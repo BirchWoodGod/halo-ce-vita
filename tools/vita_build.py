@@ -217,7 +217,11 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         )
         game_cflags = " ".join([
             abi, " ".join(GAME_FLAGS), f"-include {prefix_header}", f"-include {semantics_header}",
-            defines, f"-I{vita_include}", f"-I{port_include}", includes, sdk_flags,
+            defines, f"-I{vita_include}", f"-I{port_include}",
+            # the headers of the port's own game units (port/linux/game), for
+            # the game sources that call them under HALO_LINUX
+            f"-iquote {Path(config['game_sources'])}",
+            includes, sdk_flags,
         ])
         for obj in proj.objects:
             name = str(obj.file_path).replace(os.sep, "/")

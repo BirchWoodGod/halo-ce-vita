@@ -190,6 +190,9 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "scenario/scenario_definitions.h"
 #include "rasterizer/rasterizer.h"
+#ifdef HALO_LINUX
+#include "custom_edition_cache.h"
+#endif
 
 #include <xtl.h>
 #ifdef HALO_LINUX
@@ -1223,6 +1226,10 @@ static void cache_file_get_map_path(
 	/* (every caller's path is 256 characters; the name can come from a
 	multiplayer host) */
 	snprintf(path, 256, "%s%s.map", cache_files_map_directory(), map_name);
+	/* or the OpenSauce .yelo cache of that name, which the header check
+	names and refuses; every caller's path holds 256 characters
+	(port/linux/game/custom_edition_cache.c) */
+	opensauce_cache_path_find(path, 256);
 #else
 	sprintf(path, "%s%s.map", cache_files_map_directory(), map_name);
 #endif
