@@ -598,14 +598,32 @@ change a value (a write of the same values costs no snapshot), for the
 uniform buffer layout */
 static struct { unsigned long first, count, writes, changes; } constant_writes[64];
 static unsigned long constant_write_kinds;
+/* debug.gpu_stats, read once a frame (at Present): a settings lookup takes
+a lock and walks the settings by name, and constants_store asked for it on
+every constant write when the statistics were off - a thousand and more
+lookups a frame */
+static int gpu_stats_on = -1;
+
+static int gpu_stats_enabled(void)
+{
+	if (gpu_stats_on < 0)
+		gpu_stats_on = config_boolean("debug.gpu_stats");
+	return gpu_stats_on;
+}
 
 static void constant_write_note(unsigned long first, unsigned long count, int changed)
 {
-	unsigned long index;
+	/* (the kind written last is tried first: a model part writes the same
+	two or three ranges, part after part) */
+	static unsigned long last;
+	unsigned long index = last;
 
-	for (index = 0; index < constant_write_kinds; index++)
-		if (constant_writes[index].first == first && constant_writes[index].count == count)
-			break;
+	if (index >= constant_write_kinds || constant_writes[index].first != first || constant_writes[index].count != count)
+	{
+		for (index = 0; index < constant_write_kinds; index++)
+			if (constant_writes[index].first == first && constant_writes[index].count == count)
+				break;
+	}
 	if (index == constant_write_kinds)
 	{
 		if (constant_write_kinds >= sizeof(constant_writes) / sizeof(constant_writes[0]))
@@ -616,6 +634,7 @@ static void constant_write_note(unsigned long first, unsigned long count, int ch
 		constant_writes[constant_write_kinds].changes = 0;
 		constant_write_kinds++;
 	}
+	last = index;
 	constant_writes[index].writes++;
 	if (changed)
 		constant_writes[index].changes++;
@@ -647,7 +666,7 @@ static void constants_store(unsigned long first, const void *data, unsigned long
 		if (extent > device.d_extent_frame)
 			device.d_extent_frame = extent;
 	}
-	if (constant_write_kinds || config_boolean("debug.gpu_stats"))
+	if (gpu_stats_enabled())
 		constant_write_note(first, count, changed);
 }
 
@@ -3877,7 +3896,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				;
 		}
 	}
-	if (config_boolean("debug.gpu_stats") && device.frame % 60 == 0)
+	gpu_stats_on = config_boolean("debug.gpu_stats");
+	if (gpu_stats_on && device.frame % 60 == 0)
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, "
 			"%lu no target, %lu shader; %lu same-state; %lu KB copied (streams %lu, immediate %lu, indices %lu) + %lu KB uniforms, %lu KB direct, %lu KB textures; record %.2f ms/frame, "
