@@ -1,0 +1,45 @@
+# IDE folders
+.idea/
+.vs/
+
+# Caches
+__pycache__
+.mypy_cache
+.cache/
+
+# Build files
+build/
+projects/
+.ninja_*
+build.ninja
+*.vcxproj*
+*.sln*
+
+# decompctx output
+ctx.*
+*.ctx
+
+# Generated configs
+objdiff.json
+compile_commands.json
+
+# Miscellaneous
+*.exe
+*.pdb
+*.idb
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+*.bndb
+xbox/
+!source/**/xbox/
+
+# Locally extracted proprietary game data (never commit)
+assets/
+original/
+
+# CI build outputs (tools/ci_build.py)
+dist/
