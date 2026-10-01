@@ -194,6 +194,16 @@ enum
 
 /* ---------- macros */
 
+#ifdef HALO_LINUX
+/* (port) draw_fade_layer samples the last frame across all of the screen's
+columns (this_is_awful describes the back buffer at its own width), not the
+Xbox's 640: on a wider screen, sampling 640 of its columns stretched the
+picture sideways a little more every frame, into a horizontal streak */
+#define FADE_LAYER_RIGHT_COLUMN ((real)halo_screen_width() - 3.f)
+#else
+#define FADE_LAYER_RIGHT_COLUMN 637.f
+#endif
+
 /* ---------- structures */
 
 struct progress_bar_globals
@@ -1894,6 +1904,13 @@ static void draw_layer_int(
 	real mask_position;
 
 	generate_gravy_rect(layer, &rect);
+#ifdef HALO_LINUX
+	/* (port) the layer spans the screen's height and 640 of its columns,
+	centered: on a wider screen it keeps the shape it has on the Xbox's
+	(the blur under it, draw_fade_layer, still covers every column) */
+	rect.x0*= 640.f/(real)halo_screen_width();
+	rect.x1*= 640.f/(real)halo_screen_width();
+#endif
 	IDirect3DDevice8_Begin(global_d3d_device, D3DPT_TRIANGLEFAN);
 	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_DIFFUSE,
 		color->red, color->green, color->blue, alpha);
@@ -1979,10 +1996,10 @@ void draw_fade_layer(
 	top= 1.f + (1.f - y_offset)/128.f;
 	left= (-1.f - x_offset)/128.f - 1.f;
 	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_VERTEX, left, top, 0.5f, 1.f);
-	do_convoluation_coords(637.f, 0.f);
+	do_convoluation_coords(FADE_LAYER_RIGHT_COLUMN, 0.f);
 	right= 1.f + (1.f - x_offset)/128.f;
 	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_VERTEX, right, top, 0.5f, 1.f);
-	do_convoluation_coords(637.f, 480.f);
+	do_convoluation_coords(FADE_LAYER_RIGHT_COLUMN, 480.f);
 	bottom= (-1.f - y_offset)/128.f - 1.f;
 	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_VERTEX, right, bottom, 0.5f, 1.f);
 	do_convoluation_coords(3.f, 480.f);
@@ -2014,7 +2031,13 @@ static void this_is_awful(
 	texture->Common= 0x00040005;
 	texture->Data= surface->Data;
 	texture->Lock= 0;
+#ifdef HALO_LINUX
+	/* (port) the back buffer's own size: the screen can be wider than the
+	Xbox's 640x480 (0x271df27f) */
+	texture->Size= surface->Size;
+#else
 	texture->Size= 0x271df27f;
+#endif
 	texture->Format= 0x00011229;
 
 	return;
@@ -2296,50 +2319,6 @@ static void progress_bar_make_stuff_ready(
 	return;
 }
 
-#ifdef HALO_LINUX
-/* (port) The loading screen's picture is maps\loading.tga, which
-progress_bar_initialize copies from the disc to the cache drive. The disc
-images the port takes its maps from have no such file, and without it the
-texture keeps whatever its memory held, so the screen shows nothing (or
-noise). When the file is missing, this draws a stand-in into the texture:
-the ring seen from a little above, a thin line on the far side and a wider
-band on the near side, in the grey levels the file would hold
-(tgaLoadImageData tints them blue the same way). It runs once per load, when
-the screen first appears. */
-static void progress_bar_draw_ring(
-	unsigned long *pixels,
-	long width,
-	long height)
-{
-	const real cosine= 0.9945f, sine= -0.1045f; /* a 6 degree tilt */
-	const real inverse_radius_x= 1.f/132.f, inverse_radius_y= 1.f/34.f;
-	long x, y;
-
-	for (y= 0; y<height; y++)
-	{
-		for (x= 0; x<width; x++)
-		{
-			real dx= x - width*0.5f + 0.5f;
-			real dy= y - height*0.5f - 4.f + 0.5f;
-			real u= (dx*cosine - dy*sine)*inverse_radius_x;
-			real v= (dx*sine + dy*cosine)*inverse_radius_y;
-			real radius= (real)sqrt(u*u + v*v);
-			real near_side= radius>0.f && v>0.f ? v/radius : 0.f;
-			real distance= (radius - 1.f)/(0.035f + 0.07f*near_side);
-			unsigned long intensity= 0;
-
-			if (distance>-3.f && distance<3.f)
-			{
-				intensity= (unsigned long)(255.f*(real)exp(-distance*distance)*(0.75f + 0.25f*near_side));
-			}
-			pixels[y*width + x]= ((intensity<<9) | (intensity & ~1))<<7 | intensity>>2;
-		}
-	}
-
-	return;
-}
-#endif
-
 static void progress_bar_load_loading_texture(
 	IDirect3DTexture8 **texture)
 {
@@ -2368,7 +2347,10 @@ static void progress_bar_load_loading_texture(
 #ifdef HALO_LINUX
 	else
 	{
-		progress_bar_draw_ring(pixels, 320, 240);
+		/* (port) the disc images the port takes its maps from have no
+		loading.tga: the picture is left black, so the screen is the blur of
+		the last frame alone, not whatever the texture's memory last held */
+		csmemset(pixels, 0, locked_rect.Pitch*surface_description.Height);
 	}
 #endif
 	IDirect3DTexture8_UnlockRect(*texture, 0);
