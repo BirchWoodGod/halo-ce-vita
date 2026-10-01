@@ -402,10 +402,15 @@ void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigne
 		total += vita_host_time_us() - copy_from;
 		if (++timed % 120 == 0)
 		{
-			char message[96];
+			/* the first ten reports only: the menu's attract movie loops
+			for as long as the game sits there */
+			if (timed <= 1200)
+			{
+				char message[96];
 
-			snprintf(message, sizeof(message), "movie: %u frames copied, %.2f ms each", timed, (double)total / 120000.0);
-			vita_host_log(message);
+				snprintf(message, sizeof(message), "movie: %u frames copied, %.2f ms each", timed, (double)total / 120000.0);
+				vita_host_log(message);
+			}
 			total = 0;
 		}
 	}
