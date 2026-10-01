@@ -1645,6 +1645,9 @@ static void retail_load_loading_image(
 		/* next to the maps folder (HALO_MAPS_ROOT: the copy of the game
 		Xita's installer keeps in ux0:data/xita/haloce on the Vita) */
 		"d:\\maps\\..\\default.xbe",
+		/* above the data root (the Vita's is ux0:data/haloce-vita/data:
+		the game's own folder, where the README has it copied) */
+		"d:\\..\\default.xbe",
 	};
 	long path_index;
 
@@ -1671,8 +1674,8 @@ static void retail_load_loading_image(
 	}
 	if (!retail_loading_image.runs)
 	{
-		platform_log("loading screen: no retail default.xbe with the loading picture in the data root "
-			"or next to the maps folder; the picture stays black");
+		platform_log("loading screen: no retail default.xbe with the loading picture in the data root, "
+			"above it or next to the maps folder; the picture stays black");
 	}
 
 	return;

@@ -237,6 +237,15 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		component[component_length] = '\0';
 		if (!component_length || !strcmp(component, "."))
 			continue;
+		if (!strcmp(component, ".."))
+		{
+			/* resolved here: the Vita's file system takes ".." as a name */
+			char *slash = strrchr(resolved, '/');
+
+			if (slash && slash != resolved && slash[-1] != ':')
+				*slash = '\0';
+			continue;
+		}
 
 		if (posix_find_entry_case_insensitive(resolved, component, on_disk, sizeof(on_disk)))
 		{
