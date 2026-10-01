@@ -271,6 +271,10 @@ static struct
 	unsigned long vertex_snapshots, fragment_snapshots;
 	/* copied bytes by kind: streams in the window, immediate vertices, indices, uniforms */
 	unsigned long copied_streams, copied_immediate, copied_indices, copied_uniforms;
+	/* split records: draws whose state block was the last one by the quick
+	test (nothing set since) or by comparing the state, and new blocks; the
+	worker's full translations of a block */
+	unsigned long state_quick, state_equal, state_new, worker_builds;
 } stats;
 
 /* time spent in this layer (debug.gpu_stats) */
@@ -948,48 +952,90 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 
 /* ---------- render and texture stage state */
 
+/* The setters mark the device state dirty only when they change a value:
+the game sets most of a model part's states anew for every part (the cull
+mode, the blend, the pixel shader's constants), mostly to what they were,
+and a dirty state makes the next draw compare the whole state (2 KB) with
+the last record's. */
+
+/* the simple render state a push buffer method sets (the inverse of
+D3DSIMPLERENDERSTATEENCODE: methods 0x40000 + 4 * n, n below 0x800), +1, or
+0 when the method is no simple state */
+static unsigned char simple_state_of_method[0x800];
+
 void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 {
-	device_state_dirty = 1;
-	(void)method;
-	(void)value;
+	/* (the inline D3DDevice_SetRenderState stores the value after this
+	call: what the table holds is still the old value) */
+	unsigned long slot = (method - 0x40000UL) >> 2;
+
+	if (!simple_state_of_method[(D3DSIMPLERENDERSTATEENCODE[0] - 0x40000UL) >> 2])
+	{
+		unsigned long state;
+
+		for (state = 0; state < D3DRS_SIMPLE_MAX; state++)
+			simple_state_of_method[(D3DSIMPLERENDERSTATEENCODE[state] - 0x40000UL) >> 2] = (unsigned char)(state + 1);
+	}
+	if ((method & 3) || slot >= sizeof(simple_state_of_method) || !simple_state_of_method[slot] ||
+		D3D__RenderState[simple_state_of_method[slot] - 1] != value)
+	{
+		device_state_dirty = 1;
+	}
 }
 
 void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWORD value)
 {
-	device_state_dirty = 1;
 	if ((unsigned long)state < D3DRS_MAX)
+	{
+		if (D3D__RenderState[state] != value)
+			device_state_dirty = 1;
 		D3D__RenderState[state] = value;
+	}
 }
 
 void WINAPI D3DDevice_SetRenderState_ZBias(DWORD value);
 
 void WINAPI D3DDevice_SetRenderStateNotInline(D3DRENDERSTATETYPE state, DWORD value)
 {
-	device_state_dirty = 1;
 	if (state == D3DRS_ZBIAS)
 		D3DDevice_SetRenderState_ZBias(value);
 	else if ((unsigned long)state < D3DRS_MAX)
+	{
+		if (D3D__RenderState[state] != value)
+			device_state_dirty = 1;
 		D3D__RenderState[state] = value;
+	}
+}
+
+/* stores a render state, marking the state dirty if it changes */
+static void render_state_store(unsigned long state, DWORD value)
+{
+	if (D3D__RenderState[state] != value)
+	{
+		device_state_dirty = 1;
+		D3D__RenderState[state] = value;
+	}
 }
 
 void WINAPI D3DDevice_SetRenderState_ZBias(DWORD value)
 {
-	device_state_dirty = 1;
 	float offset = -(float)value;
 	float slope = offset * 0.25f;
 	DWORD enable = value != 0;
+	DWORD slope_bits, offset_bits;
 
-	memcpy(&D3D__RenderState[D3DRS_POLYGONOFFSETZSLOPESCALE], &slope, sizeof(slope));
-	memcpy(&D3D__RenderState[D3DRS_POLYGONOFFSETZOFFSET], &offset, sizeof(offset));
-	D3D__RenderState[D3DRS_POINTOFFSETENABLE] = enable;
-	D3D__RenderState[D3DRS_WIREFRAMEOFFSETENABLE] = enable;
-	D3D__RenderState[D3DRS_SOLIDOFFSETENABLE] = enable;
-	D3D__RenderState[D3DRS_ZBIAS] = value;
+	memcpy(&slope_bits, &slope, sizeof(slope));
+	memcpy(&offset_bits, &offset, sizeof(offset));
+	render_state_store(D3DRS_POLYGONOFFSETZSLOPESCALE, slope_bits);
+	render_state_store(D3DRS_POLYGONOFFSETZOFFSET, offset_bits);
+	render_state_store(D3DRS_POINTOFFSETENABLE, enable);
+	render_state_store(D3DRS_WIREFRAMEOFFSETENABLE, enable);
+	render_state_store(D3DRS_SOLIDOFFSETENABLE, enable);
+	render_state_store(D3DRS_ZBIAS, value);
 }
 
 #define COMPLEX_RENDER_STATE(name, state) \
-	void WINAPI D3DDevice_SetRenderState_##name(DWORD value) { device_state_dirty = 1; D3D__RenderState[state] = value; }
+	void WINAPI D3DDevice_SetRenderState_##name(DWORD value) { render_state_store(state, value); }
 
 COMPLEX_RENDER_STATE(PSTextureModes, D3DRS_PSTEXTUREMODES)
 COMPLEX_RENDER_STATE(VertexBlend, D3DRS_VERTEXBLEND)
@@ -1019,59 +1065,86 @@ COMPLEX_RENDER_STATE(RopZCmpAlwaysRead, D3DRS_ROPZCMPALWAYSREAD)
 COMPLEX_RENDER_STATE(RopZRead, D3DRS_ROPZREAD)
 COMPLEX_RENDER_STATE(DoNotCullUncompressed, D3DRS_DONOTCULLUNCOMPRESSED)
 
+/* stores a texture stage state, marking the state dirty if it changes */
+static void texture_state_store(DWORD stage, unsigned long type, DWORD value)
+{
+	if (stage < D3DTSS_MAXSTAGES && type < D3DTSS_MAX && D3D__TextureState[stage][type] != value)
+	{
+		device_state_dirty = 1;
+		D3D__TextureState[stage][type] = value;
+	}
+}
+
 void D3DFASTCALL D3DDevice_SetTextureState_Deferred(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value)
 {
-	device_state_dirty = 1;
-	if (stage < D3DTSS_MAXSTAGES && (unsigned long)type < D3DTSS_MAX)
-		D3D__TextureState[stage][type] = value;
+	texture_state_store(stage, (unsigned long)type, value);
 }
 
 void WINAPI D3DDevice_SetTextureState_TexCoordIndex(DWORD stage, DWORD value)
 {
-	device_state_dirty = 1;
-	if (stage < D3DTSS_MAXSTAGES)
-		D3D__TextureState[stage][D3DTSS_TEXCOORDINDEX] = value;
+	texture_state_store(stage, D3DTSS_TEXCOORDINDEX, value);
 }
 
 void WINAPI D3DDevice_SetTextureState_BorderColor(DWORD stage, DWORD value)
 {
-	device_state_dirty = 1;
-	if (stage < D3DTSS_MAXSTAGES)
-		D3D__TextureState[stage][D3DTSS_BORDERCOLOR] = value;
+	texture_state_store(stage, D3DTSS_BORDERCOLOR, value);
 }
 
 void WINAPI D3DDevice_SetTextureState_ColorKeyColor(DWORD stage, DWORD value)
 {
-	device_state_dirty = 1;
-	if (stage < D3DTSS_MAXSTAGES)
-		D3D__TextureState[stage][D3DTSS_COLORKEYCOLOR] = value;
+	texture_state_store(stage, D3DTSS_COLORKEYCOLOR, value);
 }
 
 void WINAPI D3DDevice_SetTextureState_BumpEnv(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value)
 {
-	device_state_dirty = 1;
-	if (stage < D3DTSS_MAXSTAGES && (unsigned long)type < D3DTSS_MAX)
-		D3D__TextureState[stage][type] = value;
+	texture_state_store(stage, (unsigned long)type, value);
 }
 
 void WINAPI D3DDevice_SetTexture(DWORD stage, D3DBaseTexture *texture)
 {
-	device_state_dirty = 1;
-	if (stage < D3DTSS_MAXSTAGES)
+	/* (the texture's header is compared at each draw, so a texture whose
+	header the game rewrites in place is still seen) */
+	if (stage < D3DTSS_MAXSTAGES && device.textures[stage] != texture)
+	{
+		device_state_dirty = 1;
 		device.textures[stage] = texture;
+	}
 }
 
 void WINAPI D3DDevice_SetPalette(DWORD stage, D3DPalette *palette)
 {
-	device_state_dirty = 1;
-	if (stage < D3DTSS_MAXSTAGES)
+	if (stage < D3DTSS_MAXSTAGES && device.palettes[stage] != palette)
+	{
+		device_state_dirty = 1;
 		device.palettes[stage] = palette;
+	}
 }
 
 void WINAPI D3DDevice_SetPixelShaderProgram(D3DPIXELSHADERDEF *definition)
 {
-	device_state_dirty = 1;
+	/* (a definition the same as what the states hold, field by field, is
+	no change: the dirty flag is kept as it is) */
 	if (!definition)
+		return;
+	if (memcmp(&D3D__RenderState[D3DRS_PSALPHAINPUTS0], definition->PSAlphaInputs, sizeof(definition->PSAlphaInputs)) ||
+		D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSABCD] != definition->PSFinalCombinerInputsABCD ||
+		D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSEFG] != definition->PSFinalCombinerInputsEFG ||
+		memcmp(&D3D__RenderState[D3DRS_PSCONSTANT0_0], definition->PSConstant0, sizeof(definition->PSConstant0)) ||
+		memcmp(&D3D__RenderState[D3DRS_PSCONSTANT1_0], definition->PSConstant1, sizeof(definition->PSConstant1)) ||
+		memcmp(&D3D__RenderState[D3DRS_PSALPHAOUTPUTS0], definition->PSAlphaOutputs, sizeof(definition->PSAlphaOutputs)) ||
+		memcmp(&D3D__RenderState[D3DRS_PSRGBINPUTS0], definition->PSRGBInputs, sizeof(definition->PSRGBInputs)) ||
+		D3D__RenderState[D3DRS_PSCOMPAREMODE] != definition->PSCompareMode ||
+		D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT0] != definition->PSFinalCombinerConstant0 ||
+		D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT1] != definition->PSFinalCombinerConstant1 ||
+		memcmp(&D3D__RenderState[D3DRS_PSRGBOUTPUTS0], definition->PSRGBOutputs, sizeof(definition->PSRGBOutputs)) ||
+		D3D__RenderState[D3DRS_PSCOMBINERCOUNT] != definition->PSCombinerCount ||
+		D3D__RenderState[D3DRS_PSTEXTUREMODES] != definition->PSTextureModes ||
+		D3D__RenderState[D3DRS_PSDOTMAPPING] != definition->PSDotMapping ||
+		D3D__RenderState[D3DRS_PSINPUTTEXTURE] != definition->PSInputTexture)
+	{
+		device_state_dirty = 1;
+	}
+	else
 		return;
 	memcpy(&D3D__RenderState[D3DRS_PSALPHAINPUTS0], definition->PSAlphaInputs, sizeof(definition->PSAlphaInputs));
 	D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSABCD] = definition->PSFinalCombinerInputsABCD;
@@ -1786,6 +1859,7 @@ static BOOL worker_build_record(struct render_command *command)
 		return draw->fragment_uniforms[0] && draw->fragment_uniforms[1];
 	}
 
+	stats.worker_builds++;
 	memset(key, 0, sizeof(*key));
 	memcpy(key->combiner_state, rs, sizeof(key->combiner_state));
 	memset(&key->combiner_state[D3DRS_PSCONSTANT0_0], 0, 16 * sizeof(DWORD));
@@ -2814,6 +2888,7 @@ static const struct record_state *record_state_current(void)
 		!memcmp(state_last->palette_data, palette_data, sizeof(palette_data)) &&
 		!memcmp(state_last->texture_header, headers, sizeof(headers)))
 	{
+		stats.state_quick++;
 		return state_last;
 	}
 	device_state_dirty = 0;
@@ -2825,8 +2900,10 @@ static const struct record_state *record_state_current(void)
 		!memcmp(state_last->palette_data, palette_data, sizeof(palette_data)) &&
 		!memcmp(state_last->texture_header, headers, sizeof(headers)))
 	{
+		stats.state_equal++;
 		return state_last;
 	}
+	stats.state_new++;
 	if (state_blocks_used >= STATE_BLOCKS_PER_FRAME)
 		return NULL;
 	block = &state_arenas[state_arena_index][state_blocks_used++];
@@ -3961,6 +4038,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				draw_profile_draws = 0;
 			}
 		}
+		platform_log("state blocks per frame: %lu quick, %lu equal, %lu new; worker builds %lu",
+			stats.state_quick / stats.presents, stats.state_equal / stats.presents, stats.state_new / stats.presents,
+			stats.worker_builds / stats.presents);
 		memset(&stats, 0, sizeof(stats));
 		layer_time = 0;
 		worker_time = 0;
