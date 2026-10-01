@@ -26,6 +26,8 @@ BUILD = Path("build/vita")
 
 TITLE_ID = "HCEV00001"
 TITLE = "Halo CE"
+# the version the LiveArea and the system show (APP_VER, "XX.YY")
+APP_VERSION = "01.00"
 
 # The MSVC/Xbox ABI of LINUX_ABI_FLAGS, on 32-bit ARM
 VITA_ABI_FLAGS = [
@@ -150,7 +152,7 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     n.rule(name="vita_eboot", command="$vita_sdk_bin/vita-make-fself -s -c $in $out", description="VITA EBOOT $out")
     n.rule(
         name="vita_sfo",
-        command=f'$vita_sdk_bin/vita-mksfoex -s TITLE_ID={TITLE_ID} -d ATTRIBUTE2=12 "{TITLE}" $out',
+        command=f'$vita_sdk_bin/vita-mksfoex -s TITLE_ID={TITLE_ID} -s APP_VER={APP_VERSION} -d ATTRIBUTE2=12 "{TITLE}" $out',
         description="VITA SFO $out",
     )
     n.rule(

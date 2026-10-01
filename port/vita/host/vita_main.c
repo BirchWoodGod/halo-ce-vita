@@ -23,6 +23,8 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <psp2/power.h>
 #include <psp2/apputil.h>
 #include <psp2/sysmodule.h>
+#include <psp2/display.h>
+#include <psp2/ctrl.h>
 
 #include <pthread.h>
 #include <stdio.h>
@@ -188,6 +190,91 @@ static void movie_placeholders(void)
 	sceIoDclose(directory);
 }
 
+/* ---------- the missing data screen
+
+Without the maps the game cannot start: a page of text on the display
+(drawn by the CPU, before anything else uses the screen) says what to copy
+where, and START leaves */
+
+#include "overlay_font.h"
+
+#define MESSAGE_WIDTH 960
+#define MESSAGE_HEIGHT 544
+
+static void message_text(uint32_t *pixels, int x, int y, int scale, uint32_t color, const char *text)
+{
+	for (; *text; text++, x += 8 * scale)
+	{
+		unsigned char c = (unsigned char)*text;
+		int row, column, dy, dx;
+
+		if (c >= 'a' && c <= 'z')
+			c = (unsigned char)(c - 'a' + 'A');
+		if (c < 32 || c >= 128)
+			continue;
+		for (row = 0; row < 8; row++)
+			for (column = 0; column < 8; column++)
+				if (font[c - 32][row] & (0x80 >> column))
+					for (dy = 0; dy < scale; dy++)
+						for (dx = 0; dx < scale; dx++)
+						{
+							int px = x + column * scale + dx, py = y + row * scale + dy;
+
+							if (px >= 0 && px < MESSAGE_WIDTH && py >= 0 && py < MESSAGE_HEIGHT)
+								pixels[py * MESSAGE_WIDTH + px] = color;
+						}
+	}
+}
+
+static void show_missing_data(void)
+{
+	static const char *const lines[] = {
+		/* (35 characters a line fit at this size) */
+		"The game files are missing.",
+		"",
+		"Copy the maps folder of your",
+		"Xbox Halo: Combat Evolved to",
+		"",
+		"  ux0:data/haloce-vita/maps/",
+		"",
+		"(ui.map, bloodgulch.map ...)",
+		"",
+		"Press START to exit.",
+	};
+	SceUID block = sceKernelAllocMemBlock("message", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 2 * 1024 * 1024, NULL);
+	SceDisplayFrameBuf frame;
+	SceCtrlData pad;
+	uint32_t *pixels;
+	unsigned int index;
+
+	vita_host_log("vita: no ui.map in " VITA_DEFAULT_MAPS_ROOT " or " VITA_XITA_MAPS_ROOT);
+	if (block < 0 || sceKernelGetMemBlockBase(block, (void **)&pixels) < 0)
+		sceKernelExitProcess(0);
+	for (index = 0; index < MESSAGE_WIDTH * MESSAGE_HEIGHT; index++)
+		pixels[index] = 0xff1a1008u;
+	message_text(pixels, 60, 50, 4, 0xff40ff40u, "HALO CE");
+	for (index = 0; index < sizeof(lines) / sizeof(lines[0]); index++)
+		message_text(pixels, 60, 130 + (int)index * 32, 3, 0xffe0e0e0u, lines[index]);
+	memset(&frame, 0, sizeof(frame));
+	frame.size = sizeof(frame);
+	frame.base = pixels;
+	frame.pitch = MESSAGE_WIDTH;
+	frame.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8;
+	frame.width = MESSAGE_WIDTH;
+	frame.height = MESSAGE_HEIGHT;
+	sceDisplaySetFrameBuf(&frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
+	for (;;)
+	{
+		memset(&pad, 0, sizeof(pad));
+		sceCtrlPeekBufferPositive(0, &pad, 1);
+		if (pad.buttons & SCE_CTRL_START)
+			break;
+		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+		sceDisplayWaitVblankStart();
+	}
+	sceKernelExitProcess(0);
+}
+
 static void read_environment_file(void)
 {
 	FILE *file = fopen(VITA_DATA_DIRECTORY "/env.txt", "r");
@@ -346,6 +433,9 @@ process that is alive with a dead log from one that is frozen */
 static void heartbeat_thread(void *unused)
 {
 	unsigned long beats = 0;
+	/* (debug) HALO_HEARTBEAT=1: a line every 2 s in heartbeat.txt, to tell
+	from afar whether the game still runs; the power tick is always sent */
+	int write_beats = getenv("HALO_HEARTBEAT") && atoi(getenv("HALO_HEARTBEAT"));
 
 	(void)unused;
 	for (;;)
@@ -359,6 +449,8 @@ static void heartbeat_thread(void *unused)
 		counts as activity, but a cinematic or a long load is not: without
 		this the Vita dims and goes to sleep in the middle of one */
 		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+		if (!write_beats)
+			continue;
 		file = sceIoOpen(VITA_DATA_DIRECTORY "/heartbeat.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
 		if (file < 0)
 			continue;
@@ -452,7 +544,13 @@ int main(int argc, char **argv)
 	if (freopen(VITA_DATA_DIRECTORY "/log.txt", "w", stderr))
 		setvbuf(stderr, NULL, _IONBF, 0);
 	sceIoRemove(VITA_DATA_DIRECTORY "/halo.log");
-	vita_host_log("vita: Halo CE starting");
+	{
+		/* (the realtime stamp tells one launch's log from the next) */
+		char message[96];
+
+		snprintf(message, sizeof(message), "vita: Halo CE starting, realtime %ld", (long)time(NULL));
+		vita_host_log(message);
+	}
 
 	memset(&init, 0, sizeof(init));
 	memset(&boot, 0, sizeof(boot));
@@ -468,8 +566,12 @@ int main(int argc, char **argv)
 		/* (the maps where this game keeps them, else Xita's copy) */
 		SceIoStat stat;
 
-		setenv("HALO_MAPS_ROOT", sceIoGetstat(VITA_DEFAULT_MAPS_ROOT "/ui.map", &stat) >= 0 ||
-			sceIoGetstat(VITA_XITA_MAPS_ROOT "/ui.map", &stat) < 0 ? VITA_DEFAULT_MAPS_ROOT : VITA_XITA_MAPS_ROOT, 0);
+		int own = sceIoGetstat(VITA_DEFAULT_MAPS_ROOT "/ui.map", &stat) >= 0;
+		int xita = !own && sceIoGetstat(VITA_XITA_MAPS_ROOT "/ui.map", &stat) >= 0;
+
+		setenv("HALO_MAPS_ROOT", xita ? VITA_XITA_MAPS_ROOT : VITA_DEFAULT_MAPS_ROOT, 0);
+		if (!own && !xita)
+			show_missing_data();
 	}
 	setenv("HALO_SAVE_ROOT", VITA_DATA_DIRECTORY "/saves", 0);
 	setenv("HALO_NET_ONLINE", "false", 0);
@@ -494,8 +596,13 @@ int main(int argc, char **argv)
 		vita_host_log(message);
 	}
 
-	clock_check();
-	primitive_benchmarks();
+	/* (debug) HALO_STARTUP_CHECKS=1: the clocks and the cost of the
+	primitives the render path leans on, logged */
+	if (getenv("HALO_STARTUP_CHECKS") && atoi(getenv("HALO_STARTUP_CHECKS")))
+	{
+		clock_check();
+		primitive_benchmarks();
+	}
 	{
 		/* free space on the memory card: the cache files of the maps the
 		game decompresses take up to 765 MB */

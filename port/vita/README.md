@@ -10,6 +10,8 @@ Combat Evolved for the Xbox.
 ## Requirements
 
 - A PS Vita or PS TV on firmware 3.60 to 3.74 with HENkaku/Ensō and VitaShell.
+- The maps must be present: without `ui.map` the game shows where to copy
+  them and exits.
 - About 1.5 GB free on `ux0:`. The game decompresses the maps it loads into
   cache files on the memory card (up to about 765 MB).
 - The Xbox game's `maps` folder (`ui.map`, `bloodgulch.map`, `a10.map` ...).
@@ -146,6 +148,9 @@ Useful ones:
 | `HALO_SCREENSHOT_DIR=ux0:data/haloce-vita/shots`, `HALO_SCREENSHOT_EVERY=n` | a BMP every n frames (at 100% resolution) |
 | `HALO_NO_MOVIES=1`, `HALO_NO_AUDIO=1` | skip movies or sound |
 | `HALO_DXT_MIPS=0` | compressed textures without their mip chains |
+| `HALO_HEARTBEAT=1` | a line every 2 s in `heartbeat.txt` (is the game still running?) |
+| `HALO_STARTUP_CHECKS=1` | the clocks and the cost of basic operations, logged at start-up |
+| `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do (see Help wanted) |
 
 ## Layout of port/vita
 
@@ -159,8 +164,10 @@ Useful ones:
 
 ## Help wanted
 
-- **Ad hoc multiplayer** (sceNetAdhoc) so two Vitas can play without a router,
-  then online play.
+- **Ad hoc multiplayer** so two Vitas can play without a router, then online
+  play. The SDK names no call that joins an ad hoc group: with
+  `HALO_ADHOC_PROBE=1` the PSP-style ad hoc libraries start, but the Vita
+  stays out of any group (peer-to-peer sockets work over Wi-Fi).
 - **Performance** in heavy fights (the render on the first core is the limit;
   see the timing lines).
 - **DXT1 mip chains**: Vita3K shows rainbow noise on some DXT1 textures'
