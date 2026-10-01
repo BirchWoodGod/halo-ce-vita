@@ -477,8 +477,13 @@ static long hs_real_to_long(
 	union hs_conversion_result value);
 static long hs_long_to_short(
 	union hs_conversion_result value);
+#ifdef HALO_LINUX
+static long hs_object_name_to_object_list(
+	long object_name_value);
+#else
 static long hs_object_name_to_object_list(
 	short object_name_index);
+#endif
 static long hs_object_to_object_list(
 	long object_index);
 static boolean hs_object_type_can_cast(
@@ -1618,11 +1623,28 @@ static long hs_long_to_short(
 	return result.long_integer;
 }
 
+#ifdef HALO_LINUX
+static long hs_object_name_to_object_list(
+	long object_name_value)
+{
+	/* (port) this is called through the typecasting table as a function of
+	a long, with the whole value word, whose upper half is not the name's
+	sign extension. The Xbox's compiler read the short from the stack and
+	ignored the upper half, but on ARM a short parameter is trusted to be
+	extended already: the name index arrived as 0xffff00eb, read outside
+	the object name list and handed a script a zero object index
+	(a10's opening cinematic passed it to vehicle_load_magic and crashed in
+	the object update). The name is the value's low half */
+	short object_name_index = (short)object_name_value;
+	long object_index;
+	long object_list_index = NONE;
+#else
 static long hs_object_name_to_object_list(
 	short object_name_index)
 {
 	long object_index;
 	long object_list_index = NONE;
+#endif
 
 	object_index = object_index_from_name_index(object_name_index);
 	if (object_index != NONE)
