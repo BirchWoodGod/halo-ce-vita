@@ -282,16 +282,23 @@ unsigned long long vita_host_time_us(void);
 static unsigned long long layer_time, layer_entered, present_wait_time;
 static int layer_depth;
 
+static int gpu_stats_enabled(void);
+
+/* (the clock is read only for the statistics: a read is a 0.7 us system
+call on the Vita, and the draw calls came in and out through here) */
 static void layer_enter(void)
 {
-	if (!layer_depth++)
+	if (!layer_depth++ && gpu_stats_enabled())
 		layer_entered = vita_host_time_us();
 }
 
 static void layer_leave(void)
 {
-	if (!--layer_depth)
+	if (!--layer_depth && layer_entered)
+	{
 		layer_time += vita_host_time_us() - layer_entered;
+		layer_entered = 0;
+	}
 }
 
 static D3DDevice *device_pointer(void)
@@ -2155,7 +2162,9 @@ int halo_trace_active(void);
 
 static void execute_command(struct render_command *command)
 {
-	unsigned long long before = vita_host_time_us();
+	/* (timed for the statistics only, as layer_enter) */
+	int timed = gpu_stats_on > 0;
+	unsigned long long before = timed ? vita_host_time_us() : 0;
 	BOOL has_depth;
 
 	switch (command->kind)
@@ -2192,9 +2201,12 @@ static void execute_command(struct render_command *command)
 		break;
 	}
 	}
-	before = vita_host_time_us() - before;
-	worker_time += before;
-	worker_kind_time[command->kind] += before;
+	if (timed)
+	{
+		before = vita_host_time_us() - before;
+		worker_time += before;
+		worker_kind_time[command->kind] += before;
+	}
 }
 
 static void *render_worker(void *unused)

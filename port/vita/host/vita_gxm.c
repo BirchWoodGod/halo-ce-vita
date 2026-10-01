@@ -795,15 +795,19 @@ static unsigned int vertex_program_count, fragment_program_count;
 static struct vertex_program_entry *vertex_programs[PROGRAM_BUCKETS];
 static struct fragment_program_entry *fragment_programs[PROGRAM_BUCKETS];
 
-static uint32_t hash_bytes(const void *data, unsigned int size)
+/* (a word at a time: a vertex program key is 204 bytes, hashed on every
+draw that changes the program, and a byte at a time was 204 dependent
+multiplies; the hash only picks the bucket, the key is compared in full) */
+static uint32_t hash_words(const void *data, unsigned int size)
 {
-	const unsigned char *bytes = data;
+	const uint32_t *words = data;
 	uint32_t hash = 2166136261U;
 
-	while (size--)
-		hash = (hash ^ *bytes++) * 16777619U;
+	for (size /= 4; size; size--)
+		hash = (hash ^ *words++) * 16777619U;
 	return hash;
 }
+typedef char vertex_program_key_size_assert[sizeof(struct vertex_program_key) % 4 == 0 ? 1 : -1];
 
 static SceGxmAttributeFormat attribute_format(unsigned int format)
 {
@@ -831,7 +835,7 @@ static SceGxmVertexProgram *vertex_program_get(const struct vertex_program_key *
 
 	if (last && !memcmp(&last->key, key, sizeof(*key)))
 		return last->program;
-	hash = hash_bytes(key, sizeof(*key));
+	hash = hash_words(key, sizeof(*key));
 	bucket = &vertex_programs[hash % PROGRAM_BUCKETS];
 	for (entry = *bucket; entry; entry = entry->next)
 	{
