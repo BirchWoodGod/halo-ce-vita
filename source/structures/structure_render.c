@@ -93,6 +93,9 @@ symbols in this file:
 #include "physics/breakable_surfaces.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_environment.h"
+#ifdef HALO_LINUX
+#include "rasterizer/rasterizer_lights.h"
+#endif
 #include "render/render.h"
 #include "scenario/scenario.h"
 #include "shaders/shader_definitions.h"
@@ -876,6 +879,25 @@ void structure_render_fog_screen(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) a light the renderer may draw: with the tick on its own thread a
+light's index can name a slot of this frame's list that holds no light
+(its datum was created or deleted mid-frame, as leaving a multiplayer
+game deletes the player's objects), whose NULL definition the environment
+passes dereferenced - as rasterizer_xbox.c's model lighting does, such a
+light is skipped */
+static boolean structure_render_light_valid(
+	long rasterizer_light_index)
+{
+	struct rasterizer_light_submit_parameters const *light;
+
+	if (rasterizer_light_index < 0 || rasterizer_light_index >= rasterizer_lights.light_count)
+		return FALSE;
+	light = &rasterizer_lights.lights[rasterizer_light_index];
+	return light->definition && light->radius > 0.0f;
+}
+#endif
+
 void structure_render_specular_light(
 	long rasterizer_light_index,
 	real_point3d const *bounding_sphere_center,
@@ -888,6 +910,10 @@ void structure_render_specular_light(
 	long environment_surface_count;
 	long environment_triangles_index;
 
+#ifdef HALO_LINUX
+	if (!structure_render_light_valid(rasterizer_light_index))
+		return;
+#endif
 	profile_enter(render_structure_specular_lights_section);
 
 	if (cluster_indices)
@@ -956,6 +982,10 @@ void structure_render_diffuse_light(
 	long environment_surface_count;
 	long environment_triangles_index;
 
+#ifdef HALO_LINUX
+	if (!structure_render_light_valid(rasterizer_light_index))
+		return;
+#endif
 	profile_enter(render_structure_diffuse_lights_section);
 
 	if (cluster_indices)
