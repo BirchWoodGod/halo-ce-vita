@@ -112,7 +112,12 @@ static void profile_write(void)
 long (a headless run has no window to close, and SDL swallows SIGTERM) */
 static void *profile_watchdog(void *seconds)
 {
-	sleep((unsigned)(unsigned long)seconds);
+	/* (sleep returns early when the profiling signal lands on this thread,
+	which ended runs after half a minute: it sleeps out the remainder) */
+	unsigned remaining = (unsigned)(unsigned long)seconds;
+
+	while (remaining)
+		remaining = sleep(remaining);
 	profile_write();
 	_exit(0);
 	return NULL;
