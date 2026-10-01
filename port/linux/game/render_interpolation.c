@@ -33,10 +33,13 @@ on top of it, fading each tick.
 #include "camera/observer.h"
 #include "game/players.h"
 #include "render/render_cameras.h"
+#include "render_epoch.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+void platform_log(const char *format, ...);
 
 /* ---------- constants */
 
@@ -104,6 +107,10 @@ static long interpolation_tick;
 static long interpolation_frame;
 static boolean interpolation_rendering;
 static real interpolation_fraction = 1.0f;
+
+static real_matrix4x3 *tick_pose_node_matrices(long object_index);
+static void tick_pose_frame_begin(void);
+static void tick_pose_frame_end(void);
 
 /* ---------- blending */
 
@@ -362,11 +369,13 @@ void render_interpolation_frame_begin(void)
 	interpolation_rendering = halo_interpolation_enabled();
 	interpolation_frame++;
 	interpolation_fraction = game_time_get_tick_fraction();
+	tick_pose_frame_begin();
 }
 
 void render_interpolation_frame_end(void)
 {
 	interpolation_rendering = FALSE;
+	tick_pose_frame_end();
 }
 
 real render_interpolation_fraction(void)
@@ -379,7 +388,9 @@ real_matrix4x3 *render_interpolation_object_node_matrices(long object_index)
 	struct interpolated_object *record;
 	long absolute_index;
 
-	if (!interpolation_rendering || !interpolated_objects || object_index == NONE)
+	if (!interpolation_rendering)
+		return tick_pose_node_matrices(object_index);
+	if (!interpolated_objects || object_index == NONE)
 		return NULL;
 	absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
 	if (absolute_index >= MAXIMUM_INTERPOLATED_OBJECTS)
@@ -596,4 +607,274 @@ real render_interpolation_game_time_sec(long ticks)
 		return (real)ticks * (1.0f / TICKS_PER_SECOND);
 	time = ((real)ticks - 1.0f + interpolation_fraction) * (1.0f / TICKS_PER_SECOND);
 	return time > 0.0f ? time : 0.0f;
+}
+
+/* ---------- the threaded tick's poses
+
+With the tick on a thread of its own (port/linux/game/tick_thread.c) a frame
+is drawn while the next tick runs. The camera is placed before that tick
+starts (observer_update), but without interpolation the render read each
+object's node matrices where the tick rewrites them: an object the tick had
+already moved when the render reached it was drawn a tick ahead of the
+camera, and one it was moving at that moment half old and half new. Where
+the camera follows a moving object - a vehicle being driven, a Pelican in a
+cinematic - which of those the render saw changed from frame to frame with
+the threads' timing, and the object shook and flickered against a world
+that stood still (on the Vita; the emulator's timing hid it).
+
+Instead, after its game_time_update the tick thread copies every object's
+node matrices into one of two buffers, and the join publishes that buffer.
+The next frame's render, drawn while the following tick runs, reads the
+published buffer, which that tick does not write (it fills the other), so
+every object is drawn as it stood when the camera was placed. The tick's
+own reads, and the frames drawn with no tick running, use the live
+matrices as before.
+
+HALO_TICK_POSES=0 turns this off; HALO_TICK_POSES_STATS=1 logs, every 300
+frames, how many objects drawn from the poses the tick had already changed
+(each one a draw that would have been out of step) and what the copies
+cost. */
+
+struct tick_pose_entry
+{
+	long object_index;
+	long first_matrix;
+	short node_count;
+	/* the buffer's capture this entry is from: older ones are stale */
+	unsigned long capture;
+	/* the bounding sphere then (the detail level, the shadow, the sorting
+	and fog centroid are taken from it) */
+	real_point3d center;
+	real radius;
+};
+
+struct tick_pose_buffer
+{
+	/* by absolute object index */
+	struct tick_pose_entry *entries;
+	real_matrix4x3 *matrices;
+	long matrix_capacity;
+	unsigned long capture;
+	unsigned long map_generation;
+};
+
+static struct tick_pose_buffer tick_pose_buffers[2];
+/* the buffer the render reads (-1: none yet), and the one the tick
+thread filled since the last join (-1: none) */
+static int tick_pose_published = -1, tick_pose_captured = -1;
+/* a tick was started after the camera was placed and is not yet joined */
+static boolean tick_pose_tick_in_flight;
+static boolean tick_pose_rendering;
+
+static struct
+{
+	int wanted;
+	unsigned long frames, lookups, moved;
+	unsigned long captures, captured_objects, captured_nodes;
+	unsigned long long capture_us;
+} tick_pose_stats = { -1 };
+
+unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+static boolean tick_poses_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_TICK_POSES");
+		const char *stats = getenv("HALO_TICK_POSES_STATS");
+
+		enabled = !setting || atoi(setting) != 0;
+		tick_pose_stats.wanted = stats && atoi(stats) != 0;
+	}
+	return enabled;
+}
+
+static unsigned long long tick_pose_now_us(void)
+{
+	return vita_host_time_us ? vita_host_time_us() : 0;
+}
+
+/* the tick thread, after game_time_update: the objects as the tick left
+them, into the buffer the render is not reading */
+void render_tick_poses_capture(void)
+{
+	struct tick_pose_buffer *buffer;
+	struct object_iterator iterator;
+	struct object_datum *object;
+	unsigned long long before;
+	long used = 0;
+	int which;
+
+	if (!tick_poses_enabled() || halo_interpolation_enabled())
+		return;
+	before = tick_pose_stats.wanted ? tick_pose_now_us() : 0;
+	which = tick_pose_published == 0 ? 1 : 0;
+	buffer = &tick_pose_buffers[which];
+	if (!buffer->entries)
+	{
+		buffer->entries = calloc(MAXIMUM_OBJECTS_PER_MAP, sizeof(*buffer->entries));
+		if (!buffer->entries)
+			return;
+	}
+	buffer->capture++;
+	object_iterator_new(&iterator, _object_mask_all, 0);
+	while ((object = (struct object_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.index);
+		short node_count = (short)(object->object.node_matrices.size / (short)sizeof(real_matrix4x3));
+		struct object_header_datum *header = object_header_get(iterator.index);
+		struct tick_pose_entry *entry;
+
+		if (absolute_index >= MAXIMUM_OBJECTS_PER_MAP || node_count <= 0)
+			continue;
+		/* (what the tick does not move is left to the live matrices, which
+		then hold still: an inactive object, which it does not update, and
+		static scenery, whose recompute writes the matrices it had - half
+		the objects and nodes of a level, kept out of the copy) */
+		if (object->object.parent_object_index == NONE && !TEST_FLAG(header->flags, _object_header_active_bit))
+			continue;
+		if (header->type == _object_type_scenery && object->object.animation.animation_graph_index == NONE &&
+			object->object.parent_object_index == NONE && object->object.first_child_object_index == NONE)
+		{
+			continue;
+		}
+		if (used + node_count > buffer->matrix_capacity)
+		{
+			long capacity = buffer->matrix_capacity ? buffer->matrix_capacity * 2 : 4096;
+			real_matrix4x3 *matrices;
+
+			if (capacity < used + node_count)
+				capacity = used + node_count;
+			/* (the C library's realloc, not cseries.h's tracked one, whose
+			list the main thread may be changing) */
+			matrices = (realloc)(buffer->matrices, capacity * sizeof(real_matrix4x3));
+			if (!matrices)
+				break; /* (the objects left out are drawn live) */
+			buffer->matrices = matrices;
+			buffer->matrix_capacity = capacity;
+		}
+		memcpy(buffer->matrices + used,
+			object_header_block_get(iterator.index, &object->object.node_matrices),
+			node_count * sizeof(real_matrix4x3));
+		entry = &buffer->entries[absolute_index];
+		entry->object_index = iterator.index;
+		entry->first_matrix = used;
+		entry->node_count = node_count;
+		entry->capture = buffer->capture;
+		entry->center = object->object.bounding_sphere_center;
+		entry->radius = object->object.bounding_sphere_radius;
+		used += node_count;
+		if (tick_pose_stats.wanted)
+			tick_pose_stats.captured_objects++;
+	}
+	buffer->map_generation = halo_map_generation;
+	tick_pose_captured = which;
+	if (tick_pose_stats.wanted)
+	{
+		tick_pose_stats.captures++;
+		tick_pose_stats.captured_nodes += used;
+		tick_pose_stats.capture_us += tick_pose_now_us() - before;
+	}
+}
+
+/* the main thread, as a tick starts (after the camera was placed) */
+void render_tick_poses_tick_started(void)
+{
+	tick_pose_tick_in_flight = TRUE;
+}
+
+/* the main thread, at the join: the finished tick's poses are the ones the
+next frame draws */
+void render_tick_poses_publish(void)
+{
+	tick_pose_tick_in_flight = FALSE;
+	if (tick_pose_captured >= 0)
+	{
+		tick_pose_published = tick_pose_captured;
+		tick_pose_captured = -1;
+	}
+}
+
+static void tick_pose_frame_begin(void)
+{
+	/* (a game state replaced since the capture - a new map, a revert, a
+	saved game - leaves the poses meaningless) */
+	tick_pose_rendering = tick_poses_enabled() && !interpolation_rendering && tick_pose_tick_in_flight &&
+		tick_pose_published >= 0 && tick_pose_buffers[tick_pose_published].map_generation == halo_map_generation;
+}
+
+static void tick_pose_frame_end(void)
+{
+	tick_pose_rendering = FALSE;
+	if (tick_pose_stats.wanted > 0 && ++tick_pose_stats.frames % 300 == 0)
+	{
+		unsigned long captures = tick_pose_stats.captures ? tick_pose_stats.captures : 1;
+
+		platform_log("tick poses: %lu lookups, %lu of them moved by the tick since (drawn from the poses); "
+			"%lu captures, %lu objects / %lu nodes each, %llu us each",
+			tick_pose_stats.lookups, tick_pose_stats.moved, tick_pose_stats.captures,
+			tick_pose_stats.captured_objects / captures, tick_pose_stats.captured_nodes / captures,
+			tick_pose_stats.capture_us / captures);
+		tick_pose_stats.lookups = tick_pose_stats.moved = 0;
+		tick_pose_stats.captures = tick_pose_stats.captured_objects = tick_pose_stats.captured_nodes = 0;
+		tick_pose_stats.capture_us = 0;
+	}
+}
+
+/* the object's entry in the poses the render draws, NULL when it is drawn
+live (no tick running, the tick's own reads, an object not kept) */
+static struct tick_pose_entry *tick_pose_entry_get(long object_index)
+{
+	struct tick_pose_buffer *buffer;
+	struct tick_pose_entry *entry;
+	long absolute_index;
+
+	if (!tick_pose_rendering || object_index == NONE || halo_epoch_on_mutator())
+		return NULL;
+	buffer = &tick_pose_buffers[tick_pose_published];
+	absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+	if (absolute_index < 0 || absolute_index >= MAXIMUM_OBJECTS_PER_MAP)
+		return NULL;
+	entry = &buffer->entries[absolute_index];
+	if (entry->capture != buffer->capture || entry->object_index != object_index)
+		return NULL;
+	return entry;
+}
+
+/* the object's bounding sphere as its pose has it (render_objects.c); FALSE
+when it is drawn live */
+boolean render_tick_pose_bounding_sphere(long object_index, real_point3d *center, real *radius)
+{
+	struct tick_pose_entry *entry = tick_pose_entry_get(object_index);
+
+	if (!entry)
+		return FALSE;
+	*center = entry->center;
+	*radius = entry->radius;
+	return TRUE;
+}
+
+static real_matrix4x3 *tick_pose_node_matrices(long object_index)
+{
+	struct tick_pose_buffer *buffer = &tick_pose_buffers[tick_pose_published < 0 ? 0 : tick_pose_published];
+	struct tick_pose_entry *entry = tick_pose_entry_get(object_index);
+
+	if (!entry)
+		return NULL;
+	if (tick_pose_stats.wanted)
+	{
+		/* (a racy read of the live matrices, for the count alone) */
+		struct object_datum *object = object_get(object_index);
+
+		tick_pose_stats.lookups++;
+		if (memcmp(buffer->matrices + entry->first_matrix,
+				object_header_block_get(object_index, &object->object.node_matrices),
+				entry->node_count * sizeof(real_matrix4x3)))
+		{
+			tick_pose_stats.moved++;
+		}
+	}
+	return buffer->matrices + entry->first_matrix;
 }

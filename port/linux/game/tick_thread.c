@@ -35,6 +35,10 @@ static volatile int main_joining;
 static volatile short finished_elapsed;
 extern volatile short halo_render_elapsed_ticks;
 short halo_game_time_last_elapsed(void);
+/* the poses the render draws while the next tick runs (render_interpolation.c) */
+void render_tick_poses_capture(void);
+void render_tick_poses_tick_started(void);
+void render_tick_poses_publish(void);
 /* the sound manager's share of the ticks (main.c reports it with the render split) */
 volatile unsigned long long halo_tick_sound_us;
 volatile unsigned long halo_tick_sound_ticks;
@@ -82,6 +86,7 @@ static void *tick_thread(void *unused)
 				platform_log("trace: tick begin");
 			game_time_update(delta);
 			finished_elapsed = halo_game_time_last_elapsed();
+			render_tick_poses_capture();
 			if (halo_trace_active && halo_trace_active())
 				platform_log("trace: tick updated");
 			/* the sound manager's frame update, with the game state it
@@ -126,6 +131,7 @@ int halo_tick_thread_enabled(void)
 void halo_tick_thread_start(float delta)
 {
 	pending_delta = delta;
+	render_tick_poses_tick_started();
 	__atomic_store_n(&started, started + 1, __ATOMIC_RELEASE);
 }
 
@@ -142,6 +148,7 @@ void halo_tick_thread_join(void)
 	}
 	__atomic_store_n(&main_joining, 0, __ATOMIC_RELEASE);
 	halo_render_elapsed_ticks = finished_elapsed;
+	render_tick_poses_publish();
 	halo_epoch_end();
 }
 

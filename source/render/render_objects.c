@@ -551,6 +551,23 @@ static void find_rendered_objects(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) an object's bounding sphere where it is drawn: with the tick on its
+thread, as its pose has it (port/linux/game/render_interpolation.c), so the
+detail level, the shadow and the centroid follow the drawn object rather
+than the tick running alongside */
+static void render_object_get_bounding_sphere(
+	long object_index,
+	real_point3d *center,
+	real *radius)
+{
+	if (!render_tick_pose_bounding_sphere(object_index, center, radius))
+	{
+		object_get_bounding_sphere(object_index, center, radius);
+	}
+}
+#endif
+
 static real object_get_level_of_detail_pixels(
 	long object_index)
 {
@@ -563,7 +580,11 @@ static real object_get_level_of_detail_pixels(
 		return REAL_MAX;
 	}
 
+#ifdef HALO_LINUX
+	render_object_get_bounding_sphere(object_index, &center, &radius);
+#else
 	object_get_bounding_sphere(object_index, &center, &radius);
+#endif
 
 	return render_frustum_sphere_diameter_in_pixels(&render.frustum, &center, radius);
 }
@@ -620,6 +641,13 @@ static void render_object_list(
 				struct object_definition *definition =
 					object_definition_get(object->definition_index);
 				real level_of_detail_pixels = object_get_level_of_detail_pixels(object_index);
+#ifdef HALO_LINUX
+				/* (port) the sphere of the pose drawn (render_object_get_bounding_sphere) */
+				real_point3d drawn_center;
+				real drawn_radius;
+
+				render_object_get_bounding_sphere(object_index, &drawn_center, &drawn_radius);
+#endif
 
 				match_assert(
 					"c:\\halo\\SOURCE\\render\\render_objects.c",
@@ -738,8 +766,13 @@ static void render_object_list(
 						object->object.outgoing_change_colors,
 						object->object.outgoing_function_values,
 						data->lighting,
+#ifdef HALO_LINUX
+						&drawn_center,
+						drawn_radius,
+#else
 						&object->object.bounding_sphere_center,
 						object->object.bounding_sphere_radius,
+#endif
 						&model_effect,
 						object_index,
 						object->object.forced_shader_permutation_index,
@@ -764,8 +797,13 @@ static void render_object_list(
 						object->object.outgoing_change_colors,
 						object->object.outgoing_function_values,
 						data->lighting,
+#ifdef HALO_LINUX
+						&drawn_center,
+						drawn_radius,
+#else
 						&object->object.bounding_sphere_center,
 						object->object.bounding_sphere_radius,
+#endif
 						NULL,
 						object_index,
 						object->object.forced_shader_permutation_index,
@@ -886,7 +924,11 @@ static boolean render_object_shadow_begin(
 	struct object_datum *object;
 	real shadow_intensity = level_of_detail;
 
+#ifdef HALO_LINUX
+	render_object_get_bounding_sphere(data->object_index, &center, &radius);
+#else
 	object_get_bounding_sphere(data->object_index, &center, &radius);
+#endif
 
 	perpendicular3d(&data->lighting->shadow_vector, &shadow_right);
 	normalize3d(&shadow_right);

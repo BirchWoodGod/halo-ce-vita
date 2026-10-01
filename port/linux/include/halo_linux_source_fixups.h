@@ -29,6 +29,11 @@ void render_interpolation_frame_begin(void);
 void render_interpolation_frame_end(void);
 float render_interpolation_fraction(void);
 struct real_matrix4x3 *render_interpolation_object_node_matrices(long object_index);
+/* with the tick on its thread, the bounding sphere of the pose drawn
+(render_interpolation.c, "the threaded tick's poses"); FALSE when the
+object is drawn live */
+union real_point3d;
+unsigned char render_tick_pose_bounding_sphere(long object_index, union real_point3d *center, float *radius);
 struct observer_result const *render_interpolation_camera(short local_player_index,
 	struct observer_result const *observer);
 void render_interpolation_first_person(short local_player_index, struct real_matrix4x3 *node_matrices,
