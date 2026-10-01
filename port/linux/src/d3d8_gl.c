@@ -3709,3 +3709,9 @@ int halo_trace_active(void)
 {
 	return 0;
 }
+
+void halo_render_draw_counts(unsigned long *stream, unsigned long *immediate)
+{
+	/* (the render profile's draw counts: not counted with this device) */
+	*stream = *immediate = 0;
+}

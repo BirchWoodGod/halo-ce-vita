@@ -282,6 +282,16 @@ static struct
 	unsigned long material_new, worker_texture_builds;
 } stats;
 
+/* draws recorded since start-up, never reset: the render profile counts
+them per phase (halo_render_draw_counts) */
+static unsigned long draw_counter_stream, draw_counter_immediate;
+
+void halo_render_draw_counts(unsigned long *stream, unsigned long *immediate)
+{
+	*stream = draw_counter_stream;
+	*immediate = draw_counter_immediate;
+}
+
 /* time spent in this layer (debug.gpu_stats) */
 unsigned long long vita_host_time_us(void);
 static unsigned long long layer_time, layer_entered, present_wait_time;
@@ -670,6 +680,10 @@ static void constant_write_note(unsigned long first, unsigned long count, int ch
 static const unsigned long chunk_first[VITA_VC_CHUNKS] = VITA_VC_FIRST;
 static const unsigned long chunk_end[VITA_VC_CHUNKS] = VITA_VC_END;
 
+/* bumped by every vertex constant write that changes a value: an
+immediate draw is merged into the one before only while it stands */
+static unsigned long constant_generation;
+
 static void constants_store(unsigned long first, const void *data, unsigned long count)
 {
 	int changed = memcmp(&CONSTANT(first), data, count * sizeof(CONSTANT(0))) != 0;
@@ -678,6 +692,7 @@ static void constants_store(unsigned long first, const void *data, unsigned long
 	{
 		int chunk;
 
+		constant_generation++;
 		memcpy(&CONSTANT(first), data, count * sizeof(CONSTANT(0)));
 		for (chunk = 0; chunk < VITA_VC_CHUNKS; chunk++)
 			if (first < chunk_end[chunk] && first + count > chunk_first[chunk])
@@ -2435,9 +2450,141 @@ static unsigned long *target_version_slot(unsigned long data)
 (HALO_SIMPLE_FRAG_BLENDS) */
 static int simple_fragment;
 
+/* An immediate-mode draw (the HUD, text, particles, lens flares, effects:
+a few vertices each) is held back, its vertices on the CPU, and the next
+immediate draw with the same primitive list, program, state and constants
+- nothing recorded between them - adds its vertices to it instead of
+being a draw of its own: the same triangles in the same order, as one
+draw. Anything else recorded commits the held draw first
+(command_begin). HALO_IMMEDIATE_MERGE=0 draws each on its own */
+static struct
+{
+	struct render_command *command;
+	D3DPRIMITIVETYPE type;
+	unsigned long count, stride, constants;
+	float *vertices;
+	unsigned long capacity;
+	/* the triangle family (lists, strips, fans, quads) is held as one
+	indexed triangle list, which any of them can join */
+	int triangles;
+	unsigned short *indices;
+	unsigned long index_count, index_capacity;
+} held_immediate;
+
+static int immediate_triangle_family(D3DPRIMITIVETYPE type)
+{
+	return type == D3DPT_TRIANGLELIST || type == D3DPT_TRIANGLESTRIP || type == D3DPT_TRIANGLEFAN ||
+		type == D3DPT_POLYGON || type == D3DPT_QUADLIST || type == D3DPT_QUADSTRIP;
+}
+
+/* a primitive's triangles as indices from base on, each with the facing
+it has as a strip or fan (odd strip triangles turned back) */
+static int immediate_hold_triangles(D3DPRIMITIVETYPE type, unsigned long base, unsigned long count)
+{
+	unsigned long triangles, needed, i;
+	unsigned short *out;
+
+	switch (type)
+	{
+	case D3DPT_TRIANGLELIST: triangles = count / 3; break;
+	case D3DPT_QUADLIST: triangles = count / 4 * 2; break;
+	default: triangles = count >= 3 ? count - 2 : 0; break;
+	}
+	needed = held_immediate.index_count + triangles * 3;
+	if (needed > held_immediate.index_capacity)
+	{
+		held_immediate.index_capacity = needed > held_immediate.index_capacity * 2 ? needed : held_immediate.index_capacity * 2;
+		held_immediate.indices = realloc(held_immediate.indices, held_immediate.index_capacity * sizeof(unsigned short));
+		if (!held_immediate.indices)
+			return 0;
+	}
+	out = held_immediate.indices + held_immediate.index_count;
+	for (i = 0; i < triangles; i++, out += 3)
+	{
+		unsigned long a, b, c;
+
+		switch (type)
+		{
+		case D3DPT_TRIANGLELIST: a = i * 3; b = a + 1; c = a + 2; break;
+		case D3DPT_QUADLIST: /* (0 1 2) and (0 2 3), as converted_indices */
+			a = i / 2 * 4;
+			b = (i & 1) ? a + 2 : a + 1;
+			c = (i & 1) ? a + 3 : a + 2;
+			break;
+		case D3DPT_TRIANGLEFAN: case D3DPT_POLYGON: a = 0; b = i + 1; c = i + 2; break;
+		default: /* strips and quad strips */
+			if (i & 1) { a = i + 1; b = i; c = i + 2; } else { a = i; b = i + 1; c = i + 2; }
+			break;
+		}
+		out[0] = (unsigned short)(base + a);
+		out[1] = (unsigned short)(base + b);
+		out[2] = (unsigned short)(base + c);
+	}
+	held_immediate.index_count = needed;
+	return 1;
+}
+static unsigned long merged_immediate_draws, merge_rejected[5];
+
+static void command_commit(struct render_command *command);
+static unsigned short *converted_indices(D3DPRIMITIVETYPE type, const unsigned short *indices, unsigned long count,
+	unsigned long *out_count, unsigned long *out_primitive);
+static BOOL needs_conversion(D3DPRIMITIVETYPE type);
+static unsigned long gxm_primitive(D3DPRIMITIVETYPE type);
+
+static void immediate_commit_held(void)
+{
+	struct render_command *command = held_immediate.command;
+	struct vgxm_draw *draw;
+	unsigned long bytes;
+	float *packed;
+
+	if (!command)
+		return;
+	held_immediate.command = NULL;
+	draw = &command->draw;
+	bytes = held_immediate.count * held_immediate.stride;
+	packed = vgxm_ring_alloc(bytes, 16);
+	stats.copied_immediate += bytes;
+	stats.copied_bytes += bytes;
+	if (!packed)
+		return;
+	memcpy(packed, held_immediate.vertices, bytes);
+	draw->streams[0] = packed;
+	if (held_immediate.triangles)
+	{
+		unsigned short *indices = held_immediate.index_count ?
+			vgxm_ring_alloc(held_immediate.index_count * sizeof(unsigned short) + 4, 16) : NULL;
+
+		if (!indices)
+			return;
+		memcpy(indices, held_immediate.indices, held_immediate.index_count * sizeof(unsigned short));
+		draw->indices = indices;
+		draw->index_count = held_immediate.index_count;
+		draw->primitive = D3DPT_TRIANGLELIST;
+		stats.copied_indices += held_immediate.index_count * sizeof(unsigned short);
+	}
+	else if (needs_conversion(held_immediate.type))
+	{
+		draw->indices = converted_indices(held_immediate.type, NULL, held_immediate.count, &draw->index_count,
+			&draw->primitive);
+		if (!draw->indices)
+			return;
+	}
+	else
+	{
+		draw->primitive = gxm_primitive(held_immediate.type);
+		draw->indices = device.sequential_indices;
+		draw->index_count = held_immediate.count;
+	}
+	command_commit(command);
+}
+
 static struct render_command *command_begin(unsigned long kind)
 {
 	struct render_command *command;
+
+	/* (the held immediate draw goes first, in its place) */
+	immediate_commit_held();
 
 	if (worker_enabled < 0)
 		worker_start();
@@ -2888,7 +3035,7 @@ half of a frame's draws repeat the previous one's materials and textures)
 copies the record's state blocks instead of building them - the key, the
 texture headers, the samplers, the fragment uniforms, the render states -
 which was most of the record's cost on the Vita. */
-static struct
+struct record_shadow_state
 {
 	DWORD render_state[D3DRS_MAX];
 	DWORD texture_state[D3DTSS_MAXSTAGES][D3DTSS_MAX];
@@ -2902,7 +3049,46 @@ static struct
 	unsigned long visibility_index;
 	BOOL immediate;
 	unsigned long ui_offset;
-} record_shadow;
+};
+static struct record_shadow_state record_shadow;
+/* the state of the held immediate draw (immediate_end): the next one joins
+it only if it is the same */
+static struct record_shadow_state held_shadow;
+
+static void shadow_capture(struct record_shadow_state *shadow, struct vertex_shader_object *program, BOOL immediate)
+{
+	memcpy(shadow->render_state, D3D__RenderState, sizeof(shadow->render_state));
+	memcpy(shadow->texture_state, D3D__TextureState, sizeof(shadow->texture_state));
+	memcpy(shadow->textures, device.textures, sizeof(shadow->textures));
+	memcpy(shadow->palettes, device.palettes, sizeof(shadow->palettes));
+	shadow->program = program;
+	shadow->declaration = device.vertex_shader;
+	shadow->render_target = device.render_target;
+	shadow->depth_stencil = device.depth_stencil;
+	shadow->viewport = device.viewport;
+	memcpy(shadow->viewport_scale, device.viewport_scale, sizeof(shadow->viewport_scale));
+	memcpy(shadow->viewport_offset, device.viewport_offset, sizeof(shadow->viewport_offset));
+	shadow->visibility_test_active = device.visibility_test_active;
+	shadow->visibility_index = device.visibility_index;
+	shadow->immediate = immediate;
+	shadow->ui_offset = (unsigned long)ui_offset;
+}
+
+static BOOL shadow_matches(const struct record_shadow_state *shadow, struct vertex_shader_object *program, BOOL immediate)
+{
+	return shadow->program == program && shadow->declaration == device.vertex_shader &&
+		shadow->render_target == device.render_target && shadow->depth_stencil == device.depth_stencil &&
+		shadow->visibility_test_active == device.visibility_test_active &&
+		shadow->visibility_index == device.visibility_index && shadow->immediate == immediate &&
+		shadow->ui_offset == (unsigned long)ui_offset &&
+		!memcmp(shadow->textures, device.textures, sizeof(shadow->textures)) &&
+		!memcmp(shadow->palettes, device.palettes, sizeof(shadow->palettes)) &&
+		!memcmp(&shadow->viewport, &device.viewport, sizeof(device.viewport)) &&
+		!memcmp(shadow->viewport_scale, device.viewport_scale, sizeof(shadow->viewport_scale)) &&
+		!memcmp(shadow->viewport_offset, device.viewport_offset, sizeof(shadow->viewport_offset)) &&
+		!memcmp(shadow->render_state, D3D__RenderState, sizeof(shadow->render_state)) &&
+		!memcmp(shadow->texture_state, D3D__TextureState, sizeof(shadow->texture_state));
+}
 static struct render_command *record_previous;
 
 static void record_shadow_fields(struct vertex_shader_object *program, BOOL immediate)
@@ -3109,9 +3295,9 @@ static struct render_command *record_draw(BOOL immediate)
 		}
 		draw->visibility_index = device.visibility_test_active ? device.visibility_index + 1 : 0;
 		if (immediate)
-			stats.immediate_draws++;
+			{ stats.immediate_draws++; draw_counter_immediate++; }
 		else
-			stats.draws++;
+			{ stats.draws++; draw_counter_stream++; }
 		stats.same_state_draws++;
 		if (draw_sampled)
 			draw_profile_draws++;
@@ -3168,9 +3354,9 @@ static struct render_command *record_draw(BOOL immediate)
 			draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
 			draw->visibility_index = device.visibility_test_active ? device.visibility_index + 1 : 0;
 			if (immediate)
-				stats.immediate_draws++;
+				{ stats.immediate_draws++; draw_counter_immediate++; }
 			else
-				stats.draws++;
+				{ stats.draws++; draw_counter_stream++; }
 			if (draw_sampled)
 				draw_profile_draws++;
 			DRAW_PROFILE_ADD(9, profile_from);
@@ -3366,9 +3552,9 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
 	draw->visibility_index = device.visibility_test_active ? device.visibility_index + 1 : 0;
 	if (immediate)
-		stats.immediate_draws++;
+		{ stats.immediate_draws++; draw_counter_immediate++; }
 	else
-		stats.draws++;
+		{ stats.draws++; draw_counter_stream++; }
 	memcpy(record_shadow.render_state, D3D__RenderState, sizeof(record_shadow.render_state));
 	memcpy(record_shadow.texture_state, D3D__TextureState, sizeof(record_shadow.texture_state));
 	record_shadow_fields(program, immediate);
@@ -3714,21 +3900,82 @@ static void immediate_emit(void)
 	device.immediate_count++;
 }
 
+static int immediate_merge_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_IMMEDIATE_MERGE");
+		enabled = !setting || atoi(setting) != 0;
+	}
+	return enabled;
+}
+
+/* a vertex's registers the draw carries, packed in the draw's order */
+static void immediate_pack(const struct vgxm_draw *draw, unsigned long first, unsigned long count, float *packed)
+{
+	unsigned long full_floats = XGPU_VERTEX_ATTRIBUTE_COUNT * 4, vertex, index;
+
+	for (vertex = first; vertex < first + count; vertex++)
+	{
+		const float *source = device.immediate_vertices + vertex * full_floats;
+
+		for (index = 0; index < draw->attribute_count; index++)
+		{
+			memcpy(packed, source + draw->attributes[index].reg * 4, 4 * sizeof(float));
+			packed += 4;
+		}
+	}
+}
+
+static int immediate_hold_room(unsigned long floats)
+{
+	if (floats <= held_immediate.capacity)
+		return 1;
+	held_immediate.capacity = floats > held_immediate.capacity * 2 ? floats : held_immediate.capacity * 2;
+	held_immediate.vertices = realloc(held_immediate.vertices, held_immediate.capacity * sizeof(float));
+	return held_immediate.vertices != NULL;
+}
+
 static void immediate_end(void)
 {
-	unsigned long full_stride = XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float);
 	unsigned long index, count = device.immediate_count;
 	D3DPRIMITIVETYPE type = device.immediate_type;
 	struct render_command *command;
 	struct vgxm_draw *draw;
-	/* the vertices in the ring carry only the input registers the program
-	reads (its other inputs come from the uniform buffer, unread): a
-	vertex's 16 registers would be 256 bytes into uncached memory */
-	unsigned long mask, stride, vertex;
-	float *packed;
+	/* the vertices carry only the input registers the program reads (its
+	other inputs come from the uniform buffer, unread): a vertex's 16
+	registers would be 256 bytes into uncached memory */
+	unsigned long mask, stride;
 
 	device.immediate_active = FALSE;
-	if (!count || count > 65536 || !(command = record_draw(TRUE)))
+	if (!count || count > 65536)
+		return;
+	if (held_immediate.command && gpu_stats_enabled())
+	{
+		/* (why the draw before could not take this one) */
+		if (!immediate_triangle_family(type) || !held_immediate.triangles) merge_rejected[0]++;
+		else if (0) merge_rejected[1]++;
+		else if (held_immediate.constants != constant_generation) merge_rejected[2]++;
+		else if (!shadow_matches(&held_shadow, current_program(), TRUE)) merge_rejected[4]++;
+	}
+	if (held_immediate.command && held_immediate.triangles && immediate_triangle_family(type) && immediate_merge_enabled() &&
+		held_immediate.constants == constant_generation && held_immediate.count + count <= 65536 &&
+		shadow_matches(&held_shadow, current_program(), TRUE))
+	{
+		draw = &held_immediate.command->draw;
+		if (immediate_hold_room((held_immediate.count + count) * (held_immediate.stride / sizeof(float))) &&
+			immediate_hold_triangles(type, held_immediate.count, count))
+		{
+			immediate_pack(draw, 0, count, held_immediate.vertices + held_immediate.count * (held_immediate.stride / sizeof(float)));
+			held_immediate.count += count;
+			merged_immediate_draws++;
+			return;
+		}
+	}
+	immediate_commit_held();
+	if (!(command = record_draw(TRUE)))
 		return;
 	draw = &command->draw;
 	mask = command->program->input_mask & ((1UL << XGPU_VERTEX_ATTRIBUTE_COUNT) - 1);
@@ -3764,36 +4011,22 @@ static void immediate_end(void)
 	stride = draw->attribute_count * 4 * sizeof(float);
 	draw->stream_count = 1;
 	draw->strides[0] = stride;
-	packed = vgxm_ring_alloc(count * stride, 16);
-	draw->streams[0] = packed;
-	stats.copied_immediate += count * stride;
-	stats.copied_bytes += count * stride;
-	if (!packed)
-		return;
-	for (vertex = 0; vertex < count; vertex++)
-	{
-		const float *source = device.immediate_vertices + vertex * (full_stride / sizeof(float));
-
-		for (index = 0; index < draw->attribute_count; index++)
-		{
-			memcpy(packed, source + draw->attributes[index].reg * 4, 4 * sizeof(float));
-			packed += 4;
-		}
-	}
 	command->provided_mask = mask;
-	if (needs_conversion(type))
-	{
-		draw->indices = converted_indices(type, NULL, count, &draw->index_count, &draw->primitive);
-		if (!draw->indices)
-			return;
-	}
-	else
-	{
-		draw->primitive = gxm_primitive(type);
-		draw->indices = device.sequential_indices;
-		draw->index_count = count;
-	}
-	command_commit(command);
+	/* held, not yet committed: the next immediate draw may join it */
+	if (!immediate_hold_room(count * (stride / sizeof(float))))
+		return;
+	immediate_pack(draw, 0, count, held_immediate.vertices);
+	held_immediate.command = command;
+	held_immediate.type = type;
+	held_immediate.count = count;
+	held_immediate.stride = stride;
+	held_immediate.constants = constant_generation;
+	held_immediate.index_count = 0;
+	shadow_capture(&held_shadow, current_program(), TRUE);
+	held_immediate.triangles = immediate_triangle_family(type) && immediate_merge_enabled() &&
+		immediate_hold_triangles(type, 0, count);
+	if (!immediate_merge_enabled())
+		immediate_commit_held();
 }
 
 void WINAPI D3DDevice_End(void)
@@ -4097,6 +4330,15 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		}
 	}
 	gpu_stats_on = config_boolean("debug.gpu_stats");
+	if (gpu_stats_on && device.frame % 60 == 0 && stats.presents)
+	{
+		platform_log("immediate draws merged into the one before: %.1f a frame; not merged: not triangles %.1f, (unused) %.1f, "
+			"constants changed %.1f, another draw between %.1f, state changed %.1f", merged_immediate_draws / (double)stats.presents,
+			merge_rejected[0] / (double)stats.presents, merge_rejected[1] / (double)stats.presents, merge_rejected[2] / (double)stats.presents,
+			merge_rejected[3] / (double)stats.presents, merge_rejected[4] / (double)stats.presents);
+		merged_immediate_draws = 0;
+		memset(merge_rejected, 0, sizeof(merge_rejected));
+	}
 	if (gpu_stats_on && device.frame % 60 == 0)
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, "
