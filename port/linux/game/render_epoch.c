@@ -14,6 +14,13 @@ strncpy never writes, so the accessors' fast path is one byte load. */
 #include "memory/data.h"
 #include "render_epoch.h"
 
+/* (cseries.h makes free the game's debug_free, which looks for its own
+header in front of the block; the mark tables come from the C library's
+calloc, so they go back to the C library's free - freeing them with
+debug_free at a map change corrupted the debug allocator's list, and
+leaving a multiplayer game crashed in it) */
+#undef free
+
 void platform_log(const char *format, ...);
 int halo_objects_pool_check(const char *when);
 

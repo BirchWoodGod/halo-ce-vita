@@ -727,6 +727,14 @@ long rasterizer_light_submit(
 		243,
 		parameters->color.blue >=0.0f && parameters->color.blue <=1.0f);
 
+#ifdef HALO_LINUX
+	/* (port) with the tick on its own thread a light can be read while its
+	object is being deleted (leaving a multiplayer game deletes the player's
+	objects mid-frame): its definition is gone, and drawing it dereferenced
+	NULL - such a light is not drawn this frame */
+	if (!parameters->definition)
+		return NONE;
+#endif
 	if (rasterizer_lights.light_count<MAXIMUM_LIGHTS_PER_WINDOW)
 	{
 		light_index= rasterizer_lights.light_count++;

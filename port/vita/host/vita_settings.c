@@ -72,6 +72,12 @@ static const char *const fixed_defaults[][2] = {
 	{ "HALO_INTERPOLATION", "false" },
 	{ "HALO_NO_VSYNC", "1" },
 	{ "HALO_STATIC_SCENERY", "1" },
+	/* the Xbox game's lockstep netcode: split screen is a host and its
+	own client on one machine, which the distributed netcode (built for
+	the desktop's internet play) left behind its own host on the Vita - a
+	player could look around but not move. A machine that joins a host
+	plays the host's netcode either way */
+	{ "HALO_NETCODE", "lockstep" },
 };
 
 static int panel_open, selected;

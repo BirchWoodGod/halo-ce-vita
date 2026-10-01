@@ -585,6 +585,7 @@ int main(int argc, char **argv)
 	vita_settings_load();
 	movie_placeholders();
 	vita_net_adhoc_probe();
+	vita_net_selftest();
 	{
 		const char *crash_at = getenv("HALO_CRASH_AT");
 

@@ -573,3 +573,139 @@ void vita_net_adhoc_probe(void)
 	if (thread >= 0)
 		sceKernelStartThread(thread, 0, NULL);
 }
+
+/* ---------- self-test (HALO_NET_SELFTEST=1)
+
+The platform layer's calls as the game makes them for a split screen or
+system link game - loopback datagrams, a loopback stream connect and
+accept, select readiness, a broadcast - logged with their results, to see
+on hardware what Vita3K's host sockets hide */
+
+static void selftest_log(const char *step, int result)
+{
+	char line[160];
+
+	snprintf(line, sizeof(line), "net selftest: %s -> %d (error %d)", step, result, result < 0 ? last_error : 0);
+	vita_host_log(line);
+}
+
+static void winsock_address(unsigned char out[16], unsigned int address_host_order, unsigned short port)
+{
+	unsigned short family = SCE_NET_AF_INET;
+
+	memset(out, 0, 16);
+	memcpy(out, &family, 2);
+	out[2] = (unsigned char)(port >> 8);
+	out[3] = (unsigned char)port;
+	out[4] = (unsigned char)(address_host_order >> 24);
+	out[5] = (unsigned char)(address_host_order >> 16);
+	out[6] = (unsigned char)(address_host_order >> 8);
+	out[7] = (unsigned char)address_host_order;
+}
+
+static int net_selftest_thread(SceSize arguments_size, void *arguments)
+{
+	unsigned char address[16], from[16];
+	char buffer[64];
+	int from_length, result, a, b, listener, client, accepted, value = 1, sockets[2], count, empty = 0;
+
+	(void)arguments_size;
+	(void)arguments;
+	sceKernelDelayThread(3000000);
+	vita_host_log("net selftest: start");
+	{
+		char line[64];
+		posix_ulong local = posix_local_ipv4_address();
+
+		snprintf(line, sizeof(line), "net selftest: local address %08lx", (unsigned long)local);
+		vita_host_log(line);
+	}
+	/* datagrams over the loopback address */
+	a = posix_socket(SCE_NET_AF_INET, SCE_NET_SOCK_DGRAM, 0);
+	b = posix_socket(SCE_NET_AF_INET, SCE_NET_SOCK_DGRAM, 0);
+	selftest_log("udp sockets", a < 0 || b < 0 ? -1 : a);
+	selftest_log("udp a nonblocking", posix_socket_set_nonblocking(a, 1));
+	winsock_address(address, 0x7f000001u, 2400);
+	selftest_log("udp a bind 127.0.0.1:2400", posix_socket_bind(a, address, 16));
+	winsock_address(address, 0, 0);
+	selftest_log("udp b bind any:0", posix_socket_bind(b, address, 16));
+	winsock_address(address, 0x7f000001u, 2400);
+	selftest_log("udp b sendto a", posix_socket_sendto(b, "halo loopback", 13, 0, address, 16));
+	sockets[0] = a;
+	count = 1;
+	selftest_log("udp select a readable (100 ms)", posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 100000, 0));
+	{
+		posix_ulong available = 0;
+
+		selftest_log("udp a bytes available", posix_socket_bytes_available(a, &available) < 0 ? -1 : (int)available);
+	}
+	from_length = 16;
+	memset(from, 0, sizeof(from));
+	result = posix_socket_recvfrom(a, buffer, sizeof(buffer), 0, from, &from_length);
+	selftest_log("udp a recvfrom", result);
+	{
+		char line[128];
+
+		snprintf(line, sizeof(line), "net selftest: from family %u port %u address %u.%u.%u.%u length %d", from[0] | from[1] << 8,
+			from[2] << 8 | from[3], from[4], from[5], from[6], from[7], from_length);
+		vita_host_log(line);
+	}
+	result = posix_socket_recvfrom(a, buffer, sizeof(buffer), 0, from, &from_length);
+	selftest_log("udp a recvfrom when empty (expect error 10035)", result);
+	/* broadcast to the port a listens on */
+	selftest_log("udp b SO_BROADCAST", posix_socket_setsockopt(b, 0xffff, 0x0020, &value, sizeof(value)));
+	winsock_address(address, 0xffffffffu, 2400);
+	selftest_log("udp b sendto broadcast:2400", posix_socket_sendto(b, "halo broadcast", 14, 0, address, 16));
+	sceKernelDelayThread(100000);
+	from_length = 16;
+	selftest_log("udp a recvfrom broadcast", posix_socket_recvfrom(a, buffer, sizeof(buffer), 0, from, &from_length));
+	posix_socket_close(a);
+	posix_socket_close(b);
+
+	/* a stream connect and accept over the loopback address */
+	listener = posix_socket(SCE_NET_AF_INET, SCE_NET_SOCK_STREAM, 0);
+	client = posix_socket(SCE_NET_AF_INET, SCE_NET_SOCK_STREAM, 0);
+	selftest_log("tcp sockets", listener < 0 || client < 0 ? -1 : listener);
+	selftest_log("tcp listener nonblocking", posix_socket_set_nonblocking(listener, 1));
+	winsock_address(address, 0x7f000001u, 2401);
+	selftest_log("tcp listener bind 127.0.0.1:2401", posix_socket_bind(listener, address, 16));
+	selftest_log("tcp listen", posix_socket_listen(listener, 4));
+	selftest_log("tcp client nonblocking", posix_socket_set_nonblocking(client, 1));
+	selftest_log("tcp client connect (expect -1 error 10035)", posix_socket_connect(client, address, 16));
+	sockets[0] = client;
+	count = 1;
+	selftest_log("tcp select client writable (500 ms)", posix_socket_select(NULL, &empty, sockets, &count, NULL, &empty, 0, 500000, 0));
+	sockets[0] = listener;
+	count = 1;
+	selftest_log("tcp select listener readable (500 ms)", posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 500000, 0));
+	from_length = 16;
+	accepted = posix_socket_accept(listener, from, &from_length);
+	selftest_log("tcp accept", accepted);
+	selftest_log("tcp client send", posix_socket_send(client, "halo stream", 11, 0));
+	sceKernelDelayThread(50000);
+	if (accepted >= 0)
+	{
+		selftest_log("tcp accepted nonblocking", posix_socket_set_nonblocking(accepted, 1));
+		selftest_log("tcp accepted recv", posix_socket_recv(accepted, buffer, sizeof(buffer), 0));
+		selftest_log("tcp accepted recv when empty (expect error 10035)", posix_socket_recv(accepted, buffer, sizeof(buffer), 0));
+		selftest_log("tcp accepted send", posix_socket_send(accepted, "reply", 5, 0));
+		sceKernelDelayThread(50000);
+		selftest_log("tcp client recv", posix_socket_recv(client, buffer, sizeof(buffer), 0));
+		posix_socket_close(accepted);
+	}
+	posix_socket_close(client);
+	posix_socket_close(listener);
+	vita_host_log("net selftest: done");
+	return 0;
+}
+
+void vita_net_selftest(void)
+{
+	SceUID thread;
+
+	if (!getenv("HALO_NET_SELFTEST") || !atoi(getenv("HALO_NET_SELFTEST")))
+		return;
+	thread = sceKernelCreateThread("net_selftest", net_selftest_thread, 0x10000100, 0x10000, 0, 0, NULL);
+	if (thread >= 0)
+		sceKernelStartThread(thread, 0, NULL);
+}

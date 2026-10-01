@@ -76,5 +76,8 @@ void vita_settings_load(void);
 /* (debug) HALO_ADHOC_PROBE=1: logs what the Vita's ad hoc libraries do
 (vita_net.c) */
 void vita_net_adhoc_probe(void);
+/* (debug) HALO_NET_SELFTEST=1: logs the socket layer's loopback and
+broadcast behaviour (vita_net.c) */
+void vita_net_selftest(void);
 
 #endif
