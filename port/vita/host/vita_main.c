@@ -431,6 +431,7 @@ int main(int argc, char **argv)
 	setenv("HALO_DISPLAY_WIDTH", "848", 0);
 	setenv("HALO_UPDATE_AUTO", "false", 0);
 	read_environment_file();
+	vita_settings_load();
 	{
 		const char *crash_at = getenv("HALO_CRASH_AT");
 

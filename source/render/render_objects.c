@@ -720,9 +720,12 @@ static void render_object_list(
 					an object whose bounding sphere spans fewer pixels than n is
 					not drawn (its children, lights and effects still are) */
 					static float minimum_pixels = -1.0f;
+					static unsigned long settings_seen;
+					extern volatile unsigned long halo_settings_generation;
 
-					if (minimum_pixels < 0.0f)
+					if (minimum_pixels < 0.0f || settings_seen != halo_settings_generation)
 					{
+						settings_seen = halo_settings_generation;
 						const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
 						minimum_pixels = setting ? (float)atof(setting) : 0.0f;
 					}
@@ -1038,9 +1041,12 @@ static void object_render_state_refresh(
 	light search every n-th scene for objects below the large size - and
 	moves toward its target as before; the game state is untouched */
 	static long refresh_divisor = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
 
-	if (refresh_divisor < 0)
+	if (refresh_divisor < 0 || settings_seen != halo_settings_generation)
 	{
+		settings_seen = halo_settings_generation;
 		const char *setting = getenv("HALO_LIGHTING_REFRESH_DIVISOR");
 		refresh_divisor = setting && atoi(setting) > 1 ? atoi(setting) : 1;
 	}

@@ -21,6 +21,11 @@ it exists, so that the player's edits and comments stay.
 #include <stdlib.h>
 #include <string.h>
 
+/* bumped when a setting held in the environment changes mid-game (the
+Vita's settings panel): the port's quality knobs that cache their
+variable read it again when this differs from what they last saw */
+volatile unsigned long halo_settings_generation;
+
 /* ---------- the settings */
 
 enum config_type

@@ -883,9 +883,12 @@ void render_model(
 			if the model covered that fraction of its pixels (a handheld quality
 			setting: 0.5 picks a level or so lower; the game state is untouched) */
 			static float lod_scale = -1.0f;
+			static unsigned long settings_seen;
+			extern volatile unsigned long halo_settings_generation;
 
-			if (lod_scale < 0.0f)
+			if (lod_scale < 0.0f || settings_seen != halo_settings_generation)
 			{
+				settings_seen = halo_settings_generation;
 				const char *setting = getenv("HALO_MODEL_LOD_SCALE");
 				lod_scale = setting && atof(setting) > 0.0 ? (float)atof(setting) : 1.0f;
 			}

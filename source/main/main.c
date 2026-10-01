@@ -2555,9 +2555,12 @@ void main_rasterizer_throttle(
 		extern long atol(const char *text);
 		static unsigned long long previous_us;
 		static long cap = -1;
+		static unsigned long settings_seen;
+		extern volatile unsigned long halo_settings_generation;
 
-		if (cap < 0)
+		if (cap < 0 || settings_seen != halo_settings_generation)
 		{
+			settings_seen = halo_settings_generation;
 			const char *setting = getenv("HALO_FRAME_CAP");
 			cap = setting ? atol(setting) : 30;
 		}

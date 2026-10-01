@@ -185,6 +185,12 @@ const char *vgxm_counts(void);
 /* the numbers the overlay shows (XV_FPS=1): frames per second, the game
 tick and render times in milliseconds */
 void vgxm_overlay_set(float fps, float tick_ms, float render_ms);
+/* the performance overlay on or off (the settings panel's switch) */
+void vgxm_overlay_enable(int enabled);
+/* the settings panel (vita_settings.c): text is its lines separated by
+'\n' (the first a title, the last a hint), selected the highlighted line;
+NULL hides it */
+void vgxm_menu_set(const char *text, int selected);
 
 /* the colour target's pixels in rows of 32-bit BGRA, for screenshots
 (waits for the GPU); NULL if there is no such target */

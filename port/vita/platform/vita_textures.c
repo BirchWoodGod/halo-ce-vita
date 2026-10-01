@@ -715,6 +715,14 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 		unsigned long face_size = xgpu_texture_face_size(description), face;
 		unsigned long chain = 0, face_stride = 0, level_count = 0;
 
+		static int cube_debug = -1;
+
+		if (cube_debug < 0)
+		{
+			/* (debug) HALO_CUBE_DEBUG=1: one level; 2: every texel grey */
+			const char *setting = getenv("HALO_CUBE_DEBUG");
+			cube_debug = setting ? atoi(setting) : 0;
+		}
 		if (width != height || !power_of_two(width))
 			return FALSE;
 		for (level = 0; (width >> level) > 0; level++)
@@ -741,6 +749,13 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				dxt_decode_level(information.kind, base + face * face_size, width, height, 1, scratch);
 			else
 				decode_level(description, 0, base + face * face_size, palette, scratch);
+			if (cube_debug == 2)
+			{
+				unsigned long texel;
+
+				for (texel = 0; texel < width * height; texel++)
+					scratch[texel] = 0xff808080u;
+			}
 			for (level = 0; level < level_count; level++)
 			{
 				unsigned long *destination = (unsigned long *)(face_memory + offset), index;
@@ -779,7 +794,7 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 		}
 		free(scratch);
 		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_cube,
-			width, height, level_count) == 0;
+			width, height, cube_debug == 1 ? 1 : level_count) == 0;
 	}
 
 	if (description->compressed && power_of_two(width) && power_of_two(height) && width >= 4 && height >= 4)
@@ -801,9 +816,54 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 			const char *setting = getenv("HALO_DXT_MIPS");
 			dxt_mips = !setting || atoi(setting) != 0;
 		}
+		static int smallest = -1;
+
+		if (smallest < 0)
+		{
+			/* (debug) HALO_DXT_MIN_SIZE=n: no chained level smaller than n */
+			const char *setting = getenv("HALO_DXT_MIN_SIZE");
+			smallest = setting && atoi(setting) >= 4 ? atoi(setting) : 4;
+		}
+		{
+			/* (debug) HALO_DXT_NOCHAIN_KIND=1/3/5: that DXT kind unchained */
+			static int unchained_kind = -1;
+
+			if (unchained_kind < 0)
+			{
+				const char *setting = getenv("HALO_DXT_NOCHAIN_KIND");
+				unchained_kind = setting ? atoi(setting) : 0;
+			}
+			if ((unchained_kind == 1 && information.kind == _texel_dxt1) || (unchained_kind == 3 && information.kind == _texel_dxt3) ||
+				(unchained_kind == 5 && information.kind == _texel_dxt5))
+				levels = 1;
+		}
 		if (dxt_mips)
-			while (chained < levels && level_dimension(width, chained) >= 4 && level_dimension(height, chained) >= 4)
+			while (chained < levels && level_dimension(width, chained) >= (unsigned long)smallest &&
+				level_dimension(height, chained) >= (unsigned long)smallest)
 				chained++;
+		{
+			/* (debug) HALO_DXT_FIRST_LEVEL=k: the texture from the Xbox's
+			level k down, one level (tells the source levels from the chain) */
+			static int first_level = -1;
+
+			if (first_level < 0)
+			{
+				const char *setting = getenv("HALO_DXT_FIRST_LEVEL");
+				first_level = setting ? atoi(setting) : 0;
+			}
+			if (first_level > 0 && (unsigned long)first_level < chained)
+			{
+				unsigned long level_width = level_dimension(width, first_level), level_height = level_dimension(height, first_level);
+
+				memory = pool_alloc((level_width / 4) * (level_height / 4) * block_bytes);
+				if (!memory)
+					return FALSE;
+				reorder_blocks(base + xgpu_texture_level_offset(description, first_level), memory, level_width, level_height,
+					block_bytes);
+				return vgxm_texture_initialize(&entry->texture, memory, format, _vgxm_texture_swizzled, level_width,
+					level_height, 1) == 0;
+			}
+		}
 		size = 0;
 		for (level = 0; level < chained; level++)
 			size += (level_dimension(width, level) / 4) * (level_dimension(height, level) / 4) * block_bytes;

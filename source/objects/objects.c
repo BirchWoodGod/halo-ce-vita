@@ -4439,10 +4439,13 @@ void objects_update(
 					every tick, is updated every nth tick, staggered */
 					static int scenery_divisor = -1;
 					static unsigned long scenery_tick;
+					static unsigned long settings_seen;
+					extern volatile unsigned long halo_settings_generation;
 					unsigned long long update_started;
 
-					if (scenery_divisor < 0)
+					if (scenery_divisor < 0 || settings_seen != halo_settings_generation)
 					{
+						settings_seen = halo_settings_generation;
 						const char *setting = getenv("HALO_SCENERY_UPDATE_DIVISOR");
 						scenery_divisor = setting ? atoi(setting) : 1;
 						if (scenery_divisor < 1)

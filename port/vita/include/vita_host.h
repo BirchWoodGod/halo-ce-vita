@@ -68,5 +68,10 @@ struct vita_host_pad
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);
+/* the settings panel (vita_settings.c): nonzero when it took the buttons
+(open, or SELECT+START held), and the game should see none */
+int vita_settings_input(const struct vita_host_pad *pad);
+/* the panel's settings.txt and the release defaults into the environment */
+void vita_settings_load(void);
 
 #endif

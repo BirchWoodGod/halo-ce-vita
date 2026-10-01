@@ -202,8 +202,12 @@ static struct
 	/* built-in programs */
 	unsigned long clear_vertex, clear_fragment, blit_vertex, blit_fragment;
 	unsigned long overlay_vertex, overlay_fragment;
-	int overlay_enabled;
+	int overlay_enabled, overlay_programs;
 	float overlay_fps, overlay_tick_ms, overlay_render_ms;
+	/* the settings panel's text, written by the game's thread and drawn by
+	the worker: two copies, the index flips when one is complete */
+	char menu_text[2][2048];
+	volatile int menu_index, menu_visible, menu_selected;
 	int shacccg_ready;
 	int ready;
 } gxm;
@@ -444,7 +448,8 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 	{
 		const char *setting = getenv("XV_FPS");
 
-		gxm.overlay_enabled = setting && atoi(setting) != 0 && gxm.overlay_vertex && gxm.overlay_fragment;
+		gxm.overlay_programs = gxm.overlay_vertex && gxm.overlay_fragment;
+		gxm.overlay_enabled = setting && atoi(setting) != 0 && gxm.overlay_programs;
 	}
 	if (!gxm.clear_vertex || !gxm.clear_fragment || !gxm.blit_vertex || !gxm.blit_fragment)
 	{
@@ -1805,12 +1810,87 @@ static unsigned int overlay_text(struct overlay_vertex *vertices, unsigned int c
 		{
 			unsigned char bits = font[c - 32][row];
 
+			/* (a run of lit pixels is one rectangle) */
 			for (column = 0; column < 8; column++)
 			{
-				if ((bits & (0x80 >> column)) && count < limit)
-					count = overlay_rect(vertices, count, x + column * scale, y + row * scale, scale, scale, color);
+				int run = 0;
+
+				while (column + run < 8 && (bits & (0x80 >> (column + run))))
+					run++;
+				if (run && count < limit)
+					count = overlay_rect(vertices, count, x + column * scale, y + row * scale, scale * run, scale, color);
+				column += run;
 			}
 		}
+	}
+	return count;
+}
+
+void vgxm_overlay_enable(int enabled)
+{
+	gxm.overlay_enabled = enabled && gxm.overlay_programs;
+}
+
+void vgxm_menu_set(const char *text, int selected)
+{
+	if (!text)
+	{
+		gxm.menu_visible = 0;
+		return;
+	}
+	{
+		int next = !gxm.menu_index;
+
+		strncpy(gxm.menu_text[next], text, sizeof(gxm.menu_text[next]) - 1);
+		gxm.menu_text[next][sizeof(gxm.menu_text[next]) - 1] = 0;
+		gxm.menu_selected = selected;
+		__atomic_store_n(&gxm.menu_index, next, __ATOMIC_RELEASE);
+		gxm.menu_visible = 1;
+	}
+}
+
+/* the settings panel, centred: title, a row per line (the selected one on
+a bar), the hint at the bottom */
+static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int count, unsigned int limit)
+{
+	const char *text = gxm.menu_text[__atomic_load_n(&gxm.menu_index, __ATOMIC_ACQUIRE)];
+	const char *lines[24];
+	int line_count = 0, index;
+	const float width = 600.0f, row_height = 24.0f;
+	float height, left, top;
+	char copy[2048];
+	char *cursor;
+
+	strncpy(copy, text, sizeof(copy) - 1);
+	copy[sizeof(copy) - 1] = 0;
+	for (cursor = copy; cursor && line_count < 24; )
+	{
+		char *newline = strchr(cursor, '\n');
+
+		lines[line_count++] = cursor;
+		if (newline)
+			*newline = 0;
+		cursor = newline ? newline + 1 : NULL;
+	}
+	if (line_count < 2)
+		return count;
+	height = 16.0f + row_height * line_count + 8.0f;
+	left = (DISPLAY_WIDTH - width) / 2.0f;
+	top = (DISPLAY_HEIGHT - height) / 2.0f;
+	count = overlay_rect(vertices, count, left, top, width, height, 0xE0101010u);
+	count = overlay_rect(vertices, count, left, top, width, 2.0f, 0xFF40FF40u);
+	for (index = 0; index < line_count; index++)
+	{
+		float y = top + 12.0f + row_height * index;
+		uint32_t color = index == 0 ? 0xFF40FF40u : index == line_count - 1 ? 0xFFA0A0A0u : 0xFFE0E0E0u;
+
+		if (index == gxm.menu_selected)
+		{
+			count = overlay_rect(vertices, count, left + 6.0f, y - 4.0f, width - 12.0f, row_height, 0xFF305030u);
+			color = 0xFFFFFFFFu;
+		}
+		count = overlay_text(vertices, count, limit, left + 16.0f, y, index == line_count - 1 ? 1.5f : 2.0f, color,
+			lines[index]);
 	}
 	return count;
 }
@@ -1827,16 +1907,23 @@ static void overlay_draw(void)
 	static SceGxmVertexProgram *vertex_program;
 	SceGxmFragmentProgram *fragment_program;
 	SceGxmBlendInfo blend;
+	/* (built in a cached array, then copied to the worker's ring as large
+	as it came out) */
+	static struct overlay_vertex *built;
 	struct overlay_vertex *vertices;
 	unsigned short *indices;
-	const unsigned int limit = 4096;
+	const unsigned int limit = 8192;
 	unsigned int count = 0, index;
 	unsigned char busy[3];
 	char text[32];
 	const float scale = 2.0f;
 	const float left = DISPLAY_WIDTH - 190.0f;
 
-	if (!gxm.overlay_enabled)
+	if (!gxm.overlay_programs || (!gxm.overlay_enabled && !gxm.menu_visible))
+		return;
+	if (!built)
+		built = malloc(limit * 6 * sizeof(*built));
+	if (!built)
 		return;
 	if (!vertex_program)
 	{
@@ -1867,33 +1954,44 @@ static void overlay_draw(void)
 	blend.colorSrc = blend.alphaSrc = SCE_GXM_BLEND_FACTOR_SRC_ALPHA;
 	blend.colorDst = blend.alphaDst = SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 	fragment_program = fragment_program_get(gxm.overlay_fragment, gxm.overlay_vertex, &blend);
-	vertices = vgxm_worker_alloc(limit * 6 * sizeof(*vertices), 16);
-	indices = vgxm_worker_alloc(limit * 6 * sizeof(*indices), 16);
-	if (!fragment_program || !vertices || !indices)
+	if (!fragment_program)
 		return;
-	vita_host_cpu_usage(busy);
-	count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 132.0f, 0xA0000000u);
-	snprintf(text, sizeof(text), "FPS %3.0f", (double)gxm.overlay_fps);
-	count = overlay_text(vertices, count, limit, left + 6.0f, 11.0f, scale, 0xFF40FF40u, text);
-	snprintf(text, sizeof(text), "GAME %3.0f MS", (double)gxm.overlay_tick_ms);
-	count = overlay_text(vertices, count, limit, left + 6.0f, 31.0f, scale, 0xFF40D0FFu, text);
-	snprintf(text, sizeof(text), "REND %3.0f MS", (double)gxm.overlay_render_ms);
-	count = overlay_text(vertices, count, limit, left + 6.0f, 51.0f, scale, 0xFFFFC040u, text);
-	for (index = 0; index < 3; index++)
+	vertices = built;
+	if (gxm.overlay_enabled)
 	{
-		float y = 75.0f + 19.0f * index;
-		uint32_t color = busy[index] == 255 ? 0xFF808080u : busy[index] > 85 ? 0xFF4040FFu : 0xFFE0E0E0u;
+		vita_host_cpu_usage(busy);
+		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 132.0f, 0xA0000000u);
+		snprintf(text, sizeof(text), "FPS %3.0f", (double)gxm.overlay_fps);
+		count = overlay_text(vertices, count, limit, left + 6.0f, 11.0f, scale, 0xFF40FF40u, text);
+		snprintf(text, sizeof(text), "GAME %3.0f MS", (double)gxm.overlay_tick_ms);
+		count = overlay_text(vertices, count, limit, left + 6.0f, 31.0f, scale, 0xFF40D0FFu, text);
+		snprintf(text, sizeof(text), "REND %3.0f MS", (double)gxm.overlay_render_ms);
+		count = overlay_text(vertices, count, limit, left + 6.0f, 51.0f, scale, 0xFFFFC040u, text);
+		for (index = 0; index < 3; index++)
+		{
+			float y = 75.0f + 19.0f * index;
+			uint32_t color = busy[index] == 255 ? 0xFF808080u : busy[index] > 85 ? 0xFF4040FFu : 0xFFE0E0E0u;
 
-		if (busy[index] == 255)
-			snprintf(text, sizeof(text), "C%u  N/A", index);
-		else
-			snprintf(text, sizeof(text), "C%u %3u%%", index, busy[index]);
-		count = overlay_text(vertices, count, limit, left + 6.0f, y, scale, color, text);
-		/* a bar to the right of the label */
-		count = overlay_rect(vertices, count, left + 108.0f, y + 2.0f, 70.0f, 12.0f, 0xFF303030u);
-		if (busy[index] != 255)
-			count = overlay_rect(vertices, count, left + 108.0f, y + 2.0f, busy[index] * 0.7f, 12.0f, color);
+			if (busy[index] == 255)
+				snprintf(text, sizeof(text), "C%u  N/A", index);
+			else
+				snprintf(text, sizeof(text), "C%u %3u%%", index, busy[index]);
+			count = overlay_text(vertices, count, limit, left + 6.0f, y, scale, color, text);
+			/* a bar to the right of the label */
+			count = overlay_rect(vertices, count, left + 108.0f, y + 2.0f, 70.0f, 12.0f, 0xFF303030u);
+			if (busy[index] != 255)
+				count = overlay_rect(vertices, count, left + 108.0f, y + 2.0f, busy[index] * 0.7f, 12.0f, color);
+		}
 	}
+	if (gxm.menu_visible)
+		count = menu_build(vertices, count, limit);
+	if (!count)
+		return;
+	vertices = vgxm_worker_alloc(count * 6 * sizeof(*vertices), 16);
+	indices = vgxm_worker_alloc(count * 6 * sizeof(*indices), 16);
+	if (!vertices || !indices)
+		return;
+	memcpy(vertices, built, count * 6 * sizeof(*vertices));
 	for (index = 0; index < count * 6; index++)
 		indices[index] = (unsigned short)index;
 	shadow.valid = 0;

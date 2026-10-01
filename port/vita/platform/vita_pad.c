@@ -23,6 +23,9 @@ The look stick takes Xita's settings: XV_LOOK_SENS (percent), XV_LOOK_CURVE
 /* set while the game's menus are up (halo_ui_pointer_update, d3d8_gxm.c) */
 int vita_menus_active;
 
+/* bumped by the settings panel (port_config.c) */
+extern volatile unsigned long halo_settings_generation;
+
 static int setting(const char *name, int fallback, int low, int high)
 {
 	const char *value = getenv(name);
@@ -76,18 +79,27 @@ static void stick(unsigned char raw_x, unsigned char raw_y, int deadzone, int se
 void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 {
 	static int deadzone = -1, sensitivity, curve, invert;
+	static unsigned long settings_seen;
 	struct vita_host_pad pad;
 	unsigned long buttons;
 	WORD result = 0;
 
-	if (deadzone < 0)
+	/* (read again after a change in the settings panel) */
+	if (deadzone < 0 || settings_seen != halo_settings_generation)
 	{
+		settings_seen = halo_settings_generation;
 		deadzone = setting("XV_DEADZONE", 0, 0, 99);
 		sensitivity = setting("XV_LOOK_SENS", 100, 0, 400);
 		curve = setting("XV_LOOK_CURVE", 0, 0, 2);
 		invert = setting("XV_INVERT_Y", 0, 0, 1);
 	}
 	vita_host_pad_read(&pad);
+	/* the settings panel has the buttons while it is open */
+	if (vita_settings_input(&pad))
+	{
+		gamepad->sThumbLX = gamepad->sThumbLY = gamepad->sThumbRX = gamepad->sThumbRY = 0;
+		return;
+	}
 	buttons = pad.buttons;
 	if (buttons & VITA_BUTTON_START) result |= XINPUT_GAMEPAD_START;
 	if (buttons & VITA_BUTTON_SELECT) result |= XINPUT_GAMEPAD_BACK;
