@@ -1514,6 +1514,200 @@ struct progress_bar_mode progress_bar_mode= {0};
 real last_t= 0.f;
 static real wobble_phase= 0.f;
 
+#ifdef HALO_LINUX
+/* (port) The retail game (Xbox build 2276, USA) draws this screen with this
+file's code unchanged, except for the picture: no maps\loading.tga, but one
+compiled into the executable, the Halo ring drawn as glowing blue edges with
+"LOADING..." in the middle, 320x240, run-length coded one byte per run (low
+nibble the intensity, high nibble the count; 26596 bytes at 0x00210990, its
+size at 0x00210988). Its progress_bar_load_loading_texture (0x000d4670)
+decodes it into texture0 with tgaLoadImageData's intensity-to-colour formula,
+and its progress_bar_initialize is empty. The picture is Bungie's data, so
+the port carries none of it: progress_bar_initialize reads it from the
+player's own retail executable, at its place on the disc (d:\default.xbe,
+the data root) or next to the maps folder. Without that file the picture
+stays black and the screen is the blur alone. */
+enum
+{
+	RETAIL_LOADING_IMAGE_WIDTH= 320,
+	RETAIL_LOADING_IMAGE_HEIGHT= 240,
+	RETAIL_LOADING_IMAGE_MAXIMUM_SIZE= 0x20000
+};
+
+static struct
+{
+	long size;
+	unsigned char *runs;
+} retail_loading_image;
+
+void platform_log(const char *format, ...);
+
+static unsigned long retail_read_long(
+	unsigned char const *bytes)
+{
+	return bytes[0] | (bytes[1]<<8) | (bytes[2]<<16) | ((unsigned long)bytes[3]<<24);
+}
+
+/* the file offset of size bytes at a virtual address in the executable's
+sections, or -1 */
+static long retail_xbe_offset(
+	unsigned char const *xbe,
+	long xbe_size,
+	unsigned long address,
+	unsigned long size)
+{
+	unsigned long base= retail_read_long(xbe + 0x104);
+	unsigned long section_count= retail_read_long(xbe + 0x11c);
+	unsigned long headers= retail_read_long(xbe + 0x120) - base;
+	unsigned long section_index;
+
+	if (headers>(unsigned long)xbe_size || section_count>((unsigned long)xbe_size - headers)/56)
+		return -1;
+	for (section_index= 0; section_index<section_count; section_index++)
+	{
+		unsigned char const *header= xbe + headers + section_index*56;
+		unsigned long virtual_address= retail_read_long(header + 4);
+		unsigned long raw_address= retail_read_long(header + 12);
+		unsigned long raw_size= retail_read_long(header + 16);
+
+		if (address>=virtual_address && size<=raw_size && address - virtual_address<=raw_size - size &&
+			raw_address<=(unsigned long)xbe_size && raw_size<=(unsigned long)xbe_size - raw_address)
+		{
+			return (long)(raw_address + address - virtual_address);
+		}
+	}
+
+	return -1;
+}
+
+/* finds the picture through the code that loads it: the retail
+progress_bar_make_stuff_ready calls progress_bar_load_loading_texture with
+	movsx eax, word ptr [height]
+	movsx ecx, word ptr [width]
+	push size
+	push runs
+and the picture must decode to exactly width*height pixels of the 320x240
+texture the screen draws */
+static boolean retail_find_loading_image(
+	unsigned char const *xbe,
+	long xbe_size)
+{
+	long index;
+
+	if (xbe_size<0x178 || memcmp(xbe, "XBEH", 4))
+		return FALSE;
+	for (index= 0; index + 25<=xbe_size; index++)
+	{
+		unsigned char const *code= xbe + index;
+		long height_offset, width_offset, runs_offset;
+		unsigned long size;
+
+		if (code[0]!=0x0f || code[1]!=0xbf || code[2]!=0x05 || code[7]!=0x0f || code[8]!=0xbf ||
+			code[9]!=0x0d || code[14]!=0x68 || code[19]!=0x68)
+		{
+			continue;
+		}
+		size= retail_read_long(code + 15);
+		height_offset= retail_xbe_offset(xbe, xbe_size, retail_read_long(code + 3), 2);
+		width_offset= retail_xbe_offset(xbe, xbe_size, retail_read_long(code + 10), 2);
+		runs_offset= retail_xbe_offset(xbe, xbe_size, retail_read_long(code + 20), size);
+		if (height_offset>=0 && width_offset>=0 && runs_offset>=0 && size>0 &&
+			size<=RETAIL_LOADING_IMAGE_MAXIMUM_SIZE &&
+			(short)(xbe[width_offset] | (xbe[width_offset + 1]<<8))==RETAIL_LOADING_IMAGE_WIDTH &&
+			(short)(xbe[height_offset] | (xbe[height_offset + 1]<<8))==RETAIL_LOADING_IMAGE_HEIGHT)
+		{
+			unsigned long pixel_count= 0;
+			unsigned long run_index;
+
+			for (run_index= 0; run_index<size; run_index++)
+				pixel_count+= xbe[runs_offset + run_index]>>4;
+			if (pixel_count==RETAIL_LOADING_IMAGE_WIDTH*RETAIL_LOADING_IMAGE_HEIGHT)
+			{
+				retail_loading_image.runs= malloc(size);
+				if (!retail_loading_image.runs)
+					return FALSE;
+				memcpy(retail_loading_image.runs, xbe + runs_offset, size);
+				retail_loading_image.size= (long)size;
+				return TRUE;
+			}
+		}
+	}
+
+	return FALSE;
+}
+
+static void retail_load_loading_image(
+	void)
+{
+	static char const *const paths[]=
+	{
+		"d:\\default.xbe",
+		/* next to the maps folder (HALO_MAPS_ROOT: the copy of the game
+		Xita's installer keeps in ux0:data/xita/haloce on the Vita) */
+		"d:\\maps\\..\\default.xbe",
+	};
+	long path_index;
+
+	if (retail_loading_image.runs)
+		return;
+	for (path_index= 0; path_index<NUMBEROF(paths) && !retail_loading_image.runs; path_index++)
+	{
+		FILE *file= fopen(paths[path_index], "rb");
+
+		if (file)
+		{
+			long size= -1;
+			unsigned char *xbe= NULL;
+
+			if (!fseek(file, 0, SEEK_END))
+				size= ftell(file);
+			if (size>0 && !fseek(file, 0, SEEK_SET))
+				xbe= malloc(size);
+			if (xbe && fread(xbe, 1, size, file)==(size_t)size && retail_find_loading_image(xbe, size))
+				platform_log("loading screen: the retail picture from %s", paths[path_index]);
+			free(xbe);
+			fclose(file);
+		}
+	}
+	if (!retail_loading_image.runs)
+	{
+		platform_log("loading screen: no retail default.xbe with the loading picture in the data root "
+			"or next to the maps folder; the picture stays black");
+	}
+
+	return;
+}
+
+/* the retail progress_bar_load_loading_texture's decode (0x000d4670) */
+static void retail_decode_loading_image(
+	D3DLOCKED_RECT const *locked_rect)
+{
+	long run_index;
+	long x= 0;
+	long y= 0;
+
+	for (run_index= 0; run_index<retail_loading_image.size; run_index++)
+	{
+		unsigned char run= retail_loading_image.runs[run_index];
+		unsigned long intensity= (unsigned char)((run & 0x0f)<<4);
+		unsigned long color= ((intensity<<9) | (intensity & ~1))<<7 | intensity>>2;
+		long count;
+
+		for (count= run>>4; count>0; count--)
+		{
+			((unsigned long *)((char *)locked_rect->pBits + y*locked_rect->Pitch))[x]= color;
+			if (++x==RETAIL_LOADING_IMAGE_WIDTH)
+			{
+				x= 0;
+				y++;
+			}
+		}
+	}
+
+	return;
+}
+#endif
+
 /* ---------- public code */
 
 void tgaLoadHeader(
@@ -1587,6 +1781,15 @@ void tgaLoad(
 
 void progress_bar_initialize(
 	void)
+#ifdef HALO_LINUX
+{
+	/* (port) retail's is empty: the picture is in the executable, not a
+	loading.tga to copy to the cache drive */
+	retail_load_loading_image();
+
+	return;
+}
+#else
 {
 	char destination_directory[40];
 	char map_directory[40];
@@ -1603,6 +1806,7 @@ void progress_bar_initialize(
 
 	return;
 }
+#endif
 
 void progress_bar_dispose(
 	void)
@@ -2077,6 +2281,121 @@ static DWORD progress_bar_vertex_shader(
 
 	return handle;
 }
+
+/* (port) The blur samples the Xbox's front buffer, GetBackBuffer(-1): the
+frame on the screen, the previous one, which the blur zooms out and fades
+by 0.9 a frame under the new picture (the glow's trail). The native devices
+have one buffer and return it for any index, so the blur sampled the target
+it was drawing into, which it had just cleared: undefined in GL (stale tiles
+on a wide screen) and on the Vita. The front buffer is kept here instead: a
+screen-sized render target that gets each finished loading frame (as the
+Xbox's swap would make it the front buffer) and that make_stuff_ready
+clears where the Xbox clears the front buffer. It is created once and never
+released: the devices keep a render target for its address for good. */
+static IDirect3DTexture8 *progress_bar_front_buffer_texture;
+static D3DSurface *progress_bar_front_buffer_surface;
+static struct pixel_shader_definition progress_bar_copy_shader;
+
+static D3DSurface *progress_bar_front_buffer(
+	void)
+{
+	D3DSurface *back_buffer;
+	D3DSURFACE_DESC back_buffer_description;
+	D3DSURFACE_DESC front_buffer_description;
+
+	IDirect3DDevice8_GetBackBuffer(global_d3d_device, 0, 0, &back_buffer);
+	IDirect3DSurface8_GetDesc(back_buffer, &back_buffer_description);
+	if (progress_bar_front_buffer_texture)
+	{
+		IDirect3DTexture8_GetLevelDesc(progress_bar_front_buffer_texture, 0, &front_buffer_description);
+		/* (a new screen width, F11 on the desktop: a new target, the old
+		one is left to the device) */
+		if (front_buffer_description.Width!=back_buffer_description.Width ||
+			front_buffer_description.Height!=back_buffer_description.Height)
+		{
+			progress_bar_front_buffer_texture= NULL;
+		}
+	}
+	if (!progress_bar_front_buffer_texture)
+	{
+		progress_bar_front_buffer_surface= NULL;
+		IDirect3DDevice8_CreateTexture(global_d3d_device, back_buffer_description.Width,
+			back_buffer_description.Height, 1, D3DUSAGE_RENDERTARGET, D3DFMT_LIN_A8R8G8B8, D3DPOOL_DEFAULT,
+			&progress_bar_front_buffer_texture);
+		if (progress_bar_front_buffer_texture)
+		{
+			D3DSurface *depth_buffer;
+
+			IDirect3DTexture8_GetSurfaceLevel(progress_bar_front_buffer_texture, 0,
+				&progress_bar_front_buffer_surface);
+			/* (black until a frame is shown) */
+			IDirect3DDevice8_GetDepthStencilSurface(global_d3d_device, &depth_buffer);
+			IDirect3DDevice8_SetRenderTarget(global_d3d_device, progress_bar_front_buffer_surface, NULL);
+			IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, 0xf0, 0, 0.f, 0);
+			IDirect3DDevice8_SetRenderTarget(global_d3d_device, back_buffer, depth_buffer);
+		}
+	}
+
+	return progress_bar_front_buffer_surface;
+}
+
+/* the finished loading frame becomes the front buffer */
+static void progress_bar_present_to_front_buffer(
+	void)
+{
+	D3DBaseTexture back_buffer_texture;
+	D3DSURFACE_DESC description;
+	D3DSurface *back_buffer;
+	D3DSurface *depth_buffer;
+	D3DSurface *front_buffer= progress_bar_front_buffer();
+
+	if (!front_buffer)
+		return;
+	if (!progress_bar_copy_shader.combiner_count)
+	{
+		/* regular_shader's texture times one, not times the colour */
+		progress_bar_copy_shader.texture_modes= 0x1;
+		progress_bar_copy_shader.combiner_count= 1;
+		progress_bar_copy_shader.rgb_inputs[0]= 0x08200000;
+		progress_bar_copy_shader.rgb_outputs[0]= 0x000000c0;
+		progress_bar_copy_shader.alpha_inputs[0]= 0x18200000;
+		progress_bar_copy_shader.alpha_outputs[0]= 0x000000c0;
+		progress_bar_copy_shader.final_combiner_inputs_abcd= 0x200c0000;
+		progress_bar_copy_shader.final_combiner_inputs_efg= 0x00001c00;
+	}
+	IDirect3DDevice8_GetBackBuffer(global_d3d_device, 0, 0, &back_buffer);
+	IDirect3DSurface8_GetDesc(back_buffer, &description);
+	IDirect3DDevice8_GetDepthStencilSurface(global_d3d_device, &depth_buffer);
+	this_is_awful(&back_buffer_texture, back_buffer);
+	IDirect3DDevice8_SetRenderTarget(global_d3d_device, front_buffer, NULL);
+	IDirect3DDevice8_SetVertexShader(global_d3d_device, progress_bar_vertex_shader());
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHABLENDENABLE, FALSE);
+	/* (linear at the texels' centres: the texels themselves; point
+	sampling picks a neighbour wherever the centre rounds the other way) */
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
+	IDirect3DDevice8_SetTexture(global_d3d_device, 0, &back_buffer_texture);
+	IDirect3DDevice8_SetPixelShaderProgram(global_d3d_device, (D3DPIXELSHADERDEF *)&progress_bar_copy_shader);
+	IDirect3DDevice8_Begin(global_d3d_device, D3DPT_TRIANGLEFAN);
+	IDirect3DDevice8_SetVertexData2f(global_d3d_device, D3DVSDE_TEXCOORD0, 0.f, 0.f);
+	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_VERTEX, -1.f, 1.f, 0.5f, 1.f);
+	IDirect3DDevice8_SetVertexData2f(global_d3d_device, D3DVSDE_TEXCOORD0, (real)description.Width, 0.f);
+	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_VERTEX, 1.f, 1.f, 0.5f, 1.f);
+	IDirect3DDevice8_SetVertexData2f(global_d3d_device, D3DVSDE_TEXCOORD0, (real)description.Width,
+		(real)description.Height);
+	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_VERTEX, 1.f, -1.f, 0.5f, 1.f);
+	IDirect3DDevice8_SetVertexData2f(global_d3d_device, D3DVSDE_TEXCOORD0, 0.f, (real)description.Height);
+	IDirect3DDevice8_SetVertexData4f(global_d3d_device, D3DVSDE_VERTEX, -1.f, -1.f, 0.5f, 1.f);
+	IDirect3DDevice8_End(global_d3d_device);
+	IDirect3DDevice8_SetTexture(global_d3d_device, 0, NULL);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHABLENDENABLE, TRUE);
+	/* (as make_stuff_ready puts the targets back) */
+	IDirect3DDevice8_SetRenderTarget(global_d3d_device, back_buffer, depth_buffer);
+
+	return;
+}
 #endif
 
 static void progress_bar_render(
@@ -2148,8 +2467,15 @@ static void progress_bar_render(
 	IDirect3DDevice8_SetVertexShader(global_d3d_device, 0);
 #endif
 	IDirect3DDevice8_SetPixelShaderProgram(global_d3d_device, (D3DPIXELSHADERDEF *)&blur_shader);
+#ifdef HALO_LINUX
+	/* (port) the front buffer (progress_bar_front_buffer), or black */
+	progress_bar_front_buffer();
+	(void)back_buffer;
+	(void)back_buffer_texture;
+#else
 	IDirect3DDevice8_GetBackBuffer(global_d3d_device, -1, 0, &back_buffer);
 	this_is_awful(&back_buffer_texture, back_buffer);
+#endif
 	for (stage= 0; stage<4; stage++)
 	{
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, stage, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
@@ -2157,7 +2483,11 @@ static void progress_bar_render(
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, stage, D3DTSS_MIPFILTER, D3DTEXF_POINT);
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, stage, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
 		IDirect3DDevice8_SetTextureStageState(global_d3d_device, stage, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
+#ifdef HALO_LINUX
+		IDirect3DDevice8_SetTexture(global_d3d_device, stage, (D3DBaseTexture *)progress_bar_front_buffer_texture);
+#else
 		IDirect3DDevice8_SetTexture(global_d3d_device, stage, &back_buffer_texture);
+#endif
 	}
 
 	if (progress<0.9f)
@@ -2176,6 +2506,9 @@ static void progress_bar_render(
 	IDirect3DDevice8_SetTransform(global_d3d_device, D3DTS_WORLD, &progress_bar_globals.saved_world);
 	IDirect3DDevice8_SetTransform(global_d3d_device, D3DTS_VIEW, &progress_bar_globals.saved_view);
 	IDirect3DDevice8_SetTransform(global_d3d_device, D3DTS_PROJECTION, &progress_bar_globals.saved_projection);
+#ifdef HALO_LINUX
+	progress_bar_present_to_front_buffer();
+#endif
 	IDirect3DDevice8_BlockUntilVerticalBlank(global_d3d_device);
 
 	return;
@@ -2310,11 +2643,31 @@ static void progress_bar_make_stuff_ready(
 		progress_bar_mode.capture_frame= FALSE;
 		IDirect3DDevice8_GetDepthStencilSurface(global_d3d_device, &depth_buffer);
 		IDirect3DDevice8_GetBackBuffer(global_d3d_device, 0, 0, &front_buffer);
+#ifdef HALO_LINUX
+		/* (port) the front buffer is progress_bar_front_buffer's */
+		back_buffer= progress_bar_front_buffer();
+		if (back_buffer)
+		{
+			IDirect3DDevice8_SetRenderTarget(global_d3d_device, back_buffer, depth_buffer);
+			IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, 0xf0, 0, 0.f, 0);
+			IDirect3DDevice8_SetRenderTarget(global_d3d_device, front_buffer, depth_buffer);
+		}
+#else
 		IDirect3DDevice8_GetBackBuffer(global_d3d_device, -1, 0, &back_buffer);
 		IDirect3DDevice8_SetRenderTarget(global_d3d_device, back_buffer, depth_buffer);
 		IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, 0xf0, 0, 0.f, 0);
 		IDirect3DDevice8_SetRenderTarget(global_d3d_device, front_buffer, depth_buffer);
+#endif
 	}
+#ifdef HALO_LINUX
+	else
+	{
+		/* (port) the Xbox's front buffer holds the last frame shown, which
+		the first loading frame blurs away; the nearest the port has is the
+		frame drawn so far, the same picture as the last one */
+		progress_bar_present_to_front_buffer();
+	}
+#endif
 
 	return;
 }
@@ -2323,17 +2676,28 @@ static void progress_bar_load_loading_texture(
 	IDirect3DTexture8 **texture)
 {
 	D3DSURFACE_DESC surface_description;
+#ifndef HALO_LINUX
 	char map_directory[40];
 	char source_path[40];
 	struct tga_image image;
+#endif
 	D3DLOCKED_RECT locked_rect;
 	unsigned long *pixels;
+#ifndef HALO_LINUX
 	FILE *file;
+#endif
 
 	IDirect3DDevice8_CreateTexture(global_d3d_device, 320, 240, 1, 0, D3DFMT_LIN_A8B8G8R8, 0, texture);
 	IDirect3DTexture8_LockRect(*texture, 0, &locked_rect, NULL, 0);
 	IDirect3DTexture8_GetLevelDesc(*texture, 0, &surface_description);
 	pixels= locked_rect.pBits;
+#ifdef HALO_LINUX
+	/* (port) retail's picture, decoded as retail does (see
+	retail_load_loading_image); black without the player's executable */
+	csmemset(pixels, 0, locked_rect.Pitch*surface_description.Height);
+	if (retail_loading_image.runs)
+		retail_decode_loading_image(&locked_rect);
+#else
 	csstrcpy(map_directory, cache_files_map_directory());
 	sprintf(source_path, "z%sloading.tga", map_directory + 1);
 	file= fopen(source_path, "rb");
@@ -2343,14 +2707,6 @@ static void progress_bar_load_loading_texture(
 		image.pixels= pixels;
 		tgaLoadImageData(file, &image);
 		fclose(file);
-	}
-#ifdef HALO_LINUX
-	else
-	{
-		/* (port) the disc images the port takes its maps from have no
-		loading.tga: the picture is left black, so the screen is the blur of
-		the last frame alone, not whatever the texture's memory last held */
-		csmemset(pixels, 0, locked_rect.Pitch*surface_description.Height);
 	}
 #endif
 	IDirect3DTexture8_UnlockRect(*texture, 0);

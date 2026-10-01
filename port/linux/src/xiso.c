@@ -2,7 +2,9 @@
 XISO.C
 
 Copies the maps folder out of an Xbox disc image (an "xiso"), for the
-desktop ports' first start without game data (sdl_platform.c).
+desktop ports' first start without game data (sdl_platform.c), and the
+game's executable, default.xbe, which holds the loading screen's picture
+(source/interface/progress_bar.c).
 
 The image's file system is XDVDFS, read as extract-xiso does
 (https://github.com/XboxDev/extract-xiso, extract-xiso.c, whose format
@@ -300,6 +302,10 @@ int xiso_extract_maps(const char *image_path, const char *destination, xiso_prog
 	unsigned long root_sector, root_size;
 	unsigned long long total = 0, done = 0;
 	char partial[1024], final[1024], path[1300];
+	/* the disc's executable, default.xbe, which holds the loading screen's
+	picture (source/interface/progress_bar.c) */
+	struct xiso_file executable;
+	int has_executable = 0;
 	int result = 0;
 	int index;
 
@@ -326,8 +332,18 @@ int xiso_extract_maps(const char *image_path, const char *destination, xiso_prog
 		goto done;
 	}
 	{
+		struct directory_walk files = { table, root_size, entries, 0, MAXIMUM_FILES, 0, 0 };
 		struct directory_walk walk = { table, root_size, entries, 0, MAXIMUM_FILES, 0, 1 };
 
+		walk_directory(&files, 0, 0);
+		for (index = 0; index < files.entry_count; index++)
+		{
+			if (names_match(entries[index].name, "default.xbe"))
+			{
+				executable = entries[index];
+				has_executable = 1;
+			}
+		}
 		walk_directory(&walk, 0, 0);
 		for (index = 0; index < walk.entry_count && !names_match(entries[index].name, "maps"); index++)
 			;
@@ -361,6 +377,14 @@ int xiso_extract_maps(const char *image_path, const char *destination, xiso_prog
 		{
 			fail(&image, "The disc image's maps folder has no ui.map: it is not a Halo disc.%s", NULL);
 			goto done;
+		}
+		if (has_executable)
+		{
+			total += executable.size;
+			snprintf(path, sizeof(path), "%s/default.xbe", destination);
+			platform_log("extracting default.xbe (%lu bytes)", executable.size);
+			if (!copy_file(&image, &executable, path, buffer, &done, total, progress, context))
+				goto done;
 		}
 		snprintf(partial, sizeof(partial), "%s/maps.partial", destination);
 		snprintf(final, sizeof(final), "%s/maps", destination);

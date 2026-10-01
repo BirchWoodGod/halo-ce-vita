@@ -22,9 +22,11 @@ Combat Evolved for the Xbox.
 1. Install `halo.vpk` with VitaShell. The bubble is called **Halo CE**
    (title ID `HCEV00001`).
 2. Copy the Xbox game's maps to `ux0:data/haloce-vita/maps/` (the whole
-   `maps` folder, including `loading.tga`: the picture of the loading screen).
-   (A copy that Xita's installer put in `ux0:data/xita/haloce/maps/` is
-   used if that folder is missing.)
+   `maps` folder), and the disc's `default.xbe` to `ux0:data/haloce-vita/`:
+   the loading screen takes its picture from the executable, and stays dark
+   without it. (A copy that Xita's installer put in
+   `ux0:data/xita/haloce/maps/` is used if that folder is missing, with the
+   `default.xbe` next to it.)
 3. Start the game. The first load of each map takes a while: the game
    writes its cache file to the card.
 
@@ -33,6 +35,7 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 | Path | What |
 | --- | --- |
 | `maps/` | the Xbox maps |
+| `default.xbe` | the Xbox executable (the loading screen's picture) |
 | `data/` | settings (`config.toml`), `init.txt`, the game's log (`debug.txt`) |
 | `saves/` | profiles and saved games |
 | `movies/` | the movies as MP4 (optional) |
