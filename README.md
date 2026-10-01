@@ -8,6 +8,10 @@ translated to the Vita's GPU.
 **No game data is included.** You need your own Xbox copy of Halo: Combat
 Evolved.
 
+![Blood Gulch on a PS Vita](docs/screenshots/blood-gulch.png)
+
+*Blood Gulch on a PS Vita (a screenshot taken on the console).*
+
 ## What works
 
 - The whole campaign from the menus, with checkpoints, saves and Save and
@@ -29,7 +33,9 @@ VitaShell, and about 1.5 GB free on `ux0:`.
 2. Copy the `maps` folder of your Xbox disc to `ux0:data/haloce-vita/maps/`.
    To get it from a disc image, `extract-xiso -x "Halo.iso"` and take the
    `maps` folder. All versions of the Xbox game work.
-3. Start the game. The first load of each level takes a while: the game
+3. Copy the disc's `default.xbe` to `ux0:data/haloce-vita/default.xbe`: the
+   loading screen takes its picture from the game's executable.
+4. Start the game. The first load of each level takes a while: the game
    decompresses it into a cache file on the memory card.
 
 Without the maps the game shows where to copy them and exits.
@@ -101,8 +107,8 @@ Issues and pull requests are welcome. Open work:
   the limit.
 - **Ad hoc multiplayer** between two Vitas without a router, then online
   play.
-- **The retail loading screen**: the decompilation is of a pre-release
-  build whose loading screen Bungie replaced before release.
+- **Draw count**: objects are drawn one part at a time (about 270 of the
+  ~360 draws in a big fight); batching them would help the most.
 
 When you report a problem, attach `ux0:data/haloce-vita/halo.log` and
 `halo-prev.log` (the previous session's log, kept after a crash).
