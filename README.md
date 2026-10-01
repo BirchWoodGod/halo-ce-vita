@@ -1,4 +1,7 @@
-# Halo: Combat Evolved for Linux, Windows and Android
+# Halo: Combat Evolved for Linux, Windows, Android and the PS Vita
+
+**PS Vita:** installing, controls, the settings panel and building are in
+[port/vita/README.md](port/vita/README.md).
 
 This project is a port of the Halo: Combat Evolved decompilation to Linux,
 Windows and Android. The decompilation is of the Xbox build 2342

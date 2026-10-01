@@ -16,6 +16,7 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/appmgr.h>
 #include <psp2/kernel/sysmem.h>
+#include <psp2/io/dirent.h>
 #include <psp2/io/stat.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/devctl.h>
@@ -29,14 +30,17 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "vita_host.h"
 
 #define VITA_DATA_DIRECTORY "ux0:data/haloce-vita"
-/* the game's own files (settings, log, init.txt); the maps are shared with
-the ones Xita's installer put on the card */
+/* the game's own files (settings, log, init.txt); the maps go in
+ux0:data/haloce-vita/maps, or are shared with the ones Xita's installer
+put on the card */
 #define VITA_DEFAULT_DATA_ROOT VITA_DATA_DIRECTORY "/data"
-#define VITA_DEFAULT_MAPS_ROOT "ux0:data/xita/haloce/maps"
+#define VITA_DEFAULT_MAPS_ROOT VITA_DATA_DIRECTORY "/maps"
+#define VITA_XITA_MAPS_ROOT "ux0:data/xita/haloce/maps"
 #define ARENA_SIZE 0x07000000UL /* PLATFORM_CONTIGUOUS_SIZE */
 
 /* newlib's heap (malloc) */
@@ -145,6 +149,43 @@ void *vita_host_arena(unsigned long *size)
 unsigned long long vita_host_time_us(void)
 {
 	return sceKernelGetProcessTimeWide();
+}
+
+/* The game looks for d:\bink\<movie>.bik before it opens a movie, and
+the Vita plays the MP4 in movies/ in its place (bink_vita.c): an empty
+.bik stands in for each MP4 there, so a movie copied in plays */
+static void movie_placeholders(void)
+{
+	SceUID directory = sceIoDopen(VITA_DATA_DIRECTORY "/movies");
+	SceIoDirent entry;
+
+	if (directory < 0)
+		return;
+	sceIoMkdir(VITA_DEFAULT_DATA_ROOT "/bink", 0777);
+	memset(&entry, 0, sizeof(entry));
+	while (sceIoDread(directory, &entry) > 0)
+	{
+		size_t length = strlen(entry.d_name);
+		char path[320];
+		SceIoStat stat;
+
+		if (length > 4 && strcasecmp(entry.d_name + length - 4, ".mp4") == 0 && length < 200)
+		{
+			snprintf(path, sizeof(path), VITA_DEFAULT_DATA_ROOT "/bink/%.*s.bik", (int)(length - 4), entry.d_name);
+			if (sceIoGetstat(path, &stat) < 0)
+			{
+				SceUID file = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT, 0666);
+
+				if (file >= 0)
+				{
+					sceIoWrite(file, "mp4 stand-in", 12);
+					sceIoClose(file);
+				}
+			}
+		}
+		memset(&entry, 0, sizeof(entry));
+	}
+	sceIoDclose(directory);
 }
 
 static void read_environment_file(void)
@@ -423,7 +464,13 @@ int main(int argc, char **argv)
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);
-	setenv("HALO_MAPS_ROOT", VITA_DEFAULT_MAPS_ROOT, 0);
+	{
+		/* (the maps where this game keeps them, else Xita's copy) */
+		SceIoStat stat;
+
+		setenv("HALO_MAPS_ROOT", sceIoGetstat(VITA_DEFAULT_MAPS_ROOT "/ui.map", &stat) >= 0 ||
+			sceIoGetstat(VITA_XITA_MAPS_ROOT "/ui.map", &stat) < 0 ? VITA_DEFAULT_MAPS_ROOT : VITA_XITA_MAPS_ROOT, 0);
+	}
 	setenv("HALO_SAVE_ROOT", VITA_DATA_DIRECTORY "/saves", 0);
 	setenv("HALO_NET_ONLINE", "false", 0);
 	/* the Vita's 16:9 screen: 480 lines of 848 columns (the port widens the
@@ -432,6 +479,7 @@ int main(int argc, char **argv)
 	setenv("HALO_UPDATE_AUTO", "false", 0);
 	read_environment_file();
 	vita_settings_load();
+	movie_placeholders();
 	{
 		const char *crash_at = getenv("HALO_CRASH_AT");
 

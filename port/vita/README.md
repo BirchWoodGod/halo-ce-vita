@@ -1,0 +1,169 @@
+# Halo: Combat Evolved on the PlayStation Vita
+
+The PS Vita build of the decompilation port. The game code is the same as
+the Linux, Windows and Android builds; `port/vita` adds a Direct3D device on
+the Vita's GPU (GXM), the controls, movies, sockets and the settings panel.
+
+The port does not include any game data. You need your own copy of Halo:
+Combat Evolved for the Xbox.
+
+## Requirements
+
+- A PS Vita or PS TV on firmware 3.60 to 3.74 with HENkaku/Ensō and VitaShell.
+- About 1.5 GB free on `ux0:`. The game decompresses the maps it loads into
+  cache files on the memory card (up to about 765 MB).
+- The Xbox game's `maps` folder (`ui.map`, `bloodgulch.map`, `a10.map` ...).
+- Optional: the intro and credits movies converted to MP4 (see Movies).
+
+## Installing
+
+1. Install `halo.vpk` with VitaShell. The bubble is called **Halo CE**
+   (title ID `HCEV00001`).
+2. Copy the Xbox game's maps to `ux0:data/haloce-vita/maps/`.
+   (A copy that Xita's installer put in `ux0:data/xita/haloce/maps/` is
+   used if that folder is missing.)
+3. Start the game. The first load of each map takes a while: the game
+   writes its cache file to the card.
+
+The game keeps its files in `ux0:data/haloce-vita/`:
+
+| Path | What |
+| --- | --- |
+| `maps/` | the Xbox maps |
+| `data/` | settings (`config.toml`), `init.txt`, the game's log (`debug.txt`) |
+| `saves/` | profiles and saved games |
+| `movies/` | the movies as MP4 (optional) |
+| `shaders/` | shaders the Vita compiled (made on first use) |
+| `settings.txt` | the settings panel's choices |
+| `halo.log` | the port's log |
+| `env.txt` | optional debug switches, one `NAME=value` per line |
+
+### Movies
+
+The Xbox movies are Bink files, which the Vita cannot play. Convert them to
+H.264 MP4 (640x480 or smaller, AAC audio) and put them in
+`ux0:data/haloce-vita/movies/` with the same names: `intro.mp4`,
+`credits.mp4`, `attract1.mp4` ... For example, with ffmpeg:
+
+```
+ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p \
+       -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
+```
+
+A movie without an MP4 is skipped, as the game skips a missing movie. (The
+game looks for `data/bink/<name>.bik` first; the port creates an empty one
+for each MP4 at start-up.)
+
+## Controls
+
+| Vita | Xbox | In play |
+| --- | --- | --- |
+| Cross | A | jump, accept |
+| Circle | B | melee, back |
+| Square | X | reload / action |
+| Triangle | Y | switch weapon |
+| L | left trigger | throw grenade |
+| R | right trigger | fire |
+| Left stick | left stick | move |
+| Right stick | right stick | look |
+| D-pad down | left stick click | crouch |
+| D-pad up | right stick click | zoom |
+| D-pad left | Black | switch grenades |
+| D-pad right | White | flashlight |
+| Start | Start | pause; skips a cinematic |
+| Select | Back | scoreboard |
+
+In the menus the D-pad moves the selection.
+
+## Settings panel
+
+Hold **Select + Start** for about a second, in play or in the menus. Up and
+down choose a setting, left and right (or Cross) change it, and Circle closes
+the panel. The game does not see the buttons while the panel is open.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Performance overlay | Off | frames per second, game and render times, core load |
+| Frame limit | 30 FPS | the most frames shown a second |
+| Render resolution | 75% | the 3D view's resolution (applies after a restart) |
+| Model detail | Low | level of detail of characters, vehicles and props |
+| Hide distant objects | Small | skips objects that cover only a few pixels |
+| Scenery updates | Quarter | how often static props are updated |
+| Object lighting | Third | how often object lighting is recomputed |
+| Look sensitivity | 100% | right stick turning speed |
+| Invert look | No | reverses the right stick's up and down |
+| Stick deadzone | Off | raise it if the sticks drift |
+
+The choices are saved in `ux0:data/haloce-vita/settings.txt`.
+
+## Multiplayer
+
+- **Split screen** needs two players, and the Vita has one controller.
+- **System link** works over Wi-Fi: every machine on the same network running
+  this port (another Vita, or the Linux/Windows build) can host or join.
+- **Ad hoc** (Vita to Vita without a router) and online play are not done yet.
+
+## Building
+
+You need:
+
+- [VitaSDK](https://vitasdk.org) (set `VITASDK`, or install it in `~/vitasdk`).
+- clang 17 or newer (the game code is compiled by clang with the game's
+  MSVC-like ABI; the Vita-side code by VitaSDK's GCC).
+- Python 3 and ninja.
+- An ARM Linux clang wrapper for `--linux-cc` (the Linux build graph is
+  generated too; `ninja vita` only builds the Vita part).
+
+```
+python3 configure.py --linux-cc <clang for armhf Linux> --lto off --pgo off --portable --release
+ninja vita
+```
+
+The results are `build/vita/eboot.bin` and `build/vita/halo.vpk`. Run
+`configure.py` again after adding a source file or changing anything in
+`port/vita/sce_sys` (the LiveArea images and the title).
+
+### Testing without a Vita
+
+- [Vita3K](https://vita3k.org) runs the build. Install the VPK, or copy
+  `eboot.bin` into `ux0/app/HCEV00001/`. Vita3K hides some hardware
+  problems (it reads render targets and mip chains its own way), so check
+  graphics changes on a Vita too.
+- `configure.py --linux-d3d gxm-null` builds the Linux game with the Vita's
+  Direct3D device over a GPU that draws nothing. It runs on x86 and ARM Linux
+  and measures the Vita render path's CPU cost without the hardware.
+
+### Debug switches
+
+`env.txt` takes the platform layer's and the port's environment variables.
+Useful ones:
+
+| Switch | What |
+| --- | --- |
+| `HALO_FRAME_TIMING=300` | a timing line every 300 frames in `halo.log` |
+| `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go |
+| `HALO_GPU_STATS=1` | draws, uniforms, ring use per frame |
+| `HALO_SCREENSHOT_DIR=ux0:data/haloce-vita/shots`, `HALO_SCREENSHOT_EVERY=n` | a BMP every n frames (at 100% resolution) |
+| `HALO_NO_MOVIES=1`, `HALO_NO_AUDIO=1` | skip movies or sound |
+| `HALO_DXT_MIPS=0` | compressed textures without their mip chains |
+
+## Layout of port/vita
+
+| Path | What |
+| --- | --- |
+| `host/` | the Vita side, built with VitaSDK's GCC: start-up, GXM, controls, movies (AvPlayer), sockets (sceNet), the settings panel |
+| `platform/` | built with the game's ABI: the Direct3D device (`d3d8_gxm.c`), the NV2A register combiner and vertex program translators (`nv2a_psh_cg.c`, `nv2a_vsh_cg.c`), texture decoding, Bink |
+| `include/` | the boundary between the two (`vita_host.h`, `vita_gxm.h`) |
+| `null/` | the do-nothing GXM for the Linux test build |
+| `sce_sys/` | LiveArea images |
+
+## Help wanted
+
+- **Ad hoc multiplayer** (sceNetAdhoc) so two Vitas can play without a router,
+  then online play.
+- **Performance** in heavy fights (the render on the first core is the limit;
+  see the timing lines).
+- **DXT1 mip chains**: Vita3K shows rainbow noise on some DXT1 textures'
+  smaller levels (`HALO_DXT_NOCHAIN_KIND=1` turns their chains off).
+- **Movies**: the colour conversion and upload cost ~20 ms a frame; a GPU
+  conversion would free the CPU.
