@@ -685,10 +685,120 @@ void *halo_d3d_resource_pointer(const void *resource);
 void platform_log(const char *format, ...);
 void *halo_d3d_contiguous_alloc(unsigned long size);
 
+/* (debug) HALO_DECAL_STATS=1: decals and their draws per frame, logged
+every 300 frames */
+static unsigned long decal_stats_decals, decal_stats_draws, decal_stats_frames;
+extern char *getenv(const char *name);
+extern int atoi(const char *text);
+extern void qsort(void *base, size_t count, size_t size, int (*compare)(const void *, const void *));
+
+void halo_decal_stats_frame(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_DECAL_STATS");
+		enabled = setting && atoi(setting);
+	}
+	if (enabled && ++decal_stats_frames % 300 == 0)
+	{
+		platform_log("decals: %.1f decals and %.1f draws a frame", decal_stats_decals / 300.0, decal_stats_draws / 300.0);
+		decal_stats_decals = decal_stats_draws = 0;
+	}
+}
+
+/* (port) a decal's fade, rounded to HALO_DECAL_LEVELS steps (default
+16): decals that fade at different moments differed by a unit or two of
+intensity, which kept neighbours from sharing a draw (780 decals went out
+as 467 draws on The Silent Cartographer's beach); 0 keeps every value */
+static unsigned long decal_intensity_rounded(unsigned long intensity)
+{
+	static long levels = -1;
+	unsigned long step, rounded;
+
+	if (levels < 0)
+	{
+		const char *setting = getenv("HALO_DECAL_LEVELS");
+		levels = setting ? atoi(setting) : 16;
+	}
+	if (levels <= 1 || levels >= 256)
+		return intensity;
+	step = 256 / (unsigned long)levels;
+	rounded = (intensity + step / 2) / step * step;
+	return rounded > 255 ? 255 : rounded;
+}
+
+/* (port) a cluster's decals drawn grouped by what a batch must share -
+blend function, bitmap, colour, intensity - and otherwise in their list
+order: a decal type picks among several bitmaps at random, so neighbours
+alternated bitmaps and 780 decals went out as 467 draws. Only the order of
+overlapping decals of different kinds can change. HALO_DECAL_SORT=0 keeps
+the list order; more than DECAL_SORT_MAXIMUM decals are drawn unsorted */
+enum { DECAL_SORT_MAXIMUM = 2048 };
+struct decal_sort_entry
+{
+	long key[4];
+	long order;
+	long decal_index;
+};
+static struct decal_sort_entry decal_sorted[DECAL_SORT_MAXIMUM];
+static long decal_sorted_count, decal_sorted_cursor;
+
+static int decal_sort_compare(const void *a, const void *b)
+{
+	const struct decal_sort_entry *left = a, *right = b;
+	int index;
+
+	for (index = 0; index < 4; index++)
+		if (left->key[index] != right->key[index])
+			return left->key[index] < right->key[index] ? -1 : 1;
+	return left->order < right->order ? -1 : left->order > right->order;
+}
+
+static unsigned long decal_intensity_rounded(unsigned long intensity);
+
+static long decal_sort_cluster(long decal_index)
+{
+	static int enabled = -1;
+	long count = 0;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_DECAL_SORT");
+		enabled = !setting || atoi(setting);
+	}
+	if (!enabled)
+		return 0;
+	while (decal_index != NONE)
+	{
+		struct decal_datum *decal = DECAL_GET(decal_index);
+		struct decal_definition *definition = decal_definition_get(decal->definition_index);
+		struct decal_sort_entry *entry;
+		pixel32 color = decal->color;
+
+		if (count == DECAL_SORT_MAXIMUM)
+			return 0;
+		entry = &decal_sorted[count];
+		entry->key[0] = definition->shader.framebuffer_blend_function;
+		entry->key[1] = definition->shader.map.index;
+		entry->key[2] = ((long)(char)decal->bitmap_index << 8) ^ (long)(color & 0x00ffffff) * 512;
+		entry->key[3] = (long)decal_intensity_rounded((decal->intensity * (color >> 24) + 127) >> 8);
+		entry->order = count;
+		entry->decal_index = decal_index;
+		count++;
+		decal_index = decal->next_decal_index;
+	}
+	if (count > 1)
+		qsort(decal_sorted, (size_t)count, sizeof(decal_sorted[0]), decal_sort_compare);
+	return count;
+}
+
 static void decal_batch_flush(void)
 {
 	if (decal_batch_quads > 0)
 	{
+		decal_stats_draws++;
 		IDirect3DDevice8_SetStreamSource(global_d3d_device, 0, decal_batch_buffer, sizeof(struct decal_vertex));
 		IDirect3DDevice8_DrawPrimitive(global_d3d_device, D3DPT_QUADLIST, 0, decal_batch_quads);
 		if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_geometry)
@@ -729,6 +839,13 @@ void _rasterizer_decals_draw(
 		return;
 
 	decal_index = decal_get_first_decal_index(cluster_index, local_layer);
+#ifdef HALO_LINUX
+	/* the cluster's decals in batch order (decal_sort_cluster) */
+	decal_sorted_count = decal_sort_cluster(decal_index);
+	decal_sorted_cursor = 0;
+	if (decal_sorted_count > 0)
+		decal_index = decal_sorted[0].decal_index;
+#endif
 	while (decal_index != NONE)
 	{
 		struct decal_datum *decal = DECAL_GET(decal_index);
@@ -742,12 +859,13 @@ void _rasterizer_decals_draw(
 		long key[4];
 
 		color = decal->color;
-		intensity = (decal->intensity * (color >> 24) + 127) >> 8;
+		intensity = decal_intensity_rounded((decal->intensity * (color >> 24) + 127) >> 8);
 		key[0] = framebuffer_blend_function;
 		key[1] = shader->map.index;
 		key[2] = ((long)(char)decal->bitmap_index << 8) ^ (long)(color & 0x00ffffff) * 512;
 		key[3] = (long)intensity;
 		decal_batch_ensure();
+		decal_stats_decals++;
 		if (decal_batch_open && memcmp(key, decal_batch_key, sizeof(key)) != 0)
 		{
 			decal_batch_flush();
@@ -839,6 +957,9 @@ void _rasterizer_decals_draw(
 		vertex_data_offset = (unsigned long)lruv_block_get_address(local_vertex_cache, decal_index);
 		color = decal->color;
 		intensity = (decal->intensity * (color >> 24) + 127) >> 8;
+#ifdef HALO_LINUX
+		intensity = decal_intensity_rounded(intensity);
+#endif
 		match_assert(
 			"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_decals.c",
 			510,
@@ -901,6 +1022,11 @@ void _rasterizer_decals_draw(
 		}
 #endif
 
+#ifdef HALO_LINUX
+		if (decal_sorted_count > 0)
+			decal_index = ++decal_sorted_cursor < decal_sorted_count ? decal_sorted[decal_sorted_cursor].decal_index : NONE;
+		else
+#endif
 		decal_index = decal->next_decal_index;
 	}
 #ifdef HALO_LINUX

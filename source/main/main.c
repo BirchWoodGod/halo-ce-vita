@@ -3478,6 +3478,26 @@ void main_loop(
 				{
 					profile_render_start();
 #ifdef HALO_LINUX
+					{
+						/* (debug) HALO_ELAPSED_STATS=1: the elapsed ticks the
+						render sees (game_time.c), counted every 300 frames */
+						static int stats = -1;
+						static unsigned long seen[4], frames;
+
+						if (stats < 0)
+							stats = getenv("HALO_ELAPSED_STATS") && atoi(getenv("HALO_ELAPSED_STATS"));
+						if (stats)
+						{
+							short elapsed = game_time_get_elapsed();
+
+							seen[elapsed <= 0 ? 0 : elapsed >= 3 ? 3 : elapsed]++;
+							if (++frames % 300 == 0)
+							{
+								platform_log("render elapsed ticks: 0:%lu 1:%lu 2:%lu 3+:%lu", seen[0], seen[1], seen[2], seen[3]);
+								memset(seen, 0, sizeof(seen));
+							}
+						}
+					}
 					halo_frame_timing(_frame_timing_render_start, 0);
 					render_interpolation_frame_begin();
 					main_game_render((double)main_globals.seconds_elapsed);
@@ -3512,6 +3532,13 @@ void main_loop(
 				halo_tick_thread_join();
 				halo_frame_timing_tick_threaded(halo_tick_thread_last_us() * 1000ull);
 				tick_running = FALSE;
+			}
+			else if (halo_tick_thread_enabled())
+			{
+				/* (a frame with no tick elapsed no game time for the next
+				frame's render to count down: game_time.c) */
+				extern volatile short halo_render_elapsed_ticks;
+				halo_render_elapsed_ticks = 0;
 			}
 #endif
 		}

@@ -543,7 +543,9 @@ int main(int argc, char **argv)
 	sceIoMkdir(VITA_DATA_DIRECTORY "/saves", 0777);
 	if (freopen(VITA_DATA_DIRECTORY "/log.txt", "w", stderr))
 		setvbuf(stderr, NULL, _IONBF, 0);
-	sceIoRemove(VITA_DATA_DIRECTORY "/halo.log");
+	/* the last session's log is kept (a crash leaves no other trace) */
+	sceIoRemove(VITA_DATA_DIRECTORY "/halo-prev.log");
+	sceIoRename(VITA_DATA_DIRECTORY "/halo.log", VITA_DATA_DIRECTORY "/halo-prev.log");
 	{
 		/* (the realtime stamp tells one launch's log from the next) */
 		char message[96];

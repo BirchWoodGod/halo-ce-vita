@@ -2163,6 +2163,11 @@ boolean server_needs_more_teams(
 {
 	boolean needs_more_teams = FALSE;
 
+#ifdef HALO_VITA
+	/* (port) a player alone in a local game needs no opposing team */
+	if (network_game_is_splitscreen_local() && server->game.player_count <= 1)
+		return FALSE;
+#endif
 	if (server->game.variant.universal_variant.teams)
 	{
 		short player_count_by_team[NUMBER_OF_MULTIPLAYER_TEAMS] = { 0, 0 };
@@ -2264,13 +2269,26 @@ boolean server_has_enough_machines(
 	return has_enough_machines;
 }
 
+/* (port) the Vita has one controller: a local split screen game starts
+with its one player, to play the multiplayer maps alone (checked here, as
+the game is set up before it is known to be a local one) */
+static long server_minimum_players(
+	struct network_game_server *server)
+{
+#ifdef HALO_VITA
+	if (network_game_is_splitscreen_local())
+		return 1;
+#endif
+	return server->game.minimum_players;
+}
+
 boolean server_ok_to_countdown(
 	struct network_game_server *server)
 {
 	if (server_has_enough_machines(server) &&
 		server_has_a_player_on_each_machine(server) &&
 		!server_needs_more_teams(server) &&
-		server->game.player_count >= server->game.minimum_players)
+		server->game.player_count >= server_minimum_players(server))
 	{
 		return TRUE;
 	}
@@ -2454,7 +2472,7 @@ boolean network_game_server_game_can_start(
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x782, server);
 
 	return server->state == 0 &&
-		server->game.player_count >= server->game.minimum_players;
+		server->game.player_count >= server_minimum_players(server);
 }
 
 void network_game_server_pause_countdown(

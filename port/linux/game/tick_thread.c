@@ -30,6 +30,11 @@ static volatile unsigned long long last_tick_us;
 /* set while the main thread waits in halo_tick_thread_join: the frame is
 rendered and presented, and nothing but the tick touches the game */
 static volatile int main_joining;
+/* the finished update's elapsed ticks, published to the render at the join
+(game_time.c) */
+static volatile short finished_elapsed;
+extern volatile short halo_render_elapsed_ticks;
+short halo_game_time_last_elapsed(void);
 /* the sound manager's share of the ticks (main.c reports it with the render split) */
 volatile unsigned long long halo_tick_sound_us;
 volatile unsigned long halo_tick_sound_ticks;
@@ -76,6 +81,7 @@ static void *tick_thread(void *unused)
 			if (halo_trace_active && halo_trace_active())
 				platform_log("trace: tick begin");
 			game_time_update(delta);
+			finished_elapsed = halo_game_time_last_elapsed();
 			if (halo_trace_active && halo_trace_active())
 				platform_log("trace: tick updated");
 			/* the sound manager's frame update, with the game state it
@@ -135,6 +141,7 @@ void halo_tick_thread_join(void)
 		pause_briefly();
 	}
 	__atomic_store_n(&main_joining, 0, __ATOMIC_RELEASE);
+	halo_render_elapsed_ticks = finished_elapsed;
 	halo_epoch_end();
 }
 

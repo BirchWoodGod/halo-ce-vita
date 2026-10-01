@@ -336,8 +336,8 @@ struct rendered_cluster *rendered_cluster_get(
 (as game.c's tick profile) */
 #include <stdlib.h>
 static int render_profile_enabled = -1;
-static unsigned long long render_phase_started, render_phase_us[32];
-static const char *render_phase_name[32];
+static unsigned long long render_phase_started, render_phase_us[40];
+static const char *render_phase_name[40];
 static unsigned long render_profile_frames;
 unsigned long long vita_host_time_us(void);
 void platform_log(const char *format, ...);
@@ -348,9 +348,9 @@ static unsigned long long render_now(void) { return vita_host_time_us ? vita_hos
 	if (render_profile_enabled > 0) { render_phase_us[phase] += render_now() - render_phase_started; render_phase_name[phase] = name; } } while (0)
 static void render_phase_report(void)
 {
-	char line[800]; int n = 0, i;
+	char line[1600]; int n = 0, i;
 	if (render_profile_enabled <= 0 || ++render_profile_frames % 300) return;
-	for (i = 0; i < 32; i++) { if (!render_phase_name[i]) continue;
+	for (i = 0; i < 40; i++) { if (!render_phase_name[i]) continue;
 		n += snprintf(line + n, sizeof(line) - n, " %s %.1f", render_phase_name[i], render_phase_us[i] / 1000.0 / 300.0); render_phase_us[i] = 0; }
 	platform_log("render-profile (ms/frame):%s", line);
 }
@@ -442,6 +442,7 @@ static void render_window(
 		lights_render_diffuse();
 		RENDER_PHASE_END(7, "lights_diffuse");
 
+		RENDER_PHASE_BEGIN();
 		rasterizer_decals_begin(_decal_layer_light);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -450,7 +451,9 @@ static void render_window(
 			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
 		}
 		rasterizer_decals_end();
+		RENDER_PHASE_END(32, "decals");
 
+		RENDER_PHASE_BEGIN();
 		rasterizer_decals_begin(_decal_layer_alpha_tested);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -459,11 +462,13 @@ static void render_window(
 			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
 		}
 		rasterizer_decals_end();
+		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN();
 		structure_render_diffuse_texture();
 		RENDER_PHASE_END(8, "structure_diffuse");
 
+		RENDER_PHASE_BEGIN();
 		rasterizer_decals_begin(_decal_layer_primary);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -472,7 +477,9 @@ static void render_window(
 			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
 		}
 		rasterizer_decals_end();
+		RENDER_PHASE_END(32, "decals");
 
+		RENDER_PHASE_BEGIN();
 		rasterizer_decals_begin(_decal_layer_secondary);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -481,6 +488,7 @@ static void render_window(
 			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
 		}
 		rasterizer_decals_end();
+		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN();
 		lights_render_specular();
@@ -488,8 +496,10 @@ static void render_window(
 		RENDER_PHASE_BEGIN();
 		structure_render_specular_lightmaps();
 		RENDER_PHASE_END(10, "specular_lightmaps");
+		RENDER_PHASE_BEGIN();
 		structure_render_reflection_lightmap_masks();
 		structure_render_reflection_mirrors();
+		RENDER_PHASE_END(33, "reflection_masks");
 		RENDER_PHASE_BEGIN();
 		structure_render_reflections();
 		RENDER_PHASE_END(11, "reflections");
@@ -499,7 +509,9 @@ static void render_window(
 		RENDER_PHASE_BEGIN();
 		structure_render_fog();
 		RENDER_PHASE_END(13, "fog");
+		RENDER_PHASE_BEGIN();
 		game_engine_post_rasterize_objects();
+		RENDER_PHASE_END(34, "post_objects");
 		RENDER_PHASE_BEGIN();
 		weather_particle_systems_render();
 		RENDER_PHASE_END(14, "weather");
@@ -516,6 +528,7 @@ static void render_window(
 		rasterizer_transparent_geometry_draw(TRUE);
 		RENDER_PHASE_END(18, "transparent_draw");
 
+		RENDER_PHASE_BEGIN();
 		rasterizer_decals_begin(_decal_layer_water);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -524,12 +537,15 @@ static void render_window(
 			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
 		}
 		rasterizer_decals_end();
+		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN();
 		structure_render_detail_objects();
 		RENDER_PHASE_END(19, "detail_objects");
+		RENDER_PHASE_BEGIN();
 		rasterizer_transparent_geometry_draw(FALSE);
 		rasterizer_transparent_geometry_stop();
+		RENDER_PHASE_END(35, "transparent_rest");
 		RENDER_PHASE_BEGIN();
 		structure_render_fog_screen();
 		RENDER_PHASE_END(29, "fog_screen");
@@ -564,6 +580,12 @@ static void render_window(
 	profile_render_window_end();
 
 	RENDER_PHASE_REPORT();
+#ifdef HALO_LINUX
+	{
+		extern void halo_decal_stats_frame(void);
+		halo_decal_stats_frame();
+	}
+#endif
 	return;
 }
 

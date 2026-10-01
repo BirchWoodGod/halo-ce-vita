@@ -3,7 +3,7 @@
 HALO_PROFILE=<path> (Linux): a sampling profiler. SIGPROF interrupts the
 process every millisecond of CPU time and the handler records where the
 interrupted thread was (the program counter and link register); at exit the
-samples are written to <path> as "pc lr" hex pairs, for symbolising with the
+samples are written to <path> as "pc lr tid" (hex, hex, decimal), for symbolising with the
 executable (tools: llvm-addr2line / llvm-symbolizer). */
 
 #if defined(__linux__) && !defined(HALO_VITA) && !defined(HALO_ANDROID)
@@ -14,6 +14,7 @@ executable (tools: llvm-addr2line / llvm-symbolizer). */
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -70,12 +71,14 @@ static void profile_signal(int signal_number, siginfo_t *information, void *cont
 	if (index >= MAXIMUM_SAMPLES)
 		return;
 #if defined(__arm__)
-	samples[index * 2] = ucontext->uc_mcontext.arm_pc;
-	samples[index * 2 + 1] = ucontext->uc_mcontext.arm_lr;
+	samples[index * 3] = ucontext->uc_mcontext.arm_pc;
+	samples[index * 3 + 1] = ucontext->uc_mcontext.arm_lr;
 #elif defined(__i386__)
-	samples[index * 2] = ucontext->uc_mcontext.gregs[REG_EIP];
-	samples[index * 2 + 1] = 0;
+	samples[index * 3] = ucontext->uc_mcontext.gregs[REG_EIP];
+	samples[index * 3 + 1] = 0;
 #endif
+	/* (the thread, to tell the render's samples from the tick's) */
+	samples[index * 3 + 2] = (unsigned long)syscall(SYS_gettid);
 }
 
 static void profile_write(void)
@@ -86,8 +89,22 @@ static void profile_write(void)
 	if (!file)
 		return;
 	for (index = 0; index < count; index++)
-		fprintf(file, "%lx %lx\n", samples[index * 2], samples[index * 2 + 1]);
+		fprintf(file, "%lx %lx %lu\n", samples[index * 3], samples[index * 3 + 1], samples[index * 3 + 2]);
 	fclose(file);
+	{
+		/* (the libraries' addresses, for samples outside the binary) */
+		char maps_path[512], line[512];
+		FILE *maps = fopen("/proc/self/maps", "r"), *copy;
+
+		snprintf(maps_path, sizeof(maps_path), "%s.maps", output_path);
+		copy = maps ? fopen(maps_path, "w") : NULL;
+		while (maps && copy && fgets(line, sizeof(line), maps))
+			fputs(line, copy);
+		if (copy)
+			fclose(copy);
+		if (maps)
+			fclose(maps);
+	}
 	fprintf(stderr, "profile: %lu samples to %s\n", count, output_path);
 }
 
@@ -111,7 +128,7 @@ static void profile_start(void)
 	output_path = getenv("HALO_PROFILE");
 	if (!output_path || !*output_path)
 		return;
-	samples = calloc(MAXIMUM_SAMPLES * 2, sizeof(unsigned long));
+	samples = calloc(MAXIMUM_SAMPLES * 3, sizeof(unsigned long));
 	memset(&action, 0, sizeof(action));
 	action.sa_sigaction = profile_signal;
 	action.sa_flags = SA_SIGINFO | SA_RESTART;

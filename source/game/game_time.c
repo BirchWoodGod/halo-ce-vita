@@ -214,13 +214,45 @@ long game_time_get(
 	return game_time_globals->local_time;
 }
 
+#ifdef HALO_LINUX
+/* (port) with the tick on its own thread (tick_thread.c), game_time_update
+runs while the frame renders, and resets the elapsed ticks to 0 first: the
+render's once-a-frame countdowns (screen flashes, camera shake and
+impulses, HUD flashes, cinematic titles) read 0 nearly every frame - a
+hunter's hit left the screen red for a minute. The render reads instead
+the elapsed ticks of the update whose state it draws, which the tick
+thread publishes when it finishes (halo_tick_thread_join) */
+extern int halo_epoch_threaded;
+int halo_epoch_on_mutator(void);
+volatile short halo_render_elapsed_ticks;
+
+static short elapsed_for_caller(void)
+{
+	if (halo_epoch_threaded && !halo_epoch_on_mutator())
+		return halo_render_elapsed_ticks;
+	return game_time_globals->last_local_time_elapsed;
+}
+#endif
+
 short game_time_get_elapsed(
 	void)
 {
 	match_assert("c:\\halo\\SOURCE\\game\\game_time.c", 471, game_time_globals && game_time_globals->initialized);
 
+#ifdef HALO_LINUX
+	return elapsed_for_caller();
+#else
 	return game_time_globals->last_local_time_elapsed;
+#endif
 }
+
+#ifdef HALO_LINUX
+/* the elapsed ticks of the update that just finished (tick_thread.c) */
+short halo_game_time_last_elapsed(void)
+{
+	return game_time_globals ? game_time_globals->last_local_time_elapsed : 0;
+}
+#endif
 
 long local_time_get(
 	void)
@@ -235,7 +267,11 @@ short local_time_get_elapsed(
 {
 	match_assert("c:\\halo\\SOURCE\\game\\game_time.c", 487, game_time_globals && game_time_globals->initialized);
 
+#ifdef HALO_LINUX
+	return elapsed_for_caller();
+#else
 	return game_time_globals->last_local_time_elapsed;
+#endif
 }
 
 boolean game_predicting(
