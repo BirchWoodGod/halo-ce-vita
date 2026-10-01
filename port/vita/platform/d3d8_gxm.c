@@ -89,8 +89,10 @@ int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
 /* ---------- state the XDK header's inline functions read and write */
 
 DWORD D3D__RenderState[D3DRS_MAX];
-/* set by every state setter: the split records' state block is compared
-only when something was set since the last draw */
+/* set by the render and texture stage state setters when they change a
+value: the split records' render and stage states are compared only when
+something changed since the last draw (the textures are compared at every
+draw) */
 static int device_state_dirty = 1;
 DWORD D3D__TextureState[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 WORD *D3D__IndexData;
@@ -271,10 +273,13 @@ static struct
 	unsigned long vertex_snapshots, fragment_snapshots;
 	/* copied bytes by kind: streams in the window, immediate vertices, indices, uniforms */
 	unsigned long copied_streams, copied_immediate, copied_indices, copied_uniforms;
-	/* split records: draws whose state block was the last one by the quick
-	test (nothing set since) or by comparing the state, and new blocks; the
-	worker's full translations of a block */
+	/* split records: draws that reused the last state block, materials
+	compared equal to the last after a setter marked them dirty, and new
+	blocks; the worker's full translations of a block */
 	unsigned long state_quick, state_equal, state_new, worker_builds;
+	/* new material blocks among the new blocks; the worker's translations
+	of a block that kept the last block's material (texture parts only) */
+	unsigned long material_new, worker_texture_builds;
 } stats;
 
 /* time spent in this layer (debug.gpu_stats) */
@@ -1120,22 +1125,17 @@ void WINAPI D3DDevice_SetTextureState_BumpEnv(DWORD stage, D3DTEXTURESTAGESTATET
 
 void WINAPI D3DDevice_SetTexture(DWORD stage, D3DBaseTexture *texture)
 {
-	/* (the texture's header is compared at each draw, so a texture whose
-	header the game rewrites in place is still seen) */
-	if (stage < D3DTSS_MAXSTAGES && device.textures[stage] != texture)
-	{
-		device_state_dirty = 1;
+	/* (no dirty mark: the textures and their headers are compared at each
+	draw, so a texture whose header the game rewrites in place is seen) */
+	if (stage < D3DTSS_MAXSTAGES)
 		device.textures[stage] = texture;
-	}
 }
 
 void WINAPI D3DDevice_SetPalette(DWORD stage, D3DPalette *palette)
 {
-	if (stage < D3DTSS_MAXSTAGES && device.palettes[stage] != palette)
-	{
-		device_state_dirty = 1;
+	/* (compared at each draw, as the textures) */
+	if (stage < D3DTSS_MAXSTAGES)
 		device.palettes[stage] = palette;
-	}
 }
 
 void WINAPI D3DDevice_SetPixelShaderProgram(D3DPIXELSHADERDEF *definition)
@@ -1509,10 +1509,19 @@ copied whole into a per-frame block when it changes, and translated into
 the shader key, the fragment uniforms and the draw states by the worker
 (core 1) instead of the game's thread - the translation was most of the
 record's cost, and the game's thread is the frame's wall */
-struct record_state
+struct record_material
 {
 	DWORD render_state[D3DRS_MAX];
 	DWORD texture_state[D3DTSS_MAXSTAGES][D3DTSS_MAX];
+};
+
+/* (the render and stage states, 1.1 KB, are a block of their own that
+consecutive state blocks share: a third of a frame's new blocks differed
+from the last only in their textures - another object with the same
+material settings) */
+struct record_state
+{
+	const struct record_material *material;
 	DWORD texture_header[D3DTSS_MAXSTAGES][5];
 	D3DBaseTexture *textures[D3DTSS_MAXSTAGES];
 	D3DPalette *palettes[D3DTSS_MAXSTAGES];
@@ -1771,35 +1780,40 @@ static int draw_profile_on(void)
 the game's thread from the device state, built here from the record's state
 block (the same code, reading the block). The last block's results are kept
 and reused while consecutive draws share it. */
-static void worker_fragment_values(const struct record_state *state, float values[VITA_FU_COUNT][4])
+static struct
 {
-	const DWORD *rs = state->render_state;
+	const struct record_state *state;
+	/* the block's material: a block with the same material (and program,
+	depth and simple flag) shares everything but the texture parts */
+	const struct record_material *material;
+	const struct vertex_shader_object *program;
+	unsigned char has_depth, simple;
+	unsigned long frame;
+	/* the results, copied into the next record that shares the block */
+	struct nv2a_pixel_shader_key key;
+	DWORD texture_header[D3DTSS_MAXSTAGES][5];
+	BOOL texture_present[D3DTSS_MAXSTAGES];
+	const D3DCOLOR *palette[D3DTSS_MAXSTAGES];
+	DWORD sampler_state[D3DTSS_MAXSTAGES][6];
+	struct vgxm_draw draw_states;
+	const void *fragment_uniforms[2];
+	/* the fragment values behind the snapshots (reused across blocks
+	with equal values) */
+	float fragment_values[VITA_FU_COUNT][4];
+	BOOL fragment_valid;
+} worker_build;
+
+/* the texture scale rows of the fragment values: 1 for a swizzled
+texture, markers naming a linear one */
+static void worker_texture_scale_markers(const struct record_state *state, float values[VITA_FU_COUNT][4])
+{
+	const DWORD *rs = state->material->render_state;
 	int stage;
 
-	memset(values, 0, sizeof(float) * 4 * VITA_FU_COUNT);
-	for (stage = 0; stage < 8; stage++)
-	{
-		color_to_vec4(rs[D3DRS_PSCONSTANT0_0 + stage], values[VITA_FU_PS_C0 + stage]);
-		color_to_vec4(rs[D3DRS_PSCONSTANT1_0 + stage], values[VITA_FU_PS_C1 + stage]);
-	}
-	color_to_vec4(rs[D3DRS_PSFINALCOMBINERCONSTANT0], values[VITA_FU_PS_FINAL_C0]);
-	color_to_vec4(rs[D3DRS_PSFINALCOMBINERCONSTANT1], values[VITA_FU_PS_FINAL_C1]);
-	color_to_vec4(rs[D3DRS_FOGCOLOR], values[VITA_FU_FOG_COLOR]);
-	values[VITA_FU_FOG_PARAMETERS][0] = dword_to_float(rs[D3DRS_FOGSTART]);
-	values[VITA_FU_FOG_PARAMETERS][1] = dword_to_float(rs[D3DRS_FOGEND]);
-	values[VITA_FU_FOG_PARAMETERS][2] = dword_to_float(rs[D3DRS_FOGDENSITY]);
-	values[VITA_FU_MISCELLANEOUS][0] = (float)(rs[D3DRS_ALPHAREF] & 0xff);
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
-		const DWORD *ts = state->texture_state[stage];
 		const DWORD *header = state->texture_header[stage];
 
-		values[VITA_FU_BUMP_MATRIX + stage][0] = dword_to_float(ts[D3DTSS_BUMPENVMAT00]);
-		values[VITA_FU_BUMP_MATRIX + stage][1] = dword_to_float(ts[D3DTSS_BUMPENVMAT01]);
-		values[VITA_FU_BUMP_MATRIX + stage][2] = dword_to_float(ts[D3DTSS_BUMPENVMAT10]);
-		values[VITA_FU_BUMP_MATRIX + stage][3] = dword_to_float(ts[D3DTSS_BUMPENVMAT11]);
-		values[VITA_FU_BUMP_LUMINANCE + stage][0] = dword_to_float(ts[D3DTSS_BUMPENVLSCALE]);
-		values[VITA_FU_BUMP_LUMINANCE + stage][1] = dword_to_float(ts[D3DTSS_BUMPENVLOFFSET]);
 		values[VITA_FU_TEXTURE_SCALE + stage][0] = 1.0f;
 		values[VITA_FU_TEXTURE_SCALE + stage][1] = 1.0f;
 		values[VITA_FU_TEXTURE_SCALE + stage][2] = 1.0f;
@@ -1822,25 +1836,116 @@ static void worker_fragment_values(const struct record_state *state, float value
 	}
 }
 
-static struct
+static void worker_fragment_values(const struct record_state *state, float values[VITA_FU_COUNT][4])
 {
-	const struct record_state *state;
-	const struct vertex_shader_object *program;
-	unsigned char has_depth, simple;
-	unsigned long frame;
-	/* the results, copied into the next record that shares the block */
-	struct nv2a_pixel_shader_key key;
-	DWORD texture_header[D3DTSS_MAXSTAGES][5];
-	BOOL texture_present[D3DTSS_MAXSTAGES];
-	const D3DCOLOR *palette[D3DTSS_MAXSTAGES];
-	DWORD sampler_state[D3DTSS_MAXSTAGES][6];
-	struct vgxm_draw draw_states;
-	const void *fragment_uniforms[2];
-	/* the fragment values behind the snapshots (reused across blocks
-	with equal values) */
-	float fragment_values[VITA_FU_COUNT][4];
-	BOOL fragment_valid;
-} worker_build;
+	const DWORD *rs = state->material->render_state;
+	int stage;
+
+	memset(values, 0, sizeof(float) * 4 * VITA_FU_COUNT);
+	for (stage = 0; stage < 8; stage++)
+	{
+		color_to_vec4(rs[D3DRS_PSCONSTANT0_0 + stage], values[VITA_FU_PS_C0 + stage]);
+		color_to_vec4(rs[D3DRS_PSCONSTANT1_0 + stage], values[VITA_FU_PS_C1 + stage]);
+	}
+	color_to_vec4(rs[D3DRS_PSFINALCOMBINERCONSTANT0], values[VITA_FU_PS_FINAL_C0]);
+	color_to_vec4(rs[D3DRS_PSFINALCOMBINERCONSTANT1], values[VITA_FU_PS_FINAL_C1]);
+	color_to_vec4(rs[D3DRS_FOGCOLOR], values[VITA_FU_FOG_COLOR]);
+	values[VITA_FU_FOG_PARAMETERS][0] = dword_to_float(rs[D3DRS_FOGSTART]);
+	values[VITA_FU_FOG_PARAMETERS][1] = dword_to_float(rs[D3DRS_FOGEND]);
+	values[VITA_FU_FOG_PARAMETERS][2] = dword_to_float(rs[D3DRS_FOGDENSITY]);
+	values[VITA_FU_MISCELLANEOUS][0] = (float)(rs[D3DRS_ALPHAREF] & 0xff);
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+	{
+		const DWORD *ts = state->material->texture_state[stage];
+
+		values[VITA_FU_BUMP_MATRIX + stage][0] = dword_to_float(ts[D3DTSS_BUMPENVMAT00]);
+		values[VITA_FU_BUMP_MATRIX + stage][1] = dword_to_float(ts[D3DTSS_BUMPENVMAT01]);
+		values[VITA_FU_BUMP_MATRIX + stage][2] = dword_to_float(ts[D3DTSS_BUMPENVMAT10]);
+		values[VITA_FU_BUMP_MATRIX + stage][3] = dword_to_float(ts[D3DTSS_BUMPENVMAT11]);
+		values[VITA_FU_BUMP_LUMINANCE + stage][0] = dword_to_float(ts[D3DTSS_BUMPENVLSCALE]);
+		values[VITA_FU_BUMP_LUMINANCE + stage][1] = dword_to_float(ts[D3DTSS_BUMPENVLOFFSET]);
+	}
+	worker_texture_scale_markers(state, values);
+}
+
+/* the parts of a record that depend on its textures rather than its
+material: the stages' presence, headers and palettes, and the key's
+coordinate fetches; nonzero when a stage takes computed coordinates */
+static int worker_texture_bits(struct render_command *command, const struct record_state *state,
+	const struct vertex_shader_object *program, struct nv2a_pixel_shader_key *key)
+{
+	const DWORD *rs = state->material->render_state;
+	int stage, computed_stage_draw = 0;
+	static int raw_texcoords = -1;
+
+	if (raw_texcoords < 0)
+	{
+		const char *setting = getenv("HALO_RAW_TEXCOORDS");
+		raw_texcoords = !setting || atoi(setting) != 0;
+	}
+	key->raw_coordinates = 0;
+	key->projective_coordinates = 0;
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+	{
+		unsigned long mode = (rs[D3DRS_PSTEXTUREMODES] >> (5 * stage)) & 0x1f;
+
+		command->texture_present[stage] = state->textures[stage] != NULL;
+		memcpy(command->texture_header[stage], state->texture_header[stage], sizeof(command->texture_header[stage]));
+		command->palette[stage] = state->palette_data[stage];
+		if (state->textures[stage])
+		{
+			if (raw_texcoords && mode == 1)
+			{
+				struct xgpu_texture_description description;
+
+				xgpu_texture_describe(state->texture_header[stage][3], state->texture_header[stage][4], &description);
+				if (!description.linear && !description.cube_map)
+				{
+					if (!(program->texcoord_w_mask & (1UL << stage)))
+						key->raw_coordinates |= (unsigned char)(1U << stage);
+					else
+					{
+						key->projective_coordinates |= (unsigned char)(1U << stage);
+						computed_stage_draw = 1;
+					}
+				}
+				else
+					computed_stage_draw = 1;
+			}
+			else if (mode == 1)
+				computed_stage_draw = 1;
+		}
+	}
+	return computed_stage_draw;
+}
+
+/* the fragment uniform snapshots for these values: a half equal to the
+last block's keeps its snapshot */
+static void worker_fragment_snapshots(float values[VITA_FU_COUNT][4], int first_half)
+{
+	int half;
+
+	for (half = first_half; half < 2; half++)
+	{
+		unsigned long first = half ? VITA_FU_A_COUNT : 0;
+		unsigned long bytes = (half ? VITA_FU_COUNT - VITA_FU_A_COUNT : VITA_FU_A_COUNT) * sizeof(values[0]);
+
+		if (!worker_build.fragment_valid || !worker_build.fragment_uniforms[half] ||
+			memcmp(values[first], worker_build.fragment_values[first], bytes))
+		{
+			void *copy = vgxm_worker_alloc(bytes, 16);
+
+			if (copy)
+				memcpy(copy, values[first], bytes);
+			worker_build.fragment_uniforms[half] = copy;
+			memcpy(worker_build.fragment_values[first], values[first], bytes);
+			stats.fragment_snapshots++;
+			stats.copied_uniforms += bytes;
+		}
+	}
+	worker_build.fragment_valid = TRUE;
+}
+
 
 /* the worker's next frame: its ring starts afresh (vgxm_present) */
 static void worker_build_frame_end(void)
@@ -1852,7 +1957,7 @@ static void worker_build_frame_end(void)
 static BOOL worker_build_record(struct render_command *command)
 {
 	const struct record_state *state = command->state;
-	const DWORD *rs = state->render_state;
+	const DWORD *rs = state->material->render_state;
 	struct vgxm_draw *draw = &command->draw;
 	struct nv2a_pixel_shader_key *key = &command->key;
 	struct vertex_shader_object *program = command->program;
@@ -1876,6 +1981,40 @@ static BOOL worker_build_record(struct render_command *command)
 		draw->fragment_uniforms[1] = worker_build.fragment_uniforms[1];
 		return draw->fragment_uniforms[0] && draw->fragment_uniforms[1];
 	}
+	if (worker_build.state && worker_build.material == state->material && worker_build.program == program &&
+		worker_build.has_depth == command->has_depth && worker_build.simple == command->simple)
+	{
+		/* another block of the same material: the key, samplers and render
+		states are the last block's, and only what the textures decide is
+		made anew - the coordinate fetches, the texture parts, and the
+		texture scale markers of the second fragment uniform half */
+		float values[VITA_FU_COUNT][4];
+
+		stats.worker_texture_builds++;
+		*key = worker_build.key;
+		computed_stage_draw = worker_texture_bits(command, state, program, key);
+		memcpy(command->sampler_state, worker_build.sampler_state, sizeof(command->sampler_state));
+		memcpy(&draw->depth_test, &worker_build.draw_states.depth_test,
+			offsetof(struct vgxm_draw, color_write) + sizeof(draw->color_write) - offsetof(struct vgxm_draw, depth_test));
+		draw->cull = worker_build.draw_states.cull;
+		draw->depth_bias_slope = worker_build.draw_states.depth_bias_slope;
+		draw->depth_bias_units = worker_build.draw_states.depth_bias_units;
+		memcpy(values, worker_build.fragment_values, sizeof(values));
+		worker_texture_scale_markers(state, values);
+		/* (the first half is the material's: kept, unless its snapshot
+		could not be made) */
+		worker_fragment_snapshots(values, worker_build.fragment_uniforms[0] ? 1 : 0);
+		draw->fragment_uniforms[0] = worker_build.fragment_uniforms[0];
+		draw->fragment_uniforms[1] = worker_build.fragment_uniforms[1];
+		worker_build.state = state;
+		worker_build.key = *key;
+		memcpy(worker_build.texture_header, command->texture_header, sizeof(command->texture_header));
+		memcpy(worker_build.texture_present, command->texture_present, sizeof(command->texture_present));
+		memcpy(worker_build.palette, command->palette, sizeof(command->palette));
+		if (computed_stage_draw)
+			stats.computed_draws++;
+		return draw->fragment_uniforms[0] && draw->fragment_uniforms[1];
+	}
 
 	stats.worker_builds++;
 	memset(key, 0, sizeof(*key));
@@ -1884,46 +2023,13 @@ static BOOL worker_build_record(struct render_command *command)
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT0] = 0;
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT1] = 0;
 	key->texture_modes = rs[D3DRS_PSTEXTUREMODES];
+	computed_stage_draw = worker_texture_bits(command, state, program, key);
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
-		const DWORD *ts = state->texture_state[stage];
-		unsigned long mode = (rs[D3DRS_PSTEXTUREMODES] >> (5 * stage)) & 0x1f;
+		const DWORD *ts = state->material->texture_state[stage];
 
 		key->alpha_kill[stage] = ts[D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE;
 		key->color_sign[stage] = (unsigned char)((ts[D3DTSS_COLORSIGN] >> 28) & 0xf);
-		command->texture_present[stage] = state->textures[stage] != NULL;
-		memcpy(command->texture_header[stage], state->texture_header[stage], sizeof(command->texture_header[stage]));
-		if (state->textures[stage])
-		{
-			static int raw_texcoords = -1;
-
-			if (raw_texcoords < 0)
-			{
-				const char *setting = getenv("HALO_RAW_TEXCOORDS");
-				raw_texcoords = !setting || atoi(setting) != 0;
-			}
-			if (raw_texcoords && mode == 1)
-			{
-				struct xgpu_texture_description description;
-
-				xgpu_texture_describe(state->texture_header[stage][3], state->texture_header[stage][4], &description);
-				if (!description.linear && !description.cube_map)
-				{
-					if (!(program->texcoord_w_mask & (1UL << stage)))
-						key->raw_coordinates |= (unsigned char)(1U << stage);
-					else
-					{
-						key->projective_coordinates |= (unsigned char)(1U << stage);
-						computed_stage_draw = 1;
-					}
-				}
-				else
-					computed_stage_draw = 1;
-			}
-			else if (mode == 1)
-				computed_stage_draw = 1;
-		}
-		command->palette[stage] = state->palette_data[stage];
 		command->sampler_state[stage][0] = ts[D3DTSS_MINFILTER];
 		command->sampler_state[stage][1] = ts[D3DTSS_MAGFILTER];
 		command->sampler_state[stage][2] = ts[D3DTSS_MIPFILTER];
@@ -1991,33 +2097,15 @@ static BOOL worker_build_record(struct render_command *command)
 
 	{
 		float values[VITA_FU_COUNT][4];
-		int half;
 
 		worker_fragment_values(state, values);
-		for (half = 0; half < 2; half++)
-		{
-			unsigned long first = half ? VITA_FU_A_COUNT : 0;
-			unsigned long bytes = (half ? VITA_FU_COUNT - VITA_FU_A_COUNT : VITA_FU_A_COUNT) * sizeof(values[0]);
-
-			if (!worker_build.fragment_valid || !worker_build.fragment_uniforms[half] ||
-				memcmp(values[first], worker_build.fragment_values[first], bytes))
-			{
-				void *copy = vgxm_worker_alloc(bytes, 16);
-
-				if (copy)
-					memcpy(copy, values[first], bytes);
-				worker_build.fragment_uniforms[half] = copy;
-				memcpy(worker_build.fragment_values[first], values[first], bytes);
-				stats.fragment_snapshots++;
-				stats.copied_uniforms += bytes;
-			}
-		}
-		worker_build.fragment_valid = TRUE;
+		worker_fragment_snapshots(values, 0);
 		draw->fragment_uniforms[0] = worker_build.fragment_uniforms[0];
 		draw->fragment_uniforms[1] = worker_build.fragment_uniforms[1];
 	}
 
 	worker_build.state = state;
+	worker_build.material = state->material;
 	worker_build.program = program;
 	worker_build.has_depth = command->has_depth;
 	worker_build.simple = command->simple;
@@ -2858,8 +2946,10 @@ records frame N+1 while the worker executes frame N), rotated at Present;
 a full arena falls back to records built in full */
 #define STATE_BLOCKS_PER_FRAME 2048
 static struct record_state *state_arenas[3];
-static unsigned long state_arena_index, state_blocks_used;
+static struct record_material *material_arenas[3];
+static unsigned long state_arena_index, state_blocks_used, material_blocks_used;
 static struct record_state *state_last;
+static struct record_material *material_last;
 
 static int record_split_enabled(void)
 {
@@ -2874,7 +2964,8 @@ static int record_split_enabled(void)
 		for (index = 0; enabled && index < 3; index++)
 		{
 			state_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_state));
-			if (!state_arenas[index])
+			material_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_material));
+			if (!state_arenas[index] || !material_arenas[index])
 				enabled = 0;
 		}
 		platform_log("draw records: %s", enabled ? "split (the worker translates the state)" : "built in full on the game's thread");
@@ -2887,7 +2978,9 @@ static void record_state_frame_end(void)
 	device_state_dirty = 1;
 	state_arena_index = (state_arena_index + 1) % 3;
 	state_blocks_used = 0;
+	material_blocks_used = 0;
 	state_last = NULL;
+	material_last = NULL;
 }
 
 static const struct record_state *record_state_current(void)
@@ -2906,32 +2999,39 @@ static const struct record_state *record_state_current(void)
 		palette_data[stage] = device.palettes[stage] && device.palettes[stage]->Data ?
 			(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[stage]->Data) : NULL;
 	}
-	if (state_last && !device_state_dirty &&
+	/* the render and stage states: the last material while nothing
+	changed, or one equal to it; else a new one */
+	if (!material_last || device_state_dirty)
+	{
+		if (!material_last ||
+			memcmp(material_last->render_state, D3D__RenderState, sizeof(material_last->render_state)) ||
+			memcmp(material_last->texture_state, D3D__TextureState, sizeof(material_last->texture_state)))
+		{
+			if (material_blocks_used >= STATE_BLOCKS_PER_FRAME)
+				return NULL;
+			material_last = &material_arenas[state_arena_index][material_blocks_used++];
+			memcpy(material_last->render_state, D3D__RenderState, sizeof(material_last->render_state));
+			memcpy(material_last->texture_state, D3D__TextureState, sizeof(material_last->texture_state));
+			stats.material_new++;
+		}
+		else
+			stats.state_equal++;
+		device_state_dirty = 0;
+	}
+	if (state_last && state_last->material == material_last &&
 		!memcmp(state_last->textures, device.textures, sizeof(state_last->textures)) &&
+		!memcmp(state_last->palettes, device.palettes, sizeof(state_last->palettes)) &&
 		!memcmp(state_last->palette_data, palette_data, sizeof(palette_data)) &&
 		!memcmp(state_last->texture_header, headers, sizeof(headers)))
 	{
 		stats.state_quick++;
 		return state_last;
 	}
-	device_state_dirty = 0;
-	if (state_last &&
-		!memcmp(state_last->render_state, D3D__RenderState, sizeof(state_last->render_state)) &&
-		!memcmp(state_last->texture_state, D3D__TextureState, sizeof(state_last->texture_state)) &&
-		!memcmp(state_last->textures, device.textures, sizeof(state_last->textures)) &&
-		!memcmp(state_last->palettes, device.palettes, sizeof(state_last->palettes)) &&
-		!memcmp(state_last->palette_data, palette_data, sizeof(palette_data)) &&
-		!memcmp(state_last->texture_header, headers, sizeof(headers)))
-	{
-		stats.state_equal++;
-		return state_last;
-	}
 	stats.state_new++;
 	if (state_blocks_used >= STATE_BLOCKS_PER_FRAME)
 		return NULL;
 	block = &state_arenas[state_arena_index][state_blocks_used++];
-	memcpy(block->render_state, D3D__RenderState, sizeof(block->render_state));
-	memcpy(block->texture_state, D3D__TextureState, sizeof(block->texture_state));
+	block->material = material_last;
 	memcpy(block->textures, device.textures, sizeof(block->textures));
 	memcpy(block->palettes, device.palettes, sizeof(block->palettes));
 	memcpy(block->palette_data, palette_data, sizeof(palette_data));
@@ -4061,9 +4161,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				draw_profile_draws = 0;
 			}
 		}
-		platform_log("state blocks per frame: %lu quick, %lu equal, %lu new; worker builds %lu",
-			stats.state_quick / stats.presents, stats.state_equal / stats.presents, stats.state_new / stats.presents,
-			stats.worker_builds / stats.presents);
+		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu compared equal); worker builds %lu (+%lu texture-only)",
+			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
+			stats.state_equal / stats.presents, stats.worker_builds / stats.presents, stats.worker_texture_builds / stats.presents);
 		memset(&stats, 0, sizeof(stats));
 		layer_time = 0;
 		worker_time = 0;
