@@ -314,12 +314,23 @@ static float dword_to_float(DWORD value)
 	return u.f;
 }
 
+/* n / 255.0f for each byte, folded by the compiler (the same correctly
+rounded quotients the divisions gave: a state block's fragment uniforms
+convert nineteen colours, 76 divisions) */
+#define UNIT4(n) (n) / 255.0f, ((n) + 1) / 255.0f, ((n) + 2) / 255.0f, ((n) + 3) / 255.0f
+#define UNIT16(n) UNIT4(n), UNIT4((n) + 4), UNIT4((n) + 8), UNIT4((n) + 12)
+#define UNIT64(n) UNIT16(n), UNIT16((n) + 16), UNIT16((n) + 32), UNIT16((n) + 48)
+static const float byte_unit[256] = { UNIT64(0), UNIT64(64), UNIT64(128), UNIT64(192) };
+#undef UNIT64
+#undef UNIT16
+#undef UNIT4
+
 static void color_to_vec4(D3DCOLOR color, float *out)
 {
-	out[0] = ((color >> 16) & 0xff) / 255.0f;
-	out[1] = ((color >> 8) & 0xff) / 255.0f;
-	out[2] = (color & 0xff) / 255.0f;
-	out[3] = ((color >> 24) & 0xff) / 255.0f;
+	out[0] = byte_unit[(color >> 16) & 0xff];
+	out[1] = byte_unit[(color >> 8) & 0xff];
+	out[2] = byte_unit[color & 0xff];
+	out[3] = byte_unit[(color >> 24) & 0xff];
 }
 
 static BOOL trace_frame(void)
