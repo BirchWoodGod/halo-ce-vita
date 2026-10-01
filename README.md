@@ -1,151 +1,147 @@
-# Halo: Combat Evolved for Linux, Windows, Android and the PS Vita
+# Halo: Combat Evolved for the PS Vita
 
-**PS Vita:** installing, controls, the settings panel and building are in
-[port/vita/README.md](port/vita/README.md).
+A native PlayStation Vita port of **Halo: Combat Evolved**, built from the
+decompilation of the Xbox game. It is not an emulator: the game's own code
+is compiled for the Vita's ARM processor, and its Direct3D rendering is
+translated to the Vita's GPU.
 
-This project is a port of the Halo: Combat Evolved decompilation to Linux,
-Windows and Android. The decompilation is of the Xbox build 2342
-(`cachebeta.exe`, SHA-256
-`4cc87b45f721270392a96f1674ed2b5cd4a7bb4355faeab4531d1cf1884d9520`).
+**No game data is included.** You need your own Xbox copy of Halo: Combat
+Evolved.
 
-<img width="1289" height="995" alt="The game on Linux" src="https://github.com/user-attachments/assets/0d3ad50f-f8b8-46cf-aef8-e3661da2a7d7" />
+## What works
 
-The port starts from the decompilation of [bnunu/halo-1](https://github.com/bnunu/halo-1).
-That project is a fork of [punpckhdq/halo](https://github.com/punpckhdq/halo).
+- The whole campaign from the menus, with checkpoints, saves and Save and
+  Quit, cinematics, and the movies (converted to MP4, see below).
+- Multiplayer maps on your own (split screen with one player), and system
+  link over Wi-Fi with other Vitas or the Linux/Windows builds of the port.
+- Profiles, controller settings and the game's settings menus.
+- A settings panel for the Vita's quality and control options: hold
+  **Select + Start** in game.
+- 30 fps in cinematics and most of the campaign; the largest fights (The
+  Silent Cartographer's beach) run in the high teens to low twenties.
 
-## Download
+## Install
 
-GitHub Actions builds the game for each commit. These links download the
-builds of the latest release:
+You need a PS Vita or PS TV with HENkaku/Ensō (firmware 3.60 to 3.74),
+VitaShell, and about 1.5 GB free on `ux0:`.
 
-| Platform | Release | Debug |
-| --- | --- | --- |
-| Linux | [halo-linux-release.zip](https://github.com/cybersecurity/halo-ce-universal/releases/latest/download/halo-linux-release.zip) | [halo-linux-debug.zip](https://github.com/cybersecurity/halo-ce-universal/releases/latest/download/halo-linux-debug.zip) |
-| Windows | [halo-windows-release.zip](https://github.com/cybersecurity/halo-ce-universal/releases/latest/download/halo-windows-release.zip) | [halo-windows-debug.zip](https://github.com/cybersecurity/halo-ce-universal/releases/latest/download/halo-windows-debug.zip) |
-| Android | [halo-android-release.zip](https://github.com/cybersecurity/halo-ce-universal/releases/latest/download/halo-android-release.zip) | [halo-android-debug.zip](https://github.com/cybersecurity/halo-ce-universal/releases/latest/download/halo-android-debug.zip) |
+1. Install `halo.vpk` with VitaShell. The bubble is called **Halo CE**.
+2. Copy the `maps` folder of your Xbox disc to `ux0:data/haloce-vita/maps/`.
+   To get it from a disc image, `extract-xiso -x "Halo.iso"` and take the
+   `maps` folder. All versions of the Xbox game work.
+3. Start the game. The first load of each level takes a while: the game
+   decompresses it into a cache file on the memory card.
 
-Use the release build to play. The debug build stops at the first failed
-assertion and writes it to the log. Use the debug build to find and report
-problems.
+Without the maps the game shows where to copy them and exits.
 
-The game updates itself. At start-up it looks for a newer release, and asks
-if you want to install it. Refer to "Updates" in
-[port/linux/README.md](port/linux/README.md#updates).
+### Movies (optional)
 
-Each build of the `main` branch that passes on all three platforms is a new
-release. The [Releases](https://github.com/cybersecurity/halo-ce-universal/releases)
-page keeps the last five releases. If the latest build has a problem, get
-an older build from that page.
+The Xbox movies are Bink files, which the Vita cannot play. Convert them
+(the disc's `bink` folder) to H.264 MP4 and put them in
+`ux0:data/haloce-vita/movies/` under the same names (`intro.mp4`,
+`credits.mp4`, `attract1.mp4` ...):
 
-## Game data
+```
+ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p \
+       -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
+```
 
-The port does not include the game data. Download an Xbox disc image
-(`.xiso` or `.iso`) of Halo: Combat Evolved. All versions of the game
-operate. The maps of the European (PAL) version were made for a slower
-console. The port changes them to play as the North American (NTSC) maps do,
-so players of the two versions can play together.
+A movie without an MP4 is skipped, as the game skips a missing movie.
 
-1. Start the game.
-2. At the first start, the game asks for the disc image. Select it.
-3. The game extracts the `maps/` folder. Then the game starts.
+## Controls
 
-On Linux and Windows, the game puts `maps/` next to the executable. On
-Android, copy the disc image to the phone first. The app puts `maps/` in its
-data folder. Refer to [port/android/README.md](port/android/README.md).
-
-## Platforms
-
-Each platform has its own instructions:
-
-| Platform | Instructions |
+| Vita | In game |
 | --- | --- |
-| Linux (32-bit x86 executable, OpenGL 4.5, SDL3) | [port/linux/README.md](port/linux/README.md) |
-| Windows (32-bit x86 executable, OpenGL 4.5, SDL3) | [port/windows/README.md](port/windows/README.md) |
-| Android (arm64 app, OpenGL ES 3, SDL3) | [port/android/README.md](port/android/README.md) |
+| Left stick / right stick | move / look |
+| R / L | fire / throw grenade |
+| Cross | jump |
+| Circle | melee |
+| Square | reload, action |
+| Triangle | switch weapon |
+| D-pad down / up | crouch / zoom |
+| D-pad left / right | switch grenades / flashlight |
+| Start | pause; skips a cinematic |
+| Select | scoreboard |
+| Select + Start (hold) | settings panel |
 
-The Linux README also gives the controls, the settings and the multiplayer
-functions. These are almost the same on all platforms.
+## Settings panel
 
-## Multiplayer
+Hold Select + Start for a second. Up and down choose a setting, left and
+right change it, Circle closes the panel. Changes apply at once (the render
+resolution after a restart) and are kept in `ux0:data/haloce-vita/settings.txt`.
 
-The game can play system link games on a local network and on the internet:
+The defaults favour frame rate: lower model detail at a distance, tiny
+distant objects skipped, static props and object lighting updated less
+often, and a 75% render resolution. Set model detail High, distant objects
+Off, scenery and lighting to every tick and the resolution to 100% to see
+the game exactly as on the Xbox.
 
-- A system link game can have up to 128 players on up to 128 machines.
-- Linux, Windows and Android machines can play in the same game.
-- An invite link lets a machine join a game on the internet. No server of
-  this project is necessary.
-- The default netcode is new. Each machine moves its own player at once,
-  and the host makes the decisions for the game. Refer to
-  [port/linux/NETCODE.md](port/linux/NETCODE.md).
+## Building
 
-## Build the game
+You need [VitaSDK](https://vitasdk.org) (set `VITASDK` or install it in
+`~/vitasdk`), clang 17 or newer, Python 3 and ninja.
 
-You do not need the Xbox SDK. The port supplies the SDK declarations that
-the game uses. Refer to [port/include/xdk](port/include/xdk/README.md).
+```
+python3 configure.py --linux-cc <clang for armhf Linux> --lto off --pgo off --portable --release
+ninja vita
+```
 
-To build the game:
+The results are `build/vita/eboot.bin` and `build/vita/halo.vpk`. The game
+code is compiled by clang with the game's MSVC-like ABI, the Vita-side code
+by VitaSDK's GCC. [port/vita/README.md](port/vita/README.md) has the
+details: the layout of `port/vita`, testing in Vita3K and in a Linux build
+of the Vita renderer, debug switches, and the files the game keeps on the
+memory card.
 
-1. Install Python and [ninja](https://ninja-build.org/).
-2. Install the tools for your platform. Refer to the README for the
-   platform.
-3. In the root folder of the repository, enter `python configure.py`.
-4. Enter `ninja` with the target for the platform:
+## Contributing
 
-| Target | Result |
-| --- | --- |
-| `ninja linux` | `build/linux/halo` |
-| `ninja windows` (on Windows) | `build/windows/halo.exe` and `SDL3.dll` |
-| `ninja android_apk` | `port/android/app/build/outputs/apk/debug/app-debug.apk` |
+Issues and pull requests are welcome. Open work:
 
-If you enter `ninja` without a target, ninja builds the game for the
-computer that you use.
+- **Performance** in the biggest fights: the render on the first core is
+  the limit.
+- **Ad hoc multiplayer** between two Vitas without a router, then online
+  play.
+- **The retail loading screen**: the decompilation is of a pre-release
+  build whose loading screen Bungie replaced before release.
 
-`tools/ci_build.py` makes the same builds as GitHub Actions. For example,
-enter `python tools/ci_build.py linux release`.
+When you report a problem, attach `ux0:data/haloce-vita/halo.log` and
+`halo-prev.log` (the previous session's log, kept after a crash).
 
-### Build options
+## Credits
 
-Give these options to `configure.py`:
+This port stands on a lot of other people's work:
 
-| Option | Result |
-| --- | --- |
-| (none) | A debug build. A failed assertion stops the game. |
-| `--release` | A release build. The game does not examine assertions, as in the retail game. |
-| `--portable` | The Linux and Windows builds operate on all x86-64 processors. Use this option for builds that you give to other persons. |
-| `--lto=thin`, `--lto=off` | Less link-time optimization. The link is faster. |
-| `--pgo=off` | No profile-guided optimization. |
-| `--pgo=train` | Records a new optimization profile. Refer to "Optimization profiles". |
+- **Bungie** made Halo: Combat Evolved. Halo is a trademark of Microsoft.
+- **[punpckhdq/halo](https://github.com/punpckhdq/halo)**: the decompilation
+  of the Xbox build 2342 (`cachebeta.exe`, SHA-256
+  `4cc87b45f721270392a96f1674ed2b5cd4a7bb4355faeab4531d1cf1884d9520`),
+  including the decompiled Xbox libraries in `libs/` (Direct3D 8, the C
+  runtime, XAPI, Bink).
+- **[bnunu/halo-1](https://github.com/bnunu/halo-1)**: the fork of that
+  decompilation the native port starts from.
+- **[cybersecurity/halo-ce-universal](https://github.com/cybersecurity/halo-ce-universal)**:
+  the native Linux, Windows and Android port this repository is built on:
+  the platform layer, the OpenGL renderer the Vita renderer is modelled on,
+  the distributed netcode, system link over the internet, and much more.
+  Those platforms still build from this tree (`port/linux`, `port/windows`,
+  `port/android`, each with its own README).
+- **[Invader](https://github.com/SnowyMouse/invader)** by SnowyMouse: the
+  tag definitions `tag_layouts.h` is generated from, which let the port
+  relocate the maps' tags.
+- **The Xita project**: the earlier work on running Halo on the Vita, whose
+  findings (the register combiner translation, the GPU and threading
+  lessons, the tools) went into this port.
+- **PS Vita port**: BirchWoodGod.
 
-Without `--portable`, the Linux and Windows builds use all the instructions
-of the processor that builds them (`-march=native`). Such a build does not
-always start on a different computer.
+Libraries and tools: [VitaSDK](https://vitasdk.org),
+[SDL3](https://github.com/libsdl-org/SDL) (desktop builds),
+[tomlc17](https://github.com/cktan/tomlc17),
+[KCP](https://github.com/skywind3000/kcp),
+[Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
+[miniupnpc](https://github.com/miniupnp/miniupnp),
+[musl](https://musl.libc.org)'s math functions,
+[extract-xiso](https://github.com/XboxDev/extract-xiso), and
+[Vita3K](https://vita3k.org) for testing.
 
-### Optimization profiles
-
-The builds use profiles of the game to optimize the code:
-
-- `pgo/halo_linux.profdata` for Linux and Android.
-- `pgo/halo_windows.profdata` for Windows.
-
-The profiles need clang 22 or later. With an older clang, the builds do not
-use the profiles.
-
-To record a new profile:
-
-1. Delete the profile.
-2. Enter `python configure.py --pgo=train`.
-3. Enter `ninja linux` or `ninja windows`.
-
-The build then plays the main menu and the first minute of each campaign
-level. This procedure continues for approximately 15 minutes. The game
-data must be in `assets/`.
-
-### The byte-matching build
-
-The original project also has a byte-matching build. That build compiles
-the game with the compiler of the Xbox SDK and compares the result with
-`cachebeta.exe`. This project does not generate that build, because the
-Xbox SDK is not free to distribute. The sources of that build are not
-changed. To use the build again, set `SolutionConfig.matching` in
-`tools/project_x86.py`. You must also have the Xbox SDK in `xbox/` and
-`cachebeta.exe` in the root folder.
+This project is not affiliated with or endorsed by Microsoft or Bungie,
+and it contains no game assets.
