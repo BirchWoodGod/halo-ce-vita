@@ -2,9 +2,9 @@
 VITA_STUBS.C
 
 What the Linux platform layer asks of the host (port/linux/src/posix.h) and
-the Vita does without: networking (sockets fail as if no network were
-up), UPnP, the desktop's process and link handling, Discord. Files are
-port/linux/src/posix_files.c itself, built here with the SDK's ABI.
+the Vita does without: UPnP, the desktop's process and link handling,
+Discord. Sockets are vita_net.c; files are port/linux/src/posix_files.c
+itself, built here with the SDK's ABI.
 */
 
 #include <psp2/kernel/rng.h>
@@ -19,43 +19,7 @@ port/linux/src/posix_files.c itself, built here with the SDK's ABI.
 #include "posix.h"
 #include "vita_compat.h"
 
-/* WSAENETDOWN */
-#define NO_NETWORK 10050
-
-int posix_socket_last_error(void) { return NO_NETWORK; }
-int posix_socket(int family, int type, int protocol) { (void)family; (void)type; (void)protocol; return -1; }
-int posix_socket_close(int socket) { (void)socket; return -1; }
-int posix_socket_bind(int socket, const void *address, int address_length) { (void)socket; (void)address; (void)address_length; return -1; }
-int posix_socket_connect(int socket, const void *address, int address_length) { (void)socket; (void)address; (void)address_length; return -1; }
-int posix_socket_listen(int socket, int backlog) { (void)socket; (void)backlog; return -1; }
-int posix_socket_accept(int socket, void *address, int *address_length) { (void)socket; (void)address; (void)address_length; return -1; }
-int posix_socket_send(int socket, const void *buffer, int length, int flags) { (void)socket; (void)buffer; (void)length; (void)flags; return -1; }
-int posix_socket_sendto(int socket, const void *buffer, int length, int flags, const void *address, int address_length)
-{ (void)socket; (void)buffer; (void)length; (void)flags; (void)address; (void)address_length; return -1; }
-int posix_socket_recv(int socket, void *buffer, int length, int flags) { (void)socket; (void)buffer; (void)length; (void)flags; return -1; }
-int posix_socket_recvfrom(int socket, void *buffer, int length, int flags, void *address, int *address_length)
-{ (void)socket; (void)buffer; (void)length; (void)flags; (void)address; (void)address_length; return -1; }
-int posix_socket_shutdown(int socket, int how) { (void)socket; (void)how; return -1; }
-int posix_socket_set_nonblocking(int socket, int nonblocking) { (void)socket; (void)nonblocking; return -1; }
-int posix_socket_bytes_available(int socket, posix_ulong *count) { (void)socket; *count = 0; return -1; }
-int posix_socket_set_nodelay(int socket) { (void)socket; return -1; }
-int posix_socket_setsockopt(int socket, int level, int name, const void *value, int length)
-{ (void)socket; (void)level; (void)name; (void)value; (void)length; return -1; }
-int posix_socket_getsockopt(int socket, int level, int name, void *value, int *length)
-{ (void)socket; (void)level; (void)name; (void)value; (void)length; return -1; }
-int posix_socket_getsockname(int socket, void *address, int *address_length) { (void)socket; (void)address; (void)address_length; return -1; }
-int posix_socket_getpeername(int socket, void *address, int *address_length) { (void)socket; (void)address; (void)address_length; return -1; }
-
-int posix_socket_select(int *read, int *read_count, int *write, int *write_count,
-	int *error, int *error_count, posix_long timeout_seconds, posix_long timeout_microseconds, int infinite)
-{
-	(void)read; (void)write; (void)error; (void)timeout_seconds; (void)timeout_microseconds; (void)infinite;
-	*read_count = *write_count = *error_count = 0;
-	return -1;
-}
-
-posix_ulong posix_local_ipv4_address(void) { return 0; }
-posix_ulong posix_resolve_ipv4(const char *host) { (void)host; return 0; }
+/* (sockets: vita_net.c) */
 
 void posix_random_bytes(void *buffer, posix_ulong size)
 {

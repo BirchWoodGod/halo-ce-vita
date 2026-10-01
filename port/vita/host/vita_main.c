@@ -411,7 +411,7 @@ int main(int argc, char **argv)
 	if (freopen(VITA_DATA_DIRECTORY "/log.txt", "w", stderr))
 		setvbuf(stderr, NULL, _IONBF, 0);
 	sceIoRemove(VITA_DATA_DIRECTORY "/halo.log");
-	vita_host_log("vita: Halo CE Vita starting");
+	vita_host_log("vita: Halo CE starting");
 
 	memset(&init, 0, sizeof(init));
 	memset(&boot, 0, sizeof(boot));

@@ -25,7 +25,7 @@ VITA_DIR = Path("port/vita")
 BUILD = Path("build/vita")
 
 TITLE_ID = "HCEV00001"
-TITLE = "Halo CE Vita"
+TITLE = "Halo CE"
 
 # The MSVC/Xbox ABI of LINUX_ABI_FLAGS, on 32-bit ARM
 VITA_ABI_FLAGS = [
