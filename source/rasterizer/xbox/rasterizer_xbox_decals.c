@@ -708,10 +708,9 @@ void halo_decal_stats_frame(void)
 	}
 }
 
-/* (port) a decal's fade, rounded to HALO_DECAL_LEVELS steps (default
-16): decals that fade at different moments differed by a unit or two of
-intensity, which kept neighbours from sharing a draw (780 decals went out
-as 467 draws on The Silent Cartographer's beach); 0 keeps every value */
+/* (port, debug) a decal's fade rounded to HALO_DECAL_LEVELS steps, to
+let more neighbours share a draw; off by default: it changed the game's
+fades and gained nothing once the decals are drawn sorted */
 static unsigned long decal_intensity_rounded(unsigned long intensity)
 {
 	static long levels = -1;
@@ -720,7 +719,7 @@ static unsigned long decal_intensity_rounded(unsigned long intensity)
 	if (levels < 0)
 	{
 		const char *setting = getenv("HALO_DECAL_LEVELS");
-		levels = setting ? atoi(setting) : 16;
+		levels = setting ? atoi(setting) : 0;
 	}
 	if (levels <= 1 || levels >= 256)
 		return intensity;

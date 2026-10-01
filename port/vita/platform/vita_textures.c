@@ -705,15 +705,18 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 
 	if (description->cube_map)
 	{
-		/* six square faces decoded from level 0 and twiddled, each with
-		its whole mip chain down to 1x1 box-filtered from it. The Vita reads
-		a cube with mips (any mip count but "none") face by face, each face
-		holding every level and starting 2 KB-aligned once a face is 16x16
-		or more (Vita3K's renderer, texture/cache.cpp); the six faces packed
-		at level 0 only were read at the wrong offsets - the reflections of
-		the menu ship's hull and the Pelican's glass showed rainbow noise */
+		/* six square faces, each with every level the Xbox texture holds
+		decoded and twiddled. The Vita reads a cube with mips (any mip count
+		but "none") face by face, each face laid out with every level down
+		to 1x1 and starting 2 KB-aligned once a face is 16x16 or more
+		(Vita3K's renderer, texture/cache.cpp): the six faces packed at
+		level 0 only were read at the wrong offsets - the reflections of the
+		menu ship's hull and the Pelican's glass showed rainbow noise. The
+		levels the Xbox texture lacks only fill the layout (each 2x2 average
+		of the one above): the mip count stops at the Xbox's, so they are
+		never sampled */
 		unsigned long face_size = xgpu_texture_face_size(description), face;
-		unsigned long chain = 0, face_stride = 0, level_count = 0;
+		unsigned long chain = 0, face_stride = 0, level_count = 0, original_levels;
 
 		static int cube_debug = -1;
 
@@ -730,6 +733,7 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 			face_stride += (width >> level) * (width >> level) * 4;
 			level_count++;
 		}
+		original_levels = levels < 1 ? 1 : levels > level_count ? level_count : levels;
 		chain = face_stride;
 		if (width >= 16)
 			face_stride = (face_stride + 2047) & ~2047UL;
@@ -745,21 +749,41 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 			unsigned char *face_memory = memory + face * face_stride;
 			unsigned long offset = 0, size_at = width;
 
-			if (description->compressed)
-				dxt_decode_level(information.kind, base + face * face_size, width, height, 1, scratch);
-			else
-				decode_level(description, 0, base + face * face_size, palette, scratch);
-			if (cube_debug == 2)
-			{
-				unsigned long texel;
-
-				for (texel = 0; texel < width * height; texel++)
-					scratch[texel] = 0xff808080u;
-			}
-			for (level = 0; level < level_count; level++)
+			for (level = 0; level < level_count; level++, size_at /= 2)
 			{
 				unsigned long *destination = (unsigned long *)(face_memory + offset), index;
 
+				if (level < original_levels)
+				{
+					const unsigned char *source = base + face * face_size + xgpu_texture_level_offset(description, level);
+
+					if (description->compressed)
+						dxt_decode_level(information.kind, source, size_at, size_at, 1, scratch);
+					else
+						decode_level(description, level, source, palette, scratch);
+				}
+				else
+				{
+					/* (layout filler: each 2x2 block of the level above,
+					averaged per channel, in place) */
+					unsigned long above = size_at * 2, x, y;
+
+					for (y = 0; y < size_at; y++)
+						for (x = 0; x < size_at; x++)
+						{
+							unsigned long a = scratch[(2 * y) * above + 2 * x], b = scratch[(2 * y) * above + 2 * x + 1];
+							unsigned long c = scratch[(2 * y + 1) * above + 2 * x], d = scratch[(2 * y + 1) * above + 2 * x + 1];
+							unsigned long result = 0, shift;
+
+							for (shift = 0; shift < 32; shift += 8)
+								result |= ((((a >> shift) & 0xff) + ((b >> shift) & 0xff) + ((c >> shift) & 0xff) +
+									((d >> shift) & 0xff) + 2) / 4) << shift;
+							scratch[y * size_at + x] = result;
+						}
+				}
+				if (cube_debug == 2)
+					for (index = 0; index < size_at * size_at; index++)
+						scratch[index] = 0xff808080u;
 				for (index = 0; index < size_at * size_at; index++)
 				{
 					unsigned long x, y;
@@ -768,33 +792,13 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 					destination[index] = scratch[y * size_at + x];
 				}
 				offset += size_at * size_at * 4;
-				if (size_at > 1)
-				{
-					/* the next level: each 2x2 block's average, per channel,
-					in place (row y of the half reads rows 2y and 2y+1) */
-					unsigned long half = size_at / 2, x, y;
-
-					for (y = 0; y < half; y++)
-						for (x = 0; x < half; x++)
-						{
-							unsigned long a = scratch[(2 * y) * size_at + 2 * x], b = scratch[(2 * y) * size_at + 2 * x + 1];
-							unsigned long c = scratch[(2 * y + 1) * size_at + 2 * x], d = scratch[(2 * y + 1) * size_at + 2 * x + 1];
-							unsigned long result = 0, shift;
-
-							for (shift = 0; shift < 32; shift += 8)
-								result |= ((((a >> shift) & 0xff) + ((b >> shift) & 0xff) + ((c >> shift) & 0xff) +
-									((d >> shift) & 0xff) + 2) / 4) << shift;
-							scratch[y * half + x] = result;
-						}
-					size_at = half;
-				}
 			}
 			if (face_stride > chain)
 				memset(face_memory + chain, 0, face_stride - chain);
 		}
 		free(scratch);
 		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_cube,
-			width, height, cube_debug == 1 ? 1 : level_count) == 0;
+			width, height, cube_debug == 1 ? 1 : original_levels) == 0;
 	}
 
 	if (description->compressed && power_of_two(width) && power_of_two(height) && width >= 4 && height >= 4)
