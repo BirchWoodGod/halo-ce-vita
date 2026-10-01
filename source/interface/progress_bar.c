@@ -2020,6 +2020,42 @@ static void this_is_awful(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) The Xbox draws the loading screen with the fixed-function pipeline
+(vertex shader 0), the only draws in the game that do. The native renderers
+translate vertex programs only and ignore SetVertexShader(0), so the screen
+would be drawn with whatever program the game set last, and land off
+screen. This program does what the fixed function does with
+progress_bar_render's transforms (world and view the identity, an
+orthographic projection that leaves x and y as they are): it takes the
+position as clip space, converts it to screen space with the viewport
+constants as every Xbox program does, and passes the colour and the four
+texture coordinates through. */
+static DWORD progress_bar_vertex_shader(
+	void)
+{
+	static const DWORD declaration[]= {D3DVSD_END()};
+	static const DWORD function[]=
+	{
+		0x00082078,
+		0x00000000, 0x0047401b, 0x0836186c, 0x0e000000, /* mul r0.xyz, v0, c[-38] */
+		0x00000000, 0x0067601b, 0x0436006c, 0x3000e800, /* add oPos.xyz, r0, c[-37] */
+		0x00000000, 0x0020001b, 0x0836006c, 0x00001800, /* mov oPos.w, v0 */
+		0x00000000, 0x0020061b, 0x0836006c, 0x0000f818, /* mov oD0, v3 */
+		0x00000000, 0x0020121b, 0x0836006c, 0x0000f848, /* mov oT0, v9 */
+		0x00000000, 0x0020141b, 0x0836006c, 0x0000f850, /* mov oT1, v10 */
+		0x00000000, 0x0020161b, 0x0836006c, 0x0000f858, /* mov oT2, v11 */
+		0x00000000, 0x0020181b, 0x0836006c, 0x0000f861, /* mov oT3, v12 */
+	};
+	static DWORD handle;
+
+	if (!handle)
+		IDirect3DDevice8_CreateVertexShader(global_d3d_device, declaration, function, &handle, 0);
+
+	return handle;
+}
+#endif
+
 static void progress_bar_render(
 	real progress)
 {
@@ -2083,7 +2119,11 @@ static void progress_bar_render(
 	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 2, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
 	IDirect3DDevice8_SetTexture(global_d3d_device, 0, (D3DBaseTexture *)progress_bar_mode.texture0);
 	IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, 0xf0, 0, 1.f, 0);
+#ifdef HALO_LINUX
+	IDirect3DDevice8_SetVertexShader(global_d3d_device, progress_bar_vertex_shader());
+#else
 	IDirect3DDevice8_SetVertexShader(global_d3d_device, 0);
+#endif
 	IDirect3DDevice8_SetPixelShaderProgram(global_d3d_device, (D3DPIXELSHADERDEF *)&blur_shader);
 	IDirect3DDevice8_GetBackBuffer(global_d3d_device, -1, 0, &back_buffer);
 	this_is_awful(&back_buffer_texture, back_buffer);
@@ -2256,6 +2296,50 @@ static void progress_bar_make_stuff_ready(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) The loading screen's picture is maps\loading.tga, which
+progress_bar_initialize copies from the disc to the cache drive. The disc
+images the port takes its maps from have no such file, and without it the
+texture keeps whatever its memory held, so the screen shows nothing (or
+noise). When the file is missing, this draws a stand-in into the texture:
+the ring seen from a little above, a thin line on the far side and a wider
+band on the near side, in the grey levels the file would hold
+(tgaLoadImageData tints them blue the same way). It runs once per load, when
+the screen first appears. */
+static void progress_bar_draw_ring(
+	unsigned long *pixels,
+	long width,
+	long height)
+{
+	const real cosine= 0.9945f, sine= -0.1045f; /* a 6 degree tilt */
+	const real inverse_radius_x= 1.f/132.f, inverse_radius_y= 1.f/34.f;
+	long x, y;
+
+	for (y= 0; y<height; y++)
+	{
+		for (x= 0; x<width; x++)
+		{
+			real dx= x - width*0.5f + 0.5f;
+			real dy= y - height*0.5f - 4.f + 0.5f;
+			real u= (dx*cosine - dy*sine)*inverse_radius_x;
+			real v= (dx*sine + dy*cosine)*inverse_radius_y;
+			real radius= (real)sqrt(u*u + v*v);
+			real near_side= radius>0.f && v>0.f ? v/radius : 0.f;
+			real distance= (radius - 1.f)/(0.035f + 0.07f*near_side);
+			unsigned long intensity= 0;
+
+			if (distance>-3.f && distance<3.f)
+			{
+				intensity= (unsigned long)(255.f*(real)exp(-distance*distance)*(0.75f + 0.25f*near_side));
+			}
+			pixels[y*width + x]= ((intensity<<9) | (intensity & ~1))<<7 | intensity>>2;
+		}
+	}
+
+	return;
+}
+#endif
+
 static void progress_bar_load_loading_texture(
 	IDirect3DTexture8 **texture)
 {
@@ -2281,6 +2365,12 @@ static void progress_bar_load_loading_texture(
 		tgaLoadImageData(file, &image);
 		fclose(file);
 	}
+#ifdef HALO_LINUX
+	else
+	{
+		progress_bar_draw_ring(pixels, 320, 240);
+	}
+#endif
 	IDirect3DTexture8_UnlockRect(*texture, 0);
 
 	return;
