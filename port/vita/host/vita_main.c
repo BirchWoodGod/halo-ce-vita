@@ -480,6 +480,7 @@ int main(int argc, char **argv)
 	read_environment_file();
 	vita_settings_load();
 	movie_placeholders();
+	vita_net_adhoc_probe();
 	{
 		const char *crash_at = getenv("HALO_CRASH_AT");
 

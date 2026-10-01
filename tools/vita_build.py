@@ -87,7 +87,7 @@ VITA_LIBRARIES = [
     "SDL3", "SceGxm_stub", "SceDisplay_stub", "SceCtrl_stub", "SceAudio_stub", "SceAudioIn_stub",
     "SceSysmodule_stub", "SceHid_stub", "SceTouch_stub", "SceMotion_stub", "ScePower_stub",
     "SceAppUtil_stub", "SceAppMgr_stub", "SceCommonDialog_stub", "SceIme_stub", "SceKernelDmacMgr_stub",
-    "SceShaccCg_stub", "SceAvPlayer_stub", "SceCamera_stub", "SceRtc_stub", "SceNet_stub", "SceNetCtl_stub", "pthread", "m", "c",
+    "SceShaccCg_stub", "SceAvPlayer_stub", "SceCamera_stub", "SceRtc_stub", "SceNet_stub", "SceNetCtl_stub", "ScePspnetAdhoc_stub", "pthread", "m", "c",
 ]
 
 

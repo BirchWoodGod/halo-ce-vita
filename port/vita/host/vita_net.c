@@ -462,3 +462,114 @@ posix_ulong posix_resolve_ipv4(const char *host)
 	sceNetResolverDestroy(resolver);
 	return address.s_addr;
 }
+
+/* ---------- ad hoc probe (HALO_ADHOC_PROBE=1)
+
+What the Vita does for an app that asks for ad hoc play, logged step by
+step in halo.log: the PSP-style ad hoc libraries start with an ad hoc ID,
+and the SDK names no call that creates or joins a group, so the probe looks
+for the system joining one on its own (an ad hoc state, an ad hoc address,
+peers) and tries a peer-to-peer datagram socket with a broadcast. Run it on
+two Vitas side by side to see them find each other. */
+
+#include <psp2/pspnet_adhoc.h>
+#include <psp2/pspnet_adhocctl.h>
+#include <psp2/kernel/threadmgr.h>
+#include <stdio.h>
+
+static void probe_log(const char *step, int result)
+{
+	char line[160];
+
+	snprintf(line, sizeof(line), "adhoc probe: %s -> 0x%08x", step, (unsigned int)result);
+	vita_host_log(line);
+}
+
+static int adhoc_probe_thread(SceSize arguments_size, void *arguments)
+{
+	SceNetAdhocctlAdhocId adhoc_id;
+	SceNetEtherAddr mac;
+	SceNetInAddr address;
+	int result, state = -1, round, socket, value = 1;
+
+	(void)arguments_size;
+	(void)arguments;
+	if (!net_ready())
+		return 0;
+	probe_log("load SCE_SYSMODULE_PSPNET_ADHOC", sceSysmoduleLoadModule(SCE_SYSMODULE_PSPNET_ADHOC));
+	probe_log("sceNetAdhocInit", sceNetAdhocInit());
+	memset(&adhoc_id, 0, sizeof(adhoc_id));
+	adhoc_id.type = SCE_NET_ADHOCCTL_ADHOCTYPE_PRODUCT_ID;
+	memcpy(adhoc_id.data, "HCEV00001", SCE_NET_ADHOCCTL_ADHOCID_LEN);
+	probe_log("sceNetAdhocctlInit(HCEV00001)", sceNetAdhocctlInit(&adhoc_id));
+	memset(&mac, 0, sizeof(mac));
+	result = sceNetAdhocctlGetEtherAddr(&mac);
+	{
+		char line[96];
+
+		snprintf(line, sizeof(line), "adhoc probe: MAC %02x:%02x:%02x:%02x:%02x:%02x (0x%08x)", mac.data[0], mac.data[1],
+			mac.data[2], mac.data[3], mac.data[4], mac.data[5], (unsigned int)result);
+		vita_host_log(line);
+	}
+	for (round = 0; round < 10; round++)
+	{
+		int peers_length = 0;
+		char line[128];
+
+		result = sceNetCtlAdhocGetState(&state);
+		memset(&address, 0, sizeof(address));
+		sceNetCtlAdhocGetInAddr(&address);
+		sceNetAdhocctlGetPeerList(&peers_length, NULL);
+		snprintf(line, sizeof(line), "adhoc probe: round %d state %d (0x%08x) address %08x peer bytes %d", round, state,
+			(unsigned int)result, address.s_addr, peers_length);
+		vita_host_log(line);
+		sceKernelDelayThread(1000000);
+	}
+	socket = sceNetSocket("halo_p2p", SCE_NET_AF_INET, SCE_NET_SOCK_DGRAM_P2P, 0);
+	probe_log("sceNetSocket(DGRAM_P2P)", socket);
+	if (socket >= 0)
+	{
+		SceNetSockaddrIn target;
+
+		probe_log("SO_BROADCAST", sceNetSetsockopt(socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_BROADCAST, &value, sizeof(value)));
+		memset(&target, 0, sizeof(target));
+		target.sin_len = sizeof(target);
+		target.sin_family = SCE_NET_AF_INET;
+		target.sin_port = (unsigned short)((2302 >> 8) | ((2302 & 0xff) << 8));
+		target.sin_vport = (unsigned short)((2302 >> 8) | ((2302 & 0xff) << 8));
+		probe_log("bind P2P :2302", sceNetBind(socket, (const SceNetSockaddr *)&target, sizeof(target)));
+		target.sin_addr.s_addr = 0xffffffffu;
+		for (round = 0; round < 10; round++)
+		{
+			char buffer[64];
+			SceNetSockaddrIn from;
+			unsigned int from_length = sizeof(from);
+
+			probe_log("sendto broadcast", sceNetSendto(socket, "halo ad hoc probe", 17, 0, (const SceNetSockaddr *)&target,
+				sizeof(target)));
+			result = sceNetRecvfrom(socket, buffer, sizeof(buffer), SCE_NET_MSG_DONTWAIT, (SceNetSockaddr *)&from, &from_length);
+			if (result > 0)
+			{
+				char line[128];
+
+				snprintf(line, sizeof(line), "adhoc probe: received %d bytes from %08x", result, from.sin_addr.s_addr);
+				vita_host_log(line);
+			}
+			sceKernelDelayThread(1000000);
+		}
+		sceNetSocketClose(socket);
+	}
+	vita_host_log("adhoc probe: done");
+	return 0;
+}
+
+void vita_net_adhoc_probe(void)
+{
+	SceUID thread;
+
+	if (!getenv("HALO_ADHOC_PROBE") || !atoi(getenv("HALO_ADHOC_PROBE")))
+		return;
+	thread = sceKernelCreateThread("adhoc_probe", adhoc_probe_thread, 0x10000100, 0x10000, 0, 0, NULL);
+	if (thread >= 0)
+		sceKernelStartThread(thread, 0, NULL);
+}
