@@ -1142,23 +1142,33 @@ D3DSIMPLERENDERSTATEENCODE: methods 0x40000 + 4 * n, n below 0x800), +1, or
 0 when the method is no simple state */
 static unsigned char simple_state_of_method[0x800];
 
+/* (each method's dirty bit, made with the table: the game sets 6500
+simple states a frame on b30, each through this call) */
+static unsigned char simple_dirty_bit_of_method[0x800];
+static int simple_state_tables_made;
+
 void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 {
 	/* (the inline D3DDevice_SetRenderState stores the value after this
 	call: what the table holds is still the old value) */
 	unsigned long slot = (method - 0x40000UL) >> 2;
 
-	if (!simple_state_of_method[(D3DSIMPLERENDERSTATEENCODE[0] - 0x40000UL) >> 2])
+	if (!simple_state_tables_made)
 	{
 		unsigned long state;
 
 		for (state = 0; state < D3DRS_SIMPLE_MAX; state++)
+		{
 			simple_state_of_method[(D3DSIMPLERENDERSTATEENCODE[state] - 0x40000UL) >> 2] = (unsigned char)(state + 1);
+			simple_dirty_bit_of_method[(D3DSIMPLERENDERSTATEENCODE[state] - 0x40000UL) >> 2] =
+				(unsigned char)render_state_dirty_bit(state);
+		}
+		simple_state_tables_made = 1;
 	}
 	if ((method & 3) || slot >= sizeof(simple_state_of_method) || !simple_state_of_method[slot])
 		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
 	else if (D3D__RenderState[simple_state_of_method[slot] - 1] != value)
-		device_state_dirty |= render_state_dirty_bit(simple_state_of_method[slot] - 1);
+		device_state_dirty |= simple_dirty_bit_of_method[slot];
 }
 
 void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWORD value)
