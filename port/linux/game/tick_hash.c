@@ -82,6 +82,10 @@ static unsigned long long hash_words(unsigned long long hash, const unsigned int
 	return hash;
 }
 
+/* the ticks simulated since start-up (the scripted test player's clock
+under HALO_FIXED_TICK: port/linux/src/xinput_sdl.c) */
+volatile unsigned long halo_ticks_simulated;
+
 void halo_tick_hash_after_tick(void)
 {
 	void *base, *gpu_base;
@@ -89,6 +93,7 @@ void halo_tick_hash_after_tick(void)
 	unsigned long long hash = 0xCBF29CE484222325ULL;
 	long time;
 
+	halo_ticks_simulated++;
 	if (state < 0)
 	{
 		const char *dump = getenv("HALO_TICK_HASH_DUMP");

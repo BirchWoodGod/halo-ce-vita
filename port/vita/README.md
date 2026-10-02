@@ -97,6 +97,8 @@ the panel. The game does not see the buttons while the panel is open.
 | Hide distant objects | Small | skips objects that cover only a few pixels |
 | Scenery updates | Quarter | how often static props are updated |
 | Object lighting | Third | how often object lighting is recomputed |
+| Sound voices | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices); applies after a restart |
+| Sound occlusion | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
 | Look sensitivity | 100% | right stick turning speed |
 | Invert look | No | reverses the right stick's up and down |
 | Stick deadzone | Off | raise it if the sticks drift |
