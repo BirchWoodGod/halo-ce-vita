@@ -164,7 +164,13 @@ static void test_game_sequence(void)
 	check(posix_socket_select(NULL, &empty, sockets, &count, NULL, &empty, 1, 0, 0) == 1 && count == 1,
 		"client tcp select writeable (connected)", count, 1);
 
-	/* the server's poll_endpoint_set and accept_endpoint */
+	/* the server's poll_endpoint_set and accept_endpoint (a listener's
+	zero-timeout poll stays an epoll: a pending connection is not peekable) */
+	usleep(20000);
+	sockets[0] = server_tcp;
+	count = 1;
+	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 0, 0) == 1 && count == 1,
+		"server listener readable (zero timeout)", count, 1);
 	sockets[0] = server_tcp;
 	count = 1;
 	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 100000, 0) == 1,
@@ -179,7 +185,17 @@ static void test_game_sequence(void)
 	/* the lobby: messages both ways over the connection */
 	check(posix_socket_send(client_tcp, "join request", 12, 0) == 12, "lobby: client sends on the connection", 0, 12);
 	usleep(20000);
+	sockets[0] = accepted;
+	sockets[1] = server_udp;
+	count = 2;
+	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 0, 0) == 1 && count == 1 &&
+		sockets[0] == accepted, "zero-timeout poll: the connection with bytes waiting is readable, the idle udp not",
+		count, 1);
 	check(posix_socket_recv(accepted, buffer, sizeof(buffer), 0) == 12, "lobby: server receives it", 0, 12);
+	sockets[0] = accepted;
+	count = 1;
+	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 0, 0) == 0 && count == 0,
+		"zero-timeout poll: a drained connection is not readable", count, 0);
 	check(posix_socket_recv(accepted, buffer, sizeof(buffer), 0) == -1 && posix_socket_last_error() == 10035,
 		"lobby: an empty connection is WSAEWOULDBLOCK", posix_socket_last_error(), 10035);
 	check(posix_socket_send(accepted, "machine accepted", 16, 0) == 16, "lobby: server sends", 0, 16);
@@ -203,6 +219,14 @@ static void test_game_sequence(void)
 		else if (update == 0)
 			printf("     first client update sendto failed: Winsock error %d\n", posix_socket_last_error());
 		usleep(2000);
+		if (update == 0)
+		{
+			int poll_sockets[1], poll_count = 1;
+
+			poll_sockets[0] = server_udp;
+			check(posix_socket_select(poll_sockets, &poll_count, NULL, &empty, NULL, &empty, 0, 0, 0) == 1,
+				"zero-timeout poll: a datagram waiting is readable", poll_count, 1);
+		}
 		for (;;)
 		{
 			from_length = 16;
@@ -236,6 +260,10 @@ static void test_game_sequence(void)
 	/* the host goes away: the client's read says the connection closed */
 	posix_socket_close(accepted);
 	usleep(20000);
+	sockets[0] = client_tcp;
+	count = 1;
+	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 0, 0) == 1,
+		"closed connection reads ready (zero timeout)", count, 1);
 	sockets[0] = client_tcp;
 	count = 1;
 	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 100000, 0) == 1,

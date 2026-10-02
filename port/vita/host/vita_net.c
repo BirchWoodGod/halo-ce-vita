@@ -38,6 +38,7 @@ datagram sockets refuse a sendto naming a destination (posix_socket_sendto).
 #define WSAECONNRESET 10054
 #define WSAENOBUFS 10055
 #define WSAEISCONN 10056
+#define WSAENOTCONN 10057
 #define WSANOTINITIALISED 10093
 
 /* the network stack's pool holds every socket's buffers: the game's
@@ -49,6 +50,10 @@ up and timed out: the player could not move and the host went down */
 #define SELECT_MAXIMUM 64
 /* the library's socket identifiers are 0 to SCE_NET_ID_SOCKET_MAX (1023) */
 #define SOCKET_IDENTIFIERS 1024
+
+/* sockets listening for connections: their readiness (a connection to
+accept) cannot be peeked (posix_socket_select) */
+static volatile unsigned char socket_listening[SOCKET_IDENTIFIERS];
 
 static __thread int last_error;
 static int net_state; /* 0 not tried, 1 up, -1 failed */
@@ -220,6 +225,9 @@ static unsigned long long trace_last_report;
 static struct
 {
 	unsigned int calls, ready, empty, failed, epoll_failed;
+	/* the zero-timeout reads answered by peeking, and the time selects took */
+	unsigned int peeked;
+	unsigned long long epoll_us, peek_us;
 } trace_selects;
 
 static int trace_on(void)
@@ -431,9 +439,11 @@ static void trace_report_if_due(void)
 	}
 	memset(&statistics, 0, sizeof(statistics));
 	statistics_result = sceNetGetStatisticsInfo(&statistics, 0);
-	trace_log("selects %u (%u ready, %u nothing, %u failed, %u epoll failures); pool free %d (least %d), "
+	trace_log("selects %u (%u ready, %u nothing, %u failed, %u epoll failures; %u by peeking; %llu us in epolls, "
+		"%llu us peeking); pool free %d (least %d), "
 		"kernel free %d (least %d), packets %d (0x%08x)", trace_selects.calls, trace_selects.ready,
-		trace_selects.empty, trace_selects.failed, trace_selects.epoll_failed, statistics.libnet_mem_free_size,
+		trace_selects.empty, trace_selects.failed, trace_selects.epoll_failed, trace_selects.peeked,
+		trace_selects.epoll_us, trace_selects.peek_us, statistics.libnet_mem_free_size,
 		statistics.libnet_mem_free_min, statistics.kernel_mem_free_size, statistics.kernel_mem_free_min,
 		statistics.packet_count, (unsigned int)statistics_result);
 	pthread_mutex_unlock(&trace_mutex);
@@ -559,6 +569,8 @@ int posix_socket_close(int socket)
 	int result;
 
 	forget_peer(socket);
+	if (socket >= 0 && socket < SOCKET_IDENTIFIERS)
+		socket_listening[socket] = 0;
 	result = sceNetSocketClose(socket);
 	if (trace_on())
 		trace_closed(socket, result);
@@ -612,6 +624,8 @@ int posix_socket_listen(int socket, int backlog)
 {
 	int result = sceNetListen(socket, backlog);
 
+	if (result >= 0 && socket >= 0 && socket < SOCKET_IDENTIFIERS)
+		socket_listening[socket] = 1;
 	if (trace_on())
 		trace_result(socket, "listen", result, NULL);
 	return answer(result);
@@ -948,6 +962,54 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 	}
 	if (trace_on())
 		__atomic_fetch_add(&trace_selects.calls, 1, __ATOMIC_RELAXED);
+	if (!infinite && timeout == 0 && !(write && *write_count) && !(error && *error_count))
+	{
+		/* A poll of readable sockets that does not wait, as the game makes
+		several times a frame (poll_endpoint_set, endpoint_readable): each
+		socket is asked by a peek of a byte that neither waits nor takes it
+		(a datagram or stream bytes waiting, the end of the stream, or an
+		error the next read will report: readable, as select says)
+		instead of an epoll made, filled, waited on and destroyed - ~10 ms
+		of the main thread a frame in a Blood Gulch solo match on the Vita.
+		Listening sockets, whose readiness is a connection, keep the epoll. */
+		unsigned long long started = trace_on() ? vita_host_time_us() : 0;
+		int peekable = 1;
+
+		for (index = 0; index < count; index++)
+			if (socket_listening[entries[index].socket])
+				peekable = 0;
+		if (peekable)
+		{
+			for (index = 0; index < count; index++)
+			{
+				char byte;
+				int peek = sceNetRecv(entries[index].socket, &byte, 1, SCE_NET_MSG_PEEK | SCE_NET_MSG_DONTWAIT);
+
+				int error_number = peek < 0 ? winsock_error(peek) : 0;
+
+				/* (not yet connected, or a connect still under way: not
+				readable, as an epoll would not say IN or ERR) */
+				if (peek >= 0 || (error_number != WSAEWOULDBLOCK && error_number != WSAENOTCONN &&
+					error_number != WSAEINPROGRESS && error_number != WSAEINVAL))
+					entries[index].ready = SCE_NET_EPOLLIN;
+			}
+			select_keep(entries, count, read, read_count, SCE_NET_EPOLLIN);
+			ready = *read_count;
+			if (trace_on())
+			{
+				__atomic_fetch_add(&trace_selects.peeked, 1, __ATOMIC_RELAXED);
+				__atomic_fetch_add(ready > 0 ? &trace_selects.ready : &trace_selects.empty, 1, __ATOMIC_RELAXED);
+				__atomic_fetch_add(&trace_selects.peek_us, vita_host_time_us() - started, __ATOMIC_RELAXED);
+				trace_report_if_due();
+			}
+			if (ready > 0)
+				last_error = 0;
+			return ready;
+		}
+	}
+	{
+	unsigned long long epoll_started = trace_on() ? vita_host_time_us() : 0;
+
 	epoll = sceNetEpollCreate("halo_select", 0);
 	if (epoll < 0)
 	{
@@ -976,6 +1038,9 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 	}
 	result = sceNetEpollWait(epoll, events, count, timeout);
 	sceNetEpollDestroy(epoll);
+	if (trace_on())
+		__atomic_fetch_add(&trace_selects.epoll_us, vita_host_time_us() - epoll_started, __ATOMIC_RELAXED);
+	}
 	if (result < 0)
 	{
 		if (trace_on())

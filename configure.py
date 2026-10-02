@@ -122,11 +122,12 @@ parser.add_argument(
 parser.add_argument(
     "--vita-aligned",
     choices=["hot", "none"],
-    default="hot",
-    help="the Vita build: hot (the default) compiles the simulation and rendering directories (objects, physics, "
-    "ai, units, items, effects, math, render, rasterizer...) without -fmax-type-align=1, so their floats load "
-    "and store straight from floating point registers (no misaligned access of theirs was seen on any campaign "
-    "level by UBSan); none keeps the flag for all of the game's code",
+    default="none",
+    help="the Vita build: none (the default) keeps -fmax-type-align=1 for all of the game's code; hot "
+    "(EXPERIMENTAL, it crashed on the hardware) compiles the simulation and rendering directories (objects, "
+    "physics, ai, units, items, effects, math, render, rasterizer...) without it, so their floats load and store "
+    "straight from floating point registers - any float read from a misaligned address is then an alignment "
+    "fault (a crash) on the Vita",
 )
 parser.add_argument(
     "--android-ndk",
