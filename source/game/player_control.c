@@ -328,7 +328,15 @@ static struct player_control_globals_data *player_control_globals;
 short debug_input_target = 0;
 real player_look_yaw_rate[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS] = {0};
 real player_look_pitch_rate[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS] = {0};
+#ifdef HALO_VITA
+/* (port) the Xbox ignores crouch at full throttle: crouch is a click of the
+stick that moves, and a running player clicked it by accident. On the Vita
+crouch is D-pad down, a button of its own: a player walking at full stick
+stood up while crouched (the crouch toggle, vita_pad.c) */
+boolean controls_enable_crouch = TRUE;
+#else
 boolean controls_enable_crouch = FALSE;
+#endif
 boolean controls_enable_doubled_spin = FALSE;
 boolean controls_swap_doubled_spin_state = FALSE;
 #ifdef HALO_LINUX
