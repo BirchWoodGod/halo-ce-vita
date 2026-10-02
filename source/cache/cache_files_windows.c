@@ -1109,6 +1109,24 @@ static void cache_file_windows_thread_proc(
 			{
 				struct cache_file_request *request = cache_request_get(request_index);
 
+#ifdef HALO_LINUX
+				/* (port) a request the game waits for first, then the lowest
+				offset. The Xbox's test kept the first pending request unless a
+				later one was both further down the disc and not waited for -
+				so a frame waiting for a texture waited behind every predicted
+				resource queued before it (on the Vita's memory card, at
+				~13 MB/s, megabytes of them at a level's start). Only the order
+				of the reads changes. */
+				if (request->pending &&
+					!request->running &&
+					(!best_request ||
+						(request->blocking && !best_request->blocking) ||
+						(request->blocking == best_request->blocking &&
+							request->overlapped.Offset < best_request->overlapped.Offset)))
+				{
+					best_request = request;
+				}
+#else
 				if (request->pending &&
 					!request->running &&
 					(!best_request ||
@@ -1117,6 +1135,7 @@ static void cache_file_windows_thread_proc(
 				{
 					best_request = request;
 				}
+#endif
 			}
 
 			if (!best_request)
