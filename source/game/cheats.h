@@ -30,6 +30,8 @@ struct cheat_globals
 
 /* ---------- prototypes/CHEATS.C */
 
+void cheats_network_client_enforce(void);
+
 void cheats_initialize(
 	void);
 void cheats_initialize_for_new_map(

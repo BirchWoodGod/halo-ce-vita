@@ -604,9 +604,31 @@ static void platform_invite_clipboard(BOOL look)
 
 	if (invite)
 	{
+#ifdef HALO_VITA
+		/* There is no desktop clipboard on the Vita. Export the invite
+		to a file VitaShell can show or transfer to another player. */
+		char path[512];
+		FILE *file;
+
+		snprintf(path, sizeof(path), "ux0:data/haloce-vita/host_invite.txt");
+		file = fopen(path, "w");
+		if (file)
+		{
+			fprintf(file, "%s\n", invite);
+			if (fclose(file) == 0)
+				platform_log("Internet play: invite written to %s", path);
+			else
+				platform_log("Internet play: could not finish writing %s", path);
+		}
+		else
+			platform_log("Internet play: could not write %s", path);
+#else
 		SDL_SetClipboardText(invite);
+#endif
 		snprintf(seen, sizeof(seen), "%s", invite);
+#ifndef HALO_VITA
 		platform_log("Internet play: the invite link is on the clipboard");
+#endif
 #ifdef HALO_ANDROID
 		SDL_ShowAndroidToast("Hosting: the invite link is on the clipboard", 1, -1, 0, 0);
 #endif
@@ -667,7 +689,12 @@ static void platform_show_pending_message(void)
 	pthread_mutex_unlock(&platform_message_lock);
 	if (!pending)
 		return;
-#ifdef HALO_NOT_DESKTOP
+#ifdef HALO_VITA
+	{
+		extern void vita_settings_message(const char *title, const char *text);
+		vita_settings_message(title, text);
+	}
+#elif defined(HALO_NOT_DESKTOP)
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, title, text, NULL);
 #else
 	{

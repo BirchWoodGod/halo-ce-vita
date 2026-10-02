@@ -201,6 +201,8 @@ char *strnlwr(char *string, long n);
 char *strupr(char *string);
 char *strlwr(char *string);
 char *csprintf(char *buffer, char *format, ...);
+void release_assert_failed(char const *information, char const *file, long line, boolean fatal);
+
 void display_assert(char *information, char *file, long line, boolean fatal);
 long csmemcmp(const void *p1, const void *p2, unsigned long size);
 void *csmemmove(void *destination, const void *source, unsigned long size);
