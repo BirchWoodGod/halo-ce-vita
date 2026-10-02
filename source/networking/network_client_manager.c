@@ -1334,6 +1334,17 @@ boolean network_game_client_game_settings_updated(
 	{
 		struct network_game previous_game;
 
+#ifdef HALO_LINUX
+		/* (the host's map name - a tag path with backslashes, such as the
+		Blood Gulch scenario's - is ended here, and one that climbs out of
+		the maps folder is refused: unended, it ran past the path built from it; with
+		"../" a host could make the client open any .map file) */
+		message_packet->map.name[NUMBEROF(message_packet->map.name) - 1] = 0;
+		if (strstr(message_packet->map.name, ".."))
+		{
+			return FALSE;
+		}
+#endif
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
 		{
 			network_event("precaching map '%s'...", message_packet->map.name);

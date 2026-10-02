@@ -310,7 +310,13 @@ void error(
 			va_list argument_list;
 
 			va_start(argument_list, format);
+#ifdef HALO_LINUX
+			/* (bounded, with room for the line end: a message can carry text
+			from the network) */
+			vsnprintf(string, sizeof(string) - 2, format, argument_list);
+#else
 			vsprintf(string, format, argument_list);
+#endif
 			va_end(argument_list);
 			csstrcat(string, "\r\n");
 
