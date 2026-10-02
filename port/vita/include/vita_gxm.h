@@ -158,7 +158,8 @@ struct vgxm_draw
 	unsigned long primitive;
 	const unsigned short *indices;
 	unsigned long index_count;
-	/* set when the draw counts samples for a visibility test (D3D index) */
+	/* set when the draw counts samples for a visibility test: its slot in
+	the frame's visibility buffer, 1 to VGXM_VISIBILITY_SLOTS - 1 */
 	unsigned long visibility_index;
 };
 
@@ -169,8 +170,12 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 
 /* ---------- visibility tests */
 
-/* the samples that passed in the latest completed test with this index */
-unsigned long vgxm_visibility_result(unsigned long index);
+/* a frame's visibility test slots (each frame's buffer has this many) */
+#define VGXM_VISIBILITY_SLOTS 1024
+
+/* the samples that passed in this slot's test in the latest frame the GPU
+has finished, in the game's pixels (unscaled by the render scale) */
+unsigned long vgxm_visibility_result(unsigned long slot);
 
 /* ---------- frames */
 

@@ -33,6 +33,8 @@ on top of it, fading each tick.
 #include "camera/observer.h"
 #include "game/players.h"
 #include "render/render_cameras.h"
+#include "structures/structures.h"
+#include "structures/structure_bsp_definitions.h"
 #include "render_epoch.h"
 
 #include <math.h>
@@ -648,6 +650,18 @@ struct tick_pose_entry
 	real radius;
 };
 
+/* a cluster partition's object lists as the tick left them: per cluster,
+its objects from first[cluster] on, each run ended by NONE */
+struct tick_cluster_list
+{
+	long *first;
+	long first_capacity;
+	long *datums;
+	long datum_capacity;
+	short cluster_count;
+	boolean valid;
+};
+
 struct tick_pose_buffer
 {
 	/* by absolute object index */
@@ -656,6 +670,7 @@ struct tick_pose_buffer
 	long matrix_capacity;
 	unsigned long capture;
 	unsigned long map_generation;
+	struct tick_cluster_list cluster_lists[_tick_cluster_list_count];
 };
 
 static struct tick_pose_buffer tick_pose_buffers[2];
@@ -665,6 +680,8 @@ static int tick_pose_published = -1, tick_pose_captured = -1;
 /* a tick was started after the camera was placed and is not yet joined */
 static boolean tick_pose_tick_in_flight;
 static boolean tick_pose_rendering;
+/* the frame finds its objects in the published cluster lists */
+static boolean tick_cluster_lists_rendering;
 
 static struct
 {
@@ -696,6 +713,135 @@ static unsigned long long tick_pose_now_us(void)
 	return vita_host_time_us ? vita_host_time_us() : 0;
 }
 
+/* ---------- the threaded tick's cluster lists
+
+The render finds the objects to draw by walking each visible cluster's list
+of objects (structure_visibility_find_objects). Those lists are the tick's:
+an object that moves, turns or animates its bounds is taken out of every
+cluster's list (object_disconnect_from_map), its node matrices recomputed,
+and put back (object_reconnect_to_map) - every tick, for every walking
+biped, driven vehicle, animating device. A render walking a list while the
+running tick has an object out of it does not find the object, and it is
+not drawn that frame: the one-frame flicker of the Vita's animated models
+(the cryo pods and alert lights of a10, the Warthog, NPCs, with
+HALO_FLICKER_LOG=1 hundreds of them in the a10 opening alone), more often
+the more there is moving. Interpolation off and the threaded tick on (the
+Vita's defaults) leave nothing to hide it.
+
+So the tick thread copies the object lists of every cluster with the poses
+(after game_time_update, when it is alone with them) and the render, while
+the next tick runs, finds its objects in the copy: the lists as they stood
+when the camera was placed, which the objects' poses are from too. An
+object the running tick deletes is still there for the render (render_
+epoch.h's tombstones) and one it creates appears next frame, as before. */
+
+static boolean tick_cluster_list_room(long **array, long *capacity, long wanted)
+{
+	long grown;
+	long *larger;
+
+	if (wanted <= *capacity)
+		return TRUE;
+	grown = *capacity ? *capacity * 2 : 1024;
+	if (grown < wanted)
+		grown = wanted;
+	/* (the C library's realloc: see render_tick_poses_capture) */
+	larger = (realloc)(*array, grown * sizeof(long));
+	if (!larger)
+		return FALSE;
+	*array = larger;
+	*capacity = grown;
+	return TRUE;
+}
+
+static void tick_cluster_lists_capture(struct tick_pose_buffer *buffer)
+{
+	static struct cluster_partition *const partitions[_tick_cluster_list_count] = {
+		&collideable_object_cluster_partition,
+		&noncollideable_object_cluster_partition,
+	};
+	struct structure_bsp *structure_bsp = global_structure_bsp_get();
+	short cluster_count = structure_bsp ? (short)structure_bsp->clusters.count : 0;
+	int which;
+
+	for (which = 0; which < _tick_cluster_list_count; which++)
+	{
+		struct tick_cluster_list *list = &buffer->cluster_lists[which];
+		struct cluster_partition *partition = partitions[which];
+		long used = 0;
+		short cluster_index;
+
+		list->valid = FALSE;
+		if (!cluster_count || !partition->data_reference_data || !partition->data_reference_data->valid ||
+			!tick_cluster_list_room(&list->first, &list->first_capacity, cluster_count))
+		{
+			continue;
+		}
+		for (cluster_index = 0; cluster_index < cluster_count; cluster_index++)
+		{
+			long reference, datum_index;
+
+			list->first[cluster_index] = used;
+			for (datum_index = cluster_partition_get_first_datum(partition, &reference, cluster_index);
+				datum_index != NONE;
+				datum_index = cluster_partition_get_next_datum(partition, &reference))
+			{
+				if (!tick_cluster_list_room(&list->datums, &list->datum_capacity, used + 2))
+					break;
+				list->datums[used++] = datum_index;
+			}
+			if (!tick_cluster_list_room(&list->datums, &list->datum_capacity, used + 1))
+				break;
+			list->datums[used++] = NONE;
+		}
+		if (cluster_index == cluster_count)
+		{
+			list->cluster_count = cluster_count;
+			list->valid = TRUE;
+		}
+	}
+}
+
+/* the render: does this frame find its objects in the lists as the tick
+left them? */
+boolean render_tick_cluster_lists_active(int which)
+{
+	return tick_cluster_lists_rendering && !halo_epoch_on_mutator() &&
+		which >= 0 && which < _tick_cluster_list_count &&
+		tick_pose_buffers[tick_pose_published].cluster_lists[which].valid;
+}
+
+/* the walk of a cluster's objects in those lists (*iterator: the position) */
+long render_tick_cluster_list_next(int which, long *iterator)
+{
+	struct tick_cluster_list *list = &tick_pose_buffers[tick_pose_published].cluster_lists[which];
+
+	while (*iterator != NONE)
+	{
+		long datum_index = list->datums[*iterator];
+
+		if (datum_index == NONE)
+		{
+			*iterator = NONE;
+			break;
+		}
+		(*iterator)++;
+		/* (an object a script or cheat deleted on this thread since,
+		between the frames, whose slot may hold another) */
+		if (object_header_try_and_get(datum_index))
+			return datum_index;
+	}
+	return NONE;
+}
+
+long render_tick_cluster_list_first(int which, long *iterator, short cluster_index)
+{
+	struct tick_cluster_list *list = &tick_pose_buffers[tick_pose_published].cluster_lists[which];
+
+	*iterator = cluster_index >= 0 && cluster_index < list->cluster_count ? list->first[cluster_index] : NONE;
+	return render_tick_cluster_list_next(which, iterator);
+}
+
 /* the tick thread, after game_time_update: the objects as the tick left
 them, into the buffer the render is not reading */
 void render_tick_poses_capture(void)
@@ -707,7 +853,7 @@ void render_tick_poses_capture(void)
 	long used = 0;
 	int which;
 
-	if (!tick_poses_enabled() || halo_interpolation_enabled())
+	if (!tick_poses_enabled())
 		return;
 	before = tick_pose_stats.wanted ? tick_pose_now_us() : 0;
 	which = tick_pose_published == 0 ? 1 : 0;
@@ -719,6 +865,14 @@ void render_tick_poses_capture(void)
 			return;
 	}
 	buffer->capture++;
+	tick_cluster_lists_capture(buffer);
+	if (halo_interpolation_enabled())
+	{
+		/* (interpolated frames blend their own poses) */
+		buffer->map_generation = halo_map_generation;
+		tick_pose_captured = which;
+		return;
+	}
 	object_iterator_new(&iterator, _object_mask_all, 0);
 	while ((object = (struct object_datum *)object_iterator_next(&iterator)) != NULL)
 	{
@@ -801,13 +955,27 @@ static void tick_pose_frame_begin(void)
 {
 	/* (a game state replaced since the capture - a new map, a revert, a
 	saved game - leaves the poses meaningless) */
-	tick_pose_rendering = tick_poses_enabled() && !interpolation_rendering && tick_pose_tick_in_flight &&
-		tick_pose_published >= 0 && tick_pose_buffers[tick_pose_published].map_generation == halo_map_generation;
+	boolean published = tick_poses_enabled() && tick_pose_tick_in_flight && tick_pose_published >= 0 &&
+		tick_pose_buffers[tick_pose_published].map_generation == halo_map_generation;
+
+	static int lists_wanted = -1;
+
+	if (lists_wanted < 0)
+	{
+		/* HALO_TICK_CLUSTER_LISTS=0: the render walks the running tick's
+		lists, as before */
+		const char *setting = getenv("HALO_TICK_CLUSTER_LISTS");
+
+		lists_wanted = !setting || atoi(setting) != 0;
+	}
+	tick_pose_rendering = published && !interpolation_rendering;
+	tick_cluster_lists_rendering = published && lists_wanted;
 }
 
 static void tick_pose_frame_end(void)
 {
 	tick_pose_rendering = FALSE;
+	tick_cluster_lists_rendering = FALSE;
 	if (tick_pose_stats.wanted > 0 && ++tick_pose_stats.frames % 300 == 0)
 	{
 		unsigned long captures = tick_pose_stats.captures ? tick_pose_stats.captures : 1;

@@ -239,6 +239,9 @@ static boolean object_is_first_person_camera(
 	long object_index);
 static void find_rendered_objects(
 	void);
+#ifdef HALO_LINUX
+static void flicker_check_found(void);
+#endif
 static real object_get_level_of_detail_pixels(
 	long object_index);
 static void render_object_list(
@@ -432,6 +435,7 @@ void render_objects(
 #ifdef HALO_LINUX
 	before = objects_profile_now();
 	find_rendered_objects();
+	flicker_check_found();
 	OBJECTS_PROFILE_ADD(0, before);
 	objects_profile_objects += render_object_globals.rendered_object_count;
 #else
@@ -522,16 +526,57 @@ static boolean object_is_first_person_camera(
 		scripted_camera_object_is_first_person_camera(object_index);
 }
 
+#ifdef HALO_LINUX
+/* (port) with the tick on its thread, the clusters' object lists as the
+finished tick left them rather than the running tick's, which has every
+moving object out of its clusters for a moment each tick
+(render_interpolation.c, "the threaded tick's cluster lists") */
+static long render_cluster_get_first_collideable_object(long *iterator, short cluster_index)
+{
+	return render_tick_cluster_list_first(_tick_cluster_list_collideable, iterator, cluster_index);
+}
+
+static long render_cluster_get_next_collideable_object(long *iterator)
+{
+	return render_tick_cluster_list_next(_tick_cluster_list_collideable, iterator);
+}
+
+static long render_cluster_get_first_noncollideable_object(long *iterator, short cluster_index)
+{
+	return render_tick_cluster_list_first(_tick_cluster_list_noncollideable, iterator, cluster_index);
+}
+
+static long render_cluster_get_next_noncollideable_object(long *iterator)
+{
+	return render_tick_cluster_list_next(_tick_cluster_list_noncollideable, iterator);
+}
+#endif
+
 static void find_rendered_objects(
 	void)
 {
+	long (*get_first_collideable)(long *, short) = cluster_get_first_collideable_object;
+	long (*get_next_collideable)(long *) = cluster_get_next_collideable_object;
+	long (*get_first_noncollideable)(long *, short) = cluster_get_first_noncollideable_object;
+	long (*get_next_noncollideable)(long *) = cluster_get_next_noncollideable_object;
+
+#ifdef HALO_LINUX
+	if (render_tick_cluster_lists_active(_tick_cluster_list_collideable) &&
+		render_tick_cluster_lists_active(_tick_cluster_list_noncollideable))
+	{
+		get_first_collideable = render_cluster_get_first_collideable_object;
+		get_next_collideable = render_cluster_get_next_collideable_object;
+		get_first_noncollideable = render_cluster_get_first_noncollideable_object;
+		get_next_noncollideable = render_cluster_get_next_noncollideable_object;
+	}
+#endif
 	object_marker_begin();
 
 	render_object_globals.rendered_object_count = structure_visibility_find_objects(
 		render_object_globals.rendered_object_indices,
 		MAXIMUM_RENDERED_OBJECTS,
-		cluster_get_first_collideable_object,
-		cluster_get_next_collideable_object,
+		get_first_collideable,
+		get_next_collideable,
 		object_get_render_bounding_sphere,
 		object_unmarked_function,
 		object_mark_function);
@@ -540,8 +585,8 @@ static void find_rendered_objects(
 		&render_object_globals.rendered_object_indices[
 			render_object_globals.rendered_object_count],
 		MAXIMUM_RENDERED_OBJECTS - render_object_globals.rendered_object_count,
-		cluster_get_first_noncollideable_object,
-		cluster_get_next_noncollideable_object,
+		get_first_noncollideable,
+		get_next_noncollideable,
 		object_get_render_bounding_sphere,
 		object_unmarked_function,
 		object_mark_function);
@@ -559,6 +604,152 @@ static void find_rendered_objects(
 }
 
 #ifdef HALO_LINUX
+/* (debug) HALO_FLICKER_LOG=1: an object the render found in the frames on
+either side of one but not in it, or drew (render_model) on either side but
+not in it, is logged with what the frame in between saw of it: whether it
+still existed, its map connection and clusters, whether its clusters' lists
+held it, its sphere against the view - to tell a one-frame flicker's cause */
+static int flicker_log_enabled = -1;
+static unsigned long flicker_frame;
+static unsigned long *flicker_found_frame, *flicker_drawn_frame;
+static short *flicker_identifier;
+static char (*flicker_why)[200];
+static char (*flicker_why_drawn)[200];
+
+static boolean flicker_log_wanted(void)
+{
+	if (flicker_log_enabled < 0)
+	{
+		const char *setting = getenv("HALO_FLICKER_LOG");
+
+		flicker_log_enabled = setting && atoi(setting) != 0;
+		if (flicker_log_enabled)
+		{
+			flicker_found_frame = calloc(MAXIMUM_OBJECTS_PER_MAP, sizeof(*flicker_found_frame));
+			flicker_drawn_frame = calloc(MAXIMUM_OBJECTS_PER_MAP, sizeof(*flicker_drawn_frame));
+			flicker_identifier = calloc(MAXIMUM_OBJECTS_PER_MAP, sizeof(*flicker_identifier));
+			flicker_why = calloc(MAXIMUM_OBJECTS_PER_MAP, sizeof(*flicker_why));
+			flicker_why_drawn = calloc(MAXIMUM_OBJECTS_PER_MAP, sizeof(*flicker_why_drawn));
+			if (!flicker_found_frame || !flicker_drawn_frame || !flicker_identifier || !flicker_why || !flicker_why_drawn)
+				flicker_log_enabled = 0;
+		}
+	}
+	return flicker_log_enabled > 0 && render.window_index == 0 && !render.camera.mirrored;
+}
+
+static void flicker_describe(long object_index, char *why, size_t size)
+{
+	struct object_datum *object = object_try_and_get(object_index);
+	struct object_header_datum *header = object_header_try_and_get(object_index);
+	int listed = 0, rendered_clusters = 0, clusters = 0;
+	long reference;
+	short cluster_index;
+	struct cluster_partition *partition;
+	boolean visible;
+
+	if (!object || !header)
+	{
+		snprintf(why, size, "gone");
+		return;
+	}
+	partition = TEST_FLAG(object->object.flags, _object_has_collision_model_bit) ?
+		&collideable_object_cluster_partition : &noncollideable_object_cluster_partition;
+	for (cluster_index = (short)cluster_partition_get_first_cluster(partition, &reference, object->object.first_cluster_reference_index);
+		cluster_index != NONE;
+		cluster_index = (short)cluster_partition_get_next_cluster(partition, &reference))
+	{
+		long rendered_index;
+
+		clusters++;
+		for (rendered_index = 0; rendered_index < render.rendered_cluster_count; rendered_index++)
+		{
+			if (rendered_cluster_get(rendered_index)->cluster_index == cluster_index)
+			{
+				long iterator, datum;
+
+				rendered_clusters++;
+				for (datum = cluster_partition_get_first_datum(partition, &iterator, cluster_index); datum != NONE;
+					datum = cluster_partition_get_next_datum(partition, &iterator))
+				{
+					if (datum == object_index)
+						listed++;
+				}
+			}
+		}
+	}
+	visible = render_frustum_sphere_visible(&render.frustum, &object->object.bounding_sphere_center,
+		object->object.bounding_sphere_radius);
+	snprintf(why, size, "type %d parent %08lx flags %08lx header %02x connected %d clusters %d rendered %d listed %d visible %d invisible %d",
+		object->object.type, (unsigned long)object->object.parent_object_index, (unsigned long)object->object.flags,
+		header->flags, TEST_FLAG(object->object.flags, _object_connected_to_map_bit) ? 1 : 0,
+		clusters, rendered_clusters, listed, visible ? 1 : 0, TEST_FLAG(object->object.flags, _object_invisible_bit) ? 1 : 0);
+}
+
+/* after find_rendered_objects: the found list against the last two frames */
+static void flicker_check_found(void)
+{
+	short index;
+	struct object_iterator iterator;
+	struct object_datum *object;
+
+	if (!flicker_log_wanted())
+		return;
+	flicker_frame++;
+	for (index = 0; index < render_object_globals.rendered_object_count; index++)
+	{
+		long object_index = render_object_globals.rendered_object_indices[index];
+		long absolute = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+
+		if (absolute < 0 || absolute >= MAXIMUM_OBJECTS_PER_MAP)
+			continue;
+		if (flicker_identifier[absolute] == DATUM_INDEX_TO_IDENTIFIER(object_index) &&
+			flicker_found_frame[absolute] == flicker_frame - 2)
+		{
+			object = object_try_and_get(object_index);
+			platform_log("flicker: frame %lu: object %08lx (%s) not found in the frame before: %s",
+				flicker_frame, (unsigned long)object_index,
+				object ? tag_name_strip_path(tag_get_name(object->definition_index)) : "?", flicker_why[absolute]);
+		}
+		flicker_identifier[absolute] = (short)DATUM_INDEX_TO_IDENTIFIER(object_index);
+		flicker_found_frame[absolute] = flicker_frame;
+	}
+	/* (found last frame, not now: what this frame sees of it) */
+	object_iterator_new(&iterator, _object_mask_all, 0);
+	while ((object = (struct object_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		long absolute = DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.index);
+
+		if (absolute < MAXIMUM_OBJECTS_PER_MAP && flicker_found_frame[absolute] == flicker_frame - 1 &&
+			flicker_identifier[absolute] == DATUM_INDEX_TO_IDENTIFIER(iterator.index))
+		{
+			flicker_describe(iterator.index, flicker_why[absolute], sizeof(flicker_why[absolute]));
+		}
+	}
+}
+
+/* render_object_list: whether render_model drew the object, and why not */
+static void flicker_note_drawn(long object_index, boolean drawn, real pixels, real minimum)
+{
+	long absolute = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+
+	if (!flicker_log_wanted() || absolute < 0 || absolute >= MAXIMUM_OBJECTS_PER_MAP)
+		return;
+	if (drawn)
+	{
+		if (flicker_drawn_frame[absolute] == flicker_frame - 2 && flicker_identifier[absolute] == DATUM_INDEX_TO_IDENTIFIER(object_index))
+		{
+			struct object_datum *object = object_try_and_get(object_index);
+
+			platform_log("flicker: frame %lu: object %08lx (%s) found but not drawn in the frame before: %s",
+				flicker_frame, (unsigned long)object_index,
+				object ? tag_name_strip_path(tag_get_name(object->definition_index)) : "?", flicker_why_drawn[absolute]);
+		}
+		flicker_drawn_frame[absolute] = flicker_frame;
+	}
+	else
+		snprintf(flicker_why_drawn[absolute], sizeof(flicker_why_drawn[absolute]), "%.1f pixels, minimum %.1f", pixels, minimum);
+}
+
 /* (port) an object's bounding sphere where it is drawn: with the tick on its
 thread, as its pose has it (port/linux/game/render_interpolation.c), so the
 detail level, the shadow and the centroid follow the drawn object rather
@@ -764,6 +955,7 @@ static void render_object_list(
 						const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
 						minimum_pixels = setting ? (float)atof(setting) : 0.0f;
 					}
+					flicker_note_drawn(object_index, level_of_detail_pixels >= minimum_pixels, level_of_detail_pixels, minimum_pixels);
 					if (level_of_detail_pixels >= minimum_pixels)
 					render_model(
 						definition->object.model.index,
