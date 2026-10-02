@@ -3482,7 +3482,13 @@ void main_loop(
 					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 				}
 
+#ifdef HALO_LINUX
+				/* (port: with the tick on its thread it runs after this
+				point, so the save check waits for the tick: below) */
+				if (main_globals.saving_map && !halo_tick_thread_enabled())
+#else
 				if (main_globals.saving_map)
+#endif
 				{
 					main_save_map_private();
 				}
@@ -3559,6 +3565,19 @@ void main_loop(
 				frame's render to count down: game_time.c) */
 				extern volatile short halo_render_elapsed_ticks;
 				halo_render_elapsed_ticks = 0;
+			}
+			/* (port) the save check comes after the tick, as on the Xbox,
+			where the tick ran before it in the same frame: a save the
+			tick's scripts ask for is then taken at the top of the next
+			frame, before the next tick. Checked before the threaded tick
+			instead, the save landed a tick late, after the script's next
+			step had already run - cinematic_skip_start's
+			(sleep_until (not (game_saving)) 1) (not (game_reverted))
+			was past when the checkpoint was taken, so skipping a cinematic
+			reverted to a checkpoint inside it and replayed it */
+			if (halo_tick_thread_enabled() && game_in_progress() && main_globals.saving_map)
+			{
+				main_save_map_private();
 			}
 #endif
 		}
