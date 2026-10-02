@@ -144,22 +144,49 @@ static const int ima_step_table[89] =
 	32767,
 };
 
-static int ima_expand(int nibble, int *predictor, int *index)
-{
-	int step = ima_step_table[*index];
-	int difference = step >> 3;
+/* IMA ADPCM expansion from tables: the difference a nibble makes at each
+step index and the step index it leads to, worked out once at start-up
+with the same integer arithmetic a nibble-by-nibble expansion does (a whole
+packet is decoded on the game's thread when it is queued: on the Vita, the
+tick's) */
+static int ima_difference_table[89][16];
+static unsigned char ima_next_index_table[89][16];
+static int ima_tables_built;
 
-	if (nibble & 1) difference += step >> 2;
-	if (nibble & 2) difference += step >> 1;
-	if (nibble & 4) difference += step;
-	if (nibble & 8) difference = -difference;
-	*predictor += difference;
-	if (*predictor > 32767) *predictor = 32767;
-	if (*predictor < -32768) *predictor = -32768;
-	*index += ima_index_table[nibble];
-	if (*index < 0) *index = 0;
-	if (*index > 88) *index = 88;
-	return *predictor;
+static void ima_build_tables(void)
+{
+	int index, nibble;
+
+	for (index = 0; index < 89; index++)
+	{
+		for (nibble = 0; nibble < 16; nibble++)
+		{
+			int step = ima_step_table[index];
+			int difference = step >> 3;
+			int next = index + ima_index_table[nibble];
+
+			if (nibble & 1) difference += step >> 2;
+			if (nibble & 2) difference += step >> 1;
+			if (nibble & 4) difference += step;
+			if (nibble & 8) difference = -difference;
+			if (next < 0) next = 0;
+			if (next > 88) next = 88;
+			ima_difference_table[index][nibble] = difference;
+			ima_next_index_table[index][nibble] = (unsigned char)next;
+		}
+	}
+	ima_tables_built = 1;
+}
+
+static inline int ima_expand_fast(int nibble, int *predictor, int *index)
+{
+	int value = *predictor + ima_difference_table[*index][nibble];
+
+	if (value > 32767) value = 32767;
+	if (value < -32768) value = -32768;
+	*predictor = value;
+	*index = ima_next_index_table[*index][nibble];
+	return value;
 }
 
 /* Xbox ADPCM: per block, a 4-byte header per channel (predictor, step
@@ -178,6 +205,8 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 		*frame_count = 0;
 		return NULL;
 	}
+	if (!ima_tables_built)
+		ima_build_tables();
 	for (block = 0; block < blocks; block++)
 	{
 		const unsigned char *data = source + block * block_bytes;
@@ -198,8 +227,8 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 				{
 					unsigned long sample = group * 8 + byte * 2;
 
-					output[sample * channels + channel] = (short)ima_expand(nibbles[byte] & 0xf, &predictor, &index);
-					output[(sample + 1) * channels + channel] = (short)ima_expand(nibbles[byte] >> 4, &predictor, &index);
+					output[sample * channels + channel] = (short)ima_expand_fast(nibbles[byte] & 0xf, &predictor, &index);
+					output[(sample + 1) * channels + channel] = (short)ima_expand_fast(nibbles[byte] >> 4, &predictor, &index);
 				}
 			}
 		}
@@ -303,7 +332,49 @@ static float packet_sample(const struct voice_packet *packet, unsigned long fram
 	return packet->samples[frame * channels + channel] * (1.0f / 32768.0f);
 }
 
-/* mixes one voice into output (frames of stereo float) */
+/* the first packet of a stream that still has frames to play at the
+cursor, marking the ones the cursor has passed finished; NULL once the
+stream has run dry */
+static struct voice_packet *mix_voice_packet(struct sdl_stream *stream)
+{
+	for (;;)
+	{
+		struct voice_packet *packet = NULL;
+		unsigned long position;
+
+		for (position = 0; position < stream->packet_count; position++)
+		{
+			struct voice_packet *candidate = &stream->packets[(stream->packet_head + position) % MAXIMUM_STREAM_PACKETS];
+
+			if (!candidate->finished)
+			{
+				packet = candidate;
+				break;
+			}
+		}
+		if (!packet)
+			return NULL;
+		if (stream->cursor < (double)packet->frames)
+			return packet;
+		stream->cursor -= (double)packet->frames;
+		if (packet->frames)
+		{
+			unsigned long last = packet->frames - 1;
+
+			stream->previous[0] = packet_sample(packet, last, 0, stream->channels);
+			stream->previous[1] = packet_sample(packet, last, stream->channels - 1, stream->channels);
+		}
+		packet->finished = TRUE;
+	}
+}
+
+/* mixes one voice into output (frames of stereo float).
+
+The packet a frame reads from only changes once the cursor passes its end,
+so it is looked up again only then rather than for every frame (on the
+Vita the mixer runs with mixer_lock held, which the game's sound calls
+wait for, so its speed is the tick's too). The arithmetic is the same as a
+frame-by-frame lookup's, in the same order, so the output is identical. */
 static void mix_voice(struct sdl_stream *stream, float *output, unsigned long frames)
 {
 	double step;
@@ -325,79 +396,68 @@ static void mix_voice(struct sdl_stream *stream, float *output, unsigned long fr
 	ramp_left = (target_left - left) / (float)frames;
 	ramp_right = (target_right - right) / (float)frames;
 
-	for (frame = 0; frame < frames; frame++)
+	frame = 0;
+	while (frame < frames)
 	{
-		struct voice_packet *packet;
-		unsigned long index;
-		float fraction, sample_left, sample_right;
+		struct voice_packet *packet = mix_voice_packet(stream);
+		const short *samples;
+		double cursor, packet_frames;
+		unsigned long last;
 
-		/* skip to the first packet that still has frames to play */
-		for (;;)
-		{
-			unsigned long position;
-
-			packet = NULL;
-			for (position = 0; position < stream->packet_count; position++)
-			{
-				struct voice_packet *candidate = &stream->packets[(stream->packet_head + position) % MAXIMUM_STREAM_PACKETS];
-
-				if (!candidate->finished)
-				{
-					packet = candidate;
-					break;
-				}
-			}
-			if (!packet)
-				break;
-			if (stream->cursor < (double)packet->frames)
-				break;
-			stream->cursor -= (double)packet->frames;
-			if (packet->frames)
-			{
-				unsigned long last = packet->frames - 1;
-
-				stream->previous[0] = packet_sample(packet, last, 0, stream->channels);
-				stream->previous[1] = packet_sample(packet, last, stream->channels - 1, stream->channels);
-			}
-			packet->finished = TRUE;
-		}
 		if (!packet)
 			break;
-
-		index = (unsigned long)stream->cursor;
-		fraction = (float)(stream->cursor - (double)index);
-		{
-			float a0 = packet_sample(packet, index, 0, stream->channels);
-			float a1 = packet_sample(packet, index, stream->channels - 1, stream->channels);
-			float b0, b1;
-
-			if (index + 1 < packet->frames)
-			{
-				b0 = packet_sample(packet, index + 1, 0, stream->channels);
-				b1 = packet_sample(packet, index + 1, stream->channels - 1, stream->channels);
-			}
-			else
-			{
-				b0 = a0;
-				b1 = a1;
-			}
-			sample_left = a0 + (b0 - a0) * fraction;
-			sample_right = a1 + (b1 - a1) * fraction;
-		}
+		samples = packet->samples;
+		cursor = stream->cursor;
+		packet_frames = (double)packet->frames;
+		last = packet->frames - 1;
 		if (stream->channels == 1)
 		{
-			/* a mono voice's mix bins or pan split it across the speakers */
-			output[frame * 2] += sample_left * left;
-			output[frame * 2 + 1] += sample_left * right;
+			for (; frame < frames && cursor < packet_frames; frame++)
+			{
+				unsigned long index = (unsigned long)cursor;
+				float fraction = (float)(cursor - (double)index);
+				float a0 = samples[index] * (1.0f / 32768.0f);
+				float b0 = index < last ? samples[index + 1] * (1.0f / 32768.0f) : a0;
+				float sample_left = a0 + (b0 - a0) * fraction;
+
+				/* a mono voice's mix bins or pan split it across the speakers */
+				output[frame * 2] += sample_left * left;
+				output[frame * 2 + 1] += sample_left * right;
+				left += ramp_left;
+				right += ramp_right;
+				cursor += step;
+			}
 		}
 		else
 		{
-			output[frame * 2] += sample_left * left;
-			output[frame * 2 + 1] += sample_right * right;
+			for (; frame < frames && cursor < packet_frames; frame++)
+			{
+				unsigned long index = (unsigned long)cursor;
+				float fraction = (float)(cursor - (double)index);
+				float a0 = samples[index * 2] * (1.0f / 32768.0f);
+				float a1 = samples[index * 2 + 1] * (1.0f / 32768.0f);
+				float b0, b1, sample_left, sample_right;
+
+				if (index < last)
+				{
+					b0 = samples[index * 2 + 2] * (1.0f / 32768.0f);
+					b1 = samples[index * 2 + 3] * (1.0f / 32768.0f);
+				}
+				else
+				{
+					b0 = a0;
+					b1 = a1;
+				}
+				sample_left = a0 + (b0 - a0) * fraction;
+				sample_right = a1 + (b1 - a1) * fraction;
+				output[frame * 2] += sample_left * left;
+				output[frame * 2 + 1] += sample_right * right;
+				left += ramp_left;
+				right += ramp_right;
+				cursor += step;
+			}
 		}
-		left += ramp_left;
-		right += ramp_right;
-		stream->cursor += step;
+		stream->cursor = cursor;
 	}
 	stream->current_left = target_left;
 	stream->current_right = target_right;
@@ -483,6 +543,7 @@ static void audio_start(void)
 	if (audio_started)
 		return;
 	audio_started = TRUE;
+	ima_build_tables();
 	master_volume = (float)config_real("audio.volume");
 
 	{
