@@ -759,12 +759,43 @@ void rasterizer_lights_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) rasterizer_lens_flare_submit_for_cluster's per-marker results, by
+marker index, valid for one structure of one loaded map (the render thread
+only) */
+enum { LENS_FLARE_MARKER_CACHE_SIZE = 4096 };
+struct lens_flare_marker_cache_entry
+{
+	unsigned long stamp;
+	long marker_index;
+	unsigned long compressed_direction, compressed_up;
+	struct lens_flare_definition *definition;
+};
+static struct lens_flare_marker_cache_entry lens_flare_marker_cache[LENS_FLARE_MARKER_CACHE_SIZE];
+static unsigned long lens_flare_marker_cache_stamp;
+#endif
+
 void rasterizer_lens_flare_submit_for_cluster(
 	short cluster_index)
 {
 	if (rasterizer_debug_options.lens_flares && !screenshot_in_progress())
 	{
 		struct structure_bsp *structure_bsp= global_structure_bsp_get();
+#ifdef HALO_LINUX
+		{
+			extern unsigned long halo_map_generation;
+			static struct structure_bsp *cached_structure_bsp;
+			static unsigned long cached_generation;
+
+			if (cached_structure_bsp != structure_bsp || cached_generation != halo_map_generation ||
+				!lens_flare_marker_cache_stamp)
+			{
+				cached_structure_bsp= structure_bsp;
+				cached_generation= halo_map_generation;
+				lens_flare_marker_cache_stamp++;
+			}
+		}
+#endif
 		struct structure_cluster *cluster= TAG_BLOCK_GET_ELEMENT(&structure_bsp->clusters, cluster_index, struct structure_cluster);
 		long lens_flare_marker_index;
 
@@ -775,6 +806,24 @@ void rasterizer_lens_flare_submit_for_cluster(
 			struct structure_lens_flare *structure_lens_flare= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flares, marker->lens_flare_index, struct structure_lens_flare);
 			struct rasterizer_lens_flare_submit_parameters parameters;
 
+#ifdef HALO_LINUX
+			/* (port) a marker's compressed direction and up vectors and its
+			definition are the same every frame (the structure's own data):
+			made once per marker and map instead of on every frame for every
+			marker in view - a10's corridors submit ~900 a frame, each two
+			normalizations and six floors */
+			struct lens_flare_marker_cache_entry *cached =
+				&lens_flare_marker_cache[structure_lens_flare_marker_index & (LENS_FLARE_MARKER_CACHE_SIZE - 1)];
+
+			if (cached->stamp == lens_flare_marker_cache_stamp && cached->marker_index == structure_lens_flare_marker_index)
+			{
+				parameters.compressed_direction= cached->compressed_direction;
+				parameters.compressed_up= cached->compressed_up;
+				parameters.definition= cached->definition;
+			}
+			else
+#endif
+			{
 			{
 				real_vector3d direction;
 				real_vector3d up;
@@ -794,6 +843,14 @@ void rasterizer_lens_flare_submit_for_cluster(
 			}
 
 			parameters.definition= lens_flare_definition_get(structure_lens_flare->lens_flare.index);
+#ifdef HALO_LINUX
+			cached->stamp= lens_flare_marker_cache_stamp;
+			cached->marker_index= structure_lens_flare_marker_index;
+			cached->compressed_direction= parameters.compressed_direction;
+			cached->compressed_up= parameters.compressed_up;
+			cached->definition= parameters.definition;
+#endif
+			}
 			parameters.position= marker->position;
 			parameters.compressed_light_color= NONE;
 			parameters.light_identifier= NONE;
