@@ -40,6 +40,20 @@ static pthread_mutex_t arena_lock = PTHREAD_MUTEX_INITIALIZER;
 /* no page protection on the Vita: protections are only recorded */
 unsigned long platform_contiguous_base;
 
+/* Where the blocks are laid out from, top down. The game state lives in
+the window and keeps absolute pointers (data arrays to their datums,
+object headers to objects, memory pool links, and the tag data it points
+into), which a campaign save keeps too: a save resumes only with every
+block where it was. The window itself lands where the system puts it,
+which moves by a megabyte whenever the program's data segment crosses a
+megabyte (v1.0 and v1.0.1: window at 0x86400000; a build whose data
+segment reached 10 MB: 0x86500000, and v1.0.1 saves did not resume). The
+blocks are therefore laid out from v1.0's window top, 0x8D400000, down -
+the game state at 0x8C0E4000 as in v1.0 and v1.0.1 - whenever the window
+reaches that high; the space above stays unused. */
+#define VITA_LAYOUT_TOP 0x8D400000UL
+static unsigned long layout_top_page = CONTIGUOUS_PAGE_COUNT;
+
 static void contiguous_arena_reserve(void)
 {
 	unsigned long size = 0;
@@ -47,11 +61,25 @@ static void contiguous_arena_reserve(void)
 
 	if (arena && size >= PLATFORM_CONTIGUOUS_SIZE)
 	{
-		platform_contiguous_base = (unsigned long)arena;
+		unsigned long base = (unsigned long)arena;
+
+		platform_contiguous_base = base;
 		/* the first page stays unused: physical address 0 means none */
 		page_protection[0] = PAGE_NOACCESS;
 		block_page_count[0] = 1;
 		arena_reserved = TRUE;
+		if (VITA_LAYOUT_TOP > base + 64UL * 1024 * 1024 && VITA_LAYOUT_TOP <= base + PLATFORM_CONTIGUOUS_SIZE)
+		{
+			layout_top_page = (VITA_LAYOUT_TOP - base) / PAGE_SIZE_BYTES;
+			platform_log("memory window at 0x%08lx: blocks laid out from 0x%08lx down, as in v1.0 and v1.0.1",
+				base, VITA_LAYOUT_TOP);
+		}
+		else
+		{
+			platform_log("memory window at 0x%08lx: WARNING: it does not reach 0x%08lx, so the blocks are not where "
+				"v1.0 and v1.0.1 put them, and their campaign saves will not resume (the level starts over)",
+				base, VITA_LAYOUT_TOP);
+		}
 	}
 	else
 	{
@@ -151,7 +179,12 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 	else if (count <= CONTIGUOUS_PAGE_COUNT)
 	{
 		/* top-down first fit, like the Xbox contiguous allocator */
-		unsigned long candidate = CONTIGUOUS_PAGE_COUNT - count;
+#ifdef HALO_VITA
+		unsigned long top = layout_top_page;
+#else
+		unsigned long top = CONTIGUOUS_PAGE_COUNT;
+#endif
+		unsigned long candidate = count <= top ? top - count : 0;
 
 		for (;;)
 		{
