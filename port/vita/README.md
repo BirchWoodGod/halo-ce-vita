@@ -98,7 +98,6 @@ the panel. The game does not see the buttons while the panel is open.
 | Scenery updates | Quarter | how often static props are updated |
 | Object lighting | Third | how often object lighting is recomputed |
 | Sound voices | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices); applies after a restart |
-| Heavy scenes | Catch up | when the game cannot keep 30 ticks a second (the heaviest fights): Catch up runs two ticks a frame to keep real time, at half the frame rate; Slow down runs one a frame, smoother but played slightly slower. Each tick is the same either way; networked games and cinematics always catch up |
 | Sound occlusion | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
 | Look sensitivity | 100% | right stick turning speed |
 | Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
