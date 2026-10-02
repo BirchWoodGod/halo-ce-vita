@@ -8,9 +8,14 @@ translated to the Vita's GPU.
 **No game data is included.** You need your own Xbox copy of Halo: Combat
 Evolved.
 
-![Blood Gulch on a PS Vita](docs/screenshots/blood-gulch.png)
+![A Warthog on The Silent Cartographer's beach, on a PS Vita](docs/screenshots/warthog-beach.png)
 
-*Blood Gulch on a PS Vita (a screenshot taken on the console).*
+| | |
+| --- | --- |
+| ![Two Pelicans over the sea in The Silent Cartographer's opening](docs/screenshots/pelicans.png) | ![Landing on The Silent Cartographer's beach](docs/screenshots/beach-landing.png) |
+| ![Covenant at a Blood Gulch base](docs/screenshots/blood-gulch.png) | |
+
+*Screenshots taken on a PS Vita.*
 
 ## What works
 
