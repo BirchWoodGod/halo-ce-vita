@@ -160,8 +160,10 @@ static unsigned long deferred_call_count;
 
 int halo_tick_thread_defer(void (*call)(void))
 {
+	/* (until the join: a tick that has finished still has its epoch open,
+	the marks it made not yet swept) */
 	if (enabled <= 0 || halo_epoch_on_mutator() ||
-		__atomic_load_n(&finished, __ATOMIC_ACQUIRE) == started ||
+		(__atomic_load_n(&finished, __ATOMIC_ACQUIRE) == started && !__atomic_load_n(&halo_epoch_active, __ATOMIC_ACQUIRE)) ||
 		deferred_call_count >= MAXIMUM_DEFERRED_CALLS)
 		return 0;
 	deferred_calls[deferred_call_count++] = call;
