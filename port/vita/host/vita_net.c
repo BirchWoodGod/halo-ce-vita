@@ -12,8 +12,9 @@ What differs from posix_net.c: the library starts on first use
 (SCE_SYSMODULE_NET, sceNetInit, sceNetCtlInit); its errors are negative
 codes whose low byte is the BSD errno, which Winsock's error numbers are
 10000 more than; a SceNetSockaddrIn starts with a length byte where the
-game's (Winsock's) address has a 16-bit family; and there is no select, so
-select is a one-shot epoll.
+game's (Winsock's) address has a 16-bit family; there is no select, so
+select is a one-shot epoll; and the stack is BSD's, whose connected
+datagram sockets refuse a sendto naming a destination (posix_socket_sendto).
 */
 
 #include <psp2/net/net.h>
@@ -31,6 +32,10 @@ select is a one-shot epoll.
 #define WSAEINPROGRESS 10036
 #define WSAENOPROTOOPT 10042
 #define WSAENETDOWN 10050
+#define WSAECONNRESET 10054
+#define WSAENOBUFS 10055
+#define WSAEISCONN 10056
+#define WSANOTINITIALISED 10093
 
 /* the network stack's pool holds every socket's buffers: the game's
 endpoints ask for 256 KB each (transport_endpoint_winsock.c) - with 1 MB
@@ -39,6 +44,8 @@ buffers, and in a match the host's connection to its own client filled
 up and timed out: the player could not move and the host went down */
 #define NET_MEMORY_SIZE (8 * 1024 * 1024)
 #define SELECT_MAXIMUM 64
+/* the library's socket identifiers are 0 to SCE_NET_ID_SOCKET_MAX (1023) */
+#define SOCKET_IDENTIFIERS 1024
 
 static __thread int last_error;
 static int net_state; /* 0 not tried, 1 up, -1 failed */
@@ -73,16 +80,54 @@ static int net_ready(void)
 	return net_state > 0;
 }
 
+/* a library error (0x80410100 | the BSD errno) as Winsock's: Winsock's
+socket errors are the BSD numbers plus 10000 (WSAEWOULDBLOCK 10035 ...
+WSAEHOSTUNREACH 10065, and WSAEBADF, WSAEACCES, WSAEFAULT, WSAEINVAL,
+WSAEMFILE below them); the library's own codes and the errors Winsock has
+no number for are what Winsock says in their place */
+static int winsock_error(int result)
+{
+	unsigned int code = (unsigned int)result;
+
+	if ((code & 0xffffff00u) != 0x80410100u)
+		return WSAENETDOWN;
+	switch (code & 0xff)
+	{
+	case 12: /* ENOMEM */
+	case 0xc9: /* ENOLIBMEM: the network pool is full */
+		return WSAENOBUFS;
+	case 32: /* EPIPE: a send to a connection the peer has closed */
+		return WSAECONNRESET;
+	case 0xc8: /* ENOTINIT */
+		return WSANOTINITIALISED;
+	default:
+		return (code & 0xff) < 0x80 ? 10000 + (int)(code & 0xff) : WSAENETDOWN;
+	}
+}
+
 /* a library result as the platform layer's: -1 with the Winsock error */
 static int answer(int result)
 {
 	if (result < 0)
 	{
-		last_error = 10000 + (result & 0xff);
+		last_error = winsock_error(result);
 		return -1;
 	}
 	last_error = 0;
 	return result;
+}
+
+/* the connected datagram sockets whose peer a sendto has named
+(posix_socket_sendto), with that peer; forgotten when the identifier is
+made, connected again or closed */
+static unsigned char connected_datagram[SOCKET_IDENTIFIERS];
+static unsigned int connected_peer_address[SOCKET_IDENTIFIERS];
+static unsigned short connected_peer_port[SOCKET_IDENTIFIERS];
+
+static void forget_peer(int socket)
+{
+	if (socket >= 0 && socket < SOCKET_IDENTIFIERS)
+		connected_datagram[socket] = 0;
 }
 
 static unsigned int address_to_vita(const void *address, int length, SceNetSockaddrIn *out)
@@ -129,11 +174,17 @@ int posix_socket(int family, int type, int protocol)
 		last_error = WSAENETDOWN;
 		return -1;
 	}
-	return answer(sceNetSocket("halo", family, type, protocol));
+	{
+		int result = sceNetSocket("halo", family, type, protocol);
+
+		forget_peer(result);
+		return answer(result);
+	}
 }
 
 int posix_socket_close(int socket)
 {
+	forget_peer(socket);
 	return answer(sceNetSocketClose(socket));
 }
 
@@ -149,10 +200,12 @@ int posix_socket_connect(int socket, const void *address, int address_length)
 {
 	SceNetSockaddrIn vita_address;
 	unsigned int length = address_to_vita(address, address_length, &vita_address);
-	int result = sceNetConnect(socket, (const SceNetSockaddr *)&vita_address, length);
+	int result;
 
+	forget_peer(socket);
+	result = sceNetConnect(socket, (const SceNetSockaddr *)&vita_address, length);
 	/* (a connect under way is WSAEWOULDBLOCK to the game, as in posix_net.c) */
-	if (result < 0 && 10000 + (result & 0xff) == WSAEINPROGRESS)
+	if (result < 0 && winsock_error(result) == WSAEINPROGRESS)
 	{
 		last_error = WSAEWOULDBLOCK;
 		return -1;
@@ -181,14 +234,70 @@ int posix_socket_send(int socket, const void *buffer, int length, int flags)
 	return answer(sceNetSend(socket, buffer, (unsigned int)length, flags));
 }
 
+/* whether the socket is a connected one whose peer is this address: known
+from an earlier send, or asked of the library (and then remembered) */
+static int is_connected_peer(int socket, const SceNetSockaddrIn *address, int ask)
+{
+	SceNetSockaddrIn peer;
+	unsigned int length = sizeof(peer);
+
+	if (socket < 0 || socket >= SOCKET_IDENTIFIERS)
+		return 0;
+	if (connected_datagram[socket])
+		return connected_peer_address[socket] == address->sin_addr.s_addr &&
+			connected_peer_port[socket] == address->sin_port;
+	if (!ask)
+		return 0;
+	memset(&peer, 0, sizeof(peer));
+	if (sceNetGetpeername(socket, (SceNetSockaddr *)&peer, &length) < 0 ||
+		peer.sin_addr.s_addr != address->sin_addr.s_addr || peer.sin_port != address->sin_port)
+	{
+		return 0;
+	}
+	connected_peer_address[socket] = peer.sin_addr.s_addr;
+	connected_peer_port[socket] = peer.sin_port;
+	connected_datagram[socket] = 1;
+	return 1;
+}
+
+/* A connected datagram socket takes a sendto that names its peer on
+Winsock and Linux (Vita3K, which runs these calls on the host's sockets,
+too), but the Vita's stack is BSD's, whose udp_output refuses any
+destination on a connected socket with EISCONN. The game's client connects
+its datagram endpoint to the server (network_connection_connect) and sends
+its in-game update, every 16 ms, to the server's address
+(network_game_client_send_update -> write_to_endpoint, unreliable, its
+failure unlogged): on the Vita every update failed, so the host never had
+the client's input - the player could look but not move - and it stalled
+128 ticks on and removed the client 2 s later ("forcibly removing client
+system ... due to timeout in-game", 6 s into the match). The lobby's
+messages, on the stream connection, never met it. A sendto naming the
+connected peer is a send; one naming another address stays refused, as BSD
+cannot send it. */
 int posix_socket_sendto(int socket, const void *buffer, int length, int flags,
 	const void *address, int address_length)
 {
 	SceNetSockaddrIn vita_address;
 	unsigned int vita_length = address_to_vita(address, address_length, &vita_address);
+	int result;
 
-	return answer(sceNetSendto(socket, buffer, (unsigned int)length, flags,
-		vita_length ? (const SceNetSockaddr *)&vita_address : NULL, vita_length));
+	if (vita_length && is_connected_peer(socket, &vita_address, 0))
+		return answer(sceNetSend(socket, buffer, (unsigned int)length, flags));
+	result = sceNetSendto(socket, buffer, (unsigned int)length, flags,
+		vita_length ? (const SceNetSockaddr *)&vita_address : NULL, vita_length);
+	if (result < 0 && vita_length && winsock_error(result) == WSAEISCONN &&
+		is_connected_peer(socket, &vita_address, 1))
+	{
+		static int logged;
+
+		if (!logged)
+		{
+			logged = 1;
+			vita_host_log("net: a connected datagram socket refused a sendto to its peer (EISCONN): sending it as a send");
+		}
+		result = sceNetSend(socket, buffer, (unsigned int)length, flags);
+	}
+	return answer(result);
 }
 
 int posix_socket_recv(int socket, void *buffer, int length, int flags)
@@ -236,7 +345,7 @@ int posix_socket_bytes_available(int socket, posix_ulong *count)
 	static char scratch[4096];
 	int result = sceNetRecv(socket, scratch, sizeof(scratch), SCE_NET_MSG_PEEK | SCE_NET_MSG_DONTWAIT);
 
-	if (result < 0 && 10000 + (result & 0xff) == WSAEWOULDBLOCK)
+	if (result < 0 && winsock_error(result) == WSAEWOULDBLOCK)
 		result = 0;
 	if (result >= 0)
 		*count = (posix_ulong)result;
