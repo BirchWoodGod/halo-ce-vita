@@ -400,7 +400,9 @@ int sceNetCtlInit(void)
 int sceNetCtlInetGetInfo(int code, SceNetCtlInfo *info)
 {
 	(void)code;
-	strcpy(info->ip_address, "192.168.1.50");
+	/* (MOCK_LOCAL_ADDRESS: the Wi-Fi address the console reports) */
+	snprintf(info->ip_address, sizeof(info->ip_address), "%s",
+		getenv("MOCK_LOCAL_ADDRESS") ? getenv("MOCK_LOCAL_ADDRESS") : "192.168.1.50");
 	return 0;
 }
 
@@ -442,7 +444,13 @@ int sceNetAdhocInit(void) { mock_adhoc_inits++; return 0; }
 int sceNetAdhocctlInit(const SceNetAdhocctlAdhocId *adhoc_id) { (void)adhoc_id; return 0; }
 int sceNetAdhocctlGetEtherAddr(SceNetEtherAddr *addr)
 {
-	memcpy(addr->data, "\x02\x00\x7f\x00\x00\xdc", 6);
+	/* 02:00 and MOCK_ADHOC_ADDRESS (an IPv4 address; 127.0.0.220 if unset),
+	as the PDP mock maps MACs */
+	in_addr_t ip = inet_addr(getenv("MOCK_ADHOC_ADDRESS") ? getenv("MOCK_ADHOC_ADDRESS") : "127.0.0.220");
+
+	addr->data[0] = 0x02;
+	addr->data[1] = 0x00;
+	memcpy(addr->data + 2, &ip, 4);
 	return 0;
 }
 int sceNetAdhocctlGetPeerList(int *buflen, void *buf) { (void)buflen; (void)buf; return -1; }
@@ -652,17 +660,42 @@ SceUInt64 sceKernelGetProcessTimeWide(void)
 	return (SceUInt64)now.tv_sec * 1000000ULL + (SceUInt64)now.tv_nsec / 1000ULL;
 }
 
+/* threads: none unless MOCK_THREADS=1 (the ad hoc test's connect thread,
+vita_adhoc_connect), then a detached pthread each */
+#include <pthread.h>
+
+#define MOCK_THREADS 8
+static SceKernelThreadEntry mock_thread_entries[MOCK_THREADS];
+static int mock_thread_count;
+
+static void *mock_thread_main(void *argument)
+{
+	SceKernelThreadEntry entry = mock_thread_entries[(long)argument];
+
+	entry(0, NULL);
+	return NULL;
+}
+
 SceUID sceKernelCreateThread(const char *name, SceKernelThreadEntry entry, int initPriority, SceSize stackSize,
 	SceUInt attr, int cpuAffinityMask, const SceKernelThreadOptParam *option)
 {
-	(void)name; (void)entry; (void)initPriority; (void)stackSize; (void)attr; (void)cpuAffinityMask; (void)option;
-	return -1;
+	(void)name; (void)initPriority; (void)stackSize; (void)attr; (void)cpuAffinityMask; (void)option;
+	if (!getenv("MOCK_THREADS") || mock_thread_count == MOCK_THREADS)
+		return -1;
+	mock_thread_entries[mock_thread_count] = entry;
+	return 0x100 + mock_thread_count++;
 }
 
 int sceKernelStartThread(SceUID thid, SceSize arglen, void *argp)
 {
-	(void)thid; (void)arglen; (void)argp;
-	return -1;
+	pthread_t thread;
+
+	(void)arglen; (void)argp;
+	if (thid < 0x100 || thid >= 0x100 + mock_thread_count ||
+		pthread_create(&thread, NULL, mock_thread_main, (void *)(long)(thid - 0x100)) != 0)
+		return -1;
+	pthread_detach(thread);
+	return 0;
 }
 
 int sceKernelDelayThread(SceUInt delay)
