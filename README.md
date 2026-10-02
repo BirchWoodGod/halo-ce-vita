@@ -10,10 +10,9 @@ Evolved.
 
 ![A Warthog on The Silent Cartographer's beach, on a PS Vita](docs/screenshots/warthog-beach.png)
 
-| | |
-| --- | --- |
-| ![Two Pelicans over the sea in The Silent Cartographer's opening](docs/screenshots/pelicans.png) | ![Landing on The Silent Cartographer's beach](docs/screenshots/beach-landing.png) |
-| ![Covenant at a Blood Gulch base](docs/screenshots/blood-gulch.png) | |
+| | | |
+| --- | --- | --- |
+| ![Two Pelicans over the sea in The Silent Cartographer's opening](docs/screenshots/pelicans.png) | ![Landing on The Silent Cartographer's beach](docs/screenshots/beach-landing.png) | ![Covenant at a Blood Gulch base](docs/screenshots/blood-gulch.png) |
 
 *Screenshots taken on a PS Vita.*
 
