@@ -193,17 +193,13 @@ int halo_thread_index(void)
 
 #define ARRAY_TABLE_SIZE 256
 
-struct marked_array
-{
-	struct data_array *data;
-	unsigned char *marks;
-	unsigned long marked;
-	/* the array's size when the marks were made: a new map builds its
-	arrays at the same addresses with other sizes */
-	long maximum_count;
-};
+/* (struct halo_epoch_marked_array, render_epoch.h: data.h's inline
+datum_get reads the table for the common "slot not marked" answer) */
+#define marked_array halo_epoch_marked_array
+typedef char array_table_size_assert[ARRAY_TABLE_SIZE == HALO_EPOCH_ARRAY_TABLE_SIZE ? 1 : -1];
 
-static struct marked_array arrays[ARRAY_TABLE_SIZE];
+#define arrays halo_epoch_marked_arrays
+struct marked_array arrays[ARRAY_TABLE_SIZE];
 static unsigned long array_count;
 
 #define MARK_FLAG(data) ((data)->name[sizeof((data)->name) - 1])
@@ -642,15 +638,23 @@ void halo_assert_soft(const char *information, const char *file, long line)
 
 static volatile int marker_held[_halo_marker_count];
 void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+/* time spent waiting for a marker held by the other thread, by the render
+[0] and the tick [1] (main.c reports it with the render split) */
+volatile unsigned long long halo_marker_wait_us[2];
 
 void halo_marker_lock(int which)
 {
 	unsigned long spins = 0;
+	unsigned long long waited_from = 0;
 
 	if (!halo_epoch_threaded)
 		return;
 	while (__atomic_exchange_n(&marker_held[which], 1, __ATOMIC_ACQUIRE))
 	{
+		if (!waited_from && vita_host_time_us)
+			waited_from = vita_host_time_us();
 		if (++spins > 200)
 		{
 			if (vita_host_sleep_us)
@@ -664,6 +668,8 @@ void halo_marker_lock(int which)
 			}
 		}
 	}
+	if (waited_from)
+		halo_marker_wait_us[halo_epoch_on_mutator() ? 1 : 0] += vita_host_time_us() - waited_from;
 }
 
 void halo_marker_unlock(int which)

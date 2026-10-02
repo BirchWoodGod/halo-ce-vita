@@ -29,6 +29,26 @@ TITLE = "Halo CE"
 # the version the LiveArea and the system show (APP_VER, "XX.YY")
 APP_VERSION = "01.01"
 
+# The game's directories compiled without -fmax-type-align=1 (configure.py
+# --vita-aligned hot, the default). The flag makes clang take every pointer
+# as unaligned, so each float the game loads or stores through one goes via
+# an integer register and a transfer, which stalls the Cortex-A9 (and its
+# double-word copies become byte work); it is needed for code that reads
+# floats from 2-byte aligned data (the script engine, hs/). A UBSan
+# alignment sweep of every campaign level (x86 harness, a scripted player,
+# ~4000 ticks each) saw misaligned accesses only in hs/, cseries/
+# debug_memory.c and the one file excepted below. Pi (Cortex-A72, which
+# minds the transfers less than the Vita's A9), deterministic b30 bench:
+# game tick -6.6%.
+VITA_ALIGNED_DIRS = (
+    "source/objects/", "source/physics/", "source/ai/", "source/render/", "source/rasterizer/",
+    "source/math/", "source/structures/", "source/models/", "source/units/", "source/items/",
+    "source/effects/", "source/camera/", "source/game/", "source/memory/",
+)
+# ... but for these, whose single misaligned access the sweep did see (a
+# 32-bit read of a byte bit vector at an odd address)
+VITA_ALIGNED_EXCEPTIONS = {"source/physics/breakable_surfaces.c"}
+
 # The MSVC/Xbox ABI of LINUX_ABI_FLAGS, on 32-bit ARM
 VITA_ABI_FLAGS = [
     "--target=armv7a-none-eabihf",
@@ -197,6 +217,9 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
             if obj.status.name == "Missing" or name in excluded or obj.file_path.suffix.lower() != ".c":
                 continue
             cflags = game_cflags
+            if (getattr(sln, "vita_aligned", "hot") == "hot" and name.startswith(VITA_ALIGNED_DIRS) and
+                    name not in VITA_ALIGNED_EXCEPTIONS):
+                cflags = cflags.replace(" -fmax-type-align=1 ", " ")
             # reals travel in their own registers on hard-float ARM, as on Android
             if name in ANDROID_VARIADIC_PROTOTYPE_FILES:
                 cflags += " -include port/android/include/halo_android_variadic_prototypes.h"

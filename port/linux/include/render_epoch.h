@@ -94,6 +94,21 @@ void halo_epoch_check_reader_mutation(const struct data_array *data, long absolu
 render states): exempt from the check */
 void halo_epoch_reader_owned(const struct data_array *data);
 
+/* the marks' table (render_epoch.c), read by data.h's inline lookups: an
+array with marks has its entry's index plus one in its two padding bytes
+at 38, and a byte per slot, 0 for a live datum */
+#define HALO_EPOCH_ARRAY_TABLE_SIZE 256
+struct halo_epoch_marked_array
+{
+	struct data_array *data;
+	unsigned char *marks;
+	unsigned long marked;
+	/* the array's size when the marks were made: a new map builds its
+	arrays at the same addresses with other sizes */
+	long maximum_count;
+};
+extern struct halo_epoch_marked_array halo_epoch_marked_arrays[HALO_EPOCH_ARRAY_TABLE_SIZE];
+
 /* the tick frees a memory pool block during an epoch: defers it; 0 when the
 free must proceed as usual */
 int halo_epoch_pool_free(struct memory_pool *pool, void *block);

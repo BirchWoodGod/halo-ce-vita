@@ -54,6 +54,11 @@ void vita_host_pin_current_thread(int core)
 	(void)core;
 }
 
+unsigned long vita_host_thread_id(void)
+{
+	return (unsigned long)pthread_self();
+}
+
 #define MAXIMUM_SAMPLES (1 << 22)
 
 static unsigned long *samples;

@@ -572,6 +572,11 @@ void game_tick(
 #ifdef HALO_LINUX
 	tick_phase_end(12, "player_effect_update");
 	tick_phase_report();
+	{
+		void halo_tick_detail_report(void);
+
+		halo_tick_detail_report();
+	}
 #endif
 
 	profile_exit(game_update_section);
