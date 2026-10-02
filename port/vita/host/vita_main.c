@@ -132,6 +132,9 @@ void vita_host_log_memory(const char *when)
 	vita_host_log(message);
 }
 
+/* set once the memory window is allocated (vita_host_log) */
+static int log_thread_allowed;
+
 void *vita_host_arena(unsigned long *size)
 {
 	if (!arena)
@@ -143,6 +146,8 @@ void *vita_host_arena(unsigned long *size)
 		else
 			fprintf(stderr, "vita: cannot allocate the %lu byte memory window: 0x%08x\n", ARENA_SIZE,
 				(unsigned)arena_block);
+		/* (the log's thread only now: see vita_host_log) */
+		log_thread_allowed = 1;
 	}
 	*size = arena ? ARENA_SIZE : 0;
 	return arena;
@@ -732,7 +737,12 @@ void vita_host_log(const char *line)
 		text[length - 1] = '\n';
 	}
 	sceClibPrintf("%s", text);
-	if (log_thread_state == 0)
+	/* (the thread, its stack and its semaphore are made after the memory
+	window: made before it, at the first line logged, they moved the window
+	- and with it the game state, whose absolute pointers a campaign save
+	keeps - so the previous build's save resumed into a crash in
+	update_queues_reset_and_fill_with_lies) */
+	if (log_thread_state == 0 && log_thread_allowed)
 	{
 		log_thread_state = -1;
 		log_semaphore = sceKernelCreateSema("halo log", 0, 0, 0x7fffffff, NULL);
