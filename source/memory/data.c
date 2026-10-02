@@ -278,11 +278,15 @@ long datum_new_at_index(
 				data->count = absolute_index+1;
 			}
 
+#ifdef HALO_LINUX
+			/* marked under construction before the slot is cleared and
+			its identifier written (see datum_new) */
+			halo_epoch_datum_created(data, absolute_index);
+#endif
 			code_00108cc0(data, header);
 			header->identifier = identifier;
 			result = identifier<<16 | absolute_index;
 #ifdef HALO_LINUX
-			halo_epoch_datum_created(data, absolute_index);
 			halo_epoch_check_reader_mutation(data, absolute_index, "new");
 #endif
 		}
@@ -309,6 +313,15 @@ long datum_new(
 	{
 		if (!header->identifier)
 		{
+#ifdef HALO_LINUX
+			/* (port) marked under construction before the slot is cleared
+			and its identifier written: marked after, a render iterating
+			the array met the new identifier with no mark yet, took the
+			zeroed datum as live, and its datum_get, which hides a datum
+			under construction in the guarded arrays, then returned NULL
+			(lights_preprocess_scene crashed so under HALO_STRESS_*) */
+			halo_epoch_datum_created(data, absolute_index);
+#endif
 			code_00108cc0(data, header);
 			data->actual_count++;
 			data->first_free_absolute_index = absolute_index+1;
@@ -319,7 +332,6 @@ long datum_new(
 
 			result = header->identifier<<16 | absolute_index;
 #ifdef HALO_LINUX
-			halo_epoch_datum_created(data, absolute_index);
 			halo_epoch_check_reader_mutation(data, absolute_index, "new");
 #endif
 			break;

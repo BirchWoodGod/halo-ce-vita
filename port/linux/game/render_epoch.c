@@ -312,6 +312,9 @@ static int mark(struct data_array *data, long absolute_index, unsigned char valu
 	}
 	entry->marks[absolute_index] = value;
 	MARK_FLAG(data) = 1;
+	/* (the mark is visible before what the caller writes next: a new
+	datum's identifier, datum_new) */
+	__atomic_thread_fence(__ATOMIC_RELEASE);
 	if (value == _halo_epoch_datum_created && created_log_count < CREATED_LOG_COUNT)
 	{
 		created_log[created_log_count].entry = entry;
@@ -361,6 +364,10 @@ int halo_epoch_datum_hidden_from_caller(const struct data_array *data, long abso
 {
 	int state;
 
+	/* the caller has just read the datum's identifier: the marks are read
+	after it (datum_new marks a new datum before writing its identifier) */
+	if (halo_epoch_active)
+		__atomic_thread_fence(__ATOMIC_ACQUIRE);
 	if (!MARK_FLAG(data))
 		return 0;
 	state = halo_epoch_datum_state(data, absolute_index);
@@ -423,6 +430,8 @@ int halo_epoch_datum_hidden_from_get(const struct data_array *data, long absolut
 {
 	int state;
 
+	if (halo_epoch_active)
+		__atomic_thread_fence(__ATOMIC_ACQUIRE);
 	if (!MARK_FLAG(data))
 		return 0;
 	state = halo_epoch_datum_state(data, absolute_index);

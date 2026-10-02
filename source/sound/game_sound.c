@@ -99,6 +99,7 @@ symbols in this file:
 #include "cseries.h"
 #ifdef HALO_LINUX
 #include "render_epoch.h"
+void platform_log(const char *format, ...);
 #else
 #define halo_epoch_threaded 0
 #endif
@@ -341,6 +342,20 @@ void game_sound_restore(
 			struct looping_sound_definition *definition =
 				looping_sound_definition_get(sound->definition_index);
 
+#ifdef HALO_LINUX
+			/* (port) a tester's Vita crashed here after a game state load:
+			the looping sound at index 0x00010012 (an identifier no datum of
+			this array can have) named a tag with no data. The loaded state
+			was already bad there; the datum is dropped, named in the log,
+			rather than read through NULL */
+			if (!definition)
+			{
+				platform_log("game_sound_restore: looping sound 0x%08lx names tag 0x%08lx with no definition: dropped",
+					(unsigned long)looping_sound_index, (unsigned long)sound->definition_index);
+				datum_delete(game_looping_sound_data, looping_sound_index);
+				continue;
+			}
+#endif
 			if (!TEST_FLAG(definition->flags, _looping_sound_fake_impulse_sound_bit))
 			{
 				definition->runtime_scripting_sound_index = looping_sound_index;

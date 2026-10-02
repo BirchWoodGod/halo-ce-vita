@@ -973,6 +973,11 @@ void lights_preprocess_scene(
 	{
 		struct light_datum *light = light_get(light_index);
 
+#ifdef HALO_LINUX
+		/* (a light the tick is constructing: datum_new) */
+		if (!light)
+			continue;
+#endif
 		LIGHT_SET_FLAG(light, _point_light_attached_to_first_person_weapon_bit, FALSE);
 		light->rasterizer_light_index = NONE;
 #ifndef HALO_LINUX
