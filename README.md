@@ -82,6 +82,10 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
 
 A movie without an MP4 is skipped, as the game skips a missing movie.
 
+A movie is shown at the shape its file gives: one made 16:9 at 640x480
+(ffmpeg `-aspect 16:9`) fills the screen's width, the Xbox's are 4:3.
+`HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
+
 ### Saving
 
 Checkpoints are kept with **Save and Quit** from the pause menu; choose the

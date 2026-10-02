@@ -90,6 +90,11 @@ HBINK __stdcall BinkOpen(const char *name, unsigned long flags)
 	return &movie_handle;
 }
 
+float halo_movie_display_aspect(void)
+{
+	return movie_open ? vita_movie_display_aspect() : 0.0f;
+}
+
 void __stdcall BinkClose(HBINK bink)
 {
 	(void)bink;

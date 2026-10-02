@@ -694,6 +694,37 @@ static void bink_draw_frame(
 		screen_bounds.x1= (short)((screen_width+bink_globals.width)/2);
 		screen_bounds.y0= (short)((screen_height-bink_globals.height)/2);
 		screen_bounds.y1= (short)((screen_height+bink_globals.height)/2);
+#ifdef HALO_LINUX
+		{
+			/* a movie whose file gives a display shape other than its
+			pixels' (an MP4 converted 16:9 at 640x480, issue #6) keeps its
+			height and is shown at that shape, as wide as the screen at most
+			(then letterboxed); the Xbox's 4:3 movies are drawn as before */
+			real aspect= halo_movie_display_aspect();
+			real pixels= bink_globals.height>0 ? (real)bink_globals.width/(real)bink_globals.height : 0.f;
+
+			if (aspect>0.f && pixels>0.f && (aspect<pixels*0.99f || aspect>pixels*1.01f))
+			{
+				real height= (real)bink_globals.height;
+				real width= height*aspect;
+
+				if (width>(real)screen_width)
+				{
+					width= (real)screen_width;
+					height= width/aspect;
+				}
+				if (height>(real)screen_height)
+				{
+					height= (real)screen_height;
+					width= height*aspect;
+				}
+				screen_bounds.x0= (short)(((real)screen_width-width)/2.f+0.5f);
+				screen_bounds.x1= (short)(((real)screen_width+width)/2.f+0.5f);
+				screen_bounds.y0= (short)(((real)screen_height-height)/2.f+0.5f);
+				screen_bounds.y1= (short)(((real)screen_height+height)/2.f+0.5f);
+			}
+		}
+#endif
 	}
 
 	for (vertex_index= 0; vertex_index<4; vertex_index++)
