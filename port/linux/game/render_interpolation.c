@@ -288,6 +288,23 @@ static real distance_squared(real_point3d const *a, real_point3d const *b)
 
 /* ---------- ticks */
 
+/* A map change must not blend against snapshots of the previous map.
+Keep the Vita's tick-pose publication and render-epoch locking intact. */
+void render_interpolation_reset(void)
+{
+	long index;
+
+	if (interpolated_objects)
+		for (index = 0; index < MAXIMUM_INTERPOLATED_OBJECTS; index++)
+			interpolated_objects[index].object_index = NONE;
+	memset(interpolated_cameras, 0, sizeof(interpolated_cameras));
+	for (index = 0; index < MAXIMUM_LOCAL_PLAYERS; index++)
+	{
+		interpolated_first_person[index].node_count = 0;
+		interpolated_first_person[index].has_previous = FALSE;
+	}
+}
+
 void render_interpolation_tick(void)
 {
 	struct object_iterator iterator;

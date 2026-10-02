@@ -279,12 +279,12 @@ void error(
 	{
 		long time = system_milliseconds();
 
-		if (time > bss_0031df2c.last_error_time+900)
+		if ((unsigned long)(time - bss_0031df2c.last_error_time) > 900)
 		{
 			bss_0031df2c.error_count = 0;
 		}
 		bss_0031df2c.last_error_time = time;
-		if (bss_0031df2c.error_count == 10)
+		if (bss_0031df2c.error_count == 10 && terminal_shows(_terminal_message_chatter))
 		{
 			terminal_printf(
 				global_real_argb_white,
@@ -314,7 +314,13 @@ void error(
 			va_end(argument_list);
 			csstrcat(string, "\r\n");
 
-			if (priority != _error_log)
+			/* (port: on screen as config.toml's game.console_log says: an
+			assert that stops the game, and what a command someone typed
+			logs (its answer), always; the rest, the game's chatter.
+			debug.txt has it whatever that is) */
+			if (priority != _error_log &&
+				terminal_shows(terminal_command_running || !strncmp(string, "EXCEPTION halt", 14) ||
+					!strncmp(string, "EXCEPTION assert", 16) ? _terminal_message_serious : _terminal_message_chatter))
 			{
 				terminal_printf(global_real_argb_white, "%s", string);
 			}

@@ -43,6 +43,8 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 | `settings.txt` | the settings panel's choices |
 | `halo.log` | the port's log |
 | `env.txt` | optional debug switches, one `NAME=value` per line |
+| `host_invite.txt` | experimental online host's current private invite |
+| `join_link.txt` | experimental online invite to consume and join |
 
 ### Movies
 
@@ -111,7 +113,56 @@ The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 - **Split screen** needs two players, and the Vita has one controller.
 - **System link** works over Wi-Fi: every machine on the same network running
   this port (another Vita, or the Linux/Windows build) can host or join.
-- **Ad hoc** (Vita to Vita without a router) and online play are not done yet.
+- **Ad hoc** (Vita to Vita without a router) is not done yet.
+- **Online (experimental)** uses the updated Universal invite protocol. It is
+  off by default and has not been verified between physical Vitas on separate
+  networks. See the development instructions below.
+
+### Experimental internet play
+
+This branch imports the networking implementation from
+`cybersecurity/halo-ce-universal` commit
+`fd3d62f9602870b209b8e0e5cd38d9f90ced6029`. It uses 64-digit invites,
+X25519 session keys, authenticated packets and replay protection. Older
+44-digit invites are incompatible. The game messages are pinned to Universal's
+network version **9**, from the same commit; the snapshot includes its joining,
+loading-clock, player-input, object, damage and game-mode state changes.
+Hosts advertising a different game-network version must use a compatible
+build; changing the version number alone does not make messages compatible.
+The Vita's threaded render timing and pose snapshots are retained.
+Join rejections appear in the Vita overlay; press Cross or Circle to dismiss.
+The version history and wire behavior are documented in [NETCODE.md](../linux/NETCODE.md).
+Version 9 includes hardware IDs for bans; Vita derives the game-specific keyed
+hash from its OpenPSID. Discord identity is unavailable on Vita.
+
+1. In the Select + Start settings panel, set **Online (experimental)** to
+   **On**, then restart the game. Change it back to Off and restart to return
+   to LAN-only play.
+2. To host, create a Multiplayer > System Link game. The current invite is
+   written to `ux0:data/haloce-vita/host_invite.txt` and logged in `halo.log`.
+   Share it with the intended players. It is a private access token and only
+   works while that hosting session remains active; an old file is not proof
+   that the host is still running.
+3. To join, write the complete invite link or its 64 hexadecimal digits into
+   `ux0:data/haloce-vita/join_link.txt` using VitaShell/FTP. Upload to a temporary
+   name and rename it to `join_link.txt` after the transfer finishes, so the
+   game never reads a partially uploaded invite. The networking thread consumes
+   and removes the file, including invalid invites; inspect `halo.log` for the
+   result. Once connected, join the host under Multiplayer > System Link.
+
+Vita does not yet provide on-screen invite entry, UPnP port forwarding, or a
+relay fallback. The shared implementation attempts UDP hole punching; some
+routers, particularly double NAT and restrictive NAT, may prevent connections.
+If manually forwarding a port, set `HALO_NET_TUNNEL_PORT=<port>` in `env.txt`
+and forward that UDP port to the Vita. Do not assume forwarding succeeds with
+carrier-grade NAT.
+
+Before calling online play supported, test Vita-to-desktop and Vita-to-Vita
+on separate networks: hosting in both directions, discovery and joining,
+map transitions, packet loss/latency, disconnects and rejoining. Use compatible
+versions and Xbox maps, and collect both peers' logs. The imported protocol
+also needs desktop regression testing. None of these changes install an
+experimental VPK onto a connected Vita.
 
 ## Building
 

@@ -74,6 +74,7 @@ void vita_host_pad_read(struct vita_host_pad *pad);
 int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
+void vita_settings_message(const char *title, const char *text);
 /* (debug) HALO_ADHOC_PROBE=1: logs what the Vita's ad hoc libraries do
 (vita_net.c) */
 void vita_net_adhoc_probe(void);
