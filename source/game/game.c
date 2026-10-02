@@ -434,7 +434,7 @@ void game_initialize(
 /* HALO_TICK_PROFILE=1: where the tick's time goes, every 300 ticks */
 #include <stdlib.h>
 static int tick_profile_enabled = -1;
-static unsigned long long tick_phase_started, tick_phase_us[16];
+static unsigned long long tick_phase_started, tick_phase_us[16], tick_phase_this_tick_us[16];
 static const char *tick_phase_name[16];
 static unsigned long tick_profile_ticks;
 unsigned long long vita_host_time_us(void);
@@ -445,12 +445,30 @@ static void tick_phase_end(int phase, const char *name)
 {
 	if (tick_profile_enabled < 0) { const char *e = getenv("HALO_TICK_PROFILE"); tick_profile_enabled = e && atoi(e) != 0; }
 	if (tick_profile_enabled <= 0) return;
-	tick_phase_us[phase] += tick_now() - tick_phase_started; tick_phase_name[phase] = name;
+	{
+		unsigned long long elapsed = tick_now() - tick_phase_started;
+
+		tick_phase_us[phase] += elapsed; tick_phase_name[phase] = name;
+		tick_phase_this_tick_us[phase] += elapsed;
+	}
 }
 static void tick_phase_report(void)
 {
 	char line[512]; int n = 0, i;
-	if (tick_profile_enabled <= 0 || ++tick_profile_ticks % 300) return;
+	unsigned long long this_tick = 0;
+	if (tick_profile_enabled <= 0) return;
+	/* a tick of over 100 ms (a hitch the frame timing's averages hide) is
+	logged with its own phases */
+	for (i = 0; i < 16; i++) this_tick += tick_phase_this_tick_us[i];
+	if (this_tick > 100000)
+	{
+		for (i = 0; i < 16; i++) { if (!tick_phase_name[i] || tick_phase_this_tick_us[i] < 1000) continue;
+			n += snprintf(line + n, sizeof(line) - n, " %s %.1f", tick_phase_name[i], tick_phase_this_tick_us[i] / 1000.0); }
+		platform_log("tick-hitch: tick %ld took %.1f ms:%s", (long)game_time_get(), this_tick / 1000.0, line);
+		n = 0;
+	}
+	for (i = 0; i < 16; i++) tick_phase_this_tick_us[i] = 0;
+	if (++tick_profile_ticks % 300) return;
 	for (i = 0; i < 16; i++) { if (!tick_phase_name[i]) continue;
 		n += snprintf(line + n, sizeof(line) - n, " %s %.2f", tick_phase_name[i], tick_phase_us[i] / 1000.0 / 300.0); tick_phase_us[i] = 0; }
 	platform_log("tick-profile (ms/tick):%s", line);

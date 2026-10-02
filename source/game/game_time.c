@@ -528,6 +528,66 @@ void game_time_start(
 	return;
 }
 
+
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) a game time update of over 100 ms - the frame's
+ticks with the update queues, the distributed netcode's per-tick work and
+the frame's particles and sounds - is logged by step ("tick-run-hitch"),
+to name what the main thread waits a second for in a hitch */
+#include <stdlib.h>
+enum { _run_update_queues, _run_game_ticks, _run_distributed, _run_game_frame, NUMBER_OF_RUN_STEPS };
+static unsigned long long run_last, run_us[NUMBER_OF_RUN_STEPS];
+static unsigned long run_ticks;
+static int run_enabled = -1;
+unsigned long long vita_host_time_us(void) __attribute__((weak));
+void platform_log(const char *format, ...);
+
+static void halo_run_mark(int step)
+{
+	unsigned long long now;
+
+	if (run_enabled < 0)
+	{
+		const char *setting = getenv("HALO_TICK_PROFILE");
+
+		run_enabled = setting && atoi(setting) != 0 && vita_host_time_us;
+	}
+	if (run_enabled <= 0)
+		return;
+	now = vita_host_time_us();
+	if (step >= 0)
+	{
+		run_us[step] += now - run_last;
+		if (step == _run_game_ticks)
+			run_ticks++;
+	}
+	run_last = now;
+}
+
+static void halo_run_report(void)
+{
+	unsigned long long total = 0;
+	int step;
+
+	if (run_enabled <= 0)
+		return;
+	for (step = 0; step < NUMBER_OF_RUN_STEPS; step++)
+		total += run_us[step];
+	if (total > 100000)
+		platform_log("tick-run-hitch: %.1f ms: update queues %.1f, %lu ticks %.1f, distributed %.1f, game frame %.1f",
+			total / 1000.0, run_us[_run_update_queues] / 1000.0, run_ticks, run_us[_run_game_ticks] / 1000.0,
+			run_us[_run_distributed] / 1000.0, run_us[_run_game_frame] / 1000.0);
+	for (step = 0; step < NUMBER_OF_RUN_STEPS; step++)
+		run_us[step] = 0;
+	run_ticks = 0;
+}
+#define HALO_RUN_MARK(step) halo_run_mark(step)
+#define HALO_RUN_REPORT() halo_run_report()
+#else
+#define HALO_RUN_MARK(step) ((void)0)
+#define HALO_RUN_REPORT() ((void)0)
+#endif
+
 void game_time_update(
 	real time_delta_sec)
 {
@@ -671,6 +731,7 @@ void game_time_update(
 				}
 
 				final_local_time = game_time_globals->local_time + ticks_elapsed;
+				HALO_RUN_MARK(-1);
 				switch (game_connection())
 				{
 				case _game_connection_local:
@@ -680,6 +741,7 @@ void game_time_update(
 					network_game_server_update_ticks(global_network_game_server_get(), ticks_elapsed);
 					break;
 				}
+				HALO_RUN_MARK(_run_update_queues);
 
 				maximum_possible_server_time = update_client_get_maximum_possible_server_time();
 #ifdef HALO_LINUX
@@ -693,7 +755,9 @@ void game_time_update(
 					server_updates = final_server_time - game_time_globals->server_time;
 					for (update_index = 0; update_index < server_updates; update_index++)
 					{
+						HALO_RUN_MARK(-1);
 						game_tick();
+						HALO_RUN_MARK(_run_game_ticks);
 #ifdef HALO_LINUX
 						render_interpolation_tick();
 #endif
@@ -702,6 +766,7 @@ void game_time_update(
 #ifdef HALO_LINUX
 						/* the distributed netcode's per-tick state */
 						network_distributed_tick();
+						HALO_RUN_MARK(_run_distributed);
 						/* (debug) HALO_TICK_HASH: the simulation oracle */
 						halo_tick_hash_after_tick();
 #endif
@@ -719,7 +784,10 @@ void game_time_update(
 			}
 		}
 
+		HALO_RUN_MARK(-1);
 		game_frame(game_time_get_speed()*time_delta_sec);
+		HALO_RUN_MARK(_run_game_frame);
+		HALO_RUN_REPORT();
 	}
 	else
 	{

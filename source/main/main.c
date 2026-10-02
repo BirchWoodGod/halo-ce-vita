@@ -2286,7 +2286,15 @@ static void main_update_time_unthrottled(
 	else
 	{
 		seconds_elapsed = PIN(seconds_elapsed, 0.0f, 1.0f);
-		if (main_globals.connection == _game_connection_local)
+		/* (port) a split screen game - the Vita's solo multiplayer: a host
+		with its own client on one machine and no other - is paced as a
+		local game, at most two ticks a frame. As a network server it took
+		up to a second's ticks (30) a frame to catch up with real time; a
+		frame slowed by a heavy moment then ran more ticks, which made the
+		next frame slower still, until frames of 1.3-1.7 s (Blood Gulch on
+		the Vita). With no other machine there is nobody to keep up with. */
+		if (main_globals.connection == _game_connection_local ||
+			(main_globals.connection == _game_connection_network_server && network_game_is_splitscreen_local()))
 		{
 			if (debug_force_frame_rate_update)
 				seconds_elapsed = CEILING(seconds_elapsed, 0.03333333507180214f);

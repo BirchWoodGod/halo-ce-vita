@@ -229,6 +229,31 @@ static struct
 	unsigned int peeked;
 	unsigned long long epoll_us, peek_us;
 } trace_selects;
+/* (HALO_NET_TRACE) the time the library's calls take, by kind: whether
+each call is a slow one, beside how many there are */
+enum { TRACE_OP_RECV, TRACE_OP_RECVFROM, TRACE_OP_SEND, TRACE_OP_SENDTO, TRACE_OP_PEERNAME, TRACE_OP_COUNT };
+static const char *const trace_op_names[TRACE_OP_COUNT] = { "recv", "recvfrom", "send", "sendto", "getpeername" };
+static struct
+{
+	unsigned int calls;
+	unsigned long long us;
+} trace_ops[TRACE_OP_COUNT];
+
+static int trace_on(void);
+
+static unsigned long long trace_op_begin(void)
+{
+	return trace_on() ? vita_host_time_us() : 0;
+}
+
+static void trace_op_end(int op, unsigned long long started)
+{
+	if (!started)
+		return;
+	__atomic_fetch_add(&trace_ops[op].calls, 1, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&trace_ops[op].us, vita_host_time_us() - started, __ATOMIC_RELAXED);
+}
+
 /* the network control service asked for this machine's address
 (posix_local_ipv4_address), and its time */
 static struct
@@ -455,6 +480,15 @@ static void trace_report_if_due(void)
 		statistics.packet_count, (unsigned int)statistics_result);
 	trace_log("local address: the network control service asked %u times (%llu us)",
 		trace_local_address.queries, trace_local_address.query_us);
+	{
+		char line[256];
+		int n = 0, op;
+
+		for (op = 0; op < TRACE_OP_COUNT; op++)
+			n += snprintf(line + n, sizeof(line) - n, " %s %u (%llu us)", trace_op_names[op], trace_ops[op].calls,
+				trace_ops[op].us);
+		trace_log("library calls:%s", line);
+	}
 	pthread_mutex_unlock(&trace_mutex);
 }
 
@@ -668,8 +702,10 @@ int posix_socket_accept(int socket, void *address, int *address_length)
 
 int posix_socket_send(int socket, const void *buffer, int length, int flags)
 {
+	unsigned long long started = trace_op_begin();
 	int result = sceNetSend(socket, buffer, (unsigned int)length, flags);
 
+	trace_op_end(TRACE_OP_SEND, started);
 	if (trace_on())
 		trace_transfer(socket, TRACE_SEND, "send", result, NULL, 0);
 	return answer(result);
@@ -724,13 +760,21 @@ int posix_socket_sendto(int socket, const void *buffer, int length, int flags,
 
 	if (vita_length && is_connected_peer(socket, &vita_address, 0))
 	{
+		unsigned long long started = trace_op_begin();
+
 		result = sceNetSend(socket, buffer, (unsigned int)length, flags);
+		trace_op_end(TRACE_OP_SEND, started);
 		if (trace_on())
 			trace_transfer(socket, TRACE_SEND, "sendto", result, &vita_address, 1);
 		return answer(result);
 	}
-	result = sceNetSendto(socket, buffer, (unsigned int)length, flags,
-		vita_length ? (const SceNetSockaddr *)&vita_address : NULL, vita_length);
+	{
+		unsigned long long started = trace_op_begin();
+
+		result = sceNetSendto(socket, buffer, (unsigned int)length, flags,
+			vita_length ? (const SceNetSockaddr *)&vita_address : NULL, vita_length);
+		trace_op_end(TRACE_OP_SENDTO, started);
+	}
 	if (result < 0 && vita_length && winsock_error(result) == WSAEISCONN &&
 		is_connected_peer(socket, &vita_address, 1))
 	{
@@ -754,8 +798,10 @@ int posix_socket_sendto(int socket, const void *buffer, int length, int flags,
 
 int posix_socket_recv(int socket, void *buffer, int length, int flags)
 {
+	unsigned long long started = trace_op_begin();
 	int result = sceNetRecv(socket, buffer, (unsigned int)length, flags);
 
+	trace_op_end(TRACE_OP_RECV, started);
 	if (trace_on())
 		trace_transfer(socket, TRACE_RECEIVE, "recv", result, NULL, 0);
 	return answer(result);
@@ -768,8 +814,12 @@ int posix_socket_recvfrom(int socket, void *buffer, int length, int flags,
 	unsigned int vita_length = sizeof(vita_address);
 	int result;
 
+	unsigned long long started;
+
 	memset(&vita_address, 0, sizeof(vita_address));
+	started = trace_op_begin();
 	result = sceNetRecvfrom(socket, buffer, (unsigned int)length, flags, (SceNetSockaddr *)&vita_address, &vita_length);
+	trace_op_end(TRACE_OP_RECVFROM, started);
 	if (result >= 0)
 		address_from_vita(&vita_address, address, address_length);
 	if (trace_on())
@@ -895,8 +945,10 @@ int posix_socket_getpeername(int socket, void *address, int *address_length)
 {
 	SceNetSockaddrIn vita_address;
 	unsigned int length = sizeof(vita_address);
+	unsigned long long started = trace_op_begin();
 	int result = sceNetGetpeername(socket, (SceNetSockaddr *)&vita_address, &length);
 
+	trace_op_end(TRACE_OP_PEERNAME, started);
 	if (result >= 0)
 		address_from_vita(&vita_address, address, address_length);
 	return answer(result);
