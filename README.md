@@ -45,10 +45,12 @@ Evolved.
    [latest release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest).
 2. **Install it.** Copy the VPK to the Vita (VitaShell's USB or FTP mode),
    open it in VitaShell and confirm. The bubble is called **Halo CE**.
-3. **Get the game files from your disc.** From an image,
-   [extract-xiso](https://github.com/XboxDev/extract-xiso) unpacks it:
-   `extract-xiso -x "Halo.iso"`. You need two things from it: the `maps`
-   folder and `default.xbe`.
+3. **Get the game files from your disc.** An Xbox disc image (an `.iso`,
+   often called an XISO: the same thing) is unpacked by
+   [extract-xiso](https://github.com/XboxDev/extract-xiso):
+   `extract-xiso -x "Halo.iso"` makes a folder with the disc's files. You
+   need two things from it: the `maps` folder and `default.xbe`. (Already
+   unpacked game files, as many backups come, work as they are.)
 4. **Copy them to the Vita**, with VitaShell's USB or FTP mode:
 
    ```
