@@ -281,6 +281,17 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=3) the biped update's stages timed (tick_detail.c) */
+unsigned long long halo_tick_detail_begin(void);
+void halo_tick_detail_end(const char *name, unsigned long long started);
+#define HALO_DETAIL_BEGIN() unsigned long long halo_detail_started = halo_tick_detail_begin()
+#define HALO_DETAIL_END(name) halo_tick_detail_end(name, halo_detail_started)
+#else
+#define HALO_DETAIL_BEGIN() ((void)0)
+#define HALO_DETAIL_END(name) ((void)0)
+#endif
+
 /* ---------- constants */
 
 enum
@@ -3931,7 +3942,7 @@ static void biped_update_moving(
 	}
 	physics.in_flags = in_flags;
 
-	biped_update_physics(&physics);
+	{ HALO_DETAIL_BEGIN(); biped_update_physics(&physics); HALO_DETAIL_END("biped:physics"); }
 
 	if (physics.elevator_object_index == NONE)
 	{
@@ -4261,11 +4272,11 @@ boolean biped_update(
 		biped_verify_object_vectors(biped_index, "pre-turning");
 		if (!TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
 		{
-			biped_update_turning(biped_index, &animation);
+			{ HALO_DETAIL_BEGIN(); biped_update_turning(biped_index, &animation); HALO_DETAIL_END("biped:turning"); }
 			biped_verify_object_vectors(biped_index, "post-turning");
 		}
 
-		biped_update_moving(biped_index, &animation);
+		{ HALO_DETAIL_BEGIN(); biped_update_moving(biped_index, &animation); HALO_DETAIL_END("biped:moving"); }
 		biped_verify_object_vectors(biped_index, "post-moving");
 
 		if (TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
@@ -4331,13 +4342,20 @@ boolean biped_update(
 			--biped->biped.player_melee_ticks;
 		}
 
-		biped_try_to_make_footsteps(biped_index);
+		{ HALO_DETAIL_BEGIN(); biped_try_to_make_footsteps(biped_index); HALO_DETAIL_END("biped:footsteps"); }
 		biped_falling_danger(biped_index);
 		biped_check_discard(biped_index);
 	}
 
-	if (unit_update_animation(biped_index, &animation)==1)
-		biped_jump(biped_index);
+	{
+		short animation_result;
+		HALO_DETAIL_BEGIN();
+
+		animation_result = unit_update_animation(biped_index, &animation);
+		HALO_DETAIL_END("biped:animation");
+		if (animation_result==1)
+			biped_jump(biped_index);
+	}
 
 	if (TEST_FLAG(biped->object.damage_flags, _object_dead_bit) &&
 		TEST_FLAG(biped->object.flags, _object_at_rest_bit))
