@@ -3344,6 +3344,64 @@ static void main_test_commands_update(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (HALO_RENDER_PROFILE=1) the main thread's frame outside the render and
+the present, by step, every 300 frames: the frame timing's "other" (with
+the tick on its thread: the main loop's own work before the render, the
+networked game's above all, and the wait for the tick after the present) */
+enum
+{
+	_main_split_input,
+	_main_split_network_start,
+	_main_split_time_ui,
+	_main_split_player_control,
+	_main_split_network_end,
+	_main_split_camera_engine,
+	_main_split_join,
+	NUMBER_OF_MAIN_SPLITS
+};
+static int main_split_enabled = -1;
+static unsigned long long main_split_last, main_split_us[NUMBER_OF_MAIN_SPLITS];
+static unsigned long main_split_frames;
+
+static void main_split_mark(int step)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	unsigned long long now;
+
+	if (main_split_enabled < 0)
+	{
+		const char *setting = getenv("HALO_RENDER_PROFILE");
+
+		main_split_enabled = setting && atoi(setting) != 0;
+	}
+	if (main_split_enabled <= 0 || !vita_host_time_us)
+		return;
+	now = vita_host_time_us();
+	if (step >= 0 && main_split_last)
+		main_split_us[step] += now - main_split_last;
+	main_split_last = now;
+}
+
+static void main_split_report(void)
+{
+	static const char *const names[NUMBER_OF_MAIN_SPLITS] =
+		{ "input", "network_start", "time+ui", "player_control", "network_end", "camera+engine", "tick_join" };
+	char line[512];
+	int n = 0, index;
+
+	if (main_split_enabled <= 0 || ++main_split_frames % 300)
+		return;
+	for (index = 0; index < NUMBER_OF_MAIN_SPLITS; index++)
+	{
+		n += snprintf(line + n, sizeof(line) - n, " %s %.2f", names[index], (double)main_split_us[index] / 1000.0 / 300.0);
+		main_split_us[index] = 0;
+	}
+	platform_log("main-split (ms/frame):%s", line);
+}
+#define MAIN_SPLIT(step) main_split_mark(step)
+#endif
+
 void main_loop(
 	void)
 {
@@ -3466,6 +3524,7 @@ void main_loop(
 		profile_frame_start();
 #ifdef HALO_LINUX
 		halo_frame_timing(_frame_timing_frame_start, 0);
+		MAIN_SPLIT(-1);
 #endif
 		input_frame_begin();
 		input_update();
@@ -3481,6 +3540,7 @@ void main_loop(
 #ifdef HALO_LINUX
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			MAIN_SPLIT(_main_split_input);
 #endif
 			connection = main_globals.connection;
 			if (connection==_game_connection_network_client)
@@ -3512,9 +3572,15 @@ void main_loop(
 				break;
 			}
 
+#ifdef HALO_LINUX
+			MAIN_SPLIT(_main_split_network_start);
+#endif
 			main_update_time();
 			process_ui_widgets();
 			bink_playback_update();
+#ifdef HALO_LINUX
+			MAIN_SPLIT(_main_split_time_ui);
+#endif
 
 			if ((!game_in_editor() && (input_key_is_down(_key_end) || input_key_is_down(_key_escape))) || editor_should_exit())
 			{
@@ -3541,6 +3607,9 @@ void main_loop(
 					debug_keys_update();
 					cheats_update();
 					player_control_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+#ifdef HALO_LINUX
+					MAIN_SPLIT(_main_split_player_control);
+#endif
 
 					connection = main_globals.connection;
 					if (connection>_game_connection_local && connection<=_game_connection_network_server && !network_game_client_end_frame())
@@ -3548,6 +3617,9 @@ void main_loop(
 						display_error_when_main_menu_loaded(1);
 						network_game_abort();
 					}
+#ifdef HALO_LINUX
+					MAIN_SPLIT(_main_split_network_end);
+#endif
 
 #ifdef HALO_LINUX
 					/* (port: with the tick on its thread it runs alongside
@@ -3577,6 +3649,9 @@ void main_loop(
 					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 					collision_log_end_period();
 					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+#ifdef HALO_LINUX
+					MAIN_SPLIT(_main_split_camera_engine);
+#endif
 				}
 
 #ifdef HALO_LINUX
@@ -3650,9 +3725,11 @@ void main_loop(
 			}
 #ifdef HALO_LINUX
 			halo_frame_timing(_frame_timing_present_end, 0);
+			MAIN_SPLIT(-1);
 			if (tick_running)
 			{
 				halo_tick_thread_join();
+				MAIN_SPLIT(_main_split_join);
 				halo_frame_timing_tick_threaded(halo_tick_thread_last_us() * 1000ull);
 				tick_running = FALSE;
 			}
@@ -3684,6 +3761,7 @@ void main_loop(
 #ifdef HALO_LINUX
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
 		halo_load_profile_frame_end();
+		main_split_report();
 #endif
 		main_frame_rate_debug();
 
