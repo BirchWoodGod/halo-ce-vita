@@ -3505,6 +3505,11 @@ void main_loop(
 	{
 #ifdef HALO_LINUX
 		main_test_commands_update();
+		{
+			void halo_shader_tour_update(void);
+
+			halo_shader_tour_update();
+		}
 #endif
 		if (!game_in_editor())
 		{

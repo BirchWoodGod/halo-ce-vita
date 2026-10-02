@@ -39,7 +39,7 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 | `data/` | settings (`config.toml`), `init.txt`, the game's log (`debug.txt`) |
 | `saves/` | profiles and saved games |
 | `movies/` | the movies as MP4 (optional) |
-| `shaders/` | shaders the Vita compiled (made on first use) |
+| `shaders/` | shaders the Vita compiled itself: those the VPK does not ship (made on first use, in the background) |
 | `settings.txt` | the settings panel's choices |
 | `halo.log` | the port's log |
 | `env.txt` | optional debug switches, one `NAME=value` per line |
@@ -148,6 +148,18 @@ The results are `build/vita/eboot.bin` and `build/vita/halo.vpk`. Run
   Direct3D device over a GPU that draws nothing. It runs on x86 and ARM Linux
   and measures the Vita render path's CPU cost without the hardware.
 
+### The shipped shaders
+
+The GPU programs are Cg the port writes from the game's combiner and vertex
+program states, compiled on the device by SceShaccCg (0.6-1.5 s each on the
+hardware). `port/vita/app0/shaders.pak`, in the VPK, holds the ones the
+levels and multiplayer maps make, compiled ahead; `tools/vita_shader_pack.py`
+says how it is made again after the Cg generators (`nv2a_psh_cg.c`,
+`nv2a_vsh_cg.c`) change: collect the sources with the gxm-null build
+(`HALO_SHADER_COLLECT`, `HALO_SHADER_TOUR`), compile them on Vita3K
+(`HALO_SHADER_PRECOMPILE`), pack them. A program the pack misses is compiled
+in the background on the device and kept in `shaders/`.
+
 ### Debug switches
 
 `env.txt` takes the platform layer's and the port's environment variables.
@@ -164,6 +176,8 @@ Useful ones:
 | `HALO_HEARTBEAT=1` | a line every 2 s in `heartbeat.txt` (is the game still running?) |
 | `HALO_STARTUP_CHECKS=1` | the clocks and the cost of basic operations, logged at start-up |
 | `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do (see Help wanted) |
+| `HALO_SHADER_ASYNC=0` | a shader that is neither shipped nor cached is compiled while the game waits (the default compiles it in the background and skips its draws until it is ready) |
+| `HALO_SHADER_PACK=0` | ignore the shipped shaders (`app0:shaders.pak`) |
 
 ## Layout of port/vita
 

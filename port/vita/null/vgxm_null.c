@@ -156,8 +156,42 @@ static unsigned long long source_hash(const char *source, int fragment)
 	return hash ^ (fragment ? 1ull : 0ull);
 }
 
-volatile unsigned long long vgxm_compile_us;
-volatile unsigned long vgxm_compiles;
+volatile unsigned long long vgxm_compile_us, vgxm_shader_load_us, vgxm_link_us, vgxm_cache_write_us;
+volatile unsigned long vgxm_compiles, vgxm_shader_loads, vgxm_links, vgxm_compiles_background;
+
+/* HALO_SHADER_COLLECT=<directory>: each program's Cg written there as
+<hash>.vp.cg or <hash>.fp.cg, named by the Vita's hash of it (vita_gxm.c's
+source_hash, which the shader cache and the shipped pack are keyed by), for
+tools/vita_shader_pack.py */
+static void shader_collect(const char *source, int fragment)
+{
+	static int checked;
+	static const char *directory;
+	unsigned long long hash = 14695981039346656037ull ^ (unsigned long long)fragment;
+	const char *each;
+	char path[1024];
+	FILE *file;
+
+	if (!checked)
+	{
+		checked = 1;
+		directory = getenv("HALO_SHADER_COLLECT");
+		if (directory && !*directory)
+			directory = NULL;
+	}
+	if (!directory)
+		return;
+	for (each = source; *each; each++)
+		hash = (hash ^ (unsigned char)*each) * 1099511628211ull;
+	snprintf(path, sizeof(path), "%s/%016llx.%s.cg", directory, hash, fragment ? "fp" : "vp");
+	if (access(path, F_OK) == 0)
+		return;
+	if ((file = fopen(path, "wb")) != NULL)
+	{
+		fwrite(source, 1, strlen(source), file);
+		fclose(file);
+	}
+}
 
 unsigned long vgxm_shader_get(const char *source, int fragment)
 {
@@ -169,8 +203,14 @@ unsigned long vgxm_shader_get(const char *source, int fragment)
 			return index + 1;
 	if (null.shader_count >= MAXIMUM_SHADERS)
 		return 0;
+	shader_collect(source, fragment);
 	null.shader_hashes[null.shader_count] = hash;
 	return ++null.shader_count;
+}
+
+unsigned long vgxm_shader_request(const char *source, int fragment)
+{
+	return vgxm_shader_get(source, fragment);
 }
 
 #define ALIGN(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))

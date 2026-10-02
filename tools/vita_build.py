@@ -280,7 +280,14 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     for asset in sorted((VITA_DIR / "sce_sys").rglob("*")) if (VITA_DIR / "sce_sys").is_dir() else []:
         if asset.is_file():
             assets.append(f"-a {_quote(asset)}={_quote(asset.relative_to(VITA_DIR))}")
-    n.build(outputs=vpk, rule="vita_vpk", inputs=[eboot, sfo],
+    # files at the root of app0: (the shipped shader programs, port/vita/app0/shaders.pak:
+    # tools/vita_shader_pack.py)
+    app0_files = []
+    for asset in sorted((VITA_DIR / "app0").rglob("*")) if (VITA_DIR / "app0").is_dir() else []:
+        if asset.is_file():
+            assets.append(f"-a {_quote(asset)}={_quote(asset.relative_to(VITA_DIR / 'app0'))}")
+            app0_files.append(asset)
+    n.build(outputs=vpk, rule="vita_vpk", inputs=[eboot, sfo], implicit=app0_files,
             variables={"sfo": str(sfo), "eboot": str(eboot), "assets": " ".join(assets)})
     n.build(outputs="vita", rule="phony", inputs=[vpk])
     n.newline()
