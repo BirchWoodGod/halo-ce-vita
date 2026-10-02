@@ -224,7 +224,13 @@ struct gxm_device
 	unsigned long immediate_capacity;
 
 	BOOL visibility_test_active;
+	/* the open test's slot in the frame's visibility buffer (1 on: tests
+	are numbered in the order they begin, from 1 at each Present), which
+	its draws count into; the game names a test only when it ends */
 	unsigned long visibility_index;
+	unsigned long visibility_tests_this_frame;
+	/* by the game's test index: the slot that test counted into */
+	unsigned short visibility_slot_of_test[VISIBILITY_TEST_SLOTS];
 
 	/* per stage: the texture with its sampler state applied, and what it
 	was made from (reused while the same) */
@@ -1027,24 +1033,45 @@ void WINAPI D3DDevice_InsertCallback(D3DCALLBACKTYPE type, D3DCALLBACK callback,
 /* ---------- visibility (occlusion) tests: the draws inside one count the
 samples that pass, which the renderer reads back once the GPU has them */
 
+/* The game names a test when it ends it (EndVisibilityTest(index)), after
+its draws were recorded, so each test is given the next slot of the frame
+when it begins, its draws count into that slot, and the index is mapped to
+the slot at the end. The lens flares (rasterizer_lights.c) test once a
+frame each, in the same order from frame to frame, and read the results at
+the start of the next frame; the GPU then still has that frame ahead of
+it, so a result is the latest one the GPU has finished for that slot (one
+to three frames old), as on the desktop's GL device, rather than a wait for
+the GPU. This used to be a stub that read 0 for every test: no lens flare
+was ever drawn on the Vita - not the lights' coronas, nor a10's calibration
+lights, which the tutorial script turns from red to green. */
+
 void WINAPI D3DDevice_BeginVisibilityTest(void)
 {
+	if (device.visibility_test_active)
+		return;
 	device.visibility_test_active = TRUE;
+	/* (past the buffer's slots a test counts nothing: slot 0) */
+	device.visibility_index = device.visibility_tests_this_frame < VGXM_VISIBILITY_SLOTS - 1 ?
+		++device.visibility_tests_this_frame : 0;
 }
 
 HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 {
+	if (!device.visibility_test_active)
+		return S_OK;
 	device.visibility_test_active = FALSE;
-	device.visibility_index = index % VISIBILITY_TEST_SLOTS;
+	device.visibility_slot_of_test[index % VISIBILITY_TEST_SLOTS] = (unsigned short)device.visibility_index;
 	return S_OK;
 }
 
 HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULONGLONG *time_stamp)
 {
+	unsigned long slot = device.visibility_slot_of_test[index % VISIBILITY_TEST_SLOTS];
+
 	if (time_stamp)
 		*time_stamp = 0;
 	if (result)
-		*result = device.gpu_ready ? (UINT)vgxm_visibility_result(index % VISIBILITY_TEST_SLOTS) : 0;
+		*result = device.gpu_ready && slot ? (UINT)vgxm_visibility_result(slot) : 0;
 	return S_OK;
 }
 
@@ -3356,7 +3383,7 @@ static struct render_command *record_draw(BOOL immediate)
 			record_previous = NULL;
 			return NULL;
 		}
-		draw->visibility_index = device.visibility_test_active ? device.visibility_index + 1 : 0;
+		draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 		if (immediate)
 			{ stats.immediate_draws++; draw_counter_immediate++; }
 		else
@@ -3415,7 +3442,7 @@ static struct render_command *record_draw(BOOL immediate)
 			draw->clip[1] = (long)device.viewport.Y;
 			draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 			draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
-			draw->visibility_index = device.visibility_test_active ? device.visibility_index + 1 : 0;
+			draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 			if (immediate)
 				{ stats.immediate_draws++; draw_counter_immediate++; }
 			else
@@ -3613,7 +3640,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->clip[1] = (long)device.viewport.Y;
 	draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 	draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
-	draw->visibility_index = device.visibility_test_active ? device.visibility_index + 1 : 0;
+	draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 	if (immediate)
 		{ stats.immediate_draws++; draw_counter_immediate++; }
 	else
@@ -4343,6 +4370,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		memset(device.chunk_snapshot, 0, sizeof(device.chunk_snapshot));
 		record_previous = NULL;
 		record_state_frame_end();
+		/* (the next frame's visibility tests count into its own buffer) */
+		device.visibility_tests_this_frame = 0;
 		device.d_extent_previous = device.d_extent_frame;
 		device.d_extent_frame = 0;
 		target_version_count = 0;

@@ -51,6 +51,10 @@ each frame's presentation.
 #define PATCHER_BUFFER_SIZE (6 * 1024 * 1024)
 #define PATCHER_USSE_SIZE (4 * 1024 * 1024)
 #define SHADER_DIRECTORY "ux0:data/haloce-vita/shaders"
+/* the GPU's cores, each counting a visibility test's samples into its own
+part of the buffer (sceGxmSetVisibilityBuffer's stride per core) */
+#define VISIBILITY_CORES 4
+#define VISIBILITY_CORE_STRIDE (VGXM_VISIBILITY_SLOTS * 4)
 
 #define ALIGN(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
 
@@ -184,6 +188,17 @@ static struct
 	unsigned int worker_ring_index;
 	struct block pool;
 	unsigned int pool_offset;
+
+	/* visibility tests: a buffer per worker ring (a frame's tests count
+	into the buffer of the ring the worker executes it in); the frame
+	number whose notification completes it (0 while it is recorded), the
+	render scale its tests were drawn at, its highest slot used, and the
+	ring whose buffer the context has */
+	struct block visibility;
+	volatile unsigned int visibility_frame[RING_COUNT];
+	float visibility_scale[RING_COUNT];
+	unsigned int visibility_slots_used[RING_COUNT];
+	int visibility_bound;
 
 	volatile unsigned int *notification;
 	unsigned int frame;
@@ -437,6 +452,10 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 	}
 	if (!block_allocate(&gxm.pool, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, POOL_SIZE, 1, "texture pool"))
 		return -1;
+	if (block_allocate(&gxm.visibility, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
+		RING_COUNT * VISIBILITY_CORES * VISIBILITY_CORE_STRIDE, 1, "visibility"))
+		memset(gxm.visibility.base, 0, gxm.visibility.size);
+	gxm.visibility_bound = -1;
 
 	sceIoMkdir(SHADER_DIRECTORY, 0777);
 	gxm.clear_vertex = vgxm_shader_get(clear_vertex_source, 0);
@@ -1178,6 +1197,11 @@ void vgxm_set_targets(unsigned long color, unsigned long depth)
 static void shadow_invalidate(void);
 
 /* begins a scene for the wanted targets if the current one is not for them */
+static unsigned int *visibility_buffer(unsigned int ring)
+{
+	return (unsigned int *)((unsigned char *)gxm.visibility.base + ring * VISIBILITY_CORES * VISIBILITY_CORE_STRIDE);
+}
+
 static int scene_ensure(void)
 {
 	struct target *color, *depth;
@@ -1219,6 +1243,13 @@ static int scene_ensure(void)
 	/* a depth target smaller than the colour target cannot serve it */
 	if (color && depth && (depth->width < color->width || depth->height < color->height))
 		depth = NULL;
+	if (gxm.visibility.base && gxm.visibility_bound != (int)gxm.worker_ring_index)
+	{
+		/* (set between scenes: the frame's tests count into its ring's
+		buffer) */
+		gxm.visibility_bound = (int)gxm.worker_ring_index;
+		sceGxmSetVisibilityBuffer(gxm.context, visibility_buffer(gxm.worker_ring_index), VISIBILITY_CORE_STRIDE);
+	}
 	{
 		unsigned long long before = sceKernelGetProcessTimeWide();
 
@@ -1586,6 +1617,29 @@ void vgxm_draw(const struct vgxm_draw *draw)
 			}
 		}
 	}
+	if (draw->visibility_index && draw->visibility_index < VGXM_VISIBILITY_SLOTS && gxm.visibility.base)
+	{
+		/* a visibility test's draw (a lens flare's occlusion quad): its
+		samples that pass count into its slot */
+		unsigned int ring = gxm.worker_ring_index;
+
+		sceGxmSetFrontVisibilityTestIndex(gxm.context, (unsigned int)draw->visibility_index);
+		sceGxmSetBackVisibilityTestIndex(gxm.context, (unsigned int)draw->visibility_index);
+		sceGxmSetFrontVisibilityTestOp(gxm.context, SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
+		sceGxmSetBackVisibilityTestOp(gxm.context, SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
+		sceGxmSetFrontVisibilityTestEnable(gxm.context, SCE_GXM_VISIBILITY_TEST_ENABLED);
+		sceGxmSetBackVisibilityTestEnable(gxm.context, SCE_GXM_VISIBILITY_TEST_ENABLED);
+		sceGxmDraw(gxm.context, primitive_type(draw->primitive), SCE_GXM_INDEX_FORMAT_U16, draw->indices,
+			(unsigned int)draw->index_count);
+		/* (off again at once: no other draw, clear or blit counts) */
+		sceGxmSetFrontVisibilityTestEnable(gxm.context, SCE_GXM_VISIBILITY_TEST_DISABLED);
+		sceGxmSetBackVisibilityTestEnable(gxm.context, SCE_GXM_VISIBILITY_TEST_DISABLED);
+		gxm.visibility_scale[ring] = scene_scale();
+		if (draw->visibility_index > gxm.visibility_slots_used[ring])
+			gxm.visibility_slots_used[ring] = (unsigned int)draw->visibility_index;
+		gxm.scene_draws++;
+		return;
+	}
 	sceGxmDraw(gxm.context, primitive_type(draw->primitive), SCE_GXM_INDEX_FORMAT_U16, draw->indices,
 		(unsigned int)draw->index_count);
 	gxm.scene_draws++;
@@ -1698,10 +1752,39 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 	gxm.scene_draws++;
 }
 
-unsigned long vgxm_visibility_result(unsigned long index)
+/* (the game's thread) the slot's count in the newest buffer whose frame the
+GPU has finished: the game asks at the start of the next frame, when that
+frame is still ahead of the GPU, and takes a result a frame or two old
+rather than wait */
+unsigned long vgxm_visibility_result(unsigned long slot)
 {
-	(void)index;
-	return 0;
+	unsigned int ring, newest = RING_COUNT, newest_frame = 0, completed = *gxm.notification;
+	unsigned long samples = 0;
+	const unsigned int *counts;
+	float scale;
+
+	if (!gxm.visibility.base || slot >= VGXM_VISIBILITY_SLOTS)
+		return 0;
+	for (ring = 0; ring < RING_COUNT; ring++)
+	{
+		unsigned int frame = gxm.visibility_frame[ring];
+
+		if (frame && (int)(completed - frame) >= 0 && (newest == RING_COUNT || (int)(frame - newest_frame) > 0))
+		{
+			newest = ring;
+			newest_frame = frame;
+		}
+	}
+	if (newest == RING_COUNT)
+		return 0;
+	counts = visibility_buffer(newest);
+	for (ring = 0; ring < VISIBILITY_CORES; ring++)
+		samples += counts[ring * (VISIBILITY_CORE_STRIDE / 4) + slot];
+	/* (samples of a scaled target: the game counts its own pixels) */
+	scale = gxm.visibility_scale[newest];
+	if (scale > 0.0f && scale < 1.0f)
+		samples = (unsigned long)(samples / (scale * scale) + 0.5f);
+	return samples;
 }
 
 /* ---------- frames */
@@ -2123,9 +2206,23 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 			gxm.ring_offset_peak = 0;
 		}
 	}
+	/* this frame's visibility counts are known once its notification is */
+	gxm.visibility_frame[gxm.worker_ring_index] = gxm.frame;
 	/* the worker's next frame goes to its next ring */
 	gxm.worker_ring_index = (gxm.worker_ring_index + 1) % RING_COUNT;
 	gxm.worker_ring_offset = 0;
+	if (gxm.visibility.base)
+	{
+		/* its visibility buffer, last counted into four frames ago (the GPU
+		is done with it: above), starts at zero again - the slots used */
+		unsigned int ring = gxm.worker_ring_index, used = gxm.visibility_slots_used[ring], core;
+
+		gxm.visibility_frame[ring] = 0;
+		if (used)
+			for (core = 0; core < VISIBILITY_CORES; core++)
+				memset(visibility_buffer(ring) + core * (VISIBILITY_CORE_STRIDE / 4), 0, (used + 1) * 4);
+		gxm.visibility_slots_used[ring] = 0;
+	}
 }
 
 const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch)
