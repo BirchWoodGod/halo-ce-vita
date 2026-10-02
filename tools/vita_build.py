@@ -27,7 +27,7 @@ BUILD = Path("build/vita")
 TITLE_ID = "HCEV00001"
 TITLE = "Halo CE"
 # the version the LiveArea and the system show (APP_VER, "XX.YY")
-APP_VERSION = "01.02"
+APP_VERSION = "01.03"
 
 # The game's directories compiled without -fmax-type-align=1 (configure.py
 # --vita-aligned hot; EXPERIMENTAL, the default is none). On the hardware
