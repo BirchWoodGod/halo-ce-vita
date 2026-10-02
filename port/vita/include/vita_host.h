@@ -21,6 +21,7 @@ void vita_host_log_memory(const char *when);
 
 /* the calling thread onto the given core (0-2) */
 void vita_host_pin_current_thread(int core);
+unsigned long vita_host_thread_id(void);
 
 /* a thread of its own on the given core (0-2); 0 on success */
 int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core);

@@ -153,6 +153,13 @@ unsigned long long vita_host_time_us(void)
 	return sceKernelGetProcessTimeWide();
 }
 
+/* the calling thread's kernel id: 0.03 us against pthread_self's 0.28
+(measured on the hardware), for the cache lock's owner test (lruv_cache.c) */
+unsigned long vita_host_thread_id(void)
+{
+	return (unsigned long)sceKernelGetThreadId();
+}
+
 /* The game looks for d:\bink\<movie>.bik before it opens a movie, and
 the Vita plays the MP4 in movies/ in its place (bink_vita.c): an empty
 .bik stands in for each MP4 there, so a movie copied in plays */

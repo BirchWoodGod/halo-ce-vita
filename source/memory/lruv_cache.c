@@ -111,7 +111,7 @@ functions, as lra_cache.c. */
 #include <stdlib.h>
 void platform_log(const char *format, ...);
 static volatile int lruv_depth;
-static pthread_t lruv_owner;
+static unsigned long lruv_owner;
 static volatile int lruv_held;
 
 void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
@@ -124,13 +124,24 @@ volatile unsigned long long halo_cache_lock_wait_us[2];
 /* acquires (the outermost, not re-entries) since the last report */
 volatile unsigned long halo_cache_lock_acquires;
 
+/* the owner test's thread identity: the Vita's kernel thread id, a fraction
+of pthread_self's cost there (the lock is taken ~500-700 times a frame) */
+unsigned long vita_host_thread_id(void) __attribute__((weak));
+
+static unsigned long cache_lock_self(void)
+{
+	if (vita_host_thread_id)
+		return vita_host_thread_id();
+	return (unsigned long)pthread_self();
+}
+
 void halo_cache_lock_acquire(void)
 {
-	pthread_t self = pthread_self();
+	unsigned long self = cache_lock_self();
 	unsigned long spins = 0;
 	unsigned long long waited_from = 0;
 
-	if (lruv_depth && pthread_equal(lruv_owner, self))
+	if (lruv_depth && lruv_owner == self)
 	{
 		lruv_depth++;
 		return;
@@ -184,7 +195,7 @@ int halo_cache_lock_suspend(void)
 {
 	int depth;
 
-	if (!lruv_depth || !pthread_equal(lruv_owner, pthread_self()))
+	if (!lruv_depth || lruv_owner != cache_lock_self())
 		return 0;
 	depth = lruv_depth;
 	lruv_depth = 0;
