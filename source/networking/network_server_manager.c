@@ -3208,6 +3208,14 @@ static boolean network_game_server_setup_game_from_playlist(
 		server->game.name[NETWORK_GAME_NAME_LENGTH - 1] = L'\0';
 		server->game.map.version = 0;
 		server->game.minimum_players = 2;
+#ifdef HALO_VITA
+		/* (port) a local game on the Vita starts with one player
+		(server_minimum_players); the clients' lobby reads the minimum from
+		the game settings, and with 2 it kept "Waiting for another player"
+		over the countdown */
+		if (network_game_is_splitscreen_local())
+			server->game.minimum_players = 1;
+#endif
 		server->game.maximum_players = MAXIMUM_NETWORK_PLAYER_COUNT;
 
 		if (server->game.variant.universal_variant.teams)
