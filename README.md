@@ -80,6 +80,14 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
        -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
 ```
 
+For better quality at the same size, High profile also plays (thanks to
+maler82, #8):
+
+```
+ffmpeg -i intro.bik -c:v libx264 -profile:v high -level 4.0 -crf 20 -pix_fmt yuv420p \
+       -vf scale=640:-2 -c:a aac -b:a 128k -movflags +faststart intro.mp4
+```
+
 A movie without an MP4 is skipped, as the game skips a missing movie.
 
 ### Saving
