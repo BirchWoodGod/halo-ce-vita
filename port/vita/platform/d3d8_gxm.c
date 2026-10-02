@@ -4754,7 +4754,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				double per = 1.0 / draw_profile_draws;
 				double worker_per = worker_profile_draws ? 1.0 / worker_profile_draws : 0.0;
 
-				platform_log("draw profile (us/draw, 1 in %d of %lu draws timed): record: begin %.1f state %.1f versions %.1f constants %.1f tail %.1f | streams %.1f commit %.1f | execute: build+targets %.1f textures %.1f shaders %.1f gxm draw %.1f",
+				platform_log("draw profile (us/draw, 1 in %d of %lu draws timed): record: begin %.2f state %.2f versions %.2f constants %.2f tail %.2f | streams %.2f commit %.2f | execute: build+targets %.2f textures %.2f shaders %.2f gxm draw %.2f",
 					draw_profile, draw_profile_draws * (unsigned long)draw_profile, draw_profile_us[0] * per, draw_profile_us[1] * per, draw_profile_us[2] * per, draw_profile_us[8] * per, draw_profile_us[9] * per,
 					draw_profile_us[3] * per, draw_profile_us[10] * per,
 					draw_profile_us[4] * worker_per, draw_profile_us[5] * worker_per, draw_profile_us[6] * worker_per, draw_profile_us[7] * worker_per);
