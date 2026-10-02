@@ -139,7 +139,18 @@ void *vita_host_arena(unsigned long *size)
 		vita_host_log_memory("before the memory window");
 		arena_block = sceKernelAllocMemBlock("halo_contiguous", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, ARENA_SIZE, NULL);
 		if (arena_block >= 0)
+		{
+			char message[96];
+
 			sceKernelGetMemBlockBase(arena_block, &arena);
+			/* (the game state lives in the window and a campaign save keeps
+			its absolute pointers: a save resumes only where the window was
+			when it was made - game_state_persistent_storage_made_here - so
+			anything allocated before this line moves every save out of
+			reach; v1.0 and v1.0.1 put it at the same place) */
+			snprintf(message, sizeof(message), "vita: memory window at %p", arena);
+			vita_host_log(message);
+		}
 		else
 			fprintf(stderr, "vita: cannot allocate the %lu byte memory window: 0x%08x\n", ARENA_SIZE,
 				(unsigned)arena_block);
