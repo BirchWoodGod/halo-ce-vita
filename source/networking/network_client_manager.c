@@ -1335,12 +1335,12 @@ boolean network_game_client_game_settings_updated(
 		struct network_game previous_game;
 
 #ifdef HALO_LINUX
-		/* (the host's map name is ended here, and a name that leaves the
-		maps folder is refused: unended, it ran past the path built from it;
-		with "../" a host could make the client open any .map file) */
+		/* (the host's map name - a tag path with backslashes, such as the
+		Blood Gulch scenario's - is ended here, and one that climbs out of
+		the maps folder is refused: unended, it ran past the path built from it; with
+		"../" a host could make the client open any .map file) */
 		message_packet->map.name[NUMBEROF(message_packet->map.name) - 1] = 0;
-		if (strchr(message_packet->map.name, '/') || strchr(message_packet->map.name, '\\') ||
-			strstr(message_packet->map.name, ".."))
+		if (strstr(message_packet->map.name, ".."))
 		{
 			return FALSE;
 		}
