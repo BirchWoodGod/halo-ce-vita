@@ -4353,6 +4353,19 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			command->color_valid = TRUE;
 			command->depth_valid = FALSE;
 			command->screenshot = screenshot_every > 0 && device.frame && device.frame % (unsigned long)screenshot_every == 0;
+			{
+				/* (debug) HALO_SCREENSHOT_FIRST / _LAST=n: only the frames
+				from / up to n (a burst of every frame around one moment) */
+				static long first = -2, last = -2;
+
+				if (first == -2)
+				{
+					first = getenv("HALO_SCREENSHOT_FIRST") ? atol(getenv("HALO_SCREENSHOT_FIRST")) : -1;
+					last = getenv("HALO_SCREENSHOT_LAST") ? atol(getenv("HALO_SCREENSHOT_LAST")) : -1;
+				}
+				if ((first >= 0 && device.frame < (unsigned long)first) || (last >= 0 && device.frame > (unsigned long)last))
+					command->screenshot = FALSE;
+			}
 			command->frame = device.frame;
 			frames_requested++;
 			command_commit(command);

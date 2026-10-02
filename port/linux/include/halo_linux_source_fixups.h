@@ -34,6 +34,13 @@ struct real_matrix4x3 *render_interpolation_object_node_matrices(long object_ind
 object is drawn live */
 union real_point3d;
 unsigned char render_tick_pose_bounding_sphere(long object_index, union real_point3d *center, float *radius);
+/* ... and the clusters' object lists as that tick left them, which the
+render walks instead of the running tick's (render_interpolation.c, "the
+threaded tick's cluster lists") */
+enum { _tick_cluster_list_collideable, _tick_cluster_list_noncollideable, _tick_cluster_list_count };
+unsigned char render_tick_cluster_lists_active(int which);
+long render_tick_cluster_list_first(int which, long *iterator, short cluster_index);
+long render_tick_cluster_list_next(int which, long *iterator);
 struct observer_result const *render_interpolation_camera(short local_player_index,
 	struct observer_result const *observer);
 void render_interpolation_first_person(short local_player_index, struct real_matrix4x3 *node_matrices,
