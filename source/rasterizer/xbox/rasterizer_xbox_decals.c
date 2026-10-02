@@ -740,19 +740,75 @@ struct decal_sort_entry
 	long key[4];
 	long order;
 	long decal_index;
+	/* (the decal and its definition, looked up once for both passes) */
+	struct decal_datum *decal;
+	struct decal_definition *definition;
 };
 static struct decal_sort_entry decal_sorted[DECAL_SORT_MAXIMUM];
+static struct decal_sort_entry decal_sort_scratch[DECAL_SORT_MAXIMUM];
 static long decal_sorted_count, decal_sorted_cursor;
 
-static int decal_sort_compare(const void *a, const void *b)
+/* the batch order: by key, then by list order (every entry's own, so the
+order is one whatever sorts it) */
+static int decal_sort_before(const struct decal_sort_entry *left, const struct decal_sort_entry *right)
 {
-	const struct decal_sort_entry *left = a, *right = b;
 	int index;
 
 	for (index = 0; index < 4; index++)
 		if (left->key[index] != right->key[index])
-			return left->key[index] < right->key[index] ? -1 : 1;
-	return left->order < right->order ? -1 : left->order > right->order;
+			return left->key[index] < right->key[index];
+	return left->order < right->order;
+}
+
+/* (insertion sort in runs of 16, then bottom-up merges: the comparison
+inline, where qsort called it through a pointer - hundreds of decals a
+frame in a long fight) */
+static void decal_sort_entries(struct decal_sort_entry *entries, long count)
+{
+	enum { RUN = 16 };
+	struct decal_sort_entry *from = entries, *to = decal_sort_scratch;
+	long start, width;
+
+	for (start = 0; start < count; start += RUN)
+	{
+		long end = start + RUN < count ? start + RUN : count, i;
+
+		for (i = start + 1; i < end; i++)
+		{
+			struct decal_sort_entry value = entries[i];
+			long place = i;
+
+			while (place > start && decal_sort_before(&value, &entries[place - 1]))
+			{
+				entries[place] = entries[place - 1];
+				place--;
+			}
+			entries[place] = value;
+		}
+	}
+	for (width = RUN; width < count; width *= 2)
+	{
+		struct decal_sort_entry *swap;
+
+		for (start = 0; start < count; start += 2 * width)
+		{
+			long middle = start + width < count ? start + width : count;
+			long end = start + 2 * width < count ? start + 2 * width : count;
+			long left = start, right = middle, out = start;
+
+			while (left < middle && right < end)
+				to[out++] = decal_sort_before(&from[right], &from[left]) ? from[right++] : from[left++];
+			while (left < middle)
+				to[out++] = from[left++];
+			while (right < end)
+				to[out++] = from[right++];
+		}
+		swap = from;
+		from = to;
+		to = swap;
+	}
+	if (from != entries)
+		memcpy(entries, from, count * sizeof(entries[0]));
 }
 
 static unsigned long decal_intensity_rounded(unsigned long intensity);
@@ -785,11 +841,13 @@ static long decal_sort_cluster(long decal_index)
 		entry->key[3] = (long)decal_intensity_rounded((decal->intensity * (color >> 24) + 127) >> 8);
 		entry->order = count;
 		entry->decal_index = decal_index;
+		entry->decal = decal;
+		entry->definition = definition;
 		count++;
 		decal_index = decal->next_decal_index;
 	}
 	if (count > 1)
-		qsort(decal_sorted, (size_t)count, sizeof(decal_sorted[0]), decal_sort_compare);
+		decal_sort_entries(decal_sorted, count);
 	return count;
 }
 
@@ -847,8 +905,14 @@ void _rasterizer_decals_draw(
 #endif
 	while (decal_index != NONE)
 	{
+#ifdef HALO_LINUX
+		struct decal_datum *decal = decal_sorted_count > 0 ? decal_sorted[decal_sorted_cursor].decal : DECAL_GET(decal_index);
+		struct decal_definition *definition = decal_sorted_count > 0 ? decal_sorted[decal_sorted_cursor].definition :
+			decal_definition_get(decal->definition_index);
+#else
 		struct decal_datum *decal = DECAL_GET(decal_index);
 		struct decal_definition *definition = decal_definition_get(decal->definition_index);
+#endif
 		struct decal_shader_definition *shader = &definition->shader;
 		short framebuffer_blend_function = shader->framebuffer_blend_function;
 		unsigned long vertex_data_offset;
