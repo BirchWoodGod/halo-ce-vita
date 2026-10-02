@@ -134,14 +134,13 @@ void vita_host_log_memory(const char *when)
 
 /* set once the memory window is allocated (vita_host_log) */
 static int log_thread_allowed;
-/* where the window lands when nothing is allocated before it (v1.0 to
-v1.0.2). The game state lives in it and campaign saves keep its absolute
-pointers, so a save resumes only with the window where it was when the
-save was made: nothing may be allocated in user memory before
+/* The game state lives in the window and campaign saves keep its absolute
+pointers: nothing should be allocated in user memory before
 vita_host_arena - no thread, no memory block, no growth of the C heap
-(HALO_IO_BENCH's buffer moved it by 1 MB). A window elsewhere is logged
-loudly. */
-#define VITA_EXPECTED_WINDOW 0x86500000UL
+(HALO_IO_BENCH's buffer moved the window by 1 MB). The window still moves
+when the program's data segment crosses a megabyte; the contiguous
+allocator lays its blocks out where v1.0 put them all the same
+(port/linux/src/xbox_memory.c, VITA_LAYOUT_TOP). */
 static void io_bench(void);
 
 void *vita_host_arena(unsigned long *size)
@@ -157,16 +156,6 @@ void *vita_host_arena(unsigned long *size)
 				(unsigned)arena_block);
 		/* (the log's thread only now: see vita_host_log) */
 		log_thread_allowed = 1;
-		if (arena && (unsigned long)arena != VITA_EXPECTED_WINDOW)
-		{
-			char message[320];
-
-			snprintf(message, sizeof(message),
-				"vita: WARNING: the memory window is at %p, not at 0x%08lx where v1.0 to v1.0.2 put it: something was "
-				"allocated before it (a change at start-up, a plugin?); campaign saves made with the window elsewhere "
-				"will not resume (they start the level over)", arena, (unsigned long)VITA_EXPECTED_WINDOW);
-			vita_host_log(message);
-		}
 		/* (debug) HALO_IO_BENCH=1: the memory card's read speed by request
 		size - only now the window exists: its buffer, allocated before the
 		window, grew the C heap and moved the window by 1 MB */
