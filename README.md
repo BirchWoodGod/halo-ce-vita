@@ -30,19 +30,41 @@ Evolved.
 
 ## Install
 
-You need a PS Vita or PS TV with HENkaku/Ensō (firmware 3.60 to 3.74),
-VitaShell, and about 1.5 GB free on `ux0:`.
+### What you need
 
-1. Install `halo.vpk` with VitaShell. The bubble is called **Halo CE**.
-2. Copy the `maps` folder of your Xbox disc to `ux0:data/haloce-vita/maps/`.
-   To get it from a disc image, `extract-xiso -x "Halo.iso"` and take the
-   `maps` folder. All versions of the Xbox game work.
-3. Copy the disc's `default.xbe` to `ux0:data/haloce-vita/default.xbe`: the
-   loading screen takes its picture from the game's executable.
-4. Start the game. The first load of each level takes a while: the game
-   decompresses it into a cache file on the memory card.
+- A PS Vita or PS TV with HENkaku/Ensō (firmware 3.60 to 3.74) and
+  [VitaShell](https://github.com/TheOfficialFloW/VitaShell/releases).
+- About 1.5 GB free on `ux0:` (the game keeps decompressed copies of the
+  levels it loads).
+- Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
+  it). All versions of the Xbox game work. The PC version's maps do not.
+
+### Steps
+
+1. **Download `halo.vpk`** from the
+   [latest release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest).
+2. **Install it.** Copy the VPK to the Vita (VitaShell's USB or FTP mode),
+   open it in VitaShell and confirm. The bubble is called **Halo CE**.
+3. **Get the game files from your disc.** From an image,
+   [extract-xiso](https://github.com/XboxDev/extract-xiso) unpacks it:
+   `extract-xiso -x "Halo.iso"`. You need two things from it: the `maps`
+   folder and `default.xbe`.
+4. **Copy them to the Vita**, with VitaShell's USB or FTP mode:
+
+   ```
+   ux0:data/haloce-vita/maps/         <- the whole maps folder (ui.map, a10.map, bloodgulch.map ...)
+   ux0:data/haloce-vita/default.xbe   <- the loading screen's picture is read from it
+   ```
+
+5. **Start the game.** The first load of each level takes a while: the
+   game writes a cache file for it to the memory card.
 
 Without the maps the game shows where to copy them and exits.
+
+### Updating
+
+Install the new `halo.vpk` over the old one. Your maps, saves and settings
+in `ux0:data/haloce-vita/` are kept.
 
 ### Movies (optional)
 
@@ -57,6 +79,12 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
 ```
 
 A movie without an MP4 is skipped, as the game skips a missing movie.
+
+### Saving
+
+Checkpoints are kept with **Save and Quit** from the pause menu; choose the
+campaign again to resume. Closing the game from the home screen keeps the
+levels you reached, but not the checkpoint, as on the Xbox.
 
 ## Controls
 
@@ -88,19 +116,47 @@ the game exactly as on the Xbox.
 
 ## Building
 
-You need [VitaSDK](https://vitasdk.org) (set `VITASDK` or install it in
-`~/vitasdk`), clang 17 or newer, Python 3 and ninja.
+### What you need
+
+- Linux (or WSL on Windows) with **Python 3**, **ninja** and **clang 17 or
+  newer** (the game code is compiled by clang with the game's MSVC-like ABI).
+- **[VitaSDK](https://vitasdk.org)** for the Vita side (compiled by its
+  GCC) and the packaging tools. Install it with
+  [vdpm](https://github.com/vitasdk/vdpm) and set `VITASDK` (or put it in
+  `~/vitasdk`).
+
+For example, on Ubuntu or Debian:
 
 ```
-python3 configure.py --linux-cc <clang for armhf Linux> --lto off --pgo off --portable --release
+sudo apt install git python3 ninja-build clang lld curl
+export VITASDK=/usr/local/vitasdk
+export PATH=$VITASDK/bin:$PATH        # (add both lines to ~/.bashrc)
+git clone https://github.com/vitasdk/vdpm && cd vdpm
+./bootstrap-vitasdk.sh && ./install-all.sh && cd ..
+```
+
+### Build
+
+```
+git clone https://github.com/BirchWoodGod/halo-ce-vita
+cd halo-ce-vita
+python3 configure.py --lto off --pgo off --portable --release
 ninja vita
 ```
 
-The results are `build/vita/eboot.bin` and `build/vita/halo.vpk`. The game
-code is compiled by clang with the game's MSVC-like ABI, the Vita-side code
-by VitaSDK's GCC. [port/vita/README.md](port/vita/README.md) has the
-details: the layout of `port/vita`, testing in Vita3K and in a Linux build
-of the Vita renderer, debug switches, and the files the game keeps on the
+The results are `build/vita/eboot.bin` and `build/vita/halo.vpk`. Install
+the VPK as above, or, with an FTP server running on the Vita (VitaShell's
+SELECT), replace just the executable:
+
+```
+curl -T build/vita/eboot.bin ftp://<vita address>:1337/ux0:/app/HCEV00001/eboot.bin
+```
+
+Run `configure.py` again after adding a source file or changing anything in
+`port/vita/sce_sys` (the LiveArea images and the title).
+[port/vita/README.md](port/vita/README.md) has the details: the layout of
+`port/vita`, testing in [Vita3K](https://vita3k.org) and in a Linux build of
+the Vita renderer, debug switches, and the files the game keeps on the
 memory card.
 
 ## Contributing

@@ -117,13 +117,14 @@ You need:
 - clang 17 or newer (the game code is compiled by clang with the game's
   MSVC-like ABI; the Vita-side code by VitaSDK's GCC).
 - Python 3 and ninja.
-- An ARM Linux clang wrapper for `--linux-cc` (the Linux build graph is
-  generated too; `ninja vita` only builds the Vita part).
 
 ```
-python3 configure.py --linux-cc <clang for armhf Linux> --lto off --pgo off --portable --release
+python3 configure.py --lto off --pgo off --portable --release
 ninja vita
 ```
+
+(`configure.py` also writes the Linux build graph; `--linux-cc` picks its
+compiler, and `ninja vita` builds only the Vita part.)
 
 The results are `build/vita/eboot.bin` and `build/vita/halo.vpk`. Run
 `configure.py` again after adding a source file or changing anything in
