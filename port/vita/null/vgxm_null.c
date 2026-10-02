@@ -477,11 +477,11 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	draw_hash_draws++;
 }
 
-/* a draw that writes no colour, depth or stencil leaves the picture as it
-was (the GXM renderer reads no sample counts back): it is not hashed */
+/* a draw that writes no colour, depth or stencil and counts no samples for
+a visibility test leaves the picture as it was: it is not hashed */
 static int draw_writes_nothing(const struct vgxm_draw *draw)
 {
-	return !draw->color_write && !draw->depth_write &&
+	return !draw->color_write && !draw->depth_write && !draw->visibility_index &&
 		!(draw->stencil_test && draw->stencil_write_mask && (draw->stencil_fail != D3DSTENCILOP_KEEP ||
 			draw->stencil_depth_fail != D3DSTENCILOP_KEEP || draw->stencil_pass != D3DSTENCILOP_KEEP));
 }
