@@ -345,6 +345,15 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
                 # the Xbox SDK declarations (port/include/xdk) come before the
                 # Windows SDK, which has headers of the same names
                 f"-I{XDK_INCLUDE}",
+                # the native ports' own headers (render_epoch.h,
+                # tick_thread.h, load_profile.h ...), included with quotes,
+                # but not the Linux build's C runtime wrappers next to them
+                f"-iquote {LINUX_DIR / 'include'}",
+                # the POSIX threads over Windows threads
+                # (port/windows/src/win32_posix.c) the native ports' threads
+                # use (pthread.h, sched.h): after the C runtime, whose
+                # headers of the same names (time.h) come first
+                f"-idirafter {posix_include}",
             ])
             for obj in proj.objects:
                 name = str(obj.file_path).replace(os.sep, "/")
