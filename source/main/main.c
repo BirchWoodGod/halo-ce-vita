@@ -3800,6 +3800,11 @@ void main_loop(
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
 		halo_load_profile_frame_end();
 		main_split_report();
+		{
+			void halo_net_detail_report(void);
+
+			halo_net_detail_report();
+		}
 #endif
 		main_frame_rate_debug();
 
