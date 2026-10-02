@@ -1214,6 +1214,13 @@ void profile_render_end(
 void profile_texture_start(
 	void)
 {
+#ifdef HALO_LINUX
+	/* (port) the texture time is the profiler's, shown only while it is
+	on; the render's texture binds (~170 a frame) otherwise skip the two
+	clock reads, a system call each on the Vita */
+	if (!profile_global_enable)
+		return;
+#endif
 	profile_timesection_begin_now(&profile_globals.current_frame.texture);
 
 	return;
@@ -1222,6 +1229,10 @@ void profile_texture_start(
 void profile_texture_end(
 	void)
 {
+#ifdef HALO_LINUX
+	if (!profile_global_enable)
+		return;
+#endif
 	profile_timesection_end_now(&profile_globals.current_frame.texture);
 
 	return;
