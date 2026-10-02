@@ -250,8 +250,8 @@ struct gxm_device
 	const void *chunk_snapshot[VITA_VC_CHUNKS];
 	unsigned long d_snapshot_count;
 	unsigned long d_extent_frame, d_extent_previous;
-	/* (the draw hash) the registers the last write from D's first register
-	covered: an object's node matrices; what lies past them is stale */
+	/* the registers the last write from D's first register covered: the
+	node matrices of the object being drawn; what lies past them is stale */
 	unsigned long d_last_object_extent;
 	/* the vertex programs' BUFFER[1] (vita_xgpu.h), likewise */
 	float vertex_uniforms[VITA_VM_COUNT][4];
@@ -284,6 +284,9 @@ static struct
 	unsigned long vertex_snapshots, fragment_snapshots;
 	/* copied bytes by kind: streams in the window, immediate vertices, indices, uniforms */
 	unsigned long copied_streams, copied_immediate, copied_indices, copied_uniforms;
+	/* the uniform bytes by kind: the vertex constant chunks and BUFFER[1]
+	(the game's thread), the fragment snapshots (the worker's) */
+	unsigned long copied_chunk[VITA_VC_CHUNKS], copied_vertex_misc, copied_fragment;
 	/* split records: draws that reused the last state block, materials
 	compared equal to the last after a setter marked them dirty, and new
 	blocks; the worker's full translations of a block */
@@ -2051,6 +2054,7 @@ static void worker_fragment_snapshots(float values[VITA_FU_COUNT][4], int first_
 			memcpy(worker_build.fragment_values[first], values[first], bytes);
 			stats.fragment_snapshots++;
 			stats.copied_uniforms += bytes;
+			stats.copied_fragment += bytes;
 		}
 	}
 	worker_build.fragment_valid = TRUE;
@@ -3074,6 +3078,7 @@ static const void *vertex_uniforms_snapshot(void)
 	{
 		device.vertex_uniform_snapshot = ring_copy(device.vertex_uniforms, sizeof(device.vertex_uniforms));
 		stats.copied_uniforms += sizeof(device.vertex_uniforms);
+		stats.copied_vertex_misc += sizeof(device.vertex_uniforms);
 	}
 	return device.vertex_uniform_snapshot;
 }
@@ -3099,9 +3104,26 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 			count = program->usage.d_absolute_end;
 			if (program->usage.relative)
 			{
-				unsigned long extent = device.d_extent_frame > device.d_extent_previous ?
-					device.d_extent_frame : device.d_extent_previous;
+				/* a program indexing the node matrices reads the matrices of
+				the object being drawn, which rasterizer_set_model_skinning
+				wrote from D's first register just before (3 per node): the
+				snapshot covers them, not every register written lately - the
+				largest model's 100+ registers for a one-node prop's 3
+				(HALO_D_EXTENT_FRAME=1: up to the highest register written
+				this frame or the last, as before) */
+				static int frame_extent = -1;
+				unsigned long extent;
 
+				if (frame_extent < 0)
+				{
+					const char *setting = getenv("HALO_D_EXTENT_FRAME");
+
+					frame_extent = setting && atoi(setting) != 0;
+				}
+				if (frame_extent)
+					extent = device.d_extent_frame > device.d_extent_previous ? device.d_extent_frame : device.d_extent_previous;
+				else
+					extent = device.d_last_object_extent;
 				if (extent > count)
 					count = extent;
 			}
@@ -3119,6 +3141,7 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 				device.d_snapshot_count = count;
 			stats.vertex_snapshots++;
 			stats.copied_uniforms += count * sizeof(device.constants[0]);
+			stats.copied_chunk[chunk] += count * sizeof(device.constants[0]);
 		}
 		draw->vertex_chunks[chunk] = device.chunk_snapshot[chunk];
 		if (chunk == VITA_VC_D)
@@ -4524,6 +4547,11 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				draw_profile_draws = 0;
 			}
 		}
+		platform_log("uniform KB/frame by kind: vertex chunks A %.1f B %.1f C1 %.1f C2 %.1f D %.1f E %.1f, vertex misc %.1f, fragment (worker) %.1f",
+			stats.copied_chunk[0] / 1024.0 / stats.presents, stats.copied_chunk[1] / 1024.0 / stats.presents,
+			stats.copied_chunk[2] / 1024.0 / stats.presents, stats.copied_chunk[3] / 1024.0 / stats.presents,
+			stats.copied_chunk[4] / 1024.0 / stats.presents, stats.copied_chunk[5] / 1024.0 / stats.presents,
+			stats.copied_vertex_misc / 1024.0 / stats.presents, stats.copied_fragment / 1024.0 / stats.presents);
 		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu compared equal); worker builds %lu (+%lu texture-only)",
 			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
 			stats.state_equal / stats.presents, stats.worker_builds / stats.presents, stats.worker_texture_builds / stats.presents);

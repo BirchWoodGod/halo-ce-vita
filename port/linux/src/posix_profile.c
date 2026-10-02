@@ -81,6 +81,28 @@ static void profile_signal(int signal_number, siginfo_t *information, void *cont
 #elif defined(__i386__)
 	samples[index * 3] = ucontext->uc_mcontext.gregs[REG_EIP];
 	samples[index * 3 + 1] = 0;
+	{
+		/* (no link register: for a sample outside the executable - a libc
+		memcpy - the first word near the stack top that points into the
+		executable's code stands in for it, the likely return address) */
+		extern char __executable_start[], etext[];
+		unsigned long pc = ucontext->uc_mcontext.gregs[REG_EIP];
+
+		if (pc < (unsigned long)__executable_start || pc >= (unsigned long)etext)
+		{
+			const unsigned long *stack = (const unsigned long *)ucontext->uc_mcontext.gregs[REG_ESP];
+			int word;
+
+			for (word = 0; word < 8; word++)
+			{
+				if (stack[word] >= (unsigned long)__executable_start && stack[word] < (unsigned long)etext)
+				{
+					samples[index * 3 + 1] = stack[word];
+					break;
+				}
+			}
+		}
+	}
 #endif
 	/* (the thread, to tell the render's samples from the tick's) */
 	samples[index * 3 + 2] = (unsigned long)syscall(SYS_gettid);
