@@ -645,7 +645,13 @@ void network_event(
 	_vsnprintf(temporary, NUMBEROF(temporary) - 1, format, arguments);
 	va_end(arguments);
 
+#ifdef HALO_LINUX
+	/* (the text can hold what a peer sent - a machine or map name - so it
+	is never a format: a '%n' in it wrote to memory) */
+	error(3, "%s", temporary);
+#else
 	error(3, temporary);
+#endif
 
 	return;
 }

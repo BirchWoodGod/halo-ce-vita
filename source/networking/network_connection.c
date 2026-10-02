@@ -696,6 +696,18 @@ static boolean network_client_unreliable_connection_read(
 				"got an unusually large datagram (#d bytes); resetting unreliable incoming queue",
 				message_size);
 		}
+#ifdef HALO_LINUX
+		else if (message_size <= sizeof(message_header))
+		{
+			/* (a message is its header and at least a byte: one that says
+			it is shorter was read as nothing, and the readers looped on it
+			forever or read before their buffer) */
+			error(
+				_error_silent,
+				"got a datagram of #%d bytes, shorter than its header; resetting unreliable incoming queue",
+				message_size);
+		}
+#endif
 		else if (message_size > *buffer_size)
 		{
 			error(
@@ -1384,6 +1396,18 @@ static boolean network_client_reliable_connection_read(
 				message_size);
 			reset_queue = TRUE;
 		}
+#ifdef HALO_LINUX
+		else if (message_size <= sizeof(message_header))
+		{
+			/* (as for datagrams: a message that says it is shorter than its
+			header - a peer's 2-byte stream - hung the host) */
+			error(
+				_error_silent,
+				"got a message of #%d bytes, shorter than its header; resetting reliable incoming queue",
+				message_size);
+			reset_queue = TRUE;
+		}
+#endif
 		else if (message_size > *buffer_size)
 		{
 			error(

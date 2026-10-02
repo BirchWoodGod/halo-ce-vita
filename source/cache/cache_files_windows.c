@@ -1190,7 +1190,13 @@ static void cache_file_get_map_path(
 	const char *map_name,
 	char *path)
 {
+#ifdef HALO_LINUX
+	/* (every caller's path is 256 characters; the name can come from a
+	multiplayer host) */
+	snprintf(path, 256, "%s%s.map", cache_files_map_directory(), map_name);
+#else
 	sprintf(path, "%s%s.map", cache_files_map_directory(), map_name);
+#endif
 
 	return;
 }
