@@ -751,11 +751,30 @@ void game_state_try_and_load_from_persistent_storage(
 	/* (port) the header first, then one read of the whole save
 	(game_state_xbox.c) */
 	unsigned long long started = halo_load_profile_now();
-	boolean header_valid = game_state_peek_persistent_storage_header(&header, sizeof(header))
-		&& code_001af4f0(&header, FALSE)
-		&& main_get_difficulty() == header.difficulty
-		&& game_state_persistent_storage_made_here();
-	int staged = header_valid ?
+	boolean header_read = game_state_peek_persistent_storage_header(&header, sizeof(header));
+	boolean header_matches = header_read && code_001af4f0(&header, FALSE);
+	boolean difficulty_matches = header_matches && main_get_difficulty() == header.difficulty;
+	boolean header_valid = difficulty_matches && game_state_persistent_storage_made_here();
+	int staged;
+
+	/* (port) why a map start did or did not resume the campaign save: the
+	Xbox said nothing, and "the level started over" has several causes (no
+	save in this profile's directory, another level's or another
+	difficulty's save, a save of another build; the address guard logs its
+	own line) */
+	if (!header_read || !header.map_name[0])
+		platform_log("campaign save: none to resume (no profile directory, or an empty save)");
+	else if (!header_matches)
+		platform_log("campaign save: not for this game (map '%.64s' here '%.64s', players %d here %d, checksums %s): level starts over",
+			header.map_name, tag_get_name(global_scenario_index), (int)header.player_count, (int)player_spawn_count,
+			header.cache_file_checksum == cache_files_get_checksum() &&
+				header.allocation_size_checksum == game_state_globals.allocation_size_checksum ? "match" : "differ");
+	else if (!difficulty_matches)
+		platform_log("campaign save: made on difficulty %d, difficulty chosen %d: level starts over",
+			(int)header.difficulty, (int)main_get_difficulty());
+	else if (header_valid)
+		platform_log("campaign save: '%.64s' on difficulty %d: resuming", header.map_name, (int)header.difficulty);
+	staged = header_valid ?
 		game_state_read_persistent_storage_staged(sizeof(header), offsetof(struct game_state_header, checksum), GAME_STATE_SIZE) :
 		0;
 
