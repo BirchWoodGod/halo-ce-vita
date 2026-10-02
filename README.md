@@ -184,7 +184,6 @@ the memory card (VitaShell's FTP or USB mode):
   writing it (a dump still being written ends in `.tmp`).
 - `ux0:data/haloce-vita/data/debug.txt`: the game's own log.
 
-
 ## Credits
 
 This port stands on a lot of other people's work:
