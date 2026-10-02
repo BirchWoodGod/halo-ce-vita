@@ -255,6 +255,14 @@ int main(void)
 	test_error_mapping();
 	printf("-- the game's calls for a solo multiplayer game\n");
 	test_game_sequence();
+	/* the console's self-test (HALO_NET_SELFTEST / HALO_NET_TRACE), its
+	log shown: VITA_NET_TEST_SELFTEST=1 */
+	if (getenv("VITA_NET_TEST_SELFTEST"))
+	{
+		mock_log_quiet = 0;
+		printf("-- the self-test\n");
+		net_selftest_thread(0, NULL);
+	}
 	printf("-- %d of %d checks failed (mock sendto calls %d, EISCONN refusals %d)\n", failures, checks,
 		mock_scenet_sendto_calls, mock_scenet_eisconn_refusals);
 	return failures ? 1 : 0;

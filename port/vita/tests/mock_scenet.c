@@ -369,6 +369,15 @@ int sceNetEpollDestroy(int eid)
 	return result_of(close(eid));
 }
 
+int sceNetGetStatisticsInfo(SceNetStatisticsInfo *info, int flags)
+{
+	(void)flags;
+	memset(info, 0, sizeof(*info));
+	info->libnet_mem_free_size = 7 * 1024 * 1024;
+	info->libnet_mem_free_min = 6 * 1024 * 1024;
+	return 0;
+}
+
 /* ---------- the library's start and addresses */
 
 int sceNetInit(SceNetInitParam *param)

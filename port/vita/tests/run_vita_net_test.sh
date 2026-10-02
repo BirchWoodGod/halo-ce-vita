@@ -17,7 +17,7 @@ ln -s "$sdk/arm-vita-eabi/include/psp2common" "$out/include/psp2common"
 ln -s "$sdk/arm-vita-eabi/include/vitasdk" "$out/include/vitasdk" 2>/dev/null || true
 [ -e "$sdk/arm-vita-eabi/include/vitasdk.h" ] && ln -s "$sdk/arm-vita-eabi/include/vitasdk.h" "$out/include/vitasdk.h"
 cc=${CC:-gcc}
-$cc -m32 -g -O1 -Wall -Wno-unused-function -D_GNU_SOURCE -I"$out/include" -I"$root/port/linux/src" -I"$root/port/vita/include" \
+$cc -m32 -pthread -g -O1 -Wall -Wno-unused-function -D_GNU_SOURCE -I"$out/include" -I"$root/port/linux/src" -I"$root/port/vita/include" \
 	"$here/vita_net_test.c" "$here/mock_scenet.c" -o "$out/vita_net_test"
 status=0
 "$out/vita_net_test" || status=$?

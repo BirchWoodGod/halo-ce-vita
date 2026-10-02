@@ -21,6 +21,9 @@ datagram sockets refuse a sendto naming a destination (posix_socket_sendto).
 #include <psp2/net/netctl.h>
 #include <psp2/sysmodule.h>
 
+#include <pthread.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -162,6 +165,368 @@ static void address_from_vita(const SceNetSockaddrIn *in, void *address, int *le
 		*length = sizeof(bytes);
 }
 
+/* ---------- the trace (HALO_NET_TRACE=1 in env.txt)
+
+What the game's sockets do, in halo.log ("net trace:" lines), to tell from
+one run on the console which call fails or which traffic never arrives:
+
+- each socket made (stream or datagram), bound, connected, listening,
+  accepted and closed, with the addresses and the results;
+- the options the game sets (buffer sizes, broadcast, non-blocking) and
+  the sizes it reads back;
+- the first datagrams each socket sends and receives, with the address;
+- the first failing calls, with the library's raw error and the Winsock
+  number the game sees (would-blocks are counted, and the first ones of
+  sends logged: a full connection);
+- every two seconds, each socket's counts since it was made: calls,
+  successes, bytes, would-blocks, failures by Winsock number, connections
+  closed, sendtos sent as sends; the selects'; and the network pool's free
+  memory (sceNetGetStatisticsInfo). */
+
+#define TRACE_CODES 4
+#define TRACE_FAILURES_LOGGED 64
+#define TRACE_SEND_BLOCKS_LOGGED 16
+#define TRACE_DATAGRAMS_LOGGED 4
+#define TRACE_PERIOD_US 2000000ULL
+
+enum
+{
+	TRACE_SEND,
+	TRACE_RECEIVE,
+};
+
+struct trace_counts
+{
+	unsigned int calls, ok, blocked, failed, closed, as_send;
+	unsigned long long bytes;
+	int codes[TRACE_CODES];
+	unsigned int code_counts[TRACE_CODES];
+};
+
+struct trace_socket
+{
+	int type;
+	char local[24], peer[24];
+	struct trace_counts counts[2];
+	unsigned int datagrams_logged[2];
+	unsigned int reported_calls;
+};
+
+static int trace_state = -1; /* -1 not read yet */
+static pthread_mutex_t trace_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct trace_socket *trace_sockets[SOCKET_IDENTIFIERS];
+static unsigned int trace_failures, trace_send_blocks;
+static unsigned long long trace_last_report;
+static struct
+{
+	unsigned int calls, ready, empty, failed, epoll_failed;
+} trace_selects;
+
+static int trace_on(void)
+{
+	if (trace_state < 0)
+	{
+		const char *setting = getenv("HALO_NET_TRACE");
+
+		trace_state = setting && atoi(setting) > 0;
+		if (trace_state)
+			vita_host_log("net trace: on");
+	}
+	return trace_state;
+}
+
+static void trace_log(const char *format, ...)
+{
+	char line[320];
+	va_list arguments;
+	int length = snprintf(line, sizeof(line), "net trace: ");
+
+	va_start(arguments, format);
+	vsnprintf(line + length, sizeof(line) - (size_t)length, format, arguments);
+	va_end(arguments);
+	vita_host_log(line);
+}
+
+/* an address in network byte order as text */
+static void trace_address_text(char *text, size_t size, unsigned int address, unsigned short port)
+{
+	snprintf(text, size, "%u.%u.%u.%u:%u", address & 0xff, (address >> 8) & 0xff, (address >> 16) & 0xff,
+		address >> 24, (unsigned int)(unsigned short)((port >> 8) | (port << 8)));
+}
+
+static void trace_vita_address_text(char *text, size_t size, const SceNetSockaddrIn *address)
+{
+	if (address)
+		trace_address_text(text, size, address->sin_addr.s_addr, address->sin_port);
+	else
+		snprintf(text, size, "-");
+}
+
+static const char *trace_type_name(int type)
+{
+	return type == SCE_NET_SOCK_STREAM ? "tcp" : type == SCE_NET_SOCK_DGRAM ? "udp" : "?";
+}
+
+/* the socket's record (made if there is none), under trace_mutex */
+static struct trace_socket *trace_socket_of(int socket)
+{
+	if (socket < 0 || socket >= SOCKET_IDENTIFIERS)
+		return NULL;
+	if (!trace_sockets[socket])
+	{
+		trace_sockets[socket] = calloc(1, sizeof(struct trace_socket));
+		if (trace_sockets[socket])
+		{
+			strcpy(trace_sockets[socket]->local, "-");
+			strcpy(trace_sockets[socket]->peer, "-");
+		}
+	}
+	return trace_sockets[socket];
+}
+
+/* the socket's addresses, as the library has them now, under trace_mutex */
+static void trace_refresh_record(int socket, struct trace_socket *record)
+{
+	SceNetSockaddrIn local, peer;
+	unsigned int local_length = sizeof(local), peer_length = sizeof(peer);
+
+	memset(&local, 0, sizeof(local));
+	memset(&peer, 0, sizeof(peer));
+	if (sceNetGetsockname(socket, (SceNetSockaddr *)&local, &local_length) >= 0)
+		trace_vita_address_text(record->local, sizeof(record->local), &local);
+	if (sceNetGetpeername(socket, (SceNetSockaddr *)&peer, &peer_length) >= 0)
+		trace_vita_address_text(record->peer, sizeof(record->peer), &peer);
+}
+
+static void trace_refresh_addresses(int socket)
+{
+	struct trace_socket *record;
+
+	pthread_mutex_lock(&trace_mutex);
+	record = trace_socket_of(socket);
+	if (record)
+		trace_refresh_record(socket, record);
+	pthread_mutex_unlock(&trace_mutex);
+}
+
+/* a failing call that is not one socket's transfer (the selects' epolls) */
+static void trace_failure(int socket, const char *call, int result)
+{
+	unsigned int failure_number = 0;
+
+	pthread_mutex_lock(&trace_mutex);
+	if (trace_failures < TRACE_FAILURES_LOGGED)
+		failure_number = ++trace_failures;
+	pthread_mutex_unlock(&trace_mutex);
+	if (failure_number)
+		trace_log("FAIL #%d %s raw 0x%08x -> winsock %d [%u/%d]", socket, call, (unsigned int)result,
+			winsock_error(result), failure_number, TRACE_FAILURES_LOGGED);
+}
+
+static void trace_made(int socket, int type, const char *how)
+{
+	struct trace_socket *record;
+
+	pthread_mutex_lock(&trace_mutex);
+	if (socket >= 0 && socket < SOCKET_IDENTIFIERS && trace_sockets[socket])
+	{
+		/* (an identifier closed behind the platform layer's back) */
+		free(trace_sockets[socket]);
+		trace_sockets[socket] = NULL;
+	}
+	record = trace_socket_of(socket);
+	if (record)
+		record->type = type;
+	pthread_mutex_unlock(&trace_mutex);
+	{
+		/* (the buffers it starts with: the game sets a stream socket's on
+		no HALO_LINUX build, and the Vita's do not grow as Linux's do) */
+		int send_size = -1, receive_size = -1;
+		unsigned int length = sizeof(send_size);
+
+		sceNetGetsockopt(socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_SNDBUF, &send_size, &length);
+		length = sizeof(receive_size);
+		sceNetGetsockopt(socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_RCVBUF, &receive_size, &length);
+		trace_log("#%d %s made (%s), buffers send %d receive %d", socket, trace_type_name(type), how, send_size,
+			receive_size);
+	}
+}
+
+static void trace_counts_text(char *text, size_t size, const struct trace_counts *counts, int receive)
+{
+	int length = snprintf(text, size, "%u calls %u ok %llu B, %u would-block, %u failed", counts->calls, counts->ok,
+		counts->bytes, counts->blocked, counts->failed);
+	int index;
+
+	for (index = 0; index < TRACE_CODES && counts->code_counts[index]; index++)
+	{
+		if (length > 0 && (size_t)length < size)
+			length += snprintf(text + length, size - (size_t)length, " %dx%u", counts->codes[index],
+				counts->code_counts[index]);
+	}
+	if (receive && counts->closed && length > 0 && (size_t)length < size)
+		length += snprintf(text + length, size - (size_t)length, ", %u closed", counts->closed);
+	if (!receive && counts->as_send && length > 0 && (size_t)length < size)
+		snprintf(text + length, size - (size_t)length, ", %u sendto as send", counts->as_send);
+}
+
+/* one socket's line, under trace_mutex */
+static void trace_socket_line(int socket, const struct trace_socket *record, const char *when)
+{
+	char sends[160], receives[160];
+
+	trace_counts_text(sends, sizeof(sends), &record->counts[TRACE_SEND], 0);
+	trace_counts_text(receives, sizeof(receives), &record->counts[TRACE_RECEIVE], 1);
+	trace_log("%s#%d %s %s -> %s | send: %s | receive: %s", when, socket, trace_type_name(record->type), record->local,
+		record->peer, sends, receives);
+}
+
+static void trace_closed(int socket, int result)
+{
+	pthread_mutex_lock(&trace_mutex);
+	if (socket >= 0 && socket < SOCKET_IDENTIFIERS && trace_sockets[socket])
+	{
+		trace_socket_line(socket, trace_sockets[socket], "closed ");
+		free(trace_sockets[socket]);
+		trace_sockets[socket] = NULL;
+	}
+	pthread_mutex_unlock(&trace_mutex);
+	if (result < 0)
+		trace_log("#%d close failed: raw 0x%08x", socket, (unsigned int)result);
+}
+
+/* every TRACE_PERIOD_US: the busy sockets' lines, the selects', the pool */
+static void trace_report_if_due(void)
+{
+	unsigned long long now = vita_host_time_us();
+	int socket;
+	SceNetStatisticsInfo statistics;
+	int statistics_result;
+
+	if (now - trace_last_report < TRACE_PERIOD_US)
+		return;
+	pthread_mutex_lock(&trace_mutex);
+	if (now - trace_last_report < TRACE_PERIOD_US)
+	{
+		pthread_mutex_unlock(&trace_mutex);
+		return;
+	}
+	trace_last_report = now;
+	for (socket = 0; socket < SOCKET_IDENTIFIERS; socket++)
+	{
+		struct trace_socket *record = trace_sockets[socket];
+		unsigned int calls;
+
+		if (!record)
+			continue;
+		calls = record->counts[TRACE_SEND].calls + record->counts[TRACE_RECEIVE].calls;
+		/* (a socket idle since the last report is not repeated) */
+		if (calls == record->reported_calls && calls)
+			continue;
+		record->reported_calls = calls;
+		/* (a stream connect finishes after the call: its peer is known now) */
+		if (!strcmp(record->peer, "-") || !strncmp(record->local, "0.0.0.0:0", 9))
+			trace_refresh_record(socket, record);
+		trace_socket_line(socket, record, "");
+	}
+	memset(&statistics, 0, sizeof(statistics));
+	statistics_result = sceNetGetStatisticsInfo(&statistics, 0);
+	trace_log("selects %u (%u ready, %u nothing, %u failed, %u epoll failures); pool free %d (least %d), "
+		"kernel free %d (least %d), packets %d (0x%08x)", trace_selects.calls, trace_selects.ready,
+		trace_selects.empty, trace_selects.failed, trace_selects.epoll_failed, statistics.libnet_mem_free_size,
+		statistics.libnet_mem_free_min, statistics.kernel_mem_free_size, statistics.kernel_mem_free_min,
+		statistics.packet_count, (unsigned int)statistics_result);
+	pthread_mutex_unlock(&trace_mutex);
+}
+
+/* a send or receive call's result, with the address it went to or came from */
+static void trace_transfer(int socket, int direction, const char *call, int result, const SceNetSockaddrIn *address,
+	int as_send)
+{
+	struct trace_socket *record;
+	char address_text[24];
+	int log_datagram = 0, log_failure = 0, log_block = 0, code = 0;
+	unsigned int failure_number = 0;
+
+	pthread_mutex_lock(&trace_mutex);
+	record = trace_socket_of(socket);
+	if (record)
+	{
+		struct trace_counts *counts = &record->counts[direction];
+
+		counts->calls++;
+		if (as_send)
+			counts->as_send++;
+		if (result >= 0)
+		{
+			counts->ok++;
+			counts->bytes += (unsigned long long)result;
+			if (direction == TRACE_RECEIVE && result == 0 && record->type == SCE_NET_SOCK_STREAM)
+				counts->closed++;
+			if (record->type != SCE_NET_SOCK_STREAM && record->datagrams_logged[direction] < TRACE_DATAGRAMS_LOGGED)
+			{
+				record->datagrams_logged[direction]++;
+				log_datagram = 1;
+			}
+		}
+		else
+		{
+			int index;
+
+			code = winsock_error(result);
+			if (code == WSAEWOULDBLOCK)
+			{
+				counts->blocked++;
+				if (direction == TRACE_SEND && trace_send_blocks < TRACE_SEND_BLOCKS_LOGGED)
+				{
+					trace_send_blocks++;
+					log_block = 1;
+				}
+			}
+			else
+			{
+				counts->failed++;
+				for (index = 0; index < TRACE_CODES; index++)
+				{
+					if (!counts->code_counts[index] || counts->codes[index] == code)
+					{
+						counts->codes[index] = code;
+						counts->code_counts[index]++;
+						break;
+					}
+				}
+				if (trace_failures < TRACE_FAILURES_LOGGED)
+				{
+					failure_number = ++trace_failures;
+					log_failure = 1;
+				}
+			}
+		}
+	}
+	pthread_mutex_unlock(&trace_mutex);
+	trace_vita_address_text(address_text, sizeof(address_text), address);
+	if (log_datagram)
+		trace_log("#%d %s %d B%s%s%s", socket, call, result, address ? (direction == TRACE_SEND ? " to " : " from ") : "",
+			address ? address_text : " (connected)", as_send ? " (sent as a send: connected peer)" : "");
+	if (log_block)
+		trace_log("#%d %s would block (send buffer full?) [%u/%d]", socket, call, trace_send_blocks,
+			TRACE_SEND_BLOCKS_LOGGED);
+	if (log_failure)
+		trace_log("FAIL #%d %s raw 0x%08x -> winsock %d (address %s) [%u/%d]", socket, call, (unsigned int)result, code,
+			address_text, failure_number, TRACE_FAILURES_LOGGED);
+	trace_report_if_due();
+}
+
+/* a call other than a transfer that failed or is worth seeing */
+static void trace_result(int socket, const char *call, int result, const char *detail)
+{
+	if (result < 0)
+		trace_log("#%d %s%s -> raw 0x%08x (winsock %d)", socket, call, detail ? detail : "", (unsigned int)result,
+			winsock_error(result));
+	else
+		trace_log("#%d %s%s -> %d", socket, call, detail ? detail : "", result);
+}
+
 int posix_socket_last_error(void)
 {
 	return last_error;
@@ -178,22 +543,44 @@ int posix_socket(int family, int type, int protocol)
 		int result = sceNetSocket("halo", family, type, protocol);
 
 		forget_peer(result);
+		if (trace_on())
+		{
+			if (result >= 0)
+				trace_made(result, type, "socket");
+			else
+				trace_result(-1, "socket", result, trace_type_name(type));
+		}
 		return answer(result);
 	}
 }
 
 int posix_socket_close(int socket)
 {
+	int result;
+
 	forget_peer(socket);
-	return answer(sceNetSocketClose(socket));
+	result = sceNetSocketClose(socket);
+	if (trace_on())
+		trace_closed(socket, result);
+	return answer(result);
 }
 
 int posix_socket_bind(int socket, const void *address, int address_length)
 {
 	SceNetSockaddrIn vita_address;
 	unsigned int length = address_to_vita(address, address_length, &vita_address);
+	int result = sceNetBind(socket, (const SceNetSockaddr *)&vita_address, length);
 
-	return answer(sceNetBind(socket, (const SceNetSockaddr *)&vita_address, length));
+	if (trace_on())
+	{
+		char detail[32] = " ";
+
+		trace_vita_address_text(detail + 1, sizeof(detail) - 1, &vita_address);
+		trace_result(socket, "bind", result, detail);
+		if (result >= 0)
+			trace_refresh_addresses(socket);
+	}
+	return answer(result);
 }
 
 int posix_socket_connect(int socket, const void *address, int address_length)
@@ -204,6 +591,14 @@ int posix_socket_connect(int socket, const void *address, int address_length)
 
 	forget_peer(socket);
 	result = sceNetConnect(socket, (const SceNetSockaddr *)&vita_address, length);
+	if (trace_on())
+	{
+		char detail[32] = " to ";
+
+		trace_vita_address_text(detail + 4, sizeof(detail) - 4, &vita_address);
+		trace_result(socket, "connect", result, detail);
+		trace_refresh_addresses(socket);
+	}
 	/* (a connect under way is WSAEWOULDBLOCK to the game, as in posix_net.c) */
 	if (result < 0 && winsock_error(result) == WSAEINPROGRESS)
 	{
@@ -215,7 +610,11 @@ int posix_socket_connect(int socket, const void *address, int address_length)
 
 int posix_socket_listen(int socket, int backlog)
 {
-	return answer(sceNetListen(socket, backlog));
+	int result = sceNetListen(socket, backlog);
+
+	if (trace_on())
+		trace_result(socket, "listen", result, NULL);
+	return answer(result);
 }
 
 int posix_socket_accept(int socket, void *address, int *address_length)
@@ -226,12 +625,31 @@ int posix_socket_accept(int socket, void *address, int *address_length)
 
 	if (result >= 0)
 		address_from_vita(&vita_address, address, address_length);
+	if (trace_on())
+	{
+		if (result >= 0)
+		{
+			char how[32];
+
+			snprintf(how, sizeof(how), "accepted on #%d", socket);
+			trace_made(result, SCE_NET_SOCK_STREAM, how);
+			trace_refresh_addresses(result);
+		}
+		else if (winsock_error(result) != WSAEWOULDBLOCK)
+		{
+			trace_result(socket, "accept", result, NULL);
+		}
+	}
 	return answer(result);
 }
 
 int posix_socket_send(int socket, const void *buffer, int length, int flags)
 {
-	return answer(sceNetSend(socket, buffer, (unsigned int)length, flags));
+	int result = sceNetSend(socket, buffer, (unsigned int)length, flags);
+
+	if (trace_on())
+		trace_transfer(socket, TRACE_SEND, "send", result, NULL, 0);
+	return answer(result);
 }
 
 /* whether the socket is a connected one whose peer is this address: known
@@ -279,10 +697,15 @@ int posix_socket_sendto(int socket, const void *buffer, int length, int flags,
 {
 	SceNetSockaddrIn vita_address;
 	unsigned int vita_length = address_to_vita(address, address_length, &vita_address);
-	int result;
+	int result, as_send = 0;
 
 	if (vita_length && is_connected_peer(socket, &vita_address, 0))
-		return answer(sceNetSend(socket, buffer, (unsigned int)length, flags));
+	{
+		result = sceNetSend(socket, buffer, (unsigned int)length, flags);
+		if (trace_on())
+			trace_transfer(socket, TRACE_SEND, "sendto", result, &vita_address, 1);
+		return answer(result);
+	}
 	result = sceNetSendto(socket, buffer, (unsigned int)length, flags,
 		vita_length ? (const SceNetSockaddr *)&vita_address : NULL, vita_length);
 	if (result < 0 && vita_length && winsock_error(result) == WSAEISCONN &&
@@ -295,14 +718,24 @@ int posix_socket_sendto(int socket, const void *buffer, int length, int flags,
 			logged = 1;
 			vita_host_log("net: a connected datagram socket refused a sendto to its peer (EISCONN): sending it as a send");
 		}
+		if (trace_on())
+			trace_log("#%d sendto refused (EISCONN, raw 0x%08x): its connected peer, sent as a send", socket,
+				(unsigned int)result);
 		result = sceNetSend(socket, buffer, (unsigned int)length, flags);
+		as_send = 1;
 	}
+	if (trace_on())
+		trace_transfer(socket, TRACE_SEND, "sendto", result, vita_length ? &vita_address : NULL, as_send);
 	return answer(result);
 }
 
 int posix_socket_recv(int socket, void *buffer, int length, int flags)
 {
-	return answer(sceNetRecv(socket, buffer, (unsigned int)length, flags));
+	int result = sceNetRecv(socket, buffer, (unsigned int)length, flags);
+
+	if (trace_on())
+		trace_transfer(socket, TRACE_RECEIVE, "recv", result, NULL, 0);
+	return answer(result);
 }
 
 int posix_socket_recvfrom(int socket, void *buffer, int length, int flags,
@@ -316,26 +749,38 @@ int posix_socket_recvfrom(int socket, void *buffer, int length, int flags,
 	result = sceNetRecvfrom(socket, buffer, (unsigned int)length, flags, (SceNetSockaddr *)&vita_address, &vita_length);
 	if (result >= 0)
 		address_from_vita(&vita_address, address, address_length);
+	if (trace_on())
+		trace_transfer(socket, TRACE_RECEIVE, "recvfrom", result, result >= 0 ? &vita_address : NULL, 0);
 	return answer(result);
 }
 
 int posix_socket_shutdown(int socket, int how)
 {
-	return answer(sceNetShutdown(socket, how));
+	int result = sceNetShutdown(socket, how);
+
+	if (trace_on())
+		trace_result(socket, "shutdown", result, NULL);
+	return answer(result);
 }
 
 int posix_socket_set_nonblocking(int socket, int nonblocking)
 {
 	int value = nonblocking ? 1 : 0;
+	int result = sceNetSetsockopt(socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &value, sizeof(value));
 
-	return answer(sceNetSetsockopt(socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &value, sizeof(value)));
+	if (trace_on())
+		trace_result(socket, "non-blocking", result, nonblocking ? " on" : " off");
+	return answer(result);
 }
 
 int posix_socket_set_nodelay(int socket)
 {
 	int value = 1;
+	int result = sceNetSetsockopt(socket, SCE_NET_IPPROTO_TCP, SCE_NET_TCP_NODELAY, &value, sizeof(value));
 
-	return answer(sceNetSetsockopt(socket, SCE_NET_IPPROTO_TCP, SCE_NET_TCP_NODELAY, &value, sizeof(value)));
+	if (trace_on())
+		trace_result(socket, "TCP_NODELAY", result, NULL);
+	return answer(result);
 }
 
 int posix_socket_bytes_available(int socket, posix_ulong *count)
@@ -370,12 +815,23 @@ static int known_option(int level, int name)
 
 int posix_socket_setsockopt(int socket, int level, int name, const void *value, int length)
 {
+	int result;
+	char detail[64] = "";
+
+	if (trace_on())
+		snprintf(detail, sizeof(detail), " level 0x%x option 0x%x = %d", (unsigned int)level, (unsigned int)name,
+			value && length >= 4 ? *(const int *)value : -1);
 	if (!known_option(level, name))
 	{
+		if (trace_on())
+			trace_result(socket, "setsockopt (ignored)", 0, detail);
 		last_error = 0;
 		return 0;
 	}
-	return answer(sceNetSetsockopt(socket, level, name, value, (unsigned int)length));
+	result = sceNetSetsockopt(socket, level, name, value, (unsigned int)length);
+	if (trace_on())
+		trace_result(socket, "setsockopt", result, detail);
+	return answer(result);
 }
 
 int posix_socket_getsockopt(int socket, int level, int name, void *value, int *length)
@@ -390,6 +846,14 @@ int posix_socket_getsockopt(int socket, int level, int name, void *value, int *l
 	}
 	result = sceNetGetsockopt(socket, level, name, value, &vita_length);
 	*length = (int)vita_length;
+	if (trace_on())
+	{
+		char detail[64];
+
+		snprintf(detail, sizeof(detail), " level 0x%x option 0x%x: %d", (unsigned int)level, (unsigned int)name,
+			result >= 0 && vita_length >= 4 ? *(int *)value : -1);
+		trace_result(socket, "getsockopt", result, detail);
+	}
 	return answer(result);
 }
 
@@ -482,9 +946,18 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 			vita_host_sleep_us((unsigned long)timeout);
 		return 0;
 	}
+	if (trace_on())
+		__atomic_fetch_add(&trace_selects.calls, 1, __ATOMIC_RELAXED);
 	epoll = sceNetEpollCreate("halo_select", 0);
 	if (epoll < 0)
+	{
+		if (trace_on())
+		{
+			__atomic_fetch_add(&trace_selects.epoll_failed, 1, __ATOMIC_RELAXED);
+			trace_failure(-1, "epoll create", epoll);
+		}
 		return answer(epoll);
+	}
 	for (index = 0; index < count; index++)
 	{
 		SceNetEpollEvent event;
@@ -493,12 +966,25 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 		/* (errors and hang-ups always reported) */
 		event.events = entries[index].wanted | SCE_NET_EPOLLERR | SCE_NET_EPOLLHUP;
 		event.data.u32 = (unsigned int)index;
-		sceNetEpollControl(epoll, SCE_NET_EPOLL_CTL_ADD, entries[index].socket, &event);
+		result = sceNetEpollControl(epoll, SCE_NET_EPOLL_CTL_ADD, entries[index].socket, &event);
+		/* (a socket the epoll does not take is never ready: seen in the trace) */
+		if (result < 0 && trace_on())
+		{
+			__atomic_fetch_add(&trace_selects.epoll_failed, 1, __ATOMIC_RELAXED);
+			trace_failure(entries[index].socket, "epoll add", result);
+		}
 	}
 	result = sceNetEpollWait(epoll, events, count, timeout);
 	sceNetEpollDestroy(epoll);
 	if (result < 0)
+	{
+		if (trace_on())
+		{
+			__atomic_fetch_add(&trace_selects.failed, 1, __ATOMIC_RELAXED);
+			trace_failure(-1, "epoll wait", result);
+		}
 		return answer(result);
+	}
 	for (index = 0; index < result; index++)
 	{
 		unsigned int entry = events[index].data.u32;
@@ -537,6 +1023,11 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 	if (error)
 		select_keep(entries, count, error, error_count, SCE_NET_EPOLLERR);
 	ready = (read ? *read_count : 0) + (write ? *write_count : 0) + (error ? *error_count : 0);
+	if (trace_on())
+	{
+		__atomic_fetch_add(ready > 0 ? &trace_selects.ready : &trace_selects.empty, 1, __ATOMIC_RELAXED);
+		trace_report_if_due();
+	}
 	/* (nothing ready leaves the last error as it was, as Winsock does) */
 	if (ready > 0)
 		last_error = 0;
@@ -773,6 +1264,29 @@ static int net_selftest_thread(SceSize arguments_size, void *arguments)
 	sceKernelDelayThread(100000);
 	from_length = 16;
 	selftest_log("udp a recvfrom broadcast", posix_socket_recvfrom(a, buffer, sizeof(buffer), 0, from, &from_length));
+	/* the game's client update: a sendto naming the peer of a connected
+	datagram socket, which BSD's stack refuses (EISCONN) and
+	posix_socket_sendto sends as a send */
+	winsock_address(address, 0x7f000001u, 2400);
+	selftest_log("udp b connect a", posix_socket_connect(b, address, 16));
+	{
+		SceNetSockaddrIn target;
+		char line[128];
+
+		address_to_vita(address, 16, &target);
+		result = sceNetSendto(b, "raw", 3, 0, (const SceNetSockaddr *)&target, sizeof(target));
+		snprintf(line, sizeof(line), "net selftest: raw sceNetSendto naming the connected peer -> 0x%08x "
+			"(0x80410138 = EISCONN, BSD's rule)", (unsigned int)result);
+		vita_host_log(line);
+	}
+	selftest_log("udp b sendto a while connected (expect 14)", posix_socket_sendto(b, "halo connected", 14, 0, address, 16));
+	sceKernelDelayThread(50000);
+	for (count = 0; count < 3; count++)
+	{
+		from_length = 16;
+		selftest_log("udp a recvfrom (14 = the connected sendto arrived)",
+			posix_socket_recvfrom(a, buffer, sizeof(buffer), 0, from, &from_length));
+	}
 	posix_socket_close(a);
 	posix_socket_close(b);
 
@@ -817,8 +1331,13 @@ void vita_net_selftest(void)
 {
 	SceUID thread;
 
-	if (!getenv("HALO_NET_SELFTEST") || !atoi(getenv("HALO_NET_SELFTEST")))
+	/* (the trace runs it too: the calls' results on this console, before
+	the game's) */
+	if ((!getenv("HALO_NET_SELFTEST") || !atoi(getenv("HALO_NET_SELFTEST"))) &&
+		(!getenv("HALO_NET_TRACE") || !atoi(getenv("HALO_NET_TRACE"))))
+	{
 		return;
+	}
 	thread = sceKernelCreateThread("net_selftest", net_selftest_thread, 0x10000100, 0x10000, 0, 0, NULL);
 	if (thread >= 0)
 		sceKernelStartThread(thread, 0, NULL);
