@@ -793,6 +793,33 @@ static void constants_store(unsigned long first, const void *data, unsigned long
 {
 	int changed = memcmp(&CONSTANT(first), data, count * sizeof(CONSTANT(0))) != 0;
 
+	{
+		/* (debug) HALO_LIGHT_CHECK=1: a vertex constant written as a value
+		that is not a finite number (NaN or infinity: what it reaches draws
+		black on the SGX) is logged with its register */
+		static int check = -1;
+
+		if (check < 0)
+			check = getenv("HALO_LIGHT_CHECK") && atoi(getenv("HALO_LIGHT_CHECK"));
+		if (check)
+		{
+			const float *values = (const float *)data;
+			static unsigned long logged;
+			unsigned long index;
+
+			for (index = 0; index < count * 4; index++)
+			{
+				if (!(values[index] == values[index]) || values[index] > 3.0e38f || values[index] < -3.0e38f)
+				{
+					if (logged++ < 50)
+						platform_log("light check: vertex constant c%lu.%c = %f (frame %lu, write of %lu from c%lu)",
+							first + index / 4, "xyzw"[index % 4], (double)values[index], device.frame, count, first);
+					break;
+				}
+			}
+		}
+	}
+
 	if (changed)
 	{
 		int chunk;
