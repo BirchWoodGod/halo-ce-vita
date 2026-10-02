@@ -20,8 +20,9 @@ Evolved.
 
 - The whole campaign from the menus, with checkpoints, saves and Save and
   Quit, cinematics, and the movies (converted to MP4, see below).
-- Multiplayer maps on your own (split screen with one player), and system
-  link over Wi-Fi with other Vitas or the Linux/Windows builds of the port.
+- Multiplayer maps on your own (split screen with one player). System link
+  between Vitas on the same Wi-Fi is in, but still being tested; play
+  against PCs is not supported yet.
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality and control options: hold
   **Select + Start** in game.
