@@ -3578,7 +3578,14 @@ static struct render_command *record_draw(BOOL immediate)
 		return NULL;
 	DRAW_FINE_ADD(0, profile_from);
 	draw = &command->draw;
-	memset(draw, 0, sizeof(*draw));
+	/* (not the whole draw, 478 bytes into a cold ring entry: every field is
+	set before it is read - the layout grows from these counts, the worker
+	sets the programs, textures, states and fragment uniforms of a split
+	record, the full record below sets them here - and the attribute and
+	stream arrays are read up to their counts) */
+	draw->attribute_count = 0;
+	draw->stream_count = 0;
+	draw->vertex_chunk_d_registers = 0;
 	has_depth = command->depth_valid && surface_is_depth_cached(&command->depth_surface);
 	{
 		/* HALO_RECORD_SHORTCUT=1 turns the same-state shortcut on (opt-in:
@@ -3854,6 +3861,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->color_write = rs[D3DRS_COLORWRITEENABLE];
 	/* the cull mode names the screen winding to discard */
 	draw->cull = rs[D3DRS_CULLMODE] == D3DCULL_NONE ? 0 : rs[D3DRS_CULLMODE];
+	draw->depth_bias_slope = draw->depth_bias_units = 0.0f;
 	if (rs[D3DRS_SOLIDOFFSETENABLE])
 	{
 		draw->depth_bias_slope = dword_to_float(rs[D3DRS_POLYGONOFFSETZSLOPESCALE]);
