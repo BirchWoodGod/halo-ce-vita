@@ -256,8 +256,10 @@ static void save(void)
 }
 
 /* the chosen network as the platform layer's settings (port_config.c):
-internet play on, without UPnP, which the Vita does not have
-(vita_stubs.c); or ad hoc play, which needs no internet */
+internet play on, or ad hoc play, which needs no internet. UPnP (asking
+the router to forward internet play's port: posix_upnp.c, built on
+newlib's sockets) stays off until it is seen working on a Vita;
+HALO_NET_ALLOW_UPNP=true in env.txt turns it on */
 static void apply_network(void)
 {
 	const char *network = getenv("HALO_VITA_NETWORK");

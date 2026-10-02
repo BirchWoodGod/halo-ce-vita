@@ -2,9 +2,9 @@
 VITA_STUBS.C
 
 What the Linux platform layer asks of the host (port/linux/src/posix.h) and
-the Vita does without: UPnP, the desktop's process and link handling,
-Discord. Sockets are vita_net.c; files are port/linux/src/posix_files.c
-itself, built here with the SDK's ABI.
+the Vita does without: the desktop's process and link handling, Discord.
+Sockets are vita_net.c; files and UPnP are port/linux/src/posix_files.c
+and posix_upnp.c themselves, built with the SDK's ABI.
 */
 
 #include <psp2/kernel/rng.h>
@@ -37,19 +37,6 @@ void posix_random_bytes(void *buffer, posix_ulong size)
 	}
 }
 
-int posix_upnp_forward_udp(unsigned short port, posix_ulong *external_address, unsigned short *external_port,
-	char *error, int error_size)
-{
-	(void)port; (void)external_address; (void)external_port;
-	if (error_size > 0)
-	{
-		strncpy(error, "no UPnP on the Vita", (size_t)error_size - 1);
-		error[error_size - 1] = 0;
-	}
-	return 0;
-}
-
-void posix_upnp_stop_forwarding_udp(unsigned short external_port) { (void)external_port; }
 int posix_command_line_argument(int index, char *buffer, posix_ulong size) { (void)index; (void)buffer; (void)size; return 0; }
 posix_ulong posix_process_id(void) { return 1; }
 int posix_register_url_scheme(const char *scheme, const char *description) { (void)scheme; (void)description; return 0; }

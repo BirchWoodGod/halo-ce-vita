@@ -18,7 +18,8 @@ from typing import Any, Dict, List
 
 from .ninja_syntax import Writer
 from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, musl_math_sources,
-                          MUSL_MATH_DIR, ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
+                          MUSL_MATH_DIR, ANDROID_VARIADIC_PROTOTYPE_FILES, MINIUPNPC_DEFINES, MINIUPNPC_DIR,
+                          miniupnpc_sources, xdk_headers, _quote)
 
 LINUX_DIR = Path("port/linux")
 VITA_DIR = Path("port/vita")
@@ -78,7 +79,8 @@ HOST_FLAGS = [
 
 # the platform layer's files the Vita does not build, or builds its own of
 LINUX_SOURCES_REPLACED = {
-    "posix_files.c", "posix_net.c", "posix_update.c", "posix_upnp.c", "posix_profile.c",  # port/vita/host
+    "posix_files.c", "posix_net.c", "posix_update.c", "posix_profile.c",  # port/vita/host
+    "posix_upnp.c",  # built below with the SDK's ABI, on newlib's sockets
     "memory_watch.c",  # port/vita/platform/vita_memory_watch.c
     "bink_null.c",  # port/vita/platform/bink_vita.c (the Vita's video player)
     # the OpenGL renderer: port/vita/platform/d3d8_gxm.c, nv2a_*_cg.c, vita_textures.c
@@ -231,6 +233,16 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         add(source, "vita_host_cc", host_cflags)
     # the files half of the Linux host boundary works as it is on newlib
     add(LINUX_DIR / "src" / "posix_files.c", "vita_host_cc", host_cflags + " -D_GNU_SOURCE")
+    # internet play's UPnP (posix_upnp.c, port/third_party/miniupnpc) on
+    # newlib's BSD sockets, with the little of a BSD system newlib lacks
+    # (port/vita/include/upnp)
+    upnp_include = VITA_DIR / "include" / "upnp"
+    upnp_cflags = " ".join(HOST_FLAGS + MINIUPNPC_DEFINES + [
+        "-DNEED_STRUCT_IP_MREQN", f"-include {upnp_include / 'vita_upnp_compat.h'}", f"-I{upnp_include}",
+        f"-I{MINIUPNPC_DIR / 'include'}", f"-I{MINIUPNPC_DIR / 'src'}", f"-I{platform_dir}"])
+    add(LINUX_DIR / "src" / "posix_upnp.c", "vita_host_cc", upnp_cflags)
+    for source in miniupnpc_sources():
+        add(source, "vita_host_cc", upnp_cflags + " -w")
 
     if lto:
         lto_object = BUILD / "halo_lto.o"
