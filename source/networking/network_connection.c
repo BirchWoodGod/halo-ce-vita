@@ -215,6 +215,15 @@ symbols in this file:
 #include "memory/circular_queue.h"
 #include "network_connection.h"
 
+#ifdef HALO_LINUX
+/* (HALO_NET_PROFILE=1) the connection idle's steps timed (port/linux/game/tick_detail.c) */
+unsigned long long halo_net_detail_begin(void);
+void halo_net_detail_end(const char *name, unsigned long long started);
+#define HALO_NET_DETAIL(name, statement) do { unsigned long long halo_net_started = halo_net_detail_begin(); statement; halo_net_detail_end(name, halo_net_started); } while (0)
+#else
+#define HALO_NET_DETAIL(name, statement) do { statement; } while (0)
+#endif
+
 /* ---------- constants */
 
 /* the client connections a server accepts: one per machine, the host's own
@@ -1119,15 +1128,19 @@ static boolean network_connection_idle_client_reliable_endpoint(
 		connection->reliable_incoming_queue);
 
 	free_space = circular_queue_free_space(connection->reliable_incoming_queue);
-	while (success && endpoint_readable(connection->reliable_endpoint, 0) && free_space > 0)
+	while (success && free_space > 0)
 	{
 		long bytes_read;
+		boolean readable;
 
+		HALO_NET_DETAIL("conn:stream_readable", readable = endpoint_readable(connection->reliable_endpoint, 0));
+		if (!readable)
+			break;
 		if (free_space >= RELIABLE_MESSAGE_MAXIMUM_SIZE)
 		{
 			free_space = RELIABLE_MESSAGE_MAXIMUM_SIZE;
 		}
-		bytes_read = read_endpoint(connection->reliable_endpoint, buffer, free_space);
+		HALO_NET_DETAIL("conn:stream_read", bytes_read = read_endpoint(connection->reliable_endpoint, buffer, free_space));
 		if (bytes_read <= 0)
 		{
 			if (bytes_read != _transport_result_operation_would_block)
@@ -1699,9 +1712,9 @@ boolean network_connection_idle(
 
 	if (TEST_FLAG(connection->flags, _connection_create_server_bit))
 	{
-		success = network_connection_idle_server_reliable_endpoint(
+		HALO_NET_DETAIL("conn:server_reliable", success = network_connection_idle_server_reliable_endpoint(
 			(struct network_server_connection *)connection,
-			new_client_connection);
+			new_client_connection));
 		if (!success)
 		{
 			error(_error_silent, "network_connection_idle_server_reliable_endpoint failed");
@@ -1710,7 +1723,7 @@ boolean network_connection_idle(
 	else if (connection->flags &
 		(FLAG(_connection_create_clientside_client_bit) | FLAG(_connection_create_serverside_client_bit)))
 	{
-		success = network_connection_idle_client_reliable_endpoint(connection);
+		HALO_NET_DETAIL("conn:client_reliable", success = network_connection_idle_client_reliable_endpoint(connection));
 		if (!success)
 		{
 			error(_error_silent, "network_connection_idle_client_reliable_endpoint failed");
@@ -1730,13 +1743,16 @@ boolean network_connection_idle(
 
 			if ((boolean)endpoint_connected(connection->unreliable_endpoint))
 			{
-				buffer_size = read_endpoint(
+				HALO_NET_DETAIL("conn:datagram_read", buffer_size = read_endpoint(
 					connection->unreliable_endpoint,
 					buffer,
-					DATAGRAM_MAXIMUM_SIZE);
+					DATAGRAM_MAXIMUM_SIZE));
 				if (buffer_size > 0)
 				{
-					if (get_endpoint_address(connection->unreliable_endpoint, &source_address) != _transport_error_none)
+					short address_result;
+
+					HALO_NET_DETAIL("conn:datagram_peer", address_result = get_endpoint_address(connection->unreliable_endpoint, &source_address));
+					if (address_result != _transport_error_none)
 					{
 						memset(&source_address, 0, sizeof(source_address));
 						source_address.address_length = IPV4_ADDRESS_LENGTH;
@@ -1749,11 +1765,11 @@ boolean network_connection_idle(
 			}
 			else
 			{
-				buffer_size = read_from_endpoint(
+				HALO_NET_DETAIL("conn:datagram_read_from", buffer_size = read_from_endpoint(
 					connection->unreliable_endpoint,
 					buffer,
 					DATAGRAM_MAXIMUM_SIZE,
-					&source_address);
+					&source_address));
 				if (buffer_size > 0)
 				{
 					network_connection_log_traffic_event(
