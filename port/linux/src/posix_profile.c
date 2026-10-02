@@ -58,6 +58,9 @@ void vita_host_pin_current_thread(int core)
 
 static unsigned long *samples;
 static volatile unsigned long sample_count;
+/* HALO_PROFILE_START=<seconds> (with HALO_PROFILE_SECONDS): samples only
+from that long after start-up (a level's fight rather than its loading) */
+static volatile int sampling = 1;
 static const char *output_path;
 
 static void profile_signal(int signal_number, siginfo_t *information, void *context)
@@ -67,6 +70,8 @@ static void profile_signal(int signal_number, siginfo_t *information, void *cont
 
 	(void)signal_number;
 	(void)information;
+	if (!sampling)
+		return;
 	index = __atomic_fetch_add(&sample_count, 1, __ATOMIC_RELAXED);
 	if (index >= MAXIMUM_SAMPLES)
 		return;
@@ -109,13 +114,23 @@ static void profile_write(void)
 }
 
 /* HALO_PROFILE_SECONDS: writes the profile and ends the process after that
-long (a headless run has no window to close, and SDL swallows SIGTERM) */
+long (a headless run has no window to close, and SDL swallows SIGTERM),
+counted from HALO_PROFILE_START when that is given */
 static void *profile_watchdog(void *seconds)
 {
 	/* (sleep returns early when the profiling signal lands on this thread,
 	which ended runs after half a minute: it sleeps out the remainder) */
 	unsigned remaining = (unsigned)(unsigned long)seconds;
+	const char *start = getenv("HALO_PROFILE_START");
 
+	if (start && atoi(start) > 0)
+	{
+		unsigned delay = (unsigned)atoi(start);
+
+		while (delay)
+			delay = sleep(delay);
+		sampling = 1;
+	}
 	while (remaining)
 		remaining = sleep(remaining);
 	profile_write();
@@ -133,6 +148,8 @@ static void profile_start(void)
 	output_path = getenv("HALO_PROFILE");
 	if (!output_path || !*output_path)
 		return;
+	if (seconds && atoi(seconds) > 0 && getenv("HALO_PROFILE_START") && atoi(getenv("HALO_PROFILE_START")) > 0)
+		sampling = 0;
 	samples = calloc(MAXIMUM_SAMPLES * 3, sizeof(unsigned long));
 	memset(&action, 0, sizeof(action));
 	action.sa_sigaction = profile_signal;
