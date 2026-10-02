@@ -754,11 +754,28 @@ static boolean tick_cluster_list_room(long **array, long *capacity, long wanted)
 	return TRUE;
 }
 
+/* (object_lights.c) */
+extern struct cluster_partition light_cluster_partition;
+extern struct data_array *light_data;
+
+/* the array each list's datums are in */
+static struct data_array *tick_cluster_list_data(int which)
+{
+	return which == _tick_cluster_list_light ? light_data : object_header_data;
+}
+
 static void tick_cluster_lists_capture(struct tick_pose_buffer *buffer)
 {
+	/* (the lights too: an object that moves - the player with the
+	flashlight - takes its lights out of their clusters and back every tick
+	(objects.c object_connect_lights), and a render that missed the
+	flashlight in its walk (lights_preprocess_scene) drew the frame without
+	it: on the Vita the flashlight's pool and what it lit went black on some
+	frames) */
 	static struct cluster_partition *const partitions[_tick_cluster_list_count] = {
 		&collideable_object_cluster_partition,
 		&noncollideable_object_cluster_partition,
+		&light_cluster_partition,
 	};
 	struct structure_bsp *structure_bsp = global_structure_bsp_get();
 	short cluster_count = structure_bsp ? (short)structure_bsp->clusters.count : 0;
@@ -826,9 +843,10 @@ long render_tick_cluster_list_next(int which, long *iterator)
 			break;
 		}
 		(*iterator)++;
-		/* (an object a script or cheat deleted on this thread since,
-		between the frames, whose slot may hold another) */
-		if (object_header_try_and_get(datum_index))
+		/* (a datum deleted on this thread since, between the frames - an
+		object a script or cheat deleted, a light's transition that ended
+		(lights_preprocess_scene) - whose slot may hold another) */
+		if (datum_try_and_get(tick_cluster_list_data(which), datum_index))
 			return datum_index;
 	}
 	return NONE;

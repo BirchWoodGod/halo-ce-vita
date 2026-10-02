@@ -1212,6 +1212,17 @@ void rasterizer_set_model_lighting_distant_light(
 		lighting_constants->distant_lights[light_index].direction =
 			light->direction;
 		lighting_constants->distant_lights[light_index].color = light->color;
+#ifdef HALO_LINUX
+		/* (port) the registers' w are left as the stack had them, and the
+		block is uploaded whole (c17..c27). The translated model vertex
+		programs read whole registers (nv2a_vsh_cg.c), where an IEEE GPU
+		gives 0 * NaN = NaN: on the Vita a stack holding a NaN there turned
+		the model black - every model lit by a point light, such as the
+		flashlight's, on the frames it happened (c24.w, HALO_LIGHT_CHECK).
+		The Xbox's stack held something harmless. */
+		lighting_constants->distant_lights[light_index].pad0C = 0.0f;
+		lighting_constants->distant_lights[light_index].pad1C = 0.0f;
+#endif
 	}
 	else
 	{
@@ -1264,6 +1275,10 @@ void rasterizer_set_model_lighting(
 				light_index,
 				&lighting_constants);
 		lighting_constants.ambient_color = lighting->ambient_color;
+#ifdef HALO_LINUX
+		/* (port) as the distant lights' w (rasterizer_set_model_lighting_distant_light) */
+		lighting_constants.pad = 0.0f;
+#endif
 	}
 	D3DDevice_SetVertexShaderConstant(
 		-79,

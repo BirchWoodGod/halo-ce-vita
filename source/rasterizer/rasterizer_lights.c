@@ -761,6 +761,44 @@ long rasterizer_light_submit(
 	NULL - such a light is not drawn this frame */
 	if (!parameters->definition)
 		return NONE;
+	{
+		/* (debug) HALO_LIGHT_CHECK=1: a light submitted with a position,
+		direction, radius or colour that is not a finite number is logged
+		(a light that turns what it lights black on the Vita) */
+		extern char *getenv(const char *name);
+		extern int atoi(const char *text);
+		extern void platform_log(const char *format, ...);
+		static int check = -1;
+
+		if (check < 0)
+			check = getenv("HALO_LIGHT_CHECK") && atoi(getenv("HALO_LIGHT_CHECK"));
+		if (check)
+		{
+			real const *values[] = {
+				&parameters->position.x, &parameters->position.y, &parameters->position.z,
+				&parameters->forward.i, &parameters->forward.j, &parameters->forward.k,
+				&parameters->up.i, &parameters->up.j, &parameters->up.k, &parameters->radius,
+				&parameters->color.red, &parameters->color.green, &parameters->color.blue,
+			};
+			static unsigned long logged;
+			int index;
+
+			for (index = 0; index < (int)NUMBEROF(values); index++)
+			{
+				if (!(*values[index] == *values[index]) || *values[index] > 1.0e30f || *values[index] < -1.0e30f)
+				{
+					if (logged++ < 50)
+						platform_log("light check: light %d value %d is %f (position %f %f %f forward %f %f %f radius %f color %f %f %f)",
+							rasterizer_lights.light_count, index, (double)*values[index],
+							(double)parameters->position.x, (double)parameters->position.y, (double)parameters->position.z,
+							(double)parameters->forward.i, (double)parameters->forward.j, (double)parameters->forward.k,
+							(double)parameters->radius, (double)parameters->color.red, (double)parameters->color.green,
+							(double)parameters->color.blue);
+					break;
+				}
+			}
+		}
+	}
 #endif
 	if (rasterizer_lights.light_count<MAXIMUM_LIGHTS_PER_WINDOW)
 	{
