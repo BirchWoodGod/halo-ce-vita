@@ -1828,6 +1828,7 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		texture_scale[stage][2] = texture_scale[stage][3] = 1.0f;
 		command->draw.textures[stage] = NULL;
 		command->key.sampler_type[stage] = _xgpu_sampler_none;
+		command->key.volume_slices_log2[stage] = command->key.volume_width_log2[stage] = 0;
 		if (!command->texture_present[stage] || !header[1] || mode == 0 || mode == 0x04 || mode == 0x05 || mode == 0x11)
 			continue;
 		target = render_target_entry_find_version(header[1], command->texture_version[stage]);
@@ -1911,6 +1912,19 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		command->draw.textures[stage] = &sampled[stage];
 		command->key.sampler_type[stage] = description.cube_map ? _xgpu_sampler_cube :
 			description.depth > 1 ? _xgpu_sampler_3d : _xgpu_sampler_2d;
+		if (command->key.sampler_type[stage] == _xgpu_sampler_3d && !description.compressed && !description.linear &&
+			description.width * description.depth <= 4096)
+		{
+			/* (its slices side by side: vita_textures.c) */
+			unsigned char slices = 0, width = 0;
+
+			while ((2UL << slices) <= description.depth)
+				slices++;
+			while ((2UL << width) <= description.width)
+				width++;
+			command->key.volume_slices_log2[stage] = slices;
+			command->key.volume_width_log2[stage] = width;
+		}
 	}
 }
 

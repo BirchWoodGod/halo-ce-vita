@@ -110,6 +110,10 @@ struct nv2a_pixel_shader_key
 	(the program writes its w): tex2Dproj, the divide done by the iterator */
 	unsigned char projective_coordinates;
 	unsigned char reserved[2];
+	/* (Vita) a volume texture's stage: log2 of its slices and of a slice's
+	width, laid side by side in one 2D texture (vita_textures.c); 0 else */
+	unsigned char volume_slices_log2[4];
+	unsigned char volume_width_log2[4];
 	/* (Vita) stages addressed D3DTADDRESS_BORDER (GXM has no border
 	mode: the program returns the border colour, D3DCOLOR, outside the
 	texture) */

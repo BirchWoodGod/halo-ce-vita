@@ -321,7 +321,8 @@ static const char *sampler_declaration(unsigned char type)
 {
 	switch (type)
 	{
-	/* GXM has no volume textures: a 3D sampler reads its first slice */
+	/* GXM has no volume textures: a 3D sampler reads its slices laid side
+	by side in a 2D texture (tex3D_slices) */
 	case _xgpu_sampler_3d: return "sampler2D";
 	case _xgpu_sampler_cube: return "samplerCUBE";
 	default: return "sampler2D";
@@ -372,6 +373,22 @@ static void sample(struct xgpu_text *text, const struct nv2a_pixel_shader_key *k
 	case _xgpu_sampler_cube:
 		border = 0;
 		xgpu_text_append(text, "texCUBE(tex%d, (%s).xyz)", stage, coordinates);
+		break;
+	case _xgpu_sampler_3d:
+		if (key->volume_slices_log2[stage])
+		{
+			snprintf(inside, sizeof(inside), "(%s).xyz", coordinates);
+			if (border)
+				xgpu_text_append(text, "border3(");
+			xgpu_text_append(text, "tex3D_slices(tex%d, (%s).xyz, %.1f, %.1f)", stage, coordinates,
+				(double)(1UL << key->volume_slices_log2[stage]), (double)(1UL << key->volume_width_log2[stage]));
+			break;
+		}
+		/* (a volume not laid out in slices: its first slice) */
+		snprintf(inside, sizeof(inside), "(%s).xy", coordinates);
+		if (border)
+			xgpu_text_append(text, "border2(");
+		xgpu_text_append(text, "tex2D(tex%d, (%s).xy)", stage, coordinates);
 		break;
 	default:
 		/* (mode 3 of HALO_SIMPLE_FRAG_MODE: the varying itself as the
@@ -603,6 +620,27 @@ char *nv2a_pixel_shader_to_cg(const struct nv2a_pixel_shader_key *key)
 			"float4 border3(float4 t, float3 c, float4 b)\n"
 			"{\n"
 			"	return (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z < 0.0 || c.z > 1.0) ? b : t;\n"
+			"}\n");
+	}
+	for (stage = 0; stage < 4; stage++)
+		if (key->sampler_type[stage] == _xgpu_sampler_3d && key->volume_slices_log2[stage])
+			break;
+	if (stage < 4)
+	{
+		/* a volume texture's slices side by side (slice z at u from z/D to
+		(z+1)/D, each W texels wide): the two slices around the coordinate,
+		blended, each read kept half a texel inside its slice */
+		xgpu_text_append(&text,
+			"float4 tex3D_slices(sampler2D s, float3 c, float D, float W)\n"
+			"{\n"
+			"	float3 cc = clamp(c, 0.0, 1.0);\n"
+			"	float z = cc.z * D - 0.5;\n"
+			"	float zf = floor(z);\n"
+			"	float s0 = clamp(zf, 0.0, D - 1.0), s1 = clamp(zf + 1.0, 0.0, D - 1.0);\n"
+			"	float u = clamp(cc.x, 0.5 / W, 1.0 - 0.5 / W);\n"
+			"	float4 a = tex2D(s, float2((s0 + u) / D, cc.y));\n"
+			"	float4 b = tex2D(s, float2((s1 + u) / D, cc.y));\n"
+			"	return a + (b - a) * (z - zf);\n"
 			"}\n");
 	}
 	xgpu_text_append(&text,
