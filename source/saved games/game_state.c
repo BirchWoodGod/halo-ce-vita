@@ -175,6 +175,7 @@ struct
 #ifdef HALO_LINUX
 #include "render_epoch.h"
 #include "load_profile.h"
+void platform_log(const char *format, ...);
 #endif
 
 #ifdef HALO_LINUX
@@ -700,6 +701,42 @@ struct lruv_cache *game_state_lruv_cache_new(
 	return cache;
 }
 
+#ifdef HALO_LINUX
+/* (port) Was the campaign save made with the game state where it is now?
+The game state holds absolute pointers (each data array's to its own
+datums, the object headers' to the objects, the memory pools' links): on
+the Xbox it sat at one fixed address, but the native builds put it where
+the platform's memory came from (HALO_RELOCATABLE_TAG_CACHE), and on the
+Vita that moves when anything allocated before it changes (a test build
+that started a thread before the memory window was allocated resumed a
+save of the build before it with every such pointer naming the old
+address, and an x86 build with the Vita's renderer resumes a save of the
+OpenGL build the same way): the players array's datums read as empty, and
+update_queues_reset_and_fill_with_lies took the missing queue 0 through
+NULL. The players array's pointer to its datums, saved and as it is now,
+tells; a save from elsewhere is not loaded (the level starts from its
+beginning) rather than loaded into a crash. */
+static boolean game_state_persistent_storage_made_here(
+	void)
+{
+	long offset;
+	void *saved_data = NULL;
+
+	if (!player_data)
+		return TRUE;
+	offset = (long)((byte *)player_data - (byte *)game_state_globals.base_address) + (long)offsetof(struct data_array, data);
+	if (offset < 0 || offset + (long)sizeof(saved_data) > GAME_STATE_SIZE)
+		return TRUE;
+	if (!game_state_peek_persistent_storage(offset, &saved_data, sizeof(saved_data)))
+		return FALSE;
+	if (saved_data == player_data->data)
+		return TRUE;
+	platform_log("game state: the campaign save was made with the game state at another address (players' datums at %p, here %p): not loaded",
+		saved_data, player_data->data);
+	return FALSE;
+}
+#endif
+
 void game_state_try_and_load_from_persistent_storage(
 	void)
 {
@@ -710,7 +747,8 @@ void game_state_try_and_load_from_persistent_storage(
 	unsigned long long started = halo_load_profile_now();
 	boolean header_valid = game_state_peek_persistent_storage_header(&header, sizeof(header))
 		&& code_001af4f0(&header, FALSE)
-		&& main_get_difficulty() == header.difficulty;
+		&& main_get_difficulty() == header.difficulty
+		&& game_state_persistent_storage_made_here();
 	int staged = header_valid ?
 		game_state_read_persistent_storage_staged(sizeof(header), offsetof(struct game_state_header, checksum), GAME_STATE_SIZE) :
 		0;

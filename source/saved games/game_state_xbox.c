@@ -925,6 +925,26 @@ copies it into the game state: the same bytes, one read. The checkpoint
 copy is the last checkpoint of the map being left, which no revert can
 use once a new map is loading (game_state_initialize_for_new_map marks it
 invalid); the game state's save right after the load makes a new one. */
+/* (port) any bytes of the campaign save, at an offset */
+boolean game_state_peek_persistent_storage(
+	long offset,
+	void *bytes,
+	long size)
+{
+	HANDLE file = game_state_open_persistent_storage(NULL);
+	unsigned long bytes_read = 0;
+	boolean result = FALSE;
+
+	if (file != INVALID_HANDLE_VALUE)
+	{
+		result = SetFilePointer(file, offset, NULL, FILE_BEGIN) != INVALID_SET_FILE_POINTER &&
+			ReadFile(file, bytes, size, &bytes_read, NULL) &&
+			bytes_read == (unsigned long)size;
+		CloseHandle(file);
+	}
+	return result;
+}
+
 boolean game_state_peek_persistent_storage_header(
 	void *header,
 	long header_size)
