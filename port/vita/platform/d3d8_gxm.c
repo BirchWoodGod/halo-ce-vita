@@ -2357,6 +2357,7 @@ static void execute_draw(struct render_command *command)
 		return;
 	}
 	DRAW_PROFILE_ADD(6, profile_from);
+	draw->vertex_input_mask = command->program->input_mask;
 	vgxm_draw(draw);
 	DRAW_PROFILE_ADD(7, profile_from);
 }
@@ -3115,6 +3116,8 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 			stats.copied_uniforms += count * sizeof(device.constants[0]);
 		}
 		draw->vertex_chunks[chunk] = device.chunk_snapshot[chunk];
+		if (chunk == VITA_VC_D)
+			draw->vertex_chunk_d_registers = device.d_snapshot_count;
 	}
 	return TRUE;
 }
@@ -4447,8 +4450,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	if (gpu_stats_on && device.frame % 60 == 0)
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, "
-			"%lu no target, %lu shader; %lu same-state; %lu KB copied (streams %lu, immediate %lu, indices %lu) + %lu KB uniforms, %lu KB direct, %lu KB textures; record %.2f ms/frame, "
-			"worker %.2f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame",
+			"%lu no target, %lu shader; %lu same-state; %lu KB copied (streams %lu, immediate %lu, indices %lu) + %lu KB uniforms, %lu KB direct, %lu KB textures; record %.3f ms/frame, "
+			"worker %.3f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame",
 			device.frame, stats.draws / stats.presents, stats.immediate_draws / stats.presents,
 			stats.clears / stats.presents, stats.target_changes / stats.presents, stats.skipped_no_program,
 			stats.skipped_no_target, stats.skipped_shader, stats.same_state_draws / stats.presents,

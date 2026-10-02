@@ -2220,6 +2220,26 @@ static boolean halo_frame_unthrottled(
 	return halo_interpolation_enabled() || unthrottled;
 }
 
+/* (harness) HALO_FIXED_DT=1: a repeatable run - every frame is a
+thirtieth of a second of game time whatever the clock says, the texture
+cache waits for every texture it starts loading and the local random seed
+is fixed. With HALO_TICK_THREAD=0 a run then repeats frame for frame, so
+two builds' draw hashes (HALO_DRAW_HASH, the null renderer) compare. */
+int halo_repeatable_run(void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static int repeatable = -1;
+
+	if (repeatable < 0)
+	{
+		const char *setting = getenv("HALO_FIXED_DT");
+
+		repeatable = setting && atoi(setting) != 0;
+	}
+	return repeatable;
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2251,6 +2271,12 @@ static void main_update_time_unthrottled(
 			else
 				seconds_elapsed = CEILING(seconds_elapsed, 0.06666667014360428f);
 		}
+	}
+	{
+		int halo_repeatable_run(void);
+
+		if (halo_repeatable_run())
+			seconds_elapsed = 1.0f / 30.0f;
 	}
 
 	{
