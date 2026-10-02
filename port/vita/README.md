@@ -24,7 +24,7 @@ Combat Evolved for the Xbox.
 2. Copy the Xbox game's maps to `ux0:data/haloce-vita/maps/` (the whole
    `maps` folder), and the disc's `default.xbe` to `ux0:data/haloce-vita/`:
    the loading screen takes its picture from the executable, and stays dark
-   without it. (A copy that Xita's installer put in
+   without it. (A copy that [Xita](https://github.com/Xita-Project/xita)'s installer put in
    `ux0:data/xita/haloce/maps/` is used if that folder is missing, with the
    `default.xbe` next to it.)
 3. Start the game. The first load of each map takes a while: the game

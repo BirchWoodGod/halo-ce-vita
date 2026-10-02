@@ -194,7 +194,7 @@ This port stands on a lot of other people's work:
 - **[Invader](https://github.com/SnowyMouse/invader)** by SnowyMouse: the
   tag definitions `port/linux/src/tag_layouts.h` is generated from (by
   `tools/gen_tag_layouts.py`), which let the port relocate the maps' tags.
-- **The Xita project**: the earlier work on running Halo on the Vita, whose
+- **[Xita](https://github.com/Xita-Project/xita)**: the earlier work on running Halo on the Vita, whose
   findings (the register combiner translation, the GPU and threading
   lessons, the tools) went into this port.
 - **PS Vita port**: BirchWoodGod.
