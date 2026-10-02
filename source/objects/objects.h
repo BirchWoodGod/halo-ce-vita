@@ -509,6 +509,43 @@ extern boolean debug_objects_collision_models;
 
 /* ---------- public code */
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE) && !defined(HALO_OBJECTS_C)
+/* (port, release builds) the object lookups inline: objects.c's functions
+are the header lookup (datum_get, itself inline in data.h for the usual
+case) and assertions, which release builds do not check, so these return
+the same; the Vita build, without link-time optimisation, made a call into
+objects.c for every object_get in the tick. */
+static __inline void *object_get_and_verify_type_inline(long object_index, unsigned long valid_type_flags)
+{
+	(void)valid_type_flags;
+	return object_header_get(object_index)->datum;
+}
+
+static __inline void *object_try_and_get_and_verify_type_inline(long object_index, unsigned long valid_type_flags)
+{
+	struct object_header_datum *header = object_header_try_and_get(object_index);
+	void *result = NULL;
+
+	if (header && TEST_FLAG(valid_type_flags, header->type))
+		result = header->datum;
+	return result;
+}
+
+static __inline void *object_header_block_get_inline(long object_index, struct object_header_block_reference *reference)
+{
+	struct object_header_datum *header = object_header_get(object_index);
+
+	return (byte *)header->datum + reference->offset;
+}
+
+#define object_get_and_verify_type(object_index, valid_type_flags) \
+	object_get_and_verify_type_inline((object_index), (valid_type_flags))
+#define object_try_and_get_and_verify_type(object_index, valid_type_flags) \
+	object_try_and_get_and_verify_type_inline((object_index), (valid_type_flags))
+#define object_header_block_get(object_index, reference) \
+	object_header_block_get_inline((object_index), (reference))
+#endif
+
 __inline short object_get_type(
 	long object_index)
 {

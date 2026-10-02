@@ -60,6 +60,9 @@ symbols in this file:
 #include "geometry.h"
 #include "random_math.h"
 #include "game_engine.h"
+#ifdef HALO_LINUX
+int halo_fixed_tick(void);
+#endif
 
 /* ---------- constants */
 
@@ -168,6 +171,13 @@ random_math_initialize(
 	short index;
 
 	random_math_globals.global_local_random_seed= get_number_suitable_for_initializing_random_seed();
+#ifdef HALO_LINUX
+	/* (debug) HALO_FIXED_TICK=1 (main.c): runs compared tick by tick
+	(tick_hash.c) start the local random sequence (effects, particles, first
+	person idles) from the same seed instead of the clock */
+	if (halo_fixed_tick())
+		random_math_globals.global_local_random_seed= 0x12345678;
+#endif
 	random_direction_geosphere= geosphere_new(RANDOM_DIRECTION_TABLE_GEOSPHERE_SEGMENT_COUNT);
 	match_assert("c:\\halo\\SOURCE\\math\\random_math.c", 174, random_direction_geosphere);
 	random_math_globals.random_direction_table= match_malloc(

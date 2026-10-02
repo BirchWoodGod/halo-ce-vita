@@ -62,6 +62,8 @@ symbols in this file:
 
 /* ---------- headers */
 
+/* (data.h: this file defines the functions its inline lookups fall back on) */
+#define HALO_DATA_C
 #include "cseries.h"
 #include "data.h"
 #ifdef HALO_LINUX

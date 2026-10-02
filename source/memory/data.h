@@ -71,6 +71,53 @@ long data_prev_index(struct data_array *data, long index);
 void data_compact(struct data_array *data);
 void data_make_valid(struct data_array *data);
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE) && !defined(HALO_DATA_C)
+/* (port, release builds) datum_get and datum_try_and_get inline for the
+datum found the usual way: the index in range, the slot in use with a
+matching identifier, and the array carrying no render-epoch marks
+(render_epoch.c keeps its marked flag in the name's last byte, the
+terminator data_initialize leaves zero); anything else, the not-found
+paths included, goes to data.c's functions as before. Release builds
+check no assertions, so the result is the same; the lookups are among the
+tick's commonest calls, and the Vita build, without link-time
+optimisation, paid a call into data.c and another into render_epoch.c for
+each. */
+static __inline void *datum_get_inline(struct data_array *data, long index)
+{
+	short absolute_index = (short)index;
+	short identifier = (short)(index >> 16);
+
+	if (absolute_index >= 0 && absolute_index < data->count && !data->name[TAG_STRING_LENGTH])
+	{
+		struct datum_header *header = (struct datum_header *)((char *)data->data + data->size * absolute_index);
+
+		if (header->identifier && (!identifier || identifier == header->identifier))
+			return header;
+	}
+	return datum_get(data, index);
+}
+
+static __inline void *datum_try_and_get_inline(struct data_array *data, long index)
+{
+	short absolute_index = (short)index;
+	short identifier = (short)(index >> 16);
+
+	if (index != -1 && absolute_index >= 0 && absolute_index < data->maximum_count &&
+		!data->name[TAG_STRING_LENGTH])
+	{
+		struct datum_header *header = (struct datum_header *)((char *)data->data + data->size * absolute_index);
+
+		if (!header->identifier || (identifier && header->identifier != identifier))
+			return 0;
+		return header;
+	}
+	return datum_try_and_get(data, index);
+}
+
+#define datum_get(data, index) datum_get_inline((data), (index))
+#define datum_try_and_get(data, index) datum_try_and_get_inline((data), (index))
+#endif
+
 
 /* ---------- globals */
 

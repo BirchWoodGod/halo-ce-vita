@@ -101,9 +101,16 @@ struct sdl_stream
 	/* gains the mixer is ramping from, to avoid clicks */
 	float current_left, current_right;
 	BOOL gains_valid;
+	/* the mix pass that last mixed this voice (mix) */
+	unsigned long mix_pass;
 };
 
 static pthread_mutex_t mixer_lock = PTHREAD_MUTEX_INITIALIZER;
+/* the voices' and the listener's parameters (volumes, positions, pitch,
+pause): the game sets them under this lock alone, held for a few stores,
+and the mixer reads a voice's under it at the start of its mix, so the
+dozens of parameter calls a frame never wait for a mix */
+static pthread_mutex_t parameter_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct sdl_stream *streams;
 
 /* the listener, in DirectSound's left-handed +y up space */
@@ -144,22 +151,49 @@ static const int ima_step_table[89] =
 	32767,
 };
 
-static int ima_expand(int nibble, int *predictor, int *index)
-{
-	int step = ima_step_table[*index];
-	int difference = step >> 3;
+/* IMA ADPCM expansion from tables: the difference a nibble makes at each
+step index and the step index it leads to, worked out once at start-up
+with the same integer arithmetic a nibble-by-nibble expansion does (a whole
+packet is decoded on the game's thread when it is queued: on the Vita, the
+tick's) */
+static int ima_difference_table[89][16];
+static unsigned char ima_next_index_table[89][16];
+static int ima_tables_built;
 
-	if (nibble & 1) difference += step >> 2;
-	if (nibble & 2) difference += step >> 1;
-	if (nibble & 4) difference += step;
-	if (nibble & 8) difference = -difference;
-	*predictor += difference;
-	if (*predictor > 32767) *predictor = 32767;
-	if (*predictor < -32768) *predictor = -32768;
-	*index += ima_index_table[nibble];
-	if (*index < 0) *index = 0;
-	if (*index > 88) *index = 88;
-	return *predictor;
+static void ima_build_tables(void)
+{
+	int index, nibble;
+
+	for (index = 0; index < 89; index++)
+	{
+		for (nibble = 0; nibble < 16; nibble++)
+		{
+			int step = ima_step_table[index];
+			int difference = step >> 3;
+			int next = index + ima_index_table[nibble];
+
+			if (nibble & 1) difference += step >> 2;
+			if (nibble & 2) difference += step >> 1;
+			if (nibble & 4) difference += step;
+			if (nibble & 8) difference = -difference;
+			if (next < 0) next = 0;
+			if (next > 88) next = 88;
+			ima_difference_table[index][nibble] = difference;
+			ima_next_index_table[index][nibble] = (unsigned char)next;
+		}
+	}
+	ima_tables_built = 1;
+}
+
+static inline int ima_expand_fast(int nibble, int *predictor, int *index)
+{
+	int value = *predictor + ima_difference_table[*index][nibble];
+
+	if (value > 32767) value = 32767;
+	if (value < -32768) value = -32768;
+	*predictor = value;
+	*index = ima_next_index_table[*index][nibble];
+	return value;
 }
 
 /* Xbox ADPCM: per block, a 4-byte header per channel (predictor, step
@@ -178,6 +212,8 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 		*frame_count = 0;
 		return NULL;
 	}
+	if (!ima_tables_built)
+		ima_build_tables();
 	for (block = 0; block < blocks; block++)
 	{
 		const unsigned char *data = source + block * block_bytes;
@@ -198,8 +234,8 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 				{
 					unsigned long sample = group * 8 + byte * 2;
 
-					output[sample * channels + channel] = (short)ima_expand(nibbles[byte] & 0xf, &predictor, &index);
-					output[(sample + 1) * channels + channel] = (short)ima_expand(nibbles[byte] >> 4, &predictor, &index);
+					output[sample * channels + channel] = (short)ima_expand_fast(nibbles[byte] & 0xf, &predictor, &index);
+					output[(sample + 1) * channels + channel] = (short)ima_expand_fast(nibbles[byte] >> 4, &predictor, &index);
 				}
 			}
 		}
@@ -303,17 +339,87 @@ static float packet_sample(const struct voice_packet *packet, unsigned long fram
 	return packet->samples[frame * channels + channel] * (1.0f / 32768.0f);
 }
 
-/* mixes one voice into output (frames of stereo float) */
-static void mix_voice(struct sdl_stream *stream, float *output, unsigned long frames)
+/* the first packet of a stream that still has frames to play at the
+cursor, marking the ones the cursor has passed finished; NULL once the
+stream has run dry */
+static struct voice_packet *mix_voice_packet(struct sdl_stream *stream)
 {
+	for (;;)
+	{
+		struct voice_packet *packet = NULL;
+		unsigned long position;
+
+		for (position = 0; position < stream->packet_count; position++)
+		{
+			struct voice_packet *candidate = &stream->packets[(stream->packet_head + position) % MAXIMUM_STREAM_PACKETS];
+
+			if (!candidate->finished)
+			{
+				packet = candidate;
+				break;
+			}
+		}
+		if (!packet)
+			return NULL;
+		if (stream->cursor < (double)packet->frames)
+			return packet;
+		stream->cursor -= (double)packet->frames;
+		if (packet->frames)
+		{
+			unsigned long last = packet->frames - 1;
+
+			stream->previous[0] = packet_sample(packet, last, 0, stream->channels);
+			stream->previous[1] = packet_sample(packet, last, stream->channels - 1, stream->channels);
+		}
+		packet->finished = TRUE;
+	}
+}
+
+/* the per-frame positions of a run of frames: the cursor before each
+frame, its whole part and its fraction (mix_voice; one mixer runs at a
+time) */
+#define RUN_FRAMES 2048
+static double run_cursors[RUN_FRAMES + 1];
+static unsigned long run_indices[RUN_FRAMES];
+static float run_fractions[RUN_FRAMES];
+
+/* the mix buffers are float arrays: telling the compiler so lets the Vita
+build (-fmax-type-align=1 takes nothing as aligned) load and store them
+straight from floating point registers instead of through integer ones */
+typedef float aligned_float __attribute__((aligned(4)));
+
+/* mixes one voice into output (frames of stereo float).
+
+The packet a frame reads from only changes once the cursor passes its end,
+so it is looked up again only then rather than for every frame (on the
+Vita the mixer's speed is the tick's too: the game's sound calls wait for
+it). And the frame loop is split in two: the cursor's positions for the
+run first, all in floating point, then the samples, with whole numbers.
+A Cortex-A9 (the Vita) stalls its pipeline for every move from a floating
+point register to an integer one, which the sample address and the
+end-of-packet test each needed per frame; as positions are worked out the
+same way and in the same order (a frame is inside the packet exactly when
+the cursor's whole part is, the packet's length being whole), the output
+is identical. */
+static void mix_voice(struct sdl_stream *stream, float *mix_output, unsigned long frames)
+{
+	aligned_float *output = (aligned_float *)mix_output;
+	const aligned_float *fractions = (const aligned_float *)run_fractions;
 	double step;
 	float target_left, target_right, left, right, ramp_left, ramp_right;
 	unsigned long frame;
 
-	if (stream->paused || !stream->packet_count || !stream->sample_rate)
+	if (!stream->packet_count || !stream->sample_rate)
 		return;
+	pthread_mutex_lock(&parameter_lock);
+	if (stream->paused)
+	{
+		pthread_mutex_unlock(&parameter_lock);
+		return;
+	}
 	step = (double)(stream->frequency ? stream->frequency : stream->sample_rate) / OUTPUT_RATE;
 	voice_gains(stream, &target_left, &target_right);
+	pthread_mutex_unlock(&parameter_lock);
 	if (!stream->gains_valid)
 	{
 		stream->current_left = target_left;
@@ -325,94 +431,185 @@ static void mix_voice(struct sdl_stream *stream, float *output, unsigned long fr
 	ramp_left = (target_left - left) / (float)frames;
 	ramp_right = (target_right - right) / (float)frames;
 
-	for (frame = 0; frame < frames; frame++)
+	frame = 0;
+	while (frame < frames)
 	{
-		struct voice_packet *packet;
-		unsigned long index;
-		float fraction, sample_left, sample_right;
+		struct voice_packet *packet = mix_voice_packet(stream);
+		const short *samples;
+		unsigned long last, packet_frames, run, k;
 
-		/* skip to the first packet that still has frames to play */
-		for (;;)
-		{
-			unsigned long position;
-
-			packet = NULL;
-			for (position = 0; position < stream->packet_count; position++)
-			{
-				struct voice_packet *candidate = &stream->packets[(stream->packet_head + position) % MAXIMUM_STREAM_PACKETS];
-
-				if (!candidate->finished)
-				{
-					packet = candidate;
-					break;
-				}
-			}
-			if (!packet)
-				break;
-			if (stream->cursor < (double)packet->frames)
-				break;
-			stream->cursor -= (double)packet->frames;
-			if (packet->frames)
-			{
-				unsigned long last = packet->frames - 1;
-
-				stream->previous[0] = packet_sample(packet, last, 0, stream->channels);
-				stream->previous[1] = packet_sample(packet, last, stream->channels - 1, stream->channels);
-			}
-			packet->finished = TRUE;
-		}
 		if (!packet)
 			break;
-
-		index = (unsigned long)stream->cursor;
-		fraction = (float)(stream->cursor - (double)index);
+		samples = packet->samples;
+		packet_frames = packet->frames;
+		last = packet_frames - 1;
+		run = frames - frame;
+		if (run > RUN_FRAMES)
+			run = RUN_FRAMES;
 		{
-			float a0 = packet_sample(packet, index, 0, stream->channels);
-			float a1 = packet_sample(packet, index, stream->channels - 1, stream->channels);
-			float b0, b1;
+			double cursor = stream->cursor;
 
-			if (index + 1 < packet->frames)
+			for (k = 0; k < run; k++)
 			{
-				b0 = packet_sample(packet, index + 1, 0, stream->channels);
-				b1 = packet_sample(packet, index + 1, stream->channels - 1, stream->channels);
+				unsigned long index = (unsigned long)cursor;
+
+				run_cursors[k] = cursor;
+				run_indices[k] = index;
+				run_fractions[k] = (float)(cursor - (double)index);
+				cursor += step;
 			}
-			else
-			{
-				b0 = a0;
-				b1 = a1;
-			}
-			sample_left = a0 + (b0 - a0) * fraction;
-			sample_right = a1 + (b1 - a1) * fraction;
+			run_cursors[run] = cursor;
 		}
 		if (stream->channels == 1)
 		{
-			/* a mono voice's mix bins or pan split it across the speakers */
-			output[frame * 2] += sample_left * left;
-			output[frame * 2 + 1] += sample_left * right;
+			for (k = 0; k < run; k++)
+			{
+				unsigned long index = run_indices[k];
+				float a0, b0, sample_left;
+
+				if (index >= packet_frames)
+					break;
+				a0 = samples[index] * (1.0f / 32768.0f);
+				b0 = index < last ? samples[index + 1] * (1.0f / 32768.0f) : a0;
+				sample_left = a0 + (b0 - a0) * fractions[k];
+				/* a mono voice's mix bins or pan split it across the speakers */
+				output[(frame + k) * 2] += sample_left * left;
+				output[(frame + k) * 2 + 1] += sample_left * right;
+				left += ramp_left;
+				right += ramp_right;
+			}
 		}
 		else
 		{
-			output[frame * 2] += sample_left * left;
-			output[frame * 2 + 1] += sample_right * right;
+			for (k = 0; k < run; k++)
+			{
+				unsigned long index = run_indices[k];
+				float a0, a1, b0, b1, sample_left, sample_right;
+
+				if (index >= packet_frames)
+					break;
+				a0 = samples[index * 2] * (1.0f / 32768.0f);
+				a1 = samples[index * 2 + 1] * (1.0f / 32768.0f);
+				if (index < last)
+				{
+					b0 = samples[index * 2 + 2] * (1.0f / 32768.0f);
+					b1 = samples[index * 2 + 3] * (1.0f / 32768.0f);
+				}
+				else
+				{
+					b0 = a0;
+					b1 = a1;
+				}
+				sample_left = a0 + (b0 - a0) * fractions[k];
+				sample_right = a1 + (b1 - a1) * fractions[k];
+				output[(frame + k) * 2] += sample_left * left;
+				output[(frame + k) * 2 + 1] += sample_right * right;
+				left += ramp_left;
+				right += ramp_right;
+			}
 		}
-		left += ramp_left;
-		right += ramp_right;
-		stream->cursor += step;
+		stream->cursor = run_cursors[k];
+		frame += k;
 	}
 	stream->current_left = target_left;
 	stream->current_right = target_right;
 }
 
+/* (HALO_RENDER_PROFILE) the mixer's time and the game's waits for it,
+reported by DirectSoundDoWork every 300 calls */
+unsigned long long vita_host_time_us(void) __attribute__((weak));
+static volatile unsigned long long statistics_mix_us, statistics_wait_us;
+static volatile unsigned long statistics_mixes, statistics_voices, statistics_waits;
+
+static unsigned long long statistics_now(void)
+{
+	return vita_host_time_us ? vita_host_time_us() : 0;
+}
+
+/* game threads waiting for mixer_lock: the mixer hands the lock over
+between two voices when it sees one (mix) */
+static volatile int game_lock_wanted;
+
+/* mixer_lock taken by the game's threads: the time spent waiting for the
+mixer is counted (a lock that is free costs no clock read) */
+static void game_lock(void)
+{
+	unsigned long long started;
+
+	if (!pthread_mutex_trylock(&mixer_lock))
+		return;
+	started = statistics_now();
+	__atomic_add_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
+	pthread_mutex_lock(&mixer_lock);
+	__atomic_sub_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
+	statistics_wait_us += statistics_now() - started;
+	statistics_waits++;
+}
+
+
+/* stream_release and IDirectSound_CreateSoundStream change the stream list
+while the mixer may be between two voices: a pass that sees the count move
+starts over from the head and skips the voices it has mixed already */
+static unsigned long stream_list_generation;
+static unsigned long mix_pass;
+
 static void mix(float *output, unsigned long frames)
 {
 	struct sdl_stream *stream;
-	unsigned long sample;
+	unsigned long sample, generation, voices = 0;
+	unsigned long long started = statistics_now();
 
 	memset(output, 0, frames * OUTPUT_CHANNELS * sizeof(float));
+	/* a game thread that wants the lock (to queue or complete packets)
+	gets it between two voices, so it waits for one voice's mix at most
+	rather than all of them: the mixer runs on its own thread at a higher
+	priority than the game's, and with many voices playing (heavy combat
+	on the Vita) a whole mix takes milliseconds that the sound update on
+	the tick thread spent waiting. Letting go and taking the lock again
+	at once is not enough (the mixer takes it back before the waiter
+	wakes): the mixer waits, briefly, until the waiter has it */
 	pthread_mutex_lock(&mixer_lock);
-	for (stream = streams; stream; stream = stream->next)
-		mix_voice(stream, output, frames);
+	mix_pass++;
+	generation = stream_list_generation;
+	stream = streams;
+	while (stream)
+	{
+		struct sdl_stream *next;
+
+		if (stream->mix_pass != mix_pass)
+		{
+			stream->mix_pass = mix_pass;
+			if (stream->packet_count && !stream->paused)
+				voices++;
+			mix_voice(stream, output, frames);
+			next = stream->next;
+			if (__atomic_load_n(&game_lock_wanted, __ATOMIC_SEQ_CST))
+			{
+				unsigned long spins = 0;
+
+				pthread_mutex_unlock(&mixer_lock);
+				/* (bounded: a waiter slow to wake costs the mixer at
+				most this, never the audio) */
+				while (__atomic_load_n(&game_lock_wanted, __ATOMIC_SEQ_CST) && ++spins < 20000)
+					;
+				pthread_mutex_lock(&mixer_lock);
+				if (generation != stream_list_generation)
+				{
+					generation = stream_list_generation;
+					next = streams;
+				}
+			}
+		}
+		else
+		{
+			next = stream->next;
+		}
+		stream = next;
+	}
 	pthread_mutex_unlock(&mixer_lock);
+	statistics_mix_us += statistics_now() - started;
+	statistics_mixes++;
+	statistics_voices += voices;
 	/* soft limit rather than wrap or hard clip when many voices pile up */
 	for (sample = 0; sample < frames * OUTPUT_CHANNELS; sample++)
 	{
@@ -432,13 +629,35 @@ static void mix(float *output, unsigned long frames)
 
 static SDL_AudioStream *audio_stream;
 static BOOL audio_started = FALSE;
+static BOOL frame_locked_mixing = FALSE;
+
+void vita_host_pin_current_thread(int core) __attribute__((weak));
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
 	float buffer[MIX_CHUNK_FRAMES * OUTPUT_CHANNELS];
+	static int pinned;
 
 	(void)userdata;
 	(void)total_amount;
+	if (!pinned)
+	{
+		/* (Vita) SDL starts its audio thread on any core, above the
+		game's priority: wherever it lands it preempts that core's thread
+		for the length of a mix, the tick's on the third core included.
+		HALO_AUDIO_CORE=0-2 pins it (default -1: left to the system; on
+		core 1, with the render worker, the user heard crackle in the b30
+		fight, while unpinned it inflated the tick's sound time) */
+		pinned = 1;
+		if (vita_host_pin_current_thread)
+		{
+			const char *setting = getenv("HALO_AUDIO_CORE");
+			int core = setting ? atoi(setting) : -1;
+
+			if (core >= 0 && core <= 2)
+				vita_host_pin_current_thread(core);
+		}
+	}
 	while (additional_amount > 0)
 	{
 		unsigned long frames = (unsigned long)additional_amount / (OUTPUT_CHANNELS * sizeof(float));
@@ -482,8 +701,22 @@ static void audio_start(void)
 	if (audio_started)
 		return;
 	audio_started = TRUE;
+	ima_build_tables();
 	master_volume = (float)config_real("audio.volume");
 
+	{
+		/* (debug) HALO_FIXED_TICK: no device and no clock thread; the
+		game's frames drive the mixer instead (DirectSoundDoWork), one
+		tick's worth of audio each, so voices finish on the same frame in
+		every run */
+		const char *setting = getenv("HALO_FIXED_TICK");
+
+		if (setting && atoi(setting))
+		{
+			frame_locked_mixing = TRUE;
+			return;
+		}
+	}
 	if (config_boolean("audio.enabled") && platform_sdl_initialize())
 	{
 		spec.format = SDL_AUDIO_F32;
@@ -533,7 +766,7 @@ static void stream_complete_head(struct sdl_stream *stream, DWORD status, DWORD 
 	{
 		pthread_mutex_unlock(&mixer_lock);
 		stream->callback(stream->context, packet.pContext, status);
-		pthread_mutex_lock(&mixer_lock);
+		game_lock();
 	}
 	else if (packet.hCompletionEvent)
 	{
@@ -545,7 +778,7 @@ static void streams_complete_finished(void)
 {
 	struct sdl_stream *stream;
 
-	pthread_mutex_lock(&mixer_lock);
+	game_lock();
 	for (stream = streams; stream; stream = stream->next)
 	{
 		while (stream->packet_count && stream->packets[stream->packet_head].finished)
@@ -566,7 +799,7 @@ static ULONG STDMETHODCALLTYPE stream_add_reference(IDirectSoundStream *object)
 	struct sdl_stream *stream = stream_from_interface(object);
 	ULONG count;
 
-	pthread_mutex_lock(&mixer_lock);
+	game_lock();
 	count = ++stream->reference_count;
 	pthread_mutex_unlock(&mixer_lock);
 	return count;
@@ -580,14 +813,14 @@ static ULONG STDMETHODCALLTYPE stream_release(IDirectSoundStream *object)
 	struct sdl_stream **link;
 	ULONG count;
 
-	pthread_mutex_lock(&mixer_lock);
+	game_lock();
 	count = --stream->reference_count;
 	pthread_mutex_unlock(&mixer_lock);
 	if (count)
 		return count;
 
 	stream_flush(object);
-	pthread_mutex_lock(&mixer_lock);
+	game_lock();
 	for (link = &streams; *link; link = &(*link)->next)
 	{
 		if (*link == stream)
@@ -596,6 +829,7 @@ static ULONG STDMETHODCALLTYPE stream_release(IDirectSoundStream *object)
 			break;
 		}
 	}
+	stream_list_generation++;
 	pthread_mutex_unlock(&mixer_lock);
 	free(stream);
 	return 0;
@@ -615,9 +849,7 @@ static HRESULT STDMETHODCALLTYPE stream_get_status(IDirectSoundStream *object, L
 {
 	struct sdl_stream *stream = stream_from_interface(object);
 
-	pthread_mutex_lock(&mixer_lock);
-	*status = stream->packet_count < MAXIMUM_STREAM_PACKETS ? XMO_STATUSF_ACCEPT_INPUT_DATA : 0;
-	pthread_mutex_unlock(&mixer_lock);
+	*status = __atomic_load_n(&stream->packet_count, __ATOMIC_ACQUIRE) < MAXIMUM_STREAM_PACKETS ? XMO_STATUSF_ACCEPT_INPUT_DATA : 0;
 	return S_OK;
 }
 
@@ -635,7 +867,7 @@ static HRESULT STDMETHODCALLTYPE stream_process(IDirectSoundStream *object, LPCX
 	samples = stream->adpcm ?
 		decode_adpcm(input->pvBuffer, input->dwMaxSize, stream->channels, &frames) :
 		decode_pcm(input->pvBuffer, input->dwMaxSize, stream->channels, &frames);
-	pthread_mutex_lock(&mixer_lock);
+	game_lock();
 	if (stream->packet_count == MAXIMUM_STREAM_PACKETS)
 	{
 		pthread_mutex_unlock(&mixer_lock);
@@ -672,7 +904,7 @@ static HRESULT STDMETHODCALLTYPE stream_flush(IDirectSoundStream *object)
 {
 	struct sdl_stream *stream = stream_from_interface(object);
 
-	pthread_mutex_lock(&mixer_lock);
+	game_lock();
 	while (stream->packet_count)
 	{
 		struct voice_packet *head = &stream->packets[stream->packet_head];
@@ -723,7 +955,38 @@ ULONG WINAPI IDirectSound_Release(LPDIRECTSOUND sound)
 
 VOID WINAPI DirectSoundDoWork(void)
 {
+	static int enabled = -1;
+	static unsigned long calls;
+	static unsigned long long last_report;
+
+	if (frame_locked_mixing)
+	{
+		static float buffer[(OUTPUT_RATE / 30) * OUTPUT_CHANNELS];
+
+		mix(buffer, OUTPUT_RATE / 30);
+	}
 	streams_complete_finished();
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_RENDER_PROFILE");
+
+		enabled = setting && atoi(setting) != 0;
+	}
+	if (enabled && ++calls % 300 == 0)
+	{
+		unsigned long mixes = statistics_mixes;
+		unsigned long long now = statistics_now();
+		double elapsed_us = last_report && now > last_report ? (double)(now - last_report) : 0.0;
+
+		last_report = now;
+		platform_log("sound mixer: %.1f%% of a core (%.2f ms/mix, %.1f voices), game waits for the mixer %.2f ms/frame (%lu waits)",
+			elapsed_us > 0.0 ? 100.0 * (double)statistics_mix_us / elapsed_us : 0.0,
+			mixes ? (double)statistics_mix_us / 1000.0 / (double)mixes : 0.0,
+			mixes ? (double)statistics_voices / (double)mixes : 0.0,
+			(double)statistics_wait_us / 1000.0 / 300.0, statistics_waits);
+		statistics_mix_us = statistics_wait_us = 0;
+		statistics_mixes = statistics_voices = statistics_waits = 0;
+	}
 }
 
 VOID WINAPI DirectSoundUseFullHRTF(void)
@@ -768,9 +1031,9 @@ HRESULT WINAPI IDirectSound_SetDistanceFactor(LPDIRECTSOUND sound, FLOAT factor,
 {
 	(void)sound;
 	(void)apply;
-	pthread_mutex_lock(&mixer_lock);
+	pthread_mutex_lock(&parameter_lock);
 	listener.distance_factor = factor > 0.0f ? factor : 1.0f;
-	pthread_mutex_unlock(&mixer_lock);
+	pthread_mutex_unlock(&parameter_lock);
 	return DS_OK;
 }
 
@@ -778,9 +1041,9 @@ HRESULT WINAPI IDirectSound_SetRolloffFactor(LPDIRECTSOUND sound, FLOAT factor, 
 {
 	(void)sound;
 	(void)apply;
-	pthread_mutex_lock(&mixer_lock);
+	pthread_mutex_lock(&parameter_lock);
 	listener.rolloff_factor = factor >= 0.0f ? factor : 1.0f;
-	pthread_mutex_unlock(&mixer_lock);
+	pthread_mutex_unlock(&parameter_lock);
 	return DS_OK;
 }
 
@@ -788,11 +1051,11 @@ HRESULT WINAPI IDirectSound_SetPosition(LPDIRECTSOUND sound, FLOAT x, FLOAT y, F
 {
 	(void)sound;
 	(void)apply;
-	pthread_mutex_lock(&mixer_lock);
+	pthread_mutex_lock(&parameter_lock);
 	listener.position[0] = x;
 	listener.position[1] = y;
 	listener.position[2] = z;
-	pthread_mutex_unlock(&mixer_lock);
+	pthread_mutex_unlock(&parameter_lock);
 	return DS_OK;
 }
 
@@ -815,7 +1078,7 @@ HRESULT WINAPI IDirectSound_SetOrientation(LPDIRECTSOUND sound, FLOAT x_front, F
 {
 	(void)sound;
 	(void)apply;
-	pthread_mutex_lock(&mixer_lock);
+	pthread_mutex_lock(&parameter_lock);
 	listener.front[0] = x_front;
 	listener.front[1] = y_front;
 	listener.front[2] = z_front;
@@ -824,7 +1087,7 @@ HRESULT WINAPI IDirectSound_SetOrientation(LPDIRECTSOUND sound, FLOAT x_front, F
 	listener.top[2] = z_top;
 	normalize3(listener.front);
 	normalize3(listener.top);
-	pthread_mutex_unlock(&mixer_lock);
+	pthread_mutex_unlock(&parameter_lock);
 	return DS_OK;
 }
 
@@ -856,9 +1119,10 @@ HRESULT WINAPI IDirectSound_CreateSoundStream(LPDIRECTSOUND sound, LPCDSSTREAMDE
 	stream->minimum_distance = DS3D_DEFAULTMINDISTANCE;
 	stream->maximum_distance = DS3D_DEFAULTMAXDISTANCE;
 	stream->i3dl2_gain = 1.0f;
-	pthread_mutex_lock(&mixer_lock);
+	game_lock();
 	stream->next = streams;
 	streams = stream;
+	stream_list_generation++;
 	pthread_mutex_unlock(&mixer_lock);
 	*result = &stream->object;
 	return DS_OK;
@@ -877,17 +1141,17 @@ unsigned long __stdcall DirectSoundGetStreamVoiceStatus(LPDIRECTSOUNDSTREAM stre
 	struct sdl_stream *record = stream_from_interface(stream);
 	unsigned long active;
 
-	pthread_mutex_lock(&mixer_lock);
-	active = record->packet_count != 0;
-	pthread_mutex_unlock(&mixer_lock);
+	/* (a word the mixer never changes: packets are completed on the
+	game's threads) */
+	active = __atomic_load_n(&record->packet_count, __ATOMIC_ACQUIRE) != 0;
 	return active;
 }
 
 #define STREAM_SETTER(body) \
 	struct sdl_stream *record = stream_from_interface(stream); \
-	pthread_mutex_lock(&mixer_lock); \
+	pthread_mutex_lock(&parameter_lock); \
 	body; \
-	pthread_mutex_unlock(&mixer_lock); \
+	pthread_mutex_unlock(&parameter_lock); \
 	return DS_OK;
 
 HRESULT WINAPI IDirectSoundStream_SetFrequency(LPDIRECTSOUNDSTREAM stream, DWORD frequency)
@@ -913,7 +1177,7 @@ HRESULT WINAPI IDirectSoundStream_SetMixBinVolumes(LPDIRECTSOUNDSTREAM stream, D
 	struct sdl_stream *record = stream_from_interface(stream);
 	unsigned long bit, index = 0;
 
-	pthread_mutex_lock(&mixer_lock);
+	pthread_mutex_lock(&parameter_lock);
 	for (bit = 0; bit < 32; bit++)
 	{
 		if (!(mix_bin_mask & (1UL << bit)))
@@ -924,7 +1188,7 @@ HRESULT WINAPI IDirectSoundStream_SetMixBinVolumes(LPDIRECTSOUNDSTREAM stream, D
 			record->mix_right = gain_from_millibels(volumes[index]);
 		index++;
 	}
-	pthread_mutex_unlock(&mixer_lock);
+	pthread_mutex_unlock(&parameter_lock);
 	return DS_OK;
 }
 

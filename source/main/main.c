@@ -2236,6 +2236,16 @@ static void main_update_time_unthrottled(
 		}
 	}
 
+	{
+		/* (debug) HALO_FIXED_TICK=1: every frame elapses exactly one tick,
+		whatever the real time, so a run's simulation does not depend on the
+		machine's speed (tick_hash.c compares runs tick by tick) */
+		int halo_fixed_tick(void);
+
+		if (halo_fixed_tick() && !main_globals.movie)
+			seconds_elapsed = 1.0f / TICKS_PER_SECOND;
+	}
+
 	main_globals.frame_start_milliseconds = system_milliseconds();
 	main_globals.seconds_elapsed = seconds_elapsed;
 	profile_seconds_elapsed(seconds_elapsed);
