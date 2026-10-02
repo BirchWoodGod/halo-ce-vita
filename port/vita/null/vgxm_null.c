@@ -666,9 +666,21 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 	}
 }
 
-unsigned long vgxm_visibility_result(unsigned long index)
+void vgxm_visibility_frame(unsigned long frame)
 {
-	(void)index;
+	(void)frame;
+}
+
+int vgxm_visibility_newest(unsigned long *frame)
+{
+	(void)frame;
+	return -1;
+}
+
+unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
+{
+	(void)buffer;
+	(void)slot;
 	return 0;
 }
 
@@ -721,9 +733,12 @@ void vgxm_overlay_set(float fps, float tick_ms, float render_ms)
 	(void)render_ms;
 }
 
-const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch)
+const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch, unsigned long *width,
+	unsigned long *height)
 {
 	(void)color_target;
+	(void)width;
+	(void)height;
 	*pitch = 0;
 	return NULL;
 }

@@ -196,6 +196,8 @@ static struct
 	ring whose buffer the context has */
 	struct block visibility;
 	volatile unsigned int visibility_frame[RING_COUNT];
+	volatile unsigned long visibility_game_frame[RING_COUNT];
+	unsigned long visibility_next_game_frame;
 	float visibility_scale[RING_COUNT];
 	unsigned int visibility_slots_used[RING_COUNT];
 	int visibility_bound;
@@ -1752,36 +1754,50 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 	gxm.scene_draws++;
 }
 
-/* (the game's thread) the slot's count in the newest buffer whose frame the
-GPU has finished: the game asks at the start of the next frame, when that
-frame is still ahead of the GPU, and takes a result a frame or two old
-rather than wait */
-unsigned long vgxm_visibility_result(unsigned long slot)
+void vgxm_visibility_frame(unsigned long frame)
 {
-	unsigned int ring, newest = RING_COUNT, newest_frame = 0, completed = *gxm.notification;
-	unsigned long samples = 0;
-	const unsigned int *counts;
-	float scale;
+	gxm.visibility_next_game_frame = frame;
+}
 
-	if (!gxm.visibility.base || slot >= VGXM_VISIBILITY_SLOTS)
-		return 0;
+/* (the game's thread) the newest buffer whose frame the GPU has finished:
+the game asks at the start of the next frame, when that frame is still
+ahead of the GPU, and takes a result a frame or two old rather than wait */
+int vgxm_visibility_newest(unsigned long *frame)
+{
+	unsigned int ring, newest_frame = 0, completed = *gxm.notification;
+	int newest = -1;
+
+	if (!gxm.visibility.base)
+		return -1;
 	for (ring = 0; ring < RING_COUNT; ring++)
 	{
-		unsigned int frame = gxm.visibility_frame[ring];
+		unsigned int gpu_frame = gxm.visibility_frame[ring];
 
-		if (frame && (int)(completed - frame) >= 0 && (newest == RING_COUNT || (int)(frame - newest_frame) > 0))
+		if (gpu_frame && (int)(completed - gpu_frame) >= 0 && (newest < 0 || (int)(gpu_frame - newest_frame) > 0))
 		{
-			newest = ring;
-			newest_frame = frame;
+			newest = (int)ring;
+			newest_frame = gpu_frame;
 		}
 	}
-	if (newest == RING_COUNT)
+	if (newest >= 0)
+		*frame = gxm.visibility_game_frame[newest];
+	return newest;
+}
+
+unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
+{
+	const unsigned int *counts;
+	unsigned long samples = 0;
+	unsigned int core;
+	float scale;
+
+	if (!gxm.visibility.base || buffer < 0 || buffer >= RING_COUNT || slot >= VGXM_VISIBILITY_SLOTS)
 		return 0;
-	counts = visibility_buffer(newest);
-	for (ring = 0; ring < VISIBILITY_CORES; ring++)
-		samples += counts[ring * (VISIBILITY_CORE_STRIDE / 4) + slot];
+	counts = visibility_buffer((unsigned int)buffer);
+	for (core = 0; core < VISIBILITY_CORES; core++)
+		samples += counts[core * (VISIBILITY_CORE_STRIDE / 4) + slot];
 	/* (samples of a scaled target: the game counts its own pixels) */
-	scale = gxm.visibility_scale[newest];
+	scale = gxm.visibility_scale[buffer];
 	if (scale > 0.0f && scale < 1.0f)
 		samples = (unsigned long)(samples / (scale * scale) + 0.5f);
 	return samples;
@@ -2207,7 +2223,8 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		}
 	}
 	/* this frame's visibility counts are known once its notification is */
-	gxm.visibility_frame[gxm.worker_ring_index] = gxm.frame;
+	gxm.visibility_game_frame[gxm.worker_ring_index] = gxm.visibility_next_game_frame;
+	__atomic_store_n(&gxm.visibility_frame[gxm.worker_ring_index], gxm.frame, __ATOMIC_RELEASE);
 	/* the worker's next frame goes to its next ring */
 	gxm.worker_ring_index = (gxm.worker_ring_index + 1) % RING_COUNT;
 	gxm.worker_ring_offset = 0;
@@ -2225,16 +2242,19 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	}
 }
 
-const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch)
+const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch, unsigned long *width,
+	unsigned long *height)
 {
 	struct target *target;
 
 	if (!gxm.ready || !color_target || color_target > gxm.target_count)
 		return NULL;
 	target = &gxm.targets[color_target - 1];
-	/* (a scaled target is not the size the caller expects) */
-	if (target->depth || target->scale > 0.0f)
+	if (target->depth)
 		return NULL;
+	/* (a scaled target, HALO_RENDER_SCALE: its own, smaller size) */
+	*width = target->width;
+	*height = target->height;
 	if (gxm.in_scene)
 	{
 		sceGxmEndScene(gxm.context, NULL, NULL);
