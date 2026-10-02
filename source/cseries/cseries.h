@@ -333,6 +333,28 @@ extern const union real_rgb_color *global_real_rgb_violet;
 
 /* ---------- public code */
 
+#ifdef HALO_LINUX
+#include <float.h>
+/* (port) rint under the default rounding (to nearest, ties to even), as the
+x87's FISTP rounds: for |value| < 2^51, adding and taking away 1.5 * 2^52
+leaves the value at a spacing of 1, so the sum is rounded to the nearest
+integer exactly as rint would (checked against rint for every float, and
+every float times 255, as the colour conversions use it). The Vita's VFPv3
+has no rounding instruction, and newlib's rint is a call that moves the
+double through the core registers - four per colour converted, which the
+render does thousands of times a frame. Only where doubles are evaluated as
+doubles (FLT_EVAL_METHOD 0): x87 extended precision would not round. */
+static __inline double halo_rint(
+	double value)
+{
+#if defined(FLT_EVAL_METHOD) && FLT_EVAL_METHOD == 0
+	if (value > -2251799813685248.0 && value < 2251799813685248.0)
+		return (value + 6755399441055744.0) - 6755399441055744.0;
+#endif
+	return __builtin_rint(value);
+}
+#endif
+
 __inline long fast_ftol(
 	real value)
 {
@@ -340,7 +362,7 @@ __inline long fast_ftol(
 
 #ifdef HALO_LINUX
 	/* FISTP: round to nearest under the default control word */
-	result = (long)__builtin_rint((double)value);
+	result = (long)halo_rint((double)value);
 #else
 	__asm
 	{

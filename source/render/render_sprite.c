@@ -416,8 +416,12 @@ void build_sprite(
 
 					if (rotation!=0.f)
 					{
+#ifdef HALO_LINUX
+						sine_cosine(rotation, &rotation_sine, &rotation_cosine);
+#else
 						rotation_sine = sine(rotation);
 						rotation_cosine = cosine(rotation);
+#endif
 					}
 
 					build_sprite_transform_origin_and_direction(

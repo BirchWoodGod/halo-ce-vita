@@ -1211,15 +1211,26 @@ void profile_render_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) the texture timer is read only when something shows or dumps the
+profile: two clock reads per texture set (hundreds a frame), each a system
+call on the Vita, for a frame history nothing looks at otherwise. A timer
+not started (0) is not stopped. */
+static boolean profile_texture_timed(void)
+{
+	return profile_global_enable || profile_display || profile_graph || profile_dump_frames || profile_dump_lost_frames;
+}
+#endif
+
 void profile_texture_start(
 	void)
 {
 #ifdef HALO_LINUX
-	/* (port) the texture time is the profiler's, shown only while it is
-	on; the render's texture binds (~170 a frame) otherwise skip the two
-	clock reads, a system call each on the Vita */
-	if (!profile_global_enable)
+	if (!profile_texture_timed())
+	{
+		profile_globals.current_frame.texture.start = 0;
 		return;
+	}
 #endif
 	profile_timesection_begin_now(&profile_globals.current_frame.texture);
 
@@ -1230,7 +1241,7 @@ void profile_texture_end(
 	void)
 {
 #ifdef HALO_LINUX
-	if (!profile_global_enable)
+	if (!profile_globals.current_frame.texture.start)
 		return;
 #endif
 	profile_timesection_end_now(&profile_globals.current_frame.texture);

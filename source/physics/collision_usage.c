@@ -588,11 +588,11 @@ void collision_log_start_time(
 	LARGE_INTEGER *start_time)
 {
 #ifdef HALO_LINUX
-	/* (port) the elapsed times are shown only with collision_log_time on
-	(collision_log_format_usage); otherwise the two clock reads around
-	every collision query (~1300 a tick in a b30 fight, a system call
-	each on the Vita) are skipped */
-	if (!collision_log_time)
+	/* (port) the clock only when the log has a period open to time into:
+	a read is a system call on the Vita, two per collision test, on the
+	tick's thread and the render's - and with the tick on its own thread the
+	log never opens one (collision_log_store_period). 0: not timed */
+	if (!collision_log_time || halo_epoch_threaded || !global_collision_log_enable || collision_usage_current_period == NONE)
 	{
 		start_time->QuadPart = 0;
 		return;
@@ -611,7 +611,7 @@ void collision_log_end_time(
 	short user;
 
 #ifdef HALO_LINUX
-	if (!collision_log_time)
+	if (!start_time)
 		return;
 #endif
 	QueryPerformanceCounter(&end_time);

@@ -960,6 +960,122 @@ static short portal_hull_from_portal(
 		result);
 }
 
+#ifdef HALO_LINUX
+/* (port) a portal's hull (and its distance test) as seen from the camera
+of the window being traversed, made once per portal and direction: the
+traversal enumerates paths, and came back to the same portal from each -
+b30's beach computed ~560 hulls a frame for a few dozen portals. Valid for
+one structure_visibility_compute (portal_hull_cache_stamp) */
+struct portal_hull_cache_entry
+{
+	unsigned long stamp;
+	short result;
+	short vertex_count;
+	long first_vertex;
+	boolean within_distance;
+	boolean within_distance_known;
+};
+/* (fixed tables, not the heap: a traversal with more hull vertices than
+this computes the rest each time as before) */
+enum
+{
+	PORTAL_HULL_CACHE_ENTRIES = MAXIMUM_CLUSTER_PORTALS_PER_STRUCTURE * 2,
+	PORTAL_HULL_CACHE_VERTICES = 8192
+};
+static struct portal_hull_cache_entry portal_hull_cache[PORTAL_HULL_CACHE_ENTRIES];
+static long portal_hull_cache_count;
+static real_point2d portal_hull_cache_vertices[PORTAL_HULL_CACHE_VERTICES];
+static long portal_hull_cache_vertex_count;
+static unsigned long portal_hull_cache_stamp;
+
+static void portal_hull_cache_begin(
+	struct structure_bsp *structure)
+{
+	long count = structure->cluster_portals.count * 2;
+
+	portal_hull_cache_count = count <= PORTAL_HULL_CACHE_ENTRIES ? count : 0;
+	portal_hull_cache_vertex_count = 0;
+	portal_hull_cache_stamp++;
+}
+
+static struct portal_hull_cache_entry *portal_hull_cache_entry_get(
+	short portal_index,
+	boolean direction)
+{
+	long index = portal_index * 2 + (direction ? 1 : 0);
+
+	return index >= 0 && index < portal_hull_cache_count ? &portal_hull_cache[index] : NULL;
+}
+
+#include <stdlib.h>
+void platform_log(const char *format, ...);
+/* (HALO_RENDER_PROFILE=1: per visibility pass, the clusters the traversal entered,
+the portal hulls made and the intersections clipped, every 300 frames) */
+static unsigned long visibility_profile_counts[3], visibility_profile_frames;
+
+static short portal_hull_from_portal_cached(
+	short portal_index,
+	boolean direction,
+	struct portal_hull *result)
+{
+	struct portal_hull_cache_entry *entry = portal_hull_cache_entry_get(portal_index, direction);
+	short hull_result;
+
+	if (entry && entry->stamp == portal_hull_cache_stamp)
+	{
+		result->vertex_count = entry->vertex_count;
+		if (entry->vertex_count > 0)
+			memcpy(result->vertices, portal_hull_cache_vertices + entry->first_vertex,
+				entry->vertex_count * sizeof(result->vertices[0]));
+		return entry->result;
+	}
+	hull_result = portal_hull_from_portal(portal_index, direction, result);
+	visibility_profile_counts[1]++;
+	if (entry)
+	{
+		long count = result->vertex_count > 0 ? result->vertex_count : 0;
+
+		if (portal_hull_cache_vertex_count + count > PORTAL_HULL_CACHE_VERTICES)
+			return hull_result;
+		entry->stamp = portal_hull_cache_stamp;
+		entry->result = hull_result;
+		entry->vertex_count = result->vertex_count;
+		entry->first_vertex = portal_hull_cache_vertex_count;
+		entry->within_distance_known = FALSE;
+		if (count)
+			memcpy(portal_hull_cache_vertices + portal_hull_cache_vertex_count, result->vertices, count * sizeof(result->vertices[0]));
+		portal_hull_cache_vertex_count += count;
+	}
+	return hull_result;
+}
+
+/* points_within_distance of the portal's vertices, once per portal and
+direction in a traversal */
+static boolean portal_within_distance_cached(
+	short portal_index,
+	boolean direction,
+	struct structure_visibility_portal *portal)
+{
+	struct portal_hull_cache_entry *entry = portal_hull_cache_entry_get(portal_index, direction);
+
+	if (entry && entry->stamp == portal_hull_cache_stamp && entry->within_distance_known)
+		return entry->within_distance;
+	{
+		boolean within = points_within_distance(
+			(short)portal->vertices.count,
+			(real_point3d const *)portal->vertices.address,
+			render.camera.z_far);
+
+		if (entry && entry->stamp == portal_hull_cache_stamp)
+		{
+			entry->within_distance = within;
+			entry->within_distance_known = TRUE;
+		}
+		return within;
+	}
+}
+#endif
+
 boolean structure_visibility_find_mirror(
 	struct render_camera const *camera,
 	struct render_frustum const *frustum,
@@ -1494,6 +1610,9 @@ static void structure_visibility_traverse_cluster(
 		structure_visibility_globals.visited_cluster_flags,
 		cluster_index,
 		TRUE);
+#ifdef HALO_LINUX
+	visibility_profile_counts[0]++;
+#endif
 
 	if (!BIT_VECTOR_TEST_FLAG(render.visible_cluster_flags, cluster_index))
 	{
@@ -1569,10 +1688,17 @@ static void structure_visibility_traverse_cluster(
 			BIT_VECTOR_TEST_FLAG(cluster_pvs, neighbor_cluster_index))
 		{
 			struct portal_hull portal_hull;
+#ifdef HALO_LINUX
+			short portal_result = portal_hull_from_portal_cached(
+				portal_index,
+				direction,
+				&portal_hull);
+#else
 			short portal_result = portal_hull_from_portal(
 				portal_index,
 				direction,
 				&portal_hull);
+#endif
 
 			if (portal_result == _portal_hull_from_portal_degenerate)
 			{
@@ -1582,13 +1708,20 @@ static void structure_visibility_traverse_cluster(
 			}
 			else if (portal_result == _portal_hull_from_portal_succeeded &&
 				(render.visible_sky_model ||
+#ifdef HALO_LINUX
+					portal_within_distance_cached(portal_index, direction, portal)))
+#else
 					points_within_distance(
 						(short)portal->vertices.count,
 						(real_point3d const *)portal->vertices.address,
 						render.camera.z_far)))
+#endif
 			{
 				struct portal_hull clipped_hull;
 
+#ifdef HALO_LINUX
+				visibility_profile_counts[2]++;
+#endif
 				clipped_hull.vertex_count = convex_hull2d_intersect(
 					visible_region->vertex_count,
 					visible_region->vertices,
@@ -1706,7 +1839,27 @@ void structure_visibility_compute(
 		0,
 		BIT_VECTOR_SIZE_IN_BYTES(structure->surfaces.count));
 	render.rendered_cluster_count = 0;
+#ifdef HALO_LINUX
+	portal_hull_cache_begin(structure);
+#endif
 	structure_visibility_find_clusters();
+#ifdef HALO_LINUX
+	{
+		static int enabled = -1;
+
+		if (enabled < 0)
+		{
+			const char *setting = getenv("HALO_RENDER_PROFILE");
+			enabled = setting ? atoi(setting) : 0;
+		}
+		if (enabled > 0 && ++visibility_profile_frames % 300 == 0)
+		{
+			platform_log("visibility-profile (per pass): %.1f clusters entered, %.1f portal hulls made, %.1f clipped",
+				visibility_profile_counts[0] / 300.0, visibility_profile_counts[1] / 300.0, visibility_profile_counts[2] / 300.0);
+			visibility_profile_counts[0] = visibility_profile_counts[1] = visibility_profile_counts[2] = 0;
+		}
+	}
+#endif
 
 	if (structures_use_pvs_for_vs)
 	{

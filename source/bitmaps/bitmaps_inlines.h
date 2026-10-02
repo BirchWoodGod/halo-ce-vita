@@ -20,6 +20,14 @@ file has inline function assertions.
 
 /* ---------- macros */
 
+/* (port) the release builds of the native ports evaluate an assertion's
+expression without checking it; the colour checks below are pure (and the
+verifying second conversion only feeds one), so there they are left out:
+a call per colour converted, thousands a frame */
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+#define BITMAPS_INLINES_UNCHECKED 1
+#endif
+
 #define match_assert_valid_real_rgb_color(file, line, rgb) \
 	match_vassert( \
 		file, \
@@ -47,6 +55,7 @@ __inline pixel32 real_argb_color_to_pixel32(
 	real scale = 255.0f;
 	pixel32 result;
 
+#ifndef BITMAPS_INLINES_UNCHECKED
 	match_vassert(
 		"..\\bitmaps\\bitmaps_inlines.h",
 		89,
@@ -59,6 +68,7 @@ __inline pixel32 real_argb_color_to_pixel32(
 			color->red,
 			color->green,
 			color->blue));
+#endif
 
 	{
 		long alpha;
@@ -68,10 +78,10 @@ __inline pixel32 real_argb_color_to_pixel32(
 
 #ifdef HALO_LINUX
 		result = (pixel32)(
-			(long)__builtin_rint((double)color->blue * scale) |
-			((long)__builtin_rint((double)color->green * scale) << 8) |
-			((long)__builtin_rint((double)color->red * scale) << 16) |
-			((long)__builtin_rint((double)color->alpha * scale) << 24));
+			(long)halo_rint((double)color->blue * scale) |
+			((long)halo_rint((double)color->green * scale) << 8) |
+			((long)halo_rint((double)color->red * scale) << 16) |
+			((long)halo_rint((double)color->alpha * scale) << 24));
 #else
 		__asm
 		{
@@ -104,15 +114,16 @@ __inline pixel32 real_argb_color_to_pixel32(
 #endif
 	}
 
+#ifndef BITMAPS_INLINES_UNCHECKED
 	{
 		pixel32 verify;
 
 #ifdef HALO_LINUX
 		verify = (pixel32)(
-			((long)__builtin_rint((double)color->blue * scale) & 0xff) |
-			(((long)__builtin_rint((double)color->green * scale) & 0xff) << 8) |
-			(((long)__builtin_rint((double)color->red * scale) & 0xff) << 16) |
-			((long)__builtin_rint((double)color->alpha * scale) << 24));
+			((long)halo_rint((double)color->blue * scale) & 0xff) |
+			(((long)halo_rint((double)color->green * scale) & 0xff) << 8) |
+			(((long)halo_rint((double)color->red * scale) & 0xff) << 16) |
+			((long)halo_rint((double)color->alpha * scale) << 24));
 #else
 		__asm
 		{
@@ -149,6 +160,7 @@ __inline pixel32 real_argb_color_to_pixel32(
 			188,
 			verify == result);
 	}
+#endif
 
 	return result;
 }
@@ -159,13 +171,15 @@ __inline pixel32 real_rgb_color_to_pixel32(
 	pixel32 result;
 	real scale = (real)UNSIGNED_CHAR_MAX;
 
+#ifndef BITMAPS_INLINES_UNCHECKED
 	match_assert_valid_real_rgb_color("..\\bitmaps\\bitmaps_inlines.h", 0xC9, color);
+#endif
 
 #ifdef HALO_LINUX
 	result = (pixel32)(
-		((long)__builtin_rint((double)color->blue * scale) & 0xff) |
-		(((long)__builtin_rint((double)color->green * scale) & 0xff) << 8) |
-		(((long)__builtin_rint((double)color->red * scale) & 0xff) << 16));
+		((long)halo_rint((double)color->blue * scale) & 0xff) |
+		(((long)halo_rint((double)color->green * scale) & 0xff) << 8) |
+		(((long)halo_rint((double)color->red * scale) & 0xff) << 16));
 #else
 	__asm
 	{
@@ -211,7 +225,7 @@ __inline pixel32 real_alpha_to_pixel32(
 		alpha>=0.0f && alpha<=1.0f);
 
 #ifdef HALO_LINUX
-	result = (pixel32)((long)__builtin_rint((double)alpha * scale) << 24);
+	result = (pixel32)((long)halo_rint((double)alpha * scale) << 24);
 #else
 	__asm
 	{

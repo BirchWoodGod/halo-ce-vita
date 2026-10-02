@@ -38,6 +38,9 @@ double halo_log(double x);
 double halo_log2(double x);
 double halo_log10(double x);
 double halo_pow(double x, double y);
+/* (port) halo_sin(x) and halo_cos(x), bit for bit, with one argument
+reduction (musl-math/src/halo_sincos.c) */
+void halo_sincos(double x, double *sin_result, double *cos_result);
 
 #define sin(x) halo_sin(x)
 #define cos(x) halo_cos(x)
