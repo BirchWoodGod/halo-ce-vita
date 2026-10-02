@@ -3127,6 +3127,7 @@ unsigned long long vita_host_time_us(void);
 log read zeros) */
 void platform_log(const char *format, ...);
 extern volatile unsigned long long halo_cache_lock_wait_us[2];
+extern volatile unsigned long long halo_marker_wait_us[2];
 extern volatile unsigned long halo_cache_lock_acquires;
 extern volatile unsigned long long halo_tick_sound_us;
 extern volatile unsigned long halo_tick_sound_ticks;
@@ -3260,14 +3261,16 @@ void main_game_render(
 			static int enabled = -1;
 			if (enabled < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); enabled = e && atoi(e) != 0; }
 			if (enabled)
-				platform_log("render-split (ms/frame): sound_render %.2f windows %.2f | cache lock waits: render %.2f tick %.2f, acquires %lu/frame | sound_render on the tick %.2f ms/tick",
+				platform_log("render-split (ms/frame): sound_render %.2f windows %.2f | cache lock waits: render %.2f tick %.2f, acquires %lu/frame | marker waits: render %.2f tick %.2f | sound_render on the tick %.2f ms/tick",
 					(double)*halo_main_render_sound_us / 300000.0, (double)*halo_main_render_windows_us / 300000.0,
 					(double)halo_cache_lock_wait_us[0] / 300000.0, (double)halo_cache_lock_wait_us[1] / 300000.0,
 					halo_cache_lock_acquires / 300,
+					(double)halo_marker_wait_us[0] / 300000.0, (double)halo_marker_wait_us[1] / 300000.0,
 					halo_tick_sound_ticks ? (double)halo_tick_sound_us / 1000.0 / (double)halo_tick_sound_ticks : 0.0);
 				halo_tick_sound_us = 0;
 				halo_tick_sound_ticks = 0;
 				halo_cache_lock_wait_us[0] = halo_cache_lock_wait_us[1] = 0;
+				halo_marker_wait_us[0] = halo_marker_wait_us[1] = 0;
 				halo_cache_lock_acquires = 0;
 			*halo_main_render_sound_us = 0; *halo_main_render_windows_us = 0;
 		}

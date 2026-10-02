@@ -638,15 +638,23 @@ void halo_assert_soft(const char *information, const char *file, long line)
 
 static volatile int marker_held[_halo_marker_count];
 void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+/* time spent waiting for a marker held by the other thread, by the render
+[0] and the tick [1] (main.c reports it with the render split) */
+volatile unsigned long long halo_marker_wait_us[2];
 
 void halo_marker_lock(int which)
 {
 	unsigned long spins = 0;
+	unsigned long long waited_from = 0;
 
 	if (!halo_epoch_threaded)
 		return;
 	while (__atomic_exchange_n(&marker_held[which], 1, __ATOMIC_ACQUIRE))
 	{
+		if (!waited_from && vita_host_time_us)
+			waited_from = vita_host_time_us();
 		if (++spins > 200)
 		{
 			if (vita_host_sleep_us)
@@ -660,6 +668,8 @@ void halo_marker_lock(int which)
 			}
 		}
 	}
+	if (waited_from)
+		halo_marker_wait_us[halo_epoch_on_mutator() ? 1 : 0] += vita_host_time_us() - waited_from;
 }
 
 void halo_marker_unlock(int which)
