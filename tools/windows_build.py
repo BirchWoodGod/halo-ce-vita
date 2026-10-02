@@ -418,6 +418,12 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # (port/include/halo_math.h)
         for source in musl_math_sources():
             add_object(source, musl_math_cflags(abi))
+        # the host hooks the game declares weak in several units, first:
+        # lld-link takes a second weak external of a name for a duplicate
+        # symbol unless the definition came before it
+        hooks = obj_dir / (PORT_DIR / "src" / "win32_host_hooks.c").with_suffix(".o")
+        objects.remove(hooks)
+        objects.insert(0, hooks)
 
         n.build(
             outputs=output,

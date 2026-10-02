@@ -309,23 +309,6 @@ int clock_gettime(clockid_t clock, struct timespec *time)
 	return 0;
 }
 
-/* the microsecond clock the native ports' timing and threading code calls
-(port/vita/host/vita_main.c on the Vita, port/linux/src/posix_profile.c on
-Linux). Its companions vita_host_sleep_us and vita_host_pin_current_thread
-are left undefined: their callers take them as weak references and yield
-or skip without them (Sleep's millisecond is too coarse for their waits). */
-unsigned long long vita_host_time_us(void)
-{
-	static LARGE_INTEGER frequency;
-	LARGE_INTEGER counter;
-
-	if (!frequency.QuadPart)
-		QueryPerformanceFrequency(&frequency);
-	QueryPerformanceCounter(&counter);
-	return (unsigned long long)(counter.QuadPart / frequency.QuadPart) * 1000000ULL +
-		(unsigned long long)(counter.QuadPart % frequency.QuadPart) * 1000000ULL / (unsigned long long)frequency.QuadPart;
-}
-
 int nanosleep(const struct timespec *duration, struct timespec *remaining)
 {
 	long long milliseconds = (long long)duration->tv_sec * 1000 + (duration->tv_nsec + 999999) / 1000000;
