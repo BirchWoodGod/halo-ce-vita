@@ -78,12 +78,11 @@ static const char *const fixed_defaults[][2] = {
 	{ "HALO_INTERPOLATION", "false" },
 	{ "HALO_NO_VSYNC", "1" },
 	{ "HALO_STATIC_SCENERY", "1" },
-	/* the Xbox game's lockstep netcode: split screen is a host and its
-	own client on one machine, which the distributed netcode (built for
-	the desktop's internet play) left behind its own host on the Vita - a
-	player could look around but not move. A machine that joins a host
-	plays the host's netcode either way */
-	{ "HALO_NETCODE", "lockstep" },
+	/* (the netcode is the platform's default, distributed: lockstep had
+	been the Vita's because a match's client could not reach its own host -
+	that was the Vita refusing a sendto on a connected datagram socket,
+	vita_net.c; with it fixed the distributed netcode plays, with less
+	waiting each frame. HALO_NETCODE=lockstep in env.txt plays the Xbox's) */
 };
 
 static int panel_open, selected;
