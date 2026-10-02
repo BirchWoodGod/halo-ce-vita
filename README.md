@@ -166,14 +166,13 @@ memory card.
 
 ## Contributing
 
-Issues and pull requests are welcome. Open work:
+Issues and pull requests are welcome. What is planned next is in the
+**[roadmap](ROADMAP.md)**. Open work:
 
 - **Performance** in the biggest fights: the render on the first core is
-  the limit.
-- **Ad hoc multiplayer** between two Vitas without a router, then online
-  play.
-- **Draw count**: objects are drawn one part at a time (about 270 of the
-  ~360 draws in a big fight); batching them would help the most.
+  the limit at the peak.
+- **Online and ad hoc multiplayer** between Vitas.
+- **The issues listed for the next update** in the roadmap.
 
 ### Reporting a crash or a problem
 
