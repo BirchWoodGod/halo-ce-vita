@@ -43,9 +43,14 @@ symbols in this file:
 
 #include "cseries.h"
 #include "bungie_net/network/transport.h"
+#include "bungie_net/network/transport_address_constants.h"
 #include "bungie_net/network/transport_endpoint.h"
 #include "hs/hs.h"
 #include "networking/telnet_console.h"
+
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#endif
 
 /* ---------- constants */
 
@@ -92,12 +97,28 @@ void telnet_console_initialize(
 {
 	csmemset(&telnet_console_globals, 0, sizeof(telnet_console_globals));
 
+#ifdef HALO_LINUX
+	/* the console runs any script it is sent, with no password: the port's
+	builds open it only when asked for (HALO_TELNET_CONSOLE=1), and only to
+	this machine. Through 1.0.2 it listened on every network the console
+	was on. */
+	{
+		char const *setting = getenv("HALO_TELNET_CONSOLE");
+
+		if (!setting || !atoi(setting))
+			return;
+	}
+#endif
+
 	telnet_console_globals.listening_endpoint = create_transport_endpoint(_transport_endpoint_type_telnet);
 	if (telnet_console_globals.listening_endpoint)
 	{
 		struct transport_address address = {{0}};
 
 		address.address_length = IPV4_ADDRESS_LENGTH;
+#ifdef HALO_LINUX
+		address.address.long_words[0] = IPV4_LOOPBACK_ADDRESS;
+#endif
 		address.port = TELNET_CONSOLE_PORT;
 
 		if (bind_endpoint(telnet_console_globals.listening_endpoint, &address)==_transport_error_none)
