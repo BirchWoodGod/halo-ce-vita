@@ -885,6 +885,38 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 		return vgxm_texture_initialize(&entry->texture, memory, format, _vgxm_texture_swizzled, width, height, chained) == 0;
 	}
 
+	if (description->depth > 1 && !description->compressed && !description->linear &&
+		width * description->depth <= 4096)
+	{
+		/* A volume texture: GXM has none, and only its first slice used to
+		be kept. The one the game samples everywhere is the 32x32x32
+		distance attenuation of the dynamic lights on the environment (the
+		flashlight, muzzle flashes, plasma, explosions): a ball of falloff
+		whose first slice is its empty face, so no dynamic light ever lit a
+		wall. Its level 0 slices now lie side by side in one 2D texture
+		(slice z at u from z/depth to (z+1)/depth), which the fragment
+		program reads as a volume, filtering between the two nearest slices
+		(nv2a_psh_cg.c tex3D_slices). */
+		unsigned long depth = description->depth, z, row;
+		unsigned long atlas_width = width * depth;
+
+		memory = pool_alloc(LINEAR_ROW(atlas_width) * height * 4);
+		scratch = malloc(width * height * depth * 4);
+		if (!memory || !scratch)
+		{
+			free(scratch);
+			return FALSE;
+		}
+		decode_level(description, 0, base, palette, scratch);
+		for (z = 0; z < depth; z++)
+			for (row = 0; row < height; row++)
+				memcpy(memory + (row * LINEAR_ROW(atlas_width) + z * width) * 4, scratch + (z * height + row) * width,
+					width * 4);
+		free(scratch);
+		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_linear,
+			atlas_width, height, 1) == 0;
+	}
+
 	/* everything else as BGRA rows, every Xbox level */
 	if (description->linear || !power_of_two(width) || !power_of_two(height))
 		levels = 1;

@@ -527,7 +527,7 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 
 static struct render_target_entry *render_target_get_version(const D3DSurface *surface, unsigned long version)
 {
-	struct render_target_entry *entry;
+	struct render_target_entry *entry, *placeholder = NULL, **link;
 	unsigned long width, height;
 	BOOL depth;
 
@@ -539,7 +539,30 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 		if (entry->target.data == surface->Data && entry->target.width == width &&
 			entry->target.height == height && entry->target.depth == depth && entry->version == version)
 		{
-			return entry->id ? entry : NULL;
+			if (entry->id)
+				return entry;
+			/* A surface no target could be made for. It used to stay
+			without one for good: the recycling below only ran at the
+			first request, and right after a level change every target is
+			still too recently used to be taken over, so the surfaces of
+			the new level that came too late (the glow's, the motion
+			sensor's) kept a placeholder and their effect never showed
+			again. Ask again every 30 frames; until then it has none. */
+			if (device.frame < entry->last_used + 30)
+				return NULL;
+			placeholder = entry;
+			break;
+		}
+	}
+	if (placeholder)
+	{
+		for (link = render_target_bucket(surface->Data); *link; link = &(*link)->next_in_bucket)
+		{
+			if (*link == placeholder)
+			{
+				*link = placeholder->next_in_bucket;
+				break;
+			}
 		}
 	}
 	{
@@ -548,26 +571,36 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 
 		if (id)
 		{
-			entry = calloc(1, sizeof(*entry));
+			entry = placeholder;
+			if (!entry)
+			{
+				entry = calloc(1, sizeof(*entry));
+				entry->next = render_targets;
+				render_targets = entry;
+			}
 			entry->id = id;
 			entry->texture = texture;
-			entry->next = render_targets;
-			render_targets = entry;
 		}
 		else if ((entry = render_target_recycle(width, height, depth)) != NULL)
 		{
 			static unsigned long recycled;
 
+			/* (a placeholder taken over by the recycled entry stays in the
+			list, without a target, and is never looked up again) */
 			if (++recycled <= 20)
 				platform_log("render target recycled for a %lux%lu %s surface (%lu so far)", width, height,
 					depth ? "depth" : "colour", recycled);
 		}
 		else
 		{
-			entry = calloc(1, sizeof(*entry));
-			entry->next = render_targets;
-			render_targets = entry;
-			platform_log("cannot create a %lux%lu %s target", width, height, depth ? "depth" : "colour");
+			entry = placeholder;
+			if (!entry)
+			{
+				entry = calloc(1, sizeof(*entry));
+				entry->next = render_targets;
+				render_targets = entry;
+				platform_log("cannot create a %lux%lu %s target", width, height, depth ? "depth" : "colour");
+			}
 		}
 	}
 	entry->version = version;
@@ -1685,6 +1718,33 @@ volatile unsigned long halo_present_counter;
 
 /* ---------- executing records (the worker's side) */
 
+/* a stage addressed with D3DTADDRESS_BORDER: outside the texture it reads
+the border colour. GXM has no such mode (vita_gxm.c clamps), and a clamp
+smears the edge texels outward instead: the object shadows, projected onto
+the ground with border addressing, streaked for metres down a slope from
+the edge of their texture, and the flashlight's spot texture lit what lies
+outside its cone. The fragment program tests the coordinate
+(nv2a_psh_cg.c). HALO_TEXTURE_BORDER=0: clamped, as before. */
+static void key_border(struct nv2a_pixel_shader_key *key, int stage, const DWORD *texture_state)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_TEXTURE_BORDER");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	if (stage == 0)
+		key->border_mask = 0;
+	key->border_color[stage] = 0;
+	if (enabled && (texture_state[D3DTSS_ADDRESSU] == D3DTADDRESS_BORDER || texture_state[D3DTSS_ADDRESSV] == D3DTADDRESS_BORDER))
+	{
+		key->border_mask |= (unsigned char)(1U << stage);
+		key->border_color[stage] = texture_state[D3DTSS_BORDERCOLOR];
+	}
+}
+
 static unsigned long stage_texture_mode_of(const struct nv2a_pixel_shader_key *key, int stage)
 {
 	return (key->texture_modes >> (5 * stage)) & 0x1f;
@@ -1768,6 +1828,7 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		texture_scale[stage][2] = texture_scale[stage][3] = 1.0f;
 		command->draw.textures[stage] = NULL;
 		command->key.sampler_type[stage] = _xgpu_sampler_none;
+		command->key.volume_slices_log2[stage] = command->key.volume_width_log2[stage] = 0;
 		if (!command->texture_present[stage] || !header[1] || mode == 0 || mode == 0x04 || mode == 0x05 || mode == 0x11)
 			continue;
 		target = render_target_entry_find_version(header[1], command->texture_version[stage]);
@@ -1851,6 +1912,19 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		command->draw.textures[stage] = &sampled[stage];
 		command->key.sampler_type[stage] = description.cube_map ? _xgpu_sampler_cube :
 			description.depth > 1 ? _xgpu_sampler_3d : _xgpu_sampler_2d;
+		if (command->key.sampler_type[stage] == _xgpu_sampler_3d && !description.compressed && !description.linear &&
+			description.width * description.depth <= 4096)
+		{
+			/* (its slices side by side: vita_textures.c) */
+			unsigned char slices = 0, width = 0;
+
+			while ((2UL << slices) <= description.depth)
+				slices++;
+			while ((2UL << width) <= description.width)
+				width++;
+			command->key.volume_slices_log2[stage] = slices;
+			command->key.volume_width_log2[stage] = width;
+		}
 	}
 }
 
@@ -2135,6 +2209,7 @@ static BOOL worker_build_record(struct render_command *command)
 
 		key->alpha_kill[stage] = ts[D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE;
 		key->color_sign[stage] = (unsigned char)((ts[D3DTSS_COLORSIGN] >> 28) & 0xf);
+		key_border(key, stage, ts);
 		command->sampler_state[stage][0] = ts[D3DTSS_MINFILTER];
 		command->sampler_state[stage][1] = ts[D3DTSS_MAGFILTER];
 		command->sampler_state[stage][2] = ts[D3DTSS_MIPFILTER];
@@ -3474,6 +3549,7 @@ static struct render_command *record_draw(BOOL immediate)
 
 		key->alpha_kill[stage] = state[D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE;
 		key->color_sign[stage] = (unsigned char)((state[D3DTSS_COLORSIGN] >> 28) & 0xf);
+		key_border(key, stage, state);
 		command->texture_present[stage] = texture != NULL;
 		command->texture_version[stage] = 0;
 		if (texture)
