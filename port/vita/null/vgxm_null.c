@@ -394,6 +394,57 @@ static void hash_vertex(const struct vgxm_draw *draw, unsigned long index)
 	}
 }
 
+/* HALO_DRAW_HASH=3: as 2, but a vertex is hashed as the values of the input
+registers its program reads - from its streams, decoded, or from the
+uniform buffer's current values - and the program by the Xbox program's
+own hash, so a draw that takes a register from its vertices instead of from
+its uniforms (the same values) hashes the same */
+static void hash_vertex_inputs(const struct vgxm_draw *draw, unsigned long index)
+{
+	unsigned long reg, attribute;
+
+	for (reg = 0; reg < 16; reg++)
+	{
+		float value[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+		if (!(draw->vertex_input_mask & (1ul << reg)))
+			continue;
+		for (attribute = 0; attribute < draw->attribute_count; attribute++)
+			if (draw->attributes[attribute].reg == reg)
+				break;
+		if (attribute < draw->attribute_count)
+		{
+			const struct vgxm_attribute *a = &draw->attributes[attribute];
+			const unsigned char *bytes = a->stream < draw->stream_count && draw->streams[a->stream] ?
+				(const unsigned char *)draw->streams[a->stream] + index * draw->strides[a->stream] + a->offset : NULL;
+			unsigned long component;
+
+			for (component = 0; bytes && component < a->components && component < 4; component++)
+			{
+				switch (a->format)
+				{
+				case _vgxm_attribute_f32: memcpy(&value[component], bytes + 4 * component, 4); break;
+				case _vgxm_attribute_u8n: value[component] = bytes[component] / 255.0f; break;
+				case _vgxm_attribute_u8: value[component] = (float)bytes[component]; break;
+				case _vgxm_attribute_s16: { short v; memcpy(&v, bytes + 2 * component, 2); value[component] = (float)v; break; }
+				default: { short v; memcpy(&v, bytes + 2 * component, 2); value[component] = v / 32767.0f; break; }
+				}
+			}
+		}
+		else if (draw->vertex_uniforms)
+			memcpy(value, (const unsigned char *)draw->vertex_uniforms + (3 + reg) * 16, sizeof(value));
+		hash_floats(value, sizeof(value));
+	}
+}
+
+static void hash_vertex_any(const struct vgxm_draw *draw, unsigned long index)
+{
+	if (draw_hash_on == 3)
+		hash_vertex_inputs(draw, index);
+	else
+		hash_vertex(draw, index);
+}
+
 static void draw_hash_primitives(const struct vgxm_draw *draw, unsigned long long state)
 {
 	unsigned long i, n = draw->index_count;
@@ -407,37 +458,37 @@ static void draw_hash_primitives(const struct vgxm_draw *draw, unsigned long lon
 		for (i = 0; i + 2 < n; i += 3)
 		{
 			draw_hash_draws++, hash_word(state ^ 3);
-			hash_vertex(draw, x[i]); hash_vertex(draw, x[i + 1]); hash_vertex(draw, x[i + 2]);
+			hash_vertex_any(draw, x[i]); hash_vertex_any(draw, x[i + 1]); hash_vertex_any(draw, x[i + 2]);
 		}
 		break;
 	case 6: /* D3DPT_TRIANGLESTRIP: odd triangles turned back, as a merged list holds them */
 		for (i = 0; i + 2 < n; i++)
 		{
 			draw_hash_draws++, hash_word(state ^ 3);
-			if (i & 1) { hash_vertex(draw, x[i + 1]); hash_vertex(draw, x[i]); }
-			else { hash_vertex(draw, x[i]); hash_vertex(draw, x[i + 1]); }
-			hash_vertex(draw, x[i + 2]);
+			if (i & 1) { hash_vertex_any(draw, x[i + 1]); hash_vertex_any(draw, x[i]); }
+			else { hash_vertex_any(draw, x[i]); hash_vertex_any(draw, x[i + 1]); }
+			hash_vertex_any(draw, x[i + 2]);
 		}
 		break;
 	case 7: /* D3DPT_TRIANGLEFAN */
 		for (i = 0; i + 2 < n; i++)
 		{
 			draw_hash_draws++, hash_word(state ^ 3);
-			hash_vertex(draw, x[0]); hash_vertex(draw, x[i + 1]); hash_vertex(draw, x[i + 2]);
+			hash_vertex_any(draw, x[0]); hash_vertex_any(draw, x[i + 1]); hash_vertex_any(draw, x[i + 2]);
 		}
 		break;
 	case 2: /* D3DPT_LINELIST */
 		for (i = 0; i + 1 < n; i += 2)
 		{
 			draw_hash_draws++, hash_word(state ^ 2);
-			hash_vertex(draw, x[i]); hash_vertex(draw, x[i + 1]);
+			hash_vertex_any(draw, x[i]); hash_vertex_any(draw, x[i + 1]);
 		}
 		break;
 	default:
 		for (i = 0; i < n; i++)
 		{
 			draw_hash_draws++, hash_word(state ^ (1 + ((unsigned long long)draw->primitive << 8)));
-			hash_vertex(draw, x[i]);
+			hash_vertex_any(draw, x[i]);
 		}
 		break;
 	}
@@ -455,7 +506,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 
 		draw_hash_trace = setting ? atol(setting) : -1;
 	}
-	if (draw_hash_on == 2)
+	if (draw_hash_on >= 2)
 		draw_hash = 1469598103934665603ull;
 	draw_hash_part = 0;
 	hash_word(0xd7a3);
@@ -463,14 +514,20 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	hash_word(null.depth_target);
 	/* (the programs by their source: the ids number them in the order
 	they were first used) */
-	hash_word(draw->vertex_shader && draw->vertex_shader <= null.shader_count ? null.shader_hashes[draw->vertex_shader - 1] : 0);
+	if (draw_hash_on == 3)
+		hash_word(draw->vertex_program_hash);
+	else
+		hash_word(draw->vertex_shader && draw->vertex_shader <= null.shader_count ? null.shader_hashes[draw->vertex_shader - 1] : 0);
 	hash_word(draw->fragment_shader && draw->fragment_shader <= null.shader_count ? null.shader_hashes[draw->fragment_shader - 1] : 0);
-	hash_word(draw->attribute_count);
-	for (attribute = 0; attribute < draw->attribute_count; attribute++)
+	if (draw_hash_on != 3)
 	{
-		const struct vgxm_attribute *a = &draw->attributes[attribute];
+		hash_word(draw->attribute_count);
+		for (attribute = 0; attribute < draw->attribute_count; attribute++)
+		{
+			const struct vgxm_attribute *a = &draw->attributes[attribute];
 
-		hash_word(a->reg | (unsigned long)a->format << 8 | (unsigned long)a->components << 16);
+			hash_word(a->reg | (unsigned long)a->format << 8 | (unsigned long)a->components << 16);
+		}
 	}
 	TRACE_PART("programs+attributes");
 	draw_hash_part = 1;
@@ -493,7 +550,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 		for (attribute = 0; attribute < draw->attribute_count; attribute++)
 			provided |= 1ul << draw->attributes[attribute].reg;
 		hash_floats(draw->vertex_uniforms, 3 * 16);
-		for (index = 0; index < 16; index++)
+		for (index = 0; index < 16 && draw_hash_on != 3; index++)
 			if ((draw->vertex_input_mask & ~provided) & (1ul << index))
 				hash_floats((const unsigned char *)draw->vertex_uniforms + (3 + index) * 16, 16);
 	}
@@ -515,7 +572,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	TRACE_PART("textures");
 	draw_hash_part = 10;
 	hash_bytes(&draw->depth_test, offsetof(struct vgxm_draw, primitive) - offsetof(struct vgxm_draw, depth_test));
-	if (draw_hash_on == 2)
+	if (draw_hash_on >= 2)
 	{
 		unsigned long long state;
 

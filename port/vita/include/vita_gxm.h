@@ -137,6 +137,9 @@ struct vgxm_draw
 	matrices - and the input registers the vertex program reads */
 	unsigned long vertex_chunk_d_registers;
 	unsigned long vertex_input_mask;
+	/* (the draw hash) the Xbox vertex program's own hash, whichever Cg
+	translation of it (by the inputs its streams provide) runs */
+	unsigned long vertex_program_hash;
 	const void *vertex_uniforms;
 	const void *fragment_uniforms[2];
 	/* per texture stage, NULL when unbound */

@@ -167,6 +167,8 @@ struct vertex_shader_object
 	/* the input registers the program reads: an immediate-mode draw's
 	vertices carry only those */
 	unsigned long input_mask;
+	/* its instructions' hash (the draw hash) */
+	unsigned long instruction_hash;
 	struct vertex_variant *variants;
 };
 
@@ -1411,6 +1413,12 @@ static void parse_declaration(struct vertex_shader_object *object, const DWORD *
 	}
 }
 
+static unsigned long hash_words(const void *data, unsigned long size);
+
+struct vertex_shader_object;
+static void declaration_masks(const struct vertex_shader_object *declaration, unsigned long *provided,
+	unsigned long *packed, unsigned long *color);
+
 HRESULT WINAPI D3DDevice_CreateVertexShader(CONST DWORD *declaration, CONST DWORD *function, DWORD *handle, DWORD usage)
 {
 	struct vertex_shader_object *object = calloc(1, sizeof(*object));
@@ -1430,6 +1438,8 @@ HRESULT WINAPI D3DDevice_CreateVertexShader(CONST DWORD *declaration, CONST DWOR
 	nv2a_vertex_shader_constant_usage(object->instructions, object->instruction_count, &object->usage);
 	object->texcoord_w_mask = nv2a_vertex_shader_texcoord_w_mask(object->instructions, object->instruction_count);
 	object->input_mask = nv2a_vertex_shader_input_mask(object->instructions, object->instruction_count);
+	object->instruction_hash = object->instructions ?
+		hash_words(object->instructions, object->instruction_count * 4 * sizeof(DWORD)) : 0;
 	if (object->usage.relative_lowest < XGPU_VERTEX_CONSTANT_COUNT && object->usage.relative_lowest < VITA_VC_D_FIRST &&
 		(object->usage.relative_lowest < chunk_first[VITA_VC_C1] || object->usage.relative_lowest >= chunk_end[VITA_VC_C1]))
 	{
@@ -2465,6 +2475,7 @@ static void execute_draw(struct render_command *command)
 	}
 	DRAW_PROFILE_ADD(6, profile_from);
 	draw->vertex_input_mask = command->program->input_mask;
+	draw->vertex_program_hash = command->program->instruction_hash;
 	vgxm_draw(draw);
 	DRAW_PROFILE_ADD(7, profile_from);
 }
