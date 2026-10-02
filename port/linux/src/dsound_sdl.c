@@ -432,6 +432,7 @@ static void mix(float *output, unsigned long frames)
 
 static SDL_AudioStream *audio_stream;
 static BOOL audio_started = FALSE;
+static BOOL frame_locked_mixing = FALSE;
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
@@ -484,6 +485,19 @@ static void audio_start(void)
 	audio_started = TRUE;
 	master_volume = (float)config_real("audio.volume");
 
+	{
+		/* (debug) HALO_FIXED_TICK: no device and no clock thread; the
+		game's frames drive the mixer instead (DirectSoundDoWork), one
+		tick's worth of audio each, so voices finish on the same frame in
+		every run */
+		const char *setting = getenv("HALO_FIXED_TICK");
+
+		if (setting && atoi(setting))
+		{
+			frame_locked_mixing = TRUE;
+			return;
+		}
+	}
 	if (config_boolean("audio.enabled") && platform_sdl_initialize())
 	{
 		spec.format = SDL_AUDIO_F32;
@@ -723,6 +737,12 @@ ULONG WINAPI IDirectSound_Release(LPDIRECTSOUND sound)
 
 VOID WINAPI DirectSoundDoWork(void)
 {
+	if (frame_locked_mixing)
+	{
+		static float buffer[(OUTPUT_RATE / 30) * OUTPUT_CHANNELS];
+
+		mix(buffer, OUTPUT_RATE / 30);
+	}
 	streams_complete_finished();
 }
 

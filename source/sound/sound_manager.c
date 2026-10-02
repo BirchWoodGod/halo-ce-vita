@@ -3652,6 +3652,15 @@ void sound_idle(
 	without its datum, at map load): the tick is feeding the audio anyway */
 	if (halo_epoch_active && !halo_epoch_on_mutator())
 		return;
+	{
+		/* (debug) HALO_FIXED_TICK: only sound_render, once a frame, moves
+		the sound manager and the mixer (dsound_sdl.c), not the render's
+		IO waits, whose number depends on the disk */
+		int halo_fixed_tick(void);
+
+		if (halo_fixed_tick())
+			return;
+	}
 #endif
 	sound_manager_globals.idling = TRUE;
 
@@ -3827,6 +3836,16 @@ void sound_render(
 		if (!sound_manager_globals.paused)
 		{
 			long render_time = system_milliseconds();
+#ifdef HALO_LINUX
+			/* (debug) HALO_FIXED_TICK: a frame's worth of sound time per call */
+			{
+				int halo_fixed_tick(void);
+				static long fixed_milliseconds;
+
+				if (halo_fixed_tick())
+					render_time = (fixed_milliseconds += 33);
+			}
+#endif
 
 			sound_manager_globals.ticks_elapsed =
 				((real)render_time - sound_manager_globals.render_time) *

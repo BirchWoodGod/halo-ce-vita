@@ -184,6 +184,40 @@ void halo_game_state_range(void **base, unsigned long *size)
 	*base = game_state_globals.base_address;
 	*size = (unsigned long)game_state_globals.cpu_allocation_size;
 }
+
+/* (debug) the arena's allocations in order, for tick_hash.c to hash one by
+one and name the first that two runs differ in */
+#define HALO_GAME_STATE_ALLOCATIONS_MAXIMUM 512
+static struct { const char *name; long offset, size; } halo_game_state_allocations[HALO_GAME_STATE_ALLOCATIONS_MAXIMUM];
+static int halo_game_state_allocation_count;
+
+static void halo_game_state_note_allocation(const char *name, long offset, long size)
+{
+	if (halo_game_state_allocation_count < HALO_GAME_STATE_ALLOCATIONS_MAXIMUM)
+	{
+		halo_game_state_allocations[halo_game_state_allocation_count].name = name;
+		halo_game_state_allocations[halo_game_state_allocation_count].offset = offset;
+		halo_game_state_allocations[halo_game_state_allocation_count].size = size;
+		halo_game_state_allocation_count++;
+	}
+}
+
+int halo_game_state_allocation(int index, const char **name, void **base, unsigned long *size)
+{
+	if (index < 0 || index >= halo_game_state_allocation_count)
+		return 0;
+	*name = halo_game_state_allocations[index].name;
+	*base = (byte *)game_state_globals.base_address + halo_game_state_allocations[index].offset;
+	*size = (unsigned long)halo_game_state_allocations[index].size;
+	return 1;
+}
+
+/* the GPU half of the arena, allocated down from its top (tick_hash.c) */
+void halo_game_state_gpu_range(void **base, unsigned long *size)
+{
+	*size = (unsigned long)game_state_globals.gpu_allocation_size;
+	*base = (byte *)game_state_globals.base_address + GAME_STATE_SIZE - *size;
+}
 #endif
 
 typedef void (*game_state_before_load_proc)(void);
@@ -548,6 +582,9 @@ void *game_state_malloc(
 	code_001af650(name, type, size, FALSE);
 
 	pointer = (byte *)game_state_globals.base_address+game_state_globals.cpu_allocation_size;
+#ifdef HALO_LINUX
+	halo_game_state_note_allocation(name, game_state_globals.cpu_allocation_size, size);
+#endif
 	game_state_globals.cpu_allocation_size+= size;
 
 	crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &size, sizeof(size));
@@ -570,6 +607,9 @@ void *game_state_gpu_malloc(
 
 	game_state_globals.gpu_allocation_size+= size;
 	pointer = (byte *)game_state_globals.base_address-game_state_globals.gpu_allocation_size+GAME_STATE_SIZE;
+#ifdef HALO_LINUX
+	halo_game_state_note_allocation(name, (long)(pointer - (byte *)game_state_globals.base_address), size);
+#endif
 
 	crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &size, sizeof(size));
 

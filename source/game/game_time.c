@@ -76,6 +76,7 @@ symbols in this file:
 boolean network_game_distributed(void);
 /* port/linux/game/network_distributed.c's */
 void network_distributed_tick(void);
+void halo_tick_hash_after_tick(void);
 #endif
 
 /* ---------- constants */
@@ -685,6 +686,8 @@ void game_time_update(
 #ifdef HALO_LINUX
 						/* the distributed netcode's per-tick state */
 						network_distributed_tick();
+						/* (debug) HALO_TICK_HASH: the simulation oracle */
+						halo_tick_hash_after_tick();
 #endif
 					}
 				}

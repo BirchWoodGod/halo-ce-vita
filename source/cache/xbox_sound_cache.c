@@ -521,6 +521,17 @@ static void sound_cache_start_loading_sound(
 			cache_address,
 			&cache_sound->loaded,
 			FALSE);
+#ifdef HALO_LINUX
+		{
+			/* (debug) HALO_FIXED_TICK: the load is done before the sound
+			manager next looks, whatever the disk's speed */
+			int halo_fixed_tick(void);
+
+			if (halo_fixed_tick())
+				while (!*(volatile boolean *)&cache_sound->loaded)
+					SwitchToThread();
+		}
+#endif
 	}
 	else if (
 		system_milliseconds() -
