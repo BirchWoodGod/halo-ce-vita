@@ -229,6 +229,13 @@ static struct
 	unsigned int peeked;
 	unsigned long long epoll_us, peek_us;
 } trace_selects;
+/* the network control service asked for this machine's address
+(posix_local_ipv4_address), and its time */
+static struct
+{
+	unsigned int queries;
+	unsigned long long query_us;
+} trace_local_address;
 
 static int trace_on(void)
 {
@@ -446,6 +453,8 @@ static void trace_report_if_due(void)
 		trace_selects.epoll_us, trace_selects.peek_us, statistics.libnet_mem_free_size,
 		statistics.libnet_mem_free_min, statistics.kernel_mem_free_size, statistics.kernel_mem_free_min,
 		statistics.packet_count, (unsigned int)statistics_result);
+	trace_log("local address: the network control service asked %u times (%llu us)",
+		trace_local_address.queries, trace_local_address.query_us);
 	pthread_mutex_unlock(&trace_mutex);
 }
 
@@ -1099,19 +1108,31 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 	return ready;
 }
 
+/* this machine's address, from the network control service (the game's
+link check asks every frame: port/linux/src/xnet.c keeps the answer a
+while; HALO_NET_TRACE counts the queries and their time) */
 posix_ulong posix_local_ipv4_address(void)
 {
 	SceNetCtlInfo information;
 	SceNetInAddr address;
+	unsigned long long started;
+	posix_ulong result = 0;
 
 	if (!net_ready())
 		return 0;
+	started = trace_on() ? vita_host_time_us() : 0;
 	memset(&information, 0, sizeof(information));
-	if (sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS, &information) < 0)
-		return 0;
-	if (sceNetInetPton(SCE_NET_AF_INET, information.ip_address, &address) <= 0)
-		return 0;
-	return address.s_addr;
+	if (sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS, &information) >= 0 &&
+		sceNetInetPton(SCE_NET_AF_INET, information.ip_address, &address) > 0)
+	{
+		result = address.s_addr;
+	}
+	if (trace_on())
+	{
+		__atomic_fetch_add(&trace_local_address.queries, 1, __ATOMIC_RELAXED);
+		__atomic_fetch_add(&trace_local_address.query_us, vita_host_time_us() - started, __ATOMIC_RELAXED);
+	}
+	return result;
 }
 
 posix_ulong posix_resolve_ipv4(const char *host)
