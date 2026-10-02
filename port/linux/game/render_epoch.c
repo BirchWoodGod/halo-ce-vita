@@ -369,6 +369,47 @@ int halo_epoch_datum_hidden_from_caller(const struct data_array *data, long abso
 	return halo_epoch_on_mutator() ? state == _halo_epoch_datum_tombstoned : state == _halo_epoch_datum_created;
 }
 
+/* A datum the render thread creates or deletes in the game state while a
+tick runs is outside the epoch's protocol: the delete is not deferred (the
+slot is freed and the array's count shrinks under the tick's walks) and the
+new slot is taken from the same free list the tick allocates from. The
+render must not do it; this names the array the first times it happens
+(the grenade crash on b30 was lights_preprocess_scene retiring an effect's
+light from the render thread). */
+static const struct data_array *reader_owned_arrays[4];
+static unsigned long reader_owned_array_count;
+
+void halo_epoch_reader_owned(const struct data_array *data)
+{
+	if (reader_owned_array_count < sizeof(reader_owned_arrays) / sizeof(reader_owned_arrays[0]))
+		reader_owned_arrays[reader_owned_array_count++] = data;
+}
+
+void halo_epoch_check_reader_mutation(const struct data_array *data, long absolute_index, const char *what)
+{
+	static struct { const struct data_array *data; const char *what; } seen[32];
+	static unsigned long seen_count, total;
+	unsigned long index;
+
+	if (!halo_epoch_active || halo_epoch_on_mutator() || !in_game_state(data))
+		return;
+	for (index = 0; index < reader_owned_array_count; index++)
+		if (reader_owned_arrays[index] == data)
+			return;
+	total++;
+	for (index = 0; index < seen_count; index++)
+		if (seen[index].data == data && seen[index].what == what)
+			return;
+	if (seen_count < sizeof(seen) / sizeof(seen[0]))
+	{
+		seen[seen_count].data = data;
+		seen[seen_count].what = what;
+		seen_count++;
+		platform_log("render epoch: %s of %s #%ld on the render thread while a tick runs (unsafe, %lu so far)",
+			what, data->name, absolute_index, total);
+	}
+}
+
 static const struct data_array *guarded_arrays[4];
 static unsigned long guarded_array_count;
 

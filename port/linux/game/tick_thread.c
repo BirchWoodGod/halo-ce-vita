@@ -17,6 +17,14 @@ second). */
 #include "tick_thread.h"
 
 void sound_render(void);
+/* the effects' lights' upkeep, which the render may not do while a tick
+runs (object_lights.c) */
+void lights_update_unattached(void);
+void lights_stress_update(void);
+/* the decals' upkeep, likewise (rasterizer_xbox.c) */
+void rasterizer_decals_update_for_frame(void);
+void decals_stress_update(void);
+void particle_systems_stress_update(void);
 
 void vita_host_pin_current_thread(int core) __attribute__((weak));
 void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
@@ -84,7 +92,16 @@ static void *tick_thread(void *unused)
 
 			if (halo_trace_active && halo_trace_active())
 				platform_log("trace: tick begin");
+			lights_stress_update();
+			decals_stress_update();
+			particle_systems_stress_update();
 			game_time_update(delta);
+			/* (what lights_preprocess_scene and rasterizer_frame_begin do
+			unthreaded: the render deleting the retired lights crashed the
+			tick walking them, and its decal deletes raced the tick's
+			inserts) */
+			lights_update_unattached();
+			rasterizer_decals_update_for_frame();
 			finished_elapsed = halo_game_time_last_elapsed();
 			render_tick_poses_capture();
 			if (halo_trace_active && halo_trace_active())

@@ -411,6 +411,7 @@ symbols in this file:
 #include "render/render.h"
 #ifdef HALO_LINUX
 int halo_epoch_on_mutator(void);
+extern int halo_epoch_threaded;
 #endif
 #include "render/render_cameras.h"
 
@@ -2276,6 +2277,10 @@ void rasterizer_set_framebuffer_blend_function(
 	return;
 }
 
+#ifdef HALO_LINUX
+void rasterizer_decals_update_for_frame(void);
+#endif
+
 void _rasterizer_frame_begin(
 	struct rasterizer_frame_begin_parameters const *parameters)
 {
@@ -2294,14 +2299,55 @@ void _rasterizer_frame_begin(
 		global_d3d_device,
 		D3DRS_DXT1NOISEENABLE,
 		rasterizer_debug_options.DXTC_noise);
+#ifdef HALO_LINUX
+	/* (the tick thread does it when there is one: below) */
+	if (!halo_epoch_threaded)
+		rasterizer_decals_update_for_frame();
+#else
 	if (rasterizer_debug_options.environment_decals)
 	{
 		rasterizer_decal_vertices_begin_update();
 		decals_update();
 		rasterizer_decal_vertices_end_update();
 	}
+#endif
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port) The decals' upkeep, which the game does as the rasterizer begins
+a frame (above): the vertex cache's clock advances, every decal's fade is
+computed, and a decal whose lifetime is over gives its vertices back to
+the cache, whose delete procedure deletes the decal and unlinks it from its
+cluster's list.
+
+With the tick on its own thread the render may not do that while the tick
+runs (render_epoch.h): the render thread's datum_delete is immediate, so a
+decal and its cache block were freed and unlinked while the tick inserted
+new decals into the same cluster lists and allocated from the same arrays
+(decal_insert runs outside the cache lock), and the render, which still
+sees the decals the tick evicted this epoch, could expire one of them and
+unlink it a second time. Grenades leave scorch marks; this is the decals'
+twin of the crash lights_update_unattached fixed (object_lights.c).
+
+So when threaded the tick does it, once per frame after its update
+(tick_thread.c): its deletes are tombstoned until the join like the
+evictions it already makes when the cache is full, and the render keeps
+drawing a retired decal until then. Unthreaded, the render does it as on
+the Xbox. */
+void rasterizer_decals_update_for_frame(
+	void)
+{
+	if (rasterizer_debug_options.environment_decals)
+	{
+		rasterizer_decal_vertices_begin_update();
+		decals_update();
+		rasterizer_decal_vertices_end_update();
+	}
+
+	return;
+}
+#endif
 
 void rasterizer_secondary_render_target_debug(
 	rectangle2d *bounds)

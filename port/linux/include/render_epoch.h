@@ -86,6 +86,14 @@ visible at once, a link to it being written after it is filled in */
 void halo_epoch_guard_constructions(struct data_array *data);
 int halo_epoch_datum_hidden_from_get(const struct data_array *data, long absolute_index);
 
+/* datum_new / datum_delete: logs (the first times per array) a game-state
+datum created or deleted by a thread other than the tick while a tick runs,
+which the epoch does not protect */
+void halo_epoch_check_reader_mutation(const struct data_array *data, long absolute_index, const char *what);
+/* an array in the game state that only the render uses (the cached object
+render states): exempt from the check */
+void halo_epoch_reader_owned(const struct data_array *data);
+
 /* the tick frees a memory pool block during an epoch: defers it; 0 when the
 free must proceed as usual */
 int halo_epoch_pool_free(struct memory_pool *pool, void *block);

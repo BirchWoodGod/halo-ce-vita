@@ -198,6 +198,12 @@ reconnects a light it believes disconnected (the assertion at 0x4F9) */
 #include "structures/structure_visibility.h"
 #include "tag_files/tag_groups.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#include "cache/cache_files.h"
+#include "game/players.h"
+void platform_log(const char *format, ...);
+#endif
 
 /* ---------- constants */
 
@@ -813,25 +819,46 @@ long light_new_unattached(
 	return light_index;
 }
 
-void lights_preprocess_scene(
+#ifdef HALO_LINUX
+/* (port) The unattached lights' upkeep, which the game does at the start of
+every rendered window (lights_preprocess_scene below): an effect's light
+(light_new_unattached keeps its creation time in parent_light_index) is
+disconnected from its clusters and deleted once its transition is over,
+and one riding an object is moved with it.
+
+With the tick on its own thread (tick_thread.c) the render is the reader
+of the render epoch, and this is game state mutation: the render thread's
+datum_delete is not deferred, so the reference nodes were freed at once
+(the array's count shrinking past them) while the tick walked the same
+cluster's light list - unit_refresh_illumination ->
+lights_illumination_at_point -> cluster_partition_get_next_datum met a node
+datum_get no longer returned and loaded through NULL. Every grenade and
+plasma burst makes such a light, so throwing one crashed the Vita (b30,
+data abort in cluster_partition_next_ready_datum with the game thread in
+datum_delete on the light cluster reference array). The render thread's
+reconnects also took nodes from the free list the tick allocates from.
+
+So when threaded the tick does the upkeep, once per frame after its update
+(tick_thread.c), as the epoch's mutator: the deletes are tombstoned until
+the join, the reconnected nodes are published like every other light's,
+and the render still reaches the retired light through the nodes it saw
+(drawing it one frame longer at worst). Unthreaded, the render does it,
+as on the Xbox. */
+void lights_update_unattached(
 	void)
 {
-	long current_time = game_time_get();
+	long current_time;
 	long light_index;
-	short rendered_cluster_index;
-	short scene_light_index;
-	short queued_lens_flare_index;
 
-	profile_enter(lights_section);
-	debug_rasterizer_light_count = 0;
+	if (!light_data || !light_data->valid)
+		return;
+	current_time = game_time_get();
 	for (light_index = data_next_index(light_data, NONE);
 		light_index != NONE;
 		light_index = data_next_index(light_data, light_index))
 	{
 		struct light_datum *light = light_get(light_index);
 
-		LIGHT_SET_FLAG(light, _point_light_attached_to_first_person_weapon_bit, FALSE);
-		light->rasterizer_light_index = NONE;
 		if (light->parent_light_index != NONE)
 		{
 			struct point_light_definition *definition = light_definition_get(
@@ -852,6 +879,124 @@ void lights_preprocess_scene(
 				light_reconnect_to_map(light_index);
 			}
 		}
+	}
+
+	return;
+}
+
+/* (port, debug) HALO_STRESS_LIGHTS=n: the tick makes n short-lived effect
+lights (light_new_unattached, as an explosion's light part does) around
+the first local player every frame, whose own illumination walks his
+cluster's light list every tick: the retiring of such lights while the tick
+walks is what crashed on the Vita when a grenade went off, and this makes
+it happen hundreds of times a second */
+void lights_stress_update(
+	void)
+{
+	static int wanted = -1;
+	static long definitions[32];
+	static short definition_count;
+	static unsigned long generation;
+	long player_index;
+	long unit_index;
+	short index;
+
+	if (wanted < 0)
+	{
+		const char *setting = getenv("HALO_STRESS_LIGHTS");
+
+		wanted = setting ? atoi(setting) : 0;
+	}
+	if (wanted <= 0 || !light_data || !light_data->valid)
+		return;
+	if (generation != halo_map_generation)
+	{
+		struct tag_iterator iterator;
+		long tag_index;
+
+		generation = halo_map_generation;
+		definition_count = 0;
+		tag_iterator_new(&iterator, LIGHT_DEFINITION_TAG);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE && definition_count < NUMBEROF(definitions))
+		{
+			struct point_light_definition *definition = light_definition_get(tag_index);
+
+			/* (game ticks, as lights_update_unattached compares them) */
+			if (definition->transition_duration > 0.0f && definition->transition_duration < 90.0f)
+			{
+				definitions[definition_count++] = tag_index;
+			}
+		}
+		platform_log("HALO_STRESS_LIGHTS: %d lights a frame from %d short-lived light definitions", wanted, definition_count);
+	}
+	player_index = local_player_get_player_index(0);
+	if (!definition_count || player_index == NONE)
+		return;
+	unit_index = player_get(player_index)->unit_index;
+	if (unit_index == NONE || !object_try_and_get(unit_index))
+		return;
+	for (index = 0; index < wanted; index++)
+	{
+		struct object_datum *object = object_get(unit_index);
+		real_point3d position = object->object.position;
+		real_vector3d direction = { 0.0f, 0.0f, -1.0f };
+
+		position.x += (real)(rand() % 200 - 100) / 50.0f;
+		position.y += (real)(rand() % 200 - 100) / 50.0f;
+		position.z += (real)(rand() % 100) / 50.0f;
+		light_new_unattached(definitions[rand() % definition_count], NONE, NONE, &position, &direction, 1.0f);
+	}
+
+	return;
+}
+#endif
+
+void lights_preprocess_scene(
+	void)
+{
+	long current_time = game_time_get();
+	long light_index;
+	short rendered_cluster_index;
+	short scene_light_index;
+	short queued_lens_flare_index;
+
+	profile_enter(lights_section);
+	debug_rasterizer_light_count = 0;
+#ifdef HALO_LINUX
+	/* (the tick thread does it when there is one: above) */
+	if (!halo_epoch_threaded)
+		lights_update_unattached();
+#endif
+	for (light_index = data_next_index(light_data, NONE);
+		light_index != NONE;
+		light_index = data_next_index(light_data, light_index))
+	{
+		struct light_datum *light = light_get(light_index);
+
+		LIGHT_SET_FLAG(light, _point_light_attached_to_first_person_weapon_bit, FALSE);
+		light->rasterizer_light_index = NONE;
+#ifndef HALO_LINUX
+		if (light->parent_light_index != NONE)
+		{
+			struct point_light_definition *definition = light_definition_get(
+				light->definition_index);
+			real elapsed = (real)(current_time - light->parent_light_index);
+
+			if (elapsed > definition->transition_duration)
+			{
+				cluster_partition_disconnect(
+					&light_cluster_partition,
+					light_index,
+					&light_get(light_index)->cluster_reference);
+				datum_delete(light_data, light_index);
+			}
+			else if (object_try_and_get(light->object_index))
+			{
+				light_disconnect_from_map(light_index);
+				light_reconnect_to_map(light_index);
+			}
+		}
+#endif
 	}
 
 	light_marker_begin();

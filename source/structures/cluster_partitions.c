@@ -100,18 +100,48 @@ static long *code_00180fa0(
 #ifdef HALO_LINUX
 #include "render_epoch.h"
 void platform_log(const char *format, ...);
+/* reference_list_get_next_datum_index, ending the walk at a node the caller
+cannot get instead of loading through NULL: a node freed under the walk
+outside the epoch (the render thread deleted lights' nodes while the tick
+walked them: object_lights.c, lights_update_unattached) cost a data abort.
+The cause is fixed; this keeps a stray one to a light, object or cluster
+missed for a frame, and names it. */
+static long reference_list_walk_next(
+	struct data_array *array,
+	long *reference_index)
+{
+	struct data_reference *reference;
+
+	if (*reference_index == NONE)
+		return NONE;
+	reference = (struct data_reference *)datum_get(array, *reference_index);
+	if (!reference)
+	{
+		static unsigned long missed;
+
+		if (missed++ < 8)
+			platform_log("%s: walk met node 0x%08lx it cannot get (count %d, %s thread): walk ended",
+				array->name, (unsigned long)*reference_index, (int)array->count,
+				halo_epoch_on_mutator() ? "tick" : "render");
+		*reference_index = NONE;
+		return NONE;
+	}
+	*reference_index = reference->next_reference_index;
+	return reference->datum_index;
+}
+
 /* the next datum of the walk that the caller may see: a render skips
 datums the tick is still constructing this epoch (render_epoch.h) */
 static long cluster_partition_next_ready_datum(
 	struct cluster_partition const *partition,
 	long *reference_index)
 {
-	long datum_index = reference_list_get_next_datum_index(partition->data_reference_data, reference_index);
+	long datum_index = reference_list_walk_next(partition->data_reference_data, reference_index);
 
 	while (datum_index != NONE && partition->datum_data && !halo_epoch_on_mutator() &&
 		halo_epoch_datum_state(partition->datum_data, datum_index & 0xFFFF) == _halo_epoch_datum_created)
 	{
-		datum_index = reference_list_get_next_datum_index(partition->data_reference_data, reference_index);
+		datum_index = reference_list_walk_next(partition->data_reference_data, reference_index);
 	}
 	return datum_index;
 }
@@ -295,14 +325,22 @@ long cluster_partition_get_first_cluster(
 {
 	*reference_index = first_cluster_reference;
 
+#ifdef HALO_LINUX
+	return reference_list_walk_next(partition->cluster_reference_data, reference_index);
+#else
 	return reference_list_get_next_datum_index(partition->cluster_reference_data, reference_index);
+#endif
 }
 
 long cluster_partition_get_next_cluster(
 	struct cluster_partition const *partition,
 	long *reference_index)
 {
+#ifdef HALO_LINUX
+	return reference_list_walk_next(partition->cluster_reference_data, reference_index);
+#else
 	return reference_list_get_next_datum_index(partition->cluster_reference_data, reference_index);
+#endif
 }
 
 void cluster_partition_reconnect(

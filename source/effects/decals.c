@@ -243,6 +243,12 @@ symbols in this file:
 #include "render/render_debug.h"
 #include "saved games/game_state.h"
 #include "shaders/shader_definitions.h"
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#include "cache/cache_files.h"
+#include "game/players.h"
+void platform_log(const char *format, ...);
+#endif
 
 /* ---------- constants */
 
@@ -2331,6 +2337,70 @@ void decal_new(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port, debug) HALO_STRESS_DECALS=n: the tick makes n short-lived decals
+on the ground around the first local player every frame (as impacts and
+explosions do), so that they expire, are evicted and are inserted into the
+same cluster lists all the time: the decals' share of the grenade crash
+(rasterizer_decals_update_for_frame, rasterizer_xbox.c) */
+void decals_stress_update(
+	void)
+{
+	static int wanted = -1;
+	static long definitions[32];
+	static short definition_count;
+	static unsigned long generation;
+	long player_index;
+	long unit_index;
+	short index;
+
+	if (wanted < 0)
+	{
+		const char *setting = getenv("HALO_STRESS_DECALS");
+
+		wanted = setting ? atoi(setting) : 0;
+	}
+	if (wanted <= 0 || !global_decal_data || !global_decal_data->valid)
+		return;
+	if (generation != halo_map_generation)
+	{
+		struct tag_iterator iterator;
+		long tag_index;
+
+		generation = halo_map_generation;
+		definition_count = 0;
+		tag_iterator_new(&iterator, DECAL_GROUP_TAG);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE && definition_count < NUMBEROF(definitions))
+		{
+			struct decal_definition *definition = decal_definition_get(tag_index);
+
+			/* (seconds) */
+			if (definition->lifetime_upper_bound > 0.0f && definition->lifetime_upper_bound < 10.0f)
+				definitions[definition_count++] = tag_index;
+		}
+		platform_log("HALO_STRESS_DECALS: %d decals a frame from %d short-lived decal definitions", wanted, definition_count);
+	}
+	player_index = local_player_get_player_index(0);
+	if (!definition_count || player_index == NONE)
+		return;
+	unit_index = player_get(player_index)->unit_index;
+	if (unit_index == NONE || !object_try_and_get(unit_index))
+		return;
+	for (index = 0; index < wanted; index++)
+	{
+		real_point3d origin = object_get(unit_index)->object.position;
+		real_vector3d ray = { 0.0f, 0.0f, -4.0f };
+
+		origin.x += (real)(rand() % 400 - 200) / 50.0f;
+		origin.y += (real)(rand() % 400 - 200) / 50.0f;
+		origin.z += 1.0f;
+		decal_new(definitions[rand() % definition_count], &origin, &ray, 1.0f, FALSE, NONE, NULL);
+	}
+
+	return;
+}
+#endif
 
 /* ---------- private code */
 
