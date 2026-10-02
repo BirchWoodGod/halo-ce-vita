@@ -337,8 +337,8 @@ static struct
 	/* new material blocks among the new blocks; the worker's translations
 	of a block that kept the last block's material (texture parts only) */
 	unsigned long material_new, worker_texture_builds;
-	/* new values blocks (record_values) */
-	unsigned long values_new;
+	/* new values blocks (record_values); materials found kept */
+	unsigned long values_new, material_kept;
 } stats;
 
 /* draws recorded since start-up, never reset: the render profile counts
@@ -3357,6 +3357,48 @@ static BOOL material_matches_current(const struct record_material *material)
 	return TRUE;
 }
 
+/* A material once made is kept for the rest of the run, found again by
+the hash of its states: a map uses a few hundred (b30 341, a10 635), while
+a frame made 130-300 new material blocks of 1.1 KB in a per-frame arena -
+memory no cache had held since, every line a miss on the Vita's 512 KB L2
+(~4400 line fills a frame). A kept material stays in the caches and is
+compared, not copied. Made-up blocks are content, so they never go stale;
+past MATERIAL_CACHE_CAPACITY new ones go to the frame's arena as before. */
+#define MATERIAL_CACHE_CAPACITY 2048
+#define MATERIAL_CACHE_SLOTS 4096
+static struct
+{
+	unsigned long hash;
+	struct record_material *material;
+} material_cache[MATERIAL_CACHE_SLOTS];
+static struct record_material *material_cache_pool;
+static unsigned long material_cache_used;
+
+/* the hash of the current states as a material holds them (without the
+draw's values) */
+static unsigned long material_hash_current(void)
+{
+	static const unsigned char ranges[][2] = {
+		{ 0, D3DRS_PSCONSTANT0_0 }, { D3DRS_PSCONSTANT1_7 + 1, D3DRS_PSFINALCOMBINERCONSTANT0 },
+		{ D3DRS_PSFINALCOMBINERCONSTANT1 + 1, D3DRS_FOGSTART }, { D3DRS_FOGDENSITY + 1, D3DRS_FOGCOLOR },
+		{ D3DRS_FOGCOLOR + 1, D3DRS_CULLMODE }, { D3DRS_CULLMODE + 1, D3DRS_MAX },
+	};
+	unsigned long hash = 2166136261UL;
+	int range, stage, index;
+
+	for (range = 0; range < (int)(sizeof(ranges) / sizeof(ranges[0])); range++)
+		for (index = ranges[range][0]; index < ranges[range][1]; index++)
+			hash = (hash ^ D3D__RenderState[index]) * 16777619UL;
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+	{
+		for (index = 0; index < D3DTSS_BUMPENVMAT00; index++)
+			hash = (hash ^ D3D__TextureState[stage][index]) * 16777619UL;
+		for (index = D3DTSS_BUMPENVLOFFSET + 1; index < D3DTSS_MAX; index++)
+			hash = (hash ^ D3D__TextureState[stage][index]) * 16777619UL;
+	}
+	return hash;
+}
+
 static BOOL values_match_current(const struct record_values *values)
 {
 	int index, stage;
@@ -3506,10 +3548,37 @@ static const struct record_state *record_state_current(void)
 		if (!material_last || !material_matches_current(material_last))
 		{
 			int index, stage;
+			unsigned long hash = material_hash_current(), slot;
+			struct record_material *kept = NULL;
 
-			if (material_blocks_used >= STATE_BLOCKS_PER_FRAME)
-				return NULL;
-			material_last = &material_arenas[state_arena_index][material_blocks_used++];
+			for (slot = hash % MATERIAL_CACHE_SLOTS; material_cache[slot].material; slot = (slot + 1) % MATERIAL_CACHE_SLOTS)
+			{
+				if (material_cache[slot].hash == hash && material_matches_current(material_cache[slot].material))
+				{
+					kept = material_cache[slot].material;
+					break;
+				}
+			}
+			if (kept)
+			{
+				material_last = kept;
+				stats.material_kept++;
+				goto material_found;
+			}
+			if (!material_cache_pool)
+				material_cache_pool = malloc(MATERIAL_CACHE_CAPACITY * sizeof(*material_cache_pool));
+			if (material_cache_pool && material_cache_used < MATERIAL_CACHE_CAPACITY)
+			{
+				material_last = &material_cache_pool[material_cache_used++];
+				material_cache[slot].hash = hash;
+				material_cache[slot].material = material_last;
+			}
+			else
+			{
+				if (material_blocks_used >= STATE_BLOCKS_PER_FRAME)
+					return NULL;
+				material_last = &material_arenas[state_arena_index][material_blocks_used++];
+			}
 			memcpy(material_last->render_state, D3D__RenderState, sizeof(material_last->render_state));
 			memcpy(material_last->texture_state, D3D__TextureState, sizeof(material_last->texture_state));
 			for (index = 0; index < RECORD_VALUE_COUNT; index++)
@@ -3520,6 +3589,7 @@ static const struct record_state *record_state_current(void)
 		}
 		else
 			stats.state_equal++;
+	material_found:;
 	}
 	if (!values_last || (device_state_dirty & STATE_DIRTY_VALUES))
 	{
@@ -4849,8 +4919,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			stats.copied_chunk[2] / 1024.0 / stats.presents, stats.copied_chunk[3] / 1024.0 / stats.presents,
 			stats.copied_chunk[4] / 1024.0 / stats.presents, stats.copied_chunk[5] / 1024.0 / stats.presents,
 			stats.copied_vertex_misc / 1024.0 / stats.presents, stats.copied_fragment / 1024.0 / stats.presents);
-		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
+		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu kept materials (%lu kept in all), %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
 			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
+			stats.material_kept / stats.presents, material_cache_used,
 			stats.values_new / stats.presents,
 			stats.state_equal / stats.presents, stats.worker_builds / stats.presents, stats.worker_texture_builds / stats.presents);
 		memset(&stats, 0, sizeof(stats));
