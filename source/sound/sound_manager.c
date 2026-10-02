@@ -3824,14 +3824,68 @@ static void detail_sound_random_offset(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (HALO_RENDER_PROFILE=1) sound_render's time by step, every 300 calls:
+on the Vita it runs on the tick thread and was seen taking up to 26 ms in
+heavy combat */
+#include <stdlib.h>
+unsigned long long vita_host_time_us(void) __attribute__((weak));
+void platform_log(const char *format, ...);
+static int sound_split_enabled = -1;
+static unsigned long long sound_split_last, sound_split_us[8];
+static unsigned long sound_split_calls;
+
+static void sound_split_mark(int step)
+{
+	unsigned long long now;
+
+	if (sound_split_enabled <= 0 || !vita_host_time_us)
+		return;
+	now = vita_host_time_us();
+	if (step >= 0)
+		sound_split_us[step] += now - sound_split_last;
+	sound_split_last = now;
+}
+
+static void sound_split_report(void)
+{
+	static const char *const names[8] =
+		{ "begin_scene", "classes+listener", "looping", "refresh", "prioritize", "channels", "end_scene", "cache_idle" };
+	char line[512];
+	int n = 0, i;
+
+	if (sound_split_enabled <= 0 || ++sound_split_calls % 300)
+		return;
+	for (i = 0; i < 8; i++)
+	{
+		n += snprintf(line + n, sizeof(line) - n, " %s %.2f", names[i], (double)sound_split_us[i] / 1000.0 / 300.0);
+		sound_split_us[i] = 0;
+	}
+	platform_log("sound-split (ms/call):%s", line);
+}
+#define SOUND_SPLIT(step) sound_split_mark(step)
+#else
+#define SOUND_SPLIT(step) ((void)0)
+#endif
+
 void sound_render(
 	void)
 {
 	profile_enter(sound_render_section);
+#ifdef HALO_LINUX
+	if (sound_split_enabled < 0)
+	{
+		const char *setting = getenv("HALO_RENDER_PROFILE");
+
+		sound_split_enabled = setting && atoi(setting) != 0;
+	}
+	SOUND_SPLIT(-1);
+#endif
 
 	if (sound_manager_globals.initialized && sound_manager_globals.enabled)
 	{
 		sound_manager_globals.platform_definition->begin_scene();
+		SOUND_SPLIT(0);
 
 		if (!sound_manager_globals.paused)
 		{
@@ -3869,20 +3923,30 @@ void sound_render(
 			sound_classes_update((long)sound_manager_globals.ticks_elapsed);
 #endif
 			refresh_listener();
+			SOUND_SPLIT(1);
 			process_looping_sounds();
+			SOUND_SPLIT(2);
 			refresh_sounds();
+			SOUND_SPLIT(3);
 			prioritize_sounds();
+			SOUND_SPLIT(4);
 			update_channels();
+			SOUND_SPLIT(5);
 			sound_manager_globals.flip_flop = !sound_manager_globals.flip_flop;
 		}
 
 		sound_manager_globals.platform_definition->end_scene();
+		SOUND_SPLIT(6);
 	}
 
 	if (!sound_manager_globals.paused)
 	{
 		sound_cache_idle();
+		SOUND_SPLIT(7);
 	}
+#ifdef HALO_LINUX
+	sound_split_report();
+#endif
 
 	profile_exit(sound_render_section);
 
