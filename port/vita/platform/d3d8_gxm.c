@@ -256,6 +256,10 @@ struct gxm_device
 	/* the vertex programs' BUFFER[1] (vita_xgpu.h), likewise */
 	float vertex_uniforms[VITA_VM_COUNT][4];
 	const void *vertex_uniform_snapshot;
+	/* an input register's current value changed since the snapshot (its
+	other rows are still right): a draw reading those rows needs a new one,
+	an immediate draw - whose inputs all come from its vertices - does not */
+	BOOL vertex_attributes_changed;
 	float fragment_uniforms[VITA_FU_COUNT][4];
 	/* (two: vita_xgpu.h VITA_FU_A_COUNT) */
 	const void *fragment_snapshot[2];
@@ -3062,7 +3066,7 @@ static void fragment_uniforms_update(void)
 	DRAW_FINE_ADD(4, fine_from);
 }
 
-static const void *vertex_uniforms_snapshot(void)
+static const void *vertex_uniforms_snapshot(BOOL immediate)
 {
 	float miscellaneous[4];
 
@@ -3074,8 +3078,9 @@ static const void *vertex_uniforms_snapshot(void)
 		memcpy(device.vertex_uniforms[VITA_VM_MISCELLANEOUS], miscellaneous, sizeof(miscellaneous));
 		device.vertex_uniform_snapshot = NULL;
 	}
-	if (!device.vertex_uniform_snapshot)
+	if (!device.vertex_uniform_snapshot || (device.vertex_attributes_changed && !immediate))
 	{
+		device.vertex_attributes_changed = FALSE;
 		device.vertex_uniform_snapshot = ring_copy(device.vertex_uniforms, sizeof(device.vertex_uniforms));
 		stats.copied_uniforms += sizeof(device.vertex_uniforms);
 		stats.copied_vertex_misc += sizeof(device.vertex_uniforms);
@@ -3415,7 +3420,7 @@ static struct render_command *record_draw(BOOL immediate)
 		simple_fragment = 0;
 		draw->fragment_uniforms[0] = device.fragment_snapshot[0];
 		draw->fragment_uniforms[1] = device.fragment_snapshot[1];
-		draw->vertex_uniforms = vertex_uniforms_snapshot();
+		draw->vertex_uniforms = vertex_uniforms_snapshot(immediate);
 		if (!draw->fragment_uniforms[0] || !draw->fragment_uniforms[1] || !draw->vertex_uniforms ||
 			!constants_snapshot(program, draw))
 		{
@@ -3467,7 +3472,7 @@ static struct render_command *record_draw(BOOL immediate)
 				}
 			}
 			DRAW_PROFILE_ADD(2, profile_from);
-			draw->vertex_uniforms = vertex_uniforms_snapshot();
+			draw->vertex_uniforms = vertex_uniforms_snapshot(immediate);
 			if (!draw->vertex_uniforms || !constants_snapshot(program, draw))
 				return NULL;
 			DRAW_PROFILE_ADD(8, profile_from);
@@ -3638,7 +3643,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->fragment_uniforms[0] = device.fragment_snapshot[0];
 	draw->fragment_uniforms[1] = device.fragment_snapshot[1];
 	DRAW_PROFILE_ADD(1, profile_from);
-	draw->vertex_uniforms = vertex_uniforms_snapshot();
+	draw->vertex_uniforms = vertex_uniforms_snapshot(immediate);
 	if (!draw->fragment_uniforms[0] || !draw->fragment_uniforms[1] || !draw->vertex_uniforms || !constants_snapshot(program, draw))
 	{
 		record_previous = NULL;
@@ -4184,7 +4189,7 @@ static void set_attribute(INT reg, float a, float b, float c, float d)
 		value[1] = b;
 		value[2] = c;
 		value[3] = d;
-		device.vertex_uniform_snapshot = NULL;
+		device.vertex_attributes_changed = TRUE;
 	}
 	if (device.immediate_active && (emit || reg == 0))
 		immediate_emit();
