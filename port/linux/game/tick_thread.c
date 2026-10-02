@@ -113,7 +113,14 @@ static void *tick_thread(void *unused)
 
 				sound_render();
 				if (vita_host_time_us)
-					halo_tick_sound_us += vita_host_time_us() - sound_before;
+				{
+					unsigned long long sound_us = vita_host_time_us() - sound_before;
+
+					halo_tick_sound_us += sound_us;
+					/* (a sound update of over 100 ms, a hitch, is named) */
+					if (sound_us > 100000)
+						platform_log("sound-hitch: sound_render took %.1f ms", sound_us / 1000.0);
+				}
 				halo_tick_sound_ticks++;
 			}
 			last_tick_us = vita_host_time_us ? vita_host_time_us() - before : 0;
