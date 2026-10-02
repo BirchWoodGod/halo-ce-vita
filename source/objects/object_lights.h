@@ -32,6 +32,13 @@ long light_new_unattached(
 	real_vector3d const *direction,
 	real scale);
 void light_delete(long light_index);
+#ifdef HALO_LINUX
+/* (port) the effects' lights retired and moved: by the tick thread when it
+has one, otherwise by lights_preprocess_scene (object_lights.c) */
+void lights_update_unattached(void);
+/* (port, debug) HALO_STRESS_LIGHTS=n: n effect lights a frame around the player */
+void lights_stress_update(void);
+#endif
 void lights_queue_lens_flare(
 	long lens_flare_definition_index,
 	real_point3d const *position,

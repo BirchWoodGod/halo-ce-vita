@@ -108,6 +108,9 @@ symbols in this file:
 #include "cutscene/cinematics.h"
 #include "tag_files/tag_files.h"
 #include "saved games/game_state.h"
+#ifdef HALO_LINUX
+#include "render_epoch.h"
+#endif
 
 /* ---------- constants */
 
@@ -338,6 +341,10 @@ void render_objects_initialize(
 		MAXIMUM_CACHED_OBJECT_RENDER_STATES,
 		sizeof(struct object_render_state));
 	match_assert("c:\\halo\\SOURCE\\render\\render_objects.c", 125, cached_object_render_states);
+#ifdef HALO_LINUX
+	/* (the render's alone: the tick only clears an object's index into it) */
+	halo_epoch_reader_owned(cached_object_render_states);
+#endif
 
 	return;
 }

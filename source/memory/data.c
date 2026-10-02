@@ -281,6 +281,7 @@ long datum_new_at_index(
 			result = identifier<<16 | absolute_index;
 #ifdef HALO_LINUX
 			halo_epoch_datum_created(data, absolute_index);
+			halo_epoch_check_reader_mutation(data, absolute_index, "new");
 #endif
 		}
 	}
@@ -317,6 +318,7 @@ long datum_new(
 			result = header->identifier<<16 | absolute_index;
 #ifdef HALO_LINUX
 			halo_epoch_datum_created(data, absolute_index);
+			halo_epoch_check_reader_mutation(data, absolute_index, "new");
 #endif
 			break;
 		}
@@ -345,6 +347,7 @@ void datum_delete(
 	struct datum_header *header = (struct datum_header *)datum_get(data, index);
 #ifdef HALO_LINUX
 	/* a tick overlapping a render: the datum stays until the join */
+	halo_epoch_check_reader_mutation(data, (short)index, "delete");
 	if (halo_epoch_datum_delete(data, (short)index))
 	{
 		data->actual_count--;
