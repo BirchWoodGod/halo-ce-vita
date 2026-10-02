@@ -78,7 +78,9 @@ static void stick(unsigned char raw_x, unsigned char raw_y, int deadzone, int se
 
 void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 {
-	static int deadzone = -1, sensitivity, curve, invert;
+	static int deadzone = -1, sensitivity, curve, invert, crouch_toggle;
+	/* the crouch toggle's state, and D-pad down last time (its presses) */
+	static int crouched, crouch_was_down;
 	static unsigned long settings_seen;
 	struct vita_host_pad pad;
 	unsigned long buttons;
@@ -92,6 +94,7 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 		sensitivity = setting("XV_LOOK_SENS", 100, 0, 400);
 		curve = setting("XV_LOOK_CURVE", 0, 0, 2);
 		invert = setting("XV_INVERT_Y", 0, 0, 1);
+		crouch_toggle = setting("HALO_CROUCH_TOGGLE", 1, 0, 1);
 	}
 	vita_host_pad_read(&pad);
 	/* the settings panel has the buttons while it is open */
@@ -105,6 +108,8 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 	if (buttons & VITA_BUTTON_SELECT) result |= XINPUT_GAMEPAD_BACK;
 	if (vita_menus_active)
 	{
+		crouched = 0;
+		crouch_was_down = (buttons & VITA_BUTTON_DOWN) != 0;
 		if (buttons & VITA_BUTTON_UP) result |= XINPUT_GAMEPAD_DPAD_UP;
 		if (buttons & VITA_BUTTON_DOWN) result |= XINPUT_GAMEPAD_DPAD_DOWN;
 		if (buttons & VITA_BUTTON_LEFT) result |= XINPUT_GAMEPAD_DPAD_LEFT;
@@ -112,7 +117,22 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 	}
 	else
 	{
-		if (buttons & VITA_BUTTON_DOWN) result |= XINPUT_GAMEPAD_LEFT_THUMB;
+		/* crouch is the left stick's click on the Xbox, held; on the Vita
+		it is D-pad down, under the same thumb as the left stick, so it
+		cannot be held while walking: HALO_CROUCH_TOGGLE (the settings
+		panel's Crouch, on by default) makes a press of D-pad down crouch
+		and the next one stand */
+		int down = (buttons & VITA_BUTTON_DOWN) != 0;
+
+		if (crouch_toggle)
+		{
+			if (down && !crouch_was_down)
+				crouched = !crouched;
+			if (crouched) result |= XINPUT_GAMEPAD_LEFT_THUMB;
+		}
+		else if (down)
+			result |= XINPUT_GAMEPAD_LEFT_THUMB;
+		crouch_was_down = down;
 		if (buttons & VITA_BUTTON_UP) result |= XINPUT_GAMEPAD_RIGHT_THUMB;
 		gamepad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] = (buttons & VITA_BUTTON_LEFT) ? 255 : 0;
 		gamepad->bAnalogButtons[XINPUT_GAMEPAD_WHITE] = (buttons & VITA_BUTTON_RIGHT) ? 255 : 0;

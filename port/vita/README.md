@@ -98,6 +98,7 @@ the panel. The game does not see the buttons while the panel is open.
 | Scenery updates | Quarter | how often static props are updated |
 | Object lighting | Third | how often object lighting is recomputed |
 | Look sensitivity | 100% | right stick turning speed |
+| Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
 | Invert look | No | reverses the right stick's up and down |
 | Stick deadzone | Off | raise it if the sticks drift |
 
