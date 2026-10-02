@@ -45,6 +45,8 @@ struct setting
 static struct setting settings[] = {
 	{ "Performance overlay", "XV_FPS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Frames per second and frame times, top right", 0 },
+	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
+		"The game's frame counter, bottom right", 0 },
 	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
 		"The most frames shown a second", 0 },
 	{ "Render resolution", "HALO_RENDER_SCALE", 1, 5, { "1", "0.875", "0.75", "0.625", "0.5" },

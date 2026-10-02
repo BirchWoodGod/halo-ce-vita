@@ -2778,6 +2778,26 @@ static void screenshot_render(
 void main_framerate_render(
 	void)
 {
+#ifdef HALO_VITA
+	{
+		/* (port) the Vita's settings panel has an "FPS counter" switch,
+		HALO_FRAMERATE_COUNTER: it has the last word over init.txt's
+		display_framerate, read again after each change in the panel */
+		extern char *getenv(const char *name);
+		extern int atoi(const char *text);
+		extern volatile unsigned long halo_settings_generation;
+		static unsigned long settings_seen = (unsigned long)-1;
+
+		if (settings_seen != halo_settings_generation)
+		{
+			const char *setting = getenv("HALO_FRAMERATE_COUNTER");
+
+			settings_seen = halo_settings_generation;
+			if (setting)
+				display_framerate = atoi(setting) != 0;
+		}
+	}
+#endif
 	if (display_framerate)
 	{
 		long font_tag_index;
