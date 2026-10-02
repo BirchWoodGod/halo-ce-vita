@@ -563,12 +563,32 @@ static SDL_AudioStream *audio_stream;
 static BOOL audio_started = FALSE;
 static BOOL frame_locked_mixing = FALSE;
 
+void vita_host_pin_current_thread(int core) __attribute__((weak));
+
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
 	float buffer[MIX_CHUNK_FRAMES * OUTPUT_CHANNELS];
+	static int pinned;
 
 	(void)userdata;
 	(void)total_amount;
+	if (!pinned)
+	{
+		/* (Vita) SDL starts its audio thread on any core, above the
+		game's priority: wherever it lands it preempts that core's thread
+		for the length of a mix, the tick's on the third core included.
+		HALO_AUDIO_CORE (0-2, default 1, the render worker's core, which
+		has time to spare; -1 leaves it to the system) */
+		pinned = 1;
+		if (vita_host_pin_current_thread)
+		{
+			const char *setting = getenv("HALO_AUDIO_CORE");
+			int core = setting ? atoi(setting) : 1;
+
+			if (core >= 0 && core <= 2)
+				vita_host_pin_current_thread(core);
+		}
+	}
 	while (additional_amount > 0)
 	{
 		unsigned long frames = (unsigned long)additional_amount / (OUTPUT_CHANNELS * sizeof(float));
