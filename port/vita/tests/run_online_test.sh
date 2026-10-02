@@ -65,7 +65,8 @@ host_env="HALO_DATA_ROOT=$out/a HALO_SAVE_ROOT=$out/saves-a HALO_NET_ADDRESS=127
 	HALO_NETWORK_TEST=host:bloodgulch HALO_NETWORK_TEST_START=30 HALO_TEST_INPUT=bot:1"
 join_env="HALO_DATA_ROOT=$out/b HALO_SAVE_ROOT=$out/saves-b HALO_NET_ADDRESS=127.0.0.211 HALO_NET_BROADCAST=127.0.0.250
 	HALO_TEST_INPUT=bot:2"
-[ "$mode" = lobby ] && host_env="$host_env HALO_NET_LOBBY_PUBLIC=true HALO_NET_LOBBY_NAME=online-test"
+# (no lobby name: the default one, "Halo")
+[ "$mode" = lobby ] && host_env="$host_env HALO_NET_LOBBY_PUBLIC=true"
 if [ "$mode" = adhoc ]; then
 	host_env="$host_env HALO_NET_ADHOC_EMULATE=127.0.0.210,127.0.0.211"
 	join_env="$join_env HALO_NET_ADHOC_EMULATE=127.0.0.211,127.0.0.210 HALO_NETWORK_TEST=join"
@@ -105,6 +106,16 @@ if grep -q "network test: tick .* player 2:.*| playing" "$out/b/run.log"; then
 else
 	echo "FAIL ($mode): the joiner never played the host's game"
 	status=1
+fi
+# a lobby entry is sent again every 20 s, not every pass of the p2p thread
+if [ "$mode" = lobby ] && [ -f "$out/broker.log" ]; then
+	sends=$(grep -c 'publish .* hceu/1/lobby/.* retained' "$out/broker.log" || true)
+	if [ "$sends" -gt $((seconds / 10 + 5)) ]; then
+		echo "FAIL (lobby): the host sent its lobby entry $sends times in $seconds s"
+		status=1
+	else
+		echo "PASS (lobby): the lobby entry was sent $sends times in $seconds s"
+	fi
 fi
 [ -n "$HALO_TEST_KEEP" ] && echo "logs in $out" || rm -rf "$out"
 exit $status

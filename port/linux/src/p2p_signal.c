@@ -1087,12 +1087,17 @@ void p2p_signal_set_lobby(int listed, const char *code, const char *name, int pl
 		signalling.listed = 0;
 		return;
 	}
-	if (signalling.listed && !strcmp(signalling.lobby_code, code) && !strcmp(signalling.lobby_name, name ? name : "") &&
-		signalling.lobby_players == players && signalling.lobby_maximum == maximum)
+	/* (called every pass while hosting: sent only when something changed) */
+	if (!name || !*name)
+		name = "Halo";
+	if (signalling.listed && !strcmp(signalling.lobby_code, code) &&
+		!strncmp(signalling.lobby_name, name, sizeof(signalling.lobby_name) - 1) &&
+		signalling.lobby_players == (players < 255 ? players : 255) &&
+		signalling.lobby_maximum == (maximum < 255 ? maximum : 255))
 		return;
 	own_lobby_topic(signalling.lobby_topic);
 	snprintf(signalling.lobby_code, sizeof(signalling.lobby_code), "%s", code);
-	snprintf(signalling.lobby_name, sizeof(signalling.lobby_name), "%s", name && *name ? name : "Halo");
+	snprintf(signalling.lobby_name, sizeof(signalling.lobby_name), "%s", name);
 	signalling.lobby_players = players < 255 ? players : 255;
 	signalling.lobby_maximum = maximum < 255 ? maximum : 255;
 	signalling.listed = 1;
