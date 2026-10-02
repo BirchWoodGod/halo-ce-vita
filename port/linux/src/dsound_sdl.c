@@ -577,13 +577,14 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 		/* (Vita) SDL starts its audio thread on any core, above the
 		game's priority: wherever it lands it preempts that core's thread
 		for the length of a mix, the tick's on the third core included.
-		HALO_AUDIO_CORE (0-2, default 1, the render worker's core, which
-		has time to spare; -1 leaves it to the system) */
+		HALO_AUDIO_CORE=0-2 pins it (default -1: left to the system; on
+		core 1, with the render worker, the user heard crackle in the b30
+		fight, while unpinned it inflated the tick's sound time) */
 		pinned = 1;
 		if (vita_host_pin_current_thread)
 		{
 			const char *setting = getenv("HALO_AUDIO_CORE");
-			int core = setting ? atoi(setting) : 1;
+			int core = setting ? atoi(setting) : -1;
 
 			if (core >= 0 && core <= 2)
 				vita_host_pin_current_thread(core);
