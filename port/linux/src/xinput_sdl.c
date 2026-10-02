@@ -248,6 +248,17 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 		return;
 	}
 	t = (double)SDL_GetTicks() / 1000.0 + seed * 1.7;
+#ifndef HALO_VITA
+	{
+		/* (debug) HALO_FIXED_TICK: on the game's clock, so the scripted
+		player does the same in every run (tick_hash.c) */
+		const char *fixed = getenv("HALO_FIXED_TICK");
+		extern volatile unsigned long halo_ticks_simulated;
+
+		if (fixed && atoi(fixed))
+			t = (double)halo_ticks_simulated / 30.0 + seed * 1.7;
+	}
+#endif
 	pad->sThumbLY = (SHORT)(sin(t * 0.9) * 32000.0);
 	pad->sThumbLX = (SHORT)(cos(t * 0.6 + seed) * 20000.0);
 	pad->sThumbRX = (SHORT)(sin(t * 0.4) * 14000.0);

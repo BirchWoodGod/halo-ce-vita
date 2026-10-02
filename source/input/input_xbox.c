@@ -390,6 +390,19 @@ void update_ticks(
 }
 
 #ifdef HALO_LINUX
+/* the clock held buttons are timed on: real time, or with the debug
+HALO_FIXED_TICK the ticks simulated, so a scripted player's presses land
+alike in every run (port/linux/game/tick_hash.c) */
+static long input_hold_clock(void)
+{
+	int halo_fixed_tick(void);
+	extern volatile unsigned long halo_ticks_simulated;
+
+	if (halo_fixed_tick())
+		return (long)(halo_ticks_simulated * 1000 / TICKS_PER_SECOND);
+	return (long)system_milliseconds();
+}
+
 /* The native builds read input once a frame and draw several frames per
 30 Hz tick (port/linux/game/render_interpolation.c), so counting frames would
 make a held button count up as many times too fast: reload would turn into a
@@ -401,7 +414,7 @@ static void update_hold_ticks(
 	long *down_time,
 	boolean down)
 {
-	long now = (long)system_milliseconds();
+	long now = input_hold_clock();
 
 	if (!down)
 	{
@@ -1136,7 +1149,7 @@ static void input_update_keyboard_devices(
 					{
 						input_globals.key_ticks[key.key_code] = 1;
 #ifdef HALO_LINUX
-						key_down_times[key.key_code] = (long)system_milliseconds();
+						key_down_times[key.key_code] = input_hold_clock();
 #endif
 					}
 				}
