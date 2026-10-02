@@ -24,9 +24,10 @@ cheaper big fights (simulation of many soldiers and sounds); the
 flashlight and dynamic lights now light the level; steady bloom and lens
 flares; saves that keep working across updates.
 
-### 1.0.2.1
+### 1.0.2.1 and 1.0.2.2
 
-Security fix: the Xbox's debug console no longer listens on the network.
+Security fixes: the Xbox's debug console no longer listens on the network,
+and three bugs in the original LAN multiplayer code are closed.
 
 ## Next: 1.0.3 (planned for next week)
 
