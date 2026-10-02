@@ -92,8 +92,37 @@ DWORD D3D__RenderState[D3DRS_MAX];
 /* set by the render and texture stage state setters when they change a
 value: the split records' render and stage states are compared only when
 something changed since the last draw (the textures are compared at every
-draw) */
-static int device_state_dirty = 1;
+draw). Bit STATE_DIRTY_MATERIAL: a state of the record's material changed;
+STATE_DIRTY_VALUES: one of its per-draw values (record_values) */
+#define STATE_DIRTY_MATERIAL 1
+#define STATE_DIRTY_VALUES 2
+static int device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
+
+/* The render states that are a draw's values rather than its material:
+the pixel shader's constants, the fog's colour and range, and the cull mode
+(the game sets them per object and part - the fog by the object's distance,
+a two-sided part's second pass's winding - while the rest stays the same:
+on b30 59% of the new materials differed from the last in these only) */
+static const unsigned char render_state_values[D3DRS_MAX] = {
+	[D3DRS_PSCONSTANT0_0] = 1, [D3DRS_PSCONSTANT0_1] = 1, [D3DRS_PSCONSTANT0_2] = 1, [D3DRS_PSCONSTANT0_3] = 1,
+	[D3DRS_PSCONSTANT0_4] = 1, [D3DRS_PSCONSTANT0_5] = 1, [D3DRS_PSCONSTANT0_6] = 1, [D3DRS_PSCONSTANT0_7] = 1,
+	[D3DRS_PSCONSTANT1_0] = 1, [D3DRS_PSCONSTANT1_1] = 1, [D3DRS_PSCONSTANT1_2] = 1, [D3DRS_PSCONSTANT1_3] = 1,
+	[D3DRS_PSCONSTANT1_4] = 1, [D3DRS_PSCONSTANT1_5] = 1, [D3DRS_PSCONSTANT1_6] = 1, [D3DRS_PSCONSTANT1_7] = 1,
+	[D3DRS_PSFINALCOMBINERCONSTANT0] = 1, [D3DRS_PSFINALCOMBINERCONSTANT1] = 1,
+	[D3DRS_FOGSTART] = 1, [D3DRS_FOGEND] = 1, [D3DRS_FOGDENSITY] = 1, [D3DRS_FOGCOLOR] = 1,
+	[D3DRS_CULLMODE] = 1,
+};
+
+/* the dirty bit a change of a render or stage state sets */
+static int render_state_dirty_bit(unsigned long state)
+{
+	return state < D3DRS_MAX && render_state_values[state] ? STATE_DIRTY_VALUES : STATE_DIRTY_MATERIAL;
+}
+
+static int texture_state_dirty_bit(unsigned long type)
+{
+	return type >= D3DTSS_BUMPENVMAT00 && type <= D3DTSS_BUMPENVLOFFSET ? STATE_DIRTY_VALUES : STATE_DIRTY_MATERIAL;
+}
 DWORD D3D__TextureState[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 WORD *D3D__IndexData;
 BYTE D3D__StateBlockDirty[1024];
@@ -302,6 +331,8 @@ static struct
 	/* new material blocks among the new blocks; the worker's translations
 	of a block that kept the last block's material (texture parts only) */
 	unsigned long material_new, worker_texture_builds;
+	/* new values blocks (record_values) */
+	unsigned long values_new;
 } stats;
 
 /* draws recorded since start-up, never reset: the render profile counts
@@ -1117,11 +1148,10 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 		for (state = 0; state < D3DRS_SIMPLE_MAX; state++)
 			simple_state_of_method[(D3DSIMPLERENDERSTATEENCODE[state] - 0x40000UL) >> 2] = (unsigned char)(state + 1);
 	}
-	if ((method & 3) || slot >= sizeof(simple_state_of_method) || !simple_state_of_method[slot] ||
-		D3D__RenderState[simple_state_of_method[slot] - 1] != value)
-	{
-		device_state_dirty = 1;
-	}
+	if ((method & 3) || slot >= sizeof(simple_state_of_method) || !simple_state_of_method[slot])
+		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
+	else if (D3D__RenderState[simple_state_of_method[slot] - 1] != value)
+		device_state_dirty |= render_state_dirty_bit(simple_state_of_method[slot] - 1);
 }
 
 void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWORD value)
@@ -1129,7 +1159,7 @@ void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWO
 	if ((unsigned long)state < D3DRS_MAX)
 	{
 		if (D3D__RenderState[state] != value)
-			device_state_dirty = 1;
+			device_state_dirty |= render_state_dirty_bit(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1143,7 +1173,7 @@ void WINAPI D3DDevice_SetRenderStateNotInline(D3DRENDERSTATETYPE state, DWORD va
 	else if ((unsigned long)state < D3DRS_MAX)
 	{
 		if (D3D__RenderState[state] != value)
-			device_state_dirty = 1;
+			device_state_dirty |= render_state_dirty_bit(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1153,7 +1183,7 @@ static void render_state_store(unsigned long state, DWORD value)
 {
 	if (D3D__RenderState[state] != value)
 	{
-		device_state_dirty = 1;
+		device_state_dirty |= render_state_dirty_bit(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1211,7 +1241,7 @@ static void texture_state_store(DWORD stage, unsigned long type, DWORD value)
 {
 	if (stage < D3DTSS_MAXSTAGES && type < D3DTSS_MAX && D3D__TextureState[stage][type] != value)
 	{
-		device_state_dirty = 1;
+		device_state_dirty |= texture_state_dirty_bit(type);
 		D3D__TextureState[stage][type] = value;
 	}
 }
@@ -1278,7 +1308,7 @@ void WINAPI D3DDevice_SetPixelShaderProgram(D3DPIXELSHADERDEF *definition)
 		D3D__RenderState[D3DRS_PSDOTMAPPING] != definition->PSDotMapping ||
 		D3D__RenderState[D3DRS_PSINPUTTEXTURE] != definition->PSInputTexture)
 	{
-		device_state_dirty = 1;
+		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
 	}
 	else
 		return;
@@ -1637,9 +1667,45 @@ struct record_material
 consecutive state blocks share: a third of a frame's new blocks differed
 from the last only in their textures - another object with the same
 material settings) */
+/* (the material leaves out the draw's values - render_state_values and the
+stages' bump environment states: they are 0 there - and the state block
+points to them in a block of their own, so an object with the material of
+the one before but its own fog or constants, or a two-sided part's second
+pass, takes the last material) */
+enum
+{
+	RECORD_VALUE_PS_C0 = 0,     /* [8] */
+	RECORD_VALUE_PS_C1 = 8,     /* [8] */
+	RECORD_VALUE_FINAL_C0 = 16,
+	RECORD_VALUE_FINAL_C1,
+	RECORD_VALUE_FOG_START,
+	RECORD_VALUE_FOG_END,
+	RECORD_VALUE_FOG_DENSITY,
+	RECORD_VALUE_FOG_COLOR,
+	RECORD_VALUE_CULL_MODE,
+	RECORD_VALUE_COUNT
+};
+static const unsigned char record_value_state[RECORD_VALUE_COUNT] = {
+	D3DRS_PSCONSTANT0_0, D3DRS_PSCONSTANT0_1, D3DRS_PSCONSTANT0_2, D3DRS_PSCONSTANT0_3,
+	D3DRS_PSCONSTANT0_4, D3DRS_PSCONSTANT0_5, D3DRS_PSCONSTANT0_6, D3DRS_PSCONSTANT0_7,
+	D3DRS_PSCONSTANT1_0, D3DRS_PSCONSTANT1_1, D3DRS_PSCONSTANT1_2, D3DRS_PSCONSTANT1_3,
+	D3DRS_PSCONSTANT1_4, D3DRS_PSCONSTANT1_5, D3DRS_PSCONSTANT1_6, D3DRS_PSCONSTANT1_7,
+	D3DRS_PSFINALCOMBINERCONSTANT0, D3DRS_PSFINALCOMBINERCONSTANT1,
+	D3DRS_FOGSTART, D3DRS_FOGEND, D3DRS_FOGDENSITY, D3DRS_FOGCOLOR, D3DRS_CULLMODE,
+};
+#define RECORD_VALUE_BUMP_COUNT (D3DTSS_BUMPENVLOFFSET - D3DTSS_BUMPENVMAT00 + 1)
+
+struct record_values
+{
+	DWORD render_state[RECORD_VALUE_COUNT];
+	/* D3DTSS_BUMPENVMAT00..D3DTSS_BUMPENVLOFFSET per stage */
+	DWORD bump[D3DTSS_MAXSTAGES][RECORD_VALUE_BUMP_COUNT];
+};
+
 struct record_state
 {
 	const struct record_material *material;
+	const struct record_values *values;
 	DWORD texture_header[D3DTSS_MAXSTAGES][5];
 	D3DBaseTexture *textures[D3DTSS_MAXSTAGES];
 	D3DPalette *palettes[D3DTSS_MAXSTAGES];
@@ -1907,6 +1973,8 @@ static struct
 	/* the block's material: a block with the same material (and program,
 	depth and simple flag) shares everything but the texture parts */
 	const struct record_material *material;
+	/* the values the fragment values were made from */
+	const struct record_values *values;
 	const struct vertex_shader_object *program;
 	unsigned char has_depth, simple;
 	unsigned long frame;
@@ -1960,33 +2028,42 @@ static void worker_texture_scale_markers(const struct record_state *state, float
 static void worker_fragment_values(const struct record_state *state, float values[VITA_FU_COUNT][4])
 {
 	const DWORD *rs = state->material->render_state;
+	const DWORD *v = state->values->render_state;
 	int stage;
 
 	memset(values, 0, sizeof(float) * 4 * VITA_FU_COUNT);
 	for (stage = 0; stage < 8; stage++)
 	{
-		color_to_vec4(rs[D3DRS_PSCONSTANT0_0 + stage], values[VITA_FU_PS_C0 + stage]);
-		color_to_vec4(rs[D3DRS_PSCONSTANT1_0 + stage], values[VITA_FU_PS_C1 + stage]);
+		color_to_vec4(v[RECORD_VALUE_PS_C0 + stage], values[VITA_FU_PS_C0 + stage]);
+		color_to_vec4(v[RECORD_VALUE_PS_C1 + stage], values[VITA_FU_PS_C1 + stage]);
 	}
-	color_to_vec4(rs[D3DRS_PSFINALCOMBINERCONSTANT0], values[VITA_FU_PS_FINAL_C0]);
-	color_to_vec4(rs[D3DRS_PSFINALCOMBINERCONSTANT1], values[VITA_FU_PS_FINAL_C1]);
-	color_to_vec4(rs[D3DRS_FOGCOLOR], values[VITA_FU_FOG_COLOR]);
-	values[VITA_FU_FOG_PARAMETERS][0] = dword_to_float(rs[D3DRS_FOGSTART]);
-	values[VITA_FU_FOG_PARAMETERS][1] = dword_to_float(rs[D3DRS_FOGEND]);
-	values[VITA_FU_FOG_PARAMETERS][2] = dword_to_float(rs[D3DRS_FOGDENSITY]);
+	color_to_vec4(v[RECORD_VALUE_FINAL_C0], values[VITA_FU_PS_FINAL_C0]);
+	color_to_vec4(v[RECORD_VALUE_FINAL_C1], values[VITA_FU_PS_FINAL_C1]);
+	color_to_vec4(v[RECORD_VALUE_FOG_COLOR], values[VITA_FU_FOG_COLOR]);
+	values[VITA_FU_FOG_PARAMETERS][0] = dword_to_float(v[RECORD_VALUE_FOG_START]);
+	values[VITA_FU_FOG_PARAMETERS][1] = dword_to_float(v[RECORD_VALUE_FOG_END]);
+	values[VITA_FU_FOG_PARAMETERS][2] = dword_to_float(v[RECORD_VALUE_FOG_DENSITY]);
 	values[VITA_FU_MISCELLANEOUS][0] = (float)(rs[D3DRS_ALPHAREF] & 0xff);
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
-		const DWORD *ts = state->material->texture_state[stage];
+		const DWORD *bump = state->values->bump[stage];
 
-		values[VITA_FU_BUMP_MATRIX + stage][0] = dword_to_float(ts[D3DTSS_BUMPENVMAT00]);
-		values[VITA_FU_BUMP_MATRIX + stage][1] = dword_to_float(ts[D3DTSS_BUMPENVMAT01]);
-		values[VITA_FU_BUMP_MATRIX + stage][2] = dword_to_float(ts[D3DTSS_BUMPENVMAT10]);
-		values[VITA_FU_BUMP_MATRIX + stage][3] = dword_to_float(ts[D3DTSS_BUMPENVMAT11]);
-		values[VITA_FU_BUMP_LUMINANCE + stage][0] = dword_to_float(ts[D3DTSS_BUMPENVLSCALE]);
-		values[VITA_FU_BUMP_LUMINANCE + stage][1] = dword_to_float(ts[D3DTSS_BUMPENVLOFFSET]);
+		values[VITA_FU_BUMP_MATRIX + stage][0] = dword_to_float(bump[D3DTSS_BUMPENVMAT00 - D3DTSS_BUMPENVMAT00]);
+		values[VITA_FU_BUMP_MATRIX + stage][1] = dword_to_float(bump[D3DTSS_BUMPENVMAT01 - D3DTSS_BUMPENVMAT00]);
+		values[VITA_FU_BUMP_MATRIX + stage][2] = dword_to_float(bump[D3DTSS_BUMPENVMAT10 - D3DTSS_BUMPENVMAT00]);
+		values[VITA_FU_BUMP_MATRIX + stage][3] = dword_to_float(bump[D3DTSS_BUMPENVMAT11 - D3DTSS_BUMPENVMAT00]);
+		values[VITA_FU_BUMP_LUMINANCE + stage][0] = dword_to_float(bump[D3DTSS_BUMPENVLSCALE - D3DTSS_BUMPENVMAT00]);
+		values[VITA_FU_BUMP_LUMINANCE + stage][1] = dword_to_float(bump[D3DTSS_BUMPENVLOFFSET - D3DTSS_BUMPENVMAT00]);
 	}
 	worker_texture_scale_markers(state, values);
+}
+
+/* the cull mode names the screen winding to discard */
+static unsigned long worker_cull(const struct record_state *state)
+{
+	DWORD cull = state->values->render_state[RECORD_VALUE_CULL_MODE];
+
+	return cull == D3DCULL_NONE ? 0 : cull;
 }
 
 /* the parts of a record that depend on its textures rather than its
@@ -2118,14 +2195,26 @@ static BOOL worker_build_record(struct render_command *command)
 		memcpy(command->sampler_state, worker_build.sampler_state, sizeof(command->sampler_state));
 		memcpy(&draw->depth_test, &worker_build.draw_states.depth_test,
 			offsetof(struct vgxm_draw, color_write) + sizeof(draw->color_write) - offsetof(struct vgxm_draw, depth_test));
-		draw->cull = worker_build.draw_states.cull;
+		draw->cull = worker_cull(state);
+		worker_build.draw_states.cull = draw->cull;
 		draw->depth_bias_slope = worker_build.draw_states.depth_bias_slope;
 		draw->depth_bias_units = worker_build.draw_states.depth_bias_units;
-		memcpy(values, worker_build.fragment_values, sizeof(values));
-		worker_texture_scale_markers(state, values);
-		/* (the first half is the material's: kept, unless its snapshot
-		could not be made) */
-		worker_fragment_snapshots(values, worker_build.fragment_uniforms[0] ? 1 : 0);
+		if (state->values != worker_build.values)
+		{
+			/* (another object's values: both halves anew - each kept if
+			equal to the last) */
+			worker_fragment_values(state, values);
+			worker_fragment_snapshots(values, 0);
+			worker_build.values = state->values;
+		}
+		else
+		{
+			memcpy(values, worker_build.fragment_values, sizeof(values));
+			worker_texture_scale_markers(state, values);
+			/* (the first half is the values': kept, unless its snapshot
+			could not be made) */
+			worker_fragment_snapshots(values, worker_build.fragment_uniforms[0] ? 1 : 0);
+		}
 		draw->fragment_uniforms[0] = worker_build.fragment_uniforms[0];
 		draw->fragment_uniforms[1] = worker_build.fragment_uniforms[1];
 		worker_build.state = state;
@@ -2209,7 +2298,7 @@ static BOOL worker_build_record(struct render_command *command)
 	draw->blend_destination = rs[D3DRS_DESTBLEND];
 	draw->blend_operation = rs[D3DRS_BLENDOP];
 	draw->color_write = rs[D3DRS_COLORWRITEENABLE];
-	draw->cull = rs[D3DRS_CULLMODE] == D3DCULL_NONE ? 0 : rs[D3DRS_CULLMODE];
+	draw->cull = worker_cull(state);
 	draw->depth_bias_slope = draw->depth_bias_units = 0.0f;
 	if (rs[D3DRS_SOLIDOFFSETENABLE])
 	{
@@ -2228,6 +2317,7 @@ static BOOL worker_build_record(struct render_command *command)
 
 	worker_build.state = state;
 	worker_build.material = state->material;
+	worker_build.values = state->values;
 	worker_build.program = program;
 	worker_build.has_depth = command->has_depth;
 	worker_build.simple = command->simple;
@@ -3187,9 +3277,10 @@ struct record_shadow_state
 	unsigned long visibility_index;
 	BOOL immediate;
 	unsigned long ui_offset;
-	/* (held_shadow) the record's material block, which holds the render and
-	stage states as they were: then they are not copied here */
+	/* (held_shadow) the record's material and values blocks, which hold the
+	render and stage states as they were: then they are not copied here */
 	const struct record_material *material;
+	const struct record_values *values;
 };
 static struct record_shadow_state record_shadow;
 /* the state of the held immediate draw (immediate_end): the next one joins
@@ -3197,12 +3288,13 @@ it only if it is the same */
 static struct record_shadow_state held_shadow;
 
 static void shadow_capture(struct record_shadow_state *shadow, struct vertex_shader_object *program, BOOL immediate,
-	const struct record_material *material)
+	const struct record_state *state)
 {
-	/* (a material block made from the current states stands in for a copy
-	of them: 1.1 KB per immediate draw) */
-	shadow->material = material;
-	if (!material)
+	/* (the material and values blocks made from the current states stand
+	in for a copy of them: 1.1 KB per immediate draw) */
+	shadow->material = state ? state->material : NULL;
+	shadow->values = state ? state->values : NULL;
+	if (!state)
 	{
 		memcpy(shadow->render_state, D3D__RenderState, sizeof(shadow->render_state));
 		memcpy(shadow->texture_state, D3D__TextureState, sizeof(shadow->texture_state));
@@ -3223,18 +3315,55 @@ static void shadow_capture(struct record_shadow_state *shadow, struct vertex_sha
 }
 
 static struct record_material *material_last;
+static struct record_values *values_last;
 
-/* the render and stage states equal the shadow's: with a material block, no
-setter changed a value since that block was the last made (the states are
-then the block's), else compared */
+/* the current render and stage states are the material's, but for the
+draw's values (render_state_values, the bump environment states), which
+the material holds as 0 */
+static BOOL material_matches_current(const struct record_material *material)
+{
+	static const unsigned char ranges[][2] = {
+		{ 0, D3DRS_PSCONSTANT0_0 }, { D3DRS_PSCONSTANT1_7 + 1, D3DRS_PSFINALCOMBINERCONSTANT0 },
+		{ D3DRS_PSFINALCOMBINERCONSTANT1 + 1, D3DRS_FOGSTART }, { D3DRS_FOGDENSITY + 1, D3DRS_FOGCOLOR },
+		{ D3DRS_FOGCOLOR + 1, D3DRS_CULLMODE }, { D3DRS_CULLMODE + 1, D3DRS_MAX },
+	};
+	int range, stage;
+
+	for (range = 0; range < (int)(sizeof(ranges) / sizeof(ranges[0])); range++)
+		if (memcmp(&material->render_state[ranges[range][0]], &D3D__RenderState[ranges[range][0]],
+			(ranges[range][1] - ranges[range][0]) * sizeof(DWORD)))
+			return FALSE;
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+		if (memcmp(material->texture_state[stage], D3D__TextureState[stage], D3DTSS_BUMPENVMAT00 * sizeof(DWORD)) ||
+			memcmp(&material->texture_state[stage][D3DTSS_BUMPENVLOFFSET + 1], &D3D__TextureState[stage][D3DTSS_BUMPENVLOFFSET + 1],
+				(D3DTSS_MAX - D3DTSS_BUMPENVLOFFSET - 1) * sizeof(DWORD)))
+			return FALSE;
+	return TRUE;
+}
+
+static BOOL values_match_current(const struct record_values *values)
+{
+	int index, stage;
+
+	for (index = 0; index < RECORD_VALUE_COUNT; index++)
+		if (values->render_state[index] != D3D__RenderState[record_value_state[index]])
+			return FALSE;
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+		if (memcmp(values->bump[stage], &D3D__TextureState[stage][D3DTSS_BUMPENVMAT00], sizeof(values->bump[stage])))
+			return FALSE;
+	return TRUE;
+}
+
+/* the render and stage states equal the shadow's: with material and values
+blocks, no setter changed a value since those blocks were the last made
+(the states are then theirs), else compared */
 static BOOL shadow_states_match(const struct record_shadow_state *shadow)
 {
 	if (shadow->material)
 	{
-		if (!device_state_dirty && material_last == shadow->material)
+		if (!device_state_dirty && material_last == shadow->material && values_last == shadow->values)
 			return TRUE;
-		return !memcmp(shadow->material->render_state, D3D__RenderState, sizeof(shadow->material->render_state)) &&
-			!memcmp(shadow->material->texture_state, D3D__TextureState, sizeof(shadow->material->texture_state));
+		return material_matches_current(shadow->material) && values_match_current(shadow->values);
 	}
 	return !memcmp(shadow->render_state, D3D__RenderState, sizeof(shadow->render_state)) &&
 		!memcmp(shadow->texture_state, D3D__TextureState, sizeof(shadow->texture_state));
@@ -3298,7 +3427,8 @@ a full arena falls back to records built in full */
 #define STATE_BLOCKS_PER_FRAME 2048
 static struct record_state *state_arenas[3];
 static struct record_material *material_arenas[3];
-static unsigned long state_arena_index, state_blocks_used, material_blocks_used;
+static struct record_values *values_arenas[3];
+static unsigned long state_arena_index, state_blocks_used, material_blocks_used, values_blocks_used;
 static struct record_state *state_last;
 
 static int record_split_enabled(void)
@@ -3315,7 +3445,8 @@ static int record_split_enabled(void)
 		{
 			state_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_state));
 			material_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_material));
-			if (!state_arenas[index] || !material_arenas[index])
+			values_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_values));
+			if (!state_arenas[index] || !material_arenas[index] || !values_arenas[index])
 				enabled = 0;
 		}
 		platform_log("draw records: %s", enabled ? "split (the worker translates the state)" : "built in full on the game's thread");
@@ -3325,12 +3456,14 @@ static int record_split_enabled(void)
 
 static void record_state_frame_end(void)
 {
-	device_state_dirty = 1;
+	device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
 	state_arena_index = (state_arena_index + 1) % 3;
 	state_blocks_used = 0;
 	material_blocks_used = 0;
+	values_blocks_used = 0;
 	state_last = NULL;
 	material_last = NULL;
+	values_last = NULL;
 }
 
 static const struct record_state *record_state_current(void)
@@ -3349,26 +3482,47 @@ static const struct record_state *record_state_current(void)
 		palette_data[stage] = device.palettes[stage] && device.palettes[stage]->Data ?
 			(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[stage]->Data) : NULL;
 	}
-	/* the render and stage states: the last material while nothing
-	changed, or one equal to it; else a new one */
-	if (!material_last || device_state_dirty)
+	/* the render and stage states: the last material while nothing of it
+	changed, or one equal to it; else a new one (with the draw's values at
+	0); likewise the values */
+	if (!material_last || (device_state_dirty & STATE_DIRTY_MATERIAL))
 	{
-		if (!material_last ||
-			memcmp(material_last->render_state, D3D__RenderState, sizeof(material_last->render_state)) ||
-			memcmp(material_last->texture_state, D3D__TextureState, sizeof(material_last->texture_state)))
+		if (!material_last || !material_matches_current(material_last))
 		{
+			int index, stage;
+
 			if (material_blocks_used >= STATE_BLOCKS_PER_FRAME)
 				return NULL;
 			material_last = &material_arenas[state_arena_index][material_blocks_used++];
 			memcpy(material_last->render_state, D3D__RenderState, sizeof(material_last->render_state));
 			memcpy(material_last->texture_state, D3D__TextureState, sizeof(material_last->texture_state));
+			for (index = 0; index < RECORD_VALUE_COUNT; index++)
+				material_last->render_state[record_value_state[index]] = 0;
+			for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+				memset(&material_last->texture_state[stage][D3DTSS_BUMPENVMAT00], 0, RECORD_VALUE_BUMP_COUNT * sizeof(DWORD));
 			stats.material_new++;
 		}
 		else
 			stats.state_equal++;
-		device_state_dirty = 0;
 	}
-	if (state_last && state_last->material == material_last &&
+	if (!values_last || (device_state_dirty & STATE_DIRTY_VALUES))
+	{
+		if (!values_last || !values_match_current(values_last))
+		{
+			int index, stage;
+
+			if (values_blocks_used >= STATE_BLOCKS_PER_FRAME)
+				return NULL;
+			values_last = &values_arenas[state_arena_index][values_blocks_used++];
+			for (index = 0; index < RECORD_VALUE_COUNT; index++)
+				values_last->render_state[index] = D3D__RenderState[record_value_state[index]];
+			for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+				memcpy(values_last->bump[stage], &D3D__TextureState[stage][D3DTSS_BUMPENVMAT00], sizeof(values_last->bump[stage]));
+			stats.values_new++;
+		}
+	}
+	device_state_dirty = 0;
+	if (state_last && state_last->material == material_last && state_last->values == values_last &&
 		!memcmp(state_last->textures, device.textures, sizeof(state_last->textures)) &&
 		!memcmp(state_last->palettes, device.palettes, sizeof(state_last->palettes)) &&
 		!memcmp(state_last->palette_data, palette_data, sizeof(palette_data)) &&
@@ -3382,6 +3536,7 @@ static const struct record_state *record_state_current(void)
 		return NULL;
 	block = &state_arenas[state_arena_index][state_blocks_used++];
 	block->material = material_last;
+	block->values = values_last;
 	memcpy(block->textures, device.textures, sizeof(block->textures));
 	memcpy(block->palettes, device.palettes, sizeof(block->palettes));
 	memcpy(block->palette_data, palette_data, sizeof(palette_data));
@@ -4207,7 +4362,7 @@ static void immediate_end(void)
 	held_immediate.stride = stride;
 	held_immediate.constants = constant_generation;
 	held_immediate.index_count = 0;
-	shadow_capture(&held_shadow, current_program(), TRUE, command->state ? command->state->material : NULL);
+	shadow_capture(&held_shadow, current_program(), TRUE, command->state);
 	held_immediate.triangles = immediate_triangle_family(type) && immediate_merge_enabled() &&
 		immediate_hold_triangles(type, 0, count);
 	if (!immediate_merge_enabled())
@@ -4608,8 +4763,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			stats.copied_chunk[2] / 1024.0 / stats.presents, stats.copied_chunk[3] / 1024.0 / stats.presents,
 			stats.copied_chunk[4] / 1024.0 / stats.presents, stats.copied_chunk[5] / 1024.0 / stats.presents,
 			stats.copied_vertex_misc / 1024.0 / stats.presents, stats.copied_fragment / 1024.0 / stats.presents);
-		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu compared equal); worker builds %lu (+%lu texture-only)",
+		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
 			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
+			stats.values_new / stats.presents,
 			stats.state_equal / stats.presents, stats.worker_builds / stats.presents, stats.worker_texture_builds / stats.presents);
 		memset(&stats, 0, sizeof(stats));
 		layer_time = 0;
