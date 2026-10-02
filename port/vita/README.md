@@ -90,6 +90,7 @@ the panel. The game does not see the buttons while the panel is open.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Performance overlay | Off | frames per second, game and render times, core load |
+| FPS counter | Off | the game's own frame counter, bottom right |
 | Frame limit | 30 FPS | the most frames shown a second |
 | Render resolution | 75% | the 3D view's resolution (applies after a restart) |
 | Model detail | Low | level of detail of characters, vehicles and props |

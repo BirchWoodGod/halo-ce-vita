@@ -27,7 +27,7 @@ BUILD = Path("build/vita")
 TITLE_ID = "HCEV00001"
 TITLE = "Halo CE"
 # the version the LiveArea and the system show (APP_VER, "XX.YY")
-APP_VERSION = "01.00"
+APP_VERSION = "01.01"
 
 # The MSVC/Xbox ABI of LINUX_ABI_FLAGS, on 32-bit ARM
 VITA_ABI_FLAGS = [
