@@ -1718,6 +1718,33 @@ volatile unsigned long halo_present_counter;
 
 /* ---------- executing records (the worker's side) */
 
+/* a stage addressed with D3DTADDRESS_BORDER: outside the texture it reads
+the border colour. GXM has no such mode (vita_gxm.c clamps), and a clamp
+smears the edge texels outward instead: the object shadows, projected onto
+the ground with border addressing, streaked for metres down a slope from
+the edge of their texture, and the flashlight's spot texture lit what lies
+outside its cone. The fragment program tests the coordinate
+(nv2a_psh_cg.c). HALO_TEXTURE_BORDER=0: clamped, as before. */
+static void key_border(struct nv2a_pixel_shader_key *key, int stage, const DWORD *texture_state)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_TEXTURE_BORDER");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	if (stage == 0)
+		key->border_mask = 0;
+	key->border_color[stage] = 0;
+	if (enabled && (texture_state[D3DTSS_ADDRESSU] == D3DTADDRESS_BORDER || texture_state[D3DTSS_ADDRESSV] == D3DTADDRESS_BORDER))
+	{
+		key->border_mask |= (unsigned char)(1U << stage);
+		key->border_color[stage] = texture_state[D3DTSS_BORDERCOLOR];
+	}
+}
+
 static unsigned long stage_texture_mode_of(const struct nv2a_pixel_shader_key *key, int stage)
 {
 	return (key->texture_modes >> (5 * stage)) & 0x1f;
@@ -2168,6 +2195,7 @@ static BOOL worker_build_record(struct render_command *command)
 
 		key->alpha_kill[stage] = ts[D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE;
 		key->color_sign[stage] = (unsigned char)((ts[D3DTSS_COLORSIGN] >> 28) & 0xf);
+		key_border(key, stage, ts);
 		command->sampler_state[stage][0] = ts[D3DTSS_MINFILTER];
 		command->sampler_state[stage][1] = ts[D3DTSS_MAGFILTER];
 		command->sampler_state[stage][2] = ts[D3DTSS_MIPFILTER];
@@ -3507,6 +3535,7 @@ static struct render_command *record_draw(BOOL immediate)
 
 		key->alpha_kill[stage] = state[D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE;
 		key->color_sign[stage] = (unsigned char)((state[D3DTSS_COLORSIGN] >> 28) & 0xf);
+		key_border(key, stage, state);
 		command->texture_present[stage] = texture != NULL;
 		command->texture_version[stage] = 0;
 		if (texture)

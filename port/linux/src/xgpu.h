@@ -110,6 +110,12 @@ struct nv2a_pixel_shader_key
 	(the program writes its w): tex2Dproj, the divide done by the iterator */
 	unsigned char projective_coordinates;
 	unsigned char reserved[2];
+	/* (Vita) stages addressed D3DTADDRESS_BORDER (GXM has no border
+	mode: the program returns the border colour, D3DCOLOR, outside the
+	texture) */
+	unsigned char border_mask;
+	unsigned char border_pad[3];
+	DWORD border_color[4];
 };
 
 char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);
