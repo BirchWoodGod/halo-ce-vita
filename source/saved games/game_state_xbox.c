@@ -164,6 +164,124 @@ static struct
 	char path[256];
 	byte header[2048];
 } persistent_header_cache;
+
+/* (port) The campaign menu's "is there a game to continue" check read the
+whole 16 MB save to checksum it, 1.4 s on the Vita the first time each
+session. The answer is kept next to the save, in savegame.chk, with the
+save's header (its stored checksum included), size and modification time:
+while the save still has that header, size and time it is the same save,
+and the answer stands without reading it through. Save and Quit writes
+the answer for the save it has just written; a check that read a save
+through writes it too. A save changed behind the game's back (a backup
+put back) has another time or header and is read through again; the
+resume itself still checks the bytes it loads (game_state_read_persistent
+_storage_staged). */
+#define PERSISTENT_CHECK_MAGIC 0x6b686368UL /* 'hchk' */
+#define PERSISTENT_CHECK_HEADER_MAXIMUM 2048
+
+struct persistent_check_file
+{
+	unsigned long magic;
+	long header_size;
+	long buffer_size;
+	unsigned long file_size;
+	FILETIME modification_time;
+	unsigned char result;
+	unsigned char corrupted;
+	unsigned char pad[2];
+	byte header[PERSISTENT_CHECK_HEADER_MAXIMUM];
+};
+
+/* the save's and its check's paths, and the save's size and time */
+static boolean persistent_check_paths(
+	char *save_path,
+	char *check_path,
+	unsigned long *file_size,
+	FILETIME *modification_time)
+{
+	char directory[256];
+	WIN32_FILE_ATTRIBUTE_DATA attributes;
+
+	if (!game_state_get_persistent_storage_path(directory) || strlen(directory) > 200)
+		return FALSE;
+	sprintf(save_path, "%ssavegame.bin", directory);
+	sprintf(check_path, "%ssavegame.chk", directory);
+	if (!GetFileAttributesExA(save_path, GetFileExInfoStandard, &attributes))
+		return FALSE;
+	*file_size = attributes.nFileSizeLow;
+	*modification_time = attributes.ftLastWriteTime;
+	return TRUE;
+}
+
+/* the kept answer for the save whose header (as stored) is given */
+static boolean persistent_check_read(
+	void const *stored_header,
+	long header_size,
+	long buffer_size,
+	boolean *result,
+	boolean *corrupted)
+{
+	char save_path[256], check_path[256];
+	unsigned long file_size;
+	FILETIME modification_time;
+	struct persistent_check_file check;
+	unsigned long bytes_read = 0;
+	HANDLE file;
+	boolean found = FALSE;
+
+	if (header_size > PERSISTENT_CHECK_HEADER_MAXIMUM ||
+		!persistent_check_paths(save_path, check_path, &file_size, &modification_time))
+	{
+		return FALSE;
+	}
+	file = CreateFileA(check_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (file == INVALID_HANDLE_VALUE)
+		return FALSE;
+	if (ReadFile(file, &check, sizeof(check), &bytes_read, NULL) && bytes_read == sizeof(check) &&
+		check.magic == PERSISTENT_CHECK_MAGIC && check.header_size == header_size && check.buffer_size == buffer_size &&
+		check.file_size == file_size &&
+		check.modification_time.dwLowDateTime == modification_time.dwLowDateTime &&
+		check.modification_time.dwHighDateTime == modification_time.dwHighDateTime &&
+		!memcmp(check.header, stored_header, header_size))
+	{
+		*result = check.result != 0;
+		*corrupted = check.corrupted != 0;
+		found = TRUE;
+	}
+	CloseHandle(file);
+	return found;
+}
+
+static void persistent_check_write(
+	void const *stored_header,
+	long header_size,
+	long buffer_size,
+	boolean result,
+	boolean corrupted)
+{
+	char save_path[256], check_path[256];
+	struct persistent_check_file check;
+	unsigned long bytes_written = 0;
+	HANDLE file;
+
+	memset(&check, 0, sizeof(check));
+	if (header_size > PERSISTENT_CHECK_HEADER_MAXIMUM ||
+		!persistent_check_paths(save_path, check_path, &check.file_size, &check.modification_time))
+	{
+		return;
+	}
+	check.magic = PERSISTENT_CHECK_MAGIC;
+	check.header_size = header_size;
+	check.buffer_size = buffer_size;
+	check.result = result ? 1 : 0;
+	check.corrupted = corrupted ? 1 : 0;
+	memcpy(check.header, stored_header, header_size);
+	file = CreateFileA(check_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (file == INVALID_HANDLE_VALUE)
+		return;
+	WriteFile(file, &check, sizeof(check), &bytes_written, NULL);
+	CloseHandle(file);
+}
 #endif
 
 /* ---------- globals */
@@ -832,6 +950,39 @@ boolean game_state_read_header_from_persistent_storage(
 		}
 		else
 		{
+#ifdef HALO_LINUX
+			boolean kept_result, kept_corrupted;
+			byte stored_header[PERSISTENT_CHECK_HEADER_MAXIMUM];
+			boolean have_stored_header = header_size <= (long)sizeof(stored_header);
+
+			if (have_stored_header)
+				memcpy(stored_header, header, header_size);
+			if (have_stored_header &&
+				persistent_check_read(stored_header, header_size, buffer_size, &kept_result, &kept_corrupted))
+			{
+				/* (the header as the read below leaves it: its checksum
+				field zero) */
+				*header_checksum = 0;
+				result = kept_result;
+				if (corrupted)
+					*corrupted = kept_corrupted;
+				if (!result)
+					error(_error_silent, "checksum failed on persistent storage");
+				if (have_path)
+				{
+					memcpy(persistent_header_cache.header, header, header_size);
+					strcpy(persistent_header_cache.path, cache_path);
+					persistent_header_cache.header_size = header_size;
+					persistent_header_cache.buffer_size = buffer_size;
+					persistent_header_cache.result = result;
+					persistent_header_cache.corrupted = kept_corrupted;
+					persistent_header_cache.generation = game_state_persistent_storage_generation;
+					persistent_header_cache.valid = TRUE;
+				}
+				CloseHandle(file);
+				return result;
+			}
+#endif
 			stored_checksum = *header_checksum;
 
 			crc_new(&checksum);
@@ -874,6 +1025,8 @@ boolean game_state_read_header_from_persistent_storage(
 				persistent_header_cache.generation = game_state_persistent_storage_generation;
 				persistent_header_cache.valid = TRUE;
 			}
+			if (have_stored_header)
+				persistent_check_write(stored_header, header_size, buffer_size, result, !result && stored_checksum);
 #endif
 		}
 		CloseHandle(file);
@@ -892,8 +1045,9 @@ void game_state_write_to_persistent_storage(
 	HANDLE file;
 	unsigned long checksum;
 	unsigned long bytes_written;
-
 #ifdef HALO_LINUX
+	boolean written_whole = FALSE;
+
 	game_state_persistent_storage_generation++;
 #endif
 	file = game_state_open_persistent_storage(NULL);
@@ -937,11 +1091,18 @@ void game_state_write_to_persistent_storage(
 			/* (port) so a device's debug.txt shows that Save and Quit
 			wrote the campaign save */
 			error(_error_silent, "saved the last checkpoint to persistent storage");
+			written_whole = TRUE;
 		}
 #endif
 
 		memcpy(buffer, saved_header, header_size);
 		CloseHandle(file);
+#ifdef HALO_LINUX
+		/* (the save just written is whole, its checksum the one computed
+		above: the answer the menu will ask for, kept) */
+		if (written_whole)
+			persistent_check_write(saved_header, header_size, buffer_size, TRUE, FALSE);
+#endif
 	}
 
 	return;
