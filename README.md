@@ -34,6 +34,11 @@ Evolved.
 
 - A PS Vita or PS TV with HENkaku/Ensō (firmware 3.60 to 3.74) and
   [VitaShell](https://github.com/TheOfficialFloW/VitaShell/releases).
+- **The Vita's shader compiler, `ur0:data/libshacccg.suprx`.** Many ports
+  need it, so you may have it already. If not, install
+  [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D/releases) and
+  run it once: it extracts the file to `ur0:data/`. Without it the game
+  stays on the loading picture while the menu's music and sounds play.
 - About 1.5 GB free on `ux0:` (the game keeps decompressed copies of the
   levels it loads).
 - Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
@@ -62,6 +67,10 @@ Evolved.
    game writes a cache file for it to the memory card.
 
 Without the maps the game shows where to copy them and exits.
+
+**Stuck on the loading picture** while the menu music plays? The shader
+compiler is missing: see `libshacccg.suprx` above. `halo.log` says so with
+the line `gxm: no libshacccg.suprx`.
 
 ### Updating
 
