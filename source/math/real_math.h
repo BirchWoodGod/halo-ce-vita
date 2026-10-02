@@ -906,6 +906,22 @@ __inline real cosine(
 	return cos(angle);
 }
 
+#ifdef HALO_LINUX
+/* (port) sine(angle) and cosine(angle), bit for bit, with one argument
+reduction (halo_sincos) */
+__inline void sine_cosine(
+	real angle,
+	real *sine_result,
+	real *cosine_result)
+{
+	double sine_value, cosine_value;
+
+	halo_sincos(angle, &sine_value, &cosine_value);
+	*sine_result = (real)sine_value;
+	*cosine_result = (real)cosine_value;
+}
+#endif
+
 __inline real tangent(
 	real angle)
 {
