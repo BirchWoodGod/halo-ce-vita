@@ -2240,6 +2240,28 @@ int halo_repeatable_run(void)
 	return repeatable;
 }
 
+/* HALO_TICK_CATCH_UP: 1 (the default) runs as many ticks a frame as the
+time elapsed asks for (up to two), 0 at most one (main_update_time_unthrottled);
+read again when the settings panel changes it */
+static boolean main_tick_catch_up(
+	void)
+{
+	extern volatile unsigned long halo_settings_generation;
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static unsigned long settings_seen;
+	static int catch_up = -1;
+
+	if (catch_up < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_TICK_CATCH_UP");
+
+		settings_seen = halo_settings_generation;
+		catch_up = !setting || atoi(setting) != 0;
+	}
+	return catch_up != 0;
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2270,6 +2292,19 @@ static void main_update_time_unthrottled(
 				seconds_elapsed = CEILING(seconds_elapsed, 0.03333333507180214f);
 			else
 				seconds_elapsed = CEILING(seconds_elapsed, 0.06666667014360428f);
+			/* (port) HALO_TICK_CATCH_UP=0 (the Vita's settings panel: Heavy
+			scenes, Slow down): a frame elapses at most one tick, so when a
+			tick takes longer than a frame's share the game plays slower
+			than real time instead of running two ticks a frame and waiting
+			for both (the frame rate halves then). Each tick is the same
+			either way; only the pacing changes. Local games only (the
+			connection test above: players of a networked game stay in
+			step), and not in a cinematic, whose sound runs in real time. */
+			if (seconds_elapsed > 0.03333333507180214f && !main_tick_catch_up() && game_in_progress() &&
+				!cinematic_in_progress())
+			{
+				seconds_elapsed = 0.03333333507180214f;
+			}
 		}
 	}
 	{
@@ -3791,6 +3826,11 @@ void main_loop(
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
 		halo_load_profile_frame_end();
 		main_split_report();
+		{
+			void halo_net_detail_report(void);
+
+			halo_net_detail_report();
+		}
 #endif
 		main_frame_rate_debug();
 

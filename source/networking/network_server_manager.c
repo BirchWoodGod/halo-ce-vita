@@ -479,6 +479,15 @@ symbols in this file:
 
 #include "cache/cache_files.h"
 
+#ifdef HALO_LINUX
+/* (HALO_NET_PROFILE=1) the networked frame's steps timed (port/linux/game/tick_detail.c) */
+unsigned long long halo_net_detail_begin(void);
+void halo_net_detail_end(const char *name, unsigned long long started);
+#define HALO_NET_DETAIL(name, statement) do { unsigned long long halo_net_started = halo_net_detail_begin(); statement; halo_net_detail_end(name, halo_net_started); } while (0)
+#else
+#define HALO_NET_DETAIL(name, statement) do { statement; } while (0)
+#endif
+
 /* ---------- constants */
 
 #define NETWORK_SERVER_MANAGER_FILE "c:\\halo\\SOURCE\\networking\\network_server_manager.c"
@@ -990,7 +999,10 @@ boolean network_game_server_idle(
 {
 	boolean success = TRUE;
 
-	if (transport_network_available() == FALSE)
+	boolean network_available;
+
+	HALO_NET_DETAIL("server:link", network_available = transport_network_available());
+	if (network_available == FALSE)
 	{
 		if (!network_game_is_splitscreen_local())
 		{
@@ -1005,10 +1017,10 @@ boolean network_game_server_idle(
 	{
 		struct network_connection *new_client_connection = NULL;
 
-		success = network_connection_idle(
+		HALO_NET_DETAIL("server:connection_idle", success = network_connection_idle(
 			server->connection,
 			_connection_dont_timeout,
-			&new_client_connection);
+			&new_client_connection));
 		if (success == TRUE)
 		{
 			if (new_client_connection)
@@ -1038,10 +1050,10 @@ boolean network_game_server_idle(
 				}
 			}
 
-			success = network_game_server_handle_public_endpoint(server);
+			HALO_NET_DETAIL("server:public_endpoint", success = network_game_server_handle_public_endpoint(server));
 			if (success)
 			{
-				success = network_game_server_handle_client_machines(server);
+				HALO_NET_DETAIL("server:client_machines", success = network_game_server_handle_client_machines(server));
 				if (success)
 				{
 					switch (server->state)
@@ -1052,7 +1064,7 @@ boolean network_game_server_idle(
 
 					case _network_game_server_state_ingame:
 #ifdef HALO_LINUX
-						network_game_server_keep_late_joiners_alive(server);
+						HALO_NET_DETAIL("server:late_joiners", network_game_server_keep_late_joiners_alive(server));
 #endif
 						break;
 

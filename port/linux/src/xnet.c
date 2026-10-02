@@ -861,11 +861,30 @@ INT WSAAPI XNetXnAddrToInAddr(const XNADDR *address, const XNKID *key_identifier
 non-loopback IPv4 address */
 static unsigned long title_address(void)
 {
+	/* The game's link check (transport_network_available, through
+	XNetGetEthernetLinkStatus) runs every frame of a networked game, and
+	finding the address is a request to the system: the Vita's network
+	control service (~10 ms a frame of a Blood Gulch solo match went to
+	network_start there), getifaddrs on Linux (0.23 ms a frame on the Pi).
+	The answer is kept for half a second: a link going down or an address
+	changing is seen that much later at most. */
+	extern unsigned long long vita_host_time_us(void);
+	static unsigned long cached;
+	static unsigned long long cached_at;
+	static int have_cached;
 	unsigned long override;
+	unsigned long long now;
 
 	if (local_address_setting(&override))
 		return override;
-	return posix_local_ipv4_address();
+	now = vita_host_time_us();
+	if (!have_cached || now - cached_at >= 500000ULL)
+	{
+		cached = posix_local_ipv4_address();
+		cached_at = now;
+		have_cached = 1;
+	}
+	return cached;
 }
 
 DWORD WSAAPI XNetGetTitleXnAddr(XNADDR *address)
