@@ -865,10 +865,10 @@ pixel32 real_a_rgb_color_to_pixel32(
 
 #ifdef HALO_LINUX
 	result = (pixel32)(
-		((long)__builtin_rint((double)color->blue * scale) & 0xff) |
-		(((long)__builtin_rint((double)color->green * scale) & 0xff) << 8) |
-		(((long)__builtin_rint((double)color->red * scale) & 0xff) << 16) |
-		((long)__builtin_rint((double)alpha * scale) << 24));
+		((long)halo_rint((double)color->blue * scale) & 0xff) |
+		(((long)halo_rint((double)color->green * scale) & 0xff) << 8) |
+		(((long)halo_rint((double)color->red * scale) & 0xff) << 16) |
+		((long)halo_rint((double)alpha * scale) << 24));
 #else
 	__asm
 	{
