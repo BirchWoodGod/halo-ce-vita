@@ -174,6 +174,7 @@ struct
 } game_state_globals = { 0 };
 #ifdef HALO_LINUX
 #include "render_epoch.h"
+#include "load_profile.h"
 #endif
 
 #ifdef HALO_LINUX
@@ -363,7 +364,16 @@ void game_state_save(
 	game_state_call_before_save_procs();
 
 	main_stop_time();
+#ifdef HALO_LINUX
+	{
+		unsigned long long started = halo_load_profile_now();
+
+		game_state_globals.saved_game_valid = (game_state_write_to_file()!=FALSE);
+		halo_load_profile_add(_halo_load_game_state_save, started, GAME_STATE_SIZE);
+	}
+#else
 	game_state_globals.saved_game_valid = (game_state_write_to_file()!=FALSE);
+#endif
 	main_start_time();
 
 	return;
@@ -379,9 +389,23 @@ void game_state_revert(
 		return;
 	}
 
+#ifdef HALO_LINUX
+	{
+		unsigned long long started = halo_load_profile_now();
+		unsigned long long after_load_started;
+
+		game_state_call_before_load_procs();
+		game_state_read_from_file();
+		halo_load_profile_add(_halo_load_game_state_revert, started, GAME_STATE_SIZE);
+		after_load_started = halo_load_profile_now();
+		game_state_call_after_load_procs();
+		halo_load_profile_add(_halo_load_persistent_after_load, after_load_started, 0);
+	}
+#else
 	game_state_call_before_load_procs();
 	game_state_read_from_file();
 	game_state_call_after_load_procs();
+#endif
 
 	return;
 }
@@ -391,7 +415,14 @@ void game_state_save_to_persistent_storage(
 {
 	if (player_spawn_count==1)
 	{
+#ifdef HALO_LINUX
+		unsigned long long started;
+
+#endif
 		game_state_revert();
+#ifdef HALO_LINUX
+		started = halo_load_profile_now();
+#endif
 		game_state_write_to_persistent_storage(
 			game_state_globals.base_address,
 			&game_state_globals.header->checksum,
@@ -399,6 +430,7 @@ void game_state_save_to_persistent_storage(
 #ifdef HALO_LINUX
 			/* the whole of the native builds' larger game state */
 			GAME_STATE_SIZE);
+		halo_load_profile_add(_halo_load_persistent_write, started, GAME_STATE_SIZE);
 #else
 			0x345000);
 #endif
@@ -672,7 +704,63 @@ void game_state_try_and_load_from_persistent_storage(
 	void)
 {
 	struct game_state_header header;
+#ifdef HALO_LINUX
+	/* (port) the header first, then one read of the whole save
+	(game_state_xbox.c) */
+	unsigned long long started = halo_load_profile_now();
+	boolean header_valid = game_state_peek_persistent_storage_header(&header, sizeof(header))
+		&& code_001af4f0(&header, FALSE)
+		&& main_get_difficulty() == header.difficulty;
+	int staged = header_valid ?
+		game_state_read_persistent_storage_staged(sizeof(header), offsetof(struct game_state_header, checksum), GAME_STATE_SIZE) :
+		0;
 
+	halo_load_profile_add(_halo_load_persistent_header, started, header_valid && staged >= 0 ? GAME_STATE_SIZE : sizeof(header));
+	if (staged > 0)
+	{
+		game_state_call_before_load_procs();
+		started = halo_load_profile_now();
+		game_state_load_staged_persistent_storage(game_state_globals.base_address, GAME_STATE_SIZE);
+		halo_load_profile_add(_halo_load_persistent_read, started, GAME_STATE_SIZE);
+		game_difficulty_level_set(main_get_difficulty());
+		started = halo_load_profile_now();
+		game_state_call_after_load_procs();
+		halo_load_profile_add(_halo_load_persistent_after_load, started, 0);
+		game_state_save();
+		return;
+	}
+	if (staged < 0)
+	{
+		started = halo_load_profile_now();
+		header_valid = game_state_read_header_from_persistent_storage(
+			&header,
+			&header.checksum,
+			sizeof(header),
+			GAME_STATE_SIZE,
+			NULL);
+		halo_load_profile_add(_halo_load_persistent_header, started, GAME_STATE_SIZE);
+	}
+	else
+	{
+		header_valid = FALSE;
+	}
+	if (header_valid
+		&& code_001af4f0(&header, FALSE)
+		&& main_get_difficulty() == header.difficulty)
+	{
+		game_state_call_before_load_procs();
+		started = halo_load_profile_now();
+		game_state_read_from_persistent_storage(
+			game_state_globals.base_address,
+			GAME_STATE_SIZE);
+		halo_load_profile_add(_halo_load_persistent_read, started, GAME_STATE_SIZE);
+		game_difficulty_level_set(main_get_difficulty());
+		started = halo_load_profile_now();
+		game_state_call_after_load_procs();
+		halo_load_profile_add(_halo_load_persistent_after_load, started, 0);
+		game_state_save();
+	}
+#else
 	if (game_state_read_header_from_persistent_storage(
 			&header,
 			&header.checksum,
@@ -690,6 +778,7 @@ void game_state_try_and_load_from_persistent_storage(
 		game_state_call_after_load_procs();
 		game_state_save();
 	}
+#endif
 
 	return;
 }

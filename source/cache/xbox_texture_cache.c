@@ -97,6 +97,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "render_epoch.h"
 void platform_log(const char *format, ...);
+#include "load_profile.h"
 #else
 #define halo_cache_lock_acquire() ((void)0)
 #define halo_cache_lock_release() ((void)0)
@@ -1001,6 +1002,10 @@ void *_texture_cache_bitmap_get_hardware_format(
 				}
 				cache_file_promote_read(texture->read_request_handle);
 			}
+#ifdef HALO_LINUX
+			{
+			unsigned long long wait_started = block && !texture->loaded ? halo_load_profile_now() : 0;
+#endif
 			do
 			{
 				if (texture->loaded)
@@ -1031,6 +1036,11 @@ void *_texture_cache_bitmap_get_hardware_format(
 				}
 			}
 			while (!hardware_format && block);
+#ifdef HALO_LINUX
+			if (wait_started)
+				halo_load_profile_add(_halo_load_texture_cache_wait, wait_started, 0);
+			}
+#endif
 		}
 	}
 	else

@@ -192,6 +192,9 @@ symbols in this file:
 #include "sound/sound_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "load_profile.h"
+#endif
 
 /* ---------- constants */
 
@@ -1065,6 +1068,8 @@ boolean scenario_switch_structure_bsp(
 		lens flares, decals or object updates) - the switch waits until
 		the frame is drawn */
 		halo_tick_wait_for_render();
+		{
+		unsigned long long switch_started = halo_load_profile_now();
 #endif
 		main_stop_time();
 		collision_log_enable(FALSE);
@@ -1111,6 +1116,10 @@ boolean scenario_switch_structure_bsp(
 
 		collision_log_enable(TRUE);
 		main_start_time();
+#ifdef HALO_LINUX
+		halo_load_profile_add(_halo_load_switch_bsp, switch_started, 0);
+		}
+#endif
 	}
 
 	return result;

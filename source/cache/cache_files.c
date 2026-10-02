@@ -138,6 +138,9 @@ int halo_epoch_on_mutator(void);
 #include "sound_cache.h"
 #include "scenario/scenario_definitions.h"
 #include "sound/sound_manager.h"
+#ifdef HALO_LINUX
+#include "load_profile.h"
+#endif
 
 /* ---------- constants */
 
@@ -779,12 +782,19 @@ boolean scenario_structure_bsp_load(
 {
 	struct cache_file_tag_instance *tag_instance;
 	byte *tag_cache_base_address;
+#ifdef HALO_LINUX
+	unsigned long long started = halo_load_profile_now();
+#endif
 
 	tag_cache_base_address = physical_memory_get_tag_cache_base_address();
 	csmemset(
 		tag_cache_base_address + cache_file_globals.header.tag_data_size,
 		0xCD,
 		0x01600000 - cache_file_globals.header.tag_data_size);
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_bsp_clear, started, 0x01600000 - cache_file_globals.header.tag_data_size);
+	started = halo_load_profile_now();
+#endif
 	{
 		boolean read_complete;
 
@@ -804,9 +814,17 @@ boolean scenario_structure_bsp_load(
 			}
 		}
 	}
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_bsp_read, started, reference->file_size);
+	started = halo_load_profile_now();
+#endif
 
 #ifdef HALO_RELOCATABLE_TAG_CACHE
 	halo_tag_relocate_structure_bsp(tag_cache_base_address, reference->base_address, reference->file_size);
+#endif
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_bsp_relocate, started, 0);
+	started = halo_load_profile_now();
 #endif
 	cache_file_globals.structure_bsp_header = reference->base_address;
 	match_assert(
@@ -814,6 +832,9 @@ boolean scenario_structure_bsp_load(
 		0xE0,
 		cache_file_globals.structure_bsp_header->signature==CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE);
 	structure_bsp_header_register_vertex_buffers(cache_file_globals.structure_bsp_header);
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_bsp_vertex_buffers, started, 0);
+#endif
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",

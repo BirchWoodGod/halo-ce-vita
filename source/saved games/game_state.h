@@ -119,6 +119,11 @@ void game_state_write_to_persistent_storage(
 	unsigned long *header_checksum,
 	long header_size,
 	long buffer_size);
+#ifdef HALO_LINUX
+boolean game_state_peek_persistent_storage_header(void *header, long header_size);
+int game_state_read_persistent_storage_staged(long header_size, long checksum_offset, long buffer_size);
+void game_state_load_staged_persistent_storage(void *buffer, long buffer_size);
+#endif
 void game_state_read_from_persistent_storage(
 	void *buffer,
 	long buffer_size);
