@@ -37,7 +37,7 @@ unsigned char render_tick_pose_bounding_sphere(long object_index, union real_poi
 /* ... and the clusters' object lists as that tick left them, which the
 render walks instead of the running tick's (render_interpolation.c, "the
 threaded tick's cluster lists") */
-enum { _tick_cluster_list_collideable, _tick_cluster_list_noncollideable, _tick_cluster_list_count };
+enum { _tick_cluster_list_collideable, _tick_cluster_list_noncollideable, _tick_cluster_list_light, _tick_cluster_list_count };
 unsigned char render_tick_cluster_lists_active(int which);
 long render_tick_cluster_list_first(int which, long *iterator, short cluster_index);
 long render_tick_cluster_list_next(int which, long *iterator);

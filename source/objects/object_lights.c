@@ -424,6 +424,10 @@ static boolean light_mark(
 static long cluster_get_first_light(
 	long *reference_index,
 	short cluster_index);
+#ifdef HALO_LINUX
+static long render_cluster_get_first_light(long *iterator, short cluster_index);
+static long render_cluster_get_next_light(long *iterator);
+#endif
 static long cluster_get_next_light(
 	long *reference_index);
 static void find_point_lights_for_object_in_cluster(
@@ -858,8 +862,16 @@ void lights_preprocess_scene(
 	lights_globals.scene_point_light_count = structure_visibility_find_objects(
 		lights_globals.scene_point_lights,
 		MAXIMUM_RENDERED_LIGHTS,
+#ifdef HALO_LINUX
+		/* (port) with the tick on its thread, the lights' cluster lists as
+		the finished tick left them (render_interpolation.c, "the threaded
+		tick's cluster lists") */
+		render_tick_cluster_lists_active(_tick_cluster_list_light) ? render_cluster_get_first_light : cluster_get_first_light,
+		render_tick_cluster_lists_active(_tick_cluster_list_light) ? render_cluster_get_next_light : cluster_get_next_light,
+#else
 		cluster_get_first_light,
 		cluster_get_next_light,
+#endif
 		light_get_bounding_sphere,
 		light_unmarked,
 		light_mark);
@@ -1535,6 +1547,21 @@ static void brighten_real_rgb_color(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+static long render_cluster_get_first_light(
+	long *iterator,
+	short cluster_index)
+{
+	return render_tick_cluster_list_first(_tick_cluster_list_light, iterator, cluster_index);
+}
+
+static long render_cluster_get_next_light(
+	long *iterator)
+{
+	return render_tick_cluster_list_next(_tick_cluster_list_light, iterator);
+}
+#endif
 
 static long cluster_get_first_light(
 	long *reference_index,
