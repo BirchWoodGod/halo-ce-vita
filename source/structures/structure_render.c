@@ -329,6 +329,44 @@ static void structure_render_dynamic_triangles_from_bitvector(
 }
 
 #ifdef HALO_LINUX
+/* (a list of 64 and more is sorted by its digits, 11 bits at a time, as
+many passes as its largest index needs: the lights' lists run to the
+thousands of surfaces; an ascending list is left as it is) */
+static void structure_render_radix_sort_surface_indices(
+	long *elements,
+	long count,
+	unsigned long largest)
+{
+	static long scratch[MAXIMUM_LOCALLY_RENDERED_SURFACES];
+	long *from = elements, *to = scratch;
+	unsigned long shift;
+
+	for (shift = 0; shift < 32 && (largest >> shift); shift += 11)
+	{
+		unsigned long counts[2048];
+		unsigned long total = 0, digit;
+		long index, *swap;
+
+		memset(counts, 0, sizeof(counts));
+		for (index = 0; index < count; index++)
+			counts[((unsigned long)from[index] >> shift) & 2047]++;
+		for (digit = 0; digit < 2048; digit++)
+		{
+			unsigned long here = counts[digit];
+
+			counts[digit] = total;
+			total += here;
+		}
+		for (index = 0; index < count; index++)
+			to[counts[((unsigned long)from[index] >> shift) & 2047]++] = from[index];
+		swap = from;
+		from = to;
+		to = swap;
+	}
+	if (from != elements)
+		memcpy(elements, from, count * sizeof(elements[0]));
+}
+
 static void structure_render_sort_surface_indices(
 	long *elements,
 	long count)
@@ -339,6 +377,29 @@ static void structure_render_sort_surface_indices(
 
 	if (count < 2)
 		return;
+	if (count >= 64 && count <= MAXIMUM_LOCALLY_RENDERED_SURFACES)
+	{
+		unsigned long largest = 0;
+		long index;
+		int ascending = 1, negative = 0;
+
+		for (index = 0; index < count; index++)
+		{
+			if (elements[index] < 0)
+				negative = 1;
+			if ((unsigned long)elements[index] > largest)
+				largest = (unsigned long)elements[index];
+			if (index && elements[index] < elements[index - 1])
+				ascending = 0;
+		}
+		if (ascending)
+			return;
+		if (!negative)
+		{
+			structure_render_radix_sort_surface_indices(elements, count, largest);
+			return;
+		}
+	}
 	for (;;)
 	{
 		if (hi - lo < 16)
