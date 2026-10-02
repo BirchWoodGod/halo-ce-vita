@@ -328,6 +328,92 @@ static void structure_render_dynamic_triangles_from_bitvector(
 	return;
 }
 
+#ifdef HALO_LINUX
+static void structure_render_sort_surface_indices(
+	long *elements,
+	long count)
+{
+	long *lo_stack[64], *hi_stack[64];
+	long depth = 0;
+	long *lo = elements, *hi = elements + count - 1;
+
+	if (count < 2)
+		return;
+	for (;;)
+	{
+		if (hi - lo < 16)
+		{
+			long *scan;
+
+			for (scan = lo + 1; scan <= hi; scan++)
+			{
+				long value = *scan;
+				long *place = scan;
+
+				while (place > lo && place[-1] > value)
+				{
+					*place = place[-1];
+					place--;
+				}
+				*place = value;
+			}
+		}
+		else
+		{
+			long *middle = lo + ((hi - lo) >> 1);
+			long pivot, temporary;
+			long *i = lo, *j = hi;
+
+			/* (the median of three for the pivot) */
+			if (*middle < *lo) { temporary = *middle; *middle = *lo; *lo = temporary; }
+			if (*hi < *lo) { temporary = *hi; *hi = *lo; *lo = temporary; }
+			if (*hi < *middle) { temporary = *hi; *hi = *middle; *middle = temporary; }
+			pivot = *middle;
+			while (i <= j)
+			{
+				while (*i < pivot)
+					i++;
+				while (*j > pivot)
+					j--;
+				if (i <= j)
+				{
+					temporary = *i;
+					*i = *j;
+					*j = temporary;
+					i++;
+					j--;
+				}
+			}
+			/* (the larger part waits on the stack, the smaller goes on) */
+			if (j - lo > hi - i)
+			{
+				if (lo < j)
+				{
+					lo_stack[depth] = lo;
+					hi_stack[depth++] = j;
+				}
+				lo = i;
+			}
+			else
+			{
+				if (i < hi)
+				{
+					lo_stack[depth] = i;
+					hi_stack[depth++] = hi;
+				}
+				hi = j;
+			}
+			if (lo < hi)
+				continue;
+		}
+		if (--depth < 0)
+			break;
+		lo = lo_stack[depth];
+		hi = hi_stack[depth];
+	}
+}
+#endif
+
 static void structure_render_dynamic_triangles_from_indices(
 	short surface_count,
 	long *surface_indices,
@@ -336,7 +422,15 @@ static void structure_render_dynamic_triangles_from_indices(
 	struct structure_bsp *structure_bsp = global_structure_bsp_get();
 	short surface_index_index;
 
+#ifdef HALO_LINUX
+	/* (port) the surface indices into ascending order - one order whatever
+	sorts them - without a call through a pointer per comparison (the
+	shadows' and lights' surface lists: up to hundreds of surfaces each,
+	tens of lists a frame) */
+	structure_render_sort_surface_indices(surface_indices, surface_count);
+#else
 	qsort_4byte(surface_indices, surface_count, compare_surface_indices);
+#endif
 
 	for (surface_index_index = 0;
 		surface_index_index < surface_count;
