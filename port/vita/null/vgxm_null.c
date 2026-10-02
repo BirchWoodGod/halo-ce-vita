@@ -329,6 +329,11 @@ static void hash_word(unsigned long long value)
 	hash_bytes(&value, sizeof(value));
 }
 
+static void hash_word32(unsigned long value)
+{
+	hash_bytes(&value, sizeof(value));
+}
+
 /* uniform words, each NaN as one value: the game uploads some vectors
 whose unused lane is whatever was on its stack (C1's lighting rows), a NaN
 that differs from run to run */
@@ -571,7 +576,16 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	}
 	TRACE_PART("textures");
 	draw_hash_part = 10;
-	hash_bytes(&draw->depth_test, offsetof(struct vgxm_draw, primitive) - offsetof(struct vgxm_draw, depth_test));
+	/* (the states, the depth bias, the viewport and the clip, field by
+	field: the draw's layout may change) */
+	hash_bytes(&draw->depth_test, offsetof(struct vgxm_draw, color_write) + sizeof(draw->color_write) -
+		offsetof(struct vgxm_draw, depth_test));
+	hash_word32(draw->cull);
+	hash_bytes(&draw->depth_bias_slope, sizeof(draw->depth_bias_slope));
+	hash_bytes(&draw->depth_bias_units, sizeof(draw->depth_bias_units));
+	hash_bytes(draw->viewport_offset, sizeof(draw->viewport_offset));
+	hash_bytes(draw->viewport_scale, sizeof(draw->viewport_scale));
+	hash_bytes(draw->clip, sizeof(draw->clip));
 	if (draw_hash_on >= 2)
 	{
 		unsigned long long state;

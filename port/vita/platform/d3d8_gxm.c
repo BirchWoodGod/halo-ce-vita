@@ -1727,32 +1727,42 @@ struct record_state
 	const D3DCOLOR *palette_data[D3DTSS_MAXSTAGES];
 };
 
-struct render_command
+/* the targets as the game had them set (copies of the surfaces): a block
+in the frame's arena that consecutive records share */
+struct record_targets
 {
-	BOOL skip;
-	/* (split records) the state block, the depth target's presence and
-	the constant-program flag; NULL state: the record was built in full */
-	const struct record_state *state;
-	unsigned char has_depth;
-	unsigned char simple;
-	unsigned long kind;
-	/* both: the targets as the game had them set (copies of the surfaces),
-	and the copy of a small target this run renders into */
 	D3DSurface color_surface, depth_surface;
 	BOOL color_valid, depth_valid;
-	unsigned long color_version;
+};
+
+/* (what the game's thread writes into a record comes first, together - a
+record is written into a cold ring entry, where every line touched is a
+cache miss - then what the worker fills in) */
+struct render_command
+{
+	unsigned long kind;
+	/* (split records) the state block; NULL: the record was built in full */
+	const struct record_state *state;
+	const struct record_targets *targets;
+	/* the depth target's presence and the constant-program flag */
+	unsigned char has_depth;
+	unsigned char simple;
 	/* a small target drawn before the main scene: no big target is read */
 	BOOL hoistable;
+	/* the copy of a small target this run renders into */
+	unsigned long color_version;
 	/* draws */
-	struct vgxm_draw draw;
 	struct vertex_shader_object *program;
 	unsigned long provided_mask, packed_mask, color_mask;
 	BOOL immediate;
+	/* the copy of a small target a stage reads */
+	unsigned long texture_version[D3DTSS_MAXSTAGES];
+	struct vgxm_draw draw;
+	/* (the worker's) */
+	BOOL skip;
 	struct nv2a_pixel_shader_key key;
 	DWORD texture_header[D3DTSS_MAXSTAGES][5];
 	BOOL texture_present[D3DTSS_MAXSTAGES];
-	/* the copy of a small target a stage reads */
-	unsigned long texture_version[D3DTSS_MAXSTAGES];
 	const D3DCOLOR *palette[D3DTSS_MAXSTAGES];
 	DWORD sampler_state[D3DTSS_MAXSTAGES][6];
 	/* clears */
@@ -1802,27 +1812,29 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 	} last;
 	struct render_target_entry *color, *depth;
 
-	if (last.color_valid == command->color_valid && last.depth_valid == command->depth_valid &&
+	const struct record_targets *targets = command->targets;
+
+	if (last.color_valid == targets->color_valid && last.depth_valid == targets->depth_valid &&
 		last.color_version == command->color_version &&
-		(!command->color_valid || !memcmp(&last.color, &command->color_surface, sizeof(last.color))) &&
-		(!command->depth_valid || !memcmp(&last.depth, &command->depth_surface, sizeof(last.depth))))
+		(!targets->color_valid || !memcmp(&last.color, &targets->color_surface, sizeof(last.color))) &&
+		(!targets->depth_valid || !memcmp(&last.depth, &targets->depth_surface, sizeof(last.depth))))
 	{
 		color = last.color_entry;
 		depth = last.depth_entry;
 	}
 	else
 	{
-		color = command->color_valid ? render_target_get_version(&command->color_surface, command->color_version) : NULL;
-		depth = command->depth_valid ? render_target_get(&command->depth_surface) : NULL;
+		color = targets->color_valid ? render_target_get_version(&targets->color_surface, command->color_version) : NULL;
+		depth = targets->depth_valid ? render_target_get(&targets->depth_surface) : NULL;
 		if (depth && !depth->target.depth)
 			depth = NULL;
 		if (color && color->target.depth)
 			color = NULL;
-		last.color = command->color_surface;
-		last.depth = command->depth_surface;
+		last.color = targets->color_surface;
+		last.depth = targets->depth_surface;
 		last.color_version = command->color_version;
-		last.color_valid = command->color_valid;
-		last.depth_valid = command->depth_valid;
+		last.color_valid = targets->color_valid;
+		last.depth_valid = targets->depth_valid;
 		last.color_entry = color;
 		last.depth_entry = depth;
 	}
@@ -1882,7 +1894,7 @@ static void bind_recorded_textures(struct render_command *command, float texture
 					render_target_chain(target, &description, header[1], command->texture_version[stage]);
 			}
 			source = &target->texture;
-			if (command->color_valid && target->target.data == command->color_surface.Data)
+			if (command->targets->color_valid && target->target.data == command->targets->color_surface.Data)
 			{
 				/* the draw samples the very target it draws into (the
 				game's render-primary textures alias the back buffer for
@@ -2512,7 +2524,7 @@ static void execute_command(struct render_command *command)
 		break;
 	case _command_present:
 	{
-		struct render_target_entry *back_buffer = command->color_valid ? render_target_get(&command->color_surface) : NULL;
+		struct render_target_entry *back_buffer = command->targets->color_valid ? render_target_get(&command->targets->color_surface) : NULL;
 
 		if (halo_trace_active())
 			platform_log("trace: worker present %lu", command->frame);
@@ -2793,6 +2805,54 @@ static void immediate_commit_held(void)
 	command_commit(command);
 }
 
+/* the records' target blocks: per-frame arenas like the state blocks
+(rotated with them, record_state_frame_end), the last block shared while
+the targets stay the same; a present's own per arena */
+#define TARGET_BLOCKS_PER_FRAME 4096
+static struct record_targets *target_arenas[3];
+static struct record_targets present_targets[3];
+static unsigned long target_blocks_used;
+static struct record_targets *targets_last;
+static unsigned long state_arena_index;
+
+static const struct record_targets *record_targets_current(const D3DSurface *color, const D3DSurface *depth)
+{
+	BOOL color_valid = color != NULL, depth_valid = depth != NULL;
+	struct record_targets *block;
+
+	if (targets_last && targets_last->color_valid == color_valid && targets_last->depth_valid == depth_valid &&
+		(!color_valid || !memcmp(&targets_last->color_surface, color, sizeof(*color))) &&
+		(!depth_valid || !memcmp(&targets_last->depth_surface, depth, sizeof(*depth))))
+	{
+		return targets_last;
+	}
+	if (!target_arenas[0])
+	{
+		int index;
+
+		for (index = 0; index < 3; index++)
+			target_arenas[index] = calloc(TARGET_BLOCKS_PER_FRAME, sizeof(struct record_targets));
+	}
+	if (!target_arenas[state_arena_index] || target_blocks_used >= TARGET_BLOCKS_PER_FRAME)
+	{
+		static int warned;
+
+		if (!warned++)
+			platform_log("Direct3D: more than %d target changes in a frame: the rest are not recorded", TARGET_BLOCKS_PER_FRAME);
+		return NULL;
+	}
+	block = &target_arenas[state_arena_index][target_blocks_used++];
+	memset(block, 0, sizeof(*block));
+	block->color_valid = color_valid;
+	block->depth_valid = depth_valid;
+	if (color_valid)
+		block->color_surface = *color;
+	if (depth_valid)
+		block->depth_surface = *depth;
+	targets_last = block;
+	return block;
+}
+
 static struct render_command *command_begin(unsigned long kind)
 {
 	struct render_command *command;
@@ -2903,32 +2963,34 @@ static struct render_command *command_begin(unsigned long kind)
 				blend_histogram[0][0]++;
 		}
 	}
-	command = &commands[command_head % COMMAND_RING];
-	command->kind = kind;
-	command->state = NULL;
-	command->color_valid = device.render_target != NULL;
-	command->depth_valid = device.depth_stencil != NULL;
+	{
+		const struct record_targets *targets = NULL;
+
+		/* (a present's are set by D3DDevice_Present) */
+		if (kind != _command_present && !(targets = record_targets_current(device.render_target, device.depth_stencil)))
+			return NULL;
+		command = &commands[command_head % COMMAND_RING];
+		command->kind = kind;
+		command->state = NULL;
+		command->targets = targets;
+	}
 	command->color_version = 0;
 	command->hoistable = FALSE;
-	if (device.render_target)
-		command->color_surface = *device.render_target;
-	if (device.depth_stencil)
-		command->depth_surface = *device.depth_stencil;
-	if (kind != _command_present && command->color_valid && surface_is_small_cached(&command->color_surface) &&
-		!(command->depth_valid && device.depth_stencil->Data && !surface_is_small(&command->depth_surface)))
+	if (kind != _command_present && command->targets->color_valid && surface_is_small_cached(&command->targets->color_surface) &&
+		!(command->targets->depth_valid && device.depth_stencil->Data && !surface_is_small(&command->targets->depth_surface)))
 	{
-		unsigned long *version = target_version_slot(command->color_surface.Data);
+		unsigned long *version = target_version_slot(command->targets->color_surface.Data);
 
 		if (version)
 		{
 			/* a new run into the target: a fresh copy */
-			if (last_recorded_target != command->color_surface.Data && *version < MAXIMUM_TARGET_VERSIONS)
+			if (last_recorded_target != command->targets->color_surface.Data && *version < MAXIMUM_TARGET_VERSIONS)
 				(*version)++;
 			command->color_version = *version;
 			command->hoistable = *version > 0;
 		}
 	}
-	last_recorded_target = command->color_valid ? command->color_surface.Data : 0;
+	last_recorded_target = command->targets && command->targets->color_valid ? command->targets->color_surface.Data : 0;
 	return command;
 }
 
@@ -3486,7 +3548,7 @@ a full arena falls back to records built in full */
 static struct record_state *state_arenas[3];
 static struct record_material *material_arenas[3];
 static struct record_values *values_arenas[3];
-static unsigned long state_arena_index, state_blocks_used, material_blocks_used, values_blocks_used;
+static unsigned long state_blocks_used, material_blocks_used, values_blocks_used;
 static struct record_state *state_last;
 
 static int record_split_enabled(void)
@@ -3522,6 +3584,8 @@ static void record_state_frame_end(void)
 	state_last = NULL;
 	material_last = NULL;
 	values_last = NULL;
+	target_blocks_used = 0;
+	targets_last = NULL;
 }
 
 static const struct record_state *record_state_current(void)
@@ -3672,7 +3736,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->attribute_count = 0;
 	draw->stream_count = 0;
 	draw->vertex_chunk_d_registers = 0;
-	has_depth = command->depth_valid && surface_is_depth_cached(&command->depth_surface);
+	has_depth = command->targets->depth_valid && surface_is_depth_cached(&command->targets->depth_surface);
 	{
 		/* HALO_RECORD_SHORTCUT=1 turns the same-state shortcut on (opt-in:
 		a run with it froze the Vita at 110 s, cause unknown) */
@@ -3690,10 +3754,25 @@ static struct render_command *record_draw(BOOL immediate)
 	{
 		const struct render_command *previous = record_previous;
 
-		memcpy(&command->program, &previous->program,
-			offsetof(struct render_command, sampler_state) + sizeof(command->sampler_state) - offsetof(struct render_command, program));
+		command->program = previous->program;
+		command->provided_mask = previous->provided_mask;
+		command->packed_mask = previous->packed_mask;
+		command->color_mask = previous->color_mask;
+		command->immediate = previous->immediate;
+		command->key = previous->key;
+		memcpy(command->texture_header, previous->texture_header, sizeof(command->texture_header));
+		memcpy(command->texture_present, previous->texture_present, sizeof(command->texture_present));
+		memcpy(command->texture_version, previous->texture_version, sizeof(command->texture_version));
+		memcpy(command->palette, previous->palette, sizeof(command->palette));
+		memcpy(command->sampler_state, previous->sampler_state, sizeof(command->sampler_state));
 		memcpy(&draw->depth_test, &previous->draw.depth_test,
-			offsetof(struct vgxm_draw, clip) + sizeof(draw->clip) - offsetof(struct vgxm_draw, depth_test));
+			offsetof(struct vgxm_draw, color_write) + sizeof(draw->color_write) - offsetof(struct vgxm_draw, depth_test));
+		draw->cull = previous->draw.cull;
+		draw->depth_bias_slope = previous->draw.depth_bias_slope;
+		draw->depth_bias_units = previous->draw.depth_bias_units;
+		memcpy(draw->viewport_offset, previous->draw.viewport_offset, sizeof(draw->viewport_offset));
+		memcpy(draw->viewport_scale, previous->draw.viewport_scale, sizeof(draw->viewport_scale));
+		memcpy(draw->clip, previous->draw.clip, sizeof(draw->clip));
 		command->hoistable = command->hoistable && previous->hoistable;
 		simple_fragment = 0;
 		draw->fragment_uniforms[0] = device.fragment_snapshot[0];
@@ -4046,6 +4125,14 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 
 		if (element->type == D3DVSDT_NONE || !device.streams[stream].data)
 			continue;
+		if (stream_slot[stream] == ~0UL && draw->stream_count >= VGXM_STREAM_COUNT)
+		{
+			static int warned;
+
+			if (!warned++)
+				platform_log("a draw with more than %d vertex streams is not drawn", VGXM_STREAM_COUNT);
+			return FALSE;
+		}
 		if (stream_slot[stream] == ~0UL)
 		{
 			const unsigned char *base = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[stream].data);
@@ -4083,6 +4170,8 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 			first * stride;
 		struct vgxm_attribute *attribute;
 
+		if (stream_slot[stream] == ~0UL && draw->stream_count >= VGXM_STREAM_COUNT)
+			return FALSE;
 		if (stream_slot[stream] == ~0UL)
 		{
 			stream_slot[stream] = draw->stream_count++;
@@ -4755,9 +4844,12 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 
 		if (command)
 		{
-			command->color_surface = device.back_buffer;
-			command->color_valid = TRUE;
-			command->depth_valid = FALSE;
+			struct record_targets *targets = &present_targets[state_arena_index];
+
+			memset(targets, 0, sizeof(*targets));
+			targets->color_surface = device.back_buffer;
+			targets->color_valid = TRUE;
+			command->targets = targets;
 			command->screenshot = screenshot_every > 0 && device.frame && device.frame % (unsigned long)screenshot_every == 0;
 			{
 				/* (debug) HALO_SCREENSHOT_FIRST / _LAST=n: only the frames

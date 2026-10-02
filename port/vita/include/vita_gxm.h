@@ -114,37 +114,51 @@ struct vgxm_attribute
 };
 
 #define VGXM_ATTRIBUTE_COUNT 16
-#define VGXM_STREAM_COUNT 16
+/* (the Direct3D device feeds at most three: two in a declaration and one
+for halo_d3d_stream_attribute) */
+#define VGXM_STREAM_COUNT 4
 
+/* (the fields the Direct3D device's record writes on the game's thread
+come first, together, then those its worker sets: a draw is written into a
+cold ring entry, and every line it touches there is a cache miss) */
 struct vgxm_draw
 {
-	unsigned long vertex_shader;
-	unsigned long fragment_shader;
-
 	/* vertex layout: the attributes (by register) and their streams */
 	unsigned long attribute_count;
-	struct vgxm_attribute attributes[VGXM_ATTRIBUTE_COUNT];
 	unsigned long stream_count;
-	unsigned long strides[VGXM_STREAM_COUNT];
-	const void *streams[VGXM_STREAM_COUNT];
-
-	/* the vertex program's constant chunks (vita_xgpu.h: BUFFER[0] and
-	[2..6]; NULL for a chunk the program does not read), its BUFFER[1], and
-	the fragment program's BUFFER[0] */
-	const void *vertex_chunks[6];
+	/* D3DPRIMITIVETYPE; quads arrive as triangles */
+	unsigned long primitive;
+	unsigned long index_count;
+	const unsigned short *indices;
+	/* set when the draw counts samples for a visibility test: its slot in
+	the frame's visibility buffer, 1 to VGXM_VISIBILITY_SLOTS - 1 */
+	unsigned long visibility_index;
+	/* the vertex program's BUFFER[1] */
+	const void *vertex_uniforms;
 	/* (for the null renderer's draw hash) the registers of chunk D's
 	snapshot the program can read - its absolute reads and the object's node
-	matrices - and the input registers the vertex program reads */
+	matrices */
 	unsigned long vertex_chunk_d_registers;
-	unsigned long vertex_input_mask;
-	/* (the draw hash) the Xbox vertex program's own hash, whichever Cg
-	translation of it (by the inputs its streams provide) runs */
-	unsigned long vertex_program_hash;
-	const void *vertex_uniforms;
+	/* the vertex program's constant chunks (vita_xgpu.h: BUFFER[0] and
+	[2..6]; NULL for a chunk the program does not read) */
+	const void *vertex_chunks[6];
+	/* the window transform: x = ndc.x * scale[0] + offset[0], likewise y,
+	and depth = ndc.z * scale[2] + offset[2] */
+	float viewport_offset[3];
+	float viewport_scale[3];
+	/* pixels [x0, x1) x [y0, y1) */
+	long clip[4];
+	unsigned long strides[VGXM_STREAM_COUNT];
+	const void *streams[VGXM_STREAM_COUNT];
+	struct vgxm_attribute attributes[VGXM_ATTRIBUTE_COUNT];
+
+	/* (set by the worker) */
+	unsigned long vertex_shader;
+	unsigned long fragment_shader;
+	/* the fragment program's BUFFER[0] and [1] */
 	const void *fragment_uniforms[2];
 	/* per texture stage, NULL when unbound */
 	const struct vgxm_texture *textures[4];
-
 	/* Direct3D render state values */
 	unsigned long depth_test, depth_write, depth_function;
 	unsigned long stencil_test, stencil_function, stencil_reference, stencil_read_mask, stencil_write_mask;
@@ -155,20 +169,11 @@ struct vgxm_draw
 	/* 0 none, else D3DCULL_CW or D3DCULL_CCW: the winding that is discarded */
 	unsigned long cull;
 	float depth_bias_slope, depth_bias_units;
-	/* the window transform: x = ndc.x * scale[0] + offset[0], likewise y,
-	and depth = ndc.z * scale[2] + offset[2] */
-	float viewport_offset[3];
-	float viewport_scale[3];
-	/* pixels [x0, x1) x [y0, y1) */
-	long clip[4];
-
-	/* D3DPRIMITIVETYPE; quads arrive as triangles */
-	unsigned long primitive;
-	const unsigned short *indices;
-	unsigned long index_count;
-	/* set when the draw counts samples for a visibility test: its slot in
-	the frame's visibility buffer, 1 to VGXM_VISIBILITY_SLOTS - 1 */
-	unsigned long visibility_index;
+	/* (for the null renderer's draw hash) the input registers the vertex
+	program reads, and the Xbox program's own hash, whichever Cg
+	translation of it (by the inputs its streams provide) runs */
+	unsigned long vertex_input_mask;
+	unsigned long vertex_program_hash;
 };
 
 void vgxm_draw(const struct vgxm_draw *draw);
