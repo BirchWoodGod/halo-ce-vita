@@ -192,8 +192,8 @@ This port stands on a lot of other people's work:
   Those platforms still build from this tree (`port/linux`, `port/windows`,
   `port/android`, each with its own README).
 - **[Invader](https://github.com/SnowyMouse/invader)** by SnowyMouse: the
-  tag definitions `tag_layouts.h` is generated from, which let the port
-  relocate the maps' tags.
+  tag definitions `port/linux/src/tag_layouts.h` is generated from (by
+  `tools/gen_tag_layouts.py`), which let the port relocate the maps' tags.
 - **The Xita project**: the earlier work on running Halo on the Vita, whose
   findings (the register combiner translation, the GPU and threading
   lessons, the tools) went into this port.
@@ -208,6 +208,21 @@ Libraries and tools: [VitaSDK](https://vitasdk.org),
 [musl](https://musl.libc.org)'s math functions,
 [extract-xiso](https://github.com/XboxDev/extract-xiso), and
 [Vita3K](https://vita3k.org) for testing.
+
+## License
+
+This port is licensed under the **GNU General Public License, version 3
+only** ([LICENSE](LICENSE)), because `port/linux/src/tag_layouts.h` is
+generated from Invader's GPL-3.0 tag definitions. To regenerate it, clone
+Invader into `invader/` (or set `INVADER=<path>`) and run
+`python3 tools/gen_tag_layouts.py port/linux/src/tag_layouts.h`.
+
+The decompilation and the halo-ce-universal port this builds on are
+dedicated to the public domain under CC0 1.0
+([LICENSES/CC0-1.0.txt](LICENSES/CC0-1.0.txt)); the bundled libraries keep
+their own licenses. The license covers this code only: Halo's maps,
+executable and other game content belong to their owners and are not
+included.
 
 This project is not affiliated with or endorsed by Microsoft or Bungie,
 and it contains no game assets.
