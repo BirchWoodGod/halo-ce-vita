@@ -304,14 +304,24 @@ log the same hashes, whatever their records look like on the way. */
 static int draw_hash_on = -1;
 static unsigned long long draw_hash, draw_hash_draws;
 
+/* HALO_DRAW_HASH_PARTS=1: a hash per kind of input too (programs, each
+uniform chunk, the textures, the states, the vertices...), logged with the
+present's, to see what two runs disagree on */
+static int draw_hash_parts = -1, draw_hash_part;
+static unsigned long long draw_part_hash[16];
+
 static void hash_bytes(const void *data, unsigned long size)
 {
 	const unsigned char *bytes = data;
-	unsigned long long hash = draw_hash;
+	unsigned long long hash = draw_hash, part = draw_part_hash[draw_hash_part];
 
 	while (size--)
-		hash = (hash ^ *bytes++) * 1099511628211ull;
+	{
+		hash = (hash ^ *bytes) * 1099511628211ull;
+		part = (part ^ *bytes++) * 1099511628211ull;
+	}
 	draw_hash = hash;
+	draw_part_hash[draw_hash_part] = part;
 }
 
 static void hash_word(unsigned long long value)
@@ -376,11 +386,14 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 
 		draw_hash_trace = setting ? atol(setting) : -1;
 	}
+	draw_hash_part = 0;
 	hash_word(0xd7a3);
 	hash_word(null.color_target);
 	hash_word(null.depth_target);
-	hash_word(draw->vertex_shader);
-	hash_word(draw->fragment_shader);
+	/* (the programs by their source: the ids number them in the order
+	they were first used) */
+	hash_word(draw->vertex_shader && draw->vertex_shader <= null.shader_count ? null.shader_hashes[draw->vertex_shader - 1] : 0);
+	hash_word(draw->fragment_shader && draw->fragment_shader <= null.shader_count ? null.shader_hashes[draw->fragment_shader - 1] : 0);
 	hash_word(draw->attribute_count);
 	for (attribute = 0; attribute < draw->attribute_count; attribute++)
 	{
@@ -389,6 +402,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 		hash_word(a->reg | (unsigned long)a->format << 8 | (unsigned long)a->components << 16);
 	}
 	TRACE_PART("programs+attributes");
+	draw_hash_part = 1;
 	for (index = 0; index < 6; index++)
 	{
 		unsigned long registers = index == 4 ? draw->vertex_chunk_d_registers : chunk_registers[index];
@@ -397,6 +411,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 		if (draw->vertex_chunks[index])
 			hash_floats(draw->vertex_chunks[index], registers * 16);
 		TRACE_PART("chunk");
+		draw_hash_part = 2 + index;
 	}
 	if (draw->vertex_uniforms)
 	{
@@ -412,11 +427,13 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 				hash_floats((const unsigned char *)draw->vertex_uniforms + (3 + index) * 16, 16);
 	}
 	TRACE_PART("vertex uniforms");
+	draw_hash_part = 8;
 	if (draw->fragment_uniforms[0])
 		hash_floats(draw->fragment_uniforms[0], 18 * 16);
 	if (draw->fragment_uniforms[1])
 		hash_floats(draw->fragment_uniforms[1], 15 * 16);
 	TRACE_PART("fragment uniforms");
+	draw_hash_part = 9;
 	for (index = 0; index < 4; index++)
 	{
 		if (draw->textures[index])
@@ -425,11 +442,13 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 			hash_word(0);
 	}
 	TRACE_PART("textures");
+	draw_hash_part = 10;
 	hash_bytes(&draw->depth_test, offsetof(struct vgxm_draw, primitive) - offsetof(struct vgxm_draw, depth_test));
 	hash_word(draw->primitive);
 	hash_word(draw->index_count);
 	hash_word(draw->visibility_index);
 	TRACE_PART("states");
+	draw_hash_part = 11;
 	if (draw->indices)
 	{
 		hash_bytes(draw->indices, draw->index_count * sizeof(unsigned short));
@@ -454,7 +473,17 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 		}
 	}
 	TRACE_PART("vertices");
+	draw_hash_part = 12;
 	draw_hash_draws++;
+}
+
+/* a draw that writes no colour, depth or stencil leaves the picture as it
+was (the GXM renderer reads no sample counts back): it is not hashed */
+static int draw_writes_nothing(const struct vgxm_draw *draw)
+{
+	return !draw->color_write && !draw->depth_write &&
+		!(draw->stencil_test && draw->stencil_write_mask && (draw->stencil_fail != D3DSTENCILOP_KEEP ||
+			draw->stencil_depth_fail != D3DSTENCILOP_KEEP || draw->stencil_pass != D3DSTENCILOP_KEEP));
 }
 
 void vgxm_draw(const struct vgxm_draw *draw)
@@ -463,7 +492,7 @@ void vgxm_draw(const struct vgxm_draw *draw)
 		return;
 	null.draws++;
 	null.scene_draws++;
-	if (draw_hash_enabled())
+	if (draw_hash_enabled() && !draw_writes_nothing(draw))
 		draw_hash_add(draw);
 }
 
@@ -497,6 +526,22 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	if (draw_hash_enabled())
 	{
 		platform_log("draw hash: present %lu draws %llu hash %016llx", null.presents, draw_hash_draws, draw_hash);
+		if (draw_hash_parts < 0)
+			draw_hash_parts = getenv("HALO_DRAW_HASH_PARTS") && atoi(getenv("HALO_DRAW_HASH_PARTS"));
+		if (draw_hash_parts)
+		{
+			/* (part 0 the programs' own words... 1 the uniform chunk A, through 6 E, 7 vertex
+			uniforms, 8 fragment uniforms, 9 textures, 10 states, 11 vertices, 12 clears) */
+			char line[400];
+			int n = 0, part;
+
+			for (part = 0; part < 13; part++)
+			{
+				n += snprintf(line + n, sizeof(line) - n, " %04llx", draw_part_hash[part] & 0xffff);
+				draw_part_hash[part] = 0;
+			}
+			platform_log("draw hash parts: present %lu%s", null.presents, line);
+		}
 		draw_hash = 1469598103934665603ull;
 		draw_hash_draws = 0;
 	}

@@ -250,6 +250,9 @@ struct gxm_device
 	const void *chunk_snapshot[VITA_VC_CHUNKS];
 	unsigned long d_snapshot_count;
 	unsigned long d_extent_frame, d_extent_previous;
+	/* (the draw hash) the registers the last write from D's first register
+	covered: an object's node matrices; what lies past them is stale */
+	unsigned long d_last_object_extent;
 	/* the vertex programs' BUFFER[1] (vita_xgpu.h), likewise */
 	float vertex_uniforms[VITA_VM_COUNT][4];
 	const void *vertex_uniform_snapshot;
@@ -773,6 +776,8 @@ static void constants_store(unsigned long first, const void *data, unsigned long
 			extent = VITA_VC_D_COUNT;
 		if (extent > device.d_extent_frame)
 			device.d_extent_frame = extent;
+		if (first == VITA_VC_D_FIRST)
+			device.d_last_object_extent = extent;
 	}
 	if (gpu_stats_enabled())
 		constant_write_note(first, count, changed);
@@ -3117,7 +3122,15 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 		}
 		draw->vertex_chunks[chunk] = device.chunk_snapshot[chunk];
 		if (chunk == VITA_VC_D)
-			draw->vertex_chunk_d_registers = device.d_snapshot_count;
+		{
+			/* (the draw hash covers the program's absolute reads and the
+			object's matrices, not the stale registers past them) */
+			unsigned long hashed = program->usage.d_absolute_end;
+
+			if (program->usage.relative && device.d_last_object_extent > hashed)
+				hashed = device.d_last_object_extent;
+			draw->vertex_chunk_d_registers = hashed < device.d_snapshot_count ? hashed : device.d_snapshot_count;
+		}
 	}
 	return TRUE;
 }

@@ -132,8 +132,9 @@ struct vgxm_draw
 	[2..6]; NULL for a chunk the program does not read), its BUFFER[1], and
 	the fragment program's BUFFER[0] */
 	const void *vertex_chunks[6];
-	/* (for the null renderer's draw hash) the registers in chunk D's
-	snapshot, and the input registers the vertex program reads */
+	/* (for the null renderer's draw hash) the registers of chunk D's
+	snapshot the program can read - its absolute reads and the object's node
+	matrices - and the input registers the vertex program reads */
 	unsigned long vertex_chunk_d_registers;
 	unsigned long vertex_input_mask;
 	const void *vertex_uniforms;
