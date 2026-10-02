@@ -662,9 +662,12 @@ static SceGxmProgram *compile(const char *source, int fragment)
 		}
 	}
 	sceShaccCgDestroyCompileOutput(output);
-	/* (WIP, untested) HALO_SHADER_RELEASE=1: the compiler's memory handed
-	back after each compile - in Vita3K the heap grew ~100 KB a compile
-	until compiles failed ("fatal internal error") after 50-110 of them */
+	/* HALO_SHADER_RELEASE=1 (off; experimental): the compiler's memory
+	handed back after each compile - in Vita3K the heap grows ~100 KB a
+	compile until compiles fail ("fatal internal error") after 50-110 of
+	them. Tried in Vita3K (Oct 2 2026): the compile after the first release
+	faults inside _malloc_r (a corrupted heap), so it stays off; the
+	shipped pack (app0:shaders.pak) is what keeps the compiles few */
 	if (getenv("HALO_SHADER_RELEASE") && atoi(getenv("HALO_SHADER_RELEASE")))
 		sceShaccCgReleaseCompiler();
 	return program;
@@ -759,7 +762,8 @@ volatile unsigned long vgxm_compiles, vgxm_shader_loads, vgxm_links, vgxm_compil
 
 /* ---------- the shipped programs
 
-The programs the campaign and the multiplayer maps make, compiled ahead by
+The programs the campaign levels and the menu make (265 in the pack of Oct 2
+2026; the multiplayer maps are not collected yet), compiled ahead by
 the same SceShaccCg (tools/vita_shader_pack.py, from the sources the Linux
 gxm-null harness collects with HALO_SHADER_COLLECT), so a first visit to an
 area compiles nothing on the device. One file in the VPK, read whole at
@@ -1236,6 +1240,14 @@ static void shader_precompile(void)
 			cache_write(hash, program);
 			compiled++;
 			free(program);
+			if (compiled % 25 == 0)
+			{
+				/* (the heap the compiler allocates from, to see whether it keeps growing) */
+				struct mallinfo heap = mallinfo();
+
+				log_line("shader precompile: %lu compiled, heap %d KB in use, %d KB free of %d KB",
+					compiled, heap.uordblks / 1024, heap.fordblks / 1024, heap.arena / 1024);
+			}
 		}
 		else
 		{

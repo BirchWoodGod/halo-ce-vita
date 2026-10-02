@@ -21,6 +21,11 @@ How the programs are gathered:
    HALO_SHADER_PRECOMPILE=ux0:data/haloce-vita/<directory>: every source is
    compiled into the memory card's cache, ux0:data/haloce-vita/shaders.
    HALO_SHADER_COLLECT on that run adds the renderer's built-in programs.
+   At start-up the game's heap is still small, so one run compiles them all
+   (265 in 32 s on Vita3K, the compiler's heap at ~12 MB); later in a game
+   SceShaccCg runs out of heap after 50-110 compiles. Any program a clean-cache
+   run still compiles in the background ("compiled in the background" in the
+   log) is a source to collect and add.
 3. Pack them: vita_shader_pack.py --sources <directory> --programs
    <the cache directory> [--output port/vita/app0/shaders.pak].
 
