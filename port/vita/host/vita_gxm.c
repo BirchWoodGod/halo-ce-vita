@@ -1024,28 +1024,26 @@ void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_fi
 
 /* ---------- render targets */
 
-unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
+/* gives a target slot back its memory and its render target object */
+static void target_release(struct target *target)
 {
-	struct target *target;
+	if (target->render_target)
+		sceGxmDestroyRenderTarget(target->render_target);
+	if (target->memory.base)
+	{
+		sceGxmUnmapMemory(target->memory.base);
+		sceKernelFreeMemBlock(target->memory.uid);
+	}
+	memset(target, 0, sizeof(*target));
+}
+
+/* makes a target in a slot: its memory, surface, render target object and
+texture; 0 on failure (what was made is given back) */
+static int target_make(struct target *target, unsigned long width, unsigned long height, int depth,
+	struct vgxm_texture *texture)
+{
 	int result;
 
-	{
-		/* (debug) HALO_TARGET_LIMIT=n: fewer targets, to exercise the
-		recycling of unused ones (d3d8_gxm.c render_target_recycle) */
-		static int limit = -1;
-
-		if (limit < 0)
-		{
-			const char *setting = getenv("HALO_TARGET_LIMIT");
-
-			limit = setting && atoi(setting) > 0 && atoi(setting) < MAXIMUM_TARGETS ? atoi(setting) : MAXIMUM_TARGETS;
-		}
-		if (!gxm.ready || gxm.target_count >= (unsigned)limit || !width || !height)
-			return 0;
-	}
-	if (getenv("HALO_TRACE_FILES"))
-		log_line("trace: target %lux%lu depth %d (%u made)", width, height, depth, gxm.target_count);
-	target = &gxm.targets[gxm.target_count];
 	memset(target, 0, sizeof(*target));
 	target->depth = depth;
 	{
@@ -1076,7 +1074,10 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 	target->height = (unsigned int)height;
 	target->render_target = render_target_for(target->width, target->height);
 	if (!target->render_target)
+	{
+		target_release(target);
 		return 0;
+	}
 	if (depth)
 	{
 		unsigned int aligned_width = ALIGN(target->width, SCE_GXM_TILE_SIZEX);
@@ -1084,12 +1085,16 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 
 		if (!block_allocate(&target->memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 4 * aligned_width * aligned_height, 1,
 			"depth target"))
+		{
+			target_release(target);
 			return 0;
+		}
 		result = sceGxmDepthStencilSurfaceInit(&target->depth_stencil, SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,
 			SCE_GXM_DEPTH_STENCIL_SURFACE_TILED, aligned_width, target->memory.base, NULL);
 		if (result < 0)
 		{
 			log_line("gxm: depth surface %lux%lu: 0x%08x", width, height, (unsigned)result);
+			target_release(target);
 			return 0;
 		}
 		/* keep the depth across scenes */
@@ -1101,7 +1106,10 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 		target->stride = ALIGN(target->width, 32);
 		if (!block_allocate(&target->memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 4 * target->stride * target->height, 1,
 			"colour target"))
+		{
+			target_release(target);
 			return 0;
+		}
 		memset(target->memory.base, 0, 4 * target->stride * target->height);
 		result = sceGxmColorSurfaceInit(&target->color, SCE_GXM_COLOR_FORMAT_A8R8G8B8, SCE_GXM_COLOR_SURFACE_LINEAR,
 			SCE_GXM_COLOR_SURFACE_SCALE_NONE, SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, target->width, target->height,
@@ -1109,6 +1117,7 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 		if (result < 0)
 		{
 			log_line("gxm: colour surface %lux%lu: 0x%08x", width, height, (unsigned)result);
+			target_release(target);
 			return 0;
 		}
 		if (texture)
@@ -1119,7 +1128,51 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 				log_line("gxm: target texture %lux%lu: 0x%08x", width, height, (unsigned)result);
 		}
 	}
+	return 1;
+}
+
+unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
+{
+	{
+		/* (debug) HALO_TARGET_LIMIT=n: fewer targets, to exercise the
+		recycling of unused ones (d3d8_gxm.c render_target_recycle) */
+		static int limit = -1;
+
+		if (limit < 0)
+		{
+			const char *setting = getenv("HALO_TARGET_LIMIT");
+
+			limit = setting && atoi(setting) > 0 && atoi(setting) < MAXIMUM_TARGETS ? atoi(setting) : MAXIMUM_TARGETS;
+		}
+		if (!gxm.ready || gxm.target_count >= (unsigned)limit || !width || !height)
+			return 0;
+	}
+	if (getenv("HALO_TRACE_FILES"))
+		log_line("trace: target %lux%lu depth %d (%u made)", width, height, depth, gxm.target_count);
+	if (!target_make(&gxm.targets[gxm.target_count], width, height, depth, texture))
+		return 0;
 	return ++gxm.target_count;
+}
+
+int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
+	struct vgxm_texture *texture)
+{
+	struct target *target;
+
+	if (!gxm.ready || !id || id > gxm.target_count || !width || !height)
+		return 0;
+	target = &gxm.targets[id - 1];
+	/* (never the scene being recorded: a target is remade only once
+	nothing has used it for hundreds of frames) */
+	if (gxm.in_scene && (gxm.scene_color == id || gxm.scene_depth == id))
+		return 0;
+	target_release(target);
+	if (!target_make(target, width, height, depth, texture))
+	{
+		log_line("gxm: cannot remake target %lu as %lux%lu %s", id, width, height, depth ? "depth" : "colour");
+		return 0;
+	}
+	return 1;
 }
 
 int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned long levels,

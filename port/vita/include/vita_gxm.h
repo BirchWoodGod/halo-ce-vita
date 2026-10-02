@@ -82,6 +82,11 @@ returns its id, 0 on failure. A colour target can be sampled through the
 texture it fills in. */
 unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth,
 	struct vgxm_texture *texture);
+/* makes target id again at another size or kind (its memory given back
+first, then allocated anew), for a target nothing uses any more; its
+texture is filled in again. 1 on success; on failure the id has no target */
+int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
+	struct vgxm_texture *texture);
 /* colour targets for each level of one linear mip chain (levels one after
 another, rows aligned to 8 texels, as the texture cache's own mipmapped
 textures), so a texture the game renders level by level (the water's

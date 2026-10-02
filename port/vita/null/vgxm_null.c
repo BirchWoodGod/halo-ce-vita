@@ -261,8 +261,19 @@ void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_fi
 
 unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
 {
-	if (null.target_count >= MAXIMUM_TARGETS)
+	/* (debug) HALO_TARGET_LIMIT=n, as on the Vita (vita_gxm.c) */
+	static int limit = -1;
+
+	if (limit < 0)
+	{
+		const char *setting = getenv("HALO_TARGET_LIMIT");
+
+		limit = setting && atoi(setting) > 0 && atoi(setting) < MAXIMUM_TARGETS ? atoi(setting) : MAXIMUM_TARGETS;
+	}
+	if (null.target_count >= (unsigned int)limit)
 		return 0;
+	if (getenv("HALO_TRACE_FILES"))
+		fprintf(stderr, "trace: target %lux%lu depth %d (%u made)\n", width, height, depth, null.target_count);
 	null.target_count++;
 	if (texture)
 	{
@@ -272,6 +283,21 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 		texture->control[3] = 0;
 	}
 	return null.target_count;
+}
+
+int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
+	struct vgxm_texture *texture)
+{
+	if (!id || id > null.target_count || !width || !height)
+		return 0;
+	if (texture)
+	{
+		texture->control[0] = 0x80000000ul | id;
+		texture->control[1] = depth ? 0x100 : 0;
+		texture->control[2] = width | height << 16;
+		texture->control[3] = 0;
+	}
+	return 1;
 }
 
 int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned long levels,
