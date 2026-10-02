@@ -104,6 +104,17 @@ void physical_memory_allocate(
 	physical_memory_map_globals.sound_cache_base_address = XPhysicalAlloc(SOUND_CACHE_SIZE, -1, 0, PAGE_READWRITE);
 #line 58 "c:\\halo\\SOURCE\\cache\\physical_memory_map.c"
 	match_assert(__FILE__, __LINE__, physical_memory_map_globals.sound_cache_base_address);
+#ifdef HALO_LINUX
+	{
+		/* (port) a campaign save resumes only with the game state where it
+		was when the save was made (port/linux/src/xbox_memory.c) */
+		void platform_log(const char *format, ...);
+
+		platform_log("game state at %p, tag cache at %p, texture cache at %p, sound cache at %p",
+			physical_memory_map_globals.game_state_base_address, physical_memory_map_globals.tag_cache_base_address,
+			physical_memory_map_globals.texture_cache_base_address, physical_memory_map_globals.sound_cache_base_address);
+	}
+#endif
 
 	return;
 }
