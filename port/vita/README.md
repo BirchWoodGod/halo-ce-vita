@@ -109,8 +109,8 @@ The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 ## Multiplayer
 
 - **Split screen** needs two players, and the Vita has one controller.
-- **System link** works over Wi-Fi: every machine on the same network running
-  this port (another Vita, or the Linux/Windows build) can host or join.
+- **System link** over Wi-Fi between Vitas on the same network is in but not
+  yet tested with two consoles. Play against PCs is not supported yet.
 - **Ad hoc** (Vita to Vita without a router) and online play are not done yet.
 
 ## Building
