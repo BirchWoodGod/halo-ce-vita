@@ -24,6 +24,10 @@ cheaper big fights (simulation of many soldiers and sounds); the
 flashlight and dynamic lights now light the level; steady bloom and lens
 flares; saves that keep working across updates.
 
+### 1.0.2.1
+
+Security fix: the Xbox's debug console no longer listens on the network.
+
 ## Next: 1.0.3 (planned for next week)
 
 - **Flashlight:** characters lit by the flashlight flicker black on some
