@@ -4131,7 +4131,13 @@ void objects_garbage_collection(
 		if (!should_collect)
 		{
 			char warningbuf[512];
+#ifdef HALO_LINUX
+			/* (port) the release procs keep their state here as structures:
+			aligned as one */
+			unsigned char release_proc_working_memory[4096] __attribute__((aligned(8)));
+#else
 			unsigned char release_proc_working_memory[4096];
+#endif
 			char released_resultbuf[512];
 			const struct object_memory_release_function *current_release_procs = object_memory_release_procs;
 			boolean v0 = FALSE;

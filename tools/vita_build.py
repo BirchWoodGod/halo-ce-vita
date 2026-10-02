@@ -30,7 +30,14 @@ TITLE = "Halo CE"
 APP_VERSION = "01.01"
 
 # The game's directories compiled without -fmax-type-align=1 (configure.py
-# --vita-aligned hot, the default). The flag makes clang take every pointer
+# --vita-aligned hot; EXPERIMENTAL, the default is none). On the hardware
+# it crashed in the b30 fight (Oct 2): actions.c passed a stack byte array
+# standing in for a struct path_collision_result, which clang had placed
+# at an odd address, to actor_move_try_evasion_vector, whose VLDR of the
+# result's point faulted. That one is fixed (the arrays are aligned now),
+# but the game has more storage typed as bytes and read as structures, and
+# no sweep proves there is no other: the x86 UBSan sweep below saw nothing,
+# its stack layout differing. The flag makes clang take every pointer
 # as unaligned, so each float the game loads or stores through one goes via
 # an integer register and a transfer, which stalls the Cortex-A9 (and its
 # double-word copies become byte work); it is needed for code that reads
@@ -217,7 +224,7 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
             if obj.status.name == "Missing" or name in excluded or obj.file_path.suffix.lower() != ".c":
                 continue
             cflags = game_cflags
-            if (getattr(sln, "vita_aligned", "hot") == "hot" and name.startswith(VITA_ALIGNED_DIRS) and
+            if (getattr(sln, "vita_aligned", "none") == "hot" and name.startswith(VITA_ALIGNED_DIRS) and
                     name not in VITA_ALIGNED_EXCEPTIONS):
                 cflags = cflags.replace(" -fmax-type-align=1 ", " ")
             # reals travel in their own registers on hard-float ARM, as on Android

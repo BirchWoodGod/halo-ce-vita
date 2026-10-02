@@ -249,6 +249,17 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 
+/* (port) the evasion tests' result is a struct path_collision_result
+(path_structure_bsp.h, 0x1C bytes) that this file keeps as a byte array:
+aligned as the structure, since its floats are read through a pointer to
+it (actor_move_try_evasion_vector) and the Vita faults on a float load
+from an odd address, where clang may put a byte array on the stack */
+#ifdef HALO_LINUX
+#define COLLISION_RESULT_ALIGNMENT __attribute__((aligned(4)))
+#else
+#define COLLISION_RESULT_ALIGNMENT
+#endif
+
 /* ---------- constants */
 
 enum
@@ -3714,7 +3725,7 @@ boolean actor_action_try_to_evade(
 				short evade_direction = _actor_evade_random;
 				real_vector2d alignment_vector = *attractor_vector;
 				boolean is_ledge;
-				byte collision_result[0x1C];
+				byte collision_result[0x1C] COLLISION_RESULT_ALIGNMENT;
 
 				normalize2d(&alignment_vector);
 				if (actor_move_try_evasion_direction(
@@ -3768,7 +3779,7 @@ boolean actor_action_try_to_dive(
 	struct actor_debug_info *debug_info =
 		&actor_debug_array[DATUM_INDEX_TO_ABSOLUTE_INDEX(actor_index)];
 	boolean dive_off_ledge = FALSE;
-	byte collision_result[0x1C];
+	byte collision_result[0x1C] COLLISION_RESULT_ALIGNMENT;
 	real_vector2d evade_vector;
 	real_vector2d left_vector;
 	real animation_desire[4];
@@ -4293,7 +4304,7 @@ static boolean actor_action_find_escape_from_danger(
 		real_vector3d right_vector;
 		real_point3d left_position;
 		real_point3d right_position;
-		byte collision_result[0x1C];
+		byte collision_result[0x1C] COLLISION_RESULT_ALIGNMENT;
 		boolean left_is_ledge;
 		boolean right_is_ledge;
 		boolean left_found;
