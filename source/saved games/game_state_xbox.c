@@ -487,6 +487,12 @@ static HANDLE game_state_open_persistent_storage(
 						INVALID_SET_FILE_POINTER ||
 					!SetEndOfFile(file))
 				{
+#ifdef HALO_LINUX
+					/* (port) the release builds compile the assertions out:
+					debug.txt is the only trace a failed save leaves */
+					error(_error_silent, "couldn't resize persistent storage \"%s\" (#%d)", path,
+						(int)GetLastError());
+#endif
 					match_vassert(
 						"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 						491,
@@ -501,6 +507,10 @@ static HANDLE game_state_open_persistent_storage(
 		}
 		else
 		{
+#ifdef HALO_LINUX
+			error(_error_silent, "couldn't open or create persistent storage \"%s\" (#%d)", path,
+				(int)GetLastError());
+#endif
 			match_vassert(
 				"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 				498,
@@ -622,6 +632,9 @@ void game_state_write_to_persistent_storage(
 			!WriteFile(file, saved_header, header_size, &bytes_written, NULL) ||
 			bytes_written != header_size)
 		{
+#ifdef HALO_LINUX
+			error(_error_silent, "failed to write to persistent storage (#%d)", (int)GetLastError());
+#endif
 			match_vassert(
 				"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 				351,
@@ -630,6 +643,14 @@ void game_state_write_to_persistent_storage(
 					GetLastError()));
 			delete_persistent_storage();
 		}
+#ifdef HALO_LINUX
+		else
+		{
+			/* (port) so a device's debug.txt shows that Save and Quit
+			wrote the campaign save */
+			error(_error_silent, "saved the last checkpoint to persistent storage");
+		}
+#endif
 
 		memcpy(buffer, saved_header, header_size);
 		CloseHandle(file);
