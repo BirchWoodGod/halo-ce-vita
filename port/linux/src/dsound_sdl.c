@@ -36,6 +36,7 @@ skips opening a device (port_config.c).
 
 #include <SDL3/SDL.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -197,9 +198,19 @@ static inline int ima_expand_fast(int nibble, int *predictor, int *index)
 	return value;
 }
 
-/* Xbox ADPCM: per block, a 4-byte header per channel (predictor, step
-index), then 4-byte groups of eight nibbles, low nibble first, alternating
-between channels; 64 samples per channel */
+/* Xbox ADPCM: per block, a 4-byte header per channel (the first sample and
+the step index), then 4-byte groups of eight nibbles, low nibble first,
+alternating between channels; 64 samples per channel: the header's sample,
+then 63 nibbles. The 64th nibble is padding (0 in every block of the game's
+sounds): the Xbox does not play it.
+
+Before 1.0.3 the port dropped the header's sample and played all 64
+nibbles, the padding's included: every block's first sample was missing and
+a made-up one ended it, a click every 64 samples (689 times a second for a
+44 kHz sound) heard as a slight distortion of all the sound and music
+(issue #6). HALO_ADPCM_LEGACY=1 decodes as before, for comparison. */
+static int adpcm_legacy = -1;
+
 static short *decode_adpcm(const unsigned char *source, unsigned long size, unsigned long channels,
 	unsigned long *frame_count)
 {
@@ -215,6 +226,8 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 	}
 	if (!ima_tables_built)
 		ima_build_tables();
+	if (adpcm_legacy < 0)
+		adpcm_legacy = getenv("HALO_ADPCM_LEGACY") && atoi(getenv("HALO_ADPCM_LEGACY"));
 	for (block = 0; block < blocks; block++)
 	{
 		const unsigned char *data = source + block * block_bytes;
@@ -226,17 +239,24 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 			int predictor = (short)(header[0] | (header[1] << 8));
 			int index = header[2] > 88 ? 88 : header[2];
 			unsigned long group, byte;
+			/* the sample the next nibble decodes to (the header's is the
+			first) */
+			unsigned long first = adpcm_legacy ? 0 : 1;
 
+			if (!adpcm_legacy)
+				output[channel] = (short)predictor;
 			for (group = 0; group < 8; group++)
 			{
 				const unsigned char *nibbles = data + 4 * channels + (group * channels + channel) * 4;
 
 				for (byte = 0; byte < 4; byte++)
 				{
-					unsigned long sample = group * 8 + byte * 2;
+					unsigned long sample = group * 8 + byte * 2 + first;
 
 					output[sample * channels + channel] = (short)ima_expand_fast(nibbles[byte] & 0xf, &predictor, &index);
-					output[(sample + 1) * channels + channel] = (short)ima_expand_fast(nibbles[byte] >> 4, &predictor, &index);
+					/* (the last nibble, padding, is not played) */
+					if (sample + 1 < XBOX_ADPCM_BLOCK_SAMPLES)
+						output[(sample + 1) * channels + channel] = (short)ima_expand_fast(nibbles[byte] >> 4, &predictor, &index);
 				}
 			}
 		}
@@ -636,6 +656,24 @@ static void mix(float *output, unsigned long frames)
 
 			output[sample] = sign * (0.8f + 0.2f * tanhf(excess / 0.2f));
 		}
+	}
+	{
+		/* (debug) HALO_AUDIO_DUMP=<file>: the mix as it goes to the device,
+		raw 32-bit float stereo at 48 kHz, for listening to and measuring
+		the output without a device (e.g. sox -t f32 -r 48000 -c 2) */
+		static FILE *dump;
+		static int dump_checked;
+
+		if (!dump_checked)
+		{
+			const char *path = getenv("HALO_AUDIO_DUMP");
+
+			dump_checked = 1;
+			if (path && *path)
+				dump = fopen(path, "wb");
+		}
+		if (dump)
+			fwrite(output, sizeof(float) * OUTPUT_CHANNELS, frames, dump);
 	}
 }
 
