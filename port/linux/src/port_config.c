@@ -144,6 +144,11 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"
 		"comma-separated host:port." },
+	{ "network.adhoc", _config_boolean, "false", "HALO_NET_ADHOC", _environment_value, _platform_all,
+		"Ad hoc play: system link with the machines of this machine's ad hoc\n"
+		"group (the Vita's wireless group without a router, joined from its\n"
+		"settings panel), carried as internet play carries it, with or without\n"
+		"network.online; nothing goes to the internet." },
 	{ "network.lobby_public", _config_boolean, "false", "HALO_NET_LOBBY_PUBLIC", _environment_value, _platform_all,
 		"List the games this machine hosts in internet play's public lobby, where\n"
 		"anyone can find and join them; false keeps them to those with the\n"

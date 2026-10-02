@@ -136,6 +136,26 @@ int posix_upnp_forward_udp(unsigned short port, posix_ulong *external_address, u
 posix_upnp_forward_udp set up; blocks */
 void posix_upnp_stop_forwarding_udp(unsigned short external_port);
 
+/* ---------- ad hoc play (p2p_adhoc.c): a wireless group of nearby
+machines without a router. On the Vita it is the PSP-style ad hoc network
+its system dialog joins (vita_net.c, sceNetAdhocPdp), whose datagrams go
+to 6-byte (MAC) addresses on ad hoc ports, not over IP. Linux emulates one
+over UDP for testing (HALO_NET_ADHOC_EMULATE, posix_net.c); elsewhere
+there is none. Ports are in host byte order. */
+
+/* nonzero while this machine is in an ad hoc group, with its address */
+int posix_adhoc_ready(unsigned char *address);
+/* opens the group's datagram port; 0 on success */
+int posix_adhoc_open(unsigned short port);
+void posix_adhoc_close(void);
+/* a datagram to address (all 0xFF bytes: every machine in the group) on
+port: the bytes sent, or -1 */
+int posix_adhoc_send(const unsigned char *address, unsigned short port, const void *data, int size);
+/* waits up to timeout microseconds for a datagram: its size, with the
+sender's address and port; 0 if none came; -1 if the port failed */
+int posix_adhoc_receive(unsigned char *address, unsigned short *port, void *data, int size,
+	posix_ulong timeout);
+
 /* ---------- the process and the desktop (internet play, p2p.c) */
 
 /* copies the command line argument at index (0 is the program) into buffer;

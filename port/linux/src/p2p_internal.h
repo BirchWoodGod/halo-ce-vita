@@ -90,6 +90,16 @@ void p2p_signal_stop_joining(void);
 /* whether any broker is connected */
 int p2p_signal_connected(void);
 
+/* ---------- p2p_adhoc.c: ad hoc play's bridge between the group and the
+tunnel */
+
+/* starts the bridge (network.adhoc), with the tunnel's port (network byte
+order); called from p2p_initialize */
+void p2p_adhoc_start(unsigned short tunnel_port);
+/* offers the group's machines to p2p.c as peers; the p2p thread's, each
+pass, under p2p_lock */
+void p2p_adhoc_update(void);
+
 /* ---------- p2p_crypto.c */
 
 enum

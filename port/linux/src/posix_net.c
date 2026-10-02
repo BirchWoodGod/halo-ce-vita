@@ -665,3 +665,142 @@ void posix_discord_close(int handle)
 	if (handle >= 0)
 		close(handle);
 }
+
+/* ---------- ad hoc play's group, emulated for testing (p2p_adhoc.c)
+
+A desktop has no PSP-style ad hoc network. HALO_NET_ADHOC_EMULATE lists
+loopback (or LAN) IPv4 addresses, this machine's first: the "group" is
+those machines, each one's 6-byte address is 02:00 and its IPv4 address,
+and its ad hoc port is that UDP port at its address. A broadcast is a
+datagram to each of the others. Two copies of the game on one computer,
+each listing itself first, are then a group of two
+(port/vita/tests/run_online_test.sh adhoc). */
+
+#define ADHOC_EMULATED_MAXIMUM 16
+
+static struct
+{
+	int read;
+	int count;
+	in_addr_t addresses[ADHOC_EMULATED_MAXIMUM];
+	int socket;
+	unsigned short port;
+} adhoc_emulated = { 0, 0, { 0 }, -1, 0 };
+
+static int adhoc_emulated_read(void)
+{
+	if (!adhoc_emulated.read)
+	{
+		const char *text = getenv("HALO_NET_ADHOC_EMULATE");
+
+		adhoc_emulated.read = 1;
+		while (text && *text && adhoc_emulated.count < ADHOC_EMULATED_MAXIMUM)
+		{
+			char address[32];
+			size_t length = strcspn(text, ",");
+
+			if (length < sizeof(address))
+			{
+				memcpy(address, text, length);
+				address[length] = 0;
+				if (inet_pton(AF_INET, address, &adhoc_emulated.addresses[adhoc_emulated.count]) == 1)
+					adhoc_emulated.count++;
+			}
+			text += length + (text[length] == ',');
+		}
+	}
+	return adhoc_emulated.count > 0;
+}
+
+static void adhoc_emulated_address(in_addr_t ip, unsigned char *address)
+{
+	address[0] = 0x02;
+	address[1] = 0x00;
+	memcpy(address + 2, &ip, 4);
+}
+
+int posix_adhoc_ready(unsigned char *address)
+{
+	if (!adhoc_emulated_read())
+		return 0;
+	adhoc_emulated_address(adhoc_emulated.addresses[0], address);
+	return 1;
+}
+
+int posix_adhoc_open(unsigned short port)
+{
+	struct sockaddr_in local;
+
+	if (!adhoc_emulated_read())
+		return -1;
+	posix_adhoc_close();
+	adhoc_emulated.socket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (adhoc_emulated.socket < 0)
+		return -1;
+	memset(&local, 0, sizeof(local));
+	local.sin_family = AF_INET;
+	local.sin_port = htons(port);
+	local.sin_addr.s_addr = adhoc_emulated.addresses[0];
+	if (bind(adhoc_emulated.socket, (struct sockaddr *)&local, sizeof(local)) < 0)
+	{
+		posix_adhoc_close();
+		return -1;
+	}
+	adhoc_emulated.port = port;
+	return 0;
+}
+
+void posix_adhoc_close(void)
+{
+	if (adhoc_emulated.socket >= 0)
+		close(adhoc_emulated.socket);
+	adhoc_emulated.socket = -1;
+}
+
+int posix_adhoc_send(const unsigned char *address, unsigned short port, const void *data, int size)
+{
+	static const unsigned char everyone[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	struct sockaddr_in to;
+	int index;
+	int result = -1;
+
+	if (adhoc_emulated.socket < 0)
+		return -1;
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_port = htons(port);
+	if (!memcmp(address, everyone, 6))
+	{
+		for (index = 1; index < adhoc_emulated.count; index++)
+		{
+			to.sin_addr.s_addr = adhoc_emulated.addresses[index];
+			if (sendto(adhoc_emulated.socket, data, (size_t)size, 0, (struct sockaddr *)&to, sizeof(to)) >= 0)
+				result = size;
+		}
+		return result;
+	}
+	memcpy(&to.sin_addr.s_addr, address + 2, 4);
+	return sendto(adhoc_emulated.socket, data, (size_t)size, 0, (struct sockaddr *)&to, sizeof(to)) >= 0 ? size : -1;
+}
+
+int posix_adhoc_receive(unsigned char *address, unsigned short *port, void *data, int size, posix_ulong timeout)
+{
+	struct pollfd poll_entry;
+	struct sockaddr_in from;
+	socklen_t from_length = sizeof(from);
+	ssize_t received;
+
+	if (adhoc_emulated.socket < 0)
+		return -1;
+	poll_entry.fd = adhoc_emulated.socket;
+	poll_entry.events = POLLIN;
+	poll_entry.revents = 0;
+	if (poll(&poll_entry, 1, (int)(timeout / 1000)) <= 0)
+		return 0;
+	received = recvfrom(adhoc_emulated.socket, data, (size_t)size, MSG_DONTWAIT, (struct sockaddr *)&from, &from_length);
+	if (received < 0)
+		return errno == EAGAIN || errno == EINTR || errno == ECONNREFUSED ? 0 : -1;
+	adhoc_emulated_address(from.sin_addr.s_addr, address);
+	*port = ntohs(from.sin_port);
+	return (int)received;
+}

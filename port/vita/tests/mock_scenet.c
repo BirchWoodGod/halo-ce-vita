@@ -21,6 +21,7 @@ behaviour where it differs from Linux's (run_vita_net_test.sh builds it
 The ad hoc and system calls vita_net.c also makes are stubs.
 */
 
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
@@ -37,6 +38,7 @@ The ad hoc and system calls vita_net.c also makes are stubs.
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -437,6 +439,133 @@ int sceNetAdhocctlGetEtherAddr(SceNetEtherAddr *addr) { (void)addr; return -1; }
 int sceNetAdhocctlGetPeerList(int *buflen, void *buf) { (void)buflen; (void)buf; return -1; }
 int sceNetCtlAdhocGetState(int *state) { (void)state; return -1; }
 int sceNetCtlAdhocGetInAddr(SceNetInAddr *inaddr) { (void)inaddr; return -1; }
+
+/* ---------- PDP (the ad hoc group's datagrams) over Linux UDP
+
+A machine's MAC is 02:00 and its IPv4 address (as HALO_NET_ADHOC_EMULATE
+has it on Linux, posix_net.c); a PDP port is that UDP port at the address
+the socket was made with. MOCK_PDP_GROUP lists the other machines'
+addresses, which a broadcast (ff:ff:ff:ff:ff:ff) goes to. The PSP library's
+semantics: errors as 0x8041070x codes; send and receive return 0 on
+success, a receive's size through its length; no flag waits up to the
+timeout (then SCE_ERROR_NET_ADHOC_TIMEOUT), SCE_NET_ADHOC_F_NONBLOCK
+returns SCE_ERROR_NET_ADHOC_WOULD_BLOCK at once. MOCK_PDP_NO_WAIT=1 makes
+waits return at once (a firmware whose waits do not wait). */
+
+int mock_pdp_creates, mock_pdp_sends, mock_pdp_receives;
+
+static int pdp_socket = -1;
+
+int sceNetAdhocPdpCreate(const SceNetEtherAddr *saddr, SceUShort16 sport, unsigned int bufsize, int flag)
+{
+	struct sockaddr_in local;
+
+	(void)bufsize;
+	(void)flag;
+	mock_pdp_creates++;
+	if (pdp_socket >= 0)
+		return (int)SCE_ERROR_NET_ADHOC_PORT_IN_USE;
+	pdp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+	memset(&local, 0, sizeof(local));
+	local.sin_family = AF_INET;
+	local.sin_port = htons(sport);
+	memcpy(&local.sin_addr.s_addr, saddr->data + 2, 4);
+	if (bind(pdp_socket, (struct sockaddr *)&local, sizeof(local)) < 0)
+	{
+		close(pdp_socket);
+		pdp_socket = -1;
+		return (int)SCE_ERROR_NET_ADHOC_PORT_NOT_AVAIL;
+	}
+	return 7; /* (an id) */
+}
+
+int sceNetAdhocPdpDelete(int id, int flag)
+{
+	(void)flag;
+	if (id != 7 || pdp_socket < 0)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_SOCKET_ID;
+	close(pdp_socket);
+	pdp_socket = -1;
+	return 0;
+}
+
+int sceNetAdhocPdpSend(int id, const SceNetEtherAddr *daddr, SceUShort16 dport, const void *data, int len,
+	unsigned int timeout, int flag)
+{
+	static const unsigned char everyone[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	struct sockaddr_in to;
+
+	(void)timeout;
+	(void)flag;
+	if (id != 7 || pdp_socket < 0)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_SOCKET_ID;
+	if (len > SCE_NET_ADHOC_PDP_MFS)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_DATALEN;
+	mock_pdp_sends++;
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_port = htons(dport);
+	if (!memcmp(daddr->data, everyone, 6))
+	{
+		const char *group = getenv("MOCK_PDP_GROUP");
+
+		while (group && *group)
+		{
+			char address[32];
+			size_t length = strcspn(group, ",");
+
+			snprintf(address, sizeof(address), "%.*s", (int)length, group);
+			if (inet_pton(AF_INET, address, &to.sin_addr) == 1)
+				sendto(pdp_socket, data, (size_t)len, 0, (struct sockaddr *)&to, sizeof(to));
+			group += length + (group[length] == ',');
+		}
+		return 0;
+	}
+	memcpy(&to.sin_addr.s_addr, daddr->data + 2, 4);
+	sendto(pdp_socket, data, (size_t)len, 0, (struct sockaddr *)&to, sizeof(to));
+	return 0;
+}
+
+int sceNetAdhocPdpRecv(int id, SceNetEtherAddr *saddr, SceUShort16 *sport, void *buf, int *len, unsigned int timeout,
+	int flag)
+{
+	struct sockaddr_in from;
+	socklen_t from_length = sizeof(from);
+	ssize_t received;
+
+	if (id != 7 || pdp_socket < 0)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_SOCKET_ID;
+	mock_pdp_receives++;
+	if (!(flag & SCE_NET_ADHOC_F_NONBLOCK) && !getenv("MOCK_PDP_NO_WAIT"))
+	{
+		fd_set set;
+		struct timeval wait;
+
+		FD_ZERO(&set);
+		FD_SET(pdp_socket, &set);
+		wait.tv_sec = timeout / 1000000;
+		wait.tv_usec = timeout % 1000000;
+		if (select(pdp_socket + 1, &set, NULL, NULL, &wait) <= 0)
+			return (int)SCE_ERROR_NET_ADHOC_TIMEOUT;
+	}
+	received = recvfrom(pdp_socket, buf, (size_t)*len, MSG_DONTWAIT, (struct sockaddr *)&from, &from_length);
+	if (received < 0)
+		return (int)((flag & SCE_NET_ADHOC_F_NONBLOCK) ? SCE_ERROR_NET_ADHOC_WOULD_BLOCK : SCE_ERROR_NET_ADHOC_TIMEOUT);
+	saddr->data[0] = 0x02;
+	saddr->data[1] = 0x00;
+	memcpy(saddr->data + 2, &from.sin_addr.s_addr, 4);
+	*sport = ntohs(from.sin_port);
+	*len = (int)received;
+	return 0;
+}
+
+SceUInt64 sceKernelGetProcessTimeWide(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (SceUInt64)now.tv_sec * 1000000ULL + (SceUInt64)now.tv_nsec / 1000ULL;
+}
 
 SceUID sceKernelCreateThread(const char *name, SceKernelThreadEntry entry, int initPriority, SceSize stackSize,
 	SceUInt attr, int cpuAffinityMask, const SceKernelThreadOptParam *option)

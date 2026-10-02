@@ -32,7 +32,10 @@ the mock Linux's sendto (what Vita3K does), to see the difference.
 
 #include "../host/vita_net.c"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <stdio.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 extern int mock_log_quiet;
@@ -248,6 +251,80 @@ static void test_game_sequence(void)
 	posix_socket_close(server_tcp);
 }
 
+/* ad hoc play's group (posix_adhoc_*, for p2p_adhoc.c) over the mock's PDP:
+this machine is 127.0.0.220 (MAC 02:00:7f:00:00:dc), the other machine a
+plain UDP socket at 127.0.0.221 */
+static void test_adhoc(void)
+{
+	extern int mock_pdp_creates;
+	unsigned char address[6], from[6];
+	unsigned char buffer[1500];
+	unsigned short port = 0;
+	struct sockaddr_in other, to;
+	socklen_t other_length = sizeof(other);
+	int other_socket, result;
+	unsigned long long started;
+	static const unsigned char everyone[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	static const unsigned char other_address[6] = { 0x02, 0x00, 127, 0, 0, 221 };
+
+	check(!posix_adhoc_ready(address), "adhoc: not ready outside a group", adhoc_state, 0);
+	/* (in a group, as vita_adhoc_connect leaves it) */
+	adhoc_state = 2;
+	memcpy(adhoc_address.data, "\x02\x00\x7f\x00\x00\xdc", 6);
+	check(posix_adhoc_ready(address) && !memcmp(address, adhoc_address.data, 6), "adhoc: ready in a group", adhoc_state, 2);
+	check(posix_adhoc_open(2306) == 0 && mock_pdp_creates == 1, "adhoc: PDP port opened", mock_pdp_creates, 1);
+
+	other_socket = socket(AF_INET, SOCK_DGRAM, 0);
+	memset(&other, 0, sizeof(other));
+	other.sin_family = AF_INET;
+	other.sin_port = htons(2306);
+	other.sin_addr.s_addr = htonl(0x7F0000DD);
+	bind(other_socket, (struct sockaddr *)&other, sizeof(other));
+
+	/* the other machine sends: received with its MAC and port */
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_port = htons(2306);
+	to.sin_addr.s_addr = htonl(0x7F0000DC);
+	sendto(other_socket, "beacon", 6, 0, (struct sockaddr *)&to, sizeof(to));
+	result = posix_adhoc_receive(from, &port, buffer, sizeof(buffer), 200000);
+	check(result == 6 && !memcmp(from, other_address, 6) && port == 2306, "adhoc: receive gives the size, MAC and port",
+		result, 6);
+	/* nothing there: a wait of about the timeout, then 0 */
+	started = vita_host_time_us();
+	result = posix_adhoc_receive(from, &port, buffer, sizeof(buffer), 50000);
+	check(result == 0 && vita_host_time_us() - started >= 40000, "adhoc: an empty receive waits its timeout, then 0",
+		(long)(vita_host_time_us() - started), 50000);
+	/* sends to a MAC and to everyone */
+	check(posix_adhoc_send(other_address, 2306, "tunnel", 6) == 6, "adhoc: send to a MAC", 0, 6);
+	result = (int)recvfrom(other_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&other, &other_length);
+	check(result == 6 && !memcmp(buffer, "tunnel", 6), "adhoc: the other machine gets it", result, 6);
+	setenv("MOCK_PDP_GROUP", "127.0.0.221", 1);
+	check(posix_adhoc_send(everyone, 2306, "everyone", 8) == 8, "adhoc: broadcast", 0, 8);
+	result = (int)recvfrom(other_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&other, &other_length);
+	check(result == 8, "adhoc: the group gets the broadcast", result, 8);
+	check(posix_adhoc_send(other_address, 2306, buffer, SCE_NET_ADHOC_PDP_MFS + 1) == -1,
+		"adhoc: a datagram past the PDP's largest fails", 0, -1);
+	/* a firmware whose waits do not wait: polling after 20 */
+	setenv("MOCK_PDP_NO_WAIT", "1", 1);
+	for (result = 0; result < 25; result++)
+		posix_adhoc_receive(from, &port, buffer, sizeof(buffer), 100000);
+	check(adhoc_polling == 1, "adhoc: receives that do not wait fall back to polling", adhoc_polling, 1);
+	unsetenv("MOCK_PDP_NO_WAIT");
+	sendto(other_socket, "late", 4, 0, (struct sockaddr *)&to, sizeof(to));
+	usleep(10000);
+	check(posix_adhoc_receive(from, &port, buffer, sizeof(buffer), 100000) == 4, "adhoc: polling still receives", 0, 4);
+	/* the address the game sees: the stand-in without Wi-Fi in ad hoc play */
+	setenv("HALO_NET_ADHOC", "true", 1);
+	check(adhoc_stand_in_address() == (169u | 254u << 8 | 0u << 16 | 220u << 24), "adhoc: stand-in address 169.254.0.220",
+		(long)adhoc_stand_in_address(), (long)(169u | 254u << 8 | 220u << 24));
+	unsetenv("HALO_NET_ADHOC");
+	check(adhoc_stand_in_address() == 0, "adhoc: no stand-in address outside ad hoc play", (long)adhoc_stand_in_address(), 0);
+	posix_adhoc_close();
+	close(other_socket);
+	adhoc_state = 0;
+}
+
 int main(void)
 {
 	mock_log_quiet = getenv("VITA_NET_TEST_LOG") ? 0 : 1;
@@ -255,6 +332,8 @@ int main(void)
 	test_error_mapping();
 	printf("-- the game's calls for a solo multiplayer game\n");
 	test_game_sequence();
+	printf("-- ad hoc play's group (PDP)\n");
+	test_adhoc();
 	/* the console's self-test (HALO_NET_SELFTEST / HALO_NET_TRACE), its
 	log shown: VITA_NET_TEST_SELFTEST=1 */
 	if (getenv("VITA_NET_TEST_SELFTEST"))

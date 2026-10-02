@@ -20,6 +20,8 @@
 #   HALO_TEST_SECONDS  how long both run (default 75)
 #   HALO_TEST_CPUS   taskset CPU lists for the two copies (default
 #                    "24-27 28-31")
+#   HALO_TEST_PUBLIC_BROKERS=1  code and lobby through the real public
+#                    brokers (network.signalling_brokers) instead
 # Passes if the joiner's log shows the game played with two players.
 set -e
 mode=${1:-code}
@@ -44,9 +46,12 @@ common="HALO_NULL_RENDERER=1 HALO_NO_AUDIO=1 HALO_UPDATE_AUTO=false HALO_EXIT_AF
 	HALO_NET_ONLINE=true HALO_NET_STUN= HALO_NET_ALLOW_UPNP=false HALO_DISCORD_APPLICATION="
 case $mode in
 code|lobby)
-	python3 "$here/mqtt_test_broker.py" --port $port > "$out/broker.log" 2>&1 &
-	pids="$pids $!"
-	common="$common HALO_NET_BROKERS=127.0.0.1:$port"
+	# (HALO_TEST_PUBLIC_BROKERS=1: the real public brokers, over the internet)
+	if [ -z "$HALO_TEST_PUBLIC_BROKERS" ]; then
+		python3 "$here/mqtt_test_broker.py" --port $port > "$out/broker.log" 2>&1 &
+		pids="$pids $!"
+		common="$common HALO_NET_BROKERS=127.0.0.1:$port"
+	fi
 	;;
 adhoc)
 	common="$common HALO_NET_BROKERS= HALO_NET_ADHOC=true"
@@ -90,8 +95,7 @@ esac
 join_pid=$!
 pids="$pids $join_pid"
 # (the game does not quit by itself without a window: timeout stops it)
-wait $join_pid || true
-wait $host_pid || true
+{ wait $join_pid; wait $host_pid; } 2>/dev/null || true
 status=0
 echo "--- host"; grep -E "Internet play|ad hoc|network test: (hosting|starting)" "$out/a/run.log" | head -20
 echo "--- joiner"; grep -E "Internet play|ad hoc|network test: (join|the public)" "$out/b/run.log" | head -20

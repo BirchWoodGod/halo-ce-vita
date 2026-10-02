@@ -257,6 +257,11 @@ static struct
 	/* what is happening, for a menu (p2p_status) */
 	char status[96];
 
+	/* ad hoc play (network.adhoc, p2p_adhoc.c): the peers are the ad hoc
+	group's machines, through local relays; nothing goes to the internet
+	(no signalling, STUN or UPnP) */
+	int adhoc;
+
 	/* UPnP (posix_upnp.c): a thread asking the router; the port it forwards
 	here, and when it was last asked */
 	int upnp_working;
@@ -1725,6 +1730,18 @@ static void update_hosting(void)
 {
 	int want = p2p.hosting_socket >= 0;
 
+	if (p2p.adhoc)
+	{
+		/* (the group's machines are already peers: the game's broadcasts
+		reach them, and its game shows in their lists) */
+		if (want != p2p.hosting)
+		{
+			p2p.hosting = want;
+			set_status(want ? "hosting over ad hoc: the group's machines see the game under System Link" :
+				"stopped hosting");
+		}
+		return;
+	}
 	if (want && !p2p.hosting)
 	{
 		char text[2 * (P2P_IDENTIFIER_SIZE + P2P_TOKEN_SIZE) + 1];
@@ -1881,7 +1898,7 @@ static void update_upnp(void)
 	pthread_t thread;
 
 	if (allowed < 0)
-		allowed = config_boolean("network.allow_upnp") ? 1 : 0;
+		allowed = config_boolean("network.allow_upnp") && !p2p.adhoc ? 1 : 0;
 	if (!allowed || p2p.upnp_working)
 		return;
 	if (p2p.upnp_forwarded)
@@ -2223,6 +2240,7 @@ static void *p2p_thread(void *unused)
 			if (p2p.streams[index].used)
 				stream_update(&p2p.streams[index]);
 		}
+		p2p_adhoc_update();
 		update_peers();
 		stun_update();
 		update_hosting();
@@ -2243,7 +2261,8 @@ void p2p_initialize(unsigned long local_address)
 	int index;
 
 	p2p_identifier();
-	if (p2p.running || !config_boolean("network.online"))
+	/* (ad hoc play is internet play's tunnel without the internet) */
+	if (p2p.running || (!config_boolean("network.online") && !config_boolean("network.adhoc")))
 		return;
 	for (index = 0; index < MAXIMUM_PROXIES; index++)
 		p2p.proxies[index].socket = -1;
@@ -2253,6 +2272,7 @@ void p2p_initialize(unsigned long local_address)
 		p2p.streams[index].socket = -1;
 	p2p.local_address = local_address;
 	p2p.lobby_public = config_boolean("network.lobby_public");
+	p2p.adhoc = config_boolean("network.adhoc");
 	p2p.tunnel_socket = open_socket(SOCK_DGRAM, 0,
 		network_short((unsigned short)config_integer("network.tunnel_port")), &p2p.tunnel_port);
 	if (p2p.tunnel_socket < 0)
@@ -2285,6 +2305,8 @@ void p2p_initialize(unsigned long local_address)
 	}
 	pthread_detach(thread);
 	p2p.running = 1;
+	if (p2p.adhoc)
+		p2p_adhoc_start(p2p.tunnel_port);
 	if (command_line_invite(invite, sizeof(invite)))
 		p2p_join_invite(invite);
 }

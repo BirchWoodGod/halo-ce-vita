@@ -151,3 +151,41 @@ void posix_discord_close(int handle)
 		discord_pipes[handle] = NULL;
 	}
 }
+
+/* ---------- ad hoc play (p2p_adhoc.c): Windows is never in an ad hoc
+group (the Vita's PSP-style network; Linux emulates one for testing) */
+
+int posix_adhoc_ready(unsigned char *address)
+{
+	(void)address;
+	return 0;
+}
+
+int posix_adhoc_open(unsigned short port)
+{
+	(void)port;
+	return -1;
+}
+
+void posix_adhoc_close(void)
+{
+}
+
+int posix_adhoc_send(const unsigned char *address, unsigned short port, const void *data, int size)
+{
+	(void)address;
+	(void)port;
+	(void)data;
+	(void)size;
+	return -1;
+}
+
+int posix_adhoc_receive(unsigned char *address, unsigned short *port, void *data, int size, posix_ulong timeout)
+{
+	(void)address;
+	(void)port;
+	(void)data;
+	(void)size;
+	Sleep(timeout / 1000);
+	return 0;
+}
