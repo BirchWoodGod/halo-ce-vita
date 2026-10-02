@@ -2903,6 +2903,16 @@ void network_game_server_stalled_on_client(
 		else
 		{
 			server->client_machines[culprit].stall_start_time = system_milliseconds();
+#ifdef HALO_LINUX
+			/* (port) why a client is removed "due to timeout in-game" 2 s
+			later: the host is 128 ticks ahead of the updates it has from it
+			(an update number of 0: none has arrived) */
+			network_event(
+				"server stalled on client machine #%d: its last update is #%d, the game time %d",
+				server->client_machines[culprit].machine_index,
+				server->client_machines[culprit].last_received_update_sequence_number,
+				game_time_get());
+#endif
 		}
 
 		for (client_machine_index = 0;
