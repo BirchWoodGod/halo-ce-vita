@@ -88,6 +88,13 @@ symbols in this file:
 #include "render/render_sprite.h"
 #include "saved games/game_state.h"
 #include "scenario/scenario.h"
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#include "render_epoch.h"
+#include "cache/cache_files.h"
+#include "game/players.h"
+void platform_log(const char *format, ...);
+#endif
 
 /* ---------- constants */
 
@@ -752,6 +759,11 @@ static void particle_system_new_particles(
 					{
 						type->particle_count++;
 						particle->next_particle_index = type->first_particle_index;
+#ifdef HALO_LINUX
+						/* the particle is filled in before a render walking the
+						list can reach it (render_epoch.h) */
+						__atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
 						type->first_particle_index = particle_index;
 					}
 					else
@@ -779,6 +791,64 @@ static void particle_system_new_particles(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port, debug) HALO_STRESS_PARTICLES=n: the tick starts n particle systems
+around the first local player every frame (as explosions' effects do), so
+that particles are born and retired all the time in the lists the render
+draws: the race particle_system_render's state check closes */
+void particle_systems_stress_update(
+	void)
+{
+	static int wanted = -1;
+	static long definitions[64];
+	static short definition_count;
+	static unsigned long generation;
+	long player_index;
+	long unit_index;
+	short index;
+
+	if (wanted < 0)
+	{
+		const char *setting = getenv("HALO_STRESS_PARTICLES");
+
+		wanted = setting ? atoi(setting) : 0;
+	}
+	if (wanted <= 0 || !particle_systems || !particle_systems->valid)
+		return;
+	if (generation != halo_map_generation)
+	{
+		struct tag_iterator iterator;
+		long tag_index;
+
+		generation = halo_map_generation;
+		definition_count = 0;
+		tag_iterator_new(&iterator, PARTICLE_SYSTEM_DEFINITION_TAG);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE && definition_count < NUMBEROF(definitions))
+			definitions[definition_count++] = tag_index;
+		platform_log("HALO_STRESS_PARTICLES: %d particle systems a frame from %d definitions", wanted, definition_count);
+	}
+	player_index = local_player_get_player_index(0);
+	if (!definition_count || player_index == NONE)
+		return;
+	unit_index = player_get(player_index)->unit_index;
+	if (unit_index == NONE || !object_try_and_get(unit_index))
+		return;
+	for (index = 0; index < wanted; index++)
+	{
+		real_point3d position = object_get(unit_index)->object.position;
+		real_vector3d velocity = { 0.0f, 0.0f, 0.0f };
+		real_argb_color color = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+		position.x += (real)(rand() % 300 - 150) / 50.0f;
+		position.y += (real)(rand() % 300 - 150) / 50.0f;
+		position.z += (real)(rand() % 100) / 50.0f;
+		particle_system_new_unattached(definitions[rand() % definition_count], &position, &velocity, &color, 1.0f);
+	}
+
+	return;
+}
+#endif
 
 void particle_systems_update(
 	real delta_time)
@@ -1357,6 +1427,26 @@ void particle_system_update(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) With the tick on its own thread (tick_thread.c) the render draws a
+type's particles while the tick updates them, and a particle's state index
+is NONE twice in its life: when particle_system_new_particles has just
+linked it (before its first state is chosen) and when its last state is
+over (before particle_system_update unlinks and deletes it). The game never
+let the render see either; here it indexed the type's particle states with
+-1 and read a bitmap through the element before the block (a tester's
+Vita: data abort in particle_system_render on the game thread, the tick in
+particle_system_update, the particle's state and transition both NONE).
+The render takes each index once, skips a particle whose state is not an
+element of the block, and draws one whose transition is not as having
+none. */
+#define PARTICLE_RENDER_STATE_INDEX state_index_snapshot
+#define PARTICLE_RENDER_TRANSITION_STATE_INDEX transition_state_index_snapshot
+#else
+#define PARTICLE_RENDER_STATE_INDEX particle->state_index
+#define PARTICLE_RENDER_TRANSITION_STATE_INDEX particle->transition_state_index
+#endif
+
 static void particle_system_render(
 	long system_index)
 {
@@ -1381,8 +1471,22 @@ static void particle_system_render(
 			while (particle_index != NONE)
 			{
 				struct ps_particle_datum *particle = ps_particle_get(particle_index);
+#ifdef HALO_LINUX
+				short state_index_snapshot = particle ? __atomic_load_n(&particle->state_index, __ATOMIC_RELAXED) : NONE;
+				short transition_state_index_snapshot = particle ? __atomic_load_n(&particle->transition_state_index, __ATOMIC_RELAXED) : NONE;
 
+				if (!particle)
+					break;
+				if (transition_state_index_snapshot < 0 || transition_state_index_snapshot >= type_definition->particle_states.count)
+					transition_state_index_snapshot = NONE;
+#endif
+
+#ifdef HALO_LINUX
+				if (state_index_snapshot >= 0 && state_index_snapshot < type_definition->particle_states.count &&
+					particle->valid && render_location_visible(&particle->location))
+#else
 				if (particle->valid && render_location_visible(&particle->location))
+#endif
 				{
 					real_point3d position_viewer_space;
 					real_vector3d axis_viewer_space;
@@ -1390,7 +1494,7 @@ static void particle_system_render(
 					real transition_weight;
 					struct particle_system_type_particle_state *state_definition = TAG_BLOCK_GET_ELEMENT(
 						&type_definition->particle_states,
-						particle->state_index,
+						PARTICLE_RENDER_STATE_INDEX,
 						struct particle_system_type_particle_state);
 					struct particle_system_type_particle_state *transition_state_definition;
 					real scale;
@@ -1411,7 +1515,7 @@ static void particle_system_render(
 						&particle->axis,
 						&axis_viewer_space);
 
-					if (particle->transition_state_index == NONE)
+					if (PARTICLE_RENDER_TRANSITION_STATE_INDEX == NONE)
 					{
 						transition_state_definition = NULL;
 						state_weight = 1.0f;
@@ -1431,7 +1535,7 @@ static void particle_system_render(
 					{
 						transition_state_definition = TAG_BLOCK_GET_ELEMENT(
 							&type_definition->particle_states,
-							particle->transition_state_index,
+							PARTICLE_RENDER_TRANSITION_STATE_INDEX,
 							struct particle_system_type_particle_state);
 						transition_shader = &transition_state_definition->shader;
 						state_weight = particle->time_left_in_state/particle->state_length;
