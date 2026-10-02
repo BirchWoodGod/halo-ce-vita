@@ -65,6 +65,8 @@ static struct setting settings[] = {
 		{ "Every tick", "Every 3rd", "Every 6th" }, "How often muffling behind walls is rechecked", 1 },
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
 		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2 },
+	{ "Crouch", "HALO_CROUCH_TOGGLE", 0, 2, { "1", "0" }, { "Toggle", "Hold" },
+		"D-pad down: a press crouches, the next stands (Toggle)", 0 },
 	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0 },
 	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
 		"Raise if the sticks drift", 0 },
