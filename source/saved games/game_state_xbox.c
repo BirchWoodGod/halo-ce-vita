@@ -608,7 +608,7 @@ boolean game_state_write_to_file(
 		QueryPerformanceCounter(&started);
 		game_state_writer_wait();
 		memcpy(game_state_writer.snapshot, xbox_game_state_globals.buffer, xbox_game_state_globals.buffer_size);
-		if (checkpoints_logged++ < 8)
+		if (checkpoints_logged++ < 64)
 			platform_log("game state: checkpoint taken in %.1f ms", game_state_writer_ms(&started));
 		game_state_writer.snapshot_valid = TRUE;
 		xbox_game_state_globals.file_valid_for_read = TRUE;
