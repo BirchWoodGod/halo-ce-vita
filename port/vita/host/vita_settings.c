@@ -59,6 +59,8 @@ static struct setting settings[] = {
 		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2 },
 	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
 		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2 },
+	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
+		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3 },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
 		{ "Every tick", "Every 3rd", "Every 6th" }, "How often muffling behind walls is rechecked", 1 },
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },

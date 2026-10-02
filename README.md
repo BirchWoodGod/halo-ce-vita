@@ -106,14 +106,16 @@ levels you reached, but not the checkpoint, as on the Xbox.
 
 Hold Select + Start for a second. Up and down choose a setting, left and
 right change it, Circle closes the panel. Changes apply at once (the render
-resolution after a restart) and are kept in `ux0:data/haloce-vita/settings.txt`.
+resolution and sound voices after a restart) and are kept in
+`ux0:data/haloce-vita/settings.txt`.
 
 The defaults favour frame rate: lower model detail at a distance, tiny
 distant objects skipped, static props and object lighting updated less
 often, sounds' muffling behind walls rechecked less often, and a 75%
 render resolution. Set model detail High, distant objects Off, scenery and
 lighting to every tick, sound occlusion every tick and the resolution to
-100% to see and hear the game exactly as on the Xbox.
+100% to see and hear the game exactly as on the Xbox. Sound voices can play
+fewer positional sounds at once for speed.
 
 ## Building
 
