@@ -587,6 +587,17 @@ static short collision_log_get_current_user(
 void collision_log_start_time(
 	LARGE_INTEGER *start_time)
 {
+#ifdef HALO_LINUX
+	/* (port) the elapsed times are shown only with collision_log_time on
+	(collision_log_format_usage); otherwise the two clock reads around
+	every collision query (~1300 a tick in a b30 fight, a system call
+	each on the Vita) are skipped */
+	if (!collision_log_time)
+	{
+		start_time->QuadPart = 0;
+		return;
+	}
+#endif
 	QueryPerformanceCounter(start_time);
 
 	return;
@@ -599,6 +610,10 @@ void collision_log_end_time(
 	LARGE_INTEGER end_time;
 	short user;
 
+#ifdef HALO_LINUX
+	if (!collision_log_time)
+		return;
+#endif
 	QueryPerformanceCounter(&end_time);
 	user = collision_log_get_current_user(collision_function);
 	if (user != NONE)

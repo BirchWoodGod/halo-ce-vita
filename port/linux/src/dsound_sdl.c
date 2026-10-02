@@ -57,9 +57,10 @@ skips opening a device (port_config.c).
 struct voice_packet
 {
 	XMEDIAPACKET packet;
-	short *samples;           /* interleaved, source channel count */
+	short *samples;           /* interleaved, source channel count; NULL until decoded */
 	unsigned long frames;
 	BOOL finished;            /* played out by the mixer, not yet completed */
+	BOOL decoded;             /* samples made from packet.pvBuffer (mix_voice_packet) */
 };
 
 struct sdl_stream
@@ -342,6 +343,17 @@ static float packet_sample(const struct voice_packet *packet, unsigned long fram
 /* the first packet of a stream that still has frames to play at the
 cursor, marking the ones the cursor has passed finished; NULL once the
 stream has run dry */
+static void voice_packet_decode(const struct sdl_stream *stream, struct voice_packet *packet)
+{
+	unsigned long frames = 0;
+
+	packet->samples = stream->adpcm ?
+		decode_adpcm(packet->packet.pvBuffer, packet->packet.dwMaxSize, stream->channels, &frames) :
+		decode_pcm(packet->packet.pvBuffer, packet->packet.dwMaxSize, stream->channels, &frames);
+	packet->frames = packet->samples ? frames : 0;
+	packet->decoded = TRUE;
+}
+
 static struct voice_packet *mix_voice_packet(struct sdl_stream *stream)
 {
 	for (;;)
@@ -361,6 +373,8 @@ static struct voice_packet *mix_voice_packet(struct sdl_stream *stream)
 		}
 		if (!packet)
 			return NULL;
+		if (!packet->decoded)
+			voice_packet_decode(stream, packet);
 		if (stream->cursor < (double)packet->frames)
 			return packet;
 		stream->cursor -= (double)packet->frames;
@@ -857,27 +871,30 @@ static HRESULT STDMETHODCALLTYPE stream_process(IDirectSoundStream *object, LPCX
 {
 	struct sdl_stream *stream = stream_from_interface(object);
 	struct voice_packet *entry;
-	unsigned long frames = 0;
-	short *samples;
+	unsigned long frames;
 
 	(void)output;
 	if (!input)
 		return E_INVALIDARG;
-	/* decode outside the lock */
-	samples = stream->adpcm ?
-		decode_adpcm(input->pvBuffer, input->dwMaxSize, stream->channels, &frames) :
-		decode_pcm(input->pvBuffer, input->dwMaxSize, stream->channels, &frames);
+	/* The packet is decoded when the mixer first reaches it
+	(mix_voice_packet), not here: this is the game's thread, the tick's on
+	the Vita, where a heavy fight queued tens of packets a frame. The
+	packet's memory (the sound cache's) stays the game's to keep until the
+	packet completes, which is after the mixer has played it. */
+	frames = stream->adpcm ?
+		input->dwMaxSize / (XBOX_ADPCM_BLOCK_BYTES * stream->channels) * XBOX_ADPCM_BLOCK_SAMPLES :
+		input->dwMaxSize / (2 * stream->channels);
 	game_lock();
 	if (stream->packet_count == MAXIMUM_STREAM_PACKETS)
 	{
 		pthread_mutex_unlock(&mixer_lock);
-		free(samples);
 		return E_OUTOFMEMORY;
 	}
 	entry = &stream->packets[(stream->packet_head + stream->packet_count) % MAXIMUM_STREAM_PACKETS];
 	entry->packet = *input;
-	entry->samples = samples;
-	entry->frames = samples ? frames : 0;
+	entry->samples = NULL;
+	entry->decoded = FALSE;
+	entry->frames = frames;
 	entry->finished = FALSE;
 	if (input->pdwStatus)
 		*input->pdwStatus = XMEDIAPACKET_STATUS_PENDING;

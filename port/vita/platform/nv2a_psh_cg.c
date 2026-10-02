@@ -321,7 +321,8 @@ static const char *sampler_declaration(unsigned char type)
 {
 	switch (type)
 	{
-	/* GXM has no volume textures: a 3D sampler reads its first slice */
+	/* GXM has no volume textures: a 3D sampler reads its slices laid side
+	by side in a 2D texture (tex3D_slices) */
 	case _xgpu_sampler_3d: return "sampler2D";
 	case _xgpu_sampler_cube: return "samplerCUBE";
 	default: return "sampler2D";
@@ -358,25 +359,70 @@ static void dot_input(struct xgpu_text *text, const DWORD *state, int stage)
 	}
 }
 
-/* the texture's LOD bias is part of its GXM sampler state (d3d8_gxm.c) */
+/* the texture's LOD bias is part of its GXM sampler state (d3d8_gxm.c);
+a stage addressed with D3DTADDRESS_BORDER returns its border colour where
+the (normalised) coordinate leaves the texture (d3d8_gxm.c key_border) */
 static void sample(struct xgpu_text *text, const struct nv2a_pixel_shader_key *key, int stage, const char *coordinates)
 {
+	int border = (key->border_mask >> stage) & 1;
+	char inside[200];
+
+	inside[0] = 0;
 	switch (key->sampler_type[stage])
 	{
 	case _xgpu_sampler_cube:
+		border = 0;
 		xgpu_text_append(text, "texCUBE(tex%d, (%s).xyz)", stage, coordinates);
+		break;
+	case _xgpu_sampler_3d:
+		if (key->volume_slices_log2[stage])
+		{
+			snprintf(inside, sizeof(inside), "(%s).xyz", coordinates);
+			if (border)
+				xgpu_text_append(text, "border3(");
+			xgpu_text_append(text, "tex3D_slices(tex%d, (%s).xyz, %.1f, %.1f)", stage, coordinates,
+				(double)(1UL << key->volume_slices_log2[stage]), (double)(1UL << key->volume_width_log2[stage]));
+			break;
+		}
+		/* (a volume not laid out in slices: its first slice) */
+		snprintf(inside, sizeof(inside), "(%s).xy", coordinates);
+		if (border)
+			xgpu_text_append(text, "border2(");
+		xgpu_text_append(text, "tex2D(tex%d, (%s).xy)", stage, coordinates);
 		break;
 	default:
 		/* (mode 3 of HALO_SIMPLE_FRAG_MODE: the varying itself as the
 		coordinate, so the fetch does not depend on fragment arithmetic:
 		the SGX prefetches such reads) */
 		if ((key->pad == 3 || (key->raw_coordinates & (1U << stage))) && strncmp(coordinates, "float4(xT", 9) == 0)
+		{
+			snprintf(inside, sizeof(inside), "xT%d.xy", stage);
+			if (border)
+				xgpu_text_append(text, "border2(");
 			xgpu_text_append(text, "tex2D(tex%d, xT%d.xy)", stage, stage);
+		}
 		else if ((key->projective_coordinates & (1U << stage)) && strncmp(coordinates, "float4(xT", 9) == 0)
+		{
+			snprintf(inside, sizeof(inside), "xT%d.xy / xT%d.w", stage, stage);
+			if (border)
+				xgpu_text_append(text, "border2(");
 			xgpu_text_append(text, "tex2Dproj(tex%d, float3(xT%d.x, xT%d.y, xT%d.w))", stage, stage, stage, stage);
+		}
 		else
+		{
+			snprintf(inside, sizeof(inside), "(%s).xy * %s.xy", coordinates, fu(VITA_FU_TEXTURE_SCALE + stage));
+			if (border)
+				xgpu_text_append(text, "border2(");
 			xgpu_text_append(text, "tex2D(tex%d, (%s).xy * %s.xy)", stage, coordinates, fu(VITA_FU_TEXTURE_SCALE + stage));
+		}
 		break;
+	}
+	if (border)
+	{
+		DWORD color = key->border_color[stage];
+
+		xgpu_text_append(text, ", %s, float4(%.6f, %.6f, %.6f, %.6f))", inside,
+			((color >> 16) & 0xff) / 255.0, ((color >> 8) & 0xff) / 255.0, (color & 0xff) / 255.0, ((color >> 24) & 0xff) / 255.0);
 	}
 }
 
@@ -563,7 +609,41 @@ char *nv2a_pixel_shader_to_cg(const struct nv2a_pixel_shader_key *key)
 		"float3 signed_bytes(float3 x)\n"
 		"{\n"
 		"	return float3(signed_byte(x.r), signed_byte(x.g), signed_byte(x.b));\n"
-		"}\n"
+		"}\n");
+	if (key->border_mask)
+	{
+		xgpu_text_append(&text,
+			"float4 border2(float4 t, float2 c, float4 b)\n"
+			"{\n"
+			"	return (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0) ? b : t;\n"
+			"}\n"
+			"float4 border3(float4 t, float3 c, float4 b)\n"
+			"{\n"
+			"	return (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z < 0.0 || c.z > 1.0) ? b : t;\n"
+			"}\n");
+	}
+	for (stage = 0; stage < 4; stage++)
+		if (key->sampler_type[stage] == _xgpu_sampler_3d && key->volume_slices_log2[stage])
+			break;
+	if (stage < 4)
+	{
+		/* a volume texture's slices side by side (slice z at u from z/D to
+		(z+1)/D, each W texels wide): the two slices around the coordinate,
+		blended, each read kept half a texel inside its slice */
+		xgpu_text_append(&text,
+			"float4 tex3D_slices(sampler2D s, float3 c, float D, float W)\n"
+			"{\n"
+			"	float3 cc = clamp(c, 0.0, 1.0);\n"
+			"	float z = cc.z * D - 0.5;\n"
+			"	float zf = floor(z);\n"
+			"	float s0 = clamp(zf, 0.0, D - 1.0), s1 = clamp(zf + 1.0, 0.0, D - 1.0);\n"
+			"	float u = clamp(cc.x, 0.5 / W, 1.0 - 0.5 / W);\n"
+			"	float4 a = tex2D(s, float2((s0 + u) / D, cc.y));\n"
+			"	float4 b = tex2D(s, float2((s1 + u) / D, cc.y));\n"
+			"	return a + (b - a) * (z - zf);\n"
+			"}\n");
+	}
+	xgpu_text_append(&text,
 		"float4 main(\n"
 		"\tfloat4 xD0 : COLOR0,\n"
 		"\tfloat4 xD1 : COLOR1,\n"

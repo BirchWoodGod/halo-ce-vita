@@ -318,6 +318,17 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=3) the actor update's stages timed (tick_detail.c) */
+unsigned long long halo_tick_detail_begin(void);
+void halo_tick_detail_end(const char *name, unsigned long long started);
+#define HALO_DETAIL_BEGIN() unsigned long long halo_detail_started = halo_tick_detail_begin()
+#define HALO_DETAIL_END(name) halo_tick_detail_end(name, halo_detail_started)
+#else
+#define HALO_DETAIL_BEGIN() ((void)0)
+#define HALO_DETAIL_END(name) ((void)0)
+#endif
+
 /* ---------- constants */
 
 enum
@@ -4196,13 +4207,13 @@ static void actor_update(
 	if (actor_general_update(actor_index))
 	{
 		actor_get_timeslice(actor_index);
-		actor_input_update(actor_index);
-		actor_perception_update(actor_index);
-		actor_situation_update(actor_index);
-		actor_emotion_update(actor_index);
+		{ HALO_DETAIL_BEGIN(); actor_input_update(actor_index); HALO_DETAIL_END("ai:input"); }
+		{ HALO_DETAIL_BEGIN(); actor_perception_update(actor_index); HALO_DETAIL_END("ai:perception"); }
+		{ HALO_DETAIL_BEGIN(); actor_situation_update(actor_index); HALO_DETAIL_END("ai:situation"); }
+		{ HALO_DETAIL_BEGIN(); actor_emotion_update(actor_index); HALO_DETAIL_END("ai:emotion"); }
 		actor_clear_orders(actor_index);
-		actor_decision_loop(actor_index);
-		actor_action_update(actor_index);
+		{ HALO_DETAIL_BEGIN(); actor_decision_loop(actor_index); HALO_DETAIL_END("ai:decision"); }
+		{ HALO_DETAIL_BEGIN(); actor_action_update(actor_index); HALO_DETAIL_END("ai:action"); }
 
 		if (!actor->meta.dormant)
 		{
@@ -4213,15 +4224,15 @@ static void actor_update(
 			else
 			{
 				actor_clear_output(actor_index);
-				actor_action_control(actor_index);
+				{ HALO_DETAIL_BEGIN(); actor_action_control(actor_index); HALO_DETAIL_END("ai:action_control"); }
 				actor_communication_update(actor_index);
 				actor_conversation_control(actor_index);
-				actor_destination_update(actor_index);
+				{ HALO_DETAIL_BEGIN(); actor_destination_update(actor_index); HALO_DETAIL_END("ai:destination"); }
 				actor_look_affect_movement(actor_index);
-				actor_move_update(actor_index);
-				actor_look_update(actor_index);
-				actor_combat_update(actor_index);
-				actor_unit_control(actor_index);
+				{ HALO_DETAIL_BEGIN(); actor_move_update(actor_index); HALO_DETAIL_END("ai:move"); }
+				{ HALO_DETAIL_BEGIN(); actor_look_update(actor_index); HALO_DETAIL_END("ai:look"); }
+				{ HALO_DETAIL_BEGIN(); actor_combat_update(actor_index); HALO_DETAIL_END("ai:combat"); }
+				{ HALO_DETAIL_BEGIN(); actor_unit_control(actor_index); HALO_DETAIL_END("ai:unit_control"); }
 			}
 		}
 	}

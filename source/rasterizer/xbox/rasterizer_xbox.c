@@ -1944,6 +1944,93 @@ void _rasterizer_dispose(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) Textures streamed instead of waited for. A texture the frame needs
+that is not in the texture cache yet was read with the game waiting
+(_texture_cache_bitmap_get_hardware_format blocking): on the Xbox's hard
+disk cache that was brief, and the clusters' predicted resources
+(observer.c) had usually asked for it already; the Vita's memory card
+reads ~10 MB/s, and walking into a new area froze the game for one to two
+seconds while 10-15 MB of textures came in. With HALO_TEXTURE_STREAMING=1
+(the Vita's default) the read is started without waiting and the draw
+uses the globals' default texture for the bitmap's type and usage (the
+one the shaders fall back on when they have none: rasterizer_set_texture)
+until the texture is in. For the first two seconds of a map or a revert
+the game waits as before, so the first frames are not drawn with
+stand-ins; the tick, which loads but draws nothing, always waits. */
+void *_texture_cache_bitmap_get_hardware_format(struct bitmap_data *bitmap, boolean block, boolean load);
+unsigned long long vita_host_time_us(void);
+void platform_log(const char *format, ...);
+extern unsigned long halo_map_generation;
+
+static boolean rasterizer_texture_streaming(
+	void)
+{
+	static int wanted = -1;
+	static unsigned long generation;
+	static unsigned long long generation_started_us;
+	unsigned long long now;
+
+	if (wanted < 0)
+	{
+		const char *setting = getenv("HALO_TEXTURE_STREAMING");
+
+#ifdef HALO_VITA
+		wanted = setting ? atoi(setting) != 0 : 1;
+#else
+		wanted = setting && atoi(setting) != 0;
+#endif
+	}
+	if (!wanted || halo_epoch_on_mutator())
+		return FALSE;
+	now = vita_host_time_us();
+	if (generation != halo_map_generation)
+	{
+		generation = halo_map_generation;
+		generation_started_us = now;
+	}
+	return now - generation_started_us > 2000000ull;
+}
+
+/* a bitmap's hardware texture when streaming: its own if it is in, else
+the stand-in's (and the read is under way); NULL to wait for it as the
+game did */
+static D3DBaseTexture *rasterizer_texture_streamed(
+	struct bitmap_data const *bitmap,
+	boolean *stand_in_used)
+{
+	long default_definition_index;
+	struct bitmap_data *stand_in;
+	D3DBaseTexture *texture;
+
+	if (!TEST_FLAG(bitmap->flags, 7 /* _bitmap_cached_bit, the private enum of bitmaps.c */) ||
+		bitmap->type < 0 || bitmap->type >= NUMBEROF(global_rasterizer_data->default_textures) ||
+		!rasterizer_texture_streaming())
+	{
+		return NULL;
+	}
+	/* (the read starts here if it has not) */
+	texture = _texture_cache_bitmap_get_hardware_format((struct bitmap_data *)bitmap, FALSE, TRUE);
+	if (texture)
+		return texture;
+	default_definition_index = global_rasterizer_data->default_textures[bitmap->type].index;
+	if (default_definition_index == NONE || default_definition_index == bitmap->tag_index)
+		return NULL;
+	stand_in = bitmap_group_try_and_get_bitmap(default_definition_index, bitmap_group_get(bitmap->tag_index)->usage);
+	if (!stand_in || stand_in->type != bitmap->type)
+		return NULL;
+	{
+		static unsigned long stand_ins;
+
+		if (stand_ins++ < 4)
+			platform_log("texture streaming: %s drawn with a stand-in while it loads", tag_get_name(bitmap->tag_index));
+	}
+	/* (the default textures are small: waited for, the first time) */
+	*stand_in_used = TRUE;
+	return _texture_cache_bitmap_get_hardware_format(stand_in, TRUE, TRUE);
+}
+#endif
+
 boolean rasterizer_set_texture_bitmap_data(
 	short stage,
 	struct bitmap_data const *bitmap)
@@ -1979,9 +2066,24 @@ boolean rasterizer_set_texture_bitmap_data(
 #endif
 
 		profile_texture_start();
+#ifdef HALO_LINUX
+		{
+			boolean stand_in_used = FALSE;
+
+			d3d_texture = rasterizer_texture_streamed(bitmap, &stand_in_used);
+			if (!d3d_texture)
+				d3d_texture = _texture_cache_bitmap_get_hardware_format(bitmap, TRUE, TRUE);
+			profile_texture_end();
+			IDirect3DDevice8_SetTexture(global_d3d_device, stage, d3d_texture);
+			/* (a stand-in is not remembered as the bitmap's texture) */
+			if (stand_in_used)
+				return TRUE;
+		}
+#else
 		d3d_texture = _texture_cache_bitmap_get_hardware_format(bitmap, TRUE, TRUE);
 		profile_texture_end();
 		IDirect3DDevice8_SetTexture(global_d3d_device, stage, d3d_texture);
+#endif
 #ifdef HALO_LINUX
 		if (on_render)
 		{

@@ -120,6 +120,16 @@ parser.add_argument(
     "render path measured on any Linux machine, such as an ARM board, without the hardware)",
 )
 parser.add_argument(
+    "--vita-aligned",
+    choices=["hot", "none"],
+    default="none",
+    help="the Vita build: none (the default) keeps -fmax-type-align=1 for all of the game's code; hot "
+    "(EXPERIMENTAL, it crashed on the hardware) compiles the simulation and rendering directories (objects, "
+    "physics, ai, units, items, effects, math, render, rasterizer...) without it, so their floats load and store "
+    "straight from floating point registers - any float read from a misaligned address is then an alignment "
+    "fault (a crash) on the Vita",
+)
+parser.add_argument(
     "--android-ndk",
     type=str,
     help="Android NDK for `ninja android` (default: ANDROID_NDK_HOME, or the newest under the Android SDK)",
@@ -194,6 +204,7 @@ sln.port_lto = args.lto
 sln.port_portable = args.portable
 sln.port_pgo = args.pgo
 sln.port_pgo_profile = args.pgo_profile
+sln.vita_aligned = args.vita_aligned
 sln.android_ndk = args.android_ndk
 sln.android_guest_cc = args.android_guest_cc
 if not is_windows():

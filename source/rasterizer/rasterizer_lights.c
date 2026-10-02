@@ -346,6 +346,7 @@ static struct rasterizer_lens_flare_submit_parameters *lens_flare_parameters_get
 	short lens_flare_index);
 static byte *lens_flare_occlusion_test_results_get(
 	struct rasterizer_lens_flare_submit_parameters *lens_flare_parameters);
+
 static real lens_flare_evaluate_corona_rotation_function(
 	short corona_rotation_function,
 	struct rasterizer_lens_flare_submit_parameters const *lens_flare_parameters);
@@ -418,6 +419,31 @@ static byte *lens_flare_occlusion_test_results_get(
 		data[lens_flare_parameters->lens_flare_index]
 		[lens_flare_parameters->compressed_window_index & _lens_flare_window_index_mask];
 }
+
+#ifdef HALO_VITA
+/* (port) the visibility test's index for a flare: on the Vita a test's
+result is read from the newest frame the GPU has finished, one to three
+frames old (port/vita/platform/d3d8_gxm.c), and a flare's place in the
+frame's list (the index the game passed) changes from frame to frame as
+lights come into and leave view - while turning, a flare was given another
+flare's visibility: flares went out when the player moved and showed
+through walls. The flare's own results slot, which stays the same for as
+long as the flare exists, names its test instead. */
+static unsigned long lens_flare_occlusion_test_key(
+	byte const *occlusion_test_result)
+{
+	byte const *base = (byte const *)local_lens_flare_occlusion_test_results;
+	byte const *base2 = (byte const *)local_lens_flare_occlusion_test_results2;
+
+	if (occlusion_test_result >= base && occlusion_test_result < base + sizeof(local_lens_flare_occlusion_test_results))
+		return 1 + (unsigned long)(occlusion_test_result - base);
+	return 1 + sizeof(local_lens_flare_occlusion_test_results) + (unsigned long)(occlusion_test_result - base2);
+}
+#define LENS_FLARE_OCCLUSION_TEST_INDEX(parameters, lens_flare_index) \
+	((long)lens_flare_occlusion_test_key(lens_flare_occlusion_test_results_get(parameters)))
+#else
+#define LENS_FLARE_OCCLUSION_TEST_INDEX(parameters, lens_flare_index) (lens_flare_index)
+#endif
 
 static real lens_flare_evaluate_corona_rotation_function(
 	short corona_rotation_function,
@@ -632,7 +658,8 @@ void rasterizer_lights_begin_for_new_frame(
 
 			if (lens_flare_parameters->internal__occlusion_pixels>0)
 			{
-				long visible_pixels= rasterizer_widget_get_occlusion_test_result(lens_flare_index);
+				long visible_pixels= rasterizer_widget_get_occlusion_test_result(
+					LENS_FLARE_OCCLUSION_TEST_INDEX(lens_flare_parameters, lens_flare_index));
 				long occlusion_pixels= lens_flare_parameters->internal__occlusion_pixels;
 
 				latest_visibility= (byte)MIN(255, (255*visible_pixels + (occlusion_pixels>>1))/occlusion_pixels);
@@ -759,12 +786,43 @@ void rasterizer_lights_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) rasterizer_lens_flare_submit_for_cluster's per-marker results, by
+marker index, valid for one structure of one loaded map (the render thread
+only) */
+enum { LENS_FLARE_MARKER_CACHE_SIZE = 4096 };
+struct lens_flare_marker_cache_entry
+{
+	unsigned long stamp;
+	long marker_index;
+	unsigned long compressed_direction, compressed_up;
+	struct lens_flare_definition *definition;
+};
+static struct lens_flare_marker_cache_entry lens_flare_marker_cache[LENS_FLARE_MARKER_CACHE_SIZE];
+static unsigned long lens_flare_marker_cache_stamp;
+#endif
+
 void rasterizer_lens_flare_submit_for_cluster(
 	short cluster_index)
 {
 	if (rasterizer_debug_options.lens_flares && !screenshot_in_progress())
 	{
 		struct structure_bsp *structure_bsp= global_structure_bsp_get();
+#ifdef HALO_LINUX
+		{
+			extern unsigned long halo_map_generation;
+			static struct structure_bsp *cached_structure_bsp;
+			static unsigned long cached_generation;
+
+			if (cached_structure_bsp != structure_bsp || cached_generation != halo_map_generation ||
+				!lens_flare_marker_cache_stamp)
+			{
+				cached_structure_bsp= structure_bsp;
+				cached_generation= halo_map_generation;
+				lens_flare_marker_cache_stamp++;
+			}
+		}
+#endif
 		struct structure_cluster *cluster= TAG_BLOCK_GET_ELEMENT(&structure_bsp->clusters, cluster_index, struct structure_cluster);
 		long lens_flare_marker_index;
 
@@ -775,6 +833,24 @@ void rasterizer_lens_flare_submit_for_cluster(
 			struct structure_lens_flare *structure_lens_flare= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flares, marker->lens_flare_index, struct structure_lens_flare);
 			struct rasterizer_lens_flare_submit_parameters parameters;
 
+#ifdef HALO_LINUX
+			/* (port) a marker's compressed direction and up vectors and its
+			definition are the same every frame (the structure's own data):
+			made once per marker and map instead of on every frame for every
+			marker in view - a10's corridors submit ~900 a frame, each two
+			normalizations and six floors */
+			struct lens_flare_marker_cache_entry *cached =
+				&lens_flare_marker_cache[structure_lens_flare_marker_index & (LENS_FLARE_MARKER_CACHE_SIZE - 1)];
+
+			if (cached->stamp == lens_flare_marker_cache_stamp && cached->marker_index == structure_lens_flare_marker_index)
+			{
+				parameters.compressed_direction= cached->compressed_direction;
+				parameters.compressed_up= cached->compressed_up;
+				parameters.definition= cached->definition;
+			}
+			else
+#endif
+			{
 			{
 				real_vector3d direction;
 				real_vector3d up;
@@ -794,6 +870,14 @@ void rasterizer_lens_flare_submit_for_cluster(
 			}
 
 			parameters.definition= lens_flare_definition_get(structure_lens_flare->lens_flare.index);
+#ifdef HALO_LINUX
+			cached->stamp= lens_flare_marker_cache_stamp;
+			cached->marker_index= structure_lens_flare_marker_index;
+			cached->compressed_direction= parameters.compressed_direction;
+			cached->compressed_up= parameters.compressed_up;
+			cached->definition= parameters.definition;
+#endif
+			}
 			parameters.position= marker->position;
 			parameters.compressed_light_color= NONE;
 			parameters.light_identifier= NONE;
@@ -869,7 +953,7 @@ void rasterizer_lens_flares_submit_occlusion_tests(
 					rasterizer_widget_submit_occlusion_test(
 						&occlusion_point,
 						occlusion_radius,
-						lens_flare_index);
+						LENS_FLARE_OCCLUSION_TEST_INDEX(lens_flare_parameters, lens_flare_index));
 			}
 		}
 

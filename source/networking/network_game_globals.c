@@ -112,6 +112,15 @@ symbols in this file:
 #include "network_game_globals.h"
 #include "network_server_manager_internal.h"
 
+#ifdef HALO_LINUX
+/* (HALO_NET_PROFILE=1) the networked frame's steps timed (port/linux/game/tick_detail.c) */
+unsigned long long halo_net_detail_begin(void);
+void halo_net_detail_end(const char *name, unsigned long long started);
+#define HALO_NET_DETAIL(name, statement) do { unsigned long long halo_net_started = halo_net_detail_begin(); statement; halo_net_detail_end(name, halo_net_started); } while (0)
+#else
+#define HALO_NET_DETAIL(name, statement) do { statement; } while (0)
+#endif
+
 /* ---------- constants */
 
 enum network_game_client_state
@@ -437,7 +446,7 @@ boolean network_game_server_start_frame(
 	boolean result;
 
 	if (bss_004566dc.server)
-		result = network_game_server_idle(bss_004566dc.server);
+		HALO_NET_DETAIL("server_idle", result = network_game_server_idle(bss_004566dc.server));
 	else
 	{
 		error(_error_silent, "no network game server");
@@ -520,7 +529,7 @@ boolean network_game_client_start_frame(
 	}
 	else
 	{
-		result = network_game_client_idle(global_network_game_client);
+		HALO_NET_DETAIL("client_idle", result = network_game_client_idle(global_network_game_client));
 		if (result)
 		{
 			if (!network_game_client_get_error(global_network_game_client))

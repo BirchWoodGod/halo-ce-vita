@@ -31,6 +31,9 @@ alone.
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+/* the release builds' lookups inline in data.h and objects.h are static, which a weak function cannot be: this unit takes the functions in data.c and objects.c instead (the same results without assertions) */
+#define HALO_DATA_C
+#define HALO_OBJECTS_C
 #endif
 
 #undef __inline

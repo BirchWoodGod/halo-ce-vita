@@ -838,10 +838,20 @@ boolean object_type_update(
 	for (i = 0; definition->part_definitions[i]; i++)
 	{
 		struct object_type_definition *current_definition = definition->part_definitions[i];
+#ifdef HALO_LINUX
+		/* (HALO_TICK_PROFILE=3) each part's update timed (tick_detail.c) */
+		unsigned long long halo_tick_detail_begin(void);
+		void halo_tick_detail_end(const char *name, unsigned long long started);
+		unsigned long long started = halo_tick_detail_begin();
+#endif
 		if (current_definition->datum_update && current_definition->datum_update(object_index))
 		{
 			result = TRUE;
 		}
+#ifdef HALO_LINUX
+		if (current_definition->datum_update)
+			halo_tick_detail_end(current_definition->name, started);
+#endif
 	}
 
 	return result;

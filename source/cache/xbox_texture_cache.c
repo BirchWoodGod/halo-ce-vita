@@ -973,6 +973,16 @@ void *_texture_cache_bitmap_get_hardware_format(
 {
 	void *hardware_format = NULL;
 
+#ifdef HALO_LINUX
+	{
+		/* (harness) a repeatable run never draws without a texture that
+		is still loading (main.c) */
+		int halo_repeatable_run(void);
+
+		if (load && halo_repeatable_run())
+			block = TRUE;
+	}
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\xbox_texture_cache.c",
 		210,

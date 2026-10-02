@@ -328,6 +328,153 @@ static void structure_render_dynamic_triangles_from_bitvector(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (a list of 64 and more is sorted by its digits, 11 bits at a time, as
+many passes as its largest index needs: the lights' lists run to the
+thousands of surfaces; an ascending list is left as it is) */
+static void structure_render_radix_sort_surface_indices(
+	long *elements,
+	long count,
+	unsigned long largest)
+{
+	static long scratch[MAXIMUM_LOCALLY_RENDERED_SURFACES];
+	long *from = elements, *to = scratch;
+	unsigned long shift;
+
+	for (shift = 0; shift < 32 && (largest >> shift); shift += 11)
+	{
+		unsigned long counts[2048];
+		unsigned long total = 0, digit;
+		long index, *swap;
+
+		memset(counts, 0, sizeof(counts));
+		for (index = 0; index < count; index++)
+			counts[((unsigned long)from[index] >> shift) & 2047]++;
+		for (digit = 0; digit < 2048; digit++)
+		{
+			unsigned long here = counts[digit];
+
+			counts[digit] = total;
+			total += here;
+		}
+		for (index = 0; index < count; index++)
+			to[counts[((unsigned long)from[index] >> shift) & 2047]++] = from[index];
+		swap = from;
+		from = to;
+		to = swap;
+	}
+	if (from != elements)
+		memcpy(elements, from, count * sizeof(elements[0]));
+}
+
+static void structure_render_sort_surface_indices(
+	long *elements,
+	long count)
+{
+	long *lo_stack[64], *hi_stack[64];
+	long depth = 0;
+	long *lo = elements, *hi = elements + count - 1;
+
+	if (count < 2)
+		return;
+	if (count >= 64 && count <= MAXIMUM_LOCALLY_RENDERED_SURFACES)
+	{
+		unsigned long largest = 0;
+		long index;
+		int ascending = 1, negative = 0;
+
+		for (index = 0; index < count; index++)
+		{
+			if (elements[index] < 0)
+				negative = 1;
+			if ((unsigned long)elements[index] > largest)
+				largest = (unsigned long)elements[index];
+			if (index && elements[index] < elements[index - 1])
+				ascending = 0;
+		}
+		if (ascending)
+			return;
+		if (!negative)
+		{
+			structure_render_radix_sort_surface_indices(elements, count, largest);
+			return;
+		}
+	}
+	for (;;)
+	{
+		if (hi - lo < 16)
+		{
+			long *scan;
+
+			for (scan = lo + 1; scan <= hi; scan++)
+			{
+				long value = *scan;
+				long *place = scan;
+
+				while (place > lo && place[-1] > value)
+				{
+					*place = place[-1];
+					place--;
+				}
+				*place = value;
+			}
+		}
+		else
+		{
+			long *middle = lo + ((hi - lo) >> 1);
+			long pivot, temporary;
+			long *i = lo, *j = hi;
+
+			/* (the median of three for the pivot) */
+			if (*middle < *lo) { temporary = *middle; *middle = *lo; *lo = temporary; }
+			if (*hi < *lo) { temporary = *hi; *hi = *lo; *lo = temporary; }
+			if (*hi < *middle) { temporary = *hi; *hi = *middle; *middle = temporary; }
+			pivot = *middle;
+			while (i <= j)
+			{
+				while (*i < pivot)
+					i++;
+				while (*j > pivot)
+					j--;
+				if (i <= j)
+				{
+					temporary = *i;
+					*i = *j;
+					*j = temporary;
+					i++;
+					j--;
+				}
+			}
+			/* (the larger part waits on the stack, the smaller goes on) */
+			if (j - lo > hi - i)
+			{
+				if (lo < j)
+				{
+					lo_stack[depth] = lo;
+					hi_stack[depth++] = j;
+				}
+				lo = i;
+			}
+			else
+			{
+				if (i < hi)
+				{
+					lo_stack[depth] = i;
+					hi_stack[depth++] = hi;
+				}
+				hi = j;
+			}
+			if (lo < hi)
+				continue;
+		}
+		if (--depth < 0)
+			break;
+		lo = lo_stack[depth];
+		hi = hi_stack[depth];
+	}
+}
+#endif
+
 static void structure_render_dynamic_triangles_from_indices(
 	short surface_count,
 	long *surface_indices,
@@ -336,7 +483,15 @@ static void structure_render_dynamic_triangles_from_indices(
 	struct structure_bsp *structure_bsp = global_structure_bsp_get();
 	short surface_index_index;
 
+#ifdef HALO_LINUX
+	/* (port) the surface indices into ascending order - one order whatever
+	sorts them - without a call through a pointer per comparison (the
+	shadows' and lights' surface lists: up to hundreds of surfaces each,
+	tens of lists a frame) */
+	structure_render_sort_surface_indices(surface_indices, surface_count);
+#else
 	qsort_4byte(surface_indices, surface_count, compare_surface_indices);
+#endif
 
 	for (surface_index_index = 0;
 		surface_index_index < surface_count;

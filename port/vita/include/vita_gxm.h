@@ -114,29 +114,51 @@ struct vgxm_attribute
 };
 
 #define VGXM_ATTRIBUTE_COUNT 16
-#define VGXM_STREAM_COUNT 16
+/* (the Direct3D device feeds at most three: two in a declaration and one
+for halo_d3d_stream_attribute) */
+#define VGXM_STREAM_COUNT 4
 
+/* (the fields the Direct3D device's record writes on the game's thread
+come first, together, then those its worker sets: a draw is written into a
+cold ring entry, and every line it touches there is a cache miss) */
 struct vgxm_draw
 {
-	unsigned long vertex_shader;
-	unsigned long fragment_shader;
-
 	/* vertex layout: the attributes (by register) and their streams */
 	unsigned long attribute_count;
-	struct vgxm_attribute attributes[VGXM_ATTRIBUTE_COUNT];
 	unsigned long stream_count;
+	/* D3DPRIMITIVETYPE; quads arrive as triangles */
+	unsigned long primitive;
+	unsigned long index_count;
+	const unsigned short *indices;
+	/* set when the draw counts samples for a visibility test: its slot in
+	the frame's visibility buffer, 1 to VGXM_VISIBILITY_SLOTS - 1 */
+	unsigned long visibility_index;
+	/* the vertex program's BUFFER[1] */
+	const void *vertex_uniforms;
+	/* (for the null renderer's draw hash) the registers of chunk D's
+	snapshot the program can read - its absolute reads and the object's node
+	matrices */
+	unsigned long vertex_chunk_d_registers;
+	/* the vertex program's constant chunks (vita_xgpu.h: BUFFER[0] and
+	[2..6]; NULL for a chunk the program does not read) */
+	const void *vertex_chunks[6];
+	/* the window transform: x = ndc.x * scale[0] + offset[0], likewise y,
+	and depth = ndc.z * scale[2] + offset[2] */
+	float viewport_offset[3];
+	float viewport_scale[3];
+	/* pixels [x0, x1) x [y0, y1) */
+	long clip[4];
 	unsigned long strides[VGXM_STREAM_COUNT];
 	const void *streams[VGXM_STREAM_COUNT];
+	struct vgxm_attribute attributes[VGXM_ATTRIBUTE_COUNT];
 
-	/* the vertex program's constant chunks (vita_xgpu.h: BUFFER[0] and
-	[2..6]; NULL for a chunk the program does not read), its BUFFER[1], and
-	the fragment program's BUFFER[0] */
-	const void *vertex_chunks[6];
-	const void *vertex_uniforms;
+	/* (set by the worker) */
+	unsigned long vertex_shader;
+	unsigned long fragment_shader;
+	/* the fragment program's BUFFER[0] and [1] */
 	const void *fragment_uniforms[2];
 	/* per texture stage, NULL when unbound */
 	const struct vgxm_texture *textures[4];
-
 	/* Direct3D render state values */
 	unsigned long depth_test, depth_write, depth_function;
 	unsigned long stencil_test, stencil_function, stencil_reference, stencil_read_mask, stencil_write_mask;
@@ -147,20 +169,11 @@ struct vgxm_draw
 	/* 0 none, else D3DCULL_CW or D3DCULL_CCW: the winding that is discarded */
 	unsigned long cull;
 	float depth_bias_slope, depth_bias_units;
-	/* the window transform: x = ndc.x * scale[0] + offset[0], likewise y,
-	and depth = ndc.z * scale[2] + offset[2] */
-	float viewport_offset[3];
-	float viewport_scale[3];
-	/* pixels [x0, x1) x [y0, y1) */
-	long clip[4];
-
-	/* D3DPRIMITIVETYPE; quads arrive as triangles */
-	unsigned long primitive;
-	const unsigned short *indices;
-	unsigned long index_count;
-	/* set when the draw counts samples for a visibility test: its slot in
-	the frame's visibility buffer, 1 to VGXM_VISIBILITY_SLOTS - 1 */
-	unsigned long visibility_index;
+	/* (for the null renderer's draw hash) the input registers the vertex
+	program reads, and the Xbox program's own hash, whichever Cg
+	translation of it (by the inputs its streams provide) runs */
+	unsigned long vertex_input_mask;
+	unsigned long vertex_program_hash;
 };
 
 void vgxm_draw(const struct vgxm_draw *draw);
@@ -173,9 +186,15 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 /* a frame's visibility test slots (each frame's buffer has this many) */
 #define VGXM_VISIBILITY_SLOTS 1024
 
-/* the samples that passed in this slot's test in the latest frame the GPU
-has finished, in the game's pixels (unscaled by the render scale) */
-unsigned long vgxm_visibility_result(unsigned long slot);
+/* (the worker, before vgxm_present) the number the game gave the frame,
+which its visibility counts are then known by */
+void vgxm_visibility_frame(unsigned long frame);
+/* the newest frame the GPU has finished whose visibility counts are kept:
+its buffer (-1: none yet) and the frame's number */
+int vgxm_visibility_newest(unsigned long *frame);
+/* the samples that passed in a slot's test in that buffer, in the game's
+pixels (unscaled by the render scale) */
+unsigned long vgxm_visibility_count(int buffer, unsigned long slot);
 
 /* ---------- frames */
 
@@ -198,7 +217,9 @@ NULL hides it */
 void vgxm_menu_set(const char *text, int selected);
 
 /* the colour target's pixels in rows of 32-bit BGRA, for screenshots
-(waits for the GPU); NULL if there is no such target */
-const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch);
+(waits for the GPU), and its size (smaller than asked for when the render
+scale made it so); NULL if there is no such target */
+const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch, unsigned long *width,
+	unsigned long *height);
 
 #endif

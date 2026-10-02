@@ -160,6 +160,15 @@ random_seed_debug_log(
 unsigned long get_number_suitable_for_initializing_random_seed(
 	void)
 {
+#ifdef HALO_LINUX
+	{
+		/* (harness) a repeatable run's seed is always the same (main.c) */
+		int halo_repeatable_run(void);
+
+		if (halo_repeatable_run())
+			return 0x2342;
+	}
+#endif
 	return system_seconds()^system_milliseconds()^rand();
 }
 

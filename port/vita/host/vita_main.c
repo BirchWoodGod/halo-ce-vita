@@ -132,6 +132,17 @@ void vita_host_log_memory(const char *when)
 	vita_host_log(message);
 }
 
+/* set once the memory window is allocated (vita_host_log) */
+static int log_thread_allowed;
+/* The game state lives in the window and campaign saves keep its absolute
+pointers: nothing should be allocated in user memory before
+vita_host_arena - no thread, no memory block, no growth of the C heap
+(HALO_IO_BENCH's buffer moved the window by 1 MB). The window still moves
+when the program's data segment crosses a megabyte; the contiguous
+allocator lays its blocks out where v1.0 put them all the same
+(port/linux/src/xbox_memory.c, VITA_LAYOUT_TOP). */
+static void io_bench(void);
+
 void *vita_host_arena(unsigned long *size)
 {
 	if (!arena)
@@ -139,10 +150,28 @@ void *vita_host_arena(unsigned long *size)
 		vita_host_log_memory("before the memory window");
 		arena_block = sceKernelAllocMemBlock("halo_contiguous", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, ARENA_SIZE, NULL);
 		if (arena_block >= 0)
+		{
+			char message[96];
+
 			sceKernelGetMemBlockBase(arena_block, &arena);
+			/* (the game state lives in the window and a campaign save keeps
+			its absolute pointers: a save resumes only where the window was
+			when it was made - game_state_persistent_storage_made_here - so
+			anything allocated before this line moves every save out of
+			reach; v1.0 and v1.0.1 put it at the same place) */
+			snprintf(message, sizeof(message), "vita: memory window at %p", arena);
+			vita_host_log(message);
+		}
 		else
 			fprintf(stderr, "vita: cannot allocate the %lu byte memory window: 0x%08x\n", ARENA_SIZE,
 				(unsigned)arena_block);
+		/* (the log's thread only now: see vita_host_log) */
+		log_thread_allowed = 1;
+		/* (debug) HALO_IO_BENCH=1: the memory card's read speed by request
+		size - only now the window exists: its buffer, allocated before the
+		window, grew the C heap and moved the window by 1 MB */
+		if (getenv("HALO_IO_BENCH") && atoi(getenv("HALO_IO_BENCH")))
+			io_bench();
 	}
 	*size = arena ? ARENA_SIZE : 0;
 	return arena;
@@ -151,6 +180,13 @@ void *vita_host_arena(unsigned long *size)
 unsigned long long vita_host_time_us(void)
 {
 	return sceKernelGetProcessTimeWide();
+}
+
+/* the calling thread's kernel id: 0.03 us against pthread_self's 0.28
+(measured on the hardware), for the cache lock's owner test (lruv_cache.c) */
+unsigned long vita_host_thread_id(void)
+{
+	return (unsigned long)sceKernelGetThreadId();
 }
 
 /* The game looks for d:\bink\<movie>.bik before it opens a movie, and
@@ -357,6 +393,62 @@ static void neon_copy(void *destination, const void *source, unsigned int bytes)
 		vst1q_u8(d, vld1q_u8(s));
 	if (bytes)
 		memcpy(d, s, bytes);
+}
+
+/* HALO_IO_BENCH=1: sequential reads of a map file (16 MB per request size,
+each size from a part of the file not read before, so no cache answers)
+at 64 KB, 256 KB, 1 MB and 4 MB a request, logged in MB/s, then the same
+with sceIoPread at increasing offsets (what the cache file thread does).
+It runs once the memory window exists (vita_host_arena): its buffer grows
+the C heap, which moved the window when the bench ran before it. */
+static void io_bench(void)
+{
+	static const unsigned long sizes[] = { 64 * 1024, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024 };
+	const char *root = getenv("HALO_MAPS_ROOT");
+	char path[320], message[200];
+	unsigned char *buffer = malloc(4 * 1024 * 1024);
+	unsigned long index, region = 0;
+	int pass;
+	SceUID file;
+
+	snprintf(path, sizeof(path), "%s/a10.map", root ? root : VITA_DEFAULT_MAPS_ROOT);
+	file = sceIoOpen(path, SCE_O_RDONLY, 0);
+	if (file < 0 || !buffer)
+	{
+		snprintf(message, sizeof(message), "io bench: cannot open %s (0x%08x)", path, (unsigned)file);
+		vita_host_log(message);
+		free(buffer);
+		return;
+	}
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (index = 0; index < sizeof(sizes) / sizeof(sizes[0]); index++, region++)
+		{
+			unsigned long long start_offset = (unsigned long long)region * 16 * 1024 * 1024;
+			unsigned long long before = sceKernelGetProcessTimeWide(), after;
+			unsigned long done = 0;
+
+			if (!pass)
+				sceIoLseek(file, start_offset, SCE_SEEK_SET);
+			while (done < 16 * 1024 * 1024)
+			{
+				int result = pass ?
+					sceIoPread(file, buffer, sizes[index], start_offset + done) :
+					sceIoRead(file, buffer, sizes[index]);
+
+				if (result <= 0)
+					break;
+				done += (unsigned long)result;
+			}
+			after = sceKernelGetProcessTimeWide();
+			snprintf(message, sizeof(message), "io bench: %s %4lu KB requests: %lu KB in %.1f ms = %.1f MB/s",
+				pass ? "pread" : "read ", sizes[index] / 1024, done / 1024, (after - before) / 1000.0,
+				after > before ? (done / 1048576.0) / ((after - before) / 1000000.0) : 0.0);
+			vita_host_log(message);
+		}
+	}
+	sceIoClose(file);
+	free(buffer);
 }
 
 static void primitive_benchmarks(void)
@@ -649,21 +741,124 @@ int main(int argc, char **argv)
 	}
 }
 
+/* The log goes to ux0:data/haloce-vita/halo.log through a thread of its
+own: written from the game's threads, three sceIoWrite calls a line waited
+for the memory card, which a background write or the cache file thread's
+reads keep busy for up to a second (the frame after a checkpoint froze on a
+log line while the checkpoint was being written). A line is copied into a
+ring the log thread empties; a line that says it crashes for the dump is
+written at once, with everything before it, since the crash follows. */
+#define LOG_RING_SIZE (256 * 1024)
+static char log_ring[LOG_RING_SIZE];
+static volatile unsigned long log_head, log_tail; /* written up to / queued up to */
+static volatile int log_lock;
+static SceUID log_file = -1, log_semaphore = -1;
+static int log_thread_state; /* 0 none, 1 running, -1 could not start */
+
+static void log_acquire(void)
+{
+	while (__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
+		;
+}
+
+static void log_release(void)
+{
+	__atomic_store_n(&log_lock, 0, __ATOMIC_RELEASE);
+}
+
+/* writes what the ring holds (the log thread, or a crashing line's thread) */
+static void log_drain(void)
+{
+	static volatile int draining;
+	char chunk[16 * 1024];
+
+	while (__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
+		sceKernelDelayThread(100);
+	for (;;)
+	{
+		unsigned long length, start, first;
+
+		log_acquire();
+		length = log_tail - log_head;
+		if (length > sizeof(chunk))
+			length = sizeof(chunk);
+		start = log_head % LOG_RING_SIZE;
+		first = length < LOG_RING_SIZE - start ? length : LOG_RING_SIZE - start;
+		memcpy(chunk, log_ring + start, first);
+		memcpy(chunk + first, log_ring, length - first);
+		log_head += length;
+		log_release();
+		if (!length)
+			break;
+		if (log_file >= 0)
+			sceIoWrite(log_file, chunk, length);
+	}
+	__atomic_store_n(&draining, 0, __ATOMIC_RELEASE);
+}
+
+static int log_thread(SceSize arguments_size, void *arguments)
+{
+	(void)arguments_size;
+	(void)arguments;
+	for (;;)
+	{
+		sceKernelWaitSema(log_semaphore, 1, NULL);
+		log_drain();
+	}
+	return 0;
+}
+
 void vita_host_log(const char *line)
 {
-	static SceUID file = -1;
-	char stamp[32];
+	char text[1100];
 	unsigned long long now = sceKernelGetProcessTimeWide();
 	int length;
+	int crashing = strstr(line, "crash") != NULL;
 
-	if (file < 0)
-		file = sceIoOpen(VITA_DATA_DIRECTORY "/halo.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
-	length = snprintf(stamp, sizeof(stamp), "%7llu.%03llu ", now / 1000000ULL, now / 1000ULL % 1000ULL);
-	sceClibPrintf("%s%s\n", stamp, line);
-	if (file >= 0)
+	if (log_file < 0)
+		log_file = sceIoOpen(VITA_DATA_DIRECTORY "/halo.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
+	length = snprintf(text, sizeof(text), "%7llu.%03llu %s\n", now / 1000000ULL, now / 1000ULL % 1000ULL, line);
+	if (length < 0)
+		return;
+	if (length >= (int)sizeof(text))
 	{
-		sceIoWrite(file, stamp, length);
-		sceIoWrite(file, line, strlen(line));
-		sceIoWrite(file, "\n", 1);
+		length = sizeof(text) - 1;
+		text[length - 1] = '\n';
 	}
+	sceClibPrintf("%s", text);
+	/* (the thread, its stack and its semaphore are made after the memory
+	window: made before it, at the first line logged, they moved the window
+	- and with it the game state, whose absolute pointers a campaign save
+	keeps - so the previous build's save resumed into a crash in
+	update_queues_reset_and_fill_with_lies) */
+	if (log_thread_state == 0 && log_thread_allowed)
+	{
+		log_thread_state = -1;
+		log_semaphore = sceKernelCreateSema("halo log", 0, 0, 0x7fffffff, NULL);
+		if (log_semaphore >= 0)
+		{
+			SceUID thread = sceKernelCreateThread("halo log", log_thread, 0x10000100, 32 * 1024, 0, 0, NULL);
+
+			if (thread >= 0 && sceKernelStartThread(thread, 0, NULL) >= 0)
+				log_thread_state = 1;
+		}
+	}
+	log_acquire();
+	if (log_thread_state == 1 && !crashing && log_tail - log_head + (unsigned long)length <= LOG_RING_SIZE)
+	{
+		unsigned long start = log_tail % LOG_RING_SIZE;
+		unsigned long first = (unsigned long)length < LOG_RING_SIZE - start ? (unsigned long)length : LOG_RING_SIZE - start;
+
+		memcpy(log_ring + start, text, first);
+		memcpy(log_ring, text + first, (unsigned long)length - first);
+		log_tail += (unsigned long)length;
+		log_release();
+		sceKernelSignalSema(log_semaphore, 1);
+		return;
+	}
+	log_release();
+	/* (no thread, a full ring, or a crash on its way: in order, now) */
+	log_drain();
+	if (log_file >= 0)
+		sceIoWrite(log_file, text, length);
 }

@@ -392,6 +392,15 @@ symbols in this file:
 #include "networking/network_server_manager.h"
 #include "text/unicode.h"
 
+#ifdef HALO_LINUX
+/* (HALO_NET_PROFILE=1) the networked frame's steps timed (port/linux/game/tick_detail.c) */
+unsigned long long halo_net_detail_begin(void);
+void halo_net_detail_end(const char *name, unsigned long long started);
+#define HALO_NET_DETAIL(name, statement) do { unsigned long long halo_net_started = halo_net_detail_begin(); statement; halo_net_detail_end(name, halo_net_started); } while (0)
+#else
+#define HALO_NET_DETAIL(name, statement) do { statement; } while (0)
+#endif
+
 /* ---------- constants */
 
 enum
@@ -2861,11 +2870,11 @@ static boolean network_game_client_idle_ingame(
 
 	if (success == TRUE)
 	{
-		success = network_connection_idle(client->connection, started ? 15000 : 75000, NULL);
+		HALO_NET_DETAIL("client:connection_idle", success = network_connection_idle(client->connection, started ? 15000 : 75000, NULL));
 
 		if (success)
 		{
-			success = network_game_client_process_incoming_messages(client);
+			HALO_NET_DETAIL("client:messages", success = network_game_client_process_incoming_messages(client));
 
 			if (!success)
 			{

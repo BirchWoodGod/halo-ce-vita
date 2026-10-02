@@ -86,6 +86,7 @@ These files use only the Windows SDK:
 | --- | --- |
 | `src/win32_files.c`, `src/win32_net.c` | The file and socket functions of `port/linux/src/posix.h`. |
 | `src/win32_posix.c` | The POSIX functions on Windows threads, critical sections, condition variables, `VirtualAlloc` and the performance counter. |
+| `src/win32_host_hooks.c` | The clock, short sleep and thread pinning the native ports' timing and threading code calls (linked first: the game declares them weak). |
 | `src/win32_memory_watch.c` | The write tracking of textures, with a vectored exception handler. It also writes reports of crashes. |
 
 `port.json` gives the Linux files that these files replace, and the Windows

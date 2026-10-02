@@ -348,7 +348,7 @@ static unsigned long long render_now(void) { return vita_host_time_us ? vita_hos
 #define RENDER_PHASE_BEGIN() do { if (render_profile_enabled > 0) { render_phase_started = render_now(); \
 	halo_render_draw_counts(&render_phase_draws_started[0], &render_phase_draws_started[1]); } } while (0)
 #define RENDER_PHASE_END(phase, name) do { \
-	if (render_profile_enabled < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); render_profile_enabled = e && atoi(e) != 0; } \
+	if (render_profile_enabled < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); render_profile_enabled = e ? atoi(e) : 0; } \
 	if (render_profile_enabled > 0) { unsigned long stream_now, immediate_now; \
 		render_phase_us[phase] += render_now() - render_phase_started; render_phase_name[phase] = name; \
 		halo_render_draw_counts(&stream_now, &immediate_now); \
@@ -359,7 +359,8 @@ static void render_phase_report(void)
 	char line[1600]; int n = 0, i;
 	if (render_profile_enabled <= 0 || ++render_profile_frames % 300) return;
 	for (i = 0; i < 40; i++) { if (!render_phase_name[i]) continue;
-		n += snprintf(line + n, sizeof(line) - n, " %s %.1f", render_phase_name[i], render_phase_us[i] / 1000.0 / 300.0); render_phase_us[i] = 0; }
+		n += snprintf(line + n, sizeof(line) - n, render_profile_enabled > 1 ? " %s %.3f" : " %s %.1f", render_phase_name[i],
+			render_phase_us[i] / 1000.0 / 300.0); render_phase_us[i] = 0; }
 	platform_log("render-profile (ms/frame):%s", line);
 	/* and the draws per frame each phase recorded, stream+immediate */
 	n = 0;
