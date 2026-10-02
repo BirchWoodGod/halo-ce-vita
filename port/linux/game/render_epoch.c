@@ -193,17 +193,13 @@ int halo_thread_index(void)
 
 #define ARRAY_TABLE_SIZE 256
 
-struct marked_array
-{
-	struct data_array *data;
-	unsigned char *marks;
-	unsigned long marked;
-	/* the array's size when the marks were made: a new map builds its
-	arrays at the same addresses with other sizes */
-	long maximum_count;
-};
+/* (struct halo_epoch_marked_array, render_epoch.h: data.h's inline
+datum_get reads the table for the common "slot not marked" answer) */
+#define marked_array halo_epoch_marked_array
+typedef char array_table_size_assert[ARRAY_TABLE_SIZE == HALO_EPOCH_ARRAY_TABLE_SIZE ? 1 : -1];
 
-static struct marked_array arrays[ARRAY_TABLE_SIZE];
+#define arrays halo_epoch_marked_arrays
+struct marked_array arrays[ARRAY_TABLE_SIZE];
 static unsigned long array_count;
 
 #define MARK_FLAG(data) ((data)->name[sizeof((data)->name) - 1])

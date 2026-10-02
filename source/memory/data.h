@@ -82,16 +82,38 @@ check no assertions, so the result is the same; the lookups are among the
 tick's commonest calls, and the Vita build, without link-time
 optimisation, paid a call into data.c and another into render_epoch.c for
 each. */
+#include "render_epoch.h"
+
+/* with the tick on its own thread, an array the tick created or deleted
+in this epoch carries marks (render_epoch.c), and the lookup asks whether
+the slot is one: the usual answer, an unmarked slot, read inline from the
+array's table entry (the same entry and byte render_epoch.c reads); 0 for
+anything else, which data.c's function settles */
+static __inline int datum_unmarked_inline(const struct data_array *data, short absolute_index)
+{
+	unsigned long hint = *(const unsigned short *)((const unsigned char *)data + 38);
+
+	if (hint && hint <= HALO_EPOCH_ARRAY_TABLE_SIZE)
+	{
+		const struct halo_epoch_marked_array *entry = &halo_epoch_marked_arrays[hint - 1];
+
+		if (entry->data == data && absolute_index < entry->maximum_count)
+			return !entry->marks[absolute_index];
+	}
+	return 0;
+}
+
 static __inline void *datum_get_inline(struct data_array *data, long index)
 {
 	short absolute_index = (short)index;
 	short identifier = (short)(index >> 16);
 
-	if (absolute_index >= 0 && absolute_index < data->count && !data->name[TAG_STRING_LENGTH])
+	if (absolute_index >= 0 && absolute_index < data->count)
 	{
 		struct datum_header *header = (struct datum_header *)((char *)data->data + data->size * absolute_index);
 
-		if (header->identifier && (!identifier || identifier == header->identifier))
+		if (header->identifier && (!identifier || identifier == header->identifier) &&
+			(!data->name[TAG_STRING_LENGTH] || datum_unmarked_inline(data, absolute_index)))
 			return header;
 	}
 	return datum_get(data, index);
@@ -102,14 +124,14 @@ static __inline void *datum_try_and_get_inline(struct data_array *data, long ind
 	short absolute_index = (short)index;
 	short identifier = (short)(index >> 16);
 
-	if (index != -1 && absolute_index >= 0 && absolute_index < data->maximum_count &&
-		!data->name[TAG_STRING_LENGTH])
+	if (index != -1 && absolute_index >= 0 && absolute_index < data->maximum_count)
 	{
 		struct datum_header *header = (struct datum_header *)((char *)data->data + data->size * absolute_index);
 
 		if (!header->identifier || (identifier && header->identifier != identifier))
 			return 0;
-		return header;
+		if (!data->name[TAG_STRING_LENGTH] || datum_unmarked_inline(data, absolute_index))
+			return header;
 	}
 	return datum_try_and_get(data, index);
 }
