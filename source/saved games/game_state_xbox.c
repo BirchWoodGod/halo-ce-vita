@@ -146,6 +146,10 @@ typedef char verify_xbox_game_state_globals_prefix_size[
 
 static HANDLE game_state_open_persistent_storage(
 	const char *directory);
+#ifdef HALO_LINUX
+static void delete_persistent_storage(
+	void);
+#endif
 
 /* ---------- globals */
 
@@ -627,6 +631,20 @@ static __inline boolean game_state_get_persistent_storage_path(
 {
 	boolean result;
 
+#ifdef HALO_LINUX
+	{
+		/* (port, debug) HALO_TEST_PERSISTENT_DIR: the campaign save's
+		directory without a profile chosen in the menu, for driving Save
+		and Quit and the resume from the harness (HALO_TEST_COMMANDS) */
+		const char *directory = getenv("HALO_TEST_PERSISTENT_DIR");
+
+		if (directory && *directory)
+		{
+			strcpy(path, directory);
+			return TRUE;
+		}
+	}
+#endif
 	result = player_ui_get_path_to_local_player_profile_directory(0, path) != FALSE;
 
 	return result;
@@ -889,5 +907,108 @@ void game_state_create_persistent_storage(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port) Loading the persistent save at a map's start. The Xbox read its
+header and the whole file to check the checksum, and if the header named
+this map, read the whole file again into the game state: 32 MB from the
+memory card on the native builds, for every new map while a save exists,
+even one for another level (the header is checked only after the
+checksum).
+
+game_state_peek_persistent_storage_header reads the header alone, so a
+save that cannot be loaded is not read through; game_state_read_persistent
+_storage_staged reads the file once, into the checkpoint copy (above),
+checks the checksum as the Xbox did (the header's checksum field taken as
+zero, then everything), and game_state_load_staged_persistent_storage
+copies it into the game state: the same bytes, one read. The checkpoint
+copy is the last checkpoint of the map being left, which no revert can
+use once a new map is loading (game_state_initialize_for_new_map marks it
+invalid); the game state's save right after the load makes a new one. */
+boolean game_state_peek_persistent_storage_header(
+	void *header,
+	long header_size)
+{
+	HANDLE file = game_state_open_persistent_storage(NULL);
+	unsigned long bytes_read;
+	boolean result = FALSE;
+
+	if (file != INVALID_HANDLE_VALUE)
+	{
+		if (SetFilePointer(file, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER ||
+			!ReadFile(file, header, header_size, &bytes_read, NULL) ||
+			bytes_read != (unsigned long)header_size)
+		{
+			/* (as the full read does when the header cannot be read) */
+			error(_error_silent, "couldn't read header from persistent storage (#%d)", (int)GetLastError());
+			delete_persistent_storage();
+		}
+		else
+		{
+			result = TRUE;
+		}
+		CloseHandle(file);
+	}
+	return result;
+}
+
+/* 1: read and checked into the copy; 0: unreadable or the checksum failed;
+-1: no copy to read into (the caller reads as the Xbox did) */
+int game_state_read_persistent_storage_staged(
+	long header_size,
+	long checksum_offset,
+	long buffer_size)
+{
+	byte saved_header[2048];
+	unsigned long stored_checksum;
+	unsigned long checksum;
+	unsigned long bytes_read;
+	HANDLE file;
+	int result = 0;
+
+	if (!game_state_writer_ready() || buffer_size > xbox_game_state_globals.buffer_size ||
+		header_size > (long)sizeof(saved_header))
+	{
+		return -1;
+	}
+	/* (the copy's last write is done before it is overwritten) */
+	game_state_writer_wait();
+	game_state_writer.snapshot_valid = FALSE;
+	file = game_state_open_persistent_storage(NULL);
+	if (file == INVALID_HANDLE_VALUE)
+		return 0;
+	if (SetFilePointer(file, 0, NULL, FILE_BEGIN) != INVALID_SET_FILE_POINTER &&
+		ReadFile(file, game_state_writer.snapshot, buffer_size, &bytes_read, NULL) &&
+		bytes_read == (unsigned long)buffer_size)
+	{
+		memcpy(saved_header, game_state_writer.snapshot, header_size);
+		memcpy(&stored_checksum, saved_header + checksum_offset, sizeof(stored_checksum));
+		memset(saved_header + checksum_offset, 0, sizeof(stored_checksum));
+		crc_new(&checksum);
+		crc_checksum_buffer(&checksum, saved_header, header_size);
+		crc_checksum_buffer(&checksum, (byte *)game_state_writer.snapshot + header_size, buffer_size - header_size);
+		if (checksum == stored_checksum)
+			result = 1;
+		else
+			error(_error_silent, "checksum failed on persistent storage");
+	}
+	else
+	{
+		error(_error_silent, "failed to read from persistent storage (#%d)", (int)GetLastError());
+	}
+	CloseHandle(file);
+	return result;
+}
+
+void game_state_load_staged_persistent_storage(
+	void *buffer,
+	long buffer_size)
+{
+#ifdef HALO_VITA
+	memory_watch_prepare_write(buffer, buffer_size);
+#endif
+	memcpy(buffer, game_state_writer.snapshot, buffer_size);
+}
+#endif
 
 /* ---------- private code */

@@ -192,6 +192,12 @@ symbols in this file:
 #include "rasterizer/rasterizer.h"
 
 #include <xtl.h>
+#ifdef HALO_LINUX
+#include "load_profile.h"
+int halo_thread_index(void);
+/* the cache file thread, by halo_thread_index (load_profile.c) */
+static int cache_file_thread_index = -1;
+#endif
 
 /* ---------- constants */
 
@@ -699,6 +705,9 @@ void cache_file_block_until_not_busy(
 {
 	boolean busy;
 	short request_index;
+#ifdef HALO_LINUX
+	unsigned long long started = halo_load_profile_now();
+#endif
 
 	do
 	{
@@ -719,6 +728,9 @@ void cache_file_block_until_not_busy(
 		}
 	}
 	while (busy);
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_cache_wait, started, 0);
+#endif
 
 	return;
 }
@@ -1074,6 +1086,9 @@ static void CALLBACK cache_file_read_io_completion_routine(
 static void cache_file_windows_thread_proc(
 	void)
 {
+#ifdef HALO_LINUX
+	cache_file_thread_index = halo_thread_index();
+#endif
 	while (TRUE)
 	{
 		while (WaitForSingleObjectEx(
@@ -1351,15 +1366,39 @@ static void cached_map_issue_async_request(
 	while (TRUE)
 	{
 		unsigned long error_code;
+#ifdef HALO_LINUX
+		unsigned long long started;
+		boolean issued;
+#endif
 
 		SleepEx(0, TRUE);
 		SetLastError(ERROR_SUCCESS);
+#ifdef HALO_LINUX
+		/* (the port's Read/WriteFileEx are synchronous: the time is the IO) */
+		started = halo_load_profile_now();
+		issued = async_request_function(
+			file,
+			buffer,
+			size,
+			overlapped,
+			completion_routine);
+		if (started)
+		{
+			halo_load_profile_add(
+				async_request_function != ReadFileEx ? _halo_load_cache_write :
+					halo_thread_index() == cache_file_thread_index ? _halo_load_cache_read_other : _halo_load_cache_read_game_thread,
+				started,
+				(unsigned long long)size);
+		}
+		if (issued)
+#else
 		if (async_request_function(
 			file,
 			buffer,
 			size,
 			overlapped,
 			completion_routine))
+#endif
 		{
 			break;
 		}
@@ -1423,6 +1462,9 @@ static boolean cached_map_block_on_async_request(
 	volatile boolean const *completion_flag)
 {
 	boolean completed;
+#ifdef HALO_LINUX
+	unsigned long long started = halo_load_profile_now();
+#endif
 
 	while (!*completion_flag)
 	{
@@ -1432,6 +1474,9 @@ static boolean cached_map_block_on_async_request(
 		}
 	}
 	completed = *completion_flag;
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_cache_wait, started, 0);
+#endif
 
 	return completed;
 }

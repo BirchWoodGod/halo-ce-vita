@@ -106,6 +106,9 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 
 #include <xtl.h>
+#ifdef HALO_LINUX
+#include "load_profile.h"
+#endif
 
 /* ---------- constants */
 
@@ -591,6 +594,10 @@ boolean _sound_cache_sound_request(
 		lruv_block_touch(
 			xbox_sound_cache_globals.cache,
 			sound->cache_block_index);
+#ifdef HALO_LINUX
+		{
+		unsigned long long wait_started = block ? halo_load_profile_now() : 0;
+#endif
 		do
 		{
 			struct xbox_cache_sound_datum *cache_sound = datum_get(
@@ -630,6 +637,11 @@ boolean _sound_cache_sound_request(
 			}
 		}
 		while (!result && block);
+#ifdef HALO_LINUX
+		if (wait_started)
+			halo_load_profile_add(_halo_load_sound_cache_wait, wait_started, 0);
+		}
+#endif
 	}
 
 	return result;

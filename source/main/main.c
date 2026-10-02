@@ -389,6 +389,9 @@ void platform_log(const char *format, ...);
 #include "physics/collision_usage.h"
 #include "physics/collision_debug.h"
 #include "hs/hs.h"
+#ifdef HALO_LINUX
+#include "load_profile.h"
+#endif
 #include "render/render.h"
 #include "text/draw_string.h"
 #include "text/font_group.h"
@@ -1419,11 +1422,22 @@ short main_get_window_count(
 static void main_new_map(
 	struct game_options *options)
 {
+#ifdef HALO_LINUX
+	unsigned long long new_map_started = halo_load_profile_now();
+	unsigned long long game_load_started;
+	boolean loaded;
+
+#endif
 	input_flush();
 #ifdef HALO_LINUX
 	platform_log("new map: loading");
-#endif
+	game_load_started = halo_load_profile_now();
+	loaded = game_load(options);
+	halo_load_profile_add(_halo_load_game_load, game_load_started, 0);
+	if (loaded)
+#else
 	if (game_load(options))
+#endif
 	{
 #ifdef HALO_LINUX
 		platform_log("new map: loaded, initializing");
@@ -1471,6 +1485,9 @@ static void main_new_map(
 	if (main_globals.allow_persistent_storage)
 		game_state_try_and_load_from_persistent_storage();
 	ui_widgets_disable_pause_game(30);
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_new_map, new_map_started, 0);
+#endif
 
 	return;
 }
@@ -3666,6 +3683,7 @@ void main_loop(
 		profile_frame_end();
 #ifdef HALO_LINUX
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
+		halo_load_profile_frame_end();
 #endif
 		main_frame_rate_debug();
 

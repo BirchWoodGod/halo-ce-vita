@@ -104,6 +104,46 @@ void crc_checksum_buffer(
 	}
 
 	crc = *crc_reference;
+#ifdef HALO_LINUX
+	/* (port) eight bytes a step through eight tables (the usual
+	"slicing-by-8" of the same reflected CRC-32: the same result): the
+	persistent save's checksum covers the native builds' 16 MB game state,
+	byte by byte a quarter of a second on the Vita */
+	if (buffer_size >= 16)
+	{
+		static unsigned long slice_tables[8][256];
+		static int slice_tables_built;
+		byte const *bytes = buffer;
+
+		if (!slice_tables_built)
+		{
+			int table, index;
+
+			for (index = 0; index < 256; index++)
+				slice_tables[0][index] = crc_globals.table[index];
+			for (table = 1; table < 8; table++)
+				for (index = 0; index < 256; index++)
+					slice_tables[table][index] = (slice_tables[table - 1][index] >> 8) ^
+						slice_tables[0][slice_tables[table - 1][index] & 0xFF];
+			slice_tables_built = 1;
+		}
+		while (buffer_size >= 8)
+		{
+			unsigned long low = crc ^ ((unsigned long)bytes[0] | ((unsigned long)bytes[1] << 8) |
+				((unsigned long)bytes[2] << 16) | ((unsigned long)bytes[3] << 24));
+			unsigned long high = (unsigned long)bytes[4] | ((unsigned long)bytes[5] << 8) |
+				((unsigned long)bytes[6] << 16) | ((unsigned long)bytes[7] << 24);
+
+			crc = slice_tables[7][low & 0xFF] ^ slice_tables[6][(low >> 8) & 0xFF] ^
+				slice_tables[5][(low >> 16) & 0xFF] ^ slice_tables[4][(low >> 24) & 0xFF] ^
+				slice_tables[3][high & 0xFF] ^ slice_tables[2][(high >> 8) & 0xFF] ^
+				slice_tables[1][(high >> 16) & 0xFF] ^ slice_tables[0][(high >> 24) & 0xFF];
+			bytes += 8;
+			buffer_size -= 8;
+		}
+		buffer = bytes;
+	}
+#endif
 	if (buffer_size > 0)
 	{
 		do
