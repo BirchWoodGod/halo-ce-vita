@@ -26,8 +26,18 @@ Evolved.
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality and control options: hold
   **Select + Start** in game.
-- 30 fps in cinematics and most of the campaign; the largest fights (The
-  Silent Cartographer's beach) run in the high teens to low twenties.
+- Up to 30 fps. Quiet areas and cinematics usually hold 25 to 30 fps;
+  busy fights drop to around 20, and the largest (The Silent
+  Cartographer's beach) to the mid-to-high teens.
+
+### Known issues
+
+The current list is in the [roadmap](ROADMAP.md) and the
+[issues](https://github.com/BirchWoodGod/halo-ce-vita/issues). The main
+ones: some objects flicker or vanish at the screen's edges, invisible
+(camouflaged) Elites can show up black late in a long session, the first
+visit to an area can freeze for a second or two, and after resuming a save
+checkpoints have stopped triggering for at least one player.
 
 ## Install
 
@@ -43,7 +53,7 @@ Evolved.
 - About 1.5 GB free on `ux0:` (the game keeps decompressed copies of the
   levels it loads).
 - Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
-  it). All versions of the Xbox game work. The PC version's maps do not.
+  it). It must be the Xbox version: the PC version's maps do not work.
 
 ### Steps
 
@@ -106,9 +116,9 @@ A movie is shown at the shape its file gives: one made 16:9 at 640x480
 
 ### Saving
 
-Checkpoints are kept with **Save and Quit** from the pause menu; choose the
-campaign again to resume. Closing the game from the home screen keeps the
-levels you reached, but not the checkpoint, as on the Xbox.
+Checkpoints are written to the memory card as you play. To continue,
+choose the campaign again with the same profile and difficulty. **Save and
+Quit** from the pause menu is the safest way to stop.
 
 ## Controls
 
@@ -120,7 +130,7 @@ levels you reached, but not the checkpoint, as on the Xbox.
 | Circle | melee |
 | Square | reload, action |
 | Triangle | switch weapon |
-| D-pad down / up | crouch / zoom |
+| D-pad down / up | crouch (a toggle; see the panel) / zoom |
 | D-pad left / right | switch grenades / flashlight |
 | Start | pause; skips a cinematic |
 | Select | scoreboard |
