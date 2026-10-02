@@ -1746,6 +1746,11 @@ struct record_targets
 /* (what the game's thread writes into a record comes first, together - a
 record is written into a cold ring entry, where every line touched is a
 cache miss - then what the worker fills in) */
+struct draw_segment
+{
+	unsigned long first_index, index_count, visibility_index;
+};
+
 struct render_command
 {
 	unsigned long kind;
@@ -1765,6 +1770,11 @@ struct render_command
 	BOOL immediate;
 	/* the copy of a small target a stage reads */
 	unsigned long texture_version[D3DTSS_MAXSTAGES];
+	/* (immediate draws merged across visibility tests, immediate_end) more
+	than one: the draw is issued once per segment, each its own index range
+	and visibility slot; 0 or 1: as one draw */
+	unsigned long segment_count;
+	const struct draw_segment *segments;
 	struct vgxm_draw draw;
 	/* (the worker's) */
 	BOOL skip;
@@ -2501,7 +2511,26 @@ static void execute_draw(struct render_command *command)
 	DRAW_PROFILE_ADD(6, profile_from);
 	draw->vertex_input_mask = command->program->input_mask;
 	draw->vertex_program_hash = command->program->instruction_hash;
-	vgxm_draw(draw);
+	if (command->segment_count > 1)
+	{
+		/* one draw per visibility test, as they were recorded: the same
+		state, each its own triangles and slot */
+		const unsigned short *indices = draw->indices;
+		unsigned long index_count = draw->index_count, visibility_index = draw->visibility_index, segment;
+
+		for (segment = 0; segment < command->segment_count; segment++)
+		{
+			draw->indices = indices + command->segments[segment].first_index;
+			draw->index_count = command->segments[segment].index_count;
+			draw->visibility_index = command->segments[segment].visibility_index;
+			vgxm_draw(draw);
+		}
+		draw->indices = indices;
+		draw->index_count = index_count;
+		draw->visibility_index = visibility_index;
+	}
+	else
+		vgxm_draw(draw);
 	DRAW_PROFILE_ADD(7, profile_from);
 }
 
@@ -2703,6 +2732,10 @@ static struct
 	int triangles;
 	unsigned short *indices;
 	unsigned long index_count, index_capacity;
+	/* the visibility segments of a draw merged across visibility tests:
+	where each test's triangles start in the indices, and its slot */
+	struct draw_segment *segments;
+	unsigned long segment_count, segment_capacity;
 } held_immediate;
 
 static int immediate_triangle_family(D3DPRIMITIVETYPE type)
@@ -2796,6 +2829,23 @@ static void immediate_commit_held(void)
 		draw->index_count = held_immediate.index_count;
 		draw->primitive = D3DPT_TRIANGLELIST;
 		stats.copied_indices += held_immediate.index_count * sizeof(unsigned short);
+		if (held_immediate.segment_count > 1)
+		{
+			struct draw_segment *segments = vgxm_ring_alloc(held_immediate.segment_count * sizeof(*segments), 16);
+			unsigned long segment;
+
+			if (!segments)
+				return;
+			for (segment = 0; segment < held_immediate.segment_count; segment++)
+			{
+				segments[segment] = held_immediate.segments[segment];
+				segments[segment].index_count = (segment + 1 < held_immediate.segment_count ?
+					held_immediate.segments[segment + 1].first_index : held_immediate.index_count) -
+					held_immediate.segments[segment].first_index;
+			}
+			command->segments = segments;
+			command->segment_count = held_immediate.segment_count;
+		}
 	}
 	else if (needs_conversion(held_immediate.type))
 	{
@@ -2980,6 +3030,7 @@ static struct render_command *command_begin(unsigned long kind)
 		command = &commands[command_head % COMMAND_RING];
 		command->kind = kind;
 		command->state = NULL;
+		command->segment_count = 0;
 		command->targets = targets;
 	}
 	command->color_version = 0;
@@ -3495,6 +3546,24 @@ static BOOL shadow_states_match(const struct record_shadow_state *shadow)
 	}
 	return !memcmp(shadow->render_state, D3D__RenderState, sizeof(shadow->render_state)) &&
 		!memcmp(shadow->texture_state, D3D__TextureState, sizeof(shadow->texture_state));
+}
+
+static BOOL shadow_matches(const struct record_shadow_state *shadow, struct vertex_shader_object *program, BOOL immediate);
+
+/* shadow_matches but for the visibility test: the draws of consecutive
+visibility tests (a lens flare's occlusion quads, a thousand a frame on
+a10) differ in nothing else */
+static BOOL shadow_matches_but_visibility(struct record_shadow_state *shadow, struct vertex_shader_object *program, BOOL immediate)
+{
+	BOOL active = shadow->visibility_test_active, matches;
+	unsigned long index = shadow->visibility_index;
+
+	shadow->visibility_test_active = device.visibility_test_active;
+	shadow->visibility_index = device.visibility_index;
+	matches = shadow_matches(shadow, program, immediate);
+	shadow->visibility_test_active = active;
+	shadow->visibility_index = index;
+	return matches;
 }
 
 static BOOL shadow_matches(const struct record_shadow_state *shadow, struct vertex_shader_object *program, BOOL immediate)
@@ -4541,6 +4610,38 @@ static int immediate_merge_enabled(void)
 	return enabled;
 }
 
+/* HALO_VISIBILITY_MERGE=0: an immediate draw of another visibility test
+is never merged into the one before */
+static int visibility_merge_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_VISIBILITY_MERGE");
+		enabled = !setting || atoi(setting) != 0;
+	}
+	return enabled;
+}
+
+static int held_segment_add(unsigned long first_index, unsigned long visibility_index)
+{
+	if (held_immediate.segment_count == held_immediate.segment_capacity)
+	{
+		unsigned long capacity = held_immediate.segment_capacity ? held_immediate.segment_capacity * 2 : 64;
+		struct draw_segment *grown = realloc(held_immediate.segments, capacity * sizeof(*grown));
+
+		if (!grown)
+			return 0;
+		held_immediate.segments = grown;
+		held_immediate.segment_capacity = capacity;
+	}
+	held_immediate.segments[held_immediate.segment_count].first_index = first_index;
+	held_immediate.segments[held_immediate.segment_count].visibility_index = visibility_index;
+	held_immediate.segment_count++;
+	return 1;
+}
+
 /* the vertices, as the draw carries them (emitted packed already) */
 static void immediate_pack(const struct vgxm_draw *draw, unsigned long first, unsigned long count, float *packed)
 {
@@ -4580,17 +4681,39 @@ static void immediate_end(void)
 		else if (!shadow_matches(&held_shadow, current_program(), TRUE)) merge_rejected[4]++;
 	}
 	if (held_immediate.command && held_immediate.triangles && immediate_triangle_family(type) && immediate_merge_enabled() &&
-		held_immediate.constants == constant_generation && held_immediate.count + count <= 65536 &&
-		shadow_matches(&held_shadow, current_program(), TRUE))
+		held_immediate.constants == constant_generation && held_immediate.count + count <= 65536)
 	{
-		draw = &held_immediate.command->draw;
-		if (immediate_hold_room((held_immediate.count + count) * (held_immediate.stride / sizeof(float))) &&
-			immediate_hold_triangles(type, held_immediate.count, count))
+		/* the same state: its triangles join the held draw's; the same but
+		for the visibility test: they join it as a segment of their own,
+		issued as a draw of its own with its own slot (the worker), and
+		the game's thread records one draw for a run of tests (the index
+		data of a segment kept 4-byte aligned) */
+		unsigned long visibility_index = device.visibility_test_active ? device.visibility_index : 0;
+		int same = shadow_matches(&held_shadow, current_program(), TRUE);
+		int segment = !same && visibility_merge_enabled() && !(held_immediate.index_count & 1) &&
+			shadow_matches_but_visibility(&held_shadow, current_program(), TRUE);
+
+		if (same || segment)
 		{
-			immediate_pack(draw, 0, count, held_immediate.vertices + held_immediate.count * (held_immediate.stride / sizeof(float)));
-			held_immediate.count += count;
-			merged_immediate_draws++;
-			return;
+			unsigned long first_index = held_immediate.index_count;
+
+			draw = &held_immediate.command->draw;
+			if (immediate_hold_room((held_immediate.count + count) * (held_immediate.stride / sizeof(float))) &&
+				immediate_hold_triangles(type, held_immediate.count, count) &&
+				(!segment || held_segment_add(first_index, visibility_index)))
+			{
+				immediate_pack(draw, 0, count, held_immediate.vertices + held_immediate.count * (held_immediate.stride / sizeof(float)));
+				held_immediate.count += count;
+				merged_immediate_draws++;
+				if (segment)
+				{
+					held_shadow.visibility_test_active = device.visibility_test_active;
+					held_shadow.visibility_index = device.visibility_index;
+				}
+				return;
+			}
+			/* (a failed allocation: the indices added are dropped) */
+			held_immediate.index_count = first_index;
 		}
 	}
 	immediate_commit_held();
@@ -4636,6 +4759,8 @@ static void immediate_end(void)
 	held_immediate.stride = stride;
 	held_immediate.constants = constant_generation;
 	held_immediate.index_count = 0;
+	held_immediate.segment_count = 0;
+	held_segment_add(0, draw->visibility_index);
 	shadow_capture(&held_shadow, current_program(), TRUE, command->state);
 	held_immediate.triangles = immediate_triangle_family(type) && immediate_merge_enabled() &&
 		immediate_hold_triangles(type, 0, count);
