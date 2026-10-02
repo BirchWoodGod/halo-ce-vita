@@ -246,6 +246,10 @@ struct gxm_device
 		UINT stride;
 	} streams[16];
 	UINT base_vertex_index;
+	/* halo_d3d_stream_attribute: an input register the stream draws take
+	from a stream of four floats per vertex instead of its current value
+	(-1: none) */
+	long extra_attribute_reg, extra_attribute_stream;
 
 	BOOL immediate_active;
 	D3DPRIMITIVETYPE immediate_type;
@@ -924,6 +928,7 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 		device.viewport.Height = height;
 		device.viewport.MaxZ = 1.0f;
 		device.next_vertex_shader_id = 1;
+		device.extra_attribute_reg = -1;
 		D3D__RenderState[D3DRS_ZENABLE] = TRUE;
 		D3D__RenderState[D3DRS_ZWRITEENABLE] = TRUE;
 		D3D__RenderState[D3DRS_ZFUNC] = D3DCMP_LESSEQUAL;
@@ -3611,7 +3616,7 @@ static struct render_command *record_draw(BOOL immediate)
 		if (!shortcut)
 			record_previous = NULL;
 	}
-	if (record_state_unchanged(program, immediate) && record_previous != command)
+	if (device.extra_attribute_reg < 0 && record_state_unchanged(program, immediate) && record_previous != command)
 	{
 		const struct render_command *previous = record_previous;
 
@@ -3655,9 +3660,7 @@ static struct render_command *record_draw(BOOL immediate)
 			simple_fragment = 0;
 			command->program = program;
 			command->immediate = immediate;
-			command->provided_mask = declaration->provided_mask;
-			command->packed_mask = declaration->packed_mask;
-			command->color_mask = declaration->color_mask;
+			declaration_masks(declaration, &command->provided_mask, &command->packed_mask, &command->color_mask);
 			for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 			{
 				D3DBaseTexture *texture = device.textures[stage];
@@ -3702,9 +3705,7 @@ static struct render_command *record_draw(BOOL immediate)
 	}
 	command->program = program;
 	command->immediate = immediate;
-	command->provided_mask = declaration->provided_mask;
-	command->packed_mask = declaration->packed_mask;
-	command->color_mask = declaration->color_mask;
+	declaration_masks(declaration, &command->provided_mask, &command->packed_mask, &command->color_mask);
 
 	key = &command->key;
 	memset(key, 0, sizeof(*key));
@@ -4002,6 +4003,40 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 		attribute->offset = element->offset;
 		attribute_format(element->type, &attribute->format, &attribute->components);
 	}
+	if (device.extra_attribute_reg >= 0 && !(declaration->provided_mask & (1UL << device.extra_attribute_reg)) &&
+		device.streams[device.extra_attribute_stream].data && draw->attribute_count < VGXM_ATTRIBUTE_COUNT)
+	{
+		/* (halo_d3d_stream_attribute's register, after the declaration's) */
+		unsigned long stream = (unsigned long)device.extra_attribute_stream;
+		unsigned long stride = device.streams[stream].stride ? device.streams[stream].stride : 16;
+		const unsigned char *start = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[stream].data) +
+			first * stride;
+		struct vgxm_attribute *attribute;
+
+		if (stream_slot[stream] == ~0UL)
+		{
+			stream_slot[stream] = draw->stream_count++;
+			draw->strides[stream_slot[stream]] = stride;
+			if (memory_is_static(start, stride * count))
+			{
+				stats.direct_bytes += stride * count;
+				draw->streams[stream_slot[stream]] = start;
+			}
+			else
+			{
+				stats.copied_streams += stride * count;
+				draw->streams[stream_slot[stream]] = ring_copy(start, stride * count);
+				if (!draw->streams[stream_slot[stream]])
+					return FALSE;
+			}
+		}
+		attribute = &draw->attributes[draw->attribute_count++];
+		attribute->reg = (unsigned char)device.extra_attribute_reg;
+		attribute->stream = (unsigned char)stream_slot[stream];
+		attribute->offset = 0;
+		attribute->format = _vgxm_attribute_f32;
+		attribute->components = 4;
+	}
 	return TRUE;
 }
 
@@ -4080,6 +4115,33 @@ void WINAPI D3DDevice_SetStreamSource(UINT stream_number, D3DVertexBuffer *strea
 		return;
 	device.streams[stream_number].data = stream_data ? stream_data->Data : 0;
 	device.streams[stream_number].stride = stride;
+}
+
+/* (port) the stream draws that follow take input register reg from stream
+stream (four floats a vertex, from its first byte) rather than from the
+register's current value, until reg -1 is given: the decals' batches carry
+each decal's colour per vertex this way (rasterizer_xbox_decals.c). The
+program reads the same values, from its vertices instead of its uniforms */
+void halo_d3d_stream_attribute(long reg, long stream)
+{
+	if (reg < 0 || reg >= XGPU_VERTEX_ATTRIBUTE_COUNT || stream < 0 || stream >= 16)
+		reg = -1;
+	device.extra_attribute_reg = reg;
+	device.extra_attribute_stream = stream;
+}
+
+/* the declaration's input masks, with halo_d3d_stream_attribute's register */
+static void declaration_masks(const struct vertex_shader_object *declaration, unsigned long *provided,
+	unsigned long *packed, unsigned long *color)
+{
+	*provided = declaration->provided_mask;
+	*packed = declaration->packed_mask;
+	*color = declaration->color_mask;
+	if (device.extra_attribute_reg >= 0 && !(*provided & (1UL << device.extra_attribute_reg)) &&
+		device.streams[device.extra_attribute_stream].data)
+	{
+		*provided |= 1UL << device.extra_attribute_reg;
+	}
 }
 
 void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_index)
@@ -4164,6 +4226,11 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 		base = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[element->stream].data);
 		if (!memory_is_static(base, 1))
 			streams_static = FALSE;
+	}
+	if (device.extra_attribute_reg >= 0 && device.streams[device.extra_attribute_stream].data &&
+		!memory_is_static((const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[device.extra_attribute_stream].data), 1))
+	{
+		streams_static = FALSE;
 	}
 	if (streams_static)
 	{
