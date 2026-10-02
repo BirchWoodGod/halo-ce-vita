@@ -3,7 +3,9 @@
 (debug) HALO_TICK_HASH=<file>: after every game tick, a 64-bit hash of the
 whole game state (the arena game_state_malloc hands out, which is what a
 saved game stores: objects, AI, physics, players, effects) is written to
-<file> as "tick <game time> <hash>". Two builds that simulate identically
+<file> as "tick <game time> <hash>" (made of the allocations' hashes below;
+an lruv cache's two function pointers are left out, since code addresses
+differ between builds). Two builds that simulate identically
 write identical files, so this is the oracle for changes meant to leave the
 simulation exactly as it was (tick performance work).
 
@@ -41,6 +43,7 @@ two runs differ in and the tick each first differs at. */
 void halo_game_state_range(void **base, unsigned long *size);
 void halo_game_state_gpu_range(void **base, unsigned long *size);
 int halo_game_state_allocation(int index, const char **name, void **base, unsigned long *size);
+int halo_game_state_allocation_is_lruv_cache(int index);
 long game_time_get(void);
 
 /* HALO_FIXED_TICK=1: the knobs that make a run's simulation independent of
@@ -107,11 +110,7 @@ void halo_tick_hash_after_tick(void)
 		return;
 	halo_game_state_range(&base, &size);
 	halo_game_state_gpu_range(&gpu_base, &gpu_size);
-	hash = hash_words(hash, (const unsigned int *)base, size / 4);
-	hash = hash_words(hash, (const unsigned int *)gpu_base, gpu_size / 4);
 	time = game_time_get();
-	fprintf(file, "tick %ld %016llx\n", time, hash);
-	if (allocations)
 	{
 		const char *name;
 		void *allocation;
@@ -132,14 +131,33 @@ void halo_tick_hash_after_tick(void)
 				fclose(names);
 			named = 1;
 		}
-		fwrite(&stamp, sizeof(stamp), 1, allocations);
+		if (allocations)
+			fwrite(&stamp, sizeof(stamp), 1, allocations);
 		for (index = 0; halo_game_state_allocation(index, &name, &allocation, &allocation_size); index++)
 		{
-			unsigned long long allocation_hash = hash_words(0xCBF29CE484222325ULL, (const unsigned int *)allocation, allocation_size / 4);
+			const unsigned int *words = (const unsigned int *)allocation;
+			unsigned long long allocation_hash;
 
-			fwrite(&allocation_hash, sizeof(allocation_hash), 1, allocations);
+			if (halo_game_state_allocation_is_lruv_cache(index) && allocation_size >= 0x28)
+			{
+				/* (an lruv cache's two procs, at 0x20 and 0x24, are code
+				addresses, which differ between builds) */
+				static const unsigned int zeros[2];
+
+				allocation_hash = hash_words(0xCBF29CE484222325ULL, words, 8);
+				allocation_hash = hash_words(allocation_hash, zeros, 2);
+				allocation_hash = hash_words(allocation_hash, words + 10, allocation_size / 4 - 10);
+			}
+			else
+				allocation_hash = hash_words(0xCBF29CE484222325ULL, words, allocation_size / 4);
+
+			if (allocations)
+				fwrite(&allocation_hash, sizeof(allocation_hash), 1, allocations);
+			hash ^= allocation_hash;
+			hash *= 0x100000001B3ULL;
 		}
 	}
+	fprintf(file, "tick %ld %016llx\n", time, hash);
 	if (time == dump_tick)
 	{
 		char name[512];

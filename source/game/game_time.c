@@ -374,6 +374,22 @@ void code_000a50c0(
 	return;
 }
 
+
+/* (port) the clock of the latency monitor below (it writes
+game_time_globals, part of the game state): with the debug HALO_FIXED_TICK
+the frame clock, so runs compare tick for tick (tick_hash.c) */
+static unsigned long game_time_statistics_milliseconds(void)
+{
+#ifdef HALO_LINUX
+	int halo_fixed_tick(void);
+	static unsigned long fixed_milliseconds;
+
+	if (halo_fixed_tick())
+		return fixed_milliseconds += 33;
+#endif
+	return system_milliseconds();
+}
+
 static void code_000a50d0(
 	short latency,
 	short server_updates,
@@ -398,12 +414,12 @@ static void code_000a50d0(
 		game_time_statistics.predicted_updates = 0;
 		game_time_statistics.minimum_predicted_updates = SHORT_MAX;
 		game_time_statistics.maximum_predicted_updates = SHORT_MIN;
-		game_time_statistics.last_milliseconds = system_milliseconds();
+		game_time_statistics.last_milliseconds = game_time_statistics_milliseconds();
 		game_time_statistics.active = TRUE;
 		return;
 	}
 
-	milliseconds = system_milliseconds();
+	milliseconds = game_time_statistics_milliseconds();
 	milliseconds_elapsed = (short)(milliseconds - game_time_statistics.last_milliseconds);
 	game_time_statistics.frame_count++;
 	game_time_statistics.total_milliseconds_elapsed += milliseconds_elapsed;
