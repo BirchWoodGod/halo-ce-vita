@@ -2925,9 +2925,18 @@ void multiplayer_game_directions(
 			return;
 		}
 
+#ifdef HALO_VITA
+		/* (port) one player starts a local game on the Vita
+		(network_server_manager.c): no "Waiting for another player" over
+		its countdown */
+		if (network_game_is_splitscreen_local() &&
+			game &&
+			game->player_count < 1)
+#else
 		if (network_game_is_splitscreen_local() &&
 			game &&
 			game->player_count < 2)
+#endif
 		{
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_waiting_for_player;
