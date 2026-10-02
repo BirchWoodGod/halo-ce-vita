@@ -941,6 +941,97 @@ static long obstruction_cache_slot(
 	return (long)(((words[0] * 73856093UL) ^ (words[1] * 19349663UL) ^ (words[2] * 83492791UL) ^
 		(unsigned long)local_player_index) % OBSTRUCTION_CACHE_SLOTS);
 }
+
+/* HALO_SOUND_OBSTRUCTION_TICKS=<n> (the Vita's settings panel: Sound
+occlusion; 1, the default elsewhere, is the original): a sound's
+obstruction ray is cast again only every n ticks while neither it nor the
+camera moved more than a quarter of a world unit (some 3 inches) since,
+the previous result standing in meanwhile. Obstruction only sets how
+muffled a sound is; in the b30 fight the rays for ~40 voices took 3.7-4.2
+ms of the Vita's tick a frame. */
+#include <stdlib.h>
+#define SOURCE_OBSTRUCTION_SLOTS 256
+#define SOURCE_OBSTRUCTION_MOVE_SQUARED (0.25f*0.25f)
+
+static struct
+{
+	struct sound_source const *source;
+	long game_time;
+	short local_player_index;
+	real_point3d position;
+	real_point3d camera;
+	real obstruction;
+	real occlusion;
+} source_obstruction_cache[SOURCE_OBSTRUCTION_SLOTS];
+
+static long source_obstruction_ticks(void)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen;
+	static long ticks = -1;
+
+	if (ticks < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_SOUND_OBSTRUCTION_TICKS");
+
+		settings_seen = halo_settings_generation;
+		ticks = setting ? atol(setting) : 1;
+		if (ticks < 1)
+			ticks = 1;
+	}
+	return ticks;
+}
+
+static long source_obstruction_slot(struct sound_source const *source)
+{
+	return (long)((((unsigned long)source) >> 2) * 2654435761UL >> 24) % SOURCE_OBSTRUCTION_SLOTS;
+}
+
+static boolean source_obstruction_reused(
+	short local_player_index,
+	struct sound_source *source,
+	real_point3d const *camera,
+	long now)
+{
+	long ticks = source_obstruction_ticks();
+	long slot;
+
+	if (ticks <= 1)
+		return FALSE;
+	slot = source_obstruction_slot(source);
+	if (source_obstruction_cache[slot].source == source &&
+		source_obstruction_cache[slot].local_player_index == local_player_index &&
+		now - source_obstruction_cache[slot].game_time >= 0 &&
+		now - source_obstruction_cache[slot].game_time < ticks &&
+		distance_squared3d(&source_obstruction_cache[slot].position, &source->location.position) < SOURCE_OBSTRUCTION_MOVE_SQUARED &&
+		distance_squared3d(&source_obstruction_cache[slot].camera, camera) < SOURCE_OBSTRUCTION_MOVE_SQUARED)
+	{
+		source->obstruction = source_obstruction_cache[slot].obstruction;
+		source->occlusion = source_obstruction_cache[slot].occlusion;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+static void source_obstruction_store(
+	short local_player_index,
+	struct sound_source const *source,
+	real_point3d const *camera,
+	long now)
+{
+	long slot;
+
+	if (source_obstruction_ticks() <= 1)
+		return;
+	slot = source_obstruction_slot(source);
+	source_obstruction_cache[slot].source = source;
+	source_obstruction_cache[slot].game_time = now;
+	source_obstruction_cache[slot].local_player_index = local_player_index;
+	source_obstruction_cache[slot].position = source->location.position;
+	source_obstruction_cache[slot].camera = *camera;
+	source_obstruction_cache[slot].obstruction = source->obstruction;
+	source_obstruction_cache[slot].occlusion = source->occlusion;
+}
 #endif
 
 void compute_sound_obstruction(
@@ -964,6 +1055,8 @@ void compute_sound_obstruction(
 		source->occlusion = obstruction_cache[slot].occlusion;
 		return;
 	}
+	if (source_obstruction_reused(local_player_index, source, &camera->position, now))
+		return;
 #endif
 
 	match_assert(
@@ -1044,6 +1137,7 @@ void compute_sound_obstruction(
 	obstruction_cache[slot].position = source->location.position;
 	obstruction_cache[slot].obstruction = source->obstruction;
 	obstruction_cache[slot].occlusion = source->occlusion;
+	source_obstruction_store(local_player_index, source, &camera->position, now);
 #endif
 
 	return;

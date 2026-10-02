@@ -110,9 +110,10 @@ resolution after a restart) and are kept in `ux0:data/haloce-vita/settings.txt`.
 
 The defaults favour frame rate: lower model detail at a distance, tiny
 distant objects skipped, static props and object lighting updated less
-often, and a 75% render resolution. Set model detail High, distant objects
-Off, scenery and lighting to every tick and the resolution to 100% to see
-the game exactly as on the Xbox.
+often, sounds' muffling behind walls rechecked less often, and a 75%
+render resolution. Set model detail High, distant objects Off, scenery and
+lighting to every tick, sound occlusion every tick and the resolution to
+100% to see and hear the game exactly as on the Xbox.
 
 ## Building
 

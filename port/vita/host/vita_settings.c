@@ -59,6 +59,8 @@ static struct setting settings[] = {
 		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2 },
 	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
 		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2 },
+	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
+		{ "Every tick", "Every 3rd", "Every 6th" }, "How often muffling behind walls is rechecked", 1 },
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
 		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2 },
 	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0 },
@@ -187,7 +189,7 @@ static void show(void)
 	}
 	if (length < (int)sizeof(text))
 		snprintf(text + length, sizeof(text) - length, "\n%s",
-			restart_pending ? "Restart the game for the new resolution. O: close" : settings[selected].help);
+			restart_pending ? "Restart the game for this change. O: close" : settings[selected].help);
 	vgxm_menu_set(text, selected + 1);
 }
 
