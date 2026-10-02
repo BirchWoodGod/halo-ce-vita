@@ -132,6 +132,9 @@ void vita_host_log_memory(const char *when)
 	vita_host_log(message);
 }
 
+/* set once the memory window is allocated (vita_host_log) */
+static int log_thread_allowed;
+
 void *vita_host_arena(unsigned long *size)
 {
 	if (!arena)
@@ -154,6 +157,8 @@ void *vita_host_arena(unsigned long *size)
 		else
 			fprintf(stderr, "vita: cannot allocate the %lu byte memory window: 0x%08x\n", ARENA_SIZE,
 				(unsigned)arena_block);
+		/* (the log's thread only now: see vita_host_log) */
+		log_thread_allowed = 1;
 	}
 	*size = arena ? ARENA_SIZE : 0;
 	return arena;
@@ -658,21 +663,124 @@ int main(int argc, char **argv)
 	}
 }
 
+/* The log goes to ux0:data/haloce-vita/halo.log through a thread of its
+own: written from the game's threads, three sceIoWrite calls a line waited
+for the memory card, which a background write or the cache file thread's
+reads keep busy for up to a second (the frame after a checkpoint froze on a
+log line while the checkpoint was being written). A line is copied into a
+ring the log thread empties; a line that says it crashes for the dump is
+written at once, with everything before it, since the crash follows. */
+#define LOG_RING_SIZE (256 * 1024)
+static char log_ring[LOG_RING_SIZE];
+static volatile unsigned long log_head, log_tail; /* written up to / queued up to */
+static volatile int log_lock;
+static SceUID log_file = -1, log_semaphore = -1;
+static int log_thread_state; /* 0 none, 1 running, -1 could not start */
+
+static void log_acquire(void)
+{
+	while (__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
+		;
+}
+
+static void log_release(void)
+{
+	__atomic_store_n(&log_lock, 0, __ATOMIC_RELEASE);
+}
+
+/* writes what the ring holds (the log thread, or a crashing line's thread) */
+static void log_drain(void)
+{
+	static volatile int draining;
+	char chunk[16 * 1024];
+
+	while (__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
+		sceKernelDelayThread(100);
+	for (;;)
+	{
+		unsigned long length, start, first;
+
+		log_acquire();
+		length = log_tail - log_head;
+		if (length > sizeof(chunk))
+			length = sizeof(chunk);
+		start = log_head % LOG_RING_SIZE;
+		first = length < LOG_RING_SIZE - start ? length : LOG_RING_SIZE - start;
+		memcpy(chunk, log_ring + start, first);
+		memcpy(chunk + first, log_ring, length - first);
+		log_head += length;
+		log_release();
+		if (!length)
+			break;
+		if (log_file >= 0)
+			sceIoWrite(log_file, chunk, length);
+	}
+	__atomic_store_n(&draining, 0, __ATOMIC_RELEASE);
+}
+
+static int log_thread(SceSize arguments_size, void *arguments)
+{
+	(void)arguments_size;
+	(void)arguments;
+	for (;;)
+	{
+		sceKernelWaitSema(log_semaphore, 1, NULL);
+		log_drain();
+	}
+	return 0;
+}
+
 void vita_host_log(const char *line)
 {
-	static SceUID file = -1;
-	char stamp[32];
+	char text[1100];
 	unsigned long long now = sceKernelGetProcessTimeWide();
 	int length;
+	int crashing = strstr(line, "crash") != NULL;
 
-	if (file < 0)
-		file = sceIoOpen(VITA_DATA_DIRECTORY "/halo.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
-	length = snprintf(stamp, sizeof(stamp), "%7llu.%03llu ", now / 1000000ULL, now / 1000ULL % 1000ULL);
-	sceClibPrintf("%s%s\n", stamp, line);
-	if (file >= 0)
+	if (log_file < 0)
+		log_file = sceIoOpen(VITA_DATA_DIRECTORY "/halo.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
+	length = snprintf(text, sizeof(text), "%7llu.%03llu %s\n", now / 1000000ULL, now / 1000ULL % 1000ULL, line);
+	if (length < 0)
+		return;
+	if (length >= (int)sizeof(text))
 	{
-		sceIoWrite(file, stamp, length);
-		sceIoWrite(file, line, strlen(line));
-		sceIoWrite(file, "\n", 1);
+		length = sizeof(text) - 1;
+		text[length - 1] = '\n';
 	}
+	sceClibPrintf("%s", text);
+	/* (the thread, its stack and its semaphore are made after the memory
+	window: made before it, at the first line logged, they moved the window
+	- and with it the game state, whose absolute pointers a campaign save
+	keeps - so the previous build's save resumed into a crash in
+	update_queues_reset_and_fill_with_lies) */
+	if (log_thread_state == 0 && log_thread_allowed)
+	{
+		log_thread_state = -1;
+		log_semaphore = sceKernelCreateSema("halo log", 0, 0, 0x7fffffff, NULL);
+		if (log_semaphore >= 0)
+		{
+			SceUID thread = sceKernelCreateThread("halo log", log_thread, 0x10000100, 32 * 1024, 0, 0, NULL);
+
+			if (thread >= 0 && sceKernelStartThread(thread, 0, NULL) >= 0)
+				log_thread_state = 1;
+		}
+	}
+	log_acquire();
+	if (log_thread_state == 1 && !crashing && log_tail - log_head + (unsigned long)length <= LOG_RING_SIZE)
+	{
+		unsigned long start = log_tail % LOG_RING_SIZE;
+		unsigned long first = (unsigned long)length < LOG_RING_SIZE - start ? (unsigned long)length : LOG_RING_SIZE - start;
+
+		memcpy(log_ring + start, text, first);
+		memcpy(log_ring, text + first, (unsigned long)length - first);
+		log_tail += (unsigned long)length;
+		log_release();
+		sceKernelSignalSema(log_semaphore, 1);
+		return;
+	}
+	log_release();
+	/* (no thread, a full ring, or a crash on its way: in order, now) */
+	log_drain();
+	if (log_file >= 0)
+		sceIoWrite(log_file, text, length);
 }
