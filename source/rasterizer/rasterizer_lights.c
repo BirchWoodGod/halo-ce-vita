@@ -346,6 +346,7 @@ static struct rasterizer_lens_flare_submit_parameters *lens_flare_parameters_get
 	short lens_flare_index);
 static byte *lens_flare_occlusion_test_results_get(
 	struct rasterizer_lens_flare_submit_parameters *lens_flare_parameters);
+
 static real lens_flare_evaluate_corona_rotation_function(
 	short corona_rotation_function,
 	struct rasterizer_lens_flare_submit_parameters const *lens_flare_parameters);
@@ -418,6 +419,31 @@ static byte *lens_flare_occlusion_test_results_get(
 		data[lens_flare_parameters->lens_flare_index]
 		[lens_flare_parameters->compressed_window_index & _lens_flare_window_index_mask];
 }
+
+#ifdef HALO_VITA
+/* (port) the visibility test's index for a flare: on the Vita a test's
+result is read from the newest frame the GPU has finished, one to three
+frames old (port/vita/platform/d3d8_gxm.c), and a flare's place in the
+frame's list (the index the game passed) changes from frame to frame as
+lights come into and leave view - while turning, a flare was given another
+flare's visibility: flares went out when the player moved and showed
+through walls. The flare's own results slot, which stays the same for as
+long as the flare exists, names its test instead. */
+static unsigned long lens_flare_occlusion_test_key(
+	byte const *occlusion_test_result)
+{
+	byte const *base = (byte const *)local_lens_flare_occlusion_test_results;
+	byte const *base2 = (byte const *)local_lens_flare_occlusion_test_results2;
+
+	if (occlusion_test_result >= base && occlusion_test_result < base + sizeof(local_lens_flare_occlusion_test_results))
+		return 1 + (unsigned long)(occlusion_test_result - base);
+	return 1 + sizeof(local_lens_flare_occlusion_test_results) + (unsigned long)(occlusion_test_result - base2);
+}
+#define LENS_FLARE_OCCLUSION_TEST_INDEX(parameters, lens_flare_index) \
+	((long)lens_flare_occlusion_test_key(lens_flare_occlusion_test_results_get(parameters)))
+#else
+#define LENS_FLARE_OCCLUSION_TEST_INDEX(parameters, lens_flare_index) (lens_flare_index)
+#endif
 
 static real lens_flare_evaluate_corona_rotation_function(
 	short corona_rotation_function,
@@ -632,7 +658,8 @@ void rasterizer_lights_begin_for_new_frame(
 
 			if (lens_flare_parameters->internal__occlusion_pixels>0)
 			{
-				long visible_pixels= rasterizer_widget_get_occlusion_test_result(lens_flare_index);
+				long visible_pixels= rasterizer_widget_get_occlusion_test_result(
+					LENS_FLARE_OCCLUSION_TEST_INDEX(lens_flare_parameters, lens_flare_index));
 				long occlusion_pixels= lens_flare_parameters->internal__occlusion_pixels;
 
 				latest_visibility= (byte)MIN(255, (255*visible_pixels + (occlusion_pixels>>1))/occlusion_pixels);
@@ -869,7 +896,7 @@ void rasterizer_lens_flares_submit_occlusion_tests(
 					rasterizer_widget_submit_occlusion_test(
 						&occlusion_point,
 						occlusion_radius,
-						lens_flare_index);
+						LENS_FLARE_OCCLUSION_TEST_INDEX(lens_flare_parameters, lens_flare_index));
 			}
 		}
 

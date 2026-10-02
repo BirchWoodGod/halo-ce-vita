@@ -173,9 +173,15 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 /* a frame's visibility test slots (each frame's buffer has this many) */
 #define VGXM_VISIBILITY_SLOTS 1024
 
-/* the samples that passed in this slot's test in the latest frame the GPU
-has finished, in the game's pixels (unscaled by the render scale) */
-unsigned long vgxm_visibility_result(unsigned long slot);
+/* (the worker, before vgxm_present) the number the game gave the frame,
+which its visibility counts are then known by */
+void vgxm_visibility_frame(unsigned long frame);
+/* the newest frame the GPU has finished whose visibility counts are kept:
+its buffer (-1: none yet) and the frame's number */
+int vgxm_visibility_newest(unsigned long *frame);
+/* the samples that passed in a slot's test in that buffer, in the game's
+pixels (unscaled by the render scale) */
+unsigned long vgxm_visibility_count(int buffer, unsigned long slot);
 
 /* ---------- frames */
 
@@ -198,7 +204,9 @@ NULL hides it */
 void vgxm_menu_set(const char *text, int selected);
 
 /* the colour target's pixels in rows of 32-bit BGRA, for screenshots
-(waits for the GPU); NULL if there is no such target */
-const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch);
+(waits for the GPU), and its size (smaller than asked for when the render
+scale made it so); NULL if there is no such target */
+const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch, unsigned long *width,
+	unsigned long *height);
 
 #endif

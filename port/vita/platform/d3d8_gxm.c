@@ -229,8 +229,14 @@ struct gxm_device
 	its draws count into; the game names a test only when it ends */
 	unsigned long visibility_index;
 	unsigned long visibility_tests_this_frame;
-	/* by the game's test index: the slot that test counted into */
-	unsigned short visibility_slot_of_test[VISIBILITY_TEST_SLOTS];
+	/* by frame (the last few): the game's index of each slot's test */
+	struct
+	{
+		unsigned long frame;
+		unsigned long count;
+		DWORD index[VGXM_VISIBILITY_SLOTS];
+	} visibility_frames[8];
+	unsigned long visibility_hint;
 
 	/* per stage: the texture with its sampler state applied, and what it
 	was made from (reused while the same) */
@@ -1068,15 +1074,18 @@ samples that pass, which the renderer reads back once the GPU has them */
 
 /* The game names a test when it ends it (EndVisibilityTest(index)), after
 its draws were recorded, so each test is given the next slot of the frame
-when it begins, its draws count into that slot, and the index is mapped to
-the slot at the end. The lens flares (rasterizer_lights.c) test once a
-frame each, in the same order from frame to frame, and read the results at
-the start of the next frame; the GPU then still has that frame ahead of
-it, so a result is the latest one the GPU has finished for that slot (one
-to three frames old), as on the desktop's GL device, rather than a wait for
-the GPU. This used to be a stub that read 0 for every test: no lens flare
-was ever drawn on the Vita - not the lights' coronas, nor a10's calibration
-lights, which the tutorial script turns from red to green. */
+when it begins, its draws count into that slot, and the frame's list of
+slots remembers the index each was ended with. The GPU is a frame or more
+behind when the game asks for a result (the lens flares, rasterizer_lights.c,
+test once a frame each and read the results at the start of the next), so
+a result is the count of the test with that index in the newest frame the
+GPU has finished (its notification), one to three frames old - as on the
+desktop's GL device - rather than a wait. The flares name their tests by
+something that stays the same from frame to frame (rasterizer_lights.c
+lens_flare_occlusion_test_key): a test that frame did not have reads 0.
+This used to be a stub that read 0 for every test: no lens flare was ever
+drawn on the Vita - not the lights' coronas, nor a10's calibration lights,
+which the tutorial script turns from red to green. */
 
 void WINAPI D3DDevice_BeginVisibilityTest(void)
 {
@@ -1093,18 +1102,53 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 	if (!device.visibility_test_active)
 		return S_OK;
 	device.visibility_test_active = FALSE;
-	device.visibility_slot_of_test[index % VISIBILITY_TEST_SLOTS] = (unsigned short)device.visibility_index;
+	if (device.visibility_index)
+	{
+		/* (the frame's list: begun anew at its first test) */
+		typeof(device.visibility_frames[0]) *frame = &device.visibility_frames[device.frame % 8];
+
+		if (frame->frame != device.frame)
+		{
+			frame->frame = device.frame;
+			frame->count = 0;
+		}
+		while (frame->count < device.visibility_index)
+			frame->index[frame->count++] = 0;
+		frame->index[device.visibility_index - 1] = index;
+	}
 	return S_OK;
 }
 
 HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULONGLONG *time_stamp)
 {
-	unsigned long slot = device.visibility_slot_of_test[index % VISIBILITY_TEST_SLOTS];
+	unsigned long frame_number, slot, tried;
+	int ring;
 
 	if (time_stamp)
 		*time_stamp = 0;
-	if (result)
-		*result = device.gpu_ready && slot ? (UINT)vgxm_visibility_result(slot) : 0;
+	if (!result)
+		return S_OK;
+	*result = 0;
+	if (!device.gpu_ready || (ring = vgxm_visibility_newest(&frame_number)) < 0)
+		return S_OK;
+	{
+		typeof(device.visibility_frames[0]) *frame = &device.visibility_frames[frame_number % 8];
+
+		if (frame->frame != frame_number || !frame->count)
+			return S_OK;
+		/* (the flares ask in the order they tested: start where the last
+		one was found) */
+		slot = device.visibility_hint < frame->count ? device.visibility_hint : 0;
+		for (tried = 0; tried < frame->count; tried++, slot = slot + 1 < frame->count ? slot + 1 : 0)
+		{
+			if (frame->index[slot] == index)
+			{
+				device.visibility_hint = slot + 1;
+				*result = (UINT)vgxm_visibility_count(ring, slot + 1);
+				break;
+			}
+		}
+	}
 	return S_OK;
 }
 
@@ -2471,6 +2515,8 @@ static void execute_command(struct render_command *command)
 		{
 			if (command->screenshot)
 				write_screenshot(back_buffer);
+			/* (the frame's visibility counts: the game's frame they are of) */
+			vgxm_visibility_frame(command->frame);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 		}
 		if (halo_trace_active())
@@ -4327,9 +4373,10 @@ static void write_screenshot_named(struct render_target_entry *target, const cha
 
 	if (!directory)
 		return;
-	pixels = vgxm_target_pixels(target->id, &pitch);
+	pixels = vgxm_target_pixels(target->id, &pitch, &width, &height);
 	if (!pixels)
 		return;
+	image_size = width * height * 4;
 	snprintf(path, sizeof(path), "%s/%s%05lu.bmp", directory, prefix, device.frame);
 	file = fopen(path, "wb");
 	if (!file)
