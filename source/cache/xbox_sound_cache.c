@@ -108,6 +108,22 @@ symbols in this file:
 #include <xtl.h>
 #ifdef HALO_LINUX
 #include "load_profile.h"
+#include <stdlib.h>
+
+/* (debug) HALO_SOUND_LOAD_DELAY=<ms>: a sound is taken as loaded only that
+long after its load started, as on the Vita, where the menu's first seconds
+queue its sound loads behind the textures' on a slow memory card */
+static long sound_load_delay_ms = -1;
+static unsigned long sound_load_started_ms[1024];
+
+static boolean sound_load_delayed(
+	long cache_block_index)
+{
+	if (sound_load_delay_ms < 0)
+		sound_load_delay_ms = getenv("HALO_SOUND_LOAD_DELAY") ? atol(getenv("HALO_SOUND_LOAD_DELAY")) : 0;
+	return sound_load_delay_ms > 0 &&
+		(long)(system_milliseconds() - sound_load_started_ms[cache_block_index & 1023]) < sound_load_delay_ms;
+}
 #endif
 
 /* ---------- constants */
@@ -525,6 +541,7 @@ static void sound_cache_start_loading_sound(
 			&cache_sound->loaded,
 			FALSE);
 #ifdef HALO_LINUX
+		sound_load_started_ms[cache_block_index & 1023] = system_milliseconds();
 		{
 			/* (debug) HALO_FIXED_TICK: the load is done before the sound
 			manager next looks, whatever the disk's speed */
@@ -603,7 +620,11 @@ boolean _sound_cache_sound_request(
 			struct xbox_cache_sound_datum *cache_sound = datum_get(
 				xbox_sound_cache_globals.cache_sounds,
 				sound->cache_block_index);
+#ifdef HALO_LINUX
+			if (cache_sound->loaded && !sound_load_delayed(sound->cache_block_index))
+#else
 			if (cache_sound->loaded)
+#endif
 			{
 				if (!cache_sound->initialized)
 				{

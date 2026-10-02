@@ -10,6 +10,10 @@ int halo_tick_thread_enabled(void);
 the game's state from the main thread */
 void halo_tick_thread_start(float delta);
 void halo_tick_thread_join(void);
+/* on the main thread while a tick is in flight: queues a call into the
+game state to be made at the join, after the tick, in the order asked
+(returns 1); 0 when no tick runs, and the caller makes it now */
+int halo_tick_thread_defer(void (*call)(void));
 /* on the tick thread: waits until the main thread has rendered and
 presented the frame (it then only waits for the tick), for a change the
 render cannot read halfway - a structure bsp switch; elsewhere returns at
