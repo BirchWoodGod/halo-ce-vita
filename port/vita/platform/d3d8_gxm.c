@@ -527,7 +527,7 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 
 static struct render_target_entry *render_target_get_version(const D3DSurface *surface, unsigned long version)
 {
-	struct render_target_entry *entry;
+	struct render_target_entry *entry, *placeholder = NULL, **link;
 	unsigned long width, height;
 	BOOL depth;
 
@@ -539,7 +539,30 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 		if (entry->target.data == surface->Data && entry->target.width == width &&
 			entry->target.height == height && entry->target.depth == depth && entry->version == version)
 		{
-			return entry->id ? entry : NULL;
+			if (entry->id)
+				return entry;
+			/* A surface no target could be made for. It used to stay
+			without one for good: the recycling below only ran at the
+			first request, and right after a level change every target is
+			still too recently used to be taken over, so the surfaces of
+			the new level that came too late (the glow's, the motion
+			sensor's) kept a placeholder and their effect never showed
+			again. Ask again every 30 frames; until then it has none. */
+			if (device.frame < entry->last_used + 30)
+				return NULL;
+			placeholder = entry;
+			break;
+		}
+	}
+	if (placeholder)
+	{
+		for (link = render_target_bucket(surface->Data); *link; link = &(*link)->next_in_bucket)
+		{
+			if (*link == placeholder)
+			{
+				*link = placeholder->next_in_bucket;
+				break;
+			}
 		}
 	}
 	{
@@ -548,26 +571,36 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 
 		if (id)
 		{
-			entry = calloc(1, sizeof(*entry));
+			entry = placeholder;
+			if (!entry)
+			{
+				entry = calloc(1, sizeof(*entry));
+				entry->next = render_targets;
+				render_targets = entry;
+			}
 			entry->id = id;
 			entry->texture = texture;
-			entry->next = render_targets;
-			render_targets = entry;
 		}
 		else if ((entry = render_target_recycle(width, height, depth)) != NULL)
 		{
 			static unsigned long recycled;
 
+			/* (a placeholder taken over by the recycled entry stays in the
+			list, without a target, and is never looked up again) */
 			if (++recycled <= 20)
 				platform_log("render target recycled for a %lux%lu %s surface (%lu so far)", width, height,
 					depth ? "depth" : "colour", recycled);
 		}
 		else
 		{
-			entry = calloc(1, sizeof(*entry));
-			entry->next = render_targets;
-			render_targets = entry;
-			platform_log("cannot create a %lux%lu %s target", width, height, depth ? "depth" : "colour");
+			entry = placeholder;
+			if (!entry)
+			{
+				entry = calloc(1, sizeof(*entry));
+				entry->next = render_targets;
+				render_targets = entry;
+				platform_log("cannot create a %lux%lu %s target", width, height, depth ? "depth" : "colour");
+			}
 		}
 	}
 	entry->version = version;
