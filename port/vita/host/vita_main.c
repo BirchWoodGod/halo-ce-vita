@@ -382,6 +382,62 @@ static void neon_copy(void *destination, const void *source, unsigned int bytes)
 		memcpy(d, s, bytes);
 }
 
+/* HALO_IO_BENCH=1: sequential reads of a map file (16 MB per request size,
+each size from a part of the file not read before, so no cache answers)
+at 64 KB, 256 KB, 1 MB and 4 MB a request, logged in MB/s, then the same
+with sceIoPread at increasing offsets (what the cache file thread does).
+The buffer comes from the C heap, made before the program starts: nothing
+is allocated in front of the memory window (vita_host_arena). */
+static void io_bench(void)
+{
+	static const unsigned long sizes[] = { 64 * 1024, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024 };
+	const char *root = getenv("HALO_MAPS_ROOT");
+	char path[320], message[200];
+	unsigned char *buffer = malloc(4 * 1024 * 1024);
+	unsigned long index, region = 0;
+	int pass;
+	SceUID file;
+
+	snprintf(path, sizeof(path), "%s/a10.map", root ? root : VITA_DEFAULT_MAPS_ROOT);
+	file = sceIoOpen(path, SCE_O_RDONLY, 0);
+	if (file < 0 || !buffer)
+	{
+		snprintf(message, sizeof(message), "io bench: cannot open %s (0x%08x)", path, (unsigned)file);
+		vita_host_log(message);
+		free(buffer);
+		return;
+	}
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (index = 0; index < sizeof(sizes) / sizeof(sizes[0]); index++, region++)
+		{
+			unsigned long long start_offset = (unsigned long long)region * 16 * 1024 * 1024;
+			unsigned long long before = sceKernelGetProcessTimeWide(), after;
+			unsigned long done = 0;
+
+			if (!pass)
+				sceIoLseek(file, start_offset, SCE_SEEK_SET);
+			while (done < 16 * 1024 * 1024)
+			{
+				int result = pass ?
+					sceIoPread(file, buffer, sizes[index], start_offset + done) :
+					sceIoRead(file, buffer, sizes[index]);
+
+				if (result <= 0)
+					break;
+				done += (unsigned long)result;
+			}
+			after = sceKernelGetProcessTimeWide();
+			snprintf(message, sizeof(message), "io bench: %s %4lu KB requests: %lu KB in %.1f ms = %.1f MB/s",
+				pass ? "pread" : "read ", sizes[index] / 1024, done / 1024, (after - before) / 1000.0,
+				after > before ? (done / 1048576.0) / ((after - before) / 1000000.0) : 0.0);
+			vita_host_log(message);
+		}
+	}
+	sceIoClose(file);
+	free(buffer);
+}
+
 static void primitive_benchmarks(void)
 {
 	enum { COUNT = 2000, BLOCK = 1536, WINDOW = 256 * 1024 };
@@ -622,6 +678,10 @@ int main(int argc, char **argv)
 		vita_host_log(message);
 	}
 
+	/* (debug) HALO_IO_BENCH=1: the memory card's read speed by request size
+	(io_bench) */
+	if (getenv("HALO_IO_BENCH") && atoi(getenv("HALO_IO_BENCH")))
+		io_bench();
 	/* (debug) HALO_STARTUP_CHECKS=1: the clocks and the cost of the
 	primitives the render path leans on, logged */
 	if (getenv("HALO_STARTUP_CHECKS") && atoi(getenv("HALO_STARTUP_CHECKS")))
