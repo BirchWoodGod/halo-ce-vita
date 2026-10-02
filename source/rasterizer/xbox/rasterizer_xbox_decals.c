@@ -681,6 +681,40 @@ static long decal_batch_quads;
 static boolean decal_batch_open;
 static long decal_batch_key[4];
 
+/* (port) and each vertex's colour - the value the decal's own draw gave
+input register 9 (SetVertexData4ub: red, green, blue, 255 - intensity, each
+/ 255) - in a stream of its own, which the batch's draw takes register 9
+from (halo_d3d_stream_attribute): decals that differ only in colour or fade
+(a fading decal's intensity is its own: 790 decals went out as 25 draws,
+fading as 180) are then one draw - the same quads in the same order, each
+vertex shaded from the same register values. A batch then shares the blend
+function, bitmap group and bitmap only. HALO_DECAL_COLOR_STREAM=0: a
+colour per draw, as before */
+enum { DECAL_COLOR_STREAM = 15 };
+static D3DVertexBuffer *decal_color_buffer;
+static float (*decal_batch_colors)[4];
+static float decal_batch_last_color[4];
+static long decal_batch_material[3];
+/* the batch's quads so far all have one colour (then drawn with it as the
+register's value, without the colour stream, which is filled only once a
+quad of another colour joins) */
+static boolean decal_batch_one_color;
+static float decal_batch_first_color[4];
+void halo_d3d_stream_attribute(long reg, long stream);
+
+static int decal_color_stream_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_DECAL_COLOR_STREAM");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	return enabled && decal_batch_colors;
+}
+
 void *halo_d3d_resource_pointer(const void *resource);
 void platform_log(const char *format, ...);
 void *halo_d3d_contiguous_alloc(unsigned long size);
@@ -740,19 +774,75 @@ struct decal_sort_entry
 	long key[4];
 	long order;
 	long decal_index;
+	/* (the decal and its definition, looked up once for both passes) */
+	struct decal_datum *decal;
+	struct decal_definition *definition;
 };
 static struct decal_sort_entry decal_sorted[DECAL_SORT_MAXIMUM];
+static struct decal_sort_entry decal_sort_scratch[DECAL_SORT_MAXIMUM];
 static long decal_sorted_count, decal_sorted_cursor;
 
-static int decal_sort_compare(const void *a, const void *b)
+/* the batch order: by key, then by list order (every entry's own, so the
+order is one whatever sorts it) */
+static int decal_sort_before(const struct decal_sort_entry *left, const struct decal_sort_entry *right)
 {
-	const struct decal_sort_entry *left = a, *right = b;
 	int index;
 
 	for (index = 0; index < 4; index++)
 		if (left->key[index] != right->key[index])
-			return left->key[index] < right->key[index] ? -1 : 1;
-	return left->order < right->order ? -1 : left->order > right->order;
+			return left->key[index] < right->key[index];
+	return left->order < right->order;
+}
+
+/* (insertion sort in runs of 16, then bottom-up merges: the comparison
+inline, where qsort called it through a pointer - hundreds of decals a
+frame in a long fight) */
+static void decal_sort_entries(struct decal_sort_entry *entries, long count)
+{
+	enum { RUN = 16 };
+	struct decal_sort_entry *from = entries, *to = decal_sort_scratch;
+	long start, width;
+
+	for (start = 0; start < count; start += RUN)
+	{
+		long end = start + RUN < count ? start + RUN : count, i;
+
+		for (i = start + 1; i < end; i++)
+		{
+			struct decal_sort_entry value = entries[i];
+			long place = i;
+
+			while (place > start && decal_sort_before(&value, &entries[place - 1]))
+			{
+				entries[place] = entries[place - 1];
+				place--;
+			}
+			entries[place] = value;
+		}
+	}
+	for (width = RUN; width < count; width *= 2)
+	{
+		struct decal_sort_entry *swap;
+
+		for (start = 0; start < count; start += 2 * width)
+		{
+			long middle = start + width < count ? start + width : count;
+			long end = start + 2 * width < count ? start + 2 * width : count;
+			long left = start, right = middle, out = start;
+
+			while (left < middle && right < end)
+				to[out++] = decal_sort_before(&from[right], &from[left]) ? from[right++] : from[left++];
+			while (left < middle)
+				to[out++] = from[left++];
+			while (right < end)
+				to[out++] = from[right++];
+		}
+		swap = from;
+		from = to;
+		to = swap;
+	}
+	if (from != entries)
+		memcpy(entries, from, count * sizeof(entries[0]));
 }
 
 static unsigned long decal_intensity_rounded(unsigned long intensity);
@@ -785,11 +875,13 @@ static long decal_sort_cluster(long decal_index)
 		entry->key[3] = (long)decal_intensity_rounded((decal->intensity * (color >> 24) + 127) >> 8);
 		entry->order = count;
 		entry->decal_index = decal_index;
+		entry->decal = decal;
+		entry->definition = definition;
 		count++;
 		decal_index = decal->next_decal_index;
 	}
 	if (count > 1)
-		qsort(decal_sorted, (size_t)count, sizeof(decal_sorted[0]), decal_sort_compare);
+		decal_sort_entries(decal_sorted, count);
 	return count;
 }
 
@@ -799,7 +891,24 @@ static void decal_batch_flush(void)
 	{
 		decal_stats_draws++;
 		IDirect3DDevice8_SetStreamSource(global_d3d_device, 0, decal_batch_buffer, sizeof(struct decal_vertex));
-		IDirect3DDevice8_DrawPrimitive(global_d3d_device, D3DPT_QUADLIST, 0, decal_batch_quads);
+		if (decal_color_stream_enabled() && decal_batch_one_color)
+		{
+			IDirect3DDevice8_SetVertexData4f(global_d3d_device, 9, decal_batch_first_color[0], decal_batch_first_color[1],
+				decal_batch_first_color[2], decal_batch_first_color[3]);
+			IDirect3DDevice8_DrawPrimitive(global_d3d_device, D3DPT_QUADLIST, 0, decal_batch_quads);
+		}
+		else if (decal_color_stream_enabled())
+		{
+			IDirect3DDevice8_SetStreamSource(global_d3d_device, DECAL_COLOR_STREAM, decal_color_buffer, sizeof(decal_batch_colors[0]));
+			halo_d3d_stream_attribute(9, DECAL_COLOR_STREAM);
+			IDirect3DDevice8_DrawPrimitive(global_d3d_device, D3DPT_QUADLIST, 0, decal_batch_quads);
+			halo_d3d_stream_attribute(-1, 0);
+			/* (register 9 left as the last decal's draw left it) */
+			IDirect3DDevice8_SetVertexData4f(global_d3d_device, 9, decal_batch_last_color[0], decal_batch_last_color[1],
+				decal_batch_last_color[2], decal_batch_last_color[3]);
+		}
+		else
+			IDirect3DDevice8_DrawPrimitive(global_d3d_device, D3DPT_QUADLIST, 0, decal_batch_quads);
 		if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_geometry)
 			rasterizer_frame_statistics.decal_draw_count++;
 	}
@@ -819,6 +928,13 @@ static void decal_batch_ensure(void)
 		decal_batch_buffer->Data = (unsigned long)decal_batch_vertices;
 		decal_batch_buffer->Lock = 0;
 		IDirect3DVertexBuffer8_Register(decal_batch_buffer, NULL);
+		decal_color_buffer = (D3DVertexBuffer *)malloc(sizeof(D3DVertexBuffer));
+		memset(decal_color_buffer, 0, sizeof(*decal_color_buffer));
+		decal_batch_colors = (float (*)[4])halo_d3d_contiguous_alloc(DECAL_BATCH_VERTICES * sizeof(decal_batch_colors[0]));
+		decal_color_buffer->Common = 1;
+		decal_color_buffer->Data = (unsigned long)decal_batch_colors;
+		decal_color_buffer->Lock = 0;
+		IDirect3DVertexBuffer8_Register(decal_color_buffer, NULL);
 	}
 }
 #endif
@@ -847,8 +963,14 @@ void _rasterizer_decals_draw(
 #endif
 	while (decal_index != NONE)
 	{
+#ifdef HALO_LINUX
+		struct decal_datum *decal = decal_sorted_count > 0 ? decal_sorted[decal_sorted_cursor].decal : DECAL_GET(decal_index);
+		struct decal_definition *definition = decal_sorted_count > 0 ? decal_sorted[decal_sorted_cursor].definition :
+			decal_definition_get(decal->definition_index);
+#else
 		struct decal_datum *decal = DECAL_GET(decal_index);
 		struct decal_definition *definition = decal_definition_get(decal->definition_index);
+#endif
 		struct decal_shader_definition *shader = &definition->shader;
 		short framebuffer_blend_function = shader->framebuffer_blend_function;
 		unsigned long vertex_data_offset;
@@ -865,7 +987,24 @@ void _rasterizer_decals_draw(
 		key[3] = (long)intensity;
 		decal_batch_ensure();
 		decal_stats_decals++;
-		if (decal_batch_open && memcmp(key, decal_batch_key, sizeof(key)) != 0)
+		if (decal_color_stream_enabled())
+		{
+			/* (what the decal's draw state is made of: the blend function,
+			and the bitmap - the colour goes with the vertices) */
+			long material[3];
+
+			material[0] = framebuffer_blend_function;
+			material[1] = shader->map.index;
+			material[2] = (char)decal->bitmap_index;
+			if (decal_batch_open && memcmp(material, decal_batch_material, sizeof(material)) != 0)
+			{
+				decal_batch_flush();
+				decal_batch_open = FALSE;
+			}
+			if (!decal_batch_open)
+				memcpy(decal_batch_material, material, sizeof(material));
+		}
+		else if (decal_batch_open && memcmp(key, decal_batch_key, sizeof(key)) != 0)
 		{
 			decal_batch_flush();
 			decal_batch_open = FALSE;
@@ -968,7 +1107,16 @@ void _rasterizer_decals_draw(
 			511,
 			vertex_data_offset%sizeof(struct decal_vertex)==0);
 #ifdef HALO_LINUX
-		if (!decal_batch_open)
+		if (decal_color_stream_enabled())
+		{
+			/* (the values SetVertexData4ub gives the register) */
+			decal_batch_last_color[0] = (BYTE)(color >> 16) / 255.0f;
+			decal_batch_last_color[1] = (BYTE)(color >> 8) / 255.0f;
+			decal_batch_last_color[2] = (BYTE)color / 255.0f;
+			decal_batch_last_color[3] = (BYTE)(PIXEL32_COMPONENT_MASK - intensity) / 255.0f;
+			decal_batch_open = TRUE;
+		}
+		else if (!decal_batch_open)
 		{
 			IDirect3DDevice8_SetVertexData4ub(
 				global_d3d_device,
@@ -993,6 +1141,26 @@ void _rasterizer_decals_draw(
 			if ((decal_batch_quads + decal->quad_count) * 4 > DECAL_BATCH_VERTICES)
 				decal_batch_flush();
 			memcpy(decal_batch_vertices + decal_batch_quads * 4, source, decal->quad_count * 4 * sizeof(struct decal_vertex));
+			if (decal_color_stream_enabled())
+			{
+				long vertex;
+
+				if (!decal_batch_quads)
+				{
+					memcpy(decal_batch_first_color, decal_batch_last_color, sizeof(decal_batch_first_color));
+					decal_batch_one_color = TRUE;
+				}
+				else if (decal_batch_one_color && memcmp(decal_batch_first_color, decal_batch_last_color, sizeof(decal_batch_last_color)))
+				{
+					/* (another colour: the quads so far get theirs) */
+					for (vertex = 0; vertex < decal_batch_quads * 4; vertex++)
+						memcpy(decal_batch_colors[vertex], decal_batch_first_color, sizeof(decal_batch_first_color));
+					decal_batch_one_color = FALSE;
+				}
+				if (!decal_batch_one_color)
+					for (vertex = decal_batch_quads * 4; vertex < (decal_batch_quads + decal->quad_count) * 4; vertex++)
+						memcpy(decal_batch_colors[vertex], decal_batch_last_color, sizeof(decal_batch_last_color));
+			}
 			decal_batch_quads += decal->quad_count;
 		}
 		if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_geometry)
