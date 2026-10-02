@@ -267,11 +267,33 @@ static void test_adhoc(void)
 	static const unsigned char everyone[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 	static const unsigned char other_address[6] = { 0x02, 0x00, 127, 0, 0, 221 };
 
+	extern int mock_dialog_result, mock_dialog_terms, mock_dialog_mode;
+	extern int mock_gxm_dialog_active, mock_gxm_dialog_switches;
+	extern char mock_dialog_group[9];
+
 	check(!posix_adhoc_ready(address), "adhoc: not ready outside a group", adhoc_state, 0);
-	/* (in a group, as vita_adhoc_connect leaves it) */
-	adhoc_state = 2;
-	memcpy(adhoc_address.data, "\x02\x00\x7f\x00\x00\xdc", 6);
-	check(posix_adhoc_ready(address) && !memcmp(address, adhoc_address.data, 6), "adhoc: ready in a group", adhoc_state, 2);
+	/* joining through the dialog (vita_adhoc_connect's thread, run here):
+	cancelled, then joined; room 3 is the group HALOCE3 */
+	adhoc_mode = 0;
+	adhoc_room = 3;
+	mock_dialog_result = SCE_COMMON_DIALOG_RESULT_USER_CANCELED;
+	adhoc_connect_thread(0, NULL);
+	check(adhoc_state == -1 && !posix_adhoc_ready(address), "adhoc: a cancelled dialog leaves no group", adhoc_state, -1);
+	check(mock_dialog_terms == 1 && mock_gxm_dialog_switches == 2 && !mock_gxm_dialog_active,
+		"adhoc: the dialog was drawn, then stopped and ended", mock_gxm_dialog_switches, 2);
+	mock_dialog_result = SCE_COMMON_DIALOG_RESULT_OK;
+	adhoc_connect_thread(0, NULL);
+	check(adhoc_state == 2 && mock_dialog_mode == SCE_NETCHECK_DIALOG_MODE_PSP_ADHOC_CONN &&
+		!strcmp(mock_dialog_group, "HALOCE3"), "adhoc: joined room 3's group in connect mode", adhoc_state, 2);
+	check(posix_adhoc_ready(address) && !memcmp(address, "\x02\x00\x7f\x00\x00\xdc", 6), "adhoc: ready in a group",
+		adhoc_state, 2);
+	{
+		char status[96];
+
+		vita_adhoc_state(status, sizeof(status));
+		check(strstr(status, "in a group") != NULL, "adhoc: the status says so", 0, 0);
+		printf("  (status: %s)\n", status);
+	}
 	check(posix_adhoc_open(2306) == 0 && mock_pdp_creates == 1, "adhoc: PDP port opened", mock_pdp_creates, 1);
 
 	other_socket = socket(AF_INET, SOCK_DGRAM, 0);

@@ -227,6 +227,10 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	unsigned long long now = now_us();
 
 	previous_buttons = buttons;
+	/* (the system's ad hoc dialog reads the pad itself: the game must not
+	act on the same presses) */
+	if (vita_adhoc_state(NULL, 0) == 1)
+		return 1;
 	if (both)
 	{
 		if (!both_since)

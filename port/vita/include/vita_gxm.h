@@ -196,6 +196,9 @@ void vgxm_overlay_enable(int enabled);
 '\n' (the first a title, the last a hint), selected the highlighted line;
 NULL hides it */
 void vgxm_menu_set(const char *text, int selected);
+/* a system dialog (vita_net.c's network check) is up: the system draws it
+over each frame presented while active (host side only) */
+void vgxm_common_dialog(int active);
 
 /* the colour target's pixels in rows of 32-bit BGRA, for screenshots
 (waits for the GPU); NULL if there is no such target */

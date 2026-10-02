@@ -73,6 +73,15 @@ void vita_host_pad_read(struct vita_host_pad *pad);
 int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
+/* ad hoc play (vita_net.c): joins an ad hoc group through the system's
+network check dialog, on a thread of its own. mode 0 "connect" (the room's
+group, made if there is none), 1 make one, 2 pick one nearby; room 1-4.
+0 if it started */
+int vita_adhoc_connect(int mode, int room);
+void vita_adhoc_leave(void);
+/* 0 not in a group, 1 joining (the dialog is up: the game should see no
+buttons), 2 in a group, -1 the last attempt failed; a line saying so */
+int vita_adhoc_state(char *text, int size);
 /* (debug) HALO_ADHOC_PROBE=1: logs what the Vita's ad hoc libraries do
 (vita_net.c) */
 void vita_net_adhoc_probe(void);

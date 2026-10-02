@@ -19,6 +19,7 @@ Frame ring reuse is fenced by the GPU's fragment notification at the end of
 each frame's presentation.
 */
 
+#include <psp2/common_dialog.h>
 #include <psp2/display.h>
 #include <psp2/gxm.h>
 #include <psp2/io/fcntl.h>
@@ -173,6 +174,9 @@ static struct
 	unsigned char context_host_memory[SCE_GXM_MINIMUM_CONTEXT_HOST_MEM_SIZE];
 
 	struct block display_memory[DISPLAY_BUFFER_COUNT];
+	/* the depth buffer a system dialog draws with (vgxm_common_dialog),
+	made the first time one is shown */
+	struct block dialog_depth;
 	SceGxmColorSurface display_surface[DISPLAY_BUFFER_COUNT];
 	SceGxmSyncObject *display_sync[DISPLAY_BUFFER_COUNT];
 	SceGxmRenderTarget *display_render_target;
@@ -2107,6 +2111,44 @@ static void overlay_draw(void)
 	gxm.scene_draws++;
 }
 
+/* ---------- system dialogs (the ad hoc group's network check dialog,
+vita_net.c): the system draws one over each finished frame, into the
+display buffer about to be shown, while vgxm_common_dialog(1) holds */
+
+static volatile int common_dialog_wanted;
+
+void vgxm_common_dialog(int active)
+{
+	common_dialog_wanted = active;
+}
+
+static void common_dialog_update(void)
+{
+	static int logged;
+	SceCommonDialogUpdateParam update;
+	int result;
+
+	if (!gxm.dialog_depth.base &&
+		!block_allocate(&gxm.dialog_depth, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
+			ALIGN(DISPLAY_WIDTH, 32) * ALIGN(DISPLAY_HEIGHT, 32) * 4, 1, "dialog depth"))
+		return;
+	memset(&update, 0, sizeof(update));
+	update.renderTarget.colorFormat = SCE_GXM_COLOR_FORMAT_A8B8G8R8;
+	update.renderTarget.surfaceType = SCE_GXM_COLOR_SURFACE_LINEAR;
+	update.renderTarget.width = DISPLAY_WIDTH;
+	update.renderTarget.height = DISPLAY_HEIGHT;
+	update.renderTarget.strideInPixels = DISPLAY_STRIDE;
+	update.renderTarget.colorSurfaceData = gxm.display_memory[gxm.back_buffer].base;
+	update.renderTarget.depthSurfaceData = gxm.dialog_depth.base;
+	update.displaySyncObject = gxm.display_sync[gxm.back_buffer];
+	result = sceCommonDialogUpdate(&update);
+	if (logged < 2 || (result < 0 && logged < 8))
+	{
+		logged++;
+		log_line("gxm: system dialog drawn: 0x%08x", (unsigned)result);
+	}
+}
+
 /* where vgxm_present's time goes: 0 ending the main scene, 1 beginning
 the display scene, 2 the blit and its scene end, 3 the display queue */
 static unsigned long long present_mark, present_step_us[4];
@@ -2146,6 +2188,8 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	notification.address = gxm.notification;
 	notification.value = ++gxm.frame;
 	sceGxmEndScene(gxm.context, NULL, &notification);
+	if (common_dialog_wanted)
+		common_dialog_update();
 	present_step(2);
 	data.address = gxm.display_memory[gxm.back_buffer].base;
 	sceGxmDisplayQueueAddEntry(gxm.display_sync[gxm.front_buffer], gxm.display_sync[gxm.back_buffer], &data);
