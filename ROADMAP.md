@@ -50,6 +50,8 @@ flares; saves that keep working across updates.
   Vitas, online or ad hoc. The Xbox game only had split-screen co-op on
   one console, so this is new work for the port.
 - **A relay** for networks that cannot connect to each other directly.
+- **QR code invites**: the host shows its lobby code as a QR code, and the
+  joiner scans it with the Vita's camera.
 - **A steady 30 fps** in the biggest fights.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
