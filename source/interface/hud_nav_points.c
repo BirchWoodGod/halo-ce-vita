@@ -227,9 +227,11 @@ struct hud_nav_object_datum
 static void hud_update_nav_point_local_player(
 	short local_player_index);
 
+#ifndef object_try_and_get_and_verify_type /* (port: objects.h may have it inline) */
 void *object_try_and_get_and_verify_type(
 	long object_index,
 	unsigned long valid_type_flags);
+#endif
 
 void object_get_bounding_sphere(
 	long object_index,

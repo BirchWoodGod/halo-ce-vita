@@ -4,6 +4,8 @@ OBJECTS.C
 
 /* ---------- headers */
 
+/* (objects.h: this file defines the functions its inline lookups stand in for) */
+#define HALO_OBJECTS_C
 #include "cseries.h"
 #include "objects.h"
 #ifdef HALO_LINUX
