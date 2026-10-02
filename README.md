@@ -170,8 +170,21 @@ Issues and pull requests are welcome. Open work:
 - **Draw count**: objects are drawn one part at a time (about 270 of the
   ~360 draws in a big fight); batching them would help the most.
 
-When you report a problem, attach `ux0:data/haloce-vita/halo.log` and
-`halo-prev.log` (the previous session's log, kept after a crash).
+### Reporting a crash or a problem
+
+Open an [issue](https://github.com/BirchWoodGod/halo-ce-vita/issues) with
+what you were doing (level, place, weapon, vehicle) and these files from
+the memory card (VitaShell's FTP or USB mode):
+
+- `ux0:data/haloce-vita/halo.log` and `halo-prev.log`: the port's logs of
+  this and the previous session (the previous one is the crashed one after
+  a restart).
+- After a crash, the newest `ux0:data/psp2core-....psp2dmp`: the crash
+  dump. Leave the Vita alone for a minute after a crash so it finishes
+  writing it (a dump still being written ends in `.tmp`).
+- `ux0:data/haloce-vita/data/debug.txt`: the game's own log.
+
+The logs hold no personal data beyond your profile names.
 
 ## Credits
 
