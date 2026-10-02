@@ -1007,6 +1007,12 @@ static struct portal_hull_cache_entry *portal_hull_cache_entry_get(
 	return index >= 0 && index < portal_hull_cache_count ? &portal_hull_cache[index] : NULL;
 }
 
+#include <stdlib.h>
+void platform_log(const char *format, ...);
+/* (HALO_RENDER_PROFILE=1: per visibility pass, the clusters the traversal entered,
+the portal hulls made and the intersections clipped, every 300 frames) */
+static unsigned long visibility_profile_counts[3], visibility_profile_frames;
+
 static short portal_hull_from_portal_cached(
 	short portal_index,
 	boolean direction,
@@ -1024,6 +1030,7 @@ static short portal_hull_from_portal_cached(
 		return entry->result;
 	}
 	hull_result = portal_hull_from_portal(portal_index, direction, result);
+	visibility_profile_counts[1]++;
 	if (entry)
 	{
 		long count = result->vertex_count > 0 ? result->vertex_count : 0;
@@ -1603,6 +1610,9 @@ static void structure_visibility_traverse_cluster(
 		structure_visibility_globals.visited_cluster_flags,
 		cluster_index,
 		TRUE);
+#ifdef HALO_LINUX
+	visibility_profile_counts[0]++;
+#endif
 
 	if (!BIT_VECTOR_TEST_FLAG(render.visible_cluster_flags, cluster_index))
 	{
@@ -1709,6 +1719,9 @@ static void structure_visibility_traverse_cluster(
 			{
 				struct portal_hull clipped_hull;
 
+#ifdef HALO_LINUX
+				visibility_profile_counts[2]++;
+#endif
 				clipped_hull.vertex_count = convex_hull2d_intersect(
 					visible_region->vertex_count,
 					visible_region->vertices,
@@ -1830,6 +1843,23 @@ void structure_visibility_compute(
 	portal_hull_cache_begin(structure);
 #endif
 	structure_visibility_find_clusters();
+#ifdef HALO_LINUX
+	{
+		static int enabled = -1;
+
+		if (enabled < 0)
+		{
+			const char *setting = getenv("HALO_RENDER_PROFILE");
+			enabled = setting ? atoi(setting) : 0;
+		}
+		if (enabled > 0 && ++visibility_profile_frames % 300 == 0)
+		{
+			platform_log("visibility-profile (per pass): %.1f clusters entered, %.1f portal hulls made, %.1f clipped",
+				visibility_profile_counts[0] / 300.0, visibility_profile_counts[1] / 300.0, visibility_profile_counts[2] / 300.0);
+			visibility_profile_counts[0] = visibility_profile_counts[1] = visibility_profile_counts[2] = 0;
+		}
+	}
+#endif
 
 	if (structures_use_pvs_for_vs)
 	{
