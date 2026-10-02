@@ -60,6 +60,10 @@ A movie without an MP4 is skipped, as the game skips a missing movie. (The
 game looks for `data/bink/<name>.bik` first; the port creates an empty one
 for each MP4 at start-up.)
 
+A movie is shown at the shape its file gives: one made 16:9 at 640x480
+(ffmpeg `-aspect 16:9`) fills the screen's width, the Xbox's are 4:3.
+`HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
+
 ## Controls
 
 | Vita | Xbox | In play |

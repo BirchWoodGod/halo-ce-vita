@@ -48,6 +48,11 @@ HBINK __stdcall BinkOpen(const char *name, unsigned long flags)
 	return NULL;
 }
 
+float halo_movie_display_aspect(void)
+{
+	return 0.0f;
+}
+
 /* never reached without an open movie */
 
 void __stdcall BinkClose(HBINK bink) { (void)bink; }

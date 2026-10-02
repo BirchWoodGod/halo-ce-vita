@@ -354,6 +354,10 @@ symbols in this file:
 #include "text/text_group.h"
 #include "text/unicode.h"
 
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#endif
+
 /* ---------- constants */
 
 enum
@@ -2030,7 +2034,27 @@ void set_textbox_to_build_number(
 	   the function is unattested. January corroborates: .bss +0x28, referenced only here. */
 	static wchar_t build_number_string[64];
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+	/* (the main menu's corner showed the beta's build number, which players
+	of the port's releases took for leftover debug text, issue #6: a
+	release build leaves the text box empty and puts the number in the log
+	instead; HALO_BUILD_NUMBER=1 shows it) */
+	static int show_build_number = -1;
+
+	if (show_build_number < 0)
+	{
+		void platform_log(const char *format, ...);
+		char const *setting = getenv("HALO_BUILD_NUMBER");
+
+		show_build_number = setting && atoi(setting) != 0;
+		platform_log("game build 01.01.14.2342 (Xbox beta)%s",
+			show_build_number ? "" : "; the main menu's build number is hidden (HALO_BUILD_NUMBER=1 shows it)");
+	}
+	/* (hidden: the string stays empty) */
+	if (show_build_number && !build_number_string[0])
+#else
 	if (!build_number_string[0])
+#endif
 	{
 		ascii_to_wide(
 			"01.01.14.2342",

@@ -3975,9 +3975,22 @@ void draw_string_and_hack_in_icons(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* the interface runs on the main thread, alongside the tick on its own
+(HALO_TICK_THREAD): starting or stopping the music there creates and
+deletes the tick's looping sounds under it (the log's "new of object
+looping sounds on the render thread while a tick runs (unsafe)"), so the
+call is made at the join instead */
+int halo_tick_thread_defer(void (*call)(void));
+#endif
+
 void ui_start_main_menu_music(
 	void)
 {
+#ifdef HALO_LINUX
+	if (halo_tick_thread_defer(ui_start_main_menu_music))
+		return;
+#endif
 	if (!widget_globals.main_menu_music_active && !main_menu_fade_active())
 	{
 		long sound_definition_index = tag_loaded(LOOPING_SOUND_DEFINITION_TAG, "sound\\music\\title1\\title1");
@@ -4000,6 +4013,10 @@ void ui_start_main_menu_music(
 void ui_stop_main_menu_music(
 	void)
 {
+#ifdef HALO_LINUX
+	if (halo_tick_thread_defer(ui_stop_main_menu_music))
+		return;
+#endif
 	if (widget_globals.main_menu_music_active == TRUE)
 	{
 		long sound_definition_index = tag_loaded(LOOPING_SOUND_DEFINITION_TAG, "sound\\music\\title1\\title1");

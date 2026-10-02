@@ -42,6 +42,8 @@ static struct
 	int frame_valid;
 	int frame_pending;
 	unsigned long width, height;
+	/* the display shape (vita_movie_display_aspect) */
+	float aspect;
 } movie;
 
 /* ---------- the player's memory */
@@ -229,10 +231,55 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 	movie.height = movie.frame_valid ? movie.frame.details.video.height : 480;
 	*width = movie.width;
 	*height = movie.height;
-	snprintf(message, sizeof(message), "movie: playing %s (%lux%lu%s)", path, movie.width, movie.height,
-		movie.frame_valid ? "" : ", no frame yet");
+	{
+		/* the shape it is shown at (issue #6: movies converted 16:9 for
+		another port, 640x480 pixels flagged 16:9, played 4:3): the file's
+		display size, else the player's own idea of it when that differs
+		from the pixels' (Vita3K's never does), else the pixels'.
+		HALO_MOVIE_ASPECT=<w:h or a number> forces one, e.g. 16:9 for a
+		squeezed copy without the flag; "pixels" keeps the size's */
+		const char *source = "its size";
+		const char *setting = getenv("HALO_MOVIE_ASPECT");
+		float pixels = (float)movie.width / (float)movie.height;
+
+		movie.aspect = vita_movie_file_aspect(path, movie.width, movie.height, &source);
+		if (movie.frame_valid && movie.aspect > pixels * 0.99f && movie.aspect < pixels * 1.01f)
+		{
+			float player = movie.frame.details.video.aspectRatio;
+
+			if (player > 0.5f && player < 4.0f && (player < pixels * 0.99f || player > pixels * 1.01f))
+			{
+				movie.aspect = player;
+				source = "the player";
+			}
+		}
+		if (setting && *setting)
+		{
+			float forced = 0.0f;
+			const char *colon = strchr(setting, ':');
+
+			if (!strcmp(setting, "pixels"))
+				forced = pixels;
+			else if (colon && atof(colon + 1) > 0.0)
+				forced = (float)(atof(setting) / atof(colon + 1));
+			else
+				forced = (float)atof(setting);
+			if (forced >= 0.5f && forced <= 4.0f)
+			{
+				movie.aspect = forced;
+				source = "HALO_MOVIE_ASPECT";
+			}
+		}
+		snprintf(message, sizeof(message), "movie: playing %s (%lux%lu%s), shown at %.3f:1 (from %s)", path, movie.width,
+			movie.height, movie.frame_valid ? "" : ", no frame yet", (double)movie.aspect, source);
+	}
 	vita_host_log(message);
 	return 0;
+}
+
+float vita_movie_display_aspect(void)
+{
+	return movie.open ? movie.aspect : 0.0f;
 }
 
 /* 1: a frame is waiting to be copied; 0: not yet time; -1: the movie ended */

@@ -18,6 +18,10 @@ SOUND_DSOUND_XBOX.C
 #include "text/draw_string.h"
 
 #include <xtl.h>
+#ifdef HALO_LINUX
+#include <stdlib.h>
+void platform_log(const char *format, ...);
+#endif
 
 /* ---------- constants */
 
@@ -2511,6 +2515,16 @@ static boolean dsound_channel_queue_packet(
 				{
 					if (channel->sample_offset)
 					{
+#ifdef HALO_LINUX
+						static int trace = -1;
+
+						if (trace < 0)
+							trace = getenv("HALO_SOUND_TRACE") && atoi(getenv("HALO_SOUND_TRACE"));
+						if (trace)
+							platform_log("sound trace: dsound channel %d last packet of %.32s, next %.32s (state %d)",
+								index, sound->name, channel->queued_permutation ? channel->queued_permutation->name : "-",
+								channel->state);
+#endif
 						channel->playing_permutation= channel->queued_permutation;
 						packet.dwMaxSize= remaining_size;
 						channel->queued_permutation= NULL;

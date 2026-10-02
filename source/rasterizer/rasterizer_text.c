@@ -646,20 +646,34 @@ cache_hardware_format_character(
 		short y0, y1;
 		short x, y;
 		short next_write_index;
+#ifdef HALO_LINUX
+		/* Each glyph has a cell one texel wider and taller than itself in
+		the cache, and the texels around it are cleared: the glyphs were
+		packed edge to edge, and wherever text is not drawn texel for pixel
+		(the Vita's render resolution below 100%, the default 75%, scales
+		the menus too) bilinear filtering reached into the neighbours,
+		leaving stray pixels at the glyphs' edges (issue #6, the Enter Name
+		keyboard). Drawn texel for pixel, the result is the same. */
+		short const cell_width = (short)(font_character->bitmap_width + 1);
+		short const cell_height = (short)(font_character->bitmap_height + 1);
+#else
+		short const cell_width = font_character->bitmap_width;
+		short const cell_height = font_character->bitmap_height;
+#endif
 
 		match_assert("c:\\halo\\SOURCE\\rasterizer\\rasterizer_text.c", 645, font_character->bitmap_width<=HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH);
 		match_assert("c:\\halo\\SOURCE\\rasterizer\\rasterizer_text.c", 646, font_character->bitmap_height<=HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT);
 
 		font_character->pad = magic_number;
 
-		if (font_character->bitmap_width + hardware_character_cache.x0 > HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH)
+		if (cell_width + hardware_character_cache.x0 > HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH)
 		{
 			hardware_character_cache.x0 = 0;
 			hardware_character_cache.y0 += hardware_character_cache.maximum_character_height;
 			hardware_character_cache.maximum_character_height = 0;
 		}
 
-		if (font_character->bitmap_height + hardware_character_cache.y0 > HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT)
+		if (cell_height + hardware_character_cache.y0 > HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT)
 		{
 			hardware_character_cache.y0 = 0;
 			hardware_character_cache.x0 = 0;
@@ -678,10 +692,10 @@ cache_hardware_format_character(
 			}
 		}
 
-		if (font_character->bitmap_height > hardware_character_cache.maximum_character_height)
+		if (cell_height > hardware_character_cache.maximum_character_height)
 		{
 			y0 = hardware_character_cache.y0 + hardware_character_cache.maximum_character_height;
-			y1 = hardware_character_cache.y0 + font_character->bitmap_height;
+			y1 = hardware_character_cache.y0 + cell_height;
 
 			for (;
 				hardware_character_cache.read_index != hardware_character_cache.write_index;
@@ -695,7 +709,7 @@ cache_hardware_format_character(
 				flush_hardware_character(hardware_character);
 			}
 
-			hardware_character_cache.maximum_character_height = font_character->bitmap_height;
+			hardware_character_cache.maximum_character_height = cell_height;
 		}
 
 		next_write_index = (hardware_character_cache.write_index + 1) & (MAXIMUM_HARDWARE_CHARACTERS - 1);
@@ -726,9 +740,34 @@ cache_hardware_format_character(
 				*destination++ = (word)((*source++ << 8) | 0x0FFF);
 		}
 
+#ifdef HALO_LINUX
+		{
+			/* the ring around the glyph: its own right column and bottom
+			row, the left neighbour's right column and the row above's
+			bottom row (a glyph of an earlier pass through the cache may
+			have left texels there) */
+			short const gutter_x0 = (short)(hardware_character->x0 - 1);
+			short const gutter_y0 = (short)(hardware_character->y0 - 1);
+			short const gutter_x1 = (short)(hardware_character->x0 + font_character->bitmap_width);
+			short const gutter_y1 = (short)(hardware_character->y0 + font_character->bitmap_height);
+
+			for (y = gutter_y0; y <= gutter_y1; y++)
+			{
+				if (y < 0 || y >= HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT)
+					continue;
+				for (x = gutter_x0; x <= gutter_x1; x++)
+				{
+					if (x < 0 || x >= HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH)
+						continue;
+					if (y == gutter_y0 || y == gutter_y1 || x == gutter_x0 || x == gutter_x1)
+						*(word *)bitmap_2d_address(hardware_character_cache.bitmap, x, y, 0) = 0x0FFF;
+				}
+			}
+		}
+#endif
 		rasterizer_bitmap_changed(hardware_character_cache.bitmap);
 
-		hardware_character_cache.x0 += font_character->bitmap_width;
+		hardware_character_cache.x0 += cell_width;
 		hardware_character_cache.write_index = (hardware_character_cache.write_index + 1) & (MAXIMUM_HARDWARE_CHARACTERS - 1);
 	}
 

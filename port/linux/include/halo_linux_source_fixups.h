@@ -54,6 +54,10 @@ long halo_screen_width(void);
 long halo_screen_commit(void);
 /* while TRUE, drawing shifts right to center 640-column layouts */
 void halo_screen_ui_offset(unsigned char centered);
+/* the open movie's display shape (width / height) when its file gives one
+apart from its size in pixels, 0 otherwise (port/vita/platform/bink_vita.c;
+port/linux/src/bink_null.c: 0) */
+float halo_movie_display_aspect(void);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
 

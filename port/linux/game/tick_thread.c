@@ -159,6 +159,30 @@ void halo_tick_thread_start(float delta)
 	__atomic_store_n(&started, started + 1, __ATOMIC_RELEASE);
 }
 
+/* calls the main thread made into the game state while a tick ran, made at
+the join instead (halo_tick_thread_defer) */
+#define MAXIMUM_DEFERRED_CALLS 16
+static void (*deferred_calls[MAXIMUM_DEFERRED_CALLS])(void);
+static unsigned long deferred_call_count;
+
+int halo_tick_thread_defer(void (*call)(void))
+{
+	/* (until the join: a tick that has finished still has its epoch open,
+	the marks it made not yet swept) */
+	if (enabled <= 0 || halo_epoch_on_mutator() ||
+		(__atomic_load_n(&finished, __ATOMIC_ACQUIRE) == started && !__atomic_load_n(&halo_epoch_active, __ATOMIC_ACQUIRE)) ||
+		deferred_call_count >= MAXIMUM_DEFERRED_CALLS)
+		return 0;
+	deferred_calls[deferred_call_count++] = call;
+	{
+		static unsigned long logged;
+
+		if (logged++ < 4)
+			platform_log("tick thread: a call into the game state from the main thread during a tick made at the join");
+	}
+	return 1;
+}
+
 void halo_tick_thread_join(void)
 {
 	unsigned long spins = 0;
@@ -174,6 +198,14 @@ void halo_tick_thread_join(void)
 	halo_render_elapsed_ticks = finished_elapsed;
 	render_tick_poses_publish();
 	halo_epoch_end();
+	if (deferred_call_count)
+	{
+		unsigned long index, count = deferred_call_count;
+
+		deferred_call_count = 0;
+		for (index = 0; index < count; index++)
+			deferred_calls[index]();
+	}
 }
 
 void halo_tick_wait_for_render(void)

@@ -240,6 +240,8 @@ symbols in this file:
 #include "render/render_debug.h"
 #ifdef HALO_LINUX
 #include "render_epoch.h"
+#include <stdlib.h>
+void platform_log(const char *format, ...);
 #endif
 #include "scenario/scenario.h"
 #include "tag_files/tag_files.h"
@@ -1256,6 +1258,23 @@ static void channel_queue_sound(
 {
 	struct sound_channel_datum *channel = channel_get(channel_index);
 
+#ifdef HALO_LINUX
+	{
+		/* (debug) HALO_SOUND_TRACE=1: every sound queued to a channel, with
+		the one it replaces (a looping sound's chain of permutations) */
+		static int trace = -1;
+
+		if (trace < 0)
+			trace = getenv("HALO_SOUND_TRACE") ? atoi(getenv("HALO_SOUND_TRACE")) : 0;
+		if (trace)
+			platform_log("sound trace: channel %d queue %.32s (next %d, %lu bytes) playing %.32s queued %.32s thread %d",
+				channel_index, permutation->name, permutation->next_permutation_index,
+				(unsigned long)permutation->samples.size,
+				channel->playing_permutation ? channel->playing_permutation->name : "-",
+				channel->queued_permutation ? channel->queued_permutation->name : "-",
+				halo_thread_index());
+	}
+#endif
 	if (channel->queued_permutation)
 	{
 		sound_cache_sound_finished(channel->queued_permutation);
@@ -2784,6 +2803,74 @@ boolean sound_refresh_looping(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* A long sound (the music, long dialogue) is a chain of permutations, each
+some 1.3 seconds of a stereo track, and the game loads the next link only
+once the one before it starts playing. The Xbox read it from its hard disk
+cache in milliseconds; the Vita reads its memory card behind the textures'
+loads, which in the main menu's first seconds takes longer than a link
+plays. The channel then ran dry and the start track of a looping sound was
+abandoned for its loop: the title music's monks sang for a second or two,
+then the strings came in at once. So the links after the one queued are
+asked for ahead (HALO_SOUND_PREFETCH links, default 3; 0 for the Xbox's
+behaviour), without a reference: the cache keeps them as it keeps any
+recently used sound. */
+static void sound_prefetch_linked_permutations(
+	struct sound_definition const *definition,
+	struct sound_pitch_range *pitch_range,
+	struct sound_permutation const *permutation)
+{
+	static long prefetch = -1;
+	long count;
+
+	if (prefetch < 0)
+	{
+		char const *setting = getenv("HALO_SOUND_PREFETCH");
+
+		prefetch = setting ? atol(setting) : 3;
+		if (prefetch < 0)
+			prefetch = 0;
+	}
+	if (!TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit))
+		return;
+	for (count = 0; count < prefetch && permutation->next_permutation_index != NONE; count++)
+	{
+		if (permutation->next_permutation_index < 0 ||
+			permutation->next_permutation_index >= pitch_range->permutations.count)
+			break;
+		permutation = TAG_BLOCK_GET_ELEMENT(
+			&pitch_range->permutations,
+			permutation->next_permutation_index,
+			struct sound_permutation);
+		_sound_cache_sound_request((struct sound_permutation *)permutation, FALSE, TRUE, FALSE);
+	}
+}
+
+/* has the sound played the last link of its chain (or its only
+permutation)? A chain whose channel ran dry partway (its next link not
+loaded in time) goes on with that link once it is, rather than counting as
+ended: the Xbox's test was only that the channel had nothing playing */
+static boolean sound_permutations_ended(
+	struct sound_datum const *sound,
+	struct sound_definition const *definition,
+	struct sound_pitch_range *pitch_range)
+{
+	struct sound_permutation const *permutation;
+
+	if (!TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit))
+		return TRUE;
+	if (TEST_FLAG(sound->flags, _sound_waiting_for_cache_bit))
+		return FALSE;
+	if (sound->permutation_index < 0 || sound->permutation_index >= pitch_range->permutations.count)
+		return TRUE;
+	permutation = TAG_BLOCK_GET_ELEMENT(
+		&pitch_range->permutations,
+		sound->permutation_index,
+		struct sound_permutation);
+	return permutation->next_permutation_index == NONE;
+}
+#endif
+
 static void update_channel_for_looping_sound(
 	short channel_index,
 	real fade)
@@ -2854,6 +2941,9 @@ static void update_channel_for_looping_sound(
 			sound_cache_sound_loaded(permutation));
 		channel_set_properties_hardware(channel_index, &properties, FALSE);
 		channel_queue_sound(channel_index, permutation);
+#ifdef HALO_LINUX
+		sound_prefetch_linked_permutations(definition, pitch_range, permutation);
+#endif
 		sound->playing_channel_index = channel_index;
 	}
 	else
@@ -2909,8 +2999,14 @@ static void update_channel_for_looping_sound(
 					sound->next_definition_index != NONE))
 			{
 				if (sound->next_definition_index != NONE &&
+#ifdef HALO_LINUX
+					(channel->playing_permutation ?
+						channel->playing_permutation->next_permutation_index == NONE :
+						sound_permutations_ended(sound, definition, pitch_range)))
+#else
 					(!channel->playing_permutation ||
 						channel->playing_permutation->next_permutation_index == NONE))
+#endif
 				{
 					sound_set_definition_end(channel->sound_index);
 					definition = sound_definition_get(sound->definition_index);
@@ -2971,6 +3067,9 @@ static void update_channel_for_looping_sound(
 					{
 						SET_FLAG(sound->flags, _sound_waiting_for_cache_bit, FALSE);
 						channel_queue_sound(channel_index, permutation);
+#ifdef HALO_LINUX
+						sound_prefetch_linked_permutations(definition, pitch_range, permutation);
+#endif
 
 						if (sound->next_definition_index == NONE &&
 							permutation->next_permutation_index == NONE)
@@ -3237,6 +3336,24 @@ static void refresh_sounds(
 			sound->type != _sound_stopping_track)
 		{
 			stop_sound = TRUE;
+#ifdef HALO_LINUX
+			/* (a looping sound's start track whose channel ran dry before
+			its chain of permutations ended - the next link still loading -
+			waits for it, rather than being stopped for the loop to take
+			over: sound_prefetch_linked_permutations) */
+			if (sound->type == _sound_start_track &&
+				sound->next_definition_index != NONE &&
+				!sound_permutations_ended(
+					sound,
+					definition,
+					TAG_BLOCK_GET_ELEMENT(
+						&definition->pitch_ranges,
+						sound->pitch_range_index,
+						struct sound_pitch_range)))
+			{
+				stop_sound = FALSE;
+			}
+#endif
 		}
 
 		if (!stop_sound && !refresh_sound(sound_index))
