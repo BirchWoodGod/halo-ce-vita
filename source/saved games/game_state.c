@@ -446,6 +446,9 @@ boolean game_state_test_persistent_storage(
 {
 	struct game_state_header header;
 	boolean success;
+#ifdef HALO_LINUX
+	unsigned long long started = halo_load_profile_now();
+#endif
 
 	if (game_state_read_header_from_persistent_storage(
 		&header,
@@ -471,6 +474,9 @@ boolean game_state_test_persistent_storage(
 
 		success = FALSE;
 	}
+#ifdef HALO_LINUX
+	halo_load_profile_add(_halo_load_persistent_header, started, 0);
+#endif
 
 	return success;
 }

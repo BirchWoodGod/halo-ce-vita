@@ -149,6 +149,21 @@ static HANDLE game_state_open_persistent_storage(
 #ifdef HALO_LINUX
 static void delete_persistent_storage(
 	void);
+static __inline boolean game_state_get_persistent_storage_path(
+	char *path);
+/* bumped whenever this program writes or deletes the campaign save */
+static unsigned long game_state_persistent_storage_generation = 1;
+static struct
+{
+	boolean valid;
+	boolean result;
+	boolean corrupted;
+	unsigned long generation;
+	long header_size;
+	long buffer_size;
+	char path[256];
+	byte header[2048];
+} persistent_header_cache;
 #endif
 
 /* ---------- globals */
@@ -180,6 +195,8 @@ xbox_files.c's reads do the same) */
 void memory_watch_prepare_write(void *address, unsigned long size);
 #endif
 void platform_log(const char *format, ...);
+
+#define GAME_STATE_WRITE_PIECE (256 * 1024)
 
 static struct
 {
@@ -222,12 +239,29 @@ static void *game_state_writer_thread(
 		game_state_writer.writing = TRUE;
 		pthread_mutex_unlock(&game_state_writer.lock);
 
-		/* (at offset 0 without moving the file pointer) */
-		memset(&overlapped, 0, sizeof(overlapped));
+		/* (positioned writes, the file pointer untouched, in pieces with a
+		pause between them: one 16 MB write held the memory card for a
+		second, and every other read or write - the cache file thread's
+		textures and sounds, the log - waited behind it) */
 		QueryPerformanceCounter(&started);
-		written = WriteFile(xbox_game_state_globals.handle, game_state_writer.snapshot,
-			xbox_game_state_globals.buffer_size, &bytes_written, &overlapped) &&
-			bytes_written == (unsigned long)xbox_game_state_globals.buffer_size;
+		written = TRUE;
+		{
+			long offset;
+
+			for (offset = 0; written && offset < xbox_game_state_globals.buffer_size; offset += GAME_STATE_WRITE_PIECE)
+			{
+				long piece = xbox_game_state_globals.buffer_size - offset;
+
+				if (piece > GAME_STATE_WRITE_PIECE)
+					piece = GAME_STATE_WRITE_PIECE;
+				memset(&overlapped, 0, sizeof(overlapped));
+				overlapped.Offset = (unsigned long)offset;
+				bytes_written = 0;
+				written = WriteFile(xbox_game_state_globals.handle, (byte *)game_state_writer.snapshot + offset,
+					piece, &bytes_written, &overlapped) && bytes_written == (unsigned long)piece;
+				Sleep(1);
+			}
+		}
 		if (!written)
 			platform_log("game state: couldn't write the checkpoint to the saved game file (#%d)", (int)GetLastError());
 		else if (game_state_writer.writes++ < 4)
@@ -655,6 +689,9 @@ static void delete_persistent_storage(
 {
 	char path[256];
 
+#ifdef HALO_LINUX
+	game_state_persistent_storage_generation++;
+#endif
 	if (game_state_get_persistent_storage_path(path))
 		DeleteFileA(path);
 
@@ -747,6 +784,31 @@ boolean game_state_read_header_from_persistent_storage(
 	long remaining_size;
 	long read_size;
 	boolean result;
+#ifdef HALO_LINUX
+	/* (port) the last answer, while the save is the one it was given for:
+	the campaign menu asks whenever it is built, and each answer read and
+	checksummed the whole 16 MB save from the card (1.3-1.7 s frames in the
+	menu). Only this program writes or deletes the save
+	(game_state_persistent_storage_generation); a different profile's save
+	is another path. */
+	char cache_path[256];
+	boolean have_path = game_state_get_persistent_storage_path(cache_path);
+
+	if (have_path && persistent_header_cache.valid &&
+		persistent_header_cache.generation == game_state_persistent_storage_generation &&
+		persistent_header_cache.header_size == header_size &&
+		persistent_header_cache.buffer_size == buffer_size &&
+		header_size <= (long)sizeof(persistent_header_cache.header) &&
+		!strcmp(persistent_header_cache.path, cache_path))
+	{
+		memcpy(header, persistent_header_cache.header, header_size);
+		if (corrupted)
+			*corrupted = persistent_header_cache.corrupted;
+		if (!persistent_header_cache.result)
+			error(_error_silent, "checksum failed on persistent storage");
+		return persistent_header_cache.result;
+	}
+#endif
 
 	file = game_state_open_persistent_storage(NULL);
 	result = FALSE;
@@ -799,6 +861,20 @@ boolean game_state_read_header_from_persistent_storage(
 					*corrupted = TRUE;
 				error(_error_silent, "checksum failed on persistent storage");
 			}
+#ifdef HALO_LINUX
+			/* (an answer read through to the end: remembered) */
+			if (have_path && header_size <= (long)sizeof(persistent_header_cache.header))
+			{
+				memcpy(persistent_header_cache.header, header, header_size);
+				strcpy(persistent_header_cache.path, cache_path);
+				persistent_header_cache.header_size = header_size;
+				persistent_header_cache.buffer_size = buffer_size;
+				persistent_header_cache.result = result;
+				persistent_header_cache.corrupted = !result && stored_checksum;
+				persistent_header_cache.generation = game_state_persistent_storage_generation;
+				persistent_header_cache.valid = TRUE;
+			}
+#endif
 		}
 		CloseHandle(file);
 	}
@@ -817,6 +893,9 @@ void game_state_write_to_persistent_storage(
 	unsigned long checksum;
 	unsigned long bytes_written;
 
+#ifdef HALO_LINUX
+	game_state_persistent_storage_generation++;
+#endif
 	file = game_state_open_persistent_storage(NULL);
 	if (file != INVALID_HANDLE_VALUE)
 	{

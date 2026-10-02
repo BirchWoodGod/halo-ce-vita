@@ -408,8 +408,16 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 	faulting. Guest memory is therefore filled through a bounce buffer: the
 	copy faults like any other write, at the moment the data really lands,
 	so a texture uploaded while the read is in flight is refreshed. */
+#ifdef HALO_VITA
+	/* (the Vita protects no pages - vita_memory_watch.c - so the kernel
+	reads straight into guest memory, in one request: through the bounce
+	buffer every cache file read was cut into 256 KB pieces, each copied
+	from a buffer allocated for the call; the card delivered ~10 MB/s so) */
+	BOOL bounce = FALSE;
+#else
 	BOOL bounce = platform_is_contiguous(buffer) ||
 		platform_is_contiguous((char *)buffer + (count ? count - 1 : 0));
+#endif
 	char *staging = bounce ? malloc(count < READ_BOUNCE_SIZE ? count : READ_BOUNCE_SIZE) : NULL;
 
 	if (bounce && !staging)
@@ -442,6 +450,12 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 		total += (DWORD)result;
 	}
 	free(staging);
+#ifdef HALO_VITA
+	/* (and marked again now the data is there: a texture made from the
+	buffer while the read was in flight is made again) */
+	if (buffer && total)
+		memory_watch_prepare_write(buffer, total);
+#endif
 	if (bytes_read)
 		*bytes_read = total;
 	return TRUE;
