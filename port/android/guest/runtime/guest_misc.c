@@ -10,6 +10,7 @@ musl provides.
 
 #include <math.h>
 #include <string.h>
+#include <time.h>
 
 /* Darwin's combined sine and cosine, which clang substitutes for
 sin()/cos() pairs of the same argument */
@@ -99,4 +100,17 @@ void backtrace_symbols_fd(void *const *frames, int size, int fd)
 	(void)frames;
 	(void)size;
 	(void)fd;
+}
+
+/* the microsecond clock the native ports' timing and threading code calls
+(port/vita/host/vita_main.c on the Vita, port/linux/src/posix_profile.c on
+Linux, which the guest leaves out). Its companions vita_host_sleep_us and
+vita_host_pin_current_thread are left undefined: their callers take them
+as weak references and yield or skip without them. */
+unsigned long long vita_host_time_us(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned long long)now.tv_sec * 1000000ULL + (unsigned long)now.tv_nsec / 1000UL;
 }
