@@ -46,7 +46,12 @@ flares; saves that keep working across updates.
   a short code, join from the settings panel. Built and tested on PC,
   waiting for hardware tests. Vita to Vita only for now.
 - **Ad hoc play** between Vitas without a router.
+- **Campaign co-op over the network**: play the campaign together on two
+  Vitas, online or ad hoc. The Xbox game only had split-screen co-op on
+  one console, so this is new work for the port.
 - **A relay** for networks that cannot connect to each other directly.
+- **QR code invites**: the host shows its lobby code as a QR code, and the
+  joiner scans it with the Vita's camera.
 - **A steady 30 fps** in the biggest fights.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
