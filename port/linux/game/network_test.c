@@ -9,7 +9,11 @@ Automated system link sessions for testing the netcode without the menus
   default; game_engine_get_variant_by_name), as the pregame screen's fast
   setup does, and starts it debug.network_test_start seconds later;
 - "join" searches for games and joins the first it finds, as picking it in
-  the system link list does.
+  the system link list does;
+- "join-public" first browses internet play's public lobby (p2p.c) and
+  joins the code of the first game listed there (not this machine's), then
+  searches as "join" does: the host's game shows in the list once the
+  tunnel reaches it. "join-code:ABCD-EFGH" joins that code the same way.
 
 Once the game runs, every second each machine logs where every player's
 unit is, so the machines' views of the game can be compared.
@@ -49,6 +53,9 @@ Called from the main loop every frame (main.c).
 
 #include <stdio.h>
 #include <string.h>
+
+/* internet play's codes and lobby (port/linux/src/p2p.c) */
+#include "../src/p2p.h"
 
 /* the platform layer's (port/linux/src/port_config.c) */
 const char *config_string(char const *name);
@@ -91,6 +98,11 @@ static struct
 	real vehicle_time;
 	real pickup_time;
 	long logged_time;
+	/* join-public, join-code: the code to join (empty: browse for one) */
+	boolean by_code;
+	boolean code_joined;
+	char code[P2P_CODE_SIZE];
+	real browse_seconds;
 } network_test;
 
 static void network_test_read_settings(
@@ -116,6 +128,13 @@ static void network_test_read_settings(
 	else if (!strcmp(setting, "join"))
 	{
 		network_test.mode = _network_test_join;
+	}
+	else if (!strcmp(setting, "join-public") || !strncmp(setting, "join-code:", 10))
+	{
+		network_test.mode = _network_test_join;
+		network_test.by_code = TRUE;
+		if (setting[5] == 'c')
+			snprintf(network_test.code, sizeof(network_test.code), "%s", setting + 10);
 	}
 	network_test.start_delay = (real)config_real("debug.network_test_start");
 	network_test.kill_interval = (real)config_real("debug.network_test_kill");
@@ -601,6 +620,36 @@ void network_test_update(
 			{
 				game_connection_set(_game_connection_network_client);
 				platform_log("network test: searching for games");
+			}
+		}
+		else if (network_test.by_code && !network_test.code_joined)
+		{
+			/* the public lobby's first game (once a second), or the code given */
+			network_test.browse_seconds += seconds;
+			if (!network_test.code[0] && network_test.browse_seconds >= 1.0f)
+			{
+				struct p2p_lobby_entry entry;
+				int index;
+
+				network_test.browse_seconds = 0.0f;
+				p2p_lobby_browse(TRUE);
+				for (index = 0; p2p_lobby_entry(index, &entry); index++)
+				{
+					if (entry.compatible && !entry.own)
+					{
+						platform_log("network test: the public lobby lists \"%s\" (%d/%d) with code %s", entry.name,
+							entry.players, entry.maximum, entry.code);
+						snprintf(network_test.code, sizeof(network_test.code), "%s", entry.code);
+						p2p_lobby_browse(FALSE);
+						break;
+					}
+				}
+			}
+			if (network_test.code[0])
+			{
+				network_test.code_joined = TRUE;
+				platform_log("network test: joining code %s: %s", network_test.code,
+					p2p_join_code(network_test.code) ? "looking it up" : "not a code");
 			}
 		}
 		else if (!network_test.joined && network_game_client_join_first_available_game())

@@ -50,4 +50,49 @@ void p2p_socket_closed(int socket);
 from the main thread */
 const char *p2p_take_clipboard_text(void);
 
+/* ---------- short codes and the public lobby (p2p_signal.c), for a
+machine with no clipboard (the Vita's settings panel) and for strangers.
+Every call takes p2p's lock and may come from any thread; nothing waits on
+the network. Plain ints and chars only: the Vita's host side (another ABI)
+calls these too. */
+
+enum
+{
+	/* "ABCD-EFGH" and a terminator */
+	P2P_CODE_SIZE = 10,
+	P2P_LOBBY_NAME_SIZE = 32,
+};
+
+/* the letters and digits of a code: no 0, 1, I or O, which read alike */
+#define P2P_CODE_ALPHABET "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+struct p2p_lobby_entry
+{
+	char code[P2P_CODE_SIZE];
+	char name[P2P_LOBBY_NAME_SIZE];
+	int players, maximum;
+	/* the same network version as this machine's (else joining fails) */
+	int compatible;
+	/* this machine's own game */
+	int own;
+};
+
+/* joins the game of a code: "ABCD-EFGH", with or without the dash, any
+case. Returns nonzero if it was a code (internet play must be on) */
+int p2p_join_code(const char *code);
+/* while this machine hosts with internet play on: copies its code (with
+the dash) and returns nonzero */
+int p2p_hosting_code(char *code, int size);
+/* lists this machine's game in the public lobby while it hosts (or not);
+the name is what others see (network.lobby_name otherwise) */
+void p2p_lobby_set_public(int listed);
+void p2p_lobby_set_name(const char *name);
+/* browsing the public lobby: on or off, and the index-th entry (nonzero if
+there is one) */
+void p2p_lobby_browse(int on);
+int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry);
+/* one line on what internet play is doing (for a menu); returns nonzero
+if internet play runs */
+int p2p_status(char *text, int size);
+
 #endif

@@ -24,6 +24,8 @@ enum
 	/* the most machines one tunnels to: a host and the rest of a system
 	link game's 128 machines (include/halo_port_limits.h) */
 	P2P_MAXIMUM_PEERS = 127,
+	/* a short code's characters (P2P_CODE_ALPHABET), shown as ABCD-EFGH */
+	P2P_CODE_LENGTH = 8,
 };
 
 struct p2p_candidate
@@ -56,6 +58,8 @@ void p2p_peer_offered(const unsigned char *identifier, const unsigned char *key,
 /* an invite that arrived on the p2p thread (from Discord, or another copy
 of the game) */
 void p2p_invite_received(const char *text);
+/* the invite link a code being looked up led to (p2p_signal.c) */
+void p2p_code_found(const char *text);
 
 /* ---------- p2p_signal.c: signalling through public MQTT brokers */
 
@@ -65,9 +69,20 @@ void p2p_signal_start(void);
 void p2p_signal_select_sets(int *read, int *read_count, int *write, int *write_count, int maximum_count);
 /* services the sockets and timers; called from the p2p thread each pass */
 void p2p_signal_update(const int *read, int read_count, const int *write, int write_count);
-/* hosting: listen for joiners who hold this token */
-void p2p_signal_host(const unsigned char *token);
+/* hosting: listen for joiners who hold this token, and keep the invite
+under the code ("ABCD-EFGH"; NULL for none) */
+void p2p_signal_host(const unsigned char *token, const char *code);
 void p2p_signal_stop_hosting(void);
+/* hosting: list the game in the public lobby (listed) with its code, a
+name and its machine counts, or not; called again as they change */
+void p2p_signal_set_lobby(int listed, const char *code, const char *name, int players, int maximum);
+/* looking up a code's eight characters (no dash): its invite comes back
+through p2p_code_found */
+void p2p_signal_lookup_code(const char *code);
+void p2p_signal_stop_lookup(void);
+/* browsing the public lobby: on or off, and its entries */
+void p2p_signal_browse(int on);
+int p2p_signal_lobby_entry(int index, struct p2p_lobby_entry *entry);
 /* joining: ask the host with this identifier, holding this token, until it
 answers (or p2p_signal_stop_joining) */
 void p2p_signal_join(const unsigned char *host_identifier, const unsigned char *token);
