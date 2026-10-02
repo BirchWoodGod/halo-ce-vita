@@ -299,7 +299,12 @@ enum
 	MAXIMUM_PENDING_CONNECTIONS = 32,
 #endif
 	MAXIMUM_ENDPOINT_THREADS = 64,
-#ifdef HALO_LINUX
+#if defined(HALO_VITA)
+	/* (port) the Vita's network pool (vita_net.c) holds every socket's
+	buffers: 256 KB each fits it, and local and system link games (16
+	players at most) need far less than the desktop's 1 MB */
+	MINIMUM_ENDPOINT_SOCKET_BUFFER_SIZE = 256 * 1024,
+#elif defined(HALO_LINUX)
 	/* a host's connection to a machine holds the updates that machine has
 	not acknowledged, up to 128 ticks of 3.9 KB with 128 players, and the
 	host's connection to its own client all it sends in one frame; a full

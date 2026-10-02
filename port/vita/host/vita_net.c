@@ -32,7 +32,12 @@ select is a one-shot epoll.
 #define WSAENOPROTOOPT 10042
 #define WSAENETDOWN 10050
 
-#define NET_MEMORY_SIZE (1024 * 1024)
+/* the network stack's pool holds every socket's buffers: the game's
+endpoints ask for 256 KB each (transport_endpoint_winsock.c) - with 1 MB
+the request failed (WSAENOBUFS), the sockets kept their small default
+buffers, and in a match the host's connection to its own client filled
+up and timed out: the player could not move and the host went down */
+#define NET_MEMORY_SIZE (8 * 1024 * 1024)
 #define SELECT_MAXIMUM 64
 
 static __thread int last_error;
