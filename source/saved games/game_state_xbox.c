@@ -151,6 +151,157 @@ static HANDLE game_state_open_persistent_storage(
 
 struct xbox_game_state_globals_prefix xbox_game_state_globals = { 0 };
 
+#ifdef HALO_LINUX
+/* (port) The checkpoint without the hitch. The Xbox wrote the whole game
+state to z:\savegame.bin at every checkpoint and read it back to revert;
+the native builds' game state is 16 MB (halo_port_capacity.h, the Xbox's
+was 3.3 MB), and writing it froze the Vita for a second at every
+checkpoint (main_stop_time around it).
+
+Now a checkpoint copies the game state into a buffer allocated once (tens
+of milliseconds on the Vita), and that copy is what a revert loads (death,
+cinematic skip, Save and Quit's revert before it writes the persistent
+save): the same bytes the file would have given back. The file is still
+written, from the copy, on a thread of its own, so it holds the last
+checkpoint as before; a checkpoint waits for the previous one's write to
+finish before it overwrites the copy, and anything that reads or closes
+the file waits for the write too. Without the memory for the copy, the
+file is written and read as on the Xbox. */
+#include <pthread.h>
+#include <stdlib.h>
+#ifdef HALO_VITA
+#include <psp2/kernel/sysmem.h>
+/* (the Vita's renderer sees writes into guest memory only when told:
+xbox_files.c's reads do the same) */
+void memory_watch_prepare_write(void *address, unsigned long size);
+#endif
+void platform_log(const char *format, ...);
+
+static struct
+{
+	void *snapshot;
+	boolean snapshot_valid;
+	boolean unavailable;
+	boolean write_pending;
+	boolean writing;
+	pthread_mutex_t lock;
+	pthread_cond_t changed;
+	pthread_t thread;
+	unsigned long writes;
+} game_state_writer;
+
+static double game_state_writer_ms(
+	LARGE_INTEGER const *from)
+{
+	LARGE_INTEGER now, frequency;
+
+	QueryPerformanceCounter(&now);
+	QueryPerformanceFrequency(&frequency);
+	return frequency.QuadPart ? (double)(now.QuadPart - from->QuadPart) * 1000.0 / (double)frequency.QuadPart : 0.0;
+}
+
+static void *game_state_writer_thread(
+	void *unused)
+{
+	(void)unused;
+	for (;;)
+	{
+		OVERLAPPED overlapped;
+		LARGE_INTEGER started;
+		unsigned long bytes_written = 0;
+		BOOL written;
+
+		pthread_mutex_lock(&game_state_writer.lock);
+		while (!game_state_writer.write_pending)
+			pthread_cond_wait(&game_state_writer.changed, &game_state_writer.lock);
+		game_state_writer.write_pending = FALSE;
+		game_state_writer.writing = TRUE;
+		pthread_mutex_unlock(&game_state_writer.lock);
+
+		/* (at offset 0 without moving the file pointer) */
+		memset(&overlapped, 0, sizeof(overlapped));
+		QueryPerformanceCounter(&started);
+		written = WriteFile(xbox_game_state_globals.handle, game_state_writer.snapshot,
+			xbox_game_state_globals.buffer_size, &bytes_written, &overlapped) &&
+			bytes_written == (unsigned long)xbox_game_state_globals.buffer_size;
+		if (!written)
+			platform_log("game state: couldn't write the checkpoint to the saved game file (#%d)", (int)GetLastError());
+		else if (game_state_writer.writes++ < 4)
+			platform_log("game state: checkpoint written to the saved game file in %.1f ms (in the background)",
+				game_state_writer_ms(&started));
+
+		pthread_mutex_lock(&game_state_writer.lock);
+		game_state_writer.writing = FALSE;
+		pthread_cond_broadcast(&game_state_writer.changed);
+		pthread_mutex_unlock(&game_state_writer.lock);
+	}
+	return NULL;
+}
+
+/* the copy and its thread, made at the first checkpoint */
+static boolean game_state_writer_ready(
+	void)
+{
+	if (game_state_writer.snapshot)
+		return TRUE;
+	if (game_state_writer.unavailable)
+		return FALSE;
+	game_state_writer.unavailable = TRUE;
+#ifdef HALO_VITA
+	{
+		SceUID block = sceKernelAllocMemBlock("game state checkpoint", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW,
+			(xbox_game_state_globals.buffer_size + 0xFFF) & ~0xFFF, NULL);
+		void *base = NULL;
+
+		if (block < 0 || sceKernelGetMemBlockBase(block, &base) < 0)
+			base = NULL;
+		game_state_writer.snapshot = base;
+	}
+#else
+	game_state_writer.snapshot = malloc(xbox_game_state_globals.buffer_size);
+#endif
+	if (!game_state_writer.snapshot)
+	{
+		platform_log("game state: no memory for the checkpoint copy (%ld bytes): checkpoints write the file as they are taken",
+			(long)xbox_game_state_globals.buffer_size);
+		return FALSE;
+	}
+	pthread_mutex_init(&game_state_writer.lock, NULL);
+	pthread_cond_init(&game_state_writer.changed, NULL);
+	{
+		pthread_attr_t attributes;
+		int created;
+
+		pthread_attr_init(&attributes);
+		pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+		pthread_attr_setstacksize(&attributes, 64 * 1024);
+		created = pthread_create(&game_state_writer.thread, &attributes, game_state_writer_thread, NULL);
+		pthread_attr_destroy(&attributes);
+		if (created != 0)
+		{
+			/* (the copy stays allocated; it is not used) */
+			platform_log("game state: couldn't start the checkpoint writer: checkpoints write the file as they are taken");
+			game_state_writer.snapshot = NULL;
+			return FALSE;
+		}
+	}
+	game_state_writer.unavailable = FALSE;
+	return TRUE;
+}
+
+/* until the copy's write, if any, is done */
+static void game_state_writer_wait(
+	void)
+{
+	if (!game_state_writer.snapshot)
+		return;
+	pthread_mutex_lock(&game_state_writer.lock);
+	while (game_state_writer.write_pending || game_state_writer.writing)
+		pthread_cond_wait(&game_state_writer.changed, &game_state_writer.lock);
+	pthread_mutex_unlock(&game_state_writer.lock);
+}
+#endif
+
 /* ---------- public code */
 
 void *game_state_allocate_buffer(
@@ -267,6 +418,9 @@ void game_state_close_file(
 		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 		106,
 		xbox_game_state_globals.file_open);
+#ifdef HALO_LINUX
+	game_state_writer_wait();
+#endif
 	CloseHandle(xbox_game_state_globals.handle);
 	xbox_game_state_globals.file_open = FALSE;
 
@@ -288,6 +442,28 @@ boolean game_state_write_to_file(
 		121,
 		xbox_game_state_globals.file_open);
 
+#ifdef HALO_LINUX
+	/* (the copy, written in the background: above) */
+	if (game_state_writer_ready())
+	{
+		static unsigned long checkpoints_logged;
+		LARGE_INTEGER started;
+
+		QueryPerformanceCounter(&started);
+		game_state_writer_wait();
+		memcpy(game_state_writer.snapshot, xbox_game_state_globals.buffer, xbox_game_state_globals.buffer_size);
+		if (checkpoints_logged++ < 8)
+			platform_log("game state: checkpoint taken in %.1f ms", game_state_writer_ms(&started));
+		game_state_writer.snapshot_valid = TRUE;
+		xbox_game_state_globals.file_valid_for_read = TRUE;
+		pthread_mutex_lock(&game_state_writer.lock);
+		game_state_writer.write_pending = TRUE;
+		pthread_cond_broadcast(&game_state_writer.changed);
+		pthread_mutex_unlock(&game_state_writer.lock);
+
+		return TRUE;
+	}
+#endif
 	if (SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
 			INVALID_SET_FILE_POINTER &&
 		WriteFile(xbox_game_state_globals.handle, xbox_game_state_globals.buffer,
@@ -327,6 +503,21 @@ boolean game_state_read_from_file(
 		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 		146,
 		xbox_game_state_globals.file_valid_for_read || recover_saved_games_hack);
+
+#ifdef HALO_LINUX
+	/* (the last checkpoint's copy holds what the file would give back:
+	above) */
+	if (game_state_writer.snapshot_valid)
+	{
+#ifdef HALO_VITA
+		memory_watch_prepare_write(xbox_game_state_globals.buffer, xbox_game_state_globals.buffer_size);
+#endif
+		memcpy(xbox_game_state_globals.buffer, game_state_writer.snapshot, xbox_game_state_globals.buffer_size);
+
+		return TRUE;
+	}
+	game_state_writer_wait();
+#endif
 
 	if (SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
 			INVALID_SET_FILE_POINTER &&

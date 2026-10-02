@@ -3260,6 +3260,73 @@ void main_game_render(
 
 }
 
+#ifdef HALO_LINUX
+/* (port, debug) HALO_TEST_COMMANDS="tick:command;tick:command...": console
+commands run at the top of the main loop once the game time reaches each
+tick, for testing the save paths without a controller, e.g.
+"300:game_save_totally_unsafe;600:game_revert". Besides the console's
+own, @skip asks for a cinematic skip (as the controller does) and @quit
+does the pause menu's Save and Quit. Each runs once, at the first frame
+whose game time has reached its tick. */
+void game_state_save_to_persistent_storage(void);
+void platform_log(const char *format, ...);
+
+static void main_test_commands_update(
+	void)
+{
+	static int parsed = 0;
+	static struct { long tick; char command[120]; boolean done; } commands[16];
+	static short command_count;
+	short index;
+
+	if (!parsed)
+	{
+		const char *setting = getenv("HALO_TEST_COMMANDS");
+
+		parsed = 1;
+		while (setting && *setting && command_count < NUMBEROF(commands))
+		{
+			const char *end = strchr(setting, ';');
+			const char *colon = strchr(setting, ':');
+			size_t length;
+
+			if (!end)
+				end = setting + strlen(setting);
+			if (colon && colon < end)
+			{
+				commands[command_count].tick = atol(setting);
+				length = (size_t)(end - colon - 1);
+				if (length >= sizeof(commands[0].command))
+					length = sizeof(commands[0].command) - 1;
+				memcpy(commands[command_count].command, colon + 1, length);
+				commands[command_count].command[length] = 0;
+				commands[command_count].done = FALSE;
+				command_count++;
+			}
+			setting = *end ? end + 1 : end;
+		}
+	}
+	if (!command_count || !game_in_progress())
+		return;
+	for (index = 0; index < command_count; index++)
+	{
+		if (commands[index].done || game_time_get() < commands[index].tick)
+			continue;
+		commands[index].done = TRUE;
+		platform_log("test command at tick %ld: %s", (long)game_time_get(), commands[index].command);
+		if (!strcmp(commands[index].command, "@skip"))
+			main_skip_cinematic();
+		else if (!strcmp(commands[index].command, "@quit"))
+		{
+			game_state_save_to_persistent_storage();
+			main_goto_main_menu();
+		}
+		else
+			hs_compile_and_evaluate(commands[index].command);
+	}
+}
+#endif
+
 void main_loop(
 	void)
 {
@@ -3289,6 +3356,9 @@ void main_loop(
 
 	while (TRUE)
 	{
+#ifdef HALO_LINUX
+		main_test_commands_update();
+#endif
 		if (!game_in_editor())
 		{
 			if (main_globals.switch_to_structure_bsp_index!=NONE)
