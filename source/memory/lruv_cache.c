@@ -130,7 +130,17 @@ unsigned long vita_host_thread_id(void) __attribute__((weak));
 
 static unsigned long cache_lock_self(void)
 {
-	if (vita_host_thread_id)
+	/* HALO_LOCK_OWNER=pthread: pthread_self as before, to rule this out
+	on the hardware */
+	static int use_pthread = -1;
+
+	if (use_pthread < 0)
+	{
+		const char *setting = getenv("HALO_LOCK_OWNER");
+
+		use_pthread = setting && setting[0] == 'p';
+	}
+	if (vita_host_thread_id && !use_pthread)
 		return vita_host_thread_id();
 	return (unsigned long)pthread_self();
 }
