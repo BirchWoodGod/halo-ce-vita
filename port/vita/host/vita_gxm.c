@@ -1008,8 +1008,20 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 	struct target *target;
 	int result;
 
-	if (!gxm.ready || gxm.target_count >= MAXIMUM_TARGETS || !width || !height)
-		return 0;
+	{
+		/* (debug) HALO_TARGET_LIMIT=n: fewer targets, to exercise the
+		recycling of unused ones (d3d8_gxm.c render_target_recycle) */
+		static int limit = -1;
+
+		if (limit < 0)
+		{
+			const char *setting = getenv("HALO_TARGET_LIMIT");
+
+			limit = setting && atoi(setting) > 0 && atoi(setting) < MAXIMUM_TARGETS ? atoi(setting) : MAXIMUM_TARGETS;
+		}
+		if (!gxm.ready || gxm.target_count >= (unsigned)limit || !width || !height)
+			return 0;
+	}
 	if (getenv("HALO_TRACE_FILES"))
 		log_line("trace: target %lux%lu depth %d (%u made)", width, height, depth, gxm.target_count);
 	target = &gxm.targets[gxm.target_count];

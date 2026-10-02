@@ -168,6 +168,8 @@ struct render_target_entry
 	unsigned long id;
 	struct vgxm_texture texture;
 	unsigned long last_rendered;
+	/* the frame it was last drawn into or sampled (render_target_recycle) */
+	unsigned long last_used;
 	/* a texture rendered level by level (the water's ripple bump map): the
 	levels' targets share one mip chain, the first level's texture covers
 	it; -1 when the chain could not be made */
@@ -486,6 +488,37 @@ static void surface_dimensions(const D3DSurface *surface, unsigned long *width, 
 		format == D3DFMT_LIN_D24S8 || format == D3DFMT_LIN_F24S8 || format == D3DFMT_LIN_D16 || format == D3DFMT_LIN_F16;
 }
 
+/* a target of the same size that has been neither drawn into nor sampled
+for ten seconds, taken over when no more targets can be made: they are
+never freed, and every map's surfaces add their own - after an hour and a
+level change the glow's 128x128 targets were not made any more (the bloom
+went). It leaves its old surface's bucket; that surface gets a new target
+if it comes back */
+static struct render_target_entry *render_target_recycle(unsigned long width, unsigned long height, BOOL depth)
+{
+	struct render_target_entry *entry, **link;
+
+	for (entry = render_targets; entry; entry = entry->next)
+	{
+		if (entry->id && !entry->chain_levels && entry->target.width == width && entry->target.height == height &&
+			entry->target.depth == depth && entry->last_used + 300 < device.frame)
+		{
+			break;
+		}
+	}
+	if (!entry)
+		return NULL;
+	for (link = render_target_bucket(entry->target.data); *link; link = &(*link)->next_in_bucket)
+	{
+		if (*link == entry)
+		{
+			*link = entry->next_in_bucket;
+			break;
+		}
+	}
+	return entry;
+}
+
 static struct render_target_entry *render_target_get_version(const D3DSurface *surface, unsigned long version)
 {
 	struct render_target_entry *entry;
@@ -503,8 +536,36 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 			return entry->id ? entry : NULL;
 		}
 	}
-	entry = calloc(1, sizeof(*entry));
+	{
+		struct vgxm_texture texture;
+		unsigned long id = vgxm_target_create(width, height, depth, &texture);
+
+		if (id)
+		{
+			entry = calloc(1, sizeof(*entry));
+			entry->id = id;
+			entry->texture = texture;
+			entry->next = render_targets;
+			render_targets = entry;
+		}
+		else if ((entry = render_target_recycle(width, height, depth)) != NULL)
+		{
+			static unsigned long recycled;
+
+			if (++recycled <= 20)
+				platform_log("render target recycled for a %lux%lu %s surface (%lu so far)", width, height,
+					depth ? "depth" : "colour", recycled);
+		}
+		else
+		{
+			entry = calloc(1, sizeof(*entry));
+			entry->next = render_targets;
+			render_targets = entry;
+			platform_log("cannot create a %lux%lu %s target", width, height, depth ? "depth" : "colour");
+		}
+	}
 	entry->version = version;
+	memset(&entry->target, 0, sizeof(entry->target));
 	entry->target.data = surface->Data;
 	entry->target.width = width;
 	entry->target.height = height;
@@ -512,11 +573,8 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 	entry->target.scale[0] = entry->target.scale[1] = 1.0f;
 	entry->target.gl_width = width;
 	entry->target.gl_height = height;
-	entry->id = vgxm_target_create(width, height, depth, &entry->texture);
-	if (!entry->id)
-		platform_log("cannot create a %lux%lu %s target", width, height, depth ? "depth" : "colour");
-	entry->next = render_targets;
-	render_targets = entry;
+	entry->last_rendered = 0;
+	entry->last_used = device.frame + 1;
 	entry->next_in_bucket = *render_target_bucket(entry->target.data);
 	*render_target_bucket(entry->target.data) = entry;
 	return entry->id ? entry : NULL;
@@ -622,7 +680,9 @@ static BOOL bind_targets(BOOL *has_depth)
 	if (!color && !depth)
 		return FALSE;
 	if (color)
-		color->last_rendered = device.frame + 1;
+		color->last_rendered = color->last_used = device.frame + 1;
+	if (depth)
+		depth->last_used = device.frame + 1;
 	vgxm_set_targets(color ? color->id : 0, depth ? depth->id : 0);
 	*has_depth = depth != NULL;
 	return TRUE;
@@ -1645,7 +1705,9 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 	if (!color && !depth)
 		return FALSE;
 	if (color)
-		color->last_rendered = device.frame + 1;
+		color->last_rendered = color->last_used = device.frame + 1;
+	if (depth)
+		depth->last_used = device.frame + 1;
 	vgxm_set_targets(color ? color->id : 0, depth ? depth->id : 0);
 	*has_depth = depth != NULL;
 	return TRUE;
@@ -1684,6 +1746,7 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		target = render_target_entry_find_version(header[1], command->texture_version[stage]);
 		if (target)
 		{
+			target->last_used = device.frame + 1;
 			xgpu_texture_describe(header[3], header[4], &description);
 			{
 				/* (HALO_TARGET_CHAIN=0: level 0 only, as before) */
