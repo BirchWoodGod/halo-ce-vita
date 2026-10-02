@@ -353,7 +353,7 @@ static int draw_hash_enabled(void)
 	{
 		const char *setting = getenv("HALO_DRAW_HASH");
 
-		draw_hash_on = setting && atoi(setting) != 0;
+		draw_hash_on = setting ? atoi(setting) : 0;
 		draw_hash = 1469598103934665603ull;
 	}
 	return draw_hash_on;
@@ -375,10 +375,79 @@ static long draw_hash_trace = -2;
 #define TRACE_PART(name) do { if (draw_hash_trace == (long)null.presents) \
 	platform_log("draw hash trace: draw %llu %s %016llx", draw_hash_draws, name, draw_hash); } while (0)
 
+/* HALO_DRAW_HASH=2: a hash that does not see how the primitives are split
+into draws - each triangle (line, point) is hashed with its draw's state
+(everything but the primitive type and the indices) and its vertices' bytes,
+in order - so a build that merges draws with the same state into one, the
+same primitives in the same order, hashes the same */
+static void hash_vertex(const struct vgxm_draw *draw, unsigned long index)
+{
+	unsigned long attribute;
+
+	for (attribute = 0; attribute < draw->attribute_count; attribute++)
+	{
+		const struct vgxm_attribute *a = &draw->attributes[attribute];
+
+		if (a->stream < draw->stream_count && draw->streams[a->stream])
+			hash_bytes((const unsigned char *)draw->streams[a->stream] + index * draw->strides[a->stream] + a->offset,
+				attribute_bytes(a));
+	}
+}
+
+static void draw_hash_primitives(const struct vgxm_draw *draw, unsigned long long state)
+{
+	unsigned long i, n = draw->index_count;
+	const unsigned short *x = draw->indices;
+
+	if (!x)
+		return;
+	switch (draw->primitive)
+	{
+	case 5: /* D3DPT_TRIANGLELIST */
+		for (i = 0; i + 2 < n; i += 3)
+		{
+			draw_hash_draws++, hash_word(state ^ 3);
+			hash_vertex(draw, x[i]); hash_vertex(draw, x[i + 1]); hash_vertex(draw, x[i + 2]);
+		}
+		break;
+	case 6: /* D3DPT_TRIANGLESTRIP: odd triangles turned back, as a merged list holds them */
+		for (i = 0; i + 2 < n; i++)
+		{
+			draw_hash_draws++, hash_word(state ^ 3);
+			if (i & 1) { hash_vertex(draw, x[i + 1]); hash_vertex(draw, x[i]); }
+			else { hash_vertex(draw, x[i]); hash_vertex(draw, x[i + 1]); }
+			hash_vertex(draw, x[i + 2]);
+		}
+		break;
+	case 7: /* D3DPT_TRIANGLEFAN */
+		for (i = 0; i + 2 < n; i++)
+		{
+			draw_hash_draws++, hash_word(state ^ 3);
+			hash_vertex(draw, x[0]); hash_vertex(draw, x[i + 1]); hash_vertex(draw, x[i + 2]);
+		}
+		break;
+	case 2: /* D3DPT_LINELIST */
+		for (i = 0; i + 1 < n; i += 2)
+		{
+			draw_hash_draws++, hash_word(state ^ 2);
+			hash_vertex(draw, x[i]); hash_vertex(draw, x[i + 1]);
+		}
+		break;
+	default:
+		for (i = 0; i < n; i++)
+		{
+			draw_hash_draws++, hash_word(state ^ (1 + ((unsigned long long)draw->primitive << 8)));
+			hash_vertex(draw, x[i]);
+		}
+		break;
+	}
+}
+
 static void draw_hash_add(const struct vgxm_draw *draw)
 {
 	static const unsigned long chunk_registers[6] = { 12, 5, 11, 32, 0, 8 };
 	unsigned long index, low = 0xffff, high = 0, attribute;
+	unsigned long long main_hash = draw_hash;
 
 	if (draw_hash_trace == -2)
 	{
@@ -386,6 +455,8 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 
 		draw_hash_trace = setting ? atol(setting) : -1;
 	}
+	if (draw_hash_on == 2)
+		draw_hash = 1469598103934665603ull;
 	draw_hash_part = 0;
 	hash_word(0xd7a3);
 	hash_word(null.color_target);
@@ -444,6 +515,18 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	TRACE_PART("textures");
 	draw_hash_part = 10;
 	hash_bytes(&draw->depth_test, offsetof(struct vgxm_draw, primitive) - offsetof(struct vgxm_draw, depth_test));
+	if (draw_hash_on == 2)
+	{
+		unsigned long long state;
+
+		hash_word(draw->visibility_index);
+		state = draw_hash;
+		draw_hash = main_hash;
+		draw_hash_part = 11;
+		/* (the present's count is then of primitives) */
+		draw_hash_primitives(draw, state);
+		return;
+	}
 	hash_word(draw->primitive);
 	hash_word(draw->index_count);
 	hash_word(draw->visibility_index);
