@@ -48,7 +48,7 @@ static uintptr_t mutator_stack_low, mutator_stack_high;
 
 #ifdef __vita__
 #include <psp2/kernel/threadmgr.h>
-#else
+#elif !defined(HALO_WINDOWS) && !defined(HALO_ANDROID) /* (Windows' POSIX threads and the Android guest's musl have no pthread_getattr_np: the guesses below) */
 #include <pthread.h>
 /* glibc's, without _GNU_SOURCE (which upsets cseries.h) */
 extern int pthread_getattr_np(pthread_t thread, pthread_attr_t *attributes);
@@ -72,7 +72,7 @@ void halo_epoch_register_mutator(void)
 		mutator_stack_low = (uintptr_t)info.stack;
 		mutator_stack_high = (uintptr_t)info.stack + info.stackSize;
 	}
-#else
+#elif !defined(HALO_WINDOWS) && !defined(HALO_ANDROID)
 	{
 		pthread_attr_t attributes;
 		void *stack = NULL;
@@ -136,7 +136,7 @@ static void stack_bounds(uintptr_t here, uintptr_t *low, uintptr_t *high)
 			*high = (uintptr_t)info.stack + info.stackSize;
 		}
 	}
-#else
+#elif !defined(HALO_WINDOWS) && !defined(HALO_ANDROID)
 	{
 		pthread_attr_t attributes;
 		void *stack = NULL;
