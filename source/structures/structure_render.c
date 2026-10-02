@@ -275,6 +275,49 @@ static void structure_render_dynamic_triangles_from_bitvector(
 	short surface_index_index = 0;
 	long surface_index = 0;
 
+#ifdef HALO_LINUX
+	/* (port) the set bits taken lowest first, by counting the zeros below
+	them, rather than every bit of every word that has one: the same surfaces
+	in the same order (the visible structure is thousands of surfaces a
+	frame, in a bit vector of all of them) */
+	if (structure_bsp->surfaces.count > 0)
+	{
+		long word_count = (structure_bsp->surfaces.count + LONG_BITS - 1) / LONG_BITS;
+		long word_index;
+
+		for (word_index = 0; word_index < word_count; word_index++)
+		{
+			unsigned long bits = surface_flags[word_index];
+
+			if (word_index == word_count - 1 && (structure_bsp->surfaces.count % LONG_BITS))
+				bits &= (1UL << (structure_bsp->surfaces.count % LONG_BITS)) - 1;
+			while (bits)
+			{
+				struct structure_surface *surface;
+
+				surface_index = word_index * LONG_BITS + __builtin_ctzl(bits);
+				bits &= bits - 1;
+				surface = TAG_BLOCK_GET_ELEMENT(
+					&structure_bsp->surfaces,
+					surface_index,
+					struct structure_surface);
+				match_assert(
+					"c:\\halo\\SOURCE\\structures\\structure_render.c",
+					421,
+					surface_index_index>=0 && surface_index_index<surface_count);
+				*surface_indices++ = surface_index;
+				triangles[surface_index_index * NUMBER_OF_VERTICES_PER_TRIANGLE + 0] =
+					surface->vertex_indices[0];
+				triangles[surface_index_index * NUMBER_OF_VERTICES_PER_TRIANGLE + 1] =
+					surface->vertex_indices[1];
+				triangles[surface_index_index * NUMBER_OF_VERTICES_PER_TRIANGLE + 2] =
+					surface->vertex_indices[2];
+				surface_index_index++;
+			}
+		}
+	}
+	return;
+#endif
 	if (structure_bsp->surfaces.count > 0)
 	{
 		do
