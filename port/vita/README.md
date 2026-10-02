@@ -103,6 +103,7 @@ the panel. The game does not see the buttons while the panel is open.
 | Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
 | Invert look | No | reverses the right stick's up and down |
 | Stick deadzone | Off | raise it if the sticks drift |
+| Multiplayer | | opens the Multiplayer page (see Multiplayer) |
 
 The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 
@@ -111,7 +112,52 @@ The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 - **Split screen** needs two players, and the Vita has one controller.
 - **System link** works over Wi-Fi: every machine on the same network running
   this port (another Vita, or the Linux/Windows build) can host or join.
-- **Ad hoc** (Vita to Vita without a router) and online play are not done yet.
+- **Online** and **ad hoc** play are new and **not yet tested on a Vita**;
+  they are off unless chosen. Both end in the game's own System Link
+  screens: the other machine's game shows in the list, and you host or
+  join as on a local network.
+
+The settings panel's last line, **Multiplayer**, opens a page of its own
+(Circle goes back):
+
+| Line | What it does |
+| --- | --- |
+| Network | **Wi-Fi** (the default): system link on this network. **Online**: internet play, with the Linux/Windows builds and other Vitas. **Ad hoc**: Vitas nearby, without a router. Applies after a restart. |
+| Online games | **Private**: others join with your code. **Public**: your games are also listed for anyone to join. |
+| Join with a code | Type another player's code with the D-pad (up and down change a letter, left and right move, Cross joins). |
+| Browse public games | The games listed in the public lobby; Cross joins one. |
+| Ad hoc room | 1 to 4: Vitas in the same room play together. |
+| Ad hoc dialog | Which mode the system's ad hoc dialog uses: Connect (try first), Create or Join. |
+| Join / Leave ad hoc group | Opens the system's ad hoc dialog (the panel closes), or leaves the group. |
+
+A line under them says what is happening: your code while you host, the
+lookup of a code, the connection, or the ad hoc group.
+
+**Online.** Set Network to Online and restart. To host, create a game in
+Multiplayer, System Link as usual: the Multiplayer page then shows **Your
+code: ABCD-EFGH** (the code stays the same until you quit). Tell it to the
+others; with Online games set to Public, your game is also listed. To
+join, type the code under Join with a code (or pick the game under Browse
+public games), wait for "connected to the host", then open Multiplayer,
+System Link: the host's game is in the list. A Linux or Windows copy of
+the port shows its code in its log next to its invite link, and joins a
+code copied to the clipboard (with its dash) or given on its command line.
+
+Internet play has no server of its own: the machines find each other
+through public MQTT brokers and connect directly (UDP hole punching).
+That fails between two networks whose NATs both give each destination its
+own port (some mobile and company networks), unless one router forwards
+the port. The Vita can ask its router for that (UPnP) but does not until
+it has been seen working: `HALO_NET_ALLOW_UPNP=true` in `env.txt` turns
+it on. A code is a convenience, not a password: anyone who guesses it can
+join that game.
+
+**Ad hoc.** Set Network to Ad hoc on every Vita and restart. Choose the
+same Ad hoc room on each, then Join ad hoc group: the system's dialog
+joins (or makes) the room's group. When the line under the page says
+another machine is in the group, one Vita creates a System Link game and
+the others find it in their lists. (Ad hoc carries the game the way online
+play does, over the group instead of the internet.)
 
 ## Building
 
@@ -159,7 +205,13 @@ Useful ones:
 | `HALO_DXT_MIPS=0` | compressed textures without their mip chains |
 | `HALO_HEARTBEAT=1` | a line every 2 s in `heartbeat.txt` (is the game still running?) |
 | `HALO_STARTUP_CHECKS=1` | the clocks and the cost of basic operations, logged at start-up |
-| `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do (see Help wanted) |
+| `HALO_NET_TRACE=1` | every socket's calls, failures and traffic every 2 s, and the network library's free memory, in `halo.log` ("net trace:"); runs the socket self-test at start-up too |
+| `HALO_NET_SELFTEST=1` | the socket layer's loopback and broadcast behaviour, logged at start-up |
+| `HALO_NET_ALLOW_UPNP=true` | online play may ask the router to forward its port (UPnP; off on the Vita until tested) |
+| `HALO_NET_BROKERS`, `HALO_NET_STUN` | the signalling brokers and STUN servers online play uses (`host:port`, commas between) |
+| `HALO_ADHOC_GROUP=NAME` | the ad hoc group's name (up to 8 letters) in place of the room's |
+| `HALO_ADHOC_ID_TYPE=0` | the ad hoc libraries' product ID type (default 1, reserved, as vitaQuake) |
+| `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do without joining a group |
 
 ## Layout of port/vita
 
@@ -173,10 +225,12 @@ Useful ones:
 
 ## Help wanted
 
-- **Ad hoc multiplayer** so two Vitas can play without a router, then online
-  play. The SDK names no call that joins an ad hoc group: with
-  `HALO_ADHOC_PROBE=1` the PSP-style ad hoc libraries start, but the Vita
-  stays out of any group (peer-to-peer sockets work over Wi-Fi).
+- **Testing online and ad hoc play** on Vitas (see Multiplayer): send
+  `halo.log` from each machine, with `HALO_NET_TRACE=1` in `env.txt`.
+  Ad hoc play joins its group through the system's network check dialog
+  in a PSP ad hoc mode (the SDK names no call that joins one directly; the
+  dialog is how vitaQuake does it), then carries the game over PDP
+  datagrams; which dialog mode two Vitas need is not known yet.
 - **Performance** in heavy fights (the render on the first core is the limit;
   see the timing lines).
 - **DXT1 mip chains**: Vita3K shows rainbow noise on some DXT1 textures'

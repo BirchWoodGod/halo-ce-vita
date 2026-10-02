@@ -170,8 +170,9 @@ Issues and pull requests are welcome. Open work:
 
 - **Performance** in the biggest fights: the render on the first core is
   the limit.
-- **Ad hoc multiplayer** between two Vitas without a router, then online
-  play.
+- **Testing online and ad hoc play** on Vitas: the settings panel's
+  Multiplayer page (see [port/vita/README.md](port/vita/README.md)); new and
+  not yet verified on hardware.
 - **Draw count**: objects are drawn one part at a time (about 270 of the
   ~360 draws in a big fight); batching them would help the most.
 

@@ -170,6 +170,9 @@ the setting for one start of the game. It has priority over the file.
 | `network.join_from_clipboard` | `true` | `HALO_NET_JOIN_FROM_CLIPBOARD` | `true`: when the game comes to the front, it joins the game of an invite link on the clipboard. |
 | `network.tunnel_port` | `0` | `HALO_NET_TUNNEL_PORT` | The UDP port for internet play. `0`: the game selects a port. Refer to "Internet play". |
 | `network.allow_upnp` | `true` | `HALO_NET_ALLOW_UPNP` | `true`: internet play can ask the router to forward its port (UPnP). `false`: the game does not ask. Refer to "Internet play". |
+| `network.lobby_public` | `false` | `HALO_NET_LOBBY_PUBLIC` | `true`: the games of this machine show in the public lobby. Refer to "Codes and the public lobby". |
+| `network.lobby_name` | `""` | `HALO_NET_LOBBY_NAME` | The name of this machine's games in the public lobby. Empty: `Halo`. |
+| `network.adhoc` | `false` | `HALO_NET_ADHOC` | `true`: ad hoc play (the PS Vita's ad hoc group). Refer to "Ad hoc play". |
 | `network.signalling_brokers` | three public brokers | `HALO_NET_BROKERS` | The public MQTT brokers (`host:port`, with commas between them) that let the machines of an invite find each other. |
 | `network.stun_servers` | Google and Cloudflare | `HALO_NET_STUN` | The public STUN servers (`host:port`, with commas between them) that give the internet address of a machine. |
 | `discord.application_id` | the application of the project | `HALO_DISCORD_APPLICATION` | The Discord application for invites. Empty: no Discord. |
@@ -335,9 +338,42 @@ When the machines connect, the game of the host shows in Multiplayer,
 System Link. Join the game as on a local network. System link on a local
 network does not need an invite.
 
+### Codes and the public lobby
+
+A host also has a short code, for example `QX7K-M2PA`. The game writes the
+code to the standard error next to the link. The code stays the same
+until the game stops.
+
+- To join with a code, copy the code (with its dash) and go to the game,
+  or enter `halo QX7K-M2PA`. The PS Vita build has a code entry in its
+  settings panel.
+- The host keeps its invite on the MQTT brokers as a retained message
+  (`src/p2p_signal.c`). The topic and the key come from the code. A machine
+  with the code gets the invite from the brokers and joins it.
+- A code has 40 bits. Anyone who tries all the codes can find the games.
+  Thus a code is not a password. The link is the secure invite.
+
+When `network.lobby_public` is `true`, the game of the host also shows in
+the public lobby: its name, its code and its number of machines, on the
+retained topic `hceu/1/lobby/<identifier>`. The PS Vita build can show the
+public lobby and join its games. If the connection to a broker stops, the
+broker removes the entry (an MQTT will). For automatic tests,
+`debug.network_test` takes `join-public` and `join-code:<code>`.
+
+### Ad hoc play
+
+The PS Vita build can play with other PS Vitas without a router, in an ad
+hoc group (`src/p2p_adhoc.c`). Each machine of the group sends a beacon
+every second. Each machine that a beacon comes from becomes an internet
+play peer, through a local relay socket. Then the game operates as with
+internet play, but nothing goes to the internet. To test on Linux,
+`HALO_NET_ADHOC_EMULATE=<this address>,<other addresses>` makes a group of
+copies of the game over UDP (`port/vita/tests/run_online_test.sh adhoc`).
+
 ### Security
 
-Only machines with the invite can find the game:
+Only machines with the invite (or its code) can find the game, unless it
+shows in the public lobby:
 
 - The link contains the identifier of the host and a random 16-byte token.
 - The machines exchange their addresses through public MQTT brokers
