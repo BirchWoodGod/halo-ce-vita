@@ -794,6 +794,38 @@ struct real_matrix4x3 *first_person_weapon_get_node_matrix(
 	return &first_person_weapon->node_matrices[node_index];
 }
 
+#ifdef HALO_LINUX
+/* (port) the render's lookup, for a particle on the first-person weapon. The
+tick clears weapon_index (a drop, picking up a weapon; a switch) before it
+stops the particles on that weapon, later in the same tick
+(first_person_weapons_update -> first_person_weapon_set_visibility); the
+render overlapping the tick sees the gap, and the lookup above dereferenced
+the missing weapon (v1.0.2.2 and v1.0.3-beta.1 dumps, #14 and #16: picking
+up a weapon with the plasma rifle venting). NULL then: the particle is not
+drawn this frame. */
+struct real_matrix4x3 *first_person_weapon_try_get_node_matrix(
+	short local_player_index,
+	short node_index)
+{
+	struct first_person_weapon *first_person_weapon;
+	long weapon_index;
+
+	if (local_player_index<0 || local_player_index>=MAXIMUM_NUMBER_OF_LOCAL_PLAYERS ||
+		node_index<0 || node_index>=MAXIMUM_NODES_PER_ANIMATION || !first_person_weapons)
+	{
+		return NULL;
+	}
+	first_person_weapon = &first_person_weapons[local_player_index];
+	weapon_index = *(volatile long *)&first_person_weapon->weapon_index;
+	if (weapon_index==NONE || !weapon_try_and_get(weapon_index))
+	{
+		return NULL;
+	}
+
+	return &first_person_weapon->node_matrices[node_index];
+}
+#endif
+
 void first_person_weapons_update(
 	void)
 {
