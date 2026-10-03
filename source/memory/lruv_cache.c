@@ -110,14 +110,35 @@ functions, as lra_cache.c. */
 #include <sched.h>
 #include <stdlib.h>
 void platform_log(const char *format, ...);
-static volatile int lruv_depth;
+
+/* The owner is cleared before the lock is let go, and a thread re-enters
+only when the owner reads as itself. The lock left the owner set at
+release and re-entered on "depth nonzero and owner == me": on the Vita's
+Cortex-A9, a thread could read the new owner's depth and still its own
+stale id (ARM lets another core see two stores in either order) and enter
+beside the owner; their unguarded depth updates then left the lock held at
+depth 1 with nobody in it - the tick waited forever ("cache lock: waited 3
+s (tick thread; owner depth 1)") while the render waited for the tick (#18;
+reproduced in the gxm-null harness by making that order visible). Now a
+thread reads its own id only from its own store (it clears it before
+releasing), whatever order the other cores see, and the depth is touched
+by the owner alone. */
 static unsigned long lruv_owner;
+static int lruv_depth;
 static volatile int lruv_held;
+/* the outermost acquire's site, caller and thread, for the report of a
+long wait (written by the owner, read by a waiter: a report) */
+static const char *volatile lruv_owner_site;
+static void *volatile lruv_owner_caller;
+static volatile int lruv_owner_is_tick;
+/* outermost acquires, for the report (main.c resets the count above) */
+static volatile unsigned long lruv_acquire_serial;
 
 void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
 unsigned long long vita_host_time_us(void);
 int halo_epoch_on_mutator(void);
-int halo_thread_index(void);
+/* the kernel's name and state for a thread id (vita_main.c); 0 without one */
+int vita_host_thread_describe(unsigned long id, char *text, unsigned long size) __attribute__((weak));
 /* time spent waiting for the lock, by the tick [1] and the rest [0]
 (main.c reports it with the render split) */
 volatile unsigned long long halo_cache_lock_wait_us[2];
@@ -128,11 +149,13 @@ volatile unsigned long halo_cache_lock_acquires;
 of pthread_self's cost there (the lock is taken ~500-700 times a frame) */
 unsigned long vita_host_thread_id(void) __attribute__((weak));
 
+/* HALO_LOCK_OWNER=pthread: pthread_self as before, to rule this out on
+the hardware */
+static int use_pthread = -1;
+
 static unsigned long cache_lock_self(void)
 {
-	/* HALO_LOCK_OWNER=pthread: pthread_self as before, to rule this out
-	on the hardware */
-	static int use_pthread = -1;
+	unsigned long self;
 
 	if (use_pthread < 0)
 	{
@@ -141,17 +164,59 @@ static unsigned long cache_lock_self(void)
 		use_pthread = setting && setting[0] == 'p';
 	}
 	if (vita_host_thread_id && !use_pthread)
-		return vita_host_thread_id();
-	return (unsigned long)pthread_self();
+		self = vita_host_thread_id();
+	else
+		self = (unsigned long)pthread_self();
+	/* (0 is "no owner") */
+	return self ? self : 1;
 }
 
-void halo_cache_lock_acquire(void)
+static int cache_lock_owned(unsigned long self)
+{
+	return __atomic_load_n(&lruv_owner, __ATOMIC_RELAXED) == self;
+}
+
+/* the report of a long wait: who waits, where, and who holds it */
+static void cache_lock_report_wait(unsigned long long waited_us, unsigned long acquires_then, const char *site, void *caller)
+{
+	unsigned long owner = __atomic_load_n(&lruv_owner, __ATOMIC_RELAXED);
+	/* (no outermost acquire since the wait began: the same hold all along) */
+	int same_hold = lruv_acquire_serial == acquires_then;
+	char owner_text[96];
+	int crash = getenv("HALO_HANG_CRASH") && atoi(getenv("HALO_HANG_CRASH"));
+
+	owner_text[0] = 0;
+	if (owner && vita_host_thread_describe && vita_host_thread_id && !use_pthread)
+		vita_host_thread_describe(owner, owner_text, sizeof(owner_text));
+	if (owner)
+		platform_log("cache lock: the %s thread (%s, from %p) has waited %llu s: held by %s thread 0x%lx%s%s%s, taken in %s (from %p), depth %d%s%s",
+			halo_epoch_on_mutator() ? "tick" : "render", site ? site : "?", caller,
+			waited_us / 1000000ull,
+			lruv_owner_is_tick ? "the tick" : "the render (or another)", owner,
+			owner_text[0] ? " (" : "", owner_text, owner_text[0] ? ")" : "",
+			lruv_owner_site ? lruv_owner_site : "?", lruv_owner_caller, lruv_depth,
+			same_hold ? ", held all the while" : ", taken again during the wait",
+			crash ? "; crashing for the dump" : "");
+	else
+		platform_log("cache lock: the %s thread (%s, from %p) has waited %llu s: held with no owner recorded (last taken in %s from %p)%s",
+			halo_epoch_on_mutator() ? "tick" : "render", site ? site : "?", caller,
+			waited_us / 1000000ull, lruv_owner_site ? lruv_owner_site : "?", lruv_owner_caller,
+			crash ? "; crashing for the dump" : "");
+	/* (HALO_HANG_CRASH=1 crashes for a dump of every thread; a dump of
+	this process stalled and wedged the Vita's shell, so by default it is
+	logged and the wait goes on) */
+	if (crash)
+		*(volatile int *)16 = 0;
+}
+
+void halo_cache_lock_acquire_at(const char *site, void *caller)
 {
 	unsigned long self = cache_lock_self();
 	unsigned long spins = 0;
-	unsigned long long waited_from = 0;
+	unsigned long long waited_from = 0, reported_at = 0;
+	unsigned long acquires_then = 0;
 
-	if (lruv_depth && lruv_owner == self)
+	if (cache_lock_owned(self))
 	{
 		lruv_depth++;
 		return;
@@ -159,20 +224,14 @@ void halo_cache_lock_acquire(void)
 	while (__atomic_exchange_n(&lruv_held, 1, __ATOMIC_ACQUIRE))
 	{
 		if (!waited_from)
-			waited_from = vita_host_time_us();
-		else if (vita_host_time_us() - waited_from > 3000000ull)
 		{
-			/* a wedge (every thread spinning starved even the Vita's FTP):
-			named, and a deliberate crash gets every thread into the dump */
-			/* (HALO_HANG_CRASH=1 crashes for a dump; a dump of this process
-			stalled and wedged the Vita's shell, so by default it is logged
-			and the wait goes on) */
-			platform_log("cache lock: waited 3 s (%s thread; owner depth %d): deadlock%s",
-				halo_epoch_on_mutator() ? "tick" : "render", lruv_depth,
-				getenv("HALO_HANG_CRASH") && atoi(getenv("HALO_HANG_CRASH")) ? ", crashing for the dump" : ", waiting on");
-			if (getenv("HALO_HANG_CRASH") && atoi(getenv("HALO_HANG_CRASH")))
-				*(volatile int *)16 = 0;
-			waited_from = vita_host_time_us();
+			waited_from = reported_at = vita_host_time_us();
+			acquires_then = lruv_acquire_serial;
+		}
+		else if (vita_host_time_us() - reported_at > 3000000ull)
+		{
+			reported_at = vita_host_time_us();
+			cache_lock_report_wait(reported_at - waited_from, acquires_then, site, caller);
 		}
 		/* (a short spin, then the core goes to whoever holds it, or to the
 		IO thread it waits for) */
@@ -187,28 +246,36 @@ void halo_cache_lock_acquire(void)
 	if (waited_from)
 		halo_cache_lock_wait_us[halo_epoch_on_mutator() ? 1 : 0] += vita_host_time_us() - waited_from;
 	halo_cache_lock_acquires++;
-	lruv_owner = self;
+	lruv_acquire_serial++;
+	__atomic_store_n(&lruv_owner, self, __ATOMIC_RELAXED);
 	lruv_depth = 1;
+	lruv_owner_site = site;
+	lruv_owner_caller = caller;
+	lruv_owner_is_tick = halo_epoch_on_mutator();
 }
 
 void halo_cache_lock_release(void)
 {
 	if (--lruv_depth == 0)
+	{
+		__atomic_store_n(&lruv_owner, 0, __ATOMIC_RELAXED);
 		__atomic_store_n(&lruv_held, 0, __ATOMIC_RELEASE);
+	}
 }
 
-/* around a wait for the IO thread (cache_files.c): the lock is let go for
-the wait if this thread holds it, since a completion on the IO thread may
-need it, and taken back after (the cycle tick -> IO -> lock -> tick wedged
-the whole Vita) */
+/* around a wait for the IO thread (cache_files.c, the texture cache): the
+lock is let go for the wait if this thread holds it, since a completion on
+the IO thread may need it, and taken back after (the cycle tick -> IO ->
+lock -> tick wedged the whole Vita) */
 int halo_cache_lock_suspend(void)
 {
 	int depth;
 
-	if (!lruv_depth || lruv_owner != cache_lock_self())
+	if (!cache_lock_owned(cache_lock_self()))
 		return 0;
 	depth = lruv_depth;
 	lruv_depth = 0;
+	__atomic_store_n(&lruv_owner, 0, __ATOMIC_RELAXED);
 	__atomic_store_n(&lruv_held, 0, __ATOMIC_RELEASE);
 	return depth;
 }
@@ -217,10 +284,10 @@ void halo_cache_lock_resume(int depth)
 {
 	if (!depth)
 		return;
-	halo_cache_lock_acquire();
+	halo_cache_lock_acquire_at("halo_cache_lock_resume", __builtin_return_address(0));
 	lruv_depth = depth;
 }
-#define lruv_acquire() halo_cache_lock_acquire()
+#define lruv_acquire() halo_cache_lock_acquire_at(__func__, __builtin_return_address(0))
 #define lruv_release() halo_cache_lock_release()
 #else
 #define lruv_acquire() ((void)0)

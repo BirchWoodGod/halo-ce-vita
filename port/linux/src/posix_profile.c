@@ -59,6 +59,16 @@ unsigned long vita_host_thread_id(void)
 	return (unsigned long)pthread_self();
 }
 
+/* a thread's name for the cache lock's report (lruv_cache.c): none here,
+where the id is pthread_self's */
+int vita_host_thread_describe(unsigned long id, char *text, unsigned long size)
+{
+	(void)id;
+	(void)text;
+	(void)size;
+	return 0;
+}
+
 #define MAXIMUM_SAMPLES (1 << 22)
 
 static unsigned long *samples;
