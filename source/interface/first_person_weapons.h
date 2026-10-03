@@ -75,6 +75,13 @@ void first_person_weapon_message_from_weapon(
 struct real_matrix4x3 *first_person_weapon_get_node_matrix(
 	short local_player_index,
 	short node_index);
+#ifdef HALO_LINUX
+/* (port) the render's lookup: NULL while the local player's first-person
+weapon is gone (first_person_weapons.c) */
+struct real_matrix4x3 *first_person_weapon_try_get_node_matrix(
+	short local_player_index,
+	short node_index);
+#endif
 
 /* ---------- globals */
 
