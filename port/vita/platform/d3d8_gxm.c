@@ -558,24 +558,33 @@ static void surface_dimensions(const D3DSurface *surface, unsigned long *width, 
 		format == D3DFMT_LIN_D24S8 || format == D3DFMT_LIN_F24S8 || format == D3DFMT_LIN_D16 || format == D3DFMT_LIN_F16;
 }
 
-/* a target of the same size that has been neither drawn into nor sampled
-for ten seconds, taken over when no more targets can be made: they are
-never freed, and every map's surfaces add their own - after an hour and a
-level change the glow's 128x128 targets were not made any more (the bloom
-went). It leaves its old surface's bucket; that surface gets a new target
-if it comes back */
+/* a target that has been neither drawn into nor sampled for ten seconds,
+taken over when no more targets can be made: they are never freed, and
+every map's surfaces add their own - after an hour and a level change the
+glow's 128x128 targets were not made any more (the bloom went). One of the
+same size is taken as it is; failing that, the stalest of another size is
+made again at this size (vgxm_target_remake gives its memory back first):
+a surface of a size no other target has - the active camouflage's 320x240
+copy of the screen, first drawn when a cloaked unit is first seen - could
+otherwise never get one once the limit was reached, and the cloaked units
+sampled its never-written memory and drew black. It leaves its old
+surface's bucket; that surface gets a new target if it comes back */
 static struct render_target_entry *render_target_recycle(unsigned long width, unsigned long height, BOOL depth)
 {
-	struct render_target_entry *entry, **link;
+	struct render_target_entry *entry, *stalest = NULL, **link;
 
 	for (entry = render_targets; entry; entry = entry->next)
 	{
-		if (entry->id && !entry->chain_levels && entry->target.width == width && entry->target.height == height &&
-			entry->target.depth == depth && entry->last_used + 300 < device.frame)
+		if (entry->id && !entry->chain_levels && entry->target.depth == depth && entry->last_used + 300 < device.frame)
 		{
-			break;
+			if (entry->target.width == width && entry->target.height == height)
+				break;
+			if (!stalest || entry->last_used < stalest->last_used)
+				stalest = entry;
 		}
 	}
+	if (!entry)
+		entry = stalest;
 	if (!entry)
 		return NULL;
 	for (link = render_target_bucket(entry->target.data); *link; link = &(*link)->next_in_bucket)
@@ -584,6 +593,21 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 		{
 			*link = entry->next_in_bucket;
 			break;
+		}
+	}
+	if (entry->target.width != width || entry->target.height != height)
+	{
+		static unsigned long remade;
+
+		if (++remade <= 20)
+			platform_log("render target %lu remade from %lux%lu to %lux%lu (%lu so far)", entry->id,
+				entry->target.width, entry->target.height, width, height, remade);
+		if (!vgxm_target_remake(entry->id, width, height, depth, &entry->texture))
+		{
+			/* (its slot is empty now: the entry stays in the list, without
+			a target, and is never looked up again) */
+			entry->id = 0;
+			return NULL;
 		}
 	}
 	return entry;
@@ -701,6 +725,18 @@ static struct render_target_entry *render_target_entry_find_version(unsigned lon
 		}
 	}
 	return best;
+}
+
+/* whether the game has rendered into this surface (it has an entry, with a
+target or without one) */
+static BOOL render_target_entry_known(unsigned long data)
+{
+	struct render_target_entry *entry;
+
+	for (entry = *render_target_bucket(data); entry; entry = entry->next_in_bucket)
+		if (entry->target.data == data && !entry->target.depth)
+			return TRUE;
+	return FALSE;
 }
 
 static struct render_target_entry *render_target_entry_find(unsigned long data)
@@ -1708,7 +1744,12 @@ static void vertex_variant_resolve(struct vertex_shader_object *program, struct 
 	variant->shader = shader;
 	variant->pending_source = NULL;
 	if (!shader || debug_settings_dump())
+	{
 		dump_shader(source, "vs", hash_words(source, strlen(source) & ~3UL));
+		if (debug_settings_dump())
+			platform_log("vertex shader %lu (inputs %04lx): vs_%08lx.cg", program->id, variant->provided_mask,
+				hash_words(source, strlen(source) & ~3UL));
+	}
 	if (!shader)
 		platform_log("vertex shader %lu (inputs %04lx) does not compile", program->id, variant->provided_mask);
 	free(source);
@@ -2129,6 +2170,21 @@ static void bind_recorded_textures(struct render_command *command, float texture
 			description.levels = target->chain_levels > 1 ? 
 				(description.levels < (unsigned long)target->chain_levels ? description.levels : (unsigned long)target->chain_levels) : 1;
 			description.cube_map = FALSE;
+		}
+		else if (render_target_entry_known(header[1]))
+		{
+			/* a surface the game renders into that has no target now (none
+			could be made): its own memory is never written - the targets
+			are the GPU's - so sampling it reads zeros, which drew the
+			active camouflage black. The draw is left out instead (a
+			cloaked unit is then simply unseen) */
+			static unsigned long logged;
+
+			if (logged++ < 8)
+				platform_log("draw left out: stage %d samples render target %08lx, which has no target", stage,
+					(unsigned long)header[1]);
+			command->skip = TRUE;
+			continue;
 		}
 		else
 		{
@@ -2636,6 +2692,76 @@ static void execute_draw(struct render_command *command)
 		draw->fragment_uniforms[1] = copy;
 	}
 	draw->fragment_shader = fragment_shader_get(&command->key);
+	{
+		/* (debug) HALO_TRACE_CAMO=n: the first n draws of the active
+		camouflage (rasterizer_xbox_active_camouflage.c): the screen copy
+		into the secondary target (modes 1, a 320x240 target), the cloaked
+		model's depth pass (no colour writes) and its distortion pass
+		(modes 0x2623), with their state */
+		static long trace = -1, traced;
+
+		if (trace < 0)
+		{
+			const char *setting = getenv("HALO_TRACE_CAMO");
+			trace = setting ? atol(setting) : 0;
+		}
+		if (trace && traced < trace && command->targets && command->targets->color_valid)
+		{
+			unsigned long width = 0, height = 0;
+			BOOL depth_surface;
+			BOOL distortion = command->key.texture_modes == 0x2623;
+			BOOL depth_pass = draw->color_write == 0 && command->key.alpha_test_function && command->key.texture_modes == 1;
+
+			surface_dimensions(&command->targets->color_surface, &width, &height, &depth_surface);
+			if (distortion || (width == 320 && height == 240) || depth_pass)
+			{
+				const float *b = (const float *)draw->vertex_chunks[VITA_VC_B];
+				const float *fa = (const float *)draw->fragment_uniforms[0];
+				const float *fb = (const float *)draw->fragment_uniforms[1];
+
+				traced++;
+				platform_log("camo trace %ld: %s frame %lu target %08lx %lux%lu vs %lu ps %08lx modes %08lx "
+					"z %d/%d func %lu cw %08lx blend %d %lu/%lu at %u indices %lu",
+					traced, distortion ? "distortion" : depth_pass ? "depth pass" : "copy", device.frame,
+					(unsigned long)command->targets->color_surface.Data, width, height, command->program->id,
+					hash_words(&command->key, sizeof(command->key)), (unsigned long)command->key.texture_modes,
+					(int)draw->depth_test, (int)draw->depth_write, draw->depth_function, draw->color_write, (int)draw->blend,
+					draw->blend_source, draw->blend_destination, (unsigned)command->key.alpha_test_function,
+					(unsigned long)draw->index_count);
+				for (stage = 0; stage < 4; stage++)
+				{
+					if (command->texture_present[stage] && command->texture_header[stage][1])
+					{
+						struct render_target_entry *entry = render_target_entry_find_version(command->texture_header[stage][1],
+							command->texture_version[stage]);
+
+						platform_log("  stage %d: data %08lx version %lu %s sampler %d scale %.6f %.6f bound %d",
+							stage, (unsigned long)command->texture_header[stage][1], command->texture_version[stage],
+							entry ? "render target" : "texture", command->key.sampler_type[stage],
+							texture_scale[stage][0], texture_scale[stage][1], draw->textures[stage] != NULL);
+					}
+				}
+				{
+					unsigned long a;
+
+					for (a = 0; a < draw->attribute_count; a++)
+						platform_log("  attribute v%u: format %u components %u stream %u offset %u stride %lu",
+							draw->attributes[a].reg, draw->attributes[a].format, draw->attributes[a].components,
+							draw->attributes[a].stream, draw->attributes[a].offset,
+							(unsigned long)draw->strides[draw->attributes[a].stream]);
+				}
+				if (b)
+					platform_log("  c12..c14: %g %g %g %g | %g %g %g %g | %g %g %g %g",
+						b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11]);
+				if (fa)
+					platform_log("  final c0: %g %g %g %g", fa[VITA_FU_PS_FINAL_C0 * 4], fa[VITA_FU_PS_FINAL_C0 * 4 + 1],
+						fa[VITA_FU_PS_FINAL_C0 * 4 + 2], fa[VITA_FU_PS_FINAL_C0 * 4 + 3]);
+				if (fb)
+					platform_log("  texture scale 2: %g %g", fb[(VITA_FU_TEXTURE_SCALE - VITA_FU_A_COUNT + 2) * 4],
+						fb[(VITA_FU_TEXTURE_SCALE - VITA_FU_A_COUNT + 2) * 4 + 1]);
+			}
+		}
+	}
 	{
 		/* (debug) HALO_TRACE_LINEAR=1: the first draws that sample a 640x480
 		linear texture (the movie), with their vertices */

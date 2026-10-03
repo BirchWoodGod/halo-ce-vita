@@ -1517,19 +1517,62 @@ void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_fi
 mip chains): CDRAM blocks come in 256 KB steps, and a block each held a
 64 KB 128x128 target in 256 KB, so two dozen of them took 6 MB of the
 12 MB left and the next failed (b30, "cannot allocate colour target").
-Small targets are carved from shared 256 KB blocks instead (targets are
-never freed). NULL when there is no memory. */
+Small targets are carved from shared 256 KB blocks instead; a share given
+back (a target remade at another size, target_release) is kept for the
+next small target that fits in it. NULL when there is no memory. */
 #define SMALL_TARGET_BLOCK (256 * 1024)
+#define MAXIMUM_SMALL_TARGET_SPARES 64
 
-static void *small_target_memory(unsigned int size)
+static struct
 {
+	void *base;
+	unsigned int size;
+} small_target_spares[MAXIMUM_SMALL_TARGET_SPARES];
+
+/* a small target's share of a block given back (the block stays) */
+static void small_target_give_back(void *base, unsigned int size)
+{
+	int i;
+
+	for (i = 0; i < MAXIMUM_SMALL_TARGET_SPARES; i++)
+	{
+		if (!small_target_spares[i].base)
+		{
+			small_target_spares[i].base = base;
+			small_target_spares[i].size = size;
+			return;
+		}
+	}
+	/* (no room: the share is lost, as before targets were remade) */
+}
+
+static void *small_target_memory(unsigned int *share_size)
+{
+	unsigned int size = *share_size;
 	static struct block current;
 	static unsigned int used;
 	struct block block;
+	int i, best = -1;
 
 	size = ALIGN(size, 4096);
 	if (size > SMALL_TARGET_BLOCK / 2)
 		return NULL;
+	for (i = 0; i < MAXIMUM_SMALL_TARGET_SPARES; i++)
+	{
+		if (small_target_spares[i].base && small_target_spares[i].size >= size &&
+			(best < 0 || small_target_spares[i].size < small_target_spares[best].size))
+		{
+			best = i;
+		}
+	}
+	if (best >= 0)
+	{
+		void *base = small_target_spares[best].base;
+
+		small_target_spares[best].base = NULL;
+		*share_size = small_target_spares[best].size;
+		return base;
+	}
 	if (!current.base || used + size > current.size)
 	{
 		if (!block_allocate(&block, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, SMALL_TARGET_BLOCK, 1, "colour targets"))
@@ -1538,6 +1581,7 @@ static void *small_target_memory(unsigned int size)
 		used = 0;
 	}
 	used += size;
+	*share_size = size;
 	return (unsigned char *)current.base + used - size;
 }
 
@@ -1545,40 +1589,42 @@ static void *small_target_memory(unsigned int size)
 of its own */
 static void *colour_target_memory(struct block *memory, unsigned int size, const char *name)
 {
-	void *base = small_target_memory(size);
+	unsigned int share_size = size;
+	void *base = small_target_memory(&share_size);
 
 	if (base)
 	{
+		/* (uid -1: a share, given back to the spares, not freed) */
 		memory->uid = -1;
 		memory->base = base;
-		memory->size = size;
+		memory->size = share_size;
 		return base;
 	}
 	return block_allocate(memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, name);
 }
 
-unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
+/* gives a target slot back its memory and its render target object */
+static void target_release(struct target *target)
 {
-	struct target *target;
+	if (target->render_target)
+		sceGxmDestroyRenderTarget(target->render_target);
+	if (target->memory.base && target->memory.uid == -1)
+		small_target_give_back(target->memory.base, target->memory.size);
+	else if (target->memory.base)
+	{
+		sceGxmUnmapMemory(target->memory.base);
+		sceKernelFreeMemBlock(target->memory.uid);
+	}
+	memset(target, 0, sizeof(*target));
+}
+
+/* makes a target in a slot: its memory, surface, render target object and
+texture; 0 on failure (what was made is given back) */
+static int target_make(struct target *target, unsigned long width, unsigned long height, int depth,
+	struct vgxm_texture *texture)
+{
 	int result;
 
-	{
-		/* (debug) HALO_TARGET_LIMIT=n: fewer targets, to exercise the
-		recycling of unused ones (d3d8_gxm.c render_target_recycle) */
-		static int limit = -1;
-
-		if (limit < 0)
-		{
-			const char *setting = getenv("HALO_TARGET_LIMIT");
-
-			limit = setting && atoi(setting) > 0 && atoi(setting) < MAXIMUM_TARGETS ? atoi(setting) : MAXIMUM_TARGETS;
-		}
-		if (!gxm.ready || gxm.target_count >= (unsigned)limit || !width || !height)
-			return 0;
-	}
-	if (getenv("HALO_TRACE_FILES"))
-		log_line("trace: target %lux%lu depth %d (%u made)", width, height, depth, gxm.target_count);
-	target = &gxm.targets[gxm.target_count];
 	memset(target, 0, sizeof(*target));
 	target->depth = depth;
 	{
@@ -1609,7 +1655,10 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 	target->height = (unsigned int)height;
 	target->render_target = render_target_for(target->width, target->height);
 	if (!target->render_target)
+	{
+		target_release(target);
 		return 0;
+	}
 	if (depth)
 	{
 		unsigned int aligned_width = ALIGN(target->width, SCE_GXM_TILE_SIZEX);
@@ -1622,7 +1671,7 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 			failed attempt, every 30 frames, leaked one, and the driver's
 			memory for them ran out - "cannot create a 128x128 render
 			target: 0x805b0027") */
-			sceGxmDestroyRenderTarget(target->render_target);
+			target_release(target);
 			return 0;
 		}
 		result = sceGxmDepthStencilSurfaceInit(&target->depth_stencil, SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,
@@ -1630,6 +1679,7 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 		if (result < 0)
 		{
 			log_line("gxm: depth surface %lux%lu: 0x%08x", width, height, (unsigned)result);
+			target_release(target);
 			return 0;
 		}
 		/* keep the depth across scenes */
@@ -1641,7 +1691,7 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 		target->stride = ALIGN(target->width, 32);
 		if (!colour_target_memory(&target->memory, 4 * target->stride * target->height, "colour target"))
 		{
-			sceGxmDestroyRenderTarget(target->render_target);
+			target_release(target);
 			return 0;
 		}
 		memset(target->memory.base, 0, 4 * target->stride * target->height);
@@ -1651,6 +1701,7 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 		if (result < 0)
 		{
 			log_line("gxm: colour surface %lux%lu: 0x%08x", width, height, (unsigned)result);
+			target_release(target);
 			return 0;
 		}
 		if (texture)
@@ -1661,7 +1712,51 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 				log_line("gxm: target texture %lux%lu: 0x%08x", width, height, (unsigned)result);
 		}
 	}
+	return 1;
+}
+
+unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
+{
+	{
+		/* (debug) HALO_TARGET_LIMIT=n: fewer targets, to exercise the
+		recycling of unused ones (d3d8_gxm.c render_target_recycle) */
+		static int limit = -1;
+
+		if (limit < 0)
+		{
+			const char *setting = getenv("HALO_TARGET_LIMIT");
+
+			limit = setting && atoi(setting) > 0 && atoi(setting) < MAXIMUM_TARGETS ? atoi(setting) : MAXIMUM_TARGETS;
+		}
+		if (!gxm.ready || gxm.target_count >= (unsigned)limit || !width || !height)
+			return 0;
+	}
+	if (getenv("HALO_TRACE_FILES"))
+		log_line("trace: target %lux%lu depth %d (%u made)", width, height, depth, gxm.target_count);
+	if (!target_make(&gxm.targets[gxm.target_count], width, height, depth, texture))
+		return 0;
 	return ++gxm.target_count;
+}
+
+int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
+	struct vgxm_texture *texture)
+{
+	struct target *target;
+
+	if (!gxm.ready || !id || id > gxm.target_count || !width || !height)
+		return 0;
+	target = &gxm.targets[id - 1];
+	/* (never the scene being recorded: a target is remade only once
+	nothing has used it for hundreds of frames) */
+	if (gxm.in_scene && (gxm.scene_color == id || gxm.scene_depth == id))
+		return 0;
+	target_release(target);
+	if (!target_make(target, width, height, depth, texture))
+	{
+		log_line("gxm: cannot remake target %lu as %lux%lu %s", id, width, height, depth ? "depth" : "colour");
+		return 0;
+	}
+	return 1;
 }
 
 int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned long levels,
