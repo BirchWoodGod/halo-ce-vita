@@ -770,6 +770,127 @@ boolean game_safe_to_save(
 	return safe;
 }
 
+#ifdef HALO_LINUX
+/* (port) Why game_safe_to_save says no, for the log (main.c, a checkpoint
+that waits): the first test that fails, in game_safe_to_save's order, and
+for the tests that look at objects the object found. Two of them look at
+the whole map, not only around the player: any_unit_is_dangerous (a unit
+throwing a grenade or dying, anywhere) and dangerous_projectiles_near_
+player (any projectile at all) - one that never goes away holds every
+checkpoint off, and a checkpoint that holds it carries it into the
+campaign save. NULL when it is safe. Nothing but the log reads it. */
+char *tag_get_name(long tag_index);
+
+static void game_unsafe_to_save_object(
+	char *buffer,
+	long size,
+	char const *test,
+	long object_index,
+	long count)
+{
+	struct object_header_datum *header = object_header_get(object_index);
+	struct object_datum *object = object_get(object_index);
+	struct data_iterator iterator;
+	struct player_datum *player;
+	real distance = -1.0f;
+
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		if (player->unit_index != NONE)
+		{
+			distance = square_root(distance_squared3d(&object_get(player->unit_index)->object.bounding_sphere_center,
+				&object->object.bounding_sphere_center));
+			break;
+		}
+	}
+	snprintf(buffer, size, "%s: %s (%s%s), %.1f m from the player, at %.1f %.1f %.1f; %ld such in the map",
+		test, tag_get_name(object->definition_index),
+		TEST_FLAG(header->flags, _object_header_active_bit) ? "active" : "not active",
+		TEST_FLAG(header->flags, _object_header_do_not_update_bit) ? ", not updated" : "",
+		distance, object->object.bounding_sphere_center.x, object->object.bounding_sphere_center.y,
+		object->object.bounding_sphere_center.z, count);
+}
+
+char const *game_unsafe_to_save_reason(
+	char *buffer,
+	long size)
+{
+	struct object_iterator iterator;
+	long object_index = NONE;
+	long count = 0;
+
+	if (ai_enemies_can_see_player())
+		return "ai_enemies_can_see_player";
+	if (dangerous_projectiles_near_player())
+	{
+		object_iterator_new(&iterator, _object_mask_projectile, 0);
+		while (object_iterator_next(&iterator))
+		{
+			if (object_index == NONE)
+				object_index = iterator.index;
+			count++;
+		}
+		if (object_index == NONE)
+			return "dangerous_projectiles_near_player";
+		game_unsafe_to_save_object(buffer, size, "dangerous_projectiles_near_player", object_index, count);
+		return buffer;
+	}
+	if (dangerous_items_near_player())
+	{
+		struct item_datum *item;
+
+		object_iterator_new(&iterator, _object_mask_item, 1);
+		while ((item = (struct item_datum *)object_iterator_next(&iterator)) != NULL)
+		{
+			if (item->item.detonation_ticks > 0)
+			{
+				if (object_index == NONE)
+					object_index = iterator.index;
+				count++;
+			}
+		}
+		if (object_index == NONE)
+			return "dangerous_items_near_player";
+		game_unsafe_to_save_object(buffer, size, "dangerous_items_near_player", object_index, count);
+		return buffer;
+	}
+	if (dangerous_effects_near_player())
+		return "dangerous_effects_near_player";
+	if (any_unit_is_dangerous())
+	{
+		struct unit_datum *unit;
+
+		object_iterator_new(&iterator, _object_mask_unit, 1);
+		while ((unit = (struct unit_datum *)object_iterator_next(&iterator)) != NULL)
+		{
+			if ((unit->unit.animation.state==_unit_state_throw_grenade && unit->unit.grenade_throw_state!=_unit_grenade_throw_ending) ||
+				((unit->unit.animation.state==_unit_state_dying || unit->unit.animation.state==_unit_state_dying_airborne) &&
+				!TEST_FLAG(unit->unit.animation.flags, _unit_animation_ignore_translation_bit)))
+			{
+				if (object_index == NONE)
+					object_index = iterator.index;
+				count++;
+			}
+		}
+		if (object_index == NONE)
+			return "any_unit_is_dangerous";
+		game_unsafe_to_save_object(buffer, size,
+			unit_get(object_index)->unit.animation.state == _unit_state_throw_grenade ?
+				"any_unit_is_dangerous (throwing a grenade)" : "any_unit_is_dangerous (dying)",
+			object_index, count);
+		return buffer;
+	}
+	if (any_player_is_in_the_air())
+		return "any_player_is_in_the_air";
+	if (any_player_is_dead())
+		return "any_player_is_dead";
+	if (vehicle_moving_near_any_player())
+		return "vehicle_moving_near_any_player";
+	return NULL;
+}
+#endif
+
 boolean game_safe_to_speak(
 	void)
 {

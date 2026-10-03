@@ -896,9 +896,16 @@ boolean main_saving_map(
 	return main_globals.saving_map;
 }
 
+#ifdef HALO_LINUX
+static void main_checkpoint_cancelled(char const *by);
+#endif
+
 void main_save_cancel(
 	void)
 {
+#ifdef HALO_LINUX
+	main_checkpoint_cancelled("game_save_cancel");
+#endif
 	main_globals.saving_map = FALSE;
 	return;
 }
@@ -947,6 +954,9 @@ void main_reset_map(
 void main_revert_map(
 	void)
 {
+#ifdef HALO_LINUX
+	main_checkpoint_cancelled("a revert");
+#endif
 	main_globals.switch_to_structure_bsp_index = NONE;
 	main_globals.saving_map = FALSE;
 	main_globals.revert_map = TRUE;
@@ -957,15 +967,25 @@ void main_revert_map(
 void main_skip_cinematic(
 	void)
 {
+#ifdef HALO_LINUX
+	main_checkpoint_cancelled("a cinematic skip");
+#endif
 	main_globals.switch_to_structure_bsp_index = NONE;
 	main_globals.saving_map = FALSE;
 	main_globals.skip_cinematic = TRUE;
 	return;
 }
 
+#ifdef HALO_LINUX
+static void main_checkpoint_asked(char const *how);
+#endif
+
 void main_save_map_nonsafe(
 	void)
 {
+#ifdef HALO_LINUX
+	main_checkpoint_asked("game_save_totally_unsafe");
+#endif
 	main_globals.saving_map = TRUE;
 	main_globals.save_map_safely = FALSE;
 	return;
@@ -1593,11 +1613,58 @@ static long sort_desired_local_player_controllers(
 	return (value_a >= value_b) - 1;
 }
 
+#ifdef HALO_LINUX
+/* (port) The checkpoints in the log: who asked for one, how long it waited
+and what game_safe_to_save refused meanwhile (game.c), and when it gave up.
+A level's scripts ask with game_save (gives up after 240 checks, 8 s at
+30 frames a second) or game_save_no_timeout (waits as long as it takes,
+and keeps a later request waiting with it): without these lines a log
+said nothing between "checkpoint taken" lines, whether no checkpoint was
+asked for or one waited minutes for a moment safe enough (GitHub #10) */
+void platform_log(const char *format, ...);
+char const *game_unsafe_to_save_reason(char *buffer, long size);
+static unsigned long checkpoint_log_lines;
+static long checkpoint_wait_checks;
+
+#define CHECKPOINT_LOG_LINES 96
+
+static void main_checkpoint_asked(
+	char const *how)
+{
+	if (checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
+		platform_log("checkpoint: %s asked for by %s at tick %ld", how, hs_runtime_get_executing_thread_name(),
+			game_in_progress() ? (long)game_time_get() : 0L);
+	checkpoint_wait_checks = 0;
+}
+
+/* a checkpoint asked for and not yet taken, dropped */
+static void main_checkpoint_cancelled(
+	char const *by)
+{
+	if (main_globals.saving_map && checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
+		platform_log("checkpoint: the one asked for cancelled by %s after %ld frames", by, checkpoint_wait_checks);
+}
+
+static void main_checkpoint_waiting(
+	char const *what)
+{
+	char buffer[256];
+	char const *reason = game_unsafe_to_save_reason(buffer, sizeof(buffer));
+
+	if (checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
+		platform_log("checkpoint: %s after %ld frames: not safe: %s", what, checkpoint_wait_checks,
+			reason ? reason : "(safe now)");
+}
+#endif
+
 void main_save_map_safe(
 	void)
 {
 	if (!main_globals.saving_map || main_globals.save_map_timeout)
 	{
+#ifdef HALO_LINUX
+		main_checkpoint_asked("game_save");
+#endif
 		main_globals.saving_map = TRUE;
 		main_globals.save_map_safely = TRUE;
 		main_globals.save_map_timeout = TRUE;
@@ -1613,6 +1680,9 @@ void main_save_map_no_timeout(
 {
 	if (!main_globals.saving_map || main_globals.save_map_timeout)
 	{
+#ifdef HALO_LINUX
+		main_checkpoint_asked("game_save_no_timeout");
+#endif
 		main_globals.saving_map = TRUE;
 		main_globals.save_map_safely = TRUE;
 		main_globals.ticks_until_next_save_check = 0;
@@ -1925,9 +1995,15 @@ static void main_save_map_private(
 
 		if (save_map_safely)
 		{
+#ifdef HALO_LINUX
+			checkpoint_wait_checks++;
+#endif
 			if (main_globals.ticks_unable_to_save++ >= 240 &&
 				main_globals.save_map_timeout)
 			{
+#ifdef HALO_LINUX
+				main_checkpoint_waiting("given up");
+#endif
 				if (debug_game_save)
 					console_printf(FALSE, "gave up trying to save");
 				main_globals.saving_map = FALSE;
@@ -1943,6 +2019,12 @@ static void main_save_map_private(
 				else
 				{
 					main_globals.safe_intervals = 0;
+#ifdef HALO_LINUX
+					/* (every 30 s of waiting: a checkpoint without a
+					timeout can wait for the rest of the level) */
+					if (checkpoint_wait_checks >= 900 && checkpoint_wait_checks % 900 < 10)
+						main_checkpoint_waiting("waiting");
+#endif
 				}
 				main_globals.ticks_until_next_save_check = 10;
 			}
@@ -1956,6 +2038,10 @@ static void main_save_map_private(
 
 		if (save_map)
 		{
+#ifdef HALO_LINUX
+			if (save_map_safely && checkpoint_wait_checks >= 300 && checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
+				platform_log("checkpoint: safe after %ld frames", checkpoint_wait_checks);
+#endif
 			hud_autosave(TRUE);
 			main_globals.save_map_completed = TRUE;
 			main_globals.saving_map = FALSE;
