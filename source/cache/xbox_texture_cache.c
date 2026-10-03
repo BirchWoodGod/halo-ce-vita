@@ -1051,21 +1051,37 @@ void *_texture_cache_bitmap_get_hardware_format(
 		load || !block);
 	if (TEST_FLAG(bitmap->flags, _bitmap_cached_bit))
 	{
+#ifdef HALO_LINUX
+		/* (port) the load's start, the lookup and the touch under the cache
+		lock: the tick (predicted resources, the lights' texture samples)
+		and the render start and look up loads at once, and the other
+		thread's evictions deleted the block in between - the texture datums
+		were made outside the lock, and a block evicted between the lookup
+		and the touch crashed in lruv_block_touch (the gxm-null harness,
+		with a small texture cache) */
+		struct xbox_texture_cache_texture *texture = NULL;
+
+		halo_cache_lock_acquire();
 		if (bitmap->cache_block_index == NONE && load)
 		{
-#ifdef HALO_LINUX
-			/* (port) under the cache lock, and only if no other thread
-			started it meanwhile: the tick (predicted resources) and the
-			render start loads at once, and the texture datums were made
-			outside the lock while the other thread's evictions deleted
-			them */
-			halo_cache_lock_acquire();
-			if (bitmap->cache_block_index == NONE)
-				texture_cache_start_loading_bitmap(bitmap, block);
-			halo_cache_lock_release();
-#else
 			texture_cache_start_loading_bitmap(bitmap, block);
-#endif
+		}
+		if (bitmap->cache_block_index != NONE)
+		{
+			texture = datum_get(
+				xbox_texture_cache_globals.textures,
+				bitmap->cache_block_index);
+			lruv_block_touch(
+				xbox_texture_cache_globals.cache,
+				bitmap->cache_block_index);
+		}
+		halo_cache_lock_release();
+		if (texture)
+		{
+#else
+		if (bitmap->cache_block_index == NONE && load)
+		{
+			texture_cache_start_loading_bitmap(bitmap, block);
 		}
 		if (bitmap->cache_block_index != NONE)
 		{
@@ -1076,6 +1092,7 @@ void *_texture_cache_bitmap_get_hardware_format(
 			lruv_block_touch(
 				xbox_texture_cache_globals.cache,
 				bitmap->cache_block_index);
+#endif
 			if (block && !texture->loaded)
 			{
 				if (debug_texture_cache)
