@@ -210,6 +210,9 @@ struct render_target_entry
 	levels' targets share one mip chain, the first level's texture covers
 	it; -1 when the chain could not be made */
 	long chain_levels;
+	/* whether a draw or a colour clear has gone into its target since it
+	was made (the worker's: execute_draw, execute_command) */
+	BOOL drawn;
 };
 
 #define RENDER_TARGET_BUCKET_COUNT 256
@@ -701,6 +704,7 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 	entry->target.gl_width = width;
 	entry->target.gl_height = height;
 	entry->last_rendered = 0;
+	entry->drawn = FALSE;
 	entry->last_used = device.frame + 1;
 	entry->next_in_bucket = *render_target_bucket(entry->target.data);
 	*render_target_bucket(entry->target.data) = entry;
@@ -2046,6 +2050,10 @@ static unsigned long stage_texture_mode_of(const struct nv2a_pixel_shader_key *k
 }
 
 /* the targets of a record; FALSE if there is nothing to draw into */
+/* the colour target of the worker's last bound targets
+(bind_recorded_targets), marked drawn once a draw or a clear goes in */
+static struct render_target_entry *worker_color_entry;
+
 static BOOL bind_recorded_targets(const struct render_command *command, BOOL *has_depth)
 {
 	/* the entries of the last record's targets, reused while the surfaces
@@ -2093,6 +2101,7 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 	if (depth)
 		depth->last_used = device.frame + 1;
 	vgxm_set_targets(color ? color->id : 0, depth ? depth->id : 0);
+	worker_color_entry = color;
 	*has_depth = depth != NULL;
 	return TRUE;
 }
@@ -2129,6 +2138,23 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		if (!command->texture_present[stage] || !header[1] || mode == 0 || mode == 0x04 || mode == 0x05 || mode == 0x11)
 			continue;
 		target = render_target_entry_find_version(header[1], command->texture_version[stage]);
+		if (target && !target->drawn && !target->chain_levels)
+		{
+			/* a target nothing has been drawn into yet: its memory is the
+			zeros it was made with. The screen effects' copies are drawn
+			by one pass and sampled by the next; when the copy's draw was
+			left out (its program still compiling, or a compile that
+			failed late in a session) the next pass drew the zeros over
+			the whole screen - a zoomed scope went black. Left out as
+			well, so the picture stays as it was. */
+			static unsigned long logged;
+
+			if (logged++ < 8)
+				platform_log("draw left out: stage %d samples render target %08lx before anything was drawn into it",
+					stage, (unsigned long)header[1]);
+			command->skip = TRUE;
+			continue;
+		}
 		if (target)
 		{
 			target->last_used = device.frame + 1;
@@ -2861,6 +2887,8 @@ static void execute_draw(struct render_command *command)
 	}
 	else
 		vgxm_draw(draw);
+	if (worker_color_entry && draw->color_write)
+		worker_color_entry->drawn = TRUE;
 	DRAW_PROFILE_ADD(7, profile_from);
 }
 
@@ -2887,6 +2915,8 @@ static void execute_command(struct render_command *command)
 			if (!has_depth)
 				flags &= ~(D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL);
 			vgxm_clear(flags, command->clear_color, command->clear_depth, command->clear_stencil, command->clip);
+			if (worker_color_entry && (flags & D3DCLEAR_TARGET))
+				worker_color_entry->drawn = TRUE;
 		}
 		break;
 	case _command_present:
