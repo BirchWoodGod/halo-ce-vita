@@ -60,3 +60,12 @@ unsigned long vita_host_thread_id(void)
 {
 	return (unsigned long)GetCurrentThreadId();
 }
+
+/* a thread's name for the cache lock's report (lruv_cache.c): none here */
+int vita_host_thread_describe(unsigned long id, char *text, unsigned long size)
+{
+	(void)id;
+	(void)text;
+	(void)size;
+	return 0;
+}

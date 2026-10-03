@@ -189,6 +189,20 @@ unsigned long vita_host_thread_id(void)
 	return (unsigned long)sceKernelGetThreadId();
 }
 
+/* a thread's kernel name, state and priority, for the cache lock's report
+of a long wait (lruv_cache.c): which thread holds it, and whether it runs */
+int vita_host_thread_describe(unsigned long id, char *text, unsigned long size)
+{
+	SceKernelThreadInfo info;
+
+	memset(&info, 0, sizeof(info));
+	info.size = sizeof(info);
+	if (sceKernelGetThreadInfo((SceUID)id, &info) < 0)
+		return snprintf(text, size, "no such thread");
+	return snprintf(text, size, "'%s', status 0x%x, priority %d", info.name, (unsigned)info.status,
+		info.currentPriority);
+}
+
 /* The game looks for d:\bink\<movie>.bik before it opens a movie, and
 the Vita plays the MP4 in movies/ in its place (bink_vita.c): an empty
 .bik stands in for each MP4 there, so a movie copied in plays */

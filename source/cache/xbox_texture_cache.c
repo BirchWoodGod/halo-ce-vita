@@ -373,6 +373,10 @@ static struct xbox_texture_cache_globals xbox_texture_cache_globals;
 struct texture_cache_debug_options texture_cache_debug_options = {0};
 boolean debug_texture_cache = FALSE;
 static unsigned long texture_cache_last_failure_time = 0;
+#ifdef HALO_LINUX
+/* the pages in use: all of them, or HALO_TEXTURE_CACHE_PAGES's (debug) */
+static long texture_cache_page_limit = XBOX_TEXTURE_CACHE_PAGE_COUNT;
+#endif
 
 /* ---------- public code */
 
@@ -471,9 +475,15 @@ static void *texture_cache_steal_memory_unlocked(
 		"c:\\halo\\SOURCE\\cache\\xbox_texture_cache.c",
 		0x140,
 		!xbox_texture_cache_globals.stolen_memory);
+#ifdef HALO_LINUX
+	lruv_resize(
+		xbox_texture_cache_globals.cache,
+		MIN(remaining_page_count, texture_cache_page_limit));
+#else
 	lruv_resize(
 		xbox_texture_cache_globals.cache,
 		remaining_page_count);
+#endif
 	XPhysicalProtect(
 		stolen_address,
 		stolen_size,
@@ -498,9 +508,15 @@ static void texture_cache_return_memory_unlocked(
 		"c:\\halo\\SOURCE\\cache\\xbox_texture_cache.c",
 		345,
 		xbox_texture_cache_globals.stolen_memory);
+#ifdef HALO_LINUX
+	lruv_resize(
+		xbox_texture_cache_globals.cache,
+		texture_cache_page_limit);
+#else
 	lruv_resize(
 		xbox_texture_cache_globals.cache,
 		XBOX_TEXTURE_CACHE_PAGE_COUNT);
+#endif
 	XPhysicalProtect(
 		physical_memory_get_texture_cache_base_address(),
 		XBOX_TEXTURE_CACHE_SIZE,
@@ -627,6 +643,35 @@ static void texture_cache_delete_block_proc(
 	texture = datum_get(
 		xbox_texture_cache_globals.textures,
 		block_index);
+#ifdef HALO_LINUX
+	{
+		/* (port) a block still loading is deleted only by a flush, a
+		resize or the bitmap's own deletion, whose public functions wait
+		for the loads before they take the cache lock (below); a wait here
+		holds the lock, so a long one is named */
+		unsigned long wait_started = 0, reported = 0;
+
+		do
+		{
+			cache_entry = datum_get(
+				xbox_texture_cache_globals.textures,
+				block_index);
+			if (cache_entry->loaded)
+				break;
+			if (!wait_started)
+				wait_started = reported = system_milliseconds();
+			else if (system_milliseconds() - reported > 3000)
+			{
+				reported = system_milliseconds();
+				platform_log("texture cache: deleting %s has waited %lu s for its load (request %d), holding the cache lock",
+					tag_get_name(cache_entry->bitmap->tag_index), (reported - wait_started) / 1000,
+					cache_entry->read_request_handle);
+			}
+			SwitchToThread();
+		}
+		while (TRUE);
+	}
+#else
 	do
 	{
 		cache_entry = datum_get(
@@ -635,6 +680,7 @@ static void texture_cache_delete_block_proc(
 	}
 	while (!cache_entry->loaded ||
 		IDirect3DBaseTexture8_IsBusy(&cache_entry->hardware_format));
+#endif
 
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\xbox_texture_cache.c",
@@ -767,6 +813,22 @@ static void texture_cache_new_unlocked(
 		105,
 		xbox_texture_cache_globals.base_address != NULL,
 		"xbox_texture_cache_globals.base_address");
+#ifdef HALO_LINUX
+	{
+		/* (debug) HALO_TEXTURE_CACHE_PAGES=<n>: a texture cache of n 16 KB
+		pages instead of 1408, for eviction churn in tests (the cache
+		lock's, #18) */
+		const char *setting = getenv("HALO_TEXTURE_CACHE_PAGES");
+		long pages = setting ? atol(setting) : 0;
+
+		if (pages > 0 && pages < XBOX_TEXTURE_CACHE_PAGE_COUNT)
+		{
+			texture_cache_page_limit = pages;
+			lruv_resize(xbox_texture_cache_globals.cache, pages);
+			platform_log("texture cache: %ld pages (HALO_TEXTURE_CACHE_PAGES)", pages);
+		}
+	}
+#endif
 
 	return;
 }
@@ -989,6 +1051,34 @@ void *_texture_cache_bitmap_get_hardware_format(
 		load || !block);
 	if (TEST_FLAG(bitmap->flags, _bitmap_cached_bit))
 	{
+#ifdef HALO_LINUX
+		/* (port) the load's start, the lookup and the touch under the cache
+		lock: the tick (predicted resources, the lights' texture samples)
+		and the render start and look up loads at once, and the other
+		thread's evictions deleted the block in between - the texture datums
+		were made outside the lock, and a block evicted between the lookup
+		and the touch crashed in lruv_block_touch (the gxm-null harness,
+		with a small texture cache) */
+		struct xbox_texture_cache_texture *texture = NULL;
+
+		halo_cache_lock_acquire();
+		if (bitmap->cache_block_index == NONE && load)
+		{
+			texture_cache_start_loading_bitmap(bitmap, block);
+		}
+		if (bitmap->cache_block_index != NONE)
+		{
+			texture = datum_get(
+				xbox_texture_cache_globals.textures,
+				bitmap->cache_block_index);
+			lruv_block_touch(
+				xbox_texture_cache_globals.cache,
+				bitmap->cache_block_index);
+		}
+		halo_cache_lock_release();
+		if (texture)
+		{
+#else
 		if (bitmap->cache_block_index == NONE && load)
 		{
 			texture_cache_start_loading_bitmap(bitmap, block);
@@ -1002,6 +1092,7 @@ void *_texture_cache_bitmap_get_hardware_format(
 			lruv_block_touch(
 				xbox_texture_cache_globals.cache,
 				bitmap->cache_block_index);
+#endif
 			if (block && !texture->loaded)
 			{
 				if (debug_texture_cache)
@@ -1092,6 +1183,59 @@ void *_texture_cache_bitmap_get_hardware_format(
 
 /* ---------- the locked public functions (port) */
 
+#ifdef HALO_LINUX
+/* The deletions that can meet a texture still loading (a flush, a resize,
+a bitmap's deletion) wait for the textures' loads first, without the cache
+lock:
+texture_cache_delete_block_proc waits for a load while the lock is held,
+and nothing else could take the lock meanwhile. (The cache file thread
+needs no lock to finish a load, so it was a stall, not a deadlock; a read
+that never finished - the request slot two threads claimed at once,
+cache_files_windows.c - held it for good.) */
+static void texture_cache_wait_for_bitmap_load(
+	struct bitmap_data *bitmap)
+{
+	long cache_block_index;
+	struct xbox_texture_cache_texture *texture;
+
+	if (!bitmap || !TEST_FLAG(bitmap->flags, _bitmap_cached_bit))
+		return;
+	cache_block_index = bitmap->cache_block_index;
+	if (cache_block_index == NONE)
+		return;
+	texture = datum_try_and_get(
+		xbox_texture_cache_globals.textures,
+		cache_block_index);
+	while (texture &&
+		!*(volatile boolean *)&texture->loaded &&
+		*(volatile long *)&bitmap->cache_block_index == cache_block_index)
+	{
+		SwitchToThread();
+	}
+}
+
+/* every texture's: the texture datums are read without the lock (a datum
+made meanwhile is waited for too, or missed; its load is short either
+way) */
+static void texture_cache_wait_for_loads(
+	void)
+{
+	struct data_array *textures = xbox_texture_cache_globals.textures;
+	short index;
+
+	if (!textures || !textures->data)
+		return;
+	for (index = 0; index < textures->count; index++)
+	{
+		struct xbox_texture_cache_texture *texture = (struct xbox_texture_cache_texture *)
+			((byte *)textures->data + textures->size * index);
+
+		while (*(volatile short *)&texture->identifier && !*(volatile boolean *)&texture->loaded)
+			SwitchToThread();
+	}
+}
+#endif
+
 void texture_cache_delete(
 	void)
 {
@@ -1128,6 +1272,9 @@ void texture_cache_bitmap_new(
 void texture_cache_bitmap_delete(
 	struct bitmap_data *bitmap)
 {
+#ifdef HALO_LINUX
+	texture_cache_wait_for_bitmap_load(bitmap);
+#endif
 	halo_cache_lock_acquire();
 	texture_cache_bitmap_delete_unlocked(bitmap);
 	halo_cache_lock_release();
@@ -1137,6 +1284,9 @@ void *texture_cache_steal_memory(
 	long size)
 {
 	void * result;
+#ifdef HALO_LINUX
+	texture_cache_wait_for_loads();
+#endif
 	halo_cache_lock_acquire();
 	result = texture_cache_steal_memory_unlocked(size);
 	halo_cache_lock_release();
@@ -1154,6 +1304,9 @@ void texture_cache_return_memory(
 void texture_cache_flush(
 	void)
 {
+#ifdef HALO_LINUX
+	texture_cache_wait_for_loads();
+#endif
 	halo_cache_lock_acquire();
 	texture_cache_flush_unlocked();
 	halo_cache_lock_release();
@@ -1170,6 +1323,9 @@ void texture_cache_new(
 void texture_cache_close(
 	void)
 {
+#ifdef HALO_LINUX
+	texture_cache_wait_for_loads();
+#endif
 	halo_cache_lock_acquire();
 	texture_cache_close_unlocked();
 	halo_cache_lock_release();
