@@ -25,6 +25,9 @@ unsigned long vita_host_thread_id(void);
 
 /* a thread of its own on the given core (0-2); 0 on success */
 int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core);
+/* the same at a priority (64..191, lower runs first); core -1: any core */
+int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core,
+	int priority);
 
 /* each core's busy share of the last second, 0-100, or 255 unknown */
 void vita_host_cpu_usage(unsigned char busy[3]);

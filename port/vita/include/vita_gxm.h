@@ -28,6 +28,13 @@ int vgxm_initialize(void *arena, unsigned long arena_size);
 card when it was compiled before); 0 when it does not compile. The id is
 also the key programs are linked by. */
 unsigned long vgxm_shader_get(const char *source, int fragment);
+/* the same without waiting for a compile (HALO_SHADER_ASYNC, on unless
+it is 0): a program neither shipped in the VPK nor in the memory card's
+cache is compiled on a thread of its own, and VGXM_SHADER_PENDING is
+returned until it is ready (the render worker's draws skip it meanwhile,
+and ask again) */
+#define VGXM_SHADER_PENDING (~0UL)
+unsigned long vgxm_shader_request(const char *source, int fragment);
 
 /* ---------- memory */
 

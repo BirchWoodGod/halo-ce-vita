@@ -8,9 +8,11 @@ vita_gxm.h). Built with VitaSDK's GCC: the Sce structures depend on its ABI.
 - Memory: the contiguous window (the game's "physical" memory) is mapped for
   the GPU as it is; three per-frame rings (uncached) hold what draws copy;
   a texture pool in CDRAM holds decoded textures.
-- Programs: Cg is compiled on the device by SceShaccCg (libshacccg.suprx,
-  which Vita3K and every Vita that runs Xita have), and the result is kept on
-  the memory card (ux0:data/haloce-vita/shaders) for the next start.
+- Programs: the ones the levels make ship compiled in the VPK
+  (app0:shaders.pak); any other Cg is compiled on the device by SceShaccCg
+  (libshacccg.suprx, which Vita3K and every Vita that runs Xita have), on a
+  thread of its own, and the result is kept on the memory card
+  (ux0:data/haloce-vita/shaders) for the next start.
 - Scenes: one per run of draws into the same targets; depth-stencil surfaces
   are loaded and stored at every scene, so a target keeps its depth across
   switches, as the game expects.
@@ -21,6 +23,7 @@ each frame's presentation.
 
 #include <psp2/display.h>
 #include <psp2/gxm.h>
+#include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/clib.h>
@@ -30,6 +33,7 @@ each frame's presentation.
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/shacccg.h>
 
+#include <malloc.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -228,6 +232,8 @@ static struct
 	int shacccg_ready;
 	int ready;
 } gxm;
+
+static void shader_precompile(void);
 
 /* ---------- start-up */
 
@@ -477,6 +483,7 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 		log_line("gxm: the built-in programs do not compile");
 		return -1;
 	}
+	shader_precompile();
 	gxm.ready = 1;
 	vita_host_log_memory("with the renderer up");
 	log_line("gxm: ready: %ux%u display, %u MB rings, %u MB texture pool, window %p (%lu MB) mapped",
@@ -637,6 +644,14 @@ static SceGxmProgram *compile(const char *source, int fragment)
 	}
 	else
 	{
+		{
+			/* (the heap, which the compiler allocates from: a compile
+			that fails for want of memory says "fatal internal error") */
+			struct mallinfo heap = mallinfo();
+
+			log_line("gxm: a %s program does not compile (heap: %d KB in use, %d KB free of %d KB)",
+				fragment ? "fragment" : "vertex", heap.uordblks / 1024, heap.fordblks / 1024, heap.arena / 1024);
+		}
 		for (index = 0; index < output->diagnosticCount; index++)
 		{
 			const SceShaccCgDiagnosticMessage *message = &output->diagnostics[index];
@@ -647,6 +662,14 @@ static SceGxmProgram *compile(const char *source, int fragment)
 		}
 	}
 	sceShaccCgDestroyCompileOutput(output);
+	/* HALO_SHADER_RELEASE=1 (off; experimental): the compiler's memory
+	handed back after each compile - in Vita3K the heap grows ~100 KB a
+	compile until compiles fail ("fatal internal error") after 50-110 of
+	them. Tried in Vita3K (Oct 2 2026): the compile after the first release
+	faults inside _malloc_r (a corrupted heap), so it stays off; the
+	shipped pack (app0:shaders.pak) is what keeps the compiles few */
+	if (getenv("HALO_SHADER_RELEASE") && atoi(getenv("HALO_SHADER_RELEASE")))
+		sceShaccCgReleaseCompiler();
 	return program;
 }
 
@@ -692,7 +715,21 @@ static SceGxmProgram *cache_read(uint64_t hash)
 	return program;
 }
 
+volatile unsigned long long vgxm_cache_write_us;
+
+static void cache_write_file(uint64_t hash, const SceGxmProgram *program);
+
+/* (timed for the hitch log: the memory card's writes, file creation and
+rename, can be slow) */
 static void cache_write(uint64_t hash, const SceGxmProgram *program)
+{
+	unsigned long long before = sceKernelGetProcessTimeWide();
+
+	cache_write_file(hash, program);
+	vgxm_cache_write_us += sceKernelGetProcessTimeWide() - before;
+}
+
+static void cache_write_file(uint64_t hash, const SceGxmProgram *program)
 {
 	char path[128], temporary[128];
 	SceUID file;
@@ -715,41 +752,184 @@ static void cache_write(uint64_t hash, const SceGxmProgram *program)
 	sceIoRename(temporary, path);
 }
 
-/* (the hitch log, d3d8_gxm.c) shaders compiled on the device since it last looked */
-volatile unsigned long long vgxm_compile_us;
-volatile unsigned long vgxm_compiles;
+/* (the hitch log, d3d8_gxm.c) shaders compiled on the device since it last
+looked, and the rest of what the worker spent on programs: loading them
+(the shipped pack, the memory card's cache, writing the cache, registering)
+and linking them. A compile in the background (HALO_SHADER_ASYNC) is
+counted in vgxm_compiles_background, not in the worker's time. */
+volatile unsigned long long vgxm_compile_us, vgxm_shader_load_us, vgxm_link_us;
+volatile unsigned long vgxm_compiles, vgxm_shader_loads, vgxm_links, vgxm_compiles_background;
 
-unsigned long vgxm_shader_get(const char *source, int fragment)
+/* ---------- the shipped programs
+
+The programs the campaign levels and the menu make (265 in the pack of Oct 2
+2026; the multiplayer maps are not collected yet), compiled ahead by
+the same SceShaccCg (tools/vita_shader_pack.py, from the sources the Linux
+gxm-null harness collects with HALO_SHADER_COLLECT), so a first visit to an
+area compiles nothing on the device. One file in the VPK, read whole at
+start-up (it is small): "HCEVSHP1", the count, then per program its source
+hash, offset and size, sorted by hash, then the programs (16-byte aligned).
+HALO_SHADER_PACK=0 leaves it unread. */
+#define SHADER_PACK_PATH "app0:shaders.pak"
+
+struct shader_pack_entry
 {
-	uint64_t hash = source_hash(source, fragment);
-	struct shader *shader;
-	SceGxmProgram *program;
+	uint64_t hash;
+	uint32_t offset, size;
+};
+
+static struct
+{
+	unsigned char *data;
+	const struct shader_pack_entry *entries;
+	unsigned int count;
+	unsigned long size;
+	int opened;
+} shader_pack;
+
+static void shader_pack_open(void)
+{
+	SceUID file;
+	SceIoStat stat;
+	const char *setting = getenv("HALO_SHADER_PACK");
 	unsigned int index;
-	int result;
+
+	if (shader_pack.opened)
+		return;
+	shader_pack.opened = 1;
+	if (setting && atoi(setting) == 0)
+		return;
+	if (sceIoGetstat(SHADER_PACK_PATH, &stat) < 0 || stat.st_size < 16)
+	{
+		log_line("gxm: no shipped shaders (%s)", SHADER_PACK_PATH);
+		return;
+	}
+	shader_pack.data = memalign(16, (size_t)stat.st_size);
+	if (!shader_pack.data)
+		return;
+	file = sceIoOpen(SHADER_PACK_PATH, SCE_O_RDONLY, 0);
+	if (file < 0 || sceIoRead(file, shader_pack.data, (SceSize)stat.st_size) != (int)stat.st_size ||
+		memcmp(shader_pack.data, "HCEVSHP1", 8))
+	{
+		if (file >= 0)
+			sceIoClose(file);
+		log_line("gxm: the shipped shaders (%s) are unreadable", SHADER_PACK_PATH);
+		free(shader_pack.data);
+		shader_pack.data = NULL;
+		return;
+	}
+	sceIoClose(file);
+	shader_pack.size = (unsigned long)stat.st_size;
+	memcpy(&shader_pack.count, shader_pack.data + 8, 4);
+	if (16 + (unsigned long long)shader_pack.count * sizeof(struct shader_pack_entry) > (unsigned long long)stat.st_size)
+		shader_pack.count = 0;
+	shader_pack.entries = (const struct shader_pack_entry *)(shader_pack.data + 16);
+	for (index = 0; index < shader_pack.count; index++)
+	{
+		if ((unsigned long long)shader_pack.entries[index].offset + shader_pack.entries[index].size >
+			(unsigned long long)stat.st_size)
+		{
+			shader_pack.count = index;
+			break;
+		}
+	}
+	log_line("gxm: %u shipped shaders (%ld KB)", shader_pack.count, (long)(stat.st_size / 1024));
+}
+
+/* the shipped program for the hash (in the pack's memory, kept for good), or NULL */
+static SceGxmProgram *shader_pack_find(uint64_t hash)
+{
+	unsigned int low = 0, high = shader_pack.count;
+
+	while (low < high)
+	{
+		unsigned int middle = low + (high - low) / 2;
+		const struct shader_pack_entry *entry = &shader_pack.entries[middle];
+
+		if (entry->hash < hash)
+			low = middle + 1;
+		else if (entry->hash > hash)
+			high = middle;
+		else
+		{
+			SceGxmProgram *program = (SceGxmProgram *)(shader_pack.data + entry->offset);
+
+			if (sceGxmProgramCheck(program) < 0 || sceGxmProgramGetSize(program) != entry->size)
+				return NULL;
+			return program;
+		}
+	}
+	return NULL;
+}
+
+static int shader_pack_owns(const SceGxmProgram *program)
+{
+	return shader_pack.data && (const unsigned char *)program >= shader_pack.data &&
+		(const unsigned char *)program < shader_pack.data + shader_pack.size;
+}
+
+/* ---------- collecting the sources (for the pack)
+
+HALO_SHADER_COLLECT=<directory>: each program's Cg is written there as
+<hash>.vp.cg or <hash>.fp.cg, its exact bytes (the hash is of them), for
+tools/vita_shader_pack.py. HALO_SHADER_PRECOMPILE=<directory>: at start-up
+every such file there is compiled into the memory card's cache (on Vita3K,
+whose SceShaccCg is the device's own), which the pack is then made from. */
+static void shader_collect(uint64_t hash, const char *source, int fragment)
+{
+	static int checked;
+	static const char *directory;
+	char path[256];
+	SceUID file;
+	SceIoStat stat;
+
+	if (!checked)
+	{
+		checked = 1;
+		directory = getenv("HALO_SHADER_COLLECT");
+		if (directory && !*directory)
+			directory = NULL;
+		if (directory)
+			sceIoMkdir(directory, 0777);
+	}
+	if (!directory)
+		return;
+	snprintf(path, sizeof(path), "%s/%016llx.%s.cg", directory, (unsigned long long)hash, fragment ? "fp" : "vp");
+	if (sceIoGetstat(path, &stat) >= 0)
+		return;
+	file = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+	if (file < 0)
+		return;
+	sceIoWrite(file, source, strlen(source));
+	sceIoClose(file);
+}
+
+/* ---------- registered programs */
+
+static unsigned long shader_find(uint64_t hash)
+{
+	unsigned int index;
 
 	for (index = 0; index < gxm.shader_count; index++)
 	{
 		if (gxm.shaders[index].hash == hash)
 			return index + 1;
 	}
-	if (gxm.shader_count >= MAXIMUM_SHADERS)
-		return 0;
-	if (getenv("HALO_TRACE_FILES"))
-		log_line("trace: shader %016llx (%s), %u registered", (unsigned long long)hash, fragment ? "fragment" : "vertex",
-			gxm.shader_count);
-	program = cache_read(hash);
-	if (!program)
-	{
-		{
-			unsigned long long before = sceKernelGetProcessTimeWide();
+	return 0;
+}
 
-			program = compile(source, fragment);
-			vgxm_compile_us += sceKernelGetProcessTimeWide() - before;
-			vgxm_compiles++;
-		}
-		if (!program)
-			return 0;
-		cache_write(hash, program);
+/* registers a loaded or compiled program (malloc'd, or the pack's) */
+static unsigned long shader_register(uint64_t hash, int fragment, SceGxmProgram *program)
+{
+	struct shader *shader;
+	unsigned int index;
+	int result;
+
+	if (gxm.shader_count >= MAXIMUM_SHADERS)
+	{
+		if (!shader_pack_owns(program))
+			free(program);
+		return 0;
 	}
 	shader = &gxm.shaders[gxm.shader_count];
 	memset(shader, 0, sizeof(*shader));
@@ -757,7 +937,8 @@ unsigned long vgxm_shader_get(const char *source, int fragment)
 	if (result < 0)
 	{
 		log_line("gxm: cannot register a program: 0x%08x", (unsigned)result);
-		free(program);
+		if (!shader_pack_owns(program))
+			free(program);
 		return 0;
 	}
 	shader->hash = hash;
@@ -782,6 +963,302 @@ unsigned long vgxm_shader_get(const char *source, int fragment)
 		shader->sampler_index[index] = parameter ? (int)sceGxmProgramParameterGetResourceIndex(parameter) : -1;
 	}
 	return ++gxm.shader_count;
+}
+
+unsigned long vgxm_shader_get(const char *source, int fragment)
+{
+	uint64_t hash = source_hash(source, fragment);
+	SceGxmProgram *program;
+	unsigned long id;
+	unsigned long long before;
+
+	if ((id = shader_find(hash)) != 0)
+		return id;
+	if (gxm.shader_count >= MAXIMUM_SHADERS)
+		return 0;
+	if (getenv("HALO_TRACE_FILES"))
+		log_line("trace: shader %016llx (%s), %u registered", (unsigned long long)hash, fragment ? "fragment" : "vertex",
+			gxm.shader_count);
+	shader_collect(hash, source, fragment);
+	before = sceKernelGetProcessTimeWide();
+	shader_pack_open();
+	program = shader_pack_find(hash);
+	if (!program)
+		program = cache_read(hash);
+	if (!program)
+	{
+		unsigned long long compile_from = sceKernelGetProcessTimeWide();
+
+		vgxm_shader_load_us += compile_from - before;
+		program = compile(source, fragment);
+		before = sceKernelGetProcessTimeWide();
+		vgxm_compile_us += before - compile_from;
+		vgxm_compiles++;
+		if (!program)
+			return 0;
+		cache_write(hash, program);
+	}
+	id = shader_register(hash, fragment, program);
+	vgxm_shader_load_us += sceKernelGetProcessTimeWide() - before;
+	vgxm_shader_loads++;
+	return id;
+}
+
+/* ---------- compiling in the background (HALO_SHADER_ASYNC)
+
+A program neither shipped nor cached is compiled on a thread of its own, at
+a low priority, and read from the memory card's cache there too: the worker
+never waits for the compiler (0.6-1.5 s a program on the hardware) nor for
+the memory card. Until it is ready the draws that need it are skipped
+(VGXM_SHADER_PENDING), so a program the pack misses costs a surface missing
+for a second instead of a frozen frame. Only the worker asks; only the
+compiler thread compiles once it is running (SceShaccCg and the source
+callback are used from one thread). Registering with the patcher stays on
+the worker. */
+struct shader_job
+{
+	struct shader_job *next;
+	uint64_t hash;
+	int fragment;
+	char *source;
+	SceGxmProgram *program;
+	/* 0 queued, 1 being compiled, 2 done (program NULL: it does not compile) */
+	volatile int state;
+	int from_cache;
+	unsigned long long queued_us, done_us, compile_us;
+};
+
+static struct
+{
+	SceUID lock, ready;
+	struct shader_job *jobs;
+	int started, enabled;
+	unsigned long queued;
+} shader_async;
+
+static void shader_compiler_thread(void *unused)
+{
+	(void)unused;
+	for (;;)
+	{
+		struct shader_job *job;
+		SceGxmProgram *program;
+		unsigned long long from;
+
+		sceKernelWaitSema(shader_async.ready, 1, NULL);
+		sceKernelWaitSema(shader_async.lock, 1, NULL);
+		for (job = shader_async.jobs; job; job = job->next)
+		{
+			if (job->state == 0)
+			{
+				job->state = 1;
+				break;
+			}
+		}
+		sceKernelSignalSema(shader_async.lock, 1);
+		if (!job)
+			continue;
+		from = sceKernelGetProcessTimeWide();
+		program = cache_read(job->hash);
+		job->from_cache = program != NULL;
+		if (!program)
+		{
+			program = compile(job->source, job->fragment);
+			job->compile_us = sceKernelGetProcessTimeWide() - from;
+			if (program)
+				cache_write_file(job->hash, program);
+		}
+		free(job->source);
+		job->source = NULL;
+		job->program = program;
+		job->done_us = sceKernelGetProcessTimeWide();
+		__atomic_store_n(&job->state, 2, __ATOMIC_RELEASE);
+	}
+}
+
+static int shader_async_enabled(void)
+{
+	if (!shader_async.started)
+	{
+		const char *setting = getenv("HALO_SHADER_ASYNC");
+
+		shader_async.started = 1;
+		shader_async.enabled = !setting || atoi(setting) != 0;
+		if (shader_async.enabled)
+		{
+			shader_async.lock = sceKernelCreateSema("shader jobs", 0, 1, 1, NULL);
+			shader_async.ready = sceKernelCreateSema("shader jobs ready", 0, 0, 0x7fffffff, NULL);
+			/* (any core, below the game's threads: it takes the time they leave) */
+			if (shader_async.lock < 0 || shader_async.ready < 0 ||
+				vita_host_thread_start_priority("shader compiler", shader_compiler_thread, NULL, -1, 180) != 0)
+			{
+				log_line("gxm: cannot start the shader compiler thread: shaders are compiled as the worker needs them");
+				shader_async.enabled = 0;
+			}
+		}
+	}
+	return shader_async.enabled;
+}
+
+unsigned long vgxm_shader_request(const char *source, int fragment)
+{
+	uint64_t hash;
+	struct shader_job *job, **link;
+	SceGxmProgram *program;
+	unsigned long id;
+	unsigned long long before;
+
+	if (!shader_async_enabled())
+		return vgxm_shader_get(source, fragment);
+	hash = source_hash(source, fragment);
+	if ((id = shader_find(hash)) != 0)
+		return id;
+	if (gxm.shader_count >= MAXIMUM_SHADERS)
+		return 0;
+	sceKernelWaitSema(shader_async.lock, 1, NULL);
+	for (link = &shader_async.jobs; (job = *link) != NULL; link = &job->next)
+	{
+		if (job->hash == hash)
+			break;
+	}
+	if (job)
+	{
+		if (__atomic_load_n(&job->state, __ATOMIC_ACQUIRE) != 2)
+		{
+			sceKernelSignalSema(shader_async.lock, 1);
+			return VGXM_SHADER_PENDING;
+		}
+		*link = job->next;
+		sceKernelSignalSema(shader_async.lock, 1);
+		before = sceKernelGetProcessTimeWide();
+		program = job->program;
+		if (!job->from_cache)
+		{
+			vgxm_compiles_background++;
+			log_line("gxm: shader %016llx compiled in the background in %.1f ms (ready %.1f ms after it was first drawn)",
+				(unsigned long long)hash, job->compile_us / 1000.0, (job->done_us - job->queued_us) / 1000.0);
+		}
+		free(job);
+		id = program ? shader_register(hash, fragment, program) : 0;
+		vgxm_shader_load_us += sceKernelGetProcessTimeWide() - before;
+		vgxm_shader_loads++;
+		return id;
+	}
+	sceKernelSignalSema(shader_async.lock, 1);
+	shader_collect(hash, source, fragment);
+	/* shipped: registered now, no waiting */
+	before = sceKernelGetProcessTimeWide();
+	shader_pack_open();
+	if ((program = shader_pack_find(hash)) != NULL)
+	{
+		id = shader_register(hash, fragment, program);
+		vgxm_shader_load_us += sceKernelGetProcessTimeWide() - before;
+		vgxm_shader_loads++;
+		return id;
+	}
+	job = calloc(1, sizeof(*job));
+	if (!job || !(job->source = strdup(source)))
+	{
+		/* (asked again at the next draw; never compiled here, beside the
+		compiler thread) */
+		free(job);
+		return VGXM_SHADER_PENDING;
+	}
+	job->hash = hash;
+	job->fragment = fragment;
+	job->queued_us = sceKernelGetProcessTimeWide();
+	sceKernelWaitSema(shader_async.lock, 1, NULL);
+	job->next = shader_async.jobs;
+	shader_async.jobs = job;
+	shader_async.queued++;
+	sceKernelSignalSema(shader_async.lock, 1);
+	sceKernelSignalSema(shader_async.ready, 1);
+	return VGXM_SHADER_PENDING;
+}
+
+/* HALO_SHADER_PRECOMPILE=<directory> (start-up): every <hash>.vp.cg and
+<hash>.fp.cg there into the memory card's cache, unless it is there */
+static void shader_precompile(void)
+{
+	const char *directory = getenv("HALO_SHADER_PRECOMPILE");
+	SceUID listing;
+	SceIoDirent entry;
+	unsigned long compiled = 0, cached = 0, failed = 0, mismatched = 0;
+	unsigned long long from = sceKernelGetProcessTimeWide();
+
+	if (!directory || !*directory)
+		return;
+	listing = sceIoDopen(directory);
+	if (listing < 0)
+	{
+		log_line("shader precompile: cannot list %s", directory);
+		return;
+	}
+	while (sceIoDread(listing, &entry) > 0)
+	{
+		char path[320];
+		unsigned long long hash;
+		int fragment;
+		size_t length = strlen(entry.d_name);
+		SceUID file;
+		char *source;
+		SceGxmProgram *program;
+		SceIoStat stat;
+
+		if (length != 22 || strcmp(entry.d_name + 19, ".cg") || entry.d_name[16] != '.' ||
+			(strncmp(entry.d_name + 17, "fp", 2) && strncmp(entry.d_name + 17, "vp", 2)))
+			continue;
+		fragment = entry.d_name[17] == 'f';
+		hash = strtoull(entry.d_name, NULL, 16);
+		snprintf(path, sizeof(path), "%s/%s", directory, entry.d_name);
+		if (sceIoGetstat(path, &stat) < 0 || stat.st_size <= 0)
+			continue;
+		source = malloc((size_t)stat.st_size + 1);
+		file = sceIoOpen(path, SCE_O_RDONLY, 0);
+		if (!source || file < 0 || sceIoRead(file, source, (SceSize)stat.st_size) != (int)stat.st_size)
+		{
+			if (file >= 0)
+				sceIoClose(file);
+			free(source);
+			continue;
+		}
+		sceIoClose(file);
+		source[stat.st_size] = 0;
+		if (source_hash(source, fragment) != hash)
+		{
+			mismatched++;
+			free(source);
+			continue;
+		}
+		if ((program = cache_read(hash)) != NULL)
+		{
+			cached++;
+			free(program);
+		}
+		else if ((program = compile(source, fragment)) != NULL)
+		{
+			cache_write(hash, program);
+			compiled++;
+			free(program);
+			if (compiled % 25 == 0)
+			{
+				/* (the heap the compiler allocates from, to see whether it keeps growing) */
+				struct mallinfo heap = mallinfo();
+
+				log_line("shader precompile: %lu compiled, heap %d KB in use, %d KB free of %d KB",
+					compiled, heap.uordblks / 1024, heap.fordblks / 1024, heap.arena / 1024);
+			}
+		}
+		else
+		{
+			log_line("shader precompile: %s does not compile", entry.d_name);
+			failed++;
+		}
+		free(source);
+	}
+	sceIoDclose(listing);
+	log_line("shader precompile: %lu compiled, %lu already cached, %lu failed, %lu with a wrong name, in %.1f s",
+		compiled, cached, failed, mismatched, (sceKernelGetProcessTimeWide() - from) / 1e6);
 }
 
 /* ---------- linked programs */
@@ -887,8 +1364,14 @@ static SceGxmVertexProgram *vertex_program_get(const struct vertex_program_key *
 		streams[index].stride = (uint16_t)key->strides[index];
 		streams[index].indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
 	}
-	result = sceGxmShaderPatcherCreateVertexProgram(gxm.patcher, shader->id, attributes, count, streams,
-		key->stream_count, &entry->program);
+	{
+		unsigned long long before = sceKernelGetProcessTimeWide();
+
+		result = sceGxmShaderPatcherCreateVertexProgram(gxm.patcher, shader->id, attributes, count, streams,
+			key->stream_count, &entry->program);
+		vgxm_link_us += sceKernelGetProcessTimeWide() - before;
+		vgxm_links++;
+	}
 	if (result < 0)
 	{
 		log_line("gxm: cannot link a vertex program: 0x%08x", (unsigned)result);
@@ -934,9 +1417,15 @@ static SceGxmFragmentProgram *fragment_program_get(unsigned long shader, unsigne
 	entry->shader = shader;
 	entry->vertex_shader = vertex_shader;
 	entry->blend = blend_word;
-	result = sceGxmShaderPatcherCreateFragmentProgram(gxm.patcher, gxm.shaders[shader - 1].id,
-		SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4, SCE_GXM_MULTISAMPLE_NONE, blend,
-		gxm.shaders[vertex_shader - 1].program, &entry->program);
+	{
+		unsigned long long before = sceKernelGetProcessTimeWide();
+
+		result = sceGxmShaderPatcherCreateFragmentProgram(gxm.patcher, gxm.shaders[shader - 1].id,
+			SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4, SCE_GXM_MULTISAMPLE_NONE, blend,
+			gxm.shaders[vertex_shader - 1].program, &entry->program);
+		vgxm_link_us += sceKernelGetProcessTimeWide() - before;
+		vgxm_links++;
+	}
 	if (result < 0)
 	{
 		log_line("gxm: cannot link a fragment program: 0x%08x", (unsigned)result);
@@ -1024,6 +1513,50 @@ void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_fi
 
 /* ---------- render targets */
 
+/* CDRAM for a small colour target (the glow's and the shadows' 128x128s,
+mip chains): CDRAM blocks come in 256 KB steps, and a block each held a
+64 KB 128x128 target in 256 KB, so two dozen of them took 6 MB of the
+12 MB left and the next failed (b30, "cannot allocate colour target").
+Small targets are carved from shared 256 KB blocks instead (targets are
+never freed). NULL when there is no memory. */
+#define SMALL_TARGET_BLOCK (256 * 1024)
+
+static void *small_target_memory(unsigned int size)
+{
+	static struct block current;
+	static unsigned int used;
+	struct block block;
+
+	size = ALIGN(size, 4096);
+	if (size > SMALL_TARGET_BLOCK / 2)
+		return NULL;
+	if (!current.base || used + size > current.size)
+	{
+		if (!block_allocate(&block, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, SMALL_TARGET_BLOCK, 1, "colour targets"))
+			return NULL;
+		current = block;
+		used = 0;
+	}
+	used += size;
+	return (unsigned char *)current.base + used - size;
+}
+
+/* CDRAM for a colour target: a small one's share of a block, else a block
+of its own */
+static void *colour_target_memory(struct block *memory, unsigned int size, const char *name)
+{
+	void *base = small_target_memory(size);
+
+	if (base)
+	{
+		memory->uid = -1;
+		memory->base = base;
+		memory->size = size;
+		return base;
+	}
+	return block_allocate(memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, name);
+}
+
 unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
 {
 	struct target *target;
@@ -1084,7 +1617,14 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 
 		if (!block_allocate(&target->memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 4 * aligned_width * aligned_height, 1,
 			"depth target"))
+		{
+			/* (the render target object is not kept for a retry: each
+			failed attempt, every 30 frames, leaked one, and the driver's
+			memory for them ran out - "cannot create a 128x128 render
+			target: 0x805b0027") */
+			sceGxmDestroyRenderTarget(target->render_target);
 			return 0;
+		}
 		result = sceGxmDepthStencilSurfaceInit(&target->depth_stencil, SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24,
 			SCE_GXM_DEPTH_STENCIL_SURFACE_TILED, aligned_width, target->memory.base, NULL);
 		if (result < 0)
@@ -1099,9 +1639,11 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 	else
 	{
 		target->stride = ALIGN(target->width, 32);
-		if (!block_allocate(&target->memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 4 * target->stride * target->height, 1,
-			"colour target"))
+		if (!colour_target_memory(&target->memory, 4 * target->stride * target->height, "colour target"))
+		{
+			sceGxmDestroyRenderTarget(target->render_target);
 			return 0;
+		}
 		memset(target->memory.base, 0, 4 * target->stride * target->height);
 		result = sceGxmColorSurfaceInit(&target->color, SCE_GXM_COLOR_FORMAT_A8R8G8B8, SCE_GXM_COLOR_SURFACE_LINEAR,
 			SCE_GXM_COLOR_SURFACE_SCALE_NONE, SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, target->width, target->height,
@@ -1137,7 +1679,7 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 
 		size += 4 * ALIGN(level_width, 8) * level_height;
 	}
-	if (!block_allocate(&chain, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, "colour target chain"))
+	if (!colour_target_memory(&chain, size, "colour target chain"))
 		return -1;
 	memset(chain.base, 0, size);
 	for (level = 0; level < levels; level++)

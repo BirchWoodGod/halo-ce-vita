@@ -147,6 +147,9 @@ struct vertex_variant
 	struct vertex_variant *next;
 	unsigned long provided_mask, packed_mask, color_mask;
 	unsigned long shader;
+	/* the Cg while its program is compiled in the background (shader 0
+	meanwhile: its draws are skipped), else NULL */
+	char *pending_source;
 };
 
 struct vertex_shader_object
@@ -180,6 +183,8 @@ struct fragment_entry
 	unsigned long hash;
 	struct nv2a_pixel_shader_key key;
 	unsigned long shader;
+	/* as vertex_variant's */
+	char *pending_source;
 };
 
 #define FRAGMENT_BUCKETS 1024
@@ -360,6 +365,8 @@ void halo_render_draw_counts(unsigned long *stream, unsigned long *immediate)
 /* time spent in this layer (debug.gpu_stats) */
 unsigned long long vita_host_time_us(void);
 static unsigned long long layer_time, layer_entered, present_wait_time;
+/* the game's wait for the worker at this frame's present (the hitch log) */
+static unsigned long long frame_drain_us;
 static int layer_depth;
 
 static int gpu_stats_enabled(void);
@@ -1686,6 +1693,27 @@ static void dump_shader(const char *source, const char *kind, unsigned long id)
 	}
 }
 
+/* a variant's program, asked for again while it compiles in the background
+(vgxm_shader_request); its Cg is freed once there is an answer */
+static void vertex_variant_resolve(struct vertex_shader_object *program, struct vertex_variant *variant)
+{
+	char *source = variant->pending_source;
+	unsigned long shader = vgxm_shader_request(source, 0);
+
+	if (shader == VGXM_SHADER_PENDING)
+	{
+		variant->shader = 0;
+		return;
+	}
+	variant->shader = shader;
+	variant->pending_source = NULL;
+	if (!shader || debug_settings_dump())
+		dump_shader(source, "vs", hash_words(source, strlen(source) & ~3UL));
+	if (!shader)
+		platform_log("vertex shader %lu (inputs %04lx) does not compile", program->id, variant->provided_mask);
+	free(source);
+}
+
 /* the program's Cg for the inputs the declaration provides */
 static unsigned long vertex_shader_get(struct vertex_shader_object *program, unsigned long provided_mask,
 	unsigned long packed_mask, unsigned long color_mask)
@@ -1698,6 +1726,8 @@ static unsigned long vertex_shader_get(struct vertex_shader_object *program, uns
 		if (variant->provided_mask == provided_mask && variant->packed_mask == packed_mask &&
 			variant->color_mask == color_mask)
 		{
+			if (variant->pending_source)
+				vertex_variant_resolve(program, variant);
 			return variant->shader;
 		}
 	}
@@ -1707,15 +1737,31 @@ static unsigned long vertex_shader_get(struct vertex_shader_object *program, uns
 	variant->color_mask = color_mask;
 	source = nv2a_vertex_shader_to_cg(program->instructions, program->instruction_count, provided_mask, packed_mask,
 		color_mask);
-	variant->shader = vgxm_shader_get(source, 0);
-	if (!variant->shader || debug_settings_dump())
-		dump_shader(source, "vs", hash_words(source, strlen(source) & ~3UL));
-	if (!variant->shader)
-		platform_log("vertex shader %lu (inputs %04lx) does not compile", program->id, provided_mask);
-	free(source);
+	variant->pending_source = source;
+	vertex_variant_resolve(program, variant);
 	variant->next = program->variants;
 	program->variants = variant;
 	return variant->shader;
+}
+
+/* as vertex_variant_resolve */
+static void fragment_entry_resolve(struct fragment_entry *entry)
+{
+	char *source = entry->pending_source;
+	unsigned long shader = vgxm_shader_request(source, 1);
+
+	if (shader == VGXM_SHADER_PENDING)
+	{
+		entry->shader = 0;
+		return;
+	}
+	entry->shader = shader;
+	entry->pending_source = NULL;
+	if (!shader && !debug_settings_dump())
+		dump_shader(source, "ps", entry->hash);
+	if (!shader)
+		platform_log("pixel shader %08lx does not compile", entry->hash);
+	free(source);
 }
 
 typedef char pixel_shader_key_size_assert[sizeof(struct nv2a_pixel_shader_key) % 4 == 0 ? 1 : -1];
@@ -1729,7 +1775,11 @@ static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key
 	char *source;
 
 	if (last && !memcmp(&last->key, key, sizeof(*key)))
+	{
+		if (last->pending_source)
+			fragment_entry_resolve(last);
 		return last->shader;
+	}
 	hash = hash_words(key, sizeof(*key));
 	bucket = &fragment_buckets[hash % FRAGMENT_BUCKETS];
 	for (entry = *bucket; entry; entry = entry->next)
@@ -1737,6 +1787,8 @@ static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key
 		if (entry->hash == hash && !memcmp(&entry->key, key, sizeof(*key)))
 		{
 			last = entry;
+			if (entry->pending_source)
+				fragment_entry_resolve(entry);
 			return entry->shader;
 		}
 	}
@@ -1748,12 +1800,8 @@ static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key
 	from can then still be read) */
 	if (debug_settings_dump())
 		dump_shader(source, "ps", hash);
-	entry->shader = vgxm_shader_get(source, 1);
-	if (!entry->shader && !debug_settings_dump())
-		dump_shader(source, "ps", hash);
-	if (!entry->shader)
-		platform_log("pixel shader %08lx does not compile", hash);
-	free(source);
+	entry->pending_source = source;
+	fragment_entry_resolve(entry);
 	entry->next = *bucket;
 	*bucket = entry;
 	last = entry;
@@ -2644,7 +2692,7 @@ static void execute_draw(struct render_command *command)
 			if (named_pair[index] == pair)
 				per_pair++;
 		}
-		if (index == named_count && named_count < 64 && per_pair < 8)
+		if (index == named_count && named_count < 64 && per_pair < 8 && draw->fragment_shader)
 		{
 			unsigned long hash = hash_words(&command->key, sizeof(command->key));
 
@@ -5187,7 +5235,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		worker_drain();
 		if (halo_trace_active())
 			platform_log("trace: present %lu drained", device.frame);
-		present_wait_time += vita_host_time_us() - before;
+		frame_drain_us = vita_host_time_us() - before;
+		present_wait_time += frame_drain_us;
 		/* the next frame's ring: every snapshot is written anew */
 		vgxm_ring_next(device.frame + 1);
 		device.vertex_uniform_snapshot = NULL;
@@ -5209,8 +5258,10 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		/* the hitch log: a frame over 100 ms is named with what it spent
 		(the game's thread between presents, the wait for the worker, the
 		textures the worker decoded and the shaders compiled meanwhile) */
-		extern volatile unsigned long long vita_texture_build_us, vgxm_compile_us;
-		extern volatile unsigned long vita_texture_builds, vita_texture_build_bytes, vgxm_compiles;
+		extern volatile unsigned long long vita_texture_build_us, vgxm_compile_us, vgxm_shader_load_us, vgxm_link_us,
+			vgxm_cache_write_us;
+		extern volatile unsigned long vita_texture_builds, vita_texture_build_bytes, vgxm_compiles, vgxm_shader_loads,
+			vgxm_links, vgxm_compiles_background;
 		static unsigned long long previous_present;
 		static unsigned long hitches_logged;
 		unsigned long long now = vita_host_time_us();
@@ -5218,15 +5269,21 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		if (previous_present && now - previous_present > 100000ull && hitches_logged < 200)
 		{
 			hitches_logged++;
-			platform_log("hitch: frame %lu took %.1f ms; textures decoded %lu (%lu KB) in %.1f ms, shaders compiled %lu in %.1f ms",
+			platform_log("hitch: frame %lu took %.1f ms; textures decoded %lu (%lu KB) in %.1f ms, shaders compiled %lu in %.1f ms"
+				" (loaded %lu in %.1f ms, cache writes %.1f ms, linked %lu in %.1f ms, %lu compiled in the background),"
+				" waited %.1f ms for the worker",
 				device.frame, (now - previous_present) / 1000.0, vita_texture_builds, vita_texture_build_bytes / 1024,
-				vita_texture_build_us / 1000.0, vgxm_compiles, vgxm_compile_us / 1000.0);
+				vita_texture_build_us / 1000.0, vgxm_compiles, vgxm_compile_us / 1000.0, vgxm_shader_loads,
+				vgxm_shader_load_us / 1000.0, vgxm_cache_write_us / 1000.0, vgxm_links, vgxm_link_us / 1000.0, vgxm_compiles_background,
+				frame_drain_us / 1000.0);
 		}
 		vita_texture_build_us = 0;
 		vita_texture_builds = 0;
 		vita_texture_build_bytes = 0;
 		vgxm_compile_us = 0;
 		vgxm_compiles = 0;
+		vgxm_shader_load_us = vgxm_link_us = vgxm_cache_write_us = 0;
+		vgxm_shader_loads = vgxm_links = vgxm_compiles_background = 0;
 		previous_present = now;
 	}
 	{
