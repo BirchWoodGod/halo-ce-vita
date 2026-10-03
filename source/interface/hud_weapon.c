@@ -584,6 +584,14 @@ static void render_grenade_hud(
 		0x62,
 		sizeof(stack_buffer));
 
+#ifdef HALO_LINUX
+	/* (port) the caller reads player->unit_index again for this, and the
+	tick (on its own thread) can have set it to NONE in between when the
+	player died: unit_get(NONE) crashed the render (gxm-null harness, b30
+	with a bot and its reverts) */
+	if (unit_index == NONE || !unit_try_and_get(unit_index))
+		return;
+#endif
 	unit = unit_get(unit_index);
 	weapon_index = unit_inventory_get_weapon(
 		unit_index,
