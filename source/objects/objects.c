@@ -4356,6 +4356,35 @@ int halo_objects_pool_check(const char *when)
 }
 #endif
 
+#ifdef HALO_LINUX
+/* HALO_SCENERY_UPDATE_DIVISOR=n (a Vita quality setting, "Scenery updates";
+the Vita's default is a quarter): scenery, hundreds of static props that do
+nothing but recompute node matrices and functions every tick, is updated
+every nth tick, staggered by its index. The stagger counts the passes of
+objects_update itself: it used to count the passes that updated the first
+object slot, and once that object went inactive or away (a marine left
+behind, as in a campaign save of a50 that is resumed), the count stopped,
+so three props in four were never updated again (GitHub #10). Scenery with
+something attached (children: needles, a plasma grenade, anything
+object_attach_to_node puts on it) is updated every tick: a child is
+updated only through its parent, and a needle stuck in a crate that is not
+updated never detonates - and any projectile in the map makes
+game_safe_to_save refuse, so a50's game_save_no_timeout waited for the
+rest of the level and no checkpoint was taken after a resume. */
+static long objects_scenery_update_divisor = -1;
+static unsigned long objects_scenery_update_pass;
+static unsigned long objects_scenery_update_settings_seen;
+
+static boolean objects_scenery_update_skipped(
+	short absolute_index,
+	struct object_header_datum const *header)
+{
+	return objects_scenery_update_divisor > 1 && header->type == _object_type_scenery &&
+		header->datum->object.first_child_object_index == NONE &&
+		(unsigned long)(absolute_index + objects_scenery_update_pass) % (unsigned long)objects_scenery_update_divisor != 0;
+}
+#endif
+
 void objects_update(
 	void)
 {
@@ -4423,6 +4452,22 @@ void objects_update(
 			cluster_count);
 	}
 
+#ifdef HALO_LINUX
+	{
+		extern volatile unsigned long halo_settings_generation;
+
+		if (objects_scenery_update_divisor < 0 || objects_scenery_update_settings_seen != halo_settings_generation)
+		{
+			const char *setting = getenv("HALO_SCENERY_UPDATE_DIVISOR");
+
+			objects_scenery_update_settings_seen = halo_settings_generation;
+			objects_scenery_update_divisor = setting ? atoi(setting) : 1;
+			if (objects_scenery_update_divisor < 1)
+				objects_scenery_update_divisor = 1;
+		}
+		objects_scenery_update_pass++;
+	}
+#endif
 	object_header = (struct object_header_datum *)object_header_data->data;
 	for (i = 0; i<object_header_data->count; ++object_header)
 	{
@@ -4440,39 +4485,13 @@ void objects_update(
 					unit_get(object_index)->unit.player_index!=NONE)
 				{
 	#ifdef HALO_LINUX
+				/* (the scenery divisor: above objects_update) */
+				if (!objects_scenery_update_skipped(i, object_header))
 				{
-					/* HALO_SCENERY_UPDATE_DIVISOR=n (a Vita quality setting,
-					off by default): scenery, hundreds of static props that
-					do nothing but recompute node matrices and functions
-					every tick, is updated every nth tick, staggered */
-					static int scenery_divisor = -1;
-					static unsigned long scenery_tick;
-					static unsigned long settings_seen;
-					extern volatile unsigned long halo_settings_generation;
-					unsigned long long update_started;
+					unsigned long long update_started = objects_profile_now();
 
-					if (scenery_divisor < 0 || settings_seen != halo_settings_generation)
-					{
-						settings_seen = halo_settings_generation;
-						const char *setting = getenv("HALO_SCENERY_UPDATE_DIVISOR");
-						scenery_divisor = setting ? atoi(setting) : 1;
-						if (scenery_divisor < 1)
-							scenery_divisor = 1;
-					}
-					if (scenery_divisor > 1 && object_header->type == _object_type_scenery &&
-						(unsigned long)(i + scenery_tick) % (unsigned long)scenery_divisor)
-					{
-						if (i == 0)
-							scenery_tick++;
-					}
-					else
-					{
-						if (i == 0)
-							scenery_tick++;
-						update_started = objects_profile_now();
-						object_update(object_index);
-						objects_profile_add(object_header->type, update_started);
-					}
+					object_update(object_index);
+					objects_profile_add(object_header->type, update_started);
 				}
 #else
 				object_update(object_index);
