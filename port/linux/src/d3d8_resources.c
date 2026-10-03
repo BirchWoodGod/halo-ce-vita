@@ -155,6 +155,13 @@ void WINAPI D3DResource_BlockUntilNotBusy(D3DResource *resource)
 
 /* ---------- textures */
 
+/* the headers the texture streaming binds its stand-ins by, copies of the
+default textures' (source/rasterizer/xbox/rasterizer_xbox.c): a device can
+tell a bitmap still loading from a real use of the default texture, and
+leave out the blended draws that sample one (port/vita/platform/d3d8_gxm.c) */
+D3DBaseTexture d3d_stand_in_textures[8];
+const unsigned long d3d_stand_in_texture_count = 8;
+
 static HRESULT create_texture(unsigned long width, unsigned long height, unsigned long depth, unsigned long levels,
 	D3DFORMAT format, BOOL cube_map, D3DBaseTexture **result)
 {

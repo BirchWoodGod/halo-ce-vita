@@ -333,6 +333,8 @@ static struct gxm_device device;
 static struct
 {
 	unsigned long draws, immediate_draws, clears, presents, self_sampled, computed_draws, alpha_tested_draws, dropped_alpha_tests;
+	/* blended draws left out for sampling a texture still loading (draw_samples_stand_in) */
+	unsigned long stand_in_draws_left_out;
 	/* draws whose state (key, textures, samplers, render states) equals the previous draw's: what a delta record could skip */
 	unsigned long same_state_draws;
 	unsigned long skipped_no_program, skipped_no_target, skipped_shader;
@@ -3044,6 +3046,41 @@ static unsigned long last_recorded_target;
 static BOOL surface_is_small_cached(const D3DSurface *surface);
 static BOOL surface_is_depth_cached(const D3DSurface *surface);
 
+extern D3DBaseTexture d3d_stand_in_textures[];
+extern const unsigned long d3d_stand_in_texture_count;
+
+/* whether a stage the pixel shader reads has a texture streaming's stand-in
+bound (rasterizer_xbox.c binds a texture still loading by a copy of the
+default texture's header). Such a blended draw is left out until the bitmap
+is in: the stand-ins are opaque white or grey, which the blended passes (the
+assault rifle's compass, decals, effects) drew as white blocks. */
+static BOOL draw_samples_stand_in(void)
+{
+	DWORD modes = D3D__RenderState[D3DRS_PSTEXTUREMODES];
+	DWORD stage;
+	/* (debug) HALO_STAND_IN_BLENDED=1: drawn with the stand-in, as before */
+	static int blended = -1;
+
+	if (blended < 0)
+		blended = getenv("HALO_STAND_IN_BLENDED") && atoi(getenv("HALO_STAND_IN_BLENDED")) != 0;
+	if (blended)
+		return FALSE;
+
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+	{
+		const D3DBaseTexture *texture = device.textures[stage];
+
+		if (((modes >> (stage * 5)) & 0x1f) && texture >= &d3d_stand_in_textures[0] &&
+			texture < &d3d_stand_in_textures[d3d_stand_in_texture_count])
+		{
+			if (stats.stand_in_draws_left_out++ < 4)
+				platform_log("blended draw left out: stage %lu samples a texture still loading", (unsigned long)stage);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 static BOOL surface_is_small(const D3DSurface *surface)
 {
 	unsigned long width, height;
@@ -3315,6 +3352,8 @@ static struct render_command *command_begin(unsigned long kind)
 			skip_blended = b && atoi(b) != 0;
 		}
 		if (kind == _command_draw && (skip_draws || (skip_blended && D3D__RenderState[D3DRS_ALPHABLENDENABLE])))
+			return NULL;
+		if (kind == _command_draw && D3D__RenderState[D3DRS_ALPHABLENDENABLE] && draw_samples_stand_in())
 			return NULL;
 		{
 			/* HALO_SKIP_ADDITIVE=1: no additive blends (ONE, ONE: the lighting
