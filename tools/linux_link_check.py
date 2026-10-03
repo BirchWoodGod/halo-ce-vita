@@ -29,6 +29,10 @@ RUNTIME_WEAK_REFERENCES = {
     "_Jv_RegisterClasses",
     "__pthread_key_create",
     "pthread_cancel",
+    # AddressSanitizer (an ASan compiler as --linux-cc): the bounds of its
+    # asan_globals section, which the linker itself defines
+    "__start_asan_globals",
+    "__stop_asan_globals",
 }
 
 
