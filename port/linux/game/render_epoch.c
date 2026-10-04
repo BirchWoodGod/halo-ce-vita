@@ -50,7 +50,10 @@ the tick then was not the mutator in ASan builds, its deletes were not
 deferred and switch_bsp did not wait for the render, and the builds
 crashed in a10 on races normal builds do not have) */
 
-static uintptr_t mutator_stack_low, mutator_stack_high;
+/* (read inline too: halo_epoch_on_mutator_inline, render_epoch.h) */
+unsigned long halo_mutator_stack_low, halo_mutator_stack_high;
+#define mutator_stack_low halo_mutator_stack_low
+#define mutator_stack_high halo_mutator_stack_high
 
 #ifdef __vita__
 #include <psp2/kernel/threadmgr.h>
