@@ -384,6 +384,7 @@ void platform_log(const char *format, ...);
 #include "networking/network_game_globals.h"
 #include "camera/director.h"
 #include "camera/observer.h"
+#include "objects/objects.h"
 #include "cutscene/cinematics.h"
 #include "effects/player_effects.h"
 #include "physics/collision_usage.h"
@@ -3445,7 +3446,9 @@ does the pause menu's Save and Quit, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
 positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
-tick, every frame), and "@shot name"
+tick, every frame), "@tv name" puts every player's unit at the centre of
+that scenario trigger volume (the benchmarks walk the player through a
+level's encounters this way: triage/perf2-status.md), and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device). Each runs once,
 at the first frame whose game time has reached its tick. */
@@ -3455,6 +3458,7 @@ void platform_log(const char *format, ...);
 char halo_screenshot_name[64];
 
 static void main_test_camera(char const *arguments);
+static void main_test_trigger_volume(char const *name);
 
 static void main_test_commands_update(
 	void)
@@ -3519,6 +3523,8 @@ static void main_test_commands_update(
 		}
 		else if (!strncmp(commands[index].command, "@camera ", 8))
 			main_test_camera(commands[index].command + 8);
+		else if (!strncmp(commands[index].command, "@tv ", 4))
+			main_test_trigger_volume(commands[index].command + 4);
 		else
 			hs_compile_and_evaluate(commands[index].command);
 	}
@@ -3531,6 +3537,46 @@ static void main_test_commands_update(
 		snprintf(line, sizeof(line), "%f %f %f %f %f", pan[0], pan[1], pan[2], pan[3] + pan[5] * ticks, pan[4] + pan[6] * ticks);
 		main_test_camera(line);
 	}
+}
+
+static void main_test_trigger_volume(
+	char const *name)
+{
+	struct scenario *scenario = global_scenario_get();
+	short index;
+
+	for (index = 0; index < scenario->trigger_volumes.count; index++)
+	{
+		struct scenario_trigger_volume *volume =
+			TAG_BLOCK_GET_ELEMENT(&scenario->trigger_volumes, index, struct scenario_trigger_volume);
+		real_point3d centre;
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		if (strcmp(volume->name, name))
+			continue;
+		if (volume->type == _scenario_trigger_volume_type_axis_aligned)
+		{
+			centre.x = (volume->bounds.x0 + volume->bounds.x1) / 2.0f;
+			centre.y = (volume->bounds.y0 + volume->bounds.y1) / 2.0f;
+			centre.z = (volume->bounds.z0 + volume->bounds.z1) / 2.0f;
+		}
+		else
+		{
+			real_matrix4x3 matrix;
+			real_point3d middle = { volume->extents.i / 2.0f, volume->extents.j / 2.0f, volume->extents.k / 2.0f };
+
+			matrix4x3_from_point_and_vectors(&matrix, &volume->position, &volume->forward, &volume->up);
+			matrix4x3_transform_point(&matrix, &middle, &centre);
+		}
+		platform_log("test command: %s at %.2f %.2f %.2f", name, centre.x, centre.y, centre.z);
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+			if (player->unit_index != NONE)
+				object_set_position(player->unit_index, &centre, NULL, NULL);
+		return;
+	}
+	platform_log("test command: no trigger volume %s", name);
 }
 
 static void main_test_camera(
