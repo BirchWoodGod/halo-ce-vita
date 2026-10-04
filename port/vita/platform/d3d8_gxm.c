@@ -752,19 +752,47 @@ static struct render_target_entry *render_target_entry_find(unsigned long data)
 
 /* the targets of a texture the game renders level by level, re-made as one
 mip chain the first time it is sampled with its levels (the levels' earlier
-targets are left unused) */
+targets are left unused).
+
+Only the levels at least one GPU tile (32x32, SCE_GXM_TILE_SIZEX/Y) in
+each direction are chained: the water's 128x128 ripple map chains 128, 64
+and 32, and its 16x16 fourth level keeps a target of its own that nothing
+samples. The texture side of the layout (linear levels one after another,
+rows rounded up to 8 texels) is the one every mipmapped BGRA texture of the
+texture cache already uses on the hardware (vita_textures.c LINEAR_ROW), but
+the colour surfaces are not: the chain was the only place the GPU rendered
+into a linear surface narrower than a tile (16 texels, rows 64 bytes apart)
+or one that does not start a memory block, and b30's creek showed blue
+streaks on the hardware only (#13/#20; Vita3K samples its own copy of a
+render target's first level and cannot show it). With every chained level a
+whole number of tiles, each level's rows are whole tiles wide and start
+4 KB apart, however the pixel back end writes a tile out.
+HALO_TARGET_CHAIN_MIN_SIZE=16 chains the small level again (as before);
+HALO_TARGET_CHAIN=0 samples the first level only. */
 static void render_target_chain(struct render_target_entry *base, const struct xgpu_texture_description *description,
 	unsigned long data, unsigned long version)
 {
 	unsigned long ids[12], levels = description->levels, level;
 	struct vgxm_texture texture;
+	static long minimum_size = -1;
 
 	if (base->chain_levels)
 		return;
 	base->chain_levels = -1;
+	if (minimum_size < 0)
+	{
+		const char *setting = getenv("HALO_TARGET_CHAIN_MIN_SIZE");
+
+		minimum_size = setting && atol(setting) > 0 ? atol(setting) : 32;
+	}
 	if (levels > 12)
 		levels = 12;
-	if (description->linear || description->cube_map || description->depth > 1 ||
+	while (levels > 1 && ((base->target.width >> (levels - 1)) < (unsigned long)minimum_size ||
+		(base->target.height >> (levels - 1)) < (unsigned long)minimum_size))
+	{
+		levels--;
+	}
+	if (levels < 2 || description->linear || description->cube_map || description->depth > 1 ||
 		(base->target.width & (base->target.width - 1)) || (base->target.height & (base->target.height - 1)) ||
 		vgxm_target_create_chain(base->target.width, base->target.height, levels, ids, &texture) != 0)
 	{
@@ -2120,6 +2148,7 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		const struct vgxm_texture *source;
 		unsigned long control[4];
 		DWORD state[6];
+		unsigned long levels;
 	} sampled_key[D3DTSS_MAXSTAGES];
 	int stage;
 
@@ -2130,6 +2159,7 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		const struct vgxm_texture *source = NULL;
 		struct xgpu_texture_description description;
 		struct render_target_entry *target;
+		unsigned long sampled_levels;
 		DWORD *state = command->sampler_state[stage];
 
 		texture_scale[stage][0] = texture_scale[stage][1] = 1.0f;
@@ -2238,16 +2268,29 @@ static void bind_recorded_textures(struct render_command *command, float texture
 			continue;
 		if (description.levels <= 1)
 			state[2] = D3DTEXF_NONE;
+		/* a chained target samples the levels the game declares now, and
+		only its first with no mip filter (D3DTEXF_NONE: GXM's mip filter
+		off still picks the nearest of all the texture's levels) */
+		sampled_levels = 0;
+		if (target && target->chain_levels > 1 &&
+			(state[2] == D3DTEXF_NONE || description.levels < (unsigned long)target->chain_levels))
+		{
+			sampled_levels = state[2] == D3DTEXF_NONE ? 1 : description.levels;
+		}
 		if (sampled_key[stage].source != source ||
 			memcmp(sampled_key[stage].control, source->control, sizeof(source->control)) ||
-			memcmp(sampled_key[stage].state, state, sizeof(sampled_key[stage].state)))
+			memcmp(sampled_key[stage].state, state, sizeof(sampled_key[stage].state)) ||
+			sampled_key[stage].levels != sampled_levels)
 		{
 			sampled[stage] = *source;
 			vgxm_texture_set_sampler(&sampled[stage], state[0], state[1], state[2], state[3], state[4],
 				dword_to_float(state[5]));
+			if (sampled_levels)
+				vgxm_texture_set_level_count(&sampled[stage], sampled_levels);
 			sampled_key[stage].source = source;
 			memcpy(sampled_key[stage].control, source->control, sizeof(source->control));
 			memcpy(sampled_key[stage].state, state, sizeof(sampled_key[stage].state));
+			sampled_key[stage].levels = sampled_levels;
 		}
 		command->draw.textures[stage] = &sampled[stage];
 		command->key.sampler_type[stage] = description.cube_map ? _xgpu_sampler_cube :
@@ -3505,6 +3548,30 @@ static void worker_drain(void)
 			waited_from = vita_host_time_us();
 		}
 	}
+}
+
+/* (the tick thread, tick_thread.c halo_tick_wait_for_render: the main
+thread is waiting for the tick and records nothing) waits until the worker
+has carried out every frame recorded and the GPU has drawn them. The GPU
+reads the structure bsp's vertices and indices where the tag data holds
+them, and runs up to two frames behind the worker, which runs a frame
+behind the game: a switch_bsp that cleared the bsp (0xCD) and read the next
+one in while those frames were still being drawn drew the last frame before
+the load - the one left on the display for the whole load - with the
+level's geometry gone: a black screen on every section change on the
+hardware (#20), where the GPU is the frame's bottleneck. */
+void halo_render_wait_for_gpu(void)
+{
+	unsigned long long started = vita_host_time_us();
+
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+	platform_log("structure bsp switch: waited %llu us for the worker and the GPU",
+		(unsigned long long)(vita_host_time_us() - started));
 }
 
 /* has the target a depth format? (no GPU work: the worker creates targets) */

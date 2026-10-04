@@ -24,6 +24,10 @@ struct render_camera;
 struct real_matrix4x3;
 int halo_interpolation_enabled(void);
 float game_time_get_tick_fraction(void);
+/* the fraction for the state the render draws (the finished update's, with the tick on its thread) */
+float halo_render_tick_fraction_get(void);
+/* the first-person weapon blended between ticks without the rest (HALO_INTERPOLATE_FIRST_PERSON) */
+int halo_first_person_interpolation_enabled(void);
 void render_interpolation_tick(void);
 void render_interpolation_frame_begin(void);
 void render_interpolation_frame_end(void);

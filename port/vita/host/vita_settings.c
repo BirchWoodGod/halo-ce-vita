@@ -57,6 +57,8 @@ static struct setting settings[] = {
 		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2 },
 	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
 		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2 },
+	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
+		"The weapon's animation blended between game ticks", 0 },
 	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
 		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2 },
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
