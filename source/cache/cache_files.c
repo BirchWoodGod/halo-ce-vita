@@ -122,6 +122,8 @@ symbols in this file:
 
 /* ---------- headers */
 
+/* (port) tag_get is defined here: the inline of tag_groups.h is for the rest */
+#define HALO_CACHE_FILES_C
 #include "cseries.h"
 #ifdef HALO_RELOCATABLE_TAG_CACHE
 #include "tag_relocate.h"
@@ -163,6 +165,13 @@ struct cache_file_tag_instance
 	void *base_address;
 	unsigned long unused[2];
 };
+
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+/* (tag_groups.h's tag_get_inline reads the instances by this layout) */
+typedef char cache_file_tag_instance_layout_assert[
+	sizeof(struct cache_file_tag_instance) == sizeof(struct halo_tag_instance_layout) &&
+	offsetof(struct cache_file_tag_instance, base_address) == offsetof(struct halo_tag_instance_layout, base_address) ? 1 : -1];
+#endif
 
 struct cache_file_tag_header
 {

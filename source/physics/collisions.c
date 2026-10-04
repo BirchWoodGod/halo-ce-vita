@@ -573,7 +573,7 @@ boolean collision_test_vector(
 								(object_index == ignore_object_index ||
 									TEST_FLAG(object->object.flags, _object_invisible_bit) ||
 									!TEST_FLAG(flags, object->object.type + _collision_test_objects_first_type_bit) ||
-									!fast_vector_intersects_sphere(
+									!fast_vector_intersects_sphere_inline(
 										point,
 										vector,
 										&object->object.bounding_sphere_center,

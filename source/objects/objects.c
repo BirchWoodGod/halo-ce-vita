@@ -300,6 +300,32 @@ void *object_get_and_verify_type(
 	return result;
 }
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+/* (port, release builds) this file's own lookups inline from here on, as
+objects.h makes them everywhere else: the functions above are the header
+lookup and assertions release builds do not check */
+static __inline void *object_get_and_verify_type_local(long object_index, unsigned long valid_type_flags)
+{
+	(void)valid_type_flags;
+	return object_header_get(object_index)->datum;
+}
+
+static __inline void *object_try_and_get_and_verify_type_local(long object_index, unsigned long valid_type_flags)
+{
+	struct object_header_datum *header = object_header_try_and_get(object_index);
+	void *result = NULL;
+
+	if (header && TEST_FLAG(valid_type_flags, header->type))
+		result = header->datum;
+	return result;
+}
+
+#define object_get_and_verify_type(object_index, valid_type_flags) \
+	object_get_and_verify_type_local((object_index), (valid_type_flags))
+#define object_try_and_get_and_verify_type(object_index, valid_type_flags) \
+	object_try_and_get_and_verify_type_local((object_index), (valid_type_flags))
+#endif
+
 void object_iterator_new(
 	struct object_iterator *iterator,
 	unsigned long type_flags,
