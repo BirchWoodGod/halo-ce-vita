@@ -18,6 +18,7 @@ too, under whatever env.txt and settings.txt say.
 #include <psp2/kernel/processmgr.h>
 
 #include <stdio.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,6 +44,8 @@ struct setting
 };
 
 static struct setting settings[] = {
+	{ "Online (experimental)", "HALO_NET_ONLINE", 1, 2, { "false", "true" }, { "Off", "On" },
+		"Internet invites; restart after changing. See README", 0 },
 	{ "Performance overlay", "XV_FPS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Frames per second and frame times, top right", 0 },
 	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
@@ -106,6 +109,9 @@ static int find_choice(const struct setting *setting, const char *value)
 	for (index = 0; index < setting->count; index++)
 		if (strcmp(setting->values[index], value) == 0)
 			return index;
+	/* Boolean environment overrides also accept 0/1, like port_config.c. */
+	if (strcmp(setting->variable, "HALO_NET_ONLINE") == 0)
+		return strcmp(value, "1") == 0 || strcmp(value, "TRUE") == 0;
 	/* (a value not on the list, from env.txt: the nearest by number) */
 	{
 		double wanted = atof(value), best_distance = 1e30;
@@ -221,14 +227,79 @@ static void close_panel(void)
 	vgxm_menu_set(NULL, 0);
 }
 
+/* Publish from the game/event thread; only the input thread writes the menu. */
+static pthread_mutex_t message_lock = PTHREAD_MUTEX_INITIALIZER;
+static char pending_message[2048];
+static int message_pending, message_visible;
+
+void vita_settings_message(const char *title, const char *text)
+{
+    char formatted[2048];
+    size_t used = 0;
+    int column = 0;
+    const char *parts[] = {title, "\n\n", text, "\n\nCross / Circle: close"};
+    for (int part = 0; part < 4; ++part)
+    {
+        const char *cursor = parts[part];
+        while (*cursor && used < sizeof(formatted) - 1)
+        {
+            if (*cursor != '\n')
+            {
+                size_t word = strcspn(cursor, " \n");
+                if (column && word && (cursor == parts[part] || cursor[-1] == ' ') && column + word > 46)
+                {
+                    formatted[used++] = '\n';
+                    column = 0;
+                    continue;
+                }
+            }
+            char ch = *cursor++;
+            if (column >= 46 && ch != '\n')
+            {
+                formatted[used++] = '\n';
+                column = 0;
+                if (used >= sizeof(formatted) - 1) break;
+            }
+            formatted[used++] = ch;
+            column = ch == '\n' ? 0 : column + 1;
+        }
+    }
+    formatted[used] = 0;
+    pthread_mutex_lock(&message_lock);
+    memcpy(pending_message, formatted, used + 1);
+    message_pending = 1;
+    pthread_mutex_unlock(&message_lock);
+}
+
 int vita_settings_input(const struct vita_host_pad *pad)
 {
 	unsigned long buttons = pad->buttons;
 	unsigned long pressed = buttons & ~previous_buttons;
 	int both = (buttons & VITA_BUTTON_SELECT) && (buttons & VITA_BUTTON_START);
 	unsigned long long now = now_us();
+    int message_opened = 0;
 
 	previous_buttons = buttons;
+    pthread_mutex_lock(&message_lock);
+    if (message_pending)
+    {
+        vgxm_menu_set(pending_message, -1);
+        message_pending = 0;
+        message_visible = 1;
+        message_opened = 1;
+        panel_open = 0;
+    }
+    pthread_mutex_unlock(&message_lock);
+    if (message_visible)
+    {
+        both_since = 0;
+        if (!message_opened && (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_CIRCLE)))
+        {
+            message_visible = 0;
+            vgxm_menu_set(NULL, 0);
+        }
+        return 1;
+    }
 	if (both)
 	{
 		if (!both_since)

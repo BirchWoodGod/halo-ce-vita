@@ -647,6 +647,8 @@ int main(int argc, char **argv)
 	(void)argv;
 	sceIoMkdir(VITA_DATA_DIRECTORY, 0777);
 	sceIoMkdir(VITA_DATA_DIRECTORY "/saves", 0777);
+	/* An invite from a previous process cannot join this run's host. */
+	sceIoRemove(VITA_DATA_DIRECTORY "/host_invite.txt");
 	if (freopen(VITA_DATA_DIRECTORY "/log.txt", "w", stderr))
 		setvbuf(stderr, NULL, _IONBF, 0);
 	/* the last session's log is kept (a crash leaves no other trace) */

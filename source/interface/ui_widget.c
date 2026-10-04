@@ -634,6 +634,7 @@ struct widget_instance;
 #include "bink/bink_playback.h"
 #include "bungie_net/common/thread.h"
 #include "cache/texture_cache.h"
+#include "cache/cache_files.h"
 #include "cseries/cseries_windows.h"
 #include "cutscene/cinematics.h"
 #include "event_manager.h"
@@ -1442,6 +1443,12 @@ static boolean ui_check_for_pause_game(
 	void);
 
 /* ---------- globals */
+
+/* port: an error message of the port's own text (display_error_text_deferred):
+the text waiting for its dialog, then the dialog's text box showing it */
+static wchar_t const *ui_widget_port_error_pending_text = NULL;
+static wchar_t const *ui_widget_port_error_text = NULL;
+static struct widget_instance *ui_widget_port_error_text_box = NULL;
 
 static struct ui_widget_bss_prefix ui_widget_globals_storage;
 
@@ -2264,6 +2271,11 @@ void ui_widget_delete(
 	case _ui_widget_type_text_box:
 		if (widget->parameters.text_box.text)
 			dispose_pointer(widget_memory_pool, widget->parameters.text_box.text);
+		if (widget == ui_widget_port_error_text_box)
+		{
+			ui_widget_port_error_text_box = NULL;
+			ui_widget_port_error_text = NULL;
+		}
 		break;
 	case _ui_widget_type_spinner_list:
 	case _ui_widget_type_column_list:
@@ -2332,6 +2344,25 @@ static struct widget_instance *ui_widget_launch_widget(
 	struct widget_instance *root;
 	struct widget_instance *new_widget;
 	short local_player_index;
+
+	/* port: the menus of multiplayer with other machines (not split screen's
+	or co-op's) open only on maps of a build that plays multiplayer with the
+	others (cache_files.c, cache_files_multiplayer_region); otherwise the
+	player is told why, and the menu stays */
+	{
+		static char const multiplayer_menus[] = "ui\\shell\\main_menu\\multiplayer_type_select\\connected\\";
+		char const *name = tag_get_name(widget_tag_index);
+		char build[0x20];
+
+		if (name &&
+			!csstrncmp(name, multiplayer_menus, sizeof(multiplayer_menus) - 1) &&
+			!cache_files_multiplayer_region(build))
+		{
+			cache_files_show_multiplayer_unavailable(NULL, build);
+
+			return NULL;
+		}
+	}
 
 	if (TEST_FLAG(definition->flags, _widget_always_use_tag_controller_index_bit))
 	{
@@ -4074,6 +4105,22 @@ void display_error_deferred(
 	return;
 }
 
+/* port: an error message of the port's own text (the maps have only the
+Xbox's), in the dialog of an error whose text it takes the place of */
+void display_error_text_deferred(
+	wchar_t const *text,
+	short local_player_index)
+{
+	short index = local_player_index == NONE ? 0 : local_player_index;
+
+	if (!VALID_INDEX(index, MAXIMUM_NUMBER_OF_LOCAL_PLAYERS) || widget_globals.deferred_errors[index].error_code != NONE)
+		return;
+	ui_widget_port_error_pending_text = text;
+	display_error_deferred(_error_cannot_create_saved_game_file_with_empty_name, local_player_index, TRUE, FALSE);
+
+	return;
+}
+
 void display_errors_deferred_until_cinematic_stop(
 	void)
 {
@@ -4170,7 +4217,15 @@ void display_error(
 		struct widget_instance *top_widget;
 		long top_widget_tag_index;
 		struct widget_instance *widget;
+		/* (port: the port's own text for this error, taken whether or not its
+		dialog opens, so that it is never another's) */
+		wchar_t const *port_text = NULL;
 
+		if (error_code == _error_cannot_create_saved_game_file_with_empty_name)
+		{
+			port_text = ui_widget_port_error_pending_text;
+			ui_widget_port_error_pending_text = NULL;
+		}
 		if (local_player_index != NONE)
 		{
 			short index;
@@ -4283,6 +4338,12 @@ void display_error(
 					text_box->type == _ui_widget_type_text_box,
 					"expected a text box widget in the error widget");
 				text_box->parameters.text_box.string_list_index = PIN(error_code, 0, NUMBER_OF_ERROR_CODES - 1);
+				/* (port: the port's own text in place of the error's) */
+				if (port_text)
+				{
+					ui_widget_port_error_text_box = text_box;
+					ui_widget_port_error_text = port_text;
+				}
 				widget->widget_is_error_dialog = TRUE;
 				if (!widget->pause_game_time)
 				{
@@ -4895,9 +4956,9 @@ static void widget_instance_render_text_box(
 			string_list_index = definition->string_list_index;
 		else
 			string_list_index = widget->parameters.text_box.string_list_index;
-		string = unicode_string_list_get_string(
-			definition->text_label_string_list.index,
-			string_list_index);
+		string = widget == ui_widget_port_error_text_box && ui_widget_port_error_text ?
+			(wchar_t *)ui_widget_port_error_text :
+			unicode_string_list_get_string(definition->text_label_string_list.index, string_list_index);
 		length = ustrlen(string);
 		widget->parameters.text_box.text = pool_resize_pointer(
 			widget_memory_pool,
