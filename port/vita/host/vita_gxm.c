@@ -2813,6 +2813,16 @@ static void present_step(int step)
 	present_mark = now;
 }
 
+void vgxm_wait_gpu_idle(void)
+{
+	unsigned int frame = __atomic_load_n(&gxm.frame, __ATOMIC_ACQUIRE);
+
+	if (!gxm.ready)
+		return;
+	while ((int)(*gxm.notification - frame) < 0)
+		sceKernelDelayThread(100);
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
 	struct display_data data;

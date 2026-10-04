@@ -3550,6 +3550,30 @@ static void worker_drain(void)
 	}
 }
 
+/* (the tick thread, tick_thread.c halo_tick_wait_for_render: the main
+thread is waiting for the tick and records nothing) waits until the worker
+has carried out every frame recorded and the GPU has drawn them. The GPU
+reads the structure bsp's vertices and indices where the tag data holds
+them, and runs up to two frames behind the worker, which runs a frame
+behind the game: a switch_bsp that cleared the bsp (0xCD) and read the next
+one in while those frames were still being drawn drew the last frame before
+the load - the one left on the display for the whole load - with the
+level's geometry gone: a black screen on every section change on the
+hardware (#20), where the GPU is the frame's bottleneck. */
+void halo_render_wait_for_gpu(void)
+{
+	unsigned long long started = vita_host_time_us();
+
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+	platform_log("structure bsp switch: waited %llu us for the worker and the GPU",
+		(unsigned long long)(vita_host_time_us() - started));
+}
+
 /* has the target a depth format? (no GPU work: the worker creates targets) */
 static BOOL surface_is_depth(const D3DSurface *surface)
 {

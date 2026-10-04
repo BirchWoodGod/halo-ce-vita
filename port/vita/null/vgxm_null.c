@@ -756,6 +756,11 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
 	return 0;
 }
 
+void vgxm_wait_gpu_idle(void)
+{
+	/* (no GPU: the draws were done when they were made) */
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
 	(void)color_target;

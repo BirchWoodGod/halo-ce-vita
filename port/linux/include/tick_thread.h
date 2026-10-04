@@ -16,8 +16,8 @@ game state to be made at the join, after the tick, in the order asked
 int halo_tick_thread_defer(void (*call)(void));
 /* on the tick thread: waits until the main thread has rendered and
 presented the frame (it then only waits for the tick), for a change the
-render cannot read halfway - a structure bsp switch; elsewhere returns at
-once */
+render cannot read halfway - a structure bsp switch; then, on any thread,
+until the GPU has drawn every frame recorded (the Vita's device) */
 void halo_tick_wait_for_render(void);
 /* the last tick's duration on the thread, microseconds */
 unsigned long long halo_tick_thread_last_us(void);

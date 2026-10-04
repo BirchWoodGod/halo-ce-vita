@@ -29,6 +29,8 @@ void particle_systems_stress_update(void);
 void vita_host_pin_current_thread(int core) __attribute__((weak));
 void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
 int halo_trace_active(void) __attribute__((weak));
+/* (the Vita's device, d3d8_gxm.c: waits for the frames the GPU has not drawn yet) */
+void halo_render_wait_for_gpu(void) __attribute__((weak));
 
 static int enabled = -1;
 static pthread_t thread;
@@ -210,12 +212,17 @@ void halo_tick_thread_join(void)
 
 void halo_tick_wait_for_render(void)
 {
-	if (enabled <= 0 || !halo_epoch_on_mutator())
-		return;
-	if (halo_trace_active && halo_trace_active())
-		platform_log("trace: tick waits for the render");
-	while (!__atomic_load_n(&main_joining, __ATOMIC_ACQUIRE))
-		pause_briefly();
+	if (enabled > 0 && halo_epoch_on_mutator())
+	{
+		if (halo_trace_active && halo_trace_active())
+			platform_log("trace: tick waits for the render");
+		while (!__atomic_load_n(&main_joining, __ATOMIC_ACQUIRE))
+			pause_briefly();
+	}
+	/* then (with the tick on its thread or not) until the GPU has drawn
+	what the render recorded: it reads the bsp's geometry in place */
+	if (halo_render_wait_for_gpu)
+		halo_render_wait_for_gpu();
 }
 
 unsigned long long halo_tick_thread_last_us(void)

@@ -217,6 +217,9 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot);
 /* ends the frame's scenes, shows the colour target (the game's back
 buffer, width x height of it) on the display and starts the next frame */
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height);
+/* waits until the GPU has finished every frame presented so far (any
+thread; the frames' scenes all end with the present's notification) */
+void vgxm_wait_gpu_idle(void);
 
 /* a line of the renderer's cache sizes (shaders, linked programs,
 targets, scenes this frame) for the frame statistics */
