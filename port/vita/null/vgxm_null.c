@@ -299,6 +299,12 @@ void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_fi
 		((unsigned long)(lod_bias * 16.0f) & 0xff) << 20;
 }
 
+void vgxm_texture_set_level_count(struct vgxm_texture *texture, unsigned long levels)
+{
+	/* (in the texture words' top bits, for the draw hash) */
+	texture->control[1] = (texture->control[1] & 0x0ffffffful) | (unsigned long)(levels & 0xf) << 28;
+}
+
 unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
 {
 	/* (debug) HALO_TARGET_LIMIT=n, as on the Vita (vita_gxm.c) */

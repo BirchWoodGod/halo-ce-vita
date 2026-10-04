@@ -81,6 +81,10 @@ int vgxm_texture_initialize(struct vgxm_texture *texture, const void *data, unsi
 /* Direct3D sampler state (D3DTEXF_*, D3DTADDRESS_*) applied to a copy */
 void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_filter, unsigned long mag_filter,
 	unsigned long mip_filter, unsigned long address_u, unsigned long address_v, float lod_bias);
+/* a copy samples only its first levels (fewer than it has; GXM's mip filter
+off still picks among all of them, the nearest, where Direct3D's
+D3DTEXF_NONE reads the first level only) */
+void vgxm_texture_set_level_count(struct vgxm_texture *texture, unsigned long levels);
 
 /* ---------- render targets */
 

@@ -1511,6 +1511,14 @@ void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_fi
 	}
 }
 
+void vgxm_texture_set_level_count(struct vgxm_texture *texture, unsigned long levels)
+{
+	SceGxmTexture *gxm_texture = (SceGxmTexture *)texture;
+
+	if (levels && levels < sceGxmTextureGetMipmapCount(gxm_texture))
+		sceGxmTextureSetMipmapCount(gxm_texture, levels);
+}
+
 /* ---------- render targets */
 
 /* CDRAM for a small colour target (the glow's and the shadows' 128x128s,
@@ -1759,11 +1767,33 @@ int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long heig
 	return 1;
 }
 
+/* gives back what a chain that could not be completed made: its levels'
+render target objects (their slots, the last ones made, are free again) and
+its memory */
+static void chain_abandon(unsigned int first_slot, struct block *chain)
+{
+	while (gxm.target_count > first_slot)
+	{
+		struct target *target = &gxm.targets[--gxm.target_count];
+
+		if (target->render_target)
+			sceGxmDestroyRenderTarget(target->render_target);
+		memset(target, 0, sizeof(*target));
+	}
+	if (chain->base && chain->uid == -1)
+		small_target_give_back(chain->base, chain->size);
+	else if (chain->base)
+	{
+		sceGxmUnmapMemory(chain->base);
+		sceKernelFreeMemBlock(chain->uid);
+	}
+}
+
 int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned long levels,
 	unsigned long *ids, struct vgxm_texture *texture)
 {
 	struct block chain;
-	unsigned int size = 0, offset = 0, level;
+	unsigned int size = 0, offset = 0, level, first_slot = gxm.target_count;
 	int result;
 
 	if (!gxm.ready || !levels || gxm.target_count + levels > MAXIMUM_TARGETS)
@@ -1790,19 +1820,27 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 		/* (the chain's block is the first level's) */
 		target->memory.base = (unsigned char *)chain.base + offset;
 		target->memory.size = 4 * target->stride * level_height;
-		if (!level)
-			target->memory.uid = chain.uid;
+		/* (the slot counts as made from here, so a failure gives its
+		render target object back too; the chain's memory is given back
+		as a whole, never through a level: target->memory.uid stays 0
+		until the chain is complete) */
+		gxm.target_count++;
 		if (!target->render_target)
+		{
+			log_line("gxm: no render target for a chained %ux%u level", level_width, level_height);
+			chain_abandon(first_slot, &chain);
 			return -1;
+		}
 		result = sceGxmColorSurfaceInit(&target->color, SCE_GXM_COLOR_FORMAT_A8R8G8B8, SCE_GXM_COLOR_SURFACE_LINEAR,
 			SCE_GXM_COLOR_SURFACE_SCALE_NONE, SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, target->width, target->height,
 			target->stride, target->memory.base);
 		if (result < 0)
 		{
 			log_line("gxm: chained colour surface %ux%u (level %u): 0x%08x", level_width, level_height, level, (unsigned)result);
+			chain_abandon(first_slot, &chain);
 			return -1;
 		}
-		ids[level] = ++gxm.target_count;
+		ids[level] = gxm.target_count;
 		offset += 4 * target->stride * level_height;
 	}
 	{
@@ -1821,8 +1859,12 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 	if (result < 0)
 	{
 		log_line("gxm: chained target texture %lux%lu, %lu levels: 0x%08x", width, height, levels, (unsigned)result);
+		chain_abandon(first_slot, &chain);
 		return -1;
 	}
+	/* (the first level holds the chain's memory: given back with it) */
+	gxm.targets[first_slot].memory.uid = chain.uid;
+	gxm.targets[first_slot].memory.size = chain.size;
 	log_line("gxm: a %lux%lu colour target with %lu levels (%u KB)", width, height, levels, size / 1024);
 	return 0;
 }
