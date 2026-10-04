@@ -18,6 +18,9 @@ symbols in this file:
 #include "sound/game_sound.h"
 #include "sound/sound_manager.h"
 #include "tag_files/tag_groups.h"
+#ifdef HALO_LINUX
+#include "tick_thread.h"
+#endif
 
 /* ---------- constants */
 
@@ -37,6 +40,90 @@ struct hud_sound_definition
 /* ---------- prototypes */
 
 /* ---------- globals */
+
+#ifdef HALO_LINUX
+/* (port) The HUD is drawn on the main thread while the tick runs on its own
+(HALO_TICK_THREAD), and a looping warning sound (shields recharging, low
+health) is a game looping sound: starting one there took a slot of the tick's
+looping sound array under it (the log's "new of object looping sounds on the
+render thread while a tick runs (unsafe)"), and stopping one set a flag the
+tick's game_sound_update rewrites. While a tick runs, the start or stop is
+queued and made at the join, after the tick; the handle reads "pending" until
+then. A pending handle a checkpoint caught counts as no sound. */
+enum
+{
+	HUD_LOOPING_SOUND_PENDING = -2,
+	MAXIMUM_HUD_LOOPING_SOUND_REQUESTS = 16
+};
+
+static struct
+{
+	long *handle; /* NULL for a stop */
+	long definition_index;
+	real scale;
+	long stop_index;
+} hud_looping_sound_requests[MAXIMUM_HUD_LOOPING_SOUND_REQUESTS];
+static short hud_looping_sound_request_count = 0;
+
+static void hud_looping_sound_requests_make(
+	void)
+{
+	short request_index;
+
+	for (request_index = 0; request_index < hud_looping_sound_request_count; request_index++)
+	{
+		if (hud_looping_sound_requests[request_index].handle)
+		{
+			/* (unless it was stopped or the game state replaced meanwhile) */
+			if (*hud_looping_sound_requests[request_index].handle == HUD_LOOPING_SOUND_PENDING)
+			{
+				*hud_looping_sound_requests[request_index].handle = unattached_looping_sound_start(
+					hud_looping_sound_requests[request_index].definition_index,
+					NONE,
+					hud_looping_sound_requests[request_index].scale);
+			}
+		}
+		else
+		{
+			unattached_looping_sound_stop(hud_looping_sound_requests[request_index].stop_index);
+		}
+	}
+	hud_looping_sound_request_count = 0;
+
+	return;
+}
+
+/* TRUE when queued for the join; FALSE when no tick runs (or the queue is
+full) and the caller makes it now */
+static boolean hud_looping_sound_request(
+	long *handle,
+	long definition_index,
+	real scale,
+	long stop_index)
+{
+	short request_index;
+
+	if (handle)
+	{
+		for (request_index = 0; request_index < hud_looping_sound_request_count; request_index++)
+		{
+			if (hud_looping_sound_requests[request_index].handle == handle)
+				return TRUE;
+		}
+	}
+	if (hud_looping_sound_request_count >= MAXIMUM_HUD_LOOPING_SOUND_REQUESTS)
+		return FALSE;
+	if (!hud_looping_sound_request_count && !halo_tick_thread_defer(hud_looping_sound_requests_make))
+		return FALSE;
+	hud_looping_sound_requests[hud_looping_sound_request_count].handle = handle;
+	hud_looping_sound_requests[hud_looping_sound_request_count].definition_index = definition_index;
+	hud_looping_sound_requests[hud_looping_sound_request_count].scale = scale;
+	hud_looping_sound_requests[hud_looping_sound_request_count].stop_index = stop_index;
+	hud_looping_sound_request_count++;
+
+	return TRUE;
+}
+#endif
 
 /* ---------- public code */
 
@@ -76,9 +163,26 @@ void hud_play_sound(
 					break;
 
 				case LOOPING_SOUND_DEFINITION_TAG:
+#ifdef HALO_LINUX
+					if (sound_indices[absolute_sound_index] == NONE ||
+						sound_indices[absolute_sound_index] == HUD_LOOPING_SOUND_PENDING)
+					{
+						if (hud_looping_sound_request(&sound_indices[absolute_sound_index],
+							sound->sound.index, sound->scale, NONE))
+						{
+							sound_indices[absolute_sound_index] = HUD_LOOPING_SOUND_PENDING;
+						}
+						else
+						{
+							sound_indices[absolute_sound_index] =
+								unattached_looping_sound_start(sound->sound.index, NONE, sound->scale);
+						}
+					}
+#else
 					if (sound_indices[absolute_sound_index] == NONE)
 						sound_indices[absolute_sound_index] =
 							unattached_looping_sound_start(sound->sound.index, NONE, sound->scale);
+#endif
 					break;
 				}
 
@@ -96,7 +200,15 @@ void hud_play_sound(
 					case SOUND_DEFINITION_TAG:
 						break;
 					case LOOPING_SOUND_DEFINITION_TAG:
+#ifdef HALO_LINUX
+						if (sound_indices[absolute_sound_index] != HUD_LOOPING_SOUND_PENDING &&
+							!hud_looping_sound_request(NULL, NONE, 0.f, sound_indices[absolute_sound_index]))
+						{
+							unattached_looping_sound_stop(sound_indices[absolute_sound_index]);
+						}
+#else
 						unattached_looping_sound_stop(sound_indices[absolute_sound_index]);
+#endif
 						break;
 					}
 
