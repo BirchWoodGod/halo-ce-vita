@@ -4370,7 +4370,12 @@ object_attach_to_node puts on it) is updated every tick: a child is
 updated only through its parent, and a needle stuck in a crate that is not
 updated never detonates - and any projectile in the map makes
 game_safe_to_save refuse, so a50's game_save_no_timeout waited for the
-rest of the level and no checkpoint was taken after a resume. */
+rest of the level and no checkpoint was taken after a resume. Scenery
+with an animation graph is updated every tick as well: an update advances
+its animation by one frame, so a skipped update played it at a quarter of
+its speed - a50's escape cutscene animates the Covenant dropship as
+scenery (scenery_animation_start), and it was still in the middle of the
+hangar when the cameras looked for it at the bay (GitHub #20). */
 static long objects_scenery_update_divisor = -1;
 static unsigned long objects_scenery_update_pass;
 static unsigned long objects_scenery_update_settings_seen;
@@ -4381,6 +4386,7 @@ static boolean objects_scenery_update_skipped(
 {
 	return objects_scenery_update_divisor > 1 && header->type == _object_type_scenery &&
 		header->datum->object.first_child_object_index == NONE &&
+		header->datum->object.animation.animation_graph_index == NONE &&
 		(unsigned long)(absolute_index + objects_scenery_update_pass) % (unsigned long)objects_scenery_update_divisor != 0;
 }
 #endif
