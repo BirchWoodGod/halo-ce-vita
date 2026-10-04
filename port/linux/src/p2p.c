@@ -2959,6 +2959,15 @@ static void *p2p_thread(void *unused)
 	enum
 	{
 		MAXIMUM_SOCKETS = 2 + MAXIMUM_PROXIES + MAXIMUM_LISTENERS + MAXIMUM_STREAMS + 16,
+#ifdef HALO_VITA
+		/* the most one select waits on: the Vita's takes 128 (vita_net.c's
+		SELECT_MAXIMUM) and drops the rest, so the tunnel and the brokers go
+		first and stand-ins past it wait for a later pass (a Vita's game of
+		16 machines needs a few dozen) */
+		SELECT_LIMIT = 128,
+#else
+		SELECT_LIMIT = MAXIMUM_SOCKETS,
+#endif
 		/* what each socket waited for is (owners) */
 		_owner_tunnel = 0,
 		_owner_handoff,
@@ -2989,7 +2998,8 @@ static void *p2p_thread(void *unused)
 		int wait = LOOP_INTERVAL * 5;
 		int index, asked;
 
-		/* what to wait for */
+		/* what to wait for: the tunnel, then the brokers (whose sockets are
+		few), then the stand-ins, as many as a select takes */
 		read_owners[read_count] = _owner_tunnel;
 		read[read_count++] = p2p.tunnel_socket;
 		if (p2p.handoff_socket >= 0)
@@ -2997,7 +3007,14 @@ static void *p2p_thread(void *unused)
 			read_owners[read_count] = _owner_handoff;
 			read[read_count++] = p2p.handoff_socket;
 		}
-		for (index = 0; index < MAXIMUM_PROXIES; index++)
+		asked_read_count = read_count;
+		asked_write_count = write_count;
+		p2p_signal_select_sets(read, &read_count, write, &write_count, SELECT_LIMIT - read_count - write_count);
+		for (index = asked_read_count; index < read_count; index++)
+			read_owners[index] = _owner_signal;
+		for (index = asked_write_count; index < write_count; index++)
+			write_owners[index] = _owner_signal;
+		for (index = 0; index < MAXIMUM_PROXIES && read_count + write_count < SELECT_LIMIT; index++)
 		{
 			if (p2p.proxies[index].socket >= 0)
 			{
@@ -3005,7 +3022,7 @@ static void *p2p_thread(void *unused)
 				read[read_count++] = p2p.proxies[index].socket;
 			}
 		}
-		for (index = 0; index < MAXIMUM_LISTENERS; index++)
+		for (index = 0; index < MAXIMUM_LISTENERS && read_count + write_count < SELECT_LIMIT; index++)
 		{
 			if (p2p.listeners[index].socket >= 0)
 			{
@@ -3019,7 +3036,7 @@ static void *p2p_thread(void *unused)
 
 			if (stream->used)
 				wait = LOOP_INTERVAL;
-			if (!stream->used || stream->socket < 0)
+			if (!stream->used || stream->socket < 0 || read_count + write_count + 2 > SELECT_LIMIT)
 				continue;
 			/* (not while the tunnel's window is full, which stream_readable
 			waits out, or the wait would return at once) */
@@ -3034,14 +3051,6 @@ static void *p2p_thread(void *unused)
 				write[write_count++] = stream->socket;
 			}
 		}
-		asked_read_count = read_count;
-		asked_write_count = write_count;
-		p2p_signal_select_sets(read, &read_count, write, &write_count,
-			MAXIMUM_SOCKETS - (read_count > write_count ? read_count : write_count));
-		for (index = asked_read_count; index < read_count; index++)
-			read_owners[index] = _owner_signal;
-		for (index = asked_write_count; index < write_count; index++)
-			write_owners[index] = _owner_signal;
 		asked_read_count = read_count;
 		asked_write_count = write_count;
 		memcpy(asked_read, read, sizeof(*read) * (size_t)read_count);

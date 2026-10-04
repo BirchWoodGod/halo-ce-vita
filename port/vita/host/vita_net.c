@@ -47,7 +47,10 @@ the request failed (WSAENOBUFS), the sockets kept their small default
 buffers, and in a match the host's connection to its own client filled
 up and timed out: the player could not move and the host went down */
 #define NET_MEMORY_SIZE (8 * 1024 * 1024)
-#define SELECT_MAXIMUM 64
+/* the sockets one select waits on: the game's own few, or internet play's
+thread (p2p.c), which waits on its tunnel, a stand-in per peer port and
+stream and the signalling brokers' connections */
+#define SELECT_MAXIMUM 128
 /* the library's socket identifiers are 0 to SCE_NET_ID_SOCKET_MAX (1023) */
 #define SOCKET_IDENTIFIERS 1024
 
@@ -975,7 +978,17 @@ static int select_add(struct select_entry *entries, int count, int socket, unsig
 			return count;
 		}
 	if (count == SELECT_MAXIMUM)
+	{
+		static int logged;
+
+		/* (that socket is never ready: said once) */
+		if (!logged)
+		{
+			logged = 1;
+			vita_host_log("net: a select over more sockets than SELECT_MAXIMUM: the rest are not waited on");
+		}
 		return count;
+	}
 	entries[count].socket = socket;
 	entries[count].wanted = events;
 	entries[count].ready = 0;
