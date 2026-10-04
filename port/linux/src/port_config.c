@@ -158,6 +158,13 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"
 		"comma-separated host:port." },
+	{ "network.lobby_public", _config_boolean, "false", "HALO_NET_LOBBY_PUBLIC", _environment_value, _platform_all,
+		"List the games this machine hosts in internet play's public lobby, where\n"
+		"anyone can find and join them; false keeps them to those with the\n"
+		"invite link or its short code." },
+	{ "network.lobby_name", _config_string, "\"\"", "HALO_NET_LOBBY_NAME", _environment_value, _platform_all,
+		"The name the public lobby shows for this machine's games; empty for\n"
+		"\"Halo\"." },
 	{ "discord.application_id", _config_string, "\"1553978809840050229\"", "HALO_DISCORD_APPLICATION",
 		_environment_value, _platform_desktop,
 		"The Discord application internet play invites go through while the\n"
@@ -169,8 +176,9 @@ static const struct config_setting config_settings[] =
 
 	{ "debug.network_test", _config_string, "\"\"", "HALO_NETWORK_TEST", _environment_value, _platform_all,
 		"Automated system link sessions for testing (port/linux/game/network_test.c):\n"
-		"\"host:<map>\" hosts a game on that map, \"join\" joins the first game found;\n"
-		"empty for none." },
+		"\"host:<map>\" hosts a game on that map, \"join\" joins the first game found,\n"
+		"\"join-public\" joins the first game of internet play's public lobby,\n"
+		"\"join-code:ABCD-EFGH\" the game of that code; empty for none." },
 	{ "debug.network_test_start", _config_real, "15.0", "HALO_NETWORK_TEST_START", _environment_value, _platform_all,
 		"Seconds after hosting that an automated test game starts." },
 	{ "debug.network_test_kill", _config_real, "0.0", "HALO_NETWORK_TEST_KILL", _environment_value, _platform_all,

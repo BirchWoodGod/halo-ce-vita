@@ -53,6 +53,30 @@ out (with the same keys again). It remembers the request at least while its
 host nonce lasts. So a joiner asks with a new nonce when its session with
 the host ends before the tunnel reached it, or when the host has not
 answered it in a while.
+
+Two ways to find an invite without being sent its link, for machines that
+cannot paste one (the Vita) or for strangers:
+
+- A short code (ABCD-EFGH: 40 bits from 32 letters and digits that cannot
+  be mistaken for each other). While it hosts, a machine keeps its invite
+  (its key's hash and the token) on the brokers as a retained message on
+  hcev/3/<HMAC(code token, "code")>, sealed with a key from the code; a
+  machine given the code subscribes there, gets the retained message at
+  once, and joins the invite in it. The code is only as secret as 40 bits:
+  anyone who collects the sealed records and tries every code finds the
+  invites, so a code is a convenience, not a lock (the invite's 128-bit
+  token is). Nothing the code leads to is more than the invite, which still
+  goes through JOIN/ACCEPT.
+- A public lobby: a host that chose to be listed also keeps, retained and
+  unsealed, hcev/3/lobby/<its identifier>: the network version, its code, a
+  name and its player counts, sent again every LOBBY_INTERVAL. Its MQTT
+  will (sent by the broker when the connection drops) is an empty retained
+  message there, which removes the entry; a host that stops being listed
+  sends that itself. A machine browsing subscribes to hcev/3/lobby/+ and
+  lists what arrives; an entry the broker kept (retained) but that is not
+  sent again within LOBBY_STALE_TIME is dropped, so a host that vanished
+  without its will reaching the broker does not stay listed.
+(The topics start "hceu" on a PC, as the rest do: SIGNAL_PREFIX.)
 */
 
 #include "platform.h"
@@ -119,6 +143,22 @@ enum
 	/* the reads of a broker's messages in one pass of the thread, whose
 	tunnels a flood of them would otherwise starve */
 	MAXIMUM_BROKER_READS = 8,
+	/* a hosting machine's code record and lobby entry are sent again this
+	often (a broker that restarted forgets retained messages) */
+	CODE_INTERVAL = 60000,
+	LOBBY_INTERVAL = 20000,
+	LOBBY_STALE_TIME = 2 * LOBBY_INTERVAL + 5000,
+	MAXIMUM_LOBBIES = 32,
+};
+
+/* the topics a broker can be subscribed to at once */
+enum
+{
+	_topic_host,
+	_topic_join,
+	_topic_code,
+	_topic_lobbies,
+	NUMBER_OF_TOPICS,
 };
 
 /* the prefix of the topics, of the key derivation's label and of the MQTT
@@ -130,6 +170,7 @@ nor a Vita's a PC's */
 #else
 #define SIGNAL_PREFIX "hceu"
 #endif
+#define LOBBY_TOPIC_PREFIX SIGNAL_PREFIX "/3/lobby/"
 
 enum
 {
@@ -145,6 +186,13 @@ enum
 	_message_accept = 'A',
 	/* 3: a JOIN proves its key before the host makes a session */
 	MESSAGE_VERSION = 3,
+	/* a code's record: the host's key hash and the invite's token */
+	_message_code = 'C',
+	/* a lobby entry (not sealed) */
+	_message_lobby = 'L',
+	/* 2: the record holds the key hash (1, of the older invites, held the
+	identifier alone) */
+	RECORD_VERSION = 2,
 };
 
 struct broker
@@ -160,9 +208,8 @@ struct broker
 	unsigned long heard_time;
 	int failures;
 	unsigned short packet_identifier;
-	/* the topics it has been asked for */
-	char host_topic[TOPIC_SIZE];
-	char join_topic[TOPIC_SIZE];
+	/* the topics it has been asked for (_topic_host ...) */
+	char topics[NUMBER_OF_TOPICS][TOPIC_SIZE];
 	unsigned char input[BUFFER_SIZE];
 	int input_size;
 	unsigned char output[BUFFER_SIZE];
@@ -254,6 +301,36 @@ static struct
 	unsigned long join_nonce_time;
 	int join_answered;
 	unsigned char join_host_nonce[NONCE_SIZE];
+
+	/* hosting: the code's record, kept on the brokers */
+	int has_code;
+	char code_topic[TOPIC_SIZE];
+	unsigned char code_key[P2P_SHA256_SIZE];
+	unsigned long code_sent_time;
+	/* hosting: the lobby entry, while listed */
+	int listed;
+	char lobby_topic[TOPIC_SIZE];
+	char lobby_code[P2P_CODE_SIZE];
+	char lobby_name[P2P_LOBBY_NAME_SIZE];
+	int lobby_players, lobby_maximum;
+	unsigned long lobby_sent_time;
+
+	/* looking up a code */
+	int looking_up;
+	char lookup_topic[TOPIC_SIZE];
+	unsigned char lookup_key[P2P_SHA256_SIZE];
+
+	/* browsing the lobbies */
+	int browsing;
+	struct lobby
+	{
+		int used;
+		char identifier[2 * P2P_IDENTIFIER_SIZE + 1];
+		char code[P2P_CODE_SIZE];
+		char name[P2P_LOBBY_NAME_SIZE];
+		int players, maximum, network_version;
+		unsigned long heard_time;
+	} lobbies[MAXIMUM_LOBBIES];
 } signalling;
 
 static int elapsed(unsigned long since, unsigned long time)
@@ -330,8 +407,7 @@ static void broker_close(struct broker *broker, int failed)
 	broker->state_time = p2p_now();
 	broker->input_size = 0;
 	broker->output_size = 0;
-	broker->host_topic[0] = 0;
-	broker->join_topic[0] = 0;
+	memset(broker->topics, 0, sizeof(broker->topics));
 	if (failed)
 		broker->failures++;
 }
@@ -409,62 +485,85 @@ static void broker_topic(struct broker *broker, const char *topic, int subscribe
 	broker_send(broker, subscribe ? 0x82 : 0xA2, body, size);
 }
 
-static void broker_publish(struct broker *broker, const char *topic, const unsigned char *payload, int payload_size)
+/* a PUBLISH at most once; retained: the broker keeps it for later
+subscribers (an empty retained one removes what it kept) */
+static void broker_publish(struct broker *broker, const char *topic, const unsigned char *payload, int payload_size,
+	int retain)
 {
 	unsigned char body[2 + TOPIC_SIZE + MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
 	int size = put_string(body, topic);
 
-	memcpy(body + size, payload, (size_t)payload_size);
-	broker_send(broker, 0x30, body, size + payload_size);
+	if (payload_size)
+		memcpy(body + size, payload, (size_t)payload_size);
+	broker_send(broker, retain ? 0x31 : 0x30, body, size + payload_size);
 }
 
 /* the topics a ready broker should be subscribed to */
 static void broker_sync_topics(struct broker *broker)
 {
-	const char *wanted[2];
-	char *had[2];
+	const char *wanted[NUMBER_OF_TOPICS];
 	int index;
 
 	if (broker->state != _broker_ready)
 		return;
-	wanted[0] = signalling.hosting ? signalling.host_topic : "";
-	wanted[1] = signalling.joining ? signalling.join_topic : "";
-	had[0] = broker->host_topic;
-	had[1] = broker->join_topic;
-	for (index = 0; index < 2; index++)
+	wanted[_topic_host] = signalling.hosting ? signalling.host_topic : "";
+	wanted[_topic_join] = signalling.joining ? signalling.join_topic : "";
+	wanted[_topic_code] = signalling.looking_up ? signalling.lookup_topic : "";
+	wanted[_topic_lobbies] = signalling.browsing ? LOBBY_TOPIC_PREFIX "+" : "";
+	for (index = 0; index < NUMBER_OF_TOPICS; index++)
 	{
-		if (!strcmp(wanted[index], had[index]))
+		char *had = broker->topics[index];
+
+		if (!strcmp(wanted[index], had))
 			continue;
-		if (had[index][0])
-			broker_topic(broker, had[index], 0);
+		if (had[0])
+			broker_topic(broker, had, 0);
 		if (wanted[index][0])
 			broker_topic(broker, wanted[index], 1);
-		strcpy(had[index], wanted[index]);
+		strcpy(had, wanted[index]);
 	}
 }
 
-static void publish_everywhere(const char *topic, const unsigned char *payload, int size)
+static void publish_everywhere(const char *topic, const unsigned char *payload, int size, int retain)
 {
 	int index;
 
 	for (index = 0; index < signalling.broker_count; index++)
 	{
 		if (signalling.brokers[index].state == _broker_ready)
-			broker_publish(&signalling.brokers[index], topic, payload, size);
+			broker_publish(&signalling.brokers[index], topic, payload, size, retain);
 	}
+}
+
+/* this machine's lobby entry's topic (its will empties it) */
+static void own_lobby_topic(char *topic)
+{
+	char text[2 * P2P_IDENTIFIER_SIZE + 1];
+
+	p2p_hex(p2p_identifier(), P2P_IDENTIFIER_SIZE, text);
+	snprintf(topic, TOPIC_SIZE, LOBBY_TOPIC_PREFIX "%s", text);
 }
 
 static void broker_connected(struct broker *broker)
 {
-	unsigned char body[64];
+	unsigned char body[128];
+	char will_topic[TOPIC_SIZE];
 	int size = 0;
 
 	size += put_string(body, "MQTT");
 	body[size++] = 4; /* 3.1.1 */
-	body[size++] = 0x02; /* a clean session */
+	/* a clean session; a will, retained: when the connection drops, the
+	broker empties this machine's lobby entry, so a host that crashed or
+	lost its network is not listed (a harmless no-op if it never was) */
+	body[size++] = 0x02 | 0x04 | 0x20;
 	body[size++] = 0;
 	body[size++] = KEEP_ALIVE_SECONDS;
 	size += put_string(body + size, signalling.client_identifier);
+	own_lobby_topic(will_topic);
+	size += put_string(body + size, will_topic);
+	/* (the will's message: empty) */
+	body[size++] = 0;
+	body[size++] = 0;
 	broker->state = _broker_awaiting_acknowledgement;
 	broker->state_time = p2p_now();
 	broker_send(broker, 0x10, body, size);
@@ -665,7 +764,7 @@ static void send_join(void)
 		size += TAG_SIZE;
 	}
 	size = p2p_seal(signalling.join_key, message, size, sealed);
-	publish_everywhere(signalling.join_host_topic, sealed, size);
+	publish_everywhere(signalling.join_host_topic, sealed, size, 0);
 	signalling.join_sent_time = p2p_now();
 }
 
@@ -743,7 +842,7 @@ static void send_accept(struct broker *broker, const unsigned char *identifier, 
 	size = p2p_seal(signalling.host_key, answer, size, sealed);
 	make_topic(signalling.host_token, "joiner", identifier, topic);
 	if (broker->state == _broker_ready)
-		broker_publish(broker, topic, sealed, size);
+		broker_publish(broker, topic, sealed, size, 0);
 }
 
 /* the host: a joiner asked (through broker); with a proof (the host's
@@ -943,6 +1042,174 @@ static void accept_received(const unsigned char *message, int size)
 	send_join();
 }
 
+/* ---------- codes and lobbies */
+
+/* what a code's topic and key derive from, as a token does: a hash of the
+code's eight characters */
+static void code_token(const char *code, unsigned char *token)
+{
+	char text[16 + P2P_CODE_LENGTH];
+	unsigned char digest[P2P_SHA256_SIZE];
+
+	memcpy(text, "halo code ", 10);
+	memcpy(text + 10, code, P2P_CODE_LENGTH);
+	p2p_sha256(text, 10 + P2P_CODE_LENGTH, digest);
+	memcpy(token, digest, P2P_TOKEN_SIZE);
+}
+
+/* the code's record (the host's key hash and the invite's token), sealed
+with the code's key, retained on one broker or all (broker NULL) */
+static void publish_code(struct broker *broker)
+{
+	unsigned char message[2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
+	unsigned char sealed[sizeof(message) + P2P_SEAL_OVERHEAD];
+	int size = 0;
+
+	message[size++] = _message_code;
+	message[size++] = RECORD_VERSION;
+	p2p_key_hash(p2p_public_key(), message + size);
+	size += P2P_KEY_HASH_SIZE;
+	memcpy(message + size, signalling.host_token, P2P_TOKEN_SIZE);
+	size += P2P_TOKEN_SIZE;
+	size = p2p_seal(signalling.code_key, message, size, sealed);
+	if (broker)
+		broker_publish(broker, signalling.code_topic, sealed, size, 1);
+	else
+		publish_everywhere(signalling.code_topic, sealed, size, 1);
+	signalling.code_sent_time = p2p_now();
+}
+
+/* the lobby entry, retained on one broker or all (broker NULL): the
+network version (big-endian), the code, the player counts, the name */
+static void publish_lobby(struct broker *broker)
+{
+	unsigned char message[4 + P2P_CODE_LENGTH + 3 + P2P_LOBBY_NAME_SIZE];
+	int size = 0;
+	int name_size = (int)strlen(signalling.lobby_name);
+
+	message[size++] = _message_lobby;
+	message[size++] = RECORD_VERSION;
+	message[size++] = (unsigned char)(HALO_PORT_NETWORK_VERSION >> 8);
+	message[size++] = (unsigned char)HALO_PORT_NETWORK_VERSION;
+	/* (the code's eight characters, without its dash) */
+	memcpy(message + size, signalling.lobby_code, 4);
+	memcpy(message + size + 4, signalling.lobby_code + 5, 4);
+	size += P2P_CODE_LENGTH;
+	message[size++] = (unsigned char)signalling.lobby_players;
+	message[size++] = (unsigned char)signalling.lobby_maximum;
+	message[size++] = (unsigned char)name_size;
+	memcpy(message + size, signalling.lobby_name, (size_t)name_size);
+	size += name_size;
+	if (broker)
+		broker_publish(broker, signalling.lobby_topic, message, size, 1);
+	else
+		publish_everywhere(signalling.lobby_topic, message, size, 1);
+	signalling.lobby_sent_time = p2p_now();
+}
+
+/* empties a retained topic everywhere */
+static void clear_retained(const char *topic)
+{
+	publish_everywhere(topic, NULL, 0, 1);
+}
+
+static void sync_all_topics(void);
+
+/* a code looked up: its record names the invite */
+static void code_received(const unsigned char *message, int size)
+{
+	char text[16 + 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE) + 1];
+
+	if (size < 2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE)
+		return;
+	signalling.looking_up = 0;
+	memcpy(text, "halo://join/", 12);
+	p2p_hex(message + 2, P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE, text + 12);
+	sync_all_topics();
+	p2p_code_found(text);
+}
+
+static struct lobby *find_lobby(const char *identifier, int create)
+{
+	struct lobby *free_entry = NULL;
+	int index;
+
+	for (index = 0; index < MAXIMUM_LOBBIES; index++)
+	{
+		struct lobby *lobby = &signalling.lobbies[index];
+
+		if (lobby->used && !strcmp(lobby->identifier, identifier))
+			return lobby;
+		if (!lobby->used && !free_entry)
+			free_entry = lobby;
+	}
+	if (!create || !free_entry)
+		return NULL;
+	memset(free_entry, 0, sizeof(*free_entry));
+	free_entry->used = 1;
+	strcpy(free_entry->identifier, identifier);
+	return free_entry;
+}
+
+/* a lobby entry (or its removal: empty), retained (kept by the broker) or
+live (sent now). It is not sealed: anyone can send one, so everything in it
+is checked, and the name is shown only as printable ASCII */
+static void lobby_received(const char *identifier, const unsigned char *message, int size)
+{
+	struct lobby *lobby;
+	int name_size;
+	int index;
+
+	if (strlen(identifier) != 2 * P2P_IDENTIFIER_SIZE)
+		return;
+	for (index = 0; identifier[index]; index++)
+	{
+		if (!((identifier[index] >= '0' && identifier[index] <= '9') ||
+			(identifier[index] >= 'a' && identifier[index] <= 'f')))
+		{
+			return;
+		}
+	}
+	if (size == 0)
+	{
+		lobby = find_lobby(identifier, 0);
+		if (lobby)
+			lobby->used = 0;
+		return;
+	}
+	if (size < 4 + P2P_CODE_LENGTH + 3 || message[0] != _message_lobby || message[1] != RECORD_VERSION)
+		return;
+	name_size = message[4 + P2P_CODE_LENGTH + 2];
+	if (size < 4 + P2P_CODE_LENGTH + 3 + name_size || name_size >= P2P_LOBBY_NAME_SIZE)
+		return;
+	for (index = 0; index < P2P_CODE_LENGTH; index++)
+	{
+		if (!message[4 + index] || !strchr(P2P_CODE_ALPHABET, message[4 + index]))
+			return;
+	}
+	lobby = find_lobby(identifier, 1);
+	if (!lobby)
+		return;
+	lobby->network_version = message[2] << 8 | message[3];
+	memcpy(lobby->code, message + 4, 4);
+	lobby->code[4] = '-';
+	memcpy(lobby->code + 5, message + 8, 4);
+	lobby->code[9] = 0;
+	lobby->players = message[4 + P2P_CODE_LENGTH];
+	lobby->maximum = message[4 + P2P_CODE_LENGTH + 1];
+	memcpy(lobby->name, message + 4 + P2P_CODE_LENGTH + 3, (size_t)name_size);
+	lobby->name[name_size] = 0;
+	/* (only what can be shown: the name is any bytes the host sent) */
+	for (index = 0; index < name_size; index++)
+	{
+		if ((unsigned char)lobby->name[index] < 32 || (unsigned char)lobby->name[index] > 126)
+			lobby->name[index] = '?';
+	}
+	/* (a retained entry counts as heard now: one its host no longer sends
+	again goes LOBBY_STALE_TIME later) */
+	lobby->heard_time = p2p_now();
+}
+
 static void publish_received(struct broker *broker, const char *topic, const unsigned char *payload, int size)
 {
 	unsigned char message[MAXIMUM_MESSAGE_SIZE];
@@ -961,6 +1228,16 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 		message_size = p2p_open(signalling.join_key, payload, size, message);
 		if (message_size >= 2 && message[0] == _message_accept && message[1] == MESSAGE_VERSION)
 			accept_received(message, message_size);
+	}
+	else if (signalling.looking_up && !strcmp(topic, signalling.lookup_topic))
+	{
+		message_size = size ? p2p_open(signalling.lookup_key, payload, size, message) : -1;
+		if (message_size >= 2 && message[0] == _message_code && message[1] == RECORD_VERSION)
+			code_received(message, message_size);
+	}
+	else if (signalling.browsing && !strncmp(topic, LOBBY_TOPIC_PREFIX, strlen(LOBBY_TOPIC_PREFIX)))
+	{
+		lobby_received(topic + strlen(LOBBY_TOPIC_PREFIX), payload, size);
 	}
 }
 
@@ -1016,6 +1293,12 @@ static void broker_parse(struct broker *broker)
 			/* a joiner's first request need not wait for the next repeat */
 			if (signalling.joining)
 				send_join();
+			/* a host's retained records, on a broker that may never have
+			had them (or forgot them) */
+			if (signalling.hosting && signalling.has_code)
+				publish_code(broker);
+			if (signalling.listed)
+				publish_lobby(broker);
 		}
 		else if ((type & 0xF0) == 0x30 && remaining >= 2)
 		{
@@ -1201,6 +1484,20 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 	}
 	if (signalling.joining && elapsed(signalling.join_sent_time, JOIN_INTERVAL))
 		send_join();
+	if (signalling.hosting && signalling.has_code && elapsed(signalling.code_sent_time, CODE_INTERVAL))
+		publish_code(NULL);
+	if (signalling.listed && elapsed(signalling.lobby_sent_time, LOBBY_INTERVAL))
+		publish_lobby(NULL);
+	if (signalling.browsing)
+	{
+		for (index = 0; index < MAXIMUM_LOBBIES; index++)
+		{
+			struct lobby *lobby = &signalling.lobbies[index];
+
+			if (lobby->used && elapsed(lobby->heard_time, LOBBY_STALE_TIME))
+				lobby->used = 0;
+		}
+	}
 }
 
 int p2p_signal_connected(void)
@@ -1223,7 +1520,7 @@ static void sync_all_topics(void)
 		broker_sync_topics(&signalling.brokers[index]);
 }
 
-void p2p_signal_host(const unsigned char *token)
+void p2p_signal_host(const unsigned char *token, const char *code)
 {
 	if (!signalling.has_nonce_key)
 	{
@@ -1234,6 +1531,19 @@ void p2p_signal_host(const unsigned char *token)
 	derive(token, "seal", NULL, signalling.host_key);
 	make_topic(token, "host", p2p_identifier(), signalling.host_topic);
 	signalling.hosting = 1;
+	signalling.has_code = code && strlen(code) == P2P_CODE_SIZE - 1;
+	if (signalling.has_code)
+	{
+		unsigned char token_of_code[P2P_TOKEN_SIZE];
+		char characters[P2P_CODE_LENGTH];
+
+		memcpy(characters, code, 4);
+		memcpy(characters + 4, code + 5, 4);
+		code_token(characters, token_of_code);
+		make_topic(token_of_code, "code", NULL, signalling.code_topic);
+		derive(token_of_code, "seal", NULL, signalling.code_key);
+		publish_code(NULL);
+	}
 	sync_all_topics();
 }
 
@@ -1242,7 +1552,93 @@ void p2p_signal_stop_hosting(void)
 	signalling.hosting = 0;
 	memset(signalling.joiners, 0, sizeof(signalling.joiners));
 	memset(signalling.askers, 0, sizeof(signalling.askers));
+	if (signalling.has_code)
+		clear_retained(signalling.code_topic);
+	signalling.has_code = 0;
+	p2p_signal_set_lobby(0, NULL, NULL, 0, 0);
 	sync_all_topics();
+}
+
+void p2p_signal_set_lobby(int listed, const char *code, const char *name, int players, int maximum)
+{
+	if (!listed || !code)
+	{
+		if (signalling.listed)
+			clear_retained(signalling.lobby_topic);
+		signalling.listed = 0;
+		return;
+	}
+	/* (called every pass while hosting: sent only when something changed) */
+	if (!name || !*name)
+		name = "Halo";
+	players = players < 0 ? 0 : players < 255 ? players : 255;
+	maximum = maximum < 0 ? 0 : maximum < 255 ? maximum : 255;
+	if (signalling.listed && !strcmp(signalling.lobby_code, code) &&
+		!strncmp(signalling.lobby_name, name, sizeof(signalling.lobby_name) - 1) &&
+		signalling.lobby_players == players && signalling.lobby_maximum == maximum)
+	{
+		return;
+	}
+	own_lobby_topic(signalling.lobby_topic);
+	snprintf(signalling.lobby_code, sizeof(signalling.lobby_code), "%s", code);
+	snprintf(signalling.lobby_name, sizeof(signalling.lobby_name), "%s", name);
+	signalling.lobby_players = players;
+	signalling.lobby_maximum = maximum;
+	signalling.listed = 1;
+	publish_lobby(NULL);
+}
+
+void p2p_signal_lookup_code(const char *code)
+{
+	unsigned char token[P2P_TOKEN_SIZE];
+
+	code_token(code, token);
+	make_topic(token, "code", NULL, signalling.lookup_topic);
+	derive(token, "seal", NULL, signalling.lookup_key);
+	signalling.looking_up = 1;
+	sync_all_topics();
+}
+
+void p2p_signal_stop_lookup(void)
+{
+	signalling.looking_up = 0;
+	sync_all_topics();
+}
+
+void p2p_signal_browse(int on)
+{
+	if (on && !signalling.browsing)
+		memset(signalling.lobbies, 0, sizeof(signalling.lobbies));
+	signalling.browsing = on != 0;
+	sync_all_topics();
+}
+
+int p2p_signal_lobby_entry(int index, struct p2p_lobby_entry *entry)
+{
+	int slot;
+
+	/* the index-th entry in the table (whose order is arrival) */
+	for (slot = 0; slot < MAXIMUM_LOBBIES; slot++)
+	{
+		struct lobby const *lobby = &signalling.lobbies[slot];
+
+		if (!lobby->used || index-- > 0)
+			continue;
+		memset(entry, 0, sizeof(*entry));
+		snprintf(entry->code, sizeof(entry->code), "%s", lobby->code);
+		snprintf(entry->name, sizeof(entry->name), "%s", lobby->name);
+		entry->players = lobby->players;
+		entry->maximum = lobby->maximum;
+		entry->compatible = lobby->network_version == HALO_PORT_NETWORK_VERSION;
+		{
+			char own[2 * P2P_IDENTIFIER_SIZE + 1];
+
+			p2p_hex(p2p_identifier(), P2P_IDENTIFIER_SIZE, own);
+			entry->own = !strcmp(lobby->identifier, own);
+		}
+		return 1;
+	}
+	return 0;
 }
 
 void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token)

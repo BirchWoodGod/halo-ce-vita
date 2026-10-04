@@ -59,6 +59,7 @@ only look up and create stand-ins.
 #include "p2p_internal.h"
 #include "ikcp.h"
 
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -118,6 +119,9 @@ enum
 	PEER_TIMEOUT = 20000,
 	PUNCH_TIMEOUT = 30000,
 	JOIN_TIMEOUT = 90000,
+	/* a code's record is retained by the brokers, so it arrives as soon as
+	one of them is reached */
+	CODE_LOOKUP_TIMEOUT = 20000,
 	STREAM_LINGER_TIME = 10000,
 	PROXY_IDLE_TIME = 60000,
 	STUN_RETRY_INTERVAL = 500,
@@ -335,6 +339,25 @@ static struct
 	char clipboard[P2P_LINK_SIZE];
 	int has_clipboard;
 
+	/* hosting: the invite's short code (ABCD-EFGH), made with it; whether
+	to list the game in the public lobby, and under which name */
+	char code[P2P_CODE_SIZE];
+	int lobby_public;
+	char lobby_name[P2P_LOBBY_NAME_SIZE];
+	/* looking up a code's eight characters, until its record arrives or
+	CODE_LOOKUP_TIMEOUT */
+	int lookup_requested;
+	int looking_up;
+	char lookup_code[P2P_CODE_LENGTH + 1];
+	unsigned long lookup_time;
+	/* browsing the public lobby (asked from any thread; the p2p thread
+	tells the brokers) */
+	int browse_wanted;
+	int browsing;
+
+	/* what is happening, for a menu (p2p_status) */
+	char status[96];
+
 	/* UPnP (posix_upnp.c): a thread asking the router; the port it forwards
 	here, and when it was last asked */
 	int upnp_working;
@@ -489,6 +512,17 @@ static int would_block(void)
 	int error = posix_socket_last_error();
 
 	return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
+}
+
+/* the status line (p2p_status) and the log, under p2p_lock */
+static void set_status(const char *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(p2p.status, sizeof(p2p.status), format, arguments);
+	va_end(arguments);
+	platform_log("Internet play: %s", p2p.status);
 }
 
 const unsigned char *p2p_identifier(void)
@@ -1034,7 +1068,7 @@ static void peer_heard(struct peer *peer, unsigned long address, unsigned short 
 				p2p.joining = 0;
 				p2p_signal_stop_joining();
 			}
-			platform_log("Internet play: the host's game is listed under Multiplayer, System Link");
+			set_status("connected to the host: its game is listed under Multiplayer, System Link");
 		}
 	}
 	else if (same)
@@ -2270,16 +2304,68 @@ static int parse_invite(const char *text, unsigned char *host_hash, unsigned cha
 	return 1;
 }
 
-/* under p2p_lock: parse_invite's result */
+/* a short code within text: eight characters of P2P_CODE_ALPHABET, any
+case, a dash or a space after the fourth (optional unless dash_required:
+on the clipboard or a command line an eight-letter word must not look up
+a game), and nothing but spaces around them. The eight characters, upper
+case, go to code */
+static int parse_code(const char *text, char *code, int dash_required)
+{
+	int count = 0;
+
+	while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n')
+		text++;
+	while (count < P2P_CODE_LENGTH)
+	{
+		char character;
+
+		if (count == 4)
+		{
+			if (*text == '-' || *text == ' ')
+				text++;
+			else if (dash_required)
+				return 0;
+		}
+		character = *text;
+		if (character >= 'a' && character <= 'z')
+			character = (char)(character - 'a' + 'A');
+		if (!character || !strchr(P2P_CODE_ALPHABET, character))
+			return 0;
+		code[count++] = character;
+		text++;
+	}
+	code[count] = 0;
+	while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n')
+		text++;
+	return *text == 0;
+}
+
+/* under p2p_lock */
+static int join_code(const char *code)
+{
+	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
+	{
+		set_status("that is this machine's own code");
+		return 1;
+	}
+	memcpy(p2p.lookup_code, code, sizeof(p2p.lookup_code));
+	p2p.lookup_requested = 1;
+	return 1;
+}
+
+/* under p2p_lock: parse_invite's result (a code, with its dash, is looked
+up) */
 static int join_invite(const char *text)
 {
 	unsigned char hash[P2P_KEY_HASH_SIZE], host[P2P_IDENTIFIER_SIZE], token[P2P_TOKEN_SIZE];
+	char code[P2P_CODE_LENGTH + 1];
 	struct peer *peer;
 	int parsed = parse_invite(text, hash, token);
 
+	if (!parsed && parse_code(text, code, 1))
+		return join_code(code);
 	if (parsed < 0)
-		platform_log("Internet play: that invite is from an older version of the game, which this one "
-			"cannot join");
+		set_status("that invite is from an older version of the game, which this one cannot join");
 	if (parsed <= 0)
 		return parsed;
 	p2p_identifier_from_hash(hash, host);
@@ -2318,13 +2404,64 @@ void p2p_invite_received(const char *text)
 {
 	/* (an older version's is logged as such) */
 	if (!join_invite(text))
-		platform_log("Internet play: that is not an invite");
+		set_status("that is not an invite");
+}
+
+void p2p_code_found(const char *text)
+{
+	if (!p2p.looking_up)
+		return;
+	p2p.looking_up = 0;
+	p2p_signal_stop_lookup();
+	set_status("code %.4s-%.4s found; reaching its host", p2p.lookup_code, p2p.lookup_code + 4);
+	join_invite(text);
+}
+
+int p2p_join_code(const char *text)
+{
+	char code[P2P_CODE_LENGTH + 1];
+	int result;
+
+	if (!parse_code(text, code, 0))
+		return 0;
+	if (!p2p.running)
+	{
+		platform_log("Internet play is off (Online in the settings): the code is ignored");
+		return 1;
+	}
+	pthread_mutex_lock(&p2p_lock);
+	result = join_code(code);
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
 }
 
 static void update_joining(void)
 {
 	char name[2 * P2P_IDENTIFIER_SIZE + 1];
 
+	if (p2p.lookup_requested)
+	{
+		p2p.lookup_requested = 0;
+		p2p.looking_up = 1;
+		p2p.lookup_time = p2p_now();
+		set_status("looking up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
+		p2p_signal_start();
+		p2p_signal_lookup_code(p2p.lookup_code);
+	}
+	else if (p2p.looking_up && elapsed(p2p.lookup_time, CODE_LOOKUP_TIMEOUT))
+	{
+		p2p.looking_up = 0;
+		p2p_signal_stop_lookup();
+		set_status(p2p_signal_connected() ? "no game has code %.4s-%.4s (check it, or the host stopped hosting)" :
+			"cannot reach the signalling brokers to look up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
+	}
+	if (p2p.browse_wanted != p2p.browsing)
+	{
+		p2p.browsing = p2p.browse_wanted;
+		if (p2p.browsing)
+			p2p_signal_start();
+		p2p_signal_browse(p2p.browsing);
+	}
 	if (p2p.join_requested)
 	{
 		/* the offer carries the public address, if there is one */
@@ -2335,7 +2472,7 @@ static void update_joining(void)
 		p2p.joining = 1;
 		p2p.join_time = p2p_now();
 		p2p_hex(p2p.join_host, P2P_IDENTIFIER_SIZE, name);
-		platform_log("Internet play: joining %s's game", name);
+		set_status("joining %s's game", name);
 		p2p_signal_start();
 		p2p_signal_join(p2p.join_host_hash, p2p.join_token);
 	}
@@ -2343,7 +2480,7 @@ static void update_joining(void)
 	{
 		p2p.joining = 0;
 		p2p_signal_stop_joining();
-		platform_log("Internet play: no answer from the invite's host; it may have stopped hosting or quit");
+		set_status("no answer from the invite's host; it may have stopped hosting or quit");
 	}
 }
 
@@ -2377,13 +2514,34 @@ static void update_hosting(void)
 			memcpy(bytes + P2P_KEY_HASH_SIZE, p2p.token, P2P_TOKEN_SIZE);
 			p2p_hex(bytes, sizeof(bytes), text);
 			snprintf(p2p.invite, sizeof(p2p.invite), "halo://join/%s", text);
+			/* the short code: 40 random bits, five to a character */
+			{
+				unsigned char random[5];
+				int index;
+
+				posix_random_bytes(random, sizeof(random));
+				for (index = 0; index < P2P_CODE_LENGTH; index++)
+				{
+					int bit = index * 5;
+					int value = ((random[bit / 8] << 8 | (bit / 8 + 1 < 5 ? random[bit / 8 + 1] : 0)) >>
+						(11 - bit % 8)) & 31;
+
+					p2p.code[index < 4 ? index : index + 1] = P2P_CODE_ALPHABET[value];
+				}
+				p2p.code[4] = '-';
+				p2p.code[9] = 0;
+			}
 		}
 		p2p.hosting = 1;
 		p2p.stun_started = 1;
 		p2p_signal_start();
-		p2p_signal_host(p2p.token);
-		platform_log("Internet play: hosting. Invite players with this link (it only works while this "
-			"copy of the game runs): %s", p2p.invite);
+		p2p_signal_host(p2p.token, p2p.code);
+		/* (the invite is a bearer token: anyone who reads it can join, so the
+		log shows only the host's part; the link itself goes to the
+		clipboard, or on the Vita to host_invite.txt) */
+		platform_log("Internet play: hosting with the invite halo://join/%.12s... (the whole link only works while "
+			"this copy of the game runs)", p2p.invite + strlen("halo://join/"));
+		set_status("hosting; others join with the code %s", p2p.code);
 		if (!p2p.invite_copied)
 		{
 			memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
@@ -2411,6 +2569,9 @@ static void update_hosting(void)
 			p2p.reported_player_maximum = maximum;
 			p2p_discord_set_hosting(p2p.invite + strlen("halo://join/"), count, maximum);
 		}
+		/* (each pass: p2p_signal.c sends the entry only when it changes) */
+		p2p_signal_set_lobby(p2p.lobby_public, p2p.code,
+			p2p.lobby_name[0] ? p2p.lobby_name : config_string("network.lobby_name"), count, maximum);
 	}
 }
 
@@ -2575,10 +2736,80 @@ const char *p2p_take_clipboard_text(void)
 	return result;
 }
 
+/* ---------- codes, the public lobby and the status, for menus */
+
+int p2p_hosting_code(char *code, int size)
+{
+	int result = 0;
+
+	if (!p2p.running || size < P2P_CODE_SIZE)
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	if (p2p.hosting && p2p.code[0])
+	{
+		memcpy(code, p2p.code, P2P_CODE_SIZE);
+		result = 1;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+void p2p_lobby_set_public(int listed)
+{
+	pthread_mutex_lock(&p2p_lock);
+	p2p.lobby_public = listed != 0;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_lobby_set_name(const char *name)
+{
+	pthread_mutex_lock(&p2p_lock);
+	snprintf(p2p.lobby_name, sizeof(p2p.lobby_name), "%s", name ? name : "");
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_lobby_browse(int on)
+{
+	pthread_mutex_lock(&p2p_lock);
+	p2p.browse_wanted = on != 0;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
+{
+	int result;
+
+	if (!p2p.running)
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	result = p2p.browsing && p2p_signal_lobby_entry(index, entry);
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+int p2p_status(char *text, int size)
+{
+	if (size <= 0)
+		return 0;
+	if (!p2p.running)
+	{
+		snprintf(text, (size_t)size, "off");
+		return 0;
+	}
+	pthread_mutex_lock(&p2p_lock);
+	if (p2p.status[0])
+		snprintf(text, (size_t)size, "%s", p2p.status);
+	else
+		snprintf(text, (size_t)size, p2p_signal_connected() ? "ready" : "starting");
+	pthread_mutex_unlock(&p2p_lock);
+	return 1;
+}
+
 /* ---------- invites from elsewhere */
 
-/* the first command line argument holding an invite (or an older
-version's, which the copy that takes it says it cannot join) */
+/* the first command line argument holding an invite or a code ABCD-EFGH
+(or an older version's invite, which the copy that takes it says it cannot
+join) */
 static int command_line_invite(char *text, int size)
 {
 	int index;
@@ -2586,8 +2817,9 @@ static int command_line_invite(char *text, int size)
 	for (index = 1; posix_command_line_argument(index, text, (posix_ulong)size); index++)
 	{
 		unsigned char hash[P2P_KEY_HASH_SIZE], token[P2P_TOKEN_SIZE];
+		char code[P2P_CODE_LENGTH + 1];
 
-		if (parse_invite(text, hash, token))
+		if (parse_invite(text, hash, token) || parse_code(text, code, 1))
 			return 1;
 	}
 	return 0;
@@ -2704,7 +2936,9 @@ static void poll_invite_file(void)
 	snprintf(taken, sizeof(taken), "%s/join_link.taken", platform_data_root());
 #endif
 	/* (taken first: a link the launcher writes while this reads is left for
-	the next look, not removed unread) */
+	the next look, not removed unread; a .taken left by a run that stopped
+	in between would make the rename fail on some file systems) */
+	remove(taken);
 	if (rename(path, taken) != 0)
 		return;
 	file = fopen(taken, "rb");
@@ -2931,6 +3165,7 @@ void p2p_initialize(unsigned long local_address)
 	for (index = 0; index < MAXIMUM_STREAMS; index++)
 		p2p.streams[index].socket = -1;
 	p2p.local_address = local_address;
+	p2p.lobby_public = config_boolean("network.lobby_public");
 	p2p.tunnel_socket = open_socket(SOCK_DGRAM, 0, network_short((unsigned short)tunnel_port), &p2p.tunnel_port);
 	if (p2p.tunnel_socket < 0)
 	{
