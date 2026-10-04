@@ -112,6 +112,9 @@ symbols in this file:
 #include "physics/collision_bsp_definitions.h"
 #include "objects/objects.h"
 #include "render/render.h"
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#endif
 #include "render/render_cameras_internal.h"
 #include "render/render_debug.h"
 #include "scenario/scenario.h"
@@ -654,6 +657,27 @@ static long planes_intersect_rectangle(
 	return _intersection_in;
 }
 
+#ifdef HALO_LINUX
+/* (port, debug: issue #9) HALO_CULL_RADIUS_SCALE=<x>: the objects' spheres
+are tested against the clusters' frustums x times as large (unset: 1, as
+the game). Culling matches the drawn frustum in every off-hardware test
+(triage/cull-status.md); on the hardware, objects that still flicker with
+a scale of 2-3 are not being culled by this test */
+static real structure_visibility_cull_radius_scale(
+	void)
+{
+	static real scale = -1.0f;
+
+	if (scale < 0.0f)
+	{
+		char const *setting = getenv("HALO_CULL_RADIUS_SCALE");
+
+		scale = setting && atof(setting) > 0.0 ? (real)atof(setting) : 1.0f;
+	}
+	return scale;
+}
+#endif
+
 short structure_visibility_find_objects(
 	long *result_indices,
 	short maximum_count,
@@ -688,6 +712,9 @@ short structure_visibility_find_objects(
 			}
 
 			get_bounding_sphere(object_index, &center, &radius);
+#ifdef HALO_LINUX
+			radius *= structure_visibility_cull_radius_scale();
+#endif
 			if (found_count < maximum_count &&
 				(render.cluster_index == NONE ||
 				render_frustum_sphere_visible(&rendered_cluster->frustum, &center, radius)))
