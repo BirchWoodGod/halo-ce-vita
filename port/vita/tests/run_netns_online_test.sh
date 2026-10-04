@@ -157,7 +157,8 @@ code|lobby)
 	two=$(two_players < "$out/joiner/run.log")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
-	grep -aq "network test: map chillout" "$out/host/run.log" || fail "the host never changed map"
+	# (the map change: code mode, which runs long enough for a game to end)
+	[ "$mode" = code ] && ! grep -aq "network test: map chillout" "$out/host/run.log" && fail "the host never changed map"
 	if [ "$rejoin" != 0 ]; then
 		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the joiner never left and joined again"
 		again=$(sed -n '/network test: joining again/,$p' "$out/joiner/run.log" | two_players)
