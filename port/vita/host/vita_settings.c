@@ -85,11 +85,10 @@ static const char *const fixed_defaults[][2] = {
 	{ "HALO_INTERPOLATION", "false" },
 	{ "HALO_NO_VSYNC", "1" },
 	{ "HALO_STATIC_SCENERY", "1" },
-	/* (the netcode is the platform's default, distributed: lockstep had
-	been the Vita's because a match's client could not reach its own host -
-	that was the Vita refusing a sendto on a connected datagram socket,
-	vita_net.c; with it fixed the distributed netcode plays, with less
-	waiting each frame. HALO_NETCODE=lockstep in env.txt plays the Xbox's) */
+	/* (the netcode is the distributed one, the only one network version 9
+	plays: a match's client once could not reach its own host because the
+	Vita refused a sendto on a connected datagram socket, fixed in
+	vita_net.c) */
 };
 
 static int panel_open, selected;
