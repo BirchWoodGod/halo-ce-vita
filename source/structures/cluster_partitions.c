@@ -147,6 +147,94 @@ static long cluster_partition_next_ready_datum(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (port) where reference_list_add_last appends to a cluster's list of datums,
+without walking it: each list's last node, remembered by the address of its
+head (a slot per head, by hash; a miss walks as before). A node stays in the
+list it was added to until reference_list_remove takes it out, which moves
+its list's entry to the node before it when it was the last (or forgets the
+entry); a node that is found again with its identifier and no next node is
+still that list's last. The whole table is forgotten when the lists
+are rebuilt (cluster_partition_make_valid, _copy) or the game state is
+replaced (halo_map_generation). The lights' and objects' reconnects walked
+their clusters' lists a node at a time, every tick they moved (~95 lights a
+tick in b30's beach fight). */
+#define LIST_TAIL_SLOTS 1024
+static struct
+{
+	long *head;
+	long tail;
+	unsigned long generation;
+	unsigned long map_generation;
+} list_tails[LIST_TAIL_SLOTS];
+static unsigned long list_tail_generation = 1;
+
+static unsigned long list_tail_slot(long *head)
+{
+	return (unsigned long)((((unsigned long)(size_t)head) >> 2) * 2654435761UL) % LIST_TAIL_SLOTS;
+}
+
+static void list_tail_forget(long *head)
+{
+	unsigned long slot = list_tail_slot(head);
+
+	if (list_tails[slot].head == head)
+		list_tails[slot].head = NULL;
+}
+
+static void cluster_list_add_last(
+	struct data_array *array,
+	long *first_reference_index,
+	long datum_index)
+{
+	unsigned long slot = list_tail_slot(first_reference_index);
+	long reference_index = datum_new(array);
+
+	if (reference_index != NONE)
+	{
+		struct data_reference *reference = (struct data_reference *)datum_get(array, reference_index);
+		long *link = NULL;
+
+		reference->datum_index = datum_index;
+		reference->next_reference_index = NONE;
+		if (list_tails[slot].head == first_reference_index &&
+			list_tails[slot].generation == list_tail_generation &&
+			list_tails[slot].map_generation == halo_map_generation &&
+			*first_reference_index != NONE)
+		{
+			struct data_reference *last = (struct data_reference *)datum_try_and_get(array, list_tails[slot].tail);
+
+			if (last && last != reference && last->next_reference_index == NONE)
+				link = &last->next_reference_index;
+		}
+		if (!link)
+		{
+			link = first_reference_index;
+			while (*link != NONE)
+			{
+				struct data_reference *last = (struct data_reference *)datum_get(array, *link);
+
+				if (!last)
+					break;
+				link = &last->next_reference_index;
+			}
+		}
+		__atomic_thread_fence(__ATOMIC_RELEASE);
+		halo_epoch_datum_ready(array, reference_index & 0xFFFF);
+		*link = reference_index;
+		list_tails[slot].head = first_reference_index;
+		list_tails[slot].tail = reference_index;
+		list_tails[slot].generation = list_tail_generation;
+		list_tails[slot].map_generation = halo_map_generation;
+	}
+	else
+	{
+		match_vassert("..\\objects\\reference_lists.h", 0x5b, FALSE,
+			csprintf(temporary, "couldn't add to reference list %s", array->name));
+	}
+}
+#endif
+
 void reference_list_remove(
 	struct data_array *array,
 	long *first_reference_index,
@@ -154,20 +242,42 @@ void reference_list_remove(
 {
 	long *reference_index = first_reference_index;
 	struct data_reference *reference;
+#ifdef HALO_LINUX
+	/* (the list's remembered last node, kept: the node before a last node
+	taken out becomes the last) */
+	long previous_index = NONE;
+#endif
 
 	while (*reference_index != NONE)
 	{
 		reference = (struct data_reference *)datum_get(array, *reference_index);
 		if (reference->datum_index == datum_index)
 		{
+#ifdef HALO_LINUX
+			unsigned long slot = list_tail_slot(first_reference_index);
+
+			if (list_tails[slot].head == first_reference_index && list_tails[slot].tail == *reference_index)
+			{
+				if (previous_index != NONE && reference->next_reference_index == NONE)
+					list_tails[slot].tail = previous_index;
+				else
+					list_tails[slot].head = NULL;
+			}
+#endif
 			datum_delete(array, *reference_index);
 			*reference_index = reference->next_reference_index;
 
 			return;
 		}
 
+#ifdef HALO_LINUX
+		previous_index = *reference_index;
+#endif
 		reference_index = &reference->next_reference_index;
 	}
+#ifdef HALO_LINUX
+	list_tail_forget(first_reference_index);
+#endif
 
 	match_vassert(
 		"..\\objects\\reference_lists.h",
@@ -252,6 +362,9 @@ void cluster_partition_new(
 void cluster_partition_make_valid(
 	struct cluster_partition *partition)
 {
+#ifdef HALO_LINUX
+	list_tail_generation++;
+#endif
 	csmemset(
 		partition->cluster_first_data_references,
 		NONE,
@@ -293,6 +406,9 @@ void cluster_partition_copy(
 	struct cluster_partition *result,
 	struct cluster_partition const *source)
 {
+#ifdef HALO_LINUX
+	list_tail_generation++;
+#endif
 	csmemcpy(
 		result->cluster_first_data_references,
 		source->cluster_first_data_references,
@@ -419,7 +535,7 @@ void cluster_partition_reconnect(
 			cluster_index);
 
 #ifdef HALO_LINUX
-		reference_list_add_last(
+		cluster_list_add_last(
 			partition->data_reference_data,
 			code_00180fa0(partition, cluster_index),
 			datum_index);
