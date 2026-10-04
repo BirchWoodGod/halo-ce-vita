@@ -279,6 +279,10 @@ int vita_settings_input(const struct vita_host_pad *pad)
     int message_opened = 0;
 
 	previous_buttons = buttons;
+	/* (the system's ad hoc dialog reads the pad itself: the game must not
+	act on the same presses) */
+	if (vita_adhoc_state(NULL, 0) == 1)
+		return 1;
     pthread_mutex_lock(&message_lock);
     if (message_pending)
     {

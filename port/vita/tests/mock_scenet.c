@@ -21,8 +21,12 @@ behaviour where it differs from Linux's (run_vita_net_test.sh builds it
 The ad hoc and system calls vita_net.c also makes are stubs.
 */
 
+#include <psp2/apputil.h>
+#include <psp2/common_dialog.h>
+#include <psp2/kernel/clib.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/netcheck_dialog.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
 #include <psp2/pspnet_adhoc.h>
@@ -433,9 +437,14 @@ int sceSysmoduleLoadModule(SceSysmoduleModuleId id)
 
 /* ---------- stubs for the ad hoc probe and the self-test's thread */
 
-int sceNetAdhocInit(void) { return -1; }
-int sceNetAdhocctlInit(const SceNetAdhocctlAdhocId *adhoc_id) { (void)adhoc_id; return -1; }
-int sceNetAdhocctlGetEtherAddr(SceNetEtherAddr *addr) { (void)addr; return -1; }
+int mock_adhoc_inits;
+int sceNetAdhocInit(void) { mock_adhoc_inits++; return 0; }
+int sceNetAdhocctlInit(const SceNetAdhocctlAdhocId *adhoc_id) { (void)adhoc_id; return 0; }
+int sceNetAdhocctlGetEtherAddr(SceNetEtherAddr *addr)
+{
+	memcpy(addr->data, "\x02\x00\x7f\x00\x00\xdc", 6);
+	return 0;
+}
 int sceNetAdhocctlGetPeerList(int *buflen, void *buf) { (void)buflen; (void)buf; return -1; }
 int sceNetCtlAdhocGetState(int *state) { (void)state; return -1; }
 int sceNetCtlAdhocGetInAddr(SceNetInAddr *inaddr) { (void)inaddr; return -1; }
@@ -557,6 +566,82 @@ int sceNetAdhocPdpRecv(int id, SceNetEtherAddr *saddr, SceUShort16 *sport, void 
 	*sport = ntohs(from.sin_port);
 	*len = (int)received;
 	return 0;
+}
+
+/* ---------- the network check dialog, scripted: it runs for
+mock_dialog_running_polls status reads, then finishes with
+mock_dialog_result (SCE_COMMON_DIALOG_RESULT_OK: in a group, whose
+address is MOCK_ADHOC_MAC's 02:00:7f:00:00:dc) */
+
+int mock_dialog_running_polls = 3, mock_dialog_result = SCE_COMMON_DIALOG_RESULT_OK;
+int mock_dialog_inits, mock_dialog_terms, mock_dialog_mode;
+char mock_dialog_group[9];
+int mock_gxm_dialog_active, mock_gxm_dialog_switches;
+static int dialog_polls;
+
+void *sceClibMemset(void *dst, int ch, SceSize len)
+{
+	return memset(dst, ch, len);
+}
+
+SceInt32 sceNetCheckDialogInit(SceNetCheckDialogParam *param)
+{
+	mock_dialog_inits++;
+	mock_dialog_mode = param->mode;
+	memcpy(mock_dialog_group, param->groupName ? (const char *)param->groupName->data : "", 8);
+	mock_dialog_group[8] = 0;
+	dialog_polls = 0;
+	return 0;
+}
+
+SceCommonDialogStatus sceNetCheckDialogGetStatus(void)
+{
+	return dialog_polls++ < mock_dialog_running_polls ? SCE_COMMON_DIALOG_STATUS_RUNNING :
+		SCE_COMMON_DIALOG_STATUS_FINISHED;
+}
+
+SceInt32 sceNetCheckDialogAbort(void) { return 0; }
+
+SceInt32 sceNetCheckDialogGetResult(SceNetCheckDialogResult *result)
+{
+	result->result = mock_dialog_result;
+	return 0;
+}
+
+SceInt32 sceNetCheckDialogTerm(void)
+{
+	mock_dialog_terms++;
+	return 0;
+}
+
+int sceCommonDialogSetConfigParam(const SceCommonDialogConfigParam *configParam)
+{
+	(void)configParam;
+	return 0;
+}
+
+int sceAppUtilSystemParamGetInt(unsigned int paramId, int *value)
+{
+	(void)paramId;
+	*value = 1;
+	return 0;
+}
+
+int sceNetAdhocctlGetParameter(SceNetAdhocctlParameter *parameter)
+{
+	memset(parameter, 0, sizeof(*parameter));
+	parameter->channel = 1;
+	memcpy(parameter->groupName.data, mock_dialog_group, 8);
+	return 0;
+}
+
+int sceNetCtlAdhocDisconnect(void) { return 0; }
+
+void vgxm_common_dialog(int active)
+{
+	if (active != mock_gxm_dialog_active)
+		mock_gxm_dialog_switches++;
+	mock_gxm_dialog_active = active;
 }
 
 SceUInt64 sceKernelGetProcessTimeWide(void)
