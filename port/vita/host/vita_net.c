@@ -17,8 +17,12 @@ select is a one-shot epoll; and the stack is BSD's, whose connected
 datagram sockets refuse a sendto naming a destination (posix_socket_sendto).
 */
 
+#include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
+#include <psp2/pspnet_adhoc.h>
+#include <psp2/pspnet_adhocctl.h>
 #include <psp2/sysmodule.h>
 
 #include <pthread.h>
@@ -60,6 +64,12 @@ static volatile unsigned char socket_listening[SOCKET_IDENTIFIERS];
 
 static __thread int last_error;
 static int net_state; /* 0 not tried, 1 up, -1 failed */
+
+/* ad hoc play (below): 0 not in a group; 1 joining one (the system dialog
+is up); 2 in a group, whose address this machine has there; -1 the last
+attempt failed */
+static volatile int adhoc_state;
+static SceNetEtherAddr adhoc_address;
 
 static int net_ready(void)
 {
@@ -1173,9 +1183,33 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 	return ready;
 }
 
+/* ad hoc play (HALO_NET_ADHOC, vita_main.c from the settings panel): an
+address for the game even without Wi-Fi. In the ad hoc group the Vita has
+no infrastructure address, and the game takes a machine without one as
+having no network (XNetGetEthernetLinkStatus, xnet.c: "not connected",
+and no system link); its traffic to the other machines goes through
+internet play's stand-ins on 127.0.0.1 (p2p_adhoc.c), so this address is
+never sent to. 169.254 and the MAC's last two bytes (link-local, as an IP
+stack would pick), or 169.254.1.1 before there is a group. */
+static posix_ulong adhoc_stand_in_address(void)
+{
+	const char *setting = getenv("HALO_NET_ADHOC");
+	unsigned char low = 1, high = 1;
+
+	if (!setting || (strcmp(setting, "true") && strcmp(setting, "1")))
+		return 0;
+	if (adhoc_state == 2)
+	{
+		high = adhoc_address.data[4];
+		low = adhoc_address.data[5] ? adhoc_address.data[5] : 1;
+	}
+	return 169u | 254u << 8 | (unsigned int)high << 16 | (unsigned int)low << 24;
+}
+
 /* this machine's address, from the network control service (the game's
 link check asks every frame: port/linux/src/xnet.c keeps the answer a
-while; HALO_NET_TRACE counts the queries and their time) */
+while; HALO_NET_TRACE counts the queries and their time), else ad hoc
+play's stand-in */
 posix_ulong posix_local_ipv4_address(void)
 {
 	SceNetCtlInfo information;
@@ -1184,7 +1218,7 @@ posix_ulong posix_local_ipv4_address(void)
 	posix_ulong result = 0;
 
 	if (!net_ready())
-		return 0;
+		return adhoc_stand_in_address();
 	started = trace_on() ? vita_host_time_us() : 0;
 	memset(&information, 0, sizeof(information));
 	if (sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS, &information) >= 0 &&
@@ -1197,7 +1231,7 @@ posix_ulong posix_local_ipv4_address(void)
 		__atomic_fetch_add(&trace_local_address.queries, 1, __ATOMIC_RELAXED);
 		__atomic_fetch_add(&trace_local_address.query_us, vita_host_time_us() - started, __ATOMIC_RELAXED);
 	}
-	return result;
+	return result ? result : adhoc_stand_in_address();
 }
 
 posix_ulong posix_resolve_ipv4(const char *host)
@@ -1227,11 +1261,6 @@ and the SDK names no call that creates or joins a group, so the probe looks
 for the system joining one on its own (an ad hoc state, an ad hoc address,
 peers) and tries a peer-to-peer datagram socket with a broadcast. Run it on
 two Vitas side by side to see them find each other. */
-
-#include <psp2/pspnet_adhoc.h>
-#include <psp2/pspnet_adhocctl.h>
-#include <psp2/kernel/threadmgr.h>
-#include <stdio.h>
 
 static void probe_log(const char *step, int result)
 {
@@ -1328,6 +1357,148 @@ void vita_net_adhoc_probe(void)
 	thread = sceKernelCreateThread("adhoc_probe", adhoc_probe_thread, 0x10000100, 0x10000, 0, 0, NULL);
 	if (thread >= 0)
 		sceKernelStartThread(thread, 0, NULL);
+}
+
+/* ---------- ad hoc play's group (posix_adhoc_*, for port/linux/src/p2p_adhoc.c)
+
+The PSP-style ad hoc network (ScePspnetAdhoc), which is what Vita homebrew
+that plays ad hoc uses (vitaQuake's net_adhoc_psp2.c, on hardware): the
+system's network check dialog joins a group (vita_adhoc_connect), and
+datagrams then go between machines' MAC addresses on PDP ports. The SDK
+names no call that creates or joins a group (no sceNetAdhocctlCreate or
+Connect): the dialog is the way in, which is why HALO_ADHOC_PROBE, which
+only starts the libraries, never saw a group.
+
+PDP calls with no flag wait (up to their timeout); with
+SCE_NET_ADHOC_F_NONBLOCK they return would-block at once. A receive is a
+wait with a timeout, so the bridge's thread sleeps until a datagram comes;
+if this firmware's waits return at once instead (seen as many empty
+receives each much shorter than asked), receives fall back to polling
+every 2 ms, logged once. */
+
+static int adhoc_pdp = -1;
+static int adhoc_polling;
+static unsigned int adhoc_short_waits;
+
+static int adhoc_failed(int result)
+{
+	switch ((unsigned int)result)
+	{
+	case SCE_ERROR_NET_ADHOC_WOULD_BLOCK:
+	case SCE_ERROR_NET_ADHOC_TIMEOUT:
+		return 0;
+	default:
+		return result < 0;
+	}
+}
+
+int posix_adhoc_ready(unsigned char *address)
+{
+	if (adhoc_state != 2)
+		return 0;
+	memcpy(address, adhoc_address.data, 6);
+	return 1;
+}
+
+int posix_adhoc_open(unsigned short port)
+{
+	char line[96];
+
+	posix_adhoc_close();
+	/* (a 32 KB receive buffer; the SDK's examples use 8 KB, tried next) */
+	adhoc_pdp = sceNetAdhocPdpCreate(&adhoc_address, port, 0x8000, 0);
+	if (adhoc_pdp < 0)
+		adhoc_pdp = sceNetAdhocPdpCreate(&adhoc_address, port, 0x2000, 0);
+	snprintf(line, sizeof(line), "adhoc: PDP port %u -> 0x%08x", port, (unsigned int)adhoc_pdp);
+	vita_host_log(line);
+	if (adhoc_pdp < 0)
+	{
+		adhoc_pdp = -1;
+		return -1;
+	}
+	adhoc_short_waits = 0;
+	return 0;
+}
+
+void posix_adhoc_close(void)
+{
+	if (adhoc_pdp >= 0)
+		sceNetAdhocPdpDelete(adhoc_pdp, 0);
+	adhoc_pdp = -1;
+}
+
+int posix_adhoc_send(const unsigned char *address, unsigned short port, const void *data, int size)
+{
+	int result;
+
+	if (adhoc_pdp < 0)
+		return -1;
+	result = sceNetAdhocPdpSend(adhoc_pdp, (const SceNetEtherAddr *)address, port, data, size, 0,
+		SCE_NET_ADHOC_F_NONBLOCK);
+	if (adhoc_failed(result))
+	{
+		static int logged;
+
+		if (logged++ < 8)
+		{
+			char line[96];
+
+			snprintf(line, sizeof(line), "adhoc: PDP send of %d bytes -> 0x%08x", size, (unsigned int)result);
+			vita_host_log(line);
+		}
+		return -1;
+	}
+	return result < 0 ? 0 : size;
+}
+
+int posix_adhoc_receive(unsigned char *address, unsigned short *port, void *data, int size, posix_ulong timeout)
+{
+	SceNetEtherAddr from;
+	SceUShort16 from_port = 0;
+	int length = size;
+	int result;
+	unsigned long long started = sceKernelGetProcessTimeWide();
+
+	if (adhoc_pdp < 0)
+		return -1;
+	result = sceNetAdhocPdpRecv(adhoc_pdp, &from, &from_port, data, &length, adhoc_polling ? 0 : (unsigned int)timeout,
+		adhoc_polling ? SCE_NET_ADHOC_F_NONBLOCK : 0);
+	if (result >= 0)
+	{
+		adhoc_short_waits = 0;
+		memcpy(address, from.data, 6);
+		*port = from_port;
+		return length;
+	}
+	if (adhoc_failed(result))
+	{
+		char line[96];
+
+		snprintf(line, sizeof(line), "adhoc: PDP receive -> 0x%08x (the group is gone?)", (unsigned int)result);
+		vita_host_log(line);
+		return -1;
+	}
+	if (adhoc_polling)
+	{
+		sceKernelDelayThread(2000);
+		return 0;
+	}
+	/* (a wait that came back at once, empty: count, and poll if they keep
+	on) */
+	if (timeout >= 4000 && sceKernelGetProcessTimeWide() - started < timeout / 4)
+	{
+		if (++adhoc_short_waits == 20)
+		{
+			adhoc_polling = 1;
+			vita_host_log("adhoc: PDP receives do not wait on this firmware: polling every 2 ms");
+		}
+		sceKernelDelayThread(2000);
+	}
+	else
+	{
+		adhoc_short_waits = 0;
+	}
+	return 0;
 }
 
 /* ---------- self-test (HALO_NET_SELFTEST=1)

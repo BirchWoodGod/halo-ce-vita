@@ -20,6 +20,8 @@
 #            one LAN with the host (it must never list or join the game)
 #   pchost   the other way round: a PC build hosts, a Vita build on its LAN
 #            must never list or join the game
+#   adhoc    online off, ad hoc on: the two machines' only link to each other
+#            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   solo     online off (the Vita's default): one copy hosts Blood Gulch
 #            alone; there must be no p2p thread, and the game must run
 #
@@ -218,6 +220,32 @@ pchost)
 	grep -aq "ignoring a host that is not a Vita" "$out/vita_lan/data/debug.txt" ||
 		fail "the Vita on the LAN never heard the PC's advertisement (so the test proves nothing)"
 	;;
+adhoc)
+	# a link between the two machines alone stands for the ad hoc group
+	# (posix_net.c emulates the Vita's ad hoc sockets over UDP: the game's own
+	# broadcasts stay on each machine's LAN, so it finds the other only through
+	# the ad hoc bridge, p2p_adhoc.c); online off
+	ip link add a_host type veth peer name a_join
+	ip link set a_host netns "$host_machine"
+	ip link set a_join netns "$join_machine"
+	in_ns "$host_machine" ip addr add 10.99.0.1/30 dev a_host
+	in_ns "$host_machine" ip link set a_host up
+	in_ns "$join_machine" ip addr add 10.99.0.2/30 dev a_join
+	in_ns "$join_machine" ip link set a_join up
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_ONLINE=false HALO_NET_ADHOC=true \
+		HALO_NET_ADHOC_EMULATE=10.99.0.1,10.99.0.2; host_pid=$last_pid
+	sleep 5
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NET_ADHOC=true \
+		HALO_NET_ADHOC_EMULATE=10.99.0.2,10.99.0.1 HALO_NETWORK_TEST=join HALO_NETWORK_TEST_REJOIN=$rejoin \
+		HALO_TEST_INPUT=bot:2; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	echo "--- host"; grep -aE "ad hoc|Internet play|network test: (hosting|map|game|the next)" "$out/host/run.log" | head -20
+	echo "--- joiner"; grep -aE "ad hoc|Internet play|network test: (join|leav)" "$out/joiner/run.log" | head -20
+	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+	grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
+	;;
 solo)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=local:bloodgulch \
 		HALO_NETWORK_TEST_START=10 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
@@ -229,7 +257,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|pc|pchost|solo" >&2
+	echo "usage: $0 code|lobby|pc|pchost|adhoc|solo" >&2
 	exit 2
 	;;
 esac

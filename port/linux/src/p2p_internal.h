@@ -86,6 +86,9 @@ none does (a session that has ended is never taken up again: its keys'
 packet numbers would start again) */
 int p2p_peer_reoffered(const unsigned char *identifier, const unsigned char *secret,
 	const struct p2p_candidate *candidates, int count);
+/* whether the session of that secret has ended (one never comes back: its
+packet numbers would start over); under p2p_lock */
+int p2p_session_retired(const unsigned char *secret);
 /* an invite that arrived on the p2p thread (from Discord, or another copy
 of the game) */
 void p2p_invite_received(const char *text);
@@ -122,6 +125,16 @@ void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token)
 void p2p_signal_stop_joining(void);
 /* whether any broker is connected */
 int p2p_signal_connected(void);
+
+/* ---------- p2p_adhoc.c: ad hoc play's bridge between the group and the
+tunnel */
+
+/* starts the bridge (network.adhoc), with the tunnel's port (network byte
+order); called from p2p_initialize */
+void p2p_adhoc_start(unsigned short tunnel_port);
+/* offers the group's machines to p2p.c as peers; the p2p thread's, each
+pass, under p2p_lock */
+void p2p_adhoc_update(void);
 
 /* ---------- p2p_crypto.c */
 
