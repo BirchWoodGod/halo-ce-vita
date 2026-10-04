@@ -500,6 +500,74 @@ void hud_play_unit_sounds(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) the HUD's warning sounds (shield charging, low and empty, health
+low, damage) start and stop sounds, looping sounds and sound cache blocks.
+The render plays them (hud_draw_screen), and with the tick on its own
+thread that ran under the tick's sound_render and its own sound starts: the
+sound the tick had just made was gone (#20's dump: sound_new_impulse), and
+a sound's cache block was deleted with packets of it still playing (#21:
+sound_cache_sound_hardware_unlock). While a tick runs the call is made at
+the join instead, once per local player, with the latest show_hud. */
+int halo_tick_thread_defer(void (*call)(void));
+
+/* per local player: 0 nothing asked, 1 hidden HUD, 2 shown */
+static signed char deferred_unit_sounds[MAXIMUM_LOCAL_PLAYERS];
+static boolean deferred_unit_sounds_queued;
+
+static void hud_play_deferred_unit_sounds(
+	void)
+{
+	short local_player_index;
+
+	deferred_unit_sounds_queued = FALSE;
+	for (local_player_index = 0;
+		local_player_index < MAXIMUM_LOCAL_PLAYERS;
+		local_player_index++)
+	{
+		signed char request = deferred_unit_sounds[local_player_index];
+		long player_index;
+
+		deferred_unit_sounds[local_player_index] = 0;
+		if (!request)
+			continue;
+		player_index = local_player_get_player_index(local_player_index);
+		if (player_index != NONE)
+		{
+			struct player_datum *player = player_try_and_get(player_index);
+
+			if (player && player->local_player_index == local_player_index)
+				hud_play_unit_sounds(player, request == 2);
+		}
+	}
+
+	return;
+}
+
+void hud_play_unit_sounds_from_render(
+	struct player_datum const *player,
+	boolean show_hud)
+{
+	short local_player_index = player->local_player_index;
+
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS)
+	{
+		deferred_unit_sounds[local_player_index] = show_hud ? 2 : 1;
+		if (deferred_unit_sounds_queued)
+			return;
+		if (halo_tick_thread_defer(hud_play_deferred_unit_sounds))
+		{
+			deferred_unit_sounds_queued = TRUE;
+			return;
+		}
+		deferred_unit_sounds[local_player_index] = 0;
+	}
+	hud_play_unit_sounds(player, show_hud);
+
+	return;
+}
+#endif
+
 /* ---------- private code */
 
 static void hud_update_unit_local_player(

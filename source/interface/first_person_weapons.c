@@ -622,6 +622,66 @@ short first_person_weapon_get_marker_by_name(
 	return marker_count;
 }
 
+#ifdef HALO_LINUX
+/* (port) the render shows and hides the first-person weapon (a zoom, a
+vehicle's third-person view), and showing or hiding it builds or deletes the
+locations of the weapon's effects and stops its particles: game state the
+tick walks (effects_update, particles_update) and changes. With the tick on
+its own thread that ran under it (the logs' "new of effect location on the
+render thread while a tick runs (unsafe)", in b40's tank fights, #20), and
+both threads could flip the same visible flag (the tick hides the weapon
+on a drop or switch). While a tick runs the change is made at the join
+instead, with the view as it is then; the weapon shows or hides a frame
+later. */
+int halo_tick_thread_defer(void (*call)(void));
+
+static boolean first_person_weapon_visibility_deferred[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+static boolean first_person_weapon_visibility_queued;
+
+static void first_person_weapons_apply_deferred_visibility(
+	void)
+{
+	short local_player_index;
+
+	first_person_weapon_visibility_queued= FALSE;
+	for (local_player_index= 0; local_player_index<MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; local_player_index++)
+	{
+		if (first_person_weapon_visibility_deferred[local_player_index])
+		{
+			struct first_person_weapon *first_person_weapon= first_person_weapon_get(local_player_index);
+
+			first_person_weapon_visibility_deferred[local_player_index]= FALSE;
+			if (first_person_weapon->unit_index!=NONE &&
+				first_person_weapon->weapon_index!=NONE)
+			{
+				first_person_weapon_set_visibility(local_player_index,
+					director_get_perspective(local_player_index)==_director_perspective_first_person &&
+					player_control_get_zoom_level(local_player_index)==NONE);
+			}
+		}
+	}
+
+	return;
+}
+
+/* TRUE: the change is made at the join */
+static boolean first_person_weapon_defer_visibility(
+	short local_player_index)
+{
+	if (local_player_index<0 || local_player_index>=MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return FALSE;
+	if (!first_person_weapon_visibility_queued)
+	{
+		if (!halo_tick_thread_defer(first_person_weapons_apply_deferred_visibility))
+			return FALSE;
+		first_person_weapon_visibility_queued= TRUE;
+	}
+	first_person_weapon_visibility_deferred[local_player_index]= TRUE;
+
+	return TRUE;
+}
+#endif
+
 void first_person_weapon_render_update(
 	void)
 {
@@ -635,6 +695,10 @@ void first_person_weapon_render_update(
 			boolean visible= director_get_perspective(render.local_player_index)==_director_perspective_first_person &&
 				player_control_get_zoom_level(render.local_player_index)==NONE;
 
+#ifdef HALO_LINUX
+			if (visible==first_person_weapon->visible ||
+				!first_person_weapon_defer_visibility(render.local_player_index))
+#endif
 			first_person_weapon_set_visibility(render.local_player_index, visible);
 			if (first_person_weapon->visible)
 			{
