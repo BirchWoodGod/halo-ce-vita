@@ -791,6 +791,58 @@ boolean object_unmarked_function(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (tick_hash.c, HALO_TICK_HASH_MASK) every object's marker stamp saved and
+cleared, or put back: the hash leaves the stamps out */
+int halo_tick_hash_object_marks(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	for (absolute_index = 0; absolute_index < object_header_data->count && count < maximum; absolute_index++)
+	{
+		struct object_header_datum *header = (struct object_header_datum *)
+			((char *)object_header_data->data + object_header_data->size * absolute_index);
+
+		if (!header->identifier || !header->datum)
+			continue;
+		if (restore)
+			header->datum->object.magic_number = saved[count++];
+		else
+		{
+			saved[count++] = header->datum->object.magic_number;
+			header->datum->object.magic_number = 0;
+		}
+	}
+	return count;
+}
+
+/* (tick_hash.c, HALO_TICK_HASH_MASK) the objects' pool hashed as its live
+objects, in header order (the pool's free and compacted-away bytes keep
+stale stamps); called with the stamps cleared */
+unsigned long long halo_tick_hash_live_objects(void)
+{
+	unsigned long long hash = 0xCBF29CE484222325ULL;
+	short absolute_index;
+
+	for (absolute_index = 0; absolute_index < object_header_data->count; absolute_index++)
+	{
+		struct object_header_datum *header = (struct object_header_datum *)
+			((char *)object_header_data->data + object_header_data->size * absolute_index);
+		const unsigned char *bytes;
+		long size;
+
+		if (!header->identifier || !header->datum)
+			continue;
+		hash = (hash ^ (unsigned long)absolute_index) * 0x100000001B3ULL;
+		bytes = (const unsigned char *)header->datum;
+		for (size = 0; size + 4 <= header->data_size; size += 4)
+			hash = (hash ^ *(const unsigned int *)(bytes + size)) * 0x100000001B3ULL;
+	}
+	return hash;
+}
+#endif
+
 boolean object_mark_function(
 	long object_index)
 {
