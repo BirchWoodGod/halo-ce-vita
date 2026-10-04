@@ -3612,6 +3612,9 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 
 /* ---------- presentation */
 
+/* (main.c, HALO_TEST_COMMANDS @shot) the next frame's screenshot name */
+extern char halo_screenshot_name[64];
+
 static void write_screenshot(struct render_target_entry *target)
 {
 	const char *directory = *config_string("debug.screenshot_directory") ?
@@ -3641,7 +3644,11 @@ static void write_screenshot(struct render_target_entry *target)
 #endif
 		pixels[row * 4 + 3] = 0xff;
 	}
-	snprintf(path, sizeof(path), "%s/frame%05lu.bmp", directory, device.frame);
+	if (halo_screenshot_name[0])
+		snprintf(path, sizeof(path), "%s/%s.bmp", directory, halo_screenshot_name);
+	else
+		snprintf(path, sizeof(path), "%s/frame%05lu.bmp", directory, device.frame);
+	halo_screenshot_name[0] = 0;
 	file = fopen(path, "wb");
 	if (file)
 	{
@@ -3681,7 +3688,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		if (trace_frame())
 			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
 				back_buffer->target.texture);
-		if (screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0)
+		if ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) || halo_screenshot_name[0])
 			write_screenshot(back_buffer);
 
 		platform_video_drawable_size(&window_width, &window_height);
