@@ -798,6 +798,26 @@ void network_server_allow_client_connections(
 	return;
 }
 
+/* (port) an unreliable write's failure, which the game drops unseen: in
+debug.txt, the first few. On the Vita every client update failed so
+(vita_net.c, posix_socket_sendto), and nothing said why the host then
+removed the client "due to timeout in-game". */
+static void network_connection_unreliable_write_failed(
+	long result)
+{
+	static long failures = 0;
+
+	if (result < 0 && result != _transport_result_operation_would_block && failures < 8)
+	{
+		failures++;
+		error(
+			_error_silent,
+			"unreliable write failed with '%s' (failure %d; only the first 8 are logged)",
+			transport_error_to_string((short)result),
+			failures);
+	}
+}
+
 boolean network_connection_write(
 	struct network_connection *connection,
 	void *message,
@@ -856,6 +876,7 @@ boolean network_connection_write(
 			message,
 			buffer_size,
 			dest_address);
+		network_connection_unreliable_write_failed(result);
 		network_connection_log_traffic_event(
 			_network_connection_traffic_event_datagram_sent,
 			buffer_size,
@@ -927,10 +948,10 @@ boolean network_connection_write(
 		{
 			if ((boolean)endpoint_connected(connection->unreliable_endpoint))
 			{
-				write_endpoint(
+				network_connection_unreliable_write_failed(write_endpoint(
 					connection->unreliable_endpoint,
 					message,
-					buffer_size);
+					buffer_size));
 				network_connection_log_traffic_event(
 					_network_connection_traffic_event_datagram_sent,
 					buffer_size,
@@ -939,11 +960,11 @@ boolean network_connection_write(
 		}
 		else
 		{
-			write_to_endpoint(
+			network_connection_unreliable_write_failed(write_to_endpoint(
 				connection->unreliable_endpoint,
 				message,
 				buffer_size,
-				dest_address);
+				dest_address));
 			network_connection_log_traffic_event(
 				_network_connection_traffic_event_datagram_sent,
 				buffer_size,
