@@ -55,6 +55,11 @@ float vita_movie_display_aspect(void);
 (vita_movie_aspect.c): its track header's display size, else its pixels'
 aspect, else width / height; *source names which */
 float vita_movie_file_aspect(const char *path, unsigned long width, unsigned long height, const char **source);
+/* the shape a movie is shown at, from vita_movie_file_aspect's answer and
+the player's aspect ratio (0: none): the file's, when it gives one; the
+player's only when the file gives nothing but its size */
+float vita_movie_choose_aspect(float file_aspect, const char **source, unsigned long width, unsigned long height,
+	float player_aspect);
 
 /* ---------- the controls (port/vita/host/vita_input.c) */
 
