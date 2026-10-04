@@ -48,7 +48,7 @@ Beta 1 is out; beta 2 fixes most of what testers reported:
 - Still being looked at: trees and Covenant shields flickering at the
   screen's edges, water on The Silent Cartographer.
 
-## 1.1.0: multiplayer
+## 1.1.0: multiplayer and a steady 30 fps
 
 - **Online play between Vitas**: host a public lobby or a private one with
   a short code, join from the settings panel. Built on iamhaller's
@@ -57,13 +57,13 @@ Beta 1 is out; beta 2 fixes most of what testers reported:
 - **QR code invites**: the host shows its lobby code as a QR code, and the
   joiner scans it with the Vita's camera.
 - **A relay** for networks that cannot connect to each other directly.
+- **A steady 30 fps**, including the biggest fights.
 
 ## Later
 
 - **Campaign co-op over the network**: play the campaign together on two
   Vitas, online or ad hoc. The Xbox game only had split-screen co-op on
   one console, so this is new work for the port.
-- **A steady 30 fps** in the biggest fights.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
 ## Help wanted
