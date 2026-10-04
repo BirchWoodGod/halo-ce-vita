@@ -2408,6 +2408,11 @@ static int join_invite(const char *text)
 	return 1;
 }
 
+int p2p_running(void)
+{
+	return p2p.running;
+}
+
 int p2p_join_invite(const char *text)
 {
 	int result;

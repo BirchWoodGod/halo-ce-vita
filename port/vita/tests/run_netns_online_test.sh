@@ -20,6 +20,7 @@
 #            one LAN with the host (it must never list or join the game)
 #   pchost   the other way round: a PC build hosts, a Vita build on its LAN
 #            must never list or join the game
+#   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   solo     online off (the Vita's default): one copy hosts Blood Gulch
@@ -33,6 +34,7 @@
 #   HALO_TEST_REJOIN   seconds into its game the joiner leaves (code; 0 never)
 #   HALO_TEST_OUT    where the logs go (kept)
 #   HALO_TEST_CPUS   taskset CPU lists for the two copies ("0-7 8-15")
+#   HALO_TEST_ENV    more VAR=value settings for both copies (profiling)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -114,7 +116,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		HALO_DATA_ROOT="$out/$name/data" HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 \
 		HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 \
 		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false \
-		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 "$@" \
+		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 "$@" ${HALO_TEST_ENV:-} \
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!
@@ -220,6 +222,28 @@ pchost)
 	grep -aq "ignoring a host that is not a Vita" "$out/vita_lan/data/debug.txt" ||
 		fail "the Vita on the LAN never heard the PC's advertisement (so the test proves nothing)"
 	;;
+lan)
+	# online off, both on the host's LAN: system link as on a Wi-Fi network
+	# (the Vita's default), the baseline for the others
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_ONLINE=false; host_pid=$last_pid
+	sleep 5
+	run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_TEST_INPUT=bot:2
+	join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+	grep -aq "Internet play: network thread started" "$out/joiner/run.log" && fail "the p2p thread started with online off"
+	;;
 adhoc)
 	# a link between the two machines alone stands for the ad hoc group
 	# (posix_net.c emulates the Vita's ad hoc sockets over UDP: the game's own
@@ -257,7 +281,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|pc|pchost|adhoc|solo" >&2
+	echo "usage: $0 code|lobby|lan|pc|pchost|adhoc|solo" >&2
 	exit 2
 	;;
 esac

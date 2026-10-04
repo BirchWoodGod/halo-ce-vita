@@ -67,6 +67,61 @@ enum
 	P2P_BROADCAST_PEERS = 127,
 };
 
+/* (HALO_NET_PROFILE=1) the socket queries (getsockname, getsockopt) these
+hooks make for internet play's bookkeeping, each a call into the Vita's
+network library, against the game's sends: logged every 10 seconds */
+static struct
+{
+	int enabled;
+	unsigned long sends, queries, time;
+} query_profile = { -1 };
+
+static void query_profile_count(int sends, int queries)
+{
+	unsigned long now;
+
+	if (query_profile.enabled < 0)
+	{
+		const char *setting = getenv("HALO_NET_PROFILE");
+
+		query_profile.enabled = setting && atoi(setting) != 0;
+		query_profile.time = GetTickCount();
+	}
+	if (!query_profile.enabled)
+		return;
+	query_profile.sends += (unsigned long)sends;
+	query_profile.queries += (unsigned long)queries;
+	now = GetTickCount();
+	if (now - query_profile.time >= 10000)
+	{
+		platform_log("xnet: %lu sends and %lu socket queries in %.1f s", query_profile.sends, query_profile.queries,
+			(now - query_profile.time) / 1000.0);
+		query_profile.sends = query_profile.queries = 0;
+		query_profile.time = now;
+	}
+}
+
+/* what internet play's bookkeeping needs of the game's sockets, kept from
+when each was made, bound or given a port, so that a send or a close asks
+the system nothing (on the Vita each query is a call into its network
+library, and the host sends every tick): by socket (the Vita's are 0 to
+1023), its type (0: not known) and local port (0: none yet) */
+enum
+{
+	KNOWN_SOCKETS = 1024,
+};
+static unsigned char known_socket_type[KNOWN_SOCKETS];
+static unsigned short known_socket_port[KNOWN_SOCKETS];
+
+static void socket_made(int socket, int type)
+{
+	if (socket >= 0 && socket < KNOWN_SOCKETS)
+	{
+		known_socket_type[socket] = (unsigned char)type;
+		known_socket_port[socket] = 0;
+	}
+}
+
 /* network.address and network.broadcast, read once (net_settings_read),
 in network byte order */
 static struct
@@ -249,12 +304,29 @@ static void note_socket_port(SOCKET socket, int listening)
 	int type = SOCK_DGRAM;
 	int type_length = sizeof(type);
 
+	/* (nothing to tell while internet play is off) */
+	if (!p2p_running())
+		return;
+	query_profile_count(0, 1);
 	if (posix_socket_getsockname((int)socket, &bound, &length) < 0 || bound.sin_family != AF_INET ||
 		!bound.sin_port)
 	{
 		return;
 	}
-	posix_socket_getsockopt((int)socket, SOL_SOCKET, SO_TYPE, &type, &type_length);
+	if ((int)socket >= 0 && (int)socket < KNOWN_SOCKETS && known_socket_type[socket])
+	{
+		type = known_socket_type[socket];
+	}
+	else
+	{
+		query_profile_count(0, 1);
+		posix_socket_getsockopt((int)socket, SOL_SOCKET, SO_TYPE, &type, &type_length);
+	}
+	if ((int)socket >= 0 && (int)socket < KNOWN_SOCKETS)
+	{
+		known_socket_type[socket] = (unsigned char)type;
+		known_socket_port[socket] = bound.sin_port;
+	}
 	/* (one bound to this machine alone, as the telnet console's, is not for
 	peers to reach, and is not hosting; its port is still no stand-in's) */
 	if (bound.sin_addr.s_addr == loopback_address())
@@ -291,8 +363,16 @@ static unsigned short socket_port(SOCKET socket)
 	struct sockaddr_in bound;
 	int length = sizeof(bound);
 
+	/* (internet play off: no use for it) */
+	if (!p2p_running())
+		return 0;
+	if ((int)socket >= 0 && (int)socket < KNOWN_SOCKETS && known_socket_port[socket])
+		return known_socket_port[socket];
+	query_profile_count(0, 1);
 	if (posix_socket_getsockname((int)socket, &bound, &length) < 0 || bound.sin_family != AF_INET)
 		return 0;
+	if ((int)socket >= 0 && (int)socket < KNOWN_SOCKETS)
+		known_socket_port[socket] = bound.sin_port;
 	return bound.sin_port;
 }
 
@@ -373,6 +453,7 @@ SOCKET WSAAPI halo_ws_socket(int family, int type, int protocol)
 	/* (the game's connections: every tick's messages go at once) */
 	if (type == SOCK_STREAM)
 		posix_socket_set_nodelay(result);
+	socket_made(result, type);
 	return (SOCKET)result;
 }
 
@@ -381,8 +462,20 @@ int WSAAPI halo_ws_closesocket(SOCKET socket)
 	int type = SOCK_STREAM;
 	int type_length = sizeof(type);
 
-	posix_socket_getsockopt((int)socket, SOL_SOCKET, SO_TYPE, &type, &type_length);
-	p2p_socket_closed((int)socket, type == SOCK_DGRAM ? socket_port(socket) : 0);
+	if (p2p_running())
+	{
+		if ((int)socket >= 0 && (int)socket < KNOWN_SOCKETS && known_socket_type[socket])
+		{
+			type = known_socket_type[socket];
+		}
+		else
+		{
+			query_profile_count(0, 1);
+			posix_socket_getsockopt((int)socket, SOL_SOCKET, SO_TYPE, &type, &type_length);
+		}
+		p2p_socket_closed((int)socket, type == SOCK_DGRAM ? socket_port(socket) : 0);
+	}
+	socket_made((int)socket, 0);
 	delayed_closed((int)socket);
 	return winsock_result(posix_socket_close((int)socket));
 }
@@ -480,6 +573,7 @@ SOCKET WSAAPI halo_ws_accept(SOCKET socket, struct sockaddr *address, int *addre
 		return INVALID_SOCKET;
 	}
 	posix_socket_set_nodelay(result);
+	socket_made(result, SOCK_STREAM);
 	peer_incoming_address(1, address, address_length);
 	return (SOCKET)result;
 }
@@ -499,6 +593,7 @@ int WSAAPI halo_ws_sendto(SOCKET socket, const char *buffer, int length, int fla
 	int result;
 	int send_error;
 
+	query_profile_count(1, 0);
 	if (address && address->sa_family == AF_INET && address_length >= (int)sizeof(struct sockaddr_in) &&
 		((const struct sockaddr_in *)address)->sin_addr.s_addr == INADDR_BROADCAST)
 	{

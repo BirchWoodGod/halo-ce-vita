@@ -26,6 +26,9 @@ int p2p_hand_off_invite(void);
 words around it. Returns nonzero if it held an invite */
 int p2p_join_invite(const char *text);
 
+/* whether internet play (or ad hoc play) runs: its thread started */
+int p2p_running(void);
+
 /* this machine's identifier, which its XNADDR carries (6 bytes) */
 const unsigned char *p2p_identifier(void);
 /* the address the game reaches the machine with this identifier at, if it
