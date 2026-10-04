@@ -2785,6 +2785,11 @@ boolean server_needs_more_teams(
 {
 	boolean needs_more_teams = FALSE;
 
+#ifdef HALO_VITA
+	/* (port) a player alone in a local game needs no opposing team */
+	if (network_game_is_splitscreen_local() && server->game.player_count <= 1)
+		return FALSE;
+#endif
 	if (server->game.variant.universal_variant.teams)
 	{
 		short player_count_by_team[NUMBER_OF_MULTIPLAYER_TEAMS] = { 0, 0 };
@@ -2885,13 +2890,25 @@ boolean server_has_enough_machines(
 	return has_enough_machines;
 }
 
+static long server_minimum_players(
+	struct network_game_server *server)
+{
+#ifdef HALO_VITA
+	/* (port) the Vita has one controller: a local game starts with one
+	player */
+	if (network_game_is_splitscreen_local())
+		return 1;
+#endif
+	return server->game.minimum_players;
+}
+
 boolean server_ok_to_countdown(
 	struct network_game_server *server)
 {
 	if (server_has_enough_machines(server) &&
 		server_has_a_player_on_each_machine(server) &&
 		!server_needs_more_teams(server) &&
-		server->game.player_count >= server->game.minimum_players)
+		server->game.player_count >= server_minimum_players(server))
 	{
 		return TRUE;
 	}
@@ -3761,6 +3778,14 @@ static boolean network_game_server_setup_game_from_playlist(
 		server->game.name[NETWORK_GAME_NAME_LENGTH - 1] = L'\0';
 		server->game.map.version = 0;
 		server->game.minimum_players = 2;
+#ifdef HALO_VITA
+		/* (port) a local game on the Vita starts with one player
+		(server_minimum_players); the clients' lobby reads the minimum from
+		the game settings, and with 2 it kept "Waiting for another player"
+		over the countdown */
+		if (network_game_is_splitscreen_local())
+			server->game.minimum_players = 1;
+#endif
 		server->game.maximum_players = MAXIMUM_NETWORK_PLAYER_COUNT;
 
 		if (server->game.variant.universal_variant.teams)
