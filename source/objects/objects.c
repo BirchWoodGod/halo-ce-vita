@@ -237,6 +237,20 @@ long cluster_get_next_collideable_object(
 		reference_index);
 }
 
+#ifdef HALO_LINUX
+long cluster_get_collideable_objects(
+	short cluster_index,
+	long *object_indices,
+	long maximum)
+{
+	return cluster_partition_get_cluster_datums(
+		&collideable_object_cluster_partition,
+		cluster_index,
+		object_indices,
+		maximum);
+}
+#endif
+
 short object_get_next_cluster(
 	struct object_cluster_iterator *iterator,
 	long object_index)

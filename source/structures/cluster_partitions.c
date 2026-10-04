@@ -318,6 +318,41 @@ long cluster_partition_get_next_datum(
 #endif
 }
 
+#ifdef HALO_LINUX
+/* (port) the walk cluster_partition_get_first_datum and _get_next_datum make
+of a cluster's datums, all of it into indices, in order: the tick's
+collision queries walk ~6000 objects a tick (b30's beach fight), and a call
+or two per object, each asking which thread it is on, cost more than the
+tests most of them fail. A render walk that must skip the tick's new datums,
+and a list longer than maximum, are left to those (NONE). */
+long cluster_partition_get_cluster_datums(
+	struct cluster_partition const *partition,
+	short cluster_index,
+	long *indices,
+	long maximum)
+{
+	long reference_index;
+	long count = 0;
+
+	/* (the render's skip of the tick's new datums: those exist only while a
+	tick's epoch is open, until its join) */
+	if (partition->datum_data && halo_epoch_active && !halo_epoch_on_mutator())
+		return NONE;
+	reference_index = *code_00180fa0((struct cluster_partition *)partition, cluster_index);
+	while (reference_index != NONE)
+	{
+		long datum_index = reference_list_walk_next(partition->data_reference_data, &reference_index);
+
+		if (datum_index == NONE)
+			break;
+		if (count >= maximum)
+			return NONE;
+		indices[count++] = datum_index;
+	}
+	return count;
+}
+#endif
+
 long cluster_partition_get_first_cluster(
 	struct cluster_partition const *partition,
 	long *reference_index,

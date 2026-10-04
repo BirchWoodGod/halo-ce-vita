@@ -388,6 +388,11 @@ long cluster_get_first_noncollideable_object(long *reference_index, short cluste
 long cluster_get_next_noncollideable_object(long *reference_index);
 long cluster_get_first_collideable_object(long *reference_index, short cluster_index);
 long cluster_get_next_collideable_object(long *reference_index);
+#ifdef HALO_LINUX
+/* (port) a cluster's collideable objects, in the order the two above walk
+them, or NONE when they must walk it (cluster_partitions.c) */
+long cluster_get_collideable_objects(short cluster_index, long *object_indices, long maximum);
+#endif
 short object_get_next_cluster(struct object_cluster_iterator *iterator, long object_index);
 void *object_try_and_get_and_verify_type(long object_index, unsigned long valid_type_flags);
 void *object_get_and_verify_type(long object_index, unsigned long valid_type_flags);
@@ -544,6 +549,21 @@ static __inline void *object_header_block_get_inline(long object_index, struct o
 	object_try_and_get_and_verify_type_inline((object_index), (valid_type_flags))
 #define object_header_block_get(object_index, reference) \
 	object_header_block_get_inline((object_index), (reference))
+#endif
+
+#ifdef HALO_LINUX
+/* object_mark_function, inline (the collision queries' object walks) */
+static __inline boolean object_mark_inline(long object_index)
+{
+	struct object_datum *object = object_get(object_index);
+
+	if (object->object.magic_number != global_object_marker)
+	{
+		object->object.magic_number = global_object_marker;
+		return TRUE;
+	}
+	return FALSE;
+}
 #endif
 
 __inline short object_get_type(

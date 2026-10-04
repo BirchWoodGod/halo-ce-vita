@@ -122,6 +122,12 @@ symbols in this file:
 
 /* ---------- constants */
 
+#ifdef HALO_LINUX
+/* (port) the most objects of one cluster a collision query takes in one walk
+(a longer list is walked as before) */
+#define COLLISION_CLUSTER_OBJECT_BATCH 512
+#endif
+
 /* ---------- macros */
 
 /* Preserve January's in-TU scalar expansion without selecting the external
@@ -540,6 +546,56 @@ boolean collision_test_vector(
 				{
 					long reference_index;
 					long object_index;
+#ifdef HALO_LINUX
+					/* (port) the cluster's objects taken in one walk, and the
+					ones object_test_vector would pass over at its first test
+					(a top-level object, no siblings: no other effect) passed
+					over here, without the call */
+					long object_indices[COLLISION_CLUSTER_OBJECT_BATCH];
+					long object_count = cluster_get_collideable_objects(
+						(short)cluster_index,
+						object_indices,
+						NUMBEROF(object_indices));
+
+					if (object_count != NONE)
+					{
+						long object_slot;
+
+						for (object_slot = 0; object_slot < object_count; object_slot++)
+						{
+							struct object_datum const *object;
+
+							object_index = object_indices[object_slot];
+							if (!object_mark_inline(object_index))
+								continue;
+							object = object_get(object_index);
+							if (object->object.next_object_index == NONE &&
+								(object_index == ignore_object_index ||
+									TEST_FLAG(object->object.flags, _object_invisible_bit) ||
+									!TEST_FLAG(flags, object->object.type + _collision_test_objects_first_type_bit) ||
+									!fast_vector_intersects_sphere(
+										point,
+										vector,
+										&object->object.bounding_sphere_center,
+										(object->object.bounding_sphere_radius))))
+							{
+								continue;
+							}
+							if (object_test_vector(
+								object_index,
+								flags,
+								bsp_flags,
+								point,
+								vector,
+								ignore_object_index,
+								collision))
+							{
+								hit = TRUE;
+							}
+						}
+						continue;
+					}
+#endif
 
 					for (object_index = cluster_get_first_collideable_object(&reference_index, cluster_index);
 						object_index != NONE;
@@ -843,6 +899,37 @@ boolean collision_get_features_in_sphere(
 				{
 					long reference_index;
 					long object_index;
+#ifdef HALO_LINUX
+					/* (port) the cluster's objects taken in one walk */
+					long object_indices[COLLISION_CLUSTER_OBJECT_BATCH];
+					long object_count = cluster_get_collideable_objects(
+						leaf->cluster_index,
+						object_indices,
+						NUMBEROF(object_indices));
+
+					if (object_count != NONE)
+					{
+						long object_slot;
+
+						for (object_slot = 0; object_slot < object_count; object_slot++)
+						{
+							object_index = object_indices[object_slot];
+							if (object_mark_inline(object_index))
+							{
+								object_get_features_in_sphere(
+									flags,
+									object_index,
+									center,
+									radius,
+									height,
+									width,
+									ignore_object_index,
+									features);
+							}
+						}
+						continue;
+					}
+#endif
 
 					for (object_index = cluster_get_first_collideable_object(
 							&reference_index,
