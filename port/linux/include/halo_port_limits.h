@@ -73,6 +73,20 @@ then flags */
 #define HALO_PORT_ADVERTISED_FLAGS_OFFSET 2
 /* ... the host plays the distributed netcode (else lockstep) */
 #define HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG 0x01
+/* ... the host is a PlayStation Vita. Vitas play only Vitas (the owner's
+decision: a Vita cannot keep up with a PC host's game): a Vita's client
+drops hosts without the flag from its game list, a PC's drops hosts with
+it, and a host refuses joiners of the other kind (their join tokens differ,
+network_game_generate_join_game_token); internet play's signalling topics
+differ too (p2p_signal.c) */
+#define HALO_PORT_ADVERTISED_VITA_FLAG 0x02
+
+/* whether this build plays on the Vitas' side of that line: the Vita's, and
+a Linux build configured with --linux-net-vita (HALO_NET_AS_VITA), which
+stands in for a Vita in the automated network tests */
+#if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
+#define HALO_PORT_VITA_NETWORK 1
+#endif
 
 /* a message header's 12-bit length allows messages of up to 0xFFF bytes,
 header included; the per-tick update of 128 players is 3,857 */

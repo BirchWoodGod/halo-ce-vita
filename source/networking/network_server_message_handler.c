@@ -1670,6 +1670,10 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] = (byte)(HALO_PORT_NETWORK_VERSION >> 8);
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] =
 				HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG;
+#ifdef HALO_PORT_VITA_NETWORK
+			/* (Vitas play only Vitas: halo_port_limits.h) */
+			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_VITA_FLAG;
+#endif
 			/* (open to joins: not while the machines load the game, nor
 			once it is over, nor in progress when no player can join it) */
 			if (network_game_server_get_state(server, NULL) == _network_game_server_state_ingame

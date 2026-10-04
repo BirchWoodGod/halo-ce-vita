@@ -2331,6 +2331,30 @@ static boolean add_advertised_game(
 	struct network_advertised_game *advertised_game = NULL;
 	long game_index;
 
+	/* (port) Vitas play only Vitas (halo_port_limits.h): a host of the
+	other kind is never listed */
+	{
+		boolean vita_host = (advertisement->__unknown5A[HALO_PORT_ADVERTISED_FLAGS_OFFSET] &
+			HALO_PORT_ADVERTISED_VITA_FLAG) != 0;
+#ifdef HALO_PORT_VITA_NETWORK
+		boolean vita_client = TRUE;
+#else
+		boolean vita_client = FALSE;
+#endif
+		static boolean told = FALSE;
+
+		if (vita_host != vita_client)
+		{
+			if (!told)
+			{
+				told = TRUE;
+				network_event(vita_client ? "ignoring a host that is not a Vita (Vitas play only Vitas)" :
+					"ignoring a Vita's host (Vitas play only Vitas)");
+			}
+			return FALSE;
+		}
+	}
+
 	for (game_index = 0; game_index < MAXIMUM_NETWORK_ADVERTISED_GAMES; game_index++)
 	{
 		struct network_advertised_game *current = available_games + game_index;
@@ -2989,6 +3013,8 @@ boolean network_game_client_advertised_game_compatible(
 	unsigned int ours = HALO_PORT_NETWORK_VERSION;
 	unsigned int theirs;
 	boolean distributed;
+	boolean vita_host;
+	boolean vita_client = FALSE;
 	char message[400];
 
 	if (game_index < 0 || game_index >= MAXIMUM_NETWORK_ADVERTISED_GAMES)
@@ -2996,6 +3022,26 @@ boolean network_game_client_advertised_game_compatible(
 	theirs = network_game_client_advertised_versions[game_index].version;
 	distributed = (network_game_client_advertised_versions[game_index].flags &
 		HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG) != 0;
+	vita_host = (network_game_client_advertised_versions[game_index].flags &
+		HALO_PORT_ADVERTISED_VITA_FLAG) != 0;
+#ifdef HALO_PORT_VITA_NETWORK
+	vita_client = TRUE;
+#endif
+	if (vita_host != vita_client)
+	{
+		/* (never listed: add_advertised_game drops them; a defence) */
+		csprintf(message, vita_client ?
+			"This host is not a PlayStation Vita.\n\n"
+			"Online play on the Vita is Vita-only: join a game hosted on another Vita." :
+			"This host is a PlayStation Vita.\n\n"
+			"Online play on the Vita is Vita-only: PCs cannot join Vita games.");
+		if (tell)
+		{
+			network_event("not joining a host on the other side of the Vita-only line");
+			platform_show_message("Halo: cannot join this game", message);
+		}
+		return FALSE;
+	}
 	if (theirs == ours && distributed)
 	{
 		network_event("joining a host of network version %u", theirs);

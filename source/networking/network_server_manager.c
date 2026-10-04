@@ -2968,6 +2968,19 @@ void network_game_generate_join_game_token(
 	}
 #endif
 
+#ifdef HALO_PORT_VITA_NETWORK
+	/* (port) Vitas play only Vitas (halo_port_limits.h): a Vita's token is
+	not a PC's, so each kind of host refuses the other kind's joiners (the
+	join request handler compares the tokens) */
+	{
+		static byte const vita_token[] = "Vita-only game!";
+		int i;
+
+		for (i = 0; i < NETWORK_JOIN_GAME_TOKEN_SIZE; i++)
+			join_token[i] ^= vita_token[i % (sizeof(vita_token) - 1)];
+	}
+#endif
+
 	return;
 }
 

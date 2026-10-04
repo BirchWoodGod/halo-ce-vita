@@ -11,9 +11,10 @@ Everything that passes through them is sealed with a key derived from the
 invite's token, and goes to topics that are hashes of it, so the brokers
 (and anyone watching them) learn nothing and can join nothing:
 
-- the host listens on hceu/3/<HMAC(token, "host" | host)>, where a joiner
-  sends JOIN: its public key (its identifier is the key's hash), a nonce,
-  and its addresses;
+- the host listens on hceu/3/<HMAC(token, "host" | host)> (a Vita on
+  hcev/3/..., and so on: Vitas play only Vitas, halo_port_limits.h),
+  where a joiner sends JOIN: its public key (its identifier is the key's
+  hash), a nonce, and its addresses;
 - the joiner listens on hceu/3/<HMAC(token, "joiner" | joiner)>, where the
   host answers ACCEPT: its public key, the joiner's nonce, one of its own,
   its addresses, and a tag that only the two of them can make (from their
@@ -119,6 +120,16 @@ enum
 	tunnels a flood of them would otherwise starve */
 	MAXIMUM_BROKER_READS = 8,
 };
+
+/* the prefix of the topics, of the key derivation's label and of the MQTT
+client identifier: Vitas signal on their own (Vitas play only Vitas,
+halo_port_limits.h), so a PC's invite or code never reaches a Vita's game,
+nor a Vita's a PC's */
+#ifdef HALO_PORT_VITA_NETWORK
+#define SIGNAL_PREFIX "hcev"
+#else
+#define SIGNAL_PREFIX "hceu"
+#endif
 
 enum
 {
@@ -305,7 +316,7 @@ static void make_topic(const unsigned char *token, const char *label, const unsi
 
 	derive(token, label, identifier, digest);
 	p2p_hex(digest, 16, text);
-	snprintf(topic, TOPIC_SIZE, "hceu/3/%s", text);
+	snprintf(topic, TOPIC_SIZE, SIGNAL_PREFIX "/3/%s", text);
 }
 
 /* ---------- MQTT */
@@ -543,8 +554,8 @@ static int get_candidates(const unsigned char *message, int size, struct p2p_can
 
 /* ---------- the keys: what only a joiner and the host can work out */
 
-/* HMAC(their X25519 shared secret, "hceu/2" | the joiner's public key | the
-host's); other is the one that is not this machine's. 0 if it is unusable */
+/* HMAC(their X25519 shared secret, "hceu/2" (a Vita's "hcev/2") | the
+joiner's public key | the host's); other is the one that is not this machine's. 0 if it is unusable */
 static int pair_base(const unsigned char *joiner_public, const unsigned char *host_public,
 	const unsigned char *other, unsigned char *base)
 {
@@ -553,7 +564,7 @@ static int pair_base(const unsigned char *joiner_public, const unsigned char *ho
 
 	if (!p2p_shared_secret(other, shared))
 		return 0;
-	memcpy(data, "hceu/2", 6);
+	memcpy(data, SIGNAL_PREFIX "/2", 6);
 	memcpy(data + 6, joiner_public, P2P_KEY_SIZE);
 	memcpy(data + 6 + P2P_KEY_SIZE, host_public, P2P_KEY_SIZE);
 	p2p_hmac_sha256(shared, P2P_KEY_SIZE, data, sizeof(data), base);
@@ -1074,7 +1085,7 @@ void p2p_signal_start(void)
 	signalling.started = 1;
 	posix_random_bytes(random, sizeof(random));
 	p2p_hex(random, sizeof(random), hex);
-	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), "hceu-%s", hex);
+	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), SIGNAL_PREFIX "-%s", hex);
 	text = config_string("network.signalling_brokers");
 	while (*text && signalling.broker_count < MAXIMUM_BROKERS)
 	{
