@@ -108,6 +108,9 @@ symbols in this file:
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "render_epoch.h"
+#endif
 
 /* ---------- constants */
 
@@ -348,12 +351,78 @@ static long get_object_icon_text_index(
 		object_get(object_index)->definition_index)->object.icon_text_index;
 }
 
+#ifdef HALO_LINUX
+/* (port) the render draws the action prompt while the tick, on its own
+thread, rewrites the player's action (players_update_after_game: the result,
+then the object) and unit. The prompt read the object twice, and the second
+read met the tick's NONE: getting out of a Ghost, the "enter vehicle" prompt
+looked up unit NONE (v1.0.2.2 dump, #22). The render works from a copy of
+the player, whose action is dropped (no prompt this frame) when its object
+is gone or of the wrong type. */
+static void hud_action_snapshot_validate(
+	struct player_datum *player)
+{
+	unsigned long object_mask = 0;
+	boolean needs_unit = FALSE;
+
+	if (player->unit_index != NONE && !unit_try_and_get(player->unit_index))
+		player->unit_index = NONE;
+	if (player->action_object_index != NONE && !object_try_and_get(player->action_object_index))
+		player->action_object_index = NONE;
+	switch (player->action_result)
+	{
+	case _player_action_result_pickup_powerup:
+	case _player_action_result_pickup_weapon:
+	case _player_action_result_swap_for_weapon:
+	case _player_action_result_add_weapon_to_inventory:
+	case _player_action_result_flip_vehicle:
+		object_mask = _object_mask_all;
+		break;
+	case _player_action_result_swap_for_powerup:
+		object_mask = _object_mask_all;
+		needs_unit = TRUE;
+		break;
+	case _player_action_result_enter_vehicle:
+	case _player_action_result_evict_from_vehicle:
+		object_mask = _object_mask_unit;
+		break;
+	case _player_action_result_touch_device:
+		object_mask = _object_mask_control;
+		break;
+	case _player_action_result_exit_vehicle:
+		needs_unit = TRUE;
+		break;
+	default:
+		break;
+	}
+	if ((object_mask && (player->action_object_index == NONE ||
+			!object_try_and_get_and_verify_type(player->action_object_index, object_mask))) ||
+		(needs_unit && player->unit_index == NONE))
+	{
+		player->action_result = _player_action_result_reload;
+		player->action_object_index = NONE;
+	}
+
+	return;
+}
+#endif
+
 static void hud_show_action_response(
 	long player_index)
 {
 	struct player_datum *player = player_get(player_index);
 	short respawn_failure = players_get_respawn_failure();
 	short item_name_index;
+#ifdef HALO_LINUX
+	struct player_datum player_snapshot;
+
+	if (halo_epoch_threaded)
+	{
+		player_snapshot = *player;
+		player = &player_snapshot;
+		hud_action_snapshot_validate(player);
+	}
+#endif
 
 	if (respawn_failure != _player_respawn_failure_none &&
 		player->unit_index == NONE)
@@ -628,6 +697,33 @@ static void hud_show_action_response(
 			struct unit_datum *unit = unit_get(player->unit_index);
 			boolean allow_swap_prompt = TRUE;
 
+#ifdef HALO_LINUX
+			/* (port) the tick takes the unit out of its seat meanwhile
+			(#22): the parent and seat read once, and checked */
+			{
+				long parent_object_index = *(volatile long *)&unit->object.parent_object_index;
+				short parent_seat_index = *(volatile short *)&unit->unit.parent_seat_index;
+				struct unit_datum *parent_unit = parent_object_index != NONE && parent_seat_index != NONE ?
+					unit_try_and_get(parent_object_index) : NULL;
+
+				if (parent_unit)
+				{
+					struct unit_definition *parent_definition = unit_definition_get(parent_unit->definition_index);
+
+					if (parent_seat_index >= 0 && parent_seat_index < parent_definition->unit.seats.count)
+					{
+						struct unit_seat *seat = TAG_BLOCK_GET_ELEMENT(
+							&parent_definition->unit.seats,
+							parent_seat_index,
+							struct unit_seat);
+
+						allow_swap_prompt =
+							!TEST_FLAG(seat->flags, _unit_seat_driver_bit) &&
+							!TEST_FLAG(seat->flags, _unit_seat_gunner_bit);
+					}
+				}
+			}
+#else
 			if (unit->object.parent_object_index != NONE &&
 				unit->unit.parent_seat_index != NONE)
 			{
@@ -643,6 +739,7 @@ static void hud_show_action_response(
 					!TEST_FLAG(seat->flags, _unit_seat_driver_bit) &&
 					!TEST_FLAG(seat->flags, _unit_seat_gunner_bit);
 			}
+#endif
 
 			if (weapon_index != NONE && allow_swap_prompt)
 			{
@@ -664,6 +761,16 @@ static void hud_show_action_response(
 						candidate_weapon_index = unit_inventory_get_weapon(
 							player->unit_index,
 							weapon_slot);
+#ifdef HALO_LINUX
+						/* (port) a slot the tick emptied meanwhile: no
+						reminder this frame */
+						if (candidate_weapon_index == NONE ||
+							!weapon_try_and_get(candidate_weapon_index))
+						{
+							candidate_weapon_index = weapon_index;
+							break;
+						}
+#endif
 						weapon_build_weapon_interface_state(
 							candidate_weapon_index,
 							&weapon_state);
