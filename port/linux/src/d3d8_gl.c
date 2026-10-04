@@ -3774,6 +3774,13 @@ int halo_trace_active(void)
 	return 0;
 }
 
+/* (tick_thread.c, before a switch_bsp clears the structure bsp: the Vita's
+GPU reads the bsp's geometry in place, a frame or two late. GL copies what a
+draw reads when the draw is made, so there is nothing to wait for) */
+void halo_render_wait_for_gpu(void)
+{
+}
+
 void halo_render_draw_counts(unsigned long *stream, unsigned long *immediate)
 {
 	/* (the render profile's draw counts: not counted with this device) */
