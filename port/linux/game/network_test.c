@@ -9,13 +9,19 @@ Automated system link sessions for testing the netcode without the menus
   (slayer by default; game_engine_get_variant_by_name), as the pregame
   screen's fast setup does, and starts it debug.network_test_start seconds
   later; with more variants, once a game is over (debug.network_test_score
-  makes it short) the next, as the host's button on the scores does;
+  makes it short) the next, as the host's button on the scores does
+  ("<variant>@<map>" plays that game on another map: a map change);
+- "local:<map>[:<variant>...]" the same with a local (split screen) game
+  of one player, which starts only where a local game may have one (the
+  Vita's rules, HALO_PORT_VITA_NETWORK);
 - "join" searches for games and joins the first it finds, as picking it in
   the system link list does;
 - "join-public" first browses internet play's public lobby (p2p.c) and
   joins the code of the first game listed there (not this machine's), then
   searches as "join" does: the host's game shows in the list once the
-  tunnel reaches it. "join-code:ABCD-EFGH" joins that code the same way.
+  tunnel reaches it. "join-code:ABCD-EFGH" joins that code the same way;
+  debug.network_test_rejoin has a joining machine leave the game that many
+  seconds in and join again, once.
 
 Once the game runs, every second each machine logs where every player's
 unit is, so the machines' views of the game can be compared.
@@ -90,6 +96,8 @@ static struct
 {
 	boolean checked;
 	short mode;
+	/* "local:": a local (split screen) game, not a system link one */
+	boolean local;
 	char map_name[64];
 	char variant_name[64];
 	/* ... the variant of this game, of variant_name's list; and the seconds
@@ -119,6 +127,12 @@ static struct
 	boolean code_joined;
 	char code[P2P_CODE_SIZE];
 	real browse_seconds;
+	/* debug.network_test_rejoin: a joining machine leaves the game that many
+	seconds in, and joins again (once) */
+	real rejoin_time;
+	real ingame_seconds;
+	boolean left;
+	boolean rejoined;
 } network_test;
 
 /* the variant at the index of the list (copied to name), FALSE past its end */
@@ -139,11 +153,38 @@ static boolean network_test_variant(
 		return FALSE;
 	if (name)
 	{
-		size_t length = strcspn(variant, ",");
+		/* (up to an "@map", the game's map if not the first's) */
+		size_t length = strcspn(variant, ",@");
 
 		snprintf(name, size, "%.*s", (int)length, variant);
 	}
 	return TRUE;
+}
+
+/* the map of the game at the index of the variant list: "<variant>@<map>"
+names one, else the first game's */
+static void network_test_variant_map(
+	short index,
+	char *map_name,
+	size_t size)
+{
+	char const *variant = network_test.variant_name;
+	char const *at;
+	size_t length;
+
+	snprintf(map_name, size, "%s", network_test.map_name);
+	for (; index > 0 && variant; index--)
+	{
+		variant = strchr(variant, ',');
+		if (variant)
+			variant++;
+	}
+	if (!variant)
+		return;
+	length = strcspn(variant, ",");
+	at = memchr(variant, '@', length);
+	if (at && at + 1 < variant + length)
+		snprintf(map_name, size, "%.*s", (int)(variant + length - at - 1), at + 1);
 }
 
 static void network_test_read_settings(
@@ -152,12 +193,13 @@ static void network_test_read_settings(
 	char const *setting = config_string("debug.network_test");
 
 	network_test.checked = TRUE;
-	if (!strncmp(setting, "host:", 5) && setting[5])
+	if ((!strncmp(setting, "host:", 5) || !strncmp(setting, "local:", 6)) && setting[5] && setting[6])
 	{
 		char *colon;
 
 		network_test.mode = _network_test_host;
-		snprintf(network_test.map_name, sizeof(network_test.map_name), "%s", setting + 5);
+		network_test.local = setting[0] == 'l';
+		snprintf(network_test.map_name, sizeof(network_test.map_name), "%s", strchr(setting, ':') + 1);
 		snprintf(network_test.variant_name, sizeof(network_test.variant_name), "slayer");
 		colon = strchr(network_test.map_name, ':');
 		if (colon)
@@ -185,6 +227,7 @@ static void network_test_read_settings(
 	snprintf(network_test.pickup_weapon, sizeof(network_test.pickup_weapon), "%s",
 		config_string("debug.network_test_pickup_weapon"));
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
+	network_test.rejoin_time = (real)config_real("debug.network_test_rejoin");
 	if (network_test.mode != _network_test_off)
 		platform_log("network test: %s", setting);
 }
@@ -899,6 +942,32 @@ void network_test_update(
 	{
 		network_test.game_over = TRUE;
 	}
+	/* debug.network_test_rejoin: leave the game, as quitting from the pause
+	menu does, then join again from the main menu */
+	if (network_test.mode == _network_test_join && network_test.rejoin_time > 0.0f && !network_test.left &&
+		game_in_progress() && game_engine_running() && !main_menu_loaded)
+	{
+		network_test.ingame_seconds += seconds;
+		if (network_test.ingame_seconds >= network_test.rejoin_time)
+		{
+			network_test.left = TRUE;
+			platform_log("network test: leaving the game");
+			main_goto_main_menu();
+		}
+	}
+	if (network_test.mode == _network_test_join && network_test.left && !network_test.rejoined && main_menu_loaded)
+	{
+		network_test.rejoined = TRUE;
+		network_test.set_up = FALSE;
+		network_test.joined = FALSE;
+		network_test.player_added = FALSE;
+		network_test.team_set = FALSE;
+		network_test.code_joined = FALSE;
+		network_test.joined_seconds = 0.0f;
+		network_test.menu_seconds = 0.0f;
+		network_test.game_over = FALSE;
+		platform_log("network test: joining again");
+	}
 	if (network_test.mode == _network_test_join && network_test.game_over && main_menu_loaded)
 	{
 		network_test.game_over = FALSE;
@@ -939,8 +1008,31 @@ void network_test_update(
 		{
 			network_test.set_up = TRUE;
 			main_set_multiplayer_map_name(network_test.map_name);
-			player_ui_fast_setup_network_server();
-			platform_log("network test: hosting %s", network_test.map_name);
+			if (network_test.local)
+			{
+				/* as Multiplayer, Split Screen does (split_screen_game_initialize) */
+				ui_widgets_close_all();
+				dispose_global_network_game_server();
+				dispose_global_network_game_client();
+				network_game_accept_remote_connections(FALSE);
+				game_engine_playlist_initialize();
+				if (create_global_network_game_server())
+				{
+					game_engine_playlist_begin();
+					game_connection_set(_game_connection_network_server);
+				}
+				if (!global_network_game_client_get())
+					create_global_network_game_client();
+				ui_widget_load_by_name_or_tag(
+					"ui\\shell\\main_menu\\multiplayer_type_select\\split_screen\\pregame\\splitscreen_pregame_wrapper_normal",
+					NONE, NULL, NONE, NONE, NONE, NONE);
+				platform_log("network test: a local game on %s", network_test.map_name);
+			}
+			else
+			{
+				player_ui_fast_setup_network_server();
+				platform_log("network test: hosting %s", network_test.map_name);
+			}
 		}
 		else if (!network_test.started)
 		{
@@ -950,11 +1042,14 @@ void network_test_update(
 			if (!network_test.map_set && network_test.setup_seconds >= 1.0f && global_network_game_server_get())
 			{
 				char path[128];
+				char map_name[64];
 
 				struct game_variant variant;
 
-				snprintf(path, sizeof(path), "levels\\test\\%s\\%s", network_test.map_name, network_test.map_name);
+				network_test_variant_map(network_test.variant_index, map_name, sizeof(map_name));
+				snprintf(path, sizeof(path), "levels\\test\\%s\\%s", map_name, map_name);
 				network_game_server_change_map_name(global_network_game_server_get(), path);
+				platform_log("network test: map %s", map_name);
 				/* the variant, as picking the game settings does */
 				{
 					char variant_name[64];

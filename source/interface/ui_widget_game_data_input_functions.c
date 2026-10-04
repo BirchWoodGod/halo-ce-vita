@@ -2926,7 +2926,7 @@ static void multiplayer_game_directions(
 			game &&
 			game->machine_count < 2;
 
-#ifdef HALO_VITA
+#ifdef HALO_PORT_VITA_NETWORK
 		/* (port) one player starts a local game on the Vita
 		(network_server_manager.c): no "Waiting for another player" over
 		its countdown */

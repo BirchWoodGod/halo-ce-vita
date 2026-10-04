@@ -81,9 +81,11 @@ network_game_generate_join_game_token); internet play's signalling topics
 differ too (p2p_signal.c) */
 #define HALO_PORT_ADVERTISED_VITA_FLAG 0x02
 
-/* whether this build plays on the Vitas' side of that line: the Vita's, and
-a Linux build configured with --linux-net-vita (HALO_NET_AS_VITA), which
-stands in for a Vita in the automated network tests */
+/* whether this build plays on the Vitas' side of that line, with the
+Vita's multiplayer rules (a local game starts with one player: the Vita
+has one controller): the Vita's, and a Linux build configured with
+--linux-net-vita (HALO_NET_AS_VITA), which stands in for a Vita in the
+automated network tests */
 #if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
 #define HALO_PORT_VITA_NETWORK 1
 #endif
