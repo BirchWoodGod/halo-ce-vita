@@ -250,6 +250,30 @@ int main(void)
 	adhoc_state_value = 2;
 	check(frame(0) == 0, "and gets them again after");
 
+	/* PR #7's message overlay (a join refused): wrapped to the menu's width,
+	not dismissed by the press that was down when it opened, and taking the
+	pad until a new Cross or Circle (tools/test_vita_message.py's checks) */
+	{
+		static const char text[] = "You are on version 5. The host is on version 9. Please install the updated build.";
+		const char *at;
+		int longest = 0;
+
+		vita_settings_message("Join rejected", text);
+		check(frame(VITA_BUTTON_CROSS) == 1 && menu_visible && strstr(menu, "Join rejected"),
+			"message: shown, and the press that was down does not reach the game");
+		for (at = menu; *at; )
+		{
+			int length = (int)strcspn(at, "\n");
+
+			longest = length > longest ? length : longest;
+			at += length + (at[length] == '\n');
+		}
+		check(longest <= 46, "message: lines of 46 characters at most");
+		check(frame(VITA_BUTTON_CROSS) == 1 && menu_visible, "message: a held Cross does not close it");
+		check(frame(0) == 1 && frame(VITA_BUTTON_CIRCLE) == 1 && !menu_visible, "message: a new Circle closes it");
+		check(frame(0) == 0, "message: then the game has the pad again");
+	}
+
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }
