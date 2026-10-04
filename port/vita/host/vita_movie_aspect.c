@@ -184,3 +184,22 @@ float vita_movie_file_aspect(const char *path, unsigned long width, unsigned lon
 	}
 	return aspect;
 }
+
+float vita_movie_choose_aspect(float file_aspect, const char **source, unsigned long width, unsigned long height,
+	float player_aspect)
+{
+	float pixels = width && height ? (float)width / (float)height : 0.0f;
+
+	/* (issue #8: a 960x544 copy flagged 16:9, setdar=16/9, has a track header
+	of 967x544 - 1.778, within 1% of its pixels' 1.765 - and was then shown
+	at the player's aspect ratio, 4:3 on the Vita. The track header is the
+	file's own word on its shape: the player's is used only without it) */
+	if (strcmp(*source, "its size") || !pixels)
+		return file_aspect;
+	if (player_aspect > 0.5f && player_aspect < 4.0f && (player_aspect < pixels * 0.99f || player_aspect > pixels * 1.01f))
+	{
+		*source = "the player";
+		return player_aspect;
+	}
+	return file_aspect;
+}

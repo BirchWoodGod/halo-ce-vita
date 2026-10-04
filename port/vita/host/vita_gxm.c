@@ -400,6 +400,31 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 		log_line("gxm: sceGxmCreateContext failed: 0x%08x", (unsigned)result);
 		return -1;
 	}
+	{
+		/* (debug, issue #9) HALO_GXM_WCLAMP=0 turns the GPU's W clamping
+		off, =<value> sets its clamp value; unset keeps GXM's default. For
+		telling on the hardware whether models that cross the camera plane
+		(a tree's crown overhead, the Chief in the a10 cryo tube looking
+		down, a Covenant shield close by) drop out in the GPU's handling of
+		vertices behind the camera rather than in the game's culling, which
+		matches the drawn frustum in every off-hardware test
+		(triage/cull-status.md) */
+		const char *setting = getenv("HALO_GXM_WCLAMP");
+
+		if (setting && *setting)
+		{
+			float value = (float)atof(setting);
+
+			if (value <= 0.0f)
+				sceGxmSetWClampEnable(gxm.context, SCE_GXM_WCLAMP_MODE_DISABLED);
+			else
+			{
+				sceGxmSetWClampEnable(gxm.context, SCE_GXM_WCLAMP_MODE_ENABLED);
+				sceGxmSetWClampValue(gxm.context, value);
+			}
+			log_line("gxm: W clamping %s (HALO_GXM_WCLAMP=%s)", value <= 0.0f ? "off" : "on", setting);
+		}
+	}
 
 	/* the display */
 	gxm.display_render_target = render_target_for(DISPLAY_WIDTH, DISPLAY_HEIGHT);

@@ -3440,17 +3440,30 @@ void main_game_render(
 commands run at the top of the main loop once the game time reaches each
 tick, for testing the save paths without a controller, e.g.
 "300:game_save_totally_unsafe;600:game_revert". Besides the console's
-own, @skip asks for a cinematic skip (as the controller does) and @quit
-does the pause menu's Save and Quit. Each runs once, at the first frame
-whose game time has reached its tick. */
+own, @skip asks for a cinematic skip (as the controller does), @quit
+does the pause menu's Save and Quit, and "@camera x y z yaw pitch" puts
+the debug camera there (degrees; yaw 0 looks along +x, pitch up is
+positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
+pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
+tick, every frame), and "@shot name"
+has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
+(the desktop GL device). Each runs once,
+at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 void platform_log(const char *format, ...);
+/* (@shot: the name of the next frame's screenshot, read by the present) */
+char halo_screenshot_name[64];
+
+static void main_test_camera(char const *arguments);
 
 static void main_test_commands_update(
 	void)
 {
+	static boolean pan_active;
+	static float pan[7];
+	static long pan_start;
 	static int parsed = 0;
-	static struct { long tick; char command[120]; boolean done; } commands[16];
+	static struct { long tick; char command[120]; boolean done; } commands[64];
 	static short command_count;
 	short index;
 
@@ -3496,8 +3509,47 @@ static void main_test_commands_update(
 			game_state_save_to_persistent_storage();
 			main_goto_main_menu();
 		}
+		else if (!strncmp(commands[index].command, "@shot ", 6))
+			csstrncpy(halo_screenshot_name, commands[index].command + 6, sizeof(halo_screenshot_name) - 1);
+		else if (!strncmp(commands[index].command, "@pan ", 5))
+		{
+			pan_active = sscanf(commands[index].command + 5, "%f %f %f %f %f %f %f", &pan[0], &pan[1], &pan[2], &pan[3],
+				&pan[4], &pan[5], &pan[6]) == 7;
+			pan_start = game_time_get();
+		}
+		else if (!strncmp(commands[index].command, "@camera ", 8))
+			main_test_camera(commands[index].command + 8);
 		else
 			hs_compile_and_evaluate(commands[index].command);
+	}
+	if (pan_active)
+	{
+		/* (@pan: the camera turned by the yaw and pitch rates each tick) */
+		char line[120];
+		long ticks = game_time_get() - pan_start;
+
+		snprintf(line, sizeof(line), "%f %f %f %f %f", pan[0], pan[1], pan[2], pan[3] + pan[5] * ticks, pan[4] + pan[6] * ticks);
+		main_test_camera(line);
+	}
+}
+
+static void main_test_camera(
+	char const *arguments)
+{
+	float x, y, z, yaw, pitch;
+	FILE *file;
+
+	if (sscanf(arguments, "%f %f %f %f %f", &x, &y, &z, &yaw, &pitch) == 5 &&
+		(file = fopen("d:\\camera.txt", "w")) != NULL)
+	{
+		real yaw_radians = DEGREES_TO_RADIANS(yaw), pitch_radians = DEGREES_TO_RADIANS(pitch);
+
+		fprintf(file, "%f %f %f\n%f %f %f\n%f %f %f\n%f\n", x, y, z,
+			cosine(yaw_radians) * cosine(pitch_radians), sine(yaw_radians) * cosine(pitch_radians), sine(pitch_radians),
+			-cosine(yaw_radians) * sine(pitch_radians), -sine(yaw_radians) * sine(pitch_radians), cosine(pitch_radians),
+			DEGREES_TO_RADIANS(70.0f));
+		fclose(file);
+		director_load_camera();
 	}
 }
 #endif

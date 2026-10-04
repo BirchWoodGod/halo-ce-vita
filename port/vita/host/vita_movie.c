@@ -234,8 +234,8 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 	{
 		/* the shape it is shown at (issue #6: movies converted 16:9 for
 		another port, 640x480 pixels flagged 16:9, played 4:3): the file's
-		display size, else the player's own idea of it when that differs
-		from the pixels' (Vita3K's never does), else the pixels'.
+		display size, else (no track header) the player's own idea of it
+		when that differs from the pixels', else the pixels'.
 		HALO_MOVIE_ASPECT=<w:h or a number> forces one, e.g. 16:9 for a
 		squeezed copy without the flag; "pixels" keeps the size's */
 		const char *source = "its size";
@@ -243,16 +243,8 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 		float pixels = (float)movie.width / (float)movie.height;
 
 		movie.aspect = vita_movie_file_aspect(path, movie.width, movie.height, &source);
-		if (movie.frame_valid && movie.aspect > pixels * 0.99f && movie.aspect < pixels * 1.01f)
-		{
-			float player = movie.frame.details.video.aspectRatio;
-
-			if (player > 0.5f && player < 4.0f && (player < pixels * 0.99f || player > pixels * 1.01f))
-			{
-				movie.aspect = player;
-				source = "the player";
-			}
-		}
+		movie.aspect = vita_movie_choose_aspect(movie.aspect, &source, movie.width, movie.height,
+			movie.frame_valid ? movie.frame.details.video.aspectRatio : 0.0f);
 		if (setting && *setting)
 		{
 			float forced = 0.0f;

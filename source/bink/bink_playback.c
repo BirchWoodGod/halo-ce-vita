@@ -699,11 +699,16 @@ static void bink_draw_frame(
 			/* a movie whose file gives a display shape other than its
 			pixels' (an MP4 converted 16:9 at 640x480, issue #6) keeps its
 			height and is shown at that shape, as wide as the screen at most
-			(then letterboxed); the Xbox's 4:3 movies are drawn as before */
+			(then letterboxed); so is one larger than the screen (a 960x544
+			copy on the Vita's 848x480, issue #8: before, drawn at its pixel
+			size and cropped). The Xbox's 4:3 movies are drawn as before */
 			real aspect= halo_movie_display_aspect();
 			real pixels= bink_globals.height>0 ? (real)bink_globals.width/(real)bink_globals.height : 0.f;
+			boolean larger= bink_globals.width>screen_width || bink_globals.height>screen_height;
 
-			if (aspect>0.f && pixels>0.f && (aspect<pixels*0.99f || aspect>pixels*1.01f))
+			if (aspect<=0.f && larger)
+				aspect= pixels;
+			if (aspect>0.f && pixels>0.f && (larger || aspect<pixels*0.99f || aspect>pixels*1.01f))
 			{
 				real height= (real)bink_globals.height;
 				real width= height*aspect;
