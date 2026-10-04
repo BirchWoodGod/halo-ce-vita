@@ -43,8 +43,8 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 | `settings.txt` | the settings panel's choices |
 | `halo.log` | the port's log |
 | `env.txt` | optional debug switches, one `NAME=value` per line |
-| `host_invite.txt` | experimental online host's current private invite |
-| `join_link.txt` | experimental online invite to consume and join |
+| `host_invite.txt` | online play: the invite of the game you host (a private access token; see Multiplayer) |
+| `join_link.txt` | online play: an invite or code to join, taken and removed by the game (see Multiplayer) |
 
 ### Movies
 
@@ -109,64 +109,86 @@ the panel. The game does not see the buttons while the panel is open.
 | Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
 | Invert look | No | reverses the right stick's up and down |
 | Stick deadzone | Off | raise it if the sticks drift |
+| Multiplayer | | opens the Multiplayer page: Wi-Fi, online and ad hoc play (see Multiplayer) |
 
 The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 
 ## Multiplayer
 
-- **Split screen** needs two players, and the Vita has one controller.
-- **System link** works over Wi-Fi: every machine on the same network running
-  this port (another Vita, or the Linux/Windows build) can host or join.
-- **Ad hoc** (Vita to Vita without a router) is not done yet.
-- **Online (experimental)** uses the updated Universal invite protocol. It is
-  off by default and has not been verified between physical Vitas on separate
-  networks. See the development instructions below.
+**Vitas play only Vitas.** Online, ad hoc and system link games on the Vita
+are between Vitas: a Vita does not list or join a PC's game, and the Linux,
+Windows and Android builds do not list or join a Vita's (a Vita cannot keep
+up with a PC host's game). Every machine needs the same version of this
+port and Xbox maps of a supported build (NTSC 01.10.12.2276 or 01.08.15.1749,
+PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
 
-### Experimental internet play
+- **Split screen** needs two players, and the Vita has one controller: a
+  split screen game starts with you alone, to play the multiplayer maps on
+  your own.
+- **System link** over Wi-Fi: Vitas on the same network host and join each
+  other's games under Multiplayer, System Link.
+- **Online** (internet play) and **ad hoc** (Vitas nearby, no router) are
+  **experimental** and off unless chosen on the Multiplayer page. Both end in
+  the game's own System Link screens: the other Vita's game shows in the
+  list, and you host or join as on a local network.
 
-This branch imports the networking implementation from
-`cybersecurity/halo-ce-universal` commit
-`fd3d62f9602870b209b8e0e5cd38d9f90ced6029`. It uses 64-digit invites,
-X25519 session keys, authenticated packets and replay protection. Older
-44-digit invites are incompatible. The game messages are pinned to Universal's
-network version **9**, from the same commit; the snapshot includes its joining,
-loading-clock, player-input, object, damage and game-mode state changes.
-Hosts advertising a different game-network version must use a compatible
-build; changing the version number alone does not make messages compatible.
-The Vita's threaded render timing and pose snapshots are retained.
-Join rejections appear in the Vita overlay; press Cross or Circle to dismiss.
-The version history and wire behavior are documented in [NETCODE.md](../linux/NETCODE.md).
-Version 9 includes hardware IDs for bans; Vita derives the game-specific keyed
-hash from its OpenPSID. Discord identity is unavailable on Vita.
+The settings panel's last line, **Multiplayer**, opens a page of its own
+(Circle goes back):
 
-1. In the Select + Start settings panel, set **Online (experimental)** to
-   **On**, then restart the game. Change it back to Off and restart to return
-   to LAN-only play.
-2. To host, create a Multiplayer > System Link game. The current invite is
-   written to `ux0:data/haloce-vita/host_invite.txt` and logged in `halo.log`.
-   Share it with the intended players. It is a private access token and only
-   works while that hosting session remains active; an old file is not proof
-   that the host is still running.
-3. To join, write the complete invite link or its 64 hexadecimal digits into
-   `ux0:data/haloce-vita/join_link.txt` using VitaShell/FTP. Upload to a temporary
-   name and rename it to `join_link.txt` after the transfer finishes, so the
-   game never reads a partially uploaded invite. The networking thread consumes
-   and removes the file, including invalid invites; inspect `halo.log` for the
-   result. Once connected, join the host under Multiplayer > System Link.
+| Line | What it does |
+| --- | --- |
+| Network | **Wi-Fi** (the default): system link on this network. **Online**: internet play with other Vitas. **Ad hoc**: Vitas nearby, without a router. Applies after a restart. |
+| Online games | **Private**: others join with your code. **Public**: your games are also listed in the public lobby for any Vita to join. |
+| Join with a code | Type another player's code with the D-pad (up and down change a letter, left and right move, Cross joins). |
+| Browse public games | The games listed in the public lobby; Cross joins one. |
+| Ad hoc room | 1 to 4: Vitas in the same room play together. |
+| Ad hoc dialog | Which mode the system's ad hoc dialog uses: Connect (try first), Create or Join. |
+| Join / Leave ad hoc group | Opens the system's ad hoc dialog (the panel closes), or leaves the group. |
 
-Vita does not yet provide on-screen invite entry, UPnP port forwarding, or a
-relay fallback. The shared implementation attempts UDP hole punching; some
-routers, particularly double NAT and restrictive NAT, may prevent connections.
-If manually forwarding a port, set `HALO_NET_TUNNEL_PORT=<port>` in `env.txt`
-and forward that UDP port to the Vita. Do not assume forwarding succeeds with
-carrier-grade NAT.
+A line under them says what is happening: your code while you host, the
+lookup of a code, the connection, or the ad hoc group.
 
-Before calling online play supported, test Vita-to-desktop and Vita-to-Vita
-on separate networks: hosting in both directions, discovery and joining,
-map transitions, packet loss/latency, disconnects and rejoining. Use compatible
-versions and Xbox maps, and collect both peers' logs. The imported protocol
-also needs desktop regression testing. None of these changes install an
-experimental VPK onto a connected Vita.
+**Online.** Set Network to Online and restart. To host, create a game in
+Multiplayer, System Link as usual: the Multiplayer page then shows your
+code, **ABCD-EFGH** (it stays the same until you quit the game). Tell it to
+the others; with Online games set to Public, your game is also listed. To
+join, type the code under Join with a code (or pick the game under Browse
+public games), wait for "connected to the host", then open Multiplayer,
+System Link: the host's game is in the list. A code is a convenience, not a
+password: anyone who has it (or guesses it) can join that game.
+
+The long invite still works too, as a fallback: the host's is written to
+`ux0:data/haloce-vita/host_invite.txt` (a private access token: share it
+only with the players you invite, and only while that game runs). To join
+with one, copy it with VitaShell or FTP under a temporary name into
+`ux0:data/haloce-vita/`, then rename it to `join_link.txt` (so the game
+never reads half a file); the game takes and removes the file within a
+second, and `halo.log` says what came of it. A file holding a code
+(`ABCD-EFGH`) works the same way.
+
+Internet play has no server of its own: the Vitas find each other through
+public MQTT brokers and then connect directly (UDP hole punching). That can
+fail between two networks whose NATs both give each destination its own port
+(some mobile and company networks, double NAT): forwarding a UDP port on one
+router helps (`HALO_NET_TUNNEL_PORT=<port>` in `env.txt`, the same port
+forwarded to that Vita). There is no relay and no UPnP on the Vita yet.
+
+What others can see: the public MQTT brokers and STUN servers (third
+parties) see each Vita's public IP address while it plays online, and the
+Vitas it plays with learn it too, as in any peer-to-peer game. Everything
+sent through the brokers is encrypted with keys from the invite, so the
+brokers learn no codes or invites, but anyone browsing the public lobby sees
+a public game's name (your Vita's user name), its code and its player
+count. Private games are not listed. A host can ban by device: the ID the
+game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
+only, not the OpenPSID itself.
+
+**Ad hoc.** Set Network to Ad hoc on every Vita and restart. Choose the
+same Ad hoc room on each, then Join ad hoc group: the system's dialog joins
+(or makes) the room's group. When the line under the page says another
+machine is in the group, one Vita creates a System Link game and the others
+find it in their lists. Ad hoc carries the game the way online play does,
+over the group instead of the internet; nothing goes to the internet.
 
 ## Building
 
@@ -226,7 +248,14 @@ Useful ones:
 | `HALO_DXT_MIPS=0` | compressed textures without their mip chains |
 | `HALO_HEARTBEAT=1` | a line every 2 s in `heartbeat.txt` (is the game still running?) |
 | `HALO_STARTUP_CHECKS=1` | the clocks and the cost of basic operations, logged at start-up |
-| `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do (see Help wanted) |
+| `HALO_NET_TRACE=1` | every socket's calls, failures and traffic every 2 s, and the network library's free memory, in `halo.log` ("net trace:"); runs the socket self-test at start-up too |
+| `HALO_NET_SELFTEST=1` | the socket layer's loopback and broadcast behaviour, logged at start-up |
+| `HALO_NET_PROFILE=1` | the networked frame's steps and the socket queries, timed |
+| `HALO_NET_TUNNEL_PORT=<port>` | online play's UDP port (to forward it on the router) |
+| `HALO_NET_BROKERS`, `HALO_NET_STUN` | the signalling brokers and STUN servers online play uses (`host:port`, commas between) |
+| `HALO_ADHOC_GROUP=NAME` | the ad hoc group's name (up to 8 letters) in place of the room's |
+| `HALO_ADHOC_ID_TYPE=0` | the ad hoc libraries' product ID type (default 1, reserved, as vitaQuake) |
+| `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do without joining a group |
 | `HALO_SHADER_ASYNC=0` | a shader that is neither shipped nor cached is compiled while the game waits (the default compiles it in the background and skips its draws until it is ready) |
 | `HALO_SHADER_PACK=0` | ignore the shipped shaders (`app0:shaders.pak`) |
 
@@ -242,10 +271,12 @@ Useful ones:
 
 ## Help wanted
 
-- **Ad hoc multiplayer** so two Vitas can play without a router, then online
-  play. The SDK names no call that joins an ad hoc group: with
-  `HALO_ADHOC_PROBE=1` the PSP-style ad hoc libraries start, but the Vita
-  stays out of any group (peer-to-peer sockets work over Wi-Fi).
+- **Testing online and ad hoc play** on Vitas (see Multiplayer): send
+  `halo.log` from each machine, with `HALO_NET_TRACE=1` in `env.txt`.
+  Ad hoc play joins its group through the system's network check dialog
+  in a PSP ad hoc mode (the SDK names no call that joins one directly; the
+  dialog is how vitaQuake does it), then carries the game over PDP
+  datagrams; which dialog mode two Vitas need is not known yet.
 - **Performance** in heavy fights (the render on the first core is the limit;
   see the timing lines).
 - **DXT1 mip chains**: Vita3K shows rainbow noise on some DXT1 textures'
