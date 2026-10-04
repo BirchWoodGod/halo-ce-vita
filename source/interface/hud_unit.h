@@ -27,6 +27,15 @@ void hud_render_damage_indicators(
 void hud_play_unit_sounds(
 	struct player_datum const *player,
 	boolean show_hud);
+#ifdef HALO_LINUX
+/* (port) hud_play_unit_sounds from the render: made at the tick's join while
+a tick runs on its own thread (hud_unit.c) */
+void hud_play_unit_sounds_from_render(
+	struct player_datum const *player,
+	boolean show_hud);
+#else
+#define hud_play_unit_sounds_from_render hud_play_unit_sounds
+#endif
 void hud_tick_shield(
 	long player_index,
 	real amount);

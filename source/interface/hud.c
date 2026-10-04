@@ -1177,7 +1177,7 @@ void hud_draw_screen(
 			{
 				hud_render_weapon_interface(player);
 				hud_show_action_response(player_index);
-				hud_play_unit_sounds(player, hud_scripted_globals->show_hud);
+				hud_play_unit_sounds_from_render(player, hud_scripted_globals->show_hud);
 				hud_render_unit_interface(player);
 				hud_render_nav_points(render.local_player_index);
 				hud_render_damage_indicators(render.local_player_index);
@@ -1185,12 +1185,12 @@ void hud_draw_screen(
 			else
 			{
 				hud_show_action_response(player_index);
-				hud_play_unit_sounds(player, hud_scripted_globals->show_hud);
+				hud_play_unit_sounds_from_render(player, hud_scripted_globals->show_hud);
 			}
 		}
 		else
 		{
-			hud_play_unit_sounds(player, FALSE);
+			hud_play_unit_sounds_from_render(player, FALSE);
 		}
 
 		hud_messaging_update(render.local_player_index);
