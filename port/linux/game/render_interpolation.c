@@ -94,6 +94,8 @@ struct interpolated_camera
 struct interpolated_first_person
 {
 	long tick;
+	/* the ticks between the previous pose and the latest */
+	long span;
 	short node_count;
 	boolean has_previous;
 	real_matrix4x3 previous[MAXIMUM_INTERPOLATED_NODES];
@@ -109,6 +111,16 @@ static long interpolation_tick;
 static long interpolation_frame;
 static boolean interpolation_rendering;
 static real interpolation_fraction = 1.0f;
+/* the first-person weapon's blend: with every frame interpolated, the same
+tick and fraction; with only the weapon (HALO_INTERPOLATE_FIRST_PERSON),
+the ticks the render has drawn and the fraction past them, both read on
+the render's side (the running tick changes interpolation_tick and the
+clock's leftover while the frame is drawn) */
+static boolean first_person_rendering;
+static long first_person_tick;
+static real first_person_fraction = 1.0f;
+
+short game_time_get_elapsed(void);
 
 static real_matrix4x3 *tick_pose_node_matrices(long object_index);
 static void tick_pose_frame_begin(void);
@@ -366,17 +378,55 @@ void render_interpolation_tick(void)
 
 /* ---------- frames */
 
+/* HALO_INTERPOLATE_FIRST_PERSON=1: without interpolation, the first-person
+weapon and hands alone are blended between the last two ticks drawn. The
+Vita draws a frame only when a tick has run, 20-30 a second, so a frame
+moves the weapon's animation on by one tick or by two, unevenly - "on
+twos" (#13). The blend costs a few microseconds a frame (a matrix inverse,
+two products and a quaternion blend per node); the weapon's animation is
+drawn up to a tick behind, the camera and the world are not. */
+int halo_first_person_interpolation_enabled(void)
+{
+	static int enabled = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	/* (read again when the settings panel changes something) */
+	if (enabled < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_INTERPOLATE_FIRST_PERSON");
+
+		settings_seen = halo_settings_generation;
+		enabled = setting && atoi(setting) != 0;
+	}
+	return enabled;
+}
+
 void render_interpolation_frame_begin(void)
 {
 	interpolation_rendering = halo_interpolation_enabled();
 	interpolation_frame++;
 	interpolation_fraction = game_time_get_tick_fraction();
+	first_person_rendering = interpolation_rendering || halo_first_person_interpolation_enabled();
+	if (interpolation_rendering)
+	{
+		first_person_tick = interpolation_tick;
+		first_person_fraction = interpolation_fraction;
+	}
+	else if (first_person_rendering)
+	{
+		short elapsed = game_time_get_elapsed();
+
+		first_person_tick += elapsed > 0 ? elapsed : 0;
+		first_person_fraction = halo_render_tick_fraction_get();
+	}
 	tick_pose_frame_begin();
 }
 
 void render_interpolation_frame_end(void)
 {
 	interpolation_rendering = FALSE;
+	first_person_rendering = FALSE;
 	tick_pose_frame_end();
 }
 
@@ -563,7 +613,9 @@ void render_interpolation_first_person(
 	real_matrix4x3 inverse_camera;
 	short node_index;
 
-	if (!interpolation_rendering ||
+	real t;
+
+	if (!first_person_rendering ||
 		local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS ||
 		node_count <= 0 || node_count > MAXIMUM_INTERPOLATED_NODES)
 	{
@@ -572,18 +624,25 @@ void render_interpolation_first_person(
 	first_person = &interpolated_first_person[local_player_index];
 	matrix4x3_from_point_and_vectors(&camera_matrix, &camera->position, &camera->forward, &camera->up);
 	matrix4x3_inverse(&camera_matrix, &inverse_camera);
-	if (first_person->tick != interpolation_tick)
+	if (first_person->tick != first_person_tick)
 	{
-		/* the pose drawn last, at the end of the previous tick */
-		first_person->has_previous = first_person->node_count == node_count;
+		/* the pose drawn last, at the end of the previous tick drawn (more
+		than one tick back when a frame ran several; a long gap - a pause,
+		a load - starts afresh) */
+		first_person->span = first_person_tick - first_person->tick;
+		first_person->has_previous = first_person->node_count == node_count &&
+			first_person->span > 0 && first_person->span <= 4;
 		memcpy(first_person->previous, first_person->latest, sizeof(first_person->previous));
-		first_person->tick = interpolation_tick;
+		first_person->tick = first_person_tick;
 	}
 	for (node_index = 0; node_index < node_count; node_index++)
 		matrix4x3_multiply(&inverse_camera, &node_matrices[node_index], &first_person->latest[node_index]);
 	first_person->node_count = node_count;
 	if (!first_person->has_previous)
 		return;
+	/* the pose a tick before the clock: the previous pose is span ticks
+	behind the latest, the clock a fraction of a tick ahead of it */
+	t = ((real)(first_person->span - 1) + first_person_fraction) / (real)first_person->span;
 	for (node_index = 0; node_index < node_count; node_index++)
 	{
 		real_matrix4x3 blended;
@@ -591,7 +650,7 @@ void render_interpolation_first_person(
 		matrix_blend(
 			&first_person->previous[node_index],
 			&first_person->latest[node_index],
-			interpolation_fraction,
+			t,
 			&blended);
 		matrix4x3_multiply(&camera_matrix, &blended, &node_matrices[node_index]);
 	}

@@ -45,6 +45,10 @@ static volatile int main_joining;
 static volatile short finished_elapsed;
 extern volatile short halo_render_elapsed_ticks;
 short halo_game_time_last_elapsed(void);
+/* ... and the fraction of a tick it left over */
+static volatile float finished_fraction = 1.0f;
+extern volatile float halo_render_tick_fraction;
+float game_time_get_tick_fraction(void);
 /* the poses the render draws while the next tick runs (render_interpolation.c) */
 void render_tick_poses_capture(void);
 void render_tick_poses_tick_started(void);
@@ -105,6 +109,7 @@ static void *tick_thread(void *unused)
 			lights_update_unattached();
 			rasterizer_decals_update_for_frame();
 			finished_elapsed = halo_game_time_last_elapsed();
+			finished_fraction = game_time_get_tick_fraction();
 			render_tick_poses_capture();
 			if (halo_trace_active && halo_trace_active())
 				platform_log("trace: tick updated");
@@ -198,6 +203,7 @@ void halo_tick_thread_join(void)
 	}
 	__atomic_store_n(&main_joining, 0, __ATOMIC_RELEASE);
 	halo_render_elapsed_ticks = finished_elapsed;
+	halo_render_tick_fraction = finished_fraction;
 	render_tick_poses_publish();
 	halo_epoch_end();
 	if (deferred_call_count)

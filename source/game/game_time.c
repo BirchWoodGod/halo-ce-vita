@@ -233,6 +233,19 @@ static short elapsed_for_caller(void)
 		return halo_render_elapsed_ticks;
 	return game_time_globals->last_local_time_elapsed;
 }
+
+/* the same for the fraction of a tick the game clock had run past the
+state the render draws (render_interpolation.c's first-person weapon): the
+running tick's game_time_update has already rewritten leftover_dt, so the
+render takes the finished update's, published at the join */
+volatile float halo_render_tick_fraction = 1.0f;
+
+real halo_render_tick_fraction_get(void)
+{
+	if (halo_epoch_threaded && !halo_epoch_on_mutator())
+		return halo_render_tick_fraction;
+	return game_time_get_tick_fraction();
+}
 #endif
 
 short game_time_get_elapsed(
