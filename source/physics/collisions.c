@@ -563,12 +563,14 @@ boolean collision_test_vector(
 
 						for (object_slot = 0; object_slot < object_count; object_slot++)
 						{
-							struct object_datum const *object;
+							struct object_datum *object;
 
+							/* (object_mark_function, with the object looked up once) */
 							object_index = object_indices[object_slot];
-							if (!object_mark_inline(object_index))
-								continue;
 							object = object_get(object_index);
+							if (object->object.magic_number == global_object_marker)
+								continue;
+							object->object.magic_number = global_object_marker;
 							if (object->object.next_object_index == NONE &&
 								(object_index == ignore_object_index ||
 									TEST_FLAG(object->object.flags, _object_invisible_bit) ||
@@ -913,8 +915,30 @@ boolean collision_get_features_in_sphere(
 
 						for (object_slot = 0; object_slot < object_count; object_slot++)
 						{
+							struct object_datum *object;
+
+							/* (object_mark_function with the object looked up
+							once, and a top-level object without siblings that
+							object_get_features_in_sphere would pass over at its
+							first tests passed over without the call) */
 							object_index = object_indices[object_slot];
-							if (object_mark_inline(object_index))
+							object = object_get(object_index);
+							if (object->object.magic_number == global_object_marker)
+								continue;
+							object->object.magic_number = global_object_marker;
+							if (object->object.next_object_index == NONE &&
+								(object_index == ignore_object_index ||
+									TEST_FLAG(object->object.flags, _object_invisible_bit) ||
+									TEST_FLAG(object->object.flags, _object_no_collisions_bit) ||
+									(TEST_FLAG(object->object.damage_flags, _object_dead_bit) &&
+										object->object.type == _object_type_biped) ||
+									!point_in_sphere(
+										center,
+										&object->object.bounding_sphere_center,
+										object->object.bounding_sphere_radius + radius)))
+							{
+								continue;
+							}
 							{
 								object_get_features_in_sphere(
 									flags,
