@@ -3637,6 +3637,93 @@ static void update_channels(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (debug) HALO_SOUND_LATENCY=1: how late sounds start - from the time the
+game asked for them (start_time) to the update that gave them a channel,
+which waits for the sound cache to have the samples (the memory card) -
+and which were dropped because they were not loaded (their class's cache
+miss mode is discard), summed every 10 s, with the worst named */
+static int sound_latency_wanted = -1;
+static struct
+{
+	unsigned long started, late[4], dropped;
+	long worst;
+	long last_report;
+	char worst_name[48];
+} sound_latency;
+
+static boolean sound_latency_on(
+	void)
+{
+	if (sound_latency_wanted < 0)
+		sound_latency_wanted = getenv("HALO_SOUND_LATENCY") && atoi(getenv("HALO_SOUND_LATENCY")) != 0;
+	return sound_latency_wanted > 0;
+}
+
+static void sound_latency_report(
+	void)
+{
+	if (sound_manager_globals.render_time - sound_latency.last_report < 10000)
+		return;
+	if (sound_latency.started || sound_latency.dropped)
+		platform_log("sound latency: %lu started (<50 ms %lu, <200 ms %lu, <1 s %lu, later %lu), %lu dropped not loaded; worst %ld ms %s",
+			sound_latency.started, sound_latency.late[0], sound_latency.late[1], sound_latency.late[2], sound_latency.late[3],
+			sound_latency.dropped, sound_latency.worst, sound_latency.worst_name);
+	memset(&sound_latency, 0, sizeof(sound_latency));
+	sound_latency.last_report = sound_manager_globals.render_time;
+}
+
+static void sound_latency_note(
+	struct sound_datum const *sound,
+	boolean dropped)
+{
+	long late = sound_manager_globals.render_time - sound->start_time;
+
+	if (dropped)
+	{
+		sound_latency.dropped++;
+		if (sound_latency.dropped <= 3)
+			platform_log("sound latency: dropped (not loaded %ld ms after it was asked for) %s", late,
+				tag_get_name(sound->definition_index));
+		return;
+	}
+	sound_latency.started++;
+	sound_latency.late[late < 50 ? 0 : late < 200 ? 1 : late < 1000 ? 2 : 3]++;
+	if (late > sound_latency.worst)
+	{
+		sound_latency.worst = late;
+		csstrncpy(sound_latency.worst_name, tag_name_strip_path(tag_get_name(sound->definition_index)),
+			sizeof(sound_latency.worst_name) - 1);
+	}
+}
+#endif
+
+#ifdef HALO_LINUX
+/* (port) HALO_SOUND_DISCARD_GRACE_MS (default 250): a sound whose class
+drops it when it is not in the sound cache as it starts (the impacts',
+the explosions', the weapons') waits this long for its load first. The
+load is asked for when the sound is made and the drop came at the next
+update, a tick later: the Xbox's hard disk had read it by then, the
+Vita's memory card often had not (#26: explosions and other effects
+without a sound; a throttled harness run dropped 37 in 2 minutes, none at
+disk speed). 0: dropped at once, as before */
+static boolean sound_discard_grace_waits(
+	struct sound_datum const *sound)
+{
+	static long grace = -1;
+
+	if (grace < 0)
+	{
+		char const *setting = getenv("HALO_SOUND_DISCARD_GRACE_MS");
+
+		grace = setting ? atol(setting) : 250;
+		if (grace < 0)
+			grace = 0;
+	}
+	return sound_manager_globals.render_time - sound->start_time < grace;
+}
+#endif
+
 static void prioritize_sounds(
 	void)
 {
@@ -3686,6 +3773,10 @@ static void prioritize_sounds(
 							sound_stop(channel->sound_index);
 						}
 
+#ifdef HALO_LINUX
+						if (sound_latency_on())
+							sound_latency_note(sound, FALSE);
+#endif
 						channel->sound_index = sound_index;
 						sound->start_time = sound_manager_globals.render_time;
 					}
@@ -3711,6 +3802,12 @@ static void prioritize_sounds(
 				switch (sound_class_get(definition->sound_class)->cache_miss_mode)
 				{
 				case _sound_cache_miss_mode_discard:
+#ifdef HALO_LINUX
+					if (sound_discard_grace_waits(sound))
+					{
+						break;
+					}
+#endif
 					{
 						struct sound_pitch_range *pitch_range = TAG_BLOCK_GET_ELEMENT(
 							&definition->pitch_ranges,
@@ -3722,6 +3819,10 @@ static void prioritize_sounds(
 							pitch_range->forced_permutation_index =
 								sound->permutation_index;
 						}
+#ifdef HALO_LINUX
+						if (sound_latency_on())
+							sound_latency_note(sound, TRUE);
+#endif
 						sound_stop(sound_index);
 					}
 					break;
@@ -3754,6 +3855,10 @@ static void prioritize_sounds(
 
 		sound_index = data_next_index(sound_data, sound_index);
 	}
+#ifdef HALO_LINUX
+	if (sound_latency_on())
+		sound_latency_report();
+#endif
 
 	return;
 }

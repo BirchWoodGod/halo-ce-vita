@@ -194,6 +194,7 @@ symbols in this file:
 #include <xtl.h>
 #ifdef HALO_LINUX
 #include "load_profile.h"
+#include <stdlib.h>
 int halo_thread_index(void);
 /* the cache file thread, by halo_thread_index (load_profile.c) */
 static int cache_file_thread_index = -1;
@@ -283,6 +284,7 @@ struct cache_file_request
 	boolean blocking;
 	boolean pending;
 	boolean running;
+	/* (port) urgent: a sound cache read (cache_file_read_urgent) */
 	byte pad1F;
 };
 
@@ -787,6 +789,16 @@ boolean cache_file_open(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+static short cache_file_read_internal(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference,
+	boolean blocking,
+	boolean urgent);
+
 short cache_file_read(
 	long tag_index,
 	long offset,
@@ -794,6 +806,37 @@ short cache_file_read(
 	void *buffer,
 	boolean *completion_flag_reference,
 	boolean blocking)
+{
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, blocking, FALSE);
+}
+
+short cache_file_read_urgent(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference)
+{
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, FALSE, TRUE);
+}
+
+static short cache_file_read_internal(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference,
+	boolean blocking,
+	boolean urgent)
+#else
+short cache_file_read(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference,
+	boolean blocking)
+#endif
 {
 #ifdef HALO_LINUX
 	short request_index;
@@ -844,6 +887,7 @@ short cache_file_read(
 	and read with the slot's last offset, size and completion flag) */
 	request->blocking = blocking;
 	request->running = FALSE;
+	request->pad1F = urgent ? 1 : 0;
 	__atomic_store_n(&request->pending, TRUE, __ATOMIC_RELEASE);
 	__atomic_store_n(&cache_request_claim_lock, 0, __ATOMIC_RELEASE);
 #else
@@ -1108,11 +1152,30 @@ static void CALLBACK cache_file_read_io_completion_routine(
 	return;
 }
 
+#ifdef HALO_LINUX
+static boolean read_first = TRUE;
+static boolean complete_each = TRUE;
+#endif
+
 static void cache_file_windows_thread_proc(
 	void)
 {
 #ifdef HALO_LINUX
 	cache_file_thread_index = halo_thread_index();
+	/* (port) HALO_SOUND_READ_FIRST (default 1): urgent reads go first.
+	HALO_IO_EACH (default 1): each read's completion is delivered as soon
+	as it is done. The reads complete as they are issued (xbox_files.c's
+	ReadFileEx), and their completion routines ran at this thread's next
+	alertable wait - after every read pending had been issued, those
+	queued meanwhile too: on the memory card a sound waited for a level's
+	worth of texture reads to be marked loaded. 0: as before */
+	{
+		char const *setting = getenv("HALO_SOUND_READ_FIRST");
+
+		read_first = !setting || atoi(setting) != 0;
+		setting = getenv("HALO_IO_EACH");
+		complete_each = !setting || atoi(setting) != 0;
+	}
 #endif
 	while (TRUE)
 	{
@@ -1142,11 +1205,19 @@ static void cache_file_windows_thread_proc(
 				resource queued before it (on the Vita's memory card, at
 				~13 MB/s, megabytes of them at a level's start). Only the order
 				of the reads changes. */
+				/* (port) then a sound something is waiting to play
+				(cache_file_read_urgent): behind a level's textures it
+				arrived after the moment it was for, and the impacts' and
+				explosions' sound classes drop a sound that is not loaded
+				when it starts (#26). HALO_SOUND_READ_FIRST=0: offset order */
 				if (request->pending &&
 					!request->running &&
 					(!best_request ||
 						(request->blocking && !best_request->blocking) ||
+						(request->blocking == best_request->blocking && read_first &&
+							request->pad1F && !best_request->pad1F) ||
 						(request->blocking == best_request->blocking &&
+							(!read_first || request->pad1F == best_request->pad1F) &&
 							request->overlapped.Offset < best_request->overlapped.Offset)))
 				{
 					best_request = request;
@@ -1186,6 +1257,12 @@ static void cache_file_windows_thread_proc(
 				best_request->overlapped.Offset,
 				(volatile boolean *)best_request->overlapped.hEvent,
 				cache_file_read_io_completion_routine);
+#ifdef HALO_LINUX
+			if (complete_each)
+			{
+				SleepEx(0, TRUE);
+			}
+#endif
 		}
 	}
 

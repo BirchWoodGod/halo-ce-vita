@@ -107,6 +107,7 @@ symbols in this file:
 
 #include <xtl.h>
 #ifdef HALO_LINUX
+#include "cache/cache_files.h"
 #include "load_profile.h"
 #include <stdlib.h>
 
@@ -533,6 +534,15 @@ static void sound_cache_start_loading_sound(
 		sound->cache_block_index = cache_block_index;
 		sound->cache_base_address = (unsigned long)cache_address;
 		cache_sound->sound = sound;
+#ifdef HALO_LINUX
+		/* (port) ahead of the textures' reads (cache_files_windows.c) */
+		cache_file_read_urgent(
+			sound->cache_tag_index,
+			sound->samples.file_offset,
+			sound->samples.size,
+			cache_address,
+			&cache_sound->loaded);
+#else
 		cache_file_read(
 			sound->cache_tag_index,
 			sound->samples.file_offset,
@@ -540,6 +550,7 @@ static void sound_cache_start_loading_sound(
 			cache_address,
 			&cache_sound->loaded,
 			FALSE);
+#endif
 #ifdef HALO_LINUX
 		sound_load_started_ms[cache_block_index & 1023] = system_milliseconds();
 		{

@@ -563,6 +563,79 @@ static void surface_dimensions(const D3DSurface *surface, unsigned long *width, 
 		format == D3DFMT_LIN_D24S8 || format == D3DFMT_LIN_F24S8 || format == D3DFMT_LIN_D16 || format == D3DFMT_LIN_F16;
 }
 
+/* the active camouflage's copy of the screen (rasterizer_xbox_active_camouflage.c:
+320x240, the only colour surface of that size). Its target was made the
+first time a cloaked unit was seen, and late in a session - all 128 targets
+made, CDRAM taken - none could be had: beta.1 drew the cloaked units black,
+beta.2 and 3 left their distortion out, so a fully cloaked unit was not
+drawn at all (#26: d40's stealth Flood combat forms, heard and felt but
+unseen, visible only while a hit dropped their camouflage). Now the target
+is made with the first targets (camo_target_reserve), handed to the copy
+when it first asks, and never taken over by the recycling; and a distortion
+pass whose copy still has no target samples the picture it draws over
+(camo_fallback). HALO_CAMO_TARGET=0: as before (no reserve, left out);
+=2: the fallback only (no reserve, recycled as any other) */
+#define CAMO_COPY_WIDTH 320
+#define CAMO_COPY_HEIGHT 240
+
+static int camo_target_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_CAMO_TARGET");
+
+		enabled = setting ? atoi(setting) : 1;
+		if (enabled < 0 || enabled > 2)
+			enabled = 1;
+		if (enabled != 1)
+			platform_log("active camouflage: %s (HALO_CAMO_TARGET=%d)", enabled ? "no reserved target, the distortion samples "
+				"the picture when its copy has no target" : "no reserved target, a copy with no target leaves the distortion out",
+				enabled);
+	}
+	return enabled != 0;
+}
+
+/* the copy's target made at the start and kept (HALO_CAMO_TARGET=1) */
+static int camo_target_reserved(void)
+{
+	static int reserved = -1;
+
+	if (reserved < 0)
+	{
+		const char *setting = getenv("HALO_CAMO_TARGET");
+
+		reserved = !setting || atoi(setting) == 1 || atoi(setting) < 0 || atoi(setting) > 2;
+	}
+	return reserved;
+}
+
+static BOOL camo_copy_size(unsigned long width, unsigned long height, BOOL depth)
+{
+	return !depth && width == CAMO_COPY_WIDTH && height == CAMO_COPY_HEIGHT;
+}
+
+static unsigned long camo_reserved_id;
+static struct vgxm_texture camo_reserved_texture;
+
+/* made with the first targets, while slots and CDRAM are plenty */
+static void camo_target_reserve(void)
+{
+	static int attempts;
+
+	if (camo_reserved_id || attempts >= 4 || !camo_target_reserved())
+		return;
+	attempts++;
+	camo_reserved_id = vgxm_target_create(CAMO_COPY_WIDTH, CAMO_COPY_HEIGHT, FALSE, &camo_reserved_texture);
+	if (camo_reserved_id)
+		platform_log("active camouflage: %dx%d target %lu reserved for the copy of the screen", CAMO_COPY_WIDTH,
+			CAMO_COPY_HEIGHT, camo_reserved_id);
+	else
+		platform_log("active camouflage: cannot reserve a %dx%d target", CAMO_COPY_WIDTH, CAMO_COPY_HEIGHT);
+	attempts = camo_reserved_id ? 4 : attempts;
+}
+
 /* a target that has been neither drawn into nor sampled for ten seconds,
 taken over when no more targets can be made: they are never freed, and
 every map's surfaces add their own - after an hour and a level change the
@@ -580,7 +653,9 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 
 	for (entry = render_targets; entry; entry = entry->next)
 	{
-		if (entry->id && !entry->chain_levels && entry->target.depth == depth && entry->last_used + 300 < device.frame)
+		if (entry->id && !entry->chain_levels && entry->target.depth == depth && entry->last_used + 300 < device.frame &&
+			!(camo_target_reserved() && camo_copy_size(entry->target.width, entry->target.height, entry->target.depth) &&
+				!camo_copy_size(width, height, depth)))
 		{
 			if (entry->target.width == width && entry->target.height == height)
 				break;
@@ -658,9 +733,20 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 			}
 		}
 	}
+	camo_target_reserve();
 	{
 		struct vgxm_texture texture;
-		unsigned long id = vgxm_target_create(width, height, depth, &texture);
+		unsigned long id;
+
+		if (camo_reserved_id && camo_copy_size(width, height, depth))
+		{
+			/* (the camouflage's copy: the target made for it at the start) */
+			id = camo_reserved_id;
+			texture = camo_reserved_texture;
+			camo_reserved_id = 0;
+		}
+		else
+			id = vgxm_target_create(width, height, depth, &texture);
 
 		if (id)
 		{
@@ -2232,6 +2318,33 @@ static void bind_recorded_textures(struct render_command *command, float texture
 			description.levels = target->chain_levels > 1 ? 
 				(description.levels < (unsigned long)target->chain_levels ? description.levels : (unsigned long)target->chain_levels) : 1;
 			description.cube_map = FALSE;
+		}
+		else if (render_target_entry_known(header[1]) && camo_target_enabled() && command->key.texture_modes == 0x2623 &&
+			stage == 2 && command->targets && command->targets->color_valid &&
+			(target = render_target_entry_find(command->targets->color_surface.Data)) != NULL)
+		{
+			/* (camo_fallback) the active camouflage's distortion pass, whose
+			copy of the screen has no target: it samples the target it
+			draws into instead - what the GPU last stored of the picture,
+			the coordinates normalised as the copy's would be - so a cloaked
+			unit shows as a shimmer rather than not at all */
+			static unsigned long logged;
+
+			if (logged++ < 4)
+				platform_log("active camouflage: the copy %08lx has no target, the distortion samples the picture",
+					(unsigned long)header[1]);
+			target->last_used = device.frame + 1;
+			sampled_targets[stage] = target->id;
+			xgpu_texture_describe(header[3], header[4], &description);
+			if (description.linear && description.width && description.height)
+			{
+				texture_scale[stage][0] = 1.0f / (float)description.width;
+				texture_scale[stage][1] = 1.0f / (float)description.height;
+			}
+			source = &target->texture;
+			description.levels = 1;
+			description.cube_map = FALSE;
+			stats.self_sampled++;
 		}
 		else if (render_target_entry_known(header[1]))
 		{
@@ -5664,6 +5777,11 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	}
 	platform_pump_events();
 
+	/* (the flips are counted down by the vertical blank thread, which the
+	game starts when it sets its callback: frames presented before - the
+	loading screen of a map precache taking seconds, on a slow disk or
+	with HALO_IO_THROTTLE_KBPS - waited for it for ever) */
+	vertical_blank_start();
 	pthread_mutex_lock(&vertical_blank_lock);
 	while (pending_flips >= 2)
 		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);

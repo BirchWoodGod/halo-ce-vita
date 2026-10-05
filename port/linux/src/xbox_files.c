@@ -560,6 +560,17 @@ BOOL WINAPI ReadFileEx(HANDLE handle, LPVOID buffer, DWORD count, LPOVERLAPPED o
 		return FALSE;
 	}
 	result = read_at(file, buffer, count, &done, TRUE, overlapped_offset(overlapped));
+	{
+		/* (debug) HALO_IO_THROTTLE_KBPS=<n>: the map's reads take as long as
+		at n KB/s (the Vita's memory card: ~10000-13000), to see in the
+		harness what waits behind them - the sound cache's loads */
+		static long throttle = -1;
+
+		if (throttle < 0)
+			throttle = getenv("HALO_IO_THROTTLE_KBPS") ? atol(getenv("HALO_IO_THROTTLE_KBPS")) : 0;
+		if (throttle > 0 && done)
+			Sleep((DWORD)(1 + (unsigned long long)done * 1000ull / ((unsigned long long)throttle * 1024ull)));
+	}
 	overlapped->Internal = result ? ERROR_SUCCESS : GetLastError();
 	if (result && done == 0 && count > 0)
 		overlapped->Internal = ERROR_HANDLE_EOF;
