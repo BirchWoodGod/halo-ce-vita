@@ -23,26 +23,30 @@ state above the tag cache (which ends at 0x819A6000), inside the Xbox memory
 window (0x80000000-0x88000000, port/linux/src/platform.h) and below everything
 the window hands out top-down (texture and sound caches, Direct3D resources).
 
-The CPU part holds about 17.2 MB of pools at the sizes below (the Xbox pools
+The CPU part holds about 13.6 MB of pools at the sizes below (the Xbox pools
 fill 3,165,260 of its 0x305000 bytes); the GPU part holds only the decal
 vertices, as on the Xbox. A change to a pool's size changes the game state's
 layout: saved games of builds before it no longer load. */
 
 #define HALO_PORT_GAME_STATE_BASE_ADDRESS 0x81A00000 /* (0x80061000) */
-#define HALO_PORT_GAME_STATE_CPU_SIZE 0x13C0000 /* (0x305000) */
+#define HALO_PORT_GAME_STATE_CPU_SIZE 0xFC0000 /* (0x305000) */
 #define HALO_PORT_GAME_STATE_GPU_SIZE 0x40000 /* (0x40000) */
 #define HALO_PORT_GAME_STATE_SIZE (HALO_PORT_GAME_STATE_CPU_SIZE+HALO_PORT_GAME_STATE_GPU_SIZE)
 
 /* ---------- AI
 
-Network co-op adds enemies for its players (port/linux/game/coop_enemies.c):
-the actors, and their knowledge of the units about them (props: with many
-players, more each), have room for several times a level's own. */
+The Xbox's sizes. Upstream's co-op makes these four times larger (and the
+game state 4 MB more) for its extra enemies (port/linux/game/coop_enemies.c);
+the Vita keeps the campaign's: a larger game state would leave single
+player's saves behind (their layout) and take memory the Vita does not have,
+and its co-op host has no extra enemies (network.coop_enemies_mode "none",
+port_config.c). With these the extra enemies find no room
+(coop_enemies.c leaves a level's 256 actors to it). */
 
-#define HALO_PORT_MAXIMUM_ACTORS 1024 /* (256) */
-#define HALO_PORT_MAXIMUM_PROPS 8192 /* (768) */
-#define HALO_PORT_MAXIMUM_SWARMS 128 /* (32) */
-#define HALO_PORT_MAXIMUM_SWARM_COMPONENTS 1024 /* (256) */
+#define HALO_PORT_MAXIMUM_ACTORS 256 /* (256) */
+#define HALO_PORT_MAXIMUM_PROPS 768 /* (768) */
+#define HALO_PORT_MAXIMUM_SWARMS 32 /* (32) */
+#define HALO_PORT_MAXIMUM_SWARM_COMPONENTS 256 /* (256) */
 
 /* ---------- objects */
 
