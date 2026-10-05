@@ -506,6 +506,10 @@ static struct
 	short ground_structure_bsp_index;
 	boolean has_ground_position[NETWORK_GAME_MAXIMUM_PLAYER_COUNT];
 	real_point3d ground_positions[NETWORK_GAME_MAXIMUM_PLAYER_COUNT];
+	/* the players a loading zone could not bring along at the switch
+	(player_teleport_on_bsp_switch), and until when they are tried again
+	each tick (players_coop_bring_along) */
+	long bring_along_until[NETWORK_GAME_MAXIMUM_PLAYER_COUNT];
 } players_coop_state;
 
 /* port: where each player was at the last checkpoint, in network co-op
@@ -2801,6 +2805,10 @@ them (world units, about 45 metres). Wide enough for a team walking through
 a doorway in a line, not for one player who ran back alone. */
 #define COOP_BACKTRACK_GATHER_DISTANCE 15.0f
 
+/* how long a player a loading zone could not bring along at the switch is
+tried again (players_coop_bring_along) */
+#define COOP_BRING_ALONG_TICKS (5 * TICKS_PER_SECOND)
+
 /* how often a player waiting for the team to go back is reminded */
 #define COOP_BACKTRACK_MESSAGE_TICKS (3 * TICKS_PER_SECOND)
 
@@ -2809,6 +2817,39 @@ beside a grounded teammate inside the BSP, else any teammate inside it, else
 to the last checkpoint. Skipped while scripts hold the controls, since
 cutscenes place the players themselves. A BSP switch already moves everyone
 (players_reconnect_to_structure_bsp); this catches anyone it missed. */
+/* Co-op host, each tick: the players a loading zone could not bring along
+at the switch go beside a teammate in the new BSP as soon as there is room
+(player_teleport_on_bsp_switch), for up to COOP_BRING_ALONG_TICKS */
+static void players_coop_bring_along(
+	void)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+
+	if (!network_coop_active() || game_connection() != _game_connection_network_server)
+		return;
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		long *until = &players_coop_state.bring_along_until[DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index)];
+
+		if (*until == 0)
+			continue;
+		if (player->unit_index == NONE || game_time_get() > *until)
+		{
+			error(2 /* _error_silent */, "co-op: player %ld was not brought along to the new BSP",
+				DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index));
+			*until = 0;
+		}
+		else if (player_place_beside_teammate(iterator.datum_index))
+		{
+			error(2 /* _error_silent */, "co-op: player %ld brought along to the new BSP, %ld ticks after the switch",
+				DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index), game_time_get() - players_coop_state.bsp_switch_time);
+			*until = 0;
+		}
+	}
+}
+
 static void players_coop_rescue_stranded(
 	void)
 {
@@ -2941,6 +2982,9 @@ void players_note_checkpoint(
 
 	csmemset(&players_checkpoint, 0, sizeof(players_checkpoint));
 	players_checkpoint.structure_bsp_index = global_structure_bsp_index_get();
+	if (network_coop_active())
+		error(2 /* _error_silent */, "co-op: checkpoint at tick %ld on BSP %d", game_time_get(),
+			(int)players_checkpoint.structure_bsp_index);
 	data_iterator_new(&iterator, player_data);
 	while ((player = data_iterator_next(&iterator)) != NULL)
 	{
@@ -3132,6 +3176,8 @@ static void players_coop_show_backtrack_wait(
 		*count = gathered_count;
 		usnprintf(text, NUMBEROF(text), L"Waiting for your team to go back: %d of %d here",
 			gathered_count, needed_count);
+		error(2 /* _error_silent */, "co-op: local player %d waits at a loading zone back: %d of %d here",
+			(int)local_player_index, (int)gathered_count, (int)needed_count);
 		hud_print_message(local_player_index, text);
 	}
 }
@@ -3205,6 +3251,16 @@ static void player_teleport_on_bsp_switch(
 				crosser, so the rest go beside whoever is already in */
 				if (!teleport_succeeded && network_coop_active())
 					teleport_succeeded = player_place_beside_teammate(player_index);
+				/* port: in co-op one that still found no room (the switch's
+				own tick: a remote player's unit, a crosser standing in the
+				trigger) is tried again each tick for a few seconds, rather
+				than left outside the new BSP (players_coop_bring_along) */
+				if (!teleport_succeeded && network_coop_active())
+				{
+					players_coop_state.bring_along_until[DATUM_INDEX_TO_ABSOLUTE_INDEX(player_index)] =
+						game_time_get() + COOP_BRING_ALONG_TICKS;
+					teleport_succeeded = TRUE;
+				}
 			}
 			else
 			{
@@ -3341,6 +3397,9 @@ void players_reconnect_to_structure_bsp(
 			found_player,
 			"no players in the bsp");
 		/* port: all players, not just local ones (the same set in split screen) */
+		if (network_coop_active())
+			error(2 /* _error_silent */, "co-op: loading zone %d: the team gathers to unit %lx (found %d)",
+				(int)players_globals->pending_teleport_starting_location_index, source_unit_index, (int)found_player);
 		if (found_player)
 		{
 			data_iterator_new(&iterator, player_data);
@@ -4398,6 +4457,7 @@ void players_update_before_game(
 
 	profile_enter(PLAYERS_UPDATE_BEFORE_GAME_PROFILE);
 	players_coop_note_on_foot();
+	players_coop_bring_along();
 	players_coop_rescue_stranded();
 	if (update_client_dequeue(actions))
 	{
