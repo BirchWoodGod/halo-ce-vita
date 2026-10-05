@@ -200,9 +200,20 @@ struct object_render_state
 
 #ifdef HALO_LINUX
 /* (port) per render state (by its slot): the scene its dynamic lights were
-last searched in (HALO_LIGHTING_REFRESH_DIVISOR); render-side, never saved */
+last searched in (HALO_LIGHTING_REFRESH_DIVISOR) and the lights found, as
+light datum indices; render-side, never saved. The lights are put into each
+scene's rasterizer light indices every scene (object_render_state_refresh):
+those are numbered afresh every scene, in the order the lights are
+submitted, and an index kept from an earlier scene named whichever light
+was submitted there now, or none - the flashlight lit an object one frame
+and another light (or none) the next. */
 #define DYNAMIC_SCENE_SLOTS 4096
-static long dynamic_scene_indices[DYNAMIC_SCENE_SLOTS];
+static struct
+{
+	long scene_index;
+	short light_count;
+	long light_indices[MAXIMUM_RENDERED_POINT_LIGHTS];
+} dynamic_lights[DYNAMIC_SCENE_SLOTS];
 #endif
 
 struct render_object_globals
@@ -1350,15 +1361,34 @@ static void object_render_state_refresh(
 
 #ifdef HALO_LINUX
 	{
-		long *searched = &dynamic_scene_indices[(unsigned long)(render_state_index & 0xffff) % DYNAMIC_SCENE_SLOTS];
+		static int datum_cache = -1;
+		long slot = (unsigned long)(render_state_index & 0xffff) % DYNAMIC_SCENE_SLOTS;
 
-		if (rebuild || render.scene_index - *searched >=
-			(level_of_detail_pixels > OBJECT_RENDER_STATE_LARGE_PIXELS ? 1 : refresh_divisor) ||
-			render.scene_index < *searched)
+		if (datum_cache < 0)
 		{
-			lights_prepare_for_object_dynamic(object_index, &state->desired_lighting);
-			*searched = render.scene_index;
+			/* (HALO_LIGHT_DATUM_CACHE=0: the rasterizer indices are kept
+			between searches, as in 1.0.3 beta 2 - the A/B switch) */
+			const char *setting = getenv("HALO_LIGHT_DATUM_CACHE");
+
+			datum_cache = !setting || atoi(setting) != 0;
 		}
+		if (rebuild || render.scene_index - dynamic_lights[slot].scene_index >=
+			(level_of_detail_pixels > OBJECT_RENDER_STATE_LARGE_PIXELS ? 1 : refresh_divisor) ||
+			render.scene_index < dynamic_lights[slot].scene_index)
+		{
+			if (datum_cache)
+				lights_find_for_object_dynamic(object_index, dynamic_lights[slot].light_indices,
+					&dynamic_lights[slot].light_count);
+			else
+				lights_prepare_for_object_dynamic(object_index, &state->desired_lighting);
+			dynamic_lights[slot].scene_index = render.scene_index;
+		}
+		/* (every scene, and after a static refresh: that overwrites the
+		whole desired lighting, its point lights with the level's default
+		none, and the object went dark until its next search) */
+		if (datum_cache)
+			lights_translate_for_object_dynamic(dynamic_lights[slot].light_indices,
+				dynamic_lights[slot].light_count, &state->desired_lighting);
 	}
 #else
 	if (rebuild || scene_age > 0)
