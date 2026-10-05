@@ -392,6 +392,11 @@ symbols in this file:
 #include "networking/network_messages.h"
 #include "networking/network_server_manager.h"
 #include "text/unicode.h"
+#ifdef HALO_LINUX
+#include "tag_files/tag_files.h"
+#include "custom_edition_maps.h"
+void platform_show_message(char const *title, char const *message);
+#endif
 
 #ifdef HALO_LINUX
 /* (HALO_NET_PROFILE=1) the networked frame's steps timed (port/linux/game/tick_detail.c) */
@@ -1347,6 +1352,29 @@ boolean network_game_client_game_settings_updated(
 #endif
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
 		{
+#ifdef HALO_LINUX
+			boolean missing;
+
+			/* port: a custom map is played only with the host's copy of it
+			(port/linux/game/custom_edition_maps.c): one missing here would
+			otherwise stop the game as a damaged disc */
+			if (!network_game_is_splitscreen_local() &&
+				!custom_edition_maps_host_copy_matches(message_packet->map.name, (unsigned long)message_packet->map.__unknown0, &missing))
+			{
+				char message[192];
+
+				snprintf(
+					message,
+					sizeof(message),
+					missing ?
+						"The host is playing the custom map %s, which isn't in your maps folder." :
+						"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.",
+					tag_name_strip_path(message_packet->map.name));
+				platform_show_message("Halo: custom map", message);
+				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
+				return FALSE;
+			}
+#endif
 			network_event("precaching map '%s'...", message_packet->map.name);
 			main_set_multiplayer_map_name(message_packet->map.name);
 		}

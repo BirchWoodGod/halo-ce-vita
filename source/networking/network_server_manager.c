@@ -476,6 +476,9 @@ symbols in this file:
 #include "networking/network_server_message_handler.h"
 #include "saved games/player_profile.h"
 #include "text/unicode.h"
+#ifdef HALO_LINUX
+#include "custom_edition_maps.h"
+#endif
 
 #include "cache/cache_files.h"
 
@@ -2536,6 +2539,12 @@ void network_game_server_change_map_name(
 		map_name,
 		NETWORK_GAME_MAP_NAME_LENGTH - 1);
 	server->game.map.name[NETWORK_GAME_MAP_NAME_LENGTH - 1] = 0;
+#ifdef HALO_LINUX
+	/* port: which copy of a custom map this is, for the players to compare
+	theirs with (port/linux/game/custom_edition_maps.c); 0, as January sent,
+	for the Xbox levels */
+	server->game.map.version = (long)custom_edition_maps_network_identity(server->game.map.name);
+#endif
 
 	if (!network_game_server_send_game_data_pregame(server))
 	{
@@ -3218,7 +3227,11 @@ static boolean network_game_server_setup_game_from_playlist(
 		network_game_generate_local_machine_name(machine_name);
 		ustrncpy(server->game.name, machine_name, NETWORK_GAME_NAME_LENGTH - 1);
 		server->game.name[NETWORK_GAME_NAME_LENGTH - 1] = L'\0';
+#ifdef HALO_LINUX
+		server->game.map.version = (long)custom_edition_maps_network_identity(server->game.map.name);
+#else
 		server->game.map.version = 0;
+#endif
 		server->game.minimum_players = 2;
 #ifdef HALO_VITA
 		/* (port) a local game on the Vita starts with one player
