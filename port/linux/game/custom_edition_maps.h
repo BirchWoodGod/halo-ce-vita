@@ -57,4 +57,20 @@ struct bitmap_data *custom_edition_maps_picture(
 	long bitmap_tag_index,
 	short *frame_index);
 
+/* What a multiplayer host sends with a level so that its players can tell
+whether they have its copy (the network game's map version, which the Xbox
+left 0): 0 for an Xbox level, whose copies differ by region and play
+together, else custom_edition_cache_map_identity's (0: no such map). */
+unsigned long custom_edition_maps_network_identity(
+	char const *level_name);
+
+/* Whether a player may play the host's level `level_name`, of which the host
+sent `host_identity`: an Xbox level always; a custom map when this machine
+has it and, if the host said which copy, that copy (*missing: not at all).
+Logs why not. */
+boolean custom_edition_maps_host_copy_matches(
+	char const *level_name,
+	unsigned long host_identity,
+	boolean *missing);
+
 #endif

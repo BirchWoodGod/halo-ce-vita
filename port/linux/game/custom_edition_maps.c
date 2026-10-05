@@ -96,6 +96,9 @@ struct custom_edition_map
 	wchar_t description[MAXIMUM_DESCRIPTION_LENGTH + 1];
 	boolean picture_read;
 	struct bitmap_data *picture;
+	/* an Xbox cache (a modded or newly built Xbox map), not a Custom Edition
+	one */
+	boolean xbox_cache;
 };
 
 struct custom_edition_maps_globals
@@ -115,6 +118,7 @@ static struct custom_edition_maps_globals custom_edition_maps_globals;
 /* the description of a map without a description file, in the manner of
 the Xbox levels' */
 static wchar_t const default_description[] = L"Halo Custom\r\nEdition map";
+static wchar_t const default_xbox_description[] = L"Custom map";
 
 /* ---------- private code */
 
@@ -242,7 +246,11 @@ static void custom_edition_map_description_read(
 	}
 	map->description[length] = 0;
 
-	if (!length)
+	if (!length && map->xbox_cache)
+	{
+		csmemcpy(map->description, default_xbox_description, sizeof(default_xbox_description));
+	}
+	else if (!length)
 	{
 		csmemcpy(map->description, default_description, sizeof(default_description));
 	}
@@ -260,6 +268,7 @@ static void custom_edition_map_add(
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	struct custom_edition_map *map;
 	short map_index;
+	boolean xbox_cache;
 
 	if (csstrcasecmp(extension, "map") && csstrcasecmp(extension, "yelo"))
 	{
@@ -272,7 +281,14 @@ static void custom_edition_map_add(
 			return;
 		}
 	}
-	if (xbox_level_named(name) || !custom_edition_cache_multiplayer(name))
+	if (xbox_level_named(name))
+	{
+		return;
+	}
+	/* a modded or newly built Xbox map plays as the Xbox levels do; a
+	Custom Edition one only with the setting on */
+	xbox_cache = !csstrcasecmp(extension, "map") && custom_edition_cache_xbox_multiplayer(name);
+	if (!xbox_cache && !(halo_custom_edition_enabled() && custom_edition_cache_multiplayer(name)))
 	{
 		return;
 	}
@@ -297,6 +313,7 @@ static void custom_edition_map_add(
 
 	map = &globals->maps[globals->map_count++];
 	csmemset(map, 0, sizeof(*map));
+	map->xbox_cache = xbox_cache;
 	csstrcpy(map->name, name);
 	csprintf(map->level_name, LEVEL_NAME_FORMAT, name, name);
 	display_name_make(name, map->display_name);
@@ -325,10 +342,6 @@ static void custom_edition_maps_look_for(
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
-	if (!halo_custom_edition_enabled())
-	{
-		return;
-	}
 
 	file_reference_create_from_path(&directory, cache_files_map_directory(), TRUE);
 	find_files_start(0, &directory);
@@ -523,4 +536,80 @@ struct bitmap_data *custom_edition_maps_picture(
 	}
 
 	return map->picture;
+}
+
+/* the Xbox multiplayer levels, whose copies differ by region (the PAL and
+NTSC maps play together: port/linux/game/pal_tags.c), so they are never
+compared */
+static char const *const xbox_multiplayer_level_names[] =
+{
+	"beavercreek", "sidewinder", "damnation", "ratrace", "prisoner", "hangemhigh", "chillout",
+	"carousel", "boardingaction", "bloodgulch", "wizard", "putput", "longest",
+};
+
+unsigned long custom_edition_maps_network_identity(
+	char const *level_name)
+{
+	char const *name;
+	short index;
+
+	if (!level_name || !level_name[0])
+	{
+		return 0;
+	}
+	name = tag_name_strip_path(level_name);
+	for (index = 0; index < NUMBEROF(xbox_multiplayer_level_names); index++)
+	{
+		if (!csstrcasecmp(name, xbox_multiplayer_level_names[index]))
+		{
+			return 0;
+		}
+	}
+
+	return custom_edition_cache_map_identity(name);
+}
+
+boolean custom_edition_maps_host_copy_matches(
+	char const *level_name,
+	unsigned long host_identity,
+	boolean *missing)
+{
+	unsigned long identity = custom_edition_maps_network_identity(level_name);
+	char const *name = level_name ? tag_name_strip_path(level_name) : "";
+	short index;
+	boolean xbox_level = FALSE;
+
+	for (index = 0; index < NUMBEROF(xbox_multiplayer_level_names); index++)
+	{
+		xbox_level |= !csstrcasecmp(name, xbox_multiplayer_level_names[index]);
+	}
+	*missing = FALSE;
+	if (xbox_level)
+	{
+		return TRUE;
+	}
+	if (!identity)
+	{
+		*missing = TRUE;
+		error(_error_silent, "custom maps: the host plays '%s', which this machine does not have", name);
+		return FALSE;
+	}
+	if (!host_identity)
+	{
+		/* a host of a build that does not say which copy it plays */
+		error(_error_silent, "custom maps: the host does not say which copy of '%s' it plays; playing this machine's", name);
+		return TRUE;
+	}
+	if (identity != host_identity)
+	{
+		error(
+			_error_silent,
+			"custom maps: this machine's '%s' (0x%08lX) is not the host's (0x%08lX)",
+			name,
+			identity,
+			host_identity);
+		return FALSE;
+	}
+
+	return TRUE;
 }

@@ -39,6 +39,8 @@ read.
 #include "tag_relocate.h"
 #endif
 
+#include "memory/zlib/zlib.h"
+
 #include <stdlib.h>
 
 /* ---------- constants */
@@ -451,6 +453,136 @@ boolean custom_edition_cache_playable(
 	struct cache_file_identity identity;
 
 	return custom_edition_cache_identify(map_name, &identity);
+}
+
+boolean custom_edition_cache_xbox_multiplayer(
+	char const *map_name)
+{
+	/* the cache partition's room for a multiplayer map
+	(cache_files_windows.c, MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE), which its
+	decompressed length must stay below */
+	enum { MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE = 0x02F00000 };
+	char const *name = tag_name_strip_path(map_name);
+	char path[MAP_PATH_SIZE];
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	boolean multiplayer = FALSE;
+
+	if (strlen(cache_files_map_directory()) + strlen(name) + strlen(MAP_FILE_EXTENSION) >= MAP_PATH_SIZE)
+	{
+		return FALSE;
+	}
+	sprintf(path, "%s%s%s", cache_files_map_directory(), name, MAP_FILE_EXTENSION);
+	if (!custom_edition_file_open(&file, path))
+	{
+		return FALSE;
+	}
+	if (cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
+		identity.format == _cache_file_format_xbox_cache &&
+		identity.scenario_type == _scenario_type_multiplayer)
+	{
+		/* the cache partition knows a copied map by the name in its header
+		(cache_files_windows.c, cached_map_files_find_map) */
+		if (csstrcasecmp(identity.name, name))
+		{
+			error(_error_silent, "custom maps: '%s' is named '%s' inside: rename the file to %s.map", path, identity.name, identity.name);
+		}
+		else if (identity.file_length >= MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE)
+		{
+			error(
+				_error_silent,
+				"custom maps: '%s' is 0x%lX bytes decompressed, more than the Xbox's multiplayer maps may be (0x%X)",
+				path,
+				(unsigned long)identity.file_length,
+				MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE);
+		}
+		else
+		{
+			multiplayer = TRUE;
+		}
+	}
+	custom_edition_file_close(&file);
+
+	return multiplayer;
+}
+
+unsigned long custom_edition_cache_map_identity(
+	char const *map_name)
+{
+	/* the answers kept, by file name and size: the CRC of a map without a
+	checksum reads the whole file */
+	enum { REMEMBERED_IDENTITIES = 8 };
+	static struct
+	{
+		char name[CACHE_FILE_STRING_BYTES];
+		uint32_t size;
+		unsigned long identity;
+	} remembered[REMEMBERED_IDENTITIES];
+	static short next_remembered;
+	char const *name = tag_name_strip_path(map_name);
+	char path[MAP_PATH_SIZE];
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	unsigned long result = 0;
+	short index;
+
+	if (strlen(name) >= CACHE_FILE_STRING_BYTES ||
+		!custom_edition_map_path(name, path) ||
+		!custom_edition_file_open(&file, path))
+	{
+		return 0;
+	}
+	for (index = 0; index < REMEMBERED_IDENTITIES; index++)
+	{
+		if (remembered[index].identity &&
+			remembered[index].size == file.source.size &&
+			!csstrcasecmp(remembered[index].name, name))
+		{
+			custom_edition_file_close(&file);
+			return remembered[index].identity;
+		}
+	}
+	if (cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
+		(identity.format == _cache_file_format_xbox_cache || identity.format == _cache_file_format_custom_edition_cache))
+	{
+		if (identity.checksum && identity.checksum != 0xFFFFFFFFUL)
+		{
+			/* the header's checksum, as Bungie's tools, Custom Edition's and
+			Invader's write it, with the length the file has */
+			result = (identity.checksum ^ (unsigned long)file.source.size * 0x9E3779B1UL) & 0xFFFFFFFFUL;
+		}
+		else
+		{
+			/* none (Invader's Xbox maps): the CRC-32 of the whole file */
+			byte buffer[READ_STAGING_BYTES];
+			uLong crc = crc32(0L, Z_NULL, 0);
+			uint32_t offset;
+
+			for (offset = 0; offset < file.source.size; offset += READ_STAGING_BYTES)
+			{
+				uint32_t chunk = MIN(file.source.size - offset, READ_STAGING_BYTES);
+
+				if (!file.source.read(file.source.context, offset, chunk, buffer))
+				{
+					crc = 0;
+					break;
+				}
+				crc = crc32(crc, buffer, chunk);
+			}
+			result = crc & 0xFFFFFFFFUL;
+		}
+		if (!result)
+		{
+			result = 1;
+		}
+		csstrncpy(remembered[next_remembered].name, name, CACHE_FILE_STRING_BYTES - 1);
+		remembered[next_remembered].size = file.source.size;
+		remembered[next_remembered].identity = result;
+		next_remembered = (short)((next_remembered + 1) % REMEMBERED_IDENTITIES);
+	}
+	custom_edition_file_close(&file);
+
+	return result;
 }
 
 boolean custom_edition_cache_multiplayer(

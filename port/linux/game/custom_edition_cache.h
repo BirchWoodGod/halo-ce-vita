@@ -48,6 +48,18 @@ boolean custom_edition_cache_playable(
 custom_edition_maps.c). */
 boolean custom_edition_cache_multiplayer(
 	char const *map_name);
+/* TRUE when the map `map_name` names is an Xbox cache of a multiplayer
+scenario that the cache partition can take (named inside as its file is,
+and no longer than the Xbox's multiplayer maps): a modded or newly built
+Xbox map for the level list (custom_edition_maps.c); it needs no setting. */
+boolean custom_edition_cache_xbox_multiplayer(
+	char const *map_name);
+/* What tells this machine's copy of the map `map_name` names from another
+(an Xbox or Custom Edition cache): its header checksum with its length, or
+the CRC-32 of the whole file when the header has none; 0 when there is no
+such map. Never 0 for a map. */
+unsigned long custom_edition_cache_map_identity(
+	char const *map_name);
 
 /* Loads the Custom Edition map `map_name` names into its tag cache and
 converts its tags for this build, copying its cache header to `header`
