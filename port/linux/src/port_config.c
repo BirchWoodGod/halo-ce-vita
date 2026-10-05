@@ -68,6 +68,17 @@ struct config_setting
 	const char *comment;
 };
 
+/* co-op's defaults: on the Vitas (and the Linux build standing in for one,
+HALO_NET_AS_VITA) the host runs the campaign's AI and scripts for everyone
+at a Vita's speed, so two players and no extra enemies */
+#if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
+#define COOP_PLAYERS_DEFAULT "2"
+#define COOP_ENEMIES_MODE_DEFAULT "\"none\""
+#else
+#define COOP_PLAYERS_DEFAULT "16"
+#define COOP_ENEMIES_MODE_DEFAULT "\"per_player\""
+#endif
+
 static const struct config_setting config_settings[] =
 {
 	{ "debug.telnet_console_port", _config_integer, "2323", "HALO_TELNET_CONSOLE_PORT", _environment_value,
@@ -159,8 +170,22 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Public MQTT brokers through which the machines of an invite find each\n"
 		"other (its messages are encrypted); comma-separated host:port." },
-	{ "network.coop_enemies_mode", _config_string, "\"per_player\"", "HALO_NET_COOP_ENEMIES_MODE", _environment_value,
+	{ "network.coop_level", _config_string, "\"\"", "HALO_NET_COOP_LEVEL", _environment_value, _platform_all,
+		"Co-op over the network: a campaign level's short name (\"a10\" ...\n"
+		"\"d40\") makes every game this machine hosts co-op on that level, its\n"
+		"next round the campaign's next level; empty hosts the lobby's\n"
+		"multiplayer game. The Vita's settings panel (Multiplayer, Co-op\n"
+		"campaign) sets it." },
+	{ "network.coop_difficulty", _config_integer, "1", "HALO_NET_COOP_DIFFICULTY", _environment_value, _platform_all,
+		"The difficulty of the co-op games this machine hosts (network.coop_level):\n"
+		"0 easy, 1 normal, 2 heroic, 3 legendary." },
+	{ "network.coop_players", _config_integer, COOP_PLAYERS_DEFAULT, "HALO_NET_COOP_PLAYERS", _environment_value,
 		_platform_all,
+		"The most players a co-op game this machine hosts takes (2 to the\n"
+		"build's maximum). The host runs the campaign's AI and scripts for\n"
+		"everyone: the Vita's default is 2." },
+	{ "network.coop_enemies_mode", _config_string, COOP_ENEMIES_MODE_DEFAULT, "HALO_NET_COOP_ENEMIES_MODE",
+		_environment_value, _platform_all,
 		"Online co-op's extra enemies: \"none\", \"per_player\" (each squad of\n"
 		"enemies grows by coop_enemies for each player past the first) or\n"
 		"\"multiplier\" (each is coop_enemies_multiplier times as large, for any\n"
