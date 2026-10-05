@@ -962,7 +962,8 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 			atlas_width, height, 1) == 0;
 	}
 
-	if (!description->linear && power_of_two(width) && power_of_two(height) && swizzled_textures())
+	if (!description->linear && description->depth <= 1 && power_of_two(width) && power_of_two(height) &&
+		swizzled_textures())
 	{
 		/* A power-of-two texture as GXM's twiddled (Morton order) BGRA,
 		every Xbox level, each level's texels in the order cube faces and
