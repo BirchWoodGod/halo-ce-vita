@@ -367,6 +367,12 @@ void vgxm_set_targets(unsigned long color, unsigned long depth)
 	null.depth_target = depth;
 }
 
+/* (no GPU: no scene dependencies) */
+void vgxm_note_sampled_target(unsigned long id)
+{
+	(void)id;
+}
+
 /* HALO_DRAW_HASH=1: every draw and clear folded into a hash of what the GPU
 would be given - the programs, the targets, the states, the bytes of each
 uniform buffer, the texture words, the indices and the vertex bytes each

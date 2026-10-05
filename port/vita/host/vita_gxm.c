@@ -151,6 +151,8 @@ struct target
 	that fraction of the size asked for, and viewports and clips into it are
 	scaled to match; 0 for 1 */
 	float scale;
+	/* the serial of the last scene that drew into it (0: none yet) */
+	unsigned int written_serial;
 	struct block memory;
 	SceGxmColorSurface color;
 	SceGxmDepthStencilSurface depth_stencil;
@@ -219,6 +221,18 @@ static struct
 	unsigned int scene_draws;
 	unsigned long scene_color, scene_depth;
 	unsigned long wanted_color, wanted_depth;
+
+	/* render to texture (scene_dependency_needed): the game scenes' serial
+	numbers, the last scene begun with SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY,
+	whether a scene into a target other than the presented one has been
+	begun since, the newest scene that drew a target the next draw samples
+	(vgxm_note_sampled_target), the target last presented, and the waits
+	and splits since the last report */
+	unsigned int scene_serial, wait_serial;
+	int texture_scene_since_wait;
+	unsigned int sampled_serial;
+	unsigned long presented_target;
+	unsigned int dependency_waits, dependency_splits;
 
 	/* built-in programs */
 	unsigned long clear_vertex, clear_fragment, blit_vertex, blit_fragment;
@@ -1908,13 +1922,68 @@ static unsigned int *visibility_buffer(unsigned int ring)
 	return (unsigned int *)((unsigned char *)gxm.visibility.base + ring * VISIBILITY_CORES * VISIBILITY_CORE_STRIDE);
 }
 
+/* HALO_GXM_RTT_SYNC (default 1): render to texture with the GPU's scene
+dependencies. Every game scene sets one (SCE_GXM_SCENE_FRAGMENT_SET_DEPENDENCY),
+and a scene that samples a target drawn by a scene before it, with no wait
+between, waits for it (SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY): without the
+wait the GPU may run the next scene while the one that draws its texture is
+still being drawn, and samples what was in the target's memory before. The
+zoom draws the screen into a copy and the copy back over the screen in the
+very next scenes (#17: at 50% render resolution the scope showed a stale,
+misaligned picture, and black before the copy was first written); the active
+camouflage's copy of the screen is sampled the same way. 0: no flags, as
+before */
+static int rtt_sync_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_GXM_RTT_SYNC");
+
+		enabled = !setting || atoi(setting) != 0;
+		if (!enabled)
+			log_line("gxm: scenes that sample a target drawn just before do not wait for it (HALO_GXM_RTT_SYNC=0)");
+	}
+	return enabled;
+}
+
+void vgxm_note_sampled_target(unsigned long id)
+{
+	if (id && id <= gxm.target_count && gxm.targets[id - 1].written_serial > gxm.sampled_serial)
+		gxm.sampled_serial = gxm.targets[id - 1].written_serial;
+}
+
+/* whether the next draw's scene must wait for the scenes before it: it
+samples a target drawn since the last wait, or it is the first scene into
+the presented target since a scene into another one (the shadows, the glow,
+the zoom's copy: sampled in it). A scene already open (open_serial, else 0)
+that drew the sampled target itself needs no wait */
+static int scene_dependency_needed(unsigned int open_serial)
+{
+	if (!rtt_sync_enabled())
+		return 0;
+	if (gxm.sampled_serial && gxm.sampled_serial >= gxm.wait_serial && gxm.sampled_serial != open_serial)
+		return 1;
+	return !open_serial && gxm.texture_scene_since_wait && gxm.wanted_color && gxm.wanted_color == gxm.presented_target;
+}
+
 static int scene_ensure(void)
 {
 	struct target *color, *depth;
 	unsigned int width, height;
 	int result;
 
-	if (gxm.in_scene && gxm.scene_color == gxm.wanted_color && gxm.scene_depth == gxm.wanted_depth)
+	unsigned int scene_flags = 0;
+
+	if (gxm.in_scene && gxm.scene_color == gxm.wanted_color && gxm.scene_depth == gxm.wanted_depth &&
+		scene_dependency_needed(gxm.scene_serial))
+	{
+		/* (an open scene samples what a scene before it drew, with no
+		wait between: begun again, waiting) */
+		gxm.dependency_splits++;
+	}
+	else if (gxm.in_scene && gxm.scene_color == gxm.wanted_color && gxm.scene_depth == gxm.wanted_depth)
 	{
 		/* HALO_GXM_SCENE_DRAWS (default 300): a scene with this many draws
 		is ended and begun again on the same targets, so its primitives fit
@@ -1956,11 +2025,17 @@ static int scene_ensure(void)
 		gxm.visibility_bound = (int)gxm.worker_ring_index;
 		sceGxmSetVisibilityBuffer(gxm.context, visibility_buffer(gxm.worker_ring_index), VISIBILITY_CORE_STRIDE);
 	}
+	if (rtt_sync_enabled())
+	{
+		scene_flags = SCE_GXM_SCENE_FRAGMENT_SET_DEPENDENCY;
+		if (scene_dependency_needed(0))
+			scene_flags |= SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY;
+	}
 	{
 		unsigned long long before = sceKernelGetProcessTimeWide();
 
-		result = sceGxmBeginScene(gxm.context, 0, color ? color->render_target : depth->render_target, NULL, NULL, NULL,
-			color ? &color->color : NULL, depth ? &depth->depth_stencil : NULL);
+		result = sceGxmBeginScene(gxm.context, scene_flags, color ? color->render_target : depth->render_target, NULL,
+			NULL, NULL, color ? &color->color : NULL, depth ? &depth->depth_stencil : NULL);
 		scene_switch_us[gxm.wanted_color == 1 ? 0 : 1] += sceKernelGetProcessTimeWide() - before;
 	}
 	if (result < 0)
@@ -1974,6 +2049,19 @@ static int scene_ensure(void)
 	gxm.in_scene = 1;
 	gxm.scene_draws = 0;
 	gxm_scene_count++;
+	gxm.scene_serial++;
+	if (scene_flags & SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY)
+	{
+		gxm.wait_serial = gxm.scene_serial;
+		gxm.texture_scene_since_wait = 0;
+		gxm.dependency_waits++;
+	}
+	if (gxm.wanted_color != gxm.presented_target)
+		gxm.texture_scene_since_wait = 1;
+	if (color)
+		color->written_serial = gxm.scene_serial;
+	if (depth)
+		depth->written_serial = gxm.scene_serial;
 	{
 		/* which targets the scenes are for (the report at present) */
 		unsigned int slot = (unsigned int)(gxm.wanted_color ? gxm.wanted_color : gxm.wanted_depth + 64) % 128;
@@ -1985,6 +2073,16 @@ static int scene_ensure(void)
 	gxm.scene_depth = gxm.wanted_depth;
 	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
 	return 1;
+}
+
+/* scene_ensure for a draw or clear: the targets its draw samples
+(vgxm_note_sampled_target) are taken into account once */
+static int scene_ensure_sampling(void)
+{
+	int result = scene_ensure();
+
+	gxm.sampled_serial = 0;
+	return result;
 }
 
 /* ---------- state */
@@ -2152,7 +2250,7 @@ void vgxm_draw(const struct vgxm_draw *draw)
 	const struct shader *fragment_shader;
 	unsigned int index;
 
-	if (!gxm.ready || !draw->index_count || !scene_ensure())
+	if (!gxm.ready || !draw->index_count || !scene_ensure_sampling())
 		return;
 	memset(&key, 0, sizeof(key));
 	key.shader = draw->vertex_shader;
@@ -2363,7 +2461,7 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 	unsigned int width, height;
 	uint8_t mask = 0;
 
-	if (!gxm.ready || !scene_ensure())
+	if (!gxm.ready || !scene_ensure_sampling())
 		return;
 	target = gxm.scene_color ? &gxm.targets[gxm.scene_color - 1] : &gxm.targets[gxm.scene_depth - 1];
 	width = target->width;
@@ -2865,8 +2963,11 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		gxm.in_scene = 0;
 	}
 	present_step(0);
-	/* the frame on the display, in a scene of its own */
-	sceGxmBeginScene(gxm.context, 0, gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
+	/* the frame on the display, in a scene of its own (it samples the
+	target the scene before drew: HALO_GXM_RTT_SYNC) */
+	gxm.presented_target = color_target;
+	sceGxmBeginScene(gxm.context, rtt_sync_enabled() && gxm.scene_serial ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
+		gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
 		&gxm.display_surface[gxm.back_buffer], NULL);
 	present_step(1);
 	/* (the letterbox stays as the buffers were cleared at start-up) */
@@ -2906,6 +3007,10 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 			log_line("gxm: %u frames in %llu ms: %.2f ms/frame waiting for the GPU, %.1f scenes/frame (%.1f splits), ring %u KB; present: end-scene %.2f begin-display %.2f blit+end %.2f queue %.2f ms/frame",
 				frames, elapsed / 1000, waited / 1000.0 / frames, (double)gxm_scene_count / frames, (double)gxm_scene_splits / frames, gxm.ring_offset_peak / 1024,
 				present_step_us[0] / 1000.0 / frames, present_step_us[1] / 1000.0 / frames, present_step_us[2] / 1000.0 / frames, present_step_us[3] / 1000.0 / frames);
+			if (gxm.dependency_waits || gxm.dependency_splits)
+				log_line("gxm: render to texture: %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
+					(double)gxm.dependency_waits / frames, (double)gxm.dependency_splits / frames);
+			gxm.dependency_waits = gxm.dependency_splits = 0;
 			memset(present_step_us, 0, sizeof(present_step_us));
 			gxm_scene_splits = 0;
 			{
