@@ -45,6 +45,9 @@ enum { _tick_cluster_list_collideable, _tick_cluster_list_noncollideable, _tick_
 unsigned char render_tick_cluster_lists_active(int which);
 long render_tick_cluster_list_first(int which, long *iterator, short cluster_index);
 long render_tick_cluster_list_next(int which, long *iterator);
+/* the clusters an object (its ultimate parent) was in when that tick was
+captured; 0 when the frame walks the live lists or the object is not there */
+unsigned char render_tick_object_clusters(long object_index, short const **clusters, short *count);
 struct observer_result const *render_interpolation_camera(short local_player_index,
 	struct observer_result const *observer);
 void render_interpolation_first_person(short local_player_index, struct real_matrix4x3 *node_matrices,
