@@ -29,8 +29,10 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
   it has, as it drives a remote player's, until it hears nothing of it for
   two seconds (`port/linux/game/network_actors.c`).
 - **Co-op.** A network game on a campaign level with no game engine
-  (Create Game's Map screen, whose campaign levels follow the multiplayer
-  maps over LAN and the internet) is co-op. Only the host runs the
+  (upstream: Create Game's Map screen in the PC menus; this tree, whose
+  Xbox menus list no campaign level for a network game: the host's
+  `network.coop_level` setting, the Vita settings panel's Co-op campaign,
+  `network_game_server_port_cooperative_setting`) is co-op. Only the host runs the
   level's scripts and spawns players. `network_coop.c` sends the clients
   everything the scripts do that they would otherwise miss:
   - every tick: the cinematic, camera, screen fade, the HUD settings the
@@ -81,9 +83,13 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
   starting locations on free ground (the same floor, clear of crates and
   other actors, with room to stand), or where none is left on rings about
   them as before, and never take the actors a level needs for its own (the
-  actor pool, `halo_port_capacity.h`, holds 1024). Riders a dropship has no
-  seats for are kept, and placed beside its riders once they get out. Only
-  the host runs the AI, so the clients see them as the host's other actors.
+  actor pool, `halo_port_capacity.h`, holds 1024 upstream). Riders a dropship
+  has no seats for are kept, and placed beside its riders once they get out.
+  Only the host runs the AI, so the clients see them as the host's other
+  actors. This tree keeps the Xbox's pool of 256 (single player's saves keep
+  their layout, and the Vita has no memory for more), so they find no room,
+  and its Vitas default to none (`network.coop_players` 2, extra enemies
+  "none").
 - **Host authoritative.** The host alone decides damage, deaths, spawns,
   pickups, scores and the game's objects; clients do not decide them but
   apply what the host sends.
@@ -158,16 +164,23 @@ every machine of a player the host dropped for cheating, each client
 tells the host its Discord user, and a machine's join request carries its
 hardware id.
 
-A host never checks a joining client's version: the client reads the
-host's from its advertisement and joins only a version it plays with. That
-is its own, or one of a range (HALO_PORT_NETWORK_VERSION_MINIMUM to
-HALO_PORT_NETWORK_VERSION_MAXIMUM, halo_port_limits.h) of versions that
-differ from it only in messages the other machine drops, not knowing them:
-version 10 (OpenCE's build-73) adds the host's message of the players'
-pings, which a machine of version 9 drops. This build has version 10, as
-OpenCE's current builds (so their clients join its hosts), without that
-message (its hosts do not send it, its clients drop it), and joins hosts of
-9 and 10. The game browser lists the range's games.
+Upstream's version 10 sends every player's ping for the scoreboard and 11
+sends with the game's settings its gametype's PC options; this tree sends
+neither (it has upstream's later co-op, not its scoreboard or PC menus).
+Version 12 plays the campaign together (co-op, above), drives the host's
+actors on its clients and sends the flinches and deaths the host picked;
+version 13 drives more of the host's AI units (upstream's extra enemies:
+its actor pool plus 32, which on this tree is the Xbox's 256 plus 32,
+`halo_port_capacity.h`); version 14 sends co-op's device positions and its
+units opening and closing; version 15 sends co-op's allegiances with its
+presentation; version 16 has a client's input say which structure BSP it
+has loaded; version 17 breaks the host's glass and destructible scenery on
+every machine (and takes a client's hits on scenery), sends the cluster a
+co-op cutscene keeps active, and leaves a failed co-op mission's revert to
+the host. This tree has version 17 and joins only hosts of its own version.
+Its Vitas (and its Linux build standing in for one) play only Vitas
+(`HALO_PORT_ADVERTISED_VITA_FLAG`), so an upstream build of the same number
+is refused all the same.
 
 A client plays by its host's rules: in another's game (searching for it,
 in its lobby, or playing it) the developer console, the telnet console
