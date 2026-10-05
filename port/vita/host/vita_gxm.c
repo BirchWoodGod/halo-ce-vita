@@ -2389,8 +2389,28 @@ void vgxm_draw(const struct vgxm_draw *draw)
 			shadow.cull = cull;
 			sceGxmSetCullMode(gxm.context, (SceGxmCullMode)cull);
 		}
-		bias[0] = (int)draw->depth_bias_slope;
-		bias[1] = (int)draw->depth_bias_units;
+		{
+			/* (debug, #26 effects flicker) HALO_GXM_DEPTH_BIAS=<scale>: the
+			draws' depth bias (D3DRS_ZBIAS as polygon offset: the effects'
+			particles, the decals) times this; 0 = none. Unset: as the game
+			sets it. For telling on the hardware whether the SGX takes the
+			units on another scale than the Xbox's, which the emulator
+			cannot show */
+			static float bias_scale = -1.0f;
+
+			if (bias_scale < 0.0f)
+			{
+				const char *setting = getenv("HALO_GXM_DEPTH_BIAS");
+
+				bias_scale = setting && *setting ? (float)atof(setting) : 1.0f;
+				if (bias_scale < 0.0f)
+					bias_scale = 1.0f;
+				if (setting && *setting)
+					log_line("gxm: depth bias times %.2f (HALO_GXM_DEPTH_BIAS)", bias_scale);
+			}
+			bias[0] = (int)(draw->depth_bias_slope * bias_scale);
+			bias[1] = (int)(draw->depth_bias_units * bias_scale);
+		}
 		if (shadow.bias[0] != bias[0] || shadow.bias[1] != bias[1])
 		{
 			shadow.bias[0] = bias[0];
