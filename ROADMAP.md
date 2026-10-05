@@ -48,7 +48,7 @@ Beta 1 is out; beta 2 fixes most of what testers reported:
 - Still being looked at: trees and Covenant shields flickering at the
   screen's edges, water on The Silent Cartographer.
 
-## 1.1.0: multiplayer and a steady 30 fps
+## 1.1.0: multiplayer, custom maps and a steady 30 fps
 
 - **Online play between Vitas**: host a public lobby or a private one with
   a short code, join from the settings panel. Built on iamhaller's
@@ -58,6 +58,7 @@ Beta 1 is out; beta 2 fixes most of what testers reported:
   joiner scans it with the Vita's camera.
 - **A relay** for networks that cannot connect to each other directly.
 - **A steady 30 fps**, including the biggest fights.
+- **Custom maps**: play community-made maps, including PC Halo CE maps converted for the Xbox engine, in multiplayer and the campaign menus.
 
 ## Later
 
