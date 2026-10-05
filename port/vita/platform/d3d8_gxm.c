@@ -5777,6 +5777,11 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	}
 	platform_pump_events();
 
+	/* (the flips are counted down by the vertical blank thread, which the
+	game starts when it sets its callback: frames presented before - the
+	loading screen of a map precache taking seconds, on a slow disk or
+	with HALO_IO_THROTTLE_KBPS - waited for it for ever) */
+	vertical_blank_start();
 	pthread_mutex_lock(&vertical_blank_lock);
 	while (pending_flips >= 2)
 		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
