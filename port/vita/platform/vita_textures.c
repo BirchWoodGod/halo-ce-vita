@@ -1179,3 +1179,27 @@ void vita_texture_cache_begin_frame(void)
 {
 	texture_frame++;
 }
+
+/* ---------- Custom Edition channel orders
+
+A Halo Custom Edition map keeps a model shader's multipurpose masks and a
+HUD meter's channels where Halo PC reads them (port/linux/game/
+custom_edition_bitmaps.c tells which texels are which). The OpenGL renderer
+samples them in this build's order with a texture swizzle
+(port/linux/src/xbox_textures.c); the Vita's does not yet, so they are drawn
+with Halo PC's channel order: wrong specular, self-illumination and color
+change masks on some models, and meters that fill wrongly. */
+
+static unsigned long custom_edition_channel_requests;
+
+void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order)
+{
+	(void)texels;
+	if (channel_order && !custom_edition_channel_requests++)
+		platform_log("custom edition: the Vita renderer keeps Halo PC's channel order of multipurpose maps and meters");
+}
+
+void halo_custom_edition_texels_forget(void)
+{
+	custom_edition_channel_requests = 0;
+}
