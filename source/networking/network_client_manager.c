@@ -1251,6 +1251,40 @@ boolean network_game_client_idle(
 	return success;
 }
 
+/* port: whether this machine may play the host's map with it (the host's
+game settings name it); FALSE once the player has been told why not. A
+local (split screen) game plays any map. Every check below runs, in turn,
+and the first that refuses ends it:
+1. the map's build is one this version plays with others
+   (cache_files_map_plays_multiplayer): the object and damage messages name
+   definitions by tag index, which differs between builds.
+2. (feat/custom-maps, not merged here) a custom map is played only with the
+   host's copy of it: custom_edition_maps_host_copy_matches(map->name,
+   (unsigned long)map->version, &missing), the host sending its copy's
+   identity in map->version (0 for the Xbox levels and older hosts: trusted).
+   A Custom Edition map's build string is not in check 1's list, so with
+   custom maps check 1 must pass a map custom_edition_maps.c recognises
+   (inside cache_files_map_plays_multiplayer, which the host's map choice
+   in ui_widget_event_handler_functions.c also asks), leaving check 2 to
+   decide it: both must run, neither replaces the other. */
+static boolean network_game_client_map_playable(
+	struct network_game_map const *map)
+{
+	char build[0x20];
+
+	if (network_game_is_splitscreen_local())
+		return TRUE;
+	/* 1. the build */
+	if (!cache_files_map_plays_multiplayer(map->name, build))
+	{
+		cache_files_show_multiplayer_unavailable(map->name, build);
+		return FALSE;
+	}
+	/* 2. (custom maps: the host's copy) */
+
+	return TRUE;
+}
+
 boolean network_game_client_game_settings_updated(
 	struct network_game_client *client,
 	struct network_game *message_packet)
@@ -1282,16 +1316,11 @@ boolean network_game_client_game_settings_updated(
 #endif
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
 		{
-			char build[0x20];
-
-			/* port: a map of a build this version does not play with others
-			(its objects would not be the host's): said, and the game left */
-			if (!network_game_is_splitscreen_local() &&
-				!cache_files_map_plays_multiplayer(message_packet->map.name, build))
+			/* port: a map this machine cannot play with the host's: said,
+			and the game left (the menu's error the join's, not the
+			connection lost that the failure would otherwise give) */
+			if (!network_game_client_map_playable(&message_packet->map))
 			{
-				cache_files_show_multiplayer_unavailable(message_packet->map.name, build);
-				/* (the menu's error the join's, not the connection lost that
-				the failure would otherwise give) */
 				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
 				return FALSE;
 			}
