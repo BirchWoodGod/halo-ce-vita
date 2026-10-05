@@ -16,7 +16,9 @@ too, under whatever env.txt and settings.txt say.
 
 Multiplayer is a page of its own (the last line opens it), with three ways
 to play beyond the Wi-Fi network's system link, each handing off to the
-game's own System Link screen:
+game's own System Link screen, and co-op ("Co-op campaign": a game this
+Vita hosts, by any of them, is that campaign level played together, the
+next level after each one won; network_server_manager.c):
 
 - Online (internet play, port/linux/src/p2p.c): hosting a System Link game
   shows its short code here (ABCD-EFGH) for others to type in; "Online
@@ -47,7 +49,7 @@ game's own System Link screen:
 #include "vita_host.h"
 
 #define SETTINGS_FILE "ux0:data/haloce-vita/settings.txt"
-#define MAXIMUM_CHOICES 6
+#define MAXIMUM_CHOICES 11
 /* a code's characters as typed (p2p.h shows them ABCD-EFGH) */
 #define P2P_CODE_LENGTH_TYPED 8
 
@@ -143,6 +145,15 @@ static struct setting settings[] = {
 		KIND_ACTION, ACTION_ADHOC_JOIN },
 	{ "Leave ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Back to no group", 0, PAGE_MULTIPLAYER, KIND_ACTION,
 		ACTION_ADHOC_LEAVE },
+	/* (co-op over the network: a hosted game is this campaign level,
+	network_server_manager.c; each level won goes on to the next) */
+	{ "Co-op campaign", "HALO_NET_COOP_LEVEL", 0, 11,
+		{ "", "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40" },
+		{ "Off", "Pillar of Autumn", "Halo", "Truth and Rec.", "Silent Cartog.", "Assault on CR", "343 Guilty Spark",
+			"The Library", "Two Betrayals", "Keyes", "The Maw" },
+		"Games you host: this level together (2 players)", 0, PAGE_MULTIPLAYER },
+	{ "Co-op difficulty", "HALO_NET_COOP_DIFFICULTY", 0, 4, { "0", "1", "2", "3" },
+		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, PAGE_MULTIPLAYER },
 	{ "Back", NULL, 0, 0, { NULL }, { NULL }, "To the settings", 0, PAGE_MULTIPLAYER, KIND_ACTION, ACTION_BACK },
 };
 

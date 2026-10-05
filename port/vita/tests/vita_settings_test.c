@@ -221,6 +221,25 @@ int main(void)
 	frame(0);
 	check(strstr(menu, "Your code: QX7K-M2PA (public)") != NULL, "hosting, the status line shows the code");
 
+	/* co-op: the level a hosted game plays together, at once (the server
+	reads the environment each frame of its lobby) */
+	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Co-op campaign", 14))
+		press(VITA_BUTTON_DOWN);
+	check(strstr(line, "Off") != NULL && getenv("HALO_NET_COOP_LEVEL") && !getenv("HALO_NET_COOP_LEVEL")[0],
+		"Co-op campaign: Off at first");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a10") &&
+		strstr(menu_line(menu_selected, line, sizeof(line)), "Pillar of Autumn") && strlen(line) <= 46,
+		"Co-op campaign: right picks The Pillar of Autumn (a10)");
+	press(VITA_BUTTON_DOWN);
+	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Co-op difficulty", 16) && strstr(line, "Normal") &&
+		!strcmp(getenv("HALO_NET_COOP_DIFFICULTY"), "1"), "Co-op difficulty: Normal at first");
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_LEFT);
+	check(!getenv("HALO_NET_COOP_LEVEL")[0], "Co-op campaign: left goes back to Off");
+	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Browse public games", 19))
+		press(VITA_BUTTON_UP);
+
 	/* ad hoc needs the network chosen first */
 	press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_DOWN);

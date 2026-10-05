@@ -473,6 +473,8 @@ symbols in this file:
 
 #include "cache/cache_files.h"
 
+#include <stdlib.h>
+
 /* port: the platform layer's settings (port/linux/src/port_config.c), and
 the co-op level choice (ui_widget_event_handler_functions.c) */
 char const *config_string(char const *name);
@@ -3883,8 +3885,11 @@ game. */
 static void network_game_server_port_cooperative_setting(
 	struct network_game_server *server)
 {
-	char const *level = config_string("network.coop_level");
-	short difficulty = (short)PIN(config_integer("network.coop_difficulty"), 0, 3);
+	/* (the environment's first: the Vita's settings panel sets it in the
+	menus, after the settings were read) */
+	char const *level = getenv("HALO_NET_COOP_LEVEL") ? getenv("HALO_NET_COOP_LEVEL") : config_string("network.coop_level");
+	short difficulty = (short)PIN(getenv("HALO_NET_COOP_DIFFICULTY") ? atol(getenv("HALO_NET_COOP_DIFFICULTY")) :
+		config_integer("network.coop_difficulty"), 0, 3);
 	char choice[16];
 	char const *map_name;
 	short level_index;
