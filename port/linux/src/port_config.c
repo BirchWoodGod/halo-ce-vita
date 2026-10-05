@@ -94,6 +94,11 @@ static const struct config_setting config_settings[] =
 	{ "input.invert_mouse", _config_boolean, "false", "HALO_MOUSE_INVERT", _environment_set_is_true, _platform_desktop,
 		"Moving the mouse forward looks down." },
 
+	{ "game.custom_edition", _config_boolean, "false", "HALO_CUSTOM_EDITION", _environment_set_is_true, _platform_all,
+		"Experimental: Halo Custom Edition (PC) maps in the maps folder are offered in\n"
+		"the multiplayer map list and run (docs/custom_edition_caches.md). Modded Xbox\n"
+		"maps need no setting." },
+
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"
 		"empty for English. The game data decides what is translated." },

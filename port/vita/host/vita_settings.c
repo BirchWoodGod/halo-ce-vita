@@ -72,6 +72,8 @@ static struct setting settings[] = {
 	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0 },
 	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
 		"Raise if the sticks drift", 0 },
+	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Experimental: Halo Custom Edition maps in the map list", 0 },
 };
 
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))

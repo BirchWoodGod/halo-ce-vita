@@ -19,6 +19,7 @@ HALO_CUSTOM_EDITION is set (docs/custom_edition_caches.md).
 */
 
 #include "platform.h"
+#include "port_config.h"
 #include "../game/cache_file_formats.h"
 
 #include <errno.h>
@@ -143,7 +144,9 @@ static void custom_edition_tag_cache_reserve(void)
 
 	/* (HALO_CUSTOM_EDITION_RELOCATE=1: none, so that the tags are loaded
 	elsewhere and moved, as on the Vita - for the harness) */
-	if (!halo_custom_edition_enabled() ||
+	/* (the environment variable only: the settings are not read this
+	early; without the window the tags are moved instead) */
+	if (!getenv("HALO_CUSTOM_EDITION") || !strcmp(getenv("HALO_CUSTOM_EDITION"), "0") ||
 		(getenv("HALO_CUSTOM_EDITION_RELOCATE") && atoi(getenv("HALO_CUSTOM_EDITION_RELOCATE"))))
 		return;
 	result = mmap(wanted, CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED, PROT_READ | PROT_WRITE,
@@ -164,9 +167,14 @@ static void custom_edition_tag_cache_reserve(void)
 
 int halo_custom_edition_enabled(void)
 {
+	/* game.custom_edition (port_config.c); its environment variable, which
+	the Vita's settings panel sets ("0" off), is read first and every time,
+	so the panel's change takes at the next map list */
 	const char *setting = getenv("HALO_CUSTOM_EDITION");
 
-	return setting && setting[0] && strcmp(setting, "0") != 0;
+	if (setting)
+		return setting[0] && strcmp(setting, "0") != 0 && strcmp(setting, "false") != 0;
+	return config_boolean("game.custom_edition");
 }
 
 void *halo_custom_edition_tag_cache(void)
