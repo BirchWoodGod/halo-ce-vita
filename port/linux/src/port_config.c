@@ -159,11 +159,23 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Public MQTT brokers through which the machines of an invite find each\n"
 		"other (its messages are encrypted); comma-separated host:port." },
+	{ "network.coop_enemies_mode", _config_string, "\"per_player\"", "HALO_NET_COOP_ENEMIES_MODE", _environment_value,
+		_platform_all,
+		"Online co-op's extra enemies: \"none\", \"per_player\" (each squad of\n"
+		"enemies grows by coop_enemies for each player past the first) or\n"
+		"\"multiplier\" (each is coop_enemies_multiplier times as large, for any\n"
+		"number of players). Server Setup's EXTRA ENEMIES in co-op writes its\n"
+		"choice here." },
 	{ "network.coop_enemies", _config_integer, "50", "HALO_NET_COOP_ENEMIES", _environment_value, _platform_all,
-		"Online co-op's extra enemies, a percentage: for each player past the\n"
-		"first, each squad of enemies a level places gets this much of itself\n"
-		"more (100: as many again; 0 to 200). Server Setup's EXTRA ENEMIES in\n"
-		"co-op writes its choice here." },
+		"Online co-op's extra enemies per player, a percentage: for each player\n"
+		"past the first, each squad of enemies a level places gets this much of\n"
+		"itself more (100: as many again; 25 to 200). Server Setup's PER PLAYER\n"
+		"in co-op writes its choice here." },
+	{ "network.coop_enemies_multiplier", _config_integer, "2", "HALO_NET_COOP_ENEMIES_MULTIPLIER", _environment_value,
+		_platform_all,
+		"Online co-op's static multiplier of its enemies: each squad of enemies\n"
+		"a level places is this many times as large (2 to 32). Server Setup's\n"
+		"MULTIPLIER in co-op writes its choice here." },
 	{ "network.stun_servers", _config_string, "\"stun.l.google.com:19302,stun.cloudflare.com:3478\"",
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"
