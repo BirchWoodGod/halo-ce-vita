@@ -63,6 +63,12 @@ game therefore land here first and are copied, as the platform's own file
 layer does (port/linux/src/xbox_files.c, read_at). */
 #define READ_STAGING_BYTES 0x10000
 
+/* the platform's write tracking (port/linux/src/platform.h): told of every
+write into guest memory the game's own code does not make, which the Vita,
+without page protection, sees in no other way - its renderer keeps converted
+textures until their pages are written */
+void memory_watch_prepare_write(void *address, unsigned long size);
+
 /* ---------- structures */
 
 struct custom_edition_file
@@ -801,6 +807,10 @@ void custom_edition_cache_read(
 		SwitchToThread();
 	}
 	read = file->stream && size >= 0;
+	if (size > 0)
+	{
+		memory_watch_prepare_write(buffer, (unsigned long)size);
+	}
 	for (read_bytes = 0; read && read_bytes < size; read_bytes += READ_STAGING_BYTES)
 	{
 		long chunk_bytes = MIN(size - read_bytes, READ_STAGING_BYTES);
