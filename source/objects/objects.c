@@ -237,6 +237,20 @@ long cluster_get_next_collideable_object(
 		reference_index);
 }
 
+#ifdef HALO_LINUX
+long cluster_get_collideable_objects(
+	short cluster_index,
+	long *object_indices,
+	long maximum)
+{
+	return cluster_partition_get_cluster_datums(
+		&collideable_object_cluster_partition,
+		cluster_index,
+		object_indices,
+		maximum);
+}
+#endif
+
 short object_get_next_cluster(
 	struct object_cluster_iterator *iterator,
 	long object_index)
@@ -285,6 +299,32 @@ void *object_get_and_verify_type(
 
 	return result;
 }
+
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+/* (port, release builds) this file's own lookups inline from here on, as
+objects.h makes them everywhere else: the functions above are the header
+lookup and assertions release builds do not check */
+static __inline void *object_get_and_verify_type_local(long object_index, unsigned long valid_type_flags)
+{
+	(void)valid_type_flags;
+	return object_header_get(object_index)->datum;
+}
+
+static __inline void *object_try_and_get_and_verify_type_local(long object_index, unsigned long valid_type_flags)
+{
+	struct object_header_datum *header = object_header_try_and_get(object_index);
+	void *result = NULL;
+
+	if (header && TEST_FLAG(valid_type_flags, header->type))
+		result = header->datum;
+	return result;
+}
+
+#define object_get_and_verify_type(object_index, valid_type_flags) \
+	object_get_and_verify_type_local((object_index), (valid_type_flags))
+#define object_try_and_get_and_verify_type(object_index, valid_type_flags) \
+	object_try_and_get_and_verify_type_local((object_index), (valid_type_flags))
+#endif
 
 void object_iterator_new(
 	struct object_iterator *iterator,
@@ -790,6 +830,58 @@ boolean object_unmarked_function(
 	
 	return result;
 }
+
+#ifdef HALO_LINUX
+/* (tick_hash.c, HALO_TICK_HASH_MASK) every object's marker stamp saved and
+cleared, or put back: the hash leaves the stamps out */
+int halo_tick_hash_object_marks(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	for (absolute_index = 0; absolute_index < object_header_data->count && count < maximum; absolute_index++)
+	{
+		struct object_header_datum *header = (struct object_header_datum *)
+			((char *)object_header_data->data + object_header_data->size * absolute_index);
+
+		if (!header->identifier || !header->datum)
+			continue;
+		if (restore)
+			header->datum->object.magic_number = saved[count++];
+		else
+		{
+			saved[count++] = header->datum->object.magic_number;
+			header->datum->object.magic_number = 0;
+		}
+	}
+	return count;
+}
+
+/* (tick_hash.c, HALO_TICK_HASH_MASK) the objects' pool hashed as its live
+objects, in header order (the pool's free and compacted-away bytes keep
+stale stamps); called with the stamps cleared */
+unsigned long long halo_tick_hash_live_objects(void)
+{
+	unsigned long long hash = 0xCBF29CE484222325ULL;
+	short absolute_index;
+
+	for (absolute_index = 0; absolute_index < object_header_data->count; absolute_index++)
+	{
+		struct object_header_datum *header = (struct object_header_datum *)
+			((char *)object_header_data->data + object_header_data->size * absolute_index);
+		const unsigned char *bytes;
+		long size;
+
+		if (!header->identifier || !header->datum)
+			continue;
+		hash = (hash ^ (unsigned long)absolute_index) * 0x100000001B3ULL;
+		bytes = (const unsigned char *)header->datum;
+		for (size = 0; size + 4 <= header->data_size; size += 4)
+			hash = (hash ^ *(const unsigned int *)(bytes + size)) * 0x100000001B3ULL;
+	}
+	return hash;
+}
+#endif
 
 boolean object_mark_function(
 	long object_index)

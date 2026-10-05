@@ -29,6 +29,17 @@ HALO_TICK_HASH_DUMP=<game time>: also writes the whole game state at that
 tick to <file>.<game time>.bin, to find which allocation (data/gamestate.txt
 lists them in order) two runs first differ in.
 
+HALO_TICK_HASH_MASK=1: leaves out what is scratch rather than simulation:
+each object's magic_number (the object marker's stamp: every marker session
+- the sound manager's obstruction vectors among them, whose count follows
+the sound cache and mixer - writes it into the objects it visits, and only
+the current session's stamp is ever compared) and the render's own
+allocations in the game state (cached object render states, decal vertex
+cache, decal vertices), and the objects' memory pool is hashed as its live
+objects (its free and compacted-away bytes hold stale stamps). Two runs of one build then agree where they
+otherwise drift apart on those alone (b30, the heavy-fight benchmark,
+triage/perf2-status.md).
+
 <file>.alloc gets each allocation's own hash after every tick (binary:
 a 32-bit game time and one 64-bit hash per allocation), <file>.names their
 names in the same order: tools/tick_hash_compare.py names the allocations
@@ -36,6 +47,7 @@ two runs differ in and the tick each first differs at. */
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* host paths, not the game's Xbox paths (port/linux/include/stdio.h) */
 #undef fopen
@@ -64,6 +76,19 @@ int halo_fixed_tick(void)
 	return fixed;
 }
 
+/* (HALO_TICK_HASH_MASK) the objects' marker stamps, cleared for the hash
+and put back: objects.c */
+int halo_tick_hash_object_marks(long *saved, int maximum, int restore);
+unsigned long long halo_tick_hash_live_objects(void);
+
+static int mask = -1;
+
+static int masked_allocation(const char *name)
+{
+	return name && (!strcmp(name, "cached object render states") || !strcmp(name, "decal vertex cache") ||
+		!strcmp(name, "decal vertices"));
+}
+
 static int state = -1;
 static FILE *file, *allocations;
 static int named;
@@ -86,8 +111,12 @@ static unsigned long long hash_words(unsigned long long hash, const unsigned int
 under HALO_FIXED_TICK: port/linux/src/xinput_sdl.c) */
 volatile unsigned long halo_ticks_simulated;
 
+#define MAXIMUM_SAVED_MARKS 4096
+static long saved_marks[MAXIMUM_SAVED_MARKS];
+
 void halo_tick_hash_after_tick(void)
 {
+	int saved_mark_count = 0;
 	void *base, *gpu_base;
 	unsigned long size, gpu_size;
 	unsigned long long hash = 0xCBF29CE484222325ULL;
@@ -113,6 +142,10 @@ void halo_tick_hash_after_tick(void)
 	}
 	if (!state)
 		return;
+	if (mask < 0)
+		mask = getenv("HALO_TICK_HASH_MASK") && atoi(getenv("HALO_TICK_HASH_MASK"));
+	if (mask)
+		saved_mark_count = halo_tick_hash_object_marks(saved_marks, MAXIMUM_SAVED_MARKS, 0);
 	halo_game_state_range(&base, &size);
 	halo_game_state_gpu_range(&gpu_base, &gpu_size);
 	time = game_time_get();
@@ -143,7 +176,11 @@ void halo_tick_hash_after_tick(void)
 			const unsigned int *words = (const unsigned int *)allocation;
 			unsigned long long allocation_hash;
 
-			if (halo_game_state_allocation_is_lruv_cache(index) && allocation_size >= 0x28)
+			if (mask && masked_allocation(name))
+				allocation_hash = 0;
+			else if (mask && name && !strcmp(name, "objects"))
+				allocation_hash = halo_tick_hash_live_objects();
+			else if (halo_game_state_allocation_is_lruv_cache(index) && allocation_size >= 0x28)
 			{
 				/* (an lruv cache's two procs, at 0x20 and 0x24, are code
 				addresses, which differ between builds) */
@@ -177,6 +214,9 @@ void halo_tick_hash_after_tick(void)
 			fclose(out);
 		}
 	}
+	/* (the dump above is masked too) */
+	if (mask)
+		halo_tick_hash_object_marks(saved_marks, saved_mark_count, 1);
 	if ((time & 63) == 0)
 	{
 		fflush(file);
