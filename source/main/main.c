@@ -2752,6 +2752,36 @@ void main_rasterizer_throttle(
 			unsigned long long period = 1000000ull / (unsigned long long)cap;
 			unsigned long long now = vita_host_time_us();
 
+			/* (port) capped at the tick rate, a frame ends half a tick
+			after the last tick boundary, not a fixed period after the frame
+			before. The game runs as many ticks as whole ticks have passed
+			since the last frame (game_time_update's leftover): frames a
+			period apart sat wherever their phase drifted to, and near a
+			tick boundary the sleep's jitter (and anything else that moved a
+			frame by a millisecond) gave a frame no tick, so the same picture
+			twice, and the next two - the uneven motion of the weapon and
+			the view at a steady 30 a second. Half a tick away from either
+			boundary, each frame runs one. HALO_FRAME_PHASE_LOCK=0: the fixed
+			period again. */
+			{
+				extern real game_time_get_tick_fraction(void);
+				static int phase_lock = -1;
+
+				if (phase_lock < 0)
+				{
+					const char *setting = getenv("HALO_FRAME_PHASE_LOCK");
+
+					phase_lock = !setting || atol(setting) != 0;
+				}
+				if (phase_lock && cap == TICKS_PER_SECOND)
+				{
+					real fraction = game_time_get_tick_fraction();
+
+					/* (1: no game running, or paused) */
+					if (fraction < 1.0f)
+						period = (unsigned long long)((1.5f - fraction) * (1000000.0f / TICKS_PER_SECOND));
+				}
+			}
 			if (previous_us && now - previous_us < period)
 			{
 				vita_host_sleep_us((unsigned long)(period - (now - previous_us)));
