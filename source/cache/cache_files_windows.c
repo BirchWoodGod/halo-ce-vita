@@ -1097,12 +1097,35 @@ static void cache_files_open_cache_files(
 				valid = FALSE;
 			}
 #endif
+#ifdef HALO_LINUX
+			/* (port) a copy is kept only when its checksum tells it from
+			another build of the map: Invader writes none (0xFFFFFFFF) in
+			the Xbox maps it builds, so any copy of such a map passed for it
+			- one of another version of the map too - and was played with
+			whatever it held (Vita3K: an Invader-built Blood Gulch drew its
+			base and sky as colour noise from an old copy, and right once
+			the copies were deleted). Such maps are copied again each time
+			the game starts; the length must agree too */
+			if (map_file->header.checksum == 0xFFFFFFFFUL ||
+				!map_file->header.checksum)
+			{
+				valid = FALSE;
+			}
+			if (cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
+				map_file->header.checksum == dvd_header.checksum &&
+				map_file->header.file_length == dvd_header.file_length &&
+				valid)
+			{
+				continue;
+			}
+#else
 			if (cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
 				map_file->header.checksum == dvd_header.checksum &&
 				valid)
 			{
 				continue;
 			}
+#endif
 		}
 
 		memset(
