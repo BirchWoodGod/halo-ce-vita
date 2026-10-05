@@ -766,6 +766,10 @@ static void network_game_server_remove_players_gone_while_loading(
 
 /* ---------- globals */
 
+/* port: the map for the next co-op round after a win
+(network_game_server_port_cooperative_won); empty when there is none */
+static char network_game_server_cooperative_next_map[sizeof(((struct network_game *)NULL)->map.name)];
+
 struct network_game_server network_game_server_memory_do_not_use_directly;
 boolean network_game_server_memory_do_not_use_directly_in_use = FALSE;
 
@@ -1178,6 +1182,9 @@ void network_game_server_dispose(
 	struct network_game_server *server)
 {
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x120, server);
+
+	/* port: a won co-op round's next level belongs to this server alone */
+	network_game_server_cooperative_next_map[0] = 0;
 
 	switch (server->state)
 	{
@@ -3782,6 +3789,54 @@ static short network_game_server_get_client_machine_count(
 	return client_machine_count;
 }
 
+void network_game_server_port_cooperative_won(
+	char const *next_map)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	if (!server)
+		return;
+	csstrncpy(network_game_server_cooperative_next_map, next_map ? next_map : server->game.map.name,
+		sizeof(network_game_server_cooperative_next_map) - 1);
+	network_game_server_cooperative_next_map[sizeof(network_game_server_cooperative_next_map) - 1] = 0;
+	network_game_server_switch_to_postgame(server);
+}
+
+/* port: reapply the co-op settings after a won round, since the playlist
+the next round is set up from (network_game_server_setup_game_from_playlist)
+has a multiplayer gametype and map */
+static void network_game_server_cooperative_round(
+	struct network_game_server *server)
+{
+	struct game_variant variant;
+
+	if (!network_game_server_cooperative_next_map[0])
+		return;
+	csmemset(&variant, 0, sizeof(variant));
+	ustrncpy(variant.human_readable_game_description, L"Co-op",
+		NUMBEROF(variant.human_readable_game_description) - 1);
+	csmemcpy(&server->game.variant, &variant, sizeof(server->game.variant));
+	csstrncpy(server->game.map.name, network_game_server_cooperative_next_map, sizeof(server->game.map.name) - 1);
+	server->game.map.name[sizeof(server->game.map.name) - 1] = 0;
+	main_set_multiplayer_map_name(server->game.map.name);
+	server->game.maximum_teams = 1;
+	network_game_server_cooperative_next_map[0] = 0;
+}
+
+void network_game_server_port_set_cooperative(
+	struct network_game_server *server,
+	short difficulty)
+{
+	if (!server || server->state != _network_game_server_state_pregame)
+		return;
+	server->game.difficulty = difficulty;
+	server->game.maximum_players = MAXIMUM_NETWORK_PLAYER_COUNT;
+	if (!network_game_server_send_game_data_pregame(server))
+		network_event("network_game_server_port_set_cooperative() failed to send updated game settings to clients");
+
+	return;
+}
+
 static boolean network_game_server_setup_game_from_playlist(
 	struct network_game_server *server)
 {
@@ -4502,6 +4557,7 @@ boolean network_game_server_reset_to_pregame(
 			network_game_reset_for_next_round(&server->game, FALSE);
 			if (network_game_server_setup_game_from_playlist(server))
 			{
+				network_game_server_cooperative_round(server);
 				/* the settings record goes out in pieces */
 				/* (the pregame whatever a machine missed: the machines are in it,
 				and the pregame's flush sends the settings again) */
