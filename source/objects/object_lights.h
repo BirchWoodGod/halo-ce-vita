@@ -64,6 +64,12 @@ void lights_reconnect_to_structure_bsp(
 void lights_prepare_for_object_dynamic(
 	long object_index,
 	struct render_lighting *lighting);
+#ifdef HALO_LINUX
+boolean lights_render_snapshot_enabled(void);
+void lights_find_for_object_dynamic(long object_index, long *light_indices, short *light_count);
+void lights_translate_for_object_dynamic(long const *light_indices, short light_count,
+	struct render_lighting *lighting);
+#endif
 
 /* ---------- globals */
 

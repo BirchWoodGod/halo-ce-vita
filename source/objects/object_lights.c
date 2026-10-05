@@ -2046,9 +2046,28 @@ static void find_point_lights_for_object_in_cluster(
 		"c:\\halo\\SOURCE\\objects\\object_lights.c",
 		0x544,
 		lights_globals.marker_initialized);
+#ifdef HALO_LINUX
+	/* (port) with the tick on its thread, the cluster's lights as the
+	finished tick left them, like lights_preprocess_scene's walk (the
+	running tick takes the flashlight out of its clusters and back every
+	tick the player moves: a search in that window missed it, and the
+	object it lit was drawn dark that frame); the live list on the tick
+	thread (lights_illumination_at_point) */
+	boolean tick_lists = lights_render_snapshot_enabled() &&
+		render_tick_cluster_lists_active(_tick_cluster_list_light);
+
+	for (light_index = tick_lists ?
+			render_tick_cluster_list_first(_tick_cluster_list_light, &reference_index, cluster_index) :
+			cluster_partition_get_first_datum(&light_cluster_partition, &reference_index, cluster_index);
+		light_index != NONE;
+		light_index = tick_lists ?
+			render_tick_cluster_list_next(_tick_cluster_list_light, &reference_index) :
+			cluster_partition_get_next_datum(&light_cluster_partition, &reference_index))
+#else
 	for (light_index = cluster_partition_get_first_datum(&light_cluster_partition, &reference_index, cluster_index);
 		light_index != NONE;
 		light_index = cluster_partition_get_next_datum(&light_cluster_partition, &reference_index))
+#endif
 	{
 		if (light_unmarked(light_index))
 		{
@@ -2203,6 +2222,124 @@ void lights_illumination_at_point(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_LIGHT_SNAPSHOT=0: the render's per-object light search walks
+the live cluster lists again (the A/B switch for the walk below) */
+boolean lights_render_snapshot_enabled(
+	void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_LIGHT_SNAPSHOT");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	return enabled;
+}
+
+/* (port) the search of lights_prepare_for_object_dynamic, as light datum
+indices: what the render caches between searches (render_objects.c,
+HALO_LIGHTING_REFRESH_DIVISOR), since the rasterizer light indices it
+translates them into are only this scene's */
+void lights_find_for_object_dynamic(
+	long object_index,
+	long *light_indices,
+	short *light_count)
+{
+	struct object_cluster_iterator iterator;
+	real_point3d center;
+	real radius;
+	real light_intensities[MAXIMUM_RENDERED_POINT_LIGHTS];
+	real light_attenuations[MAXIMUM_RENDERED_POINT_LIGHTS];
+	short const *tick_clusters;
+	short tick_cluster_count;
+	short cluster_index;
+
+	object_get_bounding_sphere(object_index, &center, &radius);
+	*light_count = 0;
+	light_marker_begin();
+	/* (with the tick on its thread, the clusters the object was in when the
+	tick drawn ended: the live references are empty while the running tick
+	has the object out of the map to move it) */
+	if (lights_render_snapshot_enabled() &&
+		render_tick_object_clusters(object_get_ultimate_parent(object_index), &tick_clusters, &tick_cluster_count))
+	{
+		for (cluster_index = 0; cluster_index < tick_cluster_count; cluster_index++)
+		{
+			find_point_lights_for_object_in_cluster(
+				object_index,
+				tick_clusters[cluster_index],
+				&center,
+				radius,
+				light_indices,
+				light_intensities,
+				light_attenuations,
+				light_count,
+				MAXIMUM_RENDERED_POINT_LIGHTS);
+		}
+	}
+	else
+	{
+		for (cluster_index = object_get_first_cluster(&iterator, object_index);
+			cluster_index != NONE;
+			cluster_index = object_get_next_cluster(&iterator, object_index))
+		{
+			find_point_lights_for_object_in_cluster(
+				object_index,
+				cluster_index,
+				&center,
+				radius,
+				light_indices,
+				light_intensities,
+				light_attenuations,
+				light_count,
+				MAXIMUM_RENDERED_POINT_LIGHTS);
+		}
+	}
+	light_marker_end();
+
+	return;
+}
+
+/* (port) ... and into this scene's rasterizer lights: a light deleted
+since, or not submitted this scene (lights_preprocess_scene), is left out */
+void lights_translate_for_object_dynamic(
+	long const *light_indices,
+	short light_count,
+	struct render_lighting *lighting)
+{
+	short index;
+
+	lighting->point_light_count = 0;
+	for (index = 0; index < light_count; index++)
+	{
+		struct light_datum *light = datum_try_and_get(light_data, light_indices[index]);
+
+		if (light && light->rasterizer_light_index != NONE &&
+			light->rasterizer_light_index < debug_rasterizer_light_count)
+		{
+			lighting->point_light_indices[lighting->point_light_count++] = light->rasterizer_light_index;
+		}
+	}
+
+	return;
+}
+
+void lights_prepare_for_object_dynamic(
+	long object_index,
+	struct render_lighting *lighting)
+{
+	long light_indices[MAXIMUM_RENDERED_POINT_LIGHTS];
+	short light_count;
+
+	lights_find_for_object_dynamic(object_index, light_indices, &light_count);
+	lights_translate_for_object_dynamic(light_indices, light_count, lighting);
+
+	return;
+}
+#else
 void lights_prepare_for_object_dynamic(
 	long object_index,
 	struct render_lighting *lighting)
@@ -2242,6 +2379,7 @@ void lights_prepare_for_object_dynamic(
 
 	return;
 }
+#endif
 
 static void build_distant_lights(
 	long flags,
