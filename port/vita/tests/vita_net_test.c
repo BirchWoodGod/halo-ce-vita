@@ -41,6 +41,9 @@ the mock Linux's sendto (what Vita3K does), to see the difference.
 extern int mock_log_quiet;
 extern int mock_scenet_sendto_calls, mock_scenet_eisconn_refusals;
 
+/* mock_scenet.c's */
+extern int mock_scenet_epoll_creates;
+
 static int failures, checks;
 
 static void check(int condition, const char *what, long value, long expected)
@@ -142,7 +145,7 @@ static void test_game_sequence(void)
 	unsigned char address[16], from[16];
 	char buffer[2048];
 	int server_tcp, server_udp, client_tcp, client_udp, accepted;
-	int sockets[4], count, empty = 0, from_length, result, update, received = 0, sent = 0;
+	int sockets[4], count, empty = 0, from_length, result, update, received = 0, sent = 0, epolls;
 	unsigned int server_ip;
 
 	/* network_connection_new: the server's, then the client's */
@@ -167,23 +170,39 @@ static void test_game_sequence(void)
 	check(posix_socket_select(NULL, &empty, sockets, &count, NULL, &empty, 1, 0, 0) == 1 && count == 1,
 		"client tcp select writeable (connected)", count, 1);
 
-	/* the server's poll_endpoint_set and accept_endpoint (a listener's
-	zero-timeout poll stays an epoll: a pending connection is not peekable) */
+	/* the server's poll_endpoint_set and accept_endpoint (a non-blocking
+	listener's zero-timeout poll accepts ahead, without an epoll: a pending
+	connection is not peekable; the next accept hands it out) */
 	usleep(20000);
+	sockets[0] = server_tcp;
+	sockets[1] = server_udp;
+	count = 2;
+	epolls = mock_scenet_epoll_creates;
+	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 0, 0) == 1 && count == 1 &&
+		sockets[0] == server_tcp, "server listener readable (zero timeout), the idle udp not", count, 1);
+	check(mock_scenet_epoll_creates == epolls, "zero-timeout poll of a listener: no epoll",
+		mock_scenet_epoll_creates - epolls, 0);
 	sockets[0] = server_tcp;
 	count = 1;
 	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 0, 0) == 1 && count == 1,
-		"server listener readable (zero timeout)", count, 1);
+		"server listener still readable (its connection accepted ahead)", count, 1);
 	sockets[0] = server_tcp;
 	count = 1;
 	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 100000, 0) == 1,
-		"server listener readable", count, 1);
+		"server listener readable (timed select)", count, 1);
 	from_length = 16;
 	accepted = posix_socket_accept(server_tcp, from, &from_length);
 	check(accepted >= 0, "server accept", accepted, 0);
 	check(from[4] == 127 && from[7] == 1, "accepted from 127.0.0.1", from[4], 127);
 	posix_socket_set_nonblocking(accepted, 1);
 	posix_socket_set_nodelay(accepted);
+	sockets[0] = server_tcp;
+	count = 1;
+	check(posix_socket_select(sockets, &count, NULL, &empty, NULL, &empty, 0, 0, 0) == 0 && count == 0,
+		"server listener not readable once accepted (zero timeout)", count, 0);
+	from_length = 16;
+	check(posix_socket_accept(server_tcp, from, &from_length) == -1 && posix_socket_last_error() == 10035,
+		"no second connection: accept is WSAEWOULDBLOCK", posix_socket_last_error(), 10035);
 
 	/* the lobby: messages both ways over the connection */
 	check(posix_socket_send(client_tcp, "join request", 12, 0) == 12, "lobby: client sends on the connection", 0, 12);

@@ -63,6 +63,13 @@ long cluster_partition_get_first_datum(
 long cluster_partition_get_next_datum(
 	struct cluster_partition const *partition,
 	long *reference_index);
+#ifdef HALO_LINUX
+long cluster_partition_get_cluster_datums(
+	struct cluster_partition const *partition,
+	short cluster_index,
+	long *indices,
+	long maximum);
+#endif
 long cluster_partition_get_first_cluster(
 	struct cluster_partition const *partition,
 	long *reference_index,

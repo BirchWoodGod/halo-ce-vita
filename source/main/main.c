@@ -384,6 +384,7 @@ void platform_log(const char *format, ...);
 #include "networking/network_game_globals.h"
 #include "camera/director.h"
 #include "camera/observer.h"
+#include "objects/objects.h"
 #include "cutscene/cinematics.h"
 #include "effects/player_effects.h"
 #include "physics/collision_usage.h"
@@ -2348,6 +2349,27 @@ static boolean main_tick_catch_up(
 	return catch_up != 0;
 }
 
+/* (port) HALO_NET_CATCH_UP_TICKS: the most ticks a frame of a distributed
+network game runs to catch up with real time (main_update_time_unthrottled);
+2 by default, as a local game; 30 the Xbox's network game */
+static long main_network_catch_up_ticks(
+	void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static long ticks = -1;
+
+	if (ticks < 0)
+	{
+		const char *setting = getenv("HALO_NET_CATCH_UP_TICKS");
+
+		ticks = setting && atoi(setting) > 0 ? atoi(setting) : 2;
+		if (ticks > TICKS_PER_SECOND)
+			ticks = TICKS_PER_SECOND;
+	}
+	return ticks;
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2399,6 +2421,29 @@ static void main_update_time_unthrottled(
 			{
 				seconds_elapsed = 0.03333333507180214f;
 			}
+		}
+		/* (port) a distributed network game - System Link and online play's
+		netcode (NETCODE.md) - the same: its machines tick on their own
+		clocks and nobody waits for anybody, but as a network server or
+		client each took up to a second's ticks (30) a frame to catch up
+		with real time, the spiral the split screen game had above. A host
+		whose tick nears a tick's 33 ms - the Vita's, with a client, whose
+		players it simulates and whose objects and corrections it sends
+		every tick - fell behind, ran more ticks the next frame, and slower
+		still: 1-5 fps for the host, and for its clients the host's players
+		and objects frozen, then jumping a second on (the host's ticks
+		and their updates came in bursts). Now at most two ticks a frame
+		(HALO_NET_CATCH_UP_TICKS): a machine that cannot keep up plays
+		slower than real time for a moment, as the campaign does; the
+		others take its updates as they come (each stamped with its tick).
+		Every network game is distributed now - System Link, online play
+		and ad hoc alike (protocol 9 has no lockstep path) - so every one is
+		paced so; a client left more than a second behind the host takes
+		the host's clock at its next update (network_client_manager.c). */
+		else if (main_globals.connection == _game_connection_network_server ||
+			main_globals.connection == _game_connection_network_client)
+		{
+			seconds_elapsed = CEILING(seconds_elapsed, (real)main_network_catch_up_ticks() * 0.03333333507180214f);
 		}
 	}
 	{
@@ -2751,6 +2796,41 @@ void main_rasterizer_throttle(
 			unsigned long long period = 1000000ull / (unsigned long long)cap;
 			unsigned long long now = vita_host_time_us();
 
+			/* (port) capped at the tick rate, a frame ends half a tick
+			after the last tick boundary, not a fixed period after the frame
+			before. The game runs as many ticks as whole ticks have passed
+			since the last frame (game_time_update's leftover): frames a
+			period apart sat wherever their phase drifted to, and near a
+			tick boundary the sleep's jitter (and anything else that moved a
+			frame by a millisecond) gave a frame no tick, so the same picture
+			twice, and the next two - the uneven motion of the weapon and
+			the view at a steady 30 a second. Half a tick away from either
+			boundary, each frame runs one. HALO_FRAME_PHASE_LOCK=0: the fixed
+			period again. */
+			{
+				extern real game_time_get_tick_fraction(void);
+				static int phase_lock = -1;
+
+				if (phase_lock < 0)
+				{
+					const char *setting = getenv("HALO_FRAME_PHASE_LOCK");
+
+					phase_lock = !setting || atol(setting) != 0;
+				}
+				/* (only for a frame that fit in the period: one that took
+				longer waited for nothing before, and would now wait up to
+				half a tick more whenever its end fell early in a tick - a
+				steady 40 ms frame ran at 24 a second instead of 25) */
+				if (phase_lock && cap == TICKS_PER_SECOND && previous_us && now - previous_us < period)
+				{
+					real fraction = game_time_get_tick_fraction();
+
+					/* (1: no game running, or paused; the test also keeps
+					the period within half a tick to a tick and a half) */
+					if (fraction >= 0.0f && fraction < 1.0f)
+						period = (unsigned long long)((1.5f - fraction) * (1000000.0f / TICKS_PER_SECOND));
+				}
+			}
 			if (previous_us && now - previous_us < period)
 			{
 				vita_host_sleep_us((unsigned long)(period - (now - previous_us)));
@@ -3445,7 +3525,9 @@ does the pause menu's Save and Quit, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
 positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
-tick, every frame), and "@shot name"
+tick, every frame), "@tv name" puts every player's unit at the centre of
+that scenario trigger volume (the benchmarks walk the player through a
+level's encounters this way: triage/perf2-status.md), and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device). Each runs once,
 at the first frame whose game time has reached its tick. */
@@ -3455,6 +3537,7 @@ void platform_log(const char *format, ...);
 char halo_screenshot_name[64];
 
 static void main_test_camera(char const *arguments);
+static void main_test_trigger_volume(char const *name);
 
 static void main_test_commands_update(
 	void)
@@ -3519,6 +3602,8 @@ static void main_test_commands_update(
 		}
 		else if (!strncmp(commands[index].command, "@camera ", 8))
 			main_test_camera(commands[index].command + 8);
+		else if (!strncmp(commands[index].command, "@tv ", 4))
+			main_test_trigger_volume(commands[index].command + 4);
 		else
 			hs_compile_and_evaluate(commands[index].command);
 	}
@@ -3531,6 +3616,46 @@ static void main_test_commands_update(
 		snprintf(line, sizeof(line), "%f %f %f %f %f", pan[0], pan[1], pan[2], pan[3] + pan[5] * ticks, pan[4] + pan[6] * ticks);
 		main_test_camera(line);
 	}
+}
+
+static void main_test_trigger_volume(
+	char const *name)
+{
+	struct scenario *scenario = global_scenario_get();
+	short index;
+
+	for (index = 0; index < scenario->trigger_volumes.count; index++)
+	{
+		struct scenario_trigger_volume *volume =
+			TAG_BLOCK_GET_ELEMENT(&scenario->trigger_volumes, index, struct scenario_trigger_volume);
+		real_point3d centre;
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		if (strcmp(volume->name, name))
+			continue;
+		if (volume->type == _scenario_trigger_volume_type_axis_aligned)
+		{
+			centre.x = (volume->bounds.x0 + volume->bounds.x1) / 2.0f;
+			centre.y = (volume->bounds.y0 + volume->bounds.y1) / 2.0f;
+			centre.z = (volume->bounds.z0 + volume->bounds.z1) / 2.0f;
+		}
+		else
+		{
+			real_matrix4x3 matrix;
+			real_point3d middle = { volume->extents.i / 2.0f, volume->extents.j / 2.0f, volume->extents.k / 2.0f };
+
+			matrix4x3_from_point_and_vectors(&matrix, &volume->position, &volume->forward, &volume->up);
+			matrix4x3_transform_point(&matrix, &middle, &centre);
+		}
+		platform_log("test command: %s at %.2f %.2f %.2f", name, centre.x, centre.y, centre.z);
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+			if (player->unit_index != NONE)
+				object_set_position(player->unit_index, &centre, NULL, NULL);
+		return;
+	}
+	platform_log("test command: no trigger volume %s", name);
 }
 
 static void main_test_camera(

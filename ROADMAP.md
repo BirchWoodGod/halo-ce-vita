@@ -29,35 +29,42 @@ flares; saves that keep working across updates.
 Security fixes: the Xbox's debug console no longer listens on the network,
 and three bugs in the original LAN multiplayer code are closed.
 
-## Next: 1.0.3 (planned for next week)
+## Next: 1.0.3 (in beta)
 
-- **Flashlight:** characters lit by the flashlight flicker black on some
-  frames.
-- **Disappearing objects:** Master Chief vanishing in the Pillar of
-  Autumn's cryo tube when you look down; trees flickering at the edges of
-  the screen; some Covenant cover only visible from some angles.
-- **Grass and terrain** look noisy up close.
-- **Multiplayer:** a per-frame network cost of about 10 ms, and freezes of
-  a second or so during matches.
-- **Heavy fights:** the render is now the limit at the peak of the biggest
-  fights (objects, particles, visibility and shadows).
-- **Polish from player reports:** 16:9 movies shown at their own aspect
-  ratio, the main menu's music, the debug build number on screen, letters
-  on the name-entry keyboard, slightly distorted sound.
+Pre-releases are on the [releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases).
+Beta 1 is out; beta 2 fixes most of what testers reported:
+
+- **Crashes and freezes** found in players' crash dumps (dropping a weapon,
+  HUD warning sounds in fights, leaving a vehicle, a texture cache lock).
+- **Checkpoints** that stopped coming after some saves, and missing
+  marine reinforcements.
+- **No more freezes reaching a new area**: the graphics shaders ship
+  precompiled.
+- **Graphics:** black camouflaged Elites, black scopes, flickering glass
+  and effects late in a session, white placeholders on the HUD, the black
+  screen between sections, the missing dropship in a cutscene, smoother
+  weapon motion.
+- **Heavy fights:** more speed in the biggest battles.
+- Still being looked at: trees and Covenant shields flickering at the
+  screen's edges, water on The Silent Cartographer.
+
+## 1.1.0: multiplayer, custom maps and a steady 30 fps
+
+- **Online play between Vitas**: host a public lobby or a private one with
+  a short code, join from the settings panel. Built on iamhaller's
+  networking work. Vita to Vita only for now.
+- **Ad hoc play** between Vitas without a router.
+- **QR code invites**: the host shows its lobby code as a QR code, and the
+  joiner scans it with the Vita's camera.
+- **A relay** for networks that cannot connect to each other directly.
+- **A steady 30 fps**, including the biggest fights.
+- **Custom maps**: play community-made maps, including PC Halo CE maps converted for the Xbox engine, in multiplayer and the campaign menus.
 
 ## Later
 
-- **Online play between Vitas**: host a public lobby or a private one with
-  a short code, join from the settings panel. Built and tested on PC,
-  waiting for hardware tests. Vita to Vita only for now.
-- **Ad hoc play** between Vitas without a router.
 - **Campaign co-op over the network**: play the campaign together on two
   Vitas, online or ad hoc. The Xbox game only had split-screen co-op on
   one console, so this is new work for the port.
-- **A relay** for networks that cannot connect to each other directly.
-- **QR code invites**: the host shows its lobby code as a QR code, and the
-  joiner scans it with the Vita's camera.
-- **A steady 30 fps** in the biggest fights.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
 ## Help wanted

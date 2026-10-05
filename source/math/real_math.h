@@ -567,6 +567,34 @@ void quaternion_transform_point(real_quaternion const *q, real_point3d const *p,
 
 void vectors3d_from_euler_angles3d(real_vector3d *forward, real_vector3d *up, real_euler_angles3d const *angles);
 boolean fast_vector_intersects_sphere(real_point3d const *point, real_vector3d const *vector, real_point3d const *center, real radius);
+#ifdef HALO_LINUX
+/* (port) fast_vector_intersects_sphere, inline for the collision queries'
+object walks: the same operations in the same order (real_math.c) */
+static __inline boolean fast_vector_intersects_sphere_inline(
+	real_point3d const *point,
+	real_vector3d const *vector,
+	real_point3d const *center,
+	real radius)
+{
+	real px = point->x - center->x, py = point->y - center->y, pz = point->z - center->z;
+	real c = (px*px) + (py*py) + (pz*pz) - (radius*radius);
+	real b, a, disc, neg_a_minus_b;
+
+	if (c < 0.f)
+		return TRUE;
+	b = vector->i*px + vector->j*py + vector->k*pz;
+	if (b >= 0.f)
+		return FALSE;
+	a = vector->i*vector->i + vector->j*vector->j + vector->k*vector->k;
+	disc = b * b - a * c;
+	if (disc <= 0.f)
+		return FALSE;
+	neg_a_minus_b = -a - b;
+	if (neg_a_minus_b < 0.f)
+		return TRUE;
+	return neg_a_minus_b * neg_a_minus_b < disc;
+}
+#endif
 real fast_vector_intersection_with_sphere(
 	real_point3d const *point,
 	real_vector3d const *vector,

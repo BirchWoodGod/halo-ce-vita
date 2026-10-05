@@ -87,8 +87,9 @@ each. */
 /* with the tick on its own thread, an array the tick created or deleted
 in this epoch carries marks (render_epoch.c), and the lookup asks whether
 the slot is one: the usual answer, an unmarked slot, read inline from the
-array's table entry (the same entry and byte render_epoch.c reads); 0 for
-anything else, which data.c's function settles */
+array's table entry (the same entry and byte render_epoch.c reads), and a
+slot the tick created this epoch, which the tick sees; 0 for anything
+else, which data.c's function settles */
 static __inline int datum_unmarked_inline(const struct data_array *data, short absolute_index)
 {
 	unsigned long hint = *(const unsigned short *)((const unsigned char *)data + 38);
@@ -98,7 +99,13 @@ static __inline int datum_unmarked_inline(const struct data_array *data, short a
 		const struct halo_epoch_marked_array *entry = &halo_epoch_marked_arrays[hint - 1];
 
 		if (entry->data == data && absolute_index < entry->maximum_count)
-			return !entry->marks[absolute_index];
+		{
+			unsigned char mark = entry->marks[absolute_index];
+
+			/* (the tick sees what it created this epoch: data.c's answer
+			for the tick, without the call) */
+			return !mark || (mark == _halo_epoch_datum_created && halo_epoch_on_mutator_inline());
+		}
 	}
 	return 0;
 }

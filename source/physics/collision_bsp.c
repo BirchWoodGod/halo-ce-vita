@@ -1739,7 +1739,58 @@ static boolean collision_bsp_test_vector_recursive(
 	real t0,
 	real t1)
 {
+#ifdef HALO_LINUX
+	/* (port) the calls in tail position (the one child a node's span
+	reaches, and the far child after the near one) made as the loop's next
+	turn: the same nodes in the same order, with the same values */
+	while (!(node_index & LONG_MIN))
+	{
+		struct bsp3d_node const *node = TAG_BLOCK_GET_ELEMENT(
+			&data->bsp->bsp3d.nodes,
+			node_index,
+			struct bsp3d_node);
+		real_plane3d const *plane = TAG_BLOCK_GET_ELEMENT(
+			&data->bsp->bsp3d.planes,
+			node->plane_designator,
+			real_plane3d);
+		real distance = plane3d_distance_to_point(plane, data->point);
+		real dot = dot_product3d(data->vector, &plane->n);
+		real distance0 = dot*t0 + distance;
+		real distance1 = dot*t1 + distance;
+		boolean reaches_back = distance0 < 0.f || distance1 < 0.f;
+		boolean reaches_front = distance0 >= 0.f || distance1 >= 0.f;
+
+		if (reaches_back && reaches_front)
+		{
+			boolean front = dot > 0.f;
+			real t = -(distance/dot);
+
+			if (collision_bsp_test_vector_recursive(
+				data,
+				node->children[!front],
+				t0,
+				t))
+			{
+				return TRUE;
+			}
+			if (data->result->t <= t)
+			{
+				return FALSE;
+			}
+			data->last_plane_index = node->plane_designator;
+			node_index = node->children[front];
+			t0 = t;
+		}
+		else
+		{
+			node_index = node->children[reaches_front];
+		}
+	}
+	/* (node_index is a leaf here: the leaf's branch below) */
+	if (FALSE)
+#else
 	if (!(node_index & LONG_MIN))
+#endif
 	{
 		struct bsp3d_node const *node = TAG_BLOCK_GET_ELEMENT(
 			&data->bsp->bsp3d.nodes,

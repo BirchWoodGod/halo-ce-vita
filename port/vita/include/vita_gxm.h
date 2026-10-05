@@ -107,6 +107,9 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 	unsigned long *ids, struct vgxm_texture *texture);
 /* where subsequent draws and clears go; either may be 0 */
 void vgxm_set_targets(unsigned long color, unsigned long depth);
+/* the next draw samples this target: its scene waits for the scene that
+drew it if there was no wait since (HALO_GXM_RTT_SYNC) */
+void vgxm_note_sampled_target(unsigned long id);
 
 /* ---------- drawing */
 

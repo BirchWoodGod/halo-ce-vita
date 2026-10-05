@@ -936,6 +936,139 @@ long render_tick_cluster_list_first(int which, long *iterator, short cluster_ind
 	return render_tick_cluster_list_next(which, iterator);
 }
 
+/* The other direction: the clusters an object is in, as the tick left it.
+An object's dynamic lights are searched in its clusters (object_lights.c
+lights_prepare_for_object_dynamic), and the live walk of its cluster
+references (object_get_first_cluster) finds none while the running tick has
+it out of the map to move it: that frame the object was drawn without the
+flashlight or any other point light, the next with it. Made on the render
+thread, once per published capture, from the two object lists above. */
+static struct
+{
+	unsigned long capture;
+	int buffer;
+	/* by absolute object index: the datum index then, its clusters from
+	first[] on, count[] of them */
+	long owner[MAXIMUM_OBJECTS_PER_MAP];
+	long first[MAXIMUM_OBJECTS_PER_MAP];
+	short count[MAXIMUM_OBJECTS_PER_MAP];
+	short *clusters;
+	long cluster_capacity;
+	boolean valid;
+} tick_object_clusters = { 0, -1 };
+
+static void tick_object_clusters_build(struct tick_pose_buffer *buffer)
+{
+	long total = 0, used = 0;
+	int which;
+	long index;
+
+	tick_object_clusters.valid = FALSE;
+	for (index = 0; index < MAXIMUM_OBJECTS_PER_MAP; index++)
+	{
+		tick_object_clusters.owner[index] = NONE;
+		tick_object_clusters.count[index] = 0;
+	}
+	for (which = _tick_cluster_list_collideable; which <= _tick_cluster_list_noncollideable; which++)
+	{
+		struct tick_cluster_list *list = &buffer->cluster_lists[which];
+		short cluster_index;
+
+		if (!list->valid)
+			return;
+		for (cluster_index = 0; cluster_index < list->cluster_count; cluster_index++)
+		{
+			long entry;
+
+			for (entry = list->first[cluster_index]; list->datums[entry] != NONE; entry++)
+			{
+				long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(list->datums[entry]);
+
+				if (absolute_index >= 0 && absolute_index < MAXIMUM_OBJECTS_PER_MAP)
+				{
+					tick_object_clusters.owner[absolute_index] = list->datums[entry];
+					tick_object_clusters.count[absolute_index]++;
+					total++;
+				}
+			}
+		}
+	}
+	if (total > tick_object_clusters.cluster_capacity)
+	{
+		long capacity = total * 2 > 4096 ? total * 2 : 4096;
+		/* (the C library's realloc: see render_tick_poses_capture) */
+		short *larger = (realloc)(tick_object_clusters.clusters, capacity * sizeof(short));
+
+		if (!larger)
+			return;
+		tick_object_clusters.clusters = larger;
+		tick_object_clusters.cluster_capacity = capacity;
+	}
+	for (index = 0; index < MAXIMUM_OBJECTS_PER_MAP; index++)
+	{
+		tick_object_clusters.first[index] = used;
+		used += tick_object_clusters.count[index];
+		tick_object_clusters.count[index] = 0;
+	}
+	for (which = _tick_cluster_list_collideable; which <= _tick_cluster_list_noncollideable; which++)
+	{
+		struct tick_cluster_list *list = &buffer->cluster_lists[which];
+		short cluster_index;
+
+		for (cluster_index = 0; cluster_index < list->cluster_count; cluster_index++)
+		{
+			long entry;
+
+			for (entry = list->first[cluster_index]; list->datums[entry] != NONE; entry++)
+			{
+				long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(list->datums[entry]);
+
+				if (absolute_index >= 0 && absolute_index < MAXIMUM_OBJECTS_PER_MAP &&
+					tick_object_clusters.owner[absolute_index] == list->datums[entry])
+				{
+					tick_object_clusters.clusters[tick_object_clusters.first[absolute_index] +
+						tick_object_clusters.count[absolute_index]++] = cluster_index;
+				}
+			}
+		}
+	}
+	tick_object_clusters.valid = TRUE;
+}
+
+/* the render: the clusters the object (its ultimate parent, as
+object_get_first_cluster) was in when the tick drawn was captured; FALSE
+when the frame does not use the captured lists or the object was not in
+them (created since): the caller walks the live references then */
+boolean render_tick_object_clusters(long object_index, short const **clusters, short *count)
+{
+	struct tick_pose_buffer *buffer;
+	long absolute_index;
+
+	if (!render_tick_cluster_lists_active(_tick_cluster_list_collideable) ||
+		!render_tick_cluster_lists_active(_tick_cluster_list_noncollideable))
+	{
+		return FALSE;
+	}
+	buffer = &tick_pose_buffers[tick_pose_published];
+	if (tick_object_clusters.buffer != tick_pose_published || tick_object_clusters.capture != buffer->capture)
+	{
+		tick_object_clusters.buffer = tick_pose_published;
+		tick_object_clusters.capture = buffer->capture;
+		tick_object_clusters_build(buffer);
+	}
+	if (!tick_object_clusters.valid)
+		return FALSE;
+	absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+	if (absolute_index < 0 || absolute_index >= MAXIMUM_OBJECTS_PER_MAP ||
+		tick_object_clusters.owner[absolute_index] != object_index)
+	{
+		return FALSE;
+	}
+	*clusters = tick_object_clusters.clusters + tick_object_clusters.first[absolute_index];
+	*count = tick_object_clusters.count[absolute_index];
+	return TRUE;
+}
+
 /* the tick thread, after game_time_update: the objects as the tick left
 them, into the buffer the render is not reading */
 void render_tick_poses_capture(void)

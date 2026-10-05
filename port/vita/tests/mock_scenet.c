@@ -318,10 +318,14 @@ int sceNetGetpeername(int s, SceNetSockaddr *address, unsigned int *length)
 
 /* ---------- epoll (timeouts in microseconds) */
 
+/* epolls made (vita_net_test.c checks that zero-timeout polls make none) */
+int mock_scenet_epoll_creates;
+
 int sceNetEpollCreate(const char *name, int flags)
 {
 	(void)name;
 	(void)flags;
+	mock_scenet_epoll_creates++;
 	return result_of(epoll_create1(0));
 }
 

@@ -142,6 +142,32 @@ long tag_loaded(long group_tag, const char *name);
 
 void *tag_get(long group_tag, long tag_index);
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+/* (port, release builds) tag_get inline: cache_files.c's function is the
+tag instance's base address and assertions, which release builds do not
+check (the layout below is cache_files.c's struct cache_file_tag_instance,
+checked there); a few thousand calls a frame in a fight */
+struct cache_file_tag_instance;
+extern struct cache_file_tag_instance *global_tag_instances;
+struct halo_tag_instance_layout
+{
+	long group_tag;
+	long parent_group_tags[2];
+	long tag_index;
+	char *name;
+	void *base_address;
+	unsigned long unused[2];
+};
+#endif
+#if defined(HALO_LINUX) && defined(HALO_RELEASE) && !defined(HALO_CACHE_FILES_C)
+static __inline__ void *tag_get_inline(long group_tag, long tag_index)
+{
+	(void)group_tag;
+	return ((struct halo_tag_instance_layout *)global_tag_instances)[(short)tag_index].base_address;
+}
+#define tag_get(group_tag, tag_index) tag_get_inline((group_tag), (tag_index))
+#endif
+
 /* ---------- globals */
 
 /* ---------- public code */
