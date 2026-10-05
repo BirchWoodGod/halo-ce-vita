@@ -62,6 +62,11 @@ long halo_screen_commit(void);
 /* the Custom Edition tag cache window, or NULL unless HALO_CUSTOM_EDITION
 reserved it (port/linux/src/xbox_memory.c) */
 void *halo_custom_edition_tag_cache(void);
+/* whether Custom Edition maps may run, and a map's tag cache when the
+window above is not there (port/linux/src/xbox_memory.c) */
+int halo_custom_edition_enabled(void);
+void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
+void halo_custom_edition_tag_cache_release(void);
 /* where Halo PC keeps the channels of the pixels a Custom Edition bitmap
 just arrived at (an enum custom_edition_channel_order,
 port/linux/game/cache_file_formats.h), which the renderer then samples in

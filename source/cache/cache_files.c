@@ -887,6 +887,8 @@ boolean scenario_structure_bsp_load(
 	custom_edition_cache.c) */
 	if (!custom_edition_cache_tags_loaded())
 		halo_tag_relocate_structure_bsp(tag_cache_base_address, reference->base_address, reference->file_size);
+	else
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size);
 #endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_relocate, started, 0);

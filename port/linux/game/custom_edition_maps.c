@@ -325,7 +325,7 @@ static void custom_edition_maps_look_for(
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
-	if (!halo_custom_edition_tag_cache())
+	if (!halo_custom_edition_enabled())
 	{
 		return;
 	}

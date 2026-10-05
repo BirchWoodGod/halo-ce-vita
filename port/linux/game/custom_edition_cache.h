@@ -59,6 +59,11 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 
 boolean custom_edition_cache_tags_loaded(
 	void);
+/* A structure BSP of the loaded map was just read to `structure_bsp`: its
+pointers are moved there too when the tags were (custom_edition_cache.c). */
+void custom_edition_cache_structure_bsp_moved(
+	void *structure_bsp,
+	long size);
 void custom_edition_cache_tags_unload(
 	void);
 

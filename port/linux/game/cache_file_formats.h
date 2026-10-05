@@ -381,6 +381,18 @@ enum cache_file_status custom_edition_cache_load(
 	uint32_t tag_cache_bytes,
 	struct custom_edition_load_report *report);
 
+/* Says that the pointers of the tag cache custom_edition_cache_load filled
+now point to `address`, where the tag cache is, rather than to
+CUSTOM_EDITION_TAG_CACHE_ADDRESS: a process that cannot have the tag cache
+there moves them (port/linux/src/tag_relocate.c), and the functions below
+then translate them from there. The next custom_edition_cache_load starts
+from CUSTOM_EDITION_TAG_CACHE_ADDRESS again. */
+void custom_edition_cache_tags_moved(
+	uint32_t address);
+/* CUSTOM_EDITION_TAG_CACHE_ADDRESS, for the units that move the pointers */
+uint32_t custom_edition_cache_linked_address(
+	void);
+
 /* Gives the tags of a tag cache custom_edition_cache_load filled
 (`loaded_bytes` of it in use) this build's layouts and values where only
 their bytes need to change: every shader's type as this build numbers them,

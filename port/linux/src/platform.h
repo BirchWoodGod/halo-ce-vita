@@ -142,6 +142,14 @@ the experimental Custom Edition map loading: reserved at start-up when
 HALO_CUSTOM_EDITION is set, else NULL (also declared for the game in
 halo_linux_source_fixups.h). */
 void *halo_custom_edition_tag_cache(void);
+/* Whether Halo Custom Edition maps may run (HALO_CUSTOM_EDITION). */
+int halo_custom_edition_enabled(void);
+/* A Custom Edition map's tag cache of `bytes`: the window above when it is
+reserved, else memory of its own (the Vita, which cannot have the window),
+whose tags are then moved there (custom_edition_cache.c); NULL when there is
+no room. Released when the map goes. */
+void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
+void halo_custom_edition_tag_cache_release(void);
 /* Which textures hold their channels where Halo PC keeps them, for the same
 (xbox_textures.c; also declared for the game there) */
 void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order);

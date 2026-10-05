@@ -447,6 +447,14 @@ static enum cache_file_status gbxmodel_part_check(
 
 /* ---------- globals */
 
+/* The address the tags of the tag cache being loaded or played are linked
+to, by which every pointer among them is translated to a place in the tag
+cache: CUSTOM_EDITION_TAG_CACHE_ADDRESS, where a cache's own pointers point,
+until a process that cannot have its tag cache there moves the pointers to
+where it is (port/linux/src/tag_relocate.c) and says so with
+custom_edition_cache_tags_moved. */
+static uint32_t tag_cache_address = CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+
 static struct element_layout const plain_element_layout = { 0, NULL, 0, NULL, 0, NULL };
 
 /* the placements the unit and grenade HUD interfaces hold themselves */
@@ -1151,12 +1159,12 @@ static int tag_cache_offset(
 	uint32_t size,
 	uint32_t *offset)
 {
-	if (address < CUSTOM_EDITION_TAG_CACHE_ADDRESS ||
-		!range_fits(address - CUSTOM_EDITION_TAG_CACHE_ADDRESS, size, state->used_bytes))
+	if (address < tag_cache_address ||
+		!range_fits(address - tag_cache_address, size, state->used_bytes))
 	{
 		return 0;
 	}
-	*offset = address - CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+	*offset = address - tag_cache_address;
 
 	return 1;
 }
@@ -1510,7 +1518,7 @@ static enum cache_file_status resource_tag_load(
 		item->size,
 		0,
 		layout,
-		CUSTOM_EDITION_TAG_CACHE_ADDRESS + offset,
+		tag_cache_address + offset,
 		0);
 	if (status == _cache_file_status_ok && layout == &font_layout)
 	{
@@ -1531,7 +1539,7 @@ static enum cache_file_status resource_tag_load(
 	}
 	if (status == _cache_file_status_ok)
 	{
-		write_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET, CUSTOM_EDITION_TAG_CACHE_ADDRESS + offset);
+		write_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET, tag_cache_address + offset);
 		state->report->resource_tag_counts[type]++;
 	}
 
@@ -1616,7 +1624,7 @@ static enum cache_file_status resource_sound_load(
 			data_bytes,
 			(uint32_t)pitch_range_index * SOUND_PITCH_RANGE_BYTES,
 			&sound_pitch_range_layout,
-			CUSTOM_EDITION_TAG_CACHE_ADDRESS + offset,
+			tag_cache_address + offset,
 			1);
 		if (status != _cache_file_status_ok)
 		{
@@ -1625,7 +1633,7 @@ static enum cache_file_status resource_sound_load(
 	}
 	if (pitch_range_count)
 	{
-		write_u32(pitch_ranges_field + TAG_BLOCK_ADDRESS_OFFSET, CUSTOM_EDITION_TAG_CACHE_ADDRESS + offset);
+		write_u32(pitch_ranges_field + TAG_BLOCK_ADDRESS_OFFSET, tag_cache_address + offset);
 		state->report->relocated_pointer_count++;
 	}
 	state->report->resource_tag_counts[_resource_map_sounds]++;
@@ -1869,8 +1877,8 @@ static enum cache_file_status structure_bsps_verify(
 		if (file_offset < CACHE_FILE_HEADER_BYTES ||
 			size < STRUCTURE_BSP_HEADER_BYTES ||
 			!range_fits((uint32_t)file_offset, (uint32_t)size, state->file_length) ||
-			bsp_address < CUSTOM_EDITION_TAG_CACHE_ADDRESS + state->used_bytes ||
-			!range_fits(bsp_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS, (uint32_t)size, tag_cache_bytes))
+			bsp_address < tag_cache_address + state->used_bytes ||
+			!range_fits(bsp_address - tag_cache_address, (uint32_t)size, tag_cache_bytes))
 		{
 			return load_fail(state, _cache_file_status_bad_structure_bsp_range, (uint32_t)file_offset);
 		}
@@ -1905,9 +1913,9 @@ static enum cache_file_status structure_bsps_verify(
 		{
 			state->report->largest_structure_bsp_bytes = (uint32_t)size;
 		}
-		if (bsp_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS < state->usable_bytes)
+		if (bsp_address - tag_cache_address < state->usable_bytes)
 		{
-			state->usable_bytes = bsp_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+			state->usable_bytes = bsp_address - tag_cache_address;
 			state->report->lowest_structure_bsp_address = bsp_address;
 		}
 		/* OpenSauce's CalculateChecksum takes the structure BSPs as packed
@@ -2112,7 +2120,27 @@ void resource_map_close(
 	return;
 }
 
+static enum cache_file_status custom_edition_cache_load_linked(
+	struct cache_file_source *map,
+	struct resource_map *const resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES],
+	uint8_t *tag_cache,
+	uint32_t tag_cache_bytes,
+	struct custom_edition_load_report *report);
+
 enum cache_file_status custom_edition_cache_load(
+	struct cache_file_source *map,
+	struct resource_map *const resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES],
+	uint8_t *tag_cache,
+	uint32_t tag_cache_bytes,
+	struct custom_edition_load_report *report)
+{
+	/* (the cache's own pointers point where its tags are linked to) */
+	tag_cache_address = CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+
+	return custom_edition_cache_load_linked(map, resource_maps, tag_cache, tag_cache_bytes, report);
+}
+
+static enum cache_file_status custom_edition_cache_load_linked(
 	struct cache_file_source *map,
 	struct resource_map *const resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES],
 	uint8_t *tag_cache,
@@ -2487,7 +2515,7 @@ void *custom_edition_cache_block_element(
 	if ((uint8_t const *)block < tag_cache ||
 		!range_fits((uint32_t)((uint8_t const *)block - tag_cache), TAG_BLOCK_BYTES, loaded_bytes) ||
 		element_bytes == 0 ||
-		!loaded_block_get(block, CUSTOM_EDITION_TAG_CACHE_ADDRESS, loaded_bytes, element_bytes, &element_count, &elements_offset) ||
+		!loaded_block_get(block, tag_cache_address, loaded_bytes, element_bytes, &element_count, &elements_offset) ||
 		element_index < 0 ||
 		element_index >= element_count)
 	{
@@ -2642,7 +2670,7 @@ static void bitmaps_prepare(
 
 	if (!loaded_block_get(
 		state->tag_cache + group_offset + BITMAP_GROUP_BITMAPS_OFFSET,
-		CUSTOM_EDITION_TAG_CACHE_ADDRESS,
+		tag_cache_address,
 		state->used_bytes,
 		BITMAP_DATA_BYTES,
 		&bitmap_count,
@@ -2687,7 +2715,7 @@ static void sound_prepare(
 
 	if (!loaded_block_get(
 		sound + SOUND_PITCH_RANGES_OFFSET,
-		CUSTOM_EDITION_TAG_CACHE_ADDRESS,
+		tag_cache_address,
 		state->used_bytes,
 		SOUND_PITCH_RANGE_BYTES,
 		&pitch_range_count,
@@ -2704,7 +2732,7 @@ static void sound_prepare(
 
 		if (!loaded_block_get(
 			pitch_range + SOUND_PITCH_RANGE_PERMUTATIONS_OFFSET,
-			CUSTOM_EDITION_TAG_CACHE_ADDRESS,
+			tag_cache_address,
 			state->used_bytes,
 			SOUND_PERMUTATION_BYTES,
 			&permutation_count,
@@ -2754,7 +2782,7 @@ static void animation_graph_overlays_repair(
 
 	if (!loaded_block_get(
 		graph + ANIMATION_GRAPH_OBJECT_OVERLAYS_OFFSET,
-		CUSTOM_EDITION_TAG_CACHE_ADDRESS,
+		tag_cache_address,
 		state->used_bytes,
 		ANIMATION_GRAPH_OBJECT_OVERLAY_BYTES,
 		&overlay_count,
@@ -2872,7 +2900,7 @@ static void hud_placement_block_convert(
 	uint32_t elements_offset;
 	int32_t element_index;
 
-	if (!loaded_block_get(block, CUSTOM_EDITION_TAG_CACHE_ADDRESS, state->used_bytes, element_bytes, &element_count, &elements_offset))
+	if (!loaded_block_get(block, tag_cache_address, state->used_bytes, element_bytes, &element_count, &elements_offset))
 	{
 		return;
 	}
@@ -2900,7 +2928,7 @@ static void weapon_hud_items_convert(
 
 	if (!loaded_block_get(
 		block,
-		CUSTOM_EDITION_TAG_CACHE_ADDRESS,
+		tag_cache_address,
 		state->used_bytes,
 		WEAPON_HUD_CROSSHAIRS_OR_OVERLAYS_BYTES,
 		&element_count,
@@ -3042,7 +3070,7 @@ static void multiplayer_score_hint_convert(
 
 	if (!loaded_block_get(
 			state->tag_cache + string_list_offset + UNICODE_STRING_LIST_STRINGS_OFFSET,
-			CUSTOM_EDITION_TAG_CACHE_ADDRESS,
+			tag_cache_address,
 			state->used_bytes,
 			TAG_DATA_BYTES,
 			&string_count,
@@ -3277,4 +3305,16 @@ void custom_edition_cache_combine_resource_offsets(
 	}
 
 	return;
+}
+
+void custom_edition_cache_tags_moved(
+	uint32_t address)
+{
+	tag_cache_address = address;
+}
+
+uint32_t custom_edition_cache_linked_address(
+	void)
+{
+	return CUSTOM_EDITION_TAG_CACHE_ADDRESS;
 }

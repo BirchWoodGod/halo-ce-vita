@@ -15,6 +15,14 @@ custom_edition_geometry.c convert the rest with the game's own functions.
 Every read the game makes of the map (structure BSPs, bitmap pixels, sound
 samples) is served from the map, bitmaps.map or sounds.map according to
 where its offset falls in their combined offset space.
+
+A process that cannot have its tag cache at 0x40440000 (the Vita, whose
+user memory starts higher) loads the tags into memory of its own instead:
+cache_file_formats.c works on any copy of the tag cache, and once it and
+the game's own conversions are done, the tags' pointers are moved to where
+the copy is (port/linux/src/tag_relocate.c, with this build's tag layouts,
+which the converted tags now have), as is each structure BSP when it is
+read.
 */
 
 /* ---------- headers */
@@ -27,6 +35,9 @@ where its offset falls in their combined offset space.
 #include "scenario/scenario_definitions.h"
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+#include "tag_relocate.h"
+#endif
 
 #include <stdlib.h>
 
@@ -68,6 +79,10 @@ struct custom_edition_cache_globals
 	struct custom_edition_file resource_files[NUMBER_OF_RESOURCE_MAP_TYPES];
 	struct resource_map resource_map_storage[NUMBER_OF_RESOURCE_MAP_TYPES];
 	struct resource_map *resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES];
+	/* the port reads from the tick thread (sounds, the textures it
+	predicts) and the render thread (textures) at once: the streams and the
+	staging buffer are taken under this */
+	volatile int read_lock;
 	byte read_staging[READ_STAGING_BYTES];
 };
 
@@ -238,6 +253,7 @@ build's: their resource offsets combined, their bytes converted, their
 bitmaps checked, their models converted. */
 static boolean custom_edition_cache_tags_convert(
 	uint8_t *tag_cache,
+	uint32_t tag_cache_bytes,
 	struct custom_edition_load_report const *report)
 {
 	uint32_t loaded_bytes = report->tag_data_bytes + report->resource_tag_bytes;
@@ -292,6 +308,28 @@ static boolean custom_edition_cache_tags_convert(
 		error(_error_silent, "custom edition: the multiplayer score hint names the BACK button where Halo PC names a key");
 	}
 
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+	/* The tags, in this build's layouts now but for the models (whose
+	Custom Edition layout the walk knows too), moved to where they are
+	before the game's own code below reads them through their pointers */
+	if ((uint32_t)(unsigned long)tag_cache != custom_edition_cache_linked_address())
+	{
+		if (!halo_tag_relocate_linked_tags(tag_cache, loaded_bytes, custom_edition_cache_linked_address(), tag_cache_bytes))
+		{
+			error(_error_silent, "custom edition: out of memory moving the tags");
+			return FALSE;
+		}
+		custom_edition_cache_tags_moved((uint32_t)(unsigned long)tag_cache);
+		error(
+			_error_silent,
+			"custom edition: tags moved from 0x%08lX to %p",
+			(unsigned long)custom_edition_cache_linked_address(),
+			tag_cache);
+	}
+#else
+	(void)tag_cache_bytes;
+#endif
+
 	return custom_edition_bitmaps_verify(tag_cache, loaded_bytes) &&
 		custom_edition_reordered_bitmaps_find(tag_cache, loaded_bytes) &&
 		custom_edition_scripts_convert(tag_cache, loaded_bytes) &&
@@ -309,7 +347,7 @@ static boolean custom_edition_cache_identify(
 	struct custom_edition_file file;
 	boolean identified = FALSE;
 
-	if (!halo_custom_edition_tag_cache() ||
+	if (!halo_custom_edition_enabled() ||
 		!custom_edition_map_path(map_name, path) ||
 		!custom_edition_file_open(&file, path))
 	{
@@ -429,7 +467,8 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	void *header)
 {
 	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
-	uint8_t *tag_cache = halo_custom_edition_tag_cache();
+	uint8_t *tag_cache;
+	uint32_t tag_cache_bytes;
 	struct custom_edition_load_report report;
 	struct cache_file_identity identity;
 	char path[MAP_PATH_SIZE];
@@ -437,7 +476,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	short type;
 
 	assert(!globals->tags_loaded);
-	if (!tag_cache || !custom_edition_map_path(map_name, path) || !custom_edition_file_open(&globals->map, path))
+	if (!custom_edition_map_path(map_name, path) || !custom_edition_file_open(&globals->map, path))
 	{
 		error(_error_silent, "custom edition: cannot open the map '%s'", map_name);
 		return NULL;
@@ -456,6 +495,26 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		path,
 		identity.build,
 		identity.has_opensauce_header ? ", OpenSauce" : "");
+	/* the tag cache the map's tags are linked to the start of: at
+	0x40440000 when the platform has it there, else elsewhere and moved
+	below */
+	tag_cache_bytes = custom_edition_tag_cache_bytes(&identity);
+	tag_cache = halo_custom_edition_tag_cache_acquire(tag_cache_bytes);
+	if (!tag_cache)
+	{
+		error(_error_silent, "custom edition: no room for the 0x%lX byte tag cache of '%s'", (unsigned long)tag_cache_bytes, path);
+		custom_edition_cache_files_close();
+		return NULL;
+	}
+#ifndef HALO_RELOCATABLE_TAG_CACHE
+	if ((uint32_t)(unsigned long)tag_cache != custom_edition_cache_linked_address())
+	{
+		error(_error_silent, "custom edition: this build cannot move the tags of '%s' off 0x40440000", path);
+		halo_custom_edition_tag_cache_release();
+		custom_edition_cache_files_close();
+		return NULL;
+	}
+#endif
 
 	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES; type++)
 	{
@@ -495,7 +554,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		&globals->map.source,
 		globals->resource_maps,
 		tag_cache,
-		CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED,
+		tag_cache_bytes,
 		&report);
 	if (status != _cache_file_status_ok)
 	{
@@ -506,15 +565,21 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 			cache_file_status_describe(status),
 			(long)report.problem_tag_index,
 			(unsigned long)report.problem_location);
+		halo_custom_edition_tag_cache_release();
 		custom_edition_cache_files_close();
 		return NULL;
 	}
 	custom_edition_cache_report_log(&report);
-	if (!custom_edition_cache_tags_convert(tag_cache, &report))
+	if (!custom_edition_cache_tags_convert(tag_cache, tag_cache_bytes, &report))
 	{
 		error(_error_silent, "custom edition: cannot run '%s'", path);
 		custom_edition_models_dispose();
 		custom_edition_bitmaps_dispose();
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+		halo_tag_relocate_linked_release();
+#endif
+		custom_edition_cache_tags_moved(custom_edition_cache_linked_address());
+		halo_custom_edition_tag_cache_release();
 		custom_edition_cache_files_close();
 		return NULL;
 	}
@@ -543,6 +608,28 @@ void custom_edition_cache_tags_unload(
 	custom_edition_cache_globals.tags_loaded = FALSE;
 	custom_edition_cache_globals.tag_cache = NULL;
 	custom_edition_cache_globals.loaded_bytes = 0;
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+	halo_tag_relocate_linked_release();
+#endif
+	custom_edition_cache_tags_moved(custom_edition_cache_linked_address());
+	halo_custom_edition_tag_cache_release();
+
+	return;
+}
+
+void custom_edition_cache_structure_bsp_moved(
+	void *structure_bsp,
+	long size)
+{
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+
+	if (globals->tags_loaded &&
+		(uint32_t)(unsigned long)globals->tag_cache != custom_edition_cache_linked_address())
+	{
+		halo_tag_relocate_linked_structure_bsp(globals->tag_cache, structure_bsp, (unsigned long)size);
+	}
+#endif
 
 	return;
 }
@@ -575,9 +662,12 @@ void custom_edition_cache_read(
 		file_offset = (unsigned long)offset;
 	}
 
-	/* the game reads its map from its main thread only (scenario and
-	structure BSP loading, the texture and sound caches), so the streams and
-	the staging buffer need no lock */
+	/* (January read its map from its main thread only; the port's tick
+	and render threads both read: read_lock) */
+	while (__atomic_exchange_n(&globals->read_lock, 1, __ATOMIC_ACQUIRE))
+	{
+		SwitchToThread();
+	}
 	read = file->stream && size >= 0;
 	for (read_bytes = 0; read && read_bytes < size; read_bytes += READ_STAGING_BYTES)
 	{
@@ -603,6 +693,7 @@ void custom_edition_cache_read(
 	{
 		custom_edition_bitmap_pixels_arrived(globals->tag_cache, globals->loaded_bytes, tag_index, offset, buffer);
 	}
+	__atomic_store_n(&globals->read_lock, 0, __ATOMIC_RELEASE);
 
 	return;
 }

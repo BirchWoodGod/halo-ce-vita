@@ -177,6 +177,25 @@ void *vita_host_arena(unsigned long *size)
 	return arena;
 }
 
+void *vita_host_block_alloc(const char *name, unsigned long size, int *uid)
+{
+	SceUID block = sceKernelAllocMemBlock(name, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, size, NULL);
+	void *base = NULL;
+
+	vita_host_log_memory("before a memory block");
+	if (block < 0)
+		return NULL;
+	sceKernelGetMemBlockBase(block, &base);
+	*uid = block;
+	return base;
+}
+
+void vita_host_block_free(int uid)
+{
+	if (uid >= 0)
+		sceKernelFreeMemBlock(uid);
+}
+
 unsigned long long vita_host_time_us(void)
 {
 	return sceKernelGetProcessTimeWide();
