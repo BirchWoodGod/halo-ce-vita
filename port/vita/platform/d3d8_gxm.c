@@ -2150,6 +2150,9 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		DWORD state[6];
 		unsigned long levels;
 	} sampled_key[D3DTSS_MAXSTAGES];
+	/* the render targets the stages sample (their scenes are waited for:
+	vgxm_note_sampled_target) */
+	unsigned long sampled_targets[D3DTSS_MAXSTAGES] = { 0 };
 	int stage;
 
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
@@ -2190,6 +2193,7 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		if (target)
 		{
 			target->last_used = device.frame + 1;
+			sampled_targets[stage] = target->id;
 			xgpu_texture_describe(header[3], header[4], &description);
 			{
 				/* (HALO_TARGET_CHAIN=0: level 0 only, as before) */
@@ -2309,6 +2313,9 @@ static void bind_recorded_textures(struct render_command *command, float texture
 			command->key.volume_width_log2[stage] = width;
 		}
 	}
+	if (!command->skip)
+		for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+			vgxm_note_sampled_target(sampled_targets[stage]);
 }
 
 /* HALO_DRAW_PROFILE=1: where a draw's CPU goes, on the game thread (the
