@@ -58,13 +58,13 @@ Beta 1 is out; beta 2 fixes most of what testers reported:
   joiner scans it with the Vita's camera.
 - **A relay** for networks that cannot connect to each other directly.
 - **A steady 30 fps**, including the biggest fights.
+- **Campaign co-op over the network**: play the campaign together on two
+  Vitas over Wi-Fi, online or ad hoc, built on halo-ce-universal's network
+  co-op (the Xbox only had split-screen co-op on one console).
 - **Custom maps**: play community-made maps, including PC Halo CE maps converted for the Xbox engine, in multiplayer and the campaign menus.
 
 ## Later
 
-- **Campaign co-op over the network**: play the campaign together on two
-  Vitas, online or ad hoc. The Xbox game only had split-screen co-op on
-  one console, so this is new work for the port.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
 ## Help wanted
