@@ -237,6 +237,8 @@ void particles_initialize(
 	render_particles sizes its unchecked list of visible particles by the same
 	value */
 	particle_data = game_state_data_new("particle", HALO_PORT_MAXIMUM_PARTICLES, 0x70);
+	/* (the Xbox's 1024 in a local game) */
+	halo_data_set_local_limit(particle_data, 1024);
 #else
 	particle_data = game_state_data_new("particle", 1024, 0x70);
 #endif

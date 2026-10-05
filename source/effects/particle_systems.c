@@ -216,6 +216,11 @@ void particle_systems_initialize(
 {
 	particle_systems = game_state_data_new("particle systems", MAXIMUM_PARTICLE_SYSTEMS, PARTICLE_SYSTEM_DATUM_SIZE);
 	system_particles = game_state_data_new("particle system particles", MAXIMUM_SYSTEM_PARTICLES, SYSTEM_PARTICLE_DATUM_SIZE);
+#ifdef HALO_LINUX
+	/* (the Xbox's sizes in a local game) */
+	halo_data_set_local_limit(particle_systems, 64);
+	halo_data_set_local_limit(system_particles, 512);
+#endif
 
 	return;
 }

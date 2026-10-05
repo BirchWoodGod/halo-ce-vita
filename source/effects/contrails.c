@@ -198,6 +198,9 @@ void contrails_initialize(
 	/* the native builds' larger contrail pools (halo_port_capacity.h) */
 	contrail_data = game_state_data_new("contrail", HALO_PORT_MAXIMUM_CONTRAILS, 0x44);
 	contrail_point_data = game_state_data_new("contrail point", MAXIMUM_CONTRAIL_POINTS, 0x38);
+	/* (the Xbox's sizes in a local game) */
+	halo_data_set_local_limit(contrail_data, 256);
+	halo_data_set_local_limit(contrail_point_data, 1024);
 #else
 	contrail_data = game_state_data_new("contrail", 256, 0x44);
 	contrail_point_data = game_state_data_new("contrail point", 1024, 0x38);

@@ -61,6 +61,11 @@ struct data_array *data_new(const char *name, short maximum_count, short size);
 void data_dispose(struct data_array *data);
 void data_make_invalid(struct data_array *data);
 long datum_new_at_index(struct data_array *data, long index);
+#ifdef HALO_LINUX
+/* (port) in a local game, new datums only below limit, as in an array of
+that size (data.c datum_new_limit) */
+void halo_data_set_local_limit(struct data_array *data, short limit);
+#endif
 long datum_new(struct data_array *data);
 void datum_delete(struct data_array *data, long index);
 void data_delete_all(struct data_array *data);
