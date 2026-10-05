@@ -25,6 +25,7 @@ memory_watch.c detects that by write-protecting the pages.
 #include "vita_xgpu.h"
 #include "vita_gxm.h"
 #include "port_config.h"
+#include "../../linux/game/cache_file_formats.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -693,6 +694,9 @@ static void *pool_alloc(unsigned long size)
 }
 
 /* decodes the texture at base into the pool; FALSE if it cannot be */
+static unsigned char custom_edition_texels_order(unsigned long address);
+static void custom_edition_texels_reorder(unsigned long *texels, unsigned long count, unsigned char order);
+
 static BOOL texture_build(struct texture_entry *entry, const unsigned char *base, const D3DCOLOR *palette)
 {
 	const struct xgpu_texture_description *description = &entry->description;
@@ -702,6 +706,9 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 	unsigned long *scratch;
 	unsigned char *memory;
 	unsigned long size;
+	/* (a Custom Edition map's multipurpose maps and HUD meters: decoded and
+	reordered, below) */
+	unsigned char channel_order = custom_edition_texels_order(entry->address);
 
 	if (description->cube_map)
 	{
@@ -801,7 +808,8 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 			width, height, cube_debug == 1 ? 1 : original_levels) == 0;
 	}
 
-	if (description->compressed && power_of_two(width) && power_of_two(height) && width >= 4 && height >= 4)
+	if (description->compressed && power_of_two(width) && power_of_two(height) && width >= 4 && height >= 4 &&
+		channel_order == _custom_edition_channels_xbox)
 	{
 		unsigned long block_bytes = information.bytes;
 		unsigned long format = information.kind == _texel_dxt1 ? _vgxm_texture_dxt1 :
@@ -944,6 +952,8 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				dxt_decode_level(information.kind, source, level_width, level_height, 1, scratch);
 			else
 				decode_level(description, level, source, palette, scratch);
+			if (channel_order != _custom_edition_channels_xbox)
+				custom_edition_texels_reorder(scratch, level_width * level_height, channel_order);
 			/* (a volume texture keeps its first slice: GXM has none) */
 			for (row = 0; row < level_height; row++)
 				memcpy(destination + row * LINEAR_ROW(level_width) * 4, scratch + row * level_width, level_width * 4);
@@ -1183,23 +1193,127 @@ void vita_texture_cache_begin_frame(void)
 /* ---------- Custom Edition channel orders
 
 A Halo Custom Edition map keeps a model shader's multipurpose masks and a
-HUD meter's channels where Halo PC reads them (port/linux/game/
-custom_edition_bitmaps.c tells which texels are which). The OpenGL renderer
-samples them in this build's order with a texture swizzle
-(port/linux/src/xbox_textures.c); the Vita's does not yet, so they are drawn
-with Halo PC's channel order: wrong specular, self-illumination and color
-change masks on some models, and meters that fill wrongly. */
+HUD meter's channels where Halo PC reads them; the map loading says which
+texels hold which order as they arrive (port/linux/game/
+custom_edition_bitmaps.c). The OpenGL renderer samples such textures with a
+texture swizzle (port/linux/src/xbox_textures.c); here they are decoded to
+BGRA - DXT ones too, rather than kept compressed - with their channels moved
+to where this build reads them (texture_build). Addresses stay listed until
+other texels arrive there or the map goes. The loading (the tick or render
+thread) and the worker's decoding share the list under a lock. */
 
-static unsigned long custom_edition_channel_requests;
+/* for each order, the channel (red, green, blue, alpha) of the texels each
+channel is taken from (as xbox_textures.c) */
+static const unsigned char custom_edition_channel_sources[NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS][4] =
+{
+	{ 0, 1, 2, 3 },
+	/* specular, self-illumination, color change and the auxiliary mask */
+	{ 2, 1, 3, 0 },
+	/* the fill order in color, the shape in alpha */
+	{ 3, 3, 3, 0 },
+};
+
+#define MAXIMUM_CUSTOM_EDITION_TEXELS 512
+
+static struct
+{
+	unsigned long address;
+	unsigned char channel_order;
+} custom_edition_texels[MAXIMUM_CUSTOM_EDITION_TEXELS];
+static unsigned long custom_edition_texel_count;
+static volatile int custom_edition_texels_lock;
+
+static void custom_edition_texels_take(void)
+{
+	while (__atomic_exchange_n(&custom_edition_texels_lock, 1, __ATOMIC_ACQUIRE))
+		;
+}
+
+static void custom_edition_texels_give(void)
+{
+	__atomic_store_n(&custom_edition_texels_lock, 0, __ATOMIC_RELEASE);
+}
+
+static unsigned char custom_edition_texels_order(unsigned long address)
+{
+	unsigned char order = _custom_edition_channels_xbox;
+	unsigned long index;
+
+	if (!custom_edition_texel_count)
+		return order;
+	custom_edition_texels_take();
+	for (index = 0; index < custom_edition_texel_count; index++)
+	{
+		if (custom_edition_texels[index].address == address)
+		{
+			order = custom_edition_texels[index].channel_order;
+			break;
+		}
+	}
+	custom_edition_texels_give();
+	return order;
+}
+
+/* the texels' channels (BGRA words, ARGB: alpha in the top byte) moved to
+where this build reads them */
+static void custom_edition_texels_reorder(unsigned long *texels, unsigned long count, unsigned char order)
+{
+	const unsigned char *sources = custom_edition_channel_sources[order];
+	/* the byte shift of red, green, blue and alpha in an ARGB word */
+	static const unsigned char shifts[4] = { 16, 8, 0, 24 };
+	unsigned long index;
+
+	for (index = 0; index < count; index++)
+	{
+		unsigned long texel = texels[index], reordered = 0, channel;
+
+		for (channel = 0; channel < 4; channel++)
+			reordered |= ((texel >> shifts[sources[channel]]) & 0xFF) << shifts[channel];
+		texels[index] = reordered;
+	}
+}
 
 void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order)
 {
-	(void)texels;
-	if (channel_order && !custom_edition_channel_requests++)
-		platform_log("custom edition: the Vita renderer keeps Halo PC's channel order of multipurpose maps and meters");
+	unsigned long address = (unsigned long)texels;
+	unsigned long index;
+
+	if (channel_order >= NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS)
+		channel_order = _custom_edition_channels_xbox;
+	custom_edition_texels_take();
+	for (index = 0; index < custom_edition_texel_count && custom_edition_texels[index].address != address; index++)
+	{
+	}
+	if (index < custom_edition_texel_count)
+	{
+		if (channel_order == _custom_edition_channels_xbox)
+			custom_edition_texels[index] = custom_edition_texels[--custom_edition_texel_count];
+		else
+			custom_edition_texels[index].channel_order = channel_order;
+	}
+	else if (channel_order != _custom_edition_channels_xbox)
+	{
+		if (custom_edition_texel_count < MAXIMUM_CUSTOM_EDITION_TEXELS)
+		{
+			custom_edition_texels[custom_edition_texel_count].address = address;
+			custom_edition_texels[custom_edition_texel_count].channel_order = channel_order;
+			custom_edition_texel_count++;
+		}
+		else
+		{
+			static int warned;
+
+			if (!warned++)
+				platform_log("custom edition: more than %d reordered textures; the rest keep Halo PC's channel order",
+					MAXIMUM_CUSTOM_EDITION_TEXELS);
+		}
+	}
+	custom_edition_texels_give();
 }
 
 void halo_custom_edition_texels_forget(void)
 {
-	custom_edition_channel_requests = 0;
+	custom_edition_texels_take();
+	custom_edition_texel_count = 0;
+	custom_edition_texels_give();
 }
