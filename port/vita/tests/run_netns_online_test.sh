@@ -25,6 +25,14 @@
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   solo     online off (the Vita's default): one copy hosts Blood Gulch
 #            alone; there must be no p2p thread, and the game must run
+#   coop     co-op over the network: the host hosts a campaign level
+#            (HALO_TEST_COOP_LEVEL, a10 by default) as the Vita's settings
+#            panel does (HALO_NET_COOP_LEVEL), the joiner joins its code
+#            (online; HALO_TEST_COOP_LAN=1: system link on one LAN, online
+#            off); each copy runs its HALO_TEST_COOP_HOST_COMMANDS /
+#            HALO_TEST_COOP_JOIN_COMMANDS (main.c's HALO_TEST_COMMANDS: skip
+#            votes, loading zones, kills, game_won); the logs are checked by
+#            the caller
 #
 #   HALO_TEST_VITA   the Linux build on the Vitas' side (configure.py
 #                    --linux-net-vita): build/linux/halo of this tree
@@ -271,6 +279,41 @@ adhoc)
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
 	;;
+coop)
+	level=${HALO_TEST_COOP_LEVEL:-a10}
+	coop_host="HALO_NET_COOP_LEVEL=$level HALO_NETWORK_TEST=host:$level HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look"
+	if [ "${HALO_TEST_COOP_LAN:-0}" = 1 ]; then
+		holder; lan=$held
+		in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+		in_ns "$host_router" ip link set m2_host netns "$lan"
+		in_ns "$host_router" ip link set l2_host master b_host
+		in_ns "$host_router" ip link set l2_host up
+		in_ns "$lan" ip link set lo up
+		in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+		in_ns "$lan" ip link set m2_host up
+		in_ns "$lan" ip route add default via 192.168.1.1
+		run_copy host "$host_machine" "$vita" "$cpu_a" $coop_host HALO_NET_ONLINE=false \
+			"HALO_TEST_COMMANDS=${HALO_TEST_COOP_HOST_COMMANDS:-}"; host_pid=$last_pid
+		sleep 5
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_TEST_INPUT=bot:2:look "HALO_TEST_COMMANDS=${HALO_TEST_COOP_JOIN_COMMANDS:-}"; join_pid=$last_pid
+	else
+		run_copy host "$host_machine" "$vita" "$cpu_a" $coop_host HALO_NET_ONLINE=true \
+			"HALO_TEST_COMMANDS=${HALO_TEST_COOP_HOST_COMMANDS:-}"; host_pid=$last_pid
+		code=$(wait_code)
+		[ -n "$code" ] || { fail "the host never showed a code"; exit 1; }
+		echo "host's code: $code"
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_TEST_INPUT=bot:2:look "HALO_TEST_COMMANDS=${HALO_TEST_COOP_JOIN_COMMANDS:-}"; join_pid=$last_pid
+	fi
+	wait $join_pid $host_pid 2>/dev/null
+	grep -a "co-op" "$out/host/data/debug.txt" | head -40 > "$out/host.summary"
+	grep -a "co-op" "$out/joiner/data/debug.txt" | head -40 > "$out/joiner.summary"
+	echo "--- host"; cat "$out/host.summary"
+	echo "--- joiner"; cat "$out/joiner.summary"
+	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+	echo "joiner's seconds with both players alive: $two"
+	;;
 solo)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=local:bloodgulch \
 		HALO_NETWORK_TEST_START=10 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
@@ -282,7 +325,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|lan|pc|pchost|adhoc|solo" >&2
+	echo "usage: $0 code|lobby|lan|pc|pchost|adhoc|solo|coop" >&2
 	exit 2
 	;;
 esac

@@ -3657,6 +3657,9 @@ char halo_screenshot_name[64];
 
 static void main_test_camera(char const *arguments);
 static void main_test_trigger_volume(char const *name);
+static void main_test_bsp_switch_trigger(char const *arguments);
+/* damage.c's */
+void damage_kill_object_for_player(long object_index, long player_index);
 
 static void main_test_commands_update(
 	void)
@@ -3723,6 +3726,60 @@ static void main_test_commands_update(
 			main_test_camera(commands[index].command + 8);
 		else if (!strncmp(commands[index].command, "@tv ", 4))
 			main_test_trigger_volume(commands[index].command + 4);
+		/* network co-op (port/linux/game/network_coop.c): "@vote" is this
+		machine's press of skip in a cinematic; "@bsp P K" stands player P
+		(its absolute index, -1 every player) in the Kth of the loaded BSP's
+		switch trigger volumes; "@kill P" kills player P */
+		else if (!strcmp(commands[index].command, "@vote"))
+		{
+			platform_log("test command: skip pressed (offered %d, skippable %d)", network_coop_skip_offered(),
+				cinematic_can_be_skipped());
+			if ((cinematic_can_be_skipped() || network_coop_skip_offered()) && !network_coop_vote_skip())
+				main_skip_cinematic();
+		}
+		else if (!strncmp(commands[index].command, "@bsp ", 5))
+			main_test_bsp_switch_trigger(commands[index].command + 5);
+		else if (!strcmp(commands[index].command, "@bsplist"))
+			main_test_bsp_switch_trigger("-2 -1");
+		/* "@pos P X Y Z": player P stands there */
+		else if (!strncmp(commands[index].command, "@pos ", 5))
+		{
+			long player_absolute_index = NONE;
+			real_point3d position;
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			if (sscanf(commands[index].command + 5, "%ld %f %f %f", &player_absolute_index, &position.x, &position.y,
+				&position.z) == 4)
+			{
+				data_iterator_new(&iterator, player_data);
+				while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+				{
+					if (DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index &&
+						player->unit_index != NONE)
+					{
+						object_set_position(player->unit_index, &position, NULL, NULL);
+					}
+				}
+			}
+		}
+		else if (!strncmp(commands[index].command, "@kill ", 6))
+		{
+			long player_absolute_index = atol(commands[index].command + 6);
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			data_iterator_new(&iterator, player_data);
+			while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+			{
+				if (DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index &&
+					player->unit_index != NONE)
+				{
+					platform_log("test command: player %ld killed", player_absolute_index);
+					damage_kill_object_for_player(player->unit_index, NONE);
+				}
+			}
+		}
 		else
 			hs_compile_and_evaluate(commands[index].command);
 	}
@@ -3775,6 +3832,78 @@ static void main_test_trigger_volume(
 		return;
 	}
 	platform_log("test command: no trigger volume %s", name);
+}
+
+/* "@bsp P K": player P (-1 every player) stands in the middle of the Kth
+switch trigger volume whose source is the loaded structure BSP (a
+scenario's block of them, as players.c has it) */
+struct main_test_bsp_switch_trigger_volume
+{
+	short trigger_volume_index;
+	short source_structure_bsp_index;
+	short destination_structure_bsp_index;
+	short cutscene_flag_index;
+};
+
+static void main_test_bsp_switch_trigger(
+	char const *arguments)
+{
+	struct scenario *scenario = global_scenario_get();
+	long player_absolute_index = NONE;
+	int wanted = 0;
+	short index;
+	int found = 0;
+
+	sscanf(arguments, "%ld %d", &player_absolute_index, &wanted);
+	for (index = 0; index < scenario->bsp_switch_trigger_volumes.count; index++)
+	{
+		struct main_test_bsp_switch_trigger_volume *switch_volume = TAG_BLOCK_GET_ELEMENT(
+			&scenario->bsp_switch_trigger_volumes, index, struct main_test_bsp_switch_trigger_volume);
+		struct scenario_trigger_volume *volume;
+		real_point3d centre;
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		if (player_absolute_index != -2 &&
+			(switch_volume->source_structure_bsp_index != global_structure_bsp_index_get() || found++ != wanted))
+		{
+			continue;
+		}
+		volume = TAG_BLOCK_GET_ELEMENT(&scenario->trigger_volumes, switch_volume->trigger_volume_index,
+			struct scenario_trigger_volume);
+		if (volume->type == _scenario_trigger_volume_type_axis_aligned)
+		{
+			centre.x = (volume->bounds.x0 + volume->bounds.x1) / 2.0f;
+			centre.y = (volume->bounds.y0 + volume->bounds.y1) / 2.0f;
+			centre.z = (volume->bounds.z0 + volume->bounds.z1) / 2.0f;
+		}
+		else
+		{
+			real_matrix4x3 matrix;
+			real_point3d middle = { volume->extents.i / 2.0f, volume->extents.j / 2.0f, volume->extents.k / 2.0f };
+
+			matrix4x3_from_point_and_vectors(&matrix, &volume->position, &volume->forward, &volume->up);
+			matrix4x3_transform_point(&matrix, &middle, &centre);
+		}
+		platform_log("test command: BSP switch trigger %d (%s, BSP %d to %d) at %.2f %.2f %.2f for player %ld", index,
+			volume->name, (int)switch_volume->source_structure_bsp_index,
+			(int)switch_volume->destination_structure_bsp_index, centre.x, centre.y, centre.z, player_absolute_index);
+		/* ("@bsplist": every one listed, nobody moved) */
+		if (player_absolute_index == -2)
+			continue;
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (player->unit_index != NONE && (player_absolute_index == NONE ||
+				DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index))
+			{
+				object_set_position(player->unit_index, &centre, NULL, NULL);
+			}
+		}
+		return;
+	}
+	if (player_absolute_index != -2)
+		platform_log("test command: no BSP switch trigger %d from BSP %d", wanted, (int)global_structure_bsp_index_get());
 }
 
 static void main_test_camera(
