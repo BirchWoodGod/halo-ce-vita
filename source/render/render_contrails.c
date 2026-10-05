@@ -261,13 +261,23 @@ void render_contrail(
 
 #ifdef HALO_LINUX
 				/* (port) the contrail's object may be gone since the tick
-				(render_epoch.h): no tint this frame */
-				if (contrail->object_index != NONE && object_try_and_get(contrail->object_index))
+				(render_epoch.h): no tint this frame. The one lookup: the
+				running tick can delete it between a check and a second
+				object_get, which then gave NULL (a segfault at 0x8 in the
+				b30 harness, a Covenant projectile's contrail) */
+				struct object_datum *contrail_object = contrail->object_index != NONE ?
+					object_try_and_get(contrail->object_index) : NULL;
+
+				if (contrail_object)
 #else
 				if (contrail->object_index != NONE)
 #endif
 				{
+#ifdef HALO_LINUX
+					struct object_datum *object = contrail_object;
+#else
 					struct object_datum *object = object_get(contrail->object_index);
+#endif
 					struct object_definition *object_definition = object_definition_get(object->definition_index);
 					struct object_attachment_definition *attachment = TAG_BLOCK_GET_ELEMENT(
 						&object_definition->object.attachments,
