@@ -361,16 +361,102 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 	return 0;
 }
 
+/* The scenes the Vita's renderer would begin for the draws and clears
+(vita_gxm.c scene_ensure, with HALO_GXM_RTT_SYNC and HALO_GXM_SCENE_DRAWS
+at their defaults): counted, with the scenes that wait for the scenes
+before them, and logged every 300 presents as the Vita's "gxm:" line has
+them, so a change to the order of the records is measured without the
+hardware ("gxm-null scenes"). */
+static struct
+{
+	int in_scene;
+	unsigned long scene_color, scene_depth, presented_target;
+	unsigned int scene_serial, wait_serial, sampled_serial, scene_draws;
+	int texture_scene_since_wait;
+	unsigned int written_serial[MAXIMUM_TARGETS + 1];
+	unsigned long scenes, waits, splits, frames;
+} scenes;
+
+static int scene_dependency_needed(unsigned int open_serial)
+{
+	if (scenes.sampled_serial && scenes.sampled_serial >= scenes.wait_serial && scenes.sampled_serial != open_serial)
+		return 1;
+	return !open_serial && scenes.texture_scene_since_wait && null.color_target &&
+		null.color_target == scenes.presented_target;
+}
+
+static void scene_ensure(void)
+{
+	if (scenes.in_scene && scenes.scene_color == null.color_target && scenes.scene_depth == null.depth_target)
+	{
+		if (scene_dependency_needed(scenes.scene_serial))
+			scenes.splits++;
+		else if (scenes.scene_draws < 300)
+			goto done;
+	}
+	scenes.in_scene = 0;
+	if (!null.color_target && !null.depth_target)
+		goto done;
+	scenes.scenes++;
+	scenes.scene_serial++;
+	if (scene_dependency_needed(0))
+	{
+		scenes.wait_serial = scenes.scene_serial;
+		scenes.texture_scene_since_wait = 0;
+		scenes.waits++;
+	}
+	if (null.color_target != scenes.presented_target)
+		scenes.texture_scene_since_wait = 1;
+	if (null.color_target <= MAXIMUM_TARGETS)
+		scenes.written_serial[null.color_target] = scenes.scene_serial;
+	if (null.depth_target <= MAXIMUM_TARGETS)
+		scenes.written_serial[null.depth_target] = scenes.scene_serial;
+	scenes.in_scene = 1;
+	scenes.scene_draws = 0;
+	scenes.scene_color = null.color_target;
+	scenes.scene_depth = null.depth_target;
+done:
+	scenes.scene_draws++;
+	scenes.sampled_serial = 0;
+}
+
+static void scenes_present(unsigned long color_target)
+{
+	scenes.in_scene = 0;
+	scenes.presented_target = color_target;
+	if (++scenes.frames == 300)
+	{
+		static int enabled = -1;
+
+		if (enabled < 0)
+			enabled = getenv("HALO_GPU_STATS") && atoi(getenv("HALO_GPU_STATS"));
+		if (enabled)
+			platform_log("gxm-null scenes: %.1f scenes/frame (%.1f splits), %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
+				scenes.scenes / 300.0, 0.0, scenes.waits / 300.0, scenes.splits / 300.0);
+		scenes.scenes = scenes.waits = scenes.splits = scenes.frames = 0;
+	}
+}
+
+/* (debug) a name for a target, for HALO_DRAW_HASH=4: the surface and the
+copy it stands for, whatever order the targets were made in */
+static unsigned long long target_names[MAXIMUM_TARGETS + 1];
+
+void vgxm_debug_name_target(unsigned long id, unsigned long long name)
+{
+	if (id && id <= MAXIMUM_TARGETS)
+		target_names[id] = name;
+}
+
 void vgxm_set_targets(unsigned long color, unsigned long depth)
 {
 	null.color_target = color;
 	null.depth_target = depth;
 }
 
-/* (no GPU: no scene dependencies) */
 void vgxm_note_sampled_target(unsigned long id)
 {
-	(void)id;
+	if (id && id <= MAXIMUM_TARGETS && scenes.written_serial[id] > scenes.sampled_serial)
+		scenes.sampled_serial = scenes.written_serial[id];
 }
 
 /* HALO_DRAW_HASH=1: every draw and clear folded into a hash of what the GPU
@@ -440,6 +526,73 @@ static int draw_hash_enabled(void)
 		draw_hash = 1469598103934665603ull;
 	}
 	return draw_hash_on;
+}
+
+/* HALO_DRAW_HASH=4: each target's draws and clears hashed in their order,
+the targets' hashes summed at the present (each under the target's name,
+vgxm_debug_name_target): a build that runs the records of different
+targets in another order - the worker's waves of small targets - hashes
+the same as long as every target is drawn the same, in the same order */
+#define TARGET_CHAINS (MAXIMUM_TARGETS + 1)
+static unsigned long long target_chain[TARGET_CHAINS], draw_hash_saved;
+
+static unsigned long long draw_hash_target_word(unsigned long id)
+{
+	if (draw_hash_on == 4 && id && id < TARGET_CHAINS && target_names[id])
+		return target_names[id];
+	return id;
+}
+
+static void draw_hash_target_begin(void)
+{
+	if (draw_hash_on != 4)
+		return;
+	draw_hash_saved = draw_hash;
+	draw_hash = 1469598103934665603ull;
+}
+
+static void draw_hash_target_end(void)
+{
+	unsigned long target = null.color_target ? null.color_target : null.depth_target;
+
+	if (draw_hash_on != 4)
+		return;
+	if (target < TARGET_CHAINS)
+		target_chain[target] = (target_chain[target] ^ draw_hash) * 1099511628211ull + 1;
+	draw_hash = draw_hash_saved;
+}
+
+static unsigned long long draw_hash_targets_sum(void)
+{
+	unsigned long long sum = 0;
+	unsigned long target;
+
+	for (target = 0; target < TARGET_CHAINS; target++)
+	{
+		if (target_chain[target])
+		{
+			unsigned long long name = draw_hash_target_word(target);
+
+			sum += (target_chain[target] ^ (name * 0x9e3779b97f4a7c15ull)) * 0xff51afd7ed558ccdull;
+			target_chain[target] = 0;
+		}
+	}
+	return sum;
+}
+
+/* a texture's words, a target's id as its name (HALO_DRAW_HASH=4) */
+static void hash_texture_words(const struct vgxm_texture *texture)
+{
+	unsigned long words[4];
+
+	memcpy(words, texture->control, sizeof(words));
+	if (draw_hash_on == 4 && (words[0] & 0x80000000ul))
+	{
+		unsigned long long name = draw_hash_target_word(words[0] & 0x7ffffffful);
+
+		words[0] = (unsigned long)name ^ (unsigned long)(name >> 32) ^ 0x80000000ul;
+	}
+	hash_bytes(words, sizeof(words));
 }
 
 static unsigned long attribute_bytes(const struct vgxm_attribute *attribute)
@@ -589,12 +742,13 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 
 		draw_hash_trace = setting ? atol(setting) : -1;
 	}
-	if (draw_hash_on >= 2)
+	if (draw_hash_on == 2 || draw_hash_on == 3)
 		draw_hash = 1469598103934665603ull;
+	draw_hash_target_begin();
 	draw_hash_part = 0;
 	hash_word(0xd7a3);
-	hash_word(null.color_target);
-	hash_word(null.depth_target);
+	hash_word(draw_hash_target_word(null.color_target));
+	hash_word(draw_hash_target_word(null.depth_target));
 	/* (the programs by their source: the ids number them in the order
 	they were first used) */
 	if (draw_hash_on == 3)
@@ -648,7 +802,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	for (index = 0; index < 4; index++)
 	{
 		if (draw->textures[index])
-			hash_bytes(draw->textures[index]->control, sizeof(draw->textures[index]->control));
+			hash_texture_words(draw->textures[index]);
 		else
 			hash_word(0);
 	}
@@ -664,7 +818,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	hash_bytes(draw->viewport_offset, sizeof(draw->viewport_offset));
 	hash_bytes(draw->viewport_scale, sizeof(draw->viewport_scale));
 	hash_bytes(draw->clip, sizeof(draw->clip));
-	if (draw_hash_on >= 2)
+	if (draw_hash_on == 2 || draw_hash_on == 3)
 	{
 		unsigned long long state;
 
@@ -707,6 +861,7 @@ static void draw_hash_add(const struct vgxm_draw *draw)
 	TRACE_PART("vertices");
 	draw_hash_part = 12;
 	draw_hash_draws++;
+	draw_hash_target_end();
 }
 
 /* a draw that writes no colour, depth or stencil and counts no samples for
@@ -724,6 +879,7 @@ void vgxm_draw(const struct vgxm_draw *draw)
 		return;
 	null.draws++;
 	null.scene_draws++;
+	scene_ensure();
 	if (draw_hash_enabled() && !draw_writes_nothing(draw))
 		draw_hash_add(draw);
 }
@@ -731,16 +887,19 @@ void vgxm_draw(const struct vgxm_draw *draw)
 void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned long stencil, const long clip[4])
 {
 	null.clears++;
+	scene_ensure();
 	if (draw_hash_enabled())
 	{
+		draw_hash_target_begin();
 		hash_word(0xc1ea);
-		hash_word(null.color_target);
-		hash_word(null.depth_target);
+		hash_word(draw_hash_target_word(null.color_target));
+		hash_word(draw_hash_target_word(null.depth_target));
 		hash_word(flags);
 		hash_word(color);
 		hash_bytes(&depth, sizeof(depth));
 		hash_word(stencil);
 		hash_bytes(clip, 4 * sizeof(long));
+		draw_hash_target_end();
 	}
 }
 
@@ -772,8 +931,11 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	(void)color_target;
 	(void)width;
 	(void)height;
+	scenes_present(color_target);
 	if (draw_hash_enabled())
 	{
+		if (draw_hash_on == 4)
+			draw_hash ^= draw_hash_targets_sum();
 		platform_log("draw hash: present %lu draws %llu hash %016llx", null.presents, draw_hash_draws, draw_hash);
 		if (draw_hash_parts < 0)
 			draw_hash_parts = getenv("HALO_DRAW_HASH_PARTS") && atoi(getenv("HALO_DRAW_HASH_PARTS"));

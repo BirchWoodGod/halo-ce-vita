@@ -110,6 +110,9 @@ void vgxm_set_targets(unsigned long color, unsigned long depth);
 /* the next draw samples this target: its scene waits for the scene that
 drew it if there was no wait since (HALO_GXM_RTT_SYNC) */
 void vgxm_note_sampled_target(unsigned long id);
+/* (debug, the null renderer's HALO_DRAW_HASH=4) the surface and copy a
+target stands for; nothing on the Vita */
+void vgxm_debug_name_target(unsigned long id, unsigned long long name);
 
 /* ---------- drawing */
 

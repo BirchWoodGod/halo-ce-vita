@@ -1948,6 +1948,12 @@ static int rtt_sync_enabled(void)
 	return enabled;
 }
 
+void vgxm_debug_name_target(unsigned long id, unsigned long long name)
+{
+	(void)id;
+	(void)name;
+}
+
 void vgxm_note_sampled_target(unsigned long id)
 {
 	if (id && id <= gxm.target_count && gxm.targets[id - 1].written_serial > gxm.sampled_serial)

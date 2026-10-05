@@ -710,6 +710,9 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 	entry->last_used = device.frame + 1;
 	entry->next_in_bucket = *render_target_bucket(entry->target.data);
 	*render_target_bucket(entry->target.data) = entry;
+	if (entry->id)
+		vgxm_debug_name_target(entry->id, ((unsigned long long)surface->Data << 24) ^ ((unsigned long long)version << 56) ^
+			(width << 12) ^ height ^ ((unsigned long long)depth << 62));
 	return entry->id ? entry : NULL;
 }
 
