@@ -105,6 +105,12 @@ ripple bump map) samples with its mipmaps; the ids go to ids[], the texture
 over the whole chain to texture. 0 on success */
 int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned long levels,
 	unsigned long *ids, struct vgxm_texture *texture);
+/* a copy of a small colour target as a cell of an atlas shared by the
+copies of one surface (key) at one size: index 1 and up picks the cell;
+the texture is over the cell's pixels. 0 if there is none (too big, out
+of cells or targets, HALO_TARGET_ATLAS=0): make a target of its own */
+unsigned long vgxm_target_create_cell(unsigned long key, unsigned long index, unsigned long width, unsigned long height,
+	struct vgxm_texture *texture);
 /* where subsequent draws and clears go; either may be 0 */
 void vgxm_set_targets(unsigned long color, unsigned long depth);
 /* the next draw samples this target: its scene waits for the scene that

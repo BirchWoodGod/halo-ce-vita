@@ -213,6 +213,8 @@ struct render_target_entry
 	/* whether a draw or a colour clear has gone into its target since it
 	was made (the worker's: execute_draw, execute_command) */
 	BOOL drawn;
+	/* its target is a cell of its surface's atlas (render_target_atlas) */
+	BOOL cell;
 };
 
 #define RENDER_TARGET_BUCKET_COUNT 256
@@ -580,7 +582,8 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 
 	for (entry = render_targets; entry; entry = entry->next)
 	{
-		if (entry->id && !entry->chain_levels && entry->target.depth == depth && entry->last_used + 300 < device.frame)
+		if (entry->id && !entry->chain_levels && !entry->cell && entry->target.depth == depth &&
+			entry->last_used + 300 < device.frame)
 		{
 			if (entry->target.width == width && entry->target.height == height)
 				break;
@@ -616,6 +619,67 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 		}
 	}
 	return entry;
+}
+
+/* Copies in an atlas (the worker's): a small colour surface the game draws
+four or more copies of in a frame - the object shadows and their blurs, a
+copy per object - has its copies made as cells of one atlas target
+(vgxm_target_create_cell), so the worker's waves of them (small_target_wave)
+draw all the shadows in one scene and all the blurs in another, instead of
+a scene each; the copies made before the surface was seen to need it are
+moved into cells at the next present. */
+#define ATLAS_SURFACES 8
+
+static unsigned long atlas_surfaces[ATLAS_SURFACES];
+static BOOL atlas_surfaces_pending;
+
+static BOOL render_target_atlas(unsigned long data)
+{
+	unsigned long index;
+
+	for (index = 0; index < ATLAS_SURFACES; index++)
+		if (atlas_surfaces[index] == data)
+			return TRUE;
+	return FALSE;
+}
+
+static unsigned long long render_target_name(unsigned long data, unsigned long version, unsigned long width,
+	unsigned long height, BOOL depth)
+{
+	return ((unsigned long long)data << 24) ^ ((unsigned long long)version << 56) ^ (width << 12) ^ height ^
+		((unsigned long long)depth << 62);
+}
+
+/* (the worker's present) the copies of the surfaces that now have an
+atlas, made before it, moved into cells: the frame they were drawn and read
+in is over, and each frame draws a copy before it reads it */
+static void render_target_atlas_frame_end(void)
+{
+	struct render_target_entry *entry;
+
+	if (!atlas_surfaces_pending)
+		return;
+	atlas_surfaces_pending = FALSE;
+	for (entry = render_targets; entry; entry = entry->next)
+	{
+		struct vgxm_texture texture;
+		unsigned long id;
+
+		if (!entry->id || entry->cell || entry->version < 1 || entry->target.depth || entry->chain_levels ||
+			!render_target_atlas(entry->target.data))
+			continue;
+		id = vgxm_target_create_cell(entry->target.data, entry->version, entry->target.width, entry->target.height,
+			&texture);
+		if (!id)
+			continue;
+		/* (its own target stays made, unused) */
+		entry->id = id;
+		entry->texture = texture;
+		entry->cell = TRUE;
+		entry->drawn = FALSE;
+		vgxm_debug_name_target(id, render_target_name(entry->target.data, entry->version, entry->target.width,
+			entry->target.height, FALSE));
+	}
 }
 
 static struct render_target_entry *render_target_get_version(const D3DSurface *surface, unsigned long version)
@@ -660,8 +724,28 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 	}
 	{
 		struct vgxm_texture texture;
-		unsigned long id = vgxm_target_create(width, height, depth, &texture);
+		unsigned long id = 0;
+		BOOL cell = FALSE;
 
+		if (version >= 4 && !depth && width <= 128 && height <= 128 && !render_target_atlas(surface->Data))
+		{
+			unsigned long index;
+
+			for (index = 0; index < ATLAS_SURFACES && atlas_surfaces[index]; index++)
+				;
+			if (index < ATLAS_SURFACES)
+			{
+				atlas_surfaces[index] = surface->Data;
+				atlas_surfaces_pending = TRUE;
+			}
+		}
+		if (version >= 1 && !depth && render_target_atlas(surface->Data))
+		{
+			id = vgxm_target_create_cell(surface->Data, version, width, height, &texture);
+			cell = id != 0;
+		}
+		if (!id)
+			id = vgxm_target_create(width, height, depth, &texture);
 		if (id)
 		{
 			entry = placeholder;
@@ -673,6 +757,7 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 			}
 			entry->id = id;
 			entry->texture = texture;
+			entry->cell = cell;
 		}
 		else if ((entry = render_target_recycle(width, height, depth)) != NULL)
 		{
@@ -711,8 +796,7 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 	entry->next_in_bucket = *render_target_bucket(entry->target.data);
 	*render_target_bucket(entry->target.data) = entry;
 	if (entry->id)
-		vgxm_debug_name_target(entry->id, ((unsigned long long)surface->Data << 24) ^ ((unsigned long long)version << 56) ^
-			(width << 12) ^ height ^ ((unsigned long long)depth << 62));
+		vgxm_debug_name_target(entry->id, render_target_name(surface->Data, version, width, height, depth));
 	return entry->id ? entry : NULL;
 }
 
@@ -2995,6 +3079,7 @@ static void execute_command(struct render_command *command)
 		}
 		if (halo_trace_active())
 			platform_log("trace: worker presented %lu", command->frame);
+		render_target_atlas_frame_end();
 		worker_build_frame_end();
 		vita_texture_cache_begin_frame();
 		break;

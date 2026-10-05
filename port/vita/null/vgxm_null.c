@@ -331,6 +331,55 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 	return null.target_count;
 }
 
+/* atlases as on the Vita (vita_gxm.c vgxm_target_create_cell): a cell is
+a target id of its own, whose scenes are its atlas's (the scene count) */
+static unsigned int cell_atlas[MAXIMUM_TARGETS + 1];
+static struct { unsigned long key, width, height; unsigned int id, cells[24]; } null_atlases[6];
+
+unsigned long vgxm_target_create_cell(unsigned long key, unsigned long index, unsigned long width, unsigned long height,
+	struct vgxm_texture *texture)
+{
+	static int enabled = -1;
+	unsigned int atlas;
+	unsigned long id;
+
+	if (enabled < 0)
+		enabled = !getenv("HALO_TARGET_ATLAS") || atoi(getenv("HALO_TARGET_ATLAS")) != 0;
+	if (!enabled || !width || !height || width > 128 || height > 128 || index < 1 || index > 24)
+		return 0;
+	for (atlas = 0; atlas < 6; atlas++)
+		if (null_atlases[atlas].id && null_atlases[atlas].key == key && null_atlases[atlas].width == width &&
+			null_atlases[atlas].height == height)
+			break;
+	if (atlas == 6)
+	{
+		for (atlas = 0; atlas < 6 && null_atlases[atlas].id; atlas++)
+			;
+		if (atlas == 6 || !(id = vgxm_target_create(width * 6, height * 4, 0, NULL)))
+			return 0;
+		null_atlases[atlas].key = key;
+		null_atlases[atlas].width = width;
+		null_atlases[atlas].height = height;
+		null_atlases[atlas].id = (unsigned int)id;
+	}
+	id = null_atlases[atlas].cells[index - 1];
+	if (!id)
+	{
+		if (!(id = vgxm_target_create(width, height, 0, NULL)) || id > MAXIMUM_TARGETS)
+			return 0;
+		null_atlases[atlas].cells[index - 1] = (unsigned int)id;
+		cell_atlas[id] = null_atlases[atlas].id;
+	}
+	if (texture)
+	{
+		texture->control[0] = 0x80000000ul | id;
+		texture->control[1] = 0;
+		texture->control[2] = width | height << 16;
+		texture->control[3] = 0;
+	}
+	return id;
+}
+
 int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
 	struct vgxm_texture *texture)
 {
@@ -369,7 +418,8 @@ them, so a change to the order of the records is measured without the
 hardware ("gxm-null scenes"). */
 static struct
 {
-	int in_scene;
+	int in_scene, sampled_cell_conflict;
+	unsigned long scene_cell;
 	unsigned long scene_color, scene_depth, presented_target;
 	unsigned int scene_serial, wait_serial, sampled_serial, scene_draws;
 	int texture_scene_since_wait;
@@ -377,8 +427,15 @@ static struct
 	unsigned long scenes, waits, splits, frames;
 } scenes;
 
+static unsigned long scene_target(unsigned long color)
+{
+	return color && color <= MAXIMUM_TARGETS && cell_atlas[color] ? cell_atlas[color] : color;
+}
+
 static int scene_dependency_needed(unsigned int open_serial)
 {
+	if (scenes.sampled_cell_conflict)
+		return 1;
 	if (scenes.sampled_serial && scenes.sampled_serial >= scenes.wait_serial && scenes.sampled_serial != open_serial)
 		return 1;
 	return !open_serial && scenes.texture_scene_since_wait && null.color_target &&
@@ -387,12 +444,19 @@ static int scene_dependency_needed(unsigned int open_serial)
 
 static void scene_ensure(void)
 {
-	if (scenes.in_scene && scenes.scene_color == null.color_target && scenes.scene_depth == null.depth_target)
+	unsigned long wanted = scene_target(null.color_target);
+
+	if (scenes.in_scene && scenes.scene_color == wanted && scenes.scene_depth == null.depth_target)
 	{
 		if (scene_dependency_needed(scenes.scene_serial))
 			scenes.splits++;
 		else if (scenes.scene_draws < 300)
+		{
+			scenes.scene_cell = wanted != null.color_target ? null.color_target : 0;
+			if (scenes.scene_cell)
+				scenes.written_serial[scenes.scene_cell] = scenes.scene_serial;
 			goto done;
+		}
 	}
 	scenes.in_scene = 0;
 	if (!null.color_target && !null.depth_target)
@@ -409,15 +473,19 @@ static void scene_ensure(void)
 		scenes.texture_scene_since_wait = 1;
 	if (null.color_target <= MAXIMUM_TARGETS)
 		scenes.written_serial[null.color_target] = scenes.scene_serial;
+	if (wanted <= MAXIMUM_TARGETS)
+		scenes.written_serial[wanted] = scenes.scene_serial;
 	if (null.depth_target <= MAXIMUM_TARGETS)
 		scenes.written_serial[null.depth_target] = scenes.scene_serial;
 	scenes.in_scene = 1;
 	scenes.scene_draws = 0;
-	scenes.scene_color = null.color_target;
+	scenes.scene_cell = wanted != null.color_target ? null.color_target : 0;
+	scenes.scene_color = wanted;
 	scenes.scene_depth = null.depth_target;
 done:
 	scenes.scene_draws++;
 	scenes.sampled_serial = 0;
+	scenes.sampled_cell_conflict = 0;
 }
 
 static void scenes_present(unsigned long color_target)
@@ -457,6 +525,9 @@ void vgxm_note_sampled_target(unsigned long id)
 {
 	if (id && id <= MAXIMUM_TARGETS && scenes.written_serial[id] > scenes.sampled_serial)
 		scenes.sampled_serial = scenes.written_serial[id];
+	if (id && id <= MAXIMUM_TARGETS && cell_atlas[id] && scenes.in_scene && cell_atlas[id] == scenes.scene_color &&
+		id != null.color_target && scenes.written_serial[id] == scenes.scene_serial)
+		scenes.sampled_cell_conflict = 1;
 }
 
 /* HALO_DRAW_HASH=1: every draw and clear folded into a hash of what the GPU
