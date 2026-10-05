@@ -74,6 +74,10 @@ this build's order; forgotten together when the map goes
 (port/linux/src/xbox_textures.c) */
 void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order);
 void halo_custom_edition_texels_forget(void);
+/* a vertex buffer (its Direct3D header) the game made once and will not
+rewrite until it says otherwise: the Vita's device reads it in place
+(port/vita/platform/d3d8_gxm.c) */
+void halo_d3d_buffer_in_place(const void *buffer, int in_place);
 /* whether a Halo Custom Edition map's multiplayer vehicles are chosen by
 their placements' spawn flags, as in retail Halo, and whether a vehicle
 placement is placed in the running game

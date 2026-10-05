@@ -252,6 +252,8 @@ struct gxm_device
 	{
 		DWORD data;
 		UINT stride;
+		/* the buffer is one the game never rewrites (halo_d3d_buffer_in_place) */
+		BOOL in_place;
 	} streams[16];
 	UINT base_vertex_index;
 	/* halo_d3d_stream_attribute: an input register the stream draws take
@@ -4715,7 +4717,7 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 
 			stream_slot[stream] = draw->stream_count++;
 			draw->strides[stream_slot[stream]] = stride;
-			if (memory_is_static(start, bytes))
+			if (device.streams[stream].in_place || memory_is_static(start, bytes))
 			{
 				stats.direct_bytes += bytes;
 				draw->streams[stream_slot[stream]] = start;
@@ -4842,12 +4844,86 @@ static BOOL needs_conversion(D3DPRIMITIVETYPE type)
 	return type == D3DPT_QUADLIST || type == D3DPT_LINESTRIP || type == D3DPT_LINELOOP;
 }
 
+/* (port) Vertex buffers the game made once and never rewrites, outside the
+tag cache: a Custom Edition map's converted model and structure BSP
+geometry (port/linux/game/custom_edition_geometry.c). Like the tag cache's
+geometry, they lie in the window the GPU maps, and are read in place rather
+than copied into the ring every draw (Vita3K, Blood Gulch built as a Custom
+Edition map: the ring's use fell from 1058 KB to 152 KB a frame, the Xbox
+map's being 131 KB). Kept by buffer, in an open-addressed table. */
+#define IN_PLACE_BUFFER_SLOTS 4096
+#define IN_PLACE_REMOVED ((const void *)1)
+static const void *in_place_buffers[IN_PLACE_BUFFER_SLOTS];
+
+static unsigned long in_place_slot(const void *buffer)
+{
+	return (unsigned long)(((unsigned long)buffer >> 3) * 2654435761UL) % IN_PLACE_BUFFER_SLOTS;
+}
+
+static BOOL buffer_in_place(const void *buffer)
+{
+	unsigned long slot = in_place_slot(buffer), probe;
+
+	if (!buffer)
+		return FALSE;
+	for (probe = 0; probe < IN_PLACE_BUFFER_SLOTS && in_place_buffers[slot]; probe++)
+	{
+		if (in_place_buffers[slot] == buffer)
+			return TRUE;
+		slot = (slot + 1) % IN_PLACE_BUFFER_SLOTS;
+	}
+	return FALSE;
+}
+
+void halo_d3d_buffer_in_place(const void *buffer, int in_place)
+{
+	unsigned long slot, probe;
+
+	if (!buffer)
+		return;
+	layer_enter();
+	slot = in_place_slot(buffer);
+	if (!in_place || !buffer_in_place(buffer))
+	{
+		for (probe = 0; probe < IN_PLACE_BUFFER_SLOTS; probe++)
+		{
+			const void *entry = in_place_buffers[slot];
+
+			if (in_place && (!entry || entry == IN_PLACE_REMOVED))
+			{
+				in_place_buffers[slot] = buffer;
+				break;
+			}
+			if (!in_place && entry == buffer)
+			{
+				in_place_buffers[slot] = IN_PLACE_REMOVED;
+				break;
+			}
+			if (!entry)
+				break;
+			slot = (slot + 1) % IN_PLACE_BUFFER_SLOTS;
+		}
+		if (in_place && probe == IN_PLACE_BUFFER_SLOTS)
+		{
+			static int warned;
+
+			if (!warned++)
+				platform_log("Direct3D: more than %d vertex buffers to read in place; the rest are copied", IN_PLACE_BUFFER_SLOTS);
+		}
+	}
+	/* (the current streams are copied until set again) */
+	for (slot = 0; slot < 16; slot++)
+		device.streams[slot].in_place = FALSE;
+	layer_leave();
+}
+
 void WINAPI D3DDevice_SetStreamSource(UINT stream_number, D3DVertexBuffer *stream_data, UINT stride)
 {
 	if (stream_number >= 16)
 		return;
 	device.streams[stream_number].data = stream_data ? stream_data->Data : 0;
 	device.streams[stream_number].stride = stride;
+	device.streams[stream_number].in_place = buffer_in_place(stream_data);
 }
 
 /* (port) the stream draws that follow take input register reg from stream
@@ -4957,7 +5033,7 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 		if (element->type == D3DVSDT_NONE || !device.streams[element->stream].data)
 			continue;
 		base = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[element->stream].data);
-		if (!memory_is_static(base, 1))
+		if (!device.streams[element->stream].in_place && !memory_is_static(base, 1))
 			streams_static = FALSE;
 	}
 	if (device.extra_attribute_reg >= 0 && device.streams[device.extra_attribute_stream].data &&

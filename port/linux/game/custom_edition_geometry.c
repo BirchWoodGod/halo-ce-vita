@@ -355,13 +355,19 @@ static boolean custom_edition_model_part_convert(
 	csmemset(&part->triangle_buffer, 0, sizeof(part->triangle_buffer));
 	csmemset(&part->vertex_buffer, 0, sizeof(part->vertex_buffer));
 
-	return rasterizer_vertex_buffer_new(
-			&part->vertex_buffer,
-			_rasterizer_vertex_type_model_compressed,
-			source->vertex_count,
-			vertices,
-			source->vertex_count * vertex_size) &&
-		rasterizer_triangle_buffer_new(
+	if (!rasterizer_vertex_buffer_new(
+		&part->vertex_buffer,
+		_rasterizer_vertex_type_model_compressed,
+		source->vertex_count,
+		vertices,
+		source->vertex_count * vertex_size))
+	{
+		return FALSE;
+	}
+	/* (made once: read in place, as an Xbox cache's model vertices are) */
+	halo_d3d_buffer_in_place(part->vertex_buffer.hardware_format, TRUE);
+
+	return rasterizer_triangle_buffer_new(
 			&part->triangle_buffer,
 			_triangle_buffer_type_precompiled_strip,
 			source->strip_triangle_count,
@@ -447,6 +453,8 @@ static void structure_bsp_buffers_release(
 				material_index,
 				struct structure_material);
 
+			halo_d3d_buffer_in_place(material->vertices.hardware_format, FALSE);
+			halo_d3d_buffer_in_place(material->lightmap_vertices.hardware_format, FALSE);
 			rasterizer_vertex_buffer_delete(&material->vertices);
 			rasterizer_vertex_buffer_delete(&material->lightmap_vertices);
 		}
@@ -487,6 +495,10 @@ static boolean structure_material_convert(
 			vertex_count,
 			vertices,
 			vertex_count * vertex_size);
+		if (success)
+		{
+			halo_d3d_buffer_in_place(material->vertices.hardware_format, TRUE);
+		}
 	}
 	if (success && lightmap_vertex_count)
 	{
@@ -503,6 +515,10 @@ static boolean structure_material_convert(
 			lightmap_vertex_count,
 			lightmap_vertices,
 			lightmap_vertex_count * lightmap_vertex_size);
+		if (success)
+		{
+			halo_d3d_buffer_in_place(material->lightmap_vertices.hardware_format, TRUE);
+		}
 	}
 	material->compressed_vertex_data.size = vertex_count * vertex_size + lightmap_vertex_count * lightmap_vertex_size;
 	material->compressed_vertex_data.address = vertices;
@@ -591,6 +607,7 @@ void custom_edition_models_dispose(
 	for (part_index = 0; part_index < globals->model_part_count; part_index++)
 	{
 		rasterizer_triangle_buffer_delete(&globals->model_parts[part_index]->triangle_buffer);
+		halo_d3d_buffer_in_place(globals->model_parts[part_index]->vertex_buffer.hardware_format, FALSE);
 		rasterizer_vertex_buffer_delete(&globals->model_parts[part_index]->vertex_buffer);
 	}
 	/* the game's free stops on NULL (cseries.h), and a map can fail before

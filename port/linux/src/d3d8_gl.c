@@ -3337,6 +3337,15 @@ void WINAPI D3DDevice_SetStreamSource(UINT stream_number, D3DVertexBuffer *strea
 stream (four floats a vertex, from its first byte) rather than from the
 register's current value, until reg -1 is given: the decals' batches carry
 each decal's colour per vertex this way (rasterizer_xbox_decals.c) */
+/* (port) a vertex buffer the game never rewrites, which the Vita's device
+reads in place (port/vita/platform/d3d8_gxm.c); OpenGL copies every draw's
+vertices anyway */
+void halo_d3d_buffer_in_place(const void *buffer, int in_place)
+{
+	(void)buffer;
+	(void)in_place;
+}
+
 void halo_d3d_stream_attribute(long reg, long stream)
 {
 	device.extra_attribute_active = reg >= 0 && reg < XGPU_VERTEX_ATTRIBUTE_COUNT && stream >= 0 && stream < 16;
