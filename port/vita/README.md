@@ -180,6 +180,7 @@ Useful ones:
 | `HALO_SHADER_PACK=0` | ignore the shipped shaders (`app0:shaders.pak`) |
 | `HALO_NET_PROFILE=1`, `HALO_NET_TRACE=1` | where a network game's frame goes; what its sockets do |
 | `HALO_NET_CATCH_UP_TICKS=n` | the most ticks a frame of a System Link or online game runs to catch up with real time (default 2; 30 = beta.1's pacing) |
+| `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
 
 ## Layout of port/vita
 

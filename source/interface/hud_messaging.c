@@ -146,6 +146,7 @@ symbols in this file:
 #include "text/unicode.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 
 /* ---------- constants */
 
@@ -969,7 +970,24 @@ void hud_render_timer(
 		}
 	}
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+	/* (port) Bungie's cutscene scripts left time_code_show on in several
+	cinematics: the beta draws the tick count as debug text in the top-left
+	corner (GitHub #26), and time_code_time, a plain global, carries over to
+	the next map and the main menu as a large negative count. A release build
+	draws it only with HALO_TIME_CODE=1 */
+	static int show_time_code = -1;
+
+	if (show_time_code < 0)
+	{
+		char const *setting = getenv("HALO_TIME_CODE");
+
+		show_time_code = setting && atoi(setting) != 0;
+	}
+	if (time_code_time != NONE && show_time_code)
+#else
 	if (time_code_time != NONE)
+#endif
 	{
 		long stop_time = time_code_stop_time;
 
