@@ -819,6 +819,18 @@ short cache_file_read(
 	short request_index;
 	struct cache_file_request *request;
 
+	/* reads of a Halo Custom Edition map are served in place, at once, and
+	take no request slot - nor the claim lock below, which nothing would
+	release (port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_tags_loaded())
+	{
+		custom_edition_cache_read(tag_index, offset, size, buffer);
+		*completion_flag_reference = TRUE;
+
+		/* (a free slot's index, never used: cache_file_promote_read takes
+		only indices in range) */
+		return cache_request_next_free_index();
+	}
 	while (__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
 		SwitchToThread();
 	request_index = cache_request_next_free_index();
@@ -828,17 +840,6 @@ short cache_file_read(
 	struct cache_file_request *request = cache_request_get(request_index);
 #endif
 
-#ifdef HALO_LINUX
-	/* reads of a Halo Custom Edition map are served in place, at once; the
-	request slot stays free (port/linux/game/custom_edition_cache.c) */
-	if (custom_edition_cache_tags_loaded())
-	{
-		custom_edition_cache_read(tag_index, offset, size, buffer);
-		*completion_flag_reference = TRUE;
-
-		return request_index;
-	}
-#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		269,
