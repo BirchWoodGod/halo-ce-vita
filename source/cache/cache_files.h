@@ -156,6 +156,16 @@ short cache_file_read(
 	void *buffer,
 	boolean *completion_flag_reference,
 	boolean blocking);
+#ifdef HALO_LINUX
+/* (port) cache_file_read for a read something is waiting to play: the
+sound cache's (cache_files_windows.c, HALO_SOUND_READ_FIRST) */
+short cache_file_read_urgent(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference);
+#endif
 
 unsigned long tag_get_group_tag(long tag_index);
 
