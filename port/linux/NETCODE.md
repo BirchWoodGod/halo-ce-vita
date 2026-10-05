@@ -37,9 +37,12 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
     scripts control (what is shown, the mission timer) and the skip vote;
   - once each, numbered so nothing is applied twice: script sounds,
     chapter titles, help and objective text, "Checkpoint" messages, screen
-    shake, nav points, and custom animations on units and scenery;
+    shake, nav points, custom animations on units and scenery, and units
+    opening and closing (dropships' doors);
   - device groups (doors, elevators, switches; a client sets none itself,
-    and its player's use of one is relayed to the host);
+    and its player's use of one is relayed to the host), and each device's
+    position and power as it changes: a client puts its device where the
+    host's is once that stops, or if they drift apart while it moves;
   - which named objects exist, so scripted creates and deletes match.
 
   Every machine follows the host's structure BSP. A dead player watches a
