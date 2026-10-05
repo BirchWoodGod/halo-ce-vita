@@ -161,6 +161,14 @@ struct distributed_inventory_message
 /* the host: the objects it has told its clients of, by absolute index
 (the object's datum index), NONE for none */
 static long objects_host_told[MAXIMUM_TRACKED_OBJECTS];
+/* ... one past the highest absolute index it has told of: the loops over
+the told objects stop there. The array has room for every object the
+port's object array holds (8192), and a Blood Gulch match uses a few
+hundred of them: walking all 8192 twice a tick (where the objects are,
+what was made and deleted) was a quarter of the host's tick with one
+client in an idle match - the time a client never spends - and on the
+Vita it pushed the host's tick past the 33 ms a tick has. */
+static long objects_host_told_end;
 /* ... the next object at rest to send, round them all */
 static long objects_host_resting_cursor;
 /* ... what each unit's inventory was last sent as, and when */
@@ -444,6 +452,15 @@ static void distributed_change_from_object(
 	}
 }
 
+static void distributed_host_tell(
+	long absolute_index,
+	long object_index)
+{
+	objects_host_told[absolute_index] = object_index;
+	if (object_index != NONE && absolute_index >= objects_host_told_end)
+		objects_host_told_end = absolute_index + 1;
+}
+
 /* the objects made and deleted since the last time, to every client */
 static void distributed_host_update_objects(
 	void)
@@ -454,8 +471,11 @@ static void distributed_host_update_objects(
 	short limit = MIN(MAXIMUM_ENTRIES_PER_MESSAGE, RELIABLE_ENTRIES(struct distributed_object_change));
 	struct object_iterator iterator;
 	long absolute_index;
+	long end;
 
-	csmemset(seen, 0, sizeof(seen));
+	/* (what the last call saw is below the end it left, and this call marks
+	only what it sees) */
+	csmemset(seen, 0, (size_t)objects_host_told_end * sizeof(seen[0]));
 	object_iterator_new(&iterator, NETWORKED_OBJECT_TYPES, 0);
 	while (object_iterator_next(&iterator))
 	{
@@ -480,7 +500,7 @@ static void distributed_host_update_objects(
 				count = 0;
 			}
 		}
-		objects_host_told[absolute_index] = iterator.index;
+		distributed_host_tell(absolute_index, iterator.index);
 		objects_statistics.creates++;
 		distributed_change_from_object(iterator.index, &message.changes[count]);
 		if (++count == limit)
@@ -491,10 +511,16 @@ static void distributed_host_update_objects(
 			count = 0;
 		}
 	}
-	for (absolute_index = 0; absolute_index < MAXIMUM_TRACKED_OBJECTS; absolute_index++)
+	end = 0;
+	for (absolute_index = 0; absolute_index < objects_host_told_end; absolute_index++)
 	{
-		if (objects_host_told[absolute_index] == NONE || seen[absolute_index])
+		if (objects_host_told[absolute_index] == NONE)
 			continue;
+		if (seen[absolute_index])
+		{
+			end = absolute_index + 1;
+			continue;
+		}
 		csmemset(&message.changes[count], 0, sizeof(message.changes[count]));
 		message.changes[count].change = _object_change_delete;
 		message.changes[count].object_index = objects_host_told[absolute_index];
@@ -508,6 +534,7 @@ static void distributed_host_update_objects(
 			count = 0;
 		}
 	}
+	objects_host_told_end = end;
 	if (count)
 	{
 		distributed_send(&message, _distributed_message_object_changes, count,
@@ -527,7 +554,7 @@ void network_objects_client_ready(
 	long absolute_index;
 
 	distributed_host_update_objects();
-	for (absolute_index = 0; absolute_index < MAXIMUM_TRACKED_OBJECTS; absolute_index++)
+	for (absolute_index = 0; absolute_index < objects_host_told_end; absolute_index++)
 	{
 		if (objects_host_told[absolute_index] == NONE)
 			continue;
@@ -576,6 +603,22 @@ static long distributed_host_placed_object(
 
 /* where the moving objects are, and a few at rest, round them all (one
 whose last move was lost is put right when its turn comes) */
+static void distributed_host_add_state(
+	struct distributed_object_state_message *message,
+	short *count,
+	short limit,
+	long object_index)
+{
+	distributed_state_from_object(object_index, &message->states[*count]);
+	if (++*count == limit)
+	{
+		distributed_send(message, _distributed_message_object_states, *count,
+			(word)(sizeof(message->header) + *count * sizeof(struct distributed_object_state)),
+			_distributed_to_clients);
+		*count = 0;
+	}
+}
+
 static void distributed_host_send_states(
 	void)
 {
@@ -584,40 +627,38 @@ static void distributed_host_send_states(
 	short limit = MIN(MAXIMUM_ENTRIES_PER_MESSAGE, DATAGRAM_ENTRIES(struct distributed_object_state));
 	short resting = 0;
 	long absolute_index;
-	long step;
+	long visited;
+	/* (nothing is told of from objects_host_told_end on: both passes stop
+	there, and the second goes round in the order it had over the whole
+	array) */
+	long end = objects_host_told_end;
 
-	for (step = 0; step < 2 * MAXIMUM_TRACKED_OBJECTS; step++)
+	/* the moving ones */
+	for (absolute_index = 0; absolute_index < end; absolute_index++)
+	{
+		long object_index = distributed_host_placed_object(absolute_index);
+
+		if (object_index != NONE && !TEST_FLAG(object_get(object_index)->object.flags, _object_at_rest_bit))
+			distributed_host_add_state(&message, &count, limit, object_index);
+	}
+	/* those at rest from the cursor on, round to it */
+	for (visited = 0; visited < MAXIMUM_TRACKED_OBJECTS && resting < RESTING_STATES_PER_TICK; visited++)
 	{
 		long object_index;
-		boolean at_rest;
 
-		/* (the first pass the moving ones, the second those at rest from
-		the cursor on, round to it) */
-		if (step < MAXIMUM_TRACKED_OBJECTS)
-			absolute_index = step;
-		else if (resting < RESTING_STATES_PER_TICK)
-			absolute_index = (objects_host_resting_cursor + step - MAXIMUM_TRACKED_OBJECTS) % MAXIMUM_TRACKED_OBJECTS;
-		else
-			break;
+		absolute_index = (objects_host_resting_cursor + visited) % MAXIMUM_TRACKED_OBJECTS;
+		if (absolute_index >= end)
+		{
+			/* (on at index 0) */
+			visited += MAXIMUM_TRACKED_OBJECTS - absolute_index - 1;
+			continue;
+		}
 		object_index = distributed_host_placed_object(absolute_index);
-		if (object_index == NONE)
+		if (object_index == NONE || !TEST_FLAG(object_get(object_index)->object.flags, _object_at_rest_bit))
 			continue;
-		at_rest = TEST_FLAG(object_get(object_index)->object.flags, _object_at_rest_bit);
-		if (step < MAXIMUM_TRACKED_OBJECTS ? at_rest : !at_rest)
-			continue;
-		if (step >= MAXIMUM_TRACKED_OBJECTS)
-		{
-			resting++;
-			objects_host_resting_cursor = (absolute_index + 1) % MAXIMUM_TRACKED_OBJECTS;
-		}
-		distributed_state_from_object(object_index, &message.states[count]);
-		if (++count == limit)
-		{
-			distributed_send(&message, _distributed_message_object_states, count,
-				(word)(sizeof(message.header) + count * sizeof(struct distributed_object_state)),
-				_distributed_to_clients);
-			count = 0;
-		}
+		resting++;
+		objects_host_resting_cursor = (absolute_index + 1) % MAXIMUM_TRACKED_OBJECTS;
+		distributed_host_add_state(&message, &count, limit, object_index);
 	}
 	if (count)
 	{
@@ -1260,6 +1301,7 @@ void network_objects_new_game(
 		objects_host_told[absolute_index] = NONE;
 		objects_client_has[absolute_index] = NONE;
 	}
+	objects_host_told_end = 0;
 	objects_host_resting_cursor = 0;
 	csmemset(objects_host_inventories, 0, sizeof(objects_host_inventories));
 	csmemset(objects_host_vehicle_predictions, 0, sizeof(objects_host_vehicle_predictions));

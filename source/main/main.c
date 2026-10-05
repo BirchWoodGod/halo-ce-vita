@@ -2349,6 +2349,27 @@ static boolean main_tick_catch_up(
 	return catch_up != 0;
 }
 
+/* (port) HALO_NET_CATCH_UP_TICKS: the most ticks a frame of a distributed
+network game runs to catch up with real time (main_update_time_unthrottled);
+2 by default, as a local game; 30 the Xbox's network game */
+static long main_network_catch_up_ticks(
+	void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static long ticks = -1;
+
+	if (ticks < 0)
+	{
+		const char *setting = getenv("HALO_NET_CATCH_UP_TICKS");
+
+		ticks = setting && atoi(setting) > 0 ? atoi(setting) : 2;
+		if (ticks > TICKS_PER_SECOND)
+			ticks = TICKS_PER_SECOND;
+	}
+	return ticks;
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2400,6 +2421,27 @@ static void main_update_time_unthrottled(
 			{
 				seconds_elapsed = 0.03333333507180214f;
 			}
+		}
+		/* (port) a distributed network game - System Link and online play's
+		netcode (NETCODE.md) - the same: its machines tick on their own
+		clocks and nobody waits for anybody, but as a network server or
+		client each took up to a second's ticks (30) a frame to catch up
+		with real time, the spiral the split screen game had above. A host
+		whose tick nears a tick's 33 ms - the Vita's, with a client, whose
+		players it simulates and whose objects and corrections it sends
+		every tick - fell behind, ran more ticks the next frame, and slower
+		still: 1-5 fps for the host, and for its clients the host's players
+		and objects frozen, then jumping a second on (the host's ticks
+		and their updates came in bursts). Now at most two ticks a frame
+		(HALO_NET_CATCH_UP_TICKS): a machine that cannot keep up plays
+		slower than real time for a moment, as the campaign does; the
+		others take its updates as they come (each stamped with its tick).
+		The lockstep netcode keeps the Xbox's pacing (its clients must run
+		every tick the host ran). */
+		else if ((main_globals.connection == _game_connection_network_server ||
+			main_globals.connection == _game_connection_network_client) && network_game_distributed())
+		{
+			seconds_elapsed = CEILING(seconds_elapsed, (real)main_network_catch_up_ticks() * 0.03333333507180214f);
 		}
 	}
 	{
