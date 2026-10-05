@@ -1519,7 +1519,10 @@ static void main_new_map(
 	main_globals.load_core = main_globals.load_core_at_startup;
 	main_globals.load_core_at_startup = FALSE;
 
-	if (main_globals.allow_persistent_storage)
+	/* port: never a network game (co-op on a campaign level): the campaign
+	save is single player's, and a network game neither resumes nor writes
+	it (pause_game_quit_to_main_menu) */
+	if (main_globals.allow_persistent_storage && main_globals.connection == _game_connection_local)
 		game_state_try_and_load_from_persistent_storage();
 	ui_widgets_disable_pause_game(30);
 #ifdef HALO_LINUX
