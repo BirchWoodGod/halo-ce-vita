@@ -1569,6 +1569,8 @@ static void client_apply_hud(
 		scripted_hud_messages_clear();
 		break;
 	case _coop_hud_checkpoint:
+		if (event->value)
+			error(_error_silent, "co-op: the host's checkpoint at tick %ld", game_time_get());
 		hud_autosave(event->value != 0);
 		break;
 	default:
