@@ -159,6 +159,11 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Public MQTT brokers through which the machines of an invite find each\n"
 		"other (its messages are encrypted); comma-separated host:port." },
+	{ "network.coop_enemies", _config_integer, "50", "HALO_NET_COOP_ENEMIES", _environment_value, _platform_all,
+		"Online co-op's extra enemies, a percentage: for each player past the\n"
+		"first, each squad of enemies a level places gets this much of itself\n"
+		"more (100: as many again; 0 to 200). Server Setup's EXTRA ENEMIES in\n"
+		"co-op writes its choice here." },
 	{ "network.stun_servers", _config_string, "\"stun.l.google.com:19302,stun.cloudflare.com:3478\"",
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"
