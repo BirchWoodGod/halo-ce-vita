@@ -238,6 +238,11 @@ This port stands on a lot of other people's work:
   the distributed netcode, system link over the internet, and much more.
   Those platforms still build from this tree (`port/linux`, `port/windows`,
   `port/android`, each with its own README).
+- **[bnunu/halo-ce-universal](https://github.com/bnunu/halo-ce-universal)**
+  (Jonas Volman): the Halo Custom Edition and OpenSauce map loader and its
+  conversions (`port/linux/game/cache_file_formats.c`,
+  `custom_edition_*.c`, `docs/custom_edition_caches.md`), which the
+  custom maps work builds on.
 - **[Invader](https://github.com/SnowyMouse/invader)** by SnowyMouse: the
   tag definitions `port/linux/src/tag_layouts.h` is generated from (by
   `tools/gen_tag_layouts.py`), which let the port relocate the maps' tags.

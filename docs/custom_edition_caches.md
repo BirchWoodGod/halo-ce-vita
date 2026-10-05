@@ -36,6 +36,31 @@ usually do.
 | **2. Load** | Put the map's tag data where its pointers expect it (`0x40440000`), read the tags kept in resource maps and relocate their pointers, and check every tag instance, name and address, every structure BSP (file range, header, lightmap materials), every model part's geometry, every bitmap's pixels and every sound's samples (range in their file), and the header checksum | **Done** in the loader, the report tool (`cache_file_report`) and the game, with the limits under [Assumptions](#assumptions-not-verified) |
 | **3. Run** | The game starts the map, draws it, plays its sounds and runs its scripts | **Reached for `bloodgulch.map`, `beavercreek_halo3.yelo` and `hugeass.map`, as far as observed** (below); not established for any other map, and not for Ogg Vorbis sounds or OpenSauce's own features |
 
+## On the PS Vita (halo-ce-vita)
+
+This loader came from `bnunu/halo-ce-universal` (`39f6e2e3` and the
+commits before it, cherry-picked). On the Vita:
+
+- **The tag cache is not at `0x40440000`.** The Vita's user memory starts
+  higher, so a Custom Edition map gets a memory block of its own, outside
+  the 112 MB window (whose layout campaign saves depend on: the game state
+  stays at `0x8c0e4000`), 23 MB, or 1.5 times that with OpenSauce's memory
+  upgrades, for as long as it is loaded. `cache_file_formats.c` loads and
+  converts the tags there as if they were at `0x40440000`; then
+  `port/linux/src/tag_relocate.c` moves their pointers with the walk the
+  Xbox maps use (`tag_layouts.h` has the Custom Edition groups too), before
+  the game's own code reads them, and each structure BSP when it is read.
+  The Linux harness takes this path with `HALO_CUSTOM_EDITION_RELOCATE=1`.
+- **The texture cache stays the Xbox's 22 MB**: the larger cache of the
+  desktop builds would change the window's layout.
+- **Channel orders**: the Vita renderer does not yet swizzle multipurpose
+  maps and HUD meters (`port/vita/platform/vita_textures.c` logs it).
+- **Modded Xbox maps** (any Xbox multiplayer map in the maps folder that is
+  not one of the thirteen levels, such as one Invader builds) are offered in
+  the level list without the setting: they play as the Xbox levels do.
+- **System link** compares the host's copy of a custom map with the
+  player's (the network game's map version): see `custom_edition_maps.c`.
+
 ## Running a map
 
 Custom Edition maps run only when the `game.custom_edition` setting is on:
