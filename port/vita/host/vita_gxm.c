@@ -1545,8 +1545,23 @@ void vgxm_texture_set_sampler(struct vgxm_texture *texture, unsigned long min_fi
 	/* cube maps address as they must */
 	if (sceGxmTextureGetType(gxm_texture) != SCE_GXM_TEXTURE_CUBE)
 	{
-		sceGxmTextureSetUAddrMode(gxm_texture, modes[address_u < 6 ? address_u : 0]);
-		sceGxmTextureSetVAddrMode(gxm_texture, modes[address_v < 6 ? address_v : 0]);
+		SceGxmTextureAddrMode u = modes[address_u < 6 ? address_u : 0], v = modes[address_v < 6 ? address_v : 0];
+		int result_u = sceGxmTextureSetUAddrMode(gxm_texture, u), result_v = sceGxmTextureSetVAddrMode(gxm_texture, v);
+
+		if (result_u < 0 || result_v < 0)
+		{
+			/* (an address mode the library refuses for the texture's
+			type keeps the one it had: logged, a few times) */
+			static unsigned int reported;
+
+			if (reported < 8)
+			{
+				reported++;
+				log_line("gxm: address mode %d/%d refused for a %ux%u texture of type %08x: 0x%08x 0x%08x", (int)u, (int)v,
+					sceGxmTextureGetWidth(gxm_texture), sceGxmTextureGetHeight(gxm_texture),
+					(unsigned)sceGxmTextureGetType(gxm_texture), (unsigned)result_u, (unsigned)result_v);
+			}
+		}
 	}
 }
 
@@ -1753,8 +1768,39 @@ static int target_make(struct target *target, unsigned long width, unsigned long
 		}
 		if (texture)
 		{
-			result = sceGxmTextureInitLinearStrided((SceGxmTexture *)texture, target->memory.base,
-				SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, target->width, target->height, target->stride * 4);
+			/* a power-of-two target whose rows are ALIGN(width, 8) texels
+			apart (32 and more wide) is described as a LINEAR texture, the
+			type of every texture in the texture cache, which the hardware
+			samples with D3DTADDRESS_WRAP everywhere. A LINEAR_STRIDED
+			texture is the SGX's stride texture, made for clamped copies.
+			The water's 128x128 ripple map is the one target the game samples
+			with WRAP, at 25-50 repeats: with a single level (c10's swamp,
+			#23) or a chain that could not be made (b30 in #20's log) it was
+			strided, and on the hardware only the reflection drew the cube
+			map as a mirror (Vita3K with the ripple map clamped draws the
+			photos' dark trunk shapes). Same memory either way.
+			HALO_TARGET_TEXTURE_LINEAR=0: every target strided, as before */
+			static int linear_targets = -1;
+
+			if (linear_targets < 0)
+			{
+				const char *setting = getenv("HALO_TARGET_TEXTURE_LINEAR");
+
+				linear_targets = !setting || atoi(setting) != 0;
+				if (!linear_targets)
+					log_line("gxm: render targets sampled as strided textures (HALO_TARGET_TEXTURE_LINEAR=0)");
+			}
+			if (linear_targets && !(target->width & (target->width - 1)) && !(target->height & (target->height - 1)) &&
+				target->stride == ALIGN(target->width, 8))
+			{
+				result = sceGxmTextureInitLinear((SceGxmTexture *)texture, target->memory.base,
+					SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, target->width, target->height, 1);
+			}
+			else
+			{
+				result = sceGxmTextureInitLinearStrided((SceGxmTexture *)texture, target->memory.base,
+					SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, target->width, target->height, target->stride * 4);
+			}
 			if (result < 0)
 				log_line("gxm: target texture %lux%lu: 0x%08x", width, height, (unsigned)result);
 		}
