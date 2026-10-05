@@ -38,6 +38,9 @@ fires for whoever walks into it, and what it starts is sent to the clients
 #include "coop_scripts.h"
 #include "network_coop.h"
 
+/* hs.c's (no header declares it) */
+short vehicle_scripting_load_magic(long vehicle_index, char const *seat_name, long object_list_index);
+
 #include <string.h>
 
 /* ---------- constants */

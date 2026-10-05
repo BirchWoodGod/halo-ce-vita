@@ -3758,7 +3758,7 @@ void errors_overflow_suppression_enable(
 void scripted_player_effect_stop(
 	real decay_time);
 void scripted_hud_set_state_message(
-	word message_index);
+	short message_index);
 void scripted_hud_set_timer_warning_cutoff(
 	short minutes,
 	word seconds);

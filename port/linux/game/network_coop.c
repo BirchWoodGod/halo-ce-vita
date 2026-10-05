@@ -113,6 +113,31 @@ index and tag, since the map placed them at the same index everywhere.
 #include "network_coop.h"
 #include "network_distributed.h"
 
+/* hud.c's: what the scripts show of the HUD (its struct hud_scripted_globals,
+which hud.c keeps to itself) */
+struct coop_hud_scripted_globals
+{
+	boolean show_hud;
+	boolean show_hud_help_text;
+	byte pad[2];
+};
+extern struct coop_hud_scripted_globals *hud_scripted_globals;
+
+/* (the game's, which this tree's headers do not declare: hs.c's and
+main.c's own prototypes; a real argument needs its prototype) */
+short main_get_window_count(void);
+void hs_effect_new(long effect_definition_index, word cutscene_flag_index);
+void hs_effect_new_from_object_marker(long effect_definition_index, long object_index, char const *marker_name);
+void hud_unit_activate_nav_point_with_flag(word player_index, long unit_index, word flag_index, real vertical_offset);
+void hud_unit_activate_nav_point_with_object(word player_index, long unit_index, long object_index,
+	real vertical_offset);
+void hud_activate_team_nav_point_with_flag(word player_index, word team, word flag_index, real vertical_offset);
+void hud_activate_team_nav_point_with_object(word player_index, word team, long object_index, real vertical_offset);
+void hud_unit_deactivate_nav_point_with_flag(long unit_index, word flag_index);
+void hud_unit_deactivate_nav_point_with_object(long unit_index, long object_index);
+void hud_deactivate_team_nav_point_with_flag(short team, word flag_index);
+void hud_deactivate_team_nav_point_with_object(short team, long object_index);
+
 /* ---------- constants */
 
 /* A joining player with nobody to spectate yet watches the host's view
@@ -1439,7 +1464,7 @@ static void host_presentation(
 	else
 		presentation->camera_object_index = NONE;
 
-	presentation->camera_scripted = (byte)(*director_camera_scripted != FALSE);
+	presentation->camera_scripted = (byte)(director_camera_scripted->camera_scripted != FALSE);
 	presentation->input_disabled = (byte)!player_input_enabled();
 	presentation->scripted_shake = (byte)player_effect_port_scripted_active();
 	presentation->players_vitality_set = (byte)players_vitality.set;

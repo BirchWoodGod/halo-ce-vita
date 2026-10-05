@@ -914,6 +914,13 @@ symbols in this file:
 #include "bungie_net/network/transport_endpoint_winsock.h"
 #include "interface/player_ui.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+
+/* port: main.c's and network_server_manager.c's, which this file's headers
+do not declare (network co-op: ui_widget_port_cooperative_level_choose) */
+struct network_game_server;
+short main_get_solo_level_from_name(char const *name);
+void main_set_multiplayer_map_name(char const *map_name);
+void network_game_server_port_set_cooperative(struct network_game_server *server, short difficulty);
 #include "saved games/player_profile.h"
 #include "interface/ui_widget_definitions.h"
 
@@ -2150,7 +2157,7 @@ static boolean pause_game_quit_to_main_menu(
 	{
 		short controller_index;
 
-		for (controller_index = 0; controller_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; controller_index++)
+		for (controller_index = 0; controller_index < MAXIMUM_LOCAL_PLAYERS; controller_index++)
 			network_game_client_local_player_quit(controller_index);
 		return TRUE;
 	}
@@ -5989,13 +5996,14 @@ boolean ui_widget_port_cooperative_level_choose(
 	short difficulty)
 {
 	struct network_game_server *server = global_network_game_server_get();
-	struct game_variant variant;
+	/* (a game_variant, game_engine.h: its description, 12 characters, then
+	its game engine, none) */
+	struct game_variant_data variant;
 
 	if (!server || !map_name || main_get_solo_level_from_name(map_name) == NONE)
 		return FALSE;
 	csmemset(&variant, 0, sizeof(variant));
-	ustrncpy(variant.human_readable_game_description, L"Co-op",
-		NUMBEROF(variant.human_readable_game_description) - 1);
+	ustrncpy((wchar_t *)variant.data, L"Co-op", 11);
 	main_set_difficulty(difficulty);
 	main_set_multiplayer_map_name(map_name);
 	network_game_server_port_set_cooperative(server, difficulty);

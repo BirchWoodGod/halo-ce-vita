@@ -279,6 +279,10 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 
+/* port: action_vehicle.c's (no header declares it): network co-op's seats */
+boolean unit_get_seat_entrance_point(long unit_index, long parent_unit_index, short seat_index,
+	real_point3d *entrance_point, real_point3d *seat_point, real_point3d *hint_point);
+
 #ifdef HALO_LINUX
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);

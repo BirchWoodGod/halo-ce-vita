@@ -58,8 +58,9 @@ in front, far enough back to see all of what holds them */
 /* the player each local player is watching, or NONE */
 static long coop_spectate_watched[MAXIMUM_LOCAL_PLAYERS] = { NONE, NONE, NONE, NONE };
 
-/* input_abstraction.c: how many ticks the keyboard's jump key has been held */
-byte input_abstraction_port_accept(short controller_index);
+
+/* hud_messaging.c's (no header declares it) */
+long hud_get_font_index(void);
 
 /* ---------- private code */
 
@@ -104,8 +105,9 @@ static boolean next_pressed(short controller_index)
 	if (controller_index < 0 || controller_index >= MAXIMUM_GAMEPADS)
 		return FALSE;
 	gamepad = input_get_gamepad_state(controller_index);
-	down = (gamepad && gamepad->buttons[FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_a] > 0) ||
-		input_abstraction_port_accept(controller_index) > 0;
+	/* (the gamepad's: this tree has no keyboard controls of the PC menus'
+	input_abstraction_port_accept; the Vita's cross is A) */
+	down = gamepad && gamepad->buttons[FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_a] > 0;
 	pressed = down && !held[controller_index];
 	held[controller_index] = down;
 	return pressed;
