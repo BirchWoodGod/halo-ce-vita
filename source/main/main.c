@@ -2773,12 +2773,17 @@ void main_rasterizer_throttle(
 
 					phase_lock = !setting || atol(setting) != 0;
 				}
-				if (phase_lock && cap == TICKS_PER_SECOND)
+				/* (only for a frame that fit in the period: one that took
+				longer waited for nothing before, and would now wait up to
+				half a tick more whenever its end fell early in a tick - a
+				steady 40 ms frame ran at 24 a second instead of 25) */
+				if (phase_lock && cap == TICKS_PER_SECOND && previous_us && now - previous_us < period)
 				{
 					real fraction = game_time_get_tick_fraction();
 
-					/* (1: no game running, or paused) */
-					if (fraction < 1.0f)
+					/* (1: no game running, or paused; the test also keeps
+					the period within half a tick to a tick and a half) */
+					if (fraction >= 0.0f && fraction < 1.0f)
 						period = (unsigned long long)((1.5f - fraction) * (1000000.0f / TICKS_PER_SECOND));
 				}
 			}
