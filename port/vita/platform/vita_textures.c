@@ -582,6 +582,36 @@ static void gxm_twiddle_position(unsigned long width, unsigned long height, unsi
 		*y |= upper;
 }
 
+/* one level of 32-bit texels, rows to GXM's twiddled order, written in
+order; a 4x4 block at a time where both sides are 4 or more (the low four
+bits of an index pick the texel in its block: y, x, y, x) */
+static void twiddle_level(unsigned long *destination, const unsigned long *source, unsigned long width,
+	unsigned long height)
+{
+	static const unsigned char block_x[16] = { 0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3 };
+	static const unsigned char block_y[16] = { 0, 1, 0, 1, 2, 3, 2, 3, 0, 1, 0, 1, 2, 3, 2, 3 };
+	unsigned long count = width * height, index, x, y, k;
+
+	if (width >= 4 && height >= 4)
+	{
+		for (index = 0; index < count; index += 16)
+		{
+			const unsigned long *block;
+
+			gxm_twiddle_position(width, height, index, &x, &y);
+			block = source + y * width + x;
+			for (k = 0; k < 16; k++)
+				destination[index + k] = block[block_y[k] * width + block_x[k]];
+		}
+		return;
+	}
+	for (index = 0; index < count; index++)
+	{
+		gxm_twiddle_position(width, height, index, &x, &y);
+		destination[index] = source[y * width + x];
+	}
+}
+
 /* one level of DXT blocks, NV2A row order to GXM twiddled order */
 static void reorder_blocks(const unsigned char *source, unsigned char *destination, unsigned long width,
 	unsigned long height, unsigned long block_bytes)
@@ -690,6 +720,21 @@ static void *pool_alloc(unsigned long size)
 	pool_last = memory;
 	pool_last_size = size;
 	return memory;
+}
+
+/* HALO_SWIZZLED_TEXTURES=0: the power-of-two BGRA textures as linear
+rows, as before (texture_build) */
+static int swizzled_textures(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SWIZZLED_TEXTURES");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	return enabled;
 }
 
 /* decodes the texture at base into the pool; FALSE if it cannot be */
@@ -915,6 +960,49 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 		free(scratch);
 		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_linear,
 			atlas_width, height, 1) == 0;
+	}
+
+	if (!description->linear && description->depth <= 1 && power_of_two(width) && power_of_two(height) &&
+		swizzled_textures())
+	{
+		/* A power-of-two texture as GXM's twiddled (Morton order) BGRA,
+		every Xbox level, each level's texels in the order cube faces and
+		DXT blocks already have them (gxm_twiddle_position), the levels one
+		after another. The same texels as the rows below, laid out so that
+		a fetch's neighbours share the GPU's texture cache lines: linear
+		rows put each 2x2 filter footprint on two lines, and these textures
+		(lightmaps, bump and detail maps: 40% of the fetches in a d40
+		frame) were the only ones the GPU read that way. */
+		unsigned long *destination;
+
+		size = 0;
+		for (level = 0; level < levels; level++)
+			size += level_dimension(width, level) * level_dimension(height, level) * 4;
+		memory = pool_alloc(size);
+		scratch = malloc(width * height * 4);
+		if (!memory || !scratch)
+		{
+			free(scratch);
+			return FALSE;
+		}
+		destination = (unsigned long *)memory;
+		for (level = 0; level < levels; level++)
+		{
+			unsigned long level_width = level_dimension(width, level);
+			unsigned long level_height = level_dimension(height, level);
+			const unsigned char *source = base + xgpu_texture_level_offset(description, level);
+			unsigned long count = level_width * level_height;
+
+			if (description->compressed)
+				dxt_decode_level(information.kind, source, level_width, level_height, 1, scratch);
+			else
+				decode_level(description, level, source, palette, scratch);
+			twiddle_level(destination, scratch, level_width, level_height);
+			destination += count;
+		}
+		free(scratch);
+		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_swizzled,
+			width, height, levels) == 0;
 	}
 
 	/* everything else as BGRA rows, every Xbox level */

@@ -1045,6 +1045,35 @@ boolean collision_bsp_test_vector(
 
 /* ---------- private code */
 
+#ifdef HALO_LINUX
+/* (port) real_math.c's fast_vector_intersects_sphere, the same arithmetic
+in the same order, inline in the surface walk */
+static __inline__ boolean collision_vector_intersects_sphere(
+	real_point3d const *point,
+	real_vector3d const *vector,
+	real_point3d const *center,
+	real radius)
+{
+	real_point3d p = {point->x-center->x, point->y-center->y, point->z - center->z};
+	real c = (p.x*p.x) + (p.y*p.y) + (p.z*p.z) - (radius*radius);
+	real b, a, disc, neg_a_minus_b;
+
+	if (c < 0.f)
+		return TRUE;
+	b = vector->i*p.x + vector->j*p.y + vector->k*p.z;
+	if (b >= 0.f)
+		return FALSE;
+	a = vector->i*vector->i + vector->j*vector->j + vector->k*vector->k;
+	disc = b * b - a * c;
+	if (disc <= 0.f)
+		return FALSE;
+	neg_a_minus_b = -a - b;
+	if (neg_a_minus_b < 0.f)
+		return TRUE;
+	return neg_a_minus_b * neg_a_minus_b < disc;
+}
+#endif
+
 static void add_feature(
 	long *count,
 	long *indices,
@@ -1093,6 +1122,63 @@ static void collision_surface_test_sphere(
 	}
 
 	radius_squared = data->radius * data->radius;
+#ifdef HALO_LINUX
+	/* (port) the vertex and the edge tests in one walk round the surface:
+	the vertices go to their list and the edges to theirs in the same order
+	as two walks put them, with the same values; the edge test is
+	fast_vector_intersects_sphere's, inline */
+	edge_index = surface->first_edge_index;
+	do
+	{
+		struct collision_edge const *edge = TAG_BLOCK_GET_ELEMENT(
+			&data->bsp->edges,
+			edge_index,
+			struct collision_edge);
+		boolean reverse = edge->surface_indices[1] == surface_index;
+		long vertex_index = edge->vertex_indices[reverse];
+		struct collision_vertex const *vertex0 = TAG_BLOCK_GET_ELEMENT(
+			&data->bsp->vertices,
+			vertex_index,
+			struct collision_vertex);
+		struct collision_vertex const *vertex1 = TAG_BLOCK_GET_ELEMENT(
+			&data->bsp->vertices,
+			edge->vertex_indices[!reverse],
+			struct collision_vertex);
+		real delta_x = vertex0->point.x - data->center->x;
+		real delta_y = vertex0->point.y - data->center->y;
+		real delta_z = vertex0->point.z - data->center->z;
+		real distance_squared =
+			delta_x * delta_x +
+			delta_y * delta_y +
+			delta_z * delta_z;
+		real_vector3d edge_vector;
+
+		if (distance_squared <= radius_squared)
+		{
+			add_feature(
+				&data->result->vertex_count,
+				data->result->vertex_indices,
+				vertex_index);
+			hit_feature = TRUE;
+		}
+		vector_from_points3d(&vertex0->point, &vertex1->point, &edge_vector);
+		if (collision_vector_intersects_sphere(
+			&vertex0->point,
+			&edge_vector,
+			data->center,
+			data->radius))
+		{
+			add_feature(
+				&data->result->edge_count,
+				data->result->edge_indices,
+				edge_index);
+			hit_feature = TRUE;
+		}
+
+		edge_index = edge->edge_indices[reverse];
+	}
+	while (edge_index != surface->first_edge_index);
+#else
 	edge_index = surface->first_edge_index;
 	do
 	{
@@ -1162,6 +1248,7 @@ static void collision_surface_test_sphere(
 		edge_index = edge->edge_indices[reverse];
 	}
 	while (edge_index != surface->first_edge_index);
+#endif
 
 	if (!hit_feature)
 	{

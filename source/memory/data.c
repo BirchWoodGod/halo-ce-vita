@@ -295,6 +295,50 @@ long datum_new_at_index(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) The native builds' particle pools are 4-8 times the Xbox's
+(halo_port_capacity.h: sized for the large networked sessions, where every
+machine must hold the same). In the Flood fights of d20 and d40 the game
+then kept 2000-2600 particles alive (harness census), where the Xbox's
+1024 stop new ones being made: the excess was simulated (collision rays
+each) on the tick thread and drawn as blended sprites. In a local game
+(campaign, a local multiplayer game: nothing to stay in lockstep with)
+the arrays given a limit here make new datums only below it, as an array
+of that size would: the same slots, in the same order, as the Xbox.
+HALO_XBOX_PARTICLE_LIMITS=0: the native sizes everywhere, as before. */
+#define LOCAL_LIMITS 8
+
+static struct data_array *local_limit_arrays[LOCAL_LIMITS];
+static short local_limit_values[LOCAL_LIMITS];
+static int local_limit_count;
+
+void halo_data_set_local_limit(struct data_array *data, short limit)
+{
+	if (data && local_limit_count < LOCAL_LIMITS)
+	{
+		local_limit_arrays[local_limit_count] = data;
+		local_limit_values[local_limit_count++] = limit;
+	}
+}
+
+static short datum_new_limit(struct data_array *data)
+{
+	extern int halo_local_limits_active(void);
+	int index;
+
+	for (index = 0; index < local_limit_count; index++)
+	{
+		if (local_limit_arrays[index] == data)
+		{
+			if (local_limit_values[index] < data->maximum_count && halo_local_limits_active())
+				return local_limit_values[index];
+			break;
+		}
+	}
+	return data->maximum_count;
+}
+#endif
+
 long datum_new(
 	struct data_array *data)
 {
@@ -302,6 +346,9 @@ long datum_new(
 	short absolute_index;
 	long size;
 	long result = NONE;
+#ifdef HALO_LINUX
+	short maximum_count;
+#endif
 
 	data_verify(data);
 	match_assert("c:\\halo\\SOURCE\\memory\\data.c", 163, data->valid);
@@ -309,7 +356,12 @@ long datum_new(
 	absolute_index = data->first_free_absolute_index;
 	size = data->size;
 	header = (struct datum_header *)((byte *)data->data+size*absolute_index);
+#ifdef HALO_LINUX
+	maximum_count = datum_new_limit(data);
+	while (absolute_index<maximum_count)
+#else
 	while (absolute_index<data->maximum_count)
+#endif
 	{
 		if (!header->identifier)
 		{

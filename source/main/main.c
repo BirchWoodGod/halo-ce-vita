@@ -859,6 +859,25 @@ short game_connection(
 	return main_globals.connection;
 }
 
+#ifdef HALO_LINUX
+/* (port) whether the arrays data.c holds to the Xbox's sizes are held now:
+a local game, unless HALO_XBOX_PARTICLE_LIMITS=0 (data.c datum_new_limit) */
+int halo_local_limits_active(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		extern char *getenv(const char *name);
+		extern int atoi(const char *text);
+		const char *setting = getenv("HALO_XBOX_PARTICLE_LIMITS");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	return enabled && game_connection() == _game_connection_local;
+}
+#endif
+
 void main_disallow_persistent_storage(
 	void)
 {
