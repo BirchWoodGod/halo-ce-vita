@@ -350,6 +350,145 @@ struct profile_section render_model_section = { "render_model", NONE, TRUE };
 
 /* ---------- private code */
 
+#ifdef HALO_LINUX
+/* (port) a part's work in a pass: what render_model_parts' walk did for
+each part in each pass (unchanged) */
+static void render_model_part_in_pass(
+	short pass,
+	struct model const *model,
+	struct model_geometry_part const *part,
+	short part_index,
+	struct model_shader_reference const *shader_reference,
+	struct shader *shader,
+	struct rasterizer_model_skinning const *skinning,
+	long object_index,
+	short forced_shader_permutation_index,
+	long flags,
+	struct render_sort_filth *sort_filth,
+	short *sort_filth_count_reference)
+{
+	boolean immediate = TEST_FLAG(flags, _render_model_immediate_bit);
+	short sort_filth_count = *sort_filth_count_reference;
+	real_point3d centroid;
+
+	if (shader_type_is_valid_for_model(shader->base.type) &&
+		!TEST_FLAG(part->flags, _model_geometry_part_stripped_bit))
+	{
+		if (shader_type_is_transparent(shader->base.type))
+		{
+			if (pass==_render_model_pass_transparent)
+			{
+				match_assert("c:\\halo\\SOURCE\\models\\models.c", 442, !TEST_FLAG(flags, _render_model_shadow_bit));
+				match_assert(
+					"c:\\halo\\SOURCE\\models\\models.c",
+					445,
+					part->centroid_primary_node_index>=0 && part->centroid_primary_node_index<model->nodes.count);
+				match_assert(
+					"c:\\halo\\SOURCE\\models\\models.c",
+					446,
+					part->centroid_secondary_node_index>=0 && part->centroid_secondary_node_index<model->nodes.count);
+
+				RENDER_MODEL_PART_BEGIN();
+
+				matrix4x3_transform_point(
+					&skinning->node_matrices[part->centroid_primary_node_index],
+					&part->centroid,
+					&centroid);
+				rasterizer_model_transparent_geometry_submit(
+					shader,
+					forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
+					&part->triangle_buffer,
+					NONE,
+					part->triangle_buffer.count,
+					&part->vertex_buffer,
+					NONE,
+					&centroid,
+					&sort_filth[sort_filth_count]);
+				RENDER_MODEL_PART_END(1);
+
+				if (sort_filth_count<MAXIMUM_PARTS_PER_MODEL_GEOMETRY &&
+					sort_filth[sort_filth_count].group_index!=NONE &&
+					!immediate &&
+					(part->next_part_index>0 || part->previous_part_index>0))
+				{
+					sort_filth[sort_filth_count].part_index = part_index;
+					sort_filth[sort_filth_count].next_part_index = part->next_part_index;
+					sort_filth_count++;
+				}
+			}
+		}
+		else if (shader->base.type==_shader_type_model &&
+			TEST_FLAG(((struct shader_model_definition *)shader_get_and_verify_type(shader, _shader_type_model))->flags, _shader_model_alpha_blended_decal_bit))
+		{
+			if (pass==_render_model_pass_decal)
+			{
+				RENDER_MODEL_PART_BEGIN();
+
+				match_assert("c:\\halo\\SOURCE\\models\\models.c", 491, !TEST_FLAG(flags, _render_model_shadow_bit));
+
+				rasterizer_model_draw(
+					shader,
+					forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
+					&part->triangle_buffer,
+					NONE,
+					part->triangle_buffer.count,
+					&part->vertex_buffer,
+					NONE);
+				RENDER_MODEL_PART_END(0);
+			}
+		}
+		else if (pass==_render_model_pass_solid)
+		{
+			RENDER_MODEL_PART_BEGIN();
+
+			if (TEST_FLAG(flags, _render_model_shadow_bit))
+			{
+				rasterizer_environment_shadow_model_draw(
+					shader,
+					forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
+					&part->triangle_buffer,
+					&part->vertex_buffer);
+				RENDER_MODEL_PART_END(2);
+			}
+			else
+			{
+				rasterizer_model_draw(
+					shader,
+					forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
+					&part->triangle_buffer,
+					NONE,
+					part->triangle_buffer.count,
+					&part->vertex_buffer,
+					NONE);
+				rasterizer_debug_model_vertices(object_index, skinning, part);
+				RENDER_MODEL_PART_END(0);
+			}
+		}
+	}
+
+	*sort_filth_count_reference = sort_filth_count;
+
+	return;
+}
+
+/* (port) render_model_parts walked the regions and parts once per pass
+(solid, decal, transparent), looking every part's permutation, geometry,
+shader reference and shader up three times to act on it in one of them.
+The walk is made once: the solid parts are drawn as it finds them, as the
+solid pass did, and the decal and transparent parts are kept, in the order
+found, for their passes after it. Each part gets the same work in the same
+order as before. A model with more than RENDER_MODEL_KEPT_PARTS decal or
+transparent parts has those passes walk the regions as before. */
+#define RENDER_MODEL_KEPT_PARTS 64
+struct render_model_kept_part
+{
+	struct model_geometry_part const *part;
+	struct model_shader_reference const *shader_reference;
+	struct shader *shader;
+	short part_index;
+};
+#endif
+
 static void render_model_parts(
 	struct model const *model,
 	char const *region_permutation_indices,
@@ -359,10 +498,18 @@ static void render_model_parts(
 	short forced_shader_permutation_index,
 	long flags)
 {
+#ifndef HALO_LINUX
 	boolean immediate = TEST_FLAG(flags, _render_model_immediate_bit);
+#endif
 	short last_pass = TEST_FLAG(flags, _render_model_shadow_bit) ? _render_model_pass_solid : _render_model_pass_transparent;
 	struct render_sort_filth sort_filth[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
+#ifdef HALO_LINUX
+	struct render_model_kept_part decal_parts[RENDER_MODEL_KEPT_PARTS], transparent_parts[RENDER_MODEL_KEPT_PARTS];
+	short decal_count = 0, transparent_count = 0;
+	boolean kept_overflow = FALSE;
+#else
 	real_point3d centroid;
+#endif
 	short pass;
 
 	for (pass = _render_model_pass_solid; pass<=last_pass; pass++)
@@ -371,6 +518,23 @@ static void render_model_parts(
 		short region_index;
 		short i, j;
 
+#ifdef HALO_LINUX
+		if (pass != _render_model_pass_solid && !kept_overflow)
+		{
+			/* (the decal or transparent parts the solid pass's walk kept) */
+			struct render_model_kept_part const *kept = pass == _render_model_pass_decal ? decal_parts : transparent_parts;
+			short kept_count = pass == _render_model_pass_decal ? decal_count : transparent_count;
+			short kept_index;
+
+			for (kept_index = 0; kept_index < kept_count; kept_index++)
+			{
+				render_model_part_in_pass(pass, model, kept[kept_index].part, kept[kept_index].part_index,
+					kept[kept_index].shader_reference, kept[kept_index].shader, skinning, object_index,
+					forced_shader_permutation_index, flags, sort_filth, &sort_filth_count);
+			}
+		}
+		else
+#endif
 		for (region_index = 0; region_index<model->regions.count; region_index++)
 		{
 			struct model_region *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
@@ -404,6 +568,48 @@ static void render_model_parts(
 							struct model_shader_reference);
 						struct shader *shader = shader_definition_get(shader_reference->shader.index);
 
+#ifdef HALO_LINUX
+						if (pass == _render_model_pass_solid && shader_type_is_valid_for_model(shader->base.type) &&
+							!TEST_FLAG(part->flags, _model_geometry_part_stripped_bit))
+						{
+							/* (as the solid pass's walk: solid parts drawn now, the
+							others kept for their passes) */
+							struct render_model_kept_part *kept = NULL;
+
+							if (shader_type_is_transparent(shader->base.type))
+							{
+								if (transparent_count < RENDER_MODEL_KEPT_PARTS)
+									kept = &transparent_parts[transparent_count++];
+								else
+									kept_overflow = TRUE;
+							}
+							else if (shader->base.type==_shader_type_model &&
+								TEST_FLAG(((struct shader_model_definition *)shader_get_and_verify_type(shader, _shader_type_model))->flags, _shader_model_alpha_blended_decal_bit))
+							{
+								if (decal_count < RENDER_MODEL_KEPT_PARTS)
+									kept = &decal_parts[decal_count++];
+								else
+									kept_overflow = TRUE;
+							}
+							else
+							{
+								render_model_part_in_pass(pass, model, part, part_index, shader_reference, shader, skinning,
+									object_index, forced_shader_permutation_index, flags, sort_filth, &sort_filth_count);
+							}
+							if (kept)
+							{
+								kept->part = part;
+								kept->shader_reference = shader_reference;
+								kept->shader = shader;
+								kept->part_index = part_index;
+							}
+						}
+						else if (pass != _render_model_pass_solid)
+						{
+							render_model_part_in_pass(pass, model, part, part_index, shader_reference, shader, skinning,
+								object_index, forced_shader_permutation_index, flags, sort_filth, &sort_filth_count);
+						}
+#else
 						if (shader_type_is_valid_for_model(shader->base.type) &&
 							!TEST_FLAG(part->flags, _model_geometry_part_stripped_bit))
 						{
@@ -498,6 +704,7 @@ static void render_model_parts(
 								}
 							}
 						}
+#endif
 					}
 				}
 			}
