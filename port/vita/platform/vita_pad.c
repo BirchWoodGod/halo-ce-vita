@@ -2,8 +2,8 @@
 VITA_PAD.C
 
 The Vita's controls as the Xbox controller on port 0, by default in Xita's
-layout (the settings panel's Controls tab moves an action to another button
-and gives the touch zones actions: vita_controls.c):
+layout (the settings panel's Controls tab puts each Xbox button on another
+Vita button and gives the touch zones Xbox buttons: vita_controls.c):
 	Cross, Circle, Square, Triangle   A, B, X, Y
 	L, R                              left trigger (grenade), right trigger (fire)
 	Start, Select                     Start, Back
@@ -82,7 +82,7 @@ static void stick(unsigned char raw_x, unsigned char raw_y, int deadzone, int se
 void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 {
 	static int deadzone = -1, sensitivity, curve, invert;
-	/* the zones' and buttons' actions (the panel's Controls tab), and the
+	/* the zones' and the Xbox buttons' settings (the panel's Controls tab), and the
 	crouch toggle's state */
 	static struct vita_controls_config controls;
 	static struct vita_controls_state controls_state;

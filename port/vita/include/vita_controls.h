@@ -3,9 +3,9 @@ VITA_CONTROLS.H
 
 The mapping layer between the Vita's controls and the Xbox controller the
 game reads (port/vita/host/vita_controls.c): the touch zones on the front
-screen and the rear pad, the game actions a zone or a button can be set to
-in the settings panel's Controls tab, and the Xbox controller's buttons
-those actions press. Nothing here touches the SDK, so the desktop test
+screen and the rear pad, and what the settings panel's Controls tab sets
+(the Xbox button each zone presses, the Vita button of each Xbox button).
+Nothing here touches the SDK, so the desktop test
 (port/vita/tests/vita_controls_test.c) builds it as it is. Like
 vita_host.h, the structures are of 32-bit scalars only: the platform layer
 (clang, the game's ABI) and the host (VitaSDK's GCC) both use them.
@@ -86,66 +86,73 @@ how many fingers came down this frame */
 unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct vita_touch_contact *contacts,
 	int count, unsigned long long now_us, int *started);
 
-/* ---------- actions */
+/* ---------- the Xbox controller's buttons */
 
+/* what a touch zone presses, and what each remappable row is: the Xbox
+controller's buttons (Start stays on Start). A to the right trigger are in
+XINPUT_GAMEPAD_A..RIGHT_TRIGGER's order, so VITA_XBOX_A + n is analog
+button n */
 enum
 {
-	VITA_ACTION_OFF,
-	VITA_ACTION_MELEE,
-	VITA_ACTION_GRENADE,
-	VITA_ACTION_FLASHLIGHT,
-	VITA_ACTION_ZOOM,
-	VITA_ACTION_CROUCH,
-	VITA_ACTION_RELOAD,
-	VITA_ACTION_SWITCH_WEAPON,
-	VITA_ACTION_SWITCH_GRENADE,
-	VITA_ACTION_JUMP,
-	VITA_ACTION_SCOREBOARD,
-	VITA_ACTION_FIRE,
-	VITA_ACTION_COUNT
+	VITA_XBOX_OFF,
+	VITA_XBOX_A,
+	VITA_XBOX_B,
+	VITA_XBOX_X,
+	VITA_XBOX_Y,
+	VITA_XBOX_BLACK,
+	VITA_XBOX_WHITE,
+	VITA_XBOX_LEFT_TRIGGER,
+	VITA_XBOX_RIGHT_TRIGGER,
+	VITA_XBOX_LEFT_STICK,
+	VITA_XBOX_RIGHT_STICK,
+	VITA_XBOX_BACK,
+	VITA_XBOX_COUNT
 };
 
-/* the actions as settings.txt values and as the panel shows them (in the
-enum's order; macros, for the panel's row initialisers) */
-#define VITA_ACTION_VALUES "off", "melee", "grenade", "flashlight", "zoom", "crouch", "reload", "weapon", \
-	"grenade_switch", "jump", "scoreboard", "fire"
-#define VITA_ACTION_NAMES "Off", "Melee", "Throw grenade", "Flashlight", "Zoom", "Crouch", "Reload/action", \
-	"Switch weapon", "Switch grenade", "Jump", "Scoreboard", "Fire"
+/* the Xbox buttons as settings.txt values and as the panel shows them (in
+the enum's order; macros, for the panel's row initialisers) */
+#define VITA_XBOX_VALUES "off", "a", "b", "x", "y", "black", "white", "lt", "rt", "ls", "rs", "back"
+#define VITA_XBOX_NAMES "Off", "A", "B", "X", "Y", "Black", "White", "Left trigger", "Right trigger", \
+	"Left stick", "Right stick", "Back"
 
-/* the action a settings value names; VITA_ACTION_OFF if none */
-int vita_action_named(const char *value);
+/* (two letters each, for the panel's zone diagram) */
+#define VITA_XBOX_SHORT_NAMES "", "A", "B", "X", "Y", "Bl", "Wh", "LT", "RT", "LS", "RS", "Bk"
 
-/* the buttons an action can be put on (in play), as settings.txt values and
-as the panel shows them; "none" leaves the action on no button */
-#define VITA_BUTTON_CHOICES 11
-#define VITA_BUTTON_VALUES "cross", "circle", "square", "triangle", "l", "r", "up", "down", "left", "right", "none"
+/* the Xbox button a settings value names; VITA_XBOX_OFF if none */
+int vita_xbox_named(const char *value);
+
+/* the Vita buttons an Xbox button can be put on (in play), as settings.txt
+values and as the panel shows them; "none" leaves it on no button */
+#define VITA_BUTTON_CHOICES 12
+#define VITA_BUTTON_VALUES "cross", "circle", "square", "triangle", "l", "r", "up", "down", "left", "right", \
+	"select", "none"
 #define VITA_BUTTON_NAMES "Cross", "Circle", "Square", "Triangle", "L", "R", "D-pad up", "D-pad down", \
-	"D-pad left", "D-pad right", "None"
+	"D-pad left", "D-pad right", "Select", "None"
 
-/* the button (a VITA_BUTTON_* bit, 0 for none) a settings value names, or
-`fallback` if it names none */
+/* the Vita button (a VITA_BUTTON_* bit, 0 for none) a settings value names,
+or `fallback` if it names none */
 unsigned long vita_button_named(const char *value, unsigned long fallback);
 
-/* the settings variable of each zone's action, and of each remappable
-action's button (NULL: the action has no row, Off and Scoreboard: Select
-is always the scoreboard) */
+/* the settings variable of each zone's Xbox button, and of each Xbox
+button's Vita button (NULL for Off) */
 extern const char *const vita_touch_variables[VITA_ZONE_COUNT];
-extern const char *const vita_button_variables[VITA_ACTION_COUNT];
-/* each action's button as shipped (the README's layout) */
-extern const unsigned long vita_button_defaults[VITA_ACTION_COUNT];
+extern const char *const vita_xbox_variables[VITA_XBOX_COUNT];
+/* each Xbox button's Vita button as shipped (the README's layout) */
+extern const unsigned long vita_xbox_defaults[VITA_XBOX_COUNT];
 
 /* ---------- the mapping */
 
 struct vita_controls_config
 {
-	int zone_action[VITA_ZONE_COUNT];
-	unsigned long action_button[VITA_ACTION_COUNT];
+	/* each zone's Xbox button, and each Xbox button's Vita button */
+	int zone_xbox[VITA_ZONE_COUNT];
+	unsigned long xbox_button[VITA_XBOX_COUNT];
 	/* HALO_CROUCH_TOGGLE */
 	int crouch_toggle;
 };
 
-/* the zones' actions and the actions' buttons from the environment (the
-panel's settings), defaults for what is unset */
+/* the zones' Xbox buttons and the Xbox buttons' Vita buttons from the
+environment (the panel's settings), defaults for what is unset */
 void vita_controls_config_load(struct vita_controls_config *config);
 
 /* what the mapping remembers between frames (the crouch toggle) */
@@ -174,8 +181,9 @@ struct vita_controls_output
 
 /* the Xbox controller's buttons for the Vita's buttons and the touch zones
 held. In the game's menus the layout is fixed (the D-pad is the D-pad,
-Cross and Circle A and B) and the touch zones do nothing; in play each
-action is its button's or a zone's */
+Cross and Circle A and B) and the touch zones do nothing; in play each Xbox
+button is its Vita button's or a zone's (the left stick's click through the
+crouch toggle) */
 void vita_controls_map(const struct vita_controls_config *config, struct vita_controls_state *state,
 	unsigned long buttons, unsigned long touch, int menus, struct vita_controls_output *output);
 
