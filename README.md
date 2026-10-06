@@ -26,18 +26,16 @@ Evolved.
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality and control options: hold
   **Select + Start** in game.
-- Up to 30 fps. Quiet areas and cinematics usually hold 25 to 30 fps;
-  busy fights drop to around 20, and the largest (The Silent
-  Cartographer's beach) to the mid-to-high teens.
+- Up to 30 fps. Quiet areas and cinematics hold 25 to 30 fps; the biggest
+  fights drop to the mid-to-high teens. See [Performance](#performance).
 
 ### Known issues
 
 The current list is in the [roadmap](ROADMAP.md) and the
 [issues](https://github.com/BirchWoodGod/halo-ce-vita/issues). The main
-ones: some objects flicker or vanish at the screen's edges, invisible
-(camouflaged) Elites can show up black late in a long session, the first
-visit to an area can freeze for a second or two, and after resuming a save
-checkpoints have stopped triggering for at least one player.
+ones: the biggest fights still drop frames (see [Performance](#performance)),
+Covenant energy shields and some glass can flicker or disappear depending
+on distance, and some trees flicker at the screen's edges.
 
 ## Install
 
@@ -150,6 +148,47 @@ render resolution. Set model detail High, distant objects Off, scenery and
 lighting to every tick, sound occlusion every tick and the resolution to
 100% to see and hear the game exactly as on the Xbox. Sound voices can play
 fewer positional sounds at once for speed.
+
+## Performance
+
+Measured on a PS Vita 1000 with 1.0.3's default settings:
+
+| Where | Frame rate |
+| --- | --- |
+| Menus, cinematics, quiet areas | 25 to 30 fps |
+| Ordinary fights | 20 to 30 fps |
+| The Silent Cartographer's beach landing | about 18 to 19 fps at its busiest |
+| Pillar of Autumn's biggest firefights | about 15 to 18 fps |
+| Late-game Flood and Covenant battles | can drop lower; 1.0.3 betas cut the GPU work there |
+
+Why it slows down: the biggest fights are limited by different things in
+different places. On The Silent Cartographer's beach the Vita's processor is
+the limit (drawing many characters, and the game's own simulation of them);
+in Pillar of Autumn's interiors the graphics chip is, and its cost there does
+not shrink much with the render resolution. So lowering the resolution
+mainly makes the picture softer and helps less than you might expect.
+
+What helps, in the settings panel:
+
+- **Model detail** Low or Lowest: characters and vehicles far away are drawn
+  with fewer polygons.
+- **Hide distant objects** Small or Medium: tiny far-away objects are skipped.
+- **Scenery updates** and **Object lighting** at Quarter / Third (the
+  defaults).
+- **Sound voices** 16: fewer positional sounds at once.
+- Keep **Smooth weapon motion** on: it costs almost nothing and makes the
+  frame rate feel steadier.
+
+A steady 30 fps in the biggest fights is a goal for 1.1.0 (see the
+[roadmap](ROADMAP.md)). If you want to help measure, add these lines to
+`ux0:data/haloce-vita/env.txt`, play a heavy fight for a couple of minutes,
+and attach `ux0:data/haloce-vita/halo.log` to an issue:
+
+```
+HALO_FRAME_TIMING=300
+HALO_RENDER_PROFILE=1
+HALO_TICK_PROFILE=1
+```
 
 ## Building
 
