@@ -3361,7 +3361,7 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 {
 	const char *text = gxm.menu_text[__atomic_load_n(&gxm.menu_index, __ATOMIC_ACQUIRE)];
 	const char *lines[24];
-	int line_count = 0, index;
+	int line_count = 0, index, slots;
 	/* (wide enough for the tab bar's six names at 12 pixels a character,
 	and a 21-character label with a 16-character choice at 16:
 	"Co-op campaign  < 343 Guilty Spark >") */
@@ -3384,17 +3384,20 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	}
 	if (line_count < 2)
 		return count;
+	/* (the tabbed panel keeps one size from tab to tab: room for 16 lines,
+	the hint on the last) */
+	slots = lines[0][0] == '\t' && line_count < 16 ? 16 : line_count;
 	/* (the rows close up to fit the screen when there are many) */
-	if (16.0f + row_height * line_count + 8.0f > DISPLAY_HEIGHT)
-		row_height = (DISPLAY_HEIGHT - 24.0f) / line_count;
-	height = 16.0f + row_height * line_count + 8.0f;
+	if (16.0f + row_height * slots + 8.0f > DISPLAY_HEIGHT)
+		row_height = (DISPLAY_HEIGHT - 24.0f) / slots;
+	height = 16.0f + row_height * slots + 8.0f;
 	left = (DISPLAY_WIDTH - width) / 2.0f;
 	top = (DISPLAY_HEIGHT - height) / 2.0f;
 	count = overlay_rect(vertices, count, left, top, width, height, 0xE0101010u);
 	count = overlay_rect(vertices, count, left, top, width, 2.0f, 0xFF40FF40u);
 	for (index = 0; index < line_count; index++)
 	{
-		float y = top + 12.0f + row_height * index;
+		float y = top + 12.0f + row_height * (index == line_count - 1 ? slots - 1 : index);
 		uint32_t color = index == 0 ? 0xFF40FF40u : index == line_count - 1 ? 0xFFA0A0A0u : 0xFFE0E0E0u;
 
 		if (index == 0 && lines[0][0] == '\t')

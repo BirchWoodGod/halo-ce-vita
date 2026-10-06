@@ -500,11 +500,16 @@ static int apply_profile(int profile)
 	return restart;
 }
 
+/* settings.txt written anew: into a file of its own, then put in place of
+the old one (a file opened for writing is not cut short on Vita3K, which
+left the end of a longer old file after a shorter new one) */
 static void save(void)
 {
-	FILE *file = fopen(SETTINGS_FILE, "w");
-	int index;
+	FILE *file;
+	int index, ok;
 
+	remove(SETTINGS_FILE ".new");
+	file = fopen(SETTINGS_FILE ".new", "w");
 	if (!file)
 		return;
 	for (index = 0; index < SETTING_COUNT; index++)
@@ -512,7 +517,12 @@ static void save(void)
 			fprintf(file, "%s=%s\n", settings[index].variable, settings[index].values[settings[index].choice]);
 	if (maps_disabled[0])
 		fprintf(file, "HALO_MAPS_DISABLED=%s\n", maps_disabled);
-	fclose(file);
+	ok = fclose(file) == 0;
+	if (ok)
+	{
+		remove(SETTINGS_FILE);
+		rename(SETTINGS_FILE ".new", SETTINGS_FILE);
+	}
 }
 
 /* the chosen network as the platform layer's settings (port_config.c):
