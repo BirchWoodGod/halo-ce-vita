@@ -35,6 +35,7 @@ read.
 #include "scenario/scenario_definitions.h"
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
+#include "map_share_protocol.h"
 #ifdef HALO_RELOCATABLE_TAG_CACHE
 #include "tag_relocate.h"
 #endif
@@ -512,18 +513,53 @@ boolean custom_edition_cache_xbox_multiplayer(
 	return multiplayer;
 }
 
+/* the identities custom_edition_cache_map_identity worked out, by file
+name and size: the CRC of a map without a checksum reads the whole file */
+enum { REMEMBERED_IDENTITIES = 8 };
+static struct
+{
+	char name[CACHE_FILE_STRING_BYTES];
+	uint32_t size;
+	unsigned long identity;
+} remembered_identities[REMEMBERED_IDENTITIES];
+
+boolean custom_edition_cache_map_file_path(
+	char const *map_name,
+	char *path,
+	long path_size)
+{
+	char found[MAP_PATH_SIZE];
+
+	if (!custom_edition_map_path(map_name, found) || (long)strlen(found) >= path_size)
+	{
+		return FALSE;
+	}
+	strcpy(path, found);
+
+	return TRUE;
+}
+
+void custom_edition_cache_map_identity_forget(
+	char const *map_name)
+{
+	char const *name = tag_name_strip_path(map_name);
+	short index;
+
+	for (index = 0; index < REMEMBERED_IDENTITIES; index++)
+	{
+		if (!csstrcasecmp(remembered_identities[index].name, name))
+		{
+			remembered_identities[index].identity = 0;
+			remembered_identities[index].name[0] = 0;
+		}
+	}
+
+	return;
+}
+
 unsigned long custom_edition_cache_map_identity(
 	char const *map_name)
 {
-	/* the answers kept, by file name and size: the CRC of a map without a
-	checksum reads the whole file */
-	enum { REMEMBERED_IDENTITIES = 8 };
-	static struct
-	{
-		char name[CACHE_FILE_STRING_BYTES];
-		uint32_t size;
-		unsigned long identity;
-	} remembered[REMEMBERED_IDENTITIES];
 	static short next_remembered;
 	char const *name = tag_name_strip_path(map_name);
 	char path[MAP_PATH_SIZE];
@@ -540,30 +576,29 @@ unsigned long custom_edition_cache_map_identity(
 	}
 	for (index = 0; index < REMEMBERED_IDENTITIES; index++)
 	{
-		if (remembered[index].identity &&
-			remembered[index].size == file.source.size &&
-			!csstrcasecmp(remembered[index].name, name))
+		if (remembered_identities[index].identity &&
+			remembered_identities[index].size == file.source.size &&
+			!csstrcasecmp(remembered_identities[index].name, name))
 		{
 			custom_edition_file_close(&file);
-			return remembered[index].identity;
+			return remembered_identities[index].identity;
 		}
 	}
 	if (cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
 		(identity.format == _cache_file_format_xbox_cache || identity.format == _cache_file_format_custom_edition_cache))
 	{
-		if (identity.checksum && identity.checksum != 0xFFFFFFFFUL)
+		uLong crc = 0;
+
+		/* (map_share_identity: the header's checksum with the file's
+		length, or for a header without one, Invader's Xbox maps, the CRC-32
+		of the whole file; map sharing works out the same of a download,
+		map_share_protocol.c) */
+		if (!identity.checksum || identity.checksum == 0xFFFFFFFFUL)
 		{
-			/* the header's checksum, as Bungie's tools, Custom Edition's and
-			Invader's write it, with the length the file has */
-			result = (identity.checksum ^ (unsigned long)file.source.size * 0x9E3779B1UL) & 0xFFFFFFFFUL;
-		}
-		else
-		{
-			/* none (Invader's Xbox maps): the CRC-32 of the whole file */
 			byte buffer[READ_STAGING_BYTES];
-			uLong crc = crc32(0L, Z_NULL, 0);
 			uint32_t offset;
 
+			crc = crc32(0L, Z_NULL, 0);
 			for (offset = 0; offset < file.source.size; offset += READ_STAGING_BYTES)
 			{
 				uint32_t chunk = MIN(file.source.size - offset, READ_STAGING_BYTES);
@@ -575,15 +610,11 @@ unsigned long custom_edition_cache_map_identity(
 				}
 				crc = crc32(crc, buffer, chunk);
 			}
-			result = crc & 0xFFFFFFFFUL;
 		}
-		if (!result)
-		{
-			result = 1;
-		}
-		csstrncpy(remembered[next_remembered].name, name, CACHE_FILE_STRING_BYTES - 1);
-		remembered[next_remembered].size = file.source.size;
-		remembered[next_remembered].identity = result;
+		result = map_share_identity((uint32_t)identity.checksum, file.source.size, (uint32_t)crc);
+		csstrncpy(remembered_identities[next_remembered].name, name, CACHE_FILE_STRING_BYTES - 1);
+		remembered_identities[next_remembered].size = file.source.size;
+		remembered_identities[next_remembered].identity = result;
 		next_remembered = (short)((next_remembered + 1) % REMEMBERED_IDENTITIES);
 	}
 	custom_edition_file_close(&file);
