@@ -49,6 +49,8 @@ boolean network_coop_active(void);
 boolean network_coop_devices_remote(void);
 /* devices.c: a group's devices were set straight to its value */
 void network_coop_note_device_snap(short group_index);
+/* devices.c: a group's value or flags changed, or a group was made (the host lists the groups again) */
+void network_coop_note_device_group(short group_index);
 /* objects.c: an object was made (the co-op host's object census) */
 void network_coop_note_object_new(long object_index);
 /* main.c: whether a co-op client holds its tick this frame, being too far

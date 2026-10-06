@@ -516,6 +516,22 @@ static struct
 	/* whether this group has changed since the map loaded */
 	boolean moved[MAXIMUM_DEVICE_GROUPS];
 	short refresh_next, moved_refresh_next;
+	/* Every group as listed last (device_group_entries), and how many of
+	them have moved. They are listed again when the devices change (the
+	census's devices_version) or after a revert (relist). Otherwise only the
+	groups devices.c said changed (network_coop_note_device_group; dirty)
+	are read again: a few a tick, of hundreds. */
+	boolean relist;
+	long devices_version;
+	short entry_count;
+	short moved_count;
+	struct distributed_coop_device_group entries[MAXIMUM_DEVICE_GROUPS];
+	short group_indices[MAXIMUM_DEVICE_GROUPS];
+	/* each group's first entry, and each entry's next of the same group (NONE ends) */
+	short first_entries[MAXIMUM_DEVICE_GROUPS];
+	short next_entries[MAXIMUM_DEVICE_GROUPS];
+	boolean any_dirty;
+	byte dirty[MAXIMUM_DEVICE_GROUPS / 8];
 	struct distributed_coop_device_groups_message message;
 } host_devices;
 
@@ -822,6 +838,8 @@ static struct
 	boolean full;
 	/* object_header_data's identifier counter after the last census */
 	short next_identifier;
+	/* counts the changes to the devices' list (host_send_device_groups) */
+	long devices_version;
 	short cursor;
 	short created_count;
 	short hot_count;
@@ -947,38 +965,93 @@ one through every group, and a quicker one through the groups that have
 moved since the map loaded. A late joiner loaded the same map, so those are
 the ones it lacks, and a level's few moved devices (a light bridge) reach it
 within a tick or two instead of after a pass through hundreds. */
+/* host: an entry's group state compared with what was last noted of the
+group; a change is noted and sent (DEVICE_GROUP_SENDS times), and the group
+counts as moved from then on */
+static void device_group_note(
+	struct distributed_coop_device_group const *entry,
+	short group_index)
+{
+	if (!host_devices.started ||
+		entry->value != host_devices.values[group_index] ||
+		entry->flags != host_devices.flags[group_index] ||
+		entry->snaps != host_devices.snaps[group_index])
+	{
+		host_devices.values[group_index] = entry->value;
+		host_devices.flags[group_index] = entry->flags;
+		host_devices.snaps[group_index] = entry->snaps;
+		/* clients loaded the same map, so the starting state isn't sent */
+		if (host_devices.started)
+		{
+			host_devices.sends[group_index] = DEVICE_GROUP_SENDS;
+			if (!host_devices.moved[group_index])
+			{
+				short index;
+
+				host_devices.moved[group_index] = TRUE;
+				/* (moved_count counts entries, and a group may have several) */
+				for (index = host_devices.first_entries[group_index]; index != NONE; index = host_devices.next_entries[index])
+					host_devices.moved_count++;
+			}
+		}
+	}
+}
+
 static void host_send_device_groups(
 	void)
 {
-	static short group_indices[MAXIMUM_DEVICE_GROUPS];
-	struct distributed_coop_device_group *entries = host_devices.message.groups;
-	short count = device_group_entries(entries, group_indices);
-	short moved_count = 0, moved_index = 0;
+	struct distributed_coop_device_group *entries = host_devices.entries;
+	short *group_indices = host_devices.group_indices;
+	struct distributed_coop_device_group *sending = host_devices.message.groups;
+	short count, moved_count, moved_index = 0;
 	short index, sent = 0;
 
-	for (index = 0; index < count; index++)
+	if (!host_devices.started || host_devices.relist || host_devices.devices_version != host_census.devices_version)
 	{
-		struct distributed_coop_device_group const *entry = &entries[index];
-		short group_index = group_indices[index];
-
-		if (!host_devices.started ||
-			entry->value != host_devices.values[group_index] ||
-			entry->flags != host_devices.flags[group_index] ||
-			entry->snaps != host_devices.snaps[group_index])
+		host_devices.entry_count = device_group_entries(entries, group_indices);
+		host_devices.relist = FALSE;
+		host_devices.devices_version = host_census.devices_version;
+		host_devices.any_dirty = FALSE;
+		csmemset(host_devices.dirty, 0, sizeof(host_devices.dirty));
+		csmemset(host_devices.first_entries, NONE, sizeof(host_devices.first_entries));
+		for (index = host_devices.entry_count - 1; index >= 0; index--)
 		{
-			host_devices.values[group_index] = entry->value;
-			host_devices.flags[group_index] = entry->flags;
-			host_devices.snaps[group_index] = entry->snaps;
-			/* clients loaded the same map, so the starting state isn't sent */
-			if (host_devices.started)
+			host_devices.next_entries[index] = host_devices.first_entries[group_indices[index]];
+			host_devices.first_entries[group_indices[index]] = index;
+		}
+		for (index = 0; index < host_devices.entry_count; index++)
+			device_group_note(&entries[index], group_indices[index]);
+		host_devices.moved_count = 0;
+		for (index = 0; index < host_devices.entry_count; index++)
+		{
+			if (host_devices.moved[group_indices[index]])
+				host_devices.moved_count++;
+		}
+	}
+	else if (host_devices.any_dirty)
+	{
+		short group_index;
+
+		host_devices.any_dirty = FALSE;
+		for (group_index = 0; group_index < MAXIMUM_DEVICE_GROUPS; group_index++)
+		{
+			if (!(host_devices.dirty[group_index / 8] & (1 << (group_index % 8))))
+				continue;
+			host_devices.dirty[group_index / 8] &= (byte)~(1 << (group_index % 8));
+			for (index = host_devices.first_entries[group_index]; index != NONE; index = host_devices.next_entries[index])
 			{
-				host_devices.sends[group_index] = DEVICE_GROUP_SENDS;
-				host_devices.moved[group_index] = TRUE;
+				/* (a group gone without the devices changing: listed again next tick) */
+				if (!device_group_state(group_index, &entries[index]))
+				{
+					host_devices.relist = TRUE;
+					continue;
+				}
+				device_group_note(&entries[index], group_index);
 			}
 		}
-		if (host_devices.moved[group_index])
-			moved_count++;
 	}
+	count = host_devices.entry_count;
+	moved_count = host_devices.moved_count;
 	if (host_devices.refresh_next >= count)
 		host_devices.refresh_next = 0;
 	if (host_devices.moved_refresh_next >= moved_count)
@@ -1000,7 +1073,7 @@ static void host_send_device_groups(
 			host_devices.sends[group_index]--;
 		else if (!refresh)
 			continue;
-		entries[sent++] = *entry;
+		sending[sent++] = *entry;
 	}
 	host_devices.started = TRUE;
 	host_devices.refresh_next = count ? (short)((host_devices.refresh_next + DEVICE_GROUP_ALL_REFRESHES_PER_TICK) % count) : 0;
@@ -1014,9 +1087,9 @@ static void host_send_device_groups(
 		short message_count = (short)MIN(sent - index, MAXIMUM_DEVICE_GROUPS_PER_MESSAGE);
 
 		if (index > 0)
-			csmemcpy(entries, &entries[index], message_count * sizeof(entries[0]));
+			csmemcpy(sending, &sending[index], message_count * sizeof(sending[0]));
 		send_to_clients(&host_devices.message, _distributed_message_coop_device_groups, message_count,
-			sizeof(entries[0]));
+			sizeof(sending[0]));
 	}
 }
 
@@ -1283,6 +1356,7 @@ static void census_device_insert(
 		(host_census.device_count - index) * sizeof(host_census.devices[0]));
 	host_census.devices[index] = absolute_index;
 	host_census.device_count++;
+	host_census.devices_version++;
 }
 
 /* the object checked against what was last sent of it (once a tick) */
@@ -1340,6 +1414,11 @@ static void host_census_update(
 	host_census.listening = TRUE;
 	if (host_census.full || host_resend.refresh)
 	{
+		short listed_count = host_census.device_count;
+		boolean devices_changed = FALSE;
+
+		/* (the devices listed again in place, in order: a change to the list
+		is told by an entry that differs, or by the count) */
 		host_census.device_count = 0;
 		for (absolute_index = 0; absolute_index < object_header_data->count; absolute_index++)
 		{
@@ -1348,10 +1427,14 @@ static void host_census_update(
 			if (TEST_FLAG(_object_mask_device, object->object.type) &&
 				host_census.device_count < MAXIMUM_CENSUS_DEVICES)
 			{
+				devices_changed = devices_changed || host_census.device_count >= listed_count ||
+					host_census.devices[host_census.device_count] != absolute_index;
 				host_census.devices[host_census.device_count++] = absolute_index;
 			}
 			census_check(object_index, object, host_resend.refresh);
 		}
+		if (devices_changed || host_census.device_count != listed_count || host_census.full)
+			host_census.devices_version++;
 		host_census.full = host_census.device_count == MAXIMUM_CENSUS_DEVICES;
 	}
 	else
@@ -1374,6 +1457,7 @@ static void host_census_update(
 				host_census.device_count--;
 				csmemmove(&host_census.devices[index], &host_census.devices[index + 1],
 					(host_census.device_count - index) * sizeof(host_census.devices[0]));
+				host_census.devices_version++;
 				index--;
 				continue;
 			}
@@ -2357,6 +2441,16 @@ void network_coop_note_device_snap(
 {
 	if (coop_host() && group_index >= 0 && group_index < MAXIMUM_DEVICE_GROUPS)
 		host_devices.snap_counts[group_index]++;
+	network_coop_note_device_group(group_index);
+}
+
+void network_coop_note_device_group(
+	short group_index)
+{
+	if (group_index < 0 || group_index >= MAXIMUM_DEVICE_GROUPS)
+		return;
+	host_devices.dirty[group_index / 8] |= (byte)(1 << (group_index % 8));
+	host_devices.any_dirty = TRUE;
 }
 
 /* index of the looping sound in host_looping_sounds, or NONE */
@@ -2914,8 +3008,9 @@ void network_coop_reverted(
 	}
 	/* (the dropships' riders kept are of the game state reverted from) */
 	coop_enemies_reset();
-	/* (every object is where the saved state had it) */
+	/* (every object is where the saved state had it, every device group as it had it) */
 	host_census.full = TRUE;
+	host_devices.relist = TRUE;
 	error(_error_silent, "co-op: reverted %ld ticks, clock kept at %ld", ticks, now);
 	event_new(_coop_event_reverted);
 }
