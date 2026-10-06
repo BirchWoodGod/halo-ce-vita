@@ -219,7 +219,7 @@ Measured on a PS Vita 1000 with 1.0.3's default settings:
 | Ordinary fights | 20 to 30 fps |
 | The Silent Cartographer's beach landing | about 18 to 19 fps at its busiest |
 | Pillar of Autumn's biggest firefights | about 15 to 18 fps |
-| Late-game Flood and Covenant battles | can drop lower; 1.0.3 betas cut the GPU work there |
+| Late-game Flood and Covenant battles | can drop lower; 1.0.3 cuts the GPU work there |
 
 Why it slows down: the biggest fights are limited by different things in
 different places. On The Silent Cartographer's beach the Vita's processor is
