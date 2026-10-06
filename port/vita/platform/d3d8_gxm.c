@@ -4269,6 +4269,10 @@ render_target_wake), then the texture pool's segments in CDRAM, one at a
 time from the top, each moved to user RAM (the textures in it decoded again
 as they are used). */
 
+/* a target allocation a frame made that found no CDRAM, noted before a
+live change (whose own attempts' refusals are not kept): cdram_wanted_relieve */
+static unsigned long cdram_wanted_pending;
+
 /* HALO_CDRAM_RELIEF=0 (debug): nothing given back when CDRAM runs short
 (as before: a live change that does not fit waits for a restart) */
 static BOOL cdram_relief_enabled(void)
@@ -4286,18 +4290,21 @@ static BOOL cdram_relief_enabled(void)
 	return enabled != 0;
 }
 
-/* a screen-sized target unused for ten seconds (not the back buffer nor
-its depth) given back, its entry dormant; the count */
-static unsigned long screen_targets_doze(void)
+/* a screen-sized target unused for idle frames (ten seconds; 0: any; not
+the back buffer nor its depth) given back, its entry dormant; the count */
+static unsigned long screen_targets_doze(unsigned long idle)
 {
 	struct render_target_entry *entry;
 	unsigned long count = 0;
 
 	for (entry = render_targets; entry; entry = entry->next)
 	{
-		if (!screen_sized_entry(entry) || entry->dormant || entry->last_used + 300 >= device.frame ||
-			entry->target.data == device.back_buffer.Data || entry->target.data == device.depth_buffer.Data)
+		if (!screen_sized_entry(entry) || entry->dormant || (idle && entry->last_used + idle >= device.frame) ||
+			(entry->target.data == device.back_buffer.Data && !entry->target.depth) ||
+			(entry->target.data == device.depth_buffer.Data && entry->target.depth))
 		{
+			/* (the zoom's copy is a colour surface over the depth buffer's
+			memory: not the depth buffer) */
 			continue;
 		}
 		vgxm_target_release(entry->id);
@@ -4330,7 +4337,7 @@ static unsigned long cdram_relieve(unsigned long *dozed)
 {
 	unsigned long freed = targets_unreferenced_sweep();
 
-	*dozed = screen_targets_doze();
+	*dozed = screen_targets_doze(300);
 	return freed + vgxm_memory_trim();
 }
 
@@ -4408,8 +4415,8 @@ static void cdram_census(const char *when)
 		if (!id || id > VGXM_MAXIMUM_TARGETS || role_of[id])
 			continue;
 		snprintf(roles[id], sizeof(roles[id]), "%s%s %08lx v%lu, used %ld frames ago%s",
-			entry->target.data == device.back_buffer.Data ? "the back buffer" :
-			entry->target.data == device.depth_buffer.Data ? "the depth buffer" :
+			entry->target.data == device.back_buffer.Data && !entry->target.depth ? "the back buffer" :
+			entry->target.data == device.depth_buffer.Data && entry->target.depth ? "the depth buffer" :
 			camo_copy_size(entry->target.width, entry->target.height, entry->target.depth) ? "the camouflage's copy" :
 			screen_sized_entry(entry) ? "a copy of the screen" : entry->chain_levels ? "a mip chain level" :
 			entry->cell ? "an atlas cell" : "a surface",
@@ -4436,10 +4443,16 @@ static void cdram_wanted_relieve(void)
 	unsigned long wanted, freed, dozed, pool_parts = 0, moved;
 
 	if (!device.created || !device.gpu_ready || (relieved_frame && device.frame < relieved_frame + 300) ||
-		!cdram_relief_enabled() || !(wanted = vgxm_cdram_wanted()))
+		!cdram_relief_enabled())
 	{
 		return;
 	}
+	wanted = vgxm_cdram_wanted();
+	if (cdram_wanted_pending > wanted)
+		wanted = cdram_wanted_pending;
+	cdram_wanted_pending = 0;
+	if (!wanted)
+		return;
 	relieved_frame = device.frame;
 	if (worker_enabled > 0)
 	{
@@ -4466,7 +4479,7 @@ static void screen_settings_apply(void)
 	float scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale();
 	long width = screen_width_wanted(), old_width = screen_width;
 	unsigned long long started;
-	unsigned long made = 0, targets, cdram, cached, cdram_free, freed = 0, dozed = 0, moved, pool_parts = 0;
+	unsigned long made = 0, targets, cdram, cached, cdram_free, freed = 0, dozed = 0, moved, pool_parts = 0, wanted;
 	int restored = TRUE, made_new;
 
 	if (scale < 0.5f || scale > 1.0f)
@@ -4495,7 +4508,21 @@ static void screen_settings_apply(void)
 			vita_host_sleep_us(100);
 	}
 	vgxm_wait_gpu_idle();
+	/* (a frame's target that found no CDRAM, kept for cdram_wanted_relieve
+	past the change's own refusals) */
+	wanted = vgxm_cdram_wanted();
+	if (wanted > cdram_wanted_pending)
+		cdram_wanted_pending = wanted;
 	vgxm_render_scale_set(scale);
+	{
+		/* (debug) HALO_CDRAM_DOZE_ALL=1: every copy of the screen given back
+		at a live change, used or not, to be made again as it is next drawn
+		into (tries render_target_wake) */
+		const char *setting = getenv("HALO_CDRAM_DOZE_ALL");
+
+		if (setting && atoi(setting))
+			screen_targets_doze(0);
+	}
 	made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
 	if (!made_new && cdram_relief_enabled())
 	{
