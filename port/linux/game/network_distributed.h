@@ -261,6 +261,9 @@ word network_actors_entry_size(void);
 /* (a client, in its tick where the host runs its actors) each actor's unit
 given the control the host last sent for it */
 void network_actors_drive(void);
+/* (a client) whether the host's actor states place this unit now (a living AI
+unit they came for lately), rather than its object states */
+boolean network_actors_client_drives(long unit_index);
 
 /* ---------- prototypes/NETWORK_COOP.C */
 

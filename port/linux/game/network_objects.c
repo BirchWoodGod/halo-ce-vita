@@ -2469,6 +2469,12 @@ void network_objects_handle_states(
 		{
 			continue;
 		}
+		/* (a living AI unit its actor states place, network_actors.c: placed
+		by both, the object state at rest, sent in its turn, snapped back a unit
+		the actor's control had moved a few centimetres, many times a minute
+		for every AI unit standing about; 97% of b30 co-op's corrections) */
+		if (TEST_FLAG(_object_mask_unit, object->object.type) && network_actors_client_drives(state->object_index))
+			continue;
 		distributed_object_state_unpack(state, &forward, &up, &velocity, &angular_velocity);
 		if (!distributed_transform_valid(&state->position, &forward, &up, NULL, NULL, &forward, &up))
 			continue;
