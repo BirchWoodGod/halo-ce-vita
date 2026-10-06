@@ -4239,9 +4239,29 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 		}
 		if (!device.chunk_snapshot[chunk])
 		{
-			device.chunk_snapshot[chunk] = ring_copy(device.constants[first], count * sizeof(device.constants[0]));
-			if (!device.chunk_snapshot[chunk])
+			/* A D snapshot spans the whole chunk, the registers past those
+			copied left as the ring has them but for the last, which is 0. A
+			skinned vertex names a second node with a weight of 0 when it has
+			none (the Warthog's windshield, the energy shield: index byte
+			0xfd), which the program's read clamps to D's last register, 123.
+			That register sat past the copy, in whatever the frame put in the
+			ring after it: weighted by 0, harmless - unless those bytes were
+			a NaN or an infinity, and the vertex was NaN and the part not
+			drawn. With the split records the fragment values go to the
+			worker's ring and the vertex constants follow one another here,
+			and the windshield went missing in about a third of the frames.
+			The rest of the gap is read only through node indices past the
+			object's matrices, which no vertex names. */
+			unsigned long span = chunk == VITA_VC_D ? VITA_VC_D_COUNT : count;
+			unsigned char *snapshot = vgxm_ring_alloc(span * sizeof(device.constants[0]), 16);
+
+			if (!snapshot)
 				return FALSE;
+			memcpy(snapshot, device.constants[first], count * sizeof(device.constants[0]));
+			if (span > count)
+				memset(snapshot + (span - 1) * sizeof(device.constants[0]), 0, sizeof(device.constants[0]));
+			stats.copied_bytes += count * sizeof(device.constants[0]);
+			device.chunk_snapshot[chunk] = snapshot;
 			if (chunk == VITA_VC_D)
 				device.d_snapshot_count = count;
 			stats.vertex_snapshots++;
