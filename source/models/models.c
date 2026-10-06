@@ -265,27 +265,60 @@ typedef char verify_rasterizer_debug_options_size[sizeof(struct rasterizer_debug
 #ifdef HALO_LINUX
 /* (port) HALO_RENDER_PROFILE=1: render_model's time split - the node
 matrices, everything up to rasterizer_model_begin (lighting and the
-parameters), and the parts (the draws) - reported by render_objects.c */
+parameters), and the parts (the draws), the parts by kind (the opaque and
+decal draws, the transparent submissions, the shadow draws; "loop" the
+walk over the regions and parts around them) - in the frames
+fine_profile.h picks, reported by render_objects.c */
+#include "fine_profile.h"
 void platform_log(const char *format, ...);
-unsigned long long vita_host_time_us(void);
 static int render_model_profile_on = -1;
-static unsigned long long render_model_profile_us[3];
-static unsigned long render_model_profile_calls;
-#define RENDER_MODEL_NOW() (render_model_profile_on > 0 ? vita_host_time_us() : 0)
-#define RENDER_MODEL_ADD(slot, from) do { if (render_model_profile_on > 0) { unsigned long long now_ = vita_host_time_us(); render_model_profile_us[slot] += now_ - (from); (from) = now_; } } while (0)
+enum
+{
+	_render_model_profile_matrices,
+	_render_model_profile_setup,
+	_render_model_profile_parts,
+	_render_model_profile_draws,
+	_render_model_profile_transparent,
+	_render_model_profile_shadow,
+	NUMBER_OF_RENDER_MODEL_PROFILE_SLOTS
+};
+static unsigned long long render_model_profile_us[NUMBER_OF_RENDER_MODEL_PROFILE_SLOTS];
+static unsigned long render_model_profile_calls, render_model_profile_parts[3];
+#define RENDER_MODEL_PROFILE_ON() (render_model_profile_on > 0 && halo_fine_render_on)
+#define RENDER_MODEL_NOW() (RENDER_MODEL_PROFILE_ON() ? halo_fine_render_now() : 0)
+#define RENDER_MODEL_ADD(slot, from) do { if (RENDER_MODEL_PROFILE_ON()) { unsigned long long now_ = halo_fine_render_now(); render_model_profile_us[slot] += now_ - (from); (from) = now_; } } while (0)
 void halo_model_part_profile_report(unsigned long frames);
 void halo_render_model_profile_report(unsigned long frames)
 {
 	if (render_model_profile_on > 0 && frames)
 	{
-		platform_log("render_model split (ms/frame over %lu models/frame): matrices %.2f setup+lighting %.2f parts %.2f",
-			render_model_profile_calls / frames, render_model_profile_us[0] / 1000.0 / frames,
-			render_model_profile_us[1] / 1000.0 / frames, render_model_profile_us[2] / 1000.0 / frames);
-		render_model_profile_us[0] = render_model_profile_us[1] = render_model_profile_us[2] = 0;
+		double per = 1.0 / (frames * 1000.0);
+		long long loop = (long long)render_model_profile_us[_render_model_profile_parts] -
+			(long long)render_model_profile_us[_render_model_profile_draws] -
+			(long long)render_model_profile_us[_render_model_profile_transparent] -
+			(long long)render_model_profile_us[_render_model_profile_shadow];
+
+		platform_log("render_model split (ms/frame over %.1f models/frame): matrices %.2f setup+lighting %.2f parts %.2f "
+			"(draws %.2f over %.1f, transparent %.2f over %.1f, shadow %.2f over %.1f, loop %.2f)",
+			(double)render_model_profile_calls / frames, render_model_profile_us[_render_model_profile_matrices] * per,
+			render_model_profile_us[_render_model_profile_setup] * per, render_model_profile_us[_render_model_profile_parts] * per,
+			render_model_profile_us[_render_model_profile_draws] * per, (double)render_model_profile_parts[0] / frames,
+			render_model_profile_us[_render_model_profile_transparent] * per, (double)render_model_profile_parts[1] / frames,
+			render_model_profile_us[_render_model_profile_shadow] * per, (double)render_model_profile_parts[2] / frames,
+			loop * per);
+		memset(render_model_profile_us, 0, sizeof(render_model_profile_us));
+		memset(render_model_profile_parts, 0, sizeof(render_model_profile_parts));
 		render_model_profile_calls = 0;
 		halo_model_part_profile_report(frames);
 	}
 }
+#define RENDER_MODEL_PART_BEGIN() unsigned long long part_profile_from = RENDER_MODEL_NOW()
+#define RENDER_MODEL_PART_END(kind) do { if (RENDER_MODEL_PROFILE_ON()) { \
+	render_model_profile_us[_render_model_profile_draws + (kind)] += halo_fine_render_now() - part_profile_from; \
+	render_model_profile_parts[kind]++; } } while (0)
+#else
+#define RENDER_MODEL_PART_BEGIN() ((void)0)
+#define RENDER_MODEL_PART_END(kind) ((void)0)
 #endif
 
 static void render_model_parts(
@@ -388,6 +421,8 @@ static void render_model_parts(
 										446,
 										part->centroid_secondary_node_index>=0 && part->centroid_secondary_node_index<model->nodes.count);
 
+									RENDER_MODEL_PART_BEGIN();
+
 									matrix4x3_transform_point(
 										&skinning->node_matrices[part->centroid_primary_node_index],
 										&part->centroid,
@@ -402,6 +437,7 @@ static void render_model_parts(
 										NONE,
 										&centroid,
 										&sort_filth[sort_filth_count]);
+									RENDER_MODEL_PART_END(1);
 
 									if (sort_filth_count<MAXIMUM_PARTS_PER_MODEL_GEOMETRY &&
 										sort_filth[sort_filth_count].group_index!=NONE &&
@@ -419,6 +455,8 @@ static void render_model_parts(
 							{
 								if (pass==_render_model_pass_decal)
 								{
+									RENDER_MODEL_PART_BEGIN();
+
 									match_assert("c:\\halo\\SOURCE\\models\\models.c", 491, !TEST_FLAG(flags, _render_model_shadow_bit));
 
 									rasterizer_model_draw(
@@ -429,10 +467,13 @@ static void render_model_parts(
 										part->triangle_buffer.count,
 										&part->vertex_buffer,
 										NONE);
+									RENDER_MODEL_PART_END(0);
 								}
 							}
 							else if (pass==_render_model_pass_solid)
 							{
+								RENDER_MODEL_PART_BEGIN();
+
 								if (TEST_FLAG(flags, _render_model_shadow_bit))
 								{
 									rasterizer_environment_shadow_model_draw(
@@ -440,6 +481,7 @@ static void render_model_parts(
 										forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
 										&part->triangle_buffer,
 										&part->vertex_buffer);
+									RENDER_MODEL_PART_END(2);
 								}
 								else
 								{
@@ -452,6 +494,7 @@ static void render_model_parts(
 										&part->vertex_buffer,
 										NONE);
 									rasterizer_debug_model_vertices(object_index, skinning, part);
+									RENDER_MODEL_PART_END(0);
 								}
 							}
 						}
@@ -809,7 +852,8 @@ void render_model(
 
 	if (render_model_profile_on < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); render_model_profile_on = e && atoi(e) != 0; }
 	profile_from = RENDER_MODEL_NOW();
-	render_model_profile_calls++;
+	if (RENDER_MODEL_PROFILE_ON())
+		render_model_profile_calls++;
 #endif
 
 	profile_enter(render_model_section);
@@ -874,7 +918,7 @@ void render_model(
 			}
 		}
 #ifdef HALO_LINUX
-		RENDER_MODEL_ADD(0, profile_from);
+		RENDER_MODEL_ADD(_render_model_profile_matrices, profile_from);
 #endif
 
 #ifdef HALO_LINUX
@@ -1105,7 +1149,7 @@ void render_model(
 			rasterizer_model_begin(&model_parameters, FALSE);
 		}
 #ifdef HALO_LINUX
-		RENDER_MODEL_ADD(1, profile_from);
+		RENDER_MODEL_ADD(_render_model_profile_setup, profile_from);
 #endif
 		render_model_parts(
 			model,
@@ -1116,7 +1160,7 @@ void render_model(
 			forced_shader_permutation_index,
 			flags);
 #ifdef HALO_LINUX
-		RENDER_MODEL_ADD(2, profile_from);
+		RENDER_MODEL_ADD(_render_model_profile_parts, profile_from);
 #endif
 		if (TEST_FLAG(flags, _render_model_shadow_bit))
 		{

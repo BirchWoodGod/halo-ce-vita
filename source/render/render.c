@@ -335,6 +335,7 @@ struct rendered_cluster *rendered_cluster_get(
 /* HALO_RENDER_PROFILE=1: where render_window's time goes, every 300 frames
 (as game.c's tick profile) */
 #include <stdlib.h>
+#include "fine_profile.h"
 static int render_profile_enabled = -1;
 static unsigned long long render_phase_started, render_phase_us[40];
 /* the draws each phase records (d3d8_gxm.c), stream and immediate */
@@ -390,6 +391,10 @@ static void render_window(
 	short rendered_cluster_index;
 
 	profile_render_window_start(TRUE);
+#ifdef HALO_LINUX
+	/* (whether this frame's fine render timers run: fine_profile.h) */
+	halo_fine_render_frame();
+#endif
 	render.scene_index++;
 	memset(&parameters, 0, sizeof(parameters));
 

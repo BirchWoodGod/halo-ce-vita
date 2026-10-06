@@ -15,13 +15,15 @@ tick tombstoned this epoch is gone for the tick, one it created is not yet
 there for the render) */
 #define OBJECT_HEADER_LIVE(header, absolute_index) \
 	((header)->identifier && !halo_epoch_datum_hidden_from_caller(object_header_data, (absolute_index)))
-/* object_update's sub-steps, timed for the HALO_TICK_PROFILE report below */
-unsigned long long vita_host_time_us(void);
+/* object_update's sub-steps, timed for the HALO_TICK_PROFILE report below
+(in the ticks fine_profile.h picks) */
+#include "fine_profile.h"
 static unsigned long long objects_step_us[8], objects_step_started;
 static int objects_step_depth;
 static int objects_profile_on;
-#define OBJECT_STEP_BEGIN() do { if (objects_profile_on > 0 && objects_step_depth == 0) objects_step_started = vita_host_time_us(); } while (0)
-#define OBJECT_STEP_END(k) do { if (objects_profile_on > 0 && objects_step_depth == 0) objects_step_us[k] += vita_host_time_us() - objects_step_started; } while (0)
+#define OBJECT_STEP_ON() (objects_profile_on > 0 && halo_fine_tick_on && objects_step_depth == 0)
+#define OBJECT_STEP_BEGIN() do { if (OBJECT_STEP_ON()) objects_step_started = halo_fine_tick_now(); } while (0)
+#define OBJECT_STEP_END(k) do { if (OBJECT_STEP_ON()) objects_step_us[k] += halo_fine_tick_now() - objects_step_started; } while (0)
 #else
 #define OBJECT_HEADER_LIVE(header, absolute_index) ((header)->identifier)
 #define OBJECT_STEP_BEGIN() ((void)0)
@@ -3863,6 +3865,10 @@ static boolean object_update(
 		}
 
 		// Update children (if we have any)
+#ifdef HALO_LINUX
+		/* (the children's and siblings' updates: their own step 7 at the top) */
+		OBJECT_STEP_BEGIN();
+#endif
 		if (object->object.first_child_object_index!=NONE)
 		{
 			{ objects_step_depth++; object_update(object->object.first_child_object_index); objects_step_depth--; }
@@ -3875,6 +3881,9 @@ static boolean object_update(
 				{ objects_step_depth++; object_update(object->object.next_object_index); objects_step_depth--; }
 			}
 		}
+#ifdef HALO_LINUX
+		OBJECT_STEP_END(7);
+#endif
 
 		OBJECT_STEP_BEGIN(); object_postprocess_node_matrices(object_index); OBJECT_STEP_END(6);
 	}
@@ -4393,7 +4402,6 @@ void objects_garbage_collection(
 /* HALO_TICK_PROFILE=1: objects_update's time by object type (game.c logs
 the tick's phases) */
 #include <stdlib.h>
-unsigned long long vita_host_time_us(void);
 void platform_log(const char *format, ...);
 static unsigned long long objects_profile_type_us[16];
 static unsigned long objects_profile_type_count[16], objects_profile_ticks;
@@ -4403,13 +4411,13 @@ static unsigned long long objects_profile_now(void)
 	/* (per-object timing at HALO_TICK_PROFILE=2 only: thousands of clock
 	reads a tick cost the tick itself) */
 	if (objects_profile_on < 0) { const char *e = getenv("HALO_TICK_PROFILE"); objects_profile_on = e && atoi(e) >= 2; }
-	return objects_profile_on > 0 ? vita_host_time_us() : 0;
+	return objects_profile_on > 0 && halo_fine_tick_on ? halo_fine_tick_now() : 0;
 }
 static void objects_profile_add(int type, unsigned long long started)
 {
-	if (objects_profile_on > 0 && type >= 0 && type < 16)
+	if (objects_profile_on > 0 && halo_fine_tick_on && type >= 0 && type < 16)
 	{
-		objects_profile_type_us[type] += vita_host_time_us() - started;
+		objects_profile_type_us[type] += halo_fine_tick_now() - started;
 		objects_profile_type_count[type]++;
 	}
 }
@@ -4417,25 +4425,32 @@ static void objects_profile_report(void)
 {
 	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
 		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
-	char line[512]; int n = 0, type;
+	char line[768]; int n = 0, type;
+	/* (per timed tick: fine_profile.h) */
+	static struct halo_fine_mark mark;
+	unsigned long timed;
+	double per;
 
 	if (objects_profile_on <= 0 || ++objects_profile_ticks % 300) return;
+	timed = halo_fine_tick_since(&mark);
+	per = timed ? 1.0 / (timed * 1000.0) : 0.0;
 	for (type = 0; type < 16; type++)
 	{
 		if (!objects_profile_type_count[type]) continue;
-		n += snprintf(line + n, sizeof(line) - n, " %s %.2f(%lu)", names[type], objects_profile_type_us[type] / 1000.0 / 300.0,
-			objects_profile_type_count[type] / 300);
+		n += snprintf(line + n, sizeof(line) - n, " %s %.2f(%.0f)", names[type], objects_profile_type_us[type] * per,
+			timed ? (double)objects_profile_type_count[type] / timed : 0.0);
 		objects_profile_type_us[type] = 0; objects_profile_type_count[type] = 0;
 	}
 	{
-		static const char *step_names[8] = { "type", "damage", "export", "node_matrices", "functions", "lights", "postprocess", "" };
+		static const char *step_names[8] = { "type", "damage", "export", "node_matrices", "functions", "lights", "postprocess", "children" };
 		int k;
-		for (k = 0; k < 7; k++)
+		for (k = 0; k < 8; k++)
 		{
-			n += snprintf(line + n, sizeof(line) - n, " | %s %.2f", step_names[k], objects_step_us[k] / 1000.0 / 300.0);
+			n += snprintf(line + n, sizeof(line) - n, " | %s %.2f", step_names[k], objects_step_us[k] * per);
 			objects_step_us[k] = 0;
 		}
 	}
+	n += snprintf(line + n, sizeof(line) - n, " | %s", mark.note);
 	platform_log("objects-update (ms/tick, objects/tick):%s", line);
 }
 #endif
