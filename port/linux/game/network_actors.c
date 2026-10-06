@@ -59,6 +59,11 @@ enum
 	sent one. After that the unit is left alone: the actor let go of it, or
 	the host went quiet. */
 	CONTROL_HELD_TICKS = 2 * TICKS_PER_SECOND,
+	/* A client lets a unit's actor states place it while one came this
+	recently: twice the longest period a unit's states go at
+	(network_objects.c's MAXIMUM_OBJECT_PERIOD_TICKS). After that its object
+	states do again. */
+	ACTOR_STATES_FRESH_TICKS = 8,
 	/* an impulse is repeated in this many entries, in case one is lost */
 	IMPULSE_REPEAT_TICKS = 3,
 	/* the number of unit_start_animation_impulse impulses (private to units.c) */
@@ -864,6 +869,22 @@ void network_actors_handle_states(
 
 	for (index = 0; index < count; index++)
 		actor_state_apply(&states[index], now);
+}
+
+boolean network_actors_client_drives(
+	long unit_index)
+{
+	short index;
+
+	for (index = 0; index < client_actor_count; index++)
+	{
+		if (client_actors[index].unit_index == unit_index)
+		{
+			return game_time_get() - client_actors[index].received_time <= ACTOR_STATES_FRESH_TICKS &&
+				actor_unit_valid(unit_index) && object_get(unit_index)->object.type != _object_type_vehicle;
+		}
+	}
+	return FALSE;
 }
 
 /* Client: called at the point in the tick where the host runs the AI.
