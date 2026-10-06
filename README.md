@@ -132,23 +132,26 @@ Quit** from the pause menu is the safest way to stop.
 
 ## Controls
 
-| Vita | In game |
-| --- | --- |
-| Left stick / right stick | move / look |
-| R / L | fire / throw grenade |
-| Cross | jump |
-| Circle | melee |
-| Square | reload, action |
-| Triangle | switch weapon |
-| D-pad down / up | crouch (a toggle; see the panel) / zoom |
-| D-pad left / right | switch grenades / flashlight |
-| Start | pause; skips a cinematic |
-| Select | scoreboard |
-| Select + Start (hold) | settings panel |
+| Vita | Xbox | In game |
+| --- | --- | --- |
+| Left stick / right stick | left stick / right stick | move / look |
+| Cross | A | jump |
+| Circle | B | melee |
+| Square | X | reload, action |
+| Triangle | Y | switch weapon |
+| D-pad left / right | Black / White | switch grenades / flashlight |
+| L / R | left trigger / right trigger | throw grenade / fire |
+| D-pad down | left stick click | crouch (a toggle; see the panel) |
+| D-pad up | right stick click | zoom |
+| Start | Start | pause; skips a cinematic |
+| Select | Back | scoreboard |
+| Select + Start (hold) | | settings panel |
 
-The settings panel's **Controls** tab can move each action to another
-button (in play; the menus keep Cross / Circle and the D-pad) and give the
-touch zones actions. The zones, all Off until set:
+The settings panel's **Controls** tab is laid out as the Xbox controller:
+each Xbox button (A, B, X, Y, Black, White, the triggers, the sticks'
+clicks, Back) can be put on another Vita button (in play; the menus keep
+Cross / Circle and the D-pad), and the touch zones can each press an Xbox
+button. The zones, all Off until set:
 
 | Zone | Where |
 | --- | --- |
@@ -156,13 +159,14 @@ touch zones actions. The zones, all Off until set:
 | Touch left edge / right edge | front screen, the middle of each side, beside the D-pad and the face buttons |
 | Rear touch left / right | the rear pad's left and right halves (a strip in the middle is neither) |
 
-Each can be Melee, Throw grenade, Flashlight, Zoom, Crouch (Hold or Toggle
-as the Crouch row says), Reload/action, Switch weapon, Switch grenade,
-Jump, Scoreboard or Fire. A front zone counts at once; a rear one once held
-for 0.1 s, so the fingers holding the Vita brushing the pad do nothing. A
-touch that starts outside a zone does nothing, and each finger counts on
-its own. While a zone's row is chosen the panel shows where the zones are.
-**Reset controls** puts the tab back as shipped (Show dev settings stays).
+Each can be A, B, X, Y, Black, White, Left trigger, Right trigger, Left
+stick (its click: crouch, Hold or Toggle as the Crouch row says), Right
+stick (its click: zoom) or Back. A front zone counts at once; a rear one
+once held for 0.1 s, so the fingers holding the Vita brushing the pad do
+nothing. A touch that starts outside a zone does nothing, and each finger
+counts on its own. While a zone's row is chosen the panel shows where the
+zones are. **Reset controls** puts the tab back as shipped (Show dev
+settings stays).
 
 ## Settings panel
 

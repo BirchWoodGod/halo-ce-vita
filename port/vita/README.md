@@ -91,8 +91,9 @@ one; `HALO_MOVIE_DUMP=n` writes the n-th frame as the decoder gave it
 | Select | Back | scoreboard |
 
 In the menus the D-pad moves the selection. The settings panel's Controls
-tab can put each action on another button (in play only: the menus keep
-this layout) and give the touch zones actions (below).
+tab is laid out as the Xbox controller: each Xbox button can be put on
+another Vita button (in play only: the menus keep this layout), and each
+touch zone (below) presses an Xbox button.
 
 **Touch zones** (`port/vita/host/vita_controls.c`; positions in the
 screen's 960 x 544 pixels, the rear pad scaled to the same as seen from the
@@ -153,16 +154,16 @@ after a restart.
 | Look sensitivity | 100% | right stick turning speed |
 | Invert look | No | reverses the right stick's up and down |
 | Stick deadzone | Off | raise it if the sticks drift |
-| Crouch | Toggle | a press of crouch crouches and the next stands (Hold: crouch while held); also for a touch zone set to Crouch |
-| Touch top left, top right, left edge, right edge | Off | a front touch zone's action: Melee, Throw grenade, Flashlight, Zoom, Crouch, Reload/action, Switch weapon, Switch grenade, Jump, Scoreboard or Fire |
+| Crouch | Toggle | the left stick click (crouch): a press crouches and the next stands (Hold: crouch while held), from its Vita button or a touch zone |
+| Touch top left, top right, left edge, right edge | Off | the Xbox button a front touch zone presses: A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back |
 | Rear touch left, right | Off | the same for the rear pad's halves |
-| Fire button ... Flashlight button | R, L, Cross, Circle, Square, Triangle, D-pad down / up / left / right | the Vita button of each action in play (None: no button); two actions on one button both happen |
+| A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back | Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select | the Vita button of each Xbox button in play (None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both |
 | Reset controls > | | this tab's rows as shipped (Show dev settings stays) |
 | Show dev settings | Off | shows the Dev tab |
 
 While a touch zone's row is chosen the panel draws the front screen and the
 rear pad beside the rows: the row's zone green (dark green while Off), the
-zones set to an action grey.
+zones set to an Xbox button grey.
 
 **Multiplayer**: see [Multiplayer](#multiplayer).
 
