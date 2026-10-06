@@ -99,6 +99,8 @@ struct vita_host_pad
 {
 	unsigned long buttons;
 	unsigned char lx, ly, rx, ry;
+	/* the touch zones held (a bit per VITA_ZONE_*, vita_controls.h) */
+	unsigned long touch;
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);

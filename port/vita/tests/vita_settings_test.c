@@ -265,6 +265,127 @@ static int to_line(const char *label)
 	return 0;
 }
 
+/* ---------- the Controls tab: touch zones, buttons, Reset controls */
+
+/* the menu's lines: how many (the zones' diagram line not counted), the
+longest, and the diagram's marks ("" without one) */
+static int menu_lines(int *longest, char *diagram, int size)
+{
+	const char *at = menu;
+	int count = 0;
+
+	*longest = 0;
+	diagram[0] = 0;
+	while (*at)
+	{
+		int length = (int)strcspn(at, "\n");
+
+		if (at[0] == '\x01')
+			snprintf(diagram, (size_t)size, "%.*s", length - 1, at + 1);
+		else
+		{
+			/* (the tab bar is drawn apart, not as a row of text) */
+			if (at[0] != '\t')
+				*longest = length > *longest ? length : *longest;
+			count++;
+		}
+		at += length + (at[length] == '\n');
+	}
+	return count;
+}
+
+/* one frame with these buttons held and these touch zones */
+static int frame_touch(unsigned long buttons, unsigned long touch)
+{
+	struct vita_host_pad pad;
+
+	memset(&pad, 0, sizeof(pad));
+	pad.buttons = buttons;
+	pad.touch = touch;
+	clock_us += 16667;
+	return vita_settings_input(&pad);
+}
+
+static void test_controls_tab(void)
+{
+	struct vita_controls_config config;
+	char diagram[16];
+	int longest, count, index;
+
+	/* (a 1.0 settings.txt was loaded last: no touch or button lines in it) */
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "off") && !strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "off") &&
+		!strcmp(getenv("HALO_BUTTON_JUMP"), "cross") && !strcmp(getenv("HALO_BUTTON_FLASHLIGHT"), "right"),
+		"a 1.0 settings.txt: touch zones Off, buttons as shipped");
+	open_panel();
+	to_tab("Controls");
+	count = menu_lines(&longest, diagram, sizeof(diagram));
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "Touch top left") && strstr(menu, "Touch right edge") && strstr(menu, "Rear touch left") &&
+		strstr(menu, "Rear touch right") && strstr(menu, "Grenade type button") && strstr(menu, "Reset controls >") &&
+		strstr(menu, "Show dev settings"), "Controls: the touch zones, the buttons, Reset controls");
+	check(count <= 24 && longest <= 46, "Controls: 24 lines at most (the panel's), each 46 characters at most");
+	check(!diagram[0], "Look sensitivity chosen: no zone diagram");
+	to_line("Rear touch left");
+	menu_lines(&longest, diagram, sizeof(diagram));
+	check(!strcmp(diagram, "----s-"), "Rear touch left chosen: the diagram marks its zone (Off)");
+	check(frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 1, "panel open: a touch zone held does not reach the game");
+	press(VITA_BUTTON_RIGHT);
+	menu_lines(&longest, diagram, sizeof(diagram));
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "melee") && strstr(menu, "< Melee >") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_LEFT=melee\n") && !strcmp(diagram, "----S-"),
+		"Rear touch left: Melee, in the environment and settings.txt; the diagram shows it set");
+	for (index = 0; index < 4; index++)
+		press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "zoom"), "Rear touch left: Zoom");
+	to_line("Touch top right");
+	for (index = 0; index < 20; index++)
+		press(VITA_BUTTON_RIGHT);
+	menu_lines(&longest, diagram, sizeof(diagram));
+	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "fire") && strstr(menu, "< Fire  ") && !strcmp(diagram, "-S--A-"),
+		"Touch top right: Fire, the last choice; the rear zone still marked set");
+	to_line("Flashlight button");
+	menu_lines(&longest, diagram, sizeof(diagram));
+	check(!diagram[0], "a button's row: no zone diagram");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_BUTTON_FLASHLIGHT"), "left") && strstr(menu, "< D-pad left >"),
+		"Flashlight button: D-pad left");
+	vita_controls_config_load(&config);
+	check(config.zone_action[VITA_ZONE_REAR_LEFT] == VITA_ACTION_ZOOM &&
+		config.zone_action[VITA_ZONE_TOP_RIGHT] == VITA_ACTION_FIRE &&
+		config.action_button[VITA_ACTION_FLASHLIGHT] == VITA_BUTTON_LEFT, "the pad reads the panel's choices");
+	press(VITA_BUTTON_CIRCLE);
+	check(frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 0, "panel closed: the touch zones reach the game");
+
+	/* the next start: settings.txt brings them back */
+	for (index = 0; index < SETTING_COUNT; index++)
+		if (settings[index].variable && (!strncmp(settings[index].variable, "HALO_TOUCH_", 11) ||
+			!strncmp(settings[index].variable, "HALO_BUTTON_", 12)))
+		{
+			settings[index].choice = 0;
+			unsetenv(settings[index].variable);
+		}
+	vita_settings_load();
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "zoom") && !strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "fire") &&
+		!strcmp(getenv("HALO_TOUCH_LEFT_EDGE"), "off") && !strcmp(getenv("HALO_BUTTON_FLASHLIGHT"), "left") &&
+		!strcmp(getenv("HALO_BUTTON_FIRE"), "r"), "settings.txt round trip: zones and buttons back at start-up");
+
+	/* Reset controls: this tab as shipped, Show dev settings kept */
+	open_panel();
+	to_tab("Controls");
+	to_line("Reset controls");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "off") && !strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "off") &&
+		!strcmp(getenv("HALO_BUTTON_FLASHLIGHT"), "right") && !strcmp(getenv("XV_LOOK_SENS"), "100") &&
+		!strcmp(getenv("HALO_CROUCH_TOGGLE"), "1") && !strcmp(getenv("XV_INVERT_Y"), "0") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_LEFT=off\n") &&
+		strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS=100\n") && strstr(menu, "Controls as shipped"),
+		"Reset controls: zones Off, buttons, look and crouch as shipped, saved");
+	check(!strcmp(getenv("HALO_DEV_SETTINGS"), "1") && strstr(menu, "|Dev"), "Reset controls keeps Show dev settings");
+	press(VITA_BUTTON_CIRCLE);
+}
+
 int main(void)
 {
 	char line[128];
@@ -615,6 +736,7 @@ int main(void)
 		check(frame(0) == 0, "message: then the game has the pad again");
 	}
 
+	test_controls_tab();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

@@ -146,6 +146,24 @@ Quit** from the pause menu is the safest way to stop.
 | Select | scoreboard |
 | Select + Start (hold) | settings panel |
 
+The settings panel's **Controls** tab can move each action to another
+button (in play; the menus keep Cross / Circle and the D-pad) and give the
+touch zones actions. The zones, all Off until set:
+
+| Zone | Where |
+| --- | --- |
+| Touch top left / top right | front screen, the top corners (over the ammo and shield readouts) |
+| Touch left edge / right edge | front screen, the middle of each side, beside the D-pad and the face buttons |
+| Rear touch left / right | the rear pad's left and right halves (a strip in the middle is neither) |
+
+Each can be Melee, Throw grenade, Flashlight, Zoom, Crouch (Hold or Toggle
+as the Crouch row says), Reload/action, Switch weapon, Switch grenade,
+Jump, Scoreboard or Fire. A front zone counts at once; a rear one once held
+for 0.1 s, so the fingers holding the Vita brushing the pad do nothing. A
+touch that starts outside a zone does nothing, and each finger counts on
+its own. While a zone's row is chosen the panel shows where the zones are.
+**Reset controls** puts the tab back as shipped (Show dev settings stays).
+
 ## Settings panel
 
 Hold Select + Start for a second. **L and R** switch between its tabs:
