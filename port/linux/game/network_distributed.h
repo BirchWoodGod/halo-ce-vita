@@ -199,6 +199,12 @@ long distributed_living_unit(struct player_datum const *player);
 /* whether the player is one of that client machine's (the host) */
 boolean distributed_machine_has_player(long machine_index, short player_index);
 void distributed_count_correction(void);
+/* (HALO_NET_SYNC_TRACE=1) whether corrections and message bytes are logged */
+boolean distributed_sync_trace(void);
+/* (traced) a correction: what made it, the object, where the host has it, how far off it was */
+void distributed_trace_correction(char const *source, long object_index, real_point3d const *position,
+	real error_distance);
+void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 /* (the host) the client machines in the game, but for its own; their count */
 short distributed_client_machines(long *machine_indices, short maximum);
 /* (the host) how long a message takes that client and its answer back, in

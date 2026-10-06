@@ -74,6 +74,7 @@ machine (their datum identifiers need not be).
 #include "network_distributed.h"
 
 #include <limits.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
 #include <math.h>
@@ -613,6 +614,10 @@ static struct
 	long sent;
 	long received;
 	long corrections;
+	/* the batched datagrams' bytes, and those sent of each message type */
+	long sent_bytes;
+	long received_bytes;
+	long sent_type_bytes[NUMBER_OF_DISTRIBUTED_MESSAGES];
 } distributed_statistics;
 
 /* ---------- shared (network_distributed.h) */
@@ -631,6 +636,67 @@ void distributed_count_correction(
 	void)
 {
 	distributed_statistics.corrections++;
+}
+
+void network_distributed_byte_statistics(
+	long *sent_bytes,
+	long *received_bytes)
+{
+	*sent_bytes = distributed_statistics.sent_bytes;
+	*received_bytes = distributed_statistics.received_bytes;
+}
+
+/* (HALO_NET_SYNC_TRACE=1) each correction, and the bytes of each message type */
+boolean distributed_sync_trace(
+	void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		char const *setting = getenv("HALO_NET_SYNC_TRACE");
+
+		enabled = setting && setting[0] == '1';
+	}
+	return enabled != 0;
+}
+
+void distributed_trace_correction(
+	char const *source,
+	long object_index,
+	real_point3d const *position,
+	real error_distance)
+{
+	struct object_datum *object;
+	struct data_iterator iterator;
+	struct player_datum *player;
+	real nearest = -1.0f;
+
+	if (!distributed_sync_trace())
+		return;
+	object = (struct object_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_all);
+	if (!object)
+		return;
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		long unit_index = distributed_living_unit(player);
+
+		if (unit_index != NONE)
+		{
+			real_point3d const *at = &object_get(unit_index)->object.position;
+			real distance = (real)sqrt((at->x - position->x) * (at->x - position->x) +
+				(at->y - position->y) * (at->y - position->y) + (at->z - position->z) * (at->z - position->z));
+
+			if (nearest < 0.0f || distance < nearest)
+				nearest = distance;
+		}
+	}
+	error(_error_silent, "net sync: tick %ld correction %s object %ld type %d %s error %.2f nearest player %.1f%s%s",
+		game_time_get(), source, (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index), (int)object->object.type,
+		tag_get_name(object->definition_index), error_distance, nearest,
+		TEST_FLAG(object->object.flags, _object_at_rest_bit) ? " at rest" : "",
+		TEST_FLAG(object->object.damage_flags, _object_dead_bit) ? " dead" : "");
 }
 
 boolean distributed_real_valid(
@@ -811,6 +877,7 @@ static void distributed_batch_flush(
 	header->game_time = game_time_get();
 	header->header = 0;
 	build_message_header(&header->header, batch->size, 2, 0);
+	distributed_statistics.sent_bytes += batch->size;
 	if (sender == HOST_SENDER)
 		network_distributed_client_send(batch->data, batch->size);
 	else
@@ -854,6 +921,8 @@ static void distributed_batch_append(
 		sizeof(*header) - sizeof(message_header));
 	csmemcpy(batch->data + batch->size + BATCH_MESSAGE_OVERHEAD, entries, entries_size);
 	batch->size += (word)(BATCH_MESSAGE_OVERHEAD + entries_size);
+	if (header->type < NUMBER_OF_DISTRIBUTED_MESSAGES)
+		distributed_statistics.sent_type_bytes[header->type] += BATCH_MESSAGE_OVERHEAD + entries_size;
 }
 
 /* where a message's bytes past its message header go: a machine's batch,
@@ -1534,7 +1603,11 @@ static boolean distributed_apply_state(
 	if (error.i * error.i + error.j * error.j + error.k * error.k <= tolerance * tolerance)
 		return TRUE;
 	if (network_objects_reconcile(unit_index, position, &forward, &up, &velocity, NULL, blend_distance))
+	{
 		distributed_statistics.corrections++;
+		distributed_trace_correction("player", unit_index, position,
+			(real)sqrt(error.i * error.i + error.j * error.j + error.k * error.k));
+	}
 	return TRUE;
 }
 
@@ -3197,6 +3270,23 @@ void network_distributed_tick(
 		return;
 	distributed_last_sent_time = game_time_get();
 	distributed_machines.in_tick = TRUE;
+	/* (traced: every 30 s, the bytes sent of each message type so far) */
+	if (distributed_sync_trace() && game_time_get() % (30 * TICKS_PER_SECOND) == 0)
+	{
+		char line[1024];
+		int length = 0;
+		short type;
+
+		for (type = 0; type < NUMBER_OF_DISTRIBUTED_MESSAGES && length < (int)sizeof(line) - 32; type++)
+		{
+			if (distributed_statistics.sent_type_bytes[type])
+				length += snprintf(line + length, sizeof(line) - length, " %d:%ld", type,
+					distributed_statistics.sent_type_bytes[type]);
+		}
+		line[length] = 0;
+		error(_error_silent, "net sync: tick %ld bytes sent %ld received %ld by type%s", game_time_get(),
+			distributed_statistics.sent_bytes, distributed_statistics.received_bytes, line);
+	}
 	if (connection == _game_connection_network_server)
 	{
 		short player_index;
@@ -3694,6 +3784,7 @@ void network_distributed_handle_message(
 	{
 		word offset = sizeof(header);
 
+		distributed_statistics.received_bytes += size;
 		while (offset + sizeof(word) <= size)
 		{
 			word buffer[(sizeof(message_header) + DATAGRAM_MAXIMUM_SIZE + 1) / sizeof(word)];
