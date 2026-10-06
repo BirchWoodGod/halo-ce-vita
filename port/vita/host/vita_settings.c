@@ -234,8 +234,12 @@ static void save(void)
 	fclose(file);
 }
 
+int vita_settings_set(const char *variable, const char *value);
+
 void vita_settings_load(void)
 {
+	extern int (*halo_test_setting_hook)(const char *variable, const char *value);
+
 	FILE *file = fopen(SETTINGS_FILE, "r");
 	char line[256];
 	int index;
@@ -295,6 +299,7 @@ void vita_settings_load(void)
 		setenv(settings[index].variable, settings[index].values[settings[index].choice], 1);
 	for (index = 0; index < (int)(sizeof(fixed_defaults) / sizeof(fixed_defaults[0])); index++)
 		setenv(fixed_defaults[index][0], fixed_defaults[index][1], 0);
+	halo_test_setting_hook = vita_settings_set;
 	{
 		/* (in halo.log: the profile and the rows it sets, the picture's) */
 		char message[300];
@@ -373,6 +378,29 @@ static void change(int step)
 		vgxm_upscale_filter_set(choice);
 	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 	save();
+}
+
+/* (debug, HALO_TEST_COMMANDS "@set VARIABLE value": main.c) a row set as
+the panel sets it, its profile worked out again; 0 if there is no such
+row */
+int vita_settings_set(const char *variable, const char *value)
+{
+	struct setting *setting = setting_named(variable);
+	int saved = selected, index;
+
+	if (!setting)
+		return 0;
+	index = (int)(setting - settings);
+	selected = index;
+	change(find_choice(setting, value) - setting->choice);
+	selected = saved;
+	{
+		char line[128];
+
+		snprintf(line, sizeof(line), "settings: %s=%s (test command)", variable, setting->values[setting->choice]);
+		vita_host_log(line);
+	}
+	return 1;
 }
 
 static void close_panel(void)
