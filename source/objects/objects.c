@@ -370,6 +370,19 @@ void *object_iterator_next(
 	while (abs_index<object_header_data->count)
 	{
 		long index = DATUM_INDEX_NEW(abs_index++, header->identifier);
+#ifdef HALO_LINUX
+		/* (port) the type and flags first: they are the header's own bytes,
+		while the liveness test asks the render epoch about the slot (a call
+		and a fence), which every header of another type paid for too */
+		if ((iterator->flags&header->flags)==iterator->flags &&
+			TEST_FLAG(iterator->type_flags, header->type) &&
+			OBJECT_HEADER_LIVE(header, abs_index - 1))
+		{
+			iterator->index = index;
+			result = header->datum;
+			break;
+		}
+#else
 		if (OBJECT_HEADER_LIVE(header, abs_index - 1))
 		{
 			if ((iterator->flags&header->flags)==iterator->flags &&
@@ -380,6 +393,7 @@ void *object_iterator_next(
 				break;
 			}
 		}
+#endif
 		++header;
 	}
 	iterator->absolute_index = abs_index;
