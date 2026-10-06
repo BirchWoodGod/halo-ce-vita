@@ -43,6 +43,9 @@ docs/custom_edition_caches.md lists each with its evidence.
 #define UNICODE_STRING_LIST_GROUP_TAG 'ustr'
 #define HUD_MESSAGE_TEXT_GROUP_TAG 'hmt '
 #define SCENARIO_GROUP_TAG 'scnr'
+/* a protected map's scenario (custom_edition_cache_load) */
+#define PROTECTED_SCENARIO_GROUP_TAG 'prot'
+#define NONE_GROUP_TAG 0xFFFFFFFFUL
 #define STRUCTURE_BSP_GROUP_TAG 'sbsp'
 #define GBXMODEL_GROUP_TAG 'mod2'
 #define PROJECT_YELLOW_GROUP_TAG 'yelo'
@@ -2274,12 +2277,21 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	}
 	state.tag_index = NO_TAG_INDEX;
 
-	/* the scenario and its structure BSPs */
+	/* the scenario and its structure BSPs (a "protected" map's scenario,
+	the one its header names, has its group renamed to 'prot', as map tools
+	of 2006 left it to keep other tools from opening the map: it is given its
+	group back below, once the checksum has been taken) */
 	scenario_handle = read_u32(tag_index + TAG_INDEX_SCENARIO_OFFSET);
 	report->scenario_tag_index = (int32_t)(scenario_handle & ABSOLUTE_INDEX_MASK);
+	if ((scenario_handle & ABSOLUTE_INDEX_MASK) < (uint32_t)tag_count &&
+		read_u32(tag_instances + (scenario_handle & ABSOLUTE_INDEX_MASK) * TAG_INSTANCE_BYTES + TAG_INSTANCE_GROUP_OFFSET) == PROTECTED_SCENARIO_GROUP_TAG)
+	{
+		report->warnings |= 1UL << _custom_edition_warning_protected_bit;
+	}
 	if ((scenario_handle & ABSOLUTE_INDEX_MASK) >= (uint32_t)tag_count ||
 		read_u32(tag_instances + (scenario_handle & ABSOLUTE_INDEX_MASK) * TAG_INSTANCE_BYTES + TAG_INSTANCE_HANDLE_OFFSET) != scenario_handle ||
-		read_u32(tag_instances + (scenario_handle & ABSOLUTE_INDEX_MASK) * TAG_INSTANCE_BYTES + TAG_INSTANCE_GROUP_OFFSET) != SCENARIO_GROUP_TAG ||
+		(read_u32(tag_instances + (scenario_handle & ABSOLUTE_INDEX_MASK) * TAG_INSTANCE_BYTES + TAG_INSTANCE_GROUP_OFFSET) != SCENARIO_GROUP_TAG &&
+		!flag_is_set(report->warnings, _custom_edition_warning_protected_bit)) ||
 		read_u32(tag_instances + (scenario_handle & ABSOLUTE_INDEX_MASK) * TAG_INSTANCE_BYTES + TAG_INSTANCE_IN_RESOURCE_MAP_OFFSET) ||
 		!tag_cache_offset(
 			&state,
@@ -2307,6 +2319,15 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	if (checksum != identity->checksum)
 	{
 		report->warnings |= 1UL << _custom_edition_warning_checksum_mismatch_bit;
+	}
+	if (flag_is_set(report->warnings, _custom_edition_warning_protected_bit))
+	{
+		uint8_t *scenario_instance = tag_instances + (scenario_handle & ABSOLUTE_INDEX_MASK) * TAG_INSTANCE_BYTES;
+
+		/* (a scenario's group has no parents) */
+		write_u32(scenario_instance + TAG_INSTANCE_GROUP_OFFSET, SCENARIO_GROUP_TAG);
+		write_u32(scenario_instance + TAG_INSTANCE_GROUP_OFFSET + 4, NONE_GROUP_TAG);
+		write_u32(scenario_instance + TAG_INSTANCE_GROUP_OFFSET + 8, NONE_GROUP_TAG);
 	}
 
 	/* the tags held by resource maps, placed after the tag data */

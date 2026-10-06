@@ -430,8 +430,9 @@ static char const *custom_edition_cache_load_status_reason(
 	case _cache_file_status_missing_resource_item:
 		return "it needs Halo Custom Edition's bitmaps.map, sounds.map and loc.map in the maps folder";
 	case _cache_file_status_bad_scenario_tag:
-		(void)report;
-		return "it has no scenario this port can find (a protected or damaged map)";
+		return TEST_FLAG(report->warnings, _custom_edition_warning_protected_bit) ?
+			"it is a protected map whose tags this port cannot read" :
+			"it has no scenario this port can find (a protected or damaged map)";
 	default:
 		return cache_file_status_describe(status);
 	}
