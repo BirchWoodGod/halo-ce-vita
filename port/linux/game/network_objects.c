@@ -2369,6 +2369,8 @@ static boolean distributed_client_correct_own_vehicle(
 	up = object->object.up;
 	network_objects_correct(vehicle_index, &position, &forward, &up, NULL, NULL);
 	distributed_count_correction();
+	distributed_trace_correction("own vehicle", vehicle_index, &position,
+		(real)sqrt(error.i * error.i + error.j * error.j + error.k * error.k));
 	/* (the ticks noted since moved as it was, not corrected again) */
 	error.i = object->object.position.x - before.x;
 	error.j = object->object.position.y - before.y;
@@ -2516,6 +2518,8 @@ void network_objects_handle_states(
 			&angular_velocity, blend_distance))
 		{
 			distributed_count_correction();
+			distributed_trace_correction(blend_distance > 0.0f ? "object" : "object at rest", state->object_index,
+				&state->position, (real)sqrt(dx * dx + dy * dy + dz * dz));
 		}
 		SET_FLAG(object->object.flags, _object_at_rest_bit, TEST_FLAG(state->flags, _distributed_object_at_rest_bit) ||
 			distributed_vehicle_unsteered(state->object_index));

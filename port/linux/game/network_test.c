@@ -90,6 +90,7 @@ void platform_log(char const *format, ...);
 void damage_kill_object_for_player(long object_index, long player_index);
 /* network_distributed.c's */
 void network_distributed_statistics(long *sent, long *received, long *corrections);
+void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 void network_distributed_item_statistics(long *creates, long *deletes, long *failures, long *removed);
 void network_damage_statistics(long *sent_reports, long *dealt_reports, long *rejected_reports, long *replayed_events);
 /* xinput_sdl.c's */
@@ -400,6 +401,12 @@ static void network_test_log_players(
 			local_player_index == NONE ? -1L : (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(local_player_index),
 			camera ? camera->position.x : 0.0f, camera ? camera->position.y : 0.0f, camera ? camera->position.z : 0.0f,
 			local_player_index == NONE ? 0L : (long)player_get(local_player_index)->respawn_timer);
+		{
+			long sent_bytes, received_bytes;
+
+			network_distributed_byte_statistics(&sent_bytes, &received_bytes);
+			platform_log("network test: tick %ld bytes sent %ld received %ld", game_time_get(), sent_bytes, received_bytes);
+		}
 	}
 	/* co-op: the structure BSP, the cinematic, the skip vote, whom a dead
 	local player watches */

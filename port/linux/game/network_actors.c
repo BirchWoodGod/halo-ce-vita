@@ -540,6 +540,8 @@ static boolean actor_state_apply(
 				REMOTE_BLEND_DISTANCE))
 		{
 			distributed_count_correction();
+			distributed_trace_correction("actor", state->unit_index, &state->position,
+				(real)sqrt(dx * dx + dy * dy + dz * dz));
 		}
 	}
 	return TRUE;
