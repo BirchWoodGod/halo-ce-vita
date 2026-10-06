@@ -1110,6 +1110,15 @@ boolean scenario_switch_structure_bsp(
 			}
 			result = TRUE;
 		}
+#ifdef HALO_LINUX
+		/* port: a Custom Edition map's first structure BSP that cannot be
+		loaded (memory) fails the map's load, which goes back to the menu
+		(scenario_load, custom_edition_cache_load_failure_show) */
+		else if (custom_edition_cache_tags_loaded() && !had_old_structure_bsp)
+		{
+			error(_error_silent, "failed to load structure bsp '%s'", reference->structure_bsp.name);
+		}
+#endif
 		else
 		{
 			error(_error_immediate, "failed to load structure bsp '%s'", reference->structure_bsp.name);

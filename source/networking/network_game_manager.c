@@ -798,6 +798,10 @@ boolean network_game_create_game_objects(
 	{
 		errors_clear();
 		error(_error_silent, "game_load() failed.");
+		/* (the menu's map at once: the rest of this frame reads the tags of
+		a map - the input's, in main_loop - before the next one leaves the
+		game, network_game_client_start_frame) */
+		main_menu_load();
 		network_game_abort();
 	}
 #endif
