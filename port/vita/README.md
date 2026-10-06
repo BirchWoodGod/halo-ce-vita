@@ -94,27 +94,74 @@ In the menus the D-pad moves the selection.
 
 ## Settings panel
 
-Hold **Select + Start** for about a second, in play or in the menus. Up and
-down choose a setting, left and right (or Cross) change it, and Circle closes
-the panel. The game does not see the buttons while the panel is open.
+Hold **Select + Start** for about a second, in play or in the menus. **L and
+R** switch tabs; up and down choose a line, left and right (or Cross) change
+it, Cross opens a line marked `>`, and Circle closes the panel. The game
+does not see the buttons while the panel is open. Rows marked `*` apply
+after a restart.
+
+**Graphics**
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Performance overlay | Off | frames per second, game and render times, core load |
+| Profile | Balanced | sets the rows below it marked (P) at once: Performance, Balanced, Quality; Custom when they match none |
+| Render resolution (P) | 75% | the 3D view's resolution (applies at once) |
+| Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
+| Upscale filter | Smooth | Sharp: crisp pixels |
+| Model detail (P) | Low | level of detail of characters, vehicles and props |
+| Hide distant objects (P) | Small | skips objects that cover only a few pixels |
+| Scenery updates (P) | Quarter | how often static props are updated |
+| Object lighting (P) | Third | how often object lighting is recomputed |
+| Smooth weapon motion | On | the first-person weapon blended between game ticks |
 | FPS counter | Off | the game's own frame counter, bottom right |
 | Frame limit | 30 FPS | the most frames shown a second |
-| Render resolution | 75% | the 3D view's resolution (applies after a restart) |
-| Model detail | Low | level of detail of characters, vehicles and props |
-| Hide distant objects | Small | skips objects that cover only a few pixels |
-| Scenery updates | Quarter | how often static props are updated |
-| Object lighting | Third | how often object lighting is recomputed |
-| Sound voices | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices); applies after a restart |
-| Sound occlusion | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
+
+**Audio**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Sound voices * | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices) |
+| Sound occlusion (P) | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
+
+**Controls**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
 | Look sensitivity | 100% | right stick turning speed |
-| Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
 | Invert look | No | reverses the right stick's up and down |
 | Stick deadzone | Off | raise it if the sticks drift |
-| Multiplayer | | opens the Multiplayer page: Wi-Fi, online and ad hoc play (see Multiplayer) |
+| Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
+| Show dev settings | Off | shows the Dev tab |
+
+**Multiplayer**: see [Multiplayer](#multiplayer).
+
+**Modded maps** lists the maps in the maps folder that are not the Xbox's
+own: name, size, kind (**Xbox** for a modded or newly built Xbox map, **CE**
+for a Halo Custom Edition one, **CE+OS** for an OpenSauce `.yelo`, marked
+`*`) and On or Off. Left and right turn a map off or on: an Off map stays in
+the folder but is left out of the multiplayer map list (`HALO_MAPS_DISABLED`
+in `settings.txt`; a game on a map you turned off may not be joinable).
+Square deletes a map, with its `.bmp` picture and `.txt` description, after
+asking (not the map being played). **PC maps** (Off by default,
+experimental) puts the Custom Edition maps in the map list; the tab warns
+when the Custom Edition resource maps they need (`bitmaps.map`,
+`sounds.map`, `loc.map`) are not in the maps folder.
+
+**Dev** (once Show dev settings is on): debug switches for testers. Each
+is an `env.txt` variable; a switch is saved in `settings.txt` only while it
+is on, and off, `env.txt`'s value (or the default) applies. While any is on,
+`halo.log` says `settings: TEST MODE, dev switches on: ...` near its top.
+
+| Switch | Variable | What it does |
+| --- | --- | --- |
+| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go, in `halo.log` |
+| Crash dump on hang | `HALO_HANG_CRASH=1` | a hang of 8 s (no frame presented) crashes on purpose, for a crash dump |
+| FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load |
+| GPU W clamp * | `HALO_GXM_WCLAMP=0` | A/B: models close to the camera dropping out (issue #9) |
+| Target mip minimum * | `HALO_TARGET_CHAIN_MIN_SIZE` | A/B: the smallest mip level of render targets (32, 16 or 8 pixels) |
+| Frame phase lock * | `HALO_FRAME_PHASE_LOCK=0` | A/B: 30 FPS frames kept between two ticks (Off: a fixed period) |
+| Render target sync * | `HALO_GXM_RTT_SYNC=0` | A/B: a scene waits for a render target drawn just before it |
+| Save report | | copies `halo.log`, `halo-prev.log`, `settings.txt`, `env.txt` and the newest `ux0:data/psp2core-*.psp2dmp` into `ux0:data/haloce-vita/report-<date>/` and shows the folder |
 
 The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 
@@ -133,12 +180,11 @@ PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
 - **System link** over Wi-Fi: Vitas on the same network host and join each
   other's games under Multiplayer, System Link.
 - **Online** (internet play) and **ad hoc** (Vitas nearby, no router) are
-  **experimental** and off unless chosen on the Multiplayer page. Both end in
+  **experimental** and off unless chosen on the Multiplayer tab. Both end in
   the game's own System Link screens: the other Vita's game shows in the
   list, and you host or join as on a local network.
 
-The settings panel's last line, **Multiplayer**, opens a page of its own
-(Circle goes back):
+The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
 | --- | --- |
@@ -156,7 +202,7 @@ A line under them says what is happening: your code while you host, the
 lookup of a code, the connection, or the ad hoc group.
 
 **Online.** Set Network to Online and restart. To host, create a game in
-Multiplayer, System Link as usual: the Multiplayer page then shows your
+Multiplayer, System Link as usual: the Multiplayer tab then shows your
 code, **ABCD-EFGH** (it stays the same until you quit the game). Tell it to
 the others; with Online games set to Public, your game is also listed. To
 join, type the code under Join with a code (or pick the game under Browse
@@ -192,7 +238,7 @@ only, not the OpenPSID itself.
 
 **Co-op (experimental).** Play the campaign together on two Vitas, by
 system link, online or ad hoc. The host picks a level and a difficulty on
-the Multiplayer page (Co-op campaign, Co-op difficulty), then creates a game
+the Multiplayer tab (Co-op campaign, Co-op difficulty), then creates a game
 in Multiplayer, System Link as usual (the lobby's map and game type do not
 matter: the game is that level); the other Vita joins it as any game, and
 the host starts it. The Xbox game had co-op only in split screen; this is

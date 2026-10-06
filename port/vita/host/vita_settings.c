@@ -222,7 +222,7 @@ static struct setting settings[] = {
 	/* (custom maps: the Custom Edition maps join the multiplayer level
 	list; off by default while their colours are wrong on the Vita) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Experimental: CE maps in the list (need CE bitmaps/sounds/loc.map)", 0, TAB_MAPS },
+		"Experimental: Custom Edition maps in the map list", 0, TAB_MAPS },
 
 	{ "Performance logging", PERFORMANCE_LOG, 1, 2, { "", "1" }, { "Off", "On" },
 		"Frame, render and tick timing in halo.log (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },

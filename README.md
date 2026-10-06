@@ -32,10 +32,10 @@ Evolved.
   Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
 - Campaign co-op over the network, experimental: two Vitas play a level
   together by system link, online or ad hoc (the settings panel's
-  Multiplayer page, Co-op campaign; [port/vita/README.md](port/vita/README.md#multiplayer)).
+  Multiplayer tab, Co-op campaign; [port/vita/README.md](port/vita/README.md#multiplayer)).
 - Profiles, controller settings and the game's settings menus.
-- A settings panel for the Vita's quality and control options: hold
-  **Select + Start** in game.
+- A settings panel for the Vita's quality, sound, control and multiplayer
+  options, custom maps and tester switches: hold **Select + Start** in game.
 - Up to 30 fps. Quiet areas and cinematics hold 25 to 30 fps; the biggest
   fights drop to the mid-to-high teens. See [Performance](#performance).
 
@@ -148,14 +148,32 @@ Quit** from the pause menu is the safest way to stop.
 
 ## Settings panel
 
-Hold Select + Start for a second. Up and down choose a setting, left and
-right change it, Circle closes the panel. Changes apply at once, render
-resolution and aspect ratio included (the picture pauses for a moment while
-the screen is set up again), except the row marked `*` (sound voices), which
-applies after a restart; the panel says so. If the memory for a bigger
-resolution cannot be found at that moment, the panel says the change waits
-for a restart. Settings are kept in
-`ux0:data/haloce-vita/settings.txt`.
+Hold Select + Start for a second. **L and R** switch between its tabs:
+**Graphics**, **Audio**, **Controls**, **Multiplayer**, **Modded maps** and,
+once Controls' **Show dev settings** is on, **Dev**. Up and down choose a
+line, left and right change it, Cross does what a line marked `>` says,
+Circle closes the panel. Changes apply at once, render resolution and
+aspect ratio included (the picture pauses for a moment while the screen is
+set up again), except the rows marked `*` (sound voices, the network, most
+dev switches), which apply after a restart; the panel says so. If the
+memory for a bigger resolution cannot be found at that moment, the panel
+says the change waits for a restart. Settings are kept in
+`ux0:data/haloce-vita/settings.txt` (a file from an older version loads as
+it is).
+
+- **Multiplayer**: the network (Wi-Fi, Online, Ad hoc), your game's code,
+  joining with a code, the public games, ad hoc groups and co-op (see
+  [port/vita/README.md](port/vita/README.md#multiplayer)).
+- **Modded maps**: the custom maps in your maps folder, with their size and
+  kind (Xbox, or CE for Halo Custom Edition). Left and right turn a map off
+  (it stays on the card but leaves the map list) or on; Square deletes it
+  after asking. **PC maps** puts Custom Edition maps in the map list
+  (experimental); the tab warns when the Custom Edition `bitmaps.map`,
+  `sounds.map` or `loc.map` they need are missing.
+- **Dev**: switches for testing (timing in `halo.log`, a crash dump when the
+  game hangs, the FPS overlay, A/B switches a bug report may ask for) and
+  **Save report** (below). While any switch is on, `halo.log` says
+  "TEST MODE" near its top.
 
 The **Profile** row at the top sets the speed-related rows together
 (render resolution, model detail, hide distant objects, scenery updates,
@@ -284,14 +302,18 @@ Issues and pull requests are welcome. What is planned next is in the
 - **Performance** in the biggest fights: the render on the first core is
   the limit at the peak.
 - **Testing online and ad hoc multiplayer** between Vitas: the settings
-  panel's Multiplayer page (see [port/vita/README.md](port/vita/README.md)).
+  panel's Multiplayer tab (see [port/vita/README.md](port/vita/README.md)).
 - **The issues listed for the next update** in the roadmap.
 
 ### Reporting a crash or a problem
 
 Open an [issue](https://github.com/BirchWoodGod/halo-ce-vita/issues) with
 what you were doing (level, place, weapon, vehicle) and these files from
-the memory card (VitaShell's FTP or USB mode):
+the memory card (VitaShell's FTP or USB mode). The settings panel's **Save
+report** (Controls: Show dev settings, then the Dev tab) copies `halo.log`,
+`halo-prev.log`, `settings.txt`, `env.txt` and the newest crash dump into
+one folder, `ux0:data/haloce-vita/report-<date>/`, for you to send; add
+`debug.txt`.
 
 - `ux0:data/haloce-vita/halo.log` and `halo-prev.log`: the port's logs of
   this and the previous session (the previous one is the crashed one after
