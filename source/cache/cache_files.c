@@ -348,9 +348,24 @@ char const *cache_files_map_directory(
 	return map_directory;
 }
 
+#ifdef HALO_LINUX
+/* the map file whose tags are loaded (its name without the extension), for
+the Vita settings panel, which does not delete a map in use */
+static char cache_files_loaded_map[64];
+
+int halo_cache_map_in_use(
+	char const *name)
+{
+	return cache_files_loaded_map[0] && !csstrcasecmp(cache_files_loaded_map, name);
+}
+#endif
+
 void scenario_tags_unload(
 	void)
 {
+#ifdef HALO_LINUX
+	cache_files_loaded_map[0] = 0;
+#endif
 	sound_cache_close();
 	texture_cache_close();
 	cache_file_close();
@@ -877,6 +892,10 @@ long scenario_tags_load(
 
 	stripped_scenario_name = tag_name_strip_path(scenario_name);
 	result = NONE;
+#ifdef HALO_LINUX
+	csstrncpy(cache_files_loaded_map, stripped_scenario_name, sizeof(cache_files_loaded_map) - 1);
+	cache_files_loaded_map[sizeof(cache_files_loaded_map) - 1] = 0;
+#endif
 	texture_cache_open();
 	sound_cache_open();
 #ifdef HALO_LINUX
