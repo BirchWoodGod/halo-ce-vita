@@ -304,6 +304,10 @@ void rasterizer_dynamic_triangles_delete(
 long rasterizer_dynamic_vertices_new(
 	short type,
 	long vertex_count);
+#ifdef HALO_LINUX
+long rasterizer_dynamic_vertices_available(
+	short type);
+#endif
 short rasterizer_dynamic_vertices_get_type(
 	long dynamic_vertex_buffer_index);
 void *rasterizer_dynamic_vertices_lock(

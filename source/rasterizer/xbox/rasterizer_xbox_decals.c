@@ -722,9 +722,13 @@ void *halo_d3d_contiguous_alloc(unsigned long size);
 /* (debug) HALO_DECAL_STATS=1: decals and their draws per frame, logged
 every 300 frames */
 static unsigned long decal_stats_decals, decal_stats_draws, decal_stats_frames;
+/* (decal_stack_cap) */
+static unsigned long decal_stack_dropped;
 extern char *getenv(const char *name);
 extern int atoi(const char *text);
 extern void qsort(void *base, size_t count, size_t size, int (*compare)(const void *, const void *));
+extern double atof(const char *text);
+extern double floor(double value);
 
 void halo_decal_stats_frame(void)
 {
@@ -737,8 +741,10 @@ void halo_decal_stats_frame(void)
 	}
 	if (enabled && ++decal_stats_frames % 300 == 0)
 	{
-		platform_log("decals: %.1f decals and %.1f draws a frame", decal_stats_decals / 300.0, decal_stats_draws / 300.0);
+		platform_log("decals: %.1f decals and %.1f draws a frame; %.1f left out by the stack cap", decal_stats_decals / 300.0,
+			decal_stats_draws / 300.0, decal_stack_dropped / 300.0);
 		decal_stats_decals = decal_stats_draws = 0;
+		decal_stack_dropped = 0;
 	}
 }
 
@@ -847,6 +853,82 @@ static void decal_sort_entries(struct decal_sort_entry *entries, long count)
 
 static unsigned long decal_intensity_rounded(unsigned long intensity);
 
+/* (port, opt-in) HALO_DECAL_STACK_CAP=n: at most n decals of a cluster's
+layer drawn in one spot (a cell of HALO_DECAL_STACK_CELL world units,
+default 0.15, around their centres), the newest; the older ones under them
+are left out. Where a fight piles hundreds of scorch marks and holes on one
+wall (a10's knot, the player pinned by plasma: ~800 quads, 2.4 screens of
+blended pixels) the GPU blends each of them; the oldest are mostly covered.
+Not the same image (an old mark that showed through goes): off by default.
+HALO_DECAL_STACK_CAP=0 off */
+static long decal_stack_cap_value = -1;
+static real decal_stack_cell = 0.15f;
+static long decal_stack_order[DECAL_SORT_MAXIMUM];
+static struct { unsigned long key; long count; } decal_stack_cells[2 * DECAL_SORT_MAXIMUM];
+
+static int decal_stack_newer_first(const void *left, const void *right)
+{
+	long a = decal_sorted[*(const long *)left].decal->creation_time;
+	long b = decal_sorted[*(const long *)right].decal->creation_time;
+
+	if (a != b)
+		return a > b ? -1 : 1;
+	return *(const long *)left - *(const long *)right;
+}
+
+static long decal_stack_cap(long count)
+{
+	long index, kept = 0, table_size;
+
+	if (decal_stack_cap_value < 0)
+	{
+		const char *setting = getenv("HALO_DECAL_STACK_CAP");
+		const char *cell = getenv("HALO_DECAL_STACK_CELL");
+
+		decal_stack_cap_value = setting ? atoi(setting) : 0;
+		if (cell && atof(cell) > 0.0)
+			decal_stack_cell = (real)atof(cell);
+	}
+	if (decal_stack_cap_value <= 0 || count <= decal_stack_cap_value)
+		return count;
+	table_size = 2 * count;
+	memset(decal_stack_cells, 0, table_size * sizeof(decal_stack_cells[0]));
+	for (index = 0; index < count; index++)
+		decal_stack_order[index] = index;
+	qsort(decal_stack_order, count, sizeof(decal_stack_order[0]), decal_stack_newer_first);
+	for (index = 0; index < count; index++)
+	{
+		struct decal_sort_entry *entry = &decal_sorted[decal_stack_order[index]];
+		real_point3d const *position = &entry->decal->position;
+		unsigned long key = ((unsigned long)(long)floor(position->x / decal_stack_cell) * 73856093UL) ^
+			((unsigned long)(long)floor(position->y / decal_stack_cell) * 19349663UL) ^
+			((unsigned long)(long)floor(position->z / decal_stack_cell) * 83492791UL);
+		long slot;
+
+		key = (key ^ (key >> 13)) | 1;
+		for (slot = (long)(key % (unsigned long)table_size);
+			decal_stack_cells[slot].key && decal_stack_cells[slot].key != key;
+			slot = (slot + 1) % table_size)
+		{
+		}
+		decal_stack_cells[slot].key = key;
+		if (decal_stack_cells[slot].count++ >= decal_stack_cap_value)
+			entry->decal_index = NONE;
+	}
+	for (index = 0; index < count; index++)
+	{
+		if (decal_sorted[index].decal_index == NONE)
+		{
+			decal_stack_dropped++;
+			continue;
+		}
+		decal_sorted[kept] = decal_sorted[index];
+		decal_sorted[kept].order = kept;
+		kept++;
+	}
+	return kept;
+}
+
 static long decal_sort_cluster(long decal_index)
 {
 	static int enabled = -1;
@@ -880,6 +962,8 @@ static long decal_sort_cluster(long decal_index)
 		count++;
 		decal_index = decal->next_decal_index;
 	}
+	if (count > 1)
+		count = decal_stack_cap(count);
 	if (count > 1)
 		decal_sort_entries(decal_sorted, count);
 	return count;
