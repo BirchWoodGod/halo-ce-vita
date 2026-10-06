@@ -90,7 +90,29 @@ one; `HALO_MOVIE_DUMP=n` writes the n-th frame as the decoder gave it
 | Start | Start | pause; skips a cinematic |
 | Select | Back | scoreboard |
 
-In the menus the D-pad moves the selection.
+In the menus the D-pad moves the selection. The settings panel's Controls
+tab can put each action on another button (in play only: the menus keep
+this layout) and give the touch zones actions (below).
+
+**Touch zones** (`port/vita/host/vita_controls.c`; positions in the
+screen's 960 x 544 pixels, the rear pad scaled to the same as seen from the
+front):
+
+| Zone | Where | Counts |
+| --- | --- | --- |
+| Touch top left | front, 0-160 x 0-120 | at once |
+| Touch top right | front, 800-960 x 0-120 | at once |
+| Touch left edge | front, 0-120 x 190-400 (beside the D-pad, above the motion tracker) | at once |
+| Touch right edge | front, 840-960 x 190-400 (beside the face buttons) | at once |
+| Rear touch left | rear, 0-440 (all of its height) | once held 0.1 s |
+| Rear touch right | rear, 520-960 | once held 0.1 s |
+
+A finger counts for the zone it came down in for as long as it stays down;
+one that comes down outside every zone does nothing, and each finger counts
+on its own. The rear pad's hold time keeps the fingers holding the Vita from
+pressing anything when they brush it. A finger coming down counts as input
+for the screen's dimming. `HALO_PAD_FILE` (debug, `vita_input.c`) takes `tl
+tr el er rl rr` for the zones.
 
 ## Settings panel
 
@@ -130,8 +152,16 @@ after a restart.
 | Look sensitivity | 100% | right stick turning speed |
 | Invert look | No | reverses the right stick's up and down |
 | Stick deadzone | Off | raise it if the sticks drift |
-| Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
+| Crouch | Toggle | a press of crouch crouches and the next stands (Hold: crouch while held); also for a touch zone set to Crouch |
+| Touch top left, top right, left edge, right edge | Off | a front touch zone's action: Melee, Throw grenade, Flashlight, Zoom, Crouch, Reload/action, Switch weapon, Switch grenade, Jump, Scoreboard or Fire |
+| Rear touch left, right | Off | the same for the rear pad's halves |
+| Fire button ... Flashlight button | R, L, Cross, Circle, Square, Triangle, D-pad down / up / left / right | the Vita button of each action in play (None: no button); two actions on one button both happen |
+| Reset controls > | | this tab's rows as shipped (Show dev settings stays) |
 | Show dev settings | Off | shows the Dev tab |
+
+While a touch zone's row is chosen the panel draws the front screen and the
+rear pad beside the rows: the row's zone green (dark green while Off), the
+zones set to an action grey.
 
 **Multiplayer**: see [Multiplayer](#multiplayer).
 
