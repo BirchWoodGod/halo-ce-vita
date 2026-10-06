@@ -1227,8 +1227,21 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 			device.presentation = *presentation_parameters;
 		width = device.presentation.BackBufferWidth ? device.presentation.BackBufferWidth : 640;
 		height = device.presentation.BackBufferHeight ? device.presentation.BackBufferHeight : 480;
-		d3d8_surface_initialize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, width, height);
-		d3d8_surface_initialize(&device.depth_buffer, D3DFMT_LIN_D24S8, width, height);
+		{
+			/* (the two surfaces' memory, the first blocks of the memory
+			window, is made for 848 columns whatever the width: a 640-wide
+			4:3 screen, HALO_DISPLAY_WIDTH=640, then leaves the game state
+			after them at the same address, so saves load in either) */
+			unsigned long allocated = width < 848 ? 848 : width;
+
+			d3d8_surface_initialize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, allocated, height);
+			d3d8_surface_initialize(&device.depth_buffer, D3DFMT_LIN_D24S8, allocated, height);
+			if (allocated != width)
+			{
+				d3d8_surface_resize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, width, height);
+				d3d8_surface_resize(&device.depth_buffer, D3DFMT_LIN_D24S8, width, height);
+			}
+		}
 		device.render_target = &device.back_buffer;
 		device.depth_stencil = &device.depth_buffer;
 		for (index = 0; index < D3DTS_MAX; index++)
@@ -3148,6 +3161,7 @@ static void execute_draw(struct render_command *command)
 }
 
 static void write_screenshot(struct render_target_entry *target);
+static void write_display_screenshot(unsigned long frame);
 int halo_trace_active(void);
 
 static void execute_command(struct render_command *command)
@@ -3211,6 +3225,8 @@ static void execute_command(struct render_command *command)
 			/* (the frame's visibility counts: the game's frame they are of) */
 			vgxm_visibility_frame(command->frame);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
+			if (command->screenshot)
+				write_display_screenshot(command->frame);
 		}
 		if (halo_trace_active())
 			platform_log("trace: worker presented %lu", command->frame);
@@ -5746,24 +5762,19 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 
 /* ---------- presentation */
 
-static void write_screenshot_named(struct render_target_entry *target, const char *prefix)
+static void write_screenshot_pixels(const unsigned char *pixels, unsigned long pitch, unsigned long width,
+	unsigned long height, const char *prefix)
 {
 	const char *directory = *config_string("debug.screenshot_directory") ?
 		config_string("debug.screenshot_directory") : NULL;
-	unsigned long width = target->target.width, height = target->target.height, pitch = 0, row, column;
-	const unsigned char *pixels;
+	unsigned long image_size = width * height * 4, row, column;
 	unsigned char header[54] = { 'B', 'M' };
-	unsigned long image_size = width * height * 4;
 	unsigned char *line;
 	char path[512];
 	FILE *file;
 
-	if (!directory)
+	if (!directory || !pixels)
 		return;
-	pixels = vgxm_target_pixels(target->id, &pitch, &width, &height);
-	if (!pixels)
-		return;
-	image_size = width * height * 4;
 	snprintf(path, sizeof(path), "%s/%s%05lu.bmp", directory, prefix, device.frame);
 	file = fopen(path, "wb");
 	if (!file)
@@ -5778,7 +5789,7 @@ static void write_screenshot_named(struct render_target_entry *target, const cha
 	*(unsigned int *)(header + 34) = (unsigned int)image_size;
 	fwrite(header, 1, sizeof(header), file);
 	line = malloc(width * 4);
-	for (row = 0; row < height; row++)
+	for (row = 0; line && row < height; row++)
 	{
 		memcpy(line, pixels + row * pitch, width * 4);
 		for (column = 0; column < width; column++)
@@ -5788,6 +5799,60 @@ static void write_screenshot_named(struct render_target_entry *target, const cha
 	free(line);
 	fclose(file);
 	platform_log("screenshot %s", path);
+}
+
+static void write_screenshot_named(struct render_target_entry *target, const char *prefix)
+{
+	unsigned long width = target->target.width, height = target->target.height, pitch = 0;
+	const unsigned char *pixels;
+
+	if (!*config_string("debug.screenshot_directory"))
+		return;
+	pixels = vgxm_target_pixels(target->id, &pitch, &width, &height);
+	write_screenshot_pixels(pixels, pitch, width, height, prefix);
+}
+
+/* (debug, HALO_TEST_COMMANDS "@shot name") the name of a frame's display
+screenshot, kept for the worker by the frame's number */
+static char shot_names[4][64];
+static unsigned long shot_frames[4];
+
+/* (debug) HALO_SCREENSHOT_DISPLAY=1: a screenshot frame's display buffer
+too, 960x544 as shown (the scale to the display, black bars, the panel),
+named display<frame>.bmp (or <name><frame>.bmp after "@shot name"); the
+display's colour order (ABGR) swapped back */
+static void write_display_screenshot(unsigned long frame)
+{
+	static int wanted = -1;
+	const char *prefix = "display";
+	unsigned long pitch = 0, width = 0, height = 0, row, column;
+	const unsigned char *pixels;
+	unsigned char *copy;
+
+	if (wanted < 0)
+		wanted = getenv("HALO_SCREENSHOT_DISPLAY") && atoi(getenv("HALO_SCREENSHOT_DISPLAY"));
+	if (shot_frames[frame & 3] == frame && shot_names[frame & 3][0])
+		prefix = shot_names[frame & 3];
+	else if (!wanted)
+		return;
+	if (!(pixels = vgxm_display_pixels(&pitch, &width, &height)))
+		return;
+	copy = malloc(width * height * 4);
+	if (!copy)
+		return;
+	for (row = 0; row < height; row++)
+		for (column = 0; column < width; column++)
+		{
+			const unsigned char *from = pixels + row * pitch + column * 4;
+			unsigned char *to = copy + (row * width + column) * 4;
+
+			to[0] = from[2];
+			to[1] = from[1];
+			to[2] = from[0];
+			to[3] = 0xff;
+		}
+	write_screenshot_pixels(copy, width * 4, width, height, prefix);
+	free(copy);
 }
 
 static void write_screenshot(struct render_target_entry *target)
@@ -5878,6 +5943,21 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				}
 				if ((first >= 0 && device.frame < (unsigned long)first) || (last >= 0 && device.frame > (unsigned long)last))
 					command->screenshot = FALSE;
+			}
+			{
+				/* (debug) "@shot name" (HALO_TEST_COMMANDS): this frame's
+				display saved as name<frame>.bmp */
+				extern char halo_screenshot_name[64];
+
+				shot_names[device.frame & 3][0] = 0;
+				if (halo_screenshot_name[0])
+				{
+					command->screenshot = TRUE;
+					shot_frames[device.frame & 3] = device.frame;
+					strncpy(shot_names[device.frame & 3], halo_screenshot_name, sizeof(shot_names[0]) - 1);
+					shot_names[device.frame & 3][sizeof(shot_names[0]) - 1] = 0;
+					halo_screenshot_name[0] = 0;
+				}
 			}
 			command->frame = device.frame;
 			frames_requested++;

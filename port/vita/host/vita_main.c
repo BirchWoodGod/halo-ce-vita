@@ -328,7 +328,9 @@ static void show_missing_data(void)
 static void read_environment_file(void)
 {
 	FILE *file = fopen(VITA_DATA_DIRECTORY "/env.txt", "r");
-	char line[512];
+	/* (long enough for a test script's HALO_TEST_COMMANDS line; static, so
+	it takes nothing from the stack) */
+	static char line[4096];
 
 	if (!file)
 		return;
@@ -345,7 +347,7 @@ static void read_environment_file(void)
 		setenv(line, equals + 1, 1);
 		{
 			char message[600];
-			snprintf(message, sizeof(message), "vita: %s=%s", line, equals + 1);
+			snprintf(message, sizeof(message), "vita: %s=%.500s", line, equals + 1);
 			vita_host_log(message);
 		}
 	}

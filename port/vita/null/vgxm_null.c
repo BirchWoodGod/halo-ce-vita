@@ -1058,3 +1058,16 @@ const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch,
 	*pitch = 0;
 	return NULL;
 }
+
+void vgxm_upscale_filter_set(int filter)
+{
+	(void)filter;
+}
+
+const void *vgxm_display_pixels(unsigned long *pitch, unsigned long *width, unsigned long *height)
+{
+	(void)width;
+	(void)height;
+	*pitch = 0;
+	return NULL;
+}

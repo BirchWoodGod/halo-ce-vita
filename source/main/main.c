@@ -3558,9 +3558,10 @@ positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
 tick, every frame), "@tv name" puts every player's unit at the centre of
 that scenario trigger volume (the benchmarks walk the player through a
-level's encounters this way: triage/perf2-status.md), and "@shot name"
+level's encounters this way: triage/perf2-status.md), "@where" logs where
+every vehicle and scenery object is, and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
-(the desktop GL device). Each runs once,
+(the desktop GL device; on the Vita its display, as name<frame>.bmp). Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 void platform_log(const char *format, ...);
@@ -3577,7 +3578,7 @@ static void main_test_commands_update(
 	static float pan[7];
 	static long pan_start;
 	static int parsed = 0;
-	static struct { long tick; char command[120]; boolean done; } commands[64];
+	static struct { long tick; char command[120]; boolean done; } commands[160];
 	static short command_count;
 	short index;
 
@@ -3633,6 +3634,19 @@ static void main_test_commands_update(
 		}
 		else if (!strncmp(commands[index].command, "@camera ", 8))
 			main_test_camera(commands[index].command + 8);
+		else if (!strcmp(commands[index].command, "@where"))
+		{
+			/* (@where: every vehicle's and scenery object's tag and place,
+			in the log, for aiming @camera at one) */
+			struct object_iterator iterator;
+			struct object_datum *object;
+
+			object_iterator_new(&iterator, _object_mask_vehicle | _object_mask_scenery, 0);
+			while ((object = object_iterator_next(&iterator)) != NULL)
+				platform_log("where %lx %s at %.2f %.2f %.2f", (unsigned long)iterator.index,
+					tag_get_name(object->definition_index), object->object.position.x, object->object.position.y,
+					object->object.position.z);
+		}
 		else if (!strncmp(commands[index].command, "@tv ", 4))
 			main_test_trigger_volume(commands[index].command + 4);
 		else

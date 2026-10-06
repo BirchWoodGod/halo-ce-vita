@@ -836,6 +836,34 @@ static real object_get_level_of_detail_pixels(
 	return render_frustum_sphere_diameter_in_pixels(&render.frustum, &center, radius);
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_MIN_OBJECT_PIXELS' exceptions (render_object_list) */
+static boolean render_object_kept_whatever_its_size(
+	struct object_datum const *object,
+	struct object_definition const *definition,
+	real minimum_pixels)
+{
+	long parent_index = object->object.parent_object_index;
+	short depth;
+
+	if (TEST_FLAG(model_transparency_flags(definition->object.model.index), _model_transparency_every_distance_bit))
+		return TRUE;
+	/* (the topmost parent's sphere: the unit holding the weapon, the
+	vehicle carrying the unit) */
+	for (depth = 0; parent_index != NONE && depth < 8; depth++)
+	{
+		struct object_datum const *parent = object_try_and_get(parent_index);
+
+		if (!parent)
+			return FALSE;
+		if (parent->object.parent_object_index == NONE)
+			return object_get_level_of_detail_pixels(parent_index) >= minimum_pixels;
+		parent_index = parent->object.parent_object_index;
+	}
+	return FALSE;
+}
+#endif
+
 static void render_object_list(
 	struct object_render_data *data,
 	struct render_model_effect const *parent_model_effect,
@@ -993,10 +1021,20 @@ static void render_object_list(
 					unsigned long long model_before = objects_profile_now();
 					/* (port) HALO_MIN_OBJECT_PIXELS=n (a handheld quality setting):
 					an object whose bounding sphere spans fewer pixels than n is
-					not drawn (its children, lights and effects still are) */
+					not drawn (its children, lights and effects still are). The
+					pixels are the game's own (its 480 lines whatever the render
+					resolution). Always drawn: a model with transparent parts and
+					no detail levels (the Xbox draws those parts at any distance;
+					the object's sphere is often its solid base alone: the
+					Covenant field generator's is 0.5 for a dome twice that, so at
+					Small the dome went at ~50 m, and came and went as the view
+					turned, the test measuring depth along the view), and a child
+					whose topmost parent is big enough (a held weapon is drawn
+					whenever its holder is) */
 					static float minimum_pixels = -1.0f;
 					static unsigned long settings_seen;
 					extern volatile unsigned long halo_settings_generation;
+					boolean big_enough;
 
 					if (minimum_pixels < 0.0f || settings_seen != halo_settings_generation)
 					{
@@ -1004,10 +1042,12 @@ static void render_object_list(
 						const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
 						minimum_pixels = setting ? (float)atof(setting) : 0.0f;
 					}
-					flicker_note_drawn(object_index, level_of_detail_pixels >= minimum_pixels, level_of_detail_pixels, minimum_pixels);
-					if (level_of_detail_pixels >= minimum_pixels && OBJECTS_PROFILE_ON())
+					big_enough = level_of_detail_pixels >= minimum_pixels ||
+						render_object_kept_whatever_its_size(object, definition, minimum_pixels);
+					flicker_note_drawn(object_index, big_enough, level_of_detail_pixels, minimum_pixels);
+					if (big_enough && OBJECTS_PROFILE_ON())
 						objects_profile_models++;
-					if (level_of_detail_pixels >= minimum_pixels)
+					if (big_enough)
 					render_model(
 						definition->object.model.index,
 						level_of_detail_pixels,

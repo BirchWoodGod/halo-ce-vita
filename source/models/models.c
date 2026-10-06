@@ -1038,6 +1038,164 @@ void model_geometry_part_build_tangent_matrices(
 	return;
 }
 
+#ifdef HALO_LINUX
+static short model_geometry_transparent_part_count(
+	struct model const *model,
+	short geometry_index)
+{
+	struct model_geometry *geometry;
+	short part_index, count = 0;
+
+	if (geometry_index < 0 || geometry_index >= model->geometries.count)
+		return 0;
+	geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index, struct model_geometry);
+	for (part_index = 0; part_index < geometry->parts.count; part_index++)
+	{
+		struct model_geometry_part *part = TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index, struct model_geometry_part);
+		struct model_shader_reference *shader_reference;
+		struct shader *shader;
+
+		if (part->shader_index < 0 || part->shader_index >= model->shaders.count ||
+			TEST_FLAG(part->flags, _model_geometry_part_stripped_bit))
+			continue;
+		shader_reference = TAG_BLOCK_GET_ELEMENT(&model->shaders, part->shader_index, struct model_shader_reference);
+		if (shader_reference->shader.index == NONE)
+			continue;
+		shader = shader_definition_get(shader_reference->shader.index);
+		if (shader_type_is_valid_for_model(shader->base.type) && shader_type_is_transparent(shader->base.type))
+			count++;
+	}
+	return count;
+}
+
+/* (port) the quality settings (HALO_MODEL_LOD_SCALE, HALO_MIN_OBJECT_PIXELS)
+keep a model's transparent parts: see models.h. Worked out once per model
+tag (each geometry's count of transparent parts, four bits each for the
+first 64) and kept in a small table (the render thread's alone) */
+#define MODEL_TRANSPARENCY_COUNTED_GEOMETRIES 64
+
+struct model_transparency
+{
+	long model_index;
+	struct model const *model;
+	unsigned long flags;
+	unsigned char counts[MODEL_TRANSPARENCY_COUNTED_GEOMETRIES / 2];
+};
+
+static short model_transparent_part_count(
+	struct model_transparency const *entry,
+	short geometry_index);
+
+static struct model_transparency const *model_transparency_get(
+	long model_index)
+{
+	static struct model_transparency cache[256];
+	struct model_transparency *entry;
+	struct model const *model = model_definition_get(model_index);
+	short geometry_index, region_index;
+	boolean detail_levels = FALSE;
+	short level;
+
+	entry = &cache[(unsigned int)model_index & (NUMBEROF(cache) - 1)];
+	if (entry->model_index == model_index && entry->model == model)
+		return entry;
+	memset(entry, 0, sizeof(*entry));
+	for (geometry_index = 0;
+		geometry_index < model->geometries.count && geometry_index < MODEL_TRANSPARENCY_COUNTED_GEOMETRIES;
+		geometry_index++)
+	{
+		short count = model_geometry_transparent_part_count(model, geometry_index);
+
+		entry->counts[geometry_index / 2] |= (unsigned char)(MIN(count, 15) << (4 * (geometry_index & 1)));
+	}
+	entry->model_index = model_index;
+	entry->model = model;
+	for (level = 0; level < NUMBER_OF_DETAIL_LEVELS_PER_MODEL; level++)
+		if (model->detail_cutoff_pixels[level] > 0.0f)
+			detail_levels = TRUE;
+	for (region_index = 0; region_index < model->regions.count; region_index++)
+	{
+		struct model_region *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
+		short permutation_index;
+
+		for (permutation_index = 0; permutation_index < region->permutations.count; permutation_index++)
+		{
+			struct model_region_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
+				&region->permutations,
+				permutation_index,
+				struct model_region_permutation);
+			short highest = model_transparent_part_count(entry, permutation->geometry_indices[NUMBER_OF_DETAIL_LEVELS_PER_MODEL - 1]);
+
+			for (level = 0; level < NUMBER_OF_DETAIL_LEVELS_PER_MODEL; level++)
+			{
+				short count = model_transparent_part_count(entry, permutation->geometry_indices[level]);
+
+				if (count)
+					entry->flags |= FLAG(_model_transparency_any_bit);
+				if (count < highest)
+					entry->flags |= FLAG(_model_transparency_lost_bit);
+			}
+		}
+	}
+	if (TEST_FLAG(entry->flags, _model_transparency_any_bit) && !detail_levels)
+		entry->flags |= FLAG(_model_transparency_every_distance_bit);
+	return entry;
+}
+
+static short model_transparent_part_count(
+	struct model_transparency const *entry,
+	short geometry_index)
+{
+	if (geometry_index < 0)
+		return 0;
+	if (geometry_index < MODEL_TRANSPARENCY_COUNTED_GEOMETRIES)
+		return (entry->counts[geometry_index / 2] >> (4 * (geometry_index & 1))) & 15;
+	return MIN(model_geometry_transparent_part_count(entry->model, geometry_index), 15);
+}
+
+unsigned long model_transparency_flags(
+	long model_index)
+{
+	return model_index == NONE ? 0 : model_transparency_get(model_index)->flags;
+}
+
+/* (port) HALO_MODEL_LOD_SCALE: the lowered detail level raised again (to at
+most the level the game would have chosen) until no region of the drawn
+permutations has fewer transparent parts than at the game's level (a visor,
+a canopy, a shield stays where the Xbox draws it) */
+static short model_detail_level_keeping_transparency(
+	long model_index,
+	struct model const *model,
+	char const *region_permutation_indices,
+	short level,
+	short game_level)
+{
+	struct model_transparency const *entry = model_transparency_get(model_index);
+
+	for (; level < game_level; level++)
+	{
+		short region_index;
+		boolean lost = FALSE;
+
+		for (region_index = 0; region_index < model->regions.count && !lost; region_index++)
+		{
+			struct model_region *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
+			char permutation_index = region_permutation_indices[region_index];
+			struct model_region_permutation *permutation;
+
+			if (permutation_index < 0 || permutation_index >= region->permutations.count)
+				continue;
+			permutation = TAG_BLOCK_GET_ELEMENT(&region->permutations, permutation_index, struct model_region_permutation);
+			lost = model_transparent_part_count(entry, permutation->geometry_indices[level]) <
+				model_transparent_part_count(entry, permutation->geometry_indices[game_level]);
+		}
+		if (!lost)
+			break;
+	}
+	return level;
+}
+#endif
+
 void render_model(
 	long model_index,
 	real level_of_detail_pixels,
@@ -1129,6 +1287,8 @@ void render_model(
 #endif
 
 #ifdef HALO_LINUX
+		real game_level_of_detail_pixels = -1.0f;
+
 		{
 			/* (port) HALO_MODEL_LOD_SCALE=<real>: the detail level is chosen as
 			if the model covered that fraction of its pixels (a handheld quality
@@ -1144,7 +1304,10 @@ void render_model(
 				lod_scale = setting && atof(setting) > 0.0 ? (float)atof(setting) : 1.0f;
 			}
 			if (lod_scale != 1.0f)
+			{
+				game_level_of_detail_pixels = level_of_detail_pixels;
 				level_of_detail_pixels *= lod_scale;
+			}
 		}
 #endif
 		geometry_detail_level_index = NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1;
@@ -1153,6 +1316,21 @@ void render_model(
 		{
 			geometry_detail_level_index--;
 		}
+#ifdef HALO_LINUX
+		if (game_level_of_detail_pixels >= 0.0f &&
+			geometry_detail_level_index < NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1 &&
+			TEST_FLAG(model_transparency_flags(model_index), _model_transparency_lost_bit))
+		{
+			short game_level = NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1;
+
+			while (game_level>0 && game_level_of_detail_pixels<model->detail_cutoff_pixels[game_level])
+			{
+				game_level--;
+			}
+			geometry_detail_level_index = model_detail_level_keeping_transparency(model_index, model,
+				region_permutation_indices, geometry_detail_level_index, game_level);
+		}
+#endif
 		if (rasterizer_debug_options.debug_model_lod!=NONE)
 		{
 			geometry_detail_level_index = PIN(rasterizer_debug_options.debug_model_lod, 0, NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1);

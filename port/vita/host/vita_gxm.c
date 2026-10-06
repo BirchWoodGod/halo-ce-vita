@@ -251,6 +251,11 @@ static struct
 	the worker: two copies, the index flips when one is complete */
 	char menu_text[2][2048];
 	volatile int menu_index, menu_visible, menu_selected;
+	/* the frame's scale to the display (HALO_UPSCALE_FILTER): 0 smooth
+	(bilinear), 1 sharp (nearest), both at the display's height; and the
+	picture's rectangle on the display, the rest black (vgxm_present) */
+	volatile int upscale_filter;
+	float picture_left, picture_top, picture_width, picture_height;
 	int shacccg_ready;
 	int ready;
 } gxm;
@@ -531,6 +536,11 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 		return -1;
 	}
 	shader_precompile();
+	{
+		const char *setting = getenv("HALO_UPSCALE_FILTER");
+
+		gxm.upscale_filter = setting && atoi(setting) == 1;
+	}
 	gxm.ready = 1;
 	vita_host_log_memory("with the renderer up");
 	log_line("gxm: ready: %ux%u display, %u MB rings, %u MB texture pool, window %p (%lu MB) mapped",
@@ -2899,17 +2909,33 @@ static void blit(struct target *source)
 	indices = vgxm_worker_alloc(4 * sizeof(unsigned short), 16);
 	if (!fragment_program || !vertices || !indices)
 		return;
-	/* the picture at the display's height, its shape kept */
+	/* the picture at the display's height, its shape kept (a 4:3 frame,
+	HALO_DISPLAY_WIDTH=640, between black bars); sharp: the same size,
+	sampled nearest rather than bilinear */
 	height = (float)DISPLAY_HEIGHT;
 	width = height * (float)source->width / (float)source->height;
 	if (width > DISPLAY_WIDTH)
-		width = DISPLAY_WIDTH;
-	x0 = -width / DISPLAY_WIDTH;
-	x1 = width / DISPLAY_WIDTH;
 	{
+		/* (wider than the display: the whole width, and the height kept
+		within a few lines of the display's, as 848 columns are) */
+		width = DISPLAY_WIDTH;
+		height = width * (float)source->height / (float)source->width;
+		if (height > DISPLAY_HEIGHT - 4)
+			height = DISPLAY_HEIGHT;
+	}
+	/* (whole pixels, the picture centred) */
+	gxm.picture_width = (float)(int)(width + 0.5f);
+	gxm.picture_height = (float)(int)(height + 0.5f);
+	gxm.picture_left = (float)(int)((DISPLAY_WIDTH - gxm.picture_width) / 2.0f);
+	gxm.picture_top = (float)(int)((DISPLAY_HEIGHT - gxm.picture_height) / 2.0f);
+	x0 = 2.0f * gxm.picture_left / DISPLAY_WIDTH - 1.0f;
+	x1 = 2.0f * (gxm.picture_left + gxm.picture_width) / DISPLAY_WIDTH - 1.0f;
+	{
+		float y0 = 1.0f - 2.0f * gxm.picture_top / DISPLAY_HEIGHT;
+		float y1 = 1.0f - 2.0f * (gxm.picture_top + gxm.picture_height) / DISPLAY_HEIGHT;
 		float quad[4][4] = {
-			{ x0, 1.0f, 0.0f, 0.0f }, { x1, 1.0f, 1.0f, 0.0f },
-			{ x0, -1.0f, 0.0f, 1.0f }, { x1, -1.0f, 1.0f, 1.0f },
+			{ x0, y0, 0.0f, 0.0f }, { x1, y0, 1.0f, 0.0f },
+			{ x0, y1, 0.0f, 1.0f }, { x1, y1, 1.0f, 1.0f },
 		};
 
 		memcpy(vertices, quad, sizeof(quad));
@@ -2917,8 +2943,12 @@ static void blit(struct target *source)
 	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
 	sceGxmTextureInitLinearStrided(&texture, source->memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, source->width,
 		source->height, source->stride * 4);
-	sceGxmTextureSetMinFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
-	sceGxmTextureSetMagFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
+	{
+		SceGxmTextureFilter filter = gxm.upscale_filter == 1 ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR;
+
+		sceGxmTextureSetMinFilter(&texture, filter);
+		sceGxmTextureSetMagFilter(&texture, filter);
+	}
 	shadow.valid = 0;
 	sceGxmSetVertexProgram(gxm.context, vertex_program);
 	sceGxmSetFragmentProgram(gxm.context, fragment_program);
@@ -3001,6 +3031,23 @@ static unsigned int overlay_text(struct overlay_vertex *vertices, unsigned int c
 void vgxm_overlay_enable(int enabled)
 {
 	gxm.overlay_enabled = enabled && gxm.overlay_programs;
+}
+
+void vgxm_upscale_filter_set(int filter)
+{
+	gxm.upscale_filter = filter;
+}
+
+const void *vgxm_display_pixels(unsigned long *pitch, unsigned long *width, unsigned long *height)
+{
+	if (!gxm.ready)
+		return NULL;
+	/* (the buffer last queued, once the GPU has drawn it) */
+	sceGxmFinish(gxm.context);
+	*pitch = DISPLAY_STRIDE * 4;
+	*width = DISPLAY_WIDTH;
+	*height = DISPLAY_HEIGHT;
+	return gxm.display_memory[gxm.front_buffer].base;
 }
 
 void vgxm_menu_set(const char *text, int selected)
@@ -3091,7 +3138,12 @@ static void overlay_draw(void)
 	const float scale = 2.0f;
 	const float left = DISPLAY_WIDTH - 190.0f;
 
-	if (!gxm.overlay_programs || (!gxm.overlay_enabled && !gxm.menu_visible))
+	/* (black bars around a picture smaller than the display, every frame:
+	the overlay and the panel draw there too, and nothing else clears it) */
+	int bars = gxm.picture_width > 0.0f &&
+		(gxm.picture_width < DISPLAY_WIDTH || gxm.picture_height < DISPLAY_HEIGHT);
+
+	if (!gxm.overlay_programs || (!gxm.overlay_enabled && !gxm.menu_visible && !bars))
 		return;
 	if (!built)
 		built = malloc(limit * 6 * sizeof(*built));
@@ -3129,6 +3181,20 @@ static void overlay_draw(void)
 	if (!fragment_program)
 		return;
 	vertices = built;
+	if (bars)
+	{
+		const float right = gxm.picture_left + gxm.picture_width, bottom = gxm.picture_top + gxm.picture_height;
+
+		if (gxm.picture_left > 0.0f)
+			count = overlay_rect(vertices, count, 0.0f, 0.0f, gxm.picture_left, DISPLAY_HEIGHT, 0xFF000000u);
+		if (right < DISPLAY_WIDTH)
+			count = overlay_rect(vertices, count, right, 0.0f, DISPLAY_WIDTH - right, DISPLAY_HEIGHT, 0xFF000000u);
+		if (gxm.picture_top > 0.0f)
+			count = overlay_rect(vertices, count, gxm.picture_left, 0.0f, gxm.picture_width, gxm.picture_top, 0xFF000000u);
+		if (bottom < DISPLAY_HEIGHT)
+			count = overlay_rect(vertices, count, gxm.picture_left, bottom, gxm.picture_width, DISPLAY_HEIGHT - bottom,
+				0xFF000000u);
+	}
 	if (gxm.overlay_enabled)
 	{
 		vita_host_cpu_usage(busy);
