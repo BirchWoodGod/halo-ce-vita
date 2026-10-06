@@ -14,7 +14,7 @@ ln -s "$sdk/arm-vita-eabi/include/psp2common" "$out/include/psp2common"
 ln -s "$sdk/arm-vita-eabi/include/vitasdk" "$out/include/vitasdk" 2>/dev/null || true
 cc=${CC:-gcc}
 $cc -m32 -g -O1 -Wall -Wno-unused-function -D_GNU_SOURCE -I"$out/include" -I"$root/port/linux/src" -I"$root/port/vita/include" \
-	"$here/vita_settings_test.c" -o "$out/vita_settings_test"
+	"$here/vita_settings_test.c" "$root/port/vita/host/vita_controls.c" -o "$out/vita_settings_test"
 status=0
 (cd "$out" && ./vita_settings_test) || status=$?
 rm -rf "$out"

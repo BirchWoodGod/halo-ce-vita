@@ -41,6 +41,7 @@ each frame's presentation.
 #include <stdlib.h>
 #include <string.h>
 
+#include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
 #include "overlay_font.h"
@@ -3355,12 +3356,55 @@ static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int coun
 	return count;
 }
 
+/* the touch zones' diagram (vita_settings.c touch_diagram: a character per
+zone, S the chosen row's, s the same while Off, A set, - Off): the front
+screen and the rear pad as small rectangles at (x, y), each zone on them
+green when it is the row's, grey when set, dark when Off */
+static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned int count, unsigned int limit,
+	float x, float y, const char *zones)
+{
+	const float scale = 144.0f / VITA_TOUCH_WIDTH;
+	const float box_width = 144.0f, box_height = VITA_TOUCH_HEIGHT * scale;
+	int panel, zone;
+
+	for (panel = 0; panel < 2; panel++)
+	{
+		float top = y + panel * (box_height + 28.0f) + 16.0f;
+
+		count = overlay_text(vertices, count, limit, x, top - 15.0f, 1.5f, 0xFFA0A0A0u,
+			panel == VITA_TOUCH_FRONT ? "Front" : "Rear");
+		count = overlay_rect(vertices, count, x, top, box_width, box_height, 0xFF707070u);
+		count = overlay_rect(vertices, count, x + 1.0f, top + 1.0f, box_width - 2.0f, box_height - 2.0f, 0xFF202020u);
+		for (zone = 0; zone < VITA_ZONE_COUNT && zones[zone]; zone++)
+		{
+			const struct vita_touch_zone *rectangle = &vita_touch_zones[zone];
+			char mark = zones[zone];
+			uint32_t color = mark == 'S' ? 0xFF40FF40u : mark == 's' ? 0xFF308030u : mark == 'A' ? 0xFF909090u :
+				0xFF404040u;
+
+			if (rectangle->panel != panel)
+				continue;
+			/* (the row's zone has a border, also while Off) */
+			if (mark == 'S' || mark == 's')
+				count = overlay_rect(vertices, count, x + rectangle->left * scale - 2.0f,
+					top + rectangle->top * scale - 2.0f, (rectangle->right - rectangle->left) * scale + 4.0f,
+					(rectangle->bottom - rectangle->top) * scale + 4.0f, 0xFFFFFFFFu);
+			count = overlay_rect(vertices, count, x + rectangle->left * scale + 1.0f, top + rectangle->top * scale + 1.0f,
+				(rectangle->right - rectangle->left) * scale - 2.0f, (rectangle->bottom - rectangle->top) * scale - 2.0f,
+				color);
+		}
+	}
+	return count;
+}
+
 /* the settings panel, centred: title (or tab bar), a row per line (the
-selected one on a bar), the hint at the bottom */
+selected one on a bar), the hint at the bottom; a line of '\x01' and zone
+marks is not a row but the touch zones' diagram, at the right */
 static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int count, unsigned int limit)
 {
 	const char *text = gxm.menu_text[__atomic_load_n(&gxm.menu_index, __ATOMIC_ACQUIRE)];
-	const char *lines[24];
+	const char *lines[28];
+	const char *diagram = NULL;
 	int line_count = 0, index, slots;
 	/* (wide enough for the tab bar's six names at 12 pixels a character,
 	and a 21-character label with a 16-character choice at 16:
@@ -3373,11 +3417,14 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 
 	strncpy(copy, text, sizeof(copy) - 1);
 	copy[sizeof(copy) - 1] = 0;
-	for (cursor = copy; cursor && line_count < 24; )
+	for (cursor = copy; cursor && line_count < 28; )
 	{
 		char *newline = strchr(cursor, '\n');
 
-		lines[line_count++] = cursor;
+		if (cursor[0] == '\x01')
+			diagram = cursor + 1;
+		else
+			lines[line_count++] = cursor;
 		if (newline)
 			*newline = 0;
 		cursor = newline ? newline + 1 : NULL;
@@ -3419,6 +3466,10 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 		count = overlay_text(vertices, count, limit, left + 16.0f, y, index == line_count - 1 ? 1.5f : 2.0f, color,
 			lines[index]);
 	}
+	/* (right of the rows' text: a 21-character label and a 14-character
+	choice end 640 pixels in) */
+	if (diagram)
+		count = menu_touch_diagram(vertices, count, limit, left + width - 160.0f, top + 12.0f + row_height, diagram);
 	return count;
 }
 

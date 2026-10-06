@@ -24,6 +24,13 @@ The Profile row at the top of Graphics sets the speed-related rows at once
 those rows match none of them. Rows marked * apply after a restart (the
 sound voices, the network, most dev switches).
 
+Controls gives the touch zones actions (the front screen's top corners and
+its left and right edges, the rear pad's halves; vita_controls.c says where
+they are and when a finger counts) and puts each action in play on a button
+of the player's choosing; while a zone's row is chosen the panel draws the
+zones beside the rows (touch_diagram). Reset controls puts the tab's rows
+back as shipped.
+
 Multiplayer has three ways to play beyond the Wi-Fi network's system link,
 each handing off to the game's own System Link screen, and co-op ("Co-op
 campaign": a game this Vita hosts, by any of them, is that campaign level
@@ -76,6 +83,7 @@ default) applies. When any is on, halo.log says so near its top.
 #include <sys/stat.h>
 
 #include "p2p.h"
+#include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
 
@@ -83,7 +91,7 @@ default) applies. When any is on, halo.log says so near its top.
 #define SETTINGS_FILE DATA_DIRECTORY "/settings.txt"
 /* where the system writes its crash dumps (psp2core-*.psp2dmp) */
 #define DUMP_DIRECTORY "ux0:data"
-#define MAXIMUM_CHOICES 11
+#define MAXIMUM_CHOICES 12
 /* a code's characters as typed (p2p.h shows them ABCD-EFGH) */
 #define P2P_CODE_LENGTH_TYPED 8
 
@@ -127,6 +135,7 @@ enum
 	ACTION_ADHOC_JOIN,
 	ACTION_ADHOC_LEAVE,
 	ACTION_SAVE_REPORT,
+	ACTION_RESET_CONTROLS,
 };
 
 struct setting
@@ -189,7 +198,43 @@ static struct setting settings[] = {
 	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
 		"Raise if the sticks drift", 0, TAB_CONTROLS },
 	{ "Crouch", "HALO_CROUCH_TOGGLE", 0, 2, { "1", "0" }, { "Toggle", "Hold" },
-		"D-pad down: a press crouches, the next stands (Toggle)", 0, TAB_CONTROLS },
+		"A press of crouch crouches, the next stands (Toggle)", 0, TAB_CONTROLS },
+	/* (the touch zones, in vita_controls.h's order, and the buttons of the
+	actions in play: vita_controls.c) */
+	{ "Touch top left", "HALO_TOUCH_TOP_LEFT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+		"Front screen, top left corner: counts at once", 0, TAB_CONTROLS },
+	{ "Touch top right", "HALO_TOUCH_TOP_RIGHT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+		"Front screen, top right corner: counts at once", 0, TAB_CONTROLS },
+	{ "Touch left edge", "HALO_TOUCH_LEFT_EDGE", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+		"Front screen, left edge by the D-pad: counts at once", 0, TAB_CONTROLS },
+	{ "Touch right edge", "HALO_TOUCH_RIGHT_EDGE", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES },
+		{ VITA_ACTION_NAMES }, "Front screen, right edge by the buttons: counts at once", 0, TAB_CONTROLS },
+	{ "Rear touch left", "HALO_TOUCH_REAR_LEFT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+		"Rear pad, left half: counts once held 0.1 s", 0, TAB_CONTROLS },
+	{ "Rear touch right", "HALO_TOUCH_REAR_RIGHT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES },
+		{ VITA_ACTION_NAMES }, "Rear pad, right half: counts once held 0.1 s", 0, TAB_CONTROLS },
+	{ "Fire button", "HALO_BUTTON_FIRE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"In play (menus keep their buttons)", 5, TAB_CONTROLS },
+	{ "Grenade button", "HALO_BUTTON_GRENADE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Throw a grenade, in play (menus keep their buttons)", 4, TAB_CONTROLS },
+	{ "Jump button", "HALO_BUTTON_JUMP", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"In play (menus keep their buttons)", 0, TAB_CONTROLS },
+	{ "Melee button", "HALO_BUTTON_MELEE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"In play (menus keep their buttons)", 1, TAB_CONTROLS },
+	{ "Reload button", "HALO_BUTTON_RELOAD", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Reload and action, in play (menus keep their buttons)", 2, TAB_CONTROLS },
+	{ "Switch weapon button", "HALO_BUTTON_WEAPON", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES },
+		{ VITA_BUTTON_NAMES }, "In play (menus keep their buttons)", 3, TAB_CONTROLS },
+	{ "Crouch button", "HALO_BUTTON_CROUCH", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"In play (menus keep their buttons)", 7, TAB_CONTROLS },
+	{ "Zoom button", "HALO_BUTTON_ZOOM", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"In play (menus keep their buttons)", 6, TAB_CONTROLS },
+	{ "Grenade type button", "HALO_BUTTON_GRENADE_SWITCH", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES },
+		{ VITA_BUTTON_NAMES }, "Switch grenades, in play (menus keep their buttons)", 8, TAB_CONTROLS },
+	{ "Flashlight button", "HALO_BUTTON_FLASHLIGHT", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES },
+		{ VITA_BUTTON_NAMES }, "In play (menus keep their buttons)", 9, TAB_CONTROLS },
+	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "This tab's rows as shipped (touch Off, Xita's buttons)", 0,
+		TAB_CONTROLS, KIND_ACTION, ACTION_RESET_CONTROLS },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, TAB_CONTROLS },
 
@@ -243,6 +288,11 @@ static struct setting settings[] = {
 };
 
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
+
+/* each row's choice as shipped (Reset controls), kept before anything is
+loaded */
+static int shipped_choice[SETTING_COUNT];
+static int shipped_kept;
 
 /* the profiles (the Profile row's first three choices): the value of each
 row a profile sets. Balanced is the release's defaults (the rows' own) */
@@ -618,6 +668,12 @@ void vita_settings_load(void)
 	char dev_saved[SETTING_COUNT];
 
 	memset(dev_saved, 0, sizeof(dev_saved));
+	if (!shipped_kept)
+	{
+		for (index = 0; index < SETTING_COUNT; index++)
+			shipped_choice[index] = settings[index].choice;
+		shipped_kept = 1;
+	}
 	/* env.txt (already read) gives a starting choice (HALO_PROFILE=
 	performance, balanced or quality there: that profile's, under the rows
 	env.txt names itself); settings.txt, the panel's own file, has the last
@@ -1192,6 +1248,33 @@ static int tab_bar(char *text, int size)
 	return length;
 }
 
+/* the touch zones' diagram (vita_gxm.c menu_build draws it): a line of
+'\x01' and a character per zone in vita_controls.h's order: S the row's
+zone (s while Off), A a zone set to an action, - one Off; nothing for a
+row that is not a zone's */
+static void touch_diagram(char *text, int size, const struct setting *chosen)
+{
+	char zones[VITA_ZONE_COUNT + 1];
+	int zone, is_zone = 0;
+
+	for (zone = 0; zone < VITA_ZONE_COUNT; zone++)
+	{
+		const struct setting *setting = setting_named(vita_touch_variables[zone]);
+		int on = setting && setting->choice != 0;
+
+		if (setting == chosen)
+		{
+			is_zone = 1;
+			zones[zone] = on ? 'S' : 's';
+		}
+		else
+			zones[zone] = on ? 'A' : '-';
+	}
+	zones[VITA_ZONE_COUNT] = 0;
+	if (is_zone)
+		snprintf(text, (size_t)size, "\n\x01%s", zones);
+}
+
 static void show_list(void)
 {
 	char text[2048];
@@ -1267,7 +1350,10 @@ static void show_list(void)
 	}
 	help_line(help, sizeof(help), count ? &lines[*selected] : NULL);
 	if (length < (int)sizeof(text))
-		snprintf(text + length, sizeof(text) - length, "\n%s", help);
+		length += snprintf(text + length, sizeof(text) - length, "\n%s", help);
+	/* a touch zone's row chosen: the zones drawn beside the rows */
+	if (count && lines[*selected].type == LINE_SETTING && length < (int)sizeof(text))
+		touch_diagram(text + length, (int)sizeof(text) - length, &settings[lines[*selected].index]);
 	vgxm_menu_set(text, highlighted);
 }
 
@@ -1491,6 +1577,28 @@ void vita_settings_message(const char *title, const char *text)
     pthread_mutex_unlock(&message_lock);
 }
 
+/* the Controls tab's rows as shipped (all but Show dev settings): the touch
+zones Off, the buttons in Xita's layout, look and crouch as they were */
+static void reset_controls(void)
+{
+	int index;
+
+	for (index = 0; index < SETTING_COUNT; index++)
+	{
+		struct setting *setting = &settings[index];
+
+		if (setting->tab != TAB_CONTROLS || setting->kind != KIND_CHOICE ||
+			strcmp(setting->variable, "HALO_DEV_SETTINGS") == 0)
+			continue;
+		setting->choice = shipped_choice[index];
+		apply_value(setting);
+	}
+	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
+	save();
+	set_notice("Controls as shipped");
+	vita_host_log("settings: controls reset (settings panel)");
+}
+
 static void act(const struct setting *setting)
 {
 	switch (setting->action)
@@ -1518,6 +1626,9 @@ static void act(const struct setting *setting)
 		break;
 	case ACTION_SAVE_REPORT:
 		report_start();
+		break;
+	case ACTION_RESET_CONTROLS:
+		reset_controls();
 		break;
 	}
 }
