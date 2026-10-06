@@ -2189,6 +2189,8 @@ struct render_command
 	wave the worker runs it in (render_worker: small_target_wave) */
 	unsigned char new_run;
 	unsigned char wave;
+	/* (HALO_FILL_STATS) the render phase that recorded the draw (render.c) */
+	signed char phase;
 	/* the copy of a small target this run renders into */
 	unsigned long color_version;
 	/* draws */
@@ -2274,6 +2276,16 @@ static unsigned long stage_texture_mode_of(const struct nv2a_pixel_shader_key *k
 /* the colour target of the worker's last bound targets
 (bind_recorded_targets), marked drawn once a draw or a clear goes in */
 static struct render_target_entry *worker_color_entry;
+/* (HALO_FILL_STATS: fill_stats.c) the worker's depth target, and the
+estimate's entry points */
+static unsigned long worker_depth_id;
+int halo_fill_stats_sampled(void);
+void halo_fill_stats_draw(const struct vgxm_draw *draw, const DWORD *instructions, unsigned long instruction_count,
+	unsigned long input_mask, unsigned long packed_mask, unsigned long color_mask, int phase,
+	unsigned long color_id, unsigned long depth_id);
+void halo_fill_stats_clear(unsigned long flags, float depth, const long clip[4], unsigned long depth_id);
+void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsigned long height);
+extern int halo_render_phase;
 
 static BOOL bind_recorded_targets(const struct render_command *command, BOOL *has_depth)
 {
@@ -2323,6 +2335,7 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 		depth->last_used = device.frame + 1;
 	vgxm_set_targets(color ? color->id : 0, depth ? depth->id : 0);
 	worker_color_entry = color;
+	worker_depth_id = depth ? depth->id : 0;
 	*has_depth = depth != NULL;
 	return TRUE;
 }
@@ -2933,6 +2946,14 @@ static BOOL worker_build_record(struct render_command *command)
 	return draw->fragment_uniforms[0] && draw->fragment_uniforms[1];
 }
 
+static void fill_stats_draw(const struct render_command *command, const struct vgxm_draw *draw)
+{
+	halo_fill_stats_draw(draw, command->program->instructions, command->program->instruction_count,
+		command->program->input_mask, command->immediate ? 0 : command->packed_mask,
+		command->immediate ? 0 : command->color_mask, command->phase,
+		worker_color_entry ? worker_color_entry->id : 0, worker_depth_id);
+}
+
 static void execute_draw(struct render_command *command)
 {
 	struct vgxm_draw *draw = &command->draw;
@@ -3149,6 +3170,8 @@ static void execute_draw(struct render_command *command)
 			draw->indices = indices + command->segments[segment].first_index;
 			draw->index_count = command->segments[segment].index_count;
 			draw->visibility_index = command->segments[segment].visibility_index;
+			if (halo_fill_stats_sampled())
+				fill_stats_draw(command, draw);
 			vgxm_draw(draw);
 		}
 		draw->indices = indices;
@@ -3156,7 +3179,11 @@ static void execute_draw(struct render_command *command)
 		draw->visibility_index = visibility_index;
 	}
 	else
+	{
+		if (halo_fill_stats_sampled())
+			fill_stats_draw(command, draw);
 		vgxm_draw(draw);
+	}
 	if (worker_color_entry && draw->color_write)
 		worker_color_entry->drawn = TRUE;
 	DRAW_PROFILE_ADD(7, profile_from);
@@ -3210,6 +3237,8 @@ static void execute_command(struct render_command *command)
 			if (!has_depth)
 				flags &= ~(D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL);
 			vgxm_clear(flags, command->clear_color, command->clear_depth, command->clear_stencil, command->clip);
+			if (halo_fill_stats_sampled())
+				halo_fill_stats_clear(flags, command->clear_depth, command->clip, worker_depth_id);
 			if (worker_color_entry && (flags & D3DCLEAR_TARGET))
 				worker_color_entry->drawn = TRUE;
 		}
@@ -3227,6 +3256,7 @@ static void execute_command(struct render_command *command)
 			/* (the frame's visibility counts: the game's frame they are of) */
 			vgxm_visibility_frame(command->frame);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
+			halo_fill_stats_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			if (command->screenshot)
 				write_display_screenshot(command->frame);
 		}
@@ -4715,6 +4745,7 @@ static struct render_command *record_draw(BOOL immediate)
 	command = command_begin(_command_draw);
 	if (!command)
 		return NULL;
+	command->phase = (signed char)halo_render_phase;
 	DRAW_FINE_ADD(0, profile_from);
 	draw = &command->draw;
 	/* (not the whole draw, 478 bytes into a cold ring entry: every field is
