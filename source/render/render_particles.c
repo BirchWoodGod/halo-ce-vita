@@ -89,6 +89,63 @@ static unsigned long particles_profile_counts[4], particles_profile_frames;
 #define PARTICLES_PROFILE_NOW() (particles_profile_enabled > 0 ? vita_host_time_us() : 0)
 #define PARTICLES_PROFILE_ADD(index, since) do { if (particles_profile_enabled > 0) \
 	particles_profile_us[index] += vita_host_time_us() - (since); } while (0)
+
+/* (port) HALO_EFFECT_STATS=1: the particles drawn per frame by definition,
+with their screen area (each sprite's diameter in pixels, squared: its
+square's), the largest eight every 300 frames - which effects the GPU's
+fill goes to */
+#include <stdio.h>
+char *tag_get_name(long tag_index);
+static int effect_stats_enabled = -1;
+static unsigned long effect_stats_frames;
+#define EFFECT_STATS_SLOTS 64
+static struct { long definition_index; double area, count, maximum; } effect_stats[EFFECT_STATS_SLOTS];
+
+static void effect_stats_add(long definition_index, real diameter)
+{
+	int slot = (int)((unsigned long)definition_index * 2654435761UL % EFFECT_STATS_SLOTS), probe;
+
+	for (probe = 0; probe < EFFECT_STATS_SLOTS; probe++, slot = (slot + 1) % EFFECT_STATS_SLOTS)
+	{
+		if (effect_stats[slot].count && effect_stats[slot].definition_index != definition_index)
+			continue;
+		effect_stats[slot].definition_index = definition_index;
+		effect_stats[slot].area += (double)diameter * diameter;
+		effect_stats[slot].count++;
+		if (diameter > effect_stats[slot].maximum)
+			effect_stats[slot].maximum = diameter;
+		return;
+	}
+}
+
+static void effect_stats_report(void)
+{
+	char line[1200];
+	int length = 0, rank;
+	double total = 0.0;
+
+	if (++effect_stats_frames % 300)
+		return;
+	for (rank = 0; rank < EFFECT_STATS_SLOTS; rank++)
+		total += effect_stats[rank].area;
+	for (rank = 0; rank < 8; rank++)
+	{
+		int slot, best = -1;
+
+		for (slot = 0; slot < EFFECT_STATS_SLOTS; slot++)
+			if (effect_stats[slot].count && (best < 0 || effect_stats[slot].area > effect_stats[best].area))
+				best = slot;
+		if (best < 0 || length > (int)sizeof(line) - 160)
+			break;
+		length += snprintf(line + length, sizeof(line) - length, " %s %.0f/%.0fK/%.0f",
+			tag_get_name(effect_stats[best].definition_index), effect_stats[best].count / 300.0,
+			effect_stats[best].area / 300.0 / 1000.0, effect_stats[best].maximum);
+		effect_stats[best].count = 0;
+	}
+	platform_log("effect-stats (particles a frame by definition: count/Kpx of their squares/largest diameter px; all %.0fK px):%s",
+		total / 300.0 / 1000.0, line);
+	memset(effect_stats, 0, sizeof(effect_stats));
+}
 #endif
 
 /* ---------- public code */
@@ -169,6 +226,13 @@ void render_particles(
 		particles_profile_enabled = setting ? atoi(setting) : 0;
 	}
 	profile_from = PARTICLES_PROFILE_NOW();
+	if (effect_stats_enabled < 0)
+	{
+		const char *setting = getenv("HALO_EFFECT_STATS");
+		effect_stats_enabled = setting ? atoi(setting) : 0;
+	}
+	if (effect_stats_enabled > 0)
+		effect_stats_report();
 #endif
 	rendered_particle_count = 0;
 	profile_enter(render_particles_section);
@@ -441,6 +505,9 @@ void render_particles(
 										_particle_datum_v_mirror_bit));
 
 #ifdef HALO_LINUX
+								if (effect_stats_enabled > 0)
+									effect_stats_add(particle->definition_index,
+										diameter < definition->minimum_pixels ? definition->minimum_pixels : diameter);
 								/* (port) the particle's frame is the tick's, read
 								mid-change once: not drawn this frame (render_epoch.h) */
 								if (particle->sequence_index >= 0 && particle->frame_index >= 0)

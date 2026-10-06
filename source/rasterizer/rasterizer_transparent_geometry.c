@@ -595,7 +595,33 @@ void rasterizer_transparent_geometry_draw(
 					!first_person_flag);
 			}
 
+#ifdef HALO_LINUX
+			{
+				/* (HALO_FILL_STATS: the group's draws by its shader's type,
+				with an object - a model's transparent part - or without -
+				particles, contrails, effects' geometry) */
+				extern int halo_render_phase;
+				extern const char *halo_render_phase_names[64];
+				static const char *const names[2][11] = {
+					{ "tr_screen", "tr_effect", "tr_decal", "tr_environment", "tr_model", "tr_generic", "tr_chicago",
+						"tr_water", "tr_glass", "tr_meter", "tr_plasma" },
+					{ "tr_obj_screen", "tr_obj_effect", "tr_obj_decal", "tr_obj_environment", "tr_obj_model",
+						"tr_obj_generic", "tr_obj_chicago", "tr_obj_water", "tr_obj_glass", "tr_obj_meter", "tr_obj_plasma" } };
+				int saved_phase = halo_render_phase;
+
+				if (saved_phase >= 0 && group->shader && group->shader->base.type >= 0 && group->shader->base.type <= 10)
+				{
+					int with_object = group->object_index != NONE;
+
+					halo_render_phase = 41 + with_object * 11 + group->shader->base.type;
+					halo_render_phase_names[halo_render_phase] = names[with_object][group->shader->base.type];
+				}
+				rasterizer_transparent_geometry_group_draw(group, FALSE);
+				halo_render_phase = saved_phase;
+			}
+#else
 			rasterizer_transparent_geometry_group_draw(group, FALSE);
+#endif
 			transparent_geometry_group_index++;
 		}
 

@@ -365,6 +365,61 @@ static struct
 them per phase (halo_render_draw_counts) */
 static unsigned long draw_counter_stream, draw_counter_immediate;
 
+/* (port) a scissor rectangle for the draws recorded next, in normalised
+device coordinates of the viewport (x right, y down, -1..1), or off (NULL):
+the dynamic lights' passes over the structure (rasterizer_xbox_environment.c)
+are clipped to the screen rectangle outside which their light adds nothing.
+Mapped to the viewport's pixels when each draw is recorded, rounded outward,
+and intersected with the viewport's own rectangle. */
+static int device_scissor_on;
+static float device_scissor[4];
+
+/* (port) the sky drawn after the opaque scene (render.c, HALO_SKY_LATE):
+while on, the draws recorded test depth, less-equal, without writing it,
+at the depth the window was cleared to (1: the viewport's depth range is
+made that one value), so they colour only the pixels nothing opaque has
+covered - the pixels the sky's own draws, without depth, would have been
+left visible on before the scene covered the rest. */
+static int device_sky_depth;
+
+void halo_d3d_sky_depth(int on)
+{
+	device_sky_depth = on != 0;
+}
+
+int halo_d3d_sky_late_supported(void)
+{
+	return 1;
+}
+
+void halo_d3d_scissor(const float *rectangle)
+{
+	device_scissor_on = rectangle != NULL;
+	if (rectangle)
+		memcpy(device_scissor, rectangle, sizeof(device_scissor));
+}
+
+static void scissor_apply(long clip[4])
+{
+	float width, height;
+	long x0, y0, x1, y1;
+
+	if (!device_scissor_on)
+		return;
+	width = (float)device.viewport.Width;
+	height = (float)device.viewport.Height;
+	x0 = (long)floorf((float)device.viewport.X + (device_scissor[0] + 1.0f) * 0.5f * width) - 1;
+	y0 = (long)floorf((float)device.viewport.Y + (device_scissor[1] + 1.0f) * 0.5f * height) - 1;
+	x1 = (long)ceilf((float)device.viewport.X + (device_scissor[2] + 1.0f) * 0.5f * width) + 1;
+	y1 = (long)ceilf((float)device.viewport.Y + (device_scissor[3] + 1.0f) * 0.5f * height) + 1;
+	if (x0 > clip[0]) clip[0] = x0;
+	if (y0 > clip[1]) clip[1] = y0;
+	if (x1 < clip[2]) clip[2] = x1;
+	if (y1 < clip[3]) clip[3] = y1;
+	if (clip[2] < clip[0]) clip[2] = clip[0];
+	if (clip[3] < clip[1]) clip[3] = clip[1];
+}
+
 void halo_render_draw_counts(unsigned long *stream, unsigned long *immediate)
 {
 	*stream = draw_counter_stream;
@@ -2189,6 +2244,10 @@ struct render_command
 	wave the worker runs it in (render_worker: small_target_wave) */
 	unsigned char new_run;
 	unsigned char wave;
+	/* (HALO_FILL_STATS) the render phase that recorded the draw (render.c) */
+	signed char phase;
+	/* recorded while the sky is drawn late (halo_d3d_sky_depth) */
+	unsigned char sky_depth;
 	/* the copy of a small target this run renders into */
 	unsigned long color_version;
 	/* draws */
@@ -2274,6 +2333,16 @@ static unsigned long stage_texture_mode_of(const struct nv2a_pixel_shader_key *k
 /* the colour target of the worker's last bound targets
 (bind_recorded_targets), marked drawn once a draw or a clear goes in */
 static struct render_target_entry *worker_color_entry;
+/* (HALO_FILL_STATS: fill_stats.c) the worker's depth target, and the
+estimate's entry points */
+static unsigned long worker_depth_id;
+int halo_fill_stats_sampled(void);
+void halo_fill_stats_draw(const struct vgxm_draw *draw, const DWORD *instructions, unsigned long instruction_count,
+	unsigned long input_mask, unsigned long packed_mask, unsigned long color_mask, int phase,
+	unsigned long color_id, unsigned long depth_id);
+void halo_fill_stats_clear(unsigned long flags, float depth, const long clip[4], unsigned long depth_id);
+void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsigned long height);
+extern int halo_render_phase;
 
 static BOOL bind_recorded_targets(const struct render_command *command, BOOL *has_depth)
 {
@@ -2323,6 +2392,7 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 		depth->last_used = device.frame + 1;
 	vgxm_set_targets(color ? color->id : 0, depth ? depth->id : 0);
 	worker_color_entry = color;
+	worker_depth_id = depth ? depth->id : 0;
 	*has_depth = depth != NULL;
 	return TRUE;
 }
@@ -2933,6 +3003,14 @@ static BOOL worker_build_record(struct render_command *command)
 	return draw->fragment_uniforms[0] && draw->fragment_uniforms[1];
 }
 
+static void fill_stats_draw(const struct render_command *command, const struct vgxm_draw *draw)
+{
+	halo_fill_stats_draw(draw, command->program->instructions, command->program->instruction_count,
+		command->program->input_mask, command->immediate ? 0 : command->packed_mask,
+		command->immediate ? 0 : command->color_mask, command->phase,
+		worker_color_entry ? worker_color_entry->id : 0, worker_depth_id);
+}
+
 static void execute_draw(struct render_command *command)
 {
 	struct vgxm_draw *draw = &command->draw;
@@ -2988,6 +3066,16 @@ static void execute_draw(struct render_command *command)
 		draw->fragment_uniforms[1] = copy;
 	}
 	draw->fragment_shader = fragment_shader_get(&command->key);
+	if (command->sky_depth)
+	{
+		/* (after the record's states are built: they are shared and
+		cached by state block, the sky's own say no depth test) */
+		draw->depth_test = has_depth;
+		draw->depth_write = 0;
+		draw->depth_function = D3DCMP_LESSEQUAL;
+		draw->viewport_scale[2] = 0.0f;
+		draw->viewport_offset[2] = 1.0f;
+	}
 	{
 		/* (debug) HALO_TRACE_CAMO=n: the first n draws of the active
 		camouflage (rasterizer_xbox_active_camouflage.c): the screen copy
@@ -3149,6 +3237,8 @@ static void execute_draw(struct render_command *command)
 			draw->indices = indices + command->segments[segment].first_index;
 			draw->index_count = command->segments[segment].index_count;
 			draw->visibility_index = command->segments[segment].visibility_index;
+			if (halo_fill_stats_sampled())
+				fill_stats_draw(command, draw);
 			vgxm_draw(draw);
 		}
 		draw->indices = indices;
@@ -3156,7 +3246,11 @@ static void execute_draw(struct render_command *command)
 		draw->visibility_index = visibility_index;
 	}
 	else
+	{
+		if (halo_fill_stats_sampled())
+			fill_stats_draw(command, draw);
 		vgxm_draw(draw);
+	}
 	if (worker_color_entry && draw->color_write)
 		worker_color_entry->drawn = TRUE;
 	DRAW_PROFILE_ADD(7, profile_from);
@@ -3210,6 +3304,8 @@ static void execute_command(struct render_command *command)
 			if (!has_depth)
 				flags &= ~(D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL);
 			vgxm_clear(flags, command->clear_color, command->clear_depth, command->clear_stencil, command->clip);
+			if (halo_fill_stats_sampled())
+				halo_fill_stats_clear(flags, command->clear_depth, command->clip, worker_depth_id);
 			if (worker_color_entry && (flags & D3DCLEAR_TARGET))
 				worker_color_entry->drawn = TRUE;
 		}
@@ -3227,6 +3323,7 @@ static void execute_command(struct render_command *command)
 			/* (the frame's visibility counts: the game's frame they are of) */
 			vgxm_visibility_frame(command->frame);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
+			halo_fill_stats_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			if (command->screenshot)
 				write_display_screenshot(command->frame);
 		}
@@ -4715,6 +4812,8 @@ static struct render_command *record_draw(BOOL immediate)
 	command = command_begin(_command_draw);
 	if (!command)
 		return NULL;
+	command->phase = (signed char)halo_render_phase;
+	command->sky_depth = (unsigned char)device_sky_depth;
 	DRAW_FINE_ADD(0, profile_from);
 	draw = &command->draw;
 	/* (not the whole draw, 478 bytes into a cold ring entry: every field is
@@ -4834,6 +4933,7 @@ static struct render_command *record_draw(BOOL immediate)
 			draw->clip[1] = (long)device.viewport.Y;
 			draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 			draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
+			scissor_apply(draw->clip);
 			draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 			if (immediate)
 				{ stats.immediate_draws++; draw_counter_immediate++; }
@@ -5034,6 +5134,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->clip[1] = (long)device.viewport.Y;
 	draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 	draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
+	scissor_apply(draw->clip);
 	draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 	if (immediate)
 		{ stats.immediate_draws++; draw_counter_immediate++; }

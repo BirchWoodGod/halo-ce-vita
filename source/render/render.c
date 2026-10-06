@@ -346,9 +346,30 @@ static unsigned long render_profile_frames;
 unsigned long long vita_host_time_us(void);
 void platform_log(const char *format, ...);
 static unsigned long long render_now(void) { return vita_host_time_us ? vita_host_time_us() : 0; }
+/* (the phase the draws recorded next belong to, for the device's fill
+statistics: HALO_FILL_STATS, d3d8_gxm.c) */
+int halo_render_phase = -1;
+/* (the late sky: the device draws it at the cleared depth) */
+void halo_d3d_sky_depth(int on);
+int halo_d3d_sky_late_supported(void);
+static boolean halo_sky_late_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SKY_LATE");
+
+		enabled = halo_d3d_sky_late_supported() && (!setting || atoi(setting) != 0);
+	}
+	return enabled > 0;
+}
+const char *halo_render_phase_names[64];
 #define RENDER_PHASE_BEGIN() do { if (render_profile_enabled > 0) { render_phase_started = render_now(); \
 	halo_render_draw_counts(&render_phase_draws_started[0], &render_phase_draws_started[1]); } } while (0)
-#define RENDER_PHASE_END(phase, name) do { \
+#define RENDER_PHASE_BEGIN_ID(phase, name) do { halo_render_phase = (phase); halo_render_phase_names[phase] = (name); \
+	RENDER_PHASE_BEGIN(); } while (0)
+#define RENDER_PHASE_END(phase, name) do { halo_render_phase = -1; \
 	if (render_profile_enabled < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); render_profile_enabled = e ? atoi(e) : 0; } \
 	if (render_profile_enabled > 0) { unsigned long stream_now, immediate_now; \
 		render_phase_us[phase] += render_now() - render_phase_started; render_phase_name[phase] = name; \
@@ -374,6 +395,7 @@ static void render_phase_report(void)
 #define RENDER_PHASE_REPORT() render_phase_report()
 #else
 #define RENDER_PHASE_BEGIN() ((void)0)
+#define RENDER_PHASE_BEGIN_ID(phase, name) ((void)0)
 #define RENDER_PHASE_END(phase, name) ((void)0)
 #define RENDER_PHASE_REPORT() ((void)0)
 #endif
@@ -408,39 +430,68 @@ static void render_window(
 	parameters.window_index = render.window_index;
 	parameters.fog = render.fog;
 
-	RENDER_PHASE_BEGIN();
+	RENDER_PHASE_BEGIN_ID(0, "visibility");
 	structure_visibility_compute();
 	RENDER_PHASE_END(0, "visibility");
 	player_effect_get_screen_flash(local_player_index, &parameters.screen_flash);
-	RENDER_PHASE_BEGIN();
+	RENDER_PHASE_BEGIN_ID(21, "window_begin");
 	rasterizer_window_begin(&parameters);
 	RENDER_PHASE_END(21, "window_begin");
 
 	if (!bink_playback_in_progress())
 	{
+#ifdef HALO_LINUX
+		/* (port) HALO_SKY_LATE (default on, 0 = off): the sky drawn after
+		the opaque scene - the objects and the structure's lightmap pass,
+		which cover every pixel they draw and write its depth - colouring
+		only the pixels still at the cleared depth (d3d8_gxm.c
+		halo_d3d_sky_depth). Drawn first, without depth, as the Xbox did,
+		its layers were shaded under the whole scene: on the Vita's tile
+		renderer a blended layer drawn first is paid in full (one to two
+		screens of fragments a frame), where drawn after the opaque scene
+		its covered pixels fail the depth test. The passes between its two
+		places draw no pixel of the sky's (the opaque ones cover theirs),
+		so every pixel ends as before. Its lens flares are queued before
+		the flare tests either way. */
+		boolean sky_late = halo_sky_late_enabled() && rasterizer_target == _render_target_primary;
+#endif
+
 		build_sprite_prepare_for_window();
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(1, "sky");
+#ifdef HALO_LINUX
+		if (!sky_late)
+#endif
 		render_sky();
 		RENDER_PHASE_END(1, "sky");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(27, "fp_update");
 		first_person_weapon_render_update();
 		RENDER_PHASE_END(27, "fp_update");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(2, "lights_preprocess");
 		lights_preprocess_scene();
 		RENDER_PHASE_END(2, "lights_preprocess");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(3, "objects");
 		render_objects();
 		RENDER_PHASE_END(3, "objects");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(4, "structure_preprocess");
 		structure_render_preprocess();
 		RENDER_PHASE_END(4, "structure_preprocess");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(5, "lightmaps");
 		structure_render_lightmaps();
 		RENDER_PHASE_END(5, "lightmaps");
-		RENDER_PHASE_BEGIN();
+#ifdef HALO_LINUX
+		if (sky_late)
+		{
+			RENDER_PHASE_BEGIN_ID(1, "sky");
+			halo_d3d_sky_depth(TRUE);
+			render_sky();
+			halo_d3d_sky_depth(FALSE);
+			RENDER_PHASE_END(1, "sky");
+		}
+#endif
+		RENDER_PHASE_BEGIN_ID(28, "flare_tests");
 		rasterizer_lens_flares_submit_occlusion_tests();
 		RENDER_PHASE_END(28, "flare_tests");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(6, "shadows");
 #ifdef HALO_LINUX
 		{
 			/* (port) with HALO_NO_SMALL_TARGETS=1 the shadow draws are dropped
@@ -459,11 +510,11 @@ static void render_window(
 		render_object_shadows();
 #endif
 		RENDER_PHASE_END(6, "shadows");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(7, "lights_diffuse");
 		lights_render_diffuse();
 		RENDER_PHASE_END(7, "lights_diffuse");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(36, "decals_light");
 		rasterizer_decals_begin(_decal_layer_light);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -474,7 +525,7 @@ static void render_window(
 		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(37, "decals_alpha_tested");
 		rasterizer_decals_begin(_decal_layer_alpha_tested);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -485,11 +536,11 @@ static void render_window(
 		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(8, "structure_diffuse");
 		structure_render_diffuse_texture();
 		RENDER_PHASE_END(8, "structure_diffuse");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(38, "decals_primary");
 		rasterizer_decals_begin(_decal_layer_primary);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -500,7 +551,7 @@ static void render_window(
 		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(39, "decals_secondary");
 		rasterizer_decals_begin(_decal_layer_secondary);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -511,45 +562,45 @@ static void render_window(
 		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(9, "lights_specular");
 		lights_render_specular();
 		RENDER_PHASE_END(9, "lights_specular");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(10, "specular_lightmaps");
 		structure_render_specular_lightmaps();
 		RENDER_PHASE_END(10, "specular_lightmaps");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(33, "reflection_masks");
 		structure_render_reflection_lightmap_masks();
 		structure_render_reflection_mirrors();
 		RENDER_PHASE_END(33, "reflection_masks");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(11, "reflections");
 		structure_render_reflections();
 		RENDER_PHASE_END(11, "reflections");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(12, "structure_transparent");
 		structure_render_transparent_geometry();
 		RENDER_PHASE_END(12, "structure_transparent");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(13, "fog");
 		structure_render_fog();
 		RENDER_PHASE_END(13, "fog");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(34, "post_objects");
 		game_engine_post_rasterize_objects();
 		RENDER_PHASE_END(34, "post_objects");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(14, "weather");
 		weather_particle_systems_render();
 		RENDER_PHASE_END(14, "weather");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(15, "particles");
 		render_particles();
 		RENDER_PHASE_END(15, "particles");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(16, "particle_systems");
 		particle_systems_render();
 		RENDER_PHASE_END(16, "particle_systems");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(17, "contrails");
 		render_contrails_normal();
 		RENDER_PHASE_END(17, "contrails");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(18, "transparent_draw");
 		rasterizer_transparent_geometry_draw(TRUE);
 		RENDER_PHASE_END(18, "transparent_draw");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(40, "decals_water");
 		rasterizer_decals_begin(_decal_layer_water);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -560,27 +611,27 @@ static void render_window(
 		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(19, "detail_objects");
 		structure_render_detail_objects();
 		RENDER_PHASE_END(19, "detail_objects");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(35, "transparent_rest");
 		rasterizer_transparent_geometry_draw(FALSE);
 		rasterizer_transparent_geometry_stop();
 		RENDER_PHASE_END(35, "transparent_rest");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(29, "fog_screen");
 		structure_render_fog_screen();
 		RENDER_PHASE_END(29, "fog_screen");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(30, "flares");
 		rasterizer_lens_flares_draw();
 		RENDER_PHASE_END(30, "flares");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(20, "interface");
 		interface_draw_screen();
 		RENDER_PHASE_END(20, "interface");
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(31, "screen_flash");
 		rasterizer_screen_flash();
 		RENDER_PHASE_END(31, "screen_flash");
 #ifdef HALO_LINUX
-		RENDER_PHASE_BEGIN();
+		RENDER_PHASE_BEGIN_ID(22, "ui_widgets");
 		halo_screen_ui_offset(TRUE);
 		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
 		halo_screen_ui_offset(FALSE);
@@ -595,7 +646,7 @@ static void render_window(
 	render_debug();
 	editor_render();
 	rasterizer_debug_draw();
-	RENDER_PHASE_BEGIN();
+	RENDER_PHASE_BEGIN_ID(23, "window_end");
 	rasterizer_window_end();
 	RENDER_PHASE_END(23, "window_end");
 	profile_render_window_end();
@@ -624,7 +675,7 @@ static void render_player_frame(
 	camera = &window->render_camera;
 	has_mirror = FALSE;
 
-	RENDER_PHASE_BEGIN();
+	RENDER_PHASE_BEGIN_ID(25, "player_frame_pre");
 	structure_visibility_find_camera(camera);
 	render.fog.runtime_flags = 0;
 	scenario_get_atmospheric_fog(
@@ -785,7 +836,7 @@ void render_frame(
 #else
 	parameters.game_time_sec = (real)game_time_get() * (1.0f / TICKS_PER_SECOND);
 #endif
-	RENDER_PHASE_BEGIN();
+	RENDER_PHASE_BEGIN_ID(24, "frame_begin");
 	rasterizer_frame_begin(&parameters);
 	rasterizer_windows_begin();
 	RENDER_PHASE_END(24, "frame_begin");
@@ -830,7 +881,7 @@ void render_frame(
 #else
 	progress_bar_eachframe();
 #endif
-	RENDER_PHASE_BEGIN();
+	RENDER_PHASE_BEGIN_ID(26, "frame_end");
 	rasterizer_windows_end();
 	rasterizer_frame_end();
 	RENDER_PHASE_END(26, "frame_end");
