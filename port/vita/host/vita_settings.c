@@ -9,14 +9,18 @@ is open. Each setting is one of the environment variables the port already
 reads (HALO_MODEL_LOD_SCALE...), kept in ux0:data/haloce-vita/settings.txt
 and set before the game starts; a change bumps halo_settings_generation,
 and the readers that can take a new value mid-game read theirs again (the
-render resolution sizes the screen's targets once: it waits for a restart).
+render resolution and the aspect ratio too: the screen's targets are made
+again between two frames, d3d8_gxm.c screen_settings_apply; if the memory
+for the new size cannot be had, the panel says the change waits for a
+restart).
 
 The release's defaults, the ones measured best on the Vita, are set here
 too, under whatever env.txt and settings.txt say.
 
 The Profile row at the top sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
-those rows match none of them. Rows marked * apply after a restart.
+those rows match none of them. Rows marked * apply after a restart (the
+sound voices).
 */
 
 #include <psp2/kernel/processmgr.h>
@@ -34,6 +38,9 @@ those rows match none of them. Rows marked * apply after a restart.
 
 /* read again by the readers that take a change mid-game (port_config.c) */
 extern volatile unsigned long halo_settings_generation;
+/* the render resolution or aspect ratio asked for could not be made
+(d3d8_gxm.c screen_settings_apply): it waits for a restart */
+int halo_screen_restart_needed(void);
 
 struct setting
 {
@@ -56,10 +63,10 @@ static struct setting settings[] = {
 		"The game's frame counter, bottom right", 0 },
 	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
 		"The most frames shown a second", 0 },
-	{ "Render resolution", "HALO_RENDER_SCALE", 1, 5, { "1", "0.875", "0.75", "0.625", "0.5" },
-		{ "100%", "88%", "75%", "63%", "50%" }, "Lower is faster and softer (after a restart)", 2 },
-	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 1, 2, { "848", "640" }, { "16:9", "4:3" },
-		"4:3: the Xbox's framing, black bars (restart)", 0 },
+	{ "Render resolution", "HALO_RENDER_SCALE", 0, 5, { "1", "0.875", "0.75", "0.625", "0.5" },
+		{ "100%", "88%", "75%", "63%", "50%" }, "Lower is faster and softer", 2 },
+	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
+		"4:3: the Xbox's framing, black bars", 0 },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
 		"Scaling to the screen: Sharp = crisp pixels", 0 },
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
@@ -325,7 +332,8 @@ static void show(void)
 	}
 	if (length < (int)sizeof(text))
 		snprintf(text + length, sizeof(text) - length, "\n%s",
-			restart_pending ? "Restart the game for this change. O: close" : settings[selected].help);
+			restart_pending || halo_screen_restart_needed() ? "Restart the game for this change. O: close" :
+			settings[selected].help);
 	vgxm_menu_set(text, selected + 1);
 }
 
