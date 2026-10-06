@@ -51,6 +51,10 @@ boolean network_coop_devices_remote(void);
 void network_coop_note_device_snap(short group_index);
 /* objects.c: an object was made (the co-op host's object census) */
 void network_coop_note_object_new(long object_index);
+/* main.c: whether a co-op client holds its tick this frame, being too far
+ahead of its host's latest tick (a slow host); and how often it has */
+boolean network_coop_client_hold(void);
+void network_coop_client_pace_statistics(long *holds, long *most_lead);
 /* unit_scripting_commands.c: a script set a unit's maximum or current
 vitality; TRUE if it was a co-op player's, now set on every player's */
 boolean network_coop_set_players_vitality(long unit_index, boolean maximum, real body, real shield);

@@ -98,6 +98,7 @@ void test_input_hold_action(int hold);
 /* network co-op's (port/linux/game/network_coop.c, coop_spectate.c) */
 boolean network_coop_active(void);
 boolean network_coop_skip_vote_status(short *votes, short *voters, boolean *voted);
+void network_coop_client_pace_statistics(long *holds, long *most_lead);
 long coop_spectate_unit(short local_player_index);
 /* network_server_manager.c's */
 word network_game_server_get_state(struct network_game_server *server, short *substate);
@@ -416,10 +417,13 @@ static void network_test_log_players(
 		boolean voted = FALSE;
 		boolean offered = network_coop_skip_vote_status(&votes, &voters, &voted);
 		long watched = coop_spectate_unit(0);
+		long holds, most_lead;
 
-		platform_log("network test: co-op tick %ld | bsp %d | cinematic %d skip %s %d/%d%s | watching %lx",
+		network_coop_client_pace_statistics(&holds, &most_lead);
+		platform_log("network test: co-op tick %ld | bsp %d | cinematic %d skip %s %d/%d%s | watching %lx | held %ld lead %ld",
 			game_time_get(), (int)global_structure_bsp_index_get(), (int)cinematic_in_progress(),
-			offered ? "offered" : "no", (int)votes, (int)voters, voted ? " voted" : "", (unsigned long)watched);
+			offered ? "offered" : "no", (int)votes, (int)voters, voted ? " voted" : "", (unsigned long)watched,
+			holds, most_lead);
 	}
 }
 

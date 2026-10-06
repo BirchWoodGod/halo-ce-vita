@@ -113,6 +113,8 @@ index and tag, since the map placed them at the same index everywhere.
 #include "network_coop.h"
 #include "network_distributed.h"
 
+#include <stdlib.h>
+
 /* hud.c's: what the scripts show of the HUD (its struct hud_scripted_globals,
 which hud.c keeps to itself) */
 struct coop_hud_scripted_globals
@@ -2819,6 +2821,56 @@ void network_coop_note_object_effect(
 	event->name_index = object->object.name_index;
 	event->definition_index = object->definition_index;
 	event->value = marker_index;
+}
+
+/* ---------- a co-op client's pace
+
+The netcode's machines tick on their own clocks (main.c). A host that can't
+keep 30 ticks a second (a Vita on a heavy campaign scene, which
+HALO_NET_CATCH_UP_TICKS holds to 2 ticks a frame rather than let it spiral)
+falls behind real time, and its clients didn't: a client ran further and
+further ahead of the host, its AI units driven for more ticks by each
+control than the host's were, and corrected back. A co-op client now holds
+its tick while it is more than HALO_NET_COOP_LEAD_TICKS (default 6, 0 for
+never) ahead of the host's latest tick, so it plays at the host's pace,
+slower than real time with it. */
+static struct
+{
+	long holds;
+	long most_lead;
+} client_pace;
+
+boolean network_coop_client_hold(
+	void)
+{
+	static long lead_limit = -1;
+	long host_time, lead;
+
+	if (lead_limit < 0)
+	{
+		char const *setting = getenv("HALO_NET_COOP_LEAD_TICKS");
+
+		lead_limit = setting && setting[0] ? atol(setting) : 6;
+		if (lead_limit < 0)
+			lead_limit = 0;
+	}
+	if (!lead_limit || !coop_client() || (host_time = distributed_latest_host_time()) == NONE)
+		return FALSE;
+	lead = game_time_get() - host_time;
+	if (lead > client_pace.most_lead)
+		client_pace.most_lead = lead;
+	if (lead <= lead_limit)
+		return FALSE;
+	client_pace.holds++;
+	return TRUE;
+}
+
+void network_coop_client_pace_statistics(
+	long *holds,
+	long *most_lead)
+{
+	*holds = client_pace.holds;
+	*most_lead = client_pace.most_lead;
 }
 
 boolean network_coop_skip_offered(

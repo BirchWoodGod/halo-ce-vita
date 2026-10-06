@@ -2596,6 +2596,9 @@ static void main_update_time_unthrottled(
 			main_globals.connection == _game_connection_network_client)
 		{
 			seconds_elapsed = CEILING(seconds_elapsed, (real)main_network_catch_up_ticks() * 0.03333333507180214f);
+			/* (a co-op client too far ahead of a slow host waits for it) */
+			if (main_globals.connection == _game_connection_network_client && network_coop_client_hold())
+				seconds_elapsed = 0.0f;
 		}
 	}
 	{
