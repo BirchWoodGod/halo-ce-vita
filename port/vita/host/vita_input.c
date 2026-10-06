@@ -381,7 +381,17 @@ static void gyro_read(unsigned long long now, float angle[3])
 		for (index = 0; index < 3; index++)
 			rate[index] = ((pad_script_gyro_set ? pad_script_gyro[index] : 0.0f) +
 				(gyro_sim_set > 0 ? gyro_sim[index] : 0.0f)) * DEGREES;
-		vita_gyro_filter_sample(&gyro_filter, rate, NULL, dt, 0, angle);
+		/* (in samples of 5 ms, as the sensor's, however long the frame
+		took - Vita3K's are 120 ms - up to a quarter of a second) */
+		if (dt > 0.25f)
+			dt = 0.25f;
+		while (dt > 0.0f)
+		{
+			float step = dt > 0.005f ? 0.005f : dt;
+
+			vita_gyro_filter_sample(&gyro_filter, rate, NULL, step, 0, angle);
+			dt -= step;
+		}
 		gyro_simulated_at = now;
 	}
 	else
