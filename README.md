@@ -34,8 +34,8 @@ Evolved.
 The current list is in the [roadmap](ROADMAP.md) and the
 [issues](https://github.com/BirchWoodGod/halo-ce-vita/issues). The main
 ones: the biggest fights still drop frames (see [Performance](#performance)),
-Covenant energy shields and some glass can flicker or disappear depending
-on distance, and some trees flicker at the screen's edges.
+the Warthog's windshield and some other glass can flicker, and some trees
+flicker at the screen's edges.
 
 ## Install
 
@@ -137,17 +137,22 @@ Quit** from the pause menu is the safest way to stop.
 ## Settings panel
 
 Hold Select + Start for a second. Up and down choose a setting, left and
-right change it, Circle closes the panel. Changes apply at once (the render
-resolution and sound voices after a restart) and are kept in
+right change it, Circle closes the panel. Changes apply at once, except the
+rows marked `*` (render resolution, aspect ratio, sound voices), which apply
+after a restart; the panel says so. Settings are kept in
 `ux0:data/haloce-vita/settings.txt`.
 
-The defaults favour frame rate: lower model detail at a distance, tiny
-distant objects skipped, static props and object lighting updated less
-often, sounds' muffling behind walls rechecked less often, and a 75%
-render resolution. Set model detail High, distant objects Off, scenery and
-lighting to every tick, sound occlusion every tick and the resolution to
-100% to see and hear the game exactly as on the Xbox. Sound voices can play
-fewer positional sounds at once for speed.
+The **Profile** row at the top sets the speed-related rows together
+(render resolution, model detail, hide distant objects, scenery updates,
+object lighting and sound occlusion): **Performance**, **Balanced** (the
+defaults) or **Quality** (the game as on the Xbox). Changing one of those
+rows yourself turns the profile to **Custom**.
+
+**Aspect ratio** 16:9 (the default) fills the Vita's screen with a wider
+view; 4:3 shows the Xbox's own framing, field of view, HUD and menus between
+black bars. **Upscale filter** Smooth (the default) or Sharp chooses how the
+picture is scaled to the 960x544 screen: Smooth blends pixels, Sharp keeps
+them crisp and blocky (most visible at lower render resolutions).
 
 ## Performance
 
@@ -168,6 +173,24 @@ so the render resolution changes little there. In Pillar of Autumn's
 firefights the graphics chip is the limit, and there **Render resolution 50%**
 helps a lot (in one test, a firefight went from about 16 fps at 75% to about
 26 fps at 50%), at the cost of a softer picture.
+
+Recommended settings (the **Profile** row sets these at once):
+
+| Setting | Performance | Balanced (default) | Quality |
+| --- | --- | --- | --- |
+| Render resolution | 50% | 75% | 100% |
+| Model detail | Low | Low | High |
+| Hide distant objects | Small | Small | Off |
+| Scenery updates | Quarter | Quarter | Every tick |
+| Object lighting | Third | Third | Full |
+| Sound occlusion | Every 6th | Every 3rd | Every tick |
+| Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
+
+Performance is the one to pick if the late-game battles feel slow; Quality
+draws and sounds exactly as on the Xbox and runs well in quiet areas. None
+of them drops see-through parts such as the Covenant field generators'
+domes or visors: models keep them at the Xbox's detail level, and the
+domes are drawn at any distance.
 
 What helps, in the settings panel:
 
