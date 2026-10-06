@@ -406,7 +406,7 @@ static void network_test_log_players(
 			long sent_bytes, received_bytes;
 
 			network_distributed_byte_statistics(&sent_bytes, &received_bytes);
-			platform_log("network test: tick %ld bytes sent %ld received %ld", game_time_get(), sent_bytes, received_bytes);
+			platform_log("network test: bytes at tick %ld: sent %ld received %ld", game_time_get(), sent_bytes, received_bytes);
 		}
 	}
 	/* co-op: the structure BSP, the cinematic, the skip vote, whom a dead
