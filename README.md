@@ -16,6 +16,12 @@ Evolved.
 
 *Screenshots taken on a PS Vita.*
 
+> **Official sources.** The only official downloads are the
+> [releases on this GitHub repository](https://github.com/BirchWoodGod/halo-ce-vita/releases),
+> published by **BirchWoodGod**. VPKs, "updates", mods or donation requests
+> offered anywhere else under this project's or the developer's name are not
+> from me. If in doubt, check that a build is listed on the releases page.
+
 ## What works
 
 - The whole campaign from the menus, with checkpoints, saves and Save and
