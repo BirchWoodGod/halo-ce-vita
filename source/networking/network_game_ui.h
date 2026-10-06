@@ -19,6 +19,11 @@ header included in hcex build.
 wchar_t const *network_game_get_random_player_name(
 	void);
 
+boolean network_game_local_player_name(
+	wchar_t const *profile_name,
+	wchar_t *name,
+	long count);
+
 /* ---------- globals */
 
 /* ---------- public code */

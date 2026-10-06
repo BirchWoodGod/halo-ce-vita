@@ -403,6 +403,8 @@ int main(void)
 	check(!strcmp(getenv("HALO_NET_ONLINE"), "true") && !strcmp(getenv("HALO_NET_ALLOW_UPNP"), "false"),
 		"Network Online: internet play on, without UPnP");
 	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser"), "the lobby name is the Vita's user name");
+	check(getenv("HALO_NET_PLAYER_NAME") && !strcmp(getenv("HALO_NET_PLAYER_NAME"), "vitauser"),
+		"a default profile's player name is the Vita's user name");
 	check(!strstr(log_text, "TEST MODE"), "no dev switch on: halo.log does not say test mode");
 
 	check(!frame(0), "closed: the game gets the buttons");
