@@ -88,6 +88,9 @@ void halo_screen_ui_offset(unsigned char centered)
 
 static void screen_settings_apply(void);
 static void dynres_configure(void);
+static void cdram_wanted_relieve(void);
+static unsigned long cdram_census_frame(void);
+static void cdram_census(const char *when);
 
 long halo_screen_commit(void)
 {
@@ -109,6 +112,7 @@ long halo_screen_commit(void)
 		screen_settings_apply();
 		dynres_configure();
 	}
+	cdram_wanted_relieve();
 	return screen_width;
 }
 
@@ -252,6 +256,11 @@ struct render_target_entry
 	BOOL drawn;
 	/* its target is a cell of its surface's atlas (render_target_atlas) */
 	BOOL cell;
+	/* a screen-sized target given back for CDRAM while unused (its id
+	kept): made again when next drawn into (render_target_wake), not before
+	the frame wake_frame after a try that found no memory */
+	BOOL dormant;
+	unsigned long wake_frame;
 };
 
 #define RENDER_TARGET_BUCKET_COUNT 256
@@ -749,7 +758,7 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 
 	for (entry = render_targets; entry; entry = entry->next)
 	{
-		if (entry->id && !entry->chain_levels && !entry->cell && entry->target.depth == depth &&
+		if (entry->id && !entry->chain_levels && !entry->cell && !entry->dormant && entry->target.depth == depth &&
 			entry->last_used + 300 < device.frame &&
 			!(camo_target_reserved() && camo_copy_size(entry->target.width, entry->target.height, entry->target.depth) &&
 				!camo_copy_size(width, height, depth)))
@@ -851,6 +860,29 @@ static void render_target_atlas_frame_end(void)
 	}
 }
 
+/* a dormant entry's target made again (screen_targets_doze gave its memory
+back); FALSE while there is no memory for it */
+static BOOL render_target_wake(struct render_target_entry *entry)
+{
+	static unsigned long woken;
+
+	if (!entry->dormant)
+		return TRUE;
+	if (device.frame < entry->wake_frame)
+		return FALSE;
+	if (!vgxm_target_remake(entry->id, entry->target.width, entry->target.height, entry->target.depth, &entry->texture))
+	{
+		entry->wake_frame = device.frame + 30;
+		return FALSE;
+	}
+	entry->dormant = FALSE;
+	entry->drawn = FALSE;
+	if (++woken <= 20)
+		platform_log("render target %lu (%lux%lu %s) made again as it is drawn into (%lu so far)", entry->id,
+			entry->target.width, entry->target.height, entry->target.depth ? "depth" : "colour", woken);
+	return TRUE;
+}
+
 static struct render_target_entry *render_target_get_version(const D3DSurface *surface, unsigned long version)
 {
 	struct render_target_entry *entry, *placeholder = NULL, **link;
@@ -866,7 +898,7 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 			entry->target.height == height && entry->target.depth == depth && entry->version == version)
 		{
 			if (entry->id)
-				return entry;
+				return render_target_wake(entry) ? entry : NULL;
 			/* A surface no target could be made for. It used to stay
 			without one for good: the recycling below only ran at the
 			first request, and right after a level change every target is
@@ -989,8 +1021,8 @@ static struct render_target_entry *render_target_entry_find_version(unsigned lon
 
 	for (entry = *render_target_bucket(data); entry; entry = entry->next_in_bucket)
 	{
-		if (entry->id && entry->target.data == data && !entry->target.depth && entry->version == version &&
-			(!best || entry->last_rendered > best->last_rendered))
+		if (entry->id && !entry->dormant && entry->target.data == data && !entry->target.depth &&
+			entry->version == version && (!best || entry->last_rendered > best->last_rendered))
 		{
 			best = entry;
 		}
@@ -2407,6 +2439,11 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 	{
 		color = last.color_entry;
 		depth = last.depth_entry;
+		/* (an entry whose target was given back for now: made again) */
+		if (color && color->dormant && !render_target_wake(color))
+			color = NULL;
+		if (depth && depth->dormant && !render_target_wake(depth))
+			depth = NULL;
 	}
 	else
 	{
@@ -3373,6 +3410,16 @@ static void execute_command(struct render_command *command)
 		/* (the next frame's render scale, between the two) */
 		dynres_frame_end();
 		render_target_atlas_frame_end();
+		{
+			/* (the census during play: cdram_census) */
+			static int census_done;
+
+			if (!census_done && command->frame >= cdram_census_frame())
+			{
+				census_done = 1;
+				cdram_census("during play");
+			}
+		}
 		worker_build_frame_end();
 		vita_texture_cache_begin_frame();
 		break;
@@ -4167,7 +4214,9 @@ static int screen_targets_make(unsigned long old_width, unsigned long new_width,
 	{
 		unsigned long width;
 
-		if (!screen_sized_entry(entry))
+		/* (one given back for now is made when next drawn into, at the
+		new size: render_target_wake) */
+		if (!screen_sized_entry(entry) || entry->dormant)
 			continue;
 		width = entry->target.width == old_width ? new_width : entry->target.width;
 		if (!vgxm_target_remake(entry->id, width, SCREEN_HEIGHT, entry->target.depth, &entry->texture))
@@ -4202,8 +4251,211 @@ static void screen_entries_rekey(unsigned long old_width, unsigned long new_widt
 		/* (zeros until the next frame draws them: not sampled before) */
 		entry->drawn = FALSE;
 		entry->last_rendered = 0;
-		entry->last_used = device.frame + 1;
+		/* (last_used stays: a copy unused for ten seconds is still one, for
+		screen_targets_doze) */
 	}
+}
+
+/* ---------- CDRAM when it runs short
+
+(the game's thread, with the worker and the GPU idle: a live change of the
+screen's targets, or a target that found no CDRAM - halo_screen_commit)
+What can be given back, safest first (vgxm_memory.h): the block cache, the
+small targets' blocks every share of which is back, the targets no entry
+refers to (the copies moved into atlases, the levels a mip chain replaced),
+the screen-sized targets no frame has used for ten seconds (the zoom's and
+the pause menu's copies, made again when next drawn into:
+render_target_wake), then the texture pool's segments in CDRAM, one at a
+time from the top, each moved to user RAM (the textures in it decoded again
+as they are used). */
+
+/* HALO_CDRAM_RELIEF=0 (debug): nothing given back when CDRAM runs short
+(as before: a live change that does not fit waits for a restart) */
+static BOOL cdram_relief_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_CDRAM_RELIEF");
+
+		enabled = !setting || atoi(setting) != 0;
+		if (!enabled)
+			platform_log("cdram: nothing given back when it runs short (HALO_CDRAM_RELIEF=0)");
+	}
+	return enabled != 0;
+}
+
+/* a screen-sized target unused for ten seconds (not the back buffer nor
+its depth) given back, its entry dormant; the count */
+static unsigned long screen_targets_doze(void)
+{
+	struct render_target_entry *entry;
+	unsigned long count = 0;
+
+	for (entry = render_targets; entry; entry = entry->next)
+	{
+		if (!screen_sized_entry(entry) || entry->dormant || entry->last_used + 300 >= device.frame ||
+			entry->target.data == device.back_buffer.Data || entry->target.data == device.depth_buffer.Data)
+		{
+			continue;
+		}
+		vgxm_target_release(entry->id);
+		entry->dormant = TRUE;
+		entry->wake_frame = 0;
+		entry->drawn = FALSE;
+		count++;
+	}
+	return count;
+}
+
+/* the targets no entry refers to given back (vgxm_targets_sweep) */
+static unsigned long targets_unreferenced_sweep(void)
+{
+	static unsigned char referenced[VGXM_MAXIMUM_TARGETS + 1];
+	struct render_target_entry *entry;
+
+	memset(referenced, 0, sizeof(referenced));
+	for (entry = render_targets; entry; entry = entry->next)
+		if (entry->id && entry->id <= VGXM_MAXIMUM_TARGETS)
+			referenced[entry->id] = 1;
+	if (camo_reserved_id && camo_reserved_id <= VGXM_MAXIMUM_TARGETS)
+		referenced[camo_reserved_id] = 1;
+	return vgxm_targets_sweep(referenced, sizeof(referenced));
+}
+
+/* what costs no texture: the bytes freed (the dozing targets' at the
+screen's next remake) */
+static unsigned long cdram_relieve(unsigned long *dozed)
+{
+	unsigned long freed = targets_unreferenced_sweep();
+
+	*dozed = screen_targets_doze();
+	return freed + vgxm_memory_trim();
+}
+
+/* one texture pool segment moved to user RAM and its textures forgotten;
+the CDRAM bytes freed (0: none left in CDRAM) */
+static unsigned long cdram_relieve_pool(void)
+{
+	void *base;
+	unsigned long size, freed = vgxm_pool_demote(&base, &size), textures = 0;
+
+	if (freed && size)
+		textures = vita_texture_cache_forget(base, size);
+	if (freed)
+		platform_log("cdram: a texture pool part (%lu KB) moved out of CDRAM, %lu textures to decode again", freed / 1024,
+			textures);
+	return freed;
+}
+
+/* the texture pool's segments in user RAM moved back to CDRAM while the
+targets keep their headroom */
+static void cdram_pool_return(void)
+{
+	void *base;
+	unsigned long size, moved = 0, textures = 0;
+
+	while (vgxm_pool_promote(&base, &size))
+	{
+		moved++;
+		if (size)
+			textures += vita_texture_cache_forget(base, size);
+	}
+	if (moved)
+		platform_log("cdram: %lu texture pool segments back in CDRAM, %lu textures to decode again", moved, textures);
+}
+
+/* the census (HALO_CDRAM_CENSUS=1, or =<frame> for when, or performance
+logging): what holds CDRAM, at a frame of play (900 by default, the worker's
+present) and after each live change; with HALO_CDRAM_CENSUS, a line per
+target with what it is */
+static int cdram_census_level(void)
+{
+	static int level = -1;
+
+	if (level < 0)
+	{
+		const char *setting = getenv("HALO_CDRAM_CENSUS");
+
+		level = setting && atoi(setting) > 0 ? 2 : (getenv("HALO_PERF_LOG") && atoi(getenv("HALO_PERF_LOG"))) ||
+			(getenv("HALO_FRAME_TIMING") && atoi(getenv("HALO_FRAME_TIMING")) > 0) ? 1 : 0;
+	}
+	return level;
+}
+
+static unsigned long cdram_census_frame(void)
+{
+	const char *setting = getenv("HALO_CDRAM_CENSUS");
+
+	return setting && atol(setting) > 1 ? (unsigned long)atol(setting) : 900;
+}
+
+static void cdram_census(const char *when)
+{
+	static char roles[VGXM_MAXIMUM_TARGETS + 1][80];
+	static const char *role_of[VGXM_MAXIMUM_TARGETS + 1];
+	struct render_target_entry *entry;
+	int level = cdram_census_level();
+
+	if (!level)
+		return;
+	memset(role_of, 0, sizeof(role_of));
+	for (entry = render_targets; entry; entry = entry->next)
+	{
+		unsigned long id = entry->id;
+
+		if (!id || id > VGXM_MAXIMUM_TARGETS || role_of[id])
+			continue;
+		snprintf(roles[id], sizeof(roles[id]), "%s%s %08lx v%lu, used %ld frames ago%s",
+			entry->target.data == device.back_buffer.Data ? "the back buffer" :
+			entry->target.data == device.depth_buffer.Data ? "the depth buffer" :
+			camo_copy_size(entry->target.width, entry->target.height, entry->target.depth) ? "the camouflage's copy" :
+			screen_sized_entry(entry) ? "a copy of the screen" : entry->chain_levels ? "a mip chain level" :
+			entry->cell ? "an atlas cell" : "a surface",
+			entry->dormant ? " (given back for now)" : "", (unsigned long)entry->target.data, entry->version,
+			(long)device.frame - (long)entry->last_used, entry->drawn || entry->target.depth ? "" : ", not drawn since made");
+		role_of[id] = roles[id];
+	}
+	if (camo_reserved_id && camo_reserved_id <= VGXM_MAXIMUM_TARGETS && !role_of[camo_reserved_id])
+		role_of[camo_reserved_id] = "the camouflage's copy (reserved, not yet used)";
+	platform_log("cdram census %s: %ldx%d at %.0f%%%s", when, screen_width, SCREEN_HEIGHT,
+		vgxm_render_scale() * 100.0f, getenv("HALO_RENDER_SCALE") && !strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") ?
+		" (dynamic)" : "");
+	vgxm_memory_census(role_of, VGXM_MAXIMUM_TARGETS + 1, level >= 2);
+}
+
+/* (halo_screen_commit, after a present) a target found no CDRAM in a
+frame (a scene's new surface: the effect it is for goes until it has
+one): once the worker and the GPU are done, what costs no texture is given
+back, then texture pool segments until that much is free; at most every
+ten seconds (the entry asks again every 30 frames) */
+static void cdram_wanted_relieve(void)
+{
+	static unsigned long relieved_frame;
+	unsigned long wanted, freed, dozed, pool_parts = 0, moved;
+
+	if (!device.created || !device.gpu_ready || (relieved_frame && device.frame < relieved_frame + 300) ||
+		!cdram_relief_enabled() || !(wanted = vgxm_cdram_wanted()))
+	{
+		return;
+	}
+	relieved_frame = device.frame;
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+	freed = cdram_relieve(&dozed);
+	while (vgxm_cdram_free() < wanted + 256 * 1024 && (moved = cdram_relieve_pool()) != 0)
+	{
+		freed += moved;
+		pool_parts++;
+	}
+	platform_log("cdram: a target found no CDRAM (%lu KB): %lu KB given back (%lu texture pool parts moved to user "
+		"RAM, %lu unused copies of the screen until next drawn), %lu KB free now", wanted / 1024, freed / 1024, pool_parts,
+		dozed, vgxm_cdram_free() / 1024);
 }
 
 static void screen_settings_apply(void)
@@ -4214,8 +4466,8 @@ static void screen_settings_apply(void)
 	float scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale();
 	long width = screen_width_wanted(), old_width = screen_width;
 	unsigned long long started;
-	unsigned long made = 0, targets, cdram, cached, cdram_free;
-	int restored = TRUE;
+	unsigned long made = 0, targets, cdram, cached, cdram_free, freed = 0, dozed = 0, moved, pool_parts = 0;
+	int restored = TRUE, made_new;
 
 	if (scale < 0.5f || scale > 1.0f)
 		scale = 1.0f;
@@ -4244,7 +4496,21 @@ static void screen_settings_apply(void)
 	}
 	vgxm_wait_gpu_idle();
 	vgxm_render_scale_set(scale);
-	if (screen_targets_make((unsigned long)old_width, (unsigned long)width, &made))
+	made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+	if (!made_new && cdram_relief_enabled())
+	{
+		/* (short of CDRAM: what costs nothing given back, then the
+		texture pool's segments one at a time, each time tried again) */
+		freed = cdram_relieve(&dozed);
+		made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+		while (!made_new && (moved = cdram_relieve_pool()) != 0)
+		{
+			freed += moved;
+			pool_parts++;
+			made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+		}
+	}
+	if (made_new)
 	{
 		screen_entries_rekey((unsigned long)old_width, (unsigned long)width);
 		screen_width = width;
@@ -4252,6 +4518,8 @@ static void screen_settings_apply(void)
 		device.presentation.BackBufferWidth = (UINT)width;
 		d3d8_surface_resize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, (unsigned long)width, SCREEN_HEIGHT);
 		d3d8_surface_resize(&device.depth_buffer, D3DFMT_LIN_D24S8, (unsigned long)width, SCREEN_HEIGHT);
+		/* (a smaller size: the texture pool's parts in user RAM back) */
+		cdram_pool_return();
 	}
 	else
 	{
@@ -4271,6 +4539,8 @@ static void screen_settings_apply(void)
 		screen_entries_rekey((unsigned long)old_width, (unsigned long)old_width);
 		screen_restart_needed = TRUE;
 	}
+	/* (the attempts' refusals are answered: not a target's in a frame) */
+	vgxm_cdram_wanted();
 	vgxm_target_stats(&targets, &cdram, &cached, &cdram_free);
 	platform_log("screen: %ldx%d at %.0f%%%s: %lu screen-sized targets made again in %llu us; %lu target slots, "
 		"targets hold %lu KB of CDRAM, %lu KB kept for other sizes, %lu KB free", screen_width, SCREEN_HEIGHT, vgxm_render_scale() * 100.0f,
@@ -4278,6 +4548,10 @@ static void screen_settings_apply(void)
 		" (NO TARGETS: no memory for the old size either)") : "",
 		made, (unsigned long long)(vita_host_time_us() - started), targets, cdram / 1024, cached / 1024,
 		cdram_free / 1024);
+	if (freed || dozed)
+		platform_log("screen: CDRAM was short: %lu KB given back (%lu texture pool parts moved to user RAM), %lu unused "
+			"copies of the screen given back until next drawn", freed / 1024, pool_parts, dozed);
+	cdram_census("after a live change");
 }
 
 /* ---------- the dynamic resolution
