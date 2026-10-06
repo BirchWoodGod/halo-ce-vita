@@ -2,8 +2,9 @@
 VITA_CONTROLS.C
 
 The mapping layer between the Vita's controls and the Xbox controller
-(port/vita/include/vita_controls.h): touch zones, the actions a zone or a
-button is set to in the settings panel, and the Xbox buttons those press.
+(port/vita/include/vita_controls.h): touch zones, the Xbox button each zone
+presses and the Vita button of each Xbox button (the settings panel's
+Controls tab).
 vita_input.c feeds the touch panels in, vita_pad.c (the platform layer)
 asks for the controller's state, vita_settings.c shows the rows.
 
@@ -39,22 +40,25 @@ const char *const vita_touch_variables[VITA_ZONE_COUNT] = {
 	"HALO_TOUCH_REAR_LEFT", "HALO_TOUCH_REAR_RIGHT",
 };
 
-const char *const vita_button_variables[VITA_ACTION_COUNT] = {
-	NULL, "HALO_BUTTON_MELEE", "HALO_BUTTON_GRENADE", "HALO_BUTTON_FLASHLIGHT", "HALO_BUTTON_ZOOM",
-	"HALO_BUTTON_CROUCH", "HALO_BUTTON_RELOAD", "HALO_BUTTON_WEAPON", "HALO_BUTTON_GRENADE_SWITCH",
-	"HALO_BUTTON_JUMP", NULL, "HALO_BUTTON_FIRE",
+const char *const vita_xbox_variables[VITA_XBOX_COUNT] = {
+	NULL, "HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
+	"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
+	"HALO_XBOX_BACK",
 };
 
-const unsigned long vita_button_defaults[VITA_ACTION_COUNT] = {
-	0, VITA_BUTTON_CIRCLE, VITA_BUTTON_L, VITA_BUTTON_RIGHT, VITA_BUTTON_UP, VITA_BUTTON_DOWN, VITA_BUTTON_SQUARE,
-	VITA_BUTTON_TRIANGLE, VITA_BUTTON_LEFT, VITA_BUTTON_CROSS, VITA_BUTTON_SELECT, VITA_BUTTON_R,
+/* Xita's layout: A B X Y on Cross Circle Square Triangle, Black and White
+on D-pad left and right, the triggers on L and R, the sticks' clicks
+(crouch, zoom) on D-pad down and up, Back on Select */
+const unsigned long vita_xbox_defaults[VITA_XBOX_COUNT] = {
+	0, VITA_BUTTON_CROSS, VITA_BUTTON_CIRCLE, VITA_BUTTON_SQUARE, VITA_BUTTON_TRIANGLE, VITA_BUTTON_LEFT,
+	VITA_BUTTON_RIGHT, VITA_BUTTON_L, VITA_BUTTON_R, VITA_BUTTON_DOWN, VITA_BUTTON_UP, VITA_BUTTON_SELECT,
 };
 
-static const char *const action_values[VITA_ACTION_COUNT] = { VITA_ACTION_VALUES };
+static const char *const xbox_values[VITA_XBOX_COUNT] = { VITA_XBOX_VALUES };
 static const char *const button_values[VITA_BUTTON_CHOICES] = { VITA_BUTTON_VALUES };
 static const unsigned long button_bits[VITA_BUTTON_CHOICES] = {
 	VITA_BUTTON_CROSS, VITA_BUTTON_CIRCLE, VITA_BUTTON_SQUARE, VITA_BUTTON_TRIANGLE, VITA_BUTTON_L, VITA_BUTTON_R,
-	VITA_BUTTON_UP, VITA_BUTTON_DOWN, VITA_BUTTON_LEFT, VITA_BUTTON_RIGHT, 0,
+	VITA_BUTTON_UP, VITA_BUTTON_DOWN, VITA_BUTTON_LEFT, VITA_BUTTON_RIGHT, VITA_BUTTON_SELECT, 0,
 };
 
 int vita_touch_zone_at(int panel, int x, int y)
@@ -133,14 +137,14 @@ unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct
 	return held;
 }
 
-int vita_action_named(const char *value)
+int vita_xbox_named(const char *value)
 {
-	int action;
+	int xbox;
 
-	for (action = 0; value && action < VITA_ACTION_COUNT; action++)
-		if (strcmp(value, action_values[action]) == 0)
-			return action;
-	return VITA_ACTION_OFF;
+	for (xbox = 0; value && xbox < VITA_XBOX_COUNT; xbox++)
+		if (strcmp(value, xbox_values[xbox]) == 0)
+			return xbox;
+	return VITA_XBOX_OFF;
 }
 
 unsigned long vita_button_named(const char *value, unsigned long fallback)
@@ -159,11 +163,11 @@ void vita_controls_config_load(struct vita_controls_config *config)
 	int index;
 
 	for (index = 0; index < VITA_ZONE_COUNT; index++)
-		config->zone_action[index] = vita_action_named(getenv(vita_touch_variables[index]));
-	for (index = 0; index < VITA_ACTION_COUNT; index++)
-		config->action_button[index] = vita_button_variables[index] ?
-			vita_button_named(getenv(vita_button_variables[index]), vita_button_defaults[index]) :
-			vita_button_defaults[index];
+		config->zone_xbox[index] = vita_xbox_named(getenv(vita_touch_variables[index]));
+	for (index = 0; index < VITA_XBOX_COUNT; index++)
+		config->xbox_button[index] = vita_xbox_variables[index] ?
+			vita_button_named(getenv(vita_xbox_variables[index]), vita_xbox_defaults[index]) :
+			vita_xbox_defaults[index];
 	/* (on unless set to 0, as vita_pad.c read it) */
 	config->crouch_toggle = toggle ? atoi(toggle) != 0 : 1;
 }
@@ -171,8 +175,8 @@ void vita_controls_config_load(struct vita_controls_config *config)
 void vita_controls_map(const struct vita_controls_config *config, struct vita_controls_state *state,
 	unsigned long buttons, unsigned long touch, int menus, struct vita_controls_output *output)
 {
-	int held[VITA_ACTION_COUNT];
-	int action, zone;
+	int held[VITA_XBOX_COUNT];
+	int xbox, zone;
 
 	memset(output, 0, sizeof(*output));
 	if (buttons & VITA_BUTTON_START)
@@ -182,7 +186,7 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 		/* the menus' fixed layout: D-pad, A B X Y, the triggers; the
 		crouch toggle starts over standing */
 		state->crouched = 0;
-		state->crouch_was_down = (buttons & config->action_button[VITA_ACTION_CROUCH]) != 0;
+		state->crouch_was_down = (buttons & config->xbox_button[VITA_XBOX_LEFT_STICK]) != 0;
 		if (buttons & VITA_BUTTON_SELECT) output->digital |= VITA_PAD_BACK;
 		if (buttons & VITA_BUTTON_UP) output->digital |= VITA_PAD_DPAD_UP;
 		if (buttons & VITA_BUTTON_DOWN) output->digital |= VITA_PAD_DPAD_DOWN;
@@ -196,33 +200,29 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 		output->analog[7] = (buttons & VITA_BUTTON_R) ? 255 : 0;
 		return;
 	}
-	/* in play: each action held by its button or by a zone set to it */
-	for (action = 0; action < VITA_ACTION_COUNT; action++)
-		held[action] = config->action_button[action] && (buttons & config->action_button[action]) != 0;
+	/* in play: each Xbox button held by its Vita button or by a zone set
+	to it */
+	for (xbox = 0; xbox < VITA_XBOX_COUNT; xbox++)
+		held[xbox] = config->xbox_button[xbox] && (buttons & config->xbox_button[xbox]) != 0;
 	for (zone = 0; zone < VITA_ZONE_COUNT; zone++)
-		if ((touch & (1UL << zone)) && config->zone_action[zone] > VITA_ACTION_OFF &&
-			config->zone_action[zone] < VITA_ACTION_COUNT)
-			held[config->zone_action[zone]] = 1;
-	/* crouch is the left stick's click, held, on the Xbox; Toggle (the
+		if ((touch & (1UL << zone)) && config->zone_xbox[zone] > VITA_XBOX_OFF &&
+			config->zone_xbox[zone] < VITA_XBOX_COUNT)
+			held[config->zone_xbox[zone]] = 1;
+	/* the left stick's click is crouch, held, on the Xbox; Toggle (the
 	panel's Crouch) makes a press crouch and the next one stand */
 	if (config->crouch_toggle)
 	{
-		if (held[VITA_ACTION_CROUCH] && !state->crouch_was_down)
+		if (held[VITA_XBOX_LEFT_STICK] && !state->crouch_was_down)
 			state->crouched = !state->crouched;
 		if (state->crouched)
 			output->digital |= VITA_PAD_LEFT_THUMB;
 	}
-	else if (held[VITA_ACTION_CROUCH])
+	else if (held[VITA_XBOX_LEFT_STICK])
 		output->digital |= VITA_PAD_LEFT_THUMB;
-	state->crouch_was_down = held[VITA_ACTION_CROUCH];
-	if (held[VITA_ACTION_ZOOM]) output->digital |= VITA_PAD_RIGHT_THUMB;
-	if (held[VITA_ACTION_SCOREBOARD]) output->digital |= VITA_PAD_BACK;
-	output->analog[0] = held[VITA_ACTION_JUMP] ? 255 : 0;
-	output->analog[1] = held[VITA_ACTION_MELEE] ? 255 : 0;
-	output->analog[2] = held[VITA_ACTION_RELOAD] ? 255 : 0;
-	output->analog[3] = held[VITA_ACTION_SWITCH_WEAPON] ? 255 : 0;
-	output->analog[4] = held[VITA_ACTION_SWITCH_GRENADE] ? 255 : 0;
-	output->analog[5] = held[VITA_ACTION_FLASHLIGHT] ? 255 : 0;
-	output->analog[6] = held[VITA_ACTION_GRENADE] ? 255 : 0;
-	output->analog[7] = held[VITA_ACTION_FIRE] ? 255 : 0;
+	state->crouch_was_down = held[VITA_XBOX_LEFT_STICK];
+	if (held[VITA_XBOX_RIGHT_STICK]) output->digital |= VITA_PAD_RIGHT_THUMB;
+	if (held[VITA_XBOX_BACK]) output->digital |= VITA_PAD_BACK;
+	/* (A to the right trigger: the analog buttons in order) */
+	for (xbox = VITA_XBOX_A; xbox <= VITA_XBOX_RIGHT_TRIGGER; xbox++)
+		output->analog[xbox - VITA_XBOX_A] = held[xbox] ? 255 : 0;
 }

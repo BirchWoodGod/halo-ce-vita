@@ -3587,14 +3587,18 @@ static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int coun
 }
 
 /* the touch zones' diagram (vita_settings.c touch_diagram: a character per
-zone, S the chosen row's, s the same while Off, A set, - Off): the front
-screen and the rear pad as small rectangles at (x, y), each zone on them
-green when it is the row's, grey when set, dark when Off */
+zone, S the chosen row's, s the same while Off, A set, - Off; then a space
+and each zone's Xbox button, 'a' + its VITA_XBOX_* index): the front screen
+and the rear pad as small rectangles at (x, y), each zone on them green
+when it is the row's, grey when set, dark when Off, a set one with its Xbox
+button's short name (A, LT, RS...) */
 static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned int count, unsigned int limit,
 	float x, float y, const char *zones)
 {
 	const float scale = 144.0f / VITA_TOUCH_WIDTH;
 	const float box_width = 144.0f, box_height = VITA_TOUCH_HEIGHT * scale;
+	static const char *const short_names[VITA_XBOX_COUNT] = { VITA_XBOX_SHORT_NAMES };
+	const char *buttons = strlen(zones) > VITA_ZONE_COUNT ? zones + VITA_ZONE_COUNT + 1 : "";
 	int panel, zone;
 
 	for (panel = 0; panel < 2; panel++)
@@ -3622,6 +3626,16 @@ static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned
 			count = overlay_rect(vertices, count, x + rectangle->left * scale + 1.0f, top + rectangle->top * scale + 1.0f,
 				(rectangle->right - rectangle->left) * scale - 2.0f, (rectangle->bottom - rectangle->top) * scale - 2.0f,
 				color);
+			/* (the Xbox button it presses, in its middle) */
+			if ((mark == 'S' || mark == 'A') && zone < (int)strlen(buttons) && buttons[zone] > 'a' &&
+				buttons[zone] < 'a' + VITA_XBOX_COUNT)
+			{
+				const char *name = short_names[buttons[zone] - 'a'];
+
+				count = overlay_text(vertices, count, limit,
+					x + (rectangle->left + rectangle->right) * scale / 2.0f - 4.0f * (float)strlen(name),
+					top + (rectangle->top + rectangle->bottom) * scale / 2.0f - 4.0f, 1.0f, 0xFF000000u, name);
+			}
 		}
 	}
 	return count;

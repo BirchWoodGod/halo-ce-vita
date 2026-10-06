@@ -5,9 +5,10 @@ A desktop test of the controls' mapping layer (port/vita/host/vita_controls.c,
 included whole): where the touch zones are, a rear finger counting only once
 held VITA_TOUCH_REAR_HOLD_US and a front one at once, a finger that starts
 outside every zone never counting, several fingers each on their own, the
-default layout (Xita's, as vita_pad.c had it), the touch zones' actions in
-play and not in the menus, the crouch toggle from a button and a zone, the
-buttons moved to other actions, and the settings read from the environment.
+default layout (Xita's, as vita_pad.c had it), the touch zones' Xbox
+buttons in play and not in the menus, the crouch toggle (the left stick's
+click) from a button and a zone, the Xbox buttons moved to other Vita
+buttons, and the settings read from the environment.
 
 Run port/vita/tests/run_vita_controls_test.sh.
 */
@@ -180,9 +181,9 @@ static void clear_environment(void)
 
 	for (index = 0; index < VITA_ZONE_COUNT; index++)
 		unsetenv(vita_touch_variables[index]);
-	for (index = 0; index < VITA_ACTION_COUNT; index++)
-		if (vita_button_variables[index])
-			unsetenv(vita_button_variables[index]);
+	for (index = 0; index < VITA_XBOX_COUNT; index++)
+		if (vita_xbox_variables[index])
+			unsetenv(vita_xbox_variables[index]);
 	unsetenv("HALO_CROUCH_TOGGLE");
 }
 
@@ -197,7 +198,7 @@ static void test_mapping(void)
 	vita_controls_config_load(&config);
 	memset(&state, 0, sizeof(state));
 	for (index = 0, zone = 0; index < VITA_ZONE_COUNT; index++)
-		zone |= config.zone_action[index] != VITA_ACTION_OFF;
+		zone |= config.zone_xbox[index] != VITA_XBOX_OFF;
 	check(!zone && config.crouch_toggle == 1, "defaults: every zone Off, crouch a toggle");
 
 	/* Xita's layout, in play */
@@ -223,7 +224,7 @@ static void test_mapping(void)
 	check(!out.digital, "play: pressed again: standing");
 
 	/* the menus: the fixed layout, touch ignored */
-	config.zone_action[VITA_ZONE_TOP_LEFT] = VITA_ACTION_JUMP;
+	config.zone_xbox[VITA_ZONE_TOP_LEFT] = VITA_XBOX_A;
 	out = map(&config, &state, VITA_BUTTON_UP | VITA_BUTTON_DOWN | VITA_BUTTON_CROSS, 0, 1);
 	check(out.digital == (VITA_PAD_DPAD_UP | VITA_PAD_DPAD_DOWN) && out.analog[0] == 255, "menus: D-pad and A");
 	out = map(&config, &state, 0, ZONE(VITA_ZONE_TOP_LEFT), 1);
@@ -231,48 +232,48 @@ static void test_mapping(void)
 	out = map(&config, &state, VITA_BUTTON_LEFT, 0, 1);
 	check(out.digital == VITA_PAD_DPAD_LEFT && !out.analog[4], "menus: D-pad left is the D-pad, not Black");
 
-	/* each action from a zone, in play */
+	/* each Xbox button from a zone, in play */
 	{
 		static const struct
 		{
-			int action;
+			int xbox;
 			unsigned long digital;
 			int analog;
 			const char *what;
 		} expected[] = {
-			{ VITA_ACTION_MELEE, 0, 1, "zone Melee: B" },
-			{ VITA_ACTION_GRENADE, 0, 6, "zone Throw grenade: left trigger" },
-			{ VITA_ACTION_FLASHLIGHT, 0, 5, "zone Flashlight: White" },
-			{ VITA_ACTION_ZOOM, VITA_PAD_RIGHT_THUMB, -1, "zone Zoom: right stick click" },
-			{ VITA_ACTION_RELOAD, 0, 2, "zone Reload/action: X" },
-			{ VITA_ACTION_SWITCH_WEAPON, 0, 3, "zone Switch weapon: Y" },
-			{ VITA_ACTION_SWITCH_GRENADE, 0, 4, "zone Switch grenade: Black" },
-			{ VITA_ACTION_JUMP, 0, 0, "zone Jump: A" },
-			{ VITA_ACTION_SCOREBOARD, VITA_PAD_BACK, -1, "zone Scoreboard: Back" },
-			{ VITA_ACTION_FIRE, 0, 7, "zone Fire: right trigger" },
+			{ VITA_XBOX_B, 0, 1, "zone B" },
+			{ VITA_XBOX_LEFT_TRIGGER, 0, 6, "zone Left trigger" },
+			{ VITA_XBOX_WHITE, 0, 5, "zone White" },
+			{ VITA_XBOX_RIGHT_STICK, VITA_PAD_RIGHT_THUMB, -1, "zone Right stick: its click" },
+			{ VITA_XBOX_X, 0, 2, "zone X" },
+			{ VITA_XBOX_Y, 0, 3, "zone Y" },
+			{ VITA_XBOX_BLACK, 0, 4, "zone Black" },
+			{ VITA_XBOX_A, 0, 0, "zone A" },
+			{ VITA_XBOX_BACK, VITA_PAD_BACK, -1, "zone Back" },
+			{ VITA_XBOX_RIGHT_TRIGGER, 0, 7, "zone Right trigger" },
 		};
 
 		for (index = 0; index < (int)(sizeof(expected) / sizeof(expected[0])); index++)
 		{
 			int analog, others = 0;
 
-			config.zone_action[VITA_ZONE_REAR_RIGHT] = expected[index].action;
+			config.zone_xbox[VITA_ZONE_REAR_RIGHT] = expected[index].xbox;
 			out = map(&config, &state, 0, ZONE(VITA_ZONE_REAR_RIGHT), 0);
 			for (analog = 0; analog < 8; analog++)
 				others |= analog != expected[index].analog && out.analog[analog];
 			check(out.digital == expected[index].digital && !others &&
 				(expected[index].analog < 0 || out.analog[expected[index].analog] == 255), expected[index].what);
 		}
-		config.zone_action[VITA_ZONE_REAR_RIGHT] = VITA_ACTION_OFF;
+		config.zone_xbox[VITA_ZONE_REAR_RIGHT] = VITA_XBOX_OFF;
 		out = map(&config, &state, 0, ZONE(VITA_ZONE_REAR_RIGHT), 0);
 		check(!out.digital && !out.analog[0], "zone Off: nothing");
 	}
 	/* a zone and a button together, and a zone's crouch with the toggle
 	and held */
-	config.zone_action[VITA_ZONE_TOP_RIGHT] = VITA_ACTION_FLASHLIGHT;
+	config.zone_xbox[VITA_ZONE_TOP_RIGHT] = VITA_XBOX_WHITE;
 	out = map(&config, &state, VITA_BUTTON_R, ZONE(VITA_ZONE_TOP_RIGHT), 0);
 	check(out.analog[5] == 255 && out.analog[7] == 255, "zone with a button: both (OR)");
-	config.zone_action[VITA_ZONE_LEFT_EDGE] = VITA_ACTION_CROUCH;
+	config.zone_xbox[VITA_ZONE_LEFT_EDGE] = VITA_XBOX_LEFT_STICK;
 	memset(&state, 0, sizeof(state));
 	out = map(&config, &state, 0, ZONE(VITA_ZONE_LEFT_EDGE), 0);
 	check(out.digital == VITA_PAD_LEFT_THUMB, "zone Crouch (toggle): a touch crouches");
@@ -290,39 +291,47 @@ static void test_mapping(void)
 	check(!out.digital, "zone Crouch (hold): standing when lifted");
 
 	/* buttons moved */
-	setenv("HALO_BUTTON_JUMP", "circle", 1);
-	setenv("HALO_BUTTON_MELEE", "none", 1);
-	setenv("HALO_BUTTON_FLASHLIGHT", "triangle", 1);
-	setenv("HALO_BUTTON_WEAPON", "nonsense", 1);
-	setenv("HALO_TOUCH_REAR_LEFT", "melee", 1);
+	setenv("HALO_XBOX_A", "circle", 1);
+	setenv("HALO_XBOX_B", "none", 1);
+	setenv("HALO_XBOX_WHITE", "triangle", 1);
+	setenv("HALO_XBOX_Y", "nonsense", 1);
+	setenv("HALO_TOUCH_REAR_LEFT", "b", 1);
+	setenv("HALO_XBOX_BACK", "l", 1);
 	setenv("HALO_TOUCH_TOP_LEFT", "nonsense", 1);
 	setenv("HALO_CROUCH_TOGGLE", "0", 1);
 	vita_controls_config_load(&config);
-	check(config.action_button[VITA_ACTION_JUMP] == VITA_BUTTON_CIRCLE && !config.action_button[VITA_ACTION_MELEE] &&
-		config.action_button[VITA_ACTION_FLASHLIGHT] == VITA_BUTTON_TRIANGLE &&
-		config.action_button[VITA_ACTION_SWITCH_WEAPON] == VITA_BUTTON_TRIANGLE,
-		"settings: buttons moved; an unknown value keeps the shipped button");
-	check(config.zone_action[VITA_ZONE_REAR_LEFT] == VITA_ACTION_MELEE &&
-		config.zone_action[VITA_ZONE_TOP_LEFT] == VITA_ACTION_OFF && config.crouch_toggle == 0,
-		"settings: a zone's action; an unknown value is Off; crouch held");
+	check(config.xbox_button[VITA_XBOX_A] == VITA_BUTTON_CIRCLE && !config.xbox_button[VITA_XBOX_B] &&
+		config.xbox_button[VITA_XBOX_WHITE] == VITA_BUTTON_TRIANGLE &&
+		config.xbox_button[VITA_XBOX_Y] == VITA_BUTTON_TRIANGLE,
+		"settings: Xbox buttons moved; an unknown value keeps the shipped button");
+	check(config.zone_xbox[VITA_ZONE_REAR_LEFT] == VITA_XBOX_B &&
+		config.zone_xbox[VITA_ZONE_TOP_LEFT] == VITA_XBOX_OFF && config.crouch_toggle == 0,
+		"settings: a zone's Xbox button; an unknown value is Off; crouch held");
 	memset(&state, 0, sizeof(state));
 	out = map(&config, &state, VITA_BUTTON_CIRCLE, 0, 0);
-	check(out.analog[0] == 255 && !out.analog[1], "moved: Circle jumps, melee on no button");
+	check(out.analog[0] == 255 && !out.analog[1], "moved: Circle is A, B on no button");
 	out = map(&config, &state, VITA_BUTTON_CROSS, 0, 0);
 	check(!out.analog[0], "moved: Cross does nothing in play");
 	out = map(&config, &state, VITA_BUTTON_TRIANGLE, 0, 0);
-	check(out.analog[3] == 255 && out.analog[5] == 255, "moved: a button on two actions does both");
+	check(out.analog[3] == 255 && out.analog[5] == 255, "moved: a Vita button on two Xbox buttons presses both");
 	out = map(&config, &state, 0, ZONE(VITA_ZONE_REAR_LEFT), 0);
-	check(out.analog[1] == 255, "moved: melee from its zone");
+	check(out.analog[1] == 255, "moved: B from its zone");
+	out = map(&config, &state, VITA_BUTTON_L, 0, 0);
+	check(out.digital == VITA_PAD_BACK && out.analog[6] == 255, "moved: Back on L too (with the left trigger)");
+	out = map(&config, &state, VITA_BUTTON_SELECT, 0, 0);
+	check(!out.digital, "moved: Select no longer Back in play");
+	out = map(&config, &state, VITA_BUTTON_SELECT, 0, 1);
+	check(out.digital == VITA_PAD_BACK, "menus: Select stays Back");
 	out = map(&config, &state, VITA_BUTTON_CROSS | VITA_BUTTON_CIRCLE, 0, 1);
 	check(out.analog[0] == 255 && out.analog[1] == 255, "menus keep Cross A and Circle B whatever the buttons");
 	clear_environment();
 	vita_controls_config_load(&config);
-	check(config.action_button[VITA_ACTION_JUMP] == VITA_BUTTON_CROSS &&
-		config.action_button[VITA_ACTION_SCOREBOARD] == VITA_BUTTON_SELECT, "settings unset: shipped buttons");
-	check(vita_action_named("grenade_switch") == VITA_ACTION_SWITCH_GRENADE && vita_action_named(NULL) == 0,
-		"action names");
-	check(vita_button_named("right", 0) == VITA_BUTTON_RIGHT && vita_button_named("none", 7) == 0 &&
+	check(config.xbox_button[VITA_XBOX_A] == VITA_BUTTON_CROSS &&
+		config.xbox_button[VITA_XBOX_BACK] == VITA_BUTTON_SELECT, "settings unset: shipped buttons");
+	check(vita_xbox_named("black") == VITA_XBOX_BLACK && vita_xbox_named("rs") == VITA_XBOX_RIGHT_STICK &&
+		vita_xbox_named(NULL) == 0, "Xbox button names");
+	check(vita_button_named("right", 0) == VITA_BUTTON_RIGHT && vita_button_named("select", 0) == VITA_BUTTON_SELECT &&
+		vita_button_named("none", 7) == 0 &&
 		vita_button_named("x", 7) == 7, "button names");
 }
 

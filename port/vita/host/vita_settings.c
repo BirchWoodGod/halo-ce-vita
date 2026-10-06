@@ -26,10 +26,11 @@ The Profile row at the top of Graphics sets the speed-related rows at once
 those rows match none of them. Rows marked * apply after a restart (the
 sound voices, the network, most dev switches).
 
-Controls gives the touch zones actions (the front screen's top corners and
-its left and right edges, the rear pad's halves; vita_controls.c says where
-they are and when a finger counts) and puts each action in play on a button
-of the player's choosing; while a zone's row is chosen the panel draws the
+Controls is laid out as the Xbox controller: each touch zone (the front
+screen's top corners and its left and right edges, the rear pad's halves;
+vita_controls.c says where they are and when a finger counts) presses an
+Xbox button, and each Xbox button (A B X Y, Black, White, the triggers, the
+sticks' clicks, Back) is on a Vita button of the player's choosing, in play; while a zone's row is chosen the panel draws the
 zones beside the rows (touch_diagram). Reset controls puts the tab's rows
 back as shipped.
 
@@ -205,42 +206,45 @@ static struct setting settings[] = {
 	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
 		"Raise if the sticks drift", 0, TAB_CONTROLS },
 	{ "Crouch", "HALO_CROUCH_TOGGLE", 0, 2, { "1", "0" }, { "Toggle", "Hold" },
-		"A press of crouch crouches, the next stands (Toggle)", 0, TAB_CONTROLS },
-	/* (the touch zones, in vita_controls.h's order, and the buttons of the
-	actions in play: vita_controls.c) */
-	{ "Touch top left", "HALO_TOUCH_TOP_LEFT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+		"Left stick click: a press crouches, the next stands (Toggle)", 0, TAB_CONTROLS },
+	/* (the touch zones, in vita_controls.h's order: the Xbox button each
+	presses; then the Vita button of each Xbox button, in play:
+	vita_controls.c) */
+	{ "Touch top left", "HALO_TOUCH_TOP_LEFT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
 		"Front screen, top left corner: counts at once", 0, TAB_CONTROLS },
-	{ "Touch top right", "HALO_TOUCH_TOP_RIGHT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+	{ "Touch top right", "HALO_TOUCH_TOP_RIGHT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
 		"Front screen, top right corner: counts at once", 0, TAB_CONTROLS },
-	{ "Touch left edge", "HALO_TOUCH_LEFT_EDGE", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+	{ "Touch left edge", "HALO_TOUCH_LEFT_EDGE", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
 		"Front screen, left edge by the D-pad: counts at once", 0, TAB_CONTROLS },
-	{ "Touch right edge", "HALO_TOUCH_RIGHT_EDGE", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES },
-		{ VITA_ACTION_NAMES }, "Front screen, right edge by the buttons: counts at once", 0, TAB_CONTROLS },
-	{ "Rear touch left", "HALO_TOUCH_REAR_LEFT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES }, { VITA_ACTION_NAMES },
+	{ "Touch right edge", "HALO_TOUCH_RIGHT_EDGE", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Front screen, right edge by the buttons: counts at once", 0, TAB_CONTROLS },
+	{ "Rear touch left", "HALO_TOUCH_REAR_LEFT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
 		"Rear pad, left half: counts once held 0.1 s", 0, TAB_CONTROLS },
-	{ "Rear touch right", "HALO_TOUCH_REAR_RIGHT", 0, VITA_ACTION_COUNT, { VITA_ACTION_VALUES },
-		{ VITA_ACTION_NAMES }, "Rear pad, right half: counts once held 0.1 s", 0, TAB_CONTROLS },
-	{ "Fire button", "HALO_BUTTON_FIRE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"In play (menus keep their buttons)", 5, TAB_CONTROLS },
-	{ "Grenade button", "HALO_BUTTON_GRENADE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Throw a grenade, in play (menus keep their buttons)", 4, TAB_CONTROLS },
-	{ "Jump button", "HALO_BUTTON_JUMP", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"In play (menus keep their buttons)", 0, TAB_CONTROLS },
-	{ "Melee button", "HALO_BUTTON_MELEE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"In play (menus keep their buttons)", 1, TAB_CONTROLS },
-	{ "Reload button", "HALO_BUTTON_RELOAD", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Reload and action, in play (menus keep their buttons)", 2, TAB_CONTROLS },
-	{ "Switch weapon button", "HALO_BUTTON_WEAPON", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES },
-		{ VITA_BUTTON_NAMES }, "In play (menus keep their buttons)", 3, TAB_CONTROLS },
-	{ "Crouch button", "HALO_BUTTON_CROUCH", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"In play (menus keep their buttons)", 7, TAB_CONTROLS },
-	{ "Zoom button", "HALO_BUTTON_ZOOM", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"In play (menus keep their buttons)", 6, TAB_CONTROLS },
-	{ "Grenade type button", "HALO_BUTTON_GRENADE_SWITCH", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES },
-		{ VITA_BUTTON_NAMES }, "Switch grenades, in play (menus keep their buttons)", 8, TAB_CONTROLS },
-	{ "Flashlight button", "HALO_BUTTON_FLASHLIGHT", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES },
-		{ VITA_BUTTON_NAMES }, "In play (menus keep their buttons)", 9, TAB_CONTROLS },
-	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "This tab's rows as shipped (touch Off, Xita's buttons)", 0,
+	{ "Rear touch right", "HALO_TOUCH_REAR_RIGHT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Rear pad, right half: counts once held 0.1 s", 0, TAB_CONTROLS },
+	{ "A", "HALO_XBOX_A", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"A: jump (in the menus Cross stays A)", 0, TAB_CONTROLS },
+	{ "B", "HALO_XBOX_B", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"B: melee (in the menus Circle stays B)", 1, TAB_CONTROLS },
+	{ "X", "HALO_XBOX_X", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"X: reload, action (in play only)", 2, TAB_CONTROLS },
+	{ "Y", "HALO_XBOX_Y", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Y: switch weapon (in play only)", 3, TAB_CONTROLS },
+	{ "Black", "HALO_XBOX_BLACK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Black: switch grenades (in play only)", 8, TAB_CONTROLS },
+	{ "White", "HALO_XBOX_WHITE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"White: flashlight (in play only)", 9, TAB_CONTROLS },
+	{ "Left trigger", "HALO_XBOX_LEFT_TRIGGER", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Left trigger: throw a grenade (in play only)", 4, TAB_CONTROLS },
+	{ "Right trigger", "HALO_XBOX_RIGHT_TRIGGER", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Right trigger: fire (in play only)", 5, TAB_CONTROLS },
+	{ "Left stick click", "HALO_XBOX_LEFT_STICK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Left stick click: crouch (in play only)", 7, TAB_CONTROLS },
+	{ "Right stick click", "HALO_XBOX_RIGHT_STICK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Right stick click: zoom (in play only)", 6, TAB_CONTROLS },
+	{ "Back", "HALO_XBOX_BACK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"Back: scoreboard (in the menus Select stays Back)", 10, TAB_CONTROLS },
+	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "This tab's rows as shipped (touch Off, Xita's layout)", 0,
 		TAB_CONTROLS, KIND_ACTION, ACTION_RESET_CONTROLS },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, TAB_CONTROLS },
@@ -1260,28 +1264,31 @@ static int tab_bar(char *text, int size)
 }
 
 /* the touch zones' diagram (vita_gxm.c menu_build draws it): a line of
-'\x01' and a character per zone in vita_controls.h's order: S the row's
-zone (s while Off), A a zone set to an action, - one Off; nothing for a
-row that is not a zone's */
+'\x01', a character per zone in vita_controls.h's order (S the row's zone,
+s while Off, A a zone set to an Xbox button, - one Off), a space, and a
+character per zone for its Xbox button ('a' + the VITA_XBOX_* index);
+nothing for a row that is not a zone's */
 static void touch_diagram(char *text, int size, const struct setting *chosen)
 {
-	char zones[VITA_ZONE_COUNT + 1];
+	char zones[2 * VITA_ZONE_COUNT + 2];
 	int zone, is_zone = 0;
 
 	for (zone = 0; zone < VITA_ZONE_COUNT; zone++)
 	{
 		const struct setting *setting = setting_named(vita_touch_variables[zone]);
-		int on = setting && setting->choice != 0;
+		int choice = setting ? setting->choice : 0;
 
 		if (setting == chosen)
 		{
 			is_zone = 1;
-			zones[zone] = on ? 'S' : 's';
+			zones[zone] = choice ? 'S' : 's';
 		}
 		else
-			zones[zone] = on ? 'A' : '-';
+			zones[zone] = choice ? 'A' : '-';
+		zones[VITA_ZONE_COUNT + 1 + zone] = (char)('a' + (choice < VITA_XBOX_COUNT ? choice : 0));
 	}
-	zones[VITA_ZONE_COUNT] = 0;
+	zones[VITA_ZONE_COUNT] = ' ';
+	zones[2 * VITA_ZONE_COUNT + 1] = 0;
 	if (is_zone)
 		snprintf(text, (size_t)size, "\n\x01%s", zones);
 }
