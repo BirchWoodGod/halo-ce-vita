@@ -8,6 +8,15 @@ proprietary; ffmpeg converts it). The video frames come out in NV12 (a Y
 plane, then interleaved chroma, both 16-aligned) and are converted for the
 game's X8R8G8B8 movie texture; the sound goes to a BGM port from a thread
 of its own. One movie at a time, as the game plays them.
+
+Any size the decoder gives (up to 960x544, the Vita's own screen) is taken:
+the frame's rows are found apart by the width padded to 16, or - for a width
+that is not a multiple of 64, where the hardware decoder may pad further
+(an 848x480 copy showed black on the Vita while 640 and 960 wide ones
+played) - by what the picture says (vita_movie_detect_pitch), and the rows
+the decoder adds to fill its last 16-pixel macroblock (640x360 decodes to
+640x368) are cut by the picture size the file gives. bink_playback.c scales
+the picture to fit the screen at its display shape.
 */
 
 #include <psp2/audioout.h>
@@ -41,10 +50,38 @@ static struct
 	SceAvPlayerFrameInfo frame;
 	int frame_valid;
 	int frame_pending;
+	/* the picture's size, as the game is told it (the decoded frame less
+	the decoder's padding rows) */
 	unsigned long width, height;
 	/* the display shape (vita_movie_display_aspect) */
 	float aspect;
+	/* the bytes between two of the frame's luma rows, and whether that was
+	settled (vita_movie_copy) */
+	unsigned long pitch;
+	int pitch_settled;
+	unsigned int pitch_frames;
+	/* frames copied */
+	unsigned int copies;
 } movie;
+
+/* the decoder's frame memory (movie_allocate_frame): how much of it can be
+read from a frame's address on */
+#define MAXIMUM_FRAME_BLOCKS 32
+static struct
+{
+	unsigned long base, size;
+} frame_blocks[MAXIMUM_FRAME_BLOCKS];
+
+static unsigned long frame_room(const void *address)
+{
+	unsigned long index;
+
+	for (index = 0; index < MAXIMUM_FRAME_BLOCKS; index++)
+		if (frame_blocks[index].size && (unsigned long)address >= frame_blocks[index].base &&
+			(unsigned long)address < frame_blocks[index].base + frame_blocks[index].size)
+			return frame_blocks[index].base + frame_blocks[index].size - (unsigned long)address;
+	return 0;
+}
 
 /* ---------- the player's memory */
 
@@ -71,11 +108,12 @@ static void *movie_allocate_frame(void *argument, uint32_t alignment, uint32_t s
 	SceKernelAllocMemBlockOpt options;
 	SceUID block;
 	void *base = NULL;
+	unsigned long allocated = ALIGN(size, 0x100000);
 	char message[128];
 
 	(void)argument;
 	if (alignment <= 0x100000)
-		block = sceKernelAllocMemBlock("movie frame", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, ALIGN(size, 0x100000), NULL);
+		block = sceKernelAllocMemBlock("movie frame", SCE_KERNEL_MEMBLOCK_TYPE_USER_MAIN_PHYCONT_NC_RW, allocated, NULL);
 	else
 		block = -1;
 	if (block < 0)
@@ -88,7 +126,8 @@ static void *movie_allocate_frame(void *argument, uint32_t alignment, uint32_t s
 		options.size = sizeof(options);
 		options.attr = SCE_KERNEL_ALLOC_MEMBLOCK_ATTR_HAS_ALIGNMENT;
 		options.alignment = alignment;
-		block = sceKernelAllocMemBlock("movie frame", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, ALIGN(size, alignment), &options);
+		allocated = ALIGN(size, alignment);
+		block = sceKernelAllocMemBlock("movie frame", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, allocated, &options);
 		snprintf(message, sizeof(message), "movie: a %u byte frame in video memory (contiguous main memory: 0x%08x): 0x%08x",
 			(unsigned)size, (unsigned)first, (unsigned)block);
 		vita_host_log(message);
@@ -96,6 +135,17 @@ static void *movie_allocate_frame(void *argument, uint32_t alignment, uint32_t s
 	if (block < 0)
 		return NULL;
 	sceKernelGetMemBlockBase(block, &base);
+	{
+		unsigned long index;
+
+		for (index = 0; index < MAXIMUM_FRAME_BLOCKS; index++)
+			if (!frame_blocks[index].size)
+			{
+				frame_blocks[index].base = (unsigned long)base;
+				frame_blocks[index].size = allocated;
+				break;
+			}
+	}
 	return base;
 }
 
@@ -104,6 +154,13 @@ static void movie_free_frame(void *argument, void *pointer)
 	SceUID block;
 
 	(void)argument;
+	{
+		unsigned long index;
+
+		for (index = 0; index < MAXIMUM_FRAME_BLOCKS; index++)
+			if (frame_blocks[index].base == (unsigned long)pointer)
+				frame_blocks[index].size = 0;
+	}
 	block = sceKernelFindMemBlockByAddr(pointer, 0);
 	if (block >= 0)
 		sceKernelFreeMemBlock(block);
@@ -229,6 +286,17 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 	}
 	movie.width = movie.frame_valid ? movie.frame.details.video.width : 640;
 	movie.height = movie.frame_valid ? movie.frame.details.video.height : 480;
+	movie.pitch = ALIGN(movie.width, 16);
+	/* (a width that is a multiple of 64 is known to come as assumed: 640
+	and 960 wide movies played on the Vita) */
+	movie.pitch_settled = !movie.frame_valid || movie.width % 64 == 0;
+	{
+		/* the decoder's padding rows off (640x360 decodes to 640x368) */
+		unsigned long picture_width, picture_height;
+
+		if (vita_movie_file_picture_size(path, &picture_width, &picture_height))
+			vita_movie_visible_size(movie.width, movie.height, picture_width, picture_height, &movie.width, &movie.height);
+	}
 	*width = movie.width;
 	*height = movie.height;
 	{
@@ -262,8 +330,13 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 				source = "HALO_MOVIE_ASPECT";
 			}
 		}
-		snprintf(message, sizeof(message), "movie: playing %s (%lux%lu%s), shown at %.3f:1 (from %s)", path, movie.width,
-			movie.height, movie.frame_valid ? "" : ", no frame yet", (double)movie.aspect, source);
+		char decoded[48] = "";
+
+		if (movie.frame_valid && (movie.width != movie.frame.details.video.width || movie.height != movie.frame.details.video.height))
+			snprintf(decoded, sizeof(decoded), ", decoded as %ux%u", (unsigned)movie.frame.details.video.width,
+				(unsigned)movie.frame.details.video.height);
+		snprintf(message, sizeof(message), "movie: playing %s (%lux%lu%s%s), shown at %.3f:1 (from %s)", path, movie.width,
+			movie.height, decoded, movie.frame_valid ? "" : ", no frame yet", (double)movie.aspect, source);
 	}
 	vita_host_log(message);
 	return 0;
@@ -301,8 +374,11 @@ static unsigned char clamp_byte(int value)
 /* the waiting frame into rows of X8R8G8B8 (BT.601, limited range) */
 void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigned long height)
 {
-	const unsigned char *luma, *chroma;
-	unsigned long stride, aligned_height, x, y;
+	const unsigned char *luma, *chroma, *block_chroma;
+	unsigned long stride, aligned_height, frame_width, room, block, x, y;
+	/* (the cached copy of 16 rows, vita_movie_copy) */
+	static unsigned char *cached;
+	static unsigned long cached_size;
 
 	unsigned long long copy_from = vita_host_time_us();
 
@@ -310,8 +386,9 @@ void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigne
 		return;
 	movie.frame_pending = 0;
 	{
-		/* (debug) HALO_MOVIE_DUMP=n: the n-th frame's raw NV12 and the
-		converted rows to ux0:data/haloce-vita/movie_*.raw */
+		/* (debug) HALO_MOVIE_DUMP=n: the n-th frame's raw NV12 (all of the
+		decoder's memory from the frame on, up to 4 MB) and the converted
+		rows to ux0:data/haloce-vita/movie_*.raw */
 		static int dump_at = -2, copies;
 
 		if (dump_at == -2)
@@ -325,7 +402,11 @@ void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigne
 
 			if (file)
 			{
-				fwrite(movie.frame.pData, 1, ALIGN(movie.frame.details.video.width, 16) * ALIGN(movie.frame.details.video.height, 16) * 3 / 2, file);
+				unsigned long bytes = frame_room(movie.frame.pData);
+
+				if (!bytes)
+					bytes = movie.pitch * ALIGN(movie.frame.details.video.height, 16) * 3 / 2;
+				fwrite(movie.frame.pData, 1, bytes < 0x400000 ? bytes : 0x400000, file);
 				fclose(file);
 			}
 			dump_pending = 1;
@@ -342,97 +423,154 @@ void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigne
 			setting_read = 1;
 		}
 	}
-	stride = ALIGN(movie.frame.details.video.width, 16);
+	frame_width = movie.frame.details.video.width;
 	aligned_height = ALIGN(movie.frame.details.video.height, 16);
+	room = frame_room(movie.frame.pData);
+	if (!movie.pitch_settled)
 	{
-		/* the decoder's frame is uncached memory: read once in bulk into a
-		cached copy (byte loads from it cost ~50 ms a frame) */
-		static unsigned char *cached;
-		static unsigned long cached_size;
-		unsigned long frame_size = stride * aligned_height * 3 / 2;
+		/* (see the top: a width not a multiple of 64 has its row pitch
+		found from the picture, once there is one to tell by) */
+		int decided;
+		unsigned long assumed = ALIGN(frame_width, 16);
+		unsigned long found = vita_movie_detect_pitch(movie.frame.pData, room ? room : assumed * aligned_height * 3 / 2,
+			frame_width, movie.frame.details.video.height, &decided);
+		char message[160];
 
-		if (frame_size > cached_size)
+		if (decided || ++movie.pitch_frames >= 300)
 		{
-			free(cached);
-			cached = memalign(64, frame_size);
-			cached_size = cached ? frame_size : 0;
+			movie.pitch = found;
+			movie.pitch_settled = 1;
+			snprintf(message, sizeof(message), "movie: the decoder's rows are %lu bytes apart (%s; %lu bytes of frame memory)",
+				found, !decided ? "assumed: no picture to tell by" : found == assumed ? "as assumed" : "found from the picture",
+				room);
+			vita_host_log(message);
 		}
-		if (cached)
-		{
-			memcpy(cached, movie.frame.pData, frame_size);
-			luma = cached;
-		}
-		else
-			luma = movie.frame.pData;
 	}
-	chroma = luma + stride * aligned_height;
-	if (width > movie.frame.details.video.width)
-		width = movie.frame.details.video.width;
+	stride = movie.pitch;
+	/* (never past the decoder's memory) */
+	if (room && stride * aligned_height * 3 / 2 > room)
+		stride = ALIGN(frame_width, 16);
+	if (width > frame_width)
+		width = frame_width;
 	if (width > 2048)
 		width = 2048;
 	if (height > movie.frame.details.video.height)
 		height = movie.frame.details.video.height;
-	for (y = 0; y < height; y++)
 	{
-		const unsigned char *luma_row = luma + y * stride;
-		const unsigned char *chroma_row = chroma + (y / 2) * stride;
-		/* (built in a cached row, then copied: the destination is the
-		game's write-combined frame buffer) */
-		static uint32_t row_buffer[2048];
-		uint32_t *row = row_buffered ? row_buffer : (uint32_t *)((unsigned char *)destination + y * pitch);
+		/* (the log) the first and the 90th frame's luma: a decoder giving
+		empty frames shows as one value */
+		if (movie.copies == 0 || movie.copies == 89)
+		{
+			const unsigned char *frame = movie.frame.pData;
+			unsigned int low = 255, high = 0, sum = 0, count = 0;
+			char message[128];
 
-		x = 0;
+			for (y = 0; y < height; y += height / 8 ? height / 8 : 1)
+				for (x = 0; x < width; x += 16)
+				{
+					unsigned int value = frame[y * stride + x];
+
+					low = value < low ? value : low;
+					high = value > high ? value : high;
+					sum += value;
+					count++;
+				}
+			snprintf(message, sizeof(message), "movie: frame %u luma %u..%u (mean %u), %lux%lu from %ux%u rows %lu apart",
+				movie.copies + 1, low, high, count ? sum / count : 0, width, height, (unsigned)frame_width,
+				(unsigned)movie.frame.details.video.height, stride);
+			vita_host_log(message);
+		}
+		movie.copies++;
+	}
+	/* the decoder's frame is uncached memory: read in bulk into a cached
+	copy (byte loads from it cost ~50 ms a frame), 16 rows at a time so the
+	copy stays in the cache while it is converted (a whole 848x480 frame
+	is more than the 512 KB L2) */
+	if (16 * stride > cached_size)
+	{
+		free(cached);
+		cached = memalign(64, 16 * stride * 3 / 2);
+		cached_size = cached ? 16 * stride : 0;
+	}
+	chroma = (const unsigned char *)movie.frame.pData + stride * aligned_height;
+	for (block = 0; block < height; block += 16)
+	{
+		unsigned long rows = height - block < 16 ? height - block : 16;
+
+		if (cached)
+		{
+			memcpy(cached, (const unsigned char *)movie.frame.pData + block * stride, rows * stride);
+			memcpy(cached + 16 * stride, chroma + (block / 2) * stride, ((rows + 1) / 2) * stride);
+			luma = cached;
+			block_chroma = cached + 16 * stride;
+		}
+		else
+		{
+			luma = (const unsigned char *)movie.frame.pData + block * stride;
+			block_chroma = chroma + (block / 2) * stride;
+		}
+		for (y = block; y < block + rows; y++)
+		{
+			const unsigned char *luma_row = luma + (y - block) * stride;
+			const unsigned char *chroma_row = block_chroma + ((y - block) / 2) * stride;
+			/* (built in a cached row, then copied: the destination is the
+			game's write-combined frame buffer) */
+			static uint32_t row_buffer[2048];
+			uint32_t *row = row_buffered ? row_buffer : (uint32_t *)((unsigned char *)destination + y * pitch);
+
+			x = 0;
 #ifdef __ARM_NEON
-		/* 16 pixels at a time (the scalar loop below, in 6-bit fixed point
-		with saturation): ~4x faster, the conversion was ~20 ms a frame and
-		held the movies to 26 fps */
-		for (; x + 16 <= width; x += 16)
-		{
-			uint8x8x2_t uv = vld2_u8(chroma_row + x);
-			uint8x8x2_t luma_pair = vld2_u8(luma_row + x);
-			int16x8_t u = vreinterpretq_s16_u16(vsubl_u8(uv.val[0], vdup_n_u8(128)));
-			int16x8_t v = vreinterpretq_s16_u16(vsubl_u8(uv.val[1], vdup_n_u8(128)));
-			int16x8_t red_part = vmulq_n_s16(v, 102);
-			int16x8_t green_part = vmlaq_n_s16(vmulq_n_s16(u, -25), v, -52);
-			int16x8_t blue_part = vmulq_n_s16(u, 129);
-			uint8x8_t red[2], green[2], blue[2];
-			uint8x16x4_t pixels;
-			uint8x8x2_t zipped;
-			int half;
-
-			for (half = 0; half < 2; half++)
+			/* 16 pixels at a time (the scalar loop below, in 6-bit fixed point
+			with saturation): ~4x faster, the conversion was ~20 ms a frame and
+			held the movies to 26 fps */
+			for (; x + 16 <= width; x += 16)
 			{
-				int16x8_t lum = vmulq_n_s16(vreinterpretq_s16_u16(vsubl_u8(luma_pair.val[half], vdup_n_u8(16))), 74);
+				uint8x8x2_t uv = vld2_u8(chroma_row + x);
+				uint8x8x2_t luma_pair = vld2_u8(luma_row + x);
+				int16x8_t u = vreinterpretq_s16_u16(vsubl_u8(uv.val[0], vdup_n_u8(128)));
+				int16x8_t v = vreinterpretq_s16_u16(vsubl_u8(uv.val[1], vdup_n_u8(128)));
+				int16x8_t red_part = vmulq_n_s16(v, 102);
+				int16x8_t green_part = vmlaq_n_s16(vmulq_n_s16(u, -25), v, -52);
+				int16x8_t blue_part = vmulq_n_s16(u, 129);
+				uint8x8_t red[2], green[2], blue[2];
+				uint8x16x4_t pixels;
+				uint8x8x2_t zipped;
+				int half;
 
-				red[half] = vqrshrun_n_s16(vqaddq_s16(lum, red_part), 6);
-				green[half] = vqrshrun_n_s16(vqaddq_s16(lum, green_part), 6);
-				blue[half] = vqrshrun_n_s16(vqaddq_s16(lum, blue_part), 6);
+				for (half = 0; half < 2; half++)
+				{
+					int16x8_t lum = vmulq_n_s16(vreinterpretq_s16_u16(vsubl_u8(luma_pair.val[half], vdup_n_u8(16))), 74);
+
+					red[half] = vqrshrun_n_s16(vqaddq_s16(lum, red_part), 6);
+					green[half] = vqrshrun_n_s16(vqaddq_s16(lum, green_part), 6);
+					blue[half] = vqrshrun_n_s16(vqaddq_s16(lum, blue_part), 6);
+				}
+				/* (even and odd pixels back in order; bytes B G R A) */
+				zipped = vzip_u8(blue[0], blue[1]);
+				pixels.val[0] = vcombine_u8(zipped.val[0], zipped.val[1]);
+				zipped = vzip_u8(green[0], green[1]);
+				pixels.val[1] = vcombine_u8(zipped.val[0], zipped.val[1]);
+				zipped = vzip_u8(red[0], red[1]);
+				pixels.val[2] = vcombine_u8(zipped.val[0], zipped.val[1]);
+				pixels.val[3] = vdupq_n_u8(0xff);
+				vst4q_u8((uint8_t *)(row + x), pixels);
 			}
-			/* (even and odd pixels back in order; bytes B G R A) */
-			zipped = vzip_u8(blue[0], blue[1]);
-			pixels.val[0] = vcombine_u8(zipped.val[0], zipped.val[1]);
-			zipped = vzip_u8(green[0], green[1]);
-			pixels.val[1] = vcombine_u8(zipped.val[0], zipped.val[1]);
-			zipped = vzip_u8(red[0], red[1]);
-			pixels.val[2] = vcombine_u8(zipped.val[0], zipped.val[1]);
-			pixels.val[3] = vdupq_n_u8(0xff);
-			vst4q_u8((uint8_t *)(row + x), pixels);
-		}
 #endif
-		for (; x < width; x += 2)
-		{
-			/* (NV12: U then V per 2x2 block) */
-			int u = chroma_row[x] - 128, v = chroma_row[x + 1] - 128;
-			int red = 409 * v + 128, green = -100 * u - 208 * v + 128, blue = 516 * u + 128;
-			int y0 = 298 * (luma_row[x] - 16), y1 = 298 * (luma_row[x + 1] - 16);
+			for (; x < width; x += 2)
+			{
+				/* (NV12: U then V per 2x2 block) */
+				int u = chroma_row[x] - 128, v = chroma_row[x + 1] - 128;
+				int red = 409 * v + 128, green = -100 * u - 208 * v + 128, blue = 516 * u + 128;
+				int y0 = 298 * (luma_row[x] - 16), y1 = 298 * (luma_row[x + 1] - 16);
 
-			row[x] = 0xff000000u | (uint32_t)clamp_byte((y0 + red) >> 8) << 16 |
-				(uint32_t)clamp_byte((y0 + green) >> 8) << 8 | clamp_byte((y0 + blue) >> 8);
-			row[x + 1] = 0xff000000u | (uint32_t)clamp_byte((y1 + red) >> 8) << 16 |
-				(uint32_t)clamp_byte((y1 + green) >> 8) << 8 | clamp_byte((y1 + blue) >> 8);
+				row[x] = 0xff000000u | (uint32_t)clamp_byte((y0 + red) >> 8) << 16 |
+					(uint32_t)clamp_byte((y0 + green) >> 8) << 8 | clamp_byte((y0 + blue) >> 8);
+				row[x + 1] = 0xff000000u | (uint32_t)clamp_byte((y1 + red) >> 8) << 16 |
+					(uint32_t)clamp_byte((y1 + green) >> 8) << 8 | clamp_byte((y1 + blue) >> 8);
+			}
+			if (row_buffered)
+				memcpy((unsigned char *)destination + y * pitch, row, width * 4);
 		}
-		if (row_buffered)
-			memcpy((unsigned char *)destination + y * pitch, row, width * 4);
 	}
 	{
 		static unsigned int timed;

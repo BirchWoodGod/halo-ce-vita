@@ -6,10 +6,12 @@ stream.
 
 The game plays everything through DirectSound streams: 16-bit stereo PCM
 (music and other uncompressed sounds) and Xbox ADPCM, mono or stereo, at 22
-or 44 kHz. A packet is decoded to 16-bit PCM when the game submits it, since
-the sound cache may reuse its memory once the packet completes. The mixer
-runs on SDL's audio thread; for every voice it resamples to the output rate
-(which is how SetFrequency changes pitch) and applies:
+or 44 kHz. A packet is decoded to 16-bit PCM by the mixer as it plays it
+(ADPCM a 64-sample block at a time, as far as each mix reaches), before it
+completes: the sound cache may reuse its memory once it has. The mixer runs
+on SDL's audio thread; for every voice it resamples to the output rate
+(which is how SetFrequency changes pitch: linear interpolation, in fixed
+point positions and with NEON where there is one) and applies:
 	- the stream volume (millibels),
 	- the front left and right mix bin volumes of 2D voices,
 	- for 3D voices, DirectSound's inverse distance rolloff between the
@@ -36,6 +38,7 @@ skips opening a device (port_config.c).
 
 #include <SDL3/SDL.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +46,9 @@ skips opening a device (port_config.c).
 #include <unistd.h>
 #ifdef HALO_VITA
 #include "vita_compat.h"
+#endif
+#ifdef __ARM_NEON
+#include <arm_neon.h>
 #endif
 
 #define OUTPUT_RATE 48000
@@ -62,6 +68,7 @@ struct voice_packet
 	unsigned long frames;
 	BOOL finished;            /* played out by the mixer, not yet completed */
 	BOOL decoded;             /* samples made from packet.pvBuffer (mix_voice_packet) */
+	unsigned long decoded_frames; /* the frames decoded so far (ADPCM: as the mixer reaches them) */
 };
 
 struct sdl_stream
@@ -155,9 +162,7 @@ static const int ima_step_table[89] =
 
 /* IMA ADPCM expansion from tables: the difference a nibble makes at each
 step index and the step index it leads to, worked out once at start-up
-with the same integer arithmetic a nibble-by-nibble expansion does (a whole
-packet is decoded on the game's thread when it is queued: on the Vita, the
-tick's) */
+with the same integer arithmetic a nibble-by-nibble expansion does */
 static int ima_difference_table[89][16];
 static unsigned char ima_next_index_table[89][16];
 static int ima_tables_built;
@@ -211,24 +216,19 @@ a made-up one ended it, a click every 64 samples (689 times a second for a
 (issue #6). HALO_ADPCM_LEGACY=1 decodes as before, for comparison. */
 static int adpcm_legacy = -1;
 
-static short *decode_adpcm(const unsigned char *source, unsigned long size, unsigned long channels,
-	unsigned long *frame_count)
+/* blocks [first, end) of an Xbox ADPCM packet into samples (the whole
+packet's interleaved 16-bit frames) */
+static void decode_adpcm_blocks(const unsigned char *source, unsigned long channels, short *samples, unsigned long first,
+	unsigned long end)
 {
 	unsigned long block_bytes = XBOX_ADPCM_BLOCK_BYTES * channels;
-	unsigned long blocks = size / block_bytes;
-	short *samples = malloc((blocks ? blocks : 1) * XBOX_ADPCM_BLOCK_SAMPLES * channels * sizeof(short));
 	unsigned long block, channel;
 
-	if (!samples)
-	{
-		*frame_count = 0;
-		return NULL;
-	}
 	if (!ima_tables_built)
 		ima_build_tables();
 	if (adpcm_legacy < 0)
 		adpcm_legacy = getenv("HALO_ADPCM_LEGACY") && atoi(getenv("HALO_ADPCM_LEGACY"));
-	for (block = 0; block < blocks; block++)
+	for (block = first; block < end; block++)
 	{
 		const unsigned char *data = source + block * block_bytes;
 		short *output = samples + block * XBOX_ADPCM_BLOCK_SAMPLES * channels;
@@ -241,7 +241,7 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 			unsigned long group, byte;
 			/* the sample the next nibble decodes to (the header's is the
 			first) */
-			unsigned long first = adpcm_legacy ? 0 : 1;
+			unsigned long first_sample = adpcm_legacy ? 0 : 1;
 
 			if (!adpcm_legacy)
 				output[channel] = (short)predictor;
@@ -251,7 +251,7 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 
 				for (byte = 0; byte < 4; byte++)
 				{
-					unsigned long sample = group * 8 + byte * 2 + first;
+					unsigned long sample = group * 8 + byte * 2 + first_sample;
 
 					output[sample * channels + channel] = (short)ima_expand_fast(nibbles[byte] & 0xf, &predictor, &index);
 					/* (the last nibble, padding, is not played) */
@@ -261,8 +261,6 @@ static short *decode_adpcm(const unsigned char *source, unsigned long size, unsi
 			}
 		}
 	}
-	*frame_count = blocks * XBOX_ADPCM_BLOCK_SAMPLES;
-	return samples;
 }
 
 static short *decode_pcm(const unsigned char *source, unsigned long size, unsigned long channels,
@@ -367,11 +365,42 @@ static void voice_packet_decode(const struct sdl_stream *stream, struct voice_pa
 {
 	unsigned long frames = 0;
 
-	packet->samples = stream->adpcm ?
-		decode_adpcm(packet->packet.pvBuffer, packet->packet.dwMaxSize, stream->channels, &frames) :
-		decode_pcm(packet->packet.pvBuffer, packet->packet.dwMaxSize, stream->channels, &frames);
+	if (stream->adpcm)
+	{
+		/* (the samples' memory now, the blocks as the mixer reaches them:
+		voice_packet_decoded) */
+		unsigned long blocks = packet->packet.dwMaxSize / (XBOX_ADPCM_BLOCK_BYTES * stream->channels);
+
+		frames = blocks * XBOX_ADPCM_BLOCK_SAMPLES;
+		packet->samples = malloc((blocks ? blocks : 1) * XBOX_ADPCM_BLOCK_SAMPLES * stream->channels * sizeof(short));
+		packet->decoded_frames = 0;
+	}
+	else
+	{
+		packet->samples = decode_pcm(packet->packet.pvBuffer, packet->packet.dwMaxSize, stream->channels, &frames);
+		packet->decoded_frames = frames;
+	}
 	packet->frames = packet->samples ? frames : 0;
 	packet->decoded = TRUE;
+}
+
+/* an ADPCM packet decoded through frame end at least (whole blocks, each
+block being independent of the others): a packet is decoded as it plays,
+spread over the mixes rather than all at the first (a long sound's whole
+packet was a spike in one mix, and a voice stopped early had decoded what
+it never played). The samples are the same */
+static void voice_packet_decoded(const struct sdl_stream *stream, struct voice_packet *packet, unsigned long end)
+{
+	unsigned long first, last;
+
+	if (end > packet->frames)
+		end = packet->frames;
+	if (end <= packet->decoded_frames)
+		return;
+	first = packet->decoded_frames / XBOX_ADPCM_BLOCK_SAMPLES;
+	last = (end + XBOX_ADPCM_BLOCK_SAMPLES - 1) / XBOX_ADPCM_BLOCK_SAMPLES;
+	decode_adpcm_blocks(packet->packet.pvBuffer, stream->channels, packet->samples, first, last);
+	packet->decoded_frames = last * XBOX_ADPCM_BLOCK_SAMPLES;
 }
 
 static struct voice_packet *mix_voice_packet(struct sdl_stream *stream)
@@ -402,6 +431,7 @@ static struct voice_packet *mix_voice_packet(struct sdl_stream *stream)
 		{
 			unsigned long last = packet->frames - 1;
 
+			voice_packet_decoded(stream, packet, packet->frames);
 			stream->previous[0] = packet_sample(packet, last, 0, stream->channels);
 			stream->previous[1] = packet_sample(packet, last, stream->channels - 1, stream->channels);
 		}
@@ -409,51 +439,56 @@ static struct voice_packet *mix_voice_packet(struct sdl_stream *stream)
 	}
 }
 
-/* the per-frame positions of a run of frames: the cursor before each
-frame, its whole part and its fraction (mix_voice; one mixer runs at a
-time) */
-#define RUN_FRAMES 2048
-static double run_cursors[RUN_FRAMES + 1];
-static unsigned long run_indices[RUN_FRAMES];
-static float run_fractions[RUN_FRAMES];
+/* a voice's parameters for one mix, read under parameter_lock (mix_voice) */
+struct voice_mix_parameters
+{
+	BOOL playing;
+	double step;
+	float target_left, target_right;
+};
+
+static void voice_mix_parameters(struct sdl_stream *stream, struct voice_mix_parameters *parameters)
+{
+	parameters->playing = FALSE;
+	if (!stream->packet_count || !stream->sample_rate)
+		return;
+	pthread_mutex_lock(&parameter_lock);
+	if (!stream->paused)
+	{
+		parameters->playing = TRUE;
+		parameters->step = (double)(stream->frequency ? stream->frequency : stream->sample_rate) / OUTPUT_RATE;
+		voice_gains(stream, &parameters->target_left, &parameters->target_right);
+	}
+	pthread_mutex_unlock(&parameter_lock);
+}
 
 /* the mix buffers are float arrays: telling the compiler so lets the Vita
 build (-fmax-type-align=1 takes nothing as aligned) load and store them
 straight from floating point registers instead of through integer ones */
 typedef float aligned_float __attribute__((aligned(4)));
 
-/* mixes one voice into output (frames of stereo float).
+/* the per-frame positions of a run of frames: the cursor before each
+frame, its whole part and its fraction (mix_voice_reference; one mixer runs
+at a time) */
+#define RUN_FRAMES 2048
+static double run_cursors[RUN_FRAMES + 1];
+static unsigned long run_indices[RUN_FRAMES];
+static float run_fractions[RUN_FRAMES];
 
-The packet a frame reads from only changes once the cursor passes its end,
-so it is looked up again only then rather than for every frame (on the
-Vita the mixer's speed is the tick's too: the game's sound calls wait for
-it). And the frame loop is split in two: the cursor's positions for the
-run first, all in floating point, then the samples, with whole numbers.
-A Cortex-A9 (the Vita) stalls its pipeline for every move from a floating
-point register to an integer one, which the sample address and the
-end-of-packet test each needed per frame; as positions are worked out the
-same way and in the same order (a frame is inside the packet exactly when
-the cursor's whole part is, the packet's length being whole), the output
-is identical. */
-static void mix_voice(struct sdl_stream *stream, float *mix_output, unsigned long frames)
+/* the mixer as it was before 1.0.5 (double cursor per frame, scalar),
+kept as the reference HALO_AUDIO_VERIFY compares mix_voice with */
+static void mix_voice_reference(struct sdl_stream *stream, const struct voice_mix_parameters *parameters,
+	float *mix_output, unsigned long frames)
 {
 	aligned_float *output = (aligned_float *)mix_output;
 	const aligned_float *fractions = (const aligned_float *)run_fractions;
-	double step;
-	float target_left, target_right, left, right, ramp_left, ramp_right;
+	double step = parameters->step;
+	float target_left = parameters->target_left, target_right = parameters->target_right;
+	float left, right, ramp_left, ramp_right;
 	unsigned long frame;
 
-	if (!stream->packet_count || !stream->sample_rate)
+	if (!parameters->playing)
 		return;
-	pthread_mutex_lock(&parameter_lock);
-	if (stream->paused)
-	{
-		pthread_mutex_unlock(&parameter_lock);
-		return;
-	}
-	step = (double)(stream->frequency ? stream->frequency : stream->sample_rate) / OUTPUT_RATE;
-	voice_gains(stream, &target_left, &target_right);
-	pthread_mutex_unlock(&parameter_lock);
 	if (!stream->gains_valid)
 	{
 		stream->current_left = target_left;
@@ -493,6 +528,8 @@ static void mix_voice(struct sdl_stream *stream, float *mix_output, unsigned lon
 				cursor += step;
 			}
 			run_cursors[run] = cursor;
+			/* (the frames this run can reach, and the next) */
+			voice_packet_decoded(stream, packet, (unsigned long)cursor + 2);
 		}
 		if (stream->channels == 1)
 		{
@@ -506,7 +543,6 @@ static void mix_voice(struct sdl_stream *stream, float *mix_output, unsigned lon
 				a0 = samples[index] * (1.0f / 32768.0f);
 				b0 = index < last ? samples[index + 1] * (1.0f / 32768.0f) : a0;
 				sample_left = a0 + (b0 - a0) * fractions[k];
-				/* a mono voice's mix bins or pan split it across the speakers */
 				output[(frame + k) * 2] += sample_left * left;
 				output[(frame + k) * 2 + 1] += sample_left * right;
 				left += ramp_left;
@@ -549,6 +585,202 @@ static void mix_voice(struct sdl_stream *stream, float *mix_output, unsigned lon
 	stream->current_right = target_right;
 }
 
+/* one run of a voice inside one packet: up to run frames of output from
+position (the packet frame, in 32.32 fixed point) on, stepping step a frame,
+until a frame's sample index is past the packet; returns the frames mixed.
+Each frame is the sample at its index linearly interpolated towards the
+next by its fraction (the packet's last sample is held), times the gains,
+which ramp by ramp_* a frame, as mix_voice_reference does.
+
+Positions are whole numbers: the index is the position's high word and the
+fraction its low word, converted to a float as the reference rounds its
+double's fraction, so no floating point value is ever moved to an integer
+register (on the Vita's Cortex-A9 each such move stalls the pipeline, and
+the reference made one a frame). With NEON, four frames at a time: the
+samples are gathered by lane loads (a mono frame's two, a stereo frame's
+four in one load) and interpolated, scaled and added in vectors; the
+gains of the four lanes step by four ramps at once, which may round them
+differently from the reference's one at a time in their last bit. */
+static unsigned long mix_run(const short *samples, unsigned long packet_frames, BOOL mono, uint64_t position,
+	uint64_t step, aligned_float *output, unsigned long run, float *left_gain, float *right_gain, float ramp_left,
+	float ramp_right)
+{
+	unsigned long k = 0, last = packet_frames - 1;
+	float left = *left_gain, right = *right_gain;
+
+#ifdef __ARM_NEON
+	if (run >= 4 && (position + 3 * step) >> 32 < last)
+	{
+		uint32_t fraction = (uint32_t)position, fraction_step = (uint32_t)step;
+		uint32_t fraction_lanes[4] = { fraction, fraction + fraction_step, fraction + 2 * fraction_step,
+			fraction + 3 * fraction_step };
+		float left_lanes[4], right_lanes[4];
+		uint32x4_t fractions = vld1q_u32(fraction_lanes);
+		uint32x4_t fraction_step4 = vdupq_n_u32(4 * fraction_step);
+		float32x4_t lefts, rights, left_step4 = vdupq_n_f32(4.0f * ramp_left), right_step4 = vdupq_n_f32(4.0f * ramp_right);
+		uint64_t step2 = 2 * step, step4 = 4 * step;
+		int lane;
+
+		for (lane = 0; lane < 4; lane++)
+		{
+			left_lanes[lane] = left;
+			right_lanes[lane] = right;
+			left += ramp_left;
+			right += ramp_right;
+		}
+		lefts = vld1q_f32(left_lanes);
+		rights = vld1q_f32(right_lanes);
+		for (; k + 4 <= run; k += 4)
+		{
+			uint64_t position1 = position + step, position3 = position1 + step2;
+			unsigned long index0 = (unsigned long)(position >> 32), index1 = (unsigned long)(position1 >> 32);
+			unsigned long index2 = (unsigned long)((position + step2) >> 32), index3 = (unsigned long)(position3 >> 32);
+			float32x4_t fraction_values = vcvtq_n_f32_u32(fractions, 32);
+			float32x4x2_t mixed = vld2q_f32(output + k * 2);
+
+			if (index3 >= last)
+				break;
+			if (mono)
+			{
+				int16x4_t a = vdup_n_s16(0), b = vdup_n_s16(0);
+				float32x4_t a_values, b_values, values;
+
+				a = vld1_lane_s16(samples + index0, a, 0);
+				b = vld1_lane_s16(samples + index0 + 1, b, 0);
+				a = vld1_lane_s16(samples + index1, a, 1);
+				b = vld1_lane_s16(samples + index1 + 1, b, 1);
+				a = vld1_lane_s16(samples + index2, a, 2);
+				b = vld1_lane_s16(samples + index2 + 1, b, 2);
+				a = vld1_lane_s16(samples + index3, a, 3);
+				b = vld1_lane_s16(samples + index3 + 1, b, 3);
+				a_values = vcvtq_n_f32_s32(vmovl_s16(a), 15);
+				b_values = vcvtq_n_f32_s32(vmovl_s16(b), 15);
+				values = vaddq_f32(a_values, vmulq_f32(vsubq_f32(b_values, a_values), fraction_values));
+				mixed.val[0] = vaddq_f32(mixed.val[0], vmulq_f32(values, lefts));
+				mixed.val[1] = vaddq_f32(mixed.val[1], vmulq_f32(values, rights));
+			}
+			else
+			{
+				/* (each frame's left, right, next left, next right) */
+				int16x8_t frames01 = vcombine_s16(vld1_s16(samples + index0 * 2), vld1_s16(samples + index1 * 2));
+				int16x8_t frames23 = vcombine_s16(vld1_s16(samples + index2 * 2), vld1_s16(samples + index3 * 2));
+				int16x8x2_t sides = vuzpq_s16(frames01, frames23);
+				int16x4x2_t lefts_ab = vuzp_s16(vget_low_s16(sides.val[0]), vget_high_s16(sides.val[0]));
+				int16x4x2_t rights_ab = vuzp_s16(vget_low_s16(sides.val[1]), vget_high_s16(sides.val[1]));
+				float32x4_t a_left = vcvtq_n_f32_s32(vmovl_s16(lefts_ab.val[0]), 15);
+				float32x4_t b_left = vcvtq_n_f32_s32(vmovl_s16(lefts_ab.val[1]), 15);
+				float32x4_t a_right = vcvtq_n_f32_s32(vmovl_s16(rights_ab.val[0]), 15);
+				float32x4_t b_right = vcvtq_n_f32_s32(vmovl_s16(rights_ab.val[1]), 15);
+				float32x4_t left_values = vaddq_f32(a_left, vmulq_f32(vsubq_f32(b_left, a_left), fraction_values));
+				float32x4_t right_values = vaddq_f32(a_right, vmulq_f32(vsubq_f32(b_right, a_right), fraction_values));
+
+				mixed.val[0] = vaddq_f32(mixed.val[0], vmulq_f32(left_values, lefts));
+				mixed.val[1] = vaddq_f32(mixed.val[1], vmulq_f32(right_values, rights));
+			}
+			vst2q_f32(output + k * 2, mixed);
+			fractions = vaddq_u32(fractions, fraction_step4);
+			lefts = vaddq_f32(lefts, left_step4);
+			rights = vaddq_f32(rights, right_step4);
+			position += step4;
+		}
+		left = vgetq_lane_f32(lefts, 0);
+		right = vgetq_lane_f32(rights, 0);
+	}
+#endif
+	for (; k < run; k++)
+	{
+		unsigned long index = (unsigned long)(position >> 32);
+		float fraction = (float)(uint32_t)position * (1.0f / 4294967296.0f);
+
+		if (index >= packet_frames)
+			break;
+		if (mono)
+		{
+			float a0 = samples[index] * (1.0f / 32768.0f);
+			float b0 = index < last ? samples[index + 1] * (1.0f / 32768.0f) : a0;
+			float sample_left = a0 + (b0 - a0) * fraction;
+
+			output[k * 2] += sample_left * left;
+			output[k * 2 + 1] += sample_left * right;
+		}
+		else
+		{
+			float a0 = samples[index * 2] * (1.0f / 32768.0f);
+			float a1 = samples[index * 2 + 1] * (1.0f / 32768.0f);
+			float b0 = a0, b1 = a1;
+			float sample_left, sample_right;
+
+			if (index < last)
+			{
+				b0 = samples[index * 2 + 2] * (1.0f / 32768.0f);
+				b1 = samples[index * 2 + 3] * (1.0f / 32768.0f);
+			}
+			sample_left = a0 + (b0 - a0) * fraction;
+			sample_right = a1 + (b1 - a1) * fraction;
+			output[k * 2] += sample_left * left;
+			output[k * 2 + 1] += sample_right * right;
+		}
+		left += ramp_left;
+		right += ramp_right;
+		position += step;
+	}
+	*left_gain = left;
+	*right_gain = right;
+	return k;
+}
+
+/* mixes one voice into output (frames of stereo float), a run of frames
+(mix_run) for each packet it plays from. The cursor stays a double between
+runs: each run starts from it in fixed point (32 fractional bits) and it
+moves on by the run's length times the step, so the fixed point steps'
+rounding never adds up past one run. */
+static void mix_voice(struct sdl_stream *stream, const struct voice_mix_parameters *parameters, float *mix_output,
+	unsigned long frames)
+{
+	aligned_float *output = (aligned_float *)mix_output;
+	double step = parameters->step;
+	uint64_t fixed_step;
+	float left, right, ramp_left, ramp_right;
+	unsigned long frame;
+
+	if (!parameters->playing)
+		return;
+	if (!stream->gains_valid)
+	{
+		stream->current_left = parameters->target_left;
+		stream->current_right = parameters->target_right;
+		stream->gains_valid = TRUE;
+	}
+	left = stream->current_left;
+	right = stream->current_right;
+	ramp_left = (parameters->target_left - left) / (float)frames;
+	ramp_right = (parameters->target_right - right) / (float)frames;
+	fixed_step = (uint64_t)(step * 4294967296.0 + 0.5);
+
+	frame = 0;
+	while (frame < frames)
+	{
+		struct voice_packet *packet = mix_voice_packet(stream);
+		double cursor = stream->cursor;
+		uint32_t whole;
+		uint64_t position;
+		unsigned long mixed;
+
+		if (!packet)
+			break;
+		whole = (uint32_t)cursor;
+		position = ((uint64_t)whole << 32) | (uint32_t)((cursor - (double)whole) * 4294967296.0);
+		/* (the frames this run can reach, and the next) */
+		voice_packet_decoded(stream, packet, (unsigned long)((position + (uint64_t)(frames - frame) * fixed_step) >> 32) + 2);
+		mixed = mix_run(packet->samples, packet->frames, stream->channels == 1, position, fixed_step, output + frame * 2,
+			frames - frame, &left, &right, ramp_left, ramp_right);
+		stream->cursor = cursor + (double)mixed * step;
+		frame += mixed;
+	}
+	stream->current_left = parameters->target_left;
+	stream->current_right = parameters->target_right;
+}
+
 /* (HALO_RENDER_PROFILE) the mixer's time and the game's waits for it,
 reported by DirectSoundDoWork every 300 calls */
 unsigned long long vita_host_time_us(void) __attribute__((weak));
@@ -581,6 +813,113 @@ static void game_lock(void)
 }
 
 
+/* (debug) HALO_AUDIO_VERIFY=1: every voice is mixed twice from the same
+state and parameters, by mix_voice_reference and by mix_voice; the largest
+difference between the two and any difference in where they left the voice
+are reported with the mixer's statistics, and HALO_AUDIO_DUMP_REF=<file>
+dumps the reference's whole mix as HALO_AUDIO_DUMP does mix_voice's. The
+output is mix_voice's, which also moves the voice on */
+#define VERIFY_FRAMES 2048
+static int audio_verify = -1;
+static float verify_mix[VERIFY_FRAMES * OUTPUT_CHANNELS];
+static float verify_reference[VERIFY_FRAMES * OUTPUT_CHANNELS], verify_voice[VERIFY_FRAMES * OUTPUT_CHANNELS];
+static volatile double verify_largest_difference, verify_largest_cursor_difference;
+static volatile unsigned long verify_voices, verify_state_mismatches, verify_samples_different;
+
+static void mix_one_voice(struct sdl_stream *stream, float *output, unsigned long frames)
+{
+	struct voice_mix_parameters parameters;
+
+	voice_mix_parameters(stream, &parameters);
+	if (audio_verify <= 0 || frames > VERIFY_FRAMES)
+	{
+		mix_voice(stream, &parameters, output, frames);
+		return;
+	}
+	{
+		/* (what mix_voice changes in a voice, put back between the two:
+		the parameters are the game's, set under their own lock) */
+		double cursor = stream->cursor, reference_cursor;
+		float previous[2] = { stream->previous[0], stream->previous[1] };
+		float current_left = stream->current_left, current_right = stream->current_right;
+		BOOL gains_valid = stream->gains_valid;
+		BOOL finished[MAXIMUM_STREAM_PACKETS], reference_finished[MAXIMUM_STREAM_PACKETS];
+		unsigned long index;
+
+		for (index = 0; index < MAXIMUM_STREAM_PACKETS; index++)
+			finished[index] = stream->packets[index].finished;
+		memset(verify_reference, 0, frames * OUTPUT_CHANNELS * sizeof(float));
+		memset(verify_voice, 0, frames * OUTPUT_CHANNELS * sizeof(float));
+		mix_voice_reference(stream, &parameters, verify_reference, frames);
+		reference_cursor = stream->cursor;
+		for (index = 0; index < MAXIMUM_STREAM_PACKETS; index++)
+		{
+			reference_finished[index] = stream->packets[index].finished;
+			stream->packets[index].finished = finished[index];
+		}
+		stream->cursor = cursor;
+		stream->previous[0] = previous[0];
+		stream->previous[1] = previous[1];
+		stream->current_left = current_left;
+		stream->current_right = current_right;
+		stream->gains_valid = gains_valid;
+		mix_voice(stream, &parameters, verify_voice, frames);
+		for (index = 0; index < MAXIMUM_STREAM_PACKETS; index++)
+			if (reference_finished[index] != stream->packets[index].finished)
+				break;
+		if (index < MAXIMUM_STREAM_PACKETS)
+			verify_state_mismatches++;
+		if (fabs(reference_cursor - stream->cursor) > verify_largest_cursor_difference)
+			verify_largest_cursor_difference = fabs(reference_cursor - stream->cursor);
+		for (index = 0; index < frames * OUTPUT_CHANNELS; index++)
+		{
+			double difference = fabs((double)verify_reference[index] - (double)verify_voice[index]);
+
+			if (difference > verify_largest_difference)
+				verify_largest_difference = difference;
+			verify_samples_different += difference != 0.0;
+			output[index] += verify_voice[index];
+			verify_mix[index] += verify_reference[index];
+		}
+		verify_voices++;
+	}
+}
+
+/* soft limit rather than wrap or hard clip when many voices pile up */
+static void limit(float *output, unsigned long samples)
+{
+	unsigned long sample;
+
+	for (sample = 0; sample < samples; sample++)
+	{
+		float value = output[sample];
+
+		if (value > 0.8f || value < -0.8f)
+		{
+			float sign = value < 0.0f ? -1.0f : 1.0f;
+			float excess = fabsf(value) - 0.8f;
+
+			output[sample] = sign * (0.8f + 0.2f * tanhf(excess / 0.2f));
+		}
+	}
+}
+
+/* (debug) HALO_AUDIO_DUMP and HALO_AUDIO_DUMP_REF: a file for a mix, opened
+at the first */
+static void dump_mix(const char *setting, FILE **dump, int *checked, const float *output, unsigned long frames)
+{
+	if (!*checked)
+	{
+		const char *path = getenv(setting);
+
+		*checked = 1;
+		if (path && *path)
+			*dump = fopen(path, "wb");
+	}
+	if (*dump)
+		fwrite(output, sizeof(float) * OUTPUT_CHANNELS, frames, *dump);
+}
+
 /* stream_release and IDirectSound_CreateSoundStream change the stream list
 while the mixer may be between two voices: a pass that sees the count move
 starts over from the head and skips the voices it has mixed already */
@@ -590,10 +929,14 @@ static unsigned long mix_pass;
 static void mix(float *output, unsigned long frames)
 {
 	struct sdl_stream *stream;
-	unsigned long sample, generation, voices = 0;
+	unsigned long generation, voices = 0;
 	unsigned long long started = statistics_now();
 
 	memset(output, 0, frames * OUTPUT_CHANNELS * sizeof(float));
+	if (audio_verify < 0)
+		audio_verify = getenv("HALO_AUDIO_VERIFY") && atoi(getenv("HALO_AUDIO_VERIFY"));
+	if (audio_verify > 0 && frames <= VERIFY_FRAMES)
+		memset(verify_mix, 0, frames * OUTPUT_CHANNELS * sizeof(float));
 	/* a game thread that wants the lock (to queue or complete packets)
 	gets it between two voices, so it waits for one voice's mix at most
 	rather than all of them: the mixer runs on its own thread at a higher
@@ -615,7 +958,7 @@ static void mix(float *output, unsigned long frames)
 			stream->mix_pass = mix_pass;
 			if (stream->packet_count && !stream->paused)
 				voices++;
-			mix_voice(stream, output, frames);
+			mix_one_voice(stream, output, frames);
 			next = stream->next;
 			if (__atomic_load_n(&game_lock_wanted, __ATOMIC_SEQ_CST))
 			{
@@ -644,36 +987,20 @@ static void mix(float *output, unsigned long frames)
 	statistics_mix_us += statistics_now() - started;
 	statistics_mixes++;
 	statistics_voices += voices;
-	/* soft limit rather than wrap or hard clip when many voices pile up */
-	for (sample = 0; sample < frames * OUTPUT_CHANNELS; sample++)
-	{
-		float value = output[sample];
-
-		if (value > 0.8f || value < -0.8f)
-		{
-			float sign = value < 0.0f ? -1.0f : 1.0f;
-			float excess = fabsf(value) - 0.8f;
-
-			output[sample] = sign * (0.8f + 0.2f * tanhf(excess / 0.2f));
-		}
-	}
+	limit(output, frames * OUTPUT_CHANNELS);
 	{
 		/* (debug) HALO_AUDIO_DUMP=<file>: the mix as it goes to the device,
 		raw 32-bit float stereo at 48 kHz, for listening to and measuring
 		the output without a device (e.g. sox -t f32 -r 48000 -c 2) */
-		static FILE *dump;
-		static int dump_checked;
+		static FILE *dump, *reference_dump;
+		static int dump_checked, reference_dump_checked;
 
-		if (!dump_checked)
+		dump_mix("HALO_AUDIO_DUMP", &dump, &dump_checked, output, frames);
+		if (audio_verify > 0 && frames <= VERIFY_FRAMES)
 		{
-			const char *path = getenv("HALO_AUDIO_DUMP");
-
-			dump_checked = 1;
-			if (path && *path)
-				dump = fopen(path, "wb");
+			limit(verify_mix, frames * OUTPUT_CHANNELS);
+			dump_mix("HALO_AUDIO_DUMP_REF", &reference_dump, &reference_dump_checked, verify_mix, frames);
 		}
-		if (dump)
-			fwrite(output, sizeof(float) * OUTPUT_CHANNELS, frames, dump);
 	}
 }
 
@@ -1041,6 +1368,10 @@ VOID WINAPI DirectSoundDoWork(void)
 			(double)statistics_wait_us / 1000.0 / 300.0, statistics_waits);
 		statistics_mix_us = statistics_wait_us = 0;
 		statistics_mixes = statistics_voices = statistics_waits = 0;
+		if (audio_verify > 0)
+			platform_log("audio verify: %lu voice mixes, largest difference from the reference %.3g (%lu samples differ), "
+				"cursor %.3g, %lu with packets finished differently", verify_voices, verify_largest_difference,
+				verify_samples_different, verify_largest_cursor_difference, verify_state_mismatches);
 	}
 }
 
