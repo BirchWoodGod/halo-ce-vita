@@ -317,7 +317,7 @@ float vgxm_render_scale(void)
 	{
 		const char *setting = getenv("HALO_RENDER_SCALE");
 
-		null_render_scale = setting ? (float)atof(setting) : 1.0f;
+		null_render_scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f;
 		if (null_render_scale < 0.5f || null_render_scale > 1.0f)
 			null_render_scale = 1.0f;
 	}
@@ -341,6 +341,60 @@ static void null_target_size(unsigned long id, unsigned long width, unsigned lon
 		height = (unsigned long)(height * scale + 0.5f) & ~1UL;
 	}
 	null_target_bytes[id] = 4 * width * height;
+}
+
+/* the dynamic resolution's rectangle, as on the Vita (vita_gxm.c
+vgxm_render_rect_set): the screen-sized targets' textures describe it (the
+words the draw hash reads) */
+static float null_rect_wanted = 1.0f;
+static unsigned long null_target_asked[MAXIMUM_TARGETS + 1];
+
+float vgxm_render_rect(void)
+{
+	float scale = vgxm_render_scale();
+
+	return null_rect_wanted < scale ? null_rect_wanted : scale;
+}
+
+float vgxm_render_rect_set(float scale)
+{
+	null_rect_wanted = scale < 0.25f || scale > 1.0f ? 1.0f : scale;
+	return vgxm_render_rect();
+}
+
+static unsigned long null_rect_words(unsigned long width, unsigned long height)
+{
+	float scale = vgxm_render_rect();
+
+	if (height == 480 && width >= 640 && scale < 1.0f)
+	{
+		width = (unsigned long)(width * scale + 0.5f) & ~1UL;
+		height = (unsigned long)(height * scale + 0.5f) & ~1UL;
+	}
+	return width | height << 16;
+}
+
+void vgxm_target_texture(unsigned long id, struct vgxm_texture *texture)
+{
+	if (!id || id > MAXIMUM_TARGETS || !texture || !null_target_asked[id])
+		return;
+	texture->control[2] = null_rect_words(null_target_asked[id] & 0xffff, null_target_asked[id] >> 16);
+}
+
+void vgxm_frame_submit_begin(void)
+{
+}
+
+int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
+{
+	/* (no GPU to time: d3d8_gxm.c's HALO_DYNRES_SIM stands in) */
+	(void)frame;
+	return 0;
+}
+
+void vgxm_overlay_dynamic(int dynamic)
+{
+	(void)dynamic;
 }
 
 void vgxm_target_release(unsigned long id)
@@ -379,11 +433,13 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 		fprintf(stderr, "trace: target %lux%lu depth %d (%u made)\n", width, height, depth, null.target_count);
 	null.target_count++;
 	null_target_size(null.target_count, width, height);
+	if (null.target_count <= MAXIMUM_TARGETS)
+		null_target_asked[null.target_count] = height == 480 && width >= 640 ? width | height << 16 : 0;
 	if (texture)
 	{
 		texture->control[0] = 0x80000000ul | null.target_count;
 		texture->control[1] = depth ? 0x100 : 0;
-		texture->control[2] = width | height << 16;
+		texture->control[2] = null_rect_words(width, height);
 		texture->control[3] = 0;
 	}
 	return null.target_count;
@@ -444,11 +500,12 @@ int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long heig
 	if (!id || id > null.target_count || !width || !height)
 		return 0;
 	null_target_size(id, width, height);
+	null_target_asked[id] = height == 480 && width >= 640 ? width | height << 16 : 0;
 	if (texture)
 	{
 		texture->control[0] = 0x80000000ul | id;
 		texture->control[1] = depth ? 0x100 : 0;
-		texture->control[2] = width | height << 16;
+		texture->control[2] = null_rect_words(width, height);
 		texture->control[3] = 0;
 	}
 	return 1;

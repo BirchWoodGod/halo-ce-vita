@@ -140,7 +140,35 @@ static void *block_allocate(struct block *block, SceKernelMemBlockType type, uns
 struct display_data
 {
 	void *address;
+	/* the frame's notification value (frame_timing) */
+	unsigned int frame;
 };
+
+/* The GPU's time per frame (the dynamic resolution's measure, and the
+overlay's GPU line): a frame's main work is handed to the GPU from when the
+worker begins it (vgxm_frame_submit_begin: the records it held back for
+the present) to its present's last scene; the display queue's callback
+runs once the GPU has finished the frame, which is stamped there. The GPU
+time is from the later of the submission's start and the previous frame's
+finish to this one's finish; the tail, from the later of the submission's
+end and the previous finish (what the GPU still had to do once it had
+everything: near the whole when the GPU is the wall, a scene or two when
+the worker is). Times in microseconds, the low 32 bits. */
+#define FRAME_TIMING_SLOTS 16
+
+static struct
+{
+	unsigned int begin_us, end_us;
+	volatile unsigned int done_us;
+	float scale;
+} frame_timing[FRAME_TIMING_SLOTS];
+/* the newest frame the callback has stamped, the newest measured, and
+the start of the submission under way (0: the last present's end) */
+static volatile unsigned int frame_timing_done;
+static unsigned int frame_timing_read, frame_submit_begin_us, frame_last_end_us;
+static int frame_submit_begun;
+/* (the overlay's GPU line: the frames' GPU time, averaged) */
+static float gpu_ms_average;
 
 struct shader
 {
@@ -159,8 +187,13 @@ struct target
 	unsigned int width, height, stride;
 	/* the screen-sized targets' render scale (HALO_RENDER_SCALE): the target is
 	that fraction of the size asked for, and viewports and clips into it are
-	scaled to match; 0 for 1 */
-	float scale;
+	scaled to match. The dynamic resolution (vgxm_render_rect_set) draws
+	into a smaller rectangle at its top left, rect_width x rect_height, the
+	memory staying as it was made: scale_x and scale_y are that rectangle
+	over the size asked for (asked_width x asked_height); 0 for 1 */
+	float scale_x, scale_y;
+	unsigned int rect_width, rect_height;
+	unsigned int asked_width, asked_height;
 	/* a screen-sized target (480 lines, 640 columns or more), whatever the
 	scale: its render target object is kept as a spare when it is given
 	back (render_target_give_back) */
@@ -225,7 +258,7 @@ static struct
 	volatile unsigned int visibility_frame[RING_COUNT];
 	volatile unsigned long visibility_game_frame[RING_COUNT];
 	unsigned long visibility_next_game_frame;
-	float visibility_scale[RING_COUNT];
+	float visibility_scale[RING_COUNT];  /* (of the area: scale_x x scale_y) */
 	unsigned int visibility_slots_used[RING_COUNT];
 	int visibility_bound;
 
@@ -307,6 +340,9 @@ static void display_callback(const void *callback_data)
 				info.currentPriority, (unsigned)info.currentCpuAffinityMask);
 		}
 	}
+	/* (the GPU has finished the frame: frame_timing) */
+	frame_timing[data->frame % FRAME_TIMING_SLOTS].done_us = (unsigned int)sceKernelGetProcessTimeWide();
+	__atomic_store_n(&frame_timing_done, data->frame, __ATOMIC_RELEASE);
 	memset(&frame_buffer, 0, sizeof(frame_buffer));
 	frame_buffer.size = sizeof(frame_buffer);
 	frame_buffer.base = data->address;
@@ -1884,7 +1920,9 @@ made at that fraction of the size, for a GPU that cannot fill 848x480 in a
 frame; the blit to the display scales the picture up. Read at the first
 target; the settings panel changes it between frames (vgxm_render_scale_set,
 d3d8_gxm.c screen_settings_apply), and the screen-sized targets are then
-made again at the new size. */
+made again at the new size. HALO_RENDER_SCALE=dynamic (the dynamic
+resolution, d3d8_gxm.c): made at the full size, the ceiling, and drawn into
+a part of it (vgxm_render_rect_set). */
 static float render_scale = -1.0f;
 
 static float render_scale_get(void)
@@ -1893,7 +1931,7 @@ static float render_scale_get(void)
 	{
 		const char *setting = getenv("HALO_RENDER_SCALE");
 
-		render_scale = setting ? (float)atof(setting) : 1.0f;
+		render_scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f;
 		if (render_scale < 0.5f || render_scale > 1.0f)
 			render_scale = 1.0f;
 		if (render_scale < 1.0f)
@@ -1912,6 +1950,100 @@ void vgxm_render_scale_set(float scale)
 	if (scale < 0.5f || scale > 1.0f)
 		scale = 1.0f;
 	render_scale = scale;
+}
+
+/* The dynamic resolution's scale (d3d8_gxm.c, on the worker between two
+frames): the screen-sized targets are drawn into their top left, this
+fraction of the size asked for (at most their memory's size: the render
+scale); 1 draws into the whole target. Viewports, clips, clears, the
+visibility counts, the targets' textures, the blit to the display and the
+screenshots all go by each target's rectangle (target_rect_update). */
+static float render_rect_wanted = 1.0f;
+
+static float render_rect_get(void)
+{
+	float scale = render_scale_get();
+
+	return render_rect_wanted < scale ? render_rect_wanted : scale;
+}
+
+/* a target's drawn rectangle at the scale in effect (all of it unless it
+is a screen-sized one) */
+static void target_rect_update(struct target *target)
+{
+	float scale = render_rect_get();
+	unsigned int width, height;
+
+	if (!target->scale_kind || target->atlas)
+	{
+		target->rect_width = target->width;
+		target->rect_height = target->height;
+		target->scale_x = target->scale_y = 0.0f;
+		return;
+	}
+	width = (unsigned int)(target->asked_width * scale + 0.5f) & ~1u;
+	height = (unsigned int)(target->asked_height * scale + 0.5f) & ~1u;
+	if (width > target->width || scale >= render_scale_get())
+		width = target->width;
+	if (height > target->height || scale >= render_scale_get())
+		height = target->height;
+	if (width < 2)
+		width = 2;
+	if (height < 2)
+		height = 2;
+	target->rect_width = width;
+	target->rect_height = height;
+	if (width == target->asked_width && height == target->asked_height)
+		target->scale_x = target->scale_y = 0.0f;
+	else
+	{
+		target->scale_x = (float)width / (float)target->asked_width;
+		target->scale_y = (float)height / (float)target->asked_height;
+	}
+}
+
+float vgxm_render_rect(void)
+{
+	return render_rect_get();
+}
+
+float vgxm_render_rect_set(float scale)
+{
+	unsigned int index;
+
+	if (scale < 0.25f || scale > 1.0f)
+		scale = 1.0f;
+	render_rect_wanted = scale;
+	if (!gxm.ready)
+		return render_rect_get();
+	for (index = 0; index < gxm.target_count; index++)
+	{
+		struct target *target = &gxm.targets[index];
+
+		if (target->scale_kind && target->memory.base && !target->atlas)
+			target_rect_update(target);
+	}
+	return render_rect_get();
+}
+
+/* a texture over a colour target's drawn rectangle: strided, rows as its
+memory's */
+static int target_rect_texture(const struct target *target, struct vgxm_texture *texture)
+{
+	return sceGxmTextureInitLinearStrided((SceGxmTexture *)texture, target->memory.base,
+		SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, target->rect_width, target->rect_height, target->stride * 4);
+}
+
+void vgxm_target_texture(unsigned long id, struct vgxm_texture *texture)
+{
+	const struct target *target;
+
+	if (!gxm.ready || !id || id > gxm.target_count || !texture)
+		return;
+	target = &gxm.targets[id - 1];
+	if (target->depth || !target->memory.base || !target->scale_kind || target->atlas)
+		return;
+	target_rect_texture(target, texture);
 }
 
 void vgxm_target_release(unsigned long id)
@@ -1974,13 +2106,16 @@ static int target_make(struct target *target, unsigned long width, unsigned long
 		{
 			width = (unsigned long)(width * scale + 0.5f) & ~1UL;
 			height = (unsigned long)(height * scale + 0.5f) & ~1UL;
-			target->scale = scale;
 		}
 	}
 	target->width = (unsigned int)width;
 	target->height = (unsigned int)height;
+	target->asked_width = (unsigned int)width_asked;
+	target->asked_height = (unsigned int)height_asked;
 	/* (a screen-sized target: its render target object may be a spare) */
 	target->scale_kind = height_asked == 480 && width_asked >= 640;
+	/* (drawn into the dynamic resolution's rectangle of it) */
+	target_rect_update(target);
 	target->render_target = target->scale_kind ? render_target_take(target->width, target->height) :
 		render_target_for(target->width, target->height);
 	if (!target->render_target)
@@ -2058,7 +2193,12 @@ static int target_make(struct target *target, unsigned long width, unsigned long
 				if (!linear_targets)
 					log_line("gxm: render targets sampled as strided textures (HALO_TARGET_TEXTURE_LINEAR=0)");
 			}
-			if (linear_targets && !(target->width & (target->width - 1)) && !(target->height & (target->height - 1)) &&
+			if (target->scale_kind)
+			{
+				/* (over its drawn rectangle: target_rect_texture) */
+				result = target_rect_texture(target, texture);
+			}
+			else if (linear_targets && !(target->width & (target->width - 1)) && !(target->height & (target->height - 1)) &&
 				target->stride == ALIGN(target->width, 8))
 			{
 				result = sceGxmTextureInitLinear((SceGxmTexture *)texture, target->memory.base,
@@ -2486,8 +2626,36 @@ static int scene_ensure(void)
 	{
 		unsigned long long before = sceKernelGetProcessTimeWide();
 
-		result = sceGxmBeginScene(gxm.context, scene_flags, color ? color->render_target : depth->render_target, NULL,
+		/* (a target drawn into a part of it, the dynamic resolution's: only
+		the tiles of that part are rendered, loaded and stored -
+		HALO_DYNRES_VALID_REGION=0 renders them all) */
+		static int valid_regions = -1;
+		const struct target *drawn = color ? color : depth;
+		SceGxmValidRegion region;
+		const SceGxmValidRegion *valid = NULL;
+
+		if (valid_regions < 0)
+			valid_regions = !getenv("HALO_DYNRES_VALID_REGION") || atoi(getenv("HALO_DYNRES_VALID_REGION")) != 0;
+		if (valid_regions && drawn->scale_kind && (drawn->rect_width < drawn->width || drawn->rect_height < drawn->height))
+		{
+			/* (the largest coordinates, kept inside the surface: one more
+			than the last pixel is still in it, whichever way the driver
+			counts) */
+			region.xMax = drawn->rect_width < drawn->width ? drawn->rect_width : drawn->width - 1;
+			region.yMax = drawn->rect_height < drawn->height ? drawn->rect_height : drawn->height - 1;
+			valid = &region;
+		}
+		result = sceGxmBeginScene(gxm.context, scene_flags, color ? color->render_target : depth->render_target, valid,
 			NULL, NULL, color ? &color->color : NULL, depth ? &depth->depth_stencil : NULL);
+		if (result < 0 && valid)
+		{
+			/* (refused: the whole target, and never again) */
+			log_line("gxm: a scene's valid region %ux%u refused: 0x%08x; whole targets from now on",
+				(unsigned)region.xMax, (unsigned)region.yMax, (unsigned)result);
+			valid_regions = 0;
+			result = sceGxmBeginScene(gxm.context, scene_flags, color ? color->render_target : depth->render_target, NULL,
+				NULL, NULL, color ? &color->color : NULL, depth ? &depth->depth_stencil : NULL);
+		}
 		scene_switch_us[gxm.wanted_color == 1 ? 0 : 1] += sceKernelGetProcessTimeWide() - before;
 	}
 	if (result < 0)
@@ -2626,27 +2794,45 @@ static SceGxmPrimitiveType primitive_type(unsigned long primitive)
 	}
 }
 
-/* the render scale of the scene's target (1 for most) */
-static float scene_scale(void)
+/* the scene's target: its render scale across and down (1 for most) and
+its drawn rectangle (target_rect_update) */
+static const struct target *scene_drawn_target(void)
 {
-	const struct target *target = gxm.scene_color ? &gxm.targets[gxm.scene_color - 1] :
+	return gxm.scene_color ? &gxm.targets[gxm.scene_color - 1] :
 		gxm.scene_depth ? &gxm.targets[gxm.scene_depth - 1] : NULL;
+}
 
-	return target && target->scale > 0.0f ? target->scale : 1.0f;
+static void scene_scales(float *scale_x, float *scale_y)
+{
+	const struct target *target = scene_drawn_target();
+
+	*scale_x = target && target->scale_x > 0.0f ? target->scale_x : 1.0f;
+	*scale_y = target && target->scale_y > 0.0f ? target->scale_y : 1.0f;
 }
 
 static void set_clip(const long unscaled[4])
 {
-	float scale = scene_scale();
+	const struct target *target = scene_drawn_target();
+	float scale_x, scale_y;
 	long clip[4];
 	long x0, y0, x1, y1;
 
-	if (scale != 1.0f)
+	scene_scales(&scale_x, &scale_y);
+	if (scale_x != 1.0f || scale_y != 1.0f)
 	{
-		clip[0] = (long)(unscaled[0] * scale);
-		clip[1] = (long)(unscaled[1] * scale);
-		clip[2] = (long)(unscaled[2] * scale + 0.999f);
-		clip[3] = (long)(unscaled[3] * scale + 0.999f);
+		clip[0] = (long)(unscaled[0] * scale_x);
+		clip[1] = (long)(unscaled[1] * scale_y);
+		clip[2] = (long)(unscaled[2] * scale_x + 0.999f);
+		clip[3] = (long)(unscaled[3] * scale_y + 0.999f);
+		/* (nothing outside the drawn rectangle: a target of the dynamic
+		resolution keeps its memory's size) */
+		if (target && !gxm.scene_cell)
+		{
+			if (clip[2] > (long)target->rect_width)
+				clip[2] = (long)target->rect_width;
+			if (clip[3] > (long)target->rect_height)
+				clip[3] = (long)target->rect_height;
+		}
 	}
 	else
 		memcpy(clip, unscaled, sizeof(clip));
@@ -2679,7 +2865,7 @@ static struct
 	int bias[2];
 	float viewport[6];
 	long clip[4];
-	float clip_scale;
+	float clip_scale[2];
 	int valid;
 } shadow;
 
@@ -2902,15 +3088,16 @@ void vgxm_draw(const struct vgxm_draw *draw)
 		}
 		{
 			/* (the viewport in the target's pixels: scaled with it) */
-			float scale = scene_scale();
+			float scale_x, scale_y;
 			float viewport[6];
 			long clip[4];
 
-			viewport[0] = draw->viewport_offset[0] * scale;
-			viewport[1] = draw->viewport_offset[1] * scale;
+			scene_scales(&scale_x, &scale_y);
+			viewport[0] = draw->viewport_offset[0] * scale_x;
+			viewport[1] = draw->viewport_offset[1] * scale_y;
 			viewport[2] = draw->viewport_offset[2];
-			viewport[3] = draw->viewport_scale[0] * scale;
-			viewport[4] = draw->viewport_scale[1] * scale;
+			viewport[3] = draw->viewport_scale[0] * scale_x;
+			viewport[4] = draw->viewport_scale[1] * scale_y;
 			viewport[5] = draw->viewport_scale[2];
 			memcpy(clip, draw->clip, sizeof(clip));
 			if (gxm.scene_cell)
@@ -2920,10 +3107,12 @@ void vgxm_draw(const struct vgxm_draw *draw)
 				memcpy(shadow.viewport, viewport, sizeof(viewport));
 				sceGxmSetViewport(gxm.context, viewport[0], viewport[3], viewport[1], viewport[4], viewport[2], viewport[5]);
 			}
-			if (memcmp(shadow.clip, clip, sizeof(shadow.clip)) || shadow.clip_scale != scale)
+			if (memcmp(shadow.clip, clip, sizeof(shadow.clip)) || shadow.clip_scale[0] != scale_x ||
+				shadow.clip_scale[1] != scale_y)
 			{
 				memcpy(shadow.clip, clip, sizeof(shadow.clip));
-				shadow.clip_scale = scale;
+				shadow.clip_scale[0] = scale_x;
+				shadow.clip_scale[1] = scale_y;
 				set_clip(clip);
 			}
 		}
@@ -2945,7 +3134,12 @@ void vgxm_draw(const struct vgxm_draw *draw)
 		/* (off again at once: no other draw, clear or blit counts) */
 		sceGxmSetFrontVisibilityTestEnable(gxm.context, SCE_GXM_VISIBILITY_TEST_DISABLED);
 		sceGxmSetBackVisibilityTestEnable(gxm.context, SCE_GXM_VISIBILITY_TEST_DISABLED);
-		gxm.visibility_scale[ring] = scene_scale();
+		{
+			float scale_x, scale_y;
+
+			scene_scales(&scale_x, &scale_y);
+			gxm.visibility_scale[ring] = scale_x * scale_y;
+		}
 		if (draw->visibility_index > gxm.visibility_slots_used[ring])
 			gxm.visibility_slots_used[ring] = (unsigned int)draw->visibility_index;
 		gxm.scene_draws++;
@@ -2988,11 +3182,22 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 	if (!vertices || !uniforms || !indices)
 		return;
 	{
-		float x0 = 2.0f * (float)clip[0] / (float)width - 1.0f, x1 = 2.0f * (float)clip[2] / (float)width - 1.0f;
-		float y0 = 1.0f - 2.0f * (float)clip[1] / (float)height, y1 = 1.0f - 2.0f * (float)clip[3] / (float)height;
-		float corners[4][3] = { { x0, y0, depth }, { x1, y0, depth }, { x0, y1, depth }, { x1, y1, depth } };
+		/* (the clip is in the game's pixels: in a scaled target's, as
+		set_clip has it - a part of a scaled target was cleared at the
+		unscaled place before, and only where that overlapped the clip) */
+		float scale_x = 1.0f, scale_y = 1.0f, x0, x1, y0, y1;
 
-		memcpy(vertices, corners, sizeof(corners));
+		if (!gxm.scene_cell)
+			scene_scales(&scale_x, &scale_y);
+		x0 = 2.0f * (float)clip[0] * scale_x / (float)width - 1.0f;
+		x1 = 2.0f * (float)clip[2] * scale_x / (float)width - 1.0f;
+		y0 = 1.0f - 2.0f * (float)clip[1] * scale_y / (float)height;
+		y1 = 1.0f - 2.0f * (float)clip[3] * scale_y / (float)height;
+		{
+			float corners[4][3] = { { x0, y0, depth }, { x1, y0, depth }, { x0, y1, depth }, { x1, y1, depth } };
+
+			memcpy(vertices, corners, sizeof(corners));
+		}
 	}
 	uniforms[0] = ((color >> 16) & 0xff) / 255.0f;
 	uniforms[1] = ((color >> 8) & 0xff) / 255.0f;
@@ -3119,7 +3324,7 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
 	/* (samples of a scaled target: the game counts its own pixels) */
 	scale = gxm.visibility_scale[buffer];
 	if (scale > 0.0f && scale < 1.0f)
-		samples = (unsigned long long)(samples / (scale * scale) + 0.5f);
+		samples = (unsigned long long)(samples / scale + 0.5f);
 	/* (no more than a quad can cover, many times over: the lens flares
 	work out 255 x visible / expected in 32 bits, and Vita3K leaves the
 	counts at 0xffffffff - summed over the cores and scaled, that wrapped
@@ -3172,14 +3377,21 @@ static void blit(struct target *source)
 	/* the picture at the display's height, its shape kept (a 4:3 frame,
 	HALO_DISPLAY_WIDTH=640, between black bars); sharp: the same size,
 	sampled nearest rather than bilinear */
+	/* (the shape the game drew, the size asked for: the dynamic
+	resolution's rectangle rounds its sides apart) */
+	unsigned int shape_width = source->asked_width ? source->asked_width : source->width;
+	unsigned int shape_height = source->asked_height ? source->asked_height : source->height;
+	unsigned int drawn_width = source->rect_width ? source->rect_width : source->width;
+	unsigned int drawn_height = source->rect_height ? source->rect_height : source->height;
+
 	height = (float)DISPLAY_HEIGHT;
-	width = height * (float)source->width / (float)source->height;
+	width = height * (float)shape_width / (float)shape_height;
 	if (width > DISPLAY_WIDTH)
 	{
 		/* (wider than the display: the whole width, and the height kept
 		within a few lines of the display's, as 848 columns are) */
 		width = DISPLAY_WIDTH;
-		height = width * (float)source->height / (float)source->width;
+		height = width * (float)shape_height / (float)shape_width;
 		if (height > DISPLAY_HEIGHT - 4)
 			height = DISPLAY_HEIGHT;
 	}
@@ -3201,8 +3413,9 @@ static void blit(struct target *source)
 		memcpy(vertices, quad, sizeof(quad));
 	}
 	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
-	sceGxmTextureInitLinearStrided(&texture, source->memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, source->width,
-		source->height, source->stride * 4);
+	/* (its drawn rectangle: all of it but for the dynamic resolution) */
+	sceGxmTextureInitLinearStrided(&texture, source->memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, drawn_width,
+		drawn_height, source->stride * 4);
 	{
 		SceGxmTextureFilter filter = gxm.upscale_filter == 1 ? SCE_GXM_TEXTURE_FILTER_POINT : SCE_GXM_TEXTURE_FILTER_LINEAR;
 
@@ -3291,6 +3504,14 @@ static unsigned int overlay_text(struct overlay_vertex *vertices, unsigned int c
 void vgxm_overlay_enable(int enabled)
 {
 	gxm.overlay_enabled = gxm.overlay_programs ? enabled : 0;
+}
+
+/* (the overlay's RES line says D while the dynamic resolution runs) */
+static volatile int overlay_dynamic;
+
+void vgxm_overlay_dynamic(int dynamic)
+{
+	overlay_dynamic = dynamic;
 }
 
 void vgxm_upscale_filter_set(int filter)
@@ -3522,7 +3743,7 @@ static void overlay_draw(void)
 	else if (gxm.overlay_enabled)
 	{
 		vita_host_cpu_usage(busy);
-		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 132.0f, 0xA0000000u);
+		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 172.0f, 0xA0000000u);
 		snprintf(text, sizeof(text), "FPS %3.0f", (double)gxm.overlay_fps);
 		count = overlay_text(vertices, count, limit, left + 6.0f, 11.0f, scale, 0xFF40FF40u, text);
 		snprintf(text, sizeof(text), "GAME %3.0f MS", (double)gxm.overlay_tick_ms);
@@ -3544,6 +3765,13 @@ static void overlay_draw(void)
 			if (busy[index] != 255)
 				count = overlay_rect(vertices, count, left + 108.0f, y + 2.0f, busy[index] * 0.7f, 12.0f, color);
 		}
+		/* the render scale the frame is drawn at (the dynamic resolution's
+		now, D after it) and the GPU's time a frame (vgxm_gpu_frame_next) */
+		snprintf(text, sizeof(text), "RES %3.0f%%%s", (double)(render_rect_get() * 100.0f),
+			overlay_dynamic ? " D" : "");
+		count = overlay_text(vertices, count, limit, left + 6.0f, 134.0f, scale, 0xFFFFFFFFu, text);
+		snprintf(text, sizeof(text), "GPU %3.0f MS", (double)gpu_ms_average);
+		count = overlay_text(vertices, count, limit, left + 6.0f, 154.0f, scale, 0xFFFF80C0u, text);
 	}
 	if (gxm.menu_visible)
 		count = menu_build(vertices, count, limit);
@@ -3629,6 +3857,48 @@ void vgxm_wait_gpu_idle(void)
 		sceKernelDelayThread(100);
 }
 
+void vgxm_frame_submit_begin(void)
+{
+	frame_submit_begin_us = (unsigned int)sceKernelGetProcessTimeWide();
+	frame_submit_begun = 1;
+}
+
+/* the GPU time of a frame over this long is a stall (a load, a shader
+compiled), not its work: the overlay's average leaves it out */
+#define GPU_FRAME_STALL_US 250000u
+
+int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
+{
+	unsigned int done = __atomic_load_n(&frame_timing_done, __ATOMIC_ACQUIRE), next, previous_done, start, end;
+
+	if (!gxm.ready || (int)(done - frame_timing_read) <= 0)
+		return 0;
+	next = frame_timing_read + 1;
+	if ((int)(done - next) >= FRAME_TIMING_SLOTS - 2)
+	{
+		/* (fallen behind: the slots were reused) */
+		frame_timing_read = done;
+		return 0;
+	}
+	frame_timing_read = next;
+	previous_done = next > 1 ? frame_timing[(next - 1) % FRAME_TIMING_SLOTS].done_us : 0;
+	start = frame_timing[next % FRAME_TIMING_SLOTS].begin_us;
+	end = frame_timing[next % FRAME_TIMING_SLOTS].end_us;
+	if (previous_done && (int)(previous_done - start) > 0)
+		start = previous_done;
+	if (previous_done && (int)(previous_done - end) > 0)
+		end = previous_done;
+	done = frame_timing[next % FRAME_TIMING_SLOTS].done_us;
+	frame->frame = next;
+	frame->gpu_ms = (int)(done - start) > 0 ? (done - start) / 1000.0f : 0.0f;
+	frame->tail_ms = (int)(done - end) > 0 ? (done - end) / 1000.0f : 0.0f;
+	frame->interval_ms = previous_done && (int)(done - previous_done) > 0 ? (done - previous_done) / 1000.0f : 0.0f;
+	frame->scale = frame_timing[next % FRAME_TIMING_SLOTS].scale;
+	if (frame->gpu_ms * 1000.0f < GPU_FRAME_STALL_US)
+		gpu_ms_average = gpu_ms_average > 0.0f ? gpu_ms_average * 0.9f + frame->gpu_ms * 0.1f : frame->gpu_ms;
+	return 1;
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
 	struct display_data data;
@@ -3660,10 +3930,22 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	notification.address = gxm.notification;
 	notification.value = ++gxm.frame;
 	sceGxmEndScene(gxm.context, NULL, &notification);
+	{
+		/* (the frame is all the GPU's now: frame_timing) */
+		unsigned int now = (unsigned int)sceKernelGetProcessTimeWide(), slot = gxm.frame % FRAME_TIMING_SLOTS;
+
+		frame_timing[slot].begin_us = frame_submit_begun ? frame_submit_begin_us : frame_last_end_us;
+		frame_timing[slot].end_us = now;
+		frame_timing[slot].done_us = 0;
+		frame_timing[slot].scale = render_rect_get();
+		frame_last_end_us = now;
+		frame_submit_begun = 0;
+	}
 	if (common_dialog_wanted)
 		common_dialog_update();
 	present_step(2);
 	data.address = gxm.display_memory[gxm.back_buffer].base;
+	data.frame = gxm.frame;
 	sceGxmDisplayQueueAddEntry(gxm.display_sync[gxm.front_buffer], gxm.display_sync[gxm.back_buffer], &data);
 	present_step(3);
 	gxm.front_buffer = gxm.back_buffer;
@@ -3756,9 +4038,10 @@ const void *vgxm_target_pixels(unsigned long color_target, unsigned long *pitch,
 	target = &gxm.targets[color_target - 1];
 	if (target->depth)
 		return NULL;
-	/* (a scaled target, HALO_RENDER_SCALE: its own, smaller size) */
-	*width = target->width;
-	*height = target->height;
+	/* (a scaled target, HALO_RENDER_SCALE: its own, smaller size; the
+	dynamic resolution's rectangle of it) */
+	*width = target->rect_width ? target->rect_width : target->width;
+	*height = target->rect_height ? target->rect_height : target->height;
 	if (gxm.in_scene)
 	{
 		sceGxmEndScene(gxm.context, NULL, NULL);
