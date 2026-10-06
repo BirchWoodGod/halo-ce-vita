@@ -727,6 +727,14 @@ void lights_dispose_from_old_map(
 {
 	data_make_invalid(light_data);
 	cluster_partition_make_invalid(&light_cluster_partition);
+#ifdef HALO_LINUX
+	/* port: the sky's lens flares queued in the old map's last frame
+	(render_sky.c) point at its lens flare tags, which the next map's first
+	frame would submit: the Xbox maps' tags lie where the next map's do,
+	but a Custom Edition map's go with it (a joiner whose host left a game
+	on one crashed in rasterizer_lens_flare_submit on the menu's map) */
+	lights_globals.queued_lens_flare_count = 0;
+#endif
 
 	return;
 }
