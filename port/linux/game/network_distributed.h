@@ -264,6 +264,8 @@ void network_actors_drive(void);
 /* (a client) whether the host's actor states place this unit now (a living AI
 unit they came for lately), rather than its object states */
 boolean network_actors_client_drives(long unit_index);
+/* (the host) whether this tick's actor states place this unit, rather than its object states */
+boolean network_actors_host_drives(long unit_index);
 
 /* ---------- prototypes/NETWORK_COOP.C */
 

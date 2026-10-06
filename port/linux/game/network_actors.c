@@ -875,6 +875,26 @@ void network_actors_handle_states(
 		actor_state_apply(&states[index], now);
 }
 
+/* host: whether this tick's actor states will place the unit (an AI biped
+an actor drove this tick, or one fleeing, which goes on without it), so its
+object states needn't (network_objects.c, before network_actors_host_tick) */
+boolean network_actors_host_drives(
+	long unit_index)
+{
+	short index;
+
+	for (index = 0; index < host_actor_count; index++)
+	{
+		struct host_actor const *actor = &host_actors[index];
+
+		if (actor->unit_index != unit_index)
+			continue;
+		return actor_unit_valid(unit_index) && object_get(unit_index)->object.type == _object_type_biped &&
+			(actor->noted || TEST_FLAG(unit_get(unit_index)->unit.flags, _unit_running_blindly_bit));
+	}
+	return FALSE;
+}
+
 boolean network_actors_client_drives(
 	long unit_index)
 {

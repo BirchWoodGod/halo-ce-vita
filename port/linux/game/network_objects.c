@@ -1372,6 +1372,9 @@ static void distributed_host_send_states(
 		objects_host_state_moving[absolute_index] = !at_rest;
 		if (at_rest && !was_moving)
 			continue;
+		/* (a living AI unit its actor states place: network_actors.c) */
+		if (object_get(object_index)->object.type == _object_type_biped && network_actors_host_drives(object_index))
+			continue;
 		distributed_state_from_object(object_index, &states[state_count]);
 		kinds[state_count++] = at_rest ? _host_state_to_all : _host_state_moving;
 	}
@@ -1382,8 +1385,11 @@ static void distributed_host_send_states(
 
 		absolute_index = (objects_host_resting_cursor + step) % told_count;
 		object_index = distributed_host_placed_object(absolute_index);
-		if (object_index == NONE || !TEST_FLAG(object_get(object_index)->object.flags, _object_at_rest_bit))
+		if (object_index == NONE || !TEST_FLAG(object_get(object_index)->object.flags, _object_at_rest_bit) ||
+			(object_get(object_index)->object.type == _object_type_biped && network_actors_host_drives(object_index)))
+		{
 			continue;
+		}
 		resting++;
 		objects_host_resting_cursor = (absolute_index + 1) % told_count;
 		distributed_state_from_object(object_index, &states[state_count]);
