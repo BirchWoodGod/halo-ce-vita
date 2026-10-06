@@ -31,6 +31,7 @@ memory_watch.c detects that by write-protecting the pages.
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #ifndef GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
 #define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT 0x83f1
@@ -1484,4 +1485,333 @@ void halo_custom_edition_texels_forget(void)
 	custom_edition_texels_take();
 	custom_edition_texel_count = 0;
 	custom_edition_texels_give();
+}
+
+/* ---------- sprite texel bounds */
+
+/* (port) Where a sprite's texels can colour anything: for a rectangle of a
+texture (a sprite of a bitmap group's sheet, in UV), the region outside
+which every sample the GPU can take reads texels that are zero in the
+channels a blend mode needs (alpha for an alpha blend, colour for add and
+the like), at every level of the Xbox mip chain (the GPU's levels are those
+or fewer), with the bilinear filter's reach (a texel of level L touches the
+samples within 1.5 of its texels around it) and the wrap of the rectangle's
+edges (a superset of the clamp). Returned in level-0 texel units: the
+rectangle and its diagonals (x + y, x - y), so a quad cut to that octagon
+draws the same image (render_sprite.c). The zero tests read the Xbox texels
+as the GPU gets them (convert_texel for the uncompressed formats; DXT
+blocks conservatively: a value counts as zero only if every decoder gives
+zero). Computed once per sprite and texture contents (the memory watch's
+generation of the texels, as the texture cache), cached. */
+
+enum
+{
+	_sprite_texels_alpha_bit = 1,
+	_sprite_texels_color_bit = 2,
+};
+
+/* the channels that may be non-zero at texel (x, y) of a level, or -1 when
+the format is not read here */
+static int sprite_texel_channels(const struct xgpu_texture_description *description, unsigned char kind,
+	const unsigned char *level_base, unsigned long level_width, unsigned long level_height,
+	const struct swizzle_masks *masks, unsigned long x, unsigned long y)
+{
+	struct format_information information = format_information(description->format);
+
+	if (kind == _texel_dxt1 || kind == _texel_dxt3 || kind == _texel_dxt5)
+	{
+		unsigned long blocks_x = (level_width + 3) / 4;
+		const unsigned char *block = level_base + ((y / 4) * blocks_x + x / 4) * information.bytes;
+		unsigned long index = (y & 3) * 4 + (x & 3);
+		const unsigned char *color_block = kind == _texel_dxt1 ? block : block + 8;
+		unsigned long c0 = color_block[0] | (color_block[1] << 8), c1 = color_block[2] | (color_block[3] << 8);
+		unsigned long bits = color_block[4] | (color_block[5] << 8) | ((unsigned long)color_block[6] << 16) |
+			((unsigned long)color_block[7] << 24);
+		unsigned long selector = (bits >> (index * 2)) & 3;
+		int channels = 0, color_zero, alpha_zero;
+
+		(void)level_height;
+		/* colour: an endpoint that is black, a mix of two black endpoints,
+		or DXT1's transparent black (index 3 when c0 <= c1) */
+		if (selector == 0)
+			color_zero = c0 == 0;
+		else if (selector == 1)
+			color_zero = c1 == 0;
+		else if (selector == 3 && kind == _texel_dxt1 && c0 <= c1)
+			color_zero = 1;
+		else
+			color_zero = c0 == 0 && c1 == 0;
+		if (kind == _texel_dxt1)
+			alpha_zero = selector == 3 && c0 <= c1;
+		else if (kind == _texel_dxt3)
+			alpha_zero = ((block[index / 2] >> ((index & 1) * 4)) & 0xf) == 0;
+		else
+		{
+			unsigned long a0 = block[0], a1 = block[1], code;
+			unsigned long long alpha_bits = 0;
+			int bit;
+
+			for (bit = 0; bit < 6; bit++)
+				alpha_bits |= (unsigned long long)block[2 + bit] << (bit * 8);
+			code = (unsigned long)(alpha_bits >> (index * 3)) & 7;
+			if (code == 0)
+				alpha_zero = a0 == 0;
+			else if (code == 1)
+				alpha_zero = a1 == 0;
+			else if (a0 <= a1 && code == 6)
+				alpha_zero = 1;
+			else if (a0 <= a1 && code == 7)
+				alpha_zero = 0;
+			else
+				alpha_zero = a0 == 0 && a1 == 0;
+		}
+		if (!alpha_zero)
+			channels |= _sprite_texels_alpha_bit;
+		if (!color_zero)
+			channels |= _sprite_texels_color_bit;
+		return channels;
+	}
+	if (kind == _texel_p8 || kind == _texel_yuy2 || kind == _texel_uyvy || kind == _texel_unknown)
+		return -1;
+	{
+		const unsigned char *texel = description->linear
+			? level_base + y * description->pitch + x * information.bytes
+			: level_base + (spread(masks->x, x) | spread(masks->y, y)) * information.bytes;
+		unsigned long value = convert_texel(kind, texel, NULL, x, texel);
+
+		return ((value >> 24) ? _sprite_texels_alpha_bit : 0) | ((value & 0x00ffffffUL) ? _sprite_texels_color_bit : 0);
+	}
+}
+
+struct sprite_texels_entry
+{
+	DWORD data, format_word, size_word;
+	uint32_t bounds_bits[4];
+	unsigned long generation, checked_serial, last_used;
+	int valid;
+	/* per channel set (alpha; colour; either): empty, rectangle, diagonals */
+	/* per channel set (alpha; colour; either): x0 y0 x1 y1 sum0 sum1
+	difference0 difference1 in eighths of a texel, outward; empty sets'
+	bits in empty */
+	short packed[3][8];
+	unsigned char empty;
+};
+
+struct vita_sprite_texels { int empty; float x0, y0, x1, y1, sum0, sum1, difference0, difference1; };
+
+#define SPRITE_TEXELS_ENTRIES 1024
+#define SPRITE_TEXELS_WAYS 4
+static struct sprite_texels_entry sprite_texels_entries[SPRITE_TEXELS_ENTRIES];
+static unsigned long sprite_texels_clock, sprite_texels_frame, sprite_texels_frame_count;
+volatile unsigned long vita_sprite_texels_computed, vita_sprite_texels_texels;
+
+/* every set of channels of one sprite's rectangle at once: alpha, colour,
+either */
+static int sprite_texels_compute(const unsigned char *base, const struct xgpu_texture_description *description,
+	const float bounds[4], struct vita_sprite_texels result[3])
+{
+	unsigned char kind = format_information(description->format).kind;
+	float u0 = bounds[0] < bounds[2] ? bounds[0] : bounds[2], u1 = bounds[0] < bounds[2] ? bounds[2] : bounds[0];
+	float v0 = bounds[1] < bounds[3] ? bounds[1] : bounds[3], v1 = bounds[1] < bounds[3] ? bounds[3] : bounds[1];
+	float width = (float)description->width, height = (float)description->height;
+	unsigned long levels = description->linear ? 1 : description->levels, level;
+	int set;
+
+	if (description->cube_map || description->depth > 1 || !(u0 >= -4.0f && u1 <= 4.0f && v0 >= -4.0f && v1 <= 4.0f))
+		return 0;
+	for (set = 0; set < 3; set++)
+	{
+		result[set].empty = 1;
+		result[set].x0 = result[set].y0 = result[set].sum0 = result[set].difference0 = 1.0e30f;
+		result[set].x1 = result[set].y1 = result[set].sum1 = result[set].difference1 = -1.0e30f;
+	}
+	for (level = 0; level < levels; level++)
+	{
+		unsigned long level_width = level_dimension(description->width, level);
+		unsigned long level_height = level_dimension(description->height, level);
+		const unsigned char *level_base = base + xgpu_texture_level_offset(description, level);
+		struct swizzle_masks masks = swizzle_masks(level_width, level_height, 1);
+		/* level-0 texels per texel of this level */
+		float scale_x = width / (float)level_width, scale_y = height / (float)level_height;
+		long first_x = (long)floorf(u0 * level_width - 0.5f), last_x = (long)floorf(u1 * level_width - 0.5f) + 1;
+		long first_y = (long)floorf(v0 * level_height - 0.5f), last_y = (long)floorf(v1 * level_height - 0.5f) + 1;
+		long i, j;
+
+		if ((last_x - first_x + 1) * (last_y - first_y + 1) > 1024L * 1024L)
+			return 0;
+		for (j = first_y; j <= last_y; j++)
+		{
+			unsigned long y = (unsigned long)(((j % (long)level_height) + (long)level_height) % (long)level_height);
+
+			for (i = first_x; i <= last_x; i++)
+			{
+				unsigned long x = (unsigned long)(((i % (long)level_width) + (long)level_width) % (long)level_width);
+				int channels = sprite_texel_channels(description, kind, level_base, level_width, level_height, &masks, x, y);
+				/* the samples this texel reaches, in level-0 texels */
+				float rx0 = (i - 0.5f) * scale_x, rx1 = (i + 1.5f) * scale_x;
+				float ry0 = (j - 0.5f) * scale_y, ry1 = (j + 1.5f) * scale_y;
+
+				if (channels < 0)
+					return 0;
+				vita_sprite_texels_texels++;
+				for (set = 0; set < 3; set++)
+				{
+					int mask = set == 0 ? _sprite_texels_alpha_bit : set == 1 ? _sprite_texels_color_bit :
+						_sprite_texels_alpha_bit | _sprite_texels_color_bit;
+					struct vita_sprite_texels *r = &result[set];
+
+					if (!(channels & mask))
+						continue;
+					r->empty = 0;
+					if (rx0 < r->x0) r->x0 = rx0;
+					if (rx1 > r->x1) r->x1 = rx1;
+					if (ry0 < r->y0) r->y0 = ry0;
+					if (ry1 > r->y1) r->y1 = ry1;
+					if (rx0 + ry0 < r->sum0) r->sum0 = rx0 + ry0;
+					if (rx1 + ry1 > r->sum1) r->sum1 = rx1 + ry1;
+					if (rx0 - ry1 < r->difference0) r->difference0 = rx0 - ry1;
+					if (rx1 - ry0 > r->difference1) r->difference1 = rx1 - ry0;
+				}
+			}
+		}
+	}
+	for (set = 0; set < 3; set++)
+	{
+		/* a margin of a sixteenth of a texel against the GPU's coordinate
+		precision */
+		struct vita_sprite_texels *r = &result[set];
+
+		r->x0 -= 0.0625f; r->y0 -= 0.0625f; r->sum0 -= 0.125f; r->difference0 -= 0.125f;
+		r->x1 += 0.0625f; r->y1 += 0.0625f; r->sum1 += 0.125f; r->difference1 += 0.125f;
+	}
+	vita_sprite_texels_computed++;
+	return 1;
+}
+
+/* resource: the bitmap's Direct3D texture header; bounds: the sprite's UV
+rectangle (x0, y0, x1, y1); channels: 1 alpha, 2 colour, 3 either. 0 when
+unknown (draw the whole quad); otherwise *texels and the texture's level-0
+size */
+int vita_sprite_texel_bounds(const void *resource_pointer, const float bounds[4], int channels,
+	struct vita_sprite_texels *texels, float *width, float *height)
+{
+	const DWORD *resource = resource_pointer;
+	DWORD data, format_word, size_word;
+	struct sprite_texels_entry *entry;
+	uint32_t bits[4];
+	unsigned long hash, address, size;
+	struct xgpu_texture_description description;
+
+	if (!resource || channels < 1 || channels > 3)
+		return 0;
+	data = resource[1];
+	format_word = resource[3];
+	size_word = resource[4];
+	memcpy(bits, bounds, sizeof(bits));
+	{
+		/* FNV-1a over the key's words, murmur3's finaliser */
+		uint32_t words[7], h = 2166136261u;
+		int index;
+
+		words[0] = data; words[1] = format_word; words[2] = size_word;
+		memcpy(words + 3, bits, sizeof(bits));
+		for (index = 0; index < 7; index++)
+			h = (h ^ words[index]) * 16777619u;
+		h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13; h *= 0xc2b2ae35u; h ^= h >> 16;
+		hash = h;
+	}
+	xgpu_texture_describe(format_word, size_word, &description);
+	address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(data);
+	size = xgpu_texture_face_size(&description);
+	{
+		/* four ways a set; a miss takes the way used longest ago */
+		struct sprite_texels_entry *set = &sprite_texels_entries[(hash % (SPRITE_TEXELS_ENTRIES / SPRITE_TEXELS_WAYS)) *
+			SPRITE_TEXELS_WAYS];
+		int way;
+
+		entry = NULL;
+		for (way = 0; way < SPRITE_TEXELS_WAYS; way++)
+		{
+			struct sprite_texels_entry *candidate = &set[way];
+
+			if (candidate->valid && candidate->data == data && candidate->format_word == format_word &&
+				candidate->size_word == size_word && !memcmp(candidate->bounds_bits, bits, sizeof(bits)))
+			{
+				entry = candidate;
+				break;
+			}
+		}
+		if (!entry)
+		{
+			entry = &set[0];
+			for (way = 1; way < SPRITE_TEXELS_WAYS; way++)
+				if (set[way].last_used < entry->last_used)
+					entry = &set[way];
+			entry->valid = 0;
+		}
+		entry->last_used = ++sprite_texels_clock;
+	}
+	if (!(entry->valid &&
+		(entry->checked_serial == memory_watch_serial() || entry->generation == memory_watch_generation(address, size))))
+	{
+		entry->valid = 0;
+		if (!platform_is_contiguous((void *)address) || !platform_is_contiguous((void *)(address + size - 1)) ||
+			custom_edition_texels_order(address) != _custom_edition_channels_xbox)
+			return 0;
+		entry->data = data;
+		entry->format_word = format_word;
+		entry->size_word = size_word;
+		memcpy(entry->bounds_bits, bits, sizeof(bits));
+		entry->generation = memory_watch_generation(address, size);
+		{
+			struct vita_sprite_texels result[3];
+			int set, value;
+
+			/* (at most 16 sprites' bounds a frame: an explosion's first
+			frame draws the rest whole) */
+			if (sprite_texels_frame != texture_frame)
+			{
+				sprite_texels_frame = texture_frame;
+				sprite_texels_frame_count = 0;
+			}
+			if (++sprite_texels_frame_count > 16)
+				return 0;
+			if (!sprite_texels_compute((const unsigned char *)address, &description, bounds, result))
+				return 0;
+			entry->empty = 0;
+			for (set = 0; set < 3; set++)
+			{
+				const float *values = &result[set].x0;
+
+				if (result[set].empty)
+					entry->empty |= 1 << set;
+				for (value = 0; value < 8; value++)
+				{
+					/* minima rounded down, maxima (x1 y1 sum1
+					difference1) up; within +-4095 texels */
+					int maximum = value == 2 || value == 3 || value == 5 || value == 7;
+					float eighths = values[value] * 8.0f;
+
+					eighths = maximum ? ceilf(eighths) : floorf(eighths);
+					if (result[set].empty)
+						eighths = 0.0f;
+					if (eighths < -32767.0f || eighths > 32767.0f)
+						return 0;
+					entry->packed[set][value] = (short)eighths;
+				}
+			}
+		}
+		entry->valid = 1;
+	}
+	entry->checked_serial = memory_watch_serial();
+	{
+		int value;
+
+		texels->empty = (entry->empty >> (channels - 1)) & 1;
+		for (value = 0; value < 8; value++)
+			(&texels->x0)[value] = entry->packed[channels - 1][value] / 8.0f;
+	}
+	*width = (float)description.width;
+	*height = (float)description.height;
+	return 1;
 }

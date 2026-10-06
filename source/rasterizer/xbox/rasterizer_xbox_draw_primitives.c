@@ -749,6 +749,24 @@ void _rasterizer_dynamic_triangles_delete(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) the vertices of a type still free this frame, and buffers left
+(render_sprite.c asks before taking room for trimmed sprites) */
+long rasterizer_dynamic_vertices_available(
+	short type)
+{
+	struct dynamic_vertex_group *group;
+
+	if (type < 0 || type >= NUMBER_OF_RASTERIZER_VERTEX_TYPES ||
+		dynamic_vertices.buffer_count >= RASTERIZER_MAXIMUM_DYNAMIC_VERTEX_BUFFERS - 1)
+		return 0;
+	group = &dynamic_vertices.groups[type];
+	if (!group->d3d_vertex_buffer)
+		return 0;
+	return group->maximum_vertex_count - group->vertex_count;
+}
+
+#endif
 long _rasterizer_dynamic_vertices_new(
 	short type,
 	long count)

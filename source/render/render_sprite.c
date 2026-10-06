@@ -203,6 +203,216 @@ struct tag_enum_definition global_sprite_render_orientations_enum =
 
 real const one_over_full_circle = 1.f / (2.f*_pi);
 
+#ifdef HALO_LINUX
+/* (port) Trimmed sprites: a particle's quad cut to the part of its texture
+that can colour anything (port/vita/platform/vita_textures.c: the texels
+that are not zero in the channels the shader's blend reads, with the
+filter's reach at every mip level), as a rectangle or that rectangle with
+its corners cut along the diagonals (an octagon, drawn as up to three
+quads). The rest of the quad sampled zero alpha (alpha blend) or zero
+colour (add, subtract, max) everywhere: those pixels left the framebuffer
+as it was, and the GPU shades fewer of them. The smoke and flame sprites of
+a firefight are most of the effects' fill (triage/fx-status.md). Only
+sprites whose cut quad shades its pixels as the whole quad did: the fog the
+vertex program gives the corners linear across the sprite (planar fog is
+not: sprite_trim_fog_linear), at least 32 pixels across, not point
+sampled. The rest differ from the whole quad's only by the interpolation's
+rounding (Vita3K at fixed ticks: under 0.2% of a frame's pixels, nearly all
+by 1 of 255; triage/fx2-status.md). HALO_SPRITE_TRIM=0 off, 1 rectangles,
+2 octagons (the default); HALO_SPRITE_TRIM_MIN_PIXELS=n the smallest. */
+#include <stdlib.h>
+struct vita_sprite_texels { int empty; float x0, y0, x1, y1, sum0, sum1, difference0, difference1; };
+extern int vita_sprite_texel_bounds(const void *resource, const float bounds[4], int channels,
+	struct vita_sprite_texels *texels, float *width, float *height) __attribute__((weak));
+
+static int sprite_trim_mode = -1;
+static real sprite_trim_minimum_pixels;
+/* (HALO_EFFECT_STATS) the effects' quad area kept, weighted by screen coverage */
+double sprite_trim_area_full, sprite_trim_area_kept;
+unsigned long sprite_trim_sprites, sprite_trim_trimmed, sprite_trim_empty, sprite_trim_fogged, sprite_trim_small;
+
+static int sprite_trim_enabled(void)
+{
+	if (sprite_trim_mode < 0)
+	{
+		const char *setting = getenv("HALO_SPRITE_TRIM");
+
+		sprite_trim_mode = setting ? atoi(setting) : 2;
+		setting = getenv("HALO_SPRITE_TRIM_MIN_PIXELS");
+		sprite_trim_minimum_pixels = setting ? (real)atof(setting) : 32.f;
+		if (!vita_sprite_texel_bounds)
+			sprite_trim_mode = 0;
+	}
+	return sprite_trim_mode;
+}
+
+/* the channels whose zero leaves the framebuffer as it was under the
+effect shader's blend function (rasterizer_set_framebuffer_blend_function;
+the effect combiners multiply the texel by the tint, the fade and the fog,
+rasterizer_xbox_transparent_geometry.c): 1 alpha, 2 colour, 3 both, 0 none */
+static int sprite_trim_channels(struct shader_effect_definition const *shader)
+{
+	/* (only an effect shader is drawn with the effect combiners: type 1,
+	rasterizer_xbox_transparent_geometry.c) */
+	if (!shader || shader->shader.base.type != 1)
+		return 0;
+	/* point sampled (primary_map_flags bit 0): a pixel next to a texel
+	boundary would flip to the other texel on the cut quad's slightly
+	different interpolation */
+	if (TEST_FLAG(shader->primary_map_flags, 0))
+		return 0;
+	switch (shader->framebuffer_blend_function)
+	{
+	case 0: return 1; /* alpha blend: src*a + dst*(1 - a) */
+	case 3: /* add: src + dst */
+	case 4: /* subtract: dst - src */
+	case 6: return 2; /* component max */
+	case 7: return 3; /* alpha multiply add: src + dst*(1 - a) */
+	default: return 0; /* multiply, double multiply, component min: zero is not neutral */
+	}
+}
+
+/* a z-sprite (the secondary map anchored to the sprite: a soft particle)
+takes its depth texture's coordinates from a stream of fixed corner values,
+four a quad (rasterizer_xbox_transparent_geometry.c's texcoord_stream). This
+port's pixel programs leave the depth replace out (nv2a_psh_cg.c dot_zw), so
+those coordinates colour nothing; a z-sprite is cut to a rectangle only, one
+quad a sprite as before, so the stream's quads stay the sprites' */
+static boolean sprite_trim_zsprite(struct shader_effect_definition const *shader)
+{
+	return shader && shader->secondary_map.index != NONE && shader->secondary_map_anchor == 2;
+}
+
+/* the polygon (UV, up to 8 points, in order) of the sprite rectangle that
+is drawn; 0 points when nothing is */
+static short sprite_trim_polygon(
+	struct bitmap_group_sprite const *sprite,
+	struct vita_sprite_texels const *texels,
+	real width,
+	real height,
+	boolean octagon,
+	real_point2d points[8])
+{
+	real_point2d buffer[2][12];
+	short count = 4, plane;
+	real u0 = MIN(sprite->bounds.x0, sprite->bounds.x1), u1 = MAX(sprite->bounds.x0, sprite->bounds.x1);
+	real v0 = MIN(sprite->bounds.y0, sprite->bounds.y1), v1 = MAX(sprite->bounds.y0, sprite->bounds.y1);
+	real x0 = MAX(texels->x0, u0*width), x1 = MIN(texels->x1, u1*width);
+	real y0 = MAX(texels->y0, v0*height), y1 = MIN(texels->y1, v1*height);
+	real_point2d *in = buffer[0], *out = buffer[1];
+	short index;
+
+	if (texels->empty || x0 >= x1 || y0 >= y1)
+		return 0;
+	/* the original's vertex order: (x0, y1) (x1, y1) (x1, y0) (x0, y0) */
+	in[0].x = x0; in[0].y = y1;
+	in[1].x = x1; in[1].y = y1;
+	in[2].x = x1; in[2].y = y0;
+	in[3].x = x0; in[3].y = y0;
+	for (plane = 0; octagon && plane < 4; plane++)
+	{
+		/* a*x + b*y >= c */
+		real a = plane < 2 ? 1.f : 1.f, b = plane < 2 ? 1.f : -1.f, c, sign = (plane & 1) ? -1.f : 1.f;
+		short out_count = 0;
+
+		c = plane == 0 ? texels->sum0 : plane == 1 ? texels->sum1 : plane == 2 ? texels->difference0 : texels->difference1;
+		for (index = 0; index < count; index++)
+		{
+			real_point2d const *p = &in[index], *q = &in[(index + 1) % count];
+			real dp = sign*(a*p->x + b*p->y - c), dq = sign*(a*q->x + b*q->y - c);
+
+			if (dp >= 0.f)
+				out[out_count++] = *p;
+			if ((dp >= 0.f) != (dq >= 0.f))
+			{
+				real t = dp/(dp - dq);
+
+				out[out_count].x = p->x + (q->x - p->x)*t;
+				out[out_count].y = p->y + (q->y - p->y)*t;
+				out_count++;
+			}
+		}
+		count = out_count;
+		{
+			real_point2d *swap = in; in = out; out = swap;
+		}
+		if (count < 3)
+			return 0;
+	}
+	if (count > 8)
+		count = 8;
+	for (index = 0; index < count; index++)
+	{
+		points[index].x = in[index].x/width;
+		points[index].y = in[index].y/height;
+	}
+	return count;
+}
+
+extern struct rasterizer_window_begin_parameters global_window_parameters;
+
+/* the fog the effect vertex shader gives a sprite's corners (the
+rasterizer's fog constants, rasterizer_xbox.c): the atmospheric term is
+linear in the view depth, clamped to [0, 1]; the planar terms (depth below
+the fog plane, view depth over the planar distance) are clamped and
+squared. A cut quad interpolates the fog of its own corners, so it shades
+as the whole quad did only where those terms are linear across the sprite:
+TRUE when each is constant or (the atmospheric one) unclamped at all four
+corners. A screen-facing sprite has one view depth; the planar fog's plane
+depth still varies across it */
+static boolean sprite_trim_fog_linear(
+	struct build_sprite_vertex const *corners)
+{
+	struct render_fog const *fog = &global_window_parameters.fog;
+	struct render_camera const *camera = &global_window_parameters.camera;
+	real view_distance = dot_product3d((real_vector3d const *)&camera->position, &camera->forward);
+	real atmospheric_range = fog->atmospheric_maximum_distance - fog->atmospheric_minimum_distance;
+	short below[3] = { 0, 0, 0 }, above[3] = { 0, 0, 0 }, corner;
+
+	for (corner = 0; corner < NUMBER_OF_VERTICES_PER_QUADRILATERAL; corner++)
+	{
+		real_point3d world;
+		real depth, term[3];
+		short index;
+
+		matrix4x3_transform_point(&global_window_parameters.frustum.view_to_world, &corners[corner].point, &world);
+		depth = dot_product3d((real_vector3d const *)&world, &camera->forward) - view_distance;
+		term[0] = atmospheric_range > 0.f ? (depth - fog->atmospheric_minimum_distance)/atmospheric_range : 0.f;
+		term[1] = fog->planar_maximum_depth > 0.f ?
+			(fog->plane.d - dot_product3d((real_vector3d const *)&world, &fog->plane.n))/fog->planar_maximum_depth : 0.f;
+		term[2] = fog->planar_maximum_distance > 0.f ? depth/fog->planar_maximum_distance : 0.f;
+		for (index = 0; index < 3; index++)
+		{
+			if (term[index] <= 0.f)
+				below[index]++;
+			if (term[index] >= 1.f)
+				above[index]++;
+		}
+	}
+	/* atmospheric: no corner clamped, or all on one side */
+	if (fog->atmospheric_maximum_density > 0.f &&
+		(below[0] || above[0]) && below[0] != NUMBER_OF_VERTICES_PER_QUADRILATERAL &&
+		above[0] != NUMBER_OF_VERTICES_PER_QUADRILATERAL)
+		return FALSE;
+	/* planar (squared): every corner clamped to the same side */
+	if (fog->planar_maximum_density > 0.f &&
+		((below[1] != NUMBER_OF_VERTICES_PER_QUADRILATERAL && above[1] != NUMBER_OF_VERTICES_PER_QUADRILATERAL) ||
+		(below[2] != NUMBER_OF_VERTICES_PER_QUADRILATERAL && above[2] != NUMBER_OF_VERTICES_PER_QUADRILATERAL)))
+		return FALSE;
+	return TRUE;
+}
+
+static real sprite_trim_polygon_area(real_point2d const *points, short count)
+{
+	real area = 0.f;
+	short index;
+
+	for (index = 0; index < count; index++)
+		area += points[index].x*points[(index + 1) % count].y - points[(index + 1) % count].x*points[index].y;
+	return area < 0.f ? -area/2.f : area/2.f;
+}
+#endif
+
 /* ---------- public code */
 
 void build_sprites_begin(
@@ -225,6 +435,11 @@ void build_sprites_begin(
 	data->sprite_count = 0;
 	data->maximum_sprite_count = maximum_sprite_count;
 	data->centroid = *global_origin3d;
+#ifdef HALO_LINUX
+	/* (port) the groups whose vertices have room for trimmed sprites'
+	octagons (build_sprite_get_group) */
+	data->pad22 = 0;
+#endif
 	SET_FLAG(data->flags, _build_sprites_valid_bit, TRUE);
 	return;
 }
@@ -279,7 +494,12 @@ void build_sprites_end(
 					NULL,
 					-NUMBER_OF_VERTICES_PER_QUADRILATERAL,
 					group->vertex_buffer_index,
+#ifdef HALO_LINUX
+					/* (port) and the trimmed sprites' extra quads */
+					2 * (group->sprite_count + group->pad0A),
+#else
 					2 * group->sprite_count,
+#endif
 					&data->centroid,
 					geometry_flags);
 			}
@@ -403,7 +623,15 @@ void build_sprite(
 
 				if (group->sprite_count<data->maximum_sprite_count)
 				{
+#ifdef HALO_LINUX
+					/* (port) after the trimmed sprites' extra quads */
+					short vertex_index = NUMBER_OF_VERTICES_PER_QUADRILATERAL*(group->sprite_count + group->pad0A);
+					short first_vertex_index = vertex_index;
+					word extra_quads_before = group->pad0A;
+					real trim_fraction = 1.f;
+#else
 					short vertex_index = NUMBER_OF_VERTICES_PER_QUADRILATERAL*group->sprite_count;
+#endif
 					real rotation_sine = 0.f;
 					real rotation_cosine = 1.f;
 					real_rectangle3d bounds = *global_null_rectangle3d;
@@ -525,6 +753,130 @@ void build_sprite(
 						vertex_index++;
 					}
 
+#ifdef HALO_LINUX
+					if (!TEST_FLAG(data->flags, _build_sprites_screen_space_bit) && sprite_trim_enabled())
+					{
+						int channels = sprite_trim_channels(data->shader);
+						void *resource = channels ? _texture_cache_bitmap_get_hardware_format(bitmap, FALSE, FALSE) : NULL;
+						struct vita_sprite_texels texels;
+						float texture_width, texture_height;
+						float rectangle[4];
+						real_point2d points[8];
+						short point_count = -1;
+
+						rectangle[0] = sprite->bounds.x0;
+						rectangle[1] = sprite->bounds.y0;
+						rectangle[2] = sprite->bounds.x1;
+						rectangle[3] = sprite->bounds.y1;
+						/* (only where the cut quad's corners get the fog the
+						whole quad interpolates to there) */
+						if (resource && !sprite_trim_fog_linear(
+							&((struct build_sprite_vertex *)group->vertices)[first_vertex_index]))
+						{
+							resource = NULL;
+							sprite_trim_fogged++;
+						}
+						if (resource)
+						{
+							/* (only sprites at least HALO_SPRITE_TRIM_MIN_PIXELS
+							across on screen, default 32, in front of the near
+							plane: a small sprite's cut corners land on the
+							GPU's sub-pixel grid apart from where its texels
+							map, and its edge pixels sample a little elsewhere;
+							small sprites are little of the fill) */
+							struct build_sprite_vertex const *corners =
+								&((struct build_sprite_vertex *)group->vertices)[first_vertex_index];
+							real x0 = 1.0e30f, x1 = -1.0e30f, y0 = 1.0e30f, y1 = -1.0e30f;
+							short corner;
+
+							for (corner = 0; corner < NUMBER_OF_VERTICES_PER_QUADRILATERAL; corner++)
+							{
+								real depth = -corners[corner].point.z;
+								real x, y;
+
+								if (depth <= render.frustum.z_near)
+								{
+									x0 = y0 = 0.f;
+									x1 = y1 = -1.f;
+									break;
+								}
+								x = corners[corner].point.x*render.frustum.projection_world_to_screen.i/depth;
+								y = corners[corner].point.y*render.frustum.projection_world_to_screen.j/depth;
+								x0 = MIN(x0, x); x1 = MAX(x1, x);
+								y0 = MIN(y0, y); y1 = MAX(y1, y);
+							}
+							if (x1 - x0 < sprite_trim_minimum_pixels || y1 - y0 < sprite_trim_minimum_pixels)
+							{
+								resource = NULL;
+								sprite_trim_small++;
+							}
+						}
+						if (resource &&
+							vita_sprite_texel_bounds(resource, rectangle, channels, &texels, &texture_width, &texture_height))
+						{
+							boolean octagon = sprite_trim_mode >= 2 && TEST_FLAG(data->pad22, group_index);
+
+							point_count = sprite_trim_polygon(sprite, &texels, texture_width, texture_height, octagon, points);
+						}
+						sprite_trim_sprites++;
+						if (point_count >= 0)
+						{
+							struct build_sprite_vertex *sprite_vertices =
+								&((struct build_sprite_vertex *)group->vertices)[first_vertex_index];
+							real full_area = (real)fabs((sprite->bounds.x1 - sprite->bounds.x0)*(sprite->bounds.y1 - sprite->bounds.y0));
+							short quad_count = point_count >= 4 ? (point_count - 1)/2 : 1;
+							short quad, corner;
+
+							sprite_trim_trimmed++;
+							if (!point_count)
+							{
+								/* nothing can show: four copies of one point */
+								sprite_trim_empty++;
+								trim_fraction = 0.f;
+								for (corner = 1; corner < NUMBER_OF_VERTICES_PER_QUADRILATERAL; corner++)
+									sprite_vertices[corner] = sprite_vertices[0];
+							}
+							else
+							{
+								struct build_sprite_vertex first_vertex = sprite_vertices[0];
+
+								trim_fraction = full_area > 0.f ? sprite_trim_polygon_area(points, point_count)/full_area : 1.f;
+								for (quad = 0; quad < quad_count; quad++)
+								{
+									for (corner = 0; corner < NUMBER_OF_VERTICES_PER_QUADRILATERAL; corner++)
+									{
+										/* a fan from point 0: (0 1 2 3) (0 3 4 5) (0 5 6 7) */
+										short point_index = corner == 0 ? 0 : MIN(2*quad + corner, point_count - 1);
+										struct build_sprite_vertex *sprite_vertex =
+											&sprite_vertices[quad*NUMBER_OF_VERTICES_PER_QUADRILATERAL + corner];
+										real u = points[point_index].x;
+										real v = points[point_index].y;
+										real offset_x = u - (sprite->bounds.x0 + sprite->registration_point.x);
+										real offset_y = (sprite->registration_point.y + sprite->bounds.y0) - v;
+										real x = offset_x*rotation_cosine - offset_y*rotation_sine;
+										real y = offset_y*rotation_cosine + offset_x*rotation_sine;
+
+										if (TEST_FLAG(flags, _build_sprite_u_mirror_bit))
+											x = -x;
+										if (TEST_FLAG(flags, _build_sprite_v_mirror_bit))
+											y = -y;
+										sprite_vertex->point.x = (basis.forward.i*x + basis.left.i*y)*scale +
+											transformed_origin.x;
+										sprite_vertex->point.y = (basis.forward.j*x + basis.left.j*y)*scale +
+											transformed_origin.y;
+										sprite_vertex->point.z = (basis.forward.k*x + basis.left.k*y)*scale +
+											transformed_origin.z;
+										sprite_vertex->texture_coordinates.x = u;
+										sprite_vertex->texture_coordinates.y = v;
+										sprite_vertex->color = first_vertex.color;
+									}
+								}
+								group->pad0A += quad_count - 1;
+								vertex_index = first_vertex_index + quad_count*NUMBER_OF_VERTICES_PER_QUADRILATERAL;
+							}
+						}
+					}
+#endif
 					data->centroid.x += transformed_origin.x;
 					data->centroid.y += transformed_origin.y;
 					data->centroid.z += transformed_origin.z;
@@ -536,10 +888,18 @@ void build_sprite(
 						real coverage = render_frustum_cube_view_fraction(&render.frustum, &bounds);
 
 						build_sprite_globals.screen_coverage += coverage;
+#ifdef HALO_LINUX
+						sprite_trim_area_full += coverage;
+						sprite_trim_area_kept += coverage*trim_fraction;
+#endif
 						if (coverage>0.5f && build_sprite_globals.big_sprite_count++>10)
 						{
 							group->sprite_count--;
 							data->sprite_count--;
+#ifdef HALO_LINUX
+							group->pad0A = extra_quads_before;
+							vertex_index = first_vertex_index + NUMBER_OF_VERTICES_PER_QUADRILATERAL;
+#endif
 						}
 
 						if (debug_sprites)
@@ -805,6 +1165,25 @@ static short build_sprite_get_group(
 			if (_texture_cache_bitmap_get_hardware_format(bitmap, FALSE, TRUE))
 			{
 				rasterizer_globals.current_lock_operation = _rasterizer_lock_sprite;
+#ifdef HALO_LINUX
+				/* (port) room for every sprite as an octagon's three quads
+				when sprites are trimmed (above); one quad each if that much
+				is not free */
+				group->vertex_buffer_index = NONE;
+				group->pad0A = 0;
+				if (!TEST_FLAG(data->flags, _build_sprites_screen_space_bit) && sprite_trim_enabled() >= 2 &&
+					sprite_trim_channels(data->shader) && !sprite_trim_zsprite(data->shader) &&
+					data->maximum_sprite_count <= 2700 &&
+					rasterizer_dynamic_vertices_available(6) >=
+						3*NUMBER_OF_VERTICES_PER_QUADRILATERAL*(long)data->maximum_sprite_count + 4096)
+				{
+					group->vertex_buffer_index = rasterizer_dynamic_vertices_new(
+						6, 3*NUMBER_OF_VERTICES_PER_QUADRILATERAL*data->maximum_sprite_count);
+					if (group->vertex_buffer_index != NONE)
+						SET_FLAG(data->pad22, group_index, TRUE);
+				}
+				if (group->vertex_buffer_index == NONE)
+#endif
 				group->vertex_buffer_index = rasterizer_dynamic_vertices_new(
 					TEST_FLAG(data->flags, _build_sprites_screen_space_bit) ? 8 : 6,
 					NUMBER_OF_VERTICES_PER_QUADRILATERAL*data->maximum_sprite_count);
