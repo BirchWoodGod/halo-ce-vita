@@ -55,7 +55,6 @@ each frame's presentation.
 #define RING_COUNT 4
 #define RING_SIZE (6 * 1024 * 1024)
 #define WORKER_RING_SIZE (2 * 1024 * 1024)
-#define POOL_SIZE (56 * 1024 * 1024)
 #define PATCHER_BUFFER_SIZE (6 * 1024 * 1024)
 #define PATCHER_USSE_SIZE (4 * 1024 * 1024)
 #define SHADER_DIRECTORY "ux0:data/haloce-vita/shaders"
@@ -101,11 +100,6 @@ struct block
 	unsigned int size;
 };
 
-/* the CDRAM the render targets hold (blocks of their own; the small
-targets' shared blocks count whole), for the log of a live change of the
-screen's targets (vgxm_target_stats) */
-static unsigned long target_cdram_bytes;
-
 static void *block_allocate(struct block *block, SceKernelMemBlockType type, unsigned int size, int map,
 	const char *name)
 {
@@ -119,8 +113,6 @@ static void *block_allocate(struct block *block, SceKernelMemBlockType type, uns
 	}
 	sceKernelGetMemBlockBase(block->uid, &block->base);
 	block->size = size;
-	if (type == SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW && strstr(name, "target"))
-		target_cdram_bytes += size;
 	if (map)
 	{
 		int result = sceGxmMapMemory(block->base, size, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE);
@@ -128,8 +120,6 @@ static void *block_allocate(struct block *block, SceKernelMemBlockType type, uns
 		if (result < 0)
 		{
 			log_line("gxm: cannot map %s: 0x%08x", name, (unsigned)result);
-			if (type == SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW && strstr(name, "target"))
-				target_cdram_bytes -= size;
 			sceKernelFreeMemBlock(block->uid);
 			block->base = NULL;
 			return NULL;
@@ -137,6 +127,66 @@ static void *block_allocate(struct block *block, SceKernelMemBlockType type, uns
 	}
 	return block->base;
 }
+
+/* the video memory's bookkeeping (port/vita/include/vgxm_memory.h): a
+block of CDRAM, or of user RAM (uncached, as the rings) for the texture
+pool's segments that CDRAM has no room for, mapped for the GPU */
+static int memory_os_allocate(int user, unsigned int size, const char *name, struct block *block)
+{
+	return block_allocate(block, user ? SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE : SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW,
+		size, 1, name) != NULL;
+}
+
+static void memory_os_free(struct block *block)
+{
+	sceGxmUnmapMemory(block->base);
+	sceKernelFreeMemBlock(block->uid);
+}
+
+/* whether the kernel's free CDRAM figure follows what is freed (the
+hardware's does; Vita3K's falls with every block freed): tried at start-up
+(memory_figure_check) */
+static int memory_figure_trusted;
+
+static long memory_os_free_kb(int user)
+{
+	SceKernelFreeMemorySizeInfo info;
+
+	if (!user && !memory_figure_trusted)
+		return -1;
+	memset(&info, 0, sizeof(info));
+	info.size = sizeof(info);
+	if (sceKernelGetFreeMemorySize(&info) < 0)
+		return -1;
+	return (user ? info.size_user : info.size_cdram) / 1024;
+}
+
+static void memory_figure_check(void)
+{
+	SceKernelFreeMemorySizeInfo info[3];
+	SceUID block = -1;
+	int index;
+
+	memset(info, 0, sizeof(info));
+	for (index = 0; index < 3; index++)
+	{
+		info[index].size = sizeof(info[index]);
+		if (index == 1)
+			block = sceKernelAllocMemBlock("cdram check", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 256 * 1024, NULL);
+		if (index == 2 && block >= 0)
+			sceKernelFreeMemBlock(block);
+		sceKernelGetFreeMemorySize(&info[index]);
+	}
+	memory_figure_trusted = block >= 0 && info[0].size_cdram == info[2].size_cdram &&
+		info[0].size_cdram - info[1].size_cdram == 256 * 1024;
+	log_line("gxm: the free CDRAM figure %s (%d KB, %d KB with a 256 KB block, %d KB after it)",
+		memory_figure_trusted ? "follows what is freed: used" : "does not follow what is freed: the model's used",
+		info[0].size_cdram / 1024, info[1].size_cdram / 1024, info[2].size_cdram / 1024);
+}
+
+static unsigned long memory_target_headroom(void);
+
+#include "vgxm_memory.h"
 
 /* ---------- state */
 
@@ -249,8 +299,6 @@ static struct
 	struct block worker_rings[RING_COUNT];
 	unsigned int worker_ring_offset;
 	unsigned int worker_ring_index;
-	struct block pool;
-	unsigned int pool_offset;
 
 	/* visibility tests: a buffer per worker ring (a frame's tests count
 	into the buffer of the ring the worker executes it in); the frame
@@ -463,6 +511,8 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 			megabytes = 40;
 		initialize.parameterBufferSize = megabytes * 1024 * 1024;
 	}
+	memory_figure_check();
+	memory_configure(initialize.parameterBufferSize);
 	result = sceGxmInitialize(&initialize);
 	if (result < 0)
 	{
@@ -532,6 +582,7 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 
 		if (!memory)
 			return -1;
+		memory_bytes[_memory_display] += gxm.display_memory[index].size;
 		memset(memory, 0, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT);
 		sceGxmColorSurfaceInit(&gxm.display_surface[index], SCE_GXM_COLOR_FORMAT_A8B8G8R8,
 			SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE, SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,
@@ -580,7 +631,7 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 		if (!block_allocate(&gxm.worker_rings[index], SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, WORKER_RING_SIZE, 1, "worker ring"))
 			return -1;
 	}
-	if (!block_allocate(&gxm.pool, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, POOL_SIZE, 1, "texture pool"))
+	if (!pool_initialize())
 		return -1;
 	if (block_allocate(&gxm.visibility, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,
 		RING_COUNT * VISIBILITY_CORES * VISIBILITY_CORE_STRIDE, 1, "visibility"))
@@ -615,8 +666,8 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 	}
 	gxm.ready = 1;
 	vita_host_log_memory("with the renderer up");
-	log_line("gxm: ready: %ux%u display, %u MB rings, %u MB texture pool, window %p (%lu MB) mapped",
-		DISPLAY_WIDTH, DISPLAY_HEIGHT, RING_COUNT * RING_SIZE >> 20, POOL_SIZE >> 20, arena, arena_size >> 20);
+	log_line("gxm: ready: %ux%u display, %u MB rings, %u MB texture pool (made as it fills), window %p (%lu MB) mapped",
+		DISPLAY_WIDTH, DISPLAY_HEIGHT, RING_COUNT * RING_SIZE >> 20, POOL_BYTES >> 20, arena, arena_size >> 20);
 	return 0;
 }
 
@@ -668,16 +719,8 @@ void vgxm_ring_next(unsigned long frame)
 
 void *vgxm_pool_alloc(unsigned long size, unsigned long alignment)
 {
-	unsigned int offset = ALIGN(gxm.pool_offset, (unsigned int)alignment);
-
-	if (offset + size > POOL_SIZE)
-		return NULL;
-	gxm.pool_offset = offset + (unsigned int)size;
-	return (unsigned char *)gxm.pool.base + offset;
+	return pool_allocate(size, alignment);
 }
-
-/* the sequential indices live at the pool's start and survive resets */
-static unsigned int pool_floor;
 
 void vgxm_pool_reset(void)
 {
@@ -687,14 +730,15 @@ void vgxm_pool_reset(void)
 		gxm.in_scene = 0;
 	}
 	sceGxmFinish(gxm.context);
+	/* (the sequential indices live at the pool's start and survive resets) */
 	if (!pool_floor)
 		pool_floor = 65536 * 2;
-	gxm.pool_offset = pool_floor;
+	pool_forget();
 }
 
 unsigned long vgxm_pool_used(void)
 {
-	return gxm.pool_offset;
+	return pool_offset + pool_jumbo_bytes;
 }
 
 /* ---------- shaders */
@@ -1760,98 +1804,6 @@ void vgxm_texture_set_level_count(struct vgxm_texture *texture, unsigned long le
 
 /* ---------- render targets */
 
-/* CDRAM for a small colour target (the glow's and the shadows' 128x128s,
-mip chains): CDRAM blocks come in 256 KB steps, and a block each held a
-64 KB 128x128 target in 256 KB, so two dozen of them took 6 MB of the
-12 MB left and the next failed (b30, "cannot allocate colour target").
-Small targets are carved from shared 256 KB blocks instead; a share given
-back (a target remade at another size, target_release) is kept for the
-next small target that fits in it. NULL when there is no memory. */
-#define SMALL_TARGET_BLOCK (256 * 1024)
-#define MAXIMUM_SMALL_TARGET_SPARES 64
-
-static struct
-{
-	void *base;
-	unsigned int size;
-} small_target_spares[MAXIMUM_SMALL_TARGET_SPARES];
-
-/* a small target's share of a block given back (the block stays) */
-static void small_target_give_back(void *base, unsigned int size)
-{
-	int i;
-
-	for (i = 0; i < MAXIMUM_SMALL_TARGET_SPARES; i++)
-	{
-		if (!small_target_spares[i].base)
-		{
-			small_target_spares[i].base = base;
-			small_target_spares[i].size = size;
-			return;
-		}
-	}
-	/* (no room: the share is lost, as before targets were remade) */
-}
-
-static void *small_target_memory(unsigned int *share_size)
-{
-	unsigned int size = *share_size;
-	static struct block current;
-	static unsigned int used;
-	struct block block;
-	int i, best = -1;
-
-	size = ALIGN(size, 4096);
-	if (size > SMALL_TARGET_BLOCK / 2)
-		return NULL;
-	for (i = 0; i < MAXIMUM_SMALL_TARGET_SPARES; i++)
-	{
-		if (small_target_spares[i].base && small_target_spares[i].size >= size &&
-			(best < 0 || small_target_spares[i].size < small_target_spares[best].size))
-		{
-			best = i;
-		}
-	}
-	if (best >= 0)
-	{
-		void *base = small_target_spares[best].base;
-
-		small_target_spares[best].base = NULL;
-		*share_size = small_target_spares[best].size;
-		return base;
-	}
-	if (!current.base || used + size > current.size)
-	{
-		if (!block_allocate(&block, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, SMALL_TARGET_BLOCK, 1, "colour targets"))
-			return NULL;
-		current = block;
-		used = 0;
-	}
-	used += size;
-	*share_size = size;
-	return (unsigned char *)current.base + used - size;
-}
-
-static void *cdram_allocate(struct block *block, unsigned int size, const char *name);
-
-/* CDRAM for a colour target: a small one's share of a block, else a block
-of its own */
-static void *colour_target_memory(struct block *memory, unsigned int size, const char *name)
-{
-	unsigned int share_size = size;
-	void *base = small_target_memory(&share_size);
-
-	if (base)
-	{
-		/* (uid -1: a share, given back to the spares, not freed) */
-		memory->uid = -1;
-		memory->base = base;
-		memory->size = share_size;
-		return base;
-	}
-	return cdram_allocate(memory, size, name);
-}
-
 /* Render target objects of the screen-sized targets given back (a live
 change of the render scale or width: vgxm_target_release), kept for the
 next target of their size instead of destroyed: switching back and forth
@@ -1900,99 +1852,6 @@ static SceGxmRenderTarget *render_target_take(unsigned int width, unsigned int h
 	return render_target_for(width, height);
 }
 
-/* The memory of the screen-sized targets given back by a live change,
-kept (up to SCREEN_BLOCK_CACHE_BYTES) for the next target of exactly that
-kind and size instead of freed. Switching between settings then lands
-each size where it was before: Vita3K's renderer keeps the surfaces it has
-seen by address, and a surface of another size made where an old one was
-drew red or nothing through the zoom's and pause menu's copies of the
-screen, and once hung its renderer (triage/live-status.md; on the hardware
-the GPU has no such cache). The oldest is freed first when the cache is
-full, and the whole cache when CDRAM runs out (cdram_allocate). */
-#define SCREEN_BLOCK_CACHE_BYTES (16u * 1024 * 1024)
-#define SCREEN_BLOCK_CACHE_COUNT 24
-
-static struct
-{
-	struct block memory;
-	int depth;
-	unsigned int width, height;
-} screen_blocks[SCREEN_BLOCK_CACHE_COUNT];
-static unsigned int screen_block_bytes;
-
-static void screen_block_free(int index)
-{
-	sceGxmUnmapMemory(screen_blocks[index].memory.base);
-	sceKernelFreeMemBlock(screen_blocks[index].memory.uid);
-	target_cdram_bytes -= screen_blocks[index].memory.size;
-	screen_block_bytes -= screen_blocks[index].memory.size;
-	memset(&screen_blocks[index], 0, sizeof(screen_blocks[index]));
-}
-
-/* frees the cache; nonzero if there was anything in it */
-static int screen_blocks_flush(void)
-{
-	int index, freed = 0;
-
-	for (index = 0; index < SCREEN_BLOCK_CACHE_COUNT; index++)
-		if (screen_blocks[index].memory.base)
-		{
-			screen_block_free(index);
-			freed = 1;
-		}
-	return freed;
-}
-
-static void screen_block_keep(const struct block *memory, int depth, unsigned int width, unsigned int height)
-{
-	int index;
-
-	/* (the oldest freed while there is no room; [0] is the newest) */
-	while (screen_blocks[SCREEN_BLOCK_CACHE_COUNT - 1].memory.base ||
-		(screen_block_bytes + memory->size > SCREEN_BLOCK_CACHE_BYTES && screen_block_bytes))
-	{
-		for (index = SCREEN_BLOCK_CACHE_COUNT - 1; index >= 0 && !screen_blocks[index].memory.base; index--)
-			;
-		screen_block_free(index);
-	}
-	memmove(&screen_blocks[1], &screen_blocks[0], (SCREEN_BLOCK_CACHE_COUNT - 1) * sizeof(screen_blocks[0]));
-	screen_blocks[0].memory = *memory;
-	screen_blocks[0].depth = depth;
-	screen_blocks[0].width = width;
-	screen_blocks[0].height = height;
-	screen_block_bytes += memory->size;
-}
-
-static int screen_block_take(struct block *memory, int depth, unsigned int width, unsigned int height)
-{
-	int index;
-
-	for (index = 0; index < SCREEN_BLOCK_CACHE_COUNT; index++)
-	{
-		if (screen_blocks[index].memory.base && screen_blocks[index].depth == depth &&
-			screen_blocks[index].width == width && screen_blocks[index].height == height)
-		{
-			*memory = screen_blocks[index].memory;
-			screen_block_bytes -= memory->size;
-			memmove(&screen_blocks[index], &screen_blocks[index + 1],
-				(SCREEN_BLOCK_CACHE_COUNT - 1 - index) * sizeof(screen_blocks[0]));
-			memset(&screen_blocks[SCREEN_BLOCK_CACHE_COUNT - 1], 0, sizeof(screen_blocks[0]));
-			return 1;
-		}
-	}
-	return 0;
-}
-
-/* a block of CDRAM for a target, the cache freed for a second try */
-static void *cdram_allocate(struct block *block, unsigned int size, const char *name)
-{
-	void *base = block_allocate(block, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, name);
-
-	if (!base && screen_blocks_flush())
-		base = block_allocate(block, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, name);
-	return base;
-}
-
 /* gives a target slot back its memory and its render target object (a
 screen-sized one's kept as spares: render_target_give_back,
 screen_block_keep) */
@@ -2002,16 +1861,7 @@ static void target_release(struct target *target)
 		render_target_give_back(target->render_target, target->width, target->height);
 	else if (target->render_target)
 		sceGxmDestroyRenderTarget(target->render_target);
-	if (target->memory.base && target->memory.uid != -1 && target->scale_kind)
-		screen_block_keep(&target->memory, target->depth, target->width, target->height);
-	else if (target->memory.base && target->memory.uid == -1)
-		small_target_give_back(target->memory.base, target->memory.size);
-	else if (target->memory.base)
-	{
-		sceGxmUnmapMemory(target->memory.base);
-		sceKernelFreeMemBlock(target->memory.uid);
-		target_cdram_bytes -= target->memory.size;
-	}
+	target_memory_give_back(&target->memory, target->depth, target->scale_kind, target->width, target->height);
 	memset(target, 0, sizeof(*target));
 }
 
@@ -2178,15 +2028,58 @@ void vgxm_target_release(unsigned long id)
 void vgxm_target_stats(unsigned long *targets, unsigned long *cdram_bytes, unsigned long *cached_bytes,
 	unsigned long *cdram_free)
 {
-	SceKernelFreeMemorySizeInfo info;
-
 	*targets = gxm.target_count;
 	/* (the cache's blocks are not the targets': screen_block_keep) */
-	*cdram_bytes = target_cdram_bytes - screen_block_bytes;
-	*cached_bytes = screen_block_bytes;
-	memset(&info, 0, sizeof(info));
-	info.size = sizeof(info);
-	*cdram_free = sceKernelGetFreeMemorySize(&info) >= 0 ? (unsigned long)info.size_cdram : 0;
+	*cdram_bytes = memory_bytes[_memory_screen] + memory_bytes[_memory_target] + memory_bytes[_memory_small];
+	*cached_bytes = memory_bytes[_memory_cache];
+	*cdram_free = memory_cdram_free();
+}
+
+/* (vgxm_memory.h) the headroom the texture pool leaves the targets: the
+screen-sized targets' bytes at 100% and 848 columns or more */
+static unsigned long memory_target_headroom(void)
+{
+	unsigned long ceiling = 0;
+	unsigned int index;
+
+	for (index = 0; index < gxm.target_count; index++)
+	{
+		const struct target *target = &gxm.targets[index];
+
+		if (target->scale_kind && target->memory.base && !target->atlas)
+			ceiling += memory_screen_ceiling(target->depth, target->asked_width);
+	}
+	return memory_headroom_from(ceiling);
+}
+
+unsigned long vgxm_cdram_free(void)
+{
+	return memory_cdram_free();
+}
+
+unsigned long vgxm_cdram_wanted(void)
+{
+	unsigned long wanted = memory_wanted_bytes;
+
+	memory_wanted_bytes = 0;
+	return wanted;
+}
+
+unsigned long vgxm_memory_trim(void)
+{
+	unsigned long freed = screen_blocks_flush();
+
+	return freed + small_blocks_release();
+}
+
+unsigned long vgxm_pool_demote(void **base, unsigned long *size)
+{
+	return pool_demote(base, size);
+}
+
+int vgxm_pool_promote(void **base, unsigned long *size)
+{
+	return pool_promote(base, size);
 }
 
 /* makes a target in a slot: its memory, surface, render target object and
@@ -2229,8 +2122,8 @@ static int target_make(struct target *target, unsigned long width, unsigned long
 		unsigned int aligned_width = ALIGN(target->width, SCE_GXM_TILE_SIZEX);
 		unsigned int aligned_height = ALIGN(target->height, SCE_GXM_TILE_SIZEY);
 
-		if (!(target->scale_kind && screen_block_take(&target->memory, 1, target->width, target->height)) &&
-			!cdram_allocate(&target->memory, 4 * aligned_width * aligned_height, "depth target"))
+		if (!target_memory_get(&target->memory, 4 * aligned_width * aligned_height, 1, target->scale_kind, target->width,
+			target->height, "depth target"))
 		{
 			/* (the render target object is not kept for a retry: each
 			failed attempt, every 30 frames, leaked one, and the driver's
@@ -2254,8 +2147,8 @@ static int target_make(struct target *target, unsigned long width, unsigned long
 	else
 	{
 		target->stride = ALIGN(target->width, 32);
-		if (!(target->scale_kind && screen_block_take(&target->memory, 0, target->width, target->height)) &&
-			!colour_target_memory(&target->memory, 4 * target->stride * target->height, "colour target"))
+		if (!target_memory_get(&target->memory, 4 * target->stride * target->height, 0, target->scale_kind, target->width,
+			target->height, "colour target"))
 		{
 			target_release(target);
 			return 0;
@@ -2442,6 +2335,86 @@ unsigned long vgxm_target_create_cell(unsigned long key, unsigned long index, un
 	return atlases[atlas].cells[index - 1];
 }
 
+static int target_is_atlas(unsigned long id)
+{
+	int atlas;
+
+	for (atlas = 0; atlas < MAXIMUM_ATLASES; atlas++)
+		if (atlases[atlas].id == id)
+			return 1;
+	return 0;
+}
+
+unsigned long vgxm_targets_sweep(const unsigned char *referenced, unsigned long count)
+{
+	unsigned long bytes = 0, swept = 0;
+	unsigned int index;
+
+	if (!gxm.ready)
+		return 0;
+	for (index = 0; index < gxm.target_count; index++)
+	{
+		struct target *target = &gxm.targets[index];
+		unsigned long id = index + 1;
+
+		if ((id < count && referenced[id]) || target->atlas || target_is_atlas(id) ||
+			(!target->memory.base && !target->render_target) ||
+			(gxm.in_scene && (gxm.scene_color == id || gxm.scene_depth == id || gxm.scene_cell == id)))
+		{
+			continue;
+		}
+		if (target->memory.uid)
+			bytes += target->memory.size;
+		target_release(target);
+		if (gxm.presented_target == id)
+			gxm.presented_target = 0;
+		swept++;
+	}
+	if (swept)
+		log_line("gxm: %lu targets nothing refers to given back (%lu KB)", swept, bytes / 1024);
+	return bytes;
+}
+
+void vgxm_memory_census(const char *const *roles, unsigned long count, int detail)
+{
+	char line[480];
+	unsigned int index;
+	long user_free = memory_os_free_kb(1);
+
+	memory_census_line(line, sizeof(line), 0);
+	log_line("cdram census: %s", line);
+	memory_census_line(line, sizeof(line), 1);
+	log_line("cdram census: %s", line);
+	log_line("cdram census: in user RAM (not CDRAM): frame rings %u KB, worker rings %u KB, GXM's VDM/vertex/fragment "
+		"rings %u KB, shader patcher %u KB, visibility %u KB, system dialog depth %u KB, texture pool %lu KB; %ld KB of "
+		"user RAM free", RING_COUNT * RING_SIZE / 1024, RING_COUNT * WORKER_RING_SIZE / 1024,
+		(gxm.vdm_ring.size + gxm.vertex_ring.size + gxm.fragment_ring.size + gxm.fragment_usse_ring.size) / 1024,
+		(gxm.patcher_buffer.size + gxm.patcher_vertex_usse.size + gxm.patcher_fragment_usse.size) / 1024,
+		gxm.visibility.size / 1024, gxm.dialog_depth.size / 1024, memory_bytes[_memory_pool_user] / 1024, user_free);
+	if (!detail)
+		return;
+	for (index = 0; index < gxm.target_count; index++)
+	{
+		const struct target *target = &gxm.targets[index];
+		unsigned long id = index + 1;
+		const char *role = id < count && roles[id] ? roles[id] : target_is_atlas(id) ?
+			"the copies of a small surface (the shadows, their blurs)" : "nothing refers to it";
+
+		if (target->atlas)
+			continue;
+		if (!target->memory.base && !target->render_target)
+		{
+			if (id < count && roles[id])
+				log_line("cdram census: target %lu: no memory now (%s)", id, role);
+			continue;
+		}
+		log_line("cdram census: target %lu: %ux%u %s, %u KB %s%s: %s", id, target->width, target->height,
+			target->depth ? "depth" : "colour", target->memory.size / 1024,
+			target->memory.uid == -1 ? "share of a small-target block" : target->memory.uid == 0 ? "in its chain's block" :
+			"block of its own", target_is_atlas(id) ? " (an atlas)" : target->scale_kind ? " (screen-sized)" : "", role);
+	}
+}
+
 int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
 	struct vgxm_texture *texture)
 {
@@ -2478,14 +2451,7 @@ static void chain_abandon(unsigned int first_slot, struct block *chain)
 			sceGxmDestroyRenderTarget(target->render_target);
 		memset(target, 0, sizeof(*target));
 	}
-	if (chain->base && chain->uid == -1)
-		small_target_give_back(chain->base, chain->size);
-	else if (chain->base)
-	{
-		sceGxmUnmapMemory(chain->base);
-		sceKernelFreeMemBlock(chain->uid);
-		target_cdram_bytes -= chain->size;
-	}
+	target_memory_give_back(chain, 0, 0, 0, 0);
 }
 
 int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned long levels,
@@ -2503,7 +2469,7 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 
 		size += 4 * ALIGN(level_width, 8) * level_height;
 	}
-	if (!colour_target_memory(&chain, size, "colour target chain"))
+	if (!target_memory_get(&chain, size, 0, 0, 0, 0, "colour target chain"))
 		return -1;
 	memset(chain.base, 0, size);
 	for (level = 0; level < levels; level++)

@@ -123,6 +123,32 @@ kept for the screen-sized targets' sizes not in use (vita_gxm.c
 screen_block_keep), and the CDRAM free */
 void vgxm_target_stats(unsigned long *targets, unsigned long *cdram_bytes, unsigned long *cached_bytes,
 	unsigned long *cdram_free);
+/* ---------- video memory (CDRAM: port/vita/include/vgxm_memory.h)
+
+The CDRAM free (the hardware's figure where it can be trusted, the model's
+otherwise, less HALO_CDRAM_RESERVE_MB's reserve). The rest is for the
+device's live changes and relief (d3d8_gxm.c), between frames, with the
+worker and the GPU idle: vgxm_cdram_wanted, the largest target allocation
+that found no CDRAM since it was last asked (0: none); vgxm_memory_trim
+frees what costs nothing (the block cache, the small targets' blocks with
+every share back), the bytes freed; vgxm_targets_sweep gives back every
+target whose id is not marked in referenced[] (count entries; never an
+atlas or its cells), the bytes they held; vgxm_pool_demote moves the
+texture pool's highest part in CDRAM to user RAM (the CDRAM bytes freed, 0
+if none), and vgxm_pool_promote the lowest in user RAM back to CDRAM when
+the targets keep their headroom (1 if one moved): the textures decoded in
+*base's *size bytes are to be forgotten (vita_texture_cache_forget).
+vgxm_memory_census logs what holds CDRAM; with detail, a line per target,
+with roles[id] (count entries) saying what each is */
+/* (the most target ids there are) */
+#define VGXM_MAXIMUM_TARGETS 256
+unsigned long vgxm_cdram_free(void);
+unsigned long vgxm_cdram_wanted(void);
+unsigned long vgxm_memory_trim(void);
+unsigned long vgxm_targets_sweep(const unsigned char *referenced, unsigned long count);
+unsigned long vgxm_pool_demote(void **base, unsigned long *size);
+int vgxm_pool_promote(void **base, unsigned long *size);
+void vgxm_memory_census(const char *const *roles, unsigned long count, int detail);
 /* colour targets for each level of one linear mip chain (levels one after
 another, rows aligned to 8 texels, as the texture cache's own mipmapped
 textures), so a texture the game renders level by level (the water's

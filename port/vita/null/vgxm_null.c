@@ -105,7 +105,6 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 /* as port/vita/host/vita_gxm.c */
 #define RING_COUNT 4
 #define RING_SIZE (6 * 1024 * 1024)
-#define POOL_SIZE (56 * 1024 * 1024)
 #define MAXIMUM_SHADERS 4096
 #define MAXIMUM_TARGETS 256
 
@@ -114,14 +113,57 @@ static struct
 	int ready;
 	unsigned char *rings[RING_COUNT];
 	unsigned int ring_offset, ring_index, ring_offset_peak;
-	unsigned char *pool;
-	unsigned int pool_offset;
 	unsigned long long shader_hashes[MAXIMUM_SHADERS];
 	unsigned int shader_count;
 	unsigned int target_count;
 	unsigned long draws, clears, presents, scene_draws;
 	unsigned long color_target, depth_target;
 } null;
+
+#define ALIGN(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
+
+/* the video memory's bookkeeping, as the Vita's (port/vita/include/
+vgxm_memory.h): blocks of the C heap stand in for CDRAM and user RAM, and
+the free CDRAM is the model's (112 MB less GXM's parameter buffer, the
+display and everything the renderer holds), so a live change finds the
+memory a Vita would, and HALO_CDRAM_RESERVE_MB makes it as tight */
+struct block
+{
+	int uid;
+	void *base;
+	unsigned int size;
+};
+
+#define log_line platform_log
+
+static int memory_os_allocate(int user, unsigned int size, const char *name, struct block *block)
+{
+	static int uids;
+
+	(void)user;
+	(void)name;
+	block->base = malloc(size);
+	if (!block->base)
+		return 0;
+	block->uid = ++uids;
+	block->size = size;
+	return 1;
+}
+
+static void memory_os_free(struct block *block)
+{
+	free(block->base);
+}
+
+static long memory_os_free_kb(int user)
+{
+	(void)user;
+	return -1;
+}
+
+static unsigned long memory_target_headroom(void);
+
+#include "vgxm_memory.h"
 
 int vgxm_initialize(void *arena, unsigned long arena_size)
 {
@@ -137,12 +179,22 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 		if (!null.rings[index])
 			return -1;
 	}
-	null.pool = malloc(POOL_SIZE);
-	if (!null.pool)
+	{
+		/* (GXM's parameter buffer and the two 960x544 display buffers, in
+		the Vita's CDRAM: counted, not made) */
+		const char *setting = getenv("HALO_GXM_PARAMETER_MB");
+		unsigned int megabytes = setting ? (unsigned int)atoi(setting) : 40;
+
+		if (megabytes < 8 || megabytes > 64)
+			megabytes = 40;
+		memory_configure(megabytes * 1024ul * 1024);
+		memory_bytes[_memory_display] = 2 * ALIGN(960u * 544 * 4, CDRAM_ALIGNMENT);
+	}
+	if (!pool_initialize())
 		return -1;
 	null.ready = 1;
 	platform_log("gxm-null: the Vita's Direct3D device over a renderer that draws nothing (%u MB rings, %u MB pool)",
-		RING_COUNT * RING_SIZE >> 20, POOL_SIZE >> 20);
+		RING_COUNT * RING_SIZE >> 20, POOL_BYTES >> 20);
 	return 0;
 }
 
@@ -213,7 +265,6 @@ unsigned long vgxm_shader_request(const char *source, int fragment)
 	return vgxm_shader_get(source, fragment);
 }
 
-#define ALIGN(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
 
 void *vgxm_ring_alloc(unsigned long size, unsigned long alignment)
 {
@@ -256,26 +307,19 @@ void vgxm_ring_next(unsigned long frame)
 
 void *vgxm_pool_alloc(unsigned long size, unsigned long alignment)
 {
-	unsigned int offset = ALIGN(null.pool_offset, (unsigned int)alignment);
-
-	if (offset + size > POOL_SIZE)
-		return NULL;
-	null.pool_offset = offset + (unsigned int)size;
-	return null.pool + offset;
+	return pool_allocate(size, alignment);
 }
-
-static unsigned int pool_floor;
 
 void vgxm_pool_reset(void)
 {
 	if (!pool_floor)
 		pool_floor = 65536 * 2;
-	null.pool_offset = pool_floor;
+	pool_forget();
 }
 
 unsigned long vgxm_pool_used(void)
 {
-	return null.pool_offset;
+	return pool_offset + pool_jumbo_bytes;
 }
 
 int vgxm_texture_initialize(struct vgxm_texture *texture, const void *data, unsigned long format,
@@ -284,8 +328,9 @@ int vgxm_texture_initialize(struct vgxm_texture *texture, const void *data, unsi
 	/* control words that differ whenever the texture does, as GXM's would */
 	/* (an offset in the pool, not the address: the same in every run, for
 	the draw hash) */
-	texture->control[0] = (const unsigned char *)data >= null.pool && (const unsigned char *)data < null.pool + POOL_SIZE ?
-		(unsigned long)((const unsigned char *)data - null.pool) : (unsigned long)data;
+	long offset = pool_offset_of(data);
+
+	texture->control[0] = offset >= 0 ? (unsigned long)offset : (unsigned long)data;
 	texture->control[1] = format | layout << 4 | levels << 8;
 	texture->control[2] = width | height << 16;
 	texture->control[3] = 0;
@@ -305,11 +350,19 @@ void vgxm_texture_set_level_count(struct vgxm_texture *texture, unsigned long le
 	texture->control[1] = (texture->control[1] & 0x0ffffffful) | (unsigned long)(levels & 0xf) << 28;
 }
 
-/* the render scale and the bytes each target would hold on the Vita (the
-screen-sized targets at the scale: vita_gxm.c target_make), so a live
-change of the screen's targets logs what it would take and give back */
+/* the render scale, and each target's memory as the Vita's renderer makes
+it (vita_gxm.c target_make: the screen-sized targets at the scale, rows of
+32 pixels, depth in whole tiles, small colour targets in shares of 256 KB
+blocks, the screen-sized ones' blocks kept after a live change), so a live
+change takes and gives back what it would on the Vita */
 static float null_render_scale = -1.0f;
-static unsigned long null_target_bytes[MAXIMUM_TARGETS + 1];
+
+static struct null_target
+{
+	struct block memory;
+	int depth, scale_kind;
+	unsigned int width, height, asked_width;
+} null_targets[MAXIMUM_TARGETS + 1];
 
 float vgxm_render_scale(void)
 {
@@ -329,18 +382,46 @@ void vgxm_render_scale_set(float scale)
 	null_render_scale = scale < 0.5f || scale > 1.0f ? 1.0f : scale;
 }
 
-static void null_target_size(unsigned long id, unsigned long width, unsigned long height)
+static void null_target_release(unsigned long id)
 {
-	float scale = vgxm_render_scale();
+	struct null_target *target;
 
-	if (id > MAXIMUM_TARGETS)
+	if (!id || id > MAXIMUM_TARGETS)
 		return;
-	if (scale < 1.0f && height == 480 && width >= 640)
+	target = &null_targets[id];
+	target_memory_give_back(&target->memory, target->depth, target->scale_kind, target->width, target->height);
+	memset(target, 0, sizeof(*target));
+}
+
+/* the memory of target id at this size; 0 when there is none */
+static int null_target_make(unsigned long id, unsigned long width, unsigned long height, int depth)
+{
+	struct null_target *target;
+	float scale = vgxm_render_scale();
+	unsigned long asked_width = width, bytes;
+
+	if (!id || id > MAXIMUM_TARGETS)
+		return 0;
+	target = &null_targets[id];
+	memset(target, 0, sizeof(*target));
+	target->scale_kind = height == 480 && width >= 640;
+	if (scale < 1.0f && target->scale_kind)
 	{
 		width = (unsigned long)(width * scale + 0.5f) & ~1UL;
 		height = (unsigned long)(height * scale + 0.5f) & ~1UL;
 	}
-	null_target_bytes[id] = 4 * width * height;
+	target->depth = depth;
+	target->width = (unsigned int)width;
+	target->height = (unsigned int)height;
+	target->asked_width = (unsigned int)asked_width;
+	bytes = depth ? 4 * ALIGN(width, 32) * ALIGN(height, 32) : 4 * ALIGN(width, 32) * height;
+	if (!target_memory_get(&target->memory, (unsigned int)bytes, depth, target->scale_kind, target->width,
+		target->height, depth ? "depth target" : "colour target"))
+	{
+		memset(target, 0, sizeof(*target));
+		return 0;
+	}
+	return 1;
 }
 
 /* the dynamic resolution's rectangle, as on the Vita (vita_gxm.c
@@ -376,7 +457,7 @@ static unsigned long null_rect_words(unsigned long width, unsigned long height)
 
 void vgxm_target_texture(unsigned long id, struct vgxm_texture *texture)
 {
-	if (!id || id > MAXIMUM_TARGETS || !texture || !null_target_asked[id])
+	if (!id || id > MAXIMUM_TARGETS || !texture || !null_target_asked[id] || !null_targets[id].memory.base)
 		return;
 	texture->control[2] = null_rect_words(null_target_asked[id] & 0xffff, null_target_asked[id] >> 16);
 }
@@ -397,23 +478,125 @@ void vgxm_overlay_dynamic(int dynamic)
 	(void)dynamic;
 }
 
+/* atlases as on the Vita (vita_gxm.c vgxm_target_create_cell): a cell is
+a target id of its own, without memory, whose scenes are its atlas's (the
+scene count) */
+static unsigned int cell_atlas[MAXIMUM_TARGETS + 1];
+static struct { unsigned long key, width, height; unsigned int id, cells[24]; } null_atlases[6];
+
+static int null_target_is_atlas(unsigned long id)
+{
+	int atlas;
+
+	for (atlas = 0; atlas < 6; atlas++)
+		if (null_atlases[atlas].id == id)
+			return 1;
+	return 0;
+}
+
 void vgxm_target_release(unsigned long id)
 {
-	if (id && id <= MAXIMUM_TARGETS)
-		null_target_bytes[id] = 0;
+	if (id && id <= MAXIMUM_TARGETS && !cell_atlas[id])
+		null_target_release(id);
 }
 
 void vgxm_target_stats(unsigned long *targets, unsigned long *cdram_bytes, unsigned long *cached_bytes,
 	unsigned long *cdram_free)
 {
-	unsigned long id, total = 0;
-
-	for (id = 1; id <= MAXIMUM_TARGETS; id++)
-		total += null_target_bytes[id];
 	*targets = null.target_count;
-	*cdram_bytes = total;
-	*cached_bytes = 0;
-	*cdram_free = 0;
+	*cdram_bytes = memory_bytes[_memory_screen] + memory_bytes[_memory_target] + memory_bytes[_memory_small];
+	*cached_bytes = memory_bytes[_memory_cache];
+	*cdram_free = memory_cdram_free();
+}
+
+static unsigned long memory_target_headroom(void)
+{
+	unsigned long ceiling = 0, id;
+
+	for (id = 1; id <= null.target_count && id <= MAXIMUM_TARGETS; id++)
+		if (null_targets[id].scale_kind && null_targets[id].memory.base)
+			ceiling += memory_screen_ceiling(null_targets[id].depth, null_targets[id].asked_width);
+	return memory_headroom_from(ceiling);
+}
+
+unsigned long vgxm_cdram_free(void)
+{
+	return memory_cdram_free();
+}
+
+unsigned long vgxm_cdram_wanted(void)
+{
+	unsigned long wanted = memory_wanted_bytes;
+
+	memory_wanted_bytes = 0;
+	return wanted;
+}
+
+unsigned long vgxm_memory_trim(void)
+{
+	unsigned long freed = screen_blocks_flush();
+
+	return freed + small_blocks_release();
+}
+
+unsigned long vgxm_pool_demote(void **base, unsigned long *size)
+{
+	return pool_demote(base, size);
+}
+
+int vgxm_pool_promote(void **base, unsigned long *size)
+{
+	return pool_promote(base, size);
+}
+
+unsigned long vgxm_targets_sweep(const unsigned char *referenced, unsigned long count)
+{
+	unsigned long id, bytes = 0, swept = 0;
+
+	for (id = 1; id <= null.target_count && id <= MAXIMUM_TARGETS; id++)
+	{
+		if ((id < count && referenced[id]) || cell_atlas[id] || null_target_is_atlas(id) || !null_targets[id].memory.base)
+			continue;
+		if (null_targets[id].memory.uid)
+			bytes += null_targets[id].memory.size;
+		null_target_release(id);
+		swept++;
+	}
+	if (swept)
+		platform_log("gxm: %lu targets nothing refers to given back (%lu KB)", swept, bytes / 1024);
+	return bytes;
+}
+
+void vgxm_memory_census(const char *const *roles, unsigned long count, int detail)
+{
+	char line[480];
+	unsigned long id;
+
+	memory_census_line(line, sizeof(line), 0);
+	platform_log("cdram census: %s", line);
+	memory_census_line(line, sizeof(line), 1);
+	platform_log("cdram census: %s", line);
+	if (!detail)
+		return;
+	for (id = 1; id <= null.target_count && id <= MAXIMUM_TARGETS; id++)
+	{
+		const struct null_target *target = &null_targets[id];
+		const char *role = id < count && roles[id] ? roles[id] : null_target_is_atlas(id) ?
+			"the copies of a small surface (the shadows, their blurs)" : "nothing refers to it";
+
+		if (cell_atlas[id])
+			continue;
+		if (!target->memory.base)
+		{
+			if (id < count && roles[id])
+				platform_log("cdram census: target %lu: no memory now (%s)", id, role);
+			continue;
+		}
+		platform_log("cdram census: target %lu: %ux%u %s, %u KB %s%s: %s", id, target->width, target->height,
+			target->depth ? "depth" : "colour", target->memory.size / 1024,
+			target->memory.uid == -1 ? "share of a small-target block" : target->memory.uid == 0 ? "in its chain's block" :
+			"block of its own", null_target_is_atlas(id) ? " (an atlas)" : target->scale_kind ? " (screen-sized)" : "", role);
+	}
 }
 
 unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
@@ -427,12 +610,13 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 
 		limit = setting && atoi(setting) > 0 && atoi(setting) < MAXIMUM_TARGETS ? atoi(setting) : MAXIMUM_TARGETS;
 	}
-	if (null.target_count >= (unsigned int)limit)
+	if (null.target_count >= (unsigned int)limit || !width || !height)
 		return 0;
 	if (getenv("HALO_TRACE_FILES"))
 		fprintf(stderr, "trace: target %lux%lu depth %d (%u made)\n", width, height, depth, null.target_count);
+	if (!null_target_make(null.target_count + 1, width, height, depth))
+		return 0;
 	null.target_count++;
-	null_target_size(null.target_count, width, height);
 	if (null.target_count <= MAXIMUM_TARGETS)
 		null_target_asked[null.target_count] = height == 480 && width >= 640 ? width | height << 16 : 0;
 	if (texture)
@@ -444,11 +628,6 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 	}
 	return null.target_count;
 }
-
-/* atlases as on the Vita (vita_gxm.c vgxm_target_create_cell): a cell is
-a target id of its own, whose scenes are its atlas's (the scene count) */
-static unsigned int cell_atlas[MAXIMUM_TARGETS + 1];
-static struct { unsigned long key, width, height; unsigned int id, cells[24]; } null_atlases[6];
 
 unsigned long vgxm_target_create_cell(unsigned long key, unsigned long index, unsigned long width, unsigned long height,
 	struct vgxm_texture *texture)
@@ -479,8 +658,11 @@ unsigned long vgxm_target_create_cell(unsigned long key, unsigned long index, un
 	id = null_atlases[atlas].cells[index - 1];
 	if (!id)
 	{
-		if (!(id = vgxm_target_create(width, height, 0, NULL)) || id > MAXIMUM_TARGETS)
+		/* (a slot without memory: the atlas's) */
+		if (null.target_count >= MAXIMUM_TARGETS)
 			return 0;
+		id = ++null.target_count;
+		null_target_asked[id] = 0;
 		null_atlases[atlas].cells[index - 1] = (unsigned int)id;
 		cell_atlas[id] = null_atlases[atlas].id;
 	}
@@ -497,10 +679,15 @@ unsigned long vgxm_target_create_cell(unsigned long key, unsigned long index, un
 int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
 	struct vgxm_texture *texture)
 {
-	if (!id || id > null.target_count || !width || !height)
+	if (!id || id > null.target_count || id > MAXIMUM_TARGETS || !width || !height || cell_atlas[id])
 		return 0;
-	null_target_size(id, width, height);
+	null_target_release(id);
 	null_target_asked[id] = height == 480 && width >= 640 ? width | height << 16 : 0;
+	if (!null_target_make(id, width, height, depth))
+	{
+		platform_log("gxm: cannot remake target %lu as %lux%lu %s", id, width, height, depth ? "depth" : "colour");
+		return 0;
+	}
 	if (texture)
 	{
 		texture->control[0] = 0x80000000ul | id;
@@ -511,17 +698,39 @@ int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long heig
 	return 1;
 }
 
+/* a mip chain as on the Vita: one block (or share) for every level, held
+by the first level's slot */
 int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned long levels,
 	unsigned long *ids, struct vgxm_texture *texture)
 {
-	unsigned long level;
+	struct block chain;
+	unsigned long level, size = 0;
 
+	if (!levels || null.target_count + levels > MAXIMUM_TARGETS)
+		return -1;
+	for (level = 0; level < levels; level++)
+		size += 4 * ALIGN(width >> level ? width >> level : 1, 8) * (height >> level ? height >> level : 1);
+	if (!target_memory_get(&chain, (unsigned int)size, 0, 0, 0, 0, "colour target chain"))
+		return -1;
 	for (level = 0; level < levels; level++)
 	{
-		ids[level] = vgxm_target_create(width >> level ? width >> level : 1, height >> level ? height >> level : 1, 0,
-			level ? NULL : texture);
-		if (!ids[level])
-			return -1;
+		unsigned long id = ++null.target_count;
+
+		memset(&null_targets[id], 0, sizeof(null_targets[id]));
+		null_targets[id].width = (unsigned int)(width >> level ? width >> level : 1);
+		null_targets[id].height = (unsigned int)(height >> level ? height >> level : 1);
+		null_targets[id].memory = chain;
+		if (level)
+			null_targets[id].memory.uid = 0;
+		null_target_asked[id] = 0;
+		ids[level] = id;
+	}
+	if (texture)
+	{
+		texture->control[0] = 0x80000000ul | ids[0];
+		texture->control[1] = levels << 8;
+		texture->control[2] = width | height << 16;
+		texture->control[3] = 0;
 	}
 	return 0;
 }
