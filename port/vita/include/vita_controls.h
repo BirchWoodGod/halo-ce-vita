@@ -187,4 +187,130 @@ crouch toggle) */
 void vita_controls_map(const struct vita_controls_config *config, struct vita_controls_state *state,
 	unsigned long buttons, unsigned long touch, int menus, struct vita_controls_output *output);
 
+/* ---------- gyro aiming
+
+The Vita's gyroscope (sceMotion, vita_input.c) turns the view as the Vita
+turns. Its axes, the Vita held in landscape facing the player: x along the
+screen's long edge (to the right), y along the short edge (up), z out of
+the screen (towards the player); angular velocity in radians a second,
+positive counter-clockwise looking down the axis. So, held upright:
+turning the Vita left (yaw) is +y, tilting its top edge towards the player
+(the view looking up, as if seen through the Vita) is +x, turning it like a
+steering wheel to the left (roll) is +z.
+
+Each sample goes through vita_gyro_filter_sample (the bias learnt while the
+Vita lies still, smoothing of small motion, a deadzone) into an angle;
+vita_gyro_accumulate turns the angles of a frame into the game's yaw (left
+positive) and pitch (up positive), which vita_gyro_take hands to the game's
+look code once a frame (port/linux/src/xinput_sdl.c halo_linux_mouse_look:
+added to the facing change directly, like mouse aim, so no stick
+acceleration, no clipping at full deflection). */
+
+enum
+{
+	VITA_GYRO_OFF,
+	VITA_GYRO_ON,
+	/* only while the weapon is zoomed */
+	VITA_GYRO_ZOOMED,
+	/* only while the gyro button is held */
+	VITA_GYRO_HOLD,
+	VITA_GYRO_MODES
+};
+
+enum
+{
+	VITA_GYRO_TURN_YAW,
+	VITA_GYRO_TURN_ROLL,
+};
+
+/* the settings (the panel's Gyro tab): HALO_GYRO off/on/zoomed/hold,
+HALO_GYRO_BUTTON (a VITA_BUTTON_VALUES name; default l), HALO_GYRO_SENS
+(percent, 1:1 at 100; default 150), HALO_GYRO_INVERT_Y 0/1, HALO_GYRO_TURN
+yaw/roll */
+#define VITA_GYRO_DEFAULT_SENS 150
+
+struct vita_gyro_config
+{
+	int mode;
+	unsigned long button;
+	/* view radians per radian the Vita turns */
+	float sensitivity;
+	int invert_y;
+	int turn;
+};
+
+void vita_gyro_config_load(struct vita_gyro_config *config);
+
+/* rates below this (radians a second, after the bias: 0.75 degrees) are
+taken as none, and above it reduced by it */
+#define VITA_GYRO_DEADZONE 0.01309f
+/* small motion is smoothed (hand tremor): fully below the first rate, not
+at all above the second (radians a second: 5 and 15 degrees), with this
+time constant (seconds) */
+#define VITA_GYRO_SMOOTH_LOW 0.08727f
+#define VITA_GYRO_SMOOTH_HIGH 0.26180f
+#define VITA_GYRO_SMOOTH_TIME 0.040f
+/* still (the bias learnt): a second in which no axis' rate moves more than
+2 degrees a second (from lowest to highest), the accelerometer no more than
+0.03 g, and the mean rate is under 6 degrees a second */
+#define VITA_GYRO_STILL_TIME 1.0f
+#define VITA_GYRO_STILL_SPREAD 0.03491f
+#define VITA_GYRO_STILL_ACCEL 0.03f
+#define VITA_GYRO_STILL_MEAN 0.10472f
+/* a gap longer than this (seconds) between two samples integrates nothing */
+#define VITA_GYRO_MAXIMUM_GAP 0.05f
+
+struct vita_gyro_filter
+{
+	/* the bias (radians a second per axis), and how many still seconds
+	it was learnt from */
+	float bias[3];
+	int still_count;
+	/* the current still window */
+	float window_time;
+	float window_sum[3];
+	float window_low[3], window_high[3];
+	float accel_low[3], accel_high[3];
+	/* the smoothed rate (after the bias) and the last rate given out (after
+	the deadzone), for the panel's line */
+	float smoothed[3];
+	float rate[3];
+};
+
+/* one sample: rate (radians a second, the Vita's axes), accel (g; NULL for
+none), dt (seconds since the previous sample); calibrate 0 for a sample
+that is not the sensor's (the pad script's): it never teaches the bias.
+Adds the angle turned (radians per axis) to angle[] */
+void vita_gyro_filter_sample(struct vita_gyro_filter *filter, const float rate[3], const float accel[3], float dt,
+	int calibrate, float angle[3]);
+
+/* whether the gyro aims now, before the zoom (vita_gyro_take): not in the
+menus, and in hold mode only while the button is held */
+int vita_gyro_active(const struct vita_gyro_config *config, unsigned long buttons, int menus);
+
+/* the yaw and pitch (the game's radians) for the angles the Vita turned */
+void vita_gyro_look(const struct vita_gyro_config *config, const float angle[3], float *yaw, float *pitch);
+
+/* what has turned since the game last took it */
+struct vita_gyro_state
+{
+	float yaw, pitch;
+	int active;
+	/* pad reads since the game last took it: more than a few (a
+	cinematic, the game paused) and what turned meanwhile is dropped */
+	int unconsumed;
+};
+
+#define VITA_GYRO_MAXIMUM_UNCONSUMED 4
+
+/* a pad read's angles; active is vita_gyro_active's answer. Inactive (or
+just becoming active) drops what was waiting: the aim starts afresh */
+void vita_gyro_accumulate(struct vita_gyro_state *state, const struct vita_gyro_config *config,
+	const float angle[3], int active);
+
+/* the yaw and pitch since the last call, zero and 0 if none (and dropped
+in zoomed mode while not zoomed) */
+int vita_gyro_take(struct vita_gyro_state *state, const struct vita_gyro_config *config, int zoomed, float *yaw,
+	float *pitch);
+
 #endif
