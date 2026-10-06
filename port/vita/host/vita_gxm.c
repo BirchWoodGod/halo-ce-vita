@@ -3824,11 +3824,14 @@ static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int coun
 			name_length = sizeof(name) - 1;
 		memcpy(name, tabs + shown, name_length);
 		name[name_length] = 0;
+		/* (three quarters of a character either side of a name: the seven
+		tabs, Dev's too, end before the R) */
 		if (shown)
-			count = overlay_rect(vertices, count, x, y - 4.0f, (name_length + 2) * character, 8.0f * scale + 8.0f,
+			count = overlay_rect(vertices, count, x, y - 4.0f, (name_length + 1.5f) * character, 8.0f * scale + 8.0f,
 				0xFF40B040u);
-		count = overlay_text(vertices, count, limit, x + character, y, scale, shown ? 0xFF000000u : 0xFFB0B0B0u, name);
-		x += (name_length + 2) * character;
+		count = overlay_text(vertices, count, limit, x + 0.75f * character, y, scale, shown ? 0xFF000000u : 0xFFB0B0B0u,
+			name);
+		x += (name_length + 1.5f) * character;
 		tabs += length;
 		if (*tabs == '|')
 			tabs++;
@@ -3901,7 +3904,7 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	const char *lines[28];
 	const char *diagram = NULL;
 	int line_count = 0, index, slots;
-	/* (wide enough for the tab bar's six names at 12 pixels a character,
+	/* (wide enough for the tab bar's seven names at 12 pixels a character,
 	and a 21-character label with a 16-character choice at 16:
 	"Co-op campaign  < 343 Guilty Spark >") */
 	const float width = 800.0f;

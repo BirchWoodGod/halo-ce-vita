@@ -11,7 +11,8 @@ joined, the game seeing no buttons while the system's dialog is up), the
 Modded maps tab (a folder of fake maps: listed, turned off and on, deleted
 after a confirmation, the map in play kept), the Dev tab behind its switch
 (switches saved only while on, the timing variables, Save report's folder),
-and a settings.txt of 1.0 loading. It runs in a folder of its own, with
+the Gyro tab (its rows, the gyroscope's line, saved and read back), and a
+settings.txt of 1.0 loading. It runs in a folder of its own, with
 ux0:data/haloce-vita made there.
 
 Run port/vita/tests/run_vita_settings_test.sh.
@@ -31,6 +32,9 @@ int halo_screen_restart_needed(void) { return 0; }
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
 static char log_text[16384];
 static int overlay_level = -1;
+
+/* (vita_input.c's) */
+void vita_gyro_status(char *text, int size) { snprintf(text, (size_t)size, "Gyro: yaw -999 pitch -999 roll -999 lay still"); }
 
 int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core)
 {
@@ -387,6 +391,83 @@ static void test_controls_tab(void)
 	press(VITA_BUTTON_CIRCLE);
 }
 
+/* ---------- the Gyro tab */
+
+static void test_gyro_tab(void)
+{
+	struct vita_gyro_config config;
+	char diagram[16], line[128];
+	int longest, count, index;
+
+	/* (a 1.0 settings.txt was loaded: no gyro lines in it) */
+	check(!strcmp(getenv("HALO_GYRO"), "off") && !strcmp(getenv("HALO_GYRO_BUTTON"), "l") &&
+		!strcmp(getenv("HALO_GYRO_SENS"), "150") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "0") &&
+		!strcmp(getenv("HALO_GYRO_TURN"), "yaw"), "a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw");
+	open_panel();
+	check(to_tab("Gyro"), "the Gyro tab");
+	count = menu_lines(&longest, diagram, sizeof(diagram));
+	printf("%s\n--\n", menu);
+	check(strstr(menu_line(1, line, sizeof(line)), "Gyro aiming") && strstr(line, "Off") &&
+		strstr(menu_line(2, line, sizeof(line)), "Gyro button") && strstr(line, "< L >") &&
+		strstr(menu_line(3, line, sizeof(line)), "Gyro sensitivity") && strstr(line, "< 1.5x >") &&
+		strstr(menu_line(4, line, sizeof(line)), "Gyro vertical") && strstr(line, "Normal") &&
+		strstr(menu_line(5, line, sizeof(line)), "Gyro turning") && strstr(line, "Turn (yaw)") &&
+		strstr(menu_line(6, line, sizeof(line)), "Gyro: yaw -999 pitch -999 roll -999"),
+		"Gyro: aiming, button, sensitivity, vertical, turning, the gyroscope's line");
+	check(count == 8 && longest <= 46 && !diagram[0], "Gyro: 8 lines (tab bar, 5 rows, the line, help), 46 characters at most");
+	check(strstr(menu, "Turn the Vita to aim") != NULL, "Gyro aiming's help line");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_GYRO"), "on") && strstr(file_text(SETTINGS_FILE), "HALO_GYRO=on\n"),
+		"Gyro aiming On: in the environment and settings.txt");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_GYRO"), "hold") && strstr(menu, "< While holding  "), "Gyro aiming: While holding, the last");
+	for (index = 0; index < 5; index++)
+		press(VITA_BUTTON_DOWN);
+	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Gyro aiming", 11),
+		"down skips the gyroscope's line (five downs: back to the first row)");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_GYRO_BUTTON"), "r") && strstr(menu, "nothing else in play"), "Gyro button: R");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_GYRO_SENS"), "250") && strstr(menu, "< 2.5x >"), "Gyro sensitivity: 2.5x");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_GYRO_INVERT_Y"), "1") && !strcmp(getenv("HALO_GYRO_TURN"), "roll"),
+		"Gyro vertical Inverted, turning Tilt (roll)");
+	vita_gyro_config_load(&config);
+	check(config.mode == VITA_GYRO_HOLD && config.button == VITA_BUTTON_R && config.sensitivity > 2.49f &&
+		config.sensitivity < 2.51f && config.invert_y && config.turn == VITA_GYRO_TURN_ROLL,
+		"the pad reads the Gyro tab's choices");
+	press(VITA_BUTTON_CIRCLE);
+
+	/* the next start: settings.txt brings them back */
+	for (index = 0; index < SETTING_COUNT; index++)
+		if (settings[index].variable && !strncmp(settings[index].variable, "HALO_GYRO", 9))
+		{
+			settings[index].choice = 0;
+			unsetenv(settings[index].variable);
+		}
+	vita_settings_load();
+	check(!strcmp(getenv("HALO_GYRO"), "hold") && !strcmp(getenv("HALO_GYRO_BUTTON"), "r") &&
+		!strcmp(getenv("HALO_GYRO_SENS"), "250") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "1") &&
+		!strcmp(getenv("HALO_GYRO_TURN"), "roll"), "settings.txt round trip: the gyro's rows back at start-up");
+	check(strstr(file_text(SETTINGS_FILE), "HALO_XBOX_A=") && strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS="),
+		"the other rows are still saved beside them");
+
+	/* Reset controls is the Controls tab's: the gyro's rows stay */
+	open_panel();
+	to_tab("Controls");
+	to_line("Reset controls");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(getenv("HALO_GYRO"), "hold"), "Reset controls leaves the Gyro tab");
+	press(VITA_BUTTON_CIRCLE);
+}
+
 int main(void)
 {
 	char line[128];
@@ -410,8 +491,8 @@ int main(void)
 	check(!frame(0), "closed: the game gets the buttons");
 	open_panel();
 	printf("%s\n--\n", menu);
-	check(menu_visible && menu[0] == '\t' && strstr(menu, "*Graphics|Audio|Controls|Multiplayer|Modded maps\n"),
-		"SELECT+START opens the Graphics tab; five tabs (Dev hidden)");
+	check(menu_visible && menu[0] == '\t' && strstr(menu, "*Graphics|Audio|Controls|Gyro|Multiplayer|Modded maps\n"),
+		"SELECT+START opens the Graphics tab; six tabs (Dev hidden)");
 	check(strstr(menu_line(1, line, sizeof(line)), "Profile") && strstr(menu_line(3, line, sizeof(line)), "Dynamic minimum") &&
 		strstr(menu_line(11, line, sizeof(line)), "FPS counter") && strstr(menu_line(12, line, sizeof(line)), "Frame limit"),
 		"Graphics: Profile, Render resolution, Dynamic minimum ... FPS counter, Frame limit");
@@ -448,7 +529,9 @@ int main(void)
 	check(strstr(menu, "*Controls") && strstr(menu, "Look sensitivity") && strstr(menu, "Show dev settings"),
 		"R: Controls, with Show dev settings");
 	press(VITA_BUTTON_R);
-	check(!strncmp(menu, "\tGraphics|Audio|Controls|*Multiplayer", 37), "R: Multiplayer");
+	check(!strncmp(menu, "\tGraphics|Audio|Controls|*Gyro|", 31) && strstr(menu, "Gyro aiming"), "R: Gyro");
+	press(VITA_BUTTON_R);
+	check(!strncmp(menu, "\tGraphics|Audio|Controls|Gyro|*Multiplayer", 42), "R: Multiplayer");
 	printf("%s\n--\n", menu);
 
 	/* Online games: Public, at once */
@@ -740,6 +823,7 @@ int main(void)
 	}
 
 	test_controls_tab();
+	test_gyro_tab();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }
