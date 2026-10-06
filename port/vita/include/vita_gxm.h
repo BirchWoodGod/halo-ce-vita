@@ -98,6 +98,21 @@ first, then allocated anew), for a target nothing uses any more; its
 texture is filled in again. 1 on success; on failure the id has no target */
 int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long height, int depth,
 	struct vgxm_texture *texture);
+/* gives target id's memory back, keeping the id (made again with
+vgxm_target_remake): between frames, with the GPU idle, so a set of
+targets can be made at another size without the old ones' memory in the
+way. Never a cell of an atlas */
+void vgxm_target_release(unsigned long id);
+/* the render scale of the screen-sized targets (480 lines, 640 columns
+and more: HALO_RENDER_SCALE), and a new one for the targets made from now
+on (the settings panel's change, between frames: d3d8_gxm.c) */
+float vgxm_render_scale(void);
+void vgxm_render_scale_set(float scale);
+/* (the log) the target slots made, the CDRAM the targets hold, the CDRAM
+kept for the screen-sized targets' sizes not in use (vita_gxm.c
+screen_block_keep), and the CDRAM free */
+void vgxm_target_stats(unsigned long *targets, unsigned long *cdram_bytes, unsigned long *cached_bytes,
+	unsigned long *cdram_free);
 /* colour targets for each level of one linear mip chain (levels one after
 another, rows aligned to 8 texels, as the texture cache's own mipmapped
 textures), so a texture the game renders level by level (the water's

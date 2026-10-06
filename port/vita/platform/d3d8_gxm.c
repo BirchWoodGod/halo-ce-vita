@@ -39,27 +39,42 @@ void *physical_memory_get_tag_cache_base_address(void);
 /* ---------- the screen
 
 The Xbox screen is 640x480; a wider one (display.screen_width, or
-HALO_DISPLAY_WIDTH) widens the 3D view as on Android. */
+HALO_DISPLAY_WIDTH) widens the 3D view as on Android.
+
+The settings panel changes the width (Aspect ratio: HALO_DISPLAY_WIDTH 848
+or 640) and the render scale (HALO_RENDER_SCALE) while the game runs: after
+a frame is presented (halo_screen_commit, from rasterizer_present's
+rasterizer_screen_width_update, which then moves the game's screen and
+title-safe bounds and its copies of the back buffer to the new width), the
+worker and the GPU are waited for and the screen-sized targets made again
+(screen_settings_apply). */
 
 #define SCREEN_HEIGHT 480
 
 static long screen_width;
 static long ui_offset;
+/* the widest the back buffer's memory holds (CreateDevice) */
+static unsigned long screen_allocated_width;
+
+static long screen_width_wanted(void)
+{
+	const char *display = getenv("HALO_DISPLAY_WIDTH");
+	long width = config_integer("display.screen_width");
+
+	if (width <= 0)
+		width = display ? atol(display) : 640;
+	if (width < 640)
+		width = 640;
+	if (width > 1024)
+		width = 1024;
+	return width & ~1L;
+}
 
 long halo_screen_width(void)
 {
 	if (!screen_width)
 	{
-		const char *display = getenv("HALO_DISPLAY_WIDTH");
-
-		screen_width = config_integer("display.screen_width");
-		if (screen_width <= 0)
-			screen_width = display ? atol(display) : 640;
-		if (screen_width < 640)
-			screen_width = 640;
-		if (screen_width > 1024)
-			screen_width = 1024;
-		screen_width &= ~1L;
+		screen_width = screen_width_wanted();
 		platform_log("screen: %ldx%d", screen_width, SCREEN_HEIGHT);
 	}
 	return screen_width;
@@ -70,9 +85,22 @@ void halo_screen_ui_offset(unsigned char centered)
 	ui_offset = centered ? (halo_screen_width() - 640) / 2 : 0;
 }
 
+static void screen_settings_apply(void);
+
 long halo_screen_commit(void)
 {
-	return halo_screen_width();
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen;
+	unsigned long generation = __atomic_load_n(&halo_settings_generation, __ATOMIC_ACQUIRE);
+
+	if (!screen_width)
+		return halo_screen_width();
+	if (generation != settings_seen)
+	{
+		settings_seen = generation;
+		screen_settings_apply();
+	}
+	return screen_width;
 }
 
 extern int vita_menus_active;
@@ -1290,6 +1318,9 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 			4:3 screen, HALO_DISPLAY_WIDTH=640, then leaves the game state
 			after them at the same address, so saves load in either) */
 			unsigned long allocated = width < 848 ? 848 : width;
+
+			/* (the widest the screen can be made while the game runs) */
+			screen_allocated_width = allocated;
 
 			d3d8_surface_initialize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, allocated, height);
 			d3d8_surface_initialize(&device.depth_buffer, D3DFMT_LIN_D24S8, allocated, height);
@@ -4072,6 +4103,166 @@ void halo_render_wait_for_gpu(void)
 	vgxm_wait_gpu_idle();
 	platform_log("structure bsp switch: waited %llu us for the worker and the GPU",
 		(unsigned long long)(vita_host_time_us() - started));
+}
+
+/* ---------- the screen's targets changed while the game runs
+
+(halo_screen_commit, the game's thread, after a frame is presented) A new
+render scale or screen width from the settings panel: once the worker has
+carried out every frame recorded and the GPU has drawn them, each target of
+a screen-sized surface (480 lines, 640 columns or more: the back buffer, its
+depth, the screen effects' copies of it) gives its memory back, and all are
+made again at the new scale (vita_gxm.c target_make) and, those as wide as
+the screen, at the new width; their entries keep their ids and surfaces
+(the surfaces' new size is their new key), so nothing else changes hands.
+The back buffer's and depth buffer's surfaces describe the new width (their
+memory was made for 848 columns or more: CreateDevice); the game moves its
+own bounds and copies after this returns (rasterizer_screen_width_update),
+before it records the next frame. If the targets cannot all be had at the
+new size (CDRAM taken or in pieces), they are made at the old one again,
+the screen keeps it, and the settings panel says the change waits for a
+restart (halo_screen_restart_needed). */
+
+static int screen_restart_needed;
+
+int halo_screen_restart_needed(void)
+{
+	return screen_restart_needed;
+}
+
+static int screen_sized_entry(const struct render_target_entry *entry)
+{
+	return entry->id && !entry->cell && entry->chain_levels <= 0 && entry->target.height == SCREEN_HEIGHT &&
+		entry->target.width >= 640;
+}
+
+/* makes every screen-sized target at the render scale (vgxm) and, those
+old_width wide, new_width wide; 1 if all were made. On failure the ones
+made are given back and nothing is changed (the caller makes them again at
+the old size) */
+static int screen_targets_make(unsigned long old_width, unsigned long new_width, unsigned long *made)
+{
+	struct render_target_entry *entry;
+	int all = TRUE;
+
+	*made = 0;
+	/* all given back first, so the new ones need not fit beside the old */
+	for (entry = render_targets; entry; entry = entry->next)
+		if (screen_sized_entry(entry))
+			vgxm_target_release(entry->id);
+	for (entry = render_targets; entry && all; entry = entry->next)
+	{
+		unsigned long width;
+
+		if (!screen_sized_entry(entry))
+			continue;
+		width = entry->target.width == old_width ? new_width : entry->target.width;
+		if (!vgxm_target_remake(entry->id, width, SCREEN_HEIGHT, entry->target.depth, &entry->texture))
+			all = FALSE;
+		else
+			(*made)++;
+	}
+	if (!all)
+	{
+		for (entry = render_targets; entry; entry = entry->next)
+			if (screen_sized_entry(entry))
+				vgxm_target_release(entry->id);
+	}
+	return all;
+}
+
+/* the entries of the screen-sized surfaces old_width wide: new_width wide
+now (their memory already is: screen_targets_make), and as yet undrawn */
+static void screen_entries_rekey(unsigned long old_width, unsigned long new_width)
+{
+	struct render_target_entry *entry;
+
+	for (entry = render_targets; entry; entry = entry->next)
+	{
+		if (!screen_sized_entry(entry))
+			continue;
+		if (entry->target.width == old_width)
+		{
+			entry->target.width = new_width;
+			entry->target.gl_width = new_width;
+		}
+		/* (zeros until the next frame draws them: not sampled before) */
+		entry->drawn = FALSE;
+		entry->last_rendered = 0;
+		entry->last_used = device.frame + 1;
+	}
+}
+
+static void screen_settings_apply(void)
+{
+	const char *setting = getenv("HALO_RENDER_SCALE");
+	float scale = setting ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale();
+	long width = screen_width_wanted(), old_width = screen_width;
+	unsigned long long started;
+	unsigned long made = 0, targets, cdram, cached, cdram_free;
+	int restored = TRUE;
+
+	if (scale < 0.5f || scale > 1.0f)
+		scale = 1.0f;
+	if (!device.created || !device.gpu_ready)
+		return;
+	if (scale == old_scale && width == old_width)
+	{
+		/* (back to what the screen has: nothing waits for a restart) */
+		screen_restart_needed = FALSE;
+		return;
+	}
+	if (!screen_allocated_width)
+		screen_allocated_width = 848;
+	if ((unsigned long)width > screen_allocated_width)
+	{
+		/* (wider than the back buffer's memory: at the next start) */
+		platform_log("screen: %ld columns wait for a restart (the back buffer holds %lu)", width, screen_allocated_width);
+		screen_restart_needed = TRUE;
+		return;
+	}
+	started = vita_host_time_us();
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+	vgxm_render_scale_set(scale);
+	if (screen_targets_make((unsigned long)old_width, (unsigned long)width, &made))
+	{
+		screen_entries_rekey((unsigned long)old_width, (unsigned long)width);
+		screen_width = width;
+		screen_restart_needed = FALSE;
+		device.presentation.BackBufferWidth = (UINT)width;
+		d3d8_surface_resize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, (unsigned long)width, SCREEN_HEIGHT);
+		d3d8_surface_resize(&device.depth_buffer, D3DFMT_LIN_D24S8, (unsigned long)width, SCREEN_HEIGHT);
+	}
+	else
+	{
+		/* (the old size again: its memory was just given back) */
+		vgxm_render_scale_set(old_scale);
+		restored = screen_targets_make((unsigned long)old_width, (unsigned long)old_width, &made);
+		if (!restored)
+		{
+			/* (should not be: the entries without a target ask for one
+			again every 30 frames, render_target_get_version) */
+			struct render_target_entry *entry;
+
+			for (entry = render_targets; entry; entry = entry->next)
+				if (screen_sized_entry(entry))
+					entry->id = 0;
+		}
+		screen_entries_rekey((unsigned long)old_width, (unsigned long)old_width);
+		screen_restart_needed = TRUE;
+	}
+	vgxm_target_stats(&targets, &cdram, &cached, &cdram_free);
+	platform_log("screen: %ldx%d at %.0f%%%s: %lu screen-sized targets made again in %llu us; %lu target slots, "
+		"targets hold %lu KB of CDRAM, %lu KB kept for other sizes, %lu KB free", screen_width, SCREEN_HEIGHT, vgxm_render_scale() * 100.0f,
+		screen_restart_needed ? (restored ? " (the change waits for a restart: no memory for the new size)" :
+		" (NO TARGETS: no memory for the old size either)") : "",
+		made, (unsigned long long)(vita_host_time_us() - started), targets, cdram / 1024, cached / 1024,
+		cdram_free / 1024);
 }
 
 /* has the target a depth format? (no GPU work: the worker creates targets) */

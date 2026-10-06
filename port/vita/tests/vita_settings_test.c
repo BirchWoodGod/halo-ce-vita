@@ -17,6 +17,8 @@ Run port/vita/tests/run_vita_settings_test.sh.
 #include <stdio.h>
 
 volatile unsigned long halo_settings_generation;
+int (*halo_test_setting_hook)(const char *variable, const char *value);
+int halo_screen_restart_needed(void) { return 0; }
 
 static int failures, checks;
 

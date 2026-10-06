@@ -924,6 +924,7 @@ boolean main_saving_map(
 
 #ifdef HALO_LINUX
 static void main_checkpoint_cancelled(char const *by);
+static void main_map_request_log(char const *what);
 #endif
 
 void main_save_cancel(
@@ -947,6 +948,11 @@ void main_won_map(
 void main_lost_map(
 	void)
 {
+#ifdef HALO_LINUX
+	if (!main_globals.lost_map)
+		main_map_request_log("game lost (back to the last checkpoint in 3 s)");
+	main_checkpoint_cancelled("a lost game");
+#endif
 	if (!main_globals.lost_map)
 	{
 		main_globals.loss_timer = 0;
@@ -975,6 +981,10 @@ void main_start_time(
 void main_reset_map(
 	void)
 {
+#ifdef HALO_LINUX
+	if (!main_globals.reset_map)
+		main_map_request_log("map reset");
+#endif
 	main_globals.switch_to_structure_bsp_index = NONE;
 	main_globals.saving_map = FALSE;
 	main_globals.reset_map = TRUE;
@@ -986,6 +996,8 @@ void main_revert_map(
 	void)
 {
 #ifdef HALO_LINUX
+	if (!main_globals.revert_map)
+		main_map_request_log("revert to the last checkpoint");
 	main_checkpoint_cancelled("a revert");
 #endif
 	main_globals.switch_to_structure_bsp_index = NONE;
@@ -1696,6 +1708,27 @@ static void main_checkpoint_cancelled(
 {
 	if (main_globals.saving_map && checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
 		platform_log("checkpoint: the one asked for cancelled by %s after %ld frames", by, checkpoint_wait_checks);
+}
+
+/* who sent the level back (GitHub #10: "the timer ran out on the Warthog
+run and it sent me to the start of the level"): a script's game_lost (d40's
+cutscene_lose when the timer runs out), game_revert or map_reset, every
+player dead, or the pause menu (which logs its own line first). The revert
+itself logs which checkpoint it loaded, or that there was none (game_state.c) */
+static void main_map_request_log(
+	char const *what)
+{
+	static unsigned long lines;
+	char const *by = hs_runtime_get_executing_thread_name();
+
+	if (!csstrcmp(by, "[unknown]"))
+	{
+		/* (not a script: players.c's every-player-dead check, the pause menu
+		or the escape key) */
+		by = players_globals && players_globals->all_dead ? "every player dead" : "the game";
+	}
+	if (lines++ < 160)
+		platform_log("%s asked for by %s at tick %ld", what, by, game_in_progress() ? (long)game_time_get() : 0L);
 }
 
 static void main_checkpoint_waiting(
@@ -3688,9 +3721,15 @@ that scenario trigger volume (the benchmarks walk the player through a
 level's encounters this way: triage/perf2-status.md), "@where" logs where
 every vehicle and scenery object is, and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
-(the desktop GL device; on the Vita its display, as name<frame>.bmp). Each runs once,
+(the desktop GL device; on the Vita its display, as name<frame>.bmp);
+"@set VARIABLE value" changes a setting as the Vita's settings panel does
+(vita_settings_set, through halo_test_setting_hook; elsewhere the variable, and the settings generation the
+readers watch). Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
+/* (the Vita's settings panel sets it: vita_settings_load) */
+int (*halo_test_setting_hook)(const char *variable, const char *value);
+extern volatile unsigned long halo_settings_generation;
 void platform_log(const char *format, ...);
 /* (@shot: the name of the next frame's screenshot, read by the present) */
 char halo_screenshot_name[64];
@@ -3776,6 +3815,17 @@ static void main_test_commands_update(
 				platform_log("where %lx %s at %.2f %.2f %.2f", (unsigned long)iterator.index,
 					tag_get_name(object->definition_index), object->object.position.x, object->object.position.y,
 					object->object.position.z);
+		}
+		else if (!strncmp(commands[index].command, "@set ", 5))
+		{
+			char variable[64], value[64];
+
+			if (sscanf(commands[index].command + 5, "%63s %63s", variable, value) == 2 &&
+				!(halo_test_setting_hook && halo_test_setting_hook(variable, value)))
+			{
+				setenv(variable, value, 1);
+				__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
+			}
 		}
 		else if (!strncmp(commands[index].command, "@tv ", 4))
 			main_test_trigger_volume(commands[index].command + 4);
