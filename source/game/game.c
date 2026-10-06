@@ -433,6 +433,7 @@ void game_initialize(
 #ifdef HALO_LINUX
 /* HALO_TICK_PROFILE=1: where the tick's time goes, every 300 ticks */
 #include <stdlib.h>
+#include "fine_profile.h"
 static int tick_profile_enabled = -1;
 static unsigned long long tick_phase_started, tick_phase_us[16], tick_phase_this_tick_us[16];
 static const char *tick_phase_name[16];
@@ -491,6 +492,8 @@ void game_tick(
 		game_globals->active);
 
 #ifdef HALO_LINUX
+	/* (whether this tick's fine timers run: fine_profile.h) */
+	halo_fine_tick_begin();
 	tick_phase_begin();
 #endif
 	remove_quitting_players_from_game();

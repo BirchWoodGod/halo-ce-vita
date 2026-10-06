@@ -125,20 +125,21 @@ symbols in this file:
 /* (port) HALO_RENDER_PROFILE=1: a model part's draw split - the textures
 and render states, the shader choice and constant arithmetic, the constant
 uploads, the state before the draw, and the draw itself (models.c reports
-it with render_model's split) */
-unsigned long long vita_host_time_us(void);
+it with render_model's split), in the frames fine_profile.h picks */
+#include "fine_profile.h"
 void platform_log(const char *format, ...);
 static int model_part_profile_on = -1;
 static unsigned long long model_part_profile_us[5];
 static unsigned long model_part_profile_parts;
-#define MODEL_PART_NOW() (model_part_profile_on > 0 ? vita_host_time_us() : 0)
-#define MODEL_PART_ADD(slot, from) do { if (model_part_profile_on > 0) { unsigned long long now_ = vita_host_time_us(); model_part_profile_us[slot] += now_ - (from); (from) = now_; } } while (0)
+#define MODEL_PART_PROFILE_ON() (model_part_profile_on > 0 && halo_fine_render_on)
+#define MODEL_PART_NOW() (MODEL_PART_PROFILE_ON() ? halo_fine_render_now() : 0)
+#define MODEL_PART_ADD(slot, from) do { if (MODEL_PART_PROFILE_ON()) { unsigned long long now_ = halo_fine_render_now(); model_part_profile_us[slot] += now_ - (from); (from) = now_; } } while (0)
 void halo_model_part_profile_report(unsigned long frames)
 {
 	if (model_part_profile_on > 0 && frames)
 	{
-		platform_log("model part split (ms/frame over %lu parts/frame): textures+states %.2f shader+math %.2f constants %.2f pre-draw %.2f draw %.2f",
-			model_part_profile_parts / frames, model_part_profile_us[0] / 1000.0 / frames, model_part_profile_us[1] / 1000.0 / frames,
+		platform_log("model part split (ms/frame over %.1f parts/frame): textures+states %.2f shader+math %.2f constants %.2f pre-draw %.2f draw %.2f",
+			(double)model_part_profile_parts / frames, model_part_profile_us[0] / 1000.0 / frames, model_part_profile_us[1] / 1000.0 / frames,
 			model_part_profile_us[2] / 1000.0 / frames, model_part_profile_us[3] / 1000.0 / frames, model_part_profile_us[4] / 1000.0 / frames);
 		memset(model_part_profile_us, 0, sizeof(model_part_profile_us));
 		model_part_profile_parts = 0;
@@ -1757,7 +1758,8 @@ void _rasterizer_model_draw(
 
 	if (model_part_profile_on < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); model_part_profile_on = e && atoi(e) != 0; }
 	part_from = MODEL_PART_NOW();
-	model_part_profile_parts++;
+	if (MODEL_PART_PROFILE_ON())
+		model_part_profile_parts++;
 #endif
 
 	match_assert(

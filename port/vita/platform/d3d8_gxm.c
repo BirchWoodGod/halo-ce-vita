@@ -3160,7 +3160,31 @@ static void execute_command(struct render_command *command)
 	switch (command->kind)
 	{
 	case _command_draw:
-		execute_draw(command);
+		if (command->state)
+		{
+			/* A split record is expanded into a copy of what the game's
+			thread wrote, not into its ring entry: the expansion (the key,
+			texture headers, samplers and states, ~600 bytes) was written into
+			the entry and read back once, right here, but the entry is cold -
+			the ring holds two frames, ~6 MB - so each draw wrote ~19 lines no
+			cache held, ~1 MB a frame streamed through the 512 KB L2 the
+			game's and tick's threads share with the worker. The copy is
+			hot. (A record built in full on the game's thread has its
+			expansion in the entry already: run in place.) */
+			static struct render_command expanded;
+			const struct vgxm_draw *recorded = &command->draw;
+			unsigned long streams = recorded->stream_count < VGXM_STREAM_COUNT ? recorded->stream_count : VGXM_STREAM_COUNT;
+			unsigned long attributes = recorded->attribute_count < VGXM_ATTRIBUTE_COUNT ? recorded->attribute_count :
+				VGXM_ATTRIBUTE_COUNT;
+
+			memcpy(&expanded, command, offsetof(struct render_command, draw) + offsetof(struct vgxm_draw, strides));
+			memcpy(expanded.draw.strides, recorded->strides, streams * sizeof(recorded->strides[0]));
+			memcpy(expanded.draw.streams, recorded->streams, streams * sizeof(recorded->streams[0]));
+			memcpy(expanded.draw.attributes, recorded->attributes, attributes * sizeof(recorded->attributes[0]));
+			execute_draw(&expanded);
+		}
+		else
+			execute_draw(command);
 		break;
 	case _command_clear:
 		if (bind_recorded_targets(command, &has_depth))
@@ -5932,6 +5956,24 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				;
 		}
 	}
+	/* (HALO_DRAW_PROFILE=N: its report every 300 frames, with or without
+	the GPU statistics) */
+	if (draw_profile > 0 && device.frame % 300 == 0 && draw_profile_draws)
+	{
+		double per = 1.0 / draw_profile_draws;
+		double worker_per = worker_profile_draws ? 1.0 / worker_profile_draws : 0.0;
+
+		platform_log("draw profile (us/draw, 1 in %d of %lu draws timed): record: begin %.2f state %.2f versions %.2f constants %.2f tail %.2f | streams %.2f commit %.2f | execute: build+targets %.2f textures %.2f shaders %.2f gxm draw %.2f",
+			draw_profile, draw_profile_draws * (unsigned long)draw_profile, draw_profile_us[0] * per, draw_profile_us[1] * per, draw_profile_us[2] * per, draw_profile_us[8] * per, draw_profile_us[9] * per,
+			draw_profile_us[3] * per, draw_profile_us[10] * per,
+			draw_profile_us[4] * worker_per, draw_profile_us[5] * worker_per, draw_profile_us[6] * worker_per, draw_profile_us[7] * worker_per);
+		worker_profile_draws = 0;
+		platform_log("record fine (us/draw): begin %.1f key-clear %.1f stages %.1f fu-gather %.1f fu-build %.1f",
+			draw_fine_us[0] * per, draw_fine_us[1] * per, draw_fine_us[2] * per, draw_fine_us[3] * per, draw_fine_us[4] * per);
+		memset(draw_fine_us, 0, sizeof(draw_fine_us));
+		memset(draw_profile_us, 0, sizeof(draw_profile_us));
+		draw_profile_draws = 0;
+	}
 	gpu_stats_on = config_boolean("debug.gpu_stats");
 	if (gpu_stats_on && device.frame % 60 == 0 && stats.presents)
 	{
@@ -5989,22 +6031,6 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			}
 			platform_log("constant writes per frame (first+count=writes/changes):%s", line);
 			constant_write_kinds = 0;
-			if (draw_profile > 0 && draw_profile_draws)
-			{
-				double per = 1.0 / draw_profile_draws;
-				double worker_per = worker_profile_draws ? 1.0 / worker_profile_draws : 0.0;
-
-				platform_log("draw profile (us/draw, 1 in %d of %lu draws timed): record: begin %.2f state %.2f versions %.2f constants %.2f tail %.2f | streams %.2f commit %.2f | execute: build+targets %.2f textures %.2f shaders %.2f gxm draw %.2f",
-					draw_profile, draw_profile_draws * (unsigned long)draw_profile, draw_profile_us[0] * per, draw_profile_us[1] * per, draw_profile_us[2] * per, draw_profile_us[8] * per, draw_profile_us[9] * per,
-					draw_profile_us[3] * per, draw_profile_us[10] * per,
-					draw_profile_us[4] * worker_per, draw_profile_us[5] * worker_per, draw_profile_us[6] * worker_per, draw_profile_us[7] * worker_per);
-				worker_profile_draws = 0;
-				platform_log("record fine (us/draw): begin %.1f key-clear %.1f stages %.1f fu-gather %.1f fu-build %.1f",
-					draw_fine_us[0] * per, draw_fine_us[1] * per, draw_fine_us[2] * per, draw_fine_us[3] * per, draw_fine_us[4] * per);
-				memset(draw_fine_us, 0, sizeof(draw_fine_us));
-				memset(draw_profile_us, 0, sizeof(draw_profile_us));
-				draw_profile_draws = 0;
-			}
 		}
 		platform_log("uniform KB/frame by kind: vertex chunks A %.1f B %.1f C1 %.1f C2 %.1f D %.1f E %.1f, vertex misc %.1f, fragment (worker) %.1f",
 			stats.copied_chunk[0] / 1024.0 / stats.presents, stats.copied_chunk[1] / 1024.0 / stats.presents,

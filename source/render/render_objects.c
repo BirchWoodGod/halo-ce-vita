@@ -411,19 +411,34 @@ struct render_lighting *object_get_cached_render_lighting(
 }
 
 #ifdef HALO_LINUX
-/* HALO_RENDER_PROFILE=1: inside render_objects (render.c times the phases) */
+/* HALO_RENDER_PROFILE=1: inside render_objects (render.c times the phases),
+in the frames fine_profile.h picks (HALO_PROFILE_SAMPLE) */
 #include <stdlib.h>
-unsigned long long vita_host_time_us(void);
+#include "fine_profile.h"
 void platform_log(const char *format, ...);
 void halo_render_model_profile_report(unsigned long frames);
-static unsigned long long objects_profile_us[5];
-static unsigned long objects_profile_frames, objects_profile_objects;
+enum
+{
+	_objects_profile_find,
+	_objects_profile_first_person,
+	_objects_profile_objects,
+	_objects_profile_refresh,
+	_objects_profile_models,
+	_objects_profile_shadow_models,
+	_objects_profile_lighting,
+	_objects_profile_widgets,
+	_objects_profile_shadow_pass,
+	NUMBER_OF_OBJECTS_PROFILE_SLOTS
+};
+static unsigned long long objects_profile_us[NUMBER_OF_OBJECTS_PROFILE_SLOTS];
+static unsigned long objects_profile_frames, objects_profile_objects, objects_profile_models, objects_profile_shadow_models;
 static int objects_profile_enabled = -1;
-#define OBJECTS_PROFILE_ADD(slot, before) do { if (objects_profile_enabled > 0) objects_profile_us[slot] += vita_host_time_us() - (before); } while (0)
-static unsigned long long objects_profile_now(void) { return objects_profile_enabled > 0 ? vita_host_time_us() : 0; }
+#define OBJECTS_PROFILE_ON() (objects_profile_enabled > 0 && halo_fine_render_on)
+#define OBJECTS_PROFILE_ADD(slot, before) do { if (OBJECTS_PROFILE_ON()) objects_profile_us[slot] += halo_fine_render_now() - (before); } while (0)
+static unsigned long long objects_profile_now(void) { return OBJECTS_PROFILE_ON() ? halo_fine_render_now() : 0; }
 static unsigned long long objects_refresh_before;
 #define OBJECTS_REFRESH_BEGIN() (objects_refresh_before = objects_profile_now())
-#define OBJECTS_REFRESH_END() OBJECTS_PROFILE_ADD(3, objects_refresh_before)
+#define OBJECTS_REFRESH_END() OBJECTS_PROFILE_ADD(_objects_profile_refresh, objects_refresh_before)
 #else
 #define OBJECTS_REFRESH_BEGIN() ((void)0)
 #define OBJECTS_REFRESH_END() ((void)0)
@@ -447,8 +462,9 @@ void render_objects(
 	before = objects_profile_now();
 	find_rendered_objects();
 	flicker_check_found();
-	OBJECTS_PROFILE_ADD(0, before);
-	objects_profile_objects += render_object_globals.rendered_object_count;
+	OBJECTS_PROFILE_ADD(_objects_profile_find, before);
+	if (OBJECTS_PROFILE_ON())
+		objects_profile_objects += render_object_globals.rendered_object_count;
 #else
 	find_rendered_objects();
 #endif
@@ -462,7 +478,7 @@ void render_objects(
 #ifdef HALO_LINUX
 			before = objects_profile_now();
 			first_person_weapon_draw();
-			OBJECTS_PROFILE_ADD(1, before);
+			OBJECTS_PROFILE_ADD(_objects_profile_first_person, before);
 #else
 			first_person_weapon_draw();
 #endif
@@ -472,7 +488,7 @@ void render_objects(
 #ifdef HALO_LINUX
 			before = objects_profile_now();
 			process_rendered_objects(&data);
-			OBJECTS_PROFILE_ADD(2, before);
+			OBJECTS_PROFILE_ADD(_objects_profile_objects, before);
 #else
 			process_rendered_objects(&data);
 #endif
@@ -486,12 +502,25 @@ void render_objects(
 #ifdef HALO_LINUX
 	if (objects_profile_enabled > 0 && ++objects_profile_frames % 300 == 0)
 	{
-		platform_log("objects-profile (ms/frame): find %.1f first_person %.1f objects %.1f (refresh %.1f, render_model %.1f of it), %.1f objects/frame",
-			objects_profile_us[0] / 300000.0, objects_profile_us[1] / 300000.0, objects_profile_us[2] / 300000.0,
-			objects_profile_us[3] / 300000.0, objects_profile_us[4] / 300000.0, objects_profile_objects / 300.0);
-		objects_profile_us[0] = objects_profile_us[1] = objects_profile_us[2] = objects_profile_us[3] = objects_profile_us[4] = 0;
-		halo_render_model_profile_report(300);
-		objects_profile_objects = 0;
+		/* (per timed frame; "walk" is the objects pass less its models,
+		lighting and widgets: the object list, LOD and effects) */
+		static struct halo_fine_mark mark;
+		unsigned long timed = halo_fine_render_since(&mark);
+		double per = timed ? 1.0 / (timed * 1000.0) : 0.0;
+		long long walk = (long long)objects_profile_us[_objects_profile_objects] - (long long)objects_profile_us[_objects_profile_models] -
+			(long long)objects_profile_us[_objects_profile_lighting] - (long long)objects_profile_us[_objects_profile_widgets];
+
+		platform_log("objects-profile (ms/frame): find %.2f first_person %.2f objects %.2f (models %.2f, lighting %.2f, widgets %.2f, walk %.2f; light refresh in both passes %.2f) | shadow pass %.2f (models %.2f) | %.1f objects, %.1f models, %.1f shadow models a frame | %s",
+			objects_profile_us[_objects_profile_find] * per, objects_profile_us[_objects_profile_first_person] * per,
+			objects_profile_us[_objects_profile_objects] * per, objects_profile_us[_objects_profile_models] * per,
+			objects_profile_us[_objects_profile_lighting] * per, objects_profile_us[_objects_profile_widgets] * per, walk * per,
+			objects_profile_us[_objects_profile_refresh] * per,
+			objects_profile_us[_objects_profile_shadow_pass] * per, objects_profile_us[_objects_profile_shadow_models] * per,
+			timed ? (double)objects_profile_objects / timed : 0.0, timed ? (double)objects_profile_models / timed : 0.0,
+			timed ? (double)objects_profile_shadow_models / timed : 0.0, mark.note);
+		memset(objects_profile_us, 0, sizeof(objects_profile_us));
+		halo_render_model_profile_report(timed);
+		objects_profile_objects = objects_profile_models = objects_profile_shadow_models = 0;
 	}
 #endif
 
@@ -512,7 +541,16 @@ void render_object_shadows(
 		rasterizer_environment_shadows_begin();
 
 		data.shadow = TRUE;
+#ifdef HALO_LINUX
+		{
+			unsigned long long shadow_before = objects_profile_now();
+
+			process_rendered_objects(&data);
+			OBJECTS_PROFILE_ADD(_objects_profile_shadow_pass, shadow_before);
+		}
+#else
 		process_rendered_objects(&data);
+#endif
 
 		rasterizer_environment_shadows_end();
 	}
@@ -967,6 +1005,8 @@ static void render_object_list(
 						minimum_pixels = setting ? (float)atof(setting) : 0.0f;
 					}
 					flicker_note_drawn(object_index, level_of_detail_pixels >= minimum_pixels, level_of_detail_pixels, minimum_pixels);
+					if (level_of_detail_pixels >= minimum_pixels && OBJECTS_PROFILE_ON())
+						objects_profile_models++;
 					if (level_of_detail_pixels >= minimum_pixels)
 					render_model(
 						definition->object.model.index,
@@ -987,7 +1027,7 @@ static void render_object_list(
 						object_index,
 						object->object.forced_shader_permutation_index,
 						data->no_planar_fog ? FLAG(_render_model_no_planar_fog_bit) : 0);
-					OBJECTS_PROFILE_ADD(4, model_before);
+					OBJECTS_PROFILE_ADD(_objects_profile_models, model_before);
 					}
 
 					if (debug_objects)
@@ -1018,7 +1058,9 @@ static void render_object_list(
 						object_index,
 						object->object.forced_shader_permutation_index,
 						FLAG(_render_model_shadow_bit));
-					OBJECTS_PROFILE_ADD(4, model_before);
+					OBJECTS_PROFILE_ADD(_objects_profile_shadow_models, model_before);
+					if (OBJECTS_PROFILE_ON())
+						objects_profile_shadow_models++;
 					}
 				}
 			}
@@ -1029,7 +1071,16 @@ static void render_object_list(
 
 				animation.colors = object->object.outgoing_change_colors;
 				animation.values = object->object.outgoing_function_values;
+#ifdef HALO_LINUX
+				{
+					unsigned long long widgets_before = objects_profile_now();
+
+					widgets_render(object_index, data->lighting, &animation);
+					OBJECTS_PROFILE_ADD(_objects_profile_widgets, widgets_before);
+				}
+#else
 				widgets_render(object_index, data->lighting, &animation);
+#endif
 			}
 
 			if (object->object.first_child_object_index != NONE)
@@ -1639,9 +1690,15 @@ static void render_object(
 
 			if (needs_lighting)
 			{
+#ifdef HALO_LINUX
+				unsigned long long lighting_before = objects_profile_now();
+#endif
 				data->lighting = object_get_cached_render_lighting(
 					data->object_index,
 					object_get_level_of_detail_pixels(data->object_index));
+#ifdef HALO_LINUX
+				OBJECTS_PROFILE_ADD(_objects_profile_lighting, lighting_before);
+#endif
 			}
 			else
 			{
