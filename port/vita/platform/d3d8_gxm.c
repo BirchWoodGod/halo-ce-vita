@@ -3160,7 +3160,31 @@ static void execute_command(struct render_command *command)
 	switch (command->kind)
 	{
 	case _command_draw:
-		execute_draw(command);
+		if (command->state)
+		{
+			/* A split record is expanded into a copy of what the game's
+			thread wrote, not into its ring entry: the expansion (the key,
+			texture headers, samplers and states, ~600 bytes) was written into
+			the entry and read back once, right here, but the entry is cold -
+			the ring holds two frames, ~6 MB - so each draw wrote ~19 lines no
+			cache held, ~1 MB a frame streamed through the 512 KB L2 the
+			game's and tick's threads share with the worker. The copy is
+			hot. (A record built in full on the game's thread has its
+			expansion in the entry already: run in place.) */
+			static struct render_command expanded;
+			const struct vgxm_draw *recorded = &command->draw;
+			unsigned long streams = recorded->stream_count < VGXM_STREAM_COUNT ? recorded->stream_count : VGXM_STREAM_COUNT;
+			unsigned long attributes = recorded->attribute_count < VGXM_ATTRIBUTE_COUNT ? recorded->attribute_count :
+				VGXM_ATTRIBUTE_COUNT;
+
+			memcpy(&expanded, command, offsetof(struct render_command, draw) + offsetof(struct vgxm_draw, strides));
+			memcpy(expanded.draw.strides, recorded->strides, streams * sizeof(recorded->strides[0]));
+			memcpy(expanded.draw.streams, recorded->streams, streams * sizeof(recorded->streams[0]));
+			memcpy(expanded.draw.attributes, recorded->attributes, attributes * sizeof(recorded->attributes[0]));
+			execute_draw(&expanded);
+		}
+		else
+			execute_draw(command);
 		break;
 	case _command_clear:
 		if (bind_recorded_targets(command, &has_depth))
