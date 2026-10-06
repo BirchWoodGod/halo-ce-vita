@@ -286,6 +286,8 @@ static struct setting settings[] = {
 		"A hang of 8 s crashes for a dump (psp2core) to send", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
 	{ "FPS overlay", "XV_FPS", 0, 3, { "0", "2", "1" }, { "Off", "FPS only", "Full" },
 		"Top right. Full: tick and render times, the cores' load", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Debug camera", "HALO_DEBUG_CAMERA", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Hold Black 1 s: follow, orbit, then a flying camera", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
 	{ "GPU W clamp", "HALO_GXM_WCLAMP", 1, 2, { "", "0" }, { "Default", "Off" },
 		"A/B: models close to the camera dropping out (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
 	{ "Target mip minimum", "HALO_TARGET_CHAIN_MIN_SIZE", 1, 3, { "", "16", "8" }, { "32 px", "16 px", "8 px" },
