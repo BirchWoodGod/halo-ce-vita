@@ -105,7 +105,8 @@ after a restart.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Profile | Balanced | sets the rows below it marked (P) at once: Performance, Balanced, Quality; Custom when they match none |
-| Render resolution (P) | 75% | the 3D view's resolution (applies at once) |
+| Render resolution (P) | 75% | the 3D view's resolution (applies at once); Dynamic: lowered in heavy scenes, from the Dynamic minimum up to 100% |
+| Dynamic minimum | 50% | with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes |
 | Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
 | Upscale filter | Smooth | Sharp: crisp pixels |
 | Model detail (P) | Low | level of detail of characters, vehicles and props |

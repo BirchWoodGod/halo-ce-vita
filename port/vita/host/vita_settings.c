@@ -14,7 +14,9 @@ bumps halo_settings_generation, and the readers that can take a new value
 mid-game read theirs again (the render resolution and the aspect ratio too:
 the screen's targets are made again between two frames, d3d8_gxm.c
 screen_settings_apply; if the memory for the new size cannot be had, the
-panel says the change waits for a restart).
+panel says the change waits for a restart). Render resolution's Dynamic
+lets the GPU's load set the scale, frame by frame, between the Dynamic
+minimum and 100% (d3d8_gxm.c, the dynamic resolution).
 
 The release's defaults, the ones measured best on the Vita, are set here
 too, under whatever env.txt and settings.txt say.
@@ -156,8 +158,13 @@ static struct setting settings[] = {
 	{ "Profile", "HALO_PROFILE", 0, 4, { "performance", "balanced", "quality", "custom" },
 		{ "Performance", "Balanced", "Quality", "Custom" }, "Sets resolution, detail, update rates at once", 1,
 		TAB_GRAPHICS },
-	{ "Render resolution", "HALO_RENDER_SCALE", 0, 5, { "1", "0.875", "0.75", "0.625", "0.5" },
-		{ "100%", "88%", "75%", "63%", "50%" }, "Lower is faster and softer", 2, TAB_GRAPHICS },
+	/* (Dynamic: the dynamic resolution, d3d8_gxm.c - the scale follows the
+	GPU's load, from the Dynamic minimum up to 100%) */
+	{ "Render resolution", "HALO_RENDER_SCALE", 0, 6, { "1", "0.875", "0.75", "0.625", "0.5", "dynamic" },
+		{ "100%", "88%", "75%", "63%", "50%", "Dynamic" }, "Lower is faster, softer. Dynamic: by GPU load", 2,
+		TAB_GRAPHICS },
+	{ "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", 0, 3, { "0.5", "0.625", "0.75" }, { "50%", "63%", "75%" },
+		"The lowest Dynamic goes in heavy scenes", 0, TAB_GRAPHICS },
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
 		"4:3: the Xbox's framing, black bars", 0, TAB_GRAPHICS },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
@@ -401,6 +408,10 @@ static int find_choice(const struct setting *setting, const char *value)
 		for (index = 0; index < setting->count; index++)
 		{
 			double distance = atof(setting->values[index]) - wanted;
+
+			/* (Render resolution's Dynamic is no number's nearest) */
+			if (!strcmp(setting->values[index], "dynamic"))
+				continue;
 
 			if (distance < 0)
 				distance = -distance;

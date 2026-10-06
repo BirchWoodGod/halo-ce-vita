@@ -229,6 +229,9 @@ What helps, in the settings panel:
 
 - **Render resolution** 50% (applies at once, as does **Aspect ratio**): the
   biggest gain in graphics-heavy fights such as Pillar of Autumn's.
+  **Dynamic** (experimental) lowers the resolution only while the graphics
+  chip is the limit and goes back up to 100% when it is not, down to the
+  **Dynamic minimum** (50% by default).
 - **Model detail** Low or Lowest: characters and vehicles far away are drawn
   with fewer polygons.
 - **Hide distant objects** Small or Medium: tiny far-away objects are skipped.

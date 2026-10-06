@@ -108,6 +108,16 @@ and more: HALO_RENDER_SCALE), and a new one for the targets made from now
 on (the settings panel's change, between frames: d3d8_gxm.c) */
 float vgxm_render_scale(void);
 void vgxm_render_scale_set(float scale);
+/* the dynamic resolution (d3d8_gxm.c, on the worker between two frames, or
+with it idle): the screen-sized targets drawn into their top left, scale
+times the size asked for, their memory as it was made (at most the render
+scale; 1: the whole target). Returns the scale in effect. Viewports, clips,
+clears, visibility counts, the blit to the display and screenshots follow;
+the colour targets' textures cover the drawn part once vgxm_target_texture
+is called again for each (a target made from now on has it already) */
+float vgxm_render_rect_set(float scale);
+float vgxm_render_rect(void);
+void vgxm_target_texture(unsigned long id, struct vgxm_texture *texture);
 /* (the log) the target slots made, the CDRAM the targets hold, the CDRAM
 kept for the screen-sized targets' sizes not in use (vita_gxm.c
 screen_block_keep), and the CDRAM free */
@@ -248,6 +258,23 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 thread; the frames' scenes all end with the present's notification) */
 void vgxm_wait_gpu_idle(void);
 
+/* the GPU's time for the frames presented (the dynamic resolution's
+measure): the worker marks when it starts handing a frame's main work to
+the GPU (vgxm_frame_submit_begin, before the records held for the present);
+vgxm_gpu_frame_next gives each frame the GPU has finished since, oldest
+first, 1 while there is one. gpu_ms is from the later of the submission's
+start and the previous frame's finish to the frame's finish, tail_ms from
+the later of its last scene's submission and that finish (most of gpu_ms
+when the GPU is the wall), interval_ms from the previous frame's finish;
+scale is the render rectangle it was drawn at. None on the null renderer */
+struct vgxm_gpu_frame
+{
+	unsigned long frame;
+	float gpu_ms, tail_ms, interval_ms, scale;
+};
+void vgxm_frame_submit_begin(void);
+int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame);
+
 /* a line of the renderer's cache sizes (shaders, linked programs,
 targets, scenes this frame) for the frame statistics */
 const char *vgxm_counts(void);
@@ -259,6 +286,8 @@ void vgxm_overlay_set(float fps, float tick_ms, float render_ms);
 and render times, the cores' load), 2 frames per second only (XV_FPS, the
 settings panel's switch) */
 void vgxm_overlay_enable(int enabled);
+/* the full overlay's RES line marks the dynamic resolution as running */
+void vgxm_overlay_dynamic(int dynamic);
 /* the frame's scale to the display: 0 smooth (bilinear), 1 sharp
 (nearest); HALO_UPSCALE_FILTER at start-up */
 void vgxm_upscale_filter_set(int filter);

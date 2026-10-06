@@ -288,11 +288,33 @@ int main(void)
 	printf("%s\n--\n", menu);
 	check(menu_visible && menu[0] == '\t' && strstr(menu, "*Graphics|Audio|Controls|Multiplayer|Modded maps\n"),
 		"SELECT+START opens the Graphics tab; five tabs (Dev hidden)");
-	check(strstr(menu_line(1, line, sizeof(line)), "Profile") && strstr(menu_line(10, line, sizeof(line)), "FPS counter") &&
-		strstr(menu_line(11, line, sizeof(line)), "Frame limit"), "Graphics: Profile ... FPS counter, Frame limit");
-	for (index = 1; index < 12; index++)
+	check(strstr(menu_line(1, line, sizeof(line)), "Profile") && strstr(menu_line(3, line, sizeof(line)), "Dynamic minimum") &&
+		strstr(menu_line(11, line, sizeof(line)), "FPS counter") && strstr(menu_line(12, line, sizeof(line)), "Frame limit"),
+		"Graphics: Profile, Render resolution, Dynamic minimum ... FPS counter, Frame limit");
+	for (index = 1; index < 13; index++)
 		check(strlen(menu_line(index, line, sizeof(line))) <= 46, "a Graphics line fits (46 characters)");
-	check(!strstr(menu, "Render resolution*") && !strstr(menu, "Aspect ratio*"), "resolution and aspect: live, no *");
+	check(!strstr(menu, "Render resolution*") && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Dynamic minimum*"),
+		"resolution, dynamic minimum and aspect: live, no *");
+	{
+		/* Render resolution's Dynamic: saved as a word, the profile Custom,
+		back to a number, and the minimum's row */
+		unsigned long generation = halo_settings_generation;
+
+		vita_settings_set("HALO_RENDER_SCALE", "dynamic");
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=dynamic\n") &&
+			!strcmp(settings[0].names[settings[0].choice], "Custom"),
+			"Render resolution Dynamic: in the environment and settings.txt at once, the profile Custom");
+		check(strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.5\n") != NULL, "Dynamic minimum: 50% by default, saved");
+		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
+		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.75\n"), "Dynamic minimum 75%");
+		vita_settings_set("HALO_RENDER_SCALE", "0.3");
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5"), "a scale off the list goes to the nearest number, not Dynamic");
+		vita_settings_set("HALO_RENDER_SCALE", "0.75");
+		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.5");
+		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 75%: Balanced again");
+	}
 	press(VITA_BUTTON_L);
 	check(strstr(menu, "*Modded maps") != NULL, "L from the first tab wraps to the last shown");
 	press(VITA_BUTTON_R);
@@ -555,6 +577,18 @@ int main(void)
 			!strcmp(getenv("XV_INVERT_Y"), "1") && !strcmp(getenv("HALO_SOUND_CHANNELS"), "24") &&
 			!strcmp(getenv("HALO_CROUCH_TOGGLE"), "0") && !strcmp(getenv("HALO_FRAME_CAP"), "60") &&
 			!strcmp(settings[0].names[settings[0].choice], "Custom"), "a 1.0 settings.txt loads, row for row");
+		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") && choice_of("HALO_DYNAMIC_RES_MIN") == 0,
+			"a 1.0 settings.txt: Dynamic minimum at its default");
+	}
+
+	/* a settings.txt with Dynamic loads */
+	{
+		static const char dynamic[] = "HALO_RENDER_SCALE=dynamic\nHALO_DYNAMIC_RES_MIN=0.625\nHALO_MODEL_LOD_SCALE=0.5\n";
+
+		write_file(SETTINGS_FILE, dynamic, sizeof(dynamic) - 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") &&
+			!strcmp(settings[1].names[settings[1].choice], "Dynamic"), "a settings.txt with Dynamic loads");
 	}
 
 	/* PR #7's message overlay (a join refused): wrapped to the menu's width,
