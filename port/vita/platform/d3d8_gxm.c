@@ -16,6 +16,7 @@ the game gave their surface, as in the OpenGL device.
 
 #include "vita_xgpu.h"
 #include "vita_gxm.h"
+#include "dynamic_resolution.h"
 #include "sdl_platform.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
@@ -86,19 +87,27 @@ void halo_screen_ui_offset(unsigned char centered)
 }
 
 static void screen_settings_apply(void);
+static void dynres_configure(void);
 
 long halo_screen_commit(void)
 {
 	extern volatile unsigned long halo_settings_generation;
 	static unsigned long settings_seen;
+	static int dynres_configured;
 	unsigned long generation = __atomic_load_n(&halo_settings_generation, __ATOMIC_ACQUIRE);
 
 	if (!screen_width)
 		return halo_screen_width();
+	if (!dynres_configured)
+	{
+		dynres_configured = 1;
+		dynres_configure();
+	}
 	if (generation != settings_seen)
 	{
 		settings_seen = generation;
 		screen_settings_apply();
+		dynres_configure();
 	}
 	return screen_width;
 }
@@ -3290,6 +3299,7 @@ static void execute_draw(struct render_command *command)
 static void write_screenshot(struct render_target_entry *target);
 static void write_display_screenshot(unsigned long frame);
 int halo_trace_active(void);
+static void dynres_frame_end(void);
 
 static void execute_command(struct render_command *command)
 {
@@ -3360,6 +3370,8 @@ static void execute_command(struct render_command *command)
 		}
 		if (halo_trace_active())
 			platform_log("trace: worker presented %lu", command->frame);
+		/* (the next frame's render scale, between the two) */
+		dynres_frame_end();
 		render_target_atlas_frame_end();
 		worker_build_frame_end();
 		vita_texture_cache_begin_frame();
@@ -3405,6 +3417,10 @@ static void *render_worker(void *unused)
 			{
 				unsigned long each;
 				unsigned int wave;
+
+				/* (the frame's main work goes to the GPU from here: the
+				dynamic resolution's GPU time) */
+				vgxm_frame_submit_begin();
 
 				for (wave = 1; wave <= last_wave; wave++)
 					for (each = 0; each < waved_count; each++)
@@ -4193,7 +4209,9 @@ static void screen_entries_rekey(unsigned long old_width, unsigned long new_widt
 static void screen_settings_apply(void)
 {
 	const char *setting = getenv("HALO_RENDER_SCALE");
-	float scale = setting ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale();
+	/* (dynamic: the targets at the full size, drawn into a part of them -
+	the dynamic resolution) */
+	float scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale();
 	long width = screen_width_wanted(), old_width = screen_width;
 	unsigned long long started;
 	unsigned long made = 0, targets, cdram, cached, cdram_free;
@@ -4260,6 +4278,240 @@ static void screen_settings_apply(void)
 		" (NO TARGETS: no memory for the old size either)") : "",
 		made, (unsigned long long)(vita_host_time_us() - started), targets, cdram / 1024, cached / 1024,
 		cdram_free / 1024);
+}
+
+/* ---------- the dynamic resolution
+
+HALO_RENDER_SCALE=dynamic (the settings panel's Render resolution: Dynamic):
+the screen-sized targets are made at the full size (the render scale 1, or
+the old size when a live change found no CDRAM for it: vgxm_render_scale is
+the ceiling) and each frame is drawn into the top left part of them, from
+HALO_DYNAMIC_RES_MIN (0.5) of the size up to the whole, in 32nds. The
+scale follows the GPU's time for the frames before (vgxm_gpu_frame_next;
+dynamic_resolution.c: down fast, up slowly) against the frame limit's
+budget (HALO_FRAME_CAP: 33.3 ms at 30 FPS and when off, 16.7 at 60). It
+changes on the worker, after a present and before the next frame's first
+record: the targets' rectangles (vgxm_render_rect_set) and their entries'
+textures move together, and every effect that samples the screen or a copy
+of it goes through those textures in the game's own coordinates
+(bind_recorded_textures: the glow, the zoom's copy, the camouflage's, the
+heat haze, the water), so nothing is made again and nothing hitches.
+
+The game's thread reads the settings (dynres_configure, at the first
+present and after a change in the panel) into dynres_config and bumps its
+generation; the worker takes them at its next frame end. Debug:
+HALO_DYNRES_FORCE=<percent> holds that scale (with
+HALO_RENDER_SCALE=dynamic: the targets at the full size);
+HALO_DYNRES_CYCLE=<frames> steps 100%..50%..100% two 32nds at a time every
+that many frames; HALO_DYNRES_SIM=<ms> stands in for the GPU's time, that
+many ms at 100% and growing with the pixels (the null renderer times
+nothing); HALO_DYNRES_BUDGET=<ms> another budget. With the performance
+logging (HALO_FRAME_TIMING) the changes go to halo.log, a line a second at
+most, and a summary every 300 frames. */
+
+static struct
+{
+	volatile unsigned long generation;
+	int enabled, floor, force, cycle, log;
+	float budget_ms, sim_ms;
+} dynres_config;
+
+static struct
+{
+	unsigned long generation;
+	int enabled, floor, force, cycle, log;
+	float budget_ms, sim_ms;
+	struct dynres_controller controller;
+	/* the level the targets are drawn at now (32nds) */
+	int level;
+	unsigned long frames;
+	/* the log: changes since the last line, the level then, the time of
+	the last line; the summary's frames, levels, GPU times */
+	unsigned long changes_pending, summary_changes;
+	int logged_level;
+	unsigned long long logged_us;
+	unsigned long summary_frames, summary_over;
+	int summary_minimum, summary_maximum;
+	float summary_level_sum, summary_gpu_sum, summary_gpu_maximum;
+	float last_gpu_ms, last_tail_ms;
+} dynres;
+
+static int dynres_level_of(float scale)
+{
+	int level = (int)(scale * DYNRES_UNITS + 0.5f);
+
+	return level < 1 ? 1 : level > DYNRES_UNITS ? DYNRES_UNITS : level;
+}
+
+/* (the game's thread) */
+static void dynres_configure(void)
+{
+	const char *scale = getenv("HALO_RENDER_SCALE"), *minimum = getenv("HALO_DYNAMIC_RES_MIN");
+	const char *force = getenv("HALO_DYNRES_FORCE"), *cycle = getenv("HALO_DYNRES_CYCLE");
+	const char *sim = getenv("HALO_DYNRES_SIM"), *budget = getenv("HALO_DYNRES_BUDGET");
+	const char *cap = getenv("HALO_FRAME_CAP"), *timing = getenv("HALO_FRAME_TIMING");
+	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2;
+	int enabled, forced = force && atoi(force) > 0 ? dynres_level_of(atoi(force) / 100.0f) : 0;
+	float budget_ms = cap && atoi(cap) > 0 ? 1000.0f / (float)atoi(cap) : 1000.0f / 30.0f;
+
+	if (floor < DYNRES_UNITS / 2)
+		floor = DYNRES_UNITS / 2;
+	if (forced && forced < DYNRES_UNITS / 2)
+		forced = DYNRES_UNITS / 2;
+	if (budget && atof(budget) > 1.0)
+		budget_ms = (float)atof(budget);
+	enabled = (scale && !strcmp(scale, "dynamic")) || forced || (cycle && atoi(cycle) > 0);
+	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force)
+		platform_log("dynamic resolution: %s%s (floor %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
+			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (double)budget_ms,
+			cycle && atoi(cycle) > 0 ? ", cycling" : "", sim && atof(sim) > 0.0 ? ", GPU simulated" : "");
+	dynres_config.enabled = enabled;
+	dynres_config.floor = floor;
+	dynres_config.force = forced;
+	dynres_config.cycle = cycle && atoi(cycle) > 0 ? atoi(cycle) : 0;
+	dynres_config.sim_ms = sim && atof(sim) > 0.0 ? (float)atof(sim) : 0.0f;
+	dynres_config.budget_ms = budget_ms;
+	dynres_config.log = timing && atoi(timing) > 0;
+	__atomic_store_n(&dynres_config.generation, dynres_config.generation + 1, __ATOMIC_RELEASE);
+}
+
+/* the targets drawn at level from the next frame on (the worker, between
+frames; or the game's thread with the worker idle) */
+static void dynres_apply(int level)
+{
+	struct render_target_entry *entry;
+	float applied = vgxm_render_rect_set((float)level / DYNRES_UNITS);
+
+	for (entry = render_targets; entry; entry = entry->next)
+		if (screen_sized_entry(entry) && !entry->target.depth)
+			vgxm_target_texture(entry->id, &entry->texture);
+	dynres.level = dynres_level_of(applied);
+}
+
+static void dynres_log_change(int from)
+{
+	unsigned long long now = vita_host_time_us();
+
+	dynres.changes_pending++;
+	dynres.summary_changes++;
+	if (!dynres.log)
+		return;
+	if (!dynres.logged_us)
+		dynres.logged_level = from;
+	if (now - dynres.logged_us < 1000000ull)
+		return;
+	platform_log("dynamic resolution: %d%% (from %d%%; GPU %.1f ms, tail %.1f, budget %.1f; %lu changes in %.1f s)",
+		dynres.level * 100 / DYNRES_UNITS, dynres.logged_level * 100 / DYNRES_UNITS, (double)dynres.last_gpu_ms,
+		(double)dynres.last_tail_ms, (double)dynres.budget_ms, dynres.changes_pending,
+		dynres.logged_us ? (now - dynres.logged_us) / 1000000.0 : 0.0);
+	dynres.changes_pending = 0;
+	dynres.logged_level = dynres.level;
+	dynres.logged_us = now;
+}
+
+/* a frame the GPU finished, at the level it was drawn at */
+static int dynres_measured(float gpu_ms, float tail_ms, int frame_level, float interval_ms)
+{
+	int level = dynres.controller.level;
+
+	dynres.last_gpu_ms = gpu_ms;
+	dynres.last_tail_ms = tail_ms;
+	if (dynres.enabled && !dynres.force && !dynres.cycle)
+		level = dynres_controller_frame(&dynres.controller, gpu_ms, tail_ms, frame_level, interval_ms);
+	if (dynres.log && gpu_ms * 1000.0f < 250000.0f)
+	{
+		dynres.summary_frames++;
+		dynres.summary_level_sum += (float)frame_level;
+		dynres.summary_gpu_sum += gpu_ms;
+		if (gpu_ms > dynres.summary_gpu_maximum)
+			dynres.summary_gpu_maximum = gpu_ms;
+		if (gpu_ms > dynres.budget_ms)
+			dynres.summary_over++;
+		if (!dynres.summary_minimum || frame_level < dynres.summary_minimum)
+			dynres.summary_minimum = frame_level;
+		if (frame_level > dynres.summary_maximum)
+			dynres.summary_maximum = frame_level;
+		if (dynres.summary_frames == 300)
+		{
+			platform_log("dynamic resolution: %lu frames at %d..%d%% (mean %.0f%%), GPU mean %.1f ms, max %.1f, "
+				"%lu over the %.1f ms budget, %lu changes", dynres.summary_frames,
+				dynres.summary_minimum * 100 / DYNRES_UNITS, dynres.summary_maximum * 100 / DYNRES_UNITS,
+				(double)(dynres.summary_level_sum * 100.0f / DYNRES_UNITS / dynres.summary_frames),
+				(double)(dynres.summary_gpu_sum / dynres.summary_frames), (double)dynres.summary_gpu_maximum,
+				dynres.summary_over, (double)dynres.budget_ms, dynres.summary_changes);
+			dynres.summary_frames = dynres.summary_over = dynres.summary_changes = 0;
+			dynres.summary_minimum = dynres.summary_maximum = 0;
+			dynres.summary_level_sum = dynres.summary_gpu_sum = dynres.summary_gpu_maximum = 0.0f;
+		}
+	}
+	return level;
+}
+
+/* (the worker, after a present) the frames the GPU finished, and the next
+frame's level */
+static void dynres_frame_end(void)
+{
+	unsigned long generation = __atomic_load_n(&dynres_config.generation, __ATOMIC_ACQUIRE);
+	struct vgxm_gpu_frame frame;
+	int ceiling = dynres_level_of(vgxm_render_scale()), level;
+
+	if (generation != dynres.generation)
+	{
+		int was_enabled = dynres.enabled;
+
+		dynres.generation = generation;
+		dynres.enabled = dynres_config.enabled;
+		dynres.floor = dynres_config.floor;
+		dynres.force = dynres_config.force;
+		dynres.cycle = dynres_config.cycle;
+		dynres.sim_ms = dynres_config.sim_ms;
+		dynres.budget_ms = dynres_config.budget_ms;
+		dynres.log = dynres_config.log;
+		if (dynres.enabled && !was_enabled)
+			dynres_controller_init(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
+		vgxm_overlay_dynamic(dynres.enabled);
+	}
+	if (!dynres.level)
+		dynres.level = dynres_level_of(vgxm_render_rect());
+	dynres_controller_limits(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
+	level = dynres.controller.level;
+	dynres.frames++;
+	/* (drained whether on or not: the overlay's GPU line) */
+	while (vgxm_gpu_frame_next(&frame))
+		if (!dynres.sim_ms)
+			level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+	if (dynres.sim_ms)
+	{
+		/* (debug) a GPU whose time grows with the pixels, 8% noise, its
+		frames finished at once */
+		static unsigned int noise = 12345;
+		float scale = (float)dynres.level / DYNRES_UNITS, gpu;
+
+		noise = noise * 1103515245u + 12345u;
+		gpu = dynres.sim_ms * scale * scale * (1.0f + 0.08f * (((noise >> 8) & 0xffff) / 32767.5f - 1.0f));
+		level = dynres_measured(gpu, gpu * 0.7f, dynres.level, gpu > dynres.budget_ms ? gpu : dynres.budget_ms);
+	}
+	if (!dynres.enabled)
+		level = DYNRES_UNITS;
+	else if (dynres.force)
+		level = dynres.force;
+	else if (dynres.cycle)
+	{
+		/* 32, 30 .. 16, 18 .. 30, again */
+		unsigned long step = (dynres.frames / (unsigned long)dynres.cycle) % 16;
+
+		level = step <= 8 ? DYNRES_UNITS - 2 * (int)step : DYNRES_UNITS / 2 + 2 * (int)(step - 8);
+	}
+	if (level > ceiling)
+		level = ceiling;
+	if (level != dynres.level)
+	{
+		int from = dynres.level;
+
+		dynres_apply(level);
+		if (dynres.level != from && dynres.enabled)
+			dynres_log_change(from);
+	}
 }
 
 /* has the target a depth format? (no GPU work: the worker creates targets) */
