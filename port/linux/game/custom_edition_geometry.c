@@ -648,13 +648,13 @@ boolean custom_edition_models_convert(
 	(rasterizer_vertex_buffer_new and rasterizer_triangle_buffer_new: in the
 	window and the C heap) - so the map's model data (21 MB of Extinction's)
 	and its compressed geometry (10 MB) are never held whole. The working
-	memory, in the window, for as long as this takes. */
+	memory, in a memory block of its own, for as long as this takes. */
 	scratch_bytes = (totals.largest_part_vertex_count * sizeof(*scratch) + 15) & ~15UL;
 	strip_scratch_bytes = (totals.largest_part_strip_index_count * sizeof(*strip_scratch) + 15) & ~15UL;
 	compressed_bytes = (totals.largest_part_vertex_count * vertex_size + 15) & ~15UL;
 	working_bytes = scratch_bytes + strip_scratch_bytes + compressed_bytes + 2 * MODEL_DATA_READ_AHEAD_BYTES;
 	globals->model_parts = malloc((totals.part_count + 1) * sizeof(*globals->model_parts));
-	working = halo_custom_edition_geometry_alloc(working_bytes);
+	working = halo_custom_edition_memory_alloc(working_bytes);
 	if (!globals->model_parts || !working)
 	{
 		error(
@@ -662,7 +662,7 @@ boolean custom_edition_models_convert(
 			"custom edition: out of memory for converting the geometry of %ld model parts (%lu KB)",
 			totals.part_count,
 			working_bytes / 1024);
-		halo_custom_edition_geometry_free(working);
+		halo_custom_edition_memory_free(working);
 		custom_edition_cache_load_failure_note("there is not enough memory for its models");
 		return FALSE;
 	}
@@ -687,7 +687,7 @@ boolean custom_edition_models_convert(
 			custom_edition_cache_load_failure_note("there is not enough memory for its models");
 		}
 	}
-	halo_custom_edition_geometry_free(working);
+	halo_custom_edition_memory_free(working);
 	if (success)
 	{
 		custom_edition_cache_tags_regroup(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, MODELS_GROUP_TAG);
@@ -770,9 +770,9 @@ boolean custom_edition_structure_bsp_load(
 
 	globals->structure_bsp = structure_bsp;
 	/* (kept for the game's own reads - object lighting, point queries -
-	with the buffers made from them; out of the C heap, which the Vita has
-	little of) */
-	globals->structure_bsp_vertices = halo_custom_edition_geometry_alloc(vertices_size);
+	with the buffers made from them; neither in the C heap, which the Vita
+	has little of, nor in the window, which the buffers need) */
+	globals->structure_bsp_vertices = halo_custom_edition_memory_alloc(vertices_size);
 	if (!globals->structure_bsp_vertices)
 	{
 		error(_error_silent, "custom edition: out of memory for 0x%lX bytes of structure BSP vertices", vertices_size);
@@ -824,7 +824,7 @@ void custom_edition_structure_bsp_unload(
 	if (globals->structure_bsp)
 	{
 		structure_bsp_buffers_release(globals->structure_bsp);
-		halo_custom_edition_geometry_free(globals->structure_bsp_vertices);
+		halo_custom_edition_memory_free(globals->structure_bsp_vertices);
 		globals->structure_bsp = NULL;
 		globals->structure_bsp_vertices = NULL;
 	}

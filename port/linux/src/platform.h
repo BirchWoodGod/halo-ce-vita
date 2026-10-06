@@ -150,11 +150,11 @@ whose tags are then moved there (custom_edition_cache.c); NULL when there is
 no room. Released when the map goes. */
 void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
 void halo_custom_edition_tag_cache_release(void);
-/* Memory for a Custom Edition map's converted geometry and its conversion,
-in the contiguous window (below the blocks the game laid out, which it does
-not move) rather than the C heap; NULL when there is no room. */
-void *halo_custom_edition_geometry_alloc(unsigned long bytes);
-void halo_custom_edition_geometry_free(void *address);
+/* Zeroed memory for a Custom Edition map's converted structure BSP vertices,
+relocation bitmap and conversion, in memory blocks of their own (neither the
+C heap nor the window); NULL when there is no room. */
+void *halo_custom_edition_memory_alloc(unsigned long bytes);
+void halo_custom_edition_memory_free(void *address);
 /* The C heap: bytes in use, and its size (0: no fixed size) */
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
 /* the contiguous window's bytes in blocks and free (where blocks are laid out) */

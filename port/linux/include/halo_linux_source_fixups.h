@@ -68,10 +68,11 @@ window above is not there (port/linux/src/xbox_memory.c) */
 int halo_custom_edition_enabled(void);
 void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
 void halo_custom_edition_tag_cache_release(void);
-/* memory in the contiguous window for a Custom Edition map's converted
-geometry (port/linux/src/xbox_memory.c); NULL when there is no room */
-void *halo_custom_edition_geometry_alloc(unsigned long bytes);
-void halo_custom_edition_geometry_free(void *address);
+/* zeroed memory blocks of their own for a Custom Edition map's converted
+geometry and its conversion (port/linux/src/xbox_memory.c); NULL when there
+is no room */
+void *halo_custom_edition_memory_alloc(unsigned long bytes);
+void halo_custom_edition_memory_free(void *address);
 /* the C heap's bytes in use and size (0: none fixed) */
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
 /* the contiguous window's bytes in blocks and free (where blocks are laid out) */

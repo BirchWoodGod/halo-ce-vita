@@ -232,24 +232,77 @@ void halo_custom_edition_tag_cache_release(void)
 	custom_edition_allocation = NULL;
 }
 
-/* (a Custom Edition map's structure BSP vertices and the working memory
-of its conversion: out of the C heap, of which the Vita has a fixed 48 MB
-that the system's libraries share; the window has room below the game's
-blocks, as its Direct3D buffers do) */
-void *halo_custom_edition_geometry_alloc(unsigned long bytes)
-{
-	void *result = platform_contiguous_alloc(bytes ? bytes : 1, PAGE_SIZE_BYTES, PLATFORM_ANY_PHYSICAL_ADDRESS,
-		PAGE_READWRITE);
+/* Memory blocks of their own (user memory: neither the C heap, a fixed
+48 MB on the Vita that the system's libraries share, nor the window, whose
+room below the game's blocks the map's Direct3D buffers need) for a Custom
+Edition map's structure BSP vertices, its relocation bitmap and the working
+memory of its conversion; zeroed. A few at a time. */
+#define CUSTOM_EDITION_MEMORY_BLOCKS 8
 
+static struct
+{
+	void *address;
+	unsigned long bytes;
+	int uid;
+} custom_edition_memory_blocks[CUSTOM_EDITION_MEMORY_BLOCKS];
+
+void *halo_custom_edition_memory_alloc(unsigned long bytes)
+{
+	void *result = NULL;
+	int index;
+	int uid = -1;
+
+	bytes = (bytes + PAGE_SIZE_BYTES - 1) & ~(PAGE_SIZE_BYTES - 1);
+	if (!bytes)
+		bytes = PAGE_SIZE_BYTES;
+	pthread_mutex_lock(&arena_lock);
+	for (index = 0; index < CUSTOM_EDITION_MEMORY_BLOCKS && custom_edition_memory_blocks[index].address; index++)
+		;
+	if (index < CUSTOM_EDITION_MEMORY_BLOCKS)
+	{
+#ifdef HALO_VITA
+		result = vita_host_block_alloc("halo_custom_edition_data", bytes, &uid);
+		if (result)
+			memset(result, 0, bytes);
+#else
+		result = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (result == MAP_FAILED)
+			result = NULL;
+#endif
+		if (result)
+		{
+			custom_edition_memory_blocks[index].address = result;
+			custom_edition_memory_blocks[index].bytes = bytes;
+			custom_edition_memory_blocks[index].uid = uid;
+		}
+	}
+	pthread_mutex_unlock(&arena_lock);
 	if (!result)
-		platform_log("custom edition: no room in the memory window for %lu KB of geometry", (bytes + 1023) / 1024);
+		platform_log("custom edition: no room for a %lu KB memory block", bytes / 1024);
 	return result;
 }
 
-void halo_custom_edition_geometry_free(void *address)
+void halo_custom_edition_memory_free(void *address)
 {
-	if (address)
-		platform_contiguous_free(address);
+	int index;
+
+	if (!address)
+		return;
+	pthread_mutex_lock(&arena_lock);
+	for (index = 0; index < CUSTOM_EDITION_MEMORY_BLOCKS; index++)
+	{
+		if (custom_edition_memory_blocks[index].address == address)
+		{
+#ifdef HALO_VITA
+			vita_host_block_free(custom_edition_memory_blocks[index].uid);
+#else
+			munmap(address, custom_edition_memory_blocks[index].bytes);
+#endif
+			custom_edition_memory_blocks[index].address = NULL;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&arena_lock);
 }
 
 void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes)
