@@ -319,6 +319,14 @@ This port stands on a lot of other people's work:
   lessons, the tools) went into this port.
 - **PS Vita port**: BirchWoodGod.
 
+### Testers
+
+Thank you to everyone who played the releases and betas on their own Vitas
+and reported what they found, with crash dumps, logs, saves and screenshots:
+[BlazeRed17](https://github.com/BlazeRed17), [ItsSamStone](https://github.com/ItsSamStone), [Benixio](https://github.com/Benixio), [DuckiEXP](https://github.com/DuckiEXP), [5ackwood](https://github.com/5ackwood), [Andiweli](https://github.com/Andiweli), [maler82](https://github.com/maler82), [rbxshh](https://github.com/rbxshh), [nxble6](https://github.com/nxble6), [LordLavaLamp](https://github.com/LordLavaLamp), [KiddRwxSsj](https://github.com/KiddRwxSsj), [GrookyGamez](https://github.com/GrookyGamez), [aguy4809-art](https://github.com/aguy4809-art), [iamayod](https://github.com/iamayod); **CallumBlackGames**, for the first two-Vita multiplayer video; and
+**psvita_dude** and the testers on Discord. Many of the fixes in 1.0.1 to
+1.0.3 exist because of your reports.
+
 Libraries and tools: [VitaSDK](https://vitasdk.org),
 [SDL3](https://github.com/libsdl-org/SDL) (desktop builds),
 [tomlc17](https://github.com/cktan/tomlc17),
