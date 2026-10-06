@@ -26,6 +26,15 @@ Automated system link sessions for testing the netcode without the menus
 Once the game runs, every second each machine logs where every player's
 unit is, so the machines' views of the game can be compared.
 
+Co-op (network.coop_level, HALO_NET_COOP_LEVEL=a10): "host:<level>" hosts
+a game the server makes co-op on that campaign level, as the Vita's
+settings panel has it (network_server_manager.c), and starts it; once a
+level is won and the scores shown, the host starts the next round (the
+campaign's next level). Each second each machine also logs the co-op state:
+its structure BSP, the cinematic and the skip vote, and whom a dead local
+player watches. HALO_TEST_COMMANDS (main.c) presses skip ("@vote"), stands
+players in loading zones ("@bsp") and kills them ("@kill").
+
 Scripted play for the netcode's parts the bots' wandering does not reach:
 debug.network_test_kill (the host kills the last player every so often),
 debug.network_test_shoot (every so often each machine's player hits the
@@ -62,6 +71,7 @@ Called from the main loop every frame (main.c).
 #include "scenario/scenario.h"
 #include "tag_files/tag_files.h"
 #include "camera/observer.h"
+#include "cutscene/cinematics.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -84,6 +94,12 @@ void network_distributed_item_statistics(long *creates, long *deletes, long *fai
 void network_damage_statistics(long *sent_reports, long *dealt_reports, long *rejected_reports, long *replayed_events);
 /* xinput_sdl.c's */
 void test_input_hold_action(int hold);
+/* network co-op's (port/linux/game/network_coop.c, coop_spectate.c) */
+boolean network_coop_active(void);
+boolean network_coop_skip_vote_status(short *votes, short *voters, boolean *voted);
+long coop_spectate_unit(short local_player_index);
+/* network_server_manager.c's */
+word network_game_server_get_state(struct network_game_server *server, short *substate);
 
 enum
 {
@@ -384,6 +400,19 @@ static void network_test_log_players(
 			local_player_index == NONE ? -1L : (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(local_player_index),
 			camera ? camera->position.x : 0.0f, camera ? camera->position.y : 0.0f, camera ? camera->position.z : 0.0f,
 			local_player_index == NONE ? 0L : (long)player_get(local_player_index)->respawn_timer);
+	}
+	/* co-op: the structure BSP, the cinematic, the skip vote, whom a dead
+	local player watches */
+	if (network_coop_active())
+	{
+		short votes = 0, voters = 0;
+		boolean voted = FALSE;
+		boolean offered = network_coop_skip_vote_status(&votes, &voters, &voted);
+		long watched = coop_spectate_unit(0);
+
+		platform_log("network test: co-op tick %ld | bsp %d | cinematic %d skip %s %d/%d%s | watching %lx",
+			game_time_get(), (int)global_structure_bsp_index_get(), (int)cinematic_in_progress(),
+			offered ? "offered" : "no", (int)votes, (int)voters, voted ? " voted" : "", (unsigned long)watched);
 	}
 }
 
@@ -935,6 +964,23 @@ void network_test_update(
 			}
 		}
 	}
+	/* co-op: a level won ends the round (the server's postgame, with no
+	game engine); the scores shown a while, the host goes back to the lobby
+	and starts the next level */
+	if (network_test.mode == _network_test_host && network_test.started && !main_menu_loaded &&
+		global_network_game_server_get() && config_string("network.coop_level")[0] &&
+		network_game_server_get_state(global_network_game_server_get(), NULL) == 2)
+	{
+		network_test.postgame_seconds += seconds;
+		if (!network_test.game_over)
+			platform_log("network test: co-op level won: %s", global_scenario_get() ? tag_get_name(global_scenario_index) : "?");
+		network_test.game_over = TRUE;
+		if (network_test.postgame_seconds >= 3.0f)
+		{
+			network_test.postgame_seconds = -1000.0f;
+			network_game_server_reset_to_pregame(global_network_game_server_get());
+		}
+	}
 	/* (a joining machine's player: the other team again in the next game's
 	lobby, whose variant may have teams where the last had none) */
 	if (network_test.mode == _network_test_join && network_test.team_set && game_engine_running() &&
@@ -979,7 +1025,15 @@ void network_test_update(
 	{
 		network_test.game_over = FALSE;
 		network_test.postgame_seconds = 0.0f;
-		if (network_test_variant(network_test.variant_index + 1, NULL, 0))
+		if (config_string("network.coop_level")[0])
+		{
+			/* (co-op: the next level, the server's next round) */
+			network_test.started = FALSE;
+			network_test.setup_seconds = 0.0f;
+			network_test.menu_seconds = 0.0f;
+			platform_log("network test: the next co-op level");
+		}
+		else if (network_test_variant(network_test.variant_index + 1, NULL, 0))
 		{
 			network_test.variant_index++;
 			network_test.started = FALSE;
@@ -1039,6 +1093,13 @@ void network_test_update(
 			network_test.setup_seconds += seconds;
 			/* the map (fast setup clears it), and a player for controller 1, as
 			pressing A in the lobby adds one */
+			/* (co-op: the server sets the level and its gametype itself,
+			network.coop_level) */
+			if (!network_test.map_set && config_string("network.coop_level")[0])
+			{
+				network_test.map_set = TRUE;
+				platform_log("network test: co-op on %s (the server's co-op setting)", config_string("network.coop_level"));
+			}
 			if (!network_test.map_set && network_test.setup_seconds >= 1.0f && global_network_game_server_get())
 			{
 				char path[128];

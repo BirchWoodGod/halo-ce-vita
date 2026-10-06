@@ -2668,6 +2668,20 @@ void damage_replay_kill(
 	distributed_damage_authorized = FALSE;
 }
 
+/* ... damage to scenery or a device, dealt as the host dealt it: the copy
+breaks, plays its effects and is destroyed as the host's was */
+void damage_replay_static(
+	long object_index,
+	struct damage_data *damage,
+	short node_index,
+	short region_index,
+	short material_index)
+{
+	distributed_damage_authorized = TRUE;
+	object_cause_damage(damage, object_index, node_index, region_index, material_index, NULL);
+	distributed_damage_authorized = FALSE;
+}
+
 /* the host's: what damage_set_network_state takes */
 void damage_get_network_state(
 	long object_index,
@@ -2697,7 +2711,8 @@ void damage_kill_object_for_player(
 		&scenario_get_game_globals()->falling_damage,
 		0,
 		struct game_globals_falling_damage);
-	struct player_datum *player = player_get(player_index);
+	/* (NONE: nobody's, as a fall) */
+	struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
 	struct damage_data damage;
 
 	if (falling_damage->falling_damage.index == NONE)
@@ -2705,9 +2720,12 @@ void damage_kill_object_for_player(
 	damage_data_new(&damage, falling_damage->falling_damage.index);
 	damage.scale = 1.f;
 	SET_FLAG(damage.flags, _damage_kill_instantly_bit, TRUE);
-	damage.owner_player_index = player_index;
-	damage.owner_object_index = player->unit_index;
-	damage.owner_team_index = (short)player->team_index;
+	if (player)
+	{
+		damage.owner_player_index = player_index;
+		damage.owner_object_index = player->unit_index;
+		damage.owner_team_index = (short)player->team_index;
+	}
 	object_cause_damage(&damage, object_index, NONE, NONE, NONE, NULL);
 }
 #endif

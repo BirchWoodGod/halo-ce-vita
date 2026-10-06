@@ -913,6 +913,14 @@ symbols in this file:
 #include "bungie_net/network/transport.h"
 #include "bungie_net/network/transport_endpoint_winsock.h"
 #include "interface/player_ui.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
+
+/* port: main.c's and network_server_manager.c's, which this file's headers
+do not declare (network co-op: ui_widget_port_cooperative_level_choose) */
+struct network_game_server;
+short main_get_solo_level_from_name(char const *name);
+void main_set_multiplayer_map_name(char const *map_name);
+void network_game_server_port_set_cooperative(struct network_game_server *server, short difficulty);
 #include "saved games/player_profile.h"
 #include "interface/ui_widget_definitions.h"
 
@@ -2118,6 +2126,9 @@ static boolean pause_game_restart_at_checkpoint(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+	/* port: in co-op this would revert only this machine */
+	if (network_coop_active())
+		return FALSE;
 #ifdef HALO_LINUX
 	{
 		void platform_log(const char *format, ...);
@@ -2134,6 +2145,9 @@ static boolean pause_game_restart_level(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+	/* port: in co-op this would restart only this machine */
+	if (network_coop_active())
+		return FALSE;
 #ifdef HALO_LINUX
 	{
 		void platform_log(const char *format, ...);
@@ -2150,6 +2164,17 @@ static boolean pause_game_quit_to_main_menu(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+	/* port: in co-op, take every player on this machine out of the network
+	game with one press (not one per split screen player). The solo save is
+	left alone. */
+	if (network_coop_active())
+	{
+		short controller_index;
+
+		for (controller_index = 0; controller_index < MAXIMUM_LOCAL_PLAYERS; controller_index++)
+			network_game_client_local_player_quit(controller_index);
+		return TRUE;
+	}
 	game_state_save_to_persistent_storage();
 	main_goto_main_menu();
 	return TRUE;
@@ -5973,5 +5998,30 @@ static boolean solo_level_initialize_list_single_player(
 				event_handler_functions.unknown3C = NONE;
 		}
 	}
+	return TRUE;
+}
+
+/* port: sets up the server for co-op (the Vita's co-op choice: multiplayer_level_select):
+the campaign level, the difficulty, and a gametype with no game engine,
+which is what makes a network game co-op (game.c, players.c). Returns FALSE
+without a server or a campaign level. */
+boolean ui_widget_port_cooperative_level_choose(
+	char const *map_name,
+	short difficulty)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	/* (a game_variant, game_engine.h: its description, 12 characters, then
+	its game engine, none) */
+	struct game_variant_data variant;
+
+	if (!server || !map_name || main_get_solo_level_from_name(map_name) == NONE)
+		return FALSE;
+	csmemset(&variant, 0, sizeof(variant));
+	ustrncpy((wchar_t *)variant.data, L"Co-op", 11);
+	main_set_difficulty(difficulty);
+	main_set_multiplayer_map_name(map_name);
+	network_game_server_port_set_cooperative(server, difficulty);
+	network_game_server_change_map_name(server, map_name);
+	network_game_server_change_game_variant(server, &variant);
 	return TRUE;
 }

@@ -349,6 +349,8 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
                 # tick_thread.h, load_profile.h ...), included with quotes,
                 # but not the Linux build's C runtime wrappers next to them
                 f"-iquote {LINUX_DIR / 'include'}",
+                # the headers of the port's own game units (port/linux/game)
+                f"-iquote {Path(linux_config['game_sources'])}",
                 # the POSIX threads over Windows threads
                 # (port/windows/src/win32_posix.c) the native ports' threads
                 # use (pthread.h, sched.h): after the C runtime, whose

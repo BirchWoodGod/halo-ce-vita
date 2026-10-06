@@ -382,6 +382,9 @@ void platform_log(const char *format, ...);
 #include "bink/bink_playback.h"
 #include "main/d3d_intimacy.h"
 #include "networking/network_game_globals.h"
+#include "networking/network_game_manager.h"
+#include "networking/network_server_manager.h" /* port: a co-op game's level won */
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "camera/director.h"
 #include "camera/observer.h"
 #include "objects/objects.h"
@@ -713,6 +716,9 @@ static char const *scenario_paths[10] =
 };
 
 static struct _main_globals main_globals = { 0 };
+/* Keep the original globals layout; these clocks belong to pending requests. */
+static long main_loss_last_tick;
+static long main_respawn_last_tick;
 boolean debug_force_frame_rate_update = FALSE;
 boolean debug_no_drawing = FALSE;
 boolean debug_game_save = FALSE;
@@ -941,6 +947,11 @@ void main_won_map(
 void main_lost_map(
 	void)
 {
+	if (!main_globals.lost_map)
+	{
+		main_globals.loss_timer = 0;
+		main_loss_last_tick = game_time_get();
+	}
 	main_globals.saving_map = FALSE;
 	main_globals.lost_map = TRUE;
 	return;
@@ -1014,9 +1025,14 @@ void main_save_map_nonsafe(
 void main_respawn(
 	boolean in_multiplayer)
 {
+	if (!main_globals.respawn)
+	{
+		main_globals.respawn_timer = 0;
+		main_respawn_last_tick = game_time_get();
+	}
 	main_globals.respawn = TRUE;
 	if (in_multiplayer)
-		main_globals.respawn_timer = 91;
+		main_globals.respawn_timer = 92;
 	return;
 }
 
@@ -1527,7 +1543,10 @@ static void main_new_map(
 	main_globals.load_core = main_globals.load_core_at_startup;
 	main_globals.load_core_at_startup = FALSE;
 
-	if (main_globals.allow_persistent_storage)
+	/* port: never a network game (co-op on a campaign level): the campaign
+	save is single player's, and a network game neither resumes nor writes
+	it (pause_game_quit_to_main_menu) */
+	if (main_globals.allow_persistent_storage && main_globals.connection == _game_connection_local)
 		game_state_try_and_load_from_persistent_storage();
 	ui_widgets_disable_pause_game(30);
 #ifdef HALO_LINUX
@@ -1963,11 +1982,40 @@ void main_pregame_render(
 	return;
 }
 
+/* port: a network co-op host reverts to its last saved state with its
+clock kept going forward, and the clients follow through the co-op syncs
+(network_coop.c). FALSE without a saved state, which would reset the map
+on the host alone. */
+static boolean main_coop_host_revert(
+	void)
+{
+	long now = game_time_get();
+
+	if (!game_state_port_saved_game_valid())
+		return FALSE;
+	game_state_revert();
+	network_coop_reverted(now);
+	ui_widgets_disable_pause_game(30);
+	return TRUE;
+}
+
+static boolean main_coop_host(
+	void)
+{
+	return game_connection() == _game_connection_network_server && network_coop_active();
+}
+
 static void main_revert_map_private(
 	void)
 {
-	game_state_revert();
-	ui_widgets_disable_pause_game(30);
+	/* (a network client never reverts on its own: its game is the host's) */
+	if (main_coop_host())
+		main_coop_host_revert();
+	else if (game_connection() != _game_connection_network_client)
+	{
+		game_state_revert();
+		ui_widgets_disable_pause_game(30);
+	}
 	main_globals.revert_map = FALSE;
 	return;
 }
@@ -1975,11 +2023,29 @@ static void main_revert_map_private(
 static void main_skip_cinematic_private(
 	void)
 {
-	if (cinematic_can_be_skipped())
+	/* port: only a local game or a network co-op host reverts to skip; a
+	network game's other machines would be left out of step */
+	boolean skippable = cinematic_can_be_skipped();
+	boolean skipped = FALSE;
+
+	if (skippable && main_coop_host())
+	{
+		skipped = main_coop_host_revert();
+		if (skipped)
+			network_coop_skip_done();
+	}
+	else if (skippable && game_connection() == _game_connection_local)
 	{
 		game_state_revert();
 		ui_widgets_disable_pause_game(30);
+		skipped = TRUE;
+	}
+	if (skipped)
 		main_globals.revert_map = FALSE;
+	else if (main_coop_host())
+	{
+		error(_error_silent, "co-op: cutscene not skipped (skippable %d, saved state %d)",
+			skippable, game_state_port_saved_game_valid());
 	}
 	main_globals.skip_cinematic = FALSE;
 	return;
@@ -2076,6 +2142,8 @@ static void main_save_map_private(
 			if (save_map_safely && checkpoint_wait_checks >= 300 && checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
 				platform_log("checkpoint: safe after %ld frames", checkpoint_wait_checks);
 #endif
+			/* port: remember where the players are, for network co-op respawns */
+			players_note_checkpoint();
 			hud_autosave(TRUE);
 			main_globals.save_map_completed = TRUE;
 			main_globals.saving_map = FALSE;
@@ -2094,17 +2162,52 @@ static void main_switch_to_structure_bsp_private(
 	return;
 }
 
+/* The original post-increment test expires on its 92nd 30 Hz update.
+   Render-only frames must not advance it. Saturate so blocked co-op
+   respawns can retry indefinitely without overflowing the short counter. */
+static boolean main_death_timer_expired(
+	short *timer,
+	long *last_tick,
+	boolean advance)
+{
+	long current_tick = game_time_get();
+	unsigned long elapsed_ticks = 0;
+
+	if (current_tick < *last_tick)
+	{
+		/* A checkpoint/core load can move the simulation clock backwards. */
+		*timer = 0;
+	}
+	else
+	{
+		elapsed_ticks = (unsigned long)current_tick - (unsigned long)*last_tick;
+	}
+	*last_tick = current_tick;
+
+	if (!advance)
+		return FALSE;
+
+	*timer = (short)MIN(92, (unsigned long)*timer + elapsed_ticks);
+	return *timer >= 92;
+}
+
 static void main_lost_map_private(
 	void)
 {
-	if (!game_time_get_paused())
+	if (main_death_timer_expired(
+		&main_globals.loss_timer, &main_loss_last_tick,
+		!game_time_get_paused()))
 	{
-		if (main_globals.loss_timer++ > 90)
-		{
-			main_globals.lost_map = FALSE;
-			main_globals.loss_timer = 0;
+		main_globals.lost_map = FALSE;
+		main_globals.loss_timer = 0;
+		/* port: in network co-op, everyone dying respawns the players where
+		they were at the last checkpoint, without a revert. A mission the
+		scripts failed (game_lost, with players still alive: d40's timer,
+		a50's Keyes) does revert, or its failure cutscene would never end. */
+		if (game_connection() != _game_connection_network_server)
 			game_state_revert();
-		}
+		else if (players_are_all_dead() || !main_coop_host_revert())
+			players_respawn_at_checkpoint();
 	}
 	return;
 }
@@ -2112,13 +2215,13 @@ static void main_lost_map_private(
 static void main_respawn_private(
 	void)
 {
-	if (!game_time_get_paused() && !cinematic_in_progress())
+	if (main_death_timer_expired(
+		&main_globals.respawn_timer, &main_respawn_last_tick,
+		!game_time_get_paused() && !cinematic_in_progress()) &&
+		players_respawn_coop())
 	{
-		if (main_globals.respawn_timer++ > 90 && players_respawn_coop())
-		{
-			main_globals.respawn = FALSE;
-			main_globals.respawn_timer = 0;
-		}
+		main_globals.respawn = FALSE;
+		main_globals.respawn_timer = 0;
 	}
 	return;
 }
@@ -2262,6 +2365,22 @@ static void main_won_map_private(
 {
 	short level;
 	short local_player_index;
+
+	/* port: when a network co-op level is won, the round ends for everyone as
+	in multiplayer, back to the lobby, and the next round is the campaign's
+	next level (The Maw's: The Pillar of Autumn). A level not in the campaign
+	repeats. */
+	if (game_connection() == _game_connection_network_server && network_coop_active())
+	{
+		struct network_game *game = network_game_get_game();
+
+		main_globals.won_map = FALSE;
+		level = game ? main_get_solo_level_from_name(game->map.name) : NONE;
+		player_profile_save_level_completed(0);
+		network_game_server_port_cooperative_won(level != NONE ?
+			main_get_solo_level_name((level + 1) % NUMBER_OF_SINGLE_PLAYER_LEVELS) : NULL);
+		return;
+	}
 	main_globals.want_to_be_at_main_menu = TRUE;
 	main_globals.won_map = FALSE;
 	level = main_get_solo_level_from_name(main_globals.soloplayer_map_name) + 1;
@@ -3575,6 +3694,9 @@ char halo_screenshot_name[64];
 
 static void main_test_camera(char const *arguments);
 static void main_test_trigger_volume(char const *name);
+static void main_test_bsp_switch_trigger(char const *arguments);
+/* damage.c's */
+void damage_kill_object_for_player(long object_index, long player_index);
 
 static void main_test_commands_update(
 	void)
@@ -3654,6 +3776,60 @@ static void main_test_commands_update(
 		}
 		else if (!strncmp(commands[index].command, "@tv ", 4))
 			main_test_trigger_volume(commands[index].command + 4);
+		/* network co-op (port/linux/game/network_coop.c): "@vote" is this
+		machine's press of skip in a cinematic; "@bsp P K" stands player P
+		(its absolute index, -1 every player) in the Kth of the loaded BSP's
+		switch trigger volumes; "@kill P" kills player P */
+		else if (!strcmp(commands[index].command, "@vote"))
+		{
+			platform_log("test command: skip pressed (offered %d, skippable %d)", network_coop_skip_offered(),
+				cinematic_can_be_skipped());
+			if ((cinematic_can_be_skipped() || network_coop_skip_offered()) && !network_coop_vote_skip())
+				main_skip_cinematic();
+		}
+		else if (!strncmp(commands[index].command, "@bsp ", 5))
+			main_test_bsp_switch_trigger(commands[index].command + 5);
+		else if (!strcmp(commands[index].command, "@bsplist"))
+			main_test_bsp_switch_trigger("-2 -1");
+		/* "@pos P X Y Z": player P stands there */
+		else if (!strncmp(commands[index].command, "@pos ", 5))
+		{
+			long player_absolute_index = NONE;
+			real_point3d position;
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			if (sscanf(commands[index].command + 5, "%ld %f %f %f", &player_absolute_index, &position.x, &position.y,
+				&position.z) == 4)
+			{
+				data_iterator_new(&iterator, player_data);
+				while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+				{
+					if (DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index &&
+						player->unit_index != NONE)
+					{
+						object_set_position(player->unit_index, &position, NULL, NULL);
+					}
+				}
+			}
+		}
+		else if (!strncmp(commands[index].command, "@kill ", 6))
+		{
+			long player_absolute_index = atol(commands[index].command + 6);
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			data_iterator_new(&iterator, player_data);
+			while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+			{
+				if (DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index &&
+					player->unit_index != NONE)
+				{
+					platform_log("test command: player %ld killed", player_absolute_index);
+					damage_kill_object_for_player(player->unit_index, NONE);
+				}
+			}
+		}
 		else
 			hs_compile_and_evaluate(commands[index].command);
 	}
@@ -3706,6 +3882,78 @@ static void main_test_trigger_volume(
 		return;
 	}
 	platform_log("test command: no trigger volume %s", name);
+}
+
+/* "@bsp P K": player P (-1 every player) stands in the middle of the Kth
+switch trigger volume whose source is the loaded structure BSP (a
+scenario's block of them, as players.c has it) */
+struct main_test_bsp_switch_trigger_volume
+{
+	short trigger_volume_index;
+	short source_structure_bsp_index;
+	short destination_structure_bsp_index;
+	short cutscene_flag_index;
+};
+
+static void main_test_bsp_switch_trigger(
+	char const *arguments)
+{
+	struct scenario *scenario = global_scenario_get();
+	long player_absolute_index = NONE;
+	int wanted = 0;
+	short index;
+	int found = 0;
+
+	sscanf(arguments, "%ld %d", &player_absolute_index, &wanted);
+	for (index = 0; index < scenario->bsp_switch_trigger_volumes.count; index++)
+	{
+		struct main_test_bsp_switch_trigger_volume *switch_volume = TAG_BLOCK_GET_ELEMENT(
+			&scenario->bsp_switch_trigger_volumes, index, struct main_test_bsp_switch_trigger_volume);
+		struct scenario_trigger_volume *volume;
+		real_point3d centre;
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		if (player_absolute_index != -2 &&
+			(switch_volume->source_structure_bsp_index != global_structure_bsp_index_get() || found++ != wanted))
+		{
+			continue;
+		}
+		volume = TAG_BLOCK_GET_ELEMENT(&scenario->trigger_volumes, switch_volume->trigger_volume_index,
+			struct scenario_trigger_volume);
+		if (volume->type == _scenario_trigger_volume_type_axis_aligned)
+		{
+			centre.x = (volume->bounds.x0 + volume->bounds.x1) / 2.0f;
+			centre.y = (volume->bounds.y0 + volume->bounds.y1) / 2.0f;
+			centre.z = (volume->bounds.z0 + volume->bounds.z1) / 2.0f;
+		}
+		else
+		{
+			real_matrix4x3 matrix;
+			real_point3d middle = { volume->extents.i / 2.0f, volume->extents.j / 2.0f, volume->extents.k / 2.0f };
+
+			matrix4x3_from_point_and_vectors(&matrix, &volume->position, &volume->forward, &volume->up);
+			matrix4x3_transform_point(&matrix, &middle, &centre);
+		}
+		platform_log("test command: BSP switch trigger %d (%s, BSP %d to %d) at %.2f %.2f %.2f for player %ld", index,
+			volume->name, (int)switch_volume->source_structure_bsp_index,
+			(int)switch_volume->destination_structure_bsp_index, centre.x, centre.y, centre.z, player_absolute_index);
+		/* ("@bsplist": every one listed, nobody moved) */
+		if (player_absolute_index == -2)
+			continue;
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (player->unit_index != NONE && (player_absolute_index == NONE ||
+				DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index))
+			{
+				object_set_position(player->unit_index, &centre, NULL, NULL);
+			}
+		}
+		return;
+	}
+	if (player_absolute_index != -2)
+		platform_log("test command: no BSP switch trigger %d from BSP %d", wanted, (int)global_structure_bsp_index_get());
 }
 
 static void main_test_camera(

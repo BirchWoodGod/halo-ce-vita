@@ -30,6 +30,9 @@ Evolved.
   between Vitas on the same Wi-Fi; online play (short codes, a public
   lobby) and ad hoc play between Vitas, experimental. Vitas play only
   Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
+- Campaign co-op over the network, experimental: two Vitas play a level
+  together by system link, online or ad hoc (the settings panel's
+  Multiplayer page, Co-op campaign; [port/vita/README.md](port/vita/README.md#multiplayer)).
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality and control options: hold
   **Select + Start** in game.
@@ -312,7 +315,10 @@ This port stands on a lot of other people's work:
   the platform layer, the OpenGL renderer the Vita renderer is modelled on,
   the distributed netcode, system link over the internet, and much more.
   Those platforms still build from this tree (`port/linux`, `port/windows`,
-  `port/android`, each with its own README).
+  `port/android`, each with its own README). Campaign co-op over the
+  network is theirs too (xshxdex98's and MrBruh's work: `network_coop.c`,
+  `coop_spectate.c`, `coop_scripts.c`, `network_actors.c`), brought in with
+  its commits' history and authors.
 - **[Invader](https://github.com/SnowyMouse/invader)** by SnowyMouse: the
   tag definitions `port/linux/src/tag_layouts.h` is generated from (by
   `tools/gen_tag_layouts.py`), which let the port relocate the maps' tags.

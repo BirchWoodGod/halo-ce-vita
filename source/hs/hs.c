@@ -2805,6 +2805,7 @@ symbols in this file:
 #include "structures/structure_lens_flares.h"
 #include "structures/structure_visibility.h"
 #include "tag_files/files.h"
+#include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 
 /* ---------- constants */
 
@@ -3757,7 +3758,7 @@ void errors_overflow_suppression_enable(
 void scripted_player_effect_stop(
 	real decay_time);
 void scripted_hud_set_state_message(
-	word message_index);
+	short message_index);
 void scripted_hud_set_timer_warning_cutoff(
 	short minutes,
 	word seconds);
@@ -13784,7 +13785,8 @@ static long alphabetize(
 	return _stricmp(*left, *right);
 }
 
-HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(game_safe_to_save_evaluate, game_safe_to_save)
+/* port: in network co-op, once any player is safe (coop_scripts.c) */
+HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(game_safe_to_save_evaluate, coop_scripts_safe_to_save)
 HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(game_all_quiet_evaluate, game_all_quiet)
 HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(game_safe_to_speak_evaluate, game_safe_to_speak)
 HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(game_is_cooperative_evaluate, game_is_cooperative)
@@ -14589,7 +14591,8 @@ HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(player_control_action_test_look_relative
 HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(player_control_action_test_look_relative_right_evaluate, player_control_action_test_look_relative_right)
 HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(player_control_action_test_look_relative_all_directions_evaluate, player_control_action_test_look_relative_all_directions)
 HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(player_control_action_test_move_relative_all_directions_evaluate, player_control_action_test_move_relative_all_directions)
-HS_EVALUATE_VOID_FROM_ARGUMENTS(player_add_equipment_evaluate, struct hs_arguments_long_word_boolean, (player_add_equipment(arguments->value0, arguments->value1, arguments->value2)))
+/* port: in network co-op, also for the players the scripts can't name (coop_scripts.c) */
+HS_EVALUATE_VOID_FROM_ARGUMENTS(player_add_equipment_evaluate, struct hs_arguments_long_word_boolean, (coop_scripts_player_add_equipment(arguments->value0, arguments->value1, arguments->value2)))
 HS_EVALUATE_VOID_FROM_ARGUMENTS(debug_player_teleport_evaluate, struct hs_arguments_short_word, (debug_player_teleport(arguments->value0, arguments->value1)))
 HS_EVALUATE_VOID_STRING(main_set_map_name_evaluate, main_set_map_name)
 HS_EVALUATE_VOID_STRING(main_set_multiplayer_map_name_evaluate, main_set_multiplayer_map_name)

@@ -226,6 +226,9 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	static int checked;
 	static int seed = -1;
+	/* "bot:<seed>:look": it also looks up and down (the campaign's first
+	level asks for that before the player leaves the cryo tube) */
+	static int look;
 	double t;
 
 	if (!checked)
@@ -237,6 +240,7 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 			seed = atoi(setting + 4);
 		else if (!strcmp(setting, "bot"))
 			seed = 0;
+		look = strstr(setting, ":look") != NULL;
 	}
 	if (seed < 0)
 		return;
@@ -262,6 +266,8 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	pad->sThumbLY = (SHORT)(sin(t * 0.9) * 32000.0);
 	pad->sThumbLX = (SHORT)(cos(t * 0.6 + seed) * 20000.0);
 	pad->sThumbRX = (SHORT)(sin(t * 0.4) * 14000.0);
+	if (look)
+		pad->sThumbRY = (SHORT)(sin(t * 0.7 + seed) * 20000.0);
 	if (fmod(t, 3.0) < 0.3)
 		pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 255;
 	if (fmod(t, 5.0) < 0.1)

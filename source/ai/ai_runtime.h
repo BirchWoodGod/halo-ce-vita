@@ -21,7 +21,8 @@ void ai_globals_ai_active(
 void ai_globals_grenades_enabled(
 	boolean enabled);
 boolean ai_enemies_endanger_player(
-	boolean must_be_attacking);
+	boolean must_be_attacking,
+	long unit_index);
 long ai_get_responsible_unit(
 	long object_index,
 	boolean responsible_for_weapon_fire);

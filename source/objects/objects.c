@@ -142,6 +142,10 @@ long network_objects_new_object_index(void);
 boolean network_objects_creating_host_object(void);
 boolean network_objects_may_delete(long object_index);
 #endif
+/* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
+void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
+	char const *child_marker_name);
+void network_coop_note_detach(long parent_index, long child_index);
 
 static void object_connect_lights(long object_index, boolean disconnect, boolean reconnect);
 static void object_name_list_allocate(void);
@@ -584,6 +588,18 @@ void object_pvs_set_camera_point(
 	}
 
 	return;
+}
+
+void objects_port_set_activating_cluster(
+	short cluster_index)
+{
+	if (cluster_index == NONE || cluster_index >= global_structure_bsp_get()->clusters.count)
+	{
+		object_globals->pvs_activation_type = _pvs_activation_normal;
+		return;
+	}
+	object_globals->pvs_activation_type = _pvs_activation_cluster;
+	object_globals->pvs_activation.cluster_index = cluster_index;
 }
 
 void object_pvs_clear(void)
@@ -3035,6 +3051,7 @@ void objects_scripting_detach(
 		child_object_index!=NONE &&
 		object_get(child_object_index)->object.parent_object_index == parent_object_index)
 	{
+		network_coop_note_detach(parent_object_index, child_object_index);
 		object_detach(child_object_index);
 	}
 
@@ -4036,6 +4053,7 @@ void objects_scripting_attach(
 		child_object_index !=NONE &&
 		object_get(child_object_index)->object.parent_object_index==NONE)
 	{
+		network_coop_note_attach(parent_object_index, parent_marker_name, child_object_index, child_marker_name);
 		object_attach_to_marker(parent_object_index, parent_marker_name, child_object_index, child_marker_name);
 	}
 

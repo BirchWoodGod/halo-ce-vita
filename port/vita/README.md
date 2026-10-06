@@ -149,6 +149,8 @@ The settings panel's last line, **Multiplayer**, opens a page of its own
 | Ad hoc room | 1 to 4: Vitas in the same room play together. |
 | Ad hoc dialog | Which mode the system's ad hoc dialog uses: Connect (try first), Create or Join. |
 | Join / Leave ad hoc group | Opens the system's ad hoc dialog (the panel closes), or leaves the group. |
+| Co-op campaign | **Off** (the default): the games you host are multiplayer. A level: the games you host are that campaign level played together (co-op, below). |
+| Co-op difficulty | Easy, Normal, Heroic or Legendary, for the co-op games you host. |
 
 A line under them says what is happening: your code while you host, the
 lookup of a code, the connection, or the ad hoc group.
@@ -187,6 +189,35 @@ a public game's name (your Vita's user name), its code and its player
 count. Private games are not listed. A host can ban by device: the ID the
 game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
 only, not the OpenPSID itself.
+
+**Co-op (experimental).** Play the campaign together on two Vitas, by
+system link, online or ad hoc. The host picks a level and a difficulty on
+the Multiplayer page (Co-op campaign, Co-op difficulty), then creates a game
+in Multiplayer, System Link as usual (the lobby's map and game type do not
+matter: the game is that level); the other Vita joins it as any game, and
+the host starts it. The Xbox game had co-op only in split screen; this is
+upstream halo-ce-universal's network co-op (credited in the main README):
+
+- Two players. The host's Vita runs the level's scripts and its AI for both,
+  and a Vita has no time to spare for more, so a co-op game takes two and
+  upstream's extra enemies are off.
+- Cutscenes are skipped by vote: press **Start** in one, and it is skipped
+  once both Vitas have (the HUD shows the count).
+- A loading zone into a part of the level the team has not been in brings
+  the other player along. Going back to a part already visited needs the
+  team there (both players at the loading zone, or near it); one held back
+  is told so.
+- A dead player watches the other and comes back beside them once it is
+  safe. With both dead, both come back where they were at the last
+  checkpoint (the level is not reverted); checkpoints show on both Vitas.
+- A level won ends the round, and the lobby's next game is the campaign's
+  next level (after The Maw, The Pillar of Autumn).
+- Co-op leaves single player's save alone: a network game neither resumes
+  nor writes it, and Save and Quit in co-op only leaves the game. Levels
+  finished in co-op count as finished in the profile, as in the Xbox's
+  split screen co-op.
+- Every Vita needs this version (network version 17): a 1.1.0 build tells
+  the player to update.
 
 **Ad hoc.** Set Network to Ad hoc on every Vita and restart. Choose the
 same Ad hoc room on each, then Join ad hoc group: the system's dialog joins

@@ -105,6 +105,8 @@ symbols in this file:
 #include "sound/game_sound.h"
 #include "tag_files/tag_files.h"
 #include "text/draw_string.h"
+#include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
@@ -992,6 +994,7 @@ void hud_autosave(
 		: hud_globals->checkpoint_end_index;
 	short local_player_index;
 
+	network_coop_note_hud(_coop_hud_checkpoint, active);
 	scripted_hud_messages_clear();
 	if (active && hud_globals->checkpoint_sound.index != NONE)
 	{
@@ -1269,6 +1272,13 @@ void hud_draw_screen(
 		{
 			hud_draw_players();
 		}
+
+		/* port: who a dead network co-op player is watching */
+		if (player->unit_index == NONE && coop_spectating() && !cinematic_in_progress())
+			coop_spectate_draw(render.local_player_index);
+		/* port: the network co-op vote to skip a cinematic */
+		if (cinematic_in_progress())
+			coop_skip_vote_draw(render.local_player_index);
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))
