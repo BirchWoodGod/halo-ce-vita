@@ -608,13 +608,18 @@ static void apply_network(void)
 		setenv("HALO_NET_ADHOC", "true", 1);
 	}
 	{
-		/* the public lobby shows the Vita's user name for its games */
+		/* the public lobby shows the Vita's user name for its games, and a
+		player with a default profile (no name) goes by it in network games
+		(network_game_local_player_name) */
 		char name[SCE_SYSTEM_PARAM_USERNAME_MAXSIZE + 1];
 
 		memset(name, 0, sizeof(name));
 		if (sceAppUtilSystemParamGetString(SCE_SYSTEM_PARAM_ID_USERNAME, (SceChar8 *)name, sizeof(name) - 1) >= 0 &&
 			name[0])
+		{
 			setenv("HALO_NET_LOBBY_NAME", name, 0);
+			setenv("HALO_NET_PLAYER_NAME", name, 0);
+		}
 	}
 	{
 		char line[96];
