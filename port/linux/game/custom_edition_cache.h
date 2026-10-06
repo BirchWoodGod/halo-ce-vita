@@ -80,6 +80,14 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	char const *map_name,
 	void *header);
 
+/* Reads `size` bytes at `offset` in the model data of the map being loaded
+(the report's), for custom_edition_models_convert; FALSE when they are not
+in it or cannot be read. */
+boolean custom_edition_cache_model_data_read(
+	struct custom_edition_load_report const *report,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer);
 boolean custom_edition_cache_tags_loaded(
 	void);
 /* A structure BSP of the loaded map was just read to `structure_bsp`: its
@@ -157,15 +165,15 @@ boolean custom_edition_vehicle_placement_allowed(
 
 /* Gives every model of a tag cache custom_edition_cache_load filled
 (`loaded_bytes` of it in use) this build's layout and compressed geometry in
-buffers of its own, made from `model_data`, the model data the report
-describes. Returns FALSE after logging why when a model cannot be converted:
-the tags are then partly converted and must not be used.
-custom_edition_models_dispose releases the buffers either way. */
+buffers of its own, made from the model data the report describes, which is
+read a part at a time (custom_edition_cache_model_data_read). Returns FALSE
+after logging why when a model cannot be converted: the tags are then partly
+converted and must not be used. custom_edition_models_dispose releases the
+buffers either way. */
 boolean custom_edition_models_convert(
 	byte *tag_cache,
 	unsigned long loaded_bytes,
-	struct custom_edition_load_report const *report,
-	byte const *model_data);
+	struct custom_edition_load_report const *report);
 void custom_edition_models_dispose(
 	void);
 

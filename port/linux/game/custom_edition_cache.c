@@ -227,34 +227,15 @@ static void custom_edition_cache_files_close(
 }
 
 /* Converts the loaded map's models for this build from its model data,
-which is read for the purpose and let go. */
+which custom_edition_models_convert reads a part at a time. */
 static boolean custom_edition_cache_models_convert(
 	uint8_t *tag_cache,
 	struct custom_edition_load_report const *report)
 {
-	struct custom_edition_file const *map = &custom_edition_cache_globals.map;
-	byte *model_data = malloc(report->model_data_bytes + 1);
-	boolean success = FALSE;
-
-	if (!model_data)
-	{
-		error(_error_silent, "custom edition: out of memory for 0x%lX bytes of model data", (unsigned long)report->model_data_bytes);
-	}
-	else if (!map->source.read(map->source.context, report->model_data_offset, report->model_data_bytes, model_data))
-	{
-		error(_error_silent, "custom edition: cannot read the model data");
-	}
-	else
-	{
-		success = custom_edition_models_convert(
-			tag_cache,
-			report->tag_data_bytes + report->resource_tag_bytes,
-			report,
-			model_data);
-	}
-	free(model_data);
-
-	return success;
+	return custom_edition_models_convert(
+		tag_cache,
+		report->tag_data_bytes + report->resource_tag_bytes,
+		report);
 }
 
 /* Makes the tags custom_edition_cache_load loaded into `tag_cache` this
@@ -393,6 +374,31 @@ static void custom_edition_cache_report_log(
 		(long)report->sound_sample_ranges_checked,
 		(long)report->relocated_pointer_count,
 		TEST_FLAG(report->warnings, _custom_edition_warning_checksum_mismatch_bit) ? "mismatched" : "matched");
+
+	return;
+}
+
+/* the C heap (on the Vita newlib's fixed 48 MB, which the system's
+libraries share; 0: no fixed size) and the memory window, for a map that
+runs out of either */
+static void custom_edition_cache_heap_log(
+	char const *when)
+{
+	unsigned long in_use;
+	unsigned long capacity;
+	unsigned long window_used;
+	unsigned long window_free;
+
+	platform_heap_usage(&in_use, &capacity);
+	platform_contiguous_usage(&window_used, &window_free);
+	error(
+		_error_silent,
+		"custom edition: %s: C heap %lu KB in use (of %lu KB), memory window %lu KB in use, %lu KB free",
+		when,
+		in_use / 1024,
+		capacity / 1024,
+		window_used / 1024,
+		window_free / 1024);
 
 	return;
 }
@@ -664,6 +670,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		path,
 		identity.build,
 		identity.has_opensauce_header ? ", OpenSauce" : "");
+	custom_edition_cache_heap_log("before loading");
 	/* the tag cache the map's tags are linked to the start of: at
 	0x40440000 when the platform has it there, else elsewhere and moved
 	below */
@@ -755,8 +762,23 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	globals->tag_cache = tag_cache;
 	globals->loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
 	globals->tags_loaded = TRUE;
+	custom_edition_cache_heap_log("loaded");
 
 	return (struct cache_file_tag_header *)tag_cache;
+}
+
+boolean custom_edition_cache_model_data_read(
+	struct custom_edition_load_report const *report,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer)
+{
+	struct custom_edition_file const *map = &custom_edition_cache_globals.map;
+
+	return map->stream &&
+		offset <= report->model_data_bytes &&
+		size <= report->model_data_bytes - offset &&
+		map->source.read(map->source.context, report->model_data_offset + (uint32_t)offset, (uint32_t)size, buffer);
 }
 
 boolean custom_edition_cache_tags_loaded(

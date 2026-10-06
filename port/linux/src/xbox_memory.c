@@ -43,6 +43,7 @@ static unsigned long block_page_count[CONTIGUOUS_PAGE_COUNT];
 static BOOL arena_reserved = FALSE;
 static pthread_mutex_t arena_lock = PTHREAD_MUTEX_INITIALIZER;
 static void *custom_edition_tag_cache = NULL;
+static unsigned long window_floor_page(void);
 
 #ifdef HALO_VITA
 /* no page protection on the Vita: protections are only recorded */
@@ -231,6 +232,48 @@ void halo_custom_edition_tag_cache_release(void)
 	custom_edition_allocation = NULL;
 }
 
+/* (a Custom Edition map's structure BSP vertices and the working memory
+of its conversion: out of the C heap, of which the Vita has a fixed 48 MB
+that the system's libraries share; the window has room below the game's
+blocks, as its Direct3D buffers do) */
+void *halo_custom_edition_geometry_alloc(unsigned long bytes)
+{
+	void *result = platform_contiguous_alloc(bytes ? bytes : 1, PAGE_SIZE_BYTES, PLATFORM_ANY_PHYSICAL_ADDRESS,
+		PAGE_READWRITE);
+
+	if (!result)
+		platform_log("custom edition: no room in the memory window for %lu KB of geometry", (bytes + 1023) / 1024);
+	return result;
+}
+
+void halo_custom_edition_geometry_free(void *address)
+{
+	if (address)
+		platform_contiguous_free(address);
+}
+
+void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes)
+{
+#ifdef HALO_VITA
+	unsigned long top = layout_top_page;
+#else
+	unsigned long top = CONTIGUOUS_PAGE_COUNT;
+#endif
+	unsigned long page, used_pages = 0, free_pages = 0;
+
+	pthread_mutex_lock(&arena_lock);
+	for (page = window_floor_page(); page < top; page++)
+	{
+		if (page_protection[page])
+			used_pages++;
+		else
+			free_pages++;
+	}
+	pthread_mutex_unlock(&arena_lock);
+	*used = used_pages * PAGE_SIZE_BYTES;
+	*free_bytes = free_pages * PAGE_SIZE_BYTES;
+}
+
 BOOL platform_is_contiguous(const void *address)
 {
 	unsigned long value = (unsigned long)address;
@@ -250,6 +293,30 @@ static BOOL pages_free(unsigned long first, unsigned long count)
 			return FALSE;
 	}
 	return TRUE;
+}
+
+/* The lowest page a block may be laid out at (top down) without a place
+asked for: 0, but in the harness HALO_WINDOW_FLOOR_KB=n keeps them n KB up,
+so that the room below the game's blocks is the Vita's - its blocks are laid
+out from 106 MB up the 112 MB window (VITA_LAYOUT_TOP), the harness's from
+the top of 128 MB: 22528 KB matches */
+static unsigned long window_floor_page(void)
+{
+#ifdef HALO_VITA
+	return 0;
+#else
+	static long floor = -1;
+
+	if (floor < 0)
+	{
+		const char *setting = getenv("HALO_WINDOW_FLOOR_KB");
+
+		floor = setting ? atol(setting) / 4 : 0;
+		if (floor < 0 || (unsigned long)floor >= CONTIGUOUS_PAGE_COUNT)
+			floor = 0;
+	}
+	return (unsigned long)floor;
+#endif
 }
 
 void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
@@ -293,10 +360,13 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 		unsigned long top = CONTIGUOUS_PAGE_COUNT;
 #endif
 		unsigned long candidate = count <= top ? top - count : 0;
+		unsigned long floor = window_floor_page();
 
 		for (;;)
 		{
 			candidate -= candidate % alignment_pages;
+			if (candidate < floor)
+				break;
 			if (pages_free(candidate, count))
 			{
 				first = candidate;
