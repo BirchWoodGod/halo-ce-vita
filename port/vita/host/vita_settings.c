@@ -2,31 +2,33 @@
 VITA_SETTINGS.C
 
 The settings panel: hold SELECT and START together for a moment, in play
-or in the menus, and a panel over the game lists the Vita's quality and
-control settings. Up and down choose one, left and right change it, circle
-(or SELECT+START again) closes the panel; the game sees no buttons while it
-is open. Each setting is one of the environment variables the port already
-reads (HALO_MODEL_LOD_SCALE...), kept in ux0:data/haloce-vita/settings.txt
-and set before the game starts; a change bumps halo_settings_generation,
-and the readers that can take a new value mid-game read theirs again (the
-render resolution and the aspect ratio too: the screen's targets are made
-again between two frames, d3d8_gxm.c screen_settings_apply; if the memory
-for the new size cannot be had, the panel says the change waits for a
-restart).
+or in the menus, and a panel over the game shows the Vita's settings in
+tabs that L and R switch between: Graphics, Audio, Controls, Multiplayer,
+Modded maps and, once "Show dev settings" (Controls) is on, Dev. Up and
+down choose a line, left and right change it, cross does what an action
+line says, circle (or SELECT+START again) closes the panel; the game sees no
+buttons while it is open. Each setting is one of the environment variables
+the port already reads (HALO_MODEL_LOD_SCALE...), kept in
+ux0:data/haloce-vita/settings.txt and set before the game starts; a change
+bumps halo_settings_generation, and the readers that can take a new value
+mid-game read theirs again (the render resolution and the aspect ratio too:
+the screen's targets are made again between two frames, d3d8_gxm.c
+screen_settings_apply; if the memory for the new size cannot be had, the
+panel says the change waits for a restart).
 
 The release's defaults, the ones measured best on the Vita, are set here
 too, under whatever env.txt and settings.txt say.
 
-The Profile row at the top sets the speed-related rows at once
+The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
 those rows match none of them. Rows marked * apply after a restart (the
-sound voices, the network).
+sound voices, the network, most dev switches).
 
-Multiplayer is a page of its own (the last line opens it), with three ways
-to play beyond the Wi-Fi network's system link, each handing off to the
-game's own System Link screen, and co-op ("Co-op campaign": a game this
-Vita hosts, by any of them, is that campaign level played together, the
-next level after each one won; network_server_manager.c):
+Multiplayer has three ways to play beyond the Wi-Fi network's system link,
+each handing off to the game's own System Link screen, and co-op ("Co-op
+campaign": a game this Vita hosts, by any of them, is that campaign level
+played together, the next level after each one won;
+network_server_manager.c):
 
 - Online (internet play, port/linux/src/p2p.c): hosting a System Link game
   shows its short code here (ABCD-EFGH) for others to type in; "Online
@@ -40,24 +42,47 @@ next level after each one won; network_server_manager.c):
   internet play starts with the game's networking. Wi-Fi, the default, is
   the system link that works on hardware; the other two are not yet
   verified there.
+
+Modded maps lists the maps in the maps folder that are not the Xbox's own:
+name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo), and
+whether it is on. Left and right turn one off or on (an off map stays in
+the folder but leaves the level list: HALO_MAPS_DISABLED, read by
+port/linux/game/custom_edition_maps.c each time the list opens); square
+deletes one, with its picture and description, after a confirmation. The
+"PC maps" switch (Custom Edition maps in the level list) is there too, with
+a warning when the Custom Edition resource maps those need (bitmaps.map,
+sounds.map, loc.map) are not in the folder.
+
+Dev holds a few switches for testers (each a debug environment variable;
+most are read once, at start-up, and say so) and "Save report", which
+copies halo.log, halo-prev.log, settings.txt, env.txt and the newest crash
+dump into ux0:data/haloce-vita/report-<date>/ for sending. A dev switch is
+saved in settings.txt only while it is on; off, env.txt's value (or the
+default) applies. When any is on, halo.log says so near its top.
 */
 
 #include <psp2/apputil.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/rtc.h>
 #include <psp2/system_param.h>
 
+#include <dirent.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 
 #include "p2p.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
 
-#define SETTINGS_FILE "ux0:data/haloce-vita/settings.txt"
+#define DATA_DIRECTORY "ux0:data/haloce-vita"
+#define SETTINGS_FILE DATA_DIRECTORY "/settings.txt"
+/* where the system writes its crash dumps (psp2core-*.psp2dmp) */
+#define DUMP_DIRECTORY "ux0:data"
 #define MAXIMUM_CHOICES 11
 /* a code's characters as typed (p2p.h shows them ABCD-EFGH) */
 #define P2P_CODE_LENGTH_TYPED 8
@@ -67,11 +92,23 @@ extern volatile unsigned long halo_settings_generation;
 /* the render resolution or aspect ratio asked for could not be made
 (d3d8_gxm.c screen_settings_apply): it waits for a restart */
 int halo_screen_restart_needed(void);
+/* whether the map file `name` (no extension) has its tags loaded
+(cache_files.c): such a map is not deleted */
+int halo_cache_map_in_use(const char *name);
 
 enum
 {
-	PAGE_SETTINGS,
-	PAGE_MULTIPLAYER,
+	TAB_GRAPHICS,
+	TAB_AUDIO,
+	TAB_CONTROLS,
+	TAB_MULTIPLAYER,
+	TAB_MAPS,
+	TAB_DEV,
+	TAB_COUNT
+};
+
+static const char *const tab_names[TAB_COUNT] = {
+	"Graphics", "Audio", "Controls", "Multiplayer", "Modded maps", "Dev",
 };
 
 enum
@@ -85,12 +122,11 @@ enum
 enum
 {
 	ACTION_NONE,
-	ACTION_MULTIPLAYER,
-	ACTION_BACK,
 	ACTION_JOIN_CODE,
 	ACTION_BROWSE,
 	ACTION_ADHOC_JOIN,
 	ACTION_ADHOC_LEAVE,
+	ACTION_SAVE_REPORT,
 };
 
 struct setting
@@ -103,65 +139,75 @@ struct setting
 	const char *names[MAXIMUM_CHOICES];
 	const char *help;
 	int choice;
-	int page;
+	int tab;
 	int kind;
 	int action;
+	/* a dev switch: its first choice is the default (an empty value: the
+	variable unset), it is saved only when on, and env.txt's value stands
+	while settings.txt does not name it */
+	int dev;
 };
 
+/* (the performance logging switch: the three timing variables at once) */
+#define PERFORMANCE_LOG "HALO_PERF_LOG"
+
 static struct setting settings[] = {
+	/* (the Profile row is the first: settings[0]) */
 	{ "Profile", "HALO_PROFILE", 0, 4, { "performance", "balanced", "quality", "custom" },
-		{ "Performance", "Balanced", "Quality", "Custom" }, "Sets resolution, detail, update rates at once", 1 },
-	{ "Performance overlay", "XV_FPS", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Frames per second and frame times, top right", 0 },
-	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
-		"The game's frame counter, bottom right", 0 },
-	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
-		"The most frames shown a second", 0 },
+		{ "Performance", "Balanced", "Quality", "Custom" }, "Sets resolution, detail, update rates at once", 1,
+		TAB_GRAPHICS },
 	{ "Render resolution", "HALO_RENDER_SCALE", 0, 5, { "1", "0.875", "0.75", "0.625", "0.5" },
-		{ "100%", "88%", "75%", "63%", "50%" }, "Lower is faster and softer", 2 },
+		{ "100%", "88%", "75%", "63%", "50%" }, "Lower is faster and softer", 2, TAB_GRAPHICS },
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
-		"4:3: the Xbox's framing, black bars", 0 },
+		"4:3: the Xbox's framing, black bars", 0, TAB_GRAPHICS },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
-		"Scaling to the screen: Sharp = crisp pixels", 0 },
+		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
-		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 2 },
+		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 2, TAB_GRAPHICS },
 	{ "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", 0, 4, { "0", "4", "8", "12" },
-		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2 },
+		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2, TAB_GRAPHICS },
 	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
-		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2 },
-	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
-		"The weapon's animation blended between game ticks", 0 },
+		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, TAB_GRAPHICS },
 	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
-		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2 },
+		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, TAB_GRAPHICS },
+	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
+		"The weapon's animation blended between game ticks", 0, TAB_GRAPHICS },
+	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
+		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
+	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
+		"The most frames shown a second", 0, TAB_GRAPHICS },
+
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
-		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3 },
+		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
-		{ "Every tick", "Every 3rd", "Every 6th" }, "How often muffling behind walls is rechecked", 1 },
+		{ "Every tick", "Every 3rd", "Every 6th" }, "How often muffling behind walls is rechecked", 1, TAB_AUDIO },
+
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
-		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2 },
-	{ "Crouch", "HALO_CROUCH_TOGGLE", 0, 2, { "1", "0" }, { "Toggle", "Hold" },
-		"D-pad down: a press crouches, the next stands (Toggle)", 0 },
-	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0 },
+		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2, TAB_CONTROLS },
+	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0,
+		TAB_CONTROLS },
 	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
-		"Raise if the sticks drift", 0 },
-	{ "Multiplayer", NULL, 0, 0, { NULL }, { NULL }, "Wi-Fi, online and ad hoc play", 0, PAGE_SETTINGS, KIND_ACTION,
-		ACTION_MULTIPLAYER },
+		"Raise if the sticks drift", 0, TAB_CONTROLS },
+	{ "Crouch", "HALO_CROUCH_TOGGLE", 0, 2, { "1", "0" }, { "Toggle", "Hold" },
+		"D-pad down: a press crouches, the next stands (Toggle)", 0, TAB_CONTROLS },
+	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"The Dev tab: switches for testers, Save report", 0, TAB_CONTROLS },
 
 	{ "Network", "HALO_VITA_NETWORK", 1, 3, { "wifi", "online", "adhoc" }, { "Wi-Fi", "Online", "Ad hoc" },
-		"This network / the internet / Vitas nearby", 0, PAGE_MULTIPLAYER },
+		"This network / the internet / Vitas nearby (after a restart)", 0, TAB_MULTIPLAYER },
 	{ "Online games", "HALO_NET_LOBBY_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
-		"Private: join by code. Public: listed for all", 0, PAGE_MULTIPLAYER },
+		"Private: join by code. Public: listed for all", 0, TAB_MULTIPLAYER },
 	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
-		PAGE_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
+		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
 	{ "Browse public games", NULL, 0, 0, { NULL }, { NULL }, "The games listed in the public lobby", 0,
-		PAGE_MULTIPLAYER, KIND_ACTION, ACTION_BROWSE },
+		TAB_MULTIPLAYER, KIND_ACTION, ACTION_BROWSE },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
-		"Vitas in the same room play together", 0, PAGE_MULTIPLAYER },
+		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
 	{ "Ad hoc dialog", "HALO_ADHOC_DIALOG_MODE", 0, 3, { "0", "1", "2" }, { "Connect", "Create", "Join" },
-		"How the system dialog joins: try Connect first", 0, PAGE_MULTIPLAYER },
-	{ "Join ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Opens the system's ad hoc dialog", 0, PAGE_MULTIPLAYER,
+		"How the system dialog joins: try Connect first", 0, TAB_MULTIPLAYER },
+	{ "Join ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Opens the system's ad hoc dialog", 0, TAB_MULTIPLAYER,
 		KIND_ACTION, ACTION_ADHOC_JOIN },
-	{ "Leave ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Back to no group", 0, PAGE_MULTIPLAYER, KIND_ACTION,
+	{ "Leave ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Back to no group", 0, TAB_MULTIPLAYER, KIND_ACTION,
 		ACTION_ADHOC_LEAVE },
 	/* (co-op over the network: a hosted game is this campaign level,
 	network_server_manager.c; each level won goes on to the next) */
@@ -169,14 +215,31 @@ static struct setting settings[] = {
 		{ "", "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40" },
 		{ "Off", "Pillar of Autumn", "Halo", "Truth and Rec.", "Silent Cartog.", "Assault on CR", "343 Guilty Spark",
 			"The Library", "Two Betrayals", "Keyes", "The Maw" },
-		"Games you host: this level together (2 players)", 0, PAGE_MULTIPLAYER },
+		"Games you host: this level together (2 players)", 0, TAB_MULTIPLAYER },
 	{ "Co-op difficulty", "HALO_NET_COOP_DIFFICULTY", 0, 4, { "0", "1", "2", "3" },
-		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, PAGE_MULTIPLAYER },
+		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, TAB_MULTIPLAYER },
+
 	/* (custom maps: the Custom Edition maps join the multiplayer level
 	list; off by default while their colours are wrong on the Vita) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Experimental: Halo Custom Edition maps in the map list", 0, PAGE_MULTIPLAYER },
-	{ "Back", NULL, 0, 0, { NULL }, { NULL }, "To the settings", 0, PAGE_MULTIPLAYER, KIND_ACTION, ACTION_BACK },
+		"Experimental: CE maps in the list (need CE bitmaps/sounds/loc.map)", 0, TAB_MAPS },
+
+	{ "Performance logging", PERFORMANCE_LOG, 1, 2, { "", "1" }, { "Off", "On" },
+		"Frame, render and tick timing in halo.log (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Crash dump on hang", "HALO_HANG_CRASH", 0, 2, { "", "1" }, { "Off", "On" },
+		"A hang of 8 s crashes for a dump (psp2core) to send", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "FPS overlay", "XV_FPS", 0, 3, { "0", "2", "1" }, { "Off", "FPS only", "Full" },
+		"Top right. Full: tick and render times, the cores' load", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "GPU W clamp", "HALO_GXM_WCLAMP", 1, 2, { "", "0" }, { "Default", "Off" },
+		"A/B: models close to the camera dropping out (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Target mip minimum", "HALO_TARGET_CHAIN_MIN_SIZE", 1, 3, { "", "16", "8" }, { "32 px", "16 px", "8 px" },
+		"A/B: smallest mip level of render targets (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Frame phase lock", "HALO_FRAME_PHASE_LOCK", 1, 2, { "", "0" }, { "On", "Off" },
+		"A/B: 30 FPS frames kept between two ticks (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Render target sync", "HALO_GXM_RTT_SYNC", 1, 2, { "", "0" }, { "On", "Off" },
+		"A/B: a scene waits for a target drawn before (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Save report", NULL, 0, 0, { NULL }, { NULL }, "Logs, settings and the newest crash dump in one folder", 0,
+		TAB_DEV, KIND_ACTION, ACTION_SAVE_REPORT },
 };
 
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
@@ -201,6 +264,13 @@ static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
 	{ "1", "1", "0", "1", "1", "1" },
 };
 
+/* the variables the performance logging switch sets, and their values */
+static const char *const performance_log_variables[3][2] = {
+	{ "HALO_FRAME_TIMING", "300" },
+	{ "HALO_RENDER_PROFILE", "1" },
+	{ "HALO_TICK_PROFILE", "1" },
+};
+
 /* the release's fixed defaults (not in the panel) */
 static const char *const fixed_defaults[][2] = {
 	{ "HALO_TICK_THREAD", "1" },
@@ -213,18 +283,20 @@ static const char *const fixed_defaults[][2] = {
 	vita_net.c) */
 };
 
-static int panel_open, selected;
+static int panel_open;
 static unsigned long long both_since, last_move, last_shown;
 static unsigned long previous_buttons;
 static int restart_pending;
 
-/* the page shown, and the screens a multiplayer action opens */
-static int page;
+/* the tab shown, the line chosen on each, and the screens an action opens */
+static int tab;
+static int tab_selected[TAB_COUNT];
 enum
 {
 	SCREEN_LIST,
 	SCREEN_CODE,
 	SCREEN_BROWSE,
+	SCREEN_DELETE,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -235,20 +307,75 @@ static int code_cursor;
 #define BROWSE_LINES 8
 static struct p2p_lobby_entry browse_entries[BROWSE_LINES];
 static int browse_count, browse_selected;
-/* a line about the last action (a code looked up ...), shown until the
-status has more to say */
-static char notice[64];
+/* a line about the last action (a code looked up ...), shown in the help
+line for a few seconds */
+static char notice[80];
 static unsigned long long notice_until;
 /* the network the game started with (HALO_VITA_NETWORK at load): what
 internet or ad hoc play can do this session */
 static char running_network[8] = "wifi";
+
+/* ---------- modded maps */
+
+#define MAXIMUM_MAPS 64
+#define MAP_NAME_SIZE 48
+/* the map lines shown at once (the list scrolls) */
+#define MAP_LINES 11
+
+enum
+{
+	MAP_XBOX,
+	MAP_CUSTOM_EDITION,
+	MAP_OPENSAUCE,
+	MAP_OTHER,
+};
+
+struct map_entry
+{
+	char name[MAP_NAME_SIZE];
+	char extension[8];
+	unsigned long long size;
+	int format;
+};
+
+static struct map_entry maps[MAXIMUM_MAPS];
+static int map_count, map_scroll;
+/* the Custom Edition resource maps missing from the folder ("" when all
+are there), and whether any map listed is a Custom Edition one */
+static char maps_missing[64];
+static int maps_have_custom_edition;
+/* the maps turned off: their names, commas between (HALO_MAPS_DISABLED) */
+static char maps_disabled[1024];
+
+/* the Xbox's own maps, and the Custom Edition resource maps: never listed */
+static const char *const stock_maps[] = {
+	"beavercreek", "sidewinder", "damnation", "ratrace", "prisoner", "hangemhigh", "chillout",
+	"carousel", "boardingaction", "bloodgulch", "wizard", "putput", "longest",
+	"a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40",
+	"ui", "bitmaps", "sounds", "loc",
+};
+
+/* ---------- the report */
+
+enum
+{
+	REPORT_IDLE,
+	REPORT_SAVING,
+	REPORT_SAVED,
+	REPORT_FAILED,
+};
+
+static volatile int report_state;
+static char report_path[96];
+static int report_files;
+static unsigned char report_buffer[64 * 1024];
 
 static unsigned long long now_us(void)
 {
 	return sceKernelGetProcessTimeWide();
 }
 
-/* a line on the last action, shown in the status line for a few seconds */
+/* a line on the last action, shown in the help line for a few seconds */
 static void set_notice(const char *format, ...)
 {
 	va_list arguments;
@@ -297,6 +424,35 @@ static struct setting *setting_named(const char *variable)
 	return NULL;
 }
 
+static int choice_of(const char *variable)
+{
+	struct setting const *setting = setting_named(variable);
+
+	return setting ? setting->choice : 0;
+}
+
+/* a setting's value as the environment variable (or variables) it is */
+static void apply_value(const struct setting *setting)
+{
+	const char *value = setting->values[setting->choice];
+
+	if (strcmp(setting->variable, PERFORMANCE_LOG) == 0)
+	{
+		int index;
+
+		/* (on: env.txt's own values stand, HALO_TICK_PROFILE=3 ...) */
+		for (index = 0; index < 3; index++)
+			if (value[0])
+				setenv(performance_log_variables[index][0], performance_log_variables[index][1], 0);
+			else
+				unsetenv(performance_log_variables[index][0]);
+	}
+	if (setting->dev && !value[0])
+		unsetenv(setting->variable);
+	else
+		setenv(setting->variable, value, 1);
+}
+
 /* the profile the rows match, or Custom */
 static int matching_profile(void)
 {
@@ -339,19 +495,9 @@ static int apply_profile(int profile)
 			if (setting->restart)
 				restart = 1;
 		}
-		setenv(setting->variable, setting->values[setting->choice], 1);
+		apply_value(setting);
 	}
 	return restart;
-}
-
-static struct setting *setting_of(const char *variable)
-{
-	int index;
-
-	for (index = 0; index < SETTING_COUNT; index++)
-		if (settings[index].variable && strcmp(settings[index].variable, variable) == 0)
-			return &settings[index];
-	return NULL;
 }
 
 static void save(void)
@@ -362,8 +508,10 @@ static void save(void)
 	if (!file)
 		return;
 	for (index = 0; index < SETTING_COUNT; index++)
-		if (settings[index].kind == KIND_CHOICE)
+		if (settings[index].kind == KIND_CHOICE && !(settings[index].dev && settings[index].choice == 0))
 			fprintf(file, "%s=%s\n", settings[index].variable, settings[index].values[settings[index].choice]);
+	if (maps_disabled[0])
+		fprintf(file, "HALO_MAPS_DISABLED=%s\n", maps_disabled);
 	fclose(file);
 }
 
@@ -401,6 +549,51 @@ static void apply_network(void)
 	}
 }
 
+/* (in halo.log near its top: the dev switches on, if any - a log from a
+tester's run in test mode says so) */
+static void log_dev_switches(void)
+{
+	char message[400];
+	int length = 0, index;
+
+	for (index = 0; index < SETTING_COUNT && length < (int)sizeof(message); index++)
+	{
+		const struct setting *setting = &settings[index];
+
+		if (!setting->dev || setting->choice == 0)
+			continue;
+		if (strcmp(setting->variable, PERFORMANCE_LOG) == 0)
+		{
+			int variable;
+
+			length += snprintf(message + length, sizeof(message) - length, " %s=1 (", PERFORMANCE_LOG);
+			for (variable = 0; variable < 3 && length < (int)sizeof(message); variable++)
+			{
+				const char *value = getenv(performance_log_variables[variable][0]);
+
+				length += snprintf(message + length, sizeof(message) - length, "%s%s=%s", variable ? " " : "",
+					performance_log_variables[variable][0], value ? value : "");
+			}
+			if (length < (int)sizeof(message))
+				length += snprintf(message + length, sizeof(message) - length, ")");
+		}
+		else
+		{
+			const char *value = getenv(setting->variable);
+
+			length += snprintf(message + length, sizeof(message) - length, " %s=%s", setting->variable,
+				value ? value : setting->values[setting->choice]);
+		}
+	}
+	if (length)
+	{
+		char line[460];
+
+		snprintf(line, sizeof(line), "settings: TEST MODE, dev switches on:%s", message);
+		vita_host_log(line);
+	}
+}
+
 int vita_settings_set(const char *variable, const char *value);
 
 void vita_settings_load(void)
@@ -408,9 +601,13 @@ void vita_settings_load(void)
 	extern int (*halo_test_setting_hook)(const char *variable, const char *value);
 
 	FILE *file = fopen(SETTINGS_FILE, "r");
-	char line[256];
+	/* (a long line: the maps turned off) */
+	char line[1200];
 	int index;
+	/* the dev switches settings.txt names (the others keep env.txt's) */
+	char dev_saved[SETTING_COUNT];
 
+	memset(dev_saved, 0, sizeof(dev_saved));
 	/* env.txt (already read) gives a starting choice (HALO_PROFILE=
 	performance, balanced or quality there: that profile's, under the rows
 	env.txt names itself); settings.txt, the panel's own file, has the last
@@ -435,10 +632,31 @@ void vita_settings_load(void)
 	}
 	for (index = 0; index < SETTING_COUNT; index++)
 	{
-		const char *value = settings[index].variable ? getenv(settings[index].variable) : NULL;
+		struct setting *setting = &settings[index];
+		const char *value = setting->variable ? getenv(setting->variable) : NULL;
 
-		if (value && settings[index].kind == KIND_CHOICE && strcmp(settings[index].variable, "HALO_PROFILE") != 0)
-			settings[index].choice = find_choice(&settings[index], value);
+		if (setting->kind != KIND_CHOICE)
+			continue;
+		if (strcmp(setting->variable, PERFORMANCE_LOG) == 0)
+		{
+			int variable;
+
+			/* (on when env.txt turns on any of its three) */
+			for (variable = 0; variable < 3; variable++)
+			{
+				const char *timing = getenv(performance_log_variables[variable][0]);
+
+				if (timing && atoi(timing))
+					setting->choice = 1;
+			}
+		}
+		else if (value && strcmp(setting->variable, "HALO_PROFILE") != 0)
+			setting->choice = find_choice(setting, value);
+	}
+	{
+		const char *disabled = getenv("HALO_MAPS_DISABLED");
+
+		snprintf(maps_disabled, sizeof(maps_disabled), "%s", disabled ? disabled : "");
 	}
 	if (file)
 	{
@@ -453,10 +671,19 @@ void vita_settings_load(void)
 			if (!equals)
 				continue;
 			*equals = 0;
+			if (strcmp(line, "HALO_MAPS_DISABLED") == 0)
+			{
+				snprintf(maps_disabled, sizeof(maps_disabled), "%s", equals + 1);
+				continue;
+			}
 			/* (the profile line is what the rows were: worked out again) */
-			setting = setting_of(line);
+			setting = setting_named(line);
 			if (setting && setting->kind == KIND_CHOICE && strcmp(line, "HALO_PROFILE") != 0)
+			{
 				setting->choice = find_choice(setting, equals + 1);
+				if (setting->dev)
+					dev_saved[setting - settings] = 1;
+			}
 		}
 		fclose(file);
 	}
@@ -464,8 +691,12 @@ void vita_settings_load(void)
 	set them apart from every profile) */
 	setting_named("HALO_PROFILE")->choice = matching_profile();
 	for (index = 0; index < SETTING_COUNT; index++)
-		if (settings[index].kind == KIND_CHOICE)
-			setenv(settings[index].variable, settings[index].values[settings[index].choice], 1);
+		if (settings[index].kind == KIND_CHOICE && (!settings[index].dev || dev_saved[index]))
+			apply_value(&settings[index]);
+	if (maps_disabled[0])
+		setenv("HALO_MAPS_DISABLED", maps_disabled, 1);
+	else
+		unsetenv("HALO_MAPS_DISABLED");
 	for (index = 0; index < (int)(sizeof(fixed_defaults) / sizeof(fixed_defaults[0])); index++)
 		setenv(fixed_defaults[index][0], fixed_defaults[index][1], 0);
 	halo_test_setting_hook = vita_settings_set;
@@ -482,14 +713,380 @@ void vita_settings_load(void)
 				getenv("HALO_DISPLAY_WIDTH"), getenv("HALO_UPSCALE_FILTER"));
 		vita_host_log(message);
 	}
+	log_dev_switches();
+	if (maps_disabled[0])
+	{
+		char message[1100];
+
+		snprintf(message, sizeof(message), "settings: maps turned off: %s", maps_disabled);
+		vita_host_log(message);
+	}
 	apply_network();
 }
 
-static int choice_of(const char *variable)
-{
-	struct setting const *setting = setting_of(variable);
+/* ---------- modded maps */
 
-	return setting ? setting->choice : 0;
+static const char *maps_directory(void)
+{
+	const char *directory = getenv("HALO_MAPS_ROOT");
+
+	return directory && directory[0] ? directory : DATA_DIRECTORY "/maps";
+}
+
+static int map_disabled(const char *name)
+{
+	const char *list = maps_disabled;
+	size_t length = strlen(name);
+
+	while (*list)
+	{
+		size_t entry = strcspn(list, ",");
+
+		if (entry == length && strncasecmp(list, name, length) == 0)
+			return 1;
+		list += entry;
+		if (*list == ',')
+			list++;
+	}
+	return 0;
+}
+
+/* turns the map `name` off or on: in the list, the environment and
+settings.txt */
+static void map_set_disabled(const char *name, int disabled)
+{
+	char list[sizeof(maps_disabled)];
+	const char *entry = maps_disabled;
+	int length = 0;
+
+	if (map_disabled(name) == disabled)
+		return;
+	/* (the list again without the name, then with it at the end) */
+	list[0] = 0;
+	while (*entry)
+	{
+		size_t size = strcspn(entry, ",");
+
+		if (size && !(size == strlen(name) && strncasecmp(entry, name, size) == 0) &&
+			length + (int)size + 2 < (int)sizeof(list))
+			length += snprintf(list + length, sizeof(list) - length, "%s%.*s", length ? "," : "", (int)size, entry);
+		entry += size;
+		if (*entry == ',')
+			entry++;
+	}
+	if (disabled && length + (int)strlen(name) + 2 < (int)sizeof(list))
+		snprintf(list + length, sizeof(list) - length, "%s%s", length ? "," : "", name);
+	memcpy(maps_disabled, list, sizeof(maps_disabled));
+	if (maps_disabled[0])
+		setenv("HALO_MAPS_DISABLED", maps_disabled, 1);
+	else
+		unsetenv("HALO_MAPS_DISABLED");
+	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
+	save();
+	{
+		char line[128];
+
+		snprintf(line, sizeof(line), "settings: map %s turned %s", name, disabled ? "off" : "on");
+		vita_host_log(line);
+	}
+}
+
+static int map_compare(const void *first, const void *second)
+{
+	const struct map_entry *a = first, *b = second;
+	int order = strcasecmp(a->name, b->name);
+
+	return order ? order : strcasecmp(a->extension, b->extension);
+}
+
+static int file_exists(const char *path)
+{
+	struct stat status;
+
+	return stat(path, &status) == 0;
+}
+
+/* the format of a map file by its header: the cache signature 'head' and
+its version (5 the Xbox's, 609 Custom Edition's) */
+static int map_format(const char *path, const char *extension)
+{
+	unsigned char header[8];
+	FILE *file = fopen(path, "rb");
+	size_t got = 0;
+	unsigned long version;
+
+	if (file)
+	{
+		got = fread(header, 1, sizeof(header), file);
+		fclose(file);
+	}
+	if (got != sizeof(header) || memcmp(header, "daeh", 4) != 0)
+		return MAP_OTHER;
+	version = header[4] | (header[5] << 8) | ((unsigned long)header[6] << 16) | ((unsigned long)header[7] << 24);
+	if (version == 5)
+		return MAP_XBOX;
+	if (version == 609)
+		return strcasecmp(extension, "yelo") == 0 ? MAP_OPENSAUCE : MAP_CUSTOM_EDITION;
+	return MAP_OTHER;
+}
+
+/* the maps folder looked through again: the maps that are not the Xbox's */
+static void maps_scan(void)
+{
+	const char *directory = maps_directory();
+	DIR *folder = opendir(directory);
+	struct dirent *entry;
+	static const char *const resource_maps[] = { "bitmaps", "sounds", "loc" };
+	int index;
+
+	map_count = 0;
+	maps_have_custom_edition = 0;
+	while (folder && (entry = readdir(folder)) != NULL && map_count < MAXIMUM_MAPS)
+	{
+		const char *dot = strrchr(entry->d_name, '.');
+		struct map_entry *map = &maps[map_count];
+		char path[512];
+		struct stat status;
+		int stock = 0;
+
+		if (!dot || dot == entry->d_name || (strcasecmp(dot, ".map") != 0 && strcasecmp(dot, ".yelo") != 0) ||
+			(size_t)(dot - entry->d_name) >= sizeof(map->name))
+			continue;
+		snprintf(map->name, sizeof(map->name), "%.*s", (int)(dot - entry->d_name), entry->d_name);
+		snprintf(map->extension, sizeof(map->extension), "%s", dot + 1);
+		for (index = 0; index < (int)(sizeof(stock_maps) / sizeof(stock_maps[0])); index++)
+			if (strcasecmp(map->name, stock_maps[index]) == 0)
+				stock = 1;
+		if (stock)
+			continue;
+		snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
+		map->size = stat(path, &status) == 0 ? (unsigned long long)status.st_size : 0;
+		map->format = map_format(path, map->extension);
+		if (map->format == MAP_CUSTOM_EDITION || map->format == MAP_OPENSAUCE)
+			maps_have_custom_edition = 1;
+		map_count++;
+	}
+	if (folder)
+		closedir(folder);
+	qsort(maps, (size_t)map_count, sizeof(maps[0]), map_compare);
+	maps_missing[0] = 0;
+	for (index = 0; index < 3; index++)
+	{
+		char path[256];
+		size_t used = strlen(maps_missing);
+
+		snprintf(path, sizeof(path), "%s/%s.map", directory, resource_maps[index]);
+		if (!file_exists(path))
+			snprintf(maps_missing + used, sizeof(maps_missing) - used, "%s%s.map", used ? " " : "",
+				resource_maps[index]);
+	}
+	if (map_scroll >= map_count)
+		map_scroll = 0;
+}
+
+static void size_text(char *text, int size, unsigned long long bytes)
+{
+	if (bytes >= 1024ULL * 1024ULL)
+		snprintf(text, (size_t)size, "%llu.%llu MB", bytes >> 20, ((bytes & 0xFFFFFULL) * 10) >> 20);
+	else
+		snprintf(text, (size_t)size, "%llu KB", (bytes + 1023) >> 10);
+}
+
+static const char *map_format_name(int format)
+{
+	return format == MAP_XBOX ? "Xbox" : format == MAP_CUSTOM_EDITION ? "CE" : format == MAP_OPENSAUCE ? "CE+OS" : "?";
+}
+
+/* deletes a map file, with its picture and description beside it */
+static void map_delete(const struct map_entry *map)
+{
+	const char *directory = maps_directory();
+	char path[256];
+	int other = 0, index;
+
+	snprintf(path, sizeof(path), "%s/%s.%s", directory, map->name, map->extension);
+	if (remove(path) != 0)
+	{
+		set_notice("Could not delete %.40s.%s", map->name, map->extension);
+		return;
+	}
+	/* (the picture and description stay while a .map or .yelo of the name
+	is left) */
+	for (index = 0; index < map_count; index++)
+		if (&maps[index] != map && strcasecmp(maps[index].name, map->name) == 0)
+			other = 1;
+	if (!other)
+	{
+		snprintf(path, sizeof(path), "%s/%s.bmp", directory, map->name);
+		remove(path);
+		snprintf(path, sizeof(path), "%s/%s.txt", directory, map->name);
+		remove(path);
+		map_set_disabled(map->name, 0);
+	}
+	set_notice("Deleted %.40s.%s", map->name, map->extension);
+	{
+		char line[160];
+
+		snprintf(line, sizeof(line), "settings: map %s.%s deleted", map->name, map->extension);
+		vita_host_log(line);
+	}
+}
+
+/* ---------- the report */
+
+/* copies a file into the report's folder; nonzero if it was there */
+static int report_copy(const char *from, const char *folder, const char *name)
+{
+	char path[256];
+	FILE *input = fopen(from, "rb"), *output;
+	size_t got;
+	int ok = 1;
+
+	if (!input)
+		return 0;
+	snprintf(path, sizeof(path), "%s/%s", folder, name);
+	output = fopen(path, "wb");
+	if (!output)
+	{
+		fclose(input);
+		return 0;
+	}
+	while ((got = fread(report_buffer, 1, sizeof(report_buffer), input)) > 0)
+		if (fwrite(report_buffer, 1, got, output) != got)
+		{
+			ok = 0;
+			break;
+		}
+	fclose(input);
+	if (fclose(output) != 0)
+		ok = 0;
+	return ok;
+}
+
+/* the report, on a thread of its own (a crash dump is tens of megabytes) */
+static void report_thread(void *argument)
+{
+	static const char *const files[] = { "halo.log", "halo-prev.log", "settings.txt", "env.txt" };
+	SceDateTime time;
+	char path[512], newest[512], newest_name[256];
+	int index, count = 0;
+	DIR *folder;
+	struct dirent *entry;
+	long long newest_time = -1;
+
+	(void)argument;
+	memset(&time, 0, sizeof(time));
+	sceRtcGetCurrentClockLocalTime(&time);
+	snprintf(report_path, sizeof(report_path), DATA_DIRECTORY "/report-%04u%02u%02u-%02u%02u%02u",
+		(unsigned)time.year, (unsigned)time.month, (unsigned)time.day, (unsigned)time.hour, (unsigned)time.minute,
+		(unsigned)time.second);
+	mkdir(report_path, 0777);
+	for (index = 0; index < (int)(sizeof(files) / sizeof(files[0])); index++)
+	{
+		snprintf(path, sizeof(path), DATA_DIRECTORY "/%s", files[index]);
+		count += report_copy(path, report_path, files[index]);
+	}
+	/* the newest crash dump */
+	newest[0] = newest_name[0] = 0;
+	folder = opendir(DUMP_DIRECTORY);
+	while (folder && (entry = readdir(folder)) != NULL)
+	{
+		struct stat status;
+		size_t length = strlen(entry->d_name);
+
+		if (length < 16 || strncmp(entry->d_name, "psp2core", 8) != 0 ||
+			strcasecmp(entry->d_name + length - 8, ".psp2dmp") != 0)
+			continue;
+		snprintf(path, sizeof(path), DUMP_DIRECTORY "/%s", entry->d_name);
+		if (stat(path, &status) == 0 && ((long long)status.st_mtime > newest_time ||
+			((long long)status.st_mtime == newest_time && strcmp(entry->d_name, newest_name) > 0)))
+		{
+			newest_time = (long long)status.st_mtime;
+			snprintf(newest, sizeof(newest), "%s", path);
+			snprintf(newest_name, sizeof(newest_name), "%s", entry->d_name);
+		}
+	}
+	if (folder)
+		closedir(folder);
+	if (newest[0])
+		count += report_copy(newest, report_path, newest_name);
+	report_files = count;
+	{
+		char line[200];
+
+		snprintf(line, sizeof(line), "settings: report saved to %s (%d files%s)", report_path, count,
+			newest[0] ? ", with the newest crash dump" : ", no crash dump");
+		vita_host_log(line);
+	}
+	__atomic_store_n(&report_state, count ? REPORT_SAVED : REPORT_FAILED, __ATOMIC_RELEASE);
+}
+
+static void report_start(void)
+{
+	if (__atomic_load_n(&report_state, __ATOMIC_ACQUIRE) == REPORT_SAVING)
+		return;
+	__atomic_store_n(&report_state, REPORT_SAVING, __ATOMIC_RELEASE);
+	if (vita_host_thread_start("halo report", report_thread, NULL, -1) < 0)
+	{
+		__atomic_store_n(&report_state, REPORT_FAILED, __ATOMIC_RELEASE);
+		set_notice("Could not start the report");
+	}
+}
+
+/* ---------- the lines of a tab */
+
+enum
+{
+	LINE_SETTING,
+	LINE_MAP,
+	/* (a line that is not chosen: a warning, a note) */
+	LINE_INFO,
+};
+
+struct line
+{
+	int type;
+	int index;
+	char text[80];
+};
+
+#define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_MAPS + 4)
+
+/* the tabs shown: Dev once its switch is on */
+static int tab_shown(int index)
+{
+	return index != TAB_DEV || choice_of("HALO_DEV_SETTINGS");
+}
+
+static int tab_lines(struct line *lines)
+{
+	int count = 0, index;
+
+	for (index = 0; index < SETTING_COUNT; index++)
+		if (settings[index].tab == tab)
+		{
+			lines[count].type = LINE_SETTING;
+			lines[count++].index = index;
+		}
+	if (tab == TAB_MAPS)
+	{
+		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition))
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), "!Missing: %s", maps_missing);
+		}
+		if (!map_count)
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), "No custom maps in the maps folder");
+		}
+		for (index = 0; index < map_count; index++)
+		{
+			lines[count].type = LINE_MAP;
+			lines[count++].index = index;
+		}
+	}
+	return count;
 }
 
 /* one short line on the network this session plays on */
@@ -498,9 +1095,7 @@ static void status_line(char *text, int size)
 	char code[P2P_CODE_SIZE];
 	char detail[96];
 
-	if (notice[0] && now_us() < notice_until)
-		snprintf(text, (size_t)size, "%s", notice);
-	else if (!strcmp(running_network, "online"))
+	if (!strcmp(running_network, "online"))
 	{
 		if (p2p_hosting_code(code, sizeof(code)))
 			snprintf(text, (size_t)size, "Your code: %s%s", code, choice_of("HALO_NET_LOBBY_PUBLIC") ? " (public)" : "");
@@ -533,77 +1128,135 @@ static void status_line(char *text, int size)
 	}
 }
 
-/* the longer line under it: what the selected line does, or why the
-last action did not work */
-static void help_line(char *text, int size, const struct setting *setting)
+/* the longer line at the bottom: what the selected line does, or what the
+last action did */
+static void help_line(char *text, int size, const struct line *line)
 {
 	char detail[96];
+	const struct setting *setting = line && line->type == LINE_SETTING ? &settings[line->index] : NULL;
+	int state = __atomic_load_n(&report_state, __ATOMIC_ACQUIRE);
 
-	if (restart_pending || halo_screen_restart_needed())
+	if (notice[0] && now_us() < notice_until)
+		snprintf(text, (size_t)size, "%s", notice);
+	else if (restart_pending || halo_screen_restart_needed())
 		snprintf(text, (size_t)size, "Restart the game for this change. O: close");
-	else if (page == PAGE_MULTIPLAYER && !strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
+	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_SAVING)
+		snprintf(text, (size_t)size, "Saving the report...");
+	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_SAVED)
+		snprintf(text, (size_t)size, "Saved: %.56s", report_path);
+	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_FAILED)
+		snprintf(text, (size_t)size, "Could not save the report");
+	else if (line && line->type == LINE_MAP)
+		snprintf(text, (size_t)size, "%s: left/right on or off, square deletes",
+			maps[line->index].format == MAP_XBOX ? "Xbox map" : maps[line->index].format == MAP_OTHER ?
+			"Not a known map" : "PC map (needs PC maps On)");
+	else if (!setting)
+		snprintf(text, (size_t)size, "L/R: tabs  O: close");
+	else if (tab == TAB_MULTIPLAYER && !strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
 		setting->action == ACTION_BROWSE || setting->action == ACTION_NONE) && p2p_status(detail, sizeof(detail)))
-		snprintf(text, (size_t)size, "%.46s", detail);
-	else if (page == PAGE_MULTIPLAYER && !strcmp(running_network, "adhoc") &&
+		snprintf(text, (size_t)size, "%.60s", detail);
+	else if (tab == TAB_MULTIPLAYER && !strcmp(running_network, "adhoc") &&
 		(setting->action == ACTION_ADHOC_JOIN || setting->action == ACTION_ADHOC_LEAVE))
 	{
 		vita_adhoc_state(detail, sizeof(detail));
-		snprintf(text, (size_t)size, "%.46s", detail);
+		snprintf(text, (size_t)size, "%.60s", detail);
 	}
 	else
 		snprintf(text, (size_t)size, "%s", setting->help);
 }
 
-/* the lines of the page shown: their settings' indices */
-static int page_lines(int *lines)
+/* the tab bar: '\t', the tabs shown with '|' between, '*' before this one */
+static int tab_bar(char *text, int size)
 {
-	int count = 0, index;
+	int length = snprintf(text, (size_t)size, "\t"), index, first = 1;
 
-	for (index = 0; index < SETTING_COUNT; index++)
-		if (settings[index].page == page)
-			lines[count++] = index;
-	return count;
+	for (index = 0; index < TAB_COUNT && length < size; index++)
+		if (tab_shown(index))
+		{
+			length += snprintf(text + length, (size_t)(size - length), "%s%s%s", first ? "" : "|",
+				index == tab ? "*" : "", tab_names[index]);
+			first = 0;
+		}
+	return length;
 }
 
 static void show_list(void)
 {
 	char text[2048];
-	int lines[SETTING_COUNT];
-	int count = page_lines(lines), length, index;
+	struct line lines[MAXIMUM_LINES];
+	int count = tab_lines(lines), length, index, shown = 0, highlighted = 0;
+	int *selected = &tab_selected[tab];
 	char status[64], help[96];
 
-	if (selected >= count)
-		selected = count - 1;
-	length = snprintf(text, sizeof(text), "%s", page == PAGE_MULTIPLAYER ? "MULTIPLAYER" : "SETTINGS");
+	if (*selected >= count)
+		*selected = count - 1;
+	if (*selected < 0)
+		*selected = 0;
+	length = tab_bar(text, sizeof(text));
+	/* (the map lines scroll: MAP_LINES at once, the chosen one among them) */
+	if (tab == TAB_MAPS && count && lines[*selected].type == LINE_MAP)
+	{
+		int map = lines[*selected].index;
+
+		if (map < map_scroll)
+			map_scroll = map;
+		if (map >= map_scroll + MAP_LINES)
+			map_scroll = map - MAP_LINES + 1;
+	}
 	for (index = 0; index < count && length < (int)sizeof(text); index++)
 	{
-		const struct setting *setting = &settings[lines[index]];
+		const struct line *line = &lines[index];
 
-		if (setting->kind == KIND_ACTION)
-			length += snprintf(text + length, sizeof(text) - length, "\n%s%s", setting->label,
-				setting->action == ACTION_BACK ? "" : " >");
+		if (line->type == LINE_MAP && (line->index < map_scroll || line->index >= map_scroll + MAP_LINES))
+			continue;
+		shown++;
+		if (index == *selected)
+			highlighted = shown;
+		if (line->type == LINE_INFO)
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", line->text);
+		else if (line->type == LINE_MAP)
+		{
+			const struct map_entry *map = &maps[line->index];
+			char size_name[24], name[24];
+
+			size_text(size_name, sizeof(size_name), map->size);
+			/* (the .yelo of a name: marked *) */
+			snprintf(name, sizeof(name), "%.19s%s", map->name, strcasecmp(map->extension, "yelo") ? "" : "*");
+			length += snprintf(text + length, sizeof(text) - length, "\n%-20s%9s  %-5s %s", name, size_name,
+				map_format_name(map->format), map_disabled(map->name) ? "Off" : "On");
+		}
 		else
 		{
-			char label[32];
-			/* (the Profile row's last choice, Custom, is read, not chosen) */
-			int last = setting == &settings[0] ? PROFILE_CUSTOM - 1 : setting->count - 1;
+			const struct setting *setting = &settings[line->index];
 
-			/* (a row that applies after a restart: marked *) */
-			snprintf(label, sizeof(label), "%s%s", setting->label, setting->restart ? "*" : "");
-			length += snprintf(text + length, sizeof(text) - length, "\n%-21s%c %s %c", label,
-				setting->choice > 0 ? '<' : ' ', setting->names[setting->choice],
-				setting->choice < last ? '>' : ' ');
+			if (setting->kind == KIND_ACTION)
+				length += snprintf(text + length, sizeof(text) - length, "\n%s >", setting->label);
+			else
+			{
+				char label[32];
+				/* (the Profile row's last choice, Custom, is read, not chosen) */
+				int last = setting == &settings[0] ? PROFILE_CUSTOM - 1 : setting->count - 1;
+
+				/* (a row that applies after a restart: marked *) */
+				snprintf(label, sizeof(label), "%s%s", setting->label, setting->restart ? "*" : "");
+				length += snprintf(text + length, sizeof(text) - length, "\n%-21s%c %s %c", label,
+					setting->choice > 0 ? '<' : ' ', setting->names[setting->choice],
+					setting->choice < last ? '>' : ' ');
+			}
 		}
 	}
-	if (page == PAGE_MULTIPLAYER && length < (int)sizeof(text))
+	if (tab == TAB_MAPS && map_count > MAP_LINES && length < (int)sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length, "\n  (maps %d-%d of %d)", map_scroll + 1,
+			map_scroll + MAP_LINES < map_count ? map_scroll + MAP_LINES : map_count, map_count);
+	if (tab == TAB_MULTIPLAYER && length < (int)sizeof(text))
 	{
 		status_line(status, sizeof(status));
 		length += snprintf(text + length, sizeof(text) - length, "\n%s", status);
 	}
-	help_line(help, sizeof(help), &settings[lines[selected]]);
+	help_line(help, sizeof(help), count ? &lines[*selected] : NULL);
 	if (length < (int)sizeof(text))
 		snprintf(text + length, sizeof(text) - length, "\n%s", help);
-	vgxm_menu_set(text, selected + 1);
+	vgxm_menu_set(text, highlighted);
 }
 
 static void show_code(void)
@@ -627,7 +1280,7 @@ static void show_code(void)
 		cursor[column++] = ' ';
 	}
 	letters[column] = cursor[column] = 0;
-	snprintf(text, sizeof(text), "JOIN WITH A CODE\n\n    %s\n    %s\n%s\nUp/down letter  L/R move  X join  O back",
+	snprintf(text, sizeof(text), "JOIN WITH A CODE\n\n    %s\n    %s\n%s\nUp/down letter  Left/right move  X join  O back",
 		letters, cursor, strcmp(running_network, "online") ? "Network must be Online (restart)" : "");
 	vgxm_menu_set(text, 2);
 }
@@ -654,6 +1307,37 @@ static void show_browse(void)
 	vgxm_menu_set(text, browse_count ? browse_selected + 1 : 0);
 }
 
+/* the map chosen on the Modded maps tab, or NULL */
+static struct map_entry *selected_map(void)
+{
+	struct line lines[MAXIMUM_LINES];
+	int count;
+
+	if (tab != TAB_MAPS)
+		return NULL;
+	count = tab_lines(lines);
+	if (tab_selected[TAB_MAPS] < count && lines[tab_selected[TAB_MAPS]].type == LINE_MAP)
+		return &maps[lines[tab_selected[TAB_MAPS]].index];
+	return NULL;
+}
+
+static void show_delete(void)
+{
+	char text[512], size_name[16];
+	const struct map_entry *map = selected_map();
+
+	if (!map)
+	{
+		screen = SCREEN_LIST;
+		show_list();
+		return;
+	}
+	size_text(size_name, sizeof(size_name), map->size);
+	snprintf(text, sizeof(text), "DELETE MAP\n\n%.40s.%s  (%s)\nand its picture and description, if any.\n\n"
+		"It cannot be undone.\nX: delete   O: keep", map->name, map->extension, size_name);
+	vgxm_menu_set(text, -1);
+}
+
 static void show(void)
 {
 	last_shown = now_us();
@@ -661,6 +1345,8 @@ static void show(void)
 		show_code();
 	else if (screen == SCREEN_BROWSE)
 		show_browse();
+	else if (screen == SCREEN_DELETE)
+		show_delete();
 	else
 		show_list();
 }
@@ -676,7 +1362,7 @@ static void change(struct setting *setting, int step)
 	if (strcmp(setting->variable, "HALO_PROFILE") == 0 && choice == PROFILE_CUSTOM)
 		return;
 	setting->choice = choice;
-	setenv(setting->variable, setting->values[choice], 1);
+	apply_value(setting);
 	if (setting->restart)
 		restart_pending = 1;
 	if (strcmp(setting->variable, "HALO_PROFILE") == 0)
@@ -692,10 +1378,10 @@ static void change(struct setting *setting, int step)
 		struct setting *profile = setting_named("HALO_PROFILE");
 
 		profile->choice = matching_profile();
-		setenv(profile->variable, profile->values[profile->choice], 1);
+		apply_value(profile);
 	}
 	if (strcmp(setting->variable, "XV_FPS") == 0)
-		vgxm_overlay_enable(choice != 0);
+		vgxm_overlay_enable(atoi(setting->values[choice]));
 	if (strcmp(setting->variable, "HALO_UPSCALE_FILTER") == 0)
 		vgxm_upscale_filter_set(choice);
 	/* (listed or not takes effect at once, also while hosting) */
@@ -703,6 +1389,14 @@ static void change(struct setting *setting, int step)
 		p2p_lobby_set_public(choice);
 	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 	save();
+	if (setting->dev)
+	{
+		char line[128];
+
+		snprintf(line, sizeof(line), "settings: dev switch %s=%s (settings panel)", setting->variable,
+			setting->values[choice][0] ? setting->values[choice] : "(default)");
+		vita_host_log(line);
+	}
 }
 
 /* (debug, HALO_TEST_COMMANDS "@set VARIABLE value": main.c) a row set as
@@ -711,14 +1405,10 @@ row */
 int vita_settings_set(const char *variable, const char *value)
 {
 	struct setting *setting = setting_named(variable);
-	int saved = selected, index;
 
-	if (!setting)
+	if (!setting || setting->kind != KIND_CHOICE)
 		return 0;
-	index = (int)(setting - settings);
-	selected = index;
 	change(setting, find_choice(setting, value) - setting->choice);
-	selected = saved;
 	{
 		char line[128];
 
@@ -785,14 +1475,6 @@ static void act(const struct setting *setting)
 {
 	switch (setting->action)
 	{
-	case ACTION_MULTIPLAYER:
-		page = PAGE_MULTIPLAYER;
-		selected = 0;
-		break;
-	case ACTION_BACK:
-		page = PAGE_SETTINGS;
-		selected = 0;
-		break;
 	case ACTION_JOIN_CODE:
 		screen = SCREEN_CODE;
 		break;
@@ -813,6 +1495,9 @@ static void act(const struct setting *setting)
 		return;
 	case ACTION_ADHOC_LEAVE:
 		vita_adhoc_leave();
+		break;
+	case ACTION_SAVE_REPORT:
+		report_start();
 		break;
 	}
 }
@@ -886,6 +1571,26 @@ static void browse_input(unsigned long pressed)
 	}
 }
 
+/* the delete confirmation's buttons */
+static void delete_input(unsigned long pressed)
+{
+	struct map_entry *map = selected_map();
+
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if ((pressed & VITA_BUTTON_CROSS) && map)
+	{
+		if (halo_cache_map_in_use(map->name))
+			set_notice("%.30s is in play: leave it first", map->name);
+		else
+		{
+			map_delete(map);
+			maps_scan();
+		}
+		screen = SCREEN_LIST;
+	}
+}
+
 /* the public lobby's entries again (not this machine's own game) */
 static void browse_refresh(void)
 {
@@ -898,6 +1603,20 @@ static void browse_refresh(void)
 			browse_entries[browse_count++] = entry;
 	if (browse_selected >= browse_count)
 		browse_selected = browse_count ? browse_count - 1 : 0;
+}
+
+/* to the next tab shown, or the one before */
+static void tab_step(int step)
+{
+	int next = tab;
+
+	do
+		next = (next + step + TAB_COUNT) % TAB_COUNT;
+	while (!tab_shown(next));
+	tab = next;
+	notice[0] = 0;
+	if (tab == TAB_MAPS)
+		maps_scan();
 }
 
 int vita_settings_input(const struct vita_host_pad *pad)
@@ -945,6 +1664,10 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			else
 			{
 				panel_open = 1;
+				if (!tab_shown(tab))
+					tab = TAB_GRAPHICS;
+				if (tab == TAB_MAPS)
+					maps_scan();
 				show();
 			}
 			both_since = 1;
@@ -971,23 +1694,30 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			show();
 		return 1;
 	}
+	if (screen == SCREEN_DELETE)
+	{
+		delete_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
 	if (pressed & VITA_BUTTON_CIRCLE)
 	{
-		/* (the multiplayer page goes back to the settings first) */
-		if (page == PAGE_MULTIPLAYER)
-		{
-			page = PAGE_SETTINGS;
-			selected = 0;
-			show();
-		}
-		else
-			close_panel();
+		close_panel();
+		return 1;
+	}
+	if (pressed & (VITA_BUTTON_L | VITA_BUTTON_R))
+	{
+		tab_step((pressed & VITA_BUTTON_L) ? -1 : 1);
+		show();
 		return 1;
 	}
 	{
-		/* up and down step, and repeat while held */
-		int lines[SETTING_COUNT];
-		int count = page_lines(lines);
+		/* up and down step over the lines that can be chosen, and repeat
+		while held */
+		struct line lines[MAXIMUM_LINES];
+		int count = tab_lines(lines);
+		int *selected = &tab_selected[tab];
 		int step = 0;
 
 		if (pressed & VITA_BUTTON_UP)
@@ -996,33 +1726,53 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			step = 1;
 		else if ((buttons & (VITA_BUTTON_UP | VITA_BUTTON_DOWN)) && now - last_move > 250000)
 			step = (buttons & VITA_BUTTON_UP) ? -1 : 1;
-		if (step)
+		if (*selected >= count)
+			*selected = count - 1;
+		if (step && count)
 		{
-			selected = (selected + step + count) % count;
+			int tries;
+
+			for (tries = 0; tries < count; tries++)
+			{
+				*selected = (*selected + step + count) % count;
+				if (lines[*selected].type != LINE_INFO)
+					break;
+			}
 			last_move = now;
 		}
-		if (selected >= count)
-			selected = count - 1;
-		if (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS))
+		if (count && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS | VITA_BUTTON_SQUARE)))
 		{
-			struct setting *setting = &settings[lines[selected]];
+			struct line *line = &lines[*selected];
 
-			if (setting->kind == KIND_ACTION)
+			if (line->type == LINE_MAP)
+			{
+				struct map_entry *map = &maps[line->index];
+
+				if (pressed & VITA_BUTTON_SQUARE)
+					screen = SCREEN_DELETE;
+				else if (pressed & VITA_BUTTON_LEFT)
+					map_set_disabled(map->name, 1);
+				else if (pressed & VITA_BUTTON_RIGHT)
+					map_set_disabled(map->name, 0);
+				else
+					map_set_disabled(map->name, !map_disabled(map->name));
+			}
+			else if (line->type == LINE_SETTING && settings[line->index].kind == KIND_ACTION)
 			{
 				if (pressed & (VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS))
 				{
 					notice[0] = 0;
-					act(setting);
+					act(&settings[line->index]);
 					if (!panel_open)
 						return 1;
 				}
 			}
-			else
-				change(setting, (pressed & VITA_BUTTON_LEFT) ? -1 : 1);
+			else if (line->type == LINE_SETTING && !(pressed & VITA_BUTTON_SQUARE))
+				change(&settings[line->index], (pressed & VITA_BUTTON_LEFT) ? -1 : 1);
 		}
 	}
 	/* (redrawn on a press, and every half second for the status line: a
-	code appears when the game starts hosting) */
+	code appears when the game starts hosting; the report's progress) */
 	if (pressed || now - last_shown > 500000)
 		show();
 	return 1;

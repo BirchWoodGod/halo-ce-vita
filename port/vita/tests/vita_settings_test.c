@@ -1,13 +1,18 @@
 /*
 VITA_SETTINGS_TEST.C
 
-A desktop test of the settings panel's multiplayer page
-(port/vita/host/vita_settings.c, included whole), with the calls it makes
-into internet play (p2p.h), ad hoc play (vita_net.c) and the renderer
-(vgxm_menu_set) recorded instead: the panel opened with SELECT+START, the
-Multiplayer page, a code typed with the D-pad and joined, the public lobby
+A desktop test of the settings panel (port/vita/host/vita_settings.c,
+included whole), with the calls it makes into internet play (p2p.h), ad hoc
+play (vita_net.c) and the renderer (vgxm_menu_set) recorded instead: the
+panel opened with SELECT+START, the tabs switched with L and R, the
+Multiplayer tab (a code typed with the D-pad and joined, the public lobby
 listed and joined, Online games switched to Public at once, an ad hoc group
-joined, and the game seeing no buttons while the system's dialog is up.
+joined, the game seeing no buttons while the system's dialog is up), the
+Modded maps tab (a folder of fake maps: listed, turned off and on, deleted
+after a confirmation, the map in play kept), the Dev tab behind its switch
+(switches saved only while on, the timing variables, Save report's folder),
+and a settings.txt of 1.0 loading. It runs in a folder of its own, with
+ux0:data/haloce-vita made there.
 
 Run port/vita/tests/run_vita_settings_test.sh.
 */
@@ -15,10 +20,36 @@ Run port/vita/tests/run_vita_settings_test.sh.
 #include "../host/vita_settings.c"
 
 #include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <utime.h>
 
 volatile unsigned long halo_settings_generation;
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
+/* (the map in play: never deleted) */
+int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
+static char log_text[16384];
+static int overlay_level = -1;
+
+int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core)
+{
+	(void)name;
+	(void)core;
+	function(argument);
+	return 0;
+}
+
+int sceRtcGetCurrentClockLocalTime(SceDateTime *time)
+{
+	time->year = 2026;
+	time->month = 10;
+	time->day = 6;
+	time->hour = 15;
+	time->minute = 30;
+	time->second = 12;
+	return 0;
+}
 
 static int failures, checks;
 
@@ -55,9 +86,14 @@ void vgxm_menu_set(const char *text, int selected)
 	menu_selected = selected;
 }
 
-void vgxm_overlay_enable(int enabled) { (void)enabled; }
+void vgxm_overlay_enable(int enabled) { overlay_level = enabled; }
 void vgxm_upscale_filter_set(int filter) { (void)filter; }
-void vita_host_log(const char *line) { (void)line; }
+void vita_host_log(const char *line)
+{
+	size_t used = strlen(log_text);
+
+	snprintf(log_text + used, sizeof(log_text) - used, "%s\n", line);
+}
 
 int p2p_join_code(const char *code)
 {
@@ -166,25 +202,107 @@ static const char *menu_line(int wanted, char *line, int size)
 	return line;
 }
 
+/* the file's text ("" if there is none) */
+static const char *file_text(const char *path)
+{
+	static char text[4096];
+	FILE *file = fopen(path, "r");
+	size_t size = 0;
+
+	if (file)
+	{
+		size = fread(text, 1, sizeof(text) - 1, file);
+		fclose(file);
+	}
+	text[size] = 0;
+	return text;
+}
+
+static void write_file(const char *path, const void *data, size_t size)
+{
+	FILE *file = fopen(path, "wb");
+
+	fwrite(data, 1, size, file);
+	fclose(file);
+}
+
+/* a fake map: the cache header's signature and version, then zeros */
+static void write_map(const char *path, unsigned version, size_t size)
+{
+	static unsigned char bytes[300000];
+
+	memset(bytes, 0, sizeof(bytes));
+	memcpy(bytes, "daeh", 4);
+	bytes[4] = version & 0xFF;
+	bytes[5] = (version >> 8) & 0xFF;
+	write_file(path, bytes, size < sizeof(bytes) ? size : sizeof(bytes));
+}
+
+/* L or R until the tab named is shown */
+static int to_tab(const char *name)
+{
+	char marked[32];
+	int index;
+
+	snprintf(marked, sizeof(marked), "*%s", name);
+	for (index = 0; index < 8 && !strstr(menu, marked); index++)
+		press(VITA_BUTTON_R);
+	return strstr(menu, marked) != NULL;
+}
+
+/* down until the selected line starts with `label` */
+static int to_line(const char *label)
+{
+	char line[128];
+	int index;
+
+	for (index = 0; index < 40; index++)
+	{
+		if (!strncmp(menu_line(menu_selected, line, sizeof(line)), label, strlen(label)))
+			return 1;
+		press(VITA_BUTTON_DOWN);
+	}
+	return 0;
+}
+
 int main(void)
 {
 	char line[128];
 	int index;
+
+	/* (the Vita's folders, in this test's own) */
+	mkdir("ux0:data", 0777);
+	mkdir("ux0:data/haloce-vita", 0777);
+	mkdir("ux0:data/haloce-vita/maps", 0777);
+	setenv("HALO_MAPS_ROOT", "ux0:data/haloce-vita/maps", 1);
 
 	setenv("HALO_VITA_NETWORK", "online", 1);
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_NET_ONLINE"), "true") && !strcmp(getenv("HALO_NET_ALLOW_UPNP"), "false"),
 		"Network Online: internet play on, without UPnP");
 	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser"), "the lobby name is the Vita's user name");
+	check(!strstr(log_text, "TEST MODE"), "no dev switch on: halo.log does not say test mode");
 
 	check(!frame(0), "closed: the game gets the buttons");
 	open_panel();
-	check(menu_visible && !strncmp(menu, "SETTINGS", 8), "SELECT+START opens the settings");
-	/* (Multiplayer is the last line: up from the first wraps to it) */
-	press(VITA_BUTTON_UP);
-	check(strstr(menu_line(menu_selected, line, sizeof(line)), "Multiplayer >") != NULL, "the last line is Multiplayer");
-	press(VITA_BUTTON_CROSS);
-	check(!strncmp(menu, "MULTIPLAYER", 11), "cross opens the Multiplayer page");
+	printf("%s\n--\n", menu);
+	check(menu_visible && menu[0] == '\t' && strstr(menu, "*Graphics|Audio|Controls|Multiplayer|Modded maps\n"),
+		"SELECT+START opens the Graphics tab; five tabs (Dev hidden)");
+	check(strstr(menu_line(1, line, sizeof(line)), "Profile") && strstr(menu_line(10, line, sizeof(line)), "FPS counter") &&
+		strstr(menu_line(11, line, sizeof(line)), "Frame limit"), "Graphics: Profile ... FPS counter, Frame limit");
+	for (index = 1; index < 12; index++)
+		check(strlen(menu_line(index, line, sizeof(line))) <= 46, "a Graphics line fits (46 characters)");
+	check(!strstr(menu, "Render resolution*") && !strstr(menu, "Aspect ratio*"), "resolution and aspect: live, no *");
+	press(VITA_BUTTON_L);
+	check(strstr(menu, "*Modded maps") != NULL, "L from the first tab wraps to the last shown");
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_R);
+	check(strstr(menu, "*Audio") && strstr(menu, "Sound voices*") && strstr(menu, "Sound occlusion"), "R: Audio");
+	press(VITA_BUTTON_R);
+	check(strstr(menu, "*Controls") && strstr(menu, "Look sensitivity") && strstr(menu, "Show dev settings"),
+		"R: Controls, with Show dev settings");
+	press(VITA_BUTTON_R);
+	check(!strncmp(menu, "\tGraphics|Audio|Controls|*Multiplayer", 37), "R: Multiplayer");
 	printf("%s\n--\n", menu);
 
 	/* Online games: Public, at once */
@@ -204,8 +322,8 @@ int main(void)
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "B A A A - 9 A A A") != NULL, "the code screen shows the letters typed");
 	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_code, "BAAA-9AAA") && !strncmp(menu, "MULTIPLAYER", 11), "cross joins the code typed");
-	check(strstr(menu, "Looking up BAAA-9AAA") != NULL, "the status line says it is looked up");
+	check(!strcmp(joined_code, "BAAA-9AAA") && strstr(menu, "*Multiplayer"), "cross joins the code typed");
+	check(strstr(menu, "Looking up BAAA-9AAA") != NULL, "the help line says it is looked up");
 
 	/* the public lobby: this Vita's own game is left out */
 	press(VITA_BUTTON_DOWN);
@@ -226,8 +344,8 @@ int main(void)
 
 	/* co-op: the level a hosted game plays together, at once (the server
 	reads the environment each frame of its lobby) */
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Co-op campaign", 14))
-		press(VITA_BUTTON_DOWN);
+	to_line("Co-op campaign");
+	menu_line(menu_selected, line, sizeof(line));
 	check(strstr(line, "Off") != NULL && getenv("HALO_NET_COOP_LEVEL") && !getenv("HALO_NET_COOP_LEVEL")[0],
 		"Co-op campaign: Off at first");
 	press(VITA_BUTTON_RIGHT);
@@ -240,13 +358,11 @@ int main(void)
 	press(VITA_BUTTON_UP);
 	press(VITA_BUTTON_LEFT);
 	check(!getenv("HALO_NET_COOP_LEVEL")[0], "Co-op campaign: left goes back to Off");
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Browse public games", 19))
-		press(VITA_BUTTON_UP);
 
 	/* ad hoc needs the network chosen first */
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_UP);
+	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Join ad hoc group", 17), "up: Join ad hoc group");
 	press(VITA_BUTTON_CROSS);
 	check(adhoc_connects == 0 && strstr(menu, "Network must be Ad hoc"), "Join ad hoc group asks for the Ad hoc network");
 
@@ -254,14 +370,15 @@ int main(void)
 	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Network", 7))
 		press(VITA_BUTTON_UP);
 	press(VITA_BUTTON_RIGHT);
+	clock_us += 5000000;
+	frame(0);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu, "Restart the game"), "Network: Ad hoc asks for a restart");
 
 	/* the next start, in ad hoc play */
 	restart_pending = 0;
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_NET_ADHOC"), "true"), "Network Ad hoc: ad hoc play on");
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Ad hoc room", 11))
-		press(VITA_BUTTON_DOWN);
+	to_line("Ad hoc room");
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_DOWN);
@@ -271,6 +388,171 @@ int main(void)
 	check(frame(VITA_BUTTON_CROSS) == 1 && frame(0) == 1, "the game sees no buttons while the dialog is up");
 	adhoc_state_value = 2;
 	check(frame(0) == 0, "and gets them again after");
+
+	/* ---------- Modded maps */
+	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);
+	write_map("ux0:data/haloce-vita/maps/inplay.map", 5, 2000);
+	write_map("ux0:data/haloce-vita/maps/cemap.map", 609, 3 * 1024 * 1024 / 16);
+	write_map("ux0:data/haloce-vita/maps/bloodgulch.map", 5, 1000);
+	write_map("ux0:data/haloce-vita/maps/bitmaps.map", 1, 1000);
+	write_file("ux0:data/haloce-vita/maps/cemap.bmp", "BM", 2);
+	write_file("ux0:data/haloce-vita/maps/notes.txt", "x", 1);
+	open_panel();
+	check(to_tab("Modded maps"), "the Modded maps tab");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "PC maps") && strstr(menu, "!Missing: sounds.map loc.map"),
+		"PC maps switch; a CE map without sounds.map/loc.map: the warning");
+	check(!strncmp(menu_line(3, line, sizeof(line)), "cemap ", 6) && !strncmp(menu_line(4, line, sizeof(line)), "inplay ", 7) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "mygulch ", 8) && menu_line(7, line, sizeof(line))[0] == 0,
+		"the custom maps listed in order, not the Xbox's or CE resource maps");
+	check(strstr(menu, "mygulch                245 KB  Xbox  On") != NULL, "mygulch: size, Xbox, On");
+	check(strstr(menu, " CE    On") != NULL, "cemap: Custom Edition");
+	to_line("mygulch");
+	check(strstr(menu, "Xbox map: left/right on or off") != NULL, "a map's help line");
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu_line(menu_selected, line, sizeof(line)), "Off") && !strcmp(getenv("HALO_MAPS_DISABLED"), "mygulch") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED=mygulch\n"), "left: mygulch off, in the environment and settings.txt");
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_MAPS_DISABLED"), "inplay,mygulch") || !strcmp(getenv("HALO_MAPS_DISABLED"), "mygulch,inplay"),
+		"two maps off");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_CROSS);
+	check(!getenv("HALO_MAPS_DISABLED") || !getenv("HALO_MAPS_DISABLED")[0], "right / cross: both on again");
+	check(!strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED"), "none off: no line in settings.txt");
+	press(VITA_BUTTON_LEFT);
+	/* delete: the map in play is kept */
+	to_line("inplay");
+	press(VITA_BUTTON_SQUARE);
+	check(!strncmp(menu, "DELETE MAP", 10) && strstr(menu, "inplay.map"), "square asks before deleting");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "inplay is in play") && file_exists("ux0:data/haloce-vita/maps/inplay.map"), "the map in play is kept");
+	to_line("cemap");
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CIRCLE);
+	check(file_exists("ux0:data/haloce-vita/maps/cemap.map") && strstr(menu, "*Modded maps"), "circle keeps it");
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(!file_exists("ux0:data/haloce-vita/maps/cemap.map") && !file_exists("ux0:data/haloce-vita/maps/cemap.bmp") &&
+		strstr(menu, "Deleted cemap.map") && !strstr(menu, "!Missing"), "cross deletes it (and its picture); no CE map, no warning");
+	check(strstr(log_text, "settings: map cemap.map deleted") != NULL, "halo.log says what was deleted");
+	press(VITA_BUTTON_UP);
+	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "PC maps", 7))
+		press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CUSTOM_EDITION"), "1") && strstr(menu, "!Missing: sounds.map loc.map"),
+		"PC maps On: the warning again");
+	press(VITA_BUTTON_LEFT);
+
+	/* ---------- Dev, behind its switch */
+	press(VITA_BUTTON_R);
+	check(strstr(menu, "*Graphics") != NULL, "R from Modded maps: Graphics (Dev hidden)");
+	to_tab("Controls");
+	to_line("Show dev settings");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "|Modded maps|Dev\n") != NULL, "Show dev settings: the Dev tab");
+	to_tab("Dev");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "Performance logging*") && strstr(menu, "Crash dump on hang") && strstr(menu, "FPS overlay") &&
+		strstr(menu, "GPU W clamp*") && strstr(menu, "Target mip minimum*") && strstr(menu, "Frame phase lock*") &&
+		strstr(menu, "Render target sync*") && strstr(menu, "Save report >"), "Dev: the switches, start-up ones marked *");
+	check(!strstr(file_text(SETTINGS_FILE), "HALO_GXM_RTT_SYNC") && !strstr(file_text(SETTINGS_FILE), "XV_FPS"),
+		"dev switches off: not in settings.txt");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_FRAME_TIMING"), "300") && !strcmp(getenv("HALO_RENDER_PROFILE"), "1") &&
+		!strcmp(getenv("HALO_TICK_PROFILE"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_PERF_LOG=1\n") &&
+		strstr(menu, "Restart the game"), "Performance logging: the three timing variables, saved, a restart");
+	restart_pending = 0;
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_HANG_CRASH"), "1") && !strstr(menu, "Restart the game"), "Crash dump on hang: live");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	check(overlay_level == 2 && !strcmp(getenv("XV_FPS"), "2"), "FPS overlay: FPS only, live");
+	press(VITA_BUTTON_RIGHT);
+	check(overlay_level == 1 && strstr(file_text(SETTINGS_FILE), "XV_FPS=1\n"), "FPS overlay: Full");
+	to_line("Render target sync");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_GXM_RTT_SYNC"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_GXM_RTT_SYNC=0\n"),
+		"Render target sync Off: 0, saved");
+	press(VITA_BUTTON_LEFT);
+	check(!getenv("HALO_GXM_RTT_SYNC") && !strstr(file_text(SETTINGS_FILE), "HALO_GXM_RTT_SYNC"),
+		"back On: unset (the default), not saved");
+	press(VITA_BUTTON_RIGHT);
+	restart_pending = 0;
+	/* Save report */
+	write_file("ux0:data/haloce-vita/halo.log", "log", 3);
+	write_file("ux0:data/haloce-vita/halo-prev.log", "prev", 4);
+	write_file("ux0:data/haloce-vita/env.txt", "HALO_NO_AUDIO=1\n", 16);
+	write_map("ux0:data/psp2core-1-old.psp2dmp", 0, 100);
+	write_map("ux0:data/psp2core-2-new.psp2dmp", 0, 200);
+	{
+		struct utimbuf old_time = { 1000, 1000 };
+
+		utime("ux0:data/psp2core-1-old.psp2dmp", &old_time);
+	}
+	to_line("Save report");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "Saved: ux0:data/haloce-vita/report-20261006-153012") != NULL, "Save report shows the folder");
+	check(file_exists("ux0:data/haloce-vita/report-20261006-153012/halo.log") &&
+		file_exists("ux0:data/haloce-vita/report-20261006-153012/halo-prev.log") &&
+		file_exists("ux0:data/haloce-vita/report-20261006-153012/settings.txt") &&
+		file_exists("ux0:data/haloce-vita/report-20261006-153012/env.txt") &&
+		file_exists("ux0:data/haloce-vita/report-20261006-153012/psp2core-2-new.psp2dmp") &&
+		!file_exists("ux0:data/haloce-vita/report-20261006-153012/psp2core-1-old.psp2dmp"),
+		"the report: the logs, settings, env.txt and the newest dump");
+	for (index = 1; index < 12; index++)
+		check(strlen(menu_line(index, line, sizeof(line))) <= 64, "a Dev line fits");
+	press(VITA_BUTTON_CIRCLE);
+	check(!menu_visible, "circle closes the panel");
+
+	/* the next start: the dev switches on say test mode in halo.log */
+	log_text[0] = 0;
+	unsetenv("HALO_GXM_RTT_SYNC");
+	unsetenv("XV_FPS");
+	vita_settings_load();
+	printf("%s--\n", log_text);
+	check(strstr(log_text, "settings: TEST MODE, dev switches on: HALO_PERF_LOG=1 (HALO_FRAME_TIMING=300") &&
+		strstr(log_text, "HALO_GXM_RTT_SYNC=0") && strstr(log_text, "XV_FPS=1"), "test mode in halo.log");
+	check(!strcmp(getenv("HALO_GXM_RTT_SYNC"), "0"), "settings.txt's dev switch applied at start-up");
+
+	/* a dev switch env.txt sets and settings.txt does not: env.txt's
+	value stands */
+	unlink(SETTINGS_FILE);
+	settings[0].choice = 1;
+	for (index = 0; index < SETTING_COUNT; index++)
+		if (settings[index].dev)
+			settings[index].choice = 0;
+	setenv("HALO_FRAME_PHASE_LOCK", "0", 1);
+	setenv("HALO_TARGET_CHAIN_MIN_SIZE", "12", 1);
+	unsetenv("HALO_GXM_RTT_SYNC");
+	unsetenv("HALO_FRAME_TIMING");
+	unsetenv("HALO_RENDER_PROFILE");
+	unsetenv("HALO_TICK_PROFILE");
+	vita_settings_load();
+	check(!strcmp(getenv("HALO_TARGET_CHAIN_MIN_SIZE"), "12") && !strcmp(getenv("HALO_FRAME_PHASE_LOCK"), "0") &&
+		choice_of("HALO_FRAME_PHASE_LOCK") == 1, "env.txt's dev values stand (shown in the panel)");
+
+	/* settings.txt of 1.0 loads */
+	{
+		static const char old[] = "HALO_PROFILE=custom\nXV_FPS=1\nHALO_FRAMERATE_COUNTER=1\nHALO_FRAME_CAP=60\n"
+			"HALO_RENDER_SCALE=0.5\nHALO_DISPLAY_WIDTH=640\nHALO_UPSCALE_FILTER=1\nHALO_MODEL_LOD_SCALE=1\n"
+			"HALO_MIN_OBJECT_PIXELS=0\nHALO_SCENERY_UPDATE_DIVISOR=1\nHALO_INTERPOLATE_FIRST_PERSON=0\n"
+			"HALO_LIGHTING_REFRESH_DIVISOR=1\nHALO_SOUND_CHANNELS=24\nHALO_SOUND_OBSTRUCTION_TICKS=6\n"
+			"XV_LOOK_SENS=150\nHALO_CROUCH_TOGGLE=0\nXV_INVERT_Y=1\nXV_DEADZONE=10\n";
+
+		write_file(SETTINGS_FILE, old, sizeof(old) - 1);
+		unsetenv("XV_FPS");
+		vita_settings_load();
+		check(!strcmp(getenv("XV_FPS"), "1") && !strcmp(getenv("HALO_RENDER_SCALE"), "0.5") &&
+			!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && !strcmp(getenv("XV_LOOK_SENS"), "150") &&
+			!strcmp(getenv("XV_INVERT_Y"), "1") && !strcmp(getenv("HALO_SOUND_CHANNELS"), "24") &&
+			!strcmp(getenv("HALO_CROUCH_TOGGLE"), "0") && !strcmp(getenv("HALO_FRAME_CAP"), "60") &&
+			!strcmp(settings[0].names[settings[0].choice], "Custom"), "a 1.0 settings.txt loads, row for row");
+	}
 
 	/* PR #7's message overlay (a join refused): wrapped to the menu's width,
 	not dismissed by the press that was down when it opened, and taking the
