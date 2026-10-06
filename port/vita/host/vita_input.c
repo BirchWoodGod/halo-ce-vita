@@ -2,23 +2,30 @@
 VITA_INPUT.C
 
 The Vita's buttons and sticks for port/vita/platform/vita_pad.c (sceCtrl, in
-the wide analog mode real firmware needs for the sticks to move).
+the wide analog mode real firmware needs for the sticks to move), and the
+touch zones held on the front screen and the rear pad (sceTouch;
+vita_controls.c says where the zones are and when a finger counts).
 
 (debug) HALO_PAD_FILE=ux0:data/haloce-vita/pad.txt: presses for automated
 tests in Vita3K, without typing into its window. The file is looked for every
 half second; its steps, "name:hold_ms:pause_ms" separated by spaces, are
 pressed one after another and the file is deleted. Names: x c z v (cross
 circle square triangle), up down left right, start select, l r, w a s d (the
-left stick), i j k ll (the right stick), a+b for buttons together.
+left stick), i j k ll (the right stick), a+b for buttons together, and the
+touch zones: tl tr (the front screen's top corners), el er (its left and
+right edges), rl rr (the rear pad's halves), touched at their middle (a
+rear one counts after its hold time, as a finger does).
 */
 
 #include <psp2/ctrl.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/touch.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "vita_controls.h"
 #include "vita_host.h"
 
 #define MAXIMUM_PAD_STEPS 64
@@ -26,6 +33,8 @@ left stick), i j k ll (the right stick), a+b for buttons together.
 struct pad_step
 {
 	unsigned int buttons;
+	/* the touch zones (a bit each) */
+	unsigned int touch;
 	int lx, ly, rx, ry;
 	unsigned int hold_ms;
 	unsigned int pause_ms;
@@ -51,6 +60,9 @@ static void pad_step_add_key(struct pad_step *step, const char *name)
 	};
 	int index;
 
+	for (index = 0; index < VITA_ZONE_COUNT; index++)
+		if (!strcmp(name, vita_touch_zones[index].script_name))
+			step->touch |= 1u << index;
 	if (!strcmp(name, "w"))
 		step->ly = 0;
 	else if (!strcmp(name, "s"))
@@ -129,8 +141,12 @@ static void pad_script_poll(unsigned long long now)
 	pad_step_start = now;
 }
 
+/* the zones the script touches now */
+static unsigned int pad_script_touch;
+
 static void pad_script_apply(struct vita_host_pad *pad, unsigned long long now)
 {
+	pad_script_touch = 0;
 	while (pad_step_index < pad_step_count)
 	{
 		const struct pad_step *step = &pad_steps[pad_step_index];
@@ -139,6 +155,7 @@ static void pad_script_apply(struct vita_host_pad *pad, unsigned long long now)
 		if (elapsed_ms < step->hold_ms)
 		{
 			pad->buttons |= step->buttons;
+			pad_script_touch = step->touch;
 			if (step->lx != 128)
 				pad->lx = step->lx;
 			if (step->ly != 128)
@@ -156,7 +173,8 @@ static void pad_script_apply(struct vita_host_pad *pad, unsigned long long now)
 	}
 }
 
-/* when the player last touched a button or moved a stick (process time,
+/* when the player last pressed a button, moved a stick or put a finger on
+a touch panel (process time,
 us): the heartbeat stops telling the system the Vita is in use a while after
 it, so an untouched Vita dims and sleeps as its settings say (an OLED screen
 left on the pause menu would otherwise show the HUD for hours) */
@@ -167,16 +185,92 @@ static int stick_moved(unsigned char value)
 	return value < 128 - 32 || value > 128 + 32;
 }
 
+/* each panel's active area (sceTouchGetPanelInfo), to scale its positions
+to the screen's pixels */
+static int touch_left[2], touch_top[2], touch_width[2], touch_height[2];
+static struct vita_touch_tracker touch_tracker;
+
+static void touch_start(void)
+{
+	int panel;
+
+	for (panel = 0; panel < 2; panel++)
+	{
+		SceTouchPanelInfo info;
+
+		sceTouchSetSamplingState(panel ? SCE_TOUCH_PORT_BACK : SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+		memset(&info, 0, sizeof(info));
+		if (sceTouchGetPanelInfo(panel ? SCE_TOUCH_PORT_BACK : SCE_TOUCH_PORT_FRONT, &info) >= 0 &&
+			info.maxAaX > info.minAaX && info.maxAaY > info.minAaY)
+		{
+			touch_left[panel] = info.minAaX;
+			touch_top[panel] = info.minAaY;
+			touch_width[panel] = info.maxAaX - info.minAaX + 1;
+			touch_height[panel] = info.maxAaY - info.minAaY + 1;
+		}
+		else
+		{
+			/* (the panels' usual areas: front 1920 x 1088, rear 1920 x
+			782 from y 108) */
+			touch_left[panel] = 0;
+			touch_top[panel] = panel ? 108 : 0;
+			touch_width[panel] = 1920;
+			touch_height[panel] = panel ? 782 : 1088;
+		}
+	}
+}
+
+/* the fingers on both panels (and the script's), in screen pixels: the
+zones they hold this frame; *started is how many came down */
+static unsigned int touch_read(unsigned long long now, int *started)
+{
+	struct vita_touch_contact contacts[2 * SCE_TOUCH_MAX_REPORT + VITA_ZONE_COUNT];
+	int count = 0, panel, index;
+
+	for (panel = 0; panel < 2; panel++)
+	{
+		SceTouchData data;
+
+		memset(&data, 0, sizeof(data));
+		if (sceTouchPeek(panel ? SCE_TOUCH_PORT_BACK : SCE_TOUCH_PORT_FRONT, &data, 1) < 0)
+			continue;
+		for (index = 0; index < (int)data.reportNum && index < SCE_TOUCH_MAX_REPORT; index++)
+		{
+			struct vita_touch_contact *contact = &contacts[count++];
+
+			contact->panel = panel ? VITA_TOUCH_REAR : VITA_TOUCH_FRONT;
+			contact->id = data.report[index].id;
+			contact->x = (data.report[index].x - touch_left[panel]) * VITA_TOUCH_WIDTH / touch_width[panel];
+			contact->y = (data.report[index].y - touch_top[panel]) * VITA_TOUCH_HEIGHT / touch_height[panel];
+		}
+	}
+	for (index = 0; index < VITA_ZONE_COUNT; index++)
+		if (pad_script_touch & (1u << index))
+		{
+			const struct vita_touch_zone *zone = &vita_touch_zones[index];
+			struct vita_touch_contact *contact = &contacts[count++];
+
+			contact->panel = zone->panel;
+			/* (ids the panels never report) */
+			contact->id = 0x100 + index;
+			contact->x = (zone->left + zone->right) / 2;
+			contact->y = (zone->top + zone->bottom) / 2;
+		}
+	return (unsigned int)vita_touch_update(&touch_tracker, contacts, count, now, started);
+}
+
 void vita_host_pad_read(struct vita_host_pad *pad)
 {
 	static int started;
 	SceCtrlData data;
 	unsigned long long now;
+	int touches_started = 0;
 
 	if (!started)
 	{
 		started = 1;
 		sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
+		touch_start();
 	}
 	memset(&data, 0, sizeof(data));
 	data.lx = data.ly = data.rx = data.ry = 128;
@@ -188,9 +282,12 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 	pad->ry = data.ry;
 
 	now = sceKernelGetProcessTimeWide();
-	if (data.buttons || stick_moved(data.lx) || stick_moved(data.ly) || stick_moved(data.rx) || stick_moved(data.ry) ||
-		!vita_host_last_input_us)
-		vita_host_last_input_us = now;
 	pad_script_poll(now);
 	pad_script_apply(pad, now);
+	pad->touch = touch_read(now, &touches_started);
+	/* (a finger coming down is input too; one left resting on the rear
+	pad is not, after its first frame) */
+	if (data.buttons || stick_moved(data.lx) || stick_moved(data.ly) || stick_moved(data.rx) || stick_moved(data.ry) ||
+		touches_started || !vita_host_last_input_us)
+		vita_host_last_input_us = now;
 }
