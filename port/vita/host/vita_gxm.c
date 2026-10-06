@@ -557,7 +557,8 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 		const char *setting = getenv("XV_FPS");
 
 		gxm.overlay_programs = gxm.overlay_vertex && gxm.overlay_fragment;
-		gxm.overlay_enabled = setting && atoi(setting) != 0 && gxm.overlay_programs;
+		/* (1: the full overlay, 2: frames per second only) */
+		gxm.overlay_enabled = setting && gxm.overlay_programs ? atoi(setting) : 0;
 	}
 	if (!gxm.clear_vertex || !gxm.clear_fragment || !gxm.blit_vertex || !gxm.blit_fragment)
 	{
@@ -3280,7 +3281,7 @@ static unsigned int overlay_text(struct overlay_vertex *vertices, unsigned int c
 
 void vgxm_overlay_enable(int enabled)
 {
-	gxm.overlay_enabled = enabled && gxm.overlay_programs;
+	gxm.overlay_enabled = gxm.overlay_programs ? enabled : 0;
 }
 
 void vgxm_upscale_filter_set(int filter)
@@ -3318,16 +3319,53 @@ void vgxm_menu_set(const char *text, int selected)
 	}
 }
 
-/* the settings panel, centred: title, a row per line (the selected one on
-a bar), the hint at the bottom */
+/* the settings panel's tab bar (a first line that starts with a tab): the
+tabs' names with '|' between them, the shown one marked by a '*' before its
+name, drawn in a row with the shown one on a bar, and the shoulder buttons
+that change it at the ends */
+static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int count, unsigned int limit, float left,
+	float y, float width, const char *tabs)
+{
+	const float scale = 1.5f, character = 8.0f * scale;
+	char name[32];
+	float x = left + 16.0f;
+
+	count = overlay_text(vertices, count, limit, x, y, scale, 0xFF40FF40u, "L");
+	x += 2.0f * character;
+	while (*tabs)
+	{
+		size_t length = strcspn(tabs, "|");
+		int shown = *tabs == '*';
+		size_t name_length = length - (size_t)shown;
+
+		if (name_length > sizeof(name) - 1)
+			name_length = sizeof(name) - 1;
+		memcpy(name, tabs + shown, name_length);
+		name[name_length] = 0;
+		if (shown)
+			count = overlay_rect(vertices, count, x, y - 4.0f, (name_length + 2) * character, 8.0f * scale + 8.0f,
+				0xFF40B040u);
+		count = overlay_text(vertices, count, limit, x + character, y, scale, shown ? 0xFF000000u : 0xFFB0B0B0u, name);
+		x += (name_length + 2) * character;
+		tabs += length;
+		if (*tabs == '|')
+			tabs++;
+	}
+	count = overlay_text(vertices, count, limit, left + width - 16.0f - character, y, scale, 0xFF40FF40u, "R");
+	return count;
+}
+
+/* the settings panel, centred: title (or tab bar), a row per line (the
+selected one on a bar), the hint at the bottom */
 static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int count, unsigned int limit)
 {
 	const char *text = gxm.menu_text[__atomic_load_n(&gxm.menu_index, __ATOMIC_ACQUIRE)];
 	const char *lines[24];
 	int line_count = 0, index;
-	/* (wide enough for a 21-character label and a 16-character choice at
-	16 pixels a character: "Co-op campaign  < 343 Guilty Spark >") */
-	const float width = 680.0f;
+	/* (wide enough for the tab bar's six names at 12 pixels a character,
+	and a 21-character label with a 16-character choice at 16:
+	"Co-op campaign  < 343 Guilty Spark >") */
+	const float width = 800.0f;
 	float row_height = 24.0f;
 	float height, left, top;
 	char copy[2048];
@@ -3346,8 +3384,7 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	}
 	if (line_count < 2)
 		return count;
-	/* (the rows close up to fit the screen: the settings page has 22 lines
-	with the profile, display and multiplayer rows) */
+	/* (the rows close up to fit the screen when there are many) */
 	if (16.0f + row_height * line_count + 8.0f > DISPLAY_HEIGHT)
 		row_height = (DISPLAY_HEIGHT - 24.0f) / line_count;
 	height = 16.0f + row_height * line_count + 8.0f;
@@ -3360,10 +3397,21 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 		float y = top + 12.0f + row_height * index;
 		uint32_t color = index == 0 ? 0xFF40FF40u : index == line_count - 1 ? 0xFFA0A0A0u : 0xFFE0E0E0u;
 
+		if (index == 0 && lines[0][0] == '\t')
+		{
+			count = menu_tabs(vertices, count, limit, left, y, width, lines[0] + 1);
+			continue;
+		}
 		if (index == gxm.menu_selected)
 		{
 			count = overlay_rect(vertices, count, left + 6.0f, y - 4.0f, width - 12.0f, row_height, 0xFF305030u);
 			color = 0xFFFFFFFFu;
+		}
+		/* (a line that starts with '!': a warning, in amber) */
+		if (lines[index][0] == '!')
+		{
+			color = 0xFF40C0FFu;
+			lines[index]++;
 		}
 		count = overlay_text(vertices, count, limit, left + 16.0f, y, index == line_count - 1 ? 1.5f : 2.0f, color,
 			lines[index]);
@@ -3452,7 +3500,14 @@ static void overlay_draw(void)
 			count = overlay_rect(vertices, count, gxm.picture_left, bottom, gxm.picture_width, DISPLAY_HEIGHT - bottom,
 				0xFF000000u);
 	}
-	if (gxm.overlay_enabled)
+	if (gxm.overlay_enabled == 2)
+	{
+		/* (frames per second only: a small box) */
+		count = overlay_rect(vertices, count, DISPLAY_WIDTH - 118.0f, 6.0f, 112.0f, 26.0f, 0xA0000000u);
+		snprintf(text, sizeof(text), "FPS %3.0f", (double)gxm.overlay_fps);
+		count = overlay_text(vertices, count, limit, DISPLAY_WIDTH - 112.0f, 11.0f, scale, 0xFF40FF40u, text);
+	}
+	else if (gxm.overlay_enabled)
 	{
 		vita_host_cpu_usage(busy);
 		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 132.0f, 0xA0000000u);

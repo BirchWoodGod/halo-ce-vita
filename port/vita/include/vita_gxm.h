@@ -255,7 +255,9 @@ const char *vgxm_counts(void);
 /* the numbers the overlay shows (XV_FPS=1): frames per second, the game
 tick and render times in milliseconds */
 void vgxm_overlay_set(float fps, float tick_ms, float render_ms);
-/* the performance overlay on or off (the settings panel's switch) */
+/* the performance overlay: 0 off, 1 the full one (frames per second, tick
+and render times, the cores' load), 2 frames per second only (XV_FPS, the
+settings panel's switch) */
 void vgxm_overlay_enable(int enabled);
 /* the frame's scale to the display: 0 smooth (bilinear), 1 sharp
 (nearest); HALO_UPSCALE_FILTER at start-up */
@@ -264,8 +266,9 @@ void vgxm_upscale_filter_set(int filter);
 HALO_SCREENSHOT_DISPLAY=1) */
 const void *vgxm_display_pixels(unsigned long *pitch, unsigned long *width, unsigned long *height);
 /* the settings panel (vita_settings.c): text is its lines separated by
-'\n' (the first a title, the last a hint), selected the highlighted line;
-NULL hides it */
+'\n' (the first a title, or a tab bar when it starts with '\t': the tabs'
+names between '|', the shown one after a '*'; the last a hint; a line that
+starts with '!' is a warning), selected the highlighted line; NULL hides it */
 void vgxm_menu_set(const char *text, int selected);
 /* a system dialog (vita_net.c's network check) is up: the system draws it
 over each frame presented while active (host side only) */
