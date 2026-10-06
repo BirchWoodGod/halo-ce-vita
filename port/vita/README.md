@@ -345,7 +345,11 @@ says how it is made again after the Cg generators (`nv2a_psh_cg.c`,
 `nv2a_vsh_cg.c`) change: collect the sources with the gxm-null build
 (`HALO_SHADER_COLLECT`, `HALO_SHADER_TOUR`), compile them on Vita3K
 (`HALO_SHADER_PRECOMPILE`), pack them. A program the pack misses is compiled
-in the background on the device and kept in `shaders/`. After an update, another build's `shaders/` is renamed to
+in the background on the device and kept in `shaders/`. The VPK gets a copy
+of the pack stamped with the build's generator id (made again when that id
+changes; the build notes it when the pack in the tree was made for another
+generator: `vita_shader_pack.py --check` tells how many collected sources it
+still has). After an update, another build's `shaders/` is renamed to
 `shaders.old-<n>` at start-up and removed by a low-priority thread once the
 game is up, while it reads no files (`gxm: old shader cache clean-up` in the
 log; an interrupted one goes on at the next start).

@@ -21,6 +21,10 @@ mkdir -p "$out/sweep"
 python3 "$root/tools/vita_shader_pack.py" --sources "$out/collect" --programs "$out/collect/progs" --output "$out/tool.pak"
 "$out/test" check-pack "$out/tool.pak" "$out/collect"
 "$out/test" shipped "$root/port/vita/app0/shaders.pak"
+# (the build stamps the VPK's copy with its generator id; the tree's pack names the generator it was made for)
+echo "this tree's generator id: $(python3 "$root/tools/vita_shader_generator_id.py")"
+python3 "$root/tools/vita_shader_pack.py" --stamp "$root/port/vita/app0/shaders.pak" --output "$out/stamped.pak"
+"$out/test" shipped "$out/stamped.pak"
 if git -C "$root" cat-file -e 83206427:port/vita/app0/shaders.pak 2>/dev/null; then
 	git -C "$root" show 83206427:port/vita/app0/shaders.pak > "$out/old.pak"
 	"$out/test" reject "$out/old.pak"
