@@ -291,6 +291,8 @@ Useful ones:
 | `HALO_SHADER_PACK=0` | ignore the shipped shaders (`app0:shaders.pak`) |
 | `HALO_NET_PROFILE=1`, `HALO_NET_TRACE=1` | where a network game's frame goes; what its sockets do |
 | `HALO_NET_CATCH_UP_TICKS=n` | the most ticks a frame of a System Link or online game runs to catch up with real time (default 2; 30 = beta.1's pacing) |
+| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host's latest, so it plays at a slow host's pace (default 6; 0 = never) |
+| `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |
 
 ## Layout of port/vita
 
