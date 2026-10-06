@@ -4173,8 +4173,11 @@ static boolean player_profile_set_for_game_1wide(
 	if (player_profile_get(available_profiles[spinner_list->data3C.selected_index], &profile))
 	{
 		/* port: not a profile whose name the host's ban command could not
-		name (one made before names were checked: player_name_valid) */
-		if (!player_name_valid(profile.player_name, NUMBEROF(profile.player_name)))
+		name (one made before names were checked: player_name_valid). A
+		default profile has no name, and the Xbox game let it play: its
+		player goes by this machine's user's name in the game
+		(network_game_local_player_name) */
+		if (profile.player_name[0] && !player_name_valid(profile.player_name, NUMBEROF(profile.player_name)))
 		{
 			display_error_text_deferred(
 				L"Sorry, this profile's\r\nname can't be used in\r\nmultiplayer. Please\r\nrename the profile.",

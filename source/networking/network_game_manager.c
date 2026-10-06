@@ -272,12 +272,10 @@ void network_game_generate_local_machine_name(
 			struct player_profile profile;
 
 			player_ui_get_active_player_profile(joined_player_index, &profile);
-			if (profile.player_name[0])
-			{
-				ustrncpy(machine_name, profile.player_name, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH);
-				machine_name[MIN(MAXIMUM_PLAYER_PROFILE_NAME_LENGTH, 32) - 1] = 0;
+			/* (a default profile, without a name: the machine's user's,
+			network_game_local_player_name; without one, the nickname) */
+			if (network_game_local_player_name(profile.player_name, machine_name, MIN(MAXIMUM_PLAYER_PROFILE_NAME_LENGTH, 32)))
 				return;
-			}
 		}
 	}
 	find_handle = XFindFirstNicknameW(FALSE, machine_name, 32);

@@ -388,6 +388,7 @@ symbols in this file:
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
 #include "networking/network_game_protocol.h"
+#include "networking/network_game_ui.h"
 #include "networking/network_messages.h"
 #include "networking/network_server_manager.h"
 #include "text/unicode.h"
@@ -1614,8 +1615,9 @@ boolean network_game_client_add_player(
 
 	player.controller_index = (char)local_player_index;
 	player.machine_index = (char)client->machine_index;
-	ustrncpy(player.name, profile.player_name, NETWORK_PLAYER_NAME_LENGTH - 1);
-	player.name[NETWORK_PLAYER_NAME_LENGTH - 1] = 0;
+	/* port: a default profile's player (no name) goes by this machine's
+	user's name (network_game_local_player_name), not the empty one */
+	network_game_local_player_name(profile.player_name, player.name, NETWORK_PLAYER_NAME_LENGTH);
 	player.primary_color_index = profile.primary_color_index;
 	player.icon_index = NONE;
 	player.team_index = NONE;

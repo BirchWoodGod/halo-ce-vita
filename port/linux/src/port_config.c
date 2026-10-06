@@ -222,6 +222,10 @@ static const struct config_setting config_settings[] =
 	{ "network.lobby_name", _config_string, "\"\"", "HALO_NET_LOBBY_NAME", _environment_value, _platform_all,
 		"The name the public lobby shows for this machine's games; empty for\n"
 		"\"Halo\"." },
+	{ "network.player_name", _config_string, "\"\"", "HALO_NET_PLAYER_NAME", _environment_value, _platform_all,
+		"The name a player goes by in network games when their profile has none\n"
+		"(the default profiles); the Vita's user name on the Vita; empty for\n"
+		"\"Player\". A profile's own name always comes first." },
 	{ "discord.application_id", _config_string, "\"1553978809840050229\"", "HALO_DISCORD_APPLICATION",
 		_environment_value, _platform_desktop,
 		"The Discord application internet play invites go through while the\n"
