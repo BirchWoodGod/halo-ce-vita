@@ -2116,6 +2116,13 @@ static boolean pause_game_restart_at_checkpoint(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+#ifdef HALO_LINUX
+	{
+		void platform_log(const char *format, ...);
+
+		platform_log("pause menu: restart at checkpoint");
+	}
+#endif
 	main_revert_map();
 	return TRUE;
 }
@@ -2125,6 +2132,13 @@ static boolean pause_game_restart_level(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+#ifdef HALO_LINUX
+	{
+		void platform_log(const char *format, ...);
+
+		platform_log("pause menu: restart level");
+	}
+#endif
 	main_reset_map();
 	return TRUE;
 }

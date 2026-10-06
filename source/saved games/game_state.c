@@ -179,6 +179,14 @@ void platform_log(const char *format, ...);
 #endif
 
 #ifdef HALO_LINUX
+/* (port) which checkpoint a revert loads, in the log: the Xbox said
+nothing, and "a death sent me back to the start of the level" (GitHub #10)
+left no trace of whether a checkpoint was there to load */
+static long game_state_checkpoint_tick = NONE;
+static unsigned long game_state_revert_log_lines;
+#endif
+
+#ifdef HALO_LINUX
 /* the memory the game state occupies so far (render_epoch.c: only its
 data arrays take part in the epoch; caches outside it are locked instead) */
 void halo_game_state_range(void **base, unsigned long *size)
@@ -338,6 +346,10 @@ void game_state_initialize_for_new_map(
 	game_state_globals.locked = TRUE;
 	game_state_globals.saved_game_valid = FALSE;
 	game_state_globals.revert_time = NONE;
+#ifdef HALO_LINUX
+	game_state_checkpoint_tick = NONE;
+	game_state_revert_log_lines = 0;
+#endif
 
 	memset(game_state_globals.header, 0, sizeof(*game_state_globals.header));
 
@@ -370,6 +382,7 @@ void game_state_save(
 		unsigned long long started = halo_load_profile_now();
 
 		game_state_globals.saved_game_valid = (game_state_write_to_file()!=FALSE);
+		game_state_checkpoint_tick = game_state_globals.saved_game_valid ? (long)game_time_get() : NONE;
 		halo_load_profile_add(_halo_load_game_state_save, started, GAME_STATE_SIZE);
 	}
 #else
@@ -385,6 +398,10 @@ void game_state_revert(
 {
 	if (!game_state_globals.saved_game_valid && !recover_saved_games_hack)
 	{
+#ifdef HALO_LINUX
+		platform_log("game state: no checkpoint to revert to at tick %ld: the level starts over",
+			game_in_progress() ? (long)game_time_get() : 0L);
+#endif
 		main_reset_map();
 
 		return;
@@ -401,6 +418,9 @@ void game_state_revert(
 		after_load_started = halo_load_profile_now();
 		game_state_call_after_load_procs();
 		halo_load_profile_add(_halo_load_persistent_after_load, after_load_started, 0);
+		if (game_state_revert_log_lines++ < 160)
+			platform_log("game state: reverted to the checkpoint taken at tick %ld (now tick %ld)",
+				game_state_checkpoint_tick, (long)game_time_get());
 	}
 #else
 	game_state_call_before_load_procs();

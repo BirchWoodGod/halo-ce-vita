@@ -2979,6 +2979,9 @@ static void main_reset_map_private(
 		ui_widgets_disable_pause_game(30);
 
 		main_globals.reset_map = FALSE;
+#ifdef HALO_LINUX
+		platform_log("map reset: the level started over");
+#endif
 	}
 
 	return;
@@ -3973,6 +3976,10 @@ void main_loop(
 
 				if (!game_engine_running())
 				{
+#ifdef HALO_LINUX
+					if (!main_globals.reset_map)
+						platform_log("escape or end key: the map starts over");
+#endif
 					main_reset_map();
 				}
 			}
