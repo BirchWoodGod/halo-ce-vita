@@ -242,6 +242,12 @@ tick and render times in milliseconds */
 void vgxm_overlay_set(float fps, float tick_ms, float render_ms);
 /* the performance overlay on or off (the settings panel's switch) */
 void vgxm_overlay_enable(int enabled);
+/* the frame's scale to the display: 0 smooth (bilinear), 1 sharp
+(nearest); HALO_UPSCALE_FILTER at start-up */
+void vgxm_upscale_filter_set(int filter);
+/* (debug) the display buffer last presented, 960x544 (the screenshots'
+HALO_SCREENSHOT_DISPLAY=1) */
+const void *vgxm_display_pixels(unsigned long *pitch, unsigned long *width, unsigned long *height);
 /* the settings panel (vita_settings.c): text is its lines separated by
 '\n' (the first a title, the last a hint), selected the highlighted line;
 NULL hides it */
