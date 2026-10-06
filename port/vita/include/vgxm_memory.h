@@ -705,12 +705,22 @@ static int memory_census_line(char *text, unsigned long size, int part)
 	int length;
 
 	if (part == 0)
-		return snprintf(text, size, "parameter buffer %lu KB, display %lu KB, texture pool %lu KB, screen-sized targets "
+	{
+		long real = memory_os_free_kb(0);
+
+		length = snprintf(text, size, "parameter buffer %lu KB, display %lu KB, texture pool %lu KB, screen-sized targets "
 			"%lu KB, other targets %lu KB, small-target blocks %lu KB, block cache %lu KB, other %lu KB: %lu KB held, "
 			"%lu KB free", memory_parameter_bytes / 1024, memory_bytes[_memory_display] / 1024,
 			memory_bytes[_memory_pool] / 1024, memory_bytes[_memory_screen] / 1024, memory_bytes[_memory_target] / 1024,
 			memory_bytes[_memory_small] / 1024, memory_bytes[_memory_cache] / 1024, memory_bytes[_memory_other] / 1024,
 			(memory_parameter_bytes + memory_cdram_held()) / 1024, memory_cdram_free() / 1024);
+		/* (the hardware's figure: what CDRAM holds that this does not count
+		- GXM's own, the system's) */
+		if (real >= 0 && length > 0 && (unsigned long)length < size)
+			length += snprintf(text + length, size - length, "; %ld KB not counted here",
+				(long)(CDRAM_APPLICATION_BYTES / 1024) - (long)((memory_parameter_bytes + memory_cdram_held()) / 1024) - real);
+		return length;
+	}
 	for (index = 0; index < POOL_SEGMENTS; index++)
 	{
 		if (pool_segments[index].memory.base && pool_segments[index].user)
