@@ -744,6 +744,9 @@ void network_actors_host_tick(
 	for (index = 0; index < host_actor_count; index++)
 	{
 		struct host_actor *actor = &host_actors[index];
+		struct unit_datum *unit;
+		word control_flags;
+		boolean is_urgent, wanted;
 
 		if (!actor_unit_valid(actor->unit_index) ||
 			(!actor->noted && !TEST_FLAG(unit_get(actor->unit_index)->unit.flags, _unit_running_blindly_bit)))
@@ -751,12 +754,30 @@ void network_actors_host_tick(
 			host_actors[index--] = host_actors[--host_actor_count];
 			continue;
 		}
-		actor_state_from_unit(actor, &states[state_count]);
-		urgent[state_count] = states[state_count].impulse != NO_IMPULSE || states[state_count].speech_sound != NONE ||
-			states[state_count].user_animation_graph != NONE ||
-			(states[state_count].control_flags & ~actor->sent_control_flags & ONE_SHOT_CONTROL_FLAGS) != 0;
-		actor->sent_control_flags = states[state_count].control_flags;
-		state_count++;
+		/* (the entry is made only on a tick some client gets it: its
+		control flags, as actor_state_from_unit sends them, and whether it is
+		urgent are known first) */
+		unit = unit_get(actor->unit_index);
+		control_flags = unit->unit.persistent_control_timer > 0 ?
+			(word)(unit->unit.control_flags & (FLAG(NUMBER_OF_UNIT_CONTROL_FLAGS) - 1)) : actor->control.control_flags;
+		is_urgent = (actor->impulse != NONE && actor->impulse_sends > 0) ||
+			(actor->speech_sound != NONE && actor->speech_sends > 0) ||
+			(actor->user_animation_graph != NONE && actor->user_animation_sends > 0) ||
+			(control_flags & ~actor->sent_control_flags & ONE_SHOT_CONTROL_FLAGS) != 0;
+		wanted = is_urgent;
+		for (machine_number = 0; machine_number < machine_count && !wanted; machine_number++)
+		{
+			short period = network_objects_send_period(machine_indices[machine_number], &unit->object.position);
+
+			wanted = (now + (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(actor->unit_index)) % period == 0;
+		}
+		actor->sent_control_flags = control_flags;
+		if (wanted)
+		{
+			actor_state_from_unit(actor, &states[state_count]);
+			urgent[state_count] = is_urgent;
+			state_count++;
+		}
 		actor->noted = FALSE;
 		if (actor->impulse_sends > 0)
 			actor->impulse_sends--;
@@ -776,7 +797,7 @@ void network_actors_host_tick(
 			struct distributed_actor_state const *state = &states[index];
 			short period = network_objects_send_period(machine_index, &state->position);
 
-			if (!urgent[index] && (now + DATUM_INDEX_TO_ABSOLUTE_INDEX(state->unit_index)) % period != 0)
+			if (!urgent[index] && (now + (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(state->unit_index)) % period != 0)
 				continue;
 			message.states[count++] = *state;
 			if (count == MAXIMUM_ENTRIES_PER_MESSAGE || count == DATAGRAM_ENTRIES(struct distributed_actor_state))
