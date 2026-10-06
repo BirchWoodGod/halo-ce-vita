@@ -156,6 +156,17 @@ static void pad_script_apply(struct vita_host_pad *pad, unsigned long long now)
 	}
 }
 
+/* when the player last touched a button or moved a stick (process time,
+us): the heartbeat stops telling the system the Vita is in use a while after
+it, so an untouched Vita dims and sleeps as its settings say (an OLED screen
+left on the pause menu would otherwise show the HUD for hours) */
+volatile unsigned long long vita_host_last_input_us;
+
+static int stick_moved(unsigned char value)
+{
+	return value < 128 - 32 || value > 128 + 32;
+}
+
 void vita_host_pad_read(struct vita_host_pad *pad)
 {
 	static int started;
@@ -177,6 +188,9 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 	pad->ry = data.ry;
 
 	now = sceKernelGetProcessTimeWide();
+	if (data.buttons || stick_moved(data.lx) || stick_moved(data.ly) || stick_moved(data.rx) || stick_moved(data.ry) ||
+		!vita_host_last_input_us)
+		vita_host_last_input_us = now;
 	pad_script_poll(now);
 	pad_script_apply(pad, now);
 }

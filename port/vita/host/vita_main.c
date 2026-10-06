@@ -555,8 +555,24 @@ static void heartbeat_thread(void *unused)
 		sceKernelDelayThread(2000000);
 		/* the game is played with the sticks and buttons, which the system
 		counts as activity, but a cinematic or a long load is not: without
-		this the Vita dims and goes to sleep in the middle of one */
-		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+		this the Vita dims and goes to sleep in the middle of one. Only for
+		HALO_IDLE_MINUTES (default 5) after the last input, though: an
+		untouched Vita then dims and sleeps as its settings say, instead of
+		showing the HUD for hours (OLED burn-in). 0 keeps it awake always. */
+		{
+			extern volatile unsigned long long vita_host_last_input_us;
+			static long idle_minutes = -1;
+			unsigned long long now = sceKernelGetProcessTimeWide();
+
+			if (idle_minutes < 0)
+			{
+				const char *setting = getenv("HALO_IDLE_MINUTES");
+
+				idle_minutes = setting ? atol(setting) : 5;
+			}
+			if (!idle_minutes || now - vita_host_last_input_us < (unsigned long long)idle_minutes * 60000000ULL)
+				sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+		}
 		if (!write_beats)
 			continue;
 		file = sceIoOpen(VITA_DATA_DIRECTORY "/heartbeat.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
