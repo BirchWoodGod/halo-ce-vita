@@ -1531,11 +1531,27 @@ static void client_watch_host_from_behind(
 	}
 	*position = coop_presentation.watching_host_position;
 	*forward = coop_presentation.watching_host_forward;
-	/* keep the camera upright */
-	up->i = 0.0f;
-	up->j = 0.0f;
-	up->k = 1.0f;
-	distributed_axes_make_valid(forward, up);
+	/* Keep the camera upright: the world's up, made square to forward. (Left
+	the world's up, the scripted camera halted on the pair, "Invalid camera
+	command", when the host looked up or down: distributed_axes_make_valid
+	leaves axes further than a little from square as they are. b30's client
+	crashed so when both players were dead.) */
+	up->i = -forward->k * forward->i;
+	up->j = -forward->k * forward->j;
+	up->k = 1.0f - forward->k * forward->k;
+	if (normalize3d(up) == 0.0f)
+	{
+		/* (looking straight up or down: level ahead is up) */
+		up->i = level.i;
+		up->j = level.j;
+		up->k = 0.0f;
+		if (normalize3d(up) == 0.0f)
+		{
+			up->i = 1.0f;
+			up->j = 0.0f;
+			up->k = 0.0f;
+		}
+	}
 }
 
 /* client: looks through the host's camera, or with its own */
@@ -3034,9 +3050,12 @@ static void client_presentation_apply(
 		{
 			if (!(coop_presentation.cinematic_started && presentation->camera_scripted))
 				client_watch_host_from_behind(&position, &forward, &up);
-			scripted_camera_set_camera_point_relative(&position, &forward, &up,
-				PIN((real)presentation->camera_field_of_view / FIELD_OF_VIEW_SCALE, CAMERA_MINIMUM_FIELD_OF_VIEW,
-					CAMERA_MAXIMUM_FIELD_OF_VIEW), 0, NONE);
+			if (distributed_point_valid(&position, CAMERA_WORLD_BOUND) && distributed_axes_make_valid(&forward, &up))
+			{
+				scripted_camera_set_camera_point_relative(&position, &forward, &up,
+					PIN((real)presentation->camera_field_of_view / FIELD_OF_VIEW_SCALE, CAMERA_MINIMUM_FIELD_OF_VIEW,
+						CAMERA_MAXIMUM_FIELD_OF_VIEW), 0, NONE);
+			}
 		}
 	}
 	else
