@@ -175,9 +175,11 @@ line, left and right change it, Cross does what a line marked `>` says,
 Circle closes the panel. Changes apply at once, render resolution and
 aspect ratio included (the picture pauses for a moment while the screen is
 set up again), except the rows marked `*` (sound voices, the network, most
-dev switches), which apply after a restart; the panel says so. If the
-memory for a bigger resolution cannot be found at that moment, the panel
-says the change waits for a restart. Settings are kept in
+dev switches), which apply after a restart; the panel says so. A bigger
+resolution makes room in video memory first (unused copies of the screen
+and part of the texture cache move out, and the textures in it load again);
+only if it still does not fit does the panel say the change waits for a
+restart. Settings are kept in
 `ux0:data/haloce-vita/settings.txt` (a file from an older version loads as
 it is).
 

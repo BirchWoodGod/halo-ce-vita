@@ -1384,6 +1384,28 @@ void vita_texture_cache_begin_frame(void)
 	}
 }
 
+unsigned long vita_texture_cache_forget(const void *base, unsigned long size)
+{
+	unsigned long bucket, count = 0;
+	struct texture_entry *entry;
+
+	if (!size)
+		return 0;
+	for (bucket = 0; bucket < TEXTURE_BUCKET_COUNT; bucket++)
+		for (entry = texture_buckets[bucket]; entry; entry = entry->next)
+			if (entry->memory && (const unsigned char *)entry->memory >= (const unsigned char *)base &&
+				(const unsigned char *)entry->memory < (const unsigned char *)base + size)
+			{
+				/* (another pool generation's: decoded again, never into
+				this memory - pool_reuse) */
+				entry->pool_serial = 0;
+				entry->memory = NULL;
+				entry->memory_size = 0;
+				count++;
+			}
+	return count;
+}
+
 /* ---------- Custom Edition channel orders
 
 A Halo Custom Edition map keeps a model shader's multipurpose masks and a

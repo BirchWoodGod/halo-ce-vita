@@ -110,5 +110,9 @@ receives what it is. NULL when the format is not handled. */
 const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLOR *palette,
 	struct xgpu_texture_description *description);
 void vita_texture_cache_begin_frame(void);
+/* forgets the textures decoded into size bytes at base (a texture pool
+segment moved between CDRAM and user RAM: vgxm_pool_demote/promote), each
+decoded again when next used; with the render worker idle. The count */
+unsigned long vita_texture_cache_forget(const void *base, unsigned long size);
 
 #endif

@@ -188,7 +188,7 @@ is on, and off, `env.txt`'s value (or the default) applies. While any is on,
 | --- | --- | --- |
 | Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go, in `halo.log` |
 | Crash dump on hang | `HALO_HANG_CRASH=1` | a hang of 8 s (no frame presented) crashes on purpose, for a crash dump |
-| FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load |
+| FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load, render scale, GPU time, free video memory (VRAM; yellow while part of the texture cache is in main memory) |
 | GPU W clamp * | `HALO_GXM_WCLAMP=0` | A/B: models close to the camera dropping out (issue #9) |
 | Target mip minimum * | `HALO_TARGET_CHAIN_MIN_SIZE` | A/B: the smallest mip level of render targets (32, 16 or 8 pixels) |
 | Frame phase lock * | `HALO_FRAME_PHASE_LOCK=0` | A/B: 30 FPS frames kept between two ticks (Off: a fixed period) |
