@@ -365,17 +365,32 @@ void halo_epoch_datum_created(struct data_array *data, long absolute_index)
 int halo_epoch_datum_hidden_from_caller(const struct data_array *data, long absolute_index)
 {
 	int state;
+	int mutator;
 
 	/* the caller has just read the datum's identifier: the marks are read
-	after it (datum_new marks a new datum before writing its identifier) */
+	after it (datum_new marks a new datum before writing its identifier).
+	Only a reader needs the fence: during the epoch the tick is the only
+	writer of identifiers and marks (mark() and the creations it marks are
+	the mutator's; the sweeps run at the join, before the next epoch's
+	start orders them for the tick), so the tick reads what it wrote
+	itself, in its own order. The tick's walks over its arrays (~2000
+	headers a tick in objects_update alone) paid a dmb each on the Vita. */
 	if (halo_epoch_active)
-		__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	{
+		mutator = halo_epoch_on_mutator();
+		if (!mutator)
+			__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	}
+	else
+		mutator = -1;
 	if (!MARK_FLAG(data))
 		return 0;
 	state = halo_epoch_datum_state(data, absolute_index);
 	if (state == _halo_epoch_datum_live)
 		return 0;
-	return halo_epoch_on_mutator() ? state == _halo_epoch_datum_tombstoned : state == _halo_epoch_datum_created;
+	if (mutator < 0)
+		mutator = halo_epoch_on_mutator();
+	return mutator ? state == _halo_epoch_datum_tombstoned : state == _halo_epoch_datum_created;
 }
 
 /* A datum the render thread creates or deletes in the game state while a
