@@ -87,6 +87,24 @@ void render_model(
 	short forced_shader_permutation_index,
 	unsigned long flags);
 
+#ifdef HALO_LINUX
+/* (port) a model's transparent parts (energy shields and domes, glass,
+visors), bits by number: _model_transparency_any_bit if any detail level of
+any permutation has one; _model_transparency_lost_bit if a lower detail
+level of a permutation has fewer than its highest (a lowered level of detail
+could drop a visor or a canopy); _model_transparency_every_distance_bit if
+it has one and no detail levels (every cutoff 0: drawn whole at any distance
+on the Xbox, such as the Covenant field generator's dome) */
+enum
+{
+	_model_transparency_any_bit,
+	_model_transparency_lost_bit,
+	_model_transparency_every_distance_bit
+};
+unsigned long model_transparency_flags(
+	long model_index);
+#endif
+
 /* ---------- globals */
 
 /* ---------- public code */
