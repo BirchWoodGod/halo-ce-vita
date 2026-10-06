@@ -14,15 +14,18 @@ whose parameters are 32-bit scalars and pointers. See port/vita/README.md.
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .ninja_syntax import Writer
+from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
 from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, musl_math_sources,
                           MUSL_MATH_DIR, ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
 
 LINUX_DIR = Path("port/linux")
 VITA_DIR = Path("port/vita")
 BUILD = Path("build/vita")
+# what tools/vita_shader_generator_id.py hashes
+SHADER_GENERATOR_SOURCES = [Path(name) for name in SHADER_GENERATOR_NAMES]
 
 TITLE_ID = "HCEV00001"
 TITLE = "Halo CE"
@@ -200,10 +203,10 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     clang_objects: List[Path] = []
     implicit = [*xdk_headers(), prefix_header, semantics_header, platform_semantics_header]
 
-    def add(source: Path, rule: str, cflags: str) -> None:
+    def add(source: Path, rule: str, cflags: str, extra: Optional[List[Path]] = None) -> None:
         obj = obj_dir / source.with_suffix(".o")
         (clang_objects if rule == "vita_cc" and lto else objects).append(obj)
-        n.build(outputs=obj, rule=rule, inputs=source, implicit=implicit if rule == "vita_cc" else [],
+        n.build(outputs=obj, rule=rule, inputs=source, implicit=(implicit if rule == "vita_cc" else []) + (extra or []),
                 variables={"cflags": cflags})
 
     # the game
@@ -257,10 +260,18 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         add(source, "vita_cc", " ".join([abi, "-std=gnu11", "-w", f"-I{MUSL_MATH_DIR}/include",
                                           f"-include {MUSL_MATH_DIR}/include/libm.h"]))
 
+    # the shader generator id (vita_gxm.c's shader cache): a hash of the sources that write the Cg
+    generator_header = BUILD / "gen" / "vita_shader_generator_id.h"
+    n.rule(name="vita_shader_generator_id",
+           command="python3 tools/vita_shader_generator_id.py --header $out",
+           description="VITA SHADER GENERATOR ID $out", restat=True)
+    n.build(outputs=generator_header, rule="vita_shader_generator_id",
+            implicit=[Path("tools/vita_shader_generator_id.py"), *SHADER_GENERATOR_SOURCES])
+
     # the Vita side, with the SDK's ABI
-    host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}"])
+    host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}", f"-I{generator_header.parent}"])
     for source in sorted((VITA_DIR / "host").glob("*.c")):
-        add(source, "vita_host_cc", host_cflags)
+        add(source, "vita_host_cc", host_cflags, [generator_header] if source.name == "vita_gxm.c" else None)
     # the files half of the Linux host boundary works as it is on newlib
     add(LINUX_DIR / "src" / "posix_files.c", "vita_host_cc", host_cflags + " -D_GNU_SOURCE")
 

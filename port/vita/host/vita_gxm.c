@@ -43,6 +43,8 @@ each frame's presentation.
 
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "vita_shader_cache.h"
+#include "vita_shader_generator_id.h"
 #include "overlay_font.h"
 
 #define DISPLAY_WIDTH 960
@@ -278,6 +280,8 @@ static struct
 } gxm;
 
 static void shader_precompile(void);
+static void shader_ids_make(void);
+static void shader_cache_check(void);
 
 /* ---------- start-up */
 
@@ -546,7 +550,8 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 		memset(gxm.visibility.base, 0, gxm.visibility.size);
 	gxm.visibility_bound = -1;
 
-	sceIoMkdir(SHADER_DIRECTORY, 0777);
+	shader_ids_make();
+	shader_cache_check();
 	gxm.clear_vertex = vgxm_shader_get(clear_vertex_source, 0);
 	gxm.clear_fragment = vgxm_shader_get(clear_fragment_source, 1);
 	gxm.blit_vertex = vgxm_shader_get(blit_vertex_source, 0);
@@ -701,6 +706,31 @@ static int shacccg_start(void)
 	return 0;
 }
 
+/* what the compiler is told besides the source: compile() takes it from
+here, and its text is hashed into the compile id (vita_shader_cache.h), so
+a program cached or shipped with other settings is never used */
+static const struct
+{
+	int optimization_level, warning_level, locale;
+	const char *main_file, *entry;
+} shader_compile_settings = { 3, 1, SCE_SHACCCG_ENGLISH, "halo.cg", "main" };
+
+static struct vshc_ids shader_ids;
+
+static void shader_ids_make(void)
+{
+	char settings[160];
+
+	snprintf(settings, sizeof(settings), "shacc profiles %d/%d optimization %d warnings %d locale %d file %s entry %s",
+		(int)SCE_SHACCCG_PROFILE_VP, (int)SCE_SHACCCG_PROFILE_FP, shader_compile_settings.optimization_level,
+		shader_compile_settings.warning_level, shader_compile_settings.locale, shader_compile_settings.main_file,
+		shader_compile_settings.entry);
+	shader_ids.compile_id = vshc_compile_id(settings);
+	shader_ids.generator_id = VSHC_GENERATOR_ID;
+	log_line("gxm: shader ids: compile %016llx, generator %016llx", (unsigned long long)shader_ids.compile_id,
+		(unsigned long long)shader_ids.generator_id);
+}
+
 /* a malloc'd GXP program for the source, or NULL */
 static SceGxmProgram *compile(const char *source, int fragment)
 {
@@ -712,13 +742,13 @@ static SceGxmProgram *compile(const char *source, int fragment)
 	if (!shacccg_start())
 		return NULL;
 	sceShaccCgInitializeCompileOptions(&options);
-	options.mainSourceFile = "halo.cg";
+	options.mainSourceFile = shader_compile_settings.main_file;
 	options.targetProfile = fragment ? SCE_SHACCCG_PROFILE_FP : SCE_SHACCCG_PROFILE_VP;
-	options.entryFunctionName = "main";
-	options.locale = SCE_SHACCCG_ENGLISH;
-	options.optimizationLevel = 3;
-	options.warningLevel = 1;
-	shacccg_source.fileName = "halo.cg";
+	options.entryFunctionName = shader_compile_settings.entry;
+	options.locale = shader_compile_settings.locale;
+	options.optimizationLevel = shader_compile_settings.optimization_level;
+	options.warningLevel = shader_compile_settings.warning_level;
+	shacccg_source.fileName = shader_compile_settings.main_file;
 	shacccg_source.text = source;
 	shacccg_source.size = strlen(source);
 	output = sceShaccCgCompileProgram(&options, &shacccg_callbacks, 0);
@@ -760,46 +790,138 @@ static SceGxmProgram *compile(const char *source, int fragment)
 	return program;
 }
 
-static uint64_t source_hash(const char *source, int fragment)
-{
-	uint64_t hash = 14695981039346656037ULL ^ (uint64_t)fragment;
+#define source_hash vshc_source_hash
 
-	while (*source)
-		hash = (hash ^ (unsigned char)*source++) * 1099511628211ULL;
-	return hash;
-}
-
+/* the cached program for the hash (malloc'd), or NULL. A file is used only
+if its header (vita_shader_cache.h) says it is this build's program for
+that very Cg and its bytes are the ones written: a file cut short (the
+process killed while writing it), damaged, written by another build or not
+a program, registered, can hang the patcher or the GPU or draw nothing (a
+black screen, issue #28) at every run - so it is removed and compiled again */
 static SceGxmProgram *cache_read(uint64_t hash)
 {
 	char path[128];
 	SceUID file;
 	SceIoStat stat;
-	SceGxmProgram *program;
+	SceGxmProgram *program = NULL;
+	unsigned char header[VSHC_HEADER_SIZE];
+	uint32_t size = 0;
+	enum vshc_result result;
 
 	snprintf(path, sizeof(path), SHADER_DIRECTORY "/%016llx.gxp", (unsigned long long)hash);
 	if (sceIoGetstat(path, &stat) < 0 || stat.st_size <= 0)
 		return NULL;
-	program = malloc((size_t)stat.st_size);
 	file = sceIoOpen(path, SCE_O_RDONLY, 0);
-	if (file < 0 || sceIoRead(file, program, (SceSize)stat.st_size) != (int)stat.st_size)
-	{
-		if (file >= 0)
-			sceIoClose(file);
-		free(program);
+	if (file < 0)
 		return NULL;
+	if (stat.st_size < VSHC_HEADER_SIZE || sceIoRead(file, header, VSHC_HEADER_SIZE) != VSHC_HEADER_SIZE)
+		result = VSHC_SHORT;
+	else if ((result = vshc_header_check(header, (size_t)stat.st_size, &shader_ids, hash, &size)) == VSHC_OK)
+	{
+		program = memalign(16, size);
+		if (!program)
+		{
+			sceIoClose(file);
+			return NULL;
+		}
+		if (sceIoRead(file, program, size) != (int)size)
+			result = VSHC_SHORT;
+		else if ((result = vshc_program_check(header, program, size)) == VSHC_OK &&
+			(sceGxmProgramCheck(program) < 0 || sceGxmProgramGetSize(program) != size))
+			result = VSHC_NOT_PROGRAM;
 	}
 	sceIoClose(file);
-	/* a file cut short (the process killed while writing it) or otherwise
-	not a program: registered, it hangs the patcher or the GPU at the
-	next map load, every run - so it is dropped and compiled again */
-	if (sceGxmProgramCheck(program) < 0 || sceGxmProgramGetSize(program) != (unsigned int)stat.st_size)
+	if (result != VSHC_OK)
 	{
-		log_line("gxm: shader cache %016llx invalid (%ld bytes), removed", (unsigned long long)hash, (long)stat.st_size);
+		log_line("gxm: shader cache %016llx %s (%ld bytes), removed", (unsigned long long)hash,
+			vshc_result_name(result), (long)stat.st_size);
 		free(program);
 		sceIoRemove(path);
 		return NULL;
 	}
 	return program;
+}
+
+/* At start-up: the memory card's cache is this build's, or it is emptied.
+The id file there names the compile and generator ids of the build that
+wrote the cache; when they are not this build's (an update, or a cache from
+before the ids), every file the cache writes (<hash>.gxp, .tmp) is
+removed - nothing else in the folder, nor outside it - and the id file
+written again. Each file's own header is checked when it is read as well
+(cache_read), so a file this misses is still never used. */
+static void shader_cache_check(void)
+{
+	static const char id_path[] = SHADER_DIRECTORY "/" VSHC_ID_FILE_NAME;
+	char contents[64], text[64], old_ids[64];
+	SceUID file, listing;
+	SceIoDirent entry;
+	int length = 0;
+	char (*names)[32] = NULL;
+	unsigned long count = 0, capacity = 0, removed = 0, index;
+
+	sceIoMkdir(SHADER_DIRECTORY, 0777);
+	if ((file = sceIoOpen(id_path, SCE_O_RDONLY, 0)) >= 0)
+	{
+		length = sceIoRead(file, contents, sizeof(contents) - 1);
+		sceIoClose(file);
+		if (length < 0)
+			length = 0;
+	}
+	if (vshc_id_matches(contents, (size_t)length, &shader_ids))
+		return;
+	/* (the names first, then the removals: a directory changed while it is
+	listed can skip entries) */
+	if ((listing = sceIoDopen(SHADER_DIRECTORY)) >= 0)
+	{
+		while (sceIoDread(listing, &entry) > 0)
+		{
+			if (!vshc_cache_file_name(entry.d_name) || strlen(entry.d_name) >= sizeof(names[0]))
+				continue;
+			if (count == capacity)
+			{
+				char (*grown)[32] = realloc(names, (capacity ? capacity * 2 : 256) * sizeof(names[0]));
+
+				if (!grown)
+					break;
+				names = grown;
+				capacity = capacity ? capacity * 2 : 256;
+			}
+			strcpy(names[count++], entry.d_name);
+		}
+		sceIoDclose(listing);
+	}
+	for (index = 0; index < count; index++)
+	{
+		char path[96];
+
+		snprintf(path, sizeof(path), SHADER_DIRECTORY "/%s", names[index]);
+		if (sceIoRemove(path) >= 0 && strcmp(names[index], VSHC_ID_FILE_NAME))
+			removed++;
+	}
+	free(names);
+	if (length > 0 || removed)
+	{
+		contents[length] = 0;
+		snprintf(old_ids, sizeof(old_ids), "%.*s", (int)strcspn(contents, "\r\n"), contents);
+		log_line("gxm: shader cache made by another build (%s; this build %016llx %016llx): %lu old programs removed",
+			length > 0 ? old_ids : "no id file", (unsigned long long)shader_ids.compile_id,
+			(unsigned long long)shader_ids.generator_id, removed);
+	}
+	vshc_id_text(text, sizeof(text), &shader_ids);
+	if ((file = sceIoOpen(SHADER_DIRECTORY "/" VSHC_ID_FILE_NAME ".tmp", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC,
+		0666)) >= 0)
+	{
+		int written = sceIoWrite(file, text, strlen(text));
+
+		sceIoClose(file);
+		if (written == (int)strlen(text))
+		{
+			sceIoRemove(id_path);
+			sceIoRename(SHADER_DIRECTORY "/" VSHC_ID_FILE_NAME ".tmp", id_path);
+		}
+		else
+			sceIoRemove(SHADER_DIRECTORY "/" VSHC_ID_FILE_NAME ".tmp");
+	}
 }
 
 volatile unsigned long long vgxm_cache_write_us;
@@ -819,16 +941,19 @@ static void cache_write(uint64_t hash, const SceGxmProgram *program)
 static void cache_write_file(uint64_t hash, const SceGxmProgram *program)
 {
 	char path[128], temporary[128];
+	unsigned char header[VSHC_HEADER_SIZE];
+	uint32_t size = sceGxmProgramGetSize(program);
 	SceUID file;
 
 	/* written under another name and renamed into place, so a reader
 	never sees a partial file */
 	snprintf(path, sizeof(path), SHADER_DIRECTORY "/%016llx.gxp", (unsigned long long)hash);
 	snprintf(temporary, sizeof(temporary), SHADER_DIRECTORY "/%016llx.tmp", (unsigned long long)hash);
+	vshc_header_make(header, &shader_ids, hash, program, size);
 	file = sceIoOpen(temporary, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
 	if (file < 0)
 		return;
-	if (sceIoWrite(file, program, sceGxmProgramGetSize(program)) != (int)sceGxmProgramGetSize(program))
+	if (sceIoWrite(file, header, VSHC_HEADER_SIZE) != VSHC_HEADER_SIZE || sceIoWrite(file, program, size) != (int)size)
 	{
 		sceIoClose(file);
 		sceIoRemove(temporary);
@@ -854,22 +979,17 @@ The programs the campaign levels and the menu make (265 in the pack of Oct 2
 the same SceShaccCg (tools/vita_shader_pack.py, from the sources the Linux
 gxm-null harness collects with HALO_SHADER_COLLECT), so a first visit to an
 area compiles nothing on the device. One file in the VPK, read whole at
-start-up (it is small): "HCEVSHP1", the count, then per program its source
-hash, offset and size, sorted by hash, then the programs (16-byte aligned).
-HALO_SHADER_PACK=0 leaves it unread. */
+start-up (it is small; the format: vita_shader_cache.h). A pack whose
+compile id is not this build's (made with other compiler settings, or an
+older format: a pack from another build put beside this eboot) is not used,
+nor a program whose bytes fail its checksum. HALO_SHADER_PACK=0 leaves it
+unread. */
 #define SHADER_PACK_PATH "app0:shaders.pak"
-
-struct shader_pack_entry
-{
-	uint64_t hash;
-	uint32_t offset, size;
-};
 
 static struct
 {
 	unsigned char *data;
-	const struct shader_pack_entry *entries;
-	unsigned int count;
+	struct vshp_pack pack;
 	unsigned long size;
 	int opened;
 } shader_pack;
@@ -879,7 +999,7 @@ static void shader_pack_open(void)
 	SceUID file;
 	SceIoStat stat;
 	const char *setting = getenv("HALO_SHADER_PACK");
-	unsigned int index;
+	enum vshc_result result;
 
 	if (shader_pack.opened)
 		return;
@@ -895,58 +1015,38 @@ static void shader_pack_open(void)
 	if (!shader_pack.data)
 		return;
 	file = sceIoOpen(SHADER_PACK_PATH, SCE_O_RDONLY, 0);
-	if (file < 0 || sceIoRead(file, shader_pack.data, (SceSize)stat.st_size) != (int)stat.st_size ||
-		memcmp(shader_pack.data, "HCEVSHP1", 8))
+	if (file < 0 || sceIoRead(file, shader_pack.data, (SceSize)stat.st_size) != (int)stat.st_size)
+		result = VSHC_SHORT;
+	else
+		result = vshp_open(&shader_pack.pack, shader_pack.data, (size_t)stat.st_size, shader_ids.compile_id);
+	if (file >= 0)
+		sceIoClose(file);
+	if (result != VSHC_OK)
 	{
-		if (file >= 0)
-			sceIoClose(file);
-		log_line("gxm: the shipped shaders (%s) are unreadable", SHADER_PACK_PATH);
+		log_line("gxm: the shipped shaders (%s) are %s: not used (this build's compile id %016llx)", SHADER_PACK_PATH,
+			vshc_result_name(result), (unsigned long long)shader_ids.compile_id);
 		free(shader_pack.data);
 		shader_pack.data = NULL;
 		return;
 	}
-	sceIoClose(file);
 	shader_pack.size = (unsigned long)stat.st_size;
-	memcpy(&shader_pack.count, shader_pack.data + 8, 4);
-	if (16 + (unsigned long long)shader_pack.count * sizeof(struct shader_pack_entry) > (unsigned long long)stat.st_size)
-		shader_pack.count = 0;
-	shader_pack.entries = (const struct shader_pack_entry *)(shader_pack.data + 16);
-	for (index = 0; index < shader_pack.count; index++)
-	{
-		if ((unsigned long long)shader_pack.entries[index].offset + shader_pack.entries[index].size >
-			(unsigned long long)stat.st_size)
-		{
-			shader_pack.count = index;
-			break;
-		}
-	}
-	log_line("gxm: %u shipped shaders (%ld KB)", shader_pack.count, (long)(stat.st_size / 1024));
+	log_line("gxm: %u shipped shaders (%ld KB)%s", shader_pack.pack.count, (long)(stat.st_size / 1024),
+		shader_pack.pack.generator_id == shader_ids.generator_id ? "" :
+			", made for an earlier Cg generator (programs still matched by their Cg)");
 }
 
 /* the shipped program for the hash (in the pack's memory, kept for good), or NULL */
 static SceGxmProgram *shader_pack_find(uint64_t hash)
 {
-	unsigned int low = 0, high = shader_pack.count;
+	SceGxmProgram *program;
+	uint32_t size;
 
-	while (low < high)
-	{
-		unsigned int middle = low + (high - low) / 2;
-		const struct shader_pack_entry *entry = &shader_pack.entries[middle];
-
-		if (entry->hash < hash)
-			low = middle + 1;
-		else if (entry->hash > hash)
-			high = middle;
-		else
-		{
-			SceGxmProgram *program = (SceGxmProgram *)(shader_pack.data + entry->offset);
-
-			if (sceGxmProgramCheck(program) < 0 || sceGxmProgramGetSize(program) != entry->size)
-				return NULL;
-			return program;
-		}
-	}
-	return NULL;
+	if (!shader_pack.data)
+		return NULL;
+	program = (SceGxmProgram *)vshp_find(&shader_pack.pack, hash, &size);
+	if (program && (sceGxmProgramCheck(program) < 0 || sceGxmProgramGetSize(program) != size))
+		program = NULL;
+	return program;
 }
 
 static int shader_pack_owns(const SceGxmProgram *program)
