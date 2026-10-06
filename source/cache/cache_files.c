@@ -142,6 +142,8 @@ int halo_epoch_on_mutator(void);
 #include "sound/sound_manager.h"
 #ifdef HALO_LINUX
 #include "load_profile.h"
+#include "custom_edition_cache.h"
+#include "custom_edition_maps.h"
 #endif
 
 /* ---------- constants */
@@ -352,7 +354,20 @@ void scenario_tags_unload(
 	sound_cache_close();
 	texture_cache_close();
 	cache_file_close();
+#ifdef HALO_LINUX
+	/* a Halo Custom Edition map has no Xbox vertex or index buffers
+	(port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_tags_loaded())
+	{
+		custom_edition_cache_tags_unload();
+	}
+	else
+	{
+		tags_header_deregister_vertex_and_index_buffers(cache_file_globals.tag_header);
+	}
+#else
 	tags_header_deregister_vertex_and_index_buffers(cache_file_globals.tag_header);
+#endif
 	cache_file_globals.tags_loaded = FALSE;
 	global_tag_instances = NULL;
 
@@ -624,6 +639,15 @@ boolean cache_file_header_verify(
 	char const *scenario_name,
 	boolean fatal)
 {
+#ifdef HALO_LINUX
+	/* the native builds say what a Halo Custom Edition cache is instead of
+	calling it an old version of this build's caches, and still refuse it
+	(port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_refuse(header, header->build, scenario_name, fatal))
+	{
+		return FALSE;
+	}
+#endif
 	if (header->header_signature != CACHE_FILE_HEADER_SIGNATURE ||
 		header->footer_signature != CACHE_FILE_FOOTER_SIGNATURE ||
 		header->file_length < 0 ||
@@ -743,6 +767,14 @@ boolean cache_files_map_plays_multiplayer(
 	build[0] = 0;
 	if (!map_name || !map_name[0])
 		return TRUE;
+#ifdef HALO_LINUX
+	/* (port) a custom map (a modded Xbox map, a Custom Edition one:
+	port/linux/game/custom_edition_maps.c) is of whatever build its tools
+	wrote: the host's copy of it decides instead
+	(custom_edition_maps_host_copy_matches, network_client_manager.c) */
+	if (custom_edition_maps_display_index(map_name) != NONE)
+		return TRUE;
+#endif
 	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), tag_name_strip_path(map_name));
 	file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file != INVALID_HANDLE_VALUE)
@@ -847,6 +879,25 @@ long scenario_tags_load(
 	result = NONE;
 	texture_cache_open();
 	sound_cache_open();
+#ifdef HALO_LINUX
+	/* a Halo Custom Edition map, when those may run, is read in place into
+	its own tag cache and has no Xbox vertex or index buffers
+	(port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_playable(stripped_scenario_name))
+	{
+		cache_file_globals.tag_header = custom_edition_cache_tags_load(
+			stripped_scenario_name,
+			&cache_file_globals.header);
+		if (cache_file_globals.tag_header)
+		{
+			global_tag_instances = cache_file_globals.tag_header->tag_instances;
+			cache_file_globals.tags_loaded = TRUE;
+			result = cache_file_globals.tag_header->scenario_tag_index;
+		}
+
+		return result;
+	}
+#endif
 	if (cache_file_open(stripped_scenario_name, &cache_file_globals.header))
 	{
 		tag_cache_base_address = physical_memory_get_tag_cache_base_address();
@@ -912,10 +963,22 @@ boolean scenario_structure_bsp_load(
 #endif
 
 	tag_cache_base_address = physical_memory_get_tag_cache_base_address();
+#ifdef HALO_LINUX
+	/* a Halo Custom Edition structure BSP goes to the top of that map's own
+	tag cache, not this build's (port/linux/game/custom_edition_cache.c) */
+	if (!custom_edition_cache_tags_loaded())
+	{
+		csmemset(
+			tag_cache_base_address + cache_file_globals.header.tag_data_size,
+			0xCD,
+			0x01600000 - cache_file_globals.header.tag_data_size);
+	}
+#else
 	csmemset(
 		tag_cache_base_address + cache_file_globals.header.tag_data_size,
 		0xCD,
 		0x01600000 - cache_file_globals.header.tag_data_size);
+#endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_clear, started, 0x01600000 - cache_file_globals.header.tag_data_size);
 	started = halo_load_profile_now();
@@ -945,7 +1008,12 @@ boolean scenario_structure_bsp_load(
 #endif
 
 #ifdef HALO_RELOCATABLE_TAG_CACHE
-	halo_tag_relocate_structure_bsp(tag_cache_base_address, reference->base_address, reference->file_size);
+	/* (a Custom Edition map's structure BSP is linked to where it is read:
+	custom_edition_cache.c) */
+	if (!custom_edition_cache_tags_loaded())
+		halo_tag_relocate_structure_bsp(tag_cache_base_address, reference->base_address, reference->file_size);
+	else
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size);
 #endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_relocate, started, 0);
@@ -959,6 +1027,16 @@ boolean scenario_structure_bsp_load(
 	structure_bsp_header_register_vertex_buffers(cache_file_globals.structure_bsp_header);
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_vertex_buffers, started, 0);
+	/* a Halo Custom Edition structure BSP has no Xbox vertex buffers: its
+	vertices are compressed and given buffers instead
+	(port/linux/game/custom_edition_geometry.c) */
+	if (custom_edition_cache_tags_loaded() &&
+		!custom_edition_structure_bsp_load(cache_file_globals.structure_bsp_header->base_address))
+	{
+		cache_file_globals.structure_bsp_header = NULL;
+
+		return FALSE;
+	}
 #endif
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);
 	match_assert(
@@ -980,6 +1058,14 @@ void scenario_structure_bsp_unload(
 	struct cache_file_tag_instance *tag_instance;
 
 	structure_bsp_header_deregister_vertex_buffers(cache_file_globals.structure_bsp_header);
+#ifdef HALO_LINUX
+	/* the buffers a Halo Custom Edition structure BSP was given
+	(port/linux/game/custom_edition_geometry.c) */
+	if (custom_edition_cache_tags_loaded())
+	{
+		custom_edition_structure_bsp_unload();
+	}
+#endif
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",

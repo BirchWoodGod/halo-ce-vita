@@ -25,6 +25,7 @@ memory_watch.c detects that by write-protecting the pages.
 #include "vita_xgpu.h"
 #include "vita_gxm.h"
 #include "port_config.h"
+#include "../../linux/game/cache_file_formats.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -738,6 +739,89 @@ static int swizzled_textures(void)
 }
 
 /* decodes the texture at base into the pool; FALSE if it cannot be */
+static unsigned char custom_edition_texels_order(unsigned long address);
+static void custom_edition_texels_reorder(unsigned long *texels, unsigned long count, unsigned char order);
+
+/* HALO_TEXTURE_DUMP_DIR names an existing directory. Capture each source /
+channel-order / GPU-layout combination once, without changing the upload.
+The .source bytes are also what desktop GL passes to glCompressedTexImage
+for DXT textures, split at the source mip offsets listed in the manifest. */
+static int texture_initialize(struct texture_entry *entry, const void *data, unsigned long format,
+	unsigned long layout, unsigned long width, unsigned long height, unsigned long levels)
+{
+	int result = vgxm_texture_initialize(&entry->texture, data, format, layout, width, height, levels);
+	const char *directory = getenv("HALO_TEXTURE_DUMP_DIR");
+	const struct xgpu_texture_description *description = &entry->description;
+	const unsigned char *source = (const unsigned char *)entry->address;
+	unsigned long index, hash = 2166136261UL;
+	unsigned char order;
+	char stem[400], path[512];
+	FILE *file;
+
+	if (result || !directory || !*directory || !pool_last)
+		return result;
+	for (index = 0; index < entry->size; index++)
+		hash = (hash ^ source[index]) * 16777619UL;
+	order = custom_edition_texels_order(entry->address);
+	snprintf(stem, sizeof(stem), "%s/%08lx-%08lx-%08lx-o%u-g%lu-%lu-%lux%lu-%lu",
+		directory, hash, (unsigned long)entry->format_word, (unsigned long)entry->size_word,
+		(unsigned)order, format, layout, width, height, levels);
+	snprintf(path, sizeof(path), "%s.txt", stem);
+	file = fopen(path, "r");
+	if (file)
+	{
+		fclose(file);
+		return result;
+	}
+	file = fopen(path, "w");
+	if (!file)
+		return result;
+	fprintf(file, "source width=%lu height=%lu depth=%lu format=%lx levels=%lu linear=%d pitch=%lu cube=%d bytes=%lu order=%u\n",
+		description->width, description->height, description->depth, (unsigned long)description->format,
+		description->levels, description->linear, description->pitch, description->cube_map, entry->size, (unsigned)order);
+	for (index = 0; index < description->levels; index++)
+		fprintf(file, "source_mip level=%lu offset=%lu bytes=%lu pitch=%lu\n", index,
+			xgpu_texture_level_offset(description, index), level_bytes(description, index),
+			xgpu_texture_level_pitch(description, index));
+	fprintf(file, "source_face_stride=%lu\n", xgpu_texture_face_size(description));
+	fprintf(file, "gpu width=%lu height=%lu format=%lu layout=%lu levels=%lu allocation_bytes=%lu\n",
+		width, height, format, layout, levels, pool_last_size);
+	fprintf(file, "control=%08lx %08lx %08lx %08lx\n",
+		(unsigned long)entry->texture.control[0], (unsigned long)entry->texture.control[1],
+		(unsigned long)entry->texture.control[2], (unsigned long)entry->texture.control[3]);
+	/* Cube storage includes a full mip chain and aligned face padding;
+	2D DXT storage is whole blocks in Y-first Morton order at each mip. */
+	{
+		unsigned long offset = 0, count = layout == _vgxm_texture_cube ? floor_log2(width) + 1 : levels;
+		for (index = 0; index < count; index++)
+		{
+			unsigned long w = level_dimension(width, index), h = level_dimension(height, index);
+			unsigned long pitch = format == _vgxm_texture_bgra8 ?
+				(layout == _vgxm_texture_linear ? LINEAR_ROW(w) : w) * 4 :
+				((w + 3) / 4) * (format == _vgxm_texture_dxt1 ? 8 : 16);
+			unsigned long bytes = pitch * (format == _vgxm_texture_bgra8 ? h : (h + 3) / 4);
+			fprintf(file, "gpu_mip level=%lu offset=%lu bytes=%lu row_bytes=%lu\n", index, offset, bytes, pitch);
+			offset += bytes;
+		}
+		if (layout == _vgxm_texture_cube)
+			fprintf(file, "gpu_face_stride=%lu\n", width >= 16 ? (offset + 2047) & ~2047UL : offset);
+	}
+	fclose(file);
+	snprintf(path, sizeof(path), "%s.source", stem);
+	if ((file = fopen(path, "wb")) != NULL)
+	{
+		fwrite(source, 1, entry->size, file);
+		fclose(file);
+	}
+	snprintf(path, sizeof(path), "%s.gpu", stem);
+	if ((file = fopen(path, "wb")) != NULL)
+	{
+		fwrite(data, 1, pool_last_size, file);
+		fclose(file);
+	}
+	return result;
+}
+
 static BOOL texture_build(struct texture_entry *entry, const unsigned char *base, const D3DCOLOR *palette)
 {
 	const struct xgpu_texture_description *description = &entry->description;
@@ -747,6 +831,9 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 	unsigned long *scratch;
 	unsigned char *memory;
 	unsigned long size;
+	/* (a Custom Edition map's multipurpose maps and HUD meters: decoded and
+	reordered, below) */
+	unsigned char channel_order = custom_edition_texels_order(entry->address);
 
 	if (description->cube_map)
 	{
@@ -842,11 +929,12 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				memset(face_memory + chain, 0, face_stride - chain);
 		}
 		free(scratch);
-		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_cube,
+		return texture_initialize(entry, memory, _vgxm_texture_bgra8, _vgxm_texture_cube,
 			width, height, cube_debug == 1 ? 1 : original_levels) == 0;
 	}
 
-	if (description->compressed && power_of_two(width) && power_of_two(height) && width >= 4 && height >= 4)
+	if (description->compressed && power_of_two(width) && power_of_two(height) && width >= 4 && height >= 4 &&
+		channel_order == _custom_edition_channels_xbox)
 	{
 		unsigned long block_bytes = information.bytes;
 		unsigned long format = information.kind == _texel_dxt1 ? _vgxm_texture_dxt1 :
@@ -909,7 +997,7 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 					return FALSE;
 				reorder_blocks(base + xgpu_texture_level_offset(description, first_level), memory, level_width, level_height,
 					block_bytes);
-				return vgxm_texture_initialize(&entry->texture, memory, format, _vgxm_texture_swizzled, level_width,
+				return texture_initialize(entry, memory, format, _vgxm_texture_swizzled, level_width,
 					level_height, 1) == 0;
 			}
 		}
@@ -927,7 +1015,7 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				block_bytes);
 			offset += (level_width / 4) * (level_height / 4) * block_bytes;
 		}
-		return vgxm_texture_initialize(&entry->texture, memory, format, _vgxm_texture_swizzled, width, height, chained) == 0;
+		return texture_initialize(entry, memory, format, _vgxm_texture_swizzled, width, height, chained) == 0;
 	}
 
 	if (description->depth > 1 && !description->compressed && !description->linear &&
@@ -958,7 +1046,7 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				memcpy(memory + (row * LINEAR_ROW(atlas_width) + z * width) * 4, scratch + (z * height + row) * width,
 					width * 4);
 		free(scratch);
-		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_linear,
+		return texture_initialize(entry, memory, _vgxm_texture_bgra8, _vgxm_texture_linear,
 			atlas_width, height, 1) == 0;
 	}
 
@@ -1032,6 +1120,8 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				dxt_decode_level(information.kind, source, level_width, level_height, 1, scratch);
 			else
 				decode_level(description, level, source, palette, scratch);
+			if (channel_order != _custom_edition_channels_xbox)
+				custom_edition_texels_reorder(scratch, level_width * level_height, channel_order);
 			/* (a volume texture keeps its first slice: GXM has none) */
 			for (row = 0; row < level_height; row++)
 				memcpy(destination + row * LINEAR_ROW(level_width) * 4, scratch + row * level_width, level_width * 4);
@@ -1062,7 +1152,7 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				(unsigned long)LINEAR_ROW(width), levels, (unsigned long)description->format);
 		}
 	}
-	return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_linear,
+	return texture_initialize(entry, memory, _vgxm_texture_bgra8, _vgxm_texture_linear,
 		width, height, levels) == 0;
 }
 
@@ -1266,4 +1356,132 @@ void vita_texture_locks_flush(void)
 void vita_texture_cache_begin_frame(void)
 {
 	texture_frame++;
+}
+
+/* ---------- Custom Edition channel orders
+
+A Halo Custom Edition map keeps a model shader's multipurpose masks and a
+HUD meter's channels where Halo PC reads them; the map loading says which
+texels hold which order as they arrive (port/linux/game/
+custom_edition_bitmaps.c). The OpenGL renderer samples such textures with a
+texture swizzle (port/linux/src/xbox_textures.c); here they are decoded to
+BGRA - DXT ones too, rather than kept compressed - with their channels moved
+to where this build reads them (texture_build). Addresses stay listed until
+other texels arrive there or the map goes. The loading (the tick or render
+thread) and the worker's decoding share the list under a lock. */
+
+/* for each order, the channel (red, green, blue, alpha) of the texels each
+channel is taken from (as xbox_textures.c) */
+static const unsigned char custom_edition_channel_sources[NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS][4] =
+{
+	{ 0, 1, 2, 3 },
+	/* specular, self-illumination, color change and the auxiliary mask */
+	{ 2, 1, 3, 0 },
+	/* the fill order in color, the shape in alpha */
+	{ 3, 3, 3, 0 },
+};
+
+#define MAXIMUM_CUSTOM_EDITION_TEXELS 512
+
+static struct
+{
+	unsigned long address;
+	unsigned char channel_order;
+} custom_edition_texels[MAXIMUM_CUSTOM_EDITION_TEXELS];
+static unsigned long custom_edition_texel_count;
+static volatile int custom_edition_texels_lock;
+
+static void custom_edition_texels_take(void)
+{
+	while (__atomic_exchange_n(&custom_edition_texels_lock, 1, __ATOMIC_ACQUIRE))
+		;
+}
+
+static void custom_edition_texels_give(void)
+{
+	__atomic_store_n(&custom_edition_texels_lock, 0, __ATOMIC_RELEASE);
+}
+
+static unsigned char custom_edition_texels_order(unsigned long address)
+{
+	unsigned char order = _custom_edition_channels_xbox;
+	unsigned long index;
+
+	if (!custom_edition_texel_count)
+		return order;
+	custom_edition_texels_take();
+	for (index = 0; index < custom_edition_texel_count; index++)
+	{
+		if (custom_edition_texels[index].address == address)
+		{
+			order = custom_edition_texels[index].channel_order;
+			break;
+		}
+	}
+	custom_edition_texels_give();
+	return order;
+}
+
+/* the texels' channels (BGRA words, ARGB: alpha in the top byte) moved to
+where this build reads them */
+static void custom_edition_texels_reorder(unsigned long *texels, unsigned long count, unsigned char order)
+{
+	const unsigned char *sources = custom_edition_channel_sources[order];
+	/* the byte shift of red, green, blue and alpha in an ARGB word */
+	static const unsigned char shifts[4] = { 16, 8, 0, 24 };
+	unsigned long index;
+
+	for (index = 0; index < count; index++)
+	{
+		unsigned long texel = texels[index], reordered = 0, channel;
+
+		for (channel = 0; channel < 4; channel++)
+			reordered |= ((texel >> shifts[sources[channel]]) & 0xFF) << shifts[channel];
+		texels[index] = reordered;
+	}
+}
+
+void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order)
+{
+	unsigned long address = (unsigned long)texels;
+	unsigned long index;
+
+	if (channel_order >= NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS)
+		channel_order = _custom_edition_channels_xbox;
+	custom_edition_texels_take();
+	for (index = 0; index < custom_edition_texel_count && custom_edition_texels[index].address != address; index++)
+	{
+	}
+	if (index < custom_edition_texel_count)
+	{
+		if (channel_order == _custom_edition_channels_xbox)
+			custom_edition_texels[index] = custom_edition_texels[--custom_edition_texel_count];
+		else
+			custom_edition_texels[index].channel_order = channel_order;
+	}
+	else if (channel_order != _custom_edition_channels_xbox)
+	{
+		if (custom_edition_texel_count < MAXIMUM_CUSTOM_EDITION_TEXELS)
+		{
+			custom_edition_texels[custom_edition_texel_count].address = address;
+			custom_edition_texels[custom_edition_texel_count].channel_order = channel_order;
+			custom_edition_texel_count++;
+		}
+		else
+		{
+			static int warned;
+
+			if (!warned++)
+				platform_log("custom edition: more than %d reordered textures; the rest keep Halo PC's channel order",
+					MAXIMUM_CUSTOM_EDITION_TEXELS);
+		}
+	}
+	custom_edition_texels_give();
+}
+
+void halo_custom_edition_texels_forget(void)
+{
+	custom_edition_texels_take();
+	custom_edition_texel_count = 0;
+	custom_edition_texels_give();
 }

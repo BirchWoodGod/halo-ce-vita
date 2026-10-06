@@ -60,6 +60,33 @@ the display's shape, or 640 (port/linux/src/d3d8_gl.c) */
 long halo_screen_width(void);
 /* takes up a new width between frames (F11); returns the width */
 long halo_screen_commit(void);
+/* the Custom Edition tag cache window, or NULL unless HALO_CUSTOM_EDITION
+reserved it (port/linux/src/xbox_memory.c) */
+void *halo_custom_edition_tag_cache(void);
+/* whether Custom Edition maps may run, and a map's tag cache when the
+window above is not there (port/linux/src/xbox_memory.c) */
+int halo_custom_edition_enabled(void);
+void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
+void halo_custom_edition_tag_cache_release(void);
+/* where Halo PC keeps the channels of the pixels a Custom Edition bitmap
+just arrived at (an enum custom_edition_channel_order,
+port/linux/game/cache_file_formats.h), which the renderer then samples in
+this build's order; forgotten together when the map goes
+(port/linux/src/xbox_textures.c) */
+void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order);
+void halo_custom_edition_texels_forget(void);
+/* a vertex buffer (its Direct3D header) the game made once and will not
+rewrite until it says otherwise: the Vita's device reads it in place
+(port/vita/platform/d3d8_gxm.c) */
+void halo_d3d_buffer_in_place(const void *buffer, int in_place);
+/* whether a Halo Custom Edition map's multiplayer vehicles are chosen by
+their placements' spawn flags, as in retail Halo, and whether a vehicle
+placement is placed in the running game
+(port/linux/game/custom_edition_objects.c) */
+struct scenario_object_datum;
+unsigned char custom_edition_vehicles_by_placement(void);
+unsigned char custom_edition_vehicle_placement_allowed(struct scenario_object_datum const *placement);
+
 /* while TRUE, drawing shifts right to center 640-column layouts */
 void halo_screen_ui_offset(unsigned char centered);
 /* the open movie's display shape (width / height) when its file gives one

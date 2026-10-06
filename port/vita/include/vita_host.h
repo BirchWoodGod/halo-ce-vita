@@ -13,6 +13,12 @@ ABI). Parameters are 32-bit scalars and pointers only, so both ABIs agree.
 is up; its size is stored through size */
 void *vita_host_arena(unsigned long *size);
 
+/* a memory block of its own (user memory, outside the window), size a
+multiple of 64 KB; NULL when there is no room, else its id is stored
+through uid for vita_host_block_free */
+void *vita_host_block_alloc(const char *name, unsigned long size, int *uid);
+void vita_host_block_free(int uid);
+
 /* one line to ux0:data/haloce-vita/log.txt and the debug output */
 void vita_host_log(const char *line);
 

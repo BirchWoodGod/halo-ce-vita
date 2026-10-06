@@ -391,6 +391,11 @@ symbols in this file:
 #include "networking/network_messages.h"
 #include "networking/network_server_manager.h"
 #include "text/unicode.h"
+#ifdef HALO_LINUX
+#include "tag_files/tag_files.h"
+#include "custom_edition_maps.h"
+void platform_show_message(char const *title, char const *message);
+#endif
 
 #ifdef HALO_LINUX
 /* (HALO_NET_PROFILE=1) the networked frame's steps timed (port/linux/game/tick_detail.c) */
@@ -1258,15 +1263,15 @@ and the first that refuses ends it:
 1. the map's build is one this version plays with others
    (cache_files_map_plays_multiplayer): the object and damage messages name
    definitions by tag index, which differs between builds.
-2. (feat/custom-maps, not merged here) a custom map is played only with the
-   host's copy of it: custom_edition_maps_host_copy_matches(map->name,
-   (unsigned long)map->version, &missing), the host sending its copy's
-   identity in map->version (0 for the Xbox levels and older hosts: trusted).
-   A Custom Edition map's build string is not in check 1's list, so with
-   custom maps check 1 must pass a map custom_edition_maps.c recognises
-   (inside cache_files_map_plays_multiplayer, which the host's map choice
-   in ui_widget_event_handler_functions.c also asks), leaving check 2 to
-   decide it: both must run, neither replaces the other. */
+2. a custom map is played only with the host's copy of it
+   (custom_edition_maps_host_copy_matches), the host sending its copy's
+   identity in map->version (0 for the Xbox levels and older hosts:
+   trusted); one missing here would otherwise stop the game as a damaged
+   disc. A custom map's build string need not be in check 1's list, so
+   check 1 passes a map custom_edition_maps.c recognises
+   (cache_files_map_plays_multiplayer, which the host's map choice in
+   ui_widget_event_handler_functions.c also asks), leaving check 2 to
+   decide it: both run, neither replaces the other. */
 static boolean network_game_client_map_playable(
 	struct network_game_map const *map)
 {
@@ -1280,7 +1285,25 @@ static boolean network_game_client_map_playable(
 		cache_files_show_multiplayer_unavailable(map->name, build);
 		return FALSE;
 	}
-	/* 2. (custom maps: the host's copy) */
+	/* 2. a custom map: the host's copy (port/linux/game/custom_edition_maps.c) */
+	{
+		boolean missing;
+
+		if (!custom_edition_maps_host_copy_matches(map->name, (unsigned long)map->version, &missing))
+		{
+			char message[192];
+
+			snprintf(
+				message,
+				sizeof(message),
+				missing ?
+					"The host is playing the custom map %s, which isn't in your maps folder." :
+					"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.",
+				tag_name_strip_path(map->name));
+			platform_show_message("Halo: custom map", message);
+			return FALSE;
+		}
+	}
 
 	return TRUE;
 }

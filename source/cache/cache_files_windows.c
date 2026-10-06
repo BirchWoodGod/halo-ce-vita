@@ -190,6 +190,9 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "scenario/scenario_definitions.h"
 #include "rasterizer/rasterizer.h"
+#ifdef HALO_LINUX
+#include "custom_edition_cache.h"
+#endif
 
 #include <xtl.h>
 #ifdef HALO_LINUX
@@ -586,6 +589,14 @@ boolean cache_files_precache_is_copying_map(
 boolean cache_files_precache_map_loaded(
 	const char *map_name)
 {
+#ifdef HALO_LINUX
+	/* a Halo Custom Edition map, when those may run, is read in place and
+	never copied to the cache partition (port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_playable(map_name))
+	{
+		return TRUE;
+	}
+#endif
 	return cached_map_files_find_map(tag_name_strip_path(map_name)) != NONE;
 }
 
@@ -658,6 +669,15 @@ void cache_files_initialize(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		188,
 		cache_file_globals.requests);
+#ifdef HALO_LINUX
+	/* cache_file_open clears the requests before an Xbox map is read; a
+	Halo Custom Edition map is read without it, so they start out free
+	(port/linux/game/custom_edition_cache.c) */
+	memset(
+		cache_file_globals.requests,
+		0,
+		MAXIMUM_SIMULTANEOUS_CACHE_REQUESTS * sizeof(struct cache_file_request));
+#endif
 	cache_file_windows_thread_create();
 	cache_files_verify_language();
 	cache_files_open_cache_files();
@@ -842,6 +862,18 @@ short cache_file_read(
 	short request_index;
 	struct cache_file_request *request;
 
+	/* reads of a Halo Custom Edition map are served in place, at once, and
+	take no request slot - nor the claim lock below, which nothing would
+	release (port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_tags_loaded())
+	{
+		custom_edition_cache_read(tag_index, offset, size, buffer);
+		*completion_flag_reference = TRUE;
+
+		/* (a free slot's index, never used: cache_file_promote_read takes
+		only indices in range) */
+		return cache_request_next_free_index();
+	}
 	while (__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
 		SwitchToThread();
 	request_index = cache_request_next_free_index();
@@ -1109,12 +1141,35 @@ static void cache_files_open_cache_files(
 				valid = FALSE;
 			}
 #endif
+#ifdef HALO_LINUX
+			/* (port) a copy is kept only when its checksum tells it from
+			another build of the map: Invader writes none (0xFFFFFFFF) in
+			the Xbox maps it builds, so any copy of such a map passed for it
+			- one of another version of the map too - and was played with
+			whatever it held (Vita3K: an Invader-built Blood Gulch drew its
+			base and sky as colour noise from an old copy, and right once
+			the copies were deleted). Such maps are copied again each time
+			the game starts; the length must agree too */
+			if (map_file->header.checksum == 0xFFFFFFFFUL ||
+				!map_file->header.checksum)
+			{
+				valid = FALSE;
+			}
+			if (cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
+				map_file->header.checksum == dvd_header.checksum &&
+				map_file->header.file_length == dvd_header.file_length &&
+				valid)
+			{
+				continue;
+			}
+#else
 			if (cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
 				map_file->header.checksum == dvd_header.checksum &&
 				valid)
 			{
 				continue;
 			}
+#endif
 		}
 
 		memset(
@@ -1300,6 +1355,10 @@ static void cache_file_get_map_path(
 	/* (every caller's path is 256 characters; the name can come from a
 	multiplayer host) */
 	snprintf(path, 256, "%s%s.map", cache_files_map_directory(), map_name);
+	/* or the OpenSauce .yelo cache of that name, which the header check
+	names and refuses; every caller's path holds 256 characters
+	(port/linux/game/custom_edition_cache.c) */
+	opensauce_cache_path_find(path, 256);
 #else
 	sprintf(path, "%s%s.map", cache_files_map_directory(), map_name);
 #endif

@@ -12,11 +12,18 @@ kernel owns the whole 4 GB address space, so the layer reserves the same
 virtual window at start-up and allocates page-granular blocks inside it:
 placed requests at exactly the address asked for, the rest top-down as the
 Xbox kernel does.
+
+The experimental Halo Custom Edition map loading needs the window Custom
+Edition tag data are linked to, 0x40440000, reserved the same way when
+HALO_CUSTOM_EDITION is set (docs/custom_edition_caches.md).
 */
 
 #include "platform.h"
+#include "port_config.h"
+#include "../game/cache_file_formats.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #ifndef HALO_VITA
 #include <sys/mman.h>
@@ -35,6 +42,7 @@ static DWORD page_protection[CONTIGUOUS_PAGE_COUNT];
 static unsigned long block_page_count[CONTIGUOUS_PAGE_COUNT];
 static BOOL arena_reserved = FALSE;
 static pthread_mutex_t arena_lock = PTHREAD_MUTEX_INITIALIZER;
+static void *custom_edition_tag_cache = NULL;
 
 #ifdef HALO_VITA
 /* no page protection on the Vita: protections are only recorded */
@@ -122,6 +130,106 @@ static void contiguous_arena_reserve(void)
 	}
 }
 #endif
+
+/* The Custom Edition tag cache, with room for OpenSauce's memory upgrades,
+reserved and committed (lazily, pages are backed when touched) before
+anything else can map into it; only when asked for, since it takes 36 MB of
+address space below 2 GB. */
+#ifndef HALO_VITA
+__attribute__((constructor(102)))
+static void custom_edition_tag_cache_reserve(void)
+{
+	void *wanted = (void *)CUSTOM_EDITION_TAG_CACHE_ADDRESS;
+	void *result;
+
+	/* (HALO_CUSTOM_EDITION_RELOCATE=1: none, so that the tags are loaded
+	elsewhere and moved, as on the Vita - for the harness) */
+	/* (the environment variable only: the settings are not read this
+	early; without the window the tags are moved instead) */
+	if (!getenv("HALO_CUSTOM_EDITION") || !strcmp(getenv("HALO_CUSTOM_EDITION"), "0") ||
+		(getenv("HALO_CUSTOM_EDITION_RELOCATE") && atoi(getenv("HALO_CUSTOM_EDITION_RELOCATE"))))
+		return;
+	result = mmap(wanted, CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+	if (result == wanted)
+	{
+		custom_edition_tag_cache = result;
+	}
+	else
+	{
+		if (result != MAP_FAILED)
+			munmap(result, CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED);
+		platform_log("cannot reserve the Custom Edition tag cache at %p (%s)",
+			wanted, strerror(errno));
+	}
+}
+#endif
+
+int halo_custom_edition_enabled(void)
+{
+	/* game.custom_edition (port_config.c); its environment variable, which
+	the Vita's settings panel sets ("0" off), is read first and every time,
+	so the panel's change takes at the next map list */
+	const char *setting = getenv("HALO_CUSTOM_EDITION");
+
+	if (setting)
+		return setting[0] && strcmp(setting, "0") != 0 && strcmp(setting, "false") != 0;
+	return config_boolean("game.custom_edition");
+}
+
+void *halo_custom_edition_tag_cache(void)
+{
+	return custom_edition_tag_cache;
+}
+
+#ifdef HALO_VITA
+static int custom_edition_block = -1;
+#else
+static unsigned long custom_edition_mapping_bytes;
+#endif
+static void *custom_edition_allocation;
+
+void *halo_custom_edition_tag_cache_acquire(unsigned long bytes)
+{
+	if (custom_edition_tag_cache)
+		return bytes <= CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED ? custom_edition_tag_cache : NULL;
+	halo_custom_edition_tag_cache_release();
+	bytes = (bytes + 0xFFFFUL) & ~0xFFFFUL;
+#ifdef HALO_VITA
+	/* a memory block of its own, outside the window (whose layout the
+	campaign saves depend on), for as long as the map is loaded */
+	custom_edition_allocation = vita_host_block_alloc("halo_custom_edition", bytes, &custom_edition_block);
+#else
+	{
+		void *result = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+
+		if (result != MAP_FAILED)
+		{
+			custom_edition_allocation = result;
+			custom_edition_mapping_bytes = bytes;
+		}
+	}
+#endif
+	if (!custom_edition_allocation)
+		platform_log("custom edition: no room for a %lu KB tag cache", bytes / 1024);
+	else
+		platform_log("custom edition: %lu KB tag cache at %p", bytes / 1024, custom_edition_allocation);
+	return custom_edition_allocation;
+}
+
+void halo_custom_edition_tag_cache_release(void)
+{
+	if (!custom_edition_allocation)
+		return;
+#ifdef HALO_VITA
+	vita_host_block_free(custom_edition_block);
+	custom_edition_block = -1;
+#else
+	munmap(custom_edition_allocation, custom_edition_mapping_bytes);
+	custom_edition_mapping_bytes = 0;
+#endif
+	custom_edition_allocation = NULL;
+}
 
 BOOL platform_is_contiguous(const void *address)
 {

@@ -165,6 +165,10 @@ static struct setting settings[] = {
 		"Games you host: this level together (2 players)", 0, PAGE_MULTIPLAYER },
 	{ "Co-op difficulty", "HALO_NET_COOP_DIFFICULTY", 0, 4, { "0", "1", "2", "3" },
 		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, PAGE_MULTIPLAYER },
+	/* (custom maps: the Custom Edition maps join the multiplayer level
+	list; off by default while their colours are wrong on the Vita) */
+	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Experimental: Halo Custom Edition maps in the map list", 0, PAGE_MULTIPLAYER },
 	{ "Back", NULL, 0, 0, { NULL }, { NULL }, "To the settings", 0, PAGE_MULTIPLAYER, KIND_ACTION, ACTION_BACK },
 };
 
