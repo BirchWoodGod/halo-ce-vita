@@ -374,6 +374,24 @@ and intersected with the viewport's own rectangle. */
 static int device_scissor_on;
 static float device_scissor[4];
 
+/* (port) the sky drawn after the opaque scene (render.c, HALO_SKY_LATE):
+while on, the draws recorded test depth, less-equal, without writing it,
+at the depth the window was cleared to (1: the viewport's depth range is
+made that one value), so they colour only the pixels nothing opaque has
+covered - the pixels the sky's own draws, without depth, would have been
+left visible on before the scene covered the rest. */
+static int device_sky_depth;
+
+void halo_d3d_sky_depth(int on)
+{
+	device_sky_depth = on != 0;
+}
+
+int halo_d3d_sky_late_supported(void)
+{
+	return 1;
+}
+
 void halo_d3d_scissor(const float *rectangle)
 {
 	device_scissor_on = rectangle != NULL;
@@ -2228,6 +2246,8 @@ struct render_command
 	unsigned char wave;
 	/* (HALO_FILL_STATS) the render phase that recorded the draw (render.c) */
 	signed char phase;
+	/* recorded while the sky is drawn late (halo_d3d_sky_depth) */
+	unsigned char sky_depth;
 	/* the copy of a small target this run renders into */
 	unsigned long color_version;
 	/* draws */
@@ -3046,6 +3066,16 @@ static void execute_draw(struct render_command *command)
 		draw->fragment_uniforms[1] = copy;
 	}
 	draw->fragment_shader = fragment_shader_get(&command->key);
+	if (command->sky_depth)
+	{
+		/* (after the record's states are built: they are shared and
+		cached by state block, the sky's own say no depth test) */
+		draw->depth_test = has_depth;
+		draw->depth_write = 0;
+		draw->depth_function = D3DCMP_LESSEQUAL;
+		draw->viewport_scale[2] = 0.0f;
+		draw->viewport_offset[2] = 1.0f;
+	}
 	{
 		/* (debug) HALO_TRACE_CAMO=n: the first n draws of the active
 		camouflage (rasterizer_xbox_active_camouflage.c): the screen copy
@@ -4783,6 +4813,7 @@ static struct render_command *record_draw(BOOL immediate)
 	if (!command)
 		return NULL;
 	command->phase = (signed char)halo_render_phase;
+	command->sky_depth = (unsigned char)device_sky_depth;
 	DRAW_FINE_ADD(0, profile_from);
 	draw = &command->draw;
 	/* (not the whole draw, 478 bytes into a cold ring entry: every field is

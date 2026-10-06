@@ -62,6 +62,11 @@ particles' fade): all three vertices 0, then the mean below each limit */
 #define ALPHA_BINS 5
 static const double alpha_bin_limit[ALPHA_BINS] = { 0, 0.05, 0.25, 0.5, 1.01 };
 static double alpha_bin_pixels[ALPHA_BINS];
+/* (the late sky's premise, render.c HALO_SKY_LATE) samples the objects'
+and lightmaps' phases colour while still at the cleared depth without
+covering them - blended, or not writing depth - which the sky drawn after
+them would then cover: 0 is the premise holding */
+static double sky_order_samples;
 
 struct depth_buffer
 {
@@ -420,6 +425,7 @@ struct raster_context
 	double covered, passed;
 	int bin_triangles;
 	int alpha_bin;
+	int sky_order_check;
 };
 
 /* one triangle in window coordinates (x, y, z), x/y in the game's pixels */
@@ -470,6 +476,9 @@ static void raster_triangle(struct raster_context *raster, const float a[3], con
 			if (z < 0.0f || z > 1.0f)
 				continue;
 			covered++;
+			if (raster->sky_order_check && raster->depth && raster->depth[y * stride + x] >= 1.0f &&
+				(!raster->draw->depth_test || depth_passes(raster->draw->depth_function, z, raster->depth[y * stride + x])))
+				sky_order_samples++;
 			if (raster->depth && raster->draw->depth_test)
 			{
 				float *stored = &raster->depth[y * stride + x];
@@ -505,7 +514,7 @@ static void project(const struct vgxm_draw *draw, const float clip[4], float out
 
 	out[0] = clip[0] * inverse * draw->viewport_scale[0] + draw->viewport_offset[0];
 	out[1] = clip[1] * inverse * draw->viewport_scale[1] + draw->viewport_offset[1];
-	out[2] = clip[2] * inverse;
+	out[2] = clip[2] * inverse * draw->viewport_scale[2] + draw->viewport_offset[2];
 }
 
 /* a triangle clipped against w > epsilon (a polygon of up to 4 vertices), then fanned */
@@ -586,6 +595,8 @@ void halo_fill_stats_draw(const struct vgxm_draw *draw, const DWORD *instruction
 	if (raster.clip[3] > FILL_MAX_HEIGHT) raster.clip[3] = FILL_MAX_HEIGHT;
 	/* (the effects: particles' sprites - transparent groups of effect shaders) */
 	raster.bin_triangles = (phase == 42 || phase == 53) && main_target && draw->blend && draw->color_write;
+	raster.sky_order_check = (phase == 3 || phase == 5) && main_target && draw->color_write &&
+		(draw->blend || !draw->depth_test || !draw->depth_write);
 	for (i = 0; i + 2 < n; i += draw->primitive == 5 ? 3 : 1)
 	{
 		const struct fill_vertex *v[3];
@@ -736,6 +747,9 @@ void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsign
 			length += snprintf(line + length, sizeof(line) - length, " %s%.2f:%.3f", phase ? "<=" : "=", alpha_bin_limit[phase],
 				alpha_bin_pixels[phase] / (FILL_GRID * FILL_GRID) / samples_per_screen);
 		platform_log("fill-effects by vertex alpha (shaded screens per frame):%s", line);
+		platform_log("fill-sky-order: %.0f samples a frame coloured at the cleared depth without covering it before the late sky",
+			sky_order_samples / fill_sampled_frames);
+		sky_order_samples = 0;
 		memset(alpha_bin_pixels, 0, sizeof(alpha_bin_pixels));
 		memset(phases, 0, sizeof(phases));
 		memset(size_bin_count, 0, sizeof(size_bin_count));

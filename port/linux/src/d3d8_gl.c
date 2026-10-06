@@ -3359,6 +3359,17 @@ void halo_d3d_scissor(const float *rectangle)
 	(void)rectangle;
 }
 
+/* (and its late sky's depth: render.c draws the sky first for this device) */
+void halo_d3d_sky_depth(int on)
+{
+	(void)on;
+}
+
+int halo_d3d_sky_late_supported(void)
+{
+	return 0;
+}
+
 void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_index)
 {
 	device.base_vertex_index = base_vertex_index;

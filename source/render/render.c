@@ -349,6 +349,21 @@ static unsigned long long render_now(void) { return vita_host_time_us ? vita_hos
 /* (the phase the draws recorded next belong to, for the device's fill
 statistics: HALO_FILL_STATS, d3d8_gxm.c) */
 int halo_render_phase = -1;
+/* (the late sky: the device draws it at the cleared depth) */
+void halo_d3d_sky_depth(int on);
+int halo_d3d_sky_late_supported(void);
+static boolean halo_sky_late_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SKY_LATE");
+
+		enabled = halo_d3d_sky_late_supported() && (!setting || atoi(setting) != 0);
+	}
+	return enabled > 0;
+}
 const char *halo_render_phase_names[64];
 #define RENDER_PHASE_BEGIN() do { if (render_profile_enabled > 0) { render_phase_started = render_now(); \
 	halo_render_draw_counts(&render_phase_draws_started[0], &render_phase_draws_started[1]); } } while (0)
@@ -425,9 +440,27 @@ static void render_window(
 
 	if (!bink_playback_in_progress())
 	{
+#ifdef HALO_LINUX
+		/* (port) HALO_SKY_LATE (default on, 0 = off): the sky drawn after
+		the opaque scene - the objects and the structure's lightmap pass,
+		which cover every pixel they draw and write its depth - colouring
+		only the pixels still at the cleared depth (d3d8_gxm.c
+		halo_d3d_sky_depth). Drawn first, without depth, as the Xbox did,
+		its layers were shaded under the whole scene: on the Vita's tile
+		renderer a blended layer drawn first is paid in full (one to two
+		screens of fragments a frame), where drawn after the opaque scene
+		its covered pixels fail the depth test. The passes between its two
+		places draw no pixel of the sky's (the opaque ones cover theirs),
+		so every pixel ends as before. Its lens flares are queued before
+		the flare tests either way. */
+		boolean sky_late = halo_sky_late_enabled() && rasterizer_target == _render_target_primary;
+#endif
 
 		build_sprite_prepare_for_window();
 		RENDER_PHASE_BEGIN_ID(1, "sky");
+#ifdef HALO_LINUX
+		if (!sky_late)
+#endif
 		render_sky();
 		RENDER_PHASE_END(1, "sky");
 		RENDER_PHASE_BEGIN_ID(27, "fp_update");
@@ -445,6 +478,16 @@ static void render_window(
 		RENDER_PHASE_BEGIN_ID(5, "lightmaps");
 		structure_render_lightmaps();
 		RENDER_PHASE_END(5, "lightmaps");
+#ifdef HALO_LINUX
+		if (sky_late)
+		{
+			RENDER_PHASE_BEGIN_ID(1, "sky");
+			halo_d3d_sky_depth(TRUE);
+			render_sky();
+			halo_d3d_sky_depth(FALSE);
+			RENDER_PHASE_END(1, "sky");
+		}
+#endif
 		RENDER_PHASE_BEGIN_ID(28, "flare_tests");
 		rasterizer_lens_flares_submit_occlusion_tests();
 		RENDER_PHASE_END(28, "flare_tests");
