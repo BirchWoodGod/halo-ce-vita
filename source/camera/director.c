@@ -781,17 +781,13 @@ static void director_choose_camera_script_camera_record(
 }
 
 #ifdef HALO_LINUX
+/* (read when Black asks for a switch, so the settings panel's Dev tab row
+applies at once) */
 static boolean director_debug_camera_enabled(void)
 {
-	static int enabled = -1;
+	char const *setting = getenv("HALO_DEBUG_CAMERA");
 
-	if (enabled < 0)
-	{
-		char const *setting = getenv("HALO_DEBUG_CAMERA");
-
-		enabled = setting && atoi(setting) != 0;
-	}
-	return enabled != 0;
+	return setting && atoi(setting) != 0;
 }
 #endif
 
