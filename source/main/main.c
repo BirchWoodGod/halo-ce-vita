@@ -918,6 +918,7 @@ boolean main_saving_map(
 
 #ifdef HALO_LINUX
 static void main_checkpoint_cancelled(char const *by);
+static void main_map_request_log(char const *what);
 #endif
 
 void main_save_cancel(
@@ -941,6 +942,11 @@ void main_won_map(
 void main_lost_map(
 	void)
 {
+#ifdef HALO_LINUX
+	if (!main_globals.lost_map)
+		main_map_request_log("game lost (back to the last checkpoint in 3 s)");
+	main_checkpoint_cancelled("a lost game");
+#endif
 	main_globals.saving_map = FALSE;
 	main_globals.lost_map = TRUE;
 	return;
@@ -964,6 +970,10 @@ void main_start_time(
 void main_reset_map(
 	void)
 {
+#ifdef HALO_LINUX
+	if (!main_globals.reset_map)
+		main_map_request_log("map reset");
+#endif
 	main_globals.switch_to_structure_bsp_index = NONE;
 	main_globals.saving_map = FALSE;
 	main_globals.reset_map = TRUE;
@@ -975,6 +985,8 @@ void main_revert_map(
 	void)
 {
 #ifdef HALO_LINUX
+	if (!main_globals.revert_map)
+		main_map_request_log("revert to the last checkpoint");
 	main_checkpoint_cancelled("a revert");
 #endif
 	main_globals.switch_to_structure_bsp_index = NONE;
@@ -1677,6 +1689,27 @@ static void main_checkpoint_cancelled(
 {
 	if (main_globals.saving_map && checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
 		platform_log("checkpoint: the one asked for cancelled by %s after %ld frames", by, checkpoint_wait_checks);
+}
+
+/* who sent the level back (GitHub #10: "the timer ran out on the Warthog
+run and it sent me to the start of the level"): a script's game_lost (d40's
+cutscene_lose when the timer runs out), game_revert or map_reset, every
+player dead, or the pause menu (which logs its own line first). The revert
+itself logs which checkpoint it loaded, or that there was none (game_state.c) */
+static void main_map_request_log(
+	char const *what)
+{
+	static unsigned long lines;
+	char const *by = hs_runtime_get_executing_thread_name();
+
+	if (!csstrcmp(by, "[unknown]"))
+	{
+		/* (not a script: players.c's every-player-dead check, the pause menu
+		or the escape key) */
+		by = players_globals && players_globals->all_dead ? "every player dead" : "the game";
+	}
+	if (lines++ < 160)
+		platform_log("%s asked for by %s at tick %ld", what, by, game_in_progress() ? (long)game_time_get() : 0L);
 }
 
 static void main_checkpoint_waiting(
