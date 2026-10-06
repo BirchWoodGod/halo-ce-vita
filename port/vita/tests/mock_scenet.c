@@ -21,7 +21,12 @@ behaviour where it differs from Linux's (run_vita_net_test.sh builds it
 The ad hoc and system calls vita_net.c also makes are stubs.
 */
 
+#include <psp2/apputil.h>
+#include <psp2/common_dialog.h>
+#include <psp2/kernel/clib.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/netcheck_dialog.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
 #include <psp2/pspnet_adhoc.h>
@@ -37,6 +42,7 @@ The ad hoc and system calls vita_net.c also makes are stubs.
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -398,7 +404,9 @@ int sceNetCtlInit(void)
 int sceNetCtlInetGetInfo(int code, SceNetCtlInfo *info)
 {
 	(void)code;
-	strcpy(info->ip_address, "192.168.1.50");
+	/* (MOCK_LOCAL_ADDRESS: the Wi-Fi address the console reports) */
+	snprintf(info->ip_address, sizeof(info->ip_address), "%s",
+		getenv("MOCK_LOCAL_ADDRESS") ? getenv("MOCK_LOCAL_ADDRESS") : "192.168.1.50");
 	return 0;
 }
 
@@ -435,24 +443,263 @@ int sceSysmoduleLoadModule(SceSysmoduleModuleId id)
 
 /* ---------- stubs for the ad hoc probe and the self-test's thread */
 
-int sceNetAdhocInit(void) { return -1; }
-int sceNetAdhocctlInit(const SceNetAdhocctlAdhocId *adhoc_id) { (void)adhoc_id; return -1; }
-int sceNetAdhocctlGetEtherAddr(SceNetEtherAddr *addr) { (void)addr; return -1; }
+int mock_adhoc_inits;
+int sceNetAdhocInit(void) { mock_adhoc_inits++; return 0; }
+int sceNetAdhocctlInit(const SceNetAdhocctlAdhocId *adhoc_id) { (void)adhoc_id; return 0; }
+int sceNetAdhocctlGetEtherAddr(SceNetEtherAddr *addr)
+{
+	/* 02:00 and MOCK_ADHOC_ADDRESS (an IPv4 address; 127.0.0.220 if unset),
+	as the PDP mock maps MACs */
+	in_addr_t ip = inet_addr(getenv("MOCK_ADHOC_ADDRESS") ? getenv("MOCK_ADHOC_ADDRESS") : "127.0.0.220");
+
+	addr->data[0] = 0x02;
+	addr->data[1] = 0x00;
+	memcpy(addr->data + 2, &ip, 4);
+	return 0;
+}
 int sceNetAdhocctlGetPeerList(int *buflen, void *buf) { (void)buflen; (void)buf; return -1; }
 int sceNetCtlAdhocGetState(int *state) { (void)state; return -1; }
 int sceNetCtlAdhocGetInAddr(SceNetInAddr *inaddr) { (void)inaddr; return -1; }
 
+/* ---------- PDP (the ad hoc group's datagrams) over Linux UDP
+
+A machine's MAC is 02:00 and its IPv4 address (as HALO_NET_ADHOC_EMULATE
+has it on Linux, posix_net.c); a PDP port is that UDP port at the address
+the socket was made with. MOCK_PDP_GROUP lists the other machines'
+addresses, which a broadcast (ff:ff:ff:ff:ff:ff) goes to. The PSP library's
+semantics: errors as 0x8041070x codes; send and receive return 0 on
+success, a receive's size through its length; no flag waits up to the
+timeout (then SCE_ERROR_NET_ADHOC_TIMEOUT), SCE_NET_ADHOC_F_NONBLOCK
+returns SCE_ERROR_NET_ADHOC_WOULD_BLOCK at once. MOCK_PDP_NO_WAIT=1 makes
+waits return at once (a firmware whose waits do not wait). */
+
+int mock_pdp_creates, mock_pdp_sends, mock_pdp_receives;
+
+static int pdp_socket = -1;
+
+int sceNetAdhocPdpCreate(const SceNetEtherAddr *saddr, SceUShort16 sport, unsigned int bufsize, int flag)
+{
+	struct sockaddr_in local;
+
+	(void)bufsize;
+	(void)flag;
+	mock_pdp_creates++;
+	if (pdp_socket >= 0)
+		return (int)SCE_ERROR_NET_ADHOC_PORT_IN_USE;
+	pdp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+	memset(&local, 0, sizeof(local));
+	local.sin_family = AF_INET;
+	local.sin_port = htons(sport);
+	memcpy(&local.sin_addr.s_addr, saddr->data + 2, 4);
+	if (bind(pdp_socket, (struct sockaddr *)&local, sizeof(local)) < 0)
+	{
+		close(pdp_socket);
+		pdp_socket = -1;
+		return (int)SCE_ERROR_NET_ADHOC_PORT_NOT_AVAIL;
+	}
+	return 7; /* (an id) */
+}
+
+int sceNetAdhocPdpDelete(int id, int flag)
+{
+	(void)flag;
+	if (id != 7 || pdp_socket < 0)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_SOCKET_ID;
+	close(pdp_socket);
+	pdp_socket = -1;
+	return 0;
+}
+
+int sceNetAdhocPdpSend(int id, const SceNetEtherAddr *daddr, SceUShort16 dport, const void *data, int len,
+	unsigned int timeout, int flag)
+{
+	static const unsigned char everyone[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	struct sockaddr_in to;
+
+	(void)timeout;
+	(void)flag;
+	if (id != 7 || pdp_socket < 0)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_SOCKET_ID;
+	if (len > SCE_NET_ADHOC_PDP_MFS)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_DATALEN;
+	mock_pdp_sends++;
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_port = htons(dport);
+	if (!memcmp(daddr->data, everyone, 6))
+	{
+		const char *group = getenv("MOCK_PDP_GROUP");
+
+		while (group && *group)
+		{
+			char address[32];
+			size_t length = strcspn(group, ",");
+
+			snprintf(address, sizeof(address), "%.*s", (int)length, group);
+			if (inet_pton(AF_INET, address, &to.sin_addr) == 1)
+				sendto(pdp_socket, data, (size_t)len, 0, (struct sockaddr *)&to, sizeof(to));
+			group += length + (group[length] == ',');
+		}
+		return 0;
+	}
+	memcpy(&to.sin_addr.s_addr, daddr->data + 2, 4);
+	sendto(pdp_socket, data, (size_t)len, 0, (struct sockaddr *)&to, sizeof(to));
+	return 0;
+}
+
+int sceNetAdhocPdpRecv(int id, SceNetEtherAddr *saddr, SceUShort16 *sport, void *buf, int *len, unsigned int timeout,
+	int flag)
+{
+	struct sockaddr_in from;
+	socklen_t from_length = sizeof(from);
+	ssize_t received;
+
+	if (id != 7 || pdp_socket < 0)
+		return (int)SCE_ERROR_NET_ADHOC_INVALID_SOCKET_ID;
+	mock_pdp_receives++;
+	if (!(flag & SCE_NET_ADHOC_F_NONBLOCK) && !getenv("MOCK_PDP_NO_WAIT"))
+	{
+		fd_set set;
+		struct timeval wait;
+
+		FD_ZERO(&set);
+		FD_SET(pdp_socket, &set);
+		wait.tv_sec = timeout / 1000000;
+		wait.tv_usec = timeout % 1000000;
+		if (select(pdp_socket + 1, &set, NULL, NULL, &wait) <= 0)
+			return (int)SCE_ERROR_NET_ADHOC_TIMEOUT;
+	}
+	received = recvfrom(pdp_socket, buf, (size_t)*len, MSG_DONTWAIT, (struct sockaddr *)&from, &from_length);
+	if (received < 0)
+		return (int)((flag & SCE_NET_ADHOC_F_NONBLOCK) ? SCE_ERROR_NET_ADHOC_WOULD_BLOCK : SCE_ERROR_NET_ADHOC_TIMEOUT);
+	saddr->data[0] = 0x02;
+	saddr->data[1] = 0x00;
+	memcpy(saddr->data + 2, &from.sin_addr.s_addr, 4);
+	*sport = ntohs(from.sin_port);
+	*len = (int)received;
+	return 0;
+}
+
+/* ---------- the network check dialog, scripted: it runs for
+mock_dialog_running_polls status reads, then finishes with
+mock_dialog_result (SCE_COMMON_DIALOG_RESULT_OK: in a group, whose
+address is MOCK_ADHOC_MAC's 02:00:7f:00:00:dc) */
+
+int mock_dialog_running_polls = 3, mock_dialog_result = SCE_COMMON_DIALOG_RESULT_OK;
+int mock_dialog_inits, mock_dialog_terms, mock_dialog_mode;
+char mock_dialog_group[9];
+int mock_gxm_dialog_active, mock_gxm_dialog_switches;
+static int dialog_polls;
+
+void *sceClibMemset(void *dst, int ch, SceSize len)
+{
+	return memset(dst, ch, len);
+}
+
+SceInt32 sceNetCheckDialogInit(SceNetCheckDialogParam *param)
+{
+	mock_dialog_inits++;
+	mock_dialog_mode = param->mode;
+	memcpy(mock_dialog_group, param->groupName ? (const char *)param->groupName->data : "", 8);
+	mock_dialog_group[8] = 0;
+	dialog_polls = 0;
+	return 0;
+}
+
+SceCommonDialogStatus sceNetCheckDialogGetStatus(void)
+{
+	return dialog_polls++ < mock_dialog_running_polls ? SCE_COMMON_DIALOG_STATUS_RUNNING :
+		SCE_COMMON_DIALOG_STATUS_FINISHED;
+}
+
+SceInt32 sceNetCheckDialogAbort(void) { return 0; }
+
+SceInt32 sceNetCheckDialogGetResult(SceNetCheckDialogResult *result)
+{
+	result->result = mock_dialog_result;
+	return 0;
+}
+
+SceInt32 sceNetCheckDialogTerm(void)
+{
+	mock_dialog_terms++;
+	return 0;
+}
+
+int sceCommonDialogSetConfigParam(const SceCommonDialogConfigParam *configParam)
+{
+	(void)configParam;
+	return 0;
+}
+
+int sceAppUtilSystemParamGetInt(unsigned int paramId, int *value)
+{
+	(void)paramId;
+	*value = 1;
+	return 0;
+}
+
+int sceNetAdhocctlGetParameter(SceNetAdhocctlParameter *parameter)
+{
+	memset(parameter, 0, sizeof(*parameter));
+	parameter->channel = 1;
+	memcpy(parameter->groupName.data, mock_dialog_group, 8);
+	return 0;
+}
+
+int sceNetCtlAdhocDisconnect(void) { return 0; }
+
+void vgxm_common_dialog(int active)
+{
+	if (active != mock_gxm_dialog_active)
+		mock_gxm_dialog_switches++;
+	mock_gxm_dialog_active = active;
+}
+
+SceUInt64 sceKernelGetProcessTimeWide(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (SceUInt64)now.tv_sec * 1000000ULL + (SceUInt64)now.tv_nsec / 1000ULL;
+}
+
+/* threads: none unless MOCK_THREADS=1 (the ad hoc test's connect thread,
+vita_adhoc_connect), then a detached pthread each */
+#include <pthread.h>
+
+#define MOCK_THREADS 8
+static SceKernelThreadEntry mock_thread_entries[MOCK_THREADS];
+static int mock_thread_count;
+
+static void *mock_thread_main(void *argument)
+{
+	SceKernelThreadEntry entry = mock_thread_entries[(long)argument];
+
+	entry(0, NULL);
+	return NULL;
+}
+
 SceUID sceKernelCreateThread(const char *name, SceKernelThreadEntry entry, int initPriority, SceSize stackSize,
 	SceUInt attr, int cpuAffinityMask, const SceKernelThreadOptParam *option)
 {
-	(void)name; (void)entry; (void)initPriority; (void)stackSize; (void)attr; (void)cpuAffinityMask; (void)option;
-	return -1;
+	(void)name; (void)initPriority; (void)stackSize; (void)attr; (void)cpuAffinityMask; (void)option;
+	if (!getenv("MOCK_THREADS") || mock_thread_count == MOCK_THREADS)
+		return -1;
+	mock_thread_entries[mock_thread_count] = entry;
+	return 0x100 + mock_thread_count++;
 }
 
 int sceKernelStartThread(SceUID thid, SceSize arglen, void *argp)
 {
-	(void)thid; (void)arglen; (void)argp;
-	return -1;
+	pthread_t thread;
+
+	(void)arglen; (void)argp;
+	if (thid < 0x100 || thid >= 0x100 + mock_thread_count ||
+		pthread_create(&thread, NULL, mock_thread_main, (void *)(long)(thid - 0x100)) != 0)
+		return -1;
+	pthread_detach(thread);
+	return 0;
 }
 
 int sceKernelDelayThread(SceUInt delay)

@@ -8,10 +8,13 @@ itself, built here with the SDK's ABI.
 */
 
 #include <psp2/kernel/rng.h>
+#include <psp2/kernel/openpsid.h>
+#include <stdio.h>
 #include <psp2/kernel/threadmgr.h>
 #include <unistd.h>
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -20,6 +23,14 @@ itself, built here with the SDK's ABI.
 #include "vita_compat.h"
 
 /* (sockets: vita_net.c) */
+
+/* the stack of a thread made with no attributes (pthread_create(&thread,
+NULL, ...)): the SDK's pthread library takes this in place of its 32 KB
+minimum. Internet play's threads (p2p.c's, which keeps two 754-socket
+lists on its stack and selects over up to 128 sockets, its UPnP thread,
+and ad hoc play's two in p2p_adhoc.c) were made for desktops' megabytes;
+xbox_kernel.c gives the game's own threads theirs explicitly */
+unsigned int _pthread_stack_default_user = 256 * 1024;
 
 void posix_random_bytes(void *buffer, posix_ulong size)
 {
@@ -30,17 +41,33 @@ void posix_random_bytes(void *buffer, posix_ulong size)
 		unsigned int value;
 		posix_ulong count = size < sizeof(value) ? size : sizeof(value);
 
-		sceKernelGetRandomNumber(&value, sizeof(value));
+		if (sceKernelGetRandomNumber(&value, sizeof(value)) < 0)
+			abort();
 		memcpy(bytes, &value, count);
 		bytes += count;
 		size -= count;
 	}
 }
 
-int posix_upnp_forward_udp(unsigned short port, posix_ulong *external_address, unsigned short *external_port,
+/* Only p2p_hardware_id's game-specific HMAC goes onto the wire. */
+int posix_hardware_id_source(char *text, int size)
+{
+    SceKernelOpenPsId id;
+    int index;
+    if (size <= 0)
+        return 0;
+    text[0] = 0;
+    if (size < 33 || sceKernelGetOpenPsId(&id) < 0)
+        return 0;
+    for (index = 0; index < 16; ++index)
+        snprintf(text + index * 2, 3, "%02x", (unsigned char)id.id[index]);
+    return 1;
+}
+
+int posix_upnp_forward_udp(unsigned short port, unsigned short preferred_port, posix_ulong *external_address, unsigned short *external_port,
 	char *error, int error_size)
 {
-	(void)port; (void)external_address; (void)external_port;
+	(void)port; (void)preferred_port; (void)external_address; (void)external_port;
 	if (error_size > 0)
 	{
 		strncpy(error, "no UPnP on the Vita", (size_t)error_size - 1);
@@ -51,6 +78,7 @@ int posix_upnp_forward_udp(unsigned short port, posix_ulong *external_address, u
 
 void posix_upnp_stop_forwarding_udp(unsigned short external_port) { (void)external_port; }
 int posix_command_line_argument(int index, char *buffer, posix_ulong size) { (void)index; (void)buffer; (void)size; return 0; }
+int posix_user_secret(unsigned char *secret, int size) { (void)secret; (void)size; return 0; }
 posix_ulong posix_process_id(void) { return 1; }
 int posix_register_url_scheme(const char *scheme, const char *description) { (void)scheme; (void)description; return 0; }
 int posix_discord_connect(void) { return -1; }

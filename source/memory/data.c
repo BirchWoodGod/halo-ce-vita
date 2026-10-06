@@ -182,6 +182,24 @@ void *datum_get(
 		}
 	}
 
+#ifdef HALO_RELEASE
+	/* port: a release build's message too, and where it was asked from
+	(debug.txt's reference address places it in the build): the caller
+	goes on with the NULL and crashes, with nothing else to say which
+	array and which caller it was */
+	{
+		char message[128];
+
+		csprintf(
+			message,
+			"%.32s index #%d (0x%x) is unused or changed (asked from %p)",
+			data->name,
+			index&0xFFFF,
+			index,
+			__builtin_return_address(0));
+		release_assert_failed(message, "c:\\halo\\SOURCE\\memory\\data.c", 412, TRUE);
+	}
+#else
 	match_vassert(
 		"c:\\halo\\SOURCE\\memory\\data.c",
 		412,
@@ -192,6 +210,7 @@ void *datum_get(
 			data->name,
 			index&0xFFFF,
 			index));
+#endif
 
 	return NULL;
 }

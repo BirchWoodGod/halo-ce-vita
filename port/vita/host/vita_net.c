@@ -17,8 +17,15 @@ select is a one-shot epoll; and the stack is BSD's, whose connected
 datagram sockets refuse a sendto naming a destination (posix_socket_sendto).
 */
 
+#include <psp2/apputil.h>
+#include <psp2/common_dialog.h>
+#include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/net/net.h>
+#include <psp2/netcheck_dialog.h>
 #include <psp2/net/netctl.h>
+#include <psp2/pspnet_adhoc.h>
+#include <psp2/pspnet_adhocctl.h>
 #include <psp2/sysmodule.h>
 
 #include <pthread.h>
@@ -28,6 +35,7 @@ datagram sockets refuse a sendto naming a destination (posix_socket_sendto).
 #include <string.h>
 
 #include "posix.h"
+#include "vita_gxm.h"
 #include "vita_host.h"
 
 #define WSAEINVAL 10022
@@ -47,7 +55,10 @@ the request failed (WSAENOBUFS), the sockets kept their small default
 buffers, and in a match the host's connection to its own client filled
 up and timed out: the player could not move and the host went down */
 #define NET_MEMORY_SIZE (8 * 1024 * 1024)
-#define SELECT_MAXIMUM 64
+/* the sockets one select waits on: the game's own few, or internet play's
+thread (p2p.c), which waits on its tunnel, a stand-in per peer port and
+stream and the signalling brokers' connections */
+#define SELECT_MAXIMUM 128
 /* the library's socket identifiers are 0 to SCE_NET_ID_SOCKET_MAX (1023) */
 #define SOCKET_IDENTIFIERS 1024
 
@@ -75,6 +86,12 @@ static pthread_mutex_t accepted_ahead_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static __thread int last_error;
 static int net_state; /* 0 not tried, 1 up, -1 failed */
+
+/* ad hoc play (below): 0 not in a group; 1 joining one (the system dialog
+is up); 2 in a group, whose address this machine has there; -1 the last
+attempt failed */
+static volatile int adhoc_state;
+static SceNetEtherAddr adhoc_address;
 
 static int net_ready(void)
 {
@@ -1098,7 +1115,17 @@ static int select_add(struct select_entry *entries, int count, int socket, unsig
 			return count;
 		}
 	if (count == SELECT_MAXIMUM)
+	{
+		static int logged;
+
+		/* (that socket is never ready: said once) */
+		if (!logged)
+		{
+			logged = 1;
+			vita_host_log("net: a select over more sockets than SELECT_MAXIMUM: the rest are not waited on");
+		}
 		return count;
+	}
 	entries[count].socket = socket;
 	entries[count].wanted = events;
 	entries[count].ready = 0;
@@ -1310,9 +1337,33 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 	return ready;
 }
 
+/* ad hoc play (HALO_NET_ADHOC, vita_main.c from the settings panel): an
+address for the game even without Wi-Fi. In the ad hoc group the Vita has
+no infrastructure address, and the game takes a machine without one as
+having no network (XNetGetEthernetLinkStatus, xnet.c: "not connected",
+and no system link); its traffic to the other machines goes through
+internet play's stand-ins on 127.0.0.1 (p2p_adhoc.c), so this address is
+never sent to. 169.254 and the MAC's last two bytes (link-local, as an IP
+stack would pick), or 169.254.1.1 before there is a group. */
+static posix_ulong adhoc_stand_in_address(void)
+{
+	const char *setting = getenv("HALO_NET_ADHOC");
+	unsigned char low = 1, high = 1;
+
+	if (!setting || (strcmp(setting, "true") && strcmp(setting, "1")))
+		return 0;
+	if (adhoc_state == 2)
+	{
+		high = adhoc_address.data[4];
+		low = adhoc_address.data[5] ? adhoc_address.data[5] : 1;
+	}
+	return 169u | 254u << 8 | (unsigned int)high << 16 | (unsigned int)low << 24;
+}
+
 /* this machine's address, from the network control service (the game's
 link check asks every frame: port/linux/src/xnet.c keeps the answer a
-while; HALO_NET_TRACE counts the queries and their time) */
+while; HALO_NET_TRACE counts the queries and their time), else ad hoc
+play's stand-in */
 posix_ulong posix_local_ipv4_address(void)
 {
 	SceNetCtlInfo information;
@@ -1321,7 +1372,7 @@ posix_ulong posix_local_ipv4_address(void)
 	posix_ulong result = 0;
 
 	if (!net_ready())
-		return 0;
+		return adhoc_stand_in_address();
 	started = trace_on() ? vita_host_time_us() : 0;
 	memset(&information, 0, sizeof(information));
 	if (sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS, &information) >= 0 &&
@@ -1334,7 +1385,7 @@ posix_ulong posix_local_ipv4_address(void)
 		__atomic_fetch_add(&trace_local_address.queries, 1, __ATOMIC_RELAXED);
 		__atomic_fetch_add(&trace_local_address.query_us, vita_host_time_us() - started, __ATOMIC_RELAXED);
 	}
-	return result;
+	return result ? result : adhoc_stand_in_address();
 }
 
 posix_ulong posix_resolve_ipv4(const char *host)
@@ -1364,11 +1415,6 @@ and the SDK names no call that creates or joins a group, so the probe looks
 for the system joining one on its own (an ad hoc state, an ad hoc address,
 peers) and tries a peer-to-peer datagram socket with a broadcast. Run it on
 two Vitas side by side to see them find each other. */
-
-#include <psp2/pspnet_adhoc.h>
-#include <psp2/pspnet_adhocctl.h>
-#include <psp2/kernel/threadmgr.h>
-#include <stdio.h>
 
 static void probe_log(const char *step, int result)
 {
@@ -1465,6 +1511,362 @@ void vita_net_adhoc_probe(void)
 	thread = sceKernelCreateThread("adhoc_probe", adhoc_probe_thread, 0x10000100, 0x10000, 0, 0, NULL);
 	if (thread >= 0)
 		sceKernelStartThread(thread, 0, NULL);
+}
+
+/* ---------- ad hoc play's group (posix_adhoc_*, for port/linux/src/p2p_adhoc.c)
+
+The PSP-style ad hoc network (ScePspnetAdhoc), which is what Vita homebrew
+that plays ad hoc uses (vitaQuake's net_adhoc_psp2.c, on hardware): the
+system's network check dialog joins a group (vita_adhoc_connect), and
+datagrams then go between machines' MAC addresses on PDP ports. The SDK
+names no call that creates or joins a group (no sceNetAdhocctlCreate or
+Connect): the dialog is the way in, which is why HALO_ADHOC_PROBE, which
+only starts the libraries, never saw a group.
+
+PDP calls with no flag wait (up to their timeout); with
+SCE_NET_ADHOC_F_NONBLOCK they return would-block at once. A receive is a
+wait with a timeout, so the bridge's thread sleeps until a datagram comes;
+if this firmware's waits return at once instead (seen as many empty
+receives each much shorter than asked), receives fall back to polling
+every 2 ms, logged once. */
+
+static int adhoc_pdp = -1;
+static int adhoc_polling;
+static unsigned int adhoc_short_waits;
+
+static int adhoc_failed(int result)
+{
+	switch ((unsigned int)result)
+	{
+	case SCE_ERROR_NET_ADHOC_WOULD_BLOCK:
+	case SCE_ERROR_NET_ADHOC_TIMEOUT:
+		return 0;
+	default:
+		return result < 0;
+	}
+}
+
+int posix_adhoc_ready(unsigned char *address)
+{
+	if (adhoc_state != 2)
+		return 0;
+	memcpy(address, adhoc_address.data, 6);
+	return 1;
+}
+
+int posix_adhoc_open(unsigned short port)
+{
+	char line[96];
+
+	posix_adhoc_close();
+	/* (a 32 KB receive buffer; the SDK's examples use 8 KB, tried next) */
+	adhoc_pdp = sceNetAdhocPdpCreate(&adhoc_address, port, 0x8000, 0);
+	if (adhoc_pdp < 0)
+		adhoc_pdp = sceNetAdhocPdpCreate(&adhoc_address, port, 0x2000, 0);
+	snprintf(line, sizeof(line), "adhoc: PDP port %u -> 0x%08x", port, (unsigned int)adhoc_pdp);
+	vita_host_log(line);
+	if (adhoc_pdp < 0)
+	{
+		adhoc_pdp = -1;
+		return -1;
+	}
+	adhoc_short_waits = 0;
+	return 0;
+}
+
+void posix_adhoc_close(void)
+{
+	if (adhoc_pdp >= 0)
+		sceNetAdhocPdpDelete(adhoc_pdp, 0);
+	adhoc_pdp = -1;
+}
+
+int posix_adhoc_send(const unsigned char *address, unsigned short port, const void *data, int size)
+{
+	int result;
+
+	if (adhoc_pdp < 0)
+		return -1;
+	result = sceNetAdhocPdpSend(adhoc_pdp, (const SceNetEtherAddr *)address, port, data, size, 0,
+		SCE_NET_ADHOC_F_NONBLOCK);
+	if (adhoc_failed(result))
+	{
+		static int logged;
+
+		if (logged++ < 8)
+		{
+			char line[96];
+
+			snprintf(line, sizeof(line), "adhoc: PDP send of %d bytes -> 0x%08x", size, (unsigned int)result);
+			vita_host_log(line);
+		}
+		return -1;
+	}
+	return result < 0 ? 0 : size;
+}
+
+int posix_adhoc_receive(unsigned char *address, unsigned short *port, void *data, int size, posix_ulong timeout)
+{
+	SceNetEtherAddr from;
+	SceUShort16 from_port = 0;
+	int length = size;
+	int result;
+	unsigned long long started = sceKernelGetProcessTimeWide();
+
+	if (adhoc_pdp < 0)
+		return -1;
+	result = sceNetAdhocPdpRecv(adhoc_pdp, &from, &from_port, data, &length, adhoc_polling ? 0 : (unsigned int)timeout,
+		adhoc_polling ? SCE_NET_ADHOC_F_NONBLOCK : 0);
+	if (result >= 0)
+	{
+		adhoc_short_waits = 0;
+		memcpy(address, from.data, 6);
+		*port = from_port;
+		return length;
+	}
+	if (adhoc_failed(result))
+	{
+		char line[96];
+
+		snprintf(line, sizeof(line), "adhoc: PDP receive -> 0x%08x (the group is gone?)", (unsigned int)result);
+		vita_host_log(line);
+		return -1;
+	}
+	if (adhoc_polling)
+	{
+		sceKernelDelayThread(2000);
+		return 0;
+	}
+	/* (a wait that came back at once, empty: count, and poll if they keep
+	on) */
+	if (timeout >= 4000 && sceKernelGetProcessTimeWide() - started < timeout / 4)
+	{
+		if (++adhoc_short_waits == 20)
+		{
+			adhoc_polling = 1;
+			vita_host_log("adhoc: PDP receives do not wait on this firmware: polling every 2 ms");
+		}
+		sceKernelDelayThread(2000);
+	}
+	else
+	{
+		adhoc_short_waits = 0;
+	}
+	return 0;
+}
+
+/* joining a group: vita_adhoc_connect, from the settings panel.
+
+The PSP-style libraries start with an ad hoc ID, which every machine of a
+game must share (the reserved type, as vitaQuake's that plays on hardware;
+HALO_ADHOC_ID_TYPE=0 for the product type), then the network check dialog
+in one of its PSP ad hoc modes joins the group: "connect" (the room's
+group, made if nobody has made it: what vitaQuake uses, with no group
+name), "create" or "join" (a list of the groups nearby). Room 1 is the
+unnamed group, 2-4 groups named HALOCE2..4 (HALO_ADHOC_GROUP names one),
+so several games nearby can keep apart. The dialog is the system's, drawn
+over the game's frames (vgxm_common_dialog) and driven by its own pad
+reading; the game sees no buttons meanwhile (vita_settings_input). */
+
+static char adhoc_status[96] = "not in an ad hoc group";
+static int adhoc_mode, adhoc_room;
+static int adhoc_libraries;
+
+static void adhoc_log(const char *step, int result)
+{
+	char line[224];
+
+	snprintf(line, sizeof(line), "adhoc: %s -> 0x%08x", step, (unsigned int)result);
+	vita_host_log(line);
+}
+
+static void adhoc_set_status(int state, const char *text)
+{
+	snprintf(adhoc_status, sizeof(adhoc_status), "%.95s", text);
+	adhoc_state = state;
+	vita_host_log(text);
+}
+
+/* the libraries, once */
+static int adhoc_start_libraries(void)
+{
+	SceNetAdhocctlAdhocId identifier;
+	const char *type = getenv("HALO_ADHOC_ID_TYPE");
+	int result;
+
+	if (adhoc_libraries)
+		return 1;
+	if (!net_ready())
+		return 0;
+	result = sceSysmoduleLoadModule(SCE_SYSMODULE_PSPNET_ADHOC);
+	adhoc_log("load SCE_SYSMODULE_PSPNET_ADHOC", result);
+	result = sceNetAdhocInit();
+	adhoc_log("sceNetAdhocInit", result);
+	if (result < 0 && (unsigned int)result != SCE_ERROR_NET_ADHOC_ALREADY_INITIALIZED)
+		return 0;
+	memset(&identifier, 0, sizeof(identifier));
+	identifier.type = type && *type ? atoi(type) : SCE_NET_ADHOCCTL_ADHOCTYPE_RESERVED;
+	memcpy(identifier.data, "HCEV00001", SCE_NET_ADHOCCTL_ADHOCID_LEN);
+	result = sceNetAdhocctlInit(&identifier);
+	adhoc_log("sceNetAdhocctlInit(HCEV00001)", result);
+	/* (0x80410b07: already initialised, by an earlier attempt) */
+	if (result < 0 && (unsigned int)result != 0x80410b07u)
+		return 0;
+	adhoc_libraries = 1;
+	return 1;
+}
+
+/* the system dialogs' language and confirm button, the system's own */
+static void adhoc_dialog_configuration(void)
+{
+	static int done;
+	SceCommonDialogConfigParam configuration;
+	int value;
+
+	if (done)
+		return;
+	done = 1;
+	sceCommonDialogConfigParamInit(&configuration);
+	if (sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &value) >= 0)
+		configuration.language = (SceSystemParamLang)value;
+	if (sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_ENTER_BUTTON, &value) >= 0)
+		configuration.enterButtonAssign = (SceSystemParamEnterButtonAssign)value;
+	adhoc_log("sceCommonDialogSetConfigParam", sceCommonDialogSetConfigParam(&configuration));
+}
+
+static int adhoc_connect_thread(SceSize arguments_size, void *arguments)
+{
+	static const int modes[] = { SCE_NETCHECK_DIALOG_MODE_PSP_ADHOC_CONN, SCE_NETCHECK_DIALOG_MODE_PSP_ADHOC_CREATE,
+		SCE_NETCHECK_DIALOG_MODE_PSP_ADHOC_JOIN };
+	SceNetCheckDialogParam parameters;
+	SceNetCheckDialogResult result;
+	SceNetAdhocctlGroupName group;
+	const char *group_setting = getenv("HALO_ADHOC_GROUP");
+	unsigned long long deadline;
+	int status, code;
+	char line[160];
+
+	(void)arguments_size;
+	(void)arguments;
+	if (!adhoc_start_libraries())
+	{
+		adhoc_set_status(-1, "ad hoc: the Vita's ad hoc libraries did not start (see halo.log)");
+		return 0;
+	}
+	adhoc_dialog_configuration();
+	memset(&group, 0, sizeof(group));
+	/* (eight bytes, not terminated when all are used) */
+	if (group_setting && *group_setting)
+	{
+		size_t length = strlen(group_setting);
+
+		memcpy(group.data, group_setting, length < SCE_NET_ADHOCCTL_GROUPNAME_LEN ? length : SCE_NET_ADHOCCTL_GROUPNAME_LEN);
+	}
+	else if (adhoc_room > 1 && adhoc_room <= 9)
+	{
+		memcpy(group.data, "HALOCE", 6);
+		group.data[6] = (SceChar8)('0' + adhoc_room);
+	}
+	sceNetCheckDialogParamInit(&parameters);
+	parameters.mode = modes[adhoc_mode >= 0 && adhoc_mode < 3 ? adhoc_mode : 0];
+	parameters.groupName = &group;
+	memcpy(parameters.npCommunicationId.data, "HCEV00001", 9);
+	parameters.npCommunicationId.term = 0;
+	parameters.npCommunicationId.num = 0;
+	parameters.timeoutUs = 0;
+	code = sceNetCheckDialogInit(&parameters);
+	snprintf(line, sizeof(line), "sceNetCheckDialogInit(mode %d, group \"%.8s\")", parameters.mode, (char *)group.data);
+	adhoc_log(line, code);
+	if (code < 0)
+	{
+		adhoc_set_status(-1, "ad hoc: the system's ad hoc dialog did not open (see halo.log)");
+		return 0;
+	}
+	vgxm_common_dialog(1);
+	/* (the dialog has its own timeout; this one in case it never ends) */
+	deadline = sceKernelGetProcessTimeWide() + 120000000ULL;
+	for (;;)
+	{
+		status = sceNetCheckDialogGetStatus();
+		if (status == SCE_COMMON_DIALOG_STATUS_FINISHED || status < 0)
+			break;
+		if (sceKernelGetProcessTimeWide() > deadline)
+		{
+			adhoc_log("sceNetCheckDialogAbort (2 minutes)", sceNetCheckDialogAbort());
+			deadline = ~0ULL;
+		}
+		sceKernelDelayThread(50000);
+	}
+	/* (the frames stop drawing it before it goes) */
+	vgxm_common_dialog(0);
+	sceKernelDelayThread(100000);
+	memset(&result, 0, sizeof(result));
+	code = sceNetCheckDialogGetResult(&result);
+	snprintf(line, sizeof(line), "dialog finished (status %d), result %d", status, result.result);
+	adhoc_log(line, code);
+	adhoc_log("sceNetCheckDialogTerm", sceNetCheckDialogTerm());
+	if (code < 0 || result.result != SCE_COMMON_DIALOG_RESULT_OK)
+	{
+		adhoc_set_status(-1, result.result == SCE_COMMON_DIALOG_RESULT_USER_CANCELED ?
+			"ad hoc: cancelled" : "ad hoc: the Vita did not join a group (see halo.log)");
+		return 0;
+	}
+	{
+		SceNetAdhocctlParameter group_parameters;
+		SceNetEtherAddr address;
+
+		memset(&address, 0, sizeof(address));
+		adhoc_log("sceNetAdhocctlGetEtherAddr", sceNetAdhocctlGetEtherAddr(&address));
+		memset(&group_parameters, 0, sizeof(group_parameters));
+		code = sceNetAdhocctlGetParameter(&group_parameters);
+		snprintf(line, sizeof(line), "adhoc: in group \"%.8s\" on channel %d as %02x:%02x:%02x:%02x:%02x:%02x (0x%08x)",
+			(char *)group_parameters.groupName.data, group_parameters.channel, address.data[0], address.data[1],
+			address.data[2], address.data[3], address.data[4], address.data[5], (unsigned int)code);
+		vita_host_log(line);
+		adhoc_address = address;
+		snprintf(line, sizeof(line), "ad hoc: in a group (room %d); host or join under Multiplayer, System Link",
+			adhoc_room);
+		adhoc_set_status(2, line);
+	}
+	return 0;
+}
+
+int vita_adhoc_connect(int mode, int room)
+{
+	SceUID thread;
+
+	if (adhoc_state == 1)
+		return -1;
+	if (adhoc_state == 2)
+		vita_adhoc_leave();
+	adhoc_mode = mode;
+	adhoc_room = room;
+	adhoc_set_status(1, "ad hoc: joining a group (the system dialog)");
+	thread = sceKernelCreateThread("adhoc_connect", adhoc_connect_thread, 0x10000100, 0x4000, 0, 0, NULL);
+	if (thread < 0 || sceKernelStartThread(thread, 0, NULL) < 0)
+	{
+		adhoc_set_status(-1, "ad hoc: cannot start joining");
+		return -1;
+	}
+	return 0;
+}
+
+void vita_adhoc_leave(void)
+{
+	if (adhoc_state != 2)
+		return;
+	/* (the bridge's next receive fails, and it waits for a group again) */
+	adhoc_state = 0;
+	posix_adhoc_close();
+	adhoc_log("sceNetCtlAdhocDisconnect", sceNetCtlAdhocDisconnect());
+	adhoc_set_status(0, "ad hoc: left the group");
+}
+
+int vita_adhoc_state(char *text, int size)
+{
+	if (text && size > 0)
+		snprintf(text, (size_t)size, "%s", adhoc_status);
+	return adhoc_state;
 }
 
 /* ---------- self-test (HALO_NET_SELFTEST=1)

@@ -183,6 +183,9 @@ struct game_options;
 #include "units/units.h"
 #include "units/vehicles.h"
 
+/* network_game_globals.c's */
+boolean network_game_distributed_client(void);
+
 /* ---------- constants */
 
 /* ---------- macros */
@@ -496,6 +499,7 @@ void game_tick(
 	halo_fine_tick_begin();
 	tick_phase_begin();
 #endif
+	cheats_network_client_enforce();
 	remove_quitting_players_from_game();
 #ifdef HALO_LINUX
 	tick_phase_end(0, "remove_quitting_players_from_game");
@@ -517,7 +521,8 @@ void game_tick(
 #ifdef HALO_LINUX
 	tick_phase_begin();
 #endif
-	ai_update();
+	if (!network_game_distributed_client())
+		ai_update();
 #ifdef HALO_LINUX
 	tick_phase_end(3, "ai_update");
 #endif
@@ -978,6 +983,13 @@ void game_initialize_for_new_map(
 	players_initialize_for_new_map();
 	scenario_initialize_for_new_map();
 	objects_initialize_for_new_map();
+	/* nothing of the distributed netcode's carried into the new game
+	(port/linux/game/network_distributed.c), before anything of the map
+	makes an object: a client makes the map's objects, and the game type's
+	(the flags of capture the flag, game_engine_initialize_for_new_map), at
+	the host's indices, not its own objects' of the last game's */
+	network_distributed_new_game();
+	render_interpolation_reset();
 	render_initialize_for_new_map();
 	structures_initialize_for_new_map();
 	breakable_surfaces_initialize_for_new_map();
@@ -994,11 +1006,7 @@ void game_initialize_for_new_map(
 	weather_particle_systems_initialize_for_new_map();
 	point_physics_initialize_for_new_map();
 	game_engine_initialize_for_new_map();
-#ifdef HALO_LINUX
-	/* nothing of the distributed netcode's carried into the new game
-	(port/linux/game/network_distributed.c) */
-	network_distributed_new_game();
-#endif
+
 	game_statistics_start();
 	update_server_new();
 	player_control_initialize_for_new_map();
@@ -1299,7 +1307,9 @@ void remove_quitting_players_from_game(
 
 		if (quit_time != NONE && !player->quit_out_of_game)
 		{
-			if (current_time == quit_time)
+			/* port: at its time or past it (a client's clock may jump the
+			ticks it missed to the host's, game_time_set_distributed) */
+			if (current_time >= quit_time)
 			{
 				long unit_index = player->unit_index;
 
@@ -1309,15 +1319,6 @@ void remove_quitting_players_from_game(
 					unit_get(unit_index);
 					unit_kill_no_statistics(player->unit_index);
 				}
-			}
-			else if (current_time > quit_time)
-			{
-				error(
-					_error_silent,
-					"player %x failed to quit, wanted %d is %d",
-					iterator.datum_index,
-					quit_time,
-					current_time);
 			}
 		}
 	}

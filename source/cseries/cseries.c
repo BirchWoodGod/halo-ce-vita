@@ -362,6 +362,65 @@ char *csprintf(
 __thread boolean display_assert_skipped = FALSE;
 #endif
 
+#ifdef HALO_RELEASE
+void release_assert_failed(
+	char const *information,
+	char const *file,
+	long line,
+	boolean fatal)
+{
+	static struct
+	{
+		char const *file;
+		long line;
+		unsigned long count;
+	} places[512];
+	static volatile long places_lock;
+	unsigned long index = ((unsigned long)(size_t)file + (unsigned long)line * 2654435761UL) % NUMBEROF(places);
+	unsigned long count = 0;
+	unsigned long probe;
+
+	while (__sync_lock_test_and_set(&places_lock, 1))
+		;
+	for (probe = 0; probe < NUMBEROF(places); probe++)
+	{
+		if (!places[index].file)
+		{
+			places[index].file = file;
+			places[index].line = line;
+		}
+		if (places[index].file == file && places[index].line == line)
+		{
+			count = ++places[index].count;
+			break;
+		}
+		index = (index + 1) % NUMBEROF(places);
+	}
+	__sync_lock_release(&places_lock);
+
+	/* (a place the full table has no room for: every time) */
+	if (count > 1)
+	{
+		unsigned long power = 10;
+
+		while (power < count && power < 1000000000UL)
+			power *= 10;
+		if (power != count)
+			return;
+	}
+	if (count > 1)
+	{
+		error(_error_log, "EXCEPTION %s in %s,#%ld: %s (release build, failed %lu times)", fatal ? "assert" : "warn",
+			file, line, information ? information : "<no reason given>", count);
+	}
+	else
+	{
+		error(_error_log, "EXCEPTION %s in %s,#%ld: %s (release build)", fatal ? "assert" : "warn",
+			file, line, information ? information : "<no reason given>");
+	}
+}
+#endif
+
 void display_assert(
 	char *information,
 	char *file,

@@ -27,8 +27,9 @@ Evolved.
 - The whole campaign from the menus, with checkpoints, saves and Save and
   Quit, cinematics, and the movies (converted to MP4, see below).
 - Multiplayer maps on your own (split screen with one player). System link
-  between Vitas on the same Wi-Fi is in, but still being tested; play
-  against PCs is not supported yet.
+  between Vitas on the same Wi-Fi; online play (short codes, a public
+  lobby) and ad hoc play between Vitas, experimental. Vitas play only
+  Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality and control options: hold
   **Select + Start** in game.
@@ -276,7 +277,8 @@ Issues and pull requests are welcome. What is planned next is in the
 
 - **Performance** in the biggest fights: the render on the first core is
   the limit at the peak.
-- **Online and ad hoc multiplayer** between Vitas.
+- **Testing online and ad hoc multiplayer** between Vitas: the settings
+  panel's Multiplayer page (see [port/vita/README.md](port/vita/README.md)).
 - **The issues listed for the next update** in the roadmap.
 
 ### Reporting a crash or a problem

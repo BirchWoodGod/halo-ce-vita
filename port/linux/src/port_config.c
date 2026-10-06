@@ -70,6 +70,26 @@ struct config_setting
 
 static const struct config_setting config_settings[] =
 {
+	{ "debug.telnet_console_port", _config_integer, "2323", "HALO_TELNET_CONSOLE_PORT", _environment_value,
+		_platform_all,
+		"The port of the script console (telnet_console); the Xbox's was 23, which\n"
+		"only the administrator can listen on." },
+	{ "debug.network_test_score", _config_integer, "0", "HALO_NETWORK_TEST_SCORE", _environment_value, _platform_all,
+		"The score that wins an automated test game (a short game, to test the next\n"
+		"one of debug.network_test's list); 0 the variant's own." },
+	{ "debug.network_test_rejoin", _config_real, "0.0", "HALO_NETWORK_TEST_REJOIN", _environment_value, _platform_all,
+		"Seconds into an automated test game after which a joining machine leaves\n"
+		"it (as quitting from the pause menu does) and joins again, once; 0 never." },
+	{ "debug.network_test_pickup_weapon", _config_string, "\"\"", "HALO_NETWORK_TEST_PICKUP_WEAPON", _environment_value,
+		_platform_all,
+		"The weapon network_test_pickup stands the player on: the first whose tag\n"
+		"name has this in it (\"sniper\", say); empty any." },
+	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
+		"What the game's console shows on screen of what it logs: \"important\"\n"
+		"(bans, players dropped for cheating, what refuses a command, and the\n"
+		"asserts that stop the game), \"all\" (every line, the game's own\n"
+		"chatter too), or \"none\" (the asserts that stop the game only). What\n"
+		"a command prints shows whatever this is, and debug.txt has every line." },
 	{ "display.fullscreen", _config_boolean, "true", "HALO_FULLSCREEN", _environment_value, _platform_desktop,
 		"Start fullscreen, drawing at the display's resolution and shape; false\n"
 		"starts in a window, which draws the Xbox's 640x480. F11 switches." },
@@ -114,10 +134,9 @@ static const struct config_setting config_settings[] =
 		"instead of the local network's broadcast address (for VPNs); empty for\n"
 		"the local network." },
 	{ "network.netcode", _config_string, "\"distributed\"", "HALO_NETCODE", _environment_value, _platform_all,
-		"\"distributed\" (work in progress, port/linux/NETCODE.md) predicts each\n"
-		"player's own moves and lets the host decide the rest; \"lockstep\" plays\n"
-		"system link as the Xbox game did. The host's is played: a machine that\n"
-		"joins a game plays its host's." },
+		"The netcode: \"distributed\" (port/linux/NETCODE.md) predicts each player's\n"
+		"own moves and lets the host decide the rest. It is the only one network\n"
+		"version 9 plays; the setting is kept so older settings files load." },
 	{ "network.online", _config_boolean, "true", "HALO_NET_ONLINE", _environment_value, _platform_all,
 		"Internet play: hosting makes an invite link (logged, and put on the\n"
 		"clipboard) that lets whoever has it join over the internet; opening a\n"
@@ -144,6 +163,18 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"
 		"comma-separated host:port." },
+	{ "network.adhoc", _config_boolean, "false", "HALO_NET_ADHOC", _environment_value, _platform_all,
+		"Ad hoc play: system link with the machines of this machine's ad hoc\n"
+		"group (the Vita's wireless group without a router, joined from its\n"
+		"settings panel), carried as internet play carries it, with or without\n"
+		"network.online; nothing goes to the internet." },
+	{ "network.lobby_public", _config_boolean, "false", "HALO_NET_LOBBY_PUBLIC", _environment_value, _platform_all,
+		"List the games this machine hosts in internet play's public lobby, where\n"
+		"anyone can find and join them; false keeps them to those with the\n"
+		"invite link or its short code." },
+	{ "network.lobby_name", _config_string, "\"\"", "HALO_NET_LOBBY_NAME", _environment_value, _platform_all,
+		"The name the public lobby shows for this machine's games; empty for\n"
+		"\"Halo\"." },
 	{ "discord.application_id", _config_string, "\"1553978809840050229\"", "HALO_DISCORD_APPLICATION",
 		_environment_value, _platform_desktop,
 		"The Discord application internet play invites go through while the\n"
@@ -155,8 +186,9 @@ static const struct config_setting config_settings[] =
 
 	{ "debug.network_test", _config_string, "\"\"", "HALO_NETWORK_TEST", _environment_value, _platform_all,
 		"Automated system link sessions for testing (port/linux/game/network_test.c):\n"
-		"\"host:<map>\" hosts a game on that map, \"join\" joins the first game found;\n"
-		"empty for none." },
+		"\"host:<map>\" hosts a game on that map, \"join\" joins the first game found,\n"
+		"\"join-public\" joins the first game of internet play's public lobby,\n"
+		"\"join-code:ABCD-EFGH\" the game of that code; empty for none." },
 	{ "debug.network_test_start", _config_real, "15.0", "HALO_NETWORK_TEST_START", _environment_value, _platform_all,
 		"Seconds after hosting that an automated test game starts." },
 	{ "debug.network_test_kill", _config_real, "0.0", "HALO_NETWORK_TEST_KILL", _environment_value, _platform_all,
@@ -170,6 +202,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_pickup", _config_real, "0.0", "HALO_NETWORK_TEST_PICKUP", _environment_value, _platform_all,
 		"This many seconds into an automated test game the host stands its last\n"
 		"player on a weapon, which a joining player then picks up; 0 never." },
+	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,
+		"Listen on 127.0.0.1 port 23 (telnet) for a script console that runs what\n"
+		"it is sent as the game's console does, with no password; false none." },
 	{ "debug.network_latency", _config_real, "0.0", "HALO_NETWORK_LATENCY", _environment_value, _platform_all,
 		"Milliseconds everything received is held back (a round trip between two\n"
 		"machines of twice it), to test the netcode as over the internet; 0 none." },

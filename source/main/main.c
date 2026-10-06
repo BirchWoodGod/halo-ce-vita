@@ -2469,10 +2469,12 @@ static void main_update_time_unthrottled(
 		(HALO_NET_CATCH_UP_TICKS): a machine that cannot keep up plays
 		slower than real time for a moment, as the campaign does; the
 		others take its updates as they come (each stamped with its tick).
-		The lockstep netcode keeps the Xbox's pacing (its clients must run
-		every tick the host ran). */
-		else if ((main_globals.connection == _game_connection_network_server ||
-			main_globals.connection == _game_connection_network_client) && network_game_distributed())
+		Every network game is distributed now - System Link, online play
+		and ad hoc alike (protocol 9 has no lockstep path) - so every one is
+		paced so; a client left more than a second behind the host takes
+		the host's clock at its next update (network_client_manager.c). */
+		else if (main_globals.connection == _game_connection_network_server ||
+			main_globals.connection == _game_connection_network_client)
 		{
 			seconds_elapsed = CEILING(seconds_elapsed, (real)main_network_catch_up_ticks() * 0.03333333507180214f);
 		}
