@@ -105,9 +105,15 @@ struct vita_host_pad
 	unsigned char lx, ly, rx, ry;
 	/* the touch zones held (a bit per VITA_ZONE_*, vita_controls.h) */
 	unsigned long touch;
+	/* the angles the Vita turned since the last read (radians about its x,
+	y and z axes, filtered: vita_controls.h, gyro aiming) */
+	float gyro[3];
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);
+/* the gyroscope's line on the settings panel's Gyro tab: the rates now
+(degrees a second), whether the bias was learnt */
+void vita_gyro_status(char *text, int size);
 /* the settings panel (vita_settings.c): nonzero when it took the buttons
 (open, or SELECT+START held), and the game should see none */
 int vita_settings_input(const struct vita_host_pad *pad);

@@ -14,6 +14,12 @@ Vita button and gives the touch zones Xbox buttons: vita_controls.c):
 	                                  (switch grenades), right White (flashlight)
 The look stick takes Xita's settings: XV_LOOK_SENS (percent), XV_LOOK_CURVE
 (2: squared), XV_INVERT_Y, and XV_DEADZONE (percent, both sticks).
+
+Gyro aiming (the panel's Gyro tab, vita_controls.h): what the Vita turned,
+in play, waits here for the game's look code, which takes it once a frame
+through vita_pad_gyro_look (port/linux/src/xinput_sdl.c halo_linux_mouse_look)
+and adds it to the facing change as mouse aim is added, divided by the
+zoom. In hold mode the gyro button only aims, in play.
 */
 
 #include "platform.h"
@@ -28,6 +34,46 @@ int vita_menus_active;
 
 /* bumped by the settings panel (port_config.c) */
 extern volatile unsigned long halo_settings_generation;
+
+/* the zoom level of a local player, NONE (-1) unzoomed (source/game/player_control.c) */
+extern short player_control_get_zoom_level(short local_player_index);
+
+/* the gyro's settings, and what it turned that the game has not taken */
+static struct vita_gyro_config gyro_config;
+static struct vita_gyro_state gyro_state;
+
+/* (the game's look code, once a frame while the player can look) the
+gyro's yaw and pitch since the last call, in radians; 0 if none */
+int vita_pad_gyro_look(short gamepad_index, float *yaw, float *pitch)
+{
+	/* (debug) HALO_GYRO_LOG=1: what the game took, in degrees, a line
+	every 30 frames while it turns */
+	static int log_wanted = -1, logged_frames;
+	static float logged_yaw, logged_pitch;
+	int result;
+
+	*yaw = *pitch = 0.0f;
+	if (gamepad_index != 0)
+		return 0;
+	result = vita_gyro_take(&gyro_state, &gyro_config, player_control_get_zoom_level(0) >= 0, yaw, pitch);
+	if (log_wanted < 0)
+		log_wanted = getenv("HALO_GYRO_LOG") && atoi(getenv("HALO_GYRO_LOG"));
+	if (log_wanted)
+	{
+		logged_yaw += *yaw * 57.29578f;
+		logged_pitch += *pitch * 57.29578f;
+		if (++logged_frames >= 30)
+		{
+			if (logged_yaw != 0.0f || logged_pitch != 0.0f)
+				platform_log("gyro: the game took yaw %+.2f pitch %+.2f degrees (mode %d, %.2fx, zoom %d)",
+					logged_yaw, logged_pitch, gyro_config.mode, gyro_config.sensitivity,
+					player_control_get_zoom_level(0));
+			logged_yaw = logged_pitch = 0.0f;
+			logged_frames = 0;
+		}
+	}
+	return result;
+}
 
 static int setting(const char *name, int fallback, int low, int high)
 {
@@ -100,15 +146,22 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 		curve = setting("XV_LOOK_CURVE", 0, 0, 2);
 		invert = setting("XV_INVERT_Y", 0, 0, 1);
 		vita_controls_config_load(&controls);
+		vita_gyro_config_load(&gyro_config);
 	}
 	vita_host_pad_read(&pad);
 	/* the settings panel has the buttons (and the touch zones) while it is
-	open */
+	open; the gyro waits */
 	if (vita_settings_input(&pad))
 	{
+		vita_gyro_accumulate(&gyro_state, &gyro_config, pad.gyro, 0);
 		gamepad->sThumbLX = gamepad->sThumbLY = gamepad->sThumbRX = gamepad->sThumbRY = 0;
 		return;
 	}
+	/* the gyro, in play: in hold mode its button only aims */
+	vita_gyro_accumulate(&gyro_state, &gyro_config, pad.gyro,
+		vita_gyro_active(&gyro_config, pad.buttons, vita_menus_active));
+	if (gyro_config.mode == VITA_GYRO_HOLD && !vita_menus_active)
+		pad.buttons &= ~gyro_config.button;
 	/* the buttons and the touch zones held as the Xbox's buttons
 	(vita_controls.c): crouch is the left stick's click, which the Vita
 	does not have; HALO_CROUCH_TOGGLE (the panel's Crouch, on by default)
