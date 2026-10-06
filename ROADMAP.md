@@ -29,26 +29,17 @@ flares; saves that keep working across updates.
 Security fixes: the Xbox's debug console no longer listens on the network,
 and three bugs in the original LAN multiplayer code are closed.
 
-## Next: 1.0.3 (in beta)
+### 1.0.3 (October 6, 2026)
 
-Pre-releases are on the [releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases).
-Beta 1 is out; beta 2 fixes most of what testers reported:
+Big fights run much better (about 25 fps on The Silent Cartographer's
+beach with the defaults, 28 with the Performance profile); shaders ship
+precompiled, so reaching a new area no longer freezes; graphics profiles,
+a 4:3 option and Sharp upscaling, all applied without a restart; crash
+fixes from players' dumps (dropped weapons, HUD sounds, vehicles); fixed
+checkpoints; Warthog windshields, energy shields, camouflage, scopes and
+water drawn correctly; the screen dims when the Vita is left alone.
 
-- **Crashes and freezes** found in players' crash dumps (dropping a weapon,
-  HUD warning sounds in fights, leaving a vehicle, a texture cache lock).
-- **Checkpoints** that stopped coming after some saves, and missing
-  marine reinforcements.
-- **No more freezes reaching a new area**: the graphics shaders ship
-  precompiled.
-- **Graphics:** black camouflaged Elites, black scopes, flickering glass
-  and effects late in a session, white placeholders on the HUD, the black
-  screen between sections, the missing dropship in a cutscene, smoother
-  weapon motion.
-- **Heavy fights:** more speed in the biggest battles.
-- Still being looked at: trees and Covenant shields flickering at the
-  screen's edges, water on The Silent Cartographer.
-
-## 1.1.0: multiplayer, custom maps and a steady 30 fps
+## Next: 1.1.0: multiplayer, custom maps and a steady 30 fps
 
 - **Online play between Vitas**: host a public lobby or a private one with
   a short code, join from the settings panel. Built on iamhaller's
@@ -61,7 +52,10 @@ Beta 1 is out; beta 2 fixes most of what testers reported:
 - **Campaign co-op over the network**: play the campaign together on two
   Vitas over Wi-Fi, online or ad hoc, built on halo-ce-universal's network
   co-op (the Xbox only had split-screen co-op on one console).
-- **Custom maps**: play community-made maps, including PC Halo CE maps converted for the Xbox engine, in multiplayer and the campaign menus.
+- **Custom maps**: play community-made maps, Xbox ones and Halo PC / Custom
+  Edition ones, and download a host's map from its Vita when you join.
+- **Settings panel in tabs**, with a Modded maps tab, touch zones and
+  remappable buttons in Xbox controller terms, and dynamic resolution.
 
 ## Later
 
