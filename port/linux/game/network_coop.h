@@ -49,6 +49,8 @@ boolean network_coop_active(void);
 boolean network_coop_devices_remote(void);
 /* devices.c: a group's devices were set straight to its value */
 void network_coop_note_device_snap(short group_index);
+/* objects.c: an object was made (the co-op host's object census) */
+void network_coop_note_object_new(long object_index);
 /* unit_scripting_commands.c: a script set a unit's maximum or current
 vitality; TRUE if it was a co-op player's, now set on every player's */
 boolean network_coop_set_players_vitality(long unit_index, boolean maximum, real body, real shield);

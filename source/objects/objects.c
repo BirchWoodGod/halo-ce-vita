@@ -139,6 +139,8 @@ on the host's word */
 long network_objects_new_object_index(void);
 boolean network_objects_creating_host_object(void);
 boolean network_objects_may_delete(long object_index);
+/* port/linux/game/network_coop.c's: the co-op host's object census looks at each object made */
+void network_coop_note_object_new(long object_index);
 #endif
 /* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
 void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
@@ -727,6 +729,10 @@ static long object_header_new(
 			index = NONE;
 		}
 	}
+#ifdef HALO_LINUX
+	if (index!=NONE && data==object_header_data)
+		network_coop_note_object_new(index);
+#endif
 
 	return index;
 }
