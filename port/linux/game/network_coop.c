@@ -182,8 +182,13 @@ enum
 	MAXIMUM_DEVICE_GROUPS = 1024,
 	/* a changed group is sent in this many ticks' messages */
 	DEVICE_GROUP_SENDS = 3,
-	/* unchanged groups sent each tick, in rotation */
+	/* unchanged groups sent each tick in each rotation: the quick one through
+	the groups that have moved since the map loaded, and one through all of
+	them. A client loaded the same map, so a group that never moved is as the
+	host has it; that rotation only backs up the other, and at 8 a tick it
+	was a third of the host's bytes (a10). */
 	DEVICE_GROUP_REFRESHES_PER_TICK = 8,
+	DEVICE_GROUP_ALL_REFRESHES_PER_TICK = 1,
 
 	OBJECT_NAMES_INTERVAL_TICKS = TICKS_PER_SECOND / 2,
 	OBJECT_NAME_BYTES = MAXIMUM_OBJECT_NAMES_PER_SCENARIO / 8,
@@ -914,7 +919,7 @@ static void host_send_device_groups(
 	{
 		struct distributed_coop_device_group *entry = &entries[index];
 		short group_index = group_indices[index];
-		boolean refresh = (index - host_devices.refresh_next + count) % count < DEVICE_GROUP_REFRESHES_PER_TICK;
+		boolean refresh = (index - host_devices.refresh_next + count) % count < DEVICE_GROUP_ALL_REFRESHES_PER_TICK;
 
 		if (host_devices.moved[group_index])
 		{
@@ -930,7 +935,7 @@ static void host_send_device_groups(
 		entries[sent++] = *entry;
 	}
 	host_devices.started = TRUE;
-	host_devices.refresh_next = count ? (short)((host_devices.refresh_next + DEVICE_GROUP_REFRESHES_PER_TICK) % count) : 0;
+	host_devices.refresh_next = count ? (short)((host_devices.refresh_next + DEVICE_GROUP_ALL_REFRESHES_PER_TICK) % count) : 0;
 	host_devices.moved_refresh_next = moved_count ?
 		(short)((host_devices.moved_refresh_next + DEVICE_GROUP_REFRESHES_PER_TICK) % moved_count) : 0;
 	/* (in messages of at most MAXIMUM_DEVICE_GROUPS_PER_MESSAGE, since a
