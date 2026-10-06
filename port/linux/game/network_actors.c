@@ -60,7 +60,8 @@ enum
 	the host went quiet. */
 	CONTROL_HELD_TICKS = 2 * TICKS_PER_SECOND,
 	/* A client lets a unit's actor states place it while one came this
-	recently: twice the longest period a unit's states go at
+	recently, in the host's ticks (a slow host's ticks go by slower than the
+	client's): twice the longest period a unit's states go at
 	(network_objects.c's MAXIMUM_OBJECT_PERIOD_TICKS). After that its object
 	states do again. */
 	ACTOR_STATES_FRESH_TICKS = 8,
@@ -210,6 +211,8 @@ struct client_actor
 {
 	long unit_index;
 	long received_time;
+	/* the host's latest tick when the last entry came (distributed_latest_host_time) */
+	long received_host_time;
 	struct unit_control_data control;
 	/* the impulse to play, and the number of the last one played */
 	short impulse;
@@ -463,6 +466,7 @@ static boolean actor_state_apply(
 
 	/* the control, applied every tick until the next entry */
 	actor->received_time = now;
+	actor->received_host_time = distributed_latest_host_time();
 	actor->control.animation_state = (char)state->animation_state;
 	actor->control.aiming_speed = (char)state->aiming_speed;
 	actor->control.control_flags = state->control_flags;
@@ -880,7 +884,7 @@ boolean network_actors_client_drives(
 	{
 		if (client_actors[index].unit_index == unit_index)
 		{
-			return game_time_get() - client_actors[index].received_time <= ACTOR_STATES_FRESH_TICKS &&
+			return distributed_latest_host_time() - client_actors[index].received_host_time <= ACTOR_STATES_FRESH_TICKS &&
 				actor_unit_valid(unit_index) && object_get(unit_index)->object.type != _object_type_vehicle;
 		}
 	}
