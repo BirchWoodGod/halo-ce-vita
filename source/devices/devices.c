@@ -776,6 +776,7 @@ static boolean device_group_change(
 			group->actual_value = desired_value;
 			group->flags |= FLAG(_device_group_changed_once_bit);
 			changed = TRUE;
+			network_coop_note_device_group(group_index);
 
 			object_iterator_new(&iterator, _object_mask_device, 0);
 			while ((device = object_iterator_next(&iterator)) != NULL)
@@ -848,6 +849,7 @@ void device_group_change_only_once_more_set(
 		}
 
 		group->flags &= ~FLAG(_device_group_changed_once_bit);
+		network_coop_note_device_group((short)group_index);
 	}
 
 	return;
@@ -1105,6 +1107,7 @@ static short device_group_new(
 
 		group->actual_value = initial_value;
 		group->flags = flags;
+		network_coop_note_device_group(group_index);
 	}
 	else
 	{
