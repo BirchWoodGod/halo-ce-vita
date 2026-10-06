@@ -54,6 +54,7 @@ void vgxm_menu_set(const char *text, int selected)
 }
 
 void vgxm_overlay_enable(int enabled) { (void)enabled; }
+void vgxm_upscale_filter_set(int filter) { (void)filter; }
 void vita_host_log(const char *line) { (void)line; }
 
 int p2p_join_code(const char *code)
