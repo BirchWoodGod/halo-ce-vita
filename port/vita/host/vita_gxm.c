@@ -3079,7 +3079,10 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	const char *text = gxm.menu_text[__atomic_load_n(&gxm.menu_index, __ATOMIC_ACQUIRE)];
 	const char *lines[24];
 	int line_count = 0, index;
-	const float width = 600.0f, row_height = 24.0f;
+	/* (wide enough for a 21-character label and a 16-character choice at
+	16 pixels a character: "Co-op campaign  < 343 Guilty Spark >") */
+	const float width = 680.0f;
+	float row_height = 24.0f;
 	float height, left, top;
 	char copy[2048];
 	char *cursor;
@@ -3097,6 +3100,10 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	}
 	if (line_count < 2)
 		return count;
+	/* (the rows close up to fit the screen: the settings page has 22 lines
+	with the profile, display and multiplayer rows) */
+	if (16.0f + row_height * line_count + 8.0f > DISPLAY_HEIGHT)
+		row_height = (DISPLAY_HEIGHT - 24.0f) / line_count;
 	height = 16.0f + row_height * line_count + 8.0f;
 	left = (DISPLAY_WIDTH - width) / 2.0f;
 	top = (DISPLAY_HEIGHT - height) / 2.0f;
