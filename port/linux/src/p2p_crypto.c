@@ -143,6 +143,40 @@ void p2p_sha256(const void *data, int size, unsigned char *digest)
 	sha256_end(&context, digest);
 }
 
+/* a running SHA-256, for the game's own units (map sharing's file digest,
+port/linux/game/map_share_protocol.h, which declares these with the same
+opaque context) */
+struct halo_sha256_stream
+{
+	unsigned long long opaque[16];
+};
+typedef char halo_sha256_stream_fits[sizeof(struct sha256) <= sizeof(struct halo_sha256_stream) ? 1 : -1];
+
+void halo_sha256_begin(struct halo_sha256_stream *context)
+{
+	sha256_begin((struct sha256 *)context);
+}
+
+void halo_sha256_add(struct halo_sha256_stream *context, const void *data, unsigned long size)
+{
+	const unsigned char *bytes = data;
+
+	/* (sha256_add takes an int) */
+	while (size > 0)
+	{
+		int count = size > 0x40000000UL ? 0x40000000 : (int)size;
+
+		sha256_add((struct sha256 *)context, bytes, count);
+		bytes += count;
+		size -= (unsigned long)count;
+	}
+}
+
+void halo_sha256_end(struct halo_sha256_stream *context, unsigned char *digest)
+{
+	sha256_end((struct sha256 *)context, digest);
+}
+
 void p2p_hmac_sha256(const unsigned char *key, int key_size, const void *data, int size, unsigned char *digest)
 {
 	unsigned char block[64], inner[P2P_SHA256_SIZE];
