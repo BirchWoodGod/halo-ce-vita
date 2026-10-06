@@ -3564,9 +3564,15 @@ that scenario trigger volume (the benchmarks walk the player through a
 level's encounters this way: triage/perf2-status.md), "@where" logs where
 every vehicle and scenery object is, and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
-(the desktop GL device; on the Vita its display, as name<frame>.bmp). Each runs once,
+(the desktop GL device; on the Vita its display, as name<frame>.bmp);
+"@set VARIABLE value" changes a setting as the Vita's settings panel does
+(vita_settings_set, through halo_test_setting_hook; elsewhere the variable, and the settings generation the
+readers watch). Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
+/* (the Vita's settings panel sets it: vita_settings_load) */
+int (*halo_test_setting_hook)(const char *variable, const char *value);
+extern volatile unsigned long halo_settings_generation;
 void platform_log(const char *format, ...);
 /* (@shot: the name of the next frame's screenshot, read by the present) */
 char halo_screenshot_name[64];
@@ -3649,6 +3655,17 @@ static void main_test_commands_update(
 				platform_log("where %lx %s at %.2f %.2f %.2f", (unsigned long)iterator.index,
 					tag_get_name(object->definition_index), object->object.position.x, object->object.position.y,
 					object->object.position.z);
+		}
+		else if (!strncmp(commands[index].command, "@set ", 5))
+		{
+			char variable[64], value[64];
+
+			if (sscanf(commands[index].command + 5, "%63s %63s", variable, value) == 2 &&
+				!(halo_test_setting_hook && halo_test_setting_hook(variable, value)))
+			{
+				setenv(variable, value, 1);
+				__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
+			}
 		}
 		else if (!strncmp(commands[index].command, "@tv ", 4))
 			main_test_trigger_volume(commands[index].command + 4);

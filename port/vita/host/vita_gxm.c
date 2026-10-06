@@ -97,6 +97,11 @@ struct block
 	unsigned int size;
 };
 
+/* the CDRAM the render targets hold (blocks of their own; the small
+targets' shared blocks count whole), for the log of a live change of the
+screen's targets (vgxm_target_stats) */
+static unsigned long target_cdram_bytes;
+
 static void *block_allocate(struct block *block, SceKernelMemBlockType type, unsigned int size, int map,
 	const char *name)
 {
@@ -110,6 +115,8 @@ static void *block_allocate(struct block *block, SceKernelMemBlockType type, uns
 	}
 	sceKernelGetMemBlockBase(block->uid, &block->base);
 	block->size = size;
+	if (type == SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW && strstr(name, "target"))
+		target_cdram_bytes += size;
 	if (map)
 	{
 		int result = sceGxmMapMemory(block->base, size, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE);
@@ -117,6 +124,8 @@ static void *block_allocate(struct block *block, SceKernelMemBlockType type, uns
 		if (result < 0)
 		{
 			log_line("gxm: cannot map %s: 0x%08x", name, (unsigned)result);
+			if (type == SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW && strstr(name, "target"))
+				target_cdram_bytes -= size;
 			sceKernelFreeMemBlock(block->uid);
 			block->base = NULL;
 			return NULL;
@@ -151,6 +160,10 @@ struct target
 	that fraction of the size asked for, and viewports and clips into it are
 	scaled to match; 0 for 1 */
 	float scale;
+	/* a screen-sized target (480 lines, 640 columns or more), whatever the
+	scale: its render target object is kept as a spare when it is given
+	back (render_target_give_back) */
+	int scale_kind;
 	/* the serial of the last scene that drew into it (0: none yet) */
 	unsigned int written_serial;
 	struct block memory;
@@ -321,6 +334,18 @@ static SceGxmRenderTarget *render_target_for(unsigned int width, unsigned int he
 	size share this object) */
 	parameters.scenesPerFrame = 8; /* SCE_GXM_MAX_SCENES_PER_RENDERTARGET */
 	result = sceGxmCreateRenderTarget(&parameters, &target);
+	{
+		/* (a driver error, once more after a moment: Vita3K's renderer
+		thread failed a few creations while the screen's targets were made
+		again) */
+		int retry;
+
+		for (retry = 0; retry < 3 && result == (int)SCE_GXM_ERROR_DRIVER; retry++)
+		{
+			sceKernelDelayThread(2000);
+			result = sceGxmCreateRenderTarget(&parameters, &target);
+		}
+	}
 	if (result < 0)
 	{
 		log_line("gxm: cannot create a %ux%u render target: 0x%08x", width, height, (unsigned)result);
@@ -1665,6 +1690,8 @@ static void *small_target_memory(unsigned int *share_size)
 	return (unsigned char *)current.base + used - size;
 }
 
+static void *cdram_allocate(struct block *block, unsigned int size, const char *name);
+
 /* CDRAM for a colour target: a small one's share of a block, else a block
 of its own */
 static void *colour_target_memory(struct block *memory, unsigned int size, const char *name)
@@ -1680,22 +1707,248 @@ static void *colour_target_memory(struct block *memory, unsigned int size, const
 		memory->size = share_size;
 		return base;
 	}
-	return block_allocate(memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, name);
+	return cdram_allocate(memory, size, name);
 }
 
-/* gives a target slot back its memory and its render target object */
+/* Render target objects of the screen-sized targets given back (a live
+change of the render scale or width: vgxm_target_release), kept for the
+next target of their size instead of destroyed: switching back and forth
+between two settings then creates none (each creation is the driver's
+work and memory, and there are only so many render target objects). One
+set's worth is kept; the oldest is destroyed to make room. */
+#define SPARE_RENDER_TARGETS 4
+
+static struct
+{
+	SceGxmRenderTarget *object;
+	unsigned int width, height;
+} spare_render_targets[SPARE_RENDER_TARGETS];
+
+static void render_target_give_back(SceGxmRenderTarget *object, unsigned int width, unsigned int height)
+{
+	int i;
+
+	if (spare_render_targets[SPARE_RENDER_TARGETS - 1].object)
+		sceGxmDestroyRenderTarget(spare_render_targets[SPARE_RENDER_TARGETS - 1].object);
+	for (i = SPARE_RENDER_TARGETS - 1; i > 0; i--)
+		spare_render_targets[i] = spare_render_targets[i - 1];
+	spare_render_targets[0].object = object;
+	spare_render_targets[0].width = width;
+	spare_render_targets[0].height = height;
+}
+
+/* a spare render target object of this size, or a new one */
+static SceGxmRenderTarget *render_target_take(unsigned int width, unsigned int height)
+{
+	int i;
+
+	for (i = 0; i < SPARE_RENDER_TARGETS; i++)
+	{
+		if (spare_render_targets[i].object && spare_render_targets[i].width == width &&
+			spare_render_targets[i].height == height)
+		{
+			SceGxmRenderTarget *object = spare_render_targets[i].object;
+
+			for (; i < SPARE_RENDER_TARGETS - 1; i++)
+				spare_render_targets[i] = spare_render_targets[i + 1];
+			spare_render_targets[SPARE_RENDER_TARGETS - 1].object = NULL;
+			return object;
+		}
+	}
+	return render_target_for(width, height);
+}
+
+/* The memory of the screen-sized targets given back by a live change,
+kept (up to SCREEN_BLOCK_CACHE_BYTES) for the next target of exactly that
+kind and size instead of freed. Switching between settings then lands
+each size where it was before: Vita3K's renderer keeps the surfaces it has
+seen by address, and a surface of another size made where an old one was
+drew red or nothing through the zoom's and pause menu's copies of the
+screen, and once hung its renderer (triage/live-status.md; on the hardware
+the GPU has no such cache). The oldest is freed first when the cache is
+full, and the whole cache when CDRAM runs out (cdram_allocate). */
+#define SCREEN_BLOCK_CACHE_BYTES (16u * 1024 * 1024)
+#define SCREEN_BLOCK_CACHE_COUNT 24
+
+static struct
+{
+	struct block memory;
+	int depth;
+	unsigned int width, height;
+} screen_blocks[SCREEN_BLOCK_CACHE_COUNT];
+static unsigned int screen_block_bytes;
+
+static void screen_block_free(int index)
+{
+	sceGxmUnmapMemory(screen_blocks[index].memory.base);
+	sceKernelFreeMemBlock(screen_blocks[index].memory.uid);
+	target_cdram_bytes -= screen_blocks[index].memory.size;
+	screen_block_bytes -= screen_blocks[index].memory.size;
+	memset(&screen_blocks[index], 0, sizeof(screen_blocks[index]));
+}
+
+/* frees the cache; nonzero if there was anything in it */
+static int screen_blocks_flush(void)
+{
+	int index, freed = 0;
+
+	for (index = 0; index < SCREEN_BLOCK_CACHE_COUNT; index++)
+		if (screen_blocks[index].memory.base)
+		{
+			screen_block_free(index);
+			freed = 1;
+		}
+	return freed;
+}
+
+static void screen_block_keep(const struct block *memory, int depth, unsigned int width, unsigned int height)
+{
+	int index;
+
+	/* (the oldest freed while there is no room; [0] is the newest) */
+	while (screen_blocks[SCREEN_BLOCK_CACHE_COUNT - 1].memory.base ||
+		(screen_block_bytes + memory->size > SCREEN_BLOCK_CACHE_BYTES && screen_block_bytes))
+	{
+		for (index = SCREEN_BLOCK_CACHE_COUNT - 1; index >= 0 && !screen_blocks[index].memory.base; index--)
+			;
+		screen_block_free(index);
+	}
+	memmove(&screen_blocks[1], &screen_blocks[0], (SCREEN_BLOCK_CACHE_COUNT - 1) * sizeof(screen_blocks[0]));
+	screen_blocks[0].memory = *memory;
+	screen_blocks[0].depth = depth;
+	screen_blocks[0].width = width;
+	screen_blocks[0].height = height;
+	screen_block_bytes += memory->size;
+}
+
+static int screen_block_take(struct block *memory, int depth, unsigned int width, unsigned int height)
+{
+	int index;
+
+	for (index = 0; index < SCREEN_BLOCK_CACHE_COUNT; index++)
+	{
+		if (screen_blocks[index].memory.base && screen_blocks[index].depth == depth &&
+			screen_blocks[index].width == width && screen_blocks[index].height == height)
+		{
+			*memory = screen_blocks[index].memory;
+			screen_block_bytes -= memory->size;
+			memmove(&screen_blocks[index], &screen_blocks[index + 1],
+				(SCREEN_BLOCK_CACHE_COUNT - 1 - index) * sizeof(screen_blocks[0]));
+			memset(&screen_blocks[SCREEN_BLOCK_CACHE_COUNT - 1], 0, sizeof(screen_blocks[0]));
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* a block of CDRAM for a target, the cache freed for a second try */
+static void *cdram_allocate(struct block *block, unsigned int size, const char *name)
+{
+	void *base = block_allocate(block, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, name);
+
+	if (!base && screen_blocks_flush())
+		base = block_allocate(block, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, 1, name);
+	return base;
+}
+
+/* gives a target slot back its memory and its render target object (a
+screen-sized one's kept as spares: render_target_give_back,
+screen_block_keep) */
 static void target_release(struct target *target)
 {
-	if (target->render_target)
+	if (target->render_target && target->scale_kind)
+		render_target_give_back(target->render_target, target->width, target->height);
+	else if (target->render_target)
 		sceGxmDestroyRenderTarget(target->render_target);
-	if (target->memory.base && target->memory.uid == -1)
+	if (target->memory.base && target->memory.uid != -1 && target->scale_kind)
+		screen_block_keep(&target->memory, target->depth, target->width, target->height);
+	else if (target->memory.base && target->memory.uid == -1)
 		small_target_give_back(target->memory.base, target->memory.size);
 	else if (target->memory.base)
 	{
 		sceGxmUnmapMemory(target->memory.base);
 		sceKernelFreeMemBlock(target->memory.uid);
+		target_cdram_bytes -= target->memory.size;
 	}
 	memset(target, 0, sizeof(*target));
+}
+
+/* The render scale (HALO_RENDER_SCALE=<0.5..1>): the screen-sized targets
+(480 lines: the back buffer, its depth, the screen effects' copies) are
+made at that fraction of the size, for a GPU that cannot fill 848x480 in a
+frame; the blit to the display scales the picture up. Read at the first
+target; the settings panel changes it between frames (vgxm_render_scale_set,
+d3d8_gxm.c screen_settings_apply), and the screen-sized targets are then
+made again at the new size. */
+static float render_scale = -1.0f;
+
+static float render_scale_get(void)
+{
+	if (render_scale < 0.0f)
+	{
+		const char *setting = getenv("HALO_RENDER_SCALE");
+
+		render_scale = setting ? (float)atof(setting) : 1.0f;
+		if (render_scale < 0.5f || render_scale > 1.0f)
+			render_scale = 1.0f;
+		if (render_scale < 1.0f)
+			log_line("gxm: screen-sized targets at %.0f%% (HALO_RENDER_SCALE)", render_scale * 100.0f);
+	}
+	return render_scale;
+}
+
+float vgxm_render_scale(void)
+{
+	return render_scale_get();
+}
+
+void vgxm_render_scale_set(float scale)
+{
+	if (scale < 0.5f || scale > 1.0f)
+		scale = 1.0f;
+	render_scale = scale;
+}
+
+void vgxm_target_release(unsigned long id)
+{
+	struct target *target;
+
+	if (!gxm.ready || !id || id > gxm.target_count)
+		return;
+	target = &gxm.targets[id - 1];
+	/* (never a cell of an atlas, nor the scene being recorded) */
+	if (target->atlas || (gxm.in_scene && (gxm.scene_color == id || gxm.scene_depth == id || gxm.scene_cell == id)))
+		return;
+	{
+		/* (debug) HALO_LIVE_KEEP_MEMORY=1: the memory is not given back (a
+		leak), so no new target lands where an old one of another size
+		was: tells an emulator's surface cache, which goes by address,
+		from a fault of the change itself */
+		static int keep = -1;
+
+		if (keep < 0)
+			keep = getenv("HALO_LIVE_KEEP_MEMORY") && atoi(getenv("HALO_LIVE_KEEP_MEMORY")) != 0;
+		if (keep)
+			memset(&target->memory, 0, sizeof(target->memory));
+	}
+	target_release(target);
+	if (gxm.presented_target == id)
+		gxm.presented_target = 0;
+	/* (the draw state cache is begun again with every scene) */
+}
+
+void vgxm_target_stats(unsigned long *targets, unsigned long *cdram_bytes, unsigned long *cached_bytes,
+	unsigned long *cdram_free)
+{
+	SceKernelFreeMemorySizeInfo info;
+
+	*targets = gxm.target_count;
+	/* (the cache's blocks are not the targets': screen_block_keep) */
+	*cdram_bytes = target_cdram_bytes - screen_block_bytes;
+	*cached_bytes = screen_block_bytes;
+	memset(&info, 0, sizeof(info));
+	info.size = sizeof(info);
+	*cdram_free = sceKernelGetFreeMemorySize(&info) >= 0 ? (unsigned long)info.size_cdram : 0;
 }
 
 /* makes a target in a slot: its memory, surface, render target object and
@@ -1703,37 +1956,28 @@ texture; 0 on failure (what was made is given back) */
 static int target_make(struct target *target, unsigned long width, unsigned long height, int depth,
 	struct vgxm_texture *texture)
 {
+	unsigned long width_asked = width, height_asked = height;
 	int result;
 
 	memset(target, 0, sizeof(*target));
 	target->depth = depth;
 	{
-		/* HALO_RENDER_SCALE=<0.5..1>: the screen-sized targets (480 lines:
-		the back buffer, its depth, the screen effects' copies) are made at
-		that fraction of the size, for a GPU that cannot fill 848x480 in a
-		frame; the blit to the display scales the picture up */
-		static float render_scale = -1.0f;
+		/* (a screen-sized target at the render scale: render_scale) */
+		float scale = render_scale_get();
 
-		if (render_scale < 0.0f)
+		if (scale < 1.0f && height == 480 && width >= 640)
 		{
-			const char *setting = getenv("HALO_RENDER_SCALE");
-
-			render_scale = setting ? (float)atof(setting) : 1.0f;
-			if (render_scale < 0.5f || render_scale > 1.0f)
-				render_scale = 1.0f;
-			if (render_scale < 1.0f)
-				log_line("gxm: screen-sized targets at %.0f%% (HALO_RENDER_SCALE)", render_scale * 100.0f);
-		}
-		if (render_scale < 1.0f && height == 480 && width >= 640)
-		{
-			width = (unsigned long)(width * render_scale + 0.5f) & ~1UL;
-			height = (unsigned long)(height * render_scale + 0.5f) & ~1UL;
-			target->scale = render_scale;
+			width = (unsigned long)(width * scale + 0.5f) & ~1UL;
+			height = (unsigned long)(height * scale + 0.5f) & ~1UL;
+			target->scale = scale;
 		}
 	}
 	target->width = (unsigned int)width;
 	target->height = (unsigned int)height;
-	target->render_target = render_target_for(target->width, target->height);
+	/* (a screen-sized target: its render target object may be a spare) */
+	target->scale_kind = height_asked == 480 && width_asked >= 640;
+	target->render_target = target->scale_kind ? render_target_take(target->width, target->height) :
+		render_target_for(target->width, target->height);
 	if (!target->render_target)
 	{
 		target_release(target);
@@ -1744,8 +1988,8 @@ static int target_make(struct target *target, unsigned long width, unsigned long
 		unsigned int aligned_width = ALIGN(target->width, SCE_GXM_TILE_SIZEX);
 		unsigned int aligned_height = ALIGN(target->height, SCE_GXM_TILE_SIZEY);
 
-		if (!block_allocate(&target->memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 4 * aligned_width * aligned_height, 1,
-			"depth target"))
+		if (!(target->scale_kind && screen_block_take(&target->memory, 1, target->width, target->height)) &&
+			!cdram_allocate(&target->memory, 4 * aligned_width * aligned_height, "depth target"))
 		{
 			/* (the render target object is not kept for a retry: each
 			failed attempt, every 30 frames, leaked one, and the driver's
@@ -1769,7 +2013,8 @@ static int target_make(struct target *target, unsigned long width, unsigned long
 	else
 	{
 		target->stride = ALIGN(target->width, 32);
-		if (!colour_target_memory(&target->memory, 4 * target->stride * target->height, "colour target"))
+		if (!(target->scale_kind && screen_block_take(&target->memory, 0, target->width, target->height)) &&
+			!colour_target_memory(&target->memory, 4 * target->stride * target->height, "colour target"))
 		{
 			target_release(target);
 			return 0;
@@ -1993,6 +2238,7 @@ static void chain_abandon(unsigned int first_slot, struct block *chain)
 	{
 		sceGxmUnmapMemory(chain->base);
 		sceKernelFreeMemBlock(chain->uid);
+		target_cdram_bytes -= chain->size;
 	}
 }
 

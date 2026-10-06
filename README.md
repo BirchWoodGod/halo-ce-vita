@@ -145,9 +145,12 @@ Quit** from the pause menu is the safest way to stop.
 ## Settings panel
 
 Hold Select + Start for a second. Up and down choose a setting, left and
-right change it, Circle closes the panel. Changes apply at once, except the
-rows marked `*` (render resolution, aspect ratio, sound voices), which apply
-after a restart; the panel says so. Settings are kept in
+right change it, Circle closes the panel. Changes apply at once, render
+resolution and aspect ratio included (the picture pauses for a moment while
+the screen is set up again), except the row marked `*` (sound voices), which
+applies after a restart; the panel says so. If the memory for a bigger
+resolution cannot be found at that moment, the panel says the change waits
+for a restart. Settings are kept in
 `ux0:data/haloce-vita/settings.txt`.
 
 The **Profile** row at the top sets the speed-related rows together
@@ -202,8 +205,8 @@ domes are drawn at any distance.
 
 What helps, in the settings panel:
 
-- **Render resolution** 50% (needs a restart): the biggest gain in
-  graphics-heavy fights such as Pillar of Autumn's.
+- **Render resolution** 50% (applies at once, as does **Aspect ratio**): the
+  biggest gain in graphics-heavy fights such as Pillar of Autumn's.
 - **Model detail** Low or Lowest: characters and vehicles far away are drawn
   with fewer polygons.
 - **Hide distant objects** Small or Medium: tiny far-away objects are skipped.
