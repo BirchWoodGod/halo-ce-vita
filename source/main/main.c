@@ -1517,6 +1517,21 @@ static void main_new_map(
 #endif
 		game_initialize_for_new_map();
 	}
+#ifdef HALO_LINUX
+	/* port: a custom map that cannot be loaded (memory, a protected map, a
+	missing resource map): the player is told why, and the menu loaded,
+	rather than the game stopped (port/linux/game/custom_edition_cache.c) */
+	else if (custom_edition_cache_load_failure_show(options->map_name))
+	{
+		errors_clear();
+		error(_error_silent, "game_load() failed.");
+		platform_log("new map: %s could not be loaded; back to the main menu", options->map_name);
+		main_globals.want_to_be_at_main_menu = TRUE;
+		main_menu_load();
+
+		return;
+	}
+#endif
 	else
 	{
 		error(_error_immediate, "game_load() failed.");

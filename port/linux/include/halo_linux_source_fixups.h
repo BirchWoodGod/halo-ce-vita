@@ -93,6 +93,10 @@ placement is placed in the running game
 (port/linux/game/custom_edition_objects.c) */
 struct scenario_object_datum;
 unsigned char custom_edition_vehicles_by_placement(void);
+/* when the last load of the Custom Edition map `map_name` names failed: the
+player is told why, and the caller goes back to the menu
+(port/linux/game/custom_edition_cache.c) */
+unsigned char custom_edition_cache_load_failure_show(char const *map_name);
 unsigned char custom_edition_vehicle_placement_allowed(struct scenario_object_datum const *placement);
 
 /* while TRUE, drawing shifts right to center 640-column layouts */

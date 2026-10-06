@@ -913,6 +913,15 @@ long scenario_tags_load(
 			cache_file_globals.tags_loaded = TRUE;
 			result = cache_file_globals.tag_header->scenario_tag_index;
 		}
+		else
+		{
+			/* (a map that cannot be loaded leaves nothing open: the menu's
+			map is loaded next, custom_edition_cache_load_failure_show, and
+			a texture cache opened twice lost the menu's textures) */
+			sound_cache_close();
+			texture_cache_close();
+			cache_files_loaded_map[0] = 0;
+		}
 
 		return result;
 	}

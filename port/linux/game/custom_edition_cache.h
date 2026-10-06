@@ -80,6 +80,16 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	char const *map_name,
 	void *header);
 
+/* Gives the player's reason the map being loaded (or its structure BSP)
+cannot be, when custom_edition_cache.c's own does not say it better. */
+void custom_edition_cache_load_failure_note(
+	char const *reason);
+/* When the last load of the Custom Edition map `map_name` names failed,
+tells the player why (platform_show_message) and returns TRUE: the caller
+then leaves for the menu rather than stopping the game (also declared for
+the game in halo_linux_source_fixups.h). */
+boolean custom_edition_cache_load_failure_show(
+	char const *map_name);
 /* Reads `size` bytes at `offset` in the model data of the map being loaded
 (the report's), for custom_edition_models_convert; FALSE when they are not
 in it or cannot be read. */
