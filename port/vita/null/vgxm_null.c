@@ -305,6 +305,63 @@ void vgxm_texture_set_level_count(struct vgxm_texture *texture, unsigned long le
 	texture->control[1] = (texture->control[1] & 0x0ffffffful) | (unsigned long)(levels & 0xf) << 28;
 }
 
+/* the render scale and the bytes each target would hold on the Vita (the
+screen-sized targets at the scale: vita_gxm.c target_make), so a live
+change of the screen's targets logs what it would take and give back */
+static float null_render_scale = -1.0f;
+static unsigned long null_target_bytes[MAXIMUM_TARGETS + 1];
+
+float vgxm_render_scale(void)
+{
+	if (null_render_scale < 0.0f)
+	{
+		const char *setting = getenv("HALO_RENDER_SCALE");
+
+		null_render_scale = setting ? (float)atof(setting) : 1.0f;
+		if (null_render_scale < 0.5f || null_render_scale > 1.0f)
+			null_render_scale = 1.0f;
+	}
+	return null_render_scale;
+}
+
+void vgxm_render_scale_set(float scale)
+{
+	null_render_scale = scale < 0.5f || scale > 1.0f ? 1.0f : scale;
+}
+
+static void null_target_size(unsigned long id, unsigned long width, unsigned long height)
+{
+	float scale = vgxm_render_scale();
+
+	if (id > MAXIMUM_TARGETS)
+		return;
+	if (scale < 1.0f && height == 480 && width >= 640)
+	{
+		width = (unsigned long)(width * scale + 0.5f) & ~1UL;
+		height = (unsigned long)(height * scale + 0.5f) & ~1UL;
+	}
+	null_target_bytes[id] = 4 * width * height;
+}
+
+void vgxm_target_release(unsigned long id)
+{
+	if (id && id <= MAXIMUM_TARGETS)
+		null_target_bytes[id] = 0;
+}
+
+void vgxm_target_stats(unsigned long *targets, unsigned long *cdram_bytes, unsigned long *cached_bytes,
+	unsigned long *cdram_free)
+{
+	unsigned long id, total = 0;
+
+	for (id = 1; id <= MAXIMUM_TARGETS; id++)
+		total += null_target_bytes[id];
+	*targets = null.target_count;
+	*cdram_bytes = total;
+	*cached_bytes = 0;
+	*cdram_free = 0;
+}
+
 unsigned long vgxm_target_create(unsigned long width, unsigned long height, int depth, struct vgxm_texture *texture)
 {
 	/* (debug) HALO_TARGET_LIMIT=n, as on the Vita (vita_gxm.c) */
@@ -321,6 +378,7 @@ unsigned long vgxm_target_create(unsigned long width, unsigned long height, int 
 	if (getenv("HALO_TRACE_FILES"))
 		fprintf(stderr, "trace: target %lux%lu depth %d (%u made)\n", width, height, depth, null.target_count);
 	null.target_count++;
+	null_target_size(null.target_count, width, height);
 	if (texture)
 	{
 		texture->control[0] = 0x80000000ul | null.target_count;
@@ -385,6 +443,7 @@ int vgxm_target_remake(unsigned long id, unsigned long width, unsigned long heig
 {
 	if (!id || id > null.target_count || !width || !height)
 		return 0;
+	null_target_size(id, width, height);
 	if (texture)
 	{
 		texture->control[0] = 0x80000000ul | id;
