@@ -64,6 +64,9 @@ symbols in this file:
 #include "shaders/shaders.h"
 
 #include <xtl.h>
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#endif
 
 #include "rasterizer/xbox/rasterizer_xbox.h"
 #include "rasterizer/xbox/rasterizer_xbox_internal.h"
@@ -282,6 +285,32 @@ void rasterizer_active_camouflage_cache_primary_render_target(
 		41,
 		global_d3d_device);
 
+#ifdef HALO_LINUX
+	/* (port) One copy of the screen a window, at the first cloaked unit
+	drawn. With active_camouflage_multipass (the default) the Xbox copied
+	the screen again before each cloaked unit, so a nearer unit's
+	distortion showed the ones behind it; on the Vita each copy ends the
+	screen's scene, draws the copy in a scene of its own and begins the
+	screen's scene again, the GPU waiting for each in turn (HALO_GXM_RTT
+	_SYNC): two scenes and two waits a unit, and a room of d40's stealth
+	Flood halved the frame rate (#26). The first unit drawn, the farthest
+	(the transparent geometry is drawn back to front), samples the same
+	copy as before; the nearer ones sample it too, without the farther
+	units' shimmer and the transparent effects between them.
+	HALO_CAMO_COPY_EACH=1: a copy before each unit, as the Xbox */
+	{
+		static int copy_each = -1;
+
+		if (copy_each < 0)
+		{
+			const char *setting = getenv("HALO_CAMO_COPY_EACH");
+
+			copy_each = setting && atoi(setting) != 0;
+		}
+		if (!copy_each && local_active_camouflage_debug_cached_flag && local_active_camouflage_debug_cache_count > 0)
+			return;
+	}
+#endif
 	if (rasterizer_debug_options.active_camouflage &&
 		local_active_camouflage_visibility_flag)
 	{
