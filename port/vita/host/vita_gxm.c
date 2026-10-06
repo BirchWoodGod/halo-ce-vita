@@ -3874,7 +3874,7 @@ static void overlay_draw(void)
 	else if (gxm.overlay_enabled)
 	{
 		vita_host_cpu_usage(busy);
-		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 172.0f, 0xA0000000u);
+		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 192.0f, 0xA0000000u);
 		snprintf(text, sizeof(text), "FPS %3.0f", (double)gxm.overlay_fps);
 		count = overlay_text(vertices, count, limit, left + 6.0f, 11.0f, scale, 0xFF40FF40u, text);
 		snprintf(text, sizeof(text), "GAME %3.0f MS", (double)gxm.overlay_tick_ms);
@@ -3903,6 +3903,22 @@ static void overlay_draw(void)
 		count = overlay_text(vertices, count, limit, left + 6.0f, 134.0f, scale, 0xFFFFFFFFu, text);
 		snprintf(text, sizeof(text), "GPU %3.0f MS", (double)gpu_ms_average);
 		count = overlay_text(vertices, count, limit, left + 6.0f, 154.0f, scale, 0xFFFF80C0u, text);
+		{
+			/* the CDRAM free (vgxm_memory.h), read twice a second; yellow
+			while part of the texture pool is in user RAM */
+			static unsigned long free_bytes, read_frame;
+			static int pool_in_user;
+
+			if (!read_frame || gxm.frame - read_frame >= 30)
+			{
+				read_frame = gxm.frame ? gxm.frame : 1;
+				free_bytes = memory_cdram_free();
+				pool_in_user = memory_bytes[_memory_pool_user] != 0;
+			}
+			snprintf(text, sizeof(text), "VRAM %4.1fMB", (double)free_bytes / (1024.0 * 1024.0));
+			count = overlay_text(vertices, count, limit, left + 6.0f, 174.0f, scale,
+				pool_in_user ? 0xFF40E0FFu : 0xFFE0E0E0u, text);
+		}
 	}
 	if (gxm.menu_visible)
 		count = menu_build(vertices, count, limit);
