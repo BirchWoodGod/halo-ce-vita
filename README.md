@@ -43,9 +43,7 @@ Evolved.
 
 The current list is in the [roadmap](ROADMAP.md) and the
 [issues](https://github.com/BirchWoodGod/halo-ce-vita/issues). The main
-ones: the biggest fights still drop frames (see [Performance](#performance)),
-the Warthog's windshield and some other glass can flicker, and some trees
-flicker at the screen's edges.
+one: the biggest fights still drop frames (see [Performance](#performance)).
 
 ## Install
 

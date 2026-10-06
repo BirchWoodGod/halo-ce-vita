@@ -119,6 +119,10 @@ symbols in this file:
 
 #include "director.h"
 
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#endif
+
 #include "camera_scripting.h"
 #include "dead_camera.h"
 #include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
@@ -792,6 +796,21 @@ static void director_choose_camera_script_camera_record(
 	return;
 }
 
+#ifdef HALO_LINUX
+static boolean director_debug_camera_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		char const *setting = getenv("HALO_DEBUG_CAMERA");
+
+		enabled = setting && atoi(setting) != 0;
+	}
+	return enabled != 0;
+}
+#endif
+
 static boolean director_update_controls(
 	short local_player_index,
 	struct camera_control *controls)
@@ -832,6 +851,14 @@ static boolean director_update_controls(
 			switch_camera = ticks > 0 && ticks % TICKS_PER_SECOND == 0;
 #endif
 		}
+#ifdef HALO_LINUX
+		/* port: the camera switch (Black held a second: a following, an
+		orbiting, then a flying camera through walls) is a tool of the beta
+		build; on the Vita Black is D-pad left or a rear touch zone a hand can
+		rest on, so it is off unless HALO_DEBUG_CAMERA=1 */
+		if (switch_camera && !director_debug_camera_enabled())
+			switch_camera = FALSE;
+#endif
 
 		if (director->camera_proc !=
 				(director_camera_update_proc)first_person_camera_update &&
