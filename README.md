@@ -163,13 +163,16 @@ Measured on a PS Vita 1000 with 1.0.3's default settings:
 
 Why it slows down: the biggest fights are limited by different things in
 different places. On The Silent Cartographer's beach the Vita's processor is
-the limit (drawing many characters, and the game's own simulation of them);
-in Pillar of Autumn's interiors the graphics chip is, and its cost there does
-not shrink much with the render resolution. So lowering the resolution
-mainly makes the picture softer and helps less than you might expect.
+the limit (drawing many characters, and the game's own simulation of them),
+so the render resolution changes little there. In Pillar of Autumn's
+firefights the graphics chip is the limit, and there **Render resolution 50%**
+helps a lot (in one test, a firefight went from about 16 fps at 75% to about
+26 fps at 50%), at the cost of a softer picture.
 
 What helps, in the settings panel:
 
+- **Render resolution** 50% (needs a restart): the biggest gain in
+  graphics-heavy fights such as Pillar of Autumn's.
 - **Model detail** Low or Lowest: characters and vehicles far away are drawn
   with fewer polygons.
 - **Hide distant objects** Small or Medium: tiny far-away objects are skipped.
