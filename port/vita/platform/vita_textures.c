@@ -1361,7 +1361,26 @@ void vita_texture_locks_flush(void)
 
 void vita_texture_cache_begin_frame(void)
 {
+	/* (debug, Vita3K) HALO_TEX_REBUILD_AT=n: at the n-th frame every
+	texture is decoded again, into new memory. Vita3K's Vulkan renderer
+	draws the textures a map first uses in the first few frames after the
+	program starts with other textures' texels (colour noise on the models
+	and the base - any map loaded straight from init.txt: a Custom Edition
+	map, or an Xbox map whose cache partition copy exists already), though
+	the GPU is given the same texels and words as when the map is loaded
+	later; the same bytes at new addresses draw right. The OpenGL renderer
+	and the hardware read the pool as it is. Costs a second copy of the
+	pool's textures. */
+	static long rebuild_at = -2;
+
 	texture_frame++;
+	if (rebuild_at == -2)
+		rebuild_at = getenv("HALO_TEX_REBUILD_AT") ? atol(getenv("HALO_TEX_REBUILD_AT")) : -1;
+	if (rebuild_at > 0 && texture_frame == (unsigned long)rebuild_at)
+	{
+		platform_log("textures: all decoded again at frame %lu (HALO_TEX_REBUILD_AT)", texture_frame);
+		pool_serial++;
+	}
 }
 
 /* ---------- Custom Edition channel orders
@@ -1452,7 +1471,14 @@ void halo_custom_edition_texels_channels(const void *texels, unsigned char chann
 	unsigned long address = (unsigned long)texels;
 	unsigned long index;
 
-	if (channel_order >= NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS)
+	/* (debug) HALO_CE_CHANNELS=0: every texture keeps its channels - a
+	Custom Edition map built from Xbox tags (Invader's test maps) has its
+	multipurpose maps in the Xbox's order already */
+	static int channels_on = -1;
+
+	if (channels_on < 0)
+		channels_on = !getenv("HALO_CE_CHANNELS") || atoi(getenv("HALO_CE_CHANNELS")) != 0;
+	if (channel_order >= NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS || !channels_on)
 		channel_order = _custom_edition_channels_xbox;
 	custom_edition_texels_take();
 	for (index = 0; index < custom_edition_texel_count && custom_edition_texels[index].address != address; index++)
