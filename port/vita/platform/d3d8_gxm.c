@@ -1227,8 +1227,21 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 			device.presentation = *presentation_parameters;
 		width = device.presentation.BackBufferWidth ? device.presentation.BackBufferWidth : 640;
 		height = device.presentation.BackBufferHeight ? device.presentation.BackBufferHeight : 480;
-		d3d8_surface_initialize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, width, height);
-		d3d8_surface_initialize(&device.depth_buffer, D3DFMT_LIN_D24S8, width, height);
+		{
+			/* (the two surfaces' memory, the first blocks of the memory
+			window, is made for 848 columns whatever the width: a 640-wide
+			4:3 screen, HALO_DISPLAY_WIDTH=640, then leaves the game state
+			after them at the same address, so saves load in either) */
+			unsigned long allocated = width < 848 ? 848 : width;
+
+			d3d8_surface_initialize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, allocated, height);
+			d3d8_surface_initialize(&device.depth_buffer, D3DFMT_LIN_D24S8, allocated, height);
+			if (allocated != width)
+			{
+				d3d8_surface_resize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, width, height);
+				d3d8_surface_resize(&device.depth_buffer, D3DFMT_LIN_D24S8, width, height);
+			}
+		}
 		device.render_target = &device.back_buffer;
 		device.depth_stencil = &device.depth_buffer;
 		for (index = 0; index < D3DTS_MAX; index++)
