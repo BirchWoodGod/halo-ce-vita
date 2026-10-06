@@ -37,7 +37,7 @@ precompiled, so reaching a new area no longer freezes; graphics profiles,
 a 4:3 option and Sharp upscaling, all applied without a restart; crash
 fixes from players' dumps (dropped weapons, HUD sounds, vehicles); fixed
 checkpoints; Warthog windshields, energy shields, camouflage, scopes and
-water drawn correctly; the screen dims when the Vita is left alone.
+water drawn correctly.
 
 ## Next: 1.1.0: multiplayer, custom maps and a steady 30 fps
 
