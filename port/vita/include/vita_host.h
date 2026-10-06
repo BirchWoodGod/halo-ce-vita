@@ -60,6 +60,18 @@ the player's aspect ratio (0: none): the file's, when it gives one; the
 player's only when the file gives nothing but its size */
 float vita_movie_choose_aspect(float file_aspect, const char **source, unsigned long width, unsigned long height,
 	float player_aspect);
+/* the picture size in the MP4's sample description (1), or 0 without one */
+int vita_movie_file_picture_size(const char *path, unsigned long *width, unsigned long *height);
+/* the part of a decoded frame that is the picture: the decoder pads it to
+whole 16-pixel macroblocks (640x360 decodes to 640x368), which the file's
+picture size takes off again */
+void vita_movie_visible_size(unsigned long decoded_width, unsigned long decoded_height, unsigned long picture_width,
+	unsigned long picture_height, unsigned long *width, unsigned long *height);
+/* how far apart the rows of a decoded frame's luma plane are, in bytes,
+judged from the picture (room: the bytes readable from luma on); *decided
+is 0 for a picture too flat to tell, and the width padded to 16 returned */
+unsigned long vita_movie_detect_pitch(const unsigned char *luma, unsigned long room, unsigned long width,
+	unsigned long height, int *decided);
 
 /* ---------- the controls (port/vita/host/vita_input.c) */
 
