@@ -1,0 +1,81 @@
+/*
+MAP_SHARE.H
+
+Map sharing (map_share.c): a joiner without the host's custom map, or with
+another copy of it, is offered the host's copy instead of being turned away,
+and downloads it over its connection to the host in the lobby. The rules
+and checks are map_share_protocol.c's.
+*/
+
+#ifndef __MAP_SHARE_H
+#define __MAP_SHARE_H
+
+/* ---------- structures */
+
+struct network_game_client;
+struct network_game_server;
+struct network_game_server_client_machine;
+
+/* ---------- prototypes/MAP_SHARE.C */
+
+/* (a joiner, network_client_manager.c) The host's game settings name the
+level `level_name`, a custom map this machine lacks (`replacing`: has
+another copy of), of which the host sent the fingerprint `identity`. TRUE
+when the joiner stays to ask the host for it (the map is then precached
+once downloaded); FALSE when it cannot be offered (map sharing off, a stock
+or badly named map, not in the lobby): the caller refuses as before. */
+boolean map_share_client_offer(
+	struct network_game_client *client,
+	char const *level_name,
+	unsigned long identity,
+	boolean replacing);
+
+/* (network_client_manager.c) The host's game settings name a level other
+than the one asked for: a download of another map stops. */
+void map_share_client_map_changed(
+	char const *level_name);
+
+/* (network_client_manager.c) The joiner's client goes: its download stops
+(the file deleted, the progress hidden). */
+void map_share_client_dispose(
+	struct network_game_client *client);
+
+/* Whether a download is under way (or offered): the joiner reports no map
+precached meanwhile. */
+boolean map_share_client_busy(
+	void);
+
+/* Each frame of a joiner: the question, the progress, the timeouts. FALSE
+when the joiner leaves the game (the player said no, cancelled, or the
+download failed; the player has been told why). */
+boolean map_share_client_update(
+	struct network_game_client *client);
+
+/* (network_client_message_handler.c) the host's answer and data messages,
+from the host: whole messages, header first */
+void map_share_client_handle_answer(
+	struct network_game_client *client,
+	word *message,
+	short message_size);
+void map_share_client_handle_data(
+	struct network_game_client *client,
+	word *message,
+	short message_size);
+
+/* (network_server_message_handler.c) a joined machine's request */
+void map_share_server_handle_request(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	word *message,
+	short message_size);
+
+/* Each frame of a host (network_server_manager.c): sends what the uploads'
+windows and the rate allow; outside the lobby, refuses them. */
+void map_share_server_update(
+	struct network_game_server *server);
+
+/* The host's game ended: every upload stops. */
+void map_share_server_dispose(
+	void);
+
+#endif

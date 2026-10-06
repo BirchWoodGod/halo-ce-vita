@@ -53,6 +53,14 @@ enum network_game_message_type
 	_message_client_remove_player_request_postgame,
 	_message_client_switch_to_pregame,
 	_message_client_graceful_game_exit_postgame,
+	/* port: map sharing (port/linux/game/map_share.c), in the lobby: a
+	joiner's query, start, acknowledgement or cancel; the host's offer,
+	refusal or end; the map's bytes. A host of a build without them ignores
+	the joiner's (an unknown packet type), and is then told apart by its
+	silence. */
+	_message_client_map_download,
+	_message_server_map_download_answer,
+	_message_server_map_download_data,
 	NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 };
 

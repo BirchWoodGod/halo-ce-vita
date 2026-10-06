@@ -73,4 +73,16 @@ boolean custom_edition_maps_host_copy_matches(
 	unsigned long host_identity,
 	boolean *missing);
 
+/* Makes the next question about the maps look for them anew (a map was
+downloaded into the folder: map_share.c). */
+void custom_edition_maps_look_again(
+	void);
+
+/* Whether a host may send its copy of the level `level_name` to a joiner
+(map_share.c): a custom map it has, which is in its level list (on, and one
+this machine plays: an Xbox multiplayer map, or a Custom Edition one with
+the setting on), never one of the Xbox's own levels. */
+boolean custom_edition_maps_shareable(
+	char const *level_name);
+
 #endif
