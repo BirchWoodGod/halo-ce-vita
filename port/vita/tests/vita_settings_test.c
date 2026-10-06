@@ -370,9 +370,12 @@ int main(void)
 	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Network", 7))
 		press(VITA_BUTTON_UP);
 	press(VITA_BUTTON_RIGHT);
-	clock_us += 5000000;
-	frame(0);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu, "Restart the game"), "Network: Ad hoc asks for a restart");
+	clock_us += 5000000;
+	press(VITA_BUTTON_DOWN);
+	check(!strstr(menu, "Restart the game"), "the other lines' help again after a few seconds");
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "Restart the game") != NULL, "the Network line still says it");
 
 	/* the next start, in ad hoc play */
 	restart_pending = 0;
@@ -464,7 +467,7 @@ int main(void)
 	check(!strcmp(getenv("HALO_FRAME_TIMING"), "300") && !strcmp(getenv("HALO_RENDER_PROFILE"), "1") &&
 		!strcmp(getenv("HALO_TICK_PROFILE"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_PERF_LOG=1\n") &&
 		strstr(menu, "Restart the game"), "Performance logging: the three timing variables, saved, a restart");
-	restart_pending = 0;
+	clock_us += 5000000;
 	press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_HANG_CRASH"), "1") && !strstr(menu, "Restart the game"), "Crash dump on hang: live");

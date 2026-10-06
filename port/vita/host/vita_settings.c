@@ -1148,7 +1148,9 @@ static void help_line(char *text, int size, const struct line *line)
 
 	if (notice[0] && now_us() < notice_until)
 		snprintf(text, (size_t)size, "%s", notice);
-	else if (restart_pending || halo_screen_restart_needed())
+	else if (halo_screen_restart_needed())
+		snprintf(text, (size_t)size, "Restart the game for this change. O: close");
+	else if (restart_pending && setting && setting->restart)
 		snprintf(text, (size_t)size, "Restart the game for this change. O: close");
 	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_SAVING)
 		snprintf(text, (size_t)size, "Saving the report...");
@@ -1373,13 +1375,21 @@ static void change(struct setting *setting, int step)
 		return;
 	setting->choice = choice;
 	apply_value(setting);
+	/* (a row that applies after a restart says so on its help line from
+	now on, and every line does for a few seconds) */
 	if (setting->restart)
+	{
 		restart_pending = 1;
+		set_notice("Restart the game for this change. O: close");
+	}
 	if (strcmp(setting->variable, "HALO_PROFILE") == 0)
 	{
 		/* (a profile sets its rows; Custom leaves them as they are) */
 		if (apply_profile(choice))
+		{
 			restart_pending = 1;
+			set_notice("Restart the game for this change. O: close");
+		}
 	}
 	else
 	{
