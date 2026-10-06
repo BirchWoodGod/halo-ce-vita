@@ -788,6 +788,69 @@ static boolean device_group_state(
 	return TRUE;
 }
 
+/* ---------- the host's object census
+
+Each tick the host compares the objects with what it last sent of them:
+the scenery and machines' transforms, the devices' positions and power,
+and every object's looks. A level has a thousand or more objects and few
+ever change, so it doesn't look at all of them every tick (four walks
+through every object a tick were a tenth of a slow host's tick). It looks
+at the objects made since the last tick (seen first as they were made),
+every device, the objects that changed in the last second (hot), and one
+slice of the rest in turn, all of them every CENSUS_SLICES ticks. A change
+the slice finds makes its object hot, so a script moving an object still
+reaches clients every tick after its first move. On the ticks the state is
+resent (host_resend), and after a revert, it looks at every object.
+object_header_new tells it of each object made (network_coop_note_object_new);
+the object array's identifier counter checks that nothing was made unseen. */
+enum
+{
+	CENSUS_SLICES = 8,
+	CENSUS_HOT_TICKS = TICKS_PER_SECOND,
+	MAXIMUM_CENSUS_HOT = 512,
+	MAXIMUM_CENSUS_CREATED = 256,
+	MAXIMUM_CENSUS_DEVICES = 1024,
+};
+
+static struct
+{
+	/* the host is noting the objects made (a co-op host past its first tick) */
+	boolean listening;
+	/* every object is to be looked at next tick */
+	boolean full;
+	/* object_header_data's identifier counter after the last census */
+	short next_identifier;
+	short cursor;
+	short created_count;
+	short hot_count;
+	short device_count;
+	/* absolute indices: of the objects made since the last census, of the
+	hot ones, and of every device, in order */
+	short created[MAXIMUM_CENSUS_CREATED];
+	short hot[MAXIMUM_CENSUS_HOT];
+	short devices[MAXIMUM_CENSUS_DEVICES];
+	/* by absolute index: ticks still hot, and the last tick looked at */
+	byte hot_ticks[MAXIMUM_OBJECTS_PER_MAP];
+	long checked_time[MAXIMUM_OBJECTS_PER_MAP];
+} host_census;
+
+/* the object at an absolute index and its datum index, or NULL */
+static struct object_datum *census_object_at(
+	short absolute_index,
+	long *object_index)
+{
+	struct object_header_datum const *header;
+
+	if (absolute_index < 0 || absolute_index >= object_header_data->count)
+		return NULL;
+	header = (struct object_header_datum const *)((byte const *)object_header_data->data +
+		absolute_index * object_header_data->size);
+	if (!header->identifier)
+		return NULL;
+	*object_index = DATUM_INDEX_NEW(absolute_index, header->identifier);
+	return (struct object_datum *)object_try_and_get(*object_index);
+}
+
 /* Host: lists every device group, scenario groups first, then each device's
 own groups. group_indices gets each entry's group index. Returns the count. */
 static short device_group_entries(
@@ -795,9 +858,8 @@ static short device_group_entries(
 	short *group_indices)
 {
 	struct scenario *scenario = global_scenario_get();
-	struct object_iterator iterator;
 	struct device_datum *device;
-	short count = 0, group_index;
+	short count = 0, group_index, device_number;
 
 	for (group_index = 0; group_index < scenario->device_groups.count && count < MAXIMUM_DEVICE_GROUPS; group_index++)
 	{
@@ -811,12 +873,16 @@ static short device_group_entries(
 		if (device_group_state(group_index, entry))
 			group_indices[count++] = group_index;
 	}
-	object_iterator_new(&iterator, _object_mask_device, 0);
-	while ((device = object_iterator_next(&iterator)) != NULL)
+	/* (the devices the census keeps, in order: host_census_update ran first this tick) */
+	for (device_number = 0; device_number < host_census.device_count; device_number++)
 	{
 		short groups[2];
 		short role;
+		long device_index;
 
+		device = (struct device_datum *)census_object_at(host_census.devices[device_number], &device_index);
+		if (!device || !TEST_FLAG(_object_mask_device, device->object.type))
+			continue;
 		groups[_device_group_role_power] = device->device.power_group_index;
 		groups[_device_group_role_position] = device->device.position_group_index;
 		for (role = 0; role < NUMBEROF(groups) && count < MAXIMUM_DEVICE_GROUPS; role++)
@@ -831,7 +897,7 @@ static short device_group_entries(
 				continue;
 			entry->group_index = NONE;
 			entry->name_index = device->object.name_index;
-			entry->object_index = iterator.index;
+			entry->object_index = device_index;
 			entry->definition_index = device->definition_index;
 			entry->role = (byte)role;
 			if (device_group_state(groups[role], entry))
@@ -1188,69 +1254,6 @@ static void host_object_sends_flush(
 	host_object_sends.transform_count = 0;
 	host_object_sends.device_state_count = 0;
 	host_object_sends.look_count = 0;
-}
-
-/* ---------- the host's object census
-
-Each tick the host compares the objects with what it last sent of them:
-the scenery and machines' transforms, the devices' positions and power,
-and every object's looks. A level has a thousand or more objects and few
-ever change, so it doesn't look at all of them every tick (four walks
-through every object a tick were a tenth of a slow host's tick). It looks
-at the objects made since the last tick (seen first as they were made),
-every device, the objects that changed in the last second (hot), and one
-slice of the rest in turn, all of them every CENSUS_SLICES ticks. A change
-the slice finds makes its object hot, so a script moving an object still
-reaches clients every tick after its first move. On the ticks the state is
-resent (host_resend), and after a revert, it looks at every object.
-object_header_new tells it of each object made (network_coop_note_object_new);
-the object array's identifier counter checks that nothing was made unseen. */
-enum
-{
-	CENSUS_SLICES = 8,
-	CENSUS_HOT_TICKS = TICKS_PER_SECOND,
-	MAXIMUM_CENSUS_HOT = 512,
-	MAXIMUM_CENSUS_CREATED = 256,
-	MAXIMUM_CENSUS_DEVICES = 1024,
-};
-
-static struct
-{
-	/* the host is noting the objects made (a co-op host past its first tick) */
-	boolean listening;
-	/* every object is to be looked at next tick */
-	boolean full;
-	/* object_header_data's identifier counter after the last census */
-	short next_identifier;
-	short cursor;
-	short created_count;
-	short hot_count;
-	short device_count;
-	/* absolute indices: of the objects made since the last census, of the
-	hot ones, and of every device, in order */
-	short created[MAXIMUM_CENSUS_CREATED];
-	short hot[MAXIMUM_CENSUS_HOT];
-	short devices[MAXIMUM_CENSUS_DEVICES];
-	/* by absolute index: ticks still hot, and the last tick looked at */
-	byte hot_ticks[MAXIMUM_OBJECTS_PER_MAP];
-	long checked_time[MAXIMUM_OBJECTS_PER_MAP];
-} host_census;
-
-/* the object at an absolute index and its datum index, or NULL */
-static struct object_datum *census_object_at(
-	short absolute_index,
-	long *object_index)
-{
-	struct object_header_datum const *header;
-
-	if (absolute_index < 0 || absolute_index >= object_header_data->count)
-		return NULL;
-	header = (struct object_header_datum const *)((byte const *)object_header_data->data +
-		absolute_index * object_header_data->size);
-	if (!header->identifier)
-		return NULL;
-	*object_index = DATUM_INDEX_NEW(absolute_index, header->identifier);
-	return (struct object_datum *)object_try_and_get(*object_index);
 }
 
 /* (the identifier counter steps from 0xFFFF to 0x8000) */
