@@ -58,7 +58,9 @@ each frame's presentation.
 #define POOL_SIZE (56 * 1024 * 1024)
 #define PATCHER_BUFFER_SIZE (6 * 1024 * 1024)
 #define PATCHER_USSE_SIZE (4 * 1024 * 1024)
-#define SHADER_DIRECTORY "ux0:data/haloce-vita/shaders"
+#define SHADER_PARENT "ux0:data/haloce-vita"
+#define SHADER_NAME "shaders"
+#define SHADER_DIRECTORY SHADER_PARENT "/" SHADER_NAME
 /* the GPU's cores, each counting a visibility test's samples into its own
 part of the buffer (sceGxmSetVisibilityBuffer's stride per core) */
 #define VISIBILITY_CORES 4
@@ -879,70 +881,130 @@ static SceGxmProgram *cache_read(uint64_t hash)
 	return program;
 }
 
-/* At start-up: the memory card's cache is this build's, or it is emptied.
-The id file there names the compile and generator ids of the build that
-wrote the cache; when they are not this build's (an update, or a cache from
-before the ids), every file the cache writes (<hash>.gxp, .tmp) is
-removed - nothing else in the folder, nor outside it - and the id file
-written again. Each file's own header is checked when it is read as well
-(cache_read), so a file this misses is still never used. */
+/* the memory card through vshc_fs (vita_shader_cache.h) */
+static int fs_rename(void *context, const char *from, const char *to)
+{
+	(void)context;
+	return sceIoRename(from, to);
+}
+
+static int fs_make_directory(void *context, const char *path)
+{
+	(void)context;
+	return sceIoMkdir(path, 0777);
+}
+
+static int fs_remove(void *context, const char *path)
+{
+	(void)context;
+	return sceIoRemove(path);
+}
+
+static int fs_remove_directory(void *context, const char *path)
+{
+	(void)context;
+	return sceIoRmdir(path);
+}
+
+static int fs_write_text(void *context, const char *path, const char *text)
+{
+	SceUID file = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+	int written;
+
+	(void)context;
+	if (file < 0)
+		return file;
+	written = sceIoWrite(file, text, strlen(text));
+	sceIoClose(file);
+	return written == (int)strlen(text) ? 0 : -1;
+}
+
+static int fs_exists(void *context, const char *path)
+{
+	SceIoStat stat;
+
+	(void)context;
+	return sceIoGetstat(path, &stat) >= 0;
+}
+
+static int fs_read_head(void *context, const char *path, void *buffer, unsigned int size)
+{
+	SceUID file = sceIoOpen(path, SCE_O_RDONLY, 0);
+	int count;
+
+	(void)context;
+	if (file < 0)
+		return file;
+	count = sceIoRead(file, buffer, size);
+	sceIoClose(file);
+	return count;
+}
+
+static int fs_list(void *context, const char *path, void (*each)(void *argument, const char *name), void *argument)
+{
+	SceUID listing = sceIoDopen(path);
+	SceIoDirent entry;
+
+	(void)context;
+	if (listing < 0)
+		return listing;
+	memset(&entry, 0, sizeof(entry));
+	while (sceIoDread(listing, &entry) > 0)
+	{
+		if (strcmp(entry.d_name, ".") && strcmp(entry.d_name, ".."))
+			each(argument, entry.d_name);
+		memset(&entry, 0, sizeof(entry));
+	}
+	sceIoDclose(listing);
+	return 0;
+}
+
+static const struct vshc_fs memory_card = { NULL, fs_rename, fs_make_directory, fs_remove, fs_remove_directory,
+	fs_write_text, fs_exists, fs_read_head, fs_list };
+
+/* At start-up: the memory card's cache is this build's, or it is put
+aside. The id file there names the compile and generator ids of the build
+that wrote the cache; when they are not this build's (an update, or a cache
+from before the ids), the folder is renamed to shaders.old-<n> in one
+operation and an empty one made in its place (vshc_retire): removing its
+files one by one here kept a Vita on a black screen for 65 s (632 files,
+v1.1.0). The old folder is removed later, in the background
+(shader_sweep_start). Each file's own header is checked when it is read as
+well (cache_read), so a file of another build is never used either way. */
 static void shader_cache_check(void)
 {
 	static const char id_path[] = SHADER_DIRECTORY "/" VSHC_ID_FILE_NAME;
 	char contents[64], text[64], old_ids[64];
-	SceUID file, listing;
-	SceIoDirent entry;
-	int length = 0;
-	char (*names)[32] = NULL;
-	unsigned long count = 0, capacity = 0, removed = 0, index;
+	SceUID file;
+	int length = 0, created, index = 0;
+	unsigned long long before = sceKernelGetProcessTimeWide();
+	enum vshc_retire_result result = VSHC_RETIRE_RENAMED;
 
-	sceIoMkdir(SHADER_DIRECTORY, 0777);
-	if ((file = sceIoOpen(id_path, SCE_O_RDONLY, 0)) >= 0)
+	created = sceIoMkdir(SHADER_DIRECTORY, 0777) >= 0;
+	if (!created && (file = sceIoOpen(id_path, SCE_O_RDONLY, 0)) >= 0)
 	{
 		length = sceIoRead(file, contents, sizeof(contents) - 1);
 		sceIoClose(file);
 		if (length < 0)
 			length = 0;
 	}
-	if (vshc_id_matches(contents, (size_t)length, &shader_ids))
+	if (!created && vshc_id_matches(contents, (size_t)length, &shader_ids))
 		return;
-	/* (the names first, then the removals: a directory changed while it is
-	listed can skip entries) */
-	if ((listing = sceIoDopen(SHADER_DIRECTORY)) >= 0)
+	/* (a folder just made is empty: nothing to put aside) */
+	if (!created)
 	{
-		while (sceIoDread(listing, &entry) > 0)
-		{
-			if (!vshc_cache_file_name(entry.d_name) || strlen(entry.d_name) >= sizeof(names[0]))
-				continue;
-			if (count == capacity)
-			{
-				char (*grown)[32] = realloc(names, (capacity ? capacity * 2 : 256) * sizeof(names[0]));
-
-				if (!grown)
-					break;
-				names = grown;
-				capacity = capacity ? capacity * 2 : 256;
-			}
-			strcpy(names[count++], entry.d_name);
-		}
-		sceIoDclose(listing);
-	}
-	for (index = 0; index < count; index++)
-	{
-		char path[96];
-
-		snprintf(path, sizeof(path), SHADER_DIRECTORY "/%s", names[index]);
-		if (sceIoRemove(path) >= 0 && strcmp(names[index], VSHC_ID_FILE_NAME))
-			removed++;
-	}
-	free(names);
-	if (length > 0 || removed)
-	{
+		result = vshc_retire(&memory_card, SHADER_PARENT, SHADER_NAME, &index);
 		contents[length] = 0;
 		snprintf(old_ids, sizeof(old_ids), "%.*s", (int)strcspn(contents, "\r\n"), contents);
-		log_line("gxm: shader cache made by another build (%s; this build %016llx %016llx): %lu old programs removed",
+		log_line("gxm: shader cache made by another build (%s; this build %016llx %016llx): %s (%.1f ms)",
 			length > 0 ? old_ids : "no id file", (unsigned long long)shader_ids.compile_id,
-			(unsigned long long)shader_ids.generator_id, removed);
+			(unsigned long long)shader_ids.generator_id,
+			result == VSHC_RETIRE_RENAMED ? "moved aside, removed in the background" :
+			result == VSHC_RETIRE_IN_PLACE ? "the folder cannot be renamed: its old files are removed in the background" :
+				"the folder cannot be renamed or marked: its old files stay (each refused when read)",
+			(sceKernelGetProcessTimeWide() - before) / 1000.0);
+		if (result == VSHC_RETIRE_RENAMED)
+			log_line("gxm: old shader cache now " SHADER_DIRECTORY VSHC_OLD_FOLDER_SUFFIX "%d", index);
 	}
 	vshc_id_text(text, sizeof(text), &shader_ids);
 	if ((file = sceIoOpen(SHADER_DIRECTORY "/" VSHC_ID_FILE_NAME ".tmp", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC,
@@ -959,6 +1021,95 @@ static void shader_cache_check(void)
 		else
 			sceIoRemove(SHADER_DIRECTORY "/" VSHC_ID_FILE_NAME ".tmp");
 	}
+}
+
+/* ---------- the old caches' clean-up
+
+Another build's cache folders (shaders.old-<n>, or the cache folder itself
+marked to be swept in place: vita_shader_cache.h) are removed by a thread of
+the lowest priority, started once the game is up (SHADER_SWEEP_FRAME frames
+presented). It removes one file at a time and only while the game has read
+no file for SHADER_SWEEP_QUIET_US (vita_host_file_read_note: a level
+loading, textures or sounds streaming), so the memory card stays the
+game's. Quitting part way leaves the rest for the next start.
+HALO_SHADER_SWEEP=0 leaves the old folders alone. */
+#define SHADER_SWEEP_FRAME 300
+#define SHADER_SWEEP_QUIET_US 1000000ULL
+#define SHADER_SWEEP_POLL_US 100000
+#define SHADER_SWEEP_GAP_US 20000
+
+static volatile unsigned int file_reads;
+
+void vita_host_file_read_note(void)
+{
+	__atomic_add_fetch(&file_reads, 1, __ATOMIC_RELAXED);
+}
+
+static struct
+{
+	unsigned int reads;
+	unsigned long long quiet_since, waited_us;
+	int started;
+} shader_sweep;
+
+/* before each removal: waits until the game has read no file for a while */
+static int shader_sweep_pace(void *argument)
+{
+	(void)argument;
+	for (;;)
+	{
+		unsigned int reads = __atomic_load_n(&file_reads, __ATOMIC_RELAXED);
+		unsigned long long now = sceKernelGetProcessTimeWide();
+
+		if (reads != shader_sweep.reads)
+		{
+			shader_sweep.reads = reads;
+			shader_sweep.quiet_since = now;
+		}
+		else if (now - shader_sweep.quiet_since >= SHADER_SWEEP_QUIET_US)
+			break;
+		sceKernelDelayThread(SHADER_SWEEP_POLL_US);
+		shader_sweep.waited_us += SHADER_SWEEP_POLL_US;
+	}
+	sceKernelDelayThread(SHADER_SWEEP_GAP_US);
+	return 1;
+}
+
+static int shader_sweep_thread(SceSize size, void *argument)
+{
+	struct vshc_sweep_counts counts;
+	unsigned long long before = sceKernelGetProcessTimeWide();
+	int done;
+
+	(void)size;
+	(void)argument;
+	if (vshc_sweep_pending(&memory_card, SHADER_PARENT, SHADER_NAME))
+	{
+		shader_sweep.reads = __atomic_load_n(&file_reads, __ATOMIC_RELAXED);
+		shader_sweep.quiet_since = before;
+		done = vshc_sweep(&memory_card, SHADER_PARENT, SHADER_NAME, &shader_ids, shader_sweep_pace, NULL, &counts);
+		log_line("gxm: old shader cache clean-up: %lu old files removed in %.1f s (%.1f s of it waiting for the "
+			"game's file reads), %lu old folder%s removed%s", counts.removed,
+			(sceKernelGetProcessTimeWide() - before) / 1e6, shader_sweep.waited_us / 1e6, counts.folders,
+			counts.folders == 1 ? "" : "s",
+			done ? "" : counts.left ? ", files not the cache's left in place" : ", the rest at the next start");
+	}
+	return sceKernelExitDeleteThread(0);
+}
+
+/* (from vgxm_present, on the thread that presents) */
+static void shader_sweep_start(void)
+{
+	const char *setting = getenv("HALO_SHADER_SWEEP");
+	SceUID thread;
+
+	shader_sweep.started = 1;
+	if (setting && atoi(setting) == 0)
+		return;
+	/* (191: the lowest priority a user thread has; any core) */
+	thread = sceKernelCreateThread("shader cache clean-up", shader_sweep_thread, 191, 32 * 1024, 0, 0, NULL);
+	if (thread >= 0)
+		sceKernelStartThread(thread, 0, NULL);
 }
 
 volatile unsigned long long vgxm_cache_write_us;
@@ -4094,6 +4245,8 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	overlay_draw();
 	notification.address = gxm.notification;
 	notification.value = ++gxm.frame;
+	if (gxm.frame >= SHADER_SWEEP_FRAME && !shader_sweep.started)
+		shader_sweep_start();
 	sceGxmEndScene(gxm.context, NULL, &notification);
 	{
 		/* (the frame is all the GPU's now: frame_timing) */

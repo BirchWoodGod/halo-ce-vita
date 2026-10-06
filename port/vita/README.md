@@ -345,7 +345,10 @@ says how it is made again after the Cg generators (`nv2a_psh_cg.c`,
 `nv2a_vsh_cg.c`) change: collect the sources with the gxm-null build
 (`HALO_SHADER_COLLECT`, `HALO_SHADER_TOUR`), compile them on Vita3K
 (`HALO_SHADER_PRECOMPILE`), pack them. A program the pack misses is compiled
-in the background on the device and kept in `shaders/`.
+in the background on the device and kept in `shaders/`. After an update, another build's `shaders/` is renamed to
+`shaders.old-<n>` at start-up and removed by a low-priority thread once the
+game is up, while it reads no files (`gxm: old shader cache clean-up` in the
+log; an interrupted one goes on at the next start).
 
 ### Debug switches
 
@@ -372,6 +375,7 @@ Useful ones:
 | `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do without joining a group |
 | `HALO_SHADER_ASYNC=0` | a shader that is neither shipped nor cached is compiled while the game waits (the default compiles it in the background and skips its draws until it is ready) |
 | `HALO_SHADER_PACK=0` | ignore the shipped shaders (`app0:shaders.pak`) |
+| `HALO_SHADER_SWEEP=0` | leave another build's old shader cache folders (`shaders.old-<n>`) on the memory card |
 | `HALO_NET_PROFILE=1`, `HALO_NET_TRACE=1` | where a network game's frame goes; what its sockets do |
 | `HALO_NET_CATCH_UP_TICKS=n` | the most ticks a frame of a System Link or online game runs to catch up with real time (default 2; 30 = beta.1's pacing) |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |

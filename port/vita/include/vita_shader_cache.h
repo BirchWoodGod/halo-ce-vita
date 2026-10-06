@@ -94,6 +94,75 @@ int vshc_id_matches(const char *contents, size_t size, const struct vshc_ids *id
 the id file: the only files the cache ever removes */
 int vshc_cache_file_name(const char *name);
 
+/* ---------- another build's cache: moved aside at start-up, removed later
+
+Emptying another build's cache file by file at start-up took 65 s on a
+Vita's memory card (632 files, sceIoRemove ~0.1 s each; v1.1.0, Oct 6 2026),
+a black screen all the while. Instead the folder is renamed, in one
+operation, to <name>.old-<n> and a new empty folder made in its place
+(vshc_retire); a low-priority thread removes the old folders later, once the
+game is up and while it reads no files (vita_gxm.c, vshc_sweep): only the
+names the cache writes (vshc_cache_file_name), then the folder if that left
+it empty, so a folder holding anything else stays. If the rename fails, the
+files stay where they are, the folder is marked (VSHC_SWEEP_FILE_NAME) and
+swept in place: a program file is removed only if its header is not this
+build's (cache_read refuses such a file anyway). An interrupted clean-up
+goes on at the next start. The file system is reached through vshc_fs, so
+the desktop test runs all of this on a folder of its own. */
+
+#define VSHC_SWEEP_FILE_NAME "sweep.pending"
+#define VSHC_OLD_FOLDER_SUFFIX ".old-"
+#define VSHC_OLD_FOLDERS_MAX 99
+
+struct vshc_fs
+{
+	void *context;
+	/* each 0 on success, negative on failure */
+	int (*rename)(void *context, const char *from, const char *to);
+	int (*make_directory)(void *context, const char *path);
+	int (*remove)(void *context, const char *path);
+	int (*remove_directory)(void *context, const char *path);
+	/* writes the text as the whole file */
+	int (*write_text)(void *context, const char *path, const char *text);
+	/* nonzero if anything is at the path */
+	int (*exists)(void *context, const char *path);
+	/* the first size bytes of the file: the count read, negative on failure */
+	int (*read_head)(void *context, const char *path, void *buffer, unsigned int size);
+	/* each entry's name in the folder (not . or ..) to each; negative if it cannot be listed */
+	int (*list)(void *context, const char *path, void (*each)(void *argument, const char *name), void *argument);
+};
+
+enum vshc_retire_result
+{
+	VSHC_RETIRE_RENAMED,  /* moved to <name>.old-<n>, an empty folder made in its place */
+	VSHC_RETIRE_IN_PLACE, /* the rename failed: marked to be swept in place */
+	VSHC_RETIRE_FAILED,   /* neither: the files stay (each still refused when read) */
+};
+
+/* parent/name, another build's cache folder, out of the way; *index: the n
+of the folder it was renamed to */
+enum vshc_retire_result vshc_retire(const struct vshc_fs *fs, const char *parent, const char *name, int *index);
+/* n if entry is <name>.old-<n> (1..VSHC_OLD_FOLDERS_MAX), else 0 */
+int vshc_old_folder_index(const char *entry, const char *name);
+/* nonzero if vshc_sweep has anything to do: an old folder in parent, or
+parent/name marked */
+int vshc_sweep_pending(const struct vshc_fs *fs, const char *parent, const char *name);
+
+struct vshc_sweep_counts
+{
+	unsigned long removed;      /* files removed */
+	unsigned long folders;      /* old folders removed */
+	unsigned long left;         /* files left: not the cache's, or not removable */
+};
+
+/* the clean-up: every <name>.old-<n> folder in parent emptied of the cache's
+files and removed, and parent/name swept in place if marked (keeping the
+files whose header carries ids). pace(argument) is called before each
+removal and stops the clean-up by returning 0 (the next start goes on).
+1 when nothing is left to do, 0 if stopped or something stays. */
+int vshc_sweep(const struct vshc_fs *fs, const char *parent, const char *name, const struct vshc_ids *ids,
+	int (*pace)(void *argument), void *argument, struct vshc_sweep_counts *counts);
+
 struct vshp_pack
 {
 	const unsigned char *data;
