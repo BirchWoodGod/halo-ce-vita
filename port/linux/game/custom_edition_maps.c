@@ -187,6 +187,43 @@ static boolean xbox_level_named(
 	return FALSE;
 }
 
+/* Whether the player turned the map `name` off (the Vita settings panel's
+Modded maps page): HALO_MAPS_DISABLED holds the names of those maps, commas
+between them. An off map stays in the folder but is not in the level list. */
+#define LOWER_CASE(c) ((c) >= 'A' && (c) <= 'Z' ? (c) - 'A' + 'a' : (c))
+
+static boolean custom_edition_map_disabled(
+	char const *name)
+{
+	char const *list = getenv("HALO_MAPS_DISABLED");
+
+	while (list && *list)
+	{
+		short index = 0;
+
+		/* (each name of the list against `name`, letters of either case) */
+		while (name[index] && list[index] && list[index] != ',' &&
+			LOWER_CASE(name[index]) == LOWER_CASE(list[index]))
+		{
+			index++;
+		}
+		if (!name[index] && (!list[index] || list[index] == ','))
+		{
+			return TRUE;
+		}
+		while (*list && *list != ',')
+		{
+			list++;
+		}
+		if (*list == ',')
+		{
+			list++;
+		}
+	}
+
+	return FALSE;
+}
+
 /* the file name as the menus show it: "beavercreek_halo3" as
 "Beavercreek Halo3" */
 static void display_name_make(
@@ -316,6 +353,11 @@ static void custom_edition_map_add(
 	}
 	if (xbox_level_named(name))
 	{
+		return;
+	}
+	if (custom_edition_map_disabled(name))
+	{
+		error(_error_silent, "custom edition: the map '%s' is turned off (HALO_MAPS_DISABLED)", name);
 		return;
 	}
 	/* a modded or newly built Xbox map plays as the Xbox levels do; a
