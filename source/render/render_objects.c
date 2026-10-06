@@ -1045,6 +1045,25 @@ static void render_object_list(
 					big_enough = level_of_detail_pixels >= minimum_pixels ||
 						render_object_kept_whatever_its_size(object, definition, minimum_pixels);
 					flicker_note_drawn(object_index, big_enough, level_of_detail_pixels, minimum_pixels);
+					/* (port) no lighting: process_rendered_objects found this
+					object invisible with no children a moment ago, and the
+					threaded tick has since shown it or given it a child (the
+					flags and links read here are the running tick's). The Xbox
+					never got here; render_model reads the lighting (a NULL
+					read, a crash on the Vita): the object is drawn from the
+					next frame */
+					if (big_enough && !data->lighting)
+					{
+						static int noted;
+
+						if (noted < 8)
+						{
+							noted++;
+							platform_log("render: object %08lx (%s) shown during the frame's walk, no lighting yet: drawn from the next frame",
+								(unsigned long)object_index, tag_name_strip_path(tag_get_name(object->definition_index)));
+						}
+						big_enough = FALSE;
+					}
 					if (big_enough && OBJECTS_PROFILE_ON())
 						objects_profile_models++;
 					if (big_enough)
