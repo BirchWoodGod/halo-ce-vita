@@ -47,7 +47,7 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 ### Movies
 
 The Xbox movies are Bink files, which the Vita cannot play. Convert them to
-H.264 MP4 (640x480 or smaller, AAC audio) and put them in
+H.264 MP4 (any size up to 960x544, AAC audio) and put them in
 `ux0:data/haloce-vita/movies/` with the same names: `intro.mp4`,
 `credits.mp4`, `attract1.mp4` ... For example, with ffmpeg:
 
@@ -60,9 +60,14 @@ A movie without an MP4 is skipped, as the game skips a missing movie. (The
 game looks for `data/bink/<name>.bik` first; the port creates an empty one
 for each MP4 at start-up.)
 
-A movie is shown at the shape its file gives: one made 16:9 at 640x480
-(ffmpeg `-aspect 16:9`) fills the screen's width, the Xbox's are 4:3.
-`HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
+A movie is scaled to fill the screen at the shape its file gives (letter-
+or pillarboxed only as that needs): the Xbox's 4:3 movies fill the height,
+16:9 ones the width, whether made 640x360, 848x480, 960x544 or 640x480 with
+ffmpeg `-aspect 16:9`. The rows the decoder adds to fill its last 16-pixel
+macroblock (640x360 decodes to 640x368) are cut by the picture size in the
+file. `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without
+one; `HALO_MOVIE_DUMP=n` writes the n-th frame as the decoder gave it
+(`movie_nv12.raw`) and as converted (`movie_rgb.raw`).
 
 ## Controls
 

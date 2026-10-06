@@ -696,32 +696,26 @@ static void bink_draw_frame(
 		screen_bounds.y1= (short)((screen_height+bink_globals.height)/2);
 #ifdef HALO_LINUX
 		{
-			/* a movie whose file gives a display shape other than its
-			pixels' (an MP4 converted 16:9 at 640x480, issue #6) keeps its
-			height and is shown at that shape, as wide as the screen at most
-			(then letterboxed); so is one larger than the screen (a 960x544
-			copy on the Vita's 848x480, issue #8: before, drawn at its pixel
-			size and cropped). The Xbox's 4:3 movies are drawn as before */
+			/* the movie is scaled to fit the screen at its display shape,
+			letterboxed or pillarboxed only as that needs: the Xbox's 4:3
+			640x480 movies fill the height as before, a 16:9 copy fills the
+			width whatever its pixels (640x480 flagged 16:9, issue #6; 640x360
+			or 848x480, which were drawn at their pixel size, small and
+			centred; 960x544, issue #8, cropped before) */
 			real aspect= halo_movie_display_aspect();
 			real pixels= bink_globals.height>0 ? (real)bink_globals.width/(real)bink_globals.height : 0.f;
-			boolean larger= bink_globals.width>screen_width || bink_globals.height>screen_height;
 
-			if (aspect<=0.f && larger)
+			if (aspect<=0.f)
 				aspect= pixels;
-			if (aspect>0.f && pixels>0.f && (larger || aspect<pixels*0.99f || aspect>pixels*1.01f))
+			if (aspect>0.f && screen_width>0 && screen_height>0)
 			{
-				real height= (real)bink_globals.height;
+				real height= (real)screen_height;
 				real width= height*aspect;
 
 				if (width>(real)screen_width)
 				{
 					width= (real)screen_width;
 					height= width/aspect;
-				}
-				if (height>(real)screen_height)
-				{
-					height= (real)screen_height;
-					width= height*aspect;
 				}
 				screen_bounds.x0= (short)(((real)screen_width-width)/2.f+0.5f);
 				screen_bounds.x1= (short)(((real)screen_width+width)/2.f+0.5f);

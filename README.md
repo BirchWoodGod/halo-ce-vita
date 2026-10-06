@@ -108,8 +108,10 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v high -level 4.0 -crf 20 -pix_fmt yuv
 
 A movie without an MP4 is skipped, as the game skips a missing movie.
 
-A movie is shown at the shape its file gives: one made 16:9 at 640x480
-(ffmpeg `-aspect 16:9`) fills the screen's width, the Xbox's are 4:3.
+A movie is scaled to fill the screen at the shape its file gives, with
+black bars only where that shape needs them: the Xbox's 4:3 movies fill the
+height, and any 16:9 encoding fills the width - 640x360, 848x480, 960x544,
+or 640x480 made with ffmpeg `-aspect 16:9`. Any size up to 960x544 plays.
 `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
 
 ### Saving
