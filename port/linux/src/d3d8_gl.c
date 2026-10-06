@@ -3353,6 +3353,12 @@ void halo_d3d_stream_attribute(long reg, long stream)
 	device.extra_attribute_stream = device.extra_attribute_active ? (unsigned long)stream : 0;
 }
 
+/* (the GXM device's light scissor, d3d8_gxm.c: drawn unclipped here) */
+void halo_d3d_scissor(const float *rectangle)
+{
+	(void)rectangle;
+}
+
 void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_index)
 {
 	device.base_vertex_index = base_vertex_index;

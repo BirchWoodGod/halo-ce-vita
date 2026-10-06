@@ -365,6 +365,43 @@ static struct
 them per phase (halo_render_draw_counts) */
 static unsigned long draw_counter_stream, draw_counter_immediate;
 
+/* (port) a scissor rectangle for the draws recorded next, in normalised
+device coordinates of the viewport (x right, y down, -1..1), or off (NULL):
+the dynamic lights' passes over the structure (rasterizer_xbox_environment.c)
+are clipped to the screen rectangle outside which their light adds nothing.
+Mapped to the viewport's pixels when each draw is recorded, rounded outward,
+and intersected with the viewport's own rectangle. */
+static int device_scissor_on;
+static float device_scissor[4];
+
+void halo_d3d_scissor(const float *rectangle)
+{
+	device_scissor_on = rectangle != NULL;
+	if (rectangle)
+		memcpy(device_scissor, rectangle, sizeof(device_scissor));
+}
+
+static void scissor_apply(long clip[4])
+{
+	float width, height;
+	long x0, y0, x1, y1;
+
+	if (!device_scissor_on)
+		return;
+	width = (float)device.viewport.Width;
+	height = (float)device.viewport.Height;
+	x0 = (long)floorf((float)device.viewport.X + (device_scissor[0] + 1.0f) * 0.5f * width) - 1;
+	y0 = (long)floorf((float)device.viewport.Y + (device_scissor[1] + 1.0f) * 0.5f * height) - 1;
+	x1 = (long)ceilf((float)device.viewport.X + (device_scissor[2] + 1.0f) * 0.5f * width) + 1;
+	y1 = (long)ceilf((float)device.viewport.Y + (device_scissor[3] + 1.0f) * 0.5f * height) + 1;
+	if (x0 > clip[0]) clip[0] = x0;
+	if (y0 > clip[1]) clip[1] = y0;
+	if (x1 < clip[2]) clip[2] = x1;
+	if (y1 < clip[3]) clip[3] = y1;
+	if (clip[2] < clip[0]) clip[2] = clip[0];
+	if (clip[3] < clip[1]) clip[3] = clip[1];
+}
+
 void halo_render_draw_counts(unsigned long *stream, unsigned long *immediate)
 {
 	*stream = draw_counter_stream;
@@ -4865,6 +4902,7 @@ static struct render_command *record_draw(BOOL immediate)
 			draw->clip[1] = (long)device.viewport.Y;
 			draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 			draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
+			scissor_apply(draw->clip);
 			draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 			if (immediate)
 				{ stats.immediate_draws++; draw_counter_immediate++; }
@@ -5065,6 +5103,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->clip[1] = (long)device.viewport.Y;
 	draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 	draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
+	scissor_apply(draw->clip);
 	draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 	if (immediate)
 		{ stats.immediate_draws++; draw_counter_immediate++; }
