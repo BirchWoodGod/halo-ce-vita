@@ -394,6 +394,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
+#include "map_share.h"
 void platform_show_message(char const *title, char const *message);
 #endif
 
@@ -902,6 +903,10 @@ static boolean check_networking_and_generate_error(
 void network_game_client_dispose(
 	struct network_game_client *client)
 {
+#ifdef HALO_LINUX
+	/* port: a download of the host's map stops with the client (map_share.c) */
+	map_share_client_dispose(client);
+#endif
 	if (client)
 	{
 		if (client->connection)
@@ -1208,6 +1213,18 @@ boolean network_game_client_write(
 		reliable);
 }
 
+#ifdef HALO_LINUX
+/* port: a message to the host, reliably (map sharing's requests:
+port/linux/game/map_share.c) */
+boolean network_game_client_send_to_server(
+	struct network_game_client *client,
+	void *message)
+{
+	return client && client->connection && message &&
+		network_game_client_write(client->connection, message, GET_MESSAGE_SIZE(*(message_header *)message), NULL, TRUE);
+}
+#endif
+
 boolean network_game_client_idle(
 	struct network_game_client *client)
 {
@@ -1217,6 +1234,17 @@ boolean network_game_client_idle(
 		"c:\\halo\\SOURCE\\networking\\network_client_manager.c",
 		0xC6,
 		client);
+
+#ifdef HALO_LINUX
+	/* port: a download of the host's custom map (port/linux/game/map_share.c):
+	one the player turned down, cancelled, or that failed, leaves the game
+	as a map the joiner cannot play always did */
+	if (!map_share_client_update(client))
+	{
+		display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
+		return FALSE;
+	}
+#endif
 
 	switch (client->state)
 	{
@@ -1257,9 +1285,8 @@ boolean network_game_client_idle(
 }
 
 /* port: whether this machine may play the host's map with it (the host's
-game settings name it); FALSE once the player has been told why not. A
-local (split screen) game plays any map. Every check below runs, in turn,
-and the first that refuses ends it:
+game settings name it). A local (split screen) game plays any map. Every
+check below runs, in turn, and the first that refuses ends it:
 1. the map's build is one this version plays with others
    (cache_files_map_plays_multiplayer): the object and damage messages name
    definitions by tag index, which differs between builds.
@@ -1271,41 +1298,59 @@ and the first that refuses ends it:
    check 1 passes a map custom_edition_maps.c recognises
    (cache_files_map_plays_multiplayer, which the host's map choice in
    ui_widget_event_handler_functions.c also asks), leaving check 2 to
-   decide it: both run, neither replaces the other. */
-static boolean network_game_client_map_playable(
-	struct network_game_map const *map)
+   decide it: both run, neither replaces the other.
+A custom map missing or different (check 2) may then be downloaded from
+the host (port/linux/game/map_share.c) rather than refused. */
+enum network_game_client_map_check
 {
-	char build[0x20];
+	_network_game_client_map_playable,
+	_network_game_client_map_build_unsupported,
+	_network_game_client_map_custom_missing,
+	_network_game_client_map_custom_different,
+};
 
+static short network_game_client_map_check(
+	struct network_game_map const *map,
+	char build[0x20])
+{
+	boolean missing;
+
+	build[0] = 0;
 	if (network_game_is_splitscreen_local())
-		return TRUE;
+		return _network_game_client_map_playable;
 	/* 1. the build */
 	if (!cache_files_map_plays_multiplayer(map->name, build))
+		return _network_game_client_map_build_unsupported;
+	/* 2. a custom map: the host's copy (port/linux/game/custom_edition_maps.c) */
+	if (!custom_edition_maps_host_copy_matches(map->name, (unsigned long)map->version, &missing))
+		return missing ? _network_game_client_map_custom_missing : _network_game_client_map_custom_different;
+
+	return _network_game_client_map_playable;
+}
+
+/* tells the player why the host's map is not played here */
+static void network_game_client_map_refusal_show(
+	struct network_game_map const *map,
+	short check,
+	char const *build)
+{
+	char message[192];
+
+	if (check == _network_game_client_map_build_unsupported)
 	{
 		cache_files_show_multiplayer_unavailable(map->name, build);
-		return FALSE;
+		return;
 	}
-	/* 2. a custom map: the host's copy (port/linux/game/custom_edition_maps.c) */
-	{
-		boolean missing;
+	snprintf(
+		message,
+		sizeof(message),
+		check == _network_game_client_map_custom_missing ?
+			"The host is playing the custom map %s, which isn't in your maps folder." :
+			"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.",
+		tag_name_strip_path(map->name));
+	platform_show_message("Halo: custom map", message);
 
-		if (!custom_edition_maps_host_copy_matches(map->name, (unsigned long)map->version, &missing))
-		{
-			char message[192];
-
-			snprintf(
-				message,
-				sizeof(message),
-				missing ?
-					"The host is playing the custom map %s, which isn't in your maps folder." :
-					"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.",
-				tag_name_strip_path(map->name));
-			platform_show_message("Halo: custom map", message);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
+	return;
 }
 
 boolean network_game_client_game_settings_updated(
@@ -1339,16 +1384,38 @@ boolean network_game_client_game_settings_updated(
 #endif
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
 		{
+			char build[0x20];
+			short check;
+
+			/* port: a download of another map stops (the host changed maps) */
+			map_share_client_map_changed(message_packet->map.name);
+			check = network_game_client_map_check(&message_packet->map, build);
+			/* port: a custom map missing here, or another copy, is offered
+			for download from the host; the joiner stays in the lobby, and
+			precaches it once it has it (map_share.c) */
+			if ((check == _network_game_client_map_custom_missing || check == _network_game_client_map_custom_different) &&
+				map_share_client_offer(
+					client,
+					message_packet->map.name,
+					(unsigned long)message_packet->map.version,
+					check == _network_game_client_map_custom_different))
+			{
+				network_event("asking the host for its map '%s'...", message_packet->map.name);
+			}
 			/* port: a map this machine cannot play with the host's: said,
 			and the game left (the menu's error the join's, not the
 			connection lost that the failure would otherwise give) */
-			if (!network_game_client_map_playable(&message_packet->map))
+			else if (check != _network_game_client_map_playable)
 			{
+				network_game_client_map_refusal_show(&message_packet->map, check, build);
 				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
 				return FALSE;
 			}
-			network_event("precaching map '%s'...", message_packet->map.name);
-			main_set_multiplayer_map_name(message_packet->map.name);
+			else
+			{
+				network_event("precaching map '%s'...", message_packet->map.name);
+				main_set_multiplayer_map_name(message_packet->map.name);
+			}
 		}
 
 		csmemcpy(&previous_game, &client->game, sizeof(client->game));
@@ -2599,6 +2666,12 @@ static void network_game_client_update_precache_status(
 {
 	unsigned long now = system_milliseconds();
 
+#ifdef HALO_LINUX
+	/* (the host's map is still being downloaded: map_share.c sets it once
+	it is here, and the map named until then is the last game's) */
+	if (map_share_client_busy())
+		return;
+#endif
 	if (now - client->last_precache_time > 1000)
 	{
 		char *map_name = main_get_multiplayer_map_name();

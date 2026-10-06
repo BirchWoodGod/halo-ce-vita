@@ -38,6 +38,12 @@
 #                    --linux-net-vita): build/linux/halo of this tree
 #   HALO_TEST_PC     a Linux build without it (pc mode's joiner)
 #   HALO_TEST_DATA   a folder with the game's maps folder
+#   HALO_TEST_DATA_HOST, HALO_TEST_DATA_JOINER   the host's and the joiner's
+#                    own (map sharing: a joiner without the host's map)
+#   HALO_TEST_HOST_GAME  the host's game instead of Blood Gulch and Chill Out
+#                    (host:<map>[:<variant>]; code/lobby/adhoc: no map change
+#                    is then looked for)
+#   HALO_TEST_JOIN_ENV   more VAR=value settings for the joiner
 #   HALO_TEST_SECONDS  how long the copies run (default 180)
 #   HALO_TEST_REJOIN   seconds into its game the joiner leaves (code; 0 never)
 #   HALO_TEST_OUT    where the logs go (kept)
@@ -118,18 +124,24 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	local name=$1 ns=$2 binary=$3 cores=$4
 	shift 4
 	mkdir -p "$out/$name/data" "$out/$name/save"
-	ln -sfn "$(cd "$data" && pwd)/maps" "$out/$name/data/maps"
+	local folder=$data
+	case $name in
+	host) folder=${HALO_TEST_DATA_HOST:-$data} ;;
+	joiner) folder=${HALO_TEST_DATA_JOINER:-$data} ;;
+	esac
+	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
 	rm -f "$out/$name/data/init.txt"
 	(cd "$out/$name" && exec nsenter -t "$ns" -n env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen \
 		HALO_DATA_ROOT="$out/$name/data" HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 \
 		HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 \
 		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false \
 		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 "$@" ${HALO_TEST_ENV:-} \
+		$([ "$name" = joiner ] && echo "${HALO_TEST_JOIN_ENV:-}") \
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!
 }
-host_env="HALO_NET_ONLINE=true HALO_NETWORK_TEST=host:bloodgulch:slayer,slayer@chillout HALO_NETWORK_TEST_START=20
+host_env="HALO_NET_ONLINE=true HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer,slayer@chillout} HALO_NETWORK_TEST_START=20
 	HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-3} HALO_NETWORK_TEST_KILL=20 HALO_TEST_INPUT=bot:1"
 wait_code() { # the host's code, once it hosts
 	local code= i
@@ -166,7 +178,7 @@ code|lobby)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	# (the map change: code mode, which runs long enough for a game to end)
-	[ "$mode" = code ] && ! grep -aq "network test: map chillout" "$out/host/run.log" && fail "the host never changed map"
+	[ "$mode" = code ] && [ -z "${HALO_TEST_HOST_GAME:-}" ] && ! grep -aq "network test: map chillout" "$out/host/run.log" && fail "the host never changed map"
 	if [ "$rejoin" != 0 ]; then
 		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the joiner never left and joined again"
 		again=$(sed -n '/network test: joining again/,$p' "$out/joiner/run.log" | two_players)

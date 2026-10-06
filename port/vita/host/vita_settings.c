@@ -1451,17 +1451,26 @@ static void close_panel(void)
 static pthread_mutex_t message_lock = PTHREAD_MUTEX_INITIALIZER;
 static char pending_message[2048];
 static int message_pending, message_visible;
+/* map sharing's question (port/linux/game/map_share.c): cross yes, circle
+no; -1 until answered */
+static char pending_question[2048];
+static int question_pending, question_visible, question_withdrawn;
+static volatile int question_result = -1;
+/* map sharing's progress: redrawn when it changes; circle cancels */
+static char pending_progress[2048];
+static int progress_changed, progress_visible, progress_hide;
+static volatile int progress_cancel;
 
-void vita_settings_message(const char *title, const char *text)
+/* `title`, `text` and `footer` in lines of the overlay's width */
+static size_t format_box(char *formatted, size_t size, const char *title, const char *text, const char *footer)
 {
-    char formatted[2048];
     size_t used = 0;
     int column = 0;
-    const char *parts[] = {title, "\n\n", text, "\n\nCross / Circle: close"};
+    const char *parts[] = {title, "\n\n", text, footer};
     for (int part = 0; part < 4; ++part)
     {
         const char *cursor = parts[part];
-        while (*cursor && used < sizeof(formatted) - 1)
+        while (*cursor && used < size - 1)
         {
             if (*cursor != '\n')
             {
@@ -1478,17 +1487,141 @@ void vita_settings_message(const char *title, const char *text)
             {
                 formatted[used++] = '\n';
                 column = 0;
-                if (used >= sizeof(formatted) - 1) break;
+                if (used >= size - 1) break;
             }
             formatted[used++] = ch;
             column = ch == '\n' ? 0 : column + 1;
         }
     }
     formatted[used] = 0;
+    return used;
+}
+
+void vita_settings_message(const char *title, const char *text)
+{
+    char formatted[2048];
+    size_t used = format_box(formatted, sizeof(formatted), title, text, "\n\nCross / Circle: close");
+
     pthread_mutex_lock(&message_lock);
     memcpy(pending_message, formatted, used + 1);
     message_pending = 1;
     pthread_mutex_unlock(&message_lock);
+}
+
+/* a yes or no question over the game (NULL withdraws it) */
+void vita_settings_question(const char *title, const char *text)
+{
+    char formatted[2048];
+    size_t used = text ? format_box(formatted, sizeof(formatted), title ? title : "", text,
+        "\n\nCross: yes     Circle: no") : 0;
+
+    pthread_mutex_lock(&message_lock);
+    question_result = -1;
+    if (text)
+    {
+        memcpy(pending_question, formatted, used + 1);
+        question_pending = 1;
+        question_withdrawn = 0;
+    }
+    else
+    {
+        question_pending = 0;
+        question_withdrawn = 1;
+    }
+    pthread_mutex_unlock(&message_lock);
+}
+
+int vita_settings_question_answer(void)
+{
+    return question_result;
+}
+
+/* a progress line over the game (NULL hides it), which circle cancels */
+void vita_settings_progress(const char *title, const char *text)
+{
+    char formatted[2048];
+    size_t used = text ? format_box(formatted, sizeof(formatted), title ? title : "", text,
+        "\n\nCircle: cancel") : 0;
+
+    pthread_mutex_lock(&message_lock);
+    if (text)
+    {
+        if (!progress_visible && !progress_changed)
+            progress_cancel = 0;
+        memcpy(pending_progress, formatted, used + 1);
+        progress_changed = 1;
+        progress_hide = 0;
+    }
+    else
+    {
+        progress_changed = 0;
+        progress_hide = 1;
+    }
+    pthread_mutex_unlock(&message_lock);
+}
+
+int vita_settings_progress_cancelled(void)
+{
+    return progress_cancel;
+}
+
+/* (the input thread) the question and the progress line, below a message:
+nonzero when one holds the buttons */
+static int question_progress_input(unsigned long pressed)
+{
+    int shown_now = 0;
+
+    pthread_mutex_lock(&message_lock);
+    if (question_withdrawn)
+    {
+        question_withdrawn = 0;
+        if (question_visible)
+        {
+            question_visible = 0;
+            vgxm_menu_set(NULL, 0);
+        }
+    }
+    if (question_pending)
+    {
+        vgxm_menu_set(pending_question, -1);
+        question_pending = 0;
+        question_visible = 1;
+        shown_now = 1;
+        panel_open = 0;
+    }
+    if (progress_hide)
+    {
+        progress_hide = 0;
+        if (progress_visible && !question_visible)
+            vgxm_menu_set(NULL, 0);
+        progress_visible = 0;
+    }
+    if (progress_changed && !question_visible)
+    {
+        vgxm_menu_set(pending_progress, -1);
+        progress_changed = 0;
+        progress_visible = 1;
+        panel_open = 0;
+    }
+    pthread_mutex_unlock(&message_lock);
+
+    if (question_visible)
+    {
+        if (!shown_now && (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_CIRCLE)))
+        {
+            question_result = (pressed & VITA_BUTTON_CROSS) ? 1 : 0;
+            question_visible = 0;
+            vgxm_menu_set(NULL, 0);
+        }
+        return 1;
+    }
+    if (progress_visible)
+    {
+        if (pressed & VITA_BUTTON_CIRCLE)
+            progress_cancel = 1;
+        return 1;
+    }
+    return 0;
 }
 
 static void act(const struct setting *setting)
@@ -1669,7 +1802,22 @@ int vita_settings_input(const struct vita_host_pad *pad)
         {
             message_visible = 0;
             vgxm_menu_set(NULL, 0);
+            /* (what the message covered comes back) */
+            pthread_mutex_lock(&message_lock);
+            if (question_visible)
+            {
+                question_visible = 0;
+                question_pending = 1;
+            }
+            else if (progress_visible)
+                progress_changed = 1;
+            pthread_mutex_unlock(&message_lock);
         }
+        return 1;
+    }
+    if (question_progress_input(pressed))
+    {
+        both_since = 0;
         return 1;
     }
 	if (both)

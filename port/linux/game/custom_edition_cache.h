@@ -60,6 +60,17 @@ the CRC-32 of the whole file when the header has none; 0 when there is no
 such map. Never 0 for a map. */
 unsigned long custom_edition_cache_map_identity(
 	char const *map_name);
+/* The file of the map `map_name` names, in the maps folder: its ".map",
+else its OpenSauce ".yelo" (`path_size` characters); FALSE when there is
+none. */
+boolean custom_edition_cache_map_file_path(
+	char const *map_name,
+	char *path,
+	long path_size);
+/* Forgets what custom_edition_cache_map_identity worked out for the map
+`map_name` names (a downloaded copy took the place of the file: map_share.c). */
+void custom_edition_cache_map_identity_forget(
+	char const *map_name);
 
 /* Loads the Custom Edition map `map_name` names into its tag cache and
 converts its tags for this build, copying its cache header to `header`

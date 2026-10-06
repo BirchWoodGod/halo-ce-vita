@@ -200,6 +200,7 @@ symbols in this file:
 #include "networking/network_client_message_handler.h"
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
+#include "map_share.h"
 
 /* port/linux/game/network_distributed.c's */
 void network_distributed_handle_message(long machine_index, word const *message, word size);
@@ -677,6 +678,23 @@ boolean network_game_client_handle_message(
 						if (!result)
 						{
 							network_event("network_game_client_handle_message_server_graceful_game_exit_postgame() failed");
+						}
+						break;
+
+					/* port: map sharing (port/linux/game/map_share.c), the
+					host's alone */
+					case _message_server_map_download_answer:
+					case _message_server_map_download_data:
+						if (network_game_client_address_matches_server(client, source_address))
+						{
+							if (packet_type == _message_server_map_download_answer)
+								map_share_client_handle_answer(client, message, message_size);
+							else
+								map_share_client_handle_data(client, message, message_size);
+						}
+						else
+						{
+							network_event("ignoring a map share message from a system that is not the host");
 						}
 						break;
 

@@ -472,6 +472,7 @@ symbols in this file:
 #include "text/unicode.h"
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
+#include "map_share.h"
 #endif
 
 #include "cache/cache_files.h"
@@ -1205,6 +1206,8 @@ void network_game_server_dispose(
 {
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x120, server);
 
+	/* port: its map uploads end with it (port/linux/game/map_share.c) */
+	map_share_server_dispose();
 	/* port: a won co-op round's next level belongs to this server alone */
 	network_game_server_cooperative_next_map[0] = 0;
 	csmemset(&network_game_server_cooperative, 0, sizeof(network_game_server_cooperative));
@@ -1428,6 +1431,10 @@ boolean network_game_server_idle(
 						success = FALSE;
 						break;
 					}
+					/* port: the custom map being sent to joiners in the
+					lobby, as much as its rate allows; refused once the game
+					leaves the lobby (port/linux/game/map_share.c) */
+					HALO_NET_DETAIL("server:map_share", map_share_server_update(server));
 				}
 				else
 				{

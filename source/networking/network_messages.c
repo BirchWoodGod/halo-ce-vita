@@ -181,6 +181,7 @@ symbols in this file:
 #include "bungie_net/common/message_header.h"
 #include "memory/data_packet_groups.h"
 #include "networking/network_messages.h"
+#include "map_share_protocol.h"
 
 /* cseries_windows.c's */
 unsigned long system_milliseconds(void);
@@ -268,7 +269,13 @@ struct network_game_message_packet_definitions
 	struct data_packet_definition client_switch_to_pregame;
 	struct data_packet_field client_graceful_game_exit_postgame_fields[2];
 	struct data_packet_definition client_graceful_game_exit_postgame;
-	struct data_packet_entry packets[35];
+	struct data_packet_field client_map_download_fields[4];
+	struct data_packet_definition client_map_download;
+	struct data_packet_field server_map_download_answer_fields[4];
+	struct data_packet_definition server_map_download_answer;
+	struct data_packet_field server_map_download_data_fields[4];
+	struct data_packet_definition server_map_download_data;
+	struct data_packet_entry packets[38];
 	struct data_packet_group_definition group;
 };
 
@@ -320,6 +327,11 @@ DEFINE_NETWORK_GAME_MESSAGE(message_server_graceful_game_exit_postgame, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_remove_player_request_postgame, 0x20);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_switch_to_pregame, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_graceful_game_exit_postgame, 0x04);
+/* (port) map sharing's (port/linux/game/map_share_protocol.h: struct
+map_share_request, map_share_answer_message, map_share_data_message) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_map_download, 2 * 2 + 2 * 4 + MAP_SHARE_NAME_BYTES);
+DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_answer, 2 * 2 + 3 * 4 + MAP_SHARE_NAME_BYTES + MAP_SHARE_DIGEST_BYTES);
+DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_data, 2 * 2 + 4 + MAP_SHARE_CHUNK_BYTES);
 
 #undef DEFINE_NETWORK_GAME_MESSAGE
 
@@ -549,6 +561,27 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(client_graceful_game_exit_postgame, "message_client_graceful_game_exit_postgame_packet", message_client_graceful_game_exit_postgame),
 	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 2),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, MAP_SHARE_NAME_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_map_download, "message_client_map_download_packet", message_client_map_download),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 3),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, MAP_SHARE_NAME_BYTES + MAP_SHARE_DIGEST_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_map_download_answer, "message_server_map_download_answer_packet", message_server_map_download_answer),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 1),
+		DATA_PACKET_FIELD(_data_packet_field_raw, MAP_SHARE_CHUNK_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_map_download_data, "message_server_map_download_data_packet", message_server_map_download_data),
+	{
 		{ 0, 0, &data_0030aa68.client_broadcast_game_search },
 		{ 0, 0, &data_0030aa68.client_ping },
 		{ 1, 0, &data_0030aa68.server_game_advertise },
@@ -584,10 +617,13 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 		{ 7, 0, &data_0030aa68.client_remove_player_request_postgame },
 		{ 7, 0, &data_0030aa68.client_switch_to_pregame },
 		{ 7, 0, &data_0030aa68.client_graceful_game_exit_postgame },
+		{ 3, 0, &data_0030aa68.client_map_download },
+		{ 2, 0, &data_0030aa68.server_map_download_answer },
+		{ 2, 0, &data_0030aa68.server_map_download_data },
 	},
 	{
 		"network_game_messages_group",
-		35,
+		38,
 		8,
 		/* the per-tick update of 128 players decodes to 0x1010 bytes */
 		HALO_PORT_NETWORK_PACKET_SIZE,
@@ -822,6 +858,15 @@ void *create_network_game_message(
 	case _message_client_graceful_game_exit_postgame:
 #line 211 "c:\\halo\\SOURCE\\networking\\network_messages.c"
 		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_graceful_game_exit_postgame));
+		break;
+	case _message_client_map_download:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_map_download));
+		break;
+	case _message_server_map_download_answer:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_map_download_answer));
+		break;
+	case _message_server_map_download_data:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_map_download_data));
 		break;
 	default:
 #line 213 "c:\\halo\\SOURCE\\networking\\network_messages.c"

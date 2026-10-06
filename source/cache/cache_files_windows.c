@@ -600,6 +600,37 @@ boolean cache_files_precache_map_loaded(
 	return cached_map_files_find_map(tag_name_strip_path(map_name)) != NONE;
 }
 
+#ifdef HALO_LINUX
+/* port: forgets this session's cache partition copy of the map `map_name`,
+whose file a download has just replaced (port/linux/game/map_share.c): the
+copy is found by the name in its header alone, and a map without a checksum
+(Invader's) would otherwise be played from the old copy until the game
+restarts. FALSE, keeping it, when that copy is open or being made. */
+boolean cache_files_forget_cached_map(
+	const char *map_name)
+{
+	const char *name = tag_name_strip_path(map_name);
+	short map_file_index = cached_map_files_find_map(name);
+
+	if (cache_file_globals.copy_in_progress && !_stricmp(cache_file_globals.copying_to_map_file_name, name))
+	{
+		return FALSE;
+	}
+	if (map_file_index == NONE)
+	{
+		return TRUE;
+	}
+	if (map_file_index == cache_file_globals.open_map_file_index)
+	{
+		return FALSE;
+	}
+	memset(&cached_map_file_get(map_file_index)->header, 0, sizeof(struct cache_file_header));
+	error(_error_silent, "cache partition: the copy of '%s' (cache file %d) is forgotten", name, map_file_index);
+
+	return TRUE;
+}
+#endif
+
 boolean cache_files_precache_map_begin(
 	const char *map_name,
 	boolean copy_map)

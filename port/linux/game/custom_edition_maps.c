@@ -670,3 +670,29 @@ boolean custom_edition_maps_host_copy_matches(
 
 	return TRUE;
 }
+
+void custom_edition_maps_look_again(
+	void)
+{
+	custom_edition_maps_globals.looked_for = FALSE;
+
+	return;
+}
+
+boolean custom_edition_maps_shareable(
+	char const *level_name)
+{
+	char const *name;
+
+	if (!level_name || !level_name[0])
+	{
+		return FALSE;
+	}
+	name = tag_name_strip_path(level_name);
+
+	/* (turned off since the list was made: HALO_MAPS_DISABLED is the panel's
+	switch, read anew) */
+	return !xbox_level_stock(name) &&
+		!custom_edition_map_disabled(name) &&
+		custom_edition_maps_display_index(level_name) != NONE;
+}
