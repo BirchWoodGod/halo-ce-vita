@@ -1085,11 +1085,17 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				dxt_decode_level(information.kind, source, level_width, level_height, 1, scratch);
 			else
 				decode_level(description, level, source, palette, scratch);
+			/* (a Custom Edition multipurpose map - always a power of two, and
+			decoded here rather than kept compressed for this - with its
+			channels where this build reads them, as the rows below and the
+			OpenGL renderer have them: they were left in Halo PC's order) */
+			if (channel_order != _custom_edition_channels_xbox)
+				custom_edition_texels_reorder(scratch, count, channel_order);
 			twiddle_level(destination, scratch, level_width, level_height);
 			destination += count;
 		}
 		free(scratch);
-		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_swizzled,
+		return texture_initialize(entry, memory, _vgxm_texture_bgra8, _vgxm_texture_swizzled,
 			width, height, levels) == 0;
 	}
 
