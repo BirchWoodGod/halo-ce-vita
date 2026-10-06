@@ -4065,13 +4065,10 @@ static void worker_drain(void)
 		else if (vita_host_time_us() - waited_from > 12000000ull)
 		{
 			static volatile unsigned long hung_frame;
-			static int crash = -1;
+			/* (read each time: the settings panel's Dev page switches it) */
+			const char *setting = getenv("HALO_HANG_CRASH");
+			int crash = setting && atoi(setting) != 0;
 
-			if (crash < 0)
-			{
-				const char *setting = getenv("HALO_HANG_CRASH");
-				crash = setting && atoi(setting) != 0;
-			}
 			hung_frame = frames_requested;
 			if (crash)
 				*(volatile int *)32 = 0;
