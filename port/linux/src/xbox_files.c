@@ -25,6 +25,9 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#ifdef HALO_VITA
+#include "vita_host.h"
+#endif
 
 /* ---------- paths */
 
@@ -402,6 +405,8 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 	it are made again - the Vita sees no other sign of the write) */
 	if (buffer && count)
 		memory_watch_prepare_write(buffer, count);
+	/* (the old shader caches' clean-up waits while the game reads) */
+	vita_host_file_read_note();
 #endif
 	/* The renderer write-protects guest memory it caches (memory_watch.c),
 	and the kernel fails a read() into a protected page instead of

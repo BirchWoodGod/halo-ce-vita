@@ -19,6 +19,10 @@ through uid for vita_host_block_free */
 void *vita_host_block_alloc(const char *name, unsigned long size, int *uid);
 void vita_host_block_free(int uid);
 
+/* the game reads a file (counted: vita_gxm.c's clean-up of old shader
+caches removes files only while the game reads none) */
+void vita_host_file_read_note(void);
+
 /* one line to ux0:data/haloce-vita/log.txt and the debug output */
 void vita_host_log(const char *line);
 

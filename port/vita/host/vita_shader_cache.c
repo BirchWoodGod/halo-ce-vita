@@ -6,6 +6,7 @@ formats). Plain C: built for the Vita and for the desktop test.
 #include "vita_shader_cache.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 uint64_t vshc_source_hash(const char *source, int fragment)
@@ -173,6 +174,214 @@ int vshc_cache_file_name(const char *name)
 			return 0;
 	}
 	return !strcmp(name + 16, ".gxp") || !strcmp(name + 16, ".tmp");
+}
+
+/* ---------- another build's cache: moved aside, removed later */
+
+int vshc_old_folder_index(const char *entry, const char *name)
+{
+	size_t length = strlen(name), suffix = strlen(VSHC_OLD_FOLDER_SUFFIX);
+	const char *digits = entry + length + suffix;
+	int value = 0;
+
+	if (strncmp(entry, name, length) || strncmp(entry + length, VSHC_OLD_FOLDER_SUFFIX, suffix) || !*digits ||
+		*digits == '0' || strlen(digits) > 2)
+		return 0;
+	for (; *digits; digits++)
+	{
+		if (*digits < '0' || *digits > '9')
+			return 0;
+		value = value * 10 + (*digits - '0');
+	}
+	return value <= VSHC_OLD_FOLDERS_MAX ? value : 0;
+}
+
+enum vshc_retire_result vshc_retire(const struct vshc_fs *fs, const char *parent, const char *name, int *index)
+{
+	char path[256], old_path[300];
+	int n;
+
+	snprintf(path, sizeof(path), "%s/%s", parent, name);
+	*index = 0;
+	for (n = 1; n <= VSHC_OLD_FOLDERS_MAX; n++)
+	{
+		snprintf(old_path, sizeof(old_path), "%s/%s" VSHC_OLD_FOLDER_SUFFIX "%d", parent, name, n);
+		if (!fs->exists(fs->context, old_path))
+			break;
+	}
+	if (n <= VSHC_OLD_FOLDERS_MAX && fs->rename(fs->context, path, old_path) >= 0)
+	{
+		*index = n;
+		/* (if this fails, nothing is cached this run; the next start makes it) */
+		fs->make_directory(fs->context, path);
+		return VSHC_RETIRE_RENAMED;
+	}
+	snprintf(old_path, sizeof(old_path), "%s/" VSHC_SWEEP_FILE_NAME, path);
+	return fs->write_text(fs->context, old_path, "sweep\n") >= 0 ? VSHC_RETIRE_IN_PLACE : VSHC_RETIRE_FAILED;
+}
+
+/* a folder's entry names (each under 64 bytes; longer ones are not ours) */
+struct name_list
+{
+	char (*names)[64];
+	unsigned long count, capacity;
+	int full;
+};
+
+static void name_list_add(void *argument, const char *name)
+{
+	struct name_list *list = argument;
+
+	if (strlen(name) >= sizeof(list->names[0]) || list->full)
+		return;
+	if (list->count == list->capacity)
+	{
+		unsigned long capacity = list->capacity ? list->capacity * 2 : 64;
+		char (*grown)[64] = realloc(list->names, capacity * sizeof(list->names[0]));
+
+		if (!grown)
+		{
+			list->full = 1;
+			return;
+		}
+		list->names = grown;
+		list->capacity = capacity;
+	}
+	strcpy(list->names[list->count++], name);
+}
+
+static int name_list_read(const struct vshc_fs *fs, const char *path, struct name_list *list)
+{
+	memset(list, 0, sizeof(*list));
+	return fs->list(fs->context, path, name_list_add, list) >= 0;
+}
+
+int vshc_sweep_pending(const struct vshc_fs *fs, const char *parent, const char *name)
+{
+	struct name_list list;
+	unsigned long index;
+	int pending = 0;
+	char path[256];
+
+	snprintf(path, sizeof(path), "%s/%s/" VSHC_SWEEP_FILE_NAME, parent, name);
+	if (fs->exists(fs->context, path))
+		return 1;
+	if (name_list_read(fs, parent, &list))
+		for (index = 0; index < list.count && !pending; index++)
+			pending = vshc_old_folder_index(list.names[index], name) != 0;
+	free(list.names);
+	return pending;
+}
+
+/* one folder: an old one emptied of the cache's files and removed, or the
+cache folder (in_place) emptied of the files another build wrote; 1 done,
+0 something stays, -1 stopped by pace */
+static int sweep_folder(const struct vshc_fs *fs, const char *folder, const struct vshc_ids *ids, int in_place,
+	int (*pace)(void *argument), void *argument, struct vshc_sweep_counts *counts)
+{
+	struct name_list list;
+	unsigned long index;
+	int done = 1;
+	char path[320];
+
+	/* (the names first, then the removals: a folder changed while it is
+	listed can skip entries) */
+	if (!name_list_read(fs, folder, &list))
+		return 0;
+	for (index = 0; index < list.count; index++)
+	{
+		const char *entry = list.names[index];
+
+		if (!vshc_cache_file_name(entry))
+		{
+			/* (the in-place marker goes last) */
+			if (!(in_place && !strcmp(entry, VSHC_SWEEP_FILE_NAME)))
+				counts->left++;
+			continue;
+		}
+		snprintf(path, sizeof(path), "%s/%s", folder, entry);
+		if (in_place)
+		{
+			unsigned char header[VSHC_HEADER_SIZE];
+			uint64_t compile_id, generator_id;
+
+			/* this build's id file and files being written stay, and a
+			program this build wrote */
+			if (strcmp(entry + strlen(entry) - 4, ".gxp"))
+				continue;
+			if (fs->read_head(fs->context, path, header, sizeof(header)) == (int)sizeof(header) &&
+				!memcmp(header, VSHC_MAGIC, 8))
+			{
+				memcpy(&compile_id, header + 8, 8);
+				memcpy(&generator_id, header + 16, 8);
+				if (compile_id == ids->compile_id && generator_id == ids->generator_id)
+					continue;
+			}
+		}
+		if (pace && !pace(argument))
+		{
+			done = -1;
+			break;
+		}
+		if (fs->remove(fs->context, path) >= 0)
+			counts->removed++;
+		else
+		{
+			counts->left++;
+			done = 0;
+		}
+	}
+	free(list.names);
+	if (done == 1 && list.full)
+		done = 0;
+	if (done != 1)
+		return done;
+	if (in_place)
+	{
+		snprintf(path, sizeof(path), "%s/" VSHC_SWEEP_FILE_NAME, folder);
+		return fs->remove(fs->context, path) >= 0;
+	}
+	/* (fails, and the folder stays, if anything else is in it) */
+	if (fs->remove_directory(fs->context, folder) < 0)
+		return 0;
+	counts->folders++;
+	return 1;
+}
+
+int vshc_sweep(const struct vshc_fs *fs, const char *parent, const char *name, const struct vshc_ids *ids,
+	int (*pace)(void *argument), void *argument, struct vshc_sweep_counts *counts)
+{
+	struct name_list list;
+	unsigned long index;
+	int done = 1, result;
+	char path[256];
+
+	memset(counts, 0, sizeof(*counts));
+	snprintf(path, sizeof(path), "%s/%s/" VSHC_SWEEP_FILE_NAME, parent, name);
+	if (fs->exists(fs->context, path))
+	{
+		snprintf(path, sizeof(path), "%s/%s", parent, name);
+		if ((result = sweep_folder(fs, path, ids, 1, pace, argument, counts)) < 0)
+			return 0;
+		done = result;
+	}
+	if (!name_list_read(fs, parent, &list))
+		return 0;
+	for (index = 0; index < list.count; index++)
+	{
+		if (!vshc_old_folder_index(list.names[index], name))
+			continue;
+		snprintf(path, sizeof(path), "%s/%s", parent, list.names[index]);
+		if ((result = sweep_folder(fs, path, ids, 0, pace, argument, counts)) != 1)
+		{
+			done = 0;
+			/* (stopped: the rest waits too) */
+			if (result < 0)
+				break;
+		}
+	}
+	free(list.names);
+	return done;
 }
 
 enum vshc_result vshp_open(struct vshp_pack *pack, const void *data, size_t size, uint64_t compile_id)

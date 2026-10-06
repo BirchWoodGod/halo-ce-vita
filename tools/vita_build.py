@@ -295,11 +295,22 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
             assets.append(f"-a {_quote(asset)}={_quote(asset.relative_to(VITA_DIR))}")
     # files at the root of app0: (the shipped shader programs, port/vita/app0/shaders.pak:
     # tools/vita_shader_pack.py)
+    # The pack goes in stamped with this build's generator id (made again when
+    # that id changes), so the VPK's pack names its eboot's generator; the stamp
+    # notes it when the pack in the tree was made for another one.
+    n.rule(name="vita_shader_pack_stamp",
+           command=f"python3 tools/vita_shader_pack.py --stamp $in --generator-header {generator_header} --output $out",
+           description="VITA SHADER PACK $out", restat=True)
     app0_files = []
     for asset in sorted((VITA_DIR / "app0").rglob("*")) if (VITA_DIR / "app0").is_dir() else []:
         if asset.is_file():
-            assets.append(f"-a {_quote(asset)}={_quote(asset.relative_to(VITA_DIR / 'app0'))}")
-            app0_files.append(asset)
+            source = asset
+            if asset.name == "shaders.pak":
+                source = BUILD / "app0" / asset.relative_to(VITA_DIR / "app0")
+                n.build(outputs=source, rule="vita_shader_pack_stamp", inputs=asset,
+                        implicit=[generator_header, Path("tools/vita_shader_pack.py")])
+            assets.append(f"-a {_quote(source)}={_quote(asset.relative_to(VITA_DIR / 'app0'))}")
+            app0_files.append(source)
     n.build(outputs=vpk, rule="vita_vpk", inputs=[eboot, sfo], implicit=app0_files,
             variables={"sfo": str(sfo), "eboot": str(eboot), "assets": " ".join(assets)})
     n.build(outputs="vita", rule="phony", inputs=[vpk])

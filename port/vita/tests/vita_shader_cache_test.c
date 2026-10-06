@@ -9,13 +9,17 @@ run_vita_shader_cache_test.sh builds and runs it.
   vita_shader_cache_test check-pack <pak> <dir> [compile id]   that pack, against those files
   vita_shader_cache_test shipped <pak>       the VPK's pack: this build's settings, every program whole
   vita_shader_cache_test reject <pak>        a pack this build must not use (another build's)
+  vita_shader_cache_test sweep <dir>         another build's cache moved aside and removed later, in <dir>
 */
 #include "vita_shader_cache.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int failures, checks;
 
@@ -412,8 +416,250 @@ static void check_rejected(const char *pack_path)
 	free(data);
 }
 
+/* ---------- another build's cache moved aside, removed later (vshc_retire, vshc_sweep) */
+
+struct test_fs
+{
+	int fail_rename;
+	unsigned long renames, removes, lists;
+};
+
+static int fs_rename(void *context, const char *from, const char *to)
+{
+	struct test_fs *fs = context;
+
+	fs->renames++;
+	return fs->fail_rename ? -1 : rename(from, to);
+}
+
+static int fs_make_directory(void *context, const char *path)
+{
+	(void)context;
+	return mkdir(path, 0777);
+}
+
+static int fs_remove(void *context, const char *path)
+{
+	((struct test_fs *)context)->removes++;
+	return unlink(path);
+}
+
+static int fs_remove_directory(void *context, const char *path)
+{
+	(void)context;
+	return rmdir(path);
+}
+
+static int fs_write_text(void *context, const char *path, const char *text)
+{
+	FILE *file = fopen(path, "wb");
+
+	(void)context;
+	if (!file)
+		return -1;
+	fputs(text, file);
+	return fclose(file) == 0 ? 0 : -1;
+}
+
+static int fs_exists(void *context, const char *path)
+{
+	struct stat st;
+
+	(void)context;
+	return stat(path, &st) == 0;
+}
+
+static int fs_read_head(void *context, const char *path, void *buffer, unsigned int size)
+{
+	FILE *file = fopen(path, "rb");
+	size_t count;
+
+	(void)context;
+	if (!file)
+		return -1;
+	count = fread(buffer, 1, size, file);
+	fclose(file);
+	return (int)count;
+}
+
+static int fs_list(void *context, const char *path, void (*each)(void *argument, const char *name), void *argument)
+{
+	DIR *listing = opendir(path);
+	struct dirent *entry;
+
+	((struct test_fs *)context)->lists++;
+	if (!listing)
+		return -1;
+	while ((entry = readdir(listing)) != NULL)
+		if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, ".."))
+			each(argument, entry->d_name);
+	closedir(listing);
+	return 0;
+}
+
+static unsigned long count_entries(const char *path)
+{
+	DIR *listing = opendir(path);
+	struct dirent *entry;
+	unsigned long count = 0;
+
+	if (!listing)
+		return (unsigned long)-1;
+	while ((entry = readdir(listing)) != NULL)
+		count += strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..");
+	closedir(listing);
+	return count;
+}
+
+static void plant(const char *folder, const struct vshc_ids *ids, unsigned long first, unsigned long count)
+{
+	unsigned char *program = fake_program(64, 3);
+	unsigned long index;
+	char path[600];
+
+	mkdir(folder, 0777);
+	for (index = first; index < first + count; index++)
+	{
+		uint64_t hash = 0x1000000000000000ULL + index * 0x9e3779b9ULL;
+		unsigned char *file = cache_file(ids, hash, program, 64);
+		FILE *out;
+
+		snprintf(path, sizeof(path), "%s/%016llx.gxp", folder, (unsigned long long)hash);
+		out = fopen(path, "wb");
+		fwrite(file, 1, VSHC_HEADER_SIZE + 64, out);
+		fclose(out);
+		free(file);
+	}
+	free(program);
+}
+
+static unsigned long pace_budget, pace_calls;
+
+static int pace_limited(void *argument)
+{
+	(void)argument;
+	pace_calls++;
+	return pace_budget ? (pace_budget--, 1) : 0;
+}
+
+static void test_sweep(const char *root)
+{
+	struct test_fs state = { 0, 0, 0, 0 };
+	struct vshc_fs fs = { &state, fs_rename, fs_make_directory, fs_remove, fs_remove_directory, fs_write_text,
+		fs_exists, fs_read_head, fs_list };
+	struct vshc_ids old_build = { 0x5555555555555555ULL, 0x1111111111111111ULL };
+	struct vshc_ids new_build = { 0x5555555555555555ULL, 0x2222222222222222ULL };
+	struct vshc_sweep_counts counts;
+	unsigned long removed, folders;
+	char cache[512], path[600], old1[512], old2[512];
+	enum vshc_retire_result result;
+	int index;
+
+	snprintf(cache, sizeof(cache), "%s/shaders", root);
+	snprintf(old1, sizeof(old1), "%s/shaders.old-1", root);
+	snprintf(old2, sizeof(old2), "%s/shaders.old-2", root);
+
+	CHECK(vshc_old_folder_index("shaders.old-1", "shaders") == 1 && vshc_old_folder_index("shaders.old-99", "shaders") == 99,
+		"old folder names are read");
+	CHECK(!vshc_old_folder_index("shaders.old-0", "shaders") && !vshc_old_folder_index("shaders.old-01", "shaders") &&
+		!vshc_old_folder_index("shaders.old-100", "shaders") && !vshc_old_folder_index("shaders.old-", "shaders") &&
+		!vshc_old_folder_index("shaders.old-1x", "shaders") && !vshc_old_folder_index("shadersx.old-1", "shaders") &&
+		!vshc_old_folder_index("shaders", "shaders") && !vshc_old_folder_index("maps", "shaders") &&
+		!vshc_old_folder_index("saves.old-1", "shaders"), "no other name is an old folder");
+
+	/* what must never be touched: other folders beside it, even holding cache-like names */
+	snprintf(path, sizeof(path), "%s/maps", root);
+	plant(path, &old_build, 0, 3);
+	snprintf(path, sizeof(path), "%s/saves", root);
+	mkdir(path, 0777);
+	snprintf(path, sizeof(path), "%s/saves/0123456789abcdef.gxp", root);
+	fs_write_text(NULL, path, "a save named like a program\n");
+
+	/* another build's cache of 600 programs, its id file, and a file of someone else's */
+	plant(cache, &old_build, 0, 600);
+	snprintf(path, sizeof(path), "%s/" VSHC_ID_FILE_NAME, cache);
+	fs_write_text(NULL, path, "HCEVSHC2 5555555555555555 1111111111111111\n");
+	snprintf(path, sizeof(path), "%s/notes.txt", cache);
+	fs_write_text(NULL, path, "mine\n");
+	CHECK(!vshc_sweep_pending(&fs, root, "shaders"), "nothing to clean up before");
+
+	/* start-up: one rename and one folder made, no file removed */
+	state.removes = state.renames = 0;
+	result = vshc_retire(&fs, root, "shaders", &index);
+	CHECK(result == VSHC_RETIRE_RENAMED && index == 1, "the cache is moved to shaders.old-1 (%d, %d)", (int)result, index);
+	CHECK(state.removes == 0 && state.renames == 1, "start-up removes nothing (%lu removals, %lu renames)", state.removes,
+		state.renames);
+	CHECK(count_entries(cache) == 0 && count_entries(old1) == 602, "an empty cache folder, the old one whole (%lu, %lu)",
+		count_entries(cache), count_entries(old1));
+	CHECK(vshc_sweep_pending(&fs, root, "shaders"), "a clean-up is pending");
+
+	/* another update before the clean-up ran: shaders.old-2 */
+	plant(cache, &old_build, 1000, 5);
+	result = vshc_retire(&fs, root, "shaders", &index);
+	CHECK(result == VSHC_RETIRE_RENAMED && index == 2 && count_entries(old2) == 5, "a second update: shaders.old-2 (%d)",
+		index);
+
+	/* the clean-up stopped after 250 removals (the game quit) ... */
+	pace_budget = 250;
+	pace_calls = 0;
+	CHECK(!vshc_sweep(&fs, root, "shaders", &new_build, pace_limited, NULL, &counts) && counts.removed == 250,
+		"a clean-up stopped part way (%lu removed)", counts.removed);
+	removed = counts.removed;
+	folders = counts.folders;
+	CHECK(vshc_sweep_pending(&fs, root, "shaders"), "still pending after it stopped");
+	/* ... goes on at the next start: everything but the file of someone else's */
+	pace_budget = 100000;
+	CHECK(!vshc_sweep(&fs, root, "shaders", &new_build, pace_limited, NULL, &counts), "a folder with a foreign file stays");
+	removed += counts.removed;
+	folders += counts.folders;
+	CHECK(removed == 606 && folders == 1 && counts.left == 1,
+		"the rest removed at the next start (%lu files, %lu folders in all, %lu left)", removed, folders, counts.left);
+	CHECK(count_entries(old1) == 1 && !fs_exists(NULL, old2), "only the foreign file is left (%lu)", count_entries(old1));
+	snprintf(path, sizeof(path), "%s/notes.txt", old1);
+	unlink(path);
+	CHECK(vshc_sweep(&fs, root, "shaders", &new_build, pace_limited, NULL, &counts) && counts.folders == 1 &&
+		!fs_exists(NULL, old1), "then the folder goes");
+	CHECK(!vshc_sweep_pending(&fs, root, "shaders"), "nothing pending at the end");
+	snprintf(path, sizeof(path), "%s/maps", root);
+	CHECK(count_entries(path) == 3, "the folders beside it are untouched (maps %lu)", count_entries(path));
+	snprintf(path, sizeof(path), "%s/saves/0123456789abcdef.gxp", root);
+	CHECK(fs_exists(NULL, path), "a save named like a program is untouched");
+
+	/* where the rename fails: marked, swept in place, this build's files kept */
+	rmdir(cache);
+	plant(cache, &old_build, 0, 40);
+	plant(cache, &new_build, 2000, 7);
+	snprintf(path, sizeof(path), "%s/" VSHC_ID_FILE_NAME, cache);
+	fs_write_text(NULL, path, "HCEVSHC2 5555555555555555 2222222222222222\n");
+	snprintf(path, sizeof(path), "%s/fedcba9876543210.tmp", cache);
+	fs_write_text(NULL, path, "being written\n");
+	snprintf(path, sizeof(path), "%s/0000000000000001.gxp", cache);
+	fs_write_text(NULL, path, "an older build's raw program\n");
+	state.fail_rename = 1;
+	result = vshc_retire(&fs, root, "shaders", &index);
+	CHECK(result == VSHC_RETIRE_IN_PLACE && index == 0, "a failed rename: swept in place (%d)", (int)result);
+	CHECK(vshc_sweep_pending(&fs, root, "shaders"), "the in-place sweep is pending");
+	pace_budget = 10;
+	CHECK(!vshc_sweep(&fs, root, "shaders", &new_build, pace_limited, NULL, &counts) && counts.removed == 10 &&
+		vshc_sweep_pending(&fs, root, "shaders"), "stopped part way, still marked");
+	pace_budget = 100000;
+	CHECK(vshc_sweep(&fs, root, "shaders", &new_build, pace_limited, NULL, &counts) && counts.removed == 31,
+		"the in-place sweep finishes (%lu removed)", counts.removed);
+	CHECK(count_entries(cache) == 9 && !vshc_sweep_pending(&fs, root, "shaders"),
+		"this build's 7 programs, its id file and the file being written stay (%lu)", count_entries(cache));
+}
+
+static int run_sweep(const char *root)
+{
+	test_sweep(root);
+	printf("%d of %d checks passed\n", checks - failures, checks);
+	return failures != 0;
+}
+
 int main(int argc, char **argv)
 {
+	if (argc == 3 && !strcmp(argv[1], "sweep"))
+		return run_sweep(argv[2]);
 	if (argc == 3 && !strcmp(argv[1], "write-cache"))
 		return write_cache(argv[2]);
 	if (argc == 4 && !strcmp(argv[1], "check-pack"))
