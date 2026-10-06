@@ -3102,10 +3102,12 @@ int vgxm_visibility_newest(unsigned long *frame)
 	return newest;
 }
 
+#define VISIBILITY_COUNT_MAXIMUM (1ull << 20)
+
 unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
 {
 	const unsigned int *counts;
-	unsigned long samples = 0;
+	unsigned long long samples = 0;
 	unsigned int core;
 	float scale;
 
@@ -3117,8 +3119,15 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
 	/* (samples of a scaled target: the game counts its own pixels) */
 	scale = gxm.visibility_scale[buffer];
 	if (scale > 0.0f && scale < 1.0f)
-		samples = (unsigned long)(samples / (scale * scale) + 0.5f);
-	return samples;
+		samples = (unsigned long long)(samples / (scale * scale) + 0.5f);
+	/* (no more than a quad can cover, many times over: the lens flares
+	work out 255 x visible / expected in 32 bits, and Vita3K leaves the
+	counts at 0xffffffff - summed over the cores and scaled, that wrapped
+	or overflowed differently at each render scale, and the flares' glow
+	showed at 100% only) */
+	if (samples > VISIBILITY_COUNT_MAXIMUM)
+		samples = VISIBILITY_COUNT_MAXIMUM;
+	return (unsigned long)samples;
 }
 
 /* ---------- frames */
