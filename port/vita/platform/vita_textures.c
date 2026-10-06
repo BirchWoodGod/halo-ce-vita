@@ -1085,11 +1085,17 @@ static BOOL texture_build(struct texture_entry *entry, const unsigned char *base
 				dxt_decode_level(information.kind, source, level_width, level_height, 1, scratch);
 			else
 				decode_level(description, level, source, palette, scratch);
+			/* (a Custom Edition multipurpose map - always a power of two, and
+			decoded here rather than kept compressed for this - with its
+			channels where this build reads them, as the rows below and the
+			OpenGL renderer have them: they were left in Halo PC's order) */
+			if (channel_order != _custom_edition_channels_xbox)
+				custom_edition_texels_reorder(scratch, count, channel_order);
 			twiddle_level(destination, scratch, level_width, level_height);
 			destination += count;
 		}
 		free(scratch);
-		return vgxm_texture_initialize(&entry->texture, memory, _vgxm_texture_bgra8, _vgxm_texture_swizzled,
+		return texture_initialize(entry, memory, _vgxm_texture_bgra8, _vgxm_texture_swizzled,
 			width, height, levels) == 0;
 	}
 
@@ -1355,7 +1361,26 @@ void vita_texture_locks_flush(void)
 
 void vita_texture_cache_begin_frame(void)
 {
+	/* (debug, Vita3K) HALO_TEX_REBUILD_AT=n: at the n-th frame every
+	texture is decoded again, into new memory. Vita3K's Vulkan renderer
+	draws the textures a map first uses in the first few frames after the
+	program starts with other textures' texels (colour noise on the models
+	and the base - any map loaded straight from init.txt: a Custom Edition
+	map, or an Xbox map whose cache partition copy exists already), though
+	the GPU is given the same texels and words as when the map is loaded
+	later; the same bytes at new addresses draw right. The OpenGL renderer
+	and the hardware read the pool as it is. Costs a second copy of the
+	pool's textures. */
+	static long rebuild_at = -2;
+
 	texture_frame++;
+	if (rebuild_at == -2)
+		rebuild_at = getenv("HALO_TEX_REBUILD_AT") ? atol(getenv("HALO_TEX_REBUILD_AT")) : -1;
+	if (rebuild_at > 0 && texture_frame == (unsigned long)rebuild_at)
+	{
+		platform_log("textures: all decoded again at frame %lu (HALO_TEX_REBUILD_AT)", texture_frame);
+		pool_serial++;
+	}
 }
 
 /* ---------- Custom Edition channel orders
@@ -1446,7 +1471,14 @@ void halo_custom_edition_texels_channels(const void *texels, unsigned char chann
 	unsigned long address = (unsigned long)texels;
 	unsigned long index;
 
-	if (channel_order >= NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS)
+	/* (debug) HALO_CE_CHANNELS=0: every texture keeps its channels - a
+	Custom Edition map built from Xbox tags (Invader's test maps) has its
+	multipurpose maps in the Xbox's order already */
+	static int channels_on = -1;
+
+	if (channels_on < 0)
+		channels_on = !getenv("HALO_CE_CHANNELS") || atoi(getenv("HALO_CE_CHANNELS")) != 0;
+	if (channel_order >= NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS || !channels_on)
 		channel_order = _custom_edition_channels_xbox;
 	custom_edition_texels_take();
 	for (index = 0; index < custom_edition_texel_count && custom_edition_texels[index].address != address; index++)
