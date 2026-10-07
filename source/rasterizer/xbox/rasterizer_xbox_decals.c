@@ -499,6 +499,37 @@ long _rasterizer_decal_vertices_new(
 		205,
 		cache_size%sizeof(struct decal_vertex)==0);
 
+#ifdef HALO_LINUX
+	/* (port) HALO_DECAL_CACHE_WINDOW=n (64, the default; 0 off): a new
+	decal's vertices take the least recently drawn room among the n decals
+	after the last one made (lruv_set_search_window), not among all 2048
+	the cache can hold: the cache's search walked every decal in it for
+	each new one, a tenth of the tick in a battle on x86 (a Custom Edition
+	AI war: 4-7 new decals a tick, the cache full). The decals evicted are
+	then not the oldest drawn of all, but old ones nearby in the cache:
+	what is on screen is drawn every frame and stays. Only the picture can
+	differ; decals are this machine's alone. */
+	{
+		extern volatile unsigned long halo_settings_generation;
+		static unsigned long settings_seen;
+		static struct lruv_cache *windowed_cache;
+		static long window = -1;
+
+		if (window < 0 || settings_seen != halo_settings_generation || windowed_cache != local_vertex_cache)
+		{
+			const char *setting = getenv("HALO_DECAL_CACHE_WINDOW");
+
+			settings_seen = halo_settings_generation;
+			window = setting ? atol(setting) : 64;
+			if (window < 0)
+				window = 0;
+			if (windowed_cache && windowed_cache != local_vertex_cache)
+				lruv_set_search_window(windowed_cache, 0);
+			windowed_cache = local_vertex_cache;
+			lruv_set_search_window(local_vertex_cache, window);
+		}
+	}
+#endif
 	return lruv_block_new(local_vertex_cache, cache_size);
 }
 
