@@ -1644,6 +1644,35 @@ int p2p_incoming(int stream, unsigned long *address, unsigned short *port)
 	return result;
 }
 
+int p2p_spoofed_source(unsigned long address)
+{
+	int result;
+
+	/* (the game's every datagram: a peer's arrive from 127.0.0.1 or the
+	local address, which is no virtual one, so the lock is never taken) */
+	if (!p2p.running || !is_virtual_address(address))
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	result = find_peer_by_address(address) != NULL || address_retired(address);
+	pthread_mutex_unlock(&p2p_lock);
+	if (result)
+	{
+		static unsigned long logged_time;
+
+		/* (anyone who can reach the game's port may send them as fast as they
+		like) */
+		if (!logged_time || elapsed(logged_time, 10000))
+		{
+			char text[32];
+
+			platform_log("Internet play: dropped traffic to the game's port claiming to come from a peer's "
+				"address %s (spoofed)", address_text(address, 0, text));
+			logged_time = p2p_now() | 1;
+		}
+	}
+	return result;
+}
+
 int p2p_broadcast_targets(unsigned short port, unsigned long *addresses, unsigned short *ports, int maximum_count)
 {
 	int count = 0;
