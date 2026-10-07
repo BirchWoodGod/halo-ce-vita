@@ -3338,6 +3338,14 @@ boolean network_game_client_join_first_available_game(
 			if (!address.address.long_words[0] || !address.port)
 				return FALSE;
 			network_game_generate_join_game_token(join_parameters.join_token);
+			{
+				char name[NETWORK_GAME_NAME_LENGTH];
+
+				wide_to_ascii(game->game_name, name, NETWORK_GAME_NAME_LENGTH);
+				name[NETWORK_GAME_NAME_LENGTH - 1] = 0;
+				network_event("joining the game '%s' (%d of %d players)", name, (int)game->player_count,
+					(int)game->maximum_player_count);
+			}
 			return network_game_client_initiate_join_game(client, game, &join_parameters, &address);
 		}
 	}
