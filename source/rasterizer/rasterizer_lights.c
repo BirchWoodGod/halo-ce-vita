@@ -580,6 +580,10 @@ void rasterizer_lens_flare_submit(
 					lens_flare_parameters_get((short)local_lens_flare_count++);
 
 				memcpy(lens_flare_parameters, parameters, sizeof(*lens_flare_parameters));
+#ifdef HALO_LINUX
+				if (local_lens_flare_count > rasterizer_pools_peaks.lens_flares)
+					rasterizer_pools_peaks.lens_flares = local_lens_flare_count;
+#endif
 
 				if (parameters->light_identifier==NONE)
 				{
@@ -630,6 +634,9 @@ void rasterizer_lens_flare_submit(
 		}
 		else
 		{
+#ifdef HALO_LINUX
+			rasterizer_pools_peaks.lens_flares_refused++;
+#endif
 			if (!warned)
 			{
 				error(2, "### ERROR too many lens flares submitted to frame");

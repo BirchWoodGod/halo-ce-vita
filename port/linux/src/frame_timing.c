@@ -15,6 +15,7 @@ void platform_log(const char *format, ...);
 
 void halo_texture_stats_report(void) __attribute__((weak));
 void halo_objects_census_report(void) __attribute__((weak));
+void halo_rasterizer_pools_report(void) __attribute__((weak));
 
 static int frame_timing_every = -1;
 static unsigned long long frame_timing_mark[_frame_timing_event_count];
@@ -140,6 +141,8 @@ void halo_frame_timing(int event, unsigned long game_ticks)
 			halo_texture_stats_report();
 		if (halo_objects_census_report)
 			halo_objects_census_report();
+		if (halo_rasterizer_pools_report)
+			halo_rasterizer_pools_report();
 		frame_timing_frames = 0;
 		frame_timing_ticks_start = frame_timing_ticks_last;
 		frame_timing_max_frame = 0;

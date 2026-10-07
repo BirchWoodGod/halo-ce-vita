@@ -347,7 +347,17 @@ struct transparent_geometry_group *rasterizer_transparent_geometry_new_group(
 		group = transparent_geometry_groups + group_index;
 		group->sorted_index = group_index;
 		transparent_geometry_group_count = group_index + 1;
+#ifdef HALO_LINUX
+		if (transparent_geometry_group_count > rasterizer_pools_peaks.transparent_groups)
+			rasterizer_pools_peaks.transparent_groups = transparent_geometry_group_count;
+#endif
 	}
+#ifdef HALO_LINUX
+	else
+	{
+		rasterizer_pools_peaks.transparent_groups_refused++;
+	}
+#endif
 
 	return group;
 }
