@@ -122,8 +122,12 @@ enum
 	it timed out and was sent again: a map download over 8 Mbit/s with a
 	100 ms round trip sent 45% again, carried 61% of the link (87% with
 	this). A segment lost with more behind it is sent again sooner, on
-	their acknowledgements (fast resend). */
+	their acknowledgements (fast resend). Only while a stream has a bulk
+	transfer queued (KCP_BULK_SEGMENTS): the game's own messages, a few at a
+	time, keep fast mode's 30 ms, so a lost one is not held half a second */
 	KCP_MINIMUM_RTO = 500,
+	KCP_FAST_MINIMUM_RTO = 30,
+	KCP_BULK_SEGMENTS = 32,
 
 	/* milliseconds */
 	LOOP_INTERVAL = 10,
@@ -2179,6 +2183,7 @@ static void stream_update(struct stream *stream)
 {
 	unsigned char message[1 + STREAM_CHUNK_SIZE];
 
+	stream->kcp->rx_minrto = ikcp_waitsnd(stream->kcp) > KCP_BULK_SEGMENTS ? KCP_MINIMUM_RTO : KCP_FAST_MINIMUM_RTO;
 	ikcp_update(stream->kcp, p2p_now());
 	/* what the peer sent */
 	for (;;)
