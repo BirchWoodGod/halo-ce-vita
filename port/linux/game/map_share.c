@@ -137,6 +137,8 @@ struct map_share_upload
 {
 	boolean active;
 	struct network_game_server_client_machine *machine;
+	/* its slot, which is its machine index (the lobby's) */
+	long machine_index;
 	struct network_connection *connection;
 	FILE *file;
 	char name[MAP_SHARE_NAME_BYTES];
@@ -147,6 +149,8 @@ struct map_share_upload
 	uint32_t acknowledged;
 	boolean done_sent;
 	unsigned long progress_time;
+	/* when the host last logged how far it is */
+	unsigned long logged_time;
 	struct halo_sha256_stream sha256;
 };
 
@@ -508,6 +512,14 @@ static void map_share_server_query_or_start(
 	csmemset(upload, 0, sizeof(*upload));
 	upload->active = TRUE;
 	upload->machine = machine;
+	upload->machine_index = NONE;
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_MACHINES; index++)
+	{
+		if (network_game_server_get_client_machine_at_index(server, index) == machine)
+		{
+			upload->machine_index = index;
+		}
+	}
 	upload->connection = network_game_server_get_client_connection(machine);
 	upload->file = file;
 	csstrncpy(upload->name, name, MAP_SHARE_NAME_BYTES - 1);
@@ -1675,6 +1687,12 @@ void map_share_server_update(
 			map_share_upload_close(upload);
 			continue;
 		}
+		if (!upload->logged_time || now - upload->logged_time >= 5000)
+		{
+			upload->logged_time = now;
+			network_event("map share: machine #%d is downloading '%s' (%d%%)", (int)upload->machine_index,
+				upload->name, (int)(upload->size ? (unsigned long long)upload->acknowledged * 100 / upload->size : 0));
+		}
 		if (!map_share_upload_send(server, upload))
 		{
 			map_share_upload_close(upload);
@@ -1683,6 +1701,52 @@ void map_share_server_update(
 	host->next_upload = (short)((host->next_upload + 1) % MAP_SHARE_MAXIMUM_UPLOADS);
 
 	return;
+}
+
+short map_share_server_machine_percent(
+	long machine_index)
+{
+	short index;
+
+	for (index = 0; index < MAP_SHARE_MAXIMUM_UPLOADS; index++)
+	{
+		struct map_share_upload const *upload = &map_share_host.uploads[index];
+
+		if (upload->active && upload->machine_index == machine_index && upload->size)
+		{
+			return (short)((unsigned long long)upload->acknowledged * 100 / upload->size);
+		}
+	}
+
+	return NONE;
+}
+
+boolean map_share_server_holds_start(
+	struct network_game_server *server)
+{
+	static unsigned long logged_time;
+	unsigned long now = system_milliseconds();
+	short index;
+
+	for (index = 0; index < MAP_SHARE_MAXIMUM_UPLOADS; index++)
+	{
+		struct map_share_upload const *upload = &map_share_host.uploads[index];
+
+		if (upload->active && network_game_server_client_machine_is_joined_to_game(server, upload->machine))
+		{
+			if (!logged_time || now - logged_time >= 5000)
+			{
+				network_event("map share: the game's start waits for machine #%d's download of '%s' (%d%%)",
+					(int)upload->machine_index, upload->name,
+					(int)map_share_server_machine_percent(upload->machine_index));
+				logged_time = now;
+			}
+			return TRUE;
+		}
+	}
+	logged_time = 0;
+
+	return FALSE;
 }
 
 void map_share_server_dispose(

@@ -358,6 +358,7 @@ symbols in this file:
 #include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
+#include "map_share.h"
 #endif
 
 #ifdef HALO_LINUX
@@ -1714,8 +1715,24 @@ static void network_pregame_status_screen_update(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					/* port: a machine the host is sending its map to shows how
+					far it is, by its name (the game waits for it to start:
+					port/linux/game/map_share.c) */
+					short download_percent = global_network_game_server_get() ?
+						map_share_server_machine_percent(game->machines[machine_indices[machine_widget_index]].machine_index) :
+						NONE;
+					wchar_t download_text[24];
+
+					download_text[0] = 0;
+					if (download_percent != NONE)
+						usnprintf(download_text, NUMBEROF(download_text), L" (map %d%%)", (int)download_percent);
+#endif
 					remote_machine_icon->animation.current_frame_index = 1;
 					length = ustrlen(game->machines[machine_indices[machine_widget_index]].name);
+#ifdef HALO_LINUX
+					length += ustrlen(download_text);
+#endif
 					remote_machine_name_text->parameters.text_box.text = ui_widget_realloc(
 						remote_machine_name_text->parameters.text_box.text,
 						(word)(2 * length + 2),
@@ -1723,10 +1740,21 @@ static void network_pregame_status_screen_update(
 						0x4F4);
 					if (remote_machine_name_text->parameters.text_box.text)
 					{
+#ifdef HALO_LINUX
+						long name_length = length - ustrlen(download_text);
+
+						ustrncpy(
+							remote_machine_name_text->parameters.text_box.text,
+							game->machines[machine_indices[machine_widget_index]].name,
+							name_length);
+						ustrncpy(remote_machine_name_text->parameters.text_box.text + name_length, download_text,
+							length - name_length);
+#else
 						ustrncpy(
 							remote_machine_name_text->parameters.text_box.text,
 							game->machines[machine_indices[machine_widget_index]].name,
 							length);
+#endif
 						remote_machine_name_text->parameters.text_box.text[length] = 0;
 					}
 

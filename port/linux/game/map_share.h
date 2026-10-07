@@ -98,6 +98,17 @@ windows and the rate allow; outside the lobby, refuses them. */
 void map_share_server_update(
 	struct network_game_server *server);
 
+/* (the lobby's machine list, ui_widget_game_data_input_functions.c) How
+much of the map the host is sending to the machine `machine_index` it has
+(percent), or NONE when it sends none. */
+short map_share_server_machine_percent(
+	long machine_index);
+
+/* (network_server_manager.c) Whether the host's game waits to start: a
+joined machine is downloading its map. */
+boolean map_share_server_holds_start(
+	struct network_game_server *server);
+
 /* The host's game ended: every upload stops. */
 void map_share_server_dispose(
 	void);
