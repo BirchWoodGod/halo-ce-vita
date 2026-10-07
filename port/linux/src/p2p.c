@@ -116,6 +116,14 @@ enum
 	/* the most unacknowledged messages a stream sends ahead */
 	STREAM_WINDOW = 128,
 	KCP_MTU = 1200,
+	/* a stream's least retransmission timeout (milliseconds; KCP's fast
+	mode's is 30): with no congestion control, a window sent at once waits
+	in a slow uplink's queue (128 KB is 256 ms at 4 Mbit/s), and the last of
+	it timed out and was sent again: a map download over 8 Mbit/s with a
+	100 ms round trip sent 45% again, carried 61% of the link (87% with
+	this). A segment lost with more behind it is sent again sooner, on
+	their acknowledgements (fast resend). */
+	KCP_MINIMUM_RTO = 500,
 
 	/* milliseconds */
 	LOOP_INTERVAL = 10,
@@ -1995,6 +2003,7 @@ static struct stream *stream_new(int peer_index, IUINT32 conversation)
 		ikcp_nodelay(stream->kcp, 1, LOOP_INTERVAL, 2, 1);
 		ikcp_wndsize(stream->kcp, 256, 256);
 		ikcp_setmtu(stream->kcp, KCP_MTU);
+		stream->kcp->rx_minrto = KCP_MINIMUM_RTO;
 		return stream;
 	}
 	return NULL;

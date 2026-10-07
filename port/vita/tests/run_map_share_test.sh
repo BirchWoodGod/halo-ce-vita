@@ -3,7 +3,9 @@
 # (port/linux/game/map_share_protocol.c; map_share_test.c), 32-bit as the
 # game is, with the real SHA-256 (port/linux/src/p2p_crypto.c, built as
 # run_vita_p2p_test.sh builds it: from a configured tree, for
-# build/linux/platform_msvc_semantics.h) and zlib's CRC-32 to compare with.
+# build/linux/platform_msvc_semantics.h) and the game's own zlib
+# (source/memory/zlib, 1.1.3: the deflate streams, and the CRC-32 to compare
+# with), built without the sanitizers.
 #   CLANG                 the game's compiler (default: build.ninja's)
 #   MAP_SHARE_TEST_SANITIZE=0   without AddressSanitizer/UBSan
 #   MAP_SHARE_TEST_XBOX_MAP, MAP_SHARE_TEST_CE_MAP, MAP_SHARE_TEST_CE_RESOURCE_MAP   real maps (map_share_test.c)
@@ -26,7 +28,15 @@ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=undefined"
 if [ "${MAP_SHARE_TEST_SANITIZE:-1}" = 0 ] || ! echo 'int main(void){return 0;}' | $cc -m32 $sanitize -x c - -o "$out/probe" 2>/dev/null; then
 	sanitize=
 fi
-$cc -m32 -g -O1 -Wall -Wextra -Wno-unused-parameter -Wno-multichar $sanitize -Iport/linux/game \
-	"$here/map_share_test.c" port/linux/game/map_share_protocol.c port/linux/game/cache_file_formats.c "$out/p2p_crypto.o" -lz -no-pie -Wl,--gc-sections -o "$out/map_share_test"
+# (the game's zlib, whose zutil.h takes debug_malloc from cseries.h: the C
+# library's here)
+mkdir -p "$out/zlib"
+printf '#include <stdlib.h>\n#define debug_malloc(size, clear, file, line) calloc(1, (size))\n#define debug_free(pointer, file, line) free(pointer)\n' > "$out/zlib/cseries.h"
+for source in adler32 crc32 deflate infblock infcodes inffast inflate inftrees infutil trees zutil; do
+	$cc -m32 -O2 -w -I"$out/zlib" -c source/memory/zlib/$source.c -o "$out/zlib/$source.o"
+done
+$cc -m32 -g -O1 -Wall -Wextra -Wno-unused-parameter -Wno-multichar $sanitize -Iport/linux/game -Isource \
+	"$here/map_share_test.c" port/linux/game/map_share_protocol.c port/linux/game/cache_file_formats.c "$out/p2p_crypto.o" \
+	"$out"/zlib/*.o -no-pie -Wl,--gc-sections -o "$out/map_share_test"
 echo "map_share_test: ${sanitize:-no sanitizers}"
 "$out/map_share_test"

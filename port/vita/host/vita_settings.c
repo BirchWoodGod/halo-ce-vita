@@ -1237,6 +1237,11 @@ static void map_delete(const struct map_entry *map)
 		set_notice("Could not delete %.40s.%s", map->name, map->extension);
 		return;
 	}
+	/* (and a download of it that was cut off, kept to go on: map_share.c) */
+	snprintf(path, sizeof(path), "%s/%s.download", directory, map->name);
+	remove(path);
+	snprintf(path, sizeof(path), "%s/%s.resume", directory, map->name);
+	remove(path);
 	/* (the picture and description stay while a .map or .yelo of the name
 	is left) */
 	for (index = 0; index < map_count; index++)

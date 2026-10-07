@@ -163,6 +163,10 @@ static struct
 	real ingame_seconds;
 	boolean left;
 	boolean rejoined;
+	/* debug.network_test_retry: the joins left to try after one that ended
+	before its game began, and the seconds since it ended */
+	long retries;
+	real retry_seconds;
 } network_test;
 
 /* the variant at the index of the list (copied to name), FALSE past its end */
@@ -262,6 +266,7 @@ static void network_test_read_settings(
 		config_string("debug.network_test_pickup_weapon"));
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
 	network_test.rejoin_time = (real)config_real("debug.network_test_rejoin");
+	network_test.retries = (long)config_integer("debug.network_test_retry");
 	if (network_test.mode != _network_test_off)
 		platform_log("network test: %s", setting);
 }
@@ -1040,6 +1045,27 @@ void network_test_update(
 		network_test.menu_seconds = 0.0f;
 		network_test.game_over = FALSE;
 		platform_log("network test: joining again");
+	}
+	/* debug.network_test_retry: a join that ended before its game (the
+	client gone: a map download cut off, the link lost) is tried again a few
+	seconds on */
+	if (network_test.mode == _network_test_join && network_test.retries > 0 && network_test.set_up &&
+		main_menu_loaded && !global_network_game_client_get())
+	{
+		network_test.retry_seconds += seconds;
+		if (network_test.retry_seconds >= 5.0f)
+		{
+			network_test.retries--;
+			network_test.retry_seconds = 0.0f;
+			network_test.set_up = FALSE;
+			network_test.joined = FALSE;
+			network_test.player_added = FALSE;
+			network_test.team_set = FALSE;
+			network_test.code_joined = FALSE;
+			network_test.joined_seconds = 0.0f;
+			network_test.menu_seconds = 0.0f;
+			platform_log("network test: joining again (the last join ended before its game)");
+		}
 	}
 	if (network_test.mode == _network_test_join && network_test.game_over && main_menu_loaded)
 	{

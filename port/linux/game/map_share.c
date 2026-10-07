@@ -16,9 +16,31 @@ Choices:
 - Rate: all of a host's uploads together send at most
   MAP_SHARE_DEFAULT_BYTES_PER_SECOND (HALO_MAP_SHARE_RATE_KB), and each
   keeps at most MAP_SHARE_WINDOW_BYTES ahead of the joiner's
-  acknowledgement, so the lobby's own messages to that machine, and the
-  other machines' link, are not crowded out. At most
-  MAP_SHARE_MAXIMUM_UPLOADS at once.
+  acknowledgement and MAP_SHARE_QUEUE_BYTES in its connection's queue, so
+  the lobby's own messages to that machine, and the other machines' link,
+  are not crowded out. At most MAP_SHARE_MAXIMUM_UPLOADS at once, a message
+  each in turn (two joiners share the upload evenly), and the reading,
+  hashing and deflating of all of them take at most
+  MAP_SHARE_DEFAULT_CPU_PERCENT of the host's frame
+  (HALO_MAP_SHARE_CPU_PERCENT).
+- Deflate (map_share_protocol.h): a Custom Edition map goes as a deflate
+  stream (40-55% of it) to a joiner that can take one. A host whose CPU,
+  not the link, holds an upload back (a Vita on a fast LAN) tries storing
+  blocks as they are for a few seconds, and keeps doing so while that is
+  faster (HALO_MAP_SHARE_LEVEL=0|1 fixes the level; HALO_MAP_SHARE_COMPRESS=0
+  turns deflate off, either side).
+- Resume: a download that stops (cancelled, the link lost, the host's game
+  started, the joiner left) keeps <name>.download, with <name>.resume: the
+  host's file (fingerprint, size, kind) and how much of it is kept, with
+  its SHA-256 (written every MAP_SHARE_RESUME_SAVE_BYTES). Offered the same
+  file again by a host that can, the joiner reads its kept part back
+  (checking it against the SHA-256 written down: else it starts over), and
+  the host sends the rest; the SHA-256 checked at the end is still the whole
+  file's. A damaged download is deleted; so are a kept part of another file
+  when the download starts, kept parts left MAP_SHARE_RESUME_KEEP_SECONDS
+  (looked at with the first download), and a map's kept part when it is
+  deleted from Modded maps (vita_settings.c). HALO_MAP_SHARE_RESUME=0 turns
+  it off (on the joiner).
 - What a host sends: only the map its game plays, when that is a custom map
   in its level list (on, not one of the Xbox's levels, never a resource map
   nor any other file: custom_edition_maps_shareable), and only the copy its
@@ -31,7 +53,7 @@ Choices:
   the host's and its fingerprint the one the game settings carry. Only then
   is it renamed to <name>.map (or .yelo), replacing the joiner's other copy,
   and the level list looks again: the Modded maps tab shows it like any
-  other map. A cancelled or failed download is deleted (no resuming).
+  other map.
 - Free space: the size offered (and a margin) must be free before starting.
 - PC maps: a joiner with PC maps (HALO_CUSTOM_EDITION) off cannot load a
   Custom Edition map, and a game started on one it cannot load stops as a
@@ -58,7 +80,8 @@ Choices:
 - HALO_MAP_SHARE=0 turns it off (joiners are refused as before; a host
   still answers). HALO_MAP_SHARE_ANSWER=yes|no answers the question without
   asking (the automated tests: a hidden window shows nothing),
-  HALO_MAP_SHARE_CANCEL_AT=<bytes> cancels a download that far in, and
+  HALO_MAP_SHARE_CANCEL_AT=<bytes> cancels a download that far in (once a
+  run), and
   HALO_MAP_SHARE_HOST_SILENT=1 has a host ignore the requests, as one of a
   version without map sharing does.
 */
@@ -78,6 +101,7 @@ Choices:
 #include "networking/network_client_manager.h"
 #include "networking/network_server_manager.h"
 #include "networking/network_server_manager_internal.h"
+#include "networking/network_connection.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "map_share_protocol.h"
@@ -87,6 +111,7 @@ Choices:
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ---------- constants */
 
@@ -123,6 +148,8 @@ enum map_share_client_state
 	_client_querying,
 	/* the player asked */
 	_client_asking,
+	/* the kept part of an earlier download read back, before the start */
+	_client_checking,
 	/* the start sent, the host's acceptance (its offer again) awaited */
 	_client_starting,
 	_client_receiving,
@@ -138,8 +165,27 @@ log) */
 /* the bytes of rate a host may save up while idle */
 #define MAXIMUM_RATE_BURST_BYTES (4UL * MAP_SHARE_CHUNK_BYTES)
 #define TEMPORARY_EXTENSION ".download"
+#define RESUME_EXTENSION ".resume"
 #define REPLACED_EXTENSION ".replaced"
 #define PATH_BYTES 256
+/* the C library's buffer of a file sent or written (the Vita's memory card
+takes few large writes better than many of a message each) */
+#define FILE_BUFFER_BYTES 0x8000
+/* a deflating upload's reads */
+#define DEFLATE_INPUT_BYTES 0x4000
+/* the reads of a host's hash catching up, and of a joiner's kept part read
+back */
+#define READ_BACK_BYTES 0x10000
+/* a joiner's frame's share of reading its kept part back */
+#define READ_BACK_MICROSECONDS 15000
+/* the most of a host's CPU share its uploads save up (the work a frame may
+take at most) */
+#define MAXIMUM_CPU_ALLOWANCE_MICROSECONDS 15000
+/* a deflating upload's level: looked at every second; stored blocks tried
+this long when deflate is held back by the CPU, kept this long when faster */
+#define LEVEL_PERIOD_MILLISECONDS 1000
+#define LEVEL_TRIAL_MILLISECONDS 3000
+#define LEVEL_HOLD_MILLISECONDS 20000
 
 /* ---------- structures */
 
@@ -151,17 +197,61 @@ struct map_share_upload
 	long machine_index;
 	struct network_connection *connection;
 	FILE *file;
+	char path[PATH_BYTES];
 	char name[MAP_SHARE_NAME_BYTES];
 	int32_t identity;
 	int32_t flags;
 	uint32_t size;
+	/* where the stream starts in the file (the joiner's kept part), and the
+	file's bytes read into it */
+	uint32_t start;
+	uint32_t position;
+	/* the stream's bytes: sent, and acknowledged */
 	uint32_t sent;
 	uint32_t acknowledged;
+	/* the stream's last byte sent */
+	boolean stream_ended;
 	boolean done_sent;
 	unsigned long progress_time;
 	/* when the host last logged how far it is */
 	unsigned long logged_time;
+	/* the whole file's SHA-256: hashed this far (from 0; the part before
+	`start` read apart, hash_file, as the bytes sent allow) */
 	struct halo_sha256_stream sha256;
+	uint32_t hashed;
+	FILE *hash_file;
+	boolean digest_known;
+	uint8_t digest[MAP_SHARE_DIGEST_BYTES];
+	/* a deflate stream: its packer, and the file's bytes read for it */
+	boolean deflating;
+	struct map_share_packer packer;
+	uint8_t *input;
+	uint32_t input_used;
+	uint32_t input_size;
+	/* the level: this second's frames, and those the CPU held it back in;
+	the file's bytes taken at its start; the deflated rate it is tried
+	against; when stored blocks are tried or kept until */
+	unsigned long level_time;
+	short frames;
+	short cpu_held_frames;
+	boolean cpu_held;
+	uint32_t period_taken;
+	unsigned long deflated_rate;
+	unsigned long stored_until;
+	boolean stored_trial;
+	unsigned long long started_us;
+};
+
+/* the SHA-256 of the file a host last sent whole: a later upload of it (a
+second joiner, a resumed one) hashes nothing */
+struct map_share_digest_cache
+{
+	boolean valid;
+	char path[PATH_BYTES];
+	uint32_t size;
+	int32_t identity;
+	long modified;
+	uint8_t digest[MAP_SHARE_DIGEST_BYTES];
 };
 
 struct map_share_host
@@ -170,6 +260,15 @@ struct map_share_host
 	short next_upload;
 	unsigned long rate_time;
 	unsigned long rate_budget;
+	/* the CPU time the uploads may take: their share of the time passing,
+	saved up to MAXIMUM_CPU_ALLOWANCE_MICROSECONDS, less what they took */
+	unsigned long long cpu_time;
+	unsigned long long cpu_allowance;
+	/* what they took since it was last logged, in all and at most a frame */
+	unsigned long long cpu_used;
+	unsigned long long cpu_used_most;
+	unsigned long cpu_logged_time;
+	struct map_share_digest_cache digest_cache;
 };
 
 struct map_share_download
@@ -199,6 +298,18 @@ struct map_share_download
 	the public lobby (a stranger's: the question warns) */
 	char host_name[40];
 	boolean public_game;
+	/* what this joiner said it can do (its query's and start's) */
+	uint32_t capabilities;
+	/* the kept part of an earlier download it continues from (0: none),
+	as written down, and read back this far */
+	uint32_t resume_from;
+	struct map_share_resume kept;
+	uint32_t checked;
+	/* the bytes in hand when the resume record was last written */
+	uint32_t saved;
+	/* the download is damaged (or the card full): not kept */
+	boolean discard;
+	unsigned long long started_us;
 	/* what the player is told on leaving */
 	char message[600];
 };
@@ -206,6 +317,7 @@ struct map_share_download
 /* ---------- prototypes */
 
 void platform_log(char const *format, ...);
+unsigned long long vita_host_time_us(void);
 void platform_show_message(char const *title, char const *message);
 void platform_ask_question(char const *title, char const *text);
 int platform_question_answer(void);
@@ -368,6 +480,16 @@ static void map_share_upload_close(
 	{
 		fclose(upload->file);
 	}
+	if (upload->hash_file)
+	{
+		fclose(upload->hash_file);
+	}
+	map_share_packer_end(&upload->packer);
+	/* (the game's free, cseries.h's, takes no NULL) */
+	if (upload->input)
+	{
+		free(upload->input);
+	}
 	csmemset(upload, 0, sizeof(*upload));
 
 	return;
@@ -389,18 +511,36 @@ static struct map_share_upload *map_share_upload_find(
 	return NULL;
 }
 
+/* when the file at `path` was last written (0: unknown) */
+static long map_share_file_modified(
+	char const *path)
+{
+	WIN32_FIND_DATAA data;
+	HANDLE find = FindFirstFileA(path, &data);
+
+	if (find == INVALID_HANDLE_VALUE)
+	{
+		return 0;
+	}
+	/* (FindClose is the XDK's CloseHandle) */
+	CloseHandle(find);
+
+	return (long)(data.ftLastWriteTime.dwLowDateTime ^ data.ftLastWriteTime.dwHighDateTime);
+}
+
 /* Whether the host serves `name`, fingerprinted `identity`, now: opens it
-(*file, its *size and offer *flags) when it does, else says why not. */
+(*file, at `path`, its *size and offer *flags) when it does, else says why
+not. */
 static enum map_share_refusal map_share_server_check(
 	struct network_game_server *server,
 	char const *name,
 	int32_t identity,
 	FILE **file,
+	char *path,
 	uint32_t *size,
 	int32_t *flags)
 {
 	char const *level_name = main_get_multiplayer_map_name();
-	char path[PATH_BYTES];
 	long length;
 	long path_length;
 
@@ -425,7 +565,7 @@ static enum map_share_refusal map_share_server_check(
 	{
 		return _map_share_refusal_changed;
 	}
-	if (!custom_edition_cache_map_file_path(level_name, path, sizeof(path)))
+	if (!custom_edition_cache_map_file_path(level_name, path, PATH_BYTES))
 	{
 		return _map_share_refusal_read_failed;
 	}
@@ -434,6 +574,8 @@ static enum map_share_refusal map_share_server_check(
 	{
 		return _map_share_refusal_read_failed;
 	}
+	/* (before any other use of it) */
+	setvbuf(*file, NULL, _IOFBF, FILE_BUFFER_BYTES);
 	if (fseek(*file, 0, SEEK_END) != 0 || (length = ftell(*file)) < 0 || fseek(*file, 0, SEEK_SET) != 0)
 	{
 		fclose(*file);
@@ -458,6 +600,30 @@ static enum map_share_refusal map_share_server_check(
 	}
 
 	return _map_share_refusal_none;
+}
+
+/* the offer's flags of what the host does of the joiner's `capabilities`:
+it continues from a kept part, and deflates a Custom Edition map (an Xbox
+map is compressed already) */
+static int32_t map_share_server_offer_flags(
+	int32_t file_flags,
+	uint32_t capabilities)
+{
+	char const *compress = getenv("HALO_MAP_SHARE_COMPRESS");
+	int32_t flags = file_flags;
+
+	if (capabilities & 1u << _map_share_capability_resume_bit)
+	{
+		flags |= 1 << _map_share_offer_resume_bit;
+	}
+	if ((capabilities & 1u << _map_share_capability_deflate_bit) &&
+		TEST_FLAG(file_flags, _map_share_offer_custom_edition_bit) &&
+		!(compress && !csstrcmp(compress, "0")))
+	{
+		flags |= 1 << _map_share_offer_deflate_bit;
+	}
+
+	return flags;
 }
 
 static void map_share_server_answer_offer(
@@ -488,8 +654,12 @@ static void map_share_server_query_or_start(
 	char const *name)
 {
 	struct map_share_upload *upload = map_share_upload_find(machine);
+	struct map_share_digest_cache const *cache = &map_share_host.digest_cache;
+	uint32_t capabilities = map_share_request_capabilities(request);
 	enum map_share_refusal refusal;
+	char path[PATH_BYTES];
 	uint32_t size;
+	uint32_t start = 0;
 	int32_t flags;
 	FILE *file;
 	short index;
@@ -499,18 +669,32 @@ static void map_share_server_query_or_start(
 	{
 		map_share_upload_close(upload);
 	}
-	refusal = map_share_server_check(server, name, request->identity, &file, &size, &flags);
+	refusal = map_share_server_check(server, name, request->identity, &file, path, &size, &flags);
 	if (refusal != _map_share_refusal_none)
 	{
 		map_share_server_refuse(server, machine, name, refusal);
 		return;
 	}
+	flags = map_share_server_offer_flags(flags, capabilities);
 	if (request->command == _map_share_command_query)
 	{
 		fclose(file);
-		network_event("map share: offering '%s' (%lu bytes) to a machine", name, (unsigned long)size);
+		network_event("map share: offering '%s' (%lu bytes%s%s) to a machine", name, (unsigned long)size,
+			TEST_FLAG(flags, _map_share_offer_resume_bit) ? ", resumable" : "",
+			TEST_FLAG(flags, _map_share_offer_deflate_bit) ? ", deflated" : "");
 		map_share_server_answer_offer(server, machine, name, request->identity, size, flags);
 		return;
+	}
+	/* (a joiner continuing its kept part: from there, inside the file) */
+	if (TEST_FLAG(flags, _map_share_offer_resume_bit))
+	{
+		start = (uint32_t)request->offset;
+		if (start >= size)
+		{
+			fclose(file);
+			map_share_server_refuse(server, machine, name, _map_share_refusal_protocol);
+			return;
+		}
 	}
 
 	for (index = 0; index < MAP_SHARE_MAXIMUM_UPLOADS && map_share_host.uploads[index].active; index++)
@@ -536,81 +720,382 @@ static void map_share_server_query_or_start(
 	}
 	upload->connection = network_game_server_get_client_connection(machine);
 	upload->file = file;
+	csstrncpy(upload->path, path, sizeof(upload->path) - 1);
 	csstrncpy(upload->name, name, MAP_SHARE_NAME_BYTES - 1);
 	upload->identity = request->identity;
-	upload->flags = flags;
 	upload->size = size;
-	upload->progress_time = system_milliseconds();
+	upload->start = upload->position = start;
+	upload->progress_time = upload->level_time = system_milliseconds();
+	upload->started_us = vita_host_time_us();
+	if (start && fseek(file, (long)start, SEEK_SET) != 0)
+	{
+		map_share_upload_close(upload);
+		map_share_server_refuse(server, machine, name, _map_share_refusal_read_failed);
+		return;
+	}
+	/* (the file sent whole before, unchanged: its SHA-256 is known) */
+	if (cache->valid && !csstrcmp(cache->path, path) && cache->size == size && cache->identity == request->identity &&
+		cache->modified == map_share_file_modified(path))
+	{
+		upload->digest_known = TRUE;
+		csmemcpy(upload->digest, cache->digest, sizeof(upload->digest));
+	}
 	halo_sha256_begin(&upload->sha256);
-	network_event("map share: sending '%s' (%lu bytes) to a machine", name, (unsigned long)size);
+	/* deflated: its state and reads (else as the file's own bytes, which the
+	start's answer then says) */
+	if (TEST_FLAG(flags, _map_share_offer_deflate_bit))
+	{
+		upload->input = malloc(DEFLATE_INPUT_BYTES);
+		if (upload->input && map_share_packer_begin(&upload->packer))
+		{
+			upload->deflating = TRUE;
+		}
+		else
+		{
+			network_event("map share: no memory to deflate '%s': sending it as it is", name);
+			if (upload->input)
+			{
+				free(upload->input);
+			}
+			upload->input = NULL;
+			flags &= ~(1 << _map_share_offer_deflate_bit);
+		}
+	}
+	{
+		char const *level = getenv("HALO_MAP_SHARE_LEVEL");
+
+		if (upload->deflating && level && *level)
+		{
+			upload->packer.level = level[0] == '0' ? 0 : MAP_SHARE_DEFLATE_LEVEL;
+		}
+	}
+	upload->flags = flags;
+	/* (the file's own bytes: the stream's offsets are the file's) */
+	if (!upload->deflating)
+	{
+		upload->sent = upload->acknowledged = start;
+	}
+	network_event("map share: sending '%s' (%lu bytes%s%s%s) to a machine", name, (unsigned long)size,
+		upload->deflating ? ", deflated" : "", start ? ", from " : "", start ? "its kept part" : "");
+	if (start)
+	{
+		network_event("map share: the machine has %lu bytes of '%s'", (unsigned long)start, name);
+	}
 	/* (the offer again: the start is taken) */
 	map_share_server_answer_offer(server, machine, name, request->identity, size, flags);
 
 	return;
 }
 
-/* Sends what the upload's window and the rate allow; FALSE when it ended. */
+/* the file's next bytes read for the stream (and hashed when the hash is
+there); FALSE when they cannot be */
+static boolean map_share_upload_read(
+	struct map_share_upload *upload,
+	uint8_t *buffer,
+	uint32_t length)
+{
+	if (fread(buffer, 1, length, upload->file) != length)
+	{
+		return FALSE;
+	}
+	if (!upload->digest_known && upload->hashed == upload->position)
+	{
+		halo_sha256_add(&upload->sha256, buffer, length);
+		upload->hashed += length;
+	}
+	upload->position += length;
+
+	return TRUE;
+}
+
+/* The upload's next data message (`data`): the file's own bytes, or the
+deflate stream's; FALSE when the file cannot be read or deflated. */
+static boolean map_share_upload_fill(
+	struct map_share_upload *upload,
+	struct map_share_data_message *data)
+{
+	uint32_t filled = 0;
+
+	csmemset(data, 0, sizeof(*data));
+	data->offset = (int32_t)upload->sent;
+	if (!upload->deflating)
+	{
+		filled = MIN(upload->size - upload->position, (uint32_t)MAP_SHARE_CHUNK_BYTES);
+		if (!map_share_upload_read(upload, data->data, filled))
+		{
+			return FALSE;
+		}
+		upload->stream_ended = upload->position == upload->size;
+	}
+	else
+	{
+		short stuck = 0;
+
+		while (filled < MAP_SHARE_CHUNK_BYTES && !upload->packer.ended)
+		{
+			uint32_t taken;
+			long made;
+
+			if (upload->input_used == upload->input_size && upload->position < upload->size)
+			{
+				uint32_t length = MIN(upload->size - upload->position, (uint32_t)DEFLATE_INPUT_BYTES);
+
+				if (!map_share_upload_read(upload, upload->input, length))
+				{
+					return FALSE;
+				}
+				upload->input_used = 0;
+				upload->input_size = length;
+			}
+			made = map_share_packer_pack(&upload->packer, upload->input + upload->input_used,
+				upload->input_size - upload->input_used, upload->position == upload->size, &taken,
+				data->data + filled, MAP_SHARE_CHUNK_BYTES - filled);
+			if (made < 0 || (stuck = made || taken ? 0 : stuck + 1) > 4)
+			{
+				return FALSE;
+			}
+			upload->input_used += taken;
+			upload->period_taken += taken;
+			filled += (uint32_t)made;
+		}
+		upload->stream_ended = upload->packer.ended;
+	}
+	data->length = (int16_t)filled;
+
+	return TRUE;
+}
+
+/* The file's bytes the joiner has (acknowledged): a deflate stream's
+counted as the file's bytes taken so far, in proportion. */
+static uint32_t map_share_upload_progress(
+	struct map_share_upload const *upload)
+{
+	uint32_t taken;
+
+	if (!upload->deflating)
+	{
+		return upload->acknowledged;
+	}
+	if (upload->done_sent && upload->acknowledged == upload->sent)
+	{
+		return upload->size;
+	}
+	taken = upload->position - upload->start - (upload->input_size - upload->input_used);
+
+	return upload->start + (upload->sent ?
+		(uint32_t)((unsigned long long)taken * upload->acknowledged / upload->sent) : 0);
+}
+
+/* Whether the upload may send a message now: its window, its connection's
+queue, the host's rate. */
+static boolean map_share_upload_may_send(
+	struct map_share_upload const *upload)
+{
+	return upload->active && !upload->stream_ended &&
+		upload->sent - upload->acknowledged < MAP_SHARE_WINDOW_BYTES &&
+		map_share_host.rate_budget >= MAP_SHARE_CHUNK_BYTES &&
+		network_connection_reliable_queued_bytes(upload->connection) < MAP_SHARE_QUEUE_BYTES;
+}
+
+/* Sends the upload's next message; FALSE when it ended (refused). */
 static boolean map_share_upload_send(
 	struct network_game_server *server,
 	struct map_share_upload *upload)
 {
-	while (!upload->done_sent)
+	/* (static: 3 KB, and one frame sends at a time) */
+	static struct map_share_data_message data;
+	void *message;
+
+	if (!map_share_upload_fill(upload, &data))
 	{
-		if (upload->sent == upload->size)
-		{
-			struct map_share_answer_message answer;
+		network_event("map share: '%s' could not be read%s", upload->name, upload->deflating ? " or deflated" : "");
+		map_share_server_refuse(server, upload->machine, upload->name, _map_share_refusal_read_failed);
+		return FALSE;
+	}
+	if (!data.length)
+	{
+		return TRUE;
+	}
+	message = create_network_game_message(_message_server_map_download_data, &data, sizeof(data));
+	if (!message || !network_game_server_send_message_to_client_machine(server, upload->machine, message))
+	{
+		network_event("map share: sending '%s' to a machine failed", upload->name);
+		return FALSE;
+	}
+	upload->sent += (uint32_t)data.length;
+	map_share_host.rate_budget -= MIN(map_share_host.rate_budget, (unsigned long)data.length);
 
-			csmemset(&answer, 0, sizeof(answer));
-			answer.kind = _map_share_answer_done;
-			answer.size = (int32_t)upload->size;
-			answer.identity = upload->identity;
-			answer.flags = upload->flags;
-			csstrncpy(answer.name, upload->name, MAP_SHARE_NAME_BYTES - 1);
-			halo_sha256_end(&upload->sha256, answer.digest);
-			upload->done_sent = TRUE;
-			fclose(upload->file);
-			upload->file = NULL;
-			if (!map_share_server_send_answer(server, upload->machine, &answer))
-			{
-				return FALSE;
-			}
-			break;
-		}
-		if (upload->sent - upload->acknowledged >= MAP_SHARE_WINDOW_BYTES ||
-			map_share_host.rate_budget < MAP_SHARE_CHUNK_BYTES)
-		{
-			break;
-		}
-		{
-			/* (static: 3 KB, and one frame sends at a time) */
-			static struct map_share_data_message data;
-			uint32_t length = MIN(upload->size - upload->sent, (uint32_t)MAP_SHARE_CHUNK_BYTES);
-			void *message;
+	return TRUE;
+}
 
-			csmemset(&data, 0, sizeof(data));
-			data.offset = (int32_t)upload->sent;
-			data.length = (int16_t)length;
-			if (fread(data.data, 1, length, upload->file) != length)
-			{
-				map_share_server_refuse(server, upload->machine, upload->name, _map_share_refusal_read_failed);
-				return FALSE;
-			}
-			halo_sha256_add(&upload->sha256, data.data, length);
-			message = create_network_game_message(_message_server_map_download_data, &data, sizeof(data));
-			if (!message || !network_game_server_send_message_to_client_machine(server, upload->machine, message))
-			{
-				network_event("map share: sending '%s' to a machine failed", upload->name);
-				return FALSE;
-			}
-			upload->sent += length;
-			map_share_host.rate_budget -= length;
+/* The hash catching up with the bytes sent (the part before a resumed
+upload's start, read apart), until `until_us` (a read at least); FALSE when the
+file cannot be read. */
+static boolean map_share_upload_hash(
+	struct map_share_upload *upload,
+	unsigned long long until_us)
+{
+	/* (static: 64 KB, and one frame hashes at a time) */
+	static uint8_t buffer[READ_BACK_BYTES];
+
+	if (upload->digest_known || upload->hashed >= upload->position)
+	{
+		return TRUE;
+	}
+	if (!upload->hash_file)
+	{
+		upload->hash_file = fopen(upload->path, "rb");
+		if (!upload->hash_file || fseek(upload->hash_file, (long)upload->hashed, SEEK_SET) != 0)
+		{
+			return FALSE;
 		}
+	}
+	/* (at least a read a frame, so that it ends) */
+	do
+	{
+		uint32_t length = MIN(upload->position - upload->hashed, (uint32_t)sizeof(buffer));
+
+		if (fread(buffer, 1, length, upload->hash_file) != length)
+		{
+			return FALSE;
+		}
+		halo_sha256_add(&upload->sha256, buffer, length);
+		upload->hashed += length;
+	}
+	while (upload->hashed < upload->position && vita_host_time_us() < until_us);
+	if (upload->hashed == upload->position)
+	{
+		fclose(upload->hash_file);
+		upload->hash_file = NULL;
 	}
 
 	return TRUE;
 }
 
+/* The done (the whole file's SHA-256) once the stream has been sent and
+the file hashed; FALSE when it could not be sent. */
+static boolean map_share_upload_finish(
+	struct network_game_server *server,
+	struct map_share_upload *upload)
+{
+	struct map_share_digest_cache *cache = &map_share_host.digest_cache;
+	struct map_share_answer_message answer;
+	unsigned long long elapsed;
+
+	if (!upload->stream_ended || upload->done_sent || (!upload->digest_known && upload->hashed < upload->size))
+	{
+		return TRUE;
+	}
+	if (!upload->digest_known)
+	{
+		halo_sha256_end(&upload->sha256, upload->digest);
+		upload->digest_known = TRUE;
+		cache->valid = TRUE;
+		csstrncpy(cache->path, upload->path, sizeof(cache->path) - 1);
+		cache->size = upload->size;
+		cache->identity = upload->identity;
+		cache->modified = map_share_file_modified(upload->path);
+		csmemcpy(cache->digest, upload->digest, sizeof(cache->digest));
+	}
+	csmemset(&answer, 0, sizeof(answer));
+	answer.kind = _map_share_answer_done;
+	answer.size = (int32_t)upload->size;
+	answer.identity = upload->identity;
+	answer.flags = upload->flags;
+	csstrncpy(answer.name, upload->name, MAP_SHARE_NAME_BYTES - 1);
+	csmemcpy(answer.digest, upload->digest, sizeof(answer.digest));
+	upload->done_sent = TRUE;
+	fclose(upload->file);
+	upload->file = NULL;
+	elapsed = vita_host_time_us() - upload->started_us;
+	network_event("map share: '%s' sent: %lu bytes of the file as %lu in %lu ms (%lu KB/s of the file)", upload->name,
+		(unsigned long)(upload->size - upload->start), (unsigned long)(upload->sent - (upload->deflating ? 0 : upload->start)),
+		(unsigned long)(elapsed / 1000),
+		(unsigned long)(elapsed ? (unsigned long long)(upload->size - upload->start) * 1000000 / 1024 / elapsed : 0));
+
+	return map_share_server_send_answer(server, upload->machine, &answer);
+}
+
+/* A deflating upload's level, looked at every second: stored blocks tried
+when the CPU held deflate back in most of its frames, kept while they move
+the file faster */
+static void map_share_upload_level(
+	struct map_share_upload *upload,
+	unsigned long now)
+{
+	unsigned long elapsed = now - upload->level_time;
+	unsigned long rate;
+	char const *fixed = getenv("HALO_MAP_SHARE_LEVEL");
+
+	if (!upload->deflating || upload->packer.finishing || (fixed && *fixed) || elapsed < LEVEL_PERIOD_MILLISECONDS)
+	{
+		return;
+	}
+	rate = (unsigned long)((unsigned long long)upload->period_taken * 1000 / elapsed);
+	if (upload->packer.level)
+	{
+		if (upload->cpu_held_frames * 2 > upload->frames)
+		{
+			upload->deflated_rate = rate;
+			upload->packer.level = 0;
+			upload->stored_trial = TRUE;
+			upload->stored_until = now + LEVEL_TRIAL_MILLISECONDS;
+			network_event("map share: deflating '%s' is held back by the CPU (%lu KB/s): trying stored blocks",
+				upload->name, rate / 1024);
+		}
+	}
+	else if ((long)(now - upload->stored_until) >= 0)
+	{
+		if (upload->stored_trial && rate > upload->deflated_rate + upload->deflated_rate / 10)
+		{
+			upload->stored_until = now + LEVEL_HOLD_MILLISECONDS;
+			network_event("map share: stored blocks of '%s' are faster (%lu KB/s): kept", upload->name, rate / 1024);
+		}
+		else
+		{
+			upload->packer.level = MAP_SHARE_DEFLATE_LEVEL;
+			network_event("map share: deflating '%s' again (stored: %lu KB/s)", upload->name, rate / 1024);
+		}
+		upload->stored_trial = FALSE;
+	}
+	upload->level_time = now;
+	upload->period_taken = 0;
+	upload->frames = upload->cpu_held_frames = 0;
+
+	return;
+}
+
 /* ---------- private code: joiner */
+
+/* a file's kind among an offer's flags (what a resume record keeps) */
+#define FILE_KIND_FLAGS (FLAG(_map_share_offer_yelo_bit) | FLAG(_map_share_offer_custom_edition_bit))
+
+static boolean map_share_setting_off(
+	char const *name)
+{
+	char const *value = getenv(name);
+
+	return value && !csstrcmp(value, "0");
+}
+
+/* what this joiner can do (HALO_MAP_SHARE_RESUME=0, HALO_MAP_SHARE_COMPRESS=0
+turn either off) */
+static uint32_t map_share_client_capabilities(
+	void)
+{
+	uint32_t capabilities = 0;
+
+	if (!map_share_setting_off("HALO_MAP_SHARE_RESUME"))
+	{
+		capabilities |= 1u << _map_share_capability_resume_bit;
+	}
+	if (!map_share_setting_off("HALO_MAP_SHARE_COMPRESS"))
+	{
+		capabilities |= 1u << _map_share_capability_deflate_bit;
+	}
+
+	return capabilities;
+}
 
 static boolean map_share_client_send(
 	struct network_game_client *client,
@@ -633,22 +1118,121 @@ static boolean map_share_client_send(
 	return message && network_game_client_send_to_server(client, message);
 }
 
-/* the download's file closed, and deleted unless kept */
-static void map_share_client_close_file(
-	boolean delete_it)
+/* a map's kept part (<name>.download and <name>.resume) deleted */
+static void map_share_kept_part_delete(
+	char const *name)
+{
+	char path[PATH_BYTES];
+
+	if (map_share_path(path, name, TEMPORARY_EXTENSION))
+	{
+		remove(path);
+	}
+	if (map_share_path(path, name, RESUME_EXTENSION))
+	{
+		remove(path);
+	}
+
+	return;
+}
+
+/* the resume record `name` has (FALSE: none that can be read) */
+static boolean map_share_resume_read(
+	char const *name,
+	struct map_share_resume *resume)
+{
+	uint8_t bytes[MAP_SHARE_RESUME_RECORD_BYTES];
+	char path[PATH_BYTES];
+	FILE *file;
+	size_t length = 0;
+
+	if (!map_share_path(path, name, RESUME_EXTENSION) || !(file = fopen(path, "rb")))
+	{
+		return FALSE;
+	}
+	length = fread(bytes, 1, sizeof(bytes), file);
+	fclose(file);
+
+	return length == sizeof(bytes) && map_share_resume_decode(bytes, resume);
+}
+
+/* The download's resume record written: the file's bytes in hand, flushed
+to the card first, and their SHA-256; FALSE when it could not be. */
+static boolean map_share_client_save_resume(
+	void)
 {
 	struct map_share_download *download = &map_share_download;
+	struct map_share_resume resume;
+	uint8_t bytes[MAP_SHARE_RESUME_RECORD_BYTES];
+	char path[PATH_BYTES];
+	FILE *file;
+	boolean written;
+
+	if (!download->file || fflush(download->file) != 0 || ferror(download->file) ||
+		!map_share_path(path, download->name, RESUME_EXTENSION))
+	{
+		return FALSE;
+	}
+	csmemset(&resume, 0, sizeof(resume));
+	csstrncpy(resume.name, download->name, MAP_SHARE_NAME_BYTES - 1);
+	resume.identity = download->identity;
+	resume.size = download->size;
+	resume.flags = (uint32_t)download->flags & FILE_KIND_FLAGS;
+	resume.kept = download->receiver.received;
+	map_share_receiver_digest_so_far(&download->receiver, resume.kept_digest);
+	resume.saved_time = (uint32_t)time(NULL);
+	map_share_resume_encode(&resume, bytes);
+	file = fopen(path, "wb");
+	if (!file)
+	{
+		return FALSE;
+	}
+	written = fwrite(bytes, 1, sizeof(bytes), file) == sizeof(bytes);
+	written = fclose(file) == 0 && written;
+	download->saved = download->receiver.received;
+
+	return written;
+}
+
+/* The download's file closed: kept, with its resume record, when it can be
+continued (not damaged, long enough, read back first when it was a kept
+part); else deleted. */
+static void map_share_client_close_file(
+	void)
+{
+	struct map_share_download *download = &map_share_download;
+	boolean keep = FALSE;
 
 	if (download->file)
 	{
+		if (download->discard)
+		{
+		}
+		else if (download->state == _client_checking)
+		{
+			/* (its record as it was) */
+			keep = TRUE;
+		}
+		else if ((download->state == _client_starting || download->state == _client_receiving) &&
+			download->receiver.received >= MAP_SHARE_RESUME_MINIMUM_BYTES && download->receiver.received < download->size &&
+			!map_share_setting_off("HALO_MAP_SHARE_RESUME"))
+		{
+			keep = map_share_client_save_resume();
+		}
 		fclose(download->file);
 		download->file = NULL;
+		if (keep)
+		{
+			network_event("map share: %lu bytes of '%s' kept, to continue later", (unsigned long)(
+				download->state == _client_checking ? download->resume_from : download->receiver.received), download->name);
+		}
 	}
-	if (delete_it && download->temporary_path[0])
+	if (!keep && download->temporary_path[0])
 	{
-		remove(download->temporary_path);
+		map_share_kept_part_delete(download->name);
 	}
 	download->temporary_path[0] = 0;
+	map_share_receiver_end(&download->receiver);
 
 	return;
 }
@@ -658,12 +1242,12 @@ static void map_share_client_reset(
 {
 	struct map_share_download *download = &map_share_download;
 
-	map_share_client_close_file(TRUE);
+	map_share_client_close_file();
 	if (download->state == _client_asking)
 	{
 		platform_ask_question(NULL, NULL);
 	}
-	if (download->state == _client_starting || download->state == _client_receiving)
+	if (download->state == _client_checking || download->state == _client_starting || download->state == _client_receiving)
 	{
 		platform_show_progress(NULL, NULL);
 	}
@@ -699,8 +1283,9 @@ static void map_share_client_refusal_text(
 	return;
 }
 
-/* Gives up: the host is told when it is sending, the file deleted, and the
-joiner leaves the game at its next frame, telling the player `why`. */
+/* Gives up: the host is told when it is sending, the file kept to continue
+(else deleted), and the joiner leaves the game at its next frame, telling
+the player `why`. */
 static void map_share_client_fail(
 	char const *why)
 {
@@ -713,17 +1298,28 @@ static void map_share_client_fail(
 	}
 	/* (the host is told while it still has bytes to send) */
 	if ((download->state == _client_starting || download->state == _client_receiving) && download->client &&
-		download->receiver.received < download->size)
+		!map_share_receiver_complete(&download->receiver))
 	{
-		map_share_client_send(download->client, _map_share_command_cancel, _map_share_refusal_cancelled, download->receiver.received);
+		map_share_client_send(download->client, _map_share_command_cancel, _map_share_refusal_cancelled, download->receiver.stream_received);
 	}
-	map_share_client_close_file(TRUE);
-	if (download->state == _client_starting || download->state == _client_receiving)
+	map_share_client_close_file();
+	if (download->state == _client_checking || download->state == _client_starting || download->state == _client_receiving)
 	{
 		platform_show_progress(NULL, NULL);
 	}
 	csstrncpy(download->message, why, sizeof(download->message) - 1);
 	download->state = _client_leaving;
+
+	return;
+}
+
+/* gives up on a download that is damaged (or cannot be written): its file
+is not kept */
+static void map_share_client_fail_damaged(
+	char const *why)
+{
+	map_share_download.discard = TRUE;
+	map_share_client_fail(why);
 
 	return;
 }
@@ -816,7 +1412,12 @@ static boolean map_share_client_install(
 		return FALSE;
 	}
 	download->temporary_path[0] = 0;
-	if (replaced)
+	/* (its resume record, of a kept part now in place) */
+	if (map_share_path(replaced_path, download->name, RESUME_EXTENSION))
+	{
+		remove(replaced_path);
+	}
+	if (replaced && map_share_path(replaced_path, download->name, REPLACED_EXTENSION))
 	{
 		remove(replaced_path);
 	}
@@ -878,14 +1479,14 @@ static void map_share_client_finish(
 	char why[320];
 	boolean missing;
 
-	if (download->receiver.received != download->size || (uint32_t)answer->size != download->size)
+	if (!map_share_receiver_complete(&download->receiver) || (uint32_t)answer->size != download->size)
 	{
-		map_share_client_fail("The host ended the download early.");
+		map_share_client_fail_damaged("The host ended the download early.");
 		return;
 	}
 	if (download->file && (fflush(download->file) != 0 || ferror(download->file)))
 	{
-		map_share_client_fail("The map couldn't be written (is the memory card full?).");
+		map_share_client_fail_damaged("The map couldn't be written (is the memory card full?).");
 		return;
 	}
 	if (download->file)
@@ -893,24 +1494,36 @@ static void map_share_client_finish(
 		fclose(download->file);
 		download->file = NULL;
 	}
+	{
+		unsigned long long elapsed = vita_host_time_us() - download->started_us;
+		uint32_t moved = download->size - download->resume_from;
+
+		network_event("map share: '%s' received: %lu bytes of the file as %lu in %lu ms (%lu KB/s of the file)%s",
+			download->name, (unsigned long)moved, (unsigned long)download->receiver.stream_received -
+				(download->receiver.inflater ? 0 : download->resume_from),
+			(unsigned long)(elapsed / 1000), (unsigned long)(elapsed ? (unsigned long long)moved * 1000000 / 1024 / elapsed : 0),
+			download->receiver.inflater ? ", deflated" : "");
+	}
+	/* (the whole file's: the kept part as read back, and the rest) */
 	map_share_receiver_digest(&download->receiver, digest);
 	if (csmemcmp(digest, answer->digest, sizeof(digest)))
 	{
-		map_share_client_fail("The download was damaged (its SHA-256 isn't the host's).");
+		map_share_client_fail_damaged("The download was damaged (its SHA-256 isn't the host's).");
 		return;
 	}
 	if (map_share_receiver_identity(&download->receiver) != download->identity)
 	{
 		snprintf(why, sizeof(why), "The host sent a copy of %s that isn't the one its game plays.", download->name);
-		map_share_client_fail(why);
+		map_share_client_fail_damaged(why);
 		return;
 	}
 	if (!map_share_client_check_file(download->temporary_path, why, sizeof(why)) ||
 		!map_share_client_install(why, sizeof(why)))
 	{
-		map_share_client_fail(why);
+		map_share_client_fail_damaged(why);
 		return;
 	}
+	map_share_receiver_end(&download->receiver);
 
 	/* the game's own checks, on the map in place */
 	custom_edition_cache_map_identity_forget(download->name);
@@ -947,9 +1560,19 @@ static void map_share_client_ask(
 {
 	struct map_share_download *download = &map_share_download;
 	char size_text[32];
-	char text[600];
+	char kept_text[96];
+	char text[800];
 
 	map_share_size_text(size_text, sizeof(size_text), download->size);
+	kept_text[0] = 0;
+	if (download->resume_from)
+	{
+		char kept_size[32];
+
+		map_share_size_text(kept_size, sizeof(kept_size), download->resume_from);
+		snprintf(kept_text, sizeof(kept_text), "\n\n(%s of it was downloaded before: the download goes on from there.)",
+			kept_size);
+	}
 	if (download->pc_maps_only)
 	{
 		snprintf(text, sizeof(text), "The host is playing the PC (Custom Edition) map %s, which is in your maps "
@@ -966,14 +1589,15 @@ static void map_share_client_ask(
 		snprintf(
 			text,
 			sizeof(text),
-			"The host is playing the PC (Custom Edition) map %s (%s), which %s.\n\nDownload it from %s and turn on PC maps?%s%s%s",
+			"The host is playing the PC (Custom Edition) map %s (%s), which %s.\n\nDownload it from %s and turn on PC maps?%s%s%s%s",
 			download->name,
 			size_text,
 			!download->replacing ? "isn't in your maps folder" : "isn't the same as yours",
 			download->host_name,
 			missing[0] ? "\n\n(Most PC maps also need " : "",
 			missing,
-			missing[0] ? " from Halo Custom Edition, which your maps folder lacks.)" : "");
+			missing[0] ? " from Halo Custom Edition, which your maps folder lacks.)" : "",
+			kept_text);
 	}
 	else
 	{
@@ -981,11 +1605,12 @@ static void map_share_client_ask(
 			text,
 			sizeof(text),
 			!download->replacing ?
-				"The host is playing the custom map %s (%s), which isn't in your maps folder.\n\nDownload it from %s?" :
-				"The host's custom map %s (%s) isn't the same as yours.\n\nDownload %s's copy in place of yours?",
+				"The host is playing the custom map %s (%s), which isn't in your maps folder.\n\nDownload it from %s?%s" :
+				"The host's custom map %s (%s) isn't the same as yours.\n\nDownload %s's copy in place of yours?%s",
 			download->name,
 			size_text,
-			download->host_name);
+			download->host_name,
+			kept_text);
 	}
 	/* (a public lobby's game: its host is a stranger) */
 	if (download->public_game && !download->pc_maps_only)
@@ -994,9 +1619,10 @@ static void map_share_client_ask(
 
 		snprintf(text + length, sizeof(text) - length, "\n\nThis is a public game: only accept maps from players you trust.");
 	}
-	network_event("map share: asking the player about '%s' (%lu bytes%s) from '%s'%s", download->name,
+	network_event("map share: asking the player about '%s' (%lu bytes%s%s) from '%s'%s", download->name,
 		(unsigned long)download->size, download->pc_maps_only ? ", PC maps only" : download->turn_on_pc_maps ?
-		", and PC maps" : "", download->host_name, download->public_game ? ", a public game" : "");
+		", and PC maps" : "", download->resume_from ? ", a part kept" : "", download->host_name,
+		download->public_game ? ", a public game" : "");
 	if (!getenv("HALO_MAP_SHARE_ANSWER"))
 	{
 		platform_ask_question("Halo: custom map", text);
@@ -1021,7 +1647,124 @@ static int map_share_client_answer(
 	return platform_question_answer();
 }
 
-/* the offer taken: room, a file, the start */
+/* the bytes of the file the receiver passes on, written */
+static int map_share_client_write(
+	void *context,
+	uint8_t const *data,
+	uint32_t length)
+{
+	return fwrite(data, 1, length, (FILE *)context) == length;
+}
+
+/* The kept part of an earlier download of the offered file, as its resume
+record says (0: none, or another file's, which the start deletes). */
+static uint32_t map_share_client_kept_part(
+	void)
+{
+	struct map_share_download *download = &map_share_download;
+	struct map_share_resume *kept = &download->kept;
+	char path[PATH_BYTES];
+	FILE *file;
+	long length = -1;
+
+	if (!TEST_FLAG(download->flags, _map_share_offer_resume_bit) || !map_share_resume_read(download->name, kept))
+	{
+		return 0;
+	}
+	if (csstrcasecmp(kept->name, download->name) || kept->identity != download->identity || kept->size != download->size ||
+		kept->flags != ((uint32_t)download->flags & FILE_KIND_FLAGS) ||
+		kept->kept < MAP_SHARE_RESUME_MINIMUM_BYTES || kept->kept >= download->size)
+	{
+		network_event("map share: the kept part of '%s' is of another file: it starts over", download->name);
+		return 0;
+	}
+	if (map_share_path(path, download->name, TEMPORARY_EXTENSION) && (file = fopen(path, "rb")))
+	{
+		if (fseek(file, 0, SEEK_END) == 0)
+		{
+			length = ftell(file);
+		}
+		fclose(file);
+	}
+	if (length < (long)kept->kept)
+	{
+		return 0;
+	}
+
+	return kept->kept;
+}
+
+/* The stream begins: deflated when the host offered it and the inflater
+can be had, from the kept part's end; the start sent. */
+static void map_share_client_begin_stream(
+	void)
+{
+	struct map_share_download *download = &map_share_download;
+	boolean deflate = TEST_FLAG(download->flags, _map_share_offer_deflate_bit);
+
+	if (deflate && !map_share_receiver_start_stream(&download->receiver, TRUE))
+	{
+		network_event("map share: no memory to inflate '%s': asking for it as it is", download->name);
+		deflate = FALSE;
+	}
+	if (!deflate)
+	{
+		download->capabilities &= ~(1u << _map_share_capability_deflate_bit);
+		map_share_receiver_start_stream(&download->receiver, FALSE);
+	}
+	if (download->resume_from && fseek(download->file, (long)download->resume_from, SEEK_SET) != 0)
+	{
+		map_share_client_fail_damaged("The map couldn't be written to the maps folder.");
+		return;
+	}
+	if (!map_share_client_send(download->client, _map_share_command_start, (short)download->capabilities, download->resume_from))
+	{
+		map_share_client_fail("The host couldn't be asked for the map.");
+		return;
+	}
+	download->state = _client_starting;
+	download->state_time = download->progress_time = system_milliseconds();
+	download->saved = download->receiver.received;
+	download->started_us = vita_host_time_us();
+	network_event("map share: downloading '%s' (%lu bytes%s%s)", download->name, (unsigned long)download->size,
+		deflate ? ", deflated" : "", download->resume_from ? ", from its kept part" : "");
+	if (download->resume_from)
+	{
+		network_event("map share: resuming '%s' at %lu bytes", download->name, (unsigned long)download->resume_from);
+	}
+
+	return;
+}
+
+/* the download from 0: a new file */
+static void map_share_client_start_over(
+	void)
+{
+	struct map_share_download *download = &map_share_download;
+
+	if (download->file)
+	{
+		fclose(download->file);
+		download->file = NULL;
+	}
+	map_share_receiver_end(&download->receiver);
+	map_share_kept_part_delete(download->name);
+	download->resume_from = 0;
+	download->file = fopen(download->temporary_path, "wb");
+	if (!download->file)
+	{
+		download->temporary_path[0] = 0;
+		map_share_client_fail("The map couldn't be written to the maps folder.");
+		return;
+	}
+	setvbuf(download->file, NULL, _IOFBF, FILE_BUFFER_BYTES);
+	map_share_receiver_begin(&download->receiver, download->size);
+	map_share_client_begin_stream();
+
+	return;
+}
+
+/* the offer taken: room, a file (the kept part read back first), the start */
 static void map_share_client_start(
 	void)
 {
@@ -1032,7 +1775,7 @@ static void map_share_client_start(
 
 	if (GetDiskFreeSpaceExA(cache_files_map_directory(), &free_bytes, NULL, NULL))
 	{
-		unsigned long long needed = (unsigned long long)download->size + FREE_SPACE_MARGIN_BYTES;
+		unsigned long long needed = (unsigned long long)(download->size - download->resume_from) + FREE_SPACE_MARGIN_BYTES;
 		unsigned long long available = (unsigned long long)free_bytes.HighPart << 32 | free_bytes.LowPart;
 
 		if (available < needed)
@@ -1053,24 +1796,68 @@ static void map_share_client_start(
 		map_share_client_fail("The map's name is too long for this maps folder.");
 		return;
 	}
-	remove(download->temporary_path);
-	download->file = fopen(download->temporary_path, "wb");
-	if (!download->file)
+	if (download->resume_from)
 	{
-		download->temporary_path[0] = 0;
-		map_share_client_fail("The map couldn't be written to the maps folder.");
+		download->file = fopen(download->temporary_path, "r+b");
+		if (download->file)
+		{
+			setvbuf(download->file, NULL, _IOFBF, FILE_BUFFER_BYTES);
+			map_share_receiver_begin(&download->receiver, download->size);
+			download->checked = 0;
+			download->state = _client_checking;
+			download->state_time = download->progress_time = system_milliseconds();
+			download->shown_time = 0;
+			download->started_us = vita_host_time_us();
+			network_event("map share: reading back the %lu bytes of '%s' kept", (unsigned long)download->resume_from, download->name);
+			return;
+		}
+	}
+	map_share_client_start_over();
+
+	return;
+}
+
+/* The kept part read back, as much as a frame's share allows: once all of
+it, checked against its record's SHA-256 (else the download starts over),
+then the start. */
+static void map_share_client_read_back(
+	void)
+{
+	struct map_share_download *download = &map_share_download;
+	/* (static: 64 KB, and one frame reads at a time) */
+	static uint8_t buffer[READ_BACK_BYTES];
+	unsigned long long until_us = vita_host_time_us() + READ_BACK_MICROSECONDS;
+	uint8_t digest[MAP_SHARE_DIGEST_BYTES];
+
+	do
+	{
+		uint32_t length = MIN(download->resume_from - download->checked, (uint32_t)sizeof(buffer));
+
+		if (fread(buffer, 1, length, download->file) != length)
+		{
+			network_event("map share: the kept part of '%s' couldn't be read back: it starts over", download->name);
+			map_share_client_start_over();
+			return;
+		}
+		map_share_receiver_add(&download->receiver, buffer, length);
+		download->checked += length;
+	}
+	while (download->checked < download->resume_from && vita_host_time_us() < until_us);
+	download->progress_time = system_milliseconds();
+	if (download->checked < download->resume_from)
+	{
 		return;
 	}
-	map_share_receiver_begin(&download->receiver, download->size);
-	if (!map_share_client_send(download->client, _map_share_command_start, _map_share_refusal_none, 0))
+	map_share_receiver_digest_so_far(&download->receiver, digest);
+	if (csmemcmp(digest, download->kept.kept_digest, sizeof(digest)))
 	{
-		map_share_client_fail("The host couldn't be asked for the map.");
+		network_event("map share: the kept part of '%s' isn't what was written down: it starts over", download->name);
+		map_share_client_start_over();
 		return;
 	}
-	download->state = _client_starting;
-	download->state_time = download->progress_time = system_milliseconds();
-	download->shown_time = 0;
-	network_event("map share: downloading '%s' (%lu bytes)", download->name, (unsigned long)download->size);
+	network_event("map share: the kept part of '%s' read back in %lu ms", download->name,
+		(unsigned long)((vita_host_time_us() - download->started_us) / 1000));
+	map_share_client_begin_stream();
 
 	return;
 }
@@ -1082,12 +1869,15 @@ static void map_share_client_show_progress(
 	char received_text[32];
 	char size_text[32];
 	char text[256];
-	unsigned long percent = download->size ?
-		(unsigned long)((unsigned long long)download->receiver.received * 100 / download->size) : 0;
+	uint32_t done = download->state == _client_checking ? download->checked : download->receiver.received;
+	uint32_t total = download->state == _client_checking ? download->resume_from : download->size;
+	unsigned long percent = total ? (unsigned long)((unsigned long long)done * 100 / total) : 0;
 
-	map_share_size_text(received_text, sizeof(received_text), download->receiver.received);
-	map_share_size_text(size_text, sizeof(size_text), download->size);
-	snprintf(text, sizeof(text), "Downloading %s from the host\n\n%s of %s (%lu%%)",
+	map_share_size_text(received_text, sizeof(received_text), done);
+	map_share_size_text(size_text, sizeof(size_text), total);
+	snprintf(text, sizeof(text), download->state == _client_checking ?
+		"Checking the part of %s downloaded before\n\n%s of %s (%lu%%)" :
+		"Downloading %s from the host\n\n%s of %s (%lu%%)",
 		download->name, received_text, size_text, percent);
 	platform_show_progress("Halo: custom map", text);
 
@@ -1123,6 +1913,81 @@ static boolean map_share_client_host(
 		origin == P2P_ORIGIN_ADHOC ? "in the ad hoc group" : "on the LAN");
 
 	return origin == P2P_ORIGIN_PUBLIC;
+}
+
+/* kept parts not taken up for MAP_SHARE_RESUME_KEEP_SECONDS (or whose
+record cannot be read), and .download files without a record (an older
+build's, or a run that stopped before writing one), deleted from the maps
+folder: once a run, before the first download */
+static void map_share_kept_parts_tidy(
+	void)
+{
+	static boolean tidied;
+	static char const *const extensions[] = { "*" RESUME_EXTENSION, "*" TEMPORARY_EXTENSION };
+	char names[16][MAP_SHARE_NAME_BYTES];
+	short name_count = 0;
+	unsigned long now = (unsigned long)time(NULL);
+	short index;
+
+	if (tidied)
+	{
+		return;
+	}
+	tidied = TRUE;
+	for (index = 0; index < NUMBEROF(extensions); index++)
+	{
+		char pattern[PATH_BYTES];
+		WIN32_FIND_DATAA data;
+		HANDLE find;
+
+		if (!map_share_path(pattern, "", extensions[index]) ||
+			(find = FindFirstFileA(pattern, &data)) == INVALID_HANDLE_VALUE)
+		{
+			continue;
+		}
+		do
+		{
+			char name[MAP_SHARE_NAME_BYTES];
+			char *dot = strrchr(data.cFileName, '.');
+			struct map_share_resume resume;
+			boolean stale;
+
+			if (!dot || dot - data.cFileName >= MAP_SHARE_NAME_BYTES || name_count >= NUMBEROF(names))
+			{
+				continue;
+			}
+			csmemcpy(name, data.cFileName, (size_t)(dot - data.cFileName));
+			name[dot - data.cFileName] = 0;
+			if (!map_share_name_valid(name))
+			{
+				continue;
+			}
+			if (index == 0)
+			{
+				stale = !map_share_resume_read(name, &resume) ||
+					(now > resume.saved_time && now - resume.saved_time > MAP_SHARE_RESUME_KEEP_SECONDS);
+			}
+			else
+			{
+				char path[PATH_BYTES];
+
+				stale = map_share_path(path, name, RESUME_EXTENSION) && !map_share_file_exists(path);
+			}
+			if (stale)
+			{
+				csstrncpy(names[name_count++], name, MAP_SHARE_NAME_BYTES - 1);
+			}
+		}
+		while (FindNextFileA(find, &data));
+		CloseHandle(find);
+	}
+	for (index = 0; index < name_count; index++)
+	{
+		network_event("map share: deleting the kept part of '%s' (old, or unreadable)", names[index]);
+		map_share_kept_part_delete(names[index]);
+	}
+
+	return;
 }
 
 /* ---------- public code: joiner */
@@ -1203,6 +2068,7 @@ boolean map_share_client_offer(
 		return FALSE;
 	}
 	map_share_client_reset();
+	map_share_kept_parts_tidy();
 	download->client = client;
 	csstrncpy(download->level_name, level_name, sizeof(download->level_name) - 1);
 	csstrncpy(download->name, name, MAP_SHARE_NAME_BYTES - 1);
@@ -1210,7 +2076,8 @@ boolean map_share_client_offer(
 	download->replacing = replacing;
 	csstrncpy(download->host_name, host_name, sizeof(download->host_name) - 1);
 	download->public_game = public_game;
-	if (!map_share_client_send(client, _map_share_command_query, _map_share_refusal_none, 0))
+	download->capabilities = map_share_client_capabilities();
+	if (!map_share_client_send(client, _map_share_command_query, (short)download->capabilities, 0))
 	{
 		csmemset(download, 0, sizeof(*download));
 		return FALSE;
@@ -1263,7 +2130,8 @@ void map_share_client_map_changed(
 		network_event("map share: the host changed maps; '%s' not downloaded", download->name);
 		if ((download->state == _client_starting || download->state == _client_receiving) && download->client)
 		{
-			map_share_client_send(download->client, _map_share_command_cancel, _map_share_refusal_cancelled, download->receiver.received);
+			map_share_client_send(download->client, _map_share_command_cancel, _map_share_refusal_cancelled,
+				download->receiver.stream_received);
 		}
 		map_share_client_reset();
 	}
@@ -1428,13 +2296,30 @@ boolean map_share_client_update(
 		break;
 	}
 
+	case _client_checking:
+		if (platform_progress_cancelled())
+		{
+			map_share_client_fail("Download cancelled.");
+			break;
+		}
+		map_share_client_read_back();
+		if (download->state == _client_checking && (!download->shown_time || now - download->shown_time >= PROGRESS_INTERVAL_MILLISECONDS))
+		{
+			download->shown_time = now;
+			map_share_client_show_progress();
+		}
+		break;
+
 	case _client_starting:
 	case _client_receiving:
 	{
-		unsigned long cancel_at = map_share_environment_number("HALO_MAP_SHARE_CANCEL_AT", 0);
+		/* (the tests' cut: once a run, so that a download continued goes on) */
+		static boolean cancelled_at;
+		unsigned long cancel_at = cancelled_at ? 0 : map_share_environment_number("HALO_MAP_SHARE_CANCEL_AT", 0);
 
 		if (platform_progress_cancelled() || (cancel_at && download->receiver.received >= cancel_at))
 		{
+			cancelled_at |= cancel_at != 0;
 			map_share_client_fail("Download cancelled.");
 		}
 		else if (now - download->progress_time > MAP_SHARE_STALL_MILLISECONDS)
@@ -1487,7 +2372,7 @@ void map_share_client_handle_answer(
 		/* (late: a download given up) */
 		return;
 	}
-	if (!map_share_answer_valid(&answer, download->name, download->identity))
+	if (!map_share_answer_valid(&answer, download->name, download->identity, download->capabilities))
 	{
 		map_share_client_fail("The host's answer about the map wasn't valid.");
 		return;
@@ -1531,11 +2416,22 @@ void map_share_client_handle_answer(
 			turn it on with the download) */
 			download->turn_on_pc_maps =
 				TEST_FLAG(download->flags, _map_share_offer_custom_edition_bit) && !halo_custom_edition_enabled();
+			/* (a kept part of this file, from an earlier download) */
+			download->resume_from = map_share_client_kept_part();
 			map_share_client_ask();
 		}
 		else if (download->state == _client_starting &&
-			(uint32_t)answer.size == download->size && answer.flags == download->flags)
+			(uint32_t)answer.size == download->size &&
+			(answer.flags | FLAG(_map_share_offer_deflate_bit)) == (download->flags | FLAG(_map_share_offer_deflate_bit)))
 		{
+			/* (deflated as offered, or the file's own bytes: a host short of
+			memory sends them) */
+			if (!TEST_FLAG(answer.flags, _map_share_offer_deflate_bit) && download->receiver.inflater)
+			{
+				network_event("map share: the host sends '%s' as it is", download->name);
+				map_share_receiver_start_stream(&download->receiver, FALSE);
+			}
+			download->flags = answer.flags;
 			download->state = _client_receiving;
 			download->progress_time = system_milliseconds();
 		}
@@ -1585,16 +2481,18 @@ void map_share_client_handle_data(
 		return;
 	}
 
-	status = map_share_receiver_accept(&download->receiver, data.offset, data.length, data.data);
+	status = map_share_receiver_accept(&download->receiver, data.offset, data.length, data.data,
+		map_share_client_write, download->file);
+	if (status == _map_share_chunk_write_failed)
+	{
+		map_share_client_fail_damaged("The map couldn't be written (is the memory card full?).");
+		return;
+	}
 	if (status != _map_share_chunk_ok)
 	{
 		network_event("map share: data at %ld (%d bytes) refused (%d)", (long)data.offset, (int)data.length, (int)status);
-		map_share_client_fail("The host sent the map out of order.");
-		return;
-	}
-	if (fwrite(data.data, 1, (size_t)data.length, download->file) != (size_t)data.length)
-	{
-		map_share_client_fail("The map couldn't be written (is the memory card full?).");
+		map_share_client_fail_damaged(status == _map_share_chunk_bad_stream ?
+			"The download was damaged (it doesn't inflate)." : "The host sent the map out of order.");
 		return;
 	}
 	download->progress_time = system_milliseconds();
@@ -1611,7 +2509,7 @@ void map_share_client_handle_data(
 		if (header_status == _map_share_header_ok &&
 			!custom_edition != !TEST_FLAG(download->flags, _map_share_offer_custom_edition_bit))
 		{
-			map_share_client_fail("The host's map isn't the kind of map it offered.");
+			map_share_client_fail_damaged("The host's map isn't the kind of map it offered.");
 			return;
 		}
 		if (header_status != _map_share_header_ok)
@@ -1620,14 +2518,21 @@ void map_share_client_handle_data(
 
 			snprintf(why, sizeof(why), "The host's map %s isn't a map this game can play (%s).",
 				download->name, map_share_header_status_describe(header_status));
-			map_share_client_fail(why);
+			map_share_client_fail_damaged(why);
 			return;
 		}
 	}
 	if (map_share_receiver_ack_due(&download->receiver))
 	{
-		download->receiver.acknowledged = download->receiver.received;
-		map_share_client_send(client, _map_share_command_ack, _map_share_refusal_none, download->receiver.received);
+		download->receiver.acknowledged = download->receiver.stream_received;
+		map_share_client_send(client, _map_share_command_ack, _map_share_refusal_none, download->receiver.stream_received);
+	}
+	/* (what is here written down now and then: a download cut off goes on
+	from there) */
+	if (download->receiver.received - download->saved >= MAP_SHARE_RESUME_SAVE_BYTES &&
+		download->receiver.received < download->size && !map_share_setting_off("HALO_MAP_SHARE_RESUME"))
+	{
+		map_share_client_save_resume();
 	}
 
 	return;
@@ -1691,7 +2596,7 @@ void map_share_server_handle_request(
 			}
 			upload->acknowledged = (uint32_t)request.offset;
 			upload->progress_time = system_milliseconds();
-			if (upload->done_sent && upload->acknowledged == upload->size)
+			if (upload->done_sent && upload->acknowledged == upload->sent)
 			{
 				network_event("map share: '%s' sent to a machine", name);
 				map_share_upload_close(upload);
@@ -1703,7 +2608,8 @@ void map_share_server_handle_request(
 		upload = map_share_upload_find(machine);
 		if (upload)
 		{
-			network_event("map share: a machine cancelled '%s' at %lu bytes", upload->name, (unsigned long)upload->acknowledged);
+			network_event("map share: a machine cancelled '%s' at %lu bytes", upload->name,
+				(unsigned long)map_share_upload_progress(upload));
 			map_share_upload_close(upload);
 		}
 		break;
@@ -1717,8 +2623,12 @@ void map_share_server_update(
 {
 	struct map_share_host *host = &map_share_host;
 	unsigned long now = system_milliseconds();
+	unsigned long long now_us = vita_host_time_us();
 	unsigned long rate = map_share_environment_number("HALO_MAP_SHARE_RATE_KB", MAP_SHARE_DEFAULT_BYTES_PER_SECOND / 1024) * 1024;
+	unsigned long cpu_percent = map_share_environment_number("HALO_MAP_SHARE_CPU_PERCENT", MAP_SHARE_DEFAULT_CPU_PERCENT);
 	boolean pregame = network_game_server_get_state(server, NULL) == _network_game_server_state_pregame;
+	unsigned long long until_us;
+	boolean sent;
 	short count;
 	short active = 0;
 
@@ -1730,6 +2640,9 @@ void map_share_server_update(
 	{
 		host->rate_time = now;
 		host->rate_budget = 0;
+		host->cpu_time = now_us;
+		host->cpu_allowance = MAXIMUM_CPU_ALLOWANCE_MICROSECONDS;
+		host->cpu_logged_time = 0;
 		return;
 	}
 	/* the rate, saved up to a few chunks */
@@ -1740,11 +2653,15 @@ void map_share_server_update(
 		host->rate_budget += (unsigned long)((unsigned long long)rate * MIN(elapsed, 1000UL) / 1000);
 		host->rate_budget = MIN(host->rate_budget, MAX(MAXIMUM_RATE_BURST_BYTES, rate / 30));
 	}
+	/* the CPU's share (of the time since the last look) */
+	host->cpu_allowance += (now_us - host->cpu_time) * cpu_percent / 100;
+	host->cpu_allowance = MIN(host->cpu_allowance, (unsigned long long)MAXIMUM_CPU_ALLOWANCE_MICROSECONDS);
+	host->cpu_time = now_us;
+	until_us = now_us + host->cpu_allowance;
 
-	/* (in turn, starting where the last frame's rate ran out) */
 	for (count = 0; count < MAP_SHARE_MAXIMUM_UPLOADS; count++)
 	{
-		struct map_share_upload *upload = &host->uploads[(host->next_upload + count) % MAP_SHARE_MAXIMUM_UPLOADS];
+		struct map_share_upload *upload = &host->uploads[count];
 
 		if (!upload->active)
 		{
@@ -1774,14 +2691,83 @@ void map_share_server_update(
 		{
 			upload->logged_time = now;
 			network_event("map share: machine #%d is downloading '%s' (%d%%)", (int)upload->machine_index,
-				upload->name, (int)(upload->size ? (unsigned long long)upload->acknowledged * 100 / upload->size : 0));
+				upload->name, (int)(upload->size ? (unsigned long long)map_share_upload_progress(upload) * 100 / upload->size : 0));
 		}
-		if (!map_share_upload_send(server, upload))
+		map_share_upload_level(upload, now);
+		upload->frames++;
+		upload->cpu_held = FALSE;
+	}
+
+	/* a message each in turn (starting with the next upload each frame),
+	while the windows, the rate and the frame's share of the CPU allow */
+	do
+	{
+		sent = FALSE;
+		for (count = 0; count < MAP_SHARE_MAXIMUM_UPLOADS; count++)
+		{
+			struct map_share_upload *upload = &host->uploads[(host->next_upload + count) % MAP_SHARE_MAXIMUM_UPLOADS];
+
+			if (!map_share_upload_may_send(upload))
+			{
+				continue;
+			}
+			if (vita_host_time_us() >= until_us)
+			{
+				upload->cpu_held = TRUE;
+				continue;
+			}
+			if (!map_share_upload_send(server, upload))
+			{
+				map_share_upload_close(upload);
+				continue;
+			}
+			sent = TRUE;
+		}
+	}
+	while (sent);
+	host->next_upload = (short)((host->next_upload + 1) % MAP_SHARE_MAXIMUM_UPLOADS);
+
+	/* the hashes behind (resumed uploads), then the done */
+	for (count = 0; count < MAP_SHARE_MAXIMUM_UPLOADS; count++)
+	{
+		struct map_share_upload *upload = &host->uploads[count];
+
+		if (!upload->active)
+		{
+			continue;
+		}
+		upload->cpu_held_frames += upload->cpu_held;
+		if (!map_share_upload_hash(upload, until_us))
+		{
+			network_event("map share: '%s' could not be read to hash it", upload->name);
+			map_share_server_refuse(server, upload->machine, upload->name, _map_share_refusal_read_failed);
+			map_share_upload_close(upload);
+			continue;
+		}
+		if (!map_share_upload_finish(server, upload))
 		{
 			map_share_upload_close(upload);
 		}
 	}
-	host->next_upload = (short)((host->next_upload + 1) % MAP_SHARE_MAXIMUM_UPLOADS);
+	/* (what the uploads took of it) */
+	{
+		unsigned long long used = vita_host_time_us() - now_us;
+
+		host->cpu_allowance -= MIN(used, host->cpu_allowance);
+		host->cpu_used += used;
+		host->cpu_used_most = MAX(host->cpu_used_most, used);
+		if (now - host->cpu_logged_time >= 5000)
+		{
+			if (host->cpu_logged_time)
+			{
+				network_event("map share: the uploads took %lu ms of the CPU in %lu ms (%lu ms at most in a frame)",
+					(unsigned long)(host->cpu_used / 1000), now - host->cpu_logged_time,
+					(unsigned long)(host->cpu_used_most / 1000));
+			}
+			host->cpu_logged_time = now;
+			host->cpu_used = host->cpu_used_most = 0;
+		}
+	}
 
 	return;
 }
@@ -1797,7 +2783,7 @@ short map_share_server_machine_percent(
 
 		if (upload->active && upload->machine_index == machine_index && upload->size)
 		{
-			return (short)((unsigned long long)upload->acknowledged * 100 / upload->size);
+			return (short)((unsigned long long)map_share_upload_progress(upload) * 100 / upload->size);
 		}
 	}
 

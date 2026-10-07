@@ -155,7 +155,8 @@ and links to no downloads.
 Only the host needs the custom map: a Vita that joins without it is asked
 whether to download it from the host in the lobby (and, for a Custom
 Edition map, to turn PC maps on). A joiner still needs its own three
-resource maps. The host waits for the download before the game starts.
+resource maps. The host waits for the download before the game starts, and
+a download that stops goes on from where it stopped the next time.
 Big Custom Edition maps can be slow on the Vita or too large for its memory.
 The question names the host; in a game joined from the public lobby it also
 warns that the host is a stranger: only accept maps from players you trust.

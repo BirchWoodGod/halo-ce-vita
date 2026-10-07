@@ -80,6 +80,10 @@ void network_connection_set_connection_rejection_procedure(
 	network_connection_rejection_procedure connection_rejection_procedure);
 boolean network_connection_active(
 	struct network_connection *connection);
+/* port: the bytes waiting in the connection's outgoing reliable queue, which
+its stream has not taken yet (map sharing keeps it short) */
+long network_connection_reliable_queued_bytes(
+	struct network_connection *connection);
 boolean network_connection_going_stale(
 	struct network_connection *connection);
 void network_connection_keep_alive(
