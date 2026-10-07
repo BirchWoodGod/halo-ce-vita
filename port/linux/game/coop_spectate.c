@@ -281,7 +281,12 @@ void coop_skip_vote_draw(
 	if (voted)
 		usnprintf(text, NUMBEROF(text) - 1, L"VOTED TO SKIP   %d OF %d", votes, voters);
 	else
+#ifdef HALO_VITA
+		/* (the Vita skips a cutscene with START: player_control.c) */
+		usnprintf(text, NUMBEROF(text) - 1, L"PRESS START TO VOTE TO SKIP   %d OF %d", votes, voters);
+#else
 		usnprintf(text, NUMBEROF(text) - 1, L"PRESS SPACE OR A TO VOTE TO SKIP   %d OF %d", votes, voters);
+#endif
 	text[NUMBEROF(text) - 1] = 0;
 	draw_bottom_text(text);
 }
