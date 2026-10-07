@@ -454,7 +454,9 @@ static void broker_send(struct broker *broker, unsigned char type, const unsigne
 		return;
 	}
 	memcpy(broker->output + broker->output_size, header, (size_t)header_size);
-	memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
+	/* (a PINGREQ has no body: NULL) */
+	if (size > 0)
+		memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
 	broker->output_size += header_size + size;
 	broker->sent_time = p2p_now();
 	broker_flush(broker);
