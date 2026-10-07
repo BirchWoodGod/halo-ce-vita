@@ -669,6 +669,9 @@ typedef char screenshot_and_framerate_globals_size_assert[
 
 #ifdef HALO_LINUX
 void network_test_update(boolean main_menu_loaded, real seconds);
+/* the Vita settings panel's Host a game and Join a game
+(port/linux/game/system_link_shortcut.c) */
+void system_link_shortcut_update(boolean main_menu_loaded);
 #endif
 
 /* ---------- prototypes */
@@ -4246,6 +4249,7 @@ void main_loop(
 #ifdef HALO_LINUX
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			system_link_shortcut_update(main_globals.main_menu_scenario_loaded);
 			MAIN_SPLIT(_main_split_input);
 #endif
 			connection = main_globals.connection;

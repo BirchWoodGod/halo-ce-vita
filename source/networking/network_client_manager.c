@@ -3246,6 +3246,28 @@ boolean network_game_client_join_first_available_game(
 	return FALSE;
 }
 
+/* port: the games the System Link list shows now (valid, of this
+platform), for the Vita settings panel's Multiplayer tab
+(port/linux/game/system_link_shortcut.c); 0 without a client searching */
+short network_game_client_listed_game_count(
+	void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	short count = 0;
+	long game_index;
+
+	if (!client || client->state != _network_game_client_state_searching)
+		return 0;
+	for (game_index = 0; game_index < MAXIMUM_NETWORK_ADVERTISED_GAMES; game_index++)
+	{
+		struct network_advertised_game *game = &client->available_games[game_index];
+
+		if (network_game_client_advertised_game_is_valid(game) && game->platform == network_game_get_local_platform())
+			count++;
+	}
+	return count;
+}
+
 /* ... and puts this machine's players on a team (a team game needs both
 teams), as the pregame screen's team choice does; NONE: the other team from
 another machine's player */

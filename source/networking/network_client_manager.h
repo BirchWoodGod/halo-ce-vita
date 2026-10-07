@@ -37,6 +37,8 @@ short network_game_client_get_state(
 	short *state_data);
 boolean network_game_client_join_first_available_game(
 	void);
+short network_game_client_listed_game_count(
+	void);
 boolean network_game_client_set_team(
 	char team_index);
 /* whether the advertised game's host has this machine's network version
