@@ -1514,6 +1514,19 @@ void map_share_client_handle_answer(
 		{
 			download->size = (uint32_t)answer.size;
 			download->flags = answer.flags;
+			/* (an OpenSauce map, .yelo: more for the loader to trust than a
+			plain map, so never from a stranger's game - the owner's choice;
+			a code's, Wi-Fi's or ad hoc's game still offers it) */
+			if (download->public_game && TEST_FLAG(download->flags, _map_share_offer_yelo_bit))
+			{
+				char why[320];
+
+				snprintf(why, sizeof(why), "The host's map %s is an OpenSauce map (.yelo), which isn't downloaded "
+					"from public games. Join with the host's code, or copy the map to your maps folder.",
+					download->name);
+				map_share_client_fail(why);
+				break;
+			}
 			/* (a Custom Edition map with PC maps off: the question asks to
 			turn it on with the download) */
 			download->turn_on_pc_maps =
