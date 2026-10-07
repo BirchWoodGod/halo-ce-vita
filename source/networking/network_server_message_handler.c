@@ -263,6 +263,7 @@ symbols in this file:
 #include "networking/network_server_message_handler.h"
 #include "text/unicode.h"
 #include "map_share.h"
+#include "main/main.h"
 /* system_milliseconds(), for the settings update interval */
 #include "cseries/cseries_windows.h"
 
@@ -1685,6 +1686,12 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			/* (Vitas play only Vitas: halo_port_limits.h) */
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_VITA_FLAG;
 #endif
+			/* (co-op: the lists show the level and its difficulty) */
+			if (game->variant.game_engine_index == 0 && main_get_solo_level_from_name(game->map.name) != NONE)
+			{
+				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_COOP_FLAG;
+				advertisement.reserved[HALO_PORT_ADVERTISED_COOP_DIFFICULTY_OFFSET] = (byte)PIN(game->difficulty, 0, 3);
+			}
 			/* (open to joins: not while the machines load the game, nor
 			once it is over, nor in progress when no player can join it) */
 			if (network_game_server_get_state(server, NULL) == _network_game_server_state_ingame

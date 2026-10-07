@@ -1006,14 +1006,39 @@ static void server_list_menu_update(
 			item && item_index < displayed_server_count;
 			item = item->next, item_index++)
 		{
+			/* (port: room for a co-op game's "<host>: <level> (<difficulty>)") */
 			item->parameters.text_box.text = ui_widget_realloc(
 				item->parameters.text_box.text,
-				0x40,
+				0x80,
 				"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
 				0x2C5);
 			if (item->parameters.text_box.text)
 			{
-				if (displayed_servers[item_index]->open == TRUE)
+				short difficulty;
+
+				/* port: a co-op game, by its level and difficulty */
+				if (network_game_client_advertised_game_cooperative(displayed_servers[item_index], &difficulty))
+				{
+					wchar_t description[0x40];
+
+					coop_menu_game_description(displayed_servers[item_index]->game_name,
+						displayed_servers[item_index]->map_name, difficulty, description, NUMBEROF(description));
+					if (displayed_servers[item_index]->open == TRUE)
+						ustrncpy(item->parameters.text_box.text, description, 0x3F);
+					else
+					{
+						usnprintf(item->parameters.text_box.text, 0x3F, L"%s %s",
+							unicode_string_list_get_string(tag_loaded(UNICODE_STRING_LIST_TAG, "ui\\multiplayer_game_text"),
+								19), description);
+					}
+					item->parameters.text_box.text[0x3F] = 0;
+					/* (the list's box shows about 190 of the font's pixels beside
+					the description: a longer one scrolls along while selected, and
+					is cut short with "..." else) */
+					coop_menu_fit_line(item->parameters.text_box.text, 190, item,
+						item_index == widget->parameters.list.selected_list_item_index);
+				}
+				else if (displayed_servers[item_index]->open == TRUE)
 				{
 					ustrncpy(
 						item->parameters.text_box.text,
@@ -1285,6 +1310,33 @@ static void server_list_menu_update(
 
 				message_text->parameters.text_box.string_list_index = 2;
 				message_text->visible = FALSE;
+
+				/* port: a co-op game: its level, and co-op on its difficulty,
+				in place of a multiplayer map and game type */
+				{
+					short difficulty;
+
+					if (network_game_client_advertised_game_cooperative(server, &difficulty))
+					{
+						wchar_t text[48];
+						wchar_t difficulty_name[16];
+
+						coop_menu_level_name(map_name, text, NUMBEROF(text));
+						ui_widget_port_text_override(map_name_text, text);
+						coop_menu_difficulty_name(difficulty, difficulty_name, NUMBEROF(difficulty_name));
+						usnprintf(text, NUMBEROF(text), L"Co-op, %s", difficulty_name);
+						text[NUMBEROF(text) - 1] = 0;
+						ui_widget_port_text_override(ruleset_text, text);
+						ui_widget_port_text_override(teams_text, L"Campaign");
+						score_limit_text->visible = FALSE;
+						score_limit_type_text->visible = FALSE;
+					}
+					else
+					{
+						score_limit_text->visible = TRUE;
+						score_limit_type_text->visible = TRUE;
+					}
+				}
 
 				if (!widget->focused_child)
 				{
