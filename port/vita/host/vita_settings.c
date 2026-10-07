@@ -1535,9 +1535,10 @@ Host a game and Join a game: Cross for A) */
 
 static int playstation_terms(void)
 {
-	const struct setting *icons = setting_named("HALO_BUTTON_ICONS");
-
-	return icons && !strcmp(icons->values[icons->choice], "playstation");
+	/* (the owner's choice: the Button icons change the game's icons only;
+	the panel keeps the Xbox controller's names, A B X Y, Black, White ...,
+	with either) */
+	return 0;
 }
 
 /* the Xbox buttons by what they do (VITA_XBOX_*'s order) */

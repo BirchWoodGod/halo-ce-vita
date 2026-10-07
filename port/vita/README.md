@@ -221,10 +221,9 @@ PlayStation's own colours (Cross blue, Circle red, Square pink, Triangle
 green); L, R, START, SELECT, the D-pad ("D-pad down") and the
 touch zones ("rear touch left") are words in the game's font. An Xbox
 button on no Vita button and no zone keeps its Xbox icon; so do the
-sticks' icons (move, look). The panel then names the Button layout's rows
-and the touch zones' choices by what each does in Halo's default controller
-layout (Jump, Melee, Action, reload, Switch weapon...) and the Host / Join
-steps by the Vita's buttons.
+sticks' icons (move, look). The settings panel keeps the Xbox controller's
+names (A, B, X, Y, Black, White ...) with either setting: the Button icons
+change the game's icons only.
 
 The Touch zones page draws the front screen and the rear pad beside the
 rows: the chosen row's zone blue (dark blue while Off), the zones set to an

@@ -189,10 +189,11 @@ makes each zone press an Xbox button. **Button icons**, the first row of
 Button layout, is Xbox by default: the game's own Xbox button icons. With
 **PlayStation** every button prompt (the HUD's "Press X to...", the menus'
 button hints) shows the Vita button that does it now instead: Cross, Circle,
-Square and Triangle drawn in the Xbox icons' place and colours, L, R, Start,
-Select, the D-pad and the touch zones by name. It follows your Button layout
-and touch zones (in the menus their fixed layout), applies at once, and the
-panel then names the Xbox buttons by what they do (Jump, Melee, Action...).
+Square and Triangle drawn in the Xbox icons' place in the PlayStation's
+colours, L, R, Start, Select, the D-pad and the touch zones by name. It
+follows your Button layout and touch zones (in the menus their fixed layout)
+and applies at once. The settings panel keeps the Xbox controller's names
+(A, B, X, Y, Black, White ...) either way.
 The zones, all Off until set:
 
 | Zone | Where |

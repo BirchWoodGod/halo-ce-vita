@@ -1017,48 +1017,41 @@ static void test_button_icons(void)
 		strstr(menu, "\nButton icons\x02< PlayStation  "),
 		"Button icons PlayStation: in the environment and settings.txt at once, read again (no restart)");
 	check(!strstr(menu, "Button icons*"), "Button icons: live, no *");
-	check(strstr(menu, "\nJump\x02  Cross >") && strstr(menu, "\nMelee\x02") && strstr(menu, "\nAction, reload\x02") &&
-		strstr(menu, "\nSwitch weapon\x02") && strstr(menu, "\nSwitch grenades\x02< D-pad left >") &&
-		strstr(menu, "\nFlashlight\x02") && strstr(menu, "\nThrow grenade\x02< L >") && strstr(menu, "\nFire\x02") &&
-		strstr(menu, "\nCrouch\x02") && strstr(menu, "\nZoom\x02") && strstr(menu, "\nScoreboard\x02") &&
-		!strstr(menu, "\nA\x02") && !strstr(menu, "\nBlack\x02") && !strstr(menu, "\nLeft trigger\x02") &&
-		menu_rows() == 12 && menu_fits(), "PlayStation: the Button layout's rows by what they do, no Xbox name, each fits");
-	to_line("Jump");
-	check(strstr(menu, "\n\x05Jump (in the menus Cross stays Accept)\n") != NULL, "PlayStation: a row's help by its action");
-	/* a remap: the row moves, the game's icon follows (vita_controls.c) */
-	to_line("Action, reload");
+	/* (the panel keeps the Xbox controller's names with either: the icons
+	change in the game only) */
+	check(strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") && !strstr(menu, "\nJump\x02") &&
+		menu_rows() == 12 && menu_fits(), "PlayStation: the Button layout's rows keep the Xbox's names, each fits");
+	/* a remap: the game's icon follows (vita_controls.c) */
+	to_line("X");
 	press(VITA_BUTTON_RIGHT);
 	vita_controls_config_load(&config);
-	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nAction, reload\x02< Triangle >") &&
+	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nX\x02< Triangle >") &&
 		vita_button_glyph(&config, 2, 0) == VITA_GLYPH_TRIANGLE && vita_button_glyph(&config, 2, 1) == VITA_GLYPH_SQUARE,
-		"Action on Triangle: the game's X icon shows Triangle in play (Square in the menus)");
+		"X on Triangle: the game's X icon shows Triangle in play (Square in the menus)");
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "Which Vita button each action is on"),
-		"back on Controls: Button icons is not the layout (As shipped); the row's help in actions");
+	check(strstr(menu, "\nButton layout\x02  As shipped  >") != NULL,
+		"back on Controls: Button icons is not the layout (As shipped)");
 	check(strstr(menu, "\nCrouch\x02") != NULL, "Controls: Crouch keeps its label");
-	to_line("Crouch");
-	check(strstr(menu, "\n\x05" "A press crouches, the next stands (Toggle)\n") != NULL, "Crouch's help: no stick click");
 
-	/* the touch zones by action, the diagram in their short names */
+	/* the touch zones: the Xbox's names too */
 	check(open_page("Touch zones") && to_line("Rear touch left"), "Touch zones opens");
 	press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< Jump >") &&
-		!strcmp(diagram, "----S- AAAABA") && menu_fits(), "PlayStation: a zone's choice by its action, the diagram's in capitals");
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< A >") && menu_fits(),
+		"PlayStation: a zone's choice keeps the Xbox's name");
 	vita_controls_config_load(&config);
 	check(vita_button_glyph(&config, 0, 0) == VITA_GLYPH_CROSS, "A on Cross and a zone: Cross shows");
 	press(VITA_BUTTON_LEFT);
 	to_tab("Controls");
 
-	/* the guide's steps in the Vita's buttons */
+	/* the guide's steps: the menus' Xbox buttons, and which Vita button each is */
 	to_tab("Multiplayer");
 	to_line("Host a game");
 	press(VITA_BUTTON_CROSS);
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "Cross to join if asked, Cross on a profile,\n  Cross again") &&
-		strstr(menu, "SYSTEM LINK GAMES: Triangle creates a game") && strstr(menu, "Cross on a map, Cross on a game type") &&
-		!strstr(menu, "Menus: A Cross") && menu_fits(), "PlayStation: Host a game's steps name Cross and Triangle");
+	check(strstr(menu, "SYSTEM LINK GAMES: Y creates a game") && strstr(menu, "Menus: A Cross") && menu_fits(),
+		"PlayStation: Host a game's steps keep the Xbox's buttons");
 	press(VITA_BUTTON_CIRCLE);
 
 	/* Reset controls keeps it; Xbox again puts the Xbox's terms back */
