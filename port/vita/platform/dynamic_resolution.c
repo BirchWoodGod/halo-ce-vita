@@ -38,6 +38,8 @@ void dynres_controller_init(struct dynres_controller *controller, int floor, int
 	controller->failed_level = 0;
 	controller->failed_age_ms = 0.0f;
 	controller->changes = 0;
+	controller->smoothed_gpu_ms = 0.0f;
+	controller->smoothed_level = 0;
 	dynres_controller_limits(controller, floor, ceiling, budget_ms);
 }
 
@@ -61,6 +63,15 @@ int dynres_controller_frame(struct dynres_controller *controller, float gpu_ms, 
 	/* (drawn at another scale: the GPU runs a frame or two behind) */
 	if (frame_level != level || gpu_ms <= 0.0f)
 		return level;
+	/* (the GPU time smoothed over about a second, for the size of a step up;
+	a frame of a new level starts it again) */
+	if (controller->smoothed_level != level || controller->smoothed_gpu_ms <= 0.0f)
+	{
+		controller->smoothed_level = level;
+		controller->smoothed_gpu_ms = gpu_ms;
+	}
+	else
+		controller->smoothed_gpu_ms += (gpu_ms - controller->smoothed_gpu_ms) * 0.05f;
 	if (gpu_ms > budget * DYNRES_HIGH && tail_ms >= gpu_ms * 0.2f)
 		controller->slow_frames++;
 	else
@@ -85,21 +96,42 @@ int dynres_controller_frame(struct dynres_controller *controller, float gpu_ms, 
 		}
 		return controller->level;
 	}
+	/* Up: the step above has to fit within the room for a while. A frame
+	that does not (a spike, an explosion) takes back three times its own
+	time rather than starting the wait again: on the Vita a spike came every
+	second or so in a fight, and a scale that went down climbed one step a
+	minute. With room for more, up to DYNRES_MAXIMUM_RISE steps at once, as
+	the pixels say (from the smoothed GPU time), never onto the step the
+	budget was last broken at before its longer hold. */
 	if (level < controller->ceiling &&
 		gpu_ms * (float)(level + 1) * (float)(level + 1) / ((float)level * (float)level) < budget * DYNRES_ROOM)
 	{
-		float hold = controller->failed_level && level + 1 >= controller->failed_level ? DYNRES_HOLD_FAILED_MS :
-			DYNRES_HOLD_MS;
-
 		controller->headroom_ms += interval_ms;
+	}
+	else
+	{
+		controller->headroom_ms -= 3.0f * interval_ms;
+		if (controller->headroom_ms < 0.0f)
+			controller->headroom_ms = 0.0f;
+	}
+	if (level < controller->ceiling)
+	{
+		int failed_near = controller->failed_level && level + 1 >= controller->failed_level;
+		float hold = failed_near ? DYNRES_HOLD_FAILED_MS : DYNRES_HOLD_MS;
+
 		if (controller->headroom_ms >= hold)
 		{
+			float smoothed = controller->smoothed_gpu_ms > 0.0f ? controller->smoothed_gpu_ms : gpu_ms;
+			int next = level + 1;
+
+			while (next < controller->ceiling && next + 1 - level <= DYNRES_MAXIMUM_RISE &&
+				(!controller->failed_level || next + 1 < controller->failed_level) &&
+				smoothed * (float)(next + 1) * (float)(next + 1) / ((float)level * (float)level) < budget * DYNRES_ROOM)
+				next++;
 			controller->headroom_ms = 0.0f;
-			controller->level = level + 1;
+			controller->level = next;
 			controller->changes++;
 		}
 	}
-	else
-		controller->headroom_ms = 0.0f;
 	return controller->level;
 }

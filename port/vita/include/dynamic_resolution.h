@@ -10,10 +10,12 @@ Down fast: two frames in a row over the high mark (92% of the frame budget,
 33.3 ms at 30 FPS), the GPU being what ended them late (its tail after the
 last submission at least a fifth of its time), and the scale drops by as
 many steps as the pixel count says bring the frame to 85% of the budget (1
-to 4 steps at once). Up slowly: the next step up has to fit within 80% of
-the budget (the GPU time taken as growing with the pixels, which
-overestimates the growth) for 1.5 s in a row, and 5 s when that step is
-where the budget was last broken (in the last 20 s). Frames measured at
+to 4 steps at once). Up more slowly: the next step up has to fit within 80%
+of the budget (the GPU time taken as growing with the pixels, which
+overestimates the growth) for 1 s, a frame that does not fit taking back
+three times its time, and 5 s when that step is where the budget was last
+broken (in the last 20 s); then up to 3 steps at once, as many as fit by
+the smoothed GPU time. Frames measured at
 another scale than the current (the GPU runs behind) are not counted.
 */
 
@@ -37,6 +39,9 @@ struct dynres_controller
 	long ago */
 	int failed_level;
 	float failed_age_ms;
+	/* the GPU time smoothed, and the level it was measured at */
+	float smoothed_gpu_ms;
+	int smoothed_level;
 	/* changes made (for the log) */
 	unsigned long changes;
 };
@@ -46,12 +51,13 @@ for, and the one a step up has to fit within */
 #define DYNRES_HIGH 0.92f
 #define DYNRES_AIM 0.85f
 #define DYNRES_ROOM 0.80f
-/* the most steps down at once */
+/* the most steps down, and up, at once */
 #define DYNRES_MAXIMUM_DROP 4
+#define DYNRES_MAXIMUM_RISE 3
 /* frames over the high mark in a row before a step down */
 #define DYNRES_SLOW_FRAMES 2
 /* the time a step up has to fit for, and after a broken budget there */
-#define DYNRES_HOLD_MS 1500.0f
+#define DYNRES_HOLD_MS 1000.0f
 #define DYNRES_HOLD_FAILED_MS 5000.0f
 #define DYNRES_FAILED_MEMORY_MS 20000.0f
 

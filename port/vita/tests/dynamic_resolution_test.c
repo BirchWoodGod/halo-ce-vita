@@ -122,10 +122,29 @@ int main(void)
 	/* ---------- the fight ends: a light scene, 16 ms at 100% */
 	run_reset(&run, &controller);
 	simulate(&controller, &run, 30 * 2, 0.0f, 16.0f, 0.05f, 0.8f, 20.0f);
-	check(controller.level <= level_settled + 2, "up slowly: at most 2 steps in 2 s");
-	simulate(&controller, &run, 30 * 40, 0.0f, 16.0f, 0.05f, 0.8f, 20.0f);
-	printf("  light scene: %d/32 after 42 s\n", controller.level);
-	check(controller.level == 32, "the light scene climbs back to the ceiling");
+	check(controller.level <= level_settled + 6, "up more slowly than down: at most 6 steps in 2 s");
+	simulate(&controller, &run, 30 * 6, 0.0f, 16.0f, 0.05f, 0.8f, 20.0f);
+	printf("  light scene: %d/32 after 8 s\n", controller.level);
+	check(controller.level == 32, "the light scene climbs back to the ceiling within 8 s");
+
+	/* ---------- a spiky scene at the floor (the Vita, Oct 6: 17.7 ms at 50%
+	with a spike about once a second, a step up a minute) */
+	dynres_controller_init(&controller, 16, 32, budget);
+	controller.level = 16;
+	run_reset(&run, &controller);
+	for (frame = 0; frame < 30 * 15; frame++)
+	{
+		int level = run.drawn[0];
+		float scale = (float)level / DYNRES_UNITS;
+		float gpu = (4.0f + 50.0f * scale * scale) * (frame % 30 == 0 ? 2.5f : 1.0f);
+		int after = dynres_controller_frame(&controller, gpu, gpu * 0.8f, level, gpu > 20.0f ? gpu : 20.0f);
+
+		run.drawn[0] = run.drawn[1];
+		run.drawn[1] = run.drawn[2];
+		run.drawn[2] = after;
+	}
+	printf("  spiky scene from the floor: %d/32 after 15 s\n", controller.level);
+	check(controller.level >= 19, "a spike a second does not keep the scale at the floor");
 
 	/* ---------- CPU-bound: the GPU idle most of a 55 ms frame */
 	dynres_controller_init(&controller, 16, 32, budget);
