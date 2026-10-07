@@ -947,6 +947,7 @@ static short device_group_find(
 	{
 		group_index = entry->group_index;
 		return group_index >= 0 && group_index < global_scenario_get()->device_groups.count &&
+			group_index < MAXIMUM_DEVICE_GROUPS &&
 			device_group_network_get(group_index, &value, &flags, &runtime) && !runtime ? group_index : NONE;
 	}
 	device_index = object_find(entry->name_index, entry->object_index, entry->definition_index, _object_mask_device);
@@ -1937,7 +1938,10 @@ static void client_apply_player_effect(
 	switch (event->type)
 	{
 	case _coop_player_effect_translation:
-		scripted_player_effect_set_translation(reals[0], reals[1], reals[2]);
+		/* (the camera's shake, which moves it no further than an observer
+		accepts: OpenCE's) */
+		scripted_player_effect_set_translation(PIN(reals[0], -CAMERA_WORLD_BOUND, CAMERA_WORLD_BOUND),
+			PIN(reals[1], -CAMERA_WORLD_BOUND, CAMERA_WORLD_BOUND), PIN(reals[2], -CAMERA_WORLD_BOUND, CAMERA_WORLD_BOUND));
 		break;
 	case _coop_player_effect_rotation:
 		scripted_player_effect_set_rotation(reals[0], reals[1], reals[2]);
@@ -2120,7 +2124,10 @@ static void client_apply_attach(
 	struct distributed_coop_event const *event)
 {
 	long parent_index = object_find(event->name_index, event->object_index, event->definition_index, _object_mask_all);
-	long child_index = object_find((short)event->reals[0], event->target, event->tag_index, _object_mask_all);
+	/* (a name index as a number from the host: within a short's range, not a
+	conversion's undefined result; OpenCE's) */
+	long child_index = object_find((short)PIN(event->reals[0], -1.0f, 32767.0f), event->target, event->tag_index,
+		_object_mask_all);
 	long ancestor_index;
 
 	if (parent_index == NONE || child_index == NONE || parent_index == child_index)
@@ -3144,7 +3151,16 @@ void network_coop_note_player_structure_bsp(
 boolean network_coop_player_has_structure_bsp(
 	long player_index)
 {
-	return !network_coop_active() || player_get(player_index)->local_player_index != NONE ||
+	struct player_datum *player;
+
+	if (!network_coop_active())
+		return TRUE;
+	/* (no player, or none of the tracked: whose BSP is not known, which
+	does not keep their predictions out: OpenCE's) */
+	player = player_index != NONE ? player_try_and_get(player_index) : NULL;
+	if (!player || DATUM_INDEX_TO_ABSOLUTE_INDEX(player_index) >= MAXIMUM_TRACKED_PLAYERS)
+		return TRUE;
+	return player->local_player_index != NONE ||
 		host_player_structure_bsps[DATUM_INDEX_TO_ABSOLUTE_INDEX(player_index)] == global_structure_bsp_index_get();
 }
 

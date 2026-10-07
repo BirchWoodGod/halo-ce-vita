@@ -427,6 +427,12 @@ enum
 	long as the host waits for a silent machine, network_server_manager.c):
 	network_game_client_network_lost */
 	NETWORK_GAME_CLIENT_LINK_DOWN_TIMEOUT = 15000,
+	/* port: how long a frame the client spends on the messages that came
+	(a host that floods it with them would hold each frame for as long as
+	they took): those left wait in the queue, in order, for the next
+	frame's, and the stream what the queue has no room for. One is always
+	handled (network_game_client_process_messages; OpenCE's) */
+	MAXIMUM_MESSAGE_MILLISECONDS_PER_IDLE = 50,
 };
 
 enum network_game_client_state
@@ -761,6 +767,9 @@ static boolean add_advertised_game(
 	struct message_server_game_advertise *advertisement);
 static boolean network_game_client_process_incoming_messages(
 	struct network_game_client *client);
+static boolean network_game_client_process_messages(
+	struct network_game_client *client,
+	boolean budgeted);
 static boolean network_game_client_process_last_messages(
 	struct network_game_client *client);
 static void network_game_client_update_precache_status(
@@ -768,6 +777,8 @@ static void network_game_client_update_precache_status(
 static boolean network_game_client_map_name_is_valid(
 	char const *map_name,
 	long size);
+static boolean network_game_client_game_record_is_valid(
+	struct network_game *game);
 static boolean network_game_client_idle_searching(
 	struct network_game_client *client);
 static boolean network_game_client_idle_joining(
@@ -1420,11 +1431,22 @@ boolean network_game_client_game_settings_updated(
 		message_packet->machine_count <= MAXIMUM_NETWORK_MACHINE_COUNT &&
 		message_packet->player_count >= 0 &&
 		message_packet->player_count <= MAXIMUM_NUMBER_OF_PLAYERS &&
+		/* port: and the most players, which caps player_count as players are
+		added (network_game_add_player; OpenCE's) */
+		message_packet->maximum_players > 0 &&
+		message_packet->maximum_players <= MAXIMUM_NUMBER_OF_PLAYERS &&
 		network_game_client_map_name_is_valid(message_packet->map.name, sizeof(message_packet->map.name)) &&
 		VALID_INDEX(message_packet->difficulty, NUMBER_OF_GAME_DIFFICULTY_LEVELS))
 	{
 		struct network_game previous_game;
 
+		/* port: the record's players: no two the same machine's same
+		controller, no machine with more than its local players (OpenCE's) */
+		if (!network_game_client_game_record_is_valid(message_packet))
+		{
+			network_event("invalid message_server_game_settings_update message received: its players");
+			return FALSE;
+		}
 #ifdef HALO_LINUX
 		/* (the host's map name - a tag path with backslashes, such as the
 		Blood Gulch scenario's - is ended here, and one that climbs out of
@@ -1434,6 +1456,19 @@ boolean network_game_client_game_settings_updated(
 		if (strstr(message_packet->map.name, ".."))
 		{
 			return FALSE;
+		}
+		/* port: the game's, the machines' and the players' names come from
+		the host as it sends them, and need not end nor be text that draws:
+		kept to what does (as the host keeps the names joiners send it:
+		player_name_clean; a name already clean is left as it is) */
+		{
+			long index;
+
+			player_name_clean(message_packet->name, NUMBEROF(message_packet->name));
+			for (index = 0; index < (long)NUMBEROF(message_packet->machines); index++)
+				player_name_clean(message_packet->machines[index].name, NUMBEROF(message_packet->machines[index].name));
+			for (index = 0; index < (long)NUMBEROF(message_packet->players); index++)
+				player_name_clean(message_packet->players[index].name, NUMBEROF(message_packet->players[index].name));
 		}
 #endif
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
@@ -1781,7 +1816,13 @@ boolean network_game_client_handle_game_update(
 	/* (the host's time at the start, and a game in progress's past 16 bits
 	of ticks: the host's whole time, if it is ahead; never back, which the
 	host would take for old messages) */
-	if (network_game_client_late_join_clock_pending)
+	/* port: and never one the game's arithmetic on its time (a second more,
+	a time limit) could take past a long (OpenCE's) */
+	if (message_packet->game_time < 0 || message_packet->game_time > 0x3FFFFFFF)
+	{
+		network_event("ignoring the host's game tick #%ld", message_packet->game_time);
+	}
+	else if (network_game_client_late_join_clock_pending)
 	{
 		network_game_client_late_join_clock_pending = FALSE;
 		if (message_packet->game_time > game_time_get())
@@ -2124,7 +2165,10 @@ boolean network_game_client_add_player_to_game(
 					struct network_player const *added = player;
 					long slot;
 
-					player = &client->game.players[client->game.player_count - 1];
+					/* (the slot network_game_add_player gave it, not one
+					worked out from player_count: OpenCE's) */
+					player = VALID_INDEX(added->player_list_index, MAXIMUM_NUMBER_OF_PLAYERS) ?
+						&client->game.players[added->player_list_index] : NULL;
 					for (slot = 0; slot < MAXIMUM_NUMBER_OF_PLAYERS; slot++)
 					{
 						if (network_player_is_valid(&client->game.players[slot]) &&
@@ -2137,7 +2181,7 @@ boolean network_game_client_add_player_to_game(
 					}
 				}
 
-				success = network_game_spawn_player(player);
+				success = player && network_game_spawn_player(player);
 
 				if (success)
 				{
@@ -2511,10 +2555,46 @@ static boolean network_game_client_map_name_is_valid(
 	long size)
 {
 	/* (a scenario's tag path, of which the cache takes the name after the
-	last backslash) */
-	return memchr(map_name, '\0', size) != NULL &&
-		!strchr(map_name, '/') &&
-		!strstr(map_name, "..");
+	last backslash; port: no control characters nor a drive's colon, and a
+	name after the last backslash that is not only dots and spaces, which
+	no map's is: OpenCE's, with the characters of the custom maps' names
+	map sharing allows, such as '#') */
+	char const *character;
+	char const *leaf;
+
+	if (!memchr(map_name, '\0', size) || strchr(map_name, '/') || strchr(map_name, ':') || strstr(map_name, ".."))
+		return FALSE;
+	for (character = map_name; *character; character++)
+	{
+		if ((unsigned char)*character < 0x20 || *character == 0x7F)
+			return FALSE;
+	}
+	leaf = strrchr(map_name, '\\');
+	leaf = leaf ? leaf + 1 : map_name;
+	return *leaf && leaf[strspn(leaf, ". ")] != 0;
+}
+
+/* port: the players of a settings record the host sends: each valid one
+the only one of its machine's controller (so no machine has more than its
+local players; OpenCE's) */
+static boolean network_game_client_game_record_is_valid(
+	struct network_game *game)
+{
+	static short machine_players[HALO_PORT_MAXIMUM_NETWORK_MACHINES][MAXIMUM_LOCAL_PLAYERS];
+	short index;
+
+	csmemset(machine_players, 0, sizeof(machine_players));
+	for (index = 0; index < (short)NUMBEROF(game->players); index++)
+	{
+		struct network_player *player = &game->players[index];
+
+		if (!network_player_is_valid(player))
+			continue;
+		if (machine_players[player->machine_index][player->controller_index]++)
+			return FALSE;
+	}
+
+	return TRUE;
 }
 
 static boolean add_advertised_game(
@@ -2693,10 +2773,20 @@ static boolean add_advertised_game(
 static boolean network_game_client_process_incoming_messages(
 	struct network_game_client *client)
 {
+	return network_game_client_process_messages(client, TRUE);
+}
+
+/* (budgeted: no longer than MAXIMUM_MESSAGE_MILLISECONDS_PER_IDLE, else
+every message queued) */
+static boolean network_game_client_process_messages(
+	struct network_game_client *client,
+	boolean budgeted)
+{
 	boolean success = TRUE;
 	word message_packet_size;
 	struct transport_address source_address;
 	word message_packet[MAXIMUM_NETWORK_MESSAGE_SIZE / sizeof(word)];
+	unsigned long start_time = system_milliseconds();
 
 	message_packet_size = sizeof(message_packet);
 
@@ -2716,6 +2806,8 @@ static boolean network_game_client_process_incoming_messages(
 		}
 
 		message_packet_size = sizeof(message_packet);
+		if (budgeted && system_milliseconds() - start_time >= MAXIMUM_MESSAGE_MILLISECONDS_PER_IDLE)
+			break;
 	}
 
 	return success;
@@ -2732,7 +2824,8 @@ static boolean network_game_client_process_last_messages(
 {
 	short state = client->state;
 
-	if (!network_game_client_process_incoming_messages(client))
+	/* (all of them: the connection goes) */
+	if (!network_game_client_process_messages(client, FALSE))
 	{
 		network_event("network_game_client_process_incoming_messages() failed after the connection failed");
 	}

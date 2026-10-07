@@ -570,6 +570,11 @@ struct play_entry
 	int compatible, own;
 	/* (UPSTREAM BROWSER) it asks for a password; its map is a PC one */
 	int locked, pc_map;
+#ifndef PLAY_UPSTREAM_BROWSER
+	/* (before it: the entry as listed, joined for the host it is listed
+	under, p2p_join_lobby_entry) */
+	struct p2p_lobby_entry lobby;
+#endif
 };
 
 /* the public lobby's entries as last shown, and the one chosen */
@@ -826,6 +831,7 @@ static int play_browse_entry(int index, struct play_entry *entry)
 #else
 	/* UPSTREAM BROWSER: a code, a name and the counts only */
 	snprintf(entry->key, sizeof(entry->key), "%s", lobby.code);
+	entry->lobby = lobby;
 #endif
 	snprintf(entry->name, sizeof(entry->name), "%s", lobby.name);
 	entry->players = lobby.players;
@@ -842,7 +848,7 @@ static void play_join_entry(const struct play_entry *entry, const char *password
 	p2p_lobby_join(entry->key, password ? password : "");
 #else
 	(void)password;
-	p2p_join_lobby_code(entry->key);
+	p2p_join_lobby_entry(&entry->lobby);
 #endif
 }
 
