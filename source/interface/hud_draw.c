@@ -2186,9 +2186,10 @@ the Vita button its Xbox button is on now (vita_pad.c, which follows the
 Button layout and the touch zones). Cross, circle, square and triangle are
 drawn here, centred where the Xbox icon's sprite would be and as tall as
 it: two strokes, a ring, a square, a triangle, quads of the game's own
-white bitmap (the virtual keyboard's caret), in the colour of the Xbox face
-button in the same place (A's green for cross, B's red, X's blue, Y's
-yellow: the callers take it from hud_globals' button icons). The others
+white bitmap (the virtual keyboard's caret), in the PlayStation's own
+colours (cross blue, circle red, square pink, triangle green), with the
+alpha the callers give (the Xbox icon's, from hud_globals' button icons,
+as it fades). The others
 (L, R, Start, Select, the D-pad, the touch zones) are words in the game's
 font, drawn by the callers as the icons that are text are. */
 
@@ -2350,6 +2351,9 @@ boolean hud_vita_glyph_draw_in_rect(
 	real_rectangle2d const *rectangle,
 	pixel32 color)
 {
+	/* (cross, circle, square, triangle: the PlayStation's colours, the
+	caller's alpha) */
+	static pixel32 const face_colors[4] = { 0x006EA8F0, 0x00F05A5A, 0x00E08CD8, 0x0030D0A0 };
 	long white_index = tag_loaded(BITMAP_GROUP_TAG, "ui\\shell\\bitmaps\\white");
 	struct bitmap_data *white;
 	real width = rectangle->x1 - rectangle->x0;
@@ -2366,6 +2370,7 @@ boolean hud_vita_glyph_draw_in_rect(
 
 	if (white_index == NONE || hud_vita_glyph_face_icon(glyph) == NONE)
 		return FALSE;
+	color = face_colors[hud_vita_glyph_face_icon(glyph)] | (color & 0xFF000000);
 	white = bitmap_group_get_bitmap_from_sequence(white_index, 0, 0);
 	if (!white || !_texture_cache_bitmap_get_hardware_format(white, FALSE, TRUE))
 		return FALSE;

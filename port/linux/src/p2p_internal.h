@@ -111,8 +111,9 @@ void p2p_signal_stop_hosting(void);
 name and its player counts, or not; called again as they change */
 void p2p_signal_set_lobby(int listed, const char *code, const char *name, int players, int maximum);
 /* looking up a code's eight characters (no dash): its invite comes back
-through p2p_code_found */
-void p2p_signal_lookup_code(const char *code);
+through p2p_code_found; with host (an identifier; NULL for any), only a
+record of the host with that identifier */
+void p2p_signal_lookup_code(const char *code, const unsigned char *host);
 void p2p_signal_stop_lookup(void);
 /* browsing the public lobby: on or off, and its entries */
 void p2p_signal_browse(int on);

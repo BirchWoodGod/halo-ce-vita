@@ -118,12 +118,14 @@ int p2p_join_code(const char *code)
 	return 1;
 }
 
-/* (a public lobby's game: joined as one, so that its host's map downloads
-warn: p2p_address_origin) */
-int p2p_join_lobby_code(const char *code)
+/* (a public game's: by its code, for the host it is listed under) */
+static char joined_host[16];
+
+int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry)
 {
+	snprintf(joined_host, sizeof(joined_host), "%s", entry->host);
 	joined_from_lobby = 1;
-	return p2p_join_code(code);
+	return p2p_join_code(entry->code);
 }
 
 int p2p_hosting_code(char *code, int size)
@@ -140,8 +142,8 @@ void p2p_lobby_browse(int on) { browsing = on; }
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 {
 	static const struct p2p_lobby_entry entries[] = {
-		{ "OWNN-GAME", "this vita", 1, 128, 1, 1 },
-		{ "HJ4T-9WXZ", "desktop host", 2, 128, 1, 0 },
+		{ "OWNN-GAME", "this vita", 1, 128, 1, 1, "0200000000aa" },
+		{ "HJ4T-9WXZ", "desktop host", 2, 128, 1, 0, "0211223344bb" },
 	};
 
 	if (!browsing || index >= 2)
@@ -943,7 +945,8 @@ static void test_online_rows(void)
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "desktop host") && !strstr(menu, "this vita"), "the lobby lists the others' games");
 	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_code, "HJ4T-9WXZ") && browsing == 0, "cross joins the game's code and stops browsing");
+	check(!strcmp(joined_code, "HJ4T-9WXZ") && !strcmp(joined_host, "0211223344bb") && browsing == 0,
+		"cross joins the game's code, for the host it is listed under, and stops browsing");
 	check(joined_from_lobby, "... as a public lobby's game (its map downloads warn)");
 
 	/* hosting: the code shows in the Multiplayer tab */
@@ -977,7 +980,7 @@ static void test_variables_kept(void)
 		"HALO_NET_COOP_DIFFICULTY", "HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
-		"HALO_BUTTON_ICONS", "HALO_MAP_SHARE_FROM",
+		"HALO_BUTTON_ICONS", "HALO_AI_PERCEPTION_LOD", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
 	};
 	int index, all = 1, choices = 0;
 
@@ -994,7 +997,7 @@ static void test_variables_kept(void)
 	for (index = 0; index < SETTING_COUNT; index++)
 		choices += settings[index].kind == KIND_CHOICE;
 	check(all && choices == (int)(sizeof(variables) / sizeof(variables[0])),
-		"every settings variable of 1.0.3 is still a row, and no other but Sun rays, Button icons and Map downloads");
+		"every settings variable of 1.0.3 is still a row, and no other but Sun rays, Button icons, Distant AI, Tiny decals and Map downloads");
 	check(!strcmp(setting_named("HALO_DEBUG_CAMERA")->names[0], "Off") &&
 		setting_named("HALO_DEBUG_CAMERA")->page == TAB_DEV, "Debug camera stays in Dev");
 	{
@@ -1030,48 +1033,41 @@ static void test_button_icons(void)
 		strstr(menu, "\nButton icons\x02< PlayStation  "),
 		"Button icons PlayStation: in the environment and settings.txt at once, read again (no restart)");
 	check(!strstr(menu, "Button icons*"), "Button icons: live, no *");
-	check(strstr(menu, "\nJump\x02  Cross >") && strstr(menu, "\nMelee\x02") && strstr(menu, "\nAction, reload\x02") &&
-		strstr(menu, "\nSwitch weapon\x02") && strstr(menu, "\nSwitch grenades\x02< D-pad left >") &&
-		strstr(menu, "\nFlashlight\x02") && strstr(menu, "\nThrow grenade\x02< L >") && strstr(menu, "\nFire\x02") &&
-		strstr(menu, "\nCrouch\x02") && strstr(menu, "\nZoom\x02") && strstr(menu, "\nScoreboard\x02") &&
-		!strstr(menu, "\nA\x02") && !strstr(menu, "\nBlack\x02") && !strstr(menu, "\nLeft trigger\x02") &&
-		menu_rows() == 12 && menu_fits(), "PlayStation: the Button layout's rows by what they do, no Xbox name, each fits");
-	to_line("Jump");
-	check(strstr(menu, "\n\x05Jump (in the menus Cross stays Accept)\n") != NULL, "PlayStation: a row's help by its action");
-	/* a remap: the row moves, the game's icon follows (vita_controls.c) */
-	to_line("Action, reload");
+	/* (the panel keeps the Xbox controller's names with either: the icons
+	change in the game only) */
+	check(strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") && !strstr(menu, "\nJump\x02") &&
+		menu_rows() == 12 && menu_fits(), "PlayStation: the Button layout's rows keep the Xbox's names, each fits");
+	/* a remap: the game's icon follows (vita_controls.c) */
+	to_line("X");
 	press(VITA_BUTTON_RIGHT);
 	vita_controls_config_load(&config);
-	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nAction, reload\x02< Triangle >") &&
+	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nX\x02< Triangle >") &&
 		vita_button_glyph(&config, 2, 0) == VITA_GLYPH_TRIANGLE && vita_button_glyph(&config, 2, 1) == VITA_GLYPH_SQUARE,
-		"Action on Triangle: the game's X icon shows Triangle in play (Square in the menus)");
+		"X on Triangle: the game's X icon shows Triangle in play (Square in the menus)");
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "Which Vita button each action is on"),
-		"back on Controls: Button icons is not the layout (As shipped); the row's help in actions");
+	check(strstr(menu, "\nButton layout\x02  As shipped  >") != NULL,
+		"back on Controls: Button icons is not the layout (As shipped)");
 	check(strstr(menu, "\nCrouch\x02") != NULL, "Controls: Crouch keeps its label");
-	to_line("Crouch");
-	check(strstr(menu, "\n\x05" "A press crouches, the next stands (Toggle)\n") != NULL, "Crouch's help: no stick click");
 
-	/* the touch zones by action, the diagram in their short names */
+	/* the touch zones: the Xbox's names too */
 	check(open_page("Touch zones") && to_line("Rear touch left"), "Touch zones opens");
 	press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< Jump >") &&
-		!strcmp(diagram, "----S- AAAABA") && menu_fits(), "PlayStation: a zone's choice by its action, the diagram's in capitals");
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< A >") && menu_fits(),
+		"PlayStation: a zone's choice keeps the Xbox's name");
 	vita_controls_config_load(&config);
 	check(vita_button_glyph(&config, 0, 0) == VITA_GLYPH_CROSS, "A on Cross and a zone: Cross shows");
 	press(VITA_BUTTON_LEFT);
 	to_tab("Controls");
 
-	/* the guide's steps in the Vita's buttons */
+	/* the guide's steps: the menus' Xbox buttons, and which Vita button each is */
 	to_tab("Multiplayer");
 	to_line("Host a game");
 	press(VITA_BUTTON_CROSS);
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "Cross to join if asked, Cross on a profile,\n  Cross again") &&
-		strstr(menu, "SYSTEM LINK GAMES: Triangle creates a game") && strstr(menu, "Cross on a map, Cross on a game type") &&
-		!strstr(menu, "Menus: A Cross") && menu_fits(), "PlayStation: Host a game's steps name Cross and Triangle");
+	check(strstr(menu, "SYSTEM LINK GAMES: Y creates a game") && strstr(menu, "Menus: A Cross") && menu_fits(),
+		"PlayStation: Host a game's steps keep the Xbox's buttons");
 	press(VITA_BUTTON_CIRCLE);
 
 	/* Reset controls keeps it; Xbox again puts the Xbox's terms back */
@@ -1165,8 +1161,10 @@ int main(void)
 		!strncmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02", 21) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Scenery updates\x02", 16) &&
 		!strncmp(menu_line(5, line, sizeof(line)), "Object lighting\x02", 16) &&
-		!strncmp(menu_line(6, line, sizeof(line)), "Sun rays\x02", 9) && menu_rows() == 5 && menu_fits(),
-		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays");
+		!strncmp(menu_line(6, line, sizeof(line)), "Sun rays\x02", 9) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "Distant AI\x02", 11) &&
+		!strncmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02", 12) && menu_rows() == 7 && menu_fits(),
+		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays, distant AI, tiny decals");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page: the profile Custom");

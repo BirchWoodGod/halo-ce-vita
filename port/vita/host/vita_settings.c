@@ -291,6 +291,14 @@ static struct setting settings[] = {
 	frame while the sun is in view) */
 	{ "Sun rays", "HALO_SUN_RAYS", 0, 2, { "1", "0" }, { "On", "Off" },
 		"The sun's glow and light shafts outdoors", 0, PAGE_GRAPHICS_ADVANCED },
+	/* (actor_perception.c: actors more than 20 world units from every
+	player look at their props every other tick; decals.c: decals under 2
+	pixels across are not made. Off as on the Xbox, in no profile yet: to
+	be tried on hardware) */
+	{ "Distant AI", "HALO_AI_PERCEPTION_LOD", 0, 2, { "0", "20" }, { "Every tick", "Half" },
+		"How often far-off enemies recheck what they see", 0, PAGE_GRAPHICS_ADVANCED },
+	{ "Tiny decals", "HALO_DECAL_MIN_PIXELS", 0, 2, { "0", "2" }, { "Shown", "Skipped" },
+		"Bullet holes too small to see", 0, PAGE_GRAPHICS_ADVANCED },
 
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
@@ -1535,9 +1543,10 @@ Host a game and Join a game: Cross for A) */
 
 static int playstation_terms(void)
 {
-	const struct setting *icons = setting_named("HALO_BUTTON_ICONS");
-
-	return icons && !strcmp(icons->values[icons->choice], "playstation");
+	/* (the owner's choice: the Button icons change the game's icons only;
+	the panel keeps the Xbox controller's names, A B X Y, Black, White ...,
+	with either) */
+	return 0;
 }
 
 /* the Xbox buttons by what they do (VITA_XBOX_*'s order) */
@@ -2614,7 +2623,7 @@ static void browse_input(unsigned long pressed)
 		browse_selected++;
 	if ((pressed & VITA_BUTTON_CROSS) && browse_selected < browse_count)
 	{
-		p2p_join_lobby_code(browse_entries[browse_selected].code);
+		p2p_join_lobby_entry(&browse_entries[browse_selected]);
 		set_notice("Joining %.20s...", browse_entries[browse_selected].name);
 		p2p_lobby_browse(0);
 		screen = code_for_join ? SCREEN_GUIDE : SCREEN_LIST;

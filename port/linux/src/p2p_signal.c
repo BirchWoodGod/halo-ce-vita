@@ -315,10 +315,12 @@ static struct
 	int lobby_players, lobby_maximum;
 	unsigned long lobby_sent_time;
 
-	/* looking up a code */
+	/* looking up a code (of a lobby entry: only its host's record) */
 	int looking_up;
 	char lookup_topic[TOPIC_SIZE];
 	unsigned char lookup_key[P2P_SHA256_SIZE];
+	int lookup_has_host;
+	unsigned char lookup_host[P2P_IDENTIFIER_SIZE];
 
 	/* browsing the lobbies */
 	int browsing;
@@ -454,7 +456,9 @@ static void broker_send(struct broker *broker, unsigned char type, const unsigne
 		return;
 	}
 	memcpy(broker->output + broker->output_size, header, (size_t)header_size);
-	memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
+	/* (a PINGREQ has no body: NULL) */
+	if (size > 0)
+		memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
 	broker->output_size += header_size + size;
 	broker->sent_time = p2p_now();
 	broker_flush(broker);
@@ -1122,6 +1126,27 @@ static void code_received(const unsigned char *message, int size)
 
 	if (size < 2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE)
 		return;
+	/* (a lobby entry's code: anyone can publish a record of their own for a
+	code the lobby shows, and only the host the entry is listed under, whose
+	key's hash the record holds, is the entry's) */
+	if (signalling.lookup_has_host)
+	{
+		unsigned char host[P2P_IDENTIFIER_SIZE];
+
+		p2p_identifier_from_hash(message + 2, host);
+		if (memcmp(host, signalling.lookup_host, P2P_IDENTIFIER_SIZE))
+		{
+			static unsigned long logged_time;
+
+			if (!logged_time || elapsed(logged_time, 10000))
+			{
+				platform_log("Internet play: a record of the code names another host than the public game "
+					"listed with it; it is not joined");
+				logged_time = p2p_now() | 1;
+			}
+			return;
+		}
+	}
 	signalling.looking_up = 0;
 	memcpy(text, "halo://join/", 12);
 	p2p_hex(message + 2, P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE, text + 12);
@@ -1588,10 +1613,13 @@ void p2p_signal_set_lobby(int listed, const char *code, const char *name, int pl
 	publish_lobby(NULL);
 }
 
-void p2p_signal_lookup_code(const char *code)
+void p2p_signal_lookup_code(const char *code, const unsigned char *host)
 {
 	unsigned char token[P2P_TOKEN_SIZE];
 
+	signalling.lookup_has_host = host != NULL;
+	if (host)
+		memcpy(signalling.lookup_host, host, P2P_IDENTIFIER_SIZE);
 	code_token(code, token);
 	make_topic(token, "code", NULL, signalling.lookup_topic);
 	derive(token, "seal", NULL, signalling.lookup_key);
@@ -1626,6 +1654,7 @@ int p2p_signal_lobby_entry(int index, struct p2p_lobby_entry *entry)
 			continue;
 		memset(entry, 0, sizeof(*entry));
 		snprintf(entry->code, sizeof(entry->code), "%s", lobby->code);
+		snprintf(entry->host, sizeof(entry->host), "%s", lobby->identifier);
 		snprintf(entry->name, sizeof(entry->name), "%s", lobby->name);
 		entry->players = lobby->players;
 		entry->maximum = lobby->maximum;

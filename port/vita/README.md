@@ -189,6 +189,8 @@ Graphics, **Advanced**:
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
 | Sun rays (P) | On | the sun's glow and light shafts outdoors (Off in Performance: seven small extra scenes a frame for the graphics chip while the sun is in view) |
+| Distant AI | Every tick | Half: enemies more than 20 world units from every player recheck what they can see every other tick (a CPU saving in big fights; they react a tick later on average). In no profile yet: being tried |
+| Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
 
 **Controls**
 
@@ -214,15 +216,14 @@ first touch zone set to it; in the menus the fixed layout (A Cross, B
 Circle, X Square, Y Triangle, the triggers L and R, Back Select). Cross,
 Circle, Square and Triangle are drawn in code (`source/interface/hud_draw.c`:
 two strokes, a ring, a square, a triangle, of the game's own white bitmap),
-centred in the Xbox icon's sprite and as tall as its button, in the colour
-of the Xbox face button in the same place (A's green for Cross, B's red,
-X's blue, Y's yellow); L, R, START, SELECT, the D-pad ("D-pad down") and the
+centred in the Xbox icon's sprite and as tall as its button, in the
+PlayStation's own colours (Cross blue, Circle red, Square pink, Triangle
+green); L, R, START, SELECT, the D-pad ("D-pad down") and the
 touch zones ("rear touch left") are words in the game's font. An Xbox
 button on no Vita button and no zone keeps its Xbox icon; so do the
-sticks' icons (move, look). The panel then names the Button layout's rows
-and the touch zones' choices by what each does in Halo's default controller
-layout (Jump, Melee, Action, reload, Switch weapon...) and the Host / Join
-steps by the Vita's buttons.
+sticks' icons (move, look). The settings panel keeps the Xbox controller's
+names (A, B, X, Y, Black, White ...) with either setting: the Button icons
+change the game's icons only.
 
 The Touch zones page draws the front screen and the rear pad beside the
 rows: the chosen row's zone blue (dark blue while Off), the zones set to an

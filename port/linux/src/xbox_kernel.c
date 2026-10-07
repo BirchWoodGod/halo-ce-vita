@@ -852,12 +852,14 @@ void platform_heap_usage(unsigned long *in_use, unsigned long *capacity)
 #endif
 #endif
 /* (an ASan build has its own malloc, which these would bypass) */
-#if !defined(HALO_VITA) && defined(__GLIBC__) && !defined(HALO_ADDRESS_SANITIZER)
+#if !defined(HALO_VITA) && defined(__GLIBC__) && !defined(HALO_ADDRESS_SANITIZER) && !defined(__SANITIZE_ADDRESS__)
 /* (harness) HALO_HEAP_LIMIT_KB=n: the Vita's C heap is newlib's, a fixed
 48 MB (vita_main.c, _newlib_heap_size_user) that the system's libraries
 and the game share; here a large allocation (64 KB or more) fails when the
 heap's use would pass n KB, as one larger than what is left fails there.
-malloc, calloc and realloc are glibc's own behind the check. */
+malloc, calloc and realloc are glibc's own behind the check. (Not in an
+AddressSanitizer build, whose own malloc these would hide: it called this
+calloc while it started, before it could, and crashed.) */
 extern void *__libc_malloc(size_t size);
 extern void *__libc_calloc(size_t count, size_t size);
 extern void *__libc_realloc(void *pointer, size_t size);
