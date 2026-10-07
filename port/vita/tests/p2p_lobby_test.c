@@ -446,6 +446,8 @@ static void lobby_checks(void)
 	locked, its token sealed */
 	new_invites = 0;
 	p2p_lobby_set_password("hunter2");
+	wait_for_keys();
+	check(lobby.password_pending && !lobby.has_password, "a password's key waits for internet play's thread");
 	lobby_update(token, 3, 16);
 	check(published_closing && !p2p_lobby_listed(), "not listed (a tombstone) while the password's key is worked out");
 	wait_for_keys();
@@ -526,6 +528,7 @@ static void lobby_checks(void)
 		"PPPPPPPPPPPPPPPP\nPPPPPPPPPPPPPPPP\nPPPPPPPPPPPPPPPP\n");
 	p2p_lobby_set_name("NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN");
 	p2p_lobby_set_password("a password of thirty-two letters!");
+	lobby_update(token, 255, 255);
 	wait_for_keys();
 	clock_now += 6000;
 	lobby_update(token, 255, 255);

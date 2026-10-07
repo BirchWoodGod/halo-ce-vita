@@ -533,6 +533,7 @@ static void listed_name(char *name)
 }
 
 static void set_password(const char *password);
+static void start_key_thread(void);
 
 static void update_hosting(const unsigned char *token, int player_count, int maximum_player_count)
 {
@@ -545,6 +546,10 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 		lobby.password_said = 1;
 		set_password(config_string("network.lobby_password"));
 	}
+	/* (a password's key, on its thread: only while internet play runs, as
+	this does) */
+	if (lobby.password_pending)
+		start_key_thread();
 	listed_name(name);
 	/* (while a password's key is worked out, the game is not listed: it
 	would be open) */
@@ -1080,9 +1085,9 @@ static void set_password(const char *password)
 		memcpy(lobby.password, copy, sizeof(copy));
 		if (has_password)
 		{
-			/* (not listed until its key is ready) */
+			/* (not listed until its key is ready; worked out once internet
+			play runs: update_hosting) */
 			lobby.password_pending = 1;
-			start_key_thread();
 		}
 		else
 		{
