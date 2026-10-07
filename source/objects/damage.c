@@ -2117,7 +2117,24 @@ static long get_player_index_from_object_or_parents(
 			break;
 		}
 
+#ifdef HALO_LINUX
+		/* port: the damage's owner can be gone: a projectile keeps the
+		index of the unit that fired or threw it, and a unit deleted while
+		it flies (ai_erase, for one) leaves an index object_get asserts on
+		(the Xbox's too). Only multiplayer asks (game_engine_running),
+		where the Xbox's maps have no AI to erase; a Custom Edition map's
+		AI do (Covenant_V_Marines_Beta_5 crashed so). An owner that is gone
+		is no player's, as unit_try_and_get above already takes it. */
+		{
+			struct object_datum *object = object_try_and_get(object_index);
+
+			if (!object)
+				break;
+			object_index = object->object.parent_object_index;
+		}
+#else
 		object_index = object_get(object_index)->object.parent_object_index;
+#endif
 	}
 
 	return player_index;
