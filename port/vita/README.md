@@ -189,6 +189,8 @@ Graphics, **Advanced**:
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
 | Sun rays (P) | On | the sun's glow and light shafts outdoors (Off in Performance: seven small extra scenes a frame for the graphics chip while the sun is in view) |
+| Distant AI | Every tick | Half: enemies more than 20 world units from every player recheck what they can see every other tick (a CPU saving in big fights; they react a tick later on average). In no profile yet: being tried |
+| Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
 
 **Controls**
 

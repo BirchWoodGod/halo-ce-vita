@@ -964,7 +964,7 @@ static void test_variables_kept(void)
 		"HALO_NET_COOP_DIFFICULTY", "HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
-		"HALO_BUTTON_ICONS",
+		"HALO_BUTTON_ICONS", "HALO_AI_PERCEPTION_LOD", "HALO_DECAL_MIN_PIXELS",
 	};
 	int index, all = 1, choices = 0;
 
@@ -981,7 +981,7 @@ static void test_variables_kept(void)
 	for (index = 0; index < SETTING_COUNT; index++)
 		choices += settings[index].kind == KIND_CHOICE;
 	check(all && choices == (int)(sizeof(variables) / sizeof(variables[0])),
-		"every settings variable of 1.0.3 is still a row, and no other but Sun rays and Button icons");
+		"every settings variable of 1.0.3 is still a row, and no other but Sun rays, Button icons, Distant AI and Tiny decals");
 	check(!strcmp(setting_named("HALO_DEBUG_CAMERA")->names[0], "Off") &&
 		setting_named("HALO_DEBUG_CAMERA")->page == TAB_DEV, "Debug camera stays in Dev");
 	{
@@ -1152,8 +1152,10 @@ int main(void)
 		!strncmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02", 21) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Scenery updates\x02", 16) &&
 		!strncmp(menu_line(5, line, sizeof(line)), "Object lighting\x02", 16) &&
-		!strncmp(menu_line(6, line, sizeof(line)), "Sun rays\x02", 9) && menu_rows() == 5 && menu_fits(),
-		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays");
+		!strncmp(menu_line(6, line, sizeof(line)), "Sun rays\x02", 9) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "Distant AI\x02", 11) &&
+		!strncmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02", 12) && menu_rows() == 7 && menu_fits(),
+		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays, distant AI, tiny decals");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page: the profile Custom");
