@@ -1,47 +1,80 @@
+<div align="center">
+
 # Halo: Combat Evolved for the PS Vita
 
-A native PlayStation Vita port of **Halo: Combat Evolved**, built from the
-decompilation of the Xbox game. It is not an emulator: the game's own code
-is compiled for the Vita's ARM processor, and its Direct3D rendering is
-translated to the Vita's GPU.
+**A native PlayStation Vita port of Halo: Combat Evolved, built from the decompilation of the Xbox game.**
 
-**No game data is included.** You need your own Xbox copy of Halo: Combat
-Evolved.
+[![Latest release](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?label=release&color=2ea44f)](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/BirchWoodGod/halo-ce-vita/total?color=blue)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
+[![Platform: PS Vita](https://img.shields.io/badge/platform-PS%20Vita%20%2F%20PS%20TV-003791)](#what-you-need)
 
-![A Warthog on The Silent Cartographer's beach, on a PS Vita](docs/screenshots/warthog-beach.png)
+[**Download**](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) ·
+[Install](#install) ·
+[Controls](#controls) ·
+[Performance](#performance) ·
+[Roadmap](ROADMAP.md) ·
+[Report a problem](#reporting-a-crash-or-a-problem)
 
-| | | |
-| --- | --- | --- |
-| ![Two Pelicans over the sea in The Silent Cartographer's opening](docs/screenshots/pelicans.png) | ![Landing on The Silent Cartographer's beach](docs/screenshots/beach-landing.png) | ![Covenant at a Blood Gulch base](docs/screenshots/blood-gulch.png) |
+<img src="docs/screenshots/warthog-beach.png" alt="A Warthog on The Silent Cartographer's beach, on a PS Vita" width="90%">
 
-*Screenshots taken on a PS Vita.*
+<table>
+  <tr>
+    <td><img src="docs/screenshots/pelicans.png" alt="Two Pelicans over the sea in The Silent Cartographer's opening"></td>
+    <td><img src="docs/screenshots/beach-landing.png" alt="Landing on The Silent Cartographer's beach"></td>
+    <td><img src="docs/screenshots/blood-gulch.png" alt="Covenant at a Blood Gulch base"></td>
+  </tr>
+</table>
 
-[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+<sub><i>Screenshots taken on a PS Vita.</i></sub>
 
-*Video: [Halo CE PS Vita port v1.0.3 | Stability Update](https://youtu.be/S6CrPv_F2jU).*
+</div>
 
+It is not an emulator: the game's own code is compiled for the Vita's ARM
+processor, and its Direct3D rendering is translated to the Vita's GPU.
+
+> [!IMPORTANT]
+> **No game data is included.** You need your own **Xbox** copy of Halo:
+> Combat Evolved.
+
+> [!WARNING]
 > **Official sources.** The only official downloads are the
 > [releases on this GitHub repository](https://github.com/BirchWoodGod/halo-ce-vita/releases),
 > published by **BirchWoodGod**. VPKs, "updates", mods or donation requests
 > offered anywhere else under this project's or the developer's name are not
 > from me. If in doubt, check that a build is listed on the releases page.
 
+<div align="center">
+
+### Watch it run
+
+[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+
+<sub><i><a href="https://youtu.be/S6CrPv_F2jU">Halo CE PS Vita port v1.0.3 | Stability Update</a></i></sub>
+
+</div>
+
+## Contents
+
+- [What works](#what-works)
+- [Install](#install): [what you need](#what-you-need), [steps](#steps), [updating](#updating), [movies](#movies-optional), [saving](#saving)
+- [Controls](#controls)
+- [Settings panel](#settings-panel)
+- [Performance](#performance)
+- [Building](#building)
+- [Contributing](#contributing) and [reporting a problem](#reporting-a-crash-or-a-problem)
+- [Credits](#credits) · [License](#license)
+
 ## What works
 
-- The whole campaign from the menus, with checkpoints, saves and Save and
-  Quit, cinematics, and the movies (converted to MP4, see below).
-- Multiplayer maps on your own (split screen with one player). System link
-  between Vitas on the same Wi-Fi is in, but still being tested; play
-  against PCs is not supported yet.
-- Profiles, controller settings and the game's settings menus.
-- A settings panel for the Vita's quality and control options: hold
-  **Select + Start** in game.
-- Up to 30 fps. Quiet areas and cinematics hold 25 to 30 fps; the biggest
-  fights drop to the mid-to-high teens. See [Performance](#performance).
+| | |
+| --- | --- |
+| 🎮 **Campaign** | The whole campaign from the menus, with checkpoints, saves and Save and Quit, cinematics, and the movies (converted to MP4, [see below](#movies-optional)). |
+| 🏁 **Multiplayer** | Multiplayer maps on your own (split screen with one player). System link between Vitas on the same Wi-Fi is in, but still being tested; play against PCs is not supported yet. |
+| ⚙️ **Settings** | Profiles, controller settings and the game's settings menus, plus a settings panel for the Vita's quality and control options: hold **Select + Start** in game. |
+| ⏱️ **Frame rate** | Up to 30 fps. Quiet areas and cinematics hold 25 to 30 fps; the biggest fights drop to the mid-to-high teens. See [Performance](#performance). |
 
-### Known issues
-
-The current list is in the [roadmap](ROADMAP.md) and the
+**Known issues:** the current list is in the [roadmap](ROADMAP.md) and the
 [issues](https://github.com/BirchWoodGod/halo-ce-vita/issues). The main
 one: the biggest fights still drop frames (see [Performance](#performance)).
 
@@ -56,7 +89,7 @@ one: the biggest fights still drop frames (see [Performance](#performance)).
   [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D/releases) and
   run it once: it extracts the file to `ur0:data/`. Without it the game
   stays on the loading picture while the menu's music and sounds play.
-- About 1.5 GB free on `ux0:` (the game keeps decompressed copies of the
+- About **1.5 GB free** on `ux0:` (the game keeps decompressed copies of the
   levels it loads).
 - Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
   it). It must be the Xbox version: the PC version's maps do not work.
@@ -85,9 +118,10 @@ one: the biggest fights still drop frames (see [Performance](#performance)).
 
 Without the maps the game shows where to copy them and exits.
 
-**Stuck on the loading picture** while the menu music plays? The shader
-compiler is missing: see `libshacccg.suprx` above. `halo.log` says so with
-the line `gxm: no libshacccg.suprx`.
+> [!TIP]
+> **Stuck on the loading picture** while the menu music plays? The shader
+> compiler is missing: see `libshacccg.suprx` above. `halo.log` says so with
+> the line `gxm: no libshacccg.suprx`.
 
 ### Updating
 
@@ -106,6 +140,9 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
        -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
 ```
 
+<details>
+<summary>Better quality, and how movies are scaled</summary>
+
 For better quality at the same size, High profile also plays (thanks to
 maler82, #8):
 
@@ -121,6 +158,8 @@ black bars only where that shape needs them: the Xbox's 4:3 movies fill the
 height, and any 16:9 encoding fills the width - 640x360, 848x480, 960x544,
 or 640x480 made with ffmpeg `-aspect 16:9`. Any size up to 960x544 plays.
 `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
+
+</details>
 
 ### Saving
 
@@ -142,30 +181,29 @@ Quit** from the pause menu is the safest way to stop.
 | D-pad left / right | switch grenades / flashlight |
 | Start | pause; skips a cinematic |
 | Select | scoreboard |
-| Select + Start (hold) | settings panel |
+| **Select + Start (hold)** | **settings panel** |
 
 ## Settings panel
 
-Hold Select + Start for a second. Up and down choose a setting, left and
+Hold **Select + Start** for a second. Up and down choose a setting, left and
 right change it, Circle closes the panel. Changes apply at once, render
 resolution and aspect ratio included (the picture pauses for a moment while
 the screen is set up again), except the row marked `*` (sound voices), which
 applies after a restart; the panel says so. If the memory for a bigger
 resolution cannot be found at that moment, the panel says the change waits
-for a restart. Settings are kept in
-`ux0:data/haloce-vita/settings.txt`.
+for a restart. Settings are kept in `ux0:data/haloce-vita/settings.txt`.
 
-The **Profile** row at the top sets the speed-related rows together
-(render resolution, model detail, hide distant objects, scenery updates,
-object lighting and sound occlusion): **Performance**, **Balanced** (the
-defaults) or **Quality** (the game as on the Xbox). Changing one of those
-rows yourself turns the profile to **Custom**.
-
-**Aspect ratio** 16:9 (the default) fills the Vita's screen with a wider
-view; 4:3 shows the Xbox's own framing, field of view, HUD and menus between
-black bars. **Upscale filter** Smooth (the default) or Sharp chooses how the
-picture is scaled to the 960x544 screen: Smooth blends pixels, Sharp keeps
-them crisp and blocky (most visible at lower render resolutions).
+- **Profile** (the top row) sets the speed-related rows together (render
+  resolution, model detail, hide distant objects, scenery updates, object
+  lighting and sound occlusion): **Performance**, **Balanced** (the
+  defaults) or **Quality** (the game as on the Xbox). Changing one of those
+  rows yourself turns the profile to **Custom**.
+- **Aspect ratio** 16:9 (the default) fills the Vita's screen with a wider
+  view; 4:3 shows the Xbox's own framing, field of view, HUD and menus
+  between black bars.
+- **Upscale filter** Smooth (the default) or Sharp chooses how the picture is
+  scaled to the 960x544 screen: Smooth blends pixels, Sharp keeps them crisp
+  and blocky (most visible at lower render resolutions).
 
 ## Performance
 
@@ -179,14 +217,6 @@ Measured on a PS Vita 1000 with 1.0.3's default settings:
 | Pillar of Autumn's biggest firefights | about 15 to 18 fps |
 | Late-game Flood and Covenant battles | can drop lower; 1.0.3 cuts the GPU work there |
 
-Why it slows down: the biggest fights are limited by different things in
-different places. On The Silent Cartographer's beach the Vita's processor is
-the limit (drawing many characters, and the game's own simulation of them),
-so the render resolution changes little there. In Pillar of Autumn's
-firefights the graphics chip is the limit, and there **Render resolution 50%**
-helps a lot (in one test, a firefight went from about 16 fps at 75% to about
-26 fps at 50%), at the cost of a softer picture.
-
 Recommended settings (the **Profile** row sets these at once):
 
 | Setting | Performance | Balanced (default) | Quality |
@@ -197,13 +227,24 @@ Recommended settings (the **Profile** row sets these at once):
 | Scenery updates | Quarter | Quarter | Every tick |
 | Object lighting | Third | Third | Full |
 | Sound occlusion | Every 6th | Every 3rd | Every tick |
-| Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
+| **Best for** | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
 
 Performance is the one to pick if the late-game battles feel slow; Quality
 draws and sounds exactly as on the Xbox and runs well in quiet areas. None
 of them drops see-through parts such as the Covenant field generators'
 domes or visors: models keep them at the Xbox's detail level, and the
 domes are drawn at any distance.
+
+<details>
+<summary>Why it slows down, and what helps</summary>
+
+The biggest fights are limited by different things in different places. On
+The Silent Cartographer's beach the Vita's processor is the limit (drawing
+many characters, and the game's own simulation of them), so the render
+resolution changes little there. In Pillar of Autumn's firefights the
+graphics chip is the limit, and there **Render resolution 50%** helps a lot
+(in one test, a firefight went from about 16 fps at 75% to about 26 fps at
+50%), at the cost of a softer picture.
 
 What helps, in the settings panel:
 
@@ -218,6 +259,8 @@ What helps, in the settings panel:
 - Keep **Smooth weapon motion** on: it costs almost nothing and makes the
   frame rate feel steadier.
 
+</details>
+
 A steady 30 fps in the biggest fights is a goal for 1.1.0 (see the
 [roadmap](ROADMAP.md)). If you want to help measure, add these lines to
 `ux0:data/haloce-vita/env.txt`, play a heavy fight for a couple of minutes,
@@ -230,6 +273,9 @@ HALO_TICK_PROFILE=1
 ```
 
 ## Building
+
+<details>
+<summary>What you need, and how to build the VPK</summary>
 
 ### What you need
 
@@ -269,6 +315,9 @@ curl -T build/vita/eboot.bin ftp://<vita address>:1337/ux0:/app/HCEV00001/eboot.
 
 Run `configure.py` again after adding a source file or changing anything in
 `port/vita/sce_sys` (the LiveArea images and the title).
+
+</details>
+
 [port/vita/README.md](port/vita/README.md) has the details: the layout of
 `port/vita`, testing in [Vita3K](https://vita3k.org) and in a Linux build of
 the Vita renderer, debug switches, and the files the game keeps on the
@@ -290,13 +339,11 @@ Open an [issue](https://github.com/BirchWoodGod/halo-ce-vita/issues) with
 what you were doing (level, place, weapon, vehicle) and these files from
 the memory card (VitaShell's FTP or USB mode):
 
-- `ux0:data/haloce-vita/halo.log` and `halo-prev.log`: the port's logs of
-  this and the previous session (the previous one is the crashed one after
-  a restart).
-- After a crash, the newest `ux0:data/psp2core-....psp2dmp`: the crash
-  dump. Leave the Vita alone for a minute after a crash so it finishes
-  writing it (a dump still being written ends in `.tmp`).
-- `ux0:data/haloce-vita/data/debug.txt`: the game's own log.
+| File | What it is |
+| --- | --- |
+| `ux0:data/haloce-vita/halo.log` and `halo-prev.log` | the port's logs of this and the previous session (the previous one is the crashed one after a restart) |
+| the newest `ux0:data/psp2core-....psp2dmp` | after a crash, the crash dump. Leave the Vita alone for a minute after a crash so it finishes writing it (a dump still being written ends in `.tmp`) |
+| `ux0:data/haloce-vita/data/debug.txt` | the game's own log |
 
 ## Credits
 
@@ -357,5 +404,6 @@ their own licenses. The license covers this code only: Halo's maps,
 executable and other game content belong to their owners and are not
 included.
 
-This project is not affiliated with or endorsed by Microsoft or Bungie,
-and it contains no game assets.
+<div align="center">
+<sub>This project is not affiliated with or endorsed by Microsoft or Bungie, and it contains no game assets.</sub>
+</div>
