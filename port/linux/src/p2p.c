@@ -1954,7 +1954,9 @@ static void stream_message(struct stream *stream, unsigned char type, const void
 	unsigned char message[1 + STREAM_CHUNK_SIZE];
 
 	message[0] = type;
-	memcpy(message + 1, data, (size_t)size);
+	/* (a close has no data: NULL) */
+	if (size > 0)
+		memcpy(message + 1, data, (size_t)size);
 	ikcp_send(stream->kcp, (const char *)message, size + 1);
 }
 
