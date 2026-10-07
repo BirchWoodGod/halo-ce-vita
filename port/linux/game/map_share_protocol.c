@@ -182,10 +182,12 @@ int map_share_name_valid(
 		{
 			return 0;
 		}
-		if (!((character >= 'a' && character <= 'z') ||
-			(character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') ||
-			character == '_' || character == '-' || character == '.'))
+		/* printable ASCII, but what a path or a file system takes for
+		something else (Windows' and FAT's: the Vita's memory card), ','
+		(HALO_MAPS_DISABLED's list of maps turned off) and '%' (a name is
+		never a format, but nor is it one by mistake): Custom Edition maps
+		go about as "Race-Track-#1" and "[h3] coldsnap" */
+		if (character < ' ' || character > '~' || strchr("/\\:*?\"<>|%,", character))
 		{
 			return 0;
 		}
@@ -194,8 +196,9 @@ int map_share_name_valid(
 			return 0;
 		}
 	}
-	/* (a trailing dot is dropped by some file systems: another file) */
-	if (name[length - 1] == '.')
+	/* (a trailing dot or space is dropped by some file systems: another
+	file; a leading space, kept by some and not others) */
+	if (name[length - 1] == '.' || name[length - 1] == ' ' || name[0] == ' ')
 	{
 		return 0;
 	}

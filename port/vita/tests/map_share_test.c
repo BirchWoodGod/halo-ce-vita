@@ -51,11 +51,14 @@ static void make_header(uint8_t *header, int32_t version, char const *name, uint
 
 static void test_names(void)
 {
-	static char const *const good[] = { "mygulch", "My_Gulch-2", "a.b", "x", "beavercreek_halo3", "abcdefghijklmnopqrstuvwxy", "console", "com10", "uix" };
+	static char const *const good[] = { "mygulch", "My_Gulch-2", "a.b", "x", "beavercreek_halo3", "abcdefghijklmnopqrstuvwxy", "console", "com10", "uix",
+		/* (Custom Edition maps' names, as they go about) */
+		"Race-Track-#1", "[h3] coldsnap", "with space", "semi;colon", "it's (v2)", "a+b=c!", "{x}~@$&^`", };
 	static char const *const bad[] = {
 		"", ".", "..", "../x", "a/b", "a\\b", "c:x", "a..b", ".hidden", "trailing.", "abcdefghijklmnopqrstuvwxyz",
-		"bloodgulch", "BloodGulch", "a10", "D40", "bitmaps", "Sounds", "LOC", "ui", "with space", "caf\xc3\xa9",
-		"tab\there", "new\nline", "star*", "q?", "pipe|", "semi;colon", "con", "CON.x", "nul", "com1", "lpt9.a",
+		"bloodgulch", "BloodGulch", "a10", "D40", "bitmaps", "Sounds", "LOC", "ui", "caf\xc3\xa9",
+		"tab\there", "new\nline", "star*", "q?", "pipe|", "con", "CON.x", "nul", "com1", "lpt9.a",
+		"100%", "%s%n", "\"quoted\"", "<x>", " leading", "trailing ", "del\x7f", "a,b",
 	};
 	char field[MAP_SHARE_NAME_BYTES];
 	char name[MAP_SHARE_NAME_BYTES];
