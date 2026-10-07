@@ -3140,6 +3140,10 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		adhoc_pending = 0;
 	}
 	guide_poll(now);
+	/* (the game's answer closed the panel just now: the buttons still held,
+	the cross that asked included, are not the game's) */
+	if (held_after_close && !panel_open)
+		return 1;
     pthread_mutex_lock(&message_lock);
     if (message_pending)
     {

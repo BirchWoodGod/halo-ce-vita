@@ -844,9 +844,8 @@ static void test_multiplayer_tab(void)
 	/* (the cross still held when the game answers) */
 	halo_system_link_answer = SYSTEM_LINK_ANSWER_OPENED;
 	halo_system_link_request = SYSTEM_LINK_REQUEST_NONE;
-	frame(VITA_BUTTON_CROSS);
-	check(!menu_visible && frame(VITA_BUTTON_CROSS) == 1,
-		"the game opened it: the panel closes; the cross still held is not the game's A");
+	check(frame(VITA_BUTTON_CROSS) == 1 && !menu_visible && frame(VITA_BUTTON_CROSS) == 1,
+		"the game opened it: the panel closes; the cross still held is not the game's A, that frame or after");
 	check(frame(0) == 0 && frame(VITA_BUTTON_CROSS) == 0, "let go and pressed again: the game has the pad");
 	check(strstr(log_text, "settings: host a game: asked the game for its System Link screen (online)") != NULL,
 		"halo.log says so");
