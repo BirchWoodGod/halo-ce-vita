@@ -59,6 +59,13 @@ int p2p_send_datagram(unsigned short source_port, unsigned long address, unsigne
 returns their count */
 int p2p_broadcast_datagram(unsigned short source_port, unsigned short port, const void *data, int size);
 
+/* whether a source the game received from, or accepted from, before
+p2p_incoming rewrote it, is a peer's virtual address (or one that was a
+peer's): the game's own socket was sent to, or connected to, directly from
+it, as only a spoofed source is (a peer's traffic arrives from its
+stand-ins); the game drops it */
+int p2p_spoofed_source(unsigned long address);
+
 /* the game's socket has this local port: bound, given one, or listening
 (stream and listening: it is hosting). Peers reach only these ports (a
 stream's only while it listens), and datagram ports it sent them from */
@@ -194,6 +201,7 @@ enum
 	P2P_ORIGIN_ADHOC,
 };
 int p2p_address_origin(unsigned long address);
+
 /* while this machine hosts with internet play on: copies its code (with
 the dash) and returns nonzero */
 int p2p_hosting_code(char *code, int size);

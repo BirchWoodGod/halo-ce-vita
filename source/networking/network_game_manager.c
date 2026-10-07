@@ -86,6 +86,7 @@ symbols in this file:
 #include "main/main.h"
 #include "memory/data.h"
 #include "network_game_globals.h"
+#include "network_messages.h"
 #include "network_game_manager.h"
 #include "network_game_ui.h"
 #include "networking/network_server_manager.h"
@@ -398,7 +399,7 @@ boolean network_game_add_player(
 	}
 	else
 	{
-		error(2, "game is already at maximum players; can't add new player");
+		network_event("game is already at maximum players; can't add new player");
 	}
 
 	return result;
@@ -635,7 +636,7 @@ boolean network_game_update_player(
 	}
 
 	if (!result)
-		error(2, "tried to update a player with indvalid data");
+		network_event("tried to update a player with indvalid data");
 
 	return result;
 }
@@ -660,6 +661,14 @@ boolean network_game_remove_player(
 				game->players[player_index].machine_index == player->machine_index &&
 				game->players[player_index].controller_index == player->controller_index)
 			{
+				/* port: a client's count is the host's (its settings), and
+				need not be as many as the players it lists: none taken
+				below none (OpenCE's) */
+				if (game->player_count <= 0)
+				{
+					error(2, "tried to remove a player from a game of %d players", game->player_count);
+					break;
+				}
 				network_game_invalidate_player(&game->players[player_index]);
 				game->player_count--;
 				result = TRUE;
@@ -669,7 +678,7 @@ boolean network_game_remove_player(
 	}
 	else
 	{
-		error(2, "tried to remove a player with indvalid data");
+		network_event("tried to remove a player with indvalid data");
 	}
 
 	return result;
@@ -700,12 +709,14 @@ boolean network_game_remove_machine(
 						game->players[player_index].machine_index == machine->machine_index)
 					{
 						if (!network_game_remove_player(game, &game->players[player_index]))
-							error(2, "failed to remove a machine's player");
+							network_event("failed to remove a machine's player");
 					}
 				}
 
 				network_game_invalidate_machine(game, machine->machine_index);
-				game->machine_count--;
+				/* (port: and none below none, as for its players) */
+				if (game->machine_count > 0)
+					game->machine_count--;
 				result = TRUE;
 				break;
 			}

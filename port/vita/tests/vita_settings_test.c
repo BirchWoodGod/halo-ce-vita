@@ -118,14 +118,6 @@ int p2p_join_code(const char *code)
 	return 1;
 }
 
-/* (a public lobby's game: joined as one, so that its host's map downloads
-warn: p2p_address_origin) */
-int p2p_join_lobby_code(const char *code)
-{
-	joined_from_lobby = 1;
-	return p2p_join_code(code);
-}
-
 int p2p_hosting_code(char *code, int size)
 {
 	if (!hosting)

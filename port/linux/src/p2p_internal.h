@@ -144,8 +144,9 @@ under the code ("ABCD-EFGH"; NULL for none) */
 void p2p_signal_host(const unsigned char *token, const char *code);
 void p2p_signal_stop_hosting(void);
 /* looking up a code's eight characters (no dash): its invite comes back
-through p2p_code_found */
-void p2p_signal_lookup_code(const char *code);
+through p2p_code_found; with host (an identifier; NULL for any), only a
+record of the host with that identifier */
+void p2p_signal_lookup_code(const char *code, const unsigned char *host);
 void p2p_signal_stop_lookup(void);
 /* joining: ask the host whose public key has this hash (p2p_key_hash),
 holding this token, until it answers (or p2p_signal_stop_joining); each call

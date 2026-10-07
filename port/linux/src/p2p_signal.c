@@ -392,10 +392,12 @@ static struct
 	unsigned char code_key[P2P_SHA256_SIZE];
 	unsigned long code_sent_time;
 
-	/* looking up a code */
+	/* looking up a code (with a host: only its record) */
 	int looking_up;
 	char lookup_topic[TOPIC_SIZE];
 	unsigned char lookup_key[P2P_SHA256_SIZE];
+	int lookup_has_host;
+	unsigned char lookup_host[P2P_IDENTIFIER_SIZE];
 } signalling;
 
 static int elapsed(unsigned long since, unsigned long time)
@@ -1372,6 +1374,27 @@ static void code_received(const unsigned char *message, int size)
 
 	if (size < 2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE)
 		return;
+	/* (a lobby entry's code: anyone can publish a record of their own for a
+	code the lobby shows, and only the host the entry is listed under, whose
+	key's hash the record holds, is the entry's) */
+	if (signalling.lookup_has_host)
+	{
+		unsigned char host[P2P_IDENTIFIER_SIZE];
+
+		p2p_identifier_from_hash(message + 2, host);
+		if (memcmp(host, signalling.lookup_host, P2P_IDENTIFIER_SIZE))
+		{
+			static unsigned long logged_time;
+
+			if (!logged_time || elapsed(logged_time, 10000))
+			{
+				platform_log("Internet play: a record of the code names another host than the public game "
+					"listed with it; it is not joined");
+				logged_time = p2p_now() | 1;
+			}
+			return;
+		}
+	}
 	signalling.looking_up = 0;
 	memcpy(text, "halo://join/", 12);
 	p2p_hex(message + 2, P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE, text + 12);
@@ -1933,10 +1956,13 @@ void p2p_signal_stop_hosting(void)
 	sync_all_topics();
 }
 
-void p2p_signal_lookup_code(const char *code)
+void p2p_signal_lookup_code(const char *code, const unsigned char *host)
 {
 	unsigned char token[P2P_TOKEN_SIZE];
 
+	signalling.lookup_has_host = host != NULL;
+	if (host)
+		memcpy(signalling.lookup_host, host, P2P_IDENTIFIER_SIZE);
 	code_token(code, token);
 	make_topic(token, "code", NULL, signalling.lookup_topic);
 	derive(token, "seal", NULL, signalling.lookup_key);

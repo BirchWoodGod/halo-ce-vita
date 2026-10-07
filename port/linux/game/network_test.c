@@ -1254,6 +1254,8 @@ void network_test_update(
 			if (network_test.code[0])
 			{
 				network_test.code_joined = TRUE;
+				/* (a public game's as the settings panel joins it: its code, whose
+				record must be the listed host's) */
 				platform_log("network test: joining code %s: %s", network_test.code,
 					p2p_join_code(network_test.code) ? "looking it up" : "not a code");
 			}
