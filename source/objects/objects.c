@@ -2938,6 +2938,12 @@ void object_compute_node_matrices(
 
 				matrix4x3_from_orientation(&object_nodes[node_stack_index], orientation);
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 2929, node->parent_node_index!=NONE);
+#ifdef HALO_LINUX
+				/* port: a model's node tree is untrusted map data: a parent
+				that is not one of its nodes is not read past the matrices */
+				if (node->parent_node_index >= 0 && node->parent_node_index < model->nodes.count &&
+					node->parent_node_index < MAXIMUM_NODES_PER_MODEL)
+#endif
 				matrix4x3_multiply(
 					&object_nodes[node->parent_node_index],
 					&object_nodes[node_stack_index],
@@ -2957,6 +2963,24 @@ void object_compute_node_matrices(
 
 			next_sibling_node_index = node->next_sibling_node_index;
 
+#ifdef HALO_LINUX
+			/* port: a model's node tree is untrusted map data: a sibling or
+			child that is not one of its nodes, or a tree with more entries
+			than a model may have nodes (a cycle), is not pushed - the fixed
+			stack would overflow, and the matrices be written past */
+			if (next_sibling_node_index!=NONE && next_sibling_node_index >= 0 &&
+				next_sibling_node_index < model->nodes.count && next_sibling_node_index < MAXIMUM_NODES_PER_MODEL &&
+				node_count < MAXIMUM_NODES_PER_MODEL)
+			{
+				node_stack[node_count++] = next_sibling_node_index;
+			}
+			if (node->first_child_node_index!=NONE && node->first_child_node_index >= 0 &&
+				node->first_child_node_index < model->nodes.count && node->first_child_node_index < MAXIMUM_NODES_PER_MODEL &&
+				node_count < MAXIMUM_NODES_PER_MODEL)
+			{
+				node_stack[node_count++] = node->first_child_node_index;
+			}
+#else
 			if (next_sibling_node_index!=NONE)
 			{
 				node_stack[node_count++] = next_sibling_node_index;
@@ -2965,6 +2989,7 @@ void object_compute_node_matrices(
 			{
 				node_stack[node_count++] = node->first_child_node_index;
 			}
+#endif
 
 			if (node_index==node_count)
 			{
