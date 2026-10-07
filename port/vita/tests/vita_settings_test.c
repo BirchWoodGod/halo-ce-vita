@@ -116,6 +116,15 @@ int p2p_join_code(const char *code)
 	return 1;
 }
 
+/* (a public game's: by its code, for the host it is listed under) */
+static char joined_host[16];
+
+int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry)
+{
+	snprintf(joined_host, sizeof(joined_host), "%s", entry->host);
+	return p2p_join_code(entry->code);
+}
+
 int p2p_hosting_code(char *code, int size)
 {
 	if (!hosting)
@@ -130,8 +139,8 @@ void p2p_lobby_browse(int on) { browsing = on; }
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 {
 	static const struct p2p_lobby_entry entries[] = {
-		{ "OWNN-GAME", "this vita", 1, 128, 1, 1 },
-		{ "HJ4T-9WXZ", "desktop host", 2, 128, 1, 0 },
+		{ "OWNN-GAME", "this vita", 1, 128, 1, 1, "0200000000aa" },
+		{ "HJ4T-9WXZ", "desktop host", 2, 128, 1, 0, "0211223344bb" },
 	};
 
 	if (!browsing || index >= 2)
@@ -932,7 +941,8 @@ static void test_online_rows(void)
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "desktop host") && !strstr(menu, "this vita"), "the lobby lists the others' games");
 	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_code, "HJ4T-9WXZ") && browsing == 0, "cross joins the game's code and stops browsing");
+	check(!strcmp(joined_code, "HJ4T-9WXZ") && !strcmp(joined_host, "0211223344bb") && browsing == 0,
+		"cross joins the game's code, for the host it is listed under, and stops browsing");
 
 	/* hosting: the code shows in the Multiplayer tab */
 	hosting = 1;
