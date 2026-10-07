@@ -174,6 +174,12 @@ short cache_file_read_urgent(
 
 unsigned long tag_get_group_tag(long tag_index);
 
+#ifdef HALO_LINUX
+/* port: whether size bytes at address lie in the loaded map's tag cache
+(the Xbox tag cache, or a Custom Edition map's own) */
+boolean cache_file_tag_cache_contains(void const *address, long size);
+#endif
+
 /* ---------- prototypes/XBOX_TEXTURE_CACHE.C */
 
 void texture_cache_bitmap_new(

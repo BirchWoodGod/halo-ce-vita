@@ -650,6 +650,31 @@ long tag_iterator_next(
 }
 
 #ifdef HALO_LINUX
+/* port (from OpenCE, MrBruh's "Harden map and network input" and "Load,
+check and run Halo Custom Edition and OpenSauce maps"): whether size bytes
+at address lie in the loaded map's tag cache: the Xbox tag cache, or the
+one a Custom Edition map's tags were loaded into (custom_edition_cache.c),
+which may be larger */
+boolean cache_file_tag_cache_contains(
+	void const *address,
+	long size)
+{
+	unsigned long base = (unsigned long)physical_memory_get_tag_cache_base_address();
+	unsigned long tag_cache_size = TAG_CACHE_SIZE;
+	unsigned long offset;
+
+	if (custom_edition_cache_tags_loaded())
+		base = (unsigned long)custom_edition_cache_tag_cache(&tag_cache_size);
+	offset = (unsigned long)address - base;
+
+	return base && size > 0 &&
+		(unsigned long)address >= base &&
+		offset <= tag_cache_size &&
+		(unsigned long)size <= tag_cache_size - offset;
+}
+#endif
+
+#ifdef HALO_LINUX
 /* port: map files are untrusted and the tag header the map carries (its tag
 instance array, counts and buffer arrays) is read and its pointers walked by
 the loader. On the Vita the pointers have been relocated into the tag cache
