@@ -2040,6 +2040,19 @@ static D3DBaseTexture *rasterizer_stand_in_header(
 	return texture;
 }
 
+/* (port) while held, the bitmaps bound are waited for as the game did
+instead of drawn with a stand-in while they load: the screen effects' masks
+and maps (rasterizer_xbox_screen_effect.c), where an opaque white stand-in
+is never right. The render thread only. */
+static boolean rasterizer_texture_streaming_held = FALSE;
+
+void rasterizer_texture_streaming_hold(
+	boolean hold)
+{
+	rasterizer_texture_streaming_held = hold;
+	return;
+}
+
 static D3DBaseTexture *rasterizer_texture_streamed(
 	struct bitmap_data const *bitmap,
 	boolean *stand_in_used)
@@ -2051,7 +2064,7 @@ static D3DBaseTexture *rasterizer_texture_streamed(
 
 	if (!TEST_FLAG(bitmap->flags, 7 /* _bitmap_cached_bit, the private enum of bitmaps.c */) ||
 		bitmap->type < 0 || bitmap->type >= NUMBEROF(global_rasterizer_data->default_textures) ||
-		!rasterizer_texture_streaming())
+		rasterizer_texture_streaming_held || !rasterizer_texture_streaming())
 	{
 		return NULL;
 	}
