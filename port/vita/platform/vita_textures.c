@@ -698,8 +698,25 @@ static void *pool_last;
 static unsigned long pool_last_size;
 
 /* (the texture report, halo_texture_stats_report) textures decoded and
-their bytes in the pool, and the times the pool was emptied */
-static unsigned long stats_builds, stats_build_bytes, stats_pool_resets;
+their bytes in the pool, and the times the pool was emptied and a segment
+of it recycled */
+static unsigned long stats_builds, stats_build_bytes, stats_pool_resets, stats_pool_recycles;
+
+/* (the pool's segments: vgxm_memory.h) a full pool frees one at a time,
+this many at most for one texture before it is emptied */
+#define POOL_RECYCLE_ATTEMPTS 15
+
+unsigned long vita_texture_cache_forget(const void *base, unsigned long size);
+
+/* HALO_TEX_RECYCLE=0: a full pool is emptied at once, as before the ring */
+static int pool_recycling(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+		enabled = !getenv("HALO_TEX_RECYCLE") || atoi(getenv("HALO_TEX_RECYCLE")) != 0;
+	return enabled;
+}
 
 static void *pool_alloc(unsigned long size)
 {
@@ -714,7 +731,27 @@ static void *pool_alloc(unsigned long size)
 		return memory;
 	}
 	memory = vgxm_pool_alloc(size, 128);
+	if (!memory && pool_recycling())
+	{
+		/* full: the next segment's textures forgotten (decoded again when
+		next used) and its memory decoded into, a segment at a time round
+		the pool (vgxm_memory.h, the ring); a texture bigger than the
+		segments, or a pool that will not take it so, empties it */
+		unsigned long attempts;
 
+		for (attempts = 0; !memory && attempts <= POOL_RECYCLE_ATTEMPTS; attempts++)
+		{
+			void *base;
+			unsigned long bytes;
+
+			if (!vgxm_pool_recycle(&base, &bytes))
+				break;
+			if (bytes)
+				vita_texture_cache_forget(base, bytes);
+			stats_pool_recycles++;
+			memory = vgxm_pool_alloc(size, 128);
+		}
+	}
 	if (!memory)
 	{
 		/* full: start again, and every texture is decoded again as it is used */
@@ -1332,9 +1369,10 @@ void halo_texture_stats_report(void)
 {
 	extern volatile unsigned long halo_texture_cache_loads, halo_texture_cache_load_bytes, halo_texture_cache_evictions;
 
-	platform_log("texture-stats: game cache %lu reads (%lu KB), %lu evicted | pool %lu decodes (%lu KB), %lu KB in use, "
-		"emptied %lu times", halo_texture_cache_loads, halo_texture_cache_load_bytes / 1024, halo_texture_cache_evictions,
-		stats_builds, stats_build_bytes / 1024, (unsigned long)(vgxm_pool_used() / 1024), stats_pool_resets);
+	platform_log("texture-stats: game cache %lu reads (%lu KB), %lu evicted | pool %lu decodes (%lu KB), at %lu KB, "
+		"%lu segments recycled, emptied %lu times", halo_texture_cache_loads, halo_texture_cache_load_bytes / 1024,
+		halo_texture_cache_evictions, stats_builds, stats_build_bytes / 1024, (unsigned long)(vgxm_pool_used() / 1024),
+		stats_pool_recycles, stats_pool_resets);
 }
 
 /* textures the game locked (to write their texels: the text glyph cache, the
