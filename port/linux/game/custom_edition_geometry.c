@@ -150,8 +150,10 @@ struct model_geometry_totals
 
 /* The map's model data, read a part at a time rather than whole (Extinction's
 is 21 MB, which the Vita's C heap never has): its vertices and strips each
-lie in model order, one region after the other, so each is read ahead into a
-buffer of its own (custom_edition_cache_model_data_read) */
+lie in one region after the other, so each is read ahead into a buffer of its
+own (custom_edition_cache_model_data_read). In model order or the reverse:
+Extinction's parts lie last to first, and a buffer read only forward of each
+miss read its 21 MB as 707 MB (3.5 minutes on the Vita's memory card) */
 #define MODEL_DATA_READ_AHEAD_BYTES 0x80000
 
 struct model_data_stream
@@ -159,6 +161,9 @@ struct model_data_stream
 	byte *buffer;
 	unsigned long start;
 	unsigned long length;
+	/* buffers read, and their bytes (logged) */
+	unsigned long reads;
+	unsigned long read_bytes;
 };
 
 struct model_data_reader
@@ -328,8 +333,23 @@ static void const *model_data_stream_read(
 	{
 		return custom_edition_cache_model_data_read(reader->report, offset, size, large_buffer) ? large_buffer : NULL;
 	}
-	stream->start = offset;
-	stream->length = MIN(MODEL_DATA_READ_AHEAD_BYTES, model_data_bytes - offset);
+	/* below the last buffer, the parts come last to first: the buffer then
+	ends where this part does */
+	if (stream->length && offset < stream->start && offset + size > MODEL_DATA_READ_AHEAD_BYTES)
+	{
+		stream->start = offset + size - MODEL_DATA_READ_AHEAD_BYTES;
+	}
+	else if (stream->length && offset < stream->start)
+	{
+		stream->start = 0;
+	}
+	else
+	{
+		stream->start = offset;
+	}
+	stream->length = MIN(MODEL_DATA_READ_AHEAD_BYTES, model_data_bytes - stream->start);
+	stream->reads++;
+	stream->read_bytes += stream->length;
 	if (!custom_edition_cache_model_data_read(reader->report, stream->start, stream->length, stream->buffer))
 	{
 		stream->length = 0;
@@ -693,10 +713,12 @@ boolean custom_edition_models_convert(
 		custom_edition_cache_tags_regroup(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, MODELS_GROUP_TAG);
 		error(
 			_error_silent,
-			"custom edition: %ld model parts converted (%ld vertices compressed, %lu KB in their buffers)",
+			"custom edition: %ld model parts converted (%ld vertices compressed, %lu KB in their buffers; model data read in %lu buffers, %lu KB)",
 			totals.part_count,
 			totals.vertex_count,
-			(totals.vertex_count * vertex_size + totals.strip_index_count * sizeof(word)) / 1024);
+			(totals.vertex_count * vertex_size + totals.strip_index_count * sizeof(word)) / 1024,
+			reader.vertices.reads + reader.strips.reads,
+			(reader.vertices.read_bytes + reader.strips.read_bytes) / 1024);
 	}
 
 	return success;
