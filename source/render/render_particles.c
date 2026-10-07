@@ -100,6 +100,9 @@ static int effect_stats_enabled = -1;
 static unsigned long effect_stats_frames;
 #define EFFECT_STATS_SLOTS 64
 static struct { long definition_index; double area, count, maximum; } effect_stats[EFFECT_STATS_SLOTS];
+/* ... and the particles left undrawn because their frame was NONE (one the
+tick had not stepped yet, or read mid-change: render_epoch.h) */
+static unsigned long effect_stats_undrawn;
 
 static void effect_stats_add(long definition_index, real diameter)
 {
@@ -142,8 +145,10 @@ static void effect_stats_report(void)
 			effect_stats[best].area / 300.0 / 1000.0, effect_stats[best].maximum);
 		effect_stats[best].count = 0;
 	}
-	platform_log("effect-stats (particles a frame by definition: count/Kpx of their squares/largest diameter px; all %.0fK px):%s",
-		total / 300.0 / 1000.0, line);
+	platform_log("effect-stats (particles a frame by definition: count/Kpx of their squares/largest diameter px; all %.0fK px; "
+		"%.1f undrawn without a frame):%s",
+		total / 300.0 / 1000.0, effect_stats_undrawn / 300.0, line);
+	effect_stats_undrawn = 0;
 	{
 		/* (render_sprite.c) the trimmed sprites */
 		extern double sprite_trim_area_full, sprite_trim_area_kept;
@@ -523,8 +528,12 @@ void render_particles(
 
 #ifdef HALO_LINUX
 								if (effect_stats_enabled > 0)
+								{
 									effect_stats_add(particle->definition_index,
 										diameter < definition->minimum_pixels ? definition->minimum_pixels : diameter);
+									if (particle->sequence_index < 0 || particle->frame_index < 0)
+										effect_stats_undrawn++;
+								}
 								/* (port) the particle's frame is the tick's, read
 								mid-change once: not drawn this frame (render_epoch.h) */
 								if (particle->sequence_index >= 0 && particle->frame_index >= 0)
