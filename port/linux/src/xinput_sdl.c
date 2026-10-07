@@ -235,6 +235,155 @@ void test_input_hold_action(int hold)
 	test_input_holding_action = hold;
 }
 
+/* (debug) HALO_TEST_PAD="steps": presses for automated menu tests on Linux
+(no window to type into: the harness), as HALO_PAD_FILE gives the Vita's
+(port/vita/host/vita_input.c): steps "name:hold_ms:pause_ms" separated by
+spaces (hold 150 and pause 1500 by default), pressed one after another
+from when the main menu has been up for a second (test_input_main_menu,
+main.c). Names in the Xbox's terms: a b x y black white lt rt up down left
+right start back ls rs, several at once joined by "+"; "wait" presses
+none. halo.log says each step as it is pressed. */
+static struct
+{
+	int parsed;
+	int count;
+	int index;
+	Uint64 started;
+	struct
+	{
+		char name[24];
+		int buttons;
+		WORD digital;
+		unsigned int hold_ms;
+		unsigned int pause_ms;
+	} steps[96];
+} test_pad;
+static volatile int test_pad_menu_ready;
+/* (the main menu is up: the scripted player leaves the menus to the steps) */
+static volatile int test_pad_at_menu;
+
+/* main.c, every frame: whether the main menu is up */
+void test_input_main_menu(int loaded)
+{
+	static Uint64 since;
+
+	test_pad_at_menu = loaded;
+	if (!loaded)
+	{
+		since = 0;
+		return;
+	}
+	if (!since)
+		since = SDL_GetTicks();
+	if (SDL_GetTicks() - since >= 1000)
+		test_pad_menu_ready = 1;
+}
+
+static void test_pad_parse(void)
+{
+	static const struct
+	{
+		const char *name;
+		int analog;
+		WORD digital;
+	} names[] =
+	{
+		{ "a", XINPUT_GAMEPAD_A, 0 }, { "b", XINPUT_GAMEPAD_B, 0 }, { "x", XINPUT_GAMEPAD_X, 0 },
+		{ "y", XINPUT_GAMEPAD_Y, 0 }, { "black", XINPUT_GAMEPAD_BLACK, 0 }, { "white", XINPUT_GAMEPAD_WHITE, 0 },
+		{ "lt", XINPUT_GAMEPAD_LEFT_TRIGGER, 0 }, { "rt", XINPUT_GAMEPAD_RIGHT_TRIGGER, 0 },
+		{ "up", -1, XINPUT_GAMEPAD_DPAD_UP }, { "down", -1, XINPUT_GAMEPAD_DPAD_DOWN },
+		{ "left", -1, XINPUT_GAMEPAD_DPAD_LEFT }, { "right", -1, XINPUT_GAMEPAD_DPAD_RIGHT },
+		{ "start", -1, XINPUT_GAMEPAD_START }, { "back", -1, XINPUT_GAMEPAD_BACK },
+		{ "ls", -1, XINPUT_GAMEPAD_LEFT_THUMB }, { "rs", -1, XINPUT_GAMEPAD_RIGHT_THUMB },
+		{ "wait", -1, 0 },
+	};
+	const char *setting = getenv("HALO_TEST_PAD");
+	char text[2048];
+	char *token, *token_end;
+
+	test_pad.parsed = 1;
+	if (!setting || !*setting)
+		return;
+	snprintf(text, sizeof(text), "%s", setting);
+	for (token = strtok_r(text, " \t\r\n", &token_end); token && test_pad.count < (int)(sizeof(test_pad.steps) /
+		sizeof(test_pad.steps[0])); token = strtok_r(NULL, " \t\r\n", &token_end))
+	{
+		char *hold = strchr(token, ':');
+		char *pause = hold ? strchr(hold + 1, ':') : NULL;
+		char *key, *key_end;
+		int step = test_pad.count++;
+
+		memset(&test_pad.steps[step], 0, sizeof(test_pad.steps[step]));
+		test_pad.steps[step].hold_ms = 150;
+		test_pad.steps[step].pause_ms = 1500;
+		if (hold)
+		{
+			*hold = 0;
+			test_pad.steps[step].hold_ms = (unsigned int)atoi(hold + 1);
+		}
+		if (pause)
+		{
+			*pause = 0;
+			test_pad.steps[step].pause_ms = (unsigned int)atoi(pause + 1);
+		}
+		snprintf(test_pad.steps[step].name, sizeof(test_pad.steps[step].name), "%s", token);
+		for (key = strtok_r(token, "+", &key_end); key; key = strtok_r(NULL, "+", &key_end))
+		{
+			int index;
+
+			for (index = 0; index < (int)(sizeof(names) / sizeof(names[0])); index++)
+			{
+				if (!strcmp(key, names[index].name))
+				{
+					if (names[index].analog >= 0)
+						test_pad.steps[step].buttons |= 1 << names[index].analog;
+					test_pad.steps[step].digital |= names[index].digital;
+				}
+			}
+		}
+	}
+}
+
+static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
+{
+	Uint64 now;
+
+	if (!test_pad.parsed)
+		test_pad_parse();
+	if (test_pad.index >= test_pad.count || !test_pad_menu_ready)
+		return;
+	now = SDL_GetTicks();
+	if (!test_pad.started)
+	{
+		test_pad.started = now;
+		platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+	}
+	while (test_pad.index < test_pad.count)
+	{
+		Uint64 elapsed = now - test_pad.started;
+		int analog;
+
+		if (elapsed < test_pad.steps[test_pad.index].hold_ms)
+		{
+			for (analog = 0; analog < 8; analog++)
+			{
+				if (test_pad.steps[test_pad.index].buttons & (1 << analog))
+					pad->bAnalogButtons[analog] = 255;
+			}
+			pad->wButtons |= test_pad.steps[test_pad.index].digital;
+			return;
+		}
+		if (elapsed < test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms)
+			return;
+		test_pad.started += test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms;
+		test_pad.index++;
+		if (test_pad.index < test_pad.count)
+			platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+		else
+			platform_log("test pad: done");
+	}
+}
+
 static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	static int checked;
@@ -256,6 +405,10 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 		look = strstr(setting, ":look") != NULL;
 	}
 	if (seed < 0)
+		return;
+	/* (HALO_TEST_PAD presses the menus: the scripted player plays only in
+	a level) */
+	if (test_pad_at_menu && test_pad.count > 0)
 		return;
 	if (test_input_holding_action)
 	{
@@ -544,6 +697,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		if (count > 0)
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
 		test_input_gamepad(&state->Gamepad);
+		test_pad_gamepad(&state->Gamepad);
 	}
 	else if (port < count)
 	{

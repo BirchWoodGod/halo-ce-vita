@@ -26,6 +26,9 @@ Automated system link sessions for testing the netcode without the menus
 Once the game runs, every second each machine logs where every player's
 unit is, so the machines' views of the game can be compared.
 
+- "watch" hosts and joins nothing (the menus do, pressed by HALO_TEST_PAD:
+  co-op from the campaign's menus), and reports the games played.
+
 Co-op (network.coop_level, HALO_NET_COOP_LEVEL=a10): "host:<level>" hosts
 a game the server makes co-op on that campaign level, as the Vita's
 settings panel has it (network_server_manager.c), and starts it; once a
@@ -108,6 +111,9 @@ enum
 	_network_test_off,
 	_network_test_host,
 	_network_test_join,
+	/* "watch": no game hosted or joined (the menus do it: HALO_TEST_PAD),
+	only the reports of a game played */
+	_network_test_watch,
 };
 
 static struct
@@ -229,6 +235,10 @@ static void network_test_read_settings(
 	else if (!strcmp(setting, "join"))
 	{
 		network_test.mode = _network_test_join;
+	}
+	else if (!strcmp(setting, "watch"))
+	{
+		network_test.mode = _network_test_watch;
 	}
 	else if (!strcmp(setting, "join-public") || !strncmp(setting, "join-code:", 10))
 	{

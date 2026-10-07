@@ -3743,6 +3743,22 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 					previous_local_player_index = NONE;
 				}
 				widget_globals.active_widgets[widget_stack] = widget;
+#ifdef HALO_LINUX
+				/* (port, debug) HALO_UI_LOG=1: halo.log names each screen
+				opened, for the automated menu tests (HALO_TEST_PAD) */
+				{
+					static int log_screens = -1;
+
+					if (log_screens < 0)
+						log_screens = getenv("HALO_UI_LOG") && atoi(getenv("HALO_UI_LOG"));
+					if (log_screens)
+					{
+						void platform_log(const char *format, ...);
+
+						platform_log("ui: screen %s", tag_get_name(tag_index));
+					}
+				}
+#endif
 				if (invoking_widget_tag != NONE &&
 					!TEST_FLAG(
 						ui_widget_definition_get(invoking_widget_tag)->flags,
