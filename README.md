@@ -35,8 +35,9 @@ Evolved.
   lobby) and ad hoc play between Vitas, experimental. Vitas play only
   Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
 - Campaign co-op over the network, experimental: two Vitas play a level
-  together by system link, online or ad hoc (the settings panel's
-  Multiplayer tab, Co-op campaign; [port/vita/README.md](port/vita/README.md#multiplayer)).
+  together by system link, online or ad hoc (Campaign, a level and a
+  difficulty, then **Y: Play co-op**; the settings panel's Play page opens
+  Campaign for it; [port/vita/README.md](port/vita/README.md#multiplayer)).
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality, sound, control and multiplayer
   options, custom maps and tester switches: hold **Select + Start** in game.
@@ -253,8 +254,18 @@ restart. Settings are kept in
 `ux0:data/haloce-vita/settings.txt` (a file from an older version loads as
 it is).
 
-- **Multiplayer**: the network (Wi-Fi, Online, Ad hoc), your game's code,
-  joining with a code, the public games, ad hoc groups and co-op (see
+- **Multiplayer**: the network (**Connection**: Same Wi-Fi, Ad hoc or
+  Online), the ad hoc room, and **Play**: one page for hosting and joining.
+  **Host a game** shows the steps, then opens the game's System Link
+  screen; under it, how others see your game: its **Lobby name** (typed on
+  the Vita's keyboard; your Vita's user name until you type one), **Max
+  players** (2 to 16), and online its **Visibility** (Private: joined by
+  code; Public: listed in the public games too) and a **Password**. **Host
+  co-op campaign** opens Campaign: pick a level and a difficulty, then Y.
+  Online, **Join with a code** and **Browse public games**; **Games on this
+  network** opens the System Link list. Rows another Connection uses are
+  hidden. A joiner of a full game is told so. Your game's code and what
+  the game is doing show under the rows (see
   [port/vita/README.md](port/vita/README.md#multiplayer)).
 - **Modded maps** (a Multiplayer page): the custom maps in your maps folder, with their size and
   kind (Xbox, or CE for Halo Custom Edition). Left and right turn a map off
@@ -401,7 +412,7 @@ Issues and pull requests are welcome. What is planned next is in the
 - **Performance** in the biggest fights: the render on the first core is
   the limit at the peak.
 - **Testing online and ad hoc multiplayer** between Vitas: the settings
-  panel's Multiplayer tab (see [port/vita/README.md](port/vita/README.md)).
+  panel's Play page (see [port/vita/README.md](port/vita/README.md)).
 - **The issues listed for the next update** in the roadmap.
 
 ### Reporting a crash or a problem
