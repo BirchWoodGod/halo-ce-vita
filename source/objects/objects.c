@@ -4604,6 +4604,8 @@ static int objects_hitch_on = -1;
 static unsigned long long objects_hitch_started;
 static unsigned long objects_hitch_updated;
 static struct objects_hitch_object objects_hitch_slowest[OBJECTS_HITCH_SLOWEST];
+/* (vehicles.c) a vehicle's kind, driver and rest, for the line */
+int vehicle_hitch_describe(long vehicle_index, char *line, int size);
 
 static void objects_hitch_begin(void)
 {
@@ -4658,7 +4660,7 @@ static void objects_hitch_end(unsigned long long lock_wait_before, unsigned long
 	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
 		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
 	unsigned long long us;
-	char line[768];
+	char line[1024];
 	int length, slot;
 
 	if (!objects_hitch_on)
@@ -4677,6 +4679,8 @@ static void objects_hitch_end(unsigned long long lock_wait_before, unsigned long
 		length += snprintf(line + length, sizeof(line) - length, " %s '%s' %.1f ms (lock %.1f, reads %.1f)",
 			names[slowest->type & 15], object ? tag_get_name(object->definition_index) : "(deleted)",
 			slowest->us / 1000.0, slowest->lock_wait_us / 1000.0, slowest->read_us / 1000.0);
+		if (object && slowest->type == _object_type_vehicle && length < (int)sizeof(line))
+			length += vehicle_hitch_describe(slowest->object_index, line + length, sizeof(line) - length);
 		if (length >= (int)sizeof(line))
 			break;
 	}

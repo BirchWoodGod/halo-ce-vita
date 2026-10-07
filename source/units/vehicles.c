@@ -2416,6 +2416,39 @@ body has the same padded size and 98 relocations. The remaining residual is
 instruction scheduling, branch layout, and relocation placement. Keep the
 file-static call topology intact while closing it. */
 
+#ifdef HALO_LINUX
+/* (port) what a vehicle is doing, in a few words, for the objects-hitch
+line (objects.c): its kind, who drives it, its mass points, and whether it
+rests - a Custom Edition map's tag names are often protected, and on the
+Vita, Oct 7, an AI's Banshee left powered on the ground (22 mass points,
+never at rest) cost 12 ms a tick under the name '<protected>' */
+int vehicle_hitch_describe(
+	long vehicle_index,
+	char *line,
+	int size)
+{
+	static char const *kinds[] = { "tank", "jeep", "boat", "plane", "alien scout", "alien fighter", "turret" };
+	struct vehicle_datum *vehicle = vehicle_datum_try_and_get(vehicle_index);
+	struct vehicle_definition *definition;
+	struct unit_datum *driver;
+	short mass_points = 0;
+
+	if (!vehicle)
+		return 0;
+	definition = vehicle_specific_definition_get(vehicle->definition_index);
+	driver = vehicle->unit.driver_object_index != NONE ? unit_try_and_get(vehicle->unit.driver_object_index) : NULL;
+	if (definition->unit.object.physics.index != NONE)
+		mass_points = physics_definition_get(definition->unit.object.physics.index)->mass_points.count;
+	return snprintf(line, size, " [%s, %s, %d mass points, %s%s]",
+		definition->vehicle_type >= 0 && definition->vehicle_type < (short)NUMBEROF(kinds) ? kinds[definition->vehicle_type] : "?",
+		!driver ? "no driver" : driver->unit.player_index != NONE ? "player driving" : driver->unit.actor_index != NONE ?
+		"AI driving" : "driven", mass_points,
+		TEST_FLAG(vehicle->object.flags, _object_at_rest_bit) ? "at rest" :
+		TEST_FLAG(vehicle->object.flags, _object_on_ground_bit) ? "on the ground, not at rest" : "in the air",
+		vehicle->vehicle.stuck_mass_point_flags ? ", stuck" : "");
+}
+#endif
+
 boolean vehicle_update(
 	long vehicle_index)
 {
