@@ -63,6 +63,10 @@ for, and the one a step up has to fit within */
 
 /* starts at the ceiling */
 void dynres_controller_init(struct dynres_controller *controller, int floor, int ceiling, float budget_ms);
+/* starts at level (within the range): switched on in a game, the scale
+drawn until then, from which it climbs as after a step down */
+void dynres_controller_start(struct dynres_controller *controller, int floor, int ceiling, float budget_ms,
+	int level);
 /* a new range or budget, keeping the level within it */
 void dynres_controller_limits(struct dynres_controller *controller, int floor, int ceiling, float budget_ms);
 /* one frame the GPU finished: its GPU time and tail (vita_gxm.h

@@ -30,9 +30,10 @@ void dynres_controller_limits(struct dynres_controller *controller, int floor, i
 	controller->level = dynres_clamp(controller->level, floor, ceiling);
 }
 
-void dynres_controller_init(struct dynres_controller *controller, int floor, int ceiling, float budget_ms)
+void dynres_controller_start(struct dynres_controller *controller, int floor, int ceiling, float budget_ms,
+	int level)
 {
-	controller->level = DYNRES_UNITS;
+	controller->level = level;
 	controller->slow_frames = 0;
 	controller->headroom_ms = 0.0f;
 	controller->failed_level = 0;
@@ -41,6 +42,11 @@ void dynres_controller_init(struct dynres_controller *controller, int floor, int
 	controller->smoothed_gpu_ms = 0.0f;
 	controller->smoothed_level = 0;
 	dynres_controller_limits(controller, floor, ceiling, budget_ms);
+}
+
+void dynres_controller_init(struct dynres_controller *controller, int floor, int ceiling, float budget_ms)
+{
+	dynres_controller_start(controller, floor, ceiling, budget_ms, DYNRES_UNITS);
 }
 
 int dynres_controller_frame(struct dynres_controller *controller, float gpu_ms, float tail_ms, int frame_level,

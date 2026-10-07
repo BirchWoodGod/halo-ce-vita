@@ -4476,7 +4476,7 @@ static void screen_settings_apply(void)
 	const char *setting = getenv("HALO_RENDER_SCALE");
 	/* (dynamic: the targets at the full size, drawn into a part of them -
 	the dynamic resolution) */
-	float scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale();
+	float scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale(), drawn;
 	long width = screen_width_wanted(), old_width = screen_width;
 	unsigned long long started;
 	unsigned long made = 0, targets, cdram, cached, cdram_free, freed = 0, dozed = 0, moved, pool_parts = 0, wanted;
@@ -4513,7 +4513,13 @@ static void screen_settings_apply(void)
 	wanted = vgxm_cdram_wanted();
 	if (wanted > cdram_wanted_pending)
 		cdram_wanted_pending = wanted;
+	drawn = vgxm_render_rect();
 	vgxm_render_scale_set(scale);
+	/* (to the dynamic resolution: the targets made at the full size are
+	drawn at the scale they had, from which its controller starts,
+	dynres_frame_end) */
+	if (setting && !strcmp(setting, "dynamic") && drawn < scale)
+		vgxm_render_rect_set(drawn);
 	{
 		/* (debug) HALO_CDRAM_DOZE_ALL=1: every copy of the screen given back
 		at a live change, used or not, to be made again as it is next drawn
@@ -4769,7 +4775,15 @@ static void dynres_frame_end(void)
 		dynres.budget_ms = dynres_config.budget_ms;
 		dynres.log = dynres_config.log;
 		if (dynres.enabled && !was_enabled)
-			dynres_controller_init(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
+		{
+			/* (from the scale drawn until now: at the first frame the
+			ceiling, switched on in a game the fixed scale it had - from
+			the ceiling, the Vita went from 50% to 100% in a Covenant
+			fight and spent seconds over the budget coming back down,
+			Oct 7) */
+			dynres.level = dynres_level_of(vgxm_render_rect());
+			dynres_controller_start(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms, dynres.level);
+		}
 		vgxm_overlay_dynamic(dynres.enabled);
 	}
 	if (!dynres.level)
