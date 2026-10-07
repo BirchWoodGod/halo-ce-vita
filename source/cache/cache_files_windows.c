@@ -827,6 +827,16 @@ boolean cache_file_open(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		224,
 		map_file_index!=NONE);
+#ifdef HALO_LINUX
+	/* port: a map that is not in the cache (its header named another map,
+	or it could not be precached: a crafted or damaged file) is not opened,
+	rather than indexing the cached-map array out of bounds (release builds
+	do not check the assertion above) */
+	if (map_file_index == NONE)
+	{
+		return FALSE;
+	}
+#endif
 	memset(
 		cache_file_globals.requests,
 		0,

@@ -649,6 +649,66 @@ long tag_iterator_next(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port: map files are untrusted and the tag header the map carries (its tag
+instance array, counts and buffer arrays) is read and its pointers walked by
+the loader. On the Vita the pointers have been relocated into the tag cache
+(tag_relocate.c); on the desktop they are absolute addresses in the mapped
+window. Either way they must all lie inside the window and the array
+extents must fit, or a crafted map would read out of bounds. A map that
+fails is refused ("damaged or not supported") instead of loaded. */
+#define MAXIMUM_LOADED_TAG_COUNT 0x20000
+static boolean cache_file_tag_header_valid(
+	struct cache_file_tag_header const *tag_header)
+{
+	unsigned long base = (unsigned long)physical_memory_get_tag_cache_base_address();
+	unsigned long end = base + 0x01600000;
+	struct cache_file_tag_instance const *instances = tag_header->tag_instances;
+	unsigned long instances_address = (unsigned long)instances;
+	long scenario_absolute_index = (short)tag_header->scenario_tag_index;
+
+	if (tag_header->signature != CACHE_FILE_TAG_HEADER_SIGNATURE ||
+		tag_header->tag_count < 1 || tag_header->tag_count > MAXIMUM_LOADED_TAG_COUNT ||
+		instances_address < base || instances_address >= end ||
+		(unsigned long)tag_header->tag_count > (end - instances_address) / sizeof(struct cache_file_tag_instance) ||
+		scenario_absolute_index < 0 || scenario_absolute_index >= tag_header->tag_count ||
+		tag_header->vertex_buffer_count < 0 || tag_header->index_buffer_count < 0)
+	{
+		return FALSE;
+	}
+	if (tag_header->vertex_buffer_count > 0)
+	{
+		unsigned long address = (unsigned long)tag_header->vertex_buffers;
+
+		if (address < base || address >= end ||
+			(unsigned long)tag_header->vertex_buffer_count > (end - address) / sizeof(D3DVertexBuffer))
+		{
+			return FALSE;
+		}
+	}
+	if (tag_header->index_buffer_count > 0)
+	{
+		unsigned long address = (unsigned long)tag_header->index_buffers;
+
+		if (address < base || address >= end ||
+			(unsigned long)tag_header->index_buffer_count > (end - address) / sizeof(D3DIndexBuffer))
+		{
+			return FALSE;
+		}
+	}
+	/* the scenario tag the loader reads next must be a scenario in the
+	window */
+	if (instances[scenario_absolute_index].group_tag != SCENARIO_TAG ||
+		(unsigned long)instances[scenario_absolute_index].base_address < base ||
+		(unsigned long)instances[scenario_absolute_index].base_address >= end)
+	{
+		return FALSE;
+	}
+
+	return TRUE;
+}
+#endif
+
 boolean cache_file_header_verify(
 	struct cache_file_header *header,
 	char const *scenario_name,
@@ -667,7 +727,18 @@ boolean cache_file_header_verify(
 		header->footer_signature != CACHE_FILE_FOOTER_SIGNATURE ||
 		header->file_length < 0 ||
 		header->file_length > 0x11600000 ||
-		csstrlen(header->name) > 31)
+		csstrlen(header->name) > 31
+#ifdef HALO_LINUX
+		/* port: map files are untrusted - the tag data must be a sane range
+		that fits the 22 MB tag cache and lies within the file, so the load
+		below (a read of tag_data_size into the tag cache) cannot overrun it */
+		|| header->tag_data_offset < (long)sizeof(struct cache_file_header)
+		|| header->tag_data_size < (long)sizeof(struct cache_file_tag_header)
+		|| header->tag_data_size > 0x01600000
+		|| header->tag_data_offset > header->file_length
+		|| header->tag_data_size > header->file_length - header->tag_data_offset
+#endif
+		)
 	{
 		if (fatal)
 		{
@@ -963,6 +1034,24 @@ long scenario_tags_load(
 					'a',
 					'g',
 					's'));
+#ifdef HALO_LINUX
+			/* port: refuse a map whose tag header is damaged or crafted
+			before anything reads its tags (tag_cache_base_address holds the
+			relocated tags now) */
+			if (!cache_file_tag_header_valid(cache_file_globals.tag_header)
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+				/* a tag block whose count or pointer did not fit the tag data:
+				a crafted map (tag_relocate.c) */
+				|| halo_tag_relocate_anomalies() != 0
+#endif
+				)
+			{
+				error(_error_silent, "cache: '%s' has a damaged or unsupported tag header; refusing it", scenario_name);
+				halo_map_load_refused(scenario_name, "this map file is damaged or not supported");
+				cache_file_globals.tag_header = NULL;
+				return NONE;
+			}
+#endif
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
 			cache_file_globals.tags_loaded = TRUE;
@@ -977,6 +1066,15 @@ long scenario_tags_load(
 			result = cache_file_globals.tag_header->scenario_tag_index;
 		}
 	}
+#ifdef HALO_LINUX
+	/* port: an Xbox cache that did not load (not in the cache, a header that
+	failed cache_file_header_verify, or a tag header refused above) returns
+	to the menu with a message rather than stopping the game fatally */
+	if (result == NONE)
+	{
+		halo_map_load_refused(stripped_scenario_name, "this map file is damaged or not supported");
+	}
+#endif
 
 	return result;
 }
@@ -992,8 +1090,33 @@ boolean scenario_structure_bsp_load(
 
 	tag_cache_base_address = physical_memory_get_tag_cache_base_address();
 #ifdef HALO_LINUX
-	/* a Halo Custom Edition structure BSP goes to the top of that map's own
-	tag cache, not this build's (port/linux/game/custom_edition_cache.c) */
+	/* port: a structure BSP reference's file range and load address come
+	from the (untrusted) map; the Xbox loader reads file_size bytes from the
+	file into base_address. Refuse one that would read out of the file or
+	write past the tag cache (a Custom Edition BSP is read and bounds-checked
+	by custom_edition_cache.c instead). */
+	if (!custom_edition_cache_tags_loaded())
+	{
+		unsigned long tag_data_size = (unsigned long)cache_file_globals.header.tag_data_size;
+		unsigned long base = (unsigned long)tag_cache_base_address;
+		unsigned long load = (unsigned long)reference->base_address;
+
+		if (reference->file_offset < (long)sizeof(struct cache_file_header) ||
+			reference->file_size <= 0 ||
+			(unsigned long)reference->file_size > 0x01600000 - tag_data_size ||
+			reference->file_offset > cache_file_globals.header.file_length ||
+			(unsigned long)reference->file_size > (unsigned long)(cache_file_globals.header.file_length - reference->file_offset) ||
+			load < base + tag_data_size ||
+			load >= base + 0x01600000 ||
+			(unsigned long)reference->file_size > base + 0x01600000 - load)
+		{
+			error(_error_silent, "cache: structure BSP %ld has a damaged or unsupported range (0x%lX+0x%lX at 0x%lX); refusing it",
+				(long)reference->structure_bsp.index, (unsigned long)reference->file_offset,
+				(unsigned long)reference->file_size, load);
+			halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+			return FALSE;
+		}
+	}
 	if (!custom_edition_cache_tags_loaded())
 	{
 		csmemset(
@@ -1039,7 +1162,18 @@ boolean scenario_structure_bsp_load(
 	/* (a Custom Edition map's structure BSP is linked to where it is read:
 	custom_edition_cache.c) */
 	if (!custom_edition_cache_tags_loaded())
+	{
 		halo_tag_relocate_structure_bsp(tag_cache_base_address, reference->base_address, reference->file_size);
+		/* port: a tag block in the structure BSP whose count or pointer did
+		not fit (a crafted map): refuse it */
+		if (halo_tag_relocate_anomalies() != 0)
+		{
+			error(_error_silent, "cache: structure BSP %ld has a damaged or unsupported block; refusing it",
+				(long)reference->structure_bsp.index);
+			halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+			return FALSE;
+		}
+	}
 	else
 		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size);
 #endif
@@ -1052,6 +1186,35 @@ boolean scenario_structure_bsp_load(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",
 		0xE0,
 		cache_file_globals.structure_bsp_header->signature==CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE);
+#ifdef HALO_LINUX
+	/* port: refuse an Xbox structure BSP whose header is damaged before its
+	buffers are registered or its tag instance is set (a Custom Edition BSP
+	is checked by custom_edition_cache.c) */
+	if (!custom_edition_cache_tags_loaded())
+	{
+		struct cache_file_structure_bsp_header const *bsp = cache_file_globals.structure_bsp_header;
+		unsigned long base = (unsigned long)tag_cache_base_address;
+		unsigned long end = base + 0x01600000;
+		short absolute_index = (short)reference->structure_bsp.index;
+
+		if (bsp->signature != CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE ||
+			bsp->vertex_buffer_count < 0 || bsp->index_buffer_count < 0 ||
+			absolute_index < 0 || absolute_index >= cache_file_globals.tag_header->tag_count ||
+			(bsp->vertex_buffer_count > 0 && ((unsigned long)bsp->vertex_buffers < base ||
+				(unsigned long)bsp->vertex_buffers >= end ||
+				(unsigned long)bsp->vertex_buffer_count > (end - (unsigned long)bsp->vertex_buffers) / sizeof(D3DVertexBuffer))) ||
+			(bsp->index_buffer_count > 0 && ((unsigned long)bsp->index_buffers < base ||
+				(unsigned long)bsp->index_buffers >= end ||
+				(unsigned long)bsp->index_buffer_count > (end - (unsigned long)bsp->index_buffers) / sizeof(D3DIndexBuffer))))
+		{
+			error(_error_silent, "cache: structure BSP %ld has a damaged or unsupported header; refusing it",
+				(long)reference->structure_bsp.index);
+			halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+			cache_file_globals.structure_bsp_header = NULL;
+			return FALSE;
+		}
+	}
+#endif
 	structure_bsp_header_register_vertex_buffers(cache_file_globals.structure_bsp_header);
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_vertex_buffers, started, 0);

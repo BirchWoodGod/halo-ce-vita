@@ -89,6 +89,9 @@ static struct
 	unsigned long tags_end;
 	unsigned long bsp_start, bsp_end;
 	unsigned long pointers, outside, walked;
+	/* port: tag blocks whose count and element pointer are inconsistent with
+	the loaded region (a crafted map): the caller refuses such a map */
+	unsigned long invalid;
 	int report;
 } relocation;
 
@@ -96,6 +99,30 @@ static int loaded(unsigned long xbox_address)
 {
 	return (xbox_address >= relocation.link_base && xbox_address < relocation.tags_end) ||
 		(xbox_address >= relocation.bsp_start && xbox_address < relocation.bsp_end);
+}
+
+/* port: map files are untrusted - whether the whole span [xbox_start,
+xbox_start + bytes) lies inside one loaded region, with no overflow, so that
+a crafted block count or buffer count cannot walk an array off the end of
+the tag cache window (an out-of-bounds read, or a count so large the walk
+never ends). */
+static int region_fits(unsigned long xbox_start, unsigned long bytes)
+{
+	unsigned long end = xbox_start + bytes;
+
+	if (end < xbox_start)
+	{
+		return 0;
+	}
+	if (xbox_start >= relocation.link_base && end <= relocation.tags_end)
+	{
+		return 1;
+	}
+	if (relocation.bsp_end > relocation.bsp_start && xbox_start >= relocation.bsp_start && end <= relocation.bsp_end)
+	{
+		return 1;
+	}
+	return 0;
 }
 
 /* relocates the pointer at location (inside the window) once; returns where
@@ -143,13 +170,25 @@ static void walk(unsigned short struct_index, unsigned char *address)
 
 			memcpy(&count, at, 4);
 			elements = relocate_word(at + 4);
-			if (elements && count > 0 && field->child != NO_LAYOUT &&
-				loaded((unsigned long)(elements - relocation.bias)))
+			/* port: a non-empty tag block must point into the loaded region
+			and its whole element array must fit there; a crafted count or
+			pointer is flagged (the map is refused) rather than walked off
+			the end or left for the game to index out of bounds */
+			if (count != 0 && field->child_size > 0)
 			{
-				long element;
+				if (count < 0 || !elements ||
+					(unsigned long)count > relocation.link_size / field->child_size ||
+					!region_fits((unsigned long)(elements - relocation.bias), (unsigned long)count * field->child_size))
+				{
+					relocation.invalid++;
+				}
+				else if (field->child != NO_LAYOUT)
+				{
+					long element;
 
-				for (element = 0; element < count; element++)
-					walk(field->child, elements + element * field->child_size);
+					for (element = 0; element < count; element++)
+						walk(field->child, elements + element * field->child_size);
+				}
 			}
 			break;
 		}
@@ -176,7 +215,9 @@ static void relocate_buffers(unsigned char *array, long count)
 {
 	long index;
 
-	if (!array || count <= 0 || !loaded((unsigned long)(array - relocation.bias)))
+	/* port: the buffer array (12 bytes each) must fit the loaded region */
+	if (!array || count <= 0 || (unsigned long)count > relocation.link_size / 12 ||
+		!region_fits((unsigned long)(array - relocation.bias), (unsigned long)count * 12))
 		return;
 	for (index = 0; index < count; index++)
 		relocate_word(array + index * 12 + 4);
@@ -209,7 +250,7 @@ static void begin(void *tag_cache)
 	relocation.report = value && value[0] == '1';
 	relocation.window = tag_cache;
 	relocation.bias = (unsigned long)tag_cache - relocation.link_base;
-	relocation.pointers = relocation.outside = relocation.walked = 0;
+	relocation.pointers = relocation.outside = relocation.walked = relocation.invalid = 0;
 }
 
 static void finish(const char *what, unsigned long size)
@@ -218,6 +259,13 @@ static void finish(const char *what, unsigned long size)
 		platform_log("tag-relocate: %s: %lu bytes, bias 0x%08lx: %lu pointers relocated, %lu structs walked, "
 			"%lu pointer fields outside the window", what, size, relocation.bias, relocation.pointers,
 			relocation.walked, relocation.outside);
+}
+
+/* port: the number of inconsistent tag blocks the last relocation walk
+found (a crafted map); the caller refuses the map when it is not zero */
+unsigned long halo_tag_relocate_anomalies(void)
+{
+	return relocation.invalid;
 }
 
 static void use_xbox_window(void)
@@ -233,6 +281,13 @@ static void relocate_instances(unsigned char *instances, long count)
 {
 	long index;
 
+	/* port: the instance array (32 bytes each) must fit the loaded tags: a
+	crafted tag count cannot send the walk off the end */
+	if (!instances || count <= 0 || (unsigned long)count > relocation.link_size / 32 ||
+		!region_fits((unsigned long)(instances - relocation.bias), (unsigned long)count * 32))
+	{
+		return;
+	}
 	for (index = 0; index < count; index++)
 	{
 		/* group tags x3, tag index, name, base address, unused x2 */

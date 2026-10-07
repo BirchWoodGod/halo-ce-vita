@@ -7,6 +7,11 @@ void halo_tag_relocate_tags(void *tag_cache, unsigned long size);
 /* a structure BSP was just read to bsp, inside the tag cache */
 void halo_tag_relocate_structure_bsp(void *tag_cache, void *bsp, unsigned long size);
 
+/* port: inconsistent tag blocks the last relocation walk found (a count or
+element pointer that does not fit the loaded region: a crafted map). Not
+zero: the caller refuses the map. */
+unsigned long halo_tag_relocate_anomalies(void);
+
 /* Halo Custom Edition tags (custom_edition_cache.c), linked to link_base
 with a window of window_bytes there, loaded and converted to this build's
 layouts at tag_cache: their pointers moved there (0 when out of memory) */
