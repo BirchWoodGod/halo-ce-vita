@@ -7,6 +7,7 @@ The rules of map sharing that need nothing of the game
 
 #include "map_share_protocol.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* ---------- constants */
@@ -484,4 +485,56 @@ uint32_t map_share_receiver_identity(
 	struct map_share_receiver const *receiver)
 {
 	return map_share_identity(read_u32(receiver->header + HEADER_CHECKSUM_OFFSET), receiver->size, receiver->crc);
+}
+
+enum map_share_downloads map_share_downloads_policy(
+	char const *setting,
+	int public_game)
+{
+	if (setting && !strcmp(setting, MAP_SHARE_DOWNLOADS_NEVER))
+	{
+		return _map_share_downloads_refused;
+	}
+	if (public_game)
+	{
+		return setting && !strcmp(setting, MAP_SHARE_DOWNLOADS_NOT_PUBLIC) ?
+			_map_share_downloads_refused_public : _map_share_downloads_ask_warning;
+	}
+
+	return _map_share_downloads_ask;
+}
+
+void map_share_host_name_text(
+	char *text,
+	long text_size,
+	uint16_t const *name,
+	long length)
+{
+	long index, used = 0;
+
+	if (text_size <= 0)
+	{
+		return;
+	}
+	for (index = 0; name && index < length && name[index] && used < text_size - 1; index++)
+	{
+		uint16_t character = name[index];
+
+		if (!used && character == ' ')
+		{
+			continue;
+		}
+		text[used++] = character >= 0x20 && character < 0x7F ? (char)character : '?';
+	}
+	while (used > 0 && text[used - 1] == ' ')
+	{
+		used--;
+	}
+	text[used] = 0;
+	if (!used)
+	{
+		snprintf(text, (size_t)text_size, "the host");
+	}
+
+	return;
 }

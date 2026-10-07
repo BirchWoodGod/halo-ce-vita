@@ -101,7 +101,10 @@ port/linux/game/custom_edition_maps.c each time the list opens); square
 deletes one, with its picture and description, after a confirmation. The
 "PC maps" switch (Custom Edition maps in the level list) is there too, with
 a warning when the Custom Edition resource maps those need (bitmaps.map,
-sounds.map, loc.map) are not in the folder.
+sounds.map, loc.map) are not in the folder, and "Map downloads": whether a
+host's map is offered for download in a game joined without it (Ask, the
+default, warns in a game joined from the public lobby; Not public games
+asks only in the others; Never: port/linux/game/map_share.c).
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
@@ -417,6 +420,11 @@ static struct setting settings[] = {
 	maps themselves follow on the page, page_lines) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
+	/* (a host's offer of its map, in a game this Vita joined:
+	port/linux/game/map_share.c; the help is each choice's own,
+	map_downloads_help) */
+	{ "Map downloads", "HALO_MAP_SHARE_FROM", 0, 3, { "ask", "private", "never" }, { "Ask", "Not public games", "Never" },
+		"A host's map, when you join without it", 0, PAGE_MAPS },
 
 	{ "Performance logging", PERFORMANCE_LOG, 1, 2, { "", "1" }, { "Off", "On" },
 		"Frame, render and tick timing in halo.log (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
@@ -1580,10 +1588,21 @@ static const char *setting_label(const struct setting *setting)
 	return row >= 0 && playstation_rows[row].label ? playstation_rows[row].label : setting->label;
 }
 
+/* Map downloads' help, by choice */
+static const char *const map_downloads_help[3] = {
+	"Asks before a host's map comes; public games warn",
+	"Asks, but not in games from the public lobby",
+	"No downloads: copy the host's map in yourself",
+};
+
 static const char *setting_help(const struct setting *setting)
 {
 	static char camera_help[64];
 	int row = playstation_row(setting);
+
+	if (setting->variable && !strcmp(setting->variable, "HALO_MAP_SHARE_FROM") && setting->choice >= 0 &&
+		setting->choice < 3)
+		return map_downloads_help[setting->choice];
 
 	/* (the debug camera's Black: the Vita button it is on) */
 	if (row >= 0 && !strcmp(playstation_rows[row].key, "HALO_DEBUG_CAMERA"))
@@ -2595,7 +2614,7 @@ static void browse_input(unsigned long pressed)
 		browse_selected++;
 	if ((pressed & VITA_BUTTON_CROSS) && browse_selected < browse_count)
 	{
-		p2p_join_code(browse_entries[browse_selected].code);
+		p2p_join_lobby_code(browse_entries[browse_selected].code);
 		set_notice("Joining %.20s...", browse_entries[browse_selected].name);
 		p2p_lobby_browse(0);
 		screen = code_for_join ? SCREEN_GUIDE : SCREEN_LIST;

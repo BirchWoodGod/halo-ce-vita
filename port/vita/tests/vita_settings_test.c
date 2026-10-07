@@ -12,8 +12,9 @@ game, a code typed with the D-pad and joined, the public lobby listed and
 joined, Online games switched to Public at once, an ad hoc group joined,
 the game seeing no buttons while the system's dialog is up), its Modded
 maps page (a folder of fake maps: listed, turned off and on, deleted after
-a confirmation, the map in play kept), the Dev tab behind its switch
-(switches saved only while on, the timing variables, Save report's folder),
+a confirmation, the map in play kept; Map downloads' three choices), the
+Dev tab behind its switch (switches saved only while on, the timing
+variables, Save report's folder),
 Controls' pages (Button layout and Touch zones in Xbox terms, Gyro
 settings with the gyroscope's line, saved and read back), Button icons
 (PlayStation at once, the panel then naming the Xbox buttons by what they
@@ -82,6 +83,7 @@ static unsigned long long clock_us = 1000000;
 static char menu[2048];
 static int menu_selected, menu_visible;
 static char joined_code[32];
+static int joined_from_lobby;
 static int lobby_public = -1, browsing, adhoc_connects, adhoc_mode = -1, adhoc_room = -1, adhoc_state_value;
 static int hosting;
 
@@ -114,6 +116,14 @@ int p2p_join_code(const char *code)
 {
 	snprintf(joined_code, sizeof(joined_code), "%s", code);
 	return 1;
+}
+
+/* (a public lobby's game: joined as one, so that its host's map downloads
+warn: p2p_address_origin) */
+int p2p_join_lobby_code(const char *code)
+{
+	joined_from_lobby = 1;
+	return p2p_join_code(code);
 }
 
 int p2p_hosting_code(char *code, int size)
@@ -919,6 +929,7 @@ static void test_online_rows(void)
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "B A A A - 9 A A A") != NULL, "the code screen shows the letters typed");
 	press(VITA_BUTTON_CROSS);
+	check(!joined_from_lobby, "a code typed in is not joined as a public lobby's");
 	check(!strcmp(joined_code, "BAAA-9AAA") && strstr(menu, "*Multiplayer") && strstr(menu, "> Online games\n"),
 		"cross joins the code typed: back on the page");
 	check(strstr(menu, "Looking up BAAA-9AAA") != NULL, "the help line says it is looked up");
@@ -933,6 +944,7 @@ static void test_online_rows(void)
 	check(strstr(menu, "desktop host") && !strstr(menu, "this vita"), "the lobby lists the others' games");
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(joined_code, "HJ4T-9WXZ") && browsing == 0, "cross joins the game's code and stops browsing");
+	check(joined_from_lobby, "... as a public lobby's game (its map downloads warn)");
 
 	/* hosting: the code shows in the Multiplayer tab */
 	hosting = 1;
@@ -947,7 +959,8 @@ static void test_online_rows(void)
 }
 
 /* every settings variable 1.0.3 had (its settings.txt) is still a row,
-with the values it saved; and the rows added since (Sun rays) */
+with the values it saved; and the rows added since (Sun rays, Button
+icons, Map downloads) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -964,7 +977,7 @@ static void test_variables_kept(void)
 		"HALO_NET_COOP_DIFFICULTY", "HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
-		"HALO_BUTTON_ICONS",
+		"HALO_BUTTON_ICONS", "HALO_MAP_SHARE_FROM",
 	};
 	int index, all = 1, choices = 0;
 
@@ -981,7 +994,7 @@ static void test_variables_kept(void)
 	for (index = 0; index < SETTING_COUNT; index++)
 		choices += settings[index].kind == KIND_CHOICE;
 	check(all && choices == (int)(sizeof(variables) / sizeof(variables[0])),
-		"every settings variable of 1.0.3 is still a row, and no other but Sun rays and Button icons");
+		"every settings variable of 1.0.3 is still a row, and no other but Sun rays, Button icons and Map downloads");
 	check(!strcmp(setting_named("HALO_DEBUG_CAMERA")->names[0], "Off") &&
 		setting_named("HALO_DEBUG_CAMERA")->page == TAB_DEV, "Debug camera stays in Dev");
 	{
@@ -1189,12 +1202,35 @@ int main(void)
 	check(to_tab("Multiplayer") && strstr(menu, "\nModded maps\x02  3 maps  >"), "Multiplayer: Modded maps says how many");
 	check(open_page("Modded maps") && strstr(menu, "\n\x03Multiplayer > Modded maps\n"), "the Modded maps page");
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) && !menu_line(3, line, sizeof(line))[0] &&
-		!strcmp(menu_line(4, line, sizeof(line)), "!Missing: sounds.map loc.map"),
-		"PC maps switch, a gap; a CE map without sounds.map/loc.map: the warning");
-	check(!strncmp(menu_line(5, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(6, line, sizeof(line)), "inplay\x02", 7) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "mygulch\x02", 8) && menu_line(8, line, sizeof(line))[0] == '\x05',
+	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(4, line, sizeof(line))[0] &&
+		!strcmp(menu_line(5, line, sizeof(line)), "!Missing: sounds.map loc.map"),
+		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning");
+	check(!strncmp(menu_line(6, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(7, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(8, line, sizeof(line)), "mygulch\x02", 8) && menu_line(9, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
+	/* Map downloads: Ask (the default: public games warn), Not public games,
+	Never; each with its own help, saved and in the environment the game
+	reads (map_share.c) */
+	check(!strcmp(getenv("HALO_MAP_SHARE_FROM"), "ask") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MAP_SHARE_FROM=ask\n"), "Map downloads: Ask by default, saved");
+	to_line("Map downloads");
+	check(strstr(menu, "\n\x05" "Asks before a host's map comes; public games warn\n") && menu_fits(),
+		"Ask's help: public games warn");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_MAP_SHARE_FROM"), "private") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MAP_SHARE_FROM=private\n") &&
+		strstr(menu, "\nMap downloads\x02< Not public games >\n") &&
+		strstr(menu, "\n\x05" "Asks, but not in games from the public lobby\n") && menu_fits(),
+		"right: Not public games, saved, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_MAP_SHARE_FROM"), "never") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MAP_SHARE_FROM=never\n") &&
+		strstr(menu, "\nMap downloads\x02< Never  \n") &&
+		strstr(menu, "\n\x05" "No downloads: copy the host's map in yourself\n"), "right: Never, saved, its help");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_MAP_SHARE_FROM"), "ask"), "back to Ask");
 	check(strstr(menu, "\nmygulch\x02  On    245 KB  Xbox\n") != NULL, "mygulch: On, size, Xbox");
 	check(strstr(menu, "\ncemap\x02  On ") && strstr(menu, "  CE\n"), "cemap: Custom Edition");
 	check(menu_fits(), "Modded maps: each line fits");

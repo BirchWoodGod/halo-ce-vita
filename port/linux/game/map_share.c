@@ -47,6 +47,14 @@ Choices:
 - The host's start waits while it sends a map (the countdown also waits for
   every machine to have the map precached), and the lobby shows the
   machine's progress by its name (map_share_server_machine_percent).
+- Who from: the question names the host (its game's name), and in a game
+  joined from the public lobby (p2p_join_lobby_code: a stranger's) warns
+  that only maps from players one trusts should be taken. The setting Map
+  downloads (HALO_MAP_SHARE_FROM, Multiplayer > Modded maps) asks (the
+  default), asks except in public games ("private"), or never ("never"); a
+  refused offer says why (map_share_downloads_policy). Every map,
+  downloaded or not, then passes the loaders' checks before the game reads
+  it.
 - HALO_MAP_SHARE=0 turns it off (joiners are refused as before; a host
   still answers). HALO_MAP_SHARE_ANSWER=yes|no answers the question without
   asking (the automated tests: a hidden window shows nothing),
@@ -63,6 +71,7 @@ Choices:
 #include "cache/cache_files.h"
 #include "main/main.h"
 #include "tag_files/tag_files.h"
+#include "bungie_net/network/transport.h"
 #include "networking/network_messages.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
@@ -73,6 +82,7 @@ Choices:
 #include "custom_edition_maps.h"
 #include "map_share_protocol.h"
 #include "map_share.h"
+#include "../src/p2p.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,6 +195,10 @@ struct map_share_download
 	FILE *file;
 	char temporary_path[PATH_BYTES];
 	struct map_share_receiver receiver;
+	/* the host's name (its game's) and whether the game was joined from
+	the public lobby (a stranger's: the question warns) */
+	char host_name[40];
+	boolean public_game;
 	/* what the player is told on leaving */
 	char message[600];
 };
@@ -952,10 +966,11 @@ static void map_share_client_ask(
 		snprintf(
 			text,
 			sizeof(text),
-			"The host is playing the PC (Custom Edition) map %s (%s), which %s.\n\nDownload it and turn on PC maps?%s%s%s",
+			"The host is playing the PC (Custom Edition) map %s (%s), which %s.\n\nDownload it from %s and turn on PC maps?%s%s%s",
 			download->name,
 			size_text,
 			!download->replacing ? "isn't in your maps folder" : "isn't the same as yours",
+			download->host_name,
 			missing[0] ? "\n\n(Most PC maps also need " : "",
 			missing,
 			missing[0] ? " from Halo Custom Edition, which your maps folder lacks.)" : "");
@@ -966,13 +981,22 @@ static void map_share_client_ask(
 			text,
 			sizeof(text),
 			!download->replacing ?
-				"The host is playing the custom map %s (%s), which isn't in your maps folder.\n\nDownload it from the host?" :
-				"The host's custom map %s (%s) isn't the same as yours.\n\nDownload the host's copy in place of yours?",
+				"The host is playing the custom map %s (%s), which isn't in your maps folder.\n\nDownload it from %s?" :
+				"The host's custom map %s (%s) isn't the same as yours.\n\nDownload %s's copy in place of yours?",
 			download->name,
-			size_text);
+			size_text,
+			download->host_name);
 	}
-	network_event("map share: asking the player about '%s' (%lu bytes%s)", download->name, (unsigned long)download->size,
-		download->pc_maps_only ? ", PC maps only" : download->turn_on_pc_maps ? ", and PC maps" : "");
+	/* (a public lobby's game: its host is a stranger) */
+	if (download->public_game && !download->pc_maps_only)
+	{
+		size_t length = strlen(text);
+
+		snprintf(text + length, sizeof(text) - length, "\n\nThis is a public game: only accept maps from players you trust.");
+	}
+	network_event("map share: asking the player about '%s' (%lu bytes%s) from '%s'%s", download->name,
+		(unsigned long)download->size, download->pc_maps_only ? ", PC maps only" : download->turn_on_pc_maps ?
+		", and PC maps" : "", download->host_name, download->public_game ? ", a public game" : "");
 	if (!getenv("HALO_MAP_SHARE_ANSWER"))
 	{
 		platform_ask_question("Halo: custom map", text);
@@ -1070,6 +1094,37 @@ static void map_share_client_show_progress(
 	return;
 }
 
+/* Whether the joiner's host was reached from the public lobby (a
+stranger's game: p2p.c knows how each internet play peer was joined; a
+host on the LAN or in the ad hoc group is not one), and its name in
+`host_name` (its game's, which is the host's machine name:
+network_server_manager.c), from the game settings `game` it sent. */
+static boolean map_share_client_host(
+	struct network_game_client *client,
+	struct network_game const *game,
+	char *host_name,
+	long host_name_size)
+{
+	struct transport_address address;
+	unsigned long host_order;
+	int origin;
+
+	map_share_host_name_text(host_name, host_name_size, (uint16_t const *)game->name, NUMBEROF(game->name));
+	csmemset(&address, 0, sizeof(address));
+	network_game_client_get_remote_server_address(client, &address);
+	host_order = address.address.long_words[0];
+	/* (p2p.c's addresses are in network byte order: the first number the
+	lowest byte) */
+	origin = p2p_address_origin((host_order >> 24) | ((host_order >> 8) & 0xFF00) | ((host_order << 8) & 0xFF0000) |
+		(host_order << 24));
+	network_event("map share: the host '%s' (%lu.%lu.%lu.%lu) is %s", host_name, (host_order >> 24) & 255,
+		(host_order >> 16) & 255, (host_order >> 8) & 255, host_order & 255,
+		origin == P2P_ORIGIN_PUBLIC ? "a public game's" : origin == P2P_ORIGIN_PRIVATE ? "joined by code or invite" :
+		origin == P2P_ORIGIN_ADHOC ? "in the ad hoc group" : "on the LAN");
+
+	return origin == P2P_ORIGIN_PUBLIC;
+}
+
 /* ---------- public code: joiner */
 
 /* Whether the joiner may ask the host about its map `level_name` (named
@@ -1079,16 +1134,26 @@ static boolean map_share_client_may_ask(
 	struct network_game_client *client,
 	char const *level_name,
 	char const *name,
+	boolean public_game,
 	char *why,
 	long why_size)
 {
 	short state = network_game_client_get_state(client, NULL);
 	char const *setting = getenv("HALO_MAP_SHARE");
+	enum map_share_downloads downloads = map_share_downloads_policy(getenv("HALO_MAP_SHARE_FROM"), public_game);
 
 	why[0] = 0;
 	if (setting && !csstrcmp(setting, "0"))
 	{
 		snprintf(why, (size_t)why_size, "Map sharing is off on this machine (HALO_MAP_SHARE=0).");
+	}
+	else if (downloads == _map_share_downloads_refused)
+	{
+		snprintf(why, (size_t)why_size, "Map downloads are off (Multiplayer > Modded maps).");
+	}
+	else if (downloads == _map_share_downloads_refused_public)
+	{
+		snprintf(why, (size_t)why_size, "Map downloads from public games are off (Multiplayer > Modded maps).");
 	}
 	else if (state != _network_game_client_state_pregame && state != _network_game_client_state_joining)
 	{
@@ -1112,6 +1177,7 @@ static boolean map_share_client_may_ask(
 
 boolean map_share_client_offer(
 	struct network_game_client *client,
+	struct network_game const *game,
 	char const *level_name,
 	unsigned long identity,
 	boolean replacing,
@@ -1120,8 +1186,10 @@ boolean map_share_client_offer(
 {
 	struct map_share_download *download = &map_share_download;
 	char const *name = level_name ? tag_name_strip_path(level_name) : "";
+	char host_name[sizeof(download->host_name)];
+	boolean public_game = map_share_client_host(client, game, host_name, sizeof(host_name));
 
-	if (!map_share_client_may_ask(client, level_name, name, why, why_size))
+	if (!map_share_client_may_ask(client, level_name, name, public_game, why, why_size))
 	{
 		return FALSE;
 	}
@@ -1140,6 +1208,8 @@ boolean map_share_client_offer(
 	csstrncpy(download->name, name, MAP_SHARE_NAME_BYTES - 1);
 	download->identity = (uint32_t)identity;
 	download->replacing = replacing;
+	csstrncpy(download->host_name, host_name, sizeof(download->host_name) - 1);
+	download->public_game = public_game;
 	if (!map_share_client_send(client, _map_share_command_query, _map_share_refusal_none, 0))
 	{
 		csmemset(download, 0, sizeof(*download));

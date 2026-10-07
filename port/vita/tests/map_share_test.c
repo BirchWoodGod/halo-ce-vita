@@ -566,6 +566,40 @@ static void test_real_resource_maps(char const *path, uint32_t expected)
 	fclose(file);
 }
 
+/* a joiner's answer to an offer: the setting Map downloads, and whether
+the game came from the public lobby; and the host's name in the question */
+static void test_downloads_policy(void)
+{
+	static const uint16_t name[16] = { ' ', 'V', 'i', 't', 'a', 0x263A, '\n', 'x', ' ', ' ', 0 };
+	static const uint16_t full[16] = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P' };
+	static const uint16_t blank[16] = { ' ', ' ', 0 };
+	char text[40];
+
+	CHECK(map_share_downloads_policy(NULL, 0) == _map_share_downloads_ask);
+	CHECK(map_share_downloads_policy(NULL, 1) == _map_share_downloads_ask_warning);
+	CHECK(map_share_downloads_policy("ask", 0) == _map_share_downloads_ask);
+	CHECK(map_share_downloads_policy("ask", 1) == _map_share_downloads_ask_warning);
+	CHECK(map_share_downloads_policy("private", 0) == _map_share_downloads_ask);
+	CHECK(map_share_downloads_policy("private", 1) == _map_share_downloads_refused_public);
+	CHECK(map_share_downloads_policy("never", 0) == _map_share_downloads_refused);
+	CHECK(map_share_downloads_policy("never", 1) == _map_share_downloads_refused);
+	/* (an unknown value asks, warning in a public game) */
+	CHECK(map_share_downloads_policy("bogus", 1) == _map_share_downloads_ask_warning);
+	CHECK(map_share_downloads_policy("", 0) == _map_share_downloads_ask);
+
+	map_share_host_name_text(text, sizeof(text), name, 16);
+	CHECK(!strcmp(text, "Vita??x"));
+	/* (sixteen units, no end: no further) */
+	map_share_host_name_text(text, sizeof(text), full, 16);
+	CHECK(!strcmp(text, "ABCDEFGHIJKLMNOP"));
+	map_share_host_name_text(text, 6, full, 16);
+	CHECK(!strcmp(text, "ABCDE"));
+	map_share_host_name_text(text, sizeof(text), blank, 16);
+	CHECK(!strcmp(text, "the host"));
+	map_share_host_name_text(text, sizeof(text), NULL, 16);
+	CHECK(!strcmp(text, "the host"));
+}
+
 int main(void)
 {
 	test_names();
@@ -575,6 +609,7 @@ int main(void)
 	test_receiver();
 	test_headers();
 	test_identity();
+	test_downloads_policy();
 	test_real_map(getenv("MAP_SHARE_TEST_XBOX_MAP"), "mygulch", 0);
 	test_real_map(getenv("MAP_SHARE_TEST_CE_MAP"), "pcgulch", 1);
 	test_resource_maps_used();

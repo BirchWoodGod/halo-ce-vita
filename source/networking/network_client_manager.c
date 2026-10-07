@@ -1451,6 +1451,7 @@ boolean network_game_client_game_settings_updated(
 			if ((check == _network_game_client_map_custom_missing || check == _network_game_client_map_custom_different) &&
 				map_share_client_offer(
 					client,
+					message_packet,
 					message_packet->map.name,
 					(unsigned long)message_packet->map.version,
 					check == _network_game_client_map_custom_different,
