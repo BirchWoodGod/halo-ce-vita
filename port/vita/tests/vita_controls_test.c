@@ -14,7 +14,9 @@ buttons, and the settings read from the environment; gyro aiming: rates
 to angles, the deadzone, smoothing of tremor, the bias learnt only while
 the Vita lies still, the yaw/roll and invert choices, the sensitivity, and
 when the game gets the angles (on, zoomed, while holding, never in the
-menus, dropped when not taken).
+menus, dropped when not taken); and the names the settings panel shows for
+the choices (Xbox terms for the Xbox buttons, never "grenade button"; each
+fitting the panel's value column), one per settings value.
 
 Run port/vita/tests/run_vita_controls_test.sh.
 */
@@ -686,8 +688,48 @@ static void test_gyro_aim(void)
 	}
 }
 
+/* the choices' names as the settings panel's rows show them
+(vita_settings.c: a value is drawn as "< name >" in a column 24 characters
+wide, vita_gxm.c menu_build) */
+static void test_names(void)
+{
+	static const char *const xbox_values[] = { VITA_XBOX_VALUES }, *const xbox_names[] = { VITA_XBOX_NAMES };
+	static const char *const xbox_short[] = { VITA_XBOX_SHORT_NAMES };
+	static const char *const button_values[] = { VITA_BUTTON_VALUES }, *const button_names[] = { VITA_BUTTON_NAMES };
+	static const char *const guard_values[] = { VITA_REAR_GUARD_VALUES }, *const guard_names[] = { VITA_REAR_GUARD_NAMES };
+	static const char *const xbox_terms[] = { "Off", "A", "B", "X", "Y", "Black", "White", "Left trigger",
+		"Right trigger", "Left stick", "Right stick", "Back" };
+	int index, fits = 1, plain = 1, terms = 1;
+
+	check(sizeof(xbox_values) == sizeof(xbox_names) && sizeof(xbox_names) == sizeof(xbox_short) &&
+		sizeof(xbox_names) / sizeof(xbox_names[0]) == VITA_XBOX_COUNT, "a name and a short name per Xbox button value");
+	check(sizeof(button_values) == sizeof(button_names) && sizeof(button_names) / sizeof(button_names[0]) ==
+		VITA_BUTTON_CHOICES, "a name per Vita button value");
+	check(sizeof(guard_values) == sizeof(guard_names) && sizeof(guard_names) / sizeof(guard_names[0]) ==
+		VITA_REAR_GUARD_COUNT, "a name per rear guard value");
+	for (index = 0; index < VITA_XBOX_COUNT; index++)
+	{
+		fits &= strlen(xbox_names[index]) + 4 <= 24 && strlen(xbox_short[index]) <= 2;
+		plain &= !strstr(xbox_names[index], "button") && !strstr(xbox_names[index], "Button");
+		terms &= !strcmp(xbox_names[index], xbox_terms[index]);
+		/* (the settings value names it back) */
+		terms &= vita_xbox_named(xbox_values[index]) == index;
+	}
+	for (index = 0; index < VITA_BUTTON_CHOICES; index++)
+	{
+		fits &= strlen(button_names[index]) + 4 <= 24;
+		plain &= !strstr(button_names[index], "button") && !strstr(button_names[index], "Button");
+	}
+	for (index = 0; index < VITA_REAR_GUARD_COUNT; index++)
+		fits &= strlen(guard_names[index]) + 4 <= 24;
+	check(terms, "the touch zones' choices are the Xbox controller's (A B X Y, Black, White, triggers, sticks, Back)");
+	check(plain, "no choice is called a \"button\" (\"grenade button\"...): the buttons by name");
+	check(fits, "every choice's name fits the panel's value column (\"< name >\", 24 characters)");
+}
+
 int main(void)
 {
+	test_names();
 	test_zones();
 	test_hold();
 	test_rear_guard();

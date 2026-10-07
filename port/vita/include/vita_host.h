@@ -111,7 +111,7 @@ struct vita_host_pad
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);
-/* the gyroscope's line on the settings panel's Gyro tab: the rates now
+/* the gyroscope's line on the settings panel's Gyro settings page: the rates now
 (degrees a second), whether the bias was learnt */
 void vita_gyro_status(char *text, int size);
 /* the settings panel (vita_settings.c): nonzero when it took the buttons

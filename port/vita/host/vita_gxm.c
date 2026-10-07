@@ -3686,34 +3686,75 @@ static unsigned int overlay_rect(struct overlay_vertex *vertices, unsigned int c
 	return count + 1;
 }
 
-/* text in the 8x8 font at scale, one rectangle per lit pixel */
+/* text in the 8x8 font at scale: a rectangle per run of lit pixels, a run
+the row below repeats made one taller rectangle (the panel's text fits in
+the overlay's 8192 rectangles, the 16-bit indices' limit) */
 static unsigned int overlay_text(struct overlay_vertex *vertices, unsigned int count, unsigned int limit, float x,
 	float y, float scale, uint32_t color, const char *text)
 {
 	for (; *text; text++, x += 8.0f * scale)
 	{
 		unsigned char c = (unsigned char)*text;
-		int row, column;
+		/* the runs still growing down: column, length, first row */
+		unsigned char open_column[8], open_length[8], open_row[8];
+		int open_count = 0, row;
 
 		if (c >= 'a' && c <= 'z')
 			c = (unsigned char)(c - 'a' + 'A');
 		if (c < 32 || c >= 128)
 			continue;
-		for (row = 0; row < 8; row++)
+		for (row = 0; row <= 8; row++)
 		{
-			unsigned char bits = font[c - 32][row];
+			unsigned char bits = row < 8 ? font[c - 32][row] : 0;
+			unsigned char run_column[8], run_length[8], run_used[8];
+			int run_count = 0, column, index;
 
-			/* (a run of lit pixels is one rectangle) */
 			for (column = 0; column < 8; column++)
 			{
 				int run = 0;
 
 				while (column + run < 8 && (bits & (0x80 >> (column + run))))
 					run++;
-				if (run && count < limit)
-					count = overlay_rect(vertices, count, x + column * scale, y + row * scale, scale * run, scale, color);
+				if (run)
+				{
+					run_column[run_count] = (unsigned char)column;
+					run_length[run_count] = (unsigned char)run;
+					run_used[run_count++] = 0;
+				}
 				column += run;
 			}
+			/* (a run this row repeats grows; one it does not is drawn) */
+			for (index = 0; index < open_count; )
+			{
+				int run, kept = 0;
+
+				for (run = 0; run < run_count; run++)
+					if (!run_used[run] && run_column[run] == open_column[index] && run_length[run] == open_length[index])
+					{
+						run_used[run] = 1;
+						kept = 1;
+						break;
+					}
+				if (kept)
+				{
+					index++;
+					continue;
+				}
+				if (count < limit)
+					count = overlay_rect(vertices, count, x + open_column[index] * scale, y + open_row[index] * scale,
+						scale * open_length[index], scale * (float)(row - open_row[index]), color);
+				open_count--;
+				open_column[index] = open_column[open_count];
+				open_length[index] = open_length[open_count];
+				open_row[index] = open_row[open_count];
+			}
+			for (index = 0; index < run_count; index++)
+				if (!run_used[index])
+				{
+					open_column[open_count] = run_column[index];
+					open_length[open_count] = run_length[index];
+					open_row[open_count++] = (unsigned char)row;
+				}
 		}
 	}
 	return count;
@@ -3767,6 +3808,21 @@ void vgxm_menu_set(const char *text, int selected)
 	}
 }
 
+/* the settings panel's colours (0xAABBGGRR), after the game's own menus:
+a dark blue-black panel, their light blue for what is chosen and for the
+values, white text */
+#define MENU_PANEL 0xF0180E08u
+#define MENU_ACCENT 0xFFF09E4Au
+#define MENU_RULE 0xFF6E4628u
+#define MENU_CHOSEN 0xFF5C3A1Eu
+#define MENU_LABEL 0xFFEBE2DCu
+#define MENU_VALUE 0xFFFFC88Cu
+#define MENU_INFO 0xFFB9A596u
+#define MENU_HELP 0xFFE1D2C8u
+#define MENU_FOOTER 0xFFD29664u
+#define MENU_TAB 0xFFB9A08Cu
+#define MENU_WARNING 0xFF40C0FFu
+
 /* the settings panel's tab bar (a first line that starts with a tab): the
 tabs' names with '|' between them, the shown one marked by a '*' before its
 name, drawn in a row with the shown one on a bar, and the shoulder buttons
@@ -3774,12 +3830,12 @@ that change it at the ends */
 static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int count, unsigned int limit, float left,
 	float y, float width, const char *tabs)
 {
-	const float scale = 1.5f, character = 8.0f * scale;
+	const float scale = 2.0f, character = 8.0f * scale;
 	char name[32];
-	float x = left + 16.0f;
+	float x = left + 20.0f;
 
-	count = overlay_text(vertices, count, limit, x, y, scale, 0xFF40FF40u, "L");
-	x += 2.0f * character;
+	count = overlay_text(vertices, count, limit, x, y, scale, MENU_ACCENT, "L");
+	x += 3.0f * character;
 	while (*tabs)
 	{
 		size_t length = strcspn(tabs, "|");
@@ -3790,26 +3846,25 @@ static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int coun
 			name_length = sizeof(name) - 1;
 		memcpy(name, tabs + shown, name_length);
 		name[name_length] = 0;
-		/* (three quarters of a character either side of a name: the seven
-		tabs, Dev's too, end before the R) */
+		/* (a character either side of a name: the five tabs end well
+		before the R) */
 		if (shown)
-			count = overlay_rect(vertices, count, x, y - 4.0f, (name_length + 1.5f) * character, 8.0f * scale + 8.0f,
-				0xFF40B040u);
-		count = overlay_text(vertices, count, limit, x + 0.75f * character, y, scale, shown ? 0xFF000000u : 0xFFB0B0B0u,
-			name);
-		x += (name_length + 1.5f) * character;
+			count = overlay_rect(vertices, count, x, y - 6.0f, (name_length + 2.0f) * character, character + 12.0f,
+				MENU_ACCENT);
+		count = overlay_text(vertices, count, limit, x + character, y, scale, shown ? 0xFF000000u : MENU_TAB, name);
+		x += (name_length + 2.0f) * character + 8.0f;
 		tabs += length;
 		if (*tabs == '|')
 			tabs++;
 	}
-	count = overlay_text(vertices, count, limit, left + width - 16.0f - character, y, scale, 0xFF40FF40u, "R");
+	count = overlay_text(vertices, count, limit, left + width - 20.0f - character, y, scale, MENU_ACCENT, "R");
 	return count;
 }
 
 /* the touch zones' diagram (vita_settings.c touch_diagram: a character per
 zone, S the chosen row's, s the same while Off, A set, - Off; then a space
 and each zone's Xbox button, 'a' + its VITA_XBOX_* index): the front screen
-and the rear pad as small rectangles at (x, y), each zone on them green
+and the rear pad as small rectangles at (x, y), each zone on them blue
 when it is the row's, grey when set, dark when Off, a set one with its Xbox
 button's short name (A, LT, RS...) */
 static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned int count, unsigned int limit,
@@ -3833,7 +3888,7 @@ static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned
 		{
 			const struct vita_touch_zone *rectangle = &vita_touch_zones[zone];
 			char mark = zones[zone];
-			uint32_t color = mark == 'S' ? 0xFF40FF40u : mark == 's' ? 0xFF308030u : mark == 'A' ? 0xFF909090u :
+			uint32_t color = mark == 'S' ? MENU_ACCENT : mark == 's' ? 0xFF805A30u : mark == 'A' ? 0xFF909090u :
 				0xFF404040u;
 
 			if (rectangle->panel != panel)
@@ -3861,27 +3916,48 @@ static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned
 	return count;
 }
 
-/* the settings panel, centred: title (or tab bar), a row per line (the
-selected one on a bar), the hint at the bottom; a line of '\x01' and zone
-marks is not a row but the touch zones' diagram, at the right */
+/* a row of the settings panel: its label, and after a '\x02' its value,
+which starts at `value_x` (the values of a page make a column) */
+static unsigned int menu_row(struct overlay_vertex *vertices, unsigned int count, unsigned int limit, float x,
+	float value_x, float y, uint32_t label_color, uint32_t value_color, const char *line)
+{
+	const char *value = strchr(line, '\x02');
+	char label[64];
+	size_t length = value ? (size_t)(value - line) : strlen(line);
+
+	if (length > sizeof(label) - 1)
+		length = sizeof(label) - 1;
+	memcpy(label, line, length);
+	label[length] = 0;
+	count = overlay_text(vertices, count, limit, x, y, 2.0f, label_color, label);
+	if (value)
+		count = overlay_text(vertices, count, limit, value_x, y, 2.0f, value_color, value + 1);
+	return count;
+}
+
+/* the settings panel. With a tab bar (a first line that starts with a
+tab, vita_settings.c show_list): the panel the height of the screen, the
+tab bar at its top, a page's title ('\x03'), the rows (label '\x02' value)
+with the chosen one on a bar, lines that are not rows ('\x04', dimmer), an
+empty line for a gap, the chosen row's help ('\x05') and the panel's
+buttons ('\x06') on the last two lines, and the touch zones' diagram (a
+line of '\x01' and zone marks) at the right. Without one (a message, a
+question, the guide, a screen an action opens): centred, its height the
+lines', the first line its title and the last its buttons. A line that
+starts with '!' is a warning, in amber */
 static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int count, unsigned int limit)
 {
 	const char *text = gxm.menu_text[__atomic_load_n(&gxm.menu_index, __ATOMIC_ACQUIRE)];
-	const char *lines[28];
+	const char *lines[32];
 	const char *diagram = NULL;
-	int line_count = 0, index, slots;
-	/* (wide enough for the tab bar's seven names at 12 pixels a character,
-	and a 21-character label with a 16-character choice at 16:
-	"Co-op campaign  < 343 Guilty Spark >") */
-	const float width = 800.0f;
-	float row_height = 24.0f;
-	float height, left, top;
+	int line_count = 0, index;
+	const float width = 880.0f, left = (DISPLAY_WIDTH - width) / 2.0f;
 	char copy[2048];
 	char *cursor;
 
 	strncpy(copy, text, sizeof(copy) - 1);
 	copy[sizeof(copy) - 1] = 0;
-	for (cursor = copy; cursor && line_count < 28; )
+	for (cursor = copy; cursor && line_count < 32; )
 	{
 		char *newline = strchr(cursor, '\n');
 
@@ -3895,45 +3971,102 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	}
 	if (line_count < 2)
 		return count;
-	/* (the tabbed panel keeps one size from tab to tab: room for 16 lines,
-	the hint on the last) */
-	slots = lines[0][0] == '\t' && line_count < 16 ? 16 : line_count;
-	/* (the rows close up to fit the screen when there are many) */
-	if (16.0f + row_height * slots + 8.0f > DISPLAY_HEIGHT)
-		row_height = (DISPLAY_HEIGHT - 24.0f) / slots;
-	height = 16.0f + row_height * slots + 8.0f;
-	left = (DISPLAY_WIDTH - width) / 2.0f;
-	top = (DISPLAY_HEIGHT - height) / 2.0f;
-	count = overlay_rect(vertices, count, left, top, width, height, 0xE0101010u);
-	count = overlay_rect(vertices, count, left, top, width, 2.0f, 0xFF40FF40u);
-	for (index = 0; index < line_count; index++)
+	if (lines[0][0] == '\t')
 	{
-		float y = top + 12.0f + row_height * (index == line_count - 1 ? slots - 1 : index);
-		uint32_t color = index == 0 ? 0xFF40FF40u : index == line_count - 1 ? 0xFFA0A0A0u : 0xFFE0E0E0u;
+		const float top = 12.0f, height = DISPLAY_HEIGHT - 24.0f, bottom = top + height;
+		const float row_height = 28.0f, x = left + 28.0f, value_x = left + 28.0f + 23.0f * 16.0f;
+		float y = top + 64.0f, rows_top = 0.0f;
 
-		if (index == 0 && lines[0][0] == '\t')
+		count = overlay_rect(vertices, count, left, top, width, height, MENU_PANEL);
+		count = overlay_rect(vertices, count, left, top, width, 2.0f, MENU_ACCENT);
+		count = menu_tabs(vertices, count, limit, left, top + 18.0f, width, lines[0] + 1);
+		count = overlay_rect(vertices, count, left + 12.0f, top + 48.0f, width - 24.0f, 2.0f, MENU_RULE);
+		/* (the help and the buttons under a rule at the bottom) */
+		count = overlay_rect(vertices, count, left + 12.0f, bottom - 64.0f, width - 24.0f, 2.0f, MENU_RULE);
+		for (index = 1; index < line_count; index++)
 		{
-			count = menu_tabs(vertices, count, limit, left, y, width, lines[0] + 1);
-			continue;
+			const char *line = lines[index];
+			uint32_t label_color = MENU_LABEL, value_color = MENU_VALUE;
+
+			if (line[0] == '\x05')
+			{
+				count = overlay_text(vertices, count, limit, x, bottom - 50.0f, 1.5f, MENU_HELP, line + 1);
+				continue;
+			}
+			if (line[0] == '\x06')
+			{
+				count = overlay_text(vertices, count, limit, x, bottom - 24.0f, 1.5f, MENU_FOOTER, line + 1);
+				continue;
+			}
+			if (line[0] == '\x03')
+			{
+				count = overlay_text(vertices, count, limit, x, y, 2.0f, MENU_ACCENT, line + 1);
+				y += 36.0f;
+				continue;
+			}
+			if (!line[0])
+			{
+				y += row_height / 2.0f;
+				continue;
+			}
+			if (!rows_top)
+				rows_top = y;
+			if (index == gxm.menu_selected)
+			{
+				/* (the bar ends before the touch zones' diagram) */
+				count = overlay_rect(vertices, count, left + 12.0f, y - 6.0f, width - (diagram ? 212.0f : 24.0f),
+					row_height, MENU_CHOSEN);
+				count = overlay_rect(vertices, count, left + 12.0f, y - 6.0f, 4.0f, row_height, MENU_ACCENT);
+				label_color = 0xFFFFFFFFu;
+			}
+			if (line[0] == '\x04')
+			{
+				label_color = value_color = MENU_INFO;
+				line++;
+			}
+			else if (line[0] == '!')
+			{
+				label_color = value_color = MENU_WARNING;
+				line++;
+			}
+			count = menu_row(vertices, count, limit, x, value_x, y, label_color, value_color, line);
+			y += row_height;
 		}
-		if (index == gxm.menu_selected)
-		{
-			count = overlay_rect(vertices, count, left + 6.0f, y - 4.0f, width - 12.0f, row_height, 0xFF305030u);
-			color = 0xFFFFFFFFu;
-		}
-		/* (a line that starts with '!': a warning, in amber) */
-		if (lines[index][0] == '!')
-		{
-			color = 0xFF40C0FFu;
-			lines[index]++;
-		}
-		count = overlay_text(vertices, count, limit, left + 16.0f, y, index == line_count - 1 ? 1.5f : 2.0f, color,
-			lines[index]);
+		/* (right of the values: "< Right trigger >" ends 664 pixels in) */
+		if (diagram)
+			count = menu_touch_diagram(vertices, count, limit, left + width - 176.0f, rows_top ? rows_top - 8.0f :
+				top + 64.0f, diagram);
+		return count;
 	}
-	/* (right of the rows' text: a 21-character label and a 14-character
-	choice end 640 pixels in) */
-	if (diagram)
-		count = menu_touch_diagram(vertices, count, limit, left + width - 160.0f, top + 12.0f + row_height, diagram);
+	{
+		const float row_height = 26.0f;
+		float height = 24.0f + row_height * line_count, top, y;
+
+		if (height > DISPLAY_HEIGHT - 8.0f)
+			height = DISPLAY_HEIGHT - 8.0f;
+		top = (float)(int)((DISPLAY_HEIGHT - height) / 2.0f);
+		count = overlay_rect(vertices, count, left, top, width, height, MENU_PANEL);
+		count = overlay_rect(vertices, count, left, top, width, 2.0f, MENU_ACCENT);
+		for (index = 0, y = top + 14.0f; index < line_count; index++, y += row_height)
+		{
+			const char *line = lines[index];
+			int last = index == line_count - 1;
+			uint32_t color = index == 0 ? MENU_ACCENT : last ? MENU_FOOTER : MENU_LABEL;
+
+			if (index == gxm.menu_selected)
+			{
+				count = overlay_rect(vertices, count, left + 12.0f, y - 5.0f, width - 24.0f, row_height, MENU_CHOSEN);
+				count = overlay_rect(vertices, count, left + 12.0f, y - 5.0f, 4.0f, row_height, MENU_ACCENT);
+				color = 0xFFFFFFFFu;
+			}
+			if (line[0] == '!')
+			{
+				color = MENU_WARNING;
+				line++;
+			}
+			count = overlay_text(vertices, count, limit, left + 28.0f, y, last ? 1.5f : 2.0f, color, line);
+		}
+	}
 	return count;
 }
 

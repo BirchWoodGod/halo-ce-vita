@@ -3,45 +3,58 @@ VITA_SETTINGS.C
 
 The settings panel: hold SELECT and START together for a moment, in play
 or in the menus, and a panel over the game shows the Vita's settings in
-tabs that L and R switch between: Graphics, Audio, Controls, Gyro,
-Multiplayer, Modded maps and, once "Show dev settings" (Controls) is on, Dev. Up and
-down choose a line, left and right change it, cross does what an action
-line says, circle (or SELECT+START again) closes the panel; the game sees no
-buttons while it is open. Each setting is one of the environment variables
-the port already reads (HALO_MODEL_LOD_SCALE...), kept in
-ux0:data/haloce-vita/settings.txt and set before the game starts; a change
+four tabs that L and R switch between: Graphics, Controls, Audio and
+Multiplayer, and Dev once "Show dev settings" (Controls, Advanced) is on.
+No tab is longer than a screen: the rows few players change open from a
+row marked > as a page of their own (Graphics' Advanced; Controls' Button
+layout, Touch zones, Gyro settings and Advanced; Multiplayer's Co-op,
+Online games, Ad hoc and Modded maps; Dev's A/B switches), and
+circle goes back.
+Up and down choose a line, left and right change it, cross does what an
+action line says, circle (or SELECT+START again) closes the panel; the
+game sees no buttons while it is open. Each row's value is drawn in a
+column of its own (a '\x02' between label and value, vita_gxm.c
+menu_build), the selected row's help on one line below the rows and the
+panel's buttons on the line under it. Each setting is one of the
+environment variables the port already reads (HALO_MODEL_LOD_SCALE...),
+kept in ux0:data/haloce-vita/settings.txt and set before the game starts;
+which page shows a row changes nothing of that. A change
 bumps halo_settings_generation, and the readers that can take a new value
 mid-game read theirs again (the render resolution and the aspect ratio too:
 the screen's targets are made again between two frames, d3d8_gxm.c
 screen_settings_apply; if the memory for the new size cannot be had, the
 panel says the change waits for a restart). Render resolution's Dynamic
 lets the GPU's load set the scale, frame by frame, between the Dynamic
-minimum and 100% (d3d8_gxm.c, the dynamic resolution).
+minimum (shown while Dynamic is chosen) and 100% (d3d8_gxm.c, the dynamic
+resolution).
 
 The release's defaults, the ones measured best on the Vita, are set here
 too, under whatever env.txt and settings.txt say.
 
 The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
-those rows match none of them. Rows marked * apply after a restart (the
-sound voices, the network, most dev switches).
+those rows match none of them (the render resolution, on the tab, and the
+detail and update rates, under Advanced). Rows marked * apply after a
+restart (the sound voices, the network, most dev switches).
 
-Controls is laid out as the Xbox controller: each touch zone (the front
-screen's top corners and its left and right edges, the rear pad's halves;
-vita_controls.c says where they are and when a finger counts; Rear touch
-guard keeps the hands holding the Vita off the rear ones) presses an
-Xbox button, and each Xbox button (A B X Y, Black, White, the triggers, the
-sticks' clicks, Back) is on a Vita button of the player's choosing, in play; while a zone's row is chosen the panel draws the
-zones beside the rows (touch_diagram). Reset controls puts the tab's rows
-back as shipped.
-
-Gyro sets gyro aiming (vita_controls.h): the view turns as the Vita turns,
-on top of the right stick - Off (the default), On, While zoomed, or While
-holding the Gyro button (which then does nothing else in play), its
-sensitivity (1x: the view turns as far as the Vita), vertical direction and
-whether turning is the Vita's yaw or its roll; a line shows the gyroscope's
-rates now and whether its bias was learnt (it is, each time the Vita lies
-still for a second).
+Controls has the rows players change (look, crouch, gyro aiming, the rear
+touch guard) and three pages laid out as the Xbox controller. Button
+layout puts each Xbox button (A B X Y, Black, White, the triggers, the
+sticks' clicks, Back) on a Vita button of the player's choosing, in play.
+Touch zones: each zone (the front screen's top corners and its left and
+right edges, the rear pad's halves; vita_controls.c says where they are
+and when a finger counts; Rear touch guard keeps the hands holding the
+Vita off the rear ones) presses an Xbox button, and the page draws the
+zones beside its rows (touch_diagram). Gyro settings: gyro aiming
+(vita_controls.h) turns the view as the Vita turns, on top of the right
+stick - Off (the default), On, While zoomed, or While holding the Gyro
+button (which then does nothing else in play) - with its sensitivity (1x:
+the view turns as far as the Vita), vertical direction and whether turning
+is the Vita's yaw or its roll; a line shows the gyroscope's rates now and
+whether its bias was learnt (it is, each time the Vita lies still for a
+second). Advanced: the sticks' deadzone, Reset controls (look, crouch,
+buttons and touch back as shipped; the gyro's rows and Show dev settings
+stay) and Show dev settings.
 
 Multiplayer is for playing with other Vitas. "Host a game" and "Join a
 game" each show the steps on a screen of their own (SCREEN_GUIDE), then
@@ -58,15 +71,21 @@ menus, outside a lobby, with a network: otherwise the guide says why.
 - "Connection" (after a restart) chooses how the Vitas reach each other:
   Same Wi-Fi, the default, the system link that works on hardware; or Ad
   hoc (p2p_adhoc.c, vita_net.c; not yet verified on hardware): Vitas side
-  by side without a router, whose rows show while it is chosen - the room,
-  joining and leaving its group; Host and Join join the room's group first
-  (the system's ad hoc dialog), then open System Link. Online (internet
-  play, port/linux/src/p2p.c) is offered there only while "Show dev
-  settings" is on, and its rows are in the Dev tab (below).
-- "Co-op campaign": a game this Vita hosts is that campaign level played
-  together, the next level after each one won (network_server_manager.c).
+  by side without a router, whose page (Ad hoc >) shows while it is
+  chosen - the room, joining and leaving its group; Host and Join join the
+  room's group first (the system's ad hoc dialog), then open System Link.
+  Online (internet play, port/linux/src/p2p.c; experimental): its page
+  (Online games >) shows while it is chosen. With the connection Online,
+  hosting a System Link game shows its short code in the tab (ABCD-EFGH)
+  for others to type in; "Online games: Public" also lists it in the
+  public lobby. "Join with a code" types one in with the D-pad; "Browse
+  public games" lists the lobby. The host's game then shows under System
+  Link.
+- "Co-op >", "Co-op campaign": a game this Vita hosts is that campaign level played
+  together, the next level after each one won (network_server_manager.c),
+  at the difficulty chosen.
 
-Modded maps lists the maps in the maps folder that are not the Xbox's own:
+Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo), and
 whether it is on. Left and right turn one off or on (an off map stays in
 the folder but leaves the level list: HALO_MAPS_DISABLED, read by
@@ -77,18 +96,14 @@ a warning when the Custom Edition resource maps those need (bitmaps.map,
 sounds.map, loc.map) are not in the folder.
 
 Dev holds a few switches for testers (each a debug environment variable;
-most are read once, at start-up, and say so) and "Save report", which
+most are read once, at start-up, and say so; the renderer's A/B ones on a
+page of their own) and "Save report", which
 copies halo.log, halo-prev.log, settings.txt, env.txt and the newest crash
 dump into ux0:data/haloce-vita/report-<date>/ for sending. A dev switch is
 saved in settings.txt only while it is on; off, env.txt's value (or the
-default) applies. When any is on, halo.log says so near its top. Internet
-play's rows are there too, out of the Multiplayer tab's way: with the
-connection Online, hosting a System Link game shows its short code in the
-Multiplayer tab (ABCD-EFGH) for others to type in; "Online games: Public"
-also lists it in the public lobby. "Join with a code" types one in with
-the D-pad; "Browse public games" lists the lobby. The host's game then
-shows under System Link. "Ad hoc dialog" is how the system's dialog joins
-a group.
+default) applies. When any is on, halo.log says so near its top. "Ad hoc
+dialog" (how the system's dialog joins a group) is there too, out of the
+Multiplayer tab's way.
 */
 
 #include <psp2/apputil.h>
@@ -128,20 +143,51 @@ int halo_screen_restart_needed(void);
 (cache_files.c): such a map is not deleted */
 int halo_cache_map_in_use(const char *name);
 
+/* the pages: the tabs L and R switch between, then the pages a row of a tab
+opens (circle goes back to the tab) */
 enum
 {
 	TAB_GRAPHICS,
-	TAB_AUDIO,
 	TAB_CONTROLS,
-	TAB_GYRO,
+	TAB_AUDIO,
 	TAB_MULTIPLAYER,
-	TAB_MAPS,
 	TAB_DEV,
-	TAB_COUNT
+	TAB_COUNT,
+
+	PAGE_GRAPHICS_ADVANCED = TAB_COUNT,
+	PAGE_BUTTONS,
+	PAGE_TOUCH,
+	PAGE_GYRO,
+	PAGE_CONTROLS_ADVANCED,
+	PAGE_COOP,
+	PAGE_ONLINE,
+	PAGE_ADHOC,
+	PAGE_MAPS,
+	PAGE_DEV_AB,
+	PAGE_COUNT
 };
 
-static const char *const tab_names[TAB_COUNT] = {
-	"Graphics", "Audio", "Controls", "Gyro", "Multiplayer", "Modded maps", "Dev",
+/* each page's name and the tab it is on (a tab's own: itself) */
+static const struct
+{
+	const char *name;
+	int tab;
+} pages[PAGE_COUNT] = {
+	{ "Graphics", TAB_GRAPHICS },
+	{ "Controls", TAB_CONTROLS },
+	{ "Audio", TAB_AUDIO },
+	{ "Multiplayer", TAB_MULTIPLAYER },
+	{ "Dev", TAB_DEV },
+	{ "Advanced", TAB_GRAPHICS },
+	{ "Button layout", TAB_CONTROLS },
+	{ "Touch zones", TAB_CONTROLS },
+	{ "Gyro settings", TAB_CONTROLS },
+	{ "Advanced", TAB_CONTROLS },
+	{ "Co-op", TAB_MULTIPLAYER },
+	{ "Online games", TAB_MULTIPLAYER },
+	{ "Ad hoc", TAB_MULTIPLAYER },
+	{ "Modded maps", TAB_MULTIPLAYER },
+	{ "A/B switches", TAB_DEV },
 };
 
 enum
@@ -163,6 +209,8 @@ enum
 	ACTION_RESET_CONTROLS,
 	ACTION_HOST,
 	ACTION_JOIN,
+	/* opens the page `opens` */
+	ACTION_PAGE,
 };
 
 struct setting
@@ -175,23 +223,28 @@ struct setting
 	const char *names[MAXIMUM_CHOICES];
 	const char *help;
 	int choice;
-	int tab;
+	/* the page the row is on (a TAB_* or PAGE_*) */
+	int page;
 	int kind;
 	int action;
 	/* a dev switch: its first choice is the default (an empty value: the
 	variable unset), it is saved only when on, and env.txt's value stands
 	while settings.txt does not name it */
 	int dev;
-	/* the row's last choices that left and right offer only while Show dev
-	settings is on (or while one is chosen) */
-	int advanced_choices;
+	/* ACTION_PAGE: the page the row opens */
+	int opens;
 };
+
+/* a row that opens a page of rows */
+#define PAGE_ROW(label, help, page, opened) \
+	{ label, NULL, 0, 0, { NULL }, { NULL }, help, 0, page, KIND_ACTION, ACTION_PAGE, 0, opened }
 
 /* (the performance logging switch: the three timing variables at once) */
 #define PERFORMANCE_LOG "HALO_PERF_LOG"
 
 static struct setting settings[] = {
-	/* (the Profile row is the first: settings[0]) */
+	/* (the Profile row is the first: settings[0]; Render resolution the
+	second) */
 	{ "Profile", "HALO_PROFILE", 0, 4, { "performance", "balanced", "quality", "custom" },
 		{ "Performance", "Balanced", "Quality", "Custom" }, "Sets resolution, detail, update rates at once", 1,
 		TAB_GRAPHICS },
@@ -200,131 +253,153 @@ static struct setting settings[] = {
 	{ "Render resolution", "HALO_RENDER_SCALE", 0, 6, { "1", "0.875", "0.75", "0.625", "0.5", "dynamic" },
 		{ "100%", "88%", "75%", "63%", "50%", "Dynamic" }, "Lower is faster, softer. Dynamic: by GPU load", 2,
 		TAB_GRAPHICS },
+	/* (shown while Render resolution is Dynamic: setting_shown) */
 	{ "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", 0, 3, { "0.5", "0.625", "0.75" }, { "50%", "63%", "75%" },
 		"The lowest Dynamic goes in heavy scenes", 0, TAB_GRAPHICS },
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
 		"4:3: the Xbox's framing, black bars", 0, TAB_GRAPHICS },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
 		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
-	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
-		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 2, TAB_GRAPHICS },
-	{ "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", 0, 4, { "0", "4", "8", "12" },
-		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2, TAB_GRAPHICS },
-	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
-		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, TAB_GRAPHICS },
-	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
-		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, TAB_GRAPHICS },
-	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
-		"The weapon's animation blended between game ticks", 0, TAB_GRAPHICS },
-	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
-		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
 	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
 		"The most frames shown a second", 0, TAB_GRAPHICS },
+	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
+		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
+	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
+		"The weapon's animation blended between game ticks", 0, TAB_GRAPHICS },
+	PAGE_ROW("Advanced", "Detail and update rates (the Profile sets them)", TAB_GRAPHICS, PAGE_GRAPHICS_ADVANCED),
+	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
+		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 2,
+		PAGE_GRAPHICS_ADVANCED },
+	{ "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", 0, 4, { "0", "4", "8", "12" },
+		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2, PAGE_GRAPHICS_ADVANCED },
+	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
+		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, PAGE_GRAPHICS_ADVANCED },
+	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
+		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, PAGE_GRAPHICS_ADVANCED },
 
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
 		{ "Every tick", "Every 3rd", "Every 6th" }, "How often muffling behind walls is rechecked", 1, TAB_AUDIO },
 
+	/* (Controls: the rows players change, then the pages laid out as the
+	Xbox controller) */
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
 		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2, TAB_CONTROLS },
 	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0,
 		TAB_CONTROLS },
-	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
-		"Raise if the sticks drift", 0, TAB_CONTROLS },
 	{ "Crouch", "HALO_CROUCH_TOGGLE", 0, 2, { "1", "0" }, { "Toggle", "Hold" },
 		"Left stick click: a press crouches, the next stands (Toggle)", 0, TAB_CONTROLS },
-	/* (the touch zones, in vita_controls.h's order: the Xbox button each
-	presses; then the Vita button of each Xbox button, in play:
-	vita_controls.c) */
-	{ "Touch top left", "HALO_TOUCH_TOP_LEFT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Front screen, top left corner: counts at once", 0, TAB_CONTROLS },
-	{ "Touch top right", "HALO_TOUCH_TOP_RIGHT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Front screen, top right corner: counts at once", 0, TAB_CONTROLS },
-	{ "Touch left edge", "HALO_TOUCH_LEFT_EDGE", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Front screen, left edge by the D-pad: counts at once", 0, TAB_CONTROLS },
-	{ "Touch right edge", "HALO_TOUCH_RIGHT_EDGE", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Front screen, right edge by the buttons: counts at once", 0, TAB_CONTROLS },
-	{ "Rear touch left", "HALO_TOUCH_REAR_LEFT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Rear pad, left half: held a moment (Rear touch guard)", 0, TAB_CONTROLS },
-	{ "Rear touch right", "HALO_TOUCH_REAR_RIGHT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Rear pad, right half: held a moment (Rear touch guard)", 0, TAB_CONTROLS },
+	/* (gyro aiming: vita_controls.h; its details on Gyro settings) */
+	{ "Gyro aiming", "HALO_GYRO", 0, VITA_GYRO_MODES, { "off", "on", "zoomed", "hold" },
+		{ "Off", "On", "While zoomed", "While holding" }, "Turn the Vita to aim, with the right stick", 0, TAB_CONTROLS },
 	/* (the rear zones' guard against the hands holding the Vita:
 	vita_controls.c - the pad's border never counts, and a hold time) */
 	{ "Rear touch guard", "HALO_TOUCH_REAR_GUARD", 0, VITA_REAR_GUARD_COUNT, { VITA_REAR_GUARD_VALUES },
 		{ VITA_REAR_GUARD_NAMES }, "Rear pad: its edges (the grip) ignored, a hold time",
 		VITA_REAR_GUARD_DEFAULT, TAB_CONTROLS },
+	PAGE_ROW("Button layout", "Which Vita button each Xbox button is on, in play", TAB_CONTROLS, PAGE_BUTTONS),
+	PAGE_ROW("Touch zones", "Front and rear touch zones as Xbox buttons", TAB_CONTROLS, PAGE_TOUCH),
+	PAGE_ROW("Gyro settings", "Gyro button, sensitivity, direction", TAB_CONTROLS, PAGE_GYRO),
+	PAGE_ROW("Advanced", "Stick deadzone, Reset controls, Show dev settings", TAB_CONTROLS, PAGE_CONTROLS_ADVANCED),
+	/* (the Vita button of each Xbox button, in play: vita_controls.c) */
 	{ "A", "HALO_XBOX_A", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"A: jump (in the menus Cross stays A)", 0, TAB_CONTROLS },
+		"A: jump (in the menus Cross stays A)", 0, PAGE_BUTTONS },
 	{ "B", "HALO_XBOX_B", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"B: melee (in the menus Circle stays B)", 1, TAB_CONTROLS },
+		"B: melee (in the menus Circle stays B)", 1, PAGE_BUTTONS },
 	{ "X", "HALO_XBOX_X", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"X: reload, action (in play only)", 2, TAB_CONTROLS },
+		"X: reload, action (in play only)", 2, PAGE_BUTTONS },
 	{ "Y", "HALO_XBOX_Y", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Y: switch weapon (in play only)", 3, TAB_CONTROLS },
+		"Y: switch weapon (in play only)", 3, PAGE_BUTTONS },
 	{ "Black", "HALO_XBOX_BLACK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Black: switch grenades (in play only)", 8, TAB_CONTROLS },
+		"Black: switch grenades (in play only)", 8, PAGE_BUTTONS },
 	{ "White", "HALO_XBOX_WHITE", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"White: flashlight (in play only)", 9, TAB_CONTROLS },
+		"White: flashlight (in play only)", 9, PAGE_BUTTONS },
 	{ "Left trigger", "HALO_XBOX_LEFT_TRIGGER", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Left trigger: throw a grenade (in play only)", 4, TAB_CONTROLS },
+		"Left trigger: throw a grenade (in play only)", 4, PAGE_BUTTONS },
 	{ "Right trigger", "HALO_XBOX_RIGHT_TRIGGER", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Right trigger: fire (in play only)", 5, TAB_CONTROLS },
+		"Right trigger: fire (in play only)", 5, PAGE_BUTTONS },
 	{ "Left stick click", "HALO_XBOX_LEFT_STICK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Left stick click: crouch (in play only)", 7, TAB_CONTROLS },
+		"Left stick click: crouch (in play only)", 7, PAGE_BUTTONS },
 	{ "Right stick click", "HALO_XBOX_RIGHT_STICK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Right stick click: zoom (in play only)", 6, TAB_CONTROLS },
+		"Right stick click: zoom (in play only)", 6, PAGE_BUTTONS },
 	{ "Back", "HALO_XBOX_BACK", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"Back: scoreboard (in the menus Select stays Back)", 10, TAB_CONTROLS },
-	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "This tab's rows as shipped (touch Off, Xita's layout)", 0,
-		TAB_CONTROLS, KIND_ACTION, ACTION_RESET_CONTROLS },
-	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
-		"The Dev tab: switches for testers, Save report", 0, TAB_CONTROLS },
-
-	/* (gyro aiming: vita_controls.h; the button's choices are the Xbox
-	buttons' rows') */
-	{ "Gyro aiming", "HALO_GYRO", 0, VITA_GYRO_MODES, { "off", "on", "zoomed", "hold" },
-		{ "Off", "On", "While zoomed", "While holding" }, "Turn the Vita to aim, with the right stick", 0, TAB_GYRO },
+		"Back: scoreboard (in the menus Select stays Back)", 10, PAGE_BUTTONS },
+	/* (the touch zones, in vita_controls.h's order: the Xbox button each
+	presses) */
+	{ "Touch top left", "HALO_TOUCH_TOP_LEFT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Front screen, top left corner: counts at once", 0, PAGE_TOUCH },
+	{ "Touch top right", "HALO_TOUCH_TOP_RIGHT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Front screen, top right corner: counts at once", 0, PAGE_TOUCH },
+	{ "Touch left edge", "HALO_TOUCH_LEFT_EDGE", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Front screen, left edge by the D-pad: counts at once", 0, PAGE_TOUCH },
+	{ "Touch right edge", "HALO_TOUCH_RIGHT_EDGE", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Front screen, right edge by the buttons: counts at once", 0, PAGE_TOUCH },
+	{ "Rear touch left", "HALO_TOUCH_REAR_LEFT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Rear pad, left half: held a moment (Rear touch guard)", 0, PAGE_TOUCH },
+	{ "Rear touch right", "HALO_TOUCH_REAR_RIGHT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
+		"Rear pad, right half: held a moment (Rear touch guard)", 0, PAGE_TOUCH },
+	/* (the button's choices are the Xbox buttons' rows') */
 	{ "Gyro button", "HALO_GYRO_BUTTON", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
-		"While holding: aims while held, nothing else in play", 4, TAB_GYRO },
+		"While holding: aims while held, nothing else in play", 4, PAGE_GYRO },
 	{ "Gyro sensitivity", "HALO_GYRO_SENS", 0, 8, { "50", "75", "100", "125", "150", "200", "250", "300" },
 		{ "0.5x", "0.75x", "1x", "1.25x", "1.5x", "2x", "2.5x", "3x" }, "1x: the view turns as far as the Vita does", 4,
-		TAB_GYRO },
+		PAGE_GYRO },
 	{ "Gyro vertical", "HALO_GYRO_INVERT_Y", 0, 2, { "0", "1" }, { "Normal", "Inverted" },
-		"Normal: tilt the top edge towards you to look up", 0, TAB_GYRO },
+		"Normal: tilt the top edge towards you to look up", 0, PAGE_GYRO },
 	{ "Gyro turning", "HALO_GYRO_TURN", 0, 2, { "yaw", "roll" }, { "Turn (yaw)", "Tilt (roll)" },
-		"Turn the Vita left/right, or tilt it like a wheel", 0, TAB_GYRO },
+		"Turn the Vita left/right, or tilt it like a wheel", 0, PAGE_GYRO },
+	{ "Stick deadzone", "XV_DEADZONE", 0, 4, { "0", "5", "10", "15" }, { "Off", "5%", "10%", "15%" },
+		"Raise if the sticks drift", 0, PAGE_CONTROLS_ADVANCED },
+	{ "Reset controls", NULL, 0, 0, { NULL }, { NULL }, "Look, crouch, buttons, touch as shipped (gyro kept)", 0,
+		PAGE_CONTROLS_ADVANCED, KIND_ACTION, ACTION_RESET_CONTROLS },
+	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"The Dev tab: switches for testers, Save report", 0, PAGE_CONTROLS_ADVANCED },
 
 	/* (Multiplayer: Host a game and Join a game - their steps, then the
-	game's System Link screen; the connection; co-op; ad hoc's rows while
-	the connection is Ad hoc, setting_shown) */
+	game's System Link screen; the connection; the pages: co-op, internet
+	play's while the connection is Online and ad hoc's while it is Ad hoc
+	(setting_shown), the modded maps) */
 	{ "Host a game", NULL, 0, 0, { NULL }, { NULL }, "Start a game for other Vitas: the steps", 0, TAB_MULTIPLAYER,
 		KIND_ACTION, ACTION_HOST },
 	{ "Join a game", NULL, 0, 0, { NULL }, { NULL }, "Join a game another Vita hosts: the steps", 0,
 		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN },
-	/* (Online, the last choice: internet play, for testers) */
+	/* (Online: internet play, experimental) */
 	{ "Connection", "HALO_VITA_NETWORK", 1, 3, { "wifi", "adhoc", "online" }, { "Same Wi-Fi", "Ad hoc", "Online" },
-		"Vitas on one Wi-Fi network play together", 0, TAB_MULTIPLAYER, KIND_CHOICE, ACTION_NONE, 0, 1 },
+		"Vitas on one Wi-Fi network play together", 0, TAB_MULTIPLAYER },
+	PAGE_ROW("Co-op", "Games you host as a campaign level together", TAB_MULTIPLAYER, PAGE_COOP),
+	PAGE_ROW("Online games", "Public or private, join with a code, browse", TAB_MULTIPLAYER, PAGE_ONLINE),
+	PAGE_ROW("Ad hoc", "The room, joining and leaving its group", TAB_MULTIPLAYER, PAGE_ADHOC),
+	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
 	/* (co-op over the network: a hosted game is this campaign level,
 	network_server_manager.c; each level won goes on to the next) */
 	{ "Co-op campaign", "HALO_NET_COOP_LEVEL", 0, 11,
 		{ "", "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40" },
 		{ "Off", "Pillar of Autumn", "Halo", "Truth and Rec.", "Silent Cartog.", "Assault on CR", "343 Guilty Spark",
 			"The Library", "Two Betrayals", "Keyes", "The Maw" },
-		"Games you host: this level together (2 players)", 0, TAB_MULTIPLAYER },
+		"Games you host: this level together (2 players)", 0, PAGE_COOP },
 	{ "Co-op difficulty", "HALO_NET_COOP_DIFFICULTY", 0, 4, { "0", "1", "2", "3" },
-		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, TAB_MULTIPLAYER },
+		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, PAGE_COOP },
+	/* (internet play, with the connection Online: listed in the public
+	lobby or not, a code typed in, the lobby's games) */
+	{ "Online games", "HALO_NET_LOBBY_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
+		"Private: others join by code. Public: listed too", 0, PAGE_ONLINE },
+	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
+		PAGE_ONLINE, KIND_ACTION, ACTION_JOIN_CODE },
+	{ "Browse public games", NULL, 0, 0, { NULL }, { NULL }, "The games listed in the public lobby", 0,
+		PAGE_ONLINE, KIND_ACTION, ACTION_BROWSE },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
-		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
-	{ "Join ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Opens the system's ad hoc dialog", 0, TAB_MULTIPLAYER,
+		"Vitas in the same room play together", 0, PAGE_ADHOC },
+	{ "Join ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Opens the system's ad hoc dialog", 0, PAGE_ADHOC,
 		KIND_ACTION, ACTION_ADHOC_JOIN },
-	{ "Leave ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Back to no group", 0, TAB_MULTIPLAYER, KIND_ACTION,
+	{ "Leave ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Back to no group", 0, PAGE_ADHOC, KIND_ACTION,
 		ACTION_ADHOC_LEAVE },
 
 	/* (custom maps: the Custom Edition maps join the multiplayer level
-	list; off by default while their colours are wrong on the Vita) */
+	list; off by default while their colours are wrong on the Vita; the
+	maps themselves follow on the page, page_lines) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Experimental: Custom Edition maps in the map list", 0, TAB_MAPS },
+		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
 
 	{ "Performance logging", PERFORMANCE_LOG, 1, 2, { "", "1" }, { "Off", "On" },
 		"Frame, render and tick timing in halo.log (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
@@ -334,26 +409,20 @@ static struct setting settings[] = {
 		"Top right. Full: tick and render times, the cores' load", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
 	{ "Debug camera", "HALO_DEBUG_CAMERA", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Hold Black 1 s: follow, orbit, then a flying camera", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
-	{ "GPU W clamp", "HALO_GXM_WCLAMP", 1, 2, { "", "0" }, { "Default", "Off" },
-		"A/B: models close to the camera dropping out (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
-	{ "Target mip minimum", "HALO_TARGET_CHAIN_MIN_SIZE", 1, 3, { "", "16", "8" }, { "32 px", "16 px", "8 px" },
-		"A/B: smallest mip level of render targets (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
-	{ "Frame phase lock", "HALO_FRAME_PHASE_LOCK", 1, 2, { "", "0" }, { "On", "Off" },
-		"A/B: 30 FPS frames kept between two ticks (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
-	{ "Render target sync", "HALO_GXM_RTT_SYNC", 1, 2, { "", "0" }, { "On", "Off" },
-		"A/B: a scene waits for a target drawn before (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
-	{ "Save report", NULL, 0, 0, { NULL }, { NULL }, "Logs, settings and the newest crash dump in one folder", 0,
-		TAB_DEV, KIND_ACTION, ACTION_SAVE_REPORT },
-	/* (internet play, with the connection Online, and the ad hoc dialog's
-	way of joining: out of the Multiplayer tab's way) */
-	{ "Online games", "HALO_NET_LOBBY_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
-		"Online: Private, join by code. Public: listed", 0, TAB_DEV },
-	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Online: type the code another player's game shows", 0,
-		TAB_DEV, KIND_ACTION, ACTION_JOIN_CODE },
-	{ "Browse public games", NULL, 0, 0, { NULL }, { NULL }, "Online: the games listed in the public lobby", 0,
-		TAB_DEV, KIND_ACTION, ACTION_BROWSE },
+	/* (the system's ad hoc dialog's way of joining, for testers) */
 	{ "Ad hoc dialog", "HALO_ADHOC_DIALOG_MODE", 0, 3, { "0", "1", "2" }, { "Connect", "Create", "Join" },
 		"How the system dialog joins: try Connect first", 0, TAB_DEV },
+	{ "Save report", NULL, 0, 0, { NULL }, { NULL }, "Logs, settings and the newest crash dump in one folder", 0,
+		TAB_DEV, KIND_ACTION, ACTION_SAVE_REPORT },
+	PAGE_ROW("A/B switches", "Renderer switches a bug report may ask for", TAB_DEV, PAGE_DEV_AB),
+	{ "GPU W clamp", "HALO_GXM_WCLAMP", 1, 2, { "", "0" }, { "Default", "Off" },
+		"A/B: models close to the camera dropping out (at start-up)", 0, PAGE_DEV_AB, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Target mip minimum", "HALO_TARGET_CHAIN_MIN_SIZE", 1, 3, { "", "16", "8" }, { "32 px", "16 px", "8 px" },
+		"A/B: smallest mip level of render targets (at start-up)", 0, PAGE_DEV_AB, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Frame phase lock", "HALO_FRAME_PHASE_LOCK", 1, 2, { "", "0" }, { "On", "Off" },
+		"A/B: 30 FPS frames kept between two ticks (at start-up)", 0, PAGE_DEV_AB, KIND_CHOICE, ACTION_NONE, 1 },
+	{ "Render target sync", "HALO_GXM_RTT_SYNC", 1, 2, { "", "0" }, { "On", "Off" },
+		"A/B: a scene waits for a target drawn before (at start-up)", 0, PAGE_DEV_AB, KIND_CHOICE, ACTION_NONE, 1 },
 };
 
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
@@ -410,9 +479,11 @@ they are let go (the cross that opened System Link is not the game's A) */
 static unsigned long held_after_close;
 static int restart_pending;
 
-/* the tab shown, the line chosen on each, and the screens an action opens */
-static int tab;
-static int tab_selected[TAB_COUNT];
+/* the tab shown, the page of it shown (the tab's own, or a page one of its
+rows opened), the line chosen on each page, and the screens an action
+opens */
+static int tab, page;
+static int page_selected[PAGE_COUNT];
 enum
 {
 	SCREEN_LIST,
@@ -452,7 +523,7 @@ static char guide_problem[64];
 #define MAXIMUM_MAPS 64
 #define MAP_NAME_SIZE 48
 /* the map lines shown at once (the list scrolls) */
-#define MAP_LINES 11
+#define MAP_LINES 8
 
 enum
 {
@@ -576,29 +647,31 @@ static const char *chosen_network(void)
 	return setting->values[setting->choice];
 }
 
-/* whether a row is shown: ad hoc's rows in the Multiplayer tab while the
-connection is Ad hoc, chosen or this session's */
+/* whether a row is shown: the Ad hoc page's row while the connection is Ad
+hoc, chosen or this session's, the Online games page's while it is Online; Dynamic minimum while Render resolution is
+Dynamic (each keeps its value meanwhile) */
 static int setting_shown(const struct setting *setting)
 {
-	int adhoc_row = setting->tab == TAB_MULTIPLAYER && (setting->action == ACTION_ADHOC_JOIN ||
-		setting->action == ACTION_ADHOC_LEAVE || (setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")));
+	if (setting->action == ACTION_PAGE && setting->opens == PAGE_ADHOC)
+		return !strcmp(running_network, "adhoc") || !strcmp(chosen_network(), "adhoc");
+	if (setting->action == ACTION_PAGE && setting->opens == PAGE_ONLINE)
+		return !strcmp(running_network, "online") || !strcmp(chosen_network(), "online");
+	if (setting->variable && !strcmp(setting->variable, "HALO_DYNAMIC_RES_MIN"))
+	{
+		const struct setting *scale = setting_named("HALO_RENDER_SCALE");
 
-	return !adhoc_row || !strcmp(running_network, "adhoc") || !strcmp(chosen_network(), "adhoc");
+		return !strcmp(scale->values[scale->choice], "dynamic");
+	}
+	return 1;
 }
 
 /* the last choice left and right reach: not the Profile row's Custom (read,
-not chosen), nor a row's advanced choices unless Show dev settings is on or
-one of them is chosen */
+not chosen) */
 static int choice_last(const struct setting *setting)
 {
-	int last = setting->count - 1;
-
 	if (setting == &settings[0])
 		return PROFILE_CUSTOM - 1;
-	if (setting->advanced_choices && !choice_of("HALO_DEV_SETTINGS") &&
-		setting->choice < setting->count - setting->advanced_choices)
-		last -= setting->advanced_choices;
-	return last;
+	return setting->count - 1;
 }
 
 /* a setting's value as the environment variable (or variables) it is */
@@ -1250,23 +1323,25 @@ static int tab_shown(int index)
 	return index != TAB_DEV || choice_of("HALO_DEV_SETTINGS");
 }
 
-static int tab_lines(struct line *lines)
+/* the lines of the page shown: its rows, then the gyroscope's line (Gyro
+settings) or the maps (Modded maps) */
+static int page_lines(struct line *lines)
 {
 	int count = 0, index;
 
 	for (index = 0; index < SETTING_COUNT; index++)
-		if (settings[index].tab == tab && setting_shown(&settings[index]))
+		if (settings[index].page == page && setting_shown(&settings[index]))
 		{
 			lines[count].type = LINE_SETTING;
 			lines[count++].index = index;
 		}
-	if (tab == TAB_GYRO)
+	if (page == PAGE_GYRO)
 	{
 		/* (the gyroscope's rates now: redrawn twice a second) */
 		lines[count].type = LINE_INFO;
 		vita_gyro_status(lines[count++].text, sizeof(lines[0].text));
 	}
-	if (tab == TAB_MAPS)
+	if (page == PAGE_MAPS)
 	{
 		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition))
 		{
@@ -1392,7 +1467,7 @@ static const char *connection_help(const struct setting *setting)
 	const char *value = setting->values[setting->choice];
 
 	return !strcmp(value, "adhoc") ? "No router: Vitas side by side (experimental)" : !strcmp(value, "online") ?
-		"Internet play by code, Dev tab (experimental)" : "Vitas on one Wi-Fi network play together";
+		"Internet play by code (experimental)" : "Vitas on one Wi-Fi network play together";
 }
 
 /* the longer line at the bottom: what the selected line does, or what the
@@ -1406,9 +1481,9 @@ static void help_line(char *text, int size, const struct line *line)
 	if (notice[0] && now_us() < notice_until)
 		snprintf(text, (size_t)size, "%s", notice);
 	else if (halo_screen_restart_needed())
-		snprintf(text, (size_t)size, "Restart the game for this change. O: close");
+		snprintf(text, (size_t)size, "Restart the game for this change");
 	else if (restart_pending && setting && setting->restart)
-		snprintf(text, (size_t)size, "Restart the game for this change. O: close");
+		snprintf(text, (size_t)size, "Restart the game for this change");
 	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_SAVING)
 		snprintf(text, (size_t)size, "Saving the report...");
 	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_SAVED)
@@ -1416,16 +1491,16 @@ static void help_line(char *text, int size, const struct line *line)
 	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_FAILED)
 		snprintf(text, (size_t)size, "Could not save the report");
 	else if (line && line->type == LINE_MAP)
-		snprintf(text, (size_t)size, "%s: left/right on or off, square deletes",
+		snprintf(text, (size_t)size, "%s: on or off, or delete it",
 			maps[line->index].format == MAP_XBOX ? "Xbox map" : maps[line->index].format == MAP_OTHER ?
 			"Not a known map" : "PC map (needs PC maps On)");
 	else if (!setting)
-		snprintf(text, (size_t)size, "L/R: tabs  O: close");
+		text[0] = 0;
 	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
 		setting->action == ACTION_BROWSE || (setting->variable && !strcmp(setting->variable, "HALO_NET_LOBBY_PUBLIC"))) &&
 		p2p_status(detail, sizeof(detail)))
 		snprintf(text, (size_t)size, "%.60s", detail);
-	else if (tab == TAB_MULTIPLAYER && !strcmp(running_network, "adhoc") &&
+	else if (page == PAGE_ADHOC && !strcmp(running_network, "adhoc") &&
 		(setting->action == ACTION_ADHOC_JOIN || setting->action == ACTION_ADHOC_LEAVE))
 	{
 		vita_adhoc_state(detail, sizeof(detail));
@@ -1446,7 +1521,7 @@ static int tab_bar(char *text, int size)
 		if (tab_shown(index))
 		{
 			length += snprintf(text + length, (size_t)(size - length), "%s%s%s", first ? "" : "|",
-				index == tab ? "*" : "", tab_names[index]);
+				index == tab ? "*" : "", pages[index].name);
 			first = 0;
 		}
 	return length;
@@ -1482,21 +1557,97 @@ static void touch_diagram(char *text, int size, const struct setting *chosen)
 		snprintf(text, (size_t)size, "\n\x01%s", zones);
 }
 
+/* the panel's buttons for the line chosen, in one line under its help */
+static void footer_line(char *text, int size, const struct line *line)
+{
+	const struct setting *setting = line && line->type == LINE_SETTING ? &settings[line->index] : NULL;
+	const char *middle = "";
+
+	if (line && line->type == LINE_MAP)
+		middle = "Left/right: on/off   Square: delete   ";
+	else if (setting && setting->kind == KIND_ACTION)
+		middle = "Cross: select   ";
+	else if (setting)
+		middle = "Left/right: change   ";
+	snprintf(text, (size_t)size, "L/R: tabs   %sCircle: %s", middle, page < TAB_COUNT ? "close" : "back");
+}
+
+/* what a row that opens a page says of it ("" for nothing) */
+static void page_summary(char *text, int size, const struct setting *setting)
+{
+	int index, set = 0, moved = 0;
+
+	text[0] = 0;
+	switch (setting->opens)
+	{
+	case PAGE_BUTTONS:
+		for (index = 0; index < SETTING_COUNT; index++)
+			if (settings[index].page == PAGE_BUTTONS && settings[index].choice != shipped_choice[index])
+				moved = 1;
+		snprintf(text, (size_t)size, "%s", moved ? "Custom" : "As shipped");
+		break;
+	case PAGE_TOUCH:
+		for (index = 0; index < SETTING_COUNT; index++)
+			if (settings[index].page == PAGE_TOUCH && settings[index].choice)
+				set++;
+		if (set)
+			snprintf(text, (size_t)size, "%d on", set);
+		else
+			snprintf(text, (size_t)size, "Off");
+		break;
+	case PAGE_MAPS:
+		snprintf(text, (size_t)size, map_count == 1 ? "1 map" : "%d maps", map_count);
+		break;
+	case PAGE_COOP:
+	{
+		const struct setting *level = setting_named("HALO_NET_COOP_LEVEL");
+
+		snprintf(text, (size_t)size, "%s", level->names[level->choice]);
+		break;
+	}
+	case PAGE_ONLINE:
+	{
+		const struct setting *listed = setting_named("HALO_NET_LOBBY_PUBLIC");
+
+		snprintf(text, (size_t)size, "%s", listed->names[listed->choice]);
+		break;
+	}
+	}
+}
+
+/* the page shown, as vita_gxm.c menu_build draws it: the tab bar ('\t'),
+a page's title ('\x03') under it, a row per line (its label, '\x02', its
+value: the values make a column), the lines that are not rows ('\x04': the
+game's state, the gyroscope's), an empty line for a gap, then the chosen
+row's help ('\x05') and the panel's buttons ('\x06') at the bottom */
 static void show_list(void)
 {
 	char text[2048];
 	struct line lines[MAXIMUM_LINES];
-	int count = tab_lines(lines), length, index, shown = 0, highlighted = 0;
-	int *selected = &tab_selected[tab];
+	int count = page_lines(lines), length, index, number = 0, highlighted = 0;
+	int *selected = &page_selected[page];
 	char status[64], help[96];
 
 	if (*selected >= count)
 		*selected = count - 1;
 	if (*selected < 0)
 		*selected = 0;
+	/* (a line that is not a row is not chosen) */
+	if (count && lines[*selected].type == LINE_INFO)
+		for (index = 0; index < count; index++)
+			if (lines[index].type != LINE_INFO)
+			{
+				*selected = index;
+				break;
+			}
 	length = tab_bar(text, sizeof(text));
+	if (page >= TAB_COUNT && length < (int)sizeof(text))
+	{
+		length += snprintf(text + length, sizeof(text) - length, "\n\x03%s > %s", pages[tab].name, pages[page].name);
+		number++;
+	}
 	/* (the map lines scroll: MAP_LINES at once, the chosen one among them) */
-	if (tab == TAB_MAPS && count && lines[*selected].type == LINE_MAP)
+	if (page == PAGE_MAPS && count && lines[*selected].type == LINE_MAP)
 	{
 		int map = lines[*selected].index;
 
@@ -1511,11 +1662,18 @@ static void show_list(void)
 
 		if (line->type == LINE_MAP && (line->index < map_scroll || line->index >= map_scroll + MAP_LINES))
 			continue;
-		shown++;
+		/* (Modded maps: a gap between its switch and the maps) */
+		if (page == PAGE_MAPS && line->type != LINE_SETTING && index && lines[index - 1].type == LINE_SETTING)
+		{
+			length += snprintf(text + length, sizeof(text) - length, "\n");
+			number++;
+		}
+		number++;
 		if (index == *selected)
-			highlighted = shown;
+			highlighted = number;
 		if (line->type == LINE_INFO)
-			length += snprintf(text + length, sizeof(text) - length, "\n%s", line->text);
+			length += snprintf(text + length, sizeof(text) - length, "\n%s%s", line->text[0] == '!' ? "" : "\x04",
+				line->text);
 		else if (line->type == LINE_MAP)
 		{
 			const struct map_entry *map = &maps[line->index];
@@ -1524,47 +1682,57 @@ static void show_list(void)
 			size_text(size_name, sizeof(size_name), map->size);
 			/* (the .yelo of a name: marked *) */
 			snprintf(name, sizeof(name), "%.19s%s", map->name, strcasecmp(map->extension, "yelo") ? "" : "*");
-			length += snprintf(text + length, sizeof(text) - length, "\n%-20s%9s  %-5s %s", name, size_name,
-				map_format_name(map->format), map_disabled(map->name) ? "Off" : "On");
+			length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %-3s %8s  %s", name,
+				map_disabled(map->name) ? "Off" : "On", size_name, map_format_name(map->format));
 		}
 		else
 		{
 			const struct setting *setting = &settings[line->index];
 
 			if (setting->kind == KIND_ACTION)
-				length += snprintf(text + length, sizeof(text) - length, "\n%s >", setting->label);
+			{
+				char summary[24];
+
+				page_summary(summary, sizeof(summary), setting);
+				/* (two spaces first: the summary, or the >, where the other
+				rows' values start, after their "< ") */
+				length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s%s>", setting->label, summary,
+					summary[0] ? "  " : "");
+			}
 			else
 			{
-				char label[32];
 				int last = choice_last(setting);
 
 				/* (a row that applies after a restart: marked *) */
-				snprintf(label, sizeof(label), "%s%s", setting->label, setting->restart ? "*" : "");
-				length += snprintf(text + length, sizeof(text) - length, "\n%-21s%c %s %c", label,
-					setting->choice > 0 ? '<' : ' ', setting->names[setting->choice],
+				length += snprintf(text + length, sizeof(text) - length, "\n%s%s\x02%c %s %c", setting->label,
+					setting->restart ? "*" : "", setting->choice > 0 ? '<' : ' ', setting->names[setting->choice],
 					setting->choice < last ? '>' : ' ');
 			}
 		}
 	}
-	if (tab == TAB_MAPS && map_count > MAP_LINES && length < (int)sizeof(text))
-		length += snprintf(text + length, sizeof(text) - length, "\n  (maps %d-%d of %d)", map_scroll + 1,
+	if (page == PAGE_MAPS && map_count > MAP_LINES && length < (int)sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length, "\n\x04(maps %d-%d of %d)", map_scroll + 1,
 			map_scroll + MAP_LINES < map_count ? map_scroll + MAP_LINES : map_count, map_count);
-	/* (Multiplayer: this Vita, the network game, internet or ad hoc play) */
-	if (tab == TAB_MULTIPLAYER && length < (int)sizeof(text))
+	/* (Multiplayer, after a gap: this Vita, the network game, internet or
+	ad hoc play) */
+	if (page == TAB_MULTIPLAYER && length < (int)sizeof(text))
 	{
 		vita_line(status, sizeof(status));
-		length += snprintf(text + length, sizeof(text) - length, "\n%s", status);
+		length += snprintf(text + length, sizeof(text) - length, "\n\n\x04%s", status);
 		game_line(status, sizeof(status));
 		if (length < (int)sizeof(text))
-			length += snprintf(text + length, sizeof(text) - length, "\n%s", status);
+			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
 		status_line(status, sizeof(status));
 		if (status[0] && length < (int)sizeof(text))
-			length += snprintf(text + length, sizeof(text) - length, "\n%s", status);
+			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
 	}
 	help_line(help, sizeof(help), count ? &lines[*selected] : NULL);
 	if (length < (int)sizeof(text))
-		length += snprintf(text + length, sizeof(text) - length, "\n%s", help);
-	/* a touch zone's row chosen: the zones drawn beside the rows */
+		length += snprintf(text + length, sizeof(text) - length, "\n\x05%s", help);
+	footer_line(help, sizeof(help), count ? &lines[*selected] : NULL);
+	if (length < (int)sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length, "\n\x06%s", help);
+	/* the Touch zones page: the zones drawn beside the rows */
 	if (count && lines[*selected].type == LINE_SETTING && length < (int)sizeof(text))
 		touch_diagram(text + length, (int)sizeof(text) - length, &settings[lines[*selected].index]);
 	vgxm_menu_set(text, highlighted);
@@ -1618,17 +1786,17 @@ static void show_browse(void)
 	vgxm_menu_set(text, browse_count ? browse_selected + 1 : 0);
 }
 
-/* the map chosen on the Modded maps tab, or NULL */
+/* the map chosen on the Modded maps page, or NULL */
 static struct map_entry *selected_map(void)
 {
 	struct line lines[MAXIMUM_LINES];
 	int count;
 
-	if (tab != TAB_MAPS)
+	if (page != PAGE_MAPS)
 		return NULL;
-	count = tab_lines(lines);
-	if (tab_selected[TAB_MAPS] < count && lines[tab_selected[TAB_MAPS]].type == LINE_MAP)
-		return &maps[lines[tab_selected[TAB_MAPS]].index];
+	count = page_lines(lines);
+	if (page_selected[PAGE_MAPS] < count && lines[page_selected[PAGE_MAPS]].type == LINE_MAP)
+		return &maps[lines[page_selected[PAGE_MAPS]].index];
 	return NULL;
 }
 
@@ -1712,7 +1880,7 @@ static void show_guide(void)
 		step += 2;
 		/* (the Custom Edition maps are in the map list with PC maps on) */
 		if (!choice_of("HALO_CUSTOM_EDITION"))
-			length += snprintf(text + length, sizeof(text) - length, "\n  (PC maps: turn on PC maps, Modded maps tab)");
+			length += snprintf(text + length, sizeof(text) - length, "\n  (PC maps: Modded maps, PC maps On)");
 		if (coop->choice)
 			length += snprintf(text + length, sizeof(text) - length, "\n  Co-op: plays %.16s, %s",
 				coop->names[coop->choice], setting_named("HALO_NET_COOP_DIFFICULTY")->names[choice_of(
@@ -1770,7 +1938,7 @@ static void change(struct setting *setting, int step)
 	if (setting->restart)
 	{
 		restart_pending = 1;
-		set_notice("Restart the game for this change. O: close");
+		set_notice("Restart the game for this change");
 	}
 	if (strcmp(setting->variable, "HALO_PROFILE") == 0)
 	{
@@ -1778,7 +1946,7 @@ static void change(struct setting *setting, int step)
 		if (apply_profile(choice))
 		{
 			restart_pending = 1;
-			set_notice("Restart the game for this change. O: close");
+			set_notice("Restart the game for this change");
 		}
 	}
 	else
@@ -1850,6 +2018,8 @@ static void close_panel(void)
 		p2p_lobby_browse(0);
 	panel_open = 0;
 	screen = SCREEN_LIST;
+	/* (it opens again on the tab's own page) */
+	page = tab;
 	held_after_close = previous_buttons;
 	vgxm_menu_set(NULL, 0);
 }
@@ -2031,8 +2201,9 @@ static int question_progress_input(unsigned long pressed)
     return 0;
 }
 
-/* the Controls tab's rows as shipped (all but Show dev settings): the touch
-zones Off, the buttons in Xita's layout, look and crouch as they were */
+/* the Controls tab's rows as shipped, its pages' too (but the gyro's rows
+and Show dev settings): the touch zones Off, the buttons in Xita's layout,
+look and crouch as they were */
 static void reset_controls(void)
 {
 	int index;
@@ -2041,8 +2212,8 @@ static void reset_controls(void)
 	{
 		struct setting *setting = &settings[index];
 
-		if (setting->tab != TAB_CONTROLS || setting->kind != KIND_CHOICE ||
-			strcmp(setting->variable, "HALO_DEV_SETTINGS") == 0)
+		if (pages[setting->page].tab != TAB_CONTROLS || setting->kind != KIND_CHOICE ||
+			strcmp(setting->variable, "HALO_DEV_SETTINGS") == 0 || strncmp(setting->variable, "HALO_GYRO", 9) == 0)
 			continue;
 		setting->choice = shipped_choice[index];
 		apply_value(setting);
@@ -2083,6 +2254,11 @@ static void act(const struct setting *setting)
 		break;
 	case ACTION_RESET_CONTROLS:
 		reset_controls();
+		break;
+	case ACTION_PAGE:
+		page = setting->opens;
+		if (page == PAGE_MAPS)
+			maps_scan();
 		break;
 	case ACTION_HOST:
 	case ACTION_JOIN:
@@ -2274,9 +2450,10 @@ static void tab_step(int step)
 	do
 		next = (next + step + TAB_COUNT) % TAB_COUNT;
 	while (!tab_shown(next));
-	tab = next;
+	tab = page = next;
 	notice[0] = 0;
-	if (tab == TAB_MAPS)
+	/* (Multiplayer's Modded maps row says how many) */
+	if (tab == TAB_MULTIPLAYER)
 		maps_scan();
 }
 
@@ -2359,8 +2536,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			{
 				panel_open = 1;
 				if (!tab_shown(tab))
-					tab = TAB_GRAPHICS;
-				if (tab == TAB_MAPS)
+					tab = page = TAB_GRAPHICS;
+				if (tab == TAB_MULTIPLAYER)
 					maps_scan();
 				show();
 			}
@@ -2405,7 +2582,15 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	}
 	if (pressed & VITA_BUTTON_CIRCLE)
 	{
-		close_panel();
+		/* (a page a row opened: back to its tab, on that row) */
+		if (page != tab)
+		{
+			page = tab;
+			notice[0] = 0;
+			show();
+		}
+		else
+			close_panel();
 		return 1;
 	}
 	if (pressed & (VITA_BUTTON_L | VITA_BUTTON_R))
@@ -2418,8 +2603,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		/* up and down step over the lines that can be chosen, and repeat
 		while held */
 		struct line lines[MAXIMUM_LINES];
-		int count = tab_lines(lines);
-		int *selected = &tab_selected[tab];
+		int count = page_lines(lines);
+		int *selected = &page_selected[page];
 		int step = 0;
 
 		if (pressed & VITA_BUTTON_UP)
