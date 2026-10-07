@@ -177,7 +177,14 @@ presentation; version 16 has a client's input say which structure BSP it
 has loaded; version 17 breaks the host's glass and destructible scenery on
 every machine (and takes a client's hits on scenery), sends the cluster a
 co-op cutscene keeps active, and leaves a failed co-op mission's revert to
-the host. This tree has version 17 and joins only hosts of its own version.
+the host. Version 18 is Halo CE for PS Vita 1.1.0's, one raise for all of
+its changes to what the machines send: killing blows sent once more
+reliably, an object come to rest sent three times, the AI units' shader
+permutation in the object creation message, only the host's crossing of a
+co-op loading zone switching the BSP (from upstream's versions 18 and 21,
+whose numbers mean nothing here), the server browser's signed and
+password-protected listings. This tree has
+version 18 and joins only hosts of its own version.
 Its Vitas (and its Linux build standing in for one) play only Vitas
 (`HALO_PORT_ADVERTISED_VITA_FLAG`), so an upstream build of the same number
 is refused all the same.
