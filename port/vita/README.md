@@ -186,6 +186,7 @@ Graphics, **Advanced**:
 | Hide distant objects (P) | Small | skips objects that cover only a few pixels |
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
+| Sun rays (P) | On | the sun's glow and light shafts outdoors (Off in Performance: seven small extra scenes a frame for the graphics chip while the sun is in view) |
 
 **Controls**
 

@@ -1003,6 +1003,32 @@ void rasterizer_lens_flares_submit_occlusion_tests(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_SUN_RAYS=0: no sun glow and rays (rasterizer_sun_glow_draw),
+the settings panel's Sun rays, off in its Performance profile. With the sun
+in view they cost the Vita's GPU seven 64x64 scenes a frame, six of them
+waiting for the one before, and the main scene stored and loaded again
+around them (port/vita/platform/d3d8_gxm.c, small targets drawn in order) */
+static boolean sun_rays_enabled(
+	void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	extern volatile unsigned long halo_settings_generation;
+	static int enabled = -1;
+	static unsigned long settings_seen;
+
+	if (enabled < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_SUN_RAYS");
+
+		settings_seen = halo_settings_generation;
+		enabled = !setting || atoi(setting) != 0;
+	}
+	return enabled;
+}
+#endif
+
 void rasterizer_lens_flares_draw(
 	void)
 {
@@ -1269,7 +1295,11 @@ void rasterizer_lens_flares_draw(
 		rasterizer_set_stencil_mode(RASTERIZER_STENCIL_MODE_NONE);
 		rasterizer_widget_end();
 
+#ifdef HALO_LINUX
+		if (rasterizer_debug_options.ray_of_buddha && sun_rays_enabled())
+#else
 		if (rasterizer_debug_options.ray_of_buddha)
+#endif
 		{
 			for (lens_flare_index = 0; lens_flare_index < local_lens_flare_count; lens_flare_index++)
 			{

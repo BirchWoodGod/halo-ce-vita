@@ -34,8 +34,8 @@ too, under whatever env.txt and settings.txt say.
 The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
 those rows match none of them (the render resolution, on the tab, and the
-detail and update rates, under Advanced). Rows marked * apply after a
-restart (the sound voices, the network, most dev switches).
+detail and update rates and the sun rays, under Advanced). Rows marked *
+apply after a restart (the sound voices, the network, most dev switches).
 
 Controls has the rows players change (look, crouch, gyro aiming, the rear
 touch guard) and three pages laid out as the Xbox controller. Button
@@ -276,6 +276,10 @@ static struct setting settings[] = {
 		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, PAGE_GRAPHICS_ADVANCED },
 	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
 		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, PAGE_GRAPHICS_ADVANCED },
+	/* (the sun's glow and rays, rasterizer_lights.c: seven small scenes a
+	frame while the sun is in view) */
+	{ "Sun rays", "HALO_SUN_RAYS", 0, 2, { "1", "0" }, { "On", "Off" },
+		"The sun's glow and light shafts outdoors", 0, PAGE_GRAPHICS_ADVANCED },
 
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
@@ -435,21 +439,21 @@ static int shipped_kept;
 /* the profiles (the Profile row's first three choices): the value of each
 row a profile sets. Balanced is the release's defaults (the rows' own) */
 #define PROFILE_CUSTOM 3
-#define PROFILE_ROWS 6
+#define PROFILE_ROWS 7
 
 static const char *const profile_variables[PROFILE_ROWS] = {
 	"HALO_RENDER_SCALE", "HALO_MODEL_LOD_SCALE", "HALO_MIN_OBJECT_PIXELS", "HALO_SCENERY_UPDATE_DIVISOR",
-	"HALO_LIGHTING_REFRESH_DIVISOR", "HALO_SOUND_OBSTRUCTION_TICKS",
+	"HALO_LIGHTING_REFRESH_DIVISOR", "HALO_SOUND_OBSTRUCTION_TICKS", "HALO_SUN_RAYS",
 };
 
 static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
-	/* Performance: 50%, Low, Small, Quarter, Third, Every 6th */
-	{ "0.5", "0.5", "8", "4", "3", "6" },
+	/* Performance: 50%, Low, Small, Quarter, Third, Every 6th, no sun rays */
+	{ "0.5", "0.5", "8", "4", "3", "6", "0" },
 	/* Balanced (the release's defaults): 75%, Low, Small, Quarter, Third,
-	Every 3rd */
-	{ "0.75", "0.5", "8", "4", "3", "3" },
-	/* Quality: 100%, High, Off, Every tick, Full, Every tick */
-	{ "1", "1", "0", "1", "1", "1" },
+	Every 3rd, sun rays */
+	{ "0.75", "0.5", "8", "4", "3", "3", "1" },
+	/* Quality: 100%, High, Off, Every tick, Full, Every tick, sun rays */
+	{ "1", "1", "0", "1", "1", "1", "1" },
 };
 
 /* the variables the performance logging switch sets, and their values */
@@ -865,8 +869,12 @@ void vita_settings_load(void)
 	int index;
 	/* the dev switches settings.txt names (the others keep env.txt's) */
 	char dev_saved[SETTING_COUNT];
+	/* the rows settings.txt names, and the profile it was saved with */
+	char named[SETTING_COUNT];
+	int saved_profile = -1;
 
 	memset(dev_saved, 0, sizeof(dev_saved));
+	memset(named, 0, sizeof(named));
 	if (!shipped_kept)
 	{
 		for (index = 0; index < SETTING_COUNT; index++)
@@ -943,14 +951,36 @@ void vita_settings_load(void)
 			}
 			/* (the profile line is what the rows were: worked out again) */
 			setting = setting_named(line);
-			if (setting && setting->kind == KIND_CHOICE && strcmp(line, "HALO_PROFILE") != 0)
+			if (setting && setting->kind == KIND_CHOICE && strcmp(line, "HALO_PROFILE") == 0)
+			{
+				for (index = 0; index < PROFILE_CUSTOM; index++)
+					if (strcasecmp(equals + 1, setting->values[index]) == 0)
+						saved_profile = index;
+			}
+			else if (setting && setting->kind == KIND_CHOICE)
 			{
 				setting->choice = find_choice(setting, equals + 1);
+				named[setting - settings] = 1;
 				if (setting->dev)
 					dev_saved[setting - settings] = 1;
 			}
 		}
 		fclose(file);
+	}
+	if (saved_profile >= 0)
+	{
+		int row;
+
+		/* a row the saved profile sets that settings.txt does not name
+		(one added since: Sun rays, in 1.1) takes the profile's value,
+		unless env.txt names it */
+		for (row = 0; row < PROFILE_ROWS; row++)
+		{
+			struct setting *setting = setting_named(profile_variables[row]);
+
+			if (setting && !named[setting - settings] && !getenv(setting->variable))
+				setting->choice = find_choice(setting, profile_values[saved_profile][row]);
+		}
 	}
 	/* (the profile is what the rows are: Custom when env.txt or the panel
 	set them apart from every profile) */
