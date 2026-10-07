@@ -936,6 +936,54 @@ pixel32 real_alpha_intensity_to_pixel32(
 	return real_argb_color_to_pixel32(&color);
 }
 
+
+#ifdef HALO_LINUX
+/* (port) set around the drawing of a weapon HUD element that belongs to its
+zoomed scope (hud_static_element_shown_by_zoom): hud_calculate_point lays a
+corner-anchored one out in the 4:3 window centred on a wide screen, where the
+scope's window and frame are (centred) */
+static boolean hud_draw_scope_centered = FALSE;
+
+void hud_draw_set_scope_centered(
+	boolean centered)
+{
+	hud_draw_scope_centered = centered;
+	return;
+}
+
+/* (port) whether a static element is part of a zoomed scope: one of its
+multitexture overlays is driven by the zoom level (the sniper rifle's two
+range ladders, drawn as overlays faded in by the zoom, are anchored to the top
+left corner at offsets made for 640 columns) */
+boolean hud_static_element_shown_by_zoom(
+	struct static_hud_element_definition const *element)
+{
+	short overlay_index;
+
+	for (overlay_index = 0; overlay_index < element->multitexture_overlays.count; overlay_index++)
+	{
+		struct multitexture_overlay_hud_element_definition const *overlay = TAG_BLOCK_GET_ELEMENT(
+			&element->multitexture_overlays,
+			overlay_index,
+			struct multitexture_overlay_hud_element_definition);
+		short function_index;
+
+		for (function_index = 0; function_index < overlay->functions.count; function_index++)
+		{
+			struct multitexture_overlay_hud_element_effector_definition const *effector = TAG_BLOCK_GET_ELEMENT(
+				&overlay->functions,
+				function_index,
+				struct multitexture_overlay_hud_element_effector_definition);
+
+			if (effector->source == _hud_multitexture_overlay_effector_source_zoom_level)
+				return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+#endif
+
 void hud_calculate_point(
 	short local_player_index,
 	struct hud_absolute_placement_definition const *absolute_placement,
@@ -978,12 +1026,40 @@ void hud_calculate_point(
 	corner = absolute_placement->corner;
 	if (corner < _hud_anchor_center)
 	{
+#ifdef HALO_LINUX
+		/* (port) a scope's element anchored to a corner (hud_draw_set_scope_centered)
+		is laid out in a 4:3 window centred in a wider one: its offset was made for
+		the Xbox's 640 columns, beside the scope's window, which is centred. The
+		window's half-width is scaled as the screen's 640 columns are, and the
+		title-safe margin with it (rasterizer_screen_width_update), so on a 4:3
+		screen nothing moves. Elsewhere a corner element keeps the wide window's
+		corner (the ammunition, the motion sensor). */
+		real window_x = render.camera.window_bounds.v[
+			((corner & FLAG(_hud_anchor_right_bit)) << 1) |
+				FLAG(_hud_anchor_right_bit)];
+
+		if (hud_draw_scope_centered && halo_screen_width() > 640)
+		{
+			real window_center = (render.camera.window_bounds.x0 + render.camera.window_bounds.x1) * 0.5f;
+			real half_width = (render.camera.window_bounds.x1 - render.camera.window_bounds.x0) * 0.5f *
+				(640.0f / (real)halo_screen_width());
+
+			window_x = TEST_FLAG(corner, _hud_anchor_right_bit) ?
+				window_center + half_width :
+				window_center - half_width;
+		}
+		point.x = placement->offset.x *
+			(TEST_FLAG(corner, _hud_anchor_right_bit) ? -1 : 1) * scale +
+			window_x -
+			render.camera.viewport_bounds.x0;
+#else
 		point.x = placement->offset.x *
 			(TEST_FLAG(corner, _hud_anchor_right_bit) ? -1 : 1) * scale +
 			render.camera.window_bounds.v[
 				((corner & FLAG(_hud_anchor_right_bit)) << 1) |
 					FLAG(_hud_anchor_right_bit)] -
 			render.camera.viewport_bounds.x0;
+#endif
 		point.y = placement->offset.y *
 			(TEST_FLAG(corner, _hud_anchor_bottom_bit) ? -1 : 1) * scale +
 			render.camera.window_bounds.v[corner & FLAG(_hud_anchor_bottom_bit)] -

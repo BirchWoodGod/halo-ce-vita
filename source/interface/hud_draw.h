@@ -55,6 +55,14 @@ struct weapon_hud_overlay_definition;
 
 /* ---------- prototypes/HUD_DRAW.C */
 
+#ifdef HALO_LINUX
+struct static_hud_element_definition;
+void hud_draw_set_scope_centered(
+	boolean centered);
+boolean hud_static_element_shown_by_zoom(
+	struct static_hud_element_definition const *element);
+#endif
+
 long get_return_eip(
 	void);
 real hud_globals_get_scale(
