@@ -5,6 +5,8 @@ A desktop test of the controls' mapping layer (port/vita/host/vita_controls.c,
 included whole): where the touch zones are, a rear finger counting only once
 held VITA_TOUCH_REAR_HOLD_US and a front one at once, a finger that starts
 outside every zone never counting, several fingers each on their own, the
+rear pad's guard (its border never counting, its hold time, the front and
+the pad script's touches untouched by it), the
 default layout (Xita's, as vita_pad.c had it), the touch zones' Xbox
 buttons in play and not in the menus, the crouch toggle (the left stick's
 click) from a button and a zone, the Xbox buttons moved to other Vita
@@ -98,7 +100,8 @@ static void test_hold(void)
 		"front: still held, nothing new started");
 	check(vita_touch_update(&tracker, fingers, 0, t + 32000, &started) == 0, "front: lifted, released");
 
-	/* the rear: only after its hold time */
+	/* the rear: only after its hold time (the tracker zeroed: the guard
+	Off, 0.1 s and no border; test_rear_guard has the others) */
 	t += 1000000;
 	fingers[0] = contact(VITA_TOUCH_REAR, 1, 100, 300);
 	check(vita_touch_update(&tracker, fingers, 1, t, NULL) == 0, "rear: not on its first frame");
@@ -167,6 +170,111 @@ static void test_hold(void)
 		check(vita_touch_update(&tracker, many, VITA_TOUCH_TRACKED + 4, t + 200000, &started) ==
 			ZONE(VITA_ZONE_LEFT_EDGE) && started == VITA_TOUCH_TRACKED, "more fingers than followed: the rest ignored");
 		check(vita_touch_update(&tracker, many, 0, t + 210000, NULL) == 0, "all lifted");
+	}
+}
+
+/* a rear finger held from t, down for `held_us`: whether it counted by then
+(lifted afterwards) */
+static int rear_counts(struct vita_touch_tracker *tracker, int x, int y, unsigned long long t,
+	unsigned long long held_us)
+{
+	struct vita_touch_contact finger = contact(VITA_TOUCH_REAR, 9, x, y);
+	unsigned long held;
+
+	vita_touch_update(tracker, &finger, 1, t, NULL);
+	held = vita_touch_update(tracker, &finger, 1, t + held_us, NULL);
+	vita_touch_update(tracker, &finger, 0, t + held_us + 1000, NULL);
+	return held != 0;
+}
+
+static void test_rear_guard(void)
+{
+	struct vita_touch_tracker tracker;
+	struct vita_touch_contact fingers[2];
+	unsigned long long t = 90000000;
+	int guard, zone;
+
+	check(vita_rear_guard_named("off") == VITA_REAR_GUARD_OFF && vita_rear_guard_named("light") == VITA_REAR_GUARD_LIGHT &&
+		vita_rear_guard_named("normal") == VITA_REAR_GUARD_NORMAL &&
+		vita_rear_guard_named("strong") == VITA_REAR_GUARD_STRONG, "guard: the settings values");
+	check(vita_rear_guard_named(NULL) == VITA_REAR_GUARD_NORMAL && vita_rear_guard_named("nonsense") == VITA_REAR_GUARD_NORMAL,
+		"guard: unset or unknown is Normal");
+	check(vita_rear_guards[VITA_REAR_GUARD_OFF].edge == 0 &&
+		vita_rear_guards[VITA_REAR_GUARD_OFF].hold_ms * 1000ULL == VITA_TOUCH_REAR_HOLD_US,
+		"guard Off: no border, the old 0.1 s");
+	for (guard = 1; guard < VITA_REAR_GUARD_COUNT; guard++)
+		check(vita_rear_guards[guard].edge > vita_rear_guards[guard - 1].edge &&
+			vita_rear_guards[guard].hold_ms > vita_rear_guards[guard - 1].hold_ms, "guard: each stronger than the last");
+
+	memset(&tracker, 0, sizeof(tracker));
+	tracker.rear_guard = VITA_REAR_GUARD_NORMAL;
+	/* the border: where the hands holding the Vita rest */
+	check(!rear_counts(&tracker, 20, 300, t, 2000000), "Normal: a finger resting on the left border never counts (2 s)");
+	check(!rear_counts(&tracker, 940, 300, t += 3000000, 2000000), "Normal: nor on the right border");
+	check(!rear_counts(&tracker, 300, 10, t += 3000000, 2000000), "Normal: nor on the top border");
+	check(!rear_counts(&tracker, 300, 530, t += 3000000, 2000000), "Normal: nor on the bottom border");
+	check(!rear_counts(&tracker, 95, 300, t += 3000000, 2000000) && rear_counts(&tracker, 96, 300, t += 3000000, 2000000),
+		"Normal: the border is 96 pixels");
+	check(!rear_counts(&tracker, 300, 544 - 96, t += 3000000, 2000000) &&
+		rear_counts(&tracker, 300, 544 - 97, t += 3000000, 2000000), "Normal: 96 pixels at the bottom too");
+	/* (a finger from the border slid inwards: still nothing) */
+	t += 3000000;
+	fingers[0] = contact(VITA_TOUCH_REAR, 4, 10, 300);
+	vita_touch_update(&tracker, fingers, 1, t, NULL);
+	fingers[0] = contact(VITA_TOUCH_REAR, 4, 250, 300);
+	check(vita_touch_update(&tracker, fingers, 1, t + 500000, NULL) == 0 &&
+		vita_touch_update(&tracker, fingers, 1, t + 1000000, NULL) == 0, "Normal: from the border slid inwards: nothing");
+	vita_touch_update(&tracker, fingers, 0, t + 1100000, NULL);
+	/* the hold time */
+	check(!rear_counts(&tracker, 250, 300, t += 3000000, 249999), "Normal: not 1 us before 0.25 s");
+	check(rear_counts(&tracker, 250, 300, t += 3000000, 250000), "Normal: counts once held 0.25 s");
+	check(!rear_counts(&tracker, 250, 300, t += 3000000, 150000), "Normal: a 0.15 s brush inside never counts");
+	/* (a grip on the border and a finger in a zone: the zone alone) */
+	t += 3000000;
+	fingers[0] = contact(VITA_TOUCH_REAR, 1, 15, 200);
+	fingers[1] = contact(VITA_TOUCH_REAR, 2, 700, 300);
+	vita_touch_update(&tracker, fingers, 2, t, NULL);
+	check(vita_touch_update(&tracker, fingers, 2, t + 300000, NULL) == ZONE(VITA_ZONE_REAR_RIGHT),
+		"Normal: the grip on the border beside a finger in the right half: the right half alone");
+	vita_touch_update(&tracker, fingers, 0, t + 400000, NULL);
+	/* the front screen: never guarded */
+	t += 3000000;
+	tracker.rear_guard = VITA_REAR_GUARD_STRONG;
+	fingers[0] = contact(VITA_TOUCH_FRONT, 1, 5, 5);
+	check(vita_touch_update(&tracker, fingers, 1, t, NULL) == ZONE(VITA_ZONE_TOP_LEFT),
+		"Strong: a front corner still counts at once, on its edge");
+	vita_touch_update(&tracker, fingers, 0, t + 16000, NULL);
+	/* the other guards */
+	check(!rear_counts(&tracker, 140, 300, t += 3000000, 2000000) && rear_counts(&tracker, 144, 300, t += 3000000, 2000000),
+		"Strong: a 144 pixel border");
+	check(!rear_counts(&tracker, 250, 300, t += 3000000, 399999) && rear_counts(&tracker, 250, 300, t += 3000000, 400000),
+		"Strong: 0.4 s");
+	tracker.rear_guard = VITA_REAR_GUARD_LIGHT;
+	check(!rear_counts(&tracker, 47, 300, t += 3000000, 2000000) && rear_counts(&tracker, 60, 300, t += 3000000, 2000000),
+		"Light: a 48 pixel border");
+	check(!rear_counts(&tracker, 250, 300, t += 3000000, 149999) && rear_counts(&tracker, 250, 300, t += 3000000, 150000),
+		"Light: 0.15 s");
+	tracker.rear_guard = VITA_REAR_GUARD_OFF;
+	check(rear_counts(&tracker, 2, 2, t += 3000000, 100000), "Off: the very corner counts after 0.1 s, as before");
+	tracker.rear_guard = 99;
+	check(!rear_counts(&tracker, 20, 300, t += 3000000, 2000000) && !rear_counts(&tracker, 250, 300, t += 3000000, 249999) &&
+		rear_counts(&tracker, 250, 300, t += 3000000, 250000), "a guard out of range: Normal");
+	/* the pad script touches a zone's middle: inside every guard's border */
+	for (guard = 0; guard < VITA_REAR_GUARD_COUNT; guard++)
+	{
+		int counted = 1;
+
+		tracker.rear_guard = guard;
+		for (zone = 0; zone < VITA_ZONE_COUNT; zone++)
+		{
+			const struct vita_touch_zone *rectangle = &vita_touch_zones[zone];
+
+			if (rectangle->panel == VITA_TOUCH_REAR)
+				counted &= rear_counts(&tracker, (rectangle->left + rectangle->right) / 2,
+					(rectangle->top + rectangle->bottom) / 2, t += 3000000, 1000000);
+		}
+		check(counted, guard == VITA_REAR_GUARD_STRONG ? "Strong: the rear zones' middles still count" :
+			"a guard: the rear zones' middles still count");
 	}
 }
 
@@ -582,6 +690,7 @@ int main(void)
 {
 	test_zones();
 	test_hold();
+	test_rear_guard();
 	test_mapping();
 	test_gyro_filter();
 	test_gyro_aim();

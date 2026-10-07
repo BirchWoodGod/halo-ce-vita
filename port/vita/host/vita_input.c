@@ -38,6 +38,9 @@ Vita lying on a table drifts).
 #include "vita_controls.h"
 #include "vita_host.h"
 
+/* bumped by the settings panel (port_config.c) */
+extern volatile unsigned long halo_settings_generation;
+
 #define MAXIMUM_PAD_STEPS 64
 
 struct pad_step
@@ -250,6 +253,17 @@ static unsigned int touch_read(unsigned long long now, int *started)
 {
 	struct vita_touch_contact contacts[2 * SCE_TOUCH_MAX_REPORT + VITA_ZONE_COUNT];
 	int count = 0, panel, index;
+	static unsigned long settings_seen;
+	static int settings_read;
+
+	/* the rear pad's guard (the panel's Rear touch guard; read again
+	after a change in the settings panel) */
+	if (!settings_read || settings_seen != halo_settings_generation)
+	{
+		settings_read = 1;
+		settings_seen = halo_settings_generation;
+		touch_tracker.rear_guard = vita_rear_guard_named(getenv("HALO_TOUCH_REAR_GUARD"));
+	}
 
 	for (panel = 0; panel < 2; panel++)
 	{

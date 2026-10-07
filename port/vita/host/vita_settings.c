@@ -28,7 +28,8 @@ sound voices, the network, most dev switches).
 
 Controls is laid out as the Xbox controller: each touch zone (the front
 screen's top corners and its left and right edges, the rear pad's halves;
-vita_controls.c says where they are and when a finger counts) presses an
+vita_controls.c says where they are and when a finger counts; Rear touch
+guard keeps the hands holding the Vita off the rear ones) presses an
 Xbox button, and each Xbox button (A B X Y, Black, White, the triggers, the
 sticks' clicks, Back) is on a Vita button of the player's choosing, in play; while a zone's row is chosen the panel draws the
 zones beside the rows (touch_diagram). Reset controls puts the tab's rows
@@ -228,9 +229,14 @@ static struct setting settings[] = {
 	{ "Touch right edge", "HALO_TOUCH_RIGHT_EDGE", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
 		"Front screen, right edge by the buttons: counts at once", 0, TAB_CONTROLS },
 	{ "Rear touch left", "HALO_TOUCH_REAR_LEFT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Rear pad, left half: counts once held 0.1 s", 0, TAB_CONTROLS },
+		"Rear pad, left half: held a moment (Rear touch guard)", 0, TAB_CONTROLS },
 	{ "Rear touch right", "HALO_TOUCH_REAR_RIGHT", 0, VITA_XBOX_COUNT, { VITA_XBOX_VALUES }, { VITA_XBOX_NAMES },
-		"Rear pad, right half: counts once held 0.1 s", 0, TAB_CONTROLS },
+		"Rear pad, right half: held a moment (Rear touch guard)", 0, TAB_CONTROLS },
+	/* (the rear zones' guard against the hands holding the Vita:
+	vita_controls.c - the pad's border never counts, and a hold time) */
+	{ "Rear touch guard", "HALO_TOUCH_REAR_GUARD", 0, VITA_REAR_GUARD_COUNT, { VITA_REAR_GUARD_VALUES },
+		{ VITA_REAR_GUARD_NAMES }, "Rear pad: its edges (the grip) ignored, a hold time",
+		VITA_REAR_GUARD_DEFAULT, TAB_CONTROLS },
 	{ "A", "HALO_XBOX_A", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
 		"A: jump (in the menus Cross stays A)", 0, TAB_CONTROLS },
 	{ "B", "HALO_XBOX_B", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },

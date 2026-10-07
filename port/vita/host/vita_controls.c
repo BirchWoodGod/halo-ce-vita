@@ -18,6 +18,17 @@ The zones, in the screen's 960 x 544 pixels:
 	rear, right half    520..960 x all      (a strip between the two counts
 	                                         for neither)
 The bottom corners are left alone: the motion tracker is bottom left.
+
+The rear pad is where the hands holding the Vita rest, so its fingers go
+through a guard (the panel's Rear touch guard): one that comes down in the
+pad's outer border never counts, and one further in only once held a
+while. On hardware the hands resting on the pad pressed a rear zone's
+button (Black) with the old 0.1 s and no border.
+	guard     border   hold
+	Off       none     0.1 s
+	Light     48 px    0.15 s
+	Normal    96 px    0.25 s   (the default)
+	Strong    144 px   0.4 s
 */
 
 #include "vita_controls.h"
@@ -34,6 +45,25 @@ const struct vita_touch_zone vita_touch_zones[VITA_ZONE_COUNT] = {
 	{ VITA_TOUCH_REAR, 0, 0, 440, 544, "rl" },
 	{ VITA_TOUCH_REAR, 520, 0, 960, 544, "rr" },
 };
+
+const struct vita_rear_guard vita_rear_guards[VITA_REAR_GUARD_COUNT] = {
+	{ 0, 100 },
+	{ 48, 150 },
+	{ 96, 250 },
+	{ 144, 400 },
+};
+
+static const char *const rear_guard_values[VITA_REAR_GUARD_COUNT] = { VITA_REAR_GUARD_VALUES };
+
+int vita_rear_guard_named(const char *value)
+{
+	int guard;
+
+	for (guard = 0; value && guard < VITA_REAR_GUARD_COUNT; guard++)
+		if (strcmp(value, rear_guard_values[guard]) == 0)
+			return guard;
+	return VITA_REAR_GUARD_DEFAULT;
+}
 
 const char *const vita_touch_variables[VITA_ZONE_COUNT] = {
 	"HALO_TOUCH_TOP_LEFT", "HALO_TOUCH_TOP_RIGHT", "HALO_TOUCH_LEFT_EDGE", "HALO_TOUCH_RIGHT_EDGE",
@@ -82,6 +112,9 @@ unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct
 	int seen[VITA_TOUCH_TRACKED];
 	unsigned long held = 0;
 	int index, finger, new_fingers = 0;
+	const struct vita_rear_guard *guard = &vita_rear_guards[tracker->rear_guard >= 0 &&
+		tracker->rear_guard < VITA_REAR_GUARD_COUNT ? tracker->rear_guard : VITA_REAR_GUARD_DEFAULT];
+	unsigned long long rear_hold_us = (unsigned long long)guard->hold_ms * 1000;
 
 	memset(seen, 0, sizeof(seen));
 	for (index = 0; index < count; index++)
@@ -111,6 +144,11 @@ unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct
 			tracker->fingers[finger].panel = contact->panel;
 			tracker->fingers[finger].id = contact->id;
 			tracker->fingers[finger].zone = vita_touch_zone_at(contact->panel, contact->x, contact->y);
+			/* (the rear pad's border, where the hands holding the Vita
+			rest: never a zone) */
+			if (contact->panel == VITA_TOUCH_REAR && (contact->x < guard->edge || contact->y < guard->edge ||
+				contact->x >= VITA_TOUCH_WIDTH - guard->edge || contact->y >= VITA_TOUCH_HEIGHT - guard->edge))
+				tracker->fingers[finger].zone = -1;
 			tracker->fingers[finger].since = now_us;
 			new_fingers++;
 		}
@@ -128,7 +166,7 @@ unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct
 		if (tracker->fingers[finger].zone < 0)
 			continue;
 		if (tracker->fingers[finger].panel == VITA_TOUCH_REAR &&
-			now_us - tracker->fingers[finger].since < VITA_TOUCH_REAR_HOLD_US)
+			now_us - tracker->fingers[finger].since < rear_hold_us)
 			continue;
 		held |= 1UL << tracker->fingers[finger].zone;
 	}

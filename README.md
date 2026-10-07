@@ -160,8 +160,10 @@ button. The zones, all Off until set:
 Each can be A, B, X, Y, Black, White, Left trigger, Right trigger, Left
 stick (its click: crouch, Hold or Toggle as the Crouch row says), Right
 stick (its click: zoom) or Back. A front zone counts at once; a rear one
-once held for 0.1 s, so the fingers holding the Vita brushing the pad do
-nothing. A touch that starts outside a zone does nothing, and each finger
+goes through the **Rear touch guard** row, so the hands holding the Vita do
+nothing: a touch that starts near the rear pad's edges never counts, and one
+further in only once held (Normal, the default: a 96-pixel border, 0.25 s;
+Light 48 / 0.15 s, Strong 144 / 0.4 s, Off no border and 0.1 s). A touch that starts outside a zone does nothing, and each finger
 counts on its own. While a zone's row is chosen the panel shows where the
 zones are. **Reset controls** puts the tab back as shipped (Show dev
 settings stays).

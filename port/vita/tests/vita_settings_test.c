@@ -329,7 +329,9 @@ static void test_controls_tab(void)
 		strstr(menu, "\nLeft trigger ") && strstr(menu, "\nRight stick click ") && strstr(menu, "\nBack ") &&
 		strstr(menu, "Reset controls >") && strstr(menu, "Show dev settings") && !strstr(menu, " button"),
 		"Controls: the touch zones, the Xbox buttons by name, Reset controls");
-	check(count <= 25 && longest <= 46, "Controls: 25 lines at most, each 46 characters at most");
+	check(count <= 26 && longest <= 46, "Controls: 26 lines at most, each 46 characters at most");
+	check(strstr(menu, "\nRear touch guard ") && strstr(menu, "< Normal >") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal"),
+		"Rear touch guard: Normal as shipped (a 1.0 settings.txt has none)");
 	check(!diagram[0], "Look sensitivity chosen: no zone diagram");
 	to_line("Rear touch left");
 	menu_lines(&longest, diagram, sizeof(diagram));
@@ -350,6 +352,20 @@ static void test_controls_tab(void)
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back  ") && !strcmp(diagram, "-S--A- alaaea"),
 		"Touch top right: Back, the last choice; the rear zone still marked set");
+	to_line("Rear touch guard");
+	menu_lines(&longest, diagram, sizeof(diagram));
+	check(!diagram[0] && strstr(menu, "Rear pad: its edges (the grip) ignored"), "Rear touch guard chosen: its help, no zone diagram");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "strong") && strstr(menu, "< Strong") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_GUARD=strong\n"), "Rear touch guard: Strong, in the environment and settings.txt");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "strong"), "Rear touch guard: Strong is the last");
+	for (index = 0; index < 3; index++)
+		press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "off") && strstr(menu, " Off >"), "Rear touch guard: Off, the first");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "light") && vita_rear_guard_named(getenv("HALO_TOUCH_REAR_GUARD")) ==
+		VITA_REAR_GUARD_LIGHT, "Rear touch guard: Light, as the touch reader takes it");
 	to_line("White");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!diagram[0], "a button's row: no zone diagram");
@@ -373,7 +389,8 @@ static void test_controls_tab(void)
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "y") && !strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") &&
 		!strcmp(getenv("HALO_TOUCH_LEFT_EDGE"), "off") && !strcmp(getenv("HALO_XBOX_WHITE"), "left") &&
-		!strcmp(getenv("HALO_XBOX_RIGHT_TRIGGER"), "r"), "settings.txt round trip: zones and buttons back at start-up");
+		!strcmp(getenv("HALO_XBOX_RIGHT_TRIGGER"), "r") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "light"),
+		"settings.txt round trip: zones, the rear guard and buttons back at start-up");
 
 	/* Reset controls: this tab as shipped, Show dev settings kept */
 	open_panel();
@@ -385,8 +402,10 @@ static void test_controls_tab(void)
 		!strcmp(getenv("HALO_XBOX_WHITE"), "right") && !strcmp(getenv("XV_LOOK_SENS"), "100") &&
 		!strcmp(getenv("HALO_CROUCH_TOGGLE"), "1") && !strcmp(getenv("XV_INVERT_Y"), "0") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_LEFT=off\n") &&
-		strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS=100\n") && strstr(menu, "Controls as shipped"),
-		"Reset controls: zones Off, buttons, look and crouch as shipped, saved");
+		strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS=100\n") && strstr(menu, "Controls as shipped") &&
+		!strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_GUARD=normal\n"),
+		"Reset controls: zones Off, the rear guard Normal, buttons, look and crouch as shipped, saved");
 	check(!strcmp(getenv("HALO_DEV_SETTINGS"), "1") && strstr(menu, "|Dev"), "Reset controls keeps Show dev settings");
 	press(VITA_BUTTON_CIRCLE);
 }

@@ -105,15 +105,28 @@ front):
 | Touch top right | front, 800-960 x 0-120 | at once |
 | Touch left edge | front, 0-120 x 190-400 (beside the D-pad, above the motion tracker) | at once |
 | Touch right edge | front, 840-960 x 190-400 (beside the face buttons) | at once |
-| Rear touch left | rear, 0-440 (all of its height) | once held 0.1 s |
-| Rear touch right | rear, 520-960 | once held 0.1 s |
+| Rear touch left | rear, 0-440 (all of its height), less the guard's border | once held the guard's time |
+| Rear touch right | rear, 520-960, less the guard's border | once held the guard's time |
 
 A finger counts for the zone it came down in for as long as it stays down;
 one that comes down outside every zone does nothing, and each finger counts
-on its own. The rear pad's hold time keeps the fingers holding the Vita from
-pressing anything when they brush it. A finger coming down counts as input
-for the screen's dimming. `HALO_PAD_FILE` (debug, `vita_input.c`) takes `tl
-tr el er rl rr` for the zones.
+on its own. The rear pad's guard (Rear touch guard, `HALO_TOUCH_REAR_GUARD`)
+keeps the hands holding the Vita from pressing anything: a finger that comes
+down within its border of the pad's edges (all four) never counts, even slid
+inwards, and one further in counts once held its time. On hardware a grip
+resting on the pad pressed a rear zone's button with the old 0.1 s and no
+border.
+
+| Rear touch guard | Border | Hold |
+| --- | --- | --- |
+| Off | none | 0.1 s |
+| Light | 48 px | 0.15 s |
+| Normal (default) | 96 px | 0.25 s |
+| Strong | 144 px | 0.4 s |
+
+A finger coming down counts as input for the screen's dimming.
+`HALO_PAD_FILE` (debug, `vita_input.c`) takes `tl tr el er rl rr` for the
+zones (touched at their middle, inside every guard's border).
 
 **Gyro aiming** (`vita_controls.c`, `vita_input.c`; the Gyro tab, Off by
 default): the gyroscope's samples (`sceMotionGetSensorState`, every sample
@@ -179,6 +192,7 @@ after a restart.
 | Crouch | Toggle | the left stick click (crouch): a press crouches and the next stands (Hold: crouch while held), from its Vita button or a touch zone |
 | Touch top left, top right, left edge, right edge | Off | the Xbox button a front touch zone presses: A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back |
 | Rear touch left, right | Off | the same for the rear pad's halves |
+| Rear touch guard | Normal | the rear zones ignore a touch that starts near the pad's edges (where the hands holding the Vita rest) and count once held: Off (no border, 0.1 s), Light, Normal (96 px, 0.25 s), Strong (144 px, 0.4 s) |
 | A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back | Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select | the Vita button of each Xbox button in play (None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both |
 | Reset controls > | | this tab's rows as shipped (Show dev settings stays) |
 | Show dev settings | Off | shows the Dev tab |

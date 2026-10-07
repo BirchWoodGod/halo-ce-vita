@@ -34,9 +34,42 @@ enum
 	VITA_ZONE_COUNT
 };
 
-/* a touch on the rear pad counts once held this long (a brush of the
-fingers holding the Vita does not); a front one at once */
+/* a touch on the rear pad counts once held its guard's hold time (a brush
+of the fingers holding the Vita does not); a front one at once. This is
+the hold of the guard Off (as before the guard) */
 #define VITA_TOUCH_REAR_HOLD_US 100000ULL
+
+/* the rear pad's guard (the panel's Rear touch guard,
+HALO_TOUCH_REAR_GUARD): the hands holding the Vita rest on the pad's
+border, so a finger that comes down within `edge` pixels of it never counts
+(not even slid inwards), and one further in counts once held hold_ms. Off
+is the pad as before the guard: no border, 0.1 s */
+enum
+{
+	VITA_REAR_GUARD_OFF,
+	VITA_REAR_GUARD_LIGHT,
+	VITA_REAR_GUARD_NORMAL,
+	VITA_REAR_GUARD_STRONG,
+	VITA_REAR_GUARD_COUNT
+};
+
+#define VITA_REAR_GUARD_DEFAULT VITA_REAR_GUARD_NORMAL
+/* (settings.txt's values and the panel's names, in the enum's order) */
+#define VITA_REAR_GUARD_VALUES "off", "light", "normal", "strong"
+#define VITA_REAR_GUARD_NAMES "Off", "Light", "Normal", "Strong"
+
+struct vita_rear_guard
+{
+	/* the border, in the screen's pixels (VITA_TOUCH_WIDTH x HEIGHT), on
+	all four sides; the hold, in milliseconds */
+	int edge;
+	int hold_ms;
+};
+
+extern const struct vita_rear_guard vita_rear_guards[VITA_REAR_GUARD_COUNT];
+
+/* the guard a settings value names; VITA_REAR_GUARD_DEFAULT if none */
+int vita_rear_guard_named(const char *value);
 
 /* both panels' positions are in the screen's pixels, 960 x 544 (the rear
 pad scaled to the same, as seen from the front) */
@@ -68,7 +101,9 @@ struct vita_touch_contact
 #define VITA_TOUCH_TRACKED 16
 
 /* the fingers followed from frame to frame: the zone each started in (-1:
-outside every zone, so it never counts) and since when */
+outside every zone or in the rear pad's guarded border, so it never
+counts) and since when; and the rear pad's guard (a VITA_REAR_GUARD_*, set
+by the caller: zeroed, Off) */
 struct vita_touch_tracker
 {
 	struct
@@ -77,12 +112,14 @@ struct vita_touch_tracker
 		int panel, id, zone;
 		unsigned long long since;
 	} fingers[VITA_TOUCH_TRACKED];
+	int rear_guard;
 };
 
 /* the zones held this frame (a bit per zone): each finger counts for the
 zone it started in, while it stays down, once held long enough for its
-panel; several fingers each count on their own. *started (if given) is
-how many fingers came down this frame */
+panel (the rear: its guard's hold, and never one that started in the
+guard's border); several fingers each count on their own. *started (if
+given) is how many fingers came down this frame */
 unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct vita_touch_contact *contacts,
 	int count, unsigned long long now_us, int *started);
 
