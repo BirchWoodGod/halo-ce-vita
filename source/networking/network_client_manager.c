@@ -777,6 +777,8 @@ static void network_game_client_update_precache_status(
 static boolean network_game_client_map_name_is_valid(
 	char const *map_name,
 	long size);
+static boolean network_game_client_game_record_is_valid(
+	struct network_game *game);
 static boolean network_game_client_idle_searching(
 	struct network_game_client *client);
 static boolean network_game_client_idle_joining(
@@ -1436,6 +1438,13 @@ boolean network_game_client_game_settings_updated(
 	{
 		struct network_game previous_game;
 
+		/* port: the record's players: no two the same machine's same
+		controller, no machine with more than its local players (OpenCE's) */
+		if (!network_game_client_game_record_is_valid(message_packet))
+		{
+			network_event("invalid message_server_game_settings_update message received: its players");
+			return FALSE;
+		}
 #ifdef HALO_LINUX
 		/* (the host's map name - a tag path with backslashes, such as the
 		Blood Gulch scenario's - is ended here, and one that climbs out of
@@ -1804,7 +1813,13 @@ boolean network_game_client_handle_game_update(
 	/* (the host's time at the start, and a game in progress's past 16 bits
 	of ticks: the host's whole time, if it is ahead; never back, which the
 	host would take for old messages) */
-	if (network_game_client_late_join_clock_pending)
+	/* port: and never one the game's arithmetic on its time (a second more,
+	a time limit) could take past a long (OpenCE's) */
+	if (message_packet->game_time < 0 || message_packet->game_time > 0x3FFFFFFF)
+	{
+		network_event("ignoring the host's game tick #%ld", message_packet->game_time);
+	}
+	else if (network_game_client_late_join_clock_pending)
 	{
 		network_game_client_late_join_clock_pending = FALSE;
 		if (message_packet->game_time > game_time_get())
@@ -2528,10 +2543,46 @@ static boolean network_game_client_map_name_is_valid(
 	long size)
 {
 	/* (a scenario's tag path, of which the cache takes the name after the
-	last backslash) */
-	return memchr(map_name, '\0', size) != NULL &&
-		!strchr(map_name, '/') &&
-		!strstr(map_name, "..");
+	last backslash; port: no control characters nor a drive's colon, and a
+	name after the last backslash that is not only dots and spaces, which
+	no map's is: OpenCE's, with the characters of the custom maps' names
+	map sharing allows, such as '#') */
+	char const *character;
+	char const *leaf;
+
+	if (!memchr(map_name, '\0', size) || strchr(map_name, '/') || strchr(map_name, ':') || strstr(map_name, ".."))
+		return FALSE;
+	for (character = map_name; *character; character++)
+	{
+		if ((unsigned char)*character < 0x20 || *character == 0x7F)
+			return FALSE;
+	}
+	leaf = strrchr(map_name, '\\');
+	leaf = leaf ? leaf + 1 : map_name;
+	return *leaf && leaf[strspn(leaf, ". ")] != 0;
+}
+
+/* port: the players of a settings record the host sends: each valid one
+the only one of its machine's controller (so no machine has more than its
+local players; OpenCE's) */
+static boolean network_game_client_game_record_is_valid(
+	struct network_game *game)
+{
+	static short machine_players[HALO_PORT_MAXIMUM_NETWORK_MACHINES][MAXIMUM_LOCAL_PLAYERS];
+	short index;
+
+	csmemset(machine_players, 0, sizeof(machine_players));
+	for (index = 0; index < (short)NUMBEROF(game->players); index++)
+	{
+		struct network_player *player = &game->players[index];
+
+		if (!network_player_is_valid(player))
+			continue;
+		if (machine_players[player->machine_index][player->controller_index]++)
+			return FALSE;
+	}
+
+	return TRUE;
 }
 
 static boolean add_advertised_game(
