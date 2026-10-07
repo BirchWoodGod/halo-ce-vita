@@ -2316,6 +2316,9 @@ struct render_command
 	wave the worker runs it in (render_worker: small_target_wave) */
 	unsigned char new_run;
 	unsigned char wave;
+	/* the records before it are run first, the held waves and the main
+	scene's so far (a small target's copies ran out: command_begin) */
+	unsigned char flush_before;
 	/* (HALO_FILL_STATS) the render phase that recorded the draw (render.c) */
 	signed char phase;
 	/* recorded while the sky is drawn late (halo_d3d_sky_depth) */
@@ -3446,6 +3449,7 @@ static void *render_worker(void *unused)
 		static unsigned long deferred[COMMAND_RING], waved[COMMAND_RING];
 		unsigned long deferred_count = 0, waved_count = 0, index = 0;
 		unsigned int last_wave = 0;
+		BOOL submit_begun = FALSE;
 
 		for (;;)
 		{
@@ -3460,14 +3464,18 @@ static void *render_worker(void *unused)
 				vita_host_sleep_us(50);
 			}
 			command = &commands[(command_tail + index) % COMMAND_RING];
-			if (command->kind == _command_present)
+			/* (a present, or a record before which what came before is
+			run: a small target's copies ran out, target_versions_ran_out) */
+			if (command->kind == _command_present || command->flush_before)
 			{
 				unsigned long each;
 				unsigned int wave;
 
 				/* (the frame's main work goes to the GPU from here: the
 				dynamic resolution's GPU time) */
-				vgxm_frame_submit_begin();
+				if (!submit_begun)
+					vgxm_frame_submit_begin();
+				submit_begun = TRUE;
 
 				for (wave = 1; wave <= last_wave; wave++)
 					for (each = 0; each < waved_count; each++)
@@ -3478,6 +3486,10 @@ static void *render_worker(void *unused)
 				for (each = 0; each < deferred_count; each++)
 					execute_command(&commands[deferred[each] % COMMAND_RING]);
 				deferred_count = 0;
+			}
+			if (command->kind == _command_present)
+			{
+				submit_begun = FALSE;
 				execute_command(command);
 				__atomic_store_n(&frames_presented, frames_presented + 1, __ATOMIC_RELEASE);
 				__atomic_store_n(&command_tail, command_tail + index + 1, __ATOMIC_RELEASE);
@@ -3677,6 +3689,27 @@ static unsigned long *target_version_slot(unsigned long data)
 	target_versions[target_version_count].data = data;
 	target_versions[target_version_count].version = 0;
 	return &target_versions[target_version_count++].version;
+}
+
+/* A run into a small target whose copies ran out (more than 24 object
+shadows in view, the armoury's racks of weapons in d40). It drew into the
+last copy again, and being hoisted, ran ahead of the main scene's draws that
+read that copy for the shadows before it: each of those shadows was drawn
+with the last one's picture (a rifle's with a body's, stretched over the
+floor), and they came and went as the count in view crossed 24. Now the
+target's copies start again, and the worker first runs every record before
+this one (the waves held and the main scene so far: render_worker), so
+the copies are free; the main scene is split there, once each 24 copies. */
+static unsigned long target_versions_ran_out_count;
+static BOOL target_versions_flush_pending;
+
+static void target_versions_ran_out(unsigned long *version)
+{
+	if (++target_versions_ran_out_count <= 4)
+		platform_log("small targets: more than %d copies of one in a frame: the frame's records so far run first (%lu so far)",
+			MAXIMUM_TARGET_VERSIONS, target_versions_ran_out_count);
+	*version = 1;
+	target_versions_flush_pending = TRUE;
 }
 
 /* the draw being recorded runs the constant fragment program
@@ -4010,6 +4043,7 @@ static struct render_command *command_begin(unsigned long kind)
 	command->new_run = command->targets && command->targets->color_valid &&
 		last_recorded_target != command->targets->color_surface.Data;
 	command->wave = 0;
+	command->flush_before = 0;
 	if (kind != _command_present && command->targets->color_valid && surface_is_small_cached(&command->targets->color_surface) &&
 		!(command->targets->depth_valid && device.depth_stencil->Data && !surface_is_small(&command->targets->depth_surface)) &&
 		!surface_in_order(command->targets->color_surface.Data))
@@ -4021,6 +4055,8 @@ static struct render_command *command_begin(unsigned long kind)
 			/* a new run into the target: a fresh copy */
 			if (last_recorded_target != command->targets->color_surface.Data && *version < MAXIMUM_TARGET_VERSIONS)
 				(*version)++;
+			else if (last_recorded_target != command->targets->color_surface.Data)
+				target_versions_ran_out(version);
 			command->color_version = *version;
 			command->hoistable = *version > 0;
 		}
@@ -4160,6 +4196,15 @@ static void small_target_wave(struct render_command *command)
 
 static void command_commit(struct render_command *command)
 {
+	if (target_versions_flush_pending)
+	{
+		/* (the first record after the copies started again: the waves
+		start again with it) */
+		target_versions_flush_pending = FALSE;
+		command->flush_before = 1;
+		wave_target_count = 0;
+		wave_overflow = FALSE;
+	}
 	if (worker_enabled)
 	{
 		small_target_wave(command);
