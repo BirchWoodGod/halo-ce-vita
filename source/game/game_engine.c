@@ -815,7 +815,8 @@ static long select_players_to_display(
 	enum postgame_statistic statistic,
 	long player_index,
 	struct statistic_buffer *output,
-	long maximum_count);
+	long maximum_count,
+	boolean in_game_only);
 
 static void netgame_flag_verify_no_team_duplicates(
 	short flag_type,
@@ -1437,10 +1438,15 @@ static void rasterize_in_game_score_draw_line(
 	return;
 }
 
-long populate_statistic_buffer(
+/* port: in_game_only (the in-game score, game_engine_rasterize_in_game_score):
+the players in the game, not those who quit, ranked and placed among
+themselves. A parameter, not a global: the render draws the score while the
+tick thread ranks the players (render_epoch.h). */
+static long populate_statistic_buffer_of(
 	struct statistic_buffer *statistic_buffer,
 	enum postgame_statistic statistic,
-	boolean inverse)
+	boolean inverse,
+	boolean in_game_only)
 {
 	long player_count = 0;
 	boolean invert = statistic == _postgame_statistic_deaths ? !inverse : inverse;
@@ -1455,6 +1461,8 @@ long populate_statistic_buffer(
 			"c:\\halo\\SOURCE\\game\\game_engine.c",
 			0x2C8,
 			player_count < MULTIPLAYER_MAXIMUM_PLAYERS);
+		if (in_game_only && player->quit_out_of_game)
+			continue;
 		if (player_count < MULTIPLAYER_MAXIMUM_PLAYERS)
 		{
 			statistic_buffer[player_count].player_index = player_iterator.datum_index;
@@ -1552,6 +1560,14 @@ long populate_statistic_buffer(
 	return player_count;
 }
 
+long populate_statistic_buffer(
+	struct statistic_buffer *statistic_buffer,
+	enum postgame_statistic statistic,
+	boolean inverse)
+{
+	return populate_statistic_buffer_of(statistic_buffer, statistic, inverse, FALSE);
+}
+
 
 
 
@@ -1561,10 +1577,11 @@ static long select_players_to_display(
 	enum postgame_statistic statistic,
 	long player_index,
 	struct statistic_buffer *output,
-	long maximum_count)
+	long maximum_count,
+	boolean in_game_only)
 {
 	struct statistic_buffer statistic_buffer[MULTIPLAYER_MAXIMUM_PLAYERS];
-	long player_count = populate_statistic_buffer(statistic_buffer, statistic, FALSE);
+	long player_count = populate_statistic_buffer_of(statistic_buffer, statistic, FALSE, in_game_only);
 	boolean debug = rasterizer_debug_options.pad3 == 'E';
 	long local_player_count = 0;
 	long statistic_index;
@@ -1660,11 +1677,13 @@ static void game_engine_rasterize_in_game_score(
 	wchar_t *score_name;
 
 	game_engine_generate_title_string(title_string, player_index);
+	/* port: not the players who quit (from OpenCE) */
 	entry_count = select_players_to_display(
 		_postgame_statistic_ranking,
 		player_index,
 		entries,
-		NUMBEROF(entries));
+		NUMBEROF(entries),
+		TRUE);
 
 	color.alpha = alpha;
 	color.red = 0.7f;
@@ -1944,7 +1963,7 @@ void game_engine_post_rasterize_post_game(
 		drawline(row_string, 7, 0);
 	}
 
-	entry_count = select_players_to_display(_postgame_statistic_ranking, NONE, entries, 12);
+	entry_count = select_players_to_display(_postgame_statistic_ranking, NONE, entries, 12, FALSE);
 	for (entry_index = 0; entry_index < entry_count; entry_index++)
 	{
 		long player_index = entries[entry_index].player_index;
