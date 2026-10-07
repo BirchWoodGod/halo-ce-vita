@@ -96,7 +96,7 @@ void game_engine_read_network_state(byte const *buffer, long size);
 /* physics.c's (world units a tick, each tick) */
 extern real global_gravity;
 /* network_server_manager.c's, cseries_windows.c's, console.c's, p2p.c's */
-void network_game_server_kick_machine(long machine_index);
+void network_game_server_kick_machine(long machine_index, boolean kept_out);
 unsigned long network_game_server_machine_address(long machine_index);
 char const *network_game_server_machine_hardware_id(long machine_index);
 void p2p_hardware_id_sanitize(char *destination, int size, const char *source);
@@ -568,7 +568,11 @@ static long distributed_received_times[MAXIMUM_SENDERS][NUMBER_OF_DISTRIBUTED_ME
 /* the host: each client machine's clock, measured (CLIENT_CLOCK_WINDOW_MILLISECONDS):
 its latest tick, and its tick and the host's time as the window began
 (NONE: none begun); how many windows in a row it went fast, and whether
-the last did */
+the last did; and whether, since they began, a message that came over its
+stream was that far ahead too (a datagram's source address is all that
+says which machine sent it, and anyone on its network can send one as from
+another's: a machine is banned only on its stream's word,
+distributed_note_client_clock; OpenCE's) */
 /* the host: each client machine's Discord user, as it told it, the text
 kept only of what is allowed (p2p_discord_sanitize) */
 static struct distributed_client_identity distributed_client_identities[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
@@ -582,7 +586,11 @@ static struct distributed_client_clock
 	unsigned long window_time;
 	short fast_windows;
 	boolean fast;
+	boolean ahead_on_stream;
 } distributed_client_clocks[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+/* the host: whether the message being handled came over its machine's
+stream (network_distributed_handle_stream_message) */
+static boolean distributed_handling_stream_message;
 /* a client: the host's latest tick it has had a message of */
 static long distributed_host_time = NONE;
 /* the host: each client's round trip, in ticks, and its jitter */
@@ -2145,6 +2153,7 @@ static void distributed_apply_predictions(
 			from a co-op client still loading the host's BSP, whose player
 			falls there with no floor under it) */
 			if (unit_index != NONE && unit_index == state->unit_index &&
+				unit_get(unit_index)->unit.player_index != NONE &&
 				network_coop_player_has_structure_bsp(unit_get(unit_index)->unit.player_index))
 			{
 				distributed_take_prediction(player_index, unit_index, &bound);
@@ -3715,6 +3724,8 @@ static void distributed_note_client_clock(
 	if (machine_index < 0 || machine_index >= HALO_PORT_MAXIMUM_NETWORK_MACHINES)
 		return;
 	clock = &distributed_client_clocks[machine_index];
+	if (distributed_handling_stream_message && tick - game_time_get() > CLIENT_CLOCK_AHEAD_TICKS)
+		clock->ahead_on_stream = TRUE;
 	if (clock->window_tick == NONE)
 	{
 		clock->latest_tick = tick;
@@ -3736,6 +3747,7 @@ static void distributed_note_client_clock(
 		if (!clock->fast)
 		{
 			clock->fast_windows = 0;
+			clock->ahead_on_stream = FALSE;
 		}
 		else if (++clock->fast_windows == 1)
 		{
@@ -3752,7 +3764,7 @@ static void distributed_note_client_clock(
 				char discord_id[DISCORD_ID_SIZE];
 				char discord_name[DISCORD_NAME_SIZE];
 				char discord[DISCORD_ID_SIZE + DISCORD_NAME_SIZE + 16] = "";
-				char reason[64];
+				char reason[96];
 				char text[MAXIMUM_NOTICE_LENGTH];
 
 				distributed_machine_player_names(machine_index, names, sizeof(names));
@@ -3762,14 +3774,30 @@ static void distributed_note_client_clock(
 					distributed_client_identities[machine_index].discord_name, 1);
 				if (discord_id[0] || discord_name[0])
 					snprintf(discord, sizeof(discord), " (Discord: %s, %s)", discord_name, discord_id);
-				snprintf(reason, sizeof(reason), "speed hack (game ran %.2f times as fast)", rate);
+				snprintf(reason, sizeof(reason), "speed hack (game ran %.2f times as fast)%s", rate,
+					clock->ahead_on_stream ? "" : " (its datagrams only: not banned)");
 				snprintf(text, sizeof(text), "%s%s kicked by the host: their game ran %.2f times as fast (a speed hack)",
 					names, discord, rate);
 				distributed_send_notice(text);
-				distributed_log_cheater(machine_index, names, reason);
+				/* banned, and kept out, only when its stream said so too; on
+				its datagrams' word alone (which another machine could have
+				sent as from its address), logged and dropped, and it may join
+				again */
+				if (clock->ahead_on_stream)
+				{
+					distributed_log_cheater(machine_index, names, reason);
+				}
+				else
+				{
+					char address[32];
+
+					distributed_machine_address_text(machine_index, address, sizeof(address));
+					distributed_write_player_record(CHEATERS_FILE, address, machine_index, names, reason);
+				}
 			}
-			network_game_server_kick_machine(machine_index);
+			network_game_server_kick_machine(machine_index, clock->ahead_on_stream);
 			clock->fast_windows = 0;
+			clock->ahead_on_stream = FALSE;
 		}
 	}
 	clock->window_tick = clock->latest_tick;
@@ -4080,4 +4108,17 @@ void network_distributed_handle_message(
 		break;
 	}
 	}
+}
+
+/* (the host: network_server_message_handler.c) a client machine's message
+of the distributed kind that came over its stream, which no other machine
+can send as it: as network_distributed_handle_message (OpenCE's) */
+void network_distributed_handle_stream_message(
+	long machine_index,
+	word const *message,
+	word size)
+{
+	distributed_handling_stream_message = TRUE;
+	network_distributed_handle_message(machine_index, message, size);
+	distributed_handling_stream_message = FALSE;
 }

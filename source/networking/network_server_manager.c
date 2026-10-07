@@ -844,7 +844,16 @@ enum
 {
 	MAXIMUM_KICKED_ADDRESSES = 64,
 };
-static boolean network_game_server_kick_pending[MAXIMUM_NETWORK_MACHINE_COUNT];
+enum
+{
+	_kick_none = 0,
+	/* its address kept out of this server's games */
+	_kick_kept_out,
+	/* (OpenCE's) dropped, and may join again: on a datagram's word alone,
+	which another machine on its network can send as from its address */
+	_kick_rejoinable,
+};
+static byte network_game_server_kick_pending[MAXIMUM_NETWORK_MACHINE_COUNT];
 /* port: each client machine's hardware id as it told it joining, hex only
 (p2p_hardware_id_sanitize), by slot */
 static char network_game_server_hardware_ids[MAXIMUM_NETWORK_MACHINE_COUNT][P2P_HARDWARE_ID_SIZE];
@@ -1055,7 +1064,7 @@ boolean network_game_server_ban_player(
 			csstrcat(names, name);
 	}
 	network_distributed_ban(machine_index, network_game_server_client_machine_addresses[machine_index], names);
-	network_game_server_kick_pending[machine_index] = TRUE;
+	network_game_server_kick_pending[machine_index] = _kick_kept_out;
 	return TRUE;
 }
 
@@ -1091,9 +1100,12 @@ unsigned long network_game_server_machine_address(
 
 /* port: the distributed netcode asks that a client machine be dropped (its
 game ran faster than this one's: network_distributed.c); it is, once this
-server next looks at its machines, not while its messages are read */
+server next looks at its machines, not while its messages are read. Its
+address kept out of this server's games (kept_out), else it may join
+again (OpenCE's) */
 void network_game_server_kick_machine(
-	long machine_index)
+	long machine_index,
+	boolean kept_out)
 {
 	struct network_game_server *server = global_network_game_server_get();
 
@@ -1103,7 +1115,7 @@ void network_game_server_kick_machine(
 	{
 		return;
 	}
-	network_game_server_kick_pending[machine_index] = TRUE;
+	network_game_server_kick_pending[machine_index] = kept_out ? _kick_kept_out : _kick_rejoinable;
 }
 
 /* (a client machine's player queued to add in game: one refused is as one
@@ -1921,7 +1933,7 @@ boolean network_game_server_accept_client_machine_into_game(
 	}
 	/* (a kick asked for the slot's machine before is not this one's) */
 	if (VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT))
-		network_game_server_kick_pending[machine_index] = FALSE;
+		network_game_server_kick_pending[machine_index] = _kick_none;
 	if (VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
 		machine == &server->client_machines[machine_index])
 	{
@@ -3075,6 +3087,11 @@ struct network_machine *network_game_server_get_client_machine(
 	if (machine_index)
 		*machine_index = NONE;
 
+	/* port: none for a connection without a slot (NONE: the assert is not
+	checked in release builds; OpenCE's) */
+	if (client_machine->machine_index < 0 || client_machine->machine_index >= MAXIMUM_NETWORK_MACHINE_COUNT)
+		return NULL;
+
 	machine = &server->game.machines[client_machine->machine_index];
 	if (machine_index)
 		*machine_index = machine->machine_index;
@@ -3110,6 +3127,10 @@ struct network_game_server_client_machine *network_game_server_get_client_machin
 {
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x741,
 		server && (index<MAXIMUM_NETWORK_MACHINE_COUNT));
+
+	/* (port: and in release builds; OpenCE's) */
+	if (index < 0 || index >= MAXIMUM_NETWORK_MACHINE_COUNT)
+		return NULL;
 
 	return &server->client_machines[index];
 }
@@ -4329,8 +4350,10 @@ static boolean network_game_server_handle_client_machines(
 				struct network_message *message;
 				unsigned long address = network_game_server_client_machine_addresses[machine_index];
 
-				network_game_server_kick_pending[machine_index] = FALSE;
-				if (address && !network_game_server_client_machine_is_local(server, client_machine))
+				boolean kept_out = network_game_server_kick_pending[machine_index] == _kick_kept_out;
+
+				network_game_server_kick_pending[machine_index] = _kick_none;
+				if (kept_out && address && !network_game_server_client_machine_is_local(server, client_machine))
 				{
 					network_game_server_kicked_addresses[network_game_server_kicked_address_next++ %
 						MAXIMUM_KICKED_ADDRESSES] = address;
