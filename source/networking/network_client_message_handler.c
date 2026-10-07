@@ -1198,8 +1198,16 @@ static boolean network_game_client_handle_message_server_begin_game(
 				the message carries 16 bits of it: the rest from the first
 				game update, network_game_client_handle_game_update) */
 				network_game_client_late_join_time = (long)((unsigned long)begin_game.unused & 0xFFFF);
-				result = network_game_client_game_has_started(client);
-				if (!result)
+				/* port: a map this machine cannot load (still downloading
+				it, a Custom Edition map with PC maps off, a game joined in
+				progress) is not loaded: the joiner leaves at its next
+				frame, told why, rather than stopping as a damaged disc
+				(port/linux/game/map_share.c) */
+				if (!map_share_client_game_starting(client, network_game_client_get_game(client)->map.name))
+				{
+					result = TRUE;
+				}
+				else if (!(result = network_game_client_game_has_started(client)))
 				{
 					network_event("network_game_client_game_has_started() failed");
 				}

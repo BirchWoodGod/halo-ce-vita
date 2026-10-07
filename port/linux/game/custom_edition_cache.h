@@ -48,6 +48,21 @@ boolean custom_edition_cache_playable(
 custom_edition_maps.c). */
 boolean custom_edition_cache_multiplayer(
 	char const *map_name);
+/* TRUE when the map `map_name` names is a Custom Edition cache, whether or
+not Custom Edition maps may run (the multiplayer join check: a joiner with
+PC maps off cannot load one, network_client_manager.c). */
+boolean custom_edition_cache_is_custom_edition(
+	char const *map_name);
+/* TRUE when the map `map_name` names is a Custom Edition cache that takes
+tags from resource maps (bitmaps.map, sounds.map, loc.map, or an OpenSauce
+mod set's) not in the maps folder, which are then named in `missing`
+(`missing_size` characters, ", " between them): it cannot be loaded. A
+quick look at its tag index (cache_file_formats.c,
+custom_edition_cache_resource_maps_used). */
+boolean custom_edition_cache_missing_resource_maps(
+	char const *map_name,
+	char *missing,
+	long missing_size);
 /* TRUE when the map `map_name` names is an Xbox cache of a multiplayer
 scenario that the cache partition can take (named inside as its file is,
 and no longer than the Xbox's multiplayer maps): a modded or newly built

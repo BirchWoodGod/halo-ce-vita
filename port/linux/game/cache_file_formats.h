@@ -361,6 +361,17 @@ upgrades. */
 uint32_t custom_edition_tag_cache_bytes(
 	struct cache_file_identity const *identity);
 
+/* The resource maps a Custom Edition cache (`map`, identified as
+`identity`) takes tags from: a bit (1 << resource_map_type) for each kind
+held by one of its tags marked as in a resource map, which
+custom_edition_cache_load reads from there. A quick look at the tag index
+alone (a few KB read at a time, before the map is loaded): pixels and
+samples a tag of the map's own keeps in a resource map are not looked for.
+0 when it takes none, or its tag index cannot be read. */
+uint32_t custom_edition_cache_resource_maps_used(
+	struct cache_file_source *map,
+	struct cache_file_identity const *identity);
+
 enum cache_file_status resource_map_open(
 	struct cache_file_source *source,
 	enum resource_map_type expected_type,

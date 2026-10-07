@@ -671,6 +671,50 @@ boolean custom_edition_maps_host_copy_matches(
 	return TRUE;
 }
 
+short custom_edition_maps_loadable(
+	char const *level_name,
+	char *missing,
+	long missing_size)
+{
+	char const *name = level_name ? tag_name_strip_path(level_name) : "";
+	char path[MAXIMUM_FILENAME_LENGTH + 1];
+
+	if (missing_size > 0)
+	{
+		missing[0] = 0;
+	}
+	if (xbox_level_stock(name))
+	{
+		return _custom_edition_maps_loadable;
+	}
+	if (!name[0] || !custom_edition_cache_map_file_path(name, path, sizeof(path)))
+	{
+		return _custom_edition_maps_not_loadable;
+	}
+	if (custom_edition_cache_is_custom_edition(name))
+	{
+		/* (the resource maps first: PC maps on would not make it load) */
+		if (custom_edition_cache_missing_resource_maps(name, missing, missing_size))
+		{
+			error(_error_silent, "custom maps: '%s' needs resource maps not in the maps folder: %s", name, missing);
+			return _custom_edition_maps_needs_resource_maps;
+		}
+		if (!halo_custom_edition_enabled())
+		{
+			error(_error_silent, "custom maps: '%s' is a Custom Edition map, and PC maps is off", name);
+			return _custom_edition_maps_needs_pc_maps;
+		}
+		return _custom_edition_maps_loadable;
+	}
+	if (!custom_edition_cache_xbox_multiplayer(name))
+	{
+		error(_error_silent, "custom maps: '%s' is not a multiplayer map this machine can load", name);
+		return _custom_edition_maps_not_loadable;
+	}
+
+	return _custom_edition_maps_loadable;
+}
+
 void custom_edition_maps_look_again(
 	void)
 {
