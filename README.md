@@ -126,6 +126,38 @@ height, and any 16:9 encoding fills the width - 640x360, 848x480, 960x544,
 or 640x480 made with ffmpeg `-aspect 16:9`. Any size up to 960x544 plays.
 `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
 
+### Custom maps (optional)
+
+Community-made multiplayer maps go in `ux0:data/haloce-vita/maps/`, next to
+the game's own. Two kinds work:
+
+- **Xbox custom maps**: copy the `.map` in. Nothing else is needed.
+- **Halo PC / Custom Edition maps** (`.map`, and OpenSauce `.yelo`;
+  experimental): these need three resource maps from your own copy of Halo
+  on PC, `bitmaps.map`, `sounds.map` and `loc.map`, copied to the same
+  folder:
+  - **Halo: The Master Chief Collection** (Steam):
+    `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`.
+    Take the three from the `custom_edition` folder, not the ones in
+    `halo1/maps`, which are MCC's own and do not work.
+  - **Halo Custom Edition** (PC): the `maps` folder of the install
+    (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`), or
+    unpacked from the Custom Edition installer with an archive tool.
+
+  Then turn on **PC maps** in the settings panel (Select + Start,
+  Multiplayer, Modded maps). The page lists your custom maps and warns if a
+  resource map is missing.
+
+Custom Edition maps themselves (race tracks and the like) come from the
+community's Halo CE map archives and forums. This project includes no maps
+and links to no downloads.
+
+Only the host needs the custom map: a Vita that joins without it is asked
+whether to download it from the host in the lobby (and, for a Custom
+Edition map, to turn PC maps on). A joiner still needs its own three
+resource maps. The host waits for the download before the game starts.
+Big Custom Edition maps can be slow on the Vita or too large for its memory.
+
 ### Saving
 
 Checkpoints are written to the memory card as you play. To continue,
