@@ -4531,6 +4531,11 @@ static boolean network_game_server_idle_pregame_tasks(
 			}
 			else if (countdown_timer_get_time_remaining(
 				&server->countdown_state.timer) == 0 &&
+#ifdef HALO_LINUX
+				/* port: no machine is downloading the map (the lobby shows
+				how far: port/linux/game/map_share.c) */
+				!map_share_server_holds_start(server) &&
+#endif
 				network_game_server_have_all_machines_have_precached(server) &&
 				server->countdown_state.paused == FALSE)
 			{

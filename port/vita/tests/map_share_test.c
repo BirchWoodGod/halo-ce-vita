@@ -10,9 +10,17 @@ SHA-256 (p2p_crypto.c) and zlib's CRC-32 to compare against.
 
   MAP_SHARE_TEST_XBOX_MAP=<a modded Xbox .map>   also checks a real one
   MAP_SHARE_TEST_CE_MAP=<a Custom Edition .map>  (and streams both through)
+  MAP_SHARE_TEST_CE_RESOURCE_MAP=<a Custom Edition .map that takes tags from
+  all three resource maps, as Custom Edition's tool builds them>
+
+Also the quick look at which resource maps a Custom Edition map takes tags
+from (cache_file_formats.c, custom_edition_cache_resource_maps_used), which
+a joiner makes before it plays or downloads one: a game on a map whose
+resource maps are missing would stop as a damaged disc.
 */
 
 #include "map_share_protocol.h"
+#include "cache_file_formats.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,11 +59,14 @@ static void make_header(uint8_t *header, int32_t version, char const *name, uint
 
 static void test_names(void)
 {
-	static char const *const good[] = { "mygulch", "My_Gulch-2", "a.b", "x", "beavercreek_halo3", "abcdefghijklmnopqrstuvwxy", "console", "com10", "uix" };
+	static char const *const good[] = { "mygulch", "My_Gulch-2", "a.b", "x", "beavercreek_halo3", "abcdefghijklmnopqrstuvwxy", "console", "com10", "uix",
+		/* (Custom Edition maps' names, as they go about) */
+		"Race-Track-#1", "[h3] coldsnap", "with space", "semi;colon", "it's (v2)", "a+b=c!", "{x}~@$&^`", };
 	static char const *const bad[] = {
 		"", ".", "..", "../x", "a/b", "a\\b", "c:x", "a..b", ".hidden", "trailing.", "abcdefghijklmnopqrstuvwxyz",
-		"bloodgulch", "BloodGulch", "a10", "D40", "bitmaps", "Sounds", "LOC", "ui", "with space", "caf\xc3\xa9",
-		"tab\there", "new\nline", "star*", "q?", "pipe|", "semi;colon", "con", "CON.x", "nul", "com1", "lpt9.a",
+		"bloodgulch", "BloodGulch", "a10", "D40", "bitmaps", "Sounds", "LOC", "ui", "caf\xc3\xa9",
+		"tab\there", "new\nline", "star*", "q?", "pipe|", "con", "CON.x", "nul", "com1", "lpt9.a",
+		"100%", "%s%n", "\"quoted\"", "<x>", " leading", "trailing ", "del\x7f", "a,b",
 	};
 	char field[MAP_SHARE_NAME_BYTES];
 	char name[MAP_SHARE_NAME_BYTES];
@@ -437,6 +448,124 @@ static void test_real_map(char const *path, char const *name, int expect_custom_
 	free(bytes);
 }
 
+/* a cache file in memory, for cache_file_formats.c's readers */
+struct memory_file
+{
+	uint8_t const *bytes;
+	uint32_t size;
+};
+
+static int memory_file_read(void *context, uint32_t offset, uint32_t size, void *buffer)
+{
+	struct memory_file const *file = context;
+
+	if (offset > file->size || size > file->size - offset)
+		return 0;
+	memcpy(buffer, file->bytes + offset, size);
+	return 1;
+}
+
+/* custom_edition_cache_resource_maps_used: a tag data block of `count`
+instances at 0x40440028, of the groups `groups` (in resource maps where
+`in_resource` is set) */
+static uint32_t resource_maps_used(uint32_t tag_data_size, uint32_t instances_address, int32_t count,
+	char const *signature, uint32_t const *groups, uint32_t const *in_resource, int instance_count)
+{
+	static uint8_t file_bytes[0x10000];
+	struct memory_file file = { file_bytes, sizeof(file_bytes) };
+	struct cache_file_source source = { &file, memory_file_read, sizeof(file_bytes) };
+	struct cache_file_identity identity;
+	uint8_t *tag_data = file_bytes + 0x800;
+	int index;
+
+	memset(file_bytes, 0, sizeof(file_bytes));
+	memset(&identity, 0, sizeof(identity));
+	identity.format = _cache_file_format_custom_edition_cache;
+	identity.tag_data_offset = 0x800;
+	identity.tag_data_size = tag_data_size;
+	put_u32(tag_data + 0x00, instances_address);
+	put_u32(tag_data + 0x0C, (uint32_t)count);
+	memcpy(tag_data + 0x24, signature, 4);
+	for (index = 0; index < instance_count; index++)
+	{
+		uint8_t *instance = tag_data + 0x28 + index * 0x20;
+
+		put_u32(instance + 0x00, groups[index]);
+		put_u32(instance + 0x18, in_resource[index]);
+	}
+
+	return custom_edition_cache_resource_maps_used(&source, &identity);
+}
+
+static void test_resource_maps_used(void)
+{
+	/* (the tags as read: 'sgat', 'mtib' little-endian, as group tags are) */
+	uint32_t const bitmap = 0x6269746Du, sound = 0x736E6421u, font = 0x666F6E74u, strings = 0x75737472u;
+	uint32_t const scenario = 0x73636E72u;
+	uint32_t groups[] = { scenario, bitmap, sound, font, strings, bitmap };
+	uint32_t none[] = { 0, 0, 0, 0, 0, 0 };
+	uint32_t all[] = { 0, 1, 1, 0, 1, 0 };
+	uint32_t sounds_only[] = { 0, 0, 1, 0, 0, 0 };
+	uint32_t const expected_all = 1u << _resource_map_bitmaps | 1u << _resource_map_sounds | 1u << _resource_map_locale;
+	char const tags[] = { 's', 'g', 'a', 't' };
+	struct cache_file_identity identity;
+	struct memory_file empty = { NULL, 0 };
+	struct cache_file_source source = { &empty, memory_file_read, 0 };
+
+	CHECK(resource_maps_used(0x1000, 0x40440028, 6, tags, groups, none, 6) == 0);
+	CHECK(resource_maps_used(0x1000, 0x40440028, 6, tags, groups, all, 6) == expected_all);
+	CHECK(resource_maps_used(0x1000, 0x40440028, 6, tags, groups, sounds_only, 6) == 1u << _resource_map_sounds);
+	/* no tag index, instances outside the tag data or before the tag
+	cache, no instances, too many: none looked for */
+	CHECK(resource_maps_used(0x1000, 0x40440028, 6, "xxxx", groups, all, 6) == 0);
+	CHECK(resource_maps_used(0xE0, 0x40440028, 6, tags, groups, all, 6) == 0);
+	CHECK(resource_maps_used(0xE8, 0x40440028, 6, tags, groups, all, 6) == expected_all);
+	CHECK(resource_maps_used(0x1000, 0x40000000, 6, tags, groups, all, 6) == 0);
+	CHECK(resource_maps_used(0x1000, 0x40440028, 0, tags, groups, all, 6) == 0);
+	CHECK(resource_maps_used(0x1000, 0x40440028, -1, tags, groups, all, 6) == 0);
+	CHECK(resource_maps_used(0x1000, 0x40440028, 0x7FFFFFFF, tags, groups, all, 6) == 0);
+	/* the tag index itself past the file: nothing read */
+	memset(&identity, 0, sizeof(identity));
+	identity.format = _cache_file_format_custom_edition_cache;
+	identity.tag_data_offset = 0x800;
+	identity.tag_data_size = 0x1000;
+	CHECK(custom_edition_cache_resource_maps_used(&source, &identity) == 0);
+	/* an Xbox cache: none */
+	identity.format = _cache_file_format_xbox_cache;
+	CHECK(custom_edition_cache_resource_maps_used(&source, &identity) == 0);
+}
+
+/* a real Custom Edition map's resource maps, read through stdio as the game
+reads them */
+static int stdio_read(void *context, uint32_t offset, uint32_t size, void *buffer)
+{
+	return fseek(context, (long)offset, SEEK_SET) == 0 && fread(buffer, 1, size, context) == size;
+}
+
+static void test_real_resource_maps(char const *path, uint32_t expected)
+{
+	FILE *file = path ? fopen(path, "rb") : NULL;
+	struct cache_file_source source;
+	struct cache_file_identity identity;
+	uint32_t used;
+
+	if (!file)
+	{
+		if (path)
+			printf("  (skipped %s: cannot open)\n", path);
+		return;
+	}
+	fseek(file, 0, SEEK_END);
+	source.context = file;
+	source.read = stdio_read;
+	source.size = (uint32_t)ftell(file);
+	CHECK(cache_file_identify(&source, &identity) == _cache_file_status_ok);
+	used = custom_edition_cache_resource_maps_used(&source, &identity);
+	CHECK(used == expected);
+	printf("  %s: takes tags from resource maps 0x%X\n", path, used);
+	fclose(file);
+}
+
 int main(void)
 {
 	test_names();
@@ -448,6 +577,12 @@ int main(void)
 	test_identity();
 	test_real_map(getenv("MAP_SHARE_TEST_XBOX_MAP"), "mygulch", 0);
 	test_real_map(getenv("MAP_SHARE_TEST_CE_MAP"), "pcgulch", 1);
+	test_resource_maps_used();
+	/* (Invader's pcgulch takes none; a map Custom Edition's tool built, all
+	three) */
+	test_real_resource_maps(getenv("MAP_SHARE_TEST_CE_MAP"), 0);
+	test_real_resource_maps(getenv("MAP_SHARE_TEST_CE_RESOURCE_MAP"),
+		1u << _resource_map_bitmaps | 1u << _resource_map_sounds | 1u << _resource_map_locale);
 	printf("map_share_test: %d/%d checks passed\n", checks - failures, checks);
 
 	return failures ? 1 : 0;

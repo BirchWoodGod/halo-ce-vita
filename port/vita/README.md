@@ -302,7 +302,13 @@ settings panel (hold Select and Start) and go to **Multiplayer**:
    **Y** to create one (A on a map, A on a game type); the others press
    **A** on the host's game.
 4. Everyone waits in the lobby; A there starts the game sooner. A custom
-   map a joiner lacks comes from the host (the game asks; Cross: yes).
+   map a joiner lacks comes from the host (the game asks; Cross: yes),
+   before the game starts: the host's game waits for the download, and its
+   lobby shows the progress by the joiner's name. For a PC map, a joiner
+   with PC maps off is asked to turn it on; a PC map also needs Custom
+   Edition's `bitmaps.map`, `sounds.map` and `loc.map` in the maps folder
+   (the game says which are missing). A joiner who cannot get the map is
+   told why (an older host, a game already started: join in the lobby).
 
 The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
 Triangle, Back Select. The same screens are under Multiplayer, System Link

@@ -206,8 +206,9 @@ struct map_share_receiver
 /* ---------- prototypes/MAP_SHARE_PROTOCOL.C */
 
 /* Whether `name` may be a shared map's file name (no extension): 1 to
-MAP_SHARE_MAXIMUM_NAME_LENGTH letters, digits, '_', '-' and '.', not
-starting with '.', no "..", and not the name of one of the Xbox's own levels
+MAP_SHARE_MAXIMUM_NAME_LENGTH printable ASCII characters but / \ : * ? " < >
+|, ',' and %, not starting with '.' or a space nor ending with either, no "..",
+not a device's name (con, nul, com1...), and not the name of one of the Xbox's own levels
 (stock maps are never shared: every machine has its own) nor of Custom
 Edition's resource maps (bitmaps, sounds, loc). */
 int map_share_name_valid(

@@ -439,19 +439,20 @@ static boolean custom_edition_cache_tags_convert(
 		custom_edition_cache_models_convert(tag_cache, report);
 }
 
-/* Whether Custom Edition maps may run (game.custom_edition) and the map
-`map_name` names is a Custom Edition cache, whose header is then described
-in `identity`. */
-static boolean custom_edition_cache_identify(
+/* Whether the map `map_name` names is a Custom Edition cache, whose header
+is then described in `identity`, whatever the setting; and when
+`resource_maps_used`, the resource maps it takes tags from
+(custom_edition_cache_resource_maps_used). */
+static boolean custom_edition_cache_identify_file(
 	char const *map_name,
-	struct cache_file_identity *identity)
+	struct cache_file_identity *identity,
+	uint32_t *resource_maps_used)
 {
 	char path[MAP_PATH_SIZE];
 	struct custom_edition_file file;
 	boolean identified = FALSE;
 
-	if (!halo_custom_edition_enabled() ||
-		!custom_edition_map_path(map_name, path) ||
+	if (!custom_edition_map_path(map_name, path) ||
 		!custom_edition_file_open(&file, path))
 	{
 		return FALSE;
@@ -460,10 +461,24 @@ static boolean custom_edition_cache_identify(
 		identity->format == _cache_file_format_custom_edition_cache)
 	{
 		identified = TRUE;
+		if (resource_maps_used)
+		{
+			*resource_maps_used = custom_edition_cache_resource_maps_used(&file.source, identity);
+		}
 	}
 	custom_edition_file_close(&file);
 
 	return identified;
+}
+
+/* Whether Custom Edition maps may run (game.custom_edition) and the map
+`map_name` names is a Custom Edition cache, whose header is then described
+in `identity`. */
+static boolean custom_edition_cache_identify(
+	char const *map_name,
+	struct cache_file_identity *identity)
+{
+	return halo_custom_edition_enabled() && custom_edition_cache_identify_file(map_name, identity, NULL);
 }
 
 static void custom_edition_cache_report_log(
@@ -639,6 +654,59 @@ boolean custom_edition_cache_playable(
 	struct cache_file_identity identity;
 
 	return custom_edition_cache_identify(map_name, &identity);
+}
+
+boolean custom_edition_cache_is_custom_edition(
+	char const *map_name)
+{
+	struct cache_file_identity identity;
+
+	return custom_edition_cache_identify_file(map_name, &identity, NULL);
+}
+
+boolean custom_edition_cache_missing_resource_maps(
+	char const *map_name,
+	char *missing,
+	long missing_size)
+{
+	struct cache_file_identity identity;
+	uint32_t used = 0;
+	long length = 0;
+	short type;
+
+	if (missing_size > 0)
+	{
+		missing[0] = 0;
+	}
+	if (!custom_edition_cache_identify_file(map_name, &identity, &used))
+	{
+		return FALSE;
+	}
+	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES; type++)
+	{
+		char path[MAP_PATH_SIZE];
+		char const *directory = cache_files_map_directory();
+
+		if (!TEST_FLAG(used, type) ||
+			!custom_edition_resource_map_path(&identity, (enum resource_map_type)type, path) ||
+			file_path_exists(path))
+		{
+			continue;
+		}
+		/* (named as in the maps folder: "data_files\<mod>-bitmaps.map" for
+		an OpenSauce mod set) */
+		if (length < missing_size - 1)
+		{
+			length += snprintf(missing + length, (size_t)(missing_size - length), "%s%s", length ? ", " : "",
+				!strncmp(path, directory, strlen(directory)) ? path + strlen(directory) : path);
+		}
+		else
+		{
+			length = missing_size;
+		}
+	}
+
+	return missing_size > 0 && missing[0];
 }
 
 boolean custom_edition_cache_xbox_multiplayer(

@@ -1302,23 +1302,35 @@ check below runs, in turn, and the first that refuses ends it:
    (cache_files_map_plays_multiplayer, which the host's map choice in
    ui_widget_event_handler_functions.c also asks), leaving check 2 to
    decide it: both run, neither replaces the other.
+3. the host's copy, this machine has: it can load it now
+   (custom_edition_maps_loadable): a Custom Edition map needs PC maps on and
+   the resource maps it takes tags from; a game on a map that cannot be
+   loaded stops as a damaged disc when it starts.
 A custom map missing or different (check 2) may then be downloaded from
-the host (port/linux/game/map_share.c) rather than refused. */
+the host (port/linux/game/map_share.c) rather than refused, and a Custom
+Edition map with PC maps off (check 3) played once the player turns PC
+maps on there. */
 enum network_game_client_map_check
 {
 	_network_game_client_map_playable,
 	_network_game_client_map_build_unsupported,
 	_network_game_client_map_custom_missing,
 	_network_game_client_map_custom_different,
+	_network_game_client_map_custom_needs_pc_maps,
+	_network_game_client_map_custom_needs_resource_maps,
+	_network_game_client_map_custom_unloadable,
 };
 
 static short network_game_client_map_check(
 	struct network_game_map const *map,
-	char build[0x20])
+	char build[0x20],
+	char *missing_files,
+	long missing_files_size)
 {
 	boolean missing;
 
 	build[0] = 0;
+	missing_files[0] = 0;
 	if (network_game_is_splitscreen_local())
 		return _network_game_client_map_playable;
 	/* 1. the build */
@@ -1327,30 +1339,67 @@ static short network_game_client_map_check(
 	/* 2. a custom map: the host's copy (port/linux/game/custom_edition_maps.c) */
 	if (!custom_edition_maps_host_copy_matches(map->name, (unsigned long)map->version, &missing))
 		return missing ? _network_game_client_map_custom_missing : _network_game_client_map_custom_different;
+	/* 3. this machine can load it (the host's own machine plays the map it
+	chose: one it cannot load fails as it loads, the custom map loader
+	saying why, custom_edition_cache.c) */
+	if (global_network_game_server_get())
+		return _network_game_client_map_playable;
+	switch (custom_edition_maps_loadable(map->name, missing_files, missing_files_size))
+	{
+	case _custom_edition_maps_needs_pc_maps:
+		return _network_game_client_map_custom_needs_pc_maps;
+	case _custom_edition_maps_needs_resource_maps:
+		return _network_game_client_map_custom_needs_resource_maps;
+	case _custom_edition_maps_not_loadable:
+		return _network_game_client_map_custom_unloadable;
+	}
 
 	return _network_game_client_map_playable;
 }
 
-/* tells the player why the host's map is not played here */
+/* tells the player why the host's map is not played here (`why`: why it is
+not downloaded or played as the joiner was asked, map_share.c, or empty) */
 static void network_game_client_map_refusal_show(
 	struct network_game_map const *map,
 	short check,
-	char const *build)
+	char const *build,
+	char const *missing_files,
+	char const *why)
 {
-	char message[192];
+	char const *name = tag_name_strip_path(map->name);
+	char message[512];
+	int length = 0;
 
-	if (check == _network_game_client_map_build_unsupported)
+	switch (check)
 	{
+	case _network_game_client_map_build_unsupported:
 		cache_files_show_multiplayer_unavailable(map->name, build);
 		return;
+	case _network_game_client_map_custom_missing:
+		length = snprintf(message, sizeof(message), "The host is playing the custom map %s, which isn't in your maps folder.", name);
+		break;
+	case _network_game_client_map_custom_different:
+		length = snprintf(message, sizeof(message),
+			"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.", name);
+		break;
+	case _network_game_client_map_custom_needs_pc_maps:
+		length = snprintf(message, sizeof(message),
+			"The host is playing the PC (Custom Edition) map %s, and PC maps is off. Turn on PC maps "
+			"(Multiplayer > Modded maps) to play it.", name);
+		break;
+	case _network_game_client_map_custom_needs_resource_maps:
+		length = snprintf(message, sizeof(message),
+			"The host is playing the PC (Custom Edition) map %s, which needs %s from Halo Custom Edition in "
+			"your maps folder. Copy %s there to play it.", name, missing_files,
+			strchr(missing_files, ',') ? "them" : "it");
+		break;
+	default:
+		length = snprintf(message, sizeof(message),
+			"The host is playing the custom map %s, but your copy isn't a multiplayer map this game can load.", name);
+		break;
 	}
-	snprintf(
-		message,
-		sizeof(message),
-		check == _network_game_client_map_custom_missing ?
-			"The host is playing the custom map %s, which isn't in your maps folder." :
-			"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.",
-		tag_name_strip_path(map->name));
+	if (why && why[0] && length > 0 && length < (int)sizeof(message))
+		snprintf(message + length, sizeof(message) - (size_t)length, "\n\n%s", why);
 	platform_show_message("Halo: custom map", message);
 
 	return;
@@ -1388,11 +1437,14 @@ boolean network_game_client_game_settings_updated(
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
 		{
 			char build[0x20];
+			char missing_files[96];
+			char why[320];
 			short check;
 
+			why[0] = 0;
 			/* port: a download of another map stops (the host changed maps) */
 			map_share_client_map_changed(message_packet->map.name);
-			check = network_game_client_map_check(&message_packet->map, build);
+			check = network_game_client_map_check(&message_packet->map, build, missing_files, sizeof(missing_files));
 			/* port: a custom map missing here, or another copy, is offered
 			for download from the host; the joiner stays in the lobby, and
 			precaches it once it has it (map_share.c) */
@@ -1401,16 +1453,25 @@ boolean network_game_client_game_settings_updated(
 					client,
 					message_packet->map.name,
 					(unsigned long)message_packet->map.version,
-					check == _network_game_client_map_custom_different))
+					check == _network_game_client_map_custom_different,
+					why,
+					sizeof(why)))
 			{
 				network_event("asking the host for its map '%s'...", message_packet->map.name);
+			}
+			/* port: the host's Custom Edition map, which this machine has,
+			with PC maps off: the player is asked to turn it on */
+			else if (check == _network_game_client_map_custom_needs_pc_maps &&
+				map_share_client_offer_pc_maps(client, message_packet->map.name, why, sizeof(why)))
+			{
+				network_event("asking the player to turn on PC maps for '%s'...", message_packet->map.name);
 			}
 			/* port: a map this machine cannot play with the host's: said,
 			and the game left (the menu's error the join's, not the
 			connection lost that the failure would otherwise give) */
 			else if (check != _network_game_client_map_playable)
 			{
-				network_game_client_map_refusal_show(&message_packet->map, check, build);
+				network_game_client_map_refusal_show(&message_packet->map, check, build, missing_files, why);
 				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
 				return FALSE;
 			}

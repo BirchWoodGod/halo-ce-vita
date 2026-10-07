@@ -2010,6 +2010,77 @@ uint32_t custom_edition_tag_cache_bytes(
 		CUSTOM_EDITION_TAG_CACHE_BYTES;
 }
 
+uint32_t custom_edition_cache_resource_maps_used(
+	struct cache_file_source *map,
+	struct cache_file_identity const *identity)
+{
+	/* (the instances are read a few at a time: on the Vita the lobby has
+	no room for the tag data) */
+	enum { INSTANCES_PER_READ = 64 };
+	uint8_t tag_index[TAG_INDEX_BYTES];
+	uint8_t instances[INSTANCES_PER_READ * TAG_INSTANCE_BYTES];
+	uint32_t instances_address;
+	uint32_t instances_offset;
+	uint32_t used = 0;
+	int32_t tag_count;
+	int32_t first;
+
+	if (identity->format != _cache_file_format_custom_edition_cache ||
+		identity->tag_data_size < TAG_INDEX_BYTES ||
+		!map->read(map->context, identity->tag_data_offset, TAG_INDEX_BYTES, tag_index) ||
+		read_u32(tag_index + TAG_INDEX_SIGNATURE_OFFSET) != TAG_INDEX_SIGNATURE)
+	{
+		return 0;
+	}
+	tag_count = read_s32(tag_index + TAG_INDEX_COUNT_OFFSET);
+	instances_address = read_u32(tag_index + TAG_INDEX_INSTANCES_OFFSET);
+	if (tag_count <= 0 ||
+		(uint32_t)tag_count > ABSOLUTE_INDEX_MASK + 1 ||
+		instances_address < CUSTOM_EDITION_TAG_CACHE_ADDRESS ||
+		!range_fits(instances_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS, (uint32_t)tag_count * TAG_INSTANCE_BYTES,
+			identity->tag_data_size))
+	{
+		return 0;
+	}
+	instances_offset = identity->tag_data_offset + (instances_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS);
+
+	for (first = 0; first < tag_count; first += INSTANCES_PER_READ)
+	{
+		int32_t count = tag_count - first < INSTANCES_PER_READ ? tag_count - first : INSTANCES_PER_READ;
+		int32_t index;
+
+		if (!map->read(map->context, instances_offset + (uint32_t)first * TAG_INSTANCE_BYTES,
+			(uint32_t)count * TAG_INSTANCE_BYTES, instances))
+		{
+			return 0;
+		}
+		for (index = 0; index < count; index++)
+		{
+			uint8_t const *instance = instances + (uint32_t)index * TAG_INSTANCE_BYTES;
+
+			if (!read_u32(instance + TAG_INSTANCE_IN_RESOURCE_MAP_OFFSET))
+			{
+				continue;
+			}
+			/* (as custom_edition_cache_load reads them) */
+			switch (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET))
+			{
+			case BITMAP_GROUP_TAG:
+				used |= 1UL << _resource_map_bitmaps;
+				break;
+			case SOUND_GROUP_TAG:
+				used |= 1UL << _resource_map_sounds;
+				break;
+			default:
+				used |= 1UL << _resource_map_locale;
+				break;
+			}
+		}
+	}
+
+	return used;
+}
+
 enum cache_file_status cache_file_identify(
 	struct cache_file_source *source,
 	struct cache_file_identity *identity)

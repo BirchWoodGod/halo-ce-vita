@@ -6,7 +6,7 @@
 # build/linux/platform_msvc_semantics.h) and zlib's CRC-32 to compare with.
 #   CLANG                 the game's compiler (default: build.ninja's)
 #   MAP_SHARE_TEST_SANITIZE=0   without AddressSanitizer/UBSan
-#   MAP_SHARE_TEST_XBOX_MAP, MAP_SHARE_TEST_CE_MAP   real maps (map_share_test.c)
+#   MAP_SHARE_TEST_XBOX_MAP, MAP_SHARE_TEST_CE_MAP, MAP_SHARE_TEST_CE_RESOURCE_MAP   real maps (map_share_test.c)
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -26,7 +26,7 @@ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=undefined"
 if [ "${MAP_SHARE_TEST_SANITIZE:-1}" = 0 ] || ! echo 'int main(void){return 0;}' | $cc -m32 $sanitize -x c - -o "$out/probe" 2>/dev/null; then
 	sanitize=
 fi
-$cc -m32 -g -O1 -Wall -Wextra -Wno-unused-parameter $sanitize -Iport/linux/game \
-	"$here/map_share_test.c" port/linux/game/map_share_protocol.c "$out/p2p_crypto.o" -lz -no-pie -Wl,--gc-sections -o "$out/map_share_test"
+$cc -m32 -g -O1 -Wall -Wextra -Wno-unused-parameter -Wno-multichar $sanitize -Iport/linux/game \
+	"$here/map_share_test.c" port/linux/game/map_share_protocol.c port/linux/game/cache_file_formats.c "$out/p2p_crypto.o" -lz -no-pie -Wl,--gc-sections -o "$out/map_share_test"
 echo "map_share_test: ${sanitize:-no sanitizers}"
 "$out/map_share_test"

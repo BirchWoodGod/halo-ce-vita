@@ -73,6 +73,32 @@ boolean custom_edition_maps_host_copy_matches(
 	unsigned long host_identity,
 	boolean *missing);
 
+/* What custom_edition_maps_loadable says of a level this machine has */
+enum custom_edition_maps_load
+{
+	_custom_edition_maps_loadable = 0,
+	/* a Custom Edition map, with PC maps (HALO_CUSTOM_EDITION) off */
+	_custom_edition_maps_needs_pc_maps,
+	/* a Custom Edition map whose resource maps are not in the maps folder */
+	_custom_edition_maps_needs_resource_maps,
+	/* no map file, or one that is neither: an Xbox cache that is not a
+	multiplayer map the cache partition takes (custom_edition_cache.c) */
+	_custom_edition_maps_not_loadable,
+};
+
+/* Whether this machine can load the level `level_name` (a network game's)
+as it is now: an Xbox level always; a custom map when its file is an Xbox
+multiplayer map, or a Custom Edition map with PC maps on and the resource
+maps it takes tags from in the maps folder (those missing are then named in
+`missing`, `missing_size` characters). A map turned off on the Modded maps
+page still loads. A game whose map cannot be loaded stops as a damaged disc
+(cache_files.c): the multiplayer join checks this first
+(network_client_manager.c, map_share.c). */
+short custom_edition_maps_loadable(
+	char const *level_name,
+	char *missing,
+	long missing_size);
+
 /* Makes the next question about the maps look for them anew (a map was
 downloaded into the folder: map_share.c). */
 void custom_edition_maps_look_again(
