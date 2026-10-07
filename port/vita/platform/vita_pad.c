@@ -20,6 +20,10 @@ in play, waits here for the game's look code, which takes it once a frame
 through vita_pad_gyro_look (port/linux/src/xinput_sdl.c halo_linux_mouse_look)
 and adds it to the facing change as mouse aim is added, divided by the
 zoom. In hold mode the gyro button only aims, in play.
+
+The game's button icons (the panel's Button icons): vita_pad_button_glyph
+tells the HUD (source/interface/hud_draw.c) the Vita button an Xbox button
+is on now, the menus' or play's, with the settings read here.
 */
 
 #include "platform.h"
@@ -37,6 +41,13 @@ extern volatile unsigned long halo_settings_generation;
 
 /* the zoom level of a local player, NONE (-1) unzoomed (source/game/player_control.c) */
 extern short player_control_get_zoom_level(short local_player_index);
+
+/* the button icons' settings (the panel's Button icons, vita_controls.h):
+whether they are PlayStation's, and the layout they follow, copied where
+the settings are read (the pad's reader, which the panel's changes reach
+first) for the HUD that draws them (vita_pad_button_glyph) */
+static volatile int icons_playstation;
+static struct vita_controls_config icons_controls;
 
 /* the gyro's settings, and what it turned that the game has not taken */
 static struct vita_gyro_config gyro_config;
@@ -73,6 +84,17 @@ int vita_pad_gyro_look(short gamepad_index, float *yaw, float *pitch)
 		}
 	}
 	return result;
+}
+
+/* (the game's button icons, source/interface/hud_draw.c) the glyph of
+the Vita button an Xbox button (the game's numbering, 0 to 15) is on now,
+in the menus or in play: VITA_GLYPH_NONE while the icons are the Xbox's or
+the button is on none */
+int vita_pad_button_glyph(short gamepad_button)
+{
+	if (!icons_playstation)
+		return VITA_GLYPH_NONE;
+	return vita_button_glyph(&icons_controls, gamepad_button, vita_menus_active);
 }
 
 static int setting(const char *name, int fallback, int low, int high)
@@ -147,6 +169,8 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 		invert = setting("XV_INVERT_Y", 0, 0, 1);
 		vita_controls_config_load(&controls);
 		vita_gyro_config_load(&gyro_config);
+		icons_controls = controls;
+		icons_playstation = vita_button_icons_playstation();
 	}
 	vita_host_pad_read(&pad);
 	/* the settings panel has the buttons (and the touch zones) while it is

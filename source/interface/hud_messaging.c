@@ -550,6 +550,22 @@ static void render_state_bitmap(
 	real_rectangle2d const *clip = NULL;
 	real scale;
 	point2d point;
+#ifdef HALO_VITA
+	/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a button
+	icon shows the Vita button its Xbox button is on, a word in the font or
+	drawn in the sprite's place in the colour of the Xbox face button there */
+	struct icon_hud_element_definition const *button_icons = hud_globals->messaging.button_icons.address;
+	long button_icon_count = hud_globals->messaging.button_icons.count;
+	short glyph = icon >= button_icons && icon < button_icons + button_icon_count ?
+		hud_vita_button_glyph((short)(icon - button_icons)) : NONE;
+	short face_icon = hud_vita_glyph_face_icon(glyph);
+
+	if (hud_vita_glyph_text(glyph))
+	{
+		render_state_text(bounds, cursor_bounds, hud_vita_glyph_text(glyph), FALSE);
+		return;
+	}
+#endif
 
 	if (icon->frame_rate)
 		frame_index = game_time_get() / icon->frame_rate;
@@ -565,6 +581,16 @@ static void render_state_bitmap(
 		scale = local_player_count() > 1 ? 0.75f : 1.0f;
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale);
+#ifdef HALO_VITA
+		if (face_icon == NONE || face_icon >= button_icon_count || !hud_vita_glyph_draw(
+			glyph,
+			bitmap,
+			_hud_corner_bottom_left,
+			&point,
+			clip,
+			scale,
+			TEST_FLAG(button_icons[face_icon].flags, _hud_icon_use_color_bit) ? button_icons[face_icon].color : color))
+#endif
 		hud_draw_bitmap_direct(
 			bitmap,
 			_hud_corner_bottom_left,
