@@ -462,6 +462,7 @@ Useful ones:
 | `HALO_TICK_CATCH_UP=0` | one tick a frame at most in a local game and, now, for a System Link host no other machine joined: the game plays slower instead of the frame rate halving |
 | `HALO_DECAL_CACHE_WINDOW=n` | a new decal takes the least recently drawn room among the n decals after the last one made instead of searching all 2048 (default 64; 0 = the whole cache, as the Xbox) |
 | `HALO_DECAL_MIN_PIXELS=n` | decals that would be under n pixels across from every local view are not made (default 0: off) |
+| `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off) |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
 | `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host's latest, so it plays at a slow host's pace (default 6; 0 = never) |
 | `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |
