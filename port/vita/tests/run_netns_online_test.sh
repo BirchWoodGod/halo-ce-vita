@@ -27,7 +27,9 @@
 #            LAN; the host takes HALO_TEST_MAX_PLAYERS players (16, the Play
 #            page's Max players): the joiners past that must be told the
 #            game is full, the others play (HALO_TEST_HOST_ENV: more for the
-#            host, e.g. HALO_TICK_SLOWDOWN=19 for a Vita-like host)
+#            host, e.g. HALO_TICK_SLOWDOWN=19 for a Vita-like host;
+#            HALO_TEST_JOIN_ENV: more for every joiner; HALO_TEST_JOIN_STAGGER:
+#            seconds between joiners, default 1)
 #   solo     online off (the Vita's default): one copy hosts Blood Gulch
 #            alone; there must be no p2p thread, and the game must run
 #   coop     co-op over the network: the host hosts a campaign level
@@ -392,9 +394,10 @@ many)
 	# (HALO_FRAME_TIMING) and net detail go in its log for the caller.
 	joiners=${HALO_TEST_JOINERS:-3}
 	most=${HALO_TEST_MAX_PLAYERS:-16}
+	stagger=${HALO_TEST_JOIN_STAGGER:-1}
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NET_LOBBY_NAME="Many test" \
 		HALO_NET_MAX_PLAYERS=$most HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} \
-		HALO_NETWORK_TEST_START=$((20 + joiners * 2)) HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50} \
+		HALO_NETWORK_TEST_START=$((20 + joiners * stagger + 10)) HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50} \
 		HALO_TEST_INPUT=bot:1 HALO_FRAME_TIMING=150 HALO_NET_PROFILE=1 ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
 	sleep 5
 	join_pids=
@@ -409,8 +412,8 @@ many)
 		in_ns "$lan" ip link set "m${i}_h" up
 		in_ns "$lan" ip route add default via 192.168.1.1
 		run_copy "joiner$i" "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
-			HALO_NET_PLAYER_NAME="Joiner$i" HALO_TEST_INPUT=bot:$((i + 1)); join_pids="$join_pids $last_pid"
-		sleep 1
+			HALO_NET_PLAYER_NAME="Joiner$i" HALO_TEST_INPUT=bot:$((i + 1)) ${HALO_TEST_JOIN_ENV:-}; join_pids="$join_pids $last_pid"
+		sleep "$stagger"
 	done
 	wait $join_pids $host_pid 2>/dev/null
 	full=0 played=0
@@ -425,6 +428,8 @@ many)
 	echo "joiners that played: $played, told the game is full: $full (max players $most)"
 	grep -aE "Many test|the game takes" "$out/host/data/debug.txt" | head -3
 	grep -a "frame-timing" "$out/host/run.log" | tail -4
+	grep -aq "joining the game 'Many test'" "$out/joiner1/data/debug.txt" ||
+		fail "the first joiner did not see the host's lobby name in its list"
 	expected=$((joiners < most - 1 ? joiners : most - 1))
 	[ "$played" -ge "$expected" ] || fail "$played joiners played ($expected wanted)"
 	[ "$full" -eq $((joiners - expected)) ] || fail "$full joiners were told the game is full ($((joiners - expected)) wanted)"
