@@ -45,7 +45,12 @@ Touch zones: each zone (the front screen's top corners and its left and
 right edges, the rear pad's halves; vita_controls.c says where they are
 and when a finger counts; Rear touch guard keeps the hands holding the
 Vita off the rear ones) presses an Xbox button, and the page draws the
-zones beside its rows (touch_diagram). Gyro settings: gyro aiming
+zones beside its rows (touch_diagram). Button layout's first row, Button
+icons, chooses the game's button icons: Xbox (the default, the game's own)
+or PlayStation, each icon then showing the Vita button its Xbox button is
+on now (vita_controls.h, source/interface/hud_draw.c; live, kept by Reset
+controls); with PlayStation the panel too names the Xbox buttons by what
+they do (Jump, Melee...) and the guide's steps the Vita's buttons. Gyro settings: gyro aiming
 (vita_controls.h) turns the view as the Vita turns, on top of the right
 stick - Off (the default), On, While zoomed, or While holding the Gyro
 button (which then does nothing else in play) - with its sensitivity (1x:
@@ -306,6 +311,11 @@ static struct setting settings[] = {
 	PAGE_ROW("Touch zones", "Front and rear touch zones as Xbox buttons", TAB_CONTROLS, PAGE_TOUCH),
 	PAGE_ROW("Gyro settings", "Gyro button, sensitivity, direction", TAB_CONTROLS, PAGE_GYRO),
 	PAGE_ROW("Advanced", "Stick deadzone, Reset controls, Show dev settings", TAB_CONTROLS, PAGE_CONTROLS_ADVANCED),
+	/* (the game's button icons: the Xbox's, or the Vita button each is on,
+	in the menus and in play: vita_controls.h; not part of the layout,
+	which Reset controls and the page's summary leave out) */
+	{ "Button icons", "HALO_BUTTON_ICONS", 0, 2, { VITA_BUTTON_ICONS_VALUES }, { VITA_BUTTON_ICONS_NAMES },
+		"Halo's prompts: Xbox icons, or the Vita's", 0, PAGE_BUTTONS },
 	/* (the Vita button of each Xbox button, in play: vita_controls.c) */
 	{ "A", "HALO_XBOX_A", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
 		"A: jump (in the menus Cross stays A)", 0, PAGE_BUTTONS },
@@ -1500,6 +1510,111 @@ static const char *connection_help(const struct setting *setting)
 		"Internet play by code (experimental)" : "Vitas on one Wi-Fi network play together";
 }
 
+/* ---------- PlayStation's terms
+
+With the Button icons PlayStation the panel says what each Xbox button does
+(in Halo's default controller layout, as the Button layout's help always
+did) where it named the Xbox button: the Button layout's rows, the touch
+zones' choices and diagram, a few help lines; and the Vita button where it
+named the one the menus' fixed layout puts an Xbox button on (the steps of
+Host a game and Join a game: Cross for A) */
+
+static int playstation_terms(void)
+{
+	const struct setting *icons = setting_named("HALO_BUTTON_ICONS");
+
+	return icons && !strcmp(icons->values[icons->choice], "playstation");
+}
+
+/* the Xbox buttons by what they do (VITA_XBOX_*'s order) */
+static const char *const xbox_actions[VITA_XBOX_COUNT] = { VITA_XBOX_ACTION_NAMES };
+
+/* a row's label and help in PlayStation's terms: by its variable, or its
+label for a row that opens a page */
+static const struct
+{
+	const char *key;
+	const char *label;
+	const char *help;
+} playstation_rows[] = {
+	{ "HALO_XBOX_A", "Jump", "Jump (in the menus Cross stays Accept)" },
+	{ "HALO_XBOX_B", "Melee", "Melee (in the menus Circle stays Back)" },
+	{ "HALO_XBOX_X", "Action, reload", "Action, reload (in play only)" },
+	{ "HALO_XBOX_Y", "Switch weapon", "Switch weapon (in play only)" },
+	{ "HALO_XBOX_BLACK", "Switch grenades", "Switch grenades (in play only)" },
+	{ "HALO_XBOX_WHITE", "Flashlight", "Flashlight (in play only)" },
+	{ "HALO_XBOX_LEFT_TRIGGER", "Throw grenade", "Throw a grenade (in play only)" },
+	{ "HALO_XBOX_RIGHT_TRIGGER", "Fire", "Fire (in play only)" },
+	{ "HALO_XBOX_LEFT_STICK", "Crouch", "Crouch (in play only)" },
+	{ "HALO_XBOX_RIGHT_STICK", "Zoom", "Zoom (in play only)" },
+	{ "HALO_XBOX_BACK", "Scoreboard", "Scoreboard (in the menus Select stays Back)" },
+	{ "HALO_CROUCH_TOGGLE", NULL, "A press crouches, the next stands (Toggle)" },
+	{ "HALO_DEBUG_CAMERA", NULL, "Hold Black 1 s: follow, orbit, then a flying camera" },
+	{ "Button layout", NULL, "Which Vita button each action is on, in play" },
+	{ "Touch zones", NULL, "Front and rear touch zones as actions" },
+};
+
+static int playstation_row(const struct setting *setting)
+{
+	const char *key = setting->variable ? setting->variable : setting->label;
+	int index;
+
+	if (!playstation_terms())
+		return -1;
+	for (index = 0; index < (int)(sizeof(playstation_rows) / sizeof(playstation_rows[0])); index++)
+		if (!strcmp(playstation_rows[index].key, key))
+			return index;
+	return -1;
+}
+
+static const char *setting_label(const struct setting *setting)
+{
+	int row = playstation_row(setting);
+
+	return row >= 0 && playstation_rows[row].label ? playstation_rows[row].label : setting->label;
+}
+
+static const char *setting_help(const struct setting *setting)
+{
+	static char camera_help[64];
+	int row = playstation_row(setting);
+
+	/* (the debug camera's Black: the Vita button it is on) */
+	if (row >= 0 && !strcmp(playstation_rows[row].key, "HALO_DEBUG_CAMERA"))
+	{
+		const struct setting *black = setting_named("HALO_XBOX_BLACK");
+
+		if (black && strcmp(black->values[black->choice], "none"))
+		{
+			snprintf(camera_help, sizeof(camera_help), "Hold %s 1 s: follow, orbit, then a flying camera",
+				black->names[black->choice]);
+			return camera_help;
+		}
+	}
+	return row >= 0 ? playstation_rows[row].help : setting->help;
+}
+
+/* the name of a row's choice: a touch zone's Xbox button by what it does */
+static const char *setting_value_name(const struct setting *setting)
+{
+	if (setting->page == PAGE_TOUCH && setting->values[0] && !strcmp(setting->values[0], "off") &&
+		playstation_terms() && setting->choice < VITA_XBOX_COUNT)
+		return xbox_actions[setting->choice];
+	return setting->names[setting->choice];
+}
+
+/* an Xbox face button in the menus (A B X Y), as the guide names it: the
+Xbox's name, or the Vita button the menus put it on */
+static const char *menu_button(char xbox)
+{
+	static const char *const vita_names[4] = { "Cross", "Circle", "Square", "Triangle" };
+	static const char *const xbox_names[4] = { "A", "B", "X", "Y" };
+	const char *letters = "ABXY";
+	int index = (int)(strchr(letters, xbox) - letters);
+
+	return playstation_terms() ? vita_names[index] : xbox_names[index];
+}
+
 /* the longer line at the bottom: what the selected line does, or what the
 last action did */
 static void help_line(char *text, int size, const struct line *line)
@@ -1539,7 +1654,7 @@ static void help_line(char *text, int size, const struct line *line)
 	else if (setting->variable && !strcmp(setting->variable, "HALO_VITA_NETWORK"))
 		snprintf(text, (size_t)size, "%s", connection_help(setting));
 	else
-		snprintf(text, (size_t)size, "%s", setting->help);
+		snprintf(text, (size_t)size, "%s", setting_help(setting));
 }
 
 /* the tab bar: '\t', the tabs shown with '|' between, '*' before this one */
@@ -1579,7 +1694,9 @@ static void touch_diagram(char *text, int size, const struct setting *chosen)
 		}
 		else
 			zones[zone] = choice ? 'A' : '-';
-		zones[VITA_ZONE_COUNT + 1 + zone] = (char)('a' + (choice < VITA_XBOX_COUNT ? choice : 0));
+		/* (capitals: the actions' short names, PlayStation's terms) */
+		zones[VITA_ZONE_COUNT + 1 + zone] = (char)((playstation_terms() ? 'A' : 'a') + (choice < VITA_XBOX_COUNT ?
+			choice : 0));
 	}
 	zones[VITA_ZONE_COUNT] = ' ';
 	zones[2 * VITA_ZONE_COUNT + 1] = 0;
@@ -1612,7 +1729,8 @@ static void page_summary(char *text, int size, const struct setting *setting)
 	{
 	case PAGE_BUTTONS:
 		for (index = 0; index < SETTING_COUNT; index++)
-			if (settings[index].page == PAGE_BUTTONS && settings[index].choice != shipped_choice[index])
+			if (settings[index].page == PAGE_BUTTONS && settings[index].choice != shipped_choice[index] &&
+				strcmp(settings[index].variable, "HALO_BUTTON_ICONS"))
 				moved = 1;
 		snprintf(text, (size_t)size, "%s", moved ? "Custom" : "As shipped");
 		break;
@@ -1726,7 +1844,7 @@ static void show_list(void)
 				page_summary(summary, sizeof(summary), setting);
 				/* (two spaces first: the summary, or the >, where the other
 				rows' values start, after their "< ") */
-				length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s%s>", setting->label, summary,
+				length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s%s>", setting_label(setting), summary,
 					summary[0] ? "  " : "");
 			}
 			else
@@ -1734,8 +1852,8 @@ static void show_list(void)
 				int last = choice_last(setting);
 
 				/* (a row that applies after a restart: marked *) */
-				length += snprintf(text + length, sizeof(text) - length, "\n%s%s\x02%c %s %c", setting->label,
-					setting->restart ? "*" : "", setting->choice > 0 ? '<' : ' ', setting->names[setting->choice],
+				length += snprintf(text + length, sizeof(text) - length, "\n%s%s\x02%c %s %c", setting_label(setting),
+					setting->restart ? "*" : "", setting->choice > 0 ? '<' : ' ', setting_value_name(setting),
 					setting->choice < last ? '>' : ' ');
 			}
 		}
@@ -1886,7 +2004,8 @@ static const char *guide_answer_text(int answer)
 }
 
 /* Host a game, Join a game: the steps, as the game's menus name the
-buttons (the Xbox's), then cross opens the game's System Link screen */
+buttons (the Xbox's, or with the Button icons PlayStation the Vita's), then
+cross opens the game's System Link screen */
 static void show_guide(void)
 {
 	char text[1536], line[64];
@@ -1901,12 +2020,14 @@ static void show_guide(void)
 		length += snprintf(text + length, sizeof(text) - length, "\n%d The system's dialog joins ad hoc room %d", step++,
 			choice_of("HALO_ADHOC_ROOM") + 1);
 	length += snprintf(text + length, sizeof(text) - length,
-		"\n%d The game's System Link screen opens\n%d A to join if asked, A on a profile, A again", step, step + 1);
+		"\n%d The game's System Link screen opens\n%d %s to join if asked, %s on a profile,%s%s again", step, step + 1,
+		menu_button('A'), menu_button('A'), playstation_terms() ? "\n  " : " ", menu_button('A'));
 	step += 2;
 	if (host)
 	{
 		length += snprintf(text + length, sizeof(text) - length,
-			"\n%d SYSTEM LINK GAMES: Y creates a game\n%d A on a map, A on a game type", step, step + 1);
+			"\n%d SYSTEM LINK GAMES: %s creates a game\n%d %s on a map, %s on a game type", step, menu_button('Y'),
+			step + 1, menu_button('A'), menu_button('A'));
 		step += 2;
 		/* (the Custom Edition maps are in the map list with PC maps on) */
 		if (!choice_of("HALO_CUSTOM_EDITION"))
@@ -1916,16 +2037,19 @@ static void show_guide(void)
 				coop->names[coop->choice], setting_named("HALO_NET_COOP_DIFFICULTY")->names[choice_of(
 				"HALO_NET_COOP_DIFFICULTY")]);
 		length += snprintf(text + length, sizeof(text) - length,
-			"\n%d Wait in the lobby for the others to\n  join; A there starts the game sooner", step);
+			"\n%d Wait in the lobby for the others to\n  join; %s there starts the game sooner", step, menu_button('A'));
 	}
 	else
 	{
 		length += snprintf(text + length, sizeof(text) - length,
-			"\n%d SYSTEM LINK GAMES: A on the host's game\n  (the games %s show there)\n%d Wait in the lobby for the"
-			" host to start\n  A map you lack comes from the host", step, adhoc ? "in the room" : "on this network",
-			step + 1);
+			"\n%d SYSTEM LINK GAMES: %s on the host's game\n  (the games %s show there)\n%d Wait in the lobby for the"
+			" host to start\n  A map you lack comes from the host", step, menu_button('A'),
+			adhoc ? "in the room" : "on this network", step + 1);
 	}
-	length += snprintf(text + length, sizeof(text) - length, "\nMenus: A Cross, B Circle, X Square, Y Triangle");
+	/* (the Xbox's names, and which Vita button each is: the game's own
+	menus show the Xbox's icons) */
+	if (!playstation_terms())
+		length += snprintf(text + length, sizeof(text) - length, "\nMenus: A Cross, B Circle, X Square, Y Triangle");
 	if (guide_waiting)
 		length += snprintf(text + length, sizeof(text) - length, "\n\nOpening System Link...\nCircle: back");
 	else if (guide_problem[0] || blocker)
@@ -2243,7 +2367,8 @@ static void reset_controls(void)
 		struct setting *setting = &settings[index];
 
 		if (pages[setting->page].tab != TAB_CONTROLS || setting->kind != KIND_CHOICE ||
-			strcmp(setting->variable, "HALO_DEV_SETTINGS") == 0 || strncmp(setting->variable, "HALO_GYRO", 9) == 0)
+			strcmp(setting->variable, "HALO_DEV_SETTINGS") == 0 || strncmp(setting->variable, "HALO_GYRO", 9) == 0 ||
+			strcmp(setting->variable, "HALO_BUTTON_ICONS") == 0)
 			continue;
 		setting->choice = shipped_choice[index];
 		apply_value(setting);

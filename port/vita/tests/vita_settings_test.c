@@ -15,7 +15,10 @@ maps page (a folder of fake maps: listed, turned off and on, deleted after
 a confirmation, the map in play kept), the Dev tab behind its switch
 (switches saved only while on, the timing variables, Save report's folder),
 Controls' pages (Button layout and Touch zones in Xbox terms, Gyro
-settings with the gyroscope's line, saved and read back), every settings
+settings with the gyroscope's line, saved and read back), Button icons
+(PlayStation at once, the panel then naming the Xbox buttons by what they
+do and the guide the Vita's buttons, a remap followed by the game's icon,
+kept by Reset controls), every settings
 variable of 1.0.3 still a row, and a settings.txt of 1.0 loading. It runs
 in a folder of its own, with ux0:data/haloce-vita made there.
 
@@ -494,8 +497,10 @@ static void test_controls_tab(void)
 	check(strstr(menu, "\nA\x02") && strstr(menu, "\nB\x02") && strstr(menu, "\nX\x02") && strstr(menu, "\nY\x02") &&
 		strstr(menu, "\nBlack\x02") && strstr(menu, "\nWhite\x02") && strstr(menu, "\nLeft trigger\x02") &&
 		strstr(menu, "\nRight trigger\x02") && strstr(menu, "\nLeft stick click\x02") &&
-		strstr(menu, "\nRight stick click\x02") && strstr(menu, "\nBack\x02") && menu_rows() == 11 &&
+		strstr(menu, "\nRight stick click\x02") && strstr(menu, "\nBack\x02") && menu_rows() == 12 &&
 		!strstr(menu, " button") && menu_fits(), "Button layout: the eleven Xbox buttons by name, each fits");
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Button icons\x02  Xbox >") &&
+		vita_button_icons_playstation() == 0, "Button layout: Button icons first, Xbox as shipped");
 	to_line("White");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!diagram[0], "a button's row: no zone diagram");
@@ -952,6 +957,7 @@ static void test_variables_kept(void)
 		"HALO_NET_COOP_DIFFICULTY", "HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
+		"HALO_BUTTON_ICONS",
 	};
 	int index, all = 1, choices = 0;
 
@@ -968,7 +974,7 @@ static void test_variables_kept(void)
 	for (index = 0; index < SETTING_COUNT; index++)
 		choices += settings[index].kind == KIND_CHOICE;
 	check(all && choices == (int)(sizeof(variables) / sizeof(variables[0])),
-		"every settings variable of 1.0.3 is still a row, and no other but Sun rays");
+		"every settings variable of 1.0.3 is still a row, and no other but Sun rays and Button icons");
 	check(!strcmp(setting_named("HALO_DEBUG_CAMERA")->names[0], "Off") &&
 		setting_named("HALO_DEBUG_CAMERA")->page == TAB_DEV, "Debug camera stays in Dev");
 	{
@@ -981,6 +987,87 @@ static void test_variables_kept(void)
 			!strcmp(button->values[9], "right") && !strcmp(zone->values[11], "back") &&
 			!strcmp(setting_named("HALO_RENDER_SCALE")->values[5], "dynamic"), "the values saved are 1.0.3's");
 	}
+}
+
+/* ---------- Button icons: the game's button icons, and the panel's terms */
+
+static void test_button_icons(void)
+{
+	struct vita_controls_config config;
+	char diagram[16], line[128];
+	unsigned long generation;
+	int longest;
+
+	open_panel();
+	to_tab("Controls");
+	check(open_page("Button layout") && to_line("Button icons") &&
+		strstr(menu, "\n\x05Halo's prompts: Xbox icons, or the Vita's\n"), "Button icons: its row and help");
+	generation = halo_settings_generation;
+	press(VITA_BUTTON_RIGHT);
+	printf("%s\n--\n", menu);
+	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "playstation") && vita_button_icons_playstation() &&
+		halo_settings_generation != generation && strstr(file_text(SETTINGS_FILE), "HALO_BUTTON_ICONS=playstation\n") &&
+		strstr(menu, "\nButton icons\x02< PlayStation  "),
+		"Button icons PlayStation: in the environment and settings.txt at once, read again (no restart)");
+	check(!strstr(menu, "Button icons*"), "Button icons: live, no *");
+	check(strstr(menu, "\nJump\x02  Cross >") && strstr(menu, "\nMelee\x02") && strstr(menu, "\nAction, reload\x02") &&
+		strstr(menu, "\nSwitch weapon\x02") && strstr(menu, "\nSwitch grenades\x02< D-pad left >") &&
+		strstr(menu, "\nFlashlight\x02") && strstr(menu, "\nThrow grenade\x02< L >") && strstr(menu, "\nFire\x02") &&
+		strstr(menu, "\nCrouch\x02") && strstr(menu, "\nZoom\x02") && strstr(menu, "\nScoreboard\x02") &&
+		!strstr(menu, "\nA\x02") && !strstr(menu, "\nBlack\x02") && !strstr(menu, "\nLeft trigger\x02") &&
+		menu_rows() == 12 && menu_fits(), "PlayStation: the Button layout's rows by what they do, no Xbox name, each fits");
+	to_line("Jump");
+	check(strstr(menu, "\n\x05Jump (in the menus Cross stays Accept)\n") != NULL, "PlayStation: a row's help by its action");
+	/* a remap: the row moves, the game's icon follows (vita_controls.c) */
+	to_line("Action, reload");
+	press(VITA_BUTTON_RIGHT);
+	vita_controls_config_load(&config);
+	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nAction, reload\x02< Triangle >") &&
+		vita_button_glyph(&config, 2, 0) == VITA_GLYPH_TRIANGLE && vita_button_glyph(&config, 2, 1) == VITA_GLYPH_SQUARE,
+		"Action on Triangle: the game's X icon shows Triangle in play (Square in the menus)");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "Which Vita button each action is on"),
+		"back on Controls: Button icons is not the layout (As shipped); the row's help in actions");
+	check(strstr(menu, "\nCrouch\x02") != NULL, "Controls: Crouch keeps its label");
+	to_line("Crouch");
+	check(strstr(menu, "\n\x05" "A press crouches, the next stands (Toggle)\n") != NULL, "Crouch's help: no stick click");
+
+	/* the touch zones by action, the diagram in their short names */
+	check(open_page("Touch zones") && to_line("Rear touch left"), "Touch zones opens");
+	press(VITA_BUTTON_RIGHT);
+	menu_lines(&longest, diagram, sizeof(diagram));
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< Jump >") &&
+		!strcmp(diagram, "----S- AAAABA") && menu_fits(), "PlayStation: a zone's choice by its action, the diagram's in capitals");
+	vita_controls_config_load(&config);
+	check(vita_button_glyph(&config, 0, 0) == VITA_GLYPH_CROSS, "A on Cross and a zone: Cross shows");
+	press(VITA_BUTTON_LEFT);
+	to_tab("Controls");
+
+	/* the guide's steps in the Vita's buttons */
+	to_tab("Multiplayer");
+	to_line("Host a game");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "Cross to join if asked, Cross on a profile,\n  Cross again") &&
+		strstr(menu, "SYSTEM LINK GAMES: Triangle creates a game") && strstr(menu, "Cross on a map, Cross on a game type") &&
+		!strstr(menu, "Menus: A Cross") && menu_fits(), "PlayStation: Host a game's steps name Cross and Triangle");
+	press(VITA_BUTTON_CIRCLE);
+
+	/* Reset controls keeps it; Xbox again puts the Xbox's terms back */
+	to_tab("Controls");
+	check(open_page("Advanced") && to_line("Reset controls"), "Advanced: Reset controls");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "playstation"), "Reset controls keeps the Button icons");
+	to_tab("Controls");
+	check(open_page("Button layout") && to_line("Button icons"), "Button layout again");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "xbox") && !vita_button_icons_playstation() &&
+		strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") && !strstr(menu, "\nJump\x02") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_BUTTON_ICONS=xbox\n"), "Xbox again: the Xbox's names");
+	(void)line;
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
 }
 
 int main(void)
@@ -1326,6 +1413,7 @@ int main(void)
 
 	test_controls_tab();
 	test_gyro_page();
+	test_button_icons();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }
