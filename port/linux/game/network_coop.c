@@ -598,6 +598,10 @@ static struct
 	/* host: the save the script makes as the cutscene becomes skippable is
 	written (a skip reverts to it) */
 	boolean skip_save_written;
+	/* host: the game time the skip was offered from; a vote counts only if
+	made since (one from before, or still in flight from an earlier offer or
+	level, never does) */
+	long offered_time;
 } skip_vote;
 
 /* ---------- prototypes */
@@ -1674,7 +1678,13 @@ static void host_count_skip_votes(
 		skip_vote.skip_save_written = TRUE;
 	skip_vote.offered = skippable && skip_vote.skip_save_written && now >= skip_vote.cooldown_until;
 	if (skip_vote.offered && !was_offered)
+	{
 		error(_error_silent, "co-op: the cutscene can be skipped");
+		/* (nothing counts from before the offer: the host's own press, or a
+		client's) */
+		skip_vote_clear();
+		skip_vote.offered_time = now;
+	}
 	if (!skip_vote.offered)
 	{
 		skip_vote_clear();
@@ -1693,11 +1703,14 @@ static void host_count_skip_votes(
 		long heard_time = skip_vote.client_heard_times[machine_indices[index]];
 		long vote_time = skip_vote.client_vote_times[machine_indices[index]];
 
-		if (heard_time == NONE || now - heard_time > SKIP_VOTE_HELD_TICKS)
+		if (heard_time == NONE || heard_time > now || now - heard_time > SKIP_VOTE_HELD_TICKS)
 			continue;
 		skip_vote.voters++;
-		if (vote_time != NONE && now - vote_time <= SKIP_VOTE_HELD_TICKS)
+		if (vote_time != NONE && vote_time >= skip_vote.offered_time && vote_time <= now &&
+			now - vote_time <= SKIP_VOTE_HELD_TICKS)
+		{
 			skip_vote.votes++;
+		}
 	}
 	if (skip_vote.votes * 2 > skip_vote.voters)
 	{
@@ -2307,7 +2320,10 @@ void network_coop_new_game(
 	host_hud_state.nav_point_count = 0;
 	skip_vote_clear();
 	skip_vote.offered = FALSE;
+	skip_vote.offered_time = 0;
 	skip_vote.voters = 0;
+	skip_vote.votes = 0;
+	skip_vote.requested = FALSE;
 	skip_vote.cooldown_until = 0;
 	skip_vote.skip_save_written = FALSE;
 	coop_enemies_new_game();
@@ -2978,7 +2994,10 @@ boolean network_coop_vote_skip(
 {
 	if (!coop_host() && !coop_client())
 		return FALSE;
-	skip_vote.voted = TRUE;
+	/* (a press while no skip is offered is no vote: it would stand until
+	the next offer, a level later) */
+	if (coop_host() ? skip_vote.offered : network_coop_skip_offered())
+		skip_vote.voted = TRUE;
 	return TRUE;
 }
 
@@ -3261,6 +3280,10 @@ void network_coop_handle_skip_vote(
 	struct distributed_coop_skip_vote const *vote = entries;
 
 	if (!coop_host() || machine_index < 0 || machine_index >= HALO_PORT_MAXIMUM_NETWORK_MACHINES)
+		return;
+	/* (votes still in flight after the skip, or after the level ended, are
+	not stamped with the time now: they would count at the next offer) */
+	if (!skip_vote.offered)
 		return;
 	skip_vote.client_heard_times[machine_index] = game_time_get();
 	skip_vote.client_vote_times[machine_index] = vote->voted ? game_time_get() : NONE;
