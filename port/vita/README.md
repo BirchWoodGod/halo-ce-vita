@@ -344,18 +344,27 @@ game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
 only, not the OpenPSID itself.
 
 **Co-op (experimental).** Play the campaign together on two Vitas, by
-system link, online or ad hoc. The host picks a level and a difficulty on
-the Multiplayer tab (Co-op campaign, Co-op difficulty), then creates a game
-in Multiplayer, System Link as usual (the lobby's map and game type do not
-matter: the game is that level); the other Vita joins it as any game, and
-the host starts it. The Xbox game had co-op only in split screen; this is
-upstream halo-ce-universal's network co-op (credited in the main README):
+system link, online or ad hoc. The host starts it from the Campaign menu:
+Campaign, a profile, a level and a difficulty as for single player, then on
+the difficulty screen **Y** (Play co-op) instead of **A** (which plays alone,
+as ever). The game's lobby opens as the waiting screen: "Waiting for your
+partner", with the level, the difficulty, this Vita's name and how the game
+is reached (system link, online and its code, or ad hoc); **B** cancels and
+goes back to the difficulty screen. The partner opens the System Link screen
+(the settings panel's Join a game on the Multiplayer tab, or Multiplayer,
+System Link), where the game is listed as "<host>: <level> (<difficulty>)"
+(with the level and "Co-op" and the difficulty beside it), and joins it with
+**A**. Once the partner is in, the level starts after a few seconds (the
+host's **A** sooner). The old way still works: the Multiplayer tab's Co-op
+campaign and Co-op difficulty make any game the host creates in System Link
+that level. The Xbox game had co-op only in split screen; this is upstream
+halo-ce-universal's network co-op (credited in the main README):
 
 - Two players. The host's Vita runs the level's scripts and its AI for both,
   and a Vita has no time to spare for more, so a co-op game takes two and
   upstream's extra enemies are off.
 - Cutscenes are skipped by vote: press **Start** in one, and it is skipped
-  once both Vitas have (the HUD shows the count).
+  once both Vitas have (the screen shows the count).
 - A loading zone into a part of the level the team has not been in brings
   the other player along. Going back to a part already visited needs the
   team there (both players at the loading zone, or near it); one held back
@@ -364,7 +373,9 @@ upstream halo-ce-universal's network co-op (credited in the main README):
   safe. With both dead, both come back where they were at the last
   checkpoint (the level is not reverted); checkpoints show on both Vitas.
 - A level won ends the round, and the lobby's next game is the campaign's
-  next level (after The Maw, The Pillar of Autumn).
+  next level (after The Maw, The Pillar of Autumn). Started from the
+  Campaign menu, the lobby opens on it with no map to pick, and it starts
+  after ten seconds (the host's **A** sooner; **B** ends the co-op game).
 - Co-op leaves single player's save alone: a network game neither resumes
   nor writes it, and Save and Quit in co-op only leaves the game. Levels
   finished in co-op count as finished in the profile, as in the Xbox's
