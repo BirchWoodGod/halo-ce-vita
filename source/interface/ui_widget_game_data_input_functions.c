@@ -350,10 +350,12 @@ symbols in this file:
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
+#include "networking/network_server_manager.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
 #include "text/text_group.h"
 #include "text/unicode.h"
+#include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
 #endif
@@ -1730,6 +1732,16 @@ static void network_pregame_status_screen_update(
 					}
 				}
 			}
+			/* port: a co-op game takes two (network.coop_players on the
+			Vitas): its lobby shows the partner's panel alone, and its
+			waiting screen's text goes where the others were
+			(port/linux/game/coop_menu.c) */
+			{
+				boolean cooperative = coop_menu_game_is_cooperative(game) && game->maximum_players <= 2;
+
+				third_machine_widget->visible = !cooperative || machine_indices[1] != NONE;
+				fourth_machine_widget->visible = !cooperative || machine_indices[2] != NONE;
+			}
 		}
 	}
 	return;
@@ -2992,8 +3004,30 @@ static void multiplayer_game_directions(
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_waiting_for_machine;
 			widget->visible = TRUE;
+			/* port: co-op hosted from the campaign's menus waits for one
+			partner */
+			if (network_game_server_port_cooperative_menu(NULL))
+				ui_widget_port_text_override(widget, L"Waiting for your partner");
 			return;
 		}
+	}
+	/* port: a co-op lobby (host or partner): the level and its difficulty
+	(not over the countdown, which this bar shows then) */
+	if (game && coop_menu_game_is_cooperative(game) && !network_game_is_splitscreen_local() &&
+		network_game_client_get_seconds_to_game_start(global_network_game_client_get()) < 0)
+	{
+		wchar_t text[64];
+		wchar_t level[48];
+		wchar_t difficulty_name[16];
+
+		coop_menu_level_name(game->map.name, level, NUMBEROF(level));
+		coop_menu_difficulty_name(game->difficulty, difficulty_name, NUMBEROF(difficulty_name));
+		usnprintf(text, NUMBEROF(text), L"Co-op: %s (%s)", level, difficulty_name);
+		text[NUMBEROF(text) - 1] = 0;
+		widget->parameters.text_box.string_list_index = _multiplayer_game_text_string_waiting_for_machine;
+		ui_widget_port_text_override(widget, text);
+		widget->visible = TRUE;
+		return;
 	}
 
 	if (game &&

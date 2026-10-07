@@ -665,6 +665,7 @@ struct widget_instance;
 #include "networking/network_game_globals.h"
 #include "networking/network_server_manager.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
 #include "rasterizer/rasterizer.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
@@ -1453,6 +1454,17 @@ the text waiting for its dialog, then the dialog's text box showing it */
 static wchar_t const *ui_widget_port_error_pending_text = NULL;
 static wchar_t const *ui_widget_port_error_text = NULL;
 static struct widget_instance *ui_widget_port_error_text_box = NULL;
+/* port: text boxes that show the port's own text in place of their string
+list's (ui_widget_port_text_override), for one render of the widgets: the
+game data functions that set it run in that render, before the boxes */
+static struct
+{
+	struct widget_instance *widget;
+	wchar_t text[64];
+} ui_widget_port_text_overrides[8];
+static short ui_widget_port_text_override_count = 0;
+/* port: co-op from the campaign's menus (ui_widget_event_handler_functions.c) */
+boolean ui_widget_port_cooperative_campaign_host(struct widget_instance *list, struct event_record *event);
 
 static struct ui_widget_bss_prefix ui_widget_globals_storage;
 
@@ -3545,6 +3557,31 @@ static boolean ui_widget_load_children_recursive(
 			ui_widget_add_child(widget, child);
 		}
 	}
+	/* port: co-op from the campaign's menus: the difficulty screen's Y
+	button (Y plays co-op: widget_instance_process_one_event_recursive),
+	the maps' own button where the profile screen has its Y (Create New);
+	its label is drawn with the screen (port/linux/game/coop_menu.c) */
+	if (result && widget->parent == NULL && coop_menu_available() &&
+		widget->definition_tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG,
+			"ui\\shell\\main_menu\\difficulty_select\\difficulty_select_list_screen"))
+	{
+		long y_button_tag = tag_loaded(UI_WIDGET_DEFINITION_TAG, "ui\\shell\\main_menu\\y_butn");
+		struct widget_instance *child = y_button_tag != NONE ? ui_widget_load_by_name_or_tag(
+			NULL,
+			y_button_tag,
+			widget,
+			widget->local_player_index,
+			NONE,
+			NONE,
+			NONE) : NULL;
+
+		if (child)
+		{
+			child->horizontal_offset = (short)(78 + widget->horizontal_offset);
+			child->vertical_offset = (short)(414 + widget->vertical_offset);
+			ui_widget_add_child(widget, child);
+		}
+	}
 	if (widget->type == _ui_widget_type_column_list &&
 		definition->extended_description_widget.index != NONE)
 	{
@@ -4484,7 +4521,20 @@ void network_game_reset_to_pregame_ui(
 	}
 	else
 	{
-		if (global_network_game_server_get())
+		/* port: co-op hosted from the campaign's menus goes on in its lobby,
+		on the campaign's next level, with no map to pick: the lobby's
+		countdown starts it (network_server_manager.c) */
+		if (global_network_game_server_get() && network_game_server_port_cooperative_menu(NULL))
+		{
+			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
+			if (!ui_widget_load_by_name_or_tag(
+				"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen",
+				NONE, NULL, NONE, NONE, NONE, NONE))
+			{
+				error(_error_silent, "failed to load networked pregame status screen");
+			}
+		}
+		else if (global_network_game_server_get())
 		{
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
 			if (!ui_widget_load_by_name_or_tag(
@@ -4791,6 +4841,94 @@ real_rgb_color get_ui_rgb_white(
 	return result;
 }
 
+/* (the box's text override entry, made if it has none; -1 when they are all
+taken) */
+static short ui_widget_port_text_override_entry(
+	struct widget_instance *widget)
+{
+	short override_index;
+
+	for (override_index = 0; override_index < ui_widget_port_text_override_count; override_index++)
+	{
+		if (ui_widget_port_text_overrides[override_index].widget == widget)
+			return override_index;
+	}
+	if (override_index >= (short)NUMBEROF(ui_widget_port_text_overrides))
+		return -1;
+	ui_widget_port_text_override_count++;
+	ui_widget_port_text_overrides[override_index].widget = widget;
+	ui_widget_port_text_overrides[override_index].text[0] = 0;
+	return override_index;
+}
+
+/* port: the text box shows text in place of its string list's string, for
+this render of the widgets (call it from a game data function of the box or
+of a widget drawn before it) */
+void ui_widget_port_text_override(
+	struct widget_instance *widget,
+	wchar_t const *text)
+{
+	short override_index;
+
+	if (!widget || !text || (override_index = ui_widget_port_text_override_entry(widget)) < 0)
+		return;
+	ustrncpy(ui_widget_port_text_overrides[override_index].text, text,
+		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1);
+	ui_widget_port_text_overrides[override_index].text[
+		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1] = 0;
+}
+
+/* port: whether the text is wider than width in the text box's font */
+boolean ui_widget_port_text_too_wide(
+	struct widget_instance *widget,
+	wchar_t const *text,
+	short width)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+	long font_index = definition->text_font.index;
+	rectangle2d bounds = { 0, 0, 480, 2000 };
+	rectangle2d text_bounds;
+	rectangle2d cursor_bounds;
+
+	if (font_index == NONE)
+		return FALSE;
+	/* (as widget_instance_render_text_box draws: the plain style) */
+	{
+		real_argb_color color = get_ui_argb_white();
+
+		draw_string_set_draw_mode(font_index, NONE, 0, 0, &color);
+	}
+	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor_bounds);
+	return text_bounds.x1 - text_bounds.x0 > width;
+}
+
+/* port: the font and text colour of a widget definition (its tag's name),
+for the port's own text drawn as the menus draw theirs; FALSE if it has
+none */
+boolean ui_widget_port_text_style(
+	char const *widget_name,
+	long *font_index,
+	real_argb_color *color)
+{
+	long tag_index = tag_loaded(UI_WIDGET_DEFINITION_TAG, widget_name);
+	struct ui_widget_definition *definition;
+
+	if (tag_index == NONE)
+		return FALSE;
+	definition = ui_widget_definition_get(tag_index);
+	*font_index = definition->text_font.index;
+	*color = definition->text_color;
+	if (color->red == 1.0f && color->green == 1.0f && color->blue == 1.0f)
+	{
+		/* (as the text boxes draw a white: the menus' white) */
+		real alpha = color->alpha;
+
+		*color = get_ui_argb_white();
+		color->alpha = alpha;
+	}
+	return *font_index != NONE;
+}
+
 real_argb_color get_ui_argb_white(
 	void)
 {
@@ -4982,6 +5120,18 @@ static void widget_instance_render_text_box(
 		string = widget == ui_widget_port_error_text_box && ui_widget_port_error_text ?
 			(wchar_t *)ui_widget_port_error_text :
 			unicode_string_list_get_string(definition->text_label_string_list.index, string_list_index);
+		{
+			short override_index;
+
+			for (override_index = 0; override_index < ui_widget_port_text_override_count; override_index++)
+			{
+				if (ui_widget_port_text_overrides[override_index].widget == widget &&
+					ui_widget_port_text_overrides[override_index].text[0])
+				{
+					string = ui_widget_port_text_overrides[override_index].text;
+				}
+			}
+		}
 		length = ustrlen(string);
 		widget->parameters.text_box.text = pool_resize_pointer(
 			widget_memory_pool,
@@ -6115,6 +6265,8 @@ void render_ui_widgets(
 		window_bounds != NULL);
 	local_player_index_for_draw_string_and_hack_in_icons =
 		local_player_index == NONE ? 0 : local_player_index;
+	/* (port: set again by this render's game data functions) */
+	ui_widget_port_text_override_count = 0;
 	if (bink_playback_ui_rendering_inhibited())
 		return;
 	if (!virtual_keyboard_active())
@@ -6179,6 +6331,9 @@ void render_ui_widgets(
 #ifdef HALO_LINUX
 				ui_mouse_noting_targets = FALSE;
 #endif
+				/* port: co-op from the campaign's menus, the text the maps
+				have no strings for (port/linux/game/coop_menu.c) */
+				coop_menu_render(widget_globals.active_widgets[widget_index]->definition_tag_index);
 				if (widget_globals.debug_show_path)
 				{
 					real_argb_color color = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -6749,6 +6904,41 @@ static void widget_instance_process_one_event_recursive(
 				}
 			}
 		}
+	}
+	/* port: co-op from the campaign's menus: Y on the difficulty list hosts
+	the level chosen on the difficulty selected, and opens the game's lobby,
+	the waiting screen, with the difficulty screen behind it (B goes back to
+	it) */
+	if (event_for_this_widget && !widget_deleted && !event_handled &&
+		event->type == _event_type_button &&
+		event->data.button.value == 1 &&
+		event->data.button.index == _gamepad_analog_button_y &&
+		widget->definition_tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG,
+			"ui\\shell\\main_menu\\difficulty_select\\difficulty_select_list"))
+	{
+		long lobby_tag = tag_loaded(UI_WIDGET_DEFINITION_TAG,
+			"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen");
+
+		event_handled = TRUE;
+		if (lobby_tag != NONE && ui_widget_port_cooperative_campaign_host(widget, event))
+		{
+			if (ui_widget_launch_widget(widget, lobby_tag))
+			{
+				audio_feedback = _ui_audio_feedback_forward;
+				widget_deleted = TRUE;
+			}
+			else
+			{
+				error(_error_silent, "co-op: the lobby did not open");
+				dispose_global_network_game_client();
+				dispose_global_network_game_server();
+				network_game_accept_remote_connections(FALSE);
+				player_ui_clear_multiplayer_variant();
+				audio_feedback = _ui_audio_feedback_flag_failure;
+			}
+		}
+		else
+			audio_feedback = _ui_audio_feedback_flag_failure;
 	}
 	if (event_for_this_widget)
 	{

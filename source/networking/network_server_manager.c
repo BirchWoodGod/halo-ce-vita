@@ -530,6 +530,10 @@ enum
 	CLIENT_UPDATE_SEQUENCE_NUMBER_MASK = 0x7FFFFFFF,
 	NETWORK_GAME_COUNTDOWN_TIME = 30999,
 	NETWORK_GAME_SPLITSCREEN_COUNTDOWN_TIME = 10999,
+	/* port: co-op hosted from the campaign's menus, its first level and the
+	next after each won */
+	NETWORK_GAME_COOP_COUNTDOWN_TIME = 5999,
+	NETWORK_GAME_COOP_NEXT_COUNTDOWN_TIME = 10999,
 	NETWORK_GAME_COUNTDOWN_ADJUSTMENT = 5000,
 	NETWORK_GAME_MINIMUM_COUNTDOWN_TIME = 999,
 	_network_client_machine_connected_bit = 0,
@@ -791,6 +795,10 @@ static struct
 	char choice[16];
 	char map_name[sizeof(((struct network_game *)NULL)->map.name)];
 	short difficulty;
+	/* (hosted from the campaign's menus, network_game_server_port_cooperative_from_menu:
+	the settings' choice is then not looked at; and the levels won since) */
+	boolean menu;
+	short rounds;
 } network_game_server_cooperative;
 
 struct network_game_server network_game_server_memory_do_not_use_directly;
@@ -3624,6 +3632,14 @@ void network_game_server_update_countdown(
 							countdown = NETWORK_GAME_SPLITSCREEN_COUNTDOWN_TIME;
 						else
 							countdown = NETWORK_GAME_COUNTDOWN_TIME;
+						/* port: co-op hosted from the campaign's menus starts
+						soon after the partner is in (the host's A sooner), the
+						next level after one won a little later */
+						if (network_game_server_cooperative.menu)
+						{
+							countdown = network_game_server_cooperative.rounds ? NETWORK_GAME_COOP_NEXT_COUNTDOWN_TIME :
+								NETWORK_GAME_COOP_COUNTDOWN_TIME;
+						}
 
 						server->countdown_state.active = TRUE;
 						countdown_timer_set_time_remaining(
@@ -3861,9 +3877,11 @@ static void network_game_server_cooperative_round(
 	csmemcpy(&server->game.variant, &variant, sizeof(server->game.variant));
 	csstrncpy(server->game.map.name, network_game_server_cooperative_next_map, sizeof(server->game.map.name) - 1);
 	server->game.map.name[sizeof(server->game.map.name) - 1] = 0;
-	/* (the settings' co-op choice goes on from here: the next level) */
-	if (network_game_server_cooperative.choice[0])
+	/* (the settings' or the menus' co-op choice goes on from here: the next
+	level) */
+	if (network_game_server_cooperative.choice[0] || network_game_server_cooperative.menu)
 	{
+		network_game_server_cooperative.rounds++;
 		csstrncpy(network_game_server_cooperative.map_name, server->game.map.name,
 			sizeof(network_game_server_cooperative.map_name) - 1);
 	}
@@ -3910,11 +3928,23 @@ static void network_game_server_port_cooperative_setting(
 	char const *map_name;
 	short level_index;
 
-	if (!level || !level[0] || server->state != _network_game_server_state_pregame ||
-		network_game_is_splitscreen_local())
+	if (server->state != _network_game_server_state_pregame || network_game_is_splitscreen_local())
+		return;
+	/* (hosted from the campaign's menus: that level, or the next one after
+	a level won, which the lobby's own widgets may put back to a
+	multiplayer map and gametype) */
+	if (network_game_server_cooperative.menu)
 	{
+		if (server->game.variant.game_engine_index != 0 ||
+			csstrcmp(server->game.map.name, network_game_server_cooperative.map_name))
+		{
+			ui_widget_port_cooperative_level_choose(network_game_server_cooperative.map_name,
+				network_game_server_cooperative.difficulty);
+		}
 		return;
 	}
+	if (!level || !level[0])
+		return;
 	level_index = main_get_solo_level_from_name(level);
 	if (level_index == NONE)
 		return;
@@ -3940,6 +3970,39 @@ static void network_game_server_port_cooperative_setting(
 		error(_error_silent, "co-op: hosting %s on difficulty %d (the co-op setting)", map_name,
 			network_game_server_cooperative.difficulty);
 	}
+}
+
+boolean network_game_server_port_cooperative_from_menu(
+	char const *map_name,
+	short difficulty)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	short level_index = map_name ? main_get_solo_level_from_name(map_name) : NONE;
+
+	if (!server || server->state != _network_game_server_state_pregame || level_index == NONE)
+		return FALSE;
+	csmemset(&network_game_server_cooperative, 0, sizeof(network_game_server_cooperative));
+	network_game_server_cooperative.menu = TRUE;
+	network_game_server_cooperative.difficulty = (short)PIN(difficulty, 0, 3);
+	csstrncpy(network_game_server_cooperative.map_name, main_get_solo_level_name(level_index),
+		sizeof(network_game_server_cooperative.map_name) - 1);
+	if (!ui_widget_port_cooperative_level_choose(network_game_server_cooperative.map_name,
+		network_game_server_cooperative.difficulty))
+	{
+		csmemset(&network_game_server_cooperative, 0, sizeof(network_game_server_cooperative));
+		return FALSE;
+	}
+	error(_error_silent, "co-op: hosting %s on difficulty %d (the campaign's menus)",
+		network_game_server_cooperative.map_name, network_game_server_cooperative.difficulty);
+	return TRUE;
+}
+
+boolean network_game_server_port_cooperative_menu(
+	short *rounds)
+{
+	if (rounds)
+		*rounds = network_game_server_cooperative.rounds;
+	return global_network_game_server_get() != NULL && network_game_server_cooperative.menu;
 }
 
 static boolean network_game_server_setup_game_from_playlist(
@@ -4421,6 +4484,16 @@ static boolean network_game_server_idle_pregame_tasks(
 			}
 		}
 
+		/* port: co-op hosted from the campaign's menus starts once the
+		partner's player is in, with no one pressing A (the lobby's own
+		countdown: the host's A shortens it, and it stops if the partner
+		leaves) */
+		if (network_game_server_cooperative.menu && !server->countdown_state.active &&
+			!server->countdown_state.paused && server_ok_to_countdown(server))
+		{
+			network_event("co-op: the partner is in: the countdown starts");
+			network_game_server_update_countdown(server, _network_game_server_countdown_event_player_joined);
+		}
 		if (server->countdown_state.active == TRUE)
 		{
 			boolean send_countdown_update = FALSE;
