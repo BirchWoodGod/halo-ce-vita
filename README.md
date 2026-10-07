@@ -16,6 +16,10 @@ Evolved.
 
 *Screenshots taken on a PS Vita.*
 
+[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+
+*Video: [Halo CE PS Vita port v1.0.3 | Stability Update](https://youtu.be/S6CrPv_F2jU).*
+
 > **Official sources.** The only official downloads are the
 > [releases on this GitHub repository](https://github.com/BirchWoodGod/halo-ce-vita/releases),
 > published by **BirchWoodGod**. VPKs, "updates", mods or donation requests
