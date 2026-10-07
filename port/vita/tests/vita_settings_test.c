@@ -26,6 +26,10 @@ Run port/vita/tests/run_vita_settings_test.sh.
 #include <utime.h>
 
 volatile unsigned long halo_settings_generation;
+/* (the game's side of Host a game and Join a game: system_link_shortcut.c) */
+volatile int halo_system_link_request;
+volatile int halo_system_link_answer;
+volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
 /* (the map in play: never deleted) */
@@ -487,6 +491,302 @@ static void test_gyro_tab(void)
 	press(VITA_BUTTON_CIRCLE);
 }
 
+/* ---------- the Multiplayer tab: Host a game, Join a game */
+
+/* what the game's main loop says (system_link_shortcut.c), as it would */
+static void game_status(int state, int machines, int games, int host)
+{
+	static const unsigned char address[4] = { 192, 168, 1, 23 };
+	int value;
+
+	memcpy(&value, address, sizeof(value));
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE] = state;
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_MACHINES] = machines;
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_PLAYERS] = machines;
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_GAMES] = games;
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_HOST] = host;
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_ADDRESS] = state == SYSTEM_LINK_STATE_STARTING ? 0 : value;
+	/* (the panel redraws twice a second) */
+	clock_us += 600000;
+	frame(0);
+}
+
+/* the game's main loop answering the panel's request */
+static void game_answers(int answer)
+{
+	halo_system_link_answer = answer;
+	halo_system_link_request = SYSTEM_LINK_REQUEST_NONE;
+	frame(0);
+}
+
+/* every line of the menu 46 characters at most (the tab bar aside) */
+static int menu_fits(void)
+{
+	const char *at = menu;
+
+	while (*at)
+	{
+		int length = (int)strcspn(at, "\n");
+
+		if (at[0] != '\t' && length > 46)
+		{
+			printf("too long: %.*s\n", length, at);
+			return 0;
+		}
+		at += length + (at[length] == '\n');
+	}
+	return 1;
+}
+
+static void test_multiplayer_tab(void)
+{
+	char line[128];
+
+	/* (the network this session runs: Online, from the environment) */
+	check(strstr(menu_line(1, line, sizeof(line)), "Host a game >") && strstr(menu_line(2, line, sizeof(line)),
+		"Join a game >") && !strncmp(menu_line(3, line, sizeof(line)), "Connection*", 11) && strstr(line, "< Online") &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Co-op campaign", 14) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Co-op difficulty", 16),
+		"Multiplayer: Host a game, Join a game, Connection, the co-op rows");
+	check(!strstr(menu, "Online games") && !strstr(menu, "Join with a code") && !strstr(menu, "Browse public") &&
+		!strstr(menu, "Ad hoc room") && !strstr(menu, "Ad hoc dialog"),
+		"Multiplayer: internet play's rows and ad hoc's are out of the way");
+	check(strstr(menu, "\nThis Vita: vitauser\n") && strstr(menu, "\nNo game yet: host one or join one\n") &&
+		strstr(menu, "\nOnline: ready"), "before the game says: this Vita's name, no game, internet play's line");
+	check(strstr(menu, "Start a game for other Vitas") != NULL, "Host a game's help line");
+	check(menu_fits(), "Multiplayer: lines of 46 characters at most");
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\nThis Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
+
+	/* Host a game: the steps, then cross asks the game for System Link */
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(!strncmp(menu, "HOST A GAME", 11) && strstr(menu, "1 The game's System Link screen opens") &&
+		strstr(menu, "2 A to join if asked, A on a profile, A again") && strstr(menu, "3 SYSTEM LINK GAMES: Y creates a game") &&
+		strstr(menu, "4 A on a map, A on a game type") && strstr(menu, "Menus: A Cross, B Circle, X Square, Y Triangle") &&
+		strstr(menu, "Cross: open System Link   Circle: back"), "Host a game: the steps in the game's (Xbox) buttons");
+	check(menu_fits() && !strstr(menu, " button"), "the steps: 46 characters a line, buttons by name");
+	check(frame(VITA_BUTTON_CROSS) == 1 && halo_system_link_request == SYSTEM_LINK_REQUEST_HOST &&
+		strstr(menu, "Opening System Link..."), "cross: the game is asked for its System Link screen (host)");
+	/* (the cross still held when the game answers) */
+	halo_system_link_answer = SYSTEM_LINK_ANSWER_OPENED;
+	halo_system_link_request = SYSTEM_LINK_REQUEST_NONE;
+	frame(VITA_BUTTON_CROSS);
+	check(!menu_visible && frame(VITA_BUTTON_CROSS) == 1,
+		"the game opened it: the panel closes; the cross still held is not the game's A");
+	check(frame(0) == 0 && frame(VITA_BUTTON_CROSS) == 0, "let go and pressed again: the game has the pad");
+	check(strstr(log_text, "settings: host a game: asked the game for its System Link screen (online)") != NULL,
+		"halo.log says so");
+	frame(0);
+
+	/* the game's state, in the tab's lines */
+	open_panel();
+	game_status(SYSTEM_LINK_STATE_SEARCHING, 0, 0, 0);
+	check(strstr(menu, "Looking for games: none yet") != NULL, "the System Link list, no game found");
+	game_status(SYSTEM_LINK_STATE_SEARCHING, 0, 2, 0);
+	check(strstr(menu, "Looking for games: 2 found") != NULL, "the System Link list, two games");
+	game_status(SYSTEM_LINK_STATE_HOSTING, 1, 0, 1);
+	check(strstr(menu, "Hosting: waiting for players") != NULL, "hosting alone: waiting for players");
+	game_status(SYSTEM_LINK_STATE_HOSTING, 3, 0, 1);
+	check(strstr(menu, "Hosting: 3 Vitas in the lobby") != NULL, "hosting: three Vitas in the lobby");
+
+	/* hosting: Join a game says why not, and asks nothing */
+	to_line("Join a game");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(!strncmp(menu, "JOIN A GAME", 11) && strstr(menu, "A on the host's game") &&
+		strstr(menu, "\n!Already hosting: the game's lobby is open\nCircle: back"),
+		"Join a game while hosting: the steps, and why not now");
+	check(menu_fits(), "Join's steps: 46 characters a line");
+	press(VITA_BUTTON_CROSS);
+	check(halo_system_link_request == SYSTEM_LINK_REQUEST_NONE, "... and cross asks nothing");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") != NULL, "circle: back to the tab");
+	game_status(SYSTEM_LINK_STATE_LOBBY, 2, 0, 0);
+	check(strstr(menu, "In a lobby: 2 Vitas, the host starts") != NULL, "in another's lobby");
+	game_status(SYSTEM_LINK_STATE_IN_GAME, 4, 0, 1);
+	check(strstr(menu, "In a game: 4 Vitas (you host)") != NULL, "in a game this Vita hosts");
+	game_status(SYSTEM_LINK_STATE_PLAYING, 0, 0, 0);
+	check(strstr(menu, "Playing: quit the level to host or join") != NULL, "playing a level");
+
+	/* the game refuses (it has the last word): the guide says why */
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	check(halo_system_link_request == SYSTEM_LINK_REQUEST_JOIN, "Join a game: the game is asked (join)");
+	game_answers(SYSTEM_LINK_ANSWER_IN_PLAY);
+	check(menu_visible && strstr(menu, "!Leave the level first: Start, then Quit"), "the game said no: the guide says why");
+	/* ... and a game that does not answer in 3 s is asked no more */
+	press(VITA_BUTTON_CROSS);
+	check(halo_system_link_request == SYSTEM_LINK_REQUEST_JOIN, "cross again: asked again");
+	clock_us += 3100000;
+	frame(0);
+	check(halo_system_link_request == SYSTEM_LINK_REQUEST_NONE && strstr(menu, "!The game did not answer: try again"),
+		"no answer in 3 s: the request withdrawn, the guide says so");
+	press(VITA_BUTTON_CIRCLE);
+
+	/* co-op: the level a hosted game plays together, at once (the server
+	reads the environment each frame of its lobby); Host's steps say it */
+	to_line("Co-op campaign");
+	menu_line(menu_selected, line, sizeof(line));
+	check(strstr(line, "Off") != NULL && getenv("HALO_NET_COOP_LEVEL") && !getenv("HALO_NET_COOP_LEVEL")[0],
+		"Co-op campaign: Off at first");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a10") &&
+		strstr(menu_line(menu_selected, line, sizeof(line)), "Pillar of Autumn") && strlen(line) <= 46,
+		"Co-op campaign: right picks The Pillar of Autumn (a10)");
+	press(VITA_BUTTON_DOWN);
+	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Co-op difficulty", 16) && strstr(line, "Normal") &&
+		!strcmp(getenv("HALO_NET_COOP_DIFFICULTY"), "1"), "Co-op difficulty: Normal at first");
+	to_line("Host a game");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "\n  Co-op: plays Pillar of Autumn, Normal\n") && menu_fits(), "Host's steps name the co-op level");
+	press(VITA_BUTTON_CIRCLE);
+	to_line("Co-op campaign");
+	press(VITA_BUTTON_LEFT);
+	check(!getenv("HALO_NET_COOP_LEVEL")[0], "Co-op campaign: left goes back to Off");
+
+	/* Connection: Online is not offered again without Show dev settings */
+	to_line("Connection");
+	check(strstr(menu, "Internet play by code, Dev tab") != NULL, "Connection Online's help line");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu, "Restart the game"),
+		"Connection: Ad hoc asks for a restart");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu_line(menu_selected, line, sizeof(line)),
+		"< Ad hoc  "), "... and Online is not offered again (dev settings off)");
+	clock_us += 5000000;
+	press(VITA_BUTTON_DOWN);
+	check(!strstr(menu, "Restart the game"), "the other lines' help again after a few seconds");
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
+	check(strstr(menu, "Ad hoc room") && strstr(menu, "Join ad hoc group >") && strstr(menu, "Leave ad hoc group >"),
+		"Ad hoc chosen: its rows show");
+	to_line("Join ad hoc group");
+	press(VITA_BUTTON_CROSS);
+	check(adhoc_connects == 0 && strstr(menu, "Connection must be Ad hoc (restart)"),
+		"Join ad hoc group waits for the restart");
+	to_line("Host a game");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "!Restart the game first: Connection changed") != NULL, "Host a game waits for the restart too");
+	press(VITA_BUTTON_CIRCLE);
+
+	/* the next start, in ad hoc play */
+	restart_pending = 0;
+	vita_settings_load();
+	check(!strcmp(getenv("HALO_NET_ADHOC"), "true"), "Connection Ad hoc: ad hoc play on");
+	clock_us += 600000;
+	frame(0);
+	check(strstr(menu, "\nThis Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\nAd hoc: not in a group\n"),
+		"ad hoc: this Vita's room, not in a group");
+	to_line("Ad hoc room");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_CROSS);
+	check(adhoc_connects == 1 && adhoc_mode == 0 && adhoc_room == 2 && !menu_visible,
+		"Join ad hoc group opens the dialog (connect, room 2) and closes the panel");
+	check(frame(VITA_BUTTON_CROSS) == 1 && frame(0) == 1, "the game sees no buttons while the dialog is up");
+	adhoc_state_value = 2;
+	check(frame(0) == 0, "and gets them again after");
+
+	/* Host a game in ad hoc play, not in a group: the dialog first, then
+	System Link by itself */
+	vita_adhoc_leave();
+	open_panel();
+	to_line("Host a game");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "1 The system's dialog joins ad hoc room 2") && strstr(menu, "2 The game's System Link screen") &&
+		menu_fits(), "Host in ad hoc play: the room's group joined first");
+	press(VITA_BUTTON_CROSS);
+	check(adhoc_connects == 2 && adhoc_room == 2 && !menu_visible && halo_system_link_request == SYSTEM_LINK_REQUEST_NONE,
+		"cross: the ad hoc dialog, the panel closed, System Link not asked yet");
+	adhoc_state_value = 2;
+	frame(0);
+	check(halo_system_link_request == SYSTEM_LINK_REQUEST_HOST, "in the group: System Link asked for");
+	game_answers(SYSTEM_LINK_ANSWER_OPENED);
+	check(!menu_visible && frame(0) == 0, "opened: nothing over the game");
+	/* ... and a dialog that does not join says so over the game */
+	vita_adhoc_leave();
+	open_panel();
+	to_line("Join a game");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	adhoc_state_value = -1;
+	frame(0);
+	check(menu_visible && strstr(menu, "did not join the ad hoc group") && halo_system_link_request == 0,
+		"the dialog did not join: a message, System Link not asked");
+	press(VITA_BUTTON_CROSS);
+	check(!menu_visible, "cross closes the message");
+	adhoc_state_value = 2;
+	frame(0);
+}
+
+/* internet play's rows, in the Dev tab (it is shown) */
+static void test_online_rows(void)
+{
+	char line[128];
+
+	/* (a session started Online) */
+	vita_settings_set("HALO_VITA_NETWORK", "online");
+	restart_pending = 0;
+	vita_settings_load();
+	to_tab("Multiplayer");
+	to_line("Connection");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online"), "Show dev settings on: Connection offers Online");
+	restart_pending = 0;
+	to_tab("Dev");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "Online games") && strstr(menu, "Join with a code >") && strstr(menu, "Browse public games >") &&
+		strstr(menu, "Ad hoc dialog"), "Dev: internet play's rows and the ad hoc dialog's");
+
+	/* Online games: Public, at once */
+	to_line("Online games");
+	press(VITA_BUTTON_RIGHT);
+	check(lobby_public == 1 && strstr(menu_line(menu_selected, line, sizeof(line)), "Public"),
+		"Online games: Public takes effect at once");
+
+	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
+	from A: the digits come first) on the fifth, then cross */
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "JOIN WITH A CODE", 16), "Join with a code opens the code screen");
+	press(VITA_BUTTON_UP);
+	for (int index = 0; index < 4; index++)
+		press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_DOWN);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "B A A A - 9 A A A") != NULL, "the code screen shows the letters typed");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(joined_code, "BAAA-9AAA") && strstr(menu, "*Dev"), "cross joins the code typed");
+	check(strstr(menu, "Looking up BAAA-9AAA") != NULL, "the help line says it is looked up");
+
+	/* the public lobby: this Vita's own game is left out */
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_CROSS);
+	check(browsing == 1 && !strncmp(menu, "PUBLIC GAMES", 12), "Browse public games starts browsing");
+	clock_us += 600000;
+	frame(0);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "desktop host") && !strstr(menu, "this vita"), "the lobby lists the others' games");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(joined_code, "HJ4T-9WXZ") && browsing == 0, "cross joins the game's code and stops browsing");
+
+	/* hosting: the code shows in the Multiplayer tab */
+	hosting = 1;
+	to_tab("Multiplayer");
+	clock_us += 5000000;
+	frame(0);
+	check(strstr(menu, "Your code: QX7K-M2PA (public)") != NULL, "hosting online: the Multiplayer tab shows the code");
+	check(menu_fits(), "Multiplayer with internet play: 46 characters a line");
+	hosting = 0;
+	to_tab("Dev");
+	to_line("Save report");
+}
+
 int main(void)
 {
 	char line[128];
@@ -553,92 +853,7 @@ int main(void)
 	check(!strncmp(menu, "\tGraphics|Audio|Controls|Gyro|*Multiplayer", 42), "R: Multiplayer");
 	printf("%s\n--\n", menu);
 
-	/* Online games: Public, at once */
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_RIGHT);
-	check(lobby_public == 1 && strstr(menu_line(2, line, sizeof(line)), "Public"), "Online games: Public takes effect at once");
-
-	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
-	from A: the digits come first) on the fifth, then cross */
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_CROSS);
-	check(!strncmp(menu, "JOIN WITH A CODE", 16), "Join with a code opens the code screen");
-	press(VITA_BUTTON_UP);
-	for (index = 0; index < 4; index++)
-		press(VITA_BUTTON_RIGHT);
-	press(VITA_BUTTON_DOWN);
-	printf("%s\n--\n", menu);
-	check(strstr(menu, "B A A A - 9 A A A") != NULL, "the code screen shows the letters typed");
-	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_code, "BAAA-9AAA") && strstr(menu, "*Multiplayer"), "cross joins the code typed");
-	check(strstr(menu, "Looking up BAAA-9AAA") != NULL, "the help line says it is looked up");
-
-	/* the public lobby: this Vita's own game is left out */
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_CROSS);
-	check(browsing == 1 && !strncmp(menu, "PUBLIC GAMES", 12), "Browse public games starts browsing");
-	clock_us += 600000;
-	frame(0);
-	printf("%s\n--\n", menu);
-	check(strstr(menu, "desktop host") && !strstr(menu, "this vita"), "the lobby lists the others' games");
-	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_code, "HJ4T-9WXZ") && browsing == 0, "cross joins the game's code and stops browsing");
-
-	/* hosting: the code shows */
-	hosting = 1;
-	clock_us += 5000000;
-	frame(0);
-	check(strstr(menu, "Your code: QX7K-M2PA (public)") != NULL, "hosting, the status line shows the code");
-
-	/* co-op: the level a hosted game plays together, at once (the server
-	reads the environment each frame of its lobby) */
-	to_line("Co-op campaign");
-	menu_line(menu_selected, line, sizeof(line));
-	check(strstr(line, "Off") != NULL && getenv("HALO_NET_COOP_LEVEL") && !getenv("HALO_NET_COOP_LEVEL")[0],
-		"Co-op campaign: Off at first");
-	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a10") &&
-		strstr(menu_line(menu_selected, line, sizeof(line)), "Pillar of Autumn") && strlen(line) <= 46,
-		"Co-op campaign: right picks The Pillar of Autumn (a10)");
-	press(VITA_BUTTON_DOWN);
-	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Co-op difficulty", 16) && strstr(line, "Normal") &&
-		!strcmp(getenv("HALO_NET_COOP_DIFFICULTY"), "1"), "Co-op difficulty: Normal at first");
-	press(VITA_BUTTON_UP);
-	press(VITA_BUTTON_LEFT);
-	check(!getenv("HALO_NET_COOP_LEVEL")[0], "Co-op campaign: left goes back to Off");
-
-	/* ad hoc needs the network chosen first */
-	press(VITA_BUTTON_UP);
-	press(VITA_BUTTON_UP);
-	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Join ad hoc group", 17), "up: Join ad hoc group");
-	press(VITA_BUTTON_CROSS);
-	check(adhoc_connects == 0 && strstr(menu, "Network must be Ad hoc"), "Join ad hoc group asks for the Ad hoc network");
-
-	/* Network: a restart */
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Network", 7))
-		press(VITA_BUTTON_UP);
-	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu, "Restart the game"), "Network: Ad hoc asks for a restart");
-	clock_us += 5000000;
-	press(VITA_BUTTON_DOWN);
-	check(!strstr(menu, "Restart the game"), "the other lines' help again after a few seconds");
-	press(VITA_BUTTON_UP);
-	check(strstr(menu, "Restart the game") != NULL, "the Network line still says it");
-
-	/* the next start, in ad hoc play */
-	restart_pending = 0;
-	vita_settings_load();
-	check(!strcmp(getenv("HALO_NET_ADHOC"), "true"), "Network Ad hoc: ad hoc play on");
-	to_line("Ad hoc room");
-	press(VITA_BUTTON_RIGHT);
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_CROSS);
-	check(adhoc_connects == 1 && adhoc_mode == 0 && adhoc_room == 2 && !menu_visible,
-		"Join ad hoc group opens the dialog (connect, room 2) and closes the panel");
-	check(frame(VITA_BUTTON_CROSS) == 1 && frame(0) == 1, "the game sees no buttons while the dialog is up");
-	adhoc_state_value = 2;
-	check(frame(0) == 0, "and gets them again after");
+	test_multiplayer_tab();
 
 	/* ---------- Modded maps */
 	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);
@@ -757,6 +972,7 @@ int main(void)
 		"the report: the logs, settings, env.txt and the newest dump");
 	for (index = 1; index < 12; index++)
 		check(strlen(menu_line(index, line, sizeof(line))) <= 64, "a Dev line fits");
+	test_online_rows();
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible, "circle closes the panel");
 

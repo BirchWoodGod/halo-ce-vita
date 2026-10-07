@@ -43,24 +43,28 @@ whether turning is the Vita's yaw or its roll; a line shows the gyroscope's
 rates now and whether its bias was learnt (it is, each time the Vita lies
 still for a second).
 
-Multiplayer has three ways to play beyond the Wi-Fi network's system link,
-each handing off to the game's own System Link screen, and co-op ("Co-op
-campaign": a game this Vita hosts, by any of them, is that campaign level
-played together, the next level after each one won;
-network_server_manager.c):
+Multiplayer is for playing with other Vitas. "Host a game" and "Join a
+game" each show the steps on a screen of their own (SCREEN_GUIDE), then
+open the game's own System Link screen as the main menu's Multiplayer, then
+System Link, would (port/linux/game/system_link_shortcut.c): A joins with a
+profile, and the list of games found (SYSTEM LINK GAMES) takes A to join a
+game, Y to create one. The steps name the buttons as the game's menus do,
+the Xbox's (A is Cross there, B Circle, X Square, Y Triangle). Lines below
+the rows say this Vita's name and address and what the game is doing:
+looking for games and how many it found, hosting and how many Vitas are in,
+in another's lobby, in a game. The game opens the screen only from the
+menus, outside a lobby, with a network: otherwise the guide says why.
 
-- Online (internet play, port/linux/src/p2p.c): hosting a System Link game
-  shows its short code here (ABCD-EFGH) for others to type in; "Online
-  games: Public" also lists it in the public lobby. "Join with a code"
-  types one in with the D-pad; "Browse public games" lists the lobby. The
-  host's game then shows under System Link.
-- Ad hoc (p2p_adhoc.c, vita_net.c): "Join ad hoc group" opens the system's
-  ad hoc dialog for the room's group; the Vitas in it then see each
-  other's games under System Link.
-- The network ("Network": Wi-Fi, Online, Ad hoc) applies after a restart:
-  internet play starts with the game's networking. Wi-Fi, the default, is
-  the system link that works on hardware; the other two are not yet
-  verified there.
+- "Connection" (after a restart) chooses how the Vitas reach each other:
+  Same Wi-Fi, the default, the system link that works on hardware; or Ad
+  hoc (p2p_adhoc.c, vita_net.c; not yet verified on hardware): Vitas side
+  by side without a router, whose rows show while it is chosen - the room,
+  joining and leaving its group; Host and Join join the room's group first
+  (the system's ad hoc dialog), then open System Link. Online (internet
+  play, port/linux/src/p2p.c) is offered there only while "Show dev
+  settings" is on, and its rows are in the Dev tab (below).
+- "Co-op campaign": a game this Vita hosts is that campaign level played
+  together, the next level after each one won (network_server_manager.c).
 
 Modded maps lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo), and
@@ -77,7 +81,14 @@ most are read once, at start-up, and say so) and "Save report", which
 copies halo.log, halo-prev.log, settings.txt, env.txt and the newest crash
 dump into ux0:data/haloce-vita/report-<date>/ for sending. A dev switch is
 saved in settings.txt only while it is on; off, env.txt's value (or the
-default) applies. When any is on, halo.log says so near its top.
+default) applies. When any is on, halo.log says so near its top. Internet
+play's rows are there too, out of the Multiplayer tab's way: with the
+connection Online, hosting a System Link game shows its short code in the
+Multiplayer tab (ABCD-EFGH) for others to type in; "Online games: Public"
+also lists it in the public lobby. "Join with a code" types one in with
+the D-pad; "Browse public games" lists the lobby. The host's game then
+shows under System Link. "Ad hoc dialog" is how the system's dialog joins
+a group.
 */
 
 #include <psp2/apputil.h>
@@ -95,6 +106,7 @@ default) applies. When any is on, halo.log says so near its top.
 #include <sys/stat.h>
 
 #include "p2p.h"
+#include "system_link_shortcut.h"
 #include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
@@ -149,6 +161,8 @@ enum
 	ACTION_ADHOC_LEAVE,
 	ACTION_SAVE_REPORT,
 	ACTION_RESET_CONTROLS,
+	ACTION_HOST,
+	ACTION_JOIN,
 };
 
 struct setting
@@ -168,6 +182,9 @@ struct setting
 	variable unset), it is saved only when on, and env.txt's value stands
 	while settings.txt does not name it */
 	int dev;
+	/* the row's last choices that left and right offer only while Show dev
+	settings is on (or while one is chosen) */
+	int advanced_choices;
 };
 
 /* (the performance logging switch: the three timing variables at once) */
@@ -278,22 +295,16 @@ static struct setting settings[] = {
 	{ "Gyro turning", "HALO_GYRO_TURN", 0, 2, { "yaw", "roll" }, { "Turn (yaw)", "Tilt (roll)" },
 		"Turn the Vita left/right, or tilt it like a wheel", 0, TAB_GYRO },
 
-	{ "Network", "HALO_VITA_NETWORK", 1, 3, { "wifi", "online", "adhoc" }, { "Wi-Fi", "Online", "Ad hoc" },
-		"This network / the internet / Vitas nearby (after a restart)", 0, TAB_MULTIPLAYER },
-	{ "Online games", "HALO_NET_LOBBY_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
-		"Private: join by code. Public: listed for all", 0, TAB_MULTIPLAYER },
-	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
-		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
-	{ "Browse public games", NULL, 0, 0, { NULL }, { NULL }, "The games listed in the public lobby", 0,
-		TAB_MULTIPLAYER, KIND_ACTION, ACTION_BROWSE },
-	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
-		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
-	{ "Ad hoc dialog", "HALO_ADHOC_DIALOG_MODE", 0, 3, { "0", "1", "2" }, { "Connect", "Create", "Join" },
-		"How the system dialog joins: try Connect first", 0, TAB_MULTIPLAYER },
-	{ "Join ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Opens the system's ad hoc dialog", 0, TAB_MULTIPLAYER,
-		KIND_ACTION, ACTION_ADHOC_JOIN },
-	{ "Leave ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Back to no group", 0, TAB_MULTIPLAYER, KIND_ACTION,
-		ACTION_ADHOC_LEAVE },
+	/* (Multiplayer: Host a game and Join a game - their steps, then the
+	game's System Link screen; the connection; co-op; ad hoc's rows while
+	the connection is Ad hoc, setting_shown) */
+	{ "Host a game", NULL, 0, 0, { NULL }, { NULL }, "Start a game for other Vitas: the steps", 0, TAB_MULTIPLAYER,
+		KIND_ACTION, ACTION_HOST },
+	{ "Join a game", NULL, 0, 0, { NULL }, { NULL }, "Join a game another Vita hosts: the steps", 0,
+		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN },
+	/* (Online, the last choice: internet play, for testers) */
+	{ "Connection", "HALO_VITA_NETWORK", 1, 3, { "wifi", "adhoc", "online" }, { "Same Wi-Fi", "Ad hoc", "Online" },
+		"Vitas on one Wi-Fi network play together", 0, TAB_MULTIPLAYER, KIND_CHOICE, ACTION_NONE, 0, 1 },
 	/* (co-op over the network: a hosted game is this campaign level,
 	network_server_manager.c; each level won goes on to the next) */
 	{ "Co-op campaign", "HALO_NET_COOP_LEVEL", 0, 11,
@@ -303,6 +314,12 @@ static struct setting settings[] = {
 		"Games you host: this level together (2 players)", 0, TAB_MULTIPLAYER },
 	{ "Co-op difficulty", "HALO_NET_COOP_DIFFICULTY", 0, 4, { "0", "1", "2", "3" },
 		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, TAB_MULTIPLAYER },
+	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
+		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
+	{ "Join ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Opens the system's ad hoc dialog", 0, TAB_MULTIPLAYER,
+		KIND_ACTION, ACTION_ADHOC_JOIN },
+	{ "Leave ad hoc group", NULL, 0, 0, { NULL }, { NULL }, "Back to no group", 0, TAB_MULTIPLAYER, KIND_ACTION,
+		ACTION_ADHOC_LEAVE },
 
 	/* (custom maps: the Custom Edition maps join the multiplayer level
 	list; off by default while their colours are wrong on the Vita) */
@@ -327,6 +344,16 @@ static struct setting settings[] = {
 		"A/B: a scene waits for a target drawn before (at start-up)", 0, TAB_DEV, KIND_CHOICE, ACTION_NONE, 1 },
 	{ "Save report", NULL, 0, 0, { NULL }, { NULL }, "Logs, settings and the newest crash dump in one folder", 0,
 		TAB_DEV, KIND_ACTION, ACTION_SAVE_REPORT },
+	/* (internet play, with the connection Online, and the ad hoc dialog's
+	way of joining: out of the Multiplayer tab's way) */
+	{ "Online games", "HALO_NET_LOBBY_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
+		"Online: Private, join by code. Public: listed", 0, TAB_DEV },
+	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Online: type the code another player's game shows", 0,
+		TAB_DEV, KIND_ACTION, ACTION_JOIN_CODE },
+	{ "Browse public games", NULL, 0, 0, { NULL }, { NULL }, "Online: the games listed in the public lobby", 0,
+		TAB_DEV, KIND_ACTION, ACTION_BROWSE },
+	{ "Ad hoc dialog", "HALO_ADHOC_DIALOG_MODE", 0, 3, { "0", "1", "2" }, { "Connect", "Create", "Join" },
+		"How the system dialog joins: try Connect first", 0, TAB_DEV },
 };
 
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
@@ -378,6 +405,9 @@ static const char *const fixed_defaults[][2] = {
 static int panel_open;
 static unsigned long long both_since, last_move, last_shown;
 static unsigned long previous_buttons;
+/* the buttons down when the panel closed: the game has them only once
+they are let go (the cross that opened System Link is not the game's A) */
+static unsigned long held_after_close;
 static int restart_pending;
 
 /* the tab shown, the line chosen on each, and the screens an action opens */
@@ -389,6 +419,7 @@ enum
 	SCREEN_CODE,
 	SCREEN_BROWSE,
 	SCREEN_DELETE,
+	SCREEN_GUIDE,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -406,6 +437,15 @@ static unsigned long long notice_until;
 /* the network the game started with (HALO_VITA_NETWORK at load): what
 internet or ad hoc play can do this session */
 static char running_network[8] = "wifi";
+/* the Vita's user name (the system's), which other players see */
+static char vita_name[SCE_SYSTEM_PARAM_USERNAME_MAXSIZE + 1];
+/* Host a game or Join a game: the guide's action (ACTION_HOST or
+ACTION_JOIN); whether the game was asked for its System Link screen and
+when; why it did not open ("" while nothing went wrong); and the request to
+make once the ad hoc dialog has joined the room's group (0: none) */
+static int guide_action, guide_waiting, adhoc_pending;
+static unsigned long long guide_sent;
+static char guide_problem[64];
 
 /* ---------- modded maps */
 
@@ -525,6 +565,40 @@ static int choice_of(const char *variable)
 	struct setting const *setting = setting_named(variable);
 
 	return setting ? setting->choice : 0;
+}
+
+/* the network chosen in the panel (this session's, running_network, until
+a restart) */
+static const char *chosen_network(void)
+{
+	const struct setting *setting = setting_named("HALO_VITA_NETWORK");
+
+	return setting->values[setting->choice];
+}
+
+/* whether a row is shown: ad hoc's rows in the Multiplayer tab while the
+connection is Ad hoc, chosen or this session's */
+static int setting_shown(const struct setting *setting)
+{
+	int adhoc_row = setting->tab == TAB_MULTIPLAYER && (setting->action == ACTION_ADHOC_JOIN ||
+		setting->action == ACTION_ADHOC_LEAVE || (setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")));
+
+	return !adhoc_row || !strcmp(running_network, "adhoc") || !strcmp(chosen_network(), "adhoc");
+}
+
+/* the last choice left and right reach: not the Profile row's Custom (read,
+not chosen), nor a row's advanced choices unless Show dev settings is on or
+one of them is chosen */
+static int choice_last(const struct setting *setting)
+{
+	int last = setting->count - 1;
+
+	if (setting == &settings[0])
+		return PROFILE_CUSTOM - 1;
+	if (setting->advanced_choices && !choice_of("HALO_DEV_SETTINGS") &&
+		setting->choice < setting->count - setting->advanced_choices)
+		last -= setting->advanced_choices;
+	return last;
 }
 
 /* a setting's value as the environment variable (or variables) it is */
@@ -650,12 +724,13 @@ static void apply_network(void)
 		{
 			setenv("HALO_NET_LOBBY_NAME", name, 0);
 			setenv("HALO_NET_PLAYER_NAME", name, 0);
+			snprintf(vita_name, sizeof(vita_name), "%s", name);
 		}
 	}
 	{
 		char line[96];
 
-		snprintf(line, sizeof(line), "vita: network %s (settings panel, Multiplayer)", running_network);
+		snprintf(line, sizeof(line), "vita: network %s (settings panel, Multiplayer: Connection)", running_network);
 		vita_host_log(line);
 	}
 }
@@ -1180,7 +1255,7 @@ static int tab_lines(struct line *lines)
 	int count = 0, index;
 
 	for (index = 0; index < SETTING_COUNT; index++)
-		if (settings[index].tab == tab)
+		if (settings[index].tab == tab && setting_shown(&settings[index]))
 		{
 			lines[count].type = LINE_SETTING;
 			lines[count++].index = index;
@@ -1212,12 +1287,76 @@ static int tab_lines(struct line *lines)
 	return count;
 }
 
-/* one short line on the network this session plays on */
+/* what the game is doing with other machines (system_link_shortcut.c) */
+static int multiplayer_state(void)
+{
+	return __atomic_load_n(&halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE], __ATOMIC_ACQUIRE);
+}
+
+/* this Vita's name, and its address as the other Vitas reach it */
+static void vita_line(char *text, int size)
+{
+	unsigned int address = (unsigned int)halo_multiplayer_status[SYSTEM_LINK_STATUS_ADDRESS];
+	const unsigned char *bytes = (const unsigned char *)&address;
+	char name[20];
+
+	snprintf(name, sizeof(name), "%.16s", vita_name[0] ? vita_name : "(no name)");
+	if (!strcmp(running_network, "adhoc"))
+		snprintf(text, (size_t)size, "This Vita: %s, ad hoc room %d", name, choice_of("HALO_ADHOC_ROOM") + 1);
+	else if (address)
+		snprintf(text, (size_t)size, "This Vita: %s  %u.%u.%u.%u", name, bytes[0], bytes[1], bytes[2], bytes[3]);
+	else if (multiplayer_state() == SYSTEM_LINK_STATE_STARTING)
+		snprintf(text, (size_t)size, "This Vita: %s", name);
+	else
+		snprintf(text, (size_t)size, "This Vita: %s, no Wi-Fi network", name);
+}
+
+/* one line on the network game: none, looking for games, hosting ... */
+static void game_line(char *text, int size)
+{
+	int machines = halo_multiplayer_status[SYSTEM_LINK_STATUS_MACHINES];
+	int games = halo_multiplayer_status[SYSTEM_LINK_STATUS_GAMES];
+
+	switch (multiplayer_state())
+	{
+	case SYSTEM_LINK_STATE_SEARCHING:
+		if (games)
+			snprintf(text, (size_t)size, "Looking for games: %d found", games);
+		else
+			snprintf(text, (size_t)size, "Looking for games: none yet");
+		break;
+	case SYSTEM_LINK_STATE_JOINING:
+		snprintf(text, (size_t)size, "Joining a game...");
+		break;
+	case SYSTEM_LINK_STATE_HOSTING:
+		if (machines > 1)
+			snprintf(text, (size_t)size, "Hosting: %d Vitas in the lobby", machines);
+		else
+			snprintf(text, (size_t)size, "Hosting: waiting for players");
+		break;
+	case SYSTEM_LINK_STATE_LOBBY:
+		snprintf(text, (size_t)size, "In a lobby: %d Vitas, the host starts", machines);
+		break;
+	case SYSTEM_LINK_STATE_IN_GAME:
+		snprintf(text, (size_t)size, "In a game: %d Vitas%s", machines,
+			halo_multiplayer_status[SYSTEM_LINK_STATUS_HOST] ? " (you host)" : "");
+		break;
+	case SYSTEM_LINK_STATE_PLAYING:
+		snprintf(text, (size_t)size, "Playing: quit the level to host or join");
+		break;
+	default:
+		snprintf(text, (size_t)size, "No game yet: host one or join one");
+		break;
+	}
+}
+
+/* one short line on internet or ad hoc play this session ("" on Wi-Fi) */
 static void status_line(char *text, int size)
 {
 	char code[P2P_CODE_SIZE];
 	char detail[96];
 
+	text[0] = 0;
 	if (!strcmp(running_network, "online"))
 	{
 		if (p2p_hosting_code(code, sizeof(code)))
@@ -1245,10 +1384,15 @@ static void status_line(char *text, int size)
 				"Ad hoc: not in a group");
 		}
 	}
-	else
-	{
-		snprintf(text, (size_t)size, "Wi-Fi: system link on this network");
-	}
+}
+
+/* the Connection row's help, by its choice */
+static const char *connection_help(const struct setting *setting)
+{
+	const char *value = setting->values[setting->choice];
+
+	return !strcmp(value, "adhoc") ? "No router: Vitas side by side (experimental)" : !strcmp(value, "online") ?
+		"Internet play by code, Dev tab (experimental)" : "Vitas on one Wi-Fi network play together";
 }
 
 /* the longer line at the bottom: what the selected line does, or what the
@@ -1277,8 +1421,9 @@ static void help_line(char *text, int size, const struct line *line)
 			"Not a known map" : "PC map (needs PC maps On)");
 	else if (!setting)
 		snprintf(text, (size_t)size, "L/R: tabs  O: close");
-	else if (tab == TAB_MULTIPLAYER && !strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
-		setting->action == ACTION_BROWSE || setting->action == ACTION_NONE) && p2p_status(detail, sizeof(detail)))
+	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
+		setting->action == ACTION_BROWSE || (setting->variable && !strcmp(setting->variable, "HALO_NET_LOBBY_PUBLIC"))) &&
+		p2p_status(detail, sizeof(detail)))
 		snprintf(text, (size_t)size, "%.60s", detail);
 	else if (tab == TAB_MULTIPLAYER && !strcmp(running_network, "adhoc") &&
 		(setting->action == ACTION_ADHOC_JOIN || setting->action == ACTION_ADHOC_LEAVE))
@@ -1286,6 +1431,8 @@ static void help_line(char *text, int size, const struct line *line)
 		vita_adhoc_state(detail, sizeof(detail));
 		snprintf(text, (size_t)size, "%.60s", detail);
 	}
+	else if (setting->variable && !strcmp(setting->variable, "HALO_VITA_NETWORK"))
+		snprintf(text, (size_t)size, "%s", connection_help(setting));
 	else
 		snprintf(text, (size_t)size, "%s", setting->help);
 }
@@ -1389,8 +1536,7 @@ static void show_list(void)
 			else
 			{
 				char label[32];
-				/* (the Profile row's last choice, Custom, is read, not chosen) */
-				int last = setting == &settings[0] ? PROFILE_CUSTOM - 1 : setting->count - 1;
+				int last = choice_last(setting);
 
 				/* (a row that applies after a restart: marked *) */
 				snprintf(label, sizeof(label), "%s%s", setting->label, setting->restart ? "*" : "");
@@ -1403,10 +1549,17 @@ static void show_list(void)
 	if (tab == TAB_MAPS && map_count > MAP_LINES && length < (int)sizeof(text))
 		length += snprintf(text + length, sizeof(text) - length, "\n  (maps %d-%d of %d)", map_scroll + 1,
 			map_scroll + MAP_LINES < map_count ? map_scroll + MAP_LINES : map_count, map_count);
+	/* (Multiplayer: this Vita, the network game, internet or ad hoc play) */
 	if (tab == TAB_MULTIPLAYER && length < (int)sizeof(text))
 	{
-		status_line(status, sizeof(status));
+		vita_line(status, sizeof(status));
 		length += snprintf(text + length, sizeof(text) - length, "\n%s", status);
+		game_line(status, sizeof(status));
+		if (length < (int)sizeof(text))
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", status);
+		status_line(status, sizeof(status));
+		if (status[0] && length < (int)sizeof(text))
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", status);
 	}
 	help_line(help, sizeof(help), count ? &lines[*selected] : NULL);
 	if (length < (int)sizeof(text))
@@ -1438,8 +1591,8 @@ static void show_code(void)
 		cursor[column++] = ' ';
 	}
 	letters[column] = cursor[column] = 0;
-	snprintf(text, sizeof(text), "JOIN WITH A CODE\n\n    %s\n    %s\n%s\nUp/down letter  Left/right move  X join  O back",
-		letters, cursor, strcmp(running_network, "online") ? "Network must be Online (restart)" : "");
+	snprintf(text, sizeof(text), "JOIN WITH A CODE\n\n    %s\n    %s\n%s\nUp/down letter  Left/right move  Cross join  O back",
+		letters, cursor, strcmp(running_network, "online") ? "Connection must be Online (restart)" : "");
 	vgxm_menu_set(text, 2);
 }
 
@@ -1451,7 +1604,7 @@ static void show_browse(void)
 
 	length = snprintf(text, sizeof(text), "PUBLIC GAMES");
 	if (strcmp(running_network, "online"))
-		length += snprintf(text + length, sizeof(text) - length, "\nNetwork must be Online (restart)");
+		length += snprintf(text + length, sizeof(text) - length, "\nConnection must be Online (restart)");
 	else if (!browse_count)
 	{
 		p2p_status(detail, sizeof(detail));
@@ -1461,7 +1614,7 @@ static void show_browse(void)
 		length += snprintf(text + length, sizeof(text) - length, "\n%-15.15s %3d %s%s", browse_entries[index].name,
 			browse_entries[index].players, browse_entries[index].code, browse_entries[index].compatible ? "" : " (old)");
 	if (length < (int)sizeof(text))
-		snprintf(text + length, sizeof(text) - length, "\nName, machines, code. X: join. O: back");
+		snprintf(text + length, sizeof(text) - length, "\nName, machines, code. Cross: join. O: back");
 	vgxm_menu_set(text, browse_count ? browse_selected + 1 : 0);
 }
 
@@ -1492,7 +1645,96 @@ static void show_delete(void)
 	}
 	size_text(size_name, sizeof(size_name), map->size);
 	snprintf(text, sizeof(text), "DELETE MAP\n\n%.40s.%s  (%s)\nand its picture and description, if any.\n\n"
-		"It cannot be undone.\nX: delete   O: keep", map->name, map->extension, size_name);
+		"It cannot be undone.\nCross: delete   O: keep", map->name, map->extension, size_name);
+	vgxm_menu_set(text, -1);
+}
+
+/* why Host or Join cannot open System Link now (NULL: it can) */
+static const char *guide_blocker(void)
+{
+	int state = multiplayer_state();
+
+	if (strcmp(chosen_network(), running_network))
+		return "Restart the game first: Connection changed";
+	if (state == SYSTEM_LINK_STATE_PLAYING)
+		return "Leave the level first: Start, then Quit";
+	if (state == SYSTEM_LINK_STATE_IN_GAME)
+		return "In a game: Start, then Quit, to leave it";
+	if (state == SYSTEM_LINK_STATE_HOSTING)
+		return "Already hosting: the game's lobby is open";
+	if (state == SYSTEM_LINK_STATE_JOINING || state == SYSTEM_LINK_STATE_LOBBY)
+		return "Already in a lobby: B there leaves it";
+	if (strcmp(running_network, "adhoc") && state != SYSTEM_LINK_STATE_STARTING &&
+		!halo_multiplayer_status[SYSTEM_LINK_STATUS_ADDRESS])
+		return "No Wi-Fi: connect the Vita to a network";
+	return NULL;
+}
+
+/* the game's answer, as the guide says it */
+static const char *guide_answer_text(int answer)
+{
+	switch (answer)
+	{
+	case SYSTEM_LINK_ANSWER_IN_PLAY:
+		return "Leave the level first: Start, then Quit";
+	case SYSTEM_LINK_ANSWER_IN_LOBBY:
+		return "Already in a lobby: B there leaves it";
+	case SYSTEM_LINK_ANSWER_NO_NETWORK:
+		return strcmp(running_network, "adhoc") ? "No Wi-Fi: connect the Vita to a network" :
+			"Not in the ad hoc group: join it first";
+	default:
+		return "The game could not open it (see its message)";
+	}
+}
+
+/* Host a game, Join a game: the steps, as the game's menus name the
+buttons (the Xbox's), then cross opens the game's System Link screen */
+static void show_guide(void)
+{
+	char text[1536], line[64];
+	int length, step = 1, host = guide_action == ACTION_HOST;
+	int adhoc = !strcmp(running_network, "adhoc");
+	const struct setting *coop = setting_named("HALO_NET_COOP_LEVEL");
+	const char *blocker = guide_blocker();
+
+	vita_line(line, sizeof(line));
+	length = snprintf(text, sizeof(text), "%s\n\n%s", host ? "HOST A GAME" : "JOIN A GAME", line);
+	if (adhoc && vita_adhoc_state(NULL, 0) != 2)
+		length += snprintf(text + length, sizeof(text) - length, "\n%d The system's dialog joins ad hoc room %d", step++,
+			choice_of("HALO_ADHOC_ROOM") + 1);
+	length += snprintf(text + length, sizeof(text) - length,
+		"\n%d The game's System Link screen opens\n%d A to join if asked, A on a profile, A again", step, step + 1);
+	step += 2;
+	if (host)
+	{
+		length += snprintf(text + length, sizeof(text) - length,
+			"\n%d SYSTEM LINK GAMES: Y creates a game\n%d A on a map, A on a game type", step, step + 1);
+		step += 2;
+		/* (the Custom Edition maps are in the map list with PC maps on) */
+		if (!choice_of("HALO_CUSTOM_EDITION"))
+			length += snprintf(text + length, sizeof(text) - length, "\n  (PC maps: turn on PC maps, Modded maps tab)");
+		if (coop->choice)
+			length += snprintf(text + length, sizeof(text) - length, "\n  Co-op: plays %.16s, %s",
+				coop->names[coop->choice], setting_named("HALO_NET_COOP_DIFFICULTY")->names[choice_of(
+				"HALO_NET_COOP_DIFFICULTY")]);
+		length += snprintf(text + length, sizeof(text) - length,
+			"\n%d Wait in the lobby for the others to\n  join; A there starts the game sooner", step);
+	}
+	else
+	{
+		length += snprintf(text + length, sizeof(text) - length,
+			"\n%d SYSTEM LINK GAMES: A on the host's game\n  (the games %s show there)\n%d Wait in the lobby for the"
+			" host to start\n  A map you lack comes from the host", step, adhoc ? "in the room" : "on this network",
+			step + 1);
+	}
+	length += snprintf(text + length, sizeof(text) - length, "\nMenus: A Cross, B Circle, X Square, Y Triangle");
+	if (guide_waiting)
+		length += snprintf(text + length, sizeof(text) - length, "\n\nOpening System Link...\nCircle: back");
+	else if (guide_problem[0] || blocker)
+		length += snprintf(text + length, sizeof(text) - length, "\n\n!%s\nCircle: back",
+			guide_problem[0] ? guide_problem : blocker);
+	else
+		length += snprintf(text + length, sizeof(text) - length, "\n\nCross: open System Link   Circle: back");
 	vgxm_menu_set(text, -1);
 }
 
@@ -1505,6 +1747,8 @@ static void show(void)
 		show_browse();
 	else if (screen == SCREEN_DELETE)
 		show_delete();
+	else if (screen == SCREEN_GUIDE)
+		show_guide();
 	else
 		show_list();
 }
@@ -1584,12 +1828,29 @@ int vita_settings_set(const char *variable, const char *value)
 	return 1;
 }
 
+/* asks the game for its System Link screen (the answer: guide_poll) */
+static void guide_request(void)
+{
+	char line[96];
+
+	guide_problem[0] = 0;
+	halo_system_link_answer = SYSTEM_LINK_ANSWER_NONE;
+	__atomic_store_n(&halo_system_link_request, guide_action == ACTION_HOST ? SYSTEM_LINK_REQUEST_HOST :
+		SYSTEM_LINK_REQUEST_JOIN, __ATOMIC_RELEASE);
+	guide_waiting = 1;
+	guide_sent = now_us();
+	snprintf(line, sizeof(line), "settings: %s a game: asked the game for its System Link screen (%s)",
+		guide_action == ACTION_HOST ? "host" : "join", running_network);
+	vita_host_log(line);
+}
+
 static void close_panel(void)
 {
 	if (screen == SCREEN_BROWSE)
 		p2p_lobby_browse(0);
 	panel_open = 0;
 	screen = SCREEN_LIST;
+	held_after_close = previous_buttons;
 	vgxm_menu_set(NULL, 0);
 }
 
@@ -1807,7 +2068,7 @@ static void act(const struct setting *setting)
 	case ACTION_ADHOC_JOIN:
 		if (strcmp(running_network, "adhoc"))
 		{
-			set_notice("Network must be Ad hoc (restart)");
+			set_notice("Connection must be Ad hoc (restart)");
 			break;
 		}
 		/* (the panel closes: the system's dialog takes the screen) */
@@ -1823,7 +2084,83 @@ static void act(const struct setting *setting)
 	case ACTION_RESET_CONTROLS:
 		reset_controls();
 		break;
+	case ACTION_HOST:
+	case ACTION_JOIN:
+		guide_action = setting->action;
+		guide_problem[0] = 0;
+		screen = SCREEN_GUIDE;
+		break;
 	}
+}
+
+/* (every frame) the game's answer to guide_request: opened, the panel
+closes; not, the guide says why (a message over the game when the panel
+is closed: the ad hoc dialog came first). The game answers within a
+frame or two: one that has not in 3 s (busy loading) is asked no more */
+static void guide_poll(unsigned long long now)
+{
+	const char *problem = NULL;
+
+	if (!guide_waiting)
+		return;
+	if (__atomic_load_n(&halo_system_link_request, __ATOMIC_ACQUIRE) == SYSTEM_LINK_REQUEST_NONE)
+	{
+		int answer = halo_system_link_answer;
+
+		guide_waiting = 0;
+		if (answer == SYSTEM_LINK_ANSWER_OPENED)
+		{
+			if (panel_open)
+				close_panel();
+			return;
+		}
+		problem = guide_answer_text(answer);
+	}
+	else if (now - guide_sent > 3000000ULL)
+	{
+		int request = __atomic_load_n(&halo_system_link_request, __ATOMIC_ACQUIRE);
+
+		/* (unless the game took it meanwhile: then its answer, next frame) */
+		if (request == SYSTEM_LINK_REQUEST_NONE || !__atomic_compare_exchange_n(&halo_system_link_request, &request,
+			SYSTEM_LINK_REQUEST_NONE, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+			return;
+		guide_waiting = 0;
+		problem = "The game did not answer: try again";
+	}
+	else
+		return;
+	snprintf(guide_problem, sizeof(guide_problem), "%s", problem);
+	/* (the guide redrawn at once) */
+	last_shown = 0;
+	if (!panel_open || screen != SCREEN_GUIDE)
+		vita_settings_message(guide_action == ACTION_HOST ? "Host a game" : "Join a game", problem);
+}
+
+/* the guide's buttons: cross opens System Link (with Ad hoc, after the
+system's dialog has joined the room's group), circle goes back */
+static void guide_input(unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+	{
+		/* (an answer still to come closes nothing: it is kept, unshown) */
+		screen = SCREEN_LIST;
+		guide_problem[0] = 0;
+		return;
+	}
+	if (!(pressed & VITA_BUTTON_CROSS) || guide_waiting)
+		return;
+	guide_problem[0] = 0;
+	if (guide_blocker())
+		return;
+	if (!strcmp(running_network, "adhoc") && vita_adhoc_state(NULL, 0) != 2)
+	{
+		/* (the panel closes: the system's dialog takes the screen) */
+		adhoc_pending = guide_action;
+		close_panel();
+		vita_adhoc_connect(choice_of("HALO_ADHOC_DIALOG_MODE"), choice_of("HALO_ADHOC_ROOM") + 1);
+		return;
+	}
+	guide_request();
 }
 
 /* the code screen's buttons */
@@ -1843,7 +2180,7 @@ static void code_input(unsigned long pressed, unsigned long buttons, unsigned lo
 
 		snprintf(code, sizeof(code), "%.4s-%.4s", code_typed, code_typed + 4);
 		if (strcmp(running_network, "online"))
-			set_notice("Network must be Online (restart)");
+			set_notice("Connection must be Online (restart)");
 		else
 		{
 			p2p_join_code(code);
@@ -1952,10 +2289,28 @@ int vita_settings_input(const struct vita_host_pad *pad)
     int message_opened = 0;
 
 	previous_buttons = buttons;
+	held_after_close &= buttons;
+	if (held_after_close && !panel_open)
+		return 1;
 	/* (the system's ad hoc dialog reads the pad itself: the game must not
 	act on the same presses) */
 	if (vita_adhoc_state(NULL, 0) == 1)
 		return 1;
+	/* (Host or Join with Ad hoc: the dialog done, System Link next, or a
+	message saying it did not join) */
+	if (adhoc_pending)
+	{
+		if (vita_adhoc_state(NULL, 0) == 2)
+		{
+			guide_action = adhoc_pending;
+			guide_request();
+		}
+		else
+			vita_settings_message(adhoc_pending == ACTION_HOST ? "Host a game" : "Join a game",
+				"The Vita did not join the ad hoc group. Try again, or another Ad hoc dialog way (Dev tab).");
+		adhoc_pending = 0;
+	}
+	guide_poll(now);
     pthread_mutex_lock(&message_lock);
     if (message_pending)
     {
@@ -2040,6 +2395,14 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			show();
 		return 1;
 	}
+	if (screen == SCREEN_GUIDE)
+	{
+		guide_input(pressed);
+		/* (redrawn twice a second: the game's state, its answer) */
+		if (panel_open && (pressed || now - last_shown > 500000))
+			show();
+		return 1;
+	}
 	if (pressed & VITA_BUTTON_CIRCLE)
 	{
 		close_panel();
@@ -2107,7 +2470,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
 				}
 			}
 			else if (line->type == LINE_SETTING && !(pressed & VITA_BUTTON_SQUARE))
-				change(&settings[line->index], (pressed & VITA_BUTTON_LEFT) ? -1 : 1);
+			{
+				struct setting *setting = &settings[line->index];
+				int step = (pressed & VITA_BUTTON_LEFT) ? -1 : 1;
+
+				if (setting->choice + step <= choice_last(setting))
+					change(setting, step);
+			}
 		}
 	}
 	/* (redrawn on a press, and every half second for the status line: a

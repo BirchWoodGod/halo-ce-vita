@@ -260,32 +260,58 @@ PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
   your own.
 - **System link** over Wi-Fi: Vitas on the same network host and join each
   other's games under Multiplayer, System Link.
-- **Online** (internet play) and **ad hoc** (Vitas nearby, no router) are
-  **experimental** and off unless chosen on the Multiplayer tab. Both end in
-  the game's own System Link screens: the other Vita's game shows in the
-  list, and you host or join as on a local network.
+- **Ad hoc** (Vitas side by side, no router) is **experimental**, and
+  **online** (internet play) is for testers: its lines are in the Dev tab.
+  Both end in the game's own System Link screens: the other Vita's game
+  shows in the list, and you host or join as on a local network.
+
+**Hosting and joining.** Put the Vitas on the same Wi-Fi network, open the
+settings panel (hold Select and Start) and go to **Multiplayer**:
+
+1. **Host a game** (or **Join a game**) shows the steps; Cross opens the
+   game's System Link screen for you.
+2. Press A to join if asked, A on your profile, then A again.
+3. **SYSTEM LINK GAMES** lists the games on the network. The host presses
+   **Y** to create one (A on a map, A on a game type); the others press
+   **A** on the host's game.
+4. Everyone waits in the lobby; A there starts the game sooner. A custom
+   map a joiner lacks comes from the host (the game asks; Cross: yes).
+
+The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
+Triangle, Back Select. The same screens are under Multiplayer, System Link
+Play in the main menu. To host on a PC (Custom Edition) map, turn on PC maps
+in the Modded maps tab first.
 
 The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
 | --- | --- |
-| Network | **Wi-Fi** (the default): system link on this network. **Online**: internet play with other Vitas. **Ad hoc**: Vitas nearby, without a router. Applies after a restart. |
+| Host a game / Join a game | The steps above, then the game's System Link screen (from the menus, outside a lobby). |
+| Connection | **Same Wi-Fi** (the default): system link on this network. **Ad hoc**: Vitas side by side, without a router. **Online** (offered while Show dev settings is on): internet play. Applies after a restart. |
+| Co-op campaign | **Off** (the default): the games you host are multiplayer. A level: the games you host are that campaign level played together (co-op, below). |
+| Co-op difficulty | Easy, Normal, Heroic or Legendary, for the co-op games you host. |
+| Ad hoc room | 1 to 4, with Connection Ad hoc: Vitas in the same room play together. |
+| Join / Leave ad hoc group | With Connection Ad hoc: opens the system's ad hoc dialog (the panel closes), or leaves the group. |
+
+Lines under them say your Vita's name and address and what the game is
+doing (looking for games and how many it found, hosting and how many Vitas
+are in, in a lobby, in a game), and with Online or Ad hoc, your code or the
+ad hoc group.
+
+Internet play's lines, in the **Dev** tab (Controls, Show dev settings):
+
+| Line | What it does |
+| --- | --- |
 | Online games | **Private**: others join with your code. **Public**: your games are also listed in the public lobby for any Vita to join. |
 | Join with a code | Type another player's code with the D-pad (up and down change a letter, left and right move, Cross joins). |
 | Browse public games | The games listed in the public lobby; Cross joins one. |
-| Ad hoc room | 1 to 4: Vitas in the same room play together. |
 | Ad hoc dialog | Which mode the system's ad hoc dialog uses: Connect (try first), Create or Join. |
-| Join / Leave ad hoc group | Opens the system's ad hoc dialog (the panel closes), or leaves the group. |
-| Co-op campaign | **Off** (the default): the games you host are multiplayer. A level: the games you host are that campaign level played together (co-op, below). |
-| Co-op difficulty | Easy, Normal, Heroic or Legendary, for the co-op games you host. |
 
-A line under them says what is happening: your code while you host, the
-lookup of a code, the connection, or the ad hoc group.
-
-**Online.** Set Network to Online and restart. To host, create a game in
-Multiplayer, System Link as usual: the Multiplayer tab then shows your
-code, **ABCD-EFGH** (it stays the same until you quit the game). Tell it to
-the others; with Online games set to Public, your game is also listed. To
+**Online.** Turn on Show dev settings, set Connection to Online and
+restart. To host, create a game (Host a game, or Multiplayer, System Link):
+the Multiplayer tab then shows your code, **ABCD-EFGH** (it stays the same
+until you quit the game). Tell it to the others; with Online games set to
+Public, your game is also listed. To
 join, type the code under Join with a code (or pick the game under Browse
 public games), wait for "connected to the host", then open Multiplayer,
 System Link: the host's game is in the list. A code is a convenience, not a
@@ -346,11 +372,12 @@ upstream halo-ce-universal's network co-op (credited in the main README):
 - Every Vita needs this version (network version 17): a 1.1.0 build tells
   the player to update.
 
-**Ad hoc.** Set Network to Ad hoc on every Vita and restart. Choose the
-same Ad hoc room on each, then Join ad hoc group: the system's dialog joins
-(or makes) the room's group. When the line under the page says another
-machine is in the group, one Vita creates a System Link game and the others
-find it in their lists. Ad hoc carries the game the way online play does,
+**Ad hoc.** Set Connection to Ad hoc on every Vita and restart. Choose the
+same Ad hoc room on each, then Host a game or Join a game: the system's
+dialog joins (or makes) the room's group first, then the System Link screen
+opens (Join ad hoc group does the first part alone). When the line under
+the page says another machine is in the group, one Vita creates a System
+Link game and the others find it in their lists. Ad hoc carries the game the way online play does,
 over the group instead of the internet; nothing goes to the internet.
 
 ## Building
