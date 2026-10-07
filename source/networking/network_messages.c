@@ -634,6 +634,51 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 
 static byte network_game_message_buffer[HALO_PORT_MAXIMUM_NETWORK_MESSAGE_SIZE + 4];
 
+/* port: each type's structure as the game declares it (the typedefs above,
+in the order of enum network_game_message_type). The packet table puts the
+server's begin game, pregame exit and pregame keep alive definitions one
+place off their types (as every build sends them), so a pregame keep alive
+(2 bytes) is encoded and decoded as 4: its encoder read past the host's
+structure, and its decoder wrote past the client's, with the host's bytes */
+static short const network_game_message_structure_sizes[NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES] =
+{
+	sizeof(message_client_broadcast_game_search), sizeof(message_client_ping), sizeof(message_server_game_advertise),
+	sizeof(message_server_pong), sizeof(message_server_machine_accepted), sizeof(message_server_machine_rejected),
+	sizeof(message_server_game_settings_update), sizeof(message_server_pregame_countdown),
+	sizeof(message_server_begin_game), sizeof(message_server_graceful_game_exit_pregame),
+	sizeof(message_server_pregame_keep_alive), sizeof(message_server_postgame_keep_alive),
+	sizeof(message_client_join_game_request), sizeof(message_client_add_player_request_pregame),
+	sizeof(message_client_remove_player_request_pregame), sizeof(message_client_settings_request),
+	sizeof(message_client_player_settings_request), sizeof(message_client_game_start_request),
+	sizeof(message_client_graceful_game_exit_pregame), sizeof(message_client_map_is_precached_pregame),
+	sizeof(message_server_game_update), sizeof(message_server_add_player_ingame),
+	sizeof(message_server_remove_player_ingame), sizeof(message_server_game_over), sizeof(message_client_loaded),
+	sizeof(message_client_game_update), sizeof(message_client_add_player_request_ingame),
+	sizeof(message_client_remove_player_request_ingame), sizeof(message_client_host_crashed_cry_for_help),
+	sizeof(message_client_join_new_host), sizeof(message_server_switch_to_pregame),
+	sizeof(message_server_graceful_game_exit_postgame), sizeof(message_client_remove_player_request_postgame),
+	sizeof(message_client_switch_to_pregame), sizeof(message_client_graceful_game_exit_postgame),
+	sizeof(message_client_map_download), sizeof(message_server_map_download_answer),
+	sizeof(message_server_map_download_data),
+};
+
+/* port: whether a type's packet definition holds more than its structure
+(the pregame keep alive: see above); its decoded size through size */
+static boolean network_game_message_larger_than_structure(
+	long message_type,
+	short *decoded_size)
+{
+	struct data_packet_entry const *packet;
+
+	if (message_type < 0 || message_type >= NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES)
+		return FALSE;
+	packet = &data_0030aa68.group.packets[message_type];
+	if (!packet->definition || packet->definition->size <= network_game_message_structure_sizes[message_type])
+		return FALSE;
+	*decoded_size = packet->definition->size;
+	return TRUE;
+}
+
 /* ---------- public code */
 
 void initialize_network_game_packets(
@@ -714,6 +759,9 @@ void *create_network_game_message(
 	byte encoded_message[HALO_PORT_NETWORK_PACKET_SIZE];
 	union network_game_message_size encoded_message_size;
 	void *message;
+	/* (port) */
+	byte padded[16];
+	short padded_size;
 
 	encoded_message_size.value = sizeof(encoded_message);
 
@@ -874,6 +922,17 @@ void *create_network_game_message(
 		break;
 	}
 
+	/* port: the structure in a buffer as large as its definition, the rest
+	zero (the encoder reads the whole definition) */
+	if (network_game_message_larger_than_structure(message_type, &padded_size) &&
+		padded_size <= (short)sizeof(padded) &&
+		message_struct_size == network_game_message_structure_sizes[message_type])
+	{
+		csmemset(padded, 0, sizeof(padded));
+		csmemcpy(padded, message_struct, message_struct_size);
+		message_struct = padded;
+	}
+
 	if (encode_network_game_message(message_struct, encoded_message, &encoded_message_size.encoded, message_type, 1))
 	{
 		/* a message header holds lengths up to HALO_PORT_MAXIMUM_NETWORK_MESSAGE_SIZE-1,
@@ -913,7 +972,35 @@ boolean decode_network_game_message(
 #line 313 "c:\\halo\\SOURCE\\networking\\network_messages.c"
 	match_assert(__FILE__, __LINE__, message_struct && encoded_message && encoded_message_size && (*encoded_message_size>0) && packet_type && (*packet_type>=0) && packet_version && (*packet_version>0));
 
-	result = data_packet_group_decode_packet(&data_0030aa68.group, message_struct, encoded_message, encoded_message_size, packet_type, packet_version, expected_packet_class);
+	/* port: a type whose definition holds more than its structure is decoded
+	into a buffer, and the structure takes what it holds (the packet's type
+	is its last byte) */
+	{
+		short decoded_size;
+
+		if (*encoded_message_size > 0 &&
+			network_game_message_larger_than_structure(
+				((char const *)encoded_message)[*encoded_message_size - 1], &decoded_size))
+		{
+			byte decoded[16];
+
+			if (decoded_size > (short)sizeof(decoded))
+			{
+				result = FALSE;
+			}
+			else
+			{
+				result = data_packet_group_decode_packet(&data_0030aa68.group, decoded, encoded_message, encoded_message_size,
+					packet_type, packet_version, expected_packet_class);
+				if (result)
+					csmemcpy(message_struct, decoded, network_game_message_structure_sizes[*packet_type]);
+			}
+		}
+		else
+		{
+			result = data_packet_group_decode_packet(&data_0030aa68.group, message_struct, encoded_message, encoded_message_size, packet_type, packet_version, expected_packet_class);
+		}
+	}
 
 	if (!result)
 	{

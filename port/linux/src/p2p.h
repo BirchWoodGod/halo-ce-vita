@@ -59,6 +59,13 @@ int p2p_send_datagram(unsigned short source_port, unsigned long address, unsigne
 returns their count */
 int p2p_broadcast_datagram(unsigned short source_port, unsigned short port, const void *data, int size);
 
+/* whether a source the game received from, or accepted from, before
+p2p_incoming rewrote it, is a peer's virtual address (or one that was a
+peer's): the game's own socket was sent to, or connected to, directly from
+it, as only a spoofed source is (a peer's traffic arrives from its
+stand-ins); the game drops it */
+int p2p_spoofed_source(unsigned long address);
+
 /* the game's socket has this local port: bound, given one, or listening
 (stream and listening: it is hosting). Peers reach only these ports (a
 stream's only while it listens), and datagram ports it sent them from */
@@ -133,6 +140,8 @@ struct p2p_lobby_entry
 	int compatible;
 	/* this machine's own game */
 	int own;
+	/* the identifier the host is listed under (hexadecimal) */
+	char host[2 * 6 + 1];
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any
@@ -154,6 +163,13 @@ enum
 	P2P_ORIGIN_ADHOC,
 };
 int p2p_address_origin(unsigned long address);
+
+/* joins a public lobby entry's game by its code, whose record must be the
+host's the entry is listed under (anyone can publish a record for a code
+that the lobby shows: the record of another host is not taken, and the
+lookup goes on until the entry's host's own comes, or it times out);
+nonzero if the entry holds a code */
+int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry);
 /* while this machine hosts with internet play on: copies its code (with
 the dash) and returns nonzero */
 int p2p_hosting_code(char *code, int size);

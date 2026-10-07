@@ -96,7 +96,7 @@ void game_engine_read_network_state(byte const *buffer, long size);
 /* physics.c's (world units a tick, each tick) */
 extern real global_gravity;
 /* network_server_manager.c's, cseries_windows.c's, console.c's, p2p.c's */
-void network_game_server_kick_machine(long machine_index);
+void network_game_server_kick_machine(long machine_index, boolean kept_out);
 unsigned long network_game_server_machine_address(long machine_index);
 char const *network_game_server_machine_hardware_id(long machine_index);
 void p2p_hardware_id_sanitize(char *destination, int size, const char *source);
@@ -576,7 +576,11 @@ static long distributed_received_times[MAXIMUM_SENDERS][NUMBER_OF_DISTRIBUTED_ME
 /* the host: each client machine's clock, measured (CLIENT_CLOCK_WINDOW_MILLISECONDS):
 its latest tick, and its tick and the host's time as the window began
 (NONE: none begun); how many windows in a row it went fast, and whether
-the last did */
+the last did; and whether, since they began, a message that came over its
+stream was that far ahead too (a datagram's source address is all that
+says which machine sent it, and anyone on its network can send one as from
+another's: a machine is banned only on its stream's word,
+distributed_note_client_clock; OpenCE's) */
 /* the host: each client machine's Discord user, as it told it, the text
 kept only of what is allowed (p2p_discord_sanitize) */
 static struct distributed_client_identity distributed_client_identities[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
@@ -590,7 +594,13 @@ static struct distributed_client_clock
 	unsigned long window_time;
 	short fast_windows;
 	boolean fast;
+	boolean ahead_on_stream;
+	/* (its datagrams' word logged, unverified, while they go on saying so) */
+	boolean logged_unverified;
 } distributed_client_clocks[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+/* the host: whether the message being handled came over its machine's
+stream (network_distributed_handle_stream_message) */
+static boolean distributed_handling_stream_message;
 /* a client: the host's latest tick it has had a message of */
 static long distributed_host_time = NONE;
 /* the host: each client's round trip, in ticks, and its jitter */
@@ -2153,6 +2163,7 @@ static void distributed_apply_predictions(
 			from a co-op client still loading the host's BSP, whose player
 			falls there with no floor under it) */
 			if (unit_index != NONE && unit_index == state->unit_index &&
+				unit_get(unit_index)->unit.player_index != NONE &&
 				network_coop_player_has_structure_bsp(unit_get(unit_index)->unit.player_index))
 			{
 				distributed_take_prediction(player_index, unit_index, &bound);
@@ -2236,7 +2247,9 @@ static void distributed_handle_unit_state(
 	unit_index = state->unit_index;
 	/* the seat it rides: a client's own player's, once it has ridden
 	otherwise for longer than its prediction takes to reach the host and
-	come back */
+	come back (a player within the tracked ones, as players.c's datums are:
+	OpenCE's) */
+	if (state->player_index < MAXIMUM_TRACKED_PLAYERS)
 	{
 		struct unit_datum *unit = unit_get(unit_index);
 		long vehicle_index = unit->object.parent_object_index != NONE && unit->unit.parent_seat_index != NONE ?
@@ -2869,8 +2882,9 @@ static void distributed_handle_actions(
 		action.control_flags = relayed.control_flags[0];
 		action.desired_facing.yaw = distributed_angle_unpack(relayed.yaw, FALSE);
 		action.desired_facing.pitch = distributed_angle_unpack(relayed.pitch, TRUE);
-		action.throttle.i = (real)relayed.throttle_i / 127.0f;
-		action.throttle.j = (real)relayed.throttle_j / 127.0f;
+		/* (-128 is no throttle a stick gives: OpenCE's) */
+		action.throttle.i = PIN((real)relayed.throttle_i / 127.0f, -1.0f, 1.0f);
+		action.throttle.j = PIN((real)relayed.throttle_j / 127.0f, -1.0f, 1.0f);
 		action.primary_trigger = (real)relayed.primary_trigger / 255.0f;
 		action.desired_weapon_index = relayed.desired_weapon_index;
 		action.desired_grenade_index = relayed.desired_grenade_index;
@@ -3612,9 +3626,13 @@ static void distributed_write_player_record(
 		error(_error_log, "could not open %s to add a player to it", file_name);
 		return;
 	}
-	fprintf(file, "%s\tip=%s\thwid=%s\tdiscord_username=%s\tdiscord_id=%s\tplayers=%s\treason=%s\n", when,
-		kept_address, hardware_id[0] ? hardware_id : "none", discord_name[0] ? discord_name : "none",
-		discord_id[0] ? discord_id : "none", kept_names, kept_reason);
+	/* (the Discord user as the machine told it, which it may say is anyone's:
+	marked so; OpenCE's) */
+	fprintf(file, "%s\tip=%s\thwid=%s\tdiscord_username=%s%s\tdiscord_id=%s%s\tplayers=%s\treason=%s\n", when,
+		kept_address, hardware_id[0] ? hardware_id : "none",
+		discord_name[0] ? discord_name : "none", discord_name[0] ? " (self-reported)" : "",
+		discord_id[0] ? discord_id : "none", discord_id[0] ? " (self-reported)" : "",
+		kept_names, kept_reason);
 	fclose(file);
 }
 
@@ -3755,6 +3773,8 @@ static void distributed_note_client_clock(
 	if (machine_index < 0 || machine_index >= HALO_PORT_MAXIMUM_NETWORK_MACHINES)
 		return;
 	clock = &distributed_client_clocks[machine_index];
+	if (distributed_handling_stream_message && tick - game_time_get() > CLIENT_CLOCK_AHEAD_TICKS)
+		clock->ahead_on_stream = TRUE;
 	if (clock->window_tick == NONE)
 	{
 		clock->latest_tick = tick;
@@ -3776,13 +3796,15 @@ static void distributed_note_client_clock(
 		if (!clock->fast)
 		{
 			clock->fast_windows = 0;
+			clock->ahead_on_stream = FALSE;
+			clock->logged_unverified = FALSE;
 		}
 		else if (++clock->fast_windows == 1)
 		{
 			error(_error_log, "machine #%ld's game runs %.2f times as fast as this host's (%ld ticks ahead): "
 				"its players' predictions refused", machine_index, rate, ahead);
 		}
-		else if (clock->fast_windows >= CLIENT_CLOCK_FAST_WINDOWS)
+		else if (clock->fast_windows >= CLIENT_CLOCK_FAST_WINDOWS && clock->ahead_on_stream)
 		{
 			error(_error_log, "machine #%ld's game ran %.2f times as fast as this host's for %d seconds "
 				"(%ld ticks ahead): dropped", machine_index, rate,
@@ -3792,7 +3814,7 @@ static void distributed_note_client_clock(
 				char discord_id[DISCORD_ID_SIZE];
 				char discord_name[DISCORD_NAME_SIZE];
 				char discord[DISCORD_ID_SIZE + DISCORD_NAME_SIZE + 16] = "";
-				char reason[64];
+				char reason[96];
 				char text[MAXIMUM_NOTICE_LENGTH];
 
 				distributed_machine_player_names(machine_index, names, sizeof(names));
@@ -3808,8 +3830,35 @@ static void distributed_note_client_clock(
 				distributed_send_notice(text);
 				distributed_log_cheater(machine_index, names, reason);
 			}
-			network_game_server_kick_machine(machine_index);
+			network_game_server_kick_machine(machine_index, TRUE);
 			clock->fast_windows = 0;
+			clock->ahead_on_stream = FALSE;
+		}
+		/* dropped, banned and kept out only when its stream said so too; on
+		its datagrams' word alone (which another machine could have sent as
+		from its address, to have it dropped and logged as a cheater) it
+		stays, its players' predictions refused while they say so, and is
+		logged once, unverified (dropped as above if its stream says so
+		later: OpenCE's) */
+		else if (clock->fast_windows >= CLIENT_CLOCK_FAST_WINDOWS)
+		{
+			clock->fast_windows = CLIENT_CLOCK_FAST_WINDOWS;
+			if (!clock->logged_unverified)
+			{
+				char names[64];
+				char reason[96];
+				char address[32];
+
+				error(_error_log, "machine #%ld's datagrams said its game ran %.2f times as fast as this host's "
+					"for %d seconds (%ld ticks ahead), its stream not: not dropped (unverified)", machine_index, rate,
+					CLIENT_CLOCK_FAST_WINDOWS * CLIENT_CLOCK_WINDOW_MILLISECONDS / 1000, ahead);
+				distributed_machine_player_names(machine_index, names, sizeof(names));
+				snprintf(reason, sizeof(reason), "unverified speed hack (its datagrams only, not dropped: "
+					"game ran %.2f times as fast)", rate);
+				distributed_machine_address_text(machine_index, address, sizeof(address));
+				distributed_write_player_record(CHEATERS_FILE, address, machine_index, names, reason);
+				clock->logged_unverified = TRUE;
+			}
 		}
 	}
 	clock->window_tick = clock->latest_tick;
@@ -4133,4 +4182,17 @@ void network_distributed_handle_message(
 		break;
 	}
 	}
+}
+
+/* (the host: network_server_message_handler.c) a client machine's message
+of the distributed kind that came over its stream, which no other machine
+can send as it: as network_distributed_handle_message (OpenCE's) */
+void network_distributed_handle_stream_message(
+	long machine_index,
+	word const *message,
+	word size)
+{
+	distributed_handling_stream_message = TRUE;
+	network_distributed_handle_message(machine_index, message, size);
+	distributed_handling_stream_message = FALSE;
 }
