@@ -154,6 +154,9 @@ static struct
 	boolean by_code;
 	boolean code_joined;
 	char code[P2P_CODE_SIZE];
+	/* the code is the public lobby's game's (joined as a player choosing it
+	there does: p2p_join_lobby_code) */
+	boolean code_from_lobby;
 	real browse_seconds;
 	/* debug.network_test_rejoin: a joining machine leaves the game that many
 	seconds in, and joins again (once) */
@@ -1207,6 +1210,7 @@ void network_test_update(
 						platform_log("network test: the public lobby lists \"%s\" (%d/%d) with code %s", entry.name,
 							entry.players, entry.maximum, entry.code);
 						snprintf(network_test.code, sizeof(network_test.code), "%s", entry.code);
+						network_test.code_from_lobby = TRUE;
 						p2p_lobby_browse(FALSE);
 						break;
 					}
@@ -1216,7 +1220,8 @@ void network_test_update(
 			{
 				network_test.code_joined = TRUE;
 				platform_log("network test: joining code %s: %s", network_test.code,
-					p2p_join_code(network_test.code) ? "looking it up" : "not a code");
+					(network_test.code_from_lobby ? p2p_join_lobby_code(network_test.code) :
+						p2p_join_code(network_test.code)) ? "looking it up" : "not a code");
 			}
 		}
 		else if (!network_test.joined && network_game_client_join_first_available_game())

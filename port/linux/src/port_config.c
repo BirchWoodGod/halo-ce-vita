@@ -222,6 +222,11 @@ static const struct config_setting config_settings[] =
 	{ "network.lobby_name", _config_string, "\"\"", "HALO_NET_LOBBY_NAME", _environment_value, _platform_all,
 		"The name the public lobby shows for this machine's games; empty for\n"
 		"\"Halo\"." },
+	{ "network.map_downloads", _config_string, "\"ask\"", "HALO_MAP_SHARE_FROM", _environment_value, _platform_all,
+		"A host's custom map, in a game joined without it: \"ask\" asks whether\n"
+		"to download it (in a game joined from the public lobby, with a warning:\n"
+		"its host is a stranger), \"private\" asks except in public lobby games,\n"
+		"\"never\" never offers one." },
 	{ "network.player_name", _config_string, "\"\"", "HALO_NET_PLAYER_NAME", _environment_value, _platform_all,
 		"The name a player goes by in network games when their profile has none\n"
 		"(the default profiles); the Vita's user name on the Vita; empty for\n"

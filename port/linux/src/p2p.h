@@ -136,8 +136,24 @@ struct p2p_lobby_entry
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any
-case. Returns nonzero if it was a code (internet play must be on) */
+case. Returns nonzero if it was a code (internet play must be on). The
+lobby's: a game listed in the public lobby, chosen there (its host is then
+a stranger's, p2p_address_origin) */
 int p2p_join_code(const char *code);
+int p2p_join_lobby_code(const char *code);
+
+/* how the machine the game reaches at this address (network byte order) is
+reached: not through p2p (system link on the LAN), a peer joined from the
+public lobby, one joined by an invite or a code (or hosting, a joiner), or
+a machine of the ad hoc group */
+enum
+{
+	P2P_ORIGIN_NONE,
+	P2P_ORIGIN_PRIVATE,
+	P2P_ORIGIN_PUBLIC,
+	P2P_ORIGIN_ADHOC,
+};
+int p2p_address_origin(unsigned long address);
 /* while this machine hosts with internet play on: copies its code (with
 the dash) and returns nonzero */
 int p2p_hosting_code(char *code, int size);

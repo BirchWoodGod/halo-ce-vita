@@ -12,15 +12,19 @@ and checks are map_share_protocol.c's.
 
 /* ---------- structures */
 
+struct network_game;
 struct network_game_client;
 struct network_game_server;
 struct network_game_server_client_machine;
 
 /* ---------- prototypes/MAP_SHARE.C */
 
-/* (a joiner, network_client_manager.c) The host's game settings name the
-level `level_name`, a custom map this machine lacks (`replacing`: has
-another copy of), of which the host sent the fingerprint `identity`. TRUE
+/* (a joiner, network_client_manager.c) The host's game settings `game`
+name the level `level_name`, a custom map this machine lacks (`replacing`:
+has another copy of), of which the host sent the fingerprint `identity`.
+The question names the host (the game's name), and warns in a game joined
+from the public lobby; the setting Map downloads (HALO_MAP_SHARE_FROM) may
+refuse it (`why`). TRUE
 when the joiner stays to ask the host for it (the map is then precached
 once downloaded); FALSE when it cannot be offered (map sharing off, a host
 that sent no fingerprint, a badly named map, not in the lobby): the caller
@@ -28,6 +32,7 @@ refuses as before, adding `why` (`why_size` characters; empty: nothing to
 add). */
 boolean map_share_client_offer(
 	struct network_game_client *client,
+	struct network_game const *game,
 	char const *level_name,
 	unsigned long identity,
 	boolean replacing,

@@ -250,7 +250,13 @@ Square deletes a map, with its `.bmp` picture and `.txt` description, after
 asking (not the map being played). **PC maps** (Off by default,
 experimental) puts the Custom Edition maps in the map list; the page warns
 when the Custom Edition resource maps they need (`bitmaps.map`,
-`sounds.map`, `loc.map`) are not in the maps folder.
+`sounds.map`, `loc.map`) are not in the maps folder. **Map downloads**
+decides what happens when you join a game on a custom map you lack:
+**Ask** (the default) asks whether to download it from the host, and in a
+game joined from the public lobby warns that the host is a stranger (only
+accept maps from players you trust); **Not public games** asks only in
+games joined with a code, on the same Wi-Fi or ad hoc; **Never** offers no
+downloads (`HALO_MAP_SHARE_FROM`: `ask`, `private`, `never`).
 
 **Dev** (once Show dev settings is on): debug switches for testers. Each
 is an `env.txt` variable; a switch is saved in `settings.txt` only while it
@@ -303,7 +309,8 @@ settings panel (hold Select and Start) and go to **Multiplayer**:
    **Y** to create one (A on a map, A on a game type); the others press
    **A** on the host's game.
 4. Everyone waits in the lobby; A there starts the game sooner. A custom
-   map a joiner lacks comes from the host (the game asks; Cross: yes),
+   map a joiner lacks comes from the host (the game asks, naming the host,
+   and warns in a public game; Cross: yes; Modded maps, Map downloads),
    before the game starts: the host's game waits for the download, and its
    lobby shows the progress by the joiner's name. For a PC map, a joiner
    with PC maps off is asked to turn it on; a PC map also needs Custom

@@ -157,6 +157,11 @@ whether to download it from the host in the lobby (and, for a Custom
 Edition map, to turn PC maps on). A joiner still needs its own three
 resource maps. The host waits for the download before the game starts.
 Big Custom Edition maps can be slow on the Vita or too large for its memory.
+The question names the host; in a game joined from the public lobby it also
+warns that the host is a stranger: only accept maps from players you trust.
+**Map downloads** on the Modded maps page sets this: **Ask** (the default),
+**Not public games** (no downloads in games from the public lobby) or
+**Never**.
 
 ### Saving
 

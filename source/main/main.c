@@ -1513,6 +1513,19 @@ static void main_new_map(
 	game_load_started = halo_load_profile_now();
 	loaded = game_load(options);
 	halo_load_profile_add(_halo_load_game_load, game_load_started, 0);
+	/* port: a custom or downloaded map that failed to load for any reason
+	(not only the Custom Edition loader's) goes back to the menu with a
+	message rather than halting the game (halt_and_catch_fire would crash on
+	a handheld): a crafted or damaged map a host sent a joiner, or one copied
+	in by hand, must not be able to stop the game. A working install's stock
+	maps do not fail here, and a precise reason the loader recorded is kept
+	(custom_edition_cache.c, cache_files.c). */
+	{
+		extern void halo_map_load_refused(char const *map_name, char const *reason);
+
+		if (!loaded)
+			halo_map_load_refused(options->map_name, "this map file is damaged or not supported");
+	}
 	if (loaded)
 #else
 	if (game_load(options))
@@ -3896,7 +3909,7 @@ tick, for testing the save paths without a controller, e.g.
 "300:game_save_totally_unsafe;600:game_revert" ("L300:..." waits for a
 level: not the main menu's scenario). Besides the console's
 own, @skip asks for a cinematic skip (as the controller does), @quit
-does the pause menu's Save and Quit, and "@camera x y z yaw pitch" puts
+does the pause menu's Save and Quit, @exit ends the game, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
 positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
@@ -3979,6 +3992,13 @@ static void main_test_commands_update(
 		platform_log("test command at tick %ld: %s", (long)game_time_get(), commands[index].command);
 		if (!strcmp(commands[index].command, "@skip"))
 			main_skip_cinematic();
+		/* (@exit: the game ends there, as debug.exit_after ends it - the
+		map fuzzing's runs, triage/mssafe) */
+		else if (!strcmp(commands[index].command, "@exit"))
+		{
+			platform_log("test command: exiting");
+			exit(EXIT_SUCCESS);
+		}
 		else if (!strcmp(commands[index].command, "@quit"))
 		{
 			game_state_save_to_persistent_storage();

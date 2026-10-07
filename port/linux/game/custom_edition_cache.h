@@ -99,6 +99,13 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 cannot be, when custom_edition_cache.c's own does not say it better. */
 void custom_edition_cache_load_failure_note(
 	char const *reason);
+
+/* port: record that the loader refused a map as damaged or unsupported, so
+main_new_map shows the player a message and returns to the menu rather than
+stopping the game (cache_files.c's Xbox-cache refusals). */
+void halo_map_load_refused(
+	char const *map_name,
+	char const *reason);
 /* When the last load of the Custom Edition map `map_name` names failed,
 tells the player why (platform_show_message) and returns TRUE: the caller
 then leaves for the menu rather than stopping the game (also declared for

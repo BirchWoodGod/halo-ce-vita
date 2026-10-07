@@ -1176,6 +1176,24 @@ boolean scenario_load(
 	if (global_scenario_index != NONE)
 	{
 		global_scenario = scenario_definition_get(global_scenario_index);
+#ifdef HALO_LINUX
+		/* port: the scenario's compiled scripts (its syntax node tree) are
+		untrusted map data that the script post-process walks by node index;
+		a crafted or damaged tree is refused here (the game returns to the
+		menu, main_new_map) rather than dereferenced out of bounds while
+		starting the map (hs.c, halo_hs_scenario_syntax_valid) */
+		{
+			extern boolean halo_hs_scenario_syntax_valid(struct scenario const *scenario);
+
+			if (!halo_hs_scenario_syntax_valid(global_scenario))
+			{
+				error(_error_silent, "scenario: '%s' has damaged or unsupported scripts; refusing it", name);
+				scenario_unload();
+				global_scenario_index = NONE;
+				return FALSE;
+			}
+		}
+#endif
 		if (global_scenario->structure_bsp_references.count > 0)
 		{
 			global_game_globals = game_globals_definition_get(

@@ -97,6 +97,8 @@ enum
 	ask in any number of made-up names: each would have the host send to the
 	addresses it gives) */
 	MAXIMUM_OPENING_PEERS = 8,
+	/* the hosts joined from the public lobby that are remembered as such */
+	P2P_PUBLIC_HOSTS = 8,
 	/* stand-ins closed lately, whose traffic the game may not have read yet
 	(p2p_incoming) */
 	MAXIMUM_CLOSED_PORTS = 128,
@@ -350,6 +352,13 @@ static struct
 	int looking_up;
 	char lookup_code[P2P_CODE_LENGTH + 1];
 	unsigned long lookup_time;
+	/* the code looked up is a public lobby's game's (p2p_join_lobby_code) */
+	int lookup_public;
+	/* the hosts last joined from the public lobby (a code or an invite
+	joined since takes its host off): their games' map downloads are asked
+	about with a warning (p2p_address_origin) */
+	unsigned char public_hosts[P2P_PUBLIC_HOSTS][P2P_IDENTIFIER_SIZE];
+	int public_host_next;
 	/* browsing the public lobby (asked from any thread; the p2p thread
 	tells the brokers) */
 	int browse_wanted;
@@ -2361,8 +2370,24 @@ static int parse_code(const char *text, char *code, int dash_required)
 	return *text == 0;
 }
 
-/* under p2p_lock */
-static int join_code(const char *code)
+/* under p2p_lock: the host `host` was joined from the public lobby
+(public) or by an invite or a code */
+static void join_origin_set(const unsigned char *host, int public)
+{
+	int index;
+
+	for (index = 0; index < P2P_PUBLIC_HOSTS; index++)
+		if (!memcmp(p2p.public_hosts[index], host, P2P_IDENTIFIER_SIZE))
+			memset(p2p.public_hosts[index], 0, P2P_IDENTIFIER_SIZE);
+	if (public)
+	{
+		memcpy(p2p.public_hosts[p2p.public_host_next], host, P2P_IDENTIFIER_SIZE);
+		p2p.public_host_next = (p2p.public_host_next + 1) % P2P_PUBLIC_HOSTS;
+	}
+}
+
+/* under p2p_lock; public: a public lobby's game */
+static int join_code(const char *code, int public)
 {
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
@@ -2370,13 +2395,14 @@ static int join_code(const char *code)
 		return 1;
 	}
 	memcpy(p2p.lookup_code, code, sizeof(p2p.lookup_code));
+	p2p.lookup_public = public;
 	p2p.lookup_requested = 1;
 	return 1;
 }
 
 /* under p2p_lock: parse_invite's result (a code, with its dash, is looked
-up) */
-static int join_invite(const char *text)
+up); public: the invite a public lobby's code led to */
+static int join_invite(const char *text, int public)
 {
 	unsigned char hash[P2P_KEY_HASH_SIZE], host[P2P_IDENTIFIER_SIZE], token[P2P_TOKEN_SIZE];
 	char code[P2P_CODE_LENGTH + 1];
@@ -2384,7 +2410,7 @@ static int join_invite(const char *text)
 	int parsed = parse_invite(text, hash, token);
 
 	if (!parsed && parse_code(text, code, 1))
-		return join_code(code);
+		return join_code(code, 0);
 	if (parsed < 0)
 		set_status("that invite is from an older version of the game, which this one cannot join");
 	if (parsed <= 0)
@@ -2392,6 +2418,7 @@ static int join_invite(const char *text)
 	p2p_identifier_from_hash(hash, host);
 	if (!memcmp(host, identifier, P2P_IDENTIFIER_SIZE))
 		return 1;
+	join_origin_set(host, public);
 	peer = find_peer(host);
 	if (peer && peer->connected)
 	{
@@ -2419,7 +2446,7 @@ int p2p_join_invite(const char *text)
 
 	p2p_identifier();
 	pthread_mutex_lock(&p2p_lock);
-	result = join_invite(text);
+	result = join_invite(text, 0);
 	pthread_mutex_unlock(&p2p_lock);
 	if (result > 0 && !p2p.running)
 		platform_log("Internet play is off (network.online in config.toml): the invite is ignored");
@@ -2429,7 +2456,7 @@ int p2p_join_invite(const char *text)
 void p2p_invite_received(const char *text)
 {
 	/* (an older version's is logged as such) */
-	if (!join_invite(text))
+	if (!join_invite(text, 0))
 		set_status("that is not an invite");
 }
 
@@ -2440,10 +2467,10 @@ void p2p_code_found(const char *text)
 	p2p.looking_up = 0;
 	p2p_signal_stop_lookup();
 	set_status("code %.4s-%.4s found; reaching its host", p2p.lookup_code, p2p.lookup_code + 4);
-	join_invite(text);
+	join_invite(text, p2p.lookup_public);
 }
 
-int p2p_join_code(const char *text)
+static int join_code_from(const char *text, int public)
 {
 	char code[P2P_CODE_LENGTH + 1];
 	int result;
@@ -2456,9 +2483,39 @@ int p2p_join_code(const char *text)
 		return 1;
 	}
 	pthread_mutex_lock(&p2p_lock);
-	result = join_code(code);
+	result = join_code(code, public);
 	pthread_mutex_unlock(&p2p_lock);
 	return result;
+}
+
+int p2p_join_code(const char *text)
+{
+	return join_code_from(text, 0);
+}
+
+int p2p_join_lobby_code(const char *text)
+{
+	return join_code_from(text, 1);
+}
+
+int p2p_address_origin(unsigned long address)
+{
+	struct peer *peer;
+	int origin = P2P_ORIGIN_NONE, index;
+
+	if (!p2p.running)
+		return P2P_ORIGIN_NONE;
+	pthread_mutex_lock(&p2p_lock);
+	peer = find_peer_by_address(address);
+	if (peer)
+	{
+		origin = p2p.adhoc ? P2P_ORIGIN_ADHOC : P2P_ORIGIN_PRIVATE;
+		for (index = 0; !p2p.adhoc && index < P2P_PUBLIC_HOSTS; index++)
+			if (!memcmp(p2p.public_hosts[index], peer->identifier, P2P_IDENTIFIER_SIZE))
+				origin = P2P_ORIGIN_PUBLIC;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return origin;
 }
 
 static void update_joining(void)

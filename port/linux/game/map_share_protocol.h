@@ -294,6 +294,43 @@ uint32_t map_share_identity(
 uint32_t map_share_receiver_identity(
 	struct map_share_receiver const *receiver);
 
+/* ---------- a joiner's answer to an offer */
+
+/* the setting "Map downloads" (Multiplayer > Modded maps on the Vita,
+network.map_downloads elsewhere: HALO_MAP_SHARE_FROM) */
+#define MAP_SHARE_DOWNLOADS_ASK "ask"
+#define MAP_SHARE_DOWNLOADS_NOT_PUBLIC "private"
+#define MAP_SHARE_DOWNLOADS_NEVER "never"
+
+enum map_share_downloads
+{
+	/* the player is asked */
+	_map_share_downloads_ask = 0,
+	/* asked, warned that the host is a public lobby's game's (a stranger's) */
+	_map_share_downloads_ask_warning,
+	/* not asked: downloads from public games are off */
+	_map_share_downloads_refused_public,
+	/* not asked: downloads are off */
+	_map_share_downloads_refused,
+};
+
+/* What a joiner does with its host's offer of a map: `setting` the
+setting's value (NULL or anything unknown: ask), `public_game` whether the
+game was joined from the public lobby. */
+enum map_share_downloads map_share_downloads_policy(
+	char const *setting,
+	int public_game);
+
+/* The host's name as the question shows it (`text`, `text_size` bytes):
+its game's name, `length` UTF-16 units of `name` (up to the first zero),
+printable ASCII kept, anything else made '?', spaces at its ends dropped;
+"the host" when nothing is left. */
+void map_share_host_name_text(
+	char *text,
+	long text_size,
+	uint16_t const *name,
+	long length);
+
 /* p2p_crypto.c's running SHA-256 */
 void halo_sha256_begin(
 	struct halo_sha256_stream *context);
