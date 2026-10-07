@@ -1350,6 +1350,9 @@ static boolean network_game_client_handle_message_server_add_player_ingame(
 				&packet_version,
 				_network_game_packet_class_ingame))
 			{
+				/* port: its name kept to text that draws, as in the host's
+				game settings (network_game_client_game_settings_updated) */
+				player_name_clean(player.name, NUMBEROF(player.name));
 				/* (the distributed netcode: a player this machine cannot add
 				does not end its game) */
 				if (!network_game_client_add_player_to_game(client, &player))

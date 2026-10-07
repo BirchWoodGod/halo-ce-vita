@@ -1433,6 +1433,19 @@ boolean network_game_client_game_settings_updated(
 		{
 			return FALSE;
 		}
+		/* port: the game's, the machines' and the players' names come from
+		the host as it sends them, and need not end nor be text that draws:
+		kept to what does (as the host keeps the names joiners send it:
+		player_name_clean; a name already clean is left as it is) */
+		{
+			long index;
+
+			player_name_clean(message_packet->name, NUMBEROF(message_packet->name));
+			for (index = 0; index < (long)NUMBEROF(message_packet->machines); index++)
+				player_name_clean(message_packet->machines[index].name, NUMBEROF(message_packet->machines[index].name));
+			for (index = 0; index < (long)NUMBEROF(message_packet->players); index++)
+				player_name_clean(message_packet->players[index].name, NUMBEROF(message_packet->players[index].name));
+		}
 #endif
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
 		{
