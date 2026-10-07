@@ -77,6 +77,10 @@ enum
 	MAXIMUM_PACKET_SIZE = TUNNEL_HEADER_SIZE + MAXIMUM_INNER_SIZE + P2P_TAG_SIZE,
 	/* the packets received out of order that are still taken */
 	REPLAY_WINDOW = 64,
+	/* a reached peer's packets from another address than its endpoint and
+	those it offered (its NAT gave it a new port, or someone else sends in
+	its name) whose seal is checked, a second: the rest are dropped unread */
+	STRAY_PACKETS_PER_SECOND = 32,
 
 	/* a host needs a UDP stand-in for two or three ports of every other
 	machine, and a stream for each one's connection; one peer can have no
@@ -197,6 +201,10 @@ struct peer
 	unsigned long endpoint_heard_time;
 	unsigned long sent_time;
 	unsigned long round_trip;
+	/* packets from elsewhere than its endpoint and the addresses it offered
+	that may still be checked (STRAY_PACKETS_PER_SECOND), as of when */
+	int stray_budget;
+	unsigned long stray_time;
 };
 
 /* a UDP stand-in for one port of a peer */
@@ -359,6 +367,9 @@ static struct
 	about with a warning (p2p_address_origin) */
 	unsigned char public_hosts[P2P_PUBLIC_HOSTS][P2P_IDENTIFIER_SIZE];
 	int public_host_next;
+	/* (a public lobby entry's code: the host it is listed under) */
+	int lookup_has_host;
+	unsigned char lookup_host[P2P_IDENTIFIER_SIZE];
 	/* browsing the public lobby (asked from any thread; the p2p thread
 	tells the brokers) */
 	int browse_wanted;
@@ -1069,6 +1080,22 @@ static void packet_received(struct peer *peer, unsigned long long counter)
 	peer->receive_window |= 1ULL << (peer->receive_highest - counter);
 }
 
+/* whether a packet from address and port comes from where the peer is
+known to be: its endpoint, or an address it offered */
+static int peer_known_address(const struct peer *peer, unsigned long address, unsigned short port)
+{
+	int index;
+
+	if (peer->endpoint.address == address && peer->endpoint.port == port)
+		return 1;
+	for (index = 0; index < peer->candidate_count; index++)
+	{
+		if (peer->candidates[index].address == address && peer->candidates[index].port == port)
+			return 1;
+	}
+	return 0;
+}
+
 /* newest: the packet is the highest numbered yet (a replayed or delayed one
 does not move the peer's endpoint) */
 static void peer_heard(struct peer *peer, unsigned long address, unsigned short port, int newest)
@@ -1653,6 +1680,35 @@ int p2p_incoming(int stream, unsigned long *address, unsigned short *port)
 	return result;
 }
 
+int p2p_spoofed_source(unsigned long address)
+{
+	int result;
+
+	/* (the game's every datagram: a peer's arrive from 127.0.0.1 or the
+	local address, which is no virtual one, so the lock is never taken) */
+	if (!p2p.running || !is_virtual_address(address))
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	result = find_peer_by_address(address) != NULL || address_retired(address);
+	pthread_mutex_unlock(&p2p_lock);
+	if (result)
+	{
+		static unsigned long logged_time;
+
+		/* (anyone who can reach the game's port may send them as fast as they
+		like) */
+		if (!logged_time || elapsed(logged_time, 10000))
+		{
+			char text[32];
+
+			platform_log("Internet play: dropped traffic to the game's port claiming to come from a peer's "
+				"address %s (spoofed)", address_text(address, 0, text));
+			logged_time = p2p_now() | 1;
+		}
+	}
+	return result;
+}
+
 int p2p_broadcast_targets(unsigned short port, unsigned long *addresses, unsigned short *ports, int maximum_count)
 {
 	int count = 0;
@@ -1963,7 +2019,9 @@ static void stream_message(struct stream *stream, unsigned char type, const void
 	unsigned char message[1 + STREAM_CHUNK_SIZE];
 
 	message[0] = type;
-	memcpy(message + 1, data, (size_t)size);
+	/* (a close has no data: NULL) */
+	if (size > 0)
+		memcpy(message + 1, data, (size_t)size);
 	ikcp_send(stream->kcp, (const char *)message, size + 1);
 }
 
@@ -2222,6 +2280,22 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 	counter = packet_counter(packet);
 	if (!packet_fresh(peer, counter))
 		return;
+	/* (anyone can send packets in a peer's name from anywhere, each costing
+	the work of its seal: from where the peer is not known to be, a few a
+	second, which a peer whose address changed still gets through with) */
+	if (peer->connected && !peer_known_address(peer, from->sin_addr.s_addr, from->sin_port))
+	{
+		unsigned long now = p2p_now();
+
+		if (elapsed(peer->stray_time, 1000))
+		{
+			peer->stray_time = now;
+			peer->stray_budget = STRAY_PACKETS_PER_SECOND;
+		}
+		if (peer->stray_budget <= 0)
+			return;
+		peer->stray_budget--;
+	}
 	packet_nonce(packet, nonce);
 	inner_size = p2p_aead_open(peer->receive_key, nonce, packet, TUNNEL_HEADER_SIZE, packet + TUNNEL_HEADER_SIZE,
 		size - TUNNEL_HEADER_SIZE, inner);
@@ -2386,8 +2460,9 @@ static void join_origin_set(const unsigned char *host, int public)
 	}
 }
 
-/* under p2p_lock; public: a public lobby's game */
-static int join_code(const char *code, int public)
+/* under p2p_lock; public: a public lobby's game; host: the identifier of
+the host whose record alone is taken (a public lobby entry's), or NULL */
+static int join_code(const char *code, int public, const unsigned char *host)
 {
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
@@ -2396,6 +2471,9 @@ static int join_code(const char *code, int public)
 	}
 	memcpy(p2p.lookup_code, code, sizeof(p2p.lookup_code));
 	p2p.lookup_public = public;
+	p2p.lookup_has_host = host != NULL;
+	if (host)
+		memcpy(p2p.lookup_host, host, P2P_IDENTIFIER_SIZE);
 	p2p.lookup_requested = 1;
 	return 1;
 }
@@ -2410,7 +2488,7 @@ static int join_invite(const char *text, int public)
 	int parsed = parse_invite(text, hash, token);
 
 	if (!parsed && parse_code(text, code, 1))
-		return join_code(code, 0);
+		return join_code(code, 0, NULL);
 	if (parsed < 0)
 		set_status("that invite is from an older version of the game, which this one cannot join");
 	if (parsed <= 0)
@@ -2483,7 +2561,32 @@ static int join_code_from(const char *text, int public)
 		return 1;
 	}
 	pthread_mutex_lock(&p2p_lock);
-	result = join_code(code, public);
+	result = join_code(code, public, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry)
+{
+	char code[P2P_CODE_LENGTH + 1];
+	unsigned char host[P2P_IDENTIFIER_SIZE];
+	int index;
+	int result;
+
+	if (!parse_code(entry->code, code, 0))
+		return 0;
+	for (index = 0; index < P2P_IDENTIFIER_SIZE; index++)
+	{
+		int high = hex_value(entry->host[index * 2]), low = high < 0 ? -1 : hex_value(entry->host[index * 2 + 1]);
+
+		if (low < 0)
+			return 0;
+		host[index] = (unsigned char)(high << 4 | low);
+	}
+	if (!p2p.running)
+		return 1;
+	pthread_mutex_lock(&p2p_lock);
+	result = join_code(code, 1, host);
 	pthread_mutex_unlock(&p2p_lock);
 	return result;
 }
@@ -2529,7 +2632,7 @@ static void update_joining(void)
 		p2p.lookup_time = p2p_now();
 		set_status("looking up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
 		p2p_signal_start();
-		p2p_signal_lookup_code(p2p.lookup_code);
+		p2p_signal_lookup_code(p2p.lookup_code, p2p.lookup_has_host ? p2p.lookup_host : NULL);
 	}
 	else if (p2p.looking_up && elapsed(p2p.lookup_time, CODE_LOOKUP_TIMEOUT))
 	{
