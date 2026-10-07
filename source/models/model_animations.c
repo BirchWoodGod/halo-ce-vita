@@ -543,6 +543,14 @@ void animation_graph_node_matrices_from_orientations(
 
 			if (!node_index)
 				parent_matrix = &root_matrix;
+#ifdef HALO_LINUX
+			/* port: an animation graph's node tree is untrusted map data: a
+			parent that is not one of its nodes is not read past the
+			matrices (the root's stands in) */
+			else if (node->parent_node_index < 0 || node->parent_node_index >= animation_graph->nodes.count ||
+				node->parent_node_index >= MAXIMUM_NODES_PER_MODEL)
+				parent_matrix = &root_matrix;
+#endif
 			else
 				parent_matrix = &node_matrices[node->parent_node_index];
 
@@ -555,6 +563,14 @@ void animation_graph_node_matrices_from_orientations(
 					"c:\\halo\\SOURCE\\models\\model_animations.c",
 					1250,
 					write_index<MAXIMUM_NODES_PER_MODEL);
+#ifdef HALO_LINUX
+				/* port: a sibling or child that is not one of the graph's
+				nodes, or more entries than a model may have nodes (a cycle),
+				is not pushed: the fixed stack would overflow, and matrices be
+				written past the caller's (a crafted map's tree) */
+				if (node->next_sibling_node_index >= 0 && node->next_sibling_node_index < animation_graph->nodes.count &&
+					node->next_sibling_node_index < MAXIMUM_NODES_PER_MODEL && write_index < MAXIMUM_NODES_PER_MODEL)
+#endif
 				node_indices[write_index++] = node->next_sibling_node_index;
 			}
 
@@ -564,6 +580,10 @@ void animation_graph_node_matrices_from_orientations(
 					"c:\\halo\\SOURCE\\models\\model_animations.c",
 					1256,
 					write_index<MAXIMUM_NODES_PER_MODEL);
+#ifdef HALO_LINUX
+				if (node->first_child_node_index >= 0 && node->first_child_node_index < animation_graph->nodes.count &&
+					node->first_child_node_index < MAXIMUM_NODES_PER_MODEL && write_index < MAXIMUM_NODES_PER_MODEL)
+#endif
 				node_indices[write_index++] = node->first_child_node_index;
 			}
 		}
