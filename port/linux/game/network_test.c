@@ -159,7 +159,7 @@ static struct
 	char code[P2P_CODE_SIZE];
 	char lobby_id[P2P_LOBBY_ID_SIZE];
 	char lobby_password[P2P_LOBBY_PASSWORD_SIZE];
-	boolean lobby_join_asked;
+	boolean lobby_join_asked, lobby_locked;
 	real browse_seconds;
 	/* debug.network_test_rejoin: a joining machine leaves the game that many
 	seconds in, and joins again (once) */
@@ -1217,6 +1217,7 @@ void network_test_update(
 						platform_log("network test: the public games list \"%s\"%s: %s; %s", entry.name,
 							entry.locked ? " [pw]" : "", entry.rules, entry.players_line);
 						snprintf(network_test.lobby_id, sizeof(network_test.lobby_id), "%s", entry.id);
+						network_test.lobby_locked = entry.locked != 0;
 						break;
 					}
 				}
@@ -1225,6 +1226,8 @@ void network_test_update(
 				if (network_test.lobby_id[0] && !network_test.lobby_join_asked)
 				{
 					network_test.lobby_join_asked = p2p_lobby_join(network_test.lobby_id, network_test.lobby_password);
+					platform_log("network test: joining the public game%s", network_test.lobby_locked ?
+						" with its password" : "");
 					if (!network_test.lobby_join_asked)
 						network_test.lobby_id[0] = 0;
 				}

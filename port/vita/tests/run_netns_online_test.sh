@@ -224,21 +224,25 @@ code|lobby|lobbypw)
 		if [ "$mode" = lobbypw ]; then
 			grep -aq 'network test: the public games list ".*\[pw\]' "$out/joiner/run.log" ||
 				fail "the game with a password was not listed locked"
-			grep -aq "network test: the public game's join: opening it with the password" "$out/joiner/run.log" ||
-				fail "the joiner did not open the locked game with its password"
+			grep -aq "network test: joining the public game with its password" "$out/joiner/run.log" ||
+				fail "the joiner did not join the locked game with its password"
 		fi
 	fi
 	;;
 pc)
 	[ -n "$pc" ] || { echo "pc mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
-	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=true; host_pid=$last_pid
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=VitaHost
+	host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; exit 1; }
 	echo "host's code: $code"
-	# browsing the server browser, from another network (it must list nothing:
-	# the Vita's listings are on the Vitas' topics, signed under their label)
-	run_copy pc_browse "$join_machine" "$pc" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
-		HALO_EXIT_AFTER=60 HALO_TEST_INPUT=bot:2; pc0=$last_pid
+	# browsing the server browser, from a network of its own (it must not list
+	# the Vita's game: the Vita's listings are on the Vitas' topics, signed
+	# under their label; alone there, so that the other PCs' games are not on
+	# its LAN)
+	side browse 10.10.3 192.168.3
+	run_copy pc_browse "$browse_machine" "$pc" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_NET_HOST_PUBLIC=false HALO_EXIT_AFTER=60 HALO_TEST_INPUT=bot:2; pc0=$last_pid
 	# by code, from another network
 	run_copy pc_code "$join_machine" "$pc" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
 		HALO_EXIT_AFTER=70 HALO_TEST_INPUT=bot:2; pc1=$last_pid
@@ -257,7 +261,8 @@ pc)
 	wait $pc0 $pc1 $pc2 2>/dev/null
 	kill $host_pid 2>/dev/null; wait $host_pid 2>/dev/null
 	echo "--- pc browsing"; grep -aE "Internet play|network test" "$out/pc_browse/run.log" | grep -v tick | head -8
-	grep -aq 'network test: the public games list' "$out/pc_browse/run.log" && fail "the PC build listed the Vita's public game"
+	grep -aq 'network test: the public games list "VitaHost"' "$out/pc_browse/run.log" &&
+		fail "the PC build listed the Vita's public game"
 	grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log" ||
 		fail "the Vita host never listed its game (so the browsing test proves nothing)"
 	echo "--- pc by code"; grep -aE "Internet play|network test" "$out/pc_code/run.log" | head -12
@@ -271,7 +276,8 @@ pc)
 pchost)
 	# the other way round: a PC hosts, a Vita on its LAN searches
 	[ -n "$pc" ] || { echo "pchost mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
-	run_copy host "$host_machine" "$pc" "$cpu_a" $host_env HALO_EXIT_AFTER=90 HALO_NET_HOST_PUBLIC=true; host_pid=$last_pid
+	run_copy host "$host_machine" "$pc" "$cpu_a" $host_env HALO_EXIT_AFTER=90 HALO_NET_HOST_PUBLIC=true \
+		HALO_NET_LOBBY_NAME=PCHost; host_pid=$last_pid
 	holder; lan=$held
 	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
 	in_ns "$host_router" ip link set m2_host netns "$lan"
@@ -283,13 +289,15 @@ pchost)
 	in_ns "$lan" ip route add default via 192.168.1.1
 	run_copy vita_lan "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_EXIT_AFTER=80 \
 		HALO_TEST_INPUT=bot:2; vita1=$last_pid
-	# a Vita browsing the server browser from another network: the PC's
+	# a Vita browsing the server browser from a network of its own: the PC's
 	# public game must not show
-	run_copy vita_browse "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
-		HALO_EXIT_AFTER=70 HALO_TEST_INPUT=bot:2; vita2=$last_pid
+	side browse 10.10.3 192.168.3
+	run_copy vita_browse "$browse_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_NET_HOST_PUBLIC=false HALO_EXIT_AFTER=70 HALO_TEST_INPUT=bot:2; vita2=$last_pid
 	wait $vita1 $vita2 $host_pid 2>/dev/null
 	echo "--- vita browsing"; grep -aE "Internet play|network test" "$out/vita_browse/run.log" | grep -v tick | head -8
-	grep -aq 'network test: the public games list' "$out/vita_browse/run.log" && fail "the Vita build listed the PC's public game"
+	grep -aq 'network test: the public games list "PCHost"' "$out/vita_browse/run.log" &&
+		fail "the Vita build listed the PC's public game"
 	grep -q 'publish .* hceu/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log" ||
 		fail "the PC host never listed its game (so the browsing test proves nothing)"
 	echo "--- vita on the PC's LAN"; grep -aE "network test" "$out/vita_lan/run.log" | grep -v tick | head -8
