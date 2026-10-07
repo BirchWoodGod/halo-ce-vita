@@ -3,9 +3,26 @@ P2P_SIGNAL.C
 
 Internet play's signalling (p2p.c): how a joiner and the host of an invite
 tell each other where they can be reached, through public MQTT brokers
-(network.signalling_brokers; MQTT 3.1.1 over TCP). Every broker is used at
-once, so any one of them working is enough (an answer goes back through
-each broker a request came through).
+(those in brokers.txt, network.brokers_file; MQTT 5 over TCP, or 3.1.1 with
+a broker that refuses 5). Every broker is used at once, so any one of them
+working is enough (an answer goes back through each broker a request came
+through).
+They also carry the server browser's listings of public games (p2p_lobby.c):
+retained in each host's slot, published at least once (QoS 1, sent again
+until the broker acknowledges them), expiring at the broker after
+LISTING_EXPIRY seconds (MQTT 5), and cleared by the broker if the host's
+connection dies (the will every connection sets: harmless when not hosting).
+The listings, MQTT 5 and the publishing below are OpenCE's
+(https://github.com/OpenCommunityEdition/OpenCE, "Server browser of public
+internet games").
+
+A broker may drop a connection's publishes past about 10 a second without a
+word (EMQX), and a host's answers to a flood of JOINs would reach that: each
+broker's publishes spend from a bucket (PUBLISH_BURST at once, one more each
+PUBLISH_INTERVAL). Answers to proven joiners come first, then the listing
+(kept to publish later), then a joiner's requests and the browser's queries;
+answers to requests not proven yet only while some are left over (the
+joiner asks again).
 
 Everything that passes through them is sealed with a key derived from the
 invite's token, and goes to topics that are hashes of it, so the brokers
@@ -67,16 +84,13 @@ cannot paste one (the Vita) or for strangers:
   invites, so a code is a convenience, not a lock (the invite's 128-bit
   token is). Nothing the code leads to is more than the invite, which still
   goes through JOIN/ACCEPT.
-- A public lobby: a host that chose to be listed also keeps, retained and
-  unsealed, hcev/3/lobby/<its identifier>: the network version, its code, a
-  name and its player counts, sent again every LOBBY_INTERVAL. Its MQTT
-  will (sent by the broker when the connection drops) is an empty retained
-  message there, which removes the entry; a host that stops being listed
-  sends that itself. A machine browsing subscribes to hcev/3/lobby/+ and
-  lists what arrives; an entry the broker kept (retained) but that is not
-  sent again within LOBBY_STALE_TIME is dropped, so a host that vanished
-  without its will reaching the broker does not stay listed.
-(The topics start "hceu" on a PC, as the rest do: SIGNAL_PREFIX.)
+- The server browser (p2p_lobby.c): a public game's signed listing, which
+  holds its invite (sealed with a password, if the game has one), but never
+  its code: a code stays the host's to give.
+(The topics start "hceu" on a PC, as the rest do: SIGNAL_PREFIX. Builds
+before the server browser listed a game, unsigned with its code, on
+hcev/3/lobby/<identifier>: they and these do not see each other's public
+games, but codes, invites, system link and ad hoc play are as they were.)
 */
 
 #include "platform.h"
@@ -106,18 +120,40 @@ enum
 	host takes at most a few new players a minute: this is hours of them;
 	one is not forgotten while its host nonce lasts: USED_REQUEST_TIME) */
 	MAXIMUM_USED_REQUESTS = 1024,
-	TOPIC_SIZE = 7 + 32 + 1,
+	/* (a slot's: hcev/3/lobby/s/ and a key hash in hex) */
+	TOPIC_SIZE = 64,
 	NONCE_SIZE = 8,
 	/* an ACCEPT's or a proven JOIN's tag: the first half of an HMAC-SHA256 */
 	TAG_SIZE = 16,
 	/* a proven JOIN's end: the host's nonce, and the tag */
 	PROOF_SIZE = NONCE_SIZE + TAG_SIZE,
 	BUFFER_SIZE = 4096,
-	MAXIMUM_MESSAGE_SIZE = 256,
+	MAXIMUM_MESSAGE_SIZE = 512,
+	/* a listing's most (p2p_lobby.c's) */
+	MAXIMUM_LISTING_SIZE = P2P_MAXIMUM_LISTING_SIZE,
+	/* the publishes awaiting acknowledgement on a broker */
+	MAXIMUM_IN_FLIGHT = 4,
+	/* a broker's publishes: at most PUBLISH_BURST at once, one more each
+	PUBLISH_INTERVAL milliseconds (EMQX drops a connection's publishes past
+	about 10 a second, without a word) */
+	PUBLISH_BURST = 8,
+	PUBLISH_INTERVAL = 125,
+	/* what is kept back of the bucket for answers to proven joiners and the
+	listing: a request's answer, and a query, need this many left */
+	UNPROVEN_RESERVE = 3,
+	/* seconds a listing lasts at the broker (MQTT 5's Message Expiry
+	Interval): a dead host's goes even from a broker that kept it through a
+	restart */
+	LISTING_EXPIRY = 90,
 
 	/* milliseconds */
 	CONNECT_TIMEOUT = 10000,
+	/* a broker that failed is tried again after this, twice as long each
+	failure after, to MAXIMUM_RETRY_INTERVAL */
 	RETRY_INTERVAL = 15000,
+	MAXIMUM_RETRY_INTERVAL = 120000,
+	/* a publish at least once not acknowledged is sent again */
+	RESEND_INTERVAL = 5000,
 	KEEP_ALIVE_SECONDS = 60,
 	PING_INTERVAL = 30000,
 	SILENCE_TIMEOUT = 90000,
@@ -143,12 +179,9 @@ enum
 	/* the reads of a broker's messages in one pass of the thread, whose
 	tunnels a flood of them would otherwise starve */
 	MAXIMUM_BROKER_READS = 8,
-	/* a hosting machine's code record and lobby entry are sent again this
-	often (a broker that restarted forgets retained messages) */
+	/* a hosting machine's code record is sent again this often (a broker
+	that restarted forgets retained messages) */
 	CODE_INTERVAL = 60000,
-	LOBBY_INTERVAL = 20000,
-	LOBBY_STALE_TIME = 2 * LOBBY_INTERVAL + 5000,
-	MAXIMUM_LOBBIES = 32,
 };
 
 /* the topics a broker can be subscribed to at once */
@@ -157,20 +190,26 @@ enum
 	_topic_host,
 	_topic_join,
 	_topic_code,
-	_topic_lobbies,
+	/* the server browser's (p2p_lobby.c): the own slot, queries, all slots */
+	_topic_own_slot,
+	_topic_query,
+	_topic_slots,
 	NUMBER_OF_TOPICS,
 };
 
+/* MQTT 5's properties */
+enum
+{
+	_property_message_expiry = 0x02,
+	_property_server_keep_alive = 0x13,
+	_property_receive_maximum = 0x21,
+	_property_retain_available = 0x25,
+	_property_wildcard_available = 0x28,
+};
+
 /* the prefix of the topics, of the key derivation's label and of the MQTT
-client identifier: Vitas signal on their own (Vitas play only Vitas,
-halo_port_limits.h), so a PC's invite or code never reaches a Vita's game,
-nor a Vita's a PC's */
-#ifdef HALO_PORT_VITA_NETWORK
-#define SIGNAL_PREFIX "hcev"
-#else
-#define SIGNAL_PREFIX "hceu"
-#endif
-#define LOBBY_TOPIC_PREFIX SIGNAL_PREFIX "/3/lobby/"
+client identifier: Vitas signal on their own (P2P_SIGNAL_PREFIX) */
+#define SIGNAL_PREFIX P2P_SIGNAL_PREFIX
 
 enum
 {
@@ -188,8 +227,6 @@ enum
 	MESSAGE_VERSION = 3,
 	/* a code's record: the host's key hash and the invite's token */
 	_message_code = 'C',
-	/* a lobby entry (not sealed) */
-	_message_lobby = 'L',
 	/* 2: the record holds the key hash (1, of the older invites, held the
 	identifier alone) */
 	RECORD_VERSION = 2,
@@ -208,8 +245,43 @@ struct broker
 	unsigned long heard_time;
 	int failures;
 	unsigned short packet_identifier;
+	/* 5 (MQTT 5), or 4 (3.1.1: the broker refused 5) */
+	int protocol;
+	/* as its CONNACK said (MQTT 5; 3.1.1 brokers have both): without
+	either, it carries only signalling, not listings */
+	int retain_available;
+	int wildcard_available;
+	/* seconds; its own if it said */
+	int keep_alive;
+	int receive_maximum;
+	/* the bucket its publishes spend from */
+	int publish_tokens;
+	unsigned long publish_time;
 	/* the topics it has been asked for (_topic_host ...) */
 	char topics[NUMBER_OF_TOPICS][TOPIC_SIZE];
+	/* the listing's version it was given (signalling.lobby_version); and
+	whether it has yet to have its slot cleared (after a tombstone) */
+	int lobby_version;
+	int lobby_clear_pending;
+	/* a query to send once subscribed to the slots */
+	int query_pending;
+	/* the code's record, to publish when the bucket allows */
+	int code_pending;
+	/* publishes at least once, awaiting PUBACK */
+	struct
+	{
+		int used;
+		unsigned short identifier;
+		unsigned long sent_time;
+		/* a listing, which a newer one replaces (not a tombstone or a
+		clearing) */
+		int listing;
+		/* refused (MQTT 5's PUBACK said why): sent again as a new publish
+		(the refusal ended the old one's identifier) */
+		int refused;
+		int size;
+		unsigned char payload[MAXIMUM_LISTING_SIZE];
+	} in_flight[MAXIMUM_IN_FLIGHT];
 	unsigned char input[BUFFER_SIZE];
 	int input_size;
 	unsigned char output[BUFFER_SIZE];
@@ -261,6 +333,18 @@ static struct
 	int broker_count;
 	char client_identifier[24];
 
+	/* the server browser (p2p_lobby.c): this machine's slot (its will
+	clears it), whether its game is listed and whether it browses; the
+	listing to publish (none: size 0), its version, and whether it is a
+	tombstone (the slot is cleared after it) */
+	char own_slot[TOPIC_SIZE];
+	int lobby_listed;
+	int lobby_browsing;
+	unsigned char lobby_listing[MAXIMUM_LISTING_SIZE];
+	int lobby_listing_size;
+	int lobby_version;
+	int lobby_closing;
+
 	/* hosting */
 	int hosting;
 	unsigned char host_token[P2P_TOKEN_SIZE];
@@ -307,30 +391,11 @@ static struct
 	char code_topic[TOPIC_SIZE];
 	unsigned char code_key[P2P_SHA256_SIZE];
 	unsigned long code_sent_time;
-	/* hosting: the lobby entry, while listed */
-	int listed;
-	char lobby_topic[TOPIC_SIZE];
-	char lobby_code[P2P_CODE_SIZE];
-	char lobby_name[P2P_LOBBY_NAME_SIZE];
-	int lobby_players, lobby_maximum;
-	unsigned long lobby_sent_time;
 
 	/* looking up a code */
 	int looking_up;
 	char lookup_topic[TOPIC_SIZE];
 	unsigned char lookup_key[P2P_SHA256_SIZE];
-
-	/* browsing the lobbies */
-	int browsing;
-	struct lobby
-	{
-		int used;
-		char identifier[2 * P2P_IDENTIFIER_SIZE + 1];
-		char code[P2P_CODE_SIZE];
-		char name[P2P_LOBBY_NAME_SIZE];
-		int players, maximum, network_version;
-		unsigned long heard_time;
-	} lobbies[MAXIMUM_LOBBIES];
 } signalling;
 
 static int elapsed(unsigned long since, unsigned long time)
@@ -408,6 +473,12 @@ static void broker_close(struct broker *broker, int failed)
 	broker->input_size = 0;
 	broker->output_size = 0;
 	memset(broker->topics, 0, sizeof(broker->topics));
+	memset(broker->in_flight, 0, sizeof(broker->in_flight));
+	/* (the will cleared the slot: the listing again once connected) */
+	broker->lobby_version = 0;
+	broker->lobby_clear_pending = 0;
+	broker->query_pending = 0;
+	broker->code_pending = 0;
 	if (failed)
 		broker->failures++;
 }
@@ -431,30 +502,58 @@ static void broker_flush(struct broker *broker)
 	}
 }
 
+static int put_variable(unsigned char *bytes, int value)
+{
+	int size = 0;
+
+	do
+	{
+		unsigned char byte = (unsigned char)(value & 127);
+
+		value >>= 7;
+		bytes[size++] = (unsigned char)(value ? byte | 128 : byte);
+	} while (value);
+	return size;
+}
+
+/* reads a variable byte integer; 0 if it does not fit */
+static int get_variable(const unsigned char *bytes, int size, int *offset, int *value)
+{
+	int shift = 0;
+
+	*value = 0;
+	for (;;)
+	{
+		unsigned char byte;
+
+		if (*offset >= size || shift > 21)
+			return 0;
+		byte = bytes[(*offset)++];
+		*value |= (byte & 127) << shift;
+		shift += 7;
+		if (!(byte & 128))
+			return 1;
+	}
+}
+
 /* queues a packet: its fixed header's first byte, and its body */
 static void broker_send(struct broker *broker, unsigned char type, const unsigned char *body, int size)
 {
 	unsigned char header[5];
-	int header_size = 1;
-	int remaining = size;
+	int header_size;
 
 	if (broker->socket < 0)
 		return;
 	header[0] = type;
-	do
-	{
-		unsigned char byte = (unsigned char)(remaining & 127);
-
-		remaining >>= 7;
-		header[header_size++] = (unsigned char)(remaining ? byte | 128 : byte);
-	} while (remaining);
+	header_size = 1 + put_variable(header + 1, size);
 	if (broker->output_size + header_size + size > BUFFER_SIZE)
 	{
 		broker_close(broker, 1);
 		return;
 	}
 	memcpy(broker->output + broker->output_size, header, (size_t)header_size);
-	memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
+	if (size)
+		memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
 	broker->output_size += header_size + size;
 	broker->sent_time = p2p_now();
 	broker_flush(broker);
@@ -470,38 +569,146 @@ static int put_string(unsigned char *body, const char *text)
 	return size + 2;
 }
 
-static void broker_topic(struct broker *broker, const char *topic, int subscribe)
+static unsigned short next_packet_identifier(struct broker *broker)
 {
-	unsigned char body[4 + TOPIC_SIZE + 1];
-	int size = 0;
-
 	if (++broker->packet_identifier == 0)
 		broker->packet_identifier = 1;
-	body[size++] = (unsigned char)(broker->packet_identifier >> 8);
-	body[size++] = (unsigned char)broker->packet_identifier;
+	return broker->packet_identifier;
+}
+
+/* whether the broker may publish now, spending from its bucket: reserve is
+how many must be left after (UNPROVEN_RESERVE for what may wait) */
+static int broker_may_publish(struct broker *broker, int reserve)
+{
+	unsigned long now = p2p_now();
+	int gained = (int)((now - broker->publish_time) / PUBLISH_INTERVAL);
+
+	if (gained > 0)
+	{
+		broker->publish_tokens = broker->publish_tokens + gained > PUBLISH_BURST ? PUBLISH_BURST :
+			broker->publish_tokens + gained;
+		broker->publish_time += (unsigned long)gained * PUBLISH_INTERVAL;
+		if (broker->publish_tokens == PUBLISH_BURST)
+			broker->publish_time = now;
+	}
+	if (broker->publish_tokens <= reserve)
+		return 0;
+	broker->publish_tokens--;
+	return 1;
+}
+
+static void broker_topic(struct broker *broker, const char *topic, int subscribe, int no_local)
+{
+	unsigned char body[5 + TOPIC_SIZE + 1];
+	unsigned short identifier = next_packet_identifier(broker);
+	int size = 0;
+
+	body[size++] = (unsigned char)(identifier >> 8);
+	body[size++] = (unsigned char)identifier;
+	/* (MQTT 5: no properties) */
+	if (broker->protocol == 5)
+		body[size++] = 0;
 	size += put_string(body + size, topic);
+	/* at most once; MQTT 5: No Local, not this connection's own publishes */
 	if (subscribe)
-		body[size++] = 0; /* at most once */
+		body[size++] = (unsigned char)(broker->protocol == 5 && no_local ? 0x04 : 0);
 	broker_send(broker, subscribe ? 0x82 : 0xA2, body, size);
 }
 
-/* a PUBLISH at most once; retained: the broker keeps it for later
-subscribers (an empty retained one removes what it kept) */
+/* a PUBLISH at most once: signalling's and queries; retained, the code's
+record: the broker keeps it for later subscribers (an empty retained one
+removes what it kept) */
 static void broker_publish(struct broker *broker, const char *topic, const unsigned char *payload, int payload_size,
 	int retain)
 {
-	unsigned char body[2 + TOPIC_SIZE + MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
+	unsigned char body[3 + TOPIC_SIZE + MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
 	int size = put_string(body, topic);
 
+	if (broker->protocol == 5)
+		body[size++] = 0;
 	if (payload_size)
 		memcpy(body + size, payload, (size_t)payload_size);
 	broker_send(broker, retain ? 0x31 : 0x30, body, size + payload_size);
+}
+
+/* a publish at least once to the own slot, retained: a listing (expiring
+at the broker), or an empty one, which clears it; again (duplicate) if the
+first was not acknowledged */
+static void broker_publish_slot(struct broker *broker, unsigned short identifier, const unsigned char *payload,
+	int payload_size, int duplicate)
+{
+	unsigned char body[2 + TOPIC_SIZE + 2 + 8 + MAXIMUM_LISTING_SIZE];
+	int size = put_string(body, signalling.own_slot);
+
+	body[size++] = (unsigned char)(identifier >> 8);
+	body[size++] = (unsigned char)identifier;
+	if (broker->protocol == 5)
+	{
+		if (payload_size)
+		{
+			body[size++] = 5;
+			body[size++] = _property_message_expiry;
+			body[size++] = 0;
+			body[size++] = 0;
+			body[size++] = 0;
+			body[size++] = LISTING_EXPIRY;
+		}
+		else
+		{
+			body[size++] = 0;
+		}
+	}
+	if (payload_size)
+		memcpy(body + size, payload, (size_t)payload_size);
+	/* PUBLISH, QoS 1, retained */
+	broker_send(broker, (unsigned char)(0x30 | (duplicate ? 0x08 : 0) | 0x02 | 0x01), body, size + payload_size);
+}
+
+/* a listing (or a clearing: size 0) to the own slot, at least once: 0 if
+there is no room for it yet */
+static int broker_publish_listing(struct broker *broker, const unsigned char *payload, int size, int listing)
+{
+	int maximum = broker->receive_maximum < MAXIMUM_IN_FLIGHT ? broker->receive_maximum : MAXIMUM_IN_FLIGHT;
+	int count = 0;
+	int free_index = -1;
+	int index;
+
+	/* (a listing replaces an older one not acknowledged yet) */
+	for (index = 0; index < MAXIMUM_IN_FLIGHT; index++)
+	{
+		if (broker->in_flight[index].used && broker->in_flight[index].listing && listing)
+			broker->in_flight[index].used = 0;
+		if (broker->in_flight[index].used)
+			count++;
+		else if (free_index < 0)
+			free_index = index;
+	}
+	if (free_index < 0 || count >= maximum || !broker_may_publish(broker, 0))
+		return 0;
+	broker->in_flight[free_index].used = 1;
+	broker->in_flight[free_index].identifier = next_packet_identifier(broker);
+	broker->in_flight[free_index].sent_time = p2p_now();
+	broker->in_flight[free_index].listing = listing;
+	broker->in_flight[free_index].refused = 0;
+	broker->in_flight[free_index].size = size;
+	if (size)
+		memcpy(broker->in_flight[free_index].payload, payload, (size_t)size);
+	broker_publish_slot(broker, broker->in_flight[free_index].identifier, payload, size, 0);
+	return 1;
+}
+
+/* whether the broker carries the server browser: retained messages and
+wildcards */
+static int broker_carries_lobby(const struct broker *broker)
+{
+	return broker->retain_available && broker->wildcard_available;
 }
 
 /* the topics a ready broker should be subscribed to */
 static void broker_sync_topics(struct broker *broker)
 {
 	const char *wanted[NUMBER_OF_TOPICS];
+	int lobby = broker_carries_lobby(broker);
 	int index;
 
 	if (broker->state != _broker_ready)
@@ -509,7 +716,9 @@ static void broker_sync_topics(struct broker *broker)
 	wanted[_topic_host] = signalling.hosting ? signalling.host_topic : "";
 	wanted[_topic_join] = signalling.joining ? signalling.join_topic : "";
 	wanted[_topic_code] = signalling.looking_up ? signalling.lookup_topic : "";
-	wanted[_topic_lobbies] = signalling.browsing ? LOBBY_TOPIC_PREFIX "+" : "";
+	wanted[_topic_own_slot] = lobby && signalling.lobby_listed ? signalling.own_slot : "";
+	wanted[_topic_query] = lobby && signalling.lobby_listed ? P2P_LOBBY_QUERY_TOPIC : "";
+	wanted[_topic_slots] = lobby && signalling.lobby_browsing ? P2P_LOBBY_SLOT_PREFIX "+" : "";
 	for (index = 0; index < NUMBER_OF_TOPICS; index++)
 	{
 		char *had = broker->topics[index];
@@ -517,9 +726,13 @@ static void broker_sync_topics(struct broker *broker)
 		if (!strcmp(wanted[index], had))
 			continue;
 		if (had[0])
-			broker_topic(broker, had, 0);
+			broker_topic(broker, had, 0, 0);
 		if (wanted[index][0])
-			broker_topic(broker, wanted[index], 1);
+			broker_topic(broker, wanted[index], 1, index == _topic_own_slot);
+		/* (once subscribed to the slots, the hosts are asked to publish:
+		retained copies come at once, but may be old) */
+		if (index == _topic_slots && wanted[index][0])
+			broker->query_pending = 1;
 		strcpy(had, wanted[index]);
 	}
 }
@@ -530,38 +743,86 @@ static void publish_everywhere(const char *topic, const unsigned char *payload, 
 
 	for (index = 0; index < signalling.broker_count; index++)
 	{
-		if (signalling.brokers[index].state == _broker_ready)
-			broker_publish(&signalling.brokers[index], topic, payload, size, retain);
+		struct broker *broker = &signalling.brokers[index];
+
+		if (broker->state == _broker_ready && broker_may_publish(broker, 0))
+			broker_publish(broker, topic, payload, size, retain);
 	}
 }
 
-/* this machine's lobby entry's topic (its will empties it) */
-static void own_lobby_topic(char *topic)
-{
-	char text[2 * P2P_IDENTIFIER_SIZE + 1];
+static void publish_code(struct broker *broker);
 
-	p2p_hex(p2p_identifier(), P2P_IDENTIFIER_SIZE, text);
-	snprintf(topic, TOPIC_SIZE, LOBBY_TOPIC_PREFIX "%s", text);
+/* the listing's publishes due on a broker: the listing, or a tombstone and
+then the slot's clearing; acknowledgements not come sent again; and the
+code's record, and a query, when the bucket allows */
+static void broker_update_lobby(struct broker *broker)
+{
+	int index;
+
+	if (broker->state != _broker_ready)
+		return;
+	if (broker->code_pending && signalling.hosting && signalling.has_code)
+		publish_code(broker);
+	if (!broker_carries_lobby(broker))
+		return;
+	for (index = 0; index < MAXIMUM_IN_FLIGHT; index++)
+	{
+		if (broker->in_flight[index].used && elapsed(broker->in_flight[index].sent_time, RESEND_INTERVAL) &&
+			broker_may_publish(broker, 0))
+		{
+			int duplicate = !broker->in_flight[index].refused;
+
+			if (!duplicate)
+				broker->in_flight[index].identifier = next_packet_identifier(broker);
+			broker->in_flight[index].refused = 0;
+			broker->in_flight[index].sent_time = p2p_now();
+			broker_publish_slot(broker, broker->in_flight[index].identifier, broker->in_flight[index].payload,
+				broker->in_flight[index].size, duplicate);
+		}
+	}
+	if (broker->lobby_version != signalling.lobby_version && signalling.lobby_listing_size &&
+		broker_publish_listing(broker, signalling.lobby_listing, signalling.lobby_listing_size,
+		!signalling.lobby_closing))
+	{
+		broker->lobby_version = signalling.lobby_version;
+		broker->lobby_clear_pending = signalling.lobby_closing;
+	}
+	if (broker->lobby_clear_pending && broker->lobby_version == signalling.lobby_version &&
+		broker_publish_listing(broker, NULL, 0, 0))
+	{
+		broker->lobby_clear_pending = 0;
+	}
+	if (broker->query_pending && broker->topics[_topic_slots][0] && broker_may_publish(broker, UNPROVEN_RESERVE))
+	{
+		unsigned char nonce[NONCE_SIZE];
+
+		posix_random_bytes(nonce, sizeof(nonce));
+		broker_publish(broker, P2P_LOBBY_QUERY_TOPIC, nonce, sizeof(nonce), 0);
+		broker->query_pending = 0;
+	}
 }
 
 static void broker_connected(struct broker *broker)
 {
-	unsigned char body[128];
-	char will_topic[TOPIC_SIZE];
+	unsigned char body[32 + sizeof(signalling.client_identifier) + TOPIC_SIZE];
 	int size = 0;
 
+	if (!broker->protocol)
+		broker->protocol = 5;
 	size += put_string(body, "MQTT");
-	body[size++] = 4; /* 3.1.1 */
-	/* a clean session; a will, retained: when the connection drops, the
-	broker empties this machine's lobby entry, so a host that crashed or
-	lost its network is not listed (a harmless no-op if it never was) */
+	body[size++] = (unsigned char)broker->protocol;
+	/* a clean session, and a will, retained: an empty message to this
+	machine's slot, which clears its listing if the connection dies (a
+	harmless no-op if it never was) */
 	body[size++] = 0x02 | 0x04 | 0x20;
 	body[size++] = 0;
 	body[size++] = KEEP_ALIVE_SECONDS;
+	if (broker->protocol == 5)
+		body[size++] = 0;
 	size += put_string(body + size, signalling.client_identifier);
-	own_lobby_topic(will_topic);
-	size += put_string(body + size, will_topic);
-	/* (the will's message: empty) */
+	if (broker->protocol == 5)
+		body[size++] = 0;
+	size += put_string(body + size, signalling.own_slot);
 	body[size++] = 0;
 	body[size++] = 0;
 	broker->state = _broker_awaiting_acknowledgement;
@@ -821,7 +1082,7 @@ static int request_used(const unsigned char *request)
 
 /* the host's answer to a request, through the broker it came through */
 static void send_accept(struct broker *broker, const unsigned char *identifier, const unsigned char *nonce,
-	const unsigned char *host_nonce, const unsigned char *base)
+	const unsigned char *host_nonce, const unsigned char *base, int proven)
 {
 	unsigned char answer[MAXIMUM_MESSAGE_SIZE];
 	unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
@@ -841,7 +1102,8 @@ static void send_accept(struct broker *broker, const unsigned char *identifier, 
 	size += TAG_SIZE;
 	size = p2p_seal(signalling.host_key, answer, size, sealed);
 	make_topic(signalling.host_token, "joiner", identifier, topic);
-	if (broker->state == _broker_ready)
+	/* (a proven joiner's first: its session is made; others ask again) */
+	if (broker->state == _broker_ready && broker_may_publish(broker, proven ? 0 : UNPROVEN_RESERVE))
 		broker_publish(broker, topic, sealed, size, 0);
 }
 
@@ -894,7 +1156,7 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 		}
 		joiner->answered_time = p2p_now();
 		joiner->answered_broker_times[broker_index] = joiner->answered_time;
-		send_accept(broker, identifier, joiner->nonce, joiner->host_nonce, joiner->base);
+		send_accept(broker, identifier, joiner->nonce, joiner->host_nonce, joiner->base, proven);
 		return;
 	}
 	memcpy(request, identifier, P2P_IDENTIFIER_SIZE);
@@ -955,7 +1217,7 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 		asker->answered_nonce_brokers[slot] = (signed char)broker_index;
 		asker->answered_nonce_times[slot] = asker->answered_time;
 		host_nonce_for(public_key, nonce, p2p_now() / HOST_NONCE_PERIOD, host_nonce);
-		send_accept(broker, identifier, nonce, host_nonce, asker->base);
+		send_accept(broker, identifier, nonce, host_nonce, asker->base, 0);
 		return;
 	}
 	/* proven: with a nonce the host answered the request with lately, and a
@@ -992,7 +1254,7 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 	memset(joiner->answered_broker_times, 0, sizeof(joiner->answered_broker_times));
 	joiner->answered_broker_times[broker_index] = joiner->answered_time;
 	joiner->used = 1;
-	send_accept(broker, identifier, nonce, host_nonce, base);
+	send_accept(broker, identifier, nonce, host_nonce, base, 1);
 }
 
 /* the joiner: the host answered */
@@ -1064,6 +1326,7 @@ static void publish_code(struct broker *broker)
 	unsigned char message[2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
 	unsigned char sealed[sizeof(message) + P2P_SEAL_OVERHEAD];
 	int size = 0;
+	int index;
 
 	message[size++] = _message_code;
 	message[size++] = RECORD_VERSION;
@@ -1072,45 +1335,32 @@ static void publish_code(struct broker *broker)
 	memcpy(message + size, signalling.host_token, P2P_TOKEN_SIZE);
 	size += P2P_TOKEN_SIZE;
 	size = p2p_seal(signalling.code_key, message, size, sealed);
-	if (broker)
-		broker_publish(broker, signalling.code_topic, sealed, size, 1);
-	else
-		publish_everywhere(signalling.code_topic, sealed, size, 1);
+	/* (each broker as its bucket allows: one that has none left now
+	publishes it in a coming pass, broker_update_lobby) */
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *each = &signalling.brokers[index];
+
+		if ((broker && each != broker) || each->state != _broker_ready)
+			continue;
+		each->code_pending = !broker_may_publish(each, 0);
+		if (!each->code_pending)
+			broker_publish(each, signalling.code_topic, sealed, size, 1);
+	}
 	signalling.code_sent_time = p2p_now();
 }
 
-/* the lobby entry, retained on one broker or all (broker NULL): the
-network version (big-endian), the code, the player counts, the name */
-static void publish_lobby(struct broker *broker)
-{
-	unsigned char message[4 + P2P_CODE_LENGTH + 3 + P2P_LOBBY_NAME_SIZE];
-	int size = 0;
-	int name_size = (int)strlen(signalling.lobby_name);
-
-	message[size++] = _message_lobby;
-	message[size++] = RECORD_VERSION;
-	message[size++] = (unsigned char)(HALO_PORT_NETWORK_VERSION >> 8);
-	message[size++] = (unsigned char)HALO_PORT_NETWORK_VERSION;
-	/* (the code's eight characters, without its dash) */
-	memcpy(message + size, signalling.lobby_code, 4);
-	memcpy(message + size + 4, signalling.lobby_code + 5, 4);
-	size += P2P_CODE_LENGTH;
-	message[size++] = (unsigned char)signalling.lobby_players;
-	message[size++] = (unsigned char)signalling.lobby_maximum;
-	message[size++] = (unsigned char)name_size;
-	memcpy(message + size, signalling.lobby_name, (size_t)name_size);
-	size += name_size;
-	if (broker)
-		broker_publish(broker, signalling.lobby_topic, message, size, 1);
-	else
-		publish_everywhere(signalling.lobby_topic, message, size, 1);
-	signalling.lobby_sent_time = p2p_now();
-}
-
-/* empties a retained topic everywhere */
+/* empties a retained topic everywhere (whatever the buckets: it is rare,
+and must not be lost) */
 static void clear_retained(const char *topic)
 {
-	publish_everywhere(topic, NULL, 0, 1);
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		if (signalling.brokers[index].state == _broker_ready)
+			broker_publish(&signalling.brokers[index], topic, NULL, 0, 1);
+	}
 }
 
 static void sync_all_topics(void);
@@ -1129,94 +1379,26 @@ static void code_received(const unsigned char *message, int size)
 	p2p_code_found(text);
 }
 
-static struct lobby *find_lobby(const char *identifier, int create)
-{
-	struct lobby *free_entry = NULL;
-	int index;
-
-	for (index = 0; index < MAXIMUM_LOBBIES; index++)
-	{
-		struct lobby *lobby = &signalling.lobbies[index];
-
-		if (lobby->used && !strcmp(lobby->identifier, identifier))
-			return lobby;
-		if (!lobby->used && !free_entry)
-			free_entry = lobby;
-	}
-	if (!create || !free_entry)
-		return NULL;
-	memset(free_entry, 0, sizeof(*free_entry));
-	free_entry->used = 1;
-	strcpy(free_entry->identifier, identifier);
-	return free_entry;
-}
-
-/* a lobby entry (or its removal: empty), retained (kept by the broker) or
-live (sent now). It is not sealed: anyone can send one, so everything in it
-is checked, and the name is shown only as printable ASCII */
-static void lobby_received(const char *identifier, const unsigned char *message, int size)
-{
-	struct lobby *lobby;
-	int name_size;
-	int index;
-
-	if (strlen(identifier) != 2 * P2P_IDENTIFIER_SIZE)
-		return;
-	for (index = 0; identifier[index]; index++)
-	{
-		if (!((identifier[index] >= '0' && identifier[index] <= '9') ||
-			(identifier[index] >= 'a' && identifier[index] <= 'f')))
-		{
-			return;
-		}
-	}
-	if (size == 0)
-	{
-		lobby = find_lobby(identifier, 0);
-		if (lobby)
-			lobby->used = 0;
-		return;
-	}
-	if (size < 4 + P2P_CODE_LENGTH + 3 || message[0] != _message_lobby || message[1] != RECORD_VERSION)
-		return;
-	name_size = message[4 + P2P_CODE_LENGTH + 2];
-	if (size < 4 + P2P_CODE_LENGTH + 3 + name_size || name_size >= P2P_LOBBY_NAME_SIZE)
-		return;
-	for (index = 0; index < P2P_CODE_LENGTH; index++)
-	{
-		if (!message[4 + index] || !strchr(P2P_CODE_ALPHABET, message[4 + index]))
-			return;
-	}
-	lobby = find_lobby(identifier, 1);
-	if (!lobby)
-		return;
-	lobby->network_version = message[2] << 8 | message[3];
-	memcpy(lobby->code, message + 4, 4);
-	lobby->code[4] = '-';
-	memcpy(lobby->code + 5, message + 8, 4);
-	lobby->code[9] = 0;
-	lobby->players = message[4 + P2P_CODE_LENGTH];
-	lobby->maximum = message[4 + P2P_CODE_LENGTH + 1];
-	memcpy(lobby->name, message + 4 + P2P_CODE_LENGTH + 3, (size_t)name_size);
-	lobby->name[name_size] = 0;
-	/* (only what can be shown: the name is any bytes the host sent) */
-	for (index = 0; index < name_size; index++)
-	{
-		if ((unsigned char)lobby->name[index] < 32 || (unsigned char)lobby->name[index] > 126)
-			lobby->name[index] = '?';
-	}
-	/* (a retained entry counts as heard now: one its host no longer sends
-	again goes LOBBY_STALE_TIME later) */
-	lobby->heard_time = p2p_now();
-}
-
-static void publish_received(struct broker *broker, const char *topic, const unsigned char *payload, int size)
+static void publish_received(struct broker *broker, const char *topic, const unsigned char *payload, int size,
+	int retained)
 {
 	unsigned char message[MAXIMUM_MESSAGE_SIZE];
 	int message_size;
 
 	if (size > MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD)
 		return;
+	/* the server browser's: a slot (p2p_lobby.c checks the rest), a query */
+	if (!strncmp(topic, P2P_LOBBY_SLOT_PREFIX, sizeof(P2P_LOBBY_SLOT_PREFIX) - 1))
+	{
+		if (size <= MAXIMUM_LISTING_SIZE)
+			p2p_lobby_slot_heard(topic + sizeof(P2P_LOBBY_SLOT_PREFIX) - 1, payload, size, retained);
+		return;
+	}
+	if (!strcmp(topic, P2P_LOBBY_QUERY_TOPIC))
+	{
+		p2p_lobby_query_heard();
+		return;
+	}
 	if (signalling.hosting && !strcmp(topic, signalling.host_topic))
 	{
 		message_size = p2p_open(signalling.host_key, payload, size, message);
@@ -1235,10 +1417,116 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 		if (message_size >= 2 && message[0] == _message_code && message[1] == RECORD_VERSION)
 			code_received(message, message_size);
 	}
-	else if (signalling.browsing && !strncmp(topic, LOBBY_TOPIC_PREFIX, strlen(LOBBY_TOPIC_PREFIX)))
+}
+
+/* a CONNACK: 0 if the connection is closed (refused, or to try 3.1.1) */
+static int broker_acknowledged(struct broker *broker, const unsigned char *body, int size)
+{
+	int code = body[1];
+	int offset = 2;
+	int properties = 0;
+
+	broker->retain_available = 1;
+	broker->wildcard_available = 1;
+	broker->keep_alive = KEEP_ALIVE_SECONDS;
+	broker->receive_maximum = MAXIMUM_IN_FLIGHT;
+	/* a broker that has not MQTT 5 answers 0x84 (5's unsupported protocol
+	version), or 3.1.1's 1 (unacceptable protocol version) */
+	if (broker->protocol == 5 && (code == 0x84 || (size == 2 && code == 1)))
 	{
-		lobby_received(topic + strlen(LOBBY_TOPIC_PREFIX), payload, size);
+		platform_log("Internet play: the signalling broker %s has not MQTT 5; using 3.1.1", broker->host);
+		broker->protocol = 4;
+		broker_close(broker, 0);
+		/* (again at once) */
+		broker->state_time = p2p_now() - MAXIMUM_RETRY_INTERVAL;
+		return 0;
 	}
+	if (code != 0)
+	{
+		platform_log("Internet play: the signalling broker %s refused the connection", broker->host);
+		broker_close(broker, 1);
+		return 0;
+	}
+	if (broker->protocol == 5 && get_variable(body, size, &offset, &properties))
+	{
+		int end = offset + properties > size ? size : offset + properties;
+
+		while (offset < end)
+		{
+			int property = body[offset++];
+
+			switch (property)
+			{
+			/* a byte */
+			case 0x01: case 0x17: case 0x19: case 0x24: case 0x25: case 0x28: case 0x29: case 0x2A:
+				if (offset < end)
+				{
+					if (property == _property_retain_available)
+						broker->retain_available = body[offset];
+					else if (property == _property_wildcard_available)
+						broker->wildcard_available = body[offset];
+				}
+				offset += 1;
+				break;
+			/* two */
+			case 0x13: case 0x21: case 0x22: case 0x23:
+				if (offset + 2 <= end)
+				{
+					int value = body[offset] << 8 | body[offset + 1];
+
+					if (property == _property_server_keep_alive && value > 0)
+						broker->keep_alive = value;
+					else if (property == _property_receive_maximum && value > 0)
+						broker->receive_maximum = value;
+				}
+				offset += 2;
+				break;
+			/* four */
+			case 0x02: case 0x11: case 0x18: case 0x27:
+				offset += 4;
+				break;
+			/* a variable byte integer */
+			case 0x0B:
+			{
+				int value;
+
+				if (!get_variable(body, end, &offset, &value))
+					offset = end;
+				break;
+			}
+			/* a string or binary data: a length, then that */
+			case 0x03: case 0x08: case 0x09: case 0x12: case 0x15: case 0x16: case 0x1A: case 0x1C: case 0x1F:
+				offset += offset + 2 <= end ? 2 + (body[offset] << 8 | body[offset + 1]) : 2;
+				break;
+			/* a pair of strings */
+			case 0x26:
+			{
+				int pair;
+
+				for (pair = 0; pair < 2; pair++)
+					offset += offset + 2 <= end ? 2 + (body[offset] << 8 | body[offset + 1]) : 2;
+				break;
+			}
+			default:
+				/* (unknown: the rest can't be read) */
+				offset = end;
+				break;
+			}
+		}
+	}
+	broker->state = _broker_ready;
+	broker->failures = 0;
+	broker->publish_tokens = PUBLISH_BURST;
+	broker->publish_time = p2p_now();
+	broker_sync_topics(broker);
+	/* a joiner's first request need not wait for the next repeat */
+	if (signalling.joining)
+		send_join();
+	/* a host's code record, on a broker that may never have had it (or
+	forgot it); the listing follows (broker_update_lobby) */
+	if (signalling.hosting && signalling.has_code)
+		publish_code(broker);
+	return 1;
 }
 
 /* the packets that arrived whole */
@@ -1280,41 +1568,72 @@ static void broker_parse(struct broker *broker)
 		type = broker->input[0];
 		if ((type & 0xF0) == 0x20 && remaining >= 2)
 		{
-			/* CONNACK */
-			if (broker->input[header_size + 1] != 0)
+			if (broker->state != _broker_awaiting_acknowledgement)
 			{
-				platform_log("Internet play: the signalling broker %s refused the connection", broker->host);
+				/* (a second CONNACK is a broken broker's) */
 				broker_close(broker, 1);
 				return;
 			}
-			broker->state = _broker_ready;
-			broker->failures = 0;
-			broker_sync_topics(broker);
-			/* a joiner's first request need not wait for the next repeat */
-			if (signalling.joining)
-				send_join();
-			/* a host's retained records, on a broker that may never have
-			had them (or forgot them) */
-			if (signalling.hosting && signalling.has_code)
-				publish_code(broker);
-			if (signalling.listed)
-				publish_lobby(broker);
+			if (!broker_acknowledged(broker, broker->input + header_size, remaining))
+				return;
 		}
 		else if ((type & 0xF0) == 0x30 && remaining >= 2)
 		{
 			/* PUBLISH */
 			const unsigned char *body = broker->input + header_size;
 			int topic_size = body[0] << 8 | body[1];
-			int offset = 2 + topic_size + (((type >> 1) & 3) ? 2 : 0);
+			int quality = (type >> 1) & 3;
+			int offset = 2 + topic_size;
+			int properties = 0;
+			int good = 1;
 
-			if (topic_size < TOPIC_SIZE && offset <= remaining)
+			if (quality)
+			{
+				/* (subscriptions ask for at most once; acknowledged all the
+				same) */
+				if (offset + 2 <= remaining && quality == 1)
+					broker_send(broker, 0x40, body + offset, 2);
+				offset += 2;
+			}
+			if (broker->protocol == 5 && offset <= remaining)
+			{
+				good = get_variable(body, remaining, &offset, &properties) && properties <= remaining - offset;
+				offset += properties;
+			}
+			if (good && topic_size < TOPIC_SIZE && offset <= remaining && broker->socket >= 0)
 			{
 				char topic[TOPIC_SIZE];
 
 				memcpy(topic, body + 2, (size_t)topic_size);
 				topic[topic_size] = 0;
-				publish_received(broker, topic, body + offset, remaining - offset);
+				/* (a topic with a zero in it is no topic of ours) */
+				if ((int)strlen(topic) == topic_size)
+					publish_received(broker, topic, body + offset, remaining - offset, type & 1);
 			}
+		}
+		else if ((type & 0xF0) == 0x40 && remaining >= 2)
+		{
+			/* PUBACK: MQTT 5's reason, if any, of 0x80 or more is a refusal
+			(a quota, a rate): sent again later */
+			const unsigned char *body = broker->input + header_size;
+			unsigned short identifier = (unsigned short)(body[0] << 8 | body[1]);
+			int refused = remaining >= 3 && body[2] >= 0x80;
+			int index;
+
+			for (index = 0; index < MAXIMUM_IN_FLIGHT; index++)
+			{
+				if (broker->in_flight[index].used && broker->in_flight[index].identifier == identifier)
+				{
+					broker->in_flight[index].used = refused;
+					broker->in_flight[index].refused = refused;
+				}
+			}
+		}
+		else if ((type & 0xF0) == 0xE0)
+		{
+			/* DISCONNECT (MQTT 5): the broker's */
+			broker_close(broker, 1);
+			return;
 		}
 		/* (what it sent in answer may have closed it, emptying input) */
 		if (broker->socket < 0)
@@ -1357,8 +1676,61 @@ static void broker_readable(struct broker *broker)
 
 /* ---------- p2p.c's side */
 
+/* the brokers if network.brokers_file cannot be read (the Vita's
+port/vita/app0/brokers.txt's) */
+#define DEFAULT_BROKERS "opence.milenko.org:1883,broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
+
+/* the brokers: network.signalling_brokers if set (the tests'), else those in
+network.brokers_file (beside config.toml, unless a full path: on the Vita,
+app0:brokers.txt, port/vita/app0/brokers.txt in its package), one on each
+line, "#" starting a comment, into text: host:port entries separated by
+commas (OpenCE's "Brokers in brokers.txt") */
+static void brokers_list(char *text, size_t size)
+{
+	const char *name = config_string("network.brokers_file");
+	const char *colon = strchr(name, ':');
+	char path[1024];
+	char *file;
+	size_t file_size = 0, index, length = 0;
+	int comment = 0;
+
+	snprintf(text, size, "%s", config_string("network.signalling_brokers"));
+	if (text[0])
+		return;
+	/* (a full path: "/...", "C:...", "app0:...") */
+	if (name[0] == '/' || name[0] == '\\' || (colon && !memchr(name, '/', (size_t)(colon - name))))
+		snprintf(path, sizeof(path), "%s", name);
+	else
+	{
+		config_folder(path, sizeof(path));
+		snprintf(path + strlen(path), sizeof(path) - strlen(path), "%s", name);
+	}
+	file = config_file_read(path, &file_size);
+	if (!file)
+	{
+		platform_log("Internet play: the brokers' file %s cannot be read (network.brokers_file); using the usual ones",
+			path);
+		snprintf(text, size, "%s", DEFAULT_BROKERS);
+		return;
+	}
+	for (index = 0; index < file_size && length + 1 < size; index++)
+	{
+		char character = file[index];
+
+		if (character == '\n' || character == '\r')
+			comment = 0;
+		else if (character == '#')
+			comment = 1;
+		if (!comment)
+			text[length++] = character == '\n' || character == '\r' || character == '\t' ? ',' : character;
+	}
+	text[length] = 0;
+	free(file);
+}
+
 void p2p_signal_start(void)
 {
+	char list[1024];
 	const char *text;
 	unsigned char random[8];
 	char hex[17];
@@ -1369,7 +1741,14 @@ void p2p_signal_start(void)
 	posix_random_bytes(random, sizeof(random));
 	p2p_hex(random, sizeof(random), hex);
 	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), SIGNAL_PREFIX "-%s", hex);
-	text = config_string("network.signalling_brokers");
+	{
+		unsigned char hash[P2P_KEY_HASH_SIZE];
+
+		p2p_key_hash(p2p_public_key(), hash);
+		p2p_lobby_slot_topic(hash, signalling.own_slot, sizeof(signalling.own_slot));
+	}
+	brokers_list(list, sizeof(list));
+	text = list;
 	while (*text && signalling.broker_count < MAXIMUM_BROKERS)
 	{
 		const char *end = text + strcspn(text, ",");
@@ -1401,7 +1780,9 @@ void p2p_signal_start(void)
 		text = *end ? end + 1 : end;
 	}
 	if (!signalling.broker_count)
-		platform_log("Internet play: no signalling brokers (network.signalling_brokers), so invites cannot work");
+		platform_log("Internet play: no signalling brokers (network.brokers_file), so invites cannot work");
+	else if (text[strspn(text, ", ")])
+		platform_log("Internet play: only the first %d signalling brokers are used", MAXIMUM_BROKERS);
 }
 
 void p2p_signal_select_sets(int *read, int *read_count, int *write, int *write_count, int maximum_count)
@@ -1441,7 +1822,8 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 	for (index = 0; index < signalling.broker_count; index++)
 	{
 		struct broker *broker = &signalling.brokers[index];
-		int retry = RETRY_INTERVAL * (broker->failures < 4 ? broker->failures + 1 : 4);
+		int retry = broker->failures < 1 ? RETRY_INTERVAL :
+			broker->failures >= 4 ? MAXIMUM_RETRY_INTERVAL : RETRY_INTERVAL << (broker->failures - 1);
 
 		switch (broker->state)
 		{
@@ -1468,13 +1850,18 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 			broker_readable(broker);
 		if (broker->state != _broker_ready)
 			continue;
-		if (elapsed(broker->heard_time, SILENCE_TIMEOUT))
+		if (elapsed(broker->heard_time, (unsigned long)broker->keep_alive * 1500 > SILENCE_TIMEOUT ?
+			(unsigned long)broker->keep_alive * 1500 : SILENCE_TIMEOUT))
 		{
 			broker_close(broker, 1);
 			continue;
 		}
-		if (elapsed(broker->sent_time, PING_INTERVAL))
+		if (elapsed(broker->sent_time, (unsigned long)broker->keep_alive * 500 < PING_INTERVAL ?
+			(unsigned long)broker->keep_alive * 500 : PING_INTERVAL))
+		{
 			broker_send(broker, 0xC0, NULL, 0);
+		}
+		broker_update_lobby(broker);
 	}
 	if (signalling.joining && !signalling.join_answered && elapsed(signalling.join_nonce_time, UNANSWERED_TIME))
 	{
@@ -1486,18 +1873,6 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 		send_join();
 	if (signalling.hosting && signalling.has_code && elapsed(signalling.code_sent_time, CODE_INTERVAL))
 		publish_code(NULL);
-	if (signalling.listed && elapsed(signalling.lobby_sent_time, LOBBY_INTERVAL))
-		publish_lobby(NULL);
-	if (signalling.browsing)
-	{
-		for (index = 0; index < MAXIMUM_LOBBIES; index++)
-		{
-			struct lobby *lobby = &signalling.lobbies[index];
-
-			if (lobby->used && elapsed(lobby->heard_time, LOBBY_STALE_TIME))
-				lobby->used = 0;
-		}
-	}
 }
 
 int p2p_signal_connected(void)
@@ -1555,37 +1930,7 @@ void p2p_signal_stop_hosting(void)
 	if (signalling.has_code)
 		clear_retained(signalling.code_topic);
 	signalling.has_code = 0;
-	p2p_signal_set_lobby(0, NULL, NULL, 0, 0);
 	sync_all_topics();
-}
-
-void p2p_signal_set_lobby(int listed, const char *code, const char *name, int players, int maximum)
-{
-	if (!listed || !code)
-	{
-		if (signalling.listed)
-			clear_retained(signalling.lobby_topic);
-		signalling.listed = 0;
-		return;
-	}
-	/* (called every pass while hosting: sent only when something changed) */
-	if (!name || !*name)
-		name = "Halo";
-	players = players < 0 ? 0 : players < 255 ? players : 255;
-	maximum = maximum < 0 ? 0 : maximum < 255 ? maximum : 255;
-	if (signalling.listed && !strcmp(signalling.lobby_code, code) &&
-		!strncmp(signalling.lobby_name, name, sizeof(signalling.lobby_name) - 1) &&
-		signalling.lobby_players == players && signalling.lobby_maximum == maximum)
-	{
-		return;
-	}
-	own_lobby_topic(signalling.lobby_topic);
-	snprintf(signalling.lobby_code, sizeof(signalling.lobby_code), "%s", code);
-	snprintf(signalling.lobby_name, sizeof(signalling.lobby_name), "%s", name);
-	signalling.lobby_players = players;
-	signalling.lobby_maximum = maximum;
-	signalling.listed = 1;
-	publish_lobby(NULL);
 }
 
 void p2p_signal_lookup_code(const char *code)
@@ -1603,42 +1948,6 @@ void p2p_signal_stop_lookup(void)
 {
 	signalling.looking_up = 0;
 	sync_all_topics();
-}
-
-void p2p_signal_browse(int on)
-{
-	if (on && !signalling.browsing)
-		memset(signalling.lobbies, 0, sizeof(signalling.lobbies));
-	signalling.browsing = on != 0;
-	sync_all_topics();
-}
-
-int p2p_signal_lobby_entry(int index, struct p2p_lobby_entry *entry)
-{
-	int slot;
-
-	/* the index-th entry in the table (whose order is arrival) */
-	for (slot = 0; slot < MAXIMUM_LOBBIES; slot++)
-	{
-		struct lobby const *lobby = &signalling.lobbies[slot];
-
-		if (!lobby->used || index-- > 0)
-			continue;
-		memset(entry, 0, sizeof(*entry));
-		snprintf(entry->code, sizeof(entry->code), "%s", lobby->code);
-		snprintf(entry->name, sizeof(entry->name), "%s", lobby->name);
-		entry->players = lobby->players;
-		entry->maximum = lobby->maximum;
-		entry->compatible = lobby->network_version == HALO_PORT_NETWORK_VERSION;
-		{
-			char own[2 * P2P_IDENTIFIER_SIZE + 1];
-
-			p2p_hex(p2p_identifier(), P2P_IDENTIFIER_SIZE, own);
-			entry->own = !strcmp(lobby->identifier, own);
-		}
-		return 1;
-	}
-	return 0;
 }
 
 void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token)
@@ -1661,4 +1970,63 @@ void p2p_signal_stop_joining(void)
 {
 	signalling.joining = 0;
 	sync_all_topics();
+}
+
+void p2p_signal_lobby_topics(int listed, int browsing)
+{
+	signalling.lobby_listed = listed;
+	signalling.lobby_browsing = browsing;
+	sync_all_topics();
+}
+
+void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing)
+{
+	int index;
+
+	if (size > MAXIMUM_LISTING_SIZE)
+		return;
+	memcpy(signalling.lobby_listing, listing, (size_t)size);
+	signalling.lobby_listing_size = size;
+	signalling.lobby_closing = closing;
+	signalling.lobby_version++;
+	/* (at once where the bucket allows; the rest in the coming passes) */
+	for (index = 0; index < signalling.broker_count; index++)
+		broker_update_lobby(&signalling.brokers[index]);
+}
+
+void p2p_signal_lobby_query(void)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		if (signalling.brokers[index].topics[_topic_slots][0])
+			signalling.brokers[index].query_pending = 1;
+		broker_update_lobby(&signalling.brokers[index]);
+	}
+}
+
+void p2p_signal_lobby_quit(void)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *broker = &signalling.brokers[index];
+		static const unsigned char disconnect[2] = { 0, 0 };
+
+		if (broker->state != _broker_ready)
+			continue;
+		/* (unless sent already: the tombstone and the clearing) */
+		if (broker_carries_lobby(broker) && signalling.lobby_listing_size &&
+			(broker->lobby_version != signalling.lobby_version || broker->lobby_clear_pending))
+		{
+			broker_publish_slot(broker, next_packet_identifier(broker), signalling.lobby_listing,
+				signalling.lobby_listing_size, 0);
+			broker_publish_slot(broker, next_packet_identifier(broker), NULL, 0, 0);
+		}
+		/* DISCONNECT (MQTT 5: a normal one, its reason and no properties) */
+		broker_send(broker, 0xE0, disconnect, broker->protocol == 5 ? 2 : 0);
+		broker_flush(broker);
+	}
 }

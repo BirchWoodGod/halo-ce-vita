@@ -82,8 +82,8 @@ static void check(int condition, const char *what)
 static unsigned long long clock_us = 1000000;
 static char menu[2048];
 static int menu_selected, menu_visible;
-static char joined_code[32];
-static int joined_from_lobby;
+static char joined_code[32], joined_id[40];
+static int refreshes, joined_from_lobby;
 static int lobby_public = -1, browsing, adhoc_connects, adhoc_mode = -1, adhoc_room = -1, adhoc_state_value;
 static int hosting;
 
@@ -136,17 +136,48 @@ int p2p_hosting_code(char *code, int size)
 
 void p2p_lobby_set_public(int listed) { lobby_public = listed; }
 void p2p_lobby_browse(int on) { browsing = on; }
+void p2p_lobby_refresh(void) { refreshes++; }
 
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 {
-	static const struct p2p_lobby_entry entries[] = {
-		{ "OWNN-GAME", "this vita", 1, 128, 1, 1 },
-		{ "HJ4T-9WXZ", "desktop host", 2, 128, 1, 0 },
-	};
-
-	if (!browsing || index >= 2)
+	if (!browsing || index >= 3)
 		return 0;
-	*entry = entries[index];
+	memset(entry, 0, sizeof(*entry));
+	entry->compatible = 1;
+	entry->maximum = 16;
+	if (index == 0)
+	{
+		snprintf(entry->id, sizeof(entry->id), "%032d", 1);
+		snprintf(entry->name, sizeof(entry->name), "this vita");
+		entry->players = 1;
+		entry->own = 1;
+	}
+	else if (index == 1)
+	{
+		snprintf(entry->id, sizeof(entry->id), "%032d", 2);
+		snprintf(entry->name, sizeof(entry->name), "desktop host");
+		snprintf(entry->map, sizeof(entry->map), "Blood Gulch");
+		snprintf(entry->rules, sizeof(entry->rules), "Slayer to 25 on Blood Gulch");
+		snprintf(entry->players_line, sizeof(entry->players_line), "2 of 16: alpha, bravo");
+		entry->players = 2;
+	}
+	else
+	{
+		snprintf(entry->id, sizeof(entry->id), "%032d", 3);
+		snprintf(entry->name, sizeof(entry->name), "locked one");
+		snprintf(entry->map, sizeof(entry->map), "Wizard");
+		snprintf(entry->rules, sizeof(entry->rules), "CTF on Wizard (HALO PC)");
+		entry->players = 1;
+		entry->locked = 1;
+		entry->pc_map = 1;
+	}
+	return 1;
+}
+
+int p2p_lobby_join(const char *id, const char *password)
+{
+	(void)password;
+	snprintf(joined_id, sizeof(joined_id), "%s", id);
 	return 1;
 }
 
@@ -942,9 +973,18 @@ static void test_online_rows(void)
 	frame(0);
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "desktop host") && !strstr(menu, "this vita"), "the lobby lists the others' games");
+	check(strstr(menu, "Blood Gulch") && strstr(menu, "Slayer to 25 on Blood Gulch") &&
+		strstr(menu, "2 of 16: alpha, bravo"), "a game's map, Rules and Players lines show");
+	check(strstr(menu, "Wizard         [pw] PC") != NULL, "a locked Halo PC game shows [pw] and PC");
+	press(VITA_BUTTON_SQUARE);
+	check(refreshes == 1, "square refreshes the list");
+	press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_code, "HJ4T-9WXZ") && browsing == 0, "cross joins the game's code and stops browsing");
-	check(joined_from_lobby, "... as a public lobby's game (its map downloads warn)");
+	check(!joined_id[0] && browsing == 1, "a locked game is not joined without its password");
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(joined_id, "00000000000000000000000000000002") && browsing == 0,
+		"cross joins the game by its listing and stops browsing");
 
 	/* hosting: the code shows in the Multiplayer tab */
 	hosting = 1;
@@ -976,7 +1016,7 @@ static void test_variables_kept(void)
 		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_VITA_NETWORK", "HALO_NET_COOP_LEVEL",
 		"HALO_NET_COOP_DIFFICULTY", "HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
-		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
+		"HALO_GXM_RTT_SYNC", "HALO_NET_HOST_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
 		"HALO_BUTTON_ICONS", "HALO_AI_PERCEPTION_LOD", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
 	};
 	int index, all = 1, choices = 0;
