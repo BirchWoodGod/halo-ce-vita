@@ -105,6 +105,10 @@ GAME_FLAGS = [
 # the TOML parser the platform layer reads config.toml with (port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
 KCP_DIR = Path("port/third_party/kcp")
+# internet play's signatures and password keys, for public games' listings
+# (port/linux/src/p2p_crypto.c, p2p_lobby.c)
+MONOCYPHER_DIR = Path("port/third_party/monocypher")
+MONOCYPHER_SOURCES = ("monocypher.c", "monocypher-ed25519.c")
 MUSL_MATH_DIR = Path("port/third_party/musl-math")
 # the self-updater's TLS (port/linux/src/posix_update.c)
 MBEDTLS_DIR = Path("port/third_party/mbedtls")
@@ -427,6 +431,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             f"-I{port_include}",
             f"-I{TOML_DIR}",
             f"-I{KCP_DIR}",
+            f"-I{MONOCYPHER_DIR}",
             "-Isource -Isource/cseries",
             sdk_flags,
         ])
@@ -481,6 +486,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
         add_object(TOML_DIR / "tomlc17.c", " ".join([abi, "-std=gnu11", "-w"]))
         # internet play's reliable streams (port/third_party/kcp; p2p.c)
         add_object(KCP_DIR / "ikcp.c", " ".join([abi, "-std=gnu11", "-w"]))
+        # internet play's signatures and password keys (port/third_party/monocypher)
+        for name in MONOCYPHER_SOURCES:
+            add_object(MONOCYPHER_DIR / name, " ".join([abi, "-std=gnu11", "-O2", "-w"]))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():
