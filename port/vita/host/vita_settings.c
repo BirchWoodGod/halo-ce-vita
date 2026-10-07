@@ -2595,7 +2595,7 @@ static void browse_input(unsigned long pressed)
 		browse_selected++;
 	if ((pressed & VITA_BUTTON_CROSS) && browse_selected < browse_count)
 	{
-		p2p_join_code(browse_entries[browse_selected].code);
+		p2p_join_lobby_entry(&browse_entries[browse_selected]);
 		set_notice("Joining %.20s...", browse_entries[browse_selected].name);
 		p2p_lobby_browse(0);
 		screen = code_for_join ? SCREEN_GUIDE : SCREEN_LIST;

@@ -350,6 +350,9 @@ static struct
 	int looking_up;
 	char lookup_code[P2P_CODE_LENGTH + 1];
 	unsigned long lookup_time;
+	/* (a public lobby entry's code: the host it is listed under) */
+	int lookup_has_host;
+	unsigned char lookup_host[P2P_IDENTIFIER_SIZE];
 	/* browsing the public lobby (asked from any thread; the p2p thread
 	tells the brokers) */
 	int browse_wanted;
@@ -2392,8 +2395,9 @@ static int parse_code(const char *text, char *code, int dash_required)
 	return *text == 0;
 }
 
-/* under p2p_lock */
-static int join_code(const char *code)
+/* under p2p_lock; host: the identifier of the host whose record alone is
+taken (a public lobby entry's), or NULL */
+static int join_code(const char *code, const unsigned char *host)
 {
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
@@ -2401,6 +2405,9 @@ static int join_code(const char *code)
 		return 1;
 	}
 	memcpy(p2p.lookup_code, code, sizeof(p2p.lookup_code));
+	p2p.lookup_has_host = host != NULL;
+	if (host)
+		memcpy(p2p.lookup_host, host, P2P_IDENTIFIER_SIZE);
 	p2p.lookup_requested = 1;
 	return 1;
 }
@@ -2415,7 +2422,7 @@ static int join_invite(const char *text)
 	int parsed = parse_invite(text, hash, token);
 
 	if (!parsed && parse_code(text, code, 1))
-		return join_code(code);
+		return join_code(code, NULL);
 	if (parsed < 0)
 		set_status("that invite is from an older version of the game, which this one cannot join");
 	if (parsed <= 0)
@@ -2487,7 +2494,32 @@ int p2p_join_code(const char *text)
 		return 1;
 	}
 	pthread_mutex_lock(&p2p_lock);
-	result = join_code(code);
+	result = join_code(code, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry)
+{
+	char code[P2P_CODE_LENGTH + 1];
+	unsigned char host[P2P_IDENTIFIER_SIZE];
+	int index;
+	int result;
+
+	if (!parse_code(entry->code, code, 0))
+		return 0;
+	for (index = 0; index < P2P_IDENTIFIER_SIZE; index++)
+	{
+		int high = hex_value(entry->host[index * 2]), low = high < 0 ? -1 : hex_value(entry->host[index * 2 + 1]);
+
+		if (low < 0)
+			return 0;
+		host[index] = (unsigned char)(high << 4 | low);
+	}
+	if (!p2p.running)
+		return 1;
+	pthread_mutex_lock(&p2p_lock);
+	result = join_code(code, host);
 	pthread_mutex_unlock(&p2p_lock);
 	return result;
 }
@@ -2503,7 +2535,7 @@ static void update_joining(void)
 		p2p.lookup_time = p2p_now();
 		set_status("looking up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
 		p2p_signal_start();
-		p2p_signal_lookup_code(p2p.lookup_code);
+		p2p_signal_lookup_code(p2p.lookup_code, p2p.lookup_has_host ? p2p.lookup_host : NULL);
 	}
 	else if (p2p.looking_up && elapsed(p2p.lookup_time, CODE_LOOKUP_TIMEOUT))
 	{

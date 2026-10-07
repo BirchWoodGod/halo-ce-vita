@@ -140,11 +140,19 @@ struct p2p_lobby_entry
 	int compatible;
 	/* this machine's own game */
 	int own;
+	/* the identifier the host is listed under (hexadecimal) */
+	char host[2 * 6 + 1];
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any
 case. Returns nonzero if it was a code (internet play must be on) */
 int p2p_join_code(const char *code);
+/* joins a public lobby entry's game by its code, whose record must be the
+host's the entry is listed under (anyone can publish a record for a code
+that the lobby shows: the record of another host is not taken, and the
+lookup goes on until the entry's host's own comes, or it times out);
+nonzero if the entry holds a code */
+int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry);
 /* while this machine hosts with internet play on: copies its code (with
 the dash) and returns nonzero */
 int p2p_hosting_code(char *code, int size);
