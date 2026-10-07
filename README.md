@@ -149,7 +149,15 @@ The settings panel's **Controls** tab has two pages laid out as the Xbox
 controller: **Button layout** puts each Xbox button (A, B, X, Y, Black,
 White, the triggers, the sticks' clicks, Back) on another Vita button (in
 play; the menus keep Cross / Circle and the D-pad), and **Touch zones**
-makes each zone press an Xbox button. The zones, all Off until set:
+makes each zone press an Xbox button. **Button icons**, the first row of
+Button layout, is Xbox by default: the game's own Xbox button icons. With
+**PlayStation** every button prompt (the HUD's "Press X to...", the menus'
+button hints) shows the Vita button that does it now instead: Cross, Circle,
+Square and Triangle drawn in the Xbox icons' place and colours, L, R, Start,
+Select, the D-pad and the touch zones by name. It follows your Button layout
+and touch zones (in the menus their fixed layout), applies at once, and the
+panel then names the Xbox buttons by what they do (Jump, Melee, Action...).
+The zones, all Off until set:
 
 | Zone | Where |
 | --- | --- |
@@ -166,7 +174,7 @@ further in only once held (Normal, the default: a 96-pixel border, 0.25 s;
 Light 48 / 0.15 s, Strong 144 / 0.4 s, Off no border and 0.1 s). A touch that starts outside a zone does nothing, and each finger
 counts on its own. The Touch zones page shows where the zones are.
 **Reset controls** (Controls, Advanced) puts look, crouch, the buttons and
-the zones back as shipped (gyro aiming and Show dev settings stay).
+the zones back as shipped (gyro aiming, Button icons and Show dev settings stay).
 
 **Gyro aiming** (the panel's Controls tab, its details on the **Gyro
 settings** page; Off until set): turning the Vita
