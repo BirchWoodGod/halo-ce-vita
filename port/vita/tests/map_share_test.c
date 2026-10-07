@@ -5,11 +5,15 @@ Desktop test of map sharing's rules (port/linux/game/map_share_protocol.c):
 the names a shared map may have, the messages' field checks, the receiving
 side's bookkeeping (order, bounds, digest, fingerprint), and the cache
 header a download must have, with truncated, oversized, badly named,
-damaged and lying files. run_map_share_test.sh builds it with the real
-SHA-256 (p2p_crypto.c) and zlib's CRC-32 to compare against.
+damaged and lying files; the capabilities a joiner and a host agree on,
+deflate streams (with the host's level changes, damaged, cut short, too
+long), a download continued from a kept part, and the resume record.
+run_map_share_test.sh builds it with the real SHA-256 (p2p_crypto.c) and
+the game's own zlib (its CRC-32 to compare against).
 
   MAP_SHARE_TEST_XBOX_MAP=<a modded Xbox .map>   also checks a real one
-  MAP_SHARE_TEST_CE_MAP=<a Custom Edition .map>  (and streams both through)
+  MAP_SHARE_TEST_CE_MAP=<a Custom Edition .map>  (and streams both through,
+  as they are and deflated, printing the ratio and deflate's speed)
   MAP_SHARE_TEST_CE_RESOURCE_MAP=<a Custom Edition .map that takes tags from
   all three resource maps, as Custom Edition's tool builds them>
 
@@ -25,7 +29,8 @@ resource maps are missing would stop as a damaged disc.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
+#include <time.h>
+#include "memory/zlib/zlib.h"
 
 static int failures;
 static int checks;
@@ -139,47 +144,47 @@ static void test_answer(void)
 	answer.size = 22310912;
 	answer.identity = 0x0BADF00D;
 	strcpy(answer.name, "mygulch");
-	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
-	CHECK(map_share_answer_valid(&answer, "MyGulch", 0x0BADF00D));
-	CHECK(!map_share_answer_valid(&answer, "othermap", 0x0BADF00D));
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00E));
+	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
+	CHECK(map_share_answer_valid(&answer, "MyGulch", 0x0BADF00D, 0));
+	CHECK(!map_share_answer_valid(&answer, "othermap", 0x0BADF00D, 0));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00E, 0));
 	answer.flags = 1;
-	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.flags = 3;
-	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.flags = 4;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.flags = -1;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.flags = 0;
 	/* oversized, truncated below a header, negative */
 	answer.size = (int32_t)MAP_SHARE_MAXIMUM_FILE_BYTES + 1;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.size = (int32_t)MAP_SHARE_MAXIMUM_FILE_BYTES;
-	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.size = MAP_SHARE_HEADER_BYTES - 1;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.size = -5;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.size = 4096;
 	answer.kind = 0;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.kind = NUMBER_OF_MAP_SHARE_ANSWERS;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	/* a refusal names the map, with a known reason */
 	answer.kind = _map_share_answer_refused;
 	answer.reason = _map_share_refusal_busy;
 	answer.identity = 0;
-	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	answer.reason = 99;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 	/* an offer of identity 0 (no map) is no offer */
 	answer.kind = _map_share_answer_offer;
 	answer.reason = 0;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0, 0));
 	memset(answer.name, 'm', sizeof(answer.name));
 	answer.identity = 0x0BADF00D;
-	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D));
+	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 }
 
 static void test_sha256(void)
@@ -231,15 +236,15 @@ static int stream(uint8_t const *file, uint32_t size, uint32_t chunk, uint32_t d
 		{
 			buffer[damage - sent] ^= 0x40;
 		}
-		if (map_share_receiver_accept(&receiver, (int32_t)sent, (int32_t)length, buffer) != _map_share_chunk_ok)
+		if (map_share_receiver_accept(&receiver, (int32_t)sent, (int32_t)length, buffer, NULL, NULL) != _map_share_chunk_ok)
 		{
 			return -2;
 		}
 		sent += length;
 		if (map_share_receiver_ack_due(&receiver))
 		{
-			receiver.acknowledged = receiver.received;
-			acknowledged = receiver.received;
+			receiver.acknowledged = receiver.stream_received;
+			acknowledged = receiver.stream_received;
 			acks++;
 		}
 	}
@@ -287,32 +292,32 @@ static void test_receiver(void)
 
 	/* the header is kept as it arrives, across chunks */
 	map_share_receiver_begin(&receiver, SIZE);
-	CHECK(map_share_receiver_accept(&receiver, 0, 700, file) == _map_share_chunk_ok);
-	CHECK(map_share_receiver_accept(&receiver, 700, 1000, file + 700) == _map_share_chunk_ok);
+	CHECK(map_share_receiver_accept(&receiver, 0, 700, file, NULL, NULL) == _map_share_chunk_ok);
+	CHECK(map_share_receiver_accept(&receiver, 700, 1000, file + 700, NULL, NULL) == _map_share_chunk_ok);
 	CHECK(memcmp(receiver.header, file, MAP_SHARE_HEADER_BYTES));
-	CHECK(map_share_receiver_accept(&receiver, 1700, 1000, file + 1700) == _map_share_chunk_ok);
+	CHECK(map_share_receiver_accept(&receiver, 1700, 1000, file + 1700, NULL, NULL) == _map_share_chunk_ok);
 	CHECK(!memcmp(receiver.header, file, MAP_SHARE_HEADER_BYTES));
 	CHECK(map_share_header_validate(receiver.header, SIZE, "mygulch", &custom_edition) == _map_share_header_ok && !custom_edition);
 
 	/* out of order, repeated, bad lengths, past the end */
 	memset(chunk, 0, sizeof(chunk));
 	map_share_receiver_begin(&receiver, 5000);
-	CHECK(map_share_receiver_accept(&receiver, 100, 100, chunk) == _map_share_chunk_out_of_order);
-	CHECK(map_share_receiver_accept(&receiver, -1, 100, chunk) == _map_share_chunk_out_of_order);
-	CHECK(map_share_receiver_accept(&receiver, 0, 0, chunk) == _map_share_chunk_bad_length);
-	CHECK(map_share_receiver_accept(&receiver, 0, -5, chunk) == _map_share_chunk_bad_length);
-	CHECK(map_share_receiver_accept(&receiver, 0, MAP_SHARE_CHUNK_BYTES + 1, chunk) == _map_share_chunk_bad_length);
-	CHECK(map_share_receiver_accept(&receiver, 0, MAP_SHARE_CHUNK_BYTES, chunk) == _map_share_chunk_ok);
-	CHECK(map_share_receiver_accept(&receiver, 0, 100, chunk) == _map_share_chunk_out_of_order);
-	CHECK(map_share_receiver_accept(&receiver, MAP_SHARE_CHUNK_BYTES, MAP_SHARE_CHUNK_BYTES, chunk) == _map_share_chunk_past_end);
+	CHECK(map_share_receiver_accept(&receiver, 100, 100, chunk, NULL, NULL) == _map_share_chunk_out_of_order);
+	CHECK(map_share_receiver_accept(&receiver, -1, 100, chunk, NULL, NULL) == _map_share_chunk_out_of_order);
+	CHECK(map_share_receiver_accept(&receiver, 0, 0, chunk, NULL, NULL) == _map_share_chunk_bad_length);
+	CHECK(map_share_receiver_accept(&receiver, 0, -5, chunk, NULL, NULL) == _map_share_chunk_bad_length);
+	CHECK(map_share_receiver_accept(&receiver, 0, MAP_SHARE_CHUNK_BYTES + 1, chunk, NULL, NULL) == _map_share_chunk_bad_length);
+	CHECK(map_share_receiver_accept(&receiver, 0, MAP_SHARE_CHUNK_BYTES, chunk, NULL, NULL) == _map_share_chunk_ok);
+	CHECK(map_share_receiver_accept(&receiver, 0, 100, chunk, NULL, NULL) == _map_share_chunk_out_of_order);
+	CHECK(map_share_receiver_accept(&receiver, MAP_SHARE_CHUNK_BYTES, MAP_SHARE_CHUNK_BYTES, chunk, NULL, NULL) == _map_share_chunk_past_end);
 	CHECK(receiver.received == MAP_SHARE_CHUNK_BYTES);
-	CHECK(map_share_receiver_accept(&receiver, MAP_SHARE_CHUNK_BYTES, 5000 - MAP_SHARE_CHUNK_BYTES, chunk) == _map_share_chunk_ok);
+	CHECK(map_share_receiver_accept(&receiver, MAP_SHARE_CHUNK_BYTES, 5000 - MAP_SHARE_CHUNK_BYTES, chunk, NULL, NULL) == _map_share_chunk_ok);
 	CHECK(map_share_receiver_ack_due(&receiver));
-	CHECK(map_share_receiver_accept(&receiver, 5000, 1, chunk) == _map_share_chunk_past_end);
+	CHECK(map_share_receiver_accept(&receiver, 5000, 1, chunk, NULL, NULL) == _map_share_chunk_past_end);
 	/* an offset near the top of the range does not wrap */
 	map_share_receiver_begin(&receiver, 0xFFFFFFF0u);
-	receiver.received = 0xFFFFFF00u;
-	CHECK(map_share_receiver_accept(&receiver, (int32_t)0xFFFFFF00u, 0x200, chunk) == _map_share_chunk_out_of_order);
+	receiver.received = receiver.stream_received = 0xFFFFFF00u;
+	CHECK(map_share_receiver_accept(&receiver, (int32_t)0xFFFFFF00u, 0x200, chunk, NULL, NULL) == _map_share_chunk_out_of_order);
 }
 
 static void test_headers(void)
@@ -407,6 +412,393 @@ static void test_identity(void)
 	CHECK(map_share_identity(46198208u * 0x9E3779B1u, 46198208, 0) == 1);
 }
 
+/* the capabilities: a query's and a start's reason, a valid reason to a
+host without them; offer flags only for what the joiner said */
+static void test_capabilities(void)
+{
+	struct map_share_request request;
+	struct map_share_answer_message answer;
+	uint32_t both = 1u << _map_share_capability_resume_bit | 1u << _map_share_capability_deflate_bit;
+
+	memset(&request, 0, sizeof(request));
+	request.command = _map_share_command_query;
+	request.reason = (int16_t)both;
+	request.identity = 0x1234;
+	strcpy(request.name, "mygulch");
+	/* (a host of test builds 1-3 checks the reason is a refusal's) */
+	CHECK(map_share_request_valid(&request) && request.reason < NUMBER_OF_MAP_SHARE_REFUSALS);
+	CHECK(map_share_request_capabilities(&request) == both);
+	request.command = _map_share_command_start;
+	request.offset = 1 << 20;
+	CHECK(map_share_request_valid(&request) && map_share_request_capabilities(&request) == both);
+	request.reason = 1;
+	CHECK(map_share_request_capabilities(&request) == 1);
+	/* (an ack's or a cancel's reason is no capability) */
+	request.command = _map_share_command_cancel;
+	request.reason = _map_share_refusal_cancelled;
+	CHECK(map_share_request_capabilities(&request) == 0);
+
+	memset(&answer, 0, sizeof(answer));
+	answer.kind = _map_share_answer_offer;
+	answer.size = 46198208;
+	answer.identity = 0x0BADF00D;
+	strcpy(answer.name, "pcgulch");
+	answer.flags = 1 << _map_share_offer_custom_edition_bit | 1 << _map_share_offer_resume_bit | 1 << _map_share_offer_deflate_bit;
+	CHECK(map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, both));
+	/* (a joiner that did not say it can, an older one: not valid) */
+	CHECK(!map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, 1u << _map_share_capability_resume_bit));
+	CHECK(!map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, 0));
+	answer.flags = 1 << _map_share_offer_custom_edition_bit | 1 << _map_share_offer_resume_bit;
+	CHECK(map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, 1u << _map_share_capability_resume_bit));
+	answer.flags = 1 << NUMBER_OF_MAP_SHARE_OFFER_FLAGS;
+	CHECK(!map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, both));
+}
+
+/* the bytes a receiver writes, gathered */
+struct gathered
+{
+	uint8_t *bytes;
+	uint32_t at;
+	uint32_t limit;
+	int fail_at_call;
+	int calls;
+};
+
+static int gather(void *context, uint8_t const *data, uint32_t length)
+{
+	struct gathered *gathered = context;
+
+	if (++gathered->calls == gathered->fail_at_call || gathered->at + length > gathered->limit)
+		return 0;
+	memcpy(gathered->bytes + gathered->at, data, length);
+	gathered->at += length;
+	return 1;
+}
+
+/* A host's deflate stream of file[from..file_size), in whole data messages
+as map_share.c fills them (16 KB of input at a time), its level changed
+every `switch_every` messages (0: never); a byte of message `damage_message`
+flipped (0: none); stopped after `stop_messages` (0: all); `extra`: one
+more message after the stream's end. The receiver (which holds
+file[0..from)) takes each. Returns the first refusal (ok when none), the
+stream's bytes in *stream_bytes. */
+static enum map_share_chunk_status deflate_stream(uint8_t const *file, uint32_t file_size, uint32_t from,
+	uint32_t switch_every, uint32_t damage_message, uint32_t stop_messages, int extra,
+	struct map_share_receiver *receiver, struct gathered *gathered, uint32_t *stream_bytes, double *seconds)
+{
+	static uint8_t message[MAP_SHARE_CHUNK_BYTES];
+	struct map_share_packer packer;
+	uint32_t position = from;
+	uint32_t wire = 0;
+	uint32_t messages = 0;
+	enum map_share_chunk_status status = _map_share_chunk_ok;
+	clock_t started;
+	double packing = 0.0;
+
+	CHECK(map_share_packer_begin(&packer));
+	while (!packer.ended && status == _map_share_chunk_ok)
+	{
+		uint32_t filled = 0;
+		int stuck = 0;
+
+		started = clock();
+		while (filled < MAP_SHARE_CHUNK_BYTES && !packer.ended && stuck < 4)
+		{
+			uint32_t input = file_size - position < 0x4000 ? file_size - position : 0x4000;
+			uint32_t taken;
+			long made = map_share_packer_pack(&packer, file + position, input, position + input == file_size, &taken,
+				message + filled, MAP_SHARE_CHUNK_BYTES - filled);
+
+			CHECK(made >= 0);
+			if (made < 0)
+				return _map_share_chunk_bad_stream;
+			stuck = made || taken ? 0 : stuck + 1;
+			position += taken;
+			filled += (uint32_t)made;
+		}
+		packing += (double)(clock() - started) / CLOCKS_PER_SEC;
+		CHECK(stuck < 4);
+		messages++;
+		if (switch_every && messages % switch_every == 0)
+			packer.level = packer.level ? 0 : MAP_SHARE_DEFLATE_LEVEL;
+		if (messages == damage_message)
+			message[filled / 2] ^= 0x10;
+		/* (whole messages but the last) */
+		CHECK(filled == MAP_SHARE_CHUNK_BYTES || packer.ended);
+		status = map_share_receiver_accept(receiver, (int32_t)wire, (int32_t)filled, message, gather, gathered);
+		wire += filled;
+		if (stop_messages && messages == stop_messages)
+			break;
+	}
+	if (extra && status == _map_share_chunk_ok)
+	{
+		memset(message, 0, 16);
+		status = map_share_receiver_accept(receiver, (int32_t)wire, 16, message, gather, gathered);
+	}
+	map_share_packer_end(&packer);
+	*stream_bytes = wire;
+	if (seconds)
+		*seconds = packing;
+
+	return status;
+}
+
+/* streams file[from..size) deflated to a receiver holding file[0..from)
+(read back); TRUE when all of it arrived, written as it is, with the file's
+digest */
+static int deflate_round_trip(uint8_t const *file, uint32_t size, uint32_t from, uint32_t switch_every,
+	uint32_t *stream_bytes, double *seconds)
+{
+	struct map_share_receiver receiver;
+	struct gathered gathered = { malloc(size), 0, size, 0, 0 };
+	struct halo_sha256_stream sha;
+	uint8_t expected[32];
+	uint8_t digest[32];
+	enum map_share_chunk_status status;
+	int whole;
+
+	memset(&receiver, 0, sizeof(receiver));
+	map_share_receiver_begin(&receiver, size);
+	map_share_receiver_add(&receiver, file, from);
+	memcpy(gathered.bytes, file, from);
+	gathered.at = from;
+	CHECK(map_share_receiver_start_stream(&receiver, 1));
+	CHECK(receiver.stream_received == 0 && receiver.received == from);
+	status = deflate_stream(file, size, from, switch_every, 0, 0, 0, &receiver, &gathered, stream_bytes, seconds);
+	CHECK(status == _map_share_chunk_ok);
+	CHECK(map_share_receiver_complete(&receiver));
+	CHECK(map_share_receiver_ack_due(&receiver));
+	halo_sha256_begin(&sha);
+	halo_sha256_add(&sha, file, size);
+	halo_sha256_end(&sha, expected);
+	map_share_receiver_digest(&receiver, digest);
+	whole = status == _map_share_chunk_ok && gathered.at == size && !memcmp(gathered.bytes, file, size) &&
+		!memcmp(digest, expected, 32);
+	map_share_receiver_end(&receiver);
+	free(gathered.bytes);
+
+	return whole;
+}
+
+static void test_deflate(void)
+{
+	enum { SIZE = 700000, KEPT = 123457 };
+	static uint8_t file[SIZE];
+	static uint8_t copy[SIZE];
+	struct map_share_receiver receiver;
+	struct gathered gathered = { copy, 0, SIZE, 0, 0 };
+	uint32_t stream_bytes;
+	uint32_t index;
+	uint32_t seed = 12345;
+	uint32_t identity;
+	uLong crc;
+	int whole;
+
+	/* half noise, half repeats (a map's pictures and its tag data) */
+	for (index = 0; index < SIZE; index++)
+	{
+		seed = seed * 1103515245u + 12345u;
+		file[index] = (index / 4096) % 2 ? (uint8_t)(seed >> 16) : (uint8_t)("tag data, repeated "[index % 19]);
+	}
+	make_header(file, 609, "pcgulch", SIZE, 0x800, 0x1000, 0xFFFFFFFF);
+	crc = crc32(crc32(0L, Z_NULL, 0), file, SIZE);
+
+	CHECK(deflate_round_trip(file, SIZE, 0, 0, &stream_bytes, NULL));
+	CHECK(stream_bytes < SIZE * 3 / 4);
+	/* the host's level changes (stored blocks while its CPU is short), every
+	few messages and every one */
+	CHECK(deflate_round_trip(file, SIZE, 0, 3, &stream_bytes, NULL));
+	CHECK(deflate_round_trip(file, SIZE, 0, 1, &stream_bytes, NULL));
+	CHECK(deflate_round_trip(file, SIZE, 0, 17, &stream_bytes, NULL));
+	/* continued from a kept part (the stream from there) */
+	CHECK(deflate_round_trip(file, SIZE, KEPT, 0, &stream_bytes, NULL));
+	CHECK(deflate_round_trip(file, SIZE, KEPT, 5, &stream_bytes, NULL));
+	CHECK(deflate_round_trip(file, SIZE, SIZE - 10, 0, &stream_bytes, NULL));
+	CHECK(deflate_round_trip(file, 4096, 0, 0, &stream_bytes, NULL));
+
+	/* the fingerprint from the CRC (no checksum in the header) */
+	memset(&receiver, 0, sizeof(receiver));
+	map_share_receiver_begin(&receiver, SIZE);
+	CHECK(map_share_receiver_start_stream(&receiver, 1));
+	CHECK(deflate_stream(file, SIZE, 0, 0, 0, 0, 0, &receiver, &gathered, &stream_bytes, NULL) == _map_share_chunk_ok);
+	identity = map_share_receiver_identity(&receiver);
+	CHECK(identity == map_share_identity(0xFFFFFFFF, SIZE, (uint32_t)crc));
+	map_share_receiver_end(&receiver);
+
+	/* damaged in transit: the stream does not inflate, or its digest
+	(zlib's Adler-32, then the SHA-256) says so */
+	{
+		struct halo_sha256_stream sha;
+		uint8_t expected[32];
+		uint8_t digest[32];
+		enum map_share_chunk_status status;
+
+		halo_sha256_begin(&sha);
+		halo_sha256_add(&sha, file, SIZE);
+		halo_sha256_end(&sha, expected);
+		for (index = 1; index < 60; index += 7)
+		{
+			memset(&receiver, 0, sizeof(receiver));
+			gathered.at = 0;
+			map_share_receiver_begin(&receiver, SIZE);
+			map_share_receiver_start_stream(&receiver, 1);
+			status = deflate_stream(file, SIZE, 0, 0, index, 0, 0, &receiver, &gathered, &stream_bytes, NULL);
+			map_share_receiver_digest(&receiver, digest);
+			whole = status == _map_share_chunk_ok && map_share_receiver_complete(&receiver) && !memcmp(digest, expected, 32);
+			CHECK(!whole);
+			map_share_receiver_end(&receiver);
+		}
+	}
+
+	/* cut short: not complete, no acknowledgement of an end */
+	memset(&receiver, 0, sizeof(receiver));
+	gathered.at = 0;
+	map_share_receiver_begin(&receiver, SIZE);
+	map_share_receiver_start_stream(&receiver, 1);
+	CHECK(deflate_stream(file, SIZE, 0, 0, 0, 20, 0, &receiver, &gathered, &stream_bytes, NULL) == _map_share_chunk_ok);
+	CHECK(!map_share_receiver_complete(&receiver) && receiver.received < SIZE);
+	CHECK(receiver.stream_received == 20 * MAP_SHARE_CHUNK_BYTES);
+	map_share_receiver_end(&receiver);
+
+	/* more after the stream's end, or a stream of a longer file than offered */
+	memset(&receiver, 0, sizeof(receiver));
+	gathered.at = 0;
+	map_share_receiver_begin(&receiver, SIZE);
+	map_share_receiver_start_stream(&receiver, 1);
+	CHECK(deflate_stream(file, SIZE, 0, 0, 0, 0, 1, &receiver, &gathered, &stream_bytes, NULL) == _map_share_chunk_bad_stream);
+	map_share_receiver_end(&receiver);
+	memset(&receiver, 0, sizeof(receiver));
+	gathered.at = 0;
+	map_share_receiver_begin(&receiver, SIZE - 1000);
+	map_share_receiver_start_stream(&receiver, 1);
+	CHECK(deflate_stream(file, SIZE, 0, 0, 0, 0, 0, &receiver, &gathered, &stream_bytes, NULL) == _map_share_chunk_bad_stream);
+	map_share_receiver_end(&receiver);
+	/* nor a shorter one: its end comes before the file's */
+	memset(&receiver, 0, sizeof(receiver));
+	gathered.at = 0;
+	map_share_receiver_begin(&receiver, SIZE + 1000);
+	map_share_receiver_start_stream(&receiver, 1);
+	CHECK(deflate_stream(file, SIZE, 0, 0, 0, 0, 0, &receiver, &gathered, &stream_bytes, NULL) == _map_share_chunk_bad_stream);
+	CHECK(!map_share_receiver_complete(&receiver));
+	map_share_receiver_end(&receiver);
+	/* the file not written (the memory card full) */
+	memset(&receiver, 0, sizeof(receiver));
+	gathered.at = 0;
+	gathered.fail_at_call = 7;
+	gathered.calls = 0;
+	map_share_receiver_begin(&receiver, SIZE);
+	map_share_receiver_start_stream(&receiver, 1);
+	CHECK(deflate_stream(file, SIZE, 0, 0, 0, 0, 0, &receiver, &gathered, &stream_bytes, NULL) == _map_share_chunk_write_failed);
+	map_share_receiver_end(&receiver);
+	gathered.fail_at_call = 0;
+	/* out of order */
+	memset(&receiver, 0, sizeof(receiver));
+	map_share_receiver_begin(&receiver, SIZE);
+	map_share_receiver_start_stream(&receiver, 1);
+	CHECK(map_share_receiver_accept(&receiver, 5, 10, file, NULL, NULL) == _map_share_chunk_out_of_order);
+	/* garbage for a zlib stream */
+	CHECK(map_share_receiver_accept(&receiver, 0, 64, file + 5000, NULL, NULL) == _map_share_chunk_bad_stream);
+	map_share_receiver_end(&receiver);
+	map_share_receiver_end(&receiver);
+}
+
+/* a download continued as the file's own bytes: from where the kept part
+ends, never from 0 */
+static void test_resume_raw(void)
+{
+	enum { SIZE = 100000, KEPT = 40000 };
+	static uint8_t file[SIZE];
+	static uint8_t copy[SIZE];
+	struct map_share_receiver receiver;
+	struct gathered gathered = { copy, KEPT, SIZE, 0, 0 };
+	struct halo_sha256_stream sha;
+	uint8_t expected[32];
+	uint8_t digest[32];
+	uint8_t kept_digest[32];
+	uint32_t index;
+
+	for (index = 0; index < SIZE; index++)
+		file[index] = (uint8_t)(index * 7 + (index >> 9));
+	make_header(file, 5, "mygulch", 0x01000000, 0x00800000, 0x100000, 0x12345678);
+	memcpy(copy, file, KEPT);
+	memset(&receiver, 0, sizeof(receiver));
+	map_share_receiver_begin(&receiver, SIZE);
+	/* (read back a piece at a time) */
+	for (index = 0; index < KEPT; index += 0x1000)
+		map_share_receiver_add(&receiver, file + index, KEPT - index < 0x1000 ? KEPT - index : 0x1000);
+	halo_sha256_begin(&sha);
+	halo_sha256_add(&sha, file, KEPT);
+	halo_sha256_end(&sha, expected);
+	map_share_receiver_digest_so_far(&receiver, kept_digest);
+	CHECK(!memcmp(kept_digest, expected, 32));
+	CHECK(!memcmp(receiver.header, file, MAP_SHARE_HEADER_BYTES));
+	CHECK(map_share_receiver_start_stream(&receiver, 0));
+	CHECK(receiver.stream_received == KEPT && receiver.acknowledged == KEPT);
+	CHECK(map_share_receiver_accept(&receiver, 0, 100, file, gather, &gathered) == _map_share_chunk_out_of_order);
+	for (index = KEPT; index < SIZE; index += MAP_SHARE_CHUNK_BYTES)
+	{
+		uint32_t length = SIZE - index < MAP_SHARE_CHUNK_BYTES ? SIZE - index : MAP_SHARE_CHUNK_BYTES;
+
+		CHECK(map_share_receiver_accept(&receiver, (int32_t)index, (int32_t)length, file + index, gather, &gathered) == _map_share_chunk_ok);
+	}
+	CHECK(map_share_receiver_complete(&receiver) && map_share_receiver_ack_due(&receiver));
+	halo_sha256_begin(&sha);
+	halo_sha256_add(&sha, file, SIZE);
+	halo_sha256_end(&sha, expected);
+	map_share_receiver_digest(&receiver, digest);
+	CHECK(!memcmp(digest, expected, 32) && !memcmp(copy, file, SIZE));
+	/* (a header with a checksum: the fingerprint is the checksum's) */
+	CHECK(map_share_receiver_identity(&receiver) == map_share_identity(0x12345678, SIZE, 0));
+}
+
+static void test_resume_record(void)
+{
+	struct map_share_resume resume;
+	struct map_share_resume back;
+	uint8_t bytes[MAP_SHARE_RESUME_RECORD_BYTES];
+	unsigned index;
+
+	memset(&resume, 0, sizeof(resume));
+	strcpy(resume.name, "Race-Track-#1");
+	resume.identity = 0xA38DD030;
+	resume.size = 97888771;
+	resume.flags = 1 << _map_share_offer_custom_edition_bit;
+	resume.kept = 50 << 20;
+	resume.saved_time = 1791331200u;
+	for (index = 0; index < 32; index++)
+		resume.kept_digest[index] = (uint8_t)(index * 9);
+	map_share_resume_encode(&resume, bytes);
+	CHECK(map_share_resume_decode(bytes, &back));
+	CHECK(!memcmp(&back, &resume, sizeof(resume)));
+	/* another magic or version, a name that is not one, a kept part past the
+	file, flags of no file kind */
+	bytes[0] ^= 1;
+	CHECK(!map_share_resume_decode(bytes, &back));
+	map_share_resume_encode(&resume, bytes);
+	bytes[4] = 2;
+	CHECK(!map_share_resume_decode(bytes, &back));
+	strcpy(resume.name, "../x");
+	map_share_resume_encode(&resume, bytes);
+	CHECK(!map_share_resume_decode(bytes, &back));
+	strcpy(resume.name, "pcgulch");
+	resume.kept = resume.size + 1;
+	map_share_resume_encode(&resume, bytes);
+	CHECK(!map_share_resume_decode(bytes, &back));
+	resume.kept = 0;
+	resume.flags = 1 << _map_share_offer_deflate_bit;
+	map_share_resume_encode(&resume, bytes);
+	CHECK(!map_share_resume_decode(bytes, &back));
+	resume.flags = 0;
+	resume.size = 100;
+	map_share_resume_encode(&resume, bytes);
+	CHECK(!map_share_resume_decode(bytes, &back));
+	resume.size = 4096;
+	map_share_resume_encode(&resume, bytes);
+	CHECK(map_share_resume_decode(bytes, &back));
+	memset(bytes + 8, 'x', MAP_SHARE_NAME_BYTES);
+	CHECK(!map_share_resume_decode(bytes, &back));
+}
+
 /* a real map through the whole path: header checked, streamed, fingerprinted */
 static void test_real_map(char const *path, char const *name, int expect_custom_edition)
 {
@@ -441,6 +833,17 @@ static void test_real_map(char const *path, char const *name, int expect_custom_
 	checksum = (uint32_t)bytes[0x64] | (uint32_t)bytes[0x65] << 8 | (uint32_t)bytes[0x66] << 16 | (uint32_t)bytes[0x67] << 24;
 	CHECK(identity == map_share_identity(checksum, (uint32_t)size, (uint32_t)crc));
 	printf("  %s: %ld bytes, %s, fingerprint 0x%08X\n", name, size, custom_edition ? "Custom Edition" : "Xbox", identity);
+	/* deflated (as a host deflates: level 1, the stream in whole messages),
+	and continued from half of it */
+	{
+		uint32_t stream_bytes;
+		double seconds;
+
+		CHECK(deflate_round_trip(bytes, (uint32_t)size, 0, 0, &stream_bytes, &seconds));
+		printf("  %s deflated: %.1f%% (%u bytes), %.1f MB/s here\n", name, stream_bytes * 100.0 / size, stream_bytes,
+			seconds > 0 ? size / seconds / 1e6 : 0.0);
+		CHECK(deflate_round_trip(bytes, (uint32_t)size, (uint32_t)size / 2, 4, &stream_bytes, NULL));
+	}
 	/* truncated on disk: its header no longer fits (Custom Edition), and
 	the fingerprint changes */
 	if (custom_edition)
@@ -610,6 +1013,10 @@ int main(void)
 	test_headers();
 	test_identity();
 	test_downloads_policy();
+	test_capabilities();
+	test_deflate();
+	test_resume_raw();
+	test_resume_record();
 	test_real_map(getenv("MAP_SHARE_TEST_XBOX_MAP"), "mygulch", 0);
 	test_real_map(getenv("MAP_SHARE_TEST_CE_MAP"), "pcgulch", 1);
 	test_resource_maps_used();
