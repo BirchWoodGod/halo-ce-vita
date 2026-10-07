@@ -429,8 +429,12 @@ static boolean custom_edition_cache_tags_convert(
 	(void)tag_cache_bytes;
 #endif
 
-	return custom_edition_bitmaps_verify(tag_cache, loaded_bytes) &&
-		custom_edition_reordered_bitmaps_find(tag_cache, loaded_bytes) &&
+	if (!custom_edition_bitmaps_verify(tag_cache, loaded_bytes))
+	{
+		return FALSE;
+	}
+	custom_edition_bitmaps_reduce(tag_cache, loaded_bytes);
+	return custom_edition_reordered_bitmaps_find(tag_cache, loaded_bytes) &&
 		custom_edition_scripts_convert(tag_cache, loaded_bytes) &&
 		custom_edition_cache_models_convert(tag_cache, report);
 }
