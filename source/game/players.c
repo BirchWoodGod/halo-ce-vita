@@ -2995,6 +2995,9 @@ boolean players_coop_bring_to_host(
 			missed_count++;
 	}
 	console_printf(FALSE, "bringto: %d brought, %d with no room", arrived_count - 1, missed_count);
+	/* (port: and in debug.txt: the Vita's Play page asks for it, and shows
+	no console) */
+	error(2 /* _error_silent */, "co-op: bringto: %d brought, %d with no room", arrived_count - 1, missed_count);
 
 	return arrived_count > 1;
 }
