@@ -6394,9 +6394,24 @@ static void immediate_emit(void)
 
 	if (device.immediate_count == device.immediate_capacity)
 	{
-		device.immediate_capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
-		device.immediate_vertices = realloc(device.immediate_vertices,
-			device.immediate_capacity * XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float));
+		unsigned long capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
+		float *grown = realloc(device.immediate_vertices, capacity * XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float));
+
+		if (!grown)
+		{
+			/* (the heap is exhausted: the draw is dropped - its vertices
+			so far and the rest, which no longer gather until the next
+			Begin - and the buffer kept) */
+			static int warned;
+
+			if (!warned++)
+				platform_log("immediate draw: out of memory for %lu vertices, the draw is dropped", capacity);
+			device.immediate_active = FALSE;
+			device.immediate_count = 0;
+			return;
+		}
+		device.immediate_vertices = grown;
+		device.immediate_capacity = capacity;
 	}
 	/* (the registers the draw carries, packed in register order: the draw's
 	attribute order, immediate_end) */
@@ -6467,9 +6482,25 @@ static int immediate_hold_room(unsigned long floats)
 {
 	if (floats <= held_immediate.capacity)
 		return 1;
-	held_immediate.capacity = floats > held_immediate.capacity * 2 ? floats : held_immediate.capacity * 2;
-	held_immediate.vertices = realloc(held_immediate.vertices, held_immediate.capacity * sizeof(float));
-	return held_immediate.vertices != NULL;
+	{
+		unsigned long capacity = floats > held_immediate.capacity * 2 ? floats : held_immediate.capacity * 2;
+		float *grown = realloc(held_immediate.vertices, capacity * sizeof(float));
+
+		if (!grown)
+		{
+			/* (the held vertices and capacity are kept, so the next draw
+			does not take a freed or NULL buffer for room; the caller drops
+			this draw) */
+			static int warned;
+
+			if (!warned++)
+				platform_log("immediate draw: out of memory holding %lu floats, the draw is dropped", floats);
+			return 0;
+		}
+		held_immediate.vertices = grown;
+		held_immediate.capacity = capacity;
+	}
+	return 1;
 }
 
 static void immediate_end(void)

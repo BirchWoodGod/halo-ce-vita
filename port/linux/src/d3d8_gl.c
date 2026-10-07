@@ -3469,9 +3469,24 @@ static void immediate_emit(void)
 
 	if (device.immediate_count == device.immediate_capacity)
 	{
-		device.immediate_capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
-		device.immediate_vertices = realloc(device.immediate_vertices,
-			device.immediate_capacity * floats * sizeof(float));
+		unsigned long capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
+		float *grown = realloc(device.immediate_vertices, capacity * floats * sizeof(float));
+
+		if (!grown)
+		{
+			/* (the heap is exhausted: the draw is dropped and the buffer
+			kept; the rest of its vertices no longer gather until the next
+			Begin) */
+			static int warned;
+
+			if (!warned++)
+				platform_log("immediate draw: out of memory for %lu vertices, the draw is dropped", capacity);
+			device.immediate_active = FALSE;
+			device.immediate_count = 0;
+			return;
+		}
+		device.immediate_vertices = grown;
+		device.immediate_capacity = capacity;
 	}
 	memcpy(device.immediate_vertices + device.immediate_count * floats, device.attributes, floats * sizeof(float));
 	device.immediate_count++;
