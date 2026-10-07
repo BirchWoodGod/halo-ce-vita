@@ -11,10 +11,11 @@ player is deathless; the level's scripts run as they would, so encounters
 and cinematics start as the player turns up near them. Logs each stop and
 "shader tour: done" at the end.
 
-A multiplayer map has no cutscene flags: its tour goes round the player
-starting locations instead (spread over the map for the game types'
-spawns), facing each one's way and then the opposite way, round and round
-until the program exits. It is how the harness walks a Custom Edition map
+A multiplayer map's tour goes round its player starting locations instead
+(spread over the map for the game types' spawns; its few cutscene flags are
+its scripts', and its next structure may be another time of day), facing
+each one's way and then the opposite way, round and round until the
+program exits. It is how the harness walks a Custom Edition map
 through its textures and objects as a player running about would (the
 texture caches, object counts over time).
 
@@ -69,7 +70,7 @@ void halo_shader_tour_update(
 	bsp_count = scenario->structure_bsp_references.count;
 	if (stop == 0)
 		hs_compile_and_evaluate("(set cheat_deathless_player true)");
-	if (flag_count == 0 && scenario->players.count > 0)
+	if (scenario->type == _scenario_type_multiplayer && scenario->players.count > 0)
 	{
 		/* (multiplayer: the starting locations, both ways, endlessly) */
 		long location_index = (stop / 2) % scenario->players.count;
