@@ -762,6 +762,114 @@ void hs_runtime_initialize(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (debug, HALO_HS_DUMP=host file) the scenario's globals and scripts as source text, rebuilt from the compiled
+syntax tree (function, script and global names, constants by type, object names) when a map's scripts start;
+for reading what a level's script does (a10's x10_chief in the cryo cinematic, issue #29) */
+void platform_log(const char *format, ...);
+#include <stdio.h>
+#include <stdlib.h>
+#undef fopen /* a host path, not an Xbox one */
+static void hs_dump_node(FILE *f, long node_index, int depth)
+{
+	struct scenario *scenario = global_scenario_get();
+	char const *strings = (char const *)scenario->hs_string_constants.address;
+	long size = scenario->hs_string_constants.size;
+	struct hs_syntax_node *node;
+	long child;
+
+	if (node_index == NONE || depth > 200)
+		return;
+	node = (struct hs_syntax_node *)datum_try_and_get(hs_syntax_data, node_index);
+	if (!node)
+	{
+		fprintf(f, "<bad %lx>", (unsigned long)node_index);
+		return;
+	}
+	if (TEST_FLAG(node->flags, 0 /* primitive */))
+	{
+		if (TEST_FLAG(node->flags, 2 /* variable */))
+		{
+			short g = (short)node->data;
+			if (!HS_GLOBAL_DESIGNATOR_IS_EXTERNAL((word)g) && g >= 0 && g < scenario->hs_globals.count)
+				fprintf(f, "%.32s", TAG_BLOCK_GET_ELEMENT(&scenario->hs_globals, g, struct hs_global)->name);
+			else
+				fprintf(f, "<global %x>", (unsigned)(word)g);
+			return;
+		}
+		switch (node->type)
+		{
+		case _hs_function_name: fprintf(f, "%s", hs_function_get((word)node->index)->name); break;
+		case _hs_type_boolean: fprintf(f, "%s", node->boolean_value ? "true" : "false"); break;
+		case _hs_type_real: fprintf(f, "%g", node->real_value); break;
+		case _hs_type_short_integer: fprintf(f, "%d", (int)node->short_value); break;
+		case _hs_type_long_integer: fprintf(f, "%ld", (long)node->data); break;
+		case _hs_type_string:
+		default:
+			if (node->type >= _hs_type_object_name && node->type <= _hs_type_scenery_name &&
+				(short)node->data >= 0 && (short)node->data < scenario->object_names.count)
+				fprintf(f, "%.31s", TAG_BLOCK_GET_ELEMENT(&scenario->object_names, (short)node->data, struct scenario_object_name)->name);
+			else if (node->string_offset >= 0 && node->string_offset < size)
+				fprintf(f, "\"%s\"", strings + node->string_offset);
+			else
+				fprintf(f, "<t%d %ld>", node->type, (long)node->data);
+			break;
+		}
+		return;
+	}
+	fprintf(f, "\n%*s(", depth * 2, "");
+	if (TEST_FLAG(node->flags, 1 /* script */) && node->index >= 0 && node->index < scenario->hs_scripts.count)
+		fprintf(f, "%.32s", TAG_BLOCK_GET_ELEMENT(&scenario->hs_scripts, node->index, struct hs_script)->name);
+	else
+		fprintf(f, "%s", hs_function_get((word)node->index)->name);
+	child = node->data;
+	if (child != NONE)
+	{
+		struct hs_syntax_node *c = (struct hs_syntax_node *)datum_try_and_get(hs_syntax_data, child);
+		child = c ? c->next_node_index : NONE;
+	}
+	while (child != NONE)
+	{
+		struct hs_syntax_node *c = (struct hs_syntax_node *)datum_try_and_get(hs_syntax_data, child);
+		fputc(' ', f);
+		hs_dump_node(f, child, depth + 1);
+		if (!c)
+			break;
+		child = c->next_node_index;
+	}
+	fputc(')', f);
+}
+
+static void hs_dump_scripts(void)
+{
+	char const *path = getenv("HALO_HS_DUMP");
+	struct scenario *scenario;
+	FILE *f;
+	short i;
+
+	if (!path || global_scenario_index == NONE || !(f = fopen(path, "w")))
+		return;
+	scenario = global_scenario_get();
+	for (i = 0; i < scenario->hs_globals.count; i++)
+	{
+		struct hs_global *g = TAG_BLOCK_GET_ELEMENT(&scenario->hs_globals, i, struct hs_global);
+		fprintf(f, "(global %d %.32s", g->type, g->name);
+		hs_dump_node(f, g->initialization_expression_index, 1);
+		fprintf(f, ")\n");
+	}
+	for (i = 0; i < scenario->hs_scripts.count; i++)
+	{
+		struct hs_script *s = TAG_BLOCK_GET_ELEMENT(&scenario->hs_scripts, i, struct hs_script);
+		fprintf(f, "\n(script %d %.32s", s->script_type, s->name);
+		hs_dump_node(f, s->root_expression_index, 1);
+		fprintf(f, ")\n");
+	}
+	fclose(f);
+	platform_log("hs-dump: %d globals, %d scripts written to %s",
+		(int)scenario->hs_globals.count, (int)scenario->hs_scripts.count, path);
+}
+#endif
+
 void hs_runtime_initialize_for_new_map(
 	void)
 {
@@ -845,6 +953,9 @@ void hs_runtime_initialize_for_new_map(
 
 	csmemset(hs_debug_data, 0,
 		BIT_VECTOR_SIZE_IN_BYTES(MAXIMUM_TRIGGER_VOLUMES_PER_SCENARIO));
+#ifdef HALO_LINUX
+	hs_dump_scripts();
+#endif
 
 	return;
 }
