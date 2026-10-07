@@ -91,6 +91,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_rejoin", _config_real, "0.0", "HALO_NETWORK_TEST_REJOIN", _environment_value, _platform_all,
 		"Seconds into an automated test game after which a joining machine leaves\n"
 		"it (as quitting from the pause menu does) and joins again, once; 0 never." },
+	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
+		"Times a joining machine of an automated test whose join ended before its\n"
+		"game began (a map download cut off, refused) joins again; 0 never." },
 	{ "debug.network_test_pickup_weapon", _config_string, "\"\"", "HALO_NETWORK_TEST_PICKUP_WEAPON", _environment_value,
 		_platform_all,
 		"The weapon network_test_pickup stands the player on: the first whose tag\n"
