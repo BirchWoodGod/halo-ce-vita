@@ -1677,12 +1677,20 @@ static void render_weapon_hud(
 			TEST_FLAG(map_type_flags, element->header.use_on_map_type))
 		{
 			state_index = element->header.state_type;
+#ifdef HALO_LINUX
+			/* (port) a scope's element, centred with the scope on a wide screen
+			(hud_draw.c hud_calculate_point) */
+			hud_draw_set_scope_centered(hud_static_element_shown_by_zoom(&element->static_element));
+#endif
 			hud_draw_static_element(
 				local_player_index,
 				&definition->absolute_placement,
 				&element->static_element,
 				state_flags[state_index],
 				hud_state->last_weapon_flash_time[state_index]);
+#ifdef HALO_LINUX
+			hud_draw_set_scope_centered(FALSE);
+#endif
 		}
 	}
 
