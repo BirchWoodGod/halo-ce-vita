@@ -295,6 +295,9 @@ static int gyro_have_sample;
 /* when the sensor last gave a sample, and the simulation last ran
 (process time, us) */
 static unsigned long long gyro_sensor_seen, gyro_simulated_at;
+/* the sensor's samples counted over its first seconds, for halo.log */
+static unsigned long long gyro_counted_since;
+static int gyro_counted, gyro_count_logged;
 /* HALO_GYRO_SIM's rates (degrees a second) */
 static int gyro_sim_set = -1;
 static float gyro_sim[3];
@@ -362,6 +365,7 @@ static void gyro_read(unsigned long long now, float angle[3])
 		gyro_counter = record->counter;
 		gyro_timestamp = record->timestamp;
 		gyro_sensor_seen = now;
+		gyro_counted++;
 		/* (a simulation in place of the sensor: its samples only counted) */
 		if (simulated)
 			continue;
@@ -372,6 +376,20 @@ static void gyro_read(unsigned long long now, float angle[3])
 		accel[1] = record->accelerometer.y;
 		accel[2] = record->accelerometer.z;
 		vita_gyro_filter_sample(&gyro_filter, rate, accel, dt, 1, angle);
+	}
+	/* (once, in halo.log: how often the sensor samples, and the bias then;
+	a hardware report says whether the gyro works) */
+	if (!gyro_counted_since)
+		gyro_counted_since = now;
+	else if (!gyro_count_logged && now - gyro_counted_since >= 5000000)
+	{
+		char line[128];
+
+		gyro_count_logged = 1;
+		snprintf(line, sizeof(line), "gyro: %d sensor samples a second; bias %+.2f %+.2f %+.2f deg/s (%d still seconds)",
+			gyro_counted / 5, gyro_filter.bias[0] / DEGREES, gyro_filter.bias[1] / DEGREES,
+			gyro_filter.bias[2] / DEGREES, gyro_filter.still_count);
+		vita_host_log(line);
 	}
 	if (simulated)
 	{
