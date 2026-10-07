@@ -789,6 +789,22 @@ boolean network_game_create_game_objects(
 			}
 		}
 	}
+#ifdef HALO_LINUX
+	/* port: a custom map that cannot be loaded here (memory, a protected
+	map, a missing resource map): the player is told why, and the game left
+	- a host's ends for everyone - for the menu, rather than stopped
+	(port/linux/game/custom_edition_cache.c) */
+	else if (custom_edition_cache_load_failure_show(options.map_name))
+	{
+		errors_clear();
+		error(_error_silent, "game_load() failed.");
+		/* (the menu's map at once: the rest of this frame reads the tags of
+		a map - the input's, in main_loop - before the next one leaves the
+		game, network_game_client_start_frame) */
+		main_menu_load();
+		network_game_abort();
+	}
+#endif
 	else
 	{
 		error(0, "game_load() failed.");

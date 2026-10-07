@@ -194,6 +194,7 @@ symbols in this file:
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include "load_profile.h"
+#include "custom_edition_cache.h"
 #endif
 
 /* ---------- constants */
@@ -1109,6 +1110,15 @@ boolean scenario_switch_structure_bsp(
 			}
 			result = TRUE;
 		}
+#ifdef HALO_LINUX
+		/* port: a Custom Edition map's first structure BSP that cannot be
+		loaded (memory) fails the map's load, which goes back to the menu
+		(scenario_load, custom_edition_cache_load_failure_show) */
+		else if (custom_edition_cache_tags_loaded() && !had_old_structure_bsp)
+		{
+			error(_error_silent, "failed to load structure bsp '%s'", reference->structure_bsp.name);
+		}
+#endif
 		else
 		{
 			error(_error_immediate, "failed to load structure bsp '%s'", reference->structure_bsp.name);
@@ -1177,6 +1187,15 @@ boolean scenario_load(
 		{
 			error(_error_delayed, "scenario doesn't have a structure bsp");
 		}
+#ifdef HALO_LINUX
+		/* port: a Custom Edition map whose structure BSP cannot be loaded
+		(custom_edition_structure_bsp_load: memory) lets its tags go, for
+		the menu's map loaded next (custom_edition_cache_load_failure_show) */
+		if (!result && custom_edition_cache_tags_loaded())
+		{
+			scenario_unload();
+		}
+#endif
 	}
 	else
 	{

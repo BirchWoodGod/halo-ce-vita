@@ -68,6 +68,15 @@ window above is not there (port/linux/src/xbox_memory.c) */
 int halo_custom_edition_enabled(void);
 void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
 void halo_custom_edition_tag_cache_release(void);
+/* zeroed memory blocks of their own for a Custom Edition map's converted
+geometry and its conversion (port/linux/src/xbox_memory.c); NULL when there
+is no room */
+void *halo_custom_edition_memory_alloc(unsigned long bytes);
+void halo_custom_edition_memory_free(void *address);
+/* the C heap's bytes in use and size (0: none fixed) */
+void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
+/* the contiguous window's bytes in blocks and free (where blocks are laid out) */
+void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
 /* where Halo PC keeps the channels of the pixels a Custom Edition bitmap
 just arrived at (an enum custom_edition_channel_order,
 port/linux/game/cache_file_formats.h), which the renderer then samples in
@@ -85,6 +94,10 @@ placement is placed in the running game
 (port/linux/game/custom_edition_objects.c) */
 struct scenario_object_datum;
 unsigned char custom_edition_vehicles_by_placement(void);
+/* when the last load of the Custom Edition map `map_name` names failed: the
+player is told why, and the caller goes back to the menu
+(port/linux/game/custom_edition_cache.c) */
+unsigned char custom_edition_cache_load_failure_show(char const *map_name);
 unsigned char custom_edition_vehicle_placement_allowed(struct scenario_object_datum const *placement);
 
 /* while TRUE, drawing shifts right to center 640-column layouts */

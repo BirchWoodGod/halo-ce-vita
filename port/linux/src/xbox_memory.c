@@ -43,6 +43,7 @@ static unsigned long block_page_count[CONTIGUOUS_PAGE_COUNT];
 static BOOL arena_reserved = FALSE;
 static pthread_mutex_t arena_lock = PTHREAD_MUTEX_INITIALIZER;
 static void *custom_edition_tag_cache = NULL;
+static unsigned long window_floor_page(void);
 
 #ifdef HALO_VITA
 /* no page protection on the Vita: protections are only recorded */
@@ -231,6 +232,101 @@ void halo_custom_edition_tag_cache_release(void)
 	custom_edition_allocation = NULL;
 }
 
+/* Memory blocks of their own (user memory: neither the C heap, a fixed
+48 MB on the Vita that the system's libraries share, nor the window, whose
+room below the game's blocks the map's Direct3D buffers need) for a Custom
+Edition map's structure BSP vertices, its relocation bitmap and the working
+memory of its conversion; zeroed. A few at a time. */
+#define CUSTOM_EDITION_MEMORY_BLOCKS 8
+
+static struct
+{
+	void *address;
+	unsigned long bytes;
+	int uid;
+} custom_edition_memory_blocks[CUSTOM_EDITION_MEMORY_BLOCKS];
+
+void *halo_custom_edition_memory_alloc(unsigned long bytes)
+{
+	void *result = NULL;
+	int index;
+	int uid = -1;
+
+	bytes = (bytes + PAGE_SIZE_BYTES - 1) & ~(PAGE_SIZE_BYTES - 1);
+	if (!bytes)
+		bytes = PAGE_SIZE_BYTES;
+	pthread_mutex_lock(&arena_lock);
+	for (index = 0; index < CUSTOM_EDITION_MEMORY_BLOCKS && custom_edition_memory_blocks[index].address; index++)
+		;
+	if (index < CUSTOM_EDITION_MEMORY_BLOCKS)
+	{
+#ifdef HALO_VITA
+		result = vita_host_block_alloc("halo_custom_edition_data", bytes, &uid);
+		if (result)
+			memset(result, 0, bytes);
+#else
+		result = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (result == MAP_FAILED)
+			result = NULL;
+#endif
+		if (result)
+		{
+			custom_edition_memory_blocks[index].address = result;
+			custom_edition_memory_blocks[index].bytes = bytes;
+			custom_edition_memory_blocks[index].uid = uid;
+		}
+	}
+	pthread_mutex_unlock(&arena_lock);
+	if (!result)
+		platform_log("custom edition: no room for a %lu KB memory block", bytes / 1024);
+	return result;
+}
+
+void halo_custom_edition_memory_free(void *address)
+{
+	int index;
+
+	if (!address)
+		return;
+	pthread_mutex_lock(&arena_lock);
+	for (index = 0; index < CUSTOM_EDITION_MEMORY_BLOCKS; index++)
+	{
+		if (custom_edition_memory_blocks[index].address == address)
+		{
+#ifdef HALO_VITA
+			vita_host_block_free(custom_edition_memory_blocks[index].uid);
+#else
+			munmap(address, custom_edition_memory_blocks[index].bytes);
+#endif
+			custom_edition_memory_blocks[index].address = NULL;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&arena_lock);
+}
+
+void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes)
+{
+#ifdef HALO_VITA
+	unsigned long top = layout_top_page;
+#else
+	unsigned long top = CONTIGUOUS_PAGE_COUNT;
+#endif
+	unsigned long page, used_pages = 0, free_pages = 0;
+
+	pthread_mutex_lock(&arena_lock);
+	for (page = window_floor_page(); page < top; page++)
+	{
+		if (page_protection[page])
+			used_pages++;
+		else
+			free_pages++;
+	}
+	pthread_mutex_unlock(&arena_lock);
+	*used = used_pages * PAGE_SIZE_BYTES;
+	*free_bytes = free_pages * PAGE_SIZE_BYTES;
+}
+
 BOOL platform_is_contiguous(const void *address)
 {
 	unsigned long value = (unsigned long)address;
@@ -250,6 +346,30 @@ static BOOL pages_free(unsigned long first, unsigned long count)
 			return FALSE;
 	}
 	return TRUE;
+}
+
+/* The lowest page a block may be laid out at (top down) without a place
+asked for: 0, but in the harness HALO_WINDOW_FLOOR_KB=n keeps them n KB up,
+so that the room below the game's blocks is the Vita's - its blocks are laid
+out from 106 MB up the 112 MB window (VITA_LAYOUT_TOP), the harness's from
+the top of 128 MB: 22528 KB matches */
+static unsigned long window_floor_page(void)
+{
+#ifdef HALO_VITA
+	return 0;
+#else
+	static long floor = -1;
+
+	if (floor < 0)
+	{
+		const char *setting = getenv("HALO_WINDOW_FLOOR_KB");
+
+		floor = setting ? atol(setting) / 4 : 0;
+		if (floor < 0 || (unsigned long)floor >= CONTIGUOUS_PAGE_COUNT)
+			floor = 0;
+	}
+	return (unsigned long)floor;
+#endif
 }
 
 void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
@@ -293,10 +413,13 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 		unsigned long top = CONTIGUOUS_PAGE_COUNT;
 #endif
 		unsigned long candidate = count <= top ? top - count : 0;
+		unsigned long floor = window_floor_page();
 
 		for (;;)
 		{
 			candidate -= candidate % alignment_pages;
+			if (candidate < floor)
+				break;
 			if (pages_free(candidate, count))
 			{
 				first = candidate;

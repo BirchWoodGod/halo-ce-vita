@@ -96,6 +96,9 @@ enum custom_edition_warning
 	/* the map holds OpenSauce's project_yellow ('yelo') or
 	project_yellow_globals ('gelo') tags */
 	_custom_edition_warning_opensauce_tags_bit,
+	/* the scenario's group was renamed to 'prot' (a "protected" map) and
+	is given back */
+	_custom_edition_warning_protected_bit,
 
 	NUMBER_OF_CUSTOM_EDITION_WARNINGS
 };

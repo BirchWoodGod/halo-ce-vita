@@ -145,15 +145,37 @@ struct model_geometry_totals
 	long vertex_count;
 	long strip_index_count;
 	long largest_part_vertex_count;
+	long largest_part_strip_index_count;
+};
+
+/* The map's model data, read a part at a time rather than whole (Extinction's
+is 21 MB, which the Vita's C heap never has): its vertices and strips each
+lie in model order, one region after the other, so each is read ahead into a
+buffer of its own (custom_edition_cache_model_data_read) */
+#define MODEL_DATA_READ_AHEAD_BYTES 0x80000
+
+struct model_data_stream
+{
+	byte *buffer;
+	unsigned long start;
+	unsigned long length;
+};
+
+struct model_data_reader
+{
+	struct custom_edition_load_report const *report;
+	/* room for a part's compressed vertices */
+	struct model_vertex_compressed *compressed;
+	struct model_data_stream vertices;
+	struct model_data_stream strips;
 };
 
 struct custom_edition_geometry_globals
 {
-	/* the model parts that have buffers, and the compressed vertices and
-	strips their buffers were made from */
+	/* the model parts that have buffers (each holding a copy of its
+	compressed vertices and strip) */
 	struct model_geometry_part **model_parts;
 	long model_part_count;
-	byte *model_geometry;
 
 	/* the structure BSP whose materials have buffers, and the compressed
 	vertices those were made from */
@@ -238,13 +260,12 @@ static boolean custom_edition_model_part_verify(
 }
 
 /* Whether this build can draw `model`: its renderer skins at most
-RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1 nodes, and every part must pass
-custom_edition_model_part_verify. Adds what its parts need to `totals`. */
-static boolean custom_edition_model_verify(
+RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1 nodes (each part is checked against
+its vertices and strip as it is converted, custom_edition_model_convert).
+Adds what its parts need to `totals`. */
+static boolean custom_edition_model_count(
 	struct model const *model,
 	char const *name,
-	struct custom_edition_load_report const *report,
-	byte const *model_data,
 	struct model_geometry_totals *totals)
 {
 	long geometry_index;
@@ -274,29 +295,48 @@ static boolean custom_edition_model_verify(
 				part_index,
 				struct custom_edition_model_part);
 
-			if (!custom_edition_model_part_verify(
-				model,
-				part,
-				geometry->parts.count,
-				(struct model_vertex_uncompressed const *)(model_data + part->vertex_offset),
-				(word const *)(model_data + report->model_index_data_offset + part->strip_offset)))
-			{
-				error(
-					_error_silent,
-					"custom edition: part %ld of geometry %ld of the model '%s' names a node, vertex, shader or part that does not exist, or has a vector this build cannot compress",
-					part_index,
-					geometry_index,
-					name);
-				return FALSE;
-			}
 			totals->part_count++;
 			totals->vertex_count += part->vertex_count;
 			totals->strip_index_count += part->strip_triangle_count + 2;
 			totals->largest_part_vertex_count = MAX(totals->largest_part_vertex_count, part->vertex_count);
+			totals->largest_part_strip_index_count = MAX(
+				totals->largest_part_strip_index_count,
+				part->strip_triangle_count + 2);
 		}
 	}
 
 	return TRUE;
+}
+
+/* `size` bytes at `offset` in the model data through `stream`'s read-ahead
+buffer (cache_file_formats.c checked every part's range lies within the
+model data); NULL when the map cannot be read */
+static void const *model_data_stream_read(
+	struct model_data_reader const *reader,
+	struct model_data_stream *stream,
+	unsigned long offset,
+	unsigned long size,
+	void *large_buffer)
+{
+	unsigned long model_data_bytes = reader->report->model_data_bytes;
+
+	if (offset >= stream->start && offset + size <= stream->start + stream->length)
+	{
+		return stream->buffer + (offset - stream->start);
+	}
+	if (size > MODEL_DATA_READ_AHEAD_BYTES)
+	{
+		return custom_edition_cache_model_data_read(reader->report, offset, size, large_buffer) ? large_buffer : NULL;
+	}
+	stream->start = offset;
+	stream->length = MIN(MODEL_DATA_READ_AHEAD_BYTES, model_data_bytes - offset);
+	if (!custom_edition_cache_model_data_read(reader->report, stream->start, stream->length, stream->buffer))
+	{
+		stream->length = 0;
+		return NULL;
+	}
+
+	return stream->buffer + (offset - stream->start);
 }
 
 /* Makes `part` this build's part for the Custom Edition part `source`,
@@ -317,7 +357,10 @@ static boolean custom_edition_model_part_convert(
 	long strip_index_count = source->strip_triangle_count + 2;
 
 	/* the renderer skins with the model's nodes */
-	csmemcpy(scratch, source_vertices, source->vertex_count * uncompressed_vertex_size);
+	if (scratch != source_vertices)
+	{
+		csmemcpy(scratch, source_vertices, source->vertex_count * uncompressed_vertex_size);
+	}
 	if (local_nodes)
 	{
 		long vertex_index;
@@ -337,7 +380,10 @@ static boolean custom_edition_model_part_convert(
 		source->vertex_count * vertex_size,
 		scratch,
 		source->vertex_count * uncompressed_vertex_size);
-	csmemcpy(strip, source_strip, strip_index_count * sizeof(*strip));
+	if (strip != source_strip)
+	{
+		csmemcpy(strip, source_strip, strip_index_count * sizeof(*strip));
+	}
 
 	part->flags = source->flags & ~FLAG(_model_geometry_part_local_nodes_bit);
 	part->shader_index = source->shader_index;
@@ -374,19 +420,21 @@ static boolean custom_edition_model_part_convert(
 			strip);
 }
 
-/* Converts every part of `model`, repacking each geometry's parts from
-Custom Edition's size to this build's in place, and records them in the
-globals; the geometry goes to `*vertices` and `*strips`, which advance. */
+/* Converts every part of `model` (named `name`), repacking each geometry's
+parts from Custom Edition's size to this build's in place, and records them
+in the globals; each part's vertices and strip are read from the model data
+to `scratch` and `strip_scratch` and checked first, and its vertices
+compressed to the reader's room for them before its buffers are made. */
 static boolean custom_edition_model_convert(
 	struct model *model,
-	struct custom_edition_load_report const *report,
-	byte const *model_data,
+	char const *name,
+	struct model_data_reader *reader,
 	struct model_vertex_uncompressed *scratch,
-	struct model_vertex_compressed **vertices,
-	word **strips)
+	word *strip_scratch)
 {
 	struct custom_edition_geometry_globals *globals = &custom_edition_geometry_globals;
 	boolean local_nodes = TEST_FLAG(model->flags, _gbxmodel_parts_have_local_nodes_bit);
+	long uncompressed_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_uncompressed);
 	long geometry_index;
 
 	for (geometry_index = 0; geometry_index < model->geometries.count; geometry_index++)
@@ -409,22 +457,60 @@ static boolean custom_edition_model_convert(
 				&geometry->parts,
 				part_index,
 				struct model_geometry_part);
+			unsigned long vertex_bytes = (unsigned long)source.vertex_count * uncompressed_vertex_size;
+			unsigned long strip_bytes = (unsigned long)(source.strip_triangle_count + 2) * sizeof(word);
+			void const *source_vertices = model_data_stream_read(
+				reader,
+				&reader->vertices,
+				source.vertex_offset,
+				vertex_bytes,
+				scratch);
+			void const *source_strip = source_vertices ? model_data_stream_read(
+				reader,
+				&reader->strips,
+				reader->report->model_index_data_offset + source.strip_offset,
+				strip_bytes,
+				strip_scratch) : NULL;
+
+			if (!source_vertices || !source_strip)
+			{
+				error(_error_silent, "custom edition: cannot read the model data of '%s'", name);
+				return FALSE;
+			}
+			/* (the convert below works in `scratch`; from the read-ahead
+			buffers the vertices and strip are copied there) */
+			if (source_vertices != scratch)
+			{
+				csmemcpy(scratch, source_vertices, vertex_bytes);
+			}
+			if (source_strip != strip_scratch)
+			{
+				csmemcpy(strip_scratch, source_strip, strip_bytes);
+			}
+			if (!custom_edition_model_part_verify(model, &source, geometry->parts.count, scratch, strip_scratch))
+			{
+				error(
+					_error_silent,
+					"custom edition: part %ld of geometry %ld of the model '%s' names a node, vertex, shader or part that does not exist, or has a vector this build cannot compress",
+					part_index,
+					geometry_index,
+					name);
+				return FALSE;
+			}
 
 			globals->model_parts[globals->model_part_count++] = part;
 			if (!custom_edition_model_part_convert(
 				part,
 				&source,
 				local_nodes,
-				(struct model_vertex_uncompressed const *)(model_data + source.vertex_offset),
-				(word const *)(model_data + report->model_index_data_offset + source.strip_offset),
 				scratch,
-				*vertices,
-				*strips))
+				strip_scratch,
+				scratch,
+				reader->compressed,
+				strip_scratch))
 			{
 				return FALSE;
 			}
-			*vertices += source.vertex_count;
-			*strips += source.strip_triangle_count + 2;
 		}
 	}
 	/* the parts' node indices are now the model's */
@@ -531,68 +617,86 @@ static boolean structure_material_convert(
 boolean custom_edition_models_convert(
 	byte *tag_cache,
 	unsigned long loaded_bytes,
-	struct custom_edition_load_report const *report,
-	byte const *model_data)
+	struct custom_edition_load_report const *report)
 {
 	struct custom_edition_geometry_globals *globals = &custom_edition_geometry_globals;
-	struct model_geometry_totals totals = { 0, 0, 0, 0 };
+	struct model_geometry_totals totals = { 0, 0, 0, 0, 0 };
+	long vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_compressed);
+	struct model_data_reader reader;
 	struct model_vertex_uncompressed *scratch;
-	struct model_vertex_compressed *vertices;
+	word *strip_scratch;
+	byte *working;
+	unsigned long scratch_bytes;
+	unsigned long strip_scratch_bytes;
+	unsigned long compressed_bytes;
+	unsigned long working_bytes;
 	struct model *model;
-	word *strips;
 	int32_t tag_index = NONE;
 	boolean success = TRUE;
 
-	assert(!globals->model_parts && !globals->model_geometry);
+	assert(!globals->model_parts);
 	while ((model = custom_edition_cache_tag_next(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, sizeof(*model), &tag_index)) != NULL)
 	{
-		if (!custom_edition_model_verify(
-			model,
-			custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index),
-			report,
-			model_data,
-			&totals))
+		if (!custom_edition_model_count(model, custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index), &totals))
 		{
 			return FALSE;
 		}
 	}
 
+	/* A part at a time: its vertices and strip read from the model data,
+	checked, compressed and given buffers, which hold copies of their own
+	(rasterizer_vertex_buffer_new and rasterizer_triangle_buffer_new: in the
+	window and the C heap) - so the map's model data (21 MB of Extinction's)
+	and its compressed geometry (10 MB) are never held whole. The working
+	memory, in a memory block of its own, for as long as this takes. */
+	scratch_bytes = (totals.largest_part_vertex_count * sizeof(*scratch) + 15) & ~15UL;
+	strip_scratch_bytes = (totals.largest_part_strip_index_count * sizeof(*strip_scratch) + 15) & ~15UL;
+	compressed_bytes = (totals.largest_part_vertex_count * vertex_size + 15) & ~15UL;
+	working_bytes = scratch_bytes + strip_scratch_bytes + compressed_bytes + 2 * MODEL_DATA_READ_AHEAD_BYTES;
 	globals->model_parts = malloc((totals.part_count + 1) * sizeof(*globals->model_parts));
-	globals->model_geometry = malloc(
-		totals.vertex_count * rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_compressed) +
-		totals.strip_index_count * sizeof(*strips) + 1);
-	scratch = malloc(totals.largest_part_vertex_count * sizeof(*scratch) + 1);
-	if (!globals->model_parts || !globals->model_geometry || !scratch)
+	working = halo_custom_edition_memory_alloc(working_bytes);
+	if (!globals->model_parts || !working)
 	{
-		error(_error_silent, "custom edition: out of memory for the geometry of %ld model parts", totals.part_count);
-		free(scratch);
+		error(
+			_error_silent,
+			"custom edition: out of memory for converting the geometry of %ld model parts (%lu KB)",
+			totals.part_count,
+			working_bytes / 1024);
+		halo_custom_edition_memory_free(working);
+		custom_edition_cache_load_failure_note("there is not enough memory for its models");
 		return FALSE;
 	}
-	vertices = (struct model_vertex_compressed *)globals->model_geometry;
-	strips = (word *)(vertices + totals.vertex_count);
+	scratch = (struct model_vertex_uncompressed *)working;
+	strip_scratch = (word *)(working + scratch_bytes);
+	csmemset(&reader, 0, sizeof(reader));
+	reader.report = report;
+	reader.compressed = (struct model_vertex_compressed *)(working + scratch_bytes + strip_scratch_bytes);
+	reader.vertices.buffer = working + scratch_bytes + strip_scratch_bytes + compressed_bytes;
+	reader.strips.buffer = reader.vertices.buffer + MODEL_DATA_READ_AHEAD_BYTES;
 
 	tag_index = NONE;
 	while (success &&
 		(model = custom_edition_cache_tag_next(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, sizeof(*model), &tag_index)) != NULL)
 	{
-		success = custom_edition_model_convert(model, report, model_data, scratch, &vertices, &strips);
+		char const *name = custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index);
+
+		success = custom_edition_model_convert(model, name, &reader, scratch, strip_scratch);
 		if (!success)
 		{
-			error(
-				_error_silent,
-				"custom edition: cannot make the buffers of the model '%s'",
-				custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index));
+			error(_error_silent, "custom edition: cannot make the buffers of the model '%s'", name);
+			custom_edition_cache_load_failure_note("there is not enough memory for its models");
 		}
 	}
-	free(scratch);
+	halo_custom_edition_memory_free(working);
 	if (success)
 	{
 		custom_edition_cache_tags_regroup(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, MODELS_GROUP_TAG);
 		error(
 			_error_silent,
-			"custom edition: %ld model parts converted (%ld vertices compressed)",
+			"custom edition: %ld model parts converted (%ld vertices compressed, %lu KB in their buffers)",
 			totals.part_count,
-			totals.vertex_count);
+			totals.vertex_count,
+			(totals.vertex_count * vertex_size + totals.strip_index_count * sizeof(word)) / 1024);
 	}
 
 	return success;
@@ -616,13 +720,8 @@ void custom_edition_models_dispose(
 	{
 		free(globals->model_parts);
 	}
-	if (globals->model_geometry)
-	{
-		free(globals->model_geometry);
-	}
 	globals->model_parts = NULL;
 	globals->model_part_count = 0;
-	globals->model_geometry = NULL;
 
 	return;
 }
@@ -670,10 +769,14 @@ boolean custom_edition_structure_bsp_load(
 	}
 
 	globals->structure_bsp = structure_bsp;
-	globals->structure_bsp_vertices = malloc(vertices_size + 1);
+	/* (kept for the game's own reads - object lighting, point queries -
+	with the buffers made from them; neither in the C heap, which the Vita
+	has little of, nor in the window, which the buffers need) */
+	globals->structure_bsp_vertices = halo_custom_edition_memory_alloc(vertices_size);
 	if (!globals->structure_bsp_vertices)
 	{
 		error(_error_silent, "custom edition: out of memory for 0x%lX bytes of structure BSP vertices", vertices_size);
+		custom_edition_cache_load_failure_note("there is not enough memory for its level geometry");
 		custom_edition_structure_bsp_unload();
 		return FALSE;
 	}
@@ -721,7 +824,7 @@ void custom_edition_structure_bsp_unload(
 	if (globals->structure_bsp)
 	{
 		structure_bsp_buffers_release(globals->structure_bsp);
-		free(globals->structure_bsp_vertices);
+		halo_custom_edition_memory_free(globals->structure_bsp_vertices);
 		globals->structure_bsp = NULL;
 		globals->structure_bsp_vertices = NULL;
 	}

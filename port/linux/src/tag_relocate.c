@@ -25,6 +25,9 @@ keeps a copy of what was read, before relocation. */
 
 /* (platform.h's; stderr on Linux, the log on the Vita) */
 void platform_log(const char *format, ...);
+/* (platform.h's: zeroed memory of its own, xbox_memory.c) */
+void *halo_custom_edition_memory_alloc(unsigned long bytes);
+void halo_custom_edition_memory_free(void *address);
 #include <string.h>
 
 #include "tag_relocate.h"
@@ -297,8 +300,11 @@ int halo_tag_relocate_linked_tags(void *tag_cache, unsigned long size, unsigned 
 	unsigned char *instances;
 	long count;
 
-	free(linked_relocated);
-	linked_relocated = calloc(window_bytes / 32 + 1, 1);
+	/* (in memory of its own, zeroed, rather than the C heap, of which the
+	Vita has a fixed 48 MB that the system's libraries share: 736 KB for a
+	23 MB window) */
+	halo_tag_relocate_linked_release();
+	linked_relocated = halo_custom_edition_memory_alloc(window_bytes / 32 + 1);
 	if (!linked_relocated)
 		return 0;
 	linked_base = link_base;
@@ -355,7 +361,7 @@ void halo_tag_relocate_linked_structure_bsp(void *tag_cache, void *bsp, unsigned
 
 void halo_tag_relocate_linked_release(void)
 {
-	free(linked_relocated);
+	halo_custom_edition_memory_free(linked_relocated);
 	linked_relocated = NULL;
 }
 

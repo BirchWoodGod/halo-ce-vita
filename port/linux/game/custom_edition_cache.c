@@ -227,34 +227,15 @@ static void custom_edition_cache_files_close(
 }
 
 /* Converts the loaded map's models for this build from its model data,
-which is read for the purpose and let go. */
+which custom_edition_models_convert reads a part at a time. */
 static boolean custom_edition_cache_models_convert(
 	uint8_t *tag_cache,
 	struct custom_edition_load_report const *report)
 {
-	struct custom_edition_file const *map = &custom_edition_cache_globals.map;
-	byte *model_data = malloc(report->model_data_bytes + 1);
-	boolean success = FALSE;
-
-	if (!model_data)
-	{
-		error(_error_silent, "custom edition: out of memory for 0x%lX bytes of model data", (unsigned long)report->model_data_bytes);
-	}
-	else if (!map->source.read(map->source.context, report->model_data_offset, report->model_data_bytes, model_data))
-	{
-		error(_error_silent, "custom edition: cannot read the model data");
-	}
-	else
-	{
-		success = custom_edition_models_convert(
-			tag_cache,
-			report->tag_data_bytes + report->resource_tag_bytes,
-			report,
-			model_data);
-	}
-	free(model_data);
-
-	return success;
+	return custom_edition_models_convert(
+		tag_cache,
+		report->tag_data_bytes + report->resource_tag_bytes,
+		report);
 }
 
 /* Makes the tags custom_edition_cache_load loaded into `tag_cache` this
@@ -393,6 +374,91 @@ static void custom_edition_cache_report_log(
 		(long)report->sound_sample_ranges_checked,
 		(long)report->relocated_pointer_count,
 		TEST_FLAG(report->warnings, _custom_edition_warning_checksum_mismatch_bit) ? "mismatched" : "matched");
+
+	return;
+}
+
+/* The last Custom Edition map loaded, and why it could not be, for the
+player (custom_edition_cache_load_failure_show): a map that cannot be loaded
+for want of memory, a resource map or anything else takes the player back
+to the menu with this, rather than stopping the game. */
+static struct
+{
+	char map_name[MAP_PATH_SIZE];
+	char reason[160];
+	boolean failed;
+} custom_edition_load_failure;
+
+static void custom_edition_cache_load_failure_begin(
+	char const *map_name)
+{
+	csstrncpy(custom_edition_load_failure.map_name, tag_name_strip_path(map_name), MAP_PATH_SIZE - 1);
+	custom_edition_load_failure.map_name[MAP_PATH_SIZE - 1] = 0;
+	custom_edition_load_failure.reason[0] = 0;
+	custom_edition_load_failure.failed = FALSE;
+
+	return;
+}
+
+/* the player's reason for a load's failure (the first one given stands: the
+most precise, a generic one following it) */
+static void custom_edition_cache_load_failure_reason(
+	char const *reason)
+{
+	custom_edition_load_failure.failed = TRUE;
+	if (!custom_edition_load_failure.reason[0])
+	{
+		csstrncpy(custom_edition_load_failure.reason, reason, sizeof(custom_edition_load_failure.reason) - 1);
+		custom_edition_load_failure.reason[sizeof(custom_edition_load_failure.reason) - 1] = 0;
+	}
+
+	return;
+}
+
+/* the reason for a failed custom_edition_cache_load, by its status */
+static char const *custom_edition_cache_load_status_reason(
+	enum cache_file_status status,
+	struct custom_edition_load_report const *report)
+{
+	switch (status)
+	{
+	case _cache_file_status_out_of_memory:
+		return "there is not enough memory for it";
+	case _cache_file_status_read_failed:
+		return "its file could not be read";
+	case _cache_file_status_missing_resource_map:
+	case _cache_file_status_missing_resource_item:
+		return "it needs Halo Custom Edition's bitmaps.map, sounds.map and loc.map in the maps folder";
+	case _cache_file_status_bad_scenario_tag:
+		return TEST_FLAG(report->warnings, _custom_edition_warning_protected_bit) ?
+			"it is a protected map whose tags this port cannot read" :
+			"it has no scenario this port can find (a protected or damaged map)";
+	default:
+		return cache_file_status_describe(status);
+	}
+}
+
+/* the C heap (on the Vita newlib's fixed 48 MB, which the system's
+libraries share; 0: no fixed size) and the memory window, for a map that
+runs out of either */
+static void custom_edition_cache_heap_log(
+	char const *when)
+{
+	unsigned long in_use;
+	unsigned long capacity;
+	unsigned long window_used;
+	unsigned long window_free;
+
+	platform_heap_usage(&in_use, &capacity);
+	platform_contiguous_usage(&window_used, &window_free);
+	error(
+		_error_silent,
+		"custom edition: %s: C heap %lu KB in use (of %lu KB), memory window %lu KB in use, %lu KB free",
+		when,
+		in_use / 1024,
+		capacity / 1024,
+		window_used / 1024,
+		window_free / 1024);
 
 	return;
 }
@@ -645,9 +711,11 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	short type;
 
 	assert(!globals->tags_loaded);
+	custom_edition_cache_load_failure_begin(map_name);
 	if (!custom_edition_map_path(map_name, path) || !custom_edition_file_open(&globals->map, path))
 	{
 		error(_error_silent, "custom edition: cannot open the map '%s'", map_name);
+		custom_edition_cache_load_failure_reason("its file could not be opened");
 		return NULL;
 	}
 	status = cache_file_identify(&globals->map.source, &identity);
@@ -657,6 +725,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		!globals->map.source.read(globals->map.source.context, 0, CACHE_FILE_HEADER_BYTES, header))
 	{
 		error(_error_silent, "custom edition: '%s' is not a loadable cache (%s)", path, cache_file_status_describe(status));
+		custom_edition_cache_load_failure_reason(cache_file_status_describe(status));
 		custom_edition_cache_files_close();
 		return NULL;
 	}
@@ -664,6 +733,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		path,
 		identity.build,
 		identity.has_opensauce_header ? ", OpenSauce" : "");
+	custom_edition_cache_heap_log("before loading");
 	/* the tag cache the map's tags are linked to the start of: at
 	0x40440000 when the platform has it there, else elsewhere and moved
 	below */
@@ -672,6 +742,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	if (!tag_cache)
 	{
 		error(_error_silent, "custom edition: no room for the 0x%lX byte tag cache of '%s'", (unsigned long)tag_cache_bytes, path);
+		custom_edition_cache_load_failure_reason("there is not enough memory for its tags");
 		custom_edition_cache_files_close();
 		return NULL;
 	}
@@ -679,6 +750,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	if ((uint32_t)(unsigned long)tag_cache != custom_edition_cache_linked_address())
 	{
 		error(_error_silent, "custom edition: this build cannot move the tags of '%s' off 0x40440000", path);
+		custom_edition_cache_load_failure_reason("this build cannot move its tags");
 		halo_custom_edition_tag_cache_release();
 		custom_edition_cache_files_close();
 		return NULL;
@@ -715,6 +787,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		globals->resource_files[_resource_map_sounds].source.size > COMBINED_OFFSET_LIMIT - COMBINED_SOUNDS_OFFSET))
 	{
 		error(_error_silent, "custom edition: a resource map is too large for this loader");
+		custom_edition_cache_load_failure_reason("a resource map in the maps folder is too large");
 		custom_edition_cache_files_close();
 		return NULL;
 	}
@@ -734,6 +807,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 			cache_file_status_describe(status),
 			(long)report.problem_tag_index,
 			(unsigned long)report.problem_location);
+		custom_edition_cache_load_failure_reason(custom_edition_cache_load_status_reason(status, &report));
 		halo_custom_edition_tag_cache_release();
 		custom_edition_cache_files_close();
 		return NULL;
@@ -742,6 +816,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	if (!custom_edition_cache_tags_convert(tag_cache, tag_cache_bytes, &report))
 	{
 		error(_error_silent, "custom edition: cannot run '%s'", path);
+		custom_edition_cache_load_failure_reason("its tags could not be converted for this port");
 		custom_edition_models_dispose();
 		custom_edition_bitmaps_dispose();
 #ifdef HALO_RELOCATABLE_TAG_CACHE
@@ -755,8 +830,55 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	globals->tag_cache = tag_cache;
 	globals->loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
 	globals->tags_loaded = TRUE;
+	custom_edition_cache_heap_log("loaded");
 
 	return (struct cache_file_tag_header *)tag_cache;
+}
+
+void custom_edition_cache_load_failure_note(
+	char const *reason)
+{
+	custom_edition_cache_load_failure_reason(reason);
+
+	return;
+}
+
+boolean custom_edition_cache_load_failure_show(
+	char const *map_name)
+{
+	void platform_show_message(char const *title, char const *message);
+	char message[320];
+
+	if (!custom_edition_load_failure.failed ||
+		csstrcasecmp(custom_edition_load_failure.map_name, tag_name_strip_path(map_name)))
+	{
+		return FALSE;
+	}
+	snprintf(
+		message,
+		sizeof(message),
+		"The custom map %s could not be loaded: %s.",
+		custom_edition_load_failure.map_name,
+		custom_edition_load_failure.reason[0] ? custom_edition_load_failure.reason : "see debug.txt");
+	error(_error_silent, "custom edition: %s", message);
+	platform_show_message("Halo: custom map", message);
+	custom_edition_load_failure.failed = FALSE;
+
+	return TRUE;
+}
+
+boolean custom_edition_cache_model_data_read(
+	struct custom_edition_load_report const *report,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer)
+{
+	struct custom_edition_file const *map = &custom_edition_cache_globals.map;
+
+	return map->stream &&
+		offset <= report->model_data_bytes &&
+		size <= report->model_data_bytes - offset &&
+		map->source.read(map->source.context, report->model_data_offset + (uint32_t)offset, (uint32_t)size, buffer);
 }
 
 boolean custom_edition_cache_tags_loaded(

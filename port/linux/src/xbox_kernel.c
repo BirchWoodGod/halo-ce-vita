@@ -819,12 +819,87 @@ struct global_block
 	/* 16 byte header keeps the payload 16 byte aligned */
 };
 
+
+/* the C library's struct mallinfo (glibc's and newlib's alike: ten words
+on these 32-bit targets), whose <malloc.h> the port's MSVC one hides */
+struct c_heap_information
+{
+	unsigned long arena, ordblks, smblks, hblks, hblkhd, usmblks, fsmblks, uordblks, fordblks, keepcost;
+};
+extern struct c_heap_information c_heap_information(void) __asm__("mallinfo");
+
+void platform_heap_usage(unsigned long *in_use, unsigned long *capacity)
+{
+	struct c_heap_information heap = c_heap_information();
+
+#ifdef HALO_VITA
+	/* newlib: the heap is one block of _newlib_heap_size_user */
+	extern unsigned int _newlib_heap_size_user;
+
+	*in_use = heap.uordblks;
+	*capacity = _newlib_heap_size_user;
+#else
+	const char *setting = getenv("HALO_HEAP_LIMIT_KB");
+
+	*in_use = heap.uordblks + heap.hblkhd;
+	*capacity = setting ? (unsigned long)atol(setting) * 1024 : 0;
+#endif
+}
+
+#if !defined(HALO_VITA) && defined(__GLIBC__)
+/* (harness) HALO_HEAP_LIMIT_KB=n: the Vita's C heap is newlib's, a fixed
+48 MB (vita_main.c, _newlib_heap_size_user) that the system's libraries
+and the game share; here a large allocation (64 KB or more) fails when the
+heap's use would pass n KB, as one larger than what is left fails there.
+malloc, calloc and realloc are glibc's own behind the check. */
+extern void *__libc_malloc(size_t size);
+extern void *__libc_calloc(size_t count, size_t size);
+extern void *__libc_realloc(void *pointer, size_t size);
+
+static int heap_limit_refuses(size_t size)
+{
+	static long limit_kb = -1;
+	unsigned long in_use, capacity;
+
+	if (limit_kb < 0)
+	{
+		const char *setting = getenv("HALO_HEAP_LIMIT_KB");
+
+		limit_kb = setting ? atol(setting) : 0;
+	}
+	if (!limit_kb || size < 0x10000)
+		return 0;
+	platform_heap_usage(&in_use, &capacity);
+	if (in_use + size <= (unsigned long)limit_kb * 1024)
+		return 0;
+	errno = ENOMEM;
+	return 1;
+}
+
+void *malloc(size_t size)
+{
+	return heap_limit_refuses(size) ? NULL : __libc_malloc(size);
+}
+
+void *calloc(size_t count, size_t size)
+{
+	return count && size > (size_t)-1 / count ? NULL :
+		heap_limit_refuses(count * size) ? NULL : __libc_calloc(count, size);
+}
+
+void *realloc(void *pointer, size_t size)
+{
+	return heap_limit_refuses(size) ? NULL : __libc_realloc(pointer, size);
+}
+#endif
+
 HGLOBAL WINAPI GlobalAlloc(UINT flags, SIZE_T size)
 {
-	struct global_block *block = (flags & GMEM_ZEROINIT) ?
+	struct global_block *block;
+
+	block = (flags & GMEM_ZEROINIT) ?
 		calloc(1, sizeof(*block) + 8 + size) :
 		malloc(sizeof(*block) + 8 + size);
-
 	if (!block)
 	{
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
