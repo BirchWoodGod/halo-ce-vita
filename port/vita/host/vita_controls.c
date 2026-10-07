@@ -4,7 +4,8 @@ VITA_CONTROLS.C
 The mapping layer between the Vita's controls and the Xbox controller
 (port/vita/include/vita_controls.h): touch zones, the Xbox button each zone
 presses and the Vita button of each Xbox button (the settings panel's
-Controls tab).
+Controls tab), and the Vita button each of the game's button icons
+shows with the panel's Button icons PlayStation (vita_button_glyph).
 vita_input.c feeds the touch panels in, vita_pad.c (the platform layer)
 asks for the controller's state, vita_settings.c shows the rows.
 
@@ -263,6 +264,65 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 	/* (A to the right trigger: the analog buttons in order) */
 	for (xbox = VITA_XBOX_A; xbox <= VITA_XBOX_RIGHT_TRIGGER; xbox++)
 		output->analog[xbox - VITA_XBOX_A] = held[xbox] ? 255 : 0;
+}
+
+/* ---------- button icons */
+
+int vita_button_icons_playstation(void)
+{
+	const char *value = getenv("HALO_BUTTON_ICONS");
+
+	return value && strcmp(value, "playstation") == 0;
+}
+
+static int glyph_of_button(unsigned long button)
+{
+	static const unsigned long bits[] = {
+		VITA_BUTTON_CROSS, VITA_BUTTON_CIRCLE, VITA_BUTTON_SQUARE, VITA_BUTTON_TRIANGLE, VITA_BUTTON_L, VITA_BUTTON_R,
+		VITA_BUTTON_UP, VITA_BUTTON_DOWN, VITA_BUTTON_LEFT, VITA_BUTTON_RIGHT, VITA_BUTTON_START, VITA_BUTTON_SELECT,
+	};
+	int index;
+
+	for (index = 0; index < (int)(sizeof(bits) / sizeof(bits[0])); index++)
+		if (button & bits[index])
+			return VITA_GLYPH_CROSS + index;
+	return VITA_GLYPH_NONE;
+}
+
+int vita_button_glyph(const struct vita_controls_config *config, int gamepad_button, int menus)
+{
+	/* the game's numbering: the analog buttons (A to the right trigger),
+	then the D-pad, Start, Back and the sticks' clicks */
+	static const int xbox_of_gamepad[16] = {
+		VITA_XBOX_A, VITA_XBOX_B, VITA_XBOX_X, VITA_XBOX_Y, VITA_XBOX_BLACK, VITA_XBOX_WHITE, VITA_XBOX_LEFT_TRIGGER,
+		VITA_XBOX_RIGHT_TRIGGER, VITA_XBOX_OFF, VITA_XBOX_OFF, VITA_XBOX_OFF, VITA_XBOX_OFF, VITA_XBOX_OFF,
+		VITA_XBOX_BACK, VITA_XBOX_LEFT_STICK, VITA_XBOX_RIGHT_STICK,
+	};
+	/* the menus' fixed layout (vita_controls_map) */
+	static const int menu_glyphs[16] = {
+		VITA_GLYPH_CROSS, VITA_GLYPH_CIRCLE, VITA_GLYPH_SQUARE, VITA_GLYPH_TRIANGLE, VITA_GLYPH_NONE, VITA_GLYPH_NONE,
+		VITA_GLYPH_L, VITA_GLYPH_R, VITA_GLYPH_UP, VITA_GLYPH_DOWN, VITA_GLYPH_LEFT, VITA_GLYPH_RIGHT, VITA_GLYPH_START,
+		VITA_GLYPH_SELECT, VITA_GLYPH_NONE, VITA_GLYPH_NONE,
+	};
+	int xbox, zone, glyph;
+
+	if (gamepad_button < 0 || gamepad_button >= 16)
+		return VITA_GLYPH_NONE;
+	if (menus)
+		return menu_glyphs[gamepad_button];
+	/* (Start stays on Start) */
+	if (gamepad_button == 12)
+		return VITA_GLYPH_START;
+	xbox = xbox_of_gamepad[gamepad_button];
+	if (xbox == VITA_XBOX_OFF)
+		return VITA_GLYPH_NONE;
+	glyph = glyph_of_button(config->xbox_button[xbox]);
+	if (glyph != VITA_GLYPH_NONE)
+		return glyph;
+	for (zone = 0; zone < VITA_ZONE_COUNT; zone++)
+		if (config->zone_xbox[zone] == xbox)
+			return VITA_GLYPH_TOUCH_TOP_LEFT + zone;
+	return VITA_GLYPH_NONE;
 }
 
 /* ---------- gyro aiming */

@@ -155,6 +155,13 @@ the enum's order; macros, for the panel's row initialisers) */
 /* (two letters each, for the panel's zone diagram) */
 #define VITA_XBOX_SHORT_NAMES "", "A", "B", "X", "Y", "Bl", "Wh", "LT", "RT", "LS", "RS", "Bk"
 
+/* the Xbox buttons by what they do in Halo's default controller layout, as
+the panel names them with the Button icons PlayStation (below), and in two
+letters */
+#define VITA_XBOX_ACTION_NAMES "Off", "Jump", "Melee", "Action", "Switch weapon", "Switch grenades", "Flashlight", \
+	"Throw grenade", "Fire", "Crouch", "Zoom", "Scoreboard"
+#define VITA_XBOX_ACTION_SHORT_NAMES "", "Jp", "Me", "Ac", "Sw", "Sg", "Fl", "Gr", "Fi", "Cr", "Zm", "Sc"
+
 /* the Xbox button a settings value names; VITA_XBOX_OFF if none */
 int vita_xbox_named(const char *value);
 
@@ -223,6 +230,55 @@ button is its Vita button's or a zone's (the left stick's click through the
 crouch toggle) */
 void vita_controls_map(const struct vita_controls_config *config, struct vita_controls_state *state,
 	unsigned long buttons, unsigned long touch, int menus, struct vita_controls_output *output);
+
+/* ---------- button icons
+
+The panel's Button icons (HALO_BUTTON_ICONS, Controls > Button layout):
+Xbox, the default, leaves the game's button icons as they are; PlayStation
+shows in their place the Vita button each Xbox button is on now, the
+mapping above's (in the menus the fixed layout, in play the Button layout
+and the touch zones), drawn by the game's HUD (source/interface/hud_draw.c)
+from these */
+enum
+{
+	/* on no Vita button (Black in the menus, a button set to None and no
+	zone): the Xbox's icon stays */
+	VITA_GLYPH_NONE,
+	VITA_GLYPH_CROSS,
+	VITA_GLYPH_CIRCLE,
+	VITA_GLYPH_SQUARE,
+	VITA_GLYPH_TRIANGLE,
+	VITA_GLYPH_L,
+	VITA_GLYPH_R,
+	VITA_GLYPH_UP,
+	VITA_GLYPH_DOWN,
+	VITA_GLYPH_LEFT,
+	VITA_GLYPH_RIGHT,
+	VITA_GLYPH_START,
+	VITA_GLYPH_SELECT,
+	/* the touch zones, in VITA_ZONE_*'s order */
+	VITA_GLYPH_TOUCH_TOP_LEFT,
+	VITA_GLYPH_TOUCH_TOP_RIGHT,
+	VITA_GLYPH_TOUCH_LEFT_EDGE,
+	VITA_GLYPH_TOUCH_RIGHT_EDGE,
+	VITA_GLYPH_TOUCH_REAR_LEFT,
+	VITA_GLYPH_TOUCH_REAR_RIGHT,
+	VITA_GLYPH_COUNT
+};
+
+#define VITA_BUTTON_ICONS_VALUES "xbox", "playstation"
+#define VITA_BUTTON_ICONS_NAMES "Xbox", "PlayStation"
+
+/* whether HALO_BUTTON_ICONS asks for PlayStation's (Xbox if unset) */
+int vita_button_icons_playstation(void);
+
+/* the glyph of the Vita button an Xbox controller button is on: the
+button as the game numbers it (A B X Y Black White, the left and right
+triggers, the D-pad's up down left right, Start, Back, the left and right
+sticks' clicks: 0 to 15), in the menus or in play. A button on a Vita
+button is that button, else the first touch zone set to it, else none (in
+play the D-pad is none: the game reads it only in the menus) */
+int vita_button_glyph(const struct vita_controls_config *config, int gamepad_button, int menus);
 
 /* ---------- gyro aiming
 

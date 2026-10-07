@@ -2174,3 +2174,301 @@ void hud_draw_numbers(
 
 	return;
 }
+
+#ifdef HALO_VITA
+/* ---------- (port) the Vita's button icons
+
+The settings panel's Button icons, PlayStation (vita_controls.h): each of
+the game's button icons - the HUD's prompts (hud_messaging.c), the icons in
+the menus' and the HUD's text (ui_widget.c draw_string_and_hack_in_icons)
+and the menus' button hints (the a_butn ... widgets, ui_widget.c) - shows
+the Vita button its Xbox button is on now (vita_pad.c, which follows the
+Button layout and the touch zones). Cross, circle, square and triangle are
+drawn here, centred where the Xbox icon's sprite would be and as tall as
+it: two strokes, a ring, a square, a triangle, quads of the game's own
+white bitmap (the virtual keyboard's caret), in the colour of the Xbox face
+button in the same place (A's green for cross, B's red, X's blue, Y's
+yellow: the callers take it from hud_globals' button icons). The others
+(L, R, Start, Select, the D-pad, the touch zones) are words in the game's
+font, drawn by the callers as the icons that are text are. */
+
+#include "input/input.h"
+#include "tag_files/tag_files.h"
+#include "tag_files/tag_groups.h"
+#include "vita_controls.h"
+
+#include <string.h>
+
+/* (vita_pad.c) */
+int vita_pad_button_glyph(short gamepad_button);
+
+enum
+{
+	VITA_GLYPH_RING_SEGMENTS = 24
+};
+
+short hud_vita_button_glyph(
+	short icon_index)
+{
+	/* (the buttons only: the sticks' icons, 16 and 17, are the Vita's too) */
+	if (icon_index < 0 || icon_index >= NUMBER_OF_GAMEPAD_BUTTONS)
+		return VITA_GLYPH_NONE;
+
+	return (short)vita_pad_button_glyph(icon_index);
+}
+
+/* the glyph of a menu's button hint widget, by its bitmap
+(ui\shell\bitmaps\a_butn, b_butn, x_butn, y_butn, a_butn_sm, b_butn_sm);
+VITA_GLYPH_NONE for any other bitmap */
+short hud_vita_menu_button_glyph(
+	long bitmap_group_index)
+{
+	char const *name;
+	char const *base;
+	char const *letter;
+
+	if (bitmap_group_index == NONE)
+		return VITA_GLYPH_NONE;
+	name = tag_get_name(bitmap_group_index);
+	if (!name)
+		return VITA_GLYPH_NONE;
+	base = strrchr(name, '\\');
+	base = base ? base + 1 : name;
+	letter = base[0] ? strchr("abxy", base[0]) : NULL;
+	if (!letter || strncmp(base + 1, "_butn", 5) || (base[6] && strcmp(base + 6, "_sm")))
+		return VITA_GLYPH_NONE;
+
+	/* (A B X Y: the game's buttons 0 to 3) */
+	return hud_vita_button_glyph((short)(letter - "abxy"));
+}
+
+/* the face button (_icon_a_button ... _icon_y_button) whose Xbox icon's
+colour a drawn glyph takes; NONE for one that is text */
+short hud_vita_glyph_face_icon(
+	short glyph)
+{
+	return glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_TRIANGLE ? glyph - VITA_GLYPH_CROSS : NONE;
+}
+
+/* the word of a glyph that is text (in the style of the game's own icon
+words, hud_icon_messages: "D-pad up"); NULL for a drawn one or none */
+wchar_t const *hud_vita_glyph_text(
+	short glyph)
+{
+	static wchar_t const *const texts[VITA_GLYPH_COUNT] =
+	{
+		NULL, NULL, NULL, NULL, NULL,
+		L"L", L"R",
+		L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
+		L"START", L"SELECT",
+		L"touch top left", L"touch top right", L"touch left edge", L"touch right edge",
+		L"rear touch left", L"rear touch right"
+	};
+
+	return glyph > VITA_GLYPH_NONE && glyph < VITA_GLYPH_COUNT ? texts[glyph] : NULL;
+}
+
+static void vita_glyph_quad(
+	struct bitmap_data *white,
+	real_point2d const *corners,
+	pixel32 color)
+{
+	struct dynamic_screen_vertex vertices[4];
+	struct rasterizer_dynamic_screen_geometry_parameters parameters;
+	short vertex_index;
+
+	for (vertex_index = 0; vertex_index < 4; vertex_index++)
+	{
+		vertices[vertex_index].position = corners[vertex_index];
+		vertices[vertex_index].texture_coordinates.x = 0.5f;
+		vertices[vertex_index].texture_coordinates.y = 0.5f;
+		vertices[vertex_index].color = color;
+	}
+	csmemset(&parameters, 0, sizeof(parameters));
+	parameters.map_texture_scale[0].i = 1.0f;
+	parameters.map_texture_scale[0].j = 1.0f;
+	parameters.map_scale[0].i = 1.0f;
+	parameters.map_scale[0].j = 1.0f;
+	parameters.framebuffer_blend_function = _shader_framebuffer_blend_function_alpha_multiply_add;
+	parameters.map[0] = white;
+	rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
+
+	return;
+}
+
+/* a closed outline: the band between an outer and an inner polygon, a quad
+per side */
+static void vita_glyph_outline(
+	struct bitmap_data *white,
+	real_point2d const *outer,
+	real_point2d const *inner,
+	short count,
+	pixel32 color)
+{
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		short next = (index + 1) % count;
+		real_point2d corners[4];
+
+		corners[0] = outer[index];
+		corners[1] = outer[next];
+		corners[2] = inner[next];
+		corners[3] = inner[index];
+		vita_glyph_quad(white, corners, color);
+	}
+
+	return;
+}
+
+/* a polygon of `count` corners round (x, y), `radius` out, the first at
+`angle` (radians, the screen's y down) */
+static void vita_glyph_polygon(
+	real_point2d *points,
+	short count,
+	real x,
+	real y,
+	real radius,
+	real angle)
+{
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		real theta = angle + index * 2.0f * 3.14159265f / count;
+
+		points[index].x = x + radius * (real)cos(theta);
+		points[index].y = y + radius * (real)sin(theta);
+	}
+
+	return;
+}
+
+boolean hud_vita_glyph_draw_in_rect(
+	short glyph,
+	real_rectangle2d const *rectangle,
+	pixel32 color)
+{
+	long white_index = tag_loaded(BITMAP_GROUP_TAG, "ui\\shell\\bitmaps\\white");
+	struct bitmap_data *white;
+	real width = rectangle->x1 - rectangle->x0;
+	real height = rectangle->y1 - rectangle->y0;
+	real x = (rectangle->x0 + rectangle->x1) * 0.5f;
+	real y = (rectangle->y0 + rectangle->y1) * 0.5f;
+	/* half the glyph's size and its strokes' width: as big as the Xbox
+	button in its sprite (its oval about 0.9 of the sprite's width), a
+	stroke an eighth of that */
+	real half = (width < height ? width : height) * 0.46f;
+	real stroke = half * 0.26f;
+	real_point2d outer[VITA_GLYPH_RING_SEGMENTS];
+	real_point2d inner[VITA_GLYPH_RING_SEGMENTS];
+
+	if (white_index == NONE || hud_vita_glyph_face_icon(glyph) == NONE)
+		return FALSE;
+	white = bitmap_group_get_bitmap_from_sequence(white_index, 0, 0);
+	if (!white || !_texture_cache_bitmap_get_hardware_format(white, FALSE, TRUE))
+		return FALSE;
+	if (stroke < 1.5f)
+		stroke = 1.5f;
+
+	switch (glyph)
+	{
+	case VITA_GLYPH_CROSS:
+		{
+			/* two strokes corner to corner of a square a little smaller
+			than the others */
+			real reach = half * 0.78f;
+			real offset = stroke * 0.5f * 0.70710678f;
+			real_point2d corners[4];
+			short diagonal;
+
+			for (diagonal = 0; diagonal < 2; diagonal++)
+			{
+				real sign = diagonal ? -1.0f : 1.0f;
+				/* (the second stroke's corners the other way round: both
+				wound alike, the renderer drawing only one winding) */
+				short first = diagonal ? 3 : 1;
+				short last = diagonal ? 1 : 3;
+
+				corners[0].x = x - reach + offset;
+				corners[0].y = y - sign * (reach + offset);
+				corners[first].x = x + reach + offset;
+				corners[first].y = y + sign * (reach - offset);
+				corners[2].x = x + reach - offset;
+				corners[2].y = y + sign * (reach + offset);
+				corners[last].x = x - reach - offset;
+				corners[last].y = y - sign * (reach - offset);
+				vita_glyph_quad(white, corners, color);
+			}
+		}
+		break;
+
+	case VITA_GLYPH_CIRCLE:
+		vita_glyph_polygon(outer, VITA_GLYPH_RING_SEGMENTS, x, y, half, 0.0f);
+		vita_glyph_polygon(inner, VITA_GLYPH_RING_SEGMENTS, x, y, half - stroke, 0.0f);
+		vita_glyph_outline(white, outer, inner, VITA_GLYPH_RING_SEGMENTS, color);
+		break;
+
+	case VITA_GLYPH_SQUARE:
+		{
+			/* (a square's corners are a polygon of four, from 45 degrees;
+			its side 1.6 half) */
+			real radius = half * 0.8f * 1.41421356f;
+
+			vita_glyph_polygon(outer, 4, x, y, radius, 3.14159265f * 0.25f);
+			vita_glyph_polygon(inner, 4, x, y, radius - stroke * 1.41421356f, 3.14159265f * 0.25f);
+			vita_glyph_outline(white, outer, inner, 4, color);
+		}
+		break;
+
+	case VITA_GLYPH_TRIANGLE:
+		{
+			/* point up, its centre a quarter of its radius low so that it
+			is as high as the others and on the same middle (an
+			equilateral's inner one is in by the stroke where its corners
+			are in by twice it) */
+			real radius = half * 1.15f;
+			real centre = y + radius * 0.25f;
+
+			vita_glyph_polygon(outer, 3, x, centre, radius, -3.14159265f * 0.5f);
+			vita_glyph_polygon(inner, 3, x, centre, radius - 2.0f * stroke, -3.14159265f * 0.5f);
+			vita_glyph_outline(white, outer, inner, 3, color);
+		}
+		break;
+	}
+
+	return TRUE;
+}
+
+/* a glyph where hud_draw_bitmap_direct would have drawn the Xbox icon's
+sprite: the same placement, clip and scale. FALSE if it could not be drawn
+(the caller draws the Xbox icon) */
+boolean hud_vita_glyph_draw(
+	short glyph,
+	struct bitmap_data const *bitmap,
+	short placement,
+	point2d const *point,
+	real_rectangle2d const *clip,
+	real scale,
+	pixel32 color)
+{
+	real_rectangle2d default_clip;
+	real_rectangle2d bounds;
+	real_rectangle2d rectangle;
+
+	default_clip.x0 = 0.0f;
+	default_clip.x1 = 1.0f;
+	default_clip.y0 = 0.0f;
+	default_clip.y1 = 1.0f;
+	if (!clip)
+		clip = &default_clip;
+	hud_calculate_bitmap_bounds(bitmap, placement, clip, &bounds, FALSE);
+	rectangle.x0 = point->x + bounds.x0 * scale;
+	rectangle.x1 = point->x + bounds.x1 * scale;
+	rectangle.y0 = point->y + bounds.y0 * scale;
+	rectangle.y1 = point->y + bounds.y1 * scale;
+
+	return hud_vita_glyph_draw_in_rect(glyph, &rectangle, color);
+}
+#endif

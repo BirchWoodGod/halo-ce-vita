@@ -144,6 +144,31 @@ void hud_draw_numbers(
 	long flash_reference_time,
 	real override_scale);
 
+#ifdef HALO_VITA
+/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a glyph is
+a VITA_GLYPH_* (port/vita/include/vita_controls.h), 0 for the Xbox's icon */
+short hud_vita_button_glyph(
+	short icon_index);
+short hud_vita_menu_button_glyph(
+	long bitmap_group_index);
+short hud_vita_glyph_face_icon(
+	short glyph);
+wchar_t const *hud_vita_glyph_text(
+	short glyph);
+boolean hud_vita_glyph_draw(
+	short glyph,
+	struct bitmap_data const *bitmap,
+	short placement,
+	point2d const *point,
+	real_rectangle2d const *clip,
+	real scale,
+	pixel32 color);
+boolean hud_vita_glyph_draw_in_rect(
+	short glyph,
+	real_rectangle2d const *rectangle,
+	pixel32 color);
+#endif
+
 /* ---------- public code */
 
 __inline short check_stack_buffer(

@@ -94,7 +94,9 @@ In the menus the D-pad moves the selection. The settings panel's Controls
 tab has two pages laid out as the Xbox controller: Button layout puts each
 Xbox button on another Vita button (in play only: the menus keep this
 layout), and Touch zones makes each touch zone (below) press an Xbox
-button.
+button. Button layout's Button icons (Xbox by default) set to PlayStation
+makes the game's button icons show the Vita button each Xbox button is on
+now (below).
 
 **Touch zones** (`port/vita/host/vita_controls.c`; positions in the
 screen's 960 x 544 pixels, the rear pad scaled to the same as seen from the
@@ -197,10 +199,30 @@ Graphics, **Advanced**:
 | Crouch | Toggle | the left stick click (crouch): a press crouches and the next stands (Hold: crouch while held), from its Vita button or a touch zone |
 | Gyro aiming | Off | turning the Vita aims, with the right stick: On, While zoomed, While holding (the Gyro button) |
 | Rear touch guard | Normal | the rear zones ignore a touch that starts near the pad's edges (where the hands holding the Vita rest) and count once held: Off (no border, 0.1 s), Light, Normal (96 px, 0.25 s), Strong (144 px, 0.4 s) |
-| Button layout > | As shipped | A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back: the Vita button of each in play (Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select as shipped; None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both. The row says Custom once one is moved |
+| Button layout > | As shipped | Button icons (Xbox; PlayStation: below), then A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back: the Vita button of each in play (Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select as shipped; None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both. The row says Custom once one is moved |
 | Touch zones > | Off | Touch top left, top right, left edge, right edge, Rear touch left, right: the Xbox button each zone presses (A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back). The row says how many are on |
 | Gyro settings > | | Gyro button (L: While holding aims while held; in play it then does nothing else), Gyro sensitivity (1.5x; 0.5x-3x, 1x turns the view as far as the Vita turns, less while zoomed), Gyro vertical (Normal: tilt the top edge towards you to look up; Inverted), Gyro turning (Turn (yaw), or Tilt (roll) it like a wheel) |
-| Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings and Show dev settings stay), Show dev settings (Off; shows the Dev tab) |
+| Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings, Button icons and Show dev settings stay), Show dev settings (Off; shows the Dev tab) |
+
+**Button icons** (`HALO_BUTTON_ICONS`, xbox or playstation; live, kept by
+Reset controls): with PlayStation each of the game's button icons - the
+HUD's prompts (`source/interface/hud_messaging.c`), the icons in the menus'
+and the HUD's text and the menus' button hints (`ui_widget.c`) - shows the
+Vita button its Xbox button is on now (`vita_button_glyph` in
+`port/vita/host/vita_controls.c`): in play the Button layout's, else the
+first touch zone set to it; in the menus the fixed layout (A Cross, B
+Circle, X Square, Y Triangle, the triggers L and R, Back Select). Cross,
+Circle, Square and Triangle are drawn in code (`source/interface/hud_draw.c`:
+two strokes, a ring, a square, a triangle, of the game's own white bitmap),
+centred in the Xbox icon's sprite and as tall as its button, in the colour
+of the Xbox face button in the same place (A's green for Cross, B's red,
+X's blue, Y's yellow); L, R, START, SELECT, the D-pad ("D-pad down") and the
+touch zones ("rear touch left") are words in the game's font. An Xbox
+button on no Vita button and no zone keeps its Xbox icon; so do the
+sticks' icons (move, look). The panel then names the Button layout's rows
+and the touch zones' choices by what each does in Halo's default controller
+layout (Jump, Melee, Action, reload, Switch weapon...) and the Host / Join
+steps by the Vita's buttons.
 
 The Touch zones page draws the front screen and the rear pad beside the
 rows: the chosen row's zone blue (dark blue while Off), the zones set to an

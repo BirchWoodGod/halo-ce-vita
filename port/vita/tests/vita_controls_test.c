@@ -16,7 +16,11 @@ the Vita lies still, the yaw/roll and invert choices, the sensitivity, and
 when the game gets the angles (on, zoomed, while holding, never in the
 menus, dropped when not taken); and the names the settings panel shows for
 the choices (Xbox terms for the Xbox buttons, never "grenade button"; each
-fitting the panel's value column), one per settings value.
+fitting the panel's value column), one per settings value; and the
+button icons (the panel's Button icons, PlayStation): the Vita button each
+of the game's button icons shows, in play and the menus, following a
+remap, a touch zone for a button on none, each one a button that presses
+it.
 
 Run port/vita/tests/run_vita_controls_test.sh.
 */
@@ -725,6 +729,126 @@ static void test_names(void)
 	check(terms, "the touch zones' choices are the Xbox controller's (A B X Y, Black, White, triggers, sticks, Back)");
 	check(plain, "no choice is called a \"button\" (\"grenade button\"...): the buttons by name");
 	check(fits, "every choice's name fits the panel's value column (\"< name >\", 24 characters)");
+	{
+		/* (PlayStation's terms: the Xbox buttons by what they do) */
+		static const char *const actions[] = { VITA_XBOX_ACTION_NAMES }, *const action_short[] = { VITA_XBOX_ACTION_SHORT_NAMES };
+		static const char *const icons_values[] = { VITA_BUTTON_ICONS_VALUES }, *const icons_names[] = { VITA_BUTTON_ICONS_NAMES };
+
+		fits = sizeof(actions) == sizeof(action_short) && sizeof(actions) / sizeof(actions[0]) == VITA_XBOX_COUNT &&
+			sizeof(icons_values) == sizeof(icons_names) && !strcmp(icons_values[0], "xbox");
+		for (index = 0; fits && index < VITA_XBOX_COUNT; index++)
+			fits &= strlen(actions[index]) + 4 <= 24 && strlen(action_short[index]) <= 2 &&
+				(index == 0) == (action_short[index][0] == 0);
+		check(fits, "an action and its short name per Xbox button, each fits; Button icons: Xbox first (the default)");
+	}
+}
+
+/* ---------- button icons: the Vita button each of the game's button icons shows */
+
+/* (the game's numbering of the controller's buttons, input.h) */
+enum
+{
+	GAME_A, GAME_B, GAME_X, GAME_Y, GAME_BLACK, GAME_WHITE, GAME_LEFT_TRIGGER, GAME_RIGHT_TRIGGER,
+	GAME_DPAD_UP, GAME_DPAD_DOWN, GAME_DPAD_LEFT, GAME_DPAD_RIGHT, GAME_START, GAME_BACK, GAME_LEFT_STICK,
+	GAME_RIGHT_STICK
+};
+
+/* whether pressing the glyph's Vita button (or holding its zone) presses
+the game's button, through the mapping itself */
+static int glyph_presses(const struct vita_controls_config *config, int glyph, int gamepad_button, int menus)
+{
+	static const unsigned long bits[] = {
+		0, VITA_BUTTON_CROSS, VITA_BUTTON_CIRCLE, VITA_BUTTON_SQUARE, VITA_BUTTON_TRIANGLE, VITA_BUTTON_L, VITA_BUTTON_R,
+		VITA_BUTTON_UP, VITA_BUTTON_DOWN, VITA_BUTTON_LEFT, VITA_BUTTON_RIGHT, VITA_BUTTON_START, VITA_BUTTON_SELECT,
+	};
+	static const unsigned long digital[] = {
+		VITA_PAD_DPAD_UP, VITA_PAD_DPAD_DOWN, VITA_PAD_DPAD_LEFT, VITA_PAD_DPAD_RIGHT, VITA_PAD_START, VITA_PAD_BACK,
+		VITA_PAD_LEFT_THUMB, VITA_PAD_RIGHT_THUMB,
+	};
+	struct vita_controls_config held = *config;
+	struct vita_controls_state state;
+	struct vita_controls_output out;
+	unsigned long buttons = 0, touch = 0;
+
+	if (glyph >= VITA_GLYPH_TOUCH_TOP_LEFT)
+		touch = 1UL << (glyph - VITA_GLYPH_TOUCH_TOP_LEFT);
+	else
+		buttons = bits[glyph];
+	/* (the left stick's click held, not toggled) */
+	held.crouch_toggle = 0;
+	memset(&state, 0, sizeof(state));
+	vita_controls_map(&held, &state, buttons, touch, menus, &out);
+	return gamepad_button < 8 ? out.analog[gamepad_button] == 255 : (out.digital & digital[gamepad_button - 8]) != 0;
+}
+
+static void test_button_glyphs(void)
+{
+	struct vita_controls_config config;
+	int button, menus, follows = 1, none = 0;
+
+	clear_environment();
+	unsetenv("HALO_BUTTON_ICONS");
+	check(!vita_button_icons_playstation(), "button icons: the Xbox's unless asked (HALO_BUTTON_ICONS unset)");
+	setenv("HALO_BUTTON_ICONS", "playstation", 1);
+	check(vita_button_icons_playstation(), "button icons: playstation");
+	setenv("HALO_BUTTON_ICONS", "nonsense", 1);
+	check(!vita_button_icons_playstation(), "button icons: a value not known is the Xbox's");
+	unsetenv("HALO_BUTTON_ICONS");
+
+	vita_controls_config_load(&config);
+	check(vita_button_glyph(&config, GAME_A, 0) == VITA_GLYPH_CROSS && vita_button_glyph(&config, GAME_B, 0) ==
+		VITA_GLYPH_CIRCLE && vita_button_glyph(&config, GAME_X, 0) == VITA_GLYPH_SQUARE &&
+		vita_button_glyph(&config, GAME_Y, 0) == VITA_GLYPH_TRIANGLE, "play, as shipped: A B X Y are Cross Circle Square Triangle");
+	check(vita_button_glyph(&config, GAME_LEFT_TRIGGER, 0) == VITA_GLYPH_L &&
+		vita_button_glyph(&config, GAME_RIGHT_TRIGGER, 0) == VITA_GLYPH_R, "play: the triggers are L and R");
+	check(vita_button_glyph(&config, GAME_BLACK, 0) == VITA_GLYPH_LEFT && vita_button_glyph(&config, GAME_WHITE, 0) ==
+		VITA_GLYPH_RIGHT, "play: Black and White are D-pad left and right");
+	check(vita_button_glyph(&config, GAME_LEFT_STICK, 0) == VITA_GLYPH_DOWN &&
+		vita_button_glyph(&config, GAME_RIGHT_STICK, 0) == VITA_GLYPH_UP, "play: crouch (left stick click) D-pad down, zoom up");
+	check(vita_button_glyph(&config, GAME_START, 0) == VITA_GLYPH_START && vita_button_glyph(&config, GAME_BACK, 0) ==
+		VITA_GLYPH_SELECT, "play: Start is Start, Back is Select");
+	check(vita_button_glyph(&config, GAME_DPAD_UP, 0) == VITA_GLYPH_NONE, "play: the D-pad's own icons are on no button");
+	check(vita_button_glyph(&config, GAME_DPAD_LEFT, 1) == VITA_GLYPH_LEFT && vita_button_glyph(&config, GAME_A, 1) ==
+		VITA_GLYPH_CROSS && vita_button_glyph(&config, GAME_BACK, 1) == VITA_GLYPH_SELECT &&
+		vita_button_glyph(&config, GAME_BLACK, 1) == VITA_GLYPH_NONE, "menus: the fixed layout (D-pad, Cross A, Select Back; Black none)");
+	check(vita_button_glyph(&config, -1, 0) == VITA_GLYPH_NONE && vita_button_glyph(&config, 16, 0) == VITA_GLYPH_NONE,
+		"a number out of range: none");
+
+	/* a remap: the icon follows it, in play only */
+	setenv("HALO_XBOX_X", "triangle", 1);
+	setenv("HALO_XBOX_Y", "square", 1);
+	setenv("HALO_XBOX_BLACK", "none", 1);
+	setenv("HALO_TOUCH_REAR_RIGHT", "black", 1);
+	setenv("HALO_XBOX_WHITE", "none", 1);
+	setenv("HALO_XBOX_BACK", "r", 1);
+	setenv("HALO_XBOX_RIGHT_TRIGGER", "cross", 1);
+	setenv("HALO_XBOX_A", "none", 1);
+	setenv("HALO_TOUCH_TOP_LEFT", "a", 1);
+	setenv("HALO_TOUCH_LEFT_EDGE", "a", 1);
+	vita_controls_config_load(&config);
+	check(vita_button_glyph(&config, GAME_X, 0) == VITA_GLYPH_TRIANGLE && vita_button_glyph(&config, GAME_Y, 0) ==
+		VITA_GLYPH_SQUARE, "remapped: X (action) on Triangle shows Triangle, Y Square");
+	check(vita_button_glyph(&config, GAME_X, 1) == VITA_GLYPH_SQUARE, "remapped: the menus keep their layout (X Square)");
+	check(vita_button_glyph(&config, GAME_BLACK, 0) == VITA_GLYPH_TOUCH_REAR_RIGHT,
+		"remapped: Black on no button but the rear right zone shows the zone");
+	check(vita_button_glyph(&config, GAME_A, 0) == VITA_GLYPH_TOUCH_TOP_LEFT, "two zones on A: the first");
+	check(vita_button_glyph(&config, GAME_WHITE, 0) == VITA_GLYPH_NONE, "White on no button and no zone: none");
+	check(vita_button_glyph(&config, GAME_BACK, 0) == VITA_GLYPH_R && vita_button_glyph(&config, GAME_RIGHT_TRIGGER, 0) ==
+		VITA_GLYPH_CROSS, "remapped: Back on R, the right trigger (fire) on Cross");
+
+	/* whatever the layout, the glyph shown is a button that presses it */
+	for (menus = 0; menus < 2; menus++)
+		for (button = 0; button < 16; button++)
+		{
+			int glyph = vita_button_glyph(&config, button, menus);
+
+			if (glyph == VITA_GLYPH_NONE)
+				none++;
+			else
+				follows &= glyph_presses(&config, glyph, button, menus);
+		}
+	check(follows && none < 12, "every glyph shown presses its button through the mapping, in play and the menus");
+	clear_environment();
 }
 
 int main(void)
@@ -736,6 +860,7 @@ int main(void)
 	test_mapping();
 	test_gyro_filter();
 	test_gyro_aim();
+	test_button_glyphs();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

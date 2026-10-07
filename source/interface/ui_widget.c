@@ -3887,6 +3887,21 @@ static void render_state_bitmap(
 	real_rectangle2d const *clip;
 	real scale;
 	point2d point;
+#ifdef HALO_VITA
+	/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a button
+	icon shows the Vita button its Xbox button is on, a word in the font or
+	drawn in the sprite's place (the caller's colour: the Xbox face button's
+	there) */
+	struct icon_hud_element_definition *button_icons = hud_globals->messaging.button_icons.address;
+	short glyph = icon >= button_icons && icon < button_icons + hud_globals->messaging.button_icons.count ?
+		hud_vita_button_glyph((short)(icon - button_icons)) : NONE;
+
+	if (hud_vita_glyph_text(glyph))
+	{
+		render_state_text(bounds, cursor_bounds, hud_vita_glyph_text(glyph));
+		return;
+	}
+#endif
 
 	global_scenario_get();
 	game_globals = scenario_get_game_globals();
@@ -3914,6 +3929,16 @@ static void render_state_bitmap(
 		scale = hud_globals_get_scale(local_player_count() > 1);
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0 + 1.0f);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale - 2.0f);
+#ifdef HALO_VITA
+		if (hud_vita_glyph_face_icon(glyph) == NONE || !hud_vita_glyph_draw(
+			glyph,
+			bitmap,
+			_hud_anchor_bottom_left,
+			&point,
+			clip,
+			scale,
+			TEST_FLAG(icon->flags, _hud_icon_use_color_bit) ? icon->color : color))
+#endif
 		hud_draw_bitmap_direct(
 			bitmap,
 			_hud_anchor_bottom_left,
@@ -3933,6 +3958,40 @@ static void render_state_bitmap(
 
 	return;
 }
+
+#ifdef HALO_VITA
+/* (port) a menu's button hint (the a_butn ... widgets) with the settings
+panel's Button icons PlayStation: the Vita button drawn over the hint's
+rectangle, in the colour of the Xbox button the art shows (hud_draw.c), at
+the widget's alpha. FALSE when the widget is not a hint, or the icons are
+the Xbox's (its art is drawn) */
+static boolean vita_button_hint_draw(
+	long bitmap_group_index,
+	rectangle2d const *bounds,
+	pixel32 color)
+{
+	short glyph = hud_vita_menu_button_glyph(bitmap_group_index);
+	short face_icon = hud_vita_glyph_face_icon(glyph);
+	pixel32 face_color = 0xFFFFFFFF;
+	real_rectangle2d rectangle;
+
+	if (face_icon == NONE)
+		return FALSE;
+	if (face_icon < hud_globals->messaging.button_icons.count)
+	{
+		face_color = TAG_BLOCK_GET_ELEMENT(
+			&hud_globals->messaging.button_icons,
+			face_icon,
+			struct icon_hud_element_definition)->color;
+	}
+	rectangle.x0 = bounds->x0;
+	rectangle.x1 = bounds->x1;
+	rectangle.y0 = bounds->y0;
+	rectangle.y1 = bounds->y1;
+
+	return hud_vita_glyph_draw_in_rect(glyph, &rectangle, (face_color & 0x00FFFFFF) | (color & 0xFF000000));
+}
+#endif
 
 void draw_string_and_hack_in_icons(
 	rectangle2d *bounds,
@@ -4029,8 +4088,22 @@ void draw_string_and_hack_in_icons(
 				real_argb_color icon_color;
 				real_argb_color text_color;
 				long alpha;
+				struct icon_hud_element_definition *color_icon = icon;
 
-				pixel32_to_real_argb_color(icon->color, &icon_color);
+#ifdef HALO_VITA
+				/* (port) a PlayStation glyph drawn in the icon's place takes
+				the colour of the Xbox face button there (hud_draw.c) */
+				{
+					short face_icon = hud_vita_glyph_face_icon(hud_vita_button_glyph(icon_index));
+
+					if (face_icon != NONE && face_icon < hud_globals->messaging.button_icons.count)
+						color_icon = TAG_BLOCK_GET_ELEMENT(
+							&hud_globals->messaging.button_icons,
+							face_icon,
+							struct icon_hud_element_definition);
+				}
+#endif
+				pixel32_to_real_argb_color(color_icon->color, &icon_color);
 				icon->flags &= ~FLAG(_hud_icon_use_color_bit);
 				match_assert(
 					"c:\\halo\\SOURCE\\interface\\ui_widget.c",
@@ -4043,7 +4116,7 @@ void draw_string_and_hack_in_icons(
 				}
 				draw_string_get_color(&text_color);
 				alpha = (long)(text_color.alpha * 255.0f) << 24;
-				if (icon->color == 0 || ignore_icon_color)
+				if (color_icon->color == 0 || ignore_icon_color)
 					icon_color = text_color;
 				icon_color.red *= text_color.alpha;
 				icon_color.green *= text_color.alpha;
@@ -6092,6 +6165,9 @@ static void widget_instance_render_recursive(
 					clip = &wide_clip;
 				}
 			}
+#ifdef HALO_VITA
+			if (!vita_button_hint_draw(definition->background_bitmap.index, &bounds, color))
+#endif
 			draw_bitmap_in_rect(
 				bitmap,
 				&destination,
@@ -6102,6 +6178,9 @@ static void widget_instance_render_recursive(
 				FALSE);
 		}
 #else
+#ifdef HALO_VITA
+		if (!vita_button_hint_draw(definition->background_bitmap.index, &bounds, color))
+#endif
 		draw_bitmap_in_rect(
 			bitmap,
 			&bounds,
