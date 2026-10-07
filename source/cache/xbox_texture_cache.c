@@ -102,6 +102,12 @@ void platform_log(const char *format, ...);
 #define halo_cache_lock_acquire() ((void)0)
 #define halo_cache_lock_release() ((void)0)
 #endif
+#ifdef HALO_LINUX
+/* (port) for the texture report (vita_textures.c halo_texture_stats_report):
+the bitmaps read into the cache and their bytes, and the blocks evicted to
+make room (the cache is 22 MB, sized for the Xbox's maps) */
+volatile unsigned long halo_texture_cache_loads, halo_texture_cache_load_bytes, halo_texture_cache_evictions;
+#endif
 /* (port) the public functions take the shared cache lock: the tick loads
 textures for the objects it creates while the render loads its own */
 void texture_cache_delete(void);
@@ -688,6 +694,9 @@ static void texture_cache_delete_block_proc(
 		texture->bitmap->cache_block_index==block_index);
 	texture->bitmap->cache_block_index = NONE;
 	texture->bitmap->base_address = NULL;
+#ifdef HALO_LINUX
+	halo_texture_cache_evictions++;
+#endif
 	datum_delete(
 		xbox_texture_cache_globals.textures,
 		block_index);
@@ -888,6 +897,22 @@ static boolean texture_cache_start_loading_bitmap(
 			base_address,
 			&texture->loaded,
 			block);
+#ifdef HALO_LINUX
+		halo_texture_cache_loads++;
+		halo_texture_cache_load_bytes += bitmap->pixels_size;
+		{
+			/* (debug) HALO_TEXTURE_CACHE_LOG=1: each bitmap read into the
+			cache, named, with its size (which textures a map's churn reads
+			again and again) */
+			static int log_reads = -1;
+
+			if (log_reads < 0)
+				log_reads = getenv("HALO_TEXTURE_CACHE_LOG") && atoi(getenv("HALO_TEXTURE_CACHE_LOG"));
+			if (log_reads)
+				platform_log("texture cache read: %s %dx%d format %d, %ld bytes, %d mipmaps", tag_get_name(bitmap->tag_index),
+					bitmap->width, bitmap->height, bitmap->format, size, bitmap->mipmap_count);
+		}
+#endif
 
 		return TRUE;
 	}

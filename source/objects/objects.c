@@ -4494,6 +4494,45 @@ static void objects_profile_report(void)
 #endif
 
 #ifdef HALO_LINUX
+/* (port) HALO_FRAME_TIMING: the objects in the game by type with each frame
+report (frame_timing.c), and the most there have been. A count that only
+grows names what a game mode never cleans up (a Custom Edition match got
+slower the longer it ran: 26 objects drawn a frame at first, 153 three
+minutes on). Read from the main thread while the tick may run: the array's
+slots stay where they are, so a count may be one off, nothing worse. */
+void halo_objects_census_report(void)
+{
+	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
+		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
+	static long peak;
+	long counts[16] = { 0 }, total = 0, index, type;
+	char line[512];
+	int n = 0;
+	const unsigned char *slot;
+
+	if (!object_header_data || !object_header_data->valid || !object_header_data->data)
+		return;
+	slot = (const unsigned char *)object_header_data->data;
+	for (index = 0; index < object_header_data->maximum_count; index++, slot += object_header_data->size)
+	{
+		const struct object_header_datum *header = (const struct object_header_datum *)slot;
+
+		if (header->identifier)
+		{
+			counts[header->type & 15]++;
+			total++;
+		}
+	}
+	if (total > peak)
+		peak = total;
+	for (type = 0; type < 16; type++)
+		if (counts[type])
+			n += snprintf(line + n, sizeof(line) - n, " %s %ld", names[type], counts[type]);
+	platform_log("objects: %ld in the game (most %ld):%s", total, peak, line);
+}
+#endif
+
+#ifdef HALO_LINUX
 /* render_epoch.c: the object pool's integrity, checked at the joins */
 int halo_objects_pool_check(const char *when)
 {
