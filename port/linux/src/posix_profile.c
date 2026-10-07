@@ -70,8 +70,17 @@ int vita_host_thread_describe(unsigned long id, char *text, unsigned long size)
 }
 
 #define MAXIMUM_SAMPLES (1 << 22)
+/* HALO_PROFILE_STACK=1 (i386): each sample also records the return addresses
+of up to this many frames, walked along the frame pointers (the build keeps
+them: -fno-omit-frame-pointer), written after the thread id; the
+symbolizer's --inclusive counts a function once per sample it is anywhere
+on the stack of */
+#define STACK_FRAMES 16
+/* (stacks for the first this many samples: 16 MB of a 32-bit address space, beside the game's memory) */
+#define STACK_SAMPLES (1 << 18)
 
 static unsigned long *samples;
+static unsigned long *stacks;
 static volatile unsigned long sample_count;
 /* HALO_PROFILE_START=<seconds> (with HALO_PROFILE_SECONDS): samples only
 from that long after start-up (a level's fight rather than its loading) */
@@ -117,6 +126,37 @@ static void profile_signal(int signal_number, siginfo_t *information, void *cont
 				}
 			}
 		}
+		if (stacks && index < STACK_SAMPLES)
+		{
+			/* (a frame is [saved ebp, return address]; each saved frame
+			is above the last and not far from it, else the walk ends -
+			code without frame pointers uses ebp for anything) */
+			unsigned long frame = ucontext->uc_mcontext.gregs[REG_EBP];
+			unsigned long esp = ucontext->uc_mcontext.gregs[REG_ESP];
+			unsigned long *out = &stacks[index * STACK_FRAMES];
+			int depth;
+
+			for (depth = 0; depth < STACK_FRAMES; depth++)
+			{
+				unsigned long next, return_address;
+
+				if (frame < esp || frame > esp + (16ul << 20) || (frame & 3))
+					break;
+				next = ((const unsigned long *)frame)[0];
+				return_address = ((const unsigned long *)frame)[1];
+				if (return_address < (unsigned long)__executable_start || return_address >= (unsigned long)etext)
+					break;
+				out[depth] = return_address;
+				if (next <= frame || next > frame + (1ul << 20))
+				{
+					depth++;
+					break;
+				}
+				frame = next;
+			}
+			if (depth < STACK_FRAMES)
+				out[depth] = 0;
+		}
 	}
 #endif
 	/* (the thread, to tell the render's samples from the tick's) */
@@ -131,7 +171,17 @@ static void profile_write(void)
 	if (!file)
 		return;
 	for (index = 0; index < count; index++)
-		fprintf(file, "%lx %lx %lu\n", samples[index * 3], samples[index * 3 + 1], samples[index * 3 + 2]);
+	{
+		fprintf(file, "%lx %lx %lu", samples[index * 3], samples[index * 3 + 1], samples[index * 3 + 2]);
+		if (stacks && index < STACK_SAMPLES)
+		{
+			int depth;
+
+			for (depth = 0; depth < STACK_FRAMES && stacks[index * STACK_FRAMES + depth]; depth++)
+				fprintf(file, " %lx", stacks[index * STACK_FRAMES + depth]);
+		}
+		fputc('\n', file);
+	}
 	fclose(file);
 	{
 		/* (the libraries' addresses, for samples outside the binary) */
@@ -188,6 +238,10 @@ static void profile_start(void)
 	if (seconds && atoi(seconds) > 0 && getenv("HALO_PROFILE_START") && atoi(getenv("HALO_PROFILE_START")) > 0)
 		sampling = 0;
 	samples = calloc(MAXIMUM_SAMPLES * 3, sizeof(unsigned long));
+#if defined(__i386__)
+	if (getenv("HALO_PROFILE_STACK") && atoi(getenv("HALO_PROFILE_STACK")) > 0)
+		stacks = calloc((size_t)STACK_SAMPLES * STACK_FRAMES, sizeof(unsigned long));
+#endif
 	memset(&action, 0, sizeof(action));
 	action.sa_sigaction = profile_signal;
 	action.sa_flags = SA_SIGINFO | SA_RESTART;
