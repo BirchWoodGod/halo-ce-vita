@@ -486,6 +486,9 @@ long config_integer(char const *name);
 boolean ui_widget_port_cooperative_level_choose(char const *map_name, short difficulty);
 short main_get_solo_level_from_name(char const *name);
 static void network_game_server_port_cooperative_setting(struct network_game_server *server);
+static long network_game_server_port_maximum_players(void);
+static boolean network_game_server_port_lobby_name(wchar_t *name, long count);
+static void network_game_server_port_lobby_settings(struct network_game_server *server);
 
 /* port: internet play's Discord presence (port/linux/src/p2p.c) */
 void p2p_set_game_player_counts(int count, int maximum);
@@ -1376,6 +1379,8 @@ boolean network_game_server_idle(
 	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
 	/* port: the settings' co-op choice (the Vita's settings panel) */
 	network_game_server_port_cooperative_setting(server);
+	/* port: the settings' lobby name and most players (the panel's Play page) */
+	network_game_server_port_lobby_settings(server);
 
 	if (network_game_server_game_is_valid(server))
 	{
@@ -4027,6 +4032,88 @@ boolean network_game_server_port_cooperative_menu(
 	return global_network_game_server_get() != NULL && network_game_server_cooperative.menu;
 }
 
+/* port: the most players a game this machine hosts takes, of the machine's
+settings (network.max_players, 2 to the build's maximum; under 2, the
+build's maximum). The environment's first: the Vita's settings panel (its
+Play page) sets it in the menus, after the settings were read. A co-op
+game takes network.coop_players instead (network_game_server_port_set_cooperative). */
+static long network_game_server_port_maximum_players(
+	void)
+{
+	char const *setting = getenv("HALO_NET_MAX_PLAYERS");
+	long maximum = setting && setting[0] ? atol(setting) : config_integer("network.max_players");
+
+	return maximum >= 2 ? MIN(maximum, MAXIMUM_NETWORK_PLAYER_COUNT) : MAXIMUM_NETWORK_PLAYER_COUNT;
+}
+
+/* port: the name the game lists show for a game this machine hosts, of the
+machine's settings (network.lobby_name; the environment's first, as above):
+its printable ASCII characters only, the spaces at either end left out, cut
+to the game's name field. FALSE (name untouched) if that leaves nothing:
+the machine's name stands */
+static boolean network_game_server_port_lobby_name(
+	wchar_t *name,
+	long count)
+{
+	char const *setting = getenv("HALO_NET_LOBBY_NAME");
+	wchar_t lobby_name[NETWORK_GAME_NAME_LENGTH];
+	long length = 0;
+
+	if (!setting)
+		setting = config_string("network.lobby_name");
+	for (; setting && *setting && length < NUMBEROF(lobby_name) - 1; setting++)
+	{
+		unsigned char character = (unsigned char)*setting;
+
+		if (character < 0x20 || character > 0x7E || (character == ' ' && length == 0))
+			continue;
+		lobby_name[length++] = (wchar_t)character;
+	}
+	while (length > 0 && lobby_name[length - 1] == L' ')
+		length--;
+	lobby_name[length] = 0;
+	if (!length || count < 2)
+		return FALSE;
+	ustrncpy(name, lobby_name, count - 1);
+	name[count - 1] = 0;
+	return TRUE;
+}
+
+/* port: the settings' lobby name and most players, applied to the hosted
+game's lobby each frame (the Vita's settings panel changes them at any
+time): the game lists and the lobby show them at once. Not a co-op game
+(two players, network.coop_players), nor a local (split screen) one; the
+most players is never fewer than the players in the lobby already. */
+static void network_game_server_port_lobby_settings(
+	struct network_game_server *server)
+{
+	wchar_t name[NETWORK_GAME_NAME_LENGTH];
+	long maximum;
+	boolean changed = FALSE;
+
+	if (server->state != _network_game_server_state_pregame || network_game_is_splitscreen_local())
+		return;
+	if (network_game_server_port_lobby_name(name, NUMBEROF(name)) && ustrcmp(name, server->game.name))
+	{
+		ustrncpy(server->game.name, name, NETWORK_GAME_NAME_LENGTH - 1);
+		server->game.name[NETWORK_GAME_NAME_LENGTH - 1] = 0;
+		changed = TRUE;
+	}
+	if (!(server->game.variant.game_engine_index == 0 && main_get_solo_level_from_name(server->game.map.name) != NONE))
+	{
+		maximum = MAX(network_game_server_port_maximum_players(), (long)server->game.player_count);
+		maximum = MIN(maximum, (long)MAXIMUM_NETWORK_PLAYER_COUNT);
+		if (maximum != server->game.maximum_players)
+		{
+			network_event("the game takes %ld players (the settings' most players)", maximum);
+			server->game.maximum_players = (byte)maximum;
+			changed = TRUE;
+		}
+	}
+	if (changed && !network_game_server_send_game_data_pregame(server))
+		network_event("network_game_server_port_lobby_settings() failed to send updated game settings to clients");
+}
+
 static boolean network_game_server_setup_game_from_playlist(
 	struct network_game_server *server)
 {
@@ -4040,6 +4127,11 @@ static boolean network_game_server_setup_game_from_playlist(
 		wchar_t machine_name[MAXIMUM_MACHINE_NAME_LENGTH] = L"<unknown>";
 
 		network_game_generate_local_machine_name(machine_name);
+#ifdef HALO_LINUX
+		/* (port) the settings' lobby name, if any, names the game in the
+		game lists (network.lobby_name) */
+		network_game_server_port_lobby_name(machine_name, NUMBEROF(machine_name));
+#endif
 		ustrncpy(server->game.name, machine_name, NETWORK_GAME_NAME_LENGTH - 1);
 		server->game.name[NETWORK_GAME_NAME_LENGTH - 1] = L'\0';
 #ifdef HALO_LINUX
@@ -4056,7 +4148,12 @@ static boolean network_game_server_setup_game_from_playlist(
 		if (network_game_is_splitscreen_local())
 			server->game.minimum_players = 1;
 #endif
+#ifdef HALO_LINUX
+		/* (port) the settings' most players (network.max_players) */
+		server->game.maximum_players = (byte)network_game_server_port_maximum_players();
+#else
 		server->game.maximum_players = MAXIMUM_NETWORK_PLAYER_COUNT;
+#endif
 
 		if (server->game.variant.universal_variant.teams)
 		{
