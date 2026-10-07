@@ -943,6 +943,7 @@ static short device_group_find(
 	{
 		group_index = entry->group_index;
 		return group_index >= 0 && group_index < global_scenario_get()->device_groups.count &&
+			group_index < MAXIMUM_DEVICE_GROUPS &&
 			device_group_network_get(group_index, &value, &flags, &runtime) && !runtime ? group_index : NONE;
 	}
 	device_index = object_find(entry->name_index, entry->object_index, entry->definition_index, _object_mask_device);
