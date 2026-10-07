@@ -20,6 +20,8 @@
 #            one LAN with the host (it must never list or join the game)
 #   pchost   the other way round: a PC build hosts, a Vita build on its LAN
 #            must never list or join the game
+#   spoof    code, and a machine on the host's LAN sends its game ports
+#            datagrams claiming the joiner's virtual address: dropped
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
@@ -253,6 +255,70 @@ pchost)
 	grep -aq "network test: joining$" "$out/vita_lan/run.log" && fail "the Vita build joined the PC's game"
 	grep -aq "ignoring a host that is not a Vita" "$out/vita_lan/data/debug.txt" ||
 		fail "the Vita on the LAN never heard the PC's advertisement (so the test proves nothing)"
+	;;
+spoof)
+	# a joiner plays the host's code; meanwhile a machine on the host's LAN
+	# (its router's namespace, with a raw socket) sends the host's game
+	# ports datagrams whose source is the joiner's virtual address, as only
+	# the tunnel's stand-ins may: the host must drop them (p2p_spoofed_source)
+	# and the game go on
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; exit 1; }
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_TEST_INPUT=bot:2; join_pid=$last_pid
+	joiner_id=
+	for i in $(seq 1 90); do
+		joiner_id=$(sed -n 's/.*Internet play: connected to player \([0-9a-f]\{12\}\).*/\1/p' "$out/host/run.log" | head -1)
+		[ -n "$joiner_id" ] && break
+		sleep 1
+	done
+	[ -n "$joiner_id" ] || fail "the joiner never reached the host"
+	sleep 20
+	# (the joiner's virtual address on the host: p2p.c's virtual_address_for)
+	in_ns "$host_router" python3 - "$joiner_id" <<'PYTHON'
+import hashlib, socket, struct, sys, time
+digest = hashlib.sha256(bytes.fromhex(sys.argv[1])).digest()
+value = digest[0] << 16 | digest[1] << 8 | digest[2]
+while True:
+    address = 0x64400000 | (value & 0x3FFFFF)
+    if address & 255 not in (0, 255):
+        break
+    value += 1
+source = socket.inet_ntoa(struct.pack('>I', address))
+raw = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+def send(source, port, index):
+    # a message header (its size; to the host's port a packet of a type
+    # that is none, to a client's a distributed message: which the host logs
+    # with their source as it drops them) and 40 bytes
+    kind = 3 << 2 if port == 5150 else 2 << 2
+    payload = struct.pack('>H', 42 << 4 | kind) + bytes(range(index % 200, index % 200 + 39)) + bytes([99])
+    udp = struct.pack('>HHHH', port, port, 8 + len(payload), 0) + payload
+    header = struct.pack('>BBHHHBBH4s4s', 0x45, 0, 20 + len(udp), index, 0, 64, 17, 0,
+        socket.inet_aton(source), socket.inet_aton('192.168.1.2'))
+    raw.sendto(header + udp, ('192.168.1.2', 0))
+# (the game's ports: the host's 5150, a client's 5151)
+for index in range(200):
+    for port in (5150, 5151):
+        send(source, port, index)
+# and a few from an address of the LAN, which the host logs: they arrive
+# (a stray datagram is logged once a second at most)
+time.sleep(2)
+for index in range(3):
+    for port in (5150, 5151):
+        send('192.168.1.77', port, index)
+print('spoofed 400 datagrams from', source)
+PYTHON
+	wait $join_pid $host_pid 2>/dev/null
+	grep -a "spoofed" "$out/host/run.log" | head -3
+	grep -aEq "(not the host @ |sender= ')192\.168\.1\.77" "$out/host/data/debug.txt" ||
+		fail "the host never logged the LAN machine's datagrams (so the test proves nothing)"
+	grep -aEq "(not the host @ |sender= ')100\." "$out/host/data/debug.txt" && fail "the host's game took a spoofed datagram"
+	grep -aq "dropped traffic to the game's port claiming to come from a peer's address" "$out/host/run.log" ||
+		fail "the host did not drop the spoofed datagrams"
+	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	;;
 lan)
 	# online off, both on the host's LAN: system link as on a Wi-Fi network
