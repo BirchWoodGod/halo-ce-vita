@@ -63,6 +63,8 @@ water drawn correctly.
 
 ## Later
 
+- **Game chat**: quick-chat phrases and typed messages in the lobby and in
+  game, with mute; voice chat to be looked at after that.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
 ## Help wanted
