@@ -144,6 +144,7 @@ int halo_epoch_on_mutator(void);
 #include "load_profile.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "tag_schema.h" /* port: tag_validate.c */
 #endif
 
 /* ---------- constants */
@@ -1076,6 +1077,31 @@ long scenario_tags_load(
 				cache_file_globals.tag_header = NULL;
 				return NONE;
 			}
+			/* port (from OpenCE, MrBruh's "Validate map tags before
+			loading"): and every tag checked against its group's schema
+			before anything reads it (port/linux/game/tag_validate.c), where
+			the tags are now (relocated): a map whose tags' pointers cannot be
+			trusted is refused; what can be corrected is */
+			{
+				boolean validated = tag_validate_tags(
+					tag_cache_base_address,
+					cache_file_globals.header.tag_data_size,
+					cache_file_globals.header.file_length,
+					stripped_scenario_name);
+
+				if (!validated)
+				{
+					error(_error_silent, "cache: '%s' failed the tag check (above); refusing it", scenario_name);
+					halo_map_load_refused(scenario_name, "this map file is damaged or not supported");
+					cache_file_globals.tag_header = NULL;
+					return NONE;
+				}
+				if (tag_validate_corrections())
+				{
+					error(_error_silent, "cache: '%s' needed %ld tag corrections (above)", scenario_name,
+						tag_validate_corrections());
+				}
+			}
 #endif
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
@@ -1238,6 +1264,23 @@ boolean scenario_structure_bsp_load(
 			cache_file_globals.structure_bsp_header = NULL;
 			return FALSE;
 		}
+	}
+#endif
+#ifdef HALO_LINUX
+	/* port (from OpenCE, MrBruh's "Validate map tags before loading"): and
+	checked against its schema, as the map's tags were, where it is now
+	(relocated), before its buffers are registered
+	(port/linux/game/tag_validate.c; a Custom Edition map's too) */
+	if (!tag_validate_structure_bsp(
+		reference->structure_bsp.index,
+		reference->base_address,
+		reference->file_size))
+	{
+		error(_error_silent, "cache: structure BSP %ld failed the tag check (above); refusing it",
+			(long)reference->structure_bsp.index);
+		halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+		cache_file_globals.structure_bsp_header = NULL;
+		return FALSE;
 	}
 #endif
 	structure_bsp_header_register_vertex_buffers(cache_file_globals.structure_bsp_header);
