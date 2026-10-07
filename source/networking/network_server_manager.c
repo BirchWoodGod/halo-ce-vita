@@ -2235,6 +2235,28 @@ boolean network_game_server_add_player_to_game(
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x46D, machine);
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x46E, player);
 
+	/* port: a machine asking again for a player it already has in the game
+	(a request sent twice over a poor connection) is answered as done: the
+	Xbox game added it a second time, or with the game full (two players in
+	co-op) refused it, and the joiner's player was left half added */
+	if (machine->machine_index == player->machine_index)
+	{
+		long player_index;
+
+		for (player_index = 0; player_index < MAXIMUM_NETWORK_PLAYER_COUNT; player_index++)
+		{
+			struct network_player *other_player = &server->game.players[player_index];
+
+			if (network_player_is_valid(other_player) && other_player->machine_index == player->machine_index &&
+				other_player->controller_index == player->controller_index)
+			{
+				network_event("machine #%d asked again for its player at controller index #%d: already in the game",
+					player->machine_index, player->controller_index);
+				return TRUE;
+			}
+		}
+	}
+
 	if (machine->machine_index == player->machine_index)
 	{
 		/* port: the smaller team (the Xbox game took turns with a counter of
