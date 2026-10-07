@@ -91,9 +91,10 @@ one; `HALO_MOVIE_DUMP=n` writes the n-th frame as the decoder gave it
 | Select | Back | scoreboard |
 
 In the menus the D-pad moves the selection. The settings panel's Controls
-tab is laid out as the Xbox controller: each Xbox button can be put on
-another Vita button (in play only: the menus keep this layout), and each
-touch zone (below) presses an Xbox button.
+tab has two pages laid out as the Xbox controller: Button layout puts each
+Xbox button on another Vita button (in play only: the menus keep this
+layout), and Touch zones makes each touch zone (below) press an Xbox
+button.
 
 **Touch zones** (`port/vita/host/vita_controls.c`; positions in the
 screen's 960 x 544 pixels, the rear pad scaled to the same as seen from the
@@ -128,8 +129,8 @@ A finger coming down counts as input for the screen's dimming.
 `HALO_PAD_FILE` (debug, `vita_input.c`) takes `tl tr el er rl rr` for the
 zones (touched at their middle, inside every guard's border).
 
-**Gyro aiming** (`vita_controls.c`, `vita_input.c`; the Gyro tab, Off by
-default): the gyroscope's samples (`sceMotionGetSensorState`, every sample
+**Gyro aiming** (`vita_controls.c`, `vita_input.c`; Controls, Gyro aiming
+and the Gyro settings page, Off by default): the gyroscope's samples (`sceMotionGetSensorState`, every sample
 since the last frame, radians a second about the Vita's axes) go through a
 filter - the bias learnt from each second the Vita lies still (no axis
 moving 2 deg/s, the accelerometer 0.03 g; drift of a resting Vita), small
@@ -153,27 +154,58 @@ took (debug).
 ## Settings panel
 
 Hold **Select + Start** for about a second, in play or in the menus. **L and
-R** switch tabs; up and down choose a line, left and right (or Cross) change
-it, Cross opens a line marked `>`, and Circle closes the panel. The game
-does not see the buttons while the panel is open. Rows marked `*` apply
-after a restart.
+R** switch between four tabs, **Graphics**, **Controls**, **Audio** and
+**Multiplayer** (and **Dev**, once Show dev settings is on); up and down
+choose a line, left and right change it, Cross opens a line marked `>` (a
+page of rarely changed rows, or an action), and Circle goes back from a
+page or closes the panel. Each row's value is in a column of its own, the
+chosen row's help is under the rows and the panel's buttons on the line
+below. The game does not see the buttons while the panel is open. Rows
+marked `*` apply after a restart. Which page shows a row changes nothing
+of `settings.txt`: a file from an older version loads as it is.
 
 **Graphics**
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Profile | Balanced | sets the rows below it marked (P) at once: Performance, Balanced, Quality; Custom when they match none |
+| Profile | Balanced | sets the rows marked (P) at once: Performance, Balanced, Quality; Custom when they match none |
 | Render resolution (P) | 75% | the 3D view's resolution (applies at once); Dynamic: lowered in heavy scenes, from the Dynamic minimum up to 100% |
-| Dynamic minimum | 50% | with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes |
+| Dynamic minimum | 50% | shown with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes |
 | Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
 | Upscale filter | Smooth | Sharp: crisp pixels |
+| Frame limit | 30 FPS | the most frames shown a second |
+| FPS counter | Off | the game's own frame counter, bottom right |
+| Smooth weapon motion | On | the first-person weapon blended between game ticks |
+| Advanced > | | the page below |
+
+Graphics, **Advanced**:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
 | Model detail (P) | Low | level of detail of characters, vehicles and props |
 | Hide distant objects (P) | Small | skips objects that cover only a few pixels |
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
-| Smooth weapon motion | On | the first-person weapon blended between game ticks |
-| FPS counter | Off | the game's own frame counter, bottom right |
-| Frame limit | 30 FPS | the most frames shown a second |
+
+**Controls**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Look sensitivity | 100% | right stick turning speed |
+| Invert look | No | reverses the right stick's up and down |
+| Crouch | Toggle | the left stick click (crouch): a press crouches and the next stands (Hold: crouch while held), from its Vita button or a touch zone |
+| Gyro aiming | Off | turning the Vita aims, with the right stick: On, While zoomed, While holding (the Gyro button) |
+| Rear touch guard | Normal | the rear zones ignore a touch that starts near the pad's edges (where the hands holding the Vita rest) and count once held: Off (no border, 0.1 s), Light, Normal (96 px, 0.25 s), Strong (144 px, 0.4 s) |
+| Button layout > | As shipped | A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back: the Vita button of each in play (Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select as shipped; None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both. The row says Custom once one is moved |
+| Touch zones > | Off | Touch top left, top right, left edge, right edge, Rear touch left, right: the Xbox button each zone presses (A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back). The row says how many are on |
+| Gyro settings > | | Gyro button (L: While holding aims while held; in play it then does nothing else), Gyro sensitivity (1.5x; 0.5x-3x, 1x turns the view as far as the Vita turns, less while zoomed), Gyro vertical (Normal: tilt the top edge towards you to look up; Inverted), Gyro turning (Turn (yaw), or Tilt (roll) it like a wheel) |
+| Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings and Show dev settings stay), Show dev settings (Off; shows the Dev tab) |
+
+The Touch zones page draws the front screen and the rear pad beside the
+rows: the chosen row's zone blue (dark blue while Off), the zones set to an
+Xbox button grey. The Gyro settings page has a line with the gyroscope's
+rates now (degrees a second: yaw, pitch, roll) and "learnt" once the Vita
+has lain still for a second.
 
 **Audio**
 
@@ -182,49 +214,17 @@ after a restart.
 | Sound voices * | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices) |
 | Sound occlusion (P) | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
 
-**Controls**
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Look sensitivity | 100% | right stick turning speed |
-| Invert look | No | reverses the right stick's up and down |
-| Stick deadzone | Off | raise it if the sticks drift |
-| Crouch | Toggle | the left stick click (crouch): a press crouches and the next stands (Hold: crouch while held), from its Vita button or a touch zone |
-| Touch top left, top right, left edge, right edge | Off | the Xbox button a front touch zone presses: A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back |
-| Rear touch left, right | Off | the same for the rear pad's halves |
-| Rear touch guard | Normal | the rear zones ignore a touch that starts near the pad's edges (where the hands holding the Vita rest) and count once held: Off (no border, 0.1 s), Light, Normal (96 px, 0.25 s), Strong (144 px, 0.4 s) |
-| A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back | Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select | the Vita button of each Xbox button in play (None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both |
-| Reset controls > | | this tab's rows as shipped (Show dev settings stays) |
-| Show dev settings | Off | shows the Dev tab |
-
-While a touch zone's row is chosen the panel draws the front screen and the
-rear pad beside the rows: the row's zone green (dark green while Off), the
-zones set to an Xbox button grey.
-
-**Gyro**
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Gyro aiming | Off | turning the Vita aims, with the right stick: On, While zoomed, While holding (the Gyro button) |
-| Gyro button | L | While holding: aims while held; in play it then does nothing else |
-| Gyro sensitivity | 1.5x | 0.5x-3x; 1x turns the view as far as the Vita turns (less while zoomed) |
-| Gyro vertical | Normal | Normal: tilt the top edge towards you to look up; Inverted |
-| Gyro turning | Turn (yaw) | turn the Vita left and right, or Tilt (roll) it like a wheel |
-
-A line below shows the gyroscope's rates now (degrees a second: yaw, pitch,
-roll) and "learnt" once the Vita has lain still for a second.
-
 **Multiplayer**: see [Multiplayer](#multiplayer).
 
-**Modded maps** lists the maps in the maps folder that are not the Xbox's
-own: name, size, kind (**Xbox** for a modded or newly built Xbox map, **CE**
+Multiplayer's **Modded maps** page lists the maps in the maps folder that
+are not the Xbox's own: name, size, kind (**Xbox** for a modded or newly built Xbox map, **CE**
 for a Halo Custom Edition one, **CE+OS** for an OpenSauce `.yelo`, marked
 `*`) and On or Off. Left and right turn a map off or on: an Off map stays in
 the folder but is left out of the multiplayer map list (`HALO_MAPS_DISABLED`
 in `settings.txt`; a game on a map you turned off may not be joinable).
 Square deletes a map, with its `.bmp` picture and `.txt` description, after
 asking (not the map being played). **PC maps** (Off by default,
-experimental) puts the Custom Edition maps in the map list; the tab warns
+experimental) puts the Custom Edition maps in the map list; the page warns
 when the Custom Edition resource maps they need (`bitmaps.map`,
 `sounds.map`, `loc.map`) are not in the maps folder.
 
@@ -238,11 +238,14 @@ is on, and off, `env.txt`'s value (or the default) applies. While any is on,
 | Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go, in `halo.log` |
 | Crash dump on hang | `HALO_HANG_CRASH=1` | a hang of 8 s (no frame presented) crashes on purpose, for a crash dump |
 | FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load, render scale, GPU time, free video memory (VRAM; yellow while part of the texture cache is in main memory) |
+| Debug camera | `HALO_DEBUG_CAMERA=1` | hold Black for a second: follow, orbit, then a flying camera |
+| Ad hoc dialog | `HALO_ADHOC_DIALOG_MODE` | which mode the system's ad hoc dialog uses: Connect (try first), Create or Join |
+| Save report | | copies `halo.log`, `halo-prev.log`, `settings.txt`, `env.txt` and the newest `ux0:data/psp2core-*.psp2dmp` into `ux0:data/haloce-vita/report-<date>/` and shows the folder |
+| A/B switches > | | the four below, on a page of their own |
 | GPU W clamp * | `HALO_GXM_WCLAMP=0` | A/B: models close to the camera dropping out (issue #9) |
 | Target mip minimum * | `HALO_TARGET_CHAIN_MIN_SIZE` | A/B: the smallest mip level of render targets (32, 16 or 8 pixels) |
 | Frame phase lock * | `HALO_FRAME_PHASE_LOCK=0` | A/B: 30 FPS frames kept between two ticks (Off: a fixed period) |
 | Render target sync * | `HALO_GXM_RTT_SYNC=0` | A/B: a scene waits for a render target drawn just before it |
-| Save report | | copies `halo.log`, `halo-prev.log`, `settings.txt`, `env.txt` and the newest `ux0:data/psp2core-*.psp2dmp` into `ux0:data/haloce-vita/report-<date>/` and shows the folder |
 
 The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 
@@ -260,8 +263,9 @@ PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
   your own.
 - **System link** over Wi-Fi: Vitas on the same network host and join each
   other's games under Multiplayer, System Link.
-- **Ad hoc** (Vitas side by side, no router) is **experimental**, and
-  **online** (internet play) is for testers: its lines are in the Dev tab.
+- **Ad hoc** (Vitas side by side, no router) and **online** (internet
+  play) are **experimental**: each has a page in the Multiplayer tab while
+  Connection is set to it.
   Both end in the game's own System Link screens: the other Vita's game
   shows in the list, and you host or join as on a local network.
 
@@ -280,35 +284,36 @@ settings panel (hold Select and Start) and go to **Multiplayer**:
 The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
 Triangle, Back Select. The same screens are under Multiplayer, System Link
 Play in the main menu. To host on a PC (Custom Edition) map, turn on PC maps
-in the Modded maps tab first.
+on the Modded maps page first.
 
 The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
 | --- | --- |
 | Host a game / Join a game | The steps above, then the game's System Link screen (from the menus, outside a lobby). |
-| Connection | **Same Wi-Fi** (the default): system link on this network. **Ad hoc**: Vitas side by side, without a router. **Online** (offered while Show dev settings is on): internet play. Applies after a restart. |
-| Co-op campaign | **Off** (the default): the games you host are multiplayer. A level: the games you host are that campaign level played together (co-op, below). |
-| Co-op difficulty | Easy, Normal, Heroic or Legendary, for the co-op games you host. |
-| Ad hoc room | 1 to 4, with Connection Ad hoc: Vitas in the same room play together. |
-| Join / Leave ad hoc group | With Connection Ad hoc: opens the system's ad hoc dialog (the panel closes), or leaves the group. |
+| Connection | **Same Wi-Fi** (the default): system link on this network. **Ad hoc** (experimental): Vitas side by side, without a router. **Online** (experimental): internet play. Applies after a restart. |
+| Co-op > | **Co-op campaign**: **Off** (the default): the games you host are multiplayer. A level: the games you host are that campaign level played together (co-op, below). **Co-op difficulty**: Easy, Normal, Heroic or Legendary, for the co-op games you host. The row says the level. |
+| Online games > | With Connection Online: the page below. |
+| Ad hoc > | With Connection Ad hoc: **Ad hoc room** (1 to 4: Vitas in the same room play together), **Join / Leave ad hoc group** (opens the system's ad hoc dialog, the panel closing, or leaves the group). |
+| Modded maps > | Your custom maps (above). |
 
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many Vitas
 are in, in a lobby, in a game), and with Online or Ad hoc, your code or the
 ad hoc group.
 
-Internet play's lines, in the **Dev** tab (Controls, Show dev settings):
+Internet play's lines, on Multiplayer's **Online games** page (Connection
+Online):
 
 | Line | What it does |
 | --- | --- |
 | Online games | **Private**: others join with your code. **Public**: your games are also listed in the public lobby for any Vita to join. |
 | Join with a code | Type another player's code with the D-pad (up and down change a letter, left and right move, Cross joins). |
 | Browse public games | The games listed in the public lobby; Cross joins one. |
-| Ad hoc dialog | Which mode the system's ad hoc dialog uses: Connect (try first), Create or Join. |
 
-**Online.** Turn on Show dev settings, set Connection to Online and
-restart. To host, create a game (Host a game, or Multiplayer, System Link):
+The ad hoc dialog's mode (Connect, Create or Join) is a Dev switch.
+
+**Online.** Set Connection to Online and restart. To host, create a game (Host a game, or Multiplayer, System Link):
 the Multiplayer tab then shows your code, **ABCD-EFGH** (it stays the same
 until you quit the game). Tell it to the others; with Online games set to
 Public, your game is also listed. To

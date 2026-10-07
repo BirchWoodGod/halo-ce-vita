@@ -145,11 +145,11 @@ Quit** from the pause menu is the safest way to stop.
 | Select | Back | scoreboard |
 | Select + Start (hold) | | settings panel |
 
-The settings panel's **Controls** tab is laid out as the Xbox controller:
-each Xbox button (A, B, X, Y, Black, White, the triggers, the sticks'
-clicks, Back) can be put on another Vita button (in play; the menus keep
-Cross / Circle and the D-pad), and the touch zones can each press an Xbox
-button. The zones, all Off until set:
+The settings panel's **Controls** tab has two pages laid out as the Xbox
+controller: **Button layout** puts each Xbox button (A, B, X, Y, Black,
+White, the triggers, the sticks' clicks, Back) on another Vita button (in
+play; the menus keep Cross / Circle and the D-pad), and **Touch zones**
+makes each zone press an Xbox button. The zones, all Off until set:
 
 | Zone | Where |
 | --- | --- |
@@ -164,11 +164,12 @@ goes through the **Rear touch guard** row, so the hands holding the Vita do
 nothing: a touch that starts near the rear pad's edges never counts, and one
 further in only once held (Normal, the default: a 96-pixel border, 0.25 s;
 Light 48 / 0.15 s, Strong 144 / 0.4 s, Off no border and 0.1 s). A touch that starts outside a zone does nothing, and each finger
-counts on its own. While a zone's row is chosen the panel shows where the
-zones are. **Reset controls** puts the tab back as shipped (Show dev
-settings stays).
+counts on its own. The Touch zones page shows where the zones are.
+**Reset controls** (Controls, Advanced) puts look, crouch, the buttons and
+the zones back as shipped (gyro aiming and Show dev settings stay).
 
-**Gyro aiming** (the panel's **Gyro** tab, Off until set): turning the Vita
+**Gyro aiming** (the panel's Controls tab, its details on the **Gyro
+settings** page; Off until set): turning the Vita
 turns the view, on top of the right stick, as if you looked through the
 Vita: turn it left and right (or, with **Gyro turning** Tilt, steer it like
 a wheel) to turn, tilt its top edge towards you to look up. **Gyro aiming**
@@ -178,17 +179,20 @@ Xbox button on another one). **Gyro sensitivity** 0.5x to 3x (1.5x by
 default; 1x turns the view as far as the Vita turns, less while zoomed, as
 the stick is), **Gyro vertical** Normal or Inverted. It aims only in play,
 not in the menus, the panel or cinematics. Lay the Vita still for a second
-now and then (the tab's line says "learnt" once it has): that teaches it
+now and then (the page's line says "learnt" once it has): that teaches it
 the gyroscope's drift, so a resting Vita does not turn the view. Gyro
 motion does not keep the screen from dimming.
 
 ## Settings panel
 
-Hold Select + Start for a second. **L and R** switch between its tabs:
-**Graphics**, **Audio**, **Controls**, **Gyro**, **Multiplayer**, **Modded
-maps** and, once Controls' **Show dev settings** is on, **Dev**. Up and down choose a
-line, left and right change it, Cross does what a line marked `>` says,
-Circle closes the panel. Changes apply at once, render resolution and
+Hold Select + Start for a second. **L and R** switch between its four tabs,
+**Graphics**, **Controls**, **Audio** and **Multiplayer**, and **Dev** once
+**Show dev settings** (Controls, Advanced) is on. Up and down choose a line,
+left and right change it, Cross opens a line marked `>` (a page of the
+rows few players change, such as Button layout, Touch zones, Gyro
+settings, Modded maps or Graphics' Advanced) or does what it says, Circle
+goes back from a page or closes the panel. The chosen line's help and the
+panel's buttons are at the bottom. Changes apply at once, render resolution and
 aspect ratio included (the picture pauses for a moment while the screen is
 set up again), except the rows marked `*` (sound voices, the network, most
 dev switches), which apply after a restart; the panel says so. A bigger
@@ -202,11 +206,11 @@ it is).
 - **Multiplayer**: the network (Wi-Fi, Online, Ad hoc), your game's code,
   joining with a code, the public games, ad hoc groups and co-op (see
   [port/vita/README.md](port/vita/README.md#multiplayer)).
-- **Modded maps**: the custom maps in your maps folder, with their size and
+- **Modded maps** (a Multiplayer page): the custom maps in your maps folder, with their size and
   kind (Xbox, or CE for Halo Custom Edition). Left and right turn a map off
   (it stays on the card but leaves the map list) or on; Square deletes it
   after asking. **PC maps** puts Custom Edition maps in the map list
-  (experimental); the tab warns when the Custom Edition `bitmaps.map`,
+  (experimental); the page warns when the Custom Edition `bitmaps.map`,
   `sounds.map` or `loc.map` they need are missing.
 - **Dev**: switches for testing (timing in `halo.log`, a crash dump when the
   game hangs, the FPS overlay, A/B switches a bug report may ask for) and
@@ -351,7 +355,7 @@ Issues and pull requests are welcome. What is planned next is in the
 Open an [issue](https://github.com/BirchWoodGod/halo-ce-vita/issues) with
 what you were doing (level, place, weapon, vehicle) and these files from
 the memory card (VitaShell's FTP or USB mode). The settings panel's **Save
-report** (Controls: Show dev settings, then the Dev tab) copies `halo.log`,
+report** (Controls, Advanced: Show dev settings, then the Dev tab) copies `halo.log`,
 `halo-prev.log`, `settings.txt`, `env.txt` and the newest crash dump into
 one folder, `ux0:data/haloce-vita/report-<date>/`, for you to send; add
 `debug.txt`.

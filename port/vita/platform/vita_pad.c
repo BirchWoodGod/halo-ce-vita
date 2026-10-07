@@ -15,7 +15,7 @@ Vita button and gives the touch zones Xbox buttons: vita_controls.c):
 The look stick takes Xita's settings: XV_LOOK_SENS (percent), XV_LOOK_CURVE
 (2: squared), XV_INVERT_Y, and XV_DEADZONE (percent, both sticks).
 
-Gyro aiming (the panel's Gyro tab, vita_controls.h): what the Vita turned,
+Gyro aiming (the panel's Controls tab, vita_controls.h): what the Vita turned,
 in play, waits here for the game's look code, which takes it once a frame
 through vita_pad_gyro_look (port/linux/src/xinput_sdl.c halo_linux_mouse_look)
 and adds it to the facing change as mouse aim is added, divided by the

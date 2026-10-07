@@ -4,16 +4,20 @@ VITA_SETTINGS_TEST.C
 A desktop test of the settings panel (port/vita/host/vita_settings.c,
 included whole), with the calls it makes into internet play (p2p.h), ad hoc
 play (vita_net.c) and the renderer (vgxm_menu_set) recorded instead: the
-panel opened with SELECT+START, the tabs switched with L and R, the
-Multiplayer tab (a code typed with the D-pad and joined, the public lobby
-listed and joined, Online games switched to Public at once, an ad hoc group
-joined, the game seeing no buttons while the system's dialog is up), the
-Modded maps tab (a folder of fake maps: listed, turned off and on, deleted
-after a confirmation, the map in play kept), the Dev tab behind its switch
+panel opened with SELECT+START, its four tabs (and Dev) switched with L and
+R, no page longer than a screen (ten rows on a tab at most, the values in
+a column, a help line and a line of the panel's buttons), the pages a row
+opens and circle going back; the Multiplayer tab (Host a game and Join a
+game, a code typed with the D-pad and joined, the public lobby listed and
+joined, Online games switched to Public at once, an ad hoc group joined,
+the game seeing no buttons while the system's dialog is up), its Modded
+maps page (a folder of fake maps: listed, turned off and on, deleted after
+a confirmation, the map in play kept), the Dev tab behind its switch
 (switches saved only while on, the timing variables, Save report's folder),
-the Gyro tab (its rows, the gyroscope's line, saved and read back), and a
-settings.txt of 1.0 loading. It runs in a folder of its own, with
-ux0:data/haloce-vita made there.
+Controls' pages (Button layout and Touch zones in Xbox terms, Gyro
+settings with the gyroscope's line, saved and read back), every settings
+variable of 1.0.3 still a row, and a settings.txt of 1.0 loading. It runs
+in a folder of its own, with ux0:data/haloce-vita made there.
 
 Run port/vita/tests/run_vita_settings_test.sh.
 */
@@ -252,13 +256,17 @@ static int to_tab(const char *name)
 	char marked[32];
 	int index;
 
+	/* (from a page a row opened: back to its tab first) */
+	if (strstr(menu, "\n\x03"))
+		press(VITA_BUTTON_CIRCLE);
 	snprintf(marked, sizeof(marked), "*%s", name);
 	for (index = 0; index < 8 && !strstr(menu, marked); index++)
 		press(VITA_BUTTON_R);
-	return strstr(menu, marked) != NULL;
+	return strstr(menu, marked) != NULL && !strstr(menu, "\n\x03");
 }
 
-/* down until the selected line starts with `label` */
+/* down until the selected line starts with `label` (a row's label is the
+line up to its '\x02') */
 static int to_line(const char *label)
 {
 	char line[128];
@@ -273,10 +281,10 @@ static int to_line(const char *label)
 	return 0;
 }
 
-/* ---------- the Controls tab: touch zones, buttons, Reset controls */
+/* ---------- the page's shape */
 
 /* the menu's lines: how many (the zones' diagram line not counted), the
-longest, and the diagram's marks ("" without one) */
+longest row label, and the diagram's marks ("" without one) */
 static int menu_lines(int *longest, char *diagram, int size)
 {
 	const char *at = menu;
@@ -292,15 +300,96 @@ static int menu_lines(int *longest, char *diagram, int size)
 			snprintf(diagram, (size_t)size, "%.*s", length - 1, at + 1);
 		else
 		{
+			int label = (int)strcspn(at, "\x02\n");
+
 			/* (the tab bar is drawn apart, not as a row of text) */
 			if (at[0] != '\t')
-				*longest = length > *longest ? length : *longest;
+				*longest = label > *longest ? label : *longest;
 			count++;
 		}
 		at += length + (at[length] == '\n');
 	}
 	return count;
 }
+
+/* the rows of the page shown (lines with a value) */
+static int menu_rows(void)
+{
+	const char *at = menu;
+	int rows = 0;
+
+	while ((at = strchr(at, '\x02')) != NULL)
+	{
+		rows++;
+		at++;
+	}
+	return rows;
+}
+
+/* every line fits: a row's label 22 characters at most and its value 24
+(the value column starts 23 characters in, vita_gxm.c menu_build), the
+help and the panel's buttons 70 (drawn smaller), any other line 46 */
+static int menu_fits(void)
+{
+	const char *at = menu;
+
+	while (*at)
+	{
+		int length = (int)strcspn(at, "\n");
+		int label = (int)strcspn(at, "\x02\n");
+		int fits;
+
+		if (at[0] == '\t' || at[0] == '\x01')
+			fits = 1;
+		else if (at[0] == '\x05' || at[0] == '\x06')
+			fits = length - 1 <= 70;
+		else if (label < length)
+			fits = label <= 22 && length - label - 1 <= 24;
+		else
+			fits = length - (at[0] == '\x03' || at[0] == '\x04' || at[0] == '!') <= 46;
+		if (!fits)
+		{
+			printf("too long: %.*s\n", length, at);
+			return 0;
+		}
+		at += length + (at[length] == '\n');
+	}
+	return 1;
+}
+
+/* the line that starts with `prefix` ("" if none) */
+static const char *menu_find(const char *prefix, char *line, int size)
+{
+	const char *at = menu;
+
+	while (*at)
+	{
+		int length = (int)strcspn(at, "\n");
+
+		if (!strncmp(at, prefix, strlen(prefix)))
+		{
+			snprintf(line, (size_t)size, "%.*s", length, at);
+			return line;
+		}
+		at += length + (at[length] == '\n');
+	}
+	line[0] = 0;
+	return line;
+}
+
+/* a row opening a page: down to it, then cross */
+static int open_page(const char *label)
+{
+	char title[64];
+
+	if (!to_line(label))
+		return 0;
+	press(VITA_BUTTON_CROSS);
+	snprintf(title, sizeof(title), "\n\x03");
+	return strstr(menu, title) != NULL;
+}
+
+/* ---------- the Controls tab and its pages */
 
 /* one frame with these buttons held and these touch zones */
 static int frame_touch(unsigned long buttons, unsigned long touch)
@@ -317,7 +406,7 @@ static int frame_touch(unsigned long buttons, unsigned long touch)
 static void test_controls_tab(void)
 {
 	struct vita_controls_config config;
-	char diagram[16];
+	char diagram[16], line[128];
 	int longest, count, index;
 
 	/* (a 1.0 settings.txt was loaded last: no touch or button lines in it) */
@@ -328,15 +417,37 @@ static void test_controls_tab(void)
 	to_tab("Controls");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "Touch top left") && strstr(menu, "Touch right edge") && strstr(menu, "Rear touch left") &&
-		strstr(menu, "Rear touch right") && strstr(menu, "\nA ") && strstr(menu, "\nBlack ") &&
-		strstr(menu, "\nLeft trigger ") && strstr(menu, "\nRight stick click ") && strstr(menu, "\nBack ") &&
-		strstr(menu, "Reset controls >") && strstr(menu, "Show dev settings") && !strstr(menu, " button"),
-		"Controls: the touch zones, the Xbox buttons by name, Reset controls");
-	check(count <= 26 && longest <= 46, "Controls: 26 lines at most, each 46 characters at most");
-	check(strstr(menu, "\nRear touch guard ") && strstr(menu, "< Normal >") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal"),
+	check(!strncmp(menu_line(1, line, sizeof(line)), "Look sensitivity\x02", 17) &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Invert look\x02", 12) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Crouch\x02", 7) &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Gyro aiming\x02", 12) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Rear touch guard\x02", 17) &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Button layout\x02  As shipped  >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Touch zones\x02  Off  >") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Gyro settings\x02  >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Advanced\x02  >"),
+		"Controls: look, invert, crouch, gyro aiming, rear guard; then Button layout, Touch zones, Gyro settings, Advanced");
+	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
+		!strstr(menu, "\nStick deadzone\x02") && !strstr(menu, "\nShow dev settings\x02"),
+		"Controls: the zones, the buttons, the gyro's details and the rare rows on their pages");
+	check(menu_rows() == 9 && count == 12 && menu_fits(), "Controls: 9 rows (and the tab bar, help, buttons), each fits");
+	check(strstr(menu, "\nRear touch guard\x02< Normal >") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal"),
 		"Rear touch guard: Normal as shipped (a 1.0 settings.txt has none)");
-	check(!diagram[0], "Look sensitivity chosen: no zone diagram");
+	check(!diagram[0], "Controls: no zone diagram");
+	to_line("Look sensitivity");
+	check(strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: close") != NULL,
+		"the panel's buttons on one line: a value row's, on a tab");
+
+	/* Touch zones: its page, the zones drawn beside */
+	check(open_page("Touch zones") && strstr(menu, "\n\x03" "Controls > Touch zones\n"), "Touch zones opens its page");
+	count = menu_lines(&longest, diagram, sizeof(diagram));
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\nTouch top left\x02") && strstr(menu, "\nTouch top right\x02") &&
+		strstr(menu, "\nTouch left edge\x02") && strstr(menu, "\nTouch right edge\x02") &&
+		strstr(menu, "\nRear touch left\x02") && strstr(menu, "\nRear touch right\x02") && menu_rows() == 6 &&
+		menu_fits(), "Touch zones: the six zones");
+	check(!strcmp(diagram, "s----- aaaaaa"), "Touch top left chosen: the diagram marks its zone (Off)");
+	check(strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: back") != NULL, "a page: circle goes back");
 	to_line("Rear touch left");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!strcmp(diagram, "----s- aaaaaa"), "Rear touch left chosen: the diagram marks its zone (Off)");
@@ -356,6 +467,12 @@ static void test_controls_tab(void)
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back  ") && !strcmp(diagram, "-S--A- alaaea"),
 		"Touch top right: Back, the last choice; the rear zone still marked set");
+	press(VITA_BUTTON_CIRCLE);
+	check(menu_visible && strstr(menu, "*Controls") && !strstr(menu, "\n\x03") &&
+		!strncmp(menu_line(menu_selected, line, sizeof(line)), "Touch zones\x02  2 on  >", 21),
+		"circle: back to Controls, on Touch zones, which says two are on");
+
+	/* the rear guard, on the tab */
 	to_line("Rear touch guard");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!diagram[0] && strstr(menu, "Rear pad: its edges (the grip) ignored"), "Rear touch guard chosen: its help, no zone diagram");
@@ -370,6 +487,15 @@ static void test_controls_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "light") && vita_rear_guard_named(getenv("HALO_TOUCH_REAR_GUARD")) ==
 		VITA_REAR_GUARD_LIGHT, "Rear touch guard: Light, as the touch reader takes it");
+
+	/* Button layout: the Xbox buttons by name */
+	check(open_page("Button layout") && strstr(menu, "\n\x03" "Controls > Button layout\n"), "Button layout opens its page");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\nA\x02") && strstr(menu, "\nB\x02") && strstr(menu, "\nX\x02") && strstr(menu, "\nY\x02") &&
+		strstr(menu, "\nBlack\x02") && strstr(menu, "\nWhite\x02") && strstr(menu, "\nLeft trigger\x02") &&
+		strstr(menu, "\nRight trigger\x02") && strstr(menu, "\nLeft stick click\x02") &&
+		strstr(menu, "\nRight stick click\x02") && strstr(menu, "\nBack\x02") && menu_rows() == 11 &&
+		!strstr(menu, " button") && menu_fits(), "Button layout: the eleven Xbox buttons by name, each fits");
 	to_line("White");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!diagram[0], "a button's row: no zone diagram");
@@ -380,7 +506,10 @@ static void test_controls_tab(void)
 	check(config.zone_xbox[VITA_ZONE_REAR_LEFT] == VITA_XBOX_Y && config.zone_xbox[VITA_ZONE_TOP_RIGHT] == VITA_XBOX_BACK &&
 		config.xbox_button[VITA_XBOX_WHITE] == VITA_BUTTON_LEFT, "the pad reads the panel's choices");
 	press(VITA_BUTTON_CIRCLE);
-	check(frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 0, "panel closed: the touch zones reach the game");
+	check(strstr(menu, "\nButton layout\x02  Custom  >") != NULL, "back on Controls: Button layout says Custom");
+	press(VITA_BUTTON_CIRCLE);
+	check(!menu_visible && frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 0,
+		"circle on a tab closes the panel: the touch zones reach the game");
 
 	/* the next start: settings.txt brings them back */
 	for (index = 0; index < SETTING_COUNT; index++)
@@ -396,27 +525,37 @@ static void test_controls_tab(void)
 		!strcmp(getenv("HALO_XBOX_RIGHT_TRIGGER"), "r") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "light"),
 		"settings.txt round trip: zones, the rear guard and buttons back at start-up");
 
-	/* Reset controls: this tab as shipped, Show dev settings kept */
+	/* Advanced: the deadzone, Reset controls (Show dev settings kept) */
 	open_panel();
-	to_tab("Controls");
+	check(strstr(menu, "*Controls") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
+	check(open_page("Advanced") && strstr(menu, "\n\x03" "Controls > Advanced\n") &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Stick deadzone\x02", 15) &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Reset controls\x02  >") &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) && menu_rows() == 3,
+		"Controls, Advanced: Stick deadzone, Reset controls, Show dev settings");
 	to_line("Reset controls");
+	check(strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: back") != NULL, "an action row's buttons: cross selects");
 	press(VITA_BUTTON_CROSS);
 	printf("%s\n--\n", menu);
 	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "off") && !strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "off") &&
 		!strcmp(getenv("HALO_XBOX_WHITE"), "right") && !strcmp(getenv("XV_LOOK_SENS"), "100") &&
 		!strcmp(getenv("HALO_CROUCH_TOGGLE"), "1") && !strcmp(getenv("XV_INVERT_Y"), "0") &&
+		!strcmp(getenv("XV_DEADZONE"), "0") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_LEFT=off\n") &&
-		strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS=100\n") && strstr(menu, "Controls as shipped") &&
+		strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS=100\n") && strstr(menu, "\n\x05" "Controls as shipped") &&
 		!strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_GUARD=normal\n"),
-		"Reset controls: zones Off, the rear guard Normal, buttons, look and crouch as shipped, saved");
+		"Reset controls: zones Off, the rear guard Normal, buttons, look, crouch, deadzone as shipped, saved");
 	check(!strcmp(getenv("HALO_DEV_SETTINGS"), "1") && strstr(menu, "|Dev"), "Reset controls keeps Show dev settings");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "\nTouch zones\x02  Off  >"),
+		"back on Controls: buttons as shipped, touch zones Off");
 	press(VITA_BUTTON_CIRCLE);
 }
 
-/* ---------- the Gyro tab */
+/* ---------- gyro aiming: its row on Controls, its page */
 
-static void test_gyro_tab(void)
+static void test_gyro_page(void)
 {
 	struct vita_gyro_config config;
 	char diagram[16], line[128];
@@ -427,17 +566,8 @@ static void test_gyro_tab(void)
 		!strcmp(getenv("HALO_GYRO_SENS"), "150") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "0") &&
 		!strcmp(getenv("HALO_GYRO_TURN"), "yaw"), "a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw");
 	open_panel();
-	check(to_tab("Gyro"), "the Gyro tab");
-	count = menu_lines(&longest, diagram, sizeof(diagram));
-	printf("%s\n--\n", menu);
-	check(strstr(menu_line(1, line, sizeof(line)), "Gyro aiming") && strstr(line, "Off") &&
-		strstr(menu_line(2, line, sizeof(line)), "Gyro button") && strstr(line, "< L >") &&
-		strstr(menu_line(3, line, sizeof(line)), "Gyro sensitivity") && strstr(line, "< 1.5x >") &&
-		strstr(menu_line(4, line, sizeof(line)), "Gyro vertical") && strstr(line, "Normal") &&
-		strstr(menu_line(5, line, sizeof(line)), "Gyro turning") && strstr(line, "Turn (yaw)") &&
-		strstr(menu_line(6, line, sizeof(line)), "Gyro: yaw -999 pitch -999 roll -999"),
-		"Gyro: aiming, button, sensitivity, vertical, turning, the gyroscope's line");
-	check(count == 8 && longest <= 46 && !diagram[0], "Gyro: 8 lines (tab bar, 5 rows, the line, help), 46 characters at most");
+	to_tab("Controls");
+	to_line("Gyro aiming");
 	check(strstr(menu, "Turn the Vita to aim") != NULL, "Gyro aiming's help line");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GYRO"), "on") && strstr(file_text(SETTINGS_FILE), "HALO_GYRO=on\n"),
@@ -445,11 +575,22 @@ static void test_gyro_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GYRO"), "hold") && strstr(menu, "< While holding  "), "Gyro aiming: While holding, the last");
-	for (index = 0; index < 5; index++)
+	check(open_page("Gyro settings"), "Gyro settings opens its page");
+	count = menu_lines(&longest, diagram, sizeof(diagram));
+	printf("%s\n--\n", menu);
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x03" "Controls > Gyro settings") &&
+		strstr(menu_line(2, line, sizeof(line)), "Gyro button\x02") && strstr(line, "< L >") &&
+		strstr(menu_line(3, line, sizeof(line)), "Gyro sensitivity\x02") && strstr(line, "< 1.5x >") &&
+		strstr(menu_line(4, line, sizeof(line)), "Gyro vertical\x02") && strstr(line, "Normal") &&
+		strstr(menu_line(5, line, sizeof(line)), "Gyro turning\x02") && strstr(line, "Turn (yaw)") &&
+		!strncmp(menu_line(6, line, sizeof(line)), "\x04Gyro: yaw -999 pitch -999 roll -999", 36),
+		"Gyro settings: button, sensitivity, vertical, turning, the gyroscope's line");
+	check(count == 9 && menu_fits() && !diagram[0],
+		"Gyro settings: 9 lines (tab bar, title, 4 rows, the line, help, buttons), each fits");
+	for (index = 0; index < 4; index++)
 		press(VITA_BUTTON_DOWN);
-	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Gyro aiming", 11),
-		"down skips the gyroscope's line (five downs: back to the first row)");
-	press(VITA_BUTTON_DOWN);
+	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Gyro button", 11),
+		"down skips the gyroscope's line (four downs: back to the first row)");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GYRO_BUTTON"), "r") && strstr(menu, "nothing else in play"), "Gyro button: R");
 	press(VITA_BUTTON_DOWN);
@@ -465,7 +606,8 @@ static void test_gyro_tab(void)
 	vita_gyro_config_load(&config);
 	check(config.mode == VITA_GYRO_HOLD && config.button == VITA_BUTTON_R && config.sensitivity > 2.49f &&
 		config.sensitivity < 2.51f && config.invert_y && config.turn == VITA_GYRO_TURN_ROLL,
-		"the pad reads the Gyro tab's choices");
+		"the pad reads the gyro's choices");
+	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 
 	/* the next start: settings.txt brings them back */
@@ -482,12 +624,15 @@ static void test_gyro_tab(void)
 	check(strstr(file_text(SETTINGS_FILE), "HALO_XBOX_A=") && strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS="),
 		"the other rows are still saved beside them");
 
-	/* Reset controls is the Controls tab's: the gyro's rows stay */
+	/* Reset controls leaves the gyro's rows (as when they had a tab) */
 	open_panel();
 	to_tab("Controls");
+	open_page("Advanced");
 	to_line("Reset controls");
 	press(VITA_BUTTON_CROSS);
-	check(!strcmp(getenv("HALO_GYRO"), "hold"), "Reset controls leaves the Gyro tab");
+	check(!strcmp(getenv("HALO_GYRO"), "hold") && !strcmp(getenv("HALO_GYRO_SENS"), "250"),
+		"Reset controls leaves gyro aiming and its settings");
+	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -519,45 +664,30 @@ static void game_answers(int answer)
 	frame(0);
 }
 
-/* every line of the menu 46 characters at most (the tab bar aside) */
-static int menu_fits(void)
-{
-	const char *at = menu;
-
-	while (*at)
-	{
-		int length = (int)strcspn(at, "\n");
-
-		if (at[0] != '\t' && length > 46)
-		{
-			printf("too long: %.*s\n", length, at);
-			return 0;
-		}
-		at += length + (at[length] == '\n');
-	}
-	return 1;
-}
-
 static void test_multiplayer_tab(void)
 {
 	char line[128];
 
 	/* (the network this session runs: Online, from the environment) */
-	check(strstr(menu_line(1, line, sizeof(line)), "Host a game >") && strstr(menu_line(2, line, sizeof(line)),
-		"Join a game >") && !strncmp(menu_line(3, line, sizeof(line)), "Connection*", 11) && strstr(line, "< Online") &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Co-op campaign", 14) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Co-op difficulty", 16),
-		"Multiplayer: Host a game, Join a game, Connection, the co-op rows");
-	check(!strstr(menu, "Online games") && !strstr(menu, "Join with a code") && !strstr(menu, "Browse public") &&
-		!strstr(menu, "Ad hoc room") && !strstr(menu, "Ad hoc dialog"),
-		"Multiplayer: internet play's rows and ad hoc's are out of the way");
-	check(strstr(menu, "\nThis Vita: vitauser\n") && strstr(menu, "\nNo game yet: host one or join one\n") &&
-		strstr(menu, "\nOnline: ready"), "before the game says: this Vita's name, no game, internet play's line");
+	check(!strcmp(menu_line(1, line, sizeof(line)), "Host a game\x02  >") &&
+		!strcmp(menu_line(2, line, sizeof(line)), "Join a game\x02  >") &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Connection*\x02", 12) && strstr(line, "< Online") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Co-op\x02  Off  >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Online games\x02  Private  >") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Modded maps\x02  0 maps  >") &&
+		!menu_line(7, line, sizeof(line))[0],
+		"Multiplayer: Host a game, Join a game, Connection, Co-op, Online games (Online), Modded maps; a gap");
+	check(!strstr(menu, "Join with a code") && !strstr(menu, "Browse public") && !strstr(menu, "Co-op difficulty") &&
+		!strstr(menu, "Ad hoc") && !strstr(menu, "PC maps"),
+		"Multiplayer: the pages' rows out of the way, ad hoc's page too (not Ad hoc)");
+	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
+		strstr(menu, "\n\x04Online: ready"), "before the game says: this Vita's name, no game, internet play's line");
+	check(menu_rows() <= 10, "Multiplayer: ten rows at most");
 	check(strstr(menu, "Start a game for other Vitas") != NULL, "Host a game's help line");
 	check(menu_fits(), "Multiplayer: lines of 46 characters at most");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "\nThis Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
+	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
 
 	/* Host a game: the steps, then cross asks the game for System Link */
 	press(VITA_BUTTON_CROSS);
@@ -628,45 +758,59 @@ static void test_multiplayer_tab(void)
 
 	/* co-op: the level a hosted game plays together, at once (the server
 	reads the environment each frame of its lobby); Host's steps say it */
+	check(open_page("Co-op") && strstr(menu, "\n\x03Multiplayer > Co-op\n") && menu_rows() == 2,
+		"Co-op opens its page: the co-op rows as they were");
 	to_line("Co-op campaign");
 	menu_line(menu_selected, line, sizeof(line));
-	check(strstr(line, "Off") != NULL && getenv("HALO_NET_COOP_LEVEL") && !getenv("HALO_NET_COOP_LEVEL")[0],
+	check(!strcmp(line, "Co-op campaign\x02  Off >") && getenv("HALO_NET_COOP_LEVEL") && !getenv("HALO_NET_COOP_LEVEL")[0],
 		"Co-op campaign: Off at first");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a10") &&
-		strstr(menu_line(menu_selected, line, sizeof(line)), "Pillar of Autumn") && strlen(line) <= 46,
+		strstr(menu_line(menu_selected, line, sizeof(line)), "< Pillar of Autumn >") && menu_fits(),
 		"Co-op campaign: right picks The Pillar of Autumn (a10)");
 	press(VITA_BUTTON_DOWN);
-	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Co-op difficulty", 16) && strstr(line, "Normal") &&
+	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Co-op difficulty\x02", 17) && strstr(line, "Normal") &&
 		!strcmp(getenv("HALO_NET_COOP_DIFFICULTY"), "1"), "Co-op difficulty: Normal at first");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\nCo-op\x02  Pillar of Autumn  >\n") && menu_fits(),
+		"back on Multiplayer: Co-op says the level");
 	to_line("Host a game");
 	press(VITA_BUTTON_CROSS);
 	check(strstr(menu, "\n  Co-op: plays Pillar of Autumn, Normal\n") && menu_fits(), "Host's steps name the co-op level");
 	press(VITA_BUTTON_CIRCLE);
+	open_page("Co-op");
 	to_line("Co-op campaign");
 	press(VITA_BUTTON_LEFT);
 	check(!getenv("HALO_NET_COOP_LEVEL")[0], "Co-op campaign: left goes back to Off");
+	press(VITA_BUTTON_CIRCLE);
 
-	/* Connection: Online is not offered again without Show dev settings */
+	/* Connection: Same Wi-Fi, Ad hoc, Online (experimental) */
 	to_line("Connection");
-	check(strstr(menu, "Internet play by code, Dev tab") != NULL, "Connection Online's help line");
+	check(strstr(menu, "\n\x05Internet play by code (experimental)") != NULL, "Connection Online's help line");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online") && strstr(menu_line(menu_selected, line, sizeof(line)), "< Online  "),
+		"Connection: Online is the last");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu, "Restart the game"),
 		"Connection: Ad hoc asks for a restart");
+	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu_line(menu_selected, line, sizeof(line)),
-		"< Ad hoc  "), "... and Online is not offered again (dev settings off)");
+		"< Ad hoc >"), "... Same Wi-Fi and back: Online offered on either side (no dev setting needed)");
 	clock_us += 5000000;
 	press(VITA_BUTTON_DOWN);
 	check(!strstr(menu, "Restart the game"), "the other lines' help again after a few seconds");
 	press(VITA_BUTTON_UP);
 	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
-	check(strstr(menu, "Ad hoc room") && strstr(menu, "Join ad hoc group >") && strstr(menu, "Leave ad hoc group >"),
-		"Ad hoc chosen: its rows show");
+	check(strstr(menu, "\nAd hoc\x02  >") && !strstr(menu, "Ad hoc room"), "Ad hoc chosen: its page's row shows");
+	check(open_page("Ad hoc") && strstr(menu, "\n\x03Multiplayer > Ad hoc\n") && strstr(menu, "\nAd hoc room\x02") &&
+		strstr(menu, "\nJoin ad hoc group\x02  >") && strstr(menu, "\nLeave ad hoc group\x02  >"),
+		"the Ad hoc page: the room, joining and leaving the group");
 	to_line("Join ad hoc group");
 	press(VITA_BUTTON_CROSS);
 	check(adhoc_connects == 0 && strstr(menu, "Connection must be Ad hoc (restart)"),
 		"Join ad hoc group waits for the restart");
+	press(VITA_BUTTON_CIRCLE);
 	to_line("Host a game");
 	press(VITA_BUTTON_CROSS);
 	check(strstr(menu, "!Restart the game first: Connection changed") != NULL, "Host a game waits for the restart too");
@@ -678,8 +822,9 @@ static void test_multiplayer_tab(void)
 	check(!strcmp(getenv("HALO_NET_ADHOC"), "true"), "Connection Ad hoc: ad hoc play on");
 	clock_us += 600000;
 	frame(0);
-	check(strstr(menu, "\nThis Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\nAd hoc: not in a group\n"),
+	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
+	open_page("Ad hoc");
 	to_line("Ad hoc room");
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_DOWN);
@@ -723,7 +868,7 @@ static void test_multiplayer_tab(void)
 	frame(0);
 }
 
-/* internet play's rows, in the Dev tab (it is shown) */
+/* internet play's rows, on Multiplayer's Online games page */
 static void test_online_rows(void)
 {
 	char line[128];
@@ -736,12 +881,13 @@ static void test_online_rows(void)
 	to_line("Connection");
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online"), "Show dev settings on: Connection offers Online");
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online"), "Connection: Online again");
 	restart_pending = 0;
-	to_tab("Dev");
+	check(open_page("Online games") && strstr(menu, "\n\x03Multiplayer > Online games\n"), "Multiplayer's Online games page");
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "Online games") && strstr(menu, "Join with a code >") && strstr(menu, "Browse public games >") &&
-		strstr(menu, "Ad hoc dialog"), "Dev: internet play's rows and the ad hoc dialog's");
+	check(strstr(menu, "\nOnline games\x02") && strstr(menu, "\nJoin with a code\x02  >") &&
+		strstr(menu, "\nBrowse public games\x02  >") && menu_rows() == 3 && !strstr(menu, "Ad hoc dialog") &&
+		menu_fits(), "Online games: public or not, a code, the public games (the ad hoc dialog stays in Dev)");
 
 	/* Online games: Public, at once */
 	to_line("Online games");
@@ -761,7 +907,8 @@ static void test_online_rows(void)
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "B A A A - 9 A A A") != NULL, "the code screen shows the letters typed");
 	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_code, "BAAA-9AAA") && strstr(menu, "*Dev"), "cross joins the code typed");
+	check(!strcmp(joined_code, "BAAA-9AAA") && strstr(menu, "*Multiplayer") && strstr(menu, "> Online games\n"),
+		"cross joins the code typed: back on the page");
 	check(strstr(menu, "Looking up BAAA-9AAA") != NULL, "the help line says it is looked up");
 
 	/* the public lobby: this Vita's own game is left out */
@@ -780,11 +927,60 @@ static void test_online_rows(void)
 	to_tab("Multiplayer");
 	clock_us += 5000000;
 	frame(0);
-	check(strstr(menu, "Your code: QX7K-M2PA (public)") != NULL, "hosting online: the Multiplayer tab shows the code");
+	check(strstr(menu, "\n\x04Your code: QX7K-M2PA (public)") != NULL, "hosting online: the Multiplayer tab shows the code");
 	check(menu_fits(), "Multiplayer with internet play: 46 characters a line");
 	hosting = 0;
 	to_tab("Dev");
 	to_line("Save report");
+}
+
+/* every settings variable 1.0.3 had (its settings.txt) is still a row,
+with the values it saved */
+static void test_variables_kept(void)
+{
+	static const char *const variables[] = {
+		"HALO_PROFILE", "HALO_RENDER_SCALE", "HALO_DYNAMIC_RES_MIN", "HALO_DISPLAY_WIDTH", "HALO_UPSCALE_FILTER",
+		"HALO_MODEL_LOD_SCALE", "HALO_MIN_OBJECT_PIXELS", "HALO_SCENERY_UPDATE_DIVISOR",
+		"HALO_LIGHTING_REFRESH_DIVISOR", "HALO_INTERPOLATE_FIRST_PERSON", "HALO_FRAMERATE_COUNTER", "HALO_FRAME_CAP",
+		"HALO_SOUND_CHANNELS", "HALO_SOUND_OBSTRUCTION_TICKS", "XV_LOOK_SENS", "XV_INVERT_Y", "XV_DEADZONE",
+		"HALO_CROUCH_TOGGLE", "HALO_TOUCH_TOP_LEFT", "HALO_TOUCH_TOP_RIGHT", "HALO_TOUCH_LEFT_EDGE",
+		"HALO_TOUCH_RIGHT_EDGE", "HALO_TOUCH_REAR_LEFT", "HALO_TOUCH_REAR_RIGHT", "HALO_TOUCH_REAR_GUARD",
+		"HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
+		"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
+		"HALO_XBOX_BACK", "HALO_DEV_SETTINGS", "HALO_GYRO", "HALO_GYRO_BUTTON", "HALO_GYRO_SENS",
+		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_VITA_NETWORK", "HALO_NET_COOP_LEVEL",
+		"HALO_NET_COOP_DIFFICULTY", "HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
+		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
+		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE",
+	};
+	int index, all = 1, choices = 0;
+
+	for (index = 0; index < (int)(sizeof(variables) / sizeof(variables[0])); index++)
+	{
+		const struct setting *setting = setting_named(variables[index]);
+
+		if (!setting || setting->kind != KIND_CHOICE)
+		{
+			printf("missing: %s\n", variables[index]);
+			all = 0;
+		}
+	}
+	for (index = 0; index < SETTING_COUNT; index++)
+		choices += settings[index].kind == KIND_CHOICE;
+	check(all && choices == (int)(sizeof(variables) / sizeof(variables[0])),
+		"every settings variable of 1.0.3 is still a row, and no other");
+	check(!strcmp(setting_named("HALO_DEBUG_CAMERA")->names[0], "Off") &&
+		setting_named("HALO_DEBUG_CAMERA")->page == TAB_DEV, "Debug camera stays in Dev");
+	{
+		/* the values each row saved in 1.0.3 */
+		const struct setting *network = setting_named("HALO_VITA_NETWORK"), *gyro = setting_named("HALO_GYRO");
+		const struct setting *button = setting_named("HALO_XBOX_WHITE"), *zone = setting_named("HALO_TOUCH_REAR_LEFT");
+
+		check(!strcmp(network->values[0], "wifi") && !strcmp(network->values[1], "adhoc") &&
+			!strcmp(network->values[2], "online") && !strcmp(gyro->values[3], "hold") &&
+			!strcmp(button->values[9], "right") && !strcmp(zone->values[11], "back") &&
+			!strcmp(setting_named("HALO_RENDER_SCALE")->values[5], "dynamic"), "the values saved are 1.0.3's");
+	}
 }
 
 int main(void)
@@ -798,6 +994,7 @@ int main(void)
 	mkdir("ux0:data/haloce-vita/maps", 0777);
 	setenv("HALO_MAPS_ROOT", "ux0:data/haloce-vita/maps", 1);
 
+	test_variables_kept();
 	setenv("HALO_VITA_NETWORK", "online", 1);
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_NET_ONLINE"), "true") && !strcmp(getenv("HALO_NET_ALLOW_UPNP"), "false"),
@@ -810,15 +1007,25 @@ int main(void)
 	check(!frame(0), "closed: the game gets the buttons");
 	open_panel();
 	printf("%s\n--\n", menu);
-	check(menu_visible && menu[0] == '\t' && strstr(menu, "*Graphics|Audio|Controls|Gyro|Multiplayer|Modded maps\n"),
-		"SELECT+START opens the Graphics tab; six tabs (Dev hidden)");
-	check(strstr(menu_line(1, line, sizeof(line)), "Profile") && strstr(menu_line(3, line, sizeof(line)), "Dynamic minimum") &&
-		strstr(menu_line(11, line, sizeof(line)), "FPS counter") && strstr(menu_line(12, line, sizeof(line)), "Frame limit"),
-		"Graphics: Profile, Render resolution, Dynamic minimum ... FPS counter, Frame limit");
-	for (index = 1; index < 13; index++)
-		check(strlen(menu_line(index, line, sizeof(line))) <= 46, "a Graphics line fits (46 characters)");
-	check(!strstr(menu, "Render resolution*") && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Dynamic minimum*"),
-		"resolution, dynamic minimum and aspect: live, no *");
+	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Graphics|Controls|Audio|Multiplayer\n"),
+		"SELECT+START opens the Graphics tab; four tabs (Dev hidden)");
+	check(!strncmp(menu_line(1, line, sizeof(line)), "Profile\x02", 8) &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Render resolution\x02", 18) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Aspect ratio\x02", 13) &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Upscale filter\x02", 15) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Frame limit\x02", 12) &&
+		!strncmp(menu_line(6, line, sizeof(line)), "FPS counter\x02", 12) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Advanced\x02  >") &&
+		!strncmp(menu_line(9, line, sizeof(line)), "\x05Sets resolution", 16) &&
+		!strncmp(menu_line(10, line, sizeof(line)), "\x06L/R: tabs", 10),
+		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, FPS counter, weapon motion, Advanced; help, buttons");
+	check(menu_fits() && menu_rows() <= 10, "Graphics: ten rows at most, each fits");
+	check(!strstr(menu, "Dynamic minimum") && !strstr(menu, "Model detail"),
+		"Graphics: Dynamic minimum hidden (not Dynamic), the detail rows under Advanced");
+	check(strstr(menu, "\nProfile\x02< Balanced >") && strstr(menu, "\nRender resolution\x02< 75% >") &&
+		strstr(menu, "\nAspect ratio\x02  16:9 >"), "values in a column: '< ' or two spaces before each");
+	check(!strstr(menu, "Render resolution*") && !strstr(menu, "Aspect ratio*"), "resolution and aspect: live, no *");
 	{
 		/* Render resolution's Dynamic: saved as a word, the profile Custom,
 		back to a number, and the minimum's row */
@@ -829,6 +1036,10 @@ int main(void)
 			strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=dynamic\n") &&
 			!strcmp(settings[0].names[settings[0].choice], "Custom"),
 			"Render resolution Dynamic: in the environment and settings.txt at once, the profile Custom");
+		press(VITA_BUTTON_DOWN);
+		press(VITA_BUTTON_UP);
+		check(!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) && !strstr(line, "*"),
+			"Dynamic: the Dynamic minimum row shows, under it (live, no *)");
 		check(strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.5\n") != NULL, "Dynamic minimum: 50% by default, saved");
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
@@ -836,26 +1047,42 @@ int main(void)
 		vita_settings_set("HALO_RENDER_SCALE", "0.3");
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5"), "a scale off the list goes to the nearest number, not Dynamic");
 		vita_settings_set("HALO_RENDER_SCALE", "0.75");
+		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.75\n"), "not Dynamic: the minimum kept (hidden)");
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.5");
 		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 75%: Balanced again");
 	}
+	/* Graphics' Advanced: the detail rows the profile sets */
+	check(open_page("Advanced") && strstr(menu, "\n\x03Graphics > Advanced\n") &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Model detail\x02", 13) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02", 21) &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Scenery updates\x02", 16) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Object lighting\x02", 16) && menu_rows() == 4 && menu_fits(),
+		"Graphics, Advanced: model detail, distant objects, scenery, lighting");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+		"a detail row changed on its page: the profile Custom");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "... and Balanced again");
+	press(VITA_BUTTON_CIRCLE);
+	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+		!strncmp(menu_line(menu_selected, line, sizeof(line)), "Advanced\x02", 9),
+		"circle: back to Graphics, on Advanced");
 	press(VITA_BUTTON_L);
-	check(strstr(menu, "*Modded maps") != NULL, "L from the first tab wraps to the last shown");
+	check(strstr(menu, "*Multiplayer") != NULL, "L from the first tab wraps to the last shown");
 	press(VITA_BUTTON_R);
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Audio") && strstr(menu, "Sound voices*") && strstr(menu, "Sound occlusion"), "R: Audio");
+	check(strstr(menu, "*Controls") && strstr(menu, "Look sensitivity"), "R: Controls");
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Controls") && strstr(menu, "Look sensitivity") && strstr(menu, "Show dev settings"),
-		"R: Controls, with Show dev settings");
+	check(strstr(menu, "*Audio") && strstr(menu, "\nSound voices*\x02") && strstr(menu, "\nSound occlusion\x02") &&
+		menu_rows() == 2 && menu_fits(), "R: Audio");
 	press(VITA_BUTTON_R);
-	check(!strncmp(menu, "\tGraphics|Audio|Controls|*Gyro|", 31) && strstr(menu, "Gyro aiming"), "R: Gyro");
-	press(VITA_BUTTON_R);
-	check(!strncmp(menu, "\tGraphics|Audio|Controls|Gyro|*Multiplayer", 42), "R: Multiplayer");
+	check(!strncmp(menu, "\tGraphics|Controls|Audio|*Multiplayer\n", 38), "R: Multiplayer");
 	printf("%s\n--\n", menu);
 
 	test_multiplayer_tab();
 
-	/* ---------- Modded maps */
+	/* ---------- Multiplayer's Modded maps page */
 	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);
 	write_map("ux0:data/haloce-vita/maps/inplay.map", 5, 2000);
 	write_map("ux0:data/haloce-vita/maps/cemap.map", 609, 3 * 1024 * 1024 / 16);
@@ -864,17 +1091,21 @@ int main(void)
 	write_file("ux0:data/haloce-vita/maps/cemap.bmp", "BM", 2);
 	write_file("ux0:data/haloce-vita/maps/notes.txt", "x", 1);
 	open_panel();
-	check(to_tab("Modded maps"), "the Modded maps tab");
+	check(to_tab("Multiplayer") && strstr(menu, "\nModded maps\x02  3 maps  >"), "Multiplayer: Modded maps says how many");
+	check(open_page("Modded maps") && strstr(menu, "\n\x03Multiplayer > Modded maps\n"), "the Modded maps page");
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "PC maps") && strstr(menu, "!Missing: sounds.map loc.map"),
-		"PC maps switch; a CE map without sounds.map/loc.map: the warning");
-	check(!strncmp(menu_line(3, line, sizeof(line)), "cemap ", 6) && !strncmp(menu_line(4, line, sizeof(line)), "inplay ", 7) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "mygulch ", 8) && menu_line(7, line, sizeof(line))[0] == 0,
+	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) && !menu_line(3, line, sizeof(line))[0] &&
+		!strcmp(menu_line(4, line, sizeof(line)), "!Missing: sounds.map loc.map"),
+		"PC maps switch, a gap; a CE map without sounds.map/loc.map: the warning");
+	check(!strncmp(menu_line(5, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(6, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "mygulch\x02", 8) && menu_line(8, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
-	check(strstr(menu, "mygulch                245 KB  Xbox  On") != NULL, "mygulch: size, Xbox, On");
-	check(strstr(menu, " CE    On") != NULL, "cemap: Custom Edition");
+	check(strstr(menu, "\nmygulch\x02  On    245 KB  Xbox\n") != NULL, "mygulch: On, size, Xbox");
+	check(strstr(menu, "\ncemap\x02  On ") && strstr(menu, "  CE\n"), "cemap: Custom Edition");
+	check(menu_fits(), "Modded maps: each line fits");
 	to_line("mygulch");
-	check(strstr(menu, "Xbox map: left/right on or off") != NULL, "a map's help line");
+	check(strstr(menu, "\n\x05Xbox map: on or off, or delete it") &&
+		strstr(menu, "\n\x06L/R: tabs   Left/right: on/off   Square: delete   Circle: back"), "a map's help and buttons");
 	press(VITA_BUTTON_LEFT);
 	check(strstr(menu_line(menu_selected, line, sizeof(line)), "Off") && !strcmp(getenv("HALO_MAPS_DISABLED"), "mygulch") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED=mygulch\n"), "left: mygulch off, in the environment and settings.txt");
@@ -897,7 +1128,7 @@ int main(void)
 	to_line("cemap");
 	press(VITA_BUTTON_SQUARE);
 	press(VITA_BUTTON_CIRCLE);
-	check(file_exists("ux0:data/haloce-vita/maps/cemap.map") && strstr(menu, "*Modded maps"), "circle keeps it");
+	check(file_exists("ux0:data/haloce-vita/maps/cemap.map") && strstr(menu, "> Modded maps\n"), "circle keeps it");
 	press(VITA_BUTTON_SQUARE);
 	press(VITA_BUTTON_CROSS);
 	printf("%s\n--\n", menu);
@@ -911,25 +1142,34 @@ int main(void)
 	check(!strcmp(getenv("HALO_CUSTOM_EDITION"), "1") && strstr(menu, "!Missing: sounds.map loc.map"),
 		"PC maps On: the warning again");
 	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\nModded maps\x02  2 maps  >") != NULL, "back on Multiplayer: two maps now");
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Graphics") != NULL, "R from Modded maps: Graphics (Dev hidden)");
+	check(strstr(menu, "*Graphics") != NULL, "R from Multiplayer: Graphics (Dev hidden)");
 	to_tab("Controls");
+	open_page("Advanced");
 	to_line("Show dev settings");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "|Modded maps|Dev\n") != NULL, "Show dev settings: the Dev tab");
+	check(strstr(menu, "\t*Graphics|*Controls") == NULL && strstr(menu, "|Multiplayer|Dev\n") != NULL,
+		"Show dev settings (Controls, Advanced): the Dev tab");
 	to_tab("Dev");
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "Performance logging*") && strstr(menu, "Crash dump on hang") && strstr(menu, "FPS overlay") &&
-		strstr(menu, "GPU W clamp*") && strstr(menu, "Target mip minimum*") && strstr(menu, "Frame phase lock*") &&
-		strstr(menu, "Render target sync*") && strstr(menu, "Save report >"), "Dev: the switches, start-up ones marked *");
+	check(!strncmp(menu_line(1, line, sizeof(line)), "Performance logging*\x02", 21) &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Crash dump on hang\x02", 19) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "FPS overlay\x02", 12) &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Debug camera\x02", 13) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Ad hoc dialog\x02", 14) &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Save report\x02  >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "A/B switches\x02  >") && menu_rows() == 7 && menu_fits(),
+		"Dev: the switches, Debug camera, Ad hoc dialog, Save report, then A/B switches");
 	check(!strstr(file_text(SETTINGS_FILE), "HALO_GXM_RTT_SYNC") && !strstr(file_text(SETTINGS_FILE), "XV_FPS"),
 		"dev switches off: not in settings.txt");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_FRAME_TIMING"), "300") && !strcmp(getenv("HALO_RENDER_PROFILE"), "1") &&
 		!strcmp(getenv("HALO_TICK_PROFILE"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_PERF_LOG=1\n") &&
-		strstr(menu, "Restart the game"), "Performance logging: the three timing variables, saved, a restart");
+		strstr(menu, "\n\x05Restart the game"), "Performance logging: the three timing variables, saved, a restart");
 	clock_us += 5000000;
 	press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_RIGHT);
@@ -939,6 +1179,10 @@ int main(void)
 	check(overlay_level == 2 && !strcmp(getenv("XV_FPS"), "2"), "FPS overlay: FPS only, live");
 	press(VITA_BUTTON_RIGHT);
 	check(overlay_level == 1 && strstr(file_text(SETTINGS_FILE), "XV_FPS=1\n"), "FPS overlay: Full");
+	check(open_page("A/B switches") && strstr(menu, "\n\x03" "Dev > A/B switches\n") &&
+		strstr(menu, "\nGPU W clamp*\x02") && strstr(menu, "\nTarget mip minimum*\x02") &&
+		strstr(menu, "\nFrame phase lock*\x02") && strstr(menu, "\nRender target sync*\x02") && menu_rows() == 4 &&
+		menu_fits(), "Dev, A/B switches: the start-up ones, marked *");
 	to_line("Render target sync");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GXM_RTT_SYNC"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_GXM_RTT_SYNC=0\n"),
@@ -948,6 +1192,7 @@ int main(void)
 		"back On: unset (the default), not saved");
 	press(VITA_BUTTON_RIGHT);
 	restart_pending = 0;
+	press(VITA_BUTTON_CIRCLE);
 	/* Save report */
 	write_file("ux0:data/haloce-vita/halo.log", "log", 3);
 	write_file("ux0:data/haloce-vita/halo-prev.log", "prev", 4);
@@ -970,8 +1215,7 @@ int main(void)
 		file_exists("ux0:data/haloce-vita/report-20261006-153012/psp2core-2-new.psp2dmp") &&
 		!file_exists("ux0:data/haloce-vita/report-20261006-153012/psp2core-1-old.psp2dmp"),
 		"the report: the logs, settings, env.txt and the newest dump");
-	for (index = 1; index < 12; index++)
-		check(strlen(menu_line(index, line, sizeof(line))) <= 64, "a Dev line fits");
+	check(menu_fits(), "Dev: each line fits (the report's folder too)");
 	test_online_rows();
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible, "circle closes the panel");
@@ -1058,7 +1302,7 @@ int main(void)
 	}
 
 	test_controls_tab();
-	test_gyro_tab();
+	test_gyro_page();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

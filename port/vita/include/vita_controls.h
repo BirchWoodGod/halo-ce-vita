@@ -260,7 +260,7 @@ enum
 	VITA_GYRO_TURN_ROLL,
 };
 
-/* the settings (the panel's Gyro tab): HALO_GYRO off/on/zoomed/hold,
+/* the settings (the panel's Controls tab and Gyro settings page): HALO_GYRO off/on/zoomed/hold,
 HALO_GYRO_BUTTON (a VITA_BUTTON_VALUES name; default l), HALO_GYRO_SENS
 (percent, 1:1 at 100; default 150), HALO_GYRO_INVERT_Y 0/1, HALO_GYRO_TURN
 yaw/roll */
