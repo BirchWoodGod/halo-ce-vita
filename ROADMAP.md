@@ -54,6 +54,10 @@ water drawn correctly.
   co-op (the Xbox only had split-screen co-op on one console).
 - **Custom maps**: play community-made maps, Xbox ones and Halo PC / Custom
   Edition ones, and download a host's map from its Vita when you join.
+- **Easier Custom Edition setup**: the game picks out the `bitmaps.map`,
+  `sounds.map` and `loc.map` that Custom Edition maps need from your own
+  Halo Custom Edition installer or Halo MCC folder copied to the Vita, so
+  no unpacking on a PC. The files themselves are never included.
 - **Settings panel in tabs**, with a Modded maps tab, touch zones and
   remappable buttons in Xbox controller terms, and dynamic resolution.
 
