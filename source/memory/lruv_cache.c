@@ -144,6 +144,11 @@ int vita_host_thread_describe(unsigned long id, char *text, unsigned long size) 
 volatile unsigned long long halo_cache_lock_wait_us[2];
 /* acquires (the outermost, not re-entries) since the last report */
 volatile unsigned long halo_cache_lock_acquires;
+/* the tick's longest wait since objects.c's hitch report cleared it: where
+it waited and where the holder had taken the lock */
+volatile unsigned long long halo_cache_lock_tick_longest_us;
+const char *volatile halo_cache_lock_tick_longest_site;
+const char *volatile halo_cache_lock_tick_longest_holder;
 
 /* the owner test's thread identity: the Vita's kernel thread id, a fraction
 of pthread_self's cost there (the lock is taken ~500-700 times a frame) */
@@ -244,7 +249,20 @@ void halo_cache_lock_acquire_at(const char *site, void *caller)
 		}
 	}
 	if (waited_from)
-		halo_cache_lock_wait_us[halo_epoch_on_mutator() ? 1 : 0] += vita_host_time_us() - waited_from;
+	{
+		unsigned long long waited = vita_host_time_us() - waited_from;
+		int tick = halo_epoch_on_mutator();
+
+		halo_cache_lock_wait_us[tick ? 1 : 0] += waited;
+		if (tick && waited > halo_cache_lock_tick_longest_us)
+		{
+			/* (the holder's site is the last taken before this thread got
+			the lock: the one it waited behind) */
+			halo_cache_lock_tick_longest_us = waited;
+			halo_cache_lock_tick_longest_site = site;
+			halo_cache_lock_tick_longest_holder = lruv_owner_site;
+		}
+	}
 	halo_cache_lock_acquires++;
 	lruv_acquire_serial++;
 	__atomic_store_n(&lruv_owner, self, __ATOMIC_RELAXED);
