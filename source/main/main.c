@@ -2573,6 +2573,154 @@ static long main_network_catch_up_ticks(
 	return ticks;
 }
 
+/* (port) HALO_TICK_OVERLAP: tick pacing for a game that cannot keep up.
+With the tick on its own thread (tick_thread.c) a frame takes the longer of
+its render and its update, the update's ticks one after another while the
+render draws. A frame that runs two ticks to catch up with real time gains
+game time only while the render covers them: once a tick takes longer than
+its 33 ms share of real time and the update is longer than the render, a
+second tick makes the frame nearly twice as long for little more game time
+- only the update's per-frame work (particles, sounds, the netcode's: ~7 ms
+on the Vita) is shared by its ticks (the Vita in a Custom Edition AI war:
+50 ms ticks, a 30 ms render, two ticks a frame: 9 fps at 18.6 ticks a
+second; one tick a frame: 17.5 fps at 17.5 ticks a second). So, from the
+ticks', the per-frame work's and the render's times averaged over the last
+frames, a frame runs one tick while that plays at most a fifth slower than
+two would (a game already slower than real time, which then plays at up to
+twice the frame rate) and while it is quicker.
+
+1 (on everywhere) or 0 (off everywhere); unset, on for a multiplayer game
+this machine plays alone (a local game, or a host no other machine has
+joined: the Vita's way to play a Custom Edition map), where only the frame
+rate is at stake, and off for the campaign and for network games with
+other machines, whose pace stays real time as long as two ticks a frame
+can keep it. Each tick's simulation is the same either way. */
+static struct
+{
+	unsigned long long started_us;
+	unsigned long long render_us;
+	unsigned long long ticks_us_at_start;
+	real tick_ms;
+	real frame_work_ms;
+	real render_ms;
+	long frames;
+	boolean one_tick;
+	long changes_logged;
+} main_tick_pacing;
+
+/* network_distributed.c */
+boolean network_distributed_host_alone(void);
+/* game_time.c */
+extern volatile unsigned long long halo_game_ticks_us;
+
+static void main_tick_pacing_tick_started(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+	main_tick_pacing.started_us = vita_host_time_us ? vita_host_time_us() : 0;
+	main_tick_pacing.render_us = 0;
+	main_tick_pacing.ticks_us_at_start = halo_game_ticks_us;
+}
+
+/* the frame is presented: its render's time, from the tick's start */
+static void main_tick_pacing_presented(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+	if (main_tick_pacing.started_us && vita_host_time_us)
+		main_tick_pacing.render_us = vita_host_time_us() - main_tick_pacing.started_us;
+}
+
+/* the update is joined: its ticks' time each and its per-frame work's */
+static void main_tick_pacing_joined(
+	void)
+{
+	extern volatile short halo_render_elapsed_ticks;
+	short ticks = halo_render_elapsed_ticks;
+
+	if (ticks > 0 && main_tick_pacing.render_us)
+	{
+		real update_ms = (real)halo_tick_thread_last_us() / 1000.0f;
+		real ticks_ms = (real)(halo_game_ticks_us - main_tick_pacing.ticks_us_at_start) / 1000.0f;
+		real tick_ms = ticks_ms / (real)ticks;
+		real frame_work_ms = update_ms > ticks_ms ? update_ms - ticks_ms : 0.0f;
+		real render_ms = (real)main_tick_pacing.render_us / 1000.0f;
+
+		if (main_tick_pacing.frames++ == 0)
+		{
+			main_tick_pacing.tick_ms = tick_ms;
+			main_tick_pacing.frame_work_ms = frame_work_ms;
+			main_tick_pacing.render_ms = render_ms;
+		}
+		else
+		{
+			main_tick_pacing.tick_ms += (tick_ms - main_tick_pacing.tick_ms) * 0.125f;
+			main_tick_pacing.frame_work_ms += (frame_work_ms - main_tick_pacing.frame_work_ms) * 0.125f;
+			main_tick_pacing.render_ms += (render_ms - main_tick_pacing.render_ms) * 0.125f;
+		}
+	}
+	main_tick_pacing.started_us = 0;
+}
+
+static boolean main_tick_pacing_one_tick(
+	void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static int overlap = -2;
+	boolean one_tick = FALSE;
+
+	if (overlap == -2)
+	{
+		const char *setting = getenv("HALO_TICK_OVERLAP");
+
+		overlap = setting ? atoi(setting) != 0 : -1;
+	}
+	/* (with some hysteresis, so a frame rate near the boundary does not
+	switch back and forth) */
+	if (overlap != 0 && halo_tick_thread_enabled() && main_tick_pacing.frames >= 8 &&
+		main_tick_pacing.tick_ms > (main_tick_pacing.one_tick ? 0.95f : 1.0f) * 1000.0f / TICKS_PER_SECOND)
+	{
+		boolean wanted = overlap > 0;
+
+		/* (unset: a multiplayer game nobody else plays in) */
+		if (overlap < 0)
+		{
+			wanted = game_engine_running() &&
+				(main_globals.connection == _game_connection_local ||
+					(main_globals.connection == _game_connection_network_server &&
+						(network_game_is_splitscreen_local() || network_distributed_host_alone())));
+		}
+		if (wanted)
+		{
+			/* (ticks a second either way: a frame lasts the longer of the
+			render and the update) */
+			real one = main_tick_pacing.frame_work_ms + main_tick_pacing.tick_ms;
+			real two = main_tick_pacing.frame_work_ms + 2.0f * main_tick_pacing.tick_ms;
+
+			if (one < main_tick_pacing.render_ms)
+				one = main_tick_pacing.render_ms;
+			if (two < main_tick_pacing.render_ms)
+				two = main_tick_pacing.render_ms;
+			one_tick = 1.0f / one >= (main_tick_pacing.one_tick ? 0.75f : 0.8f) * 2.0f / two;
+		}
+	}
+	if (one_tick != main_tick_pacing.one_tick)
+	{
+		main_tick_pacing.one_tick = one_tick;
+		if (main_tick_pacing.changes_logged < 40)
+		{
+			main_tick_pacing.changes_logged++;
+			platform_log("tick pacing: %s a frame (tick %.1f ms, the update's other work %.1f ms, render %.1f ms)",
+				one_tick ? "one tick" : "up to two ticks", main_tick_pacing.tick_ms,
+				main_tick_pacing.frame_work_ms, main_tick_pacing.render_ms);
+		}
+	}
+	return one_tick;
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2647,10 +2795,24 @@ static void main_update_time_unthrottled(
 			main_globals.connection == _game_connection_network_client)
 		{
 			seconds_elapsed = CEILING(seconds_elapsed, (real)main_network_catch_up_ticks() * 0.03333333507180214f);
+			/* (port) HALO_TICK_CATCH_UP=0 for a host with no other machine
+			in its game (a System Link game hosted to play a multiplayer
+			map alone, as the Vita does): nobody to keep up with, so paced
+			as the local game above */
+			if (main_globals.connection == _game_connection_network_server &&
+				seconds_elapsed > 0.03333333507180214f && !main_tick_catch_up() && game_in_progress() &&
+				!cinematic_in_progress() && network_distributed_host_alone())
+			{
+				seconds_elapsed = 0.03333333507180214f;
+			}
 			/* (a co-op client too far ahead of a slow host waits for it) */
 			if (main_globals.connection == _game_connection_network_client && network_coop_client_hold())
 				seconds_elapsed = 0.0f;
 		}
+		/* (port) one tick a frame while two would not play faster
+		(HALO_TICK_OVERLAP, above) */
+		if (seconds_elapsed > 0.03333333507180214f && main_tick_pacing_one_tick())
+			seconds_elapsed = 0.03333333507180214f;
 	}
 	{
 		int halo_repeatable_run(void);
@@ -4383,6 +4545,7 @@ void main_loop(
 				if (simulate && halo_tick_thread_enabled())
 				{
 					halo_tick_thread_start((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+					main_tick_pacing_tick_started();
 					tick_running = TRUE;
 				}
 #endif
@@ -4412,7 +4575,26 @@ void main_loop(
 					}
 					halo_frame_timing(_frame_timing_render_start, 0);
 					render_interpolation_frame_begin();
-					main_game_render((double)main_globals.seconds_elapsed);
+					{
+						/* (harness) HALO_RENDER_SLOWDOWN=<factor>: the render
+						takes that many times as long (a sleep for the rest),
+						as HALO_TICK_SLOWDOWN the tick (tick_thread.c) */
+						extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+						extern void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+						extern double atof(const char *text);
+						static real slowdown = -1.0f;
+						unsigned long long render_started = vita_host_time_us ? vita_host_time_us() : 0;
+
+						if (slowdown < 0.0f)
+						{
+							const char *setting = getenv("HALO_RENDER_SLOWDOWN");
+
+							slowdown = setting ? (real)atof(setting) : 0.0f;
+						}
+						main_game_render((double)main_globals.seconds_elapsed);
+						if (slowdown > 1.0f && render_started && vita_host_sleep_us)
+							vita_host_sleep_us((unsigned long)((slowdown - 1.0f) * (real)(vita_host_time_us() - render_started)));
+					}
 					render_interpolation_frame_end();
 					halo_frame_timing(_frame_timing_render_end, 0);
 #else
@@ -4442,7 +4624,9 @@ void main_loop(
 			MAIN_SPLIT(-1);
 			if (tick_running)
 			{
+				main_tick_pacing_presented();
 				halo_tick_thread_join();
+				main_tick_pacing_joined();
 				MAIN_SPLIT(_main_split_join);
 				halo_frame_timing_tick_threaded(halo_tick_thread_last_us() * 1000ull);
 				tick_running = FALSE;

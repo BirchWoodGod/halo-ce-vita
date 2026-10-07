@@ -66,6 +66,32 @@ static void pause_briefly(void)
 		sched_yield();
 }
 
+/* (harness) HALO_TICK_SLOWDOWN=<factor>: the tick takes that many times as
+long, a sleep for the rest (the Vita's tick is 10-20 times the harness's),
+for the pacing of frames and ticks on a fast machine (main.c); each game
+tick slowed apart from the update's other work, so the pacing sees them in
+the Vita's proportions */
+extern volatile unsigned long long halo_game_ticks_us;
+
+static float tick_slowdown(void)
+{
+	static float slowdown = -1.0f;
+
+	if (slowdown < 0.0f)
+	{
+		const char *setting = getenv("HALO_TICK_SLOWDOWN");
+
+		slowdown = setting ? (float)atof(setting) : 0.0f;
+	}
+	return slowdown;
+}
+
+void halo_game_tick_slowdown(unsigned long long tick_us)
+{
+	if (tick_slowdown() > 1.0f && vita_host_sleep_us)
+		vita_host_sleep_us((unsigned long)((tick_slowdown() - 1.0f) * (float)tick_us));
+}
+
 static void *tick_thread(void *unused)
 {
 	(void)unused;
@@ -95,6 +121,7 @@ static void *tick_thread(void *unused)
 		halo_epoch_begin();
 		{
 			unsigned long long before = vita_host_time_us ? vita_host_time_us() : 0;
+			unsigned long long ticks_us_before = halo_game_ticks_us;
 
 			if (halo_trace_active && halo_trace_active())
 				platform_log("trace: tick begin");
@@ -131,6 +158,16 @@ static void *tick_thread(void *unused)
 				halo_tick_sound_ticks++;
 			}
 			last_tick_us = vita_host_time_us ? vita_host_time_us() - before : 0;
+			/* (harness) HALO_TICK_SLOWDOWN: the update's work besides its
+			ticks (halo_game_tick_slowdown slows those) */
+			if (tick_slowdown() > 1.0f && vita_host_sleep_us && last_tick_us)
+			{
+				unsigned long long ticks_us = halo_game_ticks_us - ticks_us_before;
+				unsigned long long other_us = last_tick_us > ticks_us ? last_tick_us - ticks_us : 0;
+
+				vita_host_sleep_us((unsigned long)((tick_slowdown() - 1.0f) * (float)other_us));
+				last_tick_us = vita_host_time_us() - before;
+			}
 		}
 		__atomic_store_n(&finished, finished + 1, __ATOMIC_RELEASE);
 	}

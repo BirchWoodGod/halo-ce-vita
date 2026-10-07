@@ -458,6 +458,8 @@ Useful ones:
 | `HALO_SHADER_SWEEP=0` | leave another build's old shader cache folders (`shaders.old-<n>`) on the memory card |
 | `HALO_NET_PROFILE=1`, `HALO_NET_TRACE=1` | where a network game's frame goes; what its sockets do |
 | `HALO_NET_CATCH_UP_TICKS=n` | the most ticks a frame of a System Link or online game runs to catch up with real time (default 2; 30 = beta.1's pacing) |
+| `HALO_TICK_OVERLAP=1`, `=0` | when a tick takes longer than 33 ms and longer than the frame's render, a frame runs one tick instead of two while that keeps at least four fifths of the game's speed (frames come up to twice as often); unset: on in a multiplayer game nobody else plays in (a local game, or a System Link host no other machine joined), off in the campaign and in games with other machines; `tick pacing:` lines in `halo.log` |
+| `HALO_TICK_CATCH_UP=0` | one tick a frame at most in a local game and, now, for a System Link host no other machine joined: the game plays slower instead of the frame rate halving |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
 | `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host's latest, so it plays at a slow host's pace (default 6; 0 = never) |
 | `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |
