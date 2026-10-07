@@ -1037,6 +1037,27 @@ void custom_edition_cache_load_failure_note(
 	return;
 }
 
+/* port: an Xbox (or any) map the loader refuses as damaged or unsupported
+(cache_files.c): recorded so main_new_map shows the player a message and
+returns to the menu, as it does for a Custom Edition map, rather than the
+game stopping fatally (which, for a downloaded map from a stranger, would
+be a crash the host could cause). */
+void halo_map_load_refused(
+	char const *map_name,
+	char const *reason)
+{
+	/* (a more precise reason recorded earlier for the same map stands) */
+	if (custom_edition_load_failure.failed &&
+		!csstrcasecmp(custom_edition_load_failure.map_name, tag_name_strip_path(map_name)))
+	{
+		return;
+	}
+	custom_edition_cache_load_failure_begin(map_name);
+	custom_edition_cache_load_failure_reason(reason);
+
+	return;
+}
+
 boolean custom_edition_cache_load_failure_show(
 	char const *map_name)
 {
