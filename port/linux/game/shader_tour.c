@@ -11,6 +11,14 @@ player is deathless; the level's scripts run as they would, so encounters
 and cinematics start as the player turns up near them. Logs each stop and
 "shader tour: done" at the end.
 
+A multiplayer map's tour goes round its player starting locations instead
+(spread over the map for the game types' spawns; its few cutscene flags are
+its scripts', and its next structure may be another time of day), facing
+each one's way and then the opposite way, round and round until the
+program exits. It is how the harness walks a Custom Edition map
+through its textures and objects as a player running about would (the
+texture caches, object counts over time).
+
 Called from the main loop with the test commands (main.c).
 */
 
@@ -22,6 +30,7 @@ Called from the main loop with the test commands (main.c).
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 void platform_log(char const *format, ...);
@@ -61,6 +70,45 @@ void halo_shader_tour_update(
 	bsp_count = scenario->structure_bsp_references.count;
 	if (stop == 0)
 		hs_compile_and_evaluate("(set cheat_deathless_player true)");
+	if (scenario->type == _scenario_type_multiplayer && scenario->players.count > 0)
+	{
+		/* (multiplayer: the starting locations, both ways, endlessly) */
+		long location_index = (stop / 2) % scenario->players.count;
+		struct player_starting_location *location = TAG_BLOCK_GET_ELEMENT(&scenario->players, location_index,
+			struct player_starting_location);
+		real facing = location->facing + ((stop & 1) ? 3.14159265f : 0.0f);
+		real_vector3d forward;
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		forward.i = (real)cos(facing);
+		forward.j = (real)sin(facing);
+		forward.k = 0.0f;
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (player->unit_index != NONE)
+			{
+				if (!(stop & 1))
+				{
+					platform_log("shader tour: starting location %ld/%ld (%.1f %.1f %.1f)", location_index,
+						(long)scenario->players.count, location->position.x, location->position.y, location->position.z);
+					player_teleport(iterator.datum_index, NONE, &location->position);
+				}
+				if (player->local_player_index != NONE)
+					player_control_set_facing(player->local_player_index, &forward);
+				break;
+			}
+		}
+		stop++;
+		return;
+	}
+	if (flag_count == 0)
+	{
+		/* (no flags and no starting locations: the main menu's scenario;
+		a multiplayer map may follow) */
+		return;
+	}
 	while (stop < flag_count * bsp_count)
 	{
 		short bsp = (short)(stop / flag_count);

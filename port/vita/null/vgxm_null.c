@@ -317,6 +317,13 @@ void vgxm_pool_reset(void)
 	pool_forget();
 }
 
+int vgxm_pool_recycle(void **base, unsigned long *size)
+{
+	if (!pool_floor)
+		pool_floor = 65536 * 2;
+	return pool_recycle(base, size);
+}
+
 unsigned long vgxm_pool_used(void)
 {
 	return pool_offset + pool_jumbo_bytes;

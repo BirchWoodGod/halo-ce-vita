@@ -29,6 +29,7 @@ read.
 
 #include "cseries.h"
 #include "errors.h"
+#include "cseries_windows.h"
 #include "tag_files/files.h"
 #include "tag_files/tag_files.h"
 #include "cache/cache_files.h"
@@ -57,12 +58,9 @@ largest map is 0x24000000 bytes long (cache_file_formats.h) */
 #define COMBINED_SOUNDS_OFFSET 0x60000000UL
 #define COMBINED_OFFSET_LIMIT 0x80000000UL
 
-/* The renderer write-protects the memory it has made textures of and learns
-of changes to it from the faults writes take (port/linux/src/memory_watch.c);
-the kernel fails a read into such memory instead of faulting. Reads for the
-game therefore land here first and are copied, as the platform's own file
-layer does (port/linux/src/xbox_files.c, read_at). */
-#define READ_STAGING_BYTES 0x10000
+/* the piece of a whole map file read at a time for its CRC-32
+(custom_edition_cache_map_identity) */
+#define IDENTITY_READ_BYTES 0x10000
 
 /* the platform's write tracking (port/linux/src/platform.h): told of every
 write into guest memory the game's own code does not make, which the Vita,
@@ -74,7 +72,9 @@ void memory_watch_prepare_write(void *address, unsigned long size);
 
 struct custom_edition_file
 {
-	FILE *stream;
+	/* the file, while opened */
+	boolean opened;
+	HANDLE handle;
 	struct cache_file_source source;
 };
 
@@ -89,10 +89,9 @@ struct custom_edition_cache_globals
 	struct resource_map resource_map_storage[NUMBER_OF_RESOURCE_MAP_TYPES];
 	struct resource_map *resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES];
 	/* the port reads from the tick thread (sounds, the textures it
-	predicts) and the render thread (textures) at once: the streams and the
-	staging buffer are taken under this */
+	predicts) and the render thread (textures) at once: one at a time, each
+	with its arrival (custom_edition_bitmap_pixels_arrived), under this */
 	volatile int read_lock;
-	byte read_staging[READ_STAGING_BYTES];
 };
 
 /* ---------- globals */
@@ -101,35 +100,145 @@ static struct custom_edition_cache_globals custom_edition_cache_globals;
 
 /* ---------- private code */
 
+/* The map files are read with positioned reads through the platform's
+file layer (port/linux/src/xbox_files.c), as Xbox maps are: on the Vita
+straight into the reader's memory, in requests of up to a megabyte. They
+were read through stdio, whose stream buffer on the Vita (newlib's BUFSIZ)
+is 1 KB, so a read reached the memory card as 1 KB requests: ~3 MB/s, 20 s
+of Extinction's tag data and checksum, 10 s of its model data, and each
+texture and sound the game's caches stream in from bitmaps.map and
+sounds.map during play, on the thread that draws or ticks, holding the
+cache lock. */
+#define FILE_READ_REQUEST_BYTES 0x100000
+
+/* (the load's report, custom_edition_cache_tags_load: requests, bytes and
+the time spent in them, by any thread) */
+static struct
+{
+	unsigned long requests;
+	unsigned long long bytes;
+	unsigned long long microseconds;
+} custom_edition_file_reads;
+
+/* the time the tick (1) and the other threads (0) spent reading map files
+here (objects.c's hitch report) */
+volatile unsigned long long halo_map_read_us[2];
+int halo_epoch_on_mutator(void);
+
+/* (the platform's clock: port/linux/src/posix_profile.c, the Vita's host) */
+unsigned long long vita_host_time_us(void);
+
+static unsigned long long custom_edition_microseconds(
+	void)
+{
+	return vita_host_time_us();
+}
+
 static int custom_edition_file_read(
 	void *context,
 	uint32_t offset,
 	uint32_t size,
 	void *buffer)
 {
-	FILE *stream = context;
+	unsigned long long started = custom_edition_microseconds();
+	uint32_t done = 0;
 
-	return fseek(stream, (long)offset, SEEK_SET) == 0 && fread(buffer, 1, size, stream) == size;
+	while (done < size)
+	{
+		OVERLAPPED position;
+		DWORD request = MIN(size - done, FILE_READ_REQUEST_BYTES);
+		DWORD read = 0;
+
+		csmemset(&position, 0, sizeof(position));
+		position.Offset = offset + done;
+		if (!ReadFile((HANDLE)context, (byte *)buffer + done, request, &read, &position) || !read)
+		{
+			break;
+		}
+		custom_edition_file_reads.requests++;
+		done += read;
+	}
+	{
+		/* (debug) HALO_IO_THROTTLE_KBPS=<n>: as the platform's reads of Xbox
+		maps (xbox_files.c), these take as long as at n KB/s - the Vita's
+		memory card, 10000-13000 with large requests, ~3000 as stdio read
+		these maps - to see in the harness what waits behind them */
+		static long throttle = -1;
+
+		if (throttle < 0)
+			throttle = getenv("HALO_IO_THROTTLE_KBPS") ? atol(getenv("HALO_IO_THROTTLE_KBPS")) : 0;
+		if (throttle > 0 && done)
+			Sleep((DWORD)(1 + (unsigned long long)done * 1000ull / ((unsigned long long)throttle * 1024ull)));
+	}
+	custom_edition_file_reads.bytes += done;
+	custom_edition_file_reads.microseconds += custom_edition_microseconds() - started;
+	halo_map_read_us[halo_epoch_on_mutator() ? 1 : 0] += custom_edition_microseconds() - started;
+
+	return done == size;
+}
+
+/* a part of the load, for its line in debug.txt: the time since `phase`
+was marked, the reads made in it and the time they took; marks again */
+struct custom_edition_load_phase
+{
+	unsigned long long started;
+	unsigned long requests;
+	unsigned long long bytes, microseconds;
+};
+
+static void custom_edition_load_phase_mark(
+	struct custom_edition_load_phase *phase)
+{
+	phase->started = custom_edition_microseconds();
+	phase->requests = custom_edition_file_reads.requests;
+	phase->bytes = custom_edition_file_reads.bytes;
+	phase->microseconds = custom_edition_file_reads.microseconds;
+
+	return;
+}
+
+static int custom_edition_load_phase_describe(
+	struct custom_edition_load_phase *phase,
+	char const *name,
+	char *text,
+	size_t size)
+{
+	int length = snprintf(
+		text,
+		size,
+		"%s %lu ms (%lu KB in %lu reads, %lu ms of them)",
+		name,
+		(unsigned long)((custom_edition_microseconds() - phase->started) / 1000),
+		(unsigned long)((custom_edition_file_reads.bytes - phase->bytes) / 1024),
+		custom_edition_file_reads.requests - phase->requests,
+		(unsigned long)((custom_edition_file_reads.microseconds - phase->microseconds) / 1000));
+
+	custom_edition_load_phase_mark(phase);
+
+	return length;
 }
 
 static boolean custom_edition_file_open(
 	struct custom_edition_file *file,
 	char const *path)
 {
-	long size;
+	HANDLE handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	DWORD size;
 
-	file->stream = fopen(path, "rb");
-	if (!file->stream)
+	file->opened = FALSE;
+	if (handle == INVALID_HANDLE_VALUE)
 	{
 		return FALSE;
 	}
-	if (fseek(file->stream, 0, SEEK_END) != 0 || (size = ftell(file->stream)) < 0)
+	size = GetFileSize(handle, NULL);
+	if (size == INVALID_FILE_SIZE)
 	{
-		fclose(file->stream);
-		file->stream = NULL;
+		CloseHandle(handle);
 		return FALSE;
 	}
-	file->source.context = file->stream;
+	file->opened = TRUE;
+	file->handle = handle;
+	file->source.context = handle;
 	file->source.read = custom_edition_file_read;
 	file->source.size = (uint32_t)size;
 
@@ -139,10 +248,10 @@ static boolean custom_edition_file_open(
 static void custom_edition_file_close(
 	struct custom_edition_file *file)
 {
-	if (file->stream)
+	if (file->opened)
 	{
-		fclose(file->stream);
-		file->stream = NULL;
+		CloseHandle(file->handle);
+		file->opened = FALSE;
 	}
 
 	return;
@@ -320,8 +429,12 @@ static boolean custom_edition_cache_tags_convert(
 	(void)tag_cache_bytes;
 #endif
 
-	return custom_edition_bitmaps_verify(tag_cache, loaded_bytes) &&
-		custom_edition_reordered_bitmaps_find(tag_cache, loaded_bytes) &&
+	if (!custom_edition_bitmaps_verify(tag_cache, loaded_bytes))
+	{
+		return FALSE;
+	}
+	custom_edition_bitmaps_reduce(tag_cache, loaded_bytes);
+	return custom_edition_reordered_bitmaps_find(tag_cache, loaded_bytes) &&
 		custom_edition_scripts_convert(tag_cache, loaded_bytes) &&
 		custom_edition_cache_models_convert(tag_cache, report);
 }
@@ -661,13 +774,13 @@ unsigned long custom_edition_cache_map_identity(
 		map_share_protocol.c) */
 		if (!identity.checksum || identity.checksum == 0xFFFFFFFFUL)
 		{
-			byte buffer[READ_STAGING_BYTES];
+			byte buffer[IDENTITY_READ_BYTES];
 			uint32_t offset;
 
 			crc = crc32(0L, Z_NULL, 0);
-			for (offset = 0; offset < file.source.size; offset += READ_STAGING_BYTES)
+			for (offset = 0; offset < file.source.size; offset += IDENTITY_READ_BYTES)
 			{
-				uint32_t chunk = MIN(file.source.size - offset, READ_STAGING_BYTES);
+				uint32_t chunk = MIN(file.source.size - offset, IDENTITY_READ_BYTES);
 
 				if (!file.source.read(file.source.context, offset, chunk, buffer))
 				{
@@ -709,7 +822,12 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	char path[MAP_PATH_SIZE];
 	enum cache_file_status status;
 	short type;
+	/* (the load's parts in debug.txt, with the card's share of each) */
+	struct custom_edition_load_phase phase;
+	char phases[320];
+	int phases_length = 0;
 
+	custom_edition_load_phase_mark(&phase);
 	assert(!globals->tags_loaded);
 	custom_edition_cache_load_failure_begin(map_name);
 	if (!custom_edition_map_path(map_name, path) || !custom_edition_file_open(&globals->map, path))
@@ -781,9 +899,9 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 
 	/* the combined offset space serves bitmaps.map and sounds.map after the
 	map itself */
-	if ((globals->resource_files[_resource_map_bitmaps].stream &&
+	if ((globals->resource_files[_resource_map_bitmaps].opened &&
 		globals->resource_files[_resource_map_bitmaps].source.size > COMBINED_SOUNDS_OFFSET - COMBINED_BITMAPS_OFFSET) ||
-		(globals->resource_files[_resource_map_sounds].stream &&
+		(globals->resource_files[_resource_map_sounds].opened &&
 		globals->resource_files[_resource_map_sounds].source.size > COMBINED_OFFSET_LIMIT - COMBINED_SOUNDS_OFFSET))
 	{
 		error(_error_silent, "custom edition: a resource map is too large for this loader");
@@ -792,12 +910,18 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		return NULL;
 	}
 
+	phases_length += custom_edition_load_phase_describe(&phase, "opening", phases + phases_length, sizeof(phases) - phases_length);
 	status = custom_edition_cache_load(
 		&globals->map.source,
 		globals->resource_maps,
 		tag_cache,
 		tag_cache_bytes,
 		&report);
+	phases_length += custom_edition_load_phase_describe(
+		&phase,
+		", tags and checksum",
+		phases + phases_length,
+		sizeof(phases) - phases_length);
 	if (status != _cache_file_status_ok)
 	{
 		error(
@@ -831,6 +955,8 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	globals->loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
 	globals->tags_loaded = TRUE;
 	custom_edition_cache_heap_log("loaded");
+	custom_edition_load_phase_describe(&phase, ", conversion", phases + phases_length, sizeof(phases) - phases_length);
+	error(_error_silent, "custom edition: load: %s", phases);
 
 	return (struct cache_file_tag_header *)tag_cache;
 }
@@ -875,7 +1001,7 @@ boolean custom_edition_cache_model_data_read(
 {
 	struct custom_edition_file const *map = &custom_edition_cache_globals.map;
 
-	return map->stream &&
+	return map->opened &&
 		offset <= report->model_data_bytes &&
 		size <= report->model_data_bytes - offset &&
 		map->source.read(map->source.context, report->model_data_offset + (uint32_t)offset, (uint32_t)size, buffer);
@@ -934,7 +1060,6 @@ void custom_edition_cache_read(
 	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
 	struct custom_edition_file *file;
 	unsigned long file_offset;
-	long read_bytes;
 	boolean read;
 
 	if ((unsigned long)offset >= COMBINED_SOUNDS_OFFSET)
@@ -959,20 +1084,17 @@ void custom_edition_cache_read(
 	{
 		SwitchToThread();
 	}
-	read = file->stream && size >= 0;
+	read = file->opened && size >= 0;
 	if (size > 0)
 	{
 		memory_watch_prepare_write(buffer, (unsigned long)size);
 	}
-	for (read_bytes = 0; read && read_bytes < size; read_bytes += READ_STAGING_BYTES)
+	/* (straight into the reader's memory: the platform's file layer fills
+	write-watched memory through a bounce buffer where pages are protected,
+	and on the Vita in one request) */
+	if (read && size > 0)
 	{
-		long chunk_bytes = MIN(size - read_bytes, READ_STAGING_BYTES);
-
-		read = file->source.read(file->source.context, file_offset + read_bytes, (uint32_t)chunk_bytes, globals->read_staging);
-		if (read)
-		{
-			csmemcpy((byte *)buffer + read_bytes, globals->read_staging, chunk_bytes);
-		}
+		read = file->source.read(file->source.context, file_offset, (uint32_t)size, buffer);
 	}
 	if (!read)
 	{

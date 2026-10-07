@@ -128,6 +128,13 @@ boolean custom_edition_bitmaps_verify(
 	byte *tag_cache,
 	unsigned long loaded_bytes);
 
+/* Draws the large 2D textures of a tag cache custom_edition_cache_load
+filled from their second level (HALO_CE_TEXTURE_LEVEL_KB), and logs how
+many it changed. */
+void custom_edition_bitmaps_reduce(
+	byte *tag_cache,
+	unsigned long loaded_bytes);
+
 /* Finds the bitmaps of a tag cache custom_edition_cache_load filled whose
 channels Halo PC keeps elsewhere (multipurpose maps and HUD meters), which
 the renderer is to sample in this build's order as their pixels arrive;

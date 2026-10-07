@@ -51,6 +51,11 @@ void *vgxm_worker_alloc(unsigned long size, unsigned long alignment);
 void *vgxm_pool_alloc(unsigned long size, unsigned long alignment);
 /* waits for the GPU and forgets every pool allocation */
 void vgxm_pool_reset(void);
+/* the pool full: waits for the GPU and frees the pool's next segment (the
+oldest allocations, from the start again past the end), its memory in
+*base and *size (0 if it had none) for what was decoded there to be
+forgotten; 0 when none is left to free so (vgxm_pool_reset then) */
+int vgxm_pool_recycle(void **base, unsigned long *size);
 unsigned long vgxm_pool_used(void);
 
 /* ---------- textures: 16-byte GXM control words */

@@ -80,6 +80,12 @@ enum
 	_bitmap_format_p8_bump,
 };
 
+/* bitmap_group.c's group types */
+enum
+{
+	_bitmap_group_type_2d_textures,
+};
+
 enum
 {
 	_bitmap_has_power_of_two_dimensions_bit,
@@ -452,6 +458,110 @@ static void weapon_hud_statics_note(
 }
 
 /* ---------- public code */
+
+/* Halo PC's bitmaps (bitmaps.map, and many maps' own) are often four times
+the size of the Xbox's of the same texture - bump maps as 32-bit colour
+where the Xbox has 8-bit palettized ones, base maps at twice the width and
+height - and the game streams them into its 22 MB texture cache, sized for
+the Xbox's maps. Extinction draws from 517 bitmaps, 54 MB: walking about its
+cache read 458 MB in 3 minutes, each read on the thread that draws or ticks,
+holding the cache lock, and the Vita's texture pool decoded each of them
+again. So a large 2D texture of a Custom Edition map is drawn from its
+second level down: half the width and height, a quarter of the bytes, the
+level the Vita's screen samples on all but the nearest surfaces. Halo PC
+lays a bitmap's levels one after another, so its pixels start a level later
+and its levels are one fewer. Interface bitmaps, sprites and 3D and cube
+textures keep their size (the HUD and menus place theirs by their pixels);
+so do textures without levels, the lightmaps among them.
+HALO_CE_TEXTURE_LEVEL_KB=<n>: a texture whose first level takes n KB or more
+drops it (128 by default; 0 none). */
+#define REDUCED_TEXTURE_LEVEL_DEFAULT_KB 128
+
+static long custom_edition_reduced_texture_level_bytes(
+	void)
+{
+	char const *setting = getenv("HALO_CE_TEXTURE_LEVEL_KB");
+	long kilobytes = setting ? atol(setting) : REDUCED_TEXTURE_LEVEL_DEFAULT_KB;
+
+	return kilobytes > 0 ? kilobytes * 1024 : 0;
+}
+
+void custom_edition_bitmaps_reduce(
+	byte *tag_cache,
+	unsigned long loaded_bytes)
+{
+	struct bitmap_group *group;
+	int32_t tag_index = NONE;
+	long threshold = custom_edition_reduced_texture_level_bytes();
+	long reduced_count = 0;
+	unsigned long before_bytes = 0, saved_bytes = 0;
+
+	if (!threshold)
+	{
+		return;
+	}
+	while ((group = custom_edition_cache_tag_next(tag_cache, loaded_bytes, BITMAP_GROUP_TAG, sizeof(*group), &tag_index)) != NULL)
+	{
+		char const *name = custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index);
+		long bitmap_index;
+
+		if (group->type != _bitmap_group_type_2d_textures ||
+			!name ||
+			!_strnicmp(name, "ui\\", 3) ||
+			!_strnicmp(name, "interface\\", 10))
+		{
+			continue;
+		}
+		for (bitmap_index = 0; bitmap_index < group->bitmaps.count; bitmap_index++)
+		{
+			struct bitmap_data *bitmap = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, bitmap_index, struct bitmap_data);
+			long first_level_bytes;
+			long rest_bytes;
+
+			if (bitmap->type != _bitmap_type_2d ||
+				TEST_FLAG(bitmap->flags, _bitmap_linear_bit) ||
+				bitmap->mipmap_count < 1 ||
+				bitmap->width < 8 ||
+				bitmap->height < 8)
+			{
+				continue;
+			}
+			first_level_bytes = bitmap_mipmap_get_pixel_data_size(bitmap, 0);
+			if (first_level_bytes < threshold || bitmap->pixels_size < first_level_bytes)
+			{
+				continue;
+			}
+			before_bytes += bitmap->pixels_size;
+			bitmap->pixels_offset += first_level_bytes;
+			bitmap->pixels_size -= first_level_bytes;
+			bitmap->width /= 2;
+			bitmap->height /= 2;
+			bitmap->mipmap_count--;
+			rest_bytes = bitmap_get_pixel_data_size(bitmap);
+			if (bitmap->pixels_size < rest_bytes)
+			{
+				/* (not laid out as assumed: as it was) */
+				bitmap->mipmap_count++;
+				bitmap->width *= 2;
+				bitmap->height *= 2;
+				bitmap->pixels_size += first_level_bytes;
+				bitmap->pixels_offset -= first_level_bytes;
+				before_bytes -= bitmap->pixels_size;
+				continue;
+			}
+			saved_bytes += first_level_bytes;
+			reduced_count++;
+		}
+	}
+	error(
+		_error_silent,
+		"custom edition: %ld large textures drawn from their second level (%lu KB of pixels less, of %lu KB)",
+		reduced_count,
+		saved_bytes / 1024,
+		before_bytes / 1024);
+
+	return;
+}
 
 boolean custom_edition_bitmaps_verify(
 	byte *tag_cache,

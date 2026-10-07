@@ -4494,6 +4494,45 @@ static void objects_profile_report(void)
 #endif
 
 #ifdef HALO_LINUX
+/* (port) HALO_FRAME_TIMING: the objects in the game by type with each frame
+report (frame_timing.c), and the most there have been. A count that only
+grows names what a game mode never cleans up (a Custom Edition match got
+slower the longer it ran: 26 objects drawn a frame at first, 153 three
+minutes on). Read from the main thread while the tick may run: the array's
+slots stay where they are, so a count may be one off, nothing worse. */
+void halo_objects_census_report(void)
+{
+	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
+		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
+	static long peak;
+	long counts[16] = { 0 }, total = 0, index, type;
+	char line[512];
+	int n = 0;
+	const unsigned char *slot;
+
+	if (!object_header_data || !object_header_data->valid || !object_header_data->data)
+		return;
+	slot = (const unsigned char *)object_header_data->data;
+	for (index = 0; index < object_header_data->maximum_count; index++, slot += object_header_data->size)
+	{
+		const struct object_header_datum *header = (const struct object_header_datum *)slot;
+
+		if (header->identifier)
+		{
+			counts[header->type & 15]++;
+			total++;
+		}
+	}
+	if (total > peak)
+		peak = total;
+	for (type = 0; type < 16; type++)
+		if (counts[type])
+			n += snprintf(line + n, sizeof(line) - n, " %s %ld", names[type], counts[type]);
+	platform_log("objects: %ld in the game (most %ld):%s", total, peak, line);
+}
+#endif
+
+#ifdef HALO_LINUX
 /* render_epoch.c: the object pool's integrity, checked at the joins */
 int halo_objects_pool_check(const char *when)
 {
@@ -4536,6 +4575,122 @@ static boolean objects_scenery_update_skipped(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (port) HALO_TICK_PROFILE (the performance logging switch): an
+objects_update of more than 50 ms is logged as "objects-hitch" with the
+three objects whose updates took longest, each with the part of its time
+spent waiting for the cache lock (the caches the render shares: a texture
+it reads from a Custom Edition map file holds the lock throughout) and
+reading map files itself (custom_edition_cache.c). On the Vita a hitch of
+Extinction's tick (450-550 ms, every tick, as the player looked about) came
+with 104 ms a frame of the tick's waits for the cache lock. Each object's
+update is timed: two clock reads (~1.4 us on the Vita) per object updated,
+with the switch on only. */
+#define OBJECTS_HITCH_US 50000
+#define OBJECTS_HITCH_SLOWEST 3
+unsigned long long vita_host_time_us(void);
+extern volatile unsigned long long halo_cache_lock_wait_us[2];
+extern volatile unsigned long long halo_map_read_us[2];
+extern volatile unsigned long long halo_cache_lock_tick_longest_us;
+extern const char *volatile halo_cache_lock_tick_longest_site;
+extern const char *volatile halo_cache_lock_tick_longest_holder;
+struct objects_hitch_object
+{
+	long object_index;
+	short type;
+	unsigned long long us, lock_wait_us, read_us;
+};
+static int objects_hitch_on = -1;
+static unsigned long long objects_hitch_started;
+static unsigned long objects_hitch_updated;
+static struct objects_hitch_object objects_hitch_slowest[OBJECTS_HITCH_SLOWEST];
+
+static void objects_hitch_begin(void)
+{
+	if (objects_hitch_on < 0)
+	{
+		const char *setting = getenv("HALO_TICK_PROFILE");
+
+		objects_hitch_on = setting && atoi(setting) > 0;
+	}
+	if (objects_hitch_on)
+	{
+		csmemset(objects_hitch_slowest, 0, sizeof(objects_hitch_slowest));
+		objects_hitch_updated = 0;
+		halo_cache_lock_tick_longest_us = 0;
+		objects_hitch_started = vita_host_time_us();
+	}
+}
+
+/* one object's update: its time, and the waits and reads in it */
+static void objects_hitch_object_update(long object_index, short type)
+{
+	unsigned long long started, lock_wait = halo_cache_lock_wait_us[1], read = halo_map_read_us[1], us;
+	int slot;
+
+	if (!objects_hitch_on)
+	{
+		object_update(object_index);
+		return;
+	}
+	started = vita_host_time_us();
+	object_update(object_index);
+	us = vita_host_time_us() - started;
+	objects_hitch_updated++;
+	for (slot = 0; slot < OBJECTS_HITCH_SLOWEST; slot++)
+	{
+		if (us > objects_hitch_slowest[slot].us)
+		{
+			memmove(&objects_hitch_slowest[slot + 1], &objects_hitch_slowest[slot],
+				(OBJECTS_HITCH_SLOWEST - 1 - slot) * sizeof(objects_hitch_slowest[0]));
+			objects_hitch_slowest[slot].object_index = object_index;
+			objects_hitch_slowest[slot].type = type;
+			objects_hitch_slowest[slot].us = us;
+			objects_hitch_slowest[slot].lock_wait_us = halo_cache_lock_wait_us[1] - lock_wait;
+			objects_hitch_slowest[slot].read_us = halo_map_read_us[1] - read;
+			break;
+		}
+	}
+}
+
+static void objects_hitch_end(unsigned long long lock_wait_before, unsigned long long read_before)
+{
+	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
+		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
+	unsigned long long us;
+	char line[768];
+	int length, slot;
+
+	if (!objects_hitch_on)
+		return;
+	us = vita_host_time_us() - objects_hitch_started;
+	if (us < OBJECTS_HITCH_US)
+		return;
+	length = snprintf(line, sizeof(line), "objects-hitch: objects_update %.1f ms, %lu objects updated, cache lock waits %.1f ms, "
+		"map file reads %.1f ms; slowest:", us / 1000.0, objects_hitch_updated,
+		(halo_cache_lock_wait_us[1] - lock_wait_before) / 1000.0, (halo_map_read_us[1] - read_before) / 1000.0);
+	for (slot = 0; slot < OBJECTS_HITCH_SLOWEST && objects_hitch_slowest[slot].us; slot++)
+	{
+		struct objects_hitch_object *slowest = &objects_hitch_slowest[slot];
+		struct object_datum *object = object_try_and_get(slowest->object_index);
+
+		length += snprintf(line + length, sizeof(line) - length, " %s '%s' %.1f ms (lock %.1f, reads %.1f)",
+			names[slowest->type & 15], object ? tag_get_name(object->definition_index) : "(deleted)",
+			slowest->us / 1000.0, slowest->lock_wait_us / 1000.0, slowest->read_us / 1000.0);
+		if (length >= (int)sizeof(line))
+			break;
+	}
+	if (halo_cache_lock_tick_longest_us && length < (int)sizeof(line))
+	{
+		snprintf(line + length, sizeof(line) - length, "; longest lock wait %.1f ms in %s, behind %s",
+			halo_cache_lock_tick_longest_us / 1000.0,
+			halo_cache_lock_tick_longest_site ? halo_cache_lock_tick_longest_site : "?",
+			halo_cache_lock_tick_longest_holder ? halo_cache_lock_tick_longest_holder : "?");
+	}
+	platform_log("%s", line);
+}
+#endif
+
 void objects_update(
 	void)
 {
@@ -4548,6 +4703,11 @@ void objects_update(
 	struct object_header_datum *object_header;
 
 	boolean dont_update_object = ((game_time_get()&1)!=0) && game_players_are_double_speed();
+#ifdef HALO_LINUX
+	unsigned long long hitch_lock_wait = halo_cache_lock_wait_us[1], hitch_read = halo_map_read_us[1];
+
+	objects_hitch_begin();
+#endif
 
 	profile_enter(section);
 
@@ -4641,7 +4801,7 @@ void objects_update(
 				{
 					unsigned long long update_started = objects_profile_now();
 
-					object_update(object_index);
+					objects_hitch_object_update(object_index, object_header->type);
 					objects_profile_add(object_header->type, update_started);
 				}
 #else
@@ -4682,6 +4842,7 @@ void objects_update(
 	profile_exit(section);
 #ifdef HALO_LINUX
 	objects_profile_report();
+	objects_hitch_end(hitch_lock_wait, hitch_read);
 #endif
 
 	return;

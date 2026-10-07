@@ -13,6 +13,9 @@ void platform_log(const char *format, ...);
 
 #include "frame_timing.h"
 
+void halo_texture_stats_report(void) __attribute__((weak));
+void halo_objects_census_report(void) __attribute__((weak));
+
 static int frame_timing_every = -1;
 static unsigned long long frame_timing_mark[_frame_timing_event_count];
 static unsigned long long frame_timing_sum[4], frame_timing_max_frame;
@@ -131,6 +134,12 @@ void halo_frame_timing(int event, unsigned long game_ticks)
 			(double)frame_timing_sum[1] / 1e6 / frames, (double)frame_timing_sum[2] / 1e6 / frames,
 			(double)(frame_timing_sum[3] + threaded_tick_sum - frame_timing_sum[0] - frame_timing_sum[1] - frame_timing_sum[2]) / 1e6 / frames,
 			frames * 1000.0 / total_ms, (double)ticks * 1000.0 / total_ms);
+		/* (the texture caches' counts, the gxm builds' only, and the
+		objects in the game, with the same rhythm) */
+		if (halo_texture_stats_report)
+			halo_texture_stats_report();
+		if (halo_objects_census_report)
+			halo_objects_census_report();
 		frame_timing_frames = 0;
 		frame_timing_ticks_start = frame_timing_ticks_last;
 		frame_timing_max_frame = 0;
