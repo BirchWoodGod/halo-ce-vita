@@ -115,6 +115,28 @@ pressing anything when they brush it. A finger coming down counts as input
 for the screen's dimming. `HALO_PAD_FILE` (debug, `vita_input.c`) takes `tl
 tr el er rl rr` for the zones.
 
+**Gyro aiming** (`vita_controls.c`, `vita_input.c`; the Gyro tab, Off by
+default): the gyroscope's samples (`sceMotionGetSensorState`, every sample
+since the last frame, radians a second about the Vita's axes) go through a
+filter - the bias learnt from each second the Vita lies still (no axis
+moving 2 deg/s, the accelerometer 0.03 g; drift of a resting Vita), small
+motion smoothed (40 ms below 5 deg/s, none from 15 deg/s: hand tremor), a
+0.75 deg/s deadzone - and are integrated into angles. Held in landscape,
+the Vita's y axis (turning it left) is yaw left, x (its top edge towards
+you) pitch up, z (steering left) yaw with Gyro turning Tilt. The angles
+reach the game's look code as a direct change of facing, as mouse aim does
+on the desktop (`xinput_sdl.c` `halo_linux_mouse_look`,
+`source/game/player_control.c`): no stick acceleration, no clipping at full
+deflection, divided by the zoom like the stick. The game takes them once a
+frame while the player can look (not paused, not in a cinematic); what
+turns in the menus, with the panel open or before a zoom (While zoomed) or a
+button press (While holding) is dropped. The gyroscope is never input for
+the screen's dimming. `HALO_PAD_FILE` takes `gx=N gy=N gz=N` (degrees a
+second about x, y, z while the step is held, in place of the sensor;
+`gy=60:1000` turns the view left for a second), `HALO_GYRO_SIM=x,y,z` the
+same all the time, and `HALO_GYRO_LOG=1` logs the yaw and pitch the game
+took (debug).
+
 ## Settings panel
 
 Hold **Select + Start** for about a second, in play or in the menus. **L and
@@ -164,6 +186,19 @@ after a restart.
 While a touch zone's row is chosen the panel draws the front screen and the
 rear pad beside the rows: the row's zone green (dark green while Off), the
 zones set to an Xbox button grey.
+
+**Gyro**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Gyro aiming | Off | turning the Vita aims, with the right stick: On, While zoomed, While holding (the Gyro button) |
+| Gyro button | L | While holding: aims while held; in play it then does nothing else |
+| Gyro sensitivity | 1.5x | 0.5x-3x; 1x turns the view as far as the Vita turns (less while zoomed) |
+| Gyro vertical | Normal | Normal: tilt the top edge towards you to look up; Inverted |
+| Gyro turning | Turn (yaw) | turn the Vita left and right, or Tilt (roll) it like a wheel |
+
+A line below shows the gyroscope's rates now (degrees a second: yaw, pitch,
+roll) and "learnt" once the Vita has lain still for a second.
 
 **Multiplayer**: see [Multiplayer](#multiplayer).
 

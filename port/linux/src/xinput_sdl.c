@@ -103,6 +103,19 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 
 	*yaw = 0.0f;
 	*pitch = 0.0f;
+#ifdef HALO_VITA
+	/* the Vita has no mouse: its gyroscope aims the same way
+	(port/vita/platform/vita_pad.c) */
+	{
+		extern int vita_pad_gyro_look(short gamepad_index, float *yaw, float *pitch);
+
+		(void)scale;
+		(void)invert;
+		(void)x;
+		(void)y;
+		return vita_pad_gyro_look(gamepad_index, yaw, pitch);
+	}
+#endif
 	if (gamepad_index != 0)
 		return FALSE;
 	if (invert < 0)

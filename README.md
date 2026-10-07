@@ -166,11 +166,25 @@ counts on its own. While a zone's row is chosen the panel shows where the
 zones are. **Reset controls** puts the tab back as shipped (Show dev
 settings stays).
 
+**Gyro aiming** (the panel's **Gyro** tab, Off until set): turning the Vita
+turns the view, on top of the right stick, as if you looked through the
+Vita: turn it left and right (or, with **Gyro turning** Tilt, steer it like
+a wheel) to turn, tilt its top edge towards you to look up. **Gyro aiming**
+is Off, On, While zoomed (only through a scope) or While holding the **Gyro
+button** (L by default; in play that button then only aims, so put its
+Xbox button on another one). **Gyro sensitivity** 0.5x to 3x (1.5x by
+default; 1x turns the view as far as the Vita turns, less while zoomed, as
+the stick is), **Gyro vertical** Normal or Inverted. It aims only in play,
+not in the menus, the panel or cinematics. Lay the Vita still for a second
+now and then (the tab's line says "learnt" once it has): that teaches it
+the gyroscope's drift, so a resting Vita does not turn the view. Gyro
+motion does not keep the screen from dimming.
+
 ## Settings panel
 
 Hold Select + Start for a second. **L and R** switch between its tabs:
-**Graphics**, **Audio**, **Controls**, **Multiplayer**, **Modded maps** and,
-once Controls' **Show dev settings** is on, **Dev**. Up and down choose a
+**Graphics**, **Audio**, **Controls**, **Gyro**, **Multiplayer**, **Modded
+maps** and, once Controls' **Show dev settings** is on, **Dev**. Up and down choose a
 line, left and right change it, Cross does what a line marked `>` says,
 Circle closes the panel. Changes apply at once, render resolution and
 aspect ratio included (the picture pauses for a moment while the screen is

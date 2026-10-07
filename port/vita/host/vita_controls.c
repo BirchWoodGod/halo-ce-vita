@@ -226,3 +226,199 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 	for (xbox = VITA_XBOX_A; xbox <= VITA_XBOX_RIGHT_TRIGGER; xbox++)
 		output->analog[xbox - VITA_XBOX_A] = held[xbox] ? 255 : 0;
 }
+
+/* ---------- gyro aiming */
+
+static const char *const gyro_mode_values[VITA_GYRO_MODES] = { "off", "on", "zoomed", "hold" };
+
+void vita_gyro_config_load(struct vita_gyro_config *config)
+{
+	const char *mode = getenv("HALO_GYRO");
+	const char *sensitivity = getenv("HALO_GYRO_SENS");
+	const char *invert = getenv("HALO_GYRO_INVERT_Y");
+	const char *turn = getenv("HALO_GYRO_TURN");
+	int index, percent;
+
+	config->mode = VITA_GYRO_OFF;
+	for (index = 0; mode && index < VITA_GYRO_MODES; index++)
+		if (strcmp(mode, gyro_mode_values[index]) == 0)
+			config->mode = index;
+	config->button = vita_button_named(getenv("HALO_GYRO_BUTTON"), VITA_BUTTON_L);
+	percent = sensitivity ? atoi(sensitivity) : VITA_GYRO_DEFAULT_SENS;
+	if (percent <= 0 || percent > 1000)
+		percent = VITA_GYRO_DEFAULT_SENS;
+	config->sensitivity = percent / 100.0f;
+	config->invert_y = invert ? atoi(invert) != 0 : 0;
+	config->turn = turn && strcmp(turn, "roll") == 0 ? VITA_GYRO_TURN_ROLL : VITA_GYRO_TURN_YAW;
+}
+
+static float gyro_absolute(float value)
+{
+	return value < 0.0f ? -value : value;
+}
+
+/* (no libm: the desktop test builds this alone) */
+static float gyro_square_root(float value)
+{
+	float guess = value > 1.0f ? value : 1.0f;
+	int step;
+
+	if (value <= 0.0f)
+		return 0.0f;
+	for (step = 0; step < 20; step++)
+		guess = 0.5f * (guess + value / guess);
+	return guess;
+}
+
+static void gyro_window_start(struct vita_gyro_filter *filter, const float rate[3], const float accel[3], float dt)
+{
+	int axis;
+
+	filter->window_time = dt;
+	for (axis = 0; axis < 3; axis++)
+	{
+		filter->window_sum[axis] = rate[axis] * dt;
+		filter->window_low[axis] = filter->window_high[axis] = rate[axis];
+		filter->accel_low[axis] = filter->accel_high[axis] = accel ? accel[axis] : 0.0f;
+	}
+}
+
+/* the bias: learnt from each second the Vita lies still (the first one
+taken as it is, later ones halfway) */
+static void gyro_calibrate(struct vita_gyro_filter *filter, const float rate[3], const float accel[3], float dt)
+{
+	int axis, still = 1;
+
+	if (filter->window_time <= 0.0f)
+	{
+		gyro_window_start(filter, rate, accel, dt);
+		return;
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		float low = rate[axis] < filter->window_low[axis] ? rate[axis] : filter->window_low[axis];
+		float high = rate[axis] > filter->window_high[axis] ? rate[axis] : filter->window_high[axis];
+		float accel_value = accel ? accel[axis] : 0.0f;
+		float accel_low = accel_value < filter->accel_low[axis] ? accel_value : filter->accel_low[axis];
+		float accel_high = accel_value > filter->accel_high[axis] ? accel_value : filter->accel_high[axis];
+
+		if (high - low > VITA_GYRO_STILL_SPREAD || accel_high - accel_low > VITA_GYRO_STILL_ACCEL ||
+			gyro_absolute(rate[axis]) > VITA_GYRO_STILL_MEAN)
+			still = 0;
+		filter->window_low[axis] = low;
+		filter->window_high[axis] = high;
+		filter->accel_low[axis] = accel_low;
+		filter->accel_high[axis] = accel_high;
+	}
+	if (!still)
+	{
+		/* (moved: a new window from this sample) */
+		gyro_window_start(filter, rate, accel, dt);
+		return;
+	}
+	filter->window_time += dt;
+	for (axis = 0; axis < 3; axis++)
+		filter->window_sum[axis] += rate[axis] * dt;
+	if (filter->window_time >= VITA_GYRO_STILL_TIME)
+	{
+		for (axis = 0; axis < 3; axis++)
+		{
+			float mean = filter->window_sum[axis] / filter->window_time;
+
+			if (gyro_absolute(mean) > VITA_GYRO_STILL_MEAN)
+				break;
+		}
+		if (axis == 3)
+		{
+			for (axis = 0; axis < 3; axis++)
+			{
+				float mean = filter->window_sum[axis] / filter->window_time;
+
+				filter->bias[axis] = filter->still_count ? 0.5f * (filter->bias[axis] + mean) : mean;
+			}
+			filter->still_count++;
+		}
+		filter->window_time = 0.0f;
+	}
+}
+
+void vita_gyro_filter_sample(struct vita_gyro_filter *filter, const float rate[3], const float accel[3], float dt,
+	int calibrate, float angle[3])
+{
+	float corrected[3], magnitude, smoothing, alpha;
+	int axis;
+
+	if (dt < 0.0f || dt > VITA_GYRO_MAXIMUM_GAP)
+		dt = 0.0f;
+	if (calibrate)
+		gyro_calibrate(filter, rate, accel, dt);
+	else
+		filter->window_time = 0.0f;
+	for (axis = 0; axis < 3; axis++)
+		corrected[axis] = rate[axis] - filter->bias[axis];
+	/* small motion smoothed (fully at VITA_GYRO_SMOOTH_LOW and under, not
+	at all from VITA_GYRO_SMOOTH_HIGH) */
+	magnitude = gyro_square_root(corrected[0] * corrected[0] + corrected[1] * corrected[1] +
+		corrected[2] * corrected[2]);
+	smoothing = magnitude <= VITA_GYRO_SMOOTH_LOW ? 1.0f : magnitude >= VITA_GYRO_SMOOTH_HIGH ? 0.0f :
+		(VITA_GYRO_SMOOTH_HIGH - magnitude) / (VITA_GYRO_SMOOTH_HIGH - VITA_GYRO_SMOOTH_LOW);
+	alpha = smoothing > 0.0f ? dt / (VITA_GYRO_SMOOTH_TIME * smoothing + dt) : 1.0f;
+	if (dt <= 0.0f && smoothing > 0.0f)
+		alpha = 0.0f;
+	for (axis = 0; axis < 3; axis++)
+		filter->smoothed[axis] += (corrected[axis] - filter->smoothed[axis]) * alpha;
+	/* the deadzone, on the smoothed rate's size */
+	magnitude = gyro_square_root(filter->smoothed[0] * filter->smoothed[0] +
+		filter->smoothed[1] * filter->smoothed[1] + filter->smoothed[2] * filter->smoothed[2]);
+	for (axis = 0; axis < 3; axis++)
+	{
+		filter->rate[axis] = magnitude > VITA_GYRO_DEADZONE ?
+			filter->smoothed[axis] * (magnitude - VITA_GYRO_DEADZONE) / magnitude : 0.0f;
+		angle[axis] += filter->rate[axis] * dt;
+	}
+}
+
+int vita_gyro_active(const struct vita_gyro_config *config, unsigned long buttons, int menus)
+{
+	if (menus || config->mode == VITA_GYRO_OFF)
+		return 0;
+	if (config->mode == VITA_GYRO_HOLD)
+		return config->button && (buttons & config->button) != 0;
+	return 1;
+}
+
+void vita_gyro_look(const struct vita_gyro_config *config, const float angle[3], float *yaw, float *pitch)
+{
+	*yaw = (config->turn == VITA_GYRO_TURN_ROLL ? angle[2] : angle[1]) * config->sensitivity;
+	*pitch = (config->invert_y ? -angle[0] : angle[0]) * config->sensitivity;
+}
+
+void vita_gyro_accumulate(struct vita_gyro_state *state, const struct vita_gyro_config *config,
+	const float angle[3], int active)
+{
+	float yaw, pitch;
+
+	if (!active || !state->active || ++state->unconsumed > VITA_GYRO_MAXIMUM_UNCONSUMED)
+	{
+		state->yaw = state->pitch = 0.0f;
+		state->unconsumed = 0;
+	}
+	state->active = active;
+	if (!active)
+		return;
+	vita_gyro_look(config, angle, &yaw, &pitch);
+	state->yaw += yaw;
+	state->pitch += pitch;
+}
+
+int vita_gyro_take(struct vita_gyro_state *state, const struct vita_gyro_config *config, int zoomed, float *yaw,
+	float *pitch)
+{
+	*yaw = state->yaw;
+	*pitch = state->pitch;
+	state->yaw = state->pitch = 0.0f;
+	state->unconsumed = 0;
+	if (!state->active || (config->mode == VITA_GYRO_ZOOMED && !zoomed))
+		*yaw = *pitch = 0.0f;
+	return *yaw != 0.0f || *pitch != 0.0f;
+}

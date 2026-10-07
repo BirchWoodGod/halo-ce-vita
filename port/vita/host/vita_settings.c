@@ -3,8 +3,8 @@ VITA_SETTINGS.C
 
 The settings panel: hold SELECT and START together for a moment, in play
 or in the menus, and a panel over the game shows the Vita's settings in
-tabs that L and R switch between: Graphics, Audio, Controls, Multiplayer,
-Modded maps and, once "Show dev settings" (Controls) is on, Dev. Up and
+tabs that L and R switch between: Graphics, Audio, Controls, Gyro,
+Multiplayer, Modded maps and, once "Show dev settings" (Controls) is on, Dev. Up and
 down choose a line, left and right change it, cross does what an action
 line says, circle (or SELECT+START again) closes the panel; the game sees no
 buttons while it is open. Each setting is one of the environment variables
@@ -33,6 +33,14 @@ Xbox button, and each Xbox button (A B X Y, Black, White, the triggers, the
 sticks' clicks, Back) is on a Vita button of the player's choosing, in play; while a zone's row is chosen the panel draws the
 zones beside the rows (touch_diagram). Reset controls puts the tab's rows
 back as shipped.
+
+Gyro sets gyro aiming (vita_controls.h): the view turns as the Vita turns,
+on top of the right stick - Off (the default), On, While zoomed, or While
+holding the Gyro button (which then does nothing else in play), its
+sensitivity (1x: the view turns as far as the Vita), vertical direction and
+whether turning is the Vita's yaw or its roll; a line shows the gyroscope's
+rates now and whether its bias was learnt (it is, each time the Vita lies
+still for a second).
 
 Multiplayer has three ways to play beyond the Wi-Fi network's system link,
 each handing off to the game's own System Link screen, and co-op ("Co-op
@@ -112,6 +120,7 @@ enum
 	TAB_GRAPHICS,
 	TAB_AUDIO,
 	TAB_CONTROLS,
+	TAB_GYRO,
 	TAB_MULTIPLAYER,
 	TAB_MAPS,
 	TAB_DEV,
@@ -119,7 +128,7 @@ enum
 };
 
 static const char *const tab_names[TAB_COUNT] = {
-	"Graphics", "Audio", "Controls", "Multiplayer", "Modded maps", "Dev",
+	"Graphics", "Audio", "Controls", "Gyro", "Multiplayer", "Modded maps", "Dev",
 };
 
 enum
@@ -248,6 +257,20 @@ static struct setting settings[] = {
 		TAB_CONTROLS, KIND_ACTION, ACTION_RESET_CONTROLS },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, TAB_CONTROLS },
+
+	/* (gyro aiming: vita_controls.h; the button's choices are the Xbox
+	buttons' rows') */
+	{ "Gyro aiming", "HALO_GYRO", 0, VITA_GYRO_MODES, { "off", "on", "zoomed", "hold" },
+		{ "Off", "On", "While zoomed", "While holding" }, "Turn the Vita to aim, with the right stick", 0, TAB_GYRO },
+	{ "Gyro button", "HALO_GYRO_BUTTON", 0, VITA_BUTTON_CHOICES, { VITA_BUTTON_VALUES }, { VITA_BUTTON_NAMES },
+		"While holding: aims while held, nothing else in play", 4, TAB_GYRO },
+	{ "Gyro sensitivity", "HALO_GYRO_SENS", 0, 8, { "50", "75", "100", "125", "150", "200", "250", "300" },
+		{ "0.5x", "0.75x", "1x", "1.25x", "1.5x", "2x", "2.5x", "3x" }, "1x: the view turns as far as the Vita does", 4,
+		TAB_GYRO },
+	{ "Gyro vertical", "HALO_GYRO_INVERT_Y", 0, 2, { "0", "1" }, { "Normal", "Inverted" },
+		"Normal: tilt the top edge towards you to look up", 0, TAB_GYRO },
+	{ "Gyro turning", "HALO_GYRO_TURN", 0, 2, { "yaw", "roll" }, { "Turn (yaw)", "Tilt (roll)" },
+		"Turn the Vita left/right, or tilt it like a wheel", 0, TAB_GYRO },
 
 	{ "Network", "HALO_VITA_NETWORK", 1, 3, { "wifi", "online", "adhoc" }, { "Wi-Fi", "Online", "Ad hoc" },
 		"This network / the internet / Vitas nearby (after a restart)", 0, TAB_MULTIPLAYER },
@@ -1156,6 +1179,12 @@ static int tab_lines(struct line *lines)
 			lines[count].type = LINE_SETTING;
 			lines[count++].index = index;
 		}
+	if (tab == TAB_GYRO)
+	{
+		/* (the gyroscope's rates now: redrawn twice a second) */
+		lines[count].type = LINE_INFO;
+		vita_gyro_status(lines[count++].text, sizeof(lines[0].text));
+	}
 	if (tab == TAB_MAPS)
 	{
 		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition))
