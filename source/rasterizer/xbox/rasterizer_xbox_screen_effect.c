@@ -542,6 +542,15 @@ void _rasterizer_screen_effect(
 				!parameters->convolution_mask,
 				"blur effect cannot specify convolution mask");
 
+#ifdef HALO_LINUX
+		/* (port) the effect's own maps (the zoom's convolution mask, the
+		video effect's scanlines and noise) are waited for, not streamed: the
+		stand-in a streamed bitmap is drawn with while it loads is opaque
+		white, and as the convolution mask its alpha of 1 everywhere blurs
+		the whole screen, the scope's window too (rasterizer_xbox.c
+		rasterizer_texture_streaming_hold) */
+		rasterizer_texture_streaming_hold(TRUE);
+#endif
 		rasterizer_set_vertex_shader_permutation(
 			_rasterizer_vertex_shader_screen_effect,
 			_rasterizer_vertex_type_screen,
@@ -1177,6 +1186,9 @@ void _rasterizer_screen_effect(
 			FALSE,
 			FALSE,
 			TRUE);
+#ifdef HALO_LINUX
+		rasterizer_texture_streaming_hold(FALSE);
+#endif
 	}
 
 	rasterizer_profile_end(_rasterizer_profile_screen_effect);
