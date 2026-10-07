@@ -413,6 +413,11 @@ to name what the main thread waits a second for in a hitch */
 #include <stdlib.h>
 enum { _run_update_queues, _run_game_ticks, _run_distributed, _run_game_frame, NUMBER_OF_RUN_STEPS };
 static unsigned long long run_last, run_us[NUMBER_OF_RUN_STEPS];
+/* the game ticks' time since start-up, the update's other work apart (read
+by main.c at the join) */
+volatile unsigned long long halo_game_ticks_us;
+/* (harness) HALO_TICK_SLOWDOWN (tick_thread.c) */
+void halo_game_tick_slowdown(unsigned long long tick_us);
 static unsigned long run_ticks;
 static int run_enabled = -1;
 unsigned long long vita_host_time_us(void) __attribute__((weak));
@@ -569,7 +574,22 @@ void game_time_update(
 					for (update_index = 0; update_index < server_updates; update_index++)
 					{
 						HALO_RUN_MARK(-1);
+#ifdef HALO_LINUX
+						{
+							/* (main.c's tick pacing: the ticks' own time, apart
+							from the update's per-frame work) */
+							unsigned long long tick_started = vita_host_time_us ? vita_host_time_us() : 0;
+
+							game_tick();
+							if (tick_started)
+							{
+								halo_game_tick_slowdown(vita_host_time_us() - tick_started);
+								halo_game_ticks_us += vita_host_time_us() - tick_started;
+							}
+						}
+#else
 						game_tick();
+#endif
 						HALO_RUN_MARK(_run_game_ticks);
 						render_interpolation_tick();
 						game_time_globals->server_time++;

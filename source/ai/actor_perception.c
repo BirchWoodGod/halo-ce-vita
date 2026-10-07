@@ -273,6 +273,10 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 #include "units/biped_definitions.h"
+#ifdef HALO_LINUX
+#include "game/players.h"
+#include <stdlib.h>
+#endif
 
 /* ---------- constants */
 
@@ -6316,6 +6320,68 @@ static boolean actor_perception_assess_suicide_danger(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_AI_PERCEPTION_LOD=<world units> (0, the default: off): an
+actor farther than that from every player's unit refreshes what it knows
+of the units around it (its props' status: a line of sight test each, a
+collision ray, the AI's largest cost in a big fight) every other tick
+instead of every tick, staggered by its index. The Xbox's own scheme
+already spaces those refreshes out (one prop an actor a tick, allies and
+distant props less often); this spaces them out again for actors no player
+is near. Props of players are refreshed as before, so an actor that can
+see a player notices them as quickly. Only the host runs the AI, so a
+network game's machines stay consistent; a distant fight plays out a little
+differently (its actors react a tick later on average). */
+static boolean actor_perception_lod_resting(
+	long actor_index,
+	struct actor_datum const *actor)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen;
+	static long distance = -1;
+	static long points_time = -1;
+	static real_point3d points[16];
+	static short point_count;
+	short index;
+
+	if (distance < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_AI_PERCEPTION_LOD");
+
+		settings_seen = halo_settings_generation;
+		distance = setting ? atol(setting) : 0;
+	}
+	if (distance <= 0 || ((game_time_get() + DATUM_INDEX_TO_ABSOLUTE_INDEX(actor_index)) & 1) == 0)
+		return FALSE;
+	if (points_time != game_time_get())
+	{
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		points_time = game_time_get();
+		point_count = 0;
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL && point_count < NUMBEROF(points))
+		{
+			struct object_datum *unit = player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+
+			if (unit)
+				points[point_count++] = unit->object.position;
+		}
+	}
+	/* (no player in the game: nobody to see the difference, but nothing to
+	measure by either) */
+	if (!point_count)
+		return FALSE;
+	for (index = 0; index < point_count; index++)
+	{
+		if (distance_squared3d(&points[index], &actor->input.position.body_position) <= (real)(distance * distance))
+			return FALSE;
+	}
+	return TRUE;
+}
+#endif
+
 void actor_perception_update(
 	long actor_index)
 {
@@ -6328,6 +6394,9 @@ void actor_perception_update(
 	struct prop_iterator iterator;
 	struct prop_datum *prop;
 	struct actor_position_data position;
+#ifdef HALO_LINUX
+	boolean lod_resting = actor_perception_lod_resting(actor_index, actor);
+#endif
 
 	if (!actor->meta.dormant)
 	{
@@ -6536,7 +6605,12 @@ void actor_perception_update(
 			}
 
 			if (!prop_serviced &&
-				prop_timer >= actor->meta.highest_prop_timer)
+				prop_timer >= actor->meta.highest_prop_timer
+#ifdef HALO_LINUX
+				/* (HALO_AI_PERCEPTION_LOD, above) */
+				&& (!lod_resting || prop->player)
+#endif
+				)
 			{
 				refresh_status = TRUE;
 				refresh_position = TRUE;

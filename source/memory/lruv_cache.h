@@ -94,6 +94,14 @@ struct lruv_cache *lruv_new(
 void lruv_delete(
 	struct lruv_cache *cache);
 
+#ifdef HALO_LINUX
+/* (port) allocations search a window of that many blocks past a cursor
+before the whole cache (an approximate LRU); 0, the whole cache always */
+void lruv_set_search_window(
+	struct lruv_cache *cache,
+	long blocks);
+#endif
+
 void lruv_idle(
 	struct lruv_cache *cache);
 

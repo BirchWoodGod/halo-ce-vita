@@ -1224,6 +1224,28 @@ static boolean distributed_machine_is_local(
 	return FALSE;
 }
 
+/* (main.c's pacing, on the main thread between ticks) a host whose game has
+no machine but its own: nobody plays along to keep pace with */
+boolean network_distributed_host_alone(
+	void)
+{
+	long machine_indices[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	short count = network_distributed_server_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+	short index;
+
+	if (!global_network_game_server_get())
+		return FALSE;
+	for (index = 0; index < count; index++)
+	{
+		if (machine_indices[index] >= 0 && machine_indices[index] < HALO_PORT_MAXIMUM_NETWORK_MACHINES &&
+			!distributed_machine_is_local(machine_indices[index]))
+		{
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
 short distributed_client_machines(
 	long *machine_indices,
 	short maximum)

@@ -247,6 +247,8 @@ symbols in this file:
 #include <stdlib.h>
 #include "cache/cache_files.h"
 #include "game/players.h"
+#include "view_distance.h"
+void platform_log(const char *format, ...);
 void platform_log(const char *format, ...);
 #endif
 
@@ -2264,6 +2266,73 @@ void decal_new_from_collision(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_DECAL_MIN_PIXELS=n (0, the default: off): a decal that would
+be less than n pixels across from every local player's view is not made -
+the bullet holes and scorches of a battle far off, each a collision ray, a
+clip against the surface and an allocation in the decal cache, whose search
+walks every decal in it (in a Custom Edition AI war, a fifth of the tick on
+x86). Its largest radius in its chain counts, and the view nearest it
+(view_distance.c). Decals are this machine's alone (the local random seed;
+nothing of them is sent), so only the picture changes: the marks of a
+distant fight are missing when the player gets there. Permanent decals
+(the level's own) are always made. */
+static boolean decal_too_small_to_see(
+	long decal_definition_index,
+	real_point3d const *origin,
+	real radius_modifier)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen;
+	static long minimum_pixels = -1;
+	static long made, skipped, report_time;
+	real radius = 0.0f;
+	real across;
+	short chain;
+	boolean result;
+
+	if (minimum_pixels < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_DECAL_MIN_PIXELS");
+
+		settings_seen = halo_settings_generation;
+		minimum_pixels = setting ? atol(setting) : 0;
+	}
+	if (minimum_pixels <= 0)
+		return FALSE;
+	for (chain = 0; chain < 8 && decal_definition_index != NONE; chain++)
+	{
+		struct decal_definition *definition = decal_definition_get(decal_definition_index);
+
+		if (definition->radius_upper_bound > radius)
+			radius = definition->radius_upper_bound;
+		decal_definition_index = definition->next_decal_in_chain.index;
+	}
+	if (radius_modifier > 0.0f)
+		radius *= radius_modifier;
+	/* (pixels across = 2 r K / d, compared squared) */
+	across = 2.0f * radius * HALO_VIEW_PIXELS_PER_UNIT_AT_UNIT_DISTANCE;
+	result = across * across < (real)(minimum_pixels * minimum_pixels) * halo_view_distance_squared(origin);
+	if (result)
+		skipped++;
+	else
+		made++;
+	/* (HALO_TICK_PROFILE: how many, every 300 ticks) */
+	if (game_time_get() - report_time >= 300 || game_time_get() < report_time)
+	{
+		static int report = -1;
+
+		if (report < 0)
+			report = getenv("HALO_TICK_PROFILE") && atoi(getenv("HALO_TICK_PROFILE"));
+		if (report && (made || skipped))
+			platform_log("decals: %ld made, %ld too small to see (HALO_DECAL_MIN_PIXELS %ld)", made, skipped, minimum_pixels);
+		made = skipped = 0;
+		report_time = game_time_get();
+	}
+	return result;
+}
+#endif
+
 void decal_new(
 	long decal_definition_index,
 	real_point3d const *origin,
@@ -2273,6 +2342,13 @@ void decal_new(
 	short forced_sequence_index,
 	struct decal_editor_geometry *editor_geometry)
 {
+#ifdef HALO_LINUX
+	if (decals_enabled && !permanent && !editor_geometry &&
+		decal_too_small_to_see(decal_definition_index, origin, radius_modifier))
+	{
+		return;
+	}
+#endif
 	if (decals_enabled)
 	{
 		unsigned long *local_random_seed_address= get_global_local_random_seed_address();

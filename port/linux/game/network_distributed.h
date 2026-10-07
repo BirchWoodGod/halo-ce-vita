@@ -207,6 +207,8 @@ void distributed_trace_correction(char const *source, long object_index, real_po
 void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 /* (the host) the client machines in the game, but for its own; their count */
 short distributed_client_machines(long *machine_indices, short maximum);
+/* (main.c) the host has no machine in its game but its own */
+boolean network_distributed_host_alone(void);
 /* (the host) how long a message takes that client and its answer back, in
 ticks (and its jitter), as its players' input messages tell */
 real distributed_machine_round_trip_ticks(long machine_index);
