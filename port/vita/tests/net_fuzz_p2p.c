@@ -372,17 +372,36 @@ int net_fuzz_checks(void)
 	tunnel_received(packet, size, &from);
 	fuzz_check(net_fuzz_sent_count == sent, "an altered packet is dropped");
 
+	/* packets in the peer's name from elsewhere: a few a second checked */
+	{
+		int index;
+
+		from.sin_addr.s_addr = 0x0300A8C0;
+		sent = net_fuzz_sent_count;
+		for (index = 0; index < 2 * STRAY_PACKETS_PER_SECOND; index++)
+		{
+			size = fuzz_seal(ping, sizeof(ping), 200 + index, packet);
+			tunnel_received(packet, size, &from);
+		}
+		fuzz_check(net_fuzz_sent_count == sent + STRAY_PACKETS_PER_SECOND,
+			"of packets from an address the peer is not known at, a few a second are checked");
+		from.sin_addr.s_addr = fuzz_peer_address;
+		size = fuzz_seal(ping, sizeof(ping), 300, packet);
+		tunnel_received(packet, size, &from);
+		fuzz_check(net_fuzz_sent_count == sent + STRAY_PACKETS_PER_SECOND + 1, "and the peer's own still all");
+	}
+
 	/* a datagram for a port the game has not opened goes nowhere */
 	{
 		unsigned char datagram[9] = { _packet_datagram, 0x12, 0x34, 0x00, 0x16, 'h', 'i', '!', 0 };
 
-		size = fuzz_seal(datagram, sizeof(datagram), 102, packet);
+		size = fuzz_seal(datagram, sizeof(datagram), 302, packet);
 		sent = net_fuzz_sent_count;
 		tunnel_received(packet, size, &from);
 		fuzz_check(net_fuzz_sent_count == sent, "a peer's datagram to a port the game has not opened is dropped");
 		datagram[3] = 0x08;
 		datagram[4] = 0xFE;
-		size = fuzz_seal(datagram, sizeof(datagram), 103, packet);
+		size = fuzz_seal(datagram, sizeof(datagram), 303, packet);
 		tunnel_received(packet, size, &from);
 		fuzz_check(net_fuzz_sent_count == sent + 1, "one to the game's port 2302 is passed on");
 	}

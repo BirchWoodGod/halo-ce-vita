@@ -77,6 +77,10 @@ enum
 	MAXIMUM_PACKET_SIZE = TUNNEL_HEADER_SIZE + MAXIMUM_INNER_SIZE + P2P_TAG_SIZE,
 	/* the packets received out of order that are still taken */
 	REPLAY_WINDOW = 64,
+	/* a reached peer's packets from another address than its endpoint and
+	those it offered (its NAT gave it a new port, or someone else sends in
+	its name) whose seal is checked, a second: the rest are dropped unread */
+	STRAY_PACKETS_PER_SECOND = 32,
 
 	/* a host needs a UDP stand-in for two or three ports of every other
 	machine, and a stream for each one's connection; one peer can have no
@@ -195,6 +199,10 @@ struct peer
 	unsigned long endpoint_heard_time;
 	unsigned long sent_time;
 	unsigned long round_trip;
+	/* packets from elsewhere than its endpoint and the addresses it offered
+	that may still be checked (STRAY_PACKETS_PER_SECOND), as of when */
+	int stray_budget;
+	unsigned long stray_time;
 };
 
 /* a UDP stand-in for one port of a peer */
@@ -1061,6 +1069,22 @@ static void packet_received(struct peer *peer, unsigned long long counter)
 		peer->receive_highest = counter;
 	}
 	peer->receive_window |= 1ULL << (peer->receive_highest - counter);
+}
+
+/* whether a packet from address and port comes from where the peer is
+known to be: its endpoint, or an address it offered */
+static int peer_known_address(const struct peer *peer, unsigned long address, unsigned short port)
+{
+	int index;
+
+	if (peer->endpoint.address == address && peer->endpoint.port == port)
+		return 1;
+	for (index = 0; index < peer->candidate_count; index++)
+	{
+		if (peer->candidates[index].address == address && peer->candidates[index].port == port)
+			return 1;
+	}
+	return 0;
 }
 
 /* newest: the packet is the highest numbered yet (a replayed or delayed one
@@ -2247,6 +2271,22 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 	counter = packet_counter(packet);
 	if (!packet_fresh(peer, counter))
 		return;
+	/* (anyone can send packets in a peer's name from anywhere, each costing
+	the work of its seal: from where the peer is not known to be, a few a
+	second, which a peer whose address changed still gets through with) */
+	if (peer->connected && !peer_known_address(peer, from->sin_addr.s_addr, from->sin_port))
+	{
+		unsigned long now = p2p_now();
+
+		if (elapsed(peer->stray_time, 1000))
+		{
+			peer->stray_time = now;
+			peer->stray_budget = STRAY_PACKETS_PER_SECOND;
+		}
+		if (peer->stray_budget <= 0)
+			return;
+		peer->stray_budget--;
+	}
 	packet_nonce(packet, nonce);
 	inner_size = p2p_aead_open(peer->receive_key, nonce, packet, TUNNEL_HEADER_SIZE, packet + TUNNEL_HEADER_SIZE,
 		size - TUNNEL_HEADER_SIZE, inner);
