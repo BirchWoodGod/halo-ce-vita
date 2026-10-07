@@ -379,7 +379,10 @@ the heights; the block offsets below hold for every font in loc.map) */
 final inversion, as OpenSauce's Memory::CRC and CalculateChecksum do */
 #define CRC32_POLYNOMIAL 0xEDB88320UL
 #define CRC32_INITIAL 0xFFFFFFFFUL
-#define CHECKSUM_READ_CHUNK_BYTES 0x10000
+/* (the model data's part of the checksum is read in pieces this large: the
+Vita's memory card takes a request a millisecond or two before it delivers
+anything) */
+#define CHECKSUM_READ_CHUNK_BYTES 0x80000
 
 /* ---------- structures */
 
@@ -755,7 +758,10 @@ static char const *const resource_map_type_descriptions[NUMBER_OF_RESOURCE_MAP_T
 	"loc",
 };
 
-static uint32_t crc32_table[256];
+/* (eight tables: the update takes eight bytes a step, "slicing-by-8" -
+the byte at a time loop cost the Vita ~9 cycles a byte of Extinction's
+48 MB of checksummed data) */
+static uint32_t crc32_table[8][256];
 static int crc32_table_initialized = 0;
 
 /* ---------- private code */
@@ -881,7 +887,18 @@ static void crc32_table_initialize(
 		{
 			crc = (crc & 1) ? (crc >> 1) ^ CRC32_POLYNOMIAL : crc >> 1;
 		}
-		crc32_table[byte_value] = crc;
+		crc32_table[0][byte_value] = crc;
+	}
+	for (byte_value = 0; byte_value < 256; byte_value++)
+	{
+		int slice;
+
+		for (slice = 1; slice < 8; slice++)
+		{
+			uint32_t previous = crc32_table[slice - 1][byte_value];
+
+			crc32_table[slice][byte_value] = (previous >> 8) ^ crc32_table[0][previous & 0xFF];
+		}
 	}
 	crc32_table_initialized = 1;
 
@@ -899,9 +916,21 @@ static uint32_t crc32_update(
 	{
 		crc32_table_initialize();
 	}
-	for (index = 0; index < size; index++)
+	for (index = 0; index + 8 <= size; index += 8)
 	{
-		crc = (crc >> 8) ^ crc32_table[(crc ^ bytes[index]) & 0xFF];
+		uint32_t low = crc ^ ((uint32_t)bytes[index] | (uint32_t)bytes[index + 1] << 8 |
+			(uint32_t)bytes[index + 2] << 16 | (uint32_t)bytes[index + 3] << 24);
+		uint32_t high = (uint32_t)bytes[index + 4] | (uint32_t)bytes[index + 5] << 8 |
+			(uint32_t)bytes[index + 6] << 16 | (uint32_t)bytes[index + 7] << 24;
+
+		crc = crc32_table[7][low & 0xFF] ^ crc32_table[6][(low >> 8) & 0xFF] ^
+			crc32_table[5][(low >> 16) & 0xFF] ^ crc32_table[4][low >> 24] ^
+			crc32_table[3][high & 0xFF] ^ crc32_table[2][(high >> 8) & 0xFF] ^
+			crc32_table[1][(high >> 16) & 0xFF] ^ crc32_table[0][high >> 24];
+	}
+	for (; index < size; index++)
+	{
+		crc = (crc >> 8) ^ crc32_table[0][(crc ^ bytes[index]) & 0xFF];
 	}
 
 	return crc;
@@ -1925,10 +1954,20 @@ static enum cache_file_status structure_bsps_verify(
 		{
 			return load_fail(state, _cache_file_status_bad_structure_bsp_range, checksum_offset);
 		}
-		status = crc32_update_from_file(state->map, checksum, checksum_offset, (uint32_t)size);
-		if (status != _cache_file_status_ok)
+		/* (where the structure BSP lies at that offset, as tools pack them,
+		its bytes as read above, which nothing has changed: the file was read
+		twice, 11.5 MB of Extinction's load) */
+		if (checksum_offset == (uint32_t)file_offset)
 		{
-			return load_fail(state, status, checksum_offset);
+			*checksum = crc32_update(*checksum, bsp, (uint32_t)size);
+		}
+		else
+		{
+			status = crc32_update_from_file(state->map, checksum, checksum_offset, (uint32_t)size);
+			if (status != _cache_file_status_ok)
+			{
+				return load_fail(state, status, checksum_offset);
+			}
 		}
 		checksum_offset += (uint32_t)size;
 	}
