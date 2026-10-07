@@ -101,6 +101,10 @@ void rasterizer_set_stencil_mode(
 boolean rasterizer_set_texture_bitmap_data(
 	short stage,
 	struct bitmap_data const *bitmap);
+#ifdef HALO_LINUX
+void rasterizer_texture_streaming_hold(
+	boolean hold);
+#endif
 boolean rasterizer_set_texture_direct(
 	short stage,
 	long bitmap_group_index,
