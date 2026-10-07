@@ -47,6 +47,11 @@ boolean network_game_client_advertised_game_compatible(
 	struct network_game_client *client,
 	struct network_advertised_game const *game,
 	boolean tell);
+/* port: whether the advertised game has as many players as its host
+allows (the game lists show it closed); if tell, the player is told */
+boolean network_game_client_advertised_game_full(
+	struct network_advertised_game const *game,
+	boolean tell);
 /* port: whether the advertised game is co-op on a campaign level, and its
 difficulty (0 to 3) */
 boolean network_game_client_advertised_game_cooperative(

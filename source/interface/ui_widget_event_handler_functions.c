@@ -1142,6 +1142,10 @@ boolean network_game_client_advertised_game_compatible(
 	void *client,
 	void const *game,
 	boolean tell);
+/* ... and whether it is full (the player is told so) */
+boolean network_game_client_advertised_game_full(
+	void const *game,
+	boolean tell);
 #endif
 void *network_game_get_game(
 	void);
@@ -2116,6 +2120,10 @@ static boolean network_game_join_game_from_server_list(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					/* port: a full game (closed in the list) says so */
+					network_game_client_advertised_game_full(server, TRUE);
+#endif
 					error(2, "attempted to join a closed game");
 					ui_play_audio_feedback_sound(4);
 				}

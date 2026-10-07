@@ -1250,7 +1250,12 @@ static void server_list_menu_update(
 
 				number_of_players_text->parameters.text_box.text = ui_widget_realloc(
 					number_of_players_text->parameters.text_box.text,
+#ifdef HALO_LINUX
+					/* (port: "128/128", below) */
+					8 * sizeof(wchar_t),
+#else
 					8,
+#endif
 					"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
 					0x364);
 				if (number_of_players_text->parameters.text_box.text)
@@ -1263,6 +1268,20 @@ static void server_list_menu_update(
 						L"%d",
 						server->player_count);
 					number_of_players_text->parameters.text_box.text[3] = 0;
+#ifdef HALO_LINUX
+					/* port: and the most its host allows, "3/16" (eight
+					characters: room for "128/128") */
+					if (server->maximum_player_count > 0)
+					{
+						usnprintf(
+							number_of_players_text->parameters.text_box.text,
+							8,
+							L"%d/%d",
+							server->player_count,
+							server->maximum_player_count);
+						number_of_players_text->parameters.text_box.text[7] = 0;
+					}
+#endif
 				}
 
 				score_limit_text->parameters.text_box.text = ui_widget_realloc(
