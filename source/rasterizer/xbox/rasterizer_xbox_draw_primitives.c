@@ -358,6 +358,28 @@ static boolean dynamic_triangles_overflow_warning = FALSE;
 static boolean dynamic_vertices_overflow_warning = FALSE;
 
 
+#ifdef HALO_LINUX
+/* (port) the pools at their fullest (rasterizer.h), "rasterizer pools" in
+the frame report */
+struct rasterizer_pools_peaks rasterizer_pools_peaks;
+void platform_log(const char *format, ...);
+
+void halo_rasterizer_pools_report(void)
+{
+	struct rasterizer_pools_peaks *peaks = &rasterizer_pools_peaks;
+
+	platform_log("rasterizer pools (fullest frame; refused): dynamic triangles %ld/%d in %ld/%d buffers (%lu), unlit "
+		"vertices %ld/%ld, vertex buffers %ld/%d (%lu), transparent groups %ld/%ld (%lu), lens flares %ld/%ld (%lu)",
+		peaks->triangles, RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLES, peaks->triangle_buffers,
+		RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLE_BUFFERS, peaks->triangles_refused, peaks->unlit_vertices,
+		dynamic_vertices.groups[_rasterizer_vertex_type_dynamic_unlit].total_vertex_count, peaks->vertex_buffers,
+		RASTERIZER_MAXIMUM_DYNAMIC_VERTEX_BUFFERS, peaks->vertices_refused, peaks->transparent_groups,
+		(long)RASTERIZER_MAXIMUM_TRANSPARENT_GEOMETRY_GROUPS, peaks->transparent_groups_refused, peaks->lens_flares,
+		(long)MAXIMUM_LENS_FLARES_PER_FRAME, peaks->lens_flares_refused);
+	csmemset(peaks, 0, sizeof(*peaks));
+}
+#endif
+
 /* ---------- public code */
 
 boolean rasterizer_dynamic_geometry_initialize(
@@ -641,6 +663,12 @@ long _rasterizer_dynamic_triangles_new(
 			dynamic_triangle_buffer->triangle_count = count;
 			dynamic_triangles.triangle_count += count;
 			dynamic_triangles.buffer_count++;
+#ifdef HALO_LINUX
+			if (dynamic_triangles.triangle_count > rasterizer_pools_peaks.triangles)
+				rasterizer_pools_peaks.triangles = dynamic_triangles.triangle_count;
+			if (dynamic_triangles.buffer_count > rasterizer_pools_peaks.triangle_buffers)
+				rasterizer_pools_peaks.triangle_buffers = dynamic_triangles.buffer_count;
+#endif
 
 			if (rasterizer_debug_options.stats==_rasterizer_stats_geometry)
 			{
@@ -648,7 +676,11 @@ long _rasterizer_dynamic_triangles_new(
 				rasterizer_frame_statistics.dynamic_triangle_buffer_count++;
 			}
 		}
+#ifdef HALO_LINUX
+		else if (++rasterizer_pools_peaks.triangles_refused, !dynamic_triangles_overflow_warning)
+#else
 		else if (!dynamic_triangles_overflow_warning)
+#endif
 		{
 			error(_error_silent, "### ERROR too many dynamic triangles requested from rasterizer");
 			dynamic_triangles_overflow_warning = TRUE;
@@ -809,6 +841,12 @@ long _rasterizer_dynamic_vertices_new(
 			dynamic_vertex_buffer->vertex_count = count;
 			group->vertex_count += count;
 			dynamic_vertices.buffer_count++;
+#ifdef HALO_LINUX
+			if (type == _rasterizer_vertex_type_dynamic_unlit && group->vertex_count > rasterizer_pools_peaks.unlit_vertices)
+				rasterizer_pools_peaks.unlit_vertices = group->vertex_count;
+			if (dynamic_vertices.buffer_count > rasterizer_pools_peaks.vertex_buffers)
+				rasterizer_pools_peaks.vertex_buffers = dynamic_vertices.buffer_count;
+#endif
 
 			if (rasterizer_debug_options.stats==_rasterizer_stats_geometry)
 			{
@@ -816,7 +854,11 @@ long _rasterizer_dynamic_vertices_new(
 				rasterizer_frame_statistics.dynamic_vertex_buffer_count++;
 			}
 		}
+#ifdef HALO_LINUX
+		else if (++rasterizer_pools_peaks.vertices_refused, !dynamic_vertices_overflow_warning)
+#else
 		else if (!dynamic_vertices_overflow_warning)
+#endif
 		{
 			error(_error_silent, "### ERROR too many dynamic vertices requested from rasterizer");
 			dynamic_vertices_overflow_warning = TRUE;

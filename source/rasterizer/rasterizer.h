@@ -28,14 +28,35 @@ enum
 	RASTERIZER_MAXIMUM_TRIANGLES_PER_TRIANGLE_BUFFER = 24576,
 	RASTERIZER_MAXIMUM_DEBUG_PRIMITIVES = 131072,
 	RASTERIZER_MAXIMUM_DEBUG_VERTICES = 393216,
+#ifdef HALO_LINUX
+	/* (port) A frame's transparent geometry groups, dynamic triangles and
+	vertices, for the larger pools of particles, effects and objects
+	(halo_port_capacity.h) that fill them: the Xbox's 384 groups and 32768
+	triangles ran full in a Covenant V Marines fight in view (the harness's
+	frame report, rasterizer.h's peaks: 14000-17000 groups a report's 300
+	frames refused, triangles at 32767 and 2700 refused, unlit vertices at
+	29680 and vertex buffers at 893 of 1024), and the parts, particles and
+	sprites refused were not drawn that frame; with 1024 groups the same
+	fight still filled them. Costs: the groups 160 bytes each (+260 KB of
+	the C heap), the triangles 6 bytes (their index buffer:
+	+192 KB of the C heap), the unlit vertices 24 bytes twice (two buffers:
+	+768 KB of the memory window), the vertex buffers 16 bytes (+48 KB). */
+	RASTERIZER_MAXIMUM_TRANSPARENT_GEOMETRY_GROUPS = 2048, /* (384) */
+#else
 	RASTERIZER_MAXIMUM_TRANSPARENT_GEOMETRY_GROUPS = 384,
+#endif
 	RASTERIZER_MAXIMUM_TRANSPARENT_GEOMETRY_GROUPS2 = 32,
+#ifdef HALO_LINUX
+	RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLES = 65536, /* (32768) */
+#else
 	RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLES = 32768,
+#endif
 	RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLE_BUFFERS = 1024,
 #ifdef HALO_LINUX
-	/* four per particle (build_sprites_begin), for the native builds' larger
-	particle pool (halo_port_capacity.h) */
-	RASTERIZER_MAXIMUM_DYNAMIC_UNLIT_VERTICES = 4 * HALO_PORT_MAXIMUM_PARTICLES,
+	/* six per particle (build_sprites_begin takes four), for the native
+	builds' larger particle pool (halo_port_capacity.h) and what else draws
+	unlit (each buffer drawn from its own base vertex: past 65536 in all) */
+	RASTERIZER_MAXIMUM_DYNAMIC_UNLIT_VERTICES = 6 * HALO_PORT_MAXIMUM_PARTICLES,
 #else
 	RASTERIZER_MAXIMUM_DYNAMIC_UNLIT_VERTICES = 8192,
 #endif
@@ -43,7 +64,11 @@ enum
 	RASTERIZER_MAXIMUM_DYNAMIC_SCREEN_VERTICES = 16384,
 	RASTERIZER_MAXIMUM_DYNAMIC_MODEL_VERTICES = 2048,
 	RASTERIZER_MAXIMUM_DYNAMIC_MODEL_PROCESSED_VERTICES = 8192,
+#ifdef HALO_LINUX
+	RASTERIZER_MAXIMUM_DYNAMIC_VERTEX_BUFFERS = 4096, /* (1024) */
+#else
 	RASTERIZER_MAXIMUM_DYNAMIC_VERTEX_BUFFERS = 1024,
+#endif
 	RASTERIZER_MAXIMUM_DETAIL_OBJECTS_PER_FRAME = 4096,
 	RASTERIZER_NODES_PER_MODEL_VERTEX = 2,
 	RASTERIZER_MAXIMUM_NODES_PER_MODEL = 44,
@@ -753,6 +778,20 @@ void rasterizer_text_cache_dispose(
 	void);
 
 /* ---------- globals */
+
+#ifdef HALO_LINUX
+/* (port) HALO_FRAME_TIMING: the frame's dynamic geometry, transparent
+geometry groups and lens flares at their fullest over the report's frames,
+and the requests each pool refused (the game warns of the first only);
+halo_rasterizer_pools_report (rasterizer_xbox_draw_primitives.c) logs them
+with the frame report (frame_timing.c) */
+struct rasterizer_pools_peaks
+{
+	long triangles, triangle_buffers, unlit_vertices, vertex_buffers, transparent_groups, lens_flares;
+	unsigned long triangles_refused, vertices_refused, transparent_groups_refused, lens_flares_refused;
+};
+extern struct rasterizer_pools_peaks rasterizer_pools_peaks;
+#endif
 
 extern real_argb_color *global_rasterizer_model_ambient_reflection_tint;
 extern struct rasterizer_globals_definition rasterizer_globals;

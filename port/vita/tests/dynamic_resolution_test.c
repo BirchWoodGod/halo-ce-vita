@@ -183,6 +183,27 @@ int main(void)
 	dynres_controller_limits(&controller, 26, 32, budget);
 	check(controller.level == 26, "a new floor above the level lifts it");
 
+	/* ---------- switched on in a game drawn at a fixed 50% (the Vita, Oct 7:
+	from the ceiling, 50% to 100% at once in a fight of 34 ms at 50%, and
+	seconds over the budget) */
+	dynres_controller_start(&controller, 16, 32, budget, 16);
+	check(controller.level == 16, "switched on at a fixed 50%: starts at 50%, not the ceiling");
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 25, 0.0f, 16.0f, 0.0f, 0.8f, budget);
+	check(controller.level == 16, "switched on: no step up before the step above has fitted for a second");
+	simulate(&controller, &run, 30 * 6, 0.0f, 16.0f, 0.0f, 0.8f, budget);
+	printf("  switched on at 50%%, light scene: %d/32 after 7 s, %.0f frames over the budget\n", controller.level,
+		run.over_budget);
+	check(controller.level == 32 && run.over_budget == 0.0f, "switched on, a light scene: climbs to the ceiling, never over the budget");
+	dynres_controller_start(&controller, 16, 32, budget, 16);
+	run_reset(&run, &controller);
+	simulate(&controller, &run, 30 * 10, 0.0f, 120.0f, 0.0f, 0.8f, 20.0f);
+	check(controller.level == 16 && run.changes == 0, "switched on in a fight too heavy for more: stays at 50%");
+	dynres_controller_start(&controller, 20, 24, budget, 16);
+	check(controller.level == 20, "switched on below the floor: starts at the floor");
+	dynres_controller_start(&controller, 16, 24, budget, 28);
+	check(controller.level == 24, "switched on above the ceiling: starts at the ceiling");
+
 	/* ---------- frames drawn at another level are not counted */
 	dynres_controller_init(&controller, 16, 32, budget);
 	for (frame = 0; frame < 10; frame++)

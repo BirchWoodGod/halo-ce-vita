@@ -564,10 +564,27 @@ boolean collision_test_vector(
 						for (object_slot = 0; object_slot < object_count; object_slot++)
 						{
 							struct object_datum *object;
+							struct object_header_datum const *header;
 
-							/* (object_mark_function, with the object looked up once) */
+							/* (object_mark_function, with the object looked up once;
+							an object of a type the test leaves out passed over by
+							its header, unmarked: object_test_vector would test
+							neither it nor its children, and the mark only keeps a
+							second visit in this test from testing it again. A
+							cluster's objects are at the top level (children are
+							not connected to the map), without siblings. A vehicle's
+							mass points test scenery and machines only, the AI's
+							line of sight vehicles too, and a fight's clusters are
+							mostly bipeds, weapons and projectiles, each object read
+							and written for nothing) */
 							object_index = object_indices[object_slot];
-							object = object_get(object_index);
+							header = object_header_get(object_index);
+							if (!TEST_FLAG(flags, header->type + _collision_test_objects_first_type_bit) &&
+								!TEST_FLAG(header->flags, _object_header_child_bit))
+							{
+								continue;
+							}
+							object = header->datum;
 							if (object->object.magic_number == global_object_marker)
 								continue;
 							object->object.magic_number = global_object_marker;
