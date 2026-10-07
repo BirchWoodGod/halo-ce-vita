@@ -339,6 +339,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "frame_timing.h"
 #include "tick_thread.h"
+#include "view_distance.h"
 #include "render_epoch.h"
 void platform_log(const char *format, ...);
 #endif
@@ -4503,6 +4504,7 @@ void main_loop(
 					if (!halo_tick_thread_enabled())
 					{
 						halo_frame_timing(_frame_timing_tick_start, 0);
+						halo_view_points_capture();
 						game_time_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 						halo_frame_timing(_frame_timing_tick_end, 0);
 					}
@@ -4544,6 +4546,8 @@ void main_loop(
 #ifdef HALO_LINUX
 				if (simulate && halo_tick_thread_enabled())
 				{
+					/* (the cameras just updated: view_distance.c) */
+					halo_view_points_capture();
 					halo_tick_thread_start((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 					main_tick_pacing_tick_started();
 					tick_running = TRUE;
