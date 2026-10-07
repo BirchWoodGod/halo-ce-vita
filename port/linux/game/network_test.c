@@ -136,6 +136,10 @@ static struct
 	boolean started;
 	boolean joined;
 	boolean map_set;
+	/* the map set (its level name), set again if the lobby's map choice
+	changes it before the game starts (after a game, the scores' choice) */
+	char map_path[128];
+	real map_checked_seconds;
 	boolean player_added;
 	real joined_seconds;
 	boolean team_set;
@@ -1059,6 +1063,8 @@ void network_test_update(
 			network_test.variant_index++;
 			network_test.started = FALSE;
 			network_test.map_set = FALSE;
+			network_test.map_path[0] = 0;
+			network_test.map_checked_seconds = 0.0f;
 			network_test.setup_seconds = 0.0f;
 			network_test.menu_seconds = 0.0f;
 			/* (as picking the next game's map does: the scores' map choice
@@ -1131,6 +1137,7 @@ void network_test_update(
 				network_test_variant_map(network_test.variant_index, map_name, sizeof(map_name));
 				snprintf(path, sizeof(path), "levels\\test\\%s\\%s", map_name, map_name);
 				network_game_server_change_map_name(global_network_game_server_get(), path);
+				snprintf(network_test.map_path, sizeof(network_test.map_path), "%s", path);
 				platform_log("network test: map %s", map_name);
 				/* the variant, as picking the game settings does */
 				{
@@ -1146,6 +1153,15 @@ void network_test_update(
 				player_ui_set_game_variant(&variant);
 				network_game_server_change_game_variant(global_network_game_server_get(), &variant);
 				network_test.map_set = TRUE;
+			}
+			else if (network_test.map_set && network_test.map_path[0] && global_network_game_server_get() &&
+				network_test.setup_seconds - network_test.map_checked_seconds >= 1.0f &&
+				(network_test.map_checked_seconds = network_test.setup_seconds,
+					strcmp(main_get_multiplayer_map_name(), network_test.map_path)))
+			{
+				platform_log("network test: map %s again (the lobby changed it to %s)", network_test.map_path,
+					main_get_multiplayer_map_name());
+				network_game_server_change_map_name(global_network_game_server_get(), network_test.map_path);
 			}
 			if (!network_test.player_added && network_test.setup_seconds >= 2.0f && global_network_game_client_get())
 				network_test.player_added = network_game_client_add_player(global_network_game_client_get(), 0);
