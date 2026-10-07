@@ -673,6 +673,8 @@ void network_test_update(boolean main_menu_loaded, real seconds);
 /* the Vita settings panel's Host a game and Join a game
 (port/linux/game/system_link_shortcut.c) */
 void system_link_shortcut_update(boolean main_menu_loaded);
+/* (debug) HALO_TEST_PAD's presses start at the main menu (port/linux/src/xinput_sdl.c) */
+void test_input_main_menu(int loaded);
 #endif
 
 /* ---------- prototypes */
@@ -3891,7 +3893,8 @@ void main_game_render(
 /* (port, debug) HALO_TEST_COMMANDS="tick:command;tick:command...": console
 commands run at the top of the main loop once the game time reaches each
 tick, for testing the save paths without a controller, e.g.
-"300:game_save_totally_unsafe;600:game_revert". Besides the console's
+"300:game_save_totally_unsafe;600:game_revert" ("L300:..." waits for a
+level: not the main menu's scenario). Besides the console's
 own, @skip asks for a cinematic skip (as the controller does), @quit
 does the pause menu's Save and Quit, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
@@ -3928,7 +3931,7 @@ static void main_test_commands_update(
 	static float pan[7];
 	static long pan_start;
 	static int parsed = 0;
-	static struct { long tick; char command[120]; boolean done; } commands[160];
+	static struct { long tick; char command[120]; boolean done; boolean in_level; } commands[160];
 	static short command_count;
 	short index;
 
@@ -3947,7 +3950,11 @@ static void main_test_commands_update(
 				end = setting + strlen(setting);
 			if (colon && colon < end)
 			{
-				commands[command_count].tick = atol(setting);
+				/* ("L<tick>:": in a level only, not in the main menu's
+				scenario, whose time runs too: a level reached through the
+				menus, HALO_TEST_PAD) */
+				commands[command_count].in_level = *setting == 'L';
+				commands[command_count].tick = atol(setting + (*setting == 'L'));
 				length = (size_t)(end - colon - 1);
 				if (length >= sizeof(commands[0].command))
 					length = sizeof(commands[0].command) - 1;
@@ -3963,8 +3970,11 @@ static void main_test_commands_update(
 		return;
 	for (index = 0; index < command_count; index++)
 	{
-		if (commands[index].done || game_time_get() < commands[index].tick)
+		if (commands[index].done || game_time_get() < commands[index].tick ||
+			(commands[index].in_level && main_globals.main_menu_scenario_loaded))
+		{
 			continue;
+		}
 		commands[index].done = TRUE;
 		platform_log("test command at tick %ld: %s", (long)game_time_get(), commands[index].command);
 		if (!strcmp(commands[index].command, "@skip"))
@@ -4413,6 +4423,7 @@ void main_loop(
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
 			system_link_shortcut_update(main_globals.main_menu_scenario_loaded);
+			test_input_main_menu(main_globals.main_menu_scenario_loaded);
 			MAIN_SPLIT(_main_split_input);
 #endif
 			connection = main_globals.connection;

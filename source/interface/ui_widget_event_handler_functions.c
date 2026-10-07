@@ -921,6 +921,8 @@ struct network_game_server;
 short main_get_solo_level_from_name(char const *name);
 void main_set_multiplayer_map_name(char const *map_name);
 void network_game_server_port_set_cooperative(struct network_game_server *server, short difficulty);
+boolean network_game_server_port_cooperative_from_menu(char const *map_name, short difficulty);
+boolean network_game_server_port_cooperative_menu(short *rounds);
 #include "saved games/player_profile.h"
 #include "interface/ui_widget_definitions.h"
 #ifdef HALO_LINUX
@@ -2627,6 +2629,27 @@ static boolean netgame_unjoin_player(
 	boolean result = TRUE;
 	void *client = global_network_game_client_get();
 
+	/* port: B in the lobby of co-op hosted from the campaign's menus (the
+	waiting screen) cancels it: no game is left behind it (the System Link
+	lobby's keeps its game for the screens behind it), and the difficulty
+	screen is back */
+	if (client && network_game_server_port_cooperative_menu(NULL))
+	{
+#ifdef HALO_LINUX
+		{
+			void platform_log(const char *format, ...);
+
+			platform_log("co-op: the host left its lobby: the game is cancelled");
+		}
+#endif
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		network_game_accept_remote_connections(FALSE);
+		player_ui_clear_multiplayer_variant();
+		player_ui_clear_multiplayer_autojoin_for_local_player(
+			(short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1));
+		return TRUE;
+	}
 	if (client)
 	{
 		short state;
@@ -6074,5 +6097,69 @@ boolean ui_widget_port_cooperative_level_choose(
 	network_game_server_port_set_cooperative(server, difficulty);
 	network_game_server_change_map_name(server, map_name);
 	network_game_server_change_game_variant(server, &variant);
+	return TRUE;
+}
+
+/* port: co-op from the campaign's menus (ui_widget.c: Y on the difficulty
+list, after a level was chosen as for single player): hosts a network game
+of that level on the difficulty selected, as Multiplayer, System Link's Y
+(Create Game) hosts one (network_game_start_new_server), with this
+machine's player joined to it under the campaign's profile, as picking a
+profile for System Link does. The caller then opens the lobby. FALSE (the
+player told why, where the game's own checks tell) without a network, on
+maps that do not play with others, or without a campaign level. */
+boolean ui_widget_port_cooperative_campaign_host(
+	struct widget_instance *list,
+	struct event_record *event)
+{
+	char map_name[128];
+	char build[0x20];
+	short difficulty = list->data3C.selected_index;
+	short controller_index = (short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1);
+	boolean deleted = FALSE;
+
+	csstrncpy(map_name, main_get_map_name(), sizeof(map_name) - 1);
+	map_name[sizeof(map_name) - 1] = 0;
+	if (difficulty < 0 || difficulty > 3 || main_get_solo_level_from_name(map_name) == NONE)
+		return FALSE;
+	if (!transport_network_available())
+	{
+		display_error(5, event->controller_index, TRUE, TRUE);
+		return FALSE;
+	}
+	if (!cache_files_multiplayer_region(build))
+	{
+		cache_files_show_multiplayer_unavailable(NULL, build);
+		return FALSE;
+	}
+	main_set_difficulty(difficulty);
+	dispose_global_network_game_server();
+	if (!network_game_start_new_server(list, event, &deleted))
+		return FALSE;
+	if (!network_game_server_port_cooperative_from_menu(map_name, difficulty))
+	{
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		network_game_accept_remote_connections(FALSE);
+		player_ui_clear_multiplayer_variant();
+		return FALSE;
+	}
+	/* (the campaign's profile is the first player's: another controller's
+	player plays under it) */
+	if (controller_index != 0)
+	{
+		struct player_profile profile;
+
+		player_ui_get_active_player_profile(0, &profile);
+		player_ui_set_active_player_profile(controller_index, player_ui_get_active_player_profile_index(0), &profile);
+	}
+	player_ui_local_player_joined_multiplayer_game(controller_index);
+#ifdef HALO_LINUX
+	{
+		void platform_log(const char *format, ...);
+
+		platform_log("co-op: hosting %s on difficulty %d from the campaign's menus", map_name, difficulty);
+	}
+#endif
 	return TRUE;
 }

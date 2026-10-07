@@ -33,6 +33,17 @@
 #            HALO_TEST_COOP_JOIN_COMMANDS (main.c's HALO_TEST_COMMANDS: skip
 #            votes, loading zones, kills, game_won); the logs are checked by
 #            the caller
+#   coopmenu co-op from the campaign's menus, over system link on one LAN
+#            (online off), every press scripted (HALO_TEST_PAD): the host
+#            goes Campaign, a new profile, The Pillar of Autumn, Heroic and Y
+#            (Play co-op); the joiner opens the System Link screen as the
+#            settings panel's Join a game does (HALO_SYSTEM_LINK_TEST=join)
+#            and joins the game it lists. Checked here: the host's lobby
+#            opened, the game listed as co-op, both played the level, the
+#            cutscene skipped by both votes, and after the host's game_won
+#            (HALO_TEST_COOP_WIN, tick 1200) both played The Truth and
+#            Reconciliation. HALO_TEST_COOP_LIST_WAIT: the joiner's wait in
+#            the list (ms, default 15000)
 #
 #   HALO_TEST_VITA   the Linux build on the Vitas' side (configure.py
 #                    --linux-net-vita): build/linux/halo of this tree
@@ -326,6 +337,48 @@ coop)
 	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $two"
 	;;
+coopmenu)
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	# (the main menu, Campaign, the new profile's name (START: Done), Heroic, Y)
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
+		"HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y" \
+		"HALO_TEST_COMMANDS=L60:@vote;L${HALO_TEST_COOP_WIN:-1200}:game_won"; host_pid=$last_pid
+	sleep 5
+	# (the System Link screen: A joins, A picks the profile, A again; the list,
+	# a while for the host's game to be heard, then A joins it)
+	run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
+		HALO_SYSTEM_LINK_TEST=join "HALO_TEST_PAD=wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a" \
+		"HALO_TEST_COMMANDS=L60:@vote"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log hd=$out/host/data/debug.txt jd=$out/joiner/data/debug.txt
+	echo "--- host"; grep -aE "ui: screen|co-op:|test pad: y" "$hl" | head -12
+	echo "--- joiner"; grep -aE "ui: screen|system link: (joining|in another)|test command" "$jl" | head -12
+	grep -aq "co-op: hosting levels.a10.a10 on difficulty 2 from the campaign's menus" "$hl" ||
+		fail "the host did not host The Pillar of Autumn on Heroic from the campaign's menus"
+	grep -aq "ui: screen .*connected_pregame_screen" "$hl" || fail "the host's lobby (the waiting screen) did not open"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not join the host's game"
+	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
+	# (the first level: the joiner's ticks before the next level's restart)
+	first() { awk '/network test: tick [0-9]/ { split($0, a, " tick "); t = a[2] + 0; if (t < last - 300) exit; last = t } { print }' "$1"; }
+	next_level() { awk '/network test: tick [0-9]/ { split($0, a, " tick "); t = a[2] + 0; if (t < last - 300) n = 1; last = t } n' "$1"; }
+	both=$(first "$jl" | grep -a "network test: tick" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+	echo "joiner's seconds on the first level with both players alive: $both"
+	[ "$both" -ge 15 ] || fail "both players were alive on the first level for $both s (15 wanted)"
+	grep -aq "skipping the cutscene (2 of 2 voted)" "$hd" || fail "the cutscene was not skipped by both votes"
+	grep -aq "skip pressed (offered 1" "$jl" || fail "the joiner's vote was not offered"
+	grep -aq "precaching map 'levels.a30.a30'" "$jd" || fail "the joiner did not load the next level"
+	again=$(next_level "$jl" | grep -a "network test: tick" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+	echo "joiner's seconds on the next level with both players alive: $again"
+	[ "$again" -ge 10 ] || fail "both players were alive on the next level for $again s (10 wanted)"
+	;;
 solo)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=local:bloodgulch \
 		HALO_NETWORK_TEST_START=10 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
@@ -337,7 +390,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|lan|pc|pchost|adhoc|solo|coop" >&2
+	echo "usage: $0 code|lobby|lan|pc|pchost|adhoc|solo|coop|coopmenu" >&2
 	exit 2
 	;;
 esac

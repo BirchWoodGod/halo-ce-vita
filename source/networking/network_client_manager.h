@@ -47,6 +47,11 @@ boolean network_game_client_advertised_game_compatible(
 	struct network_game_client *client,
 	struct network_advertised_game const *game,
 	boolean tell);
+/* port: whether the advertised game is co-op on a campaign level, and its
+difficulty (0 to 3) */
+boolean network_game_client_advertised_game_cooperative(
+	struct network_advertised_game const *game,
+	short *difficulty);
 boolean network_game_client_initiate_join_game(
 	struct network_game_client *client,
 	struct network_advertised_game *game,

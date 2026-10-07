@@ -80,6 +80,11 @@ it, and a host refuses joiners of the other kind (their join tokens differ,
 network_game_generate_join_game_token); internet play's signalling topics
 differ too (p2p_signal.c) */
 #define HALO_PORT_ADVERTISED_VITA_FLAG 0x02
+/* ... the game is co-op on a campaign level, on the difficulty in the byte
+at HALO_PORT_ADVERTISED_COOP_DIFFICULTY_OFFSET (0 to 3): the game lists show
+it by level and difficulty (a host without the flag, by its name alone) */
+#define HALO_PORT_ADVERTISED_COOP_FLAG 0x04
+#define HALO_PORT_ADVERTISED_COOP_DIFFICULTY_OFFSET 3
 
 /* whether this build plays on the Vitas' side of that line, with the
 Vita's multiplayer rules (a local game starts with one player: the Vita

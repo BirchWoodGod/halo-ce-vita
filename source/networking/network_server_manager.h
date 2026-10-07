@@ -62,6 +62,19 @@ build's maximum players (Server Setup's player count is for PvP) */
 void network_game_server_port_set_cooperative(
 	struct network_game_server *server,
 	short difficulty);
+/* port: co-op hosted from the campaign's menus (the difficulty screen's Y,
+ui_widget_event_handler_functions.c): this server's game is that level on
+that difficulty, and goes on from the campaign's next level after each one
+won, whatever the settings' co-op choice. Returns FALSE without a server in
+its lobby or a campaign level. */
+boolean network_game_server_port_cooperative_from_menu(
+	char const *map_name,
+	short difficulty);
+/* port: the server's game is co-op hosted from the campaign's menus (its
+lobby is the waiting screen: interface/ui_widget.c); and the rounds it
+has started (0 in the first lobby, 1 after the first level won, ...) */
+boolean network_game_server_port_cooperative_menu(
+	short *rounds);
 boolean network_game_server_ban_player(
 	char const *text);
 short network_game_server_matching_player_names(

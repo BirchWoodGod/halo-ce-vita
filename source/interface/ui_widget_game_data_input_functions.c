@@ -350,10 +350,12 @@ symbols in this file:
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
+#include "networking/network_server_manager.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
 #include "text/text_group.h"
 #include "text/unicode.h"
+#include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
 #endif
@@ -1004,14 +1006,39 @@ static void server_list_menu_update(
 			item && item_index < displayed_server_count;
 			item = item->next, item_index++)
 		{
+			/* (port: room for a co-op game's "<host>: <level> (<difficulty>)") */
 			item->parameters.text_box.text = ui_widget_realloc(
 				item->parameters.text_box.text,
-				0x40,
+				0x80,
 				"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
 				0x2C5);
 			if (item->parameters.text_box.text)
 			{
-				if (displayed_servers[item_index]->open == TRUE)
+				short difficulty;
+
+				/* port: a co-op game, by its level and difficulty */
+				if (network_game_client_advertised_game_cooperative(displayed_servers[item_index], &difficulty))
+				{
+					wchar_t description[0x40];
+
+					coop_menu_game_description(displayed_servers[item_index]->game_name,
+						displayed_servers[item_index]->map_name, difficulty, description, NUMBEROF(description));
+					if (displayed_servers[item_index]->open == TRUE)
+						ustrncpy(item->parameters.text_box.text, description, 0x3F);
+					else
+					{
+						usnprintf(item->parameters.text_box.text, 0x3F, L"%s %s",
+							unicode_string_list_get_string(tag_loaded(UNICODE_STRING_LIST_TAG, "ui\\multiplayer_game_text"),
+								19), description);
+					}
+					item->parameters.text_box.text[0x3F] = 0;
+					/* (the list's box shows about 190 of the font's pixels beside
+					the description: a longer one scrolls along while selected, and
+					is cut short with "..." else) */
+					coop_menu_fit_line(item->parameters.text_box.text, 190, item,
+						item_index == widget->parameters.list.selected_list_item_index);
+				}
+				else if (displayed_servers[item_index]->open == TRUE)
 				{
 					ustrncpy(
 						item->parameters.text_box.text,
@@ -1283,6 +1310,33 @@ static void server_list_menu_update(
 
 				message_text->parameters.text_box.string_list_index = 2;
 				message_text->visible = FALSE;
+
+				/* port: a co-op game: its level, and co-op on its difficulty,
+				in place of a multiplayer map and game type */
+				{
+					short difficulty;
+
+					if (network_game_client_advertised_game_cooperative(server, &difficulty))
+					{
+						wchar_t text[48];
+						wchar_t difficulty_name[16];
+
+						coop_menu_level_name(map_name, text, NUMBEROF(text));
+						ui_widget_port_text_override(map_name_text, text);
+						coop_menu_difficulty_name(difficulty, difficulty_name, NUMBEROF(difficulty_name));
+						usnprintf(text, NUMBEROF(text), L"Co-op, %s", difficulty_name);
+						text[NUMBEROF(text) - 1] = 0;
+						ui_widget_port_text_override(ruleset_text, text);
+						ui_widget_port_text_override(teams_text, L"Campaign");
+						score_limit_text->visible = FALSE;
+						score_limit_type_text->visible = FALSE;
+					}
+					else
+					{
+						score_limit_text->visible = TRUE;
+						score_limit_type_text->visible = TRUE;
+					}
+				}
 
 				if (!widget->focused_child)
 				{
@@ -1729,6 +1783,16 @@ static void network_pregame_status_screen_update(
 						player_widget = player_widget->next;
 					}
 				}
+			}
+			/* port: a co-op game takes two (network.coop_players on the
+			Vitas): its lobby shows the partner's panel alone, and its
+			waiting screen's text goes where the others were
+			(port/linux/game/coop_menu.c) */
+			{
+				boolean cooperative = coop_menu_game_is_cooperative(game) && game->maximum_players <= 2;
+
+				third_machine_widget->visible = !cooperative || machine_indices[1] != NONE;
+				fourth_machine_widget->visible = !cooperative || machine_indices[2] != NONE;
 			}
 		}
 	}
@@ -2992,8 +3056,30 @@ static void multiplayer_game_directions(
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_waiting_for_machine;
 			widget->visible = TRUE;
+			/* port: co-op hosted from the campaign's menus waits for one
+			partner */
+			if (network_game_server_port_cooperative_menu(NULL))
+				ui_widget_port_text_override(widget, L"Waiting for your partner");
 			return;
 		}
+	}
+	/* port: a co-op lobby (host or partner): the level and its difficulty
+	(not over the countdown, which this bar shows then) */
+	if (game && coop_menu_game_is_cooperative(game) && !network_game_is_splitscreen_local() &&
+		network_game_client_get_seconds_to_game_start(global_network_game_client_get()) < 0)
+	{
+		wchar_t text[64];
+		wchar_t level[48];
+		wchar_t difficulty_name[16];
+
+		coop_menu_level_name(game->map.name, level, NUMBEROF(level));
+		coop_menu_difficulty_name(game->difficulty, difficulty_name, NUMBEROF(difficulty_name));
+		usnprintf(text, NUMBEROF(text), L"Co-op: %s (%s)", level, difficulty_name);
+		text[NUMBEROF(text) - 1] = 0;
+		widget->parameters.text_box.string_list_index = _multiplayer_game_text_string_waiting_for_machine;
+		ui_widget_port_text_override(widget, text);
+		widget->visible = TRUE;
+		return;
 	}
 
 	if (game &&

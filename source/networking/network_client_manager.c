@@ -810,6 +810,8 @@ static struct
 {
 	word version;
 	byte flags;
+	/* (HALO_PORT_ADVERTISED_COOP_FLAG: the co-op game's difficulty) */
+	byte difficulty;
 } network_game_client_advertised_versions[MAXIMUM_NETWORK_ADVERTISED_GAMES];
 
 struct network_game_client network_game_client_dont_use_directly;
@@ -2554,6 +2556,8 @@ static boolean add_advertised_game(
 				(advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] << 8));
 			network_game_client_advertised_versions[game_index].flags =
 				advertisement->__unknown5A[HALO_PORT_ADVERTISED_FLAGS_OFFSET];
+			network_game_client_advertised_versions[game_index].difficulty =
+				advertisement->__unknown5A[HALO_PORT_ADVERTISED_COOP_DIFFICULTY_OFFSET];
 		}
 
 		if (advertisement->game_name[0] != L'\0')
@@ -3266,6 +3270,28 @@ short network_game_client_listed_game_count(
 			count++;
 	}
 	return count;
+}
+
+/* port: whether the advertised game is co-op on a campaign level (its host
+says so: HALO_PORT_ADVERTISED_COOP_FLAG), and its difficulty */
+boolean network_game_client_advertised_game_cooperative(
+	struct network_advertised_game const *game,
+	short *difficulty)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	long game_index;
+
+	if (!client || !game || game < client->available_games ||
+		game >= client->available_games + MAXIMUM_NETWORK_ADVERTISED_GAMES)
+	{
+		return FALSE;
+	}
+	game_index = game - client->available_games;
+	if (!(network_game_client_advertised_versions[game_index].flags & HALO_PORT_ADVERTISED_COOP_FLAG))
+		return FALSE;
+	if (difficulty)
+		*difficulty = (short)PIN(network_game_client_advertised_versions[game_index].difficulty, 0, 3);
+	return TRUE;
 }
 
 /* ... and puts this machine's players on a team (a team game needs both
