@@ -5782,7 +5782,8 @@ static struct render_command *record_draw(BOOL immediate)
 							command->texture_version[stage] = target_versions[index].version;
 					if ((D3D__RenderState[D3DRS_PSTEXTUREMODES] >> (stage * 5)) & 0x1f)
 						command->texture_target_data[stage] = texture->Data;
-					if (command->hoistable && !command->texture_version[stage] && render_target_entry_find(texture->Data))
+					if (command->hoistable && command->texture_target_data[stage] && !command->texture_version[stage] &&
+						render_target_entry_find(texture->Data))
 						command->hoistable = FALSE;
 					if (command->texture_target_data[stage])
 						record_reads_surface(command, texture->Data);
@@ -5879,8 +5880,15 @@ static struct render_command *record_draw(BOOL immediate)
 					command->texture_version[stage] = target_versions[index].version;
 			}
 			/* reading a target that is not a copy (the main scene): the
-			draw must stay in order */
-			if (command->hoistable && !command->texture_version[stage] && render_target_entry_find(texture->Data))
+			draw must stay in order. Only a stage the pixel shader samples
+			reads it (bind_recorded_textures binds no other): a target left
+			bound on a stage the draw does not sample - the active
+			camouflage's copy of the screen stays on stage 2 after the
+			cloaked units are drawn - held the motion sensor's blips in
+			the frame's order, a scene of their own and a split of the
+			main scene more each frame a cloaked unit was in view (#33) */
+			if (command->hoistable && command->texture_target_data[stage] && !command->texture_version[stage] &&
+				render_target_entry_find(texture->Data))
 				command->hoistable = FALSE;
 			if (command->texture_target_data[stage])
 				record_reads_surface(command, texture->Data);
