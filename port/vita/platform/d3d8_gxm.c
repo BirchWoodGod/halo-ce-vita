@@ -3547,6 +3547,73 @@ static struct
 static unsigned long target_version_count;
 static unsigned long last_recorded_target;
 
+/* Small targets drawn from the main scene. The sun glow
+(rasterizer_xbox_lights.c) copies the back buffer around the sun into two
+64x64 targets, blurs them into each other four times, each pass weighted
+by the alpha the copy left in the target it draws into (DESTALPHA), and
+draws the rays from the last one. The copies read the main scene and so
+stayed in the frame's order, but the passes after them read only small
+targets: they were hoisted ahead of the main scene, before the copies were
+drawn, and each went into a fresh copy of its target, whose alpha nothing
+had written. The blur was black and the rays added nothing (issue #31). A
+small surface a run draws into from a screen-sized target is now drawn in
+the game's order from then on, into one target (no copies), as on the
+Xbox. HALO_SMALL_IN_ORDER=0: copied and hoisted, as before. */
+#define MAXIMUM_IN_ORDER_SURFACES 8
+
+static unsigned long in_order_surfaces[MAXIMUM_IN_ORDER_SURFACES];
+static unsigned long in_order_surface_count;
+
+static BOOL surface_in_order(unsigned long data)
+{
+	unsigned long index;
+
+	for (index = 0; index < in_order_surface_count; index++)
+		if (in_order_surfaces[index] == data)
+			return TRUE;
+	return FALSE;
+}
+
+static unsigned long *target_version_slot(unsigned long data);
+
+/* (recording a draw) one of its stages reads this surface: a draw reading
+an in-order surface is not hoisted, and a run into a copy of a small target
+that reads a screen-sized target makes the small one an in-order surface
+(this draw, and the rest of the frame, already without the copy) */
+static void record_reads_surface(struct render_command *command, unsigned long data)
+{
+	const struct render_target_entry *read;
+	unsigned long *version;
+	static int enabled = -1;
+
+	if (in_order_surface_count && surface_in_order(data))
+	{
+		command->hoistable = FALSE;
+		return;
+	}
+	if (!command->color_version)
+		return;
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SMALL_IN_ORDER");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	if (!enabled || in_order_surface_count >= MAXIMUM_IN_ORDER_SURFACES ||
+		!(read = render_target_entry_find(data)) ||
+		(read->target.width <= SMALL_TARGET_WIDTH && read->target.height <= SMALL_TARGET_WIDTH))
+	{
+		return;
+	}
+	in_order_surfaces[in_order_surface_count++] = command->targets->color_surface.Data;
+	if ((version = target_version_slot(command->targets->color_surface.Data)) != NULL)
+		*version = 0;
+	command->color_version = 0;
+	command->hoistable = FALSE;
+	platform_log("small targets: %08lx is drawn from the screen-sized %08lx, in order and without copies",
+		(unsigned long)command->targets->color_surface.Data, data);
+}
+
 static BOOL surface_is_small_cached(const D3DSurface *surface);
 static BOOL surface_is_depth_cached(const D3DSurface *surface);
 
@@ -3944,7 +4011,8 @@ static struct render_command *command_begin(unsigned long kind)
 		last_recorded_target != command->targets->color_surface.Data;
 	command->wave = 0;
 	if (kind != _command_present && command->targets->color_valid && surface_is_small_cached(&command->targets->color_surface) &&
-		!(command->targets->depth_valid && device.depth_stencil->Data && !surface_is_small(&command->targets->depth_surface)))
+		!(command->targets->depth_valid && device.depth_stencil->Data && !surface_is_small(&command->targets->depth_surface)) &&
+		!surface_in_order(command->targets->color_surface.Data))
 	{
 		unsigned long *version = target_version_slot(command->targets->color_surface.Data);
 
@@ -5657,6 +5725,8 @@ static struct render_command *record_draw(BOOL immediate)
 						command->texture_target_data[stage] = texture->Data;
 					if (command->hoistable && !command->texture_version[stage] && render_target_entry_find(texture->Data))
 						command->hoistable = FALSE;
+					if (command->texture_target_data[stage])
+						record_reads_surface(command, texture->Data);
 				}
 			}
 			DRAW_PROFILE_ADD(2, profile_from);
@@ -5753,6 +5823,8 @@ static struct render_command *record_draw(BOOL immediate)
 			draw must stay in order */
 			if (command->hoistable && !command->texture_version[stage] && render_target_entry_find(texture->Data))
 				command->hoistable = FALSE;
+			if (command->texture_target_data[stage])
+				record_reads_surface(command, texture->Data);
 		}
 		command->palette[stage] = device.palettes[stage] && device.palettes[stage]->Data ?
 			(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[stage]->Data) : NULL;

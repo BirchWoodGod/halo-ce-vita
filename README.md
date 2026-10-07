@@ -258,6 +258,7 @@ Recommended settings (the **Profile** row sets these at once):
 | Hide distant objects | Small | Small | Off |
 | Scenery updates | Quarter | Quarter | Every tick |
 | Object lighting | Third | Third | Full |
+| Sun rays | Off | On | On |
 | Sound occlusion | Every 6th | Every 3rd | Every tick |
 | Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
 
@@ -279,6 +280,9 @@ What helps, in the settings panel:
 - **Hide distant objects** Small or Medium: tiny far-away objects are skipped.
 - **Scenery updates** and **Object lighting** at Quarter / Third (the
   defaults).
+- **Sun rays** Off: no glow and light shafts around the sun outdoors, which
+  cost the graphics chip several small extra passes a frame while the sun
+  is in view.
 - **Sound voices** 16: fewer positional sounds at once.
 - Keep **Smooth weapon motion** on: it costs almost nothing and makes the
   frame rate feel steadier.

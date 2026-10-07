@@ -935,7 +935,7 @@ static void test_online_rows(void)
 }
 
 /* every settings variable 1.0.3 had (its settings.txt) is still a row,
-with the values it saved */
+with the values it saved; and the rows added since (Sun rays) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -951,7 +951,7 @@ static void test_variables_kept(void)
 		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_VITA_NETWORK", "HALO_NET_COOP_LEVEL",
 		"HALO_NET_COOP_DIFFICULTY", "HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
-		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE",
+		"HALO_GXM_RTT_SYNC", "HALO_NET_LOBBY_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
 	};
 	int index, all = 1, choices = 0;
 
@@ -968,7 +968,7 @@ static void test_variables_kept(void)
 	for (index = 0; index < SETTING_COUNT; index++)
 		choices += settings[index].kind == KIND_CHOICE;
 	check(all && choices == (int)(sizeof(variables) / sizeof(variables[0])),
-		"every settings variable of 1.0.3 is still a row, and no other");
+		"every settings variable of 1.0.3 is still a row, and no other but Sun rays");
 	check(!strcmp(setting_named("HALO_DEBUG_CAMERA")->names[0], "Off") &&
 		setting_named("HALO_DEBUG_CAMERA")->page == TAB_DEV, "Debug camera stays in Dev");
 	{
@@ -1057,8 +1057,9 @@ int main(void)
 		!strncmp(menu_line(2, line, sizeof(line)), "Model detail\x02", 13) &&
 		!strncmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02", 21) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Scenery updates\x02", 16) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Object lighting\x02", 16) && menu_rows() == 4 && menu_fits(),
-		"Graphics, Advanced: model detail, distant objects, scenery, lighting");
+		!strncmp(menu_line(5, line, sizeof(line)), "Object lighting\x02", 16) &&
+		!strncmp(menu_line(6, line, sizeof(line)), "Sun rays\x02", 9) && menu_rows() == 5 && menu_fits(),
+		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page: the profile Custom");
@@ -1265,6 +1266,28 @@ int main(void)
 			!strcmp(settings[0].names[settings[0].choice], "Custom"), "a 1.0 settings.txt loads, row for row");
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") && choice_of("HALO_DYNAMIC_RES_MIN") == 0,
 			"a 1.0 settings.txt: Dynamic minimum at its default");
+	}
+
+	/* a settings.txt saved with the Performance profile before Sun rays
+	was a row: still Performance, the sun rays off as the profile has them */
+	{
+		static const char performance[] = "HALO_PROFILE=performance\nHALO_RENDER_SCALE=0.5\nHALO_MODEL_LOD_SCALE=0.5\n"
+			"HALO_MIN_OBJECT_PIXELS=8\nHALO_SCENERY_UPDATE_DIVISOR=4\nHALO_LIGHTING_REFRESH_DIVISOR=3\n"
+			"HALO_SOUND_OBSTRUCTION_TICKS=6\n";
+		static const char quality[] = "HALO_PROFILE=quality\nHALO_RENDER_SCALE=1\nHALO_MODEL_LOD_SCALE=1\n"
+			"HALO_MIN_OBJECT_PIXELS=0\nHALO_SCENERY_UPDATE_DIVISOR=1\nHALO_LIGHTING_REFRESH_DIVISOR=1\n"
+			"HALO_SOUND_OBSTRUCTION_TICKS=1\n";
+
+		write_file(SETTINGS_FILE, performance, sizeof(performance) - 1);
+		unsetenv("HALO_SUN_RAYS");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_SUN_RAYS"), "0") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
+			"a Performance settings.txt from before Sun rays: Performance, sun rays off");
+		write_file(SETTINGS_FILE, quality, sizeof(quality) - 1);
+		unsetenv("HALO_SUN_RAYS");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_SUN_RAYS"), "1") && !strcmp(settings[0].names[settings[0].choice], "Quality"),
+			"a Quality settings.txt from before Sun rays: Quality, sun rays on");
 	}
 
 	/* a settings.txt with Dynamic loads */
