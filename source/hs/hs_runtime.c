@@ -322,8 +322,16 @@ enum
 #define hs_thread_get(thread_index) \
 	((struct hs_thread_datum *)datum_get(hs_thread_data, (thread_index)))
 
+#ifdef HALO_LINUX
+/* port: an out-of-range syntax index gets a zeroed sentinel instead of a
+NULL that would be dereferenced while a crafted or damaged map's scripts run
+(hs.c halo_hs_syntax_get_checked) */
+struct hs_syntax_node *halo_hs_syntax_get_checked(long expression_index);
+#define hs_syntax_get(expression_index) halo_hs_syntax_get_checked((expression_index))
+#else
 #define hs_syntax_get(expression_index) \
 	((struct hs_syntax_node *)datum_get(hs_syntax_data, (expression_index)))
+#endif
 
 /* a thread is valid when it lies inside the thread data array and its stack pointer and
    the fill mark of its topmost frame lie inside its own inline stack buffer */

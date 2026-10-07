@@ -458,7 +458,19 @@ enum hs_tokenizer_state
 
 /* ---------- macros */
 
+#ifdef HALO_LINUX
+/* port: compiling scripts post-process walks the scenario's syntax node
+tree by node index; a crafted or damaged tree (from an untrusted map) holds
+dangling indices, for which datum_get returns NULL, and the surrounding
+code dereferences the node without checking. Out-of-range indices return a
+zeroed sentinel node (type 0, next NONE) instead of NULL, so a bad tree is
+treated as corrupt (the compile fails) rather than crashing the joiner. A
+well-formed map never reaches the sentinel. */
+struct hs_syntax_node *halo_hs_syntax_get_checked(long expression_index);
+#define hs_syntax_get(expression_index) halo_hs_syntax_get_checked((expression_index))
+#else
 #define hs_syntax_get(expression_index) ((struct hs_syntax_node *)datum_get(hs_syntax_data, (expression_index)))
+#endif
 #define hud_globals_definition_get(index) ((struct hud_globals_definition *)tag_get(hud_globals_group_tag, (index)))
 #define hud_message_text_definition_get(index) ((struct hud_message_text_definition *)tag_get(hud_message_text_group_tag, (index)))
 #undef HS_TYPE_IS_OBJECT

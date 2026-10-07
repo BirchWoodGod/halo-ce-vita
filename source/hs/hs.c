@@ -12955,6 +12955,66 @@ static void hs_allocate(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: a syntax node fetched by a dangling index (datum_get returns NULL
+for an absent datum) would be dereferenced without a check while scripts are
+compiled or run; out-of-range indices get a zeroed sentinel (type and links
+NONE) so a crafted or damaged script tree is treated as corrupt rather than
+crashing (hs_compile.c, hs_runtime.c use this). */
+struct hs_syntax_node *halo_hs_syntax_get_checked(
+	long expression_index)
+{
+	static struct hs_syntax_node sentinel;
+	struct hs_syntax_node *node = hs_syntax_data ?
+		(struct hs_syntax_node *)datum_get(hs_syntax_data, expression_index) : NULL;
+
+	if (!node)
+	{
+		csmemset(&sentinel, 0, sizeof(sentinel));
+		sentinel.index = (short)NONE;
+		sentinel.type = (short)NONE;
+		sentinel.next_node_index = NONE;
+		sentinel.data = NONE;
+		return &sentinel;
+	}
+
+	return node;
+}
+
+/* port: whether the scenario's stored script syntax tree is one the loader
+can keep and walk safely (scenario.c refuses the map otherwise). The engine
+keeps the map's own node array only when its tag data is exactly the
+expected size (hs_allocate); then its header is untrusted and must stride by
+the node size and count no more nodes than the array holds, or datum_get
+would index past the buffer. A map with no stored tree (the engine builds a
+fresh one) is fine. */
+boolean halo_hs_scenario_syntax_valid(
+	struct scenario const *scenario)
+{
+	struct data_array const *nodes;
+	unsigned long expected_size = sizeof(struct data_array) +
+		(unsigned long)MAXIMUM_HS_SYNTAX_NODES_PER_SCENARIO * sizeof(struct hs_syntax_node);
+
+	if (!scenario || (unsigned long)scenario->hs_syntax_data.size != expected_size)
+	{
+		/* no stored tree, or one the engine replaces with a fresh array */
+		return TRUE;
+	}
+	nodes = (struct data_array const *)scenario->hs_syntax_data.address;
+	if (!nodes ||
+		nodes->size != (short)sizeof(struct hs_syntax_node) ||
+		nodes->maximum_count <= 0 ||
+		nodes->maximum_count > MAXIMUM_HS_SYNTAX_NODES_PER_SCENARIO ||
+		nodes->count < 0 ||
+		nodes->count > nodes->maximum_count)
+	{
+		return FALSE;
+	}
+
+	return TRUE;
+}
+#endif
+
 void hs_dispose(
 	void)
 {

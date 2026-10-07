@@ -85,10 +85,19 @@ static int objects_profile_on;
 
 
 // This is dangerous, bungie returns the same value regardless of whether the index is valid
+#ifdef HALO_LINUX
+/* port: the index is a function reference from an untrusted object tag; out
+of range (not 1..NUMBER_OF_INCOMING_OBJECT_FUNCTIONS) it would read past the
+fixed incoming_function_values array, so a crafted map gets 0 instead */
+#define OBJECT_INCOMING_FUNCTION_GET_VALUE(object, index)	\
+((index)>=1 && (index)<=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS ?	\
+(object)->object.incoming_function_values[(index)-1] : 0.f)
+#else
 #define OBJECT_INCOMING_FUNCTION_GET_VALUE(object, index)	\
 ((index)>=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS+1 ?			\
 (object)->object.incoming_function_values[(index)-1] :		\
 (object)->object.incoming_function_values[(index)-1])
+#endif
 
 #define OBJECT_FRAME_INDEX_GET(object_index) ((object_index) + game_time_get())
 
@@ -5505,7 +5514,16 @@ static void object_compute_change_colors(
 	if (TEST_FLAG(object_definition->object.runtime_flags, _object_runtime_scaled_change_colors_bit))
 	{
 		short cc_index;
-		for (cc_index = 0; cc_index<object_definition->object.change_colors.count; cc_index++)
+		short change_color_count = object_definition->object.change_colors.count;
+
+		/* port: an object tag is untrusted map data; its change-color count
+		must not index the fixed runtime array out of bounds (a crafted map
+		otherwise corrupts memory past outgoing_change_colors) */
+		if (change_color_count > NUMBER_OF_OBJECT_CHANGE_COLORS)
+		{
+			change_color_count = NUMBER_OF_OBJECT_CHANGE_COLORS;
+		}
+		for (cc_index = 0; cc_index<change_color_count; cc_index++)
 		{
 			struct object_change_color_definition *change_color = TAG_BLOCK_GET_ELEMENT(
 				&object_definition->object.change_colors,
