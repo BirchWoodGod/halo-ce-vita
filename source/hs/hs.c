@@ -14830,6 +14830,23 @@ boolean hs_scenario_postprocess(
 		else
 			error(0, "%s: %s", error_source, error_message);
 
+#ifdef HALO_LINUX
+		/* port (from OpenCE, "Harden map loading against hostile maps"): a
+		loaded map's script source is not compiled again. Its blocks can't be
+		resized (tag_block_resize fails on a cache file), so the recompile
+		never reset the map's scripts and none ran afterwards either way, and
+		the source is the map's own, which the compiler would recurse into as
+		deep as it nests (a crafted map could overflow the stack). The nodes
+		go and none run. */
+		data_delete_all(hs_syntax_data);
+		if (!tag_block_resize(&scenario->hs_globals, 0) ||
+			!tag_block_resize(&scenario->hs_scripts, 0) ||
+			!tag_data_resize(&global_scenario_get()->hs_string_constants, 0x400))
+		{
+			error(0, "the scenario's scripts won't run");
+		}
+		success = FALSE;
+#else
 		if (hs_compile_source() && hs_compile_postprocess(&error_message, &error_source))
 		{
 			success = TRUE;
@@ -14845,6 +14862,7 @@ boolean hs_scenario_postprocess(
 			}
 			success = FALSE;
 		}
+#endif
 	}
 	if (restore_syntax_data)
 		hs_syntax_data = saved_syntax_data;
