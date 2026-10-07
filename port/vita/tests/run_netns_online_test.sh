@@ -47,6 +47,8 @@
 #
 #   HALO_TEST_VITA   the Linux build on the Vitas' side (configure.py
 #                    --linux-net-vita): build/linux/halo of this tree
+#   HALO_TEST_VITA_JOINER  (code, lobby) the joiners' build, when another
+#                    (an older one: mixed versions)
 #   HALO_TEST_PC     a Linux build without it (pc mode's joiner)
 #   HALO_TEST_DATA   a folder with the game's maps folder
 #   HALO_TEST_DATA_HOST, HALO_TEST_DATA_JOINER   the host's and the joiner's
@@ -60,6 +62,15 @@
 #   HALO_TEST_OUT    where the logs go (kept)
 #   HALO_TEST_CPUS   taskset CPU lists for the two copies ("0-7 8-15")
 #   HALO_TEST_ENV    more VAR=value settings for both copies (profiling)
+#   HALO_TEST_NETEM  a home connection's link: netem settings (tc-netem(8):
+#                    "delay 40ms 5ms loss 1% rate 8mbit") for what each
+#                    side's router sends to the internet
+#   HALO_TEST_NETEM_HOST, HALO_TEST_NETEM_JOIN   the host's or the joiner's
+#                    own instead (its upload)
+#   HALO_TEST_SECOND_JOINER=1  (code) a second joiner behind a third NAT joins
+#                    the code as the first does (map sharing: two downloads at
+#                    once); its maps folder HALO_TEST_DATA_JOINER2, its CPUs the
+#                    third of HALO_TEST_CPUS; the caller checks its log
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -78,7 +89,9 @@ rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
 cpu_a=${cpus%% *}
-cpu_b=${cpus##* }
+cpu_b=${cpus#* }
+cpu_c=${cpu_b#* }
+cpu_b=${cpu_b%% *}
 mkdir -p "$out"
 pids=
 cleanup() { for pid in $pids; do kill "$pid" 2>/dev/null; done; wait 2>/dev/null; }
@@ -88,7 +101,12 @@ trap cleanup EXIT
 # router and a machine for each side; with "lan", both machines on one LAN
 # behind the first router (pc mode's second half)
 # (a process holding a new network namespace; its pid in held)
-holder() { unshare -n sleep 100000 > /dev/null 2>&1 & held=$!; pids="$pids $held"; }
+holder() {
+	unshare -n sleep 100000 > /dev/null 2>&1 & held=$!; pids="$pids $held"
+	# (once unshare has made it: a link moved to the process before stays in
+	# this namespace, and the machine then has no address, under load)
+	while [ "$(readlink /proc/$held/ns/net)" = "$(readlink /proc/self/ns/net)" ]; do sleep 0.02; done
+}
 in_ns() { local pid=$1; shift; nsenter -t "$pid" -n "$@"; }
 ip link set lo up
 ip addr add 198.51.100.1/32 dev lo
@@ -118,6 +136,14 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 	# router itself, and the machine's own datagram to that peer then gets a
 	# new port: hole punching fails on Linux's own NAT, not on the game)
 	in_ns "$router" iptables -A INPUT -i "w_$name" -p udp -m conntrack --ctstate NEW -j DROP
+	# (a home connection: its delay, loss and upload rate)
+	local netem=${HALO_TEST_NETEM:-}
+	[ "$name" = host ] && netem=${HALO_TEST_NETEM_HOST:-$netem}
+	[ "$name" = join ] && netem=${HALO_TEST_NETEM_JOIN:-$netem}
+	if [ -n "$netem" ]; then
+		in_ns "$router" tc qdisc add dev "w_$name" root netem limit 10000 $netem ||
+			{ echo "netem ($netem) could not be set on $name's link"; exit 2; }
+	fi
 	in_ns "$machine" ip link set lo up
 	in_ns "$machine" ip addr add "$lan.2/24" broadcast "$lan.255" dev "m_$name"
 	in_ns "$machine" ip link set "m_$name" up
@@ -126,6 +152,7 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 }
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
+[ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] && side join2 10.10.3 192.168.3
 python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 > "$out/broker.log" 2>&1 & pids="$pids $!"
 python3 "$here/stun_test_server.py" --host 198.51.100.1 --port 3478 > "$out/stun.log" 2>&1 & pids="$pids $!"
 sleep 1
@@ -139,6 +166,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	case $name in
 	host) folder=${HALO_TEST_DATA_HOST:-$data} ;;
 	joiner) folder=${HALO_TEST_DATA_JOINER:-$data} ;;
+	joiner2) folder=${HALO_TEST_DATA_JOINER2:-$data} ;;
 	esac
 	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
 	rm -f "$out/$name/data/init.txt"
@@ -147,7 +175,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 \
 		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false \
 		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 "$@" ${HALO_TEST_ENV:-} \
-		$([ "$name" = joiner ] && echo "${HALO_TEST_JOIN_ENV:-}") \
+		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!
@@ -175,9 +203,14 @@ code|lobby)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
 	if [ "$mode" = code ]; then join_mode="join-code:$code"; else join_mode=join-public; fi
-	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$join_mode \
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$join_mode \
 		HALO_NETWORK_TEST_REJOIN=$rejoin HALO_TEST_INPUT=bot:2; join_pid=$last_pid
-	wait $join_pid $host_pid 2>/dev/null
+	join2_pid=
+	if [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ]; then
+		run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$join_mode \
+			HALO_TEST_INPUT=bot:3; join2_pid=$last_pid
+	fi
+	wait $join_pid $host_pid $join2_pid 2>/dev/null
 	grep -aE "Internet play|network test: (hosting|starting|map|game|the next|join|leav|the public)" "$out/host/run.log" | head -30 > "$out/host.summary"
 	grep -aE "Internet play|network test: (join|leav|the public|search)" "$out/joiner/run.log" | head -30 > "$out/joiner.summary"
 	echo "--- host"; cat "$out/host.summary"
