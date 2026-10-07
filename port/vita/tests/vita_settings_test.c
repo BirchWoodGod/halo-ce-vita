@@ -748,6 +748,13 @@ static void test_multiplayer_tab(void)
 	/* the game refuses (it has the last word): the guide says why */
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "JOIN A GAME: THE HOST'S CODE", 28) && strstr(menu, "Triangle: browse public games instead"),
+		"Join a game online: the host's code first");
+	check(menu_fits(), "the code: 46 characters a line");
+	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "JOIN A GAME\n", 12) && strstr(menu, "\nOnline: ") && halo_system_link_request == SYSTEM_LINK_REQUEST_NONE,
+		"the code taken: Join's steps, with how the lookup goes, and nothing asked yet");
+	check(menu_fits(), "Join's steps online: 46 characters a line");
 	press(VITA_BUTTON_CROSS);
 	check(halo_system_link_request == SYSTEM_LINK_REQUEST_JOIN, "Join a game: the game is asked (join)");
 	game_answers(SYSTEM_LINK_ANSWER_IN_PLAY);

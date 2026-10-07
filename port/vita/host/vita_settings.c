@@ -85,7 +85,10 @@ menus, outside a lobby, with a network: otherwise the guide says why.
   for others to type in; "Online games: Public" also lists it in the
   public lobby. "Join with a code" types one in with the D-pad; "Browse
   public games" lists the lobby. The host's game then shows under System
-  Link.
+  Link. "Join a game" with the connection Online asks for the code first
+  (triangle: the public games), then shows the steps with how the lookup
+  goes: a guide that opened System Link before the host was reached would
+  show an empty list.
 - "Co-op >", "Co-op campaign": a game this Vita hosts is that campaign level played
   together, the next level after each one won (network_server_manager.c),
   at the difficulty chosen.
@@ -492,6 +495,9 @@ static unsigned long previous_buttons;
 they are let go (the cross that opened System Link is not the game's A) */
 static unsigned long held_after_close;
 static int restart_pending;
+/* the code screen (or the public games) came from Join a game with the
+connection Online: a code taken goes on to Join a game's steps */
+static int code_for_join;
 
 /* the tab shown, the page of it shown (the tab's own, or a page one of its
 rows opened), the line chosen on each page, and the screens an action
@@ -1907,8 +1913,10 @@ static void show_code(void)
 		cursor[column++] = ' ';
 	}
 	letters[column] = cursor[column] = 0;
-	snprintf(text, sizeof(text), "JOIN WITH A CODE\n\n    %s\n    %s\n%s\nUp/down letter  Left/right move  Cross join  O back",
-		letters, cursor, strcmp(running_network, "online") ? "Connection must be Online (restart)" : "");
+	snprintf(text, sizeof(text), "%s\n\n    %s\n    %s\n%s\nUp/down: letter  Left/right: move\nCross: join  Circle: back%s",
+		code_for_join ? "JOIN A GAME: THE HOST'S CODE\n(the host's Multiplayer tab shows it)" : "JOIN WITH A CODE", letters,
+		cursor, strcmp(running_network, "online") ? "Connection must be Online (restart)" : "",
+		code_for_join ? "\nTriangle: browse public games instead" : "");
 	vgxm_menu_set(text, 2);
 }
 
@@ -2010,7 +2018,7 @@ static void show_guide(void)
 {
 	char text[1536], line[64];
 	int length, step = 1, host = guide_action == ACTION_HOST;
-	int adhoc = !strcmp(running_network, "adhoc");
+	int adhoc = !strcmp(running_network, "adhoc"), online = !strcmp(running_network, "online");
 	const struct setting *coop = setting_named("HALO_NET_COOP_LEVEL");
 	const char *blocker = guide_blocker();
 
@@ -2044,8 +2052,27 @@ static void show_guide(void)
 		length += snprintf(text + length, sizeof(text) - length,
 			"\n%d SYSTEM LINK GAMES: %s on the host's game\n  (the games %s show there)\n%d Wait in the lobby for the"
 			" host to start\n  A map you lack comes from the host", step, menu_button('A'),
-			adhoc ? "in the room" : "on this network", step + 1);
+			adhoc ? "in the room" : online ? "you are connected to" : "on this network", step + 1);
 	}
+	/* (online: how the code's lookup goes; System Link lists the host's
+	game once connected) */
+	if (online && !host)
+	{
+		char detail[96];
+
+		p2p_status(detail, sizeof(detail));
+		/* (its first clause: "connected to the host", "code ABCD-EFGH
+		found", "no game has code ABCD-EFGH", in the line's 46) */
+		detail[strcspn(detail, ":;(")] = 0;
+		while (detail[0] && detail[strlen(detail) - 1] == ' ')
+			detail[strlen(detail) - 1] = 0;
+		length += snprintf(text + length, sizeof(text) - length, "\nOnline: %.38s", detail);
+		if (!strstr(detail, "connected to the host"))
+			length += snprintf(text + length, sizeof(text) - length, "\n  Wait for \"connected to the host\"");
+	}
+	else if (online)
+		length += snprintf(text + length, sizeof(text) - length,
+			"\nOnline: your code shows on the Multiplayer tab\n  once the game is made; tell it to the others");
 	/* (the Xbox's names, and which Vita button each is: the game's own
 	menus show the Xbox's icons) */
 	if (!playstation_terms())
@@ -2384,9 +2411,11 @@ static void act(const struct setting *setting)
 	switch (setting->action)
 	{
 	case ACTION_JOIN_CODE:
+		code_for_join = 0;
 		screen = SCREEN_CODE;
 		break;
 	case ACTION_BROWSE:
+		code_for_join = 0;
 		screen = SCREEN_BROWSE;
 		browse_count = browse_selected = 0;
 		p2p_lobby_browse(1);
@@ -2419,7 +2448,10 @@ static void act(const struct setting *setting)
 	case ACTION_JOIN:
 		guide_action = setting->action;
 		guide_problem[0] = 0;
-		screen = SCREEN_GUIDE;
+		/* (online, a game is joined by its code: that first, unless the
+		guide has to say why not now) */
+		code_for_join = setting->action == ACTION_JOIN && !strcmp(running_network, "online") && !guide_blocker();
+		screen = code_for_join ? SCREEN_CODE : SCREEN_GUIDE;
 		break;
 	}
 }
@@ -2517,7 +2549,14 @@ static void code_input(unsigned long pressed, unsigned long buttons, unsigned lo
 			p2p_join_code(code);
 			set_notice("Looking up %s...", code);
 		}
-		screen = SCREEN_LIST;
+		screen = code_for_join && !strcmp(running_network, "online") ? SCREEN_GUIDE : SCREEN_LIST;
+		return;
+	}
+	if ((pressed & VITA_BUTTON_TRIANGLE) && code_for_join)
+	{
+		screen = SCREEN_BROWSE;
+		browse_count = browse_selected = 0;
+		p2p_lobby_browse(1);
 		return;
 	}
 	if (pressed & VITA_BUTTON_LEFT)
@@ -2559,7 +2598,7 @@ static void browse_input(unsigned long pressed)
 		p2p_join_code(browse_entries[browse_selected].code);
 		set_notice("Joining %.20s...", browse_entries[browse_selected].name);
 		p2p_lobby_browse(0);
-		screen = SCREEN_LIST;
+		screen = code_for_join ? SCREEN_GUIDE : SCREEN_LIST;
 	}
 }
 

@@ -340,9 +340,11 @@ The ad hoc dialog's mode (Connect, Create or Join) is a Dev switch.
 the Multiplayer tab then shows your code, **ABCD-EFGH** (it stays the same
 until you quit the game). Tell it to the others; with Online games set to
 Public, your game is also listed. To
-join, type the code under Join with a code (or pick the game under Browse
-public games), wait for "connected to the host", then open Multiplayer,
-System Link: the host's game is in the list. A code is a convenience, not a
+join, choose **Join a game**: it asks for the host's code first (Triangle
+there browses the public games instead), then shows the steps with how the
+lookup goes. Once it says "connected to the host", Cross opens System Link,
+and the host's game is in the list. Join with a code and Browse public
+games on the Online games page do the same. A code is a convenience, not a
 password: anyone who has it (or guesses it) can join that game.
 
 The long invite still works too, as a fallback: the host's is written to
