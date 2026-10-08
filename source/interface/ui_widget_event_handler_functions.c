@@ -2806,12 +2806,39 @@ static boolean display_error_if_no_network_connection(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port: a game that could not be hosted, its server's or its client's
+connection not made (the game's ports another program's, or those of a copy
+of the game still running): the player stays where they were and is told
+why, and hosts again once the ports are free. The connection is no longer
+the server's (which the main loop then looked for every frame), and a list
+of games that was looking for games (the System Link list's Y) looks again */
+static void network_game_host_failed(
+	boolean had_client,
+	short controller_index)
+{
+	void platform_log(const char *format, ...);
+
+	if (had_client && create_global_network_game_client())
+		game_connection_set(_game_connection_network_client);
+	else
+		game_connection_set(_game_connection_local);
+	platform_log("network: could not host a game (the game's network ports in use?)");
+	display_error_text_deferred(
+		L"Can't host a game:\r\nanother program is\r\nusing the network\r\nport. Try again later.",
+		controller_index);
+}
+#endif
+
 static boolean split_screen_game_initialize(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted)
 {
 	boolean result = TRUE;
+#ifdef HALO_LINUX
+	boolean had_client = global_network_game_client_get() != NULL;
+#endif
 
 	network_game_accept_remote_connections(FALSE);
 	if (!global_network_game_server_get())
@@ -2832,6 +2859,9 @@ static boolean split_screen_game_initialize(
 		dispose_global_network_game_client();
 		player_ui_clear_multiplayer_variant();
 		error(2, "failed to initiate split screen game networking");
+#ifdef HALO_LINUX
+		network_game_host_failed(had_client, event ? event->controller_index : NONE);
+#endif
 	}
 	return result;
 }
@@ -3715,6 +3745,9 @@ static boolean network_game_start_new_server(
 	boolean *widget_deleted)
 {
 	boolean result = TRUE;
+#ifdef HALO_LINUX
+	boolean had_client = global_network_game_client_get() != NULL;
+#endif
 
 	dispose_global_network_game_client();
 	player_ui_clear_multiplayer_variant();
@@ -3739,6 +3772,9 @@ static boolean network_game_start_new_server(
 		network_game_accept_remote_connections(FALSE);
 		player_ui_clear_multiplayer_variant();
 		error(2, "failed to initiate a multiplayer game server");
+#ifdef HALO_LINUX
+		network_game_host_failed(had_client, event ? event->controller_index : NONE);
+#endif
 	}
 	return result;
 }

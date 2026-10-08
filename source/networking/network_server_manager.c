@@ -1269,7 +1269,14 @@ struct network_game_server *network_game_server_create(
 			error(
 				_error_silent,
 				"failed to create the server connection");
-			network_game_server_dispose(server);
+			/* port: nothing was set up, so nothing is disposed of: the server
+			is only let go. network_game_server_dispose went through its
+			client machines, all zeros here (machine 0, with no connection),
+			and network_game_server_handle_client_machines read the missing
+			connection: hosting with the game's port taken (by another
+			program, or another copy of the game) crashed */
+			csmemset(server, 0, sizeof(*server));
+			network_game_server_memory_do_not_use_directly_in_use = FALSE;
 			server = NULL;
 		}
 	}
@@ -4518,7 +4525,8 @@ static boolean network_game_server_handle_client_machines(
 		if (client_machine->machine_index == NONE)
 			continue;
 
-		if (!network_connection_active(client_machine->connection))
+		/* (port: a machine with no connection is one without a live one) */
+		if (!client_machine->connection || !network_connection_active(client_machine->connection))
 		{
 			short machine_index = client_machine->machine_index;
 
