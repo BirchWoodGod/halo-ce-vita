@@ -192,7 +192,7 @@ static void setup(void)
 	snprintf(signalling.brokers[0].host, sizeof(signalling.brokers[0].host), "broker");
 	p2p_signal_host(token, "ABCD-EFGH");
 	p2p_signal_join(host_hash, token);
-	p2p_signal_lookup_code("ABCDEFGH");
+	p2p_signal_lookup_code("ABCDEFGH", NULL);
 	p2p_signal_lobby_topics(1, 1);
 }
 
