@@ -190,6 +190,9 @@ static struct
 	/* the host: each machine's lines (by its slot), and its relaying */
 	struct chat_bucket machine_buckets[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
 	unsigned long machine_dropped[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	/* ... and refused by the host's Game chat or its mutes (logged apart
+	from a flood's) */
+	unsigned long machine_refused[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
 	struct chat_bucket relayed;
 
 	/* the players this machine's player muted (on the host: muted for the
@@ -698,6 +701,7 @@ void chat_update(
 			csmemset(&chat_globals.shown, 0, sizeof(chat_globals.shown));
 			csmemset(chat_globals.machine_buckets, 0, sizeof(chat_globals.machine_buckets));
 			csmemset(chat_globals.machine_dropped, 0, sizeof(chat_globals.machine_dropped));
+			csmemset(chat_globals.machine_refused, 0, sizeof(chat_globals.machine_refused));
 			csmemset(&chat_globals.relayed, 0, sizeof(chat_globals.relayed));
 		}
 	}
@@ -867,7 +871,7 @@ void chat_server_handle_request(
 	notice = chat_host_notice(chat_mode(), request.kind);
 	if (notice != NONE)
 	{
-		unsigned long dropped = ++chat_globals.machine_dropped[slot];
+		unsigned long dropped = ++chat_globals.machine_refused[slot];
 
 		if (dropped <= CHAT_DROP_LOGS || dropped % CHAT_DROP_LOG_EVERY == 0)
 			platform_log("chat: the host dropped a line from machine slot %ld: %s", slot, chat_notice_text(notice));
@@ -887,7 +891,7 @@ void chat_server_handle_request(
 	/* (a player the host muted is muted for its game) */
 	if (chat_is_muted(name, sender))
 	{
-		unsigned long dropped = ++chat_globals.machine_dropped[slot];
+		unsigned long dropped = ++chat_globals.machine_refused[slot];
 
 		if (dropped <= CHAT_DROP_LOGS || dropped % CHAT_DROP_LOG_EVERY == 0)
 			platform_log("chat: the host dropped a line from %s: muted by the host", name);
