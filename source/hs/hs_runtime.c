@@ -326,7 +326,14 @@ enum
 /* port: an out-of-range syntax index gets a zeroed sentinel instead of a
 NULL that would be dereferenced while a crafted or damaged map's scripts run
 (hs.c halo_hs_syntax_get_checked) */
-struct hs_syntax_node *halo_hs_syntax_get_checked(long expression_index);
+struct hs_syntax_node *halo_hs_syntax_sentinel(void);
+extern struct data_array *hs_syntax_data;
+static __inline__ struct hs_syntax_node *halo_hs_syntax_get_checked(long expression_index)
+{
+	struct hs_syntax_node *node = (struct hs_syntax_node *)datum_get(hs_syntax_data, expression_index);
+
+	return __builtin_expect(node != NULL, 1) ? node : halo_hs_syntax_sentinel();
+}
 #define hs_syntax_get(expression_index) halo_hs_syntax_get_checked((expression_index))
 #else
 #define hs_syntax_get(expression_index) \
