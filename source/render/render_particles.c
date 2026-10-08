@@ -153,16 +153,14 @@ static void effect_stats_report(void)
 		/* (render_sprite.c) the trimmed sprites */
 		extern double sprite_trim_area_full, sprite_trim_area_kept;
 		extern unsigned long sprite_trim_sprites, sprite_trim_trimmed, sprite_trim_empty, sprite_trim_fogged, sprite_trim_small;
-		/* (port/vita/platform/vita_textures.c; absent from the OpenGL build) */
-		extern volatile unsigned long vita_sprite_texels_computed __attribute__((weak));
-		extern volatile unsigned long vita_sprite_texels_texels __attribute__((weak));
+		/* (port/vita/platform/vita_textures.c; 0 in the OpenGL builds, xbox_textures.c) */
+		extern volatile unsigned long vita_sprite_texels_computed, vita_sprite_texels_texels;
 
 		platform_log("sprite-trim: %.0f sprites a frame, %.0f trimmed (%.1f empty), %.1f whole for the fog, %.1f small; quad area kept %.1f%% (coverage-weighted); "
 			"bounds computed %lu (%lu texels read) in all",
 			sprite_trim_sprites / 300.0, sprite_trim_trimmed / 300.0, sprite_trim_empty / 300.0, sprite_trim_fogged / 300.0, sprite_trim_small / 300.0,
 			sprite_trim_area_full > 0.0 ? 100.0 * sprite_trim_area_kept / sprite_trim_area_full : 100.0,
-			&vita_sprite_texels_computed ? vita_sprite_texels_computed : 0UL,
-			&vita_sprite_texels_texels ? vita_sprite_texels_texels : 0UL);
+			vita_sprite_texels_computed, vita_sprite_texels_texels);
 		sprite_trim_area_full = sprite_trim_area_kept = 0.0;
 		sprite_trim_sprites = sprite_trim_trimmed = sprite_trim_empty = sprite_trim_fogged = sprite_trim_small = 0;
 	}

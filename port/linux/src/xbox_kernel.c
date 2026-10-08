@@ -820,6 +820,7 @@ struct global_block
 };
 
 
+#if defined(HALO_VITA) || defined(__GLIBC__)
 /* the C library's struct mallinfo (glibc's and newlib's alike: ten words
 on these 32-bit targets), whose <malloc.h> the port's MSVC one hides */
 struct c_heap_information
@@ -827,22 +828,28 @@ struct c_heap_information
 	unsigned long arena, ordblks, smblks, hblks, hblkhd, usmblks, fsmblks, uordblks, fordblks, keepcost;
 };
 extern struct c_heap_information c_heap_information(void) __asm__("mallinfo");
+#endif
 
+/* (the logs' C heap figures) 0 where the C library has no mallinfo: the
+Android guest's musl and the Windows C runtime */
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity)
 {
-	struct c_heap_information heap = c_heap_information();
-
 #ifdef HALO_VITA
 	/* newlib: the heap is one block of _newlib_heap_size_user */
 	extern unsigned int _newlib_heap_size_user;
+	struct c_heap_information heap = c_heap_information();
 
 	*in_use = heap.uordblks;
 	*capacity = _newlib_heap_size_user;
-#else
+#elif defined(__GLIBC__)
+	struct c_heap_information heap = c_heap_information();
 	const char *setting = getenv("HALO_HEAP_LIMIT_KB");
 
 	*in_use = heap.uordblks + heap.hblkhd;
 	*capacity = setting ? (unsigned long)atol(setting) * 1024 : 0;
+#else
+	*in_use = 0;
+	*capacity = 0;
 #endif
 }
 

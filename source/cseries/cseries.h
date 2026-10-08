@@ -346,7 +346,7 @@ has no rounding instruction, and newlib's rint is a call that moves the
 double through the core registers - four per colour converted, which the
 render does thousands of times a frame. Only where doubles are evaluated as
 doubles (FLT_EVAL_METHOD 0): x87 extended precision would not round. */
-static __inline double halo_rint(
+static __inline__ double halo_rint(
 	double value)
 {
 #if defined(FLT_EVAL_METHOD) && FLT_EVAL_METHOD == 0

@@ -219,11 +219,15 @@ not: sprite_trim_fog_linear), at least 32 pixels across, not point
 sampled. The rest differ from the whole quad's only by the interpolation's
 rounding (Vita3K at fixed ticks: under 0.2% of a frame's pixels, nearly all
 by 1 of 255; triage/fx2-status.md). HALO_SPRITE_TRIM=0 off, 1 rectangles,
-2 octagons (the default); HALO_SPRITE_TRIM_MIN_PIXELS=n the smallest. */
+2 octagons (the default); HALO_SPRITE_TRIM_MIN_PIXELS=n the smallest.
+Only the Vita's texture translator (vita_textures.c, also the gxm-null
+harness's) finds the texels; the OpenGL builds' (xbox_textures.c) answers
+that it has none, and their sprites are drawn whole. */
 #include <stdlib.h>
 struct vita_sprite_texels { int empty; float x0, y0, x1, y1, sum0, sum1, difference0, difference1; };
+extern int vita_sprite_texel_bounds_available(void);
 extern int vita_sprite_texel_bounds(const void *resource, const float bounds[4], int channels,
-	struct vita_sprite_texels *texels, float *width, float *height) __attribute__((weak));
+	struct vita_sprite_texels *texels, float *width, float *height);
 
 static int sprite_trim_mode = -1;
 static real sprite_trim_minimum_pixels;
@@ -240,7 +244,7 @@ static int sprite_trim_enabled(void)
 		sprite_trim_mode = setting ? atoi(setting) : 2;
 		setting = getenv("HALO_SPRITE_TRIM_MIN_PIXELS");
 		sprite_trim_minimum_pixels = setting ? (real)atof(setting) : 32.f;
-		if (!vita_sprite_texel_bounds)
+		if (!vita_sprite_texel_bounds_available())
 			sprite_trim_mode = 0;
 	}
 	return sprite_trim_mode;

@@ -82,6 +82,36 @@ bool SDL_ShowSimpleMessageBox(SDL_MessageBoxFlags flags, const char *title, cons
 	return host_sdl_show_simple_message_box((unsigned int)flags, title, message) != 0;
 }
 
+/* a question with buttons (sdl_platform.c's yes or no, map sharing's): the
+buttons flattened, as SDL_MessageBoxData holds pointers the host's ABI lays
+out differently, and their texts as 32-bit guest addresses, which the host
+widens */
+#define GUEST_MESSAGE_BOX_BUTTONS 8
+
+bool SDL_ShowMessageBox(const SDL_MessageBoxData *data, int *buttonid)
+{
+	unsigned int flags[GUEST_MESSAGE_BOX_BUTTONS], texts[GUEST_MESSAGE_BOX_BUTTONS];
+	int ids[GUEST_MESSAGE_BOX_BUTTONS];
+	int count, index, answer = -1;
+
+	if (!data || data->numbuttons < 0 || data->numbuttons > GUEST_MESSAGE_BOX_BUTTONS ||
+		(data->numbuttons && !data->buttons))
+		return false;
+	count = data->numbuttons;
+	for (index = 0; index < count; index++)
+	{
+		flags[index] = (unsigned int)data->buttons[index].flags;
+		ids[index] = data->buttons[index].buttonID;
+		texts[index] = (unsigned int)(uintptr_t)data->buttons[index].text;
+	}
+	if (!host_sdl_show_message_box((unsigned int)data->flags, data->title, data->message, count, flags, ids, texts,
+		&answer))
+		return false;
+	if (buttonid)
+		*buttonid = answer;
+	return true;
+}
+
 void SDL_Delay(Uint32 milliseconds)
 {
 	struct timespec duration;

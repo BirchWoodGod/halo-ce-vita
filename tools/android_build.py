@@ -38,6 +38,9 @@ BUILD = Path("build/android")
 THIRD_PARTY = BUILD / "third_party"
 # the TOML parser config.toml is read with (port/linux/src/port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
+# (from OpenCE c9ee319a) the menus' XML parser (port/linux/src/menu_files.c)
+EXPAT_DIR = Path("port/third_party/expat")
+EXPAT_SOURCES = ("xmlparse.c", "xmlrole.c", "xmltok.c")
 KCP_DIR = Path("port/third_party/kcp")
 # (from OpenCE, MrBruh's "Second hardening round") the port's zlib
 # (port/third_party/zlib/zlib_prefixed.h, 1.3.2): what inflates the maps,
@@ -181,6 +184,18 @@ def fetch_third_party() -> None:
         print(f"Cloning SDL3 {SDL_TAG}")
         subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", SDL_TAG, SDL_URL, str(SDL_DIR)],
                        check=True)
+
+
+def _compiler_include_dir(cc: str) -> Optional[Path]:
+    """the guest compiler's own headers (arm_neon.h and the other
+    intrinsics), which -nostdinc leaves out with the host's C library"""
+    try:
+        resource_dir = subprocess.run([cc, "-print-resource-dir"], check=True, capture_output=True,
+                                      text=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    include = Path(resource_dir) / "include"
+    return include if resource_dir and include.is_dir() else None
 
 
 def _musl_sources() -> List[Path]:
@@ -345,6 +360,13 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         f"-isystem {libc_include}", f"-isystem {arch}", f"-isystem {MUSL_DIR}/arch/generic",
         f"-isystem {MUSL_DIR}/include",
     ]
+    # the compiler's own headers after musl's, so that they never stand in
+    # for the C library's (stddef.h, stdint.h ...) but the intrinsics are
+    # there: the sound mixer's NEON resampling (dsound_sdl.c, arm_neon.h)
+    compiler_include = _compiler_include_dir(guest_cc)
+    if compiler_include is None:
+        sys.exit(f"cannot find the headers of {guest_cc} (-print-resource-dir) for the Android guest")
+    libc_includes.append(f"-idirafter {compiler_include}")
     guest_abi = " ".join(GUEST_ABI_FLAGS + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []))
     guest_code = " ".join(GUEST_CODE_FLAGS)
     tool_implicit = [Path("tools/android_asm_convert.py"), *generated_headers]
@@ -423,7 +445,7 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         guest_abi, guest_code, "-std=gnu11", "-D_GNU_SOURCE", "-DHALO_LINUX_PLATFORM_LAYER", "-w", profile_flags,
         f"-include {prefix_header}", f"-include {platform_semantics_header}",
         f"-I{LINUX_DIR}/src", f"-I{LINUX_DIR}/include", f"-I{PORT_DIR}/guest/runtime",
-        f"-I{PORT_DIR}/include", f"-I{TOML_DIR}", f"-I{KCP_DIR}", f"-I{MONOCYPHER_DIR}",
+        f"-I{PORT_DIR}/include", f"-I{TOML_DIR}", f"-I{EXPAT_DIR}", f"-I{KCP_DIR}", f"-I{MONOCYPHER_DIR}",
         "-Isource -Isource/cseries",
         f"-I{SDL_DIR}/include", f"-I{gl_include}", *libc_includes, f"-idirafter {XDK_INCLUDE}",
     ])
@@ -434,6 +456,9 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         objects.append(guest_object(source, platform_cflags))
     # the settings file's parser (port/third_party/tomlc17)
     objects.append(guest_object(TOML_DIR / "tomlc17.c", platform_cflags))
+    # the menus' XML parser (port/third_party/expat; menu_files.c)
+    for name in EXPAT_SOURCES:
+        objects.append(guest_object(EXPAT_DIR / name, platform_cflags))
     # internet play's reliable streams (port/third_party/kcp; p2p.c)
     objects.append(guest_object(KCP_DIR / "ikcp.c", platform_cflags))
     # the port's zlib (map inflation: cache_files_decompress_windows.c; not

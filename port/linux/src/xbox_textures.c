@@ -955,3 +955,37 @@ void xgpu_texture_cache_begin_frame(void)
 		}
 	}
 }
+
+/* ---------- what the Vita's texture translator also answers
+
+The game's code asks the texture translator for these whichever one is
+built: port/vita/platform/vita_textures.c (the Vita, and the gxm-null
+harness on Linux) has them; this one has nothing to report and finds no
+sprite texels, so the sprites are drawn whole (render_sprite.c). */
+
+struct vita_sprite_texels;
+
+/* (render_particles.c's effect report) the sprite bounds computed */
+volatile unsigned long vita_sprite_texels_computed, vita_sprite_texels_texels;
+
+int vita_sprite_texel_bounds_available(void)
+{
+	return 0;
+}
+
+int vita_sprite_texel_bounds(const void *resource, const float bounds[4], int channels,
+	struct vita_sprite_texels *texels, float *width, float *height)
+{
+	(void)resource;
+	(void)bounds;
+	(void)channels;
+	(void)texels;
+	(void)width;
+	(void)height;
+	return 0;
+}
+
+/* (frame_timing.c, with each frame report) */
+void halo_texture_stats_report(void)
+{
+}
