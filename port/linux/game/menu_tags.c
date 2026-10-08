@@ -65,12 +65,15 @@ void *cache_files_tag_instances(long *count);
 void cache_files_set_tag_instances(void *instances, long count);
 char const *ui_widget_event_handler_function_name(long function_index);
 
+void menu_tags_preload(char const *map_name);
 void menu_tags_loaded(char const *map_name);
 void menu_tags_unloaded(void);
 long menu_tags_screen(long tag_index);
 boolean pc_menu_tag(long tag_index);
 char const *pc_menu_function_name(long function_index);
 char const *pc_menu_game_data_input_name(long function_index);
+/* (system_link_shortcut.c's, for the settings panel) */
+extern volatile int halo_pc_menus_state;
 /* menu_functions.c's: a screen of the game's that the menus' flows open
 another in place of (ours or the game's), or the tag itself */
 long pc_menu_functions_screen(long tag_index);
@@ -395,8 +398,10 @@ static void *allocate(long size)
 		return NULL;
 	}
 	memset(block, 0, size > 0 ? size : 1);
+	/* (room for 64 more at a time) */
+	if (!(menu_tags.block_count % 64))
 	{
-		void **blocks = realloc(menu_tags.blocks, (menu_tags.block_count + 1) * sizeof(*menu_tags.blocks));
+		void **blocks = realloc(menu_tags.blocks, (menu_tags.block_count + 64) * sizeof(*menu_tags.blocks));
 
 		if (!blocks)
 		{
@@ -1739,7 +1744,39 @@ static boolean menu_tags_art_load(void)
 	return success;
 }
 
+/* whether the maps folder has a bitmaps.map and a loc.map (a quick look:
+no file opened) */
+static boolean menu_resource_files_present(void)
+{
+	static char const *const names[] = { "bitmaps", "loc" };
+	int index;
+
+	for (index = 0; index < 2; index++)
+	{
+		char path[300];
+		DWORD attributes;
+
+		snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), names[index]);
+		attributes = GetFileAttributesA(path);
+		if (attributes == (DWORD)-1 || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+			return FALSE;
+	}
+	return TRUE;
+}
+
 /* ---------- public code */
+
+/* (scenario_tags_load, before ui.map's tags are read) the menus' XML read
+on a thread of its own meanwhile, if the Halo PC files are there */
+void menu_tags_preload(
+	char const *map_name)
+{
+	if (!strcmp(map_name, "ui") && !(getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox")) &&
+		menu_resource_files_present())
+	{
+		halo_menus_preload();
+	}
+}
 
 /* ui.map's tags loaded: ours added, if the player's Halo PC data is there
 (only their names and the XML: the rest at first use) */
@@ -1748,24 +1785,25 @@ void menu_tags_loaded(
 {
 	struct halo_menus const *menus;
 	struct cache_file_tag_instance *instances;
-	struct menu_resource_file bitmaps, locale;
 	long widget_count, own_lists = 0, total, index;
-	unsigned long long started = vita_host_time_us();
+	unsigned long long started = vita_host_time_us(), checked, read;
 
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
-	if (strcmp(map_name, "ui") || (getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox")))
+	if (strcmp(map_name, "ui"))
 		return;
-	/* (the player's Halo PC data: only that the files are there, and what
-	they are) */
-	if (!menu_resource_open(&bitmaps, "bitmaps", _resource_map_bitmaps, FALSE))
+	/* (until they are added: the Xbox's menus) */
+	halo_pc_menus_state = -1;
+	if (getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox"))
 		return;
-	menu_resource_close(&bitmaps, FALSE);
-	if (!menu_resource_open(&locale, "loc", _resource_map_locale, FALSE))
+	/* (the player's Halo PC data: only that the files are there; what they
+	are, when the screens first open) */
+	if (!menu_resource_files_present())
 		return;
-	menu_resource_close(&locale, FALSE);
+	checked = vita_host_time_us();
 	menus = halo_menus_load();
 	if (!menus)
 		return;
+	read = vita_host_time_us();
 	memset(&build, 0, sizeof(build));
 	build.menus = menus;
 	widget_count = menus->widget_count;
@@ -1860,10 +1898,13 @@ void menu_tags_loaded(
 		goto failed;
 	menu_tags.root_tag = build.widget_tags[widget_named(menus->root)];
 	menu_tags.loaded = TRUE;
+	halo_pc_menus_state = 1;
 	platform_log("menus: OpenCE's multiplayer screens: %ld widgets, %ld string lists and %ld bitmaps added to "
-		"ui.map's %ld tags in %lu us (the Halo PC pictures and text are read when they first open)",
+		"ui.map's %ld tags in %lu us (the Halo PC files checked %lu, the XML read %lu, the tags %lu; the pictures "
+		"and text are read when they first open)",
 		widget_count, own_lists + menus->string_list_count, menus->bitmap_count, build.first_index,
-		(unsigned long)(vita_host_time_us() - started));
+		(unsigned long)(vita_host_time_us() - started), (unsigned long)(checked - started),
+		(unsigned long)(read - checked), (unsigned long)(vita_host_time_us() - read));
 	goto done;
 
 failed:
@@ -1901,6 +1942,7 @@ long menu_tags_screen(
 			menu_tags.art = menu_tags_art_load() ? 1 : -1;
 			if (menu_tags.art < 0)
 			{
+				halo_pc_menus_state = -1;
 				platform_log("menus: OpenCE's multiplayer screens left out; the game's own Multiplayer screen");
 				return tag_index;
 			}

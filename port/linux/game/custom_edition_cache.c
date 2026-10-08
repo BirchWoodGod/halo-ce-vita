@@ -500,6 +500,67 @@ static boolean custom_edition_cache_tags_convert(
 		custom_edition_cache_models_convert(tag_cache, report);
 }
 
+/* the answers custom_edition_cache_identify_file gave, by map name, for a
+while: the game asks each frame whether the map it is precaching or about
+to load is a Custom Edition one (cache_files_precache_map_loaded, from the
+lobby's precaching and the server's checks), and each answer was the map's
+file looked for, opened, its header read and closed - several file calls a
+frame on the game thread, each waiting on the Vita for the memory card,
+which serves one request at a time: behind a map copy's write it took
+hundreds of milliseconds, the lobby's hitches with nothing else happening.
+An answer stands IDENTITY_MEMORY_MS, and a map share download forgets its
+map's (custom_edition_cache_map_identity_forget). */
+enum
+{
+	REMEMBERED_ANSWERS = 8,
+	IDENTITY_MEMORY_MS = 10000,
+};
+static struct
+{
+	char name[CACHE_FILE_STRING_BYTES];
+	unsigned long when;
+	boolean identified;
+	struct cache_file_identity identity;
+} remembered_answers[REMEMBERED_ANSWERS];
+static short next_remembered_answer;
+static volatile int remembered_answers_lock;
+
+static void remembered_answers_take(
+	void)
+{
+	while (__atomic_exchange_n(&remembered_answers_lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+
+	return;
+}
+
+static void remembered_answers_give(
+	void)
+{
+	__atomic_store_n(&remembered_answers_lock, 0, __ATOMIC_RELEASE);
+
+	return;
+}
+
+static void remembered_answers_forget(
+	char const *name)
+{
+	short index;
+
+	remembered_answers_take();
+	for (index = 0; index < REMEMBERED_ANSWERS; index++)
+	{
+		if (!name || !csstrcasecmp(remembered_answers[index].name, name))
+		{
+			remembered_answers[index].name[0] = 0;
+		}
+	}
+	remembered_answers_give();
+
+	return;
+}
+
 /* Whether the map `map_name` names is a Custom Edition cache, whose header
 is then described in `identity`, whatever the setting; and when
 `resource_maps_used`, the resource maps it takes tags from
@@ -512,22 +573,70 @@ static boolean custom_edition_cache_identify_file(
 	char path[MAP_PATH_SIZE];
 	struct custom_edition_file file;
 	boolean identified = FALSE;
+	char const *name = tag_name_strip_path(map_name);
+	unsigned long now = system_milliseconds();
+	boolean rememberable = !resource_maps_used && strlen(name) < CACHE_FILE_STRING_BYTES;
+	short index;
 
-	if (!custom_edition_map_path(map_name, path) ||
-		!custom_edition_file_open(&file, path))
+	if (rememberable)
 	{
-		return FALSE;
-	}
-	if (cache_file_identify(&file.source, identity) == _cache_file_status_ok &&
-		identity->format == _cache_file_format_custom_edition_cache)
-	{
-		identified = TRUE;
-		if (resource_maps_used)
+		remembered_answers_take();
+		for (index = 0; index < REMEMBERED_ANSWERS; index++)
 		{
-			*resource_maps_used = custom_edition_cache_resource_maps_used(&file.source, identity);
+			if (remembered_answers[index].name[0] &&
+				now - remembered_answers[index].when < IDENTITY_MEMORY_MS &&
+				!csstrcasecmp(remembered_answers[index].name, name))
+			{
+				identified = remembered_answers[index].identified;
+				if (identified)
+				{
+					*identity = remembered_answers[index].identity;
+				}
+				remembered_answers_give();
+				return identified;
+			}
 		}
+		remembered_answers_give();
 	}
-	custom_edition_file_close(&file);
+	if (custom_edition_map_path(map_name, path) &&
+		custom_edition_file_open(&file, path))
+	{
+		if (cache_file_identify(&file.source, identity) == _cache_file_status_ok &&
+			identity->format == _cache_file_format_custom_edition_cache)
+		{
+			identified = TRUE;
+			if (resource_maps_used)
+			{
+				*resource_maps_used = custom_edition_cache_resource_maps_used(&file.source, identity);
+			}
+		}
+		custom_edition_file_close(&file);
+	}
+	if (rememberable)
+	{
+		remembered_answers_take();
+		for (index = 0; index < REMEMBERED_ANSWERS; index++)
+		{
+			if (!csstrcasecmp(remembered_answers[index].name, name))
+			{
+				break;
+			}
+		}
+		if (index == REMEMBERED_ANSWERS)
+		{
+			index = next_remembered_answer;
+			next_remembered_answer = (short)((next_remembered_answer + 1) % REMEMBERED_ANSWERS);
+		}
+		csstrncpy(remembered_answers[index].name, name, CACHE_FILE_STRING_BYTES - 1);
+		remembered_answers[index].name[CACHE_FILE_STRING_BYTES - 1] = 0;
+		remembered_answers[index].when = now;
+		remembered_answers[index].identified = identified;
+		if (identified)
+		{
+			remembered_answers[index].identity = *identity;
+		}
+		remembered_answers_give();
+	}
 
 	return identified;
 }
@@ -852,6 +961,8 @@ void custom_edition_cache_map_identity_forget(
 {
 	char const *name = tag_name_strip_path(map_name);
 	short index;
+
+	remembered_answers_forget(name);
 
 	for (index = 0; index < REMEMBERED_IDENTITIES; index++)
 	{

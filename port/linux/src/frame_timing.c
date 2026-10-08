@@ -56,6 +56,21 @@ void halo_frame_timing_recent(float *frame_ms, float *tick_ms, float *render_ms)
 	*render_ms = count ? (float)render / 1e6f / (float)count : 0.0f;
 }
 
+/* the frames presented in the report's frames, those drawn between ticks
+(frame interpolation: blended from the same two ticks as the frame before,
+no new game state), and those made with frame interpolation on and with two
+frames a tick: the game's ticks a second and the frames a second apart */
+static unsigned long presented_frames, between_frames, paused_frames, interpolation_frames, two_a_tick_frames;
+
+void halo_frame_timing_presented(int presented, int between_ticks, int paused, int interpolation, int two_a_tick)
+{
+	presented_frames += presented != 0;
+	paused_frames += presented && paused;
+	between_frames += presented && between_ticks;
+	interpolation_frames += interpolation != 0;
+	two_a_tick_frames += interpolation && two_a_tick;
+}
+
 /* the tick on its own thread (tick_thread.c): its duration this frame,
 overlapping the render, so it is reported but not part of the frame's sum */
 static unsigned long long threaded_tick, threaded_tick_sum;
@@ -134,12 +149,22 @@ void halo_frame_timing(int event, unsigned long game_ticks)
 		unsigned long ticks = frame_timing_ticks_last - frame_timing_ticks_start;
 		double total_ms = (double)frame_timing_sum[3] / 1e6;
 
-		platform_log("frame-timing: game tick %lu frames %lu ticks %lu | frame %.2f ms (max %.2f) | ticks %.2f ms/frame %.2f ms/tick | render %.2f | throttle+present %.2f | other %.2f | %.1f fps %.1f ticks/s",
+		/* (presented: the frames shown; of them, new: a tick no frame drew
+		before, between: drawn between ticks by frame interpolation, paused:
+		the game paused, its pause menu up) */
+		platform_log("frame-timing: game tick %lu frames %lu ticks %lu | frame %.2f ms (max %.2f) | ticks %.2f ms/frame %.2f ms/tick | render %.2f | throttle+present %.2f | other %.2f | %.1f fps %.1f ticks/s | presented %.1f/s: new %.1f/s, between ticks %.1f/s (%lu of %lu), paused %.1f/s | interpolation %s%s",
 			game_ticks, frame_timing_frames, ticks, total_ms / frames, (double)frame_timing_max_frame / 1e6,
 			(double)frame_timing_sum[0] / 1e6 / frames, ticks ? (double)frame_timing_sum[0] / 1e6 / (double)ticks : 0.0,
 			(double)frame_timing_sum[1] / 1e6 / frames, (double)frame_timing_sum[2] / 1e6 / frames,
 			(double)(frame_timing_sum[3] + threaded_tick_sum - frame_timing_sum[0] - frame_timing_sum[1] - frame_timing_sum[2]) / 1e6 / frames,
-			frames * 1000.0 / total_ms, (double)ticks * 1000.0 / total_ms);
+			frames * 1000.0 / total_ms, (double)ticks * 1000.0 / total_ms,
+			(double)presented_frames * 1000.0 / total_ms,
+			(double)(presented_frames - between_frames - paused_frames) * 1000.0 / total_ms,
+			(double)between_frames * 1000.0 / total_ms, between_frames, presented_frames,
+			(double)paused_frames * 1000.0 / total_ms,
+			interpolation_frames ? "on" : "off",
+			interpolation_frames ? (two_a_tick_frames * 2 >= interpolation_frames ? ", two frames a tick" : ", one frame a tick") : "");
+		presented_frames = between_frames = paused_frames = interpolation_frames = two_a_tick_frames = 0;
 		/* (the texture caches' counts, the gxm builds' only, and the
 		objects in the game, with the same rhythm) */
 		if (halo_texture_stats_report)

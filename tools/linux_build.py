@@ -121,6 +121,11 @@ MONOCYPHER_SOURCES = ("monocypher.c", "monocypher-ed25519.c")
 # the menus' XML parser (port/linux/src/menu_files.c: OpenCE's menus)
 EXPAT_DIR = Path("port/third_party/expat")
 EXPAT_SOURCES = ("xmlparse.c", "xmlrole.c", "xmltok.c")
+# the Custom Edition installer's cabinet reader and LZX decoder
+# (port/linux/src/posix_ce_installer.c), with config.h's one definition
+LIBMSPACK_DIR = Path("port/third_party/libmspack")
+LIBMSPACK_SOURCES = ("cabd.c", "lzxd.c", "mszipd.c", "qtmd.c", "system.c")
+LIBMSPACK_FLAGS = (f"-I{LIBMSPACK_DIR}", "-DHAVE_INTTYPES_H=1")
 MUSL_MATH_DIR = Path("port/third_party/musl-math")
 # the self-updater's TLS (port/linux/src/posix_update.c)
 MBEDTLS_DIR = Path("port/third_party/mbedtls")
@@ -483,6 +488,8 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 add_object(source, f"{posix_cflags} {mbedtls_include}", posix=True)
             elif source.name == "posix_upnp.c":
                 add_object(source, f"{posix_cflags} -I{MINIUPNPC_DIR / 'include'} -DMINIUPNP_STATICLIB", posix=True)
+            elif source.name == "posix_ce_installer.c":
+                add_object(source, " ".join([posix_cflags, *LIBMSPACK_FLAGS]), posix=True)
             elif source.name.startswith("posix_"):
                 add_object(source, posix_cflags, posix=True)
             elif source.name == "updater.c":
@@ -503,6 +510,11 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             add_object(source, " ".join(POSIX_FLAGS + [march_flag(sln), *MINIUPNPC_DEFINES,
                                                        f"-I{MINIUPNPC_DIR / 'include'}", f"-I{MINIUPNPC_DIR / 'src'}",
                                                        "-fno-builtin-wcslen", "-w"]), posix=True)
+        # the Custom Edition installer's cabinets (port/third_party/libmspack),
+        # with the host's ABI as posix_ce_installer.c, which uses it
+        for name in LIBMSPACK_SOURCES:
+            add_object(LIBMSPACK_DIR / name, " ".join(POSIX_FLAGS + [march_flag(sln), *LIBMSPACK_FLAGS, "-w"]),
+                       posix=True)
         # the settings file's parser (port/third_party/tomlc17), with the
         # platform layer's ABI (its structs hold doubles) and nothing else
         add_object(TOML_DIR / "tomlc17.c", " ".join([abi, "-std=gnu11", "-w"]))

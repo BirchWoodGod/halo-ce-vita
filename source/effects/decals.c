@@ -1662,6 +1662,16 @@ void decal_new_from_collision(
 				definition->type);
 			definition->type = _decal_type_scratch;
 		}
+		/* port: a decal's bitmap group is a map's: one with no bitmaps (or
+		a sprite group with no sequences) has nothing to draw, and its first
+		bitmap or sequence was read from no block at all (the map fuzzer's;
+		the release builds' block accessor does not check) */
+		if (bitmap_group->bitmaps.count <= 0 || !bitmap_group->bitmaps.address ||
+			(bitmap_group->type==_bitmap_group_type_sprites &&
+			(bitmap_group->sequences.count <= 0 || !bitmap_group->sequences.address)))
+		{
+			return;
+		}
 
 		if (!reuse_previous_geometry)
 		{
@@ -1817,16 +1827,33 @@ void decal_new_from_collision(
 
 		if (bitmap_group->type==_bitmap_group_type_sprites)
 		{
-			struct bitmap_group_sequence *sequence = TAG_BLOCK_GET_ELEMENT(
+			struct bitmap_group_sequence *sequence;
+			struct bitmap_group_sprite *sprite;
+
+			/* port: (a forced sequence is the caller's, from the map) */
+			if (!VALID_INDEX(sequence_index, bitmap_group->sequences.count))
+			{
+				return;
+			}
+			sequence = TAG_BLOCK_GET_ELEMENT(
 				&bitmap_group->sequences,
 				sequence_index,
 				struct bitmap_group_sequence);
-			struct bitmap_group_sprite *sprite = TAG_BLOCK_GET_ELEMENT(
+			if (!VALID_INDEX(sprite_index, sequence->sprites.count) || !sequence->sprites.address)
+			{
+				return;
+			}
+			sprite = TAG_BLOCK_GET_ELEMENT(
 				&sequence->sprites,
 				sprite_index,
 				struct bitmap_group_sprite);
 
 			bitmap_index = sprite->bitmap_index;
+			/* port: (the sprite's bitmap is the map's index too) */
+			if (!VALID_INDEX(bitmap_index, bitmap_group->bitmaps.count))
+			{
+				return;
+			}
 			decal_sprite_get_bounds(
 				definition,
 				sequence_index,

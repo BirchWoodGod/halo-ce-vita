@@ -51,7 +51,10 @@ each frame's presentation.
 #define DISPLAY_WIDTH 960
 #define DISPLAY_HEIGHT 544
 #define DISPLAY_STRIDE 960
-#define DISPLAY_BUFFER_COUNT 2
+/* the display's buffers: two, and a third made when frame interpolation
+first asks for it (vgxm_display_buffering) */
+#define DISPLAY_BUFFER_COUNT 3
+#define DISPLAY_BUFFERS_AT_START 2
 #define RING_COUNT 4
 #define RING_SIZE (6 * 1024 * 1024)
 #define WORKER_RING_SIZE (2 * 1024 * 1024)
@@ -292,6 +295,9 @@ static struct
 	SceGxmSyncObject *display_sync[DISPLAY_BUFFER_COUNT];
 	SceGxmRenderTarget *display_render_target;
 	unsigned int back_buffer, front_buffer;
+	/* the buffers made, those the display goes round, and those asked for */
+	unsigned int display_made, display_count;
+	volatile int display_wanted;
 
 	struct block rings[RING_COUNT];
 	unsigned int ring_offset;
@@ -513,7 +519,10 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 
 	memset(&initialize, 0, sizeof(initialize));
 	initialize.flags = 0;
-	initialize.displayQueueMaxPendingCount = DISPLAY_BUFFER_COUNT - 1;
+	/* (one frame waiting for the display, with two buffers or three: the
+	third keeps the GPU from drawing into the one still being scanned out,
+	vgxm_display_buffering) */
+	initialize.displayQueueMaxPendingCount = 1;
 	initialize.displayQueueCallback = display_callback;
 	initialize.displayQueueCallbackDataSize = sizeof(struct display_data);
 	{
@@ -591,7 +600,7 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 
 	/* the display */
 	gxm.display_render_target = render_target_for(DISPLAY_WIDTH, DISPLAY_HEIGHT);
-	for (index = 0; index < DISPLAY_BUFFER_COUNT; index++)
+	for (index = 0; index < DISPLAY_BUFFERS_AT_START; index++)
 	{
 		void *memory = block_allocate(&gxm.display_memory[index], SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW,
 			4 * DISPLAY_STRIDE * DISPLAY_HEIGHT, 1, "display");
@@ -605,8 +614,10 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 			DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_STRIDE, memory);
 		sceGxmSyncObjectCreate(&gxm.display_sync[index]);
 	}
+	gxm.display_made = gxm.display_count = DISPLAY_BUFFERS_AT_START;
+	gxm.display_wanted = DISPLAY_BUFFERS_AT_START;
 	gxm.back_buffer = 0;
-	gxm.front_buffer = DISPLAY_BUFFER_COUNT - 1;
+	gxm.front_buffer = DISPLAY_BUFFERS_AT_START - 1;
 
 	/* the shader patcher */
 	if (!block_allocate(&gxm.patcher_buffer, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, PATCHER_BUFFER_SIZE, 1, "patcher") ||
@@ -4371,6 +4382,73 @@ int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
 	return 1;
 }
 
+/* ---------- the display's buffers
+
+Two display buffers, the first drawn into while the second is on the
+screen, and swapped at the vertical blank after each frame (no vsync wait:
+the display queue's callback, display_callback, sets the next buffer and
+returns). With a frame every 33 ms the buffer released when a frame is
+shown is drawn into again a whole frame later, well after the vertical
+blank that takes it off the screen. Frame interpolation presents up to 60
+frames a second: the released buffer was drawn into again within the same
+16.7 ms, often before that blank, while the display still scanned it out -
+a torn picture (the top of one frame, the bottom of the next). A third
+buffer (triple buffering, as in Bruno Santana's "TripleBuffer" build) puts
+a frame between: the buffer drawn into was released a frame earlier. Made
+the first time frame interpolation asks for it (2 MB of CDRAM, given to
+nothing else then: the cdram census counts it under display), kept after,
+and used only while frame interpolation is on, so without it the display
+works as before. The display queue still holds one frame, as with two: the
+GPU runs no further ahead of the display. */
+void vgxm_display_buffering(int buffers)
+{
+	gxm.display_wanted = buffers >= 3 ? 3 : 2;
+}
+
+/* (the worker, before a frame's display scene) */
+static void display_buffering_apply(void)
+{
+	int wanted = gxm.display_wanted;
+
+	if (wanted > (int)gxm.display_made)
+	{
+		static int refused;
+		struct block *block = &gxm.display_memory[gxm.display_made];
+		void *memory = cdram_block_get(_memory_display, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT, "display", block);
+
+		if (!memory && screen_blocks_flush())
+			memory = cdram_block_get(_memory_display, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT, "display", block);
+		if (!memory)
+		{
+			if (!refused++)
+				log_line("gxm: no CDRAM for a third display buffer (%lu KB free): frame interpolation double buffered",
+					memory_cdram_free() / 1024);
+			gxm.display_wanted = wanted = gxm.display_made;
+		}
+		else
+		{
+			/* (black, as the first two were made: the letterbox is never
+			drawn) */
+			memset(memory, 0, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT);
+			sceGxmColorSurfaceInit(&gxm.display_surface[gxm.display_made], SCE_GXM_COLOR_FORMAT_A8B8G8R8,
+				SCE_GXM_COLOR_SURFACE_LINEAR, SCE_GXM_COLOR_SURFACE_SCALE_NONE, SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,
+				DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_STRIDE, memory);
+			sceGxmSyncObjectCreate(&gxm.display_sync[gxm.display_made]);
+			gxm.display_made++;
+			log_line("gxm: a third display buffer for frame interpolation: %u KB of CDRAM, %lu KB free after it",
+				block->size / 1024, memory_cdram_free() / 1024);
+		}
+	}
+	if ((unsigned int)wanted != gxm.display_count)
+	{
+		gxm.display_count = (unsigned int)wanted;
+		/* (the next buffer drawn: after the one on the screen, of those
+		now gone round) */
+		gxm.back_buffer = (gxm.front_buffer + 1) % gxm.display_count;
+		log_line("gxm: %s buffering", gxm.display_count == 3 ? "triple" : "double");
+	}
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
 	struct display_data data;
@@ -4388,6 +4466,8 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		gxm.in_scene = 0;
 	}
 	present_step(0);
+	if (gxm.display_wanted != (int)gxm.display_count)
+		display_buffering_apply();
 	/* the frame on the display, in a scene of its own (it samples the
 	target the scene before drew: HALO_GXM_RTT_SYNC) */
 	gxm.presented_target = color_target;
@@ -4423,7 +4503,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	sceGxmDisplayQueueAddEntry(gxm.display_sync[gxm.front_buffer], gxm.display_sync[gxm.back_buffer], &data);
 	present_step(3);
 	gxm.front_buffer = gxm.back_buffer;
-	gxm.back_buffer = (gxm.back_buffer + 1) % DISPLAY_BUFFER_COUNT;
+	gxm.back_buffer = (gxm.front_buffer + 1) % gxm.display_count;
 
 	/* the GPU may run up to two frames behind (the recorder is a frame
 	ahead of this thread, and a ring is reused only once its frame's GPU

@@ -20,7 +20,8 @@ from .ninja_syntax import Writer
 from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
 from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
                           ZLIB_DEFINES, MONOCYPHER_DIR, MONOCYPHER_SOURCES, EXPAT_DIR, EXPAT_SOURCES, musl_math_sources,
-                          MUSL_MATH_DIR, ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
+                          MUSL_MATH_DIR, LIBMSPACK_DIR, LIBMSPACK_SOURCES, LIBMSPACK_FLAGS,
+                          ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
 
 LINUX_DIR = Path("port/linux")
 VITA_DIR = Path("port/vita")
@@ -110,6 +111,7 @@ HOST_FLAGS = [
 # the platform layer's files the Vita does not build, or builds its own of
 LINUX_SOURCES_REPLACED = {
     "posix_files.c", "posix_net.c", "posix_update.c", "posix_upnp.c", "posix_profile.c",  # port/vita/host
+    "posix_ce_installer.c",  # built with the SDK's ABI below, for port/vita/host
     "memory_watch.c",  # port/vita/platform/vita_memory_watch.c
     "bink_null.c",  # port/vita/platform/bink_vita.c (the Vita's video player)
     # the OpenGL renderer: port/vita/platform/d3d8_gxm.c, nv2a_*_cg.c, vita_textures.c
@@ -286,6 +288,11 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         add(source, "vita_host_cc", host_cflags, [generator_header] if source.name == "vita_gxm.c" else None)
     # the files half of the Linux host boundary works as it is on newlib
     add(LINUX_DIR / "src" / "posix_files.c", "vita_host_cc", host_cflags + " -D_GNU_SOURCE")
+    # the Custom Edition installer's maps (vita_ce_installer.c), with its
+    # cabinet reader and LZX decoder (port/third_party/libmspack)
+    add(LINUX_DIR / "src" / "posix_ce_installer.c", "vita_host_cc", " ".join([host_cflags, *LIBMSPACK_FLAGS]))
+    for name in LIBMSPACK_SOURCES:
+        add(LIBMSPACK_DIR / name, "vita_host_cc", " ".join([host_cflags, *LIBMSPACK_FLAGS, "-w"]))
 
     if lto:
         lto_object = BUILD / "halo_lto.o"

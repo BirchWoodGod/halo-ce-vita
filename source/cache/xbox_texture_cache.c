@@ -958,7 +958,13 @@ static boolean texture_cache_start_loading_bitmap(
 		bitmap->base_address = base_address;
 		texture->bitmap = bitmap;
 		texture_cache_initialize_hardware_format(bitmap, &texture->hardware_format);
+#ifdef HALO_LINUX
+		/* (port: a Custom Edition map's read not in place, under the cache
+		lock, but on the cache file thread: cache_files_windows.c) */
+		texture->read_request_handle = cache_file_read_bitmap(
+#else
 		texture->read_request_handle = cache_file_read(
+#endif
 			bitmap->tag_index,
 			bitmap->pixels_offset,
 			bitmap->pixels_size,

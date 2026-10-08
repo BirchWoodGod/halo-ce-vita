@@ -4170,13 +4170,15 @@ void sound_render(
 		{
 			long render_time = system_milliseconds();
 #ifdef HALO_LINUX
-			/* (debug) HALO_FIXED_TICK: a frame's worth of sound time per call */
+			/* (debug) HALO_FIXED_TICK: a frame's worth of sound time per call
+			(HALO_FIXED_TICK_FRAMES: a tick's over that many frames) */
 			{
 				int halo_fixed_tick(void);
-				static long fixed_milliseconds;
+				int halo_fixed_tick_frames(void);
+				static long fixed_parts;
 
 				if (halo_fixed_tick())
-					render_time = (fixed_milliseconds += 33);
+					render_time = (fixed_parts += 33) / halo_fixed_tick_frames();
 			}
 #endif
 

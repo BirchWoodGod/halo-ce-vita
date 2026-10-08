@@ -83,6 +83,23 @@ int halo_fixed_tick(void)
 	return fixed;
 }
 
+/* HALO_FIXED_TICK_FRAMES=<n> (1-4, with HALO_FIXED_TICK): n frames a tick,
+each a nth of a tick of game time (main.c) and of sound (sound_manager.c,
+dsound_sdl.c): with frame interpolation the frames between ticks are drawn,
+and a run's ticks compare with a run of one frame a tick */
+int halo_fixed_tick_frames(void)
+{
+	static int frames = -1;
+
+	if (frames < 0)
+	{
+		const char *setting = getenv("HALO_FIXED_TICK_FRAMES");
+
+		frames = setting && atoi(setting) >= 1 && atoi(setting) <= 4 ? atoi(setting) : 1;
+	}
+	return frames;
+}
+
 /* (HALO_TICK_HASH_MASK) the objects' marker stamps, cleared for the hash
 and put back: objects.c */
 int halo_tick_hash_object_marks(long *saved, int maximum, int restore);
@@ -94,10 +111,14 @@ int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore);
 
 static int mask = -1;
 
+/* (HALO_TICK_HASH_MASK=2, too: the first-person weapons, whose view
+model the render poses from its camera, and the scenario's atmospheric fog
+states, each window's from its camera: both differ with the moment a frame
+draws, which frame interpolation puts between the ticks) */
 static int masked_allocation(const char *name)
 {
 	return name && (!strcmp(name, "cached object render states") || !strcmp(name, "decal vertex cache") ||
-		!strcmp(name, "decal vertices"));
+		!strcmp(name, "decal vertices") || (mask >= 2 && !strcmp(name, "first person weapons")));
 }
 
 static int state = -1;
@@ -197,6 +218,12 @@ void halo_tick_hash_after_tick(void)
 
 			if (mask && masked_allocation(name))
 				allocation_hash = 0;
+			else if (mask >= 2 && name && !strcmp(name, "scenario globals") && allocation_size == 0x100)
+			{
+				/* (its atmospheric fog states, 4 to 0xB4, left out) */
+				allocation_hash = hash_words(0xCBF29CE484222325ULL, words, 1);
+				allocation_hash = hash_words(allocation_hash, words + 0xB4 / 4, (0x100 - 0xB4) / 4);
+			}
 			else if (mask && name && !strcmp(name, "objects"))
 				allocation_hash = halo_tick_hash_live_objects();
 			else if (halo_game_state_allocation_is_lruv_cache(index) && allocation_size >= 0x28)

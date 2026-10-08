@@ -500,7 +500,19 @@ static void lobby_checks(void)
 	hear(published, published_size, 0, NULL);
 	check(games(&listing) == 1 && !listing.locked && !strcmp(listing.invite, expected_invite),
 		"a game whose password is taken off is listed open");
-	/* co-op on a Halo PC map, and many players */
+	/* a listed game that becomes co-op (network.coop_public: private unless
+	chosen) is no longer listed, and its listed invite lets no one in */
+	new_invites = 0;
+	p2p_set_game_listing(NULL, "a10", "", 0, 1, 0, 0);
+	p2p_set_game_listing_details(0, 2, 0, "one\n");
+	clock_now += 6000;
+	lobby_update(token, 1, 4);
+	hear(published, published_size, 0, NULL);
+	check(games(&listing) == 0 && !p2p_lobby_listed() && new_invites == 1,
+		"a public game turned co-op: no longer listed, a new invite");
+	/* co-op on a Halo PC map, and many players (a co-op game listed: its
+	own visibility, network.coop_public, chosen public) */
+	p2p_lobby_set_coop_public(1);
 	p2p_set_game_listing(NULL, "a10", "", 0, 1, 0, 0);
 	p2p_set_game_listing_details(0, 2, 0, "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n");
 	clock_now += 6000;
@@ -512,6 +524,21 @@ static void lobby_checks(void)
 		!strncmp(entry.players_line, "10 of 16: one, two", 18), "the Players line ends with the rest's count");
 	check(strlen(entry.players_line) < sizeof(entry.players_line) && strstr(entry.players_line, "more"),
 		"the Players line fits");
+	/* ... and private again: no longer listed, though other games are
+	public (p2p_lobby_set_public does not change a co-op game's) */
+	p2p_lobby_set_coop_public(0);
+	clock_now += 6000;
+	lobby_update(token, 10, 16);
+	hear(published, published_size, 0, NULL);
+	check(games(&listing) == 0, "a co-op game made private is no longer listed (its own visibility)");
+	{
+		int password = -1;
+
+		check(!p2p_lobby_coop_public(&password) && password == 0,
+			"the waiting screen reads co-op's visibility as chosen: private, no password");
+		p2p_lobby_set_coop_public(1);
+		check(p2p_lobby_coop_public(NULL) == 1, "... and public once chosen");
+	}
 	p2p_set_game_listing(NULL, "bloodgulch", "CTF", 1, 1, 0, 1);
 	p2p_set_game_listing_details(3, -1, 1, "");
 	clock_now += 6000;

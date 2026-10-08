@@ -601,8 +601,10 @@ static struct distributed_client_clock
 /* the host: whether the message being handled came over its machine's
 stream (network_distributed_handle_stream_message) */
 static boolean distributed_handling_stream_message;
-/* a client: the host's latest tick it has had a message of */
+/* a client: the host's latest tick it has had a message of, and when it
+came (system_milliseconds) */
 static long distributed_host_time = NONE;
+static unsigned long distributed_host_time_received;
 /* the host: each client's round trip, in ticks, and its jitter */
 static struct
 {
@@ -1329,6 +1331,12 @@ long distributed_latest_host_time(
 	void)
 {
 	return distributed_host_time;
+}
+
+long distributed_latest_host_time_age_ms(
+	void)
+{
+	return distributed_host_time == NONE ? NONE : (long)(system_milliseconds() - distributed_host_time_received);
 }
 
 real distributed_own_round_trip_ticks(
@@ -3998,7 +4006,10 @@ void network_distributed_handle_message(
 		/* (the host's latest tick, which this client's input messages tell
 		it back) */
 		if (distributed_host_time == NONE || header.game_time > distributed_host_time)
+		{
 			distributed_host_time = header.game_time;
+			distributed_host_time_received = system_milliseconds();
+		}
 		break;
 	}
 	if ((distributed_handling_batch || header.type != _distributed_message_damage_events) &&

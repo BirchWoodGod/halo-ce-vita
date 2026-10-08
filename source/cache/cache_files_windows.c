@@ -210,6 +210,23 @@ predicts) and the render (textures) at once: a free request slot is
 claimed under this, or both took the same slot, one read was lost and its
 texture or sound never finished loading */
 static volatile int cache_request_claim_lock;
+/* (port) a request for a Custom Edition map's bitmap (cache_file_read_bitmap):
+its tag (NONE: an Xbox map's read) and unrounded size, by request slot */
+static struct
+{
+	long tag_index;
+	long size;
+} cache_request_custom_edition[512];
+
+static boolean custom_edition_reads_on_thread(
+	void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+		enabled = !getenv("HALO_CE_READ_THREAD") || atoi(getenv("HALO_CE_READ_THREAD")) != 0;
+	return enabled;
+}
 #endif
 
 /* ---------- constants */
@@ -909,7 +926,8 @@ static short cache_file_read_internal(
 	void *buffer,
 	boolean *completion_flag_reference,
 	boolean blocking,
-	boolean urgent);
+	boolean urgent,
+	boolean bitmap);
 
 short cache_file_read(
 	long tag_index,
@@ -919,7 +937,27 @@ short cache_file_read(
 	boolean *completion_flag_reference,
 	boolean blocking)
 {
-	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, blocking, FALSE);
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, blocking, FALSE, FALSE);
+}
+
+/* (port) cache_file_read for the texture cache's bitmaps. A Halo Custom
+Edition map's reads were served in place, on the thread that asked - the
+render or the tick, holding the cache lock (xbox_texture_cache.c) - so a
+megabyte from the memory card stalled the frame, and the other thread
+waited for the lock (hardware: "longest lock wait 25.2 ms in
+_texture_cache_bitmap_get_hardware_format" on a Custom Edition map, the
+tick behind the render's reads). They go to the cache file thread as an
+Xbox map's do, a blocking one first; whoever waits for one waits outside
+the lock. HALO_CE_READ_THREAD=0: in place, as before */
+short cache_file_read_bitmap(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference,
+	boolean blocking)
+{
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, blocking, FALSE, TRUE);
 }
 
 short cache_file_read_urgent(
@@ -929,7 +967,7 @@ short cache_file_read_urgent(
 	void *buffer,
 	boolean *completion_flag_reference)
 {
-	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, FALSE, TRUE);
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, FALSE, TRUE, FALSE);
 }
 
 static short cache_file_read_internal(
@@ -939,7 +977,8 @@ static short cache_file_read_internal(
 	void *buffer,
 	boolean *completion_flag_reference,
 	boolean blocking,
-	boolean urgent)
+	boolean urgent,
+	boolean bitmap)
 #else
 short cache_file_read(
 	long tag_index,
@@ -953,11 +992,14 @@ short cache_file_read(
 #ifdef HALO_LINUX
 	short request_index;
 	struct cache_file_request *request;
+	long request_size;
 
 	/* reads of a Halo Custom Edition map are served in place, at once, and
 	take no request slot - nor the claim lock below, which nothing would
 	release (port/linux/game/custom_edition_cache.c) */
-	if (custom_edition_cache_tags_loaded())
+	boolean custom_edition = custom_edition_cache_tags_loaded();
+
+	if (custom_edition && (!bitmap || !custom_edition_reads_on_thread()))
 	{
 		custom_edition_cache_read(tag_index, offset, size, buffer);
 		*completion_flag_reference = TRUE;
@@ -976,6 +1018,11 @@ short cache_file_read(
 	struct cache_file_request *request = cache_request_get(request_index);
 #endif
 
+#ifdef HALO_LINUX
+	/* (a Custom Edition map's bitmap is read from its own files, with no
+	cached map file open) */
+	if (!custom_edition)
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		269,
@@ -1002,6 +1049,9 @@ short cache_file_read(
 
 		return NONE;
 	}
+#ifdef HALO_LINUX
+	request_size = size;
+#endif
 	if (size & (CACHE_FILE_SECTOR_SIZE - 1))
 	{
 		size = (size | (CACHE_FILE_SECTOR_SIZE - 1)) + 1;
@@ -1017,6 +1067,10 @@ short cache_file_read(
 	request->overlapped.Offset = offset;
 	request->buffer = buffer;
 #ifdef HALO_LINUX
+	/* (a Custom Edition map's bitmap: read by the cache file thread from
+	the map's own files, at its own size) */
+	cache_request_custom_edition[request_index].tag_index = custom_edition ? tag_index : NONE;
+	cache_request_custom_edition[request_index].size = custom_edition ? request_size : 0;
 	/* (the request is filled in before the cache file thread can see it
 	pending: on the Vita's cores it could see the flag before the fields
 	and read with the slot's last offset, size and completion flag) */
@@ -1413,6 +1467,24 @@ static void cache_file_windows_thread_proc(
 #ifdef HALO_LINUX
 			/* (the fields are read after the flag that published them) */
 			__atomic_thread_fence(__ATOMIC_ACQUIRE);
+			{
+				short index = (short)(best_request - cache_file_globals.requests);
+
+				if (cache_request_custom_edition[index].tag_index != NONE)
+				{
+					/* (a Custom Edition map's bitmap: read here, from its
+					files, and done) */
+					best_request->running = TRUE;
+					custom_edition_cache_read(cache_request_custom_edition[index].tag_index,
+						(long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
+						best_request->buffer);
+					cache_request_custom_edition[index].tag_index = NONE;
+					__atomic_store_n((volatile boolean *)best_request->overlapped.hEvent, TRUE, __ATOMIC_RELEASE);
+					best_request->running = FALSE;
+					__atomic_store_n(&best_request->pending, FALSE, __ATOMIC_RELEASE);
+					continue;
+				}
+			}
 #endif
 
 			file = cached_map_file_get_handle(cache_file_globals.open_map_file_index);

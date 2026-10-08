@@ -1875,20 +1875,23 @@ static void network_pregame_status_screen_update(
 					}
 				}
 			}
-			/* port: a co-op game takes two (network.coop_players on the
-			Vitas): its lobby shows the partner's panel alone, and its
-			waiting screen's text goes where the others were
-			(port/linux/game/coop_menu.c) */
+			/* port: a co-op game takes as many as network.coop_players (two
+			or four on the Vitas): its lobby shows that many machines'
+			panels, and the waiting screen of co-op hosted from the menus,
+			alone, its text where the others go (port/linux/game/coop_menu.c) */
 			{
-				boolean cooperative = coop_menu_game_is_cooperative(game) && game->maximum_players <= 2;
+				boolean cooperative = coop_menu_game_is_cooperative(game);
+				boolean waiting = cooperative && global_network_game_server_get() && machine_indices[0] == NONE;
+				boolean text = waiting && network_game_server_port_cooperative_menu(NULL);
 
-				third_machine_widget->visible = !cooperative || machine_indices[1] != NONE;
-				fourth_machine_widget->visible = !cooperative || machine_indices[2] != NONE;
+				third_machine_widget->visible = !cooperative || machine_indices[1] != NONE ||
+					(!text && game->maximum_players > 2);
+				fourth_machine_widget->visible = !cooperative || machine_indices[2] != NONE ||
+					(!text && game->maximum_players > 3);
 				/* (the host's waiting screen, alone: the lobby's X (delay
 				the game) and A (start it) do nothing yet, and are not shown;
 				B cancels, as the screen's text says) */
-				network_pregame_button_key_update(widget->parent,
-					!(cooperative && global_network_game_server_get() && machine_indices[0] == NONE));
+				network_pregame_button_key_update(widget->parent, !waiting);
 			}
 		}
 	}
@@ -3152,10 +3155,13 @@ static void multiplayer_game_directions(
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_waiting_for_machine;
 			widget->visible = TRUE;
-			/* port: co-op hosted from the campaign's menus waits for one
-			partner */
+			/* port: co-op hosted from the campaign's menus waits for a
+			partner, or for the others of a larger game */
 			if (network_game_server_port_cooperative_menu(NULL))
-				ui_widget_port_text_override(widget, L"Waiting for your partner");
+			{
+				ui_widget_port_text_override(widget,
+					game && game->maximum_players > 2 ? L"Waiting for other players" : L"Waiting for your partner");
+			}
 			return;
 		}
 	}

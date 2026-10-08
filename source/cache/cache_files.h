@@ -180,6 +180,15 @@ short cache_file_read_urgent(
 	long size,
 	void *buffer,
 	boolean *completion_flag_reference);
+/* (port) cache_file_read for the texture cache: a Custom Edition map's
+bitmap read on the cache file thread too, not in place */
+short cache_file_read_bitmap(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference,
+	boolean blocking);
 #endif
 
 unsigned long tag_get_group_tag(long tag_index);

@@ -2618,7 +2618,10 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		}
 		else
 		{
-			source = vita_texture_get(header, command->palette[stage], &description);
+			/* (an immediate draw's - the HUD, the menus, sprites, the screen
+			effects - is whole at once, as the texture streaming waits for
+			theirs: a lower level stood in as blocks) */
+			source = vita_texture_get(header, command->palette[stage], &description, !command->immediate);
 			{
 				/* (experiment) HALO_LINEAR_SCALE_OFF=1: no 1/size scale for
 				linear textures that are not render targets */
@@ -4462,7 +4465,11 @@ the CDRAM bytes freed (0: none left in CDRAM) */
 static unsigned long cdram_relieve_pool(void)
 {
 	void *base;
-	unsigned long size, freed = vgxm_pool_demote(&base, &size), textures = 0;
+	unsigned long size, freed, textures = 0;
+
+	/* (no decode in the background may write into the moved memory) */
+	vita_texture_decodes_quiesce();
+	freed = vgxm_pool_demote(&base, &size);
 
 	if (freed && size)
 		textures = vita_texture_cache_forget(base, size);
@@ -4479,6 +4486,7 @@ static void cdram_pool_return(void)
 	void *base;
 	unsigned long size, moved = 0, textures = 0;
 
+	vita_texture_decodes_quiesce();
 	while (vgxm_pool_promote(&base, &size))
 	{
 		moved++;
@@ -4777,6 +4785,17 @@ static void dynres_configure(void)
 	int enabled, forced = force && atoi(force) > 0 ? dynres_level_of(atoi(force) / 100.0f) : 0;
 	float budget_ms = cap && atoi(cap) > 0 ? 1000.0f / (float)atoi(cap) : 1000.0f / 30.0f;
 
+	/* (frame interpolation: the tick's budget whatever the frame limit -
+	the frames between ticks are drawn only while there is time for them
+	(main.c), and the resolution is not lowered to make that time; the
+	panel's value, which the game reads as the next frame starts) */
+	{
+		int halo_interpolation_enabled(void);
+		const char *interpolation = getenv("HALO_INTERPOLATION");
+
+		if (interpolation ? !strcmp(interpolation, "true") || !strcmp(interpolation, "1") : halo_interpolation_enabled())
+			budget_ms = 1000.0f / 30.0f;
+	}
 	if (floor < DYNRES_UNITS / 2)
 		floor = DYNRES_UNITS / 2;
 	if (forced && forced < DYNRES_UNITS / 2)
@@ -4784,7 +4803,8 @@ static void dynres_configure(void)
 	if (budget && atof(budget) > 1.0)
 		budget_ms = (float)atof(budget);
 	enabled = (scale && !strcmp(scale, "dynamic")) || forced || (cycle && atoi(cycle) > 0);
-	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force)
+	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force ||
+		(enabled && budget_ms != dynres_config.budget_ms))
 		platform_log("dynamic resolution: %s%s (floor %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
 			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (double)budget_ms,
 			cycle && atoi(cycle) > 0 ? ", cycling" : "", sim && atof(sim) > 0.0 ? ", GPU simulated" : "");
@@ -7030,6 +7050,13 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 
 		halo_frame_timing_recent(&frame_ms, &tick_ms, &render_ms);
 		vgxm_overlay_set(frame_ms > 0.0f ? 1000.0f / frame_ms : 0.0f, tick_ms, render_ms);
+		{
+			/* (frame interpolation's frames go out triple buffered:
+			vita_gxm.c, "the display's buffers") */
+			int halo_interpolation_enabled(void);
+
+			vgxm_display_buffering(halo_interpolation_enabled() ? 3 : 2);
+		}
 		command = command_begin(_command_present);
 		before = vita_host_time_us();
 
@@ -7106,6 +7133,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			vgxm_cache_write_us;
 		extern volatile unsigned long vita_texture_builds, vita_texture_build_bytes, vgxm_compiles, vgxm_shader_loads,
 			vgxm_links, vgxm_compiles_background;
+		extern volatile unsigned long vita_texture_background_builds, vita_texture_background_bytes, vita_texture_stand_ins;
 		static unsigned long long previous_present;
 		static unsigned long hitches_logged;
 		unsigned long long now = vita_host_time_us();
@@ -7113,17 +7141,20 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		if (previous_present && now - previous_present > 100000ull && hitches_logged < 200)
 		{
 			hitches_logged++;
-			platform_log("hitch: frame %lu took %.1f ms; textures decoded %lu (%lu KB) in %.1f ms, shaders compiled %lu in %.1f ms"
+			platform_log("hitch: frame %lu took %.1f ms; textures decoded %lu (%lu KB) in %.1f ms (%lu stand-ins made, %lu (%lu KB)"
+				" decoded in the background swapped in), shaders compiled %lu in %.1f ms"
 				" (loaded %lu in %.1f ms, cache writes %.1f ms, linked %lu in %.1f ms, %lu compiled in the background),"
 				" waited %.1f ms for the worker",
 				device.frame, (now - previous_present) / 1000.0, vita_texture_builds, vita_texture_build_bytes / 1024,
-				vita_texture_build_us / 1000.0, vgxm_compiles, vgxm_compile_us / 1000.0, vgxm_shader_loads,
+				vita_texture_build_us / 1000.0, vita_texture_stand_ins, vita_texture_background_builds,
+				vita_texture_background_bytes / 1024, vgxm_compiles, vgxm_compile_us / 1000.0, vgxm_shader_loads,
 				vgxm_shader_load_us / 1000.0, vgxm_cache_write_us / 1000.0, vgxm_links, vgxm_link_us / 1000.0, vgxm_compiles_background,
 				frame_drain_us / 1000.0);
 		}
 		vita_texture_build_us = 0;
 		vita_texture_builds = 0;
 		vita_texture_build_bytes = 0;
+		vita_texture_stand_ins = vita_texture_background_builds = vita_texture_background_bytes = 0;
 		vgxm_compile_us = 0;
 		vgxm_compiles = 0;
 		vgxm_shader_load_us = vgxm_link_us = vgxm_cache_write_us = 0;
