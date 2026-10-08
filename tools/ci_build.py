@@ -89,6 +89,9 @@ def main() -> int:
         # the self-updater's TLS (port/third_party/mbedtls), whose Apache
         # license asks the same
         shutil.copy2(ROOT / "port/third_party/mbedtls/LICENSE", dist / "mbedtls-LICENSE.txt")
+        # the Custom Edition installer's cabinet reader (port/third_party/libmspack,
+        # LGPL 2.1)
+        shutil.copy2(ROOT / "port/third_party/libmspack/COPYING.LIB", dist / "libmspack-COPYING.LIB.txt")
     # internet play's UPnP (port/third_party/miniupnpc), in every build,
     # whose BSD license asks binaries to carry its notice
     shutil.copy2(ROOT / "port/third_party/miniupnpc/LICENSE", dist / "miniupnpc-LICENSE.txt")

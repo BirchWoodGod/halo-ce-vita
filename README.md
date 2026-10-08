@@ -135,19 +135,33 @@ the game's own. Two kinds work:
 - **Xbox custom maps**: copy the `.map` in. Nothing else is needed.
 - **Halo PC / Custom Edition maps** (`.map`, and OpenSauce `.yelo`;
   experimental): these need three resource maps from your own copy of Halo
-  on PC, `bitmaps.map`, `sounds.map` and `loc.map`, copied to the same
-  folder:
-  - **Halo: The Master Chief Collection** (Steam):
-    `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`.
-    Take the three from the `custom_edition` folder, not the ones in
-    `halo1/maps`, which are MCC's own and do not work.
-  - **Halo Custom Edition** (PC): the `maps` folder of the install
-    (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`), or
-    unpacked from the Custom Edition installer with an archive tool.
+  on PC, `bitmaps.map`, `sounds.map` and `loc.map`. Two of them,
+  `bitmaps.map` and `loc.map`, also give the game's Multiplayer menu the PC
+  version's screens (a server browser, Join by code, Server Setup). Three
+  ways to get them, easiest first:
+  1. **The Halo Custom Edition installer**: copy your
+     `halocesetup_en_1.00.exe` (or another language's `halocesetup*.exe`,
+     about 170 MB) to `ux0:data/haloce-vita/`. At the next start the game
+     takes the three out of it into the maps folder (about a minute; a
+     progress line shows, Circle stops it), then asks whether to delete the
+     installer to free the space. Nothing to unpack on a PC. The PC
+     multiplayer menus show from the start after that one.
+  2. **Halo: The Master Chief Collection** (Steam): copy the three from
+     `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
+     to `ux0:data/haloce-vita/maps/`. Take them from the `custom_edition`
+     folder, not the ones in `halo1/maps`, which are MCC's own and do not
+     work.
+  3. **A Halo Custom Edition install** (PC): copy the three from its `maps`
+     folder (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`)
+     to `ux0:data/haloce-vita/maps/`. (On a PC without an install,
+     `tools/ce_installer_extract.c` takes them out of the installer, as the
+     game does; how to build it is at its top.)
 
   Then turn on **PC maps** in the settings panel (Select + Start,
   Multiplayer, Modded maps). The page lists your custom maps and warns if a
-  resource map is missing.
+  resource map is missing; with an installer in `ux0:data/haloce-vita/`,
+  its **Extract PC files** row takes them out of it again (after a start
+  where you stopped it, say).
 
 Custom Edition maps themselves (race tracks and the like) come from the
 community's Halo CE map archives and forums. This project includes no maps
@@ -550,6 +564,8 @@ password keys),
 [Expat](https://libexpat.github.io) (the PC menus' files),
 [Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
 [miniupnpc](https://github.com/miniupnp/miniupnp),
+[libmspack](https://github.com/kyz/libmspack) by Stuart Caie (LGPL 2.1:
+Halo Custom Edition's resource maps out of its installer),
 [musl](https://musl.libc.org)'s math functions,
 [extract-xiso](https://github.com/XboxDev/extract-xiso), and
 [Vita3K](https://vita3k.org) for testing.
