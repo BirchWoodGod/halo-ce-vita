@@ -6,16 +6,21 @@ private (p2p.c): SHA-256 (FIPS 180-4) and HMAC-SHA256 (RFC 2104), from
 which an invite's topics and keys are derived; ChaCha20-Poly1305 (RFC 8439)
 with additional data, which seals the tunnel's packets (a counter for their
 nonce) and, with a random nonce sent ahead of the ciphertext, signalling's
-messages; and X25519 (RFC 7748), with which two machines agree on their
-tunnel's keys without sending them. The public brokers carry sealed
-messages, so only holders of the invite read them; the tunnel's packets are
-sealed with keys only its two machines have.
+messages; X25519 (RFC 7748), with which two machines agree on their
+tunnel's keys without sending them; and Ed25519 (RFC 8032, Monocypher's),
+with which a host signs its public game's listing (p2p_lobby.c). The public
+brokers carry sealed messages, so only holders of the invite read them; the
+tunnel's packets are sealed with keys only its two machines have.
 */
 
 #include "platform.h"
 #include "posix.h"
 #include "p2p_internal.h"
 
+#include "monocypher.h"
+#include "monocypher-ed25519.h"
+
+#include <stdlib.h>
 #include <string.h>
 
 /* ---------- SHA-256 */
@@ -623,4 +628,117 @@ void p2p_x25519(unsigned char *result, const unsigned char *scalar, const unsign
 	field_invert(c, c);
 	field_multiply(a, a, c);
 	field_pack(result, a);
+}
+
+/* ---------- Ed25519 (RFC 8032, with SHA-512), from Monocypher
+(port/third_party/monocypher): a run's key, from which its X25519 key also
+comes, signs the listing of a public game (p2p_lobby.c) */
+
+void p2p_sha512(const void *data, int size, unsigned char *digest)
+{
+	crypto_sha512(digest, data, (size_t)size);
+}
+
+void p2p_ed25519_public(const unsigned char *seed, unsigned char *public_key, unsigned char *x25519_secret)
+{
+	unsigned char copy[P2P_SEED_SIZE];
+	unsigned char secret_key[64];
+	unsigned char hash[64];
+
+	/* (the key pair's making wipes the seed it is given) */
+	memcpy(copy, seed, sizeof(copy));
+	crypto_ed25519_key_pair(secret_key, public_key, copy);
+	if (x25519_secret)
+	{
+		/* the scalar Ed25519 signs with: X25519 clamps it the same way */
+		p2p_sha512(seed, P2P_SEED_SIZE, hash);
+		memcpy(x25519_secret, hash, P2P_KEY_SIZE);
+	}
+	crypto_wipe(secret_key, sizeof(secret_key));
+	crypto_wipe(hash, sizeof(hash));
+}
+
+void p2p_ed25519_sign(const unsigned char *seed, const unsigned char *public_key, const void *message, int size,
+	unsigned char *signature)
+{
+	unsigned char secret_key[64];
+
+	/* (Monocypher's secret key: the seed, then the public key) */
+	memcpy(secret_key, seed, P2P_SEED_SIZE);
+	memcpy(secret_key + P2P_SEED_SIZE, public_key, P2P_KEY_SIZE);
+	crypto_ed25519_sign(signature, secret_key, message, (size_t)size);
+	crypto_wipe(secret_key, sizeof(secret_key));
+}
+
+int p2p_ed25519_to_x25519(const unsigned char *public_key, unsigned char *x25519_public)
+{
+	static const unsigned char zero[P2P_KEY_SIZE];
+	static const unsigned char scalar[P2P_KEY_SIZE] = { 1 };
+	unsigned char product[P2P_KEY_SIZE];
+
+	crypto_eddsa_to_x25519(x25519_public, public_key);
+	/* a point of small order (whose multiple by a clamped scalar, a
+	multiple of 8, is 0) has signatures anyone can make, and secrets anyone
+	knows */
+	crypto_x25519(product, scalar, x25519_public);
+	return !p2p_equal(product, zero, P2P_KEY_SIZE);
+}
+
+/* ---------- passwords (a password-protected public game's listing holds
+its invite's token sealed with the password's key: p2p_lobby.c) */
+
+/* Argon2id of 4 MiB (OpenCE's) and four passes (OpenCE's three, and one
+more: the Vita's key is worked out on a thread of its own, so it may take
+longer): about 58 ms on a Raspberry Pi 4 in 32-bit ARM at 1.8 GHz, built as
+the Vita builds it, so about half a second on a Vita's Cortex-A9 at 444 MHz
+(eight times slower); once for the host and once a guess for a joiner */
+#define PASSWORD_KEY_BLOCKS 4096
+#define PASSWORD_KEY_PASSES 4
+
+int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key)
+{
+	crypto_argon2_config config = { CRYPTO_ARGON2_ID, PASSWORD_KEY_BLOCKS, PASSWORD_KEY_PASSES, 1 };
+	crypto_argon2_inputs inputs;
+	void *work_area = malloc((size_t)PASSWORD_KEY_BLOCKS * 1024);
+
+	inputs.pass = (const unsigned char *)password;
+	inputs.pass_size = (unsigned int)strlen(password);
+	inputs.salt = salt;
+	inputs.salt_size = P2P_KEY_SIZE;
+	if (!work_area)
+	{
+		/* (no key anyone could guess: nothing opens with it) */
+		posix_random_bytes(key, P2P_PASSWORD_KEY_SIZE);
+		return 0;
+	}
+	crypto_argon2(key, P2P_PASSWORD_KEY_SIZE, work_area, config, inputs, crypto_argon2_no_extras);
+	crypto_wipe(work_area, (size_t)PASSWORD_KEY_BLOCKS * 1024);
+	free(work_area);
+	return 1;
+}
+
+void p2p_seal_token(const unsigned char *key, const unsigned char *signing_key, const unsigned char *token,
+	unsigned char *sealed)
+{
+	/* (a nonce of its own each time: 24 random bytes never repeat) */
+	posix_random_bytes(sealed, 24);
+	crypto_aead_lock(sealed + 24 + 16, sealed + 24, key, sealed, signing_key, P2P_KEY_SIZE, token, P2P_TOKEN_SIZE);
+}
+
+int p2p_unseal_token(const unsigned char *key, const unsigned char *signing_key, const unsigned char *sealed,
+	unsigned char *token)
+{
+	return crypto_aead_unlock(token, sealed + 24, key, sealed, signing_key, P2P_KEY_SIZE, sealed + 24 + 16,
+		P2P_TOKEN_SIZE) == 0;
+}
+
+int p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size,
+	const unsigned char *signature)
+{
+	unsigned char x25519_public[P2P_KEY_SIZE];
+
+	/* (Monocypher's check turns away an S past the group's order: one
+	signature a message) */
+	return p2p_ed25519_to_x25519(public_key, x25519_public) &&
+		crypto_ed25519_check(signature, public_key, message, (size_t)size) == 0;
 }

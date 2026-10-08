@@ -6,8 +6,10 @@ The rules of map sharing that need nothing of the game
 */
 
 #include "map_share_protocol.h"
+#include "memory/zlib/zlib.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---------- constants */
@@ -34,6 +36,16 @@ custom_edition_cache_xbox_multiplayer) */
 #define XBOX_MULTIPLAYER_MAXIMUM_LENGTH 0x02F00000UL
 /* the tag index a cache's tag data starts with is at least this long */
 #define MINIMUM_TAG_DATA_BYTES 0x28
+/* a resume record's first bytes */
+#define RESUME_MAGIC 0x52534D48UL /* 'HMSR' */
+#define RESUME_VERSION 1
+/* the offer flags of a file's kind */
+#define KIND_FLAGS ((1 << _map_share_offer_yelo_bit) | (1 << _map_share_offer_custom_edition_bit))
+
+/* (the capabilities a query's or start's reason carries stay valid reasons
+to a host without them, which then takes the request) */
+typedef char map_share_capabilities_are_reasons[
+	(1 << NUMBER_OF_MAP_SHARE_CAPABILITIES) - 1 < NUMBER_OF_MAP_SHARE_REFUSALS ? 1 : -1];
 
 /* ---------- globals */
 
@@ -105,6 +117,55 @@ static uint32_t read_u32(
 	uint8_t const *bytes)
 {
 	return (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 | (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
+}
+
+static void write_u32(
+	uint8_t *bytes,
+	uint32_t value)
+{
+	bytes[0] = (uint8_t)value;
+	bytes[1] = (uint8_t)(value >> 8);
+	bytes[2] = (uint8_t)(value >> 16);
+	bytes[3] = (uint8_t)(value >> 24);
+
+	return;
+}
+
+/* zlib's memory: the C library's (never the game's own allocator, which
+is the game thread's) */
+static voidpf zlib_allocate(
+	voidpf opaque,
+	uInt items,
+	uInt size)
+{
+	(void)opaque;
+
+	return calloc(items, size);
+}
+
+static void zlib_free(
+	voidpf opaque,
+	voidpf pointer)
+{
+	(void)opaque;
+	free(pointer);
+
+	return;
+}
+
+static z_stream *zlib_stream_new(
+	void)
+{
+	z_stream *stream = calloc(1, sizeof(z_stream));
+
+	if (stream)
+	{
+		stream->zalloc = zlib_allocate;
+		stream->zfree = zlib_free;
+		stream->opaque = Z_NULL;
+	}
+
+	return stream;
 }
 
 /* whether `size` bytes at `offset` lie within `limit` bytes (no overflow) */
@@ -259,12 +320,25 @@ int map_share_request_valid(
 	return map_share_name_from_field(request->name, name);
 }
 
+uint32_t map_share_request_capabilities(
+	struct map_share_request const *request)
+{
+	if (request->command != _map_share_command_query && request->command != _map_share_command_start)
+	{
+		return 0;
+	}
+
+	return (uint32_t)request->reason & ((1u << NUMBER_OF_MAP_SHARE_CAPABILITIES) - 1);
+}
+
 int map_share_answer_valid(
 	struct map_share_answer_message const *answer,
 	char const *expected_name,
-	uint32_t expected_identity)
+	uint32_t expected_identity,
+	uint32_t capabilities)
 {
 	char name[MAP_SHARE_NAME_BYTES];
+	uint32_t known_flags = KIND_FLAGS;
 
 	if (answer->kind < _map_share_answer_offer || answer->kind >= NUMBER_OF_MAP_SHARE_ANSWERS ||
 		answer->reason < 0 || answer->reason >= NUMBER_OF_MAP_SHARE_REFUSALS ||
@@ -277,12 +351,20 @@ int map_share_answer_valid(
 	{
 		return 1;
 	}
+	if (capabilities & 1u << _map_share_capability_resume_bit)
+	{
+		known_flags |= 1u << _map_share_offer_resume_bit;
+	}
+	if (capabilities & 1u << _map_share_capability_deflate_bit)
+	{
+		known_flags |= 1u << _map_share_offer_deflate_bit;
+	}
 
 	return (uint32_t)answer->identity == expected_identity &&
 		answer->identity != 0 &&
 		answer->size >= MAP_SHARE_HEADER_BYTES &&
 		(uint32_t)answer->size <= MAP_SHARE_MAXIMUM_FILE_BYTES &&
-		!(answer->flags & ~(int32_t)((1 << NUMBER_OF_MAP_SHARE_OFFER_FLAGS) - 1));
+		!((uint32_t)answer->flags & ~known_flags);
 }
 
 void map_share_receiver_begin(
@@ -296,47 +378,195 @@ void map_share_receiver_begin(
 	return;
 }
 
-enum map_share_chunk_status map_share_receiver_accept(
+void map_share_receiver_add(
 	struct map_share_receiver *receiver,
-	int32_t offset,
-	int32_t length,
-	uint8_t const *data)
+	uint8_t const *data,
+	uint32_t length)
 {
-	if (length <= 0 || length > MAP_SHARE_CHUNK_BYTES)
-	{
-		return _map_share_chunk_bad_length;
-	}
-	if (offset < 0 || (uint32_t)offset != receiver->received)
-	{
-		return _map_share_chunk_out_of_order;
-	}
-	if (!range_inside((uint32_t)offset, (uint32_t)length, receiver->size))
-	{
-		return _map_share_chunk_past_end;
-	}
+	uint32_t offset = receiver->received;
 
-	if ((uint32_t)offset < MAP_SHARE_HEADER_BYTES)
+	if (offset < MAP_SHARE_HEADER_BYTES)
 	{
-		uint32_t header_bytes = MAP_SHARE_HEADER_BYTES - (uint32_t)offset;
+		uint32_t header_bytes = MAP_SHARE_HEADER_BYTES - offset;
 
-		if (header_bytes > (uint32_t)length)
+		if (header_bytes > length)
 		{
-			header_bytes = (uint32_t)length;
+			header_bytes = length;
 		}
 		memcpy(receiver->header + offset, data, header_bytes);
 	}
 	halo_sha256_add(&receiver->sha256, data, (unsigned long)length);
-	receiver->crc = crc32_update(receiver->crc, data, (uint32_t)length);
-	receiver->received += (uint32_t)length;
+	/* (the CRC is the fingerprint of a map whose header has no checksum,
+	map_share_identity: of any other, once its header is here, it is not
+	needed) */
+	if (offset < MAP_SHARE_HEADER_BYTES ||
+		!read_u32(receiver->header + HEADER_CHECKSUM_OFFSET) ||
+		read_u32(receiver->header + HEADER_CHECKSUM_OFFSET) == 0xFFFFFFFFUL)
+	{
+		receiver->crc = crc32_update(receiver->crc, data, length);
+	}
+	receiver->received += length;
+
+	return;
+}
+
+int map_share_receiver_start_stream(
+	struct map_share_receiver *receiver,
+	int deflate)
+{
+	map_share_receiver_end(receiver);
+	receiver->stream_ended = 0;
+	receiver->stream_received = deflate ? 0 : receiver->received;
+	receiver->acknowledged = receiver->stream_received;
+	if (deflate)
+	{
+		z_stream *stream = zlib_stream_new();
+
+		if (!stream)
+		{
+			return 0;
+		}
+		if (inflateInit2(stream, MAP_SHARE_DEFLATE_WINDOW_BITS) != Z_OK)
+		{
+			free(stream);
+			return 0;
+		}
+		receiver->inflater = stream;
+	}
+
+	return 1;
+}
+
+/* the file's next bytes, from the stream: inside the file, counted in,
+written */
+static enum map_share_chunk_status map_share_receiver_take(
+	struct map_share_receiver *receiver,
+	uint8_t const *data,
+	uint32_t length,
+	map_share_write_function write,
+	void *context)
+{
+	if (!range_inside(receiver->received, length, receiver->size))
+	{
+		return _map_share_chunk_past_end;
+	}
+	map_share_receiver_add(receiver, data, length);
+	if (write && !write(context, data, length))
+	{
+		return _map_share_chunk_write_failed;
+	}
 
 	return _map_share_chunk_ok;
+}
+
+enum map_share_chunk_status map_share_receiver_accept(
+	struct map_share_receiver *receiver,
+	int32_t offset,
+	int32_t length,
+	uint8_t const *data,
+	map_share_write_function write,
+	void *context)
+{
+	z_stream *stream = receiver->inflater;
+	enum map_share_chunk_status status;
+
+	if (length <= 0 || length > MAP_SHARE_CHUNK_BYTES)
+	{
+		return _map_share_chunk_bad_length;
+	}
+	if (offset < 0 || (uint32_t)offset != receiver->stream_received)
+	{
+		return _map_share_chunk_out_of_order;
+	}
+	if (!stream)
+	{
+		status = map_share_receiver_take(receiver, data, (uint32_t)length, write, context);
+		if (status == _map_share_chunk_ok)
+		{
+			receiver->stream_received += (uint32_t)length;
+		}
+		return status;
+	}
+
+	/* inflated a piece at a time (the zlib stream's end, then nothing, must
+	come with the file's last byte) */
+	if (receiver->stream_ended)
+	{
+		return _map_share_chunk_bad_stream;
+	}
+	stream->next_in = (Bytef *)data;
+	stream->avail_in = (uInt)length;
+	for (;;)
+	{
+		/* (static: 16 KB, and one frame receives at a time) */
+		static uint8_t output[0x4000];
+		uint32_t produced;
+		int result;
+
+		stream->next_out = output;
+		stream->avail_out = sizeof(output);
+		result = inflate(stream, Z_SYNC_FLUSH);
+		produced = (uint32_t)(sizeof(output) - stream->avail_out);
+		if (result != Z_OK && result != Z_STREAM_END && !(result == Z_BUF_ERROR && !produced))
+		{
+			return _map_share_chunk_bad_stream;
+		}
+		if (produced)
+		{
+			status = map_share_receiver_take(receiver, output, produced, write, context);
+			if (status != _map_share_chunk_ok)
+			{
+				return status == _map_share_chunk_past_end ? _map_share_chunk_bad_stream : status;
+			}
+		}
+		if (result == Z_STREAM_END)
+		{
+			receiver->stream_ended = 1;
+			if (stream->avail_in || receiver->received != receiver->size)
+			{
+				return _map_share_chunk_bad_stream;
+			}
+			break;
+		}
+		if (!stream->avail_in && stream->avail_out)
+		{
+			break;
+		}
+		if (result == Z_BUF_ERROR)
+		{
+			/* (no progress with input and room left) */
+			return _map_share_chunk_bad_stream;
+		}
+	}
+	receiver->stream_received += (uint32_t)length;
+
+	return _map_share_chunk_ok;
+}
+
+int map_share_receiver_complete(
+	struct map_share_receiver const *receiver)
+{
+	return receiver->received == receiver->size && (!receiver->inflater || receiver->stream_ended);
 }
 
 int map_share_receiver_ack_due(
 	struct map_share_receiver const *receiver)
 {
-	return receiver->received - receiver->acknowledged >= MAP_SHARE_ACK_BYTES ||
-		(receiver->received == receiver->size && receiver->acknowledged != receiver->size);
+	return receiver->stream_received - receiver->acknowledged >= MAP_SHARE_ACK_BYTES ||
+		(map_share_receiver_complete(receiver) && receiver->acknowledged != receiver->stream_received);
+}
+
+void map_share_receiver_end(
+	struct map_share_receiver *receiver)
+{
+	if (receiver->inflater)
+	{
+		inflateEnd(receiver->inflater);
+		free(receiver->inflater);
+		receiver->inflater = NULL;
+	}
+
+	return;
 }
 
 void map_share_receiver_digest(
@@ -344,6 +574,17 @@ void map_share_receiver_digest(
 	uint8_t digest[MAP_SHARE_DIGEST_BYTES])
 {
 	halo_sha256_end(&receiver->sha256, digest);
+
+	return;
+}
+
+void map_share_receiver_digest_so_far(
+	struct map_share_receiver const *receiver,
+	uint8_t digest[MAP_SHARE_DIGEST_BYTES])
+{
+	struct halo_sha256_stream copy = receiver->sha256;
+
+	halo_sha256_end(&copy, digest);
 
 	return;
 }
@@ -537,4 +778,150 @@ void map_share_host_name_text(
 	}
 
 	return;
+}
+
+int map_share_packer_begin(
+	struct map_share_packer *packer)
+{
+	z_stream *stream = zlib_stream_new();
+
+	memset(packer, 0, sizeof(*packer));
+	if (!stream)
+	{
+		return 0;
+	}
+	if (deflateInit2(stream, MAP_SHARE_DEFLATE_LEVEL, Z_DEFLATED, MAP_SHARE_DEFLATE_WINDOW_BITS,
+		MAP_SHARE_DEFLATE_MEMORY_LEVEL, Z_DEFAULT_STRATEGY) != Z_OK)
+	{
+		free(stream);
+		return 0;
+	}
+	packer->deflater = stream;
+	packer->level = packer->stream_level = MAP_SHARE_DEFLATE_LEVEL;
+
+	return 1;
+}
+
+long map_share_packer_pack(
+	struct map_share_packer *packer,
+	uint8_t const *input,
+	uint32_t input_size,
+	int last,
+	uint32_t *taken,
+	uint8_t *output,
+	uint32_t output_size)
+{
+	z_stream *stream = packer->deflater;
+	int result;
+
+	*taken = 0;
+	if (!stream || packer->ended)
+	{
+		return stream ? 0 : -1;
+	}
+	stream->next_out = output;
+	stream->avail_out = (uInt)output_size;
+	/* (not once the stream is finishing: deflate takes only Z_FINISH then) */
+	if (packer->level != packer->stream_level && !packer->finishing)
+	{
+		/* everything the stream holds flushed first (deflateParams flushes
+		only what its room takes, and the new level's function would take
+		up the rest): done once the flush leaves room */
+		stream->next_in = (Bytef *)input;
+		stream->avail_in = 0;
+		result = deflate(stream, Z_SYNC_FLUSH);
+		if (result != Z_OK && result != Z_BUF_ERROR)
+		{
+			return -1;
+		}
+		if (!stream->avail_out)
+		{
+			return (long)output_size;
+		}
+		result = deflateParams(stream, packer->level, Z_DEFAULT_STRATEGY);
+		if (result != Z_OK && result != Z_BUF_ERROR)
+		{
+			return -1;
+		}
+		packer->stream_level = packer->level;
+	}
+	stream->next_in = (Bytef *)input;
+	stream->avail_in = (uInt)input_size;
+	packer->finishing |= last;
+	result = deflate(stream, last ? Z_FINISH : Z_NO_FLUSH);
+	if (result == Z_STREAM_END)
+	{
+		packer->ended = 1;
+	}
+	else if (result != Z_OK && result != Z_BUF_ERROR)
+	{
+		return -1;
+	}
+	*taken = input_size - (uint32_t)stream->avail_in;
+
+	return (long)(output_size - stream->avail_out);
+}
+
+void map_share_packer_end(
+	struct map_share_packer *packer)
+{
+	if (packer->deflater)
+	{
+		deflateEnd(packer->deflater);
+		free(packer->deflater);
+		packer->deflater = NULL;
+	}
+
+	return;
+}
+
+void map_share_resume_encode(
+	struct map_share_resume const *resume,
+	uint8_t bytes[MAP_SHARE_RESUME_RECORD_BYTES])
+{
+	uint8_t *at = bytes;
+
+	memset(bytes, 0, MAP_SHARE_RESUME_RECORD_BYTES);
+	write_u32(at, RESUME_MAGIC);
+	write_u32(at + 4, RESUME_VERSION);
+	at += 8;
+	memcpy(at, resume->name, MAP_SHARE_NAME_BYTES);
+	at[MAP_SHARE_NAME_BYTES - 1] = 0;
+	at += MAP_SHARE_NAME_BYTES;
+	write_u32(at, resume->identity);
+	write_u32(at + 4, resume->size);
+	write_u32(at + 8, resume->flags);
+	write_u32(at + 12, resume->kept);
+	write_u32(at + 16, resume->saved_time);
+	at += 20;
+	memcpy(at, resume->kept_digest, MAP_SHARE_DIGEST_BYTES);
+
+	return;
+}
+
+int map_share_resume_decode(
+	uint8_t const bytes[MAP_SHARE_RESUME_RECORD_BYTES],
+	struct map_share_resume *resume)
+{
+	uint8_t const *at = bytes + 8;
+
+	memset(resume, 0, sizeof(*resume));
+	if (read_u32(bytes) != RESUME_MAGIC || read_u32(bytes + 4) != RESUME_VERSION ||
+		!map_share_name_from_field((char const *)at, resume->name))
+	{
+		return 0;
+	}
+	at += MAP_SHARE_NAME_BYTES;
+	resume->identity = read_u32(at);
+	resume->size = read_u32(at + 4);
+	resume->flags = read_u32(at + 8);
+	resume->kept = read_u32(at + 12);
+	resume->saved_time = read_u32(at + 16);
+	at += 20;
+	memcpy(resume->kept_digest, at, MAP_SHARE_DIGEST_BYTES);
+
+	return resume->identity != 0 &&
+		resume->size >= MAP_SHARE_HEADER_BYTES && resume->size <= MAP_SHARE_MAXIMUM_FILE_BYTES &&
+		!(resume->flags & ~(uint32_t)KIND_FLAGS) &&
+		resume->kept <= resume->size;
 }

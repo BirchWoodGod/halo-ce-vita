@@ -31,8 +31,8 @@ Evolved.
 - The whole campaign from the menus, with checkpoints, saves and Save and
   Quit, cinematics, and the movies (converted to MP4, see below).
 - Multiplayer maps on your own (split screen with one player). System link
-  between Vitas on the same Wi-Fi; online play (short codes, a public
-  lobby) and ad hoc play between Vitas, experimental. Vitas play only
+  between Vitas on the same Wi-Fi; online play (short codes, a server
+  browser of public games, from OpenCE) and ad hoc play between Vitas, experimental. Vitas play only
   Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
 - Campaign co-op over the network, experimental: two Vitas play a level
   together by system link, online or ad hoc (the settings panel's
@@ -155,7 +155,8 @@ and links to no downloads.
 Only the host needs the custom map: a Vita that joins without it is asked
 whether to download it from the host in the lobby (and, for a Custom
 Edition map, to turn PC maps on). A joiner still needs its own three
-resource maps. The host waits for the download before the game starts.
+resource maps. The host waits for the download before the game starts, and
+a download that stops goes on from where it stopped the next time.
 Big Custom Edition maps can be slow on the Vita or too large for its memory.
 The question names the host; in a game joined from the public lobby it also
 warns that the host is a stranger: only accept maps from players you trust.
@@ -434,10 +435,13 @@ This port stands on a lot of other people's work:
   runtime, XAPI, Bink).
 - **[bnunu/halo-1](https://github.com/bnunu/halo-1)**: the fork of that
   decompilation the native port starts from.
-- **[cybersecurity/halo-ce-universal](https://github.com/cybersecurity/halo-ce-universal)**:
+- **[OpenCommunityEdition/OpenCE](https://github.com/OpenCommunityEdition/OpenCE)**
+  (formerly halo-ce-universal):
   the native Linux, Windows and Android port this repository is built on:
   the platform layer, the OpenGL renderer the Vita renderer is modelled on,
-  the distributed netcode, system link over the internet, and much more.
+  the distributed netcode, system link over the internet, the server
+  browser of public games (signed listings, password-protected games, its
+  Players and Rules lines), and much more.
   Those platforms still build from this tree (`port/linux`, `port/windows`,
   `port/android`, each with its own README). Campaign co-op over the
   network is theirs too (xshxdex98's and MrBruh's work: `network_coop.c`,
@@ -468,6 +472,8 @@ Libraries and tools: [VitaSDK](https://vitasdk.org),
 [SDL3](https://github.com/libsdl-org/SDL) (desktop builds),
 [tomlc17](https://github.com/cktan/tomlc17),
 [KCP](https://github.com/skywind3000/kcp),
+[Monocypher](https://monocypher.org) (the server browser's signatures and
+password keys),
 [Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
 [miniupnpc](https://github.com/miniupnp/miniupnp),
 [musl](https://musl.libc.org)'s math functions,
@@ -482,7 +488,7 @@ generated from Invader's GPL-3.0 tag definitions. To regenerate it, clone
 Invader into `invader/` (or set `INVADER=<path>`) and run
 `python3 tools/gen_tag_layouts.py port/linux/src/tag_layouts.h`.
 
-The decompilation and the halo-ce-universal port this builds on are
+The decompilation and the OpenCE (halo-ce-universal) port this builds on are
 dedicated to the public domain under CC0 1.0
 ([LICENSES/CC0-1.0.txt](LICENSES/CC0-1.0.txt)); the bundled libraries keep
 their own licenses. The license covers this code only: Halo's maps,
