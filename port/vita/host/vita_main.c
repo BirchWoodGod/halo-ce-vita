@@ -659,6 +659,7 @@ static int game_thread(SceSize arguments_size, void *arguments_data)
 
 	(void)arguments_size;
 	(void)arguments_data;
+	vita_host_thread_watch("game");
 	/* (above the game's threads, which spin at the default priority
 	while they wait on each other: at their priority it never ran) */
 	{

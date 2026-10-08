@@ -39,6 +39,21 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core,
 	int priority);
 
+/* ---------- the fourth core (port/vita/host/vita_fourth_core.c) */
+
+/* Fourth core helpers is on (HALO_FOURTH_CORE, read at start-up) */
+int vita_host_fourth_core_wanted(void);
+/* the calling thread onto the fourth core (affinity 0x80000) if Fourth core
+helpers is on and the system allows it: 3 when it moved, -1 when it stays
+where it was; halo.log says which, naming it `role` */
+int vita_host_fourth_core_join(const char *role);
+/* the same whatever the setting (HALO_AUDIO_CORE=3) */
+int vita_host_fourth_core_move(const char *role);
+/* the calling thread's run time logged with the frame timing, as `role` */
+void vita_host_thread_watch(const char *role);
+/* with each frame-timing line: the watched threads' and the cores' times */
+void vita_host_thread_times_report(unsigned long frames);
+
 /* each core's busy share of the last second, 0-100, or 255 unknown */
 void vita_host_cpu_usage(unsigned char busy[3]);
 
