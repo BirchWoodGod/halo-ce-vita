@@ -400,6 +400,37 @@ static void render_phase_report(void)
 #define RENDER_PHASE_REPORT() ((void)0)
 #endif
 
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_VITA_EFFECTS_QUALITY, the
+passes a frame draws: 2 (the default) all, as the Xbox; 1 (Performance)
+not the dynamic lights' specular pass, the specular lightmaps, the
+reflections (the shiny floors and walls, the mirrors) or the detail objects
+(grass); 0 (Minimal) neither those nor the decals (bullet holes, scorches,
+blood, the map's own markings), the weather, the contrails or the lights'
+lens flares. Drawing only: the game is the same. */
+static int render_effects_quality(
+	void)
+{
+	static int quality = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (quality < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_VITA_EFFECTS_QUALITY");
+
+		settings_seen = halo_settings_generation;
+		quality = setting && *setting ? atoi(setting) : 2;
+		if (quality < 0 || quality > 2)
+			quality = 2;
+	}
+	return quality;
+}
+#define RENDER_EFFECTS_AT_LEAST(quality) (render_effects_quality() >= (quality))
+#else
+#define RENDER_EFFECTS_AT_LEAST(quality) TRUE
+#endif
+
 static void render_window(
 	short local_player_index,
 	const struct render_camera *camera,
@@ -489,7 +520,8 @@ static void render_window(
 		}
 #endif
 		RENDER_PHASE_BEGIN_ID(28, "flare_tests");
-		rasterizer_lens_flares_submit_occlusion_tests();
+		if (RENDER_EFFECTS_AT_LEAST(1))
+			rasterizer_lens_flares_submit_occlusion_tests();
 		RENDER_PHASE_END(28, "flare_tests");
 		RENDER_PHASE_BEGIN_ID(6, "shadows");
 #ifdef HALO_LINUX
@@ -515,25 +547,31 @@ static void render_window(
 		RENDER_PHASE_END(7, "lights_diffuse");
 
 		RENDER_PHASE_BEGIN_ID(36, "decals_light");
-		rasterizer_decals_begin(_decal_layer_light);
-		for (rendered_cluster_index = 0;
-			rendered_cluster_index < render.rendered_cluster_count;
-			rendered_cluster_index++)
+		if (RENDER_EFFECTS_AT_LEAST(1))
 		{
-			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			rasterizer_decals_begin(_decal_layer_light);
+			for (rendered_cluster_index = 0;
+				rendered_cluster_index < render.rendered_cluster_count;
+				rendered_cluster_index++)
+			{
+				rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			}
+			rasterizer_decals_end();
 		}
-		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN_ID(37, "decals_alpha_tested");
-		rasterizer_decals_begin(_decal_layer_alpha_tested);
-		for (rendered_cluster_index = 0;
-			rendered_cluster_index < render.rendered_cluster_count;
-			rendered_cluster_index++)
+		if (RENDER_EFFECTS_AT_LEAST(1))
 		{
-			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			rasterizer_decals_begin(_decal_layer_alpha_tested);
+			for (rendered_cluster_index = 0;
+				rendered_cluster_index < render.rendered_cluster_count;
+				rendered_cluster_index++)
+			{
+				rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			}
+			rasterizer_decals_end();
 		}
-		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN_ID(8, "structure_diffuse");
@@ -541,39 +579,51 @@ static void render_window(
 		RENDER_PHASE_END(8, "structure_diffuse");
 
 		RENDER_PHASE_BEGIN_ID(38, "decals_primary");
-		rasterizer_decals_begin(_decal_layer_primary);
-		for (rendered_cluster_index = 0;
-			rendered_cluster_index < render.rendered_cluster_count;
-			rendered_cluster_index++)
+		if (RENDER_EFFECTS_AT_LEAST(1))
 		{
-			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			rasterizer_decals_begin(_decal_layer_primary);
+			for (rendered_cluster_index = 0;
+				rendered_cluster_index < render.rendered_cluster_count;
+				rendered_cluster_index++)
+			{
+				rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			}
+			rasterizer_decals_end();
 		}
-		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN_ID(39, "decals_secondary");
-		rasterizer_decals_begin(_decal_layer_secondary);
-		for (rendered_cluster_index = 0;
-			rendered_cluster_index < render.rendered_cluster_count;
-			rendered_cluster_index++)
+		if (RENDER_EFFECTS_AT_LEAST(1))
 		{
-			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			rasterizer_decals_begin(_decal_layer_secondary);
+			for (rendered_cluster_index = 0;
+				rendered_cluster_index < render.rendered_cluster_count;
+				rendered_cluster_index++)
+			{
+				rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			}
+			rasterizer_decals_end();
 		}
-		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN_ID(9, "lights_specular");
-		lights_render_specular();
+		if (RENDER_EFFECTS_AT_LEAST(2))
+			lights_render_specular();
 		RENDER_PHASE_END(9, "lights_specular");
 		RENDER_PHASE_BEGIN_ID(10, "specular_lightmaps");
-		structure_render_specular_lightmaps();
+		if (RENDER_EFFECTS_AT_LEAST(2))
+			structure_render_specular_lightmaps();
 		RENDER_PHASE_END(10, "specular_lightmaps");
 		RENDER_PHASE_BEGIN_ID(33, "reflection_masks");
-		structure_render_reflection_lightmap_masks();
-		structure_render_reflection_mirrors();
+		if (RENDER_EFFECTS_AT_LEAST(2))
+		{
+			structure_render_reflection_lightmap_masks();
+			structure_render_reflection_mirrors();
+		}
 		RENDER_PHASE_END(33, "reflection_masks");
 		RENDER_PHASE_BEGIN_ID(11, "reflections");
-		structure_render_reflections();
+		if (RENDER_EFFECTS_AT_LEAST(2))
+			structure_render_reflections();
 		RENDER_PHASE_END(11, "reflections");
 		RENDER_PHASE_BEGIN_ID(12, "structure_transparent");
 		structure_render_transparent_geometry();
@@ -585,7 +635,8 @@ static void render_window(
 		game_engine_post_rasterize_objects();
 		RENDER_PHASE_END(34, "post_objects");
 		RENDER_PHASE_BEGIN_ID(14, "weather");
-		weather_particle_systems_render();
+		if (RENDER_EFFECTS_AT_LEAST(1))
+			weather_particle_systems_render();
 		RENDER_PHASE_END(14, "weather");
 		RENDER_PHASE_BEGIN_ID(15, "particles");
 		render_particles();
@@ -594,25 +645,30 @@ static void render_window(
 		particle_systems_render();
 		RENDER_PHASE_END(16, "particle_systems");
 		RENDER_PHASE_BEGIN_ID(17, "contrails");
-		render_contrails_normal();
+		if (RENDER_EFFECTS_AT_LEAST(1))
+			render_contrails_normal();
 		RENDER_PHASE_END(17, "contrails");
 		RENDER_PHASE_BEGIN_ID(18, "transparent_draw");
 		rasterizer_transparent_geometry_draw(TRUE);
 		RENDER_PHASE_END(18, "transparent_draw");
 
 		RENDER_PHASE_BEGIN_ID(40, "decals_water");
-		rasterizer_decals_begin(_decal_layer_water);
-		for (rendered_cluster_index = 0;
-			rendered_cluster_index < render.rendered_cluster_count;
-			rendered_cluster_index++)
+		if (RENDER_EFFECTS_AT_LEAST(1))
 		{
-			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			rasterizer_decals_begin(_decal_layer_water);
+			for (rendered_cluster_index = 0;
+				rendered_cluster_index < render.rendered_cluster_count;
+				rendered_cluster_index++)
+			{
+				rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			}
+			rasterizer_decals_end();
 		}
-		rasterizer_decals_end();
 		RENDER_PHASE_END(32, "decals");
 
 		RENDER_PHASE_BEGIN_ID(19, "detail_objects");
-		structure_render_detail_objects();
+		if (RENDER_EFFECTS_AT_LEAST(2))
+			structure_render_detail_objects();
 		RENDER_PHASE_END(19, "detail_objects");
 		RENDER_PHASE_BEGIN_ID(35, "transparent_rest");
 		rasterizer_transparent_geometry_draw(FALSE);
@@ -622,7 +678,8 @@ static void render_window(
 		structure_render_fog_screen();
 		RENDER_PHASE_END(29, "fog_screen");
 		RENDER_PHASE_BEGIN_ID(30, "flares");
-		rasterizer_lens_flares_draw();
+		if (RENDER_EFFECTS_AT_LEAST(1))
+			rasterizer_lens_flares_draw();
 		RENDER_PHASE_END(30, "flares");
 		RENDER_PHASE_BEGIN_ID(20, "interface");
 		interface_draw_screen();

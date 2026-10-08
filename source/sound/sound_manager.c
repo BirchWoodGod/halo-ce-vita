@@ -4118,6 +4118,35 @@ static void sound_split_report(void)
 #define SOUND_SPLIT(step) ((void)0)
 #endif
 
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_SOUND_MANAGER_DIVISOR=n: the
+sound manager's own work - the looping sounds, the sounds' positions,
+volumes and obstruction, which sounds get the voices, the voices'
+properties - done every nth call of sound_render only (once a frame, on
+the tick thread when it has one: 2 to 4.5 ms of the Vita's in the beach's
+fight). 1 (the default): every call, as the Xbox. The mixer plays on as
+it does; a new sound starts, and a moving one follows its source, up to
+n - 1 frames later. */
+static boolean sound_render_manager_this_call(
+	void)
+{
+	static int divisor = -1;
+	static unsigned long settings_seen, calls;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (divisor < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_SOUND_MANAGER_DIVISOR");
+
+		settings_seen = halo_settings_generation;
+		divisor = setting && *setting ? atoi(setting) : 1;
+		if (divisor < 1 || divisor > 3)
+			divisor = 1;
+	}
+	return divisor == 1 || calls++ % (unsigned long)divisor == 0;
+}
+#endif
+
 void sound_render(
 	void)
 {
@@ -4174,6 +4203,13 @@ void sound_render(
 #endif
 			refresh_listener();
 			SOUND_SPLIT(1);
+#ifdef HALO_LINUX
+			/* (HALO_SOUND_MANAGER_DIVISOR, above: the looping sounds' flip
+			flop turns with the work, so a loop the game kept going since the
+			last time is kept) */
+			if (sound_render_manager_this_call())
+#endif
+			{
 			process_looping_sounds();
 			SOUND_SPLIT(2);
 			refresh_sounds();
@@ -4183,6 +4219,7 @@ void sound_render(
 			update_channels();
 			SOUND_SPLIT(5);
 			sound_manager_globals.flip_flop = !sound_manager_globals.flip_flop;
+			}
 		}
 
 		sound_manager_globals.platform_definition->end_scene();

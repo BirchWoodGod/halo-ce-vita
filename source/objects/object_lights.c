@@ -1041,6 +1041,77 @@ void lights_stress_update(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (tick_hash.c, HALO_TICK_HASH_MASK=2) what the render writes into the
+lights, each frame, saved and cleared or put back: the light marker's stamp
+(the scene's light query and each lit object's), the light's index among
+the frame's lights and its first-person weapon flag (lights_preprocess_scene),
+in every slot the array has used (a light deleted keeps them) */
+int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	for (absolute_index = 0; absolute_index < light_data->count && count + 3 <= maximum; absolute_index++)
+	{
+		struct light_datum *light = (struct light_datum *)((char *)light_data->data + light_data->size * absolute_index);
+
+		if (restore)
+		{
+			light->marker = saved[count++];
+			light->rasterizer_light_index = saved[count++];
+			light->flags = (word)saved[count++];
+		}
+		else
+		{
+			saved[count++] = light->marker;
+			saved[count++] = light->rasterizer_light_index;
+			saved[count++] = light->flags;
+			light->marker = 0;
+			light->rasterizer_light_index = 0;
+			light->flags &= (word)~FLAG(_point_light_attached_to_first_person_weapon_bit);
+		}
+	}
+	return count;
+}
+#endif
+
+#ifdef HALO_LINUX
+/* (port) a Vita quality setting: HALO_MAX_SCENE_LIGHTS caps the dynamic
+lights a frame has. Each gets its own additive pass over the environment
+(diffuse and specular), a blended full draw the tile renderer cannot
+hide-surface-remove, the GPU's whole cost in a fight. After Bruno Santana's
+Vita build the cap is at the source (lights_preprocess_scene): the lights
+past it are not submitted to the rasterizer, so they get no pass over the
+environment and light no object either (before, only the passes were
+capped, every object still lit by every light). Their colour and radius
+are still worked out each frame (the tick reads the radius the render
+writes: capping the scene's light query itself left the radius stale and
+the game state then differed from the uncapped run's) and
+their lens flares drawn. The query walks the clusters seen outwards from
+the camera's, so the lights kept are mostly the nearest. Unset or 0: no
+cap, as the Xbox. */
+#include <stdlib.h>
+static short lights_scene_maximum(
+	void)
+{
+	static int maximum = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (maximum < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_MAX_SCENE_LIGHTS");
+
+		settings_seen = halo_settings_generation;
+		maximum = setting ? atoi(setting) : 0;
+		if (maximum <= 0 || maximum > MAXIMUM_RENDERED_LIGHTS)
+			maximum = MAXIMUM_RENDERED_LIGHTS;
+	}
+	return (short)maximum;
+}
+#endif
+
 void lights_preprocess_scene(
 	void)
 {
@@ -1242,7 +1313,14 @@ void lights_preprocess_scene(
 				light->radius = (definition->radius_modifier_lower_bound * inverse_intensity
 					+ definition->radius_modifier_upper_bound * intensity)
 					* definition->radius;
+#ifdef HALO_LINUX
+				/* (HALO_MAX_SCENE_LIGHTS, above: the lights past the cap are
+				not submitted; their colour and radius are worked out as
+				before, the game reads them) */
+				if (light->radius != 0.0f && debug_rasterizer_light_count < lights_scene_maximum())
+#else
 				if (light->radius != 0.0f)
+#endif
 				{
 					struct rasterizer_light_submit_parameters light_parameters;
 
@@ -1931,28 +2009,7 @@ static void light_get_bounding_sphere(
 	return;
 }
 
-#ifdef HALO_LINUX
-/* (port) a Vita quality setting: HALO_MAX_SCENE_LIGHTS caps the dynamic
-lights that get their own additive pass over the environment (diffuse and
-specular); each such pass is a blended full draw the tile renderer cannot
-hide-surface-remove, the GPU's whole cost in a fight. Unset or 0: no cap. */
-#include <stdlib.h>
-static int vita_max_scene_lights = -1;
-static short vita_scene_light_count(void)
-{
-	if (vita_max_scene_lights < 0)
-	{
-		const char *setting = getenv("HALO_MAX_SCENE_LIGHTS");
-		vita_max_scene_lights = setting ? atoi(setting) : 0;
-	}
-	if (vita_max_scene_lights > 0 && lights_globals.scene_point_light_count > vita_max_scene_lights)
-		return (short)vita_max_scene_lights;
-	return lights_globals.scene_point_light_count;
-}
-#define SCENE_LIGHT_COUNT() vita_scene_light_count()
-#else
 #define SCENE_LIGHT_COUNT() lights_globals.scene_point_light_count
-#endif
 
 void lights_render_diffuse(
 	void)

@@ -40,6 +40,13 @@ objects (its free and compacted-away bytes hold stale stamps). Two runs of one b
 otherwise drift apart on those alone (b30, the heavy-fight benchmark,
 triage/perf2-status.md).
 
+HALO_TICK_HASH_MASK=2: also what the render writes into the game state's
+objects and lights each frame: each object's cached render state index and
+each light's marker stamp, frame light index and first-person weapon flag.
+The render-only settings (the objects too small to draw, the shadows, the
+dynamic lights' cap...) change those and nothing else: compared with this,
+two runs of one build with different render settings agree.
+
 <file>.alloc gets each allocation's own hash after every tick (binary:
 a 32-bit game time and one 64-bit hash per allocation), <file>.names their
 names in the same order: tools/tick_hash_compare.py names the allocations
@@ -80,6 +87,10 @@ int halo_fixed_tick(void)
 and put back: objects.c */
 int halo_tick_hash_object_marks(long *saved, int maximum, int restore);
 unsigned long long halo_tick_hash_live_objects(void);
+/* (HALO_TICK_HASH_MASK=2) the render's fields in the objects and the lights:
+objects.c, object_lights.c */
+int halo_tick_hash_object_render_states(long *saved, int maximum, int restore);
+int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore);
 
 static int mask = -1;
 
@@ -113,10 +124,13 @@ volatile unsigned long halo_ticks_simulated;
 
 #define MAXIMUM_SAVED_MARKS 4096
 static long saved_marks[MAXIMUM_SAVED_MARKS];
+static long saved_render_states[MAXIMUM_SAVED_MARKS];
+#define MAXIMUM_SAVED_LIGHT_FIELDS (3 * 4096)
+static long saved_light_fields[MAXIMUM_SAVED_LIGHT_FIELDS];
 
 void halo_tick_hash_after_tick(void)
 {
-	int saved_mark_count = 0;
+	int saved_mark_count = 0, saved_render_state_count = 0, saved_light_field_count = 0;
 	void *base, *gpu_base;
 	unsigned long size, gpu_size;
 	unsigned long long hash = 0xCBF29CE484222325ULL;
@@ -143,9 +157,14 @@ void halo_tick_hash_after_tick(void)
 	if (!state)
 		return;
 	if (mask < 0)
-		mask = getenv("HALO_TICK_HASH_MASK") && atoi(getenv("HALO_TICK_HASH_MASK"));
+		mask = getenv("HALO_TICK_HASH_MASK") ? atoi(getenv("HALO_TICK_HASH_MASK")) : 0;
 	if (mask)
 		saved_mark_count = halo_tick_hash_object_marks(saved_marks, MAXIMUM_SAVED_MARKS, 0);
+	if (mask >= 2)
+	{
+		saved_render_state_count = halo_tick_hash_object_render_states(saved_render_states, MAXIMUM_SAVED_MARKS, 0);
+		saved_light_field_count = halo_tick_hash_light_render_fields(saved_light_fields, MAXIMUM_SAVED_LIGHT_FIELDS, 0);
+	}
 	halo_game_state_range(&base, &size);
 	halo_game_state_gpu_range(&gpu_base, &gpu_size);
 	time = game_time_get();
@@ -217,6 +236,11 @@ void halo_tick_hash_after_tick(void)
 	/* (the dump above is masked too) */
 	if (mask)
 		halo_tick_hash_object_marks(saved_marks, saved_mark_count, 1);
+	if (mask >= 2)
+	{
+		halo_tick_hash_object_render_states(saved_render_states, saved_render_state_count, 1);
+		halo_tick_hash_light_render_fields(saved_light_fields, saved_light_field_count, 1);
+	}
 	if ((time & 63) == 0)
 	{
 		fflush(file);

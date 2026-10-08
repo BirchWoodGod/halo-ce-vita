@@ -4230,6 +4230,137 @@ static void actor_unit_control(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_AI_THINK_DIVISOR: how often
+an actor thinks - its perception, situation, emotions and decision loop,
+most of the AI's cost in a big fight. 1 (the default): every tick, as the
+Xbox. 2 or 3: every second or third tick (15 or 10 Hz), staggered by the
+actor's index so the actors do not all think on the same tick. 0
+(Adaptive): by the distance to the nearest player's unit - within 8 world
+units every tick, within 25 every second tick, farther every third. What
+an actor does with its decision - its action, movement, looking, combat
+and unit control - still runs every tick, so it moves and fires as
+smoothly; it notices and decides later (by a tick or two), and its timers
+counted in thoughts (its props', its emotions') run slower in game time.
+Only the host runs the AI, so a network game's machines stay consistent.
+
+The orders an actor's decision gives (actor->orders, cleared before the
+decision loop, written by the action it chooses) are kept between its
+thoughts: a tick it does not think starts from them, less the one-tick
+orders (an animation impulse, a jump, a grenade throw, a dive, abort a
+burst), which would otherwise be carried out again. They are kept here, not
+in the game state, with the tick and the actor they were given at: an
+actor whose orders are not from one of its last ticks (a new actor, a
+revert, a loaded game) thinks. */
+#include <stdlib.h>
+
+static int actor_think_divisor = -1;
+
+static struct
+{
+	long time;
+	short identifier;
+	struct actor_orders orders;
+} actor_think_orders[MAXIMUM_ACTORS];
+
+static boolean actor_think_this_tick(
+	long actor_index,
+	struct actor_datum const *actor)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen;
+	static long points_time = NONE;
+	static real_point3d points[16];
+	static short point_count;
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(actor_index);
+	long now = game_time_get();
+	long divisor;
+
+	if (actor_think_divisor < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_AI_THINK_DIVISOR");
+
+		settings_seen = halo_settings_generation;
+		actor_think_divisor = setting && *setting ? atoi(setting) : 1;
+		if (actor_think_divisor < 0 || actor_think_divisor > 3)
+			actor_think_divisor = 1;
+	}
+	divisor = actor_think_divisor;
+	if (divisor == 1 || absolute_index < 0 || absolute_index >= MAXIMUM_ACTORS)
+		return TRUE;
+	if (divisor == 0)
+	{
+		real nearest = REAL_MAX;
+		short index;
+
+		/* (the players' units where this tick has them, once a tick) */
+		if (points_time != now)
+		{
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			points_time = now;
+			point_count = 0;
+			data_iterator_new(&iterator, player_data);
+			while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL &&
+				point_count < NUMBEROF(points))
+			{
+				struct object_datum *unit = player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+
+				if (unit)
+					points[point_count++] = unit->object.position;
+			}
+		}
+		for (index = 0; index < point_count; index++)
+		{
+			real distance = distance_squared3d(&points[index], &actor->input.position.body_position);
+
+			if (distance < nearest)
+				nearest = distance;
+		}
+		/* (no player to be near: every tick) */
+		divisor = nearest < 8.f * 8.f ? 1 : nearest < 25.f * 25.f ? 2 : 3;
+		if (divisor == 1)
+			return TRUE;
+	}
+	if (now % divisor == absolute_index % divisor)
+		return TRUE;
+	/* (orders from one of the actor's last ticks, or it thinks now) */
+	return !(actor_think_orders[absolute_index].identifier == DATUM_INDEX_TO_IDENTIFIER(actor_index) &&
+		actor_think_orders[absolute_index].time < now && actor_think_orders[absolute_index].time >= now - 3);
+}
+
+/* a tick the actor thinks: its decision's orders kept */
+static void actor_think_orders_keep(
+	long actor_index,
+	struct actor_datum const *actor)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(actor_index);
+
+	if (actor_think_divisor == 1 || absolute_index < 0 || absolute_index >= MAXIMUM_ACTORS)
+		return;
+	actor_think_orders[absolute_index].time = game_time_get();
+	actor_think_orders[absolute_index].identifier = DATUM_INDEX_TO_IDENTIFIER(actor_index);
+	actor_think_orders[absolute_index].orders = actor->orders;
+}
+
+/* a tick it does not: its last decision's orders, less the one-tick ones */
+static void actor_think_orders_restore(
+	long actor_index,
+	struct actor_datum *actor)
+{
+	actor->orders = actor_think_orders[DATUM_INDEX_TO_ABSOLUTE_INDEX(actor_index)].orders;
+	actor->orders.move.animation.impulse = NONE;
+	actor->orders.move.dive_into_cover = FALSE;
+	actor->orders.move.emerge_from_cover = FALSE;
+	actor->orders.move.jump = FALSE;
+	actor->orders.move.jump_leap = FALSE;
+	actor->orders.move.jump_targeted = FALSE;
+	actor->orders.combat.abort_burst = FALSE;
+	actor->orders.combat.throw_grenade = FALSE;
+}
+#endif
+
 static void actor_update(
 	long actor_index)
 {
@@ -4240,11 +4371,22 @@ static void actor_update(
 	{
 		actor_get_timeslice(actor_index);
 		{ HALO_DETAIL_BEGIN(); actor_input_update(actor_index); HALO_DETAIL_END("ai:input"); }
+#ifdef HALO_LINUX
+		/* (HALO_AI_THINK_DIVISOR, above) */
+		if (!actor_think_this_tick(actor_index, actor))
+			actor_think_orders_restore(actor_index, actor);
+		else
+		{
+#endif
 		{ HALO_DETAIL_BEGIN(); actor_perception_update(actor_index); HALO_DETAIL_END("ai:perception"); }
 		{ HALO_DETAIL_BEGIN(); actor_situation_update(actor_index); HALO_DETAIL_END("ai:situation"); }
 		{ HALO_DETAIL_BEGIN(); actor_emotion_update(actor_index); HALO_DETAIL_END("ai:emotion"); }
 		actor_clear_orders(actor_index);
 		{ HALO_DETAIL_BEGIN(); actor_decision_loop(actor_index); HALO_DETAIL_END("ai:decision"); }
+#ifdef HALO_LINUX
+			actor_think_orders_keep(actor_index, actor);
+		}
+#endif
 		{ HALO_DETAIL_BEGIN(); actor_action_update(actor_index); HALO_DETAIL_END("ai:action"); }
 
 		if (!actor->meta.dormant)
