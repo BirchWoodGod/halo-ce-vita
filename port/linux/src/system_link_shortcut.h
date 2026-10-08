@@ -105,6 +105,11 @@ extern char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 extern int halo_text_input_maximum;
 extern int halo_text_input_password;
 
+/* whether the game's Multiplayer menu has OpenCE's screens (menu_tags.c,
+set as ui.map loads): 1 yes (Halo PC's bitmaps.map and loc.map are there),
+-1 no (the Xbox's), 0 not known yet */
+extern volatile int halo_pc_menus_state;
+
 extern volatile int halo_system_link_request;
 extern volatile int halo_system_link_answer;
 extern volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];

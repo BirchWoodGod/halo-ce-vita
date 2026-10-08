@@ -71,6 +71,8 @@ long menu_tags_screen(long tag_index);
 boolean pc_menu_tag(long tag_index);
 char const *pc_menu_function_name(long function_index);
 char const *pc_menu_game_data_input_name(long function_index);
+/* (system_link_shortcut.c's, for the settings panel) */
+extern volatile int halo_pc_menus_state;
 /* menu_functions.c's: a screen of the game's that the menus' flows open
 another in place of (ours or the game's), or the tag itself */
 long pc_menu_functions_screen(long tag_index);
@@ -1753,7 +1755,11 @@ void menu_tags_loaded(
 	unsigned long long started = vita_host_time_us();
 
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
-	if (strcmp(map_name, "ui") || (getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox")))
+	if (strcmp(map_name, "ui"))
+		return;
+	/* (until they are added: the Xbox's menus) */
+	halo_pc_menus_state = -1;
+	if (getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox"))
 		return;
 	/* (the player's Halo PC data: only that the files are there, and what
 	they are) */
@@ -1860,6 +1866,7 @@ void menu_tags_loaded(
 		goto failed;
 	menu_tags.root_tag = build.widget_tags[widget_named(menus->root)];
 	menu_tags.loaded = TRUE;
+	halo_pc_menus_state = 1;
 	platform_log("menus: OpenCE's multiplayer screens: %ld widgets, %ld string lists and %ld bitmaps added to "
 		"ui.map's %ld tags in %lu us (the Halo PC pictures and text are read when they first open)",
 		widget_count, own_lists + menus->string_list_count, menus->bitmap_count, build.first_index,
@@ -1901,6 +1908,7 @@ long menu_tags_screen(
 			menu_tags.art = menu_tags_art_load() ? 1 : -1;
 			if (menu_tags.art < 0)
 			{
+				halo_pc_menus_state = -1;
 				platform_log("menus: OpenCE's multiplayer screens left out; the game's own Multiplayer screen");
 				return tag_index;
 			}
