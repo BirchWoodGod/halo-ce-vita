@@ -183,8 +183,13 @@ reliably, an object come to rest sent three times, the AI units' shader
 permutation in the object creation message, only the host's crossing of a
 co-op loading zone switching the BSP (from upstream's versions 18 and 21,
 whose numbers mean nothing here), the server browser's signed and
-password-protected listings. This tree has
-version 18 and joins only hosts of its own version.
+password-protected listings (the internet play relays changed none of
+the game's messages: their JOIN block is read by hosts of before them, so
+they came in at 18). Version 19 is Halo CE for PS Vita 1.1.1's: game
+chat's two messages (below), which a 1.1.0 host would take for messages it
+does not know. This tree has version 19 and joins only hosts of its own
+version; a 1.1.0 Vita and a 1.1.1 one refuse each other's games, as any
+two versions do.
 Its Vitas (and its Linux build standing in for one) play only Vitas
 (`HALO_PORT_ADVERTISED_VITA_FLAG`), so an upstream build of the same number
 is refused all the same.
