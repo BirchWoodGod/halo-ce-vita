@@ -197,6 +197,29 @@ unsigned long tag_get_group_tag(long tag_index);
 /* port: whether size bytes at address lie in the loaded map's tag cache
 (the Xbox tag cache, or a Custom Edition map's own) */
 boolean cache_file_tag_cache_contains(void const *address, long size);
+/* port: what keeps this machine's file of the Xbox map `map_name` names from
+being precached, for the player (cache_files_windows.c): FALSE when nothing
+that can be seen before copying it does; else TRUE and `why` */
+boolean cache_files_xbox_map_problem(
+	char const *map_name,
+	char *why,
+	long why_size);
+/* port: why the last precache of `map_name` failed, for the player */
+void cache_files_precache_failure_describe(
+	char const *map_name,
+	char *why,
+	long why_size);
+/* port: a map that could not be precached (cache_files.c): said, and the
+game goes back to the menu or a joiner leaves its game, rather than a
+damaged disc. FALSE for the menus' own map, which has no menu to go back
+to. */
+boolean cache_files_precache_failed(
+	char const *map_name,
+	boolean blocking);
+/* port: whatever map last failed to precache may be tried again (a map
+chosen, or a game's settings received: main_set_multiplayer_map_name) */
+void cache_files_precache_failure_forget(
+	void);
 #endif
 
 /* ---------- prototypes/XBOX_TEXTURE_CACHE.C */

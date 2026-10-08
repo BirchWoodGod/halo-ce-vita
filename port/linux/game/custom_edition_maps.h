@@ -70,12 +70,15 @@ struct bitmap_data *custom_edition_maps_picture(
 /* What a multiplayer host sends with a level so that its players can tell
 whether they have its copy (the network game's map version, which the Xbox
 left 0): 0 for an Xbox level, whose copies differ by region and play
-together, else custom_edition_cache_map_identity's (0: no such map). */
+together, else custom_edition_cache_map_identity's (0: no such map); also
+for a Halo PC map named as an Xbox level when PC maps is on, which this
+machine then plays instead of that level. */
 unsigned long custom_edition_maps_network_identity(
 	char const *level_name);
 
 /* Whether a player may play the host's level `level_name`, of which the host
-sent `host_identity`: an Xbox level always; a custom map when this machine
+sent `host_identity`: an Xbox level always (unless the host plays a Halo PC
+map of its name: as a custom map then); a custom map when this machine
 has it and, if the host said which copy, that copy (*missing: not at all).
 Logs why not. */
 boolean custom_edition_maps_host_copy_matches(
@@ -108,6 +111,25 @@ short custom_edition_maps_loadable(
 	char const *level_name,
 	char *missing,
 	long missing_size);
+
+/* Whether this machine cannot play the Xbox level `level_name` that the host
+plays as one (`host_identity` 0: custom_edition_maps_network_identity): its
+file missing, cut short, damaged, too big, or a Halo PC map of that name
+(cache_files_xbox_map_problem), which precaching it would have stopped at as
+a damaged disc. TRUE then, with `why` for the player; FALSE for any other
+level, and for a Halo PC map the host plays under an Xbox level's name
+(custom_edition_maps_host_copy_matches and custom_edition_maps_loadable
+decide those). */
+boolean custom_edition_maps_stock_problem(
+	char const *level_name,
+	unsigned long host_identity,
+	char *why,
+	long why_size);
+
+/* The title of the level `level_name` for the player: an Xbox level's as the
+menus have it ("Battle Creek"), else its map's file name. */
+char const *custom_edition_maps_level_title(
+	char const *level_name);
 
 /* Makes the next question about the maps look for them anew (a map was
 downloaded into the folder: map_share.c). */

@@ -36,6 +36,7 @@ read.
 #include "scenario/scenario_definitions.h"
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
+#include "custom_edition_maps.h"
 #include "map_share_protocol.h"
 #include "tag_schema.h"
 #ifdef HALO_RELOCATABLE_TAG_CACHE
@@ -1264,14 +1265,20 @@ boolean custom_edition_cache_load_failure_show(
 	{
 		return FALSE;
 	}
-	snprintf(
-		message,
-		sizeof(message),
-		"The custom map %s could not be loaded: %s.",
-		custom_edition_load_failure.map_name,
-		custom_edition_load_failure.reason[0] ? custom_edition_load_failure.reason : "see debug.txt");
-	error(_error_silent, "custom edition: %s", message);
-	platform_show_message("Halo: custom map", message);
+	/* (an Xbox level's file, which could not be precached: cache_files.c) */
+	{
+		char const *title = custom_edition_maps_level_title(custom_edition_load_failure.map_name);
+		boolean xbox_level = csstrcmp(title, custom_edition_load_failure.map_name) != 0;
+
+		snprintf(
+			message,
+			sizeof(message),
+			xbox_level ? "Couldn't load %s: %s." : "The custom map %s could not be loaded: %s.",
+			title,
+			custom_edition_load_failure.reason[0] ? custom_edition_load_failure.reason : "see debug.txt");
+		error(_error_silent, "custom edition: %s", message);
+		platform_show_message(xbox_level ? "Halo: map" : "Halo: custom map", message);
+	}
 	custom_edition_load_failure.failed = FALSE;
 
 	return TRUE;

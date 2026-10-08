@@ -1102,8 +1102,16 @@ void game_unload(
 		while (!map_status);
 
 		ui_widgets_close_all();
+#ifdef HALO_LINUX
+		/* port: the precache under way (another map's, not the one being
+		unloaded) failed: ended, and said when that map is wanted again
+		(cache_files_precache_failed), rather than a damaged disc now */
+		if (map_status == 2)
+			error(_error_silent, "game_unload: the precache under way failed; ended");
+#else
 		if (map_status == 2)
 			display_error_damaged_media();
+#endif
 		cache_files_precache_map_end();
 	}
 
@@ -1189,6 +1197,15 @@ void game_precache_new_map(
 				_error_silent,
 				"shouldn't be here... map '%s' doesn't exist",
 				map_name);
+#ifdef HALO_LINUX
+			/* port: said, and game_load fails with the reason rather than
+			the game stopping (cache_files_precache_failed) */
+			if (blocking && cache_files_precache_failed(map_name, TRUE))
+			{
+				main_queue_map_name(NULL);
+				return;
+			}
+#endif
 			if (blocking)
 			{
 				match_vassert(
@@ -1225,8 +1242,28 @@ void game_precache_new_map(
 
 			progress_bar_end();
 			ui_widgets_close_all();
+#ifdef HALO_LINUX
+			/* port: a copy that failed (a file cut short, the card full) is
+			said, and game_load fails with the reason rather than the game
+			stopping at the damaged disc (cache_files_precache_failed) */
+			if (map_status == _cached_map_file_failed)
+			{
+				cache_files_precache_map_end();
+				if (!cache_files_precache_failed(map_name, TRUE))
+				{
+					display_error_damaged_media_reason("the menus' map %s could not be copied to the map cache", map_name);
+					display_error_damaged_media();
+				}
+				globals = game_globals;
+				globals->map_load_in_progress = FALSE;
+				globals->loading_progress = 0.0f;
+				main_queue_map_name(NULL);
+				return;
+			}
+#else
 			if (map_status == _cached_map_file_failed)
 				display_error_damaged_media();
+#endif
 			cache_files_precache_map_end();
 			match_assert(
 				"c:\\halo\\SOURCE\\game\\game.c",

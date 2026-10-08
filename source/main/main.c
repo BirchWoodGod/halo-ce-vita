@@ -1700,6 +1700,11 @@ void main_set_multiplayer_map_name(
 {
 	csstrncpy(main_globals.multiplayer_map_name, map_name, NUMBEROF(main_globals.multiplayer_map_name) - 1);
 	main_globals.multiplayer_map_name[NUMBEROF(main_globals.multiplayer_map_name) - 1] = 0;
+#ifdef HALO_LINUX
+	/* (port: a map chosen anew is tried again, though it failed before:
+	cache_files_precache_failed) */
+	cache_files_precache_failure_forget();
+#endif
 	cache_files_give_time_to_precache(main_globals.multiplayer_map_name);
 	return;
 }

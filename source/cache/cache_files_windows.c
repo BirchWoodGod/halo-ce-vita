@@ -658,6 +658,137 @@ boolean cache_files_forget_cached_map(
 
 	return TRUE;
 }
+
+/* port: how the last precache's copy failed (cache_files_precache_map_status:
+_cache_copy_read_failure and the others), or 0 */
+static short cache_files_last_copy_failure = 0;
+/* (and the cache file it was copying to) */
+static short cache_files_last_copy_slot = NONE;
+
+boolean cache_files_xbox_map_problem(
+	char const *map_name,
+	char *why,
+	long why_size)
+{
+	char const *name = tag_name_strip_path(map_name ? map_name : "");
+	struct cache_file_header header;
+	char path[256];
+	HANDLE file = INVALID_HANDLE_VALUE;
+	unsigned long bytes_read = 0;
+	boolean read = FALSE;
+	long largest;
+
+	why[0] = 0;
+	if (!name[0])
+	{
+		snprintf(why, (size_t)why_size, "the host named no map");
+		return TRUE;
+	}
+	cache_file_get_map_path(name, path);
+	if (path[0])
+	{
+		file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	}
+	if (file == INVALID_HANDLE_VALUE)
+	{
+		snprintf(why, (size_t)why_size, "%s.map isn't in your maps folder", name);
+		return TRUE;
+	}
+	read = ReadFile(file, &header, sizeof(header), &bytes_read, NULL) && bytes_read == sizeof(header);
+	CloseHandle(file);
+	if (!read)
+	{
+		snprintf(why, (size_t)why_size, "your %s.map is cut short (%lu bytes): copy it to your maps folder again",
+			name, bytes_read);
+		return TRUE;
+	}
+	/* (a Halo PC map named as an Xbox level: its loader is
+	custom_edition_cache.c's, with PC maps on, and it is not the Xbox map) */
+	if (custom_edition_cache_is_custom_edition(name))
+	{
+		snprintf(why, (size_t)why_size, "your %s.map is the Halo PC (Custom Edition) map, not the Xbox one", name);
+		return TRUE;
+	}
+	/* (Halo PC's own maps, version 7: Halo PC's maps folder copied over the
+	Xbox maps) */
+	if (header.header_signature == 'head' && header.version == 7)
+	{
+		snprintf(why, (size_t)why_size, "your %s.map is the Halo PC map, not the Xbox one", name);
+		return TRUE;
+	}
+	if (!cache_file_header_verify(&header, path, FALSE))
+	{
+		snprintf(why, (size_t)why_size, "your %s.map isn't an Xbox map this game can load (damaged, or another "
+			"version's): copy the Xbox %s.map to your maps folder again", name, name);
+		return TRUE;
+	}
+	if (_stricmp(header.name, name) != 0)
+	{
+		snprintf(why, (size_t)why_size, "your %s.map is another map (it names itself '%.31s')", name, header.name);
+		return TRUE;
+	}
+	switch (header.scenario_type)
+	{
+	case _scenario_type_solo:
+		largest = cached_map_file_get_size(0);
+		break;
+	case _scenario_type_main_menu:
+		largest = cached_map_file_get_size(2);
+		break;
+	case _scenario_type_multiplayer:
+		largest = cached_map_file_get_size(3);
+		break;
+	default:
+		largest = 0;
+		break;
+	}
+	if (header.file_length >= largest)
+	{
+		snprintf(why, (size_t)why_size, "your %s.map is too big for the game's map cache (%ld bytes)",
+			name, (long)header.file_length);
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+void cache_files_precache_failure_describe(
+	char const *map_name,
+	char *why,
+	long why_size)
+{
+	char const *name = tag_name_strip_path(map_name ? map_name : "");
+
+	if (cache_files_xbox_map_problem(map_name, why, why_size))
+	{
+		return;
+	}
+	switch (cache_files_last_copy_failure)
+	{
+	case _cache_copy_write_failure:
+	{
+		char path[256];
+
+		path[0] = 0;
+		if (cache_files_last_copy_slot >= 0 && cache_files_last_copy_slot < NUMBER_OF_CACHED_MAP_FILES)
+		{
+			cached_map_file_get_path(cache_files_last_copy_slot, path);
+		}
+		snprintf(why, (size_t)why_size, "the game's map cache %s couldn't be written (is the memory card full, or the "
+			"data folder read-only?)", path);
+		break;
+	}
+	case _cache_copy_read_failure:
+	case _cache_copy_bad_file_failure:
+		snprintf(why, (size_t)why_size, "your %s.map is cut short or damaged: copy it to your maps folder again", name);
+		break;
+	default:
+		snprintf(why, (size_t)why_size, "your %s.map could not be read", name);
+		break;
+	}
+
+	return;
+}
 #endif
 
 /* (the port's, port/linux/src/sdl_platform.c) */
@@ -692,8 +823,11 @@ boolean cache_files_precache_map_begin(
 				error(_error_silent, "map '%s' names itself '%s' in its header: refused", cache_map_name, header.name);
 				platform_log("map %s.map names itself '%s' in its header; a map's name must be its file's",
 					cache_map_name, header.name);
-				if (copy_map)
+				/* (port: the menus' map alone; any other is said by the caller,
+				cache_files_precache_failed, and the menu shown) */
+				if (copy_map && !_stricmp(cache_map_name, "ui"))
 				{
+					display_error_damaged_media_reason("ui.map names itself '%s' in its header", header.name);
 					display_error_damaged_media();
 				}
 
@@ -707,8 +841,10 @@ boolean cache_files_precache_map_begin(
 			{
 				error(_error_silent, "no cache file can hold map '%s' (%08x bytes, type %d)",
 					cache_map_name, header.file_length, header.scenario_type);
-				if (copy_map)
+				if (copy_map && !_stricmp(cache_map_name, "ui"))
 				{
+					display_error_damaged_media_reason("ui.map is too big for its cache file (%ld bytes, type %d)",
+						(long)header.file_length, (int)header.scenario_type);
 					display_error_damaged_media();
 				}
 
@@ -723,6 +859,9 @@ boolean cache_files_precache_map_begin(
 				sizeof(struct cache_file_header));
 			cache_file_globals.copy_in_progress = TRUE;
 			cache_file_globals.copying_to_map_file_index = map_file_index;
+#ifdef HALO_LINUX
+			cache_files_last_copy_failure = 0;
+#endif
 			strncpy(
 				cache_file_globals.copying_to_map_file_name,
 				cache_map_name,
@@ -742,8 +881,9 @@ boolean cache_files_precache_map_begin(
 		{
 			error(_error_silent, "couldn't find map '%s' on the DVD", cache_map_name);
 			error(_error_silent, "full path name '%s'", map_name);
-			if (copy_map)
+			if (copy_map && !_stricmp(cache_map_name, "ui"))
 			{
+				display_error_damaged_media_reason("ui.map is missing from the maps folder, or isn't an Xbox map");
 				display_error_damaged_media();
 			}
 
@@ -889,15 +1029,12 @@ boolean cache_file_open(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		223,
 		cache_file_globals.open_map_file_index==NONE);
-	match_assert(
-		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
-		224,
-		map_file_index!=NONE);
 #ifdef HALO_LINUX
 	/* port: a map that is not in the cache (its header named another map,
-	or it could not be precached: a crafted or damaged file) is not opened,
-	rather than indexing the cached-map array out of bounds (release builds
-	do not check the assertion above) */
+	or it could not be precached: a crafted, damaged or missing file,
+	cache_files_precache_failed) is not opened, rather than indexing the
+	cached-map array out of bounds: before the assertion below, so that the
+	builds that check it go back to the menu with the reason too */
 	if (map_file_index == NONE)
 	{
 		error(_error_silent, "the map '%s' is in no cache file", scenario_name);
@@ -905,6 +1042,10 @@ boolean cache_file_open(
 		return FALSE;
 	}
 #endif
+	match_assert(
+		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
+		224,
+		map_file_index!=NONE);
 	memset(
 		cache_file_globals.requests,
 		0,
@@ -1098,7 +1239,20 @@ short cache_files_precache_map_status(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		984,
 		cache_file_globals.copy_in_progress);
+#ifdef HALO_LINUX
+	/* (port: how it failed, for the player: cache_files_precache_failure_describe) */
+	{
+		short copy_status = cache_copy_get_status(progress);
+
+		if (copy_status != _cache_copy_in_progress && copy_status != _cache_copy_finished)
+		{
+			cache_files_last_copy_failure = copy_status;
+			cache_files_last_copy_slot = cache_file_globals.copying_to_map_file_index;
+		}
+		switch (copy_status)
+#else
 	switch (cache_copy_get_status(progress))
+#endif
 	{
 		case _cache_copy_bad_file_failure:
 		case _cache_copy_read_failure:
@@ -1126,6 +1280,9 @@ short cache_files_precache_map_status(
 			match_vassert("c:\\halo\\SOURCE\\cache\\cache_files_windows.c", 1013, FALSE, NULL);
 			break;
 	}
+#ifdef HALO_LINUX
+	}
+#endif
 
 	return status;
 }
@@ -1283,6 +1440,15 @@ static void cache_files_open_cache_files(
 			CloseHandle(file);
 			file = INVALID_HANDLE_VALUE;
 		}
+#ifdef HALO_LINUX
+		/* port: a cache file that cannot be made fails every map copied to
+		it (the damaged disc error of old): named in halo.log */
+		if (file == INVALID_HANDLE_VALUE)
+		{
+			platform_log("map cache: %s (%ld bytes) could not be made (error %lu): the maps it holds can't be loaded",
+				path, size, (unsigned long)GetLastError());
+		}
+#endif
 
 		map_file->file = file;
 		if (valid)
@@ -2031,6 +2197,14 @@ static short cached_map_files_find_map(
 {
 	short map_file_index;
 
+#ifdef HALO_LINUX
+	/* port: no map is named "": an empty name matched an empty cache file,
+	and passed for a map precached (cache_files_give_time_to_precache) */
+	if (!map_name || !map_name[0])
+	{
+		return NONE;
+	}
+#endif
 	for (map_file_index = 0;
 		map_file_index < NUMBER_OF_CACHED_MAP_FILES;
 		map_file_index++)

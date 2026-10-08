@@ -1027,6 +1027,9 @@ short cache_copy_get_status(
 {
 	unsigned long flags = cache_copy_get_flags();
 	short status = 0;
+#ifdef HALO_LINUX
+	boolean complete;
+#endif
 
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files_decompress_windows.c",
@@ -1035,13 +1038,27 @@ short cache_copy_get_status(
 
 	if (global_self->blocking)
 		Sleep(16);
+#ifdef HALO_LINUX
+	/* port: whether the copy is over, then its flags, both after the wait:
+	the flags were read before it, and a copy that failed in those 16 ms
+	(a map file cut short, found as it decompresses) was over with its
+	failure unread, which said it was copied: a blocking precache then went
+	on to load a map the cache did not hold. The copy thread sets a failure
+	before it says it is over, so the flags read after its end hold it. */
+	complete = WaitForSingleObject(global_self->copy_complete_event, 0) == 0;
+	flags = cache_copy_get_flags();
+#endif
 
 	if (!flags && global_self->copy_thread)
 	{
 		if (global_self->header.size > 0)
 		{
+#ifdef HALO_LINUX
+			status = (short)(complete + _cache_copy_in_progress);
+#else
 			status = (short)((WaitForSingleObject(global_self->copy_complete_event, 0) == 0) +
 				_cache_copy_in_progress);
+#endif
 			if (WaitForSingleObject(global_self->progress_update_event, 0) == 0)
 			{
 				real read_progress;
@@ -1667,6 +1684,14 @@ static void cache_copy_run_decompression(
 			if (cache_copy_stop_requested())
 				break;
 
+#ifdef HALO_LINUX
+			/* port: a map file cut short or damaged is the player's file, not
+			a fault of the game's: logged, and the copy fails as a bad file
+			(said to the player: cache_files_precache_failed), also in the
+			builds that check assertions */
+			error(_error_silent, "cache copy: '%s' does not decompress (zlib %d, '%s'): a bad file",
+				global_self->src_name, zlib_result, zlib_stream->msg ? zlib_stream->msg : "");
+#else
 			match_vassert(
 				"c:\\halo\\SOURCE\\cache\\cache_files_decompress_windows.c",
 				1248,
@@ -1676,6 +1701,7 @@ static void cache_copy_run_decompression(
 					"decompression fucked up with error code (%d), msg '%s'",
 					zlib_result,
 					zlib_stream->msg ? zlib_stream->msg : ""));
+#endif
 			cache_copy_set_flag(_copy_bad_file_bit);
 
 			break;
