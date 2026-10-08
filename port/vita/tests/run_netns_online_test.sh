@@ -72,10 +72,11 @@
 #            (online; HALO_TEST_COOP_LAN=1: system link on one LAN, online
 #            off); each copy runs its HALO_TEST_COOP_HOST_COMMANDS /
 #            HALO_TEST_COOP_JOIN_COMMANDS (main.c's HALO_TEST_COMMANDS: skip
-#            votes, loading zones, kills, game_won); the logs are checked by
-#            the caller. HALO_TEST_COOP_JOINERS: how many join (1; up to
-#            network.coop_players, 4 on the Vitas: each must see every
-#            player alive at once), HALO_TEST_COOP_STAGGER seconds apart
+#            votes, loading zones, kills, game_won); the rest of the logs
+#            are checked by the caller. Each joiner must see every player
+#            alive at once for 15 s. HALO_TEST_COOP_JOINERS: how many join
+#            (1; up to network.coop_players, 4 on the Vitas),
+#            HALO_TEST_COOP_STAGGER seconds apart
 #            (1; past the host's start, HALO_NETWORK_TEST_START 20, a late
 #            join); HALO_TEST_COOP_HOST_ENV: more for the host
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
@@ -644,15 +645,16 @@ coop)
 	echo "--- joiner"; cat "$out/joiner.summary"
 	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $two"
-	if [ "$joiners" -gt 1 ]; then
-		# (every joiner played, and the seconds all of them were alive at once)
-		pattern=$(for i in $(seq 0 "$joiners"); do printf 'player [0-9]+: \\(.*'; done)
-		for name in $names; do
-			all=$(grep -a "network test: tick" "$out/$name/run.log" | grep -aEc "$pattern")
-			echo "$name's seconds with all $((joiners + 1)) players alive: $all"
-			[ "$all" -ge 15 ] || fail "$name saw all $((joiners + 1)) players alive for $all s (15 wanted)"
-		done
-	fi
+	# (every joiner played, one alone too: the seconds all of them were alive
+	# at once. On a10 the host leaves the cryo tube first, on Easy and Normal
+	# once the bot has looked around and pressed X, and only then does a
+	# joiner spawn: HALO_TEST_SECONDS 180 leaves about a minute)
+	pattern=$(for i in $(seq 0 "$joiners"); do printf 'player [0-9]+: \\(.*'; done)
+	for name in $names; do
+		all=$(grep -a "network test: tick" "$out/$name/run.log" | grep -aEc "$pattern")
+		echo "$name's seconds with all $((joiners + 1)) players alive: $all"
+		[ "$all" -ge 15 ] || fail "$name saw all $((joiners + 1)) players alive for $all s (15 wanted)"
+	done
 	# (a co-op game is private unless chosen: network.coop_public, OpenCE's)
 	if [ "${HALO_TEST_COOP_LAN:-0}" != 1 ] && grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log"; then
 		fail "the co-op game was listed in the public games (it is private unless chosen)"

@@ -389,8 +389,11 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	static int checked;
 	static int seed = -1;
-	/* "bot:<seed>:look": it also looks up and down (the campaign's first
-	level asks for that before the player leaves the cryo tube) */
+	/* "bot:<seed>:look": it also looks up and down and presses X (action)
+	now and then: on Easy and Normal the campaign's first level asks for a
+	look all around and then for the action button before the player leaves
+	the cryo tube (player_action_test_action), and until a teammate is out a
+	co-op partner only watches (players_coop_room_to_spawn) */
 	static int look;
 	double t;
 
@@ -434,7 +437,11 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	pad->sThumbLX = (SHORT)(cos(t * 0.6 + seed) * 20000.0);
 	pad->sThumbRX = (SHORT)(sin(t * 0.4) * 14000.0);
 	if (look)
+	{
 		pad->sThumbRY = (SHORT)(sin(t * 0.7 + seed) * 20000.0);
+		if (fmod(t, 4.0) >= 2.0 && fmod(t, 4.0) < 2.2)
+			pad->bAnalogButtons[XINPUT_GAMEPAD_X] = 255;
+	}
 	if (fmod(t, 3.0) < 0.3)
 		pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 255;
 	if (fmod(t, 5.0) < 0.1)
