@@ -89,6 +89,9 @@ enum
 	_chat_notice_host_off,
 	/* the host's Game chat is Quick chat only: no typed lines */
 	_chat_notice_host_quick,
+	/* the host passes on no voice (voice.c: its Voice in my games is Off,
+	or Private games only and its game is listed in the public games) */
+	_chat_notice_host_voice_off,
 	NUMBER_OF_CHAT_NOTICES
 };
 

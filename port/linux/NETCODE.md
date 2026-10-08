@@ -187,7 +187,9 @@ password-protected listings (the internet play relays changed none of
 the game's messages: their JOIN block is read by hosts of before them, so
 they came in at 18). Version 19 is Halo CE for PS Vita 1.1.1's: game
 chat's two messages (below), which a 1.1.0 host would take for messages it
-does not know. This tree has version 19 and joins only hosts of its own
+does not know, and voice chat's two (below, folded into the same version:
+1.1.1 had not shipped, and a build of 19 without them drops them as kinds
+it does not know). This tree has version 19 and joins only hosts of its own
 version; a 1.1.0 Vita and a 1.1.1 one refuse each other's games, as any
 two versions do.
 Its Vitas (and its Linux build standing in for one) play only Vitas
@@ -311,6 +313,53 @@ Until it has loaded, the machine hears none of the game's messages (which a
 machine in the pregame refuses, and which the others no longer need), only
 a pregame keep-alive every five seconds from the host
 (`network_server_manager.c`, `network_server_message_handler.c`).
+
+## Voice chat
+
+Voice chat (`port/linux/game/voice.c`, its rules `voice_protocol.c`, its
+audio `port/linux/src/voice_audio.c`) travels as two of the distributed
+netcode's unreliable messages, in a game being played (not the lobby):
+`_distributed_message_voice` (78), a client's 20 ms Opus frames (16 kHz
+mono, 16 kbps, in-band FEC; libopus 1.6.1 in `port/third_party/opus`) of
+the tick, at most four, naming only which of the machine's controllers
+talks; and `_distributed_message_voice_relay` (79), the host's relay of
+its talkers' frames, naming each talker by its place in the game's player
+list. Both go after the tick's game messages, whole (never split between
+two datagrams: `distributed_send_whole`), in the room the game's messages
+leave in the tick's datagram or a datagram of their own; a lost frame is
+never sent again and nothing waits for one. Each frame is five bytes
+(who, flags, a 16-bit sequence, its size) and its Opus packet.
+
+The host takes frames only from a machine in the game that has loaded
+(the distributed netcode's own check) and names their talker itself from
+that machine's players, so a joiner cannot talk as another. Every frame is
+checked, on the host and again on every machine: the message read whole
+or dropped whole (its count, every size within 80 bytes, its flags, no
+bytes left over), and each frame an Opus packet of exactly one 20 ms mono
+frame (its TOC), so the decoder is only given what voice sends. The host
+drops a machine's frames past twelve at once and one every 18 ms (a
+talker's pace), its own relaying past four talkers' worth, and talkers past
+four at once (the first to talk keep their places until 400 ms quiet), and
+passes the rest on after its tick to every other machine in the game, or,
+in a game with teams, to those with a player of the talker's team (a
+talker's own machine never gets its voice back). Every machine plays no
+more than the host's own limit and drops the voice of players its player
+muted (game chat's mutes, by machine and controller and by name).
+
+The host's **Voice in my games** (`HALO_VOICE_HOST`) is its game's:
+Private games only, the default, passes voice on in a game that is not
+listed in the public games (system link, ad hoc, a game joined by its
+code, private co-op) and none in a listed one; On in every game, Off in
+none. A machine whose voice the host drops is told so, at most every 20
+seconds, by game chat's notice ("Voice chat is off in this game"). A player
+the host muted is muted for its game.
+
+A client stops sending while its round trip to the host is past 20 ticks
+or it has heard nothing from it for 1.5 seconds, and the host sends no
+voice to a machine whose round trip is that long, so voice gives way to the
+game on a bad connection. A talker costs about 13 to 20 kbps from its
+machine to the host (its frames and their headers; most go in the tick's
+own datagram) and as much from the host to each machine that hears it.
 
 ## Stages
 

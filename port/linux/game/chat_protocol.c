@@ -26,6 +26,7 @@ static char const *const chat_notices[NUMBER_OF_CHAT_NOTICES] =
 {
 	"Chat is off in this game",
 	"Only quick chat in this game",
+	"Voice chat is off in this game",
 };
 
 /* ---------- private code */

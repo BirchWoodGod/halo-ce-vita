@@ -144,6 +144,7 @@ Multiplayer tab's way.
 #include <sys/stat.h>
 
 #include "chat_link.h"
+#include "voice_link.h"
 #include "p2p.h"
 #include "system_link_shortcut.h"
 #include "vita_controls.h"
@@ -459,6 +460,19 @@ static struct setting settings[] = {
 	chat_help) */
 	{ "Game chat", "HALO_CHAT", 0, 3, { "on", "quick", "off" }, { "On", "Quick chat only", "Off" },
 		"Back + Y in a lobby or game: phrases, typing", 0, TAB_MULTIPLAYER },
+	/* (voice chat, port/linux/game/voice.c and voice_audio.c: the Vita's
+	microphone or a headset's; push to talk is Back + left trigger in a
+	network game, vita_settings_game_buttons. Voice in my games is the
+	games this Vita hosts: by default none in a game listed in the public
+	games; the help is each choice's own, voice_help) */
+	{ "Voice chat", "HALO_VOICE", 0, 3, { "ptt", "open", "off" }, { "Push to talk", "Open mic", "Off" },
+		"Hold Back + LT in a network game to talk", 0, TAB_MULTIPLAYER },
+	{ "  Open mic level", "HALO_VOICE_LEVEL", 0, 3, { "low", "medium", "high" }, { "Low", "Medium", "High" },
+		"How loud you must be: Low sends a quiet voice", 1, TAB_MULTIPLAYER },
+	{ "Voice volume", "HALO_VOICE_VOLUME", 0, 5, { "20", "40", "60", "80", "100" },
+		{ "20%", "40%", "60%", "80%", "100%" }, "How loud the other players' voices are", 3, TAB_MULTIPLAYER },
+	{ "Voice in my games", "HALO_VOICE_HOST", 0, 3, { "private", "on", "off" },
+		{ "Private games only", "On", "Off" }, "Not in your games listed in the public games", 0, TAB_MULTIPLAYER },
 	/* (the hosted game's settings, which the game's Server Setup sets
 	(vita_settings_set, menu_functions.c) and settings.txt keeps: on a page
 	no row opens) */
@@ -949,6 +963,13 @@ static int setting_shown(const struct setting *setting)
 		return network_is("online");
 	if (setting->variable && !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD"))
 		return network_is("online") && choice_of("HALO_NET_HOST_PUBLIC");
+	/* (open mic's threshold, with Open mic) */
+	if (setting->variable && !strcmp(setting->variable, "HALO_VOICE_LEVEL"))
+	{
+		const struct setting *voice = setting_named("HALO_VOICE");
+
+		return voice && !strcmp(voice->values[voice->choice], "open");
+	}
 	if (setting->variable && !strcmp(setting->variable, "HALO_DYNAMIC_RES_MIN"))
 	{
 		const struct setting *scale = setting_named("HALO_RENDER_SCALE");
@@ -1984,6 +2005,18 @@ static const char *const chat_help[3] = {
 	"No chat, and none in the games you host",
 };
 
+/* (Voice chat's and Voice in my games': each choice's) */
+static const char *const voice_help[3] = {
+	"Hold Back + LT in a network game to talk",
+	"Sends when the mic hears you; Back + LT too",
+	"No voice: yours not sent, others' not played",
+};
+static const char *const voice_host_help[3] = {
+	"Not in your games listed in the public games",
+	"Voice in every game you host",
+	"No voice in the games you host",
+};
+
 static const char *setting_help(const struct setting *setting)
 {
 	static char camera_help[64];
@@ -1992,6 +2025,12 @@ static const char *setting_help(const struct setting *setting)
 	if (setting->variable && !strcmp(setting->variable, "HALO_MAP_SHARE_FROM") && setting->choice >= 0 &&
 		setting->choice < 3)
 		return map_downloads_help[setting->choice];
+	if (setting->variable && !strcmp(setting->variable, "HALO_VOICE") && setting->choice >= 0 && setting->choice < 3)
+		return setting->choice == 0 && playstation_terms() ? "Hold Select + L in a network game to talk" :
+			voice_help[setting->choice];
+	if (setting->variable && !strcmp(setting->variable, "HALO_VOICE_HOST") && setting->choice >= 0 &&
+		setting->choice < 3)
+		return voice_host_help[setting->choice];
 	if (setting->variable && !strcmp(setting->variable, "HALO_CHAT") && setting->choice >= 0 && setting->choice < 3)
 		return setting->choice == 0 && playstation_terms() ? "Select + Triangle in a lobby or game: phrases, typing" :
 			chat_help[setting->choice];
@@ -3537,8 +3576,34 @@ static int chat_combo(unsigned long buttons, unsigned long pressed)
 	return 0;
 }
 
+/* ---------- voice chat's push to talk
+
+Back + left trigger (Select + L) held in a network game being played, with
+Voice chat not Off (voice_link.h): voice's, not the game's - no grenade, no
+scoreboard - and each stays voice's until it is let go, so letting go of one
+first neither throws a grenade nor shows the scores. In the menus (the pause
+menu) never: nothing is sent from a menu. */
+static int voice_combo_used;
+
+static unsigned long voice_buttons(unsigned long buttons, int menus)
+{
+	int available = __atomic_load_n(&halo_voice_status[HALO_VOICE_STATUS_AVAILABLE], __ATOMIC_ACQUIRE);
+	int held = available && !menus && (buttons & VITA_BUTTON_SELECT) && (buttons & VITA_BUTTON_L) &&
+		!(buttons & VITA_BUTTON_START);
+
+	if (held)
+		voice_combo_used = 1;
+	else if (!(buttons & (VITA_BUTTON_SELECT | VITA_BUTTON_L)))
+		voice_combo_used = 0;
+	if (voice_combo_used)
+		buttons &= ~(VITA_BUTTON_SELECT | VITA_BUTTON_L);
+	__atomic_store_n(&halo_voice_talk_held, held, __ATOMIC_RELEASE);
+	return buttons;
+}
+
 unsigned long vita_settings_game_buttons(unsigned long buttons, int menus)
 {
+	buttons = voice_buttons(buttons, menus);
 	if (!chat_available())
 	{
 		chat_back = CHAT_BACK_IDLE;

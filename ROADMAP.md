@@ -65,6 +65,9 @@ water drawn correctly.
 
 - **Game chat**: quick-chat phrases and typed messages in the lobby and in
   game, with mute.
+- **Voice chat**: push to talk (Back + LT) or open mic with the Vita's
+  microphone or a headset, through the host, muted with game chat's mutes;
+  none in public games unless their host turns it on.
 - **Split screen on the PS TV**: more than one player on one PS TV with
   DualShock 3 / DualShock 4 controllers.
 

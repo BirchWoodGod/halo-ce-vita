@@ -391,6 +391,26 @@ not sent. The host's Game chat setting holds for its whole game: with
 Quick chat only nobody can type, with Off nobody can chat, and a player who
 tries is told so.
 
+**Voice chat.** In a network game being played, hold **Back + left
+trigger (Select + L)** and talk: the Vita's microphone (or a headset's)
+is on only while both are held, and the top right of the screen says
+**Talking (mic on)** in red meanwhile. Neither button does its usual thing
+while they are held together (no scoreboard, no grenade), nor when one is
+let go before the other. The name of each player you hear shows under it
+while they talk. Voice uses game chat's **Mute players** (Back + Y): a
+player you mute is neither shown nor heard, and when you host, nobody in
+your game hears a player you mute. In a game with teams you hear your own
+team only. Voice is sent in small pieces that are not sent again when one
+is lost, so it never holds up the game: on a slow connection your Vita
+stops sending voice (the screen says **Voice paused: slow connection**) and
+the host sends none to a player whose connection is slow. The host passes
+on at most four talkers at once.
+
+With **Open mic** your Vita sends whenever its microphone hears more than
+the **Open mic level** (Low sends a quiet voice, High only a near one), and
+the screen says **Open mic** all the while. Voice is not in the lobby,
+only in the game.
+
 The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
@@ -400,7 +420,11 @@ The settings panel's **Multiplayer** tab:
 | Join the room | With Ad hoc: the system's dialog joins (or makes) the room's group; then Multiplayer, System Link (LAN) in the game. |
 | Join with a code | Online, without the PC menus (whose Join by code does it): type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins), then the steps with how the lookup goes, and Cross opens System Link. |
 | Modded maps > | Your custom maps (above). |
-| Game chat | **On** (the default), **Quick chat only** (phrases only: no typed lines sent or shown) or **Off** (no chat; Back + Y is Y again). When you host, it holds for everyone in your game. Game chat below. |
+| Game chat | **On** (the default), **Quick chat only** (phrases only: no typed lines sent or shown) or **Off** (no chat; Back + Y is Y again). When you host, it holds for everyone in your game. Game chat above. |
+| Voice chat | **Push to talk** (the default: Back + LT), **Open mic** or **Off** (yours not sent, others' not played; Back + LT are the game's again). Voice chat above. |
+| Open mic level | With Open mic: **Low**, **Medium** (the default) or **High**: how loud you must be to be sent. |
+| Voice volume | How loud others' voices are: 20% to 100% (80%, the default, plays them as they came). |
+| Voice in my games | The games you host: **Private games only** (the default: voice in system link, ad hoc and games joined by code, none in a game listed in the public games), **On** or **Off**. A player who talks in a game without voice is told so. |
 
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many

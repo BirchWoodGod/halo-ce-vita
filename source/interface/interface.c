@@ -106,6 +106,7 @@ symbols in this file:
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include "chat.h"
+#include "voice.h"
 #endif
 
 /* ---------- constants */
@@ -481,6 +482,9 @@ void interface_draw_fullscreen_overlays(
 	/* port: game chat's lines (port/linux/game/chat.c), the lobby's and the
 	game's */
 	chat_draw();
+	/* port: voice chat's talkers and this machine's microphone
+	(port/linux/game/voice.c) */
+	voice_draw();
 #endif
 	main_framerate_render();
 	render_debug_profile();

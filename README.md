@@ -275,6 +275,7 @@ Quit** from the pause menu is the safest way to stop.
 | Start | Start | pause; skips a cinematic |
 | Select | Back | scoreboard |
 | Select + Start (hold) | | settings panel |
+| Select + L (hold) | Back + left trigger | voice chat in a network game: push to talk |
 
 The settings panel's **Controls** tab has two pages laid out as the Xbox
 controller: **Button layout** puts each Xbox button (A, B, X, Y, Black,

@@ -72,6 +72,7 @@ machine (their datum identifiers need not be).
 #include "units/bipeds.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "voice.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -1074,6 +1075,19 @@ void distributed_send_to_machine(
 		return;
 	distributed_fill_header(message, type, count, size);
 	distributed_batch_add((short)machine_index, message, size, distributed_entry_size(count, size));
+}
+
+void distributed_send_whole(
+	void *message,
+	byte type,
+	short count,
+	word size,
+	long machine_index)
+{
+	if (machine_index != NONE && (machine_index < 0 || machine_index >= HALO_PORT_MAXIMUM_NETWORK_MACHINES))
+		return;
+	distributed_fill_header(message, type, count, size);
+	distributed_batch_add(machine_index == NONE ? HOST_SENDER : (short)machine_index, message, size, 0);
 }
 
 void distributed_send_to_machine_reliably(
@@ -3401,6 +3415,9 @@ void network_distributed_tick(
 		network_damage_client_tick();
 		network_coop_client_tick();
 	}
+	/* (voice chat's frames last: the tick's game messages have the batches
+	first, and voice goes in what room is left, or a datagram of its own) */
+	voice_network_tick();
 	distributed_batches_flush();
 	distributed_machines.in_tick = FALSE;
 	distributed_machines.valid = FALSE;
@@ -3955,6 +3972,8 @@ void network_distributed_handle_message(
 	case _distributed_message_damage_animations: entry_size = network_objects_damage_animation_entry_size(); break;
 	case _distributed_message_coop_screen_effect: entry_size = network_coop_screen_effect_entry_size(); break;
 	case _distributed_message_coop_device_states: entry_size = network_coop_device_state_entry_size(); break;
+	case _distributed_message_voice:
+	case _distributed_message_voice_relay: entry_size = voice_minimum_entry_size(); break;
 	case _distributed_message_pickups: entry_size = sizeof(struct distributed_pickup); break;
 	case _distributed_message_player_inputs: entry_size = sizeof(struct distributed_player_input); break;
 	case _distributed_message_relayed_actions: entry_size = DISTRIBUTED_RELAYED_ACTION_MINIMUM_SIZE; break;
@@ -3997,6 +4016,7 @@ void network_distributed_handle_message(
 	case _distributed_message_vehicle_prediction:
 	case _distributed_message_player_inputs:
 	case _distributed_message_coop_skip_vote:
+	case _distributed_message_voice:
 		if (machine_index == NONE || game_connection() != _game_connection_network_server)
 			return;
 		break;
@@ -4160,6 +4180,12 @@ void network_distributed_handle_message(
 		}
 		break;
 	}
+	case _distributed_message_voice:
+		voice_handle_frames(machine_index, (byte const *)entries, (byte const *)message + size, header.count);
+		break;
+	case _distributed_message_voice_relay:
+		voice_handle_relay((byte const *)entries, (byte const *)message + size, header.count);
+		break;
 	case _distributed_message_damage_events:
 		network_damage_handle_events(entries, header.count);
 		break;

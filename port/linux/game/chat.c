@@ -803,6 +803,54 @@ void chat_draw(
 	}
 }
 
+boolean chat_player_muted(
+	struct network_player const *player)
+{
+	char name[CHAT_NAME_BYTES];
+
+	if (!player)
+		return FALSE;
+	chat_name_clean(name, sizeof(name), (uint16_t const *)player->name, CHAT_NAME_CHARACTERS);
+	return chat_is_muted(name, player);
+}
+
+void chat_server_notice_machine(
+	long machine_index,
+	short notice)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	struct chat_relay_message relay;
+	long slot;
+
+	if (!server || !chat_notice_text(notice))
+		return;
+	for (slot = 0; slot < HALO_PORT_MAXIMUM_NETWORK_MACHINES; slot++)
+	{
+		struct network_game_server_client_machine *machine = network_game_server_get_client_machine_at_index(server, slot);
+		long machine_id;
+		void *message;
+
+		if (!machine || !network_game_server_client_machine_is_joined_to_game(server, machine) ||
+			!network_game_server_get_client_machine(server, machine, &machine_id) || machine_id != machine_index)
+		{
+			continue;
+		}
+		if (!chat_bucket_take(&chat_globals.machine_buckets[slot], system_milliseconds(), CHAT_BURST,
+			CHAT_REFILL_MILLISECONDS))
+		{
+			return;
+		}
+		csmemset(&relay, 0, sizeof(relay));
+		relay.kind = _chat_kind_notice;
+		relay.phrase = notice;
+		relay.team = NONE;
+		message = create_network_game_message(_message_server_chat, &relay, sizeof(relay));
+		if (message)
+			network_game_server_send_message_to_client_machine(server, machine, message);
+		return;
+	}
+}
+
 void chat_server_handle_request(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,

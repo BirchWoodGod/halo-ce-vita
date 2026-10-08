@@ -1030,6 +1030,8 @@ starts over from the head and skips the voices it has mixed already */
 static unsigned long stream_list_generation;
 static unsigned long mix_pass;
 
+void voice_audio_mix(float *output, unsigned long frames);
+
 static void mix(float *output, unsigned long frames)
 {
 	struct sdl_stream *stream;
@@ -1091,6 +1093,8 @@ static void mix(float *output, unsigned long frames)
 	statistics_mix_us += statistics_now() - started;
 	statistics_mixes++;
 	statistics_voices += voices;
+	/* voice chat's talkers, before the limiter (voice_audio.c) */
+	voice_audio_mix(output, frames);
 	limit(&output_limiter, output, frames);
 	{
 		/* (debug) HALO_AUDIO_DUMP=<file>: the mix as it goes to the device,

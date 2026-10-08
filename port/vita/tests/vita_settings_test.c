@@ -59,6 +59,9 @@ volatile int halo_chat_request;
 volatile int halo_chat_request_value;
 volatile int halo_chat_request_team;
 char halo_chat_request_text[HALO_CHAT_TEXT_SIZE];
+/* (voice chat's side: port/linux/src/voice_audio.c) */
+volatile int halo_voice_status[HALO_VOICE_STATUS_COUNT];
+volatile int halo_voice_talk_held;
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
 /* (the map in play: never deleted) */
@@ -834,9 +837,10 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat") && strstr(menu, "< Online") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && strstr(menu, "< Online") &&
 		strstr(menu, "\nGame chat\x02  On >"),
-		"Multiplayer: Connection, Join with a code (Online), Modded maps, Game chat (On); no Play page (no ad hoc room: Online)");
+		"Multiplayer: Connection, Join with a code (Online), Modded maps, Game chat (On), voice chat's rows; no Play page "
+		"(no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
 		!strstr(menu, "Games on this network") && !strstr(menu, "Host co-op campaign"),
@@ -844,7 +848,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
-	check(menu_rows() == 4 && menu_fits(), "Multiplayer: four rows, 46 characters a line");
+	check(menu_rows() == 7 && menu_fits(), "Multiplayer: seven rows, 46 characters a line");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
 
@@ -853,13 +857,13 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Modded maps|Game chat") && !strstr(menu, "Online menus"),
+	check(!strcmp(labels, "Connection*|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && !strstr(menu, "Online menus"),
 		"the PC menus in the game: Connection and Modded maps only");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
@@ -969,7 +973,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_UP);
 	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Modded maps|Game chat"),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games"),
 		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
 	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
@@ -985,7 +989,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps|Game chat") && menu_fits(),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && menu_fits(),
 		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
 	clock_us += 5000000;
 	to_line("Ad hoc room");
@@ -1017,8 +1021,8 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Modded maps|Game chat") && menu_fits(),
-		"Same Wi-Fi: Connection, Modded maps, Game chat");
+	check(!strcmp(labels, "Connection*|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && menu_fits(),
+		"Same Wi-Fi: Connection, Modded maps, Game chat, voice chat's rows");
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -1034,7 +1038,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -1091,6 +1095,7 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_CHAT",
+		"HALO_VOICE", "HALO_VOICE_LEVEL", "HALO_VOICE_VOLUME", "HALO_VOICE_HOST",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1381,6 +1386,90 @@ static void test_button_icons(void)
 	press(VITA_BUTTON_CIRCLE);
 }
 
+
+/* ---------- voice chat */
+
+static void test_voice_chat(void)
+{
+	unsigned long game;
+	char labels[512];
+	int info;
+
+	/* the rows: Voice chat (Push to talk), its level with Open mic only,
+	the volume, Voice in my games (Private games only) */
+	open_panel();
+	check(to_tab("Multiplayer") && to_line("Voice chat") && strstr(menu, "Voice chat\x02  Push to talk >") &&
+		strstr(menu, "\n\x05Hold Back + LT in a network game to talk\n") && menu_fits(),
+		"Voice chat: Push to talk by default, its help names Back + LT");
+	rows_of(labels, sizeof(labels), &info);
+	check(!strstr(labels, "Open mic level"), "no Open mic level with Push to talk");
+	press(VITA_BUTTON_RIGHT);
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(getenv("HALO_VOICE"), "open") && strstr(menu, "Voice chat\x02< Open mic >") &&
+		strstr(labels, "|Voice chat|  Open mic level|Voice volume|") &&
+		strstr(menu, "\n\x05Sends when the mic hears you; Back + LT too\n") && menu_fits(),
+		"Open mic: its level row shown");
+	press(VITA_BUTTON_DOWN);
+	check(strstr(menu, "Open mic level\x02< Medium >") != NULL, "Open mic level: Medium by default");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_VOICE_LEVEL"), "low"), "Open mic level: Low");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_VOICE"), "off") && strstr(menu, "\n\x05No voice: yours not sent, others' not played\n") &&
+		strstr(file_text("ux0:data/haloce-vita/settings.txt"), "HALO_VOICE=off"), "Voice chat: Off, saved");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_VOICE"), "ptt"), "Voice chat: Push to talk again");
+	check(to_line("Voice volume") && strstr(menu, "Voice volume\x02< 80% >"), "Voice volume: 80% by default");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_VOICE_VOLUME"), "100"), "Voice volume: 100%");
+	press(VITA_BUTTON_LEFT);
+	check(to_line("Voice in my games") && strstr(menu, "Voice in my games\x02  Private games only >") &&
+		strstr(menu, "\n\x05Not in your games listed in the public games\n") && menu_fits(),
+		"Voice in my games: Private games only by default (none in a listed game)");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_VOICE_HOST"), "on") && strstr(menu, "\n\x05Voice in every game you host\n"),
+		"Voice in my games: On");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_VOICE_HOST"), "off") && strstr(menu, "\n\x05No voice in the games you host\n"),
+		"Voice in my games: Off");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+
+	/* push to talk: Back + left trigger (Select + L), in a game with voice */
+	halo_voice_status[HALO_VOICE_STATUS_AVAILABLE] = 0;
+	game = vita_settings_game_buttons(VITA_BUTTON_SELECT | VITA_BUTTON_L, 0);
+	check(game == (VITA_BUTTON_SELECT | VITA_BUTTON_L) && !halo_voice_talk_held,
+		"no voice (Off, or no network game): Select + L are the game's");
+	vita_settings_game_buttons(0, 0);
+	halo_voice_status[HALO_VOICE_STATUS_AVAILABLE] = 1;
+	check(vita_settings_game_buttons(VITA_BUTTON_L, 0) == VITA_BUTTON_L && !halo_voice_talk_held,
+		"L alone: a grenade, not talking");
+	vita_settings_game_buttons(0, 0);
+	game = vita_settings_game_buttons(VITA_BUTTON_SELECT | VITA_BUTTON_L | VITA_BUTTON_R, 0);
+	check(halo_voice_talk_held && game == VITA_BUTTON_R, "Select + L: talking; neither the scoreboard nor a grenade, "
+		"the rest the game's");
+	game = vita_settings_game_buttons(VITA_BUTTON_SELECT, 0);
+	check(!halo_voice_talk_held && game == 0, "L let go: not talking, Select still voice's (no scoreboard)");
+	game = vita_settings_game_buttons(VITA_BUTTON_SELECT | VITA_BUTTON_L, 0);
+	check(halo_voice_talk_held, "L again: talking");
+	game = vita_settings_game_buttons(VITA_BUTTON_L, 0);
+	check(!halo_voice_talk_held && game == 0, "Select let go first: L still voice's (no grenade)");
+	game = vita_settings_game_buttons(0, 0);
+	game = vita_settings_game_buttons(VITA_BUTTON_L, 0);
+	check(game == VITA_BUTTON_L, "both let go: L the game's again");
+	vita_settings_game_buttons(0, 0);
+	game = vita_settings_game_buttons(VITA_BUTTON_SELECT | VITA_BUTTON_L, 1);
+	check(!halo_voice_talk_held, "in the menus (the pause menu): never talking");
+	vita_settings_game_buttons(0, 1);
+	game = vita_settings_game_buttons(VITA_BUTTON_SELECT | VITA_BUTTON_L | VITA_BUTTON_START, 0);
+	check(!halo_voice_talk_held, "Select + Start held (the panel's combination): not talking");
+	vita_settings_game_buttons(0, 0);
+	halo_voice_status[HALO_VOICE_STATUS_AVAILABLE] = 0;
+}
 
 /* ---------- game chat's menu */
 
@@ -2110,6 +2199,7 @@ int main(void)
 	test_gyro_page();
 	test_button_icons();
 	test_game_text_input();
+	test_voice_chat();
 	test_game_chat();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;

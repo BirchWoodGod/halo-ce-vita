@@ -20,6 +20,7 @@ Keyboard and mouse (port 0):
 	left ctrl, C     left stick click    Z, middle button right stick click
 	escape           start               F1               back
 	F12              release or recapture the mouse
+	V                voice chat's push to talk (as Back + left trigger)
 
 In the menus the mouse is free and drives a pointer instead
 (port/linux/include/halo_ui_pointer.h, source/interface/ui_widget.c): its
@@ -39,6 +40,7 @@ drive the controller.
 #include "platform.h"
 #include "sdl_platform.h"
 #include "port_config.h"
+#include "voice_link.h"
 
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -211,6 +213,23 @@ static void keyboard_gamepad(const struct platform_input_state *input, XINPUT_GA
 	pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] |= analog(k[SDL_SCANCODE_X]);
 	pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] |= analog(k[SDL_SCANCODE_G] || (mouse && m[SDL_BUTTON_RIGHT]));
 	pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] |= analog(mouse && m[SDL_BUTTON_LEFT]);
+}
+
+/* Voice chat's push to talk (voice_link.h): V held (the console closed), or
+Back with the left trigger, which in a game with voice are voice's alone
+(no scoreboard, no grenade) while both are held */
+static void voice_push_to_talk(const struct platform_input_state *input, XINPUT_GAMEPAD *pad)
+{
+	int available = __atomic_load_n(&halo_voice_status[HALO_VOICE_STATUS_AVAILABLE], __ATOMIC_ACQUIRE);
+	int combination = (pad->wButtons & XINPUT_GAMEPAD_BACK) && pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] >= 128;
+	int key = !console_is_active() && input->keys[SDL_SCANCODE_V];
+
+	if (available && combination)
+	{
+		pad->wButtons &= ~XINPUT_GAMEPAD_BACK;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] = 0;
+	}
+	__atomic_store_n(&halo_voice_talk_held, available && (combination || key), __ATOMIC_RELEASE);
 }
 
 /* A scroll of the wheel switches weapons once: it holds Y for WHEEL_PRESS_MS
@@ -774,6 +793,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
 		test_input_gamepad(&state->Gamepad, 0);
 		test_pad_gamepad(&state->Gamepad, 0);
+		voice_push_to_talk(&input, &state->Gamepad);
 	}
 	else if (port < test_controller_count())
 	{

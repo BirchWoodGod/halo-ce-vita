@@ -250,6 +250,20 @@ static const struct config_setting config_settings[] =
 		"its code or invite link): its own, which network.host_public (the\n"
 		"other games') never changes. X on the waiting screen of co-op hosted\n"
 		"from the campaign's menus writes its choice here (OpenCE's setting)." },
+	{ "network.voice", _config_string, "\"ptt\"", "HALO_VOICE", _environment_value, _platform_all,
+		"Voice chat in network games: \"ptt\" sends your microphone only while\n"
+		"push to talk is held (V, or a controller's Back + left trigger; the\n"
+		"Vita's Select + L), \"open\" whenever it hears more than\n"
+		"network.voice_level, \"off\" neither sends nor plays others' voices." },
+	{ "network.voice_volume", _config_integer, "80", "HALO_VOICE_VOLUME", _environment_value, _platform_all,
+		"How loud others' voices play, 0 to 100 (80 as they came)." },
+	{ "network.voice_level", _config_string, "\"medium\"", "HALO_VOICE_LEVEL", _environment_value, _platform_all,
+		"Open mic's threshold: \"low\" sends a quiet voice, \"medium\", \"high\"\n"
+		"only a near one." },
+	{ "network.voice_host", _config_string, "\"private\"", "HALO_VOICE_HOST", _environment_value, _platform_all,
+		"Voice in the games this machine hosts: \"private\" in those not listed in\n"
+		"the public games (system link, ad hoc, join by code, private co-op) and\n"
+		"none in a listed one, \"on\" in every one, \"off\" in none." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"

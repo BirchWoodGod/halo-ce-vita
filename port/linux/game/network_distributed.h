@@ -103,6 +103,12 @@ enum
 	/* co-op: where the host's devices are (doors, elevators), when they move
 	(network_coop.c) */
 	_distributed_message_coop_device_states = 77,
+	/* voice chat (voice.c): a client's frames of its player's voice, to the
+	host (unreliable, whole) */
+	_distributed_message_voice = 78,
+	/* ... the host's relay of a talker's frames, named by the host, to the
+	machines that hear them (unreliable, whole) */
+	_distributed_message_voice_relay = 79,
 
 	NUMBER_OF_DISTRIBUTED_MESSAGES
 };
@@ -185,6 +191,10 @@ void distributed_send(void *message, byte type, short count, word size, short de
 void distributed_client_send_identity(void);
 /* ... unreliably to one client (the host) */
 void distributed_send_to_machine(long machine_index, void *message, byte type, short count, word size);
+/* ... unreliably, whole (never split between two datagrams: a message of
+entries of their own sizes, voice chat's), to one client (the host) or,
+machine_index NONE, to the host (a client) */
+void distributed_send_whole(void *message, byte type, short count, word size, long machine_index);
 /* ... reliably to one client (the host) */
 void distributed_send_to_machine_reliably(long machine_index, void *message, byte type, short count, word size);
 /* the player at an absolute index, or NULL */
