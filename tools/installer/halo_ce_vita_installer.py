@@ -32,7 +32,11 @@ files. Every name read from a disc image or a cabinet is checked before a
 file is written (no "..", no absolute paths, nothing outside the output
 folder), and the files are checked once written (sizes, headers).
 
-Python 3.8 or later, no other packages (tkinter for the window).
+Python 3.8 or later, no other packages (tkinter for the window). Optional,
+for the window's look: sv-ttk (the Sun Valley theme, Windows 11's light and
+dark styles) and darkdetect (the system's dark or light setting), both in
+requirements.txt and inside the Windows program. Without them the window is
+the same, in Tk's own look.
 """
 
 from __future__ import annotations
@@ -2023,8 +2027,9 @@ def xbox_files_size(source_path: str) -> int:
 
 
 def self_test(report: Optional[str] = None) -> int:
-    """What this copy of the tool can do: tkinter for the window, ffmpeg
-    for the movies (the Windows program brings its own)."""
+    """What this copy of the tool can do: tkinter for the window, its theme
+    (sv-ttk, which the Windows program must bring), ffmpeg for the movies
+    (the Windows program brings its own)."""
     lines = ["halo_ce_vita_installer %s, Python %s on %s" % (VERSION, sys.version.split()[0], sys.platform)]
     good = True
     try:
@@ -2033,6 +2038,15 @@ def self_test(report: Optional[str] = None) -> int:
     except ImportError as error:
         lines.append("tkinter: missing (%s)" % error)
         good = False
+    if _sv_ttk_module():
+        try:
+            import darkdetect  # noqa: F401
+            lines.append("theme: sv-ttk ok, darkdetect ok (the system is set to %s)" % system_theme())
+        except ImportError:
+            lines.append("theme: sv-ttk ok, darkdetect missing (light, unless chosen)")
+    else:
+        lines.append("theme: sv-ttk missing (the window uses Tk's own look)")
+        good = good and not getattr(sys, "frozen", False)
     ffmpeg = find_ffmpeg()
     if ffmpeg:
         try:
@@ -2151,6 +2165,138 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 # ---------------------------------------------------------------------------
 # the window
+#
+# The look comes from the Sun Valley ttk theme (sv-ttk, MIT: Windows 11's
+# light and dark styles for ttk's own widgets), following the system's dark
+# or light setting (darkdetect, BSD). Both are optional: without them (the
+# .py run where they are not installed) the same window is drawn with Tk's
+# own ttk theme. HCV_THEME=light, dark or plain (no sv-ttk) picks one.
+
+
+def _windows_dpi_awareness() -> None:
+    """Sharp text on scaled displays: Windows would otherwise draw the
+    window at 96 DPI and stretch it. Also names the process, so the taskbar
+    shows the window's own icon, not Python's."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # system DPI aware
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except (AttributeError, OSError):
+            pass
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HaloCEVita.InstallHelper")
+    except (AttributeError, OSError):
+        pass
+
+
+def _windows_title_bar(root, dark: bool) -> None:
+    """Windows 10/11's dark title bar to go with the dark theme."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        root.update_idletasks()
+        window = ctypes.windll.user32.GetParent(root.winfo_id())
+        value = ctypes.c_int(1 if dark else 0)
+        for attribute in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE, and its number before Windows 10 20H1
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(window, attribute, ctypes.byref(value),
+                                                          ctypes.sizeof(value)) == 0:
+                break
+    except Exception:  # cosmetic only
+        pass
+
+
+def system_theme() -> str:
+    """'dark' or 'light', as the system is set (darkdetect), else light."""
+    try:
+        import darkdetect
+        return "dark" if (darkdetect.theme() or "").lower() == "dark" else "light"
+    except Exception:
+        return "light"
+
+
+def _sv_ttk_module():
+    try:
+        import sv_ttk
+        return sv_ttk
+    except ImportError:
+        return None
+
+
+# The window's icon, drawn here (no image files): a blue rounded square with
+# a white arrow going down into a tray. Generic on purpose: no game artwork.
+ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+
+
+def _icon_sample(u: float, v: float):
+    margin, radius = 0.04, 0.21
+    dx = max(abs(u - 0.5) - (0.5 - margin - radius), 0.0)
+    dy = max(abs(v - 0.5) - (0.5 - margin - radius), 0.0)
+    if dx * dx + dy * dy > radius * radius:
+        return None
+    white = (255, 255, 255)
+    if 0.44 <= u <= 0.56 and 0.17 <= v <= 0.46:  # the arrow's shaft
+        return white
+    if 0.40 <= v <= 0.65 and abs(u - 0.5) <= (0.65 - v) / 0.25 * 0.21:  # its head
+        return white
+    if 0.73 <= v <= 0.82 and 0.21 <= u <= 0.79:  # the tray
+        return white
+    if 0.57 <= v <= 0.82 and (0.21 <= u <= 0.30 or 0.70 <= u <= 0.79):
+        return white
+    top, bottom = (0x3a, 0x96, 0xdd), (0x00, 0x5f, 0xb8)
+    return tuple(round(a + (b - a) * v) for a, b in zip(top, bottom))
+
+
+def _png(size: int, rgba: bytes) -> bytes:
+    row = size * 4
+    raw = b"".join(b"\0" + rgba[y * row:(y + 1) * row] for y in range(size))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def icon_png(size: int) -> bytes:
+    """The icon as a PNG of size x size pixels (each pixel the average of
+    a grid of samples, so the edges are smooth)."""
+    grid = 4 if size <= 64 else 2
+    out = bytearray()
+    for y in range(size):
+        for x in range(size):
+            red = green = blue = alpha = 0
+            for j in range(grid):
+                v = (y + (j + 0.5) / grid) / size
+                for i in range(grid):
+                    colour = _icon_sample((x + (i + 0.5) / grid) / size, v)
+                    if colour:
+                        red += colour[0]
+                        green += colour[1]
+                        blue += colour[2]
+                        alpha += 1
+            if alpha:
+                out += bytes((red // alpha, green // alpha, blue // alpha, 255 * alpha // (grid * grid)))
+            else:
+                out += b"\0\0\0\0"
+    return _png(size, bytes(out))
+
+
+def write_icon(path: str, sizes: Sequence[int] = ICON_SIZES) -> None:
+    """The icon as a Windows .ico (PNG images inside, every size Windows
+    asks for): the program's icon in the Windows build."""
+    images = [icon_png(size) for size in sizes]
+    header = struct.pack("<HHH", 0, 1, len(images))
+    offset = len(header) + 16 * len(images)
+    entries = b""
+    for size, image in zip(sizes, images):
+        entries += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(image), offset)
+        offset += len(image)
+    with open(path, "wb") as file:
+        file.write(header + entries + b"".join(images))
 
 
 def run_window(out: str) -> int:
@@ -2161,6 +2307,7 @@ def run_window(out: str) -> int:
         _console_log("tkinter is not available: use the command-line steps (--help), or install Python's "
                      "tkinter (python3-tk).")
         return 1
+    _windows_dpi_awareness()
     try:
         root = tkinter.Tk()
     except tkinter.TclError as error:
@@ -2171,22 +2318,69 @@ def run_window(out: str) -> int:
     return 0
 
 
+# the colours around sv-ttk's own (its backgrounds and accent blues)
+PALETTES = {
+    "light": {"bg": "#fafafa", "sidebar": "#f0f0f0", "fg": "#1c1c1c", "muted": "#5f5f5f", "accent": "#005fb8",
+              "on_accent": "#ffffff", "tag": "#e1ecf7", "error": "#c42b1c", "ok": "#0f7b0f",
+              "ring": "#8a8a8a", "chip": "#ececec", "log": "#ffffff", "border": "#d9d9d9"},
+    "dark": {"bg": "#1c1c1c", "sidebar": "#242424", "fg": "#fafafa", "muted": "#b8b8b8", "accent": "#57c8ff",
+             "on_accent": "#000000", "tag": "#173647", "error": "#ff99a4", "ok": "#6ccb5f",
+             "ring": "#8a8a8a", "chip": "#2e2e2e", "log": "#262626", "border": "#3d3d3d"},
+}
+
+
 class InstallerWindow:
     STEPS = ("Welcome", "1. Xbox game files", "2. Movies", "3. Halo PC files", "4. Copy to the Vita",
              "5. Install the VPK", "Done")
+    # each page: the sidebar's name, what it needs, the header's title and its short description
+    PAGES = (
+        ("Welcome", "", "Welcome",
+         "Gather your own Halo CE files in the layout the Vita needs, then copy them to the Vita over "
+         "VitaShell's FTP. Five steps; each can be skipped and run again."),
+        ("Xbox game files", "Required", "Xbox game files",
+         "Choose your Xbox disc image (.iso) or the unpacked game folder: its maps and default.xbe are "
+         "taken out."),
+        ("Movies", "Optional", "Movies",
+         "The disc's intro, attract and credits movies, converted for the Vita with ffmpeg. The game runs "
+         "without them."),
+        ("Halo PC files", "Required for online play", "Halo PC files",
+         "bitmaps.map, sounds.map and loc.map from your own copy of Halo PC, for online play and the "
+         "Custom Edition maps."),
+        ("Copy to the Vita", "Required", "Copy to the Vita",
+         "Everything gathered goes to %s over VitaShell's FTP." % VITA_GAME_FOLDER),
+        ("Install the VPK", "Required for a first install", "Install the VPK",
+         "Copy halo.vpk to the Vita's ux0:data/, then install it with VitaShell."),
+        ("Done", "", "All done",
+         "What was gathered and copied, and what to do next on the Vita."),
+    )
+    LAST_STEP = 5
+    SIDEBAR_NEEDS = {3: "For online play", 5: "For a first install"}  # (shorter, for the sidebar)
 
-    def __init__(self, root, out: str):
+    def __init__(self, root, out: str, theme: Optional[str] = None):
         import tkinter
         from tkinter import ttk
         self.tk = tkinter
         self.ttk = ttk
         self.root = root
         root.title("Halo CE for PS Vita - Install helper")
-        root.minsize(820, 660)
         self.messages: "queue.Queue" = queue.Queue()
         self.worker: Optional[threading.Thread] = None
         self.cancel = threading.Event()
         self.page = 0
+        self.running_page: Optional[int] = None
+        self.done_steps: set = set()  # steps finished in this session
+        self.skipped: set = set()
+        self.results: Dict[int, str] = {}
+        self.notice = None
+        self.details_shown = False
+
+        theme = (theme or os.environ.get("HCV_THEME", "")).strip().lower()
+        self.sv_ttk = None if theme == "plain" else _sv_ttk_module()
+        self.follow_system = theme not in ("light", "dark")
+        self.theme = theme if theme in ("light", "dark") else system_theme()
+        if not self.sv_ttk:
+            self.theme = "plain"
+        self.scale = max(1.0, root.winfo_fpixels("1i") / 96.0)
 
         self.out = tkinter.StringVar(value=out)
         self.xbox_source = tkinter.StringVar()
@@ -2201,81 +2395,472 @@ class InstallerWindow:
         self.port = tkinter.StringVar(value=str(FTP_PORT))
         self.replace = tkinter.BooleanVar(value=False)
         self.vpk = tkinter.StringVar(value=(find_local_vpks() or [""])[0])
-        self.status = tkinter.StringVar(value="")
+        self.status = tkinter.StringVar(value="Ready")
+        self.percent = tkinter.StringVar(value="")
+        self.dark = tkinter.BooleanVar(value=self.theme == "dark")
 
-        outer = ttk.Frame(root, padding=10)
-        outer.pack(fill="both", expand=True)
-        sidebar = ttk.Frame(outer)
-        sidebar.pack(side="left", fill="y", padx=(0, 12))
-        self.step_labels = []
-        for name in self.STEPS:
-            label = ttk.Label(sidebar, text=name, padding=(6, 4))
-            label.pack(anchor="w", fill="x")
-            self.step_labels.append(label)
-        main = ttk.Frame(outer)
+        self._make_fonts()
+        self._icons = []
+        try:
+            self._icons = [tkinter.PhotoImage(data=icon_png(size), format="png") for size in (64, 32, 16)]
+            root.iconphoto(True, *self._icons)
+        except tkinter.TclError:
+            pass
+        self._build()
+        self.apply_theme(self.theme)
+        width, height = self.px(1000), self.px(740)
+        width = min(width, max(root.winfo_screenwidth() - 40, 640))
+        height = min(height, max(root.winfo_screenheight() - 90, 520))
+        root.geometry("%dx%d" % (width, height))
+        root.minsize(min(self.px(860), width), min(self.px(620), height))
+        self.show(0)
+        if self.follow_system and self.sv_ttk and sys.platform == "win32":
+            self._listen_for_system_theme()
+        root.after(100, self.poll)
+
+    # -- sizes, fonts and colours
+    def px(self, value: float) -> int:
+        return int(round(value * self.scale))
+
+    def _make_fonts(self):
+        from tkinter import font as tkfont
+        families = set(tkfont.families(self.root))
+        if sys.platform == "win32":
+            text = "Segoe UI Variable Text" if "Segoe UI Variable Text" in families else "Segoe UI"
+            display = "Segoe UI Variable Display" if "Segoe UI Variable Display" in families else "Segoe UI"
+        else:
+            text = next((name for name in ("Segoe UI", "Inter", "Cantarell", "Noto Sans", "Ubuntu",
+                                           "DejaVu Sans") if name in families),
+                        tkfont.nametofont("TkDefaultFont", root=self.root).actual("family"))
+            display = text
+        # sizes in pixels (sv-ttk's), scaled for the display
+        self.fonts = {
+            "HcvCaption": (text, 12, "normal"), "HcvBody": (text, 14, "normal"),
+            "HcvBodyStrong": (text, 14, "bold"), "HcvSubtitle": (display, 17, "bold"),
+            "HcvTitle": (display, 26, "bold"), "HcvLink": (text, 14, "normal"),
+        }
+        # (kept: tkinter deletes a named font when its Font object goes)
+        self._font_objects = []
+        for name, (family, size, weight) in self.fonts.items():
+            options = dict(family=family, size=-self.px(size), weight=weight, underline=name == "HcvLink")
+            try:
+                tkfont.Font(root=self.root, name=name, exists=True).configure(**options)
+            except self.tk.TclError:
+                self._font_objects.append(tkfont.Font(root=self.root, name=name, **options))
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
+            tkfont.nametofont(name, root=self.root).configure(family=text, size=-self.px(14))
+        tkfont.nametofont("TkFixedFont", root=self.root).configure(size=-self.px(12))
+
+    def _sv_fonts(self):
+        """sv-ttk's named fonts in the window's family and scaled sizes
+        (its own are Windows 11's Segoe UI Variable at fixed pixel sizes)."""
+        from tkinter import font as tkfont
+        text = self.fonts["HcvBody"][0]
+        display = self.fonts["HcvTitle"][0]
+        for name, family, size, weight in (("SunValleyCaptionFont", text, 12, "normal"),
+                                           ("SunValleyBodyFont", text, 14, "normal"),
+                                           ("SunValleyBodyStrongFont", text, 14, "bold"),
+                                           ("SunValleyBodyLargeFont", text, 18, "normal"),
+                                           ("SunValleySubtitleFont", display, 20, "bold"),
+                                           ("SunValleyTitleFont", display, 28, "bold")):
+            try:
+                tkfont.Font(root=self.root, name=name, exists=True).configure(
+                    family=family, size=-self.px(size), weight=weight)
+            except self.tk.TclError:
+                pass
+
+    def apply_theme(self, theme: str):
+        style = self.ttk.Style(self.root)
+        if self.sv_ttk and theme in ("light", "dark"):
+            self.sv_ttk.set_theme(theme, self.root)
+            self._sv_fonts()
+            palette = dict(PALETTES[theme])
+        else:
+            theme = "plain"
+            names = style.theme_names()
+            for name in ("vista", "aqua", "clam"):
+                if name in names:
+                    style.theme_use(name)
+                    break
+            palette = dict(PALETTES["light"])
+            palette["bg"] = style.lookup(".", "background") or "#f0f0f0"
+            palette["sidebar"] = "#e6e6e6"
+            palette["fg"] = style.lookup(".", "foreground") or "#000000"
+            palette["border"] = "#c4c4c4"
+        self.theme = theme
+        self.palette = palette
+        self._styles(style, palette)
+        self._repaint()
+        # sv-ttk recolours the widgets there are (tk_setPalette) once Tk
+        # gets to its <<ThemeChanged>>, after this: painted again then
+        self.root.after_idle(self._repaint)
+        _windows_title_bar(self.root, theme == "dark")
+
+    def _repaint(self):
+        """The colours that are not ttk styles: the labels' own (tk_setPalette
+        gives every label the theme's background, which hides the styles'),
+        the log and the sidebar's markers."""
+        palette = self.palette
+        widgets = [self.root]
+        while widgets:
+            widget = widgets.pop()
+            widgets.extend(widget.winfo_children())
+            if widget.winfo_class() == "TLabel":
+                widget.configure(background="", foreground="")
+        self.root.configure(background=palette["bg"])
+        self.card.configure(background=palette["bg"], highlightbackground=palette["border"],
+                            highlightcolor=palette["border"])
+        self.canvas.configure(background=palette["bg"], yscrollincrement=self.px(20))
+        self.log_text.configure(background=palette["log"], foreground=palette["fg"],
+                                insertbackground=palette["fg"], highlightbackground=palette["border"],
+                                highlightcolor=palette["border"], selectbackground=palette["accent"],
+                                selectforeground=palette["on_accent"])
+        self.refresh_sidebar()
+
+    def _styles(self, style, p):
+        px = self.px
+        plain = self.theme == "plain"
+        for name in ("TFrame", "TLabel", "TRadiobutton", "TCheckbutton"):
+            style.configure(name, background=p["bg"])
+        style.configure("TLabel", foreground=p["fg"], font="HcvBody")
+        style.configure("TRadiobutton", font="HcvBody")
+        style.configure("TCheckbutton", font="HcvBody")
+        style.configure("Sidebar.TFrame", background=p["sidebar"])
+        style.configure("Sidebar.TLabel", background=p["sidebar"], foreground=p["fg"], font="HcvBody")
+        style.configure("SidebarCurrent.TLabel", background=p["sidebar"], foreground=p["fg"], font="HcvBodyStrong")
+        style.configure("SidebarMuted.TLabel", background=p["sidebar"], foreground=p["muted"], font="HcvCaption")
+        style.configure("SidebarBrand.TLabel", background=p["sidebar"], foreground=p["fg"], font="HcvSubtitle")
+        style.configure("Sidebar.Switch.TCheckbutton", background=p["sidebar"], foreground=p["fg"],
+                        font="HcvCaption")
+        style.configure("Step.TLabel", foreground=p["accent"], font="HcvCaption")
+        style.configure("Title.TLabel", foreground=p["fg"], font="HcvTitle")
+        style.configure("Subtitle.TLabel", foreground=p["fg"], font="HcvSubtitle")
+        style.configure("Muted.TLabel", foreground=p["muted"], font="HcvBody")
+        style.configure("Field.TLabel", foreground=p["fg"], font="HcvBodyStrong")
+        style.configure("Hint.TLabel", foreground=p["muted"], font="HcvCaption")
+        style.configure("Tag.TLabel", background=p["tag"], foreground=p["accent"], font="HcvCaption",
+                        padding=(px(8), px(1)))
+        style.configure("Chip.TLabel", background=p["chip"], foreground=p["muted"], font="HcvCaption",
+                        padding=(px(8), px(2)))
+        style.configure("ChipOk.TLabel", background=p["chip"], foreground=p["ok"], font="HcvCaption",
+                        padding=(px(8), px(2)))
+        style.configure("Warning.TLabel", foreground=p["error"], font="HcvBody")
+        style.configure("Success.TLabel", foreground=p["ok"], font="HcvBody")
+        style.configure("Link.TLabel", foreground=p["accent"], font="HcvLink")
+        style.configure("HintLink.TLabel", foreground=p["accent"], font="HcvCaption")
+        style.configure("Option.TRadiobutton", font="HcvBodyStrong")
+        if plain:
+            style.configure("Accent.TButton", font="HcvBodyStrong")
+
+    # -- the layout
+    def _build(self):
+        tk, ttk, px = self.tk, self.ttk, self.px
+        root = self.root
+        self.sidebar = ttk.Frame(root, style="Sidebar.TFrame", width=px(264), padding=(px(18), px(20)))
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+        brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
+        brand.pack(fill="x", pady=(0, px(22)))
+        self._brand_icon = None
+        try:
+            self._brand_icon = tk.PhotoImage(data=icon_png(px(36)), format="png")
+            ttk.Label(brand, image=self._brand_icon, style="Sidebar.TLabel").pack(side="left", padx=(0, px(10)))
+        except tk.TclError:
+            pass
+        names = ttk.Frame(brand, style="Sidebar.TFrame")
+        names.pack(side="left", fill="x")
+        ttk.Label(names, text="Halo CE for PS Vita", style="SidebarCurrent.TLabel").pack(anchor="w")
+        ttk.Label(names, text="Install helper %s" % VERSION, style="SidebarMuted.TLabel").pack(anchor="w")
+
+        self.step_rows = []
+        for index, (name, need, _, _) in enumerate(self.PAGES):
+            need = self.SIDEBAR_NEEDS.get(index, need)
+            row = ttk.Frame(self.sidebar, style="Sidebar.TFrame", padding=(0, px(5)))
+            row.pack(fill="x")
+            size = px(26)
+            marker = tk.Canvas(row, width=size, height=size, highlightthickness=0, borderwidth=0)
+            marker.pack(side="left", padx=(0, px(10)))
+            words = ttk.Frame(row, style="Sidebar.TFrame")
+            words.pack(side="left", fill="x", expand=True)
+            title = ttk.Label(words, text=name, style="Sidebar.TLabel")
+            title.pack(anchor="w")
+            state = ttk.Label(words, text=need, style="SidebarMuted.TLabel", padding=(0, 0, px(6), 0))
+            if 1 <= index <= self.LAST_STEP:
+                state.pack(anchor="w")
+            for widget in (row, marker, words, title, state):
+                widget.bind("<Button-1>", lambda event, page=index: self.go(page))
+                widget.configure(cursor="hand2")
+            self.step_rows.append((marker, title, state))
+        if self.sv_ttk:
+            ttk.Checkbutton(self.sidebar, text="Dark mode", variable=self.dark, style="Sidebar.Switch.TCheckbutton",
+                            command=self.toggle_theme).pack(side="bottom", anchor="w")
+
+        main = ttk.Frame(root, padding=(px(30), px(24), px(30), px(18)))
         main.pack(side="left", fill="both", expand=True)
+        self.main = main
+        header = ttk.Frame(main)
+        header.pack(side="top", fill="x", pady=(0, px(16)))
+        self.step_caption = ttk.Label(header, style="Step.TLabel")
+        self.step_caption.pack(anchor="w")
+        title_row = ttk.Frame(header)
+        title_row.pack(fill="x", pady=(px(2), px(4)))
+        self.title_label = ttk.Label(title_row, style="Title.TLabel")
+        self.title_label.pack(side="left")
+        self.tag_label = ttk.Label(title_row, style="Tag.TLabel")
+        self.description = self.paragraph(header, "", "Muted.TLabel")
+
         # (packed from the bottom up, so the buttons stay on screen)
         buttons = ttk.Frame(main)
-        buttons.pack(side="bottom", fill="x", pady=(8, 0))
-        log_frame = ttk.Frame(main)
-        log_frame.pack(side="bottom", fill="x", pady=(6, 0))
-        self.log_text = tkinter.Text(log_frame, height=6, wrap="word", state="disabled")
-        scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        buttons.pack(side="bottom", fill="x", pady=(px(12), 0))
+        self.back_button = ttk.Button(buttons, text="Back", width=10, command=lambda: self.go(self.page - 1))
+        self.back_button.pack(side="left")
+        self.stop_button = ttk.Button(buttons, text="Stop", width=10, command=self.cancel.set, state="disabled")
+        self.stop_button.pack(side="left", padx=(px(8), 0))
+        self.next_button = ttk.Button(buttons, text="Next", width=14, style="Accent.TButton",
+                                      command=lambda: self.go(self.page + 1))
+        self.next_button.pack(side="right")
+        ttk.Separator(main).pack(side="bottom", fill="x", pady=(px(12), 0))
+
+        self.details = ttk.Frame(main)
+        self.log_text = tk.Text(self.details, height=8, wrap="word", state="disabled", relief="flat",
+                                borderwidth=0, highlightthickness=1, padx=px(8), pady=px(6), font="TkFixedFont")
+        scroll = ttk.Scrollbar(self.details, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        bar = ttk.Frame(main)
-        bar.pack(side="bottom", fill="x", pady=(8, 0))
-        self.progress = ttk.Progressbar(bar, mode="determinate", maximum=1000)
-        self.progress.pack(fill="x")
-        ttk.Label(bar, textvariable=self.status).pack(anchor="w")
-        self.body = ttk.Frame(main)
-        self.body.pack(side="top", fill="both", expand=True)
-        self.back_button = ttk.Button(buttons, text="< Back", command=lambda: self.show(self.page - 1))
-        self.back_button.pack(side="left")
-        self.stop_button = ttk.Button(buttons, text="Stop", command=self.cancel.set, state="disabled")
-        self.stop_button.pack(side="left", padx=8)
-        self.next_button = ttk.Button(buttons, text="Next (skip) >", command=lambda: self.show(self.page + 1))
-        self.next_button.pack(side="right")
-        self.show(0)
-        root.after(100, self.poll)
+
+        self.progress_frame = ttk.Frame(main)
+        self.progress_frame.pack(side="bottom", fill="x", pady=(px(14), 0))
+        line = ttk.Frame(self.progress_frame)
+        line.pack(fill="x")
+        ttk.Label(line, textvariable=self.status, style="Muted.TLabel").pack(side="left")
+        self.details_button = ttk.Button(line, text="Show details", style="Toolbutton", command=self.toggle_details)
+        self.details_button.pack(side="right")
+        ttk.Label(line, textvariable=self.percent, style="Muted.TLabel").pack(side="right", padx=(0, px(10)))
+        self.progress = ttk.Progressbar(self.progress_frame, mode="determinate", maximum=1000)
+        self.progress.pack(fill="x", pady=(px(6), 0))
+
+        # the step's card: a thin border around the page's own widgets,
+        # which scroll when the window is too short for them (a small screen
+        # at a large scale)
+        self.card = tk.Frame(main, highlightthickness=1, borderwidth=0)
+        self.card.pack(side="top", fill="both", expand=True)
+        self.canvas = tk.Canvas(self.card, highlightthickness=0, borderwidth=0)
+        self.scrollbar = ttk.Scrollbar(self.card, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.body = ttk.Frame(self.canvas, padding=(px(22), px(18)))
+        self._body_item = self.canvas.create_window(0, 0, window=self.body, anchor="nw")
+        self.body.bind("<Configure>", lambda event: self._fit_body())
+        self.canvas.bind("<Configure>", lambda event: self._fit_body())
+        self.canvas.bind("<Enter>", lambda event: self._wheel(True))
+        self.canvas.bind("<Leave>", lambda event: self._wheel(False))
+
+    def _fit_body(self):
+        """The page as wide as the card and at least as tall (so what is
+        packed at its bottom sits there), with the scroll bar only when the
+        page is taller."""
+        width, height = self.canvas.winfo_width(), self.canvas.winfo_height()
+        needed = self.body.winfo_reqheight()
+        if width <= 1 or height <= 1:
+            return
+        self.canvas.itemconfigure(self._body_item, width=width, height=max(needed, height))
+        self.canvas.configure(scrollregion=(0, 0, width, max(needed, height)))
+        if needed > height + 1:
+            if not self.scrollbar.winfo_ismapped():
+                self.scrollbar.pack(side="right", fill="y", before=self.canvas)
+        elif self.scrollbar.winfo_ismapped():
+            self.scrollbar.pack_forget()
+            self.canvas.yview_moveto(0)
+
+    def _wheel(self, inside: bool):
+        if not inside:
+            self.canvas.unbind_all("<MouseWheel>")
+            self.canvas.unbind_all("<Button-4>")
+            self.canvas.unbind_all("<Button-5>")
+            return
+
+        def scroll(steps):
+            if self.scrollbar.winfo_ismapped():
+                self.canvas.yview_scroll(steps, "units")
+        self.canvas.bind_all("<MouseWheel>", lambda event: scroll(-1 if event.delta > 0 else 1))
+        self.canvas.bind_all("<Button-4>", lambda event: scroll(-1))
+        self.canvas.bind_all("<Button-5>", lambda event: scroll(1))
+
+    def refresh_sidebar(self):
+        if not hasattr(self, "step_rows"):
+            return
+        p = self.palette
+        staged = self._staged_done()
+        for index, (marker, title, state) in enumerate(self.step_rows):
+            need = self.SIDEBAR_NEEDS.get(index, self.PAGES[index][1])
+            current = index == self.page
+            done = index in self.done_steps or index in staged
+            skipped = index in self.skipped and not done
+            title.configure(style="SidebarCurrent.TLabel" if current else "Sidebar.TLabel")
+            if 1 <= index <= self.LAST_STEP:
+                state.configure(text="Done" if done else "Skipped" if skipped else need)
+            marker.configure(background=p["sidebar"])
+            marker.delete("all")
+            size = int(marker.cget("width"))
+            inset = max(1, self.px(1.5))
+            box = (inset, inset, size - inset, size - inset)
+            if not 1 <= index <= self.LAST_STEP:  # Welcome and Done: a dot
+                radius = self.px(5 if current else 4)
+                colour = p["accent"] if current else p["ring"]
+                marker.create_oval(size / 2 - radius, size / 2 - radius, size / 2 + radius, size / 2 + radius,
+                                   fill=colour, outline=colour)
+            elif current:
+                marker.create_oval(*box, fill=p["accent"], outline=p["accent"])
+                marker.create_text(size / 2, size / 2, text=str(index), fill=p["on_accent"], font="HcvCaption")
+            elif done:
+                marker.create_oval(*box, fill=p["ok"], outline=p["ok"])
+                marker.create_line(size * 0.30, size * 0.52, size * 0.44, size * 0.66, size * 0.71, size * 0.36,
+                                   fill=p["bg"] if self.theme == "dark" else "#ffffff", width=max(2, self.px(2)),
+                                   capstyle="round", joinstyle="round")
+            elif skipped:
+                marker.create_oval(*box, outline=p["ring"], width=max(1, self.px(1.5)), dash=(3, 2))
+                marker.create_line(size * 0.35, size / 2, size * 0.65, size / 2, fill=p["ring"],
+                                   width=max(2, self.px(2)), capstyle="round")
+            else:
+                marker.create_oval(*box, outline=p["ring"], width=max(1, self.px(1.5)))
+                marker.create_text(size / 2, size / 2, text=str(index), fill=p["muted"], font="HcvCaption")
+
+    def step_state(self, index: int) -> str:
+        """'current', 'done', 'skipped' or 'todo', as the sidebar shows it."""
+        if index == self.page:
+            return "current"
+        if index in self.done_steps or index in self._staged_done():
+            return "done"
+        if index in self.skipped:
+            return "skipped"
+        return "todo"
+
+    def _staged_summary(self) -> dict:
+        items = staged_uploads(self.out.get())
+        maps = [item for item in items if item.folder.endswith("/maps")]
+        names = {item.name.lower() for item in maps}
+        pc = [name for name, _ in PC_RESOURCE_MAPS if name in names]
+        return {"items": items, "maps": maps, "movies": [item for item in items if item.folder.endswith("/movies")],
+                "pc": pc, "xbe": any(item.name == STAGING_XBE for item in items),
+                "xbox_maps": all(name in names for name in XBOX_REQUIRED_MAPS),
+                "size": sum(item.size for item in items)}
+
+    def _staged_done(self) -> set:
+        try:
+            summary = self._staged_summary()
+        except OSError:
+            return set()
+        done = set()
+        if summary["xbe"] and summary["xbox_maps"]:
+            done.add(1)
+        if summary["movies"]:
+            done.add(2)
+        if len(summary["pc"]) == len(PC_RESOURCE_MAPS):
+            done.add(3)
+        return done
 
     # -- helpers
     def clear(self):
         for child in self.body.winfo_children():
             child.destroy()
+        self.notice = None
+        self.canvas.yview_moveto(0)
 
-    def heading(self, text: str, explanation: str):
-        ttk = self.ttk
-        ttk.Label(self.body, text=text, font=("TkDefaultFont", 14, "bold")).pack(anchor="w")
-        ttk.Label(self.body, text=explanation, wraplength=520, justify="left").pack(anchor="w", pady=(4, 10))
+    def paragraph(self, parent, text: str, style: str = "TLabel", pady=(0, 0)):
+        """A label that wraps to the width it is given."""
+        label = self.ttk.Label(parent, text=text, style=style, justify="left", anchor="w",
+                               wraplength=self.px(600))
+        label.pack(fill="x", anchor="w", pady=pady)
+        label.bind("<Configure>", lambda event: label.configure(wraplength=max(event.width - 4, 120)))
+        return label
 
-    def path_row(self, label: str, variable, browse_file=None, browse_folder=None, filetypes=None):
-        ttk = self.ttk
+    def heading(self, text: str, explanation: str = ""):
+        """A section's heading in the card, and its text."""
+        self.ttk.Label(self.body, text=text, style="Subtitle.TLabel").pack(anchor="w", pady=(0, self.px(4)))
+        if explanation:
+            self.paragraph(self.body, explanation, "Muted.TLabel", pady=(0, self.px(12)))
+
+    def path_row(self, label: str, variable, browse_file=None, browse_folder=None, filetypes=None, hint: str = "",
+                 tag: str = "", parent=None, picked=None):
+        """A field: its name (and what it needs), the entry and its Choose
+        buttons, then a hint below."""
+        ttk, px = self.ttk, self.px
         from tkinter import filedialog
-        row = ttk.Frame(self.body)
-        row.pack(fill="x", pady=3)
-        ttk.Label(row, text=label, width=16).pack(side="left")
-        ttk.Entry(row, textvariable=variable).pack(side="left", fill="x", expand=True)
-        if browse_file:
-            ttk.Button(row, text="File...", command=lambda: variable.set(
-                filedialog.askopenfilename(filetypes=filetypes or [("All files", "*")]) or variable.get())
-            ).pack(side="left", padx=(4, 0))
-        if browse_folder:
-            ttk.Button(row, text="Folder...", command=lambda: variable.set(
-                filedialog.askdirectory() or variable.get())).pack(side="left", padx=(4, 0))
-        return row
+        box = ttk.Frame(parent or self.body)
+        box.pack(fill="x", pady=(0, px(10)))
+        head = ttk.Frame(box)
+        head.pack(fill="x")
+        ttk.Label(head, text=label, style="Field.TLabel").pack(side="left")
+        if tag:
+            ttk.Label(head, text=tag, style="Tag.TLabel").pack(side="left", padx=(px(8), 0))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=(px(4), 0))
 
-    def action(self, text: str, prepare):
-        button = self.ttk.Button(self.body, text=text, command=lambda: self.start(prepare))
-        button.pack(anchor="w", pady=(10, 0))
+        def choose(chosen):
+            if chosen:
+                variable.set(chosen)
+                if picked:
+                    picked()
+        entry = ttk.Entry(row, textvariable=variable)
+        entry.pack(side="left", fill="x", expand=True)
+        if picked:
+            entry.bind("<FocusIn>", lambda event: picked())
+        if browse_file:
+            ttk.Button(row, text="Choose file...", command=lambda: choose(
+                filedialog.askopenfilename(parent=self.root, filetypes=filetypes or [("All files", "*")]))
+            ).pack(side="left", padx=(px(6), 0))
+        if browse_folder:
+            ttk.Button(row, text="Choose folder...", command=lambda: choose(
+                filedialog.askdirectory(parent=self.root))).pack(side="left", padx=(px(6), 0))
+        if hint:
+            self.paragraph(box, hint, "Hint.TLabel", pady=(px(3), 0))
+        return box
+
+    def action(self, text: str, prepare, parent=None):
+        """The step's own button (the page's main action), with the line
+        that says what is missing, or what the step did."""
+        row = self.ttk.Frame(parent or self.body)
+        row.pack(fill="x", pady=(self.px(8), 0))
+        # (the main button until the step is done; then Next is)
+        button = self.ttk.Button(row, text=text, command=lambda: self.start(prepare),
+                                 style="TButton" if self.step_state_done(self.page) else "Accent.TButton")
+        button.pack(side="left")
+        result = self.results.get(self.page)
+        self.notice = self.ttk.Label(row, text=("✓ " + result.splitlines()[0]) if result else "",
+                                     style="Success.TLabel", justify="left", wraplength=self.px(420))
+        self.notice.pack(side="left", padx=(self.px(14), 0), fill="x", expand=True)
+        self.notice.bind("<Configure>", lambda event: event.widget.configure(
+            wraplength=max(event.width - 4, 120)))
         return button
 
-    def link(self, text: str, url: str):
+    def show_notice(self, text: str, problem: bool = True):
+        if self.notice is not None and self.notice.winfo_exists():
+            self.notice.configure(text=("⚠ " if problem else "✓ ") + text,
+                                  style="Warning.TLabel" if problem else "Success.TLabel")
+            return True
+        return False
+
+    def notice_text(self) -> str:
+        return self.notice.cget("text") if self.notice is not None and self.notice.winfo_exists() else ""
+
+    def link(self, text: str, url: str, parent=None):
         import webbrowser
-        label = self.ttk.Label(self.body, text=text, foreground="#1a5fb4", cursor="hand2")
-        label.pack(anchor="w")
+        label = self.ttk.Label(parent or self.body, text=text + " ↗", style="Link.TLabel", cursor="hand2")
+        label.pack(anchor="w", pady=(self.px(2), 0))
         label.bind("<Button-1>", lambda event: webbrowser.open(url))
+        return label
+
+    def bullet(self, parent, text: str, tag: str = "", mark: str = "•", style: str = "TLabel"):
+        row = self.ttk.Frame(parent)
+        row.pack(fill="x", pady=(0, self.px(6)))
+        self.ttk.Label(row, text=mark, style=style, width=2).pack(side="left", anchor="n")
+        if tag:
+            self.ttk.Label(row, text=tag, style="Tag.TLabel").pack(side="right", anchor="n", padx=(self.px(8), 0))
+        words = self.ttk.Label(row, text=text, style=style, justify="left", wraplength=self.px(480))
+        words.pack(side="left", fill="x", expand=True)
+        words.bind("<Configure>", lambda event: event.widget.configure(wraplength=max(event.width - 4, 120)))
+        return row
 
     def log(self, message: str):
         self.messages.put(("log", message))
@@ -2284,6 +2869,33 @@ class InstallerWindow:
         if self.cancel.is_set():
             raise Cancelled()
         self.messages.put(("progress", message, done, total))
+
+    def toggle_details(self, show: Optional[bool] = None):
+        self.details_shown = (not self.details_shown) if show is None else show
+        if self.details_shown:
+            self.details.pack(side="bottom", fill="x", pady=(self.px(10), 0), before=self.progress_frame)
+            self.details_button.configure(text="Hide details")
+            self.root.update_idletasks()
+            needed = self.root.winfo_reqheight()
+            if self.root.winfo_height() < needed <= self.root.winfo_screenheight() - 90:
+                self.root.geometry("%dx%d" % (self.root.winfo_width(), needed))
+        else:
+            self.details.pack_forget()
+            self.details_button.configure(text="Show details")
+
+    def toggle_theme(self):
+        self.follow_system = False
+        self.apply_theme("dark" if self.dark.get() else "light")
+
+    def _listen_for_system_theme(self):
+        try:
+            import darkdetect
+            listener = getattr(darkdetect, "listener", None)
+            if listener:
+                threading.Thread(target=listener, args=(lambda name: self.messages.put(("theme", name)),),
+                                 daemon=True).start()
+        except Exception:
+            pass
 
     # -- the worker: `prepare` reads the window's fields (here, on the
     # window's thread: tkinter is not thread-safe) and returns the work,
@@ -2294,14 +2906,21 @@ class InstallerWindow:
         try:
             function = prepare()
         except InstallerError as error:
-            from tkinter import messagebox
-            messagebox.showerror("Halo CE for PS Vita", str(error), parent=self.root)
+            if not self.show_notice(str(error)):
+                from tkinter import messagebox
+                messagebox.showerror("Halo CE for PS Vita", str(error), parent=self.root)
             return
         self.cancel.clear()
+        self.running_page = self.page
+        self.results.pop(self.page, None)
+        if self.notice is not None and self.notice.winfo_exists():
+            self.notice.configure(text="Working... (Show details for each file)", style="Muted.TLabel")
         self.stop_button.configure(state="normal")
         self.next_button.configure(state="disabled")
         self.back_button.configure(state="disabled")
         self.progress["value"] = 0
+        self.status.set("Starting...")
+        self.percent.set("")
 
         def run():
             try:
@@ -2317,6 +2936,9 @@ class InstallerWindow:
         self.worker = threading.Thread(target=run, daemon=True)
         self.worker.start()
 
+    def busy(self) -> bool:
+        return bool(self.worker and self.worker.is_alive())
+
     def poll(self):
         try:
             while True:
@@ -2326,19 +2948,36 @@ class InstallerWindow:
                 elif message[0] == "progress":
                     _, text, done, total = message
                     self.progress["value"] = 1000 * done // total if total else 0
-                    self.status.set("%s - %d%%" % (text, 100 * done // total if total else 100))
+                    self.status.set(text[:1].upper() + text[1:] if text else "Working...")
+                    self.percent.set("%d%%" % (100 * done // total if total else 100))
+                elif message[0] == "theme":
+                    if self.follow_system and self.sv_ttk:
+                        theme = "dark" if str(message[1]).lower() == "dark" else "light"
+                        self.dark.set(theme == "dark")
+                        self.apply_theme(theme)
                 elif message[0] in ("done", "error"):
                     self.stop_button.configure(state="disabled")
                     self.next_button.configure(state="normal")
                     self.back_button.configure(state="normal")
+                    page, self.running_page = self.running_page, None
                     if message[0] == "error":
-                        self.status.set("Problem - see below")
+                        self.status.set("Stopped" if message[1] == "Stopped." else "Problem - see the details")
+                        self.percent.set("")
                         self.append_log("ERROR: " + message[1])
-                        from tkinter import messagebox
-                        messagebox.showerror("Halo CE for PS Vita", message[1], parent=self.root)
+                        self.show(self.page)
+                        self.show_notice(message[1])
+                        if message[1] != "Stopped.":
+                            self.toggle_details(True)
+                            from tkinter import messagebox
+                            messagebox.showerror("Halo CE for PS Vita", message[1], parent=self.root)
                     else:
                         self.progress["value"] = 1000
                         self.status.set("Done")
+                        self.percent.set("100%")
+                        if page is not None:
+                            self.done_steps.add(page)
+                            self.skipped.discard(page)
+                            self.results[page] = message[1] if isinstance(message[1], str) and message[1] else "Done"
                         if isinstance(message[1], str) and message[1]:
                             self.append_log(message[1])
                         self.show(self.page)
@@ -2353,43 +2992,83 @@ class InstallerWindow:
         self.log_text.configure(state="disabled")
 
     # -- the pages
+    def go(self, page: int):
+        """Back, Next and the sidebar: moving on past a step not done marks
+        it skipped."""
+        if self.busy():
+            return
+        if page >= len(self.STEPS):
+            self.root.destroy()
+            return
+        if page > self.page and 1 <= self.page <= self.LAST_STEP and not self.step_state_done(self.page):
+            self.skipped.add(self.page)
+        if page != self.page:
+            self.status.set("Ready")
+            self.percent.set("")
+            self.progress["value"] = 0
+        self.show(page)
+
+    def step_state_done(self, index: int) -> bool:
+        return index in self.done_steps or index in self._staged_done()
+
     def show(self, page: int):
         page = max(0, min(page, len(self.STEPS) - 1))
         self.page = page
-        for index, label in enumerate(self.step_labels):
-            label.configure(font=("TkDefaultFont", 10, "bold" if index == page else "normal"))
+        name, need, title, description = self.PAGES[page]
+        self.step_caption.configure(text="STEP %d OF %d" % (page, self.LAST_STEP) if 1 <= page <= self.LAST_STEP
+                                    else "INSTALL HELPER" if page == 0 else "FINISHED")
+        self.title_label.configure(text=title)
+        if need:
+            self.tag_label.configure(text=need)
+            self.tag_label.pack(side="left", padx=(self.px(12), 0), pady=(self.px(6), 0))
+        else:
+            self.tag_label.pack_forget()
+        self.description.configure(text=description)
         self.clear()
         self.back_button.configure(state="normal" if page else "disabled")
-        self.next_button.configure(text="Next (skip) >" if 0 < page < len(self.STEPS) - 1 else "Next >",
-                                   state="normal" if page < len(self.STEPS) - 1 else "disabled")
+        if page == len(self.STEPS) - 1:
+            self.next_button.configure(text="Close", style="Accent.TButton", state="normal")
+        elif page == 0:
+            self.next_button.configure(text="Get started", style="Accent.TButton", state="normal")
+        elif self.step_state_done(page):
+            self.next_button.configure(text="Next", style="Accent.TButton", state="normal")
+        else:
+            # the step's own button is the page's main one; this skips it
+            self.next_button.configure(text="Skip this step", style="TButton", state="normal")
         getattr(self, "page_%d" % page)()
+        self.refresh_sidebar()
 
     def page_0(self):
-        self.heading("Halo CE for PS Vita - install helper",
-                     "This gathers your own game files in the layout the Vita needs and copies them to the "
-                     "Vita over VitaShell's FTP. No game data comes with it: you need your own Xbox copy of "
-                     "Halo: Combat Evolved. Every step can be skipped (Next). The files are gathered in "
-                     "the folder below first (about 2.5 GB with everything).")
-        self.path_row("Output folder", self.out, browse_folder=True)
-        self.ttk.Label(self.body, wraplength=520, justify="left", text=(
-            "Also needed on the Vita: HENkaku/Enso, VitaShell, and the shader compiler "
-            "ur0:data/libshacccg.suprx (ShaRKF00D extracts it). See README.md.")).pack(anchor="w", pady=(10, 0))
+        ttk, px = self.ttk, self.px
+        self.paragraph(self.body, "No game data comes with this tool: every step reads your own files. You need "
+                                  "your own Xbox copy of Halo: Combat Evolved. Files already in place are kept, "
+                                  "so any step can be run again.", pady=(0, px(14)))
+        ttk.Label(self.body, text="You will need", style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
+        self.bullet(self.body, "Your Xbox Halo disc image (.iso) or the unpacked game folder", "Required")
+        self.bullet(self.body, "Halo PC's files: Halo MCC on Steam, or the Halo Custom Edition installer",
+                    "For online play")
+        self.bullet(self.body, "On the Vita: HENkaku/Enso, VitaShell, and the shader compiler "
+                               "ur0:data/libshacccg.suprx (ShaRKF00D extracts it). See README.md.", "Required")
+        ttk.Frame(self.body, height=px(8)).pack(fill="x")
+        self.path_row("Output folder", self.out, browse_folder=True,
+                      hint="The files are gathered here first, laid out as on the Vita (about 2.5 GB with "
+                           "everything).")
         self.link("The official downloads (releases)", RELEASES_URL)
+        self.show_staged()
 
     def page_1(self):
-        self.heading("1. Xbox game files",
-                     "Choose your Xbox Halo disc image (.iso / .xiso, a full disc image works too) or an "
-                     "already unpacked game folder. The maps folder and default.xbe are taken out of it. "
-                     "It must be the Xbox version: the PC version's maps do not work.")
-        self.path_row("Disc image/folder", self.xbox_source, browse_file=True, browse_folder=True,
-                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")])
+        self.path_row("Xbox disc image or game folder", self.xbox_source, browse_file=True, browse_folder=True,
+                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")],
+                      hint="An .iso / .xiso (a full disc image works too) or an already unpacked game folder. "
+                           "The maps folder and default.xbe are taken out of it. It must be the Xbox version: "
+                           "the PC version's maps do not work.")
         self.action("Get the Xbox files", self.do_xbox)
         self.show_staged()
 
     def do_xbox(self):
         source = self.xbox_source.get().strip()
         if not source:
-            raise InstallerError("Choose your Xbox disc image or game folder first.")
+            raise InstallerError("Choose your Xbox disc image (.iso) or the unpacked game folder first.")
         out = self.out.get()
         if not self.movie_source.get():
             self.movie_source.set(source)
@@ -2401,32 +3080,32 @@ class InstallerWindow:
         return work
 
     def page_2(self):
-        self.heading("2. Movies",
-                     "The disc's movies (Bink) converted to the MP4s the Vita plays, with ffmpeg: the intro, "
-                     "the attract videos and the credits. They are optional: without them the game skips "
-                     "each movie and the main menu comes up ready to play. This takes a few minutes; Next "
-                     "skips it.")
+        ttk, px = self.ttk, self.px
+        self.paragraph(self.body, "The disc's Bink movies become the H.264 MP4s the Vita plays. Without them the "
+                                  "game skips each movie and the main menu comes up ready to play. Converting takes "
+                                  "a few minutes; Skip this step leaves them out.", pady=(0, px(12)))
         if not self.movie_source.get() and self.xbox_source.get():
             self.movie_source.set(self.xbox_source.get())
-        self.path_row("Disc image/folder", self.movie_source, browse_file=True, browse_folder=True,
-                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")])
-        self.path_row("ffmpeg", self.ffmpeg, browse_file=True)
-        if not self.ffmpeg.get():
-            self.ttk.Label(self.body, text="ffmpeg was not found: install it from ffmpeg.org, or choose its "
-                                           "program.", foreground="#a51d2d").pack(anchor="w")
-        row = self.ttk.Frame(self.body)
-        row.pack(anchor="w", pady=(6, 0))
-        self.ttk.Radiobutton(row, text="Standard (H.264 Baseline, as README.md)", value="baseline",
-                             variable=self.quality).pack(anchor="w")
-        self.ttk.Radiobutton(row, text="Better quality (H.264 High profile, same size)", value="high",
-                             variable=self.quality).pack(anchor="w")
+        self.path_row("Xbox disc image or game folder", self.movie_source, browse_file=True, browse_folder=True,
+                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")],
+                      hint="The same one as in step 1.")
+        self.path_row("ffmpeg", self.ffmpeg, browse_file=True,
+                      hint="" if self.ffmpeg.get() else "ffmpeg was not found: install it from ffmpeg.org, or "
+                                                        "choose its program.")
+        ttk.Label(self.body, text="Quality", style="Field.TLabel").pack(anchor="w")
+        row = ttk.Frame(self.body)
+        row.pack(anchor="w", pady=(px(2), 0))
+        ttk.Radiobutton(row, text="Standard (H.264 Baseline, as README.md)", value="baseline",
+                        variable=self.quality).pack(anchor="w")
+        ttk.Radiobutton(row, text="Better quality (H.264 High profile, same size)", value="high",
+                        variable=self.quality).pack(anchor="w")
         self.action("Convert the movies", self.do_movies)
         self.show_staged()
 
     def do_movies(self):
         source = self.movie_source.get().strip()
         if not source:
-            raise InstallerError("Choose your Xbox disc image or game folder first.")
+            raise InstallerError("Choose your Xbox disc image (.iso) or the unpacked game folder first.")
         out, ffmpeg, quality = self.out.get(), self.ffmpeg.get() or None, self.quality.get()
 
         def work():
@@ -2436,24 +3115,31 @@ class InstallerWindow:
         return work
 
     def page_3(self):
-        self.heading("3. Halo PC files (for online play)",
-                     "Online play and the Custom Edition maps need Halo PC's bitmaps.map, sounds.map and "
-                     "loc.map, from your own copy. Pick one way:")
-        ttk = self.ttk
-        ttk.Radiobutton(self.body, text="Halo: The Master Chief Collection on Steam", value="mcc",
-                        variable=self.pc_mode).pack(anchor="w")
-        self.path_row("  custom_edition", self.mcc_folder, browse_folder=True)
-        if not self.mcc_folder.get():
-            ttk.Label(self.body, text="  (not found by itself: choose halo1/maps/custom_edition in MCC's "
-                                      "folder)").pack(anchor="w")
-        ttk.Radiobutton(self.body, text="The Halo Custom Edition installer (any file name)", value="installer",
-                        variable=self.pc_mode).pack(anchor="w", pady=(8, 0))
-        self.path_row("  Installer", self.installer, browse_file=True,
-                      filetypes=[("Programs", "*.exe"), ("All files", "*")])
-        self.link("  Where to get it: halomaps.org (Halo Custom Edition)", CE_INSTALLER_URL)
-        ttk.Radiobutton(self.body, text="A folder that has them (a Custom Edition install's maps)",
-                        value="folder", variable=self.pc_mode).pack(anchor="w", pady=(8, 0))
-        self.path_row("  Folder", self.pc_folder, browse_folder=True)
+        ttk, px = self.ttk, self.px
+        self.ttk.Label(self.body, text="Pick one way:", style="Muted.TLabel").pack(anchor="w", pady=(0, px(6)))
+
+        def option(value, text):
+            box = ttk.Frame(self.body)
+            box.pack(fill="x", pady=(0, px(4)))
+            ttk.Radiobutton(box, text=text, value=value, variable=self.pc_mode,
+                            style="Option.TRadiobutton").pack(anchor="w")
+            inner = ttk.Frame(box, padding=(px(28), 0, 0, 0))
+            inner.pack(fill="x")
+            return inner
+
+        inner = option("mcc", "Halo: The Master Chief Collection on Steam")
+        self.path_row("custom_edition folder", self.mcc_folder, browse_folder=True, parent=inner,
+                      picked=lambda: self.pc_mode.set("mcc"),
+                      hint="Found in your Steam libraries." if self.mcc_folder.get() else
+                      "Not found by itself: choose halo1/maps/custom_edition in MCC's folder.")
+        inner = option("installer", "The Halo Custom Edition installer (any file name)")
+        box = self.path_row("Installer", self.installer, browse_file=True, parent=inner,
+                            filetypes=[("Programs", "*.exe"), ("All files", "*")],
+                            picked=lambda: self.pc_mode.set("installer"))
+        self.link("Where to get it: halomaps.org (Halo Custom Edition)", CE_INSTALLER_URL, parent=box)
+        inner = option("folder", "A folder that has them (a Custom Edition install's maps)")
+        self.path_row("Folder", self.pc_folder, browse_folder=True, parent=inner,
+                      picked=lambda: self.pc_mode.set("folder"))
         self.action("Get the Halo PC files", self.do_pc_files)
         self.show_staged()
 
@@ -2463,9 +3149,9 @@ class InstallerWindow:
         installer = self.installer.get()
         folder = self.mcc_folder.get() if mode == "mcc" else self.pc_folder.get()
         if mode == "installer" and not installer:
-            raise InstallerError("Choose the installer first.")
+            raise InstallerError("Choose the installer first (Choose file...).")
         if mode != "installer" and not folder:
-            raise InstallerError("Choose the folder first.")
+            raise InstallerError("Choose the folder first (Choose folder...).")
 
         def work():
             _check_space(out, 200 << 20)
@@ -2476,25 +3162,36 @@ class InstallerWindow:
             return "Halo PC files ready"
         return work
 
+    def address_row(self, port: bool = True):
+        ttk, px = self.ttk, self.px
+        box = ttk.Frame(self.body)
+        box.pack(fill="x", pady=(0, px(10)))
+        head = ttk.Frame(box)
+        head.pack(fill="x")
+        ttk.Label(head, text="Vita address", style="Field.TLabel").pack(side="left")
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=(px(4), 0))
+        ttk.Entry(row, textvariable=self.host, width=28).pack(side="left")
+        if port:
+            ttk.Label(row, text="Port", style="Muted.TLabel").pack(side="left", padx=(px(12), px(6)))
+            ttk.Entry(row, textvariable=self.port, width=7).pack(side="left")
+        self.paragraph(box, "As VitaShell shows it after SELECT, like ftp://192.168.1.20:1337 (the port is "
+                            "taken from it too).", "Hint.TLabel", pady=(px(3), 0))
+
     def page_4(self):
-        self.heading("4. Copy to the Vita",
-                     "On the Vita, open VitaShell and press SELECT: it shows FTP mode with an address like "
-                     "ftp://192.168.1.20:1337. Type that address below. Keep the Vita awake while it copies "
-                     "(touch the screen now and then, or turn off auto-standby): if it sleeps the copy stops; "
-                     "press Copy again and it goes on from where it stopped.")
-        row = self.ttk.Frame(self.body)
-        row.pack(fill="x", pady=3)
-        self.ttk.Label(row, text="Vita address", width=16).pack(side="left")
-        self.ttk.Entry(row, textvariable=self.host, width=20).pack(side="left")
-        self.ttk.Label(row, text="  port").pack(side="left")
-        self.ttk.Entry(row, textvariable=self.port, width=6).pack(side="left")
-        self.ttk.Checkbutton(self.body, text="Copy files already on the Vita again", variable=self.replace
-                             ).pack(anchor="w", pady=(6, 0))
+        ttk, px = self.ttk, self.px
+        self.paragraph(self.body, "On the Vita, open VitaShell and press SELECT: it shows FTP mode with an address "
+                                  "like ftp://192.168.1.20:1337. Type that address below.", pady=(0, px(12)))
+        self.address_row()
+        ttk.Checkbutton(self.body, text="Copy files already on the Vita again", variable=self.replace
+                        ).pack(anchor="w", pady=(0, px(6)))
         items = staged_uploads(self.out.get())
-        self.ttk.Label(self.body, wraplength=520, justify="left", text=(
-            "To copy into %s: %d files, %s. (Custom maps put in %s are copied too.)" % (
-                VITA_GAME_FOLDER, len(items), human_size(sum(item.size for item in items)),
-                os.path.join(self.out.get(), STAGING_MAPS)))).pack(anchor="w", pady=(6, 0))
+        self.paragraph(self.body, "To copy into %s: %d files, %s. (Custom maps put in %s are copied too.)" % (
+            VITA_GAME_FOLDER, len(items), human_size(sum(item.size for item in items)),
+            os.path.join(self.out.get(), STAGING_MAPS)), "Muted.TLabel", pady=(0, px(4)))
+        self.paragraph(self.body, "Keep the Vita awake while it copies (touch the screen now and then, or turn off "
+                                  "auto-standby): if it sleeps the copy stops; press Copy again and it goes on from "
+                                  "where it stopped.", "Hint.TLabel", pady=(0, px(4)))
         self.action("Copy to the Vita", self.do_upload)
 
     def _host_port(self) -> Tuple[str, int]:
@@ -2521,23 +3218,22 @@ class InstallerWindow:
         return work
 
     def page_5(self):
-        self.heading("5. Install the VPK",
-                     "Download halo.vpk from the official releases (or put it next to this program), then "
-                     "copy it to the Vita's ux0:data/ here. VitaShell installs it: this program cannot.")
+        px = self.px
+        self.paragraph(self.body, "Download halo.vpk from the official releases (or put it next to this program), "
+                                  "then copy it to the Vita's ux0:data/ here. VitaShell installs it: this program "
+                                  "cannot.", pady=(0, px(4)))
         self.link("Releases: download halo.vpk", RELEASES_URL)
+        self.ttk.Frame(self.body, height=px(10)).pack(fill="x")
         self.path_row("VPK", self.vpk, browse_file=True, filetypes=[("VPK", "*.vpk"), ("All files", "*")])
-        row = self.ttk.Frame(self.body)
-        row.pack(fill="x", pady=3)
-        self.ttk.Label(row, text="Vita address", width=16).pack(side="left")
-        self.ttk.Entry(row, textvariable=self.host, width=20).pack(side="left")
+        self.address_row(port=False)
         self.action("Copy the VPK to the Vita", self.do_vpk)
-        self.ttk.Label(self.body, wraplength=520, justify="left", text=VPK_INSTRUCTIONS.format(
-            name=os.path.basename(self.vpk.get()) or "halo.vpk")).pack(anchor="w", pady=(10, 0))
+        self.paragraph(self.body, VPK_INSTRUCTIONS.format(name=os.path.basename(self.vpk.get()) or "halo.vpk"),
+                       "Hint.TLabel", pady=(px(12), 0))
 
     def do_vpk(self):
         vpk = self.vpk.get()
         if not vpk:
-            raise InstallerError("Choose the VPK first.")
+            raise InstallerError("Choose the VPK first (Choose file...).")
         host, port = self._host_port()
 
         def work():
@@ -2545,25 +3241,94 @@ class InstallerWindow:
             return VPK_INSTRUCTIONS.format(name=name)
         return work
 
+    def done_summary(self) -> List[Tuple[bool, str, str]]:
+        """The Done page's list: (done, what, how it went)."""
+        summary = self._staged_summary()
+        xbox = [item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)]
+        rows = []
+        rows.append((summary["xbe"] and summary["xbox_maps"], "Xbox game files",
+                     "default.xbe and %d maps" % len(xbox) if summary["xbe"] and summary["xbox_maps"]
+                     else "not gathered yet (step 1)"))
+        rows.append((bool(summary["movies"]), "Movies",
+                     "%d movies" % len(summary["movies"]) if summary["movies"]
+                     else "skipped (the game runs without them)"))
+        complete = len(summary["pc"]) == len(PC_RESOURCE_MAPS)
+        rows.append((complete, "Halo PC files", ", ".join(name for name, _ in PC_RESOURCE_MAPS) if complete
+                     else "not gathered (only online play and Custom Edition maps need them)"))
+        copied = self.results.get(4, "").replace("On the Vita: ", "")
+        rows.append((4 in self.results, "Copied to the Vita",
+                     copied or "not copied in this session (%d files, %s gathered in %s)" % (
+                         len(summary["items"]), human_size(summary["size"]), self.out.get())))
+        vpk = re.split(r"[\\/]", self.vpk.get())[-1] or "halo.vpk"
+        rows.append((5 in self.results, "The VPK",
+                     "%s copied to %s/" % (vpk, VITA_VPK_FOLDER) if 5 in self.results
+                     else "not copied in this session"))
+        return rows
+
     def page_6(self):
-        self.heading("Done",
-                     "Start Halo CE from its bubble. The first load of each level takes a while: the game "
-                     "writes a cache file for it. Stuck on the loading picture while the music plays? The "
-                     "shader compiler ur0:data/libshacccg.suprx is missing (ShaRKF00D). Online play also "
-                     "needs Connection: Online in the settings panel (Select + Start).")
-        self.show_staged()
+        ttk, px = self.ttk, self.px
+        ttk.Label(self.body, text="Summary", style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
+        for done, what, how in self.done_summary():
+            self.bullet(self.body, "%s: %s" % (what, how), mark="✓" if done else "–",
+                        style="Success.TLabel" if done else "Muted.TLabel")
+        ttk.Label(self.body, text="Next, on the Vita", style="Field.TLabel").pack(anchor="w", pady=(px(10), px(6)))
+        vpk = re.split(r"[\\/]", self.vpk.get())[-1] or "halo.vpk"
+        steps = ["Install the VPK in VitaShell: leave FTP mode (Circle), open ux0:, then data, press Cross on %s "
+                 "and confirm. The bubble is called Halo CE." % vpk,
+                 "Check that ur0:data/libshacccg.suprx is there (ShaRKF00D extracts it). Stuck on the loading "
+                 "picture while the music plays? It is missing.",
+                 "Start Halo CE from its bubble. The first load of each level takes a while: the game writes a "
+                 "cache file for it.",
+                 "Online play also needs Connection: Online in the settings panel (Select + Start)."]
+        for number, text in enumerate(steps, 1):
+            self.bullet(self.body, text, mark="%d." % number)
+        row = ttk.Frame(self.body)
+        row.pack(fill="x", pady=(px(8), 0))
+        ttk.Button(row, text="Open the output folder", command=self.open_output).pack(side="left")
+        self.notice = ttk.Label(row, text=self.out.get(), style="Hint.TLabel")
+        self.notice.pack(side="left", padx=(px(14), 0))
+
+    def open_output(self):
+        folder = self.out.get()
+        if not os.path.isdir(folder):
+            self.show_notice("The output folder is not there yet: %s" % folder)
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", folder],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            self.show_notice("Cannot open %s (%s)" % (folder, error))
 
     def show_staged(self):
-        items = staged_uploads(self.out.get())
-        maps = [item for item in items if item.folder.endswith("/maps")]
-        movies = [item for item in items if item.folder.endswith("/movies")]
-        pc = [name for name, _ in PC_RESOURCE_MAPS if any(item.name.lower() == name for item in maps)]
-        xbe = any(item.name == STAGING_XBE for item in items)
-        self.ttk.Label(self.body, wraplength=520, justify="left", foreground="#555", text=(
-            "Gathered so far in %s: %s, %d maps (%s), %d movies." % (
-                self.out.get(), "default.xbe" if xbe else "no default.xbe", len(maps),
-                "with the Halo PC files" if len(pc) == 3 else "no Halo PC files", len(movies)))
-        ).pack(anchor="w", pady=(14, 0))
+        """What is in the output folder so far, as a row of chips at the
+        bottom of the card."""
+        ttk, px = self.ttk, self.px
+        try:
+            summary = self._staged_summary()
+        except OSError:
+            return
+        box = ttk.Frame(self.body)
+        box.pack(side="bottom", fill="x", pady=(px(14), 0))
+        ttk.Separator(box).pack(fill="x", pady=(0, px(10)))
+        head = ttk.Frame(box)
+        head.pack(fill="x")
+        ttk.Label(head, text="Gathered so far in the output folder", style="Hint.TLabel").pack(side="left")
+        opener = ttk.Label(head, text="Open the folder", style="HintLink.TLabel", cursor="hand2")
+        opener.pack(side="right")
+        opener.bind("<Button-1>", lambda event: self.open_output())
+        chips = ttk.Frame(box)
+        chips.pack(fill="x", pady=(px(6), 0))
+        xbox = len([item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)])
+        pc = len(summary["pc"]) == len(PC_RESOURCE_MAPS)
+        for good, text in ((summary["xbe"], "default.xbe" if summary["xbe"] else "no default.xbe"),
+                           (xbox > 0, "%d maps" % xbox),
+                           (pc, "with the Halo PC files" if pc else "no Halo PC files"),
+                           (bool(summary["movies"]), "%d movies" % len(summary["movies"]))):
+            ttk.Label(chips, text=("✓ " if good else "") + text,
+                      style="ChipOk.TLabel" if good else "Chip.TLabel").pack(side="left", padx=(0, px(6)))
 
 
 if __name__ == "__main__":
