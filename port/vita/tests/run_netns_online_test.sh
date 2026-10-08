@@ -28,6 +28,31 @@
 #   lobbypw  the same with a password (HALO_TEST_LOBBY_PASSWORD, default
 #            "hunter2"): the game is listed locked, and the joiner opens it
 #            with the password
+#   badmap   a public game on an Xbox level (HALO_TEST_BADMAP_GAME,
+#            host:beavercreek:rockets), its host with PC maps on (the Halo PC
+#            files from HALO_TEST_DATA_MENUS when there), joined from the
+#            server browser by two machines whose file of that level is not
+#            the Xbox map: the first's cut short (its first MB: found only as
+#            the lobby precaches it), the second's missing, or with
+#            HALO_TEST_CE_MAP (a Halo PC Custom Edition map) that map under
+#            the level's name, PC maps off. Retail Halo's damaged disc error
+#            closed the game (October 2026, Battle Creek); each must be told
+#            "Couldn't load Battle Creek: ..." and stay up, never at the
+#            dashboard
+#   fullcache a joiner whose six cache files all hold a map (a10, a30, ui,
+#            bloodgulch, chillout, carousel: played offline first, each
+#            HALO_TEST_FULLCACHE_SECONDS, 12) joins a public game on Battle
+#            Creek from the server browser over a jittery link
+#            (HALO_TEST_NETEM, "delay 80ms 70ms" by default), which brings
+#            the host's game settings a frame or more after its acceptance.
+#            Before them the lobby precached the menus' map name, empty:
+#            "couldn't find map '' on the DVD" and the damaged disc error
+#            (October 2026; with an empty cache file '' passed for
+#            precached). The joiner (HALO_TEST_PRECACHE_AT_ACCEPT: the
+#            lobby's precache in the frame of its acceptance, as when the
+#            settings come later, which the link alone seldom makes) must
+#            wait for the host's map, precache it and play, never at the
+#            dashboard
 #   pc       the host is a Vita build, the joiner a PC build: by code (it
 #            must find nothing: Vitas signal on their own topics) and on
 #            one LAN with the host (it must never list or join the game)
@@ -285,7 +310,7 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 }
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
-[ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] && side join2 10.10.3 192.168.3
+{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ]; } && side join2 10.10.3 192.168.3
 python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 \
 	$([ "${HALO_TEST_MQTT311:-0}" = 1 ] && echo --mqtt311) > "$out/broker.log" 2>&1 & pids="$pids $!"
 python3 "$here/stun_test_server.py" --host 198.51.100.1 --port 3478 > "$out/stun.log" 2>&1 & pids="$pids $!"
@@ -374,7 +399,7 @@ code|lobby|lobbypw|relay|latency)
 	[ "$mode" = lobbypw ] && extra="HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_PASSWORD=$password"
 	# (latency: one game the whole run, no game over in the blackout)
 	[ "$mode" = latency ] && extra="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50}"
-	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $extra; host_pid=$last_pid
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $extra ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
@@ -544,6 +569,99 @@ menushost)
 	grep -aq "menus: Server Setup: MenuHost, 16 players, public" "$hl" || fail "Server Setup did not set the game up"
 	grep -aq "menus: Create Game > Internet: the game's server started" "$hl" || fail "the game was not created"
 	grep -aq 'network test: the public games list ".*MenuHost' "$jl" || fail "the joiner never listed the host's game"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
+badmap)
+	game=${HALO_TEST_BADMAP_GAME:-host:beavercreek:rockets}
+	level=$(echo "$game" | cut -d: -f2)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	[ -d "$menus_data/maps" ] || menus_data=$data
+	# (the joiners' maps folders: the level's file cut short, or missing, or a
+	# Halo PC map under its name, beside links to the others)
+	for side in short other; do
+		mkdir -p "$out/data-$side/maps"
+		for map in "$data"/maps/*.map; do ln -sfn "$(cd "$data/maps" && pwd)/$(basename "$map")" "$out/data-$side/maps/"; done
+		rm -f "$out/data-$side/maps/$level.map"
+	done
+	head -c 1048576 "$data/maps/$level.map" > "$out/data-short/maps/$level.map"
+	other_join_env="HALO_CUSTOM_EDITION=0"
+	if [ -n "${HALO_TEST_CE_MAP:-}" ]; then
+		# (the Halo PC map's header named as the level, as its file is)
+		cp "$HALO_TEST_CE_MAP" "$out/data-other/maps/$level.map"
+		printf '%s' "$level" | dd of="$out/data-other/maps/$level.map" bs=1 seek=32 conv=notrunc status=none
+		dd if=/dev/zero of="$out/data-other/maps/$level.map" bs=1 seek=$((32 + ${#level})) count=$((32 - ${#level})) \
+			conv=notrunc status=none
+	fi
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST=$game \
+		HALO_NETWORK_TEST_START=${HALO_TEST_BADMAP_START:-60} HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=BadMapHost \
+		HALO_CUSTOM_EDITION=1; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	HALO_TEST_DATA_JOINER=$out/data-short run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
+		HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public HALO_TEST_INPUT=bot:2 HALO_CUSTOM_EDITION=0; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$out/data-other run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" \
+		HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public HALO_TEST_INPUT=bot:3 $other_join_env; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	for side in joiner joiner2; do
+		log=$out/$side/run.log
+		echo "--- $side"; grep -aE "network test: (join|the public)|system link: in |damaged disc|error dialog|Couldn't load|map: |XLaunchNewImage" "$log" | head -12
+		grep -aq "network test: joining" "$log" || fail "the $side never joined the host's game"
+		grep -aq "XLaunchNewImage" "$log" && fail "the $side went to the dashboard"
+		grep -aq "damaged disc error\|error dialog [0-9]* (the disc" "$log" && fail "the $side showed the damaged disc error"
+		grep -aq "Couldn't load .*: " "$log" || fail "the $side was not told why the host's map could not be loaded"
+		grep -aq "exiting after debug.exit_after" "$log" || fail "the $side did not run to the end"
+	done
+	grep -aq "Couldn't load .*: your $level.map is cut short or damaged" "$out/joiner/run.log" ||
+		fail "the joiner with the file cut short was not told so"
+	if [ -n "${HALO_TEST_CE_MAP:-}" ]; then
+		grep -aq "Couldn't load .*: your $level.map is the Halo PC (Custom Edition) map" "$out/joiner2/run.log" ||
+			fail "the joiner with a Halo PC map under the level's name was not told so"
+	else
+		grep -aq "Couldn't load .*: $level.map isn't in your maps folder" "$out/joiner2/run.log" ||
+			fail "the joiner without the level's map was not told so"
+	fi
+	;;
+fullcache)
+	# (the joiner's cache files filled, offline, before it joins: each map
+	# copied into one, the menus' ui.map last)
+	mkdir -p "$out/prefill/data" "$out/joiner/save"
+	ln -sfn "$(cd "${HALO_TEST_DATA_JOINER:-$data}" && pwd)/maps" "$out/prefill/data/maps"
+	for level in 'a10\a10' 'a30\a30' 'test\bloodgulch\bloodgulch' 'test\chillout\chillout' 'test\carousel\carousel' -; do
+		if [ "$level" = - ]; then rm -f "$out/prefill/data/init.txt"; else printf 'map_name levels\\%s\n' "$level" > "$out/prefill/data/init.txt"; fi
+		(cd "$out/prefill" && env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/prefill/data" \
+			HALO_SAVE_ROOT="$out/joiner/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=${HALO_TEST_FULLCACHE_SECONDS:-12} \
+			HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_NET_ONLINE=false HALO_UPDATE_AUTO=false HALO_TICK_THREAD=1 \
+			taskset -c "$cpu_b" timeout 120 "${HALO_TEST_VITA_JOINER:-$vita}" >> "$out/prefill/run.log" 2>&1)
+	done
+	filled=$(grep -ac "starting precaching of map" "$out/prefill/data/debug.txt")
+	echo "cache files filled offline: $filled (6 wanted)"
+	[ "$filled" -ge 6 ] || fail "the joiner's cache files were not all filled ($filled)"
+	# (the jitter: the routers' netem, set with the sides unless given)
+	if [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ]; then
+		for side in host join; do
+			eval "router=\$${side}_router"
+			in_ns "$router" tc qdisc add dev "w_$side" root netem limit 10000 delay 80ms 70ms ||
+				{ echo "netem could not be set on $side's link"; exit 2; }
+		done
+	fi
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST=${HALO_TEST_FULLCACHE_GAME:-host:beavercreek:slayer} \
+		HALO_NETWORK_TEST_START=40 HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=FullCacheHost; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_TEST_INPUT=bot:2 HALO_TEST_PRECACHE_AT_ACCEPT=1; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	jl=$out/joiner/run.log jd=$out/joiner/data/debug.txt
+	echo "--- joiner"; grep -aE "successfully joined|waiting for game to start|precaching map|find map|XLaunchNewImage" "$jd" | head -8
+	grep -aq "successfully joined a net game" "$jd" || fail "the joiner never joined"
+	grep -aq "find map '' on the DVD" "$jd" && fail "the joiner precached a map with no name"
+	grep -aq "XLaunchNewImage" "$jl" && fail "the joiner went to the dashboard"
+	grep -aq "damaged disc error" "$jl" && fail "the joiner showed the damaged disc error"
+	grep -aq "precaching map 'levels.test.beavercreek.beavercreek'" "$jd" || fail "the joiner did not precache the host's map"
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
