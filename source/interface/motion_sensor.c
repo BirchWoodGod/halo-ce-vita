@@ -330,11 +330,30 @@ static void motion_sensor_update(
 	}
 	else
 	{
+#ifdef HALO_LINUX
+		/* port: each local player's next blip, and the local players in
+		order, in arrays of their own; and a camera position for each of up
+		to four players. The Xbox's code kept both in one array of four (the
+		blips from 0, the players from 2) and two camera positions: with a
+		third player in split screen they overlapped and ran past the
+		stack's arrays (the game crashed drawing the motion sensor) */
+		short local_player_blips[MAXIMUM_LOCAL_PLAYERS] = { 0 };
+		short local_player_order[MAXIMUM_LOCAL_PLAYERS] = { 0 };
+#define MOTION_SENSOR_PLAYER_BLIP(local_player_index) local_player_blips[local_player_index]
+#define MOTION_SENSOR_PLAYER_ORDER(scan_index) local_player_order[scan_index]
+#else
 		short local_player_slots[4] = { 0 };
+#define MOTION_SENSOR_PLAYER_BLIP(local_player_index) local_player_slots[local_player_index]
+#define MOTION_SENSOR_PLAYER_ORDER(scan_index) local_player_slots[(scan_index) + 2]
+#endif
 		short player_count = local_player_count();
 		short local_player_index = local_player_get_next(NONE);
 		struct object_iterator iterator;
+#ifdef HALO_LINUX
+		real_point3d camera_positions[MAXIMUM_LOCAL_PLAYERS];
+#else
 		real_point3d camera_positions[2];
+#endif
 		boolean done = FALSE;
 		short player_scan_index;
 
@@ -353,7 +372,7 @@ static void motion_sensor_update(
 					local_player_get_player_index(local_player_index))->unit_index;
 			short blip_index;
 
-			local_player_slots[player_scan_index + 2] = local_player_index;
+			MOTION_SENSOR_PLAYER_ORDER(player_scan_index) = local_player_index;
 			camera_positions[local_player_index].x = 0.0f;
 			camera_positions[local_player_index].y = 0.0f;
 			camera_positions[local_player_index].z = 0.0f;
@@ -395,7 +414,7 @@ static void motion_sensor_update(
 					player_scan_index++)
 				{
 					short scan_player_index =
-						local_player_slots[player_scan_index + 2];
+						MOTION_SENSOR_PLAYER_ORDER(player_scan_index);
 					long player_index =
 						local_player_get_player_index(scan_player_index);
 
@@ -404,7 +423,7 @@ static void motion_sensor_update(
 							local_player_get_player_index(scan_player_index))
 							->unit_index != NONE)
 					{
-						short blip_index = local_player_slots[scan_player_index];
+						short blip_index = MOTION_SENSOR_PLAYER_BLIP(scan_player_index);
 
 						if (blip_index >= MAXIMUM_MOTION_SENSOR_BLIPS)
 						{
@@ -457,7 +476,7 @@ static void motion_sensor_update(
 
 								player->unit_indices[blip_index] = iterator.index;
 								sensor->blip_count++;
-								local_player_slots[scan_player_index] =
+								MOTION_SENSOR_PLAYER_BLIP(scan_player_index) =
 									(short)(blip_index + 1);
 							}
 						}
@@ -469,6 +488,8 @@ static void motion_sensor_update(
 			}
 		}
 	}
+#undef MOTION_SENSOR_PLAYER_BLIP
+#undef MOTION_SENSOR_PLAYER_ORDER
 
 	{
 		short corrupt_index;
