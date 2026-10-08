@@ -170,6 +170,35 @@ static void effect_stats_report(void)
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_PARTICLE_RENDER_DIVISOR=n:
+one particle in n of the world's drawn (render_particles), and of the
+particle systems' that are not attached to an object
+(particle_systems.c); 1 (the default) all, as the Xbox. Which are drawn
+goes by the particle's slot, so a particle is drawn or not for as long as
+it lives (no flicker); the first-person weapon's particles and the
+particle systems on an object (a weapon's, a unit's, a vehicle's) are all
+drawn. Drawing only: every particle is still simulated. */
+int halo_particle_render_divisor(
+	void)
+{
+	static int divisor = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (divisor < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_PARTICLE_RENDER_DIVISOR");
+
+		settings_seen = halo_settings_generation;
+		divisor = setting && *setting ? atoi(setting) : 1;
+		if (divisor < 1 || divisor > 4)
+			divisor = 1;
+	}
+	return divisor;
+}
+#endif
+
 /* ---------- public code */
 
 boolean local_player_is_first_person(
@@ -270,6 +299,10 @@ void render_particles(
 			local_player_index = MAXIMUM_LOCAL_PLAYERS;
 		}
 
+#ifdef HALO_LINUX
+		int divisor = halo_particle_render_divisor();
+#endif
+
 		for (particle_index = data_next_index(particle_data, NONE);
 			particle_index != NONE;
 			particle_index = data_next_index(particle_data, particle_index))
@@ -278,6 +311,15 @@ void render_particles(
 			boolean owned_by_local_player =
 				particle->local_player_index == local_player_index;
 
+#ifdef HALO_LINUX
+			/* (HALO_PARTICLE_RENDER_DIVISOR, above: the first-person
+			weapon's are all drawn) */
+			if (divisor > 1 && DATUM_INDEX_TO_ABSOLUTE_INDEX(particle_index) % divisor != 0 &&
+				!(owned_by_local_player && TEST_FLAG(particle->flags, _particle_datum_dont_draw_third_person_bit)))
+			{
+				continue;
+			}
+#endif
 			if (render_location_visible(&particle->location) &&
 				(!TEST_FLAG(
 					particle->flags,

@@ -1472,6 +1472,12 @@ static void particle_system_render(
 		{
 			short particle_index = (short)type->first_particle_index;
 			struct build_sprite_data sprite_data;
+#ifdef HALO_LINUX
+			/* (HALO_PARTICLE_RENDER_DIVISOR, render_particles.c: a system on
+			an object draws all its particles) */
+			int halo_particle_render_divisor(void);
+			int divisor = system->object_index == NONE ? halo_particle_render_divisor() : 1;
+#endif
 
 			while (particle_index != NONE)
 			{
@@ -1488,6 +1494,7 @@ static void particle_system_render(
 
 #ifdef HALO_LINUX
 				if (state_index_snapshot >= 0 && state_index_snapshot < type_definition->particle_states.count &&
+					(divisor == 1 || particle_index % divisor == 0) &&
 					particle->valid && render_location_visible(&particle->location))
 #else
 				if (particle->valid && render_location_visible(&particle->location))
