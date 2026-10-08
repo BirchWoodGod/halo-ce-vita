@@ -557,7 +557,7 @@ static __inline void *object_header_block_get_inline(long object_index, struct o
 
 #ifdef HALO_LINUX
 /* object_mark_function, inline (the collision queries' object walks) */
-static __inline boolean object_mark_inline(long object_index)
+static __inline__ boolean object_mark_inline(long object_index)
 {
 	struct object_datum *object = object_get(object_index);
 
