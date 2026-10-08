@@ -54,8 +54,9 @@ void vita_host_thread_watch(const char *role);
 /* with each frame-timing line: the watched threads' and the cores' times */
 void vita_host_thread_times_report(unsigned long frames);
 
-/* each core's busy share of the last second, 0-100, or 255 unknown */
-void vita_host_cpu_usage(unsigned char busy[3]);
+/* each core's busy share of the last second, 0-100, or 255 unknown (the
+fourth core's last) */
+void vita_host_cpu_usage(unsigned char busy[4]);
 
 /* microseconds since the process started */
 unsigned long long vita_host_time_us(void);

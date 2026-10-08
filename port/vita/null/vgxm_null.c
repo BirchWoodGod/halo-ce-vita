@@ -86,9 +86,9 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 	return 0;
 }
 
-void vita_host_cpu_usage(unsigned char busy[3])
+void vita_host_cpu_usage(unsigned char busy[4])
 {
-	busy[0] = busy[1] = busy[2] = 255;
+	busy[0] = busy[1] = busy[2] = busy[3] = 255;
 }
 
 /* (vita_pad.c's, which the device sets for the D-pad's meaning) */
