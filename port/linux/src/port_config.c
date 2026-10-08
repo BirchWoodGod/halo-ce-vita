@@ -287,6 +287,10 @@ static const struct config_setting config_settings[] =
 		"to download it (in a game joined from the public lobby, with a warning:\n"
 		"its host is a stranger), \"private\" asks except in public lobby games,\n"
 		"\"never\" never offers one." },
+	{ "network.latency_meter", _config_boolean, "true", "HALO_LATENCY_METER", _environment_value, _platform_all,
+		"Show the round trip to the host in a network game, in milliseconds,\n"
+		"at the screen's top right (the host: its slowest player's), and\n"
+		"\"Connection problem\" when the host has sent nothing for two seconds." },
 	{ "network.player_name", _config_string, "\"\"", "HALO_NET_PLAYER_NAME", _environment_value, _platform_all,
 		"The name a player goes by in network games when their profile has none\n"
 		"(the default profiles); the Vita's user name on the Vita; empty for\n"

@@ -588,6 +588,9 @@ real_argb_color *hud_get_text_color(real_argb_color *color);
 #include "text/unicode.h"
 #include "units/bipeds.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "latency_meter.h"
+#endif
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -1372,8 +1375,10 @@ static void rasterize_in_game_score_draw_line(
 	long row_index)
 {
 	rectangle2d bounds = render.camera.window_bounds;
-	short narrow_tab_stops[3];
-	short wide_tab_stops[3];
+	/* port: a fourth stop, the Ping column of a network game
+	(scoreboard_ping_column) */
+	short narrow_tab_stops[4];
+	short wide_tab_stops[4];
 	short *tab_stops;
 	boolean splitscreen;
 	long font_index;
@@ -1383,9 +1388,11 @@ static void rasterize_in_game_score_draw_line(
 	narrow_tab_stops[0] = 80;
 	narrow_tab_stops[1] = 125;
 	narrow_tab_stops[2] = 200;
+	narrow_tab_stops[3] = 262;
 	wide_tab_stops[0] = 130;
 	wide_tab_stops[1] = 195;
 	wide_tab_stops[2] = 315;
+	wide_tab_stops[3] = 420;
 
 	if (bounds.x1 - bounds.x0 > 320)
 		tab_stops = wide_tab_stops;
@@ -1393,7 +1400,7 @@ static void rasterize_in_game_score_draw_line(
 		tab_stops = narrow_tab_stops;
 
 	if (row_index)
-		draw_string_set_tab_stops(tab_stops, 3);
+		draw_string_set_tab_stops(tab_stops, 4);
 	else
 		draw_string_set_tab_stops(NULL, 0);
 
@@ -1710,6 +1717,11 @@ static void game_engine_rasterize_in_game_score(
 
 	game_engine->format_score_name(score_string);
 	usprintf(row_string, L"\t%s\t%s\t%s", column_name, score_name, score_string);
+#ifdef HALO_LINUX
+	/* port: a network game's Ping column (latency_meter.c) */
+	if (latency_meter_shown())
+		usprintf(row_string, L"\t%s\t%s\t%s\tPing", column_name, score_name, score_string);
+#endif
 	rasterize_in_game_score_draw_line(row_string, FALSE, &color, 1);
 
 	for (entry_index = 0; entry_index < entry_count; entry_index++)
@@ -1783,6 +1795,32 @@ static void game_engine_rasterize_in_game_score(
 				is_current_player,
 				row_color,
 				entry_index + 2);
+#ifdef HALO_LINUX
+			/* port: the player's ping, in its own colour, where the
+			heading says Ping (none known: none shown) */
+			if (latency_meter_shown())
+			{
+				wchar_t ping_string[16];
+				real_argb_color ping_color;
+				long ping = latency_meter_player_ping(
+					(short)DATUM_INDEX_TO_ABSOLUTE_INDEX(entry_player_index),
+					&ping_color);
+
+				if (ping != NONE)
+				{
+					ping_color.alpha = alpha;
+					if (ping > 999)
+						usprintf(ping_string, L"\t\t\t\t999+");
+					else
+						usprintf(ping_string, L"\t\t\t\t%ld", ping);
+					rasterize_in_game_score_draw_line(
+						ping_string,
+						FALSE,
+						&ping_color,
+						entry_index + 2);
+				}
+			}
+#endif
 		}
 	}
 
@@ -3183,6 +3221,14 @@ boolean game_engine_running(
 	boolean running = game_engine!=NULL;
 
 	return running;
+}
+
+/* port: whether a game is being played: none of a game engine's (co-op, the
+campaign), or its game not over (the latency meter: latency_meter.c) */
+boolean game_engine_in_play(
+	void)
+{
+	return game_engine == NULL || game_engine_globals.postgame_state == game_engine_mode_active;
 }
 
 /* port: whether the game is over and its scores are shown (where the

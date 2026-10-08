@@ -108,6 +108,9 @@ symbols in this file:
 #include "chat.h"
 #include "voice.h"
 #endif
+#ifdef HALO_LINUX
+#include "latency_meter.h"
+#endif
 
 /* ---------- constants */
 
@@ -485,6 +488,11 @@ void interface_draw_fullscreen_overlays(
 	/* port: voice chat's talkers and this machine's microphone
 	(port/linux/game/voice.c) */
 	voice_draw();
+#endif
+#ifdef HALO_LINUX
+	/* port: a network game's round trip to the host
+	(port/linux/game/latency_meter.c) */
+	latency_meter_draw();
 #endif
 	main_framerate_render();
 	render_debug_profile();
