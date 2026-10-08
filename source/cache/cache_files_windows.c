@@ -920,7 +920,8 @@ short cache_file_read(
 		only indices in range) */
 		return cache_request_next_free_index();
 	}
-	while (__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&cache_request_claim_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
 		SwitchToThread();
 	request_index = cache_request_next_free_index();
 	request = cache_request_get(request_index);

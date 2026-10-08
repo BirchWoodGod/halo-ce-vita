@@ -809,7 +809,8 @@ static int log_thread_state; /* 0 none, 1 running, -1 could not start */
 
 static void log_acquire(void)
 {
-	while (__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&log_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
 		;
 }
 
@@ -824,7 +825,8 @@ static void log_drain(void)
 	static volatile int draining;
 	char chunk[16 * 1024];
 
-	while (__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&draining, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
 		sceKernelDelayThread(100);
 	for (;;)
 	{

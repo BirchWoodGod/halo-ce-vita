@@ -1169,7 +1169,8 @@ void custom_edition_cache_read(
 
 	/* (January read its map from its main thread only; the port's tick
 	and render threads both read: read_lock) */
-	while (__atomic_exchange_n(&globals->read_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&globals->read_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&globals->read_lock, 1, __ATOMIC_ACQUIRE))
 	{
 		SwitchToThread();
 	}

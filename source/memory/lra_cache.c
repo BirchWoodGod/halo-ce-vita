@@ -418,7 +418,8 @@ static void lra_acquire(void)
 		lra_depth++;
 		return;
 	}
-	while (__atomic_exchange_n(&lra_lock_word, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&lra_lock_word, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&lra_lock_word, 1, __ATOMIC_ACQUIRE))
 		;
 	lra_owner = self;
 	lra_depth = 1;
