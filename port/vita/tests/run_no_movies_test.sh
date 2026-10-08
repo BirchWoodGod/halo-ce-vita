@@ -13,6 +13,13 @@
 #            after it is up - before, it came up at once and dropped every
 #            press while they ran (on the Vita: "the main menu ignores all
 #            input"); then down/A/B through the main menu's screens
+#   panel    the checks made 6 s long, and the Vita settings panel's Join a
+#            game asked for 3 s in (HALO_SYSTEM_LINK_TEST=join), while they
+#            still run: the System Link screen it opens stays when they end
+#            (the main menu that waited for them is not put over it), and
+#            A A A then reaches the list of games - before, the main menu
+#            replaced it and the presses went into Campaign
+#            (run_netns_online_test.sh coopmenu failed so, 2 runs in 4)
 #   attract  the main menu left alone past the attract mode's countdown (75 s),
 #            with no attract movie: no movie is tried (the menu's music is not
 #            stopped and started over, the intro's is the only failed open),
@@ -20,7 +27,7 @@
 #
 # Each must log no assertion or exception, and exit by itself.
 #
-#   run_no_movies_test.sh [CASE...]   (default: fresh attract)
+#   run_no_movies_test.sh [CASE...]   (default: fresh panel attract)
 #   HALO_TEST_VITA   the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA   a folder with the game's maps folder (the Xbox maps)
 #   HALO_TEST_OUT    where the logs go (kept; the harness copies are removed)
@@ -30,7 +37,7 @@ root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_no_movies_test.$$}
-cases=${*:-fresh attract}
+cases=${*:-fresh panel attract}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -99,6 +106,24 @@ for case in $cases; do
 		[ "$(grep -ac 'ui: screen ui.shell.main_menu.multiplayer_type_select' "$out/fresh/run.log")" -ge 2 ] ||
 			fail fresh "Multiplayer did not open twice"
 		;;
+	panel)
+		run panel 35 "wait:150:9000 a a a wait:150:4000" HALO_SYSTEM_LINK_TEST=join HALO_TEST_FILESYSTEM_CHECK_MS=6000
+		log=$out/panel/run.log debug=$out/panel/data/debug.txt
+		echo "--- panel"
+		grep -aE "ui: screen|system link: the|test pad: a$" "$log" | head -12
+		grep -aE "checks|main menu" "$debug" 2>/dev/null
+		[ "$(cat "$out/panel/exit")" = 0 ] || fail panel "exit $(cat "$out/panel/exit")"
+		grep -aqiE "assert|exception|halt" "$log" && fail panel "an assertion, exception or halt"
+		grep -aq "the settings panel's join a game: the System Link screen opened" "$log" ||
+			fail panel "the System Link screen did not open"
+		grep -aq "the filesystem checks are done; the screen opened meanwhile stays" "$debug" ||
+			fail panel "the System Link screen was not opened while the checks ran, or did not stay"
+		awk '/System Link screen opened/ { opened = 1; next } opened && /ui: screen ui.shell.main_menu.main_menu$/ { bad = 1 }
+			END { exit bad ? 0 : 1 }' "$log" && fail panel "the main menu was put over the System Link screen"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.server_list.server_list_screen" "$log" ||
+			fail panel "A A A did not reach the list of games"
+		grep -aq "new_campaign" "$log" && fail panel "the presses went into Campaign"
+		;;
 	attract)
 		# (the countdown runs from the menu's last press: 75 s untouched)
 		run attract 100 "wait:150:82000 down:150:1000 a:150:3000 b:150:2000"
@@ -113,7 +138,7 @@ for case in $cases; do
 			fail attract "the menu's music was started $(grep -ac 'starting main menu music' "$debug") times"
 		;;
 	*)
-		echo "usage: $0 [fresh|attract]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|panel|attract]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
