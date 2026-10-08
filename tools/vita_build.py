@@ -18,8 +18,8 @@ from typing import Any, Dict, List, Optional
 
 from .ninja_syntax import Writer
 from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
-from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, MONOCYPHER_DIR,
-                          MONOCYPHER_SOURCES, musl_math_sources,
+from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
+                          ZLIB_DEFINES, MONOCYPHER_DIR, MONOCYPHER_SOURCES, musl_math_sources,
                           MUSL_MATH_DIR, ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
 
 LINUX_DIR = Path("port/linux")
@@ -257,6 +257,10 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         add(source, "vita_cc", platform_cflags)
     add(TOML_DIR / "tomlc17.c", "vita_cc", " ".join([abi, "-std=gnu11", "-w"]))
     add(KCP_DIR / "ikcp.c", "vita_cc", " ".join([abi, "-std=gnu11", "-w"]))
+    # (from OpenCE) the port's zlib, which inflates the maps
+    # (cache_files_decompress_windows.c) instead of the game's own 1.1.3
+    for name in ZLIB_SOURCES:
+        add(ZLIB_DIR / name, "vita_cc", " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
     # internet play's signatures and password keys (port/third_party/monocypher): its
     # own word-aligned loads (the game's -fmax-type-align=1 would make Argon2 crawl)
     for name in MONOCYPHER_SOURCES:
