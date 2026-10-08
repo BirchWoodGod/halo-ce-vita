@@ -1088,15 +1088,20 @@ static void game_engine_generate_title_string(
 	long string_list_index;
 	wchar_t *format_string;
 
-	player_get(player_index);
 	secondary_string = L"";
 	match_assert(
 		"c:\\halo\\SOURCE\\game\\game_engine.c",
 		0x36E,
 		title_string);
+	/* port: no title for a machine whose player is not (or not yet) in
+	the game: its place, score and lives are its player's (the scoreboard
+	open with none must never crash: issue #36) */
+	title_string[0] = 0;
+	if (!player_try_and_get(player_index))
+		return;
 	if (global_variant.universal_variant.lives > 0)
 	{
-		struct player_datum *player = player_get(player_index);
+		struct player_datum *player = player_try_and_get(player_index);
 		long remaining_lives =
 			global_variant.universal_variant.lives - player->statistics.deaths;
 
@@ -1238,8 +1243,11 @@ static void game_engine_generate_title_string(
 	}
 	else if (game_engine_has_teams())
 	{
-		wchar_t team0_name[8];
-		wchar_t team1_name[8];
+		/* port: room for any score a game type writes as a team's name
+		(slayer's and CTF's a number, king's and oddball's a time: a host's
+		score past 9999 minutes or below zero overran 8) */
+		wchar_t team0_name[32];
+		wchar_t team1_name[32];
 		long team0_score;
 		long team1_score;
 
@@ -3109,7 +3117,9 @@ static void game_engine_post_rasterize_in_game(
 
 	local_player_index = render.local_player_index;
 	player_index = local_player_get_player_index(local_player_index);
-	player = player_get(player_index);
+	/* port: a local player with no player (yet) in the game: the scores
+	are still drawn, without its title (issue #36) */
+	player = player_index != NONE ? player_try_and_get(player_index) : NULL;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\game\\game_engine.c",
@@ -4809,22 +4819,24 @@ static struct statistic_buffer game_engine_get_player_place(
 	long player_index)
 {
 	struct statistic_buffer statistic_buffer[MULTIPLAYER_MAXIMUM_PLAYERS];
-	long place = 0;
+	struct statistic_buffer none = { NONE, 0, 0, 0, 0, 0, 0 };
+	long player_count;
+	long place;
 
-	populate_statistic_buffer(statistic_buffer, _postgame_statistic_ranking, FALSE);
-	while (TRUE)
+	player_count = populate_statistic_buffer(statistic_buffer, _postgame_statistic_ranking, FALSE);
+	/* port: only among the players listed. The search went on until it
+	found the player, its assertion the only bound, and a release build
+	compiles that out: a player not in the list (NONE for a machine with
+	no player yet, or one the render does not see yet: render_epoch.c)
+	read on past the array into the stack (the scoreboard's title, found
+	looking into issue #36). Not found: an entry of no player (NONE). */
+	for (place = 0; place < player_count; place++)
 	{
 		if (statistic_buffer[place].player_index == player_index)
-			break;
-
-		place++;
-		match_assert(
-			"c:\\halo\\SOURCE\\game\\game_engine.c",
-			0x362,
-			place<MULTIPLAYER_MAXIMUM_PLAYERS);
+			return statistic_buffer[place];
 	}
 
-	return statistic_buffer[place];
+	return none;
 }
 
 struct game_variant *build_game_variant_king(
@@ -5867,7 +5879,10 @@ long game_engine_did_player_win_default(
 		struct statistic_buffer entry;
 
 		entry = game_engine_get_player_place(player_index);
-		if (is_place_tied(&entry) &&
+		/* (port: a player not among them, none: no win) */
+		if (entry.player_index == NONE)
+			result = FALSE;
+		else if (is_place_tied(&entry) &&
 			!place_get_position(&entry))
 			result = NONE;
 		else if (!place_get_position(&entry))
