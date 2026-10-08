@@ -157,7 +157,16 @@ cpu_c=${cpu_b#* }
 cpu_b=${cpu_b%% *}
 mkdir -p "$out"
 pids=
-cleanup() { for pid in $pids; do kill "$pid" 2>/dev/null; done; wait 2>/dev/null; }
+# (config_kept: config.toml beside the build as it was before a mode that
+# changes it, put back at the end: coopmenuonline)
+config_kept=
+cleanup() {
+	for pid in $pids; do kill "$pid" 2>/dev/null; done; wait 2>/dev/null
+	if [ -n "$config_kept" ]; then
+		config=$(dirname "$vita")/config.toml
+		if [ -f "$config_kept" ]; then cp "$config_kept" "$config"; else rm -f "$config"; fi
+	fi
+}
 trap cleanup EXIT
 
 # ---- the network: "internet" here (198.51.100.1: broker and STUN), a NAT
@@ -664,7 +673,12 @@ coopmenuonline)
 	# co-op from the campaign's menus, online: the host goes Campaign, a new
 	# profile, The Pillar of Autumn, Heroic and Y (Play co-op), and in the
 	# waiting screen X makes the game public (network.coop_public); the
-	# joiner finds it in the server browser and joins it (network test)
+	# joiner finds it in the server browser and joins it (network test).
+	# X also writes coop_public = true to config.toml beside the build,
+	# which would make every later co-op game of that build public (coop's
+	# check that it is private unless chosen): the file is put back after
+	config_kept=$out/config.toml.kept
+	cp "$(dirname "$vita")/config.toml" "$config_kept" 2>/dev/null
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
 		"HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y wait:150:6000 x" \
 		"HALO_TEST_COMMANDS=L60:@vote"; host_pid=$last_pid
