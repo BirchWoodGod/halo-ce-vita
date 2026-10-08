@@ -1,0 +1,121 @@
+#!/bin/bash
+# A first start without the movies (README: they are optional), on the Linux
+# harness (any build of this tree: the Linux build plays no movie, so every
+# movie is missing, as on a Vita without ux0:data/haloce-vita/movies/), every
+# press scripted (HALO_TEST_PAD), the screens named in the log (HALO_UI_LOG).
+# Each case starts fresh: its own copy of the harness (so its own config.toml
+# beside it), an empty data folder (no bink folder, no settings) and an empty
+# save folder (no profiles, no playlists).
+#
+#   fresh    the start-up filesystem checks made to take 6 s
+#            (HALO_TEST_FILESYSTEM_CHECK_MS, as on a Vita's memory card): the
+#            main menu comes up once they end and takes the first press made
+#            after it is up - before, it came up at once and dropped every
+#            press while they ran (on the Vita: "the main menu ignores all
+#            input"); then down/A/B through the main menu's screens
+#   attract  the main menu left alone past the attract mode's countdown (75 s),
+#            with no attract movie: no movie is tried (the menu's music is not
+#            stopped and started over, the intro's is the only failed open),
+#            and the menu still takes a press after it
+#
+# Each must log no assertion or exception, and exit by itself.
+#
+#   run_no_movies_test.sh [CASE...]   (default: fresh attract)
+#   HALO_TEST_VITA   the harness (default build/linux/halo of this tree)
+#   HALO_TEST_DATA   a folder with the game's maps folder (the Xbox maps)
+#   HALO_TEST_OUT    where the logs go (kept; the harness copies are removed)
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../../.." && pwd)
+binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
+data=${HALO_TEST_DATA:-$root/../data2276}
+out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_no_movies_test.$$}
+cases=${*:-fresh attract}
+status=0
+fail() { echo "FAIL ($1): $2"; status=1; }
+
+if [ ! -x "$binary" ]; then
+	echo "no harness at $binary (HALO_TEST_VITA)"
+	exit 2
+fi
+if [ ! -e "$data/maps/ui.map" ]; then
+	echo "no maps in $data/maps (HALO_TEST_DATA)"
+	exit 2
+fi
+mkdir -p "$out"
+
+run() { # NAME SECONDS PAD [VAR=value...]
+	local name=$1 seconds=$2 pad=$3
+	shift 3
+	rm -rf "$out/$name"
+	mkdir -p "$out/$name/data" "$out/$name/save" "$out/$name/bin"
+	ln -sfn "$(cd "$data" && pwd)/maps" "$out/$name/data/maps"
+	cp "$binary" "$out/$name/bin/halo"
+	(cd "$out/$name" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
+		HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
+		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
+		HALO_UI_LOG=1 "HALO_TEST_PAD=$pad" "$@" timeout -k 5 $((seconds + 90)) "$out/$name/bin/halo" > "$out/$name/run.log" 2>&1)
+	echo $? > "$out/$name/exit"
+	rm -rf "$out/$name/bin"
+}
+
+# whether the first A pressed after the main menu came up opened a screen
+# (before the next press): the menu took it
+first_press_taken() { # LOG
+	awk '
+		/ui: screen ui.shell.main_menu.main_menu$/ && !menu { menu = 1; next }
+		menu && !pressed && /test pad: a$/ { pressed = 1; next }
+		pressed && /ui: screen / { taken = 1; exit }
+		pressed && /test pad: / { exit }
+		END { exit taken ? 0 : 1 }' "$1"
+}
+
+check() { # NAME
+	local name=$1 log=$out/$1/run.log debug=$out/$1/data/debug.txt
+	echo "--- $name"
+	grep -aE "ui: screen|test pad: a$" "$log" | head -12
+	grep -aE "main menu|movie|bink" "$debug" 2>/dev/null
+	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
+	grep -aqiE "assert|exception|halt" "$log" && fail "$name" "an assertion, exception or halt"
+	[ -e "$out/$name/data/bink" ] && fail "$name" "a bink folder in the data folder (the test wants none)"
+	grep -aq "ui: screen ui.shell.main_menu.main_menu" "$log" || fail "$name" "the main menu did not come up"
+	first_press_taken "$log" || fail "$name" "the first press after the main menu came up did not reach a screen"
+}
+
+for case in $cases; do
+	case $case in
+	fresh)
+		# (the steps start a second after the main menu's scene is up, while
+		# the checks still run: those presses are dropped, as the intro drops
+		# them; then each A opens a screen and B comes back)
+		pad="down:150:1000 a:150:2500 b:150:1500"
+		pad="$pad $pad $pad $pad $pad $pad $pad"
+		run fresh 45 "$pad" HALO_TEST_FILESYSTEM_CHECK_MS=6000
+		check fresh
+		grep -aq "the main menu waits for the filesystem checks" "$out/fresh/data/debug.txt" ||
+			fail fresh "the main menu did not wait for the filesystem checks"
+		grep -aq "the filesystem checks are done; the main menu comes up" "$out/fresh/data/debug.txt" ||
+			fail fresh "the main menu did not come up after the filesystem checks"
+		[ "$(grep -ac 'ui: screen ui.shell.main_menu.multiplayer_type_select' "$out/fresh/run.log")" -ge 2 ] ||
+			fail fresh "Multiplayer did not open twice"
+		;;
+	attract)
+		# (the countdown runs from the menu's last press: 75 s untouched)
+		run attract 100 "wait:150:82000 down:150:1000 a:150:3000 b:150:2000"
+		check attract
+		debug=$out/attract/data/debug.txt
+		grep -aqE "unable to locate any movie for movie #[0-2]" "$debug" ||
+			fail attract "the countdown did not run out (no attract movie looked for)"
+		[ "$(grep -ac 'failed to open bink file' "$debug")" = 1 ] ||
+			fail attract "a movie other than the intro was tried: $(grep -ac 'failed to open bink file' "$debug") failed opens"
+		grep -aq "stopping main menu music" "$debug" && fail attract "the menu's music was stopped for an attract movie"
+		[ "$(grep -ac 'starting main menu music' "$debug")" = 1 ] ||
+			fail attract "the menu's music was started $(grep -ac 'starting main menu music' "$debug") times"
+		;;
+	*)
+		echo "usage: $0 [fresh|attract]..." >&2; exit 2 ;;
+	esac
+done
+echo "logs in $out"
+[ $status = 0 ] && echo PASS
+exit $status

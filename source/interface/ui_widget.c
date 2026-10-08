@@ -4927,6 +4927,19 @@ short remap_sticks_for_local_player(
 static unsigned long __stdcall filesystem_initialization_thread_proc(
 	void *input)
 {
+#ifdef HALO_LINUX
+	{
+		/* (test) HALO_TEST_FILESYSTEM_CHECK_MS=<ms>: the checks take that
+		much longer, as on a Vita's memory card (5-10 s, more at a first
+		start), for the harness (port/vita/tests/run_no_movies_test.sh) */
+		extern char *getenv(const char *name);
+		extern long atol(const char *text);
+		const char *setting = getenv("HALO_TEST_FILESYSTEM_CHECK_MS");
+
+		if (setting && atol(setting) > 0)
+			Sleep((unsigned long)atol(setting));
+	}
+#endif
 	widget_globals.filesystem_check_result = saved_game_perform_file_system_checks();
 	if (!widget_globals.filesystem_check_result)
 	{
@@ -4962,6 +4975,12 @@ static void perform_filesystem_initialization(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the main menu waits for the start-up filesystem checks
+(main_screen_shell_load, process_ui_widgets) */
+static boolean main_menu_waits_for_filesystem_checks = FALSE;
+#endif
+
 void main_screen_shell_load(
 	void)
 {
@@ -4992,6 +5011,24 @@ void main_screen_shell_load(
 		perform_filesystem_initialization();
 		input_abstraction_reset_controller_detection_timer();
 	}
+#ifdef HALO_LINUX
+	/* port: the main menu takes no input until the start-up filesystem
+	checks (perform_filesystem_initialization: saved games, profiles,
+	playlists) are done - process_ui_widgets drops every press while their
+	thread runs. On the Xbox the intro covers them (it cannot be skipped
+	before they end). Without it - the movies are optional (README), and
+	the Linux build has none - the menu came up at once and ignored every
+	button for as long as the checks took: 5-10 s on a Vita, more at a
+	first start, with the menu's music started beside them on the same
+	memory card. So the menu comes up when they end (process_ui_widgets),
+	ready for input as after the intro; the same if the intro ends first */
+	if (load_main_menu && widget_globals.initialization_thread)
+	{
+		main_menu_waits_for_filesystem_checks = TRUE;
+		load_main_menu = FALSE;
+		error(_error_silent, "the main menu waits for the filesystem checks");
+	}
+#endif
 	if (load_main_menu)
 	{
 		attract_mode_reset_timer();
@@ -7534,6 +7571,21 @@ void process_ui_widgets(
 		dispose_thread(widget_globals.initialization_thread);
 		widget_globals.initialization_thread = NULL;
 		ui_widgets_inhibit_processing(FALSE);
+#ifdef HALO_LINUX
+		/* port: the main menu that waited for the checks (main_screen_shell_load),
+		if the game is still at it; the presses made while they ran
+		dropped, as the intro drops them */
+		if (main_menu_waits_for_filesystem_checks)
+		{
+			main_menu_waits_for_filesystem_checks = FALSE;
+			error(_error_silent, "the filesystem checks are done; the main menu comes up");
+			if (main_menu_is_active())
+			{
+				event_manager_flush();
+				main_screen_shell_load();
+			}
+		}
+#endif
 		switch (widget_globals.filesystem_check_result)
 		{
 		case _file_system_check_result_not_enough_free_space:

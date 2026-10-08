@@ -58,9 +58,13 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
        -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
 ```
 
-A movie without an MP4 is skipped, as the game skips a missing movie. (The
-game looks for `data/bink/<name>.bik` first; the port creates an empty one
-for each MP4 at start-up.)
+A movie without an MP4 (or one that will not open) is skipped, as the game
+skips a missing movie: no intro, no attract videos, and the main menu takes
+input as soon as it is up - without the intro it comes up once the start-up
+saves and profile checks end, which the intro otherwise plays over. (The
+game looks for `data/bink/<name>.bik` first; the port creates a 12-byte
+stand-in for each MP4 at start-up, and removes the stand-ins whose MP4 is
+gone.)
 
 A movie is scaled to fill the screen at the shape its file gives (letter-
 or pillarboxed only as that needs): the Xbox's 4:3 movies fill the height,
