@@ -1474,7 +1474,7 @@ static void particle_system_render(
 			struct build_sprite_data sprite_data;
 #ifdef HALO_LINUX
 			/* (HALO_PARTICLE_RENDER_DIVISOR, render_particles.c: a system on
-			an object draws all its particles) */
+			an object draws all its particles; below) */
 			int halo_particle_render_divisor(void);
 			int divisor = system->object_index == NONE ? halo_particle_render_divisor() : 1;
 #endif
@@ -1494,7 +1494,6 @@ static void particle_system_render(
 
 #ifdef HALO_LINUX
 				if (state_index_snapshot >= 0 && state_index_snapshot < type_definition->particle_states.count &&
-					(divisor == 1 || particle_index % divisor == 0) &&
 					particle->valid && render_location_visible(&particle->location))
 #else
 				if (particle->valid && render_location_visible(&particle->location))
@@ -1616,6 +1615,16 @@ static void particle_system_render(
 							sprite_index += (short)sequence->sprites.count;
 					}
 
+#ifdef HALO_LINUX
+					/* (HALO_PARTICLE_RENDER_DIVISOR: a particle thinned out is
+					passed over here, after its sprite is chosen above - that
+					choice takes the game's local random number, so the
+					simulation goes on as if it were drawn) */
+					if (divisor > 1 && particle_index % divisor != 0)
+					{
+						state_weight = transition_weight = 0.f;
+					}
+#endif
 					if (state_weight > 0.01f)
 					{
 						real_argb_color lit_color = color;

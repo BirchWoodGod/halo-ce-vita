@@ -265,6 +265,9 @@ void render_particles(
 	short group_particle_counts[MAXIMUM_RENDERED_PARTICLE_GROUPS];
 	short rendered_particle_count;
 	struct build_sprite_data sprite_data;
+#ifdef HALO_LINUX
+	int particle_divisor = halo_particle_render_divisor();
+#endif
 	real_point3d position;
 	real_vector3d direction;
 
@@ -299,10 +302,6 @@ void render_particles(
 			local_player_index = MAXIMUM_LOCAL_PLAYERS;
 		}
 
-#ifdef HALO_LINUX
-		int divisor = halo_particle_render_divisor();
-#endif
-
 		for (particle_index = data_next_index(particle_data, NONE);
 			particle_index != NONE;
 			particle_index = data_next_index(particle_data, particle_index))
@@ -311,15 +310,6 @@ void render_particles(
 			boolean owned_by_local_player =
 				particle->local_player_index == local_player_index;
 
-#ifdef HALO_LINUX
-			/* (HALO_PARTICLE_RENDER_DIVISOR, above: the first-person
-			weapon's are all drawn) */
-			if (divisor > 1 && DATUM_INDEX_TO_ABSOLUTE_INDEX(particle_index) % divisor != 0 &&
-				!(owned_by_local_player && TEST_FLAG(particle->flags, _particle_datum_dont_draw_third_person_bit)))
-			{
-				continue;
-			}
-#endif
 			if (render_location_visible(&particle->location) &&
 				(!TEST_FLAG(
 					particle->flags,
@@ -525,6 +515,23 @@ void render_particles(
 								unsigned long flags;
 								word particle_flags;
 
+#ifdef HALO_LINUX
+								/* (HALO_PARTICLE_RENDER_DIVISOR, above: the
+								first-person weapon's are all drawn. A particle
+								thinned out is passed over only here, as drawn
+								for the game: the orphan's delete above is the
+								game's, and the game deletes a particle not
+								drawn for a while - particles.c's
+								last_rendered_frame_index) */
+								if (particle_divisor > 1 &&
+									DATUM_INDEX_TO_ABSOLUTE_INDEX(rendered_particle->particle_index) % particle_divisor != 0 &&
+									!rendered_particle->attached_to_first_person_weapon)
+								{
+									particle->last_rendered_frame_index = render.frame_index;
+									rendered_particle++;
+									continue;
+								}
+#endif
 								fade = 1.0f;
 								built_particle_count++;
 								scale =
