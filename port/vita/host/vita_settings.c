@@ -322,7 +322,7 @@ static struct setting settings[] = {
 	where each went. Off until the hardware says what it is worth; in no
 	profile) */
 	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
-		"CapUnlocker: 4th core runs audio, or all async work", 0, PAGE_GRAPHICS_ADVANCED },
+		"Needs CapUnlocker: audio, or all background work", 0, PAGE_GRAPHICS_ADVANCED },
 
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },

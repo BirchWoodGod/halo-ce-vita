@@ -1270,7 +1270,7 @@ static void test_fourth_core(void)
 		!strcmp(row->names[2], "All async") && !strcmp(row->values[1], "1") && !strcmp(row->values[2], "2") &&
 		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "0"),
 		"Fourth core helpers: on Graphics > Advanced, Off, Audio, All async; Off by default (HALO_CPU3_AUX=0), after a restart");
-	check(strstr(row->help, "4th core") && strstr(row->help, "CapUnlocker"), "Fourth core helpers: the help names the plugin");
+	check(strstr(row->help, "Needs CapUnlocker") && strstr(row->help, "background work"), "Fourth core helpers: the help names the plugin (the README's words)");
 	{
 		int index, in_profile = 0;
 
@@ -1283,8 +1283,8 @@ static void test_fourth_core(void)
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=1\n") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< Audio >") &&
-		settings[0].choice == profile && restart_pending,
-		"Fourth core helpers Audio: saved, in the environment, the profile unchanged, a restart asked for");
+		settings[0].choice == profile && restart_pending && menu_fits(),
+		"Fourth core helpers Audio: saved, in the environment, the profile unchanged, a restart asked for; its lines fit");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "2") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=2\n") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< All async  "),
