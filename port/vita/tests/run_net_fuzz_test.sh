@@ -3,7 +3,8 @@
 # public signalling brokers send, read by
 #   p2p        internet play's tunnel, streams (KCP), STUN, invites, codes
 #              (port/linux/src/p2p.c)
-#   signal     MQTT, JOIN/ACCEPT, code records, lobby entries (p2p_signal.c)
+#   signal     MQTT 5 and 3.1.1, JOIN/ACCEPT, code records, the server
+#              browser's slots and queries (p2p_signal.c)
 #   messages   the game's message decoder (source/networking/
 #              network_messages.c, source/memory/data_packet*.c)
 #   map_share  map sharing's message rules (port/linux/game/map_share_protocol.c)
@@ -34,7 +35,8 @@ sanitize="-fsanitize=address,undefined -fno-sanitize=alignment,function -fno-san
 platform_flags="--target=i686-linux-gnu -m32 -fms-extensions -fshort-wchar -malign-double -fcommon -fno-pic
 	-fno-strict-aliasing -fwrapv -freg-struct-return -ffunction-sections -fdata-sections -O1 -g -std=gnu11 -D_GNU_SOURCE
 	-DHALO_LINUX_PLATFORM_LAYER -DHALO_VITA -w -include port/linux/include/halo_linux_prefix.h
-	-Iport/linux/src -Iport/linux/include -Iport/linux/game -Iport/third_party/kcp -Isource -Isource/cseries
+	-Iport/linux/src -Iport/linux/include -Iport/linux/game -Iport/third_party/kcp -Iport/third_party/monocypher
+	-Isource -Isource/cseries
 	-idirafter port/include/xdk"
 # (one line: the commands are built with eval, for the game's quoted include
 # paths)
@@ -66,11 +68,13 @@ if [ "$seconds" != 0 ]; then
 fi
 
 status=0
+# (p2p_crypto.c's Ed25519 and Argon2, for the server browser)
+monocypher="port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c"
 for target in $targets; do
 	case $target in
-	p2p) flags=$platform_flags; sources="port/vita/tests/net_fuzz_p2p.c port/third_party/kcp/ikcp.c" ;;
-	signal) flags=$platform_flags; sources="port/vita/tests/net_fuzz_signal.c" ;;
-	map_share) flags=$platform_flags; sources="port/vita/tests/net_fuzz_map_share.c port/linux/src/p2p_crypto.c" ;;
+	p2p) flags=$platform_flags; sources="port/vita/tests/net_fuzz_p2p.c port/third_party/kcp/ikcp.c $monocypher" ;;
+	signal) flags=$platform_flags; sources="port/vita/tests/net_fuzz_signal.c $monocypher" ;;
+	map_share) flags=$platform_flags; sources="port/vita/tests/net_fuzz_map_share.c port/linux/src/p2p_crypto.c $monocypher" ;;
 	messages) flags=$game_flags; sources="port/vita/tests/net_fuzz_messages.c source/memory/data_packet_groups.c
 		source/memory/data_packets.c source/memory/data_encoding.c source/memory/byte_swapping.c
 		source/bungie_net/common/message_header.c" ;;

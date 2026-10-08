@@ -346,9 +346,9 @@ Online):
 
 | Line | What it does |
 | --- | --- |
-| Online games | **Private**: others join with your code. **Public**: your games are also listed in the public lobby for any Vita to join. |
+| Online games | **Private**: others join with your code. **Public**: your games are also listed in the server browser for any Vita to join. |
 | Join with a code | Type another player's code with the D-pad (up and down change a letter, left and right move, Cross joins). |
-| Browse public games | The games listed in the public lobby; Cross joins one. |
+| Browse public games | The server browser: one line a game (its name, players, map, **[pw]** if it has a password, **PC** on a Halo PC map), and the chosen game's Rules ("Slayer to 50 on Blood Gulch") and Players ("5 of 16: name, name... +3 more") below. Cross joins it, Square refreshes the list. |
 
 The ad hoc dialog's mode (Connect, Create or Join) is a Dev switch.
 
@@ -383,9 +383,16 @@ What others can see: the public MQTT brokers and STUN servers (third
 parties) see each Vita's public IP address while it plays online, and the
 Vitas it plays with learn it too, as in any peer-to-peer game. Everything
 sent through the brokers is encrypted with keys from the invite, so the
-brokers learn no codes or invites, but anyone browsing the public lobby sees
-a public game's name (your Vita's user name), its code and its player
-count. Private games are not listed. A host can ban by device: the ID the
+brokers learn no codes or invites, but anyone browsing the public games sees
+a public game's name (your Vita's user name), its map, its rules, its
+players' names and counts, and can join it. A public game's listing is
+signed with the host's key (OpenCE's server browser), so no one else can
+list, change or remove it; it never holds the game's code. A game with a
+password lists its invite sealed with the password (Argon2id, about half a
+second on a Vita to try one), so only those who know it can join from the
+browser; a code still joins it. Private games are not listed. Vitas list on
+their own topics, signed under their own label: a PC never sees a Vita's
+public game, nor a Vita a PC's. A host can ban by device: the ID the
 game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
 only, not the OpenPSID itself.
 

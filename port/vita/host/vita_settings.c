@@ -410,7 +410,7 @@ static struct setting settings[] = {
 		{ "Easy", "Normal", "Heroic", "Legendary" }, "The co-op games you host", 1, PAGE_COOP },
 	/* (internet play, with the connection Online: listed in the public
 	lobby or not, a code typed in, the lobby's games) */
-	{ "Online games", "HALO_NET_LOBBY_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
+	{ "Online games", "HALO_NET_HOST_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
 		"Private: others join by code. Public: listed too", 0, PAGE_ONLINE },
 	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
 		PAGE_ONLINE, KIND_ACTION, ACTION_JOIN_CODE },
@@ -1502,7 +1502,7 @@ static void status_line(char *text, int size)
 	if (!strcmp(running_network, "online"))
 	{
 		if (p2p_hosting_code(code, sizeof(code)))
-			snprintf(text, (size_t)size, "Your code: %s%s", code, choice_of("HALO_NET_LOBBY_PUBLIC") ? " (public)" : "");
+			snprintf(text, (size_t)size, "Your code: %s%s", code, choice_of("HALO_NET_HOST_PUBLIC") ? " (public)" : "");
 		else
 		{
 			p2p_status(detail, sizeof(detail));
@@ -1681,7 +1681,7 @@ static void help_line(char *text, int size, const struct line *line)
 	else if (!setting)
 		text[0] = 0;
 	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
-		setting->action == ACTION_BROWSE || (setting->variable && !strcmp(setting->variable, "HALO_NET_LOBBY_PUBLIC"))) &&
+		setting->action == ACTION_BROWSE || (setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC"))) &&
 		p2p_status(detail, sizeof(detail)))
 		snprintf(text, (size_t)size, "%.60s", detail);
 	else if (page == PAGE_ADHOC && !strcmp(running_network, "adhoc") &&
@@ -1794,7 +1794,7 @@ static void page_summary(char *text, int size, const struct setting *setting)
 	}
 	case PAGE_ONLINE:
 	{
-		const struct setting *listed = setting_named("HALO_NET_LOBBY_PUBLIC");
+		const struct setting *listed = setting_named("HALO_NET_HOST_PUBLIC");
 
 		snprintf(text, (size_t)size, "%s", listed->names[listed->choice]);
 		break;
@@ -1953,6 +1953,10 @@ static void show_code(void)
 	vgxm_menu_set(text, 2);
 }
 
+/* the public games as the server browser lists them (one line each: the
+name, the players, the map, then [pw] for a password and PC for a Halo PC
+map), the chosen one's Rules and Players lines below, in the overlay's own
+font: no art */
 static void show_browse(void)
 {
 	char text[2048];
@@ -1965,13 +1969,23 @@ static void show_browse(void)
 	else if (!browse_count)
 	{
 		p2p_status(detail, sizeof(detail));
-		length += snprintf(text + length, sizeof(text) - length, "\nLooking for games (%.12s)", detail);
+		length += snprintf(text + length, sizeof(text) - length, "\nLooking for games (%.40s)", detail);
 	}
 	for (index = 0; index < browse_count && length < (int)sizeof(text); index++)
-		length += snprintf(text + length, sizeof(text) - length, "\n%-15.15s %3d %s%s", browse_entries[index].name,
-			browse_entries[index].players, browse_entries[index].code, browse_entries[index].compatible ? "" : " (old)");
+	{
+		const struct p2p_lobby_entry *entry = &browse_entries[index];
+		char players[8];
+
+		snprintf(players, sizeof(players), "%d/%d", entry->players, entry->maximum);
+		length += snprintf(text + length, sizeof(text) - length, "\n%-15.15s %5s %-14.14s%s%s", entry->name, players,
+			entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "");
+	}
+	if (browse_count && length < (int)sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length, "\n\n%s%.46s\n%.46s",
+			browse_entries[browse_selected].failed ? "FAILED: " : "", browse_entries[browse_selected].rules,
+			browse_entries[browse_selected].players_line);
 	if (length < (int)sizeof(text))
-		snprintf(text + length, sizeof(text) - length, "\nName, machines, code. Cross: join. O: back");
+		snprintf(text + length, sizeof(text) - length, "\nCross: join. Square: refresh. O: back");
 	vgxm_menu_set(text, browse_count ? browse_selected + 1 : 0);
 }
 
@@ -2177,7 +2191,7 @@ static void change(struct setting *setting, int step)
 	if (strcmp(setting->variable, "HALO_UPSCALE_FILTER") == 0)
 		vgxm_upscale_filter_set(choice);
 	/* (listed or not takes effect at once, also while hosting) */
-	if (strcmp(setting->variable, "HALO_NET_LOBBY_PUBLIC") == 0)
+	if (strcmp(setting->variable, "HALO_NET_HOST_PUBLIC") == 0)
 		p2p_lobby_set_public(choice);
 	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 	save();
@@ -2626,9 +2640,17 @@ static void browse_input(unsigned long pressed)
 		browse_selected--;
 	if ((pressed & VITA_BUTTON_DOWN) && browse_selected < browse_count - 1)
 		browse_selected++;
+	if (pressed & VITA_BUTTON_SQUARE)
+		p2p_lobby_refresh();
+	/* (a game with a password: the Play page asks for it; here, none) */
 	if ((pressed & VITA_BUTTON_CROSS) && browse_selected < browse_count)
 	{
-		p2p_join_lobby_entry(&browse_entries[browse_selected]);
+		if (browse_entries[browse_selected].locked)
+		{
+			set_notice("%.20s has a password", browse_entries[browse_selected].name);
+			return;
+		}
+		p2p_lobby_join(browse_entries[browse_selected].id, "");
 		set_notice("Joining %.20s...", browse_entries[browse_selected].name);
 		p2p_lobby_browse(0);
 		screen = code_for_join ? SCREEN_GUIDE : SCREEN_LIST;
@@ -2659,12 +2681,21 @@ static void delete_input(unsigned long pressed)
 static void browse_refresh(void)
 {
 	struct p2p_lobby_entry entry;
+	char selected[P2P_LOBBY_ID_SIZE] = "";
 	int index;
 
+	/* (the chosen game stays chosen while the list changes under it) */
+	if (browse_selected < browse_count)
+		memcpy(selected, browse_entries[browse_selected].id, sizeof(selected));
 	browse_count = 0;
 	for (index = 0; browse_count < BROWSE_LINES && p2p_lobby_entry(index, &entry); index++)
-		if (!entry.own)
-			browse_entries[browse_count++] = entry;
+	{
+		if (entry.own)
+			continue;
+		if (selected[0] && !strcmp(entry.id, selected))
+			browse_selected = browse_count;
+		browse_entries[browse_count++] = entry;
+	}
 	if (browse_selected >= browse_count)
 		browse_selected = browse_count ? browse_count - 1 : 0;
 }
