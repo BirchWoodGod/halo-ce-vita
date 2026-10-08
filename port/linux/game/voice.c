@@ -142,6 +142,7 @@ void platform_log(char const *format, ...);
 int setenv(const char *name, const char *value, int overwrite);
 unsigned long system_milliseconds(void);
 char const *config_string(char const *name);
+long config_integer(char const *name);
 /* (internet play, p2p_lobby.c) whether this machine's game is listed in the
 public games */
 int p2p_lobby_listed(void);
@@ -250,10 +251,11 @@ static short voice_host_mode(
 static int voice_volume(
 	void)
 {
-	char const *setting = voice_setting("HALO_VOICE_VOLUME", "network.voice_volume");
-	int volume = *setting ? atoi(setting) : 80;
+	/* (an integer in config.toml) */
+	char const *setting = getenv("HALO_VOICE_VOLUME");
+	long volume = setting && *setting ? atol(setting) : config_integer("network.voice_volume");
 
-	return volume < 0 ? 0 : volume > 100 ? 100 : volume;
+	return volume < 0 ? 0 : volume > 100 ? 100 : (int)volume;
 }
 
 /* open mic's threshold (dBFS) */
