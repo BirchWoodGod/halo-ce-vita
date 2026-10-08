@@ -2955,6 +2955,98 @@ static void main_interpolation_frame_end(
 	}
 }
 
+/* (port) frame interpolation keeps real time through a hitch. A local
+game's frame elapses at most two ticks (main_update_time_unthrottled: the
+heavy frames' spiral), so the time of a frame longer than that - a settings
+change remaking the screen's targets, a burst of texture decodes, 150-300
+ms on the Vita - was dropped, and the game fell behind real time by it each
+time (the harness, a 250 ms hitch a second: 23.6 ticks a second, on or off).
+With frame interpolation on, that time is kept and the frames after it each
+run up to two ticks until it is caught up (no more than a second of it; a
+frame of over half a second - a load, a checkpoint written - is a stall,
+dropped as before), so the
+game keeps its 30 ticks a second through hitches and the frames between
+ticks hide the extra tick. Not in a network game (its own pacing), with one
+tick a frame asked for (HALO_TICK_CATCH_UP=0, HALO_TICK_OVERLAP), paused,
+or in a film. */
+#define INTERPOLATION_CATCH_UP_MAXIMUM 1.0f
+#define INTERPOLATION_STALL 0.5f
+
+static real main_interpolation_catch_up(
+	real wanted,
+	real allowed)
+{
+	static real owed;
+	static long dropped_logged;
+	const real most = 0.06666667014360428f;
+
+	if (!halo_interpolation_enabled() || !main_tick_catch_up() || main_tick_pacing.one_tick ||
+		!game_in_progress() || game_time_get_paused() ||
+		!(main_globals.connection == _game_connection_local ||
+			(main_globals.connection == _game_connection_network_server && network_game_is_splitscreen_local())))
+	{
+		owed = 0.0f;
+		return allowed;
+	}
+	if (wanted - allowed > INTERPOLATION_STALL)
+	{
+		/* (a stall, not a hitch: dropped, as before, with what was owed) */
+		if (dropped_logged++ < 20)
+			platform_log("frame interpolation: a %.0f ms stall not caught up", wanted * 1000.0f);
+		owed = 0.0f;
+	}
+	else if (wanted > allowed)
+	{
+		owed += wanted - allowed;
+		if (owed > INTERPOLATION_CATCH_UP_MAXIMUM)
+			owed = INTERPOLATION_CATCH_UP_MAXIMUM;
+	}
+	if (owed > 0.0f && allowed < most)
+	{
+		real paid = most - allowed < owed ? most - allowed : owed;
+
+		allowed += paid;
+		owed -= paid;
+	}
+	return allowed;
+}
+
+/* (harness) HALO_TEST_HITCH=<every ms>:<ms>: the game thread stalls that
+long that often (as a settings change remaking the screen's targets or a
+burst of texture decodes does on the Vita), for the pacing's test that the
+game keeps real time through hitches (port/vita/tests/run_hitch_pacing_test.sh) */
+static void main_test_hitch(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	extern void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+	extern char *getenv(const char *name);
+	extern long atol(const char *text);
+	static long every = -1, length;
+	static unsigned long long next_us;
+
+	if (every < 0)
+	{
+		const char *setting = getenv("HALO_TEST_HITCH");
+		const char *colon = setting ? strchr(setting, ':') : NULL;
+
+		every = colon ? atol(setting) : 0;
+		length = colon ? atol(colon + 1) : 0;
+	}
+	if (every > 0 && length > 0 && vita_host_time_us && vita_host_sleep_us && game_in_progress())
+	{
+		unsigned long long now = vita_host_time_us();
+
+		if (!next_us)
+			next_us = now + (unsigned long long)every * 1000;
+		else if (now >= next_us)
+		{
+			vita_host_sleep_us((unsigned long)length * 1000);
+			next_us = now + (unsigned long long)every * 1000;
+		}
+	}
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2962,6 +3054,7 @@ static void main_update_time_unthrottled(
 	LARGE_INTEGER counter;
 	LARGE_INTEGER frequency;
 	real seconds_elapsed = 0.0f;
+	real raw_seconds_elapsed = 0.0f;
 
 	QueryPerformanceCounter(&counter);
 	QueryPerformanceFrequency(&frequency);
@@ -2979,6 +3072,7 @@ static void main_update_time_unthrottled(
 	else
 	{
 		seconds_elapsed = PIN(seconds_elapsed, 0.0f, 1.0f);
+		raw_seconds_elapsed = seconds_elapsed;
 		/* (port) a split screen game - the Vita's solo multiplayer: a host
 		with its own client on one machine and no other - is paced as a
 		local game, at most two ticks a frame. As a network server it took
@@ -3047,6 +3141,9 @@ static void main_update_time_unthrottled(
 		(HALO_TICK_OVERLAP, above) */
 		if (seconds_elapsed > 0.03333333507180214f && main_tick_pacing_one_tick())
 			seconds_elapsed = 0.03333333507180214f;
+		/* (port) frame interpolation: the time past those two ticks a frame
+		caught up with in the frames after it */
+		seconds_elapsed = main_interpolation_catch_up(raw_seconds_elapsed, seconds_elapsed);
 	}
 	{
 		int halo_repeatable_run(void);
@@ -4728,6 +4825,7 @@ void main_loop(
 			main_interpolation_pacing.update_ticks = 0;
 		}
 		presented = FALSE;
+		main_test_hitch();
 #endif
 		input_frame_begin();
 		input_update();
@@ -5025,8 +5123,15 @@ void main_loop(
 		frames presented, those of a new tick and those between, for the
 		frame-timing line: frame_timing.c) */
 		main_interpolation_frame_end(presented);
-		halo_frame_timing_presented(presented, presented && game_in_progress() && halo_interpolation_enabled() &&
-			!render_interpolation_frame_drew_new_tick(), halo_interpolation_enabled(), main_interpolation_two_a_tick());
+		{
+			/* (paused: the pause menu's frames, which draw no tick either way;
+			between: frame interpolation's frames between two ticks) */
+			boolean paused = presented && game_in_progress() && game_time_get_paused();
+
+			halo_frame_timing_presented(presented, presented && !paused && game_in_progress() &&
+				halo_interpolation_enabled() && !render_interpolation_frame_drew_new_tick(), paused,
+				halo_interpolation_enabled(), main_interpolation_two_a_tick());
+		}
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
 		halo_load_profile_frame_end();
 		main_split_report();
