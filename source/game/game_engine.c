@@ -1672,6 +1672,18 @@ static long select_players_to_display(
 	return MIN(maximum_count, player_count);
 }
 
+#ifdef HALO_LINUX
+/* port: the frames the in-game score has been drawn (the automated tests,
+network_test.c: the scoreboard held open was drawn) */
+static volatile long game_engine_in_game_score_draws;
+
+long game_engine_in_game_score_draw_count(
+	void)
+{
+	return game_engine_in_game_score_draws;
+}
+#endif
+
 static void game_engine_rasterize_in_game_score(
 	long player_index,
 	real alpha)
@@ -1691,6 +1703,9 @@ static void game_engine_rasterize_in_game_score(
 	wchar_t *column_name;
 	wchar_t *score_name;
 
+#ifdef HALO_LINUX
+	game_engine_in_game_score_draws++;
+#endif
 	game_engine_generate_title_string(title_string, player_index);
 	/* port: not the players who quit (from OpenCE) */
 	entry_count = select_players_to_display(

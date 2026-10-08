@@ -236,6 +236,15 @@ void test_input_hold_action(int hold)
 	test_input_holding_action = hold;
 }
 
+/* the automated tests (network_test.c's debug.network_test_scores): the
+player holds Back, the scoreboard, as the scripted player plays on */
+static int test_input_holding_back;
+
+void test_input_hold_back(int hold)
+{
+	test_input_holding_back = hold;
+}
+
 /* (debug) HALO_TEST_PAD="steps": presses for automated menu tests on Linux
 (no window to type into: the harness), as HALO_PAD_FILE gives the Vita's
 (port/vita/host/vita_input.c): steps "name:hold_ms:pause_ms" separated by
@@ -408,6 +417,8 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 			seed = 0;
 		look = strstr(setting, ":look") != NULL;
 	}
+	if (test_input_holding_back)
+		pad->wButtons |= XINPUT_GAMEPAD_BACK;
 	if (seed < 0)
 		return;
 	/* (HALO_TEST_PAD presses the menus: the scripted player plays only in

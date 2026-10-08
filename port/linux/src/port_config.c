@@ -325,6 +325,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_pickup", _config_real, "0.0", "HALO_NETWORK_TEST_PICKUP", _environment_value, _platform_all,
 		"This many seconds into an automated test game the host stands its last\n"
 		"player on a weapon, which a joining player then picks up; 0 never." },
+	{ "debug.network_test_scores", _config_real, "0.0", "HALO_NETWORK_TEST_SCORES", _environment_value, _platform_all,
+		"Every this many seconds of an automated test game each machine's player\n"
+		"holds Back (the scoreboard) for half of it; 0 never." },
 	{ "debug.network_test_pickup_weapon", _config_string, "\"\"", "HALO_NETWORK_TEST_PICKUP_WEAPON", _environment_value,
 		_platform_all,
 		"The weapon network_test_pickup stands the player on: the first whose tag\n"

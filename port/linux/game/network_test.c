@@ -100,6 +100,9 @@ void network_distributed_item_statistics(long *creates, long *deletes, long *fai
 void network_damage_statistics(long *sent_reports, long *dealt_reports, long *rejected_reports, long *replayed_events);
 /* xinput_sdl.c's */
 void test_input_hold_action(int hold);
+void test_input_hold_back(int hold);
+/* game_engine.c's */
+long game_engine_in_game_score_draw_count(void);
 /* network co-op's (port/linux/game/network_coop.c, coop_spectate.c) */
 boolean network_coop_active(void);
 boolean network_coop_skip_vote_status(short *votes, short *voters, boolean *voted);
@@ -149,6 +152,11 @@ static struct
 	real shoot_interval;
 	real vehicle_time;
 	real pickup_time;
+	/* debug.network_test_scores: every so often the scoreboard held open
+	(Back), and the times it was */
+	real scores_interval;
+	boolean scores_held;
+	long scores_shown;
 	char pickup_weapon[64];
 	long score_to_win;
 	long logged_time;
@@ -271,6 +279,7 @@ static void network_test_read_settings(
 	network_test.shoot_interval = (real)config_real("debug.network_test_shoot");
 	network_test.vehicle_time = (real)config_real("debug.network_test_vehicle");
 	network_test.pickup_time = (real)config_real("debug.network_test_pickup");
+	network_test.scores_interval = (real)config_real("debug.network_test_scores");
 	snprintf(network_test.pickup_weapon, sizeof(network_test.pickup_weapon), "%s",
 		config_string("debug.network_test_pickup_weapon"));
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
@@ -1030,6 +1039,29 @@ void network_test_update(
 		!main_menu_loaded && !game_engine_can_score())
 	{
 		network_test.game_over = TRUE;
+	}
+	/* debug.network_test_scores: the scoreboard held open (Back) for the
+	first half of every interval of a game, as a player looking at the
+	scores does (issue #36: a crash with it open online), and let go
+	outside a game and on its carnage report (where Back leaves for the
+	menus) */
+	if (network_test.scores_interval > 0.0f)
+	{
+		long interval = MAX(2, (long)(network_test.scores_interval * TICKS_PER_SECOND));
+		boolean hold = game_in_progress() && game_engine_running() && !main_menu_loaded &&
+			!game_engine_force_single_screen() && game_time_get() % interval < interval / 2;
+
+		if (hold != network_test.scores_held)
+		{
+			network_test.scores_held = hold;
+			test_input_hold_back(hold);
+			if (hold)
+			{
+				network_test.scores_shown++;
+				platform_log("network test: scoreboard held (%ld; drawn in %ld frames so far)", network_test.scores_shown,
+					game_engine_in_game_score_draw_count());
+			}
+		}
 	}
 	/* debug.network_test_rejoin: leave the game, as quitting from the pause
 	menu does, then join again from the main menu */
