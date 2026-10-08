@@ -123,7 +123,14 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v high -level 4.0 -crf 20 -pix_fmt yuv
        -vf scale=640:-2 -c:a aac -b:a 128k -movflags +faststart intro.mp4
 ```
 
-A movie without an MP4 is skipped, as the game skips a missing movie.
+The game needs none of them. With no `movies` folder, or a movie that is
+missing or will not open, that movie is skipped: no intro, no attract
+videos on an idle main menu (its music plays on), and the main menu takes
+input as soon as it is up. Without the intro the main menu appears a few
+seconds after the menu's background, more at the first start: the game
+first checks its saves and writes its default profile and playlists, which
+the intro otherwise plays over. Movies added or removed later are noticed
+at the next start.
 
 A movie is scaled to fill the screen at the shape its file gives, with
 black bars only where that shape needs them: the Xbox's 4:3 movies fill the
