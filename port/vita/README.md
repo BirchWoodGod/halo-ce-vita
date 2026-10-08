@@ -418,40 +418,49 @@ public game, nor a Vita a PC's. A host can ban by device: the ID the
 game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
 only, not the OpenPSID itself.
 
-**Co-op (experimental).** Play the campaign together on two Vitas, by
+**Co-op (experimental).** Play the campaign together on up to four Vitas, by
 system link, online or ad hoc. The host starts it from the Campaign menu:
 Campaign, a profile, a level and a difficulty as for single player, then on
-the difficulty screen **Y** (Play co-op) instead of **A** (which plays alone,
-as ever). The game's lobby opens as the waiting screen: "Waiting for your
-partner", with the level, the difficulty, this Vita's name and how the game
-is reached (system link, online and its code, or ad hoc); **B** cancels and
-goes back to the difficulty screen. The partner opens the System Link screen
-(Multiplayer: LAN, the server browser or Join by code; without the PC
-menus, System Link or the settings panel's Join with a code), where the game is listed as
-"<host>: <level> (<difficulty>)" (with the level and "Co-op" and the
-difficulty beside it), and joins it with **A**. Once the partner is in, the
-level starts after a few seconds (the host's **A** sooner). The PC menus'
-**Co-op campaign** opens the Campaign screen for the host. While the
-host waits alone, the lobby's X and A keys are hidden (B cancels), and B
-back on the difficulty screen keeps the difficulty chosen. 1.0.3's Co-op
-page, which made every game the Vita hosted a campaign level, is gone: a
-settings.txt that had a level set loads as Off. The Xbox game had co-op only
-in split screen; this is upstream halo-ce-universal's network co-op
-(credited in the main README):
+the difficulty screen **Y** (Play co-op) instead of **A** (which plays
+alone, as ever). The game's lobby opens as the waiting screen: "Waiting for
+other players", with the level, the difficulty, this Vita's name and how the
+game is reached (system link, online and its code, or ad hoc); **B** cancels
+and goes back to the difficulty screen. Online, a co-op game is **private**
+(joined by its code) unless you choose: **X** on the waiting screen makes it
+public, listed in the server browser (with Server Setup's password, if one
+is set), and X again private (OpenCE's `network.coop_public`, kept). The
+others open the System Link screen (Multiplayer: LAN, the server browser or
+Join by code; without the PC menus, System Link or the settings panel's Join
+with a code), where the game is listed as "<host>: <level> (<difficulty>)"
+(with the level and "Co-op" and the difficulty beside it), and join it with
+**A**. The lobby shows a panel for each of the three others. Once the first
+is in, the level starts after 15 seconds, so the rest can join, or 6 seconds
+once the lobby is full (the host's **A** sooner); a Vita can also join a
+level in progress, and comes in beside the team. The PC menus' **Co-op
+campaign** opens the Campaign screen for the host. While the host waits
+alone, the lobby's X and A keys are hidden (B cancels; X there is the
+visibility, as the screen says), and B back on the difficulty screen keeps
+the difficulty chosen. 1.0.3's Co-op page, which made every game the Vita
+hosted a campaign level, is gone: a settings.txt that had a level set loads
+as Off. The Xbox game had co-op only in split screen; this is upstream
+halo-ce-universal's network co-op (credited in the main README):
 
-- Two players. The host's Vita runs the level's scripts and its AI for both,
-  and a Vita has no time to spare for more, so a co-op game takes two and
-  upstream's extra enemies are off.
+- Up to four players (two in 1.0.3). The host's Vita runs the level's
+  scripts and its AI for everyone, so its frame rate drops with each player
+  (the game's tick took a third to a half longer with four than with two on
+  the desktop test harness; `HALO_NET_COOP_PLAYERS=2` in env.txt keeps a
+  game to two), and upstream's extra enemies are off.
 - Cutscenes are skipped by vote: press **Start** in one, and it is skipped
-  once both Vitas have (the screen shows the count). Only a press while the
-  skip is offered counts (not one from before it, nor from a level before).
-- A loading zone into a part of the level the team has not been in brings
-  the other player along. Going back to a part already visited needs the
-  team there (both players at the loading zone, or near it); one held back
-  is told so.
-- A dead player watches the other and comes back beside them once it is
-  safe. With both dead, both come back where they were at the last
-  checkpoint (the level is not reverted); checkpoints show on both Vitas.
+  once more than half of the Vitas have (the screen shows the count). Only a
+  press while the skip is offered counts (not one from before it, nor from a
+  level before).
+- Loading zones are the host's: its crossing switches the part of the level
+  and brings the others along (anyone's while the host is dead); another
+  player on one is told to wait for the host.
+- A dead player watches a teammate (A switches to the next) and comes back
+  beside one once it is safe. With everyone dead, all come back where they
+  were at the last checkpoint (the level is not reverted); checkpoints show
+  on every Vita.
 - A level won ends the round, and the lobby's next game is the campaign's
   next level (after The Maw, The Pillar of Autumn). Started from the
   Campaign menu, the lobby opens on it with no map to pick, and it starts

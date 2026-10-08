@@ -111,7 +111,7 @@ static char menu[2048];
 static int menu_selected, menu_visible;
 static char joined_code[32];
 static int refreshes;
-static int lobby_public = -1, browsing, adhoc_connects, adhoc_mode = -1, adhoc_room = -1, adhoc_state_value;
+static int lobby_public = -1, lobby_coop_public = -1, browsing, adhoc_connects, adhoc_mode = -1, adhoc_room = -1, adhoc_state_value;
 static char lobby_name[64], lobby_password[64], joined_id[40], joined_password[64];
 static int ime_opens, ime_open_now, ime_result, ime_maximum, ime_password;
 static char ime_title[64], ime_initial[64], ime_typed[128];
@@ -157,6 +157,7 @@ int p2p_hosting_code(char *code, int size)
 }
 
 void p2p_lobby_set_public(int listed) { lobby_public = listed; }
+void p2p_lobby_set_coop_public(int listed) { lobby_coop_public = listed; }
 void p2p_lobby_browse(int on) { browsing = on; }
 void p2p_lobby_set_name(const char *name) { snprintf(lobby_name, sizeof(lobby_name), "%s", name ? name : ""); }
 
@@ -862,6 +863,17 @@ static void test_multiplayer_tab(void)
 	check(lobby_public == 0 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false"), "Private: at once (network.host_public)");
 	vita_settings_set("HALO_NET_HOST_PUBLIC", "true");
 	check(lobby_public == 1 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "true"), "Public: listed at once");
+	/* (co-op's own, X on its waiting screen: coop_menu.c) */
+	check(!strcmp(getenv("HALO_NET_COOP_PUBLIC"), "false") && lobby_coop_public == -1,
+		"co-op: private unless chosen (network.coop_public)");
+	vita_settings_set("HALO_NET_COOP_PUBLIC", "true");
+	check(lobby_coop_public == 1 && lobby_public == 1 && !strcmp(getenv("HALO_NET_COOP_PUBLIC"), "true") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_PUBLIC=true\n"), "co-op Public: listed at once, saved");
+	vita_settings_set("HALO_NET_HOST_PUBLIC", "false");
+	check(lobby_coop_public == 1 && lobby_public == 0, "the other games' Visibility leaves co-op's alone");
+	vita_settings_set("HALO_NET_COOP_PUBLIC", "false");
+	check(lobby_coop_public == 0 && !strcmp(getenv("HALO_NET_COOP_PUBLIC"), "false"), "co-op Private again: at once");
+	vita_settings_set("HALO_NET_HOST_PUBLIC", "true");
 	vita_settings_set("HALO_NET_LOBBY_PASSWORD", "hunter2");
 	check(!strcmp(getenv("HALO_NET_LOBBY_PASSWORD"), "hunter2") && !strcmp(lobby_password, "hunter2") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PASSWORD=hunter2\n") &&
@@ -1055,7 +1067,7 @@ static void test_variables_kept(void)
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
 		"HALO_BUTTON_ICONS", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
-		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_CPU3_AUX",
+		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION",
 	};
@@ -1727,13 +1739,14 @@ int main(void)
 		check(!strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false") &&
 			choice_of("HALO_NET_HOST_PUBLIC") == 0, "1.0.3's Online games Private: Visibility Private");
 		vita_settings_set("HALO_FRAME_CAP", "30");
-		check(!strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PUBLIC") &&
+		check(!strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_LEVEL") &&
+			!strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_DIFFICULTY") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PUBLIC") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_NET_HOST_PUBLIC=false\n"),
 			"the next save: no co-op lines, Visibility under its own name");
 		/* (env.txt's co-op level stands: the automated co-op tests) */
 		setenv("HALO_NET_COOP_LEVEL", "a30", 1);
 		vita_settings_load();
-		check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a30") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP"),
+		check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a30") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_LEVEL"),
 			"env.txt's co-op level is left alone (tests), and never saved");
 		unsetenv("HALO_NET_COOP_LEVEL");
 	}

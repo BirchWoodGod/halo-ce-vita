@@ -539,9 +539,11 @@ enum
 	CLIENT_UPDATE_SEQUENCE_NUMBER_MASK = 0x7FFFFFFF,
 	NETWORK_GAME_COUNTDOWN_TIME = 30999,
 	NETWORK_GAME_SPLITSCREEN_COUNTDOWN_TIME = 10999,
-	/* port: co-op hosted from the campaign's menus, its first level and the
+	/* port: co-op hosted from the campaign's menus, its first level (with
+	room for more players, longer: the others have time to join) and the
 	next after each won */
 	NETWORK_GAME_COOP_COUNTDOWN_TIME = 5999,
+	NETWORK_GAME_COOP_OPEN_COUNTDOWN_TIME = 15999,
 	NETWORK_GAME_COOP_NEXT_COUNTDOWN_TIME = 10999,
 	NETWORK_GAME_COUNTDOWN_ADJUSTMENT = 5000,
 	NETWORK_GAME_MINIMUM_COUNTDOWN_TIME = 999,
@@ -1435,6 +1437,16 @@ static void network_game_server_list(
 		last.pc_map = custom_edition_cache_is_custom_edition(game->map.name) ? 1 : 0;
 		last.told = FALSE;
 	}
+	if (!last.told || game->variant.universal_variant.score_to_win != last.score || difficulty != last.difficulty ||
+		strcmp(players, last.players))
+	{
+		last.score = game->variant.universal_variant.score_to_win;
+		last.difficulty = difficulty;
+		strcpy(last.players, players);
+		/* (first: a co-op game is known as one before it can be listed,
+		and its own visibility applies, network.coop_public: p2p_lobby.c) */
+		p2p_set_game_listing_details(last.score, difficulty, last.pc_map, players);
+	}
 	if (!last.told || strcmp(name, last.name) || strncmp(map, last.map, sizeof(last.map) - 1) ||
 		strcmp(gametype, last.gametype) || game->variant.game_engine_index != last.engine || open != last.open ||
 		in_progress != last.in_progress || game->variant.universal_variant.teams != last.teams)
@@ -1448,14 +1460,6 @@ static void network_game_server_list(
 		last.teams = game->variant.universal_variant.teams;
 		/* (the scenario's name, not its path: the listing has 32 characters) */
 		p2p_set_game_listing(name, map, gametype, last.engine, open, in_progress, last.teams);
-	}
-	if (!last.told || game->variant.universal_variant.score_to_win != last.score || difficulty != last.difficulty ||
-		strcmp(players, last.players))
-	{
-		last.score = game->variant.universal_variant.score_to_win;
-		last.difficulty = difficulty;
-		strcpy(last.players, players);
-		p2p_set_game_listing_details(last.score, difficulty, last.pc_map, players);
 	}
 	last.told = TRUE;
 }
@@ -1519,14 +1523,16 @@ boolean network_game_server_idle(
 		}
 	}
 
-	/* (what Discord shows of a game hosted for internet play, and the
-	server browser's listing) */
-	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
-	network_game_server_list(server);
 	/* port: the settings' co-op choice (the Vita's settings panel) */
 	network_game_server_port_cooperative_setting(server);
 	/* port: the settings' lobby name and most players (the panel's Play page) */
 	network_game_server_port_lobby_settings(server);
+	/* (what Discord shows of a game hosted for internet play, and the
+	server browser's listing: after the settings above, so that a game they
+	make co-op is never listed as the game it was, co-op's visibility being
+	its own, network.coop_public) */
+	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
+	network_game_server_list(server);
 
 	if (network_game_server_game_is_valid(server))
 	{
@@ -3824,12 +3830,17 @@ void network_game_server_update_countdown(
 						else
 							countdown = NETWORK_GAME_COUNTDOWN_TIME;
 						/* port: co-op hosted from the campaign's menus starts
-						soon after the partner is in (the host's A sooner), the
-						next level after one won a little later */
+						soon after the partner is in, a little later while a
+						larger game has room for more (each machine joining
+						stops the countdown until its player is in, and it
+						starts again: a full lobby's is the short one; the
+						host's A sooner), the next level after one won a
+						little later */
 						if (network_game_server_cooperative.menu)
 						{
 							countdown = network_game_server_cooperative.rounds ? NETWORK_GAME_COOP_NEXT_COUNTDOWN_TIME :
-								NETWORK_GAME_COOP_COUNTDOWN_TIME;
+								server->game.maximum_players > 2 && server->game.player_count < server->game.maximum_players ?
+								NETWORK_GAME_COOP_OPEN_COUNTDOWN_TIME : NETWORK_GAME_COOP_COUNTDOWN_TIME;
 						}
 
 						server->countdown_state.active = TRUE;
@@ -4088,7 +4099,7 @@ void network_game_server_port_set_cooperative(
 	if (!server || server->state != _network_game_server_state_pregame)
 		return;
 	server->game.difficulty = difficulty;
-	/* (network.coop_players: 2 on the Vitas, whose host runs the campaign's
+	/* (network.coop_players: 4 on the Vitas, whose host runs the campaign's
 	AI and scripts for everyone, 16 elsewhere as upstream's Server Setup) */
 	server->game.maximum_players = (byte)PIN(config_integer("network.coop_players"), 2, MAXIMUM_NETWORK_PLAYER_COUNT);
 	if (!network_game_server_send_game_data_pregame(server))
@@ -4246,7 +4257,7 @@ static boolean network_game_server_port_lobby_name(
 /* port: the settings' lobby name and most players, applied to the hosted
 game's lobby each frame (the Vita's settings panel changes them at any
 time): the game lists and the lobby show them at once. Not a co-op game
-(two players, network.coop_players), nor a local (split screen) one; the
+(network.coop_players: four on the Vitas), nor a local (split screen) one; the
 most players is never fewer than the players in the lobby already. */
 static void network_game_server_port_lobby_settings(
 	struct network_game_server *server)
@@ -4778,9 +4789,9 @@ static boolean network_game_server_idle_pregame_tasks(
 		}
 
 		/* port: co-op hosted from the campaign's menus starts once the
-		partner's player is in, with no one pressing A (the lobby's own
-		countdown: the host's A shortens it, and it stops if the partner
-		leaves) */
+		first other player is in, with no one pressing A (the lobby's own
+		countdown: the host's A shortens it, and it stops if the others
+		leave; more may join until the level starts, and after) */
 		if (network_game_server_cooperative.menu && !server->countdown_state.active &&
 			!server->countdown_state.paused && server_ok_to_countdown(server))
 		{

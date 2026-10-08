@@ -210,6 +210,14 @@ everyone's server browser (public) or reached only by its code and invite
 (private); going private makes a new invite, so that one seen in a listing
 lets no one in (the code leads to the new one) */
 void p2p_lobby_set_public(int listed);
+/* the same for a co-op game (network.coop_public, OpenCE's: private unless
+chosen; the co-op lobby's choice, port/linux/game/coop_menu.c), which
+p2p_lobby_set_public does not change */
+void p2p_lobby_set_coop_public(int listed);
+/* whether a co-op game this machine hosts is listed (as chosen, else
+network.coop_public; never with the server browser off), and in
+has_password (if not NULL) whether a listing would ask for the password */
+int p2p_lobby_coop_public(int *has_password);
 /* the name the browser lists the game under ("": network.lobby_name, else
 the game's own) */
 void p2p_lobby_set_name(const char *name);

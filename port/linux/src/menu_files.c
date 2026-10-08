@@ -21,6 +21,7 @@ file and line, and then no file is used: the game keeps its own menus.
 #include "expat.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +31,9 @@ file and line, and then no file is used: the game keeps its own menus.
 #endif
 
 #define MAXIMUM_DEPTH 32
+/* (the platform's clock, in microseconds: the Vita's host, posix_profile.c) */
+unsigned long long vita_host_time_us(void);
+#define platform_microseconds_now vita_host_time_us
 #define MAXIMUM_FILE_BYTES (1024 * 1024)
 
 /* ---------- the files */
@@ -322,7 +326,13 @@ static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 which fails the reading (the array is then as it was) */
 static void *grow(struct reader *reader, void *array, long count, size_t size)
 {
-	void *grown = realloc(array, (size_t)(count + 1) * size);
+	void *grown;
+
+	/* (room for 16, then doubled: an element at a time made the reading
+	slow on the Vita, ~1 ms an element in all) */
+	if (array && (count < 16 || (count & (count - 1))))
+		return array;
+	grown = realloc(array, (size_t)(count < 16 ? 16 : count * 2) * size);
 
 	if (!grown)
 		reader_error(reader, "out of memory");
@@ -830,18 +840,21 @@ static int read_file(struct reader *reader, const struct menu_file *file)
 
 /* ---------- public code */
 
-struct halo_menus const *halo_menus_load(void)
+static struct halo_menus const *menus_load(void)
 {
 	static int read;
 	static struct halo_menus menus;
 	static int succeeded;
 	struct reader reader;
 	long index;
+	unsigned long long gather_started, parse_started;
 
 	if (read)
 		return succeeded ? &menus : NULL;
 	read = 1;
+	gather_started = platform_microseconds_now();
 	files_gather();
+	parse_started = platform_microseconds_now();
 	memset(&reader, 0, sizeof(reader));
 	for (index = 0; index < file_count && !reader.failed; index++)
 		read_file(&reader, &files[index]);
@@ -870,6 +883,8 @@ struct halo_menus const *halo_menus_load(void)
 	}
 	menus = reader.menus;
 	succeeded = 1;
+	platform_log("menus: %ld files read in %llu us, parsed in %llu us", file_count, parse_started - gather_started,
+		platform_microseconds_now() - parse_started);
 	return &menus;
 }
 
@@ -909,4 +924,56 @@ long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity)
 void halo_menus_log(char const *file, long line, char const *message, char const *detail)
 {
 	platform_log("menus: %s:%ld: %s%s%s", file ? file : "?", line, message, detail ? " " : "", detail ? detail : "");
+}
+
+/* ---------- reading ahead
+
+The files are read and parsed on a thread of their own while ui.map's tags
+load (halo_menus_preload, from scenario_tags_load), so that the main menu
+waits for none of it; halo_menus_load then takes what the thread made, or
+reads them itself. */
+
+static pthread_mutex_t preload_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t preload_thread;
+static int preload_started, preload_joined;
+static struct halo_menus const *preload_result;
+
+static void *preload_proc(void *unused)
+{
+	(void)unused;
+	preload_result = menus_load();
+	return NULL;
+}
+
+void halo_menus_preload(void)
+{
+	pthread_mutex_lock(&preload_lock);
+	if (!preload_started)
+	{
+		pthread_attr_t attributes;
+
+		pthread_attr_init(&attributes);
+		pthread_attr_setstacksize(&attributes, 256 * 1024);
+		preload_started = pthread_create(&preload_thread, &attributes, preload_proc, NULL) == 0;
+		pthread_attr_destroy(&attributes);
+		/* (a thread that could not start: halo_menus_load reads them) */
+		if (!preload_started)
+			preload_joined = 1;
+	}
+	pthread_mutex_unlock(&preload_lock);
+}
+
+struct halo_menus const *halo_menus_load(void)
+{
+	struct halo_menus const *result;
+
+	pthread_mutex_lock(&preload_lock);
+	if (preload_started && !preload_joined)
+	{
+		pthread_join(preload_thread, NULL);
+		preload_joined = 1;
+	}
+	result = preload_started ? preload_result : menus_load();
+	pthread_mutex_unlock(&preload_lock);
+	return result;
 }

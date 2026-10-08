@@ -34,8 +34,8 @@ Evolved.
   between Vitas on the same Wi-Fi; online play (short codes, a server
   browser of public games, from OpenCE) and ad hoc play between Vitas, experimental. Vitas play only
   Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
-- Campaign co-op over the network, experimental: two Vitas play a level
-  together by system link, online or ad hoc (Campaign, a level and a
+- Campaign co-op over the network, experimental: up to four Vitas play a
+  level together by system link, online or ad hoc (Campaign, a level and a
   difficulty, then **Y: Play co-op**;
   [port/vita/README.md](port/vita/README.md#multiplayer)).
 - Profiles, controller settings and the game's settings menus.
@@ -207,8 +207,10 @@ Multiplayer screen, from OpenCE's PC menus:
   code) and password, which are kept - then your profile, the map and the
   gametype; the settings panel's Multiplayer tab shows your game's code.
   **LAN** is the System Link screen (Y creates a game).
-- **Co-op campaign** (pick a level and a difficulty, then Y), **Split
-  screen** and **Edit gametypes**, as before.
+- **Co-op campaign** (pick a level and a difficulty, then Y; up to four
+  players; online the game is private, joined by its code, unless X on its
+  waiting screen makes it public), **Split screen** and **Edit gametypes**,
+  as before.
 
 Internet and Join by code need **Connection: Online** (settings panel,
 Multiplayer); the screen says so otherwise. The pictures and text are read

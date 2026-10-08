@@ -180,6 +180,14 @@ static struct
 	network.host_public until said) */
 	int public_said;
 	int public;
+	/* a co-op game's own (network.coop_public, OpenCE's: private unless
+	chosen), which the other's never changes */
+	int coop_public_said;
+	int coop_public;
+	/* the game's details told once (p2p_set_game_listing_details): until
+	then it is not known whether the game is a co-op one, whose visibility
+	is its own */
+	int details_told;
 	char chosen_name[P2P_LISTING_NAME_SIZE + 1];
 	char name[P2P_LISTING_NAME_SIZE + 1];
 	char map[P2P_LISTING_MAP_SIZE + 1];
@@ -512,8 +520,11 @@ network.coop_public, private unless set); never with the server browser off
 (network.public_lobby) */
 static int hosting_public(void)
 {
-	return config_boolean("network.public_lobby") && (lobby.public_said ? lobby.public :
-		config_boolean(lobby.flags & _listing_coop ? "network.coop_public" : "network.host_public"));
+	if (!config_boolean("network.public_lobby"))
+		return 0;
+	if (lobby.flags & _listing_coop)
+		return lobby.coop_public_said ? lobby.coop_public : config_boolean("network.coop_public");
+	return lobby.public_said ? lobby.public : config_boolean("network.host_public");
 }
 
 /* the name listed: the one chosen, else network.lobby_name, else the
@@ -553,9 +564,16 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 	listed_name(name);
 	/* (while a password's key is worked out, the game is not listed: it
 	would be open) */
-	want = token && hosting_public() && !lobby.password_pending && !lobby.password_failed;
+	want = token && lobby.details_told && hosting_public() && !lobby.password_pending && !lobby.password_failed;
 	if (lobby.listed && (!want || memcmp(token, lobby.token, P2P_TOKEN_SIZE)))
+	{
+		/* (the same game gone private by itself, as a game that becomes
+		co-op does, whose visibility is its own: a new invite, so that the
+		one listed lets no one in, as p2p_lobby_set_public's) */
+		if (token && !memcmp(token, lobby.token, P2P_TOKEN_SIZE) && lobby.details_told && !hosting_public())
+			p2p_new_invite_if_listed();
 		stop_listing();
+	}
 	if (!want)
 		return;
 	if (player_count != lobby.player_count || maximum_player_count != lobby.maximum_player_count)
@@ -1050,11 +1068,37 @@ void p2p_lobby_set_public(int public)
 	pthread_mutex_lock(&p2p_lock);
 	public = public ? 1 : 0;
 	/* (a new invite going private: p2p.c) */
-	if (hosting_public() && !public)
+	if (hosting_public() && !public && !(lobby.flags & _listing_coop))
 		p2p_new_invite_if_listed();
 	lobby.public = public;
 	lobby.public_said = 1;
 	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_lobby_set_coop_public(int public)
+{
+	pthread_mutex_lock(&p2p_lock);
+	public = public ? 1 : 0;
+	/* (a new invite going private, as for any game) */
+	if (hosting_public() && !public && (lobby.flags & _listing_coop))
+		p2p_new_invite_if_listed();
+	lobby.coop_public = public;
+	lobby.coop_public_said = 1;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+int p2p_lobby_coop_public(int *has_password)
+{
+	int public;
+
+	pthread_mutex_lock(&p2p_lock);
+	public = config_boolean("network.public_lobby") &&
+		(lobby.coop_public_said ? lobby.coop_public : config_boolean("network.coop_public"));
+	if (has_password)
+		*has_password = lobby.password_said ? lobby.has_password || lobby.password_pending :
+			config_string("network.lobby_password")[0] != 0;
+	pthread_mutex_unlock(&p2p_lock);
+	return public;
 }
 
 void p2p_lobby_set_name(const char *name)
@@ -1163,6 +1207,7 @@ void p2p_set_game_listing_details(int score_limit, int coop_difficulty, int pc_m
 	score_limit = score_limit < 0 ? 0 : score_limit > 0xFFFF ? 0xFFFF : score_limit;
 	coop_difficulty = coop_difficulty < 0 || coop_difficulty > 3 ? 255 : coop_difficulty;
 	pthread_mutex_lock(&p2p_lock);
+	lobby.details_told = 1;
 	flags = (lobby.flags & ~(_listing_pc_map | _listing_coop)) | (pc_map ? _listing_pc_map : 0) |
 		(coop_difficulty != 255 ? _listing_coop : 0);
 	if (score_limit != lobby.score_limit || coop_difficulty != lobby.difficulty || flags != lobby.flags ||

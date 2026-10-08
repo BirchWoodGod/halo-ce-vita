@@ -70,9 +70,9 @@ struct config_setting
 
 /* co-op's defaults: on the Vitas (and the Linux build standing in for one,
 HALO_NET_AS_VITA) the host runs the campaign's AI and scripts for everyone
-at a Vita's speed, so two players and no extra enemies */
+at a Vita's speed, so four players and no extra enemies */
 #if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
-#define COOP_PLAYERS_DEFAULT "2"
+#define COOP_PLAYERS_DEFAULT "4"
 #define COOP_ENEMIES_MODE_DEFAULT "\"none\""
 #else
 #define COOP_PLAYERS_DEFAULT "16"
@@ -222,7 +222,7 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The most players a co-op game this machine hosts takes (2 to the\n"
 		"build's maximum). The host runs the campaign's AI and scripts for\n"
-		"everyone: the Vita's default is 2." },
+		"everyone: the Vita's default is 4." },
 	{ "network.coop_enemies_mode", _config_string, COOP_ENEMIES_MODE_DEFAULT, "HALO_NET_COOP_ENEMIES_MODE",
 		_environment_value, _platform_all,
 		"Online co-op's extra enemies: \"none\", \"per_player\" (each squad of\n"
@@ -256,8 +256,10 @@ static const struct config_setting config_settings[] =
 		"settings panel says for each game (OpenCE's setting)." },
 	{ "network.coop_public", _config_boolean, "false", "HALO_NET_COOP_PUBLIC", _environment_value, _platform_all,
 		"Whether a co-op game this machine hosts for internet play is public\n"
-		"(listed in everyone's server browser) or, false, private, until the\n"
-		"settings panel says (network.host_public: the other games')." },
+		"(listed in everyone's server browser) or, false, private (joined by\n"
+		"its code or invite link): its own, which network.host_public (the\n"
+		"other games') never changes. X on the waiting screen of co-op hosted\n"
+		"from the campaign's menus writes its choice here (OpenCE's setting)." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"

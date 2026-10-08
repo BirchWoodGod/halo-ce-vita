@@ -3118,6 +3118,17 @@ static boolean network_game_start_slower(
 	short machine_index;
 	long player_index;
 
+#ifdef HALO_LINUX
+	/* port: X in the waiting screen of co-op hosted online from the
+	campaign's menus lists the game in the server browser or not
+	(network.coop_public, port/linux/game/coop_menu.c) */
+	{
+		extern boolean coop_menu_toggle_public(void);
+
+		if (coop_menu_toggle_public())
+			return TRUE;
+	}
+#endif
 	if (client)
 	{
 		void *game = network_game_client_get_game(client);

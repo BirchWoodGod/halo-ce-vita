@@ -27,5 +27,9 @@ boolean coop_menu_game_is_cooperative(struct network_game const *game);
 boolean coop_menu_available(void);
 /* the text drawn over the screen whose tag this is, if any (render_ui_widgets) */
 void coop_menu_render(long screen_tag_index);
+/* (X in a co-op lobby hosted online from the menus, while no one else is
+in) the game listed in the server browser or not (network.coop_public);
+FALSE when it is no such lobby */
+boolean coop_menu_toggle_public(void);
 
 #endif
