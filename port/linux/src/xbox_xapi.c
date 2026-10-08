@@ -42,19 +42,42 @@ DWORD WINAPI XLaunchNewImageA(LPCSTR image_path, PLAUNCH_DATA launch_data)
 	exit(EXIT_SUCCESS);
 }
 
+/* The game's language: the Xbox's dashboard setting, game.language here
+(HALO_LANGUAGE; the Vita's settings panel's Language row). "auto", the
+Vita's default, is the system's language (HALO_SYSTEM_LANGUAGE, set by
+vita_settings.c). What it changes is Halo's: the map folder of that
+language when there is one (cache_files.c: a PAL disc's maps_es, maps_fr,
+maps_de, maps_it; else maps), the movies' (intro_es.bik ...) and, when it
+differs from the last run's, the cache files made again; the text is the
+maps' own. It is the one at start for the whole run (a map folder that
+changed mid-run would mix the cached copies of two languages' maps); the
+port's own text follows the row at once (lang.c). */
 DWORD WINAPI XGetLanguage(void)
 {
-	const char *language = config_string("game.language");
+	static DWORD language_at_start;
 
-	if (*language)
+	if (!language_at_start)
 	{
-		if (!strncmp(language, "ja", 2)) return XC_LANGUAGE_JAPANESE;
-		if (!strncmp(language, "de", 2)) return XC_LANGUAGE_GERMAN;
-		if (!strncmp(language, "fr", 2)) return XC_LANGUAGE_FRENCH;
-		if (!strncmp(language, "es", 2)) return XC_LANGUAGE_SPANISH;
-		if (!strncmp(language, "it", 2)) return XC_LANGUAGE_ITALIAN;
+		const char *language = config_string("game.language");
+		DWORD found = XC_LANGUAGE_ENGLISH;
+
+		if (!strcmp(language, "auto"))
+		{
+			language = getenv("HALO_SYSTEM_LANGUAGE");
+			language = language ? language : "";
+		}
+		if (!strncmp(language, "ja", 2)) found = XC_LANGUAGE_JAPANESE;
+		if (!strncmp(language, "de", 2)) found = XC_LANGUAGE_GERMAN;
+		if (!strncmp(language, "fr", 2)) found = XC_LANGUAGE_FRENCH;
+		if (!strncmp(language, "es", 2)) found = XC_LANGUAGE_SPANISH;
+		if (!strncmp(language, "it", 2)) found = XC_LANGUAGE_ITALIAN;
+		platform_log("XGetLanguage: %s (game.language \"%s\")", found == XC_LANGUAGE_ENGLISH ? "English" :
+			found == XC_LANGUAGE_SPANISH ? "Spanish" : found == XC_LANGUAGE_FRENCH ? "French" :
+			found == XC_LANGUAGE_GERMAN ? "German" : found == XC_LANGUAGE_ITALIAN ? "Italian" : "Japanese",
+			config_string("game.language"));
+		language_at_start = found;
 	}
-	return XC_LANGUAGE_ENGLISH;
+	return language_at_start;
 }
 
 /* ---------- save games */
