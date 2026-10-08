@@ -1268,6 +1268,13 @@ long scenario_tags_load(
 	texture_cache_open();
 	sound_cache_open();
 #ifdef HALO_LINUX
+	/* port: the menus' XML read meanwhile, on a thread of its own, for
+	ui.map (port/linux/game/menu_tags.c) */
+	{
+		extern void menu_tags_preload(char const *map_name);
+
+		menu_tags_preload(stripped_scenario_name);
+	}
 	/* a Halo Custom Edition map, when those may run, is read in place into
 	its own tag cache and has no Xbox vertex or index buffers
 	(port/linux/game/custom_edition_cache.c) */

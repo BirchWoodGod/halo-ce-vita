@@ -152,6 +152,9 @@ struct halo_menus
 /* the menus, read from the files (once; the same each call after); NULL if
 there are none, or a file has an error (logged) */
 struct halo_menus const *halo_menus_load(void);
+/* the same begun on a thread of its own (once), which halo_menus_load waits
+for */
+void halo_menus_preload(void);
 /* a file of the menus folder (a frame's PNG), read whole, NULL if it cannot
 be read; halo_menus_file_free lets it go (the platform layer's heap, not
 the game's) */
