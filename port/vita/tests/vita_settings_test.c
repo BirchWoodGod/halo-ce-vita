@@ -58,6 +58,7 @@ volatile int halo_chat_player_muted[HALO_CHAT_PLAYERS];
 volatile int halo_chat_request;
 volatile int halo_chat_request_value;
 volatile int halo_chat_request_team;
+volatile int halo_chat_request_controller;
 char halo_chat_request_text[HALO_CHAT_TEXT_SIZE];
 /* (voice chat's side: port/linux/src/voice_audio.c) */
 volatile int halo_voice_status[HALO_VOICE_STATUS_COUNT];
@@ -1704,6 +1705,186 @@ static void test_game_chat(void)
 	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 0;
 }
 
+/* one frame of split screen as vita_pad.c has it: controller 0's (the
+panel's, else the game's buttons), then each other controller's; what the
+game has of each in game[] (0 for one game chat took) */
+static void split_frame(unsigned long extra, const unsigned long buttons[4], int menus, unsigned long game[4])
+{
+	struct vita_host_pad pad;
+	int taken, waiting, controller;
+
+	memset(&pad, 0, sizeof(pad));
+	pad.buttons = buttons[0];
+	clock_us += 16667;
+	vita_settings_controllers(extra);
+	taken = vita_settings_input(&pad);
+	waiting = taken && vita_settings_chat_owner() < 0;
+	game[0] = taken ? 0 : vita_settings_game_buttons(buttons[0], menus);
+	for (controller = 1; controller < 4; controller++)
+	{
+		unsigned long held = buttons[controller];
+
+		game[controller] = 0;
+		if (!(extra & (1UL << controller)) || waiting)
+			continue;
+		if (!vita_settings_extra_input(controller, &held, menus))
+			game[controller] = held;
+	}
+}
+
+/* game chat with a PS TV's other controllers: each opens its own menu */
+static void test_game_chat_split_screen(void)
+{
+	unsigned long held[4] = { 0, 0, 0, 0 }, game[4];
+	unsigned long extra = 1UL << 1 | 1UL << 2;
+	int request, value, team;
+	char text[HALO_CHAT_TEXT_SIZE];
+
+	printf("-- game chat, split screen\n");
+	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 1;
+	halo_chat_status[HALO_CHAT_STATUS_MODE] = HALO_CHAT_MODE_ON;
+	halo_chat_status[HALO_CHAT_STATUS_TEAMS] = 0;
+	halo_chat_status[HALO_CHAT_STATUS_PLAYERS] = 2;
+	split_frame(extra, held, 0, game);
+
+	/* controller 2: Back + Y opens its menu; the others play on */
+	held[1] = VITA_BUTTON_SELECT;
+	split_frame(extra, held, 0, game);
+	held[1] = VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE;
+	held[0] = VITA_BUTTON_CROSS;
+	held[2] = VITA_BUTTON_R;
+	split_frame(extra, held, 0, game);
+	check(menu_visible && !strncmp(menu, "GAME CHAT - PLAYER 2\n", 21) && vita_settings_chat_owner() == 1 && !game[1],
+		"controller 2's Back + Y: its menu, named PLAYER 2");
+	held[1] = 0;
+	split_frame(extra, held, 0, game);
+	check(game[0] == VITA_BUTTON_CROSS && game[2] == VITA_BUTTON_R && !game[1],
+		"its menu open: controllers 1 and 3 play on, 2 has none");
+	/* controller 1's presses do not move it */
+	held[0] = VITA_BUTTON_DOWN;
+	split_frame(extra, held, 0, game);
+	held[0] = VITA_BUTTON_CIRCLE;
+	split_frame(extra, held, 0, game);
+	check(menu_visible && menu_selected == 1 && game[0] == VITA_BUTTON_CIRCLE,
+		"controller 1's down and B are its game's, the menu stays on its row");
+	held[0] = 0;
+	/* controller 2 moves it and sends Enemy spotted */
+	held[1] = VITA_BUTTON_DOWN;
+	split_frame(extra, held, 0, game);
+	held[1] = 0;
+	split_frame(extra, held, 0, game);
+	held[1] = VITA_BUTTON_CROSS;
+	split_frame(extra, held, 0, game);
+	check(halo_chat_request == HALO_CHAT_REQUEST_QUICK && halo_chat_request_value == 1 &&
+		halo_chat_request_controller == 1 && !menu_visible, "controller 2's down and A: Enemy spotted, as player 2");
+	chat_taken(&request, &value, &team, text, sizeof(text));
+	split_frame(extra, held, 0, game);
+	check(!game[1], "the A that sent it is not controller 2's game's");
+	held[1] = 0;
+	split_frame(extra, held, 0, game);
+	held[1] = VITA_BUTTON_R;
+	split_frame(extra, held, 0, game);
+	check(game[1] == VITA_BUTTON_R, "let go: controller 2 plays again");
+	held[1] = 0;
+	split_frame(extra, held, 0, game);
+
+	/* controller 3's Back + left: Follow me at once, as player 3 */
+	held[2] = VITA_BUTTON_SELECT;
+	split_frame(extra, held, 0, game);
+	held[2] = VITA_BUTTON_SELECT | VITA_BUTTON_LEFT;
+	split_frame(extra, held, 0, game);
+	check(halo_chat_request == HALO_CHAT_REQUEST_QUICK && halo_chat_request_value == 2 &&
+		halo_chat_request_controller == 2 && !menu_visible && !game[2], "controller 3's Back + left: Follow me, as player 3");
+	chat_taken(&request, &value, &team, text, sizeof(text));
+	held[2] = 0;
+	split_frame(extra, held, 0, game);
+
+	/* controller 1's own menu: named PLAYER 1 with others connected; the
+	others play on; its phrase is player 1's */
+	held[0] = VITA_BUTTON_SELECT;
+	split_frame(extra, held, 0, game);
+	held[0] = VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE;
+	held[1] = VITA_BUTTON_R;
+	split_frame(extra, held, 0, game);
+	check(menu_visible && !strncmp(menu, "GAME CHAT - PLAYER 1\n", 21) && vita_settings_chat_owner() == 0 &&
+		game[1] == VITA_BUTTON_R, "controller 1's Back + Y: its menu (PLAYER 1), controller 2 plays on");
+	held[0] = 0;
+	split_frame(extra, held, 0, game);
+	held[0] = VITA_BUTTON_CROSS;
+	split_frame(extra, held, 0, game);
+	check(halo_chat_request == HALO_CHAT_REQUEST_QUICK && halo_chat_request_value == 0 &&
+		halo_chat_request_controller == 0, "controller 1's A: Need backup, as player 1");
+	chat_taken(&request, &value, &team, text, sizeof(text));
+	held[0] = held[1] = 0;
+	split_frame(extra, held, 0, game);
+
+	/* controller 2's mute page: the Vita's mutes */
+	held[1] = VITA_BUTTON_SELECT;
+	split_frame(extra, held, 0, game);
+	held[1] = VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE;
+	split_frame(extra, held, 0, game);
+	held[1] = 0;
+	split_frame(extra, held, 0, game);
+	{
+		int index;
+
+		for (index = 0; index < 9; index++)
+		{
+			held[1] = VITA_BUTTON_DOWN;
+			split_frame(extra, held, 0, game);
+			held[1] = 0;
+			split_frame(extra, held, 0, game);
+		}
+	}
+	held[1] = VITA_BUTTON_CROSS;
+	split_frame(extra, held, 0, game);
+	held[1] = 0;
+	split_frame(extra, held, 0, game);
+	check(menu_visible && strstr(menu, "MUTE PLAYERS") && strstr(menu, "\nMuted for every player on this system\n") &&
+		menu_fits(), "controller 2's Mute players: muted for every player on the system");
+	held[1] = VITA_BUTTON_CROSS;
+	split_frame(extra, held, 0, game);
+	check(halo_chat_request == HALO_CHAT_REQUEST_MUTE && halo_chat_request_controller == 1, "A: a mute");
+	chat_taken(&request, &value, &team, text, sizeof(text));
+	held[1] = 0;
+	split_frame(extra, held, 0, game);
+
+	/* controller 2 switched off with its menu open: it closes, controller
+	1 still plays */
+	extra = 1UL << 2;
+	held[0] = VITA_BUTTON_CROSS;
+	split_frame(extra, held, 0, game);
+	check(!menu_visible && vita_settings_chat_owner() < 0 && game[0] == VITA_BUTTON_CROSS,
+		"controller 2 switched off: its menu closed, controller 1 plays");
+	held[0] = 0;
+	split_frame(extra, held, 0, game);
+	extra = 1UL << 1 | 1UL << 2;
+
+	/* in the menus (a lobby) controller 3's Back waits for the combo */
+	held[2] = VITA_BUTTON_SELECT;
+	split_frame(extra, held, 1, game);
+	check(!(game[2] & VITA_BUTTON_SELECT), "in the menus: controller 3's Back waits");
+	held[2] = 0;
+	split_frame(extra, held, 1, game);
+	check(game[2] & VITA_BUTTON_SELECT, "a short press: the game has it after");
+	split_frame(extra, held, 1, game);
+	split_frame(extra, held, 1, game);
+	split_frame(extra, held, 1, game);
+
+	/* one controller (a Vita): GAME CHAT as before */
+	held[0] = VITA_BUTTON_SELECT;
+	split_frame(0, held, 0, game);
+	held[0] = VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE;
+	split_frame(0, held, 0, game);
+	check(menu_visible && !strncmp(menu, "GAME CHAT\n", 10), "one controller: GAME CHAT, no player named");
+	held[0] = VITA_BUTTON_CIRCLE;
+	split_frame(0, held, 0, game);
+	held[0] = 0;
+	split_frame(0, held, 0, game);
+	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 0;
+	split_frame(0, held, 0, game);
+}
+
 int main(void)
 {
 	char line[128];
@@ -2201,6 +2382,7 @@ int main(void)
 	test_game_text_input();
 	test_voice_chat();
 	test_game_chat();
+	test_game_chat_split_screen();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

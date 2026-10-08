@@ -584,7 +584,11 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 	controllers paired (split screen) it is read there alone: port 0 is
 	the system's port for a game of one player, which may answer to any
 	controller (RetroArch reads a PS TV's players from ports 1 to 4 for
-	that reason), and another player's presses must not be player 1's */
+	that reason), and another player's presses must not be player 1's.
+	A handheld Vita never comes here (sceKernelGetModel: its own controls
+	are port 0, SCE_CTRL_TYPE_PHY, and ports 1 to 4 are a PS TV's paired
+	controllers, ctrl.h), nor a PS TV with one controller: port 0 as
+	before, port 1's extra buttons added */
 	if (vita_host_is_pstv() && ports_paired()[1])
 	{
 		SceCtrlData first;
@@ -605,6 +609,10 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 				data.ry = first.ry;
 			}
 		}
+		/* (port 1 not read: port 0 as with one controller, rather than
+		player 1 with no controls at all) */
+		else if (alone)
+			sceCtrlPeekBufferPositive(0, &data, 1);
 	}
 	else
 		sceCtrlPeekBufferPositive(0, &data, 1);

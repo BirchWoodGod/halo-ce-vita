@@ -391,6 +391,15 @@ not sent. The host's Game chat setting holds for its whole game: with
 Quick chat only nobody can type, with Off nobody can chat, and a player who
 tries is told so.
 
+With split screen on a PS TV, every player chats with their own
+controller: Back + Y opens *their* menu (GAME CHAT - PLAYER 2), which only
+their controller moves while the others play on, and their lines go out
+under their own name. In the game each player's part of the screen shows
+the lines for everyone, their own team's lines and their own notices (a
+wait, a refusal); in the lobby the lines show once, across the screen.
+Mutes are the PS TV's, not one player's: everyone at the screen reads the
+same lines, so a player muted by anyone is muted for all of you.
+
 **Voice chat.** In a network game being played, hold **Back + left
 trigger (Select + L)** and talk: the Vita's microphone (or a headset's)
 is on only while both are held, and the top right of the screen says
@@ -409,7 +418,9 @@ on at most four talkers at once.
 With **Open mic** your Vita sends whenever its microphone hears more than
 the **Open mic level** (Low sends a quiet voice, High only a near one), and
 the screen says **Open mic** all the while. Voice is not in the lobby,
-only in the game.
+only in the game. On a PS TV (which has no microphone of its own: a
+headset) push to talk is player 1's controller's, Select + L1, and the
+whole PS TV talks as player 1.
 
 The settings panel's **Multiplayer** tab:
 

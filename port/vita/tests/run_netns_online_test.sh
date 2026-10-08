@@ -62,6 +62,14 @@
 #            (the joiner's typed line is refused with a notice, its phrase
 #            passes) and then Off (its phrase refused with a notice); the
 #            joiner mutes the host, whose phrase it then does not show
+#   chatsplit code, split screen on both machines (debug.test_controllers 2:
+#            two local players each, one four-player game online) with game
+#            chat from each local player ("2." steps: controller 2's): the
+#            host names each line after the player at the controller it came
+#            from, a wait notice goes to that player's window, each window
+#            draws the lines, the host's mute of the joiner's second player
+#            leaves its first heard and the host's own player of the same
+#            name too, and the game plays with four players for 30 s
 #   voice    code, with voice chat (port/linux/game/voice.c, HALO_TEST_VOICE;
 #            each microphone a tone, HALO_TEST_VOICE_MIC): the joiner talks
 #            (push to talk) while the host talks too, and the host plays it
@@ -1070,8 +1078,62 @@ voice|voicepublic)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
 	;;
+chatsplit)
+	# (two local players on each machine; a long lobby for the lobby lines.
+	# The game names the host's players Player and Player 2, the joiner's
+	# Player 3 and Player 4: the host mutes the joiner's second player, and
+	# by name alone the name of its own second, which it must still hear)
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST_START=45 HALO_TEST_CONTROLLERS=2 \
+		"HALO_TEST_CHAT=70:2.say:host two in game|76:mute:Player 4|77:mute:Player 2|78:2.say:host two after the mute|100:unmute:*"
+	host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_TEST_INPUT=bot:2 HALO_TEST_CONTROLLERS=2 \
+		"HALO_TEST_CHAT=6:say:one in the lobby|8:2.say:two in the lobby|10:2.quick:4|20:2.say:w1|20:2.say:w2|20:2.say:w3|20:2.say:w4|60:2.say:two in game|62:say:one in game|84:2.say:two after the mute|86:say:one after the mute"
+	join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "chat:|players on this machine|split screen:|is named" "$hl" | head -40
+	echo "--- joiner"; grep -aE "chat:|players on this machine|split screen:" "$jl" | head -40
+	grep -aq "network test: 2 players on this machine" "$hl" && grep -aq "network test: 2 players on this machine" "$jl" ||
+		fail "not two local players on each machine"
+	grep -aq "split screen: 2 windows" "$hl" && grep -aq "split screen: 2 windows" "$jl" || fail "a screen did not split in two"
+	# (the joiner's players: controller 1's first, controller 2's next)
+	one=$(sed -n "s/.*chat: the host passes on \(.*\)'s typed line.*/\1/p" "$hl" | head -1)
+	two=$(sed -n "s/.*chat: \(.*\): two in the lobby\$/\1/p" "$hl" | head -1)
+	echo "the joiner's players in chat: '$one' and '$two'"
+	grep -aqF "chat: $one: one in the lobby" "$hl" || fail "the host did not show the joiner's first player's line"
+	[ -n "$two" ] && [ "$two" != "$one" ] || fail "controller 2's line was not named after the joiner's second player"
+	grep -aqF "chat: player 2 sent a typed line (lobby)" "$jl" || fail "the joiner's controller 2 sent no line as player 2"
+	grep -aqF "chat: $two: Thanks" "$hl" || fail "controller 2's quick chat phrase was not its player's"
+	grep -aqF "chat: (to player 2) Wait" "$jl" || fail "the wait notice was not player 2's"
+	grep -aqF "chat: $two: two in game" "$hl" && grep -aqF "chat: $one: one in game" "$hl" ||
+		fail "the host did not show both of the joiner's players' lines in the game"
+	host_two=$(sed -n "s/.*chat: \(.*\): host two in game\$/\1/p" "$jl" | head -1)
+	echo "the host's second player in chat: '$host_two'"
+	[ -n "$host_two" ] && [ "$host_two" != "$one" ] && [ "$host_two" != "$two" ] ||
+		fail "the joiner did not show the host's second player's line under its own name"
+	[ "$two" = "Player 4" ] && [ "$host_two" = "Player 2" ] ||
+		fail "the players are not named as the host's test steps expect (Player 2 the host's second, Player 4 the joiner's)"
+	grep -aq "chat: the lines drawn in player 1's window of 2" "$jl" && grep -aq "chat: the lines drawn in player 2's window of 2" "$jl" ||
+		fail "the joiner's two windows did not each draw the lines"
+	# (the host muted the joiner's "Player 2": that player only, by machine and
+	# controller; the host's own player of that name is never its mute's)
+	grep -aqF "chat: the host dropped a line from $two: muted by the host" "$hl" ||
+		fail "the host's mute of the joiner's second player dropped none of its lines"
+	grep -aqF "chat: $two: two after the mute" "$hl" "$jl" && fail "a line of the muted second player was shown"
+	grep -aqF "chat: $one: one after the mute" "$hl" || fail "the joiner's first player was muted with its second"
+	grep -aqF "chat: $host_two: host two after the mute" "$jl" ||
+		fail "the host's own second player was muted (its name is the muted player's)"
+	four=$(grep -a "network test: tick" "$jl" | grep -a "| playing" |
+		grep -aEc "player [0-9]+:.* player [0-9]+:.* player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with four players playing: $four"
+	[ "$four" -ge 30 ] || fail "the joiner played the host's game for $four s with four players (30 wanted)"
+	;;
 *)
-	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|chat|voice|voicepublic" >&2
+	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|chat|chatsplit|voice|voicepublic" >&2
 	exit 2
 	;;
 esac

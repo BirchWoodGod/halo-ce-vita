@@ -36,9 +36,20 @@ the limits and the mutes here stand in for.
   name does not shake it off, and by name, so leaving and joining again
   does not either.
 - What is shown: the last lines, at the window's left above the motion
-  sensor, for twelve seconds each (chat_draw, from interface.c's overlays:
-  the lobby and the game), "Name: text" ("[Team] Name: text" in green for
-  team chat); and a line in halo.log ("chat: ...").
+  sensor, for twelve seconds each, "Name: text" ("[Team] Name: text" in
+  green for team chat); and a line in halo.log ("chat: ..."). In the lobby
+  the screen's (chat_draw, interface.c's overlays); in the game each
+  player's window's (chat_draw_window, interface.c's per-window HUD), as
+  the game's own messages are.
+- Split screen (several players on one machine): chat is each local
+  player's. Each opens the menu or sends a phrase from their own controller
+  (Back + Y), the line goes with that controller (the request's
+  local_player), and the host names that player. A window shows the lines
+  for everyone, the team lines of its player's team only, and the notices
+  (a wait, a refusal) of its player only; with one window (one player, or
+  a cinematic) every line. The mutes are the machine's, not a player's:
+  the players share one screen, so a line muted for one would be read by
+  the others anyway, and any of them can mute or unmute.
 
 The Vita's menu (Back + Y: the phrases, typing on the system keyboard, team
 or all, muting a player: port/vita/host/vita_settings.c) reaches here
@@ -86,9 +97,9 @@ enum
 	/* a line of the log: "[Team] " and a name of twelve, ": ", the text */
 	CHAT_LINE_BYTES = 8 + CHAT_NAME_BYTES + 2 + CHAT_TEXT_BYTES,
 	/* the log's lines are broken at a space before this many characters
-	(the terminal font is about 8 pixels a character: a 4:3 window's half
-	and more) */
-	CHAT_WRAP_CHARACTERS = 60,
+	(the terminal font is about 8 pixels a character: a split screen's
+	quarter window, 424 pixels on the Vita, less the margin) */
+	CHAT_WRAP_CHARACTERS = 50,
 	/* a machine's dropped lines the host logs one by one; after that,
 	every CHAT_DROP_LOG_EVERY'th */
 	CHAT_DROP_LOGS = 4,
@@ -137,6 +148,11 @@ struct chat_line
 {
 	char text[CHAT_LINE_BYTES];
 	short style;
+	/* (split screen) the team whose players' windows show it, NONE every
+	window; the controller whose player's window shows it (a notice), NONE
+	every window */
+	short team;
+	short controller;
 	unsigned long time;
 };
 
@@ -144,6 +160,8 @@ struct chat_test_step
 {
 	unsigned long at;
 	char action[12];
+	/* the controller it is from ("N.ACTION": N 1 to 4; else the first) */
+	short controller;
 	char argument[CHAT_TEXT_BYTES];
 };
 
@@ -158,6 +176,7 @@ typedef char chat_name_size_assert[sizeof(((struct network_player *)0)->name) ==
 void platform_log(char const *format, ...);
 int setenv(const char *name, const char *value, int overwrite);
 unsigned long system_milliseconds(void);
+short main_get_window_count(void);
 boolean network_game_client_send_to_server(struct network_game_client *client, void *message);
 
 /* ---------- globals */
@@ -168,6 +187,7 @@ volatile int halo_chat_player_muted[HALO_CHAT_PLAYERS];
 volatile int halo_chat_request;
 volatile int halo_chat_request_value;
 volatile int halo_chat_request_team;
+volatile int halo_chat_request_controller;
 char halo_chat_request_text[HALO_CHAT_TEXT_SIZE];
 
 static struct
@@ -202,6 +222,12 @@ static struct
 	/* the lines drawn in a lobby, and in a game, since chat became
 	available (said once each in halo.log) */
 	boolean drawn[2];
+	/* ... and in each local player's window of a split screen game */
+	boolean drawn_window[4];
+	/* the frame (render.frame_index) the players' windows drew the lines in:
+	the screen's overlay then does not */
+	long window_frame;
+	boolean window_frame_set;
 
 	struct chat_test_step test_steps[CHAT_TEST_STEPS];
 	short test_step_count;
@@ -280,11 +306,14 @@ static struct network_player *chat_game_player(
 }
 
 /* whether the player (NULL: not in this machine's record) of this name is
-muted */
+muted; never one of this machine's own (a split screen player with a name
+another player muted has) */
 static boolean chat_is_muted(
 	char const *name,
 	struct network_player const *player)
 {
+	if (player && network_game_player_is_local((struct network_player *)player))
+		return FALSE;
 	return chat_mutes_match(&chat_globals.mutes, name, player ? player->machine_index : NONE,
 		player ? player->controller_index : NONE) != 0;
 }
@@ -299,6 +328,8 @@ static boolean chat_hosting(
 /* a line into the log, broken at spaces into lines of the log's width */
 static void chat_log_add(
 	short style,
+	short team,
+	short controller,
 	char const *text)
 {
 	unsigned long now = system_milliseconds();
@@ -329,6 +360,8 @@ static void chat_log_add(
 		/* (a continued line indented) */
 		snprintf(line->text, sizeof(line->text), "%s%.*s", start ? "  " : "", (int)(end - start), text + start);
 		line->style = style;
+		line->team = team;
+		line->controller = controller;
 		line->time = now;
 		if (chat_globals.line_count < CHAT_LOG_LINES)
 			chat_globals.line_count++;
@@ -338,34 +371,52 @@ static void chat_log_add(
 	}
 }
 
+/* a word of this machine's to the player at the controller (NONE: to all
+of its players) */
 static void chat_notice(
+	short controller,
 	char const *text)
 {
-	chat_log_add(_chat_style_notice, text);
-	platform_log("chat: (to this player) %s", text);
+	chat_log_add(_chat_style_notice, NONE, controller, text);
+	if (controller != NONE && controller != 0)
+		platform_log("chat: (to player %d) %s", controller + 1, text);
+	else
+		platform_log("chat: (to this player) %s", text);
 }
 
-/* the controller of this machine's first player in the game (0 if none) */
+/* the controller of this machine's player in the game who is at the
+controller wanted (split screen: each chats from their own), else of its
+first player (0 if none) */
 static short chat_local_controller(
-	struct network_game_client *client)
+	struct network_game_client *client,
+	short wanted)
 {
 	struct network_game *game = network_game_client_get_game(client);
 	short count = chat_player_count(game);
+	short first = NONE;
 	short index;
 
 	for (index = 0; index < count; index++)
 	{
 		struct network_player *player = &game->players[index];
+		short controller;
 
-		if (network_player_is_valid(player) && network_game_player_is_local(player))
-			return player->controller_index >= 0 && player->controller_index < 4 ? player->controller_index : 0;
+		if (!network_player_is_valid(player) || !network_game_player_is_local(player))
+			continue;
+		controller = player->controller_index >= 0 && player->controller_index < 4 ? player->controller_index : 0;
+		if (controller == wanted)
+			return controller;
+		if (first == NONE)
+			first = controller;
 	}
-	return 0;
+	return first != NONE ? first : 0;
 }
 
-/* a line of this machine's player to the host; force: past this machine's
-own limit (the test's flood), unclean: the text as it is (the test's) */
+/* a line of this machine's player at the controller to the host; force:
+past this machine's own limit (the test's flood), unclean: the text as it
+is (the test's) */
 static boolean chat_send(
+	short controller,
 	short kind,
 	short phrase,
 	boolean team,
@@ -385,7 +436,7 @@ static boolean chat_send(
 	request.kind = kind;
 	request.phrase = phrase;
 	request.flags = team ? 1 << _chat_flag_team_bit : 0;
-	request.local_player = chat_local_controller(client);
+	request.local_player = chat_local_controller(client, controller);
 	if (kind == _chat_kind_typed)
 	{
 		if (unclean)
@@ -394,7 +445,7 @@ static boolean chat_send(
 			return FALSE;
 		else if (chat_text_has_link(request.text))
 		{
-			chat_notice("Links can't be sent in chat");
+			chat_notice(request.local_player, "Links can't be sent in chat");
 			return FALSE;
 		}
 	}
@@ -405,7 +456,7 @@ static boolean chat_send(
 			(chat_bucket_wait(&chat_globals.sent, now, CHAT_BURST, CHAT_REFILL_MILLISECONDS) + 999) / 1000;
 
 		snprintf(wait, sizeof(wait), "Wait %lu s to chat again", seconds ? seconds : 1);
-		chat_notice(wait);
+		chat_notice(request.local_player, wait);
 		return FALSE;
 	}
 	message = create_network_game_message(_message_client_chat, &request, sizeof(request));
@@ -414,8 +465,13 @@ static boolean chat_send(
 		platform_log("chat: the line could not be sent");
 		return FALSE;
 	}
-	platform_log("chat: sent a %s%s line (%s)", team ? "team " : "", kind == _chat_kind_quick ? "quick chat" : "typed",
-		network_game_client_get_state(client, NULL) == _client_pregame ? "lobby" : "game");
+	if (request.local_player)
+		platform_log("chat: player %d sent a %s%s line (%s)", request.local_player + 1, team ? "team " : "",
+			kind == _chat_kind_quick ? "quick chat" : "typed",
+			network_game_client_get_state(client, NULL) == _client_pregame ? "lobby" : "game");
+	else
+		platform_log("chat: sent a %s%s line (%s)", team ? "team " : "", kind == _chat_kind_quick ? "quick chat" : "typed",
+			network_game_client_get_state(client, NULL) == _client_pregame ? "lobby" : "game");
 	return TRUE;
 }
 
@@ -461,7 +517,8 @@ static void chat_mute(
 	}
 	snprintf(text, sizeof(text), !mute ? "%s can be heard again" : chat_hosting() ? "%s muted for everyone" : "%s muted",
 		clean);
-	chat_notice(text);
+	/* (the machine's mute: told in every player's window) */
+	chat_notice(NONE, text);
 }
 
 /* (debug) HALO_TEST_CHAT's steps, read once */
@@ -489,6 +546,13 @@ static void chat_test_read(
 			char const *argument = memchr(colon + 1, ':', (size_t)(length - (colon + 1 - script)));
 
 			action_length = (argument ? argument : script + length) - (colon + 1);
+			/* ("N.ACTION": controller N's player's) */
+			if (action_length > 2 && colon[1] >= '1' && colon[1] <= '4' && colon[2] == '.')
+			{
+				step->controller = (short)(colon[1] - '1');
+				colon += 2;
+				action_length -= 2;
+			}
 			if (action_length > (long)sizeof(step->action) - 1)
 				action_length = sizeof(step->action) - 1;
 			memcpy(step->action, colon + 1, (size_t)action_length);
@@ -535,14 +599,18 @@ static void chat_test_update(
 			char shown[CHAT_TEXT_BYTES];
 
 			chat_text_clean(shown, sizeof(shown), step->argument, sizeof(step->argument));
-			platform_log("chat: test step %s %s", step->action, shown);
+			if (step->controller)
+				platform_log("chat: test step %d.%s %s", step->controller + 1, step->action, shown);
+			else
+				platform_log("chat: test step %s %s", step->action, shown);
 		}
 		if (!strcmp(step->action, "quick") || !strcmp(step->action, "teamquick"))
-			chat_send(_chat_kind_quick, (short)atoi(step->argument), step->action[0] == 't', NULL, FALSE, FALSE);
+			chat_send(step->controller, _chat_kind_quick, (short)atoi(step->argument), step->action[0] == 't', NULL, FALSE,
+				FALSE);
 		else if (!strcmp(step->action, "say") || !strcmp(step->action, "team"))
-			chat_send(_chat_kind_typed, 0, step->action[0] == 't', step->argument, FALSE, FALSE);
+			chat_send(step->controller, _chat_kind_typed, 0, step->action[0] == 't', step->argument, FALSE, FALSE);
 		else if (!strcmp(step->action, "raw"))
-			chat_send(_chat_kind_typed, 0, FALSE, step->argument, TRUE, TRUE);
+			chat_send(step->controller, _chat_kind_typed, 0, FALSE, step->argument, TRUE, TRUE);
 		else if (!strcmp(step->action, "flood"))
 		{
 			long count = atol(step->argument);
@@ -553,7 +621,7 @@ static void chat_test_update(
 				char text[32];
 
 				snprintf(text, sizeof(text), "flood %ld", index + 1);
-				chat_send(_chat_kind_typed, 0, FALSE, text, TRUE, FALSE);
+				chat_send(step->controller, _chat_kind_typed, 0, FALSE, text, TRUE, FALSE);
 			}
 		}
 		else if ((!strcmp(step->action, "mute") || !strcmp(step->action, "unmute")) && !strcmp(step->argument, "*"))
@@ -691,6 +759,7 @@ void chat_update(
 				chat_globals.available_time = system_milliseconds();
 			chat_globals.ever_available = TRUE;
 			chat_globals.drawn[0] = chat_globals.drawn[1] = FALSE;
+			csmemset(chat_globals.drawn_window, 0, sizeof(chat_globals.drawn_window));
 		}
 		else
 		{
@@ -709,16 +778,20 @@ void chat_update(
 	if (request != HALO_CHAT_REQUEST_NONE)
 	{
 		char text[HALO_CHAT_TEXT_SIZE];
+		short controller = (short)halo_chat_request_controller;
 
 		csmemcpy(text, halo_chat_request_text, sizeof(text));
 		text[sizeof(text) - 1] = 0;
+		if (controller < 0 || controller > 3)
+			controller = 0;
 		switch (request)
 		{
 		case HALO_CHAT_REQUEST_QUICK:
-			chat_send(_chat_kind_quick, (short)halo_chat_request_value, halo_chat_request_team != 0, NULL, FALSE, FALSE);
+			chat_send(controller, _chat_kind_quick, (short)halo_chat_request_value, halo_chat_request_team != 0, NULL, FALSE,
+				FALSE);
 			break;
 		case HALO_CHAT_REQUEST_TYPED:
-			chat_send(_chat_kind_typed, 0, halo_chat_request_team != 0, text, FALSE, FALSE);
+			chat_send(controller, _chat_kind_typed, 0, halo_chat_request_team != 0, text, FALSE, FALSE);
 			break;
 		case HALO_CHAT_REQUEST_MUTE:
 		case HALO_CHAT_REQUEST_UNMUTE:
@@ -732,8 +805,33 @@ void chat_update(
 	chat_link_status(client, mode);
 }
 
-void chat_draw(
-	void)
+/* whether the line is for the window of the local player (NONE: the
+screen's, every line) */
+static boolean chat_line_for_window(
+	struct chat_line const *line,
+	short local_player_index)
+{
+	struct player_datum *player;
+	long player_index;
+
+	if (local_player_index == NONE || (line->team == NONE && line->controller == NONE) || main_get_window_count() <= 1)
+		return TRUE;
+	player_index = local_player_get_player_index(local_player_index);
+	player = player_index != NONE ? player_try_and_get(player_index) : NULL;
+	/* (a window whose player is not known yet shows every line) */
+	if (!player)
+		return TRUE;
+	if (line->team != NONE && player->network_player_data.team_index != line->team)
+		return FALSE;
+	if (line->controller != NONE && player->network_player_data.controller_index != line->controller)
+		return FALSE;
+	return TRUE;
+}
+
+/* the lines in the window being drawn (render.camera's), those for its
+local player (NONE: every line) */
+static void chat_draw_lines(
+	short local_player_index)
 {
 	long font_index;
 	struct font_header *font;
@@ -741,10 +839,9 @@ void chat_draw(
 	short line_height;
 	short bottom;
 	short count;
+	short shown;
 	short line_index;
 
-	if (!chat_globals.line_count || !chat_globals.available || chat_mode() == HALO_CHAT_MODE_OFF)
-		return;
 	font_index = interface_get_tag_index(_interface_font_terminal);
 	if (font_index == NONE)
 		return;
@@ -756,7 +853,8 @@ void chat_draw(
 	bottom = (short)(render.camera.window_bounds.y1 -
 		(render.camera.window_bounds.y1 - render.camera.window_bounds.y0) * 27 / 100);
 	line_index = chat_globals.newest_line;
-	for (count = 0; count < chat_globals.line_count; count++)
+	for (count = 0, shown = 0; count < chat_globals.line_count;
+		count++, line_index = (short)((line_index + CHAT_LOG_LINES - 1) % CHAT_LOG_LINES))
 	{
 		struct chat_line const *line = &chat_globals.lines[line_index];
 		unsigned long age = now - line->time;
@@ -766,6 +864,9 @@ void chat_draw(
 		/* (older lines are older still) */
 		if (age >= CHAT_SHOW_MILLISECONDS)
 			break;
+		if (!chat_line_for_window(line, local_player_index))
+			continue;
+		shown++;
 		switch (line->style)
 		{
 		case _chat_style_team:
@@ -788,9 +889,8 @@ void chat_draw(
 		draw_string_set_draw_mode(font_index, NONE, 0, 0, &color);
 		rasterizer_draw_string(&bounds, NULL, NULL, 0, line->text);
 		bottom = (short)(bottom - line_height);
-		line_index = (short)((line_index + CHAT_LOG_LINES - 1) % CHAT_LOG_LINES);
 	}
-	if (count)
+	if (shown)
 	{
 		struct network_game_client *client = chat_client();
 		boolean in_game = client && network_game_client_get_state(client, NULL) != _client_pregame;
@@ -799,6 +899,13 @@ void chat_draw(
 		{
 			chat_globals.drawn[in_game] = TRUE;
 			platform_log("chat: the lines drawn (%s)", in_game ? "game" : "lobby");
+		}
+		if (local_player_index >= 0 && local_player_index < 4 && main_get_window_count() > 1 &&
+			!chat_globals.drawn_window[local_player_index])
+		{
+			chat_globals.drawn_window[local_player_index] = TRUE;
+			platform_log("chat: the lines drawn in player %d's window of %d", local_player_index + 1,
+				main_get_window_count());
 		}
 	}
 }
@@ -849,6 +956,33 @@ void chat_server_notice_machine(
 			network_game_server_send_message_to_client_machine(server, machine, message);
 		return;
 	}
+}
+
+static boolean chat_lines_to_draw(
+	void)
+{
+	return chat_globals.line_count && chat_globals.available && chat_mode() != HALO_CHAT_MODE_OFF;
+}
+
+void chat_draw(
+	void)
+{
+	/* (in a game the players' windows drew them this frame) */
+	if (chat_globals.window_frame_set && chat_globals.window_frame == render.frame_index)
+		return;
+	if (chat_lines_to_draw())
+		chat_draw_lines(NONE);
+}
+
+void chat_draw_window(
+	void)
+{
+	if (render.local_player_index == NONE)
+		return;
+	chat_globals.window_frame = render.frame_index;
+	chat_globals.window_frame_set = TRUE;
+	if (chat_lines_to_draw())
+		chat_draw_lines(render.local_player_index);
 }
 
 void chat_server_handle_request(
@@ -930,6 +1064,9 @@ void chat_server_handle_request(
 			relay.kind = _chat_kind_notice;
 			relay.phrase = (short)notice;
 			relay.team = NONE;
+			/* (a notice's player: the controller whose line it refuses, so
+			that player's window shows it, split screen) */
+			relay.player = request.local_player >= 0 && request.local_player < 4 ? request.local_player : 0;
 			relay_message = create_network_game_message(_message_server_chat, &relay, sizeof(relay));
 			if (relay_message)
 				network_game_server_send_message_to_client_machine(server, machine, relay_message);
@@ -1025,7 +1162,7 @@ void chat_client_handle_relay(
 		return;
 	if (relay.kind == _chat_kind_notice)
 	{
-		chat_notice(chat_notice_text(relay.phrase));
+		chat_notice(relay.player < 4 ? relay.player : NONE, chat_notice_text(relay.phrase));
 		return;
 	}
 	if (mode == HALO_CHAT_MODE_QUICK && relay.kind != _chat_kind_quick)
@@ -1040,6 +1177,7 @@ void chat_client_handle_relay(
 	team = (relay.flags & (1 << _chat_flag_team_bit)) != 0;
 	snprintf(line, sizeof(line), "%s%s: %s", team ? "[Team] " : "", name,
 		relay.kind == _chat_kind_quick ? chat_phrase_text(relay.phrase) : text);
-	chat_log_add(team ? _chat_style_team : _chat_style_all, line);
+	/* (split screen: a team line in the windows of its team's players) */
+	chat_log_add(team ? _chat_style_team : _chat_style_all, team ? relay.team : NONE, NONE, line);
 	platform_log("chat: %s", line);
 }

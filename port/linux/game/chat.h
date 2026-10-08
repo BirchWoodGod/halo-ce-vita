@@ -20,9 +20,14 @@ struct network_player;
 (chat_link.h), what the menu lists, the test script (HALO_TEST_CHAT) */
 void chat_update(void);
 
-/* the chat lines, over everything else in the window (interface.c's
-fullscreen overlays: the lobby's and the game's) */
+/* the chat lines over the screen (interface.c's fullscreen overlays: the
+lobby's; in a game, only when no player's window drew them this frame) */
 void chat_draw(void);
+
+/* (interface.c's per-window HUD, render.local_player_index's window) the
+lines for that window's player: split screen's windows each show their
+own player's (chat.c) */
+void chat_draw_window(void);
 
 /* (network_server_message_handler.c) a joiner's _message_client_chat,
 over its connection */
