@@ -13916,6 +13916,13 @@ static void hs_scenario_functions_check(
 	return;
 }
 
+boolean hs_function_allowed_in_map_scripts(
+	short function_index)
+{
+	return function_index >= 0 && function_index < (short)NUMBEROF(hs_function_allowed_in_maps) &&
+		hs_function_allowed_in_maps[function_index];
+}
+
 boolean hs_scenario_script_disabled(
 	short script_index)
 {

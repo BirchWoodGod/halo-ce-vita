@@ -1,10 +1,12 @@
 /*
 CUSTOM_EDITION_MAPS.H
 
-The Halo Custom Edition maps in the multiplayer menus of the native builds.
-With the game.custom_edition setting on, the multiplayer level list
+The Halo Custom Edition maps in the menus of the native builds. With the
+game.custom_edition setting on, the multiplayer level list
 (source/interface/ui_widget_event_handler_functions.c) offers the Custom
-Edition multiplayer maps in the maps folder after the Xbox levels. The menus
+Edition multiplayer maps in the maps folder after the Xbox levels, and the
+campaign's level list the Custom Edition campaign maps (solo scenarios)
+after its ten levels, played alone or as network co-op. The menus
 that show a level (ui_widget_game_data_input_functions.c) know a level by an
 index into the strings and frames of their own tags; these maps get display
 indices beyond those, and text_group.c and ui_widget.c ask this unit for
@@ -13,6 +15,14 @@ their names, descriptions and pictures (custom_edition_maps.c).
 
 #ifndef __CUSTOM_EDITION_MAPS_H
 #define __CUSTOM_EDITION_MAPS_H
+
+/* ---------- constants */
+
+/* the most maps of both kinds looked for, and the entries of the campaign's
+level list: its ten levels, then the campaign maps
+(ui_widget_event_handler_functions.c single_player_level_data) */
+#define CUSTOM_EDITION_MAPS_MAXIMUM 128
+#define CUSTOM_EDITION_MAPS_CAMPAIGN_LIST_ENTRIES (10 + CUSTOM_EDITION_MAPS_MAXIMUM)
 
 /* ---------- structures */
 
@@ -103,6 +113,24 @@ short custom_edition_maps_loadable(
 downloaded into the folder: map_share.c). */
 void custom_edition_maps_look_again(
 	void);
+
+/* The campaign's level list: looks for the maps anew and returns how many
+Custom Edition campaign maps there are, in the order of their names; then
+the level name and the display index (for the list's names, pictures and
+descriptions) of the one at `campaign_index`, NULL and NONE past them. */
+short custom_edition_maps_campaigns_find(
+	void);
+char const *custom_edition_maps_campaign_level_name(
+	short campaign_index);
+short custom_edition_maps_campaign_display_index(
+	short campaign_index);
+
+/* Whether `level_name` is a campaign level's: one of the campaign's ten, or
+a Custom Edition campaign map's (custom_maps\<name>, custom_edition_level_name:
+no file is looked at, so a client without the map knows it too). A network
+game on one with no game engine is co-op. */
+boolean custom_edition_maps_campaign_level(
+	char const *level_name);
 
 /* Whether a host may send its copy of the level `level_name` to a joiner
 (map_share.c): a custom map it has, which is in its level list (on, and one

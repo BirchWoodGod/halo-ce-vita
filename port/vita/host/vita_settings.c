@@ -99,8 +99,9 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
 
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
-name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo), and
-whether it is on. Left and right turn one off or on (an off map stays in
+name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo; CE SP
+for a Custom Edition campaign map, which the Campaign's level list offers
+after its ten levels), and whether it is on. Left and right turn one off or on (an off map stays in
 the folder but leaves the level list: HALO_MAPS_DISABLED, read by
 port/linux/game/custom_edition_maps.c each time the list opens); square
 deletes one, with its picture and description, after a confirmation. The
@@ -662,6 +663,9 @@ enum
 	MAP_CUSTOM_EDITION,
 	MAP_OPENSAUCE,
 	MAP_OTHER,
+	/* a Custom Edition cache of a solo scenario: a campaign map (the
+	Campaign's level list's, port/linux/game/custom_edition_maps.c) */
+	MAP_CUSTOM_EDITION_CAMPAIGN,
 };
 
 struct map_entry
@@ -1409,10 +1413,11 @@ static int file_exists(const char *path)
 }
 
 /* the format of a map file by its header: the cache signature 'head' and
-its version (5 the Xbox's, 609 Custom Edition's) */
+its version (5 the Xbox's, 609 Custom Edition's), and a Custom Edition
+cache's scenario type (0x60: 0 solo, a campaign map) */
 static int map_format(const char *path, const char *extension)
 {
-	unsigned char header[8];
+	unsigned char header[0x62];
 	FILE *file = fopen(path, "rb");
 	size_t got = 0;
 	unsigned long version;
@@ -1427,6 +1432,8 @@ static int map_format(const char *path, const char *extension)
 	version = header[4] | (header[5] << 8) | ((unsigned long)header[6] << 16) | ((unsigned long)header[7] << 24);
 	if (version == 5)
 		return MAP_XBOX;
+	if (version == 609 && strcasecmp(extension, "yelo") != 0 && header[0x60] == 0 && header[0x61] == 0)
+		return MAP_CUSTOM_EDITION_CAMPAIGN;
 	if (version == 609)
 		return strcasecmp(extension, "yelo") == 0 ? MAP_OPENSAUCE : MAP_CUSTOM_EDITION;
 	return MAP_OTHER;
@@ -1464,7 +1471,7 @@ static void maps_scan(void)
 		snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
 		map->size = stat(path, &status) == 0 ? (unsigned long long)status.st_size : 0;
 		map->format = map_format(path, map->extension);
-		if (map->format == MAP_CUSTOM_EDITION || map->format == MAP_OPENSAUCE)
+		if (map->format == MAP_CUSTOM_EDITION || map->format == MAP_OPENSAUCE || map->format == MAP_CUSTOM_EDITION_CAMPAIGN)
 			maps_have_custom_edition = 1;
 		map_count++;
 	}
@@ -1497,7 +1504,8 @@ static void size_text(char *text, int size, unsigned long long bytes)
 
 static const char *map_format_name(int format)
 {
-	return format == MAP_XBOX ? "Xbox" : format == MAP_CUSTOM_EDITION ? "CE" : format == MAP_OPENSAUCE ? "CE+OS" : "?";
+	return format == MAP_XBOX ? "Xbox" : format == MAP_CUSTOM_EDITION ? "CE" : format == MAP_OPENSAUCE ? "CE+OS" :
+		format == MAP_CUSTOM_EDITION_CAMPAIGN ? "CE SP" : "?";
 }
 
 /* deletes a map file, with its picture and description beside it */
@@ -1972,7 +1980,8 @@ static void help_line(char *text, int size, const struct line *line)
 	else if (line && line->type == LINE_MAP)
 		snprintf(text, (size_t)size, "%s: on or off, or delete it",
 			maps[line->index].format == MAP_XBOX ? "Xbox map" : maps[line->index].format == MAP_OTHER ?
-			"Not a known map" : "PC map (needs PC maps On)");
+			"Not a known map" : maps[line->index].format == MAP_CUSTOM_EDITION_CAMPAIGN ?
+			"PC campaign map, in Campaign's levels (needs PC maps On)" : "PC map (needs PC maps On)");
 	else if (!setting)
 		text[0] = 0;
 	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||

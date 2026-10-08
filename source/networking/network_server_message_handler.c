@@ -264,6 +264,7 @@ symbols in this file:
 #include "text/unicode.h"
 #include "map_share.h"
 #include "main/main.h"
+#include "custom_edition_maps.h"
 /* system_milliseconds(), for the settings update interval */
 #include "cseries/cseries_windows.h"
 
@@ -1733,7 +1734,7 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_VITA_FLAG;
 #endif
 			/* (co-op: the lists show the level and its difficulty) */
-			if (game->variant.game_engine_index == 0 && main_get_solo_level_from_name(game->map.name) != NONE)
+			if (game->variant.game_engine_index == 0 && custom_edition_maps_campaign_level(game->map.name))
 			{
 				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_COOP_FLAG;
 				advertisement.reserved[HALO_PORT_ADVERTISED_COOP_DIFFICULTY_OFFSET] = (byte)PIN(game->difficulty, 0, 3);

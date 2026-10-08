@@ -356,7 +356,13 @@ static void test_headers(void)
 	header[0x60] = 1;
 	header[0x61] = 1;
 	CHECK(map_share_header_validate(header, 22310912, "mygulch", &custom_edition) == _map_share_header_not_multiplayer);
+	/* (an Xbox solo map, even for a network co-op game's campaign level:
+	never) */
+	header[0x60] = 0;
 	header[0x61] = 0;
+	CHECK(map_share_header_validate_level(header, 22310912, "mygulch", 1, &custom_edition) ==
+		_map_share_header_not_multiplayer);
+	header[0x60] = 1;
 	/* strings not ended in their fields */
 	memset(header + 0x20, 'm', 0x20);
 	CHECK(map_share_header_validate(header, 22310912, "mygulch", &custom_edition) == _map_share_header_unterminated_string);
@@ -383,6 +389,19 @@ static void test_headers(void)
 	CHECK(map_share_header_validate(header, 46198208, "pcgulch", &custom_edition) == _map_share_header_ok && custom_edition);
 	/* (a Custom Edition map's file may be named otherwise) */
 	CHECK(map_share_header_validate(header, 46198208, "renamed_gulch", &custom_edition) == _map_share_header_ok);
+	/* a Custom Edition campaign map (a solo scenario): only for a network
+	co-op game's campaign level (custom_maps\<name>); a UI scenario never */
+	header[0x60] = 0;
+	CHECK(map_share_header_validate(header, 46198208, "pcgulch", &custom_edition) == _map_share_header_not_multiplayer);
+	CHECK(map_share_header_validate_level(header, 46198208, "pcgulch", 0, &custom_edition) ==
+		_map_share_header_not_multiplayer);
+	CHECK(map_share_header_validate_level(header, 46198208, "pcgulch", 1, &custom_edition) == _map_share_header_ok &&
+		custom_edition);
+	header[0x60] = 2;
+	CHECK(map_share_header_validate_level(header, 46198208, "pcgulch", 1, &custom_edition) ==
+		_map_share_header_not_multiplayer);
+	header[0x60] = 1;
+	CHECK(map_share_header_validate_level(header, 46198208, "pcgulch", 1, &custom_edition) == _map_share_header_ok);
 	/* the header claims more than the file holds (a truncated file) */
 	CHECK(map_share_header_validate(header, 46198208 - 1, "pcgulch", &custom_edition) == _map_share_header_bad_length);
 	CHECK(map_share_header_validate(header, 1000000, "pcgulch", &custom_edition) == _map_share_header_bad_length);

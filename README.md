@@ -175,6 +175,17 @@ the game's own. Two kinds work:
   its **Extract PC files** row takes them out of it again (after a start
   where you stopped it, say).
 
+Custom Edition **campaign** maps (single player maps, Firefight maps and the
+like) go in the same folder and need the same three files and PC maps. They
+show up in **Campaign**'s level list after The Maw: pick one, then a
+difficulty. A plays it alone, Y hosts it as network co-op, as for the
+campaign's own levels (a joiner without the map is offered it as for a
+multiplayer map). A custom campaign map has no saved game and no next level:
+winning it goes back to the main menu, and Save and Quit keeps your
+campaign's own save. What its scripts ask for that the Vita can't do (an
+OpenSauce extra, restarting or switching the map) does nothing; the rest of
+the map plays.
+
 Custom Edition maps themselves (race tracks and the like) come from the
 community's Halo CE map archives and forums. This project includes no maps
 and links to no downloads.
@@ -330,7 +341,8 @@ it is).
   host's code here. Your game's code and what the game is doing show under
   the rows (see [port/vita/README.md](port/vita/README.md#multiplayer)).
 - **Modded maps** (a Multiplayer page): the custom maps in your maps folder, with their size and
-  kind (Xbox, or CE for Halo Custom Edition). Left and right turn a map off
+  kind (Xbox, or CE for Halo Custom Edition, CE SP for a Custom Edition
+  campaign map, which Campaign's level list offers). Left and right turn a map off
   (it stays on the card but leaves the map list) or on; Square deletes it
   after asking. **PC maps** puts Custom Edition maps in the map list
   (experimental); the page warns when the Custom Edition `bitmaps.map`,

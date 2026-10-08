@@ -3118,13 +3118,18 @@ void players_note_checkpoint(
 
 /* Everyone back after all died: each where they were at the last checkpoint
 (players_checkpoint_position), then those with no such spot beside the
-others. Players who come back are spawned first, at the level's start. */
+others. Players who come back are spawned first, at the level's start.
+Then nobody is dead: all_dead, which only a death sets and a revert clears,
+is cleared too, or players_update_after_game would never see the team alive
+again, and the next time every player died in one tick (a grenade, a
+Firefight map's wave) would ask for no lost game, leaving them dead. */
 void players_respawn_at_checkpoint(
 	void)
 {
 	struct data_iterator iterator;
 	struct player_datum *player;
 	boolean unplaced[NETWORK_GAME_MAXIMUM_PLAYER_COUNT] = { FALSE };
+	boolean anyone_alive = FALSE;
 
 	data_iterator_new(&iterator, player_data);
 	while ((player = data_iterator_next(&iterator)) != NULL)
@@ -3143,7 +3148,11 @@ void players_respawn_at_checkpoint(
 	{
 		if (unplaced[DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index)])
 			player_place_beside_teammate(iterator.datum_index);
+		if (player->unit_index != NONE)
+			anyone_alive = TRUE;
 	}
+	if (anyone_alive)
+		players_globals->all_dead = FALSE;
 
 	return;
 }
@@ -4648,6 +4657,17 @@ void players_update_before_game(
 						else if (players_coop_may_spawn())
 						{
 							player_spawn(iterator.datum_index);
+							/* (a level whose starting locations are all taken, as a
+							Custom Edition campaign map's one is by the first
+							player still standing on it: behind a teammate on the
+							ground instead, as a respawn starts) */
+							if (player->unit_index == NONE)
+							{
+								players_coop_spawn_beside_index = players_coop_unit_where(players_coop_unit_grounded);
+								if (players_coop_spawn_beside_index != NONE)
+									player_spawn(iterator.datum_index);
+								players_coop_spawn_beside_index = NONE;
+							}
 							player_place_beside_teammate(iterator.datum_index);
 						}
 					}

@@ -472,6 +472,7 @@ symbols in this file:
 #include "saved games/player_profile.h"
 #include "text/unicode.h"
 #ifdef HALO_LINUX
+#include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "map_share.h"
 #endif
@@ -811,7 +812,7 @@ static char network_game_server_cooperative_next_map[sizeof(((struct network_gam
 and difficulty its co-op is on (the next level after one won) */
 static struct
 {
-	char choice[16];
+	char choice[48];
 	char map_name[sizeof(((struct network_game *)NULL)->map.name)];
 	short difficulty;
 	/* (hosted from the campaign's menus, network_game_server_port_cooperative_from_menu:
@@ -1414,7 +1415,7 @@ static void network_game_server_list(
 	boolean in_progress = state != _network_game_server_state_pregame || server->sent_start_game_message;
 	boolean open = state == _network_game_server_state_ingame ? network_game_server_accepts_late_joins(server) :
 		network_game_server_game_is_open(server) && network_game_has_free_player_slot(game);
-	int difficulty = game->variant.game_engine_index == 0 && main_get_solo_level_from_name(game->map.name) != NONE ?
+	int difficulty = game->variant.game_engine_index == 0 && custom_edition_maps_campaign_level(game->map.name) ?
 		PIN(game->difficulty, 0, 3) : -1;
 	int length = 0;
 	short index;
@@ -4109,7 +4110,9 @@ void network_game_server_port_set_cooperative(
 }
 
 /* port: the co-op choice of the machine's settings (network.coop_level, a
-campaign level's short name such as "a10", empty for none, and
+campaign level's short name such as "a10", or a Custom Edition campaign
+map's level name, custom_maps\<name> (custom_edition_cache.h; the network
+test's co-op on one), empty for none, and
 network.coop_difficulty, 0 to 3): the Vita's way to host co-op, its
 settings panel's Multiplayer page, as the Xbox's menus list no campaign
 level for a network game. Each frame of a hosted game's lobby: a game that
@@ -4126,7 +4129,7 @@ static void network_game_server_port_cooperative_setting(
 	char const *level = getenv("HALO_NET_COOP_LEVEL") ? getenv("HALO_NET_COOP_LEVEL") : config_string("network.coop_level");
 	short difficulty = (short)PIN(getenv("HALO_NET_COOP_DIFFICULTY") ? atol(getenv("HALO_NET_COOP_DIFFICULTY")) :
 		config_integer("network.coop_difficulty"), 0, 3);
-	char choice[16];
+	char choice[48];
 	char const *map_name;
 	short level_index;
 
@@ -4148,16 +4151,16 @@ static void network_game_server_port_cooperative_setting(
 	if (!level || !level[0])
 		return;
 	level_index = main_get_solo_level_from_name(level);
-	if (level_index == NONE)
+	if (level_index == NONE && !custom_edition_level_name(level))
 		return;
-	snprintf(choice, sizeof(choice), "%.8s/%d", level, difficulty);
+	snprintf(choice, sizeof(choice), "%.40s/%d", level, difficulty);
 	/* (the choice made or changed: its level; else the level this server's
 	co-op is on, the next one after a level won, which the lobby's own
 	widgets put back to a multiplayer map and gametype when it opens) */
 	if (strcmp(choice, network_game_server_cooperative.choice))
 	{
 		csstrncpy(network_game_server_cooperative.choice, choice, sizeof(network_game_server_cooperative.choice) - 1);
-		csstrncpy(network_game_server_cooperative.map_name, main_get_solo_level_name(level_index),
+		csstrncpy(network_game_server_cooperative.map_name, level_index != NONE ? main_get_solo_level_name(level_index) : level,
 			sizeof(network_game_server_cooperative.map_name) - 1);
 		network_game_server_cooperative.difficulty = difficulty;
 	}
@@ -4181,12 +4184,14 @@ boolean network_game_server_port_cooperative_from_menu(
 	struct network_game_server *server = global_network_game_server_get();
 	short level_index = map_name ? main_get_solo_level_from_name(map_name) : NONE;
 
-	if (!server || server->state != _network_game_server_state_pregame || level_index == NONE)
+	/* (a campaign level, by its own name; or a Custom Edition campaign
+	map's, custom_edition_maps.c) */
+	if (!server || server->state != _network_game_server_state_pregame || !custom_edition_maps_campaign_level(map_name))
 		return FALSE;
 	csmemset(&network_game_server_cooperative, 0, sizeof(network_game_server_cooperative));
 	network_game_server_cooperative.menu = TRUE;
 	network_game_server_cooperative.difficulty = (short)PIN(difficulty, 0, 3);
-	csstrncpy(network_game_server_cooperative.map_name, main_get_solo_level_name(level_index),
+	csstrncpy(network_game_server_cooperative.map_name, level_index != NONE ? main_get_solo_level_name(level_index) : map_name,
 		sizeof(network_game_server_cooperative.map_name) - 1);
 	if (!ui_widget_port_cooperative_level_choose(network_game_server_cooperative.map_name,
 		network_game_server_cooperative.difficulty))
@@ -4274,7 +4279,7 @@ static void network_game_server_port_lobby_settings(
 		server->game.name[NETWORK_GAME_NAME_LENGTH - 1] = 0;
 		changed = TRUE;
 	}
-	if (!(server->game.variant.game_engine_index == 0 && main_get_solo_level_from_name(server->game.map.name) != NONE))
+	if (!(server->game.variant.game_engine_index == 0 && custom_edition_maps_campaign_level(server->game.map.name)))
 	{
 		maximum = MAX(network_game_server_port_maximum_players(), (long)server->game.player_count);
 		maximum = MIN(maximum, (long)MAXIMUM_NETWORK_PLAYER_COUNT);

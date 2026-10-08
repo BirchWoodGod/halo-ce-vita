@@ -1,8 +1,7 @@
 /*
 CUSTOM_EDITION_MAPS.C
 
-The Halo Custom Edition maps in the multiplayer menus
-(custom_edition_maps.h).
+The Halo Custom Edition maps in the menus (custom_edition_maps.h).
 
 The maps are the Custom Edition caches of multiplayer scenarios in the maps
 folder, OpenSauce's ".yelo" maps among them (custom_edition_cache_multiplayer),
@@ -12,6 +11,16 @@ the cache file loader finds a map by the last part of its level name. The
 game engine keeps a level name in 64 characters, so a map whose name is
 longer than 25 characters is left out, and so is a map named as one of the
 Xbox levels, which that level already offers.
+
+The Custom Edition caches of solo scenarios, the campaign maps
+(custom_edition_cache_campaign), are the campaign's level list's, after its
+ten levels (ui_widget_event_handler_functions.c; OpenCE's CUSTOM
+SINGLEPLAYER, ce41b41d), looked for whenever that list opens: played alone
+as the campaign's levels are, at the difficulty chosen next, or hosted as
+network co-op (Y on the difficulty). Their level name is
+custom_maps\<name> (custom_edition_cache.h), which no campaign level has.
+They come after the multiplayer maps in the maps array, with display
+indices of their own.
 
 A map's picture is the Windows bitmap <name>.bmp beside it, when there is one
 (bmp_files.c): the middle of it with the shape of the menus' level pictures,
@@ -40,9 +49,12 @@ in lines of about 20 characters.
 #include <stdio.h>
 #include <stdlib.h>
 
+/* main.c's */
+short main_get_solo_level_from_name(char const *name);
+
 /* ---------- constants */
 
-#define MAXIMUM_CUSTOM_EDITION_MAPS 128
+#define MAXIMUM_CUSTOM_EDITION_MAPS CUSTOM_EDITION_MAPS_MAXIMUM
 /* room for the level list's Xbox levels
 (ui_widget_event_handler_functions.c offers 13) */
 #define MAXIMUM_XBOX_LEVELS 16
@@ -53,8 +65,10 @@ keeps of a level name (game_engine.c, struct game_engine_stage) */
 #define MAXIMUM_MAP_NAME_LENGTH 25
 
 /* The maps' display indices: beyond every string and frame of the menus'
-tags (the level names are 15 strings, the level pictures 14 frames). */
+tags (the level names are 15 strings, the level pictures 14 frames); the
+campaign maps' after the multiplayer maps' (OpenCE's numbers). */
 #define FIRST_DISPLAY_INDEX 0x4000
+#define FIRST_CAMPAIGN_DISPLAY_INDEX 0x6000
 
 /* the level pictures, their shape (the level list's are 140 by 114 of the
 menus' 640 by 480, the lobby's 139 by 113) and their frame of an unknown
@@ -63,6 +77,10 @@ level (ui_widget_game_data_input_functions.c) */
 #define LEVEL_PICTURE_SHAPE_WIDTH 140
 #define LEVEL_PICTURE_SHAPE_HEIGHT 114
 #define UNKNOWN_LEVEL_FRAME 13
+/* the campaign's level pictures (the level list's), and their frame of a
+level not reached yet (ui_widget_game_data_input_functions.c) */
+#define CAMPAIGN_LEVEL_PICTURES_TAG_NAME "ui\\shell\\bitmaps\\sp_levels"
+#define UNKNOWN_CAMPAIGN_LEVEL_FRAME 10
 
 #define PICTURE_EXTENSION ".bmp"
 /* a 4K screenshot is 25 MB as a bmp file */
@@ -99,12 +117,17 @@ struct custom_edition_map
 	/* an Xbox cache (a modded or newly built Xbox map), not a Custom Edition
 	one */
 	boolean xbox_cache;
+	/* a Custom Edition campaign map (a solo scenario) */
+	boolean campaign;
 };
 
 struct custom_edition_maps_globals
 {
 	boolean looked_for;
+	/* the maps: the multiplayer ones, then the campaign ones */
 	short map_count;
+	short multiplayer_count;
+	short campaign_count;
 	struct custom_edition_map maps[MAXIMUM_CUSTOM_EDITION_MAPS];
 	/* the latest level list: its Xbox levels, then the maps' level names */
 	short xbox_level_count;
@@ -160,6 +183,8 @@ static void custom_edition_maps_forget(
 		bitmap_delete(globals->maps[map_index].picture);
 	}
 	globals->map_count = 0;
+	globals->multiplayer_count = 0;
+	globals->campaign_count = 0;
 
 	return;
 }
@@ -329,8 +354,8 @@ static void custom_edition_map_description_read(
 }
 
 /* Adds the map the file `name`.`extension` of the maps folder holds, when it
-is a Custom Edition multiplayer map not added yet (as a .map and a .yelo of
-one name are, which the loader reads the .map of). */
+is a Custom Edition multiplayer or campaign map not added yet (as a .map and
+a .yelo of one name are, which the loader reads the .map of). */
 static void custom_edition_map_add(
 	char const *name,
 	char const *extension)
@@ -339,6 +364,7 @@ static void custom_edition_map_add(
 	struct custom_edition_map *map;
 	short map_index;
 	boolean xbox_cache;
+	boolean campaign = FALSE;
 
 	if (csstrcasecmp(extension, "map") && csstrcasecmp(extension, "yelo"))
 	{
@@ -365,13 +391,18 @@ static void custom_edition_map_add(
 	xbox_cache = !csstrcasecmp(extension, "map") && custom_edition_cache_xbox_multiplayer(name);
 	if (!xbox_cache && !(halo_custom_edition_enabled() && custom_edition_cache_multiplayer(name)))
 	{
-		return;
+		/* (a campaign map: the campaign's level list's) */
+		campaign = halo_custom_edition_enabled() && custom_edition_cache_campaign(name);
+		if (!campaign)
+		{
+			return;
+		}
 	}
 	if (csstrlen(name) > MAXIMUM_MAP_NAME_LENGTH)
 	{
 		error(
 			_error_silent,
-			"custom edition: the map '%s' is not in the level list: its name is longer than %d characters",
+			"custom edition: the map '%s' is not in a level list: its name is longer than %d characters",
 			name,
 			MAXIMUM_MAP_NAME_LENGTH);
 		return;
@@ -380,7 +411,7 @@ static void custom_edition_map_add(
 	{
 		error(
 			_error_silent,
-			"custom edition: the map '%s' is not in the level list, which holds %d of them",
+			"custom edition: the map '%s' is not in a level list, which hold %d of them",
 			name,
 			MAXIMUM_CUSTOM_EDITION_MAPS);
 		return;
@@ -389,21 +420,37 @@ static void custom_edition_map_add(
 	map = &globals->maps[globals->map_count++];
 	csmemset(map, 0, sizeof(*map));
 	map->xbox_cache = xbox_cache;
+	map->campaign = campaign;
 	csstrcpy(map->name, name);
-	csprintf(map->level_name, LEVEL_NAME_FORMAT, name, name);
+	if (campaign)
+	{
+		csprintf(map->level_name, "%s%s", CUSTOM_EDITION_LEVEL_NAME_PREFIX, name);
+	}
+	else
+	{
+		csprintf(map->level_name, LEVEL_NAME_FORMAT, name, name);
+	}
 	display_name_make(name, map->display_name);
 	custom_edition_map_description_read(map);
 
 	return;
 }
 
+/* the multiplayer maps first, then the campaign maps, each in the order of
+their names */
 static int custom_edition_map_compare(
 	void const *first,
 	void const *second)
 {
-	return (int)csstrcasecmp(
-		((struct custom_edition_map const *)first)->name,
-		((struct custom_edition_map const *)second)->name);
+	struct custom_edition_map const *first_map = first;
+	struct custom_edition_map const *second_map = second;
+
+	if (first_map->campaign != second_map->campaign)
+	{
+		return first_map->campaign ? 1 : -1;
+	}
+
+	return (int)csstrcasecmp(first_map->name, second_map->name);
 }
 
 static void custom_edition_maps_look_for(
@@ -427,7 +474,17 @@ static void custom_edition_maps_look_for(
 		custom_edition_map_add(name, extension);
 	}
 	qsort(globals->maps, globals->map_count, sizeof(globals->maps[0]), custom_edition_map_compare);
-	error(_error_silent, "custom edition: %d multiplayer maps for the level list", globals->map_count);
+	for (globals->multiplayer_count = 0;
+		globals->multiplayer_count < globals->map_count && !globals->maps[globals->multiplayer_count].campaign;
+		globals->multiplayer_count++)
+	{
+	}
+	globals->campaign_count = globals->map_count - globals->multiplayer_count;
+	error(
+		_error_silent,
+		"custom edition: %d multiplayer maps for the level list, %d campaign maps for the campaign's",
+		globals->multiplayer_count,
+		globals->campaign_count);
 
 	return;
 }
@@ -508,8 +565,25 @@ static struct custom_edition_map *custom_edition_map_get(
 {
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	short map_index = display_index - FIRST_DISPLAY_INDEX;
+	short campaign_index = display_index - FIRST_CAMPAIGN_DISPLAY_INDEX;
 
-	return map_index >= 0 && map_index < globals->map_count ? &globals->maps[map_index] : NULL;
+	if (campaign_index >= 0 && campaign_index < globals->campaign_count)
+	{
+		return &globals->maps[globals->multiplayer_count + campaign_index];
+	}
+
+	return map_index >= 0 && map_index < globals->multiplayer_count ? &globals->maps[map_index] : NULL;
+}
+
+/* the display index of the map at `map_index` in the maps array */
+static short custom_edition_map_display_index(
+	short map_index)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+
+	return globals->maps[map_index].campaign ?
+		FIRST_CAMPAIGN_DISPLAY_INDEX + map_index - globals->multiplayer_count :
+		FIRST_DISPLAY_INDEX + map_index;
 }
 
 /* ---------- public code */
@@ -529,11 +603,11 @@ char **custom_edition_maps_level_list(
 		globals->levels[level_index] = xbox_levels[level_index];
 	}
 	custom_edition_maps_look_for();
-	for (map_index = 0; map_index < globals->map_count; map_index++)
+	for (map_index = 0; map_index < globals->multiplayer_count; map_index++)
 	{
 		globals->levels[globals->xbox_level_count + map_index] = globals->maps[map_index].level_name;
 	}
-	*level_count = globals->xbox_level_count + globals->map_count;
+	*level_count = globals->xbox_level_count + globals->multiplayer_count;
 
 	return globals->levels;
 }
@@ -544,7 +618,7 @@ short custom_edition_maps_level_display_index(
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	short map_index = level_index - globals->xbox_level_count;
 
-	return map_index >= 0 && map_index < globals->map_count ? FIRST_DISPLAY_INDEX + map_index : level_index;
+	return map_index >= 0 && map_index < globals->multiplayer_count ? FIRST_DISPLAY_INDEX + map_index : level_index;
 }
 
 short custom_edition_maps_display_index(
@@ -562,7 +636,7 @@ short custom_edition_maps_display_index(
 	{
 		if (!csstrcasecmp(globals->maps[map_index].name, name))
 		{
-			return FIRST_DISPLAY_INDEX + map_index;
+			return custom_edition_map_display_index(map_index);
 		}
 	}
 
@@ -590,16 +664,22 @@ struct bitmap_data *custom_edition_maps_picture(
 	short *frame_index)
 {
 	struct custom_edition_map *map;
+	boolean campaign_pictures;
 
-	if (*frame_index < FIRST_DISPLAY_INDEX ||
-		bitmap_tag_index == NONE ||
-		csstrcasecmp(tag_get_name(bitmap_tag_index), LEVEL_PICTURES_TAG_NAME))
+	if (*frame_index < FIRST_DISPLAY_INDEX || bitmap_tag_index == NONE)
+	{
+		return NULL;
+	}
+	/* (the multiplayer level pictures, or the campaign's: either list shows
+	maps of its own kind, and the lobby a co-op game's campaign map) */
+	campaign_pictures = !csstrcasecmp(tag_get_name(bitmap_tag_index), CAMPAIGN_LEVEL_PICTURES_TAG_NAME);
+	if (!campaign_pictures && csstrcasecmp(tag_get_name(bitmap_tag_index), LEVEL_PICTURES_TAG_NAME))
 	{
 		return NULL;
 	}
 
 	map = custom_edition_map_get(*frame_index);
-	*frame_index = UNKNOWN_LEVEL_FRAME;
+	*frame_index = campaign_pictures ? UNKNOWN_CAMPAIGN_LEVEL_FRAME : UNKNOWN_LEVEL_FRAME;
 	if (!map)
 	{
 		return NULL;
@@ -721,6 +801,36 @@ void custom_edition_maps_look_again(
 	custom_edition_maps_globals.looked_for = FALSE;
 
 	return;
+}
+
+short custom_edition_maps_campaigns_find(
+	void)
+{
+	custom_edition_maps_look_for();
+
+	return custom_edition_maps_globals.campaign_count;
+}
+
+char const *custom_edition_maps_campaign_level_name(
+	short campaign_index)
+{
+	struct custom_edition_map *map = custom_edition_map_get(FIRST_CAMPAIGN_DISPLAY_INDEX + campaign_index);
+
+	return campaign_index >= 0 && map ? map->level_name : NULL;
+}
+
+short custom_edition_maps_campaign_display_index(
+	short campaign_index)
+{
+	return campaign_index >= 0 && custom_edition_map_get(FIRST_CAMPAIGN_DISPLAY_INDEX + campaign_index) ?
+		FIRST_CAMPAIGN_DISPLAY_INDEX + campaign_index :
+		NONE;
+}
+
+boolean custom_edition_maps_campaign_level(
+	char const *level_name)
+{
+	return level_name && (main_get_solo_level_from_name(level_name) != NONE || custom_edition_level_name(level_name));
 }
 
 boolean custom_edition_maps_shareable(

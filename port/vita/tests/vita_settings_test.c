@@ -342,8 +342,9 @@ static void write_file(const char *path, const void *data, size_t size)
 	fclose(file);
 }
 
-/* a fake map: the cache header's signature and version, then zeros */
-static void write_map(const char *path, unsigned version, size_t size)
+/* a fake map: the cache header's signature, version and scenario type
+(0x60: 0 solo, 1 multiplayer), then zeros */
+static void write_map_of_type(const char *path, unsigned version, unsigned type, size_t size)
 {
 	static unsigned char bytes[300000];
 
@@ -351,7 +352,13 @@ static void write_map(const char *path, unsigned version, size_t size)
 	memcpy(bytes, "daeh", 4);
 	bytes[4] = version & 0xFF;
 	bytes[5] = (version >> 8) & 0xFF;
+	bytes[0x60] = type & 0xFF;
 	write_file(path, bytes, size < sizeof(bytes) ? size : sizeof(bytes));
+}
+
+static void write_map(const char *path, unsigned version, size_t size)
+{
+	write_map_of_type(path, version, 1, size);
 }
 
 /* L or R until the tab named is shown */
@@ -1497,12 +1504,13 @@ int main(void)
 	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);
 	write_map("ux0:data/haloce-vita/maps/inplay.map", 5, 2000);
 	write_map("ux0:data/haloce-vita/maps/cemap.map", 609, 3 * 1024 * 1024 / 16);
+	write_map_of_type("ux0:data/haloce-vita/maps/cesolo.map", 609, 0, 4096);
 	write_map("ux0:data/haloce-vita/maps/bloodgulch.map", 5, 1000);
 	write_map("ux0:data/haloce-vita/maps/bitmaps.map", 1, 1000);
 	write_file("ux0:data/haloce-vita/maps/cemap.bmp", "BM", 2);
 	write_file("ux0:data/haloce-vita/maps/notes.txt", "x", 1);
 	open_panel();
-	check(to_tab("Multiplayer") && strstr(menu, "\nModded maps\x02  3 maps  >"), "Multiplayer: Modded maps says how many");
+	check(to_tab("Multiplayer") && strstr(menu, "\nModded maps\x02  4 maps  >"), "Multiplayer: Modded maps says how many");
 	check(open_page("Modded maps") && strstr(menu, "\n\x03Multiplayer > Modded maps\n"), "the Modded maps page");
 	printf("%s\n--\n", menu);
 	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) &&
@@ -1512,8 +1520,9 @@ int main(void)
 		!strcmp(menu_line(7, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita"),
 		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning, and that "
 		"the installer does");
-	check(!strncmp(menu_line(8, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(9, line, sizeof(line)), "inplay\x02", 7) &&
-		!strncmp(menu_line(10, line, sizeof(line)), "mygulch\x02", 8) && menu_line(11, line, sizeof(line))[0] == '\x05',
+	check(!strncmp(menu_line(8, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(9, line, sizeof(line)), "cesolo\x02", 7) &&
+		!strncmp(menu_line(10, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(11, line, sizeof(line)), "mygulch\x02", 8) && menu_line(12, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
 	/* Map downloads: Ask (the default: public games warn), Not public games,
 	Never; each with its own help, saved and in the environment the game
@@ -1539,6 +1548,7 @@ int main(void)
 	check(!strcmp(getenv("HALO_MAP_SHARE_FROM"), "ask"), "back to Ask");
 	check(strstr(menu, "\nmygulch\x02  On    245 KB  Xbox\n") != NULL, "mygulch: On, size, Xbox");
 	check(strstr(menu, "\ncemap\x02  On ") && strstr(menu, "  CE\n"), "cemap: Custom Edition");
+	check(strstr(menu, "\ncesolo\x02  On ") && strstr(menu, "  CE SP\n"), "cesolo: a Custom Edition campaign map");
 	check(menu_fits(), "Modded maps: each line fits");
 	to_line("mygulch");
 	check(strstr(menu, "\n\x05Xbox map: on or off, or delete it") &&
@@ -1562,6 +1572,8 @@ int main(void)
 	check(!strncmp(menu, "DELETE MAP", 10) && strstr(menu, "inplay.map"), "square asks before deleting");
 	press(VITA_BUTTON_CROSS);
 	check(strstr(menu, "inplay is in play") && file_exists("ux0:data/haloce-vita/maps/inplay.map"), "the map in play is kept");
+	/* (the campaign map gone too, so that no Custom Edition map is left) */
+	unlink("ux0:data/haloce-vita/maps/cesolo.map");
 	to_line("cemap");
 	press(VITA_BUTTON_SQUARE);
 	press(VITA_BUTTON_CIRCLE);

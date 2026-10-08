@@ -676,7 +676,13 @@ static void dim_if_no_system_link_cable(
 static ui_widget_game_data_function game_data_input_function_list[41];
 
 extern struct persistent_game_data_info_view persistant_game_data_info;
+#ifdef HALO_LINUX
+/* (port: the campaign's ten levels, then the Custom Edition campaign maps:
+ui_widget_event_handler_functions.c) */
+extern struct single_player_level_entry single_player_level_data[CUSTOM_EDITION_MAPS_CAMPAIGN_LIST_ENTRIES];
+#else
 extern struct single_player_level_entry single_player_level_data[10];
+#endif
 extern struct cached_player_profile_entry cached_player_profile[3];
 extern struct cached_variant_profile_entry cached_variant_profile[3];
 
@@ -4308,6 +4314,28 @@ static void solo_level_select_list_update_displayed_items(
 		completion_marker->animation.current_frame_index = 1;
 		difficulty_marker->animation.current_frame_index = 2;
 		cooperative_marker->animation.current_frame_index = 3;
+
+#ifdef HALO_LINUX
+		/* port: a Custom Edition campaign map after the campaign's levels
+		shows its own name, picture and description by its display index
+		(port/linux/game/custom_edition_maps.c; the level not reached yet's
+		when it is gone), and no marks of progress */
+		if (displayed_item_indices[item_index] >= 10)
+		{
+			short display_index = custom_edition_maps_campaign_display_index(
+				(short)(displayed_item_indices[item_index] - 10));
+
+			if (display_index == NONE)
+				display_index = 10;
+			map_name->parameters.text_box.string_list_index = display_index;
+			map_bitmap->animation.current_frame_index = display_index;
+			map_description->parameters.text_box.string_list_index = display_index;
+			completion_marker->visible = FALSE;
+			difficulty_marker->visible = FALSE;
+			cooperative_marker->visible = FALSE;
+			continue;
+		}
+#endif
 
 		match_vassert(
 			"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",

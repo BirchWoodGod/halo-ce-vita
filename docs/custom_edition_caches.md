@@ -122,6 +122,27 @@ optional files beside the map give it what the Xbox levels have:
 
   Without one, the map is described as "Halo Custom Edition map".
 
+### In the campaign's menus
+
+The Custom Edition maps of solo scenarios, the campaign maps (Firefight
+maps, single player maps; the header's scenario type, 0), are the
+campaign's level list's, after its ten levels, in the order of their names,
+whatever the profile has reached (OpenCE's CUSTOM SINGLEPLAYER, ce41b41d,
+here in the Xbox's level list, whose own screens the port's campaign keeps).
+One chosen goes on to the difficulties: A plays it alone, Y hosts it as
+network co-op, as the campaign's levels are hosted. Its level name is
+`custom_maps\<name>` (`custom_edition_cache.h`,
+`CUSTOM_EDITION_LEVEL_NAME_PREFIX`), which none of the campaign's levels
+has, so it is never taken for one of them: it is not the campaign save
+(Save and Quit keeps the campaign's), not the profile's progress, and has
+no next level (won alone, the game goes back to the main menu; won in
+co-op, it is played again). The `.bmp` and `.txt` beside it are its
+picture and description as above. A co-op joiner without the map is
+offered the host's copy (map sharing takes a Custom Edition solo scenario
+for a `custom_maps\` level only). The settings panel's Modded maps page
+marks them CE SP; HALO_MAPS_DISABLED turns them off as it does the
+multiplayer maps.
+
 ## What the native builds do
 
 - **With the setting off** (the default), a Custom Edition cache in
@@ -336,9 +357,16 @@ changed:
   `switch_bsp`. A compiled script also keeps every name, in its string data,
   so every call and every engine global is found again by name with the
   game's own `hs_find_function_by_name` and `hs_find_global_by_name`
-  (`custom_edition_scripts.c`); a map whose scripts use one this build does
-  not have is refused and the names logged. The value types are numbered
-  alike in both builds.
+  (`custom_edition_scripts.c`). A call of a function this build does not
+  have, or a read or set of an engine global it does not have, does nothing
+  (a constant of its type's harmless value), as does a call of a function a
+  map's scripts may not call (`map_reset`, which Firefight maps call when
+  their last wave is won, and `map_name`) and a set of an engine global they
+  may not set, each logged by name, so the rest of the script runs where the
+  game's own check would keep the whole script from running; only one that
+  gives a script's index refuses the map (after OpenCE's
+  `custom_edition_scripts.c`, f823a18d). The value types are numbered alike
+  in both builds.
 - **Multiplayer vehicle placement.** This build places a multiplayer game's
   vehicles by type: only the first three of the globals' multiplayer
   vehicles are created, and of those the ones the variant's vehicle set
