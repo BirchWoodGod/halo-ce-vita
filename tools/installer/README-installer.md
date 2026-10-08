@@ -51,11 +51,13 @@ Custom maps you put in that `maps` folder yourself are copied too.
    extract-xiso needed. It checks that the campaign maps and the menu
    (`ui.map`, `a10.map` ... `d40.map`) and `default.xbe` are there, so the PC
    version's maps are not taken by mistake.
-2. **Movies.** The disc's Bink movies (`bink/*.bik`) are converted with
-   ffmpeg to H.264 MP4s, 640 wide, as the README's Movies section does
-   (Standard = its first command, Baseline profile; Better quality = its High
-   profile command). For now the game needs them: without them the main menu
-   does not take input.
+2. **Movies (optional).** The disc's Bink movies (`bink/*.bik`) are
+   converted with ffmpeg to H.264 MP4s, 640 wide, as the README's Movies
+   section does (Standard = its first command, Baseline profile; Better
+   quality = its High profile command). The game runs without them: each
+   missing movie is skipped (no intro, no attract videos, no credits movie)
+   and the main menu comes up ready to play. Skip the step with **Next** to
+   save the few minutes it takes.
 3. **Halo PC files** (for online play and Custom Edition maps):
    `bitmaps.map`, `sounds.map` and `loc.map`, from one of:
    - **Halo: The Master Chief Collection** on Steam: its

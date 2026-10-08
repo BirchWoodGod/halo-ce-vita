@@ -15,8 +15,8 @@ The steps, each one optional:
 1. Xbox game files: the maps folder and default.xbe out of the player's Xbox
    disc image (an XISO or a full disc image: read here, by a small XDVDFS
    reader, nothing to install) or an already unpacked folder.
-2. Movies: the disc's Bink movies converted by ffmpeg to the H.264 MP4s the
-   Vita plays (movies/<name>.mp4).
+2. Movies (optional: the game runs without them): the disc's Bink movies
+   converted by ffmpeg to the H.264 MP4s the Vita plays (movies/<name>.mp4).
 3. Halo PC files: bitmaps.map, sounds.map and loc.map, which online play and
    the Custom Edition maps need, from Halo MCC on Steam
    (halo1/maps/custom_edition), the Halo Custom Edition installer (any file
@@ -2402,9 +2402,10 @@ class InstallerWindow:
 
     def page_2(self):
         self.heading("2. Movies",
-                     "The disc's movies (Bink) converted to the MP4s the Vita plays, with ffmpeg. For now "
-                     "the game needs them: without them the main menu does not take input. This takes a "
-                     "few minutes.")
+                     "The disc's movies (Bink) converted to the MP4s the Vita plays, with ffmpeg: the intro, "
+                     "the attract videos and the credits. They are optional: without them the game skips "
+                     "each movie and the main menu comes up ready to play. This takes a few minutes; Next "
+                     "skips it.")
         if not self.movie_source.get() and self.xbox_source.get():
             self.movie_source.set(self.xbox_source.get())
         self.path_row("Disc image/folder", self.movie_source, browse_file=True, browse_folder=True,
