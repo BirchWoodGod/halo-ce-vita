@@ -181,7 +181,7 @@ the cores' busy shares, since the last */
 void vita_host_thread_times_report(unsigned long frames)
 {
 	char line[1000];
-	int length, index, count = __atomic_load_n(&watched_count, __ATOMIC_ACQUIRE);
+	int length, index, shown = 0, count = __atomic_load_n(&watched_count, __ATOMIC_ACQUIRE);
 	unsigned long long now = sceKernelGetProcessTimeWide(), fourth_total = 0;
 	SceKernelSystemInfo system;
 
@@ -189,7 +189,7 @@ void vita_host_thread_times_report(unsigned long frames)
 		return;
 	if (count > MAXIMUM_WATCHED)
 		count = MAXIMUM_WATCHED;
-	length = snprintf(line, sizeof(line), "thread-times (ms/frame, %lu frames):", frames);
+	length = snprintf(line, sizeof(line), "thread-times (ms/frame, %lu frames)", frames);
 	for (index = 0; index < count; index++)
 	{
 		SceKernelThreadInfo info;
@@ -206,15 +206,16 @@ void vita_host_thread_times_report(unsigned long frames)
 		if (watched[index].fourth)
 			fourth_total += run;
 		if (length < (int)sizeof(line))
-			length += snprintf(line + length, sizeof(line) - (size_t)length, " %s %.2f [cpu %d%s]%s", watched[index].role,
-				(double)run / 1000.0 / (double)frames, (int)info.lastExecutedCpuId, watched[index].fourth ? ", core 3" : "",
-				index + 1 < count ? " |" : "");
+			length += snprintf(line + length, sizeof(line) - (size_t)length, "%s %s %.2f [cpu %d%s]",
+				shown++ ? " |" : ":", watched[index].role, (double)run / 1000.0 / (double)frames,
+				(int)info.lastExecutedCpuId, watched[index].fourth ? ", core 3" : "");
 	}
 	vita_host_log(line);
 
 	memset(&system, 0, sizeof(system));
 	system.size = sizeof(system);
-	if (sceKernelGetSystemInfo(&system) < 0)
+	/* (Vita3K answers with nothing filled in: no core active) */
+	if (sceKernelGetSystemInfo(&system) < 0 || !(system.activeCpuMask & 0xf000f))
 	{
 		have_previous_system = 0;
 		snprintf(line, sizeof(line), "core-load: unknown (no idle clocks); fourth core helpers %.2f ms/frame",
