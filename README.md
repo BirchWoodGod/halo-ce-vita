@@ -356,9 +356,12 @@ needed, and the game runs the same without them.
 
 - **[CapUnlocker](https://github.com/GrapheneCt/CapUnlocker)** by GrapheneCt
   lets games use the Vita's fourth CPU core, which the system normally keeps
-  for itself. With it, the **Fourth core helpers** setting moves background
-  work (audio, the display queue, loading and checkpoint writing) onto that
-  core, leaving more of the other three for the game. Without it the setting
+  for itself. With it, the **Fourth core helpers** setting (Graphics >
+  Advanced; it applies after a restart) moves background work onto that
+  core: **Audio** moves the sound mixer, **All async** also the display
+  queue, loading, map decompression, checkpoint writing, shader compiling
+  and the log. The game, render and tick threads never move. If core 3
+  stays very busy and the frame rate drops, use Audio. Without it the setting
   does nothing and `halo.log` says so. To install: copy `CapUnlocker.skprx`
   from its releases to `ur0:tai/`, add the line `ur0:tai/CapUnlocker.skprx`
   under `*KERNEL` in `ur0:tai/config.txt` (keep a copy of the file first: a
