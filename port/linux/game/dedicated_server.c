@@ -875,7 +875,11 @@ static void command(
 		{
 			config_set_override("network.host_public", value ? "true" : "false");
 			if (dedicated.hosting)
+			{
 				p2p_lobby_set_public((int)value);
+				if (dedicated.coop)
+					p2p_lobby_set_coop_public((int)value);
+			}
 			say(value ? "public: listed in the server browser" : "private: joined by its code only");
 		}
 	}
@@ -1260,8 +1264,11 @@ void dedicated_server_update(
 		dedicated.lobby_seconds = 0.0f;
 		dedicated.map_checked_seconds = 0.0f;
 		dedicated.back_to_lobby = FALSE;
-		/* (the settings' password and visibility, as the commands left them) */
+		/* (the settings' password and visibility, as the commands left them:
+		sv_public a co-op game's too, which is otherwise private unless chosen) */
 		p2p_lobby_set_public(config_boolean("network.host_public"));
+		if (dedicated.coop)
+			p2p_lobby_set_coop_public(config_boolean("network.host_public"));
 		return;
 	}
 
