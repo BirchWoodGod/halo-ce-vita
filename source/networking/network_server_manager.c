@@ -4340,8 +4340,16 @@ static long network_game_server_port_maximum_players(
 {
 	char const *setting = getenv("HALO_NET_MAX_PLAYERS");
 	long maximum = setting && setting[0] ? atol(setting) : config_integer("network.max_players");
+#if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
+	/* (a Vita, and a host Vitas play on, offers the Xbox's 16 at most: every
+	Vita in the game simulates every player, and the 128 the build allows
+	were offered by a game hosted without Server Setup's choice) */
+	long most = MIN(16, MAXIMUM_NETWORK_PLAYER_COUNT);
+#else
+	long most = MAXIMUM_NETWORK_PLAYER_COUNT;
+#endif
 
-	return maximum >= 2 ? MIN(maximum, MAXIMUM_NETWORK_PLAYER_COUNT) : MAXIMUM_NETWORK_PLAYER_COUNT;
+	return maximum >= 2 ? MIN(maximum, most) : most;
 }
 
 /* port: the name the game lists show for a game this machine hosts, of the
