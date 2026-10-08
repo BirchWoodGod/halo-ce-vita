@@ -1301,6 +1301,15 @@ void hud_render_unit_interface(
 							meter_index,
 							struct auxilary_meter_definition);
 
+#ifdef HALO_LINUX
+						/* port: a meter's type is a map's: one this build has
+						no flash time or value for is not drawn (it indexed the
+						HUD state, and shifted a flag word, past their ends) */
+						if (meter->type < 0 || meter->type >= NUMBEROF(hud_state->auxilary_flash_time))
+						{
+							continue;
+						}
+#endif
 						if (TEST_FLAG(
 								hud_state->auxilary_active_type_flags,
 								meter->type) &&
