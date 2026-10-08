@@ -330,6 +330,26 @@ Triangle, Back Select. The same screens are under Multiplayer, System Link
 Play in the main menu. To host on a PC (Custom Edition) map, turn on PC maps
 on the Modded maps page first.
 
+**Game chat.** In a network game's lobby and in the game, hold **Back
+(Select)** and press **Y (Triangle)**: the chat menu opens over the game,
+which gets no buttons meanwhile.
+
+- The quick chat phrases (Need backup, Enemy spotted, Follow me, On my way,
+  Thanks, Good game, Yes, No): A sends one.
+- **Type a message...**: the Vita's keyboard, 80 characters at most
+  (letters, digits and punctuation; others are left out).
+- **To**: All or Team (left and right), in a game with teams.
+- **Mute players**: the game's other players; A mutes one (their lines
+  are no longer shown) or hears them again, for as long as the game runs.
+
+Back and a direction of the D-pad sends a phrase at once: up Enemy spotted,
+down Need backup, left Follow me, right On my way. B closes the menu. Lines
+show at the left of the screen with the sender's name for twelve seconds,
+team lines in green. A player can send three lines at once, then one every
+two seconds; the host names who said each line and passes it on, drops the
+rest of a flood, and lines with a link (a web address, an IP address) are
+not sent.
+
 The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
@@ -338,6 +358,7 @@ The settings panel's **Multiplayer** tab:
 | Play > | Hosting and joining: the page below. |
 | Ad hoc room | With Connection Ad hoc: 1 to 4. Vitas in the same room play together. |
 | Modded maps > | Your custom maps (above). |
+| Game chat | **On** (the default), **Quick chat only** (phrases only: no typed lines sent or shown) or **Off** (no chat; Back + Y is Y again). Game chat below. |
 
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many

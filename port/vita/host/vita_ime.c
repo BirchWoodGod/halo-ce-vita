@@ -2,7 +2,8 @@
 VITA_IME.C
 
 The system's keyboard (the IME dialog) for the settings panel's lines of
-text: the Play page's lobby name and password (vita_settings.c). The
+text: the Play page's lobby name and password, game chat's lines
+(vita_settings.c). The
 dialog is one of the system's common dialogs, drawn over the game's frames
 while vgxm_common_dialog(1) holds (vita_gxm.c) and reading the pad itself;
 the panel polls it once a frame (vita_ime_poll) and hands the game no
@@ -21,8 +22,9 @@ printable ASCII (what the game's font and the game lists show).
 #include "vita_gxm.h"
 #include "vita_host.h"
 
-/* (the dialog's text, and its title, as UTF-16) */
-#define IME_TEXT_SIZE 64
+/* (the dialog's text, and its title, as UTF-16: a chat line's 80
+characters at most) */
+#define IME_TEXT_SIZE 80
 
 static SceWChar16 ime_title[SCE_IME_DIALOG_MAX_TITLE_LENGTH];
 static SceWChar16 ime_initial[IME_TEXT_SIZE];

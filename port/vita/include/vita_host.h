@@ -135,6 +135,11 @@ void vita_gyro_status(char *text, int size);
 /* the settings panel (vita_settings.c): nonzero when it took the buttons
 (open, or SELECT+START held), and the game should see none */
 int vita_settings_input(const struct vita_host_pad *pad);
+/* (the panel closed) the buttons the game has of those held: in a network
+game, while Back (Select) is held, the D-pad and Y are game chat's (Back +
+Y opens its menu, Back + the D-pad sends a phrase), and in the menus Back
+itself waits for the rest of the combo (menus: the game's menus are up) */
+unsigned long vita_settings_game_buttons(unsigned long buttons, int menus);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
 void vita_settings_message(const char *title, const char *text);
@@ -148,7 +153,7 @@ void vita_adhoc_leave(void);
 buttons), 2 in a group, -1 the last attempt failed; a line saying so */
 int vita_adhoc_state(char *text, int size);
 /* the system's keyboard (vita_ime.c), for a line of text the settings
-panel asks for (the Play page's lobby name and password): opens it over the
+panel asks for (the Play page's lobby name and password, a chat line): opens it over the
 game with this title and text (ASCII, at most maximum_length characters;
 password: the characters hidden). 0 if it opened */
 int vita_ime_open(const char *title, const char *text, int maximum_length, int password);

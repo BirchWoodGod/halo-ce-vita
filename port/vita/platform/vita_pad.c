@@ -181,6 +181,8 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 		gamepad->sThumbLX = gamepad->sThumbLY = gamepad->sThumbRX = gamepad->sThumbRY = 0;
 		return;
 	}
+	/* (game chat's Back + Y and Back + D-pad: vita_settings.c) */
+	pad.buttons = vita_settings_game_buttons(pad.buttons, vita_menus_active);
 	/* the gyro, in play: in hold mode its button only aims */
 	vita_gyro_accumulate(&gyro_state, &gyro_config, pad.gyro,
 		vita_gyro_active(&gyro_config, pad.buttons, vita_menus_active));
