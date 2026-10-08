@@ -182,6 +182,7 @@ symbols in this file:
 #include "memory/data_packet_groups.h"
 #include "networking/network_messages.h"
 #include "map_share_protocol.h"
+#include "chat_protocol.h"
 
 /* cseries_windows.c's */
 unsigned long system_milliseconds(void);
@@ -275,7 +276,11 @@ struct network_game_message_packet_definitions
 	struct data_packet_definition server_map_download_answer;
 	struct data_packet_field server_map_download_data_fields[4];
 	struct data_packet_definition server_map_download_data;
-	struct data_packet_entry packets[38];
+	struct data_packet_field client_chat_fields[3];
+	struct data_packet_definition client_chat;
+	struct data_packet_field server_chat_fields[4];
+	struct data_packet_definition server_chat;
+	struct data_packet_entry packets[40];
 	struct data_packet_group_definition group;
 };
 
@@ -332,6 +337,10 @@ map_share_request, map_share_answer_message, map_share_data_message) */
 DEFINE_NETWORK_GAME_MESSAGE(message_client_map_download, 2 * 2 + 2 * 4 + MAP_SHARE_NAME_BYTES);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_answer, 2 * 2 + 3 * 4 + MAP_SHARE_NAME_BYTES + MAP_SHARE_DIGEST_BYTES);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_data, 2 * 2 + 4 + MAP_SHARE_CHUNK_BYTES);
+/* (port) game chat's (port/linux/game/chat_protocol.h: struct
+chat_request_message, chat_relay_message) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_chat, 4 * 2 + CHAT_TEXT_BYTES);
+DEFINE_NETWORK_GAME_MESSAGE(message_server_chat, 6 * 2 + CHAT_NAME_CHARACTERS * 2 + CHAT_TEXT_BYTES);
 
 #undef DEFINE_NETWORK_GAME_MESSAGE
 
@@ -582,6 +591,19 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(server_map_download_data, "message_server_map_download_data_packet", message_server_map_download_data),
 	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 4),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, CHAT_TEXT_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_chat, "message_client_chat_packet", message_client_chat),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 6),
+		DATA_PACKET_FIELD(_data_packet_field_shorts, CHAT_NAME_CHARACTERS),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, CHAT_TEXT_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_chat, "message_server_chat_packet", message_server_chat),
+	{
 		{ 0, 0, &data_0030aa68.client_broadcast_game_search },
 		{ 0, 0, &data_0030aa68.client_ping },
 		{ 1, 0, &data_0030aa68.server_game_advertise },
@@ -620,10 +642,12 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 		{ 3, 0, &data_0030aa68.client_map_download },
 		{ 2, 0, &data_0030aa68.server_map_download_answer },
 		{ 2, 0, &data_0030aa68.server_map_download_data },
+		{ 3, 0, &data_0030aa68.client_chat },
+		{ 2, 0, &data_0030aa68.server_chat },
 	},
 	{
 		"network_game_messages_group",
-		38,
+		40,
 		8,
 		/* the per-tick update of 128 players decodes to 0x1010 bytes */
 		HALO_PORT_NETWORK_PACKET_SIZE,
@@ -659,7 +683,7 @@ static short const network_game_message_structure_sizes[NUMBER_OF_NETWORK_GAME_M
 	sizeof(message_server_graceful_game_exit_postgame), sizeof(message_client_remove_player_request_postgame),
 	sizeof(message_client_switch_to_pregame), sizeof(message_client_graceful_game_exit_postgame),
 	sizeof(message_client_map_download), sizeof(message_server_map_download_answer),
-	sizeof(message_server_map_download_data),
+	sizeof(message_server_map_download_data), sizeof(message_client_chat), sizeof(message_server_chat),
 };
 
 /* port: whether a type's packet definition holds more than its structure
@@ -915,6 +939,12 @@ void *create_network_game_message(
 		break;
 	case _message_server_map_download_data:
 		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_map_download_data));
+		break;
+	case _message_client_chat:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_chat));
+		break;
+	case _message_server_chat:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_chat));
 		break;
 	default:
 #line 213 "c:\\halo\\SOURCE\\networking\\network_messages.c"

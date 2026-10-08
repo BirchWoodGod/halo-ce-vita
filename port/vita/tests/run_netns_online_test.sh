@@ -50,6 +50,18 @@
 #            public), START GAME, the profile, the map and the gametype; the
 #            joiner joins it from the server browser (network test)
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
+#   chat     code, with game chat (port/linux/game/chat.c, HALO_TEST_CHAT):
+#            in the lobby the joiner sends a quick chat phrase, a typed line,
+#            a line with control characters and the game's text codes (the
+#            host cleans it), one with a link (the host drops it) and a
+#            flood (the host passes CHAT_BURST, 3, and drops the rest); in
+#            the game a typed line and a team phrase (no teams: to all); the
+#            host says a line the joiner shows, then mutes the joiner, whose
+#            next line no one is shown (a host's mute is its game's), and
+#            hears it again; the host turns its Game chat to Quick chat only
+#            (the joiner's typed line is refused with a notice, its phrase
+#            passes) and then Off (its phrase refused with a notice); the
+#            joiner mutes the host, whose phrase it then does not show
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -906,8 +918,69 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
+chat)
+	# (a long lobby: the joiner's lobby lines before the game starts)
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST_START=45 \
+		"HALO_TEST_CHAT=75:say:hi from the host|80:mute:*|100:unmute:*|104:mode:quick|121:quick:0|125:mode:off"
+	host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_TEST_INPUT=bot:2 "HALO_TEST_CHAT=1:quick:1|2:say:hello from the lobby|3:raw:bad\x07\x7cnend\x1b[0m |4:raw:visit evil (.) com|8:flood:20|60:say:hello in game|61:teamquick:5|84:say:after the mute|104:say:typed in quick|106:quick:4|109:mute:*|132:quick:7"
+	join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -a "chat:" "$hl" | head -40
+	echo "--- joiner"; grep -a "chat:" "$jl" | grep -v "sent a typed line (lobby)" | head -30
+	name=$(sed -n "s/.*chat: the host passes on \(.*\)'s quick chat line.*/\1/p" "$hl" | head -1)
+	host_name=$(sed -n 's/.*chat: \(.*\): hi from the host$/\1/p' "$jl" | head -1)
+	echo "the joiner's player: '$name', the host's: '$host_name'"
+	[ -n "$name" ] || fail "the host passed on no quick chat line of the joiner's"
+	grep -aq "chat: sent a quick chat line (lobby)" "$jl" && grep -aq "chat: sent a typed line (lobby)" "$jl" ||
+		fail "the joiner sent no lines in the lobby"
+	grep -aqF "chat: $name: Enemy spotted" "$hl" || fail "the host did not show the joiner's quick chat phrase"
+	grep -aqF "chat: $name: hello from the lobby" "$hl" || fail "the host did not show the joiner's typed line"
+	grep -aqF "chat: $name: bad/nend[0m" "$hl" || fail "the host did not show the line with control characters, cleaned"
+	grep -a "chat: " "$hl" "$jl" | grep -aq "$(printf '\033')\|$(printf '\007')\||n" && fail "a control character or text code was shown"
+	grep -aq "chat: the host dropped a line from machine slot [0-9]*: not valid" "$hl" || fail "the host did not drop the link"
+	grep -a "chat: " "$hl" | grep -aqi "evil" && fail "the host showed the line with a link"
+	floods=$(grep -acF "chat: $name: flood " "$hl")
+	echo "flood lines the host passed on: $floods of 20"
+	[ "$floods" -ge 1 ] && [ "$floods" -le 3 ] || fail "the host passed on $floods lines of the flood (1 to 3 wanted)"
+	grep -aq "chat: the host dropped a line from machine slot [0-9]*: too many" "$hl" || fail "the host did not drop the flood"
+	grep -aq "chat: sent a typed line (game)" "$jl" || fail "the joiner sent no line in the game"
+	grep -aqF "chat: $name: hello in game" "$hl" || fail "the host did not show the joiner's line in the game"
+	grep -aqF "chat: $name: Good game" "$hl" || fail "the host did not show the team phrase (to all: no teams)"
+	grep -aqF "chat: [Team]" "$hl" && fail "a team line in a game without teams"
+	[ -n "$host_name" ] || fail "the joiner did not show the host's line"
+	grep -aqF "chat: (to this player) $name muted for everyone" "$hl" || fail "the host did not mute the joiner (for everyone)"
+	grep -aqF "chat: the host dropped a line from $name: muted by the host" "$hl" ||
+		fail "the host did not drop the line of the player it muted"
+	grep -aqF "chat: $name: after the mute" "$hl" "$jl" && fail "a line of the player the host muted was shown"
+	grep -aqF "chat: (to this player) $name can be heard again" "$hl" || fail "the host did not hear the joiner again"
+	# (the host's Game chat is its game's: Quick chat only, then Off)
+	grep -aq "chat: the host dropped a line from machine slot [0-9]*: Only quick chat in this game" "$hl" &&
+		grep -aqF "chat: (to this player) Only quick chat in this game" "$jl" ||
+		fail "the host's Quick chat only: the typed line not refused, or the joiner not told"
+	grep -aqF "chat: $name: typed in quick" "$hl" "$jl" && fail "a typed line shown with the host's Quick chat only"
+	grep -aqF "chat: $name: Thanks" "$hl" || fail "the host's Quick chat only did not pass on a phrase"
+	grep -aq "chat: the host dropped a line from machine slot [0-9]*: Chat is off in this game" "$hl" &&
+		grep -aqF "chat: (to this player) Chat is off in this game" "$jl" ||
+		fail "the host's Game chat Off: the phrase not refused, or the joiner not told"
+	grep -aqx "halo-linux: chat: $name: No" "$hl" "$jl" && fail "a line shown with the host's Game chat Off"
+	# (the joiner's own mute: the host's phrase not shown)
+	grep -aqF "chat: (to this player) $host_name muted" "$jl" && grep -aqF "chat: a line from $host_name (muted)" "$jl" ||
+		fail "the joiner did not mute the host"
+	grep -aqF "chat: $host_name: Need backup" "$jl" && fail "the joiner showed the line of the host it muted"
+	grep -aq "chat: the lines drawn (lobby)" "$jl" && grep -aq "chat: the lines drawn (game)" "$jl" ||
+		fail "the joiner did not draw the chat lines in the lobby and in the game"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
 *)
-	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport" >&2
+	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|chat" >&2
 	exit 2
 	;;
 esac

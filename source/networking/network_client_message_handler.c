@@ -201,6 +201,7 @@ symbols in this file:
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
 #include "map_share.h"
+#include "chat.h"
 
 /* port/linux/game/network_distributed.c's */
 void network_distributed_handle_message(long machine_index, word const *message, word size);
@@ -716,6 +717,19 @@ boolean network_game_client_handle_message(
 						else
 						{
 							network_event("ignoring a map share message from a system that is not the host");
+						}
+						break;
+
+					/* port: game chat (port/linux/game/chat.c), the host's
+					alone */
+					case _message_server_chat:
+						if (network_game_client_address_matches_server(client, source_address))
+						{
+							chat_client_handle_relay(client, message, message_size);
+						}
+						else
+						{
+							network_event("ignoring a chat line from a system that is not the host");
 						}
 						break;
 

@@ -98,6 +98,10 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   of co-op hosted online sets (port/linux/game/coop_menu.c). 1.0.3's
   "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
 
+- "Game chat" (port/linux/game/chat.c): On, Quick chat only or Off, for
+  this Vita and, when it hosts, for everyone in its game. Its menu, Back +
+  Y in a network game's lobby or in the game, is below (game chat's menu).
+
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo; CE SP
 for a Custom Edition campaign map, which the Campaign's level list offers
@@ -139,6 +143,7 @@ Multiplayer tab's way.
 #include <strings.h>
 #include <sys/stat.h>
 
+#include "chat_link.h"
 #include "p2p.h"
 #include "system_link_shortcut.h"
 #include "vita_controls.h"
@@ -449,6 +454,11 @@ static struct setting settings[] = {
 	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
 		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
+	/* (game chat, port/linux/game/chat.c: its menu is Back + Y in a
+	network game's lobby or the game; the help is each choice's own,
+	chat_help) */
+	{ "Game chat", "HALO_CHAT", 0, 3, { "on", "quick", "off" }, { "On", "Quick chat only", "Off" },
+		"Back + Y in a lobby or game: phrases, typing", 0, TAB_MULTIPLAYER },
 	/* (the hosted game's settings, which the game's Server Setup sets
 	(vita_settings_set, menu_functions.c) and settings.txt keeps: on a page
 	no row opens) */
@@ -592,6 +602,9 @@ enum
 	SCREEN_BROWSE,
 	SCREEN_DELETE,
 	SCREEN_GUIDE,
+	/* game chat's menu, and its Mute players page */
+	SCREEN_CHAT,
+	SCREEN_CHAT_MUTE,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -649,6 +662,58 @@ static struct play_text
 
 /* the keyboard's row while it is open (the setting), else NULL */
 static const struct setting *ime_setting;
+
+/* ---------- game chat's menu
+
+Back + Y (Select + Triangle) in a network game's lobby or in the game,
+while the game says chat is available (chat_link.h: Game chat not Off),
+opens the menu over the game, which sees no buttons meanwhile: the quick
+chat phrases (A sends one), Type a message (the system's keyboard; not
+with Quick chat only), To: All or Team (left and right, in a game with
+teams) and Mute players (the game's other players: A mutes one or hears
+them again; on the host, muted for everyone in its game). A phrase or a line sent closes it, as B does. Back and a
+direction of the D-pad sends one of four phrases at once (up Enemy
+spotted, down Need backup, left Follow me, right On my way). While Back is
+held, the D-pad and Y are chat's, not the game's; in the menus (where Back
+is the Xbox's back) Back itself waits until it is let go or held a while,
+so the combo never reaches the lobby (vita_settings_game_buttons). The
+game sends, checks, limits and shows the lines (port/linux/game/chat.c). */
+
+enum
+{
+	CHAT_ROW_TYPE = HALO_CHAT_PHRASE_COUNT,
+	CHAT_ROW_TO,
+	CHAT_ROW_MUTE,
+	CHAT_ROWS
+};
+
+/* the mute page's names shown at once (it scrolls) */
+#define CHAT_MUTE_LINES 10
+/* in the menus, Back waits this long for the rest of the combo before the
+game has it (microseconds) */
+#define CHAT_BACK_WAIT_US 400000ULL
+
+static const char *const chat_phrases[HALO_CHAT_PHRASE_COUNT] = { HALO_CHAT_PHRASES };
+/* the phrases Back + up, down, left and right send */
+static const int chat_dpad_phrases[4] = { 1, 0, 2, 3 };
+static int chat_selected, chat_team, chat_mute_selected, chat_mute_scroll;
+/* the keyboard is up for a line */
+static int chat_typing;
+/* Back in the combo: withheld from the game (in the menus) while it waits
+for the rest, or for good once the combo was used, until it is let go */
+enum
+{
+	CHAT_BACK_IDLE,
+	CHAT_BACK_WAITING,
+	CHAT_BACK_PASSING,
+	CHAT_BACK_USED,
+};
+static int chat_back;
+static unsigned long long chat_back_since;
+/* frames left of a short press of Back handed to the game late */
+static int chat_back_tap;
+
+static void chat_request(int request, int value, const char *text);
 
 /* ---------- modded maps */
 
@@ -1912,6 +1977,13 @@ static const char *const map_downloads_help[3] = {
 	"No downloads: copy the host's map in yourself",
 };
 
+/* (Game chat's: the menu's buttons in the Xbox's terms, or the Vita's) */
+static const char *const chat_help[3] = {
+	"Back + Y in a lobby or game: phrases, typing",
+	"Phrases only, for all in the games you host",
+	"No chat, and none in the games you host",
+};
+
 static const char *setting_help(const struct setting *setting)
 {
 	static char camera_help[64];
@@ -1920,6 +1992,9 @@ static const char *setting_help(const struct setting *setting)
 	if (setting->variable && !strcmp(setting->variable, "HALO_MAP_SHARE_FROM") && setting->choice >= 0 &&
 		setting->choice < 3)
 		return map_downloads_help[setting->choice];
+	if (setting->variable && !strcmp(setting->variable, "HALO_CHAT") && setting->choice >= 0 && setting->choice < 3)
+		return setting->choice == 0 && playstation_terms() ? "Select + Triangle in a lobby or game: phrases, typing" :
+			chat_help[setting->choice];
 
 	/* (the debug camera's Black: the Vita button it is on) */
 	if (row >= 0 && !strcmp(playstation_rows[row].key, "HALO_DEBUG_CAMERA"))
@@ -2456,6 +2531,120 @@ static void show_guide(void)
 	vgxm_menu_set(text, -1);
 }
 
+/* ---------- game chat's menu: what it shows */
+
+static int chat_status(int index)
+{
+	return __atomic_load_n(&halo_chat_status[index], __ATOMIC_ACQUIRE);
+}
+
+static int chat_available(void)
+{
+	return chat_status(HALO_CHAT_STATUS_AVAILABLE) != 0;
+}
+
+/* whether a row of the menu is there now: Type a message not with Quick
+chat only, To only in a game with teams */
+static int chat_row_shown(int row)
+{
+	if (row == CHAT_ROW_TYPE)
+		return chat_status(HALO_CHAT_STATUS_MODE) == HALO_CHAT_MODE_ON;
+	if (row == CHAT_ROW_TO)
+		return chat_status(HALO_CHAT_STATUS_TEAMS) != 0;
+	return row >= 0 && row < CHAT_ROWS;
+}
+
+/* the controller's Back as the menu names it */
+static const char *chat_back_name(void)
+{
+	return playstation_terms() ? "Select" : "Back";
+}
+
+/* the players the game listed (at most HALO_CHAT_PLAYERS) */
+static int chat_player_count(void)
+{
+	int count = chat_status(HALO_CHAT_STATUS_PLAYERS);
+
+	return count < 0 ? 0 : count > HALO_CHAT_PLAYERS ? HALO_CHAT_PLAYERS : count;
+}
+
+static void show_chat(void)
+{
+	char text[1024];
+	int length = snprintf(text, sizeof(text), "GAME CHAT");
+	int row, number = 0, highlighted = 0, muted = 0, index;
+	int wait = chat_status(HALO_CHAT_STATUS_WAIT);
+	int teams = chat_status(HALO_CHAT_STATUS_TEAMS) != 0;
+
+	for (index = 0; index < chat_player_count(); index++)
+		muted += halo_chat_player_muted[index] != 0;
+	if (!chat_row_shown(chat_selected))
+		chat_selected = 0;
+	for (row = 0; row < CHAT_ROWS && length < (int)sizeof(text); row++)
+	{
+		if (!chat_row_shown(row))
+			continue;
+		number++;
+		if (row == chat_selected)
+			highlighted = number;
+		if (row < HALO_CHAT_PHRASE_COUNT)
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", chat_phrases[row]);
+		else if (row == CHAT_ROW_TYPE)
+			length += snprintf(text + length, sizeof(text) - length, "\nType a message...");
+		else if (row == CHAT_ROW_TO)
+			length += snprintf(text + length, sizeof(text) - length, "\nTo: %c %s %c", chat_team ? '<' : ' ',
+				chat_team ? "Team" : "All", chat_team ? ' ' : '>');
+		else
+			length += snprintf(text + length, sizeof(text) - length, muted ? "\nMute players  (%d muted)  >" :
+				"\nMute players  >", muted);
+	}
+	if (length < (int)sizeof(text))
+	{
+		if (wait > 0)
+			length += snprintf(text + length, sizeof(text) - length, "\n\nWait %d s to chat again", (wait + 999) / 1000);
+		else
+			length += snprintf(text + length, sizeof(text) - length, "\n\n%s + D-pad: a phrase at once%s", chat_back_name(),
+				teams && chat_team ? " (team)" : "");
+	}
+	if (length < (int)sizeof(text))
+		snprintf(text + length, sizeof(text) - length, "\n%s: send   %s%s: close", menu_button('A'),
+			teams ? "Left/right: To   " : "", menu_button('B'));
+	vgxm_menu_set(text, highlighted);
+}
+
+static void show_chat_mute(void)
+{
+	char text[1024];
+	int length = snprintf(text, sizeof(text), "MUTE PLAYERS");
+	int count = chat_player_count(), index;
+
+	if (chat_mute_selected >= count)
+		chat_mute_selected = count ? count - 1 : 0;
+	if (chat_mute_selected < chat_mute_scroll)
+		chat_mute_scroll = chat_mute_selected;
+	if (chat_mute_selected >= chat_mute_scroll + CHAT_MUTE_LINES)
+		chat_mute_scroll = chat_mute_selected - CHAT_MUTE_LINES + 1;
+	if (!count)
+		length += snprintf(text + length, sizeof(text) - length, "\nNo other players in the game yet");
+	for (index = chat_mute_scroll; index < count && index < chat_mute_scroll + CHAT_MUTE_LINES &&
+		length < (int)sizeof(text); index++)
+	{
+		char name[HALO_CHAT_NAME_SIZE];
+
+		snprintf(name, sizeof(name), "%s", halo_chat_player_names[index]);
+		length += snprintf(text + length, sizeof(text) - length, "\n%-16s%s", name,
+			halo_chat_player_muted[index] ? "Muted" : "-");
+	}
+	if (count > CHAT_MUTE_LINES && length < (int)sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length, "\n(players %d-%d of %d)", chat_mute_scroll + 1,
+			chat_mute_scroll + CHAT_MUTE_LINES, count);
+	if (length < (int)sizeof(text))
+		snprintf(text + length, sizeof(text) - length, "\n\n%s\n%s: mute or hear   %s: back",
+			chat_status(HALO_CHAT_STATUS_HOST) ? "You host: muted for everyone in your game" :
+			"A muted player's lines are not shown", menu_button('A'), menu_button('B'));
+	vgxm_menu_set(text, count ? chat_mute_selected - chat_mute_scroll + 1 : 0);
+}
+
 static void show(void)
 {
 	last_shown = now_us();
@@ -2467,6 +2656,10 @@ static void show(void)
 		show_delete();
 	else if (screen == SCREEN_GUIDE)
 		show_guide();
+	else if (screen == SCREEN_CHAT)
+		show_chat();
+	else if (screen == SCREEN_CHAT_MUTE)
+		show_chat_mute();
 	else
 		show_list();
 }
@@ -3119,15 +3312,27 @@ typed goes to its row (or the password to the chosen public game's join),
 and the panel is back */
 static int ime_input(void)
 {
-	char typed[64];
+	char typed[HALO_CHAT_TEXT_SIZE];
 	int result;
 
-	if (!ime_setting && !browse_join_pending)
+	if (!ime_setting && !browse_join_pending && !chat_typing)
 		return 0;
 	result = vita_ime_poll(typed, sizeof(typed));
 	if (result == 0)
 		return 1;
-	if (ime_setting)
+	if (chat_typing)
+	{
+		/* (a line typed goes, and the menu closes; cancelled, the menu is
+		back) */
+		chat_typing = 0;
+		if (result > 0 && typed[0] && chat_available())
+		{
+			chat_request(HALO_CHAT_REQUEST_TYPED, 0, typed);
+			close_panel();
+			return 1;
+		}
+	}
+	else if (ime_setting)
 	{
 		struct play_text *text = play_text_named(ime_setting->variable);
 
@@ -3203,6 +3408,175 @@ static int game_text_input(void)
 	return 1;
 }
 
+/* ---------- game chat's menu: its buttons */
+
+/* a request to the game (chat_link.h), taken at its next frame (one a
+frame: a second is dropped) */
+static void chat_request(int request, int value, const char *text)
+{
+	char line[96];
+
+	if (__atomic_load_n(&halo_chat_request, __ATOMIC_ACQUIRE) != HALO_CHAT_REQUEST_NONE)
+		return;
+	snprintf(halo_chat_request_text, sizeof(halo_chat_request_text), "%s", text ? text : "");
+	halo_chat_request_value = value;
+	halo_chat_request_team = chat_team && chat_status(HALO_CHAT_STATUS_TEAMS);
+	__atomic_store_n(&halo_chat_request, request, __ATOMIC_RELEASE);
+	snprintf(line, sizeof(line), "settings: chat %s%s", request == HALO_CHAT_REQUEST_QUICK ? "phrase" :
+		request == HALO_CHAT_REQUEST_TYPED ? "line" : request == HALO_CHAT_REQUEST_MUTE ? "mute" : "unmute",
+		halo_chat_request_team ? " to the team" : "");
+	vita_host_log(line);
+}
+
+static void chat_open(void)
+{
+	panel_open = 1;
+	screen = SCREEN_CHAT;
+	chat_selected = 0;
+	if (!chat_status(HALO_CHAT_STATUS_TEAMS))
+		chat_team = 0;
+	show();
+}
+
+/* the next row shown, or the one before */
+static void chat_step(int step)
+{
+	int tries, row = chat_selected;
+
+	for (tries = 0; tries < CHAT_ROWS; tries++)
+	{
+		row = (row + step + CHAT_ROWS) % CHAT_ROWS;
+		if (chat_row_shown(row))
+			break;
+	}
+	chat_selected = row;
+}
+
+static void chat_input(unsigned long pressed, unsigned long buttons, unsigned long long now)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+	{
+		close_panel();
+		return;
+	}
+	if (pressed & VITA_BUTTON_UP)
+		chat_step(-1), last_move = now;
+	else if (pressed & VITA_BUTTON_DOWN)
+		chat_step(1), last_move = now;
+	else if ((buttons & (VITA_BUTTON_UP | VITA_BUTTON_DOWN)) && now - last_move > 250000)
+		chat_step((buttons & VITA_BUTTON_UP) ? -1 : 1), last_move = now;
+	if (chat_selected == CHAT_ROW_TO && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS)))
+		chat_team = (pressed & VITA_BUTTON_LEFT) ? 0 : (pressed & VITA_BUTTON_RIGHT) ? 1 : !chat_team;
+	else if (pressed & VITA_BUTTON_CROSS)
+	{
+		if (chat_selected < HALO_CHAT_PHRASE_COUNT)
+		{
+			chat_request(HALO_CHAT_REQUEST_QUICK, chat_selected, NULL);
+			close_panel();
+		}
+		else if (chat_selected == CHAT_ROW_TYPE)
+		{
+			/* (the panel hides while the keyboard is up; the line comes
+			back in ime_input) */
+			if (vita_ime_open(chat_team && chat_status(HALO_CHAT_STATUS_TEAMS) ? "Say to your team" : "Say to everyone",
+				"", HALO_CHAT_TEXT_LENGTH, 0) == 0)
+			{
+				chat_typing = 1;
+				vgxm_menu_set(NULL, 0);
+			}
+		}
+		else if (chat_selected == CHAT_ROW_MUTE)
+		{
+			screen = SCREEN_CHAT_MUTE;
+			chat_mute_selected = chat_mute_scroll = 0;
+		}
+	}
+}
+
+static void chat_mute_input(unsigned long pressed)
+{
+	int count = chat_player_count();
+
+	if (pressed & VITA_BUTTON_CIRCLE)
+	{
+		screen = SCREEN_CHAT;
+		return;
+	}
+	if ((pressed & VITA_BUTTON_UP) && count)
+		chat_mute_selected = (chat_mute_selected + count - 1) % count;
+	else if ((pressed & VITA_BUTTON_DOWN) && count)
+		chat_mute_selected = (chat_mute_selected + 1) % count;
+	else if ((pressed & VITA_BUTTON_CROSS) && chat_mute_selected < count)
+		chat_request(halo_chat_player_muted[chat_mute_selected] ? HALO_CHAT_REQUEST_UNMUTE : HALO_CHAT_REQUEST_MUTE, 0,
+			halo_chat_player_names[chat_mute_selected]);
+}
+
+/* (the panel closed) Back and Y, or a direction of the D-pad: the menu
+opens, or a phrase goes at once; nonzero if so (the game then has none of
+this frame's buttons) */
+static int chat_combo(unsigned long buttons, unsigned long pressed)
+{
+	static const unsigned long directions[4] = { VITA_BUTTON_UP, VITA_BUTTON_DOWN, VITA_BUTTON_LEFT, VITA_BUTTON_RIGHT };
+	int index;
+
+	if (!chat_available() || !(buttons & VITA_BUTTON_SELECT) || (buttons & VITA_BUTTON_START))
+		return 0;
+	if (pressed & VITA_BUTTON_TRIANGLE)
+	{
+		chat_back = CHAT_BACK_USED;
+		chat_open();
+		return 1;
+	}
+	for (index = 0; index < 4; index++)
+		if (pressed & directions[index])
+		{
+			chat_back = CHAT_BACK_USED;
+			chat_request(HALO_CHAT_REQUEST_QUICK, chat_dpad_phrases[index], NULL);
+			return 1;
+		}
+	return 0;
+}
+
+unsigned long vita_settings_game_buttons(unsigned long buttons, int menus)
+{
+	if (!chat_available())
+	{
+		chat_back = CHAT_BACK_IDLE;
+		chat_back_tap = 0;
+		return buttons;
+	}
+	if (buttons & VITA_BUTTON_SELECT)
+	{
+		/* (while Back is held, the D-pad and Y are chat's) */
+		buttons &= ~(VITA_BUTTON_UP | VITA_BUTTON_DOWN | VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_TRIANGLE);
+		if (chat_back == CHAT_BACK_IDLE)
+		{
+			chat_back = menus ? CHAT_BACK_WAITING : CHAT_BACK_PASSING;
+			chat_back_since = now_us();
+		}
+		if (chat_back == CHAT_BACK_WAITING && now_us() - chat_back_since > CHAT_BACK_WAIT_US)
+			chat_back = CHAT_BACK_PASSING;
+		/* (in play Back stays the scoreboard; in the menus a Back that
+		was part of the combo is never the game's) */
+		if (chat_back == CHAT_BACK_WAITING || (chat_back == CHAT_BACK_USED && menus))
+			buttons &= ~VITA_BUTTON_SELECT;
+	}
+	else
+	{
+		/* (a short press of Back in the menus, which waited: the game has
+		it now, for a few frames) */
+		if (chat_back == CHAT_BACK_WAITING)
+			chat_back_tap = 3;
+		chat_back = CHAT_BACK_IDLE;
+	}
+	if (chat_back_tap > 0)
+	{
+		chat_back_tap--;
+		buttons |= VITA_BUTTON_SELECT;
+	}
+	return buttons;
+}
+
 /* to the next tab shown, or the one before */
 static void tab_step(int step)
 {
@@ -3228,6 +3602,11 @@ int vita_settings_input(const struct vita_host_pad *pad)
 
 	previous_buttons = buttons;
 	held_after_close &= buttons;
+	/* (game chat's Back let go, while the panel had the buttons too: the
+	next press of Back is a new one; one that waited keeps waiting for
+	vita_settings_game_buttons to hand it to the game) */
+	if (!(buttons & VITA_BUTTON_SELECT) && chat_back != CHAT_BACK_WAITING)
+		chat_back = CHAT_BACK_IDLE;
 	if (held_after_close && !panel_open)
 		return 1;
 	/* (the system's ad hoc dialog reads the pad itself: the game must not
@@ -3295,8 +3674,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
         both_since = 0;
         return 1;
     }
+	/* (Back and Y, or the D-pad: game chat) */
+	if (!panel_open && chat_combo(buttons, pressed))
+		return 1;
 	if (both)
 	{
+		/* (a Back that waited for game chat's combo was this one's) */
+		chat_back = CHAT_BACK_USED;
 		if (!both_since)
 			both_since = now;
 		/* held for 0.8 s: the panel opens or closes, once per hold */
@@ -3344,6 +3728,21 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	{
 		delete_input(pressed);
 		if (pressed)
+			show();
+		return 1;
+	}
+	if (screen == SCREEN_CHAT || screen == SCREEN_CHAT_MUTE)
+	{
+		/* (closed when the game is left, or chat turned Off) */
+		if (!chat_available())
+			close_panel();
+		else if (screen == SCREEN_CHAT)
+			chat_input(pressed, buttons, now);
+		else
+			chat_mute_input(pressed);
+		/* (redrawn twice a second: the players, the wait; not over the
+		keyboard) */
+		if (panel_open && !chat_typing && (pressed || now - last_shown > 500000))
 			show();
 		return 1;
 	}

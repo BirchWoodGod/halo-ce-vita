@@ -104,6 +104,9 @@ symbols in this file:
 #include "text/draw_string.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "chat.h"
+#endif
 
 /* ---------- constants */
 
@@ -474,6 +477,11 @@ void interface_draw_fullscreen_overlays(
 	interface_splitscreen_render();
 	hud_render_timer();
 	terminal_draw();
+#ifdef HALO_LINUX
+	/* port: game chat's lines (port/linux/game/chat.c), the lobby's and the
+	game's */
+	chat_draw();
+#endif
 	main_framerate_render();
 	render_debug_profile();
 

@@ -61,6 +61,12 @@ enum network_game_message_type
 	_message_client_map_download,
 	_message_server_map_download_answer,
 	_message_server_map_download_data,
+	/* port: game chat (port/linux/game/chat.c), in the lobby and in game: a
+	player's quick chat phrase or typed line to the host, and the host's
+	relay of it, named from the connection it came over (network version
+	19) */
+	_message_client_chat,
+	_message_server_chat,
 	NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 };
 

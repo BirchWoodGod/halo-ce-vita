@@ -183,11 +183,48 @@ reliably, an object come to rest sent three times, the AI units' shader
 permutation in the object creation message, only the host's crossing of a
 co-op loading zone switching the BSP (from upstream's versions 18 and 21,
 whose numbers mean nothing here), the server browser's signed and
-password-protected listings. This tree has
-version 18 and joins only hosts of its own version.
+password-protected listings (the internet play relays changed none of
+the game's messages: their JOIN block is read by hosts of before them, so
+they came in at 18). Version 19 is Halo CE for PS Vita 1.1.1's: game
+chat's two messages (below), which a 1.1.0 host would take for messages it
+does not know. This tree has version 19 and joins only hosts of its own
+version; a 1.1.0 Vita and a 1.1.1 one refuse each other's games, as any
+two versions do.
 Its Vitas (and its Linux build standing in for one) play only Vitas
 (`HALO_PORT_ADVERTISED_VITA_FLAG`), so an upstream build of the same number
 is refused all the same.
+
+## Game chat
+
+Game chat (`port/linux/game/chat.c`, its rules `chat_protocol.c`: from
+OpenCE PR #72, "Text chat in games", smokeyllama) travels as two of the
+game's own messages, over a joiner's connection to its host in the lobby,
+the game and its scores: `_message_client_chat`, a player's quick chat
+phrase (its number) or typed line (80 characters at most), to the host,
+naming nobody; and `_message_server_chat`, the host's relay of it. The host
+takes a line only from a joined machine's connection and names its sender
+itself, from that machine's own players in its record of the game, so a
+joiner cannot speak as another; it checks the line (printable ASCII, the
+game's text codes and control characters out, no link), drops a machine's
+lines past three at once and one every two seconds, and its own relaying
+past twelve at once and four a second, and passes it on to every joined
+machine (its own local one included), or, team chat in a game with teams,
+to those with a player of the sender's team. Every machine checks the
+host's line again (a host is a stranger too), shows no more than the
+host's own limit, and drops what its player muted or turned off (Game chat:
+Quick chat only shows the phrases alone, by this machine's own text).
+Names are shown as the host keeps them apart (a name the same as another's
+is numbered by the host, its accented letters read as plain ones), so two
+players never show as one.
+
+The host's Game chat is its game's: Off, it passes on no one's lines;
+Quick chat only, no typed ones; either way the sender gets a notice, a
+`_message_server_chat` of its own kind to that machine alone carrying only
+the notice's number. A player muted on the host is muted for the game:
+the host passes on none of their lines. A mute holds until Halo is
+closed, by the player's machine and controller in the game's record (a new
+name does not shake it off) and by name (leaving and joining again does
+not either).
 
 A client plays by its host's rules: in another's game (searching for it,
 in its lobby, or playing it) the developer console, the telnet console

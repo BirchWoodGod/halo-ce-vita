@@ -68,7 +68,7 @@ static long const fuzz_structure_sizes[NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES] =
 	sizeof(message_server_graceful_game_exit_postgame), sizeof(message_client_remove_player_request_postgame),
 	sizeof(message_client_switch_to_pregame), sizeof(message_client_graceful_game_exit_postgame),
 	sizeof(message_client_map_download), sizeof(message_server_map_download_answer),
-	sizeof(message_server_map_download_data),
+	sizeof(message_server_map_download_data), sizeof(message_client_chat), sizeof(message_server_chat),
 };
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)

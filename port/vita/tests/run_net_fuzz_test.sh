@@ -8,6 +8,8 @@
 #   messages   the game's message decoder (source/networking/
 #              network_messages.c, source/memory/data_packet*.c)
 #   map_share  map sharing's message rules (port/linux/game/map_share_protocol.c)
+#   chat       game chat's rules: a joiner's request, a host's relay, their
+#              text and names, links, flood limits (port/linux/game/chat_protocol.c)
 # Each is built 32-bit as the game is, with AddressSanitizer and UBSan, and
 # runs its checks and the cases kept in net_fuzz_cases/<target> (inputs that
 # found bugs, and seeds); any out-of-bounds access, overflow or failed
@@ -16,7 +18,7 @@
 #                        (clang's i386 runtime, its COMDAT groups taken out
 #                        when it does not link as it is); what it finds goes
 #                        to NET_FUZZ_OUT (default a folder under TMPDIR)
-#   NET_FUZZ_TARGETS     the targets (default all four)
+#   NET_FUZZ_TARGETS     the targets (default all five)
 # Needs the Linux build configured in this tree (build.ninja: its compiler and
 # the game's flags; build/linux/halo_msvc_semantics.h) and clang that targets
 # i686 (CLANG, default the Linux build's compiler).
@@ -26,7 +28,7 @@ root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/net_fuzz_test.$$
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
-targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share"}
+targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share chat"}
 seconds=${NET_FUZZ_SECONDS:-0}
 mkdir -p "$out"
 cd "$root"
@@ -75,6 +77,7 @@ for target in $targets; do
 	p2p) flags=$platform_flags; sources="port/vita/tests/net_fuzz_p2p.c port/third_party/kcp/ikcp.c $monocypher" ;;
 	signal) flags=$platform_flags; sources="port/vita/tests/net_fuzz_signal.c $monocypher" ;;
 	map_share) flags=$platform_flags; sources="port/vita/tests/net_fuzz_map_share.c port/linux/src/p2p_crypto.c $monocypher" ;;
+	chat) flags=$platform_flags; sources="port/vita/tests/net_fuzz_chat.c" ;;
 	messages) flags=$game_flags; sources="port/vita/tests/net_fuzz_messages.c source/memory/data_packet_groups.c
 		source/memory/data_packets.c source/memory/data_encoding.c source/memory/byte_swapping.c
 		source/bungie_net/common/message_header.c" ;;

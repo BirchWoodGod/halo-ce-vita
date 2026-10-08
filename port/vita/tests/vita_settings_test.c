@@ -24,7 +24,10 @@ settings with the gyroscope's line, saved and read back), Button icons
 (PlayStation at once, the panel then naming the Xbox buttons by what they
 do and the guide the Vita's buttons, a remap followed by the game's icon,
 kept by Reset controls), every settings
-variable of 1.0.3 still a row, and a settings.txt of 1.0 loading. It runs
+variable of 1.0.3 still a row, a settings.txt of 1.0 loading, and game
+chat's menu (its Game chat row; Back + Y and Back + the D-pad in play and in
+a lobby, Back held back from a lobby until the combo is known; the phrases,
+typing, To, Mute players, Quick chat only, the game left). It runs
 in a folder of its own, with ux0:data/haloce-vita made there.
 
 Run port/vita/tests/run_vita_settings_test.sh.
@@ -48,6 +51,14 @@ char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 int halo_text_input_maximum;
 int halo_text_input_password;
+/* (game chat's side: port/linux/game/chat.c) */
+volatile int halo_chat_status[HALO_CHAT_STATUS_COUNT];
+char halo_chat_player_names[HALO_CHAT_PLAYERS][HALO_CHAT_NAME_SIZE];
+volatile int halo_chat_player_muted[HALO_CHAT_PLAYERS];
+volatile int halo_chat_request;
+volatile int halo_chat_request_value;
+volatile int halo_chat_request_team;
+char halo_chat_request_text[HALO_CHAT_TEXT_SIZE];
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
 /* (the map in play: never deleted) */
@@ -823,8 +834,9 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps") && strstr(menu, "< Online"),
-		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat") && strstr(menu, "< Online") &&
+		strstr(menu, "\nGame chat\x02  On >"),
+		"Multiplayer: Connection, Join with a code (Online), Modded maps, Game chat (On); no Play page (no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
 		!strstr(menu, "Games on this network") && !strstr(menu, "Host co-op campaign"),
@@ -832,7 +844,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
-	check(menu_rows() == 3 && menu_fits(), "Multiplayer: three rows, 46 characters a line");
+	check(menu_rows() == 4 && menu_fits(), "Multiplayer: four rows, 46 characters a line");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
 
@@ -841,13 +853,13 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Modded maps") && !strstr(menu, "Online menus"),
+	check(!strcmp(labels, "Connection*|Modded maps|Game chat") && !strstr(menu, "Online menus"),
 		"the PC menus in the game: Connection and Modded maps only");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
@@ -957,7 +969,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_UP);
 	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Modded maps"),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Modded maps|Game chat"),
 		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
 	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
@@ -973,7 +985,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps") && menu_fits(),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps|Game chat") && menu_fits(),
 		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
 	clock_us += 5000000;
 	to_line("Ad hoc room");
@@ -1005,7 +1017,8 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Modded maps") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
+	check(!strcmp(labels, "Connection*|Modded maps|Game chat") && menu_fits(),
+		"Same Wi-Fi: Connection, Modded maps, Game chat");
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -1021,7 +1034,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -1056,7 +1069,8 @@ static void test_online_rows(void)
 with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
-players, Visibility, Fourth core helpers; the Play page's two texts) */
+players, Visibility, Fourth core helpers, Game chat; the Play page's two
+texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1076,7 +1090,7 @@ static void test_variables_kept(void)
 		"HALO_BUTTON_ICONS", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
-		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION",
+		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_CHAT",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1365,6 +1379,240 @@ static void test_button_icons(void)
 	(void)line;
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
+}
+
+
+/* ---------- game chat's menu */
+
+/* one frame as the platform layer has it (vita_pad.c): the panel's, else
+the buttons the game has; the game's in *game */
+static int chat_frame(unsigned long buttons, int menus, unsigned long *game)
+{
+	int taken = frame(buttons);
+
+	*game = taken ? 0 : vita_settings_game_buttons(buttons, menus);
+	return taken;
+}
+
+/* the game takes the menu's request (chat.c's chat_update) */
+static int chat_taken(int *request, int *value, int *team, char *text, int size)
+{
+	*request = halo_chat_request;
+	*value = halo_chat_request_value;
+	*team = halo_chat_request_team;
+	snprintf(text, (size_t)size, "%s", halo_chat_request_text);
+	halo_chat_request = HALO_CHAT_REQUEST_NONE;
+	return *request;
+}
+
+static void test_game_chat(void)
+{
+	unsigned long game;
+	int request, value, team, index, opens;
+	char text[HALO_CHAT_TEXT_SIZE], line[128];
+
+	/* the Game chat row: On, Quick chat only, Off */
+	open_panel();
+	check(to_tab("Multiplayer") && to_line("Game chat") && strstr(menu, "\n\x05" "Back + Y in a lobby or game: phrases, typing\n"),
+		"Game chat: On by default, its help names Back + Y");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CHAT"), "quick") && strstr(menu, "Game chat\x02< Quick chat only >") &&
+		strstr(menu, "\n\x05Phrases only, for all in the games you host\n") && menu_fits(),
+		"Game chat: Quick chat only (a host's for its game)");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CHAT"), "off") && strstr(file_text("ux0:data/haloce-vita/settings.txt"), "HALO_CHAT") &&
+		strstr(menu, "\n\x05No chat, and none in the games you host\n") && menu_fits(),
+		"Game chat: Off, saved (a host's for its game)");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CHAT"), "on"), "Game chat: On again");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible, "the panel closed");
+
+	/* no chat (Off, or no network game): Back + Y is the game's */
+	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 0;
+	check(chat_frame(VITA_BUTTON_SELECT, 0, &game) == 0 && game == VITA_BUTTON_SELECT, "no chat: Back is the game's");
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 0, &game) == 0 &&
+		game == (VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE) && !menu_visible && !halo_chat_request,
+		"no chat: Back + Y is the game's, no menu");
+	chat_frame(0, 0, &game);
+
+	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 1;
+	halo_chat_status[HALO_CHAT_STATUS_MODE] = HALO_CHAT_MODE_ON;
+	halo_chat_status[HALO_CHAT_STATUS_TEAMS] = 0;
+	halo_chat_status[HALO_CHAT_STATUS_PLAYERS] = 2;
+	snprintf(halo_chat_player_names[0], HALO_CHAT_NAME_SIZE, "alpha");
+	snprintf(halo_chat_player_names[1], HALO_CHAT_NAME_SIZE, "bravo");
+
+	/* in play: Back is the scoreboard at once; with it held the D-pad and Y
+	are chat's, and Back + up sends Enemy spotted */
+	check(chat_frame(VITA_BUTTON_SELECT, 0, &game) == 0 && game == VITA_BUTTON_SELECT, "in play: Back at once");
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_UP, 0, &game) == 1 && halo_chat_request == HALO_CHAT_REQUEST_QUICK &&
+		halo_chat_request_value == 1 && !menu_visible, "Back + up: Enemy spotted, at once, no menu");
+	chat_taken(&request, &value, &team, text, sizeof(text));
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_UP, 0, &game) == 0 && game == VITA_BUTTON_SELECT,
+		"... while they are held the game has Back (the scoreboard), not the D-pad");
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT, 0, &game) == 1 && halo_chat_request_value == 2,
+		"Back + left: Follow me");
+	chat_taken(&request, &value, &team, text, sizeof(text));
+	chat_frame(0, 0, &game);
+	check(chat_frame(VITA_BUTTON_LEFT, 0, &game) == 0 && game == VITA_BUTTON_LEFT, "the D-pad alone is the game's");
+	chat_frame(0, 0, &game);
+
+	/* Back + Y: the menu */
+	chat_frame(VITA_BUTTON_SELECT, 0, &game);
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 0, &game) == 1 && menu_visible &&
+		!strncmp(menu, "GAME CHAT\nNeed backup\nEnemy spotted\nFollow me\nOn my way\nThanks\nGood game\nYes\nNo\n"
+		"Type a message...\nMute players  >\n", 113) && !strstr(menu, "To:") && menu_selected == 1,
+		"Back + Y: the menu, its phrases, Type a message and Mute players (no To: no teams)");
+	printf("%s\n--\n", menu);
+	check(menu_fits() && strstr(menu, "\nBack + D-pad: a phrase at once\nA: send   B: close"),
+		"the menu: 46 characters a line, the buttons as the Xbox's");
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 0, &game) == 1 && chat_frame(0, 0, &game) == 1,
+		"while it is open the game has no buttons");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_DOWN);
+	check(!strcmp(menu_line(menu_selected, line, sizeof(line)), "Follow me"), "down: Follow me");
+	frame(VITA_BUTTON_CROSS);
+	check(chat_taken(&request, &value, &team, text, sizeof(text)) == HALO_CHAT_REQUEST_QUICK && value == 2 && !team &&
+		!menu_visible, "A: Follow me sent, the menu closed");
+	check(chat_frame(VITA_BUTTON_CROSS, 0, &game) == 1 && chat_frame(0, 0, &game) == 0,
+		"the A that sent it is not the game's");
+
+	/* typing */
+	opens = ime_opens;
+	chat_frame(VITA_BUTTON_SELECT, 0, &game);
+	chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 0, &game);
+	chat_frame(0, 0, &game);
+	for (index = 0; index < 8; index++)
+		press(VITA_BUTTON_DOWN);
+	check(!strcmp(menu_line(menu_selected, line, sizeof(line)), "Type a message..."), "down to Type a message");
+	press(VITA_BUTTON_CROSS);
+	check(ime_opens == opens + 1 && ime_open_now && !strcmp(ime_title, "Say to everyone") && ime_maximum == 80 &&
+		!ime_password && !menu_visible, "A: the keyboard, 80 characters, the menu hidden");
+	check(frame(VITA_BUTTON_CROSS) == 1, "the game has no buttons while it is up");
+	ime_result = -1;
+	frame(0);
+	check(menu_visible && strstr(menu, "GAME CHAT") && !halo_chat_request, "cancelled: the menu is back, nothing sent");
+	press(VITA_BUTTON_CROSS);
+	snprintf(ime_typed, sizeof(ime_typed), "hello there");
+	ime_result = 1;
+	frame(0);
+	check(chat_taken(&request, &value, &team, text, sizeof(text)) == HALO_CHAT_REQUEST_TYPED && !strcmp(text, "hello there") &&
+		!menu_visible, "typed: the line goes to the game, the menu closed");
+	frame(0);
+
+	/* Quick chat only: no typing */
+	halo_chat_status[HALO_CHAT_STATUS_MODE] = HALO_CHAT_MODE_QUICK;
+	chat_frame(VITA_BUTTON_SELECT, 0, &game);
+	chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 0, &game);
+	chat_frame(0, 0, &game);
+	check(menu_visible && !strstr(menu, "Type a message"), "Quick chat only: no Type a message");
+	press(VITA_BUTTON_CIRCLE);
+	check(!menu_visible, "B closes it");
+	frame(0);
+	halo_chat_status[HALO_CHAT_STATUS_MODE] = HALO_CHAT_MODE_ON;
+
+	/* a game with teams: To */
+	halo_chat_status[HALO_CHAT_STATUS_TEAMS] = 1;
+	chat_frame(VITA_BUTTON_SELECT, 0, &game);
+	chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 0, &game);
+	chat_frame(0, 0, &game);
+	check(strstr(menu, "\nTo:   All >\n") && strstr(menu, "Left/right: To") && menu_fits(), "teams: To: All");
+	for (index = 0; index < 9; index++)
+		press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nTo: < Team  \n") && strstr(menu, "(team)"), "right: To: Team");
+	for (index = 0; index < 9; index++)
+		press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_CROSS);
+	check(chat_taken(&request, &value, &team, text, sizeof(text)) == HALO_CHAT_REQUEST_QUICK && value == 0 && team,
+		"Need backup, to the team");
+	frame(0);
+	check(chat_frame(VITA_BUTTON_SELECT, 0, &game) == 0 && chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN, 0, &game) == 1 &&
+		halo_chat_request_team, "Back + down: to the team too, as the menu has it");
+	chat_taken(&request, &value, &team, text, sizeof(text));
+	chat_frame(0, 0, &game);
+	halo_chat_status[HALO_CHAT_STATUS_TEAMS] = 0;
+
+	/* muting */
+	chat_frame(VITA_BUTTON_SELECT, 0, &game);
+	chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 0, &game);
+	chat_frame(0, 0, &game);
+	for (index = 0; index < 9; index++)
+		press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(!strncmp(menu, "MUTE PLAYERS\nalpha           -\nbravo           -\n", 46) && menu_selected == 1 && menu_fits() &&
+		strstr(menu, "\nA muted player's lines are not shown\n"), "Mute players: the others, none muted");
+	/* (on the host: muted for everyone) */
+	halo_chat_status[HALO_CHAT_STATUS_HOST] = 1;
+	clock_us += 600000;
+	frame(0);
+	check(strstr(menu, "\nYou host: muted for everyone in your game\n") && menu_fits(),
+		"Mute players on the host: muted for everyone in its game");
+	halo_chat_status[HALO_CHAT_STATUS_HOST] = 0;
+	clock_us += 600000;
+	frame(0);
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_CROSS);
+	check(chat_taken(&request, &value, &team, text, sizeof(text)) == HALO_CHAT_REQUEST_MUTE && !strcmp(text, "bravo") &&
+		menu_visible, "A: bravo muted (the page stays)");
+	halo_chat_player_muted[1] = 1;
+	clock_us += 600000;
+	frame(0);
+	check(strstr(menu, "\nbravo           Muted\n") != NULL, "... shown muted");
+	press(VITA_BUTTON_CROSS);
+	check(chat_taken(&request, &value, &team, text, sizeof(text)) == HALO_CHAT_REQUEST_UNMUTE && !strcmp(text, "bravo"),
+		"A again: heard again");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "GAME CHAT") && strstr(menu, "Mute players  (1 muted)  >"), "B: back to the menu, 1 muted");
+	halo_chat_player_muted[1] = 0;
+	halo_chat_status[HALO_CHAT_STATUS_PLAYERS] = 0;
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "No other players in the game yet") != NULL, "no others: the page says so");
+	press(VITA_BUTTON_CIRCLE);
+
+	/* the game left: the menu closes */
+	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 0;
+	frame(0);
+	check(!menu_visible && frame(0) == 0, "the game left: the menu closed, the game has the pad");
+	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 1;
+
+	/* in the menus (a lobby): Back waits for the rest of the combo */
+	check(chat_frame(VITA_BUTTON_SELECT, 1, &game) == 0 && game == 0, "lobby: Back waits");
+	check(chat_frame(0, 1, &game) == 0 && game == VITA_BUTTON_SELECT, "... let go: the game has it");
+	check(chat_frame(0, 1, &game) == 0 && game == VITA_BUTTON_SELECT && chat_frame(0, 1, &game) == 0 &&
+		game == VITA_BUTTON_SELECT && chat_frame(0, 1, &game) == 0 && game == 0, "... for three frames");
+	chat_frame(VITA_BUTTON_SELECT, 1, &game);
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_TRIANGLE, 1, &game) == 1 && menu_visible, "lobby: Back + Y opens the menu");
+	check(chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_CIRCLE, 1, &game) == 1 && !menu_visible, "B closes it, Back still held");
+	check(chat_frame(VITA_BUTTON_SELECT, 1, &game) == 1, "... Back still held after it: not the game's");
+	check(chat_frame(0, 1, &game) == 0 && game == 0 && chat_frame(0, 1, &game) == 0 && game == 0,
+		"... nor when let go (the combo was used)");
+	check(chat_frame(VITA_BUTTON_SELECT, 1, &game) == 0 && game == 0 && chat_frame(0, 1, &game) == 0 &&
+		game == VITA_BUTTON_SELECT, "a new press of Back: the game has it once let go");
+	chat_frame(0, 1, &game);
+	chat_frame(0, 1, &game);
+	chat_frame(0, 1, &game);
+	for (index = 0; index < 30; index++)
+		chat_frame(VITA_BUTTON_SELECT, 1, &game);
+	check(game == VITA_BUTTON_SELECT, "lobby: Back held a while is the game's");
+	chat_frame(0, 1, &game);
+	check(game == 0, "... and let go, no extra press");
+	/* (Back, then Start: the settings panel's, not the lobby's) */
+	chat_frame(VITA_BUTTON_SELECT, 1, &game);
+	for (index = 0; index < 60; index++)
+		chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_START, 1, &game);
+	check(menu_visible && !strstr(menu, "GAME CHAT"), "lobby: Back then Start held: the settings panel");
+	chat_frame(0, 1, &game);
+	for (index = 0; index < 60; index++)
+		chat_frame(VITA_BUTTON_SELECT | VITA_BUTTON_START, 1, &game);
+	check(!menu_visible, "... held again: closed");
+	chat_frame(0, 1, &game);
+	check(chat_frame(0, 1, &game) == 0 && game == 0, "... and the lobby never had Back");
+	halo_chat_status[HALO_CHAT_STATUS_AVAILABLE] = 0;
 }
 
 int main(void)
@@ -1862,6 +2110,7 @@ int main(void)
 	test_gyro_page();
 	test_button_icons();
 	test_game_text_input();
+	test_game_chat();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }
