@@ -159,6 +159,9 @@ static struct
 	char code[P2P_CODE_SIZE];
 	char lobby_id[P2P_LOBBY_ID_SIZE];
 	char lobby_password[P2P_LOBBY_PASSWORD_SIZE];
+	/* join-public: only the game listed with this name (debug.network_test_public_name;
+	empty: the first) */
+	char lobby_name[64];
 	boolean lobby_join_asked, lobby_locked;
 	real browse_seconds;
 	/* debug.network_test_rejoin: a joining machine leaves the game that many
@@ -273,6 +276,8 @@ static void network_test_read_settings(
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
 	network_test.rejoin_time = (real)config_real("debug.network_test_rejoin");
 	network_test.retries = (long)config_integer("debug.network_test_retry");
+	snprintf(network_test.lobby_name, sizeof(network_test.lobby_name), "%s",
+		config_string("debug.network_test_public_name"));
 	if (network_test.mode != _network_test_off)
 		platform_log("network test: %s", setting);
 }
@@ -1248,7 +1253,8 @@ void network_test_update(
 				p2p_lobby_browse(TRUE);
 				for (index = 0; !network_test.lobby_id[0] && p2p_lobby_entry(index, &entry); index++)
 				{
-					if (entry.compatible && !entry.own)
+					if (entry.compatible && !entry.own &&
+						(!network_test.lobby_name[0] || !strcmp(entry.name, network_test.lobby_name)))
 					{
 						platform_log("network test: the public games list \"%s\"%s%s: %s; %s", entry.name,
 							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "", entry.rules,
