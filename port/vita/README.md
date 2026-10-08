@@ -385,8 +385,14 @@ The settings panel's **Multiplayer** tab:
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many
 players are in of the most it takes, in a lobby, in a game), with Online
-or Ad hoc your code or the ad hoc group, and without the Halo PC files
-"Online menus need bitmaps.map, loc.map: README".
+or Ad hoc your code or the ad hoc group, and, when the game's menus are
+the Xbox's, why: "Online menus: bitmaps.map not found in
+ux0:data/haloce-vita/maps" (or loc.map; the folder the game looked in),
+"bitmaps.map in ... can't be read (Halo Custom Edition's is needed)" (MCC's
+`halo1/maps` files, not `custom_edition`'s, for example), "the menus folder
+is missing from the install (reinstall the VPK)", "this ui.map has no Xbox
+multiplayer screen (a different Halo release?)" or "off (HALO_MENUS=xbox)".
+halo.log has the same reason on a "menus:" line.
 
 The ad hoc dialog's mode (Connect, Create or Join) is a Dev switch.
 

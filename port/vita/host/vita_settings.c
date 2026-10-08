@@ -80,8 +80,9 @@ hosting online, the game's short code (ABCD-EFGH) for others to type in.
 Hosting, joining and co-op are the game's own Multiplayer menu's: with Halo
 PC's bitmaps.map and loc.map in the maps folder, OpenCE's screens (server
 browser, Server Setup, Direct Link: port/linux/game/menu_functions.c), else
-the Xbox's (System Link, where Y creates a game); then a line says "Online
-menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
+the Xbox's (System Link, where Y creates a game); then a line says why
+(halo_pc_menus_state, halo_pc_menus_reason: "Online menus: loc.map not
+found in ux0:data/haloce-vita/maps", the install's menus folder missing, ...).
 
 - "Connection" (after a restart) chooses how the Vitas reach each other:
   Same Wi-Fi, the default, the system link that works on hardware; Ad hoc
@@ -2266,6 +2267,46 @@ a page's title ('\x03') under it, a row per line (its label, '\x02', its
 value: the values make a column), the lines that are not rows ('\x04': the
 game's state, the gyroscope's), an empty line for a gap, then the chosen
 row's help ('\x05') and the panel's buttons ('\x06') at the bottom */
+static size_t format_box(char *formatted, size_t size, const char *title, const char *text, const char *footer);
+
+/* why the game's Multiplayer menu has not got OpenCE's screens
+(halo_pc_menus_reason, menu_tags.c), in the player's language */
+static void pc_menus_reason_text(char *out, size_t size)
+{
+    const char *file = "bitmaps.map";
+    switch (halo_pc_menus_reason)
+    {
+    case HALO_PC_MENUS_REASON_OFF:
+        snprintf(out, size, "%s", T("Online menus: off (HALO_MENUS=xbox)"));
+        break;
+    case HALO_PC_MENUS_REASON_NO_LOC:
+        file = "loc.map";
+        /* fall through */
+    case HALO_PC_MENUS_REASON_NO_BITMAPS:
+        snprintf(out, size, T("Online menus: %s not found in %s"), file, halo_pc_menus_folder);
+        break;
+    case HALO_PC_MENUS_REASON_NO_MENUS:
+        snprintf(out, size, "%s", T("Online menus: the menus folder is missing from the install (reinstall the VPK)"));
+        break;
+    case HALO_PC_MENUS_REASON_NO_XBOX_SCREEN:
+        snprintf(out, size, "%s", T("Online menus: this ui.map has no Xbox multiplayer screen (a different Halo release?)"));
+        break;
+    case HALO_PC_MENUS_REASON_BAD_LOC:
+        file = "loc.map";
+        /* fall through */
+    case HALO_PC_MENUS_REASON_BAD_BITMAPS:
+        snprintf(out, size, T("Online menus: %s in %s can't be read (Halo Custom Edition's is needed)"), file,
+            halo_pc_menus_folder);
+        break;
+    case HALO_PC_MENUS_REASON_FAILED:
+        snprintf(out, size, "%s", T("Online menus: couldn't be added (see halo.log)"));
+        break;
+    default:
+        snprintf(out, size, "%s", T("Online menus need bitmaps.map, loc.map: README"));
+        break;
+    }
+}
+
 static void show_list(void)
 {
 	char text[3072];
@@ -2384,10 +2425,27 @@ static void show_list(void)
 		{
 			vita_line(status, sizeof(status));
 			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
-			/* (the game's Multiplayer menu without OpenCE's screens) */
+			/* (the game's Multiplayer menu without OpenCE's screens: why,
+			in lines of the panel's 46 characters) */
 			if (halo_pc_menus_state < 0 && length < (int)sizeof(text))
-				length += snprintf(text + length, sizeof(text) - length, "\n\x04%s",
-					T("Online menus need bitmaps.map, loc.map: README"));
+			{
+				char reason[320], wrapped[400];
+				const char *line;
+
+				pc_menus_reason_text(reason, sizeof(reason));
+				format_box(wrapped, sizeof(wrapped), "", reason, "");
+				/* (format_box puts its title's gap first) */
+				for (line = wrapped + strspn(wrapped, "\n"); *line && length < (int)sizeof(text); )
+				{
+					int bytes = (int)strcspn(line, "\n"), shown = bytes;
+
+					/* (not the space a line was broken at) */
+					while (shown && line[shown - 1] == ' ')
+						shown--;
+					length += snprintf(text + length, sizeof(text) - length, "\n\x04%.*s", shown, line);
+					line += bytes + (line[bytes] == '\n');
+				}
+			}
 		}
 		game_line(status, sizeof(status));
 		if (length < (int)sizeof(text))

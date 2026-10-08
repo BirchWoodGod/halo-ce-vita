@@ -109,6 +109,25 @@ extern int halo_text_input_password;
 set as ui.map loads): 1 yes (Halo PC's bitmaps.map and loc.map are there),
 -1 no (the Xbox's), 0 not known yet */
 extern volatile int halo_pc_menus_state;
+/* and with -1, why not (menu_tags.c, said in halo.log with "menus:"): the
+settings panel's line names it, since "they need bitmaps.map and loc.map"
+alone misled a player who had both */
+enum halo_pc_menus_reason
+{
+	HALO_PC_MENUS_REASON_UNKNOWN,
+	HALO_PC_MENUS_REASON_OFF, /* HALO_MENUS=xbox */
+	HALO_PC_MENUS_REASON_NO_BITMAPS, /* no bitmaps.map in the maps folder */
+	HALO_PC_MENUS_REASON_NO_LOC, /* no loc.map */
+	HALO_PC_MENUS_REASON_NO_MENUS, /* the install's menus folder (app0:menus) missing or damaged */
+	HALO_PC_MENUS_REASON_NO_XBOX_SCREEN, /* ui.map has no Xbox Multiplayer screen to replace */
+	HALO_PC_MENUS_REASON_BAD_BITMAPS, /* bitmaps.map there but not read (not Custom Edition's?) */
+	HALO_PC_MENUS_REASON_BAD_LOC, /* loc.map the same */
+	HALO_PC_MENUS_REASON_FAILED /* anything else (memory, a PNG): halo.log says */
+};
+extern volatile int halo_pc_menus_reason;
+/* the maps folder looked in, as the player finds it
+(ux0:data/haloce-vita/maps/) */
+extern char halo_pc_menus_folder[128];
 
 extern volatile int halo_system_link_request;
 extern volatile int halo_system_link_answer;

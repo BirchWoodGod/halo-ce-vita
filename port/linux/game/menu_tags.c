@@ -51,6 +51,7 @@ is let go in scenario_tags_unload, before the next map's tags load.
 
 #include "halo_menus.h"
 #include "../src/lang.h"
+#include "../src/system_link_shortcut.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -60,6 +61,7 @@ void platform_log(char const *format, ...);
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
 void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
 unsigned long long vita_host_time_us(void);
+void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
 
 /* cache_files.c's (port) */
 void *cache_files_tag_instances(long *count);
@@ -73,8 +75,8 @@ long menu_tags_screen(long tag_index);
 boolean pc_menu_tag(long tag_index);
 char const *pc_menu_function_name(long function_index);
 char const *pc_menu_game_data_input_name(long function_index);
-/* (system_link_shortcut.c's, for the settings panel) */
-extern volatile int halo_pc_menus_state;
+/* (halo_pc_menus_state, _reason and _folder: system_link_shortcut.c's,
+for the settings panel) */
 /* menu_functions.c's: a screen of the game's that the menus' flows open
 another in place of (ours or the game's), or the tag itself */
 long pc_menu_functions_screen(long tag_index);
@@ -1733,6 +1735,8 @@ static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 	return TRUE;
 }
 
+static void menu_tags_not_added(enum halo_pc_menus_reason reason);
+
 /* the pictures and the text of the player's, and the PNGs: the first time
 the screens open */
 static boolean menu_tags_art_load(void)
@@ -1746,10 +1750,14 @@ static boolean menu_tags_art_load(void)
 	platform_heap_usage(&heap_before, &heap_capacity);
 	platform_contiguous_usage(&window_before, &window_free);
 	if (!menu_resource_open(&bitmaps, "bitmaps", _resource_map_bitmaps, TRUE))
+	{
+		menu_tags_not_added(HALO_PC_MENUS_REASON_BAD_BITMAPS);
 		return FALSE;
+	}
 	if (!menu_resource_open(&locale, "loc", _resource_map_locale, TRUE))
 	{
 		menu_resource_close(&bitmaps, TRUE);
+		menu_tags_not_added(HALO_PC_MENUS_REASON_BAD_LOC);
 		return FALSE;
 	}
 	for (index = 0; index < menu_tags.bitmap_resource_count && success; index++)
@@ -1769,12 +1777,59 @@ static boolean menu_tags_art_load(void)
 		menu_tags.bitmap_resource_count, menu_tags.string_resource_count, menu_tags.png_frame_count,
 		((long)heap_after - (long)heap_before) / 1024, ((long)window_after - (long)window_before) / 1024,
 		window_free / 1024);
+	if (!success)
+		menu_tags_not_added(HALO_PC_MENUS_REASON_FAILED);
 	return success;
 }
 
+/* why OpenCE's screens are not in the game (the settings panel's line), in
+halo.log too (each reason once in a row: ui.map loads at each main menu) */
+static int menu_tags_reason_logged = -1;
+
+static void menu_tags_not_added(enum halo_pc_menus_reason reason)
+{
+	char const *folder;
+
+	platform_translate_path(cache_files_map_directory(), halo_pc_menus_folder, sizeof(halo_pc_menus_folder));
+	folder = halo_pc_menus_folder;
+	halo_pc_menus_reason = reason;
+	halo_pc_menus_state = -1;
+	if (menu_tags_reason_logged == (int)reason)
+		return;
+	menu_tags_reason_logged = (int)reason;
+	switch (reason)
+	{
+	case HALO_PC_MENUS_REASON_OFF:
+		platform_log("menus: OpenCE's multiplayer screens off (HALO_MENUS=xbox); the game's own");
+		break;
+	case HALO_PC_MENUS_REASON_NO_BITMAPS:
+	case HALO_PC_MENUS_REASON_NO_LOC:
+		platform_log("menus: OpenCE's multiplayer screens not added: %s.map not found in %s; the game's own",
+			reason == HALO_PC_MENUS_REASON_NO_BITMAPS ? "bitmaps" : "loc", folder);
+		break;
+	case HALO_PC_MENUS_REASON_NO_MENUS:
+		platform_log("menus: OpenCE's multiplayer screens not added: the install's menus folder is missing or "
+			"damaged (reinstall the VPK); the game's own");
+		break;
+	case HALO_PC_MENUS_REASON_NO_XBOX_SCREEN:
+		platform_log("menus: OpenCE's multiplayer screens not added: this ui.map has no Xbox Multiplayer screen "
+			"(a different Halo release?); the game's own");
+		break;
+	case HALO_PC_MENUS_REASON_BAD_BITMAPS:
+	case HALO_PC_MENUS_REASON_BAD_LOC:
+		platform_log("menus: OpenCE's multiplayer screens left out: %s.map in %s cannot be read (Halo Custom "
+			"Edition's is needed); the game's own",
+			reason == HALO_PC_MENUS_REASON_BAD_BITMAPS ? "bitmaps" : "loc", folder);
+		break;
+	default:
+		platform_log("menus: OpenCE's multiplayer screens not added (see the lines above); the game's own");
+		break;
+	}
+}
+
 /* whether the maps folder has a bitmaps.map and a loc.map (a quick look:
-no file opened) */
-static boolean menu_resource_files_present(void)
+no file opened); the reason if not */
+static boolean menu_resource_files_present(enum halo_pc_menus_reason *reason)
 {
 	static char const *const names[] = { "bitmaps", "loc" };
 	int index;
@@ -1787,7 +1842,11 @@ static boolean menu_resource_files_present(void)
 		snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), names[index]);
 		attributes = GetFileAttributesA(path);
 		if (attributes == (DWORD)-1 || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+		{
+			if (reason)
+				*reason = index ? HALO_PC_MENUS_REASON_NO_LOC : HALO_PC_MENUS_REASON_NO_BITMAPS;
 			return FALSE;
+		}
 	}
 	return TRUE;
 }
@@ -1800,7 +1859,7 @@ void menu_tags_preload(
 	char const *map_name)
 {
 	if (!strcmp(map_name, "ui") && !(getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox")) &&
-		menu_resource_files_present())
+		menu_resource_files_present(NULL))
 	{
 		halo_menus_preload();
 	}
@@ -1814,6 +1873,7 @@ void menu_tags_loaded(
 	struct halo_menus const *menus;
 	struct cache_file_tag_instance *instances;
 	long widget_count, own_lists = 0, total, index;
+	enum halo_pc_menus_reason reason = HALO_PC_MENUS_REASON_FAILED;
 	unsigned long long started = vita_host_time_us(), checked, read;
 
 	menu_tags.root_tag = menu_tags.xbox_root_tag = NONE;
@@ -1821,16 +1881,26 @@ void menu_tags_loaded(
 		return;
 	/* (until they are added: the Xbox's menus) */
 	halo_pc_menus_state = -1;
+	halo_pc_menus_reason = HALO_PC_MENUS_REASON_UNKNOWN;
 	if (getenv("HALO_MENUS") && !strcmp(getenv("HALO_MENUS"), "xbox"))
+	{
+		menu_tags_not_added(HALO_PC_MENUS_REASON_OFF);
 		return;
+	}
 	/* (the player's Halo PC data: only that the files are there; what they
 	are, when the screens first open) */
-	if (!menu_resource_files_present())
+	if (!menu_resource_files_present(&reason))
+	{
+		menu_tags_not_added(reason);
 		return;
+	}
 	checked = vita_host_time_us();
 	menus = halo_menus_load();
 	if (!menus)
+	{
+		menu_tags_not_added(HALO_PC_MENUS_REASON_NO_MENUS);
 		return;
+	}
 	read = vita_host_time_us();
 	memset(&build, 0, sizeof(build));
 	build.menus = menus;
@@ -1854,6 +1924,7 @@ void menu_tags_loaded(
 	if (menu_tags.xbox_root_tag == NONE || widget_named(menus->root) == NONE)
 	{
 		platform_log("menus: there is no screen %s (the Xbox's, or ours: %s)", XBOX_MULTIPLAYER_SCREEN, menus->root);
+		reason = menu_tags.xbox_root_tag == NONE ? HALO_PC_MENUS_REASON_NO_XBOX_SCREEN : HALO_PC_MENUS_REASON_NO_MENUS;
 		goto failed;
 	}
 	total = widget_count + own_lists + menus->string_list_count + menus->bitmap_count;
@@ -1927,6 +1998,8 @@ void menu_tags_loaded(
 	menu_tags.root_tag = build.widget_tags[widget_named(menus->root)];
 	menu_tags.loaded = TRUE;
 	halo_pc_menus_state = 1;
+	halo_pc_menus_reason = HALO_PC_MENUS_REASON_UNKNOWN;
+	menu_tags_reason_logged = -1;
 	platform_log("menus: OpenCE's multiplayer screens: %ld widgets, %ld string lists and %ld bitmaps added to "
 		"ui.map's %ld tags in %lu us (the Halo PC files checked %lu, the XML read %lu, the tags %lu; the pictures "
 		"and text are read when they first open)",
@@ -1936,8 +2009,8 @@ void menu_tags_loaded(
 	goto done;
 
 failed:
-	platform_log("menus: OpenCE's multiplayer screens not added; the game's own");
 	menu_tags_release();
+	menu_tags_not_added(reason);
 
 done:
 	free(build.widget_tags);
@@ -1970,8 +2043,7 @@ long menu_tags_screen(
 			menu_tags.art = menu_tags_art_load() ? 1 : -1;
 			if (menu_tags.art < 0)
 			{
-				halo_pc_menus_state = -1;
-				platform_log("menus: OpenCE's multiplayer screens left out; the game's own Multiplayer screen");
+				/* (menu_tags_art_load said why: halo_pc_menus_state -1) */
 				return tag_index;
 			}
 		}

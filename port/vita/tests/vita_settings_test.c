@@ -45,6 +45,8 @@ volatile int halo_system_link_request;
 volatile int halo_system_link_answer;
 volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 volatile int halo_pc_menus_state;
+volatile int halo_pc_menus_reason;
+char halo_pc_menus_folder[128];
 volatile int halo_text_input_state;
 char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
@@ -870,7 +872,7 @@ static int rows_of(char *labels, int size, int *info)
 static void test_multiplayer_tab(void)
 {
 	char line[128], labels[512];
-	int info;
+	int info, index;
 
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
@@ -921,6 +923,36 @@ static void test_multiplayer_tab(void)
 	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
+	/* why, when menu_tags.c says (a player with both files saw the line
+	above): the file and the folder looked in, the install's menus folder,
+	in lines of the panel's 46 characters */
+	snprintf(halo_pc_menus_folder, sizeof(halo_pc_menus_folder), "ux0:data/haloce-vita/maps");
+	halo_pc_menus_reason = HALO_PC_MENUS_REASON_NO_LOC;
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(strstr(menu, "\n\x04Online menus: loc.map not found in\n\x04ux0:data/haloce-vita/maps\n") &&
+		!strstr(menu, "need bitmaps.map") && menu_fits(),
+		"no loc.map: the line names it and the maps folder, in two lines that fit");
+	halo_pc_menus_reason = HALO_PC_MENUS_REASON_NO_BITMAPS;
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(strstr(menu, "\n\x04Online menus: bitmaps.map not found in\n\x04ux0:data/haloce-vita/maps\n") &&
+		menu_fits(), "no bitmaps.map: the same");
+	halo_pc_menus_reason = HALO_PC_MENUS_REASON_NO_MENUS;
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n\x04Online menus: the menus folder is missing from\n\x04the install (reinstall the VPK)\n") &&
+		menu_fits(), "the install's menus folder missing: reinstall the VPK");
+	for (index = HALO_PC_MENUS_REASON_UNKNOWN; index <= HALO_PC_MENUS_REASON_FAILED; index++)
+	{
+		halo_pc_menus_reason = index;
+		game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+		rows_of(labels, sizeof(labels), &info);
+		if (!menu_fits() || !strstr(menu, "\n\x04Online menus"))
+			printf("(reason %d)\n%s\n", index, menu);
+		check(menu_fits() && strstr(menu, "\n\x04Online menus") &&
+			!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter"),
+			"each reason: its line fits, Join with a code stays");
+	}
+	halo_pc_menus_reason = HALO_PC_MENUS_REASON_UNKNOWN;
 
 	/* the hosted game's settings, as the game's Server Setup sets them
 	(vita_settings_set): applied at once and kept in settings.txt */
@@ -1610,6 +1642,20 @@ static void test_languages(void)
 	browse_count = 0;
 	show();
 	check(menu_lines_fit(), "Spanish: the public games, none");
+	/* (the online menus' reasons, with a long maps folder) */
+	screen = SCREEN_LIST;
+	halo_pc_menus_state = -1;
+	snprintf(halo_pc_menus_folder, sizeof(halo_pc_menus_folder), "ux0:data/haloce-vita/maps");
+	for (index = HALO_PC_MENUS_REASON_UNKNOWN; index <= HALO_PC_MENUS_REASON_FAILED; index++)
+	{
+		halo_pc_menus_reason = index;
+		show();
+		if (!menu_fits() || !strstr(menu, "\n\x04Menús en línea"))
+			printf("(reason %d)\n%s\n", index, menu);
+		check(menu_fits() && strstr(menu, "\n\x04Menús en línea"), "Spanish: each online menus reason fits");
+	}
+	halo_pc_menus_reason = HALO_PC_MENUS_REASON_UNKNOWN;
+	halo_pc_menus_state = 1;
 	screen = SCREEN_GUIDE;
 	for (index = 0; index < 3; index++)
 	{

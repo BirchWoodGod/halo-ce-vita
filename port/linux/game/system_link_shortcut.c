@@ -56,6 +56,8 @@ volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 /* (OpenCE's multiplayer screens' typing: menu_functions.c, the Vita's
 host) */
 volatile int halo_pc_menus_state;
+volatile int halo_pc_menus_reason;
+char halo_pc_menus_folder[128];
 volatile int halo_text_input_state;
 char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
