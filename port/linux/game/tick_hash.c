@@ -125,7 +125,7 @@ volatile unsigned long halo_ticks_simulated;
 #define MAXIMUM_SAVED_MARKS 4096
 static long saved_marks[MAXIMUM_SAVED_MARKS];
 static long saved_render_states[MAXIMUM_SAVED_MARKS];
-#define MAXIMUM_SAVED_LIGHT_FIELDS (3 * 1024)
+#define MAXIMUM_SAVED_LIGHT_FIELDS (3 * 4096)
 static long saved_light_fields[MAXIMUM_SAVED_LIGHT_FIELDS];
 
 void halo_tick_hash_after_tick(void)

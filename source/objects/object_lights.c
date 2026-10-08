@@ -967,17 +967,16 @@ void lights_stress_update(
 /* (tick_hash.c, HALO_TICK_HASH_MASK=2) what the render writes into the
 lights, each frame, saved and cleared or put back: the light marker's stamp
 (the scene's light query and each lit object's), the light's index among
-the frame's lights and its first-person weapon flag (lights_preprocess_scene) */
+the frame's lights and its first-person weapon flag (lights_preprocess_scene),
+in every slot the array has used (a light deleted keeps them) */
 int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore)
 {
-	long light_index;
+	short absolute_index;
 	int count = 0;
 
-	for (light_index = data_next_index(light_data, NONE);
-		light_index != NONE && count + 3 <= maximum;
-		light_index = data_next_index(light_data, light_index))
+	for (absolute_index = 0; absolute_index < light_data->count && count + 3 <= maximum; absolute_index++)
 	{
-		struct light_datum *light = light_get(light_index);
+		struct light_datum *light = (struct light_datum *)((char *)light_data->data + light_data->size * absolute_index);
 
 		if (restore)
 		{
