@@ -1353,10 +1353,11 @@ int usprintf(
 		"c:\\halo\\SOURCE\\text\\unicode.c",
 		751,
 		string && format);
-	match_assert(
-		"c:\\halo\\SOURCE\\text\\unicode.c",
-		752,
-		wcslen(string) < MAXIMUM_STRING_SIZE);
+	/* port: not the length of what the string holds before it is written
+	(752: wcslen(string) < MAXIMUM_STRING_SIZE). Its callers pass buffers
+	not yet written (the scoreboard's score and team names: slayer's), and
+	the check read on past them to the first zero; a release build keeps
+	the call (its assertion only drops the test) */
 	match_assert(
 		"c:\\halo\\SOURCE\\text\\unicode.c",
 		753,

@@ -191,6 +191,31 @@
 #            is decompressed once into the shared cache, and the servers'
 #            own caches stay empty (HALO_TEST_MULTI_SHARED=0: each its own,
 #            for comparing the disk they take)
+#   scoreboard the scoreboard held open (Back, HALO_NETWORK_TEST_SCORES: the
+#            first half of every HALO_TEST_SCORES_EVERY seconds, 4) by every
+#            player, on a dedicated server (no player of its own: Chill Out
+#            slayer, Blood Gulch team slayer, Chill Out oddball, sv_timelimit
+#            1), two Vita builds joining it by its code, the second
+#            HALO_TEST_JOIN_STAGGER seconds (25) later, into the game in
+#            progress; and at once on a Vita host of its own (Blood Gulch
+#            team slayer, then oddball on Chill Out) with a joiner by its
+#            code. Issue #36: a crash with the scoreboard open online. Each
+#            must have drawn the scoreboard, held it open at least 10 times
+#            and played 60 s with another player; the server must lose
+#            nobody, and none go to the dashboard
+#   dedicatedfullcache the dedicated server (Battle Creek, then Chill Out)
+#            and two Vita builds joining it by its code over a jittery link
+#            (HALO_TEST_NETEM, "delay 80ms 70ms" by default), each with its six
+#            cache files full (fullcache's offline games: a10, a30,
+#            bloodgulch, chillout, carousel, ui), the second
+#            HALO_TEST_JOIN_STAGGER seconds (6) after the first: in the
+#            server's countdown (sv_start_delay 10), which it starts again.
+#            beta.1's lobby precached the menus' empty map name before the
+#            server's settings came, and with the six full that was the
+#            damaged disc error at once, which the server saw only as
+#            "lost the connection" 20 s on (the official servers, October
+#            2026). Each must precache the server's map and play both games
+#            with the other, the server lose neither
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -251,6 +276,9 @@ mode=${1:-code}
 # (latency: a home connection's delay unless one is given)
 [ "$mode" = latency ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 40ms"
+# (dedicatedfullcache: a jittery link unless one is given)
+[ "$mode" = dedicatedfullcache ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
+	export HALO_TEST_NETEM="delay 80ms 70ms"
 vita=${HALO_TEST_VITA:-$root/build/linux/halo}
 pc=${HALO_TEST_PC:-}
 data=${HALO_TEST_DATA:-$root/../data2276}
@@ -261,6 +289,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedban ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
+[ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = scoreboard ] && seconds=${HALO_TEST_SECONDS:-240}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
@@ -382,6 +412,24 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!
+}
+# prefill_cache NAME: NAME's six cache files filled, offline, before it
+# joins (fullcache, dedicatedfullcache): each map copied into one, the
+# menus' ui.map last; its log and data in $out/prefill_NAME
+prefill_cache() {
+	local name=$1 pre=$out/prefill_$1 level filled
+	mkdir -p "$pre/data" "$out/$name/save"
+	ln -sfn "$(cd "${HALO_TEST_DATA_JOINER:-$data}" && pwd)/maps" "$pre/data/maps"
+	for level in 'a10\a10' 'a30\a30' 'test\bloodgulch\bloodgulch' 'test\chillout\chillout' 'test\carousel\carousel' -; do
+		if [ "$level" = - ]; then rm -f "$pre/data/init.txt"; else printf 'map_name levels\\%s\n' "$level" > "$pre/data/init.txt"; fi
+		(cd "$pre" && env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$pre/data" \
+			HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=${HALO_TEST_FULLCACHE_SECONDS:-12} \
+			HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_NET_ONLINE=false HALO_UPDATE_AUTO=false HALO_TICK_THREAD=1 \
+			taskset -c "$cpu_b" timeout 120 "${HALO_TEST_VITA_JOINER:-$vita}" >> "$pre/run.log" 2>&1)
+	done
+	filled=$(grep -ac "starting precaching of map" "$pre/data/debug.txt")
+	echo "$name's cache files filled offline: $filled (6 wanted)"
+	[ "$filled" -ge 6 ] || fail "$name's cache files were not all filled ($filled)"
 }
 host_env="HALO_NET_ONLINE=true HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer,slayer@chillout} HALO_NETWORK_TEST_START=20
 	HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-3} HALO_NETWORK_TEST_KILL=20 HALO_TEST_INPUT=bot:1"
@@ -789,20 +837,7 @@ badmap)
 	fi
 	;;
 fullcache)
-	# (the joiner's cache files filled, offline, before it joins: each map
-	# copied into one, the menus' ui.map last)
-	mkdir -p "$out/prefill/data" "$out/joiner/save"
-	ln -sfn "$(cd "${HALO_TEST_DATA_JOINER:-$data}" && pwd)/maps" "$out/prefill/data/maps"
-	for level in 'a10\a10' 'a30\a30' 'test\bloodgulch\bloodgulch' 'test\chillout\chillout' 'test\carousel\carousel' -; do
-		if [ "$level" = - ]; then rm -f "$out/prefill/data/init.txt"; else printf 'map_name levels\\%s\n' "$level" > "$out/prefill/data/init.txt"; fi
-		(cd "$out/prefill" && env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/prefill/data" \
-			HALO_SAVE_ROOT="$out/joiner/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=${HALO_TEST_FULLCACHE_SECONDS:-12} \
-			HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_NET_ONLINE=false HALO_UPDATE_AUTO=false HALO_TICK_THREAD=1 \
-			taskset -c "$cpu_b" timeout 120 "${HALO_TEST_VITA_JOINER:-$vita}" >> "$out/prefill/run.log" 2>&1)
-	done
-	filled=$(grep -ac "starting precaching of map" "$out/prefill/data/debug.txt")
-	echo "cache files filled offline: $filled (6 wanted)"
-	[ "$filled" -ge 6 ] || fail "the joiner's cache files were not all filled ($filled)"
+	prefill_cache joiner
 	# (the jitter: the routers' netem, set with the sides unless given)
 	if [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ]; then
 		for side in host join; do
@@ -1326,7 +1361,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti)
+dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|scoreboard)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
 	[ "$mode" = dedicatedpc ] && [ -z "$pc" ] && { echo "dedicatedpc needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
@@ -1459,6 +1494,26 @@ sv_public 1
 sv_start_delay 5
 sv_end_empty 10
 INIT
+	fi
+	# (scoreboard: a free-for-all, a team game and oddball)
+	if [ "$mode" = scoreboard ]; then
+		cat > "$out/server/data/init.txt" <<'INIT'
+sv_name "Netns Scoreboard"
+sv_maxplayers 12
+sv_public 1
+sv_mapcycle_add chillout slayer
+sv_mapcycle_add bloodgulch team_slayer
+sv_mapcycle_add chillout oddball
+sv_timelimit 1
+sv_start_delay 5
+sv_postgame 5
+sv_end_empty 20
+sv_port 2302
+INIT
+	fi
+	# (dedicatedfullcache: first a map none of the joiners' cache files has)
+	if [ "$mode" = dedicatedfullcache ]; then
+		sed -i 's/^sv_mapcycle_add bloodgulch slayer$/sv_mapcycle_add beavercreek slayer/' "$out/server/data/init.txt"
 	fi
 	[ "${HALO_TEST_SERVER_PUBLIC:-0}" = 1 ] && echo "sv_public_address 10.10.1.2:2302" >> "$out/server/data/init.txt"
 	# (HALO_TEST_SERVER_INIT: another init.txt, e.g. one map for measuring)
@@ -1600,7 +1655,9 @@ INIT
 			run_copy "$name" "$machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
 				HALO_NETWORK_TEST=$how HALO_NETWORK_TEST_REJOIN=$again HALO_NET_PLAYER_NAME=Vita$i \
 				HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:$((i + 1)); join_pids="$join_pids $last_pid"
-			sleep 2
+			# (HALO_TEST_JOIN_STAGGER: seconds between joiners, a later one
+			# joining the game in progress)
+			sleep "${HALO_TEST_JOIN_STAGGER:-2}"
 		done
 		# (the console once the first joiner is back from its leave, HALO_TEST_REJOIN)
 		sleep $((rejoin > 0 ? rejoin + 50 : 60))
@@ -1638,6 +1695,86 @@ INIT
 			[ "$(grep -ac '^server: player #[0-9]* Vita1 joined' "$sl")" -ge 2 ] || fail "the server did not see Vita1 join twice"
 			grep -aq "^server: player #[0-9]* Vita1 left" "$sl" || fail "the server did not see Vita1 leave"
 		fi
+		;;
+	scoreboard)
+		scores="HALO_NETWORK_TEST_SCORES=${HALO_TEST_SCORES_EVERY:-4}"
+		# the Vita host, on a network of its own, and its joiner on another
+		side vh 10.10.30 192.168.30
+		side vj 10.10.31 192.168.31
+		run_copy host "$vh_machine" "$vita" "$cpu_a" $host_env \
+			HALO_NETWORK_TEST=host:bloodgulch:team_slayer,oddball@chillout HALO_NET_HOST_PUBLIC=false $scores
+		vhost_pid=$last_pid
+		# the server's joiners
+		side d2 10.10.22 192.168.22
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:2 $scores; j1=$last_pid
+		vcode=$(wait_code)
+		[ -n "$vcode" ] || fail "the Vita host never showed a code"
+		echo "the Vita host's code: $vcode"
+		run_copy vjoiner "$vj_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$vcode \
+			HALO_NET_PLAYER_NAME=VitaJ HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:4 $scores; vj=$last_pid
+		# (the second into the server's game in progress)
+		sleep "${HALO_TEST_JOIN_STAGGER:-25}"
+		run_copy joiner2 "$d2_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_NET_PLAYER_NAME=Vita2 HALO_EXIT_AFTER=$((seconds - 35)) HALO_TEST_INPUT=bot:3 $scores; j2=$last_pid
+		wait $j1 $j2 $vj 2>/dev/null
+		kill -TERM "$server_pid" "$vhost_pid" 2>/dev/null; wait "$server_pid" "$vhost_pid" 2>/dev/null
+		echo "--- server"; grep -aE "^server: (the game|player)" "$sl" | head -20
+		for game in "slayer on chillout" "team_slayer on bloodgulch" "oddball on chillout"; do
+			grep -aq "^server: the game starts: $game" "$sl" || fail "the server never played $game"
+		done
+		grep -aq "lost the connection" "$sl" && fail "the server lost a player's connection"
+		grep -aq "lost the connection" "$out/host/run.log" && fail "the Vita host lost a player's connection"
+		for name in joiner joiner2 vjoiner host; do
+			l=$out/$name/run.log
+			held=$(grep -ac "network test: scoreboard held" "$l")
+			drawn=$(sed -n 's/.*network test: scoreboard held ([0-9]*; drawn in \([0-9]*\) frames so far).*/\1/p' "$l" | tail -1)
+			n=$(grep -a "network test: tick" "$l" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name: scoreboard held $held times, drawn in ${drawn:-0} frames; $n s playing with another player"
+			[ "$held" -ge 10 ] || fail "$name held the scoreboard $held times (10 wanted)"
+			[ "${drawn:-0}" -gt 0 ] || fail "$name never drew the scoreboard"
+			[ "$n" -ge 60 ] || fail "$name played with another player for $n s (60 wanted)"
+			grep -aq "XLaunchNewImage" "$l" && fail "$name went to the dashboard"
+		done
+		;;
+	dedicatedfullcache)
+		# (both joiners' cache files filled at once, then checked here: the
+		# prefill's own check runs in its subshell)
+		prefill_cache joiner > /dev/null & p1=$!
+		prefill_cache joiner2 > /dev/null & p2=$!
+		wait $p1 $p2
+		for name in joiner joiner2; do
+			filled=$(grep -ac "starting precaching of map" "$out/prefill_$name/data/debug.txt")
+			echo "$name's cache files filled offline: $filled (6 wanted)"
+			[ "$filled" -ge 6 ] || fail "$name's cache files were not all filled ($filled)"
+		done
+		side d2 10.10.22 192.168.22
+		run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=$((seconds - 10)) \
+			HALO_TEST_INPUT=bot:2; j1=$last_pid
+		# (the second in the server's countdown, which starts it again)
+		sleep "${HALO_TEST_JOIN_STAGGER:-6}"
+		run_copy joiner2 "$d2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_NET_PLAYER_NAME=Vita2 HALO_EXIT_AFTER=$((seconds - 20)) \
+			HALO_TEST_INPUT=bot:3; j2=$last_pid
+		wait $j1 $j2 2>/dev/null
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"; grep -aE "^server: (the next game|the game|player)" "$sl" | head -20
+		grep -aq "^server: the game starts: slayer on beavercreek" "$sl" || fail "the server never started Battle Creek"
+		grep -aq "lost the connection" "$sl" && fail "the server lost a joiner's connection"
+		for name in joiner joiner2; do
+			jl=$out/$name/run.log jd=$out/$name/data/debug.txt
+			echo "--- $name"; grep -aE "successfully joined|precaching map|find map|XLaunchNewImage|damaged disc" "$jd" "$jl" | head -6
+			grep -aq "successfully joined a net game" "$jd" || fail "$name never joined"
+			grep -aq "find map '' on the DVD" "$jd" && fail "$name precached a map with no name"
+			grep -aq "XLaunchNewImage" "$jl" && fail "$name went to the dashboard"
+			grep -aq "damaged disc error" "$jl" && fail "$name showed the damaged disc error"
+			grep -aq "precaching map 'levels.test.beavercreek.beavercreek'" "$jd" || fail "$name did not precache the server's map"
+			n=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name's seconds playing with the other: $n"
+			[ "$n" -ge 60 ] || fail "$name played with the other for $n s (60 wanted)"
+		done
+		grep -aq "^server: the game starts: slayer on chillout" "$sl" || fail "the server never went on to Chill Out"
 		;;
 	dedicatedpc)
 		# a Vita on the server's LAN (online off) so that the PCs' refusal there
