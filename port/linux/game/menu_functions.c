@@ -17,7 +17,10 @@ internet play with:
   the screen saying so opens); SYSTEM LINK is the Xbox's System Link screen
   (its list of games, where Y creates one), co-op the Campaign screen (Y on
   the difficulty hosts it: coop_menu.c), split screen and gametypes the
-  Xbox's own.
+  Xbox's own. SPLIT SCREEN needs a second controller ("port mp require
+  controllers": a PS TV's DualShocks, vita_pad.c); with one, a screen says
+  so, where A plays alone (the Xbox's split screen of one player) and B
+  goes back.
 - The Server Browser ("port browser ...") lists the public games
   (p2p_lobby_entry: a lock for a password, the name, map, gametype and
   players; the chosen one's Players and Rules lines below); A joins the
@@ -52,6 +55,9 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* the game's */
+boolean input_has_gamepad(short gamepad_index);
 
 /* the platform layer's */
 void platform_log(char const *format, ...);
@@ -110,6 +116,7 @@ enum
 	_function_code_join,
 	_function_code_back,
 	_function_coop_campaign,
+	_function_mp_require_controllers,
 };
 
 /* in port_game_data_input_names' order */
@@ -327,6 +334,22 @@ static boolean internet_play(void)
 	char text[96];
 
 	return p2p_status(text, sizeof(text)) != 0;
+}
+
+/* whether more than one controller is connected (split screen: a PS TV's
+paired DualShocks, the Linux build's gamepads, the tests' controllers) */
+static boolean several_controllers(void)
+{
+	short gamepad;
+	short connected = 0;
+
+	for (gamepad = 0; gamepad < 4; gamepad++)
+	{
+		if (input_has_gamepad(gamepad))
+			connected++;
+	}
+	platform_log("menus: Split Screen: %d controller%s connected", connected, connected == 1 ? "" : "s");
+	return connected > 1;
 }
 
 /* a Play page setting, set as the settings panel sets it (on the Vita:
@@ -752,6 +775,8 @@ boolean pc_menu_event_function_invoke(
 		return internet_play();
 	case _function_mp_require_lan:
 		return TRUE;
+	case _function_mp_require_controllers:
+		return several_controllers();
 	case _function_browser_init:
 		menu_functions.status[0] = 0;
 		menu_functions.join_watched = FALSE;

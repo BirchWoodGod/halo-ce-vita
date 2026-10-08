@@ -20,7 +20,7 @@
 		<on event="a start" open="ui\shell\main_menu\player_profiles_select\solo_game_player_profile_select_screen"/>
 	</widget>
 	<widget name="mp/item_split" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_labels" string_index="2">
-		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
+		<on event="a start" run="port mp require controllers" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen" otherwise="mp/controllers"/>
 	</widget>
 	<widget name="mp/item_gametypes" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_options" string_index="5">
 		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen"/>
@@ -58,6 +58,13 @@
 	<widget name="mp/offline" flags="pass_unhandled_to_focused_child" bitmap="gradient">
 		<child widget="mp/header"/>
 		<child widget="mp/offline_text"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+	<widget name="mp/controllers_text" type="text" left="68" top="110" width="520" height="260" string_list="controllers" font="ui\large_ui" color="#FFFFFFFF"/>
+	<widget name="mp/controllers" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
+		<child widget="mp/header"/>
+		<child widget="mp/controllers_text"/>
 		<child widget="ui\shell\main_menu\button_key"/>
 	</widget>
 </menus>

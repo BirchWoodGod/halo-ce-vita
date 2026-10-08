@@ -335,6 +335,7 @@ static char const *const port_function_names[] =
 	"port setup back",
 	"port code init", "port code edit", "port code join", "port code back",
 	"port coop campaign",
+	"port mp require controllers",
 };
 
 /* the port's game data functions (menu_functions.c), from

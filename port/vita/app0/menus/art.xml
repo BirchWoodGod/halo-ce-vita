@@ -40,8 +40,11 @@
 		<string text="Host a game on the Internet: name\nit, choose who may join, then pick\nthe map and the gametype."/>
 		<string text="Host a game on your Wi-Fi network:\non the System Link screen,\n%y-button creates a game."/>
 		<string text="Host the campaign for up to three\nothers: pick a level and a\ndifficulty, then press %y-button."/>
-		<string text="Play with several controllers\non this screen."/>
+		<string text="Up to four players on this screen,\na controller each: on a PS TV,\nDualShock 3 or 4 controllers."/>
 		<string text="Set all the attributes for your\nmultiplayer gametypes and keep\nthem for future use."/>
+	</strings>
+	<strings name="controllers">
+		<string text="Split screen needs a controller for each\nplayer: a PS TV with up to three more\nDualShock 3 or 4 controllers paired\nwith it, then %a-button on each to join.\n\nThe PS Vita has only its own controls:\n%a-button plays alone, %b-button goes back."/>
 	</strings>
 	<strings name="offline">
 		<string text="Internet play is off.\n\nOpen the settings panel (SELECT + START),\nMultiplayer tab, set Connection to Online,\nthen restart the game."/>

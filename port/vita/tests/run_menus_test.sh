@@ -13,11 +13,18 @@
 #           are added again
 #   xbox    without the Halo PC files: the Xbox's Multiplayer screen, nothing
 #           added
+#   split   SPLIT SCREEN with four controllers (debug.test_controllers): each
+#           presses START on the Xbox's Select Profile screen and A on its
+#           profile, then player 1 goes through the map, the gametype and the
+#           pregame screens into the game, which splits in four
+#   split1  SPLIT SCREEN with one controller (a Vita): the screen that says
+#           it needs a PS TV's controllers, B back; then A on it plays alone
+#           (the Xbox's Select Profile screen)
 #
 # Each must log no "is not a tag index" (a tag of ours read as the empty
 # one), no assertion or exception, and exit by itself.
 #
-#   run_menus_test.sh [CASE...]      (default: fresh level xbox)
+#   run_menus_test.sh [CASE...]      (default: fresh level xbox split split1)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA        a folder with the game's maps folder (the Xbox maps)
 #   HALO_TEST_DATA_MENUS  the same with Halo PC's bitmaps.map and loc.map in
@@ -31,7 +38,7 @@ binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
-cases=${*:-fresh level xbox}
+cases=${*:-fresh level xbox split split1}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -78,6 +85,19 @@ check() { # NAME SCREENS_WANTED
 	fi
 }
 
+# (Multiplayer, then down to SPLIT SCREEN, the seventh item)
+to_split="wait:150:2000 down:150:2500 a wait:150:3000 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600"
+to_split="$to_split down:150:600 wait:150:1000 a wait:150:3000"
+
+check_split() { # NAME
+	local name=$1 log=$out/$1/run.log debug=$out/$1/data/debug.txt
+	echo "--- $name"
+	grep -aE "menus: Split|ui: screen|split screen:|system link: playing" "$log" | head -16
+	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
+	grep -aqi "is not a tag index" "$log" "$debug" 2>/dev/null && fail "$name" "a tag was read as the empty one"
+	grep -aqiE "assert|exception|halt" "$log" && fail "$name" "an assertion, exception or halt"
+}
+
 for case in $cases; do
 	case $case in
 	fresh)
@@ -90,8 +110,23 @@ for case in $cases; do
 	xbox)
 		run xbox "$data" 40 "$pad"
 		check xbox xbox ;;
+	split)
+		run split "$menus_data" 90 "$to_split start:150:1000 2.start:150:1000 3.start:150:1000 4.start:150:2000 a:150:1000 2.a:150:1000 3.a:150:1000 4.a:150:2000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000" \
+			HALO_TEST_CONTROLLERS=4 HALO_DISPLAY_WIDTH=848
+		check_split split
+		grep -aq "menus: Split Screen: 4 controllers connected" "$out/split/run.log" || fail split "the four controllers were not counted"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.split_screen.pregame" "$out/split/run.log" ||
+			fail split "the split screen pregame screen did not open"
+		grep -aq "split screen: 4 windows" "$out/split/run.log" || fail split "the game did not split in four" ;;
+	split1)
+		run split1 "$menus_data" 40 "$to_split b wait:150:2500 a wait:150:3000 a wait:150:3000"
+		check_split split1
+		[ "$(grep -ac 'ui: screen pc.mp.controllers' "$out/split1/run.log")" -ge 2 ] ||
+			fail split1 "the screen that says split screen needs controllers did not open twice"
+		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.split_screen.4way_profile_select" "$out/split1/run.log" ||
+			fail split1 "A did not go on to play alone" ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|split|split1]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
