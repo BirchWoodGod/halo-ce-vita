@@ -1034,7 +1034,8 @@ static int host_nonce_current(const unsigned char *public_key, const unsigned ch
 
 /* ---------- the messages */
 
-static void send_join(void)
+/* a JOIN, with this machine's relays or without (form 1 or 0) */
+static void send_join_form(int with_relays)
 {
 	unsigned char message[MAXIMUM_MESSAGE_SIZE];
 	unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
@@ -1047,7 +1048,8 @@ static void send_join(void)
 	memcpy(message + size, signalling.join_nonce, NONCE_SIZE);
 	size += NONCE_SIZE;
 	size += put_candidates(message + size);
-	size += put_relays(message + size);
+	if (with_relays)
+		size += put_relays(message + size);
 	/* answered: the proof that this machine holds its key, of which the host
 	makes the session */
 	if (signalling.join_answered)
@@ -1059,6 +1061,21 @@ static void send_join(void)
 	}
 	size = p2p_seal(signalling.join_key, message, size, sealed);
 	publish_everywhere(signalling.join_host_topic, sealed, size, 0);
+}
+
+/* the JOIN: a request as before relays (a host takes relays only from a
+proof, and a host of before relays takes nothing longer); and its proof,
+once answered, also with this machine's relays if it has any, sent first
+(a host of before relays turns that one down and makes the session of the
+other; a host of now makes it of whichever comes first, and takes the
+relays from the one that has them) */
+static void send_join(void)
+{
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+
+	if (signalling.join_answered && p2p_local_relays(relays, P2P_MAXIMUM_RELAYS))
+		send_join_form(1);
+	send_join_form(0);
 	signalling.join_sent_time = p2p_now();
 }
 
@@ -1195,6 +1212,11 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 		{
 			return;
 		}
+		/* (the relays from a proof that has them: the joiner sends its proof
+		with them and without, the two at once, so before the answers' pace;
+		one without leaves them as they were) */
+		if (proven && relay_count > 0)
+			p2p_peer_relays(identifier, joiner->secret, relays, relay_count);
 		if (!elapsed(joiner->answered_broker_times[broker_index], ANSWER_INTERVAL) ||
 			!p2p_peer_reoffered(identifier, joiner->secret, candidates, proven ? count : 0) ||
 			(!proven && !budget_left(&signalling.unproven_answers, MAXIMUM_UNPROVEN_ANSWERS,
@@ -1202,8 +1224,6 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 		{
 			return;
 		}
-		if (proven)
-			p2p_peer_relays(identifier, joiner->secret, relays, relay_count);
 		joiner->answered_time = p2p_now();
 		joiner->answered_broker_times[broker_index] = joiner->answered_time;
 		send_accept(broker, identifier, joiner->nonce, joiner->host_nonce, joiner->base, proven);
