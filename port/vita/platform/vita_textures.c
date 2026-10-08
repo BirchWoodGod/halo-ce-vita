@@ -1232,6 +1232,28 @@ static unsigned long texel_checksum(const unsigned char *data, unsigned long siz
 volatile unsigned long long vita_texture_build_us;
 volatile unsigned long vita_texture_builds, vita_texture_build_bytes;
 
+void vita_host_sleep_us(unsigned long microseconds);
+
+/* (harness) HALO_TEX_DECODE_KBPMS=<KB per ms>: a decode that took less
+than its texels' size at this rate waits out the rest - the Vita decodes
+about 15-30 KB of texels a millisecond (halo.log's hitch lines), the PC a
+few hundred - so the gxm-null harness's frames wait for decoding as the
+Vita's do */
+static void decode_rate_emulate(unsigned long long started_us, unsigned long bytes)
+{
+	static long rate = -1;
+	unsigned long long wanted, elapsed;
+
+	if (rate < 0)
+		rate = getenv("HALO_TEX_DECODE_KBPMS") ? atol(getenv("HALO_TEX_DECODE_KBPMS")) : 0;
+	if (rate <= 0)
+		return;
+	wanted = (unsigned long long)bytes * 1000ull / 1024ull / (unsigned long long)rate;
+	elapsed = vita_host_time_us() - started_us;
+	if (elapsed < wanted)
+		vita_host_sleep_us((unsigned long)(wanted - elapsed));
+}
+
 const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLOR *palette,
 	struct xgpu_texture_description *description)
 {
@@ -1339,6 +1361,7 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 				pool_reuse = NULL;
 				entry->memory = pool_last;
 				entry->memory_size = pool_last ? pool_last_size : 0;
+				decode_rate_emulate(before, entry->size);
 				vita_texture_build_us += vita_host_time_us() - before;
 				vita_texture_builds++;
 				vita_texture_build_bytes += entry->size;
