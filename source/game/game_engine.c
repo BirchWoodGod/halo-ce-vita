@@ -2561,6 +2561,31 @@ static boolean goal_matches_player(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port: the nav points a player is shown (goal_matches_player), up to
+maximum of them: where the offline bots go (port/linux/game/bots.c): the
+flag to take or the base to bring it to, the hill, the ball, the race's
+next point. How many. */
+long game_engine_port_player_goals(
+	long player_index,
+	real_point3d *positions,
+	long maximum)
+{
+	struct player_datum *player = player_try_and_get(player_index);
+	long goal_index;
+	long count = 0;
+
+	if (!player)
+		return 0;
+	for (goal_index = 0; goal_index < (long)NUMBEROF(global_goal) && count < maximum; goal_index++)
+	{
+		if (goal_matches_player(player, player_index, goal_index))
+			positions[count++] = global_goal[goal_index].position;
+	}
+	return count;
+}
+#endif
+
 static boolean nearby_vehicle(
 	long player_index,
 	struct player_starting_location const *starting_location)
