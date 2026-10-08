@@ -830,14 +830,20 @@ static void log_drain(void)
 	{
 		unsigned long length, start, first;
 
+		/* (the lock is held only to read where the lines end: the bytes up
+		to there are the drain's alone until log_head moves past them, so a
+		log thread on the fourth core, put off by the system's processes
+		there, never keeps the game's threads spinning at the lock) */
 		log_acquire();
 		length = log_tail - log_head;
+		log_release();
 		if (length > sizeof(chunk))
 			length = sizeof(chunk);
 		start = log_head % LOG_RING_SIZE;
 		first = length < LOG_RING_SIZE - start ? length : LOG_RING_SIZE - start;
 		memcpy(chunk, log_ring + start, first);
 		memcpy(chunk + first, log_ring, length - first);
+		log_acquire();
 		log_head += length;
 		log_release();
 		if (!length)
