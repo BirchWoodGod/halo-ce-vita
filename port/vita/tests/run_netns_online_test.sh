@@ -35,6 +35,9 @@
 #            must never list or join the game
 #   spoof    code, and a machine on the host's LAN sends its game ports
 #            datagrams claiming the joiner's virtual address: dropped
+#   coopmenuonline co-op from the campaign's menus, online: X in the waiting
+#            screen makes it public (network.coop_public, private unless
+#            chosen); the joiner finds it in the server browser
 #   menus    lobby, joined from OpenCE's multiplayer screens (menu_tags.c):
 #            the joiner (its maps folder HALO_TEST_DATA_MENUS, with the Halo
 #            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET (the
@@ -599,6 +602,35 @@ coop)
 	echo "--- joiner"; cat "$out/joiner.summary"
 	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $two"
+	# (a co-op game is private unless chosen: network.coop_public, OpenCE's)
+	if [ "${HALO_TEST_COOP_LAN:-0}" != 1 ] && grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log"; then
+		fail "the co-op game was listed in the public games (it is private unless chosen)"
+	fi
+	;;
+coopmenuonline)
+	# co-op from the campaign's menus, online: the host goes Campaign, a new
+	# profile, The Pillar of Autumn, Heroic and Y (Play co-op), and in the
+	# waiting screen X makes the game public (network.coop_public); the
+	# joiner finds it in the server browser and joins it (network test)
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
+		"HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y wait:150:6000 x" \
+		"HALO_TEST_COMMANDS=L60:@vote"; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; grep -aE "ui: screen|co-op|test pad" "$out/host/run.log" | tail; exit 1; }
+	echo "host's code: $code"
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_TEST_INPUT=bot:2:look "HALO_TEST_COMMANDS=L60:@vote"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|co-op: (public|private)|test pad: x" "$hl" | head -12
+	echo "--- joiner"; grep -aE "network test: (the public|join)" "$jl" | head -6
+	grep -aq "co-op: public: listed in the server browser" "$hl" || fail "X did not make the co-op game public"
+	grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log" ||
+		fail "the public co-op game was never listed"
+	grep -aq 'network test: the public games list "' "$jl" || fail "the joiner never listed the co-op game"
+	both=$(grep -a "network test: tick" "$jl" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+	echo "joiner's seconds with both players alive: $both"
+	[ "$both" -ge 15 ] || fail "both players were alive for $both s (15 wanted)"
 	;;
 coopmenu)
 	holder; lan=$held
@@ -701,7 +733,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu" >&2
+	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline" >&2
 	exit 2
 	;;
 esac

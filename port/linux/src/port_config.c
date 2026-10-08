@@ -256,8 +256,10 @@ static const struct config_setting config_settings[] =
 		"settings panel says for each game (OpenCE's setting)." },
 	{ "network.coop_public", _config_boolean, "false", "HALO_NET_COOP_PUBLIC", _environment_value, _platform_all,
 		"Whether a co-op game this machine hosts for internet play is public\n"
-		"(listed in everyone's server browser) or, false, private, until the\n"
-		"settings panel says (network.host_public: the other games')." },
+		"(listed in everyone's server browser) or, false, private (joined by\n"
+		"its code or invite link): its own, which network.host_public (the\n"
+		"other games') never changes. X on the waiting screen of co-op hosted\n"
+		"from the campaign's menus writes its choice here (OpenCE's setting)." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"

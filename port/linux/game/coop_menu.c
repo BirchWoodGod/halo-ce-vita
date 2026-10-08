@@ -10,10 +10,13 @@ The game's own lobby (connected_pregame_screen) is then the waiting screen:
 "Waiting for your partner" in its message bar, and here, where the other
 machines' panels go, the level, the difficulty, this machine's name, how
 the game is reached (system link, online and its code, ad hoc) and B to
-cancel. The partner finds the game in the System Link list (Multiplayer,
-System Link, or the Vita settings panel's Join a game) as "<host>: <level>
-(<difficulty>)" and joins it as any game; once their player is in, the
-lobby's countdown starts the level (a few seconds; the host's A sooner).
+cancel; online also whether it is listed in the server browser, private
+unless chosen (OpenCE's network.coop_public), and X to change it
+(coop_menu_toggle_public). The partner finds the game in the System Link
+list (Multiplayer, System Link, or the Vita settings panel's Join a game)
+as "<host>: <level> (<difficulty>)" and joins it as any game; once their
+player is in, the lobby's countdown starts the level (a few seconds; the
+host's A sooner).
 
 This file: that text, drawn over the game's own screens in the menus'
 fonts (the maps have no strings for it), from the level and difficulty
@@ -42,7 +45,11 @@ names of the maps' own string lists.
 
 /* the platform layer's (port/linux/src/port_config.c, p2p.c) */
 int config_boolean(const char *name);
+int config_write_boolean(const char *name, int value);
 int p2p_running(void);
+void p2p_lobby_set_coop_public(int listed);
+int p2p_lobby_coop_public(int *has_password);
+void platform_log(char const *format, ...);
 int p2p_hosting_code(char *code, int size);
 
 static char const coop_menu_level_names_tag[] = "ui\\shell\\main_menu\\map_list";
@@ -225,6 +232,57 @@ static void coop_menu_connection(
 	text[count - 1] = 0;
 }
 
+/* whether a co-op game hosted online is listed in the server browser (as
+chosen, else network.coop_public, OpenCE's: private unless chosen; never
+with the server browser off, network.public_lobby), and whether it asks for
+the password */
+static boolean coop_menu_public(
+	boolean *password)
+{
+	int has_password = 0;
+	boolean listed = p2p_lobby_coop_public(&has_password) != 0;
+
+	if (password)
+		*password = has_password != 0;
+	return listed;
+}
+
+/* whether this machine waits alone in the lobby of co-op it hosts online
+from the menus (the waiting screen's text, and X) */
+static boolean coop_menu_waiting_online(
+	void)
+{
+	struct network_game *game = network_game_get_game();
+
+	return global_network_game_server_get() && network_game_server_port_cooperative_menu(NULL) && game &&
+		game->machine_count < 2 && config_boolean("network.online") && p2p_running();
+}
+
+/* (X in the waiting screen, ui_widget_event_handler_functions.c) a co-op
+game hosted online from the menus: listed in the server browser or not,
+set as the settings panel sets a row (HALO_NET_COOP_PUBLIC: on the Vita kept
+in settings.txt; elsewhere in config.toml, as OpenCE's Server Setup keeps
+it); FALSE when it is no such game, or the server browser is off (the key
+does what it did) */
+boolean coop_menu_toggle_public(
+	void)
+{
+	extern int (*halo_test_setting_hook)(const char *variable, const char *value);
+	boolean listed;
+
+	if (!coop_menu_waiting_online() || !config_boolean("network.public_lobby"))
+		return FALSE;
+	listed = !coop_menu_public(NULL);
+	if (!halo_test_setting_hook || !halo_test_setting_hook("HALO_NET_COOP_PUBLIC", listed ? "true" : "false"))
+	{
+		if (!config_write_boolean("network.coop_public", listed))
+			platform_log("co-op: could not write network.coop_public to config.toml");
+	}
+	p2p_lobby_set_coop_public(listed);
+	platform_log("co-op: %s", listed ? "public: listed in the server browser" : "private: joined by its code");
+	return TRUE;
+}
+
 /* the styles: a button's label, a panel's name, the message bar's text */
 static char const coop_menu_label_style[] = "ui\\shell\\main_menu\\=create_new";
 static char const coop_menu_name_style[] =
@@ -282,6 +340,28 @@ void coop_menu_render(
 		y += 24;
 		coop_menu_connection(line, NUMBEROF(line));
 		coop_menu_draw(coop_menu_text_style, x, y, width, line);
+		/* (online: listed or not, and X to change it) */
+		if (coop_menu_waiting_online())
+		{
+			boolean password;
+			boolean listed = coop_menu_public(&password);
+
+			y += 24;
+			if (!listed)
+				usnprintf(line, NUMBEROF(line), L"Private: joined by its code");
+			else
+				usnprintf(line, NUMBEROF(line), L"Public: listed%ls", password ? L", password" : L"");
+			line[NUMBEROF(line) - 1] = 0;
+			coop_menu_draw(coop_menu_text_style, x, y, width, line);
+			if (config_boolean("network.public_lobby"))
+			{
+				y += 24;
+				coop_menu_draw(coop_menu_text_style, x, y, width,
+					listed ? L"%x-button: make it private" : L"%x-button: make it public");
+			}
+			/* (the cancel line closer: inside the panel's box) */
+			y -= 10;
+		}
 		y += 36;
 		coop_menu_draw(coop_menu_text_style, x, y, width, L"Press %b-button to cancel");
 	}

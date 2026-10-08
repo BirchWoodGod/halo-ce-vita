@@ -421,15 +421,20 @@ the difficulty screen **Y** (Play co-op) instead of **A** (which plays alone,
 as ever). The game's lobby opens as the waiting screen: "Waiting for your
 partner", with the level, the difficulty, this Vita's name and how the game
 is reached (system link, online and its code, or ad hoc); **B** cancels and
-goes back to the difficulty screen. The partner opens the System Link screen
-(Multiplayer: LAN, the server browser or Join by code; without the PC
-menus, System Link or the settings panel's Join with a code), where the game is listed as
+goes back to the difficulty screen. Online, a co-op game is **private**
+(joined by its code) unless you choose: **X** on the waiting screen makes
+it public, listed in the server browser (with Server Setup's password, if
+one is set), and X again private (OpenCE's `network.coop_public`, kept).
+The partner opens the System Link screen (Multiplayer: LAN, the server
+browser or Join by code; without the PC menus, System Link or the settings
+panel's Join with a code), where the game is listed as
 "<host>: <level> (<difficulty>)" (with the level and "Co-op" and the
 difficulty beside it), and joins it with **A**. Once the partner is in, the
 level starts after a few seconds (the host's **A** sooner). The PC menus'
 **Co-op campaign** opens the Campaign screen for the host. While the
-host waits alone, the lobby's X and A keys are hidden (B cancels), and B
-back on the difficulty screen keeps the difficulty chosen. 1.0.3's Co-op
+host waits alone, the lobby's X and A keys are hidden (B cancels; X there
+is the visibility, as the screen says), and B back on the difficulty
+screen keeps the difficulty chosen. 1.0.3's Co-op
 page, which made every game the Vita hosted a campaign level, is gone: a
 settings.txt that had a level set loads as Off. The Xbox game had co-op only
 in split screen; this is upstream halo-ce-universal's network co-op

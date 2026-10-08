@@ -93,8 +93,10 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   HALO_NET_LOBBY_PASSWORD) are the game's Server Setup's, which sets them as
   this panel sets a row (vita_settings_set) and settings.txt keeps them; the
   Play page that showed them is gone (its rows are kept on a page no row
-  opens). 1.0.3's "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as
-  Visibility; 1.0.3's Co-op page variables load as Off.
+  opens). So is co-op's own visibility (HALO_NET_COOP_PUBLIC, OpenCE's
+  network.coop_public: Private unless chosen), which X on the waiting screen
+  of co-op hosted online sets (port/linux/game/coop_menu.c). 1.0.3's
+  "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
 
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo), and
@@ -462,6 +464,11 @@ static struct setting settings[] = {
 		"Private: others join by code. Public: listed too", 1, PAGE_PLAY },
 	{ "  Password", "HALO_NET_LOBBY_PASSWORD", 0, 0, { NULL }, { NULL }, "A public game asks joiners for it", 0,
 		PAGE_PLAY, KIND_TEXT },
+	/* (network.coop_public, OpenCE's: co-op hosted online is private
+	unless chosen with X on its waiting screen, which sets this row; it
+	takes effect at once: port/linux/game/coop_menu.c) */
+	{ "  Co-op visibility", "HALO_NET_COOP_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
+		"Co-op online: Private, by code; Public, listed too", 0, PAGE_PLAY },
 
 	/* (custom maps: the Custom Edition maps join the multiplayer level
 	list; off by default while their colours are wrong on the Vita; the
@@ -810,6 +817,12 @@ static void play_listing_set_name(const char *name)
 static void play_listing_set_public(int listed)
 {
 	p2p_lobby_set_public(listed);
+}
+
+/* (a co-op game's own: network.coop_public) */
+static void play_listing_set_coop_public(int listed)
+{
+	p2p_lobby_set_coop_public(listed);
 }
 
 /* (internet play works the password's key out on its own thread, once it
@@ -2488,6 +2501,8 @@ static void change(struct setting *setting, int step)
 	/* (listed or not takes effect at once, also while hosting) */
 	if (strcmp(setting->variable, "HALO_NET_HOST_PUBLIC") == 0)
 		play_listing_set_public(choice);
+	if (strcmp(setting->variable, "HALO_NET_COOP_PUBLIC") == 0)
+		play_listing_set_coop_public(choice);
 	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 	save();
 	if (setting->dev)

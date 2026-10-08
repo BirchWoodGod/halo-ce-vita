@@ -1435,6 +1435,16 @@ static void network_game_server_list(
 		last.pc_map = custom_edition_cache_is_custom_edition(game->map.name) ? 1 : 0;
 		last.told = FALSE;
 	}
+	if (!last.told || game->variant.universal_variant.score_to_win != last.score || difficulty != last.difficulty ||
+		strcmp(players, last.players))
+	{
+		last.score = game->variant.universal_variant.score_to_win;
+		last.difficulty = difficulty;
+		strcpy(last.players, players);
+		/* (first: a co-op game is known as one before it can be listed,
+		and its own visibility applies, network.coop_public: p2p_lobby.c) */
+		p2p_set_game_listing_details(last.score, difficulty, last.pc_map, players);
+	}
 	if (!last.told || strcmp(name, last.name) || strncmp(map, last.map, sizeof(last.map) - 1) ||
 		strcmp(gametype, last.gametype) || game->variant.game_engine_index != last.engine || open != last.open ||
 		in_progress != last.in_progress || game->variant.universal_variant.teams != last.teams)
@@ -1448,14 +1458,6 @@ static void network_game_server_list(
 		last.teams = game->variant.universal_variant.teams;
 		/* (the scenario's name, not its path: the listing has 32 characters) */
 		p2p_set_game_listing(name, map, gametype, last.engine, open, in_progress, last.teams);
-	}
-	if (!last.told || game->variant.universal_variant.score_to_win != last.score || difficulty != last.difficulty ||
-		strcmp(players, last.players))
-	{
-		last.score = game->variant.universal_variant.score_to_win;
-		last.difficulty = difficulty;
-		strcpy(last.players, players);
-		p2p_set_game_listing_details(last.score, difficulty, last.pc_map, players);
 	}
 	last.told = TRUE;
 }
@@ -1519,14 +1521,16 @@ boolean network_game_server_idle(
 		}
 	}
 
-	/* (what Discord shows of a game hosted for internet play, and the
-	server browser's listing) */
-	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
-	network_game_server_list(server);
 	/* port: the settings' co-op choice (the Vita's settings panel) */
 	network_game_server_port_cooperative_setting(server);
 	/* port: the settings' lobby name and most players (the panel's Play page) */
 	network_game_server_port_lobby_settings(server);
+	/* (what Discord shows of a game hosted for internet play, and the
+	server browser's listing: after the settings above, so that a game they
+	make co-op is never listed as the game it was, co-op's visibility being
+	its own, network.coop_public) */
+	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
+	network_game_server_list(server);
 
 	if (network_game_server_game_is_valid(server))
 	{

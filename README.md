@@ -184,8 +184,9 @@ the PC version's Multiplayer screen, from OpenCE's PC menus:
   code) and password, which are kept - then your profile, the map and the
   gametype; the settings panel's Multiplayer tab shows your game's code.
   **LAN** is the System Link screen (Y creates a game).
-- **Co-op campaign** (pick a level and a difficulty, then Y), **Split
-  screen** and **Edit gametypes**, as before.
+- **Co-op campaign** (pick a level and a difficulty, then Y; online the
+  game is private, joined by its code, unless X on its waiting screen makes
+  it public), **Split screen** and **Edit gametypes**, as before.
 
 Internet and Join by code need **Connection: Online** (settings panel,
 Multiplayer); the screen says so otherwise. The pictures and text are read
