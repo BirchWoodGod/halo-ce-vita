@@ -109,6 +109,23 @@ int p2p_peer_offered(const unsigned char *identifier, const unsigned char *secre
 		fuzz_offers += (int)(candidates[count - 1].port & 1);
 	return 1;
 }
+/* (the relays: one offered, so a JOIN and an ACCEPT carry the block) */
+int p2p_local_relays(struct p2p_candidate *relays, int maximum_count)
+{
+	(void)maximum_count;
+	relays[0].address = 0x0200000A;
+	relays[0].port = 0x5678;
+	return 1;
+}
+void p2p_peer_relays(const unsigned char *identifier, const unsigned char *secret, const struct p2p_candidate *relays,
+	int count)
+{
+	(void)identifier; (void)secret;
+	if (count < 0 || count > P2P_MAXIMUM_RELAYS || (count && !relays))
+		abort();
+	if (count > 0)
+		fuzz_offers += (int)(relays[count - 1].port & 1);
+}
 int p2p_peer_turned_away(const unsigned char *identifier, int is_host)
 {
 	(void)is_host;
