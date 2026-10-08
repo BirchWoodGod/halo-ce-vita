@@ -291,6 +291,10 @@ __attribute__((constructor(200))) static void dedicated_platform_start(void)
 		sigaction(SIGINT, &action, NULL);
 		sigaction(SIGHUP, &action, NULL);
 		signal(SIGPIPE, SIG_IGN);
+		/* (started in the background of a shell, "halo-server &": reading the
+		terminal would stop the whole server; ignored, the read fails and
+		the console is off) */
+		signal(SIGTTIN, SIG_IGN);
 	}
 
 	/* what a server never has (the settings' variables: port_config.c) */

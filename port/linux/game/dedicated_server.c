@@ -1374,14 +1374,15 @@ void dedicated_server_update(
 			{
 				if (dedicated.coop)
 				{
-					/* (co-op has no game engine to end: back to the lobby,
-					the level again for the next to join) */
+					/* (co-op has no game engine to end: its round ends as a
+					level won ends it, the same level next, back in the lobby
+					for the next to join) */
 					if (!dedicated.back_to_lobby)
 					{
-						say("nobody is left: back to the lobby");
+						say("nobody is left: back to the lobby (the level again)");
 						dedicated.back_to_lobby = TRUE;
 						dedicated.restart = TRUE;
-						network_game_server_reset_to_pregame(server);
+						network_game_server_port_cooperative_won(NULL);
 					}
 				}
 				else
