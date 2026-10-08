@@ -187,6 +187,17 @@ void main_vertical_blank_interrupt_handler(
 
 void main_loop(void);
 
+#ifdef HALO_LINUX
+/* port: a host command asked for from another thread: the Vita's settings
+panel's Play page. "kick <player name>" (dropped, may join again), "ban
+<player name>" (dropped, kept out: bans.txt) or "bringto" (co-op: every
+player comes to the host), run as the console runs it
+(hs_compile_and_evaluate) at the top of the next frame, while no tick runs.
+FALSE if the command is too long or too many wait already. Thread-safe. */
+boolean main_request_host_command(
+	char const *command);
+#endif
+
 /* ---------- globals */
 
 extern short player_spawn_count;
