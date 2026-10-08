@@ -4542,11 +4542,15 @@ enum
 	_main_split_network_end,
 	_main_split_camera_engine,
 	_main_split_join,
+	_main_split_render,
+	_main_split_present,
 	NUMBER_OF_MAIN_SPLITS
 };
 static int main_split_enabled = -1;
 static unsigned long long main_split_last, main_split_us[NUMBER_OF_MAIN_SPLITS];
 static unsigned long main_split_frames;
+/* (the frame's own, for the frame-hitch line) */
+static unsigned long long main_split_frame_us[NUMBER_OF_MAIN_SPLITS], main_split_frame_started;
 
 static void main_split_mark(int step)
 {
@@ -4563,18 +4567,54 @@ static void main_split_mark(int step)
 		return;
 	now = vita_host_time_us();
 	if (step >= 0 && main_split_last)
+	{
 		main_split_us[step] += now - main_split_last;
+		main_split_frame_us[step] += now - main_split_last;
+	}
+	if (!main_split_frame_started)
+		main_split_frame_started = now;
 	main_split_last = now;
 }
 
 static void main_split_report(void)
 {
 	static const char *const names[NUMBER_OF_MAIN_SPLITS] =
-		{ "input", "network_start", "time+ui", "player_control", "network_end", "camera+engine", "tick_join" };
+		{ "input", "network_start", "time+ui", "player_control", "network_end", "camera+engine", "tick_join", "render",
+		"present" };
 	char line[512];
 	int n = 0, index;
 
-	if (main_split_enabled <= 0 || ++main_split_frames % 300)
+	if (main_split_enabled <= 0)
+		return;
+	{
+		/* (a frame over 100 ms: the game thread's steps that frame, by
+		name - what a hitch with no texture decoded, no shader and no wait
+		for the worker spent its time on; "present" holds the wait for
+		the worker, the load-profile line (HALO_LOAD_PROFILE) the waits for
+		reads) */
+		extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+		static unsigned long hitches;
+		unsigned long long now = vita_host_time_us ? vita_host_time_us() : 0, total;
+
+		total = main_split_frame_started && now > main_split_frame_started ? now - main_split_frame_started : 0;
+		if (total > 100000ull && hitches < 200)
+		{
+			unsigned long long marked = 0;
+
+			hitches++;
+			for (index = 0; index < NUMBER_OF_MAIN_SPLITS; index++)
+			{
+				marked += main_split_frame_us[index];
+				n += snprintf(line + n, sizeof(line) - n, " %s %.1f", names[index], (double)main_split_frame_us[index] / 1000.0);
+			}
+			platform_log("frame-hitch: %.1f ms on the game thread:%s, other %.1f", (double)total / 1000.0, line,
+				(double)(total > marked ? total - marked : 0) / 1000.0);
+			n = 0;
+		}
+		memset(main_split_frame_us, 0, sizeof(main_split_frame_us));
+		main_split_frame_started = 0;
+	}
+	if (++main_split_frames % 300)
 		return;
 	for (index = 0; index < NUMBER_OF_MAIN_SPLITS; index++)
 	{
@@ -4961,6 +5001,7 @@ void main_loop(
 			}
 
 #ifdef HALO_LINUX
+			MAIN_SPLIT(_main_split_render);
 			halo_frame_timing(_frame_timing_present_start, 0);
 #endif
 			main_rasterizer_throttle();
@@ -4974,7 +5015,7 @@ void main_loop(
 			}
 #ifdef HALO_LINUX
 			halo_frame_timing(_frame_timing_present_end, 0);
-			MAIN_SPLIT(-1);
+			MAIN_SPLIT(_main_split_present);
 			if (tick_running)
 			{
 				extern unsigned long long vita_host_time_us(void) __attribute__((weak));

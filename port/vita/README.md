@@ -270,7 +270,7 @@ is on, and off, `env.txt`'s value (or the default) applies. While any is on,
 
 | Switch | Variable | What it does |
 | --- | --- | --- |
-| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go, in `halo.log` |
+| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1`, `HALO_LOAD_PROFILE=1` | where the frame and the tick go, in `halo.log`; a frame over 100 ms named by its parts (`frame-hitch`, `load-profile`) |
 | Crash dump on hang | `HALO_HANG_CRASH=1` | a hang of 8 s (no frame presented) crashes on purpose, for a crash dump |
 | FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load, render scale, GPU time, free video memory (VRAM; yellow while part of the texture cache is in main memory) |
 | Debug camera | `HALO_DEBUG_CAMERA=1` | hold Black for a second: follow, orbit, then a flying camera |
