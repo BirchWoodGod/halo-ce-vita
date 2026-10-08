@@ -12,7 +12,9 @@ installer streamed). Its progress is the settings panel's progress line
 over the game, which circle cancels; then, the three in place, the player
 is asked whether to delete the installer (170 MB). The PC multiplayer
 menus look for the maps as ui.map loads (port/linux/game/menu_tags.c), so
-the first start's menus are the Xbox's: the question says to restart.
+the first start's menus are the Xbox's: once the question is answered, the
+game restarts itself when the main menu is up and no network game holds it
+(halo_main_menu_idle, main.c), or says to restart.
 */
 
 #include <psp2/appmgr.h>
@@ -36,6 +38,8 @@ void vita_settings_progress(const char *title, const char *text);
 int vita_settings_progress_cancelled(void);
 void vita_settings_question(const char *title, const char *text);
 int vita_settings_question_answer(void);
+/* (main.c) the main menu is up, no network game: a restart loses nothing */
+int halo_main_menu_idle(void);
 
 static volatile int running;
 static char installer[512];
@@ -162,8 +166,9 @@ static void extraction_thread(void *argument)
 		int answer;
 
 		snprintf(text, sizeof(text), "bitmaps.map, sounds.map and loc.map are in the maps folder: Custom Edition "
-			"maps can be played (Modded maps > PC maps), and the PC multiplayer menus come after a restart.\n\n"
-			"Delete %s (%llu MB) to free the space?", file_name(installer), installer_size >> 20);
+			"maps can be played (Modded maps > PC maps), and the PC multiplayer menus come after a restart%s.\n\n"
+			"Delete %s (%llu MB) to free the space?",
+			halo_main_menu_idle() ? ", which follows this question" : "", file_name(installer), installer_size >> 20);
 		vita_settings_question(TITLE, text);
 		while ((answer = vita_settings_question_answer()) < 0)
 			vita_host_sleep_us(100000);
@@ -177,6 +182,24 @@ static void extraction_thread(void *argument)
 				vita_settings_message(TITLE, "The installer could not be deleted. Delete it with VitaShell.");
 			}
 		}
+		/* the PC menus are read as ui.map loads: a restart brings them,
+		unless a game is under way (the player restarts when it suits) */
+		if (halo_main_menu_idle())
+		{
+			int error_code;
+
+			vita_settings_progress(TITLE, "Restarting the game for the PC multiplayer menus...");
+			vita_host_log("ce installer: restarting the game for the PC menus");
+			vita_host_sleep_us(1500000);
+			error_code = sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
+			vita_settings_progress(NULL, NULL);
+			snprintf(text, sizeof(text), "ce installer: the restart failed (0x%08X)", (unsigned int)error_code);
+			vita_host_log(text);
+			vita_settings_message(TITLE, "The game could not restart itself: close it and start it again for the PC "
+				"multiplayer menus.");
+		}
+		else
+			vita_settings_message(TITLE, "Restart Halo after this game to get the PC multiplayer menus.");
 	}
 	running = 0;
 }

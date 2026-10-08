@@ -872,6 +872,13 @@ short game_connection(
 }
 
 #ifdef HALO_LINUX
+/* (port) whether the main menu is up and no network game holds the game:
+nothing is lost if the game restarts now (vita_ce_installer.c) */
+int halo_main_menu_idle(void)
+{
+	return main_globals.main_menu_scenario_loaded && main_globals.connection == _game_connection_local;
+}
+
 /* (port) whether the arrays data.c holds to the Xbox's sizes are held now:
 a local game, unless HALO_XBOX_PARTICLE_LIMITS=0 (data.c datum_new_limit) */
 int halo_local_limits_active(void)
