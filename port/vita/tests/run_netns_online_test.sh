@@ -709,7 +709,8 @@ esac
 # taken, but in relay mode)
 if [ "$mode" != relay ]; then
 	for log in "$out"/*/run.log; do
-		grep -aq "Internet play: connected to host" "$log" || continue
+		# (a copy of before relays, HALO_TEST_VITA_JOINER: not told)
+		grep -aq "Internet play: connected to host" "$log" && grep -aq "Internet play: the relay " "$log" || continue
 		grep -aq "Internet play: connected to host .*, directly" "$log" ||
 			fail "$(basename "$(dirname "$log")") did not connect to the host directly"
 		grep -aqE "Internet play: (connected to .*|.* is now reached) through the relay" "$log" &&
