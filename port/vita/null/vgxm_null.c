@@ -1396,6 +1396,15 @@ void vgxm_upscale_filter_set(int filter)
 	(void)filter;
 }
 
+/* (no display: the buffering asked for is logged once each way) */
+void vgxm_display_buffering(int buffers)
+{
+	static int logged[2];
+
+	if (!logged[buffers >= 3]++)
+		platform_log("gxm-null: %s buffering asked for", buffers >= 3 ? "triple" : "double");
+}
+
 const void *vgxm_display_pixels(unsigned long *pitch, unsigned long *width, unsigned long *height)
 {
 	(void)width;

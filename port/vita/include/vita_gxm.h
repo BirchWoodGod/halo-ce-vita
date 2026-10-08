@@ -322,6 +322,9 @@ void vgxm_overlay_dynamic(int dynamic);
 /* the frame's scale to the display: 0 smooth (bilinear), 1 sharp
 (nearest); HALO_UPSCALE_FILTER at start-up */
 void vgxm_upscale_filter_set(int filter);
+/* the display's buffers: 3 (triple buffering, frame interpolation's: the
+third made the first time) or 2, from the next frame on */
+void vgxm_display_buffering(int buffers);
 /* (debug) the display buffer last presented, 960x544 (the screenshots'
 HALO_SCREENSHOT_DISPLAY=1) */
 const void *vgxm_display_pixels(unsigned long *pitch, unsigned long *width, unsigned long *height);
