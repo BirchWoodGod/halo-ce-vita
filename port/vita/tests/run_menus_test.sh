@@ -27,7 +27,7 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
-binary=${HALO_TEST_VITA:-$root/build/linux/halo}
+binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
