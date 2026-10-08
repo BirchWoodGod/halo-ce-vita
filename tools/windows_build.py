@@ -49,6 +49,15 @@ SDL_DIR = THIRD_PARTY / f"SDL3-{SDL_VERSION}"
 # the TOML parser the platform layer reads config.toml with (port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
 KCP_DIR = Path("port/third_party/kcp")
+# (from OpenCE, MrBruh's "Second hardening round") the port's zlib
+# (port/third_party/zlib/zlib_prefixed.h, 1.3.2): what inflates the maps,
+# which are anyone's files, instead of the game's own 1.1.3 (its inflate
+# only, its names prefixed z_)
+ZLIB_DIR = Path("port/third_party/zlib")
+ZLIB_SOURCES = ("adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "uncompr.c", "zutil.c")
+# (its names prefixed, and the one Z_PREFIX leaves, its error messages, which
+# the game's zlib names the same)
+ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
 
 
 def updater_defines(release: bool) -> str:
@@ -416,6 +425,9 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         add_object(TOML_DIR / "tomlc17.c", " ".join([abi, "-std=gnu11", "-w"]))
         # internet play's reliable streams (port/third_party/kcp; p2p.c)
         add_object(KCP_DIR / "ikcp.c", " ".join([abi, "-std=gnu11", "-w"]))
+        # the port's zlib (map inflation: cache_files_decompress_windows.c)
+        for name in ZLIB_SOURCES:
+            add_object(ZLIB_DIR / name, " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():

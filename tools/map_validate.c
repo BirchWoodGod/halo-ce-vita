@@ -46,7 +46,7 @@ usage: map_validate [--strict] [--quiet] [--maps folder] [--fuzz iterations [--s
 #include <time.h>
 #include <unistd.h>
 
-#include "zlib.h"
+#include "zlib_prefixed.h"
 #include "../port/linux/game/cache_file_formats.h"
 
 /* ---------- constants */

@@ -39,6 +39,15 @@ THIRD_PARTY = BUILD / "third_party"
 # the TOML parser config.toml is read with (port/linux/src/port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
 KCP_DIR = Path("port/third_party/kcp")
+# (from OpenCE, MrBruh's "Second hardening round") the port's zlib
+# (port/third_party/zlib/zlib_prefixed.h, 1.3.2): what inflates the maps,
+# which are anyone's files, instead of the game's own 1.1.3 (its inflate
+# only, its names prefixed z_)
+ZLIB_DIR = Path("port/third_party/zlib")
+ZLIB_SOURCES = ("adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "uncompr.c", "zutil.c")
+# (its names prefixed, and the one Z_PREFIX leaves, its error messages, which
+# the game's zlib names the same)
+ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
 MUSL_VERSION = "1.2.5"
 MUSL_DIR = THIRD_PARTY / f"musl-{MUSL_VERSION}"
 MUSL_URL = f"https://musl.libc.org/releases/musl-{MUSL_VERSION}.tar.gz"
@@ -425,6 +434,12 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     objects.append(guest_object(TOML_DIR / "tomlc17.c", platform_cflags))
     # internet play's reliable streams (port/third_party/kcp; p2p.c)
     objects.append(guest_object(KCP_DIR / "ikcp.c", platform_cflags))
+    # the port's zlib (map inflation: cache_files_decompress_windows.c; not
+    # the CPU's CRC32 instructions, which the guest's assembly step is not
+    # told it may use)
+    for name in ZLIB_SOURCES:
+        objects.append(guest_object(ZLIB_DIR / name, " ".join([platform_cflags, *ZLIB_DEFINES,
+                                                               "-U__ARM_FEATURE_CRC32"])))
     # the game's sin, pow and the rest, the same on every port
     # (port/include/halo_math.h)
     musl_math_cflags = " ".join([

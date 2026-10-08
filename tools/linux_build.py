@@ -105,6 +105,15 @@ GAME_FLAGS = [
 # the TOML parser the platform layer reads config.toml with (port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
 KCP_DIR = Path("port/third_party/kcp")
+# (from OpenCE, MrBruh's "Second hardening round") the port's zlib
+# (port/third_party/zlib/zlib_prefixed.h, 1.3.2): what inflates the maps,
+# which are anyone's files, instead of the game's own 1.1.3 (its inflate
+# only, its names prefixed z_)
+ZLIB_DIR = Path("port/third_party/zlib")
+ZLIB_SOURCES = ("adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "uncompr.c", "zutil.c")
+# (its names prefixed, and the one Z_PREFIX leaves, its error messages, which
+# the game's zlib names the same)
+ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
 MUSL_MATH_DIR = Path("port/third_party/musl-math")
 # the self-updater's TLS (port/linux/src/posix_update.c)
 MBEDTLS_DIR = Path("port/third_party/mbedtls")
@@ -490,6 +499,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
         add_object(TOML_DIR / "tomlc17.c", " ".join([abi, "-std=gnu11", "-w"]))
         # internet play's reliable streams (port/third_party/kcp; p2p.c)
         add_object(KCP_DIR / "ikcp.c", " ".join([abi, "-std=gnu11", "-w"]))
+        # the port's zlib (map inflation: cache_files_decompress_windows.c)
+        for name in ZLIB_SOURCES:
+            add_object(ZLIB_DIR / name, " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():
@@ -508,13 +520,12 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
 
         # (from OpenCE) the tag validator (port/linux/game/tag_validate.c,
         # tag_schema*.c) alone on map files: the game's objects of it and of
-        # the Custom Edition loader (cache_file_formats.c), the game's zlib,
+        # the Custom Edition loader (cache_file_formats.c), the port's zlib,
         # and a program that reads maps (tools/map_validate.c)
         if validator is not None:
             game_dir = Path(config["game_sources"])
             tool = Path("tools/map_validate.c")
             tool_object = obj_dir / tool.with_suffix(".o")
-            zlib_dir = Path("source/memory/zlib")
             n.build(
                 outputs=tool_object,
                 rule="linux_cc",
@@ -523,13 +534,12 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 # loader's objects it calls have them: -malign-double puts its
                 # reports' 64-bit fields where the game does)
                 variables={"cflags": " ".join([posix_cflags, "-malign-double", "-freg-struct-return",
-                                               f"-I{zlib_dir}", posix_extra])},
+                                               f"-I{ZLIB_DIR}", *ZLIB_DEFINES, posix_extra])},
             )
             tool_objects = [tool_object, obj_dir / (game_dir / "tag_validate.o"),
                             obj_dir / (game_dir / "cache_file_formats.o"),
                             *(obj_dir / source.with_suffix(".o") for source in sorted(game_dir.glob("tag_schema*.c"))),
-                            *(obj for obj in objects if str(obj).replace(os.sep, "/").startswith(
-                                str(obj_dir / zlib_dir).replace(os.sep, "/") + "/") and obj.name != "gzio.o")]
+                            *(obj_dir / (ZLIB_DIR / name).with_suffix(".o") for name in ZLIB_SOURCES)]
             n.build(
                 outputs=validator,
                 rule="linux_tool_link",

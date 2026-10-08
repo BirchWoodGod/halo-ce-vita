@@ -223,7 +223,12 @@ symbols in this file:
 #include "cseries/errors.h"
 #include "cache/cache_files.h"
 #include "cache/cache_files_decompress_windows.h"
-#include "memory/zlib/zlib.h"
+/* port (from OpenCE, MrBruh's "Second hardening round"): the port's zlib
+(1.3.2), not the game's 1.1.3, inflates the maps, which are anyone's files
+(a map downloaded from a stranger too); its inflate needs about 40 KB of
+ZLIB_BUFFER_SIZE, and frees what it takes in the reverse order, as
+cache_copy_compressed_free wants */
+#include "../../port/third_party/zlib/zlib_prefixed.h"
 
 #include <xtl.h>
 
