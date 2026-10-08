@@ -600,9 +600,11 @@ void scenario_tags_unload(
 
 #ifdef HALO_LINUX
 /* port: the loaded tags' table and its count, for the menus' tags
-(port/linux/game/menu_tags.c), which a copy with theirs added replaces:
-the table first, then its count, so that another thread looking a tag up
-by name meanwhile walks one table or the other */
+(port/linux/game/menu_tags.c), which a copy with theirs added replaces -
+in the tag header too, which the tag checks read (tag_validate.c), and the
+release builds' count (halo_loaded_tag_count): the table first, then its
+count, so that another thread looking a tag up meanwhile walks one table
+or the other */
 void *cache_files_tag_instances(
 	long *count)
 {
@@ -616,14 +618,22 @@ void cache_files_set_tag_instances(
 {
 	if (!cache_file_globals.tags_loaded)
 		return;
+	/* (and the count the release builds' tag_get checks indices against,
+	tag_groups.h: without it, every tag of ours read as the empty one) */
 	if (count > cache_file_globals.tag_header->tag_count)
 	{
 		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_instances, (struct cache_file_tag_instance *)instances,
+			__ATOMIC_RELEASE);
 		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&halo_loaded_tag_count, count, __ATOMIC_RELEASE);
 	}
 	else
 	{
+		__atomic_store_n(&halo_loaded_tag_count, count, __ATOMIC_RELEASE);
 		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_instances, (struct cache_file_tag_instance *)instances,
+			__ATOMIC_RELEASE);
 		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
 	}
 }
