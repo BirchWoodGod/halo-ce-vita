@@ -37,6 +37,57 @@ What it does not do:
 - Players in the lobby cannot see `sv_say` messages. They see them in a
   game.
 
+## Download a release build
+
+Each release from 1.1.0-beta.2 has the server ready to run, on its
+[releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases), as
+two downloads:
+
+| Download | For |
+| --- | --- |
+| `halo-ce-vita-server-<version>-linux-x86.tar.gz` | A 64-bit PC or VPS: Debian 12 or newer, Ubuntu 22.04 or newer, or another distribution with glibc 2.36 or newer. A 32-bit x86 program. |
+| `halo-ce-vita-server-<version>-linux-armhf.tar.gz` | A Raspberry Pi 4 (or another ARMv8 Pi: 3, 5) with Raspberry Pi OS 12 ("Bookworm") or 13 ("Trixie"), 32-bit or 64-bit. A 32-bit ARM program. |
+
+The program needs only glibc: SDL3 is linked into it. On a 64-bit system,
+add the 32-bit glibc once:
+
+```
+sudo dpkg --add-architecture i386 && sudo apt update && sudo apt install libc6:i386     # PC, VPS
+sudo dpkg --add-architecture armhf && sudo apt update && sudo apt install libc6:armhf   # 64-bit Raspberry Pi OS
+```
+
+Each download holds `halo-server`, `README-SERVER.md` (a quick start),
+this guide, `init.txt.example`, `examples/` (Slayer, Big Team, Oddball and
+King of the Hill servers on ports 2302 to 2305), `systemd/` (the units of
+"As a service" and "Several servers on one VPS", and `halo-servers`), the
+licences (`LICENSE`, the GPL 3, and `licenses/`, SDL3's and the other
+libraries') and `SHA256SUMS`. No game data: copy the `maps` folder of your
+own Xbox game into the server's folder ("The server's folder"). The
+release's `SHA256SUMS` has the downloads' checksums:
+
+```
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf halo-ce-vita-server-<version>-linux-x86.tar.gz
+cd halo-ce-vita-server-<version>-linux-x86 && ./halo-server -help
+```
+
+Then follow "Run it on a PC" or "Run it on a Raspberry Pi 4" with that
+`halo-server` in place of `build/linux/halo-server`.
+
+The downloads are built by `.github/workflows/dedicated-server.yml` (on a
+release's tag, or by hand) with `tools/package_server.py`, which builds the
+same packages on any Linux PC with clang, lld, cmake and ninja: it compiles
+the server against Debian 12's own glibc and libgcc (fetched, checked
+against their pinned checksums), with SDL3 3.2 built as a static, headless
+library, checks that the programs need no glibc symbol newer than 2.36 and
+no library but glibc's, and starts each package's server in Debian 12's
+userland (bubblewrap, or a `debian:bookworm` container; the ARM one under
+`qemu-arm`):
+
+```
+python3 tools/package_server.py --version 1.1.0-beta.2 --fetch-qemu
+```
+
 ## Build
 
 The server is built from this repository with the same tools as the game.
@@ -64,8 +115,10 @@ packages, without `-dev` where your distribution splits them).
 
 ### For a Raspberry Pi 4
 
-The server for a Raspberry Pi is a 32-bit ARM (armhf) program. It runs on
-Raspberry Pi OS 13 ("Trixie") or newer. On a 64-bit Raspberry Pi OS, add
+The server for a Raspberry Pi is a 32-bit ARM (armhf) program. Built with
+Arm's toolchain as below, it runs on Raspberry Pi OS 13 ("Trixie") or newer
+(its glibc is 2.38); the release build ("Download a release build") runs on
+12 ("Bookworm") too. On a 64-bit Raspberry Pi OS, add
 the armhf libraries once:
 `sudo dpkg --add-architecture armhf && sudo apt update && sudo apt install libc6:armhf libsdl3-0:armhf`.
 
@@ -375,7 +428,7 @@ the user `halo`, with `/opt/halo/mapcache` as their shared map cache
 (unless a server's `init.txt` names another) and the protections of
 `halo-server.service`. The program is `/opt/halo/bin/halo-server`, and
 `/opt/halo/lib` holds the 32-bit SDL3 (and the 32-bit libraries it needs)
-on a system without them.
+on a system without them (a release build needs none: SDL3 is inside it).
 
 Four servers:
 
@@ -386,7 +439,7 @@ sudo install -d -o halo -g halo -m 750 /opt/halo/mapcache
 for n in 1 2 3 4; do
 	sudo install -d -o halo -g halo -m 750 /opt/halo/servers/s$n
 	sudo ln -s /opt/halo/maps /opt/halo/servers/s$n/maps    # the maps, once
-	sudo install -o halo -g halo -m 640 init-s$n.txt /opt/halo/servers/s$n/init.txt
+	sudo install -o halo -g halo -m 640 init-s$n.txt /opt/halo/servers/s$n/init.txt   # (a release's examples/)
 done
 sudo install -m 644 port/linux/halo-server@.service /etc/systemd/system/
 sudo install -m 755 tools/halo-servers /usr/local/bin/halo-servers
@@ -405,8 +458,8 @@ Open UDP 2302 to 2305 in the firewall (`sudo ufw allow 2302:2305/udp`).
 ```
 $ halo-servers list
 SERVER       STATE      PORT   GAME-PORTS  NAME
-s1           active     2302   5150-5151   Vita Official #1 Slayer
-s2           active     2303   5152-5153   Vita Official #2 Big Team
+s1           active     2302   5150-5151   My Slayer Server
+s2           active     2303   5152-5153   My Big Team Server
 ...
 $ sudo halo-servers status
 s1: active; playing, slayer on prisoner; 3 players (Vita1, Bob, Ann); code ABCD-EFGH

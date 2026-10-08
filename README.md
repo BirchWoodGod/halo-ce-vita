@@ -520,6 +520,9 @@ map cycle set up in `init.txt` with Halo PC's dedicated server commands
 supplies the game data (their own Xbox `maps` folder). Building it, running
 it on a PC or a Pi, port forwarding and security:
 **[port/linux/DEDICATED_SERVER.md](port/linux/DEDICATED_SERVER.md)**.
+From 1.1.0-beta.2, each release also has the server ready to run, for a
+Linux PC or VPS (x86) and a Raspberry Pi (armhf): see
+[Download a release build](port/linux/DEDICATED_SERVER.md#download-a-release-build).
 
 ## Saving
 
