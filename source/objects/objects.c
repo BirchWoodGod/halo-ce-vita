@@ -2653,7 +2653,13 @@ void object_compute_node_matrices(
 					overlay_index,
 					struct animation_graph_object_overlay);
 
+				/* port: the overlay's indices are a map's: a function the
+				object's outgoing values hold, an animation the graph has */
 				if (overlay->animation_index!=NONE &&
+					overlay->animation_index>=0 &&
+					overlay->animation_index<animation_graph->animations.count &&
+					overlay->function_index>=0 &&
+					overlay->function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS &&
 					overlay->function_index<object_definition->object.functions.count)
 				{
 					struct object_function_definition* function = TAG_BLOCK_GET_ELEMENT(
@@ -5457,7 +5463,12 @@ static void object_compute_function_values(
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
 	real huh = (57 * DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + game_time_get()) * 0.033333335f;
 
-	for (function_index = 0; function_index<object_definition->object.functions.count; ++function_index)
+	/* port: an object tag's function count is a map's; past
+	NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS it wrote the object's outgoing values
+	and shifted its active flags past their ends */
+	for (function_index = 0;
+		function_index<object_definition->object.functions.count && function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS;
+		++function_index)
 	{
 		real value;
 		real output;
@@ -5559,7 +5570,11 @@ static void object_compute_function_values(
 			}
 		}
 
+		/* port: (an index of no function turns nothing off: the map's, and a
+		flag past the byte's) */
 		if (function->turn_off_with_function_index!=NONE &&
+			function->turn_off_with_function_index>=0 &&
+			function->turn_off_with_function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS &&
 			!TEST_FLAG(object->object.functions_active_flags, function->turn_off_with_function_index))
 		{
 			function_is_active = FALSE;
