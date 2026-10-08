@@ -54,6 +54,23 @@ int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
 static char log_text[16384];
 static int overlay_level = -1;
 
+/* (vita_ce_installer.c's: whether a Custom Edition installer is there, and
+the extraction started) */
+static int installer_state, installer_starts;
+int vita_ce_installer_state(char *name, int size)
+{
+	snprintf(name, (size_t)size, "halocesetup_en_1.00.exe");
+	return installer_state;
+}
+int vita_ce_installer_start(void)
+{
+	installer_starts++;
+	if (installer_state != 1)
+		return -1;
+	installer_state = 2;
+	return 0;
+}
+
 /* (vita_input.c's) */
 void vita_gyro_status(char *text, int size) { snprintf(text, (size_t)size, "Gyro: yaw -999 pitch -999 roll -999 lay still"); }
 
@@ -1638,10 +1655,13 @@ int main(void)
 	printf("%s\n--\n", menu);
 	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(4, line, sizeof(line))[0] &&
-		!strcmp(menu_line(5, line, sizeof(line)), "!Missing: sounds.map loc.map"),
-		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning");
-	check(!strncmp(menu_line(6, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(7, line, sizeof(line)), "inplay\x02", 7) &&
-		!strncmp(menu_line(8, line, sizeof(line)), "mygulch\x02", 8) && menu_line(9, line, sizeof(line))[0] == '\x05',
+		!strcmp(menu_line(5, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita"),
+		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning, and that "
+		"the installer does");
+	check(!strncmp(menu_line(8, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(9, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(10, line, sizeof(line)), "mygulch\x02", 8) && menu_line(11, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
 	/* Map downloads: Ask (the default: public games warn), Not public games,
 	Never; each with its own help, saved and in the environment the game
@@ -1709,6 +1729,21 @@ int main(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
 	check(strstr(menu, "\nModded maps\x02  2 maps  >") != NULL, "back on Multiplayer: two maps now");
+	/* a Custom Edition installer in ux0:data/haloce-vita (PC maps off): the
+	warning, and Extract PC files, which starts taking them */
+	installer_state = 1;
+	open_page("Modded maps");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n!Missing: sounds.map loc.map\n!Extract PC files takes them from the installer\n") &&
+		strstr(menu, "\nExtract PC files\x02") && menu_fits(), "an installer: the warning says Extract PC files, its row");
+	to_line("Extract PC files");
+	check(strstr(menu, "\n\x05The three files out of the Halo CE installer\n") != NULL, "Extract PC files' help");
+	press(VITA_BUTTON_CROSS);
+	check(installer_starts == 1 && strstr(menu, "Taking them from halocesetup_en_1.00.exe") &&
+		strstr(menu, "\n!Taking them from halocesetup_en_1.00.exe\n") && !strstr(menu, "\nExtract PC files\x02") &&
+		menu_fits(), "cross starts it: the row goes, the warning says it is under way");
+	installer_state = 0;
+	press(VITA_BUTTON_CIRCLE);
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);

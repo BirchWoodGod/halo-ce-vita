@@ -138,6 +138,12 @@ int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
 void vita_settings_message(const char *title, const char *text);
+/* the Custom Edition installer's maps (vita_ce_installer.c): taken on a
+thread of their own when an installer is there and they are missing (0
+started, else -1); the state for Modded maps: 0 nothing to do, 1 an
+installer (its file name) and maps missing, 2 taking them */
+int vita_ce_installer_start(void);
+int vita_ce_installer_state(char *name, int size);
 /* ad hoc play (vita_net.c): joins an ad hoc group through the system's
 network check dialog, on a thread of its own. mode 0 "connect" (the room's
 group, made if there is none), 1 make one, 2 pick one nearby; room 1-4.

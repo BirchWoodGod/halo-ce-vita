@@ -15,6 +15,8 @@ and the debug keyboard that the game's console reads.
 #include "port_config.h"
 #include "p2p.h"
 #include "xiso.h"
+#include "ce_installer.h"
+#include "posix.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -46,6 +48,9 @@ static unsigned long keystroke_head, keystroke_count;
 /* updater.c's: the desktop self-updater */
 void updater_start(void);
 void updater_poll(SDL_Window *window);
+#endif
+#if !defined(HALO_NOT_DESKTOP) && defined(__linux__)
+static void platform_ce_installer(void);
 #endif
 
 BOOL platform_sdl_initialize(void)
@@ -81,11 +86,66 @@ BOOL platform_sdl_initialize(void)
 	/* found (or offered to the player, platform_offer_game_data) before the
 	game's window opens */
 	platform_data_root();
+#ifdef __linux__
+	platform_ce_installer();
+#endif
 	/* (a new version looked for meanwhile, updater_poll asking about it) */
 	updater_start();
 #endif
 	return TRUE;
 }
+
+#if !defined(HALO_NOT_DESKTOP) && defined(__linux__)
+/* ---------- the Custom Edition installer (posix_ce_installer.c) */
+
+static int platform_ce_installer_progress(void *context, const char *file, unsigned long long done,
+	unsigned long long total)
+{
+	static Uint64 logged;
+	Uint64 now = SDL_GetTicks();
+
+	(void)context;
+	if (file[0] && (!logged || now - logged >= 2000))
+	{
+		platform_log("Custom Edition installer: %s, %llu%%", file, total ? done * 100 / total : 100ULL);
+		logged = now;
+	}
+	return 0;
+}
+
+/* a Halo Custom Edition installer (halocesetup*.exe) in the data root or its
+maps folder: the resource maps missing from the maps folder (bitmaps.map,
+sounds.map, loc.map) taken from it before the game starts, so its first
+ui.map has the PC menus (the Vita does it on a thread of its own:
+port/vita/host/vita_ce_installer.c) */
+static void platform_ce_installer(void)
+{
+	const char *root = platform_data_root(), *maps_root = getenv("HALO_MAPS_ROOT");
+	char maps[1024], on_disk[256], installer[1024], error[512];
+	unsigned long long size;
+	int missing, result;
+	Uint64 started;
+
+	if (maps_root && *maps_root)
+		snprintf(maps, sizeof(maps), "%s", maps_root);
+	else if (posix_find_entry_case_insensitive(root, "maps", on_disk, sizeof(on_disk)))
+		snprintf(maps, sizeof(maps), "%s/%s", root, on_disk);
+	else
+		return;
+	missing = ce_installer_missing(maps);
+	if (!missing || (!ce_installer_find(root, installer, sizeof(installer), &size) &&
+		!ce_installer_find(maps, installer, sizeof(installer), &size)))
+		return;
+	platform_log("Custom Edition installer: taking the resource maps missing from %s out of %s", maps, installer);
+	started = SDL_GetTicks();
+	result = ce_installer_extract(installer, maps, missing, platform_ce_installer_progress, NULL, error, sizeof(error));
+	if (result == CE_INSTALLER_DONE)
+		platform_log("Custom Edition installer: bitmaps.map, sounds.map and loc.map in %s in %llu ms; the installer "
+			"can be deleted", maps, (unsigned long long)(SDL_GetTicks() - started));
+	else
+		platform_log("Custom Edition installer: %s", error);
+}
+#endif
 
 #ifndef HALO_NOT_DESKTOP
 /* ---------- first start without game data (xbox_files.c) */

@@ -30,6 +30,13 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	result = arena ? vgxm_initialize(arena, size) : -1;
 	if (result != 0)
 		result = 1;
+#ifndef HALO_GXM_NULL
+	/* (a Custom Edition installer copied in: its maps taken on a thread of
+	their own, once the memory window and the display are up; the Linux
+	builds do it as they start, sdl_platform.c) */
+	else
+		vita_ce_installer_start();
+#endif
 	return result == 0;
 }
 

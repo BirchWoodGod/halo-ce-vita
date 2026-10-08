@@ -118,7 +118,9 @@ port/linux/game/custom_edition_maps.c each time the list opens); square
 deletes one, with its picture and description, after a confirmation. The
 "PC maps" switch (Custom Edition maps in the level list) is there too, with
 a warning when the Custom Edition resource maps those need (bitmaps.map,
-sounds.map, loc.map) are not in the folder, and "Map downloads": whether a
+sounds.map, loc.map) are not in the folder (copy them in, or the Halo CE
+installer: with one in ux0:data/haloce-vita, "Extract PC files" takes them
+from it, vita_ce_installer.c), and "Map downloads": whether a
 host's map is offered for download in a game joined without it (Ask, the
 default, warns in a game joined from the public lobby; Not public games
 asks only in the others; Never: port/linux/game/map_share.c).
@@ -238,6 +240,8 @@ enum
 	ACTION_CAMPAIGN,
 	/* opens the page `opens` */
 	ACTION_PAGE,
+	/* the Custom Edition installer's maps taken (vita_ce_installer.c) */
+	ACTION_CE_EXTRACT,
 };
 
 struct setting
@@ -477,6 +481,10 @@ static struct setting settings[] = {
 	maps themselves follow on the page, page_lines) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
+	/* (shown while a Custom Edition installer is in ux0:data/haloce-vita
+	and the resource maps are missing: vita_ce_installer.c) */
+	{ "Extract PC files", NULL, 0, 0, { NULL }, { NULL }, "The three files out of the Halo CE installer",
+		0, PAGE_MAPS, KIND_ACTION, ACTION_CE_EXTRACT },
 	/* (a host's offer of its map, in a game this Vita joined:
 	port/linux/game/map_share.c; the help is each choice's own,
 	map_downloads_help) */
@@ -672,6 +680,10 @@ static int map_count, map_scroll;
 are there), and whether any map listed is a Custom Edition one */
 static char maps_missing[64];
 static int maps_have_custom_edition;
+/* a Custom Edition installer to take them from: vita_ce_installer_state's
+(0 none, 1 there, 2 being read) and its file name */
+static int maps_installer_state;
+static char maps_installer[64];
 /* the maps turned off: their names, commas between (HALO_MAPS_DISABLED) */
 static char maps_disabled[1024];
 
@@ -853,6 +865,8 @@ static int setting_shown(const struct setting *setting)
 {
 	if (setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM"))
 		return network_is("adhoc");
+	if (setting->action == ACTION_CE_EXTRACT)
+		return maps_installer_state == 1;
 	if (setting->action == ACTION_JOIN_CODE || setting->action == ACTION_BROWSE ||
 		(setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC")))
 		return network_is("online");
@@ -1462,6 +1476,7 @@ static void maps_scan(void)
 	}
 	if (map_scroll >= map_count)
 		map_scroll = 0;
+	maps_installer_state = maps_missing[0] ? vita_ce_installer_state(maps_installer, sizeof(maps_installer)) : 0;
 }
 
 static void size_text(char *text, int size, unsigned long long bytes)
@@ -1663,10 +1678,22 @@ static int page_lines(struct line *lines)
 	}
 	if (page == PAGE_MAPS)
 	{
-		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition))
+		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition || maps_installer_state))
 		{
 			lines[count].type = LINE_INFO;
 			snprintf(lines[count++].text, sizeof(lines[0].text), "!Missing: %s", maps_missing);
+			/* (where they come from: the Halo CE installer copied in does) */
+			lines[count].type = LINE_INFO;
+			if (maps_installer_state == 2)
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!Taking them from %.28s", maps_installer);
+			else if (maps_installer_state == 1)
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!Extract PC files takes them from the installer");
+			else
+			{
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!Copy them in, or the Halo CE installer");
+				lines[count].type = LINE_INFO;
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!(halocesetup*.exe) to ux0:data/haloce-vita");
+			}
 		}
 		if (!map_count)
 		{
@@ -2589,6 +2616,8 @@ static size_t format_box(char *formatted, size_t size, const char *title, const 
                 formatted[used++] = '\n';
                 column = 0;
                 if (used >= size - 1) break;
+                /* (a space the line ended at does not start the next) */
+                if (ch == ' ') continue;
             }
             formatted[used++] = ch;
             column = ch == '\n' ? 0 : column + 1;
@@ -2784,6 +2813,14 @@ static void act(const struct setting *setting)
 		page = setting->opens;
 		if (page == PAGE_MAPS)
 			maps_scan();
+		break;
+	/* (its progress line then takes the screen) */
+	case ACTION_CE_EXTRACT:
+		if (vita_ce_installer_start() == 0)
+			set_notice("Taking them from %.28s", maps_installer);
+		else
+			set_notice("No installer, or the files are there");
+		maps_scan();
 		break;
 	case ACTION_HOST:
 	case ACTION_JOIN:
