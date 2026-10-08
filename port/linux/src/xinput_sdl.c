@@ -262,7 +262,9 @@ from when the main menu has been up for a second (test_input_main_menu,
 main.c). Names in the Xbox's terms: a b x y black white lt rt up down left
 right start back ls rs, several at once joined by "+"; "wait" presses
 none; "2." to "4." before a step press it on controller 2 to 4 (the test
-controllers, debug.test_controllers) instead of controller 1. halo.log says
+controllers, debug.test_controllers) instead of controller 1; "unplug" and
+"plug" on one of them disconnect it and connect it again as the step
+begins (a PS TV's DualShock switched off mid-game, and back). halo.log says
 each step as it is pressed. */
 static struct
 {
@@ -282,6 +284,8 @@ static struct
 	} steps[96];
 } test_pad;
 static volatile int test_pad_menu_ready;
+/* the test controllers a step unplugged (a bit per port) */
+static volatile DWORD test_pad_unplugged;
 /* (the main menu is up: the scripted player leaves the menus to the steps) */
 static volatile int test_pad_at_menu;
 
@@ -372,6 +376,20 @@ static void test_pad_parse(void)
 	}
 }
 
+/* a step as it begins: logged, and a test controller's unplug or plug */
+static void test_pad_step_begin(void)
+{
+	const char *name = test_pad.steps[test_pad.index].name;
+	int port = test_pad.steps[test_pad.index].port;
+	const char *action = port ? name + 2 : name;
+
+	platform_log("test pad: %s", name);
+	if (port && !strncmp(action, "unplug", 6))
+		test_pad_unplugged |= 1UL << port;
+	else if (port && !strncmp(action, "plug", 4))
+		test_pad_unplugged &= ~(1UL << port);
+}
+
 static void test_pad_gamepad(XINPUT_GAMEPAD *pad, int port)
 {
 	Uint64 now;
@@ -384,7 +402,7 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad, int port)
 	if (!test_pad.started)
 	{
 		test_pad.started = now;
-		platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+		test_pad_step_begin();
 	}
 	while (test_pad.index < test_pad.count)
 	{
@@ -408,7 +426,7 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad, int port)
 		test_pad.started += test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms;
 		test_pad.index++;
 		if (test_pad.index < test_pad.count)
-			platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+			test_pad_step_begin();
 		else
 			platform_log("test pad: done");
 	}
@@ -642,9 +660,12 @@ static DWORD connected_gamepads(void)
 	for (port = 1; port < count; port++)
 		mask |= 1UL << port;
 #endif
-	/* (debug) the automated tests' controllers */
+	/* (debug) the automated tests' controllers, but those a step unplugged */
 	for (port = 1; port < test_controller_count(); port++)
-		mask |= 1UL << port;
+	{
+		if (!(test_pad_unplugged & (1UL << port)))
+			mask |= 1UL << port;
+	}
 	return mask;
 }
 
@@ -748,7 +769,10 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 	}
 	else if (port < test_controller_count())
 	{
-		/* (debug) a test controller: the scripted player's and the steps' */
+		/* (debug) a test controller: the scripted player's and the steps'
+		(none while unplugged; port 0's poll moves the steps on) */
+		if (test_pad_unplugged & (1UL << port))
+			return ERROR_DEVICE_NOT_CONNECTED;
 		test_input_gamepad(&state->Gamepad, port);
 		test_pad_gamepad(&state->Gamepad, port);
 	}
