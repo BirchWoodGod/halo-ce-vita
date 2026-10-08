@@ -7,3 +7,6 @@
 # default: the machine of either player may name one, and both then use it.
 # (The Vita reads this file from its package, app0:relays.txt:
 # network.relays_file, or HALO_NET_RELAYS=host:port in env.txt.)
+
+# The project's relay (Linode, Chicago), run by the developer:
+172.236.110.38:47320
