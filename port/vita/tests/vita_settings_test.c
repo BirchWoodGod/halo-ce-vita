@@ -1410,10 +1410,12 @@ static void test_game_chat(void)
 		"Game chat: On by default, its help names Back + Y");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CHAT"), "quick") && strstr(menu, "Game chat\x02< Quick chat only >") &&
-		strstr(menu, "\n\x05Phrases only: no typed lines sent or shown\n") && menu_fits(), "Game chat: Quick chat only");
+		strstr(menu, "\n\x05Phrases only, for all in the games you host\n") && menu_fits(),
+		"Game chat: Quick chat only (a host's for its game)");
 	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_CHAT"), "off") && strstr(file_text("ux0:data/haloce-vita/settings.txt"), "HALO_CHAT"),
-		"Game chat: Off, saved");
+	check(!strcmp(getenv("HALO_CHAT"), "off") && strstr(file_text("ux0:data/haloce-vita/settings.txt"), "HALO_CHAT") &&
+		strstr(menu, "\n\x05No chat, and none in the games you host\n") && menu_fits(),
+		"Game chat: Off, saved (a host's for its game)");
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CHAT"), "on"), "Game chat: On again");
@@ -1535,8 +1537,17 @@ static void test_game_chat(void)
 		press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_CROSS);
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu, "MUTE PLAYERS\nalpha           -\nbravo           -\n", 46) && menu_selected == 1 && menu_fits(),
-		"Mute players: the others, none muted");
+	check(!strncmp(menu, "MUTE PLAYERS\nalpha           -\nbravo           -\n", 46) && menu_selected == 1 && menu_fits() &&
+		strstr(menu, "\nA muted player's lines are not shown\n"), "Mute players: the others, none muted");
+	/* (on the host: muted for everyone) */
+	halo_chat_status[HALO_CHAT_STATUS_HOST] = 1;
+	clock_us += 600000;
+	frame(0);
+	check(strstr(menu, "\nYou host: muted for everyone in your game\n") && menu_fits(),
+		"Mute players on the host: muted for everyone in its game");
+	halo_chat_status[HALO_CHAT_STATUS_HOST] = 0;
+	clock_us += 600000;
+	frame(0);
 	press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_CROSS);
 	check(chat_taken(&request, &value, &team, text, sizeof(text)) == HALO_CHAT_REQUEST_MUTE && !strcmp(text, "bravo") &&

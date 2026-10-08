@@ -43,6 +43,9 @@ enum
 	HALO_CHAT_STATUS_PLAYERS,
 	/* milliseconds until this machine may send a line (0: now) */
 	HALO_CHAT_STATUS_WAIT,
+	/* nonzero if this machine hosts the game (its Game chat and its mutes
+	are the game's) */
+	HALO_CHAT_STATUS_HOST,
 	HALO_CHAT_STATUS_COUNT
 };
 

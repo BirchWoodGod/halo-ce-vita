@@ -21,6 +21,13 @@ typedef char chat_text_fits[HALO_CHAT_TEXT_SIZE == CHAT_TEXT_BYTES && HALO_CHAT_
 phrase for good (a new one goes at the end) */
 static char const *const chat_phrases[CHAT_PHRASE_COUNT] = { HALO_CHAT_PHRASES };
 
+/* the host's notices, by their number on the wire */
+static char const *const chat_notices[NUMBER_OF_CHAT_NOTICES] =
+{
+	"Chat is off in this game",
+	"Only quick chat in this game",
+};
+
 /* ---------- private code */
 
 static int chat_letter(char letter)
@@ -102,6 +109,20 @@ char const *chat_phrase_text(int phrase)
 int chat_phrase_count(void)
 {
 	return CHAT_PHRASE_COUNT;
+}
+
+char const *chat_notice_text(int notice)
+{
+	return notice >= 0 && notice < NUMBER_OF_CHAT_NOTICES ? chat_notices[notice] : NULL;
+}
+
+int chat_host_notice(int host_mode, int kind)
+{
+	if (host_mode == HALO_CHAT_MODE_ON)
+		return -1;
+	if (host_mode == HALO_CHAT_MODE_QUICK)
+		return kind == _chat_kind_quick ? -1 : _chat_notice_host_quick;
+	return _chat_notice_host_off;
 }
 
 int chat_text_clean(char *destination, int size, char const *source, int source_size)
@@ -205,6 +226,12 @@ int chat_text_has_link(char const *text)
 
 int chat_name_clean(char *destination, int size, uint16_t const *name, int count)
 {
+	/* (players.c's player_name_character_ascii: U+00C0 to U+017F) */
+	static char const latin[] =
+		"AAAAAAACEEEEIIIIDNOOOOO?OUUUUYTs"
+		"aaaaaaaceeeeiiiidnooooo?ouuuuyty"
+		"AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIiIiJjKkkLlLlLlL"
+		"lLlNnNnNnnNnOoOoOoOoRrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs";
 	int length = 0;
 	int index;
 
@@ -218,9 +245,11 @@ int chat_name_clean(char *destination, int size, uint16_t const *name, int count
 
 		if (character == '|')
 			character = '/';
+		else if (character >= 0xC0 && character < 0x180)
+			character = (uint16_t)latin[character - 0xC0];
 		else if (character < 0x20 || character > 0x7E)
 			character = '?';
-		if (character == ' ' && (length == 0 || destination[length - 1] == ' '))
+		if (character == ' ' && length == 0)
 			continue;
 		destination[length++] = (char)character;
 	}
@@ -232,8 +261,9 @@ int chat_name_clean(char *destination, int size, uint16_t const *name, int count
 	return length;
 }
 
-/* a message's kind, phrase, flags and text, as both directions have them */
-static int chat_fields_valid(int kind, int phrase, int flags, char const *field, char *text)
+/* a message's kind, phrase, flags and text, as both directions have them
+(a notice: the host's alone) */
+static int chat_fields_valid(int kind, int phrase, int flags, char const *field, char *text, int notice)
 {
 	text[0] = 0;
 	if (flags & ~CHAT_VALID_FLAGS)
@@ -242,6 +272,8 @@ static int chat_fields_valid(int kind, int phrase, int flags, char const *field,
 	{
 	case _chat_kind_quick:
 		return chat_phrase_text(phrase) != NULL;
+	case _chat_kind_notice:
+		return notice && !flags && chat_notice_text(phrase) != NULL;
 	case _chat_kind_typed:
 		if (!chat_text_clean(text, CHAT_TEXT_BYTES, field, CHAT_TEXT_BYTES))
 			return 0;
@@ -260,7 +292,7 @@ int chat_request_valid(struct chat_request_message const *request, char *text)
 {
 	text[0] = 0;
 	return request->local_player >= 0 && request->local_player < 4 &&
-		chat_fields_valid(request->kind, request->phrase, request->flags, request->text, text);
+		chat_fields_valid(request->kind, request->phrase, request->flags, request->text, text, 0);
 }
 
 int chat_relay_valid(struct chat_relay_message const *relay, char *name, char *text)
@@ -268,12 +300,132 @@ int chat_relay_valid(struct chat_relay_message const *relay, char *name, char *t
 	name[0] = 0;
 	text[0] = 0;
 	if (relay->team < -1 || relay->team > 15 || relay->player < 0 || relay->player > 127 ||
-		!chat_fields_valid(relay->kind, relay->phrase, relay->flags, relay->text, text))
+		!chat_fields_valid(relay->kind, relay->phrase, relay->flags, relay->text, text, 1))
 	{
 		return 0;
 	}
-	chat_name_clean(name, CHAT_NAME_BYTES, relay->name, CHAT_NAME_CHARACTERS);
+	/* (a notice names nobody) */
+	if (relay->kind != _chat_kind_notice)
+		chat_name_clean(name, CHAT_NAME_BYTES, relay->name, CHAT_NAME_CHARACTERS);
 	return 1;
+}
+
+static int chat_mute_names(struct chat_mute const *entry, char const *name)
+{
+	return name && name[0] && !strncmp(entry->name, name, CHAT_NAME_BYTES - 1);
+}
+
+static int chat_mute_is(struct chat_mute const *entry, int machine, int controller)
+{
+	return machine >= 0 && entry->machine == machine && entry->controller == controller;
+}
+
+int chat_mutes_set(struct chat_mutes *mutes, char const *name, int machine, int controller, int mute)
+{
+	int index;
+	int changed = 0;
+
+	if (!name || !name[0] || mutes->count < 0 || mutes->count > CHAT_MUTED_PLAYERS)
+		return 0;
+	if (mute)
+	{
+		if (chat_mutes_match(mutes, name, machine, controller) || mutes->count == CHAT_MUTED_PLAYERS)
+			return 0;
+		memset(&mutes->entries[mutes->count], 0, sizeof(mutes->entries[0]));
+		strncpy(mutes->entries[mutes->count].name, name, CHAT_NAME_BYTES - 1);
+		mutes->entries[mutes->count].machine = (int16_t)(machine >= 0 && machine < 0x8000 ? machine : -1);
+		mutes->entries[mutes->count].controller = (int16_t)(machine >= 0 ? controller : -1);
+		mutes->count++;
+		return 1;
+	}
+	for (index = 0; index < mutes->count;)
+	{
+		if (chat_mute_names(&mutes->entries[index], name) || chat_mute_is(&mutes->entries[index], machine, controller))
+		{
+			mutes->count--;
+			memmove(&mutes->entries[index], &mutes->entries[index + 1],
+				(size_t)(mutes->count - index) * sizeof(mutes->entries[0]));
+			changed = 1;
+		}
+		else
+		{
+			index++;
+		}
+	}
+	return changed;
+}
+
+int chat_mutes_match(struct chat_mutes const *mutes, char const *name, int machine, int controller)
+{
+	int index;
+
+	for (index = 0; index < mutes->count && index < CHAT_MUTED_PLAYERS; index++)
+	{
+		if (chat_mute_is(&mutes->entries[index], machine, controller) || chat_mute_names(&mutes->entries[index], name))
+			return 1;
+	}
+	return 0;
+}
+
+void chat_mutes_player(struct chat_mutes *mutes, int machine, int controller, char const *name)
+{
+	int index;
+
+	if (!name || !name[0])
+		return;
+	for (index = 0; index < mutes->count && index < CHAT_MUTED_PLAYERS; index++)
+	{
+		struct chat_mute *entry = &mutes->entries[index];
+
+		if (chat_mute_is(entry, machine, controller))
+		{
+			memset(entry->name, 0, sizeof(entry->name));
+			strncpy(entry->name, name, CHAT_NAME_BYTES - 1);
+		}
+		else if (chat_mute_names(entry, name))
+		{
+			/* (muted by name alone, back in the game: known by where the
+			game has them again) */
+			if (entry->machine < 0 && machine >= 0 && machine < 0x8000)
+			{
+				entry->machine = (int16_t)machine;
+				entry->controller = (int16_t)controller;
+			}
+			/* (another now has the name a muted player left: not them) */
+			else if (entry->machine >= 0)
+			{
+				memset(entry->name, 0, sizeof(entry->name));
+			}
+		}
+	}
+}
+
+void chat_mutes_forget_machine(struct chat_mutes *mutes, int machine)
+{
+	int index;
+
+	if (mutes->count < 0 || mutes->count > CHAT_MUTED_PLAYERS)
+		mutes->count = 0;
+	for (index = 0; index < mutes->count;)
+	{
+		struct chat_mute *entry = &mutes->entries[index];
+
+		if (machine < 0 || entry->machine == machine)
+		{
+			entry->machine = -1;
+			entry->controller = -1;
+		}
+		/* (one left with neither a name nor a place goes) */
+		if (entry->machine < 0 && !entry->name[0])
+		{
+			mutes->count--;
+			memmove(entry, entry + 1, (size_t)(mutes->count - index) * sizeof(*entry));
+		}
+		else
+		{
+			index++;
+		}
+	}
 }
 
 /* the bucket's credit now: the time it has saved up, at most burst

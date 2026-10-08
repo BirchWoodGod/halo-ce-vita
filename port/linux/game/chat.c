@@ -22,11 +22,19 @@ the limits and the mutes here stand in for.
   (CHAT_HOST_BURST), and passes the line on as _message_server_chat to
   every joined machine, its own local machine included, or, team chat in a
   game with teams, to those with a player of the sender's team.
+- The host's own Game chat is its game's (chat_host_notice): Off, it
+  passes on no one's lines, Quick chat only, no typed ones, and the sender
+  is told so by a notice (_chat_kind_notice, its number only). A player the
+  host muted is muted for the game: the host passes on none of their lines.
 - Every machine checks the host's line again (chat_relay_valid: a host is
   a stranger too), shows no more than the host's own limit lets through,
   and drops those of the players its player muted, and, with Game chat
   Quick chat only, the typed ones (a quick chat phrase travels as its
   number and shows as this machine's own text), or every one with Off.
+- A mute (chat_mutes) holds until Halo is closed (games left and joined),
+  by the player's machine and controller in the game's record, so a new
+  name does not shake it off, and by name, so leaving and joining again
+  does not either.
 - What is shown: the last lines, at the window's left above the motion
   sensor, for twelve seconds each (chat_draw, from interface.c's overlays:
   the lobby and the game), "Name: text" ("[Team] Name: text" in green for
@@ -40,7 +48,7 @@ became available (a lobby joined or hosted): quick:N, teamquick:N, say:TEXT,
 team:TEXT, raw:TEXT (sent without this machine's own cleaning, its "\xNN"s
 as those bytes: the host's checks), flood:N (N lines at once, past this
 machine's own limit: the host's limit), mute:NAME, unmute:NAME ("*": every
-other player).
+other player), mode:on|quick|off (Game chat changed, as the panel does).
 */
 
 #include "cseries.h"
@@ -81,8 +89,6 @@ enum
 	(the terminal font is about 8 pixels a character: a 4:3 window's half
 	and more) */
 	CHAT_WRAP_CHARACTERS = 60,
-	/* the names a player has muted (for the run of the game) */
-	CHAT_MUTED_NAMES = 32,
 	/* a machine's dropped lines the host logs one by one; after that,
 	every CHAT_DROP_LOG_EVERY'th */
 	CHAT_DROP_LOGS = 4,
@@ -150,6 +156,7 @@ typedef char chat_name_size_assert[sizeof(((struct network_player *)0)->name) ==
 /* ---------- prototypes */
 
 void platform_log(char const *format, ...);
+int setenv(const char *name, const char *value, int overwrite);
 unsigned long system_milliseconds(void);
 boolean network_game_client_send_to_server(struct network_game_client *client, void *message);
 
@@ -185,8 +192,9 @@ static struct
 	unsigned long machine_dropped[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
 	struct chat_bucket relayed;
 
-	char muted[CHAT_MUTED_NAMES][CHAT_NAME_BYTES];
-	short muted_count;
+	/* the players this machine's player muted (on the host: muted for the
+	game) */
+	struct chat_mutes mutes;
 
 	/* the lines drawn in a lobby, and in a game, since chat became
 	available (said once each in halo.log) */
@@ -255,17 +263,34 @@ static short chat_player_count(
 	return count < 0 ? 0 : count > HALO_PORT_MAXIMUM_NETWORK_PLAYERS ? HALO_PORT_MAXIMUM_NETWORK_PLAYERS : count;
 }
 
-static boolean chat_is_muted(
-	char const *name)
+/* this machine's record of the game's player at index, valid, or NULL */
+static struct network_player *chat_game_player(
+	struct network_game *game,
+	long index)
 {
-	short index;
+	struct network_player *player;
 
-	for (index = 0; index < chat_globals.muted_count; index++)
-	{
-		if (!strcmp(chat_globals.muted[index], name))
-			return TRUE;
-	}
-	return FALSE;
+	if (!game || index < 0 || index >= chat_player_count(game))
+		return NULL;
+	player = &game->players[index];
+	return network_player_is_valid(player) ? player : NULL;
+}
+
+/* whether the player (NULL: not in this machine's record) of this name is
+muted */
+static boolean chat_is_muted(
+	char const *name,
+	struct network_player const *player)
+{
+	return chat_mutes_match(&chat_globals.mutes, name, player ? player->machine_index : NONE,
+		player ? player->controller_index : NONE) != 0;
+}
+
+/* whether this machine hosts the game */
+static boolean chat_hosting(
+	void)
+{
+	return global_network_game_server_get() != NULL;
 }
 
 /* a line into the log, broken at spaces into lines of the log's width */
@@ -395,33 +420,44 @@ static void chat_mute(
 	char const *name,
 	boolean mute)
 {
+	struct network_game_client *client = chat_client();
+	struct network_game *game = client ? network_game_client_get_game(client) : NULL;
+	struct network_player const *muted = NULL;
 	char clean[CHAT_NAME_BYTES];
-	char text[CHAT_NAME_BYTES + 32];
+	char text[CHAT_NAME_BYTES + 48];
+	short count = chat_player_count(game);
 	short index;
 
-	/* (the name as the menu listed it, cleaned as names are) */
-	chat_text_clean(clean, sizeof(clean), name, CHAT_NAME_BYTES);
+	/* (the name as the menu listed it, chat_name_clean's: printable ASCII,
+	its spaces as they are; the player of that name in the game, by where
+	the game has them) */
+	for (index = 0; index < CHAT_NAME_BYTES - 1 && name[index]; index++)
+	{
+		if (name[index] < 0x20 || name[index] > 0x7E)
+			return;
+		clean[index] = name[index];
+	}
+	clean[index] = 0;
 	if (!clean[0])
 		return;
-	for (index = 0; index < chat_globals.muted_count && strcmp(chat_globals.muted[index], clean); index++)
-		;
-	if (mute && index == chat_globals.muted_count && chat_globals.muted_count < CHAT_MUTED_NAMES)
+	for (index = 0; index < count && !muted; index++)
 	{
-		csstrncpy(chat_globals.muted[chat_globals.muted_count], clean, CHAT_NAME_BYTES - 1);
-		chat_globals.muted[chat_globals.muted_count][CHAT_NAME_BYTES - 1] = 0;
-		chat_globals.muted_count++;
+		struct network_player const *player = chat_game_player(game, index);
+		char player_name[CHAT_NAME_BYTES];
+
+		if (!player || network_game_player_is_local((struct network_player *)player))
+			continue;
+		chat_name_clean(player_name, sizeof(player_name), (uint16_t const *)player->name, CHAT_NAME_CHARACTERS);
+		if (!strcmp(player_name, clean))
+			muted = player;
 	}
-	else if (!mute && index < chat_globals.muted_count)
-	{
-		chat_globals.muted_count--;
-		memmove(chat_globals.muted[index], chat_globals.muted[index + 1],
-			(size_t)(chat_globals.muted_count - index) * CHAT_NAME_BYTES);
-	}
-	else
+	if (!chat_mutes_set(&chat_globals.mutes, clean, muted ? muted->machine_index : NONE,
+		muted ? muted->controller_index : NONE, mute))
 	{
 		return;
 	}
-	snprintf(text, sizeof(text), mute ? "%s muted" : "%s can be heard again", clean);
+	snprintf(text, sizeof(text), !mute ? "%s can be heard again" : chat_hosting() ? "%s muted for everyone" : "%s muted",
+		clean);
 	chat_notice(text);
 }
 
@@ -527,6 +563,11 @@ static void chat_test_update(
 		}
 		else if (!strcmp(step->action, "mute") || !strcmp(step->action, "unmute"))
 			chat_mute(step->argument, step->action[0] == 'm');
+		else if (!strcmp(step->action, "mode") &&
+			(!strcmp(step->argument, "on") || !strcmp(step->argument, "quick") || !strcmp(step->argument, "off")))
+		{
+			setenv("HALO_CHAT", step->argument, 1);
+		}
 	}
 }
 
@@ -540,20 +581,47 @@ static void chat_link_status(
 	short listed = 0;
 	short index;
 
-	for (index = 0; index < count && listed < HALO_CHAT_PLAYERS; index++)
+	/* (the mutes follow the game's players: a new name, a machine gone) */
+	if (!client)
+		chat_mutes_forget_machine(&chat_globals.mutes, NONE);
+	for (index = 0; index < chat_globals.mutes.count; index++)
 	{
-		struct network_player *player = &game->players[index];
+		short machine = chat_globals.mutes.entries[index].machine;
+		short other;
 
-		if (!network_player_is_valid(player) || network_game_player_is_local(player))
+		for (other = 0; machine != NONE && other < count; other++)
+		{
+			struct network_player *player = chat_game_player(game, other);
+
+			if (player && player->machine_index == machine && !network_game_player_is_local(player))
+				break;
+		}
+		if (machine != NONE && other == count)
+		{
+			chat_mutes_forget_machine(&chat_globals.mutes, machine);
+			index = -1;
+		}
+	}
+	for (index = 0; index < count; index++)
+	{
+		struct network_player *player = chat_game_player(game, index);
+		char name[CHAT_NAME_BYTES];
+
+		if (!player || network_game_player_is_local(player))
 			continue;
-		chat_name_clean(halo_chat_player_names[listed], HALO_CHAT_NAME_SIZE, (uint16_t const *)player->name,
-			CHAT_NAME_CHARACTERS);
-		halo_chat_player_muted[listed] = chat_is_muted(halo_chat_player_names[listed]);
-		listed++;
+		chat_name_clean(name, sizeof(name), (uint16_t const *)player->name, CHAT_NAME_CHARACTERS);
+		chat_mutes_player(&chat_globals.mutes, player->machine_index, player->controller_index, name);
+		if (listed < HALO_CHAT_PLAYERS)
+		{
+			csmemcpy(halo_chat_player_names[listed], name, HALO_CHAT_NAME_SIZE);
+			halo_chat_player_muted[listed] = chat_is_muted(name, player);
+			listed++;
+		}
 	}
 	halo_chat_status[HALO_CHAT_STATUS_PLAYERS] = listed;
 	halo_chat_status[HALO_CHAT_STATUS_TEAMS] = chat_game_has_teams(game);
 	halo_chat_status[HALO_CHAT_STATUS_MODE] = mode;
+	halo_chat_status[HALO_CHAT_STATUS_HOST] = client && chat_hosting();
 	halo_chat_status[HALO_CHAT_STATUS_WAIT] = (int)chat_bucket_wait(&chat_globals.sent, system_milliseconds(),
 		CHAT_BURST, CHAT_REFILL_MILLISECONDS);
 	__atomic_store_n(&halo_chat_status[HALO_CHAT_STATUS_AVAILABLE], client && mode != HALO_CHAT_MODE_OFF,
@@ -751,6 +819,7 @@ void chat_server_handle_request(
 	short index;
 	boolean team_only;
 	void *relay_message;
+	long notice;
 
 	message_size -= sizeof(word);
 	csmemset(&request, 0, sizeof(request));
@@ -791,6 +860,39 @@ void chat_server_handle_request(
 		platform_log("chat: the host dropped a line from machine slot %ld: it has no player", slot);
 		return;
 	}
+	chat_name_clean(name, sizeof(name), (uint16_t const *)sender->name, CHAT_NAME_CHARACTERS);
+
+	/* (the host's Game chat is its game's: Off, or Quick chat only and a
+	typed line, the sender is told so, within the machine's limit) */
+	notice = chat_host_notice(chat_mode(), request.kind);
+	if (notice != NONE)
+	{
+		unsigned long dropped = ++chat_globals.machine_dropped[slot];
+
+		if (dropped <= CHAT_DROP_LOGS || dropped % CHAT_DROP_LOG_EVERY == 0)
+			platform_log("chat: the host dropped a line from machine slot %ld: %s", slot, chat_notice_text(notice));
+		if (chat_bucket_take(&chat_globals.machine_buckets[slot], system_milliseconds(), CHAT_BURST,
+			CHAT_REFILL_MILLISECONDS))
+		{
+			csmemset(&relay, 0, sizeof(relay));
+			relay.kind = _chat_kind_notice;
+			relay.phrase = (short)notice;
+			relay.team = NONE;
+			relay_message = create_network_game_message(_message_server_chat, &relay, sizeof(relay));
+			if (relay_message)
+				network_game_server_send_message_to_client_machine(server, machine, relay_message);
+		}
+		return;
+	}
+	/* (a player the host muted is muted for its game) */
+	if (chat_is_muted(name, sender))
+	{
+		unsigned long dropped = ++chat_globals.machine_dropped[slot];
+
+		if (dropped <= CHAT_DROP_LOGS || dropped % CHAT_DROP_LOG_EVERY == 0)
+			platform_log("chat: the host dropped a line from %s: muted by the host", name);
+		return;
+	}
 	if (!chat_server_allows(slot))
 		return;
 
@@ -803,7 +905,6 @@ void chat_server_handle_request(
 	relay.player = (short)(sender - game->players);
 	csmemcpy(relay.name, sender->name, sizeof(relay.name));
 	csstrncpy(relay.text, text, sizeof(relay.text) - 1);
-	chat_name_clean(name, sizeof(name), relay.name, CHAT_NAME_CHARACTERS);
 	platform_log("chat: the host passes on %s's %s%s line", name, team_only ? "team " : "",
 		request.kind == _chat_kind_quick ? "quick chat" : "typed");
 
@@ -847,7 +948,6 @@ void chat_client_handle_relay(
 	char line[CHAT_LINE_BYTES];
 	boolean team;
 
-	(void)client;
 	message_size -= sizeof(word);
 	csmemset(&relay, 0, sizeof(relay));
 	if (message_size <= 0 ||
@@ -868,9 +968,19 @@ void chat_client_handle_relay(
 			platform_log("chat: too many lines from the host (%lu not shown)", chat_globals.shown_dropped);
 		return;
 	}
-	if (mode == HALO_CHAT_MODE_OFF || (mode == HALO_CHAT_MODE_QUICK && relay.kind != _chat_kind_quick))
+	/* (nothing kept for a game this machine is not in) */
+	if (mode == HALO_CHAT_MODE_OFF || !chat_globals.available)
 		return;
-	if (chat_is_muted(name))
+	if (relay.kind == _chat_kind_notice)
+	{
+		chat_notice(chat_notice_text(relay.phrase));
+		return;
+	}
+	if (mode == HALO_CHAT_MODE_QUICK && relay.kind != _chat_kind_quick)
+		return;
+	/* (muted: by where this machine's record of the game has the player
+	the host names, or by the name) */
+	if (chat_is_muted(name, chat_game_player(client ? network_game_client_get_game(client) : NULL, relay.player)))
 	{
 		platform_log("chat: a line from %s (muted)", name);
 		return;

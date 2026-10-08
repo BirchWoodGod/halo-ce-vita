@@ -213,6 +213,18 @@ to those with a player of the sender's team. Every machine checks the
 host's line again (a host is a stranger too), shows no more than the
 host's own limit, and drops what its player muted or turned off (Game chat:
 Quick chat only shows the phrases alone, by this machine's own text).
+Names are shown as the host keeps them apart (a name the same as another's
+is numbered by the host, its accented letters read as plain ones), so two
+players never show as one.
+
+The host's Game chat is its game's: Off, it passes on no one's lines;
+Quick chat only, no typed ones; either way the sender gets a notice, a
+`_message_server_chat` of its own kind to that machine alone carrying only
+the notice's number. A player muted on the host is muted for the game:
+the host passes on none of their lines. A mute holds until Halo is
+closed, by the player's machine and controller in the game's record (a new
+name does not shake it off) and by name (leaving and joining again does
+not either).
 
 A client plays by its host's rules: in another's game (searching for it,
 in its lobby, or playing it) the developer console, the telnet console

@@ -5,11 +5,14 @@ Desktop test of game chat's rules (port/linux/game/chat_protocol.c): the
 phrases, what is kept of typed text (printable ASCII, the game's text codes
 and control characters out, the length cap) and of names, the links
 refused (OpenCE PR #72's cases and more), a joiner's request and a host's
-relay as every field from the wire could be, and the flood limits.
+relay as every field from the wire could be, the host's notices and what
+its own Game chat lets through, the mutes (a new name, a machine gone, a
+player back), and the flood limits.
 run_chat_test.sh builds it 32-bit, with AddressSanitizer and UBSan.
 */
 
 #include "chat_protocol.h"
+#include "../../linux/src/chat_link.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -135,6 +138,123 @@ static void test_names(void)
 	CHECK(chat_name_clean(name, sizeof(name), blank, CHAT_NAME_CHARACTERS) == 1 && !strcmp(name, "?"));
 	CHECK(chat_name_clean(name, 4, full, CHAT_NAME_CHARACTERS) == 3 && !strcmp(name, "ABC"));
 	CHECK(chat_name_clean(name, sizeof(name), NULL, 3) == 1 && !strcmp(name, "?"));
+	/* (as the host keeps names apart: a Latin letter with a mark its plain
+	letter, the spaces within kept, so "Bo  b" and "Bo b", or "B\u00f6b" and
+	"B?b", which the host tells apart, are not shown the same) */
+	{
+		static uint16_t const accented[CHAT_NAME_CHARACTERS] = { 'B', 0xF6, 'b', ' ', 0xC9, 0x17F, 0x180, 0 };
+		static uint16_t const spaced[CHAT_NAME_CHARACTERS] = { 'B', 'o', ' ', ' ', 'b', 0 };
+
+		CHECK(chat_name_clean(name, sizeof(name), accented, CHAT_NAME_CHARACTERS) == 7 && !strcmp(name, "Bob Es?"));
+		CHECK(chat_name_clean(name, sizeof(name), spaced, CHAT_NAME_CHARACTERS) == 5 && !strcmp(name, "Bo  b"));
+	}
+}
+
+static void test_notices(void)
+{
+	struct chat_relay_message relay;
+	struct chat_request_message request;
+	char name[CHAT_NAME_BYTES];
+	char text[CHAT_TEXT_BYTES];
+
+	CHECK(!strcmp(chat_notice_text(_chat_notice_host_off), "Chat is off in this game"));
+	CHECK(!strcmp(chat_notice_text(_chat_notice_host_quick), "Only quick chat in this game"));
+	CHECK(chat_notice_text(-1) == NULL && chat_notice_text(NUMBER_OF_CHAT_NOTICES) == NULL);
+	CHECK(cleaned(chat_notice_text(0), chat_notice_text(0)) && cleaned(chat_notice_text(1), chat_notice_text(1)));
+	/* (the host's own Game chat is its game's) */
+	CHECK(chat_host_notice(HALO_CHAT_MODE_ON, _chat_kind_quick) == -1);
+	CHECK(chat_host_notice(HALO_CHAT_MODE_ON, _chat_kind_typed) == -1);
+	CHECK(chat_host_notice(HALO_CHAT_MODE_QUICK, _chat_kind_quick) == -1);
+	CHECK(chat_host_notice(HALO_CHAT_MODE_QUICK, _chat_kind_typed) == _chat_notice_host_quick);
+	CHECK(chat_host_notice(HALO_CHAT_MODE_OFF, _chat_kind_quick) == _chat_notice_host_off);
+	CHECK(chat_host_notice(HALO_CHAT_MODE_OFF, _chat_kind_typed) == _chat_notice_host_off);
+	CHECK(chat_host_notice(7, _chat_kind_quick) == _chat_notice_host_off);
+
+	/* a notice from the host: its number only, naming nobody */
+	memset(&relay, 0, sizeof(relay));
+	relay.kind = _chat_kind_notice;
+	relay.phrase = _chat_notice_host_quick;
+	relay.team = -1;
+	relay.name[0] = 'E';
+	strcpy(relay.text, "visit evil.com");
+	memset(name, 0x5A, sizeof(name));
+	CHECK(chat_relay_valid(&relay, name, text) && !name[0] && !text[0]);
+	relay.phrase = NUMBER_OF_CHAT_NOTICES;
+	CHECK(!chat_relay_valid(&relay, name, text));
+	relay.phrase = -1;
+	CHECK(!chat_relay_valid(&relay, name, text));
+	relay.phrase = 0;
+	relay.flags = 1 << _chat_flag_team_bit;
+	CHECK(!chat_relay_valid(&relay, name, text));
+	/* ... and a joiner's request may not be one */
+	memset(&request, 0, sizeof(request));
+	request.kind = _chat_kind_notice;
+	CHECK(!chat_request_valid(&request, text));
+}
+
+static void test_mutes(void)
+{
+	struct chat_mutes mutes;
+	int index;
+
+	memset(&mutes, 0, sizeof(mutes));
+	/* muted where the game has them (machine 2, controller 0) */
+	CHECK(chat_mutes_set(&mutes, "Troll", 2, 0, 1) && mutes.count == 1);
+	CHECK(!chat_mutes_set(&mutes, "Troll", 2, 0, 1) && mutes.count == 1);
+	CHECK(chat_mutes_match(&mutes, "Troll", 2, 0));
+	CHECK(chat_mutes_match(&mutes, "Troll", -1, -1));
+	CHECK(!chat_mutes_match(&mutes, "Friend", 3, 0));
+	CHECK(!chat_mutes_match(&mutes, "Friend", 2, 1));
+	/* a new name: still muted, the mute following it; the name it left,
+	taken by another, is not muted */
+	chat_mutes_player(&mutes, 2, 0, "Nice");
+	CHECK(chat_mutes_match(&mutes, "Nice", 2, 0) && !strcmp(mutes.entries[0].name, "Nice"));
+	chat_mutes_player(&mutes, 4, 0, "Troll");
+	CHECK(!chat_mutes_match(&mutes, "Troll", 4, 0));
+	/* ... nor its new name, once the muted one took another again */
+	chat_mutes_player(&mutes, 2, 0, "Troll2");
+	CHECK(!chat_mutes_match(&mutes, "Nice", 5, 0) && chat_mutes_match(&mutes, "Troll2", 2, 0));
+	/* the machine gone: by name; back in the game (another machine), known
+	by its place again, then a new name does not shake it off */
+	chat_mutes_forget_machine(&mutes, 2);
+	CHECK(mutes.count == 1 && mutes.entries[0].machine == -1 && chat_mutes_match(&mutes, "Troll2", 6, 0));
+	CHECK(!chat_mutes_match(&mutes, "x", 2, 0));
+	chat_mutes_player(&mutes, 6, 1, "Troll2");
+	chat_mutes_player(&mutes, 6, 1, "Angel");
+	CHECK(chat_mutes_match(&mutes, "Angel", 6, 1) && !chat_mutes_match(&mutes, "Troll2", 7, 0));
+	/* heard again, by name or by place */
+	CHECK(chat_mutes_set(&mutes, "Angel", -1, -1, 0) && mutes.count == 0);
+	CHECK(!chat_mutes_set(&mutes, "Angel", -1, -1, 0));
+	chat_mutes_set(&mutes, "Troll", 2, 0, 1);
+	CHECK(chat_mutes_set(&mutes, "Renamed", 2, 0, 0) && mutes.count == 0);
+	/* (a mute whose name another took and whose machine went: gone) */
+	chat_mutes_set(&mutes, "Troll", 2, 0, 1);
+	chat_mutes_player(&mutes, 3, 0, "Troll");
+	chat_mutes_forget_machine(&mutes, -1);
+	CHECK(mutes.count == 0);
+	/* by name alone (not in the game's record) */
+	CHECK(chat_mutes_set(&mutes, "Ghost", -1, 5, 1) && mutes.entries[0].machine == -1 && mutes.entries[0].controller == -1);
+	CHECK(!chat_mutes_match(&mutes, "", -1, -1) && !chat_mutes_match(&mutes, NULL, -1, -1));
+	CHECK(!chat_mutes_set(&mutes, "", 1, 0, 1) && !chat_mutes_set(&mutes, NULL, 1, 0, 1));
+	/* (full: no more, nothing written past the list) */
+	memset(&mutes, 0, sizeof(mutes));
+	for (index = 0; index < CHAT_MUTED_PLAYERS + 4; index++)
+	{
+		char name[CHAT_NAME_BYTES];
+
+		snprintf(name, sizeof(name), "p%d", index);
+		chat_mutes_set(&mutes, name, index, 0, 1);
+	}
+	CHECK(mutes.count == CHAT_MUTED_PLAYERS && chat_mutes_match(&mutes, "p31", -1, -1) && !chat_mutes_match(&mutes, "p32", 32, 0));
+	/* (a long name: kept to a name's size) */
+	CHECK(chat_mutes_set(&mutes, "p0", 0, 0, 0));
+	CHECK(chat_mutes_set(&mutes, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 40, 0, 1) &&
+		strlen(mutes.entries[CHAT_MUTED_PLAYERS - 1].name) == CHAT_NAME_BYTES - 1);
+	/* (a count from nowhere is not trusted) */
+	mutes.count = 1000;
+	CHECK(!chat_mutes_set(&mutes, "x", 1, 0, 1));
+	chat_mutes_forget_machine(&mutes, -1);
+	CHECK(mutes.count == 0);
 }
 
 static void test_request(void)
@@ -276,6 +396,8 @@ int main(void)
 	test_names();
 	test_request();
 	test_relay();
+	test_notices();
+	test_mutes();
 	test_bucket();
 	printf("%s chat_test: %d checks, %d failed\n", failures ? "FAIL" : "PASS", checks, failures);
 	return failures != 0;

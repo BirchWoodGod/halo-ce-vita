@@ -366,7 +366,9 @@ which gets no buttons meanwhile.
   (letters, digits and punctuation; others are left out).
 - **To**: All or Team (left and right), in a game with teams.
 - **Mute players**: the game's other players; A mutes one (their lines
-  are no longer shown) or hears them again, for as long as the game runs.
+  are no longer shown) or hears them again, until you close Halo. A muted
+  player stays muted under a new name and if they leave and join again.
+  When you host, a player you mute is muted for everyone in your game.
 
 Back and a direction of the D-pad sends a phrase at once: up Enemy spotted,
 down Need backup, left Follow me, right On my way. B closes the menu. Lines
@@ -374,7 +376,9 @@ show at the left of the screen with the sender's name for twelve seconds,
 team lines in green. A player can send three lines at once, then one every
 two seconds; the host names who said each line and passes it on, drops the
 rest of a flood, and lines with a link (a web address, an IP address) are
-not sent.
+not sent. The host's Game chat setting holds for its whole game: with
+Quick chat only nobody can type, with Off nobody can chat, and a player who
+tries is told so.
 
 The settings panel's **Multiplayer** tab:
 
@@ -385,7 +389,7 @@ The settings panel's **Multiplayer** tab:
 | Join the room | With Ad hoc: the system's dialog joins (or makes) the room's group; then Multiplayer, System Link (LAN) in the game. |
 | Join with a code | Online, without the PC menus (whose Join by code does it): type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins), then the steps with how the lookup goes, and Cross opens System Link. |
 | Modded maps > | Your custom maps (above). |
-| Game chat | **On** (the default), **Quick chat only** (phrases only: no typed lines sent or shown) or **Off** (no chat; Back + Y is Y again). Game chat below. |
+| Game chat | **On** (the default), **Quick chat only** (phrases only: no typed lines sent or shown) or **Off** (no chat; Back + Y is Y again). When you host, it holds for everyone in your game. Game chat below. |
 
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many

@@ -98,9 +98,9 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   of co-op hosted online sets (port/linux/game/coop_menu.c). 1.0.3's
   "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
 
-- "Game chat" (port/linux/game/chat.c): On, Quick chat only or Off. Its
-  menu, Back + Y in a network game's lobby or in the game, is below (game
-  chat's menu).
+- "Game chat" (port/linux/game/chat.c): On, Quick chat only or Off, for
+  this Vita and, when it hosts, for everyone in its game. Its menu, Back +
+  Y in a network game's lobby or in the game, is below (game chat's menu).
 
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo), and
@@ -670,7 +670,7 @@ opens the menu over the game, which sees no buttons meanwhile: the quick
 chat phrases (A sends one), Type a message (the system's keyboard; not
 with Quick chat only), To: All or Team (left and right, in a game with
 teams) and Mute players (the game's other players: A mutes one or hears
-them again). A phrase or a line sent closes it, as B does. Back and a
+them again; on the host, muted for everyone in its game). A phrase or a line sent closes it, as B does. Back and a
 direction of the D-pad sends one of four phrases at once (up Enemy
 spotted, down Need backup, left Follow me, right On my way). While Back is
 held, the D-pad and Y are chat's, not the game's; in the menus (where Back
@@ -1972,8 +1972,8 @@ static const char *const map_downloads_help[3] = {
 /* (Game chat's: the menu's buttons in the Xbox's terms, or the Vita's) */
 static const char *const chat_help[3] = {
 	"Back + Y in a lobby or game: phrases, typing",
-	"Phrases only: no typed lines sent or shown",
-	"No chat: nothing sent or shown",
+	"Phrases only, for all in the games you host",
+	"No chat, and none in the games you host",
 };
 
 static const char *setting_help(const struct setting *setting)
@@ -2630,8 +2630,9 @@ static void show_chat_mute(void)
 		length += snprintf(text + length, sizeof(text) - length, "\n(players %d-%d of %d)", chat_mute_scroll + 1,
 			chat_mute_scroll + CHAT_MUTE_LINES, count);
 	if (length < (int)sizeof(text))
-		snprintf(text + length, sizeof(text) - length, "\n\nA muted player's lines are not shown\n%s: mute or hear   %s: back",
-			menu_button('A'), menu_button('B'));
+		snprintf(text + length, sizeof(text) - length, "\n\n%s\n%s: mute or hear   %s: back",
+			chat_status(HALO_CHAT_STATUS_HOST) ? "You host: muted for everyone in your game" :
+			"A muted player's lines are not shown", menu_button('A'), menu_button('B'));
 	vgxm_menu_set(text, count ? chat_mute_selected - chat_mute_scroll + 1 : 0);
 }
 
