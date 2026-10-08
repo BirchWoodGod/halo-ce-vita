@@ -317,6 +317,8 @@ settings panel (hold Select and Start) and go to **Multiplayer**:
    Edition's `bitmaps.map`, `sounds.map` and `loc.map` in the maps folder
    (the game says which are missing). A joiner who cannot get the map is
    told why (an older host, a game already started: join in the lobby).
+   A download that stops (cancelled, the connection lost) goes on from
+   where it stopped when you join for the same map again.
 
 The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
 Triangle, Back Select. The same screens are under Multiplayer, System Link

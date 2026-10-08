@@ -154,9 +154,8 @@ static struct
 	boolean by_code;
 	boolean code_joined;
 	char code[P2P_CODE_SIZE];
-	/* the code is the public lobby's game's (joined as a player choosing it
-	there does: p2p_join_lobby_code) */
-	boolean code_from_lobby;
+	/* join-public: the entry the code is from */
+	struct p2p_lobby_entry lobby_entry;
 	real browse_seconds;
 	/* debug.network_test_rejoin: a joining machine leaves the game that many
 	seconds in, and joins again (once) */
@@ -164,6 +163,10 @@ static struct
 	real ingame_seconds;
 	boolean left;
 	boolean rejoined;
+	/* debug.network_test_retry: the joins left to try after one that ended
+	before its game began, and the seconds since it ended */
+	long retries;
+	real retry_seconds;
 } network_test;
 
 /* the variant at the index of the list (copied to name), FALSE past its end */
@@ -263,6 +266,7 @@ static void network_test_read_settings(
 		config_string("debug.network_test_pickup_weapon"));
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
 	network_test.rejoin_time = (real)config_real("debug.network_test_rejoin");
+	network_test.retries = (long)config_integer("debug.network_test_retry");
 	if (network_test.mode != _network_test_off)
 		platform_log("network test: %s", setting);
 }
@@ -1042,6 +1046,27 @@ void network_test_update(
 		network_test.game_over = FALSE;
 		platform_log("network test: joining again");
 	}
+	/* debug.network_test_retry: a join that ended before its game (the
+	client gone: a map download cut off, the link lost) is tried again a few
+	seconds on */
+	if (network_test.mode == _network_test_join && network_test.retries > 0 && network_test.set_up &&
+		main_menu_loaded && !global_network_game_client_get())
+	{
+		network_test.retry_seconds += seconds;
+		if (network_test.retry_seconds >= 5.0f)
+		{
+			network_test.retries--;
+			network_test.retry_seconds = 0.0f;
+			network_test.set_up = FALSE;
+			network_test.joined = FALSE;
+			network_test.player_added = FALSE;
+			network_test.team_set = FALSE;
+			network_test.code_joined = FALSE;
+			network_test.joined_seconds = 0.0f;
+			network_test.menu_seconds = 0.0f;
+			platform_log("network test: joining again (the last join ended before its game)");
+		}
+	}
 	if (network_test.mode == _network_test_join && network_test.game_over && main_menu_loaded)
 	{
 		network_test.game_over = FALSE;
@@ -1210,7 +1235,7 @@ void network_test_update(
 						platform_log("network test: the public lobby lists \"%s\" (%d/%d) with code %s", entry.name,
 							entry.players, entry.maximum, entry.code);
 						snprintf(network_test.code, sizeof(network_test.code), "%s", entry.code);
-						network_test.code_from_lobby = TRUE;
+						network_test.lobby_entry = entry;
 						p2p_lobby_browse(FALSE);
 						break;
 					}
@@ -1219,9 +1244,11 @@ void network_test_update(
 			if (network_test.code[0])
 			{
 				network_test.code_joined = TRUE;
+				/* (a public game's as the settings panel joins it: its code, whose
+				record must be the listed host's) */
 				platform_log("network test: joining code %s: %s", network_test.code,
-					(network_test.code_from_lobby ? p2p_join_lobby_code(network_test.code) :
-						p2p_join_code(network_test.code)) ? "looking it up" : "not a code");
+					(network_test.lobby_entry.code[0] ? p2p_join_lobby_entry(&network_test.lobby_entry) :
+					p2p_join_code(network_test.code)) ? "looking it up" : "not a code");
 			}
 		}
 		else if (!network_test.joined && network_game_client_join_first_available_game())

@@ -1356,6 +1356,9 @@ static boolean network_client_reliable_connection_read(
 	return success;
 }
 
+/* (port) network_connection_last_read_was_unreliable's */
+static boolean network_connection_last_read_unreliable;
+
 boolean network_connection_read(
 	struct network_connection *connection,
 	void *buffer,
@@ -1376,12 +1379,23 @@ boolean network_connection_read(
 		connection->flags&FLAG(_connection_create_serverside_client_bit));
 
 	result = network_client_reliable_connection_read(connection, buffer, buffer_size, source_address);
+	network_connection_last_read_unreliable = FALSE;
 	if (!result && TEST_FLAG(connection->flags, _connection_create_clientside_client_bit))
 	{
 		result = network_client_unreliable_connection_read(connection, buffer, buffer_size, source_address);
+		network_connection_last_read_unreliable = result;
 	}
 
 	return result;
+}
+
+/* port: whether the message network_connection_read last gave a client came
+in a datagram (which anyone can send as the host) rather than over its
+connection to the host (OpenCE's) */
+boolean network_connection_last_read_was_unreliable(
+	void)
+{
+	return network_connection_last_read_unreliable;
 }
 
 boolean network_server_close_client_connection(
@@ -1823,6 +1837,14 @@ boolean network_connection_idle(
 	}
 
 	return success;
+}
+
+/* port: map sharing's look at the outgoing queue (map_share.c) */
+long network_connection_reliable_queued_bytes(
+	struct network_connection *connection)
+{
+	return connection && connection->reliable_outgoing_queue ?
+		circular_queue_size(connection->reliable_outgoing_queue) : 0;
 }
 
 /* ---------- private code */

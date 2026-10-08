@@ -91,6 +91,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_rejoin", _config_real, "0.0", "HALO_NETWORK_TEST_REJOIN", _environment_value, _platform_all,
 		"Seconds into an automated test game after which a joining machine leaves\n"
 		"it (as quitting from the pause menu does) and joins again, once; 0 never." },
+	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
+		"Times a joining machine of an automated test whose join ended before its\n"
+		"game began (a map download cut off, refused) joins again; 0 never." },
 	{ "debug.network_test_pickup_weapon", _config_string, "\"\"", "HALO_NETWORK_TEST_PICKUP_WEAPON", _environment_value,
 		_platform_all,
 		"The weapon network_test_pickup stands the player on: the first whose tag\n"
@@ -266,6 +269,18 @@ static const struct config_setting config_settings[] =
 		"machines of twice it), to test the netcode as over the internet; 0 none." },
 	{ "debug.network_loss", _config_real, "0.0", "HALO_NETWORK_LOSS", _environment_value, _platform_all,
 		"Percent of datagrams received that are dropped, for the same; 0 none." },
+	{ "debug.network_corrupt", _config_real, "0.0", "HALO_NETWORK_CORRUPT", _environment_value, _platform_all,
+		"Percent of the datagrams received that are damaged at random, to test\n"
+		"that nothing a machine sends can crash the game; 0 none." },
+	{ "debug.network_corrupt_stream", _config_real, "0.0", "HALO_NETWORK_CORRUPT_STREAM", _environment_value,
+		_platform_all,
+		"Percent of the reads of streams that are damaged at random, for the\n"
+		"same (a damaged stream is closed, so a little goes a long way); 0 none." },
+	{ "debug.network_corrupt_after", _config_real, "0.0", "HALO_NETWORK_CORRUPT_AFTER", _environment_value,
+		_platform_all,
+		"Seconds after the start before anything is damaged, so that a game can\n"
+		"be set up and started first (a host's messages to its own client are\n"
+		"damaged too)." },
 	{ "debug.test_input", _config_string, "\"\"", "HALO_TEST_INPUT", _environment_value, _platform_all,
 		"\"bot:<seed>\" plays controller 1 with a scripted pattern (automated\n"
 		"network tests); empty for none." },

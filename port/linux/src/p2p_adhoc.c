@@ -188,13 +188,29 @@ static void beacon_received(const unsigned char *address, const unsigned char *b
 	peer = find_peer(address);
 	if (!peer)
 	{
+		int relay = -1;
+		unsigned short relay_port = 0;
+
 		for (index = 0; index < ADHOC_MAXIMUM_PEERS && adhoc.peers[index].used; index++)
 			;
+		/* full: a machine silent for PEER_SILENCE (which is no longer
+		offered) gives its place, and its relay, which is never closed (a
+		machine in the group could send beacons from many made-up addresses,
+		and keep the group's real machines out for good) */
 		if (index == ADHOC_MAXIMUM_PEERS)
-			return;
+		{
+			for (index = 0; index < ADHOC_MAXIMUM_PEERS && !elapsed(adhoc.peers[index].heard_time, PEER_SILENCE);
+				index++)
+				;
+			if (index == ADHOC_MAXIMUM_PEERS)
+				return;
+			relay = adhoc.peers[index].relay;
+			relay_port = adhoc.peers[index].relay_port;
+		}
 		peer = &adhoc.peers[index];
 		memset(peer, 0, sizeof(*peer));
-		peer->relay = open_relay(&peer->relay_port);
+		peer->relay = relay >= 0 ? relay : open_relay(&relay_port);
+		peer->relay_port = relay_port;
 		if (peer->relay < 0)
 		{
 			platform_log("ad hoc: cannot open a relay for a machine in the group");
