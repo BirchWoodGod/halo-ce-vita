@@ -145,11 +145,12 @@ the game's own. Two kinds work:
   ways to get them, easiest first:
   1. **The Halo Custom Edition installer**: copy your
      `halocesetup_en_1.00.exe` (or another language's `halocesetup*.exe`,
-     about 170 MB) to `ux0:data/haloce-vita/`. At the next start the game
-     takes the three out of it into the maps folder (about a minute; a
-     progress line shows, Circle stops it), then asks whether to delete the
-     installer to free the space. Nothing to unpack on a PC. The PC
-     multiplayer menus show from the start after that one.
+     about 170 MB) to `ux0:data/haloce-vita/`. The name must start with
+     `halocesetup` and end in `.exe`: rename a download called something
+     else. At the next start the game takes the three out of it into the
+     maps folder (under a minute; a progress line shows, Circle stops it),
+     asks whether to delete the installer to free the space, then restarts
+     itself with the PC multiplayer menus. Nothing to unpack on a PC.
   2. **Halo: The Master Chief Collection** (Steam): copy the three from
      `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
      to `ux0:data/haloce-vita/maps/`. Take them from the `custom_edition`
@@ -178,9 +179,10 @@ and links to no downloads.
 easiest:
 
 1. **The Halo Custom Edition installer:** copy `halocesetup_en_1.00.exe`
-   to `ux0:data/haloce-vita/` and start the game. It unpacks the three
-   files by itself (about a minute), then asks before deleting the
-   installer. Restart the game afterwards.
+   (renamed to that if your download is called something else) to
+   `ux0:data/haloce-vita/` and start the game. It unpacks the three files
+   by itself (under a minute), asks before deleting the installer, then
+   restarts itself.
 2. **Halo: The Master Chief Collection** (Steam): the three files in
    `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
    (not the ones directly in `halo1/maps`).
