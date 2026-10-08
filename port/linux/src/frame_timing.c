@@ -16,6 +16,11 @@ void platform_log(const char *format, ...);
 void halo_texture_stats_report(void) __attribute__((weak));
 void halo_objects_census_report(void) __attribute__((weak));
 void halo_rasterizer_pools_report(void) __attribute__((weak));
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c: the threads' run times and the
+cores' load since the last line) */
+void vita_host_thread_times_report(unsigned long frames);
+#endif
 
 static int frame_timing_every = -1;
 static unsigned long long frame_timing_mark[_frame_timing_event_count];
@@ -164,6 +169,9 @@ void halo_frame_timing(int event, unsigned long game_ticks)
 			halo_objects_census_report();
 		if (halo_rasterizer_pools_report)
 			halo_rasterizer_pools_report();
+#ifdef HALO_VITA
+		vita_host_thread_times_report(frame_timing_frames);
+#endif
 		frame_timing_frames = 0;
 		frame_timing_ticks_start = frame_timing_ticks_last;
 		frame_timing_max_frame = 0;

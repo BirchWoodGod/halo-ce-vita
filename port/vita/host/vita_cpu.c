@@ -4,7 +4,9 @@ VITA_CPU.C
 Per-core busy time, as Xita's xv_cpu.c measured it: the kernel's idle clock
 per core (sceKernelGetSystemInfo), sampled about once a second. Busy is the
 share of the interval the core was not idle; 255 means unknown (Vita3K
-returns no counters, and the fourth core is the system's).
+returns no counters). The fourth core's too: the system's, where Fourth
+core helpers puts the port's helpers with CapUnlocker (vita_fourth_core.c;
+shown as in Bruno Santana's modified build).
 */
 
 #include <psp2/kernel/processmgr.h>
@@ -19,21 +21,21 @@ returns no counters, and the fourth core is the system's).
 static SceKernelSystemInfo previous;
 static unsigned long long previous_time, last_poll;
 static int have_previous;
-static unsigned char busy[3] = { 255, 255, 255 };
+static unsigned char busy[4] = { 255, 255, 255, 255 };
 
 static unsigned int cpu_mask(unsigned int mask)
 {
-	return ((mask >> 16) | mask) & 7u;
+	return ((mask >> 16) | mask) & 15u;
 }
 
-void vita_host_cpu_usage(unsigned char out[3])
+void vita_host_cpu_usage(unsigned char out[4])
 {
 	unsigned long long now = sceKernelGetProcessTimeWide();
 	SceKernelSystemInfo info;
 
 	if (last_poll && now - last_poll < PERIOD_US)
 	{
-		memcpy(out, busy, 3);
+		memcpy(out, busy, 4);
 		return;
 	}
 	last_poll = now;
@@ -41,7 +43,7 @@ void vita_host_cpu_usage(unsigned char out[3])
 	info.size = sizeof(info);
 	if (sceKernelGetSystemInfo(&info) < 0 || !cpu_mask(info.activeCpuMask))
 	{
-		busy[0] = busy[1] = busy[2] = 255;
+		busy[0] = busy[1] = busy[2] = busy[3] = 255;
 		have_previous = 0;
 	}
 	else
@@ -52,7 +54,7 @@ void vita_host_cpu_usage(unsigned char out[3])
 			unsigned int active = cpu_mask(previous.activeCpuMask) & cpu_mask(info.activeCpuMask);
 			unsigned int core;
 
-			for (core = 0; core < 3; core++)
+			for (core = 0; core < 4; core++)
 			{
 				unsigned long long old_idle = previous.cpuInfo[core].idleClock, idle = info.cpuInfo[core].idleClock;
 				unsigned long long idle_delta;
@@ -70,5 +72,5 @@ void vita_host_cpu_usage(unsigned char out[3])
 		previous_time = now;
 		have_previous = 1;
 	}
-	memcpy(out, busy, 3);
+	memcpy(out, busy, 4);
 }

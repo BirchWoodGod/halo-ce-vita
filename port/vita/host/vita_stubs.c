@@ -145,7 +145,8 @@ static volatile int generic_atomic_lock;
 
 static void generic_atomic_acquire(void)
 {
-	while (__atomic_exchange_n(&generic_atomic_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&generic_atomic_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&generic_atomic_lock, 1, __ATOMIC_ACQUIRE))
 		;
 }
 

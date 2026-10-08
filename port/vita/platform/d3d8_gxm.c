@@ -3442,6 +3442,9 @@ static void *render_worker(void *unused)
 	/* (a pthread, since it waits on pthread condition variables; pinned
 	to the second core) */
 	vita_host_pin_current_thread(1);
+#ifdef HALO_VITA
+	vita_host_thread_watch("render worker");
+#endif
 	{
 		/* the records of the frame that are not hoisted, run at its present,
 		and the hoisted ones of the later waves (small_target_wave), run

@@ -280,10 +280,12 @@ it is).
   "TEST MODE" near its top.
 
 The **Profile** row at the top sets the speed-related rows together
-(render resolution, model detail, hide distant objects, scenery updates,
-object lighting and sound occlusion): **Performance**, **Balanced** (the
-defaults) or **Quality** (the game as on the Xbox). Changing one of those
-rows yourself turns the profile to **Custom**.
+(render resolution, model detail, hide distant objects, object shadows,
+dynamic lights, effects quality, particle density, sun rays, scenery
+updates, object lighting, AI think rate, sound occlusion and sound updates):
+**Performance**, **Balanced** (the defaults) or **Quality** (the game as on
+the Xbox). Changing one of those rows yourself turns the profile to
+**Custom**.
 
 **Aspect ratio** 16:9 (the default) fills the Vita's screen with a wider
 view; 4:3 shows the Xbox's own framing, field of view, HUD and menus between
@@ -320,12 +322,23 @@ Recommended settings (the **Profile** row sets these at once):
 | Hide distant objects | Small | Small | Off |
 | Scenery updates | Quarter | Quarter | Every tick |
 | Object lighting | Third | Third | Full |
+| Object shadows | Off | Near only | Full |
+| Dynamic lights | 4 | 8 | All |
+| Effects quality | Performance | Full | Full |
+| Particle density | Half | Full | Full |
 | Sun rays | Off | On | On |
+| AI think rate | Adaptive | Adaptive | Every tick |
 | Sound occlusion | Every 6th | Every 3rd | Every tick |
+| Sound updates | Every 2nd | Every 2nd | Every frame |
 | Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
 
 Performance is the one to pick if the late-game battles feel slow; Quality
-draws and sounds exactly as on the Xbox and runs well in quiet areas. None
+draws, sounds and plays exactly as on the Xbox and runs well in quiet areas.
+Balanced and Performance think less often for far-off enemies and update
+the sounds every other frame, so a fight plays a little differently from
+the Xbox's (the shadows, lights, effects and particles change only what is
+drawn). Object shadows, Dynamic lights, Effects quality, Particle density,
+AI think rate and Sound updates come from Bruno Santana's modified build. None
 of them drops see-through parts such as the Covenant field generators'
 domes or visors: models keep them at the Xbox's detail level, and the
 domes are drawn at any distance.
@@ -348,6 +361,28 @@ What helps, in the settings panel:
 - **Sound voices** 16: fewer positional sounds at once.
 - Keep **Smooth weapon motion** on: it costs almost nothing and makes the
   frame rate feel steadier.
+
+### More performance with plugins (optional)
+
+Two optional plugins give the game more of the Vita's processor. Neither is
+needed, and the game runs the same without them.
+
+- **[CapUnlocker](https://github.com/GrapheneCt/CapUnlocker)** by GrapheneCt
+  lets games use the Vita's fourth CPU core, which the system normally keeps
+  for itself. With it, the **Fourth core helpers** setting (Graphics >
+  Advanced; it applies after a restart) moves background work onto that
+  core: **Audio** moves the sound mixer, **All async** also the display
+  queue, loading, map decompression, checkpoint writing, shader compiling
+  and the log. The game, render and tick threads never move. If core 3
+  stays very busy and the frame rate drops, use Audio. Without it the setting
+  does nothing and `halo.log` says so. To install: copy `CapUnlocker.skprx`
+  from its releases to `ur0:tai/`, add the line `ur0:tai/CapUnlocker.skprx`
+  under `*KERNEL` in `ur0:tai/config.txt` (keep a copy of the file first: a
+  mistake there stops plugins loading), and reboot.
+- **[PSVshell](https://github.com/Electry/PSVshell)** (or PSVshellPlus)
+  raises the processor to 500 MHz, which helps in the biggest fights at some
+  cost in battery and heat. The game keeps a higher speed set there; it only
+  raises the clock when it is lower than the game needs.
 
 A steady 30 fps in the biggest fights is a goal for 1.1.0 (see the
 [roadmap](ROADMAP.md)). If you want to help measure, add these lines to
@@ -469,6 +504,9 @@ This port stands on a lot of other people's work:
 - **[Xita](https://github.com/Xita-Project/xita)**: the earlier work on running Halo on the Vita, whose
   findings (the register combiner translation, the GPU and threading
   lessons, the tools) went into this port.
+- **Bruno Santana**: his modified build of this port showed the Vita's
+  fourth core running helper work, frame interpolation at 60 fps and more
+  graphics settings, which the 1.1.0 work on those builds on.
 - **PS Vita port**: BirchWoodGod.
 
 ### Testers

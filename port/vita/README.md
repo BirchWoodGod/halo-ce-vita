@@ -185,12 +185,16 @@ Graphics, **Advanced**:
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Model detail (P) | Low | level of detail of characters, vehicles and props |
-| Hide distant objects (P) | Small | skips objects that cover only a few pixels |
+| Hide distant objects (P) | Small | skips objects that cover only a few pixels (before their lighting is prepared) |
+| Object shadows (P) | Near only | the shadows under characters and vehicles: Full (the Xbox's, for objects over 30 pixels across), Near only (over 60 pixels), Off |
+| Dynamic lights (P) | 8 | the most dynamic lights (shots, explosions, muzzle flashes) a frame lights the scene and objects with, the nearest first: All (the Xbox's), 8, 4, 2 |
+| Effects quality (P) | Full | Performance: no dynamic lights' specular pass, specular lightmaps, reflections (shiny floors, mirrors) or grass; Minimal: also no decals (bullet holes, scorches, the map's markings), weather, contrails or light lens flares |
+| Particle density (P) | Full | Half, Third, Quarter: that share of the smoke, sparks and debris drawn (each particle drawn or not for its whole life; your own weapon's and the effects on weapons, units and vehicles all drawn) |
+| Sun rays (P) | On | the sun's glow and light shafts outdoors (Off in Performance: seven small extra scenes a frame for the graphics chip while the sun is in view) |
+| Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
-| Sun rays (P) | On | the sun's glow and light shafts outdoors (Off in Performance: seven small extra scenes a frame for the graphics chip while the sun is in view) |
-| Distant AI | Every tick | Half: enemies more than 20 world units from every player recheck what they can see every other tick (a CPU saving in big fights; they react a tick later on average). In no profile yet: being tried |
-| Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
+| AI think rate (P) | Adaptive | how often enemies and allies think (what they see, feel and decide): Every tick (the Xbox's), Adaptive (within 8 world units of a player every tick, within 25 every second tick, farther every third), 15 Hz, 10 Hz. Their movement, aim and firing stay every tick; the game plays a little differently (they notice and decide a tick or two later). Replaces 1.1's Distant AI |
 
 **Controls**
 
@@ -237,6 +241,7 @@ has lain still for a second.
 | --- | --- | --- |
 | Sound voices * | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices) |
 | Sound occlusion (P) | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
+| Sound updates (P) | Every 2nd | how often the sound manager places the sounds and picks which play: Every frame (the original), Every 2nd, Every 3rd frame; a new sound starts up to a frame or two later, the mixer plays on |
 
 **Multiplayer**: see [Multiplayer](#multiplayer).
 
@@ -535,7 +540,8 @@ Useful ones:
 | `HALO_TICK_CATCH_UP=0` | one tick a frame at most in a local game and, now, for a System Link host no other machine joined: the game plays slower instead of the frame rate halving |
 | `HALO_DECAL_CACHE_WINDOW=n` | a new decal takes the least recently drawn room among the n decals after the last one made instead of searching all 2048 (default 64; 0 = the whole cache, as the Xbox) |
 | `HALO_DECAL_MIN_PIXELS=n` | decals that would be under n pixels across from every local view are not made (default 0: off) |
-| `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off) |
+| `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off; no longer a row: AI think rate) |
+| `HALO_TICK_HASH_MASK=2` | (Linux harness) the tick hash also leaves out what the render writes into the objects and lights, to compare render settings |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
 | `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host's latest, so it plays at a slow host's pace (default 6; 0 = never) |
 | `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |

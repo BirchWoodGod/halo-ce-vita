@@ -34,7 +34,9 @@ too, under whatever env.txt and settings.txt say.
 The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
 those rows match none of them (the render resolution, on the tab, and the
-detail and update rates and the sun rays, under Advanced). Rows marked *
+detail and update rates, the sun rays, the shadows, lights, effects and
+particles and the AI's think rate, under Advanced, and Audio's sound
+updates and occlusion). Quality is the Xbox game's every one. Rows marked *
 apply after a restart (the sound voices, the network, most dev switches).
 
 Controls has the rows players change (look, crouch, gyro aiming, the rear
@@ -303,27 +305,60 @@ static struct setting settings[] = {
 		PAGE_GRAPHICS_ADVANCED },
 	{ "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", 0, 4, { "0", "4", "8", "12" },
 		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2, PAGE_GRAPHICS_ADVANCED },
-	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
-		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, PAGE_GRAPHICS_ADVANCED },
-	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
-		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, PAGE_GRAPHICS_ADVANCED },
+	/* (Bruno Santana's settings, his variables and values, so his build's
+	settings.txt carries over: render_objects.c's shadows - Near only for
+	objects over 60 pixels across, the Xbox's 30 -, object_lights.c's
+	dynamic lights cap, render.c's passes, render_particles.c's density) */
+	{ "Object shadows", "HALO_VITA_SHADOWS", 0, 3, { "2", "1", "0" }, { "Full", "Near only", "Off" },
+		"Shadows under characters and vehicles", 1, PAGE_GRAPHICS_ADVANCED },
+	{ "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", 0, 4, { "0", "8", "4", "2" }, { "All", "8", "4", "2" },
+		"The most lights from shots and blasts a frame", 1, PAGE_GRAPHICS_ADVANCED },
+	{ "Effects quality", "HALO_VITA_EFFECTS_QUALITY", 0, 3, { "2", "1", "0" },
+		{ "Full", "Performance", "Minimal" }, "Performance: no reflections, specular, grass", 0,
+		PAGE_GRAPHICS_ADVANCED },
+	{ "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", 0, 4, { "1", "2", "3", "4" },
+		{ "Full", "Half", "Third", "Quarter" }, "Smoke, sparks, debris drawn (your gun's: all)", 0,
+		PAGE_GRAPHICS_ADVANCED },
 	/* (the sun's glow and rays, rasterizer_lights.c: seven small scenes a
 	frame while the sun is in view) */
 	{ "Sun rays", "HALO_SUN_RAYS", 0, 2, { "1", "0" }, { "On", "Off" },
 		"The sun's glow and light shafts outdoors", 0, PAGE_GRAPHICS_ADVANCED },
-	/* (actor_perception.c: actors more than 20 world units from every
-	player look at their props every other tick; decals.c: decals under 2
-	pixels across are not made. Off as on the Xbox, in no profile yet: to
-	be tried on hardware) */
-	{ "Distant AI", "HALO_AI_PERCEPTION_LOD", 0, 2, { "0", "20" }, { "Every tick", "Half" },
-		"How often far-off enemies recheck what they see", 0, PAGE_GRAPHICS_ADVANCED },
+	/* (decals.c: decals under 2 pixels across are not made. Off as on the
+	Xbox, in no profile yet: to be tried on hardware) */
 	{ "Tiny decals", "HALO_DECAL_MIN_PIXELS", 0, 2, { "0", "2" }, { "Shown", "Skipped" },
 		"Bullet holes too small to see", 0, PAGE_GRAPHICS_ADVANCED },
+	{ "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", 0, 3, { "1", "2", "4" },
+		{ "Every tick", "Half", "Quarter" }, "How often static props are updated", 2, PAGE_GRAPHICS_ADVANCED },
+	{ "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", 0, 3, { "1", "2", "3" },
+		{ "Full", "Half", "Third" }, "How often object lighting is recomputed", 2, PAGE_GRAPHICS_ADVANCED },
+	/* (actors.c, Bruno Santana's variable and values: how often an actor
+	thinks - its perception, situation, emotions and decision -, its
+	movement and firing every tick; Adaptive by its distance to the nearest
+	player. 1.1's Distant AI row, HALO_AI_PERCEPTION_LOD, is gone: a
+	settings.txt naming it loads as the profile has this row) */
+	{ "AI think rate", "HALO_AI_THINK_DIVISOR", 0, 4, { "1", "0", "2", "3" },
+		{ "Every tick", "Adaptive", "15 Hz", "10 Hz" }, "Adaptive: far-off enemies think less often", 1,
+		PAGE_GRAPHICS_ADVANCED },
+	/* (vita_fourth_core.c, with Bruno Santana's levels and variable, so his
+	build's settings.txt carries over: Audio puts the sound mixer on the
+	fourth core, All async the mixer, GXM's display queue, the cache file
+	thread, the map decompression, the checkpoint writer, the shader
+	compiler and clean-up and the log's writer. The system gives a game
+	that core only with a kernel plugin such as CapUnlocker; halo.log says
+	where each went. Off until the hardware says what it is worth; in no
+	profile) */
+	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
+		"Needs CapUnlocker: audio, or all background work", 0, PAGE_GRAPHICS_ADVANCED },
 
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
 		{ "Every tick", "Every 3rd", "Every 6th" }, "How often muffling behind walls is rechecked", 1, TAB_AUDIO },
+	/* (sound_manager.c, Bruno Santana's variable: the sound manager's work
+	- positions, volumes, which sounds get the voices - every nth frame;
+	the mixer plays on) */
+	{ "Sound updates", "HALO_SOUND_MANAGER_DIVISOR", 0, 3, { "1", "2", "3" },
+		{ "Every frame", "Every 2nd", "Every 3rd" }, "Sounds placed and started; lower is faster", 1, TAB_AUDIO },
 
 	/* (Controls: the rows players change, then the pages laid out as the
 	Xbox controller) */
@@ -488,21 +523,30 @@ static int shipped_kept;
 /* the profiles (the Profile row's first three choices): the value of each
 row a profile sets. Balanced is the release's defaults (the rows' own) */
 #define PROFILE_CUSTOM 3
-#define PROFILE_ROWS 7
+#define PROFILE_ROWS 13
 
 static const char *const profile_variables[PROFILE_ROWS] = {
 	"HALO_RENDER_SCALE", "HALO_MODEL_LOD_SCALE", "HALO_MIN_OBJECT_PIXELS", "HALO_SCENERY_UPDATE_DIVISOR",
 	"HALO_LIGHTING_REFRESH_DIVISOR", "HALO_SOUND_OBSTRUCTION_TICKS", "HALO_SUN_RAYS",
+	"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
+	"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR",
 };
 
+/* (a settings.txt saved with a profile before a row was added takes the
+profile's value for it: vita_settings_load) */
 static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
-	/* Performance: 50%, Low, Small, Quarter, Third, Every 6th, no sun rays */
-	{ "0.5", "0.5", "8", "4", "3", "6", "0" },
+	/* Performance: 50%, Low, Small, Quarter, Third, Every 6th, no sun rays;
+	no object shadows, 4 lights, Performance effects, half the particles,
+	Adaptive AI, sound every 2nd frame */
+	{ "0.5", "0.5", "8", "4", "3", "6", "0", "0", "4", "1", "2", "0", "2" },
 	/* Balanced (the release's defaults): 75%, Low, Small, Quarter, Third,
-	Every 3rd, sun rays */
-	{ "0.75", "0.5", "8", "4", "3", "3", "1" },
-	/* Quality: 100%, High, Off, Every tick, Full, Every tick, sun rays */
-	{ "1", "1", "0", "1", "1", "1", "1" },
+	Every 3rd, sun rays; shadows near only, 8 lights, Full effects and
+	particles, Adaptive AI, sound every 2nd frame */
+	{ "0.75", "0.5", "8", "4", "3", "3", "1", "1", "8", "2", "1", "0", "2" },
+	/* Quality, the Xbox's: 100%, High, Off, Every tick, Full, Every tick,
+	sun rays; all shadows, lights, effects and particles, AI every tick,
+	sound every frame */
+	{ "1", "1", "0", "1", "1", "1", "1", "2", "0", "2", "1", "1", "1" },
 };
 
 /* the variables the performance logging switch sets, and their values */
@@ -1240,7 +1284,7 @@ void vita_settings_load(void)
 	halo_test_setting_hook = vita_settings_set;
 	{
 		/* (in halo.log: the profile and the rows it sets, the picture's) */
-		char message[300];
+		char message[600];
 		int length = snprintf(message, sizeof(message), "settings: profile %s:", settings[0].names[settings[0].choice]);
 
 		for (index = 0; index < PROFILE_ROWS && length < (int)sizeof(message); index++)

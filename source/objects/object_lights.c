@@ -205,6 +205,9 @@ reconnects a light it believes disconnected (the assertion at 0x4F9) */
 void platform_log(const char *format, ...);
 #endif
 
+/* port: port/linux/src (halo.log) */
+void platform_log(const char *format, ...);
+
 /* ---------- constants */
 
 enum
@@ -739,6 +742,51 @@ void lights_dispose_from_old_map(
 	return;
 }
 
+/* port: the lights array out of order in a map (game_state.c's
+game_state_check_data_arrays reports how): Sentry's NATIVE-7 found it made
+for no map, every light lost, and the next light made or looked up crashed.
+Lights are only seen, so they all go: the array is made again, valid and
+empty, its clusters' references with it, and the objects let go of the
+lights they had (their attachments, light_delete and
+object_get_self_illumination take none for lost). Lights made from then on
+are as ever. Whether it did. */
+boolean lights_port_recover(
+	void)
+{
+	struct data_array *data = light_data;
+	struct object_iterator iterator;
+	struct object_datum *object;
+
+	if (data->signature == 'd@t@' && data->data == (void *)(data + 1) && data->valid && data->next_identifier &&
+		data->maximum_count == MAXIMUM_LIGHTS_PER_MAP && data->size == sizeof(struct light_datum) &&
+		data->count >= 0 && data->count <= data->maximum_count &&
+		data->actual_count >= 0 && data->actual_count <= data->count &&
+		data->first_free_absolute_index >= 0 && data->first_free_absolute_index <= data->maximum_count)
+	{
+		return FALSE;
+	}
+	/* (how, and since when) */
+	game_state_check_data_arrays();
+	data_initialize(data, "lights", MAXIMUM_LIGHTS_PER_MAP, sizeof(struct light_datum));
+	lights_initialize_for_new_map();
+	object_iterator_new(&iterator, _object_mask_all, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		struct object_definition *definition = object_definition_get(object->definition_index);
+		short attachment_count = (short)MIN(definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT);
+		short attachment_index;
+
+		for (attachment_index = 0; attachment_index < attachment_count; attachment_index++)
+		{
+			if (object->object.attachment_types[attachment_index] == _object_attachment_type_light)
+				object->object.attachment_indices[attachment_index] = NONE;
+		}
+	}
+	platform_log("lights: the lights were out of order and all of them were let go");
+
+	return TRUE;
+}
+
 boolean lights_enable(
 	boolean enable)
 {
@@ -764,6 +812,9 @@ long light_new(
 		|| definition->lens_flare.index != NONE)
 	{
 		light_index = datum_new(light_data);
+		/* port: no light if the new one can't be had (data.c's data_usable) */
+		if (light_index != NONE && !datum_try_and_get(light_data, light_index))
+			light_index = NONE;
 		if (light_index != NONE)
 		{
 			struct light_datum *light = light_get(light_index);
@@ -771,8 +822,35 @@ long light_new(
 			light->definition_index = definition_index;
 			light->object_index = object_index;
 			light->attachment_marker_index = object_attachment_index;
+			/* port: a function and a change color the object holds, or none
+			(an attachment's references in a map; retail's are none to d for
+			the function, none to b for the color) */
 			light->function_index = object_function_index;
 			light->color_function_index = object_change_color_index;
+			if ((object_function_index!=NONE && !VALID_INDEX(object_function_index, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS)) ||
+				(object_change_color_index!=NONE && !VALID_INDEX(object_change_color_index, NUMBER_OF_OBJECT_CHANGE_COLORS)))
+			{
+				static boolean reference_reported = FALSE;
+
+				if (!reference_reported)
+				{
+					reference_reported = TRUE;
+					error(
+						_error_silent,
+						"### ERROR light %s is attached with function #%d and change color #%d; the bad one is none",
+						tag_get_name(definition_index),
+						object_function_index,
+						object_change_color_index);
+				}
+				if (!VALID_INDEX(object_function_index, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS))
+				{
+					light->function_index = NONE;
+				}
+				if (!VALID_INDEX(object_change_color_index, NUMBER_OF_OBJECT_CHANGE_COLORS))
+				{
+					light->color_function_index = NONE;
+				}
+			}
 			light->flags = 0;
 			LIGHT_SET_FLAG(light, _point_light_dynamic_bit, TEST_FLAG(definition->flags, _light_definition_dynamic_bit));
 			LIGHT_SET_FLAG(light, _point_light_connects_to_map_bit, TEST_FLAG(light->flags, _point_light_dynamic_bit) || definition->lens_flare.index != NONE);
@@ -963,6 +1041,77 @@ void lights_stress_update(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (tick_hash.c, HALO_TICK_HASH_MASK=2) what the render writes into the
+lights, each frame, saved and cleared or put back: the light marker's stamp
+(the scene's light query and each lit object's), the light's index among
+the frame's lights and its first-person weapon flag (lights_preprocess_scene),
+in every slot the array has used (a light deleted keeps them) */
+int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	for (absolute_index = 0; absolute_index < light_data->count && count + 3 <= maximum; absolute_index++)
+	{
+		struct light_datum *light = (struct light_datum *)((char *)light_data->data + light_data->size * absolute_index);
+
+		if (restore)
+		{
+			light->marker = saved[count++];
+			light->rasterizer_light_index = saved[count++];
+			light->flags = (word)saved[count++];
+		}
+		else
+		{
+			saved[count++] = light->marker;
+			saved[count++] = light->rasterizer_light_index;
+			saved[count++] = light->flags;
+			light->marker = 0;
+			light->rasterizer_light_index = 0;
+			light->flags &= (word)~FLAG(_point_light_attached_to_first_person_weapon_bit);
+		}
+	}
+	return count;
+}
+#endif
+
+#ifdef HALO_LINUX
+/* (port) a Vita quality setting: HALO_MAX_SCENE_LIGHTS caps the dynamic
+lights a frame has. Each gets its own additive pass over the environment
+(diffuse and specular), a blended full draw the tile renderer cannot
+hide-surface-remove, the GPU's whole cost in a fight. After Bruno Santana's
+Vita build the cap is at the source (lights_preprocess_scene): the lights
+past it are not submitted to the rasterizer, so they get no pass over the
+environment and light no object either (before, only the passes were
+capped, every object still lit by every light). Their colour and radius
+are still worked out each frame (the tick reads the radius the render
+writes: capping the scene's light query itself left the radius stale and
+the game state then differed from the uncapped run's) and
+their lens flares drawn. The query walks the clusters seen outwards from
+the camera's, so the lights kept are mostly the nearest. Unset or 0: no
+cap, as the Xbox. */
+#include <stdlib.h>
+static short lights_scene_maximum(
+	void)
+{
+	static int maximum = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (maximum < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_MAX_SCENE_LIGHTS");
+
+		settings_seen = halo_settings_generation;
+		maximum = setting ? atoi(setting) : 0;
+		if (maximum <= 0 || maximum > MAXIMUM_RENDERED_LIGHTS)
+			maximum = MAXIMUM_RENDERED_LIGHTS;
+	}
+	return (short)maximum;
+}
+#endif
+
 void lights_preprocess_scene(
 	void)
 {
@@ -979,6 +1128,13 @@ void lights_preprocess_scene(
 	if (!halo_epoch_threaded)
 		lights_update_unattached();
 #endif
+	/* port: the lights in order before they are drawn (a frame can come
+	between ticks: lights_port_recover); not while the tick thread may be
+	changing them (it does it at each tick's start and end: game.c) */
+#ifdef HALO_LINUX
+	if (!halo_epoch_threaded)
+#endif
+		lights_port_recover();
 	for (light_index = data_next_index(light_data, NONE);
 		light_index != NONE;
 		light_index = data_next_index(light_data, light_index))
@@ -1157,7 +1313,14 @@ void lights_preprocess_scene(
 				light->radius = (definition->radius_modifier_lower_bound * inverse_intensity
 					+ definition->radius_modifier_upper_bound * intensity)
 					* definition->radius;
+#ifdef HALO_LINUX
+				/* (HALO_MAX_SCENE_LIGHTS, above: the lights past the cap are
+				not submitted; their colour and radius are worked out as
+				before, the game reads them) */
+				if (light->radius != 0.0f && debug_rasterizer_light_count < lights_scene_maximum())
+#else
 				if (light->radius != 0.0f)
+#endif
 				{
 					struct rasterizer_light_submit_parameters light_parameters;
 
@@ -1326,8 +1489,11 @@ void lights_preprocess_scene(
 void light_delete(
 	long light_index)
 {
-	struct light_datum *light = light_get(light_index);
+	struct light_datum *light = datum_try_and_get(light_data, light_index);
 
+	/* port: not one let go of (lights_port_recover) */
+	if (!light)
+		return;
 	cluster_partition_disconnect(
 		&light_cluster_partition,
 		light_index,
@@ -1344,20 +1510,27 @@ real object_get_self_illumination(
 	struct object_definition *definition = object_definition_get(object->definition_index);
 	real illumination = 0.0f;
 	short attachment_index = 0;
+	/* port: the attachments attachments_new made (a map's count; past them
+	the types and indices were the object's other fields; retail has up to
+	8) */
+	short attachment_count = (short)MIN(definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT);
 
-	if (definition->object.attachments.count > 0)
+	if (attachment_count > 0)
 	{
 		do
 		{
 			if (object->object.attachment_types[attachment_index] == _object_attachment_type_light
 				&& object->object.attachment_indices[attachment_index] != NONE)
 			{
-				struct light_datum *light = light_get(object->object.attachment_indices[attachment_index]);
-				illumination += real_rgb_color_brightness(&light->color);
+				struct light_datum *light = datum_try_and_get(light_data, object->object.attachment_indices[attachment_index]);
+
+				/* (port: not one let go of: lights_port_recover) */
+				if (light)
+					illumination += real_rgb_color_brightness(&light->color);
 			}
 			attachment_index++;
 		}
-		while (attachment_index < definition->object.attachments.count);
+		while (attachment_index < attachment_count);
 	}
 
 	if (object->object.first_child_object_index != NONE)
@@ -1836,28 +2009,7 @@ static void light_get_bounding_sphere(
 	return;
 }
 
-#ifdef HALO_LINUX
-/* (port) a Vita quality setting: HALO_MAX_SCENE_LIGHTS caps the dynamic
-lights that get their own additive pass over the environment (diffuse and
-specular); each such pass is a blended full draw the tile renderer cannot
-hide-surface-remove, the GPU's whole cost in a fight. Unset or 0: no cap. */
-#include <stdlib.h>
-static int vita_max_scene_lights = -1;
-static short vita_scene_light_count(void)
-{
-	if (vita_max_scene_lights < 0)
-	{
-		const char *setting = getenv("HALO_MAX_SCENE_LIGHTS");
-		vita_max_scene_lights = setting ? atoi(setting) : 0;
-	}
-	if (vita_max_scene_lights > 0 && lights_globals.scene_point_light_count > vita_max_scene_lights)
-		return (short)vita_max_scene_lights;
-	return lights_globals.scene_point_light_count;
-}
-#define SCENE_LIGHT_COUNT() vita_scene_light_count()
-#else
 #define SCENE_LIGHT_COUNT() lights_globals.scene_point_light_count
-#endif
 
 void lights_render_diffuse(
 	void)
@@ -2760,40 +2912,3 @@ void lights_prepare_for_object_static(
 
 	return;
 }
-
-#ifdef HALO_LINUX
-/* (port/linux/game/tick_hash.c, HALO_TICK_HASH_MASK=2) what the render
-writes into the lights (lights_preprocess_scene): each light's rasterizer
-light, its first-person weapon bit and its marker stamp (light_mark: a
-stamp per walk, as the objects' magic numbers), saved and cleared, or put
-back (three words a light) */
-int halo_tick_hash_light_render_marks(long *saved, int maximum, int restore)
-{
-	struct data_iterator iterator;
-	struct light_datum *light;
-	int count = 0;
-
-	if (!light_data)
-		return 0;
-	data_iterator_new(&iterator, light_data);
-	while ((light = (struct light_datum *)data_iterator_next(&iterator)) != NULL && count + 3 <= maximum)
-	{
-		if (restore)
-		{
-			light->rasterizer_light_index = saved[count++];
-			light->flags = (word)saved[count++];
-			light->marker = saved[count++];
-		}
-		else
-		{
-			saved[count++] = light->rasterizer_light_index;
-			saved[count++] = light->flags;
-			saved[count++] = light->marker;
-			light->rasterizer_light_index = NONE;
-			light->marker = 0;
-			light->flags &= ~FLAG(_point_light_attached_to_first_person_weapon_bit);
-		}
-	}
-	return count;
-}
-#endif

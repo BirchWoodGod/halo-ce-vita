@@ -449,10 +449,14 @@ void cluster_partition_copy(
 #ifdef HALO_LINUX
 	list_tail_generation++;
 #endif
+	/* port (from OpenCE, MrBruh's "Harden map and network input"): no
+	more clusters than the partitions hold (a map's bsp may say it has
+	more) */
 	csmemcpy(
 		result->cluster_first_data_references,
 		source->cluster_first_data_references,
-		global_structure_bsp_get()->clusters.count * sizeof(*result->cluster_first_data_references));
+		PIN(global_structure_bsp_get()->clusters.count, 0, MAXIMUM_CLUSTERS_PER_STRUCTURE) *
+			sizeof(*result->cluster_first_data_references));
 	reference_list_copy(
 		result->cluster_reference_data,
 		source->cluster_reference_data);
@@ -694,6 +698,17 @@ static long *code_00180fa0(
 		"c:\\halo\\SOURCE\\structures\\cluster_partitions.c",
 		0xd5,
 		cluster_index>=0 && cluster_index<global_structure_bsp_get()->clusters.count);
+
+	/* port (from OpenCE, MrBruh's "Harden map and network input"): a
+	cluster index that fits no cluster's list has an empty list (what is
+	put in it is not kept), not one past the lists */
+	if (cluster_index < 0 || cluster_index >= MAXIMUM_CLUSTERS_PER_STRUCTURE)
+	{
+		static long no_cluster_first_reference;
+
+		no_cluster_first_reference = NONE;
+		return &no_cluster_first_reference;
+	}
 
 	return &partition->cluster_first_data_references[cluster_index];
 }

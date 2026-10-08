@@ -150,6 +150,10 @@ enum
 #define OBJECT_RENDER_STATE_SMALL_PIXELS 100.f
 
 #define OBJECT_SHADOW_MINIMUM_PIXELS 30.f
+#ifdef HALO_LINUX
+/* (HALO_VITA_SHADOWS=1, Near only: render_object_shadows) */
+#define OBJECT_SHADOW_NEAR_MINIMUM_PIXELS 60.f
+#endif
 #define OBJECT_SHADOW_MINIMUM_DARKNESS 0.19f
 
 #define OBJECT_LIGHTING_MAXIMUM_COLOR_DELTA 0.03f
@@ -529,12 +533,44 @@ void render_objects(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_VITA_SHADOWS, the objects'
+shadows: 2 (the default) as the Xbox; 1 (Near only) only for objects over
+60 pixels across (the Xbox's 30; the shadow fades in over the 15 pixels
+above it as before); 0 none (the pass is skipped). At every level an object
+too small for a shadow is passed over before its lighting is prepared
+(render_object), so the objects Hide distant objects dropped are not lit
+for the shadow pass either */
+static int render_object_shadow_quality(
+	void)
+{
+	static int quality = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (quality < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_VITA_SHADOWS");
+
+		settings_seen = halo_settings_generation;
+		quality = setting && *setting ? atoi(setting) : 2;
+		if (quality < 0 || quality > 2)
+			quality = 2;
+	}
+	return quality;
+}
+#endif
+
 void render_object_shadows(
 	void)
 {
 	profile_enter(render_object_shadows_section);
 
+#ifdef HALO_LINUX
+	if (render_shadows && render_object_shadow_quality() > 0)
+#else
 	if (render_shadows)
+#endif
 	{
 		struct object_render_data data;
 
@@ -837,6 +873,27 @@ static real object_get_level_of_detail_pixels(
 }
 
 #ifdef HALO_LINUX
+/* (port) HALO_MIN_OBJECT_PIXELS=n, a handheld quality setting
+(render_object_list) */
+static real render_object_minimum_pixels(
+	void)
+{
+	static real minimum_pixels = -1.0f;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (minimum_pixels < 0.0f || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
+
+		settings_seen = halo_settings_generation;
+		minimum_pixels = setting ? (real)atof(setting) : 0.0f;
+		if (minimum_pixels < 0.0f)
+			minimum_pixels = 0.0f;
+	}
+	return minimum_pixels;
+}
+
 /* (port) HALO_MIN_OBJECT_PIXELS' exceptions (render_object_list) */
 static boolean render_object_kept_whatever_its_size(
 	struct object_datum const *object,
@@ -1031,17 +1088,9 @@ static void render_object_list(
 					turned, the test measuring depth along the view), and a child
 					whose topmost parent is big enough (a held weapon is drawn
 					whenever its holder is) */
-					static float minimum_pixels = -1.0f;
-					static unsigned long settings_seen;
-					extern volatile unsigned long halo_settings_generation;
+					real minimum_pixels = render_object_minimum_pixels();
 					boolean big_enough;
 
-					if (minimum_pixels < 0.0f || settings_seen != halo_settings_generation)
-					{
-						settings_seen = halo_settings_generation;
-						const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
-						minimum_pixels = setting ? (float)atof(setting) : 0.0f;
-					}
 					big_enough = level_of_detail_pixels >= minimum_pixels ||
 						render_object_kept_whatever_its_size(object, definition, minimum_pixels);
 					flicker_note_drawn(object_index, big_enough, level_of_detail_pixels, minimum_pixels);
@@ -1691,6 +1740,13 @@ static void render_object(
 	if (data->shadow)
 	{
 		struct object_datum *object = object_get(data->object_index);
+#ifdef HALO_LINUX
+		/* (HALO_VITA_SHADOWS, render_object_shadows) */
+		real shadow_minimum_pixels = render_object_shadow_quality() == 1 ?
+			OBJECT_SHADOW_NEAR_MINIMUM_PIXELS : OBJECT_SHADOW_MINIMUM_PIXELS;
+#else
+		real shadow_minimum_pixels = OBJECT_SHADOW_MINIMUM_PIXELS;
+#endif
 
 		if (!object_is_first_person_camera(data->object_index) &&
 			!TEST_FLAG(object->object.flags, _object_shadowless_bit) &&
@@ -1700,6 +1756,14 @@ static void render_object(
 			real level_of_detail_pixels;
 			real shadow_darkness;
 
+#ifdef HALO_LINUX
+			/* (an object too small for a shadow is passed over before its
+			lighting is prepared, not after: the shadow drawn is the same) */
+			if (object_get_level_of_detail_pixels(data->object_index) <= shadow_minimum_pixels)
+			{
+				return;
+			}
+#endif
 			data->lighting = object_get_cached_render_lighting(
 				data->object_index,
 				object_get_level_of_detail_pixels(data->object_index));
@@ -1707,11 +1771,11 @@ static void render_object(
 			level_of_detail_pixels = object_get_level_of_detail_pixels(data->object_index);
 			shadow_darkness = 1.f - real_rgb_color_brightness(&data->lighting->shadow_color);
 
-			if (level_of_detail_pixels > OBJECT_SHADOW_MINIMUM_PIXELS &&
+			if (level_of_detail_pixels > shadow_minimum_pixels &&
 				shadow_darkness > OBJECT_SHADOW_MINIMUM_DARKNESS)
 			{
 				real size_fraction =
-					(level_of_detail_pixels - OBJECT_SHADOW_MINIMUM_PIXELS) * 0.06666667f;
+					(level_of_detail_pixels - shadow_minimum_pixels) * 0.06666667f;
 				real darkness_fraction =
 					(shadow_darkness - OBJECT_SHADOW_MINIMUM_DARKNESS) * 9.0909081f;
 
@@ -1730,6 +1794,24 @@ static void render_object(
 	{
 		struct object_datum *object = object_get(data->object_index);
 		boolean needs_lighting;
+#ifdef HALO_LINUX
+		real level_of_detail_pixels = object_get_level_of_detail_pixels(data->object_index);
+
+		/* (port, after Bruno Santana's Vita build) HALO_MIN_OBJECT_PIXELS: an
+		object too small to draw (render_object_list's test, its exceptions
+		too) with no children and no widgets draws nothing at all, so it is
+		dropped here, before its lighting and render state are prepared
+		(render_object_list dropped it after them) */
+		if (level_of_detail_pixels < render_object_minimum_pixels() &&
+			object->object.first_child_object_index == NONE &&
+			object->object.first_widget_index == NONE &&
+			!render_object_kept_whatever_its_size(object, object_definition_get(object->definition_index),
+				render_object_minimum_pixels()))
+		{
+			flicker_note_drawn(data->object_index, FALSE, level_of_detail_pixels, render_object_minimum_pixels());
+			return;
+		}
+#endif
 
 		if (!TEST_FLAG(object->object.flags, _object_invisible_bit) ||
 			object->object.first_child_object_index != NONE ||
@@ -1754,9 +1836,11 @@ static void render_object(
 #endif
 				data->lighting = object_get_cached_render_lighting(
 					data->object_index,
-					object_get_level_of_detail_pixels(data->object_index));
 #ifdef HALO_LINUX
+					level_of_detail_pixels);
 				OBJECTS_PROFILE_ADD(_objects_profile_lighting, lighting_before);
+#else
+					object_get_level_of_detail_pixels(data->object_index));
 #endif
 			}
 			else

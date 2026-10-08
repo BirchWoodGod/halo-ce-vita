@@ -122,6 +122,10 @@ boolean custom_edition_cache_model_data_read(
 	void *buffer);
 boolean custom_edition_cache_tags_loaded(
 	void);
+/* The tag cache the loaded map's tags are in and its size, in bytes
+(cache_file_tag_cache_contains); NULL and 0 when none is loaded. */
+void *custom_edition_cache_tag_cache(
+	unsigned long *size);
 /* A structure BSP of the loaded map was just read to `structure_bsp`: its
 pointers are moved there too when the tags were (custom_edition_cache.c). */
 void custom_edition_cache_structure_bsp_moved(
