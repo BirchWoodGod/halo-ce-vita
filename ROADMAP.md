@@ -87,8 +87,6 @@ each other (a new network version), so they come after 1.1.0:
 - **Game chat**: quick-chat phrases and typed messages in the lobby and in
   game, with mutes and the host's On / Quick chat only / Off setting.
 - **Voice chat** in network games.
-- **Split screen on the PS TV**: up to four players on one PS TV with
-  DualShock 3 / DualShock 4 controllers.
 
 ## Later
 

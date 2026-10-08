@@ -56,8 +56,8 @@ Evolved.
 - A settings panel in tabs (hold **SELECT + START**), button remapping, touch
   zones, gyro aiming and PlayStation button icons.
 
-Coming in **1.1.1** (see the [roadmap](ROADMAP.md)): game chat, voice chat,
-and split screen on the PS TV with DualShock controllers.
+Coming in **1.1.1** (see the [roadmap](ROADMAP.md)): game chat and voice
+chat.
 
 ## What works
 
@@ -65,7 +65,7 @@ and split screen on the PS TV with DualShock controllers.
   Quit, cinematics, and the movies if you convert them (optional).
 - Multiplayer between Vitas: on the same Wi-Fi (system link), online
   (experimental) and ad hoc (experimental). The multiplayer maps on your
-  own too (split screen with one player). Vitas
+  own too. Vitas
   play only Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
 - Campaign co-op over the network for up to four Vitas (experimental).
 - Custom maps: Xbox maps, Custom Edition multiplayer maps and Custom Edition
@@ -260,7 +260,7 @@ opens the PC version's Multiplayer screen, from OpenCE's menus:
     joiners for it; the code still joins). Then your profile, a map and a
     gametype. The settings panel's Multiplayer tab shows your game's code.
   - **LAN**: the System Link screen, where Y creates a game.
-- **Co-op campaign**, **Split screen** and **Edit gametypes**.
+- **Co-op campaign** and **Edit gametypes**.
 
 Internet and Join by code need Connection **Online**; the screen says so
 otherwise. A code is a convenience, not a password: anyone who has it can
@@ -634,6 +634,12 @@ This port stands on a lot of other people's work:
   fourth core running helper work, frame interpolation at 60 fps and more
   graphics settings, which 1.1.0's are built after.
 - **iamhaller**: the networking work online play started from.
+- **Vita homebrew** the game relies on or recommends:
+  [VitaShell](https://github.com/TheOfficialFloW/VitaShell) by TheFloW,
+  [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D) by Rinnegatamante,
+  [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker) by GrapheneCt
+  (the fourth core) and [PSVshell](https://github.com/Electry/PSVshell) by
+  Electry.
 - **PS Vita port**: BirchWoodGod.
 
 ### Testers
