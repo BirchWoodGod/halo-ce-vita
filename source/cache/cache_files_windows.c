@@ -199,6 +199,11 @@ symbols in this file:
 #include "load_profile.h"
 #include <stdlib.h>
 int halo_thread_index(void);
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c) */
+int vita_host_fourth_core_move(const char *role);
+void vita_host_thread_watch(const char *role);
+#endif
 /* the cache file thread, by halo_thread_index (load_profile.c) */
 static int cache_file_thread_index = -1;
 /* (port) cache_file_read is called by the tick (sounds, the textures it
@@ -1272,6 +1277,20 @@ static void cache_file_windows_thread_proc(
 		setting = getenv("HALO_IO_EACH");
 		complete_each = !setting || atoi(setting) != 0;
 	}
+#ifdef HALO_VITA
+	/* (port) HALO_FOURTH_CORE_CACHE=1: this thread on the Vita's fourth
+	core where the system allows it (port/vita/host/vita_fourth_core.c). A
+	test, not part of Fourth core helpers: a frame can wait for a texture
+	read here, and a sound starts when its read is done */
+	{
+		char const *setting = getenv("HALO_FOURTH_CORE_CACHE");
+
+		if (setting && atoi(setting) != 0)
+			vita_host_fourth_core_move("cache file reads");
+		else
+			vita_host_thread_watch("cache file reads");
+	}
+#endif
 #endif
 	while (TRUE)
 	{
