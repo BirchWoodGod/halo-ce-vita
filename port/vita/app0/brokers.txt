@@ -4,8 +4,8 @@
 # enough. One host:port on each line; "#" starts a comment.
 # (From OpenCE's port/assets/network/brokers.txt. The Vita reads this file
 # from its package, app0:brokers.txt: network.brokers_file, HALO_NET_BROKERS_FILE
-# in env.txt for a list of your own.)
-opence.milenko.org:1883
+# in env.txt for a list of your own. OpenCE's community broker is left out:
+# only the large public brokers carry the Vita's listings.)
 broker.emqx.io:1883
 broker.hivemq.com:1883
 test.mosquitto.org:1883

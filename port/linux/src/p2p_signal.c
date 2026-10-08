@@ -1701,7 +1701,7 @@ static void broker_readable(struct broker *broker)
 
 /* the brokers if network.brokers_file cannot be read (the Vita's
 port/vita/app0/brokers.txt's) */
-#define DEFAULT_BROKERS "opence.milenko.org:1883,broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
+#define DEFAULT_BROKERS "broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
 
 /* the brokers: network.signalling_brokers if set (the tests'), else those in
 network.brokers_file (beside config.toml, unless a full path: on the Vita,
