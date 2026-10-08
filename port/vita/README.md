@@ -356,6 +356,20 @@ The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
 Triangle, Back Select. To host on a PC (Custom Edition) map, turn on PC maps
 on the Modded maps page first.
 
+**The latency meter.** In a network game being played (system link, ad
+hoc or online, directly or through a relay; multiplayer or co-op) the top
+right of the screen shows your round trip to the host: **Ping 45 ms** with
+four bars, green below 80 ms, yellow below 150, red above (two bars from
+150, one from 250). It is the game's own round trip, timed as the netcode
+already times it (nothing more is sent): the network both ways plus each
+machine's wait for its next tick to send, up to 33 ms each, so a Wi-Fi
+network shows 15 to 35 ms. If the host has sent nothing for two seconds it
+says **Connection problem** in red instead. The host shows **Max ping**:
+its slowest player's (one silent for a while, as long as it has been). Hold
+Back for the scoreboard: its **Ping** column has each player's on the host
+(its own players 0) and your own on another Vita. Latency meter Off hides
+both.
+
 The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
@@ -365,6 +379,7 @@ The settings panel's **Multiplayer** tab:
 | Join the room | With Ad hoc: the system's dialog joins (or makes) the room's group; then Multiplayer, System Link (LAN) in the game. |
 | Join with a code | Online, without the PC menus (whose Join by code does it): type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins), then the steps with how the lookup goes, and Cross opens System Link. |
 | Modded maps > | Your custom maps (above). |
+| Latency meter | **On** (the default) or **Off**: your round trip to the host in a network game (the latency meter, below). |
 
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many
