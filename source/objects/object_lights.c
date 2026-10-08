@@ -1472,6 +1472,10 @@ void lights_preprocess_scene(
 		}
 	}
 
+#ifdef HALO_LINUX
+	(void)queued_lens_flare_index;
+	lights_port_submit_queued_lens_flares();
+#else
 	for (queued_lens_flare_index = 0;
 		queued_lens_flare_index < lights_globals.queued_lens_flare_count;
 		queued_lens_flare_index++)
@@ -1480,6 +1484,7 @@ void lights_preprocess_scene(
 			&lights_globals.queued_lens_flares[queued_lens_flare_index]);
 	}
 	lights_globals.queued_lens_flare_count = 0;
+#endif
 	rasterizer_lights_end();
 	profile_exit(lights_section);
 
@@ -1544,6 +1549,32 @@ real object_get_self_illumination(
 
 	return illumination;
 }
+
+#ifdef HALO_LINUX
+/* port: the lens flares the sky queued (render_sky.c) submitted, as
+lights_preprocess_scene does; also called after the late sky (render.c),
+which comes after lights_preprocess_scene: its flares would otherwise wait
+for the next window, in split screen another player's (whose window they
+are not: rasterizer_lens_flare_submit asserts it). A flare queued in another
+window is dropped */
+void lights_port_submit_queued_lens_flares(
+	void)
+{
+	short queued_lens_flare_index;
+
+	for (queued_lens_flare_index = 0;
+		queued_lens_flare_index < lights_globals.queued_lens_flare_count;
+		queued_lens_flare_index++)
+	{
+		if ((lights_globals.queued_lens_flares[queued_lens_flare_index].compressed_window_index &
+			~LENS_FLARE_FIRST_PERSON_MARKER_FLAG) == render.window_index)
+		{
+			rasterizer_lens_flare_submit(&lights_globals.queued_lens_flares[queued_lens_flare_index]);
+		}
+	}
+	lights_globals.queued_lens_flare_count = 0;
+}
+#endif
 
 void lights_queue_lens_flare(
 	long lens_flare_definition_index,
