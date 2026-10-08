@@ -2426,8 +2426,19 @@ static void distributed_handle_inputs(
 		player = distributed_player(input->player_index);
 		if (!player)
 			continue;
-		/* (the sticks and the trigger no further than a controller's) */
+		/* (the sticks and the trigger no further than a controller's; and
+		no number that is not one, which a client can send as easily: a NaN
+		facing became the unit's aiming vector) */
 		action = input->action;
+		if (!distributed_real_valid(action.desired_facing.yaw) || !distributed_real_valid(action.desired_facing.pitch))
+		{
+			action.desired_facing.yaw = 0.0f;
+			action.desired_facing.pitch = 0.0f;
+		}
+		if (!distributed_real_valid(action.throttle.i) || !distributed_real_valid(action.throttle.j))
+			action.throttle.i = action.throttle.j = 0.0f;
+		if (!distributed_real_valid(action.primary_trigger))
+			action.primary_trigger = 0.0f;
 		action.throttle.i = PIN(action.throttle.i, -1.0f, 1.0f);
 		action.throttle.j = PIN(action.throttle.j, -1.0f, 1.0f);
 		action.primary_trigger = PIN(action.primary_trigger, 0.0f, 1.0f);
