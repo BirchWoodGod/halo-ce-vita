@@ -664,7 +664,7 @@ char *nv2a_pixel_shader_to_cg(const struct nv2a_pixel_shader_key *key)
 		"\t%s v0 = xD0;\n"
 		"\t%s v1 = xD1;\n"
 		"\t%s t0 = %s(0.0), t1 = %s(0.0), t2 = %s(0.0), t3 = %s(0.0);\n"
-		"\tfloat dot0 = 0.0, dot1 = 0.0, dot2 = 0.0, dot3 = 0.0;\n", VITA_FU_A_COUNT, VITA_FU_COUNT - VITA_FU_A_COUNT, H4, H4, H4, H4, H4, H4, H4);
+		"\tfloat dot0 = 0.0, dot1 = 0.0, dot2 = 0.0, dot3 = 0.0;\n", VITA_FU_A_COUNT, (key->blend_fold ? VITA_FU_FOLD_COUNT : VITA_FU_COUNT) - VITA_FU_A_COUNT, H4, H4, H4, H4, H4, H4, H4);
 	/* (HALO_SIMPLE_FRAG_BLENDS, d3d8_gxm.c: a constant in place of the
 	program, to measure the program's share of a pass's GPU time) */
 	if (key->pad == 1)
@@ -764,6 +764,10 @@ char *nv2a_pixel_shader_to_cg(const struct nv2a_pixel_shader_key *key)
 		xgpu_text_append(&text, "\tresult = float4(t0.rgb, 1.0);\n");
 	if (config_boolean("debug.gpu_debug_flat"))
 		xgpu_text_append(&text, "\tresult = xD0.a > 0.0 ? float4(xD0.rgb, 1.0) : float4(1.0, 0.0, 1.0, 1.0);\n");
+	/* (a constant blend factor: blend_constant.h) */
+	if (key->blend_fold)
+		xgpu_text_append(&text, "\tresult = saturate(result) * %s(%s) + %s(%s);\n", H4, fu(VITA_FU_BLEND_SCALE), H4,
+			fu(VITA_FU_BLEND_OFFSET));
 	xgpu_text_append(&text, "\treturn saturate(result);\n}\n");
 	return text.buffer;
 }
