@@ -23,6 +23,8 @@ struct observer_result;
 struct render_camera;
 struct real_matrix4x3;
 int halo_interpolation_enabled(void);
+/* (main.c, as a frame starts) the setting read again after the settings panel changed it */
+void halo_interpolation_latch(void);
 float game_time_get_tick_fraction(void);
 /* the fraction for the state the render draws (the finished update's, with the tick on its thread) */
 float halo_render_tick_fraction_get(void);
@@ -33,6 +35,10 @@ void render_interpolation_reset(void);
 void render_interpolation_frame_begin(void);
 void render_interpolation_frame_end(void);
 float render_interpolation_fraction(void);
+/* the frame drew a tick no frame drew before (FALSE: drawn between ticks) */
+unsigned char render_interpolation_frame_drew_new_tick(void);
+/* the tick the frame draws */
+long render_interpolation_drawn_tick(void);
 struct real_matrix4x3 *render_interpolation_object_node_matrices(long object_index);
 /* with the tick on its thread, the bounding sphere of the pose drawn
 (render_interpolation.c, "the threaded tick's poses"); FALSE when the

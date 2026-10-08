@@ -1189,11 +1189,13 @@ static void first_person_weapon_build_node_matrices(
 	{
 		static long last_render_ticks[MAXIMUM_LOCAL_PLAYERS] = { NONE, NONE, NONE, NONE };
 
-		if (!halo_interpolation_enabled() || last_render_ticks[local_player_index] != game_time_get())
+		/* (the tick the frame draws: with the tick on its thread the game's
+		time is the running tick's, render_interpolation.c) */
+		if (!halo_interpolation_enabled() || last_render_ticks[local_player_index] != render_interpolation_drawn_tick())
 		{
 			first_person_weapon->last_render_facing= first_person_weapon->render_facing;
 			first_person_weapon->last_render_position= first_person_weapon->render_position;
-			last_render_ticks[local_player_index]= game_time_get();
+			last_render_ticks[local_player_index]= render_interpolation_drawn_tick();
 		}
 	}
 #else
