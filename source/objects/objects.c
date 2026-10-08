@@ -98,19 +98,16 @@ collects at once. */
 
 
 // This is dangerous, bungie returns the same value regardless of whether the index is valid
-#ifdef HALO_LINUX
-/* port: the index is a function reference from an untrusted object tag; out
-of range (not 1..NUMBER_OF_INCOMING_OBJECT_FUNCTIONS) it would read past the
-fixed incoming_function_values array, so a crafted map gets 0 instead */
+/* port: an index is 1-4 for the incoming functions and 5-8 for the outgoing
+ones (the Xbox read both through incoming_function_values, which the
+outgoing ones follow; retail uses up to 8). Anything else is a map's bad
+index, which reads no function: 0 */
 #define OBJECT_INCOMING_FUNCTION_GET_VALUE(object, index)	\
-((index)>=1 && (index)<=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS ?	\
-(object)->object.incoming_function_values[(index)-1] : 0.f)
-#else
-#define OBJECT_INCOMING_FUNCTION_GET_VALUE(object, index)	\
-((index)>=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS+1 ?			\
-(object)->object.incoming_function_values[(index)-1] :		\
+((unsigned long)((index)-1)>=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS+NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS ? \
+0.f :														\
+(index)>=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS+1 ?			\
+(object)->object.outgoing_function_values[(index)-NUMBER_OF_INCOMING_OBJECT_FUNCTIONS-1] : \
 (object)->object.incoming_function_values[(index)-1])
-#endif
 
 #define OBJECT_FRAME_INDEX_GET(object_index) ((object_index) + game_time_get())
 
@@ -206,6 +203,8 @@ static void object_delete_attachments(long object_index);
 static void object_delete_recursive(long object_index, boolean delete_siblings);
 static void object_compute_function_values(long object_index);
 static void object_compute_change_colors(long object_index);
+static void object_model_nodes_error(long model_index, struct model const *model);
+static void object_definition_data_error(long definition_index, char const *problem);
 
 /* ---------- globals */
 
@@ -456,7 +455,9 @@ void object_set_object_index_for_name_index(
 	short name_index,
 	long object_index)
 {
-	if (VALID_INDEX(name_index, global_scenario_get()->object_names.count))
+	/* port: and one the name list holds (a map's count; retail has up to
+	448 names) */
+	if (VALID_INDEX(name_index, MIN(global_scenario_get()->object_names.count, MAXIMUM_OBJECT_NAMES_PER_SCENARIO)))
 	{
 		object_name_list[name_index] = object_index;
 	}
@@ -1660,7 +1661,9 @@ void object_permute_region(
 		short region_index;
 		struct model* model = model_definition_get(object_definition->object.model.index);
 		
-		for (region_index = 0; region_index<model->regions.count; region_index++)
+		/* port: no more regions than the object's region_permutations holds
+		(a map's count; retail has up to 8) */
+		for (region_index = 0; region_index<MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT); region_index++)
 		{
 			if (desired_region_index==NONE || desired_region_index==region_index)
 			{
@@ -1670,7 +1673,10 @@ void object_permute_region(
 					region_index,
 					struct model_region);
 
-				for (permutation_index = 0; permutation_index<region->permutations.count; permutation_index++)
+				/* port: no more permutations than a region has room for (a map's
+				count, which a short counter would never reach; retail has up
+				to 12) */
+				for (permutation_index = 0; permutation_index<MIN(region->permutations.count, MAXIMUM_PERMUTATIONS_PER_MODEL_REGION); permutation_index++)
 				{
 					struct model_region_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
 						&region->permutations,
@@ -1708,9 +1714,31 @@ boolean object_get_function_value(
 	{
 		match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 1654, function_index>=0 && function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS);
 
-		*value_reference = object->object.outgoing_function_values[function_index];
-		
-		result = TEST_FLAG(object->object.functions_active_flags, function_index);
+		/* port: a function the object can have (a map's index, from an
+		attachment, a widget or a shader; retail's are NONE or 0-3), or
+		it reads as off */
+		if (VALID_INDEX(function_index, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS))
+		{
+			*value_reference = object->object.outgoing_function_values[function_index];
+
+			result = TEST_FLAG(object->object.functions_active_flags, function_index);
+		}
+		else
+		{
+			static boolean function_index_reported = FALSE;
+
+			if (!function_index_reported)
+			{
+				function_index_reported = TRUE;
+				error(
+					_error_silent,
+					"### ERROR %s asked for function #%d; it reads as off",
+					tag_get_name(object->definition_index),
+					function_index);
+			}
+			*value_reference = 0.f;
+			result = FALSE;
+		}
 	}
 	
 	return result;
@@ -2050,6 +2078,26 @@ real_matrix4x3 *object_get_node_matrix(
 	short node_index)
 {
 	match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 1060, object_has_node(object_index, node_index));
+	/* port: a node the object has no matrix for (an index a map's data
+	gave) is its first node, which every object has, not whatever lies
+	past its matrices */
+	{
+		struct object_datum *object = object_get(object_index);
+
+		if (node_index < 0 ||
+			node_index >= object->object.node_matrices.size / (short)sizeof(real_matrix4x3))
+		{
+			static boolean logged = FALSE;
+
+			if (!logged)
+			{
+				logged = TRUE;
+				error(_error_silent, "object %08lx has no node #%d: its first node is used",
+					(unsigned long)object_index, node_index);
+			}
+			node_index = 0;
+		}
+	}
 
 #ifdef HALO_LINUX
 	{
@@ -2489,7 +2537,16 @@ void object_export_function_values(
 			default:
 				region_index = object_definition->object.function_modes[i]-_object_function_first_region_damage;
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 2630, region_index>=0 && region_index<MAXIMUM_REGIONS_PER_OBJECT);
-				value = object->object.region_damage[region_index] / 255.f;
+				/* port: a region the object has, or 0 (a map's function mode;
+				retail's are 0-5, 10, 18 and 19) */
+				if (VALID_INDEX(region_index, MAXIMUM_REGIONS_PER_OBJECT))
+				{
+					value = object->object.region_damage[region_index] / 255.f;
+				}
+				else
+				{
+					object_definition_data_error(object->definition_index, "function mode; it reads 0");
+				}
 				break;
 			}
 			object->object.incoming_function_values[i] = value;
@@ -2578,7 +2635,9 @@ void object_compute_node_matrices(
 		cannot_interpolate_node_orientations_storage :
 		(real_orientation *)object_header_block_get(object_index, &object->object.node_orientations);
 
-	if (object_definition->object.model.index!=NONE)
+	/* port: a model without nodes is placed like no model (a map's count) */
+	if (object_definition->object.model.index!=NONE &&
+		model_definition_get(object_definition->object.model.index)->nodes.count>0)
 	{
 		real_matrix4x3 *object_node_matrix;
 		boolean world_relative;
@@ -2590,6 +2649,8 @@ void object_compute_node_matrices(
 		struct object_type_definition *object_type_definition = object_type_definition_get(object->object.type);
 		
 		struct model *model = model_definition_get(object_definition->object.model.index);
+		/* port: the nodes node_stack and the orientations hold (a map's count) */
+		short model_node_count = (short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
 
 		if (object->object.parent_object_index==NONE)
 		{
@@ -2653,14 +2714,11 @@ void object_compute_node_matrices(
 					overlay_index,
 					struct animation_graph_object_overlay);
 
-				/* port: the overlay's indices are a map's: a function the
-				object's outgoing values hold, an animation the graph has */
-				if (overlay->animation_index!=NONE &&
-					overlay->animation_index>=0 &&
-					overlay->animation_index<animation_graph->animations.count &&
-					overlay->function_index>=0 &&
-					overlay->function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS &&
-					overlay->function_index<object_definition->object.functions.count)
+				/* port: an animation the graph has (a map's index), and a function
+				the object has room for (a map's index; NONE read before the
+				functions; retail's are 0-3) */
+				if (VALID_INDEX(overlay->animation_index, animation_graph->animations.count) &&
+					VALID_INDEX(overlay->function_index, MIN(object_definition->object.functions.count, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS)))
 				{
 					struct object_function_definition* function = TAG_BLOCK_GET_ELEMENT(
 						&object_definition->object.functions,
@@ -2672,7 +2730,14 @@ void object_compute_node_matrices(
 						struct animation);
 					real value= object->object.outgoing_function_values[overlay->function_index];
 
-					if (overlay->mode==_object_overlay_mode_frame)
+					/* port: no more nodes than the model has, which is all the
+					orientations hold (a map's animation; retail's overlays have
+					the model's count) */
+					if (animation->node_count>model_node_count)
+					{
+						object_definition_data_error(object->definition_index, "overlay animation (more nodes than its model); it is skipped");
+					}
+					else if (overlay->mode==_object_overlay_mode_frame)
 					{
 						real frame_index;
 						if (TEST_FLAG(function->flags, _object_function_additive_bit))
@@ -2686,7 +2751,9 @@ void object_compute_node_matrices(
 
 						overlay_animation_apply_continuous(animation, frame_index, node_orientations);
 					}
-					else if (overlay->mode==_object_overlay_mode_scale)
+					/* port: and a frame to pick (a map's frame count of 0 divided
+					by zero) */
+					else if (overlay->mode==_object_overlay_mode_scale && animation->frame_count>0)
 					{
 						short frame_index = OBJECT_FRAME_INDEX_GET(object_index) % (unsigned long)animation->frame_count;
 
@@ -2961,17 +3028,18 @@ void object_compute_node_matrices(
 			else
 			{
 				real_orientation *orientation = &node_orientations[node_stack_index];
+				short parent_node_index = node->parent_node_index;
 
 				matrix4x3_from_orientation(&object_nodes[node_stack_index], orientation);
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 2929, node->parent_node_index!=NONE);
-#ifdef HALO_LINUX
-				/* port: a model's node tree is untrusted map data: a parent
-				that is not one of its nodes is not read past the matrices */
-				if (node->parent_node_index >= 0 && node->parent_node_index < model->nodes.count &&
-					node->parent_node_index < MAXIMUM_NODES_PER_MODEL)
-#endif
+				/* port: a parent the model doesn't have is the root (a map's index) */
+				if (!VALID_INDEX(parent_node_index, model_node_count))
+				{
+					object_model_nodes_error(object_definition->object.model.index, model);
+					parent_node_index = 0;
+				}
 				matrix4x3_multiply(
-					&object_nodes[node->parent_node_index],
+					&object_nodes[parent_node_index],
 					&object_nodes[node_stack_index],
 					&object_nodes[node_stack_index]);
 			}
@@ -2989,33 +3057,30 @@ void object_compute_node_matrices(
 
 			next_sibling_node_index = node->next_sibling_node_index;
 
-#ifdef HALO_LINUX
-			/* port: a model's node tree is untrusted map data: a sibling or
-			child that is not one of its nodes, or a tree with more entries
-			than a model may have nodes (a cycle), is not pushed - the fixed
-			stack would overflow, and the matrices be written past */
-			if (next_sibling_node_index!=NONE && next_sibling_node_index >= 0 &&
-				next_sibling_node_index < model->nodes.count && next_sibling_node_index < MAXIMUM_NODES_PER_MODEL &&
-				node_count < MAXIMUM_NODES_PER_MODEL)
-			{
-				node_stack[node_count++] = next_sibling_node_index;
-			}
-			if (node->first_child_node_index!=NONE && node->first_child_node_index >= 0 &&
-				node->first_child_node_index < model->nodes.count && node->first_child_node_index < MAXIMUM_NODES_PER_MODEL &&
-				node_count < MAXIMUM_NODES_PER_MODEL)
-			{
-				node_stack[node_count++] = node->first_child_node_index;
-			}
-#else
+			/* port: only nodes the model has, and no more than node_stack holds
+			(a map's links, which could go in a loop) */
 			if (next_sibling_node_index!=NONE)
 			{
-				node_stack[node_count++] = next_sibling_node_index;
+				if (VALID_INDEX(next_sibling_node_index, model_node_count) && node_count<MAXIMUM_NODES_PER_MODEL)
+				{
+					node_stack[node_count++] = next_sibling_node_index;
+				}
+				else
+				{
+					object_model_nodes_error(object_definition->object.model.index, model);
+				}
 			}
 			if (node->first_child_node_index!=NONE)
 			{
-				node_stack[node_count++] = node->first_child_node_index;
+				if (VALID_INDEX(node->first_child_node_index, model_node_count) && node_count<MAXIMUM_NODES_PER_MODEL)
+				{
+					node_stack[node_count++] = node->first_child_node_index;
+				}
+				else
+				{
+					object_model_nodes_error(object_definition->object.model.index, model);
+				}
 			}
-#endif
 
 			if (node_index==node_count)
 			{
@@ -3096,7 +3161,9 @@ static void object_choose_random_change_colors(
 				), 
 				1.f);
 
-			for (permutation_index =0; permutation_index<cc->permutations.count; permutation_index++)
+			/* port: no more than the short counter reaches (a map's count;
+			retail has up to 8) */
+			for (permutation_index =0; permutation_index<MIN(cc->permutations.count, SHORT_MAX); permutation_index++)
 			{
 				struct object_change_color_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
 					&cc->permutations,
@@ -3366,8 +3433,22 @@ static void attachments_new(
 
 	struct object_datum *object = object_get(object_index);
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
+	/* port: no more attachments than the object holds (a map's count; the rest
+	aren't made) */
+	short attachment_count = (short)MIN(object_definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT);
 
-	for (attachment_num = 0; attachment_num<object_definition->object.attachments.count; attachment_num++)
+	if (object_definition->object.attachments.count>MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT &&
+		model_data_report_once(object_definition))
+	{
+		error(
+			_error_silent,
+			"### ERROR %s has %ld attachments; only the first %d are made",
+			tag_get_name(object->definition_index),
+			object_definition->object.attachments.count,
+			MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT);
+	}
+
+	for (attachment_num = 0; attachment_num<attachment_count; attachment_num++)
 	{
 		struct object_attachment_definition* attachment = TAG_BLOCK_GET_ELEMENT(
 			&object_definition->object.attachments,
@@ -3532,6 +3613,23 @@ long object_new(
 		definition_index = game_engine_remap_object_definition(definition_index);
 	}
 
+	/* port: only an object whose type is its tag's group (a map's type, which
+	picks the datum's size, the type's functions and how the rest of the tag
+	is read; retail's all match). The object isn't made */
+	if (definition_index!=NONE &&
+		object_definition_index_to_object_type(definition_index)!=object_definition_get(definition_index)->object.type)
+	{
+		if (model_data_report_once(object_definition_get(definition_index)))
+		{
+			error(
+				_error_silent,
+				"### ERROR %s has object type #%d, not its tag's; it isn't made",
+				tag_get_name(definition_index),
+				object_definition_get(definition_index)->object.type);
+		}
+		definition_index = NONE;
+	}
+
 	if (definition_index!=NONE)
 	{
 		struct object_definition *object_definition = object_definition_get(definition_index);
@@ -3618,10 +3716,39 @@ long object_new(
 			}
 			else
 			{
-				node_count = model_definition_get(object_definition->object.model.index)->nodes.count;
+				long model_node_count = model_definition_get(object_definition->object.model.index)->nodes.count;
+
+				/* port: the root's matrix at least, which the object always has
+				(a map's model with no nodes is placed like no model). And no
+				more nodes than a block's size, a short, can hold: past that the
+				size wrapped and the matrices overran the object (a map's count;
+				the object isn't made) */
+				if (model_node_count==0)
+				{
+					node_count = 1;
+				}
+				else if (model_node_count<0 ||
+					model_node_count>SHORT_MAX/(long)sizeof(struct real_matrix4x3))
+				{
+					if (model_data_report_once(model_definition_get(object_definition->object.model.index)))
+					{
+						error(
+							_error_silent,
+							"### ERROR model %s has %ld nodes; %s isn't made",
+							tag_get_name(object_definition->object.model.index),
+							model_node_count,
+							tag_get_name(definition_index));
+					}
+					node_count = NONE;
+				}
+				else
+				{
+					node_count = (short)model_node_count;
+				}
 			}
 
-			if (object_header_block_allocate(
+			if (node_count>0 &&
+				object_header_block_allocate(
 				object_index,
 				offsetof(struct object_datum, object.node_matrices),
 				sizeof(struct real_matrix4x3) * node_count))
@@ -4017,7 +4144,9 @@ long object_new_from_scenario(
 	
 	long result = NONE;
 
-	if (scenario_object->palette_entry_index!=NONE &&
+	/* port: a palette entry the scenario has (a map's index; retail's are
+	all NONE or in range) */
+	if (VALID_INDEX(scenario_object->palette_entry_index, palette->count) &&
 		(
 			!object_globals->initial_placement ||
 			!TEST_FLAG(scenario_object->placement_flags, _scenario_object_placement_not_automatic_bit)
@@ -4104,16 +4233,33 @@ long object_new_by_name(
 		name_index,
 		struct scenario_object_name);
 
-	struct tag_block* datum = scenario_get_object_type_scenario_datums(
+	struct tag_block* datum;
+	struct tag_block *palette;
+	struct scenario_object_datum *object;
+
+	/* port: a name that names no placement (one past the names, or whose
+	type has no placements or whose placement is not there: a map's) makes
+	no object, rather than one of whatever its fields read as */
+	if (!VALID_INDEX(name_index, scenario->object_names.count) ||
+		!VALID_INDEX(name->runtime_object_type, NUMBER_OF_OBJECT_TYPES) ||
+		object_type_definition_get(name->runtime_object_type)->placement_tag_block_offset == NONE ||
+		object_type_definition_get(name->runtime_object_type)->palette_tag_block_offset == NONE)
+	{
+		return NONE;
+	}
+
+	datum = scenario_get_object_type_scenario_datums(
 		scenario,
 		name->runtime_object_type,
 		&placement_tag_block_element_size);
+	if (!VALID_INDEX(name->runtime_scenario_datum_index, datum->count))
+		return NONE;
 
-	struct tag_block *palette = scenario_get_object_type_scenario_palette(
+	palette = scenario_get_object_type_scenario_palette(
 		scenario,
 		name->runtime_object_type);
 
-	struct scenario_object_datum *object = (struct scenario_object_datum *)tag_block_get_element_with_size(
+	object = (struct scenario_object_datum *)tag_block_get_element_with_size(
 			datum,
 			name->runtime_scenario_datum_index,
 			placement_tag_block_element_size);
@@ -4964,7 +5110,8 @@ static void object_connect_lights(
 		short i;
 		struct object_definition *object_definition = object_definition_get(object->definition_index);
 		
-		for (i =0; i<object_definition->object.attachments.count; ++i)
+		/* port: the attachments attachments_new made (a map's count) */
+		for (i =0; i<MIN(object_definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT); ++i)
 		{
 			if (!object->object.attachment_types[i] && object->object.attachment_indices[i]!=NONE)
 			{
@@ -5019,7 +5166,24 @@ static void object_name_list_new(
 		4099,
 		name_index>=0 && name_index<MAXIMUM_OBJECT_NAMES_PER_SCENARIO);
 
-	if (object_name_list[name_index]==NONE)
+	/* port: only a name the scenario has and the name list holds (a map's
+	index; the lookup gave NONE for any other, so it came here; retail's
+	are below 448) */
+	if (!VALID_INDEX(name_index, MIN(global_scenario_get()->object_names.count, MAXIMUM_OBJECT_NAMES_PER_SCENARIO)))
+	{
+		static boolean name_index_reported = FALSE;
+
+		if (!name_index_reported)
+		{
+			name_index_reported = TRUE;
+			error(
+				_error_silent,
+				"### ERROR %s was placed with name #%d, which the scenario doesn't have; it is left unnamed",
+				tag_get_name(object->definition_index),
+				name_index);
+		}
+	}
+	else if (object_name_list[name_index]==NONE)
 	{
 		object_name_list[name_index] = object_index;
 		object->object.name_index = name_index;
@@ -5046,7 +5210,9 @@ static void object_name_list_delete(
 		struct scenario *scenario = global_scenario_get();
 		object->object.name_index = NONE;
 
-		for (i =0; i<scenario->object_names.count; ++i)
+		/* port: no more than the name list holds (a map's count, which a short
+		counter would never reach; retail has up to 448) */
+		for (i =0; i<MIN(scenario->object_names.count, MAXIMUM_OBJECT_NAMES_PER_SCENARIO); ++i)
 		{
 			if (object_name_list[i]==object_index)
 			{
@@ -5216,7 +5382,9 @@ static short object_find_region_permutations_available_with_variant(
 	short i;
 	short result = 0;
 
-	for (i = 0; i<region->permutations.count; i++)
+	/* port: no more permutations than a region has room for, and the caller's
+	available_indices holds (a map's count) */
+	for (i = 0; i<MIN(region->permutations.count, MAXIMUM_PERMUTATIONS_PER_MODEL_REGION); i++)
 	{
 		struct model_region_permutation* permutation = TAG_BLOCK_GET_ELEMENT(
 			&region->permutations,
@@ -5246,7 +5414,10 @@ static boolean object_select_random_region_permutations_by_variant(
 	struct object_datum *object = object_get(object_index);
 	boolean result = TRUE;
 
-	for (region_index =0; region_index<model->regions.count; region_index++)
+	/* port: no more regions than the object's region_permutations holds (a
+	map's count; past them are the change colors and the node blocks; retail
+	has up to 8) */
+	for (region_index =0; region_index<MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT); region_index++)
 	{
 		struct model_region *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
 		short permutation_index = object_find_region_permutations_available_with_variant(region, variant_number, available_permutation_indices);
@@ -5280,7 +5451,9 @@ static short object_determine_variant_number(
 	struct object_datum *object = object_get(object_index);
 	short result = 0;
 
-	for (region_index =0; region_index<model->regions.count&& !result; region_index++)
+	/* port: the regions object_select_random_region_permutations_by_variant
+	chose for (a map's count) */
+	for (region_index =0; region_index<MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT)&& !result; region_index++)
 	{
 		struct model_region* region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
 		if (object->object.region_permutations[region_index] < region->permutations.count)
@@ -5360,7 +5533,8 @@ static void attachments_delete(
 	struct object_datum *object = object_get(object_index);
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
 
-	for (attachment_index =0; attachment_index<object_definition->object.attachments.count; ++attachment_index)
+	/* port: the attachments attachments_new made (a map's count) */
+	for (attachment_index =0; attachment_index<MIN(object_definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT); ++attachment_index)
 	{
 		if (object->object.attachment_types[attachment_index]!=NONE &&
 			object->object.attachment_indices[attachment_index]!=NONE)
@@ -5387,6 +5561,41 @@ static void attachments_delete(
 				break;
 			}
 		}
+	}
+
+	return;
+}
+
+/* port: a map's object definition with a bad count, index or type, reported
+once (most of these are read every tick) */
+static void object_definition_data_error(
+	long definition_index,
+	char const *problem)
+{
+	if (model_data_report_once(object_definition_get(definition_index)))
+	{
+		error(
+			_error_silent,
+			"### ERROR %s has a bad %s",
+			tag_get_name(definition_index),
+			problem);
+	}
+
+	return;
+}
+
+/* port: a map's model with a bad node list, reported once (the matrices are
+built every tick) */
+static void object_model_nodes_error(
+	long model_index,
+	struct model const *model)
+{
+	if (model_data_report_once(model))
+	{
+		error(
+			_error_silent,
+			"### ERROR model %s has a bad node list; its bad links are skipped",
+			tag_get_name(model_index));
 	}
 
 	return;
@@ -5462,13 +5671,16 @@ static void object_compute_function_values(
 	struct object_datum *object = object_get(object_index);
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
 	real huh = (57 * DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + game_time_get()) * 0.033333335f;
+	/* port: no more functions than the object holds values for (a map's count;
+	past them are the attachments and the node blocks; retail has up to 4) */
+	short function_count = (short)MIN(object_definition->object.functions.count, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS);
 
-	/* port: an object tag's function count is a map's; past
-	NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS it wrote the object's outgoing values
-	and shifted its active flags past their ends */
-	for (function_index = 0;
-		function_index<object_definition->object.functions.count && function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS;
-		++function_index)
+	if (object_definition->object.functions.count>NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS)
+	{
+		object_definition_data_error(object->definition_index, "function count; only the first 4 are computed");
+	}
+
+	for (function_index = 0; function_index<function_count; ++function_index)
 	{
 		real value;
 		real output;
@@ -5601,14 +5813,13 @@ static void object_compute_change_colors(
 	if (TEST_FLAG(object_definition->object.runtime_flags, _object_runtime_scaled_change_colors_bit))
 	{
 		short cc_index;
-		short change_color_count = object_definition->object.change_colors.count;
+		/* port: no more change colors than the object holds (a map's count;
+		past them are the node blocks; retail has up to 3) */
+		short change_color_count = (short)MIN(object_definition->object.change_colors.count, NUMBER_OF_OBJECT_CHANGE_COLORS);
 
-		/* port: an object tag is untrusted map data; its change-color count
-		must not index the fixed runtime array out of bounds (a crafted map
-		otherwise corrupts memory past outgoing_change_colors) */
-		if (change_color_count > NUMBER_OF_OBJECT_CHANGE_COLORS)
+		if (object_definition->object.change_colors.count>NUMBER_OF_OBJECT_CHANGE_COLORS)
 		{
-			change_color_count = NUMBER_OF_OBJECT_CHANGE_COLORS;
+			object_definition_data_error(object->definition_index, "change color count; only the first 4 are used");
 		}
 		for (cc_index = 0; cc_index<change_color_count; cc_index++)
 		{

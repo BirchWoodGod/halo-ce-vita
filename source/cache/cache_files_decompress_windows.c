@@ -223,11 +223,16 @@ symbols in this file:
 #include "cseries/errors.h"
 #include "cache/cache_files.h"
 #include "cache/cache_files_decompress_windows.h"
-/* port: the port's zlib (1.3), not the game's 1.1.3, inflates the maps,
-which are anyone's files; its inflate needs about 40 KB of ZLIB_BUFFER_SIZE,
-and frees what it takes in the reverse order, as cache_copy_compressed_free
-wants */
+/* port (from OpenCE, MrBruh's "Second hardening round"): the port's zlib
+(1.3.2), not the game's 1.1.3, inflates the maps, which are anyone's files
+(a map downloaded from a stranger too); its inflate needs about 40 KB of
+ZLIB_BUFFER_SIZE, and frees what it takes in the reverse order, as
+cache_copy_compressed_free wants */
 #include "../../port/third_party/zlib/zlib_prefixed.h"
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c) */
+int vita_host_fourth_core_join(const char *role, int level);
+#endif
 
 #include <xtl.h>
 
@@ -1685,6 +1690,12 @@ static unsigned long __stdcall simple_cache_copy_thread(
 {
 	struct simple_decompressor_definition *self = global_self;
 
+#ifdef HALO_VITA
+	/* (port) Fourth core helpers, All async: the map's decompression on
+	the Vita's fourth core where the system allows it (as in Bruno
+	Santana's modified build) */
+	vita_host_fourth_core_join("map decompression", 2);
+#endif
 	for (;;)
 	{
 		WaitForSingleObject(self->copy_start_event, INFINITE);

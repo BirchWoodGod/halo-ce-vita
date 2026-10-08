@@ -67,6 +67,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries/cseries.h"
+#include "cseries/errors.h"
 #include "cutscene/cinematics.h"
 #include "effects/player_effects.h"
 #include "game/game.h"
@@ -506,7 +507,8 @@ void hud_play_unit_sounds(
 					sound_flags,
 					&hud_definition->warning_sounds,
 					hud_state->last_sound_handles,
-					&hud_state->sound_flags);
+					&hud_state->sound_flags,
+					(short)NUMBEROF(hud_state->last_sound_handles));
 			}
 		}
 	}
@@ -1301,15 +1303,26 @@ void hud_render_unit_interface(
 							meter_index,
 							struct auxilary_meter_definition);
 
-#ifdef HALO_LINUX
-						/* port: a meter's type is a map's: one this build has
-						no flash time or value for is not drawn (it indexed the
-						HUD state, and shifted a flag word, past their ends) */
-						if (meter->type < 0 || meter->type >= NUMBEROF(hud_state->auxilary_flash_time))
+						/* port: the type is the map's and indexes the flash times
+						and values (one type, the integrated light, which every
+						retail meter is): a meter of any other is not drawn, and
+						that is said once */
+						if (!VALID_INDEX(meter->type, (short)NUMBEROF(hud_state->auxilary_flash_time)))
 						{
+							static boolean bad_meter_type_reported = FALSE;
+
+							if (!bad_meter_type_reported)
+							{
+								bad_meter_type_reported = TRUE;
+								error(
+									_error_silent,
+									"unit hud auxilary meter of type %d (of %d) not drawn",
+									meter->type,
+									(short)NUMBEROF(hud_state->auxilary_flash_time));
+							}
 							continue;
 						}
-#endif
+
 						if (TEST_FLAG(
 								hud_state->auxilary_active_type_flags,
 								meter->type) &&

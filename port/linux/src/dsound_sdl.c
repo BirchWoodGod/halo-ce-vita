@@ -792,6 +792,11 @@ reported by DirectSoundDoWork every 300 calls */
 unsigned long long vita_host_time_us(void) __attribute__((weak));
 static volatile unsigned long long statistics_mix_us, statistics_wait_us;
 static volatile unsigned long statistics_mixes, statistics_voices, statistics_waits;
+/* the device's calls for audio: the longest time between two, and how many
+came over 25 ms apart (SDL asks for 512 frames, 10.7 ms: a gap past two of
+those has let the device's queue run dry, heard as a crackle) */
+static volatile unsigned long long statistics_callback_gap_us;
+static volatile unsigned long statistics_callbacks_late;
 
 static unsigned long long statistics_now(void)
 {
@@ -1105,6 +1110,11 @@ static BOOL audio_started = FALSE;
 static BOOL frame_locked_mixing = FALSE;
 
 void vita_host_pin_current_thread(int core) __attribute__((weak));
+#ifdef HALO_VITA
+int vita_host_fourth_core_move(const char *role);
+int vita_host_fourth_core_join(const char *role, int level);
+void vita_host_thread_watch(const char *role);
+#endif
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
@@ -1120,7 +1130,13 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 		for the length of a mix, the tick's on the third core included.
 		HALO_AUDIO_CORE=0-2 pins it (default -1: left to the system; on
 		core 1, with the render worker, the user heard crackle in the b30
-		fight, while unpinned it inflated the tick's sound time) */
+		fight, while unpinned it inflated the tick's sound time).
+		HALO_AUDIO_CORE=3, or without HALO_AUDIO_CORE Fourth core helpers
+		at Audio or All async: the Vita's fourth core, where the system
+		allows it (vita_fourth_core.c; as in Bruno Santana's modified build.
+		The game waits for the mixer's lock, and the system's processes
+		there run too: the sound mixer's line says how late the device's
+		calls came and how long the game waited) */
 		pinned = 1;
 		if (vita_host_pin_current_thread)
 		{
@@ -1129,7 +1145,30 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 
 			if (core >= 0 && core <= 2)
 				vita_host_pin_current_thread(core);
+#ifdef HALO_VITA
+			if (core == 3)
+				vita_host_fourth_core_move("sound mixer");
+			else if (!setting)
+				vita_host_fourth_core_join("sound mixer", 1);
+			else
+				vita_host_thread_watch("sound mixer");
+#endif
 		}
+	}
+	{
+		static unsigned long long previous_call;
+		unsigned long long now = statistics_now();
+
+		if (previous_call && now > previous_call)
+		{
+			unsigned long long gap = now - previous_call;
+
+			if (gap > statistics_callback_gap_us)
+				statistics_callback_gap_us = gap;
+			if (gap > 25000)
+				statistics_callbacks_late++;
+		}
+		previous_call = now;
 	}
 	while (additional_amount > 0)
 	{
@@ -1455,11 +1494,15 @@ VOID WINAPI DirectSoundDoWork(void)
 		double elapsed_us = last_report && now > last_report ? (double)(now - last_report) : 0.0;
 
 		last_report = now;
-		platform_log("sound mixer: %.1f%% of a core (%.2f ms/mix, %.1f voices), game waits for the mixer %.2f ms/frame (%lu waits)",
+		platform_log("sound mixer: %.1f%% of a core (%.2f ms/mix, %.1f voices), game waits for the mixer %.2f ms/frame (%lu waits);"
+			" device calls: longest gap %.1f ms, %lu over 25 ms",
 			elapsed_us > 0.0 ? 100.0 * (double)statistics_mix_us / elapsed_us : 0.0,
 			mixes ? (double)statistics_mix_us / 1000.0 / (double)mixes : 0.0,
 			mixes ? (double)statistics_voices / (double)mixes : 0.0,
-			(double)statistics_wait_us / 1000.0 / 300.0, statistics_waits);
+			(double)statistics_wait_us / 1000.0 / 300.0, statistics_waits,
+			(double)statistics_callback_gap_us / 1000.0, statistics_callbacks_late);
+		statistics_callback_gap_us = 0;
+		statistics_callbacks_late = 0;
 		statistics_mix_us = statistics_wait_us = 0;
 		statistics_mixes = statistics_voices = statistics_waits = 0;
 		if (audio_verify > 0)

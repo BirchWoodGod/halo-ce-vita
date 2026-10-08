@@ -257,7 +257,8 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         add(source, "vita_cc", platform_cflags)
     add(TOML_DIR / "tomlc17.c", "vita_cc", " ".join([abi, "-std=gnu11", "-w"]))
     add(KCP_DIR / "ikcp.c", "vita_cc", " ".join([abi, "-std=gnu11", "-w"]))
-    # the port's zlib (the maps' inflate: port/third_party/zlib)
+    # (from OpenCE) the port's zlib, which inflates the maps
+    # (cache_files_decompress_windows.c) instead of the game's own 1.1.3
     for name in ZLIB_SOURCES:
         add(ZLIB_DIR / name, "vita_cc", " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
     # internet play's signatures and password keys (port/third_party/monocypher): its

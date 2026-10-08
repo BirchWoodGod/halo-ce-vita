@@ -1503,7 +1503,8 @@ static volatile int custom_edition_texels_lock;
 
 static void custom_edition_texels_take(void)
 {
-	while (__atomic_exchange_n(&custom_edition_texels_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&custom_edition_texels_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&custom_edition_texels_lock, 1, __ATOMIC_ACQUIRE))
 		;
 }
 

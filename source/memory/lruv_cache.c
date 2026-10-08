@@ -226,7 +226,8 @@ void halo_cache_lock_acquire_at(const char *site, void *caller)
 		lruv_depth++;
 		return;
 	}
-	while (__atomic_exchange_n(&lruv_held, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&lruv_held, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&lruv_held, 1, __ATOMIC_ACQUIRE))
 	{
 		if (!waited_from)
 		{

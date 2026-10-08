@@ -537,7 +537,8 @@ boolean scenario_location_deafening(
 		struct structure_cluster);
 	boolean deafening = FALSE;
 
-	if (cluster->background_sound_palette_index != NONE &&
+	/* port: and not below the palette (a map's index) */
+	if (cluster->background_sound_palette_index >= 0 &&
 		cluster->background_sound_palette_index < global_structure_bsp_get()->background_sound_palette.count)
 	{
 		struct structure_background_sound_palette_entry *background_sound = TAG_BLOCK_GET_ELEMENT(
@@ -654,6 +655,13 @@ short scenario_get_fog_region_index(
 		fog_reference = cluster->fog_reference;
 		if (fog_reference != NONE)
 		{
+			/* port: a fog plane the map doesn't have is no fog */
+			if (TEST_FLAG((word)fog_reference, 15) &&
+				(fog_reference & SHORT_MAX) >= structure_bsp->fog_planes.count)
+			{
+				return NONE;
+			}
+
 			if (TEST_FLAG((word)fog_reference, 15))
 			{
 				fog_plane = TAG_BLOCK_GET_ELEMENT(
@@ -676,6 +684,10 @@ short scenario_get_fog_region_index(
 			{
 				result = fog_reference & SHORT_MAX;
 			}
+
+			/* port: and a fog region it doesn't have, none */
+			if (!VALID_INDEX(result, structure_bsp->fog_regions.count))
+				result = NONE;
 		}
 	}
 
@@ -721,6 +733,10 @@ boolean scenario_location_underwater(
 		weather_palette_index = cluster->weather_palette_index;
 	}
 
+	/* port: a weather palette entry the map doesn't have is none */
+	if (!VALID_INDEX(weather_palette_index, structure_bsp->weather_palette.count))
+		weather_palette_index = NONE;
+
 	if (optional_weather_palette_index)
 		*optional_weather_palette_index = weather_palette_index;
 
@@ -749,7 +765,10 @@ real scenario_location_water_depth(
 			location->cluster_index,
 			struct structure_cluster);
 		fog_reference = cluster->fog_reference;
-		if (fog_reference != NONE)
+		/* port: a fog plane the map doesn't have is no water */
+		if (fog_reference != NONE &&
+			(!TEST_FLAG((word)fog_reference, 15) ||
+				(fog_reference & SHORT_MAX) < structure_bsp->fog_planes.count))
 		{
 			if (TEST_FLAG((word)fog_reference, 15))
 			{
@@ -798,7 +817,9 @@ short scenario_object_name_index_from_string(
 {
 	short object_name_index;
 
-	for (object_name_index = 0; object_name_index < scenario->object_names.count; object_name_index++)
+	/* port: no more than the short counter reaches (a map's count; past it
+	the counter wraps and the loop never ends) */
+	for (object_name_index = 0; object_name_index < MIN(scenario->object_names.count, SHORT_MAX); object_name_index++)
 	{
 		struct scenario_object_name *object_name = TAG_BLOCK_GET_ELEMENT(
 			&scenario->object_names,
@@ -820,8 +841,9 @@ short scenario_get_structure_reference_index_from_tag_index(
 	short structure_bsp_reference_index;
 	short result = NONE;
 
+	/* port: no more than the short counter reaches (a map's count) */
 	for (structure_bsp_reference_index = 0;
-		structure_bsp_reference_index < scenario->structure_bsp_references.count;
+		structure_bsp_reference_index < MIN(scenario->structure_bsp_references.count, SHORT_MAX);
 		structure_bsp_reference_index++)
 	{
 		struct scenario_structure_bsp_reference *reference = TAG_BLOCK_GET_ELEMENT(
@@ -854,12 +876,27 @@ void scenario_location_from_point(
 	{
 		cluster_index = location->leaf_index;
 	}
+	else if ((location->leaf_index & LONG_MAX) >= global_structure_bsp_get()->leaves.count)
+	{
+		/* port: a leaf the map doesn't have is outside the world */
+		location->leaf_index = NONE;
+		cluster_index = NONE;
+	}
 	else
 	{
 		cluster_index = TAG_BLOCK_GET_ELEMENT(
 			&global_structure_bsp_get()->leaves,
 			location->leaf_index & LONG_MAX,
 			struct structure_leaf)->cluster_index;
+
+		/* port: and so is one in a cluster it doesn't have (every lookup
+		by the location's cluster goes on from here) */
+		if (cluster_index != NONE &&
+			!VALID_INDEX(cluster_index, global_structure_bsp_get()->clusters.count))
+		{
+			location->leaf_index = NONE;
+			cluster_index = NONE;
+		}
 	}
 
 	location->cluster_index = (short)cluster_index;
@@ -975,7 +1012,27 @@ boolean scenario_trigger_volume_test_point(
 	short trigger_volume_index,
 	const real_point3d *position)
 {
-	struct scenario_trigger_volume *trigger_volume = TAG_BLOCK_GET_ELEMENT(
+	struct scenario_trigger_volume *trigger_volume;
+
+	/* port: a trigger volume that isn't the scenario's (a script's or a
+	tag's index) holds nothing */
+	if (trigger_volume_index<0 ||
+		trigger_volume_index>=global_scenario_get()->trigger_volumes.count)
+	{
+		static boolean reported = FALSE;
+
+		if (!reported)
+		{
+			error(_error_silent, "trigger volume #%d isn't the scenario's (it has %ld)",
+				trigger_volume_index,
+				global_scenario_get()->trigger_volumes.count);
+			reported = TRUE;
+		}
+
+		return FALSE;
+	}
+
+	trigger_volume = TAG_BLOCK_GET_ELEMENT(
 		&global_scenario_get()->trigger_volumes,
 		trigger_volume_index,
 		struct scenario_trigger_volume);
@@ -1021,14 +1078,15 @@ long scenario_fog_region_get_fog_index(
 {
 	struct structure_bsp *structure_bsp = global_structure_bsp_get();
 
-	if (fog_region_index != NONE)
+	/* port: a region or palette entry the map doesn't have is no fog */
+	if (VALID_INDEX(fog_region_index, structure_bsp->fog_regions.count))
 	{
 		struct structure_fog_region *fog_region = TAG_BLOCK_GET_ELEMENT(
 			&structure_bsp->fog_regions,
 			fog_region_index,
 			struct structure_fog_region);
 
-		if (fog_region->fog_palette_index != NONE)
+		if (VALID_INDEX(fog_region->fog_palette_index, structure_bsp->fog_palette.count))
 		{
 			struct structure_fog_palette_entry *fog_palette_entry = TAG_BLOCK_GET_ELEMENT(
 				&structure_bsp->fog_palette,
@@ -1049,11 +1107,18 @@ boolean scenario_switch_structure_bsp(
 	boolean result = FALSE;
 	boolean had_old_structure_bsp;
 	short proc_index;
+	boolean loaded;
 	struct scenario_structure_bsp_reference *reference;
+	/* port: (the bsp loaded before, loaded again if the new one is refused) */
+	short old_structure_bsp_index = NONE;
 
+	/* port: and one the per-bsp arrays hold (MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO:
+	breakable_surfaces.c's; a map's count. The retail scenarios have at most
+	13 bsps) */
 	if (structure_bsp_index != global_structure_bsp_index &&
 		structure_bsp_index >= 0 &&
-		structure_bsp_index < global_scenario->structure_bsp_references.count)
+		structure_bsp_index < global_scenario->structure_bsp_references.count &&
+		structure_bsp_index < MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO)
 	{
 		reference = TAG_BLOCK_GET_ELEMENT(
 			&global_scenario->structure_bsp_references,
@@ -1081,6 +1146,7 @@ boolean scenario_switch_structure_bsp(
 				scenario_structure_bsp_disconnect_procs[proc_index]();
 
 			had_old_structure_bsp = TRUE;
+			old_structure_bsp_index = global_structure_bsp_index;
 			scenario_structure_bsp_unload(TAG_BLOCK_GET_ELEMENT(
 				&global_scenario->structure_bsp_references,
 				global_structure_bsp_index,
@@ -1089,7 +1155,52 @@ boolean scenario_switch_structure_bsp(
 			global_structure_bsp_index = NONE;
 		}
 
-		if (scenario_structure_bsp_load(reference))
+		/* port: and a bsp whose counts the game's fixed arrays can't hold
+		(its clusters above all: structure_bsp_port_verify) is refused, as
+		one that didn't load */
+		loaded = scenario_structure_bsp_load(reference);
+		if (loaded &&
+			!structure_bsp_port_verify(structure_bsp_definition_get(reference->structure_bsp.index)))
+		{
+			error(_error_silent, "structure bsp #%d has more than the game can hold", structure_bsp_index);
+			scenario_structure_bsp_unload(reference);
+			loaded = FALSE;
+		}
+		/* port: a bsp refused (by its checks: cache_files.c) after the old
+		one was let go of leaves the game with none, where the old one's
+		pointers lead into what was read in its place: the old one is loaded
+		again (it loaded before), and with that refused too the game goes back
+		to the main menu with no bsp, rather than play on in a bsp it hasn't
+		checked. (A map's first bsp refused refuses the map: scenario_load) */
+		if (!loaded)
+		{
+			/* (silent: an immediate error stops the game, which on the Vita
+			is a crash; the refusal goes back to the menu with its message,
+			halo_map_load_refused, or plays on in the old bsp) */
+			error(_error_silent, "failed to load structure bsp #%d", structure_bsp_index);
+			global_structure_bsp = NULL;
+			global_collision_bsp = NULL;
+			global_bsp3d = NULL;
+			if (old_structure_bsp_index != NONE)
+			{
+				structure_bsp_index = old_structure_bsp_index;
+				reference = TAG_BLOCK_GET_ELEMENT(
+					&global_scenario->structure_bsp_references,
+					structure_bsp_index,
+					struct scenario_structure_bsp_reference);
+				loaded = scenario_structure_bsp_load(reference);
+				if (loaded &&
+					!structure_bsp_port_verify(structure_bsp_definition_get(reference->structure_bsp.index)))
+				{
+					scenario_structure_bsp_unload(reference);
+					loaded = FALSE;
+				}
+			}
+			if (!loaded && had_old_structure_bsp)
+				main_goto_main_menu();
+		}
+
+		if (loaded)
 		{
 			global_structure_bsp = structure_bsp_definition_get(reference->structure_bsp.index);
 			global_collision_bsp = TAG_BLOCK_GET_ELEMENT(
@@ -1108,7 +1219,8 @@ boolean scenario_switch_structure_bsp(
 				for (proc_index = 0; proc_index < NUMBEROF(scenario_structure_bsp_reconnect_proc_table); proc_index++)
 					scenario_structure_bsp_reconnect_procs[proc_index]();
 			}
-			result = TRUE;
+			/* port: (not when it is the old one, loaded again) */
+			result = structure_bsp_index != old_structure_bsp_index;
 		}
 #ifdef HALO_LINUX
 		/* port: a Custom Edition map's first structure BSP that cannot be
@@ -1121,7 +1233,10 @@ boolean scenario_switch_structure_bsp(
 #endif
 		else
 		{
-			error(_error_immediate, "failed to load structure bsp '%s'", reference->structure_bsp.name);
+			/* port: named by its index: its name is the map's pointer, and a
+			bsp is refused when its reference is damaged (cache_files.c);
+			silent, as above */
+			error(_error_silent, "failed to load structure bsp #%d", structure_bsp_index);
 		}
 
 		collision_log_enable(TRUE);
@@ -1321,7 +1436,8 @@ void scenario_get_sound_environment(
 					}
 				}
 
-				if (cluster->sound_environment_palette_index != NONE)
+				/* port: a palette entry the map doesn't have is none */
+				if (VALID_INDEX(cluster->sound_environment_palette_index, structure_bsp->sound_environment_palette.count))
 				{
 					sound_environment = TAG_BLOCK_GET_ELEMENT(
 						&structure_bsp->sound_environment_palette,
@@ -1334,7 +1450,7 @@ void scenario_get_sound_environment(
 						selected_sound_environment_index = sound_environment_index;
 						best_priority = sound_environment_definition_get(sound_environment_index)->priority;
 						water_boundary = FALSE;
-						if (cluster->background_sound_palette_index != NONE &&
+						if (cluster->background_sound_palette_index >= 0 &&
 							cluster->background_sound_palette_index < structure_bsp->background_sound_palette.count)
 						{
 							background_sound = TAG_BLOCK_GET_ELEMENT(

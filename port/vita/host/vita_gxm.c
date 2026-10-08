@@ -394,6 +394,20 @@ static void display_callback(const void *callback_data)
 			log_line("gxm: display queue thread priority -> 64: 0x%08x (now %d, affinity 0x%x)", (unsigned)result,
 				info.currentPriority, (unsigned)info.currentCpuAffinityMask);
 		}
+		/* Fourth core helpers, All async: off the game's cores too, where
+		the system allows it (vita_fourth_core.c; as in Bruno Santana's
+		modified build). It wakes once a frame, when the GPU is done, to
+		name the next buffer; at 64 it comes before the game's threads
+		wherever it runs, and on cores 0-2 it puts one of them off each
+		time. HALO_FOURTH_CORE_DISPLAY=0 leaves it there (a test) */
+		{
+			const char *setting = getenv("HALO_FOURTH_CORE_DISPLAY");
+
+			if (setting && atoi(setting) == 0)
+				vita_host_thread_watch("display queue");
+			else
+				vita_host_fourth_core_join("display queue", 2);
+		}
 	}
 	/* (the GPU has finished the frame: frame_timing) */
 	frame_timing[data->frame % FRAME_TIMING_SLOTS].done_us = (unsigned int)sceKernelGetProcessTimeWide();
@@ -1142,6 +1156,8 @@ static int shader_sweep_thread(SceSize size, void *argument)
 
 	(void)size;
 	(void)argument;
+	/* (Fourth core helpers: removing files is nothing a frame waits for) */
+	vita_host_fourth_core_join("shader cache clean-up", 2);
 	if (vshc_sweep_pending(&memory_card, SHADER_PARENT, SHADER_NAME))
 	{
 		shader_sweep.reads = __atomic_load_n(&file_reads, __ATOMIC_RELAXED);
@@ -1473,6 +1489,8 @@ static struct
 static void shader_compiler_thread(void *unused)
 {
 	(void)unused;
+	/* (Fourth core helpers: the worker never waits for a compile) */
+	vita_host_fourth_core_join("shader compiler", 2);
 	for (;;)
 	{
 		struct shader_job *job;
@@ -4107,7 +4125,7 @@ static void overlay_draw(void)
 	unsigned short *indices;
 	const unsigned int limit = 8192;
 	unsigned int count = 0, index;
-	unsigned char busy[3];
+	unsigned char busy[4];
 	char text[32];
 	const float scale = 2.0f;
 	const float left = DISPLAY_WIDTH - 190.0f;
@@ -4179,14 +4197,16 @@ static void overlay_draw(void)
 	else if (gxm.overlay_enabled)
 	{
 		vita_host_cpu_usage(busy);
-		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 192.0f, 0xA0000000u);
+		count = overlay_rect(vertices, count, left, 6.0f, 184.0f, 211.0f, 0xA0000000u);
 		snprintf(text, sizeof(text), "FPS %3.0f", (double)gxm.overlay_fps);
 		count = overlay_text(vertices, count, limit, left + 6.0f, 11.0f, scale, 0xFF40FF40u, text);
 		snprintf(text, sizeof(text), "GAME %3.0f MS", (double)gxm.overlay_tick_ms);
 		count = overlay_text(vertices, count, limit, left + 6.0f, 31.0f, scale, 0xFF40D0FFu, text);
 		snprintf(text, sizeof(text), "REND %3.0f MS", (double)gxm.overlay_render_ms);
 		count = overlay_text(vertices, count, limit, left + 6.0f, 51.0f, scale, 0xFFFFC040u, text);
-		for (index = 0; index < 3; index++)
+		/* (the fourth core's too: the system's, and the helpers' with
+		Fourth core helpers and CapUnlocker - vita_fourth_core.c) */
+		for (index = 0; index < 4; index++)
 		{
 			float y = 75.0f + 19.0f * index;
 			uint32_t color = busy[index] == 255 ? 0xFF808080u : busy[index] > 85 ? 0xFF4040FFu : 0xFFE0E0E0u;
@@ -4205,9 +4225,9 @@ static void overlay_draw(void)
 		now, D after it) and the GPU's time a frame (vgxm_gpu_frame_next) */
 		snprintf(text, sizeof(text), "RES %3.0f%%%s", (double)(render_rect_get() * 100.0f),
 			overlay_dynamic ? " D" : "");
-		count = overlay_text(vertices, count, limit, left + 6.0f, 134.0f, scale, 0xFFFFFFFFu, text);
+		count = overlay_text(vertices, count, limit, left + 6.0f, 153.0f, scale, 0xFFFFFFFFu, text);
 		snprintf(text, sizeof(text), "GPU %3.0f MS", (double)gpu_ms_average);
-		count = overlay_text(vertices, count, limit, left + 6.0f, 154.0f, scale, 0xFFFF80C0u, text);
+		count = overlay_text(vertices, count, limit, left + 6.0f, 173.0f, scale, 0xFFFF80C0u, text);
 		{
 			/* the CDRAM free (vgxm_memory.h), read twice a second; yellow
 			while part of the texture pool is in user RAM */
@@ -4221,7 +4241,7 @@ static void overlay_draw(void)
 				pool_in_user = memory_bytes[_memory_pool_user] != 0;
 			}
 			snprintf(text, sizeof(text), "VRAM %4.1fMB", (double)free_bytes / (1024.0 * 1024.0));
-			count = overlay_text(vertices, count, limit, left + 6.0f, 174.0f, scale,
+			count = overlay_text(vertices, count, limit, left + 6.0f, 193.0f, scale,
 				pool_in_user ? 0xFF40E0FFu : 0xFFE0E0E0u, text);
 		}
 	}
