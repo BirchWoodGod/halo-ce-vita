@@ -49,6 +49,14 @@
 #            GAME INTERNET, Server Setup (its name typed, Max players,
 #            public), START GAME, the profile, the map and the gametype; the
 #            joiner joins it from the server browser (network test)
+#   latency  code, with a home connection's delay on both sides
+#            (HALO_TEST_NETEM, "delay 40ms" by default: an 80 ms round trip)
+#            and one game to a high score; HALO_TEST_BLACKOUT seconds after the
+#            joiner starts (75 by default) both routers drop everything for 5
+#            s. The latency meter (latency_meter.c) must show about the
+#            round trip on both sides before (the joiner its own, the host
+#            the joiner's), both must say "connection problem" in the
+#            blackout and recover after it, and the game play on
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
@@ -133,6 +141,13 @@
 #                    third of HALO_TEST_CPUS; the caller checks its log
 #   HALO_TEST_MQTT311  1: the broker refuses MQTT 5, as a 3.1.1 broker does
 #                    (the copies must connect again with 3.1.1)
+#
+# The latency meter's round trip (halo.log's "latency:" lines, every ten
+# seconds) is checked in code, lobby, lobbypw, relay and latency against the
+# netem delays (a round trip of both uploads' delays, plus up to two ticks of
+# the machines' waits to send: 0 to 90 ms more), in lan and adhoc at most
+# 90 ms (those waits alone, two ticks, 67 ms, and the emulated ad hoc
+# bridge's: 16 to 50 ms seen).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -143,6 +158,9 @@ if [ "${HALO_NETNS_INSIDE:-}" != 1 ]; then
 fi
 
 mode=${1:-code}
+# (latency: a home connection's delay unless one is given)
+[ "$mode" = latency ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
+	export HALO_TEST_NETEM="delay 40ms"
 vita=${HALO_TEST_VITA:-$root/build/linux/halo}
 pc=${HALO_TEST_PC:-}
 data=${HALO_TEST_DATA:-$root/../data2276}
@@ -276,19 +294,50 @@ wait_code() { # the host's code, once it hosts
 }
 status=0
 fail() { echo "FAIL ($mode): $*"; status=1; }
+# (the latency meter) the delay a netem setting adds, in milliseconds
+netem_delay() { local d; d=$(sed -n 's/.*delay \([0-9]*\)ms.*/\1/p' <<< "${1:-}"); echo "${d:-0}"; }
+# the round trip the routers' netem delays make (both uploads)
+netem_round_trip() {
+	echo $(( $(netem_delay "${HALO_TEST_NETEM_HOST:-${HALO_TEST_NETEM:-}}") +
+		$(netem_delay "${HALO_TEST_NETEM_JOIN:-${HALO_TEST_NETEM:-}}") ))
+}
+# the median of the latency meter's round trips each side logged (the
+# joiner's own; the host's of its client) before the first connection
+# problem, which must be from LOW to HIGH ms
+check_latency() { # check_latency LOW HIGH
+	local low=$1 high=$2 side values median count
+	for side in joiner host; do
+		[ -f "$out/$side/run.log" ] || continue
+		if [ $side = joiner ]; then
+			values=$(sed -n '/latency: .*connection problem/q; s/.*latency: round trip to the host \([0-9]*\) ms.*/\1/p' \
+				"$out/$side/run.log")
+		else
+			values=$(sed -n '/latency: .*connection problem/q; s/.*latency: the clients. round trips: machine [0-9]* \([0-9]*\) ms.*/\1/p' \
+				"$out/$side/run.log")
+		fi
+		count=$(echo "$values" | grep -c .)
+		median=$(echo "$values" | grep . | sort -n | awk '{ v[NR] = $1 } END { if (NR) print v[int((NR + 1) / 2)] }')
+		echo "latency meter, $side: median ${median:-none} ms of $count (wanted $low to $high ms)"
+		[ "$count" -ge 2 ] || { fail "the $side logged the latency meter $count times"; continue; }
+		[ "$median" -ge "$low" ] && [ "$median" -le "$high" ] ||
+			fail "the $side's latency meter said $median ms ($low to $high wanted)"
+	done
+}
 
 case $mode in
-code|lobby|lobbypw|relay)
+code|lobby|lobbypw|relay|latency)
 	extra=
 	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
 	[ "$mode" = lobby ] && extra="HALO_NET_HOST_PUBLIC=true"
 	[ "$mode" = lobbypw ] && extra="HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_PASSWORD=$password"
+	# (latency: one game the whole run, no game over in the blackout)
+	[ "$mode" = latency ] && extra="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50}"
 	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $extra; host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
 	case $mode in
-	code|relay) join_mode="join-code:$code" ;;
+	code|relay|latency) join_mode="join-code:$code" ;;
 	lobby) join_mode=join-public ;;
 	lobbypw) join_mode="join-public:$password" ;;
 	esac
@@ -298,6 +347,29 @@ code|lobby|lobbypw|relay)
 	if [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ]; then
 		run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$join_mode \
 			HALO_TEST_INPUT=bot:3; join2_pid=$last_pid
+	fi
+	if [ "$mode" = latency ]; then
+		# (the blackout: everything both routers send to the internet dropped)
+		blackout=${HALO_TEST_BLACKOUT:-75}
+		sleep "$blackout"
+		echo "blackout: both routers drop everything for 5 s, $blackout s after the joiner started"
+		for side in host join; do
+			netem=${HALO_TEST_NETEM:-}
+			[ "$side" = host ] && netem=${HALO_TEST_NETEM_HOST:-$netem}
+			[ "$side" = join ] && netem=${HALO_TEST_NETEM_JOIN:-$netem}
+			eval "router=\$${side}_router"
+			in_ns "$router" tc qdisc replace dev "w_$side" root netem limit 10000 $netem loss 100% ||
+				fail "netem could not drop $side's traffic"
+		done
+		sleep 5
+		for side in host join; do
+			netem=${HALO_TEST_NETEM:-}
+			[ "$side" = host ] && netem=${HALO_TEST_NETEM_HOST:-$netem}
+			[ "$side" = join ] && netem=${HALO_TEST_NETEM_JOIN:-$netem}
+			eval "router=\$${side}_router"
+			in_ns "$router" tc qdisc replace dev "w_$side" root netem limit 10000 ${netem:-delay 0ms}
+		done
+		echo "blackout over"
 	fi
 	wait $join_pid $host_pid $join2_pid 2>/dev/null
 	grep -aE "Internet play|network test: (hosting|starting|map|game|the next|join|leav|the public)" "$out/host/run.log" | head -30 > "$out/host.summary"
@@ -310,6 +382,26 @@ code|lobby|lobbypw|relay)
 	two=$(two_players < "$out/joiner/run.log")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+	# (the latency meter: about the routers' round trip)
+	rtt=$(netem_round_trip)
+	echo "the routers' round trip: $rtt ms"
+	check_latency "$rtt" $((rtt + 90))
+	if [ "$mode" = latency ]; then
+		echo "--- latency"; grep -ah "latency: .*\(connection problem\|heard again\)" "$out"/joiner/run.log "$out"/host/run.log
+		grep -aq "latency: the host silent for [0-9]* ms: connection problem" "$out/joiner/run.log" ||
+			fail "the joiner never said the host was silent in the blackout"
+		grep -aq "latency: the host heard again after [0-9]* ms" "$out/joiner/run.log" ||
+			fail "the joiner never heard the host again after the blackout"
+		grep -aq "latency: machine [0-9]* silent for [0-9]* ms: connection problem" "$out/host/run.log" ||
+			fail "the host never said the joiner was silent in the blackout"
+		grep -aq "latency: machine [0-9]* heard again after [0-9]* ms" "$out/host/run.log" ||
+			fail "the host never heard the joiner again after the blackout"
+		# (and the meter as before once it is over)
+		after=$(sed -n '/latency: the host heard again/,$ s/.*latency: round trip to the host \([0-9]*\) ms.*/\1/p' \
+			"$out/joiner/run.log" | tail -1)
+		echo "the joiner's latency meter after the blackout: ${after:-none} ms"
+		[ -n "$after" ] && [ "$after" -le $((rtt + 150)) ] || fail "the joiner's latency meter did not come back ($after ms)"
+	fi
 	# (the map change: code mode, which runs long enough for a game to end)
 	[ "$mode" = code ] && [ -z "${HALO_TEST_HOST_GAME:-}" ] && ! grep -aq "network test: map chillout" "$out/host/run.log" && fail "the host never changed map"
 	if [ "$rejoin" != 0 ]; then
@@ -335,7 +427,7 @@ code|lobby|lobbypw|relay)
 		bytes=$(sed -n 's/^summary: .* packets (\([0-9]*\) B) relayed.*/\1/p' "$out/relay.log" | tail -1)
 		echo "relayed ${bytes:-0} B in ${seconds} s: $(( ${bytes:-0} * 8 / seconds / 1000 )) kbit/s both ways together"
 		[ "${bytes:-0}" -gt 0 ] || fail "the relay carried nothing"
-	elif [ "$mode" != code ]; then
+	elif [ "$mode" != code ] && [ "$mode" != latency ]; then
 		# (the listing on the host's slot, at least once; republished every 30 s
 		# and when the game changes, at most every 5 s)
 		sends=$(grep -c 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained qos1' "$out/broker.log")
@@ -575,6 +667,9 @@ lan)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	grep -aq "Internet play: network thread started" "$out/joiner/run.log" && fail "the p2p thread started with online off"
+	# (the latency meter on a LAN: the two machines' waits for their next tick
+	# alone, two ticks at most, 67 ms)
+	check_latency 0 90
 	;;
 adhoc)
 	# a link between the two machines alone stands for the ad hoc group
@@ -601,6 +696,7 @@ adhoc)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
+	check_latency 0 90
 	;;
 coop)
 	level=${HALO_TEST_COOP_LEVEL:-a10}
@@ -907,7 +1003,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport" >&2
 	exit 2
 	;;
 esac

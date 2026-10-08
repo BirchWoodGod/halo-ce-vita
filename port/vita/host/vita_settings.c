@@ -450,6 +450,11 @@ static struct setting settings[] = {
 	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
 		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
+	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
+	to the host at the top right of a network game and in the scoreboard's
+	Ping column; the host's, its slowest player's) */
+	{ "Latency meter", "HALO_LATENCY_METER", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Ping to the host in network games, top right", 0, TAB_MULTIPLAYER },
 	/* (the hosted game's settings, which the game's Server Setup sets
 	(vita_settings_set, menu_functions.c) and settings.txt keeps: on a page
 	no row opens) */

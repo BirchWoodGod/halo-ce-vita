@@ -104,6 +104,9 @@ symbols in this file:
 #include "text/draw_string.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "latency_meter.h"
+#endif
 
 /* ---------- constants */
 
@@ -474,6 +477,11 @@ void interface_draw_fullscreen_overlays(
 	interface_splitscreen_render();
 	hud_render_timer();
 	terminal_draw();
+#ifdef HALO_LINUX
+	/* port: a network game's round trip to the host
+	(port/linux/game/latency_meter.c) */
+	latency_meter_draw();
+#endif
 	main_framerate_render();
 	render_debug_profile();
 
