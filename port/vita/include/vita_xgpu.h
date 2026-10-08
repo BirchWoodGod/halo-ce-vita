@@ -76,6 +76,13 @@ struct nv2a_vertex_constant_usage
 #define VITA_FU_BUMP_LUMINANCE 25  /* [4] */
 #define VITA_FU_TEXTURE_SCALE 29   /* [4] */
 #define VITA_FU_COUNT 33
+/* (a draw whose blend's constant factor is folded into its program, the
+key's blend_fold: blend_constant.h) the program's output o becomes o *
+scale + offset, the two rows past the second buffer's in a copy of it the
+draw has of its own; the other programs do not declare them */
+#define VITA_FU_BLEND_SCALE 33
+#define VITA_FU_BLEND_OFFSET 34
+#define VITA_FU_FOLD_COUNT 35
 /* two buffers: A = registers 0..17 (the combiner constants: BUFFER[0],
 which change per material and part), B = 18..32 (fog, alpha reference,
 bump, texture scale: BUFFER[1], per view), so a part's constants do not

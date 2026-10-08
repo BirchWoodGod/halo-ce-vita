@@ -3000,7 +3000,8 @@ static SceGxmBlendFactor blend_factor(unsigned long factor)
 	case 774: return SCE_GXM_BLEND_FACTOR_DST_COLOR;
 	case 775: return SCE_GXM_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
 	case 776: return SCE_GXM_BLEND_FACTOR_SRC_ALPHA_SATURATE;
-	/* GXM has no constant colour factors */
+	/* GXM has no constant colour factors (d3d8_gxm.c makes the draws
+	that have one of GXM's: blend_constant.h) */
 	default: return SCE_GXM_BLEND_FACTOR_ONE;
 	}
 }
@@ -3199,6 +3200,13 @@ void vgxm_draw(const struct vgxm_draw *draw)
 			blend.colorFunc = blend.alphaFunc = blend_function(draw->blend_operation);
 			blend.colorSrc = blend.alphaSrc = blend_factor(draw->blend_source);
 			blend.colorDst = blend.alphaDst = blend_factor(draw->blend_destination);
+			/* MIN and MAX do not use the factors (on the Xbox as in OpenGL),
+			and GXM links them only with ONE: the needler's max screen flash,
+			INVDESTCOLOR/INVCONSTANTCOLOR, was "cannot link a fragment program:
+			0x805b0003" and not drawn (d3d8_gxm.c makes it ONE/ONE before
+			this; here for any other way in) */
+			if (blend.colorFunc == SCE_GXM_BLEND_FUNC_MIN || blend.colorFunc == SCE_GXM_BLEND_FUNC_MAX)
+				blend.colorSrc = blend.alphaSrc = blend.colorDst = blend.alphaDst = SCE_GXM_BLEND_FACTOR_ONE;
 		}
 		else
 		{

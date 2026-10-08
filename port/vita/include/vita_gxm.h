@@ -248,6 +248,9 @@ struct vgxm_draw
 	unsigned long stencil_test, stencil_function, stencil_reference, stencil_read_mask, stencil_write_mask;
 	unsigned long stencil_fail, stencil_depth_fail, stencil_pass;
 	unsigned long blend, blend_source, blend_destination, blend_operation;
+	/* D3DRS_BLENDCOLOR (its factors are made of GXM's before the draw
+	reaches vgxm_draw: blend_constant.h) */
+	unsigned long blend_color;
 	/* D3DCOLORWRITEENABLE_* bits */
 	unsigned long color_write;
 	/* 0 none, else D3DCULL_CW or D3DCULL_CCW: the winding that is discarded */

@@ -17,6 +17,7 @@ the game gave their surface, as in the OpenGL device.
 #include "vita_xgpu.h"
 #include "vita_gxm.h"
 #include "dynamic_resolution.h"
+#include "blend_constant.h"
 #include "sdl_platform.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
@@ -3051,6 +3052,7 @@ static BOOL worker_build_record(struct render_command *command)
 	draw->blend_source = rs[D3DRS_SRCBLEND];
 	draw->blend_destination = rs[D3DRS_DESTBLEND];
 	draw->blend_operation = rs[D3DRS_BLENDOP];
+	draw->blend_color = rs[D3DRS_BLENDCOLOR];
 	draw->color_write = rs[D3DRS_COLORWRITEENABLE];
 	draw->cull = worker_cull(state);
 	draw->depth_bias_slope = draw->depth_bias_units = 0.0f;
@@ -3094,12 +3096,85 @@ static void fill_stats_draw(const struct render_command *command, const struct v
 		worker_color_entry ? worker_color_entry->id : 0, worker_depth_id);
 }
 
+/* a draw to GXM, once per visibility test segment as recorded; without
+count_visibility the draw counts for no test (the first of a blend's two
+passes: blend_constant.h) */
+static void issue_draw(const struct render_command *command, struct vgxm_draw *draw, int count_visibility)
+{
+	if (!count_visibility)
+		draw->visibility_index = 0;
+	if (command->segment_count > 1)
+	{
+		/* one draw per visibility test, as they were recorded: the same
+		state, each its own triangles and slot */
+		const unsigned short *indices = draw->indices;
+		unsigned long index_count = draw->index_count, visibility_index = draw->visibility_index, segment;
+
+		for (segment = 0; segment < command->segment_count; segment++)
+		{
+			draw->indices = indices + command->segments[segment].first_index;
+			draw->index_count = command->segments[segment].index_count;
+			draw->visibility_index = count_visibility ? command->segments[segment].visibility_index : 0;
+			if (halo_fill_stats_sampled())
+				fill_stats_draw(command, draw);
+			vgxm_draw(draw);
+		}
+		draw->indices = indices;
+		draw->index_count = index_count;
+		draw->visibility_index = visibility_index;
+	}
+	else
+	{
+		if (halo_fill_stats_sampled())
+			fill_stats_draw(command, draw);
+		vgxm_draw(draw);
+	}
+}
+
+/* the fragment uniforms' second buffer of a draw whose blend's constant is
+folded into its program: a copy with the fold's two rows after it */
+static const void *blend_fold_uniforms(const void *second, const struct blend_pass *pass)
+{
+	float (*copy)[4] = vgxm_worker_alloc((VITA_FU_FOLD_COUNT - VITA_FU_A_COUNT) * sizeof(float) * 4, 16);
+
+	if (!copy)
+		return NULL;
+	memcpy(copy, second, (VITA_FU_COUNT - VITA_FU_A_COUNT) * sizeof(float) * 4);
+	memcpy(copy[VITA_FU_BLEND_SCALE - VITA_FU_A_COUNT], pass->scale, sizeof(float) * 4);
+	memcpy(copy[VITA_FU_BLEND_OFFSET - VITA_FU_A_COUNT], pass->offset, sizeof(float) * 4);
+	return copy;
+}
+
+/* the log's line for each kind of blend made of GXM's factors, once */
+static void blend_plan_note(const struct vgxm_draw *draw, const struct blend_plan *plan)
+{
+	static unsigned long noted[32];
+	static int noted_count;
+	unsigned long kind = draw->blend_source << 17 ^ draw->blend_destination << 2 ^ draw->blend_operation << 20 ^
+		(unsigned long)plan->pass_count ^ (unsigned long)!plan->exact << 31;
+	int index;
+
+	for (index = 0; index < noted_count; index++)
+		if (noted[index] == kind)
+			return;
+	if (noted_count >= 32)
+		return;
+	noted[noted_count++] = kind;
+	platform_log("blend %lu/%lu op %lu, constant %08lx, writes %08lx: %s%s", draw->blend_source, draw->blend_destination,
+		draw->blend_operation, draw->blend_color, draw->color_write, plan->how,
+		plan->exact ? "" : " (GXM's factors cannot make it: an approximation)");
+}
+
 static void execute_draw(struct render_command *command)
 {
 	struct vgxm_draw *draw = &command->draw;
 	float texture_scale[4][4];
 	BOOL has_depth;
 	int stage;
+	/* (a blend GXM cannot take as it is: blend_constant.h) */
+	struct blend_plan blend_plan;
+	int blend_passes = 0;
+	unsigned long plain_shader = 0, fold_shader = 0;
 
 	unsigned long long profile_from;
 
@@ -3148,7 +3223,36 @@ static void execute_draw(struct render_command *command)
 			memcpy(copy[VITA_FU_TEXTURE_SCALE - VITA_FU_A_COUNT + stage], texture_scale[stage], sizeof(float) * 4);
 		draw->fragment_uniforms[1] = copy;
 	}
-	draw->fragment_shader = fragment_shader_get(&command->key);
+	if (draw->blend)
+		blend_passes = blend_constant_plan(draw->blend_source, draw->blend_destination, draw->blend_operation,
+			draw->color_write, draw->blend_color, &blend_plan);
+	if (blend_passes)
+	{
+		/* the program as it is and/or its fold, as the passes need */
+		int pass, plain = 0, fold = 0;
+
+		for (pass = 0; pass < blend_plan.pass_count; pass++)
+		{
+			if (blend_plan.passes[pass].fold)
+				fold = 1;
+			else
+				plain = 1;
+		}
+		if (plain)
+			plain_shader = fragment_shader_get(&command->key);
+		if (fold)
+		{
+			struct nv2a_pixel_shader_key fold_key = command->key;
+
+			fold_key.blend_fold = 1;
+			fold_shader = fragment_shader_get(&fold_key);
+		}
+		/* (none drawn until both are ready: one pass alone is wrong) */
+		draw->fragment_shader = (plain && !plain_shader) || (fold && !fold_shader) ? 0 : plain ? plain_shader : fold_shader;
+		blend_plan_note(draw, &blend_plan);
+	}
+	else
+		draw->fragment_shader = fragment_shader_get(&command->key);
 	if (command->sky_depth)
 	{
 		/* (after the record's states are built: they are shared and
@@ -3308,32 +3412,39 @@ static void execute_draw(struct render_command *command)
 	DRAW_PROFILE_ADD(6, profile_from);
 	draw->vertex_input_mask = command->program->input_mask;
 	draw->vertex_program_hash = command->program->instruction_hash;
-	if (command->segment_count > 1)
+	if (blend_passes)
 	{
-		/* one draw per visibility test, as they were recorded: the same
-		state, each its own triangles and slot */
-		const unsigned short *indices = draw->indices;
-		unsigned long index_count = draw->index_count, visibility_index = draw->visibility_index, segment;
+		/* each pass with its factors and program; the first of two only
+		multiplies the colour target: the depth, stencil and visibility
+		test are the second's */
+		int pass;
 
-		for (segment = 0; segment < command->segment_count; segment++)
+		for (pass = 0; pass < blend_plan.pass_count; pass++)
 		{
-			draw->indices = indices + command->segments[segment].first_index;
-			draw->index_count = command->segments[segment].index_count;
-			draw->visibility_index = command->segments[segment].visibility_index;
-			if (halo_fill_stats_sampled())
-				fill_stats_draw(command, draw);
-			vgxm_draw(draw);
+			const struct blend_pass *plan_pass = &blend_plan.passes[pass];
+			struct vgxm_draw pass_draw = *draw;
+			int first_of_two = blend_plan.pass_count == 2 && pass == 0;
+
+			pass_draw.blend_source = plan_pass->source;
+			pass_draw.blend_destination = plan_pass->destination;
+			pass_draw.blend_operation = plan_pass->operation;
+			pass_draw.fragment_shader = plan_pass->fold ? fold_shader : plain_shader;
+			if (plan_pass->fold)
+			{
+				pass_draw.fragment_uniforms[1] = blend_fold_uniforms(draw->fragment_uniforms[1], plan_pass);
+				if (!pass_draw.fragment_uniforms[1])
+					return;
+			}
+			if (first_of_two)
+			{
+				pass_draw.depth_write = 0;
+				pass_draw.stencil_fail = pass_draw.stencil_depth_fail = pass_draw.stencil_pass = D3DSTENCILOP_KEEP;
+			}
+			issue_draw(command, &pass_draw, !first_of_two);
 		}
-		draw->indices = indices;
-		draw->index_count = index_count;
-		draw->visibility_index = visibility_index;
 	}
 	else
-	{
-		if (halo_fill_stats_sampled())
-			fill_stats_draw(command, draw);
-		vgxm_draw(draw);
-	}
+		issue_draw(command, draw, 1);
 	if (worker_color_entry && draw->color_write)
 		worker_color_entry->drawn = TRUE;
 	DRAW_PROFILE_ADD(7, profile_from);
@@ -6018,6 +6129,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->blend_source = rs[D3DRS_SRCBLEND];
 	draw->blend_destination = rs[D3DRS_DESTBLEND];
 	draw->blend_operation = rs[D3DRS_BLENDOP];
+	draw->blend_color = rs[D3DRS_BLENDCOLOR];
 	draw->color_write = rs[D3DRS_COLORWRITEENABLE];
 	/* the cull mode names the screen winding to discard */
 	draw->cull = rs[D3DRS_CULLMODE] == D3DCULL_NONE ? 0 : rs[D3DRS_CULLMODE];
