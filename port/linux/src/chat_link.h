@@ -70,6 +70,10 @@ extern volatile int halo_chat_request;
 extern volatile int halo_chat_request_value;
 /* nonzero: the request's line to the sender's team only */
 extern volatile int halo_chat_request_team;
+/* the controller (0 to 3) whose player the request's line is from: with
+split screen each local player chats from their own controller, and the
+host names that player (a mute is the whole machine's, whichever asked) */
+extern volatile int halo_chat_request_controller;
 extern char halo_chat_request_text[HALO_CHAT_TEXT_SIZE];
 
 /* the quick chat phrases as the menu lists them (chat_protocol.c's, by

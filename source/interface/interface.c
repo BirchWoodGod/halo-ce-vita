@@ -478,8 +478,8 @@ void interface_draw_fullscreen_overlays(
 	hud_render_timer();
 	terminal_draw();
 #ifdef HALO_LINUX
-	/* port: game chat's lines (port/linux/game/chat.c), the lobby's and the
-	game's */
+	/* port: game chat's lines (port/linux/game/chat.c) over the screen: the
+	lobby's (in a game the players' windows have drawn them) */
 	chat_draw();
 #endif
 	main_framerate_render();
@@ -816,6 +816,11 @@ void interface_draw_screen(
 
 	hud_draw_screen();
 	game_engine_post_rasterize();
+#ifdef HALO_LINUX
+	/* port: game chat's lines in this player's window (port/linux/game/
+	chat.c: split screen's windows each show their player's) */
+	chat_draw_window();
+#endif
 
 	return;
 }
