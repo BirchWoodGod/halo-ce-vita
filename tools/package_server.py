@@ -290,7 +290,7 @@ def build_sdl(arch: Arch, work: Path, root: Path, clang: str) -> Path:
     """SDL3, static and headless, built against the sysroot"""
     prefix = work / f"sdl3-{arch.name}"
     stamp = prefix / ".built"
-    key = f"{SDL_VERSION} {' '.join(SDL_CMAKE_OPTIONS)} {' '.join(sdl_target_flags(arch))} {clang}"
+    key = f"{SDL_VERSION} {' '.join(SDL_CMAKE_OPTIONS)} {' '.join(sdl_target_flags(arch))} {clang} {work} prefix-map"
     if stamp.exists() and stamp.read_text() == key:
         return prefix
     archive = fetch([SDL_URL], SDL_SHA256, work / "downloads" / f"SDL3-{SDL_VERSION}.tar.gz")
@@ -304,7 +304,9 @@ def build_sdl(arch: Arch, work: Path, root: Path, clang: str) -> Path:
     if prefix.exists():
         shutil.rmtree(prefix)
     build.mkdir(parents=True)
-    flags = " ".join(sdl_target_flags(arch))
+    # (the work folder's path left out of the library, __FILE__'s, so that the
+    # package is the same wherever it is built)
+    flags = " ".join(sdl_target_flags(arch) + [f"-ffile-prefix-map={work}=/build"])
     toolchain = build / "toolchain.cmake"
     toolchain.write_text(f"""set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR {"i686" if arch.name == "x86" else "armv7l"})
@@ -387,15 +389,22 @@ def build_server(arch: Arch, work: Path, root: Path, sdl: Path, clang: str, jobs
         wrapper.write_text(f"""#!/bin/sh
 # the dedicated server's x86 release build (tools/package_server.py): the
 # game's clang command against Debian 12's glibc and a static, headless SDL3
-exec "{clang}" --sysroot="{root}" -I"{sdl}/include" -L"{sdl}/lib" -fuse-ld=lld -Qunused-arguments "$@"
+exec "{clang}" --sysroot="{root}" -I"{sdl}/include" -L"{sdl}/lib" -fuse-ld=lld -ffile-prefix-map="{work}"=/build -Qunused-arguments "$@"
 """)
     else:
         wrapper.write_text(f"""#!/bin/sh
 # the dedicated server's armhf release build (tools/package_server.py):
 # tools/linux_armhf_cc.sh against Debian 12's glibc and a static, headless SDL3
-ARMHF_SYSROOT="{root}" SDL3_ARMHF="{sdl}" CLANG="{clang}" exec "{tree}/tools/linux_armhf_cc.sh" "$@"
+ARMHF_SYSROOT="{root}" SDL3_ARMHF="{sdl}" CLANG="{clang}" exec "{tree}/tools/linux_armhf_cc.sh" -ffile-prefix-map="{work}"=/build "$@"
 """)
     wrapper.chmod(0o755)
+    # (a new compiler command or SDL is not something ninja sees: the build
+    # starts again)
+    key = wrapper.read_text() + (sdl / ".built").read_text()
+    stamp = work / f"build-key-{arch.name}"
+    if not stamp.exists() or stamp.read_text() != key:
+        shutil.rmtree(tree / "build", ignore_errors=True)
+        stamp.write_text(key)
     configure = [sys.executable, "configure.py", "--linux-cc", wrapper, "--portable", "--release",
                  "--lto", "off", "--pgo", "off"]
     launcher = os.environ.get("CI_COMPILER_LAUNCHER")
