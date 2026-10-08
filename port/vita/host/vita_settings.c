@@ -97,6 +97,12 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   network.coop_public: Private unless chosen), which X on the waiting screen
   of co-op hosted online sets (port/linux/game/coop_menu.c). 1.0.3's
   "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
+- "Bots" (HALO_BOTS, Off or 1 to 15): computer players in the game's
+  Multiplayer > Split Screen games (port/linux/game/bots.c), who join its
+  lobby; with any, "Bot skill" (HALO_BOT_SKILL: Easy, Normal, Heroic,
+  Legendary) and "Bot teams" (HALO_BOT_TEAMS: in team games Even, on both
+  teams, or Against you, all on the other team) show below it. Live: the
+  lobby follows them.
 
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo; CE SP
@@ -449,6 +455,15 @@ static struct setting settings[] = {
 		TAB_MULTIPLAYER, KIND_ACTION, ACTION_ADHOC_JOIN },
 	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
 		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
+	/* (the offline bots: port/linux/game/bots.c; the skill and teams rows
+	shown while there are any, setting_shown) */
+	{ "Bots", "HALO_BOTS", 0, 11, { "0", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
+		{ "Off", "1", "2", "3", "4", "5", "6", "7", "9", "11", "15" },
+		"Computer players in Multiplayer > Split Screen", 0, TAB_MULTIPLAYER },
+	{ "  Bot skill", "HALO_BOT_SKILL", 0, 4, { "easy", "normal", "heroic", "legendary" },
+		{ "Easy", "Normal", "Heroic", "Legendary" }, "How soon bots react, how well they aim", 1, TAB_MULTIPLAYER },
+	{ "  Bot teams", "HALO_BOT_TEAMS", 0, 2, { "even", "against" }, { "Even", "Against you" },
+		"Team games: bots on both teams, or all against you", 0, TAB_MULTIPLAYER },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
 	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
 	to the host at the top right of a network game and in the scoreboard's
@@ -881,6 +896,8 @@ static int setting_shown(const struct setting *setting)
 		return network_is("adhoc");
 	if (setting->action == ACTION_CE_EXTRACT)
 		return maps_installer_state == 1;
+	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS")))
+		return choice_of("HALO_BOTS") != 0;
 	/* (a code typed in: online, on a Vita whose game has not got the PC
 	menus' Direct Link, menu_tags.c) */
 	if (setting->action == ACTION_JOIN_CODE)

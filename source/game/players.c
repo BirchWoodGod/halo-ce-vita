@@ -280,6 +280,9 @@ symbols in this file:
 #include "units/units.h"
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
+#ifdef HALO_LINUX
+#include "bots.h"
+#endif
 
 /* port: action_vehicle.c's (no header declares it): network co-op's seats */
 boolean unit_get_seat_entrance_point(long unit_index, long parent_unit_index, short seat_index,
@@ -641,6 +644,10 @@ void players_initialize_for_new_map(
 #else
 		0x40);
 #endif
+#ifdef HALO_LINUX
+	/* port: the offline bots' map (port/linux/game/bots.c) */
+	bots_initialize_for_new_map();
+#endif
 
 	return;
 }
@@ -648,6 +655,9 @@ void players_initialize_for_new_map(
 void players_dispose_from_old_map(
 	void)
 {
+#ifdef HALO_LINUX
+	bots_dispose_from_old_map();
+#endif
 	data_make_invalid(player_data);
 	data_make_invalid(team_data);
 
@@ -4574,6 +4584,11 @@ void players_update_before_game(
 	players_coop_rescue_stranded();
 	if (update_client_dequeue(actions))
 	{
+#ifdef HALO_LINUX
+		/* port: the offline bots' controls this tick (port/linux/game/bots.c),
+		in place of what their queues held: idle actions */
+		bots_update_actions(actions);
+#endif
 		data_iterator_new(&iterator, player_data);
 		while (player = data_iterator_next(&iterator))
 		{
