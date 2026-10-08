@@ -239,6 +239,12 @@ short hs_global_get_type(
 	short global_index);
 char const *hs_global_get_name(
 	short global_index);
+/* port: whether a map's scripts may call the function
+(hs_function_allowed_in_maps; the console may call any). A Custom Edition
+map's call of one that may not does nothing instead
+(port/linux/game/custom_edition_scripts.c). */
+boolean hs_function_allowed_in_map_scripts(
+	short function_index);
 /* port: the map's scripts and global initializers that call a function a
 map's scripts may not (hs_scenario_functions_check) */
 boolean hs_scenario_script_disabled(

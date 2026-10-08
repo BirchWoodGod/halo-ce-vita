@@ -336,9 +336,16 @@ changed:
   `switch_bsp`. A compiled script also keeps every name, in its string data,
   so every call and every engine global is found again by name with the
   game's own `hs_find_function_by_name` and `hs_find_global_by_name`
-  (`custom_edition_scripts.c`); a map whose scripts use one this build does
-  not have is refused and the names logged. The value types are numbered
-  alike in both builds.
+  (`custom_edition_scripts.c`). A call of a function this build does not
+  have, or a read or set of an engine global it does not have, does nothing
+  (a constant of its type's harmless value), as does a call of a function a
+  map's scripts may not call (`map_reset`, which Firefight maps call when
+  their last wave is won, and `map_name`) and a set of an engine global they
+  may not set, each logged by name, so the rest of the script runs where the
+  game's own check would keep the whole script from running; only one that
+  gives a script's index refuses the map (after OpenCE's
+  `custom_edition_scripts.c`, f823a18d). The value types are numbered alike
+  in both builds.
 - **Multiplayer vehicle placement.** This build places a multiplayer game's
   vehicles by type: only the first three of the globals' multiplayer
   vehicles are created, and of those the ones the variant's vehicle set
