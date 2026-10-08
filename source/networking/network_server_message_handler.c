@@ -263,6 +263,7 @@ symbols in this file:
 #include "networking/network_server_message_handler.h"
 #include "text/unicode.h"
 #include "map_share.h"
+#include "chat.h"
 #include "main/main.h"
 /* system_milliseconds(), for the settings update interval */
 #include "cseries/cseries_windows.h"
@@ -1355,6 +1356,17 @@ boolean network_game_server_handle_client_message(
 						from a machine joined to the game (checked above) */
 						case _message_client_map_download:
 							map_share_server_handle_request(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
+						/* port: game chat (port/linux/game/chat.c), from a
+						machine joined to the game (checked above), which
+						names the sender */
+						case _message_client_chat:
+							chat_server_handle_request(
 								server,
 								machine,
 								message,
