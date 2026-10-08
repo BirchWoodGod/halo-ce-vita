@@ -456,3 +456,16 @@ def test_a_short_window_scrolls(root, tmp_path):
     root.geometry(tall)
     pump(root, lambda: not window.scrollbar.winfo_ismapped(), 3)
     assert not window.scrollbar.winfo_ismapped()
+
+
+def test_classic_palette_without_tk_setpalette(root, monkeypatch):
+    """Windows runners failed to auto-load Tk's palette.tcl ("invalid command
+    name tk_setPalette"): the classic look's colours then go through the
+    option database instead of stopping the window."""
+    def broken(*args, **kwargs):
+        raise tk_module().TclError('invalid command name "tk_setPalette"')
+
+    monkeypatch.setattr(root, "tk_setPalette", broken)
+    assert hcv._set_palette(root, background="#c0c0c0", foreground="#000000") is False
+    assert root.option_get("background", "Frame") == "#c0c0c0"
+    assert str(root.cget("background")) == "#c0c0c0"
