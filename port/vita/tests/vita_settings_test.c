@@ -1218,7 +1218,7 @@ static void test_variables_kept(void)
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
 		"HALO_BUTTON_ICONS", "HALO_AI_PERCEPTION_LOD", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
-		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC",
+		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_INTERPOLATION",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1361,12 +1361,13 @@ int main(void)
 		!strncmp(menu_line(3, line, sizeof(line)), "Aspect ratio\x02", 13) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Upscale filter\x02", 15) &&
 		!strncmp(menu_line(5, line, sizeof(line)), "Frame limit\x02", 12) &&
-		!strncmp(menu_line(6, line, sizeof(line)), "FPS counter\x02", 12) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
-		!strcmp(menu_line(8, line, sizeof(line)), "Advanced\x02  >") &&
-		!strncmp(menu_line(9, line, sizeof(line)), "\x05Sets resolution", 16) &&
-		!strncmp(menu_line(10, line, sizeof(line)), "\x06L/R: tabs", 10),
-		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, FPS counter, weapon motion, Advanced; help, buttons");
+		!strncmp(menu_line(6, line, sizeof(line)), "Frame interpolation\x02", 20) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "FPS counter\x02", 12) &&
+		!strncmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Advanced\x02  >") &&
+		!strncmp(menu_line(10, line, sizeof(line)), "\x05Sets resolution", 16) &&
+		!strncmp(menu_line(11, line, sizeof(line)), "\x06L/R: tabs", 10),
+		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, Frame interpolation, FPS counter, weapon motion, Advanced; help, buttons");
 	check(menu_fits() && menu_rows() <= 10, "Graphics: ten rows at most, each fits");
 	check(!strstr(menu, "Dynamic minimum") && !strstr(menu, "Model detail"),
 		"Graphics: Dynamic minimum hidden (not Dynamic), the detail rows under Advanced");
@@ -1398,6 +1399,28 @@ int main(void)
 			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.75\n"), "not Dynamic: the minimum kept (hidden)");
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.5");
 		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 75%: Balanced again");
+	}
+	{
+		/* Frame interpolation: Off by default (and in the environment the
+		game reads, no longer a fixed default), live (no *), saved; the
+		profile untouched */
+		unsigned long generation = halo_settings_generation;
+
+		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n") &&
+			strstr(menu, "\nFrame interpolation\x02  Off >") && !strstr(menu, "Frame interpolation*"),
+			"Frame interpolation: Off by default, saved, live");
+		check(to_line("Frame interpolation") && strstr(menu, "\n\x05Up to 60 FPS: frames between the 30 Hz ticks\n") &&
+			menu_fits(), "Frame interpolation: its help line fits");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_INTERPOLATION"), "true") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=true\n") &&
+			strstr(menu, "\nFrame interpolation\x02< On") && !strstr(notice, "Restart") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"Frame interpolation On: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n"), "... and Off again");
 	}
 	/* Graphics' Advanced: the detail rows the profile sets */
 	check(open_page("Advanced") && strstr(menu, "\n\x03Graphics > Advanced\n") &&
