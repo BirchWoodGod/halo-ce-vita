@@ -254,6 +254,43 @@ enum
 int p2p_lobby_join_state(void);
 /* a game the browser could not join: kept, marked failed, for this run */
 void p2p_lobby_mark_failed(const char *id);
+/* how the server browser is doing, for its status line: the games found,
+looking still (a broker being tried, the hosts' answers on their way), the
+brokers out of reach (none took the subscription: no internet, DNS, a
+firewall), or reached with no games; text gets the line for the player
+("3 public games", "Looking for public games...", "Can't reach the online
+game list - check your internet connection", "No public games right now";
+"" when off) */
+enum
+{
+	P2P_LOBBY_BROWSE_OFF,
+	P2P_LOBBY_BROWSE_LOOKING,
+	P2P_LOBBY_BROWSE_UNREACHABLE,
+	P2P_LOBBY_BROWSE_EMPTY,
+	P2P_LOBBY_BROWSE_GAMES,
+};
+int p2p_lobby_browse_status(char *text, int size);
+/* the hosted game's listing, as the brokers hold it (acknowledged by
+them): not hosting for the internet, private, being listed, listed on some
+("Listed on 2 of 3 servers"), or on none ("Not listed: can't reach the online
+game list") */
+enum
+{
+	P2P_LOBBY_HOSTING_NONE,
+	P2P_LOBBY_HOSTING_PRIVATE,
+	P2P_LOBBY_HOSTING_PENDING,
+	P2P_LOBBY_HOSTING_LISTED,
+	P2P_LOBBY_HOSTING_UNREACHABLE,
+};
+int p2p_lobby_hosting_status(char *text, int size);
+/* before hosting (Server Setup): the brokers reached now (internet play's
+signalling started, as hosting or browsing starts it), and whether the
+online game list can be reached: P2P_LOBBY_BROWSE_LOOKING (being reached,
+"Connecting to the online game list..."), _UNREACHABLE ("Can't reach the
+online game list - check your internet connection") or _EMPTY (reached:
+"") */
+void p2p_lobby_reach_brokers(void);
+int p2p_lobby_brokers_status(char *text, int size);
 /* one line on what internet play is doing (for a menu); returns nonzero
 if internet play runs */
 int p2p_status(char *text, int size);

@@ -121,6 +121,55 @@ enum
 	VERIFY_BUDGET = 2,
 	/* seconds */
 	RETAINED_WINDOW = 600,
+
+	/* diagnostics (milliseconds): a listing no broker acknowledged in this
+	long is "not listed", said again this often while it stays so; the
+	brokers holding it said again at most this often */
+	LISTING_ACKNOWLEDGE_TIME = 15000,
+	NOT_LISTED_LOG_INTERVAL = 60000,
+	LISTING_COUNT_LOG_INTERVAL = 10000,
+	/* the browser: looking (not yet "can't reach") this long after it opens
+	while a broker is still being tried; "looking" this long after a broker
+	took the subscription, before "no public games"; its summary this long
+	after it opens or is refreshed, and again this often while listings come */
+	BROWSE_REACH_TIME = 12000,
+	BROWSE_SETTLE_TIME = 5000,
+	BROWSE_SUMMARY_TIME = 10000,
+	BROWSE_SUMMARY_INTERVAL = 60000,
+	/* lines about games shown or gone: at most this many each interval */
+	GAME_LINES = 12,
+	GAME_LINES_INTERVAL = 30000,
+	/* the hosts of another network version told apart */
+	OTHER_VERSION_HOSTS = 16,
+};
+
+/* why the browser did not take a listing (its summary's counts) */
+enum
+{
+	_drop_malformed,
+	_drop_version,
+	_drop_slot,
+	_drop_unnamed,
+	_drop_stale,
+	_drop_signature,
+	_drop_older,
+	_drop_queue_full,
+	NUMBER_OF_DROPS,
+};
+
+static const char *const drop_names[NUMBER_OF_DROPS] = {
+	"not a listing", "of another version", "on another's slot", "with no name", "stale retained copies",
+	"badly signed", "older than one taken", "past the queue",
+};
+
+/* what the browser heard since its last summary */
+struct browse_counts
+{
+	int heard, retained, empty, repeated, taken, closed, expired;
+	int drops[NUMBER_OF_DROPS];
+	/* the largest clock difference of a stale retained copy (seconds) */
+	long stale_seconds;
+	int game_lines_dropped;
 };
 
 #define SIGNATURE_LABEL P2P_SIGNAL_PREFIX "-lobby-1"
@@ -248,11 +297,47 @@ static struct
 	unsigned char join_sealed_token[P2P_SEALED_TOKEN_SIZE];
 	/* key_thread runs */
 	int key_thread_running;
+
+	/* diagnostics: hosting (whether the game was hosted for the internet
+	in the last pass; when it was listed, whether a broker's acknowledgement
+	was announced, the brokers holding it as last said and when, when "not
+	listed" was last said) */
+	int hosting;
+	unsigned long listed_time;
+	int listing_announced;
+	int logged_listing_count;
+	unsigned long listing_logged_time;
+	unsigned long not_listed_logged_time;
+	/* browsing: when it opened, when its summary is due (0: none), the
+	counts since the last, the lines about games this interval, and the
+	hosts of another version heard */
+	unsigned long browse_time;
+	unsigned long summary_time;
+	unsigned long summary_logged_time;
+	struct browse_counts counts;
+	int game_lines;
+	unsigned long game_lines_time;
+	unsigned char other_versions[OTHER_VERSION_HOSTS][P2P_KEY_HASH_SIZE];
+	int other_version_count;
+	int browse_state_logged;
+	/* the brokers wanted before anything is hosted or browsed (Server
+	Setup: p2p_lobby_reach_brokers), since when */
+	int brokers_wanted;
+	unsigned long reach_time;
 } lobby;
 
 static int elapsed(unsigned long since, unsigned long time)
 {
 	return (unsigned int)(p2p_now() - since) >= (unsigned int)time;
+}
+
+/* now, as a time kept where 0 means none (never later than now, which
+elapsed would take for long past) */
+static unsigned long now_stamp(void)
+{
+	unsigned long now = p2p_now();
+
+	return now ? now : (unsigned long)-1;
 }
 
 /* printable ASCII, as the menus' font has it (others: '?'), cut to size */
@@ -522,6 +607,109 @@ static void stop_listing(void)
 	platform_log("Internet play: the game is no longer listed in the public games");
 }
 
+static int hosting_public(void);
+
+/* the hosted game's listing, as the brokers hold it: a
+P2P_LOBBY_HOSTING_*, and its line for the player; under p2p_lock */
+static int hosting_status(char *text, int size)
+{
+	struct p2p_signal_counts counts;
+
+	if (!lobby.hosting)
+	{
+		snprintf(text, (size_t)size, "%s", "");
+		return P2P_LOBBY_HOSTING_NONE;
+	}
+	if (!lobby.listed)
+	{
+		if (lobby.details_told && !hosting_public())
+		{
+			snprintf(text, (size_t)size, "Private: not in the server browser");
+			return P2P_LOBBY_HOSTING_PRIVATE;
+		}
+		snprintf(text, (size_t)size, "%s", lobby.password_failed ? "Not listed: no memory for the password" :
+			"Getting listed...");
+		return lobby.password_failed ? P2P_LOBBY_HOSTING_UNREACHABLE : P2P_LOBBY_HOSTING_PENDING;
+	}
+	p2p_signal_counts(&counts);
+	if (counts.listing)
+	{
+		snprintf(text, (size_t)size, "Listed on %d of %d servers", counts.listing, counts.brokers);
+		return P2P_LOBBY_HOSTING_LISTED;
+	}
+	if (!elapsed(lobby.listed_time, LISTING_ACKNOWLEDGE_TIME) && counts.ready)
+	{
+		snprintf(text, (size_t)size, "Getting listed...");
+		return P2P_LOBBY_HOSTING_PENDING;
+	}
+	if (!elapsed(lobby.listed_time, BROWSE_REACH_TIME) && counts.tried < counts.brokers)
+	{
+		snprintf(text, (size_t)size, "Getting listed...");
+		return P2P_LOBBY_HOSTING_PENDING;
+	}
+	snprintf(text, (size_t)size, "Not listed: can't reach the online game list");
+	return P2P_LOBBY_HOSTING_UNREACHABLE;
+}
+
+int p2p_lobby_hosting_status_locked(char *text, int size)
+{
+	return hosting_status(text, size);
+}
+
+int p2p_lobby_hosting_status(char *text, int size)
+{
+	int state;
+
+	pthread_mutex_lock(&p2p_lock);
+	state = hosting_status(text, size);
+	pthread_mutex_unlock(&p2p_lock);
+	return state;
+}
+
+/* the listing's state in the log: listed once a broker has acknowledged
+it (not before), on how many as that changes, and not listed while none
+has; the p2p thread's, while listed */
+static void log_listing(void)
+{
+	struct p2p_signal_counts counts;
+	char brokers[384];
+
+	p2p_signal_counts(&counts);
+	if (counts.listing && !lobby.listing_announced)
+	{
+		p2p_signal_brokers_text(brokers, sizeof(brokers), 2);
+		platform_log("Internet play: the game is listed in everyone's public games%s (on %d of %d brokers: %s)",
+			lobby.has_password ? ", with a password" : "", counts.listing, counts.brokers, brokers);
+		lobby.listing_announced = 1;
+		lobby.logged_listing_count = counts.listing;
+		lobby.listing_logged_time = now_stamp();
+		return;
+	}
+	if (lobby.listing_announced && counts.listing != lobby.logged_listing_count &&
+		elapsed(lobby.listing_logged_time, LISTING_COUNT_LOG_INTERVAL))
+	{
+		p2p_signal_brokers_text(brokers, sizeof(brokers), 2);
+		if (counts.listing)
+			platform_log("Internet play: the listing is on %d of %d brokers now (%s)", counts.listing, counts.brokers,
+				brokers);
+		else
+			platform_log("Internet play: the listing is on none of the %d brokers now (%s); it is published again as "
+				"they come back", counts.brokers, brokers);
+		lobby.logged_listing_count = counts.listing;
+		lobby.listing_logged_time = now_stamp();
+		return;
+	}
+	if (!counts.listing && elapsed(lobby.listed_time, LISTING_ACKNOWLEDGE_TIME) &&
+		(!lobby.not_listed_logged_time || elapsed(lobby.not_listed_logged_time, NOT_LISTED_LOG_INTERVAL)) &&
+		(!lobby.listing_announced || !lobby.logged_listing_count))
+	{
+		p2p_signal_brokers_text(brokers, sizeof(brokers), 2);
+		platform_log("Internet play: the game is not listed: no broker has acknowledged its listing in %lu s (%s)",
+			(p2p_now() - lobby.listed_time) / 1000, brokers);
+		lobby.not_listed_logged_time = now_stamp();
+	}
+}
+
 /* public: as the game says, else as the settings (a co-op game's own,
 network.coop_public, private unless set); never with the server browser off
 (network.public_lobby) */
@@ -571,6 +759,7 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 	listed_name(name);
 	/* (while a password's key is worked out, the game is not listed: it
 	would be open) */
+	lobby.hosting = token != NULL;
 	want = token && lobby.details_told && hosting_public() && !lobby.password_pending && !lobby.password_failed;
 	if (lobby.listed && (!want || memcmp(token, lobby.token, P2P_TOKEN_SIZE)))
 	{
@@ -598,14 +787,22 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 	}
 	if (!lobby.listed)
 	{
+		struct p2p_signal_counts counts;
+
 		memcpy(lobby.token, token, P2P_TOKEN_SIZE);
 		lobby.listed = 1;
+		lobby.listed_time = now_stamp();
+		lobby.listing_announced = 0;
+		lobby.not_listed_logged_time = 0;
 		p2p_signal_lobby_topics(1, lobby.browsing);
 		publish();
-		platform_log("Internet play: the game is listed in everyone's public games%s",
-			lobby.has_password ? ", with a password" : "");
+		/* (listed only once a broker acknowledges it: log_listing) */
+		p2p_signal_counts(&counts);
+		platform_log("Internet play: the game is public%s: its listing is being published (%d of %d brokers ready)",
+			lobby.has_password ? ", with a password" : "", counts.lobby, counts.brokers);
 		return;
 	}
+	log_listing();
 	if ((lobby.republish_wanted && (long)(p2p_now() - lobby.republish_time) >= 0) ||
 		elapsed(lobby.published_time, REPUBLISH_INTERVAL))
 	{
@@ -718,23 +915,42 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 		if (!memcmp(own, key_hash, P2P_KEY_HASH_SIZE))
 			own_slot_heard(payload, size, retained);
 	}
-	/* (an emptied slot is no news: a wipe is not a delete) */
-	if (!lobby.browsing || size < MINIMUM_LISTING_SIZE || size > MAXIMUM_LISTING_SIZE)
+	if (!lobby.browsing)
 		return;
+	/* (an emptied slot is no news: a wipe is not a delete) */
+	if (!size)
+	{
+		lobby.counts.empty++;
+		return;
+	}
+	lobby.counts.heard++;
+	lobby.counts.retained += retained != 0;
+	if (size < MINIMUM_LISTING_SIZE || size > MAXIMUM_LISTING_SIZE)
+	{
+		lobby.counts.drops[_drop_malformed]++;
+		return;
+	}
 	/* the same listing again: heard, no work */
 	game = find_game(key_hash);
 	if (game && game->payload_size == size && !memcmp(game->payload, payload, (size_t)size))
 	{
 		game->heard_time = p2p_now();
+		lobby.counts.repeated++;
 		return;
 	}
 	for (index = 0; index < lobby.queue_count; index++)
 	{
 		if (lobby.queue[index].size == size && !memcmp(lobby.queue[index].payload, payload, (size_t)size))
+		{
+			lobby.counts.repeated++;
 			return;
+		}
 	}
 	if (lobby.queue_count == MAXIMUM_QUEUED)
+	{
+		lobby.counts.drops[_drop_queue_full]++;
 		return;
+	}
 	queued = &lobby.queue[lobby.queue_count++];
 	memcpy(queued->key_hash, key_hash, P2P_KEY_HASH_SIZE);
 	memcpy(queued->payload, payload, (size_t)size);
@@ -754,20 +970,29 @@ static void make_invite(const unsigned char *key_hash, const unsigned char *toke
 	memset(bytes, 0, sizeof(bytes));
 }
 
+static void game_line(const char *what, const struct p2p_listing *listing);
+
 /* a queued listing, its signature checked: taken or not */
 static void listing_take(const struct queued *queued, const struct listing *listing)
 {
 	struct tombstone *tombstone = find_tombstone(queued->key_hash);
 	struct game *game = find_game(queued->key_hash);
 	struct p2p_listing *shown;
-	int index;
+	int index, new_game = game == NULL;
 
-	if (tombstone && listing->sequence <= tombstone->sequence)
+	if ((tombstone && listing->sequence <= tombstone->sequence) || (game && listing->sequence <= game->sequence))
+	{
+		lobby.counts.drops[_drop_older]++;
 		return;
-	if (game && listing->sequence <= game->sequence)
-		return;
+	}
+	lobby.counts.taken++;
 	if (listing->flags & _listing_closed)
 	{
+		if (game)
+		{
+			lobby.counts.closed++;
+			game_line("game closed:", &game->listing);
+		}
 		if (!tombstone)
 		{
 			tombstone = &lobby.tombstones[lobby.next_tombstone];
@@ -795,6 +1020,7 @@ static void listing_take(const struct queued *queued, const struct listing *list
 					oldest = index;
 			}
 			index = oldest;
+			game_line("game dropped for room (64 shown):", &lobby.games[index].listing);
 		}
 		game = &lobby.games[index];
 		memset(game, 0, sizeof(*game));
@@ -845,34 +1071,136 @@ static void listing_take(const struct queued *queued, const struct listing *list
 			memcpy(shown->players[shown->listed_player_count++], name, sizeof(name));
 	}
 	shown->ping = -1;
+	if (new_game)
+		game_line("new game", shown);
 }
 
 /* checks a queued listing: 1 if it is to be taken (its signature too, with
-check), as a browser does */
-static int listing_acceptable(const struct queued *queued, struct listing *listing, int check)
+check), as a browser does; else why not in drop (a _drop_*), if not NULL */
+static int listing_check(const struct queued *queued, struct listing *listing, int check, int *drop)
 {
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
+	int reason;
 
-	if (!p2p_lobby_listing_read(queued->payload, queued->size, listing) ||
-		listing->version != HALO_PORT_NETWORK_VERSION || !signing_key_hash(listing->key, key_hash) ||
-		memcmp(key_hash, queued->key_hash, P2P_KEY_HASH_SIZE))
-	{
-		return 0;
-	}
+	if (!p2p_lobby_listing_read(queued->payload, queued->size, listing))
+		reason = _drop_malformed;
+	else if (listing->version != HALO_PORT_NETWORK_VERSION)
+		reason = _drop_version;
+	else if (!signing_key_hash(listing->key, key_hash) || memcmp(key_hash, queued->key_hash, P2P_KEY_HASH_SIZE))
+		reason = _drop_slot;
 	/* (a game whose name names nothing is not shown, as a player with such a
 	name would not be: d578f88b) */
-	if (!(listing->flags & _listing_closed) && !p2p_lobby_clean_name(listing->name))
-		return 0;
-	/* a slot's retained copy: only one of about now (a host that died left
-	it, and nothing cleared it) */
-	if (queued->retained)
+	else if (!(listing->flags & _listing_closed) && !p2p_lobby_clean_name(listing->name))
+		reason = _drop_unnamed;
+	else
 	{
-		long difference = (long)(listing->time - (unsigned long)time(NULL));
+		reason = -1;
+		/* a slot's retained copy: only one of about now (a host that died
+		left it, and nothing cleared it) */
+		if (queued->retained)
+		{
+			long difference = (long)(listing->time - (unsigned long)time(NULL));
 
-		if (difference > RETAINED_WINDOW || difference < -RETAINED_WINDOW)
-			return 0;
+			if (difference > RETAINED_WINDOW || difference < -RETAINED_WINDOW)
+			{
+				reason = _drop_stale;
+				difference = difference < 0 ? -difference : difference;
+				if (difference > lobby.counts.stale_seconds)
+					lobby.counts.stale_seconds = difference;
+			}
+		}
+		if (reason < 0 && check && !listing_signed(queued->payload, listing))
+			reason = _drop_signature;
 	}
-	return !check || listing_signed(queued->payload, listing);
+	if (drop)
+		*drop = reason;
+	return reason < 0;
+}
+
+static int listing_acceptable(const struct queued *queued, struct listing *listing, int check)
+{
+	return listing_check(queued, listing, check, NULL);
+}
+
+/* a line about a game shown or gone (GAME_LINES each GAME_LINES_INTERVAL;
+the rest counted for the summary); the key's hash only by its start, the
+invite never */
+static void game_line(const char *what, const struct p2p_listing *listing)
+{
+	char hash[2 * P2P_KEY_HASH_SIZE + 1];
+
+	if (!lobby.game_lines_time || elapsed(lobby.game_lines_time, GAME_LINES_INTERVAL))
+	{
+		lobby.game_lines_time = now_stamp();
+		lobby.game_lines = 0;
+	}
+	if (lobby.game_lines++ >= GAME_LINES)
+	{
+		lobby.counts.game_lines_dropped++;
+		return;
+	}
+	p2p_hex(listing->key_hash, P2P_KEY_HASH_SIZE, hash);
+	platform_log("Internet play: browser: %s \"%s\" (%d/%d players, %s%s%s%s) from host %.8s", what, listing->name,
+		listing->player_count, listing->maximum_player_count, listing->map, listing->gametype[0] ? ", " : "",
+		listing->gametype, listing->locked ? ", password" : "", hash);
+}
+
+/* a host of another network version heard: counted once */
+static void other_version_heard(const unsigned char *key_hash)
+{
+	int index;
+
+	for (index = 0; index < lobby.other_version_count; index++)
+	{
+		if (!memcmp(lobby.other_versions[index], key_hash, P2P_KEY_HASH_SIZE))
+			return;
+	}
+	if (lobby.other_version_count < OTHER_VERSION_HOSTS)
+		memcpy(lobby.other_versions[lobby.other_version_count++], key_hash, P2P_KEY_HASH_SIZE);
+}
+
+static int browse_status(char *text, int size);
+
+/* the browser's summary in the log: what it heard since the last, what it
+shows, and why it did not take the rest */
+static void browse_summary(const char *when)
+{
+	struct browse_counts *counts = &lobby.counts;
+	char line[640], brokers[384];
+	int length, index, shown = 0;
+
+	for (index = 0; index < MAXIMUM_GAMES; index++)
+		shown += lobby.games[index].used;
+	p2p_signal_brokers_text(brokers, sizeof(brokers), 1);
+	length = snprintf(line, sizeof(line), "Internet play: browser (%s): %d listing%s heard (%d retained, %d again), "
+		"%d game%s shown", when, counts->heard, counts->heard == 1 ? "" : "s", counts->retained, counts->repeated,
+		shown, shown == 1 ? "" : "s");
+	if (counts->empty && length < (int)sizeof(line))
+		length += snprintf(line + length, sizeof(line) - (size_t)length, ", %d emptied slot%s", counts->empty,
+			counts->empty == 1 ? "" : "s");
+	if (counts->closed && length < (int)sizeof(line))
+		length += snprintf(line + length, sizeof(line) - (size_t)length, ", %d closed", counts->closed);
+	if (counts->expired && length < (int)sizeof(line))
+		length += snprintf(line + length, sizeof(line) - (size_t)length, ", %d gone quiet", counts->expired);
+	for (index = 0; index < NUMBER_OF_DROPS && length < (int)sizeof(line); index++)
+	{
+		if (!counts->drops[index])
+			continue;
+		length += snprintf(line + length, sizeof(line) - (size_t)length, "; dropped %d %s", counts->drops[index],
+			drop_names[index]);
+		if (index == _drop_stale && length < (int)sizeof(line))
+			length += snprintf(line + length, sizeof(line) - (size_t)length, " (clocks %ld s apart)",
+				counts->stale_seconds);
+		if (index == _drop_version && length < (int)sizeof(line))
+			length += snprintf(line + length, sizeof(line) - (size_t)length, " (%d host%s)",
+				lobby.other_version_count, lobby.other_version_count == 1 ? "" : "s");
+	}
+	if (counts->game_lines_dropped && length < (int)sizeof(line))
+		length += snprintf(line + length, sizeof(line) - (size_t)length, "; %d more games came or went",
+			counts->game_lines_dropped);
+	platform_log("%s; brokers: %s", line, brokers);
+	memset(counts, 0, sizeof(*counts));
+	lobby.summary_logged_time = now_stamp();
 }
 
 static void update_browsing(void)
@@ -890,16 +1218,23 @@ static void update_browsing(void)
 	{
 		struct queued queued = lobby.queue[0];
 		struct listing listing;
-		int good;
+		int good, drop;
 
 		memmove(lobby.queue, lobby.queue + 1, sizeof(*lobby.queue) * (size_t)(--lobby.queue_count));
-		if (!listing_acceptable(&queued, &listing, 0))
+		if (!listing_check(&queued, &listing, 0, &drop))
+		{
+			lobby.counts.drops[drop]++;
+			if (drop == _drop_version)
+				other_version_heard(queued.key_hash);
 			continue;
+		}
 		/* (the work, without the lock: the game's threads need not wait) */
 		pthread_mutex_unlock(&p2p_lock);
 		good = listing_signed(queued.payload, &listing);
 		pthread_mutex_lock(&p2p_lock);
-		if (good && lobby.browsing)
+		if (!good)
+			lobby.counts.drops[_drop_signature]++;
+		else if (lobby.browsing)
 			listing_take(&queued, &listing);
 	}
 	if (lobby.queue_count && !lobby.browsing)
@@ -907,7 +1242,33 @@ static void update_browsing(void)
 	for (index = 0; index < MAXIMUM_GAMES; index++)
 	{
 		if (lobby.games[index].used && elapsed(lobby.games[index].heard_time, GAME_EXPIRY))
+		{
+			lobby.counts.expired++;
+			game_line("game gone (not heard in 90 s):", &lobby.games[index].listing);
 			lobby.games[index].used = 0;
+		}
+	}
+	if (!lobby.browsing)
+		return;
+	/* (the summary: once settled after opening or a refresh, then each
+	BROWSE_SUMMARY_INTERVAL while listings come) */
+	if ((lobby.summary_time && (long)(p2p_now() - lobby.summary_time) >= 0) || (!lobby.summary_time &&
+		lobby.summary_logged_time && elapsed(lobby.summary_logged_time, BROWSE_SUMMARY_INTERVAL) &&
+		(lobby.counts.heard || lobby.counts.empty || lobby.counts.expired)))
+	{
+		lobby.summary_time = 0;
+		browse_summary("summary");
+	}
+	/* (the player's line, as it changes) */
+	{
+		char text[96];
+		int state = browse_status(text, sizeof(text));
+
+		if (state != lobby.browse_state_logged)
+		{
+			lobby.browse_state_logged = state;
+			platform_log("Internet play: browser: \"%s\"", text);
+		}
 	}
 }
 
@@ -1241,8 +1602,33 @@ void p2p_lobby_browse(int on)
 		lobby.browsing = on;
 		if (!on)
 		{
+			int index, shown = 0;
+
+			for (index = 0; index < MAXIMUM_GAMES; index++)
+				shown += lobby.games[index].used;
+			browse_summary("closing");
+			platform_log("Internet play: stopped browsing the public games (%d shown)", shown);
 			memset(lobby.games, 0, sizeof(lobby.games));
 			lobby.queue_count = 0;
+		}
+		else
+		{
+			struct p2p_signal_counts counts;
+
+			p2p_signal_counts(&counts);
+			memset(&lobby.counts, 0, sizeof(lobby.counts));
+			lobby.other_version_count = 0;
+			lobby.browse_time = now_stamp();
+			lobby.summary_time = lobby.browse_time + BROWSE_SUMMARY_TIME;
+			lobby.summary_logged_time = 0;
+			lobby.browse_state_logged = -1;
+			if (counts.started_time)
+				platform_log("Internet play: browsing the public games (%d of %d brokers ready)", counts.lobby,
+					counts.brokers);
+			else
+				platform_log("Internet play: browsing the public games (connecting to the brokers)");
+			/* (a broker waiting after failing tries now) */
+			p2p_signal_kick();
 		}
 		lobby.query_wanted = on;
 		p2p_signal_lobby_topics(lobby.listed, on);
@@ -1254,8 +1640,116 @@ void p2p_lobby_refresh(void)
 {
 	pthread_mutex_lock(&p2p_lock);
 	if (lobby.browsing)
+	{
 		lobby.query_wanted = 1;
+		/* (its counts, once the hosts have answered) */
+		lobby.summary_time = p2p_now() + BROWSE_SUMMARY_TIME / 2;
+		if (!lobby.summary_time)
+			lobby.summary_time = 1;
+		platform_log("Internet play: browser: refreshed");
+		p2p_signal_kick();
+	}
 	pthread_mutex_unlock(&p2p_lock);
+}
+
+/* the browser's line for the player: a P2P_LOBBY_BROWSE_*; under p2p_lock */
+static int browse_status(char *text, int size)
+{
+	struct p2p_signal_counts counts;
+	int index, shown = 0;
+
+	if (!lobby.browsing)
+	{
+		snprintf(text, (size_t)size, "%s", "");
+		return P2P_LOBBY_BROWSE_OFF;
+	}
+	for (index = 0; index < MAXIMUM_GAMES; index++)
+		shown += lobby.games[index].used;
+	if (shown)
+	{
+		snprintf(text, (size_t)size, "%d public game%s", shown, shown == 1 ? "" : "s");
+		return P2P_LOBBY_BROWSE_GAMES;
+	}
+	p2p_signal_counts(&counts);
+	if (counts.browsing)
+	{
+		/* (the retained listings come at once, the others' answers to the
+		query within seconds) */
+		if (!elapsed(lobby.browse_time, BROWSE_SETTLE_TIME) || !elapsed(counts.browsing_time, BROWSE_SETTLE_TIME))
+		{
+			snprintf(text, (size_t)size, "Looking for public games...");
+			return P2P_LOBBY_BROWSE_LOOKING;
+		}
+		if (lobby.other_version_count)
+			snprintf(text, (size_t)size, "No public games for this version (%d on another)", lobby.other_version_count);
+		else
+			snprintf(text, (size_t)size, "No public games right now");
+		return P2P_LOBBY_BROWSE_EMPTY;
+	}
+	/* (none taking the subscription: still being tried, or out of reach) */
+	if (!elapsed(lobby.browse_time, BROWSE_REACH_TIME) && (!counts.started_time || counts.tried < counts.brokers ||
+		counts.lobby))
+	{
+		snprintf(text, (size_t)size, "Looking for public games...");
+		return P2P_LOBBY_BROWSE_LOOKING;
+	}
+	snprintf(text, (size_t)size, "Can't reach the online game list - check your internet connection");
+	return P2P_LOBBY_BROWSE_UNREACHABLE;
+}
+
+void p2p_lobby_reach_brokers(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	if (!lobby.reach_time)
+		lobby.reach_time = now_stamp();
+	lobby.brokers_wanted = 1;
+	p2p_signal_kick();
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+int p2p_lobby_brokers_wanted(void)
+{
+	return lobby.brokers_wanted;
+}
+
+int p2p_lobby_brokers_status(char *text, int size)
+{
+	struct p2p_signal_counts counts;
+	int state;
+
+	if (size <= 0)
+		return P2P_LOBBY_BROWSE_OFF;
+	pthread_mutex_lock(&p2p_lock);
+	p2p_signal_counts(&counts);
+	if (counts.lobby)
+	{
+		snprintf(text, (size_t)size, "%s", "");
+		state = P2P_LOBBY_BROWSE_EMPTY;
+	}
+	else if (!counts.started_time || (counts.tried < counts.brokers && !elapsed(counts.started_time, BROWSE_REACH_TIME)))
+	{
+		snprintf(text, (size_t)size, "Connecting to the online game list...");
+		state = P2P_LOBBY_BROWSE_LOOKING;
+	}
+	else
+	{
+		snprintf(text, (size_t)size, "Can't reach the online game list - check your internet connection");
+		state = P2P_LOBBY_BROWSE_UNREACHABLE;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return state;
+}
+
+int p2p_lobby_browse_status(char *text, int size)
+{
+	int state;
+
+	if (size <= 0)
+		return P2P_LOBBY_BROWSE_OFF;
+	pthread_mutex_lock(&p2p_lock);
+	state = browse_status(text, size);
+	pthread_mutex_unlock(&p2p_lock);
+	return state;
 }
 
 /* the order shown: the most players first; then those joining has not

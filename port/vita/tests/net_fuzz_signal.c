@@ -51,6 +51,8 @@ static unsigned char fuzz_host_base[P2P_SHA256_SIZE];
 
 unsigned long p2p_now(void) { return net_fuzz_clock; }
 unsigned long p2p_resolve(const char *host) { (void)host; return 0x01020304; }
+const char *p2p_resolve_error(void) { return "fuzz"; }
+void p2p_resolver_cache_allow(const char *host) { (void)host; }
 void p2p_register_url_scheme(const char *scheme, const char *description) { (void)scheme; (void)description; }
 void p2p_hex(const unsigned char *bytes, int size, char *text)
 {

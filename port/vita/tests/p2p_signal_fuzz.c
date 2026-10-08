@@ -53,6 +53,13 @@ void config_folder(char *path, size_t size) { snprintf(path, size, "./"); }
 char *config_file_read(const char *path, size_t *size) { (void)path; (void)size; return NULL; }
 void platform_log(const char *format, ...) { (void)format; }
 unsigned long p2p_resolve(const char *host) { (void)host; return 0x0100007F; }
+const char *p2p_resolve_error(void) { return "fuzz"; }
+void p2p_resolver_cache_allow(const char *host) { (void)host; }
+int posix_socket_getsockopt(int socket, int level, int name, void *value, int *length)
+{
+	(void)socket; (void)level; (void)name; (void)value; (void)length;
+	return -1;
+}
 int posix_socket(int family, int type, int protocol) { (void)family; (void)type; (void)protocol; return 3; }
 int posix_socket_close(int socket) { (void)socket; return 0; }
 int posix_socket_connect(int socket, const void *address, int length) { (void)socket; (void)address; (void)length; return 0; }

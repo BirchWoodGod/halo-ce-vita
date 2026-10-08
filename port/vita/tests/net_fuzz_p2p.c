@@ -32,6 +32,7 @@ runs the checks of net_fuzz_p2p_checks.
 
 #include "../../linux/src/p2p.c"
 #include "../../linux/src/p2p_crypto.c"
+#include "../../linux/src/p2p_resolver_cache.c"
 #include "net_fuzz_common.h"
 
 /* ---------- what p2p_signal.c, p2p_adhoc.c and p2p_discord.c give p2p.c */
@@ -54,6 +55,14 @@ void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_
 }
 int p2p_lobby_listed(void) { return 0; }
 int p2p_lobby_browsing(void) { return 0; }
+int p2p_lobby_brokers_wanted(void) { return 0; }
+int p2p_lobby_hosting_status_locked(char *text, int size)
+{
+	if (size > 0)
+		text[0] = 0;
+	return P2P_LOBBY_HOSTING_NONE;
+}
+void p2p_signal_kick(void) {}
 void p2p_lobby_quit(void) {}
 void p2p_lobby_join_timed_out(const unsigned char *host_hash) { (void)host_hash; }
 void p2p_signal_lookup_code(const char *code, const unsigned char *host) { (void)code; (void)host; }

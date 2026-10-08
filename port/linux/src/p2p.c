@@ -76,6 +76,7 @@ only look up and create stand-ins.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 enum
 {
@@ -157,6 +158,12 @@ enum
 	STUN_RETRY_INTERVAL = 500,
 	STUN_REFRESH_INTERVAL = 25000,
 	STUN_ATTEMPTS = 6,
+	/* a STUN server or relay whose name could not be looked up is looked up
+	again after this */
+	LOOKUP_RETRY_INTERVAL = 30000,
+	/* the resolver cache's file is written at most this often (and only when
+	an address changed: p2p_resolver_cache.c) */
+	RESOLVER_CACHE_WRITE_INTERVAL = 10000,
 	/* a joiner asks its router to forward the tunnel's port when it has not
 	reached a peer in this long; a forwarding is renewed this often (its
 	lease is an hour), and one refused asked for again this long after */
@@ -376,6 +383,8 @@ struct stun_server
 	unsigned long address;
 	unsigned char transaction[12];
 	int attempts;
+	/* its name's lookups that failed */
+	int lookup_failures;
 	unsigned long sent_time;
 	int has_mapped;
 	struct p2p_candidate mapped;
@@ -495,6 +504,11 @@ static struct
 	int relays_resolved;
 	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
 	int relay_count;
+	/* each name's: looked up; its lookups that failed; when they were last
+	tried */
+	int relay_host_found[P2P_MAXIMUM_RELAYS];
+	int relay_lookup_failures[P2P_MAXIMUM_RELAYS];
+	unsigned long relay_lookup_time;
 } p2p = { 0, 0, -1, 0, -1, .hosting_socket = -1 };
 
 /* the proxy (its index + 1) with each local port (all of theirs are on
@@ -526,15 +540,137 @@ static int elapsed(unsigned long since, unsigned long time)
 	return (unsigned int)(p2p_now() - since) >= (unsigned int)time;
 }
 
+/* now, as a time kept where 0 means none (never later than now, which
+elapsed would take for long past) */
+static unsigned long now_stamp(void)
+{
+	unsigned long now = p2p_now();
+
+	return now ? now : (unsigned long)-1;
+}
+
+/* the resolver cache (p2p_resolver_cache.c): read from its file once, and
+written when an address changed; the last lookup's failure, in words */
+static struct
+{
+	int loaded;
+	int dirty;
+	unsigned long written_time;
+	char error[64];
+	/* the names whose stand-in address was logged, and when */
+	char logged[P2P_RESOLVER_CACHE_ENTRIES][P2P_RESOLVER_HOST_SIZE];
+	unsigned long logged_time[P2P_RESOLVER_CACHE_ENTRIES];
+} resolver;
+
+/* the resolver cache's file (network.resolver_cache_file, beside config.toml
+unless a full path); 0 if there is none */
+static int resolver_cache_path(char *path, int size)
+{
+	const char *name = config_string("network.resolver_cache_file");
+	const char *colon = strchr(name, ':');
+
+	if (!name[0])
+		return 0;
+	if (name[0] == '/' || name[0] == '\\' || (colon && !memchr(name, '/', (size_t)(colon - name))))
+		snprintf(path, (size_t)size, "%s", name);
+	else
+	{
+		config_folder(path, (size_t)size);
+		snprintf(path + strlen(path), (size_t)size - strlen(path), "%s", name);
+	}
+	return 1;
+}
+
+static void resolver_cache_load(void)
+{
+	char path[1024];
+	char *text;
+	size_t size = 0;
+
+	if (resolver.loaded)
+		return;
+	resolver.loaded = 1;
+	if (!resolver_cache_path(path, sizeof(path)))
+		return;
+	text = config_file_read(path, &size);
+	if (!text)
+		return;
+	p2p_resolver_cache_load(text, (unsigned long)time(NULL));
+	free(text);
+}
+
+/* the file written, if an address changed (not too often); the p2p
+thread's, under p2p_lock, which the writing lets go of */
+static void resolver_cache_write(void)
+{
+	char path[1024];
+	char text[P2P_RESOLVER_CACHE_ENTRIES * (P2P_RESOLVER_HOST_SIZE + 32) + 256];
+	int length;
+
+	if (!resolver.dirty || (resolver.written_time && !elapsed(resolver.written_time, RESOLVER_CACHE_WRITE_INTERVAL)))
+		return;
+	resolver.dirty = 0;
+	resolver.written_time = now_stamp();
+	if (!resolver_cache_path(path, sizeof(path)))
+		return;
+	length = p2p_resolver_cache_save(text, sizeof(text));
+	pthread_mutex_unlock(&p2p_lock);
+	if (!config_file_write(path, text, (size_t)length))
+		platform_log("Internet play: cannot write the brokers' last good addresses to %s", path);
+	pthread_mutex_lock(&p2p_lock);
+}
+
 unsigned long p2p_resolve(const char *host)
 {
-	unsigned long address;
+	unsigned long address, cached, cached_time = 0;
+	unsigned long now = (unsigned long)time(NULL);
+	char error[sizeof(resolver.error)];
 
+	resolver_cache_load();
 	/* DNS can take seconds, which the game's threads must not wait for */
 	pthread_mutex_unlock(&p2p_lock);
 	address = posix_resolve_ipv4(host);
+	if (!address)
+		posix_resolve_error(error, sizeof(error));
 	pthread_mutex_lock(&p2p_lock);
-	return address;
+	if (address)
+	{
+		/* (a lookup that works always wins, and is kept) */
+		if (p2p_resolver_cache_store(host, address, now))
+			resolver.dirty = 1;
+		return address;
+	}
+	memcpy(resolver.error, error, sizeof(error));
+	if (p2p_resolver_cache_lookup(host, now, &cached, &cached_time))
+	{
+		const unsigned char *bytes = (const unsigned char *)&cached;
+		int index, slot = -1;
+
+		/* (said once a name each FAILURE_LOG_INTERVAL: it is tried often) */
+		for (index = 0; index < P2P_RESOLVER_CACHE_ENTRIES && slot < 0; index++)
+		{
+			if (!strcmp(resolver.logged[index], host) || !resolver.logged[index][0])
+				slot = index;
+		}
+		if (slot < 0 || !resolver.logged_time[slot] || elapsed(resolver.logged_time[slot], 300000))
+		{
+			platform_log("Internet play: cannot look up %s (%s); using its last good address %u.%u.%u.%u (from %lu "
+				"hours ago)", host, error, bytes[0], bytes[1], bytes[2], bytes[3],
+				now > cached_time ? (now - cached_time) / 3600 : 0);
+			if (slot >= 0)
+			{
+				snprintf(resolver.logged[slot], sizeof(resolver.logged[slot]), "%s", host);
+				resolver.logged_time[slot] = now_stamp();
+			}
+		}
+		return cached;
+	}
+	return 0;
+}
+
+const char *p2p_resolve_error(void)
+{
+	return resolver.error[0] ? resolver.error : "unknown";
 }
 
 void p2p_register_url_scheme(const char *scheme, const char *description)
@@ -1156,7 +1292,7 @@ int p2p_peer_turned_away(const unsigned char *peer_identifier, int is_host)
 	if (!logged_time || elapsed(logged_time, 10000))
 	{
 		platform_log("Internet play: %s; one more was turned away (it asks again)", reason);
-		logged_time = p2p_now() | 1;
+		logged_time = now_stamp();
 	}
 	return 1;
 }
@@ -1474,6 +1610,8 @@ static void stun_setup(void)
 				server->port = network_short((unsigned short)atoi(colon + 1));
 				server->host[colon - server->host] = 0;
 			}
+			/* (its address kept for when looking it up fails) */
+			p2p_resolver_cache_allow(server->host);
 			p2p.stun_count++;
 		}
 		text = *end ? end + 1 : end;
@@ -1490,14 +1628,24 @@ static void stun_update(void)
 	{
 		struct stun_server *server = &p2p.stun[index];
 
+		/* (one whose name could not be looked up: again after a while) */
+		if (!server->address && server->attempts >= STUN_ATTEMPTS && elapsed(server->sent_time,
+			LOOKUP_RETRY_INTERVAL))
+		{
+			server->attempts = 0;
+		}
 		if (!server->address && !server->attempts)
 		{
-			/* looked up once, here on the p2p thread */
+			/* looked up here on the p2p thread (its last good address if that
+			fails: p2p_resolve) */
 			server->address = p2p_resolve(server->host);
 			if (!server->address)
 			{
-				platform_log("Internet play: cannot look up the STUN server %s", server->host);
+				if (!server->lookup_failures++)
+					platform_log("Internet play: cannot look up the STUN server %s (%s); trying again every %d s",
+						server->host, p2p_resolve_error(), LOOKUP_RETRY_INTERVAL / 1000);
 				server->attempts = STUN_ATTEMPTS;
+				server->sent_time = p2p_now();
 				continue;
 			}
 		}
@@ -1712,7 +1860,10 @@ static void relay_setup(void)
 				*colon = 0;
 			}
 			if (host[0] && port > 0 && port <= 65535)
+			{
+				p2p_resolver_cache_allow(host);
 				p2p.relay_ports[p2p.relay_host_count++] = network_short((unsigned short)port);
+			}
 			else
 				platform_log("Internet play: the relay \"%.*s\" is not a host:port; left out", length, entry);
 		}
@@ -1720,26 +1871,36 @@ static void relay_setup(void)
 	}
 }
 
-/* looks the relays up, once, when STUN starts (a game hosted or joined) */
+/* looks the relays up when STUN starts (a game hosted or joined), and one
+whose name could not be looked up again each LOOKUP_RETRY_INTERVAL */
 static void relay_resolve(void)
 {
 	int index;
 
-	if (p2p.relays_resolved || !p2p.stun_started)
+	if (!p2p.stun_started || (p2p.relays_resolved && (p2p.relay_count == p2p.relay_host_count ||
+		!elapsed(p2p.relay_lookup_time, LOOKUP_RETRY_INTERVAL))))
+	{
 		return;
+	}
 	p2p.relays_resolved = 1;
-	for (index = 0; index < p2p.relay_host_count; index++)
+	p2p.relay_lookup_time = p2p_now();
+	for (index = 0; index < p2p.relay_host_count && p2p.relay_count < P2P_MAXIMUM_RELAYS; index++)
 	{
 		struct p2p_candidate *relay = &p2p.relays[p2p.relay_count];
 		char text[32];
 
+		if (p2p.relay_host_found[index])
+			continue;
 		relay->address = p2p_resolve(p2p.relay_hosts[index]);
 		relay->port = p2p.relay_ports[index];
 		if (!relay->address)
 		{
-			platform_log("Internet play: cannot look up the relay %s", p2p.relay_hosts[index]);
+			if (!p2p.relay_lookup_failures[index]++)
+				platform_log("Internet play: cannot look up the relay %s (%s); trying again every %d s",
+					p2p.relay_hosts[index], p2p_resolve_error(), LOOKUP_RETRY_INTERVAL / 1000);
 			continue;
 		}
+		p2p.relay_host_found[index] = 1;
 		platform_log("Internet play: the relay %s is at %s", p2p.relay_hosts[index],
 			address_text(relay->address, relay->port, text));
 		p2p.relay_count++;
@@ -2301,7 +2462,7 @@ int p2p_spoofed_source(unsigned long address)
 
 			platform_log("Internet play: dropped traffic to the game's port claiming to come from a peer's "
 				"address %s (spoofed)", address_text(address, 0, text));
-			logged_time = p2p_now() | 1;
+			logged_time = now_stamp();
 		}
 	}
 	return result;
@@ -3302,6 +3463,7 @@ static void update_joining(void)
 		p2p.lookup_time = p2p_now();
 		set_status("looking up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
 		p2p_signal_start();
+		p2p_signal_kick();
 		p2p_signal_lookup_code(p2p.lookup_code, p2p.lookup_has_host ? p2p.lookup_host : NULL);
 	}
 	else if (p2p.looking_up && elapsed(p2p.lookup_time, CODE_LOOKUP_TIMEOUT))
@@ -3433,6 +3595,8 @@ static void update_hosting(void)
 		p2p.hosting = 1;
 		p2p.stun_started = 1;
 		p2p_signal_start();
+		/* (a broker waiting after a failure tries now) */
+		p2p_signal_kick();
 		p2p_signal_host(p2p.token, p2p.code);
 		/* (the invite is a bearer token: anyone who reads it can join, so the
 		log shows only the host's part; the link itself goes to the
@@ -3673,6 +3837,18 @@ int p2p_status(char *text, int size)
 		snprintf(text, (size_t)size, "%s", p2p.status);
 	else
 		snprintf(text, (size_t)size, p2p_signal_connected() ? "ready" : "starting");
+	/* (hosting a public game: whether the brokers hold its listing) */
+	if (p2p.hosting && !p2p.adhoc)
+	{
+		char listing[64];
+		size_t length = strlen(text);
+
+		if (p2p_lobby_hosting_status_locked(listing, sizeof(listing)) != P2P_LOBBY_HOSTING_NONE && listing[0] &&
+			length + 3 < (size_t)size)
+		{
+			snprintf(text + length, (size_t)size - length, "; %s", listing);
+		}
+	}
 	pthread_mutex_unlock(&p2p_lock);
 	return 1;
 }
@@ -4012,7 +4188,7 @@ static void *p2p_thread(void *unused)
 		update_hosting();
 		/* the server browser (p2p_lobby.c): signalling while browsing too
 		(not in ad hoc play, which reaches no broker) */
-		if (p2p_lobby_browsing() && !p2p.adhoc)
+		if ((p2p_lobby_browsing() || p2p_lobby_brokers_wanted()) && !p2p.adhoc)
 			p2p_signal_start();
 		if (!p2p.adhoc)
 		{
@@ -4033,6 +4209,7 @@ static void *p2p_thread(void *unused)
 		update_joining();
 		update_upnp();
 		p2p_discord_update();
+		resolver_cache_write();
 #if defined(HALO_ANDROID) || defined(HALO_VITA)
 		poll_invite_file();
 #endif

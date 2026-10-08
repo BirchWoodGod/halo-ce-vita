@@ -542,20 +542,35 @@ void posix_random_bytes(void *buffer, posix_ulong size)
 	}
 }
 
+/* (posix_resolve_error's: the calling thread's last failure) */
+static __thread int resolve_failure;
+
 posix_ulong posix_resolve_ipv4(const char *host)
 {
 	struct addrinfo hints, *results;
 	posix_ulong address = 0;
+	int result;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
-	if (getaddrinfo(host, NULL, &hints, &results) != 0)
+	result = getaddrinfo(host, NULL, &hints, &results);
+	if (result != 0)
+	{
+		resolve_failure = result;
 		return 0;
+	}
 	if (results && results->ai_addr && results->ai_addr->sa_family == AF_INET)
 		address = ((struct sockaddr_in *)results->ai_addr)->sin_addr.s_addr;
 	freeaddrinfo(results);
+	resolve_failure = address ? 0 : EAI_NONAME;
 	return address;
+}
+
+void posix_resolve_error(char *text, int size)
+{
+	snprintf(text, (size_t)size, "%s", resolve_failure == EAI_NONAME ? "no such name" : resolve_failure == EAI_AGAIN ?
+		"the name server did not answer" : resolve_failure ? gai_strerror(resolve_failure) : "no address");
 }
 
 /* ---------- the process and the desktop */

@@ -118,6 +118,15 @@ char *config_file_read(const char *path, size_t *size)
 	return NULL;
 }
 
+/* (the resolver cache's file: not written here) */
+int config_file_write(const char *path, const char *text, size_t size)
+{
+	(void)path;
+	(void)text;
+	(void)size;
+	return 1;
+}
+
 __attribute__((stdcall)) unsigned long GetTickCount(void)
 {
 	struct timespec now;

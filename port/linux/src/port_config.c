@@ -234,6 +234,12 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"
 		"comma-separated host:port." },
+	{ "network.resolver_cache_file", _config_string, "\"dns_cache.txt\"", "HALO_NET_RESOLVER_CACHE",
+		_environment_value, _platform_all,
+		"Where internet play keeps the last good address of each broker, STUN\n"
+		"server and relay it looked up (only the names in these settings and\n"
+		"their files), to use while looking one up fails (beside this file\n"
+		"unless a full path); empty keeps them in memory only. Safe to delete." },
 	{ "network.adhoc", _config_boolean, "false", "HALO_NET_ADHOC", _environment_value, _platform_all,
 		"Ad hoc play: system link with the machines of this machine's ad hoc\n"
 		"group (the Vita's wireless group without a router, joined from its\n"
@@ -522,6 +528,11 @@ static int config_write_file_length(const char *path, const char *text, size_t l
 static int config_write_file(const char *path, const char *text)
 {
 	return config_write_file_length(path, text, strlen(text));
+}
+
+int config_file_write(const char *path, const char *text, size_t size)
+{
+	return config_write_file_length(path, text, size);
 }
 
 /* whether there is a file (or anything) at path */

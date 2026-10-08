@@ -1834,7 +1834,28 @@ static void status_line(char *text, int size)
 	if (!strcmp(running_network, "online"))
 	{
 		if (p2p_hosting_code(code, sizeof(code)))
-			snprintf(text, (size_t)size, "Your code: %s%s", code, choice_of("HALO_NET_HOST_PUBLIC") ? " (public)" : "");
+		{
+			/* (a public game: whether the brokers hold its listing) */
+			switch (p2p_lobby_hosting_status(detail, sizeof(detail)))
+			{
+			case P2P_LOBBY_HOSTING_LISTED:
+				snprintf(text, (size_t)size, "Your code: %s; %.30s", code, detail);
+				break;
+			case P2P_LOBBY_HOSTING_UNREACHABLE:
+				snprintf(text, (size_t)size, "Your code: %s; not listed: no game list", code);
+				break;
+			case P2P_LOBBY_HOSTING_PENDING:
+				snprintf(text, (size_t)size, "Your code: %s; getting listed...", code);
+				break;
+			case P2P_LOBBY_HOSTING_PRIVATE:
+				snprintf(text, (size_t)size, "Your code: %s (private)", code);
+				break;
+			default:
+				snprintf(text, (size_t)size, "Your code: %s%s", code, choice_of("HALO_NET_HOST_PUBLIC") ? " (public)" :
+					"");
+				break;
+			}
+		}
 		else
 		{
 			p2p_status(detail, sizeof(detail));
@@ -2303,8 +2324,21 @@ static void show_browse(void)
 		length += snprintf(text + length, sizeof(text) - length, "\nConnection must be Online (restart)");
 	else if (!browse_count)
 	{
-		p2p_status(detail, sizeof(detail));
-		length += snprintf(text + length, sizeof(text) - length, "\nLooking for games (%.24s)", detail);
+		/* (why there is none: the brokers out of reach, or no public game:
+		p2p_lobby_browse_status, in two lines of the overlay's width) */
+		char line[96];
+		int state = p2p_lobby_browse_status(line, sizeof(line));
+
+		if (state == P2P_LOBBY_BROWSE_UNREACHABLE)
+			length += snprintf(text + length, sizeof(text) - length,
+				"\nCan't reach the online game list:\ncheck your internet connection (Square: retry)");
+		else if (state == P2P_LOBBY_BROWSE_EMPTY)
+			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", line);
+		else
+		{
+			p2p_status(detail, sizeof(detail));
+			length += snprintf(text + length, sizeof(text) - length, "\nLooking for games (%.24s)", detail);
+		}
 	}
 	/* (a game a line: its name, players of most, map, [pw] for a password,
 	PC for a Halo PC map, DED for a dedicated server's) */

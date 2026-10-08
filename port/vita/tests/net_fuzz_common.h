@@ -247,6 +247,13 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 }
 posix_ulong posix_local_ipv4_address(void) { return 0x0A00000A; }
 posix_ulong posix_resolve_ipv4(const char *host) { (void)host; return 0x01020304; }
+void posix_resolve_error(char *text, int size) { snprintf(text, (size_t)size, "fuzz"); }
+int posix_socket_getsockopt(int socket, int level, int name, void *value, int *length)
+{
+	(void)socket; (void)level; (void)name; (void)value; (void)length;
+	return -1;
+}
+int config_file_write(const char *path, const char *text, size_t size) { (void)path; (void)text; (void)size; return 1; }
 int posix_command_line_argument(int index, char *buffer, posix_ulong size) { (void)index; (void)buffer; (void)size; return 0; }
 int posix_register_url_scheme(const char *scheme, const char *description) { (void)scheme; (void)description; return 0; }
 int posix_upnp_forward_udp(unsigned short port, unsigned short preferred_port, posix_ulong *external_address,

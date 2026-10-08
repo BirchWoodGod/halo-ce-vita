@@ -56,7 +56,31 @@ const char *config_string(const char *name)
 {
 	return !strcmp(name, "network.lobby_password") ? lobby_password_setting : "";
 }
-void platform_log(const char *format, ...) { (void)format; }
+/* (the log's last lines, for the diagnostics' checks) */
+static char logged[64][320];
+static int logged_count;
+void platform_log(const char *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(logged[logged_count % 64], sizeof(logged[0]), format, arguments);
+	va_end(arguments);
+	logged_count++;
+}
+
+/* whether the log's last lines (since logged_count was 0) hold text */
+static int logged_line(const char *text)
+{
+	int index;
+
+	for (index = logged_count > 64 ? logged_count - 64 : 0; index < logged_count; index++)
+	{
+		if (strstr(logged[index % 64], text))
+			return 1;
+	}
+	return 0;
+}
 
 void p2p_hex(const unsigned char *bytes, int size, char *text)
 {
@@ -98,6 +122,15 @@ void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closin
 	publish_count++;
 }
 void p2p_signal_lobby_quit(void) {}
+/* (the brokers as the checks set them) */
+static struct p2p_signal_counts signal_counts = { 3, 3, 3, 3, 3, 3, 1, 1, 1 };
+static int kicks;
+void p2p_signal_counts(struct p2p_signal_counts *counts) { *counts = signal_counts; }
+void p2p_signal_brokers_text(char *text, int size, int what)
+{
+	snprintf(text, (size_t)size, "the test's brokers (%d)", what);
+}
+void p2p_signal_kick(void) { kicks++; }
 int p2p_join_invite_locked(const char *text)
 {
 	snprintf(joined_invite, sizeof(joined_invite), "%s", text);
@@ -609,11 +642,144 @@ static void flood_checks(void)
 	check(games(NULL) == 0, "a browser that stops keeps nothing");
 }
 
+/* the diagnostics: the host's listing said to be listed only once a broker
+holds it, and its status as the brokers are; the browser's status line
+(looking, the list out of reach, no games, games), its summary's counts and
+its lines about games */
+static void status_checks(void)
+{
+	static const unsigned char token[P2P_TOKEN_SIZE] = { 5, 5, 5 };
+	unsigned char bytes[P2P_MAXIMUM_LISTING_SIZE];
+	char text[128];
+	int size, state;
+
+	wait_for_keys();
+	p2p_lobby_browse(0);
+	pthread_mutex_lock(&p2p_lock);
+	memset(&lobby, 0, sizeof(lobby));
+	pthread_mutex_unlock(&p2p_lock);
+	lobby_password_setting = "";
+	memset(&signal_counts, 0, sizeof(signal_counts));
+	signal_counts.brokers = 3;
+	signal_counts.started_time = clock_now;
+	logged_count = 0;
+	kicks = 0;
+
+	/* ---- hosting */
+	hosting_token = token;
+	p2p_lobby_set_public(1);
+	p2p_set_game_listing("Status", "wizard", "Slayer", 2, 1, 0, 0);
+	p2p_set_game_listing_details(25, -1, 0, "alpha\n");
+	lobby_update(token, 1, 16);
+	check(p2p_lobby_listed(), "a public game's listing is published");
+	check(!logged_line("listed in everyone's public games"),
+		"but it is not said to be listed before a broker acknowledges it");
+	state = p2p_lobby_hosting_status(text, sizeof(text));
+	check(state == P2P_LOBBY_HOSTING_PENDING && !strcmp(text, "Getting listed..."),
+		"its status: getting listed, while the brokers are tried");
+	clock_now += LISTING_ACKNOWLEDGE_TIME + 1000;
+	signal_counts.tried = 3;
+	lobby_update(token, 1, 16);
+	state = p2p_lobby_hosting_status(text, sizeof(text));
+	check(state == P2P_LOBBY_HOSTING_UNREACHABLE && !strcmp(text, "Not listed: can't reach the online game list"),
+		"no broker acknowledged it: not listed, the list out of reach");
+	check(logged_line("the game is not listed: no broker has acknowledged its listing"), "and the log says so");
+	signal_counts.ready = signal_counts.lobby = signal_counts.listing = 2;
+	lobby_update(token, 1, 16);
+	check(logged_line("the game is listed in everyone's public games (on 2 of 3 brokers"),
+		"listed once two brokers acknowledged it, on how many said");
+	state = p2p_lobby_hosting_status(text, sizeof(text));
+	check(state == P2P_LOBBY_HOSTING_LISTED && !strcmp(text, "Listed on 2 of 3 servers"), "its status: listed on 2 of 3");
+	clock_now += LISTING_COUNT_LOG_INTERVAL + 1000;
+	signal_counts.listing = 1;
+	lobby_update(token, 1, 16);
+	check(logged_line("the listing is on 1 of 3 brokers now"), "a broker losing it is said");
+	p2p_lobby_set_public(0);
+	lobby_update(token, 1, 16);
+	state = p2p_lobby_hosting_status(text, sizeof(text));
+	check(state == P2P_LOBBY_HOSTING_PRIVATE && !p2p_lobby_listed(), "a private game: private, not listed");
+	lobby_update(NULL, 0, 0);
+	check(p2p_lobby_hosting_status(text, sizeof(text)) == P2P_LOBBY_HOSTING_NONE && !text[0], "not hosting: nothing");
+
+	/* ---- browsing */
+	hosting_token = NULL;
+	memset(&signal_counts, 0, sizeof(signal_counts));
+	signal_counts.brokers = 3;
+	logged_count = 0;
+	p2p_lobby_browse(1);
+	check(kicks > 0, "opening the browser has a broker waiting after a failure try at once");
+	state = p2p_lobby_browse_status(text, sizeof(text));
+	check(state == P2P_LOBBY_BROWSE_LOOKING && !strcmp(text, "Looking for public games..."),
+		"looking while signalling starts");
+	signal_counts.started_time = clock_now;
+	signal_counts.tried = 3;
+	lobby_update(NULL, 0, 0);
+	state = p2p_lobby_browse_status(text, sizeof(text));
+	check(state == P2P_LOBBY_BROWSE_UNREACHABLE &&
+		!strcmp(text, "Can't reach the online game list - check your internet connection"),
+		"every broker failed: the list is out of reach");
+	check(logged_line("browser: \"Can't reach the online game list - check your internet connection\""),
+		"and the log says so");
+	check(p2p_lobby_brokers_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_UNREACHABLE &&
+		strstr(text, "Can't reach the online game list"), "Server Setup's line says so too");
+	signal_counts.ready = signal_counts.lobby = signal_counts.browsing = 1;
+	signal_counts.browsing_time = clock_now;
+	check(p2p_lobby_browse_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_LOOKING, "a broker took the subscription: "
+		"looking while the hosts answer");
+	check(p2p_lobby_brokers_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_EMPTY && !text[0],
+		"the list reached: Server Setup says nothing");
+	clock_now += BROWSE_SETTLE_TIME + 1000;
+	state = p2p_lobby_browse_status(text, sizeof(text));
+	check(state == P2P_LOBBY_BROWSE_EMPTY && !strcmp(text, "No public games right now"), "reached, no games");
+	/* a listing of another network version: not shown, counted, said */
+	pthread_mutex_lock(&p2p_lock);
+	size = listing_make(bytes, 0);
+	pthread_mutex_unlock(&p2p_lock);
+	bytes[3] = (unsigned char)((HALO_PORT_NETWORK_VERSION - 1) >> 8);
+	bytes[4] = (unsigned char)(HALO_PORT_NETWORK_VERSION - 1);
+	hear(bytes, resign(bytes, size, SIGNATURE_LABEL), 0, NULL);
+	state = p2p_lobby_browse_status(text, sizeof(text));
+	check(state == P2P_LOBBY_BROWSE_EMPTY && !strcmp(text, "No public games for this version (1 on another)"),
+		"a game of another version: said, not shown");
+	/* the summary, once due: the counts and why */
+	clock_now += BROWSE_SUMMARY_TIME;
+	lobby_update(NULL, 0, 0);
+	check(logged_line("browser (summary): 1 listing heard (0 retained, 0 again), 0 games shown") &&
+		logged_line("dropped 1 of another version (1 host)"), "the summary counts the listing and why it was dropped");
+	/* a game of this version: shown, its line logged (the key's hash only by
+	its start) */
+	pthread_mutex_lock(&p2p_lock);
+	size = listing_make(bytes, 0);
+	pthread_mutex_unlock(&p2p_lock);
+	hear(bytes, size, 1, NULL);
+	state = p2p_lobby_browse_status(text, sizeof(text));
+	check(state == P2P_LOBBY_BROWSE_GAMES && !strcmp(text, "1 public game"), "a game: one public game");
+	check(logged_line("browser: new game \"Status\" (1/16 players, wizard, Slayer) from host "),
+		"the game's line names it, its players, map and gametype");
+	{
+		unsigned char hash[P2P_KEY_HASH_SIZE];
+		char hex[2 * P2P_KEY_HASH_SIZE + 1];
+
+		p2p_key_hash(x25519_public, hash);
+		p2p_hex(hash, P2P_KEY_HASH_SIZE, hex);
+		check(!logged_line(hex), "and never the key's whole hash");
+	}
+	/* the hosts asked again on a refresh: its counts once they answer */
+	kicks = 0;
+	p2p_lobby_refresh();
+	check(kicks > 0 && logged_line("browser: refreshed"), "a refresh is said, and tries the brokers at once");
+	p2p_lobby_browse(0);
+	check(logged_line("browser (closing): 1 listing heard (1 retained, 0 again), 1 game shown") &&
+		logged_line("stopped browsing the public games (1 shown)"), "closing: its counts");
+	check(p2p_lobby_browse_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_OFF && !text[0], "closed: nothing");
+}
+
 #ifndef P2P_LOBBY_FUZZ
 int main(void)
 {
 	crypto_checks();
 	lobby_checks();
+	status_checks();
 	flood_checks();
 	printf("%s (%d of %d checks failed)\n", failures ? "FAIL" : "PASS", failures, checks);
 	return failures != 0;
