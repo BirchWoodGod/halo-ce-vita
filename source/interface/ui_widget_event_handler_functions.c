@@ -1630,7 +1630,13 @@ boolean widget_event_function_list_widget_goto_previous_item(
 
 extern short player_spawn_count;
 static wchar_t new_campaign_profile_name[12] = { 0 };
+#ifdef HALO_LINUX
+/* port: the campaign's ten levels, then the Custom Edition campaign maps
+(solo_level_list_custom_campaigns_add) */
+byte single_player_level_data[CUSTOM_EDITION_MAPS_CAMPAIGN_LIST_ENTRIES * sizeof(struct single_player_level_entry)] = { 0 };
+#else
 byte single_player_level_data[0x50] = { 0 };
+#endif
 struct persistent_game_difficulty
 {
 	short value;
@@ -4351,6 +4357,32 @@ static boolean player_profile_initialize_controller_settings(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port: puts the Custom Edition campaign maps in the campaign's level list
+after its ten levels (custom_edition_maps.c, looked for anew as the list
+opens; OpenCE's CUSTOM SINGLEPLAYER, ce41b41d), each available on any
+profile and with no marks of progress; returns the list's length */
+static short solo_level_list_custom_campaigns_add(
+	void)
+{
+	struct single_player_level_entry *entries = (struct single_player_level_entry *)single_player_level_data;
+	short count = custom_edition_maps_campaigns_find();
+	short index;
+
+	count = (short)MIN(count, CUSTOM_EDITION_MAPS_CAMPAIGN_LIST_ENTRIES - 10);
+	for (index = 0; index < count; index++)
+	{
+		struct single_player_level_entry *entry = &entries[10 + index];
+
+		csmemset(entry, 0, sizeof(*entry));
+		entry->map_name = (char *)custom_edition_maps_campaign_level_name(index);
+		entry->available = entry->map_name != NULL;
+	}
+
+	return (short)(10 + count);
+}
+
+#endif
 static boolean solo_level_initialize_list_coop(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -4362,7 +4394,7 @@ static boolean solo_level_initialize_list_coop(
 	short highest_difficulties[2];
 	struct ui_widget_definition *definition;
 
-	memset(single_player_level_data, 0, 0x50);
+	memset(single_player_level_data, 0, sizeof(single_player_level_data));
 	{
 		player_ui_get_active_player_profile(0, &profile0);
 		player_profile_get_highest_completed_solo_level(&profile0, &highest_levels[0], &highest_difficulties[0]);
@@ -4392,7 +4424,11 @@ static boolean solo_level_initialize_list_coop(
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 689, definition->type == 2, "expected a spinner list widget for 'solo level list' widget");
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 690, definition->child_count == 3, "expected 3 list items for 'solo level list' widget");
 	widget->generated_list = single_player_level_data;
+#ifdef HALO_LINUX
+	widget->generated_count = solo_level_list_custom_campaigns_add();
+#else
 	widget->generated_count = 10;
+#endif
 	widget->data3C.selected_index = PIN(player_ui_get_last_single_player_level_played(0), 0, 9);
 	return TRUE;
 }
@@ -4494,6 +4530,28 @@ static boolean solo_level_set_next_map_name(
 
 	list_widget = widget;
 	result = FALSE;
+#ifdef HALO_LINUX
+	/* port: a Custom Edition campaign map after the campaign's levels, never
+	locked: played as they are, at the difficulty chosen next (alone, or Y
+	there hosts it as network co-op) */
+	if (list_widget->data3C.selected_index >= 10)
+	{
+		char const *map_name = list_widget->data3C.selected_index < list_widget->generated_count ?
+			custom_edition_maps_campaign_level_name((short)(list_widget->data3C.selected_index - 10)) : NULL;
+
+		if (!map_name)
+		{
+			error(2, "this level is unavailable to you!");
+			ui_play_audio_feedback_sound(4);
+			return FALSE;
+		}
+		if (player_spawn_count == 1)
+			player_ui_remember_player1_profile(0);
+		main_set_map_name(map_name);
+		main_defer_map_map_change();
+		return TRUE;
+	}
+#endif
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 724, list_widget->data3C.selected_index >= 0 && list_widget->data3C.selected_index < 10, "I don't think this is the solo level list widget");
 	switch (player_spawn_count)
 	{
@@ -6089,7 +6147,11 @@ static boolean solo_level_initialize_list_single_player(
 		definition->child_count == 3,
 		"expected 3 list items for 'solo level list' widget");
 	widget->generated_list = single_player_level_data;
+#ifdef HALO_LINUX
+	widget->generated_count = solo_level_list_custom_campaigns_add();
+#else
 	widget->generated_count = 10;
+#endif
 	widget->data3C.selected_index = PIN(player_ui_get_last_single_player_level_played(0), 0, 9);
 
 	if (persistant_game_data_info.valid == TRUE)
@@ -6136,9 +6198,10 @@ static boolean solo_level_initialize_list_single_player(
 }
 
 /* port: sets up the server for co-op (the Vita's co-op choice: multiplayer_level_select):
-the campaign level, the difficulty, and a gametype with no game engine,
-which is what makes a network game co-op (game.c, players.c). Returns FALSE
-without a server or a campaign level. */
+the campaign level (or a Custom Edition campaign map's: custom_edition_maps.c),
+the difficulty, and a gametype with no game engine, which is what makes a
+network game co-op (game.c, players.c). Returns FALSE without a server or a
+campaign level. */
 boolean ui_widget_port_cooperative_level_choose(
 	char const *map_name,
 	short difficulty)
@@ -6148,7 +6211,7 @@ boolean ui_widget_port_cooperative_level_choose(
 	its game engine, none) */
 	struct game_variant_data variant;
 
-	if (!server || !map_name || main_get_solo_level_from_name(map_name) == NONE)
+	if (!server || !map_name || !custom_edition_maps_campaign_level(map_name))
 		return FALSE;
 	csmemset(&variant, 0, sizeof(variant));
 	ustrncpy((wchar_t *)variant.data, L"Co-op", 11);
@@ -6180,7 +6243,7 @@ boolean ui_widget_port_cooperative_campaign_host(
 
 	csstrncpy(map_name, main_get_map_name(), sizeof(map_name) - 1);
 	map_name[sizeof(map_name) - 1] = 0;
-	if (difficulty < 0 || difficulty > 3 || main_get_solo_level_from_name(map_name) == NONE)
+	if (difficulty < 0 || difficulty > 3 || !custom_edition_maps_campaign_level(map_name))
 		return FALSE;
 	if (!transport_network_available())
 	{

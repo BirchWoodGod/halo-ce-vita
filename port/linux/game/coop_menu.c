@@ -34,6 +34,7 @@ names of the maps' own string lists.
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "halo_port_limits.h"
+#include "custom_edition_maps.h"
 
 #include "coop_menu.h"
 
@@ -92,7 +93,22 @@ void coop_menu_level_name(
 		return;
 	text[0] = 0;
 	if (level_index != NONE)
+	{
 		coop_menu_string(coop_menu_level_names_tag, level_index, text, count);
+	}
+	/* (a Custom Edition campaign map's name, as the level list shows it;
+	its file's name on a machine without it: custom_edition_maps.c) */
+	else if (map_name && custom_edition_maps_campaign_level(map_name))
+	{
+		short display_index = custom_edition_maps_display_index(map_name);
+		wchar_t const *name = display_index != NONE ? custom_edition_maps_name(display_index) : NULL;
+		char const *file_name = tag_name_strip_path(map_name);
+		int length;
+
+		for (length = 0; length < count - 1 && (name ? name[length] : file_name[length]); length++)
+			text[length] = name ? name[length] : (wchar_t)(unsigned char)file_name[length];
+		text[length] = 0;
+	}
 }
 
 void coop_menu_difficulty_name(
@@ -169,7 +185,7 @@ void coop_menu_fit_line(
 boolean coop_menu_game_is_cooperative(
 	struct network_game const *game)
 {
-	return game && game->variant.game_engine_index == 0 && main_get_solo_level_from_name(game->map.name) != NONE;
+	return game && game->variant.game_engine_index == 0 && custom_edition_maps_campaign_level(game->map.name);
 }
 
 boolean coop_menu_available(

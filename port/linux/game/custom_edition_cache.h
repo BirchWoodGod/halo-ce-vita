@@ -14,6 +14,20 @@ cache_file_formats.c.
 #ifndef __CUSTOM_EDITION_CACHE_H
 #define __CUSTOM_EDITION_CACHE_H
 
+/* ---------- constants */
+
+/* A Custom Edition campaign map's level name (one of a solo scenario,
+played alone or as network co-op) is this and its file's name:
+custom_maps\firefight-airlock for firefight-airlock.map in the maps folder,
+which the cache file loader finds by the last part, as it finds every map.
+None of the game's own levels is named so, so nothing takes such a map for
+one of the campaign's (saved games, the profile's progress, the next level:
+main_get_solo_level_from_name). From OpenCE's custom_edition_cache.h (CC0,
+ce41b41d), whose maps all have such names; here only the campaign maps, the
+multiplayer ones keeping levels\test\<name>\<name> (custom_edition_maps.c),
+which 1.0.3's players know. */
+#define CUSTOM_EDITION_LEVEL_NAME_PREFIX "custom_maps\\"
+
 /* ---------- structures */
 
 struct cache_file_tag_header;
@@ -48,6 +62,16 @@ boolean custom_edition_cache_playable(
 custom_edition_maps.c). */
 boolean custom_edition_cache_multiplayer(
 	char const *map_name);
+/* The same, for a Custom Edition map of a solo scenario: a campaign map,
+played alone or as network co-op (the campaign's level list,
+custom_edition_maps.c). */
+boolean custom_edition_cache_campaign(
+	char const *map_name);
+/* Whether `level_name` is a Custom Edition campaign map's
+(CUSTOM_EDITION_LEVEL_NAME_PREFIX and a file name map sharing would take,
+map_share_name_valid): no file is looked at. */
+boolean custom_edition_level_name(
+	char const *level_name);
 /* TRUE when the map `map_name` names is a Custom Edition cache, whether or
 not Custom Edition maps may run (the multiplayer join check: a joiner with
 PC maps off cannot load one, network_client_manager.c). */

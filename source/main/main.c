@@ -396,6 +396,7 @@ void platform_log(const char *format, ...);
 #include "hs/hs.h"
 #ifdef HALO_LINUX
 #include "load_profile.h"
+#include "custom_edition_cache.h" /* port: custom_edition_level_name */
 #endif
 #include "render/render.h"
 #include "text/draw_string.h"
@@ -1323,6 +1324,13 @@ short main_get_solo_level_from_name(
 	char lower_name[128] = { 0 };
 	short level;
 
+#ifdef HALO_LINUX
+	/* port: a Custom Edition campaign map (custom_maps\firefight-airlock)
+	is never one of the campaign's levels, whatever its name holds: not its
+	saved game, its progress or its next level (custom_edition_cache.h) */
+	if (custom_edition_level_name(name))
+		return NONE;
+#endif
 	csstrncpy(lower_name, name, NUMBEROF(lower_name) - 1);
 	lower_name[NUMBEROF(lower_name) - 1] = 0;
 	strlwr(lower_name);
@@ -2457,7 +2465,19 @@ static void main_won_map_private(
 	}
 	main_globals.want_to_be_at_main_menu = TRUE;
 	main_globals.won_map = FALSE;
-	level = main_get_solo_level_from_name(main_globals.soloplayer_map_name) + 1;
+	level = main_get_solo_level_from_name(main_globals.soloplayer_map_name);
+#ifdef HALO_LINUX
+	/* port: a level not in the campaign (a Custom Edition campaign map's)
+	is no profile's progress and has no next level: won, it goes back to the
+	main menu, where NONE + 1 would have gone on to The Pillar of Autumn
+	(OpenCE's main.c, ce41b41d, rolls the credits instead) */
+	if (level == NONE)
+	{
+		error(_error_silent, "won '%s', not a campaign level: back to the main menu", main_globals.soloplayer_map_name);
+		return;
+	}
+#endif
+	level = level + 1;
 	if (level >= 10)
 		level = NONE;
 	for (local_player_index = 0; local_player_index < player_spawn_count; local_player_index++)

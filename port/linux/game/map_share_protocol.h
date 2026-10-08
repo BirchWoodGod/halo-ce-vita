@@ -419,6 +419,16 @@ enum map_share_header_status map_share_header_validate(
 	uint32_t file_size,
 	char const *expected_name,
 	int *custom_edition);
+/* The same for the level a game plays: with `campaign` (a network co-op
+game's Custom Edition campaign map, custom_maps\<name>:
+custom_edition_cache.h) a Custom Edition cache of a solo scenario passes
+too, where an Xbox cache must still be a multiplayer map. */
+enum map_share_header_status map_share_header_validate_level(
+	uint8_t const *header,
+	uint32_t file_size,
+	char const *expected_name,
+	int campaign,
+	int *custom_edition);
 
 char const *map_share_header_status_describe(
 	enum map_share_header_status status);

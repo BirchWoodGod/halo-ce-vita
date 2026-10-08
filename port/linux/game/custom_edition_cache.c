@@ -1050,6 +1050,28 @@ boolean custom_edition_cache_multiplayer(
 		identity.scenario_type == _scenario_type_multiplayer;
 }
 
+boolean custom_edition_cache_campaign(
+	char const *map_name)
+{
+	struct cache_file_identity identity;
+
+	return custom_edition_cache_identify(map_name, &identity) &&
+		identity.format == _cache_file_format_custom_edition_cache &&
+		identity.scenario_type == _scenario_type_solo;
+}
+
+boolean custom_edition_level_name(
+	char const *level_name)
+{
+	long prefix_length = (long)strlen(CUSTOM_EDITION_LEVEL_NAME_PREFIX);
+
+	/* (the file name after it as map sharing takes one, map_share_name_valid:
+	no path, no folder above, nothing a file system takes for something else) */
+	return level_name &&
+		!_strnicmp(level_name, CUSTOM_EDITION_LEVEL_NAME_PREFIX, (size_t)prefix_length) &&
+		map_share_name_valid(level_name + prefix_length);
+}
+
 struct cache_file_tag_header *custom_edition_cache_tags_load(
 	char const *map_name,
 	void *header)

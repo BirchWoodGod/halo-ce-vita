@@ -59,7 +59,12 @@
 #   solo     online off (the Vita's default): one copy hosts Blood Gulch
 #            alone; there must be no p2p thread, and the game must run
 #   coop     co-op over the network: the host hosts a campaign level
-#            (HALO_TEST_COOP_LEVEL, a10 by default) as the Vita's settings
+#            (HALO_TEST_COOP_LEVEL, a10 by default; or a Custom Edition
+#            campaign map's level name, 'custom_maps\<name>', its map in
+#            HALO_TEST_DATA's maps folder with the Custom Edition resource
+#            maps, HALO_TEST_ENV=HALO_CUSTOM_EDITION=1, a joiner without it
+#            in HALO_TEST_DATA_JOINER downloading it with
+#            HALO_TEST_JOIN_ENV=HALO_MAP_SHARE_ANSWER=yes) as the Vita's settings
 #            panel does (HALO_NET_COOP_LEVEL), the joiner joins its code
 #            (online; HALO_TEST_COOP_LAN=1: system link on one LAN, online
 #            off); each copy runs its HALO_TEST_COOP_HOST_COMMANDS /
@@ -567,7 +572,9 @@ adhoc)
 	;;
 coop)
 	level=${HALO_TEST_COOP_LEVEL:-a10}
-	coop_host="HALO_NET_COOP_LEVEL=$level HALO_NETWORK_TEST=host:$level HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look"
+	# (the network test's game is first on the level's map by its file name,
+	# which the co-op setting then makes co-op)
+	coop_host="HALO_NET_COOP_LEVEL=$level HALO_NETWORK_TEST=host:${level##*\\} HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look"
 	if [ "${HALO_TEST_COOP_LAN:-0}" = 1 ]; then
 		holder; lan=$held
 		in_ns "$host_router" ip link add l2_host type veth peer name m2_host

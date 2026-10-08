@@ -1357,7 +1357,8 @@ static boolean map_share_client_check_file(
 		snprintf(why, (size_t)why_size, "The downloaded map %s couldn't be read back.", download->name);
 		return FALSE;
 	}
-	status = map_share_header_validate(header, download->size, download->name, &custom_edition);
+	status = map_share_header_validate_level(header, download->size, download->name,
+		custom_edition_level_name(download->level_name), &custom_edition);
 	if (status != _map_share_header_ok)
 	{
 		snprintf(why, (size_t)why_size, "The host's map %s isn't a map this game can play (%s).",
@@ -2503,7 +2504,8 @@ void map_share_client_handle_data(
 	{
 		int custom_edition;
 		enum map_share_header_status header_status =
-			map_share_header_validate(download->receiver.header, download->size, download->name, &custom_edition);
+			map_share_header_validate_level(download->receiver.header, download->size, download->name,
+				custom_edition_level_name(download->level_name), &custom_edition);
 
 		download->receiver.header_checked = TRUE;
 		if (header_status == _map_share_header_ok &&

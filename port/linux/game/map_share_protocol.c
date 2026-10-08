@@ -29,6 +29,7 @@ The rules of map sharing that need nothing of the game
 #define HEADER_FOOTER_OFFSET 0x7FC
 #define VERSION_XBOX 5
 #define VERSION_CUSTOM_EDITION 609
+#define SCENARIO_TYPE_SOLO 0
 #define SCENARIO_TYPE_MULTIPLAYER 1
 /* the cache partition's room for a multiplayer map, which an Xbox map's
 decompressed length must stay below (custom_edition_cache.c,
@@ -595,10 +596,21 @@ enum map_share_header_status map_share_header_validate(
 	char const *expected_name,
 	int *custom_edition)
 {
+	return map_share_header_validate_level(header, file_size, expected_name, 0, custom_edition);
+}
+
+enum map_share_header_status map_share_header_validate_level(
+	uint8_t const *header,
+	uint32_t file_size,
+	char const *expected_name,
+	int campaign,
+	int *custom_edition)
+{
 	int32_t version;
 	uint32_t file_length;
 	uint32_t tag_data_offset;
 	uint32_t tag_data_size;
+	int scenario_type;
 
 	*custom_edition = 0;
 	if (file_size < MAP_SHARE_HEADER_BYTES || file_size > MAP_SHARE_MAXIMUM_FILE_BYTES)
@@ -626,7 +638,12 @@ enum map_share_header_status map_share_header_validate(
 	{
 		return _map_share_header_wrong_name;
 	}
-	if ((header[HEADER_SCENARIO_TYPE_OFFSET] | header[HEADER_SCENARIO_TYPE_OFFSET + 1] << 8) != SCENARIO_TYPE_MULTIPLAYER)
+	/* (a network co-op game's Custom Edition campaign map: a solo scenario;
+	never an Xbox one, which only the cache partition's multiplayer maps
+	are) */
+	scenario_type = header[HEADER_SCENARIO_TYPE_OFFSET] | header[HEADER_SCENARIO_TYPE_OFFSET + 1] << 8;
+	if (scenario_type != SCENARIO_TYPE_MULTIPLAYER &&
+		!(campaign && *custom_edition && scenario_type == SCENARIO_TYPE_SOLO))
 	{
 		return _map_share_header_not_multiplayer;
 	}
