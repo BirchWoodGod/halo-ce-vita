@@ -16,7 +16,9 @@ SHA-256 before anything is taken out of it: gyan.dev's "essentials" build
 (GPL v3; its LICENSE and README.txt, which says where its source is, go into
 the program next to it). Only bin/ffmpeg.exe, LICENSE and README.txt are
 taken out, under fixed names. Nothing downloaded is committed: build/ and
-dist/ are ignored.
+dist/ are ignored. The window's theme (sv-ttk, darkdetect: requirements.txt,
+pulled in by requirements-build.txt) goes into the program too, and its icon,
+drawn by the tool into build/ (halo_ce_vita_installer.spec).
 """
 
 import argparse
