@@ -994,7 +994,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps|Latency meter") && menu_fits(),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Bots|Modded maps|Latency meter") && menu_fits(),
 		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
 	clock_us += 5000000;
 	to_line("Ad hoc room");
@@ -1108,7 +1108,7 @@ static void test_variables_kept(void)
 		"HALO_BUTTON_ICONS", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
-		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER",
+		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 	};
 	int index, all = 1, choices = 0;
 
