@@ -1107,6 +1107,58 @@ void object_types_disconnect_from_structure_bsp(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: whether every object the scenario places names an entry of its
+type's palette (or none): the palette index is a map's, and is read without
+a check wherever objects are placed (object_types_place_objects,
+objects_place_object...). A map whose index points past its palette - a
+crafted one: the fuzzer's - is refused as it loads (scenario.c), rather than
+each read being checked, which would cost every placement. */
+boolean object_types_scenario_palettes_valid(
+	struct scenario *scenario)
+{
+	short object_type;
+
+	for (object_type = 0; object_type < NUMBER_OF_OBJECT_TYPES; object_type++)
+	{
+		struct object_type_definition *definition = object_type_definition_get(object_type);
+
+		if (definition->placement_tag_block_offset!=NONE &&
+			definition->palette_tag_block_offset!=NONE)
+		{
+			long element_size;
+			struct tag_block *scenario_datums = scenario_get_object_type_scenario_datums(
+				scenario,
+				object_type,
+				&element_size);
+			struct tag_block *scenario_palette = scenario_get_object_type_scenario_palette(
+				scenario,
+				object_type);
+			long scenario_datum_index;
+
+			if (scenario_datums->count > 0 && (!scenario_datums->address || element_size < (long)sizeof(struct scenario_object_datum)))
+			{
+				return FALSE;
+			}
+			for (scenario_datum_index = 0; scenario_datum_index < scenario_datums->count; scenario_datum_index++)
+			{
+				struct scenario_object_datum const *scenario_object = (struct scenario_object_datum const *)
+					((byte const *)scenario_datums->address + scenario_datum_index * element_size);
+
+				if (scenario_object->palette_entry_index != NONE &&
+					(scenario_object->palette_entry_index < 0 ||
+					scenario_object->palette_entry_index >= scenario_palette->count))
+				{
+					return FALSE;
+				}
+			}
+		}
+	}
+
+	return TRUE;
+}
+#endif
+
 void object_types_place_objects(
 	boolean reconnecting)
 {

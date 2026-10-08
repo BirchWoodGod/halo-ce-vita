@@ -132,15 +132,14 @@ void tag_index_error(char const *what, long index, long count);
 #if defined(HALO_RELEASE) && defined(HALO_LINUX)
 /* (port) release builds check nothing in tag_block_get_element_with_size
 (match_assert is empty): the element's address, inline - a call per
-element was ~2% of the Pi's CPU in BSP and collision walks. An index past
-the block (a map's: untrusted) gets the empty data, as the function's does */
+element was ~2% of the Pi's CPU in BSP and collision walks. Unchecked here
+too (a check per element cost 4% of the tick on the Pi): a map's blocks are
+checked once as it loads (tag_relocate.c: every block's elements within the
+tags, every tag reference a tag of its group), and the element indices a
+crafted map was found to use past their blocks are checked where they are
+read (object_types.c) */
 static __inline__ void *tag_block_get_element_inline(struct tag_block const *block, long index, long element_size)
 {
-	if (__builtin_expect((unsigned long)index >= (unsigned long)block->count || !block->address, 0))
-	{
-		tag_index_error("block element", index, block->count);
-		return tag_empty_data_sized(element_size);
-	}
 	return (void *)((char *)block->address + index * element_size);
 }
 #undef TAG_BLOCK_GET_ELEMENT
