@@ -2205,6 +2205,32 @@ def _windows_dpi_awareness() -> None:
         pass
 
 
+
+def _set_palette(root, **colours):
+    """Tk's tk_setPalette, or the same colours through the option database
+    when Tk can't load the script that defines it (palette.tcl: seen on
+    Windows runners, where its auto-load fails with "invalid command name
+    tk_setPalette"); the window then looks the same for the widgets made
+    after it, and the root's own colour is set directly."""
+    import tkinter as tk
+    try:
+        root.tk_setPalette(**colours)
+        return True
+    except tk.TclError:
+        pass
+    names = {"background": "background", "foreground": "foreground",
+             "selectBackground": "selectBackground", "selectForeground": "selectForeground",
+             "activeBackground": "activeBackground", "highlightColor": "highlightColor"}
+    for key, value in colours.items():
+        root.option_add("*" + names.get(key, key), value)
+    if "background" in colours:
+        root.option_add("*activeBackground", colours.get("activeBackground", colours["background"]))
+        try:
+            root.configure(background=colours["background"])
+        except tk.TclError:
+            pass
+    return False
+
 def _windows_title_bar(root, dark: bool) -> None:
     """Windows 10/11's dark title bar to go with the dark theme."""
     if sys.platform != "win32":
@@ -2690,9 +2716,9 @@ class InstallerWindow:
             names = style.theme_names()
             style.theme_use("alt" if "alt" in names else "classic")
             palette = _palette("classic")
-            self.root.tk_setPalette(background=palette["bg"], foreground=palette["fg"],
-                                    selectBackground=palette["accent"], selectForeground=palette["on_accent"],
-                                    activeBackground=palette["bg"], highlightColor=palette["fg"])
+            _set_palette(self.root, background=palette["bg"], foreground=palette["fg"],
+                         selectBackground=palette["accent"], selectForeground=palette["on_accent"],
+                         activeBackground=palette["bg"], highlightColor=palette["fg"])
             style.configure(".", background=palette["bg"], foreground=palette["fg"], font="TkDefaultFont",
                             troughcolor=palette["bg"], selectbackground=palette["accent"],
                             selectforeground=palette["on_accent"], fieldbackground="#ffffff")
