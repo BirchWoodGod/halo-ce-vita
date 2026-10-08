@@ -129,6 +129,15 @@ void vita_adhoc_leave(void);
 /* 0 not in a group, 1 joining (the dialog is up: the game should see no
 buttons), 2 in a group, -1 the last attempt failed; a line saying so */
 int vita_adhoc_state(char *text, int size);
+/* the system's keyboard (vita_ime.c), for a line of text the settings
+panel asks for (the Play page's lobby name and password): opens it over the
+game with this title and text (ASCII, at most maximum_length characters;
+password: the characters hidden). 0 if it opened */
+int vita_ime_open(const char *title, const char *text, int maximum_length, int password);
+/* while it is open, 0; once closed, 1 with the text typed in text (its
+printable ASCII characters; others are left out), or -1 if it was
+cancelled or failed. The game should see no buttons while it is open */
+int vita_ime_poll(char *text, int size);
 /* (debug) HALO_ADHOC_PROBE=1: logs what the Vita's ad hoc libraries do
 (vita_net.c) */
 void vita_net_adhoc_probe(void);

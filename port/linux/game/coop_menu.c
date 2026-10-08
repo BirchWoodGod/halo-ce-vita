@@ -273,6 +273,10 @@ void coop_menu_render(
 #else
 		usnprintf(line, NUMBEROF(line), L"This machine: %ls", machine_name);
 #endif
+		/* (the name the partner's list shows, when it is not the machine's:
+		the settings' lobby name, network_server_manager.c) */
+		if (game->name[0] && ustrcmp(game->name, machine_name))
+			usnprintf(line, NUMBEROF(line), L"Listed as: %ls", game->name);
 		line[NUMBEROF(line) - 1] = 0;
 		coop_menu_draw(coop_menu_text_style, x, y, width, line);
 		y += 24;

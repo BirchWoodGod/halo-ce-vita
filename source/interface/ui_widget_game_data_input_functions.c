@@ -1250,7 +1250,12 @@ static void server_list_menu_update(
 
 				number_of_players_text->parameters.text_box.text = ui_widget_realloc(
 					number_of_players_text->parameters.text_box.text,
+#ifdef HALO_LINUX
+					/* (port: "128/128", below) */
+					8 * sizeof(wchar_t),
+#else
 					8,
+#endif
 					"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
 					0x364);
 				if (number_of_players_text->parameters.text_box.text)
@@ -1263,6 +1268,20 @@ static void server_list_menu_update(
 						L"%d",
 						server->player_count);
 					number_of_players_text->parameters.text_box.text[3] = 0;
+#ifdef HALO_LINUX
+					/* port: and the most its host allows, "3/16" (eight
+					characters: room for "128/128") */
+					if (server->maximum_player_count > 0)
+					{
+						usnprintf(
+							number_of_players_text->parameters.text_box.text,
+							8,
+							L"%d/%d",
+							server->player_count,
+							server->maximum_player_count);
+						number_of_players_text->parameters.text_box.text[7] = 0;
+					}
+#endif
 				}
 
 				score_limit_text->parameters.text_box.text = ui_widget_realloc(
@@ -1379,6 +1398,39 @@ static void server_list_menu_update(
 		}
 	}
 	return;
+}
+
+/* port: the lobby screen's X and A keys (delay and start the game) shown
+or not: the co-op host's waiting screen hides them while it is alone */
+static void network_pregame_button_key_update(
+	struct widget_instance *screen,
+	boolean shown)
+{
+	static char const *const hidden[] = { "\\x_butn", "\\=delay_game", "\\a_butn", "\\=start_game" };
+	struct widget_instance *child;
+
+	for (child = screen ? screen->child : NULL; child; child = child->next)
+	{
+		char const *name = tag_get_name(child->definition_tag_index);
+		struct widget_instance *key;
+
+		if (!name || !strstr(name, "\\mp_button_key"))
+			continue;
+		for (key = child->child; key; key = key->next)
+		{
+			char const *key_name = tag_get_name(key->definition_tag_index);
+			size_t key_length = key_name ? strlen(key_name) : 0;
+			long index;
+
+			for (index = 0; index < NUMBEROF(hidden); index++)
+			{
+				size_t length = strlen(hidden[index]);
+
+				if (key_length >= length && !strcmp(key_name + key_length - length, hidden[index]))
+					key->visible = shown;
+			}
+		}
+	}
 }
 
 static void network_pregame_status_screen_update(
@@ -1821,6 +1873,11 @@ static void network_pregame_status_screen_update(
 
 				third_machine_widget->visible = !cooperative || machine_indices[1] != NONE;
 				fourth_machine_widget->visible = !cooperative || machine_indices[2] != NONE;
+				/* (the host's waiting screen, alone: the lobby's X (delay
+				the game) and A (start it) do nothing yet, and are not shown;
+				B cancels, as the screen's text says) */
+				network_pregame_button_key_update(widget->parent,
+					!(cooperative && global_network_game_server_get() && machine_indices[0] == NONE));
 			}
 		}
 	}
