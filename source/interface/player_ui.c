@@ -497,6 +497,21 @@ void player_ui_local_player_joined_multiplayer_game(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the local player out of this game and the next (a split screen
+player who quit, the others staying: player_ui_autojoin_players_to_next_
+multiplayer_game would join them again). OpenCE's (e3389991) */
+void player_ui_local_player_left_multiplayer_game(
+	short local_player_index)
+{
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	player_ui_globals.local_players[local_player_index].prejoined_multiplayer = FALSE;
+	player_ui_globals.multiplayer_autojoin[local_player_index] = FALSE;
+	return;
+}
+#endif
+
 boolean player_ui_rumble_disabled(
 	short local_player_index)
 {
