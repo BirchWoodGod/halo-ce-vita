@@ -1,0 +1,15 @@
+# The network namespace hs<n> of the dedicated server number <n>
+# (halo-netns.sh; README-SERVER.md, "Each server in a network namespace").
+# halo-server-ns@<n>.service starts it. Install:
+#   sudo install -D -m 755 halo-netns.sh /opt/halo/halo-netns.sh
+#   sudo install -m 644 halo-netns@.service /etc/systemd/system/
+[Unit]
+Description=Network namespace for Halo server %i
+Before=halo-server-ns@%i.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/halo/halo-netns.sh %i

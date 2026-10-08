@@ -1,0 +1,153 @@
+name: Dedicated server
+
+# The dedicated server's release packages (port/linux/DEDICATED_SERVER.md,
+# "Download a release build"): tools/package_server.py builds each one, for
+# 32-bit x86 (PCs, VPSes) and armhf (a Raspberry Pi), against Debian 12's
+# glibc with a static, headless SDL3, so it runs on Debian 12+, Ubuntu
+# 22.04+ and Raspberry Pi OS 12+. Each package is then unpacked and started
+# in a debian:bookworm container with nothing but the 32-bit glibc added, as
+# its README says (the ARM one under qemu-arm).
+#
+# Uploaded as artifacts only: releases are published by hand, with the
+# halo-ce-vita-server artifact's two tarballs and SHA256SUMS attached.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The release's name in the packages' names (1.1.0-beta.2); empty: the tag, else port/vita/include/vita_version.h's"
+        required: false
+        default: ""
+
+concurrency:
+  group: dedicated-server-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.arch }})
+    # Arch Linux: the clang, lld, cmake and ninja the packages are built
+    # with; the glibc they need comes from Debian 12 (the script fetches it)
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, armhf]
+    steps:
+      - name: Install the toolchain
+        run: |
+          pacman -Syu --noconfirm --needed git python ninja cmake clang lld llvm binutils
+
+      - uses: actions/checkout@v4
+
+      # Debian's packages and SDL's source (pinned by checksum in the script)
+      - uses: actions/cache@v4
+        with:
+          path: build/server-package/downloads
+          key: server-downloads-${{ hashFiles('tools/package_server.py') }}
+
+      - name: Build
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python tools/package_server.py --arch ${{ matrix.arch }} ${VERSION:+--version "$VERSION"} --no-test
+
+      - name: What it needs
+        run: |
+          for binary in dist/halo-server-*.debug; do
+            readelf -d "$binary" | grep NEEDED
+            echo "newest glibc symbol version: $(readelf -V "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.arch }}
+          path: |
+            dist/halo-ce-vita-server-*.tar.gz
+            dist/halo-server-*.debug
+          retention-days: 30
+
+  test:
+    name: Test (${{ matrix.arch }}, Debian 12)
+    needs: package
+    runs-on: ubuntu-24.04
+    container: debian:bookworm
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            debian: i386
+            run: ""
+          - arch: armhf
+            debian: armhf
+            run: qemu-arm-static
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-${{ matrix.arch }}
+
+      - name: Add the 32-bit glibc (as the package's README says)
+        run: |
+          dpkg --add-architecture ${{ matrix.debian }}
+          apt-get update -qq
+          apt-get install -y -qq libc6:${{ matrix.debian }} ${{ matrix.run && 'qemu-user-static' || '' }} >/dev/null
+
+      - name: Unpack and check
+        run: |
+          tar xzf halo-ce-vita-server-*-linux-${{ matrix.arch }}.tar.gz
+          cd halo-ce-vita-server-*-linux-${{ matrix.arch }}
+          sha256sum -c SHA256SUMS
+          test -f README-SERVER.md -a -f LICENSE -a -f licenses/SDL3-LICENSE.txt -a -f init.txt.example
+          test -f systemd/halo-server.service
+          if find . -name '*.map' | grep .; then echo "game data in the package"; exit 1; fi
+
+      - name: Start the server
+        run: |
+          cd halo-ce-vita-server-*-linux-${{ matrix.arch }}
+          ${{ matrix.run }} ./halo-server -help | tee help.txt
+          grep -q 'halo-server \[-path DIR\]' help.txt
+          # an empty folder (no maps): the server starts, says ui.map is
+          # missing and waits at that error, until timeout stops it (SIGTERM,
+          # then SIGKILL, as systemd does); its console's standard input
+          # stays open meanwhile
+          folder=$(mktemp -d)
+          printf 'sv_name "CI check"\nsv_public 0\n' > "$folder/init.txt"
+          status=0
+          sleep 45 | timeout -k 5 30 ${{ matrix.run }} ./halo-server -path "$folder" > "$folder/run.log" 2>&1 || status=$?
+          cat "$folder/run.log"
+          echo "exit status $status (124 or 137: still running when stopped)"
+          test "$status" = 124 -o "$status" = 137
+          grep -q 'ui.map is missing' "$folder/run.log"
+
+  release-files:
+    name: Release files
+    needs: [package, test]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*
+          merge-multiple: true
+
+      # the two tarballs and their checksums, as a release attaches them
+      - name: SHA256SUMS
+        run: |
+          mkdir release
+          mv halo-ce-vita-server-*.tar.gz release/
+          cd release
+          sha256sum halo-ce-vita-server-*.tar.gz | tee SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: halo-ce-vita-server
+          path: release/
+          retention-days: 30

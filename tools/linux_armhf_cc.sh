@@ -13,6 +13,9 @@
 #                      its glibc no newer than the Pi's)
 #   SDL3_ARMHF         SDL3 built with it as a static library (the folder
 #                      holding include/ and lib/libSDL3.a), linked in whole
+# or, in place of Arm's toolchain (the release packages, tools/package_server.py):
+#   ARMHF_SYSROOT      a Debian armhf sysroot (glibc, kernel headers, libgcc),
+#                      whose glibc the program then needs at most
 # and always:
 #   ARMHF_CPU          the processor to tune for (default cortex-a72: the Pi 4)
 #   CLANG              the clang to run (default clang)
@@ -37,6 +40,7 @@ extra=(-DHALO_RELOCATABLE_TAG_CACHE=1 -fsigned-char -fmax-type-align=1 -mcpu="${
 if [ -n "${ARM_GNU_TOOLCHAIN:-}" ]; then
 	extra+=(--gcc-toolchain="$ARM_GNU_TOOLCHAIN" --sysroot="$ARM_GNU_TOOLCHAIN/arm-none-linux-gnueabihf/libc")
 fi
+[ -n "${ARMHF_SYSROOT:-}" ] && extra+=(--sysroot="$ARMHF_SYSROOT")
 [ -n "${SDL3_ARMHF:-}" ] && extra+=(-I"$SDL3_ARMHF/include")
 if [ $link = 1 ]; then
 	extra+=(-fuse-ld=lld)
