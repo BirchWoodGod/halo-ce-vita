@@ -350,6 +350,8 @@ static byte *lens_flare_occlusion_test_results_get(
 static real lens_flare_evaluate_corona_rotation_function(
 	short corona_rotation_function,
 	struct rasterizer_lens_flare_submit_parameters const *lens_flare_parameters);
+static void lens_flare_data_error(
+	char const *problem);
 
 /* ---------- globals */
 
@@ -362,6 +364,21 @@ extern short global_screenshot_count;
 extern short global_screenshot_size;
 
 /* ---------- private code */
+
+/* port: a map's BSP lens flare marker past what the BSP has; said once */
+static void lens_flare_data_error(
+	char const *problem)
+{
+	static boolean reported= FALSE;
+
+	if (!reported)
+	{
+		error(_error_silent, "### ERROR a BSP lens flare marker has a bad %s index; it is skipped", problem);
+		reported= TRUE;
+	}
+
+	return;
+}
 
 static boolean screenshot_in_progress(
 	void)
@@ -870,13 +887,38 @@ void rasterizer_lens_flare_submit_for_cluster(
 #endif
 		struct structure_cluster *cluster= TAG_BLOCK_GET_ELEMENT(&structure_bsp->clusters, cluster_index, struct structure_cluster);
 		long lens_flare_marker_index;
+		/* port: only markers the BSP has, and no more than the occlusion
+		results hold: a marker's index goes into a short, read back sign
+		extended (rasterizer_lens_flare_submit), with the queued flares'
+		after it (a map's range: past it the index wrapped negative) */
+		long marker_count= MIN(
+			structure_bsp->lens_flare_markers.count,
+			SHORT_MAX+1-MAXIMUM_QUEUED_LENS_FLARES);
 
 		for (lens_flare_marker_index= 0; lens_flare_marker_index<cluster->lens_flare_marker_count; lens_flare_marker_index++)
 		{
 			long structure_lens_flare_marker_index= cluster->first_lens_flare_marker_index+lens_flare_marker_index;
-			struct structure_lens_flare_marker *marker= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flare_markers, structure_lens_flare_marker_index, struct structure_lens_flare_marker);
-			struct structure_lens_flare *structure_lens_flare= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flares, marker->lens_flare_index, struct structure_lens_flare);
+			struct structure_lens_flare_marker *marker;
+			struct structure_lens_flare *structure_lens_flare;
 			struct rasterizer_lens_flare_submit_parameters parameters;
+
+			/* port (from OpenCE, MrBruh's "Validate map tags before loading"):
+			only markers the BSP has (marker_count), each of a lens flare it
+			has (a map's indices); before the cache below, whose hits use the
+			marker too */
+			if (structure_lens_flare_marker_index>=marker_count)
+			{
+				lens_flare_data_error("marker");
+				break;
+			}
+			marker= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flare_markers, structure_lens_flare_marker_index, struct structure_lens_flare_marker);
+			/* port: and a lens flare the BSP has (a map's index) */
+			if (marker->lens_flare_index>=structure_bsp->lens_flares.count)
+			{
+				lens_flare_data_error("lens flare");
+				continue;
+			}
+			structure_lens_flare= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flares, marker->lens_flare_index, struct structure_lens_flare);
 
 #ifdef HALO_LINUX
 			/* (port) a marker's compressed direction and up vectors and its
@@ -1145,9 +1187,14 @@ void rasterizer_lens_flares_draw(
 								reflection_index,
 								struct lens_flare_reflection);
 							real brightness_lower_bound = reflection->brightness_lower_bounds;
+							/* port: a scale function the table doesn't have (a map's)
+							scales it to nothing */
 							real brightness = (brightness_lower_bound+
 								(reflection->brightness_upper_bounds-brightness_lower_bound)*light_scale)*
-								scale_functions[reflection->brightness_scale_function]*light_brightness;
+								(VALID_INDEX(reflection->brightness_scale_function, NUMBER_OF_LENS_FLARE_REFLECTION_SCALE_FUNCTIONS) ?
+									scale_functions[reflection->brightness_scale_function] :
+									0.0f)*
+								light_brightness;
 
 							if (reflection_index == 0)
 							{

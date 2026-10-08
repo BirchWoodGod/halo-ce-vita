@@ -77,6 +77,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries/cseries.h"
+#include "cseries/errors.h" /* port: collision_bsp_valid_surface_index */
 #include "collision_bsp.h"
 #include "collision_bsp_definitions.h"
 #include "collision_usage.h"
@@ -305,6 +306,59 @@ void render_debug_collision_edge(
 static struct collision_bsp_usage_times collision_bsp_usage_times = { 0 };
 
 /* ---------- public code */
+
+/* port (from OpenCE, MrBruh's "Validate map tags before loading"): whether
+a surface's ring of edges (from the map) goes on to edge_index after
+edge_count of its edges, and whether a surface index names one of the bsp's
+(FALSE, reported once, if not), for the code outside the collision tests
+that walks a bsp's surfaces and edges. The collision tests themselves walk
+bsps the validator has checked as they loaded (tag_schema_collision.c,
+collision_bsp_graph_check: their 3d and 2d trees, leaves and edge rings),
+and are not slowed by checking again */
+static boolean warned_about_collision_surface_edges;
+static boolean warned_about_collision_surface_index;
+
+boolean collision_surface_edge_ring_continues(
+	struct collision_bsp const *bsp,
+	long edge_index,
+	short edge_count)
+{
+	if (edge_index >= 0 &&
+		edge_index < bsp->edges.count &&
+		edge_count < MAXIMUM_EDGES_PER_COLLISION_SURFACE)
+	{
+		return TRUE;
+	}
+
+	if (!warned_about_collision_surface_edges)
+	{
+		error(_error_silent, "a collision surface's edges are not a ring of at most %d of the bsp's",
+			MAXIMUM_EDGES_PER_COLLISION_SURFACE);
+		warned_about_collision_surface_edges = TRUE;
+	}
+
+	return FALSE;
+}
+
+boolean collision_bsp_valid_surface_index(
+	struct collision_bsp const *bsp,
+	long surface_index)
+{
+	if (surface_index >= 0 && surface_index < bsp->surfaces.count)
+	{
+		return TRUE;
+	}
+
+	if (!warned_about_collision_surface_index)
+	{
+		error(_error_silent, "collision surface #%ld is not one of the bsp's %ld",
+			surface_index,
+			bsp->surfaces.count);
+		warned_about_collision_surface_index = TRUE;
+	}
+
+	return FALSE;
+}
 
 short collision_surface_edge_count(
 	struct collision_bsp const *bsp,

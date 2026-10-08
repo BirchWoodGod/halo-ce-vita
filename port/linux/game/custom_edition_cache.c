@@ -37,6 +37,7 @@ read.
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
 #include "map_share_protocol.h"
+#include "tag_schema.h"
 #ifdef HALO_RELOCATABLE_TAG_CACHE
 #include "tag_relocate.h"
 #endif
@@ -84,6 +85,8 @@ struct custom_edition_cache_globals
 	/* the tag cache and the bytes of it the loaded tags use */
 	uint8_t *tag_cache;
 	uint32_t loaded_bytes;
+	/* (the tag cache's size: cache_file_tag_cache_contains) */
+	uint32_t tag_cache_bytes;
 	struct custom_edition_file map;
 	struct custom_edition_file resource_files[NUMBER_OF_RESOURCE_MAP_TYPES];
 	struct resource_map resource_map_storage[NUMBER_OF_RESOURCE_MAP_TYPES];
@@ -347,9 +350,59 @@ static boolean custom_edition_cache_models_convert(
 		report);
 }
 
+static void custom_edition_cache_load_failure_reason(
+	char const *reason);
+
+/* The tags custom_edition_cache_load loaded and custom_edition_cache_convert
+converted (and moved), checked as an Xbox map's are before the game reads
+them (tag_validate.c): their pixels and samples in the files of the combined
+offset space. */
+static boolean custom_edition_cache_tags_validate(
+	uint8_t *tag_cache,
+	uint32_t tag_cache_bytes,
+	struct custom_edition_load_report const *report)
+{
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	struct tag_validate_file_range ranges[MAXIMUM_TAG_VALIDATE_FILE_RANGES];
+	short range_count = 0;
+
+	ranges[range_count].offset = 0;
+	ranges[range_count++].size = report->identity.file_size;
+	if (globals->resource_files[_resource_map_bitmaps].opened)
+	{
+		ranges[range_count].offset = COMBINED_BITMAPS_OFFSET;
+		ranges[range_count++].size = globals->resource_files[_resource_map_bitmaps].source.size;
+	}
+	if (globals->resource_files[_resource_map_sounds].opened)
+	{
+		ranges[range_count].offset = COMBINED_SOUNDS_OFFSET;
+		ranges[range_count++].size = globals->resource_files[_resource_map_sounds].source.size;
+	}
+	if (!tag_validate_custom_edition_tags(
+		tag_cache,
+		(long)(report->tag_data_bytes + report->resource_tag_bytes),
+		tag_cache_bytes,
+		ranges,
+		range_count,
+		report->identity.name))
+	{
+		error(_error_silent, "custom edition: the map's tags failed the tag check (above)");
+		custom_edition_cache_load_failure_reason("this map file is damaged or not supported");
+		return FALSE;
+	}
+	if (tag_validate_corrections())
+	{
+		error(_error_silent, "custom edition: the map's tags needed %ld corrections (above)",
+			tag_validate_corrections());
+	}
+
+	return TRUE;
+}
+
 /* Makes the tags custom_edition_cache_load loaded into `tag_cache` this
-build's: their resource offsets combined, their bytes converted, their
-bitmaps checked, their models converted. */
+build's: their resource offsets combined, their bytes converted, then
+checked as an Xbox map's tags are; then their bitmaps checked, their
+models converted. */
 static boolean custom_edition_cache_tags_convert(
 	uint8_t *tag_cache,
 	uint32_t tag_cache_bytes,
@@ -425,9 +478,17 @@ static boolean custom_edition_cache_tags_convert(
 			(unsigned long)custom_edition_cache_linked_address(),
 			tag_cache);
 	}
-#else
-	(void)tag_cache_bytes;
 #endif
+
+	/* (from OpenCE, MrBruh's "Validate map tags before loading" and "Load,
+	check and run Halo Custom Edition and OpenSauce maps") the tags, made
+	this build's and where they are now, checked as an Xbox map's are
+	before the game's own code reads them (tag_validate.c): their pixels
+	and samples in the files of the combined offset space */
+	if (!custom_edition_cache_tags_validate(tag_cache, tag_cache_bytes, report))
+	{
+		return FALSE;
+	}
 
 	if (!custom_edition_bitmaps_verify(tag_cache, loaded_bytes))
 	{
@@ -1021,6 +1082,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	}
 	globals->tag_cache = tag_cache;
 	globals->loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
+	globals->tag_cache_bytes = tag_cache_bytes;
 	globals->tags_loaded = TRUE;
 	custom_edition_cache_heap_log("loaded");
 	custom_edition_load_phase_describe(&phase, ", conversion", phases + phases_length, sizeof(phases) - phases_length);
@@ -1102,6 +1164,16 @@ boolean custom_edition_cache_tags_loaded(
 	return custom_edition_cache_globals.tags_loaded;
 }
 
+void *custom_edition_cache_tag_cache(
+	unsigned long *size)
+{
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+
+	*size = globals->tags_loaded ? globals->tag_cache_bytes : 0;
+
+	return globals->tags_loaded ? globals->tag_cache : NULL;
+}
+
 void custom_edition_cache_tags_unload(
 	void)
 {
@@ -1114,6 +1186,7 @@ void custom_edition_cache_tags_unload(
 	custom_edition_cache_globals.tags_loaded = FALSE;
 	custom_edition_cache_globals.tag_cache = NULL;
 	custom_edition_cache_globals.loaded_bytes = 0;
+	custom_edition_cache_globals.tag_cache_bytes = 0;
 #ifdef HALO_RELOCATABLE_TAG_CACHE
 	halo_tag_relocate_linked_release();
 #endif
