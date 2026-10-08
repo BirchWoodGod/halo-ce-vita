@@ -790,6 +790,20 @@ struct observer_result const *render_interpolation_camera(
 		}
 	}
 	camera->blended.field_of_view = lerp(camera->previous.field_of_view, camera->latest.field_of_view, t);
+	{
+		/* (debug) HALO_INTERPOLATION_TRACE=1: each frame's drawn camera,
+		for the evenness of its steps (triage/interp-status.md) */
+		static int trace = -1;
+
+		if (trace < 0)
+			trace = getenv("HALO_INTERPOLATION_TRACE") && atoi(getenv("HALO_INTERPOLATION_TRACE"));
+		if (trace)
+		{
+			platform_log("interpolation trace: frame %ld tick %ld span %ld fraction %.3f camera %.4f %.4f %.4f",
+				interpolation_frame, interpolation_drawn_tick, span, interpolation_fraction,
+				camera->blended.position.x, camera->blended.position.y, camera->blended.position.z);
+		}
+	}
 	return &camera->blended;
 }
 
