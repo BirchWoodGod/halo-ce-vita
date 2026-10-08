@@ -703,10 +703,18 @@ int main(int argc, char **argv)
 	memset(&init, 0, sizeof(init));
 	memset(&boot, 0, sizeof(boot));
 	sceAppUtilInit(&init, &boot);
-	scePowerSetArmClockFrequency(444);
-	scePowerSetBusClockFrequency(222);
-	scePowerSetGpuClockFrequency(222);
-	scePowerSetGpuXbarClockFrequency(166);
+	/* the clocks the game needs as floors: raised to them, never lowered
+	from more (a 500 MHz profile of PSVshell or another overclocking plugin
+	stays; 444/222/222/166 are the system's highest otherwise) - from
+	Bruno Santana's modified build */
+	if (scePowerGetArmClockFrequency() < 444)
+		scePowerSetArmClockFrequency(444);
+	if (scePowerGetBusClockFrequency() < 222)
+		scePowerSetBusClockFrequency(222);
+	if (scePowerGetGpuClockFrequency() < 222)
+		scePowerSetGpuClockFrequency(222);
+	if (scePowerGetGpuXbarClockFrequency() < 166)
+		scePowerSetGpuXbarClockFrequency(166);
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);
@@ -740,8 +748,9 @@ int main(int argc, char **argv)
 	}
 	{
 		char message[128];
-		snprintf(message, sizeof(message), "vita: arm %d MHz, bus %d MHz, gpu %d MHz", scePowerGetArmClockFrequency(),
-			scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency());
+		snprintf(message, sizeof(message), "vita: arm %d MHz, bus %d MHz, gpu %d MHz, xbar %d MHz",
+			scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(),
+			scePowerGetGpuXbarClockFrequency());
 		vita_host_log(message);
 	}
 
