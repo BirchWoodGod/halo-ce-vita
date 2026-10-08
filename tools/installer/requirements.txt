@@ -1,6 +1,7 @@
 # The tool needs only Python 3.8+ and its standard library (tkinter for the
-# window). Optional, for the window's look (and inside HaloCEVitaInstaller.exe):
-# the Sun Valley ttk theme (MIT) and the system's dark/light setting (BSD-3).
-# Without them the window is the same, in Tk's own look.
+# window). Optional, for the window's Modern look (and inside
+# HaloCEVitaInstaller.exe): the Sun Valley ttk theme (MIT) and the system's
+# dark/light setting (BSD-3). Without them the window has its classic look
+# only, which is its default anyway.
 sv-ttk==2.6.1; python_version >= "3.9"
 darkdetect==0.8.0

@@ -23,9 +23,9 @@ disc image, your Halo PC files.
 - **Any system with Python 3.8 or later:** `python3 halo_ce_vita_installer.py`
   opens the window (on Linux, tkinter may be a separate package:
   `python3-tk` or `tk`). The movie step needs ffmpeg installed. For the
-  window's modern look, `python3 -m pip install -r requirements.txt` (see
-  [The window's look](#the-windows-look)); without it the window works the
-  same in Tk's own look.
+  window's Modern look, `python3 -m pip install -r requirements.txt` (see
+  [The window's look](#the-windows-look)); without it the window has its
+  classic look, the default.
 - **Without the window:** `python3 halo_ce_vita_installer.py --help` lists
   the same steps as commands (see below).
 
@@ -104,17 +104,33 @@ shader compiler `ur0:data/libshacccg.suprx` (ShaRKF00D extracts it).
 
 ## The window's look
 
-The window uses the [Sun Valley ttk theme](https://github.com/rdbende/Sun-Valley-ttk-theme)
+By default the window has a classic look: Tk's own grey widgets in its
+Windows 95/98-style theme, a white header band, the steps as a list with
+check boxes, and for each page a small pixelated picture of the port
+running on a PS Vita. The pictures are the project's own screenshots
+(`docs/screenshots`, the ones the README shows), shrunk to 76x43 pixels and
+a few colours by `make_pictures.py` into `pictures/` (about 10 KB in all) and
+zoomed by whole pixels in the window. There is no box art, logo or other
+artwork. Without the `pictures` folder the window works the same, without
+pictures.
+
+The **Modern look** check box at the bottom left switches to the
+[Sun Valley ttk theme](https://github.com/rdbende/Sun-Valley-ttk-theme)
 (`sv-ttk`, MIT licence), Windows 11's light and dark styles for Tk's own
-widgets, and follows the system's dark or light setting
+widgets, which follows the system's dark or light setting
 ([darkdetect](https://github.com/albertosottile/darkdetect), BSD 3-clause
-licence); the **Dark mode** switch at the bottom left changes it for the
-session. Both are pinned in `requirements.txt` and are inside
-`HaloCEVitaInstaller.exe`, with their licences (in its `licenses` folder).
-Neither is needed: without them the window is the same, in Tk's own look.
-`HCV_THEME=light`, `dark` or `plain` (Tk's own look) picks one. On Windows
-the window is DPI aware, so its text is sharp on scaled displays. Its icon
-is drawn by the tool itself (a plain arrow into a tray; no game artwork).
+licence) until **Dark mode** is switched. Both are pinned in
+`requirements.txt` and are inside `HaloCEVitaInstaller.exe`, with their
+licences (in its `licenses` folder); without them there is only the classic
+look. The look chosen is kept in a small settings file:
+`%APPDATA%\HaloCEVita\installer-settings.json` on Windows,
+`~/.config/halo-ce-vita/installer-settings.json` on Linux
+(`$XDG_CONFIG_HOME`), `~/Library/Application Support/HaloCEVita/` on macOS.
+`HCV_THEME=classic`, `light`, `dark`, `modern` (light or dark as the system
+is) or `plain` (Tk's platform theme, as the first beta's window had) picks
+one for a run. On Windows the window is DPI aware, so its text is sharp on
+scaled displays. Its icon is drawn by the tool itself (a plain arrow into a
+tray; no game artwork).
 
 ## Command line
 
@@ -162,8 +178,10 @@ cabinet in its resources, fake resource maps, a stand-in ffmpeg, and a local
 FTP server that answers like VitaShell (its LIST format, no NLST, no SIZE, a
 connection that drops on demand, doubled transfer replies). The window's
 tests run where there is a display (every page, a step run through it, the
-sidebar's states, the details, the Done page, light and dark with sv-ttk, and
-the plain window without it).
+sidebar's states, the details, the Done page, the classic look by default,
+the Modern look's light and dark with sv-ttk and its setting kept,
+`HCV_THEME`, each page's picture, and the window without its pictures or
+sv-ttk).
 
 ## Building the Windows program
 
@@ -178,8 +196,9 @@ out). It downloads FFmpeg 9.0.2 (gyan.dev's essentials build, GPL v3) from a
 fixed address, checks its SHA-256, and builds
 `tools/installer/dist/HaloCEVitaInstaller.exe` with PyInstaller; ffmpeg's
 LICENSE and README.txt (which names its source) go inside next to it, and
-so do the window's theme (sv-ttk, darkdetect, their licences) and its icon,
-drawn into `build/` by the tool itself. The
+so do the window's pictures (`pictures/`), its Modern look's theme (sv-ttk,
+darkdetect, their licences) and its icon, drawn into `build/` by the tool
+itself. The
 GitHub Actions workflow `.github/workflows/windows-installer.yml` does the
 same on `windows-latest`, runs the tests and the program's selftest, and
 uploads the program as an artifact. Nothing it downloads is committed.

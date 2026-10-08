@@ -32,17 +32,20 @@ files. Every name read from a disc image or a cabinet is checked before a
 file is written (no "..", no absolute paths, nothing outside the output
 folder), and the files are checked once written (sizes, headers).
 
-Python 3.8 or later, no other packages (tkinter for the window). Optional,
-for the window's look: sv-ttk (the Sun Valley theme, Windows 11's light and
-dark styles) and darkdetect (the system's dark or light setting), both in
-requirements.txt and inside the Windows program. Without them the window is
-the same, in Tk's own look.
+Python 3.8 or later, no other packages (tkinter for the window). The window
+has the classic grey look of Tk's own widgets by default, with small
+pixelated pictures made from the project's own screenshots of the port on a
+PS Vita (pictures/, made by make_pictures.py). Optional, for its Modern look:
+sv-ttk (the Sun Valley theme, Windows 11's light and dark styles) and
+darkdetect (the system's dark or light setting), both in requirements.txt
+and inside the Windows program.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import queue
 import re
@@ -2027,9 +2030,10 @@ def xbox_files_size(source_path: str) -> int:
 
 
 def self_test(report: Optional[str] = None) -> int:
-    """What this copy of the tool can do: tkinter for the window, its theme
-    (sv-ttk, which the Windows program must bring), ffmpeg for the movies
-    (the Windows program brings its own)."""
+    """What this copy of the tool can do: tkinter for the window, its
+    pictures and its Modern look's theme (sv-ttk; the Windows program must
+    bring both), ffmpeg for the movies (the Windows program brings its
+    own)."""
     lines = ["halo_ce_vita_installer %s, Python %s on %s" % (VERSION, sys.version.split()[0], sys.platform)]
     good = True
     try:
@@ -2045,8 +2049,11 @@ def self_test(report: Optional[str] = None) -> int:
         except ImportError:
             lines.append("theme: sv-ttk ok, darkdetect missing (light, unless chosen)")
     else:
-        lines.append("theme: sv-ttk missing (the window uses Tk's own look)")
+        lines.append("theme: sv-ttk missing (the window has its classic look only)")
         good = good and not getattr(sys, "frozen", False)
+    pictures = [name for name, _ in PAGE_PICTURES if os.path.isfile(picture_path(name))]
+    lines.append("pictures: %d of %d in %s" % (len(pictures), len(PAGE_PICTURES), picture_path("")))
+    good = good and (len(pictures) == len(PAGE_PICTURES) or not getattr(sys, "frozen", False))
     ffmpeg = find_ffmpeg()
     if ffmpeg:
         try:
@@ -2166,11 +2173,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 # ---------------------------------------------------------------------------
 # the window
 #
-# The look comes from the Sun Valley ttk theme (sv-ttk, MIT: Windows 11's
-# light and dark styles for ttk's own widgets), following the system's dark
-# or light setting (darkdetect, BSD). Both are optional: without them (the
-# .py run where they are not installed) the same window is drawn with Tk's
-# own ttk theme. HCV_THEME=light, dark or plain (no sv-ttk) picks one.
+# Two looks. The classic one, the default: Tk's own grey widgets in its
+# Windows 95/98-style ttk theme ("alt"), a white header band, the steps as a
+# list with check boxes, and a small pixelated picture for each page (the
+# project's own screenshots of the port on a PS Vita: pictures/, made by
+# make_pictures.py). The Modern look (a check box at the bottom left, off by
+# default, remembered in the user's settings file): the Sun Valley ttk theme
+# (sv-ttk, MIT: Windows 11's light and dark styles for ttk's own widgets),
+# following the system's dark or light setting (darkdetect, BSD), both
+# optional. HCV_THEME=classic, light, dark, modern (light or dark as the
+# system is) or plain (Tk's platform theme: vista/aqua/clam) picks one.
 
 
 def _windows_dpi_awareness() -> None:
@@ -2225,6 +2237,71 @@ def _sv_ttk_module():
         return sv_ttk
     except ImportError:
         return None
+
+
+THEMES = ("classic", "light", "dark", "modern", "plain")  # HCV_THEME's values
+SETTINGS_FILE = "installer-settings.json"
+
+
+def settings_path() -> str:
+    """The window's settings (its look): a small JSON file in the user's
+    application data folder."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+        folder = os.path.join(base, "HaloCEVita")
+    elif sys.platform == "darwin":
+        folder = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "HaloCEVita")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+        folder = os.path.join(base, "halo-ce-vita")
+    return os.path.join(folder, SETTINGS_FILE)
+
+
+def load_settings() -> dict:
+    """The saved settings, or none (a missing or damaged file is no
+    settings)."""
+    try:
+        with open(settings_path(), "r", encoding="utf-8") as file:
+            settings = json.load(file)
+        return settings if isinstance(settings, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(settings: dict) -> bool:
+    """Writes the settings (to a temporary file, then renamed over the
+    old one). A folder that cannot be written only means they are not kept."""
+    path = settings_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        partial = path + ".part"
+        with open(partial, "w", encoding="utf-8") as file:
+            json.dump(settings, file, indent=1, sort_keys=True)
+        os.replace(partial, path)
+        return True
+    except OSError:
+        return False
+
+
+# Each page's picture (pictures/, from docs/screenshots by make_pictures.py)
+# and its caption. The window works without them.
+PAGE_PICTURES = (
+    ("welcome.png", "Two Pelicans over the sea in The Silent Cartographer's opening"),
+    ("xbox.png", "Landing on The Silent Cartographer's beach"),
+    ("movies.png", "A Pelican in The Silent Cartographer's opening"),
+    ("pc.png", "Covenant at a Blood Gulch base"),
+    ("copy.png", "The Silent Cartographer's beach"),
+    ("vpk.png", "Blood Gulch"),
+    ("done.png", "A Warthog on The Silent Cartographer's beach"),
+)
+PICTURE_ZOOM = 3  # each picture pixel as 3x3 screen pixels at 100%
+
+
+def picture_path(name: str) -> str:
+    """A picture of pictures/: next to this file, or in the Windows program's
+    bundle."""
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "pictures", name)
 
 
 # The window's icon, drawn here (no image files): a blue rounded square with
@@ -2285,6 +2362,66 @@ def icon_png(size: int) -> bytes:
     return _png(size, bytes(out))
 
 
+def _segment_distance(x: float, y: float, a, b) -> float:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    t = max(0.0, min(1.0, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy)))
+    return ((x - a[0] - t * dx) ** 2 + (y - a[1] - t * dy) ** 2) ** 0.5
+
+
+def _indicator_sample(kind: str, on: bool, disabled: bool, size: int, x: float, y: float):
+    """A Windows 95/98 check box or radio button at size x size pixels:
+    its colour at (x, y), or None outside it."""
+    bevel = max(1.0, size / 13.0)
+    face = (0xc0, 0xc0, 0xc0) if disabled else (0xff, 0xff, 0xff)
+    mark = (0x80, 0x80, 0x80) if disabled else (0, 0, 0)
+    if kind == "radio":
+        centre = size / 2.0
+        r = ((x - centre) ** 2 + (y - centre) ** 2) ** 0.5
+        if r > centre:
+            return None
+        upper_left = x + y < size
+        if r > centre - bevel:
+            return (0x80, 0x80, 0x80) if upper_left else (0xff, 0xff, 0xff)
+        if r > centre - 2 * bevel:
+            return (0, 0, 0) if upper_left else (0xdf, 0xdf, 0xdf)
+        return mark if on and r < centre * 0.34 else face
+    edge = min(x, y, size - x, size - y)
+    upper_left = min(x, y) <= min(size - x, size - y)
+    if edge < bevel:
+        return (0x80, 0x80, 0x80) if upper_left else (0xff, 0xff, 0xff)
+    if edge < 2 * bevel:
+        return (0, 0, 0) if upper_left else (0xdf, 0xdf, 0xdf)
+    if on:
+        tick = [(size * u, size * v) for u, v in ((0.26, 0.50), (0.42, 0.66), (0.74, 0.32))]
+        if min(_segment_distance(x, y, tick[0], tick[1]), _segment_distance(x, y, tick[1], tick[2])) <= bevel:
+            return mark
+    return face
+
+
+def indicator_png(kind: str, on: bool, disabled: bool, size: int) -> bytes:
+    """The classic look's check box ("check") or radio button ("radio") as
+    a PNG, for displays scaled past what Tk's own (13 pixels) suits."""
+    grid = 3
+    out = bytearray()
+    for row in range(size):
+        for column in range(size):
+            red = green = blue = alpha = 0
+            for j in range(grid):
+                for i in range(grid):
+                    colour = _indicator_sample(kind, on, disabled, size, column + (i + 0.5) / grid,
+                                               row + (j + 0.5) / grid)
+                    if colour:
+                        red += colour[0]
+                        green += colour[1]
+                        blue += colour[2]
+                        alpha += 1
+            if alpha:
+                out += bytes((red // alpha, green // alpha, blue // alpha, 255 * alpha // (grid * grid)))
+            else:
+                out += b"\0\0\0\0"
+    return _png(size, bytes(out))
+
+
 def write_icon(path: str, sizes: Sequence[int] = ICON_SIZES) -> None:
     """The icon as a Windows .ico (PNG images inside, every size Windows
     asks for): the program's icon in the Windows build."""
@@ -2318,8 +2455,14 @@ def run_window(out: str) -> int:
     return 0
 
 
-# the colours around sv-ttk's own (its backgrounds and accent blues)
+# the colours: the classic look's (Windows 95/98's grey, navy and white),
+# and the Modern look's around sv-ttk's own (its backgrounds and accent blues)
 PALETTES = {
+    "classic": {"bg": "#c0c0c0", "sidebar": "#c0c0c0", "header": "#ffffff", "fg": "#000000", "muted": "#3c3c3c",
+                "accent": "#000080", "on_accent": "#ffffff", "tag": "#ffffe1", "error": "#a00000", "ok": "#006400",
+                "ring": "#808080", "chip": "#c0c0c0", "log": "#ffffff", "border": "#808080", "link": "#0000ee",
+                "row": "#ffffff", "row_current": "#000080", "row_fg_current": "#ffffff",
+                "row_muted": "#3c3c3c", "row_muted_current": "#d8d8ff"},
     "light": {"bg": "#fafafa", "sidebar": "#f0f0f0", "fg": "#1c1c1c", "muted": "#5f5f5f", "accent": "#005fb8",
               "on_accent": "#ffffff", "tag": "#e1ecf7", "error": "#c42b1c", "ok": "#0f7b0f",
               "ring": "#8a8a8a", "chip": "#ececec", "log": "#ffffff", "border": "#d9d9d9"},
@@ -2327,6 +2470,19 @@ PALETTES = {
              "on_accent": "#000000", "tag": "#173647", "error": "#ff99a4", "ok": "#6ccb5f",
              "ring": "#8a8a8a", "chip": "#2e2e2e", "log": "#262626", "border": "#3d3d3d"},
 }
+
+
+def _palette(theme: str) -> dict:
+    palette = dict(PALETTES[theme])
+    # (the Modern look's header, sidebar rows and links are its page's colours)
+    palette.setdefault("header", palette["bg"])
+    palette.setdefault("link", palette["accent"])
+    palette.setdefault("row", palette["sidebar"])
+    palette.setdefault("row_current", palette["sidebar"])
+    palette.setdefault("row_fg_current", palette["fg"])
+    palette.setdefault("row_muted", palette["muted"])
+    palette.setdefault("row_muted_current", palette["muted"])
+    return palette
 
 
 class InstallerWindow:
@@ -2373,13 +2529,21 @@ class InstallerWindow:
         self.results: Dict[int, str] = {}
         self.notice = None
         self.details_shown = False
+        self._pictures: Dict[int, object] = {}
+        self._listening = False
 
+        # the look: HCV_THEME (or the caller's), else the one saved, else classic
+        self.settings = load_settings()
+        self.sv_ttk = _sv_ttk_module()
         theme = (theme or os.environ.get("HCV_THEME", "")).strip().lower()
-        self.sv_ttk = None if theme == "plain" else _sv_ttk_module()
-        self.follow_system = theme not in ("light", "dark")
-        self.theme = theme if theme in ("light", "dark") else system_theme()
-        if not self.sv_ttk:
-            self.theme = "plain"
+        if theme not in THEMES:
+            theme = "modern" if self.settings.get("look") == "modern" else "classic"
+        if theme in ("light", "dark", "modern") and not self.sv_ttk:
+            theme = "classic"
+        self.follow_system = False
+        if theme == "modern":
+            theme = self._modern_theme()
+        self.theme = theme
         self.scale = max(1.0, root.winfo_fpixels("1i") / 96.0)
 
         self.out = tkinter.StringVar(value=out)
@@ -2398,6 +2562,7 @@ class InstallerWindow:
         self.status = tkinter.StringVar(value="Ready")
         self.percent = tkinter.StringVar(value="")
         self.dark = tkinter.BooleanVar(value=self.theme == "dark")
+        self.modern = tkinter.BooleanVar(value=self.modern_look)
 
         self._make_fonts()
         self._icons = []
@@ -2414,9 +2579,26 @@ class InstallerWindow:
         root.geometry("%dx%d" % (width, height))
         root.minsize(min(self.px(860), width), min(self.px(620), height))
         self.show(0)
-        if self.follow_system and self.sv_ttk and sys.platform == "win32":
-            self._listen_for_system_theme()
+        self._listen_for_system_theme()
         root.after(100, self.poll)
+
+    @property
+    def classic(self) -> bool:
+        return self.theme == "classic"
+
+    @property
+    def modern_look(self) -> bool:
+        return self.theme in ("light", "dark")
+
+    def _modern_theme(self) -> str:
+        """The Modern look's light or dark: the one chosen with Dark mode,
+        else the system's (followed while it changes)."""
+        dark = self.settings.get("dark")
+        if isinstance(dark, bool):
+            self.follow_system = False
+            return "dark" if dark else "light"
+        self.follow_system = True
+        return system_theme()
 
     # -- sizes, fonts and colours
     def px(self, value: float) -> int:
@@ -2425,31 +2607,58 @@ class InstallerWindow:
     def _make_fonts(self):
         from tkinter import font as tkfont
         families = set(tkfont.families(self.root))
-        if sys.platform == "win32":
-            text = "Segoe UI Variable Text" if "Segoe UI Variable Text" in families else "Segoe UI"
-            display = "Segoe UI Variable Display" if "Segoe UI Variable Display" in families else "Segoe UI"
+        default = tkfont.nametofont("TkDefaultFont", root=self.root).actual("family")
+
+        def first(names, fallback):
+            return next((name for name in names if name in families), fallback)
+        if self.classic:
+            # Windows 95/98's dialog fonts (MS Sans Serif's TrueType sibling,
+            # Verdana for the titles, as its setup wizards had), in points
+            if sys.platform == "win32":
+                text = first(("Microsoft Sans Serif", "Tahoma", "Arial"), default)
+                display = first(("Verdana",), text)
+                fixed = first(("Courier New",), None)
+            else:
+                text = first(("DejaVu Sans", "Liberation Sans", "Arial", "Helvetica"), default)
+                display = text
+                fixed = None
+            self.fonts = {
+                "HcvCaption": (text, 8, "normal"), "HcvBody": (text, 9, "normal"),
+                "HcvBodyStrong": (text, 9, "bold"), "HcvSubtitle": (display, 10, "bold"),
+                "HcvTitle": (display, 12, "bold"), "HcvLink": (text, 9, "normal"),
+            }
+            sizes = {name: size for name, (_, size, _) in self.fonts.items()}
+            body, fixed_size = 9, 9
         else:
-            text = next((name for name in ("Segoe UI", "Inter", "Cantarell", "Noto Sans", "Ubuntu",
-                                           "DejaVu Sans") if name in families),
-                        tkfont.nametofont("TkDefaultFont", root=self.root).actual("family"))
-            display = text
-        # sizes in pixels (sv-ttk's), scaled for the display
-        self.fonts = {
-            "HcvCaption": (text, 12, "normal"), "HcvBody": (text, 14, "normal"),
-            "HcvBodyStrong": (text, 14, "bold"), "HcvSubtitle": (display, 17, "bold"),
-            "HcvTitle": (display, 26, "bold"), "HcvLink": (text, 14, "normal"),
-        }
+            if sys.platform == "win32":
+                text = first(("Segoe UI Variable Text",), "Segoe UI")
+                display = first(("Segoe UI Variable Display",), "Segoe UI")
+            else:
+                text = first(("Segoe UI", "Inter", "Cantarell", "Noto Sans", "Ubuntu", "DejaVu Sans"), default)
+                display = text
+            fixed = None
+            # sizes in pixels (sv-ttk's), scaled for the display
+            self.fonts = {
+                "HcvCaption": (text, 12, "normal"), "HcvBody": (text, 14, "normal"),
+                "HcvBodyStrong": (text, 14, "bold"), "HcvSubtitle": (display, 17, "bold"),
+                "HcvTitle": (display, 26, "bold"), "HcvLink": (text, 14, "normal"),
+            }
+            sizes = {name: -self.px(size) for name, (_, size, _) in self.fonts.items()}
+            body, fixed_size = -self.px(14), -self.px(12)
         # (kept: tkinter deletes a named font when its Font object goes)
-        self._font_objects = []
-        for name, (family, size, weight) in self.fonts.items():
-            options = dict(family=family, size=-self.px(size), weight=weight, underline=name == "HcvLink")
+        self._font_objects = getattr(self, "_font_objects", [])
+        for name, (family, _, weight) in self.fonts.items():
+            options = dict(family=family, size=sizes[name], weight=weight, underline=name == "HcvLink")
             try:
                 tkfont.Font(root=self.root, name=name, exists=True).configure(**options)
             except self.tk.TclError:
                 self._font_objects.append(tkfont.Font(root=self.root, name=name, **options))
         for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
-            tkfont.nametofont(name, root=self.root).configure(family=text, size=-self.px(14))
-        tkfont.nametofont("TkFixedFont", root=self.root).configure(size=-self.px(12))
+            tkfont.nametofont(name, root=self.root).configure(family=text, size=body)
+        fixed_font = tkfont.nametofont("TkFixedFont", root=self.root)
+        if not hasattr(self, "_fixed_family"):
+            self._fixed_family = fixed_font.actual("family")
+        fixed_font.configure(family=fixed or self._fixed_family, size=fixed_size)
 
     def _sv_fonts(self):
         """sv-ttk's named fonts in the window's family and scaled sizes
@@ -2474,7 +2683,20 @@ class InstallerWindow:
         if self.sv_ttk and theme in ("light", "dark"):
             self.sv_ttk.set_theme(theme, self.root)
             self._sv_fonts()
-            palette = dict(PALETTES[theme])
+            palette = _palette(theme)
+        elif theme == "classic":
+            # Tk's Windows 95/98-style theme, everywhere (Windows' own
+            # "winnative" would draw its buttons in the system's colours)
+            names = style.theme_names()
+            style.theme_use("alt" if "alt" in names else "classic")
+            palette = _palette("classic")
+            self.root.tk_setPalette(background=palette["bg"], foreground=palette["fg"],
+                                    selectBackground=palette["accent"], selectForeground=palette["on_accent"],
+                                    activeBackground=palette["bg"], highlightColor=palette["fg"])
+            style.configure(".", background=palette["bg"], foreground=palette["fg"], font="TkDefaultFont",
+                            troughcolor=palette["bg"], selectbackground=palette["accent"],
+                            selectforeground=palette["on_accent"], fieldbackground="#ffffff")
+            self._classic_indicators(style)
         else:
             theme = "plain"
             names = style.theme_names()
@@ -2482,10 +2704,10 @@ class InstallerWindow:
                 if name in names:
                     style.theme_use(name)
                     break
-            palette = dict(PALETTES["light"])
-            palette["bg"] = style.lookup(".", "background") or "#f0f0f0"
-            palette["sidebar"] = "#e6e6e6"
-            palette["fg"] = style.lookup(".", "foreground") or "#000000"
+            palette = _palette("light")
+            palette["bg"] = palette["header"] = style.lookup(".", "background") or "#f0f0f0"
+            palette["sidebar"] = palette["row"] = palette["row_current"] = "#e6e6e6"
+            palette["fg"] = palette["row_fg_current"] = style.lookup(".", "foreground") or "#000000"
             palette["border"] = "#c4c4c4"
         self.theme = theme
         self.palette = palette
@@ -2496,10 +2718,40 @@ class InstallerWindow:
         self.root.after_idle(self._repaint)
         _windows_title_bar(self.root, theme == "dark")
 
+    def _classic_indicators(self, style):
+        """Check boxes and radio buttons drawn at the display's scale: Tk's
+        own in its classic themes are 13 pixels whatever the scale (tiny
+        next to the text at 150%)."""
+        size = self.px(13)
+        if size < 16 or "Hcv.Checkbutton.indicator" in style.element_names():
+            return
+        try:
+            images = {}
+            for kind in ("check", "radio"):
+                for on in (False, True):
+                    for disabled in (False, True):
+                        images[kind, on, disabled] = self.tk.PhotoImage(
+                            master=self.root, data=indicator_png(kind, on, disabled, size), format="png")
+        except self.tk.TclError:
+            return
+        self._indicator_images = images
+        for kind, widget in (("check", "Checkbutton"), ("radio", "Radiobutton")):
+            style.element_create("Hcv.%s.indicator" % widget, "image", images[kind, False, False],
+                                 ("disabled", "selected", images[kind, True, True]),
+                                 ("disabled", images[kind, False, True]),
+                                 ("selected", images[kind, True, False]),
+                                 width=size + self.px(5), sticky="w")  # (the gap before the text)
+            style.layout("T" + widget, [("%s.padding" % widget, {"sticky": "nswe", "children": [
+                ("Hcv.%s.indicator" % widget, {"side": "left", "sticky": ""}),
+                ("%s.focus" % widget, {"side": "left", "sticky": "w", "children": [
+                    ("%s.label" % widget, {"sticky": "nswe"})]})]})])
+
     def _repaint(self):
         """The colours that are not ttk styles: the labels' own (tk_setPalette
         gives every label the theme's background, which hides the styles'),
         the log and the sidebar's markers."""
+        if not self.card.winfo_exists():
+            return
         palette = self.palette
         widgets = [self.root]
         while widgets:
@@ -2508,8 +2760,12 @@ class InstallerWindow:
             if widget.winfo_class() == "TLabel":
                 widget.configure(background="", foreground="")
         self.root.configure(background=palette["bg"])
-        self.card.configure(background=palette["bg"], highlightbackground=palette["border"],
-                            highlightcolor=palette["border"])
+        if self.classic:
+            self.card.configure(background=palette["bg"], highlightthickness=0)
+            self.step_list.configure(background=palette["row"])
+        else:
+            self.card.configure(background=palette["bg"], highlightthickness=1,
+                                highlightbackground=palette["border"], highlightcolor=palette["border"])
         self.canvas.configure(background=palette["bg"], yscrollincrement=self.px(20))
         self.log_text.configure(background=palette["log"], foreground=palette["fg"],
                                 insertbackground=palette["fg"], highlightbackground=palette["border"],
@@ -2519,7 +2775,7 @@ class InstallerWindow:
 
     def _styles(self, style, p):
         px = self.px
-        plain = self.theme == "plain"
+        classic = self.classic
         for name in ("TFrame", "TLabel", "TRadiobutton", "TCheckbutton"):
             style.configure(name, background=p["bg"])
         style.configure("TLabel", foreground=p["fg"], font="HcvBody")
@@ -2532,38 +2788,65 @@ class InstallerWindow:
         style.configure("SidebarBrand.TLabel", background=p["sidebar"], foreground=p["fg"], font="HcvSubtitle")
         style.configure("Sidebar.Switch.TCheckbutton", background=p["sidebar"], foreground=p["fg"],
                         font="HcvCaption")
-        style.configure("Step.TLabel", foreground=p["accent"], font="HcvCaption")
-        style.configure("Title.TLabel", foreground=p["fg"], font="HcvTitle")
+        style.configure("Sidebar.TCheckbutton", background=p["sidebar"], foreground=p["fg"], font="HcvCaption")
+        # the step list's rows: the current one as a selected list item in
+        # the classic look, in bold in the Modern one
+        style.configure("Row.TFrame", background=p["row"])
+        style.configure("RowCurrent.TFrame", background=p["row_current"])
+        style.configure("Row.TLabel", background=p["row"], foreground=p["fg"], font="HcvBody")
+        style.configure("RowCurrent.TLabel", background=p["row_current"], foreground=p["row_fg_current"],
+                        font="HcvBody" if classic else "HcvBodyStrong")
+        style.configure("RowMuted.TLabel", background=p["row"], foreground=p["row_muted"], font="HcvCaption")
+        style.configure("RowCurrentMuted.TLabel", background=p["row_current"],
+                        foreground=p["row_muted_current"], font="HcvCaption")
+        style.configure("Picture.TLabel", background=p["sidebar"], relief="sunken" if classic else "flat",
+                        borderwidth=2 if classic else 0, padding=0)
+        style.configure("Header.TFrame", background=p["header"])
+        style.configure("Step.TLabel", background=p["header"], foreground=p["accent"], font="HcvCaption")
+        style.configure("Title.TLabel", background=p["header"], foreground=p["fg"], font="HcvTitle")
+        style.configure("Description.TLabel", background=p["header"], foreground=p["muted"], font="HcvBody")
         style.configure("Subtitle.TLabel", foreground=p["fg"], font="HcvSubtitle")
         style.configure("Muted.TLabel", foreground=p["muted"], font="HcvBody")
         style.configure("Field.TLabel", foreground=p["fg"], font="HcvBodyStrong")
         style.configure("Hint.TLabel", foreground=p["muted"], font="HcvCaption")
-        style.configure("Tag.TLabel", background=p["tag"], foreground=p["accent"], font="HcvCaption",
-                        padding=(px(8), px(1)))
-        style.configure("Chip.TLabel", background=p["chip"], foreground=p["muted"], font="HcvCaption",
-                        padding=(px(8), px(2)))
-        style.configure("ChipOk.TLabel", background=p["chip"], foreground=p["ok"], font="HcvCaption",
-                        padding=(px(8), px(2)))
+        # (a tooltip's pale yellow box in the classic look, a pill in the Modern one)
+        style.configure("Tag.TLabel", background=p["tag"], foreground=p["fg"] if classic else p["accent"],
+                        font="HcvCaption", padding=(px(5), 0) if classic else (px(8), px(1)),
+                        relief="solid" if classic else "flat", borderwidth=1 if classic else 0)
+        # (the classic look's chips are status bar panes)
+        for name, colour in (("Chip.TLabel", p["muted"]), ("ChipOk.TLabel", p["ok"])):
+            style.configure(name, background=p["chip"], foreground=colour, font="HcvCaption",
+                            padding=(px(6), px(1)) if classic else (px(8), px(2)),
+                            relief="sunken" if classic else "flat", borderwidth=1 if classic else 0)
         style.configure("Warning.TLabel", foreground=p["error"], font="HcvBody")
         style.configure("Success.TLabel", foreground=p["ok"], font="HcvBody")
-        style.configure("Link.TLabel", foreground=p["accent"], font="HcvLink")
-        style.configure("HintLink.TLabel", foreground=p["accent"], font="HcvCaption")
+        style.configure("Link.TLabel", foreground=p["link"], font="HcvLink")
+        style.configure("HintLink.TLabel", foreground=p["link"], font="HcvCaption")
         style.configure("Option.TRadiobutton", font="HcvBodyStrong")
-        if plain:
-            style.configure("Accent.TButton", font="HcvBodyStrong")
+        if self.theme in ("plain", "classic"):
+            style.configure("Accent.TButton", font="HcvBodyStrong" if self.theme == "plain" else "HcvBody")
+        if classic:
+            style.configure("TButton", font="HcvBody", padding=(px(10), px(2)))
+            style.configure("Accent.TButton", padding=(px(10), px(2)))
+            style.configure("TEntry", fieldbackground="#ffffff", foreground=p["fg"])
+            style.configure("Horizontal.TProgressbar", background=p["accent"], troughcolor=p["bg"])
 
     # -- the layout
     def _build(self):
         tk, ttk, px = self.tk, self.ttk, self.px
         root = self.root
-        self.sidebar = ttk.Frame(root, style="Sidebar.TFrame", width=px(264), padding=(px(18), px(20)))
+        classic = self.classic
+        self.sidebar = ttk.Frame(root, style="Sidebar.TFrame", width=px(264),
+                                 padding=(px(14), px(14)) if classic else (px(18), px(20)))
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
+        if classic:
+            ttk.Separator(root, orient="vertical").pack(side="left", fill="y")
         brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
-        brand.pack(fill="x", pady=(0, px(22)))
+        brand.pack(fill="x", pady=(0, px(14 if classic else 22)))
         self._brand_icon = None
         try:
-            self._brand_icon = tk.PhotoImage(data=icon_png(px(36)), format="png")
+            self._brand_icon = tk.PhotoImage(data=icon_png(px(32 if classic else 36)), format="png")
             ttk.Label(brand, image=self._brand_icon, style="Sidebar.TLabel").pack(side="left", padx=(0, px(10)))
         except tk.TclError:
             pass
@@ -2572,84 +2855,121 @@ class InstallerWindow:
         ttk.Label(names, text="Halo CE for PS Vita", style="SidebarCurrent.TLabel").pack(anchor="w")
         ttk.Label(names, text="Install helper %s" % VERSION, style="SidebarMuted.TLabel").pack(anchor="w")
 
+        # the steps: in the classic look a white list box (sunken), each
+        # step with a check box and its number
+        self.step_list = tk.Frame(self.sidebar, relief="sunken" if classic else "flat",
+                                  borderwidth=2 if classic else 0, highlightthickness=0)
+        self.step_list.pack(fill="x")
         self.step_rows = []
+        self._row_frames = []
         for index, (name, need, _, _) in enumerate(self.PAGES):
             need = self.SIDEBAR_NEEDS.get(index, need)
-            row = ttk.Frame(self.sidebar, style="Sidebar.TFrame", padding=(0, px(5)))
+            row = ttk.Frame(self.step_list, style="Row.TFrame",
+                            padding=(px(4), px(3), 0, px(3)) if classic else (0, px(5)))
             row.pack(fill="x")
-            size = px(26)
+            size = px(18) if classic else px(26)
             marker = tk.Canvas(row, width=size, height=size, highlightthickness=0, borderwidth=0)
-            marker.pack(side="left", padx=(0, px(10)))
-            words = ttk.Frame(row, style="Sidebar.TFrame")
+            marker.pack(side="left", padx=(0, px(6 if classic else 10)), anchor="n" if classic else "center")
+            words = ttk.Frame(row, style="Row.TFrame")
             words.pack(side="left", fill="x", expand=True)
-            title = ttk.Label(words, text=name, style="Sidebar.TLabel")
+            # (a little room to the right: Windows' text can be drawn wider than Tk measured it)
+            title = ttk.Label(words, text=self.STEPS[index] if classic else name, style="Row.TLabel",
+                              padding=(0, 0, px(6), 0))
             title.pack(anchor="w")
-            state = ttk.Label(words, text=need, style="SidebarMuted.TLabel", padding=(0, 0, px(6), 0))
+            state = ttk.Label(words, text=need, style="RowMuted.TLabel", padding=(0, 0, px(6), 0))
             if 1 <= index <= self.LAST_STEP:
                 state.pack(anchor="w")
             for widget in (row, marker, words, title, state):
                 widget.bind("<Button-1>", lambda event, page=index: self.go(page))
                 widget.configure(cursor="hand2")
             self.step_rows.append((marker, title, state))
-        if self.sv_ttk:
-            ttk.Checkbutton(self.sidebar, text="Dark mode", variable=self.dark, style="Sidebar.Switch.TCheckbutton",
-                            command=self.toggle_theme).pack(side="bottom", anchor="w")
+            self._row_frames.append((row, words))
 
-        main = ttk.Frame(root, padding=(px(30), px(24), px(30), px(18)))
+        # the bottom of the sidebar: the looks, then above them the page's picture
+        if self.sv_ttk:
+            if self.modern_look:
+                ttk.Checkbutton(self.sidebar, text="Dark mode", variable=self.dark,
+                                style="Sidebar.Switch.TCheckbutton",
+                                command=self.toggle_theme).pack(side="bottom", anchor="w", pady=(px(6), 0))
+            ttk.Checkbutton(self.sidebar, text="Modern look", variable=self.modern,
+                            style="Sidebar.Switch.TCheckbutton" if self.modern_look else "Sidebar.TCheckbutton",
+                            command=self.toggle_look).pack(side="bottom", anchor="w", pady=(px(6), 0))
+        self.picture_box = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
+        self.picture_box.pack(side="bottom", fill="x", pady=(px(10), 0))
+        self.picture_label = ttk.Label(self.picture_box, style="Picture.TLabel", anchor="center")
+        self.picture_caption = ttk.Label(self.picture_box, style="SidebarMuted.TLabel", justify="left",
+                                         wraplength=px(228))
+
+        main = ttk.Frame(root)
         main.pack(side="left", fill="both", expand=True)
         self.main = main
-        header = ttk.Frame(main)
-        header.pack(side="top", fill="x", pady=(0, px(16)))
+        # the header: in the classic look a white band (a setup wizard's),
+        # with an etched line below
+        header = ttk.Frame(main, style="Header.TFrame",
+                           padding=(px(18), px(12), px(18), px(12)) if classic else (px(30), px(24), px(30), px(16)))
+        header.pack(side="top", fill="x")
+        self.header = header
+        if classic:
+            ttk.Separator(main).pack(side="top", fill="x")
         self.step_caption = ttk.Label(header, style="Step.TLabel")
         self.step_caption.pack(anchor="w")
-        title_row = ttk.Frame(header)
+        title_row = ttk.Frame(header, style="Header.TFrame")
         title_row.pack(fill="x", pady=(px(2), px(4)))
         self.title_label = ttk.Label(title_row, style="Title.TLabel")
         self.title_label.pack(side="left")
         self.tag_label = ttk.Label(title_row, style="Tag.TLabel")
-        self.description = self.paragraph(header, "", "Muted.TLabel")
+        self.description = self.paragraph(header, "", "Description.TLabel")
+        if classic:
+            self.description.pack_configure(padx=(px(14), 0))
 
+        content = ttk.Frame(main, padding=(px(18), px(12), px(18), px(12)) if classic
+                            else (px(30), 0, px(30), px(18)))
+        content.pack(side="top", fill="both", expand=True)
         # (packed from the bottom up, so the buttons stay on screen)
-        buttons = ttk.Frame(main)
+        buttons = ttk.Frame(content)
         buttons.pack(side="bottom", fill="x", pady=(px(12), 0))
-        self.back_button = ttk.Button(buttons, text="Back", width=10, command=lambda: self.go(self.page - 1))
+        self.back_button = ttk.Button(buttons, text="Back", width=10,
+                                      command=lambda: self.go(self.page - 1))
         self.back_button.pack(side="left")
         self.stop_button = ttk.Button(buttons, text="Stop", width=10, command=self.cancel.set, state="disabled")
         self.stop_button.pack(side="left", padx=(px(8), 0))
         self.next_button = ttk.Button(buttons, text="Next", width=14, style="Accent.TButton",
                                       command=lambda: self.go(self.page + 1))
         self.next_button.pack(side="right")
-        ttk.Separator(main).pack(side="bottom", fill="x", pady=(px(12), 0))
+        ttk.Separator(content).pack(side="bottom", fill="x", pady=(px(12), 0))
 
-        self.details = ttk.Frame(main)
-        self.log_text = tk.Text(self.details, height=8, wrap="word", state="disabled", relief="flat",
-                                borderwidth=0, highlightthickness=1, padx=px(8), pady=px(6), font="TkFixedFont")
+        self.details = ttk.Frame(content)
+        self.log_text = tk.Text(self.details, height=8, wrap="word", state="disabled",
+                                relief="sunken" if classic else "flat", borderwidth=2 if classic else 0,
+                                highlightthickness=0 if classic else 1, padx=px(8), pady=px(6),
+                                font="TkFixedFont")
         scroll = ttk.Scrollbar(self.details, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-        self.progress_frame = ttk.Frame(main)
+        self.progress_frame = ttk.Frame(content)
         self.progress_frame.pack(side="bottom", fill="x", pady=(px(14), 0))
         line = ttk.Frame(self.progress_frame)
         line.pack(fill="x")
         ttk.Label(line, textvariable=self.status, style="Muted.TLabel").pack(side="left")
-        self.details_button = ttk.Button(line, text="Show details", style="Toolbutton", command=self.toggle_details)
+        self.details_button = ttk.Button(line, text="Show details", style="TButton" if classic else "Toolbutton",
+                                         command=self.toggle_details)
         self.details_button.pack(side="right")
         ttk.Label(line, textvariable=self.percent, style="Muted.TLabel").pack(side="right", padx=(0, px(10)))
         self.progress = ttk.Progressbar(self.progress_frame, mode="determinate", maximum=1000)
         self.progress.pack(fill="x", pady=(px(6), 0))
 
-        # the step's card: a thin border around the page's own widgets,
-        # which scroll when the window is too short for them (a small screen
-        # at a large scale)
-        self.card = tk.Frame(main, highlightthickness=1, borderwidth=0)
+        # the step's card (a thin border around the page's own widgets in the
+        # Modern look), which scrolls when the window is too short for them
+        # (a small screen at a large scale)
+        self.card = tk.Frame(content, highlightthickness=0 if classic else 1, borderwidth=0)
         self.card.pack(side="top", fill="both", expand=True)
         self.canvas = tk.Canvas(self.card, highlightthickness=0, borderwidth=0)
         self.scrollbar = ttk.Scrollbar(self.card, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.body = ttk.Frame(self.canvas, padding=(px(22), px(18)))
+        self.body = ttk.Frame(self.canvas, padding=(px(4), px(4)) if classic else (px(22), px(18)))
         self._body_item = self.canvas.create_window(0, 0, window=self.body, anchor="nw")
         self.body.bind("<Configure>", lambda event: self._fit_body())
         self.canvas.bind("<Configure>", lambda event: self._fit_body())
@@ -2687,6 +3007,39 @@ class InstallerWindow:
         self.canvas.bind_all("<Button-4>", lambda event: scroll(-1))
         self.canvas.bind_all("<Button-5>", lambda event: scroll(1))
 
+    # -- the pictures
+    def picture(self, page: int):
+        """The page's picture, zoomed by whole pixels (so it shows as big
+        square pixels), or None when its file is missing or unreadable."""
+        if page in self._pictures:
+            return self._pictures[page]
+        image = None
+        name = PAGE_PICTURES[page][0] if 0 <= page < len(PAGE_PICTURES) else ""
+        path = picture_path(name) if name else ""
+        if path and os.path.isfile(path):
+            try:
+                image = self.tk.PhotoImage(master=self.root, file=path)
+                # (whole pixels that fit the sidebar's width at any scale)
+                zoom = max(1, int(PICTURE_ZOOM * self.scale + 1e-6))
+                if zoom > 1:
+                    image = image.zoom(zoom)
+            except self.tk.TclError:
+                image = None
+        self._pictures[page] = image
+        return image
+
+    def show_picture(self, page: int):
+        image = self.picture(page)
+        if image is None:
+            self.picture_label.pack_forget()
+            self.picture_caption.pack_forget()
+            return
+        self.picture_label.configure(image=image)
+        self.picture_caption.configure(text=PAGE_PICTURES[page][1])
+        if not self.picture_label.winfo_manager():
+            self.picture_label.pack(anchor="w")
+            self.picture_caption.pack(anchor="w", fill="x", pady=(self.px(4), 0))
+
     def refresh_sidebar(self):
         if not hasattr(self, "step_rows"):
             return
@@ -2697,12 +3050,19 @@ class InstallerWindow:
             current = index == self.page
             done = index in self.done_steps or index in staged
             skipped = index in self.skipped and not done
-            title.configure(style="SidebarCurrent.TLabel" if current else "Sidebar.TLabel")
+            row, words = self._row_frames[index]
+            row.configure(style="RowCurrent.TFrame" if current else "Row.TFrame")
+            words.configure(style="RowCurrent.TFrame" if current else "Row.TFrame")
+            title.configure(style="RowCurrent.TLabel" if current else "Row.TLabel")
+            state.configure(style="RowCurrentMuted.TLabel" if current else "RowMuted.TLabel")
             if 1 <= index <= self.LAST_STEP:
                 state.configure(text="Done" if done else "Skipped" if skipped else need)
-            marker.configure(background=p["sidebar"])
+            marker.configure(background=p["row_current"] if current else p["row"])
             marker.delete("all")
             size = int(marker.cget("width"))
+            if self.classic:
+                self._classic_marker(marker, size, index, done, skipped)
+                continue
             inset = max(1, self.px(1.5))
             box = (inset, inset, size - inset, size - inset)
             if not 1 <= index <= self.LAST_STEP:  # Welcome and Done: a dot
@@ -2725,6 +3085,33 @@ class InstallerWindow:
             else:
                 marker.create_oval(*box, outline=p["ring"], width=max(1, self.px(1.5)))
                 marker.create_text(size / 2, size / 2, text=str(index), fill=p["muted"], font="HcvCaption")
+
+    def _classic_marker(self, marker, size: int, index: int, done: bool, skipped: bool):
+        """A Windows 95/98 check box: sunken, ticked when the step is done,
+        greyed with a dash when it was skipped. Welcome and Done: an arrow."""
+        px = self.px
+        box = px(13)
+        x0 = (size - box) // 2
+        y0 = max(0, (size - box) // 2)
+        x1, y1 = x0 + box - 1, y0 + box - 1
+        if not 1 <= index <= self.LAST_STEP:
+            colour = "#ffffff" if index == self.page else "#000000"
+            marker.create_polygon(x0 + px(3), y0 + px(2), x1 - px(2), (y0 + y1) / 2, x0 + px(3), y1 - px(2),
+                                  fill=colour, outline=colour)
+            return
+        marker.create_rectangle(x0, y0, x1, y1, fill="#c0c0c0" if skipped else "#ffffff", outline="")
+        # the bevel: dark grey and black above and left, white and light grey below and right
+        for offset, top_left, bottom_right in ((0, "#808080", "#ffffff"), (1, "#000000", "#dfdfdf")):
+            marker.create_line(x0 + offset, y1 - offset, x0 + offset, y0 + offset, x1 - offset, y0 + offset,
+                               fill=top_left)
+            marker.create_line(x0 + offset, y1 - offset, x1 - offset, y1 - offset, x1 - offset, y0 + offset - 1,
+                               fill=bottom_right)
+        if done:
+            marker.create_line(x0 + box * 0.25, y0 + box * 0.50, x0 + box * 0.42, y0 + box * 0.68,
+                               x0 + box * 0.76, y0 + box * 0.30, fill="#000000", width=max(2, px(2)))
+        elif skipped:
+            marker.create_line(x0 + box * 0.28, y0 + box / 2, x0 + box * 0.72, y0 + box / 2, fill="#808080",
+                               width=max(2, px(2)))
 
     def step_state(self, index: int) -> str:
         """'current', 'done', 'skipped' or 'todo', as the sidebar shows it."""
@@ -2772,8 +3159,23 @@ class InstallerWindow:
         label = self.ttk.Label(parent, text=text, style=style, justify="left", anchor="w",
                                wraplength=self.px(600))
         label.pack(fill="x", anchor="w", pady=pady)
-        label.bind("<Configure>", lambda event: label.configure(wraplength=max(event.width - 4, 120)))
+        label.bind("<Configure>", self._wrap)
         return label
+
+    def _wrap(self, event):
+        """A label wrapped to the width it was given; the page fitted again
+        once it has (fewer lines can make the scroll bar unneeded, and the
+        page's own size does not change for it to notice)."""
+        width = max(event.width - 4, 120)
+        if str(event.widget.cget("wraplength")) != str(width):
+            event.widget.configure(wraplength=width)
+            if not getattr(self, "_fit_pending", None):
+                self._fit_pending = self.root.after_idle(self._fit_later)
+
+    def _fit_later(self):
+        self._fit_pending = None
+        if self.canvas.winfo_exists():
+            self._fit_body()
 
     def heading(self, text: str, explanation: str = ""):
         """A section's heading in the card, and its text."""
@@ -2823,16 +3225,22 @@ class InstallerWindow:
         row = self.ttk.Frame(parent or self.body)
         row.pack(fill="x", pady=(self.px(8), 0))
         # (the main button until the step is done; then Next is)
-        button = self.ttk.Button(row, text=text, command=lambda: self.start(prepare),
-                                 style="TButton" if self.step_state_done(self.page) else "Accent.TButton")
+        button = self.ttk.Button(row, text=text, command=lambda: self.start(prepare))
+        self.set_main_button(button, not self.step_state_done(self.page))
         button.pack(side="left")
         result = self.results.get(self.page)
         self.notice = self.ttk.Label(row, text=("✓ " + result.splitlines()[0]) if result else "",
                                      style="Success.TLabel", justify="left", wraplength=self.px(420))
         self.notice.pack(side="left", padx=(self.px(14), 0), fill="x", expand=True)
-        self.notice.bind("<Configure>", lambda event: event.widget.configure(
-            wraplength=max(event.width - 4, 120)))
+        self.notice.bind("<Configure>", self._wrap)
         return button
+
+    def set_main_button(self, button, main: bool):
+        """The page's main button: the accent colour in the Modern look, the
+        default button's black ring in the classic one."""
+        button.configure(style="Accent.TButton" if main else "TButton")
+        if self.classic:
+            button.configure(default="active" if main else "normal")
 
     def show_notice(self, text: str, problem: bool = True):
         if self.notice is not None and self.notice.winfo_exists():
@@ -2859,7 +3267,7 @@ class InstallerWindow:
             self.ttk.Label(row, text=tag, style="Tag.TLabel").pack(side="right", anchor="n", padx=(self.px(8), 0))
         words = self.ttk.Label(row, text=text, style=style, justify="left", wraplength=self.px(480))
         words.pack(side="left", fill="x", expand=True)
-        words.bind("<Configure>", lambda event: event.widget.configure(wraplength=max(event.width - 4, 120)))
+        words.bind("<Configure>", self._wrap)
         return row
 
     def log(self, message: str):
@@ -2884,16 +3292,62 @@ class InstallerWindow:
             self.details_button.configure(text="Show details")
 
     def toggle_theme(self):
+        """Dark mode (the Modern look's): kept in the settings."""
         self.follow_system = False
+        self.settings["dark"] = bool(self.dark.get())
+        save_settings(self.settings)
         self.apply_theme("dark" if self.dark.get() else "light")
 
+    def toggle_look(self):
+        """The Modern look check box: the window drawn again in the other
+        look (not while a step runs), kept in the settings."""
+        if self.busy() or not self.sv_ttk:
+            self.modern.set(self.modern_look)
+            return
+        if self.modern.get():
+            self.settings["look"] = "modern"
+            theme = self._modern_theme()
+        else:
+            self.settings["look"] = "classic"
+            self.follow_system = False
+            theme = "classic"
+        save_settings(self.settings)
+        self.set_look(theme)
+
+    def set_look(self, theme: str):
+        """Builds the window again in another look, keeping the page, the
+        fields (their variables), the log and whether it is shown."""
+        log = self.log_text.get("1.0", "end-1c")
+        details = self.details_shown
+        for child in self.root.winfo_children():
+            child.destroy()
+        self.notice = None
+        self.details_shown = False
+        self.theme = theme
+        self.dark.set(theme == "dark")
+        self.modern.set(self.modern_look)
+        self._make_fonts()
+        self._build()
+        self.apply_theme(theme)
+        if log:
+            self.append_log(log)
+        if details:
+            self.toggle_details(True)
+        self.show(self.page)
+        self._listen_for_system_theme()
+
     def _listen_for_system_theme(self):
+        """The Modern look follows the system's dark or light setting while it
+        changes (Windows: darkdetect's listener, once)."""
+        if self._listening or not (self.follow_system and self.modern_look and sys.platform == "win32"):
+            return
         try:
             import darkdetect
             listener = getattr(darkdetect, "listener", None)
             if listener:
                 threading.Thread(target=listener, args=(lambda name: self.messages.put(("theme", name)),),
                                  daemon=True).start()
+                self._listening = True
         except Exception:
             pass
 
@@ -2951,7 +3405,7 @@ class InstallerWindow:
                     self.status.set(text[:1].upper() + text[1:] if text else "Working...")
                     self.percent.set("%d%%" % (100 * done // total if total else 100))
                 elif message[0] == "theme":
-                    if self.follow_system and self.sv_ttk:
+                    if self.follow_system and self.sv_ttk and self.modern_look:
                         theme = "dark" if str(message[1]).lower() == "dark" else "light"
                         self.dark.set(theme == "dark")
                         self.apply_theme(theme)
@@ -3027,15 +3481,18 @@ class InstallerWindow:
         self.clear()
         self.back_button.configure(state="normal" if page else "disabled")
         if page == len(self.STEPS) - 1:
-            self.next_button.configure(text="Close", style="Accent.TButton", state="normal")
+            self.next_button.configure(text="Close", state="normal")
         elif page == 0:
-            self.next_button.configure(text="Get started", style="Accent.TButton", state="normal")
+            self.next_button.configure(text="Get started", state="normal")
         elif self.step_state_done(page):
-            self.next_button.configure(text="Next", style="Accent.TButton", state="normal")
+            self.next_button.configure(text="Next", state="normal")
         else:
             # the step's own button is the page's main one; this skips it
-            self.next_button.configure(text="Skip this step", style="TButton", state="normal")
+            self.next_button.configure(text="Skip this step", state="normal")
+        self.set_main_button(self.next_button, page == 0 or page == len(self.STEPS) - 1
+                             or self.step_state_done(page))
         getattr(self, "page_%d" % page)()
+        self.show_picture(page)
         self.refresh_sidebar()
 
     def page_0(self):
