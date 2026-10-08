@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OpenCE's Multiplayer screen (its PC menus' layout, c9ee319a), standing for the Xbox's when the player's Halo PC data is in the maps folder -->
+<menus root="mp/screen">
+	<widget name="mp/item_internet" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_options" string_index="2">
+		<on event="a start" run="port mp require online" open="browser/screen" otherwise="mp/offline"/>
+	</widget>
+	<widget name="mp/item_lan" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_options" string_index="3">
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="mp/item_code" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_labels" string_index="0">
+		<on event="a start" run="port mp require online" open="code/screen" otherwise="mp/offline"/>
+	</widget>
+	<widget name="mp/item_create_internet" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_options" string_index="2">
+		<on event="a start" run="port mp require online" open="setup/screen" otherwise="mp/offline"/>
+	</widget>
+	<widget name="mp/item_create_lan" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_options" string_index="3">
+		<on event="a start" run="error if no network connection" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="mp/item_coop" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_labels" string_index="1">
+		<on event="a start" open="ui\shell\main_menu\player_profiles_select\solo_game_player_profile_select_screen"/>
+	</widget>
+	<widget name="mp/item_split" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_labels" string_index="2">
+		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="mp/item_gametypes" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_options" string_index="5">
+		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen"/>
+	</widget>
+	<widget name="mp/label_join" top="78" string_index="0" type="text" left="19" width="232" height="32" string_list="mp_options" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5"/>
+	<widget name="mp/label_create" top="210" string_index="1" type="text" left="19" width="232" height="32" string_list="mp_options" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5"/>
+	<widget name="mp/header" left="35" top="11" width="605" height="59" bitmap="header_multiplayer"/>
+	<widget name="mp/description_picture" left="288" top="82" width="307" height="244" bitmap="mp_options"/>
+	<widget name="mp/description_text" type="text" left="290" top="322" width="300" height="72" string_list="mp_descriptions" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="mp/description" left="275" top="78" width="320" height="322" bitmap="list_field">
+		<child widget="mp/description_picture"/>
+		<child widget="mp/description_text"/>
+	</widget>
+	<widget name="mp/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items" description="mp/description">
+		<data input="port mp update desc"/>
+		<child widget="mp/item_internet" y="111"/>
+		<child widget="mp/item_lan" y="144"/>
+		<child widget="mp/item_code" y="177"/>
+		<child widget="mp/item_create_internet" y="243"/>
+		<child widget="mp/item_create_lan" y="276"/>
+		<child widget="mp/item_coop" y="309"/>
+		<child widget="mp/item_split" y="342"/>
+		<child widget="mp/item_gametypes" y="375"/>
+	</widget>
+	<widget name="mp/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="created" run="mp type menu initialize"/>
+		<on event="created" run="port mp screen init"/>
+		<child widget="mp/header"/>
+		<child widget="mp/label_join"/>
+		<child widget="mp/label_create"/>
+		<child widget="mp/list"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+	<widget name="mp/offline_text" type="text" left="68" top="110" width="520" height="200" string_list="offline" font="ui\large_ui" color="#FFFFFFFF"/>
+	<widget name="mp/offline" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<child widget="mp/header"/>
+		<child widget="mp/offline_text"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+</menus>

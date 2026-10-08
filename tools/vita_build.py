@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from .ninja_syntax import Writer
 from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
 from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, MONOCYPHER_DIR,
+                          EXPAT_DIR, EXPAT_SOURCES,
                           MONOCYPHER_SOURCES, musl_math_sources,
                           MUSL_MATH_DIR, ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
 
@@ -248,7 +249,7 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     platform_cflags = " ".join([
         abi, " ".join(PLATFORM_FLAGS), "-w", f"-include {prefix_header}", f"-include {platform_semantics_header}",
         f"-I{platform_dir}", f"-I{vita_include}", f"-I{port_include}", f"-I{TOML_DIR}", f"-I{KCP_DIR}",
-        f"-I{MONOCYPHER_DIR}", "-Isource -Isource/cseries", sdk_flags,
+        f"-I{MONOCYPHER_DIR}", f"-I{EXPAT_DIR}", "-Isource -Isource/cseries", sdk_flags,
     ])
     for source in sorted(platform_dir.glob("*.c")):
         if source.name not in LINUX_SOURCES_REPLACED:
@@ -261,6 +262,9 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     # own word-aligned loads (the game's -fmax-type-align=1 would make Argon2 crawl)
     for name in MONOCYPHER_SOURCES:
         add(MONOCYPHER_DIR / name, "vita_cc", " ".join([abi.replace("-fmax-type-align=1", ""), "-std=gnu11", "-w"]))
+    # the menus' XML parser (port/third_party/expat; menu_files.c)
+    for name in EXPAT_SOURCES:
+        add(EXPAT_DIR / name, "vita_cc", " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-w"]))
     for source in musl_math_sources():
         add(source, "vita_cc", " ".join([abi, "-std=gnu11", "-w", f"-I{MUSL_MATH_DIR}/include",
                                           f"-include {MUSL_MATH_DIR}/include/libm.h"]))

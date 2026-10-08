@@ -53,6 +53,13 @@ void platform_log(char const *format, ...);
 volatile int halo_system_link_request;
 volatile int halo_system_link_answer;
 volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
+/* (OpenCE's multiplayer screens' typing: menu_functions.c, the Vita's
+host) */
+volatile int halo_text_input_state;
+char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
+char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
+int halo_text_input_maximum;
+int halo_text_input_password;
 
 /* (network_client_manager.c's client states, in its order) */
 enum
@@ -135,7 +142,7 @@ static void system_link_shortcut_status(
 }
 
 /* the System Link screen, its history behind it */
-static boolean system_link_shortcut_open(
+boolean system_link_shortcut_open(
 	void)
 {
 	long main_menu = tag_loaded(UI_WIDGET_DEFINITION_TAG, system_link_main_menu);
@@ -205,6 +212,13 @@ void system_link_shortcut_update(
 	char build[0x20];
 
 	system_link_shortcut_status(main_menu_loaded);
+	/* (OpenCE's multiplayer screens: what they open from outside the
+	widgets' own events, menu_functions.c) */
+	{
+		extern void pc_menu_functions_update(boolean main_menu_loaded);
+
+		pc_menu_functions_update(main_menu_loaded);
+	}
 	if (request == SYSTEM_LINK_REQUEST_NONE)
 	{
 		system_link_shortcut_test(main_menu_loaded);

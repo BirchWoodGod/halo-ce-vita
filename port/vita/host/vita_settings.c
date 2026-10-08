@@ -3053,6 +3053,47 @@ static int ime_input(void)
 	return 1;
 }
 
+/* (each frame) a line of text the game's menus asked for
+(system_link_shortcut.h, port/linux/game/menu_functions.c): the system's
+keyboard opened on it, and the text typed handed back; nonzero while the
+keyboard is up (the game then gets no buttons) */
+static int game_text_input(void)
+{
+	int state = __atomic_load_n(&halo_text_input_state, __ATOMIC_ACQUIRE);
+	char typed[HALO_TEXT_INPUT_SIZE];
+	int result;
+
+	if (state == HALO_TEXT_INPUT_REQUESTED)
+	{
+		/* (not over the panel: the game's menus are not taking presses then) */
+		if (panel_open)
+			return 0;
+		halo_text_input_title[HALO_TEXT_INPUT_SIZE - 1] = 0;
+		halo_text_input_text[HALO_TEXT_INPUT_SIZE - 1] = 0;
+		if (vita_ime_open(halo_text_input_title, halo_text_input_text, halo_text_input_maximum,
+			halo_text_input_password) != 0)
+		{
+			vita_host_log("ime: the game's typing did not open");
+			__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_CANCELLED, __ATOMIC_RELEASE);
+			return 0;
+		}
+		__atomic_store_n(&halo_text_input_state, HALO_TEXT_INPUT_OPEN, __ATOMIC_RELEASE);
+		return 1;
+	}
+	if (state != HALO_TEXT_INPUT_OPEN)
+		return 0;
+	result = vita_ime_poll(typed, sizeof(typed));
+	if (result == 0)
+		return 1;
+	if (result > 0)
+		snprintf(halo_text_input_text, sizeof(halo_text_input_text), "%s", typed);
+	__atomic_store_n(&halo_text_input_state, result > 0 ? HALO_TEXT_INPUT_DONE : HALO_TEXT_INPUT_CANCELLED,
+		__ATOMIC_RELEASE);
+	/* (the presses that closed the keyboard are not the game's) */
+	held_after_close = previous_buttons;
+	return 1;
+}
+
 /* to the next tab shown, or the one before */
 static void tab_step(int step)
 {
@@ -3086,6 +3127,10 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		return 1;
 	/* (nor while the system's keyboard is up) */
 	if (ime_input())
+		return 1;
+	/* (the game's menus' own typing, the same keyboard: OpenCE's multiplayer
+	screens) */
+	if (game_text_input())
 		return 1;
 	/* (Host or Join with Ad hoc: the dialog done, System Link next, or a
 	message saying it did not join) */
