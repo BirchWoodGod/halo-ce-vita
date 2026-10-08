@@ -359,6 +359,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
 #include "map_share.h"
+#include "bots.h"
 #endif
 
 #ifdef HALO_LINUX
@@ -2046,6 +2047,30 @@ static void splitscreen_pregame_status_screen_update(
 			}
 		}
 
+#ifdef HALO_LINUX
+		/* port: the offline bots in this game (port/linux/game/bots.c),
+		whom the screen's four controller places do not show: "<this
+		machine's name> + 3 bots" */
+		{
+			static wchar_t name_with_bots[48];
+			long bot_count = 0;
+
+			for (player_index = 0; player_index < (long)NUMBEROF(game->players); player_index++)
+			{
+				if (network_player_is_valid(&game->players[player_index]) &&
+					bots_machine_is_bot(game->players[player_index].machine_index))
+				{
+					bot_count++;
+				}
+			}
+			if (bot_count > 0)
+			{
+				usnprintf(name_with_bots, NUMBEROF(name_with_bots), bot_count == 1 ? L"%s + 1 bot" : L"%s + %d bots",
+					machine_name, bot_count);
+				machine_name = name_with_bots;
+			}
+		}
+#endif
 		length = ustrlen(machine_name);
 		machine_name_text->parameters.text_box.text = ui_widget_realloc(
 			machine_name_text->parameters.text_box.text,

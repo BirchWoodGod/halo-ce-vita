@@ -1339,23 +1339,375 @@ static void bots_bot_reset(struct bots_bot *bot, long player_index, long bot_ind
 	bot->strafe_sign = 1.0f;
 }
 
-static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_action *action)
+/* a bot's tick: what it knows of itself, and the controls it builds */
+struct bots_tick
 {
-	struct bots_skill_definition const *skill = &bots_skills[bots_skill()];
-	struct player_datum *player = player_get(bot->player_index);
-	long now = game_time_get();
+	struct bots_skill_definition const *skill;
+	struct player_datum *player;
 	struct unit_datum *unit;
 	struct object_datum *object;
-	real_point3d eye, position;
-	unsigned long flags = 0;
-	real move_direction = 0.0f;
-	boolean moving = FALSE;
-	real throttle_scale = 1.0f;
+	long now;
+	real_point3d eye;
+	real_point3d position;
 	long weapon_index;
-	real vitality;
-	boolean fighting = FALSE;
-	real target_distance = 0.0f;
+	/* the controls: buttons, where it walks, how hard */
+	unsigned long flags;
+	boolean moving;
+	real move_direction;
+	real throttle_scale;
+	/* it has a target in sight, this far away */
+	boolean fighting;
+	real target_distance;
+	struct player_action *action;
+};
 
+/* looking for enemies (every third tick, the bots in turn; (debug)
+HALO_BOT_PEACEFUL=1: never, for the moving alone), and forgetting the one
+gone a while */
+static void bots_bot_look(struct bots_bot *bot, struct bots_tick *tick)
+{
+	if (tick->now >= bot->next_look_tick && !bots_peaceful())
+	{
+		long target = bots_find_target(bot, tick->player, tick->unit, &tick->eye);
+
+		bot->next_look_tick = tick->now + 3;
+		if (target != NONE)
+		{
+			struct player_datum *target_player = player_get(target);
+			struct object_datum *target_object = object_get(target_player->unit_index);
+			real_point3d ground;
+			long surface_index;
+
+			/* (a new target: the aim's error as it first turns to it) */
+			if (target != bot->target_player_index || tick->now - bot->target_seen_tick > TICKS_PER_SECOND * 2)
+			{
+				real error = tick->skill->aim_error_degrees * BOTS_DEGREES;
+
+				bot->target_first_seen_tick = tick->now;
+				bot->aim_error_yaw = bots_random_signed(bot) * error;
+				bot->aim_error_pitch = bots_random_signed(bot) * error * 0.6f;
+			}
+			bot->target_player_index = target;
+			bot->target_seen_tick = tick->now;
+			bot->target_last_position = target_object->object.position;
+			surface_index = bots_unit_surface(target_player->unit_index, &ground);
+			if (surface_index != NONE)
+				bot->target_last_surface_index = surface_index;
+		}
+	}
+	if (bot->target_player_index != NONE)
+	{
+		struct player_datum *target_player = player_try_and_get(bot->target_player_index);
+
+		if (!target_player || target_player->unit_index == NONE ||
+			tick->now - bot->target_seen_tick > TICKS_PER_SECOND * 10)
+		{
+			bot->target_player_index = NONE;
+		}
+	}
+}
+
+/* fighting the target seen in the last half second: aim (turning at its
+speed, leading, an error that settles), fire, a grenade, a blow, strafing */
+static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
+{
+	struct bots_skill_definition const *skill = tick->skill;
+	struct player_datum *target_player = player_get(bot->target_player_index);
+	struct object_datum *target_object = object_get(target_player->unit_index);
+	real_point3d aim_point = target_object->object.bounding_sphere_center;
+	long reaction_ticks = (long)(skill->reaction_seconds * TICKS_PER_SECOND);
+	long now = tick->now;
+	real desired_yaw, desired_pitch, dx, dy, dz, horizontal, turn, yaw_off, pitch_off, cone;
+	real settle = (real)exp(-1.0f / (skill->aim_settle_seconds * TICKS_PER_SECOND) * 1.1f);
+
+	tick->fighting = TRUE;
+	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
+	/* (leading a moving target by the projectile's flight) */
+	if (tick->weapon_index != NONE && skill->lead > 0.0f)
+	{
+		real speed = bots_projectile_speed(tick->weapon_index);
+
+		if (speed > 0.01f)
+		{
+			real ticks = MIN(tick->target_distance / speed, 30.0f);
+
+			aim_point.x += target_object->object.translational_velocity.i * ticks * skill->lead;
+			aim_point.y += target_object->object.translational_velocity.j * ticks * skill->lead;
+			aim_point.z += target_object->object.translational_velocity.k * ticks * skill->lead;
+		}
+	}
+	dx = aim_point.x - tick->eye.x;
+	dy = aim_point.y - tick->eye.y;
+	dz = aim_point.z - tick->eye.z;
+	horizontal = (real)sqrt(dx * dx + dy * dy);
+	/* the aim error settles while the target stays in sight, with a tremble */
+	bot->aim_error_yaw = bot->aim_error_yaw * settle +
+		bots_random_signed(bot) * skill->aim_error_degrees * 0.04f * BOTS_DEGREES;
+	bot->aim_error_pitch = bot->aim_error_pitch * settle +
+		bots_random_signed(bot) * skill->aim_error_degrees * 0.03f * BOTS_DEGREES;
+	desired_yaw = (real)atan2(dy, dx) + bot->aim_error_yaw;
+	desired_pitch = (real)atan2(dz, horizontal) + bot->aim_error_pitch;
+	turn = skill->turn_degrees_per_tick * BOTS_DEGREES;
+	yaw_off = bots_angle_difference(desired_yaw, bot->yaw);
+	pitch_off = desired_pitch - bot->pitch;
+	bot->yaw += PIN(yaw_off, -turn, turn);
+	bot->pitch += PIN(pitch_off, -turn, turn);
+
+	/* fire: once it has reacted, while its aim is on the target (its size
+	at that distance) */
+	yaw_off = (real)fabs(bots_angle_difference((real)atan2(dy, dx), bot->yaw));
+	pitch_off = (real)fabs((real)atan2(dz, horizontal) - bot->pitch);
+	cone = (real)atan(0.35f / MAX(tick->target_distance, 0.5f)) * skill->fire_cone + 0.01f;
+	if (now - bot->target_first_seen_tick >= reaction_ticks && now - bot->target_seen_tick <= 3 &&
+		yaw_off < cone && pitch_off < cone * 1.5f && tick->weapon_index != NONE)
+	{
+		short tap_ticks = bots_weapon_tap_ticks(tick->weapon_index);
+
+		if (tap_ticks > 0)
+		{
+			/* (a press a shot, released between: as fast as the weapon fires,
+			a little slower for the less skilled) */
+			if (now >= bot->burst_until_tick)
+			{
+				tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
+				bot->burst_until_tick = now + tap_ticks + (long)(bots_random(bot) % (1 + skill->pause_ticks / 3));
+			}
+		}
+		else if (now < bot->burst_until_tick)
+			tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
+		else if (now >= bot->pause_until_tick)
+		{
+			/* (bursts, with pauses between) */
+			bot->burst_until_tick = now + skill->burst_ticks + (long)(bots_random(bot) % 4);
+			bot->pause_until_tick = bot->burst_until_tick + skill->pause_ticks + (long)(bots_random(bot) % 4);
+			tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
+		}
+	}
+	/* a blow close up */
+	if (tick->target_distance < 1.1f && now >= bot->melee_tick)
+	{
+		tick->flags |= FLAG(_unit_control_use_equipment_bit);
+		bot->melee_tick = now + TICKS_PER_SECOND;
+	}
+	/* a grenade at middle range, now and then */
+	if (tick->target_distance > 6.0f && tick->target_distance < 22.0f && now >= bot->grenade_tick &&
+		(tick->unit->unit.grenade_counts[0] > 0 || tick->unit->unit.grenade_counts[1] > 0) &&
+		bots_random_real(bot) < skill->grenade_chance / TICKS_PER_SECOND * 3.0f &&
+		now - bot->target_first_seen_tick >= reaction_ticks)
+	{
+		tick->flags |= FLAG(_unit_control_throw_grenade_bit);
+		if (tick->unit->unit.grenade_counts[(long)tick->unit->unit.current_grenade_index] <= 0)
+			tick->action->desired_grenade_index = tick->unit->unit.grenade_counts[0] > 0 ? 0 : 1;
+		bot->grenade_tick = now + TICKS_PER_SECOND * 4;
+	}
+	/* strafing, to a side for a while; nearer or further to keep its
+	weapon's distance; a jump now and then */
+	if (now >= bot->strafe_until_tick)
+	{
+		bot->strafe_sign = bots_random_real(bot) < 0.5f ? -1.0f : 1.0f;
+		bot->strafe_until_tick = now + TICKS_PER_SECOND / 3 + (long)(bots_random(bot) % (TICKS_PER_SECOND));
+	}
+	{
+		real to_target = (real)atan2(dy, dx);
+		real range = bots_weapon_range(tick->weapon_index);
+		real forward = tick->target_distance > range * 1.3f ? 0.8f : tick->target_distance < range * 0.6f ? -0.5f : 0.0f;
+		real side = bot->strafe_sign;
+
+		tick->move_direction = (real)atan2((real)sin(to_target) * forward + (real)sin(to_target + BOTS_PI * 0.5f) * side,
+			(real)cos(to_target) * forward + (real)cos(to_target + BOTS_PI * 0.5f) * side);
+		tick->moving = TRUE;
+		tick->throttle_scale = 1.0f;
+	}
+	if (bots_random_real(bot) < skill->jump_chance / TICKS_PER_SECOND)
+		tick->flags |= FLAG(_unit_control_jump_bit);
+}
+
+/* walking to the goal, looking where it goes; there, a look about (and the
+last bit straight onto a spot or an item); a reload when no one is about */
+static void bots_bot_walk(struct bots_bot *bot, struct bots_tick *tick)
+{
+	real direction;
+
+	if (bots_follow_path(bot, tick->player->unit_index, &tick->position, &direction))
+	{
+		real turn = 12.0f * BOTS_DEGREES;
+		real off = bots_angle_difference(direction, bot->yaw);
+
+		tick->move_direction = direction;
+		tick->moving = TRUE;
+		bot->yaw += PIN(off, -turn, turn);
+		bot->pitch += PIN(-bot->pitch, -0.05f, 0.05f);
+	}
+	else
+	{
+		bot->yaw += 2.0f * BOTS_DEGREES;
+		if (bot->goal_kind == _bots_goal_roam || bot->goal_kind == _bots_goal_enemy)
+			bot->goal_kind = _bots_goal_none;
+		/* (on to a spot that must be stood on) */
+		if (bot->goal_kind == _bots_goal_objective && bot->goal_exact &&
+			bots_distance2d(&bot->goal_point, &tick->position) > 0.15f)
+		{
+			tick->move_direction = (real)atan2(bot->goal_point.y - tick->position.y, bot->goal_point.x - tick->position.x);
+			tick->moving = TRUE;
+			tick->throttle_scale = 0.5f;
+		}
+		/* (at an item: on to it) */
+		if (bot->goal_kind == _bots_goal_item)
+		{
+			struct object_datum *item = object_try_and_get_and_verify_type(bot->item_index, _object_mask_item);
+
+			if (item && bots_distance2d(&item->object.position, &tick->position) > 0.3f)
+			{
+				tick->move_direction = (real)atan2(item->object.position.y - tick->position.y,
+					item->object.position.x - tick->position.x);
+				tick->moving = TRUE;
+				tick->throttle_scale = 0.6f;
+			}
+		}
+	}
+	if (tick->weapon_index != NONE && bots_weapon_loaded(tick->weapon_index) < 0.4f &&
+		tick->now - bot->target_seen_tick > TICKS_PER_SECOND * 2)
+	{
+		tick->flags |= FLAG(_unit_control_weapon_reload_bit);
+	}
+}
+
+/* weapons: the other one when this one is empty; at the weapon it fetches,
+the action button (X) held, as a player holds it to swap a weapon (the swap:
+players_update_before_game's player_handle_weapon_swap), let go now and
+then, so that a second swap can follow a first */
+static void bots_bot_weapons(struct bots_bot *bot, struct bots_tick *tick)
+{
+	if (tick->weapon_index != NONE && bots_weapon_empty(tick->weapon_index))
+	{
+		short slot;
+
+		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+		{
+			long other = tick->unit->unit.weapon_object_indices[slot];
+
+			if (slot != tick->unit->unit.current_weapon_index && other != NONE && !bots_weapon_empty(other))
+			{
+				tick->action->desired_weapon_index = slot;
+				break;
+			}
+		}
+	}
+	if (bot->goal_kind == _bots_goal_item)
+	{
+		struct object_datum *item = object_try_and_get_and_verify_type(bot->item_index, _object_mask_weapon);
+
+		if (item && item->object.parent_object_index == NONE &&
+			bots_distance2d(&item->object.position, &tick->position) < 0.8f &&
+			fabs(item->object.position.z - tick->position.z) < 1.2f)
+		{
+			if (tick->now - bot->item_press_tick > TICKS_PER_SECOND)
+				bot->item_press_tick = tick->now;
+			if (tick->now - bot->item_press_tick < TICKS_PER_SECOND / 2)
+				tick->flags |= FLAG(_unit_control_swap_weapons_bit);
+		}
+	}
+}
+
+/* stuck: not moving for a second while it walks - a jump and a sidestep,
+then another path; somewhere else after three */
+static void bots_bot_unstick(struct bots_bot *bot, struct bots_tick *tick)
+{
+	long now = tick->now;
+
+	if (now - bot->stuck_tick >= TICKS_PER_SECOND)
+	{
+		if (tick->moving && bots_distance2d(&tick->position, &bot->stuck_position) < 0.4f &&
+			tick->object->object.parent_object_index == NONE)
+		{
+			bot->stuck_count++;
+			bot->unstick_until_tick = now + TICKS_PER_SECOND / 2;
+			bot->unstick_direction = tick->move_direction + (bots_random_real(bot) < 0.5f ? -1.0f : 1.0f) * BOTS_PI * 0.5f;
+			bot->path.valid = FALSE;
+			if (bot->stuck_count >= 3)
+			{
+				bot->goal_kind = _bots_goal_none;
+				bot->stuck_count = 0;
+				if (bots_globals.roam_point_count > 0)
+					bots_pick_roam_goal(bot, &tick->position);
+			}
+		}
+		else
+			bot->stuck_count = 0;
+		bot->stuck_position = tick->position;
+		bot->stuck_tick = now;
+	}
+	if (now < bot->unstick_until_tick)
+	{
+		tick->move_direction = bot->unstick_direction;
+		tick->moving = TRUE;
+		if (now == bot->unstick_until_tick - TICKS_PER_SECOND / 2)
+			tick->flags |= FLAG(_unit_control_jump_bit);
+	}
+}
+
+/* (debug) HALO_BOT_TRACE=<seconds>: each bot's state that often */
+static void bots_bot_trace(struct bots_bot *bot, long bot_index, struct bots_tick *tick)
+{
+	static long trace = -1;
+	long now = tick->now;
+
+	if (trace < 0)
+	{
+		char const *setting = getenv("HALO_BOT_TRACE");
+
+		trace = setting ? atol(setting) * TICKS_PER_SECOND : 0;
+	}
+	if (trace <= 0 || now % trace != bot_index)
+		return;
+	platform_log("bots: trace %ld bot %ld at (%.1f %.1f %.1f) goal %d (%.1f %.1f %.1f) s%ld path %s %d/%d%s "
+		"target %ld seen %ld ago%s stuck %d yaw %.0f thr %.2f/%.2f flags %lx search %ld fail %ld",
+		now, bot_index + 1, tick->position.x, tick->position.y, tick->position.z, (int)bot->goal_kind,
+		bot->goal_point.x, bot->goal_point.y, bot->goal_point.z, bot->goal_surface_index,
+		bot->path.valid ? "yes" : "no", (int)bot->path.step_index, (int)bot->path.step_count,
+		bot->path.steps_finish_path ? " (all)" : "",
+		bot->target_player_index == NONE ? -1L : (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(bot->target_player_index),
+		now - bot->target_seen_tick, tick->fighting ? " fighting" : "", (int)bot->stuck_count,
+		bot->yaw / BOTS_DEGREES, tick->action->throttle.i, tick->action->throttle.j, tick->action->control_flags,
+		bot->search_slot, bot->path_failures);
+	if (bot->goal_kind == _bots_goal_item && object_try_and_get(bot->item_index))
+	{
+		struct object_datum *item = object_get(bot->item_index);
+
+		platform_log("bots: trace item %s at (%.2f %.2f %.2f)", tag_get_name(item->definition_index),
+			item->object.position.x, item->object.position.y, item->object.position.z);
+	}
+	if (tick->weapon_index != NONE)
+	{
+		struct weapon_datum *weapon = weapon_get(tick->weapon_index);
+		short slot;
+
+		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+		{
+			long other = tick->unit->unit.weapon_object_indices[slot];
+
+			if (slot != tick->unit->unit.current_weapon_index && other != NONE)
+				platform_log("bots: trace other weapon %s", tag_get_name(object_get(other)->definition_index));
+		}
+		platform_log("bots: trace weapon %s slot %d loaded %d total %d fired %ld ago, aim off %.1f/%.1f deg dist %.1f",
+			tag_get_name(weapon->definition_index), (int)tick->unit->unit.current_weapon_index,
+			(int)weapon->weapon.magazines[0].rounds_loaded, (int)weapon->weapon.magazines[0].rounds_total,
+			now - weapon->weapon.game_time_last_fired, bot->aim_error_yaw / BOTS_DEGREES,
+			bot->aim_error_pitch / BOTS_DEGREES, tick->target_distance);
+	}
+}
+
+static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_action *action)
+{
+	struct bots_tick tick;
+	real vitality;
+
+	csmemset(&tick, 0, sizeof(tick));
+	tick.skill = &bots_skills[bots_skill()];
+	tick.player = player_get(bot->player_index);
+	tick.now = game_time_get();
+	tick.throttle_scale = 1.0f;
+	tick.action = action;
 	csmemset(action, 0, sizeof(*action));
 	action->desired_weapon_index = NONE;
 	action->desired_grenade_index = NONE;
@@ -1363,9 +1715,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	action->desired_facing.yaw = bot->yaw;
 	action->desired_facing.pitch = bot->pitch;
 
-	if (player->unit_index == NONE)
+	if (tick.player->unit_index == NONE)
 	{
-		/* (dead: it forgets its fight and path, and its search; the game
+		/* (dead: it forgets its fight, its path and its search; the game
 		respawns it) */
 		bots_search_take(bot, FALSE);
 		bot->unit_index = NONE;
@@ -1375,319 +1727,58 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->previous_control_flags = 0;
 		return;
 	}
-	unit = unit_get(player->unit_index);
-	object = object_get(player->unit_index);
-	if (bot->unit_index != player->unit_index)
+	tick.unit = unit_get(tick.player->unit_index);
+	tick.object = object_get(tick.player->unit_index);
+	if (bot->unit_index != tick.player->unit_index)
 	{
 		/* (spawned: it looks the way its unit faces) */
-		bot->unit_index = player->unit_index;
-		bot->yaw = (real)atan2(object->object.forward.j, object->object.forward.i);
+		bot->unit_index = tick.player->unit_index;
+		bot->yaw = (real)atan2(tick.object->object.forward.j, tick.object->object.forward.i);
 		bot->pitch = 0.0f;
-		bot->last_vitality = object->object.body_vitality + object->object.shield_vitality;
-		bot->stuck_position = object->object.position;
-		bot->stuck_tick = now;
+		bot->last_vitality = tick.object->object.body_vitality + tick.object->object.shield_vitality;
+		bot->stuck_position = tick.object->object.position;
+		bot->stuck_tick = tick.now;
 		bot->stuck_count = 0;
 		bot->goal_kind = _bots_goal_none;
-		bot->next_look_tick = now + (bot_index % 3);
+		bot->next_look_tick = tick.now + (bot_index % 3);
 	}
-	unit_get_head_position(player->unit_index, &eye);
-	position = object->object.position;
+	unit_get_head_position(tick.player->unit_index, &tick.eye);
+	tick.position = tick.object->object.position;
 
 	/* hurt: it turns to look for who did it */
-	vitality = object->object.body_vitality + object->object.shield_vitality;
+	vitality = tick.object->object.body_vitality + tick.object->object.shield_vitality;
 	if (vitality < bot->last_vitality - 0.01f)
-		bot->hurt_tick = now;
+		bot->hurt_tick = tick.now;
 	bot->last_vitality = vitality;
 
-	/* looking for enemies (every third tick, the bots in turn; (debug)
-	HALO_BOT_PEACEFUL=1: never, for the moving alone) */
-	if (now >= bot->next_look_tick && !bots_peaceful())
-	{
-		long target = bots_find_target(bot, player, unit, &eye);
-
-		bot->next_look_tick = now + 3;
-		if (target != NONE)
-		{
-			struct player_datum *target_player = player_get(target);
-			struct object_datum *target_object = object_get(target_player->unit_index);
-			real_point3d ground;
-			long surface_index;
-
-			if (target != bot->target_player_index || now - bot->target_seen_tick > TICKS_PER_SECOND * 2)
-			{
-				real error = skill->aim_error_degrees * BOTS_DEGREES;
-
-				bot->target_first_seen_tick = now;
-				bot->aim_error_yaw = bots_random_signed(bot) * error;
-				bot->aim_error_pitch = bots_random_signed(bot) * error * 0.6f;
-			}
-			bot->target_player_index = target;
-			bot->target_seen_tick = now;
-			bot->target_last_position = target_object->object.position;
-			surface_index = bots_unit_surface(target_player->unit_index, &ground);
-			if (surface_index != NONE)
-				bot->target_last_surface_index = surface_index;
-		}
-	}
-	/* (a target out of sight a moment ago, or dead: forgotten after a while) */
-	if (bot->target_player_index != NONE)
-	{
-		struct player_datum *target_player = player_try_and_get(bot->target_player_index);
-
-		if (!target_player || target_player->unit_index == NONE ||
-			now - bot->target_seen_tick > TICKS_PER_SECOND * 10)
-		{
-			bot->target_player_index = NONE;
-		}
-	}
-
-	weapon_index = bots_current_weapon(unit);
-	/* fighting: the target seen in the last half second */
-	if (bot->target_player_index != NONE && now - bot->target_seen_tick <= TICKS_PER_SECOND / 2)
-	{
-		struct player_datum *target_player = player_get(bot->target_player_index);
-		struct object_datum *target_object = object_get(target_player->unit_index);
-		real_point3d aim_point = target_object->object.bounding_sphere_center;
-		real desired_yaw, desired_pitch, dx, dy, dz, horizontal, turn, yaw_off, pitch_off, cone;
-		real settle = (real)exp(-1.0f / (skill->aim_settle_seconds * TICKS_PER_SECOND) * 1.1f);
-
-		fighting = TRUE;
-		target_distance = bots_distance3d(&eye, &aim_point);
-		/* (leading a moving target by the projectile's flight) */
-		if (weapon_index != NONE && skill->lead > 0.0f)
-		{
-			real speed = bots_projectile_speed(weapon_index);
-
-			if (speed > 0.01f)
-			{
-				real ticks = target_distance / speed;
-
-				if (ticks > 30.0f)
-					ticks = 30.0f;
-				aim_point.x += target_object->object.translational_velocity.i * ticks * skill->lead;
-				aim_point.y += target_object->object.translational_velocity.j * ticks * skill->lead;
-				aim_point.z += target_object->object.translational_velocity.k * ticks * skill->lead;
-			}
-		}
-		dx = aim_point.x - eye.x;
-		dy = aim_point.y - eye.y;
-		dz = aim_point.z - eye.z;
-		horizontal = (real)sqrt(dx * dx + dy * dy);
-		/* the aim error settles while the target stays in sight, with a
-		tremble */
-		bot->aim_error_yaw = bot->aim_error_yaw * settle + bots_random_signed(bot) * skill->aim_error_degrees * 0.04f * BOTS_DEGREES;
-		bot->aim_error_pitch = bot->aim_error_pitch * settle + bots_random_signed(bot) * skill->aim_error_degrees * 0.03f * BOTS_DEGREES;
-		desired_yaw = (real)atan2(dy, dx) + bot->aim_error_yaw;
-		desired_pitch = (real)atan2(dz, horizontal) + bot->aim_error_pitch;
-		turn = skill->turn_degrees_per_tick * BOTS_DEGREES;
-		yaw_off = bots_angle_difference(desired_yaw, bot->yaw);
-		pitch_off = desired_pitch - bot->pitch;
-		bot->yaw += PIN(yaw_off, -turn, turn);
-		bot->pitch += PIN(pitch_off, -turn, turn);
-		/* fire: once it has reacted, while its aim is on the target (its
-		size at that distance), in bursts */
-		yaw_off = (real)fabs(bots_angle_difference((real)atan2(dy, dx), bot->yaw));
-		pitch_off = (real)fabs((real)atan2(dz, horizontal) - bot->pitch);
-		cone = (real)atan(0.35f / MAX(target_distance, 0.5f)) * skill->fire_cone + 0.01f;
-		if (now - bot->target_first_seen_tick >= (long)(skill->reaction_seconds * TICKS_PER_SECOND) &&
-			now - bot->target_seen_tick <= 3 && yaw_off < cone && pitch_off < cone * 1.5f &&
-			weapon_index != NONE)
-		{
-			short tap_ticks = bots_weapon_tap_ticks(weapon_index);
-
-			if (tap_ticks > 0)
-			{
-				/* (a press a shot, released between: as fast as the weapon
-				fires, a little slower for the less skilled) */
-				if (now >= bot->burst_until_tick)
-				{
-					flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
-					bot->burst_until_tick = now + tap_ticks + (long)(bots_random(bot) % (1 + skill->pause_ticks / 3));
-				}
-			}
-			else if (now < bot->burst_until_tick)
-				flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
-			else if (now >= bot->pause_until_tick)
-			{
-				bot->burst_until_tick = now + skill->burst_ticks + (long)(bots_random(bot) % 4);
-				bot->pause_until_tick = bot->burst_until_tick + skill->pause_ticks + (long)(bots_random(bot) % 4);
-				flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
-			}
-		}
-		/* a blow close up */
-		if (target_distance < 1.1f && now >= bot->melee_tick)
-		{
-			flags |= FLAG(_unit_control_use_equipment_bit);
-			bot->melee_tick = now + TICKS_PER_SECOND;
-		}
-		/* a grenade at middle range, now and then */
-		if (target_distance > 6.0f && target_distance < 22.0f && now >= bot->grenade_tick &&
-			(unit->unit.grenade_counts[0] > 0 || unit->unit.grenade_counts[1] > 0) &&
-			bots_random_real(bot) < skill->grenade_chance / TICKS_PER_SECOND * 3.0f &&
-			now - bot->target_first_seen_tick >= (long)(skill->reaction_seconds * TICKS_PER_SECOND))
-		{
-			flags |= FLAG(_unit_control_throw_grenade_bit);
-			if (unit->unit.grenade_counts[(long)unit->unit.current_grenade_index] <= 0)
-				action->desired_grenade_index = unit->unit.grenade_counts[0] > 0 ? 0 : 1;
-			bot->grenade_tick = now + TICKS_PER_SECOND * 4;
-		}
-		/* strafing, to a side for a while; nearer or further to keep its
-		distance */
-		if (now >= bot->strafe_until_tick)
-		{
-			bot->strafe_sign = bots_random_real(bot) < 0.5f ? -1.0f : 1.0f;
-			bot->strafe_until_tick = now + TICKS_PER_SECOND / 3 + (long)(bots_random(bot) % (TICKS_PER_SECOND));
-		}
-		{
-			real to_target = (real)atan2(dy, dx);
-			real range = bots_weapon_range(weapon_index);
-			real forward = target_distance > range * 1.3f ? 0.8f : target_distance < range * 0.6f ? -0.5f : 0.0f;
-			real side = bot->strafe_sign;
-
-			move_direction = (real)atan2((real)sin(to_target) * forward + (real)sin(to_target + BOTS_PI * 0.5f) * side,
-				(real)cos(to_target) * forward + (real)cos(to_target + BOTS_PI * 0.5f) * side);
-			moving = TRUE;
-			throttle_scale = 1.0f;
-		}
-		if (bots_random_real(bot) < skill->jump_chance / TICKS_PER_SECOND)
-			flags |= FLAG(_unit_control_jump_bit);
-	}
+	bots_bot_look(bot, &tick);
+	tick.weapon_index = bots_current_weapon(tick.unit);
+	if (bot->target_player_index != NONE && tick.now - bot->target_seen_tick <= TICKS_PER_SECOND / 2)
+		bots_bot_fight(bot, &tick);
 
 	/* the goal, and the path to it (while fighting, only the game's
-	objective or a weapon close by) */
-	if (!fighting || bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_item)
-		bots_choose_goal(bot, bot->player_index, &position, fighting);
+	objective or a weapon close by: towards it, still facing the enemy) */
+	if (!tick.fighting || bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_item)
+		bots_choose_goal(bot, bot->player_index, &tick.position, tick.fighting);
 	bots_search_take(bot, TRUE);
-	if (!fighting)
-	{
-		real direction;
-
-		if (bots_follow_path(bot, player->unit_index, &position, &direction))
-		{
-			real turn = 12.0f * BOTS_DEGREES;
-			real off = bots_angle_difference(direction, bot->yaw);
-
-			move_direction = direction;
-			moving = TRUE;
-			/* (looking where it walks, level) */
-			bot->yaw += PIN(off, -turn, turn);
-			bot->pitch += PIN(-bot->pitch, -0.05f, 0.05f);
-		}
-		else
-		{
-			/* (there: a look about, and somewhere else next) */
-			bot->yaw += 2.0f * BOTS_DEGREES;
-			if (bot->goal_kind == _bots_goal_roam || bot->goal_kind == _bots_goal_enemy)
-				bot->goal_kind = _bots_goal_none;
-			/* (on to a spot that must be stood on) */
-			if (bot->goal_kind == _bots_goal_objective && bot->goal_exact &&
-				bots_distance2d(&bot->goal_point, &position) > 0.15f)
-			{
-				move_direction = (real)atan2(bot->goal_point.y - position.y, bot->goal_point.x - position.x);
-				moving = TRUE;
-				throttle_scale = 0.5f;
-			}
-			/* (at an item: on to it, the last bit straight) */
-			if (bot->goal_kind == _bots_goal_item)
-			{
-				struct object_datum *item = object_try_and_get_and_verify_type(bot->item_index, _object_mask_item);
-
-				if (item && bots_distance2d(&item->object.position, &position) > 0.3f)
-				{
-					move_direction = (real)atan2(item->object.position.y - position.y, item->object.position.x - position.x);
-					moving = TRUE;
-					throttle_scale = 0.6f;
-				}
-			}
-		}
-		/* reloading when there is no one about */
-		if (weapon_index != NONE && bots_weapon_loaded(weapon_index) < 0.4f && now - bot->target_seen_tick > TICKS_PER_SECOND * 2)
-			flags |= FLAG(_unit_control_weapon_reload_bit);
-	}
+	if (!tick.fighting)
+		bots_bot_walk(bot, &tick);
 	else if (bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_item)
 	{
-		/* (an objective or a weapon close by while fighting: towards it,
-		still facing the enemy) */
 		real direction;
 
-		if (bots_follow_path(bot, player->unit_index, &position, &direction))
-			move_direction = direction;
+		if (bots_follow_path(bot, tick.player->unit_index, &tick.position, &direction))
+			tick.move_direction = direction;
 	}
+	bots_bot_weapons(bot, &tick);
+	bots_bot_unstick(bot, &tick);
 
-	/* the other weapon when this one is empty */
-	if (weapon_index != NONE && bots_weapon_empty(weapon_index))
+	if (tick.moving)
 	{
-		short slot;
+		real relative = bots_angle_difference(tick.move_direction, bot->yaw);
 
-		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
-		{
-			long other = unit->unit.weapon_object_indices[slot];
-
-			if (slot != unit->unit.current_weapon_index && other != NONE && !bots_weapon_empty(other))
-			{
-				action->desired_weapon_index = slot;
-				break;
-			}
-		}
-	}
-	/* at the weapon it fetches: the action button (X) held, as a player
-	holds it to swap a weapon (the swap: players_update_before_game's
-	player_handle_weapon_swap); let go now and then, so that a second swap
-	can follow a first */
-	if (bot->goal_kind == _bots_goal_item)
-	{
-		struct object_datum *item = object_try_and_get_and_verify_type(bot->item_index, _object_mask_weapon);
-
-		if (item && item->object.parent_object_index == NONE &&
-			bots_distance2d(&item->object.position, &position) < 0.8f &&
-			fabs(item->object.position.z - position.z) < 1.2f)
-		{
-			if (now - bot->item_press_tick > TICKS_PER_SECOND)
-				bot->item_press_tick = now;
-			if (now - bot->item_press_tick < TICKS_PER_SECOND / 2)
-				flags |= FLAG(_unit_control_swap_weapons_bit);
-		}
-	}
-
-	/* stuck: not moving for a second while it walks - a jump and a sidestep,
-	then another path */
-	if (now - bot->stuck_tick >= TICKS_PER_SECOND)
-	{
-		if (moving && bots_distance2d(&position, &bot->stuck_position) < 0.4f &&
-			object->object.parent_object_index == NONE)
-		{
-			bot->stuck_count++;
-			bot->unstick_until_tick = now + TICKS_PER_SECOND / 2;
-			bot->unstick_direction = move_direction + (bots_random_real(bot) < 0.5f ? -1.0f : 1.0f) * BOTS_PI * 0.5f;
-			bot->path.valid = FALSE;
-			if (bot->stuck_count >= 3)
-			{
-				/* (somewhere else) */
-				bot->goal_kind = _bots_goal_none;
-				bot->stuck_count = 0;
-				if (bots_globals.roam_point_count > 0)
-					bots_pick_roam_goal(bot, &position);
-			}
-		}
-		else
-			bot->stuck_count = 0;
-		bot->stuck_position = position;
-		bot->stuck_tick = now;
-	}
-	if (now < bot->unstick_until_tick)
-	{
-		move_direction = bot->unstick_direction;
-		moving = TRUE;
-		if (now == bot->unstick_until_tick - TICKS_PER_SECOND / 2)
-			flags |= FLAG(_unit_control_jump_bit);
-	}
-
-	if (moving)
-	{
-		real relative = bots_angle_difference(move_direction, bot->yaw);
-
-		action->throttle.i = (real)cos(relative) * throttle_scale;
-		action->throttle.j = (real)sin(relative) * throttle_scale;
+		action->throttle.i = (real)cos(relative) * tick.throttle_scale;
+		action->throttle.j = (real)sin(relative) * tick.throttle_scale;
 	}
 	bot->pitch = PIN(bot->pitch, -1.4f, 1.4f);
 	bot->yaw = bots_angle_difference(bot->yaw, 0.0f);
@@ -1696,61 +1787,17 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 
 	/* a press is one tick held and the next released (the jump, the grenade,
 	the blow, the reload), as a player's buttons are; the trigger and the
-	action button may be held */
+	swap button may be held */
 	{
 		unsigned long pressed = FLAG(_unit_control_jump_bit) | FLAG(_unit_control_throw_grenade_bit) |
 			FLAG(_unit_control_use_equipment_bit) | FLAG(_unit_control_weapon_reload_bit);
 
-		flags &= ~(bot->previous_control_flags & pressed);
-		bot->previous_control_flags = flags;
+		tick.flags &= ~(bot->previous_control_flags & pressed);
+		bot->previous_control_flags = tick.flags;
 	}
-	action->control_flags = flags;
-	action->primary_trigger = TEST_FLAG(flags, _unit_control_weapon_primary_trigger_bit) ? 1.0f : 0.0f;
-
-	/* (debug) HALO_BOT_TRACE=<seconds>: each bot's state that often */
-	{
-		static long trace = -1;
-
-		if (trace < 0)
-		{
-			char const *setting = getenv("HALO_BOT_TRACE");
-
-			trace = setting ? atol(setting) * TICKS_PER_SECOND : 0;
-		}
-		if (trace > 0 && now % trace == bot_index)
-		{
-			platform_log("bots: trace %ld bot %ld at (%.1f %.1f %.1f) goal %d (%.1f %.1f %.1f) s%ld path %s %d/%d%s "
-				"target %ld seen %ld ago%s stuck %d yaw %.0f thr %.2f/%.2f flags %lx search %ld fail %ld",
-				now, bot_index + 1, position.x, position.y, position.z, (int)bot->goal_kind, bot->goal_point.x,
-				bot->goal_point.y, bot->goal_point.z, bot->goal_surface_index, bot->path.valid ? "yes" : "no",
-				(int)bot->path.step_index, (int)bot->path.step_count, bot->path.steps_finish_path ? " (all)" : "",
-				bot->target_player_index == NONE ? -1L : (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(bot->target_player_index),
-				now - bot->target_seen_tick, fighting ? " fighting" : "", (int)bot->stuck_count,
-				bot->yaw / BOTS_DEGREES, action->throttle.i, action->throttle.j, flags, bot->search_slot,
-				bot->path_failures);
-			if (bot->goal_kind == _bots_goal_item && object_try_and_get(bot->item_index))
-			{
-				struct object_datum *item = object_get(bot->item_index);
-
-				platform_log("bots: trace item %s at (%.2f %.2f %.2f) parent %lx flags %lx", tag_get_name(item->definition_index),
-					item->object.position.x, item->object.position.y, item->object.position.z,
-					(unsigned long)item->object.parent_object_index, (unsigned long)item->object.flags);
-			}
-			if (weapon_index != NONE)
-			{
-				struct weapon_datum *weapon = weapon_get(weapon_index);
-
-				long other = unit->unit.weapon_object_indices[unit->unit.current_weapon_index == 0 ? 1 : 0];
-
-				platform_log("bots: trace other weapon %s", other != NONE ? tag_get_name(object_get(other)->definition_index) : "none");
-				platform_log("bots: trace weapon %s %lx slot %d loaded %d total %d fired %ld ago, aim off %.1f/%.1f deg dist %.1f",
-					tag_get_name(weapon->definition_index), (unsigned long)weapon->definition_index, (int)unit->unit.current_weapon_index,
-					(int)weapon->weapon.magazines[0].rounds_loaded, (int)weapon->weapon.magazines[0].rounds_total,
-					now - weapon->weapon.game_time_last_fired, bot->aim_error_yaw / BOTS_DEGREES,
-					bot->aim_error_pitch / BOTS_DEGREES, target_distance);
-			}
-		}
-	}
+	action->control_flags = tick.flags;
+	action->primary_trigger = TEST_FLAG(tick.flags, _unit_control_weapon_primary_trigger_bit) ? 1.0f : 0.0f;
+	bots_bot_trace(bot, bot_index, &tick);
 }
 
 static void bots_report(void)
@@ -1800,10 +1847,6 @@ void bots_update_actions(struct player_action *actions)
 	if (!game_engine_running() || !network_game_is_splitscreen_local())
 		return;
 	started = vita_host_time_us();
-	if (!bots_helper.started)
-		bots_helper_start();
-	if (!bots_globals.map_ready)
-		bots_prepare_map();
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
 	{
@@ -1813,6 +1856,11 @@ void bots_update_actions(struct player_action *actions)
 
 		if (player->local_player_index != NONE || !bots_machine_is_bot(player->network_player_data.machine_index))
 			continue;
+		/* (the helper thread and the roaming places once a game has bots) */
+		if (!bots_helper.started)
+			bots_helper_start();
+		if (!bots_globals.map_ready)
+			bots_prepare_map();
 		bot_index = player->network_player_data.machine_index - BOTS_FIRST_MACHINE;
 		bot = &bots_globals.bots[bot_index];
 		if (bot->player_index != iterator.datum_index)
