@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .linux_build import (LINUX_PROFILE, MINIUPNPC_DEFINES, MINIUPNPC_DIR, MUSL_MATH_DIR, XDK_INCLUDE,
+from .linux_build import (ZLIB_DIR, ZLIB_SOURCES, ZLIB_DEFINES, LINUX_PROFILE, MINIUPNPC_DEFINES, MINIUPNPC_DIR, MUSL_MATH_DIR, XDK_INCLUDE,
                           compile_launcher, miniupnpc_sources, musl_math_sources, pgo_mode, pgo_profile,
                           profile_use_flags, xdk_headers)
 from .ninja_syntax import Writer
@@ -425,6 +425,12 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     objects.append(guest_object(TOML_DIR / "tomlc17.c", platform_cflags))
     # internet play's reliable streams (port/third_party/kcp; p2p.c)
     objects.append(guest_object(KCP_DIR / "ikcp.c", platform_cflags))
+    # the port's zlib (the maps' inflate: port/third_party/zlib; not the
+    # CPU's CRC32 instructions, which the guest's assembly step is not told
+    # it may use)
+    for name in ZLIB_SOURCES:
+        objects.append(guest_object(ZLIB_DIR / name, " ".join([platform_cflags, *ZLIB_DEFINES,
+                                                               "-U__ARM_FEATURE_CRC32"])))
     # the game's sin, pow and the rest, the same on every port
     # (port/include/halo_math.h)
     musl_math_cflags = " ".join([
