@@ -36,8 +36,8 @@ Evolved.
   Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
 - Campaign co-op over the network, experimental: two Vitas play a level
   together by system link, online or ad hoc (Campaign, a level and a
-  difficulty, then **Y: Play co-op**; the settings panel's Play page opens
-  Campaign for it; [port/vita/README.md](port/vita/README.md#multiplayer)).
+  difficulty, then **Y: Play co-op**;
+  [port/vita/README.md](port/vita/README.md#multiplayer)).
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality, sound, control and multiplayer
   options, custom maps and tester switches: hold **Select + Start** in game.
@@ -167,9 +167,9 @@ the PC version's Multiplayer screen, from OpenCE's PC menus:
   **Join by code** a host's code.
 - **Create Game**: **Internet** is Server Setup: the lobby name, max players,
   visibility (public: in everyone's server browser; private: joined by its
-  code) and password - the same settings as the settings panel's Play page,
-  kept there - then your profile, the map and the gametype; the lobby shows
-  your game's code. **LAN** is the System Link screen (Y creates a game).
+  code) and password, which are kept - then your profile, the map and the
+  gametype; the settings panel's Multiplayer tab shows your game's code.
+  **LAN** is the System Link screen (Y creates a game).
 - **Co-op campaign** (pick a level and a difficulty, then Y), **Split
   screen** and **Edit gametypes**, as before.
 
@@ -177,8 +177,9 @@ Internet and Join by code need **Connection: Online** (settings panel,
 Multiplayer); the screen says so otherwise. The pictures and text are read
 from your own `bitmaps.map` and `loc.map` the first time the screen opens;
 none of Bungie's files are in this project. Without the two files, the
-Xbox's Multiplayer screen opens as before, and the settings panel's Play
-page does all of the above either way.
+Xbox's Multiplayer screen opens as before: System Link hosts (online too,
+with the settings last chosen) and joins, and the settings panel's **Join
+with a code** joins a code; the public games' browser needs the files.
 
 Only the host needs the custom map: a Vita that joins without it is asked
 whether to download it from the host in the lobby (and, for a Custom
@@ -283,19 +284,12 @@ restart. Settings are kept in
 it is).
 
 - **Multiplayer**: the network (**Connection**: Same Wi-Fi, Ad hoc or
-  Online), the ad hoc room, and **Play**: one page for hosting and joining.
-  **Host a game** shows the steps, then opens the game's System Link
-  screen; under it, how others see your game: its **Lobby name** (typed on
-  the Vita's keyboard; your Vita's user name until you type one), **Max
-  players** (2 to 16), and online its **Visibility** (Private: joined by
-  code; Public: listed in the public games too) and a **Password**. **Host
-  co-op campaign** opens Campaign: pick a level and a difficulty, then Y.
-  Online, **Join with a code** and **Browse public games** (also in the game's
-  own Multiplayer menu with the PC menus: "PC multiplayer menus" above); **Games on this
-  network** opens the System Link list. Rows another Connection uses are
-  hidden. A joiner of a full game is told so. Your game's code and what
-  the game is doing show under the rows (see
-  [port/vita/README.md](port/vita/README.md#multiplayer)).
+  Online), and with Ad hoc the room and **Join the room** (the system's
+  dialog joins its group). Hosting and joining are in the game's own
+  Multiplayer menu ("PC multiplayer menus" above, or the Xbox's System
+  Link); without the Halo PC files, online, **Join with a code** types a
+  host's code here. Your game's code and what the game is doing show under
+  the rows (see [port/vita/README.md](port/vita/README.md#multiplayer)).
 - **Modded maps** (a Multiplayer page): the custom maps in your maps folder, with their size and
   kind (Xbox, or CE for Halo Custom Edition). Left and right turn a map off
   (it stays on the card but leaves the map list) or on; Square deletes it
@@ -475,8 +469,8 @@ Issues and pull requests are welcome. What is planned next is in the
 
 - **Performance** in the biggest fights: the render on the first core is
   the limit at the peak.
-- **Testing online and ad hoc multiplayer** between Vitas: the settings
-  panel's Play page (see [port/vita/README.md](port/vita/README.md)).
+- **Testing online and ad hoc multiplayer** between Vitas: the game's
+  Multiplayer menu (see [port/vita/README.md](port/vita/README.md)).
 - **The issues listed for the next update** in the roadmap.
 
 ### Reporting a crash or a problem
