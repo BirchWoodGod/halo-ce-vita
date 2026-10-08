@@ -15,7 +15,7 @@ reads it from here.
 #ifndef VITA_VERSION_H
 #define VITA_VERSION_H
 
-#define HALO_VITA_VERSION "1.1.0-beta.1"
+#define HALO_VITA_VERSION "1.1.0-beta.2"
 #define HALO_VITA_APP_VER "01.10"
 
 #endif
