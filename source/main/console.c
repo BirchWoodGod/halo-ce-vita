@@ -389,6 +389,11 @@ void console_startup(
 	FILE *file;
 	short newest_previous_command_index;
 
+#ifdef HALO_DEDICATED_SERVER
+	/* (port) a dedicated server's init.txt is its own commands, which it
+	runs itself (port/linux/game/dedicated_server.c): no script from a file */
+	return;
+#endif
 	if (!game_in_editor())
 	{
 		file = fopen("d:\\init.txt", "r");

@@ -165,7 +165,8 @@ struct p2p_lobby_entry
 	char map[P2P_LOBBY_MAP_SIZE];
 	char gametype[P2P_LOBBY_GAMETYPE_SIZE];
 	/* "Slayer to 50 on Blood Gulch", "Co-op: The Pillar of Autumn, Heroic",
-	then ": under way" or ": full or starting", and " (HALO PC)" */
+	then ": under way" or ": full or starting", " (HALO PC)" and
+	" (DEDICATED)" */
 	char rules[P2P_LOBBY_RULES_SIZE];
 	/* "5 of 16: name, name... +3 more" */
 	char players_line[P2P_LOBBY_PLAYERS_SIZE];
@@ -180,6 +181,9 @@ struct p2p_lobby_entry
 	int pc_map;
 	/* taking players; started; teams; joining it failed this run */
 	int open, in_progress, has_teams, failed;
+	/* hosted by a dedicated server (port/linux/DEDICATED_SERVER.md), whose
+	host has no player of its own */
+	int dedicated;
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any

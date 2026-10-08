@@ -27,5 +27,8 @@ char *config_file_read(const char *path, size_t *size);
 /* sets a boolean setting, and writes it into config.toml (only its line
 changes); 1 on success */
 int config_write_boolean(const char *name, int value);
+/* sets a setting for this run only (the file is left alone), from text as
+its environment variable would; 1 if the setting exists */
+int config_set_override(const char *name, const char *text);
 
 #endif

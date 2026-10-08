@@ -184,6 +184,16 @@ enum
 	/* where a running copy of the game takes invites from another one
 	started to open a link (127.0.0.1), sealed with a key of the user's */
 	HANDOFF_PORT = 47315,
+
+#ifdef HALO_DEDICATED_SERVER
+	/* a dedicated server, the internet's to reach (port/linux/DEDICATED_SERVER.md):
+	a peer's packets a second past which the rest are dropped (a game sends
+	a few score a second, a map download's acknowledgements some hundreds),
+	and the peers one address may have connected (players behind one NAT
+	share it; a relay's peers are told apart by the relay) */
+	DEDICATED_PEER_PACKETS_PER_SECOND = 2000,
+	DEDICATED_PEERS_PER_ADDRESS = 8,
+#endif
 };
 
 enum
@@ -268,6 +278,13 @@ struct peer
 	unsigned long stray_time;
 	/* a pong came back: it is reached both ways */
 	int two_way;
+#ifdef HALO_DEDICATED_SERVER
+	/* (a dedicated server) its packets this second, and since when; when an
+	excess was last logged */
+	int rate_count;
+	unsigned long rate_time;
+	unsigned long rate_logged_time;
+#endif
 	/* relays: those it offered; the allocation of the session (from its
 	secret); whether it is asked for through relays, and through which; the
 	endpoint is a relay's, since when; and when its addresses were last
@@ -1594,6 +1611,25 @@ int p2p_local_candidates(struct p2p_candidate *candidates, int maximum_count)
 	/* (the port the router forwards here, UPnP) */
 	if (p2p.upnp_forwarded && count < maximum_count)
 		candidates[count++] = p2p.upnp_candidate;
+#ifdef HALO_DEDICATED_SERVER
+	/* (a dedicated server's public address as its operator gives it,
+	sv_public_address: HALO_SERVER_PUBLIC_ADDRESS, a.b.c.d[:port], the port
+	the router forwards to internet play's) */
+	{
+		const char *text = getenv("HALO_SERVER_PUBLIC_ADDRESS");
+		unsigned int parts[4], port = 0;
+		char end = 0;
+		int fields = text ? sscanf(text, "%u.%u.%u.%u:%u%c", &parts[0], &parts[1], &parts[2], &parts[3], &port, &end) : 0;
+
+		if ((fields == 4 || fields == 5) && parts[0] < 256 && parts[1] < 256 && parts[2] < 256 && parts[3] < 256 &&
+			port < 65536 && count < maximum_count)
+		{
+			candidates[count].address = network_long((unsigned long)parts[0] << 24 | parts[1] << 16 | parts[2] << 8 |
+				parts[3]);
+			candidates[count++].port = fields == 5 && port ? network_short((unsigned short)port) : p2p.tunnel_port;
+		}
+	}
+#endif
 	for (index = 0; index < p2p.stun_count && count < maximum_count; index++)
 	{
 		int known;
@@ -2817,6 +2853,57 @@ static void stream_writeable(struct stream *stream)
 
 /* ---------- the tunnel */
 
+#ifdef HALO_DEDICATED_SERVER
+/* (a dedicated server) a peer's sealed packet, from where it came: 0 if it
+is dropped, as one of more than DEDICATED_PEER_PACKETS_PER_SECOND, or with
+the peer, the first from an address that has DEDICATED_PEERS_PER_ADDRESS
+peers connected already (not through a relay, whose peers share it) */
+static int dedicated_peer_admitted(struct peer *peer, const struct sockaddr_in *from)
+{
+	unsigned long now = p2p_now();
+	char text[32];
+
+	if (!peer->connected && !peer_relay_at(peer, from->sin_addr.s_addr, from->sin_port))
+	{
+		int index, count = 0;
+
+		for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+		{
+			struct peer *other = &p2p.peers[index];
+
+			if (other != peer && other->used && other->connected && !other->via_relay &&
+				other->endpoint.address == from->sin_addr.s_addr)
+			{
+				count++;
+			}
+		}
+		if (count >= DEDICATED_PEERS_PER_ADDRESS)
+		{
+			platform_log("Internet play: player %s refused: %d machines are connected from %s already", peer->name,
+				count, address_text(from->sin_addr.s_addr, 0, text));
+			drop_peer(peer, "too many machines from its address");
+			return 0;
+		}
+	}
+	if (elapsed(peer->rate_time, 1000))
+	{
+		peer->rate_time = now;
+		peer->rate_count = 0;
+	}
+	if (++peer->rate_count > DEDICATED_PEER_PACKETS_PER_SECOND)
+	{
+		if (!peer->rate_logged_time || elapsed(peer->rate_logged_time, 10000))
+		{
+			peer->rate_logged_time = now ? now : 1;
+			platform_log("Internet play: player %s sends more than %d packets a second; the rest are dropped",
+				peer->name, DEDICATED_PEER_PACKETS_PER_SECOND);
+		}
+		return 0;
+	}
+	return 1;
+}
+#endif
+
 static void tunnel_received(const unsigned char *packet, int size, const struct sockaddr_in *from)
 {
 	unsigned char inner[MAXIMUM_INNER_SIZE];
@@ -2870,6 +2957,10 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		size - TUNNEL_HEADER_SIZE, inner);
 	if (inner_size < 1)
 		return;
+#ifdef HALO_DEDICATED_SERVER
+	if (!dedicated_peer_admitted(peer, from))
+		return;
+#endif
 	newest = counter > peer->receive_highest;
 	packet_received(peer, counter);
 	peer_heard(peer, from->sin_addr.s_addr, from->sin_port, newest, inner[0] == _packet_pong && inner_size >= 5);
@@ -3033,6 +3124,13 @@ static void join_origin_set(const unsigned char *host, int public)
 the host whose record alone is taken (a public lobby entry's), or NULL */
 static int join_code(const char *code, int public, const unsigned char *host)
 {
+#ifdef HALO_DEDICATED_SERVER
+	/* (a dedicated server joins nothing: it only hosts) */
+	(void)public;
+	(void)host;
+	set_status("a dedicated server joins no games (code %.4s-%.4s ignored)", code, code + 4);
+	return 1;
+#endif
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
 		set_status("that is this machine's own code");
@@ -3056,6 +3154,14 @@ static int join_invite(const char *text, int public)
 	struct peer *peer;
 	int parsed = parse_invite(text, hash, token);
 
+#ifdef HALO_DEDICATED_SERVER
+	/* (a dedicated server joins nothing: it only hosts) */
+	if (parsed > 0)
+	{
+		set_status("a dedicated server joins no games (the invite is ignored)");
+		return 1;
+	}
+#endif
 	if (!parsed && parse_code(text, code, 1))
 		return join_code(code, 0, NULL);
 	if (parsed < 0)
@@ -3980,9 +4086,9 @@ void p2p_initialize(unsigned long local_address)
 		posix_socket_setsockopt(p2p.tunnel_socket, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
 		posix_socket_setsockopt(p2p.tunnel_socket, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 	}
-#if !defined(HALO_ANDROID) && !defined(HALO_VITA)
+#if !defined(HALO_ANDROID) && !defined(HALO_VITA) && !defined(HALO_DEDICATED_SERVER)
 	/* the first copy of the game takes the invites later ones are opened
-	with */
+	with (not a dedicated server, which joins nothing) */
 	p2p.has_handoff_key = handoff_key(p2p.handoff_key);
 	if (p2p.has_handoff_key)
 		p2p.handoff_socket = open_socket(SOCK_DGRAM, network_long(0x7F000001), network_short(HANDOFF_PORT), NULL);

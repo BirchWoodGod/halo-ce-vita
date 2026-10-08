@@ -596,4 +596,16 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     validator = build_dir / "map_validate"
     emit(obj_dir, output, cflags, ldflags, [profile] if profile else [], validator)
     n.build(outputs="linux", rule="phony", inputs=[output, validator])
+
+    # The dedicated server (ninja linux-server: port/linux/DEDICATED_SERVER.md):
+    # the same game compiled once more as a headless host on the Vitas' side
+    # of the Vita-only line (HALO_NET_AS_VITA) that can do nothing else
+    # (HALO_DEDICATED_SERVER: no window, sound or local player, and no join of
+    # another's game), into build/linux/halo-server. Not part of `ninja
+    # linux`; without the profile, which is the game's own (its code differs)
+    server_cflags, server_ldflags = lto_flags(sln, build_dir / "server" / "thinlto-cache")
+    server_output = build_dir / "halo-server"
+    emit(build_dir / "server" / "obj", server_output,
+         server_cflags + ["-DHALO_NET_AS_VITA=1", "-DHALO_DEDICATED_SERVER=1"], server_ldflags, [])
+    n.build(outputs="linux-server", rule="phony", inputs=[server_output])
     n.newline()

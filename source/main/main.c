@@ -669,6 +669,9 @@ struct _screenshot_and_framerate_globals
 typedef char screenshot_and_framerate_globals_size_assert[
 	sizeof(struct _screenshot_and_framerate_globals) == 0x38B ? 1 : -1];
 
+#ifdef HALO_DEDICATED_SERVER
+#include "dedicated_server.h"
+#endif
 #ifdef HALO_LINUX
 void network_test_update(boolean main_menu_loaded, real seconds);
 /* the Vita settings panel's Host a game and Join a game
@@ -727,7 +730,13 @@ static struct _main_globals main_globals = { 0 };
 static long main_loss_last_tick;
 static long main_respawn_last_tick;
 boolean debug_force_frame_rate_update = FALSE;
+#ifdef HALO_DEDICATED_SERVER
+/* (port) a dedicated server draws nothing: it has no player to draw for
+(port/linux/game/dedicated_server.c) */
+boolean debug_no_drawing = TRUE;
+#else
 boolean debug_no_drawing = FALSE;
+#endif
 boolean debug_game_save = FALSE;
 boolean debug_frame_rate = FALSE;
 boolean display_framerate = FALSE;
@@ -3534,6 +3543,11 @@ void main_rasterizer_throttle(
 			const char *setting = getenv("HALO_FRAME_CAP");
 			cap = setting ? atol(setting) : 30;
 		}
+#ifdef HALO_DEDICATED_SERVER
+		/* (a dedicated server: the tick rate with machines connected, a few
+		frames a second without) */
+		cap = dedicated_server_frame_cap();
+#endif
 		if (cap > 0 && vita_host_time_us && vita_host_sleep_us)
 		{
 			unsigned long long period = 1000000ull / (unsigned long long)cap;
@@ -4971,7 +4985,12 @@ void main_loop(
 		{
 			render_frame = TRUE;
 
-#ifdef HALO_LINUX
+#ifdef HALO_DEDICATED_SERVER
+			/* the dedicated server's hosting and commands
+			(port/linux/game/dedicated_server.c); none of the tests' sessions */
+			dedicated_server_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			MAIN_SPLIT(_main_split_input);
+#elif defined(HALO_LINUX)
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
 			system_link_shortcut_update(main_globals.main_menu_scenario_loaded);
@@ -5184,7 +5203,12 @@ void main_loop(
 					profile_render_end();
 				}
 			}
+#ifdef HALO_DEDICATED_SERVER
+			/* (a dedicated server: no loading screen either) */
+			else if (FALSE)
+#else
 			else
+#endif
 			{
 				profile_render_start();
 				main_pregame_render();

@@ -415,6 +415,13 @@ static void config_path(char *path, size_t size)
 	const char *root = getenv("HALO_DATA_ROOT");
 
 	snprintf(path, size, "%s/config.toml", root && *root ? root : ".");
+#elif defined(HALO_DEDICATED_SERVER)
+	/* the dedicated server's folder (-path, which the server sets as the data
+	root: posix_dedicated_server.c), not the executable's, which a server's
+	service may not write to */
+	const char *root = getenv("HALO_DATA_ROOT");
+
+	snprintf(path, size, "%s/config.toml", root && *root ? root : ".");
 #else
 	/* the executable's folder, with its separator */
 	const char *base = SDL_GetBasePath();
@@ -1410,6 +1417,34 @@ int config_write_boolean(const char *name, int value)
 	free(updated);
 	free(text);
 	return succeeded;
+}
+
+/* sets a setting for this run only, from text as its environment variable
+would (the dedicated server's commands: port/linux/game/dedicated_server.c);
+the file is left alone. A string's old text is kept, not freed: another
+thread may still be reading it (a few bytes, a command at a time). 1 if the
+setting exists */
+int config_set_override(const char *name, const char *text)
+{
+	long index = config_setting_index(name);
+
+	if (index < 0 || !text)
+		return 0;
+	/* (the file read first, so that it does not overwrite this later) */
+	config_value(name, config_settings[index].type);
+	pthread_mutex_lock(&config_lock);
+	if (config_settings[index].type == _config_string)
+	{
+		char *copy = strdup(text);
+
+		if (copy)
+			config_values[index].string = copy;
+	}
+	else
+		config_set_from_text(&config_values[index], config_settings[index].type, text);
+	halo_settings_generation++;
+	pthread_mutex_unlock(&config_lock);
+	return 1;
 }
 
 /* ---------- public code */

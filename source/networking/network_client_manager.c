@@ -392,6 +392,7 @@ symbols in this file:
 #include "networking/network_messages.h"
 #include "networking/network_server_manager.h"
 #include "text/unicode.h"
+#include <stdlib.h>
 #ifdef HALO_LINUX
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
@@ -2013,11 +2014,15 @@ boolean network_game_client_remove_player(
 				}
 			}
 
+			/* (port: a dedicated server's own client never had a player:
+			it stays, hosting) */
+#ifndef HALO_DEDICATED_SERVER
 			if (network_player_index == MAXIMUM_NUMBER_OF_PLAYERS)
 			{
 				network_game_client_all_local_players_have_quit();
 				network_event("no local players remain in the game, exiting the game now");
 			}
+#endif
 		}
 		else
 		{
@@ -2237,6 +2242,17 @@ boolean network_game_client_initiate_join_game(
 		0x157,
 		client && (client->state == _network_game_client_state_searching) && game && join_parameters && client->connection && !network_connection_connected(client->connection) && (game->platform == network_game_get_local_platform()));
 
+#ifdef HALO_DEDICATED_SERVER
+	/* (port) a dedicated server's client is its own game's, and nothing
+	else's: it joins no other game (its build plays on the Vitas' side of
+	the Vita-only line, which no PC player should get to pass for a Vita
+	by running a server: port/linux/DEDICATED_SERVER.md) */
+	if (!address || address->address.long_words[0] != IPV4_LOOPBACK_ADDRESS)
+	{
+		network_event("a dedicated server joins no other game");
+		return FALSE;
+	}
+#endif
 	client->join_in_progress = TRUE;
 	client->connect_process = 0;
 	client->connection_attempt_time = system_milliseconds();
@@ -2597,6 +2613,25 @@ static boolean network_game_client_game_record_is_valid(
 	return TRUE;
 }
 
+/* (port, automated tests only: not in release builds) HALO_NETWORK_TEST_CROSS_LINE=1:
+this client lists and tries to join a host on the other side of the
+Vita-only line, so that the tests see the host refuse it (its join token
+is the other kind's: network_game_generate_join_game_token), as a modified
+client would be refused (run_netns_online_test.sh dedicatedpc) */
+static boolean network_game_client_test_crosses_vita_line(
+	void)
+{
+#ifdef HALO_RELEASE
+	return FALSE;
+#else
+	static int crosses = -1;
+
+	if (crosses < 0)
+		crosses = getenv("HALO_NETWORK_TEST_CROSS_LINE") && !strcmp(getenv("HALO_NETWORK_TEST_CROSS_LINE"), "1");
+	return crosses != 0;
+#endif
+}
+
 static boolean add_advertised_game(
 	struct network_advertised_game *available_games,
 	struct message_server_game_advertise *advertisement)
@@ -2619,7 +2654,7 @@ static boolean add_advertised_game(
 #endif
 		static boolean told = FALSE;
 
-		if (vita_host != vita_client)
+		if (vita_host != vita_client && !network_game_client_test_crosses_vita_line())
 		{
 			if (!told)
 			{
@@ -3380,7 +3415,7 @@ boolean network_game_client_advertised_game_compatible(
 #ifdef HALO_PORT_VITA_NETWORK
 	vita_client = TRUE;
 #endif
-	if (vita_host != vita_client)
+	if (vita_host != vita_client && !network_game_client_test_crosses_vita_line())
 	{
 		/* (never listed: add_advertised_game drops them; a defence) */
 		csprintf(message, vita_client ?
