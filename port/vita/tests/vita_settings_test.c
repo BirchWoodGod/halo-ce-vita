@@ -646,6 +646,8 @@ static void test_controls_tab(void)
 		!strcmp(menu_line(3, line, sizeof(line)), "Reset controls\x02  >") &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) && menu_rows() == 3,
 		"Controls, Advanced: Stick deadzone, Reset controls, Show dev settings");
+	check(strstr(menu, "\n\x04" "Version " HALO_VITA_VERSION "\n") != NULL,
+		"Controls, Advanced: the build's version (vita_version.h) under the rows");
 	to_line("Reset controls");
 	check(strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: back") != NULL, "an action row's buttons: cross selects");
 	press(VITA_BUTTON_CROSS);
