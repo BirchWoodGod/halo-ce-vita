@@ -902,6 +902,24 @@ void rasterizer_lens_flare_submit_for_cluster(
 			struct structure_lens_flare *structure_lens_flare;
 			struct rasterizer_lens_flare_submit_parameters parameters;
 
+			/* port (from OpenCE, MrBruh's "Validate map tags before loading"):
+			only markers the BSP has (marker_count), each of a lens flare it
+			has (a map's indices); before the cache below, whose hits use the
+			marker too */
+			if (structure_lens_flare_marker_index>=marker_count)
+			{
+				lens_flare_data_error("marker");
+				break;
+			}
+			marker= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flare_markers, structure_lens_flare_marker_index, struct structure_lens_flare_marker);
+			/* port: and a lens flare the BSP has (a map's index) */
+			if (marker->lens_flare_index>=structure_bsp->lens_flares.count)
+			{
+				lens_flare_data_error("lens flare");
+				continue;
+			}
+			structure_lens_flare= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flares, marker->lens_flare_index, struct structure_lens_flare);
+
 #ifdef HALO_LINUX
 			/* (port) a marker's compressed direction and up vectors and its
 			definition are the same every frame (the structure's own data):
@@ -920,20 +938,6 @@ void rasterizer_lens_flare_submit_for_cluster(
 			else
 #endif
 			{
-			if (structure_lens_flare_marker_index>=marker_count)
-			{
-				lens_flare_data_error("marker");
-				break;
-			}
-			marker= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flare_markers, structure_lens_flare_marker_index, struct structure_lens_flare_marker);
-			/* port: and a lens flare the BSP has (a map's index) */
-			if (marker->lens_flare_index>=structure_bsp->lens_flares.count)
-			{
-				lens_flare_data_error("lens flare");
-				continue;
-			}
-			structure_lens_flare= TAG_BLOCK_GET_ELEMENT(&structure_bsp->lens_flares, marker->lens_flare_index, struct structure_lens_flare);
-
 			{
 				real_vector3d direction;
 				real_vector3d up;
