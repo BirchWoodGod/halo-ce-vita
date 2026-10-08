@@ -7573,16 +7573,36 @@ void process_ui_widgets(
 		ui_widgets_inhibit_processing(FALSE);
 #ifdef HALO_LINUX
 		/* port: the main menu that waited for the checks (main_screen_shell_load),
-		if the game is still at it; the presses made while they ran
-		dropped, as the intro drops them */
+		if the game is still at it and no screen was put up meanwhile; the
+		presses made while they ran dropped, as the intro drops them. A
+		screen opened while they ran - the Vita settings panel's Join a
+		game, Host a game or Host co-op campaign (system_link_shortcut.c),
+		the main menu behind it - stays: the main menu loaded over it
+		closed it (ui_widgets_close_all), and the System Link screen the
+		player asked for fell back to the main menu, its next A going into
+		Campaign (run_netns_online_test.sh coopmenu, 2 runs in 4) */
 		if (main_menu_waits_for_filesystem_checks)
 		{
+			boolean screen_up = FALSE;
+
 			main_menu_waits_for_filesystem_checks = FALSE;
-			error(_error_silent, "the filesystem checks are done; the main menu comes up");
+			for (widget_index = 0; widget_index<MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; widget_index++)
+			{
+				if (widget_globals.active_widgets[widget_index])
+					screen_up = TRUE;
+			}
 			if (main_menu_is_active())
 			{
 				event_manager_flush();
-				main_screen_shell_load();
+				if (screen_up)
+				{
+					error(_error_silent, "the filesystem checks are done; the screen opened meanwhile stays");
+				}
+				else
+				{
+					error(_error_silent, "the filesystem checks are done; the main menu comes up");
+					main_screen_shell_load();
+				}
 			}
 		}
 #endif
