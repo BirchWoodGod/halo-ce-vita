@@ -1230,7 +1230,8 @@ static boolean network_game_client_handle_message_server_begin_game(
 				progress) is not loaded: the joiner leaves at its next
 				frame, told why, rather than stopping as a damaged disc
 				(port/linux/game/map_share.c) */
-				if (!map_share_client_game_starting(client, network_game_client_get_game(client)->map.name))
+				if (!map_share_client_game_starting(client, network_game_client_get_game(client)->map.name,
+					(unsigned long)network_game_client_get_game(client)->map.version))
 				{
 					result = TRUE;
 				}

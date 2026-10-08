@@ -313,6 +313,9 @@ struct map_share_download
 	unsigned long long started_us;
 	/* what the player is told on leaving */
 	char message[600];
+	/* about a map that is no custom map (an Xbox level that could not be
+	precached: map_share_client_precache_failed) */
+	boolean plain_map;
 };
 
 /* ---------- prototypes */
@@ -2155,7 +2158,7 @@ void map_share_client_dispose(
 	{
 		if (download->state == _client_leaving)
 		{
-			platform_show_message("Halo: custom map", download->message);
+			platform_show_message(download->plain_map ? "Halo: map" : "Halo: custom map", download->message);
 		}
 		else
 		{
@@ -2175,7 +2178,8 @@ boolean map_share_client_busy(
 
 boolean map_share_client_game_starting(
 	struct network_game_client *client,
-	char const *level_name)
+	char const *level_name,
+	unsigned long host_identity)
 {
 	struct map_share_download *download = &map_share_download;
 	char why[320];
@@ -2198,8 +2202,28 @@ boolean map_share_client_game_starting(
 		return FALSE;
 	}
 	/* (the host's own machine plays the map it chose, network_client_manager.c) */
-	if (network_game_is_splitscreen_local() || global_network_game_server_get() || !level_name ||
-		custom_edition_maps_loadable(level_name, why, sizeof(why)) == _custom_edition_maps_loadable)
+	if (network_game_is_splitscreen_local() || global_network_game_server_get() || !level_name)
+	{
+		return TRUE;
+	}
+	/* (an Xbox level whose file here is missing, cut short or a Halo PC map
+	of its name: a game joined in progress precaches it only now, and that
+	stopped as a damaged disc) */
+	if (custom_edition_maps_stock_problem(level_name, host_identity, why, sizeof(why)))
+	{
+		char text[480];
+
+		map_share_client_reset();
+		download->client = client;
+		csstrncpy(download->level_name, level_name, sizeof(download->level_name) - 1);
+		csstrncpy(download->name, tag_name_strip_path(level_name), sizeof(download->name) - 1);
+		download->plain_map = TRUE;
+		snprintf(text, sizeof(text), "Couldn't load %s: %s.", custom_edition_maps_level_title(level_name), why);
+		network_event("map share: not loading the host's map '%s'", level_name);
+		map_share_client_fail(text);
+		return FALSE;
+	}
+	if (custom_edition_maps_loadable(level_name, why, sizeof(why)) == _custom_edition_maps_loadable)
 	{
 		return TRUE;
 	}
@@ -2219,6 +2243,35 @@ boolean map_share_client_game_starting(
 	map_share_client_fail(why);
 
 	return FALSE;
+}
+
+boolean map_share_client_precache_failed(
+	char const *level_name,
+	char const *why)
+{
+	struct map_share_download *download = &map_share_download;
+	struct network_game_client *client = global_network_game_client_get();
+	char const *name = level_name ? tag_name_strip_path(level_name) : "";
+	char text[480];
+
+	if (!client || global_network_game_server_get() || network_game_is_splitscreen_local() || !name[0])
+	{
+		return FALSE;
+	}
+	if (download->state == _client_leaving)
+	{
+		return TRUE;
+	}
+	map_share_client_reset();
+	download->client = client;
+	csstrncpy(download->level_name, level_name, sizeof(download->level_name) - 1);
+	csstrncpy(download->name, name, sizeof(download->name) - 1);
+	download->plain_map = !custom_edition_maps_shareable(level_name);
+	snprintf(text, sizeof(text), "Couldn't load %s: %s.", custom_edition_maps_level_title(level_name), why);
+	network_event("map share: the host's map '%s' could not be precached here; leaving", level_name);
+	map_share_client_fail(text);
+
+	return TRUE;
 }
 
 boolean map_share_client_update(
@@ -2347,7 +2400,7 @@ boolean map_share_client_update(
 
 	if (download->state == _client_leaving)
 	{
-		platform_show_message("Halo: custom map", download->message);
+		platform_show_message(download->plain_map ? "Halo: map" : "Halo: custom map", download->message);
 		csmemset(download, 0, sizeof(*download));
 		return FALSE;
 	}

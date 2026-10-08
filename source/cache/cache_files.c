@@ -254,6 +254,11 @@ void texture_cache_close(
 	void);
 void display_error_damaged_media(
 	void);
+#ifdef HALO_LINUX
+void display_error_damaged_media_reason(
+	char const *format,
+	...);
+#endif
 void texture_cache_open(
 	void);
 void sound_idle(
@@ -1213,15 +1218,108 @@ void cache_files_show_multiplayer_unavailable(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the map whose precache last failed (cache_files_precache_failed),
+not tried again every second (cache_files_give_time_to_precache) until a map
+is chosen or a game's settings name one again */
+static char cache_files_precache_failed_map[256];
+
+void cache_files_precache_failure_forget(
+	void)
+{
+	cache_files_precache_failed_map[0] = 0;
+
+	return;
+}
+
+/* (map_share.c's: a joiner leaves its game, told why) */
+boolean map_share_client_precache_failed(char const *level_name, char const *why);
+
+/* A map that could not be precached: missing, cut short, a Halo PC map named
+as an Xbox level with PC maps off, too big (cache_files_windows.c says which).
+Retail Halo stopped at the damaged disc error for any of them, as this did:
+in a joiner's lobby, the host's map (Ben's Battle Creek, October 2026), the
+game closing. Now the player is told why: a joiner leaves its game at its next
+frame (`blocking` FALSE: the lobby's precache, map_share.c), a host is told
+at once, and a map being loaded is recorded as refused, so game_load fails
+and the menu says why (custom_edition_cache_load_failure_show;
+network_game_create_game_objects ends a network game). The menus' own map
+has no menu to go back to: FALSE, and the damaged disc as before. */
+boolean cache_files_precache_failed(
+	char const *map_name,
+	boolean blocking)
+{
+	void platform_log(char const *format, ...);
+	char why[256];
+	char const *name = tag_name_strip_path(map_name ? map_name : "");
+
+	if (!csstrcasecmp(name, "ui"))
+	{
+		return FALSE;
+	}
+	if (!name[0])
+	{
+		snprintf(why, sizeof(why), "no map was named");
+		platform_log("map: a map with no name could not be precached");
+		error(_error_silent, "cache: a map with no name could not be precached");
+		if (blocking)
+		{
+			halo_map_load_refused("", why);
+		}
+		return TRUE;
+	}
+	cache_files_precache_failure_describe(map_name, why, sizeof(why));
+	platform_log("map: %s could not be precached: %s", name, why);
+	error(_error_silent, "cache: '%s' could not be precached: %s", map_name, why);
+	csstrncpy(cache_files_precache_failed_map, map_name, sizeof(cache_files_precache_failed_map) - 1);
+	cache_files_precache_failed_map[sizeof(cache_files_precache_failed_map) - 1] = 0;
+	if (!blocking)
+	{
+		/* (a host's or a lone player's map chosen in the menus: said now,
+		once (the map is not tried again until chosen again); the game
+		does not start without it) */
+		if (!map_share_client_precache_failed(map_name, why))
+		{
+			void platform_show_message(char const *title, char const *message);
+			char message[320];
+
+			snprintf(message, sizeof(message), "Couldn't load %s: %s.", custom_edition_maps_level_title(map_name), why);
+			platform_show_message("Halo: map", message);
+		}
+		return TRUE;
+	}
+	halo_map_load_refused(map_name, why);
+
+	return TRUE;
+}
+#endif
+
 boolean cache_files_give_time_to_precache(
 	char const *map_name)
 {
 	boolean result = FALSE;
 
+#ifdef HALO_LINUX
+	/* (port: no map named, nothing to precache: an empty name passed for
+	precached when a cache file was empty, and was a damaged disc when none
+	was, network_game_client_update_precache_status) */
+	if (!map_name || !map_name[0])
+	{
+		return FALSE;
+	}
+#endif
 	if (cache_files_precache_map_loaded(map_name))
 	{
 		result = TRUE;
 	}
+#ifdef HALO_LINUX
+	/* (port: one that failed is not tried again each second) */
+	else if (cache_files_precache_failed_map[0] && map_name &&
+		!csstrcasecmp(cache_files_precache_failed_map, map_name) &&
+		!cache_files_precache_in_progress())
+	{
+	}
+#endif
 	else
 	{
 		if (cache_files_precache_in_progress() &&
@@ -1235,8 +1333,22 @@ boolean cache_files_give_time_to_precache(
 			real progress;
 			short status = cache_files_precache_map_status(&progress);
 
+#ifdef HALO_LINUX
+			/* port: said, not a damaged disc (cache_files_precache_failed) */
+			if (status == 2)
+			{
+				cache_files_precache_map_end();
+				if (!cache_files_precache_failed(map_name, FALSE))
+				{
+					display_error_damaged_media_reason("the menus' map %s could not be copied to the map cache",
+						map_name ? map_name : "");
+					display_error_damaged_media();
+				}
+			}
+#else
 			if (status == 2)
 				display_error_damaged_media();
+#endif
 			else if (status == 1)
 				cache_files_precache_map_end();
 		}
@@ -1244,7 +1356,17 @@ boolean cache_files_give_time_to_precache(
 		{
 			cache_files_precache_set_priority(0);
 			if (!cache_files_precache_map_begin(map_name, FALSE))
+#ifdef HALO_LINUX
+			{
+				if (!cache_files_precache_failed(map_name, FALSE))
+				{
+					display_error_damaged_media_reason("the menus' map %s could not be precached", map_name ? map_name : "");
+					display_error_damaged_media();
+				}
+			}
+#else
 				display_error_damaged_media();
+#endif
 		}
 	}
 

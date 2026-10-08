@@ -1323,7 +1323,13 @@ check below runs, in turn, and the first that refuses ends it:
 A custom map missing or different (check 2) may then be downloaded from
 the host (port/linux/game/map_share.c) rather than refused, and a Custom
 Edition map with PC maps off (check 3) played once the player turns PC
-maps on there. */
+maps on there.
+Between 2 and 3, an Xbox level the host plays as one: this machine's file of
+it must be the Xbox map, whole (custom_edition_maps_stock_problem). Missing,
+cut short, or a Halo PC map of that name (Halo PC's beavercreek.map in the
+maps folder, PC maps off), precaching it in the lobby stopped the game as a
+damaged disc (a report of October 2026: joining a public Battle Creek game
+from the server browser); it is refused here with the reason. */
 enum network_game_client_map_check
 {
 	_network_game_client_map_playable,
@@ -1333,18 +1339,24 @@ enum network_game_client_map_check
 	_network_game_client_map_custom_needs_pc_maps,
 	_network_game_client_map_custom_needs_resource_maps,
 	_network_game_client_map_custom_unloadable,
+	/* an Xbox level whose file here is missing, damaged or a Halo PC map
+	(the reason in `reason`) */
+	_network_game_client_map_stock_unloadable,
 };
 
 static short network_game_client_map_check(
 	struct network_game_map const *map,
 	char build[0x20],
 	char *missing_files,
-	long missing_files_size)
+	long missing_files_size,
+	char *reason,
+	long reason_size)
 {
 	boolean missing;
 
 	build[0] = 0;
 	missing_files[0] = 0;
+	reason[0] = 0;
 	if (network_game_is_splitscreen_local())
 		return _network_game_client_map_playable;
 	/* 1. the build */
@@ -1358,6 +1370,9 @@ static short network_game_client_map_check(
 	saying why, custom_edition_cache.c) */
 	if (global_network_game_server_get())
 		return _network_game_client_map_playable;
+	/* an Xbox level: this machine's file of it, as it will be precached */
+	if (custom_edition_maps_stock_problem(map->name, (unsigned long)map->version, reason, reason_size))
+		return _network_game_client_map_stock_unloadable;
 	switch (custom_edition_maps_loadable(map->name, missing_files, missing_files_size))
 	{
 	case _custom_edition_maps_needs_pc_maps:
@@ -1380,6 +1395,7 @@ static void network_game_client_map_refusal_show(
 	char const *missing_files,
 	char const *why)
 {
+	void platform_log(char const *format, ...);
 	char const *name = tag_name_strip_path(map->name);
 	char message[512];
 	int length = 0;
@@ -1401,6 +1417,11 @@ static void network_game_client_map_refusal_show(
 			"The host is playing the PC (Custom Edition) map %s, and PC maps is off. Turn on PC maps "
 			"(Multiplayer > Modded maps) to play it.", name);
 		break;
+	case _network_game_client_map_stock_unloadable:
+		length = snprintf(message, sizeof(message), "Couldn't load %s: %s.", custom_edition_maps_level_title(map->name),
+			missing_files);
+		platform_log("map: the host's %s can't be played here: %s", name, missing_files);
+		break;
 	case _network_game_client_map_custom_needs_resource_maps:
 		length = snprintf(message, sizeof(message),
 			"The host is playing the PC (Custom Edition) map %s, which needs %s from Halo Custom Edition in "
@@ -1414,7 +1435,7 @@ static void network_game_client_map_refusal_show(
 	}
 	if (why && why[0] && length > 0 && length < (int)sizeof(message))
 		snprintf(message + length, sizeof(message) - (size_t)length, "\n\n%s", why);
-	platform_show_message("Halo: custom map", message);
+	platform_show_message(check == _network_game_client_map_stock_unloadable ? "Halo: map" : "Halo: custom map", message);
 
 	return;
 }
@@ -1476,13 +1497,23 @@ boolean network_game_client_game_settings_updated(
 		{
 			char build[0x20];
 			char missing_files[96];
+			char reason[256];
 			char why[320];
 			short check;
 
 			why[0] = 0;
+			/* port: which map the host's game settings name, in halo.log: the
+			name the lobby precaches, and none before it */
+			{
+				void platform_log(char const *format, ...);
+
+				platform_log("join: the host's map is %s (copy 0x%08lX)", message_packet->map.name,
+					(unsigned long)message_packet->map.version);
+			}
 			/* port: a download of another map stops (the host changed maps) */
 			map_share_client_map_changed(message_packet->map.name);
-			check = network_game_client_map_check(&message_packet->map, build, missing_files, sizeof(missing_files));
+			check = network_game_client_map_check(&message_packet->map, build, missing_files, sizeof(missing_files),
+				reason, sizeof(reason));
 			/* port: a custom map missing here, or another copy, is offered
 			for download from the host; the joiner stays in the lobby, and
 			precaches it once it has it (map_share.c) */
@@ -1510,7 +1541,8 @@ boolean network_game_client_game_settings_updated(
 			connection lost that the failure would otherwise give) */
 			else if (check != _network_game_client_map_playable)
 			{
-				network_game_client_map_refusal_show(&message_packet->map, check, build, missing_files, why);
+				network_game_client_map_refusal_show(&message_packet->map, check, build,
+					check == _network_game_client_map_stock_unloadable ? reason : missing_files, why);
 				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
 				return FALSE;
 			}
@@ -2062,6 +2094,16 @@ void network_game_client_accepted_into_game(
 		network_event(
 			"successfully joined a net game; our machine is #%d",
 			message_packet->machine_index);
+#ifdef HALO_LINUX
+		/* port (the tests: run_netns_online_test.sh fullcache): the lobby's
+		precache at once, as a frame of the pregame does when the host's
+		game settings are a frame or more behind its acceptance (the
+		internet's), which a test's link seldom makes happen */
+		if (getenv("HALO_TEST_PRECACHE_AT_ACCEPT") && atoi(getenv("HALO_TEST_PRECACHE_AT_ACCEPT")))
+		{
+			network_game_client_update_precache_status(client);
+		}
+#endif
 
 		network_game_generate_local_machine_name(settings_request.machine_name);
 		settings_request.machine_index = (char)message_packet->machine_index;
@@ -2883,6 +2925,20 @@ static void network_game_client_update_precache_status(
 	{
 		char *map_name = main_get_multiplayer_map_name();
 
+#ifdef HALO_LINUX
+		/* port: nothing is precached before the host's game settings have
+		named its map (network_game_client_game_settings_updated sets it). The
+		machine's acceptance comes first, and over the internet the settings
+		often a frame or more later: the map named until then was the menus'
+		(empty after the main menu, or the last game's), and an empty name
+		was precached - "couldn't find map '' on the DVD", the damaged disc
+		error and the game closing for a joiner whose cache files all held a
+		map (Ben's 1.1.0-beta.1 joins, October 2026; one with an empty cache
+		file took '' for precached and never knew). A stale map name is no
+		better: the host's own is waited for. */
+		if (!client->game.map.name[0] || !map_name || csstrcmp(map_name, client->game.map.name))
+			return;
+#endif
 		client->last_precache_time = now;
 
 		if (cache_files_give_time_to_precache(map_name))

@@ -154,6 +154,18 @@ static char const *const xbox_level_names[] =
 	"a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40",
 };
 
+/* the Xbox levels' titles, as the menus name them (p2p_lobby.c's too), in
+xbox_level_names' order */
+static char const *const xbox_level_titles[] =
+{
+	"Battle Creek", "Sidewinder", "Damnation", "Rat Race", "Prisoner", "Hang 'Em High", "Chill Out",
+	"Derelict", "Boarding Action", "Blood Gulch", "Wizard", "Chiron TL-34", "Longest",
+	"The Pillar of Autumn", "Halo", "The Truth and Reconciliation", "The Silent Cartographer",
+	"Assault on the Control Room", "343 Guilty Spark", "The Library", "Two Betrayals", "Keyes", "The Maw",
+};
+
+typedef char verify_xbox_level_titles[NUMBEROF(xbox_level_titles) == NUMBEROF(xbox_level_names) ? 1 : -1];
+
 /* ---------- private code */
 
 static boolean xbox_level_stock(
@@ -704,9 +716,14 @@ unsigned long custom_edition_maps_network_identity(
 		return 0;
 	}
 	name = tag_name_strip_path(level_name);
+	/* (a Halo PC map named as an Xbox level, which this machine plays with
+	PC maps on, custom_edition_cache.c: not the Xbox level, and said, so that
+	a player with the Xbox map does not load another map than the host's;
+	versions before 1.1.0-beta.2 sent 0 and ignored it) */
 	if (xbox_level_stock(name))
 	{
-		return 0;
+		return halo_custom_edition_enabled() && custom_edition_cache_is_custom_edition(name) ?
+			custom_edition_cache_map_identity(name) : 0;
 	}
 
 	return custom_edition_cache_map_identity(name);
@@ -721,9 +738,18 @@ boolean custom_edition_maps_host_copy_matches(
 	char const *name = level_name ? tag_name_strip_path(level_name) : "";
 
 	*missing = FALSE;
-	if (xbox_level_stock(name))
+	/* (an Xbox level the host plays as one: its copies differ by region,
+	and are never compared; this machine's file is checked by
+	custom_edition_maps_stock_problem) */
+	if (xbox_level_stock(name) && !host_identity)
 	{
 		return TRUE;
+	}
+	/* (a Halo PC map named as an Xbox level, the host's: this machine's
+	file of that name, whatever it is, against it) */
+	if (xbox_level_stock(name))
+	{
+		identity = custom_edition_cache_map_identity(name);
 	}
 	if (!identity)
 	{
@@ -763,7 +789,10 @@ short custom_edition_maps_loadable(
 	{
 		missing[0] = 0;
 	}
-	if (xbox_level_stock(name))
+	/* (an Xbox level's file: the Xbox map's, checked as it is precached,
+	custom_edition_maps_stock_problem; or a Halo PC map of that name, which
+	loads as the Custom Edition maps below do) */
+	if (xbox_level_stock(name) && !custom_edition_cache_is_custom_edition(name))
 	{
 		return _custom_edition_maps_loadable;
 	}
@@ -793,6 +822,45 @@ short custom_edition_maps_loadable(
 	}
 
 	return _custom_edition_maps_loadable;
+}
+
+boolean custom_edition_maps_stock_problem(
+	char const *level_name,
+	unsigned long host_identity,
+	char *why,
+	long why_size)
+{
+	char const *name = level_name ? tag_name_strip_path(level_name) : "";
+
+	why[0] = 0;
+	if (!xbox_level_stock(name) || host_identity)
+	{
+		return FALSE;
+	}
+	if (!cache_files_xbox_map_problem(level_name, why, why_size))
+	{
+		return FALSE;
+	}
+	error(_error_silent, "custom maps: the host plays the Xbox level '%s', which this machine cannot load: %s", name, why);
+
+	return TRUE;
+}
+
+char const *custom_edition_maps_level_title(
+	char const *level_name)
+{
+	char const *name = level_name ? tag_name_strip_path(level_name) : "";
+	short index;
+
+	for (index = 0; index < NUMBEROF(xbox_level_names); index++)
+	{
+		if (!csstrcasecmp(name, xbox_level_names[index]))
+		{
+			return xbox_level_titles[index];
+		}
+	}
+
+	return name;
 }
 
 void custom_edition_maps_look_again(

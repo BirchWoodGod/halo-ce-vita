@@ -66,13 +66,24 @@ boolean map_share_client_busy(
 	void);
 
 /* (network_client_message_handler.c) The host started the game on
-`level_name`: FALSE when this machine cannot load it (a question or a
-download under way, a map it cannot load as it is: a game joined in
-progress), which it then leaves at its next frame, the player told why,
-rather than stopping as a damaged disc. */
+`level_name` (the host's copy `host_identity`, the game's map version):
+FALSE when this machine cannot load it (a question or a download under way,
+a map it cannot load as it is, an Xbox level whose file here is not the
+Xbox map, whole: a game joined in progress), which it then leaves at its
+next frame, the player told why, rather than stopping as a damaged disc. */
 boolean map_share_client_game_starting(
 	struct network_game_client *client,
-	char const *level_name);
+	char const *level_name,
+	unsigned long host_identity);
+
+/* (cache_files.c) The map `level_name` could not be precached on this
+joiner (cache_files_precache_failed: missing, cut short, a Halo PC map named
+as an Xbox level with PC maps off...): the joiner leaves its game at its
+next frame, the player told `why`, rather than stopping as a damaged disc.
+FALSE when this machine is no joiner (it hosts, or plays alone). */
+boolean map_share_client_precache_failed(
+	char const *level_name,
+	char const *why);
 
 /* Each frame of a joiner: the question, the progress, the timeouts. FALSE
 when the joiner leaves the game (the player said no, cancelled, or the

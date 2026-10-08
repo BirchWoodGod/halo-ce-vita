@@ -137,6 +137,13 @@ void display_error_deferred(
 void display_error_text_deferred(
 	wchar_t const *text,
 	short local_player_index);
+#ifdef HALO_LINUX
+/* port: why the damaged disc error is shown, to halo.log and debug.txt
+(ui_widget.c): every caller says before showing it */
+void display_error_damaged_media_reason(
+	char const *format,
+	...);
+#endif
 void display_error_abort_to_dashboard_deferred(
 	short error_code,
 	boolean optional);
