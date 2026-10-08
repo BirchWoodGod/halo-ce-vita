@@ -992,7 +992,7 @@ static void test_online_rows(void)
 
 /* every settings variable 1.0.3 had (its settings.txt) is still a row,
 with the values it saved; and the rows added since (Sun rays, Button
-icons, Map downloads) */
+icons, Map downloads, Fourth core helpers) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1010,6 +1010,7 @@ static void test_variables_kept(void)
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_NET_HOST_PUBLIC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
 		"HALO_BUTTON_ICONS", "HALO_AI_PERCEPTION_LOD", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
+		"HALO_FOURTH_CORE",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1026,7 +1027,7 @@ static void test_variables_kept(void)
 	for (index = 0; index < SETTING_COUNT; index++)
 		choices += settings[index].kind == KIND_CHOICE;
 	check(all && choices == (int)(sizeof(variables) / sizeof(variables[0])),
-		"every settings variable of 1.0.3 is still a row, and no other but Sun rays, Button icons, Distant AI, Tiny decals and Map downloads");
+		"every settings variable of 1.0.3 is still a row, and no other but Sun rays, Button icons, Distant AI, Tiny decals, Map downloads and Fourth core helpers");
 	check(!strcmp(setting_named("HALO_DEBUG_CAMERA")->names[0], "Off") &&
 		setting_named("HALO_DEBUG_CAMERA")->page == TAB_DEV, "Debug camera stays in Dev");
 	{
@@ -1039,6 +1040,47 @@ static void test_variables_kept(void)
 			!strcmp(button->values[9], "right") && !strcmp(zone->values[11], "back") &&
 			!strcmp(setting_named("HALO_RENDER_SCALE")->values[5], "dynamic"), "the values saved are 1.0.3's");
 	}
+}
+
+/* Fourth core helpers (Graphics > Advanced; vita_fourth_core.c): Off by
+default and in every profile, On saved and in the environment the next
+start reads, a restart's row, the profile left as it was; back Off */
+static void test_fourth_core(void)
+{
+	struct setting *row = setting_named("HALO_FOURTH_CORE");
+	int profile = settings[0].choice;
+	char line[128];
+
+	check(row && row->page == PAGE_GRAPHICS_ADVANCED && row->restart && row->count == 2 &&
+		!strcmp(row->values[row->choice], "0") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "On") &&
+		getenv("HALO_FOURTH_CORE") && !strcmp(getenv("HALO_FOURTH_CORE"), "0"),
+		"Fourth core helpers: on Graphics > Advanced, Off by default (HALO_FOURTH_CORE=0), after a restart");
+	check(strstr(row->help, "4th core") && strstr(row->help, "CapUnlocker"), "Fourth core helpers: the help names the plugin");
+	{
+		int index, in_profile = 0;
+
+		for (index = 0; index < PROFILE_ROWS; index++)
+			in_profile |= !strcmp(profile_variables[index], "HALO_FOURTH_CORE");
+		check(!in_profile, "no profile sets Fourth core helpers");
+	}
+	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 9)
+		press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_FOURTH_CORE"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_FOURTH_CORE=1\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< On  ") &&
+		settings[0].choice == profile && restart_pending,
+		"Fourth core helpers On: saved, in the environment, the profile unchanged, a restart asked for");
+	vita_settings_load();
+	check(!strcmp(setting_named("HALO_FOURTH_CORE")->values[setting_named("HALO_FOURTH_CORE")->choice], "1") &&
+		!strcmp(getenv("HALO_FOURTH_CORE"), "1"), "Fourth core helpers On: read back from settings.txt");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_FOURTH_CORE"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_FOURTH_CORE=0\n") &&
+		settings[0].choice == profile, "Fourth core helpers back Off");
+	while (menu_selected > 2)
+		press(VITA_BUTTON_UP);
+	/* (as after the restart it asked for: the rows after this one say
+	what they do, not that a restart waits) */
+	restart_pending = 0;
 }
 
 /* ---------- Button icons: the game's button icons, and the panel's terms */
@@ -1192,8 +1234,11 @@ int main(void)
 		!strncmp(menu_line(5, line, sizeof(line)), "Object lighting\x02", 16) &&
 		!strncmp(menu_line(6, line, sizeof(line)), "Sun rays\x02", 9) &&
 		!strncmp(menu_line(7, line, sizeof(line)), "Distant AI\x02", 11) &&
-		!strncmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02", 12) && menu_rows() == 7 && menu_fits(),
-		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays, distant AI, tiny decals");
+		!strncmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02", 12) &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Fourth core helpers*\x02  Off >") && menu_rows() == 8 && menu_fits(),
+		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays, distant AI, tiny decals, "
+		"fourth core helpers (Off, after a restart)");
+	test_fourth_core();
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page: the profile Custom");
