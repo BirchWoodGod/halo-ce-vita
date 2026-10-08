@@ -11,3 +11,9 @@ declared here under its own name.
 #undef strnlen
 #include_next <string.h>
 #pragma pop_macro("strnlen")
+
+/* POSIX strtok_r (xinput_sdl.c's HALO_TEST_PAD): the C runtime's strtok_s
+has its arguments and meaning */
+#ifndef strtok_r
+#define strtok_r strtok_s
+#endif
