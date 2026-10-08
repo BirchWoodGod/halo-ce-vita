@@ -3781,6 +3781,12 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	}
 	platform_pump_events();
 
+	/* (the vertical blanks that let the queued frames go, from the first
+	frame on: a menus' map precached before main_initialize_time sets the
+	vertical blank callback presents frames while it waits - a dedicated
+	server waiting for another to add ui.map to the shared map cache - and
+	with no vertical blank yet the third frame waited for ever) */
+	vertical_blank_start();
 	pthread_mutex_lock(&vertical_blank_lock);
 	/* the Xbox keeps at most two frames queued behind its 60 Hz display;
 	with interpolation, frames come at the real display's rate instead,
