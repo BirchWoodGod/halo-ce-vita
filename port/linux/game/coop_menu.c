@@ -40,6 +40,7 @@ names of the maps' own string lists.
 #include "text/unicode.h"
 #include "halo_port_limits.h"
 #include "custom_edition_maps.h"
+#include "../src/lang.h"
 
 #include "coop_menu.h"
 
@@ -240,13 +241,13 @@ static void coop_menu_connection(
 	char code[32];
 
 	if (config_boolean("network.adhoc"))
-		usnprintf(text, count, L"Ad hoc");
+		usnprintf(text, count, TW(L"Ad hoc"));
 	else if (config_boolean("network.online") && p2p_running() && p2p_hosting_code(code, (int)sizeof(code)) && code[0])
-		usnprintf(text, count, L"Online, code %hs", code);
+		usnprintf(text, count, TW(L"Online, code %hs"), code);
 	else if (config_boolean("network.online") && p2p_running())
-		usnprintf(text, count, L"Online");
+		usnprintf(text, count, TW(L"Online"));
 	else
-		usnprintf(text, count, L"System link");
+		usnprintf(text, count, TW(L"System link"));
 	text[count - 1] = 0;
 }
 
@@ -321,7 +322,7 @@ void coop_menu_render(
 	if (!csstrcmp(name, coop_menu_difficulty_screen))
 	{
 		if (coop_menu_available())
-			coop_menu_draw(coop_menu_label_style, 100, 414, 200, L"=PLAY CO-OP");
+			coop_menu_draw(coop_menu_label_style, 100, 414, 200, TW(L"=PLAY CO-OP"));
 		return;
 	}
 	/* the lobby of co-op hosted from the menus, while no one else is in:
@@ -345,14 +346,14 @@ void coop_menu_render(
 		csmemset(machine_name, 0, sizeof(machine_name));
 		network_game_generate_local_machine_name(machine_name);
 #ifdef HALO_PORT_VITA_NETWORK
-		usnprintf(line, NUMBEROF(line), L"This Vita: %ls", machine_name);
+		usnprintf(line, NUMBEROF(line), TW(L"This Vita: %ls"), machine_name);
 #else
-		usnprintf(line, NUMBEROF(line), L"This machine: %ls", machine_name);
+		usnprintf(line, NUMBEROF(line), TW(L"This machine: %ls"), machine_name);
 #endif
 		/* (the name the others' list shows, when it is not the machine's:
 		the settings' lobby name, network_server_manager.c) */
 		if (game->name[0] && ustrcmp(game->name, machine_name))
-			usnprintf(line, NUMBEROF(line), L"Listed as: %ls", game->name);
+			usnprintf(line, NUMBEROF(line), TW(L"Listed as: %ls"), game->name);
 		line[NUMBEROF(line) - 1] = 0;
 		coop_menu_draw(coop_menu_text_style, x, y, width, line);
 		y += 24;
@@ -366,21 +367,21 @@ void coop_menu_render(
 
 			y += 24;
 			if (!listed)
-				usnprintf(line, NUMBEROF(line), L"Private: joined by its code");
+				usnprintf(line, NUMBEROF(line), TW(L"Private: joined by its code"));
 			else
-				usnprintf(line, NUMBEROF(line), L"Public: listed%ls", password ? L", password" : L"");
+				usnprintf(line, NUMBEROF(line), TW(L"Public: listed%ls"), password ? TW(L", password") : L"");
 			line[NUMBEROF(line) - 1] = 0;
 			coop_menu_draw(coop_menu_text_style, x, y, width, line);
 			if (config_boolean("network.public_lobby"))
 			{
 				y += 24;
 				coop_menu_draw(coop_menu_text_style, x, y, width,
-					listed ? L"%x-button: make it private" : L"%x-button: make it public");
+					listed ? TW(L"%x-button: make it private") : TW(L"%x-button: make it public"));
 			}
 			/* (the cancel line closer: inside the panel's box) */
 			y -= 10;
 		}
 		y += 36;
-		coop_menu_draw(coop_menu_text_style, x, y, width, L"Press %b-button to cancel");
+		coop_menu_draw(coop_menu_text_style, x, y, width, TW(L"Press %b-button to cancel"));
 	}
 }

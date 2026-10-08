@@ -24,6 +24,10 @@ docs/custom_edition_caches.md lists each with its evidence.
 /* ---------- headers */
 
 #include "cache_file_formats.h"
+/* (N_ only, lang.h's mark: the status descriptions are translated where
+they are shown to the player, custom_edition_cache.c; this file is also
+built alone, without lang.c) */
+#include "../src/lang.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -709,43 +713,43 @@ static struct shader_group_type const shader_group_types[] =
 static char const *const cache_file_status_descriptions[NUMBER_OF_CACHE_FILE_STATUSES] =
 {
 	"ok",
-	"the file could not be read",
-	"out of memory",
-	"the file is too small to hold a header",
-	"the file is larger than any map can be",
-	"the header or footer signature is wrong",
-	"the cache version is not one this build knows",
-	"a name or build string in the header is not terminated",
-	"the file length in the header does not fit the file or the size limit",
-	"the cache is compressed, which Custom Edition caches never are",
-	"the tag data range in the header does not fit the file or the tag cache",
-	"the OpenSauce header is not valid (version, tag versions or memory upgrade)",
-	"the OpenSauce header sets flags OpenSauce does not define",
-	"the OpenSauce tag definitions lie outside the file",
-	"the tag index signature is not 'tags'",
-	"the tag instances do not fit in the tag data",
-	"a tag handle does not match its position in the index",
-	"a tag name lies outside the tag data or is not terminated",
-	"a tag's address lies outside the tag data",
-	"the scenario tag is missing, misplaced or not a scenario",
-	"the model vertex and index data do not fit in the file",
-	"a tag of a group that resource maps never hold is marked as held by one",
-	"a tag block or tag data field lies outside the loaded tags",
-	"the scenario's structure BSP block is not valid",
-	"a structure BSP does not fit in the file or in the tag cache",
-	"a structure BSP header is not valid",
-	"a structure BSP's lightmaps or their materials do not have the documented layout",
-	"a model part's strip or vertices lie outside the model data or are not of the kind Custom Edition writes",
-	"a shader's type is not the one Custom Edition gives its group",
-	"the scenario's scripts use more syntax nodes than this build has room for, or are not a syntax node array",
-	"a resource map header is not valid",
-	"a resource map is not of the type needed",
-	"a resource map entry lies outside the file or its name is not terminated",
-	"a map needs a resource map that was not supplied",
-	"a tag's entry is missing from its resource map",
-	"a tag held by a resource map does not have the documented layout",
-	"bitmap pixels or sound samples lie outside their file",
-	"the tag data and the tags held by resource maps do not fit below the structure BSP",
+	N_("the file could not be read"),
+	N_("out of memory"),
+	N_("the file is too small to hold a header"),
+	N_("the file is larger than any map can be"),
+	N_("the header or footer signature is wrong"),
+	N_("the cache version is not one this build knows"),
+	N_("a name or build string in the header is not terminated"),
+	N_("the file length in the header does not fit the file or the size limit"),
+	N_("the cache is compressed, which Custom Edition caches never are"),
+	N_("the tag data range in the header does not fit the file or the tag cache"),
+	N_("the OpenSauce header is not valid (version, tag versions or memory upgrade)"),
+	N_("the OpenSauce header sets flags OpenSauce does not define"),
+	N_("the OpenSauce tag definitions lie outside the file"),
+	N_("the tag index signature is not 'tags'"),
+	N_("the tag instances do not fit in the tag data"),
+	N_("a tag handle does not match its position in the index"),
+	N_("a tag name lies outside the tag data or is not terminated"),
+	N_("a tag's address lies outside the tag data"),
+	N_("the scenario tag is missing, misplaced or not a scenario"),
+	N_("the model vertex and index data do not fit in the file"),
+	N_("a tag of a group that resource maps never hold is marked as held by one"),
+	N_("a tag block or tag data field lies outside the loaded tags"),
+	N_("the scenario's structure BSP block is not valid"),
+	N_("a structure BSP does not fit in the file or in the tag cache"),
+	N_("a structure BSP header is not valid"),
+	N_("a structure BSP's lightmaps or their materials do not have the documented layout"),
+	N_("a model part's strip or vertices lie outside the model data or are not of the kind Custom Edition writes"),
+	N_("a shader's type is not the one Custom Edition gives its group"),
+	N_("the scenario's scripts use more syntax nodes than this build has room for, or are not a syntax node array"),
+	N_("a resource map header is not valid"),
+	N_("a resource map is not of the type needed"),
+	N_("a resource map entry lies outside the file or its name is not terminated"),
+	N_("a map needs a resource map that was not supplied"),
+	N_("a tag's entry is missing from its resource map"),
+	N_("a tag held by a resource map does not have the documented layout"),
+	N_("bitmap pixels or sound samples lie outside their file"),
+	N_("the tag data and the tags held by resource maps do not fit below the structure BSP"),
 };
 
 static char const *const cache_file_format_descriptions[NUMBER_OF_CACHE_FILE_FORMATS] =
@@ -1993,7 +1997,7 @@ char const *cache_file_status_describe(
 {
 	return status >= 0 && status < NUMBER_OF_CACHE_FILE_STATUSES ?
 		cache_file_status_descriptions[status] :
-		"unknown status";
+		N_("unknown status");
 }
 
 char const *cache_file_format_describe(

@@ -243,6 +243,7 @@ has lain still for a second.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| Language | Automatic | the language of this panel and of the port's own messages (see [Languages](#languages)): Automatic (the Vita's system language when the port has it, else English), English, Español; applies at once |
 | Sound voices * | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices) |
 | Sound occlusion (P) | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
 | Sound updates (P) | Every 2nd | how often the sound manager places the sounds and picks which play: Every frame (the original), Every 2nd, Every 3rd frame; a new sound starts up to a frame or two later, the mixer plays on |
@@ -542,6 +543,84 @@ tab says another machine is in the group, one Vita
 creates a System Link game and the others find it in their lists. Ad hoc carries the game the way online play does,
 over the group instead of the internet; nothing goes to the internet.
 
+## Languages
+
+The port's own text follows the settings panel's **Language** row (Audio
+tab): Automatic, the default, is the Vita's system language when the port
+has it, else English. That text is the panel, its messages, questions and
+progress lines over the game (map downloads, the Halo CE installer's PC
+files, a map that could not be loaded, a game that could not be joined),
+the PC multiplayer menus' own lines and the server browser's, co-op's
+waiting and spectating lines, the latency meter, and the missing data
+screen. It is in English and Spanish (Español) so far, and changes at once;
+the PC menus' screens follow from the next time the main menu loads.
+
+Halo's own text (its menus, the HUD's messages, the objectives, the
+subtitles, the button prompts' words) is not the port's: it is in the
+player's map files, ui.map and each level's, in the language of the disc
+they came from. The NTSC (North American) Xbox disc's maps hold English
+only, so with them Halo itself stays in English whatever the Language row
+says; no translation of Bungie's text can come with the port (no game data
+is in it). With a European (PAL) disc's maps in the player's language,
+Halo's own text is in that language:
+
+- copy them into `ux0:data/haloce-vita/maps/` as usual: they are Spanish
+  (or French, German, Italian) whatever the Language row says, since the
+  text is in the files;
+- or keep a language's maps in a folder of its own beside `maps`,
+  `maps_es` (`maps_fr`, `maps_de`, `maps_it`), as the Xbox did: the game
+  reads that folder when its language is the one chosen (Automatic: the
+  Vita's), at start. After a change of language the game fills its map
+  cache again (the first loads take a little longer, once).
+
+The PC multiplayer menus (with Halo PC's `bitmaps.map` and `loc.map` in
+the maps folder) take a few of their lists from `loc.map`: a Spanish Halo
+PC or Custom Edition install's `loc.map` gives those lists in Spanish by
+itself, around the port's own lines in the language chosen.
+
+### Translations
+
+Each language is one file of UTF-8 text in `port/vita/app0/lang/`, named
+by the language's code, packed into the VPK (`app0:lang/`) and read at
+start (`port/linux/src/lang.c`). In the code the English is the key:
+`T("English")` (`TW(L"...")` for text drawn with Halo's fonts, `N_("...")`
+for a table's strings, translated where they are shown), so a language
+without an entry for a string shows it in English. A line of a file is
+
+    "English text" = "the text in the language"
+
+with C's escapes (`\n`, `\r`, `\t`, `\"`, `\\`); `@name = "Español"` names
+the language as the Language row shows it, and `#` starts a comment.
+
+To add a language (French here):
+
+1. `python3 tools/lang_check.py --missing fr > port/vita/app0/lang/fr.txt`
+   writes every string as an English = English line; add
+   `@name = "Français"` at the top.
+2. Translate the right-hand side of each line. Keep each `%` conversion
+   (`%s`, `%d`, `%.40s`, `%%`) and Halo's button tokens (`%a-button`) as
+   they are, in the same order: a line whose conversions differ is not
+   taken (the English is shown, and `halo.log` says which line). The Xbox
+   controller's buttons keep the names the panel gives them (A, B, X, Y,
+   Back, Start, Black, White, the triggers).
+3. Mind the room: a panel row's name is 22 characters at most, its value
+   20, a help line 70, any other line 46 (the panel's font is upper case,
+   8 pixels a character; it draws ASCII and the Latin-1 letters, accents,
+   ñ, ç, ß, ¿ ¡ « » º ª).
+4. Check it: `sh port/vita/tests/run_lang_test.sh` (every marked string
+   has an entry in each file, with the same conversions, in characters the
+   panel draws) and `sh port/vita/tests/run_vita_settings_test.sh` (the
+   Spanish pass shows how a language is checked to fit: copy it for the
+   new one), then `configure.py` again and `ninja vita`.
+
+The file's name is the code the Vita's system languages map to
+(`vita_settings.c`, `system_language_codes`): `fr`, `de`, `it`, `pt` (and
+`pt-BR`, which falls back to `pt`), `nl`, `ru`, `pl`, `fi`, `sv`, `da`,
+`no`, `tr`, `ja`, `ko`, `zh-TW`, `zh-CN`. The panel's font has no glyphs
+beyond Latin-1, so Russian, Japanese, Korean or Chinese would need a font
+first. Adding a string to the code: give it to `T()`, add it to every file
+(`tools/lang_check.py` lists what is missing; CI fails until it is there).
+
 ## Building
 
 You need:
@@ -640,6 +719,7 @@ Useful ones:
 | `include/` | the boundary between the two (`vita_host.h`, `vita_gxm.h`) |
 | `null/` | the do-nothing GXM for the Linux test build |
 | `sce_sys/` | LiveArea images |
+| `app0/` | files in the VPK beside the eboot: the shipped shaders, the brokers and relays, the PC menus' XML, the translations (`lang/`) |
 
 ## Help wanted
 

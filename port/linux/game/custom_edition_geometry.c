@@ -32,6 +32,7 @@ Edition vertices (docs/custom_edition_caches.md).
 #include "structures/structure_bsp_definitions.h"
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
+#include "../src/lang.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -683,7 +684,7 @@ boolean custom_edition_models_convert(
 			totals.part_count,
 			working_bytes / 1024);
 		halo_custom_edition_memory_free(working);
-		custom_edition_cache_load_failure_note("there is not enough memory for its models");
+		custom_edition_cache_load_failure_note(T("there is not enough memory for its models"));
 		return FALSE;
 	}
 	scratch = (struct model_vertex_uncompressed *)working;
@@ -704,7 +705,7 @@ boolean custom_edition_models_convert(
 		if (!success)
 		{
 			error(_error_silent, "custom edition: cannot make the buffers of the model '%s'", name);
-			custom_edition_cache_load_failure_note("there is not enough memory for its models");
+			custom_edition_cache_load_failure_note(T("there is not enough memory for its models"));
 		}
 	}
 	halo_custom_edition_memory_free(working);
@@ -798,7 +799,7 @@ boolean custom_edition_structure_bsp_load(
 	if (!globals->structure_bsp_vertices)
 	{
 		error(_error_silent, "custom edition: out of memory for 0x%lX bytes of structure BSP vertices", vertices_size);
-		custom_edition_cache_load_failure_note("there is not enough memory for its level geometry");
+		custom_edition_cache_load_failure_note(T("there is not enough memory for its level geometry"));
 		custom_edition_structure_bsp_unload();
 		return FALSE;
 	}

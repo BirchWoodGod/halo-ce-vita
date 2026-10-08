@@ -12,7 +12,7 @@ writes the three that are not in the folder yet (default: the current one).
 Built alone, with any C compiler:
 
     cc -O2 -Iport/linux/src -Iport/third_party/libmspack -DHAVE_INTTYPES_H=1 \
-        tools/ce_installer_extract.c port/linux/src/posix_ce_installer.c \
+        tools/ce_installer_extract.c port/linux/src/posix_ce_installer.c port/linux/src/lang.c \
         port/third_party/libmspack/{cabd,lzxd,mszipd,qtmd,system}.c -o ce_installer_extract
 */
 

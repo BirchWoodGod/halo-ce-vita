@@ -34,6 +34,7 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <string.h>
 #include <strings.h>
 
+#include "lang.h"
 #include "vita_host.h"
 #include "vita_version.h"
 
@@ -320,22 +321,21 @@ where, and START leaves */
 
 static void message_text(uint32_t *pixels, int x, int y, int scale, uint32_t color, const char *text)
 {
-	for (; *text; text++, x += 8 * scale)
+	/* (UTF-8: a translated line's accented letters, overlay_glyph) */
+	for (; *text; x += 8 * scale)
 	{
-		unsigned char c = (unsigned char)*text;
+		unsigned char glyph[OVERLAY_ROWS];
 		int row, column, dy, dx;
 
-		if (c >= 'a' && c <= 'z')
-			c = (unsigned char)(c - 'a' + 'A');
-		if (c < 32 || c >= 128)
+		if (!overlay_glyph(&text, glyph))
 			continue;
-		for (row = 0; row < 8; row++)
+		for (row = 0; row < OVERLAY_ROWS; row++)
 			for (column = 0; column < 8; column++)
-				if (font[c - 32][row] & (0x80 >> column))
+				if (glyph[row] & (0x80 >> column))
 					for (dy = 0; dy < scale; dy++)
 						for (dx = 0; dx < scale; dx++)
 						{
-							int px = x + column * scale + dx, py = y + row * scale + dy;
+							int px = x + column * scale + dx, py = y + (row - OVERLAY_ROWS_ABOVE) * scale + dy;
 
 							if (px >= 0 && px < MESSAGE_WIDTH && py >= 0 && py < MESSAGE_HEIGHT)
 								pixels[py * MESSAGE_WIDTH + px] = color;
@@ -345,18 +345,19 @@ static void message_text(uint32_t *pixels, int x, int y, int scale, uint32_t col
 
 static void show_missing_data(void)
 {
+	/* (35 characters a line fit at this size; each in the Vita's language,
+	lang.c, a translation's lines as long) */
 	static const char *const lines[] = {
-		/* (35 characters a line fit at this size) */
-		"The game files are missing.",
+		N_("The game files are missing."),
 		"",
-		"Copy the maps folder of your",
-		"Xbox Halo: Combat Evolved to",
+		N_("Copy the maps folder of your"),
+		N_("Xbox Halo: Combat Evolved to"),
 		"",
 		"  ux0:data/haloce-vita/maps/",
 		"",
-		"(ui.map, bloodgulch.map ...)",
+		N_("(ui.map, bloodgulch.map ...)"),
 		"",
-		"Press START to exit.",
+		N_("Press START to exit."),
 	};
 	SceUID block = sceKernelAllocMemBlock("message", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 2 * 1024 * 1024, NULL);
 	SceDisplayFrameBuf frame;
@@ -371,7 +372,7 @@ static void show_missing_data(void)
 		pixels[index] = 0xff1a1008u;
 	message_text(pixels, 60, 50, 4, 0xff40ff40u, "HALO CE");
 	for (index = 0; index < sizeof(lines) / sizeof(lines[0]); index++)
-		message_text(pixels, 60, 130 + (int)index * 32, 3, 0xffe0e0e0u, lines[index]);
+		message_text(pixels, 60, 130 + (int)index * 32, 3, 0xffe0e0e0u, T(lines[index]));
 	memset(&frame, 0, sizeof(frame));
 	frame.size = sizeof(frame);
 	frame.base = pixels;
@@ -752,6 +753,9 @@ int main(int argc, char **argv)
 	memset(&init, 0, sizeof(init));
 	memset(&boot, 0, sizeof(boot));
 	sceAppUtilInit(&init, &boot);
+	/* the port's text in the Vita's language, from here on (lang.c; the
+	settings' Language row's choice is applied when they are loaded) */
+	vita_settings_language_init();
 	/* the clocks the game needs as floors: raised to them, never lowered
 	from more (a 500 MHz profile of PSVshell or another overclocking plugin
 	stays; 444/222/222/166 are the system's highest otherwise) - from

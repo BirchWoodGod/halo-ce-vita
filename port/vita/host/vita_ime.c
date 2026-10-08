@@ -37,12 +37,31 @@ static void ime_log(const char *step, int result)
 	vita_host_log(line);
 }
 
+/* UTF-8 text (a translated title, lang.c; the lobby names' printable
+ASCII) as UTF-16, the Basic Multilingual Plane's */
 static void ascii_to_utf16(SceWChar16 *out, int size, const char *text)
 {
 	int length = 0;
 
 	while (text && *text && length < size - 1)
-		out[length++] = (SceWChar16)(unsigned char)*text++;
+	{
+		unsigned int character = (unsigned char)*text++;
+
+		if (character >= 0xE0 && (text[0] & 0xC0) == 0x80 && (text[1] & 0xC0) == 0x80)
+		{
+			character = ((character & 0x0F) << 12) | (((unsigned char)text[0] & 0x3Fu) << 6) |
+				((unsigned char)text[1] & 0x3Fu);
+			text += 2;
+		}
+		else if (character >= 0xC0 && (text[0] & 0xC0) == 0x80)
+		{
+			character = ((character & 0x1F) << 6) | ((unsigned char)text[0] & 0x3Fu);
+			text++;
+		}
+		while ((*text & 0xC0) == 0x80)
+			text++;
+		out[length++] = (SceWChar16)character;
+	}
 	out[length] = 0;
 }
 

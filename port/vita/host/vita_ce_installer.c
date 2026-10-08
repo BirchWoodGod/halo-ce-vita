@@ -27,10 +27,12 @@ game restarts itself when the main menu is up and no network game holds it
 #include <string.h>
 
 #include "ce_installer.h"
+#include "lang.h"
 #include "vita_host.h"
 
 #define DATA_DIRECTORY "ux0:data/haloce-vita"
-#define TITLE "Halo CE: PC map files"
+/* (each message in the language chosen: lang.c) */
+#define TITLE T("Halo CE: PC map files")
 /* what the three need, and a margin */
 #define SPACE_NEEDED (166ULL * 1024 * 1024 + 16ULL * 1024 * 1024)
 
@@ -91,7 +93,7 @@ static unsigned long long free_space(void)
 
 static int show_progress(void *context, const char *file, unsigned long long done, unsigned long long total)
 {
-	char text[800], left[48] = "", status[96];
+	char text[1200], left[96] = "", status[192];
 	unsigned long long now = sceKernelGetProcessTimeWide(), elapsed = now - started_us;
 
 	(void)context;
@@ -101,17 +103,17 @@ static int show_progress(void *context, const char *file, unsigned long long don
 		unsigned long long seconds = (total - done) * (elapsed / 1000ULL) / done / 1000ULL;
 
 		if (seconds >= 90)
-			snprintf(left, sizeof(left), ", about %llu min left", (seconds + 30) / 60);
+			snprintf(left, sizeof(left), T(", about %llu min left"), (seconds + 30) / 60);
 		else
-			snprintf(left, sizeof(left), ", about %llu s left", seconds < 5 ? 5 : seconds);
+			snprintf(left, sizeof(left), T(", about %llu s left"), seconds < 5 ? 5 : seconds);
 	}
 	if (!file[0] && !done)
-		snprintf(status, sizeof(status), "Reading the installer...");
+		snprintf(status, sizeof(status), "%s", T("Reading the installer..."));
 	else
-		snprintf(status, sizeof(status), "%s %llu%%%s", file[0] ? file : "Done:", total ? done * 100 / total : 100ULL,
+		snprintf(status, sizeof(status), "%s %llu%%%s", file[0] ? file : T("Done:"), total ? done * 100 / total : 100ULL,
 			left);
 	snprintf(text, sizeof(text),
-		"Taking bitmaps.map, sounds.map and loc.map from %s, for Custom Edition maps and the PC menus.\n\n%s",
+		T("Taking bitmaps.map, sounds.map and loc.map from %s, for Custom Edition maps and the PC menus.\n\n%s"),
 		file_name(installer), status);
 	vita_settings_progress(TITLE, text);
 	return vita_settings_progress_cancelled();
@@ -121,7 +123,7 @@ static void extraction_thread(void *argument)
 {
 	const char *maps = maps_directory();
 	int missing = ce_installer_missing(maps), result;
-	char error[512], text[1200];
+	char error[512], text[2048];
 	unsigned long long space = free_space();
 
 	(void)argument;
@@ -132,8 +134,8 @@ static void extraction_thread(void *argument)
 	}
 	if (space < SPACE_NEEDED)
 	{
-		snprintf(text, sizeof(text), "The memory card has %llu MB free; bitmaps.map, sounds.map and loc.map need "
-			"about 180 MB. Free some space, then restart the game or use Modded maps' Extract PC files.",
+		snprintf(text, sizeof(text), T("The memory card has %llu MB free; bitmaps.map, sounds.map and loc.map need "
+			"about 180 MB. Free some space, then restart the game or use Modded maps' Extract PC files."),
 			space >> 20);
 		vita_settings_message(TITLE, text);
 		log_line("ce installer: %s: not enough space on ux0: (%s)", file_name(installer), "");
@@ -154,21 +156,21 @@ static void extraction_thread(void *argument)
 		vita_host_log(line);
 	}
 	if (result == CE_INSTALLER_STOPPED)
-		vita_settings_message(TITLE, "Stopped. The installer stays; the game takes the files from it at the next "
-			"start, or from Multiplayer > Modded maps.");
+		vita_settings_message(TITLE, T("Stopped. The installer stays; the game takes the files from it at the next "
+			"start, or from Multiplayer > Modded maps."));
 	else if (result != CE_INSTALLER_DONE)
 	{
-		snprintf(text, sizeof(text), "The files could not be taken from %s: %s", file_name(installer), error);
+		snprintf(text, sizeof(text), T("The files could not be taken from %s: %s"), file_name(installer), error);
 		vita_settings_message(TITLE, text);
 	}
 	else
 	{
 		int answer;
 
-		snprintf(text, sizeof(text), "bitmaps.map, sounds.map and loc.map are in the maps folder: Custom Edition "
+		snprintf(text, sizeof(text), T("bitmaps.map, sounds.map and loc.map are in the maps folder: Custom Edition "
 			"maps can be played (Modded maps > PC maps), and the PC multiplayer menus come after a restart%s.\n\n"
-			"Delete %s (%llu MB) to free the space?",
-			halo_main_menu_idle() ? ", which follows this question" : "", file_name(installer), installer_size >> 20);
+			"Delete %s (%llu MB) to free the space?"),
+			halo_main_menu_idle() ? T(", which follows this question") : "", file_name(installer), installer_size >> 20);
 		vita_settings_question(TITLE, text);
 		while ((answer = vita_settings_question_answer()) < 0)
 			vita_host_sleep_us(100000);
@@ -179,7 +181,7 @@ static void extraction_thread(void *argument)
 			else
 			{
 				log_line("ce installer: %s could not be deleted%s", installer, "");
-				vita_settings_message(TITLE, "The installer could not be deleted. Delete it with VitaShell.");
+				vita_settings_message(TITLE, T("The installer could not be deleted. Delete it with VitaShell."));
 			}
 		}
 		/* the PC menus are read as ui.map loads: a restart brings them,
@@ -188,18 +190,18 @@ static void extraction_thread(void *argument)
 		{
 			int error_code;
 
-			vita_settings_progress(TITLE, "Restarting the game for the PC multiplayer menus...");
+			vita_settings_progress(TITLE, T("Restarting the game for the PC multiplayer menus..."));
 			vita_host_log("ce installer: restarting the game for the PC menus");
 			vita_host_sleep_us(1500000);
 			error_code = sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
 			vita_settings_progress(NULL, NULL);
 			snprintf(text, sizeof(text), "ce installer: the restart failed (0x%08X)", (unsigned int)error_code);
 			vita_host_log(text);
-			vita_settings_message(TITLE, "The game could not restart itself: close it and start it again for the PC "
-				"multiplayer menus.");
+			vita_settings_message(TITLE, T("The game could not restart itself: close it and start it again for the PC "
+				"multiplayer menus."));
 		}
 		else
-			vita_settings_message(TITLE, "Restart Halo after this game to get the PC multiplayer menus.");
+			vita_settings_message(TITLE, T("Restart Halo after this game to get the PC multiplayer menus."));
 	}
 	running = 0;
 }

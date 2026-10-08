@@ -39,6 +39,7 @@ read.
 #include "custom_edition_maps.h"
 #include "map_share_protocol.h"
 #include "tag_schema.h"
+#include "../src/lang.h"
 #ifdef HALO_RELOCATABLE_TAG_CACHE
 #include "tag_relocate.h"
 #endif
@@ -388,7 +389,7 @@ static boolean custom_edition_cache_tags_validate(
 		report->identity.name))
 	{
 		error(_error_silent, "custom edition: the map's tags failed the tag check (above)");
-		custom_edition_cache_load_failure_reason("this map file is damaged or not supported");
+		custom_edition_cache_load_failure_reason(T("this map file is damaged or not supported"));
 		return FALSE;
 	}
 	if (tag_validate_corrections())
@@ -684,7 +685,7 @@ to the menu with this, rather than stopping the game. */
 static struct
 {
 	char map_name[MAP_PATH_SIZE];
-	char reason[160];
+	char reason[256];
 	boolean failed;
 } custom_edition_load_failure;
 
@@ -714,7 +715,8 @@ static void custom_edition_cache_load_failure_reason(
 	return;
 }
 
-/* the reason for a failed custom_edition_cache_load, by its status */
+/* the reason for a failed custom_edition_cache_load, by its status, in the
+player's language */
 static char const *custom_edition_cache_load_status_reason(
 	enum cache_file_status status,
 	struct custom_edition_load_report const *report)
@@ -722,18 +724,18 @@ static char const *custom_edition_cache_load_status_reason(
 	switch (status)
 	{
 	case _cache_file_status_out_of_memory:
-		return "there is not enough memory for it";
+		return T("there is not enough memory for it");
 	case _cache_file_status_read_failed:
-		return "its file could not be read";
+		return T("its file could not be read");
 	case _cache_file_status_missing_resource_map:
 	case _cache_file_status_missing_resource_item:
-		return "it needs Halo Custom Edition's bitmaps.map, sounds.map and loc.map in the maps folder";
+		return T("it needs Halo Custom Edition's bitmaps.map, sounds.map and loc.map in the maps folder");
 	case _cache_file_status_bad_scenario_tag:
 		return TEST_FLAG(report->warnings, _custom_edition_warning_protected_bit) ?
-			"it is a protected map whose tags this port cannot read" :
-			"it has no scenario this port can find (a protected or damaged map)";
+			T("it is a protected map whose tags this port cannot read") :
+			T("it has no scenario this port can find (a protected or damaged map)");
 	default:
-		return cache_file_status_describe(status);
+		return T(cache_file_status_describe(status));
 	}
 }
 
@@ -1096,7 +1098,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	if (!custom_edition_map_path(map_name, path) || !custom_edition_file_open(&globals->map, path))
 	{
 		error(_error_silent, "custom edition: cannot open the map '%s'", map_name);
-		custom_edition_cache_load_failure_reason("its file could not be opened");
+		custom_edition_cache_load_failure_reason(T("its file could not be opened"));
 		return NULL;
 	}
 	status = cache_file_identify(&globals->map.source, &identity);
@@ -1106,7 +1108,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		!globals->map.source.read(globals->map.source.context, 0, CACHE_FILE_HEADER_BYTES, header))
 	{
 		error(_error_silent, "custom edition: '%s' is not a loadable cache (%s)", path, cache_file_status_describe(status));
-		custom_edition_cache_load_failure_reason(cache_file_status_describe(status));
+		custom_edition_cache_load_failure_reason(T(cache_file_status_describe(status)));
 		custom_edition_cache_files_close();
 		return NULL;
 	}
@@ -1123,7 +1125,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	if (!tag_cache)
 	{
 		error(_error_silent, "custom edition: no room for the 0x%lX byte tag cache of '%s'", (unsigned long)tag_cache_bytes, path);
-		custom_edition_cache_load_failure_reason("there is not enough memory for its tags");
+		custom_edition_cache_load_failure_reason(T("there is not enough memory for its tags"));
 		custom_edition_cache_files_close();
 		return NULL;
 	}
@@ -1131,7 +1133,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	if ((uint32_t)(unsigned long)tag_cache != custom_edition_cache_linked_address())
 	{
 		error(_error_silent, "custom edition: this build cannot move the tags of '%s' off 0x40440000", path);
-		custom_edition_cache_load_failure_reason("this build cannot move its tags");
+		custom_edition_cache_load_failure_reason(T("this build cannot move its tags"));
 		halo_custom_edition_tag_cache_release();
 		custom_edition_cache_files_close();
 		return NULL;
@@ -1168,7 +1170,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		globals->resource_files[_resource_map_sounds].source.size > COMBINED_OFFSET_LIMIT - COMBINED_SOUNDS_OFFSET))
 	{
 		error(_error_silent, "custom edition: a resource map is too large for this loader");
-		custom_edition_cache_load_failure_reason("a resource map in the maps folder is too large");
+		custom_edition_cache_load_failure_reason(T("a resource map in the maps folder is too large"));
 		custom_edition_cache_files_close();
 		return NULL;
 	}
@@ -1203,7 +1205,7 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	if (!custom_edition_cache_tags_convert(tag_cache, tag_cache_bytes, &report))
 	{
 		error(_error_silent, "custom edition: cannot run '%s'", path);
-		custom_edition_cache_load_failure_reason("its tags could not be converted for this port");
+		custom_edition_cache_load_failure_reason(T("its tags could not be converted for this port"));
 		custom_edition_models_dispose();
 		custom_edition_bitmaps_dispose();
 #ifdef HALO_RELOCATABLE_TAG_CACHE
@@ -1249,6 +1251,12 @@ void halo_map_load_refused(
 		return;
 	}
 	custom_edition_cache_load_failure_begin(map_name);
+	/* (the loader's generic reason, cache_files.c's and main.c's, in the
+	player's language; the others come translated) */
+	if (!csstrcmp(reason, "this map file is damaged or not supported"))
+	{
+		reason = T("this map file is damaged or not supported");
+	}
 	custom_edition_cache_load_failure_reason(reason);
 
 	return;
@@ -1258,7 +1266,7 @@ boolean custom_edition_cache_load_failure_show(
 	char const *map_name)
 {
 	void platform_show_message(char const *title, char const *message);
-	char message[320];
+	char message[480];
 
 	if (!custom_edition_load_failure.failed ||
 		csstrcasecmp(custom_edition_load_failure.map_name, tag_name_strip_path(map_name)))
@@ -1273,11 +1281,11 @@ boolean custom_edition_cache_load_failure_show(
 		snprintf(
 			message,
 			sizeof(message),
-			xbox_level ? "Couldn't load %s: %s." : "The custom map %s could not be loaded: %s.",
+			xbox_level ? T("Couldn't load %s: %s.") : T("The custom map %s could not be loaded: %s."),
 			title,
-			custom_edition_load_failure.reason[0] ? custom_edition_load_failure.reason : "see debug.txt");
+			custom_edition_load_failure.reason[0] ? custom_edition_load_failure.reason : T("see debug.txt"));
 		error(_error_silent, "custom edition: %s", message);
-		platform_show_message(xbox_level ? "Halo: map" : "Halo: custom map", message);
+		platform_show_message(xbox_level ? T("Halo: map") : T("Halo: custom map"), message);
 	}
 	custom_edition_load_failure.failed = FALSE;
 

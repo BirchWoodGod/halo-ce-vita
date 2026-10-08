@@ -69,6 +69,7 @@ only look up and create stand-ins.
 #include "port_config.h"
 #include "p2p_internal.h"
 #include "p2p_relay_protocol.h"
+#include "lang.h"
 #include "ikcp.h"
 
 #include <stdarg.h>
@@ -482,6 +483,8 @@ static struct
 
 	/* what is happening, for a menu (p2p_status) */
 	char status[96];
+	/* (the same in the language chosen, lang.c: p2p_status_shown) */
+	char status_shown[192];
 
 	/* ad hoc play (network.adhoc, p2p_adhoc.c): the peers are the ad hoc
 	group's machines, through local relays; nothing goes to the internet
@@ -787,14 +790,26 @@ static int would_block(void)
 }
 
 /* the status line (p2p_status) and the log, under p2p_lock */
+/* the status line, in English (halo.log, p2p_status) and in the language
+chosen (p2p_status_shown): `format` is an N_() marked English text */
+static void set_status_arguments(const char *format, va_list arguments)
+{
+	va_list copy;
+
+	va_copy(copy, arguments);
+	vsnprintf(p2p.status, sizeof(p2p.status), format, arguments);
+	vsnprintf(p2p.status_shown, sizeof(p2p.status_shown), T(format), copy);
+	va_end(copy);
+	platform_log("Internet play: %s", p2p.status);
+}
+
 static void set_status(const char *format, ...)
 {
 	va_list arguments;
 
 	va_start(arguments, format);
-	vsnprintf(p2p.status, sizeof(p2p.status), format, arguments);
+	set_status_arguments(format, arguments);
 	va_end(arguments);
-	platform_log("Internet play: %s", p2p.status);
 }
 
 const unsigned char *p2p_identifier(void)
@@ -1416,8 +1431,8 @@ a relay); its first clause is what the Vita's settings panel shows of it
 (in its 38 characters) */
 static void set_connected_status(int relayed)
 {
-	set_status(relayed ? "connected to the host via a relay: its game is listed under Multiplayer, System Link" :
-		"connected to the host directly: its game is listed under Multiplayer, System Link");
+	set_status(relayed ? N_("connected to the host via a relay: its game is listed under Multiplayer, System Link") :
+		N_("connected to the host directly: its game is listed under Multiplayer, System Link"));
 }
 
 /* newest: the packet is the highest numbered yet (a replayed or delayed one
@@ -1445,7 +1460,7 @@ static void peer_heard(struct peer *peer, unsigned long address, unsigned short 
 			address_text(address, port, text), relayed ? "through the relay" : "directly");
 		if (p2p.adhoc)
 		{
-			set_status("connected to a machine of the ad hoc group: its games are listed under Multiplayer, System Link");
+			set_status(N_("connected to a machine of the ad hoc group: its games are listed under Multiplayer, System Link"));
 		}
 		else if (peer->is_host)
 		{
@@ -2025,7 +2040,7 @@ static void relay_update_peer(struct peer *peer)
 			peer_role(peer->is_host), peer->name, RELAY_DELAY / 1000, peer->relay_count,
 			peer->relay_count == 1 ? "" : "s");
 		if (peer->is_host && !peer->connected)
-			set_status("trying a relay to reach the host");
+			set_status(N_("trying a relay to reach the host"));
 	}
 	for (index = 0; index < peer->relay_count; index++)
 	{
@@ -3357,12 +3372,12 @@ static int join_code(const char *code, int public, const unsigned char *host)
 	/* (a dedicated server joins nothing: it only hosts) */
 	(void)public;
 	(void)host;
-	set_status("a dedicated server joins no games (code %.4s-%.4s ignored)", code, code + 4);
+	set_status(N_("a dedicated server joins no games (code %.4s-%.4s ignored)"), code, code + 4);
 	return 1;
 #endif
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
-		set_status("that is this machine's own code");
+		set_status(N_("that is this machine's own code"));
 		return 1;
 	}
 	memcpy(p2p.lookup_code, code, sizeof(p2p.lookup_code));
@@ -3387,14 +3402,14 @@ static int join_invite(const char *text, int public)
 	/* (a dedicated server joins nothing: it only hosts) */
 	if (parsed > 0)
 	{
-		set_status("a dedicated server joins no games (the invite is ignored)");
+		set_status(N_("a dedicated server joins no games (the invite is ignored)"));
 		return 1;
 	}
 #endif
 	if (!parsed && parse_code(text, code, 1))
 		return join_code(code, 0, NULL);
 	if (parsed < 0)
-		set_status("that invite is from an older version of the game, which this one cannot join");
+		set_status(N_("that invite is from an older version of the game, which this one cannot join"));
 	if (parsed <= 0)
 		return parsed;
 	p2p_identifier_from_hash(hash, host);
@@ -3437,9 +3452,8 @@ void p2p_set_status(const char *format, ...)
 	va_list arguments;
 
 	va_start(arguments, format);
-	vsnprintf(p2p.status, sizeof(p2p.status), format, arguments);
+	set_status_arguments(format, arguments);
 	va_end(arguments);
-	platform_log("Internet play: %s", p2p.status);
 }
 
 int p2p_join_invite(const char *text)
@@ -3459,7 +3473,7 @@ void p2p_invite_received(const char *text)
 {
 	/* (an older version's is logged as such) */
 	if (!join_invite(text, 0))
-		set_status("that is not an invite");
+		set_status(N_("that is not an invite"));
 }
 
 void p2p_code_found(const char *text)
@@ -3468,7 +3482,7 @@ void p2p_code_found(const char *text)
 		return;
 	p2p.looking_up = 0;
 	p2p_signal_stop_lookup();
-	set_status("code %.4s-%.4s found; reaching its host", p2p.lookup_code, p2p.lookup_code + 4);
+	set_status(N_("code %.4s-%.4s found; reaching its host"), p2p.lookup_code, p2p.lookup_code + 4);
 	join_invite(text, p2p.lookup_public);
 }
 
@@ -3529,7 +3543,7 @@ static void update_joining(void)
 		p2p.lookup_requested = 0;
 		p2p.looking_up = 1;
 		p2p.lookup_time = p2p_now();
-		set_status("looking up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
+		set_status(N_("looking up code %.4s-%.4s"), p2p.lookup_code, p2p.lookup_code + 4);
 		p2p_signal_start();
 		p2p_signal_kick();
 		p2p_signal_lookup_code(p2p.lookup_code, p2p.lookup_has_host ? p2p.lookup_host : NULL);
@@ -3538,8 +3552,8 @@ static void update_joining(void)
 	{
 		p2p.looking_up = 0;
 		p2p_signal_stop_lookup();
-		set_status(p2p_signal_connected() ? "no game has code %.4s-%.4s (check it, or the host stopped hosting)" :
-			"cannot reach the signalling brokers to look up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
+		set_status(p2p_signal_connected() ? N_("no game has code %.4s-%.4s (check it, or the host stopped hosting)") :
+			N_("cannot reach the signalling brokers to look up code %.4s-%.4s"), p2p.lookup_code, p2p.lookup_code + 4);
 	}
 	if (p2p.join_requested)
 	{
@@ -3553,7 +3567,7 @@ static void update_joining(void)
 		p2p.joining = 1;
 		p2p.join_time = p2p_now();
 		p2p_hex(p2p.join_host, P2P_IDENTIFIER_SIZE, name);
-		set_status("joining %s's game", name);
+		set_status(N_("joining %s's game"), name);
 		p2p_signal_start();
 		p2p_signal_join(p2p.join_host_hash, p2p.join_token);
 	}
@@ -3561,7 +3575,7 @@ static void update_joining(void)
 	{
 		p2p.joining = 0;
 		p2p_signal_stop_joining();
-		set_status("no answer from the invite's host; it may have stopped hosting or quit");
+		set_status(N_("no answer from the invite's host; it may have stopped hosting or quit"));
 		p2p_lobby_join_timed_out(p2p.join_host_hash);
 	}
 }
@@ -3630,8 +3644,8 @@ static void update_hosting(void)
 		if (want != p2p.hosting)
 		{
 			p2p.hosting = want;
-			set_status(want ? "hosting over ad hoc: the group's machines see the game under System Link" :
-				"stopped hosting");
+			set_status(want ? N_("hosting over ad hoc: the group's machines see the game under System Link") :
+				N_("stopped hosting"));
 		}
 		return;
 	}
@@ -3671,7 +3685,7 @@ static void update_hosting(void)
 		clipboard, or on the Vita to host_invite.txt) */
 		platform_log("Internet play: hosting with the invite halo://join/%.12s... (the whole link only works while "
 			"this copy of the game runs)", p2p.invite + strlen("halo://join/"));
-		set_status("hosting; others join with the code %s", p2p.code);
+		set_status(N_("hosting; others join with the code %s"), p2p.code);
 		if (!p2p.invite_copied)
 		{
 			memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
@@ -3891,24 +3905,28 @@ int p2p_hosting_code(char *code, int size)
 	return result;
 }
 
-int p2p_status(char *text, int size)
+/* the status line, English (`shown` 0) or in the language chosen */
+static int status_line(char *text, int size, int shown)
 {
 	if (size <= 0)
 		return 0;
 	if (!p2p.running)
 	{
-		snprintf(text, (size_t)size, "off");
+		snprintf(text, (size_t)size, "%s", shown ? T("off") : "off");
 		return 0;
 	}
 	pthread_mutex_lock(&p2p_lock);
 	if (p2p.status[0])
-		snprintf(text, (size_t)size, "%s", p2p.status);
+		snprintf(text, (size_t)size, "%s", shown ? p2p.status_shown : p2p.status);
+	else if (p2p_signal_connected())
+		snprintf(text, (size_t)size, "%s", shown ? T("ready") : "ready");
 	else
-		snprintf(text, (size_t)size, p2p_signal_connected() ? "ready" : "starting");
-	/* (hosting a public game: whether the brokers hold its listing) */
+		snprintf(text, (size_t)size, "%s", shown ? T("starting") : "starting");
+	/* (hosting a public game: whether the brokers hold its listing, in the
+	language chosen either way) */
 	if (p2p.hosting && !p2p.adhoc)
 	{
-		char listing[64];
+		char listing[96];
 		size_t length = strlen(text);
 
 		if (p2p_lobby_hosting_status_locked(listing, sizeof(listing)) != P2P_LOBBY_HOSTING_NONE && listing[0] &&
@@ -3919,6 +3937,16 @@ int p2p_status(char *text, int size)
 	}
 	pthread_mutex_unlock(&p2p_lock);
 	return 1;
+}
+
+int p2p_status(char *text, int size)
+{
+	return status_line(text, size, 0);
+}
+
+int p2p_status_shown(char *text, int size)
+{
+	return status_line(text, size, 1);
 }
 
 /* ---------- invites from elsewhere */

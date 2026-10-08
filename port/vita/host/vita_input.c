@@ -36,6 +36,7 @@ Vita lying on a table drifts).
 #include <string.h>
 
 #include "vita_controls.h"
+#include "lang.h"
 #include "vita_host.h"
 
 /* bumped by the settings panel (port_config.c) */
@@ -441,14 +442,15 @@ void vita_gyro_status(char *text, int size)
 
 		rate[axis] = degrees > 999.0f ? 999 : degrees < -999.0f ? -999 : (int)(degrees + (degrees < 0 ? -0.5f : 0.5f));
 	}
+	/* (the settings panel's line: in the language chosen, lang.c) */
 	if (!gyro_sampling && !gyro_simulated_at)
-		snprintf(text, (size_t)size, "Gyro: no sensor");
+		snprintf(text, (size_t)size, "%s", T("Gyro: no sensor"));
 	else if (!gyro_simulated_at && (!gyro_sensor_seen || now - gyro_sensor_seen > 1000000))
-		snprintf(text, (size_t)size, "Gyro: no samples");
+		snprintf(text, (size_t)size, "%s", T("Gyro: no samples"));
 	else
 		/* (degrees a second, the game's way round: yaw left +, pitch up +) */
-		snprintf(text, (size_t)size, "Gyro: yaw %+d pitch %+d roll %+d %s", rate[1], rate[0], rate[2],
-			gyro_simulated_at ? "simulated" : gyro_filter.still_count ? "learnt" : "lay still");
+		snprintf(text, (size_t)size, T("Gyro: yaw %+d pitch %+d roll %+d %s"), rate[1], rate[0], rate[2],
+			gyro_simulated_at ? T("simulated") : gyro_filter.still_count ? T("learnt") : T("lay still"));
 }
 
 void vita_host_pad_read(struct vita_host_pad *pad)

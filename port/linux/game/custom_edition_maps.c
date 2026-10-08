@@ -45,6 +45,8 @@ in lines of about 20 characters.
 #include "bmp_files.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "text/unicode.h"
+#include "../src/lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,11 +139,6 @@ struct custom_edition_maps_globals
 /* ---------- globals */
 
 static struct custom_edition_maps_globals custom_edition_maps_globals;
-
-/* the description of a map without a description file, in the manner of
-the Xbox levels' */
-static wchar_t const default_description[] = L"Halo Custom\r\nEdition map";
-static wchar_t const default_xbox_description[] = L"Custom map";
 
 /* the Xbox's own levels, whose copies differ by region (the PAL and NTSC
 maps play together: port/linux/game/pal_tags.c), so they are never
@@ -353,14 +350,17 @@ static void custom_edition_map_description_read(
 	}
 	map->description[length] = 0;
 
+	/* (none: the default, in the manner of the Xbox levels', in the
+	player's language, lang.h) */
 	if (!length && map->xbox_cache)
 	{
-		csmemcpy(map->description, default_xbox_description, sizeof(default_xbox_description));
+		ustrncpy(map->description, TW(L"Custom map"), MAXIMUM_DESCRIPTION_LENGTH);
 	}
 	else if (!length)
 	{
-		csmemcpy(map->description, default_description, sizeof(default_description));
+		ustrncpy(map->description, TW(L"Halo Custom\r\nEdition map"), MAXIMUM_DESCRIPTION_LENGTH);
 	}
+	map->description[MAXIMUM_DESCRIPTION_LENGTH] = 0;
 
 	return;
 }

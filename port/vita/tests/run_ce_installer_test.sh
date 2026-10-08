@@ -27,7 +27,7 @@ mkdir -p "$out"
 sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
 # (libmspack's own configuration: config.h's few)
 mspack="-I$root/port/third_party/libmspack -DHAVE_INTTYPES_H=1"
-sources="$root/port/linux/src/posix_ce_installer.c $root/port/third_party/libmspack/cabd.c
+sources="$root/port/linux/src/posix_ce_installer.c $root/port/linux/src/lang.c $root/port/third_party/libmspack/cabd.c
 	$root/port/third_party/libmspack/lzxd.c $root/port/third_party/libmspack/mszipd.c
 	$root/port/third_party/libmspack/qtmd.c $root/port/third_party/libmspack/system.c"
 flags="-g -O1 -Wall -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -I$root/port/linux/src $mspack"

@@ -46,6 +46,7 @@ each frame's presentation.
 #include "vita_host.h"
 #include "vita_shader_cache.h"
 #include "vita_shader_generator_id.h"
+#include "lang.h"
 #include "overlay_font.h"
 
 #define DISPLAY_WIDTH 960
@@ -358,7 +359,7 @@ static struct
 	float overlay_fps, overlay_tick_ms, overlay_render_ms;
 	/* the settings panel's text, written by the game's thread and drawn by
 	the worker: two copies, the index flips when one is complete */
-	char menu_text[2][2048];
+	char menu_text[2][3072];
 	volatile int menu_index, menu_visible, menu_selected;
 	/* the frame's scale to the display (HALO_UPSCALE_FILTER): 0 smooth
 	(bilinear), 1 sharp (nearest), both at the display's height; and the
@@ -3738,26 +3739,28 @@ static unsigned int overlay_rect(struct overlay_vertex *vertices, unsigned int c
 	return count + 1;
 }
 
-/* text in the 8x8 font at scale: a rectangle per run of lit pixels, a run
-the row below repeats made one taller rectangle (the panel's text fits in
-the overlay's 8192 rectangles, the 16-bit indices' limit) */
+/* UTF-8 text in the 8x8 font at scale (a translated text's accented
+letters with their marks in the rows above the cell: overlay_font.h
+overlay_glyph): a rectangle per run of lit pixels, a run the row below
+repeats made one taller rectangle (the panel's text fits in the overlay's
+8192 rectangles, the 16-bit indices' limit) */
 static unsigned int overlay_text(struct overlay_vertex *vertices, unsigned int count, unsigned int limit, float x,
 	float y, float scale, uint32_t color, const char *text)
 {
-	for (; *text; text++, x += 8.0f * scale)
+	const float top = y - OVERLAY_ROWS_ABOVE * scale;
+
+	for (; *text; x += 8.0f * scale)
 	{
-		unsigned char c = (unsigned char)*text;
+		unsigned char glyph[OVERLAY_ROWS];
 		/* the runs still growing down: column, length, first row */
 		unsigned char open_column[8], open_length[8], open_row[8];
 		int open_count = 0, row;
 
-		if (c >= 'a' && c <= 'z')
-			c = (unsigned char)(c - 'a' + 'A');
-		if (c < 32 || c >= 128)
+		if (!overlay_glyph(&text, glyph))
 			continue;
-		for (row = 0; row <= 8; row++)
+		for (row = 0; row <= OVERLAY_ROWS; row++)
 		{
-			unsigned char bits = row < 8 ? font[c - 32][row] : 0;
+			unsigned char bits = row < OVERLAY_ROWS ? glyph[row] : 0;
 			unsigned char run_column[8], run_length[8], run_used[8];
 			int run_count = 0, column, index;
 
@@ -3793,7 +3796,7 @@ static unsigned int overlay_text(struct overlay_vertex *vertices, unsigned int c
 					continue;
 				}
 				if (count < limit)
-					count = overlay_rect(vertices, count, x + open_column[index] * scale, y + open_row[index] * scale,
+					count = overlay_rect(vertices, count, x + open_column[index] * scale, top + open_row[index] * scale,
 						scale * open_length[index], scale * (float)(row - open_row[index]), color);
 				open_count--;
 				open_column[index] = open_column[open_count];
@@ -3883,9 +3886,27 @@ static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int coun
 	float y, float width, const char *tabs)
 {
 	const float scale = 2.0f, character = 8.0f * scale;
-	char name[32];
+	char name[64];
 	float x = left + 20.0f;
+	/* a character either side of a name, or half of one when the names
+	(a translation's, longer) would reach the R; their lengths in
+	characters, not UTF-8's bytes */
+	float pad = 2.0f, room = width - 40.0f - 4.0f * character, needed = 0.0f;
+	const char *at;
 
+	for (at = tabs; *at; )
+	{
+		size_t length = strcspn(at, "|");
+		int shown = *at == '*', characters = 0;
+		size_t index;
+
+		for (index = (size_t)shown; index < length; index++)
+			characters += ((unsigned char)at[index] & 0xC0) != 0x80;
+		needed += (characters + 2.0f) * character + 8.0f;
+		at += length + (at[length] == '|');
+	}
+	if (needed > room)
+		pad = 1.0f;
 	count = overlay_text(vertices, count, limit, x, y, scale, MENU_ACCENT, "L");
 	x += 3.0f * character;
 	while (*tabs)
@@ -3898,13 +3919,16 @@ static unsigned int menu_tabs(struct overlay_vertex *vertices, unsigned int coun
 			name_length = sizeof(name) - 1;
 		memcpy(name, tabs + shown, name_length);
 		name[name_length] = 0;
-		/* (a character either side of a name: the five tabs end well
-		before the R) */
-		if (shown)
-			count = overlay_rect(vertices, count, x, y - 6.0f, (name_length + 2.0f) * character, character + 12.0f,
-				MENU_ACCENT);
-		count = overlay_text(vertices, count, limit, x + character, y, scale, shown ? 0xFF000000u : MENU_TAB, name);
-		x += (name_length + 2.0f) * character + 8.0f;
+		{
+			float characters = (float)lang_utf8_length(name);
+
+			if (shown)
+				count = overlay_rect(vertices, count, x, y - 6.0f, (characters + pad) * character, character + 12.0f,
+					MENU_ACCENT);
+			count = overlay_text(vertices, count, limit, x + pad * character / 2.0f, y, scale,
+				shown ? 0xFF000000u : MENU_TAB, name);
+			x += (characters + pad) * character + 8.0f;
+		}
 		tabs += length;
 		if (*tabs == '|')
 			tabs++;
@@ -3935,7 +3959,7 @@ static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned
 		float top = y + panel * (box_height + 28.0f) + 16.0f;
 
 		count = overlay_text(vertices, count, limit, x, top - 15.0f, 1.5f, 0xFFA0A0A0u,
-			panel == VITA_TOUCH_FRONT ? "Front" : "Rear");
+			panel == VITA_TOUCH_FRONT ? T("Front") : T("Rear"));
 		count = overlay_rect(vertices, count, x, top, box_width, box_height, 0xFF707070u);
 		count = overlay_rect(vertices, count, x + 1.0f, top + 1.0f, box_width - 2.0f, box_height - 2.0f, 0xFF202020u);
 		for (zone = 0; zone < VITA_ZONE_COUNT && zones[zone]; zone++)
@@ -4007,7 +4031,7 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	const char *diagram = NULL;
 	int line_count = 0, index;
 	const float width = 880.0f, left = (DISPLAY_WIDTH - width) / 2.0f;
-	char copy[2048];
+	char copy[3072];
 	char *cursor;
 
 	strncpy(copy, text, sizeof(copy) - 1);

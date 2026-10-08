@@ -356,6 +356,7 @@ symbols in this file:
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
 #include "map_share.h"
@@ -1362,10 +1363,10 @@ static void server_list_menu_update(
 						coop_menu_level_name(map_name, text, NUMBEROF(text));
 						ui_widget_port_text_override(map_name_text, text);
 						coop_menu_difficulty_name(difficulty, difficulty_name, NUMBEROF(difficulty_name));
-						usnprintf(text, NUMBEROF(text), L"Co-op, %s", difficulty_name);
+						usnprintf(text, NUMBEROF(text), TW(L"Co-op, %s"), difficulty_name);
 						text[NUMBEROF(text) - 1] = 0;
 						ui_widget_port_text_override(ruleset_text, text);
-						ui_widget_port_text_override(teams_text, L"Campaign");
+						ui_widget_port_text_override(teams_text, TW(L"Campaign"));
 						score_limit_text->visible = FALSE;
 						score_limit_type_text->visible = FALSE;
 					}
@@ -1796,7 +1797,7 @@ static void network_pregame_status_screen_update(
 
 					download_text[0] = 0;
 					if (download_percent != NONE)
-						usnprintf(download_text, NUMBEROF(download_text), L" (map %d%%)", (int)download_percent);
+						usnprintf(download_text, NUMBEROF(download_text), TW(L" (map %d%%)"), (int)download_percent);
 #endif
 					remote_machine_icon->animation.current_frame_index = 1;
 					length = ustrlen(game->machines[machine_indices[machine_widget_index]].name);
@@ -2065,7 +2066,7 @@ static void splitscreen_pregame_status_screen_update(
 			}
 			if (bot_count > 0)
 			{
-				usnprintf(name_with_bots, NUMBEROF(name_with_bots), bot_count == 1 ? L"%s + 1 bot" : L"%s + %d bots",
+				usnprintf(name_with_bots, NUMBEROF(name_with_bots), bot_count == 1 ? TW(L"%s + 1 bot") : TW(L"%s + %d bots"),
 					machine_name, bot_count);
 				machine_name = name_with_bots;
 			}
@@ -3191,7 +3192,7 @@ static void multiplayer_game_directions(
 			if (network_game_server_port_cooperative_menu(NULL))
 			{
 				ui_widget_port_text_override(widget,
-					game && game->maximum_players > 2 ? L"Waiting for other players" : L"Waiting for your partner");
+					game && game->maximum_players > 2 ? TW(L"Waiting for other players") : TW(L"Waiting for your partner"));
 			}
 			return;
 		}
@@ -3207,7 +3208,7 @@ static void multiplayer_game_directions(
 
 		coop_menu_level_name(game->map.name, level, NUMBEROF(level));
 		coop_menu_difficulty_name(game->difficulty, difficulty_name, NUMBEROF(difficulty_name));
-		usnprintf(text, NUMBEROF(text), L"Co-op: %s (%s)", level, difficulty_name);
+		usnprintf(text, NUMBEROF(text), TW(L"Co-op: %s (%s)"), level, difficulty_name);
 		text[NUMBEROF(text) - 1] = 0;
 		widget->parameters.text_box.string_list_index = _multiplayer_game_text_string_waiting_for_machine;
 		ui_widget_port_text_override(widget, text);

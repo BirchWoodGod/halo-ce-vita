@@ -311,6 +311,9 @@ int p2p_lobby_brokers_status(char *text, int size);
 /* one line on what internet play is doing (for a menu); returns nonzero
 if internet play runs */
 int p2p_status(char *text, int size);
+/* the same in the language chosen (lang.c), for the player: p2p_status's
+English is halo.log's, and what its callers test */
+int p2p_status_shown(char *text, int size);
 /* the same for ad hoc play (p2p_adhoc.c): in a group or not, with how many
 other machines; returns nonzero if ad hoc play is on */
 int p2p_adhoc_status(char *text, int size);

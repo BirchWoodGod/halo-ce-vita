@@ -125,7 +125,9 @@ static const struct config_setting config_settings[] =
 
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"
-		"empty for English. The game data decides what is translated." },
+		"empty for English; \"auto\" (the Vita's) the system's. The game data decides\n"
+		"what is translated: a PAL disc's maps_es (maps_fr ...) folder beside maps is\n"
+		"read in that language. Read once, at start." },
 
 	{ "paths.data", _config_string, "\"\"", "HALO_DATA_ROOT", _environment_value, _platform_desktop,
 		"The folder holding the game data's maps folder; empty looks in the\n"

@@ -47,6 +47,7 @@ under it.
 #include "posix.h"
 #include "port_config.h"
 #include "p2p_internal.h"
+#include "lang.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -485,10 +486,13 @@ int p2p_adhoc_status(char *text, int size)
 	pthread_mutex_lock(&adhoc.lock);
 	for (index = 0; index < ADHOC_MAXIMUM_PEERS; index++)
 		count += adhoc.peers[index].used && !elapsed(adhoc.peers[index].heard_time, PEER_SILENCE);
+	/* (for the player: in the language chosen, lang.c) */
 	if (!adhoc.opened)
-		snprintf(text, (size_t)size, "not in an ad hoc group");
+		snprintf(text, (size_t)size, "%s", T("not in an ad hoc group"));
+	else if (count == 1)
+		snprintf(text, (size_t)size, "%s", T("in the group, 1 other machine"));
 	else
-		snprintf(text, (size_t)size, "in the group, %d other machine%s", count, count == 1 ? "" : "s");
+		snprintf(text, (size_t)size, T("in the group, %d other machines"), count);
 	pthread_mutex_unlock(&adhoc.lock);
 	return 1;
 }
