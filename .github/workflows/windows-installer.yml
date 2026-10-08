@@ -1,0 +1,57 @@
+name: Windows install tool
+
+# The install helper (tools/installer) on Windows: its tests, then
+# HaloCEVitaInstaller.exe built by PyInstaller with ffmpeg inside (pinned
+# download, checked by SHA-256: build_windows.py), checked by its selftest
+# and uploaded as an artifact. Only runs when the tool changes.
+on:
+  push:
+    paths:
+      - "tools/installer/**"
+      - ".github/workflows/windows-installer.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the build and test tools
+        run: python -m pip install -r tools/installer/requirements-build.txt -r tools/installer/requirements-dev.txt
+
+      - name: Tests
+        run: python -m pytest -q tools/installer/tests
+
+      - uses: actions/cache@v4
+        with:
+          path: tools/installer/build/ffmpeg-download.zip
+          key: ffmpeg-${{ hashFiles('tools/installer/build_windows.py') }}
+
+      - name: Build HaloCEVitaInstaller.exe
+        run: python tools/installer/build_windows.py
+
+      - name: Self test of the built program
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath tools/installer/dist/HaloCEVitaInstaller.exe -ArgumentList "selftest","--report","selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HaloCEVitaInstaller
+          path: tools/installer/dist/HaloCEVitaInstaller.exe
+          retention-days: 14
