@@ -30,6 +30,11 @@ Evolved.
 
 - The whole campaign from the menus, with checkpoints, saves and Save and
   Quit, cinematics, and the movies (converted to MP4, see below).
+- Split screen on a PS TV, experimental: up to four players on one screen
+  with DualShock 3 / DualShock 4 controllers paired to it, in multiplayer
+  games (also over system link, with players from other Vitas) and in the
+  campaign for two (the Xbox's Cooperative Play). A PS Vita has only its
+  own controls: split screen there is one player.
 - Multiplayer maps on your own (split screen with one player). System link
   between Vitas on the same Wi-Fi; online play (short codes, a server
   browser of public games, from OpenCE) and ad hoc play between Vitas, experimental. Vitas play only
@@ -220,8 +225,13 @@ Multiplayer screen, from OpenCE's PC menus:
   **LAN** is the System Link screen (Y creates a game).
 - **Co-op campaign** (pick a level and a difficulty, then Y; up to four
   players; online the game is private, joined by its code, unless X on its
-  waiting screen makes it public), **Split screen** and **Edit gametypes**,
-  as before.
+  waiting screen makes it public) and **Edit gametypes**, as before.
+- **Split screen**: with more than one controller (a PS TV with other
+  DualShocks paired), **Multiplayer game** (each player presses A on the
+  Select Profile screen and picks a profile, then the map and gametype) or
+  **Co-op campaign** (two players' profiles, then the level and the
+  difficulty). With one controller a screen says split screen needs a
+  PS TV's controllers; A there plays alone.
 
 Internet and Join by code need **Connection: Online** (settings panel,
 Multiplayer); the screen says so otherwise. The pictures and text are read

@@ -349,8 +349,10 @@ static unsigned long long render_now(void) { return vita_host_time_us ? vita_hos
 /* (the phase the draws recorded next belong to, for the device's fill
 statistics: HALO_FILL_STATS, d3d8_gxm.c) */
 int halo_render_phase = -1;
-/* (the late sky: the device draws it at the cleared depth) */
+/* (the late sky: the device draws it at the cleared depth; its lens flares,
+object_lights.c) */
 void halo_d3d_sky_depth(int on);
+void lights_port_submit_queued_lens_flares(void);
 int halo_d3d_sky_late_supported(void);
 static boolean halo_sky_late_enabled(void)
 {
@@ -516,6 +518,9 @@ static void render_window(
 			halo_d3d_sky_depth(TRUE);
 			render_sky();
 			halo_d3d_sky_depth(FALSE);
+			/* (its lens flares, this window's: in split screen the next
+			window is another player's) */
+			lights_port_submit_queued_lens_flares();
 			RENDER_PHASE_END(1, "sky");
 		}
 #endif

@@ -335,6 +335,7 @@ static char const *const port_function_names[] =
 	"port setup back",
 	"port code init", "port code edit", "port code join", "port code back",
 	"port coop campaign",
+	"port mp require controllers",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -343,6 +344,7 @@ static char const *const port_game_data_input_names[] =
 {
 	"unwired",
 	"port mp update desc", "port browser update", "port password update", "port setup update", "port code update",
+	"port split update desc",
 };
 
 static struct

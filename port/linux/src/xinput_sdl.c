@@ -5,6 +5,10 @@ Xbox controllers and the debug keyboard for the Linux build.
 
 Port 0 is always connected: it is the keyboard and mouse, merged with the
 first SDL gamepad when one is present. Further SDL gamepads take ports 1-3.
+On the Vita, port 0 is the Vita's own controls and ports 1-3 a PS TV's other
+controllers (port/vita/platform/vita_pad.c). (debug) debug.test_controllers
+connects ports 1-3 with no device behind them, for automated split screen
+tests (the scripted player and HALO_TEST_PAD's steps play them).
 
 Keyboard and mouse (port 0):
 	W A S D          left stick          arrows           D-pad
@@ -219,6 +223,21 @@ once a frame, at the display's refresh rate. */
 #define WHEEL_PRESS_MS 50
 #define WHEEL_SCROLL_GAP_MS 200
 
+/* (debug) debug.test_controllers: the controllers the automated tests have,
+1 to 4 (ports 1 on with no device behind them) */
+static int test_controller_count(void)
+{
+	static int count;
+
+	if (!count)
+	{
+		long setting = config_integer("debug.test_controllers");
+
+		count = setting < 1 ? 1 : setting > PORT_COUNT ? PORT_COUNT : (int)setting;
+	}
+	return count;
+}
+
 /* debug.test_input "bot:<seed>": a scripted player for the automated
 network tests (port/linux/game/network_test.c), different for each seed:
 it walks and strafes in circles, turns, fires every few seconds, jumps now
@@ -243,7 +262,11 @@ spaces (hold 150 and pause 1500 by default), pressed one after another
 from when the main menu has been up for a second (test_input_main_menu,
 main.c). Names in the Xbox's terms: a b x y black white lt rt up down left
 right start back ls rs, several at once joined by "+"; "wait" presses
-none. halo.log says each step as it is pressed. */
+none; "2." to "4." before a step press it on controller 2 to 4 (the test
+controllers, debug.test_controllers) instead of controller 1; "unplug" and
+"plug" on one of them disconnect it and connect it again as the step
+begins (a PS TV's DualShock switched off mid-game, and back). halo.log says
+each step as it is pressed. */
 static struct
 {
 	int parsed;
@@ -253,6 +276,8 @@ static struct
 	struct
 	{
 		char name[24];
+		/* the port pressing it */
+		int port;
 		int buttons;
 		WORD digital;
 		unsigned int hold_ms;
@@ -260,6 +285,8 @@ static struct
 	} steps[96];
 } test_pad;
 static volatile int test_pad_menu_ready;
+/* the test controllers a step unplugged (a bit per port) */
+static volatile DWORD test_pad_unplugged;
 /* (the main menu is up: the scripted player leaves the menus to the steps) */
 static volatile int test_pad_at_menu;
 
@@ -328,6 +355,11 @@ static void test_pad_parse(void)
 			test_pad.steps[step].pause_ms = (unsigned int)atoi(pause + 1);
 		}
 		snprintf(test_pad.steps[step].name, sizeof(test_pad.steps[step].name), "%s", token);
+		if (token[0] >= '2' && token[0] <= '0' + PORT_COUNT && token[1] == '.')
+		{
+			test_pad.steps[step].port = token[0] - '1';
+			token += 2;
+		}
 		for (key = strtok_r(token, "+", &key_end); key; key = strtok_r(NULL, "+", &key_end))
 		{
 			int index;
@@ -345,7 +377,21 @@ static void test_pad_parse(void)
 	}
 }
 
-static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
+/* a step as it begins: logged, and a test controller's unplug or plug */
+static void test_pad_step_begin(void)
+{
+	const char *name = test_pad.steps[test_pad.index].name;
+	int port = test_pad.steps[test_pad.index].port;
+	const char *action = port ? name + 2 : name;
+
+	platform_log("test pad: %s", name);
+	if (port && !strncmp(action, "unplug", 6))
+		test_pad_unplugged |= 1UL << port;
+	else if (port && !strncmp(action, "plug", 4))
+		test_pad_unplugged &= ~(1UL << port);
+}
+
+static void test_pad_gamepad(XINPUT_GAMEPAD *pad, int port)
 {
 	Uint64 now;
 
@@ -357,7 +403,7 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 	if (!test_pad.started)
 	{
 		test_pad.started = now;
-		platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+		test_pad_step_begin();
 	}
 	while (test_pad.index < test_pad.count)
 	{
@@ -366,6 +412,8 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 
 		if (elapsed < test_pad.steps[test_pad.index].hold_ms)
 		{
+			if (test_pad.steps[test_pad.index].port != port)
+				return;
 			for (analog = 0; analog < 8; analog++)
 			{
 				if (test_pad.steps[test_pad.index].buttons & (1 << analog))
@@ -379,13 +427,13 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 		test_pad.started += test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms;
 		test_pad.index++;
 		if (test_pad.index < test_pad.count)
-			platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+			test_pad_step_begin();
 		else
 			platform_log("test pad: done");
 	}
 }
 
-static void test_input_gamepad(XINPUT_GAMEPAD *pad)
+static void test_input_gamepad(XINPUT_GAMEPAD *pad, int port)
 {
 	static int checked;
 	static int seed = -1;
@@ -395,6 +443,7 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	the cryo tube (player_action_test_action), and until a teammate is out a
 	co-op partner only watches (players_coop_room_to_spawn) */
 	static int look;
+	int player_seed;
 	double t;
 
 	if (!checked)
@@ -414,14 +463,16 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	a level) */
 	if (test_pad_at_menu && test_pad.count > 0)
 		return;
-	if (test_input_holding_action)
+	if (test_input_holding_action && port == 0)
 	{
 		/* (standing still, the button held from a second on) */
 		if (SDL_GetTicks() - test_input_holding_action_since >= 1000)
 			pad->bAnalogButtons[XINPUT_GAMEPAD_X] = 255;
 		return;
 	}
-	t = (double)SDL_GetTicks() / 1000.0 + seed * 1.7;
+	/* (the test controllers' players: seeds of their own) */
+	player_seed = seed + port * 3;
+	t = (double)SDL_GetTicks() / 1000.0 + player_seed * 1.7;
 #ifndef HALO_VITA
 	{
 		/* (debug) HALO_FIXED_TICK: on the game's clock, so the scripted
@@ -430,15 +481,15 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 		extern volatile unsigned long halo_ticks_simulated;
 
 		if (fixed && atoi(fixed))
-			t = (double)halo_ticks_simulated / 30.0 + seed * 1.7;
+			t = (double)halo_ticks_simulated / 30.0 + player_seed * 1.7;
 	}
 #endif
 	pad->sThumbLY = (SHORT)(sin(t * 0.9) * 32000.0);
-	pad->sThumbLX = (SHORT)(cos(t * 0.6 + seed) * 20000.0);
+	pad->sThumbLX = (SHORT)(cos(t * 0.6 + player_seed) * 20000.0);
 	pad->sThumbRX = (SHORT)(sin(t * 0.4) * 14000.0);
 	if (look)
 	{
-		pad->sThumbRY = (SHORT)(sin(t * 0.7 + seed) * 20000.0);
+		pad->sThumbRY = (SHORT)(sin(t * 0.7 + player_seed) * 20000.0);
 		if (fmod(t, 4.0) >= 2.0 && fmod(t, 4.0) < 2.2)
 			pad->bAnalogButtons[XINPUT_GAMEPAD_X] = 255;
 	}
@@ -603,9 +654,26 @@ static DWORD connected_gamepads(void)
 	DWORD mask = XDEVICE_PORT0_MASK;
 	int port;
 
+#ifdef HALO_VITA
+	/* (the Vita's own controls are port 0: its SDL joystick is not another
+	controller) a PS TV's other controllers (port/vita/platform/vita_pad.c) */
+	{
+		extern unsigned long vita_pad_extra_connected(void);
+
+		(void)count;
+		mask |= vita_pad_extra_connected() & 0x0EUL;
+	}
+#else
 	/* the first pad shares port 0 with the keyboard */
 	for (port = 1; port < count; port++)
 		mask |= 1UL << port;
+#endif
+	/* (debug) the automated tests' controllers, but those a step unplugged */
+	for (port = 1; port < test_controller_count(); port++)
+	{
+		if (!(test_pad_unplugged & (1UL << port)))
+			mask |= 1UL << port;
+	}
 	return mask;
 }
 
@@ -704,13 +772,32 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 			keyboard_gamepad(&input, &state->Gamepad);
 		if (count > 0)
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
-		test_input_gamepad(&state->Gamepad);
-		test_pad_gamepad(&state->Gamepad);
+		test_input_gamepad(&state->Gamepad, 0);
+		test_pad_gamepad(&state->Gamepad, 0);
 	}
+	else if (port < test_controller_count())
+	{
+		/* (debug) a test controller: the scripted player's and the steps'
+		(none while unplugged; port 0's poll moves the steps on) */
+		if (test_pad_unplugged & (1UL << port))
+			return ERROR_DEVICE_NOT_CONNECTED;
+		test_input_gamepad(&state->Gamepad, port);
+		test_pad_gamepad(&state->Gamepad, port);
+	}
+#ifdef HALO_VITA
+	else
+	{
+		/* a PS TV's other controllers (port/vita/platform/vita_pad.c) */
+		extern void vita_pad_extra_state(int controller, XINPUT_GAMEPAD *gamepad);
+
+		vita_pad_extra_state(port, &state->Gamepad);
+	}
+#else
 	else if (port < count)
 	{
 		sdl_gamepad_state(gamepads[port], &state->Gamepad);
 	}
+#endif
 
 	if (memcmp(&state->Gamepad, &controllers[port].previous, sizeof(state->Gamepad)))
 	{
@@ -732,6 +819,17 @@ DWORD WINAPI XInputSetState(HANDLE device, PXINPUT_FEEDBACK feedback)
 	feedback->Header.dwStatus = ERROR_SUCCESS;
 	if (port < 0)
 		return ERROR_DEVICE_NOT_CONNECTED;
+#ifdef HALO_VITA
+	/* a PS TV's DualShocks (port/vita/platform/vita_pad.c) */
+	{
+		extern void vita_pad_rumble(int controller, unsigned short left, unsigned short right);
+
+		(void)gamepads;
+		(void)count;
+		vita_pad_rumble(port, feedback->Rumble.wLeftMotorSpeed, feedback->Rumble.wRightMotorSpeed);
+		return ERROR_SUCCESS;
+	}
+#endif
 	count = sdl_gamepads(gamepads);
 	if (port < count)
 	{

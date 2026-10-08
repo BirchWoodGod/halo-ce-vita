@@ -4163,6 +4163,20 @@ void main_game_render(
 		window_count = 1;
 		player_window_count = 1;
 	}
+#ifdef HALO_LINUX
+	{
+		/* port: halo.log says when the screen splits and joins again (split
+		screen on a PS TV; the automated tests look for it) */
+		static short logged_window_count = 1;
+
+		if (player_window_count != logged_window_count)
+		{
+			logged_window_count = player_window_count;
+			platform_log("split screen: %d %s", player_window_count,
+				player_window_count > 1 ? "windows" : "window");
+		}
+	}
+#endif
 
 	for (window_index = 0; window_index < player_window_count; window_index++)
 	{

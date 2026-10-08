@@ -343,7 +343,11 @@ static const struct config_setting config_settings[] =
 		"damaged too)." },
 	{ "debug.test_input", _config_string, "\"\"", "HALO_TEST_INPUT", _environment_value, _platform_all,
 		"\"bot:<seed>\" plays controller 1 with a scripted pattern (automated\n"
-		"network tests); empty for none." },
+		"network tests), and debug.test_controllers' others; empty for none." },
+	{ "debug.test_controllers", _config_integer, "1", "HALO_TEST_CONTROLLERS", _environment_value, _platform_all,
+		"Controllers 2 to this many (up to 4) connected with no device behind them,\n"
+		"for automated split screen tests: test_input's scripted player plays each\n"
+		"(a seed of its own), and network_test adds a player for each; 1 none." },
 	{ "debug.update_answer", _config_string, "\"\"", "HALO_UPDATE_ANSWER", _environment_value, _platform_desktop,
 		"The answer to the new version question, for automated tests: \"yes\",\n"
 		"\"no\" or \"never\" (do not ask again, confirmed); empty asks." },

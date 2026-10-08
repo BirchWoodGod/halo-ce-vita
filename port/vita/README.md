@@ -303,9 +303,19 @@ up with a PC host's game). Every machine needs the same version of this
 port and Xbox maps of a supported build (NTSC 01.10.12.2276 or 01.08.15.1749,
 PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
 
-- **Split screen** needs two players, and the Vita has one controller: a
-  split screen game starts with you alone, to play the multiplayer maps on
-  your own.
+- **Split screen** (experimental) is for a **PS TV** with up to three more
+  DualShock 3 or DualShock 4 controllers paired to it (a DualShock 3 by
+  its USB cable, a DualShock 4 over Bluetooth): up to four players on one
+  screen, each with a profile of their own. Controllers can be switched off
+  and on during a game: the player's part of the screen asks for the
+  controller until it is back. Every controller uses the settings panel's
+  Controls layout; a DualShock's L2 and R2 are also L and R, L3 and R3 the
+  sticks' clicks, and its motors rumble. A Vita has only its own controls,
+  so split screen there starts with you alone, to play the multiplayer
+  maps on your own. Split screen games can also be system link games:
+  each Vita or PS TV brings its own players. Every part of the screen is
+  drawn on its own, so a frame of four players costs about three times as
+  many draws as a frame of one: expect a lower frame rate.
 - **System link** over Wi-Fi: Vitas on the same network host and join each
   other's games under Multiplayer, System Link.
 - **Ad hoc** (Vitas side by side, no router) and **online** (internet
@@ -327,7 +337,8 @@ PC version's Multiplayer screen, OpenCE's menus:
 | Create Game: Internet | Server Setup: Server name (others see it in their lists; 15 characters; your Vita's user name until you type one), Max players (2 to 16; a joiner past it is told the game is full), Visibility (**Public**: listed in every Vita's server browser; **Private**: joined by its code), Password (a public game asks joiners for it; the code still joins). START GAME, then your profile, a map and a gametype: your lobby. The settings are kept. |
 | Create Game: LAN | The System Link screen, where Y creates a game. |
 | Co-op campaign | The Campaign screen: a profile, a level, a difficulty, then **Y** (co-op, below). |
-| Split screen, Edit gametypes | As on the Xbox. |
+| Split screen | With more than one controller: **Multiplayer game** (the Xbox's Split Screen: each player presses A on Select Profile and picks a profile, then the map and the gametype) or **Co-op campaign** (the Xbox's Cooperative Play: player 1's profile, player 2's with their own controller, then the level and the difficulty). With one controller, a screen says split screen needs a PS TV's controllers; A there plays alone. |
+| Edit gametypes | As on the Xbox. |
 
 Internet and Join by code need Connection Online. Without the two Halo PC
 files the Xbox's Multiplayer screen opens as before: **System Link** hosts

@@ -2595,6 +2595,12 @@ static boolean network_game_remove_local_player(
 		event && event->controller_index >= 0 && event->controller_index < 4,
 		"valid controller index required to remove player from network game");
 	network_game_client_local_player_quit(event->controller_index);
+#ifdef HALO_LINUX
+	/* port: a split screen player who quit, the others staying, is not
+	joined to the next game (OpenCE's, e3389991) */
+	if (local_player_count() > 1)
+		player_ui_local_player_left_multiplayer_game(event->controller_index);
+#endif
 	return TRUE;
 }
 
@@ -2731,7 +2737,17 @@ static boolean netgame_unjoin_player(
 						player_ui_autojoin_players_to_next_multiplayer_game();
 					}
 					else
+					{
+#ifdef HALO_LINUX
+						/* port: a split screen player's B in the lobby, the
+						others staying: out of the next game too (the Xbox
+						joined them again after this one: OpenCE's
+						ui_widget_port_unjoin_player, e3389991) */
+						if (player)
+							player_ui_local_player_left_multiplayer_game((short)(signed char)player[0x1D]);
+#endif
 						result = FALSE;
+					}
 				}
 			}
 		}

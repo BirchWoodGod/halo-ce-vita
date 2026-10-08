@@ -41,6 +41,11 @@ void lights_update_unattached(void);
 /* (port, debug) HALO_STRESS_LIGHTS=n: n effect lights a frame around the player */
 void lights_stress_update(void);
 #endif
+#ifdef HALO_LINUX
+/* port: the sky's queued lens flares submitted for the window drawn now */
+void lights_port_submit_queued_lens_flares(
+	void);
+#endif
 void lights_queue_lens_flare(
 	long lens_flare_definition_index,
 	real_point3d const *position,
