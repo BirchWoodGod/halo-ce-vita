@@ -39,7 +39,7 @@
 		<string text="Join an Internet game by its host's\ncode (ABCD-EFGH)."/>
 		<string text="Host a game on the Internet: name\nit, choose who may join, then pick\nthe map and the gametype."/>
 		<string text="Host a game on your Wi-Fi network:\non the System Link screen,\n%y-button creates a game."/>
-		<string text="Host the campaign for a partner:\npick a level and a difficulty,\nthen press %y-button."/>
+		<string text="Host the campaign for up to three\nothers: pick a level and a\ndifficulty, then press %y-button."/>
 		<string text="Play with several controllers\non this screen."/>
 		<string text="Set all the attributes for your\nmultiplayer gametypes and keep\nthem for future use."/>
 	</strings>

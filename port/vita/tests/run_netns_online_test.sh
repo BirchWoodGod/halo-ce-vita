@@ -68,7 +68,11 @@
 #            off); each copy runs its HALO_TEST_COOP_HOST_COMMANDS /
 #            HALO_TEST_COOP_JOIN_COMMANDS (main.c's HALO_TEST_COMMANDS: skip
 #            votes, loading zones, kills, game_won); the logs are checked by
-#            the caller
+#            the caller. HALO_TEST_COOP_JOINERS: how many join (1; up to
+#            network.coop_players, 4 on the Vitas: each must see every
+#            player alive at once), HALO_TEST_COOP_STAGGER seconds apart
+#            (1; past the host's start, HALO_NETWORK_TEST_START 20, a late
+#            join); HALO_TEST_COOP_HOST_ENV: more for the host
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
 #            (online off), every press scripted (HALO_TEST_PAD): the host
 #            goes Campaign, a new profile, The Pillar of Autumn, Heroic and Y
@@ -79,7 +83,9 @@
 #            cutscene skipped by both votes, and after the host's game_won
 #            (HALO_TEST_COOP_WIN, tick 1200) both played The Truth and
 #            Reconciliation. HALO_TEST_COOP_LIST_WAIT: the joiner's wait in
-#            the list (ms, default 15000)
+#            the list (ms, default 15000); HALO_TEST_COOP_JOINERS: how many
+#            join (1; 3 fills the Vitas' four: the short countdown, not the
+#            one that leaves room for more)
 #
 #   HALO_TEST_VITA   the Linux build on the Vitas' side (configure.py
 #                    --linux-net-vita): build/linux/halo of this tree
@@ -570,38 +576,63 @@ adhoc)
 	;;
 coop)
 	level=${HALO_TEST_COOP_LEVEL:-a10}
+	joiners=${HALO_TEST_COOP_JOINERS:-1}
+	stagger=${HALO_TEST_COOP_STAGGER:-1}
 	coop_host="HALO_NET_COOP_LEVEL=$level HALO_NETWORK_TEST=host:$level HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look"
+	# (more joiners, online: each behind a NAT of its own; system link: each
+	# on the host's LAN)
 	if [ "${HALO_TEST_COOP_LAN:-0}" = 1 ]; then
-		holder; lan=$held
-		in_ns "$host_router" ip link add l2_host type veth peer name m2_host
-		in_ns "$host_router" ip link set m2_host netns "$lan"
-		in_ns "$host_router" ip link set l2_host master b_host
-		in_ns "$host_router" ip link set l2_host up
-		in_ns "$lan" ip link set lo up
-		in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
-		in_ns "$lan" ip link set m2_host up
-		in_ns "$lan" ip route add default via 192.168.1.1
 		run_copy host "$host_machine" "$vita" "$cpu_a" $coop_host HALO_NET_ONLINE=false \
-			"HALO_TEST_COMMANDS=${HALO_TEST_COOP_HOST_COMMANDS:-}"; host_pid=$last_pid
+			"HALO_TEST_COMMANDS=${HALO_TEST_COOP_HOST_COMMANDS:-}" ${HALO_TEST_COOP_HOST_ENV:-}; host_pid=$last_pid
 		sleep 5
-		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
-			HALO_TEST_INPUT=bot:2:look "HALO_TEST_COMMANDS=${HALO_TEST_COOP_JOIN_COMMANDS:-}"; join_pid=$last_pid
 	else
 		run_copy host "$host_machine" "$vita" "$cpu_a" $coop_host HALO_NET_ONLINE=true \
-			"HALO_TEST_COMMANDS=${HALO_TEST_COOP_HOST_COMMANDS:-}"; host_pid=$last_pid
+			"HALO_TEST_COMMANDS=${HALO_TEST_COOP_HOST_COMMANDS:-}" ${HALO_TEST_COOP_HOST_ENV:-}; host_pid=$last_pid
 		code=$(wait_code)
 		[ -n "$code" ] || { fail "the host never showed a code"; exit 1; }
 		echo "host's code: $code"
-		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
-			HALO_TEST_INPUT=bot:2:look "HALO_TEST_COMMANDS=${HALO_TEST_COOP_JOIN_COMMANDS:-}"; join_pid=$last_pid
 	fi
-	wait $join_pid $host_pid 2>/dev/null
+	join_pids= names=
+	for i in $(seq 1 "$joiners"); do
+		name=joiner; [ "$i" -gt 1 ] && name=joiner$i
+		names="$names $name"
+		if [ "${HALO_TEST_COOP_LAN:-0}" = 1 ]; then
+			holder; lan=$held
+			in_ns "$host_router" ip link add "l$((i + 1))_host" type veth peer name "m$((i + 1))_host"
+			in_ns "$host_router" ip link set "m$((i + 1))_host" netns "$lan"
+			in_ns "$host_router" ip link set "l$((i + 1))_host" master b_host
+			in_ns "$host_router" ip link set "l$((i + 1))_host" up
+			in_ns "$lan" ip link set lo up
+			in_ns "$lan" ip addr add "192.168.1.$((i + 2))/24" broadcast 192.168.1.255 dev "m$((i + 1))_host"
+			in_ns "$lan" ip link set "m$((i + 1))_host" up
+			in_ns "$lan" ip route add default via 192.168.1.1
+			run_copy "$name" "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+				HALO_TEST_INPUT=bot:$((i + 1)):look "HALO_TEST_COMMANDS=${HALO_TEST_COOP_JOIN_COMMANDS:-}"
+		else
+			machine=$join_machine
+			if [ "$i" -gt 1 ]; then side "j$i" "10.10.$((10 + i))" "192.168.$((10 + i))"; eval "machine=\$j${i}_machine"; fi
+			run_copy "$name" "$machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+				HALO_TEST_INPUT=bot:$((i + 1)):look "HALO_TEST_COMMANDS=${HALO_TEST_COOP_JOIN_COMMANDS:-}"
+		fi
+		join_pids="$join_pids $last_pid"
+		[ "$i" -lt "$joiners" ] && sleep "$stagger"
+	done
+	wait $join_pids $host_pid 2>/dev/null
 	grep -a "co-op" "$out/host/data/debug.txt" | head -40 > "$out/host.summary"
 	grep -a "co-op" "$out/joiner/data/debug.txt" | head -40 > "$out/joiner.summary"
 	echo "--- host"; cat "$out/host.summary"
 	echo "--- joiner"; cat "$out/joiner.summary"
 	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $two"
+	if [ "$joiners" -gt 1 ]; then
+		# (every joiner played, and the seconds all of them were alive at once)
+		pattern=$(for i in $(seq 0 "$joiners"); do printf 'player [0-9]+: \\(.*'; done)
+		for name in $names; do
+			all=$(grep -a "network test: tick" "$out/$name/run.log" | grep -aEc "$pattern")
+			echo "$name's seconds with all $((joiners + 1)) players alive: $all"
+			[ "$all" -ge 15 ] || fail "$name saw all $((joiners + 1)) players alive for $all s (15 wanted)"
+		done
+	fi
 	# (a co-op game is private unless chosen: network.coop_public, OpenCE's)
 	if [ "${HALO_TEST_COOP_LAN:-0}" != 1 ] && grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log"; then
 		fail "the co-op game was listed in the public games (it is private unless chosen)"
@@ -633,46 +664,66 @@ coopmenuonline)
 	[ "$both" -ge 15 ] || fail "both players were alive for $both s (15 wanted)"
 	;;
 coopmenu)
-	holder; lan=$held
-	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
-	in_ns "$host_router" ip link set m2_host netns "$lan"
-	in_ns "$host_router" ip link set l2_host master b_host
-	in_ns "$host_router" ip link set l2_host up
-	in_ns "$lan" ip link set lo up
-	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
-	in_ns "$lan" ip link set m2_host up
-	in_ns "$lan" ip route add default via 192.168.1.1
+	joiners=${HALO_TEST_COOP_JOINERS:-1}
+	players=$((joiners + 1))
 	# (the main menu, Campaign, the new profile's name (START: Done), Heroic, Y)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
 		"HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y" \
 		"HALO_TEST_COMMANDS=L60:@vote;L${HALO_TEST_COOP_WIN:-1200}:game_won"; host_pid=$last_pid
 	sleep 5
-	# (the System Link screen: A joins, A picks the profile, A again; the list,
-	# a while for the host's game to be heard, then A joins it)
-	run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
-		HALO_SYSTEM_LINK_TEST=join "HALO_TEST_PAD=wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a" \
-		"HALO_TEST_COMMANDS=L60:@vote"; join_pid=$last_pid
-	wait $join_pid $host_pid 2>/dev/null
+	# (each joiner on the host's LAN: the System Link screen, A joins, A picks
+	# the profile, A again; the list, a while for the host's game to be heard,
+	# then A joins it)
+	join_pids= names=
+	for i in $(seq 1 "$joiners"); do
+		name=joiner; [ "$i" -gt 1 ] && name=joiner$i
+		names="$names $name"
+		holder; lan=$held
+		in_ns "$host_router" ip link add "l$((i + 1))_host" type veth peer name "m$((i + 1))_host"
+		in_ns "$host_router" ip link set "m$((i + 1))_host" netns "$lan"
+		in_ns "$host_router" ip link set "l$((i + 1))_host" master b_host
+		in_ns "$host_router" ip link set "l$((i + 1))_host" up
+		in_ns "$lan" ip link set lo up
+		in_ns "$lan" ip addr add "192.168.1.$((i + 2))/24" broadcast 192.168.1.255 dev "m$((i + 1))_host"
+		in_ns "$lan" ip link set "m$((i + 1))_host" up
+		in_ns "$lan" ip route add default via 192.168.1.1
+		run_copy "$name" "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
+			HALO_SYSTEM_LINK_TEST=join "HALO_TEST_PAD=wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a" \
+			"HALO_TEST_COMMANDS=L60:@vote"; join_pids="$join_pids $last_pid"
+	done
+	wait $join_pids $host_pid 2>/dev/null
 	hl=$out/host/run.log jl=$out/joiner/run.log hd=$out/host/data/debug.txt jd=$out/joiner/data/debug.txt
 	echo "--- host"; grep -aE "ui: screen|co-op:|test pad: y" "$hl" | head -12
 	echo "--- joiner"; grep -aE "ui: screen|system link: (joining|in another)|test command" "$jl" | head -12
 	grep -aq "co-op: hosting levels.a10.a10 on difficulty 2 from the campaign's menus" "$hl" ||
 		fail "the host did not host The Pillar of Autumn on Heroic from the campaign's menus"
 	grep -aq "ui: screen .*connected_pregame_screen" "$hl" || fail "the host's lobby (the waiting screen) did not open"
-	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not join the host's game"
 	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
+	# (the countdown from its last start to the loading: 15 s while a game of
+	# four, network.coop_players on the Vitas, has room, 6 s once it is full)
+	wait_s=$(awk '/co-op: the partner is in: the countdown starts/ { t = $2 } /signalling client machines to begin loading/ && t {
+		split(t, a, ":"); split($2, b, ":"); print (b[1] * 3600 + b[2] * 60 + b[3]) - (a[1] * 3600 + a[2] * 60 + a[3]); exit }' "$hd")
+	echo "the lobby's countdown: ${wait_s:-?} s"
+	if [ "$players" = 4 ]; then
+		[ -n "$wait_s" ] && [ "$wait_s" -le 8 ] || fail "the full lobby's countdown took ${wait_s:-?} s (6 wanted)"
+	fi
 	# (the first level: the joiner's ticks before the next level's restart)
 	first() { awk '/network test: tick [0-9]/ { split($0, a, " tick "); t = a[2] + 0; if (t < last - 300) exit; last = t } { print }' "$1"; }
 	next_level() { awk '/network test: tick [0-9]/ { split($0, a, " tick "); t = a[2] + 0; if (t < last - 300) n = 1; last = t } n' "$1"; }
-	both=$(first "$jl" | grep -a "network test: tick" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
-	echo "joiner's seconds on the first level with both players alive: $both"
-	[ "$both" -ge 15 ] || fail "both players were alive on the first level for $both s (15 wanted)"
-	grep -aq "skipping the cutscene (2 of 2 voted)" "$hd" || fail "the cutscene was not skipped by both votes"
-	grep -aq "skip pressed (offered 1" "$jl" || fail "the joiner's vote was not offered"
-	grep -aq "precaching map 'levels.a30.a30'" "$jd" || fail "the joiner did not load the next level"
-	again=$(next_level "$jl" | grep -a "network test: tick" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
-	echo "joiner's seconds on the next level with both players alive: $again"
-	[ "$again" -ge 10 ] || fail "both players were alive on the next level for $again s (10 wanted)"
+	pattern=$(for i in $(seq 1 "$players"); do printf 'player [0-9]+: \\(.*'; done)
+	for name in $names; do
+		grep -aq "system link: in another's lobby" "$out/$name/run.log" || fail "$name did not join the host's game"
+		grep -aq "skip pressed (offered 1" "$out/$name/run.log" || fail "$name's vote was not offered"
+		both=$(first "$out/$name/run.log" | grep -a "network test: tick" | grep -aEc "$pattern")
+		echo "$name's seconds on the first level with all $players players alive: $both"
+		[ "$both" -ge 15 ] || fail "all $players players were alive on the first level for $both s (15 wanted)"
+		grep -aq "precaching map 'levels.a30.a30'" "$out/$name/data/debug.txt" || fail "$name did not load the next level"
+		again=$(next_level "$out/$name/run.log" | grep -a "network test: tick" | grep -aEc "$pattern")
+		echo "$name's seconds on the next level with all $players players alive: $again"
+		[ "$again" -ge 10 ] || fail "all $players players were alive on the next level for $again s (10 wanted)"
+	done
+	# (skipped once more than half the machines voted)
+	grep -aqE "skipping the cutscene \([0-9]+ of $players voted\)" "$hd" || fail "the cutscene was not skipped by the votes"
 	;;
 many)
 	# online off, the host and HALO_TEST_JOINERS joiners (default 3) on the

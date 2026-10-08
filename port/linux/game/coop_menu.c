@@ -7,16 +7,18 @@ alone (as ever) and Y hosts a network game of it on the difficulty selected
 (ui_widget_event_handler_functions.c ui_widget_port_cooperative_campaign_host;
 network_server_manager.c network_game_server_port_cooperative_from_menu).
 The game's own lobby (connected_pregame_screen) is then the waiting screen:
-"Waiting for your partner" in its message bar, and here, where the other
-machines' panels go, the level, the difficulty, this machine's name, how
-the game is reached (system link, online and its code, ad hoc) and B to
-cancel; online also whether it is listed in the server browser, private
-unless chosen (OpenCE's network.coop_public), and X to change it
-(coop_menu_toggle_public). The partner finds the game in the System Link
-list (Multiplayer, System Link, or the Vita settings panel's Join a game)
-as "<host>: <level> (<difficulty>)" and joins it as any game; once their
-player is in, the lobby's countdown starts the level (a few seconds; the
-host's A sooner).
+"Waiting for your partner" (or for other players, in a game of more than
+two: network.coop_players, four on the Vitas) in its message bar, and here,
+where the other machines' panels go, the level, the difficulty, this
+machine's name, how the game is reached (system link, online and its code,
+ad hoc) and B to cancel; online also whether it is listed in the server
+browser, private unless chosen (OpenCE's network.coop_public), and X to
+change it (coop_menu_toggle_public). The others find the game in the
+System Link list (Multiplayer, System Link, or the Vita settings panel's
+Join a game) as "<host>: <level> (<difficulty>)" and join it as any game;
+once the first is in, the lobby shows the others' panels and its countdown
+starts the level (a few seconds, longer while a larger game has room; the
+host's A sooner), and more may join the level in progress.
 
 This file: that text, drawn over the game's own screens in the menus'
 fonts (the maps have no strings for it), from the level and difficulty
@@ -306,9 +308,9 @@ void coop_menu_render(
 			coop_menu_draw(coop_menu_label_style, 100, 414, 200, L"=PLAY CO-OP");
 		return;
 	}
-	/* the lobby of co-op hosted from the menus, while the partner is not in:
-	where the other machines' panels were (the lobby shows the partner's
-	alone: ui_widget_game_data_input_functions.c) */
+	/* the lobby of co-op hosted from the menus, while no one else is in:
+	where the other machines' panels go (the lobby shows the first panel
+	alone meanwhile: ui_widget_game_data_input_functions.c) */
 	if (!csstrcmp(name, coop_menu_pregame_screen) && network_game_server_port_cooperative_menu(NULL))
 	{
 		struct network_game *game = network_game_get_game();
@@ -331,7 +333,7 @@ void coop_menu_render(
 #else
 		usnprintf(line, NUMBEROF(line), L"This machine: %ls", machine_name);
 #endif
-		/* (the name the partner's list shows, when it is not the machine's:
+		/* (the name the others' list shows, when it is not the machine's:
 		the settings' lobby name, network_server_manager.c) */
 		if (game->name[0] && ustrcmp(game->name, machine_name))
 			usnprintf(line, NUMBEROF(line), L"Listed as: %ls", game->name);

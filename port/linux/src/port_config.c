@@ -70,9 +70,9 @@ struct config_setting
 
 /* co-op's defaults: on the Vitas (and the Linux build standing in for one,
 HALO_NET_AS_VITA) the host runs the campaign's AI and scripts for everyone
-at a Vita's speed, so two players and no extra enemies */
+at a Vita's speed, so four players and no extra enemies */
 #if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
-#define COOP_PLAYERS_DEFAULT "2"
+#define COOP_PLAYERS_DEFAULT "4"
 #define COOP_ENEMIES_MODE_DEFAULT "\"none\""
 #else
 #define COOP_PLAYERS_DEFAULT "16"
@@ -222,7 +222,7 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The most players a co-op game this machine hosts takes (2 to the\n"
 		"build's maximum). The host runs the campaign's AI and scripts for\n"
-		"everyone: the Vita's default is 2." },
+		"everyone: the Vita's default is 4." },
 	{ "network.coop_enemies_mode", _config_string, COOP_ENEMIES_MODE_DEFAULT, "HALO_NET_COOP_ENEMIES_MODE",
 		_environment_value, _platform_all,
 		"Online co-op's extra enemies: \"none\", \"per_player\" (each squad of\n"

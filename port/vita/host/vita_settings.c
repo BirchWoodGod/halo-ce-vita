@@ -454,11 +454,11 @@ static struct setting settings[] = {
 	{ "  Lobby name", "HALO_NET_LOBBY_NAME", 0, 0, { NULL }, { NULL }, "The name others see for your game", 0,
 		PAGE_PLAY, KIND_TEXT },
 	/* (network_server_manager.c: the game's maximum_players; co-op takes
-	two) */
+	network.coop_players, four) */
 	{ "  Max players", "HALO_NET_MAX_PLAYERS", 0, 15,
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
-		"The most players your games take (co-op: 2)", 14, PAGE_PLAY },
+		"The most players your games take (co-op: 4)", 14, PAGE_PLAY },
 	/* (network.host_public, OpenCE's: p2p.c) */
 	{ "  Visibility", "HALO_NET_HOST_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
 		"Private: others join by code. Public: listed too", 1, PAGE_PLAY },

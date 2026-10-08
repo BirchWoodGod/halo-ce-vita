@@ -49,8 +49,8 @@ water drawn correctly.
   joiner scans it with the Vita's camera.
 - **A relay** for networks that cannot connect to each other directly.
 - **A steady 30 fps**, including the biggest fights.
-- **Campaign co-op over the network**: play the campaign together on two
-  Vitas over Wi-Fi, online or ad hoc, built on halo-ce-universal's network
+- **Campaign co-op over the network**: play the campaign together on up to
+  four Vitas over Wi-Fi, online or ad hoc, built on halo-ce-universal's network
   co-op (the Xbox only had split-screen co-op on one console).
 - **Custom maps**: play community-made maps, Xbox ones and Halo PC / Custom
   Edition ones, and download a host's map from its Vita when you join.
