@@ -189,6 +189,26 @@ static const struct config_setting config_settings[] =
 	{ "network.signalling_brokers", _config_string, "\"\"", "HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Comma-separated host:port brokers in place of network.brokers_file's\n"
 		"(the automated tests' own); empty for the file's." },
+	{ "network.relays_file", _config_string,
+#ifdef HALO_VITA
+		"\"app0:relays.txt\"",
+#else
+		"\"relays.txt\"",
+#endif
+		"HALO_NET_RELAYS_FILE", _environment_value, _platform_all,
+		"The file of the relays (port/relay) that carry internet play between\n"
+		"two machines whose NATs keep them from reaching each other directly,\n"
+		"beside this file unless a full path (on the Vita, the one in the\n"
+		"game's package, empty: none): one host:port on each line, up to 2. The\n"
+		"relay passes the tunnel's packets on, still encrypted; a direct\n"
+		"connection is always tried first and preferred." },
+	{ "network.relays", _config_string, "\"\"", "HALO_NET_RELAYS", _environment_value, _platform_all,
+		"Comma-separated host:port relays in place of network.relays_file's;\n"
+		"empty for the file's." },
+	{ "network.allow_relay", _config_boolean, "true", "HALO_NET_ALLOW_RELAY", _environment_value, _platform_all,
+		"Let internet play go through a relay (this machine's, or the other\n"
+		"one's) when no direct connection can be made. False never uses or\n"
+		"offers one." },
 	{ "network.coop_level", _config_string, "\"\"", "HALO_NET_COOP_LEVEL", _environment_value, _platform_all,
 		"Co-op over the network: a campaign level's short name (\"a10\" ...\n"
 		"\"d40\") makes every game this machine hosts co-op on that level, its\n"

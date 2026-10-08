@@ -13,6 +13,7 @@ p2p_discord.c; see p2p.c for the design).
 #include "halo_port_limits.h"
 
 #include <pthread.h>
+#include <stddef.h>
 
 enum
 {
@@ -27,6 +28,8 @@ enum
 	P2P_TOKEN_SIZE = 16,
 	/* the addresses a machine offers to be reached at */
 	P2P_MAXIMUM_CANDIDATES = 4,
+	/* the relays it offers to be reached through (p2p_relay_protocol.h) */
+	P2P_MAXIMUM_RELAYS = 2,
 	/* an invite link's text: "halo://join/", the host's key hash and the
 	token in hexadecimal, and a terminator */
 	P2P_LINK_SIZE = 12 + 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE) + 1,
@@ -79,6 +82,9 @@ void p2p_register_url_scheme(const char *scheme, const char *description);
 void p2p_hex(const unsigned char *bytes, int size, char *text);
 /* the addresses this machine can be reached at; returns their count */
 int p2p_local_candidates(struct p2p_candidate *candidates, int maximum_count);
+/* the relays this machine can be reached through (looked up; none if
+network.allow_relay is off); returns their count */
+int p2p_local_relays(struct p2p_candidate *relays, int maximum_count);
 /* this run's X25519 public key (P2P_KEY_SIZE bytes), whose hash the
 identifier is (p2p_identifier) */
 const unsigned char *p2p_public_key(void);
@@ -113,6 +119,10 @@ none does (a session that has ended is never taken up again: its keys'
 packet numbers would start again) */
 int p2p_peer_reoffered(const unsigned char *identifier, const unsigned char *secret,
 	const struct p2p_candidate *candidates, int count);
+/* the relays a machine whose session (that secret's) lives offered, in a
+JOIN with its proof or an ACCEPT: in place of those it offered before */
+void p2p_peer_relays(const unsigned char *identifier, const unsigned char *secret,
+	const struct p2p_candidate *relays, int count);
 /* whether the session of that secret has ended (one never comes back: its
 packet numbers would start over); under p2p_lock */
 int p2p_session_retired(const unsigned char *secret);
@@ -156,6 +166,12 @@ void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token)
 void p2p_signal_stop_joining(void);
 /* whether any broker is connected */
 int p2p_signal_connected(void);
+/* a list of host:port entries, separated by commas, into text: the
+setting override_setting if set (the tests'), else the file file_setting
+names (beside config.toml unless a full path: on the Vita, "app0:..."),
+one entry a line, "#" starting a comment. 0 if the file could not be read
+(text is then empty) */
+int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size);
 /* the server browser's topics: the own slot and the queries (a listed
 game), and every slot (browsing) */
 void p2p_signal_lobby_topics(int listed, int browsing);

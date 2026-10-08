@@ -21,9 +21,10 @@ link games as if they were on one LAN, without a server of this project's.
   each, and never travels.
 - The tunnel is one UDP socket. Each machine learns its public address from
   public STUN servers, and both then send to each other's addresses until
-  packets get through (hole punching). There is no relay: two machines whose
-  NATs both map every destination to a new port cannot connect, unless a
-  router forwards one of them a port. So a host asks its router to forward
+  packets get through (hole punching). Two machines whose NATs both map
+  every destination to a new port cannot connect that way, unless a router
+  forwards one of them a port, or a relay carries them (below). So a host
+  asks its router to forward
   the tunnel's port (UPnP, posix_upnp.c) as soon as a player reaches out
   with its invite, and a joiner asks its own when it has not reached the
   host in a few seconds (network.allow_upnp); the forwarded port is one more
@@ -33,6 +34,16 @@ link games as if they were on one LAN, without a server of this project's.
   its header (the sender and the packet's number, the nonce) authenticated
   too, and a packet already received, or from further back than the last
   64, is dropped.
+- Relays (port/relay, p2p_relay_protocol.h): a machine may name up to
+  P2P_MAXIMUM_RELAYS of them (relays.txt beside brokers.txt, or
+  network.relays; none by default), and offers them with its addresses in
+  signalling. A peer not reached both ways (no answer to a ping) RELAY_DELAY
+  after it was offered is also asked for through the relays, the host's
+  first: each machine asks each relay for the allocation of their session
+  (an identifier derived from its secret, which only the two of them have),
+  and the relay passes their tunnel packets, still sealed, between the two
+  once both did. A direct path stays preferred: its addresses are still
+  tried a while, and the first answer from one moves the peer back to it.
 - Each peer gets a virtual address in 100.64.0.0/10, which the game sees
   (XNetXnAddrToInAddr maps the peer's XNADDR to it). The game's datagrams
   to a peer go onto the tunnel from xnet.c at once (p2p_send_datagram);
@@ -57,6 +68,7 @@ only look up and create stand-ins.
 #include "posix.h"
 #include "port_config.h"
 #include "p2p_internal.h"
+#include "p2p_relay_protocol.h"
 #include "ikcp.h"
 
 #include <stdarg.h>
@@ -68,7 +80,7 @@ only look up and create stand-ins.
 enum
 {
 	/* the tunnel's version 2 (0x68 was the first) */
-	TUNNEL_MAGIC = 0x69,
+	TUNNEL_MAGIC = P2P_TUNNEL_MAGIC,
 	/* the magic, the sender's identifier, and the packet's number */
 	TUNNEL_HEADER_SIZE = 1 + P2P_IDENTIFIER_SIZE + 8,
 	/* a tunnel packet's plaintext: a type, and at most the game's largest
@@ -153,6 +165,21 @@ enum
 	UPNP_RETRY_INTERVAL = 5 * 60 * 1000,
 	/* how long the game's exit waits for a request under way */
 	UPNP_RELEASE_WAIT = 3000,
+	/* relays: a peer not reached both ways in this long is also asked for
+	through them; a relay's allocation is asked for this often until it is
+	ready, refreshed this often while it carries a peer, and asked again
+	this long after the relay refused it; and while a peer is reached only
+	through a relay its addresses are still tried, this often for this long
+	(a direct path is taken at its first answer) */
+	RELAY_DELAY = 8000,
+	RELAY_RETRY_INTERVAL = 500,
+	RELAY_REFRESH_INTERVAL = 15000,
+	RELAY_REFUSED_INTERVAL = 5000,
+	RELAYED_PUNCH_INTERVAL = 1000,
+	RELAYED_PUNCH_TIME = 300000,
+	/* the relays a peer may be reached through: this machine's and the
+	peer's */
+	MAXIMUM_PEER_RELAYS = 2 * P2P_MAXIMUM_RELAYS,
 
 	/* where a running copy of the game takes invites from another one
 	started to open a link (127.0.0.1), sealed with a key of the user's */
@@ -174,6 +201,28 @@ enum
 	_stream_open = 'O',
 	_stream_data = 'D',
 	_stream_close = 'C',
+};
+
+/* a relay's allocation for a peer: asked for, waiting for the peer to ask
+too, carrying (DATA), refused (no room, or its side another's) */
+enum
+{
+	_relay_asking,
+	_relay_waiting,
+	_relay_ready,
+	_relay_refused,
+};
+
+struct peer_relay
+{
+	struct p2p_candidate address;
+	int state;
+	unsigned long channel;
+	/* the nonce of this machine's requests, which the answers carry; and
+	the cookie the relay gave */
+	unsigned char nonce[P2P_RELAY_NONCE_SIZE];
+	unsigned char cookie[P2P_RELAY_COOKIE_SIZE];
+	unsigned long sent_time;
 };
 
 enum
@@ -217,6 +266,21 @@ struct peer
 	that may still be checked (STRAY_PACKETS_PER_SECOND), as of when */
 	int stray_budget;
 	unsigned long stray_time;
+	/* a pong came back: it is reached both ways */
+	int two_way;
+	/* relays: those it offered; the allocation of the session (from its
+	secret); whether it is asked for through relays, and through which; the
+	endpoint is a relay's, since when; and when its addresses were last
+	tried meanwhile */
+	struct p2p_candidate offered_relays[P2P_MAXIMUM_RELAYS];
+	int offered_relay_count;
+	unsigned char relay_allocation[P2P_RELAY_ALLOCATION_SIZE];
+	int relaying;
+	struct peer_relay relays[MAXIMUM_PEER_RELAYS];
+	int relay_count;
+	int via_relay;
+	unsigned long relayed_time;
+	unsigned long punch_time;
 };
 
 /* a UDP stand-in for one port of a peer */
@@ -403,6 +467,17 @@ static struct
 	int upnp_released;
 	struct p2p_candidate upnp_candidate;
 	unsigned long upnp_time;
+
+	/* relays (relays.txt, network.relays): their names, looked up once
+	when STUN starts; whether any may be used (network.allow_relay, not in
+	ad hoc play) */
+	int relay_allowed;
+	char relay_hosts[P2P_MAXIMUM_RELAYS][128];
+	unsigned short relay_ports[P2P_MAXIMUM_RELAYS];
+	int relay_host_count;
+	int relays_resolved;
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+	int relay_count;
 } p2p = { 0, 0, -1, 0, -1, .hosting_socket = -1 };
 
 /* the proxy (its index + 1) with each local port (all of theirs are on
@@ -778,9 +853,18 @@ unsigned long p2p_peer_endpoint_address(unsigned long virtual_address)
 		return 0;
 	pthread_mutex_lock(&p2p_lock);
 	peer = find_peer_by_address(virtual_address);
-	if (peer)
-		address = peer->endpoint.address ? peer->endpoint.address :
-			(peer->candidate_count > 0 ? peer->candidates[0].address : 0);
+	if (peer && peer->endpoint.address && !peer->via_relay)
+		address = peer->endpoint.address;
+	else if (peer)
+	{
+		int index;
+
+		/* (reached through a relay: the address it said it has on the
+		internet, its last offered, rather than the relay's, which many
+		share) */
+		for (index = 0; index < peer->candidate_count; index++)
+			address = peer->candidates[index].address;
+	}
 	pthread_mutex_unlock(&p2p_lock);
 	return address;
 }
@@ -828,10 +912,29 @@ static void packet_nonce(const unsigned char *packet, unsigned char *nonce)
 	memcpy(nonce + P2P_NONCE_SIZE - 8, packet + 1 + P2P_IDENTIFIER_SIZE, 8);
 }
 
+/* the peer's relay at that address that carries it now (its allocation
+ready), or NULL */
+static struct peer_relay *peer_relay_at(struct peer *peer, unsigned long address, unsigned short port)
+{
+	int index;
+
+	for (index = 0; index < peer->relay_count; index++)
+	{
+		struct peer_relay *relay = &peer->relays[index];
+
+		if (relay->state == _relay_ready && relay->address.address == address && relay->address.port == port)
+			return relay;
+	}
+	return NULL;
+}
+
 static void peer_send_to(struct peer *peer, const struct p2p_candidate *to, const unsigned char *inner, int size)
 {
-	unsigned char packet[MAXIMUM_PACKET_SIZE];
+	/* (room ahead for a relay's DATA header) */
+	unsigned char buffer[P2P_RELAY_DATA_HEADER_SIZE + MAXIMUM_PACKET_SIZE];
+	unsigned char *packet = buffer + P2P_RELAY_DATA_HEADER_SIZE;
 	unsigned char nonce[P2P_NONCE_SIZE];
+	struct peer_relay const *relay = peer_relay_at(peer, to->address, to->port);
 	struct sockaddr_in address;
 	unsigned long long counter;
 	int sealed;
@@ -849,6 +952,17 @@ static void peer_send_to(struct peer *peer, const struct p2p_candidate *to, cons
 	sealed = p2p_aead_seal(peer->send_key, nonce, packet, TUNNEL_HEADER_SIZE, inner, size,
 		packet + TUNNEL_HEADER_SIZE);
 	make_address(&address, to->address, to->port);
+	if (relay)
+	{
+		/* (to the relay, which passes it on as it is) */
+		buffer[0] = P2P_RELAY_MAGIC;
+		buffer[1] = _relay_data;
+		for (index = 0; index < 4; index++)
+			buffer[2 + index] = (unsigned char)(relay->channel >> (24 - index * 8));
+		posix_socket_sendto(p2p.tunnel_socket, buffer, P2P_RELAY_DATA_HEADER_SIZE + TUNNEL_HEADER_SIZE + sealed, 0,
+			&address, sizeof(address));
+		return;
+	}
 	posix_socket_sendto(p2p.tunnel_socket, packet, TUNNEL_HEADER_SIZE + sealed, 0, &address, sizeof(address));
 }
 
@@ -1062,6 +1176,14 @@ int p2p_peer_offered(const unsigned char *peer_identifier, const unsigned char *
 		p2p_hmac_sha256(secret, P2P_SHA256_SIZE, "host", 4, host_key);
 		memcpy(peer->send_key, is_host ? joiner_key : host_key, P2P_SHA256_SIZE);
 		memcpy(peer->receive_key, is_host ? host_key : joiner_key, P2P_SHA256_SIZE);
+		/* the allocation a relay pairs the two machines of this session by:
+		only they can work it out */
+		{
+			unsigned char digest[P2P_SHA256_SIZE];
+
+			p2p_hmac_sha256(secret, P2P_SHA256_SIZE, P2P_SIGNAL_PREFIX " relay allocation", 21, digest);
+			memcpy(peer->relay_allocation, digest, P2P_RELAY_ALLOCATION_SIZE);
+		}
 		/* (packets are numbered from 1) */
 		peer->receive_window = 1;
 		peer->virtual_address = virtual_address_for(peer_identifier);
@@ -1121,27 +1243,49 @@ static int peer_known_address(const struct peer *peer, unsigned long address, un
 		if (peer->candidates[index].address == address && peer->candidates[index].port == port)
 			return 1;
 	}
+	for (index = 0; index < peer->relay_count; index++)
+	{
+		if (peer->relays[index].state == _relay_ready && peer->relays[index].address.address == address &&
+			peer->relays[index].address.port == port)
+		{
+			return 1;
+		}
+	}
 	return 0;
 }
 
+/* the status line of a joiner that reached the host (directly, or through
+a relay); its first clause is what the Vita's settings panel shows of it
+(in its 38 characters) */
+static void set_connected_status(int relayed)
+{
+	set_status(relayed ? "connected to the host via a relay: its game is listed under Multiplayer, System Link" :
+		"connected to the host directly: its game is listed under Multiplayer, System Link");
+}
+
 /* newest: the packet is the highest numbered yet (a replayed or delayed one
-does not move the peer's endpoint) */
-static void peer_heard(struct peer *peer, unsigned long address, unsigned short port, int newest)
+does not move the peer's endpoint); pong: it answers a ping of this
+machine's, so that path carries both ways */
+static void peer_heard(struct peer *peer, unsigned long address, unsigned short port, int newest, int pong)
 {
 	unsigned long now = p2p_now();
 	int same = peer->endpoint.address == address && peer->endpoint.port == port;
+	int relayed = peer_relay_at(peer, address, port) != NULL;
+	char text[32];
 
 	peer->heard_time = now;
+	if (pong)
+		peer->two_way = 1;
 	if (!peer->connected)
 	{
-		char text[32];
-
 		peer->connected = 1;
 		peer->endpoint.address = address;
 		peer->endpoint.port = port;
 		peer->endpoint_heard_time = now;
-		platform_log("Internet play: connected to %s %s at %s", peer_role(peer->is_host), peer->name,
-			address_text(address, port, text));
+		peer->via_relay = relayed;
+		peer->relayed_time = now;
+		platform_log("Internet play: connected to %s %s at %s, %s", peer_role(peer->is_host), peer->name,
+			address_text(address, port, text), relayed ? "through the relay" : "directly");
 		if (p2p.adhoc)
 		{
 			set_status("connected to a machine of the ad hoc group: its games are listed under Multiplayer, System Link");
@@ -1153,19 +1297,59 @@ static void peer_heard(struct peer *peer, unsigned long address, unsigned short 
 				p2p.joining = 0;
 				p2p_signal_stop_joining();
 			}
-			set_status("connected to the host: its game is listed under Multiplayer, System Link");
+			set_connected_status(relayed);
 		}
 	}
 	else if (same)
 	{
 		peer->endpoint_heard_time = now;
 	}
-	else if (newest && elapsed(peer->endpoint_heard_time, ENDPOINT_SWITCH_TIME))
+	else if (newest && ((peer->via_relay && !relayed && pong) || elapsed(peer->endpoint_heard_time,
+		ENDPOINT_SWITCH_TIME)))
 	{
-		/* its address changed (a NAT's mapping, or a better path) */
+		/* its address changed (a NAT's mapping, or a better path): a direct
+		path that answers is taken from a relay at once */
 		peer->endpoint.address = address;
 		peer->endpoint.port = port;
 		peer->endpoint_heard_time = now;
+		if (relayed != peer->via_relay)
+		{
+			peer->via_relay = relayed;
+			peer->relayed_time = now;
+			platform_log("Internet play: %s %s is now reached %s (%s)", peer_role(peer->is_host), peer->name,
+				relayed ? "through the relay" : "directly", address_text(address, port, text));
+			if (peer->is_host && !p2p.adhoc)
+				set_connected_status(relayed);
+		}
+	}
+}
+
+static void relay_update_peer(struct peer *peer);
+
+/* pings the peer everywhere it may be reached: its endpoint, the addresses
+it offered, and its relays that are ready */
+static void peer_punch(struct peer *peer)
+{
+	int index;
+
+	if (peer->connected)
+		peer_ping(peer, &peer->endpoint);
+	for (index = 0; index < peer->candidate_count; index++)
+	{
+		if (!peer->connected || peer->candidates[index].address != peer->endpoint.address ||
+			peer->candidates[index].port != peer->endpoint.port)
+		{
+			peer_ping(peer, &peer->candidates[index]);
+		}
+	}
+	for (index = 0; index < peer->relay_count; index++)
+	{
+		if (peer->relays[index].state == _relay_ready && (!peer->connected ||
+			peer->relays[index].address.address != peer->endpoint.address ||
+			peer->relays[index].address.port != peer->endpoint.port))
+		{
+			peer_ping(peer, &peer->relays[index].address);
+		}
 	}
 }
 
@@ -1179,28 +1363,45 @@ static void update_peers(void)
 
 		if (!peer->used)
 			continue;
+		relay_update_peer(peer);
 		if (peer->connected)
 		{
 			if (elapsed(peer->heard_time, PEER_TIMEOUT))
 				drop_peer(peer, "lost the connection");
+			else if (!peer->two_way && peer->relaying && elapsed(peer->sent_time, PUNCH_INTERVAL))
+			{
+				/* (heard, but no answer has come back: every path, the
+				relays' too) */
+				peer_punch(peer);
+				peer->sent_time = p2p_now();
+			}
 			else if (elapsed(peer->sent_time, PING_INTERVAL))
 			{
 				peer_ping(peer, &peer->endpoint);
 				peer->sent_time = p2p_now();
 			}
+			/* (through a relay: a direct path is still looked for a while) */
+			if (peer->used && peer->via_relay && !elapsed(peer->relayed_time, RELAYED_PUNCH_TIME) &&
+				elapsed(peer->punch_time, RELAYED_PUNCH_INTERVAL))
+			{
+				int candidate;
+
+				for (candidate = 0; candidate < peer->candidate_count; candidate++)
+					peer_ping(peer, &peer->candidates[candidate]);
+				peer->punch_time = p2p_now();
+			}
 		}
 		else if (elapsed(peer->offered_time, PUNCH_TIMEOUT))
 		{
-			drop_peer(peer, "could not connect (both networks' NATs may be too strict for a direct "
-				"connection; forwarding network.tunnel_port on one router helps, as UPnP does where the "
-				"router allows it: network.allow_upnp)");
+			drop_peer(peer, peer->relay_count ? "could not connect, directly or through the relays (are the "
+				"relays up? relays.txt, network.relays)" : "could not connect (both networks' NATs may be too "
+				"strict for a direct connection; a relay in relays.txt (network.relays) carries such connections, "
+				"and forwarding network.tunnel_port on one router helps, as UPnP does where the router allows it: "
+				"network.allow_upnp)");
 		}
 		else if (elapsed(peer->sent_time, PUNCH_INTERVAL))
 		{
-			int candidate;
-
-			for (candidate = 0; candidate < peer->candidate_count; candidate++)
-				peer_ping(peer, &peer->candidates[candidate]);
+			peer_punch(peer);
 			peer->sent_time = p2p_now();
 		}
 	}
@@ -1427,6 +1628,339 @@ static int stun_settled(void)
 			return 0;
 	}
 	return 1;
+}
+
+/* ---------- relays (port/relay, p2p_relay_protocol.h) */
+
+/* whether an address a peer offered as a relay may be one: not this
+machine's own, nor nothing, a broadcast or a multicast group */
+static int relay_address_usable(const struct p2p_candidate *relay)
+{
+	unsigned long value = network_long(relay->address);
+
+	return relay->port && value && value != 0xFFFFFFFF && (value >> 24) != 127 && (value >> 28) != 14;
+}
+
+/* the relays named (network.relays, else network.relays_file), when
+internet play starts: looked up later, on the p2p thread */
+static void relay_setup(void)
+{
+	char text[1024];
+	const char *entry;
+
+	p2p.relay_allowed = config_boolean("network.allow_relay") && !p2p.adhoc;
+	if (!p2p.relay_allowed)
+		return;
+	p2p_list_setting("network.relays", "network.relays_file", text, sizeof(text));
+	for (entry = text; *entry && p2p.relay_host_count < P2P_MAXIMUM_RELAYS; )
+	{
+		const char *end = entry + strcspn(entry, ",");
+		char *host = p2p.relay_hosts[p2p.relay_host_count];
+		char *colon;
+		int length;
+		long port = 47320;
+
+		while (entry < end && *entry == ' ')
+			entry++;
+		length = (int)(end - entry);
+		while (length > 0 && entry[length - 1] == ' ')
+			length--;
+		if (length > 0 && length < (int)sizeof(p2p.relay_hosts[0]))
+		{
+			memcpy(host, entry, (size_t)length);
+			host[length] = 0;
+			colon = strchr(host, ':');
+			if (colon)
+			{
+				port = strtol(colon + 1, NULL, 10);
+				*colon = 0;
+			}
+			if (host[0] && port > 0 && port <= 65535)
+				p2p.relay_ports[p2p.relay_host_count++] = network_short((unsigned short)port);
+			else
+				platform_log("Internet play: the relay \"%.*s\" is not a host:port; left out", length, entry);
+		}
+		entry = *end ? end + 1 : end;
+	}
+}
+
+/* looks the relays up, once, when STUN starts (a game hosted or joined) */
+static void relay_resolve(void)
+{
+	int index;
+
+	if (p2p.relays_resolved || !p2p.stun_started)
+		return;
+	p2p.relays_resolved = 1;
+	for (index = 0; index < p2p.relay_host_count; index++)
+	{
+		struct p2p_candidate *relay = &p2p.relays[p2p.relay_count];
+		char text[32];
+
+		relay->address = p2p_resolve(p2p.relay_hosts[index]);
+		relay->port = p2p.relay_ports[index];
+		if (!relay->address)
+		{
+			platform_log("Internet play: cannot look up the relay %s", p2p.relay_hosts[index]);
+			continue;
+		}
+		platform_log("Internet play: the relay %s is at %s", p2p.relay_hosts[index],
+			address_text(relay->address, relay->port, text));
+		p2p.relay_count++;
+	}
+}
+
+int p2p_local_relays(struct p2p_candidate *relays, int maximum_count)
+{
+	int count = 0;
+
+	for (; p2p.relay_allowed && count < p2p.relay_count && count < maximum_count; count++)
+		relays[count] = p2p.relays[count];
+	return count;
+}
+
+/* adds the relay to those the peer is asked for through, if it is not
+there yet */
+static void relay_add(struct peer *peer, const struct p2p_candidate *address)
+{
+	struct peer_relay *relay;
+	int index;
+
+	for (index = 0; index < peer->relay_count; index++)
+	{
+		if (peer->relays[index].address.address == address->address &&
+			peer->relays[index].address.port == address->port)
+		{
+			return;
+		}
+	}
+	if (peer->relay_count >= MAXIMUM_PEER_RELAYS)
+		return;
+	relay = &peer->relays[peer->relay_count++];
+	memset(relay, 0, sizeof(*relay));
+	relay->address = *address;
+	relay->state = _relay_asking;
+	posix_random_bytes(relay->nonce, sizeof(relay->nonce));
+}
+
+/* the relays a peer is asked for through: the host's first (both machines
+put them in the same order), then the joiner's */
+static void relay_choose(struct peer *peer)
+{
+	int index, side;
+
+	for (side = 0; side < 2; side++)
+	{
+		/* (side 0: the host's; the peer is the host on a joiner) */
+		int own = peer->is_host ? side == 1 : side == 0;
+
+		if (own)
+		{
+			for (index = 0; index < p2p.relay_count; index++)
+				relay_add(peer, &p2p.relays[index]);
+		}
+		else
+		{
+			for (index = 0; index < peer->offered_relay_count; index++)
+				relay_add(peer, &peer->offered_relays[index]);
+		}
+	}
+}
+
+void p2p_peer_relays(const unsigned char *peer_identifier, const unsigned char *secret,
+	const struct p2p_candidate *relays, int count)
+{
+	struct peer *peer = find_peer(peer_identifier);
+	int index;
+
+	if (!peer || memcmp(peer->secret, secret, P2P_SHA256_SIZE))
+		return;
+	peer->offered_relay_count = 0;
+	for (index = 0; index < count && peer->offered_relay_count < P2P_MAXIMUM_RELAYS; index++)
+	{
+		if (relay_address_usable(&relays[index]))
+			peer->offered_relays[peer->offered_relay_count++] = relays[index];
+	}
+	if (peer->relaying)
+		relay_choose(peer);
+}
+
+/* asks a relay for the peer's allocation (with its cookie, once given) */
+static void relay_ask(struct peer *peer, struct peer_relay *relay)
+{
+	unsigned char request[P2P_RELAY_ALLOCATE_SIZE];
+	struct sockaddr_in address;
+
+	memset(request, 0, sizeof(request));
+	request[0] = P2P_RELAY_MAGIC;
+	request[1] = _relay_allocate;
+	request[2] = P2P_RELAY_VERSION;
+	/* (0: the host's side; the peer is the host on a joiner) */
+	request[P2P_RELAY_ROLE_OFFSET] = (unsigned char)(peer->is_host ? 1 : 0);
+	memcpy(request + P2P_RELAY_NONCE_OFFSET, relay->nonce, P2P_RELAY_NONCE_SIZE);
+	memcpy(request + P2P_RELAY_COOKIE_OFFSET, relay->cookie, P2P_RELAY_COOKIE_SIZE);
+	memcpy(request + P2P_RELAY_ALLOCATION_OFFSET, peer->relay_allocation, P2P_RELAY_ALLOCATION_SIZE);
+	make_address(&address, relay->address.address, relay->address.port);
+	posix_socket_sendto(p2p.tunnel_socket, request, sizeof(request), 0, &address, sizeof(address));
+	relay->sent_time = p2p_now();
+}
+
+/* each pass, for each peer: its relays asked for, kept, or let lapse */
+static void relay_update_peer(struct peer *peer)
+{
+	int index;
+
+	if (!p2p.relay_allowed || p2p.adhoc)
+		return;
+	if (!peer->relaying)
+	{
+		if (peer->two_way || !elapsed(peer->offered_time, RELAY_DELAY))
+			return;
+		relay_choose(peer);
+		if (!peer->relay_count)
+			return;
+		peer->relaying = 1;
+		platform_log("Internet play: %s %s not reached both ways in %d s: asking through %d relay%s too",
+			peer_role(peer->is_host), peer->name, RELAY_DELAY / 1000, peer->relay_count,
+			peer->relay_count == 1 ? "" : "s");
+		if (peer->is_host && !peer->connected)
+			set_status("trying a relay to reach the host");
+	}
+	for (index = 0; index < peer->relay_count; index++)
+	{
+		struct peer_relay *relay = &peer->relays[index];
+		/* (the relay carries the peer now) */
+		int in_use = peer->connected && relay->address.address == peer->endpoint.address &&
+			relay->address.port == peer->endpoint.port;
+		int interval;
+
+		/* (once the peer is reached both ways elsewhere, an allocation
+		lapses at the relay: no more requests) */
+		if (peer->two_way && !in_use)
+			continue;
+		interval = relay->state == _relay_ready ? RELAY_REFRESH_INTERVAL :
+			relay->state == _relay_refused ? RELAY_REFUSED_INTERVAL : RELAY_RETRY_INTERVAL;
+		if (!relay->sent_time || elapsed(relay->sent_time, (unsigned long)interval))
+			relay_ask(peer, relay);
+	}
+}
+
+/* the relay of a peer at that address whose requests carry this nonce, and
+its peer; NULL if none */
+static struct peer_relay *relay_find(const struct sockaddr_in *from, const unsigned char *nonce, struct peer **owner)
+{
+	int index, entry;
+
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+	{
+		struct peer *peer = &p2p.peers[index];
+
+		for (entry = 0; peer->used && entry < peer->relay_count; entry++)
+		{
+			struct peer_relay *relay = &peer->relays[entry];
+
+			if (relay->address.address == from->sin_addr.s_addr && relay->address.port == from->sin_port &&
+				p2p_equal(relay->nonce, nonce, P2P_RELAY_NONCE_SIZE))
+			{
+				*owner = peer;
+				return relay;
+			}
+		}
+	}
+	return NULL;
+}
+
+static void tunnel_received(const unsigned char *packet, int size, const struct sockaddr_in *from);
+
+/* a message of a relay's: an answer to a request, or a peer's tunnel
+packet passed on (from a relay that carries the peer, on its channel) */
+static void relay_received(const unsigned char *packet, int size, const struct sockaddr_in *from)
+{
+	struct peer_relay *relay;
+	struct peer *peer = NULL;
+	int index, entry;
+
+	if (size < 3 || p2p.adhoc)
+		return;
+	if (packet[1] == _relay_data)
+	{
+		unsigned long channel;
+
+		if (size < P2P_RELAY_DATA_HEADER_SIZE + P2P_RELAY_MINIMUM_TUNNEL_PACKET ||
+			packet[P2P_RELAY_DATA_HEADER_SIZE] != TUNNEL_MAGIC)
+		{
+			return;
+		}
+		channel = (unsigned long)packet[2] << 24 | (unsigned long)packet[3] << 16 | (unsigned long)packet[4] << 8 |
+			packet[5];
+		for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+		{
+			peer = &p2p.peers[index];
+			for (entry = 0; peer->used && entry < peer->relay_count; entry++)
+			{
+				relay = &peer->relays[entry];
+				/* (the sender in the packet's header must be the peer the
+				channel is for: its seal is checked as any packet's) */
+				if (relay->state == _relay_ready && relay->channel == channel &&
+					relay->address.address == from->sin_addr.s_addr && relay->address.port == from->sin_port &&
+					!memcmp(packet + P2P_RELAY_DATA_HEADER_SIZE + 1, peer->identifier, P2P_IDENTIFIER_SIZE))
+				{
+					tunnel_received(packet + P2P_RELAY_DATA_HEADER_SIZE, size - P2P_RELAY_DATA_HEADER_SIZE, from);
+					return;
+				}
+			}
+		}
+		return;
+	}
+	if (packet[2] != P2P_RELAY_VERSION)
+		return;
+	if (packet[1] == _relay_cookie && size == P2P_RELAY_COOKIE_MESSAGE_SIZE)
+	{
+		const unsigned char *cookie = packet + 4 + P2P_RELAY_NONCE_SIZE;
+
+		relay = relay_find(from, packet + 4, &peer);
+		/* (a new cookie: asked again with it at once) */
+		if (relay && !p2p_equal(relay->cookie, cookie, P2P_RELAY_COOKIE_SIZE))
+		{
+			memcpy(relay->cookie, cookie, P2P_RELAY_COOKIE_SIZE);
+			if (!peer->two_way || relay->state == _relay_ready)
+				relay_ask(peer, relay);
+		}
+	}
+	else if (packet[1] == _relay_allocated && size == P2P_RELAY_ALLOCATED_SIZE)
+	{
+		int status = packet[3];
+		char text[32];
+
+		relay = relay_find(from, packet + P2P_RELAY_NONCE_OFFSET, &peer);
+		if (!relay)
+			return;
+		relay->channel = (unsigned long)packet[P2P_RELAY_CHANNEL_OFFSET] << 24 |
+			(unsigned long)packet[P2P_RELAY_CHANNEL_OFFSET + 1] << 16 |
+			(unsigned long)packet[P2P_RELAY_CHANNEL_OFFSET + 2] << 8 | packet[P2P_RELAY_CHANNEL_OFFSET + 3];
+		if (status == P2P_RELAY_READY && relay->channel)
+		{
+			if (relay->state != _relay_ready)
+			{
+				platform_log("Internet play: the relay %s carries %s %s",
+					address_text(relay->address.address, relay->address.port, text), peer_role(peer->is_host),
+					peer->name);
+				relay->state = _relay_ready;
+				/* (tried at once) */
+				peer_ping(peer, &relay->address);
+			}
+		}
+		else if (status == P2P_RELAY_WAITING && relay->channel)
+			relay->state = _relay_waiting;
+		else if (status == P2P_RELAY_BUSY || status == P2P_RELAY_TAKEN)
+		{
+			if (relay->state != _relay_refused)
+				platform_log("Internet play: the relay %s refused %s %s (%s)",
+					address_text(relay->address.address, relay->address.port, text), peer_role(peer->is_host),
+					peer->name, status == P2P_RELAY_BUSY ? "it is full" : "another machine took its side");
+			relay->state = _relay_refused;
+		}
+	}
 }
 
 /* ---------- stand-ins for peers' ports */
@@ -2294,6 +2828,11 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 
 	/* (the magic first: a tunnel packet's bytes 4 to 7, of the sender and
 	its number, can be STUN's magic cookie) */
+	if (size >= 1 && packet[0] == P2P_RELAY_MAGIC)
+	{
+		relay_received(packet, size, from);
+		return;
+	}
 	if (size < 1 || packet[0] != TUNNEL_MAGIC)
 	{
 		if (size >= 20 && packet[4] == 0x21 && packet[5] == 0x12 && packet[6] == 0xA4 && packet[7] == 0x42)
@@ -2333,7 +2872,7 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		return;
 	newest = counter > peer->receive_highest;
 	packet_received(peer, counter);
-	peer_heard(peer, from->sin_addr.s_addr, from->sin_port, newest);
+	peer_heard(peer, from->sin_addr.s_addr, from->sin_port, newest, inner[0] == _packet_pong && inner_size >= 5);
 	switch (inner[0])
 	{
 	case _packet_ping:
@@ -2670,6 +3209,8 @@ static void update_joining(void)
 	{
 		/* the offer carries the public address, if there is one */
 		p2p.stun_started = 1;
+		/* (and the relays, which it carries too) */
+		relay_resolve();
 		if (!stun_settled())
 			return;
 		p2p.join_requested = 0;
@@ -3361,6 +3902,7 @@ static void *p2p_thread(void *unused)
 		update_peers();
 		expire_proxies();
 		stun_update();
+		relay_resolve();
 		update_hosting();
 		/* the server browser (p2p_lobby.c): signalling while browsing too
 		(not in ad hoc play, which reaches no broker) */
@@ -3446,6 +3988,7 @@ void p2p_initialize(unsigned long local_address)
 		p2p.handoff_socket = open_socket(SOCK_DGRAM, network_long(0x7F000001), network_short(HANDOFF_PORT), NULL);
 #endif
 	stun_setup();
+	relay_setup();
 	{
 		int error = pthread_create(&thread, NULL, p2p_thread, NULL);
 		if (error != 0)

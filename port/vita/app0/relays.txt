@@ -1,0 +1,9 @@
+# Relays for internet play (port/relay in the source): when two machines'
+# NATs keep them from reaching each other directly (both behind symmetric or
+# double NAT, or a mobile network), a relay passes their tunnel's packets
+# between them, still encrypted end to end: it reads nothing of the game. A
+# direct connection is always tried first and kept whenever it works.
+# One host:port on each line (up to 2); "#" starts a comment. None by
+# default: the machine of either player may name one, and both then use it.
+# (The Vita reads this file from its package, app0:relays.txt:
+# network.relays_file, or HALO_NET_RELAYS=host:port in env.txt.)
