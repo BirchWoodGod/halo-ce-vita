@@ -26,46 +26,90 @@ Evolved.
 > offered anywhere else under this project's or the developer's name are not
 > from me. If in doubt, check that a build is listed on the releases page.
 
+> **1.1.0 is in beta.** The 1.1.0 betas are on the releases page as
+> pre-releases, for players who want to help test; the stable version is
+> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3).
+> This README describes 1.1.0.
+
+## What's new in 1.1
+
+- **[Online play](#multiplayer)** with the PC version's multiplayer menus
+  (from OpenCE): a server browser of public games, **Join by code**, and
+  Create Game with lobby name, max players, public or private and a
+  password. It needs the [Halo PC files](#halo-pc-files).
+- **Same Wi-Fi** (system link) and **ad hoc** play between Vitas.
+- **[Co-op campaign](#co-op-campaign)** for up to **four** Vitas, Private or
+  Public.
+- **[Custom maps](#custom-maps-and-map-sharing)**: Xbox ones, and Halo PC /
+  Custom Edition multiplayer and campaign maps. A Vita that joins without
+  the host's map downloads it in the lobby.
+- **[Graphics settings and profiles](#graphics)**: object shadows, dynamic
+  lights, effects quality, particle density, AI think rate and sound
+  updates, after **Bruno Santana**'s modified build.
+- **[Frame interpolation](#graphics)**: up to 60 frames a second between the
+  game's 30 ticks.
+- **[The Vita's fourth CPU core](#more-performance-with-plugins-optional)**
+  with the CapUnlocker plugin.
+- **[Movies are optional](#movies-optional)**: the game runs without them.
+- **[A Windows install tool](#easy-install-windows-tool)** that gathers your
+  files and copies them to the Vita.
+- A settings panel in tabs (hold **SELECT + START**), button remapping, touch
+  zones, gyro aiming and PlayStation button icons.
+
 ## What works
 
 - The whole campaign from the menus, with checkpoints, saves and Save and
-  Quit, cinematics, and the movies (converted to MP4, see below).
-- Multiplayer maps on your own (split screen with one player). System link
-  between Vitas on the same Wi-Fi; online play (short codes, a server
-  browser of public games, from OpenCE) and ad hoc play between Vitas, experimental. Vitas play only
-  Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
-- Campaign co-op over the network, experimental: up to four Vitas play a
-  level together by system link, online or ad hoc (Campaign, a level and a
-  difficulty, then **Y: Play co-op**;
-  [port/vita/README.md](port/vita/README.md#multiplayer)).
+  Quit, cinematics, and the movies if you convert them (optional).
+- Multiplayer between Vitas: on the same Wi-Fi (system link), online
+  (experimental) and ad hoc (experimental). The multiplayer maps on your
+  own too (split screen with one player). Vitas
+  play only Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
+- Campaign co-op over the network for up to four Vitas (experimental).
+- Custom maps: Xbox maps, Custom Edition multiplayer maps and Custom Edition
+  campaign maps (experimental).
 - Profiles, controller settings and the game's settings menus.
-- A settings panel for the Vita's quality, sound, control and multiplayer
-  options, custom maps and tester switches: hold **Select + Start** in game.
-- Up to 30 fps. Quiet areas and cinematics hold 25 to 30 fps; the biggest
-  fights drop to the mid-to-high teens. See [Performance](#performance).
+- Up to 30 fps, or up to 60 with frame interpolation. Quiet areas and
+  cinematics hold 25 to 30 fps; the biggest fights drop lower. See
+  [Performance](#performance).
 
 ### Known issues
 
+- The biggest fights still drop frames (see [Performance](#performance)).
+- A Custom Edition map can't be downloaded once the match has started: join
+  while the host is in the lobby.
+- Custom Edition maps' Ogg Vorbis sounds are silent.
+- In co-op the host's Vita runs everyone's AI and the level's scripts, so it
+  slows down with three or four players.
+- Master Chief's body can be missing in The Pillar of Autumn's cryo tube
+  ([#29](https://github.com/BirchWoodGod/halo-ce-vita/issues/29)).
+
 The current list is in the [roadmap](ROADMAP.md) and the
-[issues](https://github.com/BirchWoodGod/halo-ce-vita/issues). The main
-one: the biggest fights still drop frames (see [Performance](#performance)).
+[issues](https://github.com/BirchWoodGod/halo-ce-vita/issues).
 
 ## Install
 
 ### Easy install (Windows tool)
 
-The install helper, `HaloCEVitaInstaller.exe` (attached to each
-[release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) next
-to `halo.vpk`; or, on any system with Python,
-[tools/installer/halo_ce_vita_installer.py](tools/installer/halo_ce_vita_installer.py)),
-does the steps below for you: it takes the maps folder and `default.xbe` out
-of your Xbox disc image, converts the movies, gets Halo PC's three files
-(from Halo MCC on Steam, the Halo Custom Edition installer whatever its file
-name, or a folder), and copies everything to the Vita over VitaShell's FTP
-(press SELECT in VitaShell, and keep the Vita awake). It copies the VPK to
-`ux0:data/` too; you install it with VitaShell. It includes no game data.
-See [tools/installer/README-installer.md](tools/installer/README-installer.md).
-The manual steps follow.
+**`HaloCEVitaInstaller.exe`**, attached to each
+[release](https://github.com/BirchWoodGod/halo-ce-vita/releases) next to
+`halo.vpk`, does the manual steps below for you:
+
+1. takes the `maps` folder and `default.xbe` out of your Xbox disc image
+   (`.iso`/`.xiso`) or game folder,
+2. converts the movies (optional; ffmpeg is inside the tool),
+3. gets the [Halo PC files](#halo-pc-files) from Halo MCC on Steam, the Halo
+   Custom Edition installer (whatever its file name) or a folder,
+4. copies everything to the Vita over VitaShell's FTP (press SELECT in
+   VitaShell, and keep the Vita awake while it copies),
+5. copies `halo.vpk` to `ux0:data/`; you install it with VitaShell.
+
+Each step can be skipped. The tool includes no game data. It is not signed:
+Windows SmartScreen says "Windows protected your PC" the first time (click
+**More info**, then **Run anyway**), and some antivirus programs may flag it
+wrongly, as they often do with packed Python programs. On any system with
+Python, [tools/installer/halo_ce_vita_installer.py](tools/installer/halo_ce_vita_installer.py)
+is the same tool. Details, and ffmpeg's licence (GPL v3, as this project):
+[tools/installer/README-installer.md](tools/installer/README-installer.md).
 
 ### What you need
 
@@ -80,15 +124,13 @@ The manual steps follow.
   levels it loads).
 - Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
   it). It must be the Xbox version: the PC version's maps do not work.
-- **For online play:** Halo PC's `bitmaps.map`, `sounds.map` and `loc.map`
-  (from your own Halo Custom Edition installer, Halo MCC on Steam, or a
-  Custom Edition install). They give the game its online multiplayer menus
-  and Custom Edition maps; see [Online play](#online-play-halo-pc-files).
+- **For online play and Custom Edition maps:** the [Halo PC files](#halo-pc-files)
+  `bitmaps.map`, `sounds.map` and `loc.map`, from your own copy of Halo PC.
 
 ### Steps
 
 1. **Download `halo.vpk`** from the
-   [latest release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest).
+   [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases).
 2. **Install it.** Copy the VPK to the Vita (VitaShell's USB or FTP mode),
    open it in VitaShell and confirm. The bubble is called **Halo CE**.
 3. **Get the game files from your disc.** An Xbox disc image (an `.iso`,
@@ -104,7 +146,8 @@ The manual steps follow.
    ux0:data/haloce-vita/default.xbe   <- the loading screen's picture is read from it
    ```
 
-5. **Start the game.** The first load of each level takes a while: the
+5. **For online play**, add the [Halo PC files](#halo-pc-files).
+6. **Start the game.** The first load of each level takes a while: the
    game writes a cache file for it to the memory card.
 
 Without the maps the game shows where to copy them and exits.
@@ -115,15 +158,51 @@ the line `gxm: no libshacccg.suprx`.
 
 ### Updating
 
-Install the new `halo.vpk` over the old one. Your maps, saves and settings
-in `ux0:data/haloce-vita/` are kept.
+Install the new `halo.vpk` over the old one (the whole VPK). Your maps,
+saves and settings in `ux0:data/haloce-vita/` are kept. Every Vita in a
+multiplayer or co-op game needs the same version: a Vita joining a game of
+another version is told which one is newer.
+
+### Halo PC files
+
+Online play's menus and the Custom Edition maps need three files from your
+own copy of Halo on PC: **`bitmaps.map`, `sounds.map` and `loc.map`**, in
+`ux0:data/haloce-vita/maps/`. They come from any of these:
+
+1. **The Halo Custom Edition installer** (easiest): copy
+   `halocesetup_en_1.00.exe` (or another language's, about 170 MB) to
+   `ux0:data/haloce-vita/`. Its name must start with `halocesetup` and end
+   in `.exe`: rename a download called something else. At the next start
+   the game takes the three files out of it by itself (under a minute; a
+   progress line shows, Circle stops it), asks whether to delete the
+   installer to free the space, then restarts itself. Nothing to unpack on a
+   PC.
+2. **Halo: The Master Chief Collection** (Steam): copy the three from
+   `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`.
+   Take them from the `custom_edition` folder, not the ones directly in
+   `halo1/maps`, which are MCC's own and do not work.
+3. **A Halo Custom Edition install** (PC): copy the three from its `maps`
+   folder (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`).
+
+The Windows install tool does any of the three for you. The game checks each
+file; the settings panel's **Modded maps** page says which are missing,
+and its **Extract PC files** row takes them out of an installer again
+(after a start where you stopped it, say). None of Bungie's files are in
+this project.
 
 ### Movies (optional)
 
-The Xbox movies are Bink files, which the Vita cannot play. Convert them
-(the disc's `bink` folder) to H.264 MP4 and put them in
-`ux0:data/haloce-vita/movies/` under the same names (`intro.mp4`,
-`credits.mp4`, `attract1.mp4` ...):
+The game runs without the movies: each missing one is skipped (no intro,
+no attract videos on an idle main menu, no credits movie), and the main
+menu comes up ready to play. Without the intro it appears a few seconds
+after the menu's background, more at the first start, while the game checks
+its saves and writes its default profile and playlists (which the intro
+otherwise plays over).
+
+To have them, convert the Xbox's Bink movies (the disc's `bink` folder) to
+H.264 MP4 and put them in `ux0:data/haloce-vita/movies/` under the same
+names (`intro.mp4`, `credits.mp4`, `attract1.mp4` ...), or let the install
+tool do it:
 
 ```
 ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p \
@@ -138,133 +217,120 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v high -level 4.0 -crf 20 -pix_fmt yuv
        -vf scale=640:-2 -c:a aac -b:a 128k -movflags +faststart intro.mp4
 ```
 
-The game needs none of them. With no `movies` folder, or a movie that is
-missing or will not open, that movie is skipped: no intro, no attract
-videos on an idle main menu (its music plays on), and the main menu takes
-input as soon as it is up. Without the intro the main menu appears a few
-seconds after the menu's background, more at the first start: the game
-first checks its saves and writes its default profile and playlists, which
-the intro otherwise plays over. Movies added or removed later are noticed
-at the next start.
-
-A movie is scaled to fill the screen at the shape its file gives, with
-black bars only where that shape needs them: the Xbox's 4:3 movies fill the
-height, and any 16:9 encoding fills the width - 640x360, 848x480, 960x544,
-or 640x480 made with ffmpeg `-aspect 16:9`. Any size up to 960x544 plays.
+Movies added or removed later are noticed at the next start. A movie is
+scaled to fill the screen at the shape its file gives, with black bars only
+where that shape needs them: the Xbox's 4:3 movies fill the height, and any
+16:9 encoding fills the width (640x360, 848x480, 960x544, or 640x480 made
+with ffmpeg `-aspect 16:9`). Any size up to 960x544 plays.
 `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
 
-### Custom maps (optional)
+## Multiplayer
 
-Community-made multiplayer maps go in `ux0:data/haloce-vita/maps/`, next to
-the game's own. Two kinds work:
+**Vitas play only Vitas**, and every Vita in a game needs the same version
+of this port and Xbox maps of a supported build (NTSC 01.10.12.2276 or
+01.08.15.1749, PAL 01.01.14.2342). Choose how your Vita connects in the
+settings panel (hold **SELECT + START**), **Multiplayer**, **Connection**
+(it applies after a restart):
+
+| Connection | What it is |
+| --- | --- |
+| **Same Wi-Fi** (the default) | System link: Vitas on the same Wi-Fi network see each other's games. |
+| **Online** (experimental) | Internet play: the server browser, Join by code, and your own public or private games. |
+| **Ad hoc** (experimental) | Vitas side by side, no router: pick the same **Ad hoc room** on each, then **Join the room** (the system's dialog joins the room's group). Nothing goes to the internet. |
+
+### The multiplayer menus
+
+With the [Halo PC files](#halo-pc-files), the main menu's **Multiplayer**
+opens the PC version's Multiplayer screen, from OpenCE's menus:
+
+- **Join Game**
+  - **Internet**: the server browser of public games, with their map,
+    gametype and players and a lock on those with a password. A joins (a
+    locked game's password is typed on the Vita's keyboard), X refreshes.
+  - **Join by code**: type the host's code (`ABCD-EFGH`).
+  - **LAN**: the System Link screen, with the games on the same Wi-Fi or in
+    your ad hoc room.
+- **Create Game**
+  - **Internet**: Server Setup: the lobby name others see, max players (2
+    to 16), visibility (**Public**: listed in every Vita's server browser;
+    **Private**: joined by its code) and a password (a public game asks
+    joiners for it; the code still joins). Then your profile, a map and a
+    gametype. The settings panel's Multiplayer tab shows your game's code.
+  - **LAN**: the System Link screen, where Y creates a game.
+- **Co-op campaign**, **Split screen** and **Edit gametypes**.
+
+Internet and Join by code need Connection **Online**; the screen says so
+otherwise. A code is a convenience, not a password: anyone who has it can
+join that game.
+
+**Without the Halo PC files** the Xbox's Multiplayer screen opens: System
+Link hosts and joins (on the network the Connection row chose), and online
+the settings panel's **Join with a code** joins a host's code. The server
+browser needs the files.
+
+Internet play has no server of its own: Vitas find each other through public
+MQTT brokers and then connect directly. That can fail between two networks
+that both use strict NAT (some mobile and company networks, double NAT);
+forwarding a UDP port to the Vita helps. The brokers and the Vitas you play
+with see your public IP address, as in any peer-to-peer game; a public
+game's name, map and players are visible to anyone browsing. See
+[port/vita/README.md](port/vita/README.md#multiplayer) for the details.
+
+### Co-op campaign
+
+Play the campaign together on up to **four** Vitas, by system link, online
+or ad hoc (experimental). The host goes **Campaign**, a profile, a level and
+a difficulty, then **Y** (Play co-op) instead of A. On the waiting screen:
+
+- **X** switches the game between **Private** (the default: joined by its
+  code) and **Public** (listed in the server browser; online only).
+- **B** cancels; the host's **A** starts sooner.
+
+The others join from the server browser, Join by code or the System Link
+screen. The level starts 15 seconds after the first joins (6 once the lobby
+is full), and a Vita can join a level in progress. Cutscenes are skipped by
+vote (Start), loading zones follow the host, a dead player watches a
+teammate and comes back beside one, and winning a level moves everyone to
+the next. Co-op never touches your single player save. The host runs
+everyone's AI, so its frame rate drops with each player.
+
+### Custom maps and map sharing
+
+Custom maps go in `ux0:data/haloce-vita/maps/`, next to the game's own:
 
 - **Xbox custom maps**: copy the `.map` in. Nothing else is needed.
-- **Halo PC / Custom Edition maps** (`.map`, and OpenSauce `.yelo`;
-  experimental): these need three resource maps from your own copy of Halo
-  on PC, `bitmaps.map`, `sounds.map` and `loc.map`. Two of them,
-  `bitmaps.map` and `loc.map`, also give the game's Multiplayer menu the PC
-  version's screens (a server browser, Join by code, Server Setup). Three
-  ways to get them, easiest first:
-  1. **The Halo Custom Edition installer**: copy your
-     `halocesetup_en_1.00.exe` (or another language's `halocesetup*.exe`,
-     about 170 MB) to `ux0:data/haloce-vita/`. The name must start with
-     `halocesetup` and end in `.exe`: rename a download called something
-     else. At the next start the game takes the three out of it into the
-     maps folder (under a minute; a progress line shows, Circle stops it),
-     asks whether to delete the installer to free the space, then restarts
-     itself with the PC multiplayer menus. Nothing to unpack on a PC.
-  2. **Halo: The Master Chief Collection** (Steam): copy the three from
-     `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
-     to `ux0:data/haloce-vita/maps/`. Take them from the `custom_edition`
-     folder, not the ones in `halo1/maps`, which are MCC's own and do not
-     work.
-  3. **A Halo Custom Edition install** (PC): copy the three from its `maps`
-     folder (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`)
-     to `ux0:data/haloce-vita/maps/`. (On a PC without an install,
-     `tools/ce_installer_extract.c` takes them out of the installer, as the
-     game does; how to build it is at its top.)
+- **Custom Edition multiplayer maps** (`.map`, and OpenSauce `.yelo`;
+  experimental): they need the [Halo PC files](#halo-pc-files). Turn on
+  **PC maps** in the settings panel (Multiplayer, Modded maps); the page
+  lists your custom maps, lets you turn each off or delete it, and warns if
+  a PC file is missing.
+- **Custom Edition campaign maps** (single player and Firefight maps;
+  experimental): the same files and PC maps On. They are listed in
+  **Campaign**'s level list after The Maw: A plays one alone, Y hosts it as
+  co-op. A custom campaign map has no saved game and no next level: winning
+  it or Save and Quit goes back to the main menu, and your campaign's own
+  save is kept. What its scripts ask for that the Vita can't do (OpenSauce
+  extras, restarting or switching the map) does nothing.
 
-  Then turn on **PC maps** in the settings panel (Select + Start,
-  Multiplayer, Modded maps). The page lists your custom maps and warns if a
-  resource map is missing; with an installer in `ux0:data/haloce-vita/`,
-  its **Extract PC files** row takes them out of it again (after a start
-  where you stopped it, say).
+**Map sharing:** only the host needs the map. Host the game and stay in the
+lobby: a Vita that joins without the map is asked "Download it from the
+host?" (Cross: yes; for a Custom Edition map, it is also offered to turn PC
+maps on). The host's lobby shows each download's progress, and the match
+waits for it; a download that stops goes on from where it stopped next
+time. A joiner still needs its own Halo PC files for a Custom Edition map.
+In a game from the public server browser the question warns that the host
+is a stranger: only accept maps from players you trust. **Map downloads**
+(Modded maps) is **Ask** (the default), **Not public games** or **Never**,
+and an OpenSauce `.yelo` is never downloaded from a public game.
 
-Custom Edition **campaign** maps (single player maps, Firefight maps and the
-like) go in the same folder and need the same three files and PC maps. They
-show up in **Campaign**'s level list after The Maw: pick one, then a
-difficulty. A plays it alone, Y hosts it as network co-op, as for the
-campaign's own levels (a joiner without the map is offered it as for a
-multiplayer map). A custom campaign map has no saved game and no next level:
-winning it goes back to the main menu, and Save and Quit keeps your
-campaign's own save. What its scripts ask for that the Vita can't do (an
-OpenSauce extra, restarting or switching the map) does nothing; the rest of
-the map plays.
-
-Custom Edition maps themselves (race tracks and the like) come from the
-community's Halo CE map archives and forums. This project includes no maps
-and links to no downloads.
-
-### Online play: Halo PC files
-
-**Online play needs Halo PC's `bitmaps.map`, `sounds.map` and `loc.map` in
-`ux0:data/haloce-vita/maps/`.** Get them from your own copy, whichever is
-easiest:
-
-1. **The Halo Custom Edition installer:** copy `halocesetup_en_1.00.exe`
-   (renamed to that if your download is called something else) to
-   `ux0:data/haloce-vita/` and start the game. It unpacks the three files
-   by itself (under a minute), asks before deleting the installer, then
-   restarts itself.
-2. **Halo: The Master Chief Collection** (Steam): the three files in
-   `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
-   (not the ones directly in `halo1/maps`).
-3. **A Halo Custom Edition install:** its `maps` folder.
-
-With them, the main menu's **Multiplayer** opens the PC version's
-Multiplayer screen, from OpenCE's PC menus:
-
-- **Join Game**: **Internet** is the server browser (the public games, a
-  lock on those with a password; A joins, a locked game's password is typed
-  on the Vita's keyboard; Square refreshes), **LAN** the System Link screen,
-  **Join by code** a host's code.
-- **Create Game**: **Internet** is Server Setup: the lobby name, max players,
-  visibility (public: in everyone's server browser; private: joined by its
-  code) and password, which are kept - then your profile, the map and the
-  gametype; the settings panel's Multiplayer tab shows your game's code.
-  **LAN** is the System Link screen (Y creates a game).
-- **Co-op campaign** (pick a level and a difficulty, then Y; up to four
-  players; online the game is private, joined by its code, unless X on its
-  waiting screen makes it public), **Split screen** and **Edit gametypes**,
-  as before.
-
-Internet and Join by code need **Connection: Online** (settings panel,
-Multiplayer); the screen says so otherwise. The pictures and text are read
-from your own `bitmaps.map` and `loc.map` the first time the screen opens;
-none of Bungie's files are in this project. Without the two files, the
-Xbox's Multiplayer screen opens as before: System Link hosts (online too,
-with the settings last chosen) and joins, and the settings panel's **Join
-with a code** joins a code; the public games' browser needs the files.
-
-Only the host needs the custom map: a Vita that joins without it is asked
-whether to download it from the host in the lobby (and, for a Custom
-Edition map, to turn PC maps on). A joiner still needs its own three
-resource maps. The host waits for the download before the game starts, and
-a download that stops goes on from where it stopped the next time.
-Big Custom Edition maps can be slow on the Vita or too large for its memory.
-The question names the host; in a game joined from the public lobby it also
-warns that the host is a stranger: only accept maps from players you trust.
-**Map downloads** on the Modded maps page sets this: **Ask** (the default),
-**Not public games** (no downloads in games from the public lobby) or
-**Never**.
-
-### Saving
-
-Checkpoints are written to the memory card as you play. To continue,
-choose the campaign again with the same profile and difficulty. **Save and
-Quit** from the pause menu is the safest way to stop.
+Big Custom Edition maps can be slow on the Vita or too large for its
+memory. Custom Edition maps come from the community's Halo CE map archives;
+this project includes no maps and links to no downloads.
 
 ## Controls
+
+The settings panel and the game's menus name the buttons as the **Xbox
+controller** does; this is where each is on the Vita as shipped:
 
 | Vita | Xbox | In game |
 | --- | --- | --- |
@@ -279,129 +345,50 @@ Quit** from the pause menu is the safest way to stop.
 | D-pad up | right stick click | zoom |
 | Start | Start | pause; skips a cinematic |
 | Select | Back | scoreboard |
-| Select + Start (hold) | | settings panel |
+| **SELECT + START** (hold) | | the settings panel |
 
-The settings panel's **Controls** tab has two pages laid out as the Xbox
-controller: **Button layout** puts each Xbox button (A, B, X, Y, Black,
-White, the triggers, the sticks' clicks, Back) on another Vita button (in
-play; the menus keep Cross / Circle and the D-pad), and **Touch zones**
-makes each zone press an Xbox button. **Button icons**, the first row of
-Button layout, is Xbox by default: the game's own Xbox button icons. With
-**PlayStation** every button prompt (the HUD's "Press X to...", the menus'
-button hints) shows the Vita button that does it now instead: Cross, Circle,
-Square and Triangle drawn in the Xbox icons' place in the PlayStation's
-colours, L, R, Start, Select, the D-pad and the touch zones by name. It
-follows your Button layout and touch zones (in the menus their fixed layout)
-and applies at once. The settings panel keeps the Xbox controller's names
-(A, B, X, Y, Black, White ...) either way.
-The zones, all Off until set:
+The settings panel's **Controls** tab:
 
-| Zone | Where |
-| --- | --- |
-| Touch top left / top right | front screen, the top corners (over the ammo and shield readouts) |
-| Touch left edge / right edge | front screen, the middle of each side, beside the D-pad and the face buttons |
-| Rear touch left / right | the rear pad's left and right halves (a strip in the middle is neither) |
-
-Each can be A, B, X, Y, Black, White, Left trigger, Right trigger, Left
-stick (its click: crouch, Hold or Toggle as the Crouch row says), Right
-stick (its click: zoom) or Back. A front zone counts at once; a rear one
-goes through the **Rear touch guard** row, so the hands holding the Vita do
-nothing: a touch that starts near the rear pad's edges never counts, and one
-further in only once held (Normal, the default: a 96-pixel border, 0.25 s;
-Light 48 / 0.15 s, Strong 144 / 0.4 s, Off no border and 0.1 s). A touch that starts outside a zone does nothing, and each finger
-counts on its own. The Touch zones page shows where the zones are.
-**Reset controls** (Controls, Advanced) puts look, crouch, the buttons and
-the zones back as shipped (gyro aiming, Button icons and Show dev settings stay).
-
-**Gyro aiming** (the panel's Controls tab, its details on the **Gyro
-settings** page; Off until set): turning the Vita
-turns the view, on top of the right stick, as if you looked through the
-Vita: turn it left and right (or, with **Gyro turning** Tilt, steer it like
-a wheel) to turn, tilt its top edge towards you to look up. **Gyro aiming**
-is Off, On, While zoomed (only through a scope) or While holding the **Gyro
-button** (L by default; in play that button then only aims, so put its
-Xbox button on another one). **Gyro sensitivity** 0.5x to 3x (1.5x by
-default; 1x turns the view as far as the Vita turns, less while zoomed, as
-the stick is), **Gyro vertical** Normal or Inverted. It aims only in play,
-not in the menus, the panel or cinematics. Lay the Vita still for a second
-now and then (the page's line says "learnt" once it has): that teaches it
-the gyroscope's drift, so a resting Vita does not turn the view. Gyro
-motion does not keep the screen from dimming.
+- **Button layout** puts each Xbox button (A, B, X, Y, Black, White, the
+  triggers, the sticks' clicks, Back) on the Vita button of your choice, in
+  play (the menus keep Cross / Circle and the D-pad). Its first row, **Button
+  icons**, is **Xbox** by default (the game's own icons); **PlayStation**
+  makes every prompt in the HUD and the menus show the Vita button that does
+  it now (Cross, Circle, Square and Triangle in the PlayStation's colours, L,
+  R, Start, Select, the D-pad and touch zones by name). The panel keeps the
+  Xbox names either way.
+- **Touch zones**: the front screen's top corners and left and right edges,
+  and the rear pad's halves, can each press an Xbox button (all Off until
+  set). **Rear touch guard** keeps the hands holding the Vita from pressing
+  the rear zones: a touch near the pad's edges never counts, one further in
+  only once held (Normal, the default: a 96-pixel border, 0.25 s).
+- **Gyro aiming** (Off until set): turning the Vita turns the view, on top of
+  the right stick: On, While zoomed, or While holding the **Gyro button**.
+  **Gyro settings** has its sensitivity (0.5x to 3x), direction and Turn or
+  Tilt steering. Lay the Vita still for a second now and then: that teaches
+  it the gyroscope's drift.
+- **Advanced**: Stick deadzone, **Reset controls**, Show dev settings, and
+  the version of the build.
 
 ## Settings panel
 
-Hold Select + Start for a second. **L and R** switch between its four tabs,
-**Graphics**, **Controls**, **Audio** and **Multiplayer**, and **Dev** once
-**Show dev settings** (Controls, Advanced) is on. Up and down choose a line,
-left and right change it, Cross opens a line marked `>` (a page of the
-rows few players change, such as Button layout, Touch zones, Gyro
-settings, Modded maps or Graphics' Advanced) or does what it says, Circle
-goes back from a page or closes the panel. The chosen line's help and the
-panel's buttons are at the bottom. Changes apply at once, render resolution and
-aspect ratio included (the picture pauses for a moment while the screen is
-set up again), except the rows marked `*` (sound voices, the network, most
-dev switches), which apply after a restart; the panel says so. A bigger
-resolution makes room in video memory first (unused copies of the screen
-and part of the texture cache move out, and the textures in it load again);
-only if it still does not fit does the panel say the change waits for a
-restart. Settings are kept in
-`ux0:data/haloce-vita/settings.txt` (a file from an older version loads as
-it is).
+Hold **SELECT + START** for a second, in play or in the menus. **L and R**
+switch between its tabs, **Graphics**, **Controls**, **Audio** and
+**Multiplayer** (and **Dev**, once **Show dev settings** in Controls,
+Advanced is on). Up and down choose a line, left and right change it, Cross
+opens a line marked `>` (a page of rows few players change) or does what
+it says, Circle goes back from a page or closes the panel. The chosen line's
+help and the panel's buttons are at the bottom. Changes apply at once,
+render resolution and aspect ratio included (the picture pauses for a
+moment), except the rows marked `*`, which apply after a restart. Settings
+are kept in `ux0:data/haloce-vita/settings.txt` (a file from an older
+version loads as it is).
 
-- **Multiplayer**: the network (**Connection**: Same Wi-Fi, Ad hoc or
-  Online), and with Ad hoc the room and **Join the room** (the system's
-  dialog joins its group). Hosting and joining are in the game's own
-  Multiplayer menu ("Online play: Halo PC files" above, or the Xbox's System
-  Link); without the Halo PC files, online, **Join with a code** types a
-  host's code here. Your game's code and what the game is doing show under
-  the rows (see [port/vita/README.md](port/vita/README.md#multiplayer)).
-- **Modded maps** (a Multiplayer page): the custom maps in your maps folder, with their size and
-  kind (Xbox, or CE for Halo Custom Edition, CE SP for a Custom Edition
-  campaign map, which Campaign's level list offers). Left and right turn a map off
-  (it stays on the card but leaves the map list) or on; Square deletes it
-  after asking. **PC maps** puts Custom Edition maps in the map list
-  (experimental); the page warns when the Custom Edition `bitmaps.map`,
-  `sounds.map` or `loc.map` they need are missing.
-- **Dev**: switches for testing (timing in `halo.log`, a crash dump when the
-  game hangs, the FPS overlay, A/B switches a bug report may ask for) and
-  **Save report** (below). While any switch is on, `halo.log` says
-  "TEST MODE" near its top.
+### Graphics
 
-The **Profile** row at the top sets the speed-related rows together
-(render resolution, model detail, hide distant objects, object shadows,
-dynamic lights, effects quality, particle density, sun rays, scenery
-updates, object lighting, AI think rate, sound occlusion and sound updates):
+The **Profile** row at the top sets the speed-related rows together:
 **Performance**, **Balanced** (the defaults) or **Quality** (the game as on
-the Xbox). Changing one of those rows yourself turns the profile to
-**Custom**.
-
-**Aspect ratio** 16:9 (the default) fills the Vita's screen with a wider
-view; 4:3 shows the Xbox's own framing, field of view, HUD and menus between
-black bars. **Upscale filter** Smooth (the default) or Sharp chooses how the
-picture is scaled to the 960x544 screen: Smooth blends pixels, Sharp keeps
-them crisp and blocky (most visible at lower render resolutions).
-
-## Performance
-
-Measured on a PS Vita 1000 with 1.0.3's default settings:
-
-| Where | Frame rate |
-| --- | --- |
-| Menus, cinematics, quiet areas | 25 to 30 fps |
-| Ordinary fights | 20 to 30 fps |
-| The Silent Cartographer's beach landing | about 18 to 19 fps at its busiest |
-| Pillar of Autumn's biggest firefights | about 15 to 18 fps |
-| Late-game Flood and Covenant battles | can drop lower; 1.0.3 cuts the GPU work there |
-
-Why it slows down: the biggest fights are limited by different things in
-different places. On The Silent Cartographer's beach the Vita's processor is
-the limit (drawing many characters, and the game's own simulation of them),
-so the render resolution changes little there. In Pillar of Autumn's
-firefights the graphics chip is the limit, and there **Render resolution 50%**
-helps a lot (in one test, a firefight went from about 16 fps at 75% to about
-26 fps at 50%), at the cost of a softer picture.
-
-Recommended settings (the **Profile** row sets these at once):
+the Xbox). Changing one of those rows yourself makes the profile **Custom**.
 
 | Setting | Performance | Balanced (default) | Quality |
 | --- | --- | --- | --- |
@@ -420,35 +407,70 @@ Recommended settings (the **Profile** row sets these at once):
 | Sound updates | Every 2nd | Every 2nd | Every frame |
 | Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
 
-Performance is the one to pick if the late-game battles feel slow; Quality
-draws, sounds and plays exactly as on the Xbox and runs well in quiet areas.
-Balanced and Performance think less often for far-off enemies and update
-the sounds every other frame, so a fight plays a little differently from
-the Xbox's (the shadows, lights, effects and particles change only what is
-drawn). Object shadows, Dynamic lights, Effects quality, Particle density,
-AI think rate and Sound updates come from Bruno Santana's modified build. None
-of them drops see-through parts such as the Covenant field generators'
-domes or visors: models keep them at the Xbox's detail level, and the
-domes are drawn at any distance.
+Object shadows, Dynamic lights, Effects quality, Particle density, AI think
+rate, Sound updates and the fourth core's helpers come from **Bruno
+Santana**'s modified build of this port. Balanced and Performance think less
+often for far-off enemies and update the sounds every other frame, so a
+fight plays a little differently from the Xbox's; the shadows, lights,
+effects and particles change only what is drawn. None of them drops
+see-through parts such as the Covenant field generators' domes or visors.
 
-What helps, in the settings panel:
+The Graphics tab's other rows:
 
-- **Render resolution** 50% (applies at once, as does **Aspect ratio**): the
-  biggest gain in graphics-heavy fights such as Pillar of Autumn's.
-  **Dynamic** (experimental) lowers the resolution only while the graphics
-  chip is the limit and goes back up to 100% when it is not, down to the
-  **Dynamic minimum** (50% by default).
-- **Model detail** Low or Lowest: characters and vehicles far away are drawn
-  with fewer polygons.
-- **Hide distant objects** Small or Medium: tiny far-away objects are skipped.
-- **Scenery updates** and **Object lighting** at Quarter / Third (the
-  defaults).
-- **Sun rays** Off: no glow and light shafts around the sun outdoors, which
-  cost the graphics chip several small extra passes a frame while the sun
-  is in view.
-- **Sound voices** 16: fewer positional sounds at once.
-- Keep **Smooth weapon motion** on: it costs almost nothing and makes the
-  frame rate feel steadier.
+- **Render resolution**: lower is faster and softer. **Dynamic**
+  (experimental) lowers it only while the graphics chip is the limit, down
+  to the **Dynamic minimum** (50% by default).
+- **Aspect ratio**: 16:9 (the default) fills the screen with a wider view;
+  4:3 shows the Xbox's own framing, HUD and menus between black bars.
+- **Upscale filter**: Smooth (the default) or Sharp (crisp, blocky pixels).
+- **Frame limit**: 30 FPS (the default), 60 FPS or Off.
+- **Frame interpolation** (Off by default): the game runs 30 ticks a second;
+  with this On the Vita draws frames between them, blended, for up to 60
+  frames a second while it keeps up, and one a tick when it can't. It
+  applies at once.
+- **FPS counter**, and **Smooth weapon motion** (On: the weapon blended
+  between ticks; it costs almost nothing).
+- **Advanced >**: the rows the profiles set, Tiny decals, and **Fourth core
+  helpers** (see [plugins](#more-performance-with-plugins-optional)).
+
+### Audio, Multiplayer and Dev
+
+- **Audio**: Sound voices (fewer is faster), Sound occlusion and Sound
+  updates.
+- **Multiplayer**: **Connection** (Same Wi-Fi, Ad hoc or Online), the ad hoc
+  room, **Join with a code**, and **Modded maps** (your custom maps, PC
+  maps, Extract PC files, Map downloads). Lines under the rows show your
+  Vita's name and address, what the game is doing, and online your game's
+  code.
+- **Dev** (testers): timing in `halo.log`, a crash dump when the game hangs,
+  the FPS overlay, the debug camera, A/B switches a bug report may ask for,
+  and **Save report**. While a switch is on, `halo.log` says "TEST MODE"
+  near its top.
+
+## Performance
+
+Measured on a PS Vita 1000 with 1.0.3's default settings:
+
+| Where | Frame rate |
+| --- | --- |
+| Menus, cinematics, quiet areas | 25 to 30 fps |
+| Ordinary fights | 20 to 30 fps |
+| The Silent Cartographer's beach landing | about 25 fps on average (Balanced), 28 (Performance) |
+| Pillar of Autumn's biggest firefights | about 15 to 18 fps |
+| Late-game Flood and Covenant battles | can drop lower |
+
+The biggest fights are limited by different things in different places. On
+The Silent Cartographer's beach the Vita's processor is the limit (drawing
+many characters, and the game's own simulation of them), so the render
+resolution changes little there. In Pillar of Autumn's firefights the
+graphics chip is the limit, and **Render resolution 50%** (the Performance
+profile) helps a lot: in one test a firefight went from about 16 fps at 75%
+to about 26 fps at 50%.
+
+What helps, in the settings panel: the **Performance** profile; **Render
+resolution** 50% or Dynamic; **Model detail** Low or Lowest; **Hide distant
+objects** Small or Medium; **Sun rays** Off; **Sound voices** 16. Keep
+**Smooth weapon motion** on: it makes the frame rate feel steadier.
 
 ### More performance with plugins (optional)
 
@@ -457,31 +479,57 @@ needed, and the game runs the same without them.
 
 - **[CapUnlocker](https://github.com/GrapheneCt/CapUnlocker)** by GrapheneCt
   lets games use the Vita's fourth CPU core, which the system normally keeps
-  for itself. With it, the **Fourth core helpers** setting (Graphics >
-  Advanced; **All async** by default; it applies after a restart) moves
-  background work onto that core: **Audio** moves the sound mixer, **All async** also the display
-  queue, loading, map decompression, checkpoint writing, shader compiling
-  and the log. The game, render and tick threads never move. If core 3
-  stays very busy and the frame rate drops, use Audio. Without it the setting
-  does nothing and `halo.log` says so. To install: copy `CapUnlocker.skprx`
-  from its releases to `ur0:tai/`, add the line `ur0:tai/CapUnlocker.skprx`
-  under `*KERNEL` in `ur0:tai/config.txt` (keep a copy of the file first: a
-  mistake there stops plugins loading), and reboot.
+  for itself. With it, **Fourth core helpers** (Graphics > Advanced;
+  **All async** by default; it applies after a restart) moves background
+  work onto that core: **Audio** moves the sound mixer, **All async** also
+  the display queue, loading, map decompression, checkpoint writing, shader
+  compiling and the log. It helps most in multiplayer. The game, render and
+  tick threads never move. If core 3 stays very busy and the frame rate
+  drops, use Audio. Without CapUnlocker the helpers stay where they are and
+  `halo.log` says so. To install: copy `CapUnlocker.skprx` from its releases
+  to `ur0:tai/`, add the line `ur0:tai/CapUnlocker.skprx` under `*KERNEL` in
+  `ur0:tai/config.txt` (keep a copy of the file first: a mistake there stops
+  plugins loading), and reboot.
 - **[PSVshell](https://github.com/Electry/PSVshell)** (or PSVshellPlus)
   raises the processor to 500 MHz, which helps in the biggest fights at some
   cost in battery and heat. The game keeps a higher speed set there; it only
   raises the clock when it is lower than the game needs.
 
-A steady 30 fps in the biggest fights is a goal for 1.1.0 (see the
-[roadmap](ROADMAP.md)). If you want to help measure, add these lines to
-`ux0:data/haloce-vita/env.txt`, play a heavy fight for a couple of minutes,
-and attach `ux0:data/haloce-vita/halo.log` to an issue:
+To help measure, turn on Dev, **Performance logging** (or add
+`HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1` and `HALO_TICK_PROFILE=1`
+to `ux0:data/haloce-vita/env.txt`), play a heavy fight for a couple of
+minutes, and attach `halo.log` to an issue. Any frame over 100 ms is named
+in `halo.log` (a `frame-hitch` line) whether it is on or not.
 
-```
-HALO_FRAME_TIMING=300
-HALO_RENDER_PROFILE=1
-HALO_TICK_PROFILE=1
-```
+## Saving
+
+Checkpoints are written to the memory card as you play. To continue,
+choose the campaign again with the same profile and difficulty. **Save and
+Quit** from the pause menu is the safest way to stop.
+
+## Reporting problems
+
+### Reporting a crash or a problem
+
+Open an [issue](https://github.com/BirchWoodGod/halo-ce-vita/issues) with
+the version (the first line of `halo.log`, or the settings panel's Controls,
+Advanced), what you were doing (level, place, weapon, vehicle; for
+multiplayer the mode: Online, Same Wi-Fi, Ad hoc or Co-op), and these files
+from the memory card (VitaShell's FTP or USB mode):
+
+- `ux0:data/haloce-vita/halo.log` and `halo-prev.log`: the port's logs of
+  this and the previous session (the previous one is the crashed one after
+  a restart).
+- After a crash, the newest `ux0:data/psp2core-....psp2dmp`: the crash
+  dump. Leave the Vita alone for a minute after a crash so it finishes
+  writing it (a dump still being written ends in `.tmp`).
+- `ux0:data/haloce-vita/data/debug.txt`: the game's own log.
+
+For a multiplayer problem, send the files from every Vita in the game. The
+settings panel's **Save report** (Controls, Advanced: Show dev settings,
+then the Dev tab) copies `halo.log`, `halo-prev.log`, `settings.txt`,
+`env.txt` and the newest crash dump into one folder,
+`ux0:data/haloce-vita/report-<date>/`, for you to send; add `debug.txt`.
 
 ## Building
 
@@ -521,12 +569,14 @@ SELECT), replace just the executable:
 curl -T build/vita/eboot.bin ftp://<vita address>:1337/ux0:/app/HCEV00001/eboot.bin
 ```
 
-Run `configure.py` again after adding a source file or changing anything in
+The version is set in `port/vita/include/vita_version.h`. Run
+`configure.py` again after adding a source file or changing anything in
 `port/vita/sce_sys` (the LiveArea images and the title).
 [port/vita/README.md](port/vita/README.md) has the details: the layout of
 `port/vita`, testing in [Vita3K](https://vita3k.org) and in a Linux build of
 the Vita renderer, debug switches, and the files the game keeps on the
-memory card.
+memory card. The install tool's build is in
+[tools/installer/README-installer.md](tools/installer/README-installer.md).
 
 ## Contributing
 
@@ -535,27 +585,9 @@ Issues and pull requests are welcome. What is planned next is in the
 
 - **Performance** in the biggest fights: the render on the first core is
   the limit at the peak.
-- **Testing online and ad hoc multiplayer** between Vitas: the game's
-  Multiplayer menu (see [port/vita/README.md](port/vita/README.md)).
+- **Testing online, ad hoc and co-op** between Vitas, and Custom Edition
+  maps.
 - **The issues listed for the next update** in the roadmap.
-
-### Reporting a crash or a problem
-
-Open an [issue](https://github.com/BirchWoodGod/halo-ce-vita/issues) with
-what you were doing (level, place, weapon, vehicle) and these files from
-the memory card (VitaShell's FTP or USB mode). The settings panel's **Save
-report** (Controls, Advanced: Show dev settings, then the Dev tab) copies `halo.log`,
-`halo-prev.log`, `settings.txt`, `env.txt` and the newest crash dump into
-one folder, `ux0:data/haloce-vita/report-<date>/`, for you to send; add
-`debug.txt`.
-
-- `ux0:data/haloce-vita/halo.log` and `halo-prev.log`: the port's logs of
-  this and the previous session (the previous one is the crashed one after
-  a restart).
-- After a crash, the newest `ux0:data/psp2core-....psp2dmp`: the crash
-  dump. Leave the Vita alone for a minute after a crash so it finishes
-  writing it (a dump still being written ends in `.tmp`).
-- `ux0:data/haloce-vita/data/debug.txt`: the game's own log.
 
 ## Credits
 
@@ -577,7 +609,8 @@ This port stands on a lot of other people's work:
   browser of public games (signed listings, password-protected games, its
   Players and Rules lines), the PC menus' multiplayer screens (Server
   Browser, Server Setup, the password and Direct Link screens and their
-  header art, read with [Expat](https://libexpat.github.io)), and much more.
+  header art, read with [Expat](https://libexpat.github.io)), the map
+  validator, multiplayer fixes, and much more.
   Those platforms still build from this tree (`port/linux`, `port/windows`,
   `port/android`, each with its own README). Campaign co-op over the
   network is theirs too (xshxdex98's and MrBruh's work: `network_coop.c`,
@@ -596,16 +629,18 @@ This port stands on a lot of other people's work:
   lessons, the tools) went into this port.
 - **Bruno Santana**: his modified build of this port showed the Vita's
   fourth core running helper work, frame interpolation at 60 fps and more
-  graphics settings, which the 1.1.0 work on those builds on.
+  graphics settings, which 1.1.0's are built after.
+- **iamhaller**: the networking work online play started from.
 - **PS Vita port**: BirchWoodGod.
 
 ### Testers
 
-Thank you to everyone who played the releases and betas on their own Vitas
-and reported what they found, with crash dumps, logs, saves and screenshots:
+Thank you to everyone who played the releases, betas and test builds on
+their own Vitas and reported what they found, with crash dumps, logs, saves
+and screenshots:
 [BlazeRed17](https://github.com/BlazeRed17), [ItsSamStone](https://github.com/ItsSamStone), [Benixio](https://github.com/Benixio), [DuckiEXP](https://github.com/DuckiEXP), [5ackwood](https://github.com/5ackwood), [Andiweli](https://github.com/Andiweli), [maler82](https://github.com/maler82), [rbxshh](https://github.com/rbxshh), [nxble6](https://github.com/nxble6), [LordLavaLamp](https://github.com/LordLavaLamp), [KiddRwxSsj](https://github.com/KiddRwxSsj), [GrookyGamez](https://github.com/GrookyGamez), [aguy4809-art](https://github.com/aguy4809-art), [iamayod](https://github.com/iamayod); **CallumBlackGames**, for the first two-Vita multiplayer video; and
 **psvita_dude** and the testers on Discord. Many of the fixes in 1.0.1 to
-1.0.3 exist because of your reports.
+1.1.0 exist because of your reports.
 
 Libraries and tools: [VitaSDK](https://vitasdk.org),
 [SDL3](https://github.com/libsdl-org/SDL) (desktop builds),
@@ -618,8 +653,11 @@ password keys),
 [miniupnpc](https://github.com/miniupnp/miniupnp),
 [libmspack](https://github.com/kyz/libmspack) by Stuart Caie (LGPL 2.1:
 Halo Custom Edition's resource maps out of its installer),
+[zlib](https://zlib.net),
 [musl](https://musl.libc.org)'s math functions,
-[extract-xiso](https://github.com/XboxDev/extract-xiso), and
+[extract-xiso](https://github.com/XboxDev/extract-xiso),
+[FFmpeg](https://ffmpeg.org) (GPL v3, inside the Windows install tool) and
+[PyInstaller](https://pyinstaller.org) (which packs it), and
 [Vita3K](https://vita3k.org) for testing.
 
 ## License
