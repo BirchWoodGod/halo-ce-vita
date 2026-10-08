@@ -61,13 +61,15 @@ water drawn correctly.
 - **Settings panel in tabs**, with a Modded maps tab, touch zones and
   remappable buttons in Xbox controller terms, and dynamic resolution.
 
-## Later
+## Next: 1.1.1
 
 - **Game chat**: quick-chat phrases and typed messages in the lobby and in
-  game, with mute; voice chat to be looked at after that.
-- **Split screen on the PS TV**: two to four players on one PS TV with
-  DualShock 3 / DualShock 4 controllers, as the Xbox game's split screen
-  (the game already supports it; the Vita's speed is the question).
+  game, with mute.
+- **Split screen on the PS TV**: more than one player on one PS TV with
+  DualShock 3 / DualShock 4 controllers.
+
+## Later
+
 - **Loading**: a level start without the remaining few seconds of waiting.
 
 ## Help wanted
