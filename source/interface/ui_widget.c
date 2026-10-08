@@ -1962,6 +1962,13 @@ void display_error_abort_to_dashboard_deferred(
 	short error_code,
 	boolean optional)
 {
+#ifdef HALO_LINUX
+	{
+		void platform_log(char const *format, ...);
+
+		platform_log("error dialog %d queued (the dashboard error of the saved games' checks)", (int)error_code);
+	}
+#endif
 	if (widget_globals.deferred_dashboard_error_code == NONE)
 	{
 		widget_globals.deferred_dashboard_error_code = error_code;
@@ -4649,12 +4656,60 @@ void display_error(
 	return;
 }
 
+#ifdef HALO_LINUX
+#include <stdarg.h>
+
+void platform_log(char const *format, ...);
+
+/* port: the error dialogs that end at the dashboard (the game's exit on the
+Vita), named in halo.log as they open: a player's report then says which
+and why (the damaged disc error said nothing: October 2026) */
+static char const *dashboard_error_name(
+	short error_code)
+{
+	switch (error_code)
+	{
+	case _error_hard_drive_not_enough_free_space:
+		return "not enough free space for saved games";
+	case _error_hard_drive_maximum_saved_game_files:
+		return "too many saved games";
+	case _error_media_damaged:
+		return "the disc is dirty or damaged";
+	case _error_saved_game_state_corrupt:
+		return "a saved game is damaged";
+	default:
+		return "an error";
+	}
+}
+
+void display_error_damaged_media_reason(
+	char const *format,
+	...)
+{
+	char reason[320];
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(reason, sizeof(reason), format, arguments);
+	va_end(arguments);
+	platform_log("damaged disc error: %s", reason);
+	error(_error_silent, "damaged disc error: %s", reason);
+
+	return;
+}
+#endif
+
 void display_error_abort_to_dashboard(
 	short error_code,
 	boolean optional)
 {
 	char const *widget_name;
 	struct widget_instance *widget;
+
+#ifdef HALO_LINUX
+	platform_log("error dialog %d (%s)%s: the game exits to the dashboard after it", (int)error_code,
+		dashboard_error_name(error_code), optional ? ", or back to the game" : "");
+#endif
 
 	if (optional == TRUE)
 		widget_name = "ui\\shell\\error\\error_abort_to_dashboard";
