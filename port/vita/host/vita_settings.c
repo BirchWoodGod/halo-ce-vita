@@ -423,8 +423,7 @@ static struct setting settings[] = {
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
 		"The most players your games take (co-op: 2)", 14, PAGE_PLAY },
-	/* (the variable OpenCE's server setup uses; p2p.c reads
-	HALO_NET_LOBBY_PUBLIC, which apply_value sets with it) */
+	/* (network.host_public, OpenCE's: p2p.c) */
 	{ "  Visibility", "HALO_NET_HOST_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
 		"Private: others join by code. Public: listed too", 1, PAGE_PLAY },
 	{ "  Password", "HALO_NET_LOBBY_PASSWORD", 0, 0, { NULL }, { NULL }, "A public game asks joiners for it", 0,
@@ -548,38 +547,10 @@ static int screen;
 character the cursor is on */
 static char code_typed[P2P_CODE_LENGTH_TYPED + 1] = "AAAAAAAA";
 static int code_cursor;
-/* (the Play page's listing: OpenCE's server browser, ported, declares
-P2P_LOBBY_API 2 in p2p.h) */
-#if defined(P2P_LOBBY_API) && P2P_LOBBY_API >= 2
-#define PLAY_UPSTREAM_BROWSER 1
-#endif
-
-/* a public game as the Browse list shows it (all printable ASCII) */
-struct play_entry
-{
-	/* how it is joined: its id (the upstream browser's), or its code */
-	char key[40];
-	char name[40];
-	/* (UPSTREAM BROWSER: empty before it) the map, the rules ("Slayer to
-	50 on Wizard", "Co-op: Pillar of Autumn, Heroic") and the players ("5
-	of 16: name, name... +3 more") */
-	char map[33];
-	char rules[48];
-	char players_line[64];
-	int players, maximum;
-	int compatible, own;
-	/* (UPSTREAM BROWSER) it asks for a password; its map is a PC one */
-	int locked, pc_map;
-#ifndef PLAY_UPSTREAM_BROWSER
-	/* (before it: the entry as listed, joined for the host it is listed
-	under, p2p_join_lobby_entry) */
-	struct p2p_lobby_entry lobby;
-#endif
-};
-
-/* the public lobby's entries as last shown, and the one chosen */
+/* the public games as last shown (OpenCE's server browser: p2p.h's
+p2p_lobby_entry, every text printable ASCII), and the one chosen */
 #define BROWSE_LINES 8
-static struct play_entry browse_entries[BROWSE_LINES];
+static struct p2p_lobby_entry browse_entries[BROWSE_LINES];
 static int browse_count, browse_selected;
 /* the chosen game asks for its password: the keyboard is up for it */
 static int browse_join_pending;
@@ -760,13 +731,9 @@ static const char *chosen_network(void)
 /* ---------- the Play page's listing
 
 The hosted game as others see it (its name, most players, public or not,
-password) and the public lobby's games, over internet play's calls
-(p2p.h). OpenCE's server browser, ported to internet play in
-feat/upstream-server-browser (signed listings, passwords, the map and
-rules, the players), declares P2P_LOBBY_API 2 in p2p.h: entries by the
-host's key (id) with their map, rules and players, joined by id with a
-password. Before it, the lobby's entries have a code and a name only, and
-a password does nothing: the lines marked UPSTREAM BROWSER. */
+password) and the public games, over internet play's calls (p2p.h): OpenCE's
+server browser, ported (signed listings, passwords, the map, rules and
+players; entries by the host's key, id, joined by it with a password). */
 
 
 static struct play_text *play_text_named(const char *variable)
@@ -803,66 +770,26 @@ static void play_listing_set_public(int listed)
 	p2p_lobby_set_public(listed);
 }
 
+/* (internet play works the password's key out on its own thread, once it
+runs) */
 static void play_listing_set_password(const char *password)
 {
-#ifdef PLAY_UPSTREAM_BROWSER
 	p2p_lobby_set_password(password);
-#else
-	/* UPSTREAM BROWSER: no passwords before it (kept in settings.txt) */
-	(void)password;
-#endif
-}
-
-/* the index-th game of the public lobby (nonzero if there is one) */
-static int play_browse_entry(int index, struct play_entry *entry)
-{
-	struct p2p_lobby_entry lobby;
-
-	memset(entry, 0, sizeof(*entry));
-	if (!p2p_lobby_entry(index, &lobby))
-		return 0;
-#ifdef PLAY_UPSTREAM_BROWSER
-	snprintf(entry->key, sizeof(entry->key), "%s", lobby.id);
-	snprintf(entry->map, sizeof(entry->map), "%s", lobby.map);
-	snprintf(entry->rules, sizeof(entry->rules), "%s", lobby.rules);
-	snprintf(entry->players_line, sizeof(entry->players_line), "%s", lobby.players_line);
-	entry->locked = lobby.locked;
-	entry->pc_map = lobby.pc_map;
-#else
-	/* UPSTREAM BROWSER: a code, a name and the counts only */
-	snprintf(entry->key, sizeof(entry->key), "%s", lobby.code);
-	entry->lobby = lobby;
-#endif
-	snprintf(entry->name, sizeof(entry->name), "%s", lobby.name);
-	entry->players = lobby.players;
-	entry->maximum = lobby.maximum;
-	entry->compatible = lobby.compatible;
-	entry->own = lobby.own;
-	return 1;
 }
 
 /* joins a public game (with the password typed, for a locked one) */
-static void play_join_entry(const struct play_entry *entry, const char *password)
+static void play_join_entry(const struct p2p_lobby_entry *entry, const char *password)
 {
-#ifdef PLAY_UPSTREAM_BROWSER
-	p2p_lobby_join(entry->key, password ? password : "");
-#else
-	(void)password;
-	p2p_join_lobby_entry(&entry->lobby);
-#endif
+	p2p_lobby_join(entry->id, password ? password : "");
 }
 
 /* how the last join of a public game went: -1 the password was wrong, -2
-the game is gone, else 0 (UPSTREAM BROWSER: always 0 before it) */
+the game is gone, else 0 */
 static int play_join_state(void)
 {
-#ifdef PLAY_UPSTREAM_BROWSER
 	int state = p2p_lobby_join_state();
 
 	return state == P2P_LOBBY_JOIN_WRONG_PASSWORD ? -1 : state == P2P_LOBBY_JOIN_GONE ? -2 : 0;
-#else
-	return 0;
-#endif
 }
 
 /* the Play page's rows that apply: internet play's while the connection
@@ -925,9 +852,6 @@ static void apply_value(const struct setting *setting)
 		unsetenv(setting->variable);
 	else
 		setenv(setting->variable, value, 1);
-	/* (internet play reads network.lobby_public: p2p.c) */
-	if (strcmp(setting->variable, "HALO_NET_HOST_PUBLIC") == 0)
-		setenv("HALO_NET_LOBBY_PUBLIC", value, 1);
 }
 
 /* a Play page text set (typed, loaded or a test command's): kept
@@ -1522,6 +1446,11 @@ static void map_delete(const struct map_entry *map)
 		set_notice("Could not delete %.40s.%s", map->name, map->extension);
 		return;
 	}
+	/* (and a download of it that was cut off, kept to go on: map_share.c) */
+	snprintf(path, sizeof(path), "%s/%s.download", directory, map->name);
+	remove(path);
+	snprintf(path, sizeof(path), "%s/%s.resume", directory, map->name);
+	remove(path);
 	/* (the picture and description stay while a .map or .yelo of the name
 	is left) */
 	for (index = 0; index < map_count; index++)
@@ -2238,6 +2167,10 @@ static void show_code(void)
 	vgxm_menu_set(text, 2);
 }
 
+/* the public games as the server browser lists them (one line each: the
+name, the players, the map, then [pw] for a password and PC for a Halo PC
+map), the chosen one's Rules and Players lines below, in the overlay's own
+font: no art */
 static void show_browse(void)
 {
 	char text[2048];
@@ -2252,32 +2185,33 @@ static void show_browse(void)
 		p2p_status(detail, sizeof(detail));
 		length += snprintf(text + length, sizeof(text) - length, "\nLooking for games (%.24s)", detail);
 	}
-	/* (a game a line: its name, players of most, map (its code before the
-	upstream browser), [pw] for a password, PC for a Custom Edition map) */
+	/* (a game a line: its name, players of most, map, [pw] for a password,
+	PC for a Halo PC map) */
 	for (index = 0; index < browse_count && length < (int)sizeof(text); index++)
 	{
-		const struct play_entry *entry = &browse_entries[index];
+		const struct p2p_lobby_entry *entry = &browse_entries[index];
 		char row[64];
 		int end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s", entry->name, entry->players,
-			entry->maximum, entry->map[0] ? entry->map : entry->key, entry->locked ? " [pw]" : "",
-			entry->pc_map ? " PC" : entry->compatible ? "" : " (old)");
+			entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "");
 
 		while (end > 0 && row[end - 1] == ' ')
 			row[--end] = 0;
 		length += snprintf(text + length, sizeof(text) - length, "\n%s", row);
 	}
-	/* (the chosen game's rules and players, when the listing says) */
+	/* (the chosen game's Rules and Players lines; one that could not be
+	joined this run says so) */
 	if (browse_selected < browse_count && length < (int)sizeof(text))
 	{
-		const struct play_entry *entry = &browse_entries[browse_selected];
+		const struct p2p_lobby_entry *entry = &browse_entries[browse_selected];
 
 		if (entry->rules[0])
-			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->rules);
+			length += snprintf(text + length, sizeof(text) - length, "\n%s%.*s", entry->failed ? "FAILED: " : "",
+				entry->failed ? 38 : 46, entry->rules);
 		if (entry->players_line[0] && length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->players_line);
 	}
 	if (length < (int)sizeof(text))
-		snprintf(text + length, sizeof(text) - length, "\nCross: join   Circle: back");
+		snprintf(text + length, sizeof(text) - length, "\nCross: join   Square: refresh   Circle: back");
 	vgxm_menu_set(text, browse_count ? browse_selected + 1 : 0);
 }
 
@@ -2976,9 +2910,12 @@ static void browse_input(unsigned long pressed)
 		browse_selected--;
 	if ((pressed & VITA_BUTTON_DOWN) && browse_selected < browse_count - 1)
 		browse_selected++;
+	/* (every host asked to publish again) */
+	if (pressed & VITA_BUTTON_SQUARE)
+		p2p_lobby_refresh();
 	if ((pressed & VITA_BUTTON_CROSS) && browse_selected < browse_count)
 	{
-		const struct play_entry *entry = &browse_entries[browse_selected];
+		const struct p2p_lobby_entry *entry = &browse_entries[browse_selected];
 
 		/* (a locked game: its password first, on the system's keyboard) */
 		if (entry->locked)
@@ -3018,16 +2955,25 @@ static void delete_input(unsigned long pressed)
 	}
 }
 
-/* the public lobby's entries again (not this machine's own game) */
+/* the public games again (not this machine's own game); the chosen one
+stays chosen while the list changes under it */
 static void browse_refresh(void)
 {
-	struct play_entry entry;
+	struct p2p_lobby_entry entry;
+	char selected[sizeof(entry.id)] = "";
 	int index;
 
+	if (browse_selected < browse_count)
+		memcpy(selected, browse_entries[browse_selected].id, sizeof(selected));
 	browse_count = 0;
-	for (index = 0; browse_count < BROWSE_LINES && play_browse_entry(index, &entry); index++)
-		if (!entry.own)
-			browse_entries[browse_count++] = entry;
+	for (index = 0; browse_count < BROWSE_LINES && p2p_lobby_entry(index, &entry); index++)
+	{
+		if (entry.own)
+			continue;
+		if (selected[0] && !strcmp(entry.id, selected))
+			browse_selected = browse_count;
+		browse_entries[browse_count++] = entry;
+	}
 	if (browse_selected >= browse_count)
 		browse_selected = browse_count ? browse_count - 1 : 0;
 }

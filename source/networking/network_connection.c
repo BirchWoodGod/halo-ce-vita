@@ -1839,6 +1839,14 @@ boolean network_connection_idle(
 	return success;
 }
 
+/* port: map sharing's look at the outgoing queue (map_share.c) */
+long network_connection_reliable_queued_bytes(
+	struct network_connection *connection)
+{
+	return connection && connection->reliable_outgoing_queue ?
+		circular_queue_size(connection->reliable_outgoing_queue) : 0;
+}
+
 /* ---------- private code */
 
 /* the message after what the stream has waiting; FALSE when the stream is

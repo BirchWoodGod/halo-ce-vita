@@ -317,6 +317,8 @@ settings panel (hold Select and Start) and go to **Multiplayer**, **Play**:
    Edition's `bitmaps.map`, `sounds.map` and `loc.map` in the maps folder
    (the game says which are missing). A joiner who cannot get the map is
    told why (an older host, a game already started: join in the lobby).
+   A download that stops (cancelled, the connection lost) goes on from
+   where it stopped when you join for the same map again.
 
 The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
 Triangle, Back Select. The same screens are under Multiplayer, System Link
@@ -346,10 +348,10 @@ are hidden (Same Wi-Fi and Ad hoc have the first three and the last two):
 | Lobby name | The name others see for your game: in their System Link list, your lobby and the public games. Cross types it on the Vita's keyboard (15 characters, letters, digits and punctuation; others are left out). Until you type one, your Vita's user name. |
 | Max players | 2 to 16 (default 16): the most players your games take. A joiner past it is told the game is full. A co-op game takes 2. |
 | Visibility | Online: **Public** (the default): your games are also listed in the public games for any Vita to join. **Private**: others join with your code. Applies at once, also while hosting. |
-| Password | Online and Public: a joiner of your listed game is asked for it (typed on the keyboard; empty: none). Needs the public games of OpenCE's server browser (coming); until then it is kept but not asked. |
+| Password | Online and Public: a joiner from the public games is asked for it (typed on the keyboard; empty: none). Your code still joins without it. |
 | Host co-op campaign | Opens the game's Campaign screen: pick a profile, a level and a difficulty, then **Y: Play co-op** (co-op, below). With Ad hoc, the room's group is joined first. |
 | Join with a code | Online: type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins; Triangle: the public games instead), then the steps with how the lookup goes. |
-| Browse public games | Online: the games listed in the public lobby, by name, players of the most and map; Cross joins one (a game with **[pw]** asks for its password), then the steps. |
+| Browse public games | Online: the server browser, one line a game (its name, players of the most, map, **[pw]** if it has a password, **PC** on a Halo PC map), and the chosen game's Rules ("Slayer to 50 on Blood Gulch") and Players ("5 of 16: name, name... +3 more") below. Cross joins it (a **[pw]** game asks for its password on the keyboard), then the steps; Square refreshes the list. |
 | Games on this network | The steps, then the System Link list: Cross on the host's game joins it. With Ad hoc, the room's group is joined first. |
 
 The ad hoc dialog's mode (Connect, Create or Join) is a Dev switch.
@@ -384,9 +386,17 @@ What others can see: the public MQTT brokers and STUN servers (third
 parties) see each Vita's public IP address while it plays online, and the
 Vitas it plays with learn it too, as in any peer-to-peer game. Everything
 sent through the brokers is encrypted with keys from the invite, so the
-brokers learn no codes or invites, but anyone browsing the public lobby sees
+brokers learn no codes or invites, but anyone browsing the public games sees
 a public game's name (its Lobby name: your Vita's user name until you type
-another), its code and its player count. Private games are not listed. A host can ban by device: the ID the
+another), its map, its rules, its
+players' names and counts, and can join it. A public game's listing is
+signed with the host's key (OpenCE's server browser), so no one else can
+list, change or remove it; it never holds the game's code. A game with a
+password lists its invite sealed with the password (Argon2id, about half a
+second on a Vita to try one), so only those who know it can join from the
+browser; a code still joins it. Private games are not listed. Vitas list on
+their own topics, signed under their own label: a PC never sees a Vita's
+public game, nor a Vita a PC's. A host can ban by device: the ID the
 game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
 only, not the OpenPSID itself.
 

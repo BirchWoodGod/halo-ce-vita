@@ -455,6 +455,7 @@ symbols in this file:
 #include "game/game_engine.h"
 #include "game/player_queues_new.h"
 #include "game/players.h"
+#include "tag_files/tag_files.h"
 #include "interface/ui_widget.h"
 #include "main/main.h"
 #include "math/real_math.h"
@@ -490,8 +491,13 @@ static long network_game_server_port_maximum_players(void);
 static boolean network_game_server_port_lobby_name(wchar_t *name, long count);
 static void network_game_server_port_lobby_settings(struct network_game_server *server);
 
-/* port: internet play's Discord presence (port/linux/src/p2p.c) */
+/* port: internet play's Discord presence (port/linux/src/p2p.c), and the
+server browser's listing of a public game (p2p_lobby.c) */
 void p2p_set_game_player_counts(int count, int maximum);
+void p2p_set_game_listing(const char *name, const char *map, const char *gametype, int engine_type, int open,
+	int in_progress, int has_teams);
+void p2p_set_game_listing_details(int score_limit, int coop_difficulty, int pc_map, const char *player_names);
+boolean custom_edition_cache_is_custom_edition(char const *map_name);
 
 #ifdef HALO_LINUX
 /* (HALO_NET_PROFILE=1) the networked frame's steps timed (port/linux/game/tick_detail.c) */
@@ -1336,6 +1342,88 @@ void network_game_server_dispose(
 	return;
 }
 
+/* port: wide text as the listing has it: ASCII, a Latin letter with a mark
+its plain letter ('?' for the rest: player_name_character_ascii, as the
+server browser validates the name as a player's) */
+static void listing_text(char *text, int size, wchar_t const *wide, int length)
+{
+	int index;
+
+	for (index = 0; index < size - 1 && index < length && wide[index]; index++)
+		text[index] = player_name_character_ascii(wide[index]);
+	text[index] = 0;
+}
+
+/* port: the server browser's listing of the game (listed only if hosted
+for the internet and public: p2p_lobby.c), as its advertisement has it
+(network_server_message_handler.c); p2p is told only what changed (it takes
+its lock) */
+static void network_game_server_list(
+	struct network_game_server *server)
+{
+	static struct
+	{
+		char name[17], map[33], gametype[25], players[16 * 13 + 1], map_checked[256];
+		int engine, open, in_progress, teams, score, difficulty, pc_map, told;
+	} last;
+	struct network_game *game = &server->game;
+	short state = network_game_server_get_state(server, NULL);
+	char name[NUMBEROF(game->name) + 1];
+	char gametype[NUMBEROF(game->variant.human_readable_game_description) + 1];
+	char players[sizeof(last.players)];
+	char const *map = tag_name_strip_path(game->map.name);
+	/* (loading: its start sent, still in the pregame) */
+	boolean in_progress = state != _network_game_server_state_pregame || server->sent_start_game_message;
+	boolean open = state == _network_game_server_state_ingame ? network_game_server_accepts_late_joins(server) :
+		network_game_server_game_is_open(server) && network_game_has_free_player_slot(game);
+	int difficulty = game->variant.game_engine_index == 0 && main_get_solo_level_from_name(game->map.name) != NONE ?
+		PIN(game->difficulty, 0, 3) : -1;
+	int length = 0;
+	short index;
+
+	listing_text(name, sizeof(name), game->name, NUMBEROF(game->name));
+	listing_text(gametype, sizeof(gametype), game->variant.human_readable_game_description,
+		NUMBEROF(game->variant.human_readable_game_description));
+	players[0] = 0;
+	for (index = 0; index < game->player_count && index < 16; index++)
+	{
+		char player[13];
+
+		listing_text(player, sizeof(player), game->players[index].name, NUMBEROF(game->players[index].name));
+		length += snprintf(players + length, sizeof(players) - (size_t)length, "%s\n", player);
+	}
+	/* (whether the map is a Halo PC one: a look at its file, once a map) */
+	if (strncmp(last.map_checked, game->map.name, sizeof(last.map_checked)))
+	{
+		strncpy(last.map_checked, game->map.name, sizeof(last.map_checked) - 1);
+		last.pc_map = custom_edition_cache_is_custom_edition(game->map.name) ? 1 : 0;
+		last.told = FALSE;
+	}
+	if (!last.told || strcmp(name, last.name) || strncmp(map, last.map, sizeof(last.map) - 1) ||
+		strcmp(gametype, last.gametype) || game->variant.game_engine_index != last.engine || open != last.open ||
+		in_progress != last.in_progress || game->variant.universal_variant.teams != last.teams)
+	{
+		strcpy(last.name, name);
+		snprintf(last.map, sizeof(last.map), "%s", map);
+		strcpy(last.gametype, gametype);
+		last.engine = game->variant.game_engine_index;
+		last.open = open;
+		last.in_progress = in_progress;
+		last.teams = game->variant.universal_variant.teams;
+		/* (the scenario's name, not its path: the listing has 32 characters) */
+		p2p_set_game_listing(name, map, gametype, last.engine, open, in_progress, last.teams);
+	}
+	if (!last.told || game->variant.universal_variant.score_to_win != last.score || difficulty != last.difficulty ||
+		strcmp(players, last.players))
+	{
+		last.score = game->variant.universal_variant.score_to_win;
+		last.difficulty = difficulty;
+		strcpy(last.players, players);
+		p2p_set_game_listing_details(last.score, difficulty, last.pc_map, players);
+	}
+	last.told = TRUE;
+}
+
 /* port: whether the host's network is gone: at once but in a game, where a
 link that comes back within NETWORK_GAME_SERVER_CLIENT_TIMEOUT (an address
 renewed, a wifi drop) goes on (a check more than two seconds after the last
@@ -1395,8 +1483,10 @@ boolean network_game_server_idle(
 		}
 	}
 
-	/* (what Discord shows of a game hosted for internet play) */
+	/* (what Discord shows of a game hosted for internet play, and the
+	server browser's listing) */
 	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
+	network_game_server_list(server);
 	/* port: the settings' co-op choice (the Vita's settings panel) */
 	network_game_server_port_cooperative_setting(server);
 	/* port: the settings' lobby name and most players (the panel's Play page) */

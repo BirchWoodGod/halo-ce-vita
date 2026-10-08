@@ -116,6 +116,18 @@ enum
 	/* the most unacknowledged messages a stream sends ahead */
 	STREAM_WINDOW = 128,
 	KCP_MTU = 1200,
+	/* a stream's least retransmission timeout (milliseconds; KCP's fast
+	mode's is 30): with no congestion control, a window sent at once waits
+	in a slow uplink's queue (128 KB is 256 ms at 4 Mbit/s), and the last of
+	it timed out and was sent again: a map download over 8 Mbit/s with a
+	100 ms round trip sent 45% again, carried 61% of the link (87% with
+	this). A segment lost with more behind it is sent again sooner, on
+	their acknowledgements (fast resend). Only while a stream has a bulk
+	transfer queued (KCP_BULK_SEGMENTS): the game's own messages, a few at a
+	time, keep fast mode's 30 ms, so a lost one is not held half a second */
+	KCP_MINIMUM_RTO = 500,
+	KCP_FAST_MINIMUM_RTO = 30,
+	KCP_BULK_SEGMENTS = 32,
 
 	/* milliseconds */
 	LOOP_INTERVAL = 10,
@@ -288,7 +300,7 @@ struct stun_server
 	struct p2p_candidate mapped;
 };
 
-static pthread_mutex_t p2p_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct
 {
@@ -328,6 +340,11 @@ static struct
 	int hosting;
 	int has_token;
 	unsigned char token[P2P_TOKEN_SIZE];
+	/* whether the server browser's exit hook is set (lobby_quit) */
+	int lobby_quit_registered;
+	/* whether the server browser listed this token (p2p_lobby.c): going
+	private makes a new one */
+	int token_listed;
 	char invite[P2P_LINK_SIZE];
 	int invite_copied;
 	/* the game's players and its most (p2p_set_game_player_counts; 0: not
@@ -349,31 +366,25 @@ static struct
 	char clipboard[P2P_LINK_SIZE];
 	int has_clipboard;
 
-	/* hosting: the invite's short code (ABCD-EFGH), made with it; whether
-	to list the game in the public lobby, and under which name */
+	/* hosting: the invite's short code (ABCD-EFGH), made with it (the
+	run's: a new invite keeps it) */
 	char code[P2P_CODE_SIZE];
-	int lobby_public;
-	char lobby_name[P2P_LOBBY_NAME_SIZE];
 	/* looking up a code's eight characters, until its record arrives or
 	CODE_LOOKUP_TIMEOUT */
 	int lookup_requested;
 	int looking_up;
 	char lookup_code[P2P_CODE_LENGTH + 1];
 	unsigned long lookup_time;
-	/* the code looked up is a public lobby's game's (p2p_join_lobby_code) */
+	/* (a code whose record must be one host's: the host's identifier) */
+	int lookup_has_host;
+	unsigned char lookup_host[P2P_IDENTIFIER_SIZE];
+	/* the code looked up is a public lobby's game's (p2p_join_lobby_code, p2p_lobby_join) */
 	int lookup_public;
 	/* the hosts last joined from the public lobby (a code or an invite
 	joined since takes its host off): their games' map downloads are asked
 	about with a warning (p2p_address_origin) */
 	unsigned char public_hosts[P2P_PUBLIC_HOSTS][P2P_IDENTIFIER_SIZE];
 	int public_host_next;
-	/* (a public lobby entry's code: the host it is listed under) */
-	int lookup_has_host;
-	unsigned char lookup_host[P2P_IDENTIFIER_SIZE];
-	/* browsing the public lobby (asked from any thread; the p2p thread
-	tells the brokers) */
-	int browse_wanted;
-	int browsing;
 
 	/* what is happening, for a menu (p2p_status) */
 	char status[96];
@@ -399,7 +410,11 @@ p2p.local_address) */
 static unsigned short proxy_by_port[65536];
 
 static unsigned char identifier[P2P_IDENTIFIER_SIZE];
-/* this run's X25519 keys, which the identifier comes from */
+/* this run's X25519 keys, which the identifier comes from: from an Ed25519
+seed, whose key signs the listing of a public game (p2p_lobby.c), so that a
+listing's key is also the invite's */
+static unsigned char seed[P2P_SEED_SIZE];
+static unsigned char signing_key[P2P_KEY_SIZE];
 static unsigned char secret_key[P2P_KEY_SIZE];
 static unsigned char public_key[P2P_KEY_SIZE];
 static int has_identifier;
@@ -558,7 +573,8 @@ const unsigned char *p2p_identifier(void)
 	pthread_mutex_lock(&identifier_lock);
 	if (!has_identifier)
 	{
-		posix_random_bytes(secret_key, sizeof(secret_key));
+		posix_random_bytes(seed, sizeof(seed));
+		p2p_ed25519_public(seed, signing_key, secret_key);
 		p2p_x25519(public_key, secret_key, NULL);
 		p2p_identifier_for(public_key, identifier);
 		has_identifier = 1;
@@ -595,6 +611,18 @@ const unsigned char *p2p_public_key(void)
 {
 	p2p_identifier();
 	return public_key;
+}
+
+const unsigned char *p2p_signing_key(void)
+{
+	p2p_identifier();
+	return signing_key;
+}
+
+void p2p_sign(const void *message, int size, unsigned char *signature)
+{
+	p2p_identifier();
+	p2p_ed25519_sign(seed, signing_key, message, size, signature);
 }
 
 int p2p_shared_secret(const unsigned char *key, unsigned char *shared)
@@ -1995,6 +2023,7 @@ static struct stream *stream_new(int peer_index, IUINT32 conversation)
 		ikcp_nodelay(stream->kcp, 1, LOOP_INTERVAL, 2, 1);
 		ikcp_wndsize(stream->kcp, 256, 256);
 		ikcp_setmtu(stream->kcp, KCP_MTU);
+		stream->kcp->rx_minrto = KCP_MINIMUM_RTO;
 		return stream;
 	}
 	return NULL;
@@ -2170,6 +2199,7 @@ static void stream_update(struct stream *stream)
 {
 	unsigned char message[1 + STREAM_CHUNK_SIZE];
 
+	stream->kcp->rx_minrto = ikcp_waitsnd(stream->kcp) > KCP_BULK_SEGMENTS ? KCP_MINIMUM_RTO : KCP_FAST_MINIMUM_RTO;
 	ikcp_update(stream->kcp, p2p_now());
 	/* what the peer sent */
 	for (;;)
@@ -2518,6 +2548,26 @@ int p2p_running(void)
 	return p2p.running;
 }
 
+int p2p_join_invite_locked(const char *text)
+{
+	/* (the server browser's: its host is a stranger's) */
+	int result = join_invite(text, 1);
+
+	if (result > 0 && !p2p.running)
+		platform_log("Internet play is off: the invite is ignored");
+	return result > 0;
+}
+
+void p2p_set_status(const char *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(p2p.status, sizeof(p2p.status), format, arguments);
+	va_end(arguments);
+	platform_log("Internet play: %s", p2p.status);
+}
+
 int p2p_join_invite(const char *text)
 {
 	int result;
@@ -2562,31 +2612,6 @@ static int join_code_from(const char *text, int public)
 	}
 	pthread_mutex_lock(&p2p_lock);
 	result = join_code(code, public, NULL);
-	pthread_mutex_unlock(&p2p_lock);
-	return result;
-}
-
-int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry)
-{
-	char code[P2P_CODE_LENGTH + 1];
-	unsigned char host[P2P_IDENTIFIER_SIZE];
-	int index;
-	int result;
-
-	if (!parse_code(entry->code, code, 0))
-		return 0;
-	for (index = 0; index < P2P_IDENTIFIER_SIZE; index++)
-	{
-		int high = hex_value(entry->host[index * 2]), low = high < 0 ? -1 : hex_value(entry->host[index * 2 + 1]);
-
-		if (low < 0)
-			return 0;
-		host[index] = (unsigned char)(high << 4 | low);
-	}
-	if (!p2p.running)
-		return 1;
-	pthread_mutex_lock(&p2p_lock);
-	result = join_code(code, 1, host);
 	pthread_mutex_unlock(&p2p_lock);
 	return result;
 }
@@ -2641,13 +2666,6 @@ static void update_joining(void)
 		set_status(p2p_signal_connected() ? "no game has code %.4s-%.4s (check it, or the host stopped hosting)" :
 			"cannot reach the signalling brokers to look up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
 	}
-	if (p2p.browse_wanted != p2p.browsing)
-	{
-		p2p.browsing = p2p.browse_wanted;
-		if (p2p.browsing)
-			p2p_signal_start();
-		p2p_signal_browse(p2p.browsing);
-	}
 	if (p2p.join_requested)
 	{
 		/* the offer carries the public address, if there is one */
@@ -2667,6 +2685,7 @@ static void update_joining(void)
 		p2p.joining = 0;
 		p2p_signal_stop_joining();
 		set_status("no answer from the invite's host; it may have stopped hosting or quit");
+		p2p_lobby_join_timed_out(p2p.join_host_hash);
 	}
 }
 
@@ -2678,6 +2697,49 @@ static int connected_player_count(void)
 	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
 		count += p2p.peers[index].used && p2p.peers[index].connected && !p2p.peers[index].is_host;
 	return count;
+}
+
+/* a new invite (a new token) */
+static void make_invite(void)
+{
+	unsigned char bytes[P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
+	char text[2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE) + 1];
+
+	posix_random_bytes(p2p.token, sizeof(p2p.token));
+	p2p.has_token = 1;
+	p2p.token_listed = 0;
+	p2p_key_hash(p2p_public_key(), bytes);
+	memcpy(bytes + P2P_KEY_HASH_SIZE, p2p.token, P2P_TOKEN_SIZE);
+	p2p_hex(bytes, sizeof(bytes), text);
+	snprintf(p2p.invite, sizeof(p2p.invite), "halo://join/%s", text);
+}
+
+void p2p_new_invite_if_listed(void)
+{
+	if (!p2p.has_token || !p2p.token_listed)
+		return;
+	make_invite();
+	/* (the invite is a bearer token: the log shows only the host's part) */
+	platform_log("Internet play: a new invite, so that the one listed lets no one in (private, or a new password): "
+		"halo://join/%.12s...", p2p.invite + strlen("halo://join/"));
+	if (p2p.hosting)
+	{
+		/* (the code stays: it was never listed, and now leads to the new
+		invite) */
+		p2p_signal_host(p2p.token, p2p.code);
+		memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
+		p2p.has_clipboard = 1;
+		/* (Discord is told the new one) */
+		p2p.reported_player_count = -1;
+	}
+}
+
+/* the hosted game's players, as the game says; else the host and the
+machines the tunnel reaches */
+static void hosted_player_counts(int *count, int *maximum)
+{
+	*count = p2p.game_player_maximum > 0 ? p2p.game_player_count : connected_player_count() + 1;
+	*maximum = p2p.game_player_maximum > 0 ? p2p.game_player_maximum : P2P_MAXIMUM_PEERS + 1;
 }
 
 static void update_hosting(void)
@@ -2698,20 +2760,11 @@ static void update_hosting(void)
 	}
 	if (want && !p2p.hosting)
 	{
-		char text[2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE) + 1];
-
 		/* one invite for the whole run, so a link keeps working from game
 		to game */
 		if (!p2p.has_token)
 		{
-			unsigned char bytes[P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
-
-			posix_random_bytes(p2p.token, sizeof(p2p.token));
-			p2p.has_token = 1;
-			p2p_key_hash(p2p_public_key(), bytes);
-			memcpy(bytes + P2P_KEY_HASH_SIZE, p2p.token, P2P_TOKEN_SIZE);
-			p2p_hex(bytes, sizeof(bytes), text);
-			snprintf(p2p.invite, sizeof(p2p.invite), "halo://join/%s", text);
+			make_invite();
 			/* the short code: 40 random bits, five to a character */
 			{
 				unsigned char random[5];
@@ -2756,20 +2809,15 @@ static void update_hosting(void)
 	}
 	if (p2p.hosting)
 	{
-		/* the game's players, as the game says; else the host and the
-		machines the tunnel reaches */
-		int count = p2p.game_player_maximum > 0 ? p2p.game_player_count : connected_player_count() + 1;
-		int maximum = p2p.game_player_maximum > 0 ? p2p.game_player_maximum : P2P_MAXIMUM_PEERS + 1;
+		int count, maximum;
 
+		hosted_player_counts(&count, &maximum);
 		if (count != p2p.reported_player_count || maximum != p2p.reported_player_maximum)
 		{
 			p2p.reported_player_count = count;
 			p2p.reported_player_maximum = maximum;
 			p2p_discord_set_hosting(p2p.invite + strlen("halo://join/"), count, maximum);
 		}
-		/* (each pass: p2p_signal.c sends the entry only when it changes) */
-		p2p_signal_set_lobby(p2p.lobby_public, p2p.code,
-			p2p.lobby_name[0] ? p2p.lobby_name : config_string("network.lobby_name"), count, maximum);
 	}
 }
 
@@ -2835,6 +2883,15 @@ static void *upnp_thread(void *unused)
 	return NULL;
 }
 
+/* quitting: a game listed in the server browser is taken out of it at once
+(not when its listing lapses), as when it stops being hosted */
+static void lobby_quit(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_quit();
+	pthread_mutex_unlock(&p2p_lock);
+}
+
 /* the game exits: the router forwards the port no longer (after a request
 under way, which may forward one, if it ends soon) */
 static void upnp_release(void)
@@ -2870,6 +2927,9 @@ static int upnp_needed(void)
 	int index;
 
 	if (p2p.joining && elapsed(p2p.join_time, UPNP_JOIN_DELAY))
+		return 1;
+	/* a game in the server browser: at once (more joiners get through) */
+	if (p2p_lobby_listed())
 		return 1;
 	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
 	{
@@ -2948,39 +3008,6 @@ int p2p_hosting_code(char *code, int size)
 		memcpy(code, p2p.code, P2P_CODE_SIZE);
 		result = 1;
 	}
-	pthread_mutex_unlock(&p2p_lock);
-	return result;
-}
-
-void p2p_lobby_set_public(int listed)
-{
-	pthread_mutex_lock(&p2p_lock);
-	p2p.lobby_public = listed != 0;
-	pthread_mutex_unlock(&p2p_lock);
-}
-
-void p2p_lobby_set_name(const char *name)
-{
-	pthread_mutex_lock(&p2p_lock);
-	snprintf(p2p.lobby_name, sizeof(p2p.lobby_name), "%s", name ? name : "");
-	pthread_mutex_unlock(&p2p_lock);
-}
-
-void p2p_lobby_browse(int on)
-{
-	pthread_mutex_lock(&p2p_lock);
-	p2p.browse_wanted = on != 0;
-	pthread_mutex_unlock(&p2p_lock);
-}
-
-int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
-{
-	int result;
-
-	if (!p2p.running)
-		return 0;
-	pthread_mutex_lock(&p2p_lock);
-	result = p2p.browsing && p2p_signal_lobby_entry(index, entry);
 	pthread_mutex_unlock(&p2p_lock);
 	return result;
 }
@@ -3335,6 +3362,26 @@ static void *p2p_thread(void *unused)
 		expire_proxies();
 		stun_update();
 		update_hosting();
+		/* the server browser (p2p_lobby.c): signalling while browsing too
+		(not in ad hoc play, which reaches no broker) */
+		if (p2p_lobby_browsing() && !p2p.adhoc)
+			p2p_signal_start();
+		if (!p2p.adhoc)
+		{
+			int count, maximum;
+
+			hosted_player_counts(&count, &maximum);
+			p2p_lobby_update(p2p.hosting && p2p.has_token ? p2p.token : NULL, count, maximum);
+			if (p2p_lobby_listed())
+			{
+				p2p.token_listed = 1;
+				if (!p2p.lobby_quit_registered)
+				{
+					p2p.lobby_quit_registered = 1;
+					atexit(lobby_quit);
+				}
+			}
+		}
 		update_joining();
 		update_upnp();
 		p2p_discord_update();
@@ -3374,7 +3421,6 @@ void p2p_initialize(unsigned long local_address)
 	for (index = 0; index < MAXIMUM_STREAMS; index++)
 		p2p.streams[index].socket = -1;
 	p2p.local_address = local_address;
-	p2p.lobby_public = config_boolean("network.lobby_public");
 	p2p.adhoc = config_boolean("network.adhoc");
 	p2p.tunnel_socket = open_socket(SOCK_DGRAM, 0, network_short((unsigned short)tunnel_port), &p2p.tunnel_port);
 	if (p2p.tunnel_socket < 0)

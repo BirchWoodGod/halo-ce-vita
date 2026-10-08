@@ -79,7 +79,7 @@ int config_boolean(const char *name)
 		return !getenv("TEST_ADHOC");
 	if (!strcmp(name, "network.adhoc"))
 		return getenv("TEST_ADHOC") != NULL;
-	if (!strcmp(name, "network.lobby_public"))
+	if (!strcmp(name, "network.host_public"))
 		return 0;
 	return 0;
 }
@@ -103,6 +103,19 @@ const char *config_string(const char *name)
 	if (!strcmp(name, "network.lobby_name"))
 		return "vita test";
 	return "";
+}
+
+void config_folder(char *path, size_t size)
+{
+	snprintf(path, size, "./");
+}
+
+/* (no brokers' file: TEST_BROKER names the test's broker) */
+char *config_file_read(const char *path, size_t *size)
+{
+	(void)path;
+	(void)size;
+	return NULL;
 }
 
 __attribute__((stdcall)) unsigned long GetTickCount(void)

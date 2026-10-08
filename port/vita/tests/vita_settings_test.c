@@ -87,12 +87,9 @@ static unsigned long long clock_us = 1000000;
 static char menu[2048];
 static int menu_selected, menu_visible;
 static char joined_code[32];
-static int joined_from_lobby;
+static int refreshes;
 static int lobby_public = -1, browsing, adhoc_connects, adhoc_mode = -1, adhoc_room = -1, adhoc_state_value;
-static char lobby_name[64];
-#ifdef PLAY_UPSTREAM_BROWSER
-static char lobby_password[64], joined_password[64];
-#endif
+static char lobby_name[64], lobby_password[64], joined_id[40], joined_password[64];
 static int ime_opens, ime_open_now, ime_result, ime_maximum, ime_password;
 static char ime_title[64], ime_initial[64], ime_typed[128];
 static int hosting;
@@ -128,18 +125,6 @@ int p2p_join_code(const char *code)
 	return 1;
 }
 
-#ifndef PLAY_UPSTREAM_BROWSER
-/* (a public game's: by its code, for the host it is listed under) */
-static char joined_host[16];
-
-int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry)
-{
-	snprintf(joined_host, sizeof(joined_host), "%s", entry->host);
-	joined_from_lobby = 1;
-	return p2p_join_code(entry->code);
-}
-#endif
-
 int p2p_hosting_code(char *code, int size)
 {
 	if (!hosting)
@@ -152,8 +137,9 @@ void p2p_lobby_set_public(int listed) { lobby_public = listed; }
 void p2p_lobby_browse(int on) { browsing = on; }
 void p2p_lobby_set_name(const char *name) { snprintf(lobby_name, sizeof(lobby_name), "%s", name ? name : ""); }
 
-#ifdef PLAY_UPSTREAM_BROWSER
-/* (OpenCE's server browser, ported: entries by id, with a password) */
+void p2p_lobby_refresh(void) { refreshes++; }
+
+/* (OpenCE's server browser: entries by id, with a password) */
 void p2p_lobby_set_password(const char *password)
 {
 	snprintf(lobby_password, sizeof(lobby_password), "%s", password ? password : "");
@@ -161,45 +147,49 @@ void p2p_lobby_set_password(const char *password)
 
 int p2p_lobby_join(const char *id, const char *password)
 {
-	snprintf(joined_code, sizeof(joined_code), "%s", id);
+	snprintf(joined_id, sizeof(joined_id), "%s", id);
 	snprintf(joined_password, sizeof(joined_password), "%s", password ? password : "");
-	joined_from_lobby = 1;
 	return 1;
 }
 
 int p2p_lobby_join_state(void) { return P2P_LOBBY_JOIN_IDLE; }
 
+/* this Vita's own game, an open one and a locked Halo PC one */
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 {
 	if (!browsing || index >= 3)
 		return 0;
 	memset(entry, 0, sizeof(*entry));
-	snprintf(entry->id, sizeof(entry->id), "%s", index == 0 ? "0wn" : index == 1 ? "a1b2" : "c3d4");
-	snprintf(entry->name, sizeof(entry->name), "%s", index == 0 ? "this vita" : index == 1 ? "desktop host" : "locked game");
-	snprintf(entry->map, sizeof(entry->map), "%s", index == 2 ? "Wizard" : "Blood Gulch");
-	snprintf(entry->rules, sizeof(entry->rules), "%s", "Slayer to 50 on Blood Gulch");
-	snprintf(entry->players_line, sizeof(entry->players_line), "%s", "2 of 16: Alpha, Bravo");
-	entry->players = 2;
-	entry->maximum = 16;
 	entry->compatible = 1;
-	entry->own = index == 0;
-	entry->locked = index == 2;
+	entry->maximum = 16;
+	if (index == 0)
+	{
+		snprintf(entry->id, sizeof(entry->id), "%032d", 1);
+		snprintf(entry->name, sizeof(entry->name), "this vita");
+		entry->players = 1;
+		entry->own = 1;
+	}
+	else if (index == 1)
+	{
+		snprintf(entry->id, sizeof(entry->id), "%032d", 2);
+		snprintf(entry->name, sizeof(entry->name), "desktop host");
+		snprintf(entry->map, sizeof(entry->map), "Blood Gulch");
+		snprintf(entry->rules, sizeof(entry->rules), "Slayer to 25 on Blood Gulch");
+		snprintf(entry->players_line, sizeof(entry->players_line), "2 of 16: alpha, bravo");
+		entry->players = 2;
+	}
+	else
+	{
+		snprintf(entry->id, sizeof(entry->id), "%032d", 3);
+		snprintf(entry->name, sizeof(entry->name), "locked one");
+		snprintf(entry->map, sizeof(entry->map), "Wizard");
+		snprintf(entry->rules, sizeof(entry->rules), "CTF on Wizard (HALO PC)");
+		entry->players = 1;
+		entry->locked = 1;
+		entry->pc_map = 1;
+	}
 	return 1;
 }
-#else
-int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
-{
-	static const struct p2p_lobby_entry entries[] = {
-		{ "OWNN-GAME", "this vita", 1, 128, 1, 1, "0200000000aa" },
-		{ "HJ4T-9WXZ", "desktop host", 2, 16, 1, 0, "0211223344bb" },
-	};
-
-	if (!browsing || index >= 2)
-		return 0;
-	*entry = entries[index];
-	return 1;
-}
-#endif
 
 /* (vita_ime.c's keyboard: opened, then closed with ime_result and
 ime_typed once a test says so) */
@@ -903,11 +893,10 @@ static void test_multiplayer_tab(void)
 	/* Visibility: Private hides the password; Public at once */
 	to_line("  Visibility");
 	press(VITA_BUTTON_LEFT);
-	check(lobby_public == 0 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false") &&
-		!strcmp(getenv("HALO_NET_LOBBY_PUBLIC"), "false") && !strstr(menu, "Password"),
-		"Visibility Private: at once, internet play's variable too; no password row");
+	check(lobby_public == 0 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false") && !strstr(menu, "Password"),
+		"Visibility Private: at once (network.host_public); no password row");
 	press(VITA_BUTTON_RIGHT);
-	check(lobby_public == 1 && !strcmp(getenv("HALO_NET_LOBBY_PUBLIC"), "true") && strstr(menu, "\n  Password\x02"),
+	check(lobby_public == 1 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "true") && strstr(menu, "\n  Password\x02"),
 		"Visibility Public: listed at once, the password row back");
 
 	/* Password: hidden as typed, "set" */
@@ -919,9 +908,7 @@ static void test_multiplayer_tab(void)
 		!strstr(menu, "hunter2") && strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PASSWORD=hunter2\n") &&
 		strstr(log_text, "settings: password set (settings panel)") && !strstr(log_text, "hunter2"),
 		"Password: kept and saved, shown as set (not in the panel or halo.log)");
-#ifdef PLAY_UPSTREAM_BROWSER
 	check(!strcmp(lobby_password, "hunter2"), "the listing has the password");
-#endif
 	press(VITA_BUTTON_CROSS);
 	keyboard_closes("");
 	check(!getenv("HALO_NET_LOBBY_PASSWORD")[0] && strstr(menu, "\n  Password\x02  none\n") &&
@@ -1157,15 +1144,13 @@ static void test_online_rows(void)
 	clock_us += 600000;
 	frame(0);
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "desktop host") && !strstr(menu, "this vita") && strstr(menu, "\nCross: join   Circle: back"),
-		"the lobby lists the others' games");
-#ifdef PLAY_UPSTREAM_BROWSER
-	check(strstr(menu, "\ndesktop host     2/16 Blood Gulch\n") && strstr(menu, "\nlocked game      2/16 Wizard         [pw]\n") &&
-		strstr(menu, "\nSlayer to 50 on Blood Gulch\n2 of 16: Alpha, Bravo\n"),
-		"each game: name, players of most, map, [pw]; the chosen one's rules and players");
-#else
-	check(strstr(menu, "\ndesktop host     2/16 HJ4T-9WXZ\n") != NULL, "each game: name, players of most, code");
-#endif
+	check(strstr(menu, "desktop host") && !strstr(menu, "this vita") &&
+		strstr(menu, "\nCross: join   Square: refresh   Circle: back"), "the lobby lists the others' games");
+	check(strstr(menu, "\ndesktop host     2/16 Blood Gulch\n") && strstr(menu, "\nlocked one       1/16 Wizard         [pw] PC\n") &&
+		strstr(menu, "\nSlayer to 25 on Blood Gulch\n2 of 16: alpha, bravo\n"),
+		"each game: name, players of most, map, [pw], PC; the chosen one's Rules and Players lines");
+	press(VITA_BUTTON_SQUARE);
+	check(refreshes == 1, "square refreshes the list");
 	{
 		const char *at = menu;
 		int longest = 0;
@@ -1180,16 +1165,9 @@ static void test_online_rows(void)
 		check(longest <= 46, "the public games: 46 characters a line");
 	}
 	press(VITA_BUTTON_CROSS);
-#ifdef PLAY_UPSTREAM_BROWSER
-	check(!strcmp(joined_code, "a1b2") && !joined_password[0] && browsing == 0, "cross joins the game by its id");
-#else
-	check(!strcmp(joined_code, "HJ4T-9WXZ") && !strcmp(joined_host, "0211223344bb") && browsing == 0,
-		"cross joins the game's code, for the host it is listed under, and stops browsing");
-#endif
-	check(joined_from_lobby && !strncmp(menu, "JOIN A GAME\n", 12),
-		"... as a public lobby's game (its map downloads warn); then Join's steps");
+	check(!strcmp(joined_id, "00000000000000000000000000000002") && !joined_password[0] && browsing == 0 &&
+		!strncmp(menu, "JOIN A GAME\n", 12), "cross joins the game by its listing, stops browsing; then Join's steps");
 	press(VITA_BUTTON_CIRCLE);
-#ifdef PLAY_UPSTREAM_BROWSER
 	/* a locked game: its password first */
 	to_line("Browse public games");
 	press(VITA_BUTTON_CROSS);
@@ -1199,10 +1177,9 @@ static void test_online_rows(void)
 	press(VITA_BUTTON_CROSS);
 	check(ime_password && !menu_visible, "a locked game: the keyboard for its password");
 	keyboard_closes("swordfish");
-	check(!strcmp(joined_code, "c3d4") && !strcmp(joined_password, "swordfish") && !strncmp(menu, "JOIN A GAME\n", 12),
-		"joined with the password typed");
+	check(!strcmp(joined_id, "00000000000000000000000000000003") && !strcmp(joined_password, "swordfish") &&
+		!strncmp(menu, "JOIN A GAME\n", 12), "joined with the password typed");
 	press(VITA_BUTTON_CIRCLE);
-#endif
 
 	/* hosting: the code shows on the Play page and the tab */
 	hosting = 1;
@@ -1680,7 +1657,7 @@ int main(void)
 		check(!getenv("HALO_NET_COOP_LEVEL") && !getenv("HALO_NET_COOP_DIFFICULTY") &&
 			strstr(log_text, "settings: the old co-op setting (a10) is off: co-op is hosted from Campaign"),
 			"a 1.0.3 settings.txt with a co-op level: Off (not set), halo.log says where co-op went");
-		check(!strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false") && !strcmp(getenv("HALO_NET_LOBBY_PUBLIC"), "false") &&
+		check(!strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false") &&
 			choice_of("HALO_NET_HOST_PUBLIC") == 0, "1.0.3's Online games Private: Visibility Private");
 		vita_settings_set("HALO_FRAME_CAP", "30");
 		check(!strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PUBLIC") &&
