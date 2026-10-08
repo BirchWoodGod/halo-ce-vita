@@ -32,6 +32,7 @@ runs the checks of net_fuzz_p2p_checks.
 
 #include "../../linux/src/p2p.c"
 #include "../../linux/src/p2p_crypto.c"
+#include "../../linux/src/p2p_resolver_cache.c"
 #include "net_fuzz_common.h"
 
 /* ---------- what p2p_signal.c, p2p_adhoc.c and p2p_discord.c give p2p.c */

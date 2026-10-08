@@ -30,7 +30,8 @@ game_flags="--target=i686-linux-gnu -m32 -fms-extensions -fshort-wchar -malign-d
 	-Iport/linux/src -Iport/linux/include -Iport/third_party/kcp -Iport/third_party/monocypher -Isource -Isource/cseries
 	-idirafter port/include/xdk"
 for source in port/linux/src/p2p.c port/linux/src/p2p_signal.c port/linux/src/p2p_crypto.c port/linux/src/p2p_adhoc.c \
-	port/linux/src/p2p_lobby.c port/third_party/kcp/ikcp.c port/third_party/monocypher/monocypher.c \
+	port/linux/src/p2p_lobby.c port/linux/src/p2p_resolver_cache.c port/third_party/kcp/ikcp.c \
+	port/third_party/monocypher/monocypher.c \
 	port/third_party/monocypher/monocypher-ed25519.c; do
 	$clang $game_flags -c $source -o "$out/$(basename $source .c).o"
 done

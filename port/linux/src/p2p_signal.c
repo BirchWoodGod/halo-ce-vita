@@ -845,7 +845,8 @@ static void broker_connect(struct broker *broker)
 		if (!broker->address)
 		{
 			if (!broker->failures)
-				platform_log("Internet play: cannot look up the signalling broker %s", broker->host);
+				platform_log("Internet play: cannot look up the signalling broker %s (%s)", broker->host,
+					p2p_resolve_error());
 			broker_close(broker, 1);
 			return;
 		}
@@ -1886,6 +1887,9 @@ void p2p_signal_start(void)
 				broker->port = network_short((unsigned short)atoi(colon + 1));
 				*colon = 0;
 			}
+			/* (its address kept for when looking it up fails: one of this
+			machine's own settings) */
+			p2p_resolver_cache_allow(broker->host);
 			/* connect at once */
 			broker->state_time = p2p_now() - RETRY_INTERVAL;
 			signalling.broker_count++;

@@ -372,6 +372,9 @@ void posix_random_bytes(void *buffer, posix_ulong size)
 		abort();
 }
 
+/* (posix_resolve_error's: the calling thread's last failure) */
+static __thread int resolve_failure;
+
 posix_ulong posix_resolve_ipv4(const char *host)
 {
 	struct addrinfo hints, *results;
@@ -381,10 +384,18 @@ posix_ulong posix_resolve_ipv4(const char *host)
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
-	if (getaddrinfo(host, NULL, &hints, &results) != 0)
+	resolve_failure = getaddrinfo(host, NULL, &hints, &results);
+	if (resolve_failure != 0)
 		return 0;
 	if (results && results->ai_addr && results->ai_addr->sa_family == AF_INET)
 		address = ((struct sockaddr_in *)results->ai_addr)->sin_addr.s_addr;
 	freeaddrinfo(results);
+	resolve_failure = address ? 0 : WSAHOST_NOT_FOUND;
 	return address;
+}
+
+void posix_resolve_error(char *text, int size)
+{
+	snprintf(text, (size_t)size, resolve_failure == WSAHOST_NOT_FOUND ? "no such name" : resolve_failure == WSATRY_AGAIN ?
+		"the name server did not answer" : resolve_failure ? "error %d" : "no address", resolve_failure);
 }

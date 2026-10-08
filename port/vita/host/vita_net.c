@@ -1388,23 +1388,52 @@ posix_ulong posix_local_ipv4_address(void)
 	return result ? result : adhoc_stand_in_address();
 }
 
+/* (posix_resolve_error's: the calling thread's last failure, an SCE error
+code, or 1: the network is not up) */
+static __thread int resolve_failure;
+
 posix_ulong posix_resolve_ipv4(const char *host)
 {
 	SceNetInAddr address;
-	int resolver;
+	int resolver, result;
 
+	resolve_failure = 1;
 	if (!host || !net_ready())
 		return 0;
 	if (sceNetInetPton(SCE_NET_AF_INET, host, &address) > 0)
 		return address.s_addr;
 	resolver = sceNetResolverCreate("halo", NULL, 0);
 	if (resolver < 0)
+	{
+		resolve_failure = resolver;
 		return 0;
-	/* (two tries of two seconds) */
-	if (sceNetResolverStartNtoa(resolver, host, &address, 2000000, 2, 0) < 0)
+	}
+	/* (two tries of two seconds: the p2p thread waits, with its lock let
+	go, never the game's; a failure is tried again later, and a broker's
+	last good address stands in meanwhile: p2p.c) */
+	result = sceNetResolverStartNtoa(resolver, host, &address, 2000000, 2, 0);
+	if (result < 0)
 		address.s_addr = 0;
+	resolve_failure = result < 0 ? result : address.s_addr ? 0 : 1;
 	sceNetResolverDestroy(resolver);
 	return address.s_addr;
+}
+
+void posix_resolve_error(char *text, int size)
+{
+	/* (SCE_NET_ERROR_RESOLVER_*: 0x804101DC on, psp2/net/net.h's
+	SCE_NET_RESOLVER_E* from 220) */
+	static const char *const names[] = { "internal error", "busy", "no space", "bad packet", "reserved",
+		"no DNS server", "timed out", "not supported", "bad format", "server failure", "no such name",
+		"not implemented", "the server refused", "no record", "alignment" };
+	unsigned int code = (unsigned int)resolve_failure;
+
+	if (resolve_failure == 1)
+		snprintf(text, (size_t)size, "the network is not up");
+	else if ((code & 0xFFFFFF00U) == 0x80410100U && (code & 0xFF) >= 220 && (code & 0xFF) < 220 + 15)
+		snprintf(text, (size_t)size, "%s, 0x%08X", names[(code & 0xFF) - 220], code);
+	else
+		snprintf(text, (size_t)size, "error 0x%08X", code);
 }
 
 /* ---------- ad hoc probe (HALO_ADHOC_PROBE=1)

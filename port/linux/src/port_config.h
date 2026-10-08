@@ -24,6 +24,8 @@ const char *config_string(const char *name);
 void config_folder(char *path, size_t size);
 /* a whole file, NUL terminated, or NULL; free() it */
 char *config_file_read(const char *path, size_t *size);
+/* a whole file written (replaced); 1 on success */
+int config_file_write(const char *path, const char *text, size_t size);
 /* sets a boolean setting, and writes it into config.toml (only its line
 changes); 1 on success */
 int config_write_boolean(const char *name, int value);

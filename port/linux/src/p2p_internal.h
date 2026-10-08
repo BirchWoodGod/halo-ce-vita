@@ -71,8 +71,14 @@ struct p2p_candidate
 /* the milliseconds of a monotonic clock */
 unsigned long p2p_now(void);
 /* looks up a host name (posix_resolve_ipv4), letting go of the p2p lock
-while it waits; the p2p thread's */
+while it waits; the p2p thread's. A name of internet play's own settings
+(brokers, STUN servers, relays: p2p_resolver_cache_allow) whose lookup fails
+gets the address it had the last time it was looked up (p2p_resolver_cache.c),
+if any: a lookup that works always wins */
 unsigned long p2p_resolve(const char *host);
+/* why the last p2p_resolve that returned 0 failed ("no such name", "timed
+out", "no network", "error 0x..."), for the log; the p2p thread's */
+const char *p2p_resolve_error(void);
 /* registers this executable for links of scheme (posix_register_url_scheme),
 unless it is an automated run (debug.exit_after, a hidden window, no
 renderer), which must not take the links over. The p2p thread's: it lets
@@ -342,6 +348,38 @@ written to the brokers at once; under p2p_lock */
 void p2p_lobby_quit(void);
 /* a key hash's slot */
 void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size);
+
+/* ---------- p2p_resolver_cache.c: the last good address of each name
+internet play looks up (no locks: p2p.c calls these under p2p_lock) */
+
+enum
+{
+	P2P_RESOLVER_HOST_SIZE = 128,
+	/* names kept, and the names allowed */
+	P2P_RESOLVER_CACHE_ENTRIES = 16,
+	/* seconds an address is used for after it was looked up */
+	P2P_RESOLVER_CACHE_MAXIMUM_AGE = 30 * 24 * 3600,
+};
+
+/* a name of internet play's own settings (a broker, a STUN server, a
+relay): the only ones stored or answered */
+void p2p_resolver_cache_allow(const char *host);
+int p2p_resolver_cache_allowed(const char *host);
+/* a lookup that worked (address in network byte order, now Unix seconds):
+kept; 1 if what is to be written changed */
+int p2p_resolver_cache_store(const char *host, unsigned long address, unsigned long now);
+/* the address a name had when last looked up: 1 if there is one, allowed
+and not older than P2P_RESOLVER_CACHE_MAXIMUM_AGE (now 0: any age) */
+int p2p_resolver_cache_lookup(const char *host, unsigned long now, unsigned long *address, unsigned long *stored_time);
+/* the cache file's text read (each line checked; now 0: any age): returns
+the entries taken; and written into text (returns its length) */
+int p2p_resolver_cache_load(const char *text, unsigned long now);
+int p2p_resolver_cache_save(char *text, int size);
+/* whether an address could be a broker's (not 0/8, loopback, link-local,
+multicast or reserved) */
+int p2p_resolver_cache_usable_address(unsigned long address);
+/* forgets everything (the tests') */
+void p2p_resolver_cache_reset(void);
 
 /* ---------- p2p_discord.c: rich presence and invites through the Discord
 desktop client */

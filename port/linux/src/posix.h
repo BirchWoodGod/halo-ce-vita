@@ -126,6 +126,9 @@ void posix_random_bytes(void *buffer, posix_ulong size);
 /* the IPv4 address (network byte order) of host, a name or a dotted quad,
 or 0 if it cannot be resolved; may block while a name is looked up */
 posix_ulong posix_resolve_ipv4(const char *host);
+/* why the calling thread's last posix_resolve_ipv4 that returned 0 failed,
+in a few words ("no such name", "timed out", "no DNS server", "error ...") */
+void posix_resolve_error(char *text, int size);
 
 /* ---------- UPnP (internet play, p2p.c; posix_upnp.c, with
 port/third_party/miniupnpc) */
