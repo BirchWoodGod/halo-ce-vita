@@ -13985,25 +13985,20 @@ static void hs_allocate(
 for an absent datum) would be dereferenced without a check while scripts are
 compiled or run; out-of-range indices get a zeroed sentinel (type and links
 NONE) so a crafted or damaged script tree is treated as corrupt rather than
-crashing (hs_compile.c, hs_runtime.c use this). */
-struct hs_syntax_node *halo_hs_syntax_get_checked(
-	long expression_index)
+crashing (hs_compile.c's and hs_runtime.c's hs_syntax_get, inline: only a
+missing node takes this call). */
+struct hs_syntax_node *halo_hs_syntax_sentinel(
+	void)
 {
 	static struct hs_syntax_node sentinel;
-	struct hs_syntax_node *node = hs_syntax_data ?
-		(struct hs_syntax_node *)datum_get(hs_syntax_data, expression_index) : NULL;
 
-	if (!node)
-	{
-		csmemset(&sentinel, 0, sizeof(sentinel));
-		sentinel.index = (short)NONE;
-		sentinel.type = (short)NONE;
-		sentinel.next_node_index = NONE;
-		sentinel.data = NONE;
-		return &sentinel;
-	}
+	csmemset(&sentinel, 0, sizeof(sentinel));
+	sentinel.index = (short)NONE;
+	sentinel.type = (short)NONE;
+	sentinel.next_node_index = NONE;
+	sentinel.data = NONE;
 
-	return node;
+	return &sentinel;
 }
 
 /* port: whether the scenario's stored script syntax tree is one the loader

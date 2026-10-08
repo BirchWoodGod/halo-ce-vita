@@ -122,11 +122,22 @@ struct tag_data
 long verify_tag_reference(struct tag_reference const *reference);
 void *tag_data_get_pointer(struct tag_data const *data, long offset, long size);
 void *tag_block_get_element_with_size(struct tag_block const *block, long index, long element_size);
+#ifdef HALO_LINUX
+/* port: zeros in place of an element, data or tag that is not there (a
+map's bad index: tag_groups.c), and the log of one */
+void *tag_empty_data_sized(long size);
+void tag_index_error(char const *what, long index, long count);
+#endif
 
 #if defined(HALO_RELEASE) && defined(HALO_LINUX)
 /* (port) release builds check nothing in tag_block_get_element_with_size
 (match_assert is empty): the element's address, inline - a call per
-element was ~2% of the Pi's CPU in BSP and collision walks */
+element was ~2% of the Pi's CPU in BSP and collision walks. Unchecked here
+too (a check per element cost 4% of the tick on the Pi): a map's blocks are
+checked once as it loads (tag_relocate.c: every block's elements within the
+tags, every tag reference a tag of its group), and the element indices a
+crafted map was found to use past their blocks are checked where they are
+read (object_types.c) */
 static __inline__ void *tag_block_get_element_inline(struct tag_block const *block, long index, long element_size)
 {
 	return (void *)((char *)block->address + index * element_size);
@@ -160,10 +171,30 @@ struct halo_tag_instance_layout
 };
 #endif
 #if defined(HALO_LINUX) && defined(HALO_RELEASE) && !defined(HALO_CACHE_FILES_C)
+/* (the loaded tags' count: cache_files.c) */
+extern long halo_loaded_tag_count;
 static __inline__ void *tag_get_inline(long group_tag, long tag_index)
 {
-	(void)group_tag;
-	return ((struct halo_tag_instance_layout *)global_tag_instances)[(short)tag_index].base_address;
+	struct halo_tag_instance_layout *instance;
+	short absolute_index = (short)tag_index;
+
+	/* port: a map's tag reference is untrusted: an index past the tags, or
+	a tag of another group than the one asked for (which the debug builds
+	assert on), gets the empty data (tag_groups.c) rather than memory past
+	the tags or another kind of tag read as this one */
+	if (__builtin_expect(absolute_index < 0 || absolute_index >= halo_loaded_tag_count, 0))
+	{
+		tag_index_error("tag", tag_index, halo_loaded_tag_count);
+		return tag_empty_data_sized(0x10000);
+	}
+	instance = &((struct halo_tag_instance_layout *)global_tag_instances)[absolute_index];
+	if (__builtin_expect(!instance->base_address || (instance->group_tag != group_tag &&
+		instance->parent_group_tags[0] != group_tag && instance->parent_group_tags[1] != group_tag), 0))
+	{
+		tag_index_error("tag of its group", tag_index, halo_loaded_tag_count);
+		return tag_empty_data_sized(0x10000);
+	}
+	return instance->base_address;
 }
 #define tag_get(group_tag, tag_index) tag_get_inline((group_tag), (tag_index))
 #endif
