@@ -47,6 +47,12 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # the checkout belongs to the runner's user, the container runs as
+      # root: without this, git refuses the tree ("dubious ownership") and
+      # the script's `git ls-files` fails with 128
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       # Debian's packages and SDL's source (pinned by checksum in the script)
       - uses: actions/cache@v4
         with:
