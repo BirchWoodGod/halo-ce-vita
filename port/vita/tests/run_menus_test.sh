@@ -72,7 +72,10 @@ check() { # NAME SCREENS_WANTED
 		grep -aq "ui: screen pc.mp.offline" "$log" || fail "$name" "Create Game Internet did not say internet play is off"
 		grep -aq "menus: the Halo PC pictures and text read" "$log" || fail "$name" "the Halo PC pictures were not read"
 	else
-		grep -aq "menus: OpenCE" "$log" && fail "$name" "OpenCE's screens were added without the Halo PC files"
+		grep -aq "menus: OpenCE's multiplayer screens: .* added" "$log" &&
+			fail "$name" "OpenCE's screens were added without the Halo PC files"
+		grep -aq "menus: OpenCE's multiplayer screens not added: bitmaps.map not found in " "$log" ||
+			fail "$name" "halo.log did not say why the screens are the Xbox's (bitmaps.map not found in ...)"
 		[ "$(grep -ac 'ui: screen ui.shell.main_menu.multiplayer_type_select.multiplayer_type_select_screen' "$log")" -ge 2 ] ||
 			fail "$name" "the Xbox's Multiplayer screen did not open twice"
 	fi
