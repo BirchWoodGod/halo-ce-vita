@@ -167,6 +167,7 @@ struct game_options;
 #include "memory/data.h"
 #include "networking/network_messages.h"
 #include "networking/telnet_console.h"
+#include "objects/object_lights.h"
 #include "objects/objects.h"
 #include "physics/breakable_surfaces.h"
 #include "physics/collision_usage.h"
@@ -502,6 +503,15 @@ void game_tick(
 	halo_fine_tick_begin();
 	tick_phase_begin();
 #endif
+	/* port: a data array gone out of order reported, and the lights made
+	again if it was theirs (game_state.c, object_lights.c), before anything
+	of the tick: a loaded game state's first tick, its scripts placing
+	actors, made the first light from it (Sentry NATIVE-7) */
+	game_state_check_data_arrays();
+	lights_port_recover();
+
+	/* port: a client of another's game, the host's rules (its own cheats and
+	game speed, set before it joined too, put back) */
 	cheats_network_client_enforce();
 	remove_quitting_players_from_game();
 #ifdef HALO_LINUX
@@ -604,6 +614,9 @@ void game_tick(
 	tick_phase_begin();
 #endif
 	player_effect_update();
+	/* port: and at its end, before the frame draws the lights */
+	game_state_check_data_arrays();
+	lights_port_recover();
 #ifdef HALO_LINUX
 	tick_phase_end(12, "player_effect_update");
 	tick_phase_report();
