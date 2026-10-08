@@ -38,6 +38,9 @@ BUILD = Path("build/android")
 THIRD_PARTY = BUILD / "third_party"
 # the TOML parser config.toml is read with (port/linux/src/port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
+# (from OpenCE c9ee319a) the menus' XML parser (port/linux/src/menu_files.c)
+EXPAT_DIR = Path("port/third_party/expat")
+EXPAT_SOURCES = ("xmlparse.c", "xmlrole.c", "xmltok.c")
 KCP_DIR = Path("port/third_party/kcp")
 # (from OpenCE, MrBruh's "Second hardening round") the port's zlib
 # (port/third_party/zlib/zlib_prefixed.h, 1.3.2): what inflates the maps,
@@ -423,7 +426,7 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         guest_abi, guest_code, "-std=gnu11", "-D_GNU_SOURCE", "-DHALO_LINUX_PLATFORM_LAYER", "-w", profile_flags,
         f"-include {prefix_header}", f"-include {platform_semantics_header}",
         f"-I{LINUX_DIR}/src", f"-I{LINUX_DIR}/include", f"-I{PORT_DIR}/guest/runtime",
-        f"-I{PORT_DIR}/include", f"-I{TOML_DIR}", f"-I{KCP_DIR}", f"-I{MONOCYPHER_DIR}",
+        f"-I{PORT_DIR}/include", f"-I{TOML_DIR}", f"-I{EXPAT_DIR}", f"-I{KCP_DIR}", f"-I{MONOCYPHER_DIR}",
         "-Isource -Isource/cseries",
         f"-I{SDL_DIR}/include", f"-I{gl_include}", *libc_includes, f"-idirafter {XDK_INCLUDE}",
     ])
@@ -434,6 +437,9 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         objects.append(guest_object(source, platform_cflags))
     # the settings file's parser (port/third_party/tomlc17)
     objects.append(guest_object(TOML_DIR / "tomlc17.c", platform_cflags))
+    # the menus' XML parser (port/third_party/expat; menu_files.c)
+    for name in EXPAT_SOURCES:
+        objects.append(guest_object(EXPAT_DIR / name, platform_cflags))
     # internet play's reliable streams (port/third_party/kcp; p2p.c)
     objects.append(guest_object(KCP_DIR / "ikcp.c", platform_cflags))
     # the port's zlib (map inflation: cache_files_decompress_windows.c; not
