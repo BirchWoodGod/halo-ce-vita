@@ -182,7 +182,7 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_start_delay <seconds>` | The lobby's countdown once they are in (default 10). |
 | `sv_postgame <seconds>` | How long the scores are shown (default 10). |
 | `sv_end_empty <seconds>` | A game that nobody is in ends after this (default 30; 0: never). |
-| `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle. `init.txt` only. |
+| `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby. 0 (the default): no downloads. |
 | `sv_port <port>` | Internet play's UDP port (default 2302). `init.txt` only. |
 | `sv_public_address <ip>[:port]` | The address the internet reaches the server at, if it cannot find it itself. `init.txt` only. |
@@ -257,15 +257,17 @@ user to type commands.
 
 The steps are the same as on a PC, with the Pi's build of the server.
 
-- Use a Pi 4 with 2 GB of memory or more. The server uses about 100 MB of
-  memory, and the game's map cache in `saves/` about 800 MB of storage.
+- Any Pi 4 has the memory: the server used 92-95 MB with four players in
+  multiplayer and about 117 MB in co-op. The game's map cache in `saves/`
+  takes about 800 MB of storage.
   Keep the server's folder on the SD card or, better, a USB SSD.
 - Connect the Pi by Ethernet, not Wi-Fi.
-- The server with four players used under 2% of one core of an AMD Ryzen 9
-  7950X. A Pi 4 core is about five times slower for this code: expect about
-  10% of one core with four players, more with sixteen, and well under 2%
-  while nobody is connected. (Measured on the PC only: see the commit that
-  added the server.)
+- On an AMD Ryzen 9 7950X the server used 1.8% of one core with four
+  players on Blood Gulch (shooting each other, too), 1.2% in co-op on The
+  Truth and Reconciliation with one player, and 0.3% with nobody connected.
+  A Pi 4 core is about four to six times slower for this code: expect about
+  10% of one core with four players, more with sixteen, and 1 to 2% while
+  nobody is connected. (Measured on the PC only.)
 
 ## Port forwarding
 
@@ -280,11 +282,18 @@ port is needed from the internet.
 - If the router uses UPnP, the server can ask it for the forwarding itself
   (`network.allow_upnp` in `config.toml`, on by default) when a player
   connects. A fixed forwarding is more reliable.
-- If the server cannot work out its public address (some double NAT), give
-  it with `sv_public_address`.
+- The server offers the address and port the internet sees it at (learned
+  from STUN). A router that keeps the port when it forwards (most do) needs
+  nothing more. A router that changes the port of what goes out (a
+  "symmetric" NAT) hides the forwarded port: give the server its address
+  with `sv_public_address <your public IP>:2302`.
 - A relay (`sv_relay`, `port/relay`) is only for players whose network
   cannot reach the server directly. With the port forwarded, players
-  connect directly.
+  connect directly, even players behind a symmetric NAT (a mobile network):
+  in the tests, Vitas behind symmetric NATs connected straight to a server
+  whose port was forwarded; with the server's router symmetric as well, they
+  went through the relay until `sv_public_address` named the forwarded
+  port, and then connected directly.
 - On a LAN, Vitas with Connection set to System Link find the server in
   their System Link list without the internet (the game's ports 5150 and
   5151 on the LAN).
@@ -382,6 +391,11 @@ standing in for Vitas in network namespaces, with no internet:
 - `dedicatedpc`: PC builds are refused (by code, browsing, on the LAN, and
   one that tries anyway).
 - `dedicatedban`: `sv_ban`, a restart, and `sv_unban`.
+- `dedicatedcoop`: co-op on The Truth and Reconciliation with two Vitas,
+  and the empty round ended.
+
+`HALO_TEST_SYMMETRIC_NAT=joiners` (or `all`, with
+`HALO_TEST_SERVER_PUBLIC=1`) makes the routers' NAT symmetric.
 
 ```
 python3 configure.py --linux-d3d gxm-null --linux-net-vita --lto off --pgo off

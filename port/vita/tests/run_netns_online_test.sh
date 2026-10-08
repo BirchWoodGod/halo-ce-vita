@@ -120,12 +120,20 @@
 #            (HALO_NETWORK_TEST_CROSS_LINE=1, as a modified PC build would):
 #            refused by the server (the Vitas' join token); a Vita build on
 #            its LAN plays, so the LAN test proves something
+#   dedicatedcoop the server hosts co-op (sv_coop a30, public), two Vita builds
+#            join (by code, from the browser) and play the level with the
+#            server running its AI and scripts; once they have left, the
+#            server ends the empty round (sv_end_empty) and waits in its lobby
 #   dedicatedban the server and a Vita joiner by code: sv_ban on the server's
 #            console drops it, it is refused joining again (bans.txt), the
 #            server restarted (a new code) still refuses it, and sv_unban
 #            lets it in again
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
+#   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
+#                    (relay mode's), or every one but the host's (the
+#                    server's); HALO_TEST_SERVER_PUBLIC=1 gives the server its
+#                    forwarded address (sv_public_address 10.10.1.2:2302)
 #   HALO_TEST_SERVER_STATS=1  the server's CPU and memory every 5 s
 #                    (server/stats.log); HALO_TEST_SERVER_INIT its init.txt
 #                    instead of the test's; HALO_TEST_JOIN_DELAY seconds it
@@ -176,6 +184,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicated ] && seconds=${HALO_TEST_SECONDS:-260}
 [ "$mode" = dedicatedpc ] && seconds=${HALO_TEST_SECONDS:-120}
 [ "$mode" = dedicatedban ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
@@ -231,7 +240,12 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 	in_ns "$router" ip link set "l_$name" up
 	in_ns "$router" sysctl -qw net.ipv4.ip_forward=1
 	# (relay mode: a symmetric NAT, a new random port for every destination)
-	in_ns "$router" iptables -t nat -A POSTROUTING -o "w_$name" -j MASQUERADE $([ "$mode" = relay ] && echo --random-fully)
+	# (HALO_TEST_SYMMETRIC_NAT: all, every side's; joiners, all but the host's)
+	local symmetric=
+	[ "$mode" = relay ] && symmetric=--random-fully
+	[ "${HALO_TEST_SYMMETRIC_NAT:-}" = all ] && symmetric=--random-fully
+	[ "${HALO_TEST_SYMMETRIC_NAT:-}" = joiners ] && [ "$name" != host ] && symmetric=--random-fully
+	in_ns "$router" iptables -t nat -A POSTROUTING -o "w_$name" -j MASQUERADE $symmetric
 	# (a datagram from outside that no mapping expects is dropped unseen, as a
 	# home router does; else the kernel keeps a record of it as a flow to the
 	# router itself, and the machine's own datagram to that peer then gets a
@@ -934,7 +948,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban)
+dedicated|dedicatedpc|dedicatedban|dedicatedcoop)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
 	[ "$mode" = dedicatedpc ] && [ -z "$pc" ] && { echo "dedicatedpc needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
@@ -1013,6 +1027,16 @@ sv_postgame 5
 sv_end_empty 20
 sv_port 2302
 INIT
+	if [ "$mode" = dedicatedcoop ]; then
+		cat > "$out/server/data/init.txt" <<'INIT'
+sv_name "Netns Co-op"
+sv_coop a30 1
+sv_public 1
+sv_start_delay 5
+sv_end_empty 10
+INIT
+	fi
+	[ "${HALO_TEST_SERVER_PUBLIC:-0}" = 1 ] && echo "sv_public_address 10.10.1.2:2302" >> "$out/server/data/init.txt"
 	# (HALO_TEST_SERVER_INIT: another init.txt, e.g. one map for measuring)
 	[ -n "${HALO_TEST_SERVER_INIT:-}" ] && cp "$HALO_TEST_SERVER_INIT" "$out/server/data/init.txt"
 	run_server server
@@ -1041,7 +1065,8 @@ INIT
 				HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:$((i + 1)); join_pids="$join_pids $last_pid"
 			sleep 2
 		done
-		sleep 60
+		# (the console once the first joiner is back from its leave, HALO_TEST_REJOIN)
+		sleep $((rejoin > 0 ? rejoin + 50 : 60))
 		console sv_players
 		console sv_say hello from the netns test
 		console sv_status
@@ -1051,7 +1076,7 @@ INIT
 		grep -aq "^server: the game starts: slayer on bloodgulch" "$sl" || fail "the server never started Blood Gulch"
 		grep -aq "^server: the game starts: slayer on chillout" "$sl" || fail "the server never went on to Chill Out (its cycle)"
 		grep -aq "^server: the game ends (the time limit)" "$sl" || fail "sv_timelimit never ended a game"
-		grep -aq "^server: #0 " "$sl" || fail "sv_players listed no player"
+		grep -aqE "^server: #[0-9]+ " "$sl" || fail "sv_players listed no player"
 		grep -aq "Server: hello from the netns test" "$sd" || fail "sv_say was not sent"
 		grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log" || fail "the server never listed its game"
 		grep -aq 'network test: the public games list "Netns Dedicated" \[dedicated\]' "$out/joiner2/run.log" 2>/dev/null ||
@@ -1116,6 +1141,33 @@ INIT
 		grep -aq "server added machine @ 192.168.1.5:" "$sd" && fail "the server added the PC that tried anyway"
 		grep -aq "precaching map 'levels.test" "$out/pc_cross/data/debug.txt" && fail "the PC that tried anyway loaded the game"
 		;;
+	dedicatedcoop)
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=$((seconds - 50)) HALO_TEST_INPUT=bot:2:look; j1=$last_pid
+		sleep 5
+		side d2 10.10.22 192.168.22
+		run_copy joiner2 "$d2_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			HALO_NET_PLAYER_NAME=Vita2 HALO_EXIT_AFTER=$((seconds - 50)) HALO_TEST_INPUT=bot:3:look; j2=$last_pid
+		wait $j1 $j2 2>/dev/null
+		# (both gone: the round ends after sv_end_empty, 10 s)
+		for i in $(seq 1 30); do grep -aq "^server: nobody is left" "$sl" && break; sleep 1; done
+		sleep 5
+		console sv_status
+		sleep 2
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"; grep -aE "^server: (co-op|the game|player|nobody|.*in the lobby)" "$sl" | head -12
+		grep -aq "^server: the game starts: co-op on a30" "$sl" || fail "the server did not start co-op on a30"
+		grep -aq 'network test: the public games list "Netns Co-op" \[dedicated\]' "$out/joiner2/run.log" ||
+			fail "the co-op game was not in the server browser (sv_public 1)"
+		for name in joiner joiner2; do
+			both=$(grep -a "network test: tick" "$out/$name/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+			echo "$name's seconds with both players alive: $both"
+			[ "$both" -ge 15 ] || fail "$name saw both players alive for $both s (15 wanted)"
+		done
+		grep -aq "co-op: skipping the cutscene" "$sd" || fail "the cutscene was not skipped by the players' votes"
+		grep -aq "^server: nobody is left: back to the lobby" "$sl" || fail "the empty co-op round did not end"
+		grep -aq "^server: .*in the lobby" "$sl" || fail "the server was not waiting in its lobby"
+		;;
 	dedicatedban)
 		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
 			HALO_NETWORK_TEST_RETRY=20 HALO_NET_PLAYER_NAME=Banned HALO_TEST_INPUT=bot:2 HALO_EXIT_AFTER=$((seconds - 10))
@@ -1165,7 +1217,7 @@ INIT
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban" >&2
+	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop" >&2
 	exit 2
 	;;
 esac
