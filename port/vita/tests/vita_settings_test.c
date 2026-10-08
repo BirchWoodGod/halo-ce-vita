@@ -1218,7 +1218,7 @@ static void test_variables_kept(void)
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
 		"HALO_BUTTON_ICONS", "HALO_AI_PERCEPTION_LOD", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
-		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_FOURTH_CORE",
+		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_CPU3_AUX",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1254,39 +1254,47 @@ static void test_variables_kept(void)
 	}
 }
 
-/* Fourth core helpers (Graphics > Advanced; vita_fourth_core.c): Off by
-default and in every profile, On saved and in the environment the next
-start reads, a restart's row, the profile left as it was; back Off */
+/* Fourth core helpers (Graphics > Advanced; vita_fourth_core.c): Bruno
+Santana's levels and variable (HALO_CPU3_AUX: Off, Audio, All async), Off
+by default and in no profile, a level saved and in the environment the next
+start reads, a restart's row, the profile left as it was; his build's
+settings.txt line read; back Off */
 static void test_fourth_core(void)
 {
-	struct setting *row = setting_named("HALO_FOURTH_CORE");
+	struct setting *row = setting_named("HALO_CPU3_AUX");
 	int profile = settings[0].choice;
 	char line[128];
 
-	check(row && row->page == PAGE_GRAPHICS_ADVANCED && row->restart && row->count == 2 &&
-		!strcmp(row->values[row->choice], "0") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "On") &&
-		getenv("HALO_FOURTH_CORE") && !strcmp(getenv("HALO_FOURTH_CORE"), "0"),
-		"Fourth core helpers: on Graphics > Advanced, Off by default (HALO_FOURTH_CORE=0), after a restart");
+	check(row && row->page == PAGE_GRAPHICS_ADVANCED && row->restart && row->count == 3 &&
+		!strcmp(row->values[row->choice], "0") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
+		!strcmp(row->names[2], "All async") && !strcmp(row->values[1], "1") && !strcmp(row->values[2], "2") &&
+		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "0"),
+		"Fourth core helpers: on Graphics > Advanced, Off, Audio, All async; Off by default (HALO_CPU3_AUX=0), after a restart");
 	check(strstr(row->help, "4th core") && strstr(row->help, "CapUnlocker"), "Fourth core helpers: the help names the plugin");
 	{
 		int index, in_profile = 0;
 
 		for (index = 0; index < PROFILE_ROWS; index++)
-			in_profile |= !strcmp(profile_variables[index], "HALO_FOURTH_CORE");
+			in_profile |= !strcmp(profile_variables[index], "HALO_CPU3_AUX");
 		check(!in_profile, "no profile sets Fourth core helpers");
 	}
 	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 9)
 		press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_FOURTH_CORE"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_FOURTH_CORE=1\n") &&
-		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< On  ") &&
+	check(!strcmp(getenv("HALO_CPU3_AUX"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=1\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< Audio >") &&
 		settings[0].choice == profile && restart_pending,
-		"Fourth core helpers On: saved, in the environment, the profile unchanged, a restart asked for");
+		"Fourth core helpers Audio: saved, in the environment, the profile unchanged, a restart asked for");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CPU3_AUX"), "2") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=2\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< All async  "),
+		"Fourth core helpers All async: the last");
 	vita_settings_load();
-	check(!strcmp(setting_named("HALO_FOURTH_CORE")->values[setting_named("HALO_FOURTH_CORE")->choice], "1") &&
-		!strcmp(getenv("HALO_FOURTH_CORE"), "1"), "Fourth core helpers On: read back from settings.txt");
+	check(!strcmp(setting_named("HALO_CPU3_AUX")->values[setting_named("HALO_CPU3_AUX")->choice], "2") &&
+		!strcmp(getenv("HALO_CPU3_AUX"), "2"), "Fourth core helpers All async: read back from settings.txt (as Bruno Santana's build writes it)");
 	press(VITA_BUTTON_LEFT);
-	check(!strcmp(getenv("HALO_FOURTH_CORE"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_FOURTH_CORE=0\n") &&
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CPU3_AUX"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=0\n") &&
 		settings[0].choice == profile, "Fourth core helpers back Off");
 	while (menu_selected > 2)
 		press(VITA_BUTTON_UP);

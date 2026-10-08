@@ -394,18 +394,19 @@ static void display_callback(const void *callback_data)
 			log_line("gxm: display queue thread priority -> 64: 0x%08x (now %d, affinity 0x%x)", (unsigned)result,
 				info.currentPriority, (unsigned)info.currentCpuAffinityMask);
 		}
-		/* Fourth core helpers: off the game's cores too, where the system
-		allows it (vita_fourth_core.c). It wakes once a frame, when the GPU
-		is done, to name the next buffer; at 64 it comes before the game's
-		threads wherever it runs, and on cores 0-2 it puts one of them off
-		each time. HALO_FOURTH_CORE_DISPLAY=0 leaves it there (a test) */
+		/* Fourth core helpers, All async: off the game's cores too, where
+		the system allows it (vita_fourth_core.c; as in Bruno Santana's
+		modified build). It wakes once a frame, when the GPU is done, to
+		name the next buffer; at 64 it comes before the game's threads
+		wherever it runs, and on cores 0-2 it puts one of them off each
+		time. HALO_FOURTH_CORE_DISPLAY=0 leaves it there (a test) */
 		{
 			const char *setting = getenv("HALO_FOURTH_CORE_DISPLAY");
 
 			if (setting && atoi(setting) == 0)
 				vita_host_thread_watch("display queue");
 			else
-				vita_host_fourth_core_join("display queue");
+				vita_host_fourth_core_join("display queue", 2);
 		}
 	}
 	/* (the GPU has finished the frame: frame_timing) */
@@ -1156,7 +1157,7 @@ static int shader_sweep_thread(SceSize size, void *argument)
 	(void)size;
 	(void)argument;
 	/* (Fourth core helpers: removing files is nothing a frame waits for) */
-	vita_host_fourth_core_join("shader cache clean-up");
+	vita_host_fourth_core_join("shader cache clean-up", 2);
 	if (vshc_sweep_pending(&memory_card, SHADER_PARENT, SHADER_NAME))
 	{
 		shader_sweep.reads = __atomic_load_n(&file_reads, __ATOMIC_RELAXED);
@@ -1489,7 +1490,7 @@ static void shader_compiler_thread(void *unused)
 {
 	(void)unused;
 	/* (Fourth core helpers: the worker never waits for a compile) */
-	vita_host_fourth_core_join("shader compiler");
+	vita_host_fourth_core_join("shader compiler", 2);
 	for (;;)
 	{
 		struct shader_job *job;

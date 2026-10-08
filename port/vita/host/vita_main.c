@@ -871,7 +871,7 @@ static int log_thread(SceSize arguments_size, void *arguments)
 	(void)arguments;
 	/* (Fourth core helpers: the lines wait in the ring; a game's thread
 	writes them itself only when the ring is full) */
-	vita_host_fourth_core_join("log");
+	vita_host_fourth_core_join("log", 2);
 	for (;;)
 	{
 		sceKernelWaitSema(log_semaphore, 1, NULL);

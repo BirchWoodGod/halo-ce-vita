@@ -1112,6 +1112,7 @@ static BOOL frame_locked_mixing = FALSE;
 void vita_host_pin_current_thread(int core) __attribute__((weak));
 #ifdef HALO_VITA
 int vita_host_fourth_core_move(const char *role);
+int vita_host_fourth_core_join(const char *role, int level);
 void vita_host_thread_watch(const char *role);
 #endif
 
@@ -1130,10 +1131,12 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 		HALO_AUDIO_CORE=0-2 pins it (default -1: left to the system; on
 		core 1, with the render worker, the user heard crackle in the b30
 		fight, while unpinned it inflated the tick's sound time).
-		HALO_AUDIO_CORE=3: the Vita's fourth core, where the system allows
-		it (vita_fourth_core.c; a test: the game waits for the mixer's lock,
-		and the system's processes there run first - the sound mixer's line
-		says how late the device's calls came) */
+		HALO_AUDIO_CORE=3, or without HALO_AUDIO_CORE Fourth core helpers
+		at Audio or All async: the Vita's fourth core, where the system
+		allows it (vita_fourth_core.c; as in Bruno Santana's modified build.
+		The game waits for the mixer's lock, and the system's processes
+		there run too: the sound mixer's line says how late the device's
+		calls came and how long the game waited) */
 		pinned = 1;
 		if (vita_host_pin_current_thread)
 		{
@@ -1145,6 +1148,8 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 #ifdef HALO_VITA
 			if (core == 3)
 				vita_host_fourth_core_move("sound mixer");
+			else if (!setting)
+				vita_host_fourth_core_join("sound mixer", 1);
 			else
 				vita_host_thread_watch("sound mixer");
 #endif

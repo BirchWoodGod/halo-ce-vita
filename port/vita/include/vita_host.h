@@ -41,12 +41,14 @@ int vita_host_thread_start_priority(const char *name, void (*function)(void *), 
 
 /* ---------- the fourth core (port/vita/host/vita_fourth_core.c) */
 
-/* Fourth core helpers is on (HALO_FOURTH_CORE, read at start-up) */
-int vita_host_fourth_core_wanted(void);
+/* Fourth core helpers' level (HALO_CPU3_AUX, read at start-up): 0 off,
+1 audio, 2 all async */
+int vita_host_fourth_core_level(void);
 /* the calling thread onto the fourth core (affinity 0x80000) if Fourth core
-helpers is on and the system allows it: 3 when it moved, -1 when it stays
-where it was; halo.log says which, naming it `role` */
-int vita_host_fourth_core_join(const char *role);
+helpers is at `level` or above and the system allows it (a kernel plugin
+such as CapUnlocker): 3 when it moved, -1 when it stays where it was;
+halo.log says which, naming it `role` */
+int vita_host_fourth_core_join(const char *role, int level);
 /* the same whatever the setting (HALO_AUDIO_CORE=3) */
 int vita_host_fourth_core_move(const char *role);
 /* the calling thread's run time logged with the frame timing, as `role` */

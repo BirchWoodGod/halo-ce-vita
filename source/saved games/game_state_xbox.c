@@ -312,8 +312,8 @@ file is written and read as on the Xbox. */
 xbox_files.c's reads do the same) */
 void memory_watch_prepare_write(void *address, unsigned long size);
 /* (port/vita/host/vita_fourth_core.c: the writer on the fourth core when
-Fourth core helpers is on and the system allows it) */
-int vita_host_fourth_core_join(const char *role);
+Fourth core helpers is All async and the system allows it) */
+int vita_host_fourth_core_join(const char *role, int level);
 #endif
 void platform_log(const char *format, ...);
 
@@ -350,7 +350,7 @@ static void *game_state_writer_thread(
 	/* (late on a busy fourth core costs only the wait of the next
 	checkpoint, a revert or a load for this write, which takes a second of
 	the memory card's time already) */
-	vita_host_fourth_core_join("checkpoint writer");
+	vita_host_fourth_core_join("checkpoint writer", 2);
 #endif
 	for (;;)
 	{

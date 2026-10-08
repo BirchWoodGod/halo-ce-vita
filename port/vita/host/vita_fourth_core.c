@@ -13,29 +13,32 @@ Vita3K refuses it too (SCE_KERNEL_ERROR_ILLEGAL_CPU_AFFINITY_MASK). So each
 helper asks, reads its mask back, and stays where it was when refused or
 given another mask.
 
-"Fourth core helpers" (HALO_FOURTH_CORE=1, Graphics > Advanced; read at
-start-up) moves work no frame waits for: the checkpoint writer, the shader
-compiler's background compiles, the old shader cache's clean-up and the
-log's writer; and GXM's display queue thread, which does little but at
-priority 64 puts one of the game's threads off each time it wakes (a
-community build moved it to the fourth core with CapUnlocker;
-HALO_FOURTH_CORE_DISPLAY=0 leaves it on cores 0-2). The system's processes
-share the fourth core (about 10-15% of it while a game plays, as reported
-when the plugin came out): a helper there is late at worst. The game's
-thread, the render worker and the tick stay on cores 0-2. Two more, as
-tests of their own: HALO_AUDIO_CORE=3 puts the sound mixer there (the game
-waits for the mixer's lock, and a late mix crackles: the sound mixer's line
-says how late the device's calls came), and HALO_FOURTH_CORE_CACHE=1 the
-cache file thread, which reads the map's textures and sounds (the game
-waits for it while it loads, and a late sound starts late).
+"Fourth core helpers" (HALO_CPU3_AUX, Graphics > Advanced; read at
+start-up) has the levels of Bruno Santana's modified build, whose setting
+this follows (he found the fourth core usable with CapUnlocker, and the
+whole tick there too much for it: the fourth core above 90% and the game at
+10-15 FPS). Off. Audio (1): the sound mixer (SDL's audio thread) there.
+All async (2): the mixer and the work no frame waits for each time - GXM's
+display queue thread, which does little but at priority 64 puts one of the
+game's threads off each time it wakes (HALO_FOURTH_CORE_DISPLAY=0 leaves
+it on cores 0-2, a test), the cache file thread (the map's texture and
+sound reads), the map decompression's copy, the checkpoint writer, the
+shader compiler's background compiles, the old shader cache's clean-up and
+the log's writer. The system's processes share the fourth core (about
+10-15% of it while a game plays, as reported when the plugin came out): a
+helper there is late at worst - a sound read or a mix late, the reason the
+sound mixer's line says how late the audio device's calls came and how
+long the game waited for the mixer's lock. The game's thread, the render
+worker and the tick stay on cores 0-2. HALO_AUDIO_CORE (0-3) places the
+mixer whatever the level.
 
 The run times: the threads named here (the helpers and the game's busy
 threads: the game thread, the render worker, the tick, the mixer, the
 display queue) have their kernel run time (runClocks, microseconds) logged
 with each frame-timing line (Performance logging) as milliseconds a frame,
 with the core each last ran on, and each core's busy share from the
-kernel's idle clocks, the fourth core's included (vita_cpu.c's are the
-first three, for the overlay).
+kernel's idle clocks, the fourth core's included (vita_cpu.c's, once a
+second, are the overlay's).
 */
 
 #include <psp2/kernel/cpu.h>
@@ -68,18 +71,21 @@ static SceKernelSystemInfo previous_system;
 static unsigned long long previous_report;
 static int have_previous_system;
 
-/* Fourth core helpers: on (HALO_FOURTH_CORE=1, read once) */
-int vita_host_fourth_core_wanted(void)
+/* Fourth core helpers' level: 0 off, 1 audio, 2 all async (HALO_CPU3_AUX,
+read once) */
+int vita_host_fourth_core_level(void)
 {
-	static int wanted = -1;
+	static int level = -1;
 
-	if (wanted < 0)
+	if (level < 0)
 	{
-		const char *setting = getenv("HALO_FOURTH_CORE");
+		const char *setting = getenv("HALO_CPU3_AUX");
 
-		wanted = setting && atoi(setting) != 0;
+		level = setting ? atoi(setting) : 0;
+		if (level < 0 || level > 2)
+			level = level < 0 ? 0 : 2;
 	}
-	return wanted;
+	return level;
 }
 
 static int watch(const char *role, int fourth)
@@ -153,20 +159,17 @@ int vita_host_fourth_core_move(const char *role)
 	return -1;
 }
 
-/* the calling thread onto the fourth core if Fourth core helpers is on */
-int vita_host_fourth_core_join(const char *role)
+/* the calling thread onto the fourth core if Fourth core helpers is at
+`level` or above */
+int vita_host_fourth_core_join(const char *role, int level)
 {
-	if (!vita_host_fourth_core_wanted())
+	if (vita_host_fourth_core_level() < level)
 	{
-		static int said;
-		char message[160];
+		char message[200];
 
-		if (!__atomic_exchange_n(&said, 1, __ATOMIC_ACQ_REL))
-		{
-			snprintf(message, sizeof(message), "fourth core: helpers off (Graphics > Advanced > Fourth core helpers): "
-				"%s and the others stay on cores 0-2", role);
-			vita_host_log(message);
-		}
+		snprintf(message, sizeof(message), "fourth core: %s stays on cores 0-2 (Graphics > Advanced > Fourth core "
+			"helpers: %s)", role, vita_host_fourth_core_level() ? "Audio" : "Off");
+		vita_host_log(message);
 		watch(role, 0);
 		return -1;
 	}
