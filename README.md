@@ -314,7 +314,7 @@ it is).
 - **Multiplayer**: the network (**Connection**: Same Wi-Fi, Ad hoc or
   Online), and with Ad hoc the room and **Join the room** (the system's
   dialog joins its group). Hosting and joining are in the game's own
-  Multiplayer menu ("PC multiplayer menus" above, or the Xbox's System
+  Multiplayer menu ("Online play: Halo PC files" above, or the Xbox's System
   Link); without the Halo PC files, online, **Join with a code** types a
   host's code here. Your game's code and what the game is doing show under
   the rows (see [port/vita/README.md](port/vita/README.md#multiplayer)).

@@ -312,7 +312,7 @@ PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
 **The game's Multiplayer menu.** Hosting and joining are in the game's own
 menus. With Halo PC's `bitmaps.map` and `loc.map` in the maps folder (from
 MCC's `halo1/maps/custom_edition/` or a Custom Edition install: see the main
-README's "PC multiplayer menus"), the main menu's **Multiplayer** opens the
+README's "Online play: Halo PC files"), the main menu's **Multiplayer** opens the
 PC version's Multiplayer screen, OpenCE's menus:
 
 | Item | What it does |
