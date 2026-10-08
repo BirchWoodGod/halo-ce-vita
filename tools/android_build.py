@@ -186,6 +186,18 @@ def fetch_third_party() -> None:
                        check=True)
 
 
+def _compiler_include_dir(cc: str) -> Optional[Path]:
+    """the guest compiler's own headers (arm_neon.h and the other
+    intrinsics), which -nostdinc leaves out with the host's C library"""
+    try:
+        resource_dir = subprocess.run([cc, "-print-resource-dir"], check=True, capture_output=True,
+                                      text=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    include = Path(resource_dir) / "include"
+    return include if resource_dir and include.is_dir() else None
+
+
 def _musl_sources() -> List[Path]:
     src = MUSL_DIR / "src"
     result = set()
@@ -348,6 +360,13 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         f"-isystem {libc_include}", f"-isystem {arch}", f"-isystem {MUSL_DIR}/arch/generic",
         f"-isystem {MUSL_DIR}/include",
     ]
+    # the compiler's own headers after musl's, so that they never stand in
+    # for the C library's (stddef.h, stdint.h ...) but the intrinsics are
+    # there: the sound mixer's NEON resampling (dsound_sdl.c, arm_neon.h)
+    compiler_include = _compiler_include_dir(guest_cc)
+    if compiler_include is None:
+        sys.exit(f"cannot find the headers of {guest_cc} (-print-resource-dir) for the Android guest")
+    libc_includes.append(f"-idirafter {compiler_include}")
     guest_abi = " ".join(GUEST_ABI_FLAGS + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []))
     guest_code = " ".join(GUEST_CODE_FLAGS)
     tool_implicit = [Path("tools/android_asm_convert.py"), *generated_headers]
