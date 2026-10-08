@@ -72,10 +72,11 @@
 #            (online; HALO_TEST_COOP_LAN=1: system link on one LAN, online
 #            off); each copy runs its HALO_TEST_COOP_HOST_COMMANDS /
 #            HALO_TEST_COOP_JOIN_COMMANDS (main.c's HALO_TEST_COMMANDS: skip
-#            votes, loading zones, kills, game_won); the logs are checked by
-#            the caller. HALO_TEST_COOP_JOINERS: how many join (1; up to
-#            network.coop_players, 4 on the Vitas: each must see every
-#            player alive at once), HALO_TEST_COOP_STAGGER seconds apart
+#            votes, loading zones, kills, game_won); the rest of the logs
+#            are checked by the caller. Each joiner must see every player
+#            alive at once for 15 s. HALO_TEST_COOP_JOINERS: how many join
+#            (1; up to network.coop_players, 4 on the Vitas),
+#            HALO_TEST_COOP_STAGGER seconds apart
 #            (1; past the host's start, HALO_NETWORK_TEST_START 20, a late
 #            join); HALO_TEST_COOP_HOST_ENV: more for the host
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
@@ -156,7 +157,16 @@ cpu_c=${cpu_b#* }
 cpu_b=${cpu_b%% *}
 mkdir -p "$out"
 pids=
-cleanup() { for pid in $pids; do kill "$pid" 2>/dev/null; done; wait 2>/dev/null; }
+# (config_kept: config.toml beside the build as it was before a mode that
+# changes it, put back at the end: coopmenuonline)
+config_kept=
+cleanup() {
+	for pid in $pids; do kill "$pid" 2>/dev/null; done; wait 2>/dev/null
+	if [ -n "$config_kept" ]; then
+		config=$(dirname "$vita")/config.toml
+		if [ -f "$config_kept" ]; then cp "$config_kept" "$config"; else rm -f "$config"; fi
+	fi
+}
 trap cleanup EXIT
 
 # ---- the network: "internet" here (198.51.100.1: broker and STUN), a NAT
@@ -644,15 +654,16 @@ coop)
 	echo "--- joiner"; cat "$out/joiner.summary"
 	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $two"
-	if [ "$joiners" -gt 1 ]; then
-		# (every joiner played, and the seconds all of them were alive at once)
-		pattern=$(for i in $(seq 0 "$joiners"); do printf 'player [0-9]+: \\(.*'; done)
-		for name in $names; do
-			all=$(grep -a "network test: tick" "$out/$name/run.log" | grep -aEc "$pattern")
-			echo "$name's seconds with all $((joiners + 1)) players alive: $all"
-			[ "$all" -ge 15 ] || fail "$name saw all $((joiners + 1)) players alive for $all s (15 wanted)"
-		done
-	fi
+	# (every joiner played, one alone too: the seconds all of them were alive
+	# at once. On a10 the host leaves the cryo tube first, on Easy and Normal
+	# once the bot has looked around and pressed X, and only then does a
+	# joiner spawn: HALO_TEST_SECONDS 180 leaves about a minute)
+	pattern=$(for i in $(seq 0 "$joiners"); do printf 'player [0-9]+: \\(.*'; done)
+	for name in $names; do
+		all=$(grep -a "network test: tick" "$out/$name/run.log" | grep -aEc "$pattern")
+		echo "$name's seconds with all $((joiners + 1)) players alive: $all"
+		[ "$all" -ge 15 ] || fail "$name saw all $((joiners + 1)) players alive for $all s (15 wanted)"
+	done
 	# (a co-op game is private unless chosen: network.coop_public, OpenCE's)
 	if [ "${HALO_TEST_COOP_LAN:-0}" != 1 ] && grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log"; then
 		fail "the co-op game was listed in the public games (it is private unless chosen)"
@@ -662,7 +673,12 @@ coopmenuonline)
 	# co-op from the campaign's menus, online: the host goes Campaign, a new
 	# profile, The Pillar of Autumn, Heroic and Y (Play co-op), and in the
 	# waiting screen X makes the game public (network.coop_public); the
-	# joiner finds it in the server browser and joins it (network test)
+	# joiner finds it in the server browser and joins it (network test).
+	# X also writes coop_public = true to config.toml beside the build,
+	# which would make every later co-op game of that build public (coop's
+	# check that it is private unless chosen): the file is put back after
+	config_kept=$out/config.toml.kept
+	cp "$(dirname "$vita")/config.toml" "$config_kept" 2>/dev/null
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
 		"HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y wait:150:6000 x" \
 		"HALO_TEST_COMMANDS=L60:@vote"; host_pid=$last_pid
