@@ -27,6 +27,10 @@ void decals_stress_update(void);
 void particle_systems_stress_update(void);
 
 void vita_host_pin_current_thread(int core) __attribute__((weak));
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c: its run time in halo.log) */
+void vita_host_thread_watch(const char *role);
+#endif
 void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
 int halo_trace_active(void) __attribute__((weak));
 /* (the Vita's device, d3d8_gxm.c: waits for the frames the GPU has not drawn yet) */
@@ -105,6 +109,9 @@ static void *tick_thread(void *unused)
 
 		vita_host_pin_current_thread(core >= 0 && core <= 2 ? core : 2);
 	}
+#ifdef HALO_VITA
+	vita_host_thread_watch("tick");
+#endif
 	halo_epoch_register_mutator();
 	for (;;)
 	{

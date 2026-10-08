@@ -659,6 +659,7 @@ static int game_thread(SceSize arguments_size, void *arguments_data)
 
 	(void)arguments_size;
 	(void)arguments_data;
+	vita_host_thread_watch("game");
 	/* (above the game's threads, which spin at the default priority
 	while they wait on each other: at their priority it never ran) */
 	{
@@ -702,10 +703,18 @@ int main(int argc, char **argv)
 	memset(&init, 0, sizeof(init));
 	memset(&boot, 0, sizeof(boot));
 	sceAppUtilInit(&init, &boot);
-	scePowerSetArmClockFrequency(444);
-	scePowerSetBusClockFrequency(222);
-	scePowerSetGpuClockFrequency(222);
-	scePowerSetGpuXbarClockFrequency(166);
+	/* the clocks the game needs as floors: raised to them, never lowered
+	from more (a 500 MHz profile of PSVshell or another overclocking plugin
+	stays; 444/222/222/166 are the system's highest otherwise) - from
+	Bruno Santana's modified build */
+	if (scePowerGetArmClockFrequency() < 444)
+		scePowerSetArmClockFrequency(444);
+	if (scePowerGetBusClockFrequency() < 222)
+		scePowerSetBusClockFrequency(222);
+	if (scePowerGetGpuClockFrequency() < 222)
+		scePowerSetGpuClockFrequency(222);
+	if (scePowerGetGpuXbarClockFrequency() < 166)
+		scePowerSetGpuXbarClockFrequency(166);
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);
@@ -739,8 +748,9 @@ int main(int argc, char **argv)
 	}
 	{
 		char message[128];
-		snprintf(message, sizeof(message), "vita: arm %d MHz, bus %d MHz, gpu %d MHz", scePowerGetArmClockFrequency(),
-			scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency());
+		snprintf(message, sizeof(message), "vita: arm %d MHz, bus %d MHz, gpu %d MHz, xbar %d MHz",
+			scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(),
+			scePowerGetGpuXbarClockFrequency());
 		vita_host_log(message);
 	}
 
@@ -808,7 +818,8 @@ static int log_thread_state; /* 0 none, 1 running, -1 could not start */
 
 static void log_acquire(void)
 {
-	while (__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&log_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
 		;
 }
 
@@ -823,20 +834,27 @@ static void log_drain(void)
 	static volatile int draining;
 	char chunk[16 * 1024];
 
-	while (__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&draining, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
 		sceKernelDelayThread(100);
 	for (;;)
 	{
 		unsigned long length, start, first;
 
+		/* (the lock is held only to read where the lines end: the bytes up
+		to there are the drain's alone until log_head moves past them, so a
+		log thread on the fourth core, put off by the system's processes
+		there, never keeps the game's threads spinning at the lock) */
 		log_acquire();
 		length = log_tail - log_head;
+		log_release();
 		if (length > sizeof(chunk))
 			length = sizeof(chunk);
 		start = log_head % LOG_RING_SIZE;
 		first = length < LOG_RING_SIZE - start ? length : LOG_RING_SIZE - start;
 		memcpy(chunk, log_ring + start, first);
 		memcpy(chunk + first, log_ring, length - first);
+		log_acquire();
 		log_head += length;
 		log_release();
 		if (!length)
@@ -851,6 +869,9 @@ static int log_thread(SceSize arguments_size, void *arguments)
 {
 	(void)arguments_size;
 	(void)arguments;
+	/* (Fourth core helpers: the lines wait in the ring; a game's thread
+	writes them itself only when the ring is full) */
+	vita_host_fourth_core_join("log", 2);
 	for (;;)
 	{
 		sceKernelWaitSema(log_semaphore, 1, NULL);

@@ -199,6 +199,10 @@ symbols in this file:
 #include "load_profile.h"
 #include <stdlib.h>
 int halo_thread_index(void);
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c) */
+int vita_host_fourth_core_join(const char *role, int level);
+#endif
 /* the cache file thread, by halo_thread_index (load_profile.c) */
 static int cache_file_thread_index = -1;
 /* (port) cache_file_read is called by the tick (sounds, the textures it
@@ -915,7 +919,8 @@ short cache_file_read(
 		only indices in range) */
 		return cache_request_next_free_index();
 	}
-	while (__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&cache_request_claim_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
 		SwitchToThread();
 	request_index = cache_request_next_free_index();
 	request = cache_request_get(request_index);
@@ -1272,6 +1277,14 @@ static void cache_file_windows_thread_proc(
 		setting = getenv("HALO_IO_EACH");
 		complete_each = !setting || atoi(setting) != 0;
 	}
+#ifdef HALO_VITA
+	/* (port) Fourth core helpers, All async: this thread on the Vita's
+	fourth core where the system allows it (port/vita/host/
+	vita_fourth_core.c; as in Bruno Santana's modified build). Mostly
+	waiting for the memory card; a read late there is a texture or a sound
+	late */
+	vita_host_fourth_core_join("cache file thread", 2);
+#endif
 #endif
 	while (TRUE)
 	{

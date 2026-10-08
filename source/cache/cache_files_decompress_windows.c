@@ -224,6 +224,10 @@ symbols in this file:
 #include "cache/cache_files.h"
 #include "cache/cache_files_decompress_windows.h"
 #include "memory/zlib/zlib.h"
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c) */
+int vita_host_fourth_core_join(const char *role, int level);
+#endif
 
 #include <xtl.h>
 
@@ -1654,6 +1658,12 @@ static unsigned long __stdcall simple_cache_copy_thread(
 {
 	struct simple_decompressor_definition *self = global_self;
 
+#ifdef HALO_VITA
+	/* (port) Fourth core helpers, All async: the map's decompression on
+	the Vita's fourth core where the system allows it (as in Bruno
+	Santana's modified build) */
+	vita_host_fourth_core_join("map decompression", 2);
+#endif
 	for (;;)
 	{
 		WaitForSingleObject(self->copy_start_event, INFINITE);

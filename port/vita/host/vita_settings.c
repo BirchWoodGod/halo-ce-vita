@@ -313,6 +313,16 @@ static struct setting settings[] = {
 		"How often far-off enemies recheck what they see", 0, PAGE_GRAPHICS_ADVANCED },
 	{ "Tiny decals", "HALO_DECAL_MIN_PIXELS", 0, 2, { "0", "2" }, { "Shown", "Skipped" },
 		"Bullet holes too small to see", 0, PAGE_GRAPHICS_ADVANCED },
+	/* (vita_fourth_core.c, with Bruno Santana's levels and variable, so his
+	build's settings.txt carries over: Audio puts the sound mixer on the
+	fourth core, All async the mixer, GXM's display queue, the cache file
+	thread, the map decompression, the checkpoint writer, the shader
+	compiler and clean-up and the log's writer. The system gives a game
+	that core only with a kernel plugin such as CapUnlocker; halo.log says
+	where each went. Off until the hardware says what it is worth; in no
+	profile) */
+	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
+		"Needs CapUnlocker: audio, or all background work", 0, PAGE_GRAPHICS_ADVANCED },
 
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
