@@ -62,6 +62,21 @@
 #            (the joiner's typed line is refused with a notice, its phrase
 #            passes) and then Off (its phrase refused with a notice); the
 #            joiner mutes the host, whose phrase it then does not show
+#   voice    code, with voice chat (port/linux/game/voice.c, HALO_TEST_VOICE;
+#            each microphone a tone, HALO_TEST_VOICE_MIC): the joiner talks
+#            (push to talk) while the host talks too, and the host plays it
+#            and passes it on; the host mutes the joiner (its voice is then
+#            dropped, for everyone) and hears it again; the host turns its
+#            Voice in my games Off (the joiner's voice dropped, the joiner
+#            told by a notice) and back to Private games only (the game is
+#            not listed: passed on); the joiner mutes the host, whose voice
+#            it then does not play; and each microphone is live only while
+#            push to talk is held. Each side's codec time a frame and the
+#            voice's kbps are printed
+#   voicepublic  lobby (the host's game listed in the public games), with
+#            voice: the host's default, Private games only, passes on no
+#            voice in it (the joiner told so) until its Voice in my games is
+#            On
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -979,8 +994,84 @@ chat)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
 	;;
+voice|voicepublic)
+	# (seconds from when each side's game began; both talk at once at the
+	# start, for the two-talker measurement)
+	if [ "$mode" = voice ]; then
+		host_voice="4:talk:6|14:mute:*|26:unmute:*|40:host:off|52:host:private|58:talk:5"
+		join_voice="2:talk:8|17:talk:5|30:talk:5|43:talk:5|50:mute:*|56:talk:2"
+		# (a private game, joined by its code: the harness host's is public by
+		# default, network.host_public, where voice is off by default)
+		run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_TEST_VOICE_MIC=tone:600 \
+			"HALO_TEST_VOICE=$host_voice"
+		host_pid=$last_pid
+		code=$(wait_code)
+		[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+		echo "host's code: $code"
+		join_mode="join-code:$code"
+	else
+		host_voice="30:host:on"
+		join_voice="5:talk:6|40:talk:6"
+		run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=true HALO_TEST_VOICE_MIC=tone:600 \
+			"HALO_TEST_VOICE=$host_voice"
+		host_pid=$last_pid
+		code=$(wait_code)
+		[ -n "$code" ] || { fail "the host never hosted"; tail -20 "$out/host/run.log"; exit 1; }
+		join_mode=join-public
+	fi
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$join_mode \
+		HALO_TEST_INPUT=bot:2 HALO_TEST_VOICE_MIC=tone:440 "HALO_TEST_VOICE=$join_voice"
+	join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -a "voice:" "$hl" | head -60
+	echo "--- joiner"; grep -a "voice:\|chat: (to this player)" "$jl" | head -60
+	# (sums over the ten-second statistics lines)
+	total() { grep -a "$2" "$1" | sed -n "s/$3/\1/p" | awk '{ sum += $1 } END { print sum + 0 }'; }
+	host_played=$(total "$hl" "voice: talker [0-9]* played" '.*played \([0-9]*\) frames.*')
+	join_played=$(total "$jl" "voice: talker [0-9]* played" '.*played \([0-9]*\) frames.*')
+	passed=$(total "$hl" "the host passed on" '.*passed on \([0-9]*\) frames.*')
+	dropped_muted=$(total "$hl" "the host passed on" '.*, \([0-9]*\) muted,.*')
+	dropped_off=$(total "$hl" "the host passed on" '.*, \([0-9]*\) voice off,.*')
+	join_sent=$(total "$jl" "voice: sent" '.*sent \([0-9]*\) frames.*')
+	join_received=$(total "$jl" "voice: received" '.*received \([0-9]*\) frames.*')
+	join_muted=$(total "$jl" "voice: received" '.*, \([0-9]*\) of players muted here.*')
+	echo "joiner sent $join_sent frames, received $join_received ($join_muted of the host it muted), played $join_played"
+	echo "host passed on $passed, played $host_played; dropped $dropped_muted muted, $dropped_off with its voice off"
+	grep -a "voice: encoded" "$hl" "$jl" | sed 's/.*run.log:/  /' | head -8
+	grep -a "kbps" "$hl" "$jl" | sed 's/.*run.log:/  /' | head -8
+	grep -aq "voice: Opus .*16 kHz mono, 16 kbps" "$jl" || fail "the joiner's encoder was not set up"
+	grep -a "voice: talker [0-9]* played [1-9]" "$hl" "$jl" | grep -aq "level -[0-9] dBFS\|level -[12][0-9] dBFS" ||
+		fail "no talker played at a tone's level (-30 dBFS or louder)"
+	# (the microphone: live once per push of the button, and off again)
+	live=$(grep -ac "voice: the microphone is live" "$jl")
+	off=$(grep -ac "voice: the microphone is off" "$jl")
+	echo "the joiner's microphone was live $live times, off $off times"
+	if [ "$mode" = voice ]; then
+		[ "$join_sent" -ge 900 ] || fail "the joiner sent $join_sent frames (900 wanted: 18 s of the 25 it talked unmuted or not)"
+		[ "$host_played" -ge 450 ] || fail "the host played $host_played frames of the joiner's (450 wanted)"
+		[ "$host_played" -le 1000 ] || fail "the host played $host_played frames of the joiner's: some it muted or refused"
+		[ "$dropped_muted" -ge 150 ] || fail "the host dropped $dropped_muted frames of the joiner it muted (150 wanted)"
+		[ "$dropped_off" -ge 150 ] || fail "the host dropped $dropped_off frames with its voice off (150 wanted)"
+		grep -aqF "chat: (to this player) Voice chat is off in this game" "$jl" ||
+			fail "the joiner was not told the host's voice is off"
+		[ "$join_played" -ge 200 ] || fail "the joiner played $join_played frames of the host's (200 wanted)"
+		[ "$join_muted" -ge 100 ] || fail "the joiner dropped $join_muted frames of the host it muted (100 wanted)"
+		[ "$live" = 5 ] || fail "the joiner's microphone was live $live times (5 pushes of the button)"
+		[ "$((live - off))" -le 1 ] || fail "the joiner's microphone stayed live"
+		grep -aq "voice: the host dropped frames .*not valid" "$hl" && fail "the host found frames not valid"
+	else
+		[ "$dropped_off" -ge 150 ] || fail "the host passed on voice in its public game ($dropped_off dropped, 150 wanted)"
+		grep -aqF "chat: (to this player) Voice chat is off in this game" "$jl" ||
+			fail "the joiner was not told the host's voice is off"
+		[ "$host_played" -ge 150 ] || fail "with the host's voice On the host played $host_played frames (150 wanted)"
+	fi
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
 *)
-	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|chat" >&2
+	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|chat|voice|voicepublic" >&2
 	exit 2
 	;;
 esac
