@@ -27,6 +27,17 @@
 #            must never list or join the game
 #   spoof    code, and a machine on the host's LAN sends its game ports
 #            datagrams claiming the joiner's virtual address: dropped
+#   menus    lobby, joined from OpenCE's multiplayer screens (menu_tags.c):
+#            the joiner (its maps folder HALO_TEST_DATA_MENUS, with the Halo
+#            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET (the
+#            server browser), A on the host's row, then on the System Link
+#            screen the profile and the game (HALO_TEST_PAD)
+#   menuspw  the same with a password (HALO_TEST_LOBBY_PASSWORD), typed on
+#            the password screen (HALO_TEST_TEXT_INPUT)
+#   menushost the host creates its game from the menus: Multiplayer, CREATE
+#            GAME INTERNET, Server Setup (its name typed, Max players,
+#            public), START GAME, the profile, the map and the gametype; the
+#            joiner joins it from the server browser (network test)
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
@@ -270,6 +281,66 @@ code|lobby|lobbypw)
 				fail "the joiner did not join the locked game with its password"
 		fi
 	fi
+	;;
+menus|menuspw)
+	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	extra="HALO_NET_HOST_PUBLIC=true"
+	[ "$mode" = menuspw ] && extra="$extra HALO_NET_LOBBY_PASSWORD=$password"
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST_START=${HALO_TEST_MENUS_START:-75} \
+		HALO_NET_LOBBY_NAME=VitaHost $extra; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	# (Multiplayer, INTERNET: the server browser; a while for the listing, A on
+	# its row; menuspw: the password screen, A types it, down, JOIN GAME; then
+	# the System Link screen: A joins, A picks the profile, A, a while for the
+	# host's game to be reached, A joins it)
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
+	[ "$mode" = menuspw ] && pad="$pad wait:150:3000 a wait:150:1500 down a"
+	pad="$pad wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a"
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
+		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
+		"HALO_TEST_TEXT_INPUT=$password"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	echo "--- joiner"; grep -aE "menus:|ui: screen|system link: (joining|in another)" "$jl" | head -20
+	grep -aq "menus: OpenCE's multiplayer screens: .* added" "$jl" || fail "the joiner did not add OpenCE's screens"
+	grep -aq "ui: screen pc.browser.screen" "$jl" || fail "the server browser did not open"
+	grep -aq "menus: joining the public game VitaHost" "$jl" || fail "the joiner did not join the host's game from the browser"
+	if [ "$mode" = menuspw ]; then
+		grep -aq "ui: screen pc.join.password.screen" "$jl" || fail "the password screen did not open"
+		grep -aq "menus: joining the public game VitaHost with its password" "$jl" || fail "the password was not given"
+	fi
+	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
+menushost)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	# (Multiplayer, CREATE GAME INTERNET: Server Setup; A on SERVER NAME types
+	# it; down to START GAME; the System Link screen's profile (A A A), the map
+	# list (A), the gametype (A): the lobby; START starts the game)
+	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down a"
+	pad="$pad wait:150:5000 a a a wait:150:5000 a wait:150:4000 a"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false "HALO_TEST_PAD=$pad" \
+		HALO_TEST_TEXT_INPUT=MenuHost; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; grep -aE "menus:|ui: screen|test pad" "$out/host/run.log" | tail -20; exit 1; }
+	echo "host's code: $code"
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_TEST_INPUT=bot:2; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "menus:|ui: screen|system link: (hosting|in a)" "$hl" | head -20
+	grep -aq "menus: Server Setup: MenuHost, 16 players, public" "$hl" || fail "Server Setup did not set the game up"
+	grep -aq "menus: Create Game > Internet: the game's server started" "$hl" || fail "the game was not created"
+	grep -aq 'network test: the public games list ".*MenuHost' "$jl" || fail "the joiner never listed the host's game"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
 	;;
 pc)
 	[ -n "$pc" ] || { echo "pc mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
@@ -595,7 +666,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|lobbypw|lan|pc|pchost|adhoc|many|solo|coop|coopmenu" >&2
+	echo "usage: $0 code|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu" >&2
 	exit 2
 	;;
 esac
