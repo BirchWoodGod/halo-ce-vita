@@ -1001,10 +1001,11 @@ static void first_person_weapon_start_interpolation(
 	struct animation_graph *animation_graph= animation_graph_definition_get(
 		weapon_definition->weapon.interface_definition.first_person_animations.index);
 
+	/* port: no more nodes than the weapon's orientations hold (a map's count) */
 	csmemcpy(
 		first_person_weapon->original_node_orientations,
 		first_person_weapon->node_orientations,
-		animation_graph->nodes.count*sizeof(real_orientation));
+		PIN(animation_graph->nodes.count, 0, MAXIMUM_NODES_PER_ANIMATION)*sizeof(real_orientation));
 	if (frame_count>=first_person_weapon->interpolation_frame_count-
 		first_person_weapon->interpolation_frame_index)
 	{
@@ -1459,10 +1460,11 @@ static void first_person_weapon_build_node_matrices(
 			&render.camera.up);
 #ifdef HALO_LINUX
 		/* the pose between the last two ticks (render_interpolation.c) */
+		/* port: no more nodes than the weapon's matrices hold (a map's count) */
 		render_interpolation_first_person(
 			local_player_index,
 			first_person_weapon->node_matrices,
-			(short)animation_graph->nodes.count,
+			(short)MIN(animation_graph->nodes.count, MAXIMUM_NODES_PER_ANIMATION),
 			&render.camera);
 #endif
 	}
@@ -2125,7 +2127,9 @@ static boolean model_build_remapping_table_for_animation_graph(
 	boolean valid= TRUE;
 	short model_node_index;
 
-	for (model_node_index=0; model_node_index<model->nodes.count; model_node_index++)
+	/* port: no more model nodes than the table holds, and only graph nodes
+	the weapon's matrices hold (a map's counts) */
+	for (model_node_index=0; model_node_index<MIN(model->nodes.count, MAXIMUM_NODES_PER_ANIMATION); model_node_index++)
 	{
 		struct model_node *model_node= TAG_BLOCK_GET_ELEMENT(
 			&model->nodes,
@@ -2134,7 +2138,7 @@ static boolean model_build_remapping_table_for_animation_graph(
 		short animation_graph_node_index= NONE;
 		short node_index;
 
-		for (node_index=0; node_index<animation_graph->nodes.count; node_index++)
+		for (node_index=0; node_index<MIN(animation_graph->nodes.count, MAXIMUM_NODES_PER_ANIMATION); node_index++)
 		{
 			struct animation_graph_node *animation_graph_node= TAG_BLOCK_GET_ELEMENT(
 				&animation_graph->nodes,
@@ -2189,7 +2193,10 @@ static void weapon_play_first_person_weapon_sound(
 								&animation_graph->first_person_weapon_animations,
 								0,
 								struct animation_graph_first_person_weapon_animations);
-					short animation_index= (animation_type>=0 &&
+					/* port: and the graph has first-person animations (a map's
+					graph without them was a NULL read) */
+					short animation_index= (first_person_weapon_animations &&
+						animation_type>=0 &&
 						animation_type<first_person_weapon_animations->animations.count) ?
 							animation_graph_animation_index_get(
 								&first_person_weapon_animations->animations)
@@ -2203,7 +2210,8 @@ static void weapon_play_first_person_weapon_sound(
 							animation_index,
 							struct animation)->sound_index;
 
-						if (sound_index!=NONE)
+						/* port: a sound the graph has (a map's index) */
+						if (VALID_INDEX(sound_index, animation_graph->sound_references.count))
 						{
 							long definition_index= TAG_BLOCK_GET_ELEMENT(
 								&animation_graph->sound_references,
@@ -2339,7 +2347,9 @@ static void model_remap_node_matrices_to_match_animation_graph(
 	struct animation_graph *animation_graph= animation_graph_definition_get(animation_graph_index);
 	short node_index;
 
-	for (node_index=0; node_index<model->nodes.count; node_index++)
+	/* port: no more nodes than the table and model_node_matrices hold (a
+	map's count) */
+	for (node_index=0; node_index<MIN(model->nodes.count, MAXIMUM_NODES_PER_ANIMATION); node_index++)
 	{
 		short animation_graph_node_index= node_remapping_table[node_index];
 
