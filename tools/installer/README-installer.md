@@ -11,7 +11,15 @@ disc image, your Halo PC files.
 
 ## Running it
 
-- **Windows:** double-click `HaloCEVitaInstaller.exe`.
+- **Windows:** download `HaloCEVitaInstaller.exe` from the
+  [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
+  (it is attached next to `halo.vpk`) and double-click it. It is one
+  program of about 47 MB that unpacks itself to a temporary folder at each
+  start, so it takes a few seconds to open. It is not signed: Windows
+  SmartScreen says "Windows protected your PC" the first time (click
+  "More info", then "Run anyway"), and some antivirus programs may flag it
+  wrongly, as they often do with Python programs packed this way. The
+  Python file below is the same tool, readable.
 - **Any system with Python 3.8 or later:** `python3 halo_ce_vita_installer.py`
   opens the window (on Linux, tkinter may be a separate package:
   `python3-tk` or `tk`). The movie step needs ffmpeg installed.
@@ -148,3 +156,14 @@ LICENSE and README.txt (which names its source) go inside next to it. The
 GitHub Actions workflow `.github/workflows/windows-installer.yml` does the
 same on `windows-latest`, runs the tests and the program's selftest, and
 uploads the program as an artifact. Nothing it downloads is committed.
+
+## ffmpeg's licence
+
+`HaloCEVitaInstaller.exe` includes ffmpeg (FFmpeg 9.0.2, gyan.dev's
+essentials build), which is licensed under the GNU GPL version 3, like this
+project. Its LICENSE and README.txt are inside the program next to it; the
+README names the exact FFmpeg source it was built from. FFmpeg's source:
+<https://ffmpeg.org/download.html#get-sources> (the release tarball
+`ffmpeg-9.0.2.tar.xz`), and gyan.dev's build notes:
+<https://www.gyan.dev/ffmpeg/builds/>. Each release that attaches the
+program says so in its notes.

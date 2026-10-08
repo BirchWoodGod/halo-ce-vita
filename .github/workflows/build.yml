@@ -24,6 +24,9 @@ on:
       - "**.md"
       - "docs/**"
       - "research/**"
+      # (the install tool has its own workflow, windows-installer.yml)
+      - "tools/installer/**"
+      - ".github/workflows/windows-installer.yml"
   workflow_dispatch:
 
 concurrency:
