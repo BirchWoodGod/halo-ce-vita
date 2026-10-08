@@ -1451,6 +1451,27 @@ static long looping_sound_new(
 			looping_sound->component_sound_count = 0;
 			looping_sound->ordered_sounds_finished = FALSE;
 
+			/* port: no more tracks or details than the looping sound holds. A
+			tag with more is cut to that, and said once. */
+			if (definition->tracks.count > (long)NUMBEROF(looping_sound->tracks) ||
+				definition->details.count > (long)NUMBEROF(looping_sound->detail_play_times))
+			{
+				error(
+					_error_silent,
+					"looping sound %s has %d tracks and %d details (only %d and %d are played)",
+					tag_get_name(definition_index),
+					definition->tracks.count,
+					definition->details.count,
+					(long)NUMBEROF(looping_sound->tracks),
+					(long)NUMBEROF(looping_sound->detail_play_times));
+				definition->tracks.count = MIN(
+					definition->tracks.count,
+					(long)NUMBEROF(looping_sound->tracks));
+				definition->details.count = MIN(
+					definition->details.count,
+					(long)NUMBEROF(looping_sound->detail_play_times));
+			}
+
 			for (detail_index = 0;
 				detail_index < definition->details.count;
 				detail_index++)
@@ -2610,7 +2631,11 @@ boolean sound_refresh_looping(
 						&source->location.position);
 				}
 
-				for (track_index = 0; track_index < definition->tracks.count; track_index++)
+				/* port: no more tracks than the looping sound holds (the map's count) */
+				for (track_index = 0;
+					track_index < definition->tracks.count &&
+						track_index < (short)NUMBEROF(loop->tracks);
+					track_index++)
 				{
 					struct looping_sound_track *track = TAG_BLOCK_GET_ELEMENT(
 						&definition->tracks,
@@ -3120,7 +3145,10 @@ static void process_looping_sounds(
 		{
 			short detail_index;
 
-			for (detail_index = 0; detail_index < definition->details.count;
+			/* port: no more details than the looping sound holds (the map's count) */
+			for (detail_index = 0;
+				detail_index < definition->details.count &&
+					detail_index < (short)NUMBEROF(looping_sound->detail_play_times);
 				detail_index++)
 			{
 				struct looping_sound_detail *detail = TAG_BLOCK_GET_ELEMENT(
@@ -4090,6 +4118,35 @@ static void sound_split_report(void)
 #define SOUND_SPLIT(step) ((void)0)
 #endif
 
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_SOUND_MANAGER_DIVISOR=n: the
+sound manager's own work - the looping sounds, the sounds' positions,
+volumes and obstruction, which sounds get the voices, the voices'
+properties - done every nth call of sound_render only (once a frame, on
+the tick thread when it has one: 2 to 4.5 ms of the Vita's in the beach's
+fight). 1 (the default): every call, as the Xbox. The mixer plays on as
+it does; a new sound starts, and a moving one follows its source, up to
+n - 1 frames later. */
+static boolean sound_render_manager_this_call(
+	void)
+{
+	static int divisor = -1;
+	static unsigned long settings_seen, calls;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (divisor < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_SOUND_MANAGER_DIVISOR");
+
+		settings_seen = halo_settings_generation;
+		divisor = setting && *setting ? atoi(setting) : 1;
+		if (divisor < 1 || divisor > 3)
+			divisor = 1;
+	}
+	return divisor == 1 || calls++ % (unsigned long)divisor == 0;
+}
+#endif
+
 void sound_render(
 	void)
 {
@@ -4146,6 +4203,13 @@ void sound_render(
 #endif
 			refresh_listener();
 			SOUND_SPLIT(1);
+#ifdef HALO_LINUX
+			/* (HALO_SOUND_MANAGER_DIVISOR, above: the looping sounds' flip
+			flop turns with the work, so a loop the game kept going since the
+			last time is kept) */
+			if (sound_render_manager_this_call())
+#endif
+			{
 			process_looping_sounds();
 			SOUND_SPLIT(2);
 			refresh_sounds();
@@ -4155,6 +4219,7 @@ void sound_render(
 			update_channels();
 			SOUND_SPLIT(5);
 			sound_manager_globals.flip_flop = !sound_manager_globals.flip_flop;
+			}
 		}
 
 		sound_manager_globals.platform_definition->end_scene();

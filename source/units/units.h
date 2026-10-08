@@ -905,6 +905,18 @@ void unit_place(
 void unit_preprocess_node_orientations(
 	long unit_index,
 	struct real_orientation *node_orientations);
+/* port: the animations a unit (or vehicle) applies to its orientations */
+struct animation;
+struct animation_graph;
+short unit_animation_model_node_count(
+	long unit_index);
+struct animation *unit_animation_get_fitting(
+	struct animation_graph *animation_graph,
+	short animation_index,
+	short model_node_count);
+void unit_postprocess_node_matrices(
+	long object_index,
+	struct real_matrix4x3 *node_matrices);
 
 
 /* ---------- prototypes/UNIT_DIALOGUE.C */

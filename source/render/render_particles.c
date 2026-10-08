@@ -170,6 +170,35 @@ static void effect_stats_report(void)
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_PARTICLE_RENDER_DIVISOR=n:
+one particle in n of the world's drawn (render_particles), and of the
+particle systems' that are not attached to an object
+(particle_systems.c); 1 (the default) all, as the Xbox. Which are drawn
+goes by the particle's slot, so a particle is drawn or not for as long as
+it lives (no flicker); the first-person weapon's particles and the
+particle systems on an object (a weapon's, a unit's, a vehicle's) are all
+drawn. Drawing only: every particle is still simulated. */
+int halo_particle_render_divisor(
+	void)
+{
+	static int divisor = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (divisor < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_PARTICLE_RENDER_DIVISOR");
+
+		settings_seen = halo_settings_generation;
+		divisor = setting && *setting ? atoi(setting) : 1;
+		if (divisor < 1 || divisor > 4)
+			divisor = 1;
+	}
+	return divisor;
+}
+#endif
+
 /* ---------- public code */
 
 boolean local_player_is_first_person(
@@ -236,6 +265,9 @@ void render_particles(
 	short group_particle_counts[MAXIMUM_RENDERED_PARTICLE_GROUPS];
 	short rendered_particle_count;
 	struct build_sprite_data sprite_data;
+#ifdef HALO_LINUX
+	int particle_divisor = halo_particle_render_divisor();
+#endif
 	real_point3d position;
 	real_vector3d direction;
 
@@ -483,6 +515,23 @@ void render_particles(
 								unsigned long flags;
 								word particle_flags;
 
+#ifdef HALO_LINUX
+								/* (HALO_PARTICLE_RENDER_DIVISOR, above: the
+								first-person weapon's are all drawn. A particle
+								thinned out is passed over only here, as drawn
+								for the game: the orphan's delete above is the
+								game's, and the game deletes a particle not
+								drawn for a while - particles.c's
+								last_rendered_frame_index) */
+								if (particle_divisor > 1 &&
+									DATUM_INDEX_TO_ABSOLUTE_INDEX(rendered_particle->particle_index) % particle_divisor != 0 &&
+									!rendered_particle->attached_to_first_person_weapon)
+								{
+									particle->last_rendered_frame_index = render.frame_index;
+									rendered_particle++;
+									continue;
+								}
+#endif
 								fade = 1.0f;
 								built_particle_count++;
 								scale =
