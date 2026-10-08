@@ -65,6 +65,10 @@ one: the biggest fights still drop frames (see [Performance](#performance)).
   levels it loads).
 - Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
   it). It must be the Xbox version: the PC version's maps do not work.
+- **For online play:** Halo PC's `bitmaps.map`, `sounds.map` and `loc.map`
+  (from your own Halo Custom Edition installer, Halo MCC on Steam, or a
+  Custom Edition install). They give the game its online multiplayer menus
+  and Custom Edition maps; see [Online play](#online-play-halo-pc-files).
 
 ### Steps
 
@@ -167,13 +171,23 @@ Custom Edition maps themselves (race tracks and the like) come from the
 community's Halo CE map archives and forums. This project includes no maps
 and links to no downloads.
 
-### PC multiplayer menus (optional)
+### Online play: Halo PC files
 
-With Halo PC's `bitmaps.map` and `loc.map` in `ux0:data/haloce-vita/maps/`
-(the same Custom Edition files as for custom maps above: from MCC's
-`halo1/maps/custom_edition/`, or a Custom Edition install's `maps` folder;
-`sounds.map` is not needed for this), the main menu's **Multiplayer** opens
-the PC version's Multiplayer screen, from OpenCE's PC menus:
+**Online play needs Halo PC's `bitmaps.map`, `sounds.map` and `loc.map` in
+`ux0:data/haloce-vita/maps/`.** Get them from your own copy, whichever is
+easiest:
+
+1. **The Halo Custom Edition installer:** copy `halocesetup_en_1.00.exe`
+   to `ux0:data/haloce-vita/` and start the game. It unpacks the three
+   files by itself (about a minute), then asks before deleting the
+   installer. Restart the game afterwards.
+2. **Halo: The Master Chief Collection** (Steam): the three files in
+   `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
+   (not the ones directly in `halo1/maps`).
+3. **A Halo Custom Edition install:** its `maps` folder.
+
+With them, the main menu's **Multiplayer** opens the PC version's
+Multiplayer screen, from OpenCE's PC menus:
 
 - **Join Game**: **Internet** is the server browser (the public games, a
   lock on those with a password; A joins, a locked game's password is typed
