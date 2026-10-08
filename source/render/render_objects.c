@@ -837,6 +837,27 @@ static real object_get_level_of_detail_pixels(
 }
 
 #ifdef HALO_LINUX
+/* (port) HALO_MIN_OBJECT_PIXELS=n, a handheld quality setting
+(render_object_list) */
+static real render_object_minimum_pixels(
+	void)
+{
+	static real minimum_pixels = -1.0f;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (minimum_pixels < 0.0f || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
+
+		settings_seen = halo_settings_generation;
+		minimum_pixels = setting ? (real)atof(setting) : 0.0f;
+		if (minimum_pixels < 0.0f)
+			minimum_pixels = 0.0f;
+	}
+	return minimum_pixels;
+}
+
 /* (port) HALO_MIN_OBJECT_PIXELS' exceptions (render_object_list) */
 static boolean render_object_kept_whatever_its_size(
 	struct object_datum const *object,
@@ -1031,17 +1052,9 @@ static void render_object_list(
 					turned, the test measuring depth along the view), and a child
 					whose topmost parent is big enough (a held weapon is drawn
 					whenever its holder is) */
-					static float minimum_pixels = -1.0f;
-					static unsigned long settings_seen;
-					extern volatile unsigned long halo_settings_generation;
+					real minimum_pixels = render_object_minimum_pixels();
 					boolean big_enough;
 
-					if (minimum_pixels < 0.0f || settings_seen != halo_settings_generation)
-					{
-						settings_seen = halo_settings_generation;
-						const char *setting = getenv("HALO_MIN_OBJECT_PIXELS");
-						minimum_pixels = setting ? (float)atof(setting) : 0.0f;
-					}
 					big_enough = level_of_detail_pixels >= minimum_pixels ||
 						render_object_kept_whatever_its_size(object, definition, minimum_pixels);
 					flicker_note_drawn(object_index, big_enough, level_of_detail_pixels, minimum_pixels);
@@ -1730,6 +1743,24 @@ static void render_object(
 	{
 		struct object_datum *object = object_get(data->object_index);
 		boolean needs_lighting;
+#ifdef HALO_LINUX
+		real level_of_detail_pixels = object_get_level_of_detail_pixels(data->object_index);
+
+		/* (port, after Bruno Santana's Vita build) HALO_MIN_OBJECT_PIXELS: an
+		object too small to draw (render_object_list's test, its exceptions
+		too) with no children and no widgets draws nothing at all, so it is
+		dropped here, before its lighting and render state are prepared
+		(render_object_list dropped it after them) */
+		if (level_of_detail_pixels < render_object_minimum_pixels() &&
+			object->object.first_child_object_index == NONE &&
+			object->object.first_widget_index == NONE &&
+			!render_object_kept_whatever_its_size(object, object_definition_get(object->definition_index),
+				render_object_minimum_pixels()))
+		{
+			flicker_note_drawn(data->object_index, FALSE, level_of_detail_pixels, render_object_minimum_pixels());
+			return;
+		}
+#endif
 
 		if (!TEST_FLAG(object->object.flags, _object_invisible_bit) ||
 			object->object.first_child_object_index != NONE ||
@@ -1754,9 +1785,11 @@ static void render_object(
 #endif
 				data->lighting = object_get_cached_render_lighting(
 					data->object_index,
-					object_get_level_of_detail_pixels(data->object_index));
 #ifdef HALO_LINUX
+					level_of_detail_pixels);
 				OBJECTS_PROFILE_ADD(_objects_profile_lighting, lighting_before);
+#else
+					object_get_level_of_detail_pixels(data->object_index));
 #endif
 			}
 			else
