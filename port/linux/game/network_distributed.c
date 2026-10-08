@@ -72,6 +72,7 @@ machine (their datum identifiers need not be).
 #include "units/bipeds.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "ping_protocol.h"
 #include "voice.h"
 
 #include <limits.h>
@@ -186,6 +187,8 @@ enum
 	MAXIMUM_PING_MILLISECONDS = 9999,
 	PING_REFRESH_TICKS = TICKS_PER_SECOND / 2,
 	CONNECTION_PROBLEM_MILLISECONDS = 2000,
+	/* the host tells every client everyone's pings this often (ticks) */
+	PINGS_INTERVAL_TICKS = PING_INTERVAL_MILLISECONDS * TICKS_PER_SECOND / 1000,
 	/* a client: where its own players' units were, the last ticks (a power
 	of two, more than the longest round trip) */
 	OWN_POSITION_TICKS = 64,
@@ -648,6 +651,14 @@ in the tick every PING_REFRESH_TICKS, read whole): each player's ping
 (distributed_player_ping), NONE for none; and the host's slowest client's */
 static long distributed_shown_pings[MAXIMUM_TRACKED_PLAYERS];
 static long distributed_shown_slowest_ping = NONE;
+/* a client: each player's ping as the host last told it (PING_UNKNOWN: not
+told), when that came (system_milliseconds, 0 for never), and when a
+message of them was last taken (ping_message_due) */
+static uint16_t distributed_told_pings[MAXIMUM_TRACKED_PLAYERS];
+static unsigned long distributed_told_time;
+static struct ping_receiver distributed_told_receiver;
+
+typedef char distributed_pings_number_assert[_distributed_message_pings == 19 ? 1 : -1];
 
 /* the host: its clients' machines, found once a tick */
 static struct
@@ -1513,10 +1524,17 @@ static void distributed_refresh_pings(
 				slowest = MAX(slowest, ping);
 			}
 		}
-		else if (connection == _game_connection_network_client && distributed_player_is_local(player_index) &&
-			distributed_own_ping_valid)
+		else if (connection == _game_connection_network_client && distributed_player_is_local(player_index))
 		{
-			ping = (long)(distributed_own_ping_milliseconds + 0.5f);
+			if (distributed_own_ping_valid)
+				ping = (long)(distributed_own_ping_milliseconds + 0.5f);
+		}
+		/* (another machine's player: as the host told it lately) */
+		else if (connection == _game_connection_network_client && distributed_told_time &&
+			system_milliseconds() - distributed_told_time < PING_TOLD_MILLISECONDS &&
+			distributed_told_pings[player_index] != PING_UNKNOWN)
+		{
+			ping = (long)distributed_told_pings[player_index];
 		}
 		distributed_shown_pings[player_index] = ping;
 	}
@@ -1595,11 +1613,76 @@ static void distributed_refresh_pings(
 		}
 		else if (connection == _game_connection_network_client && distributed_own_ping_valid)
 		{
-			platform_log("latency: round trip to the host %ld ms (%.1f ticks)%s",
+			short player_index;
+
+			/* (and what the host told lately: every player's, this
+			machine's own too, as the host measures them) */
+			if (distributed_told_time && system_milliseconds() - distributed_told_time < PING_TOLD_MILLISECONDS)
+			{
+				for (player_index = 0; player_index < MAXIMUM_TRACKED_PLAYERS && length < (int)sizeof(line) - 40;
+					player_index++)
+				{
+					if (distributed_told_pings[player_index] == PING_UNKNOWN || !distributed_player(player_index))
+						continue;
+					length += snprintf(line + length, sizeof(line) - length, "%s player %d%s %u ms",
+						length ? "," : "; the host's:", player_index,
+						distributed_player_is_local(player_index) ? " (this machine's)" : "",
+						(unsigned int)distributed_told_pings[player_index]);
+				}
+			}
+			platform_log("latency: round trip to the host %ld ms (%.1f ticks)%s%s",
 				(long)(distributed_own_ping_milliseconds + 0.5f), distributed_own_round_trip,
-				distributed_connection_problem() ? ", connection problem" : "");
+				distributed_connection_problem() ? ", connection problem" : "", line);
 		}
 	}
+}
+
+/* (the host) every player's ping as it measures them, to every client:
+its own players' 0, a client's its machine's round trip (no client tells
+its own), one message of the players there are (ping_protocol.h) */
+static void distributed_send_pings(
+	void)
+{
+	struct
+	{
+		struct distributed_message_header header;
+		struct ping_entry entries[MAXIMUM_TRACKED_PLAYERS];
+	} message;
+	short count = 0;
+	short player_index;
+
+	for (player_index = 0; player_index < MAXIMUM_TRACKED_PLAYERS; player_index++)
+	{
+		if (!distributed_player(player_index))
+			continue;
+		message.entries[count].player_index = (uint8_t)player_index;
+		message.entries[count].pad = 0;
+		message.entries[count].milliseconds = ping_entry_value(distributed_shown_pings[player_index]);
+		count++;
+	}
+	if (count)
+	{
+		distributed_send(&message, _distributed_message_pings, count,
+			(word)(sizeof(message.header) + count * sizeof(struct ping_entry)), _distributed_to_clients);
+	}
+}
+
+/* (a client) the host's pings: checked whole (ping_protocol.c), one message
+every PING_MINIMUM_INTERVAL_MILLISECONDS at most */
+static void distributed_handle_pings(
+	void const *entries,
+	short count)
+{
+	uint16_t table[MAXIMUM_TRACKED_PLAYERS];
+
+	if (!ping_message_due(&distributed_told_receiver, (uint32_t)system_milliseconds()))
+		return;
+	if (ping_entries_read(entries, count, table, MAXIMUM_TRACKED_PLAYERS) < 0)
+		return;
+	csmemcpy(distributed_told_pings, table, sizeof(distributed_told_pings));
+	distributed_told_time = system_milliseconds();
+	if (!distributed_told_time)
+		distributed_told_time = 1;
 }
 
 long distributed_player_ping(
@@ -3615,6 +3698,10 @@ void network_distributed_new_game(
 	distributed_own_ping_milliseconds = 0.0f;
 	distributed_host_silent_since = 0;
 	for (player_index = 0; player_index < MAXIMUM_TRACKED_PLAYERS; player_index++)
+		distributed_told_pings[player_index] = PING_UNKNOWN;
+	distributed_told_time = 0;
+	csmemset(&distributed_told_receiver, 0, sizeof(distributed_told_receiver));
+	for (player_index = 0; player_index < MAXIMUM_TRACKED_PLAYERS; player_index++)
 		distributed_shown_pings[player_index] = NONE;
 	distributed_shown_slowest_ping = NONE;
 	for (type = 0; type < TICK_SENT_TIMES; type++)
@@ -3686,6 +3773,8 @@ void network_distributed_tick(
 		distributed_host_plan_players();
 		if (game_time_get() % PING_REFRESH_TICKS == 0)
 			distributed_refresh_pings();
+		if (game_time_get() % PINGS_INTERVAL_TICKS == 0)
+			distributed_send_pings();
 		network_damage_host_tick();
 		if (distributed_statistics_due || game_time_get() % STATISTICS_INTERVAL_TICKS == 0)
 			distributed_send_statistics(game_time_get() % STATISTICS_REFRESH_TICKS == 0);
@@ -3747,6 +3836,7 @@ static boolean distributed_message_stale(
 	case _distributed_message_player_inputs:
 	case _distributed_message_relayed_actions:
 	case _distributed_message_damage_events:
+	case _distributed_message_pings:
 	case _distributed_message_actor_states:
 	case _distributed_message_structure_bsp:
 	case _distributed_message_coop_presentation:
@@ -4286,6 +4376,7 @@ void network_distributed_handle_message(
 	case _distributed_message_notice:
 	case _distributed_message_client_ready: entry_size = 0; break;
 	case _distributed_message_client_identity: entry_size = sizeof(struct distributed_client_identity); break;
+	case _distributed_message_pings: entry_size = sizeof(struct ping_entry); break;
 	case _distributed_message_damage_events:
 	case _distributed_message_hit_reports: entry_size = network_damage_entry_size(header.type); break;
 	default: entry_size = network_objects_entry_size(header.type); break;
@@ -4501,6 +4592,9 @@ void network_distributed_handle_message(
 		break;
 	case _distributed_message_vehicle_prediction:
 		network_objects_handle_vehicle_prediction(machine_index, entries, header.count);
+		break;
+	case _distributed_message_pings:
+		distributed_handle_pings(entries, header.count);
 		break;
 	case _distributed_message_player_inputs:
 		distributed_handle_inputs(machine_index, (struct distributed_player_input const *)entries, header.count);

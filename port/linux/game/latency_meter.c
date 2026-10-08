@@ -24,8 +24,10 @@ NETCODE.md, "The round trip"), timed in milliseconds rather than ticks
 - The host: its clients' round trips, timed the same way by when it sent
   the tick each client's input names. It shows "Max ping", its slowest
   client's (one silent for a while as long as it has been); the
-  scoreboard, each client's, its own players' 0. Another client's is not
-  known on a client: its scoreboard has its own players' alone.
+  scoreboard, each client's, its own players' 0, and every two seconds it
+  tells every client everyone's (_distributed_message_pings,
+  ping_protocol.h), so a client's scoreboard has every player's: its own
+  players' as it measures them, the others' as the host does.
 
 Shown with Latency meter On (the Vita's settings panel, Multiplayer;
 HALO_LATENCY_METER; network.latency_meter on a desktop), the default, and

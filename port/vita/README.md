@@ -432,9 +432,9 @@ machine's wait for its next tick to send, up to 33 ms each, so a Wi-Fi
 network shows 15 to 35 ms. If the host has sent nothing for two seconds it
 says **Connection problem** in red instead. The host shows **Max ping**:
 its slowest player's (one silent for a while, as long as it has been). Hold
-Back for the scoreboard: its **Ping** column has each player's on the host
-(its own players 0) and your own on another Vita. Latency meter Off hides
-both.
+Back for the scoreboard: its **Ping** column has every player's, as the
+host measures them (the host's own players 0), yours as your Vita does.
+Latency meter Off hides both.
 
 The settings panel's **Multiplayer** tab:
 

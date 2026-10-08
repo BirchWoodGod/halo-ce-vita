@@ -11,8 +11,8 @@ the game is played (latency_meter.c).
 /* whether it is shown: Latency meter On, a network game being played */
 boolean latency_meter_shown(void);
 /* (the scoreboard's Ping column, game_engine.c) a player's ping in
-milliseconds and its colour, NONE when it is not known here (a client knows
-its own players' only) */
+milliseconds and its colour, NONE when it is not known here (a client: its
+own players' as it measures them, the rest as the host told it) */
 long latency_meter_player_ping(short player_index, real_argb_color *color);
 /* (interface.c's overlays, over the whole screen) */
 void latency_meter_draw(void);

@@ -1375,8 +1375,8 @@ static void rasterize_in_game_score_draw_line(
 	long row_index)
 {
 	rectangle2d bounds = render.camera.window_bounds;
-	/* port: a fourth stop, the Ping column of a network game
-	(scoreboard_ping_column) */
+	/* port: a fourth stop, the Ping column of a network game (its rows'
+	pings drawn on their own, game_engine_rasterize_in_game_score) */
 	short narrow_tab_stops[4];
 	short wide_tab_stops[4];
 	short *tab_stops;

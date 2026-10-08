@@ -180,8 +180,9 @@
 # The latency meter's round trip (halo.log's "latency:" lines, every ten
 # seconds) is checked in code, lobby, lobbypw, relay and latency against the
 # netem delays (a round trip of both uploads' delays, plus up to two ticks of
-# the machines' waits to send: 0 to 90 ms more), in lan and adhoc below 80
-# ms (green).
+# the machines' waits to send: 0 to 90 ms more), in lan and adhoc at most
+# 90 ms (those waits alone, two ticks, 67 ms, and the emulated ad hoc
+# bridge's: 16 to 50 ms seen).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -435,6 +436,16 @@ code|lobby|lobbypw|relay|latency)
 			"$out/joiner/run.log" | tail -1)
 		echo "the joiner's latency meter after the blackout: ${after:-none} ms"
 		[ -n "$after" ] && [ "$after" -le $((rtt + 150)) ] || fail "the joiner's latency meter did not come back ($after ms)"
+		# (every machine's scoreboard has every player's: the host tells its
+		# measures, _distributed_message_pings; the joiner logs them with
+		# its own, its own player's as the host has it about the round trip)
+		told=$(grep -a "latency: round trip to the host .*; the host's:" "$out/joiner/run.log" | head -n -1 | tail -1)
+		echo "the joiner told by the host:$(sed 's/.*the host.s://' <<< "$told")"
+		[ "$(grep -o "player [0-9]*" <<< "$told" | wc -l)" -ge 2 ] ||
+			fail "the joiner was not told every player's ping by the host"
+		mine=$(sed -n 's/.*player [0-9]* (this machine.s) \([0-9]*\) ms.*/\1/p' <<< "$told")
+		[ -n "$mine" ] && [ "$mine" -ge "$rtt" ] && [ "$mine" -le $((rtt + 90)) ] ||
+			fail "the host told the joiner its own ping as ${mine:-nothing} ms ($rtt to $((rtt + 90)) wanted)"
 	fi
 	# (the map change: code mode, which runs long enough for a game to end)
 	[ "$mode" = code ] && [ -z "${HALO_TEST_HOST_GAME:-}" ] && ! grep -aq "network test: map chillout" "$out/host/run.log" && fail "the host never changed map"
@@ -701,8 +712,9 @@ lan)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	grep -aq "Internet play: network thread started" "$out/joiner/run.log" && fail "the p2p thread started with online off"
-	# (the latency meter on a LAN: green)
-	check_latency 0 79
+	# (the latency meter on a LAN: the two machines' waits for their next tick
+	# alone, two ticks at most, 67 ms)
+	check_latency 0 90
 	;;
 adhoc)
 	# a link between the two machines alone stands for the ad hoc group
@@ -729,7 +741,7 @@ adhoc)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
 	grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
-	check_latency 0 79
+	check_latency 0 90
 	;;
 coop)
 	level=${HALO_TEST_COOP_LEVEL:-a10}
