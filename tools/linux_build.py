@@ -121,6 +121,22 @@ MONOCYPHER_SOURCES = ("monocypher.c", "monocypher-ed25519.c")
 # the menus' XML parser (port/linux/src/menu_files.c: OpenCE's menus)
 EXPAT_DIR = Path("port/third_party/expat")
 EXPAT_SOURCES = ("xmlparse.c", "xmlrole.c", "xmltok.c")
+# voice chat's codec (port/linux/src/voice_audio.c): libopus 1.6.1
+# (port/third_party/opus), fixed point (16-bit samples in and out), C only,
+# its scratch space on the calling thread's stack, the same on every port;
+# its fixed-point arithmetic wraps (a malformed packet's SILK state can
+# overflow a product: noise, not undefined behaviour), as every port's
+# game ABI has it, said again for those whose does not
+OPUS_DIR = Path("port/third_party/opus")
+OPUS_FLAGS = ("-DOPUS_BUILD", "-DFIXED_POINT", "-DDISABLE_FLOAT_API", "-DVAR_ARRAYS", "-fwrapv")
+OPUS_INCLUDES = tuple(f"-I{OPUS_DIR / d}" for d in ("include", "celt", "silk", "silk/fixed", "src"))
+
+
+def opus_sources() -> List[Path]:
+    return [source for directory in ("celt", "silk", "silk/fixed", "src")
+            for source in sorted((OPUS_DIR / directory).glob("*.c"))]
+
+
 # the Custom Edition installer's cabinet reader and LZX decoder
 # (port/linux/src/posix_ce_installer.c), with config.h's one definition
 LIBMSPACK_DIR = Path("port/third_party/libmspack")
@@ -459,6 +475,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             f"-I{KCP_DIR}",
             f"-I{MONOCYPHER_DIR}",
             f"-I{EXPAT_DIR}",
+            f"-I{OPUS_DIR / 'include'}",
             "-Isource -Isource/cseries",
             sdk_flags,
         ])
@@ -529,6 +546,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
         # the menus' XML parser (port/third_party/expat; menu_files.c)
         for name in EXPAT_SOURCES:
             add_object(EXPAT_DIR / name, " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-w"]))
+        # voice chat's codec (port/third_party/opus)
+        for source in opus_sources():
+            add_object(source, " ".join([abi, "-std=gnu11", "-O2", *OPUS_FLAGS, *OPUS_INCLUDES, "-w"]))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():

@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from .linux_build import (ZLIB_DIR, ZLIB_SOURCES, ZLIB_DEFINES, LINUX_PROFILE, MINIUPNPC_DEFINES, MINIUPNPC_DIR, MUSL_MATH_DIR, XDK_INCLUDE,
                           compile_launcher, miniupnpc_sources, musl_math_sources, pgo_mode, pgo_profile,
-                          profile_use_flags, xdk_headers)
+                          profile_use_flags, xdk_headers, OPUS_DIR, OPUS_FLAGS, OPUS_INCLUDES, opus_sources)
 from .ninja_syntax import Writer
 
 PORT_DIR = Path("port/android")
@@ -446,7 +446,7 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         f"-include {prefix_header}", f"-include {platform_semantics_header}",
         f"-I{LINUX_DIR}/src", f"-I{LINUX_DIR}/include", f"-I{PORT_DIR}/guest/runtime",
         f"-I{PORT_DIR}/include", f"-I{TOML_DIR}", f"-I{EXPAT_DIR}", f"-I{KCP_DIR}", f"-I{MONOCYPHER_DIR}",
-        "-Isource -Isource/cseries",
+        f"-I{OPUS_DIR / 'include'}", "-Isource -Isource/cseries",
         f"-I{SDL_DIR}/include", f"-I{gl_include}", *libc_includes, f"-idirafter {XDK_INCLUDE}",
     ])
     guest_host_only = {"memory_watch.c"}  # replaced by guest_memory_watch.c
@@ -470,6 +470,10 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     # internet play's signatures and password keys (port/third_party/monocypher)
     for name in ("monocypher.c", "monocypher-ed25519.c"):
         objects.append(guest_object(MONOCYPHER_DIR / name, platform_cflags))
+    # voice chat's codec (port/third_party/opus)
+    for source in opus_sources():
+        objects.append(guest_object(source, " ".join([guest_abi, guest_code, "-std=gnu11", "-w", profile_flags,
+                                                      *libc_includes, *OPUS_FLAGS, *OPUS_INCLUDES])))
     # the game's sin, pow and the rest, the same on every port
     # (port/include/halo_math.h)
     musl_math_cflags = " ".join([
