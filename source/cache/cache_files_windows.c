@@ -1457,8 +1457,19 @@ static void cache_file_get_map_path(
 {
 #ifdef HALO_LINUX
 	/* (every caller's path is 256 characters; the name can come from a
-	multiplayer host) */
-	snprintf(path, 256, "%s%s.map", cache_files_map_directory(), map_name);
+	multiplayer host). port (from OpenCE, MrBruh's "Validate map tags before
+	loading"): one that doesn't fit is no path (no file is found), not a cut
+	one (another file could be) */
+	{
+		int length = snprintf(path, 256, "%s%s.map", cache_files_map_directory(), map_name);
+
+		if (length < 0 || length >= 256)
+		{
+			error(_error_silent, "map path for '%.64s' is too long", map_name);
+			path[0] = 0;
+			return;
+		}
+	}
 	/* or the OpenSauce .yelo cache of that name, which the header check
 	names and refuses; every caller's path holds 256 characters
 	(port/linux/game/custom_edition_cache.c) */

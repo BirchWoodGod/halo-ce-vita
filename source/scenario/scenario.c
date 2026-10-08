@@ -817,7 +817,9 @@ short scenario_object_name_index_from_string(
 {
 	short object_name_index;
 
-	for (object_name_index = 0; object_name_index < scenario->object_names.count; object_name_index++)
+	/* port: no more than the short counter reaches (a map's count; past it
+	the counter wraps and the loop never ends) */
+	for (object_name_index = 0; object_name_index < MIN(scenario->object_names.count, SHORT_MAX); object_name_index++)
 	{
 		struct scenario_object_name *object_name = TAG_BLOCK_GET_ELEMENT(
 			&scenario->object_names,
@@ -839,8 +841,9 @@ short scenario_get_structure_reference_index_from_tag_index(
 	short structure_bsp_reference_index;
 	short result = NONE;
 
+	/* port: no more than the short counter reaches (a map's count) */
 	for (structure_bsp_reference_index = 0;
-		structure_bsp_reference_index < scenario->structure_bsp_references.count;
+		structure_bsp_reference_index < MIN(scenario->structure_bsp_references.count, SHORT_MAX);
 		structure_bsp_reference_index++)
 	{
 		struct scenario_structure_bsp_reference *reference = TAG_BLOCK_GET_ELEMENT(
@@ -1106,10 +1109,16 @@ boolean scenario_switch_structure_bsp(
 	short proc_index;
 	boolean loaded;
 	struct scenario_structure_bsp_reference *reference;
+	/* port: (the bsp loaded before, loaded again if the new one is refused) */
+	short old_structure_bsp_index = NONE;
 
+	/* port: and one the per-bsp arrays hold (MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO:
+	breakable_surfaces.c's; a map's count. The retail scenarios have at most
+	13 bsps) */
 	if (structure_bsp_index != global_structure_bsp_index &&
 		structure_bsp_index >= 0 &&
-		structure_bsp_index < global_scenario->structure_bsp_references.count)
+		structure_bsp_index < global_scenario->structure_bsp_references.count &&
+		structure_bsp_index < MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO)
 	{
 		reference = TAG_BLOCK_GET_ELEMENT(
 			&global_scenario->structure_bsp_references,
@@ -1137,6 +1146,7 @@ boolean scenario_switch_structure_bsp(
 				scenario_structure_bsp_disconnect_procs[proc_index]();
 
 			had_old_structure_bsp = TRUE;
+			old_structure_bsp_index = global_structure_bsp_index;
 			scenario_structure_bsp_unload(TAG_BLOCK_GET_ELEMENT(
 				&global_scenario->structure_bsp_references,
 				global_structure_bsp_index,
@@ -1155,6 +1165,39 @@ boolean scenario_switch_structure_bsp(
 			error(_error_silent, "structure bsp #%d has more than the game can hold", structure_bsp_index);
 			scenario_structure_bsp_unload(reference);
 			loaded = FALSE;
+		}
+		/* port: a bsp refused (by its checks: cache_files.c) after the old
+		one was let go of leaves the game with none, where the old one's
+		pointers lead into what was read in its place: the old one is loaded
+		again (it loaded before), and with that refused too the game goes back
+		to the main menu with no bsp, rather than play on in a bsp it hasn't
+		checked. (A map's first bsp refused refuses the map: scenario_load) */
+		if (!loaded)
+		{
+			/* (silent: an immediate error stops the game, which on the Vita
+			is a crash; the refusal goes back to the menu with its message,
+			halo_map_load_refused, or plays on in the old bsp) */
+			error(_error_silent, "failed to load structure bsp #%d", structure_bsp_index);
+			global_structure_bsp = NULL;
+			global_collision_bsp = NULL;
+			global_bsp3d = NULL;
+			if (old_structure_bsp_index != NONE)
+			{
+				structure_bsp_index = old_structure_bsp_index;
+				reference = TAG_BLOCK_GET_ELEMENT(
+					&global_scenario->structure_bsp_references,
+					structure_bsp_index,
+					struct scenario_structure_bsp_reference);
+				loaded = scenario_structure_bsp_load(reference);
+				if (loaded &&
+					!structure_bsp_port_verify(structure_bsp_definition_get(reference->structure_bsp.index)))
+				{
+					scenario_structure_bsp_unload(reference);
+					loaded = FALSE;
+				}
+			}
+			if (!loaded && had_old_structure_bsp)
+				main_goto_main_menu();
 		}
 
 		if (loaded)
@@ -1176,7 +1219,8 @@ boolean scenario_switch_structure_bsp(
 				for (proc_index = 0; proc_index < NUMBEROF(scenario_structure_bsp_reconnect_proc_table); proc_index++)
 					scenario_structure_bsp_reconnect_procs[proc_index]();
 			}
-			result = TRUE;
+			/* port: (not when it is the old one, loaded again) */
+			result = structure_bsp_index != old_structure_bsp_index;
 		}
 #ifdef HALO_LINUX
 		/* port: a Custom Edition map's first structure BSP that cannot be
@@ -1190,8 +1234,9 @@ boolean scenario_switch_structure_bsp(
 		else
 		{
 			/* port: named by its index: its name is the map's pointer, and a
-			bsp is refused when its reference is damaged (cache_files.c) */
-			error(_error_immediate, "failed to load structure bsp #%d", structure_bsp_index);
+			bsp is refused when its reference is damaged (cache_files.c);
+			silent, as above */
+			error(_error_silent, "failed to load structure bsp #%d", structure_bsp_index);
 		}
 
 		collision_log_enable(TRUE);
