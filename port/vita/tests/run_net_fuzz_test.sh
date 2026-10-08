@@ -10,6 +10,9 @@
 #   map_share  map sharing's message rules (port/linux/game/map_share_protocol.c)
 #   chat       game chat's rules: a joiner's request, a host's relay, their
 #              text and names, links, flood limits (port/linux/game/chat_protocol.c)
+#   voice      voice chat's rules: a machine's frames, the host's relay, the
+#              jitter buffer, the talkers (port/linux/game/voice_protocol.c),
+#              and the Opus decoder fed what they pass (port/third_party/opus)
 # Each is built 32-bit as the game is, with AddressSanitizer and UBSan, and
 # runs its checks and the cases kept in net_fuzz_cases/<target> (inputs that
 # found bugs, and seeds); any out-of-bounds access, overflow or failed
@@ -18,7 +21,7 @@
 #                        (clang's i386 runtime, its COMDAT groups taken out
 #                        when it does not link as it is); what it finds goes
 #                        to NET_FUZZ_OUT (default a folder under TMPDIR)
-#   NET_FUZZ_TARGETS     the targets (default all five)
+#   NET_FUZZ_TARGETS     the targets (default all six)
 # Needs the Linux build configured in this tree (build.ninja: its compiler and
 # the game's flags; build/linux/halo_msvc_semantics.h) and clang that targets
 # i686 (CLANG, default the Linux build's compiler).
@@ -28,7 +31,7 @@ root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/net_fuzz_test.$$
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
-targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share chat"}
+targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share chat voice"}
 seconds=${NET_FUZZ_SECONDS:-0}
 mkdir -p "$out"
 cd "$root"
@@ -38,6 +41,7 @@ platform_flags="--target=i686-linux-gnu -m32 -fms-extensions -fshort-wchar -mali
 	-fno-strict-aliasing -fwrapv -freg-struct-return -ffunction-sections -fdata-sections -O1 -g -std=gnu11 -D_GNU_SOURCE
 	-DHALO_LINUX_PLATFORM_LAYER -DHALO_VITA -w -include port/linux/include/halo_linux_prefix.h
 	-Iport/linux/src -Iport/linux/include -Iport/linux/game -Iport/third_party/kcp -Iport/third_party/monocypher
+	-Iport/third_party/opus/include
 	-Isource -Isource/cseries
 	-idirafter port/include/xdk"
 # (one line: the commands are built with eval, for the game's quoted include
@@ -70,6 +74,27 @@ if [ "$seconds" != 0 ]; then
 fi
 
 status=0
+# (voice: the codec, built once, as the game builds it - tools/linux_build.py's
+# OPUS_FLAGS - with the sanitizers, in parallel; and again for libFuzzer)
+opus_objects=; opus_fuzz_objects=
+case " $targets " in *" voice "*)
+	mkdir -p "$out/opus"
+	opus_flags="--target=i686-linux-gnu -m32 -O1 -g -std=gnu11 -w -DOPUS_BUILD -DFIXED_POINT -DDISABLE_FLOAT_API -fwrapv
+		-DVAR_ARRAYS -Iport/third_party/opus/include -Iport/third_party/opus/celt -Iport/third_party/opus/silk
+		-Iport/third_party/opus/silk/fixed -Iport/third_party/opus/src"
+	opus_flags=$(echo $opus_flags)
+	for variant in plain fuzz; do
+		[ $variant = fuzz ] && [ -z "$libfuzzer" ] && continue
+		extra=; [ $variant = fuzz ] && extra=-fsanitize=fuzzer-no-link
+		ls port/third_party/opus/celt/*.c port/third_party/opus/silk/*.c port/third_party/opus/silk/fixed/*.c \
+			port/third_party/opus/src/*.c | xargs -P "$(nproc 2>/dev/null || echo 4)" -I{} sh -c \
+			'"$1" $2 $3 $4 -c "{}" -o "$5/opus/$(echo "{}" | tr / _).$6.o"' - "$clang" "$opus_flags" "$sanitize" \
+			"$extra" "$out" $variant
+	done
+	opus_objects=$(ls "$out"/opus/*.plain.o | tr '\n' ' ')
+	[ -n "$libfuzzer" ] && opus_fuzz_objects=$(ls "$out"/opus/*.fuzz.o | tr '\n' ' ')
+	;;
+esac
 # (p2p_crypto.c's Ed25519 and Argon2, for the server browser)
 monocypher="port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c"
 for target in $targets; do
@@ -78,12 +103,14 @@ for target in $targets; do
 	signal) flags=$platform_flags; sources="port/vita/tests/net_fuzz_signal.c $monocypher" ;;
 	map_share) flags=$platform_flags; sources="port/vita/tests/net_fuzz_map_share.c port/linux/src/p2p_crypto.c $monocypher" ;;
 	chat) flags=$platform_flags; sources="port/vita/tests/net_fuzz_chat.c" ;;
+	voice) flags=$platform_flags; sources="port/vita/tests/net_fuzz_voice.c" ;;
 	messages) flags=$game_flags; sources="port/vita/tests/net_fuzz_messages.c source/memory/data_packet_groups.c
 		source/memory/data_packets.c source/memory/data_encoding.c source/memory/byte_swapping.c
 		source/bungie_net/common/message_header.c" ;;
 	*) echo "FAIL unknown target $target"; status=1; continue ;;
 	esac
 	objects=; fuzz_objects=
+	[ $target = voice ] && objects=$opus_objects && fuzz_objects=$opus_fuzz_objects
 	for source in $sources; do
 		object="$out/$target.$(basename "$source" .c)"
 		extra=
