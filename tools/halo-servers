@@ -1,0 +1,143 @@
+#!/bin/bash
+# halo-servers: the dedicated servers of one machine, run by systemd's
+# halo-server@.service, one folder each in /opt/halo/servers
+# (port/linux/DEDICATED_SERVER.md, "Several servers on one VPS").
+#
+#   halo-servers list                  the servers: folder, unit, ports, name
+#   halo-servers status [NAME...]      each one's state, code, game and players
+#                                      (from its log since it last started)
+#   halo-servers start|stop|restart NAME...|all
+#   halo-servers enable|disable NAME...|all   (started at boot, or not)
+#   halo-servers logs NAME [-f] [journalctl's options...]
+#
+# Starting and stopping need root (sudo); reading the logs, root or the
+# systemd-journal group. HALO_SERVERS_ROOT: the folders (default
+# /opt/halo/servers); HALO_SERVERS_UNIT: the unit (default halo-server@).
+# HALO_SERVERS_LOGS=files reads each folder's run.log instead of the journal
+# (servers started by hand, halo-server ... > run.log; the tests).
+set -u
+root=${HALO_SERVERS_ROOT:-/opt/halo/servers}
+unit=${HALO_SERVERS_UNIT:-halo-server@}
+
+usage() {
+	sed -n '2,/^set -u/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2
+	exit 2
+}
+
+# the servers' names: the folders with an init.txt
+servers() {
+	local folder
+	for folder in "$root"/*/; do
+		[ -f "$folder/init.txt" ] && basename "$folder"
+	done
+}
+
+# NAME... or all -> the names (an unknown one is an error)
+names() {
+	local name
+	if [ "$#" = 0 ]; then echo "halo-servers: which server? (a name, or all)" >&2; exit 2; fi
+	if [ "$1" = all ]; then servers; return; fi
+	for name in "$@"; do
+		case $name in */*|.*|'') echo "halo-servers: $name is not a server's name" >&2; exit 2 ;; esac
+		[ -f "$root/$name/init.txt" ] || { echo "halo-servers: no server $name ($root/$name/init.txt)" >&2; exit 2; }
+		echo "$name"
+	done
+}
+
+# an init.txt command's value (the last one: the server takes the last)
+setting() { # setting NAME COMMAND
+	sed -n "s/^[[:space:]]*$2[[:space:]]\{1,\}//p" "$root/$1/init.txt" | tail -1 | sed 's/^"\(.*\)"[[:space:]]*$/\1/; s/[[:space:]]*$//'
+}
+
+state() { # the unit's state: active, inactive, failed...
+	if [ "${HALO_SERVERS_LOGS:-journal}" = files ]; then
+		echo "-"
+	else
+		systemctl is-active "$unit$1.service" 2>/dev/null || true
+	fi
+}
+
+# the server's log since it last started
+log_since_start() {
+	if [ "${HALO_SERVERS_LOGS:-journal}" = files ]; then
+		cat "$root/$1/run.log" 2>/dev/null
+	else
+		journalctl -u "$unit$1.service" -o cat --no-pager -n 20000 2>/dev/null
+	fi | awk '/^server: Halo CE for PS Vita dedicated server, network version/ { n = 0 } { line[n++] = $0 }
+		END { for (i = 0; i < n; i++) print line[i] }'
+}
+
+list() {
+	local name port game_port
+	printf "%-12s %-10s %-6s %-11s %s\n" SERVER STATE PORT GAME-PORTS NAME
+	for name in $(servers); do
+		port=$(setting "$name" sv_port)
+		game_port=$(setting "$name" sv_game_port)
+		# (the server's own rule when sv_game_port is not given: 5150 for
+		# 2302, two more for each port after it)
+		if [ -z "$game_port" ]; then
+			game_port=5150
+			[ -n "$port" ] && [ "$port" -gt 2302 ] 2>/dev/null && [ "$port" -lt 2402 ] && game_port=$((5150 + 2 * (port - 2302)))
+		fi
+		printf "%-12s %-10s %-6s %-11s %s\n" "$name" "$(state "$name")" "${port:-2302}" "$game_port-$((game_port + 1))" \
+			"$(setting "$name" sv_name)"
+	done
+}
+
+status() {
+	local name
+	for name in "$@"; do
+		log_since_start "$name" | awk -v server="$name" -v state="$(state "$name")" '
+			/^server: Halo CE for PS Vita dedicated server/ { started = 1 }
+			/^server: hosting; Vitas join with the code / { code = $8; sub(/,$/, "", code) }
+			/^server: the game starts: / { s = $0; sub(/^server: the game starts: /, "", s); sub(/, [0-9]+ players?$/, "", s);
+				game = s; where = "playing" }
+			/^server: the next game: / { s = $0; sub(/^server: the next game: /, "", s); game = s; where = "lobby" }
+			/^server: the game ends/ { where = "scores" }
+			/^server: nobody is left/ { where = "lobby" }
+			/^server: stopping/ { where = "stopped"; for (slot in player) delete player[slot] }
+			/^server: player #[0-9]+ .* joined from / {
+				slot = $3; sub(/^#/, "", slot); s = $0; sub(/^server: player #[0-9]+ /, "", s); sub(/ joined from .*$/, "", s)
+				player[slot] = s }
+			/^server: player #[0-9]+ .* left$/ { slot = $3; sub(/^#/, "", slot); delete player[slot] }
+			END {
+				count = 0; who = ""
+				for (slot in player) { count++; who = who (who == "" ? "" : ", ") player[slot] }
+				printf "%s: %s", server, state
+				if (!started) { print "; no log since it started"; exit }
+				printf "; %s", (where == "" ? "starting" : where)
+				if (game != "") printf ", %s", game
+				printf "; %d player%s%s", count, (count == 1 ? "" : "s"), (count ? " (" who ")" : "")
+				if (code != "") printf "; code %s", code
+				printf "\n"
+			}'
+	done
+}
+
+command=${1:-}
+[ -n "$command" ] || usage
+shift
+case $command in
+list) list ;;
+status)
+	if [ "$#" = 0 ]; then set -- $(servers); fi
+	status $(names "$@")
+	;;
+start|stop|restart|enable|disable)
+	units=
+	for name in $(names "$@"); do units="$units $unit$name.service"; done
+	[ -n "$units" ] || { echo "halo-servers: no servers in $root" >&2; exit 1; }
+	exec systemctl "$command" $units
+	;;
+logs)
+	[ "$#" -ge 1 ] || usage
+	name=$(names "$1") || exit 2
+	shift
+	if [ "${HALO_SERVERS_LOGS:-journal}" = files ]; then
+		if [ "${1:-}" = -f ]; then exec tail -f "$root/$name/run.log"; else exec cat "$root/$name/run.log"; fi
+	fi
+	exec journalctl -u "$unit$name.service" -o cat "$@"
+	;;
+-h|--help|help) usage ;;
+*) echo "halo-servers: unknown command $command" >&2; usage ;;
+esac
