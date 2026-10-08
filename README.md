@@ -52,6 +52,21 @@ one: the biggest fights still drop frames (see [Performance](#performance)).
 
 ## Install
 
+### Easy install (Windows tool)
+
+The install helper, `HaloCEVitaInstaller.exe` (attached to each
+[release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) next
+to `halo.vpk`; or, on any system with Python,
+[tools/installer/halo_ce_vita_installer.py](tools/installer/halo_ce_vita_installer.py)),
+does the steps below for you: it takes the maps folder and `default.xbe` out
+of your Xbox disc image, converts the movies, gets Halo PC's three files
+(from Halo MCC on Steam, the Halo Custom Edition installer whatever its file
+name, or a folder), and copies everything to the Vita over VitaShell's FTP
+(press SELECT in VitaShell, and keep the Vita awake). It copies the VPK to
+`ux0:data/` too; you install it with VitaShell. It includes no game data.
+See [tools/installer/README-installer.md](tools/installer/README-installer.md).
+The manual steps follow.
+
 ### What you need
 
 - A PS Vita or PS TV with HENkaku/Ensō (firmware 3.60 to 3.74) and

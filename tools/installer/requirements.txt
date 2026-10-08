@@ -1,0 +1,2 @@
+# The tool itself needs only Python 3.8+ and its standard library (tkinter
+# for the window). Nothing to install.
