@@ -923,6 +923,33 @@ int halo_tick_hash_object_marks(long *saved, int maximum, int restore)
 	return count;
 }
 
+/* (tick_hash.c, HALO_TICK_HASH_MASK=2) what the render writes into the
+objects, their cached render state's index, saved and cleared, or put
+back: frame interpolation draws other moments than the ticks, and the
+render's cache then differs */
+int halo_tick_hash_object_render_marks(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	for (absolute_index = 0; absolute_index < object_header_data->count && count < maximum; absolute_index++)
+	{
+		struct object_header_datum *header = (struct object_header_datum *)
+			((char *)object_header_data->data + object_header_data->size * absolute_index);
+
+		if (!header->identifier || !header->datum)
+			continue;
+		if (restore)
+			header->datum->object.cached_render_state_index = saved[count++];
+		else
+		{
+			saved[count++] = header->datum->object.cached_render_state_index;
+			header->datum->object.cached_render_state_index = NONE;
+		}
+	}
+	return count;
+}
+
 /* (tick_hash.c, HALO_TICK_HASH_MASK) the objects' pool hashed as its live
 objects, in header order (the pool's free and compacted-away bytes keep
 stale stamps); called with the stamps cleared */

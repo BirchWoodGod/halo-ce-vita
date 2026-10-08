@@ -2760,3 +2760,40 @@ void lights_prepare_for_object_static(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port/linux/game/tick_hash.c, HALO_TICK_HASH_MASK=2) what the render
+writes into the lights (lights_preprocess_scene): each light's rasterizer
+light, its first-person weapon bit and its marker stamp (light_mark: a
+stamp per walk, as the objects' magic numbers), saved and cleared, or put
+back (three words a light) */
+int halo_tick_hash_light_render_marks(long *saved, int maximum, int restore)
+{
+	struct data_iterator iterator;
+	struct light_datum *light;
+	int count = 0;
+
+	if (!light_data)
+		return 0;
+	data_iterator_new(&iterator, light_data);
+	while ((light = (struct light_datum *)data_iterator_next(&iterator)) != NULL && count + 3 <= maximum)
+	{
+		if (restore)
+		{
+			light->rasterizer_light_index = saved[count++];
+			light->flags = (word)saved[count++];
+			light->marker = saved[count++];
+		}
+		else
+		{
+			saved[count++] = light->rasterizer_light_index;
+			saved[count++] = light->flags;
+			saved[count++] = light->marker;
+			light->rasterizer_light_index = NONE;
+			light->marker = 0;
+			light->flags &= ~FLAG(_point_light_attached_to_first_person_weapon_bit);
+		}
+	}
+	return count;
+}
+#endif

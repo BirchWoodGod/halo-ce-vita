@@ -1437,9 +1437,11 @@ VOID WINAPI DirectSoundDoWork(void)
 
 	if (frame_locked_mixing)
 	{
+		/* (HALO_FIXED_TICK_FRAMES: a tick's audio over that many frames) */
+		int halo_fixed_tick_frames(void);
 		static float buffer[(OUTPUT_RATE / 30) * OUTPUT_CHANNELS];
 
-		mix(buffer, OUTPUT_RATE / 30);
+		mix(buffer, OUTPUT_RATE / 30 / halo_fixed_tick_frames());
 	}
 	streams_complete_finished();
 	if (enabled < 0)
