@@ -2517,6 +2517,13 @@ static int sprite_texels_compute(const unsigned char *base, const struct xgpu_te
 	return 1;
 }
 
+/* (render_sprite.c) this translator finds sprites' texels; the OpenGL
+builds' (xbox_textures.c) does not */
+int vita_sprite_texel_bounds_available(void)
+{
+	return 1;
+}
+
 /* resource: the bitmap's Direct3D texture header; bounds: the sprite's UV
 rectangle (x0, y0, x1, y1); channels: 1 alpha, 2 colour, 3 either. 0 when
 unknown (draw the whole quad); otherwise *texels and the texture's level-0

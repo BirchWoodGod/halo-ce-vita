@@ -13,7 +13,9 @@ void platform_log(const char *format, ...);
 
 #include "frame_timing.h"
 
-void halo_texture_stats_report(void) __attribute__((weak));
+/* (the texture translator's: vita_textures.c, or xbox_textures.c, which
+reports nothing) */
+void halo_texture_stats_report(void);
 void halo_objects_census_report(void) __attribute__((weak));
 void halo_rasterizer_pools_report(void) __attribute__((weak));
 #ifdef HALO_VITA
@@ -167,8 +169,7 @@ void halo_frame_timing(int event, unsigned long game_ticks)
 		presented_frames = between_frames = paused_frames = interpolation_frames = two_a_tick_frames = 0;
 		/* (the texture caches' counts, the gxm builds' only, and the
 		objects in the game, with the same rhythm) */
-		if (halo_texture_stats_report)
-			halo_texture_stats_report();
+		halo_texture_stats_report();
 		if (halo_objects_census_report)
 			halo_objects_census_report();
 		if (halo_rasterizer_pools_report)
