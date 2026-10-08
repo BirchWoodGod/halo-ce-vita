@@ -1308,6 +1308,19 @@ boolean scenario_load(
 				return FALSE;
 			}
 		}
+		/* port: the objects it places name entries of their palettes
+		(object_types.c, object_types_scenario_palettes_valid) */
+		{
+			extern boolean object_types_scenario_palettes_valid(struct scenario *scenario);
+
+			if (!object_types_scenario_palettes_valid(global_scenario))
+			{
+				error(_error_silent, "scenario: '%s' places objects past its palettes; refusing it", name);
+				scenario_unload();
+				global_scenario_index = NONE;
+				return FALSE;
+			}
+		}
 #endif
 		if (global_scenario->structure_bsp_references.count > 0)
 		{

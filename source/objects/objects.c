@@ -5808,7 +5808,11 @@ static void object_compute_function_values(
 			}
 		}
 
+		/* port: (an index of no function turns nothing off: the map's, and a
+		flag past the byte's) */
 		if (function->turn_off_with_function_index!=NONE &&
+			function->turn_off_with_function_index>=0 &&
+			function->turn_off_with_function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS &&
 			!TEST_FLAG(object->object.functions_active_flags, function->turn_off_with_function_index))
 		{
 			function_is_active = FALSE;

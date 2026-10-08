@@ -1,0 +1,334 @@
+# Halo settings
+#
+# The game writes this file with the defaults when it is missing: delete
+# it to go back to them.
+
+[debug]
+
+# The port of the script console (telnet_console); the Xbox's was 23, which
+# only the administrator can listen on.
+telnet_console_port = 2424
+
+# The score that wins an automated test game (a short game, to test the next
+# one of debug.network_test's list); 0 the variant's own.
+network_test_score = 0
+
+# Seconds into an automated test game after which a joining machine leaves
+# it (as quitting from the pause menu does) and joins again, once; 0 never.
+network_test_rejoin = 0.0
+
+# Times a joining machine of an automated test whose join ended before its
+# game began (a map download cut off, refused) joins again; 0 never.
+network_test_retry = 0
+
+# The weapon network_test_pickup stands the player on: the first whose tag
+# name has this in it ("sniper", say); empty any.
+network_test_pickup_weapon = ""
+
+[game]
+
+# What the game's console shows on screen of what it logs: "important"
+# (bans, players dropped for cheating, what refuses a command, and the
+# asserts that stop the game), "all" (every line, the game's own
+# chatter too), or "none" (the asserts that stop the game only). What
+# a command prints shows whatever this is, and debug.txt has every line.
+console_log = "all"
+
+[display]
+
+# Columns of the 480-line picture: 0 for the display's shape, 640 for the
+# Xbox's 4:3.
+screen_width = 0
+
+# Wait for the display between frames; false draws as fast as possible.
+vsync = true
+
+# Draw a frame for every display refresh, blending between the game's 30
+# ticks a second; false keeps the original 30 frames a second.
+interpolation = true
+
+[audio]
+
+# Play sound.
+enabled = true
+
+# The volume of everything, 0.0 to 1.0.
+volume = 1.0
+
+[game]
+
+# Experimental: Halo Custom Edition (PC) maps in the maps folder are offered in
+# the multiplayer map list and run (docs/custom_edition_caches.md). Modded Xbox
+# maps need no setting.
+custom_edition = false
+
+# The language the game asks the Xbox for: "ja", "de", "fr", "es" or "it";
+# empty for English. The game data decides what is translated.
+language = "fr"
+
+[network]
+
+# This machine's IPv4 address for system link, for a machine on several
+# networks; empty chooses one.
+address = ""
+
+# Comma-separated IPv4 addresses system link sends its announcements to
+# instead of the local network's broadcast address (for VPNs); empty for
+# the local network.
+broadcast = ""
+
+# The netcode: "distributed" (port/linux/NETCODE.md) predicts each player's
+# own moves and lets the host decide the rest. It is the only one network
+# version 9 plays; the setting is kept so older settings files load.
+netcode = "distributed"
+
+# Internet play: hosting makes an invite link (logged, and put on the
+# clipboard) that lets whoever has it join over the internet; opening a
+# link (or copying one before switching to the game) joins. Only people
+# with the invite can join. Off keeps system link to the local network.
+online = true
+
+# Join the game of an invite link found on the clipboard when the game
+# comes to the front.
+join_from_clipboard = true
+
+# The UDP port internet play uses; 0 picks one. A fixed one can be
+# forwarded on the router, for networks whose NAT stops connections.
+tunnel_port = 0
+
+# Let internet play ask the router (UPnP) to forward its port, for
+# networks whose NAT stops connections: when a player joins this
+# machine's game, and when joining a game takes too long. False never
+# asks.
+allow_upnp = true
+
+# The file of the public MQTT brokers through which the machines of an
+# invite find each other (its messages are encrypted) and the server
+# browser's listings go, beside this file unless a full path (on the
+# Vita, the one in the game's package): one host:port on each line, up
+# to 4. Updates replace brokers.txt: keep a list of your own under
+# another name.
+brokers_file = "app0:brokers.txt"
+
+# Comma-separated host:port brokers in place of network.brokers_file's
+# (the automated tests' own); empty for the file's.
+signalling_brokers = ""
+
+# The file of the relays (port/relay) that carry internet play between
+# two machines whose NATs keep them from reaching each other directly,
+# beside this file unless a full path (on the Vita, the one in the
+# game's package, empty: none): one host:port on each line, up to 2. The
+# relay passes the tunnel's packets on, still encrypted; a direct
+# connection is always tried first and preferred.
+relays_file = "app0:relays.txt"
+
+# Comma-separated host:port relays in place of network.relays_file's;
+# empty for the file's.
+relays = ""
+
+# Let internet play go through a relay (this machine's, or the other
+# one's) when no direct connection can be made. False never uses or
+# offers one.
+allow_relay = true
+
+# Co-op over the network: a campaign level's short name ("a10" ...
+# "d40") makes every game this machine hosts co-op on that level, its
+# next round the campaign's next level; empty hosts the lobby's
+# multiplayer game. For tests: the Vita hosts co-op from the Campaign
+# menu (Y on the difficulty screen).
+coop_level = ""
+
+# The difficulty of the co-op games this machine hosts (network.coop_level):
+# 0 easy, 1 normal, 2 heroic, 3 legendary.
+coop_difficulty = 1
+
+# The most players a co-op game this machine hosts takes (2 to the
+# build's maximum). The host runs the campaign's AI and scripts for
+# everyone: the Vita's default is 4.
+coop_players = 4
+
+# Online co-op's extra enemies: "none", "per_player" (each squad of
+# enemies grows by coop_enemies for each player past the first) or
+# "multiplier" (each is coop_enemies_multiplier times as large, for any
+# number of players). Server Setup's EXTRA ENEMIES in co-op writes its
+# choice here.
+coop_enemies_mode = "none"
+
+# Online co-op's extra enemies per player, a percentage: for each player
+# past the first, each squad of enemies a level places gets this much of
+# itself more (100: as many again; 25 to 200). Server Setup's PER PLAYER
+# in co-op writes its choice here.
+coop_enemies = 50
+
+# Online co-op's static multiplier of its enemies: each squad of enemies
+# a level places is this many times as large (2 to 32). Server Setup's
+# MULTIPLIER in co-op writes its choice here.
+coop_enemies_multiplier = 2
+
+# Public STUN servers that tell this machine its internet address;
+# comma-separated host:port.
+stun_servers = "stun.l.google.com:19302,stun.cloudflare.com:3478"
+
+# Ad hoc play: system link with the machines of this machine's ad hoc
+# group (the Vita's wireless group without a router, joined from its
+# settings panel), carried as internet play carries it, with or without
+# network.online; nothing goes to the internet.
+adhoc = false
+
+# Whether a game this machine hosts for internet play is public (listed in
+# everyone's server browser: anyone can find and join it) or, false,
+# private (only those with its code or invite link can join); the Vita's
+# settings panel says for each game (OpenCE's setting).
+host_public = true
+
+# Whether a co-op game this machine hosts for internet play is public
+# (listed in everyone's server browser) or, false, private (joined by
+# its code or invite link): its own, which network.host_public (the
+# other games') never changes. X on the waiting screen of co-op hosted
+# from the campaign's menus writes its choice here (OpenCE's setting).
+coop_public = true
+
+# The server browser: public games are listed through the signalling
+# brokers, and the settings panel's Browse public games shows them.
+# False lists no game of this machine's and shows none.
+public_lobby = true
+
+# The name the server browser and the System Link list show for this
+# machine's games (printable ASCII, the first 15 characters in the
+# System Link list); empty for the game's own name (else "Halo"). The
+# Vita's settings panel (Multiplayer, Play, Lobby name) sets it.
+lobby_name = ""
+
+# The most players a game this machine hosts takes (2 to the build's
+# maximum; 0 for the build's maximum). A co-op game takes
+# network.coop_players. The Vita's settings panel (Multiplayer, Play,
+# Max players) sets it.
+max_players = 0
+
+# A password for the public games this machine hosts: the server browser
+# lets only those who know it join (the code and invite link still do);
+# empty for none.
+lobby_password = ""
+
+# A host's custom map, in a game joined without it: "ask" asks whether
+# to download it (in a game joined from the public lobby, with a warning:
+# its host is a stranger), "private" asks except in public lobby games,
+# "never" never offers one.
+map_downloads = "ask"
+
+# The name a player goes by in network games when their profile has none
+# (the default profiles); the Vita's user name on the Vita; empty for
+# "Player". A profile's own name always comes first.
+player_name = ""
+
+[update]
+
+# Look for a new version when the game starts, and offer to update to it;
+# false never looks (the game's "Do not ask again" writes false here).
+auto = false
+
+[debug]
+
+# Automated system link sessions for testing (port/linux/game/network_test.c):
+# "host:<map>" hosts a game on that map, "join" joins the first game found,
+# "join-public" joins the first game of internet play's public lobby,
+# "join-code:ABCD-EFGH" the game of that code; empty for none.
+network_test = ""
+
+# Seconds after hosting that an automated test game starts.
+network_test_start = 15.0
+
+# Every this many seconds an automated test host kills its last player; 0 never.
+network_test_kill = 0.0
+
+# Every this many seconds each automated test player hits the next with
+# their weapon; 0 never.
+network_test_shoot = 0.0
+
+# This many seconds into an automated test game the host seats its last
+# player as a vehicle's driver (and out 15 seconds on); 0 never.
+network_test_vehicle = 0.0
+
+# This many seconds into an automated test game the host stands its last
+# player on a weapon, which a joining player then picks up; 0 never.
+network_test_pickup = 0.0
+
+# Listen on 127.0.0.1 port 23 (telnet) for a script console that runs what
+# it is sent as the game's console does, with no password; false none.
+telnet_console = false
+
+# Milliseconds everything received is held back (a round trip between two
+# machines of twice it), to test the netcode as over the internet; 0 none.
+network_latency = 0.0
+
+# Percent of datagrams received that are dropped, for the same; 0 none.
+network_loss = 0.0
+
+# Percent of the datagrams received that are damaged at random, to test
+# that nothing a machine sends can crash the game; 0 none.
+network_corrupt = 0.0
+
+# Percent of the reads of streams that are damaged at random, for the
+# same (a damaged stream is closed, so a little goes a long way); 0 none.
+network_corrupt_stream = 0.0
+
+# Seconds after the start before anything is damaged, so that a game can
+# be set up and started first (a host's messages to its own client are
+# damaged too).
+network_corrupt_after = 0.0
+
+# "bot:<seed>" plays controller 1 with a scripted pattern (automated
+# network tests); empty for none.
+test_input = ""
+
+# Quit this many seconds after the window opens; 0 never.
+exit_after = 0.0
+
+# Run without a window, drawing nothing.
+null_renderer = false
+
+# Report OpenGL errors in the log.
+gl_debug = false
+
+# Log the renderer's draw counts once a second.
+gpu_stats = false
+
+# Log every draw of this frame; -1 none.
+gpu_trace_frame = -1
+
+# With gpu_trace_frame, also the vertex shader constants.
+gpu_trace_constants = false
+
+# Comma-separated ids of vertex shaders not to draw with.
+gpu_skip_vertex_shaders = ""
+
+# A folder to write the generated GLSL to; empty none.
+gpu_dump_shaders = ""
+
+# A GLSL expression every pixel shader shows instead of its result.
+gpu_debug_expression = ""
+
+# Pixel shaders show their first texture.
+gpu_debug_texture0 = false
+
+# Pixel shaders show their vertex colour.
+gpu_debug_flat = false
+
+# A folder to save frames to (with screenshot_every); empty none.
+screenshot_directory = ""
+
+# Save every this many frames to screenshot_directory; 0 none.
+screenshot_every = 0
+
+# A folder to write every texture to as it is uploaded; empty none.
+texture_dump_directory = ""
+
+# Log texture uploads.
+texture_log = false
+
+# Upload textures again every time they are used.
+texture_no_cache = false
+
+# Log where every game thread is this often, in seconds (read by the
+# app, port/android/host/host_debug.c); 0 never.
+sample_seconds = 0.0

@@ -2949,37 +2949,92 @@ falls behind real time, and its clients didn't: a client ran further and
 further ahead of the host, its AI units driven for more ticks by each
 control than the host's were, and corrected back. A co-op client now holds
 its tick while it is more than HALO_NET_COOP_LEAD_TICKS (default 6, 0 for
-never) ahead of the host's latest tick, so it plays at the host's pace,
-slower than real time with it. */
+never) ahead of the host.
+
+Ahead of the host as the host is now, not as its newest message said: the
+message has waited here since it came. Measured against the message's tick
+alone, a client was "ahead" by a heavy host's gaps between messages, and
+whenever the network held the host's messages back (a spike of a second
+over a home connection) it held its tick until they came: no tick, so no
+frame drawn, for as long as the spike - the co-op client's 0.2-1.2 s
+hitches over the internet in b30's fights (owner's test, Oct 8 2026), with
+nothing decoded, compiled or waited for. Now the host's tick is taken to
+have gone on since its message came, at 30 a second (for at most
+HALO_NET_COOP_SILENCE_MS, default 1500): a host that is slow still holds
+its clients back, its messages coming fresh with the few ticks it has made,
+and a network that is slow does not - the client plays on, predicting as in
+a multiplayer game, and takes the host's corrections when they come. (The
+client's clock started at the host's start message, so it already runs the
+one-way latency behind the host's.)
+Each hold is counted for the frame-hitch line (network_coop_client_pace_note). */
 static struct
 {
 	long holds;
 	long most_lead;
+	/* since the last note: frames held, the largest lead among them, and the
+	host's newest message's age then */
+	long held_frames;
+	long held_lead;
+	long held_age_ms;
 } client_pace;
 
 boolean network_coop_client_hold(
 	void)
 {
-	static long lead_limit = -1;
-	long host_time, lead;
+	static long lead_limit = -1, silence_limit_ms = -1;
+	long host_time, lead, age_ms, gone_on;
 
 	if (lead_limit < 0)
 	{
 		char const *setting = getenv("HALO_NET_COOP_LEAD_TICKS");
+		char const *silence = getenv("HALO_NET_COOP_SILENCE_MS");
 
 		lead_limit = setting && setting[0] ? atol(setting) : 6;
 		if (lead_limit < 0)
 			lead_limit = 0;
+		silence_limit_ms = silence && silence[0] ? atol(silence) : 1500;
+		if (silence_limit_ms < 0)
+			silence_limit_ms = 0;
 	}
 	if (!lead_limit || !coop_client() || (host_time = distributed_latest_host_time()) == NONE)
 		return FALSE;
-	lead = game_time_get() - host_time;
+	/* (the host's tick now: its message's, and the ticks since it came) */
+	age_ms = distributed_latest_host_time_age_ms();
+	if (age_ms < 0)
+		age_ms = 0;
+	gone_on = (MIN(age_ms, silence_limit_ms) * TICKS_PER_SECOND) / 1000;
+	lead = game_time_get() - host_time - gone_on;
 	if (lead > client_pace.most_lead)
 		client_pace.most_lead = lead;
 	if (lead <= lead_limit)
 		return FALSE;
 	client_pace.holds++;
+	client_pace.held_frames++;
+	if (lead > client_pace.held_lead)
+	{
+		client_pace.held_lead = lead;
+		client_pace.held_age_ms = age_ms;
+	}
 	return TRUE;
+}
+
+int network_coop_client_pace_note(
+	char *line,
+	int size)
+{
+	int length = 0;
+
+	if (size > 0)
+		line[0] = 0;
+	if (client_pace.held_frames && size > 0)
+	{
+		length = snprintf(line, (size_t)size, "held %ld frames for the host (%ld ticks ahead of it, its newest message %ld ms old)",
+			client_pace.held_frames, client_pace.held_lead, client_pace.held_age_ms);
+	}
+	client_pace.held_frames = 0;
+	client_pace.held_lead = 0;
+	client_pace.held_age_ms = 0;
+	return length;
 }
 
 void network_coop_client_pace_statistics(

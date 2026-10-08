@@ -6,13 +6,20 @@ The native ports' settings (port_config.h), parsed with tomlc17
 type, default, the HALO_* environment variable that overrides it and the
 comment written into a new file. The file is read once, on the first
 question; unknown keys and values of the wrong type are reported in the log
-and the defaults used instead, and the file itself is never rewritten once
-it exists, so that the player's edits and comments stay.
+and the defaults used instead. The file is changed only where it must be,
+so that the player's edits and comments stay: a setting new in this version
+added in its section, a setting the game writes (config_write_boolean) on
+its line, and a file that does not read as TOML put right, the file as it
+was kept beside it (config_repair). Nothing that would not read back is
+ever written.
 */
 
 #include "platform.h"
 #include "port_config.h"
 #include "tomlc17.h"
+#ifdef HALO_NOT_DESKTOP
+#include "posix.h"
+#endif
 
 #include <SDL3/SDL.h>
 #include <ctype.h>
@@ -70,9 +77,9 @@ struct config_setting
 
 /* co-op's defaults: on the Vitas (and the Linux build standing in for one,
 HALO_NET_AS_VITA) the host runs the campaign's AI and scripts for everyone
-at a Vita's speed, so two players and no extra enemies */
+at a Vita's speed, so four players and no extra enemies */
 #if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
-#define COOP_PLAYERS_DEFAULT "2"
+#define COOP_PLAYERS_DEFAULT "4"
 #define COOP_ENEMIES_MODE_DEFAULT "\"none\""
 #else
 #define COOP_PLAYERS_DEFAULT "16"
@@ -81,29 +88,6 @@ at a Vita's speed, so two players and no extra enemies */
 
 static const struct config_setting config_settings[] =
 {
-	{ "debug.telnet_console_port", _config_integer, "2323", "HALO_TELNET_CONSOLE_PORT", _environment_value,
-		_platform_all,
-		"The port of the script console (telnet_console); the Xbox's was 23, which\n"
-		"only the administrator can listen on." },
-	{ "debug.network_test_score", _config_integer, "0", "HALO_NETWORK_TEST_SCORE", _environment_value, _platform_all,
-		"The score that wins an automated test game (a short game, to test the next\n"
-		"one of debug.network_test's list); 0 the variant's own." },
-	{ "debug.network_test_rejoin", _config_real, "0.0", "HALO_NETWORK_TEST_REJOIN", _environment_value, _platform_all,
-		"Seconds into an automated test game after which a joining machine leaves\n"
-		"it (as quitting from the pause menu does) and joins again, once; 0 never." },
-	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
-		"Times a joining machine of an automated test whose join ended before its\n"
-		"game began (a map download cut off, refused) joins again; 0 never." },
-	{ "debug.network_test_pickup_weapon", _config_string, "\"\"", "HALO_NETWORK_TEST_PICKUP_WEAPON", _environment_value,
-		_platform_all,
-		"The weapon network_test_pickup stands the player on: the first whose tag\n"
-		"name has this in it (\"sniper\", say); empty any." },
-	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
-		"What the game's console shows on screen of what it logs: \"important\"\n"
-		"(bans, players dropped for cheating, what refuses a command, and the\n"
-		"asserts that stop the game), \"all\" (every line, the game's own\n"
-		"chatter too), or \"none\" (the asserts that stop the game only). What\n"
-		"a command prints shows whatever this is, and debug.txt has every line." },
 	{ "display.fullscreen", _config_boolean, "true", "HALO_FULLSCREEN", _environment_value, _platform_desktop,
 		"Start fullscreen, drawing at the display's resolution and shape; false\n"
 		"starts in a window, which draws the Xbox's 640x480. F11 switches." },
@@ -128,6 +112,12 @@ static const struct config_setting config_settings[] =
 	{ "input.invert_mouse", _config_boolean, "false", "HALO_MOUSE_INVERT", _environment_set_is_true, _platform_desktop,
 		"Moving the mouse forward looks down." },
 
+	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
+		"What the game's console shows on screen of what it logs: \"important\"\n"
+		"(bans, players dropped for cheating, what refuses a command, and the\n"
+		"asserts that stop the game), \"all\" (every line, the game's own\n"
+		"chatter too), or \"none\" (the asserts that stop the game only). What\n"
+		"a command prints shows whatever this is, and debug.txt has every line." },
 	{ "game.custom_edition", _config_boolean, "false", "HALO_CUSTOM_EDITION", _environment_set_is_true, _platform_all,
 		"Experimental: Halo Custom Edition (PC) maps in the maps folder are offered in\n"
 		"the multiplayer map list and run (docs/custom_edition_caches.md). Modded Xbox\n"
@@ -189,6 +179,26 @@ static const struct config_setting config_settings[] =
 	{ "network.signalling_brokers", _config_string, "\"\"", "HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Comma-separated host:port brokers in place of network.brokers_file's\n"
 		"(the automated tests' own); empty for the file's." },
+	{ "network.relays_file", _config_string,
+#ifdef HALO_VITA
+		"\"app0:relays.txt\"",
+#else
+		"\"relays.txt\"",
+#endif
+		"HALO_NET_RELAYS_FILE", _environment_value, _platform_all,
+		"The file of the relays (port/relay) that carry internet play between\n"
+		"two machines whose NATs keep them from reaching each other directly,\n"
+		"beside this file unless a full path (on the Vita, the one in the\n"
+		"game's package, empty: none): one host:port on each line, up to 2. The\n"
+		"relay passes the tunnel's packets on, still encrypted; a direct\n"
+		"connection is always tried first and preferred." },
+	{ "network.relays", _config_string, "\"\"", "HALO_NET_RELAYS", _environment_value, _platform_all,
+		"Comma-separated host:port relays in place of network.relays_file's;\n"
+		"empty for the file's." },
+	{ "network.allow_relay", _config_boolean, "true", "HALO_NET_ALLOW_RELAY", _environment_value, _platform_all,
+		"Let internet play go through a relay (this machine's, or the other\n"
+		"one's) when no direct connection can be made. False never uses or\n"
+		"offers one." },
 	{ "network.coop_level", _config_string, "\"\"", "HALO_NET_COOP_LEVEL", _environment_value, _platform_all,
 		"Co-op over the network: a campaign level's short name (\"a10\" ...\n"
 		"\"d40\") makes every game this machine hosts co-op on that level, its\n"
@@ -202,7 +212,7 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The most players a co-op game this machine hosts takes (2 to the\n"
 		"build's maximum). The host runs the campaign's AI and scripts for\n"
-		"everyone: the Vita's default is 2." },
+		"everyone: the Vita's default is 4." },
 	{ "network.coop_enemies_mode", _config_string, COOP_ENEMIES_MODE_DEFAULT, "HALO_NET_COOP_ENEMIES_MODE",
 		_environment_value, _platform_all,
 		"Online co-op's extra enemies: \"none\", \"per_player\" (each squad of\n"
@@ -236,8 +246,10 @@ static const struct config_setting config_settings[] =
 		"settings panel says for each game (OpenCE's setting)." },
 	{ "network.coop_public", _config_boolean, "false", "HALO_NET_COOP_PUBLIC", _environment_value, _platform_all,
 		"Whether a co-op game this machine hosts for internet play is public\n"
-		"(listed in everyone's server browser) or, false, private, until the\n"
-		"settings panel says (network.host_public: the other games')." },
+		"(listed in everyone's server browser) or, false, private (joined by\n"
+		"its code or invite link): its own, which network.host_public (the\n"
+		"other games') never changes. X on the waiting screen of co-op hosted\n"
+		"from the campaign's menus writes its choice here (OpenCE's setting)." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"
@@ -292,9 +304,26 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_pickup", _config_real, "0.0", "HALO_NETWORK_TEST_PICKUP", _environment_value, _platform_all,
 		"This many seconds into an automated test game the host stands its last\n"
 		"player on a weapon, which a joining player then picks up; 0 never." },
+	{ "debug.network_test_pickup_weapon", _config_string, "\"\"", "HALO_NETWORK_TEST_PICKUP_WEAPON", _environment_value,
+		_platform_all,
+		"The weapon network_test_pickup stands the player on: the first whose tag\n"
+		"name has this in it (\"sniper\", say); empty any." },
+	{ "debug.network_test_score", _config_integer, "0", "HALO_NETWORK_TEST_SCORE", _environment_value, _platform_all,
+		"The score that wins an automated test game (a short game, to test the next\n"
+		"one of debug.network_test's list); 0 the variant's own." },
+	{ "debug.network_test_rejoin", _config_real, "0.0", "HALO_NETWORK_TEST_REJOIN", _environment_value, _platform_all,
+		"Seconds into an automated test game after which a joining machine leaves\n"
+		"it (as quitting from the pause menu does) and joins again, once; 0 never." },
+	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
+		"Times a joining machine of an automated test whose join ended before its\n"
+		"game began (a map download cut off, refused) joins again; 0 never." },
 	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,
 		"Listen on 127.0.0.1 port 23 (telnet) for a script console that runs what\n"
 		"it is sent as the game's console does, with no password; false none." },
+	{ "debug.telnet_console_port", _config_integer, "2323", "HALO_TELNET_CONSOLE_PORT", _environment_value,
+		_platform_all,
+		"The port of the script console (telnet_console); the Xbox's was 23, which\n"
+		"only the administrator can listen on." },
 	{ "debug.network_latency", _config_real, "0.0", "HALO_NETWORK_LATENCY", _environment_value, _platform_all,
 		"Milliseconds everything received is held back (a round trip between two\n"
 		"machines of twice it), to test the netcode as over the internet; 0 none." },
@@ -457,7 +486,7 @@ static char *config_read_file(const char *path, size_t *size)
 #endif
 }
 
-static int config_write_file(const char *path, const char *text)
+static int config_write_file_length(const char *path, const char *text, size_t length)
 {
 #ifdef HALO_NOT_DESKTOP
 	FILE *file = fopen(path, "wb");
@@ -465,10 +494,27 @@ static int config_write_file(const char *path, const char *text)
 
 	if (!file)
 		return 0;
-	written = fwrite(text, 1, strlen(text), file) == strlen(text);
+	written = fwrite(text, 1, length, file) == length;
 	return fclose(file) == 0 && written;
 #else
-	return SDL_SaveFile(path, text, strlen(text));
+	return SDL_SaveFile(path, text, length);
+#endif
+}
+
+static int config_write_file(const char *path, const char *text)
+{
+	return config_write_file_length(path, text, strlen(text));
+}
+
+/* whether there is a file (or anything) at path */
+static int config_file_exists(const char *path)
+{
+#ifdef HALO_NOT_DESKTOP
+	struct posix_file_information information;
+
+	return posix_stat(path, &information) == 0;
+#else
+	return SDL_GetPathInfo(path, NULL);
 #endif
 }
 
@@ -478,10 +524,8 @@ struct config_text
 	size_t length, capacity;
 };
 
-static void config_append(struct config_text *text, const char *string)
+static void config_append_length(struct config_text *text, const char *string, size_t length)
 {
-	size_t length = strlen(string);
-
 	if (text->length + length + 1 > text->capacity)
 	{
 		size_t capacity = (text->capacity ? text->capacity : 4096) * 2 + length;
@@ -492,8 +536,27 @@ static void config_append(struct config_text *text, const char *string)
 		text->buffer = buffer;
 		text->capacity = capacity;
 	}
-	memcpy(text->buffer + text->length, string, length + 1);
+	memcpy(text->buffer + text->length, string, length);
 	text->length += length;
+	text->buffer[text->length] = 0;
+}
+
+static void config_append(struct config_text *text, const char *string)
+{
+	config_append_length(text, string, strlen(string));
+}
+
+/* string put into text at offset, what was there moved along */
+static void config_insert(struct config_text *text, size_t offset, const char *string)
+{
+	size_t length = strlen(string);
+	size_t before = text->length;
+
+	config_append_length(text, string, length);
+	if (text->length != before + length)
+		return;
+	memmove(text->buffer + offset + length, text->buffer + offset, before - offset);
+	memcpy(text->buffer + offset, string, length);
 }
 
 /* the first length characters of text, as a string of their own */
@@ -548,11 +611,24 @@ static void config_append_setting(struct config_text *text, const struct config_
 	config_append(text, buffer);
 }
 
-/* the file with every setting of this build at its default */
+/* whether the setting other is in name's section ("network" of
+"network.online") */
+static int config_same_section(const char *name, const char *other)
+{
+	const char *dot = strchr(name, '.');
+	size_t length = dot ? (size_t)(dot - name) : strlen(name);
+
+	return !strncmp(name, other, length) && other[length] == '.';
+}
+
+/* the file with every setting of this build at its default: each section
+once, with all its settings in the table's order. (A section's header
+written twice makes the whole file unreadable, "table defined more than
+once": 1.1's first files had [game] and [debug] twice, the table then
+having a debug and a game setting at its start) */
 static char *config_default_text(void)
 {
 	struct config_text text = { NULL, 0, 0 };
-	char section[32] = "";
 	size_t index;
 
 #ifdef HALO_NOT_DESKTOP
@@ -574,19 +650,90 @@ static char *config_default_text(void)
 		const struct config_setting *setting = &config_settings[index];
 		const char *dot = strchr(setting->name, '.');
 		char buffer[64];
+		size_t other;
 
 		if (!(setting->platforms & CONFIG_PLATFORM) || !dot)
 			continue;
-		if (strncmp(section, setting->name, (size_t)(dot - setting->name)) ||
-			section[dot - setting->name] != 0)
+		/* (the section written already, with this setting) */
+		for (other = 0; other < index; other++)
 		{
-			snprintf(section, sizeof(section), "%.*s", (int)(dot - setting->name), setting->name);
-			snprintf(buffer, sizeof(buffer), "\n[%s]\n", section);
-			config_append(&text, buffer);
+			if ((config_settings[other].platforms & CONFIG_PLATFORM) &&
+				config_same_section(setting->name, config_settings[other].name))
+			{
+				break;
+			}
 		}
-		config_append_setting(&text, setting);
+		if (other < index)
+			continue;
+		snprintf(buffer, sizeof(buffer), "\n[%.*s]\n", (int)(dot - setting->name), setting->name);
+		config_append(&text, buffer);
+		for (other = index; other < NUMBER_OF_CONFIG_SETTINGS; other++)
+		{
+			if ((config_settings[other].platforms & CONFIG_PLATFORM) &&
+				config_same_section(setting->name, config_settings[other].name))
+			{
+				config_append_setting(&text, &config_settings[other]);
+			}
+		}
 	}
 	return text.buffer;
+}
+
+/* the line's key, if it is "key = ..." (after spaces), in key */
+static int config_line_key(const char *line, const char *end, const char *key)
+{
+	size_t length = strlen(key);
+
+	while (line < end && (*line == ' ' || *line == '\t'))
+		line++;
+	if ((size_t)(end - line) <= length || strncmp(line, key, length) != 0)
+		return 0;
+	line += length;
+	while (line < end && (*line == ' ' || *line == '\t'))
+		line++;
+	return line < end && *line == '=';
+}
+
+/* the section the line opens, if it is "[section]": spaces allowed before
+it and inside the brackets ("[ network ]"), anything after. "[[...]]", an
+array of tables, opens none of ours; a name too long for section is "\1",
+no setting's */
+static int config_line_section(const char *line, const char *end, char *section, size_t size)
+{
+	const char *close;
+	size_t length;
+
+	while (line < end && (*line == ' ' || *line == '\t'))
+		line++;
+	if (line >= end || *line != '[' || (line + 1 < end && line[1] == '['))
+		return 0;
+	close = memchr(line, ']', (size_t)(end - line));
+	if (!close)
+		return 0;
+	for (line++; line < close && (*line == ' ' || *line == '\t'); line++)
+		;
+	for (length = (size_t)(close - line); length && (line[length - 1] == ' ' || line[length - 1] == '\t'); length--)
+		;
+	if (length >= size)
+	{
+		snprintf(section, size, "\1");
+		return 1;
+	}
+	memcpy(section, line, length);
+	section[length] = 0;
+	return 1;
+}
+
+/* whether text reads as TOML; if not, why in error (when given) */
+static int config_text_parses(const char *text, char *error, size_t size)
+{
+	toml_result_t result = toml_parse(text, (int)strlen(text));
+	int parses = result.ok;
+
+	if (!parses && error && size)
+		snprintf(error, size, "%s", result.errmsg);
+	toml_free(result);
+	return parses;
 }
 
 /* the settings of this build that text (the file, parsed as table) lacks,
@@ -605,24 +752,27 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 		const char *current = result ? result : text;
 		struct config_text block = { NULL, 0, 0 };
 		struct config_text updated = { NULL, 0, 0 };
-		char header[40];
+		char section[40], header[48];
 		const char *line;
 		const char *insert = NULL;
 
 		if (!(setting->platforms & CONFIG_PLATFORM) || !dot || toml_seek(table, setting->name).type != TOML_UNKNOWN)
 			continue;
-		snprintf(header, sizeof(header), "[%.*s]", (int)(dot - setting->name), setting->name);
+		snprintf(section, sizeof(section), "%.*s", (int)(dot - setting->name), setting->name);
+		snprintf(header, sizeof(header), "[%s]", section);
 		/* the end of the section's last line that is not blank */
 		for (line = current; *line; )
 		{
 			const char *start = line;
 			size_t length = strcspn(line, "\n");
+			char name[40];
+			int opens = config_line_section(line, line + length, name, sizeof(name));
 
 			while (*start == ' ' || *start == '\t')
 				start++;
-			if (insert && *start == '[')
+			if (insert && (opens || *start == '['))
 				break;
-			if (!insert && !strncmp(start, header, strlen(header)))
+			if (!insert && opens && !strcmp(name, section))
 				insert = line + length;
 			else if (insert && start < line + length && *start != '\r')
 				insert = line + length;
@@ -647,13 +797,7 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 		}
 		if (!block.buffer)
 			continue;
-		{
-			char *before = config_copy(current, (size_t)(insert - current));
-
-			if (before)
-				config_append(&updated, before);
-			free(before);
-		}
+		config_append_length(&updated, current, (size_t)(insert - current));
 		if (insert > current && insert[-1] != '\n')
 			config_append(&updated, "\n");
 		config_append(&updated, block.buffer);
@@ -667,6 +811,318 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 		}
 	}
 	return result;
+}
+
+/* text with the setting name's value (as TOML writes it) changed on its
+line, the rest kept as it is: the key's line in its section, or a dotted
+key's ("update.auto = true") before any section; when there is none, a
+line added after the section's last (a new section at the end when there
+is none). NULL when out of memory or name is no "section.key" */
+static char *config_text_set(const char *text, const char *name, const char *value)
+{
+	const char *dot = strchr(name, '.');
+	char section[64], current[64], line_text[1024];
+	struct config_text out = { NULL, 0, 0 };
+	const char *line;
+	size_t section_end = 0;
+	int written = 0, in_section = 0, any_section = 0;
+
+	if (!dot || (size_t)(dot - name) >= sizeof(section))
+		return NULL;
+	snprintf(section, sizeof(section), "%.*s", (int)(dot - name), name);
+	for (line = text; *line;)
+	{
+		const char *end = line + strcspn(line, "\n");
+		const char *next = *end ? end + 1 : end;
+		const char *start = line;
+
+		if (config_line_section(line, end, current, sizeof(current)))
+		{
+			if (in_section && !written)
+			{
+				snprintf(line_text, sizeof(line_text), "%s%s = %s\n",
+					section_end && out.buffer[section_end - 1] != '\n' ? "\n" : "", dot + 1, value);
+				config_insert(&out, section_end, line_text);
+				written = 1;
+			}
+			in_section = !strcmp(current, section);
+			any_section = 1;
+		}
+		else if (!written &&
+			((in_section && config_line_key(line, end, dot + 1)) || (!any_section && config_line_key(line, end, name))))
+		{
+			snprintf(line_text, sizeof(line_text), "%s = %s%s", in_section ? dot + 1 : name, value,
+				end > line && end[-1] == '\r' ? "\r\n" : "\n");
+			config_append(&out, line_text);
+			written = 1;
+			line = next;
+			continue;
+		}
+		config_append_length(&out, line, (size_t)(next - line));
+		while (start < end && (*start == ' ' || *start == '\t' || *start == '\r'))
+			start++;
+		if (in_section && start < end)
+			section_end = out.length;
+		line = next;
+	}
+	if (!written)
+	{
+		if (in_section)
+		{
+			snprintf(line_text, sizeof(line_text), "%s%s = %s\n",
+				section_end && out.buffer[section_end - 1] != '\n' ? "\n" : "", dot + 1, value);
+			config_insert(&out, section_end, line_text);
+		}
+		else
+		{
+			if (out.length && out.buffer[out.length - 1] != '\n')
+				config_append(&out, "\n");
+			snprintf(line_text, sizeof(line_text), "\n[%s]\n%s = %s\n", section, dot + 1, value);
+			config_append(&out, line_text);
+		}
+	}
+	return out.buffer;
+}
+
+/* ---------- a file that does not read
+
+Any error in a TOML file makes all of it unreadable, which left every
+setting at its default without a word on screen (1.1's files: a section
+written twice). It is put right where that can be done, the file as it
+was kept beside it as config.toml.broken. */
+
+/* the value text of the setting's line in text (as config_text_set finds
+it, the first), or NULL */
+static char *config_text_value(const char *text, const char *name)
+{
+	const char *dot = strchr(name, '.');
+	char section[64], current[64];
+	const char *line;
+	int in_section = 0, any_section = 0;
+
+	if (!dot || (size_t)(dot - name) >= sizeof(section))
+		return NULL;
+	snprintf(section, sizeof(section), "%.*s", (int)(dot - name), name);
+	for (line = text; *line;)
+	{
+		const char *end = line + strcspn(line, "\n");
+		const char *next = *end ? end + 1 : end;
+
+		if (config_line_section(line, end, current, sizeof(current)))
+		{
+			in_section = !strcmp(current, section);
+			any_section = 1;
+		}
+		else if ((in_section && config_line_key(line, end, dot + 1)) || (!any_section && config_line_key(line, end, name)))
+		{
+			const char *value = (const char *)memchr(line, '=', (size_t)(end - line)) + 1;
+
+			while (value < end && (*value == ' ' || *value == '\t'))
+				value++;
+			while (end > value && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r'))
+				end--;
+			return config_copy(value, (size_t)(end - value));
+		}
+		line = next;
+	}
+	return NULL;
+}
+
+/* whether value (TOML) reads on its own as a value of the setting's type */
+static int config_value_fits(const struct config_setting *setting, const char *value)
+{
+	struct config_text document = { NULL, 0, 0 };
+	toml_result_t result;
+	int fits = 0;
+
+	config_append(&document, "value = ");
+	config_append(&document, value);
+	config_append(&document, "\n");
+	if (!document.buffer)
+		return 0;
+	result = toml_parse(document.buffer, (int)document.length);
+	if (result.ok)
+	{
+		toml_datum_t datum = toml_seek(result.toptab, "value");
+
+		switch (setting->type)
+		{
+		case _config_boolean: fits = datum.type == TOML_BOOLEAN; break;
+		case _config_integer: fits = datum.type == TOML_INT64; break;
+		case _config_real: fits = datum.type == TOML_FP64 || datum.type == TOML_INT64; break;
+		case _config_string: fits = datum.type == TOML_STRING; break;
+		}
+	}
+	toml_free(result);
+	free(document.buffer);
+	return fits;
+}
+
+/* text with each section that is there more than once made one: the
+lines of the later ones moved to the end of the first. NULL if no section
+is there twice */
+static char *config_merge_sections(const char *text)
+{
+	struct config_block
+	{
+		const char *start, *body, *end;
+		char name[64];
+	} *blocks = NULL;
+	size_t count = 0, capacity = 0, index, other;
+	const char *line, *preamble_end = NULL;
+	struct config_text out = { NULL, 0, 0 };
+	int twice = 0;
+
+	for (line = text; *line;)
+	{
+		const char *end = line + strcspn(line, "\n");
+		const char *next = *end ? end + 1 : end;
+		char name[64];
+
+		if (config_line_section(line, end, name, sizeof(name)))
+		{
+			if (count == capacity)
+			{
+				struct config_block *grown = realloc(blocks, (capacity ? capacity * 2 : 16) * sizeof(*blocks));
+
+				if (!grown)
+				{
+					free(blocks);
+					return NULL;
+				}
+				blocks = grown;
+				capacity = capacity ? capacity * 2 : 16;
+			}
+			if (count)
+				blocks[count - 1].end = line;
+			else
+				preamble_end = line;
+			blocks[count].start = line;
+			blocks[count].body = next;
+			snprintf(blocks[count].name, sizeof(blocks[count].name), "%s", name);
+			count++;
+		}
+		line = next;
+	}
+	if (count)
+		blocks[count - 1].end = line;
+	for (index = 0; index < count && !twice; index++)
+	{
+		for (other = 0; other < index && !twice; other++)
+			twice = !strcmp(blocks[index].name, blocks[other].name);
+	}
+	if (!twice)
+	{
+		free(blocks);
+		return NULL;
+	}
+	config_append_length(&out, text, (size_t)(preamble_end - text));
+	for (index = 0; index < count; index++)
+	{
+		for (other = 0; other < index && strcmp(blocks[index].name, blocks[other].name); other++)
+			;
+		if (other < index)
+			continue;
+		config_append_length(&out, blocks[index].start, (size_t)(blocks[index].end - blocks[index].start));
+		for (other = index + 1; other < count; other++)
+		{
+			if (strcmp(blocks[index].name, blocks[other].name))
+				continue;
+			if (out.length && out.buffer[out.length - 1] != '\n')
+				config_append(&out, "\n");
+			config_append_length(&out, blocks[other].body, (size_t)(blocks[other].end - blocks[other].body));
+			platform_log("config.toml: [%s] was there more than once: made one", blocks[index].name);
+		}
+	}
+	free(blocks);
+	return out.buffer;
+}
+
+/* the defaults with each setting text has a value for that reads on its
+own (the first, if it is there twice) */
+static char *config_salvage(const char *text, int *read)
+{
+	char *result = config_default_text();
+	size_t index;
+
+	*read = 0;
+	for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS && result; index++)
+	{
+		const struct config_setting *setting = &config_settings[index];
+		char *value;
+
+		if (!(setting->platforms & CONFIG_PLATFORM) || !strchr(setting->name, '.'))
+			continue;
+		value = config_text_value(text, setting->name);
+		if (value && config_value_fits(setting, value))
+		{
+			char *updated = config_text_set(result, setting->name, value);
+
+			if (updated)
+			{
+				free(result);
+				result = updated;
+				(*read)++;
+			}
+		}
+		else if (value)
+		{
+			platform_log("config.toml: %s = %s does not read; it is back at its default, %s", setting->name, value,
+				setting->default_value);
+		}
+		free(value);
+	}
+	return result;
+}
+
+/* text (the file at path, size bytes) written to config.toml.broken (or
+.broken1 ... .broken9 when that is there), its name in backup */
+static int config_backup(const char *path, const char *text, size_t size, char *backup, size_t backup_size)
+{
+	int number;
+
+	for (number = 0; number < 10; number++)
+	{
+		if (number)
+			snprintf(backup, backup_size, "%s.broken%d", path, number);
+		else
+			snprintf(backup, backup_size, "%s.broken", path);
+		if (!config_file_exists(backup))
+			break;
+	}
+	return config_write_file_length(backup, text, size);
+}
+
+/* the file at path (text, size bytes), which does not read (error), put
+right: its sections that are there twice made one, or else written again
+from the defaults with every value of it that reads. The repaired text,
+which reads, (written to path when the file as it was could be kept
+beside it), or NULL */
+static char *config_repair(const char *path, const char *text, size_t size, const char *error)
+{
+	char *repaired = config_merge_sections(text);
+	char how[96], backup[1100];
+	int read = 0;
+
+	snprintf(how, sizeof(how), "its sections that were there twice made one");
+	if (!repaired || !config_text_parses(repaired, NULL, 0))
+	{
+		free(repaired);
+		repaired = config_salvage(text, &read);
+		snprintf(how, sizeof(how), "written again with the defaults and the %d settings of it that read", read);
+	}
+	if (!repaired || !config_text_parses(repaired, NULL, 0))
+	{
+		free(repaired);
+		return NULL;
+	}
+	if (!config_backup(path, text, size, backup, sizeof(backup)))
+		platform_log("config.toml: %s; read as %s, the file left as it is (%s cannot be written)", error, how, backup);
+	else if (!config_write_file(path, repaired))
+		platform_log("config.toml: %s; read as %s (kept as %s), but it cannot be written", error, how, backup);
+	else
+		platform_log("config.toml: %s; repaired: %s. The file as it was is %s", error, how, backup);
+	return repaired;
 }
 
 /* ---------- values */
@@ -822,25 +1278,50 @@ static void config_load(void)
 	{
 		toml_result_t result = toml_parse(text, (int)size);
 
+		if (!result.ok)
+		{
+			char error[sizeof(result.errmsg)];
+			char *repaired;
+
+			snprintf(error, sizeof(error), "%s", result.errmsg);
+			toml_free(result);
+			repaired = config_repair(path, text, size, error);
+			if (repaired)
+			{
+				free(text);
+				text = repaired;
+				size = strlen(text);
+			}
+			result = toml_parse(text, (int)size);
+		}
 		if (result.ok)
 		{
 			char *completed;
+			char error[sizeof(result.errmsg)];
 
 			for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 				config_set_from_file(&config_values[index], &config_settings[index], result.toptab);
 			config_report_unknown_keys(result.toptab);
 			platform_log("settings: %s", path);
 			completed = config_add_missing(text, result.toptab);
-			if (completed && !config_write_file(path, completed))
+			/* (never a file that does not read back) */
+			if (completed && !config_text_parses(completed, error, sizeof(error)))
+				platform_log("settings: the settings new in this version not added to %s (%s)", path, error);
+			else if (completed && !config_write_file(path, completed))
 				platform_log("settings: cannot write %s", path);
 			free(completed);
 		}
 		else
 		{
-			platform_log("config.toml: %s; using the defaults", result.errmsg);
+			platform_log("config.toml: %s; using the defaults (the file is left as it is)", result.errmsg);
 		}
 		toml_free(result);
 		free(text);
+	}
+	else if (config_file_exists(path))
+	{
+		/* (not written over: it may be the player's, there but unreadable now) */
+		platform_log("settings: cannot read %s; using the defaults (the file is left as it is)", path);
 	}
 	else
 	{
@@ -898,112 +1379,39 @@ static const struct config_value *config_value(const char *name, enum config_typ
 
 /* ---------- writing a setting */
 
-/* the line's key, if it is "key = ..." (after spaces), in key */
-static int config_line_key(const char *line, const char *end, const char *key)
-{
-	size_t length = strlen(key);
-
-	while (line < end && (*line == ' ' || *line == '\t'))
-		line++;
-	if ((size_t)(end - line) <= length || strncmp(line, key, length) != 0)
-		return 0;
-	line += length;
-	while (line < end && (*line == ' ' || *line == '\t'))
-		line++;
-	return line < end && *line == '=';
-}
-
-/* the section the line opens, if it is "[section]" (after spaces) */
-static int config_line_section(const char *line, const char *end, char *section, size_t size)
-{
-	const char *close;
-
-	while (line < end && (*line == ' ' || *line == '\t'))
-		line++;
-	if (line >= end || *line != '[')
-		return 0;
-	close = memchr(line, ']', (size_t)(end - line));
-	if (!close || (size_t)(close - line - 1) >= size)
-		return 0;
-	memcpy(section, line + 1, (size_t)(close - line - 1));
-	section[close - line - 1] = 0;
-	return 1;
-}
-
 /* sets a boolean setting, for now and in config.toml: its line there is
 changed (or added), the rest of the file kept as it is */
 int config_write_boolean(const char *name, int value)
 {
-	const char *dot = strchr(name, '.');
 	long index = config_setting_index(name);
-	char section[64], key[64], wanted[80], current[64] = "", line_text[96], path[1024];
-	struct config_text out = { 0 };
+	char path[1024], error[200];
 	size_t size = 0;
-	char *text;
-	const char *line;
-	int written = 0, in_section = 0, succeeded;
+	char *text, *updated = NULL;
+	int succeeded = 0;
 
-	if (index < 0 || config_settings[index].type != _config_boolean || !dot || (size_t)(dot - name) >= sizeof(section))
+	if (index < 0 || config_settings[index].type != _config_boolean || !strchr(name, '.'))
 		return 0;
 	/* (the file read first, as the other settings are) */
 	config_boolean(name);
 	pthread_mutex_lock(&config_lock);
 	config_values[index].boolean = value != 0;
-	snprintf(section, sizeof(section), "%.*s", (int)(dot - name), name);
-	snprintf(key, sizeof(key), "%s", dot + 1);
-	snprintf(line_text, sizeof(line_text), "%s = %s\n", key, value ? "true" : "false");
-	snprintf(wanted, sizeof(wanted), "%s", section);
 	config_path(path, sizeof(path));
 	text = config_read_file(path, &size);
-	for (line = text ? text : ""; *line;)
-	{
-		const char *end = line + strcspn(line, "\n");
-		const char *next = *end ? end + 1 : end;
-
-		if (config_line_section(line, end, current, sizeof(current)))
-		{
-			/* (leaving the section without the key: it goes at its end) */
-			if (in_section && !written)
-			{
-				config_append(&out, line_text);
-				written = 1;
-			}
-			in_section = !strcmp(current, wanted);
-		}
-		else if (in_section && !written && config_line_key(line, end, key))
-		{
-			config_append(&out, line_text);
-			written = 1;
-			line = next;
-			continue;
-		}
-		{
-			char *copy = config_copy(line, (size_t)(next - line));
-
-			if (copy)
-			{
-				config_append(&out, copy);
-				free(copy);
-			}
-		}
-		line = next;
-	}
-	if (!written)
-	{
-		if (out.length && out.buffer[out.length - 1] != '\n')
-			config_append(&out, "\n");
-		if (!in_section)
-		{
-			char header[80];
-
-			snprintf(header, sizeof(header), "\n[%s]\n", section);
-			config_append(&out, header);
-		}
-		config_append(&out, line_text);
-	}
-	succeeded = out.buffer && config_write_file(path, out.buffer);
+	/* (a file gone since the start is written whole again; one there that
+	cannot be read is left alone) */
+	if (!text && !config_file_exists(path))
+		text = config_default_text();
+	if (text)
+		updated = config_text_set(text, name, value ? "true" : "false");
+	if (!updated)
+		platform_log("settings: cannot write %s to %s", name, path);
+	/* (never a file that does not read back) */
+	else if (!config_text_parses(updated, error, sizeof(error)))
+		platform_log("settings: %s not written to %s, which would not read (%s)", name, path, error);
+	else
+		succeeded = config_write_file(path, updated);
 	pthread_mutex_unlock(&config_lock);
-	free(out.buffer);
+	free(updated);
 	free(text);
 	return succeeded;
 }

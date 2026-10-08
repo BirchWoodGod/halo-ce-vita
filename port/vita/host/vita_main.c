@@ -224,12 +224,59 @@ int vita_host_thread_describe(unsigned long id, char *text, unsigned long size)
 
 /* The game looks for d:\bink\<movie>.bik before it opens a movie, and
 the Vita plays the MP4 in movies/ in its place (bink_vita.c): an empty
-.bik stands in for each MP4 there, so a movie copied in plays */
+.bik stands in for each MP4 there, so a movie copied in plays. A stand-in
+whose MP4 went (the movies folder deleted or renamed: the movies are
+optional) goes too, so the game skips that movie as one it does not have
+rather than trying to open it */
+#define MOVIE_STAND_IN "mp4 stand-in"
+
+static void movie_placeholders_remove_stale(void)
+{
+	SceUID directory = sceIoDopen(VITA_DEFAULT_DATA_ROOT "/bink");
+	SceIoDirent entry;
+	/* (the names first, then the removals: not while the folder is read) */
+	char stale[16][64];
+	int stale_count = 0, index;
+
+	if (directory < 0)
+		return;
+	memset(&entry, 0, sizeof(entry));
+	while (sceIoDread(directory, &entry) > 0)
+	{
+		size_t length = strlen(entry.d_name);
+
+		if (length > 4 && length < sizeof(stale[0]) && strcasecmp(entry.d_name + length - 4, ".bik") == 0 &&
+			entry.d_stat.st_size == sizeof(MOVIE_STAND_IN) - 1 && stale_count < 16)
+		{
+			char path[160];
+			SceIoStat stat;
+
+			snprintf(path, sizeof(path), VITA_DATA_DIRECTORY "/movies/%.*s.mp4", (int)(length - 4), entry.d_name);
+			if (sceIoGetstat(path, &stat) < 0)
+				snprintf(stale[stale_count++], sizeof(stale[0]), "%s", entry.d_name);
+		}
+		memset(&entry, 0, sizeof(entry));
+	}
+	sceIoDclose(directory);
+	for (index = 0; index < stale_count; index++)
+	{
+		char path[160], message[192];
+
+		snprintf(path, sizeof(path), VITA_DEFAULT_DATA_ROOT "/bink/%.63s", stale[index]);
+		sceIoRemove(path);
+		snprintf(message, sizeof(message), "movie: %.63s has no MP4 in movies/ now; its stand-in removed (the movie is skipped)",
+			stale[index]);
+		vita_host_log(message);
+	}
+}
+
 static void movie_placeholders(void)
 {
-	SceUID directory = sceIoDopen(VITA_DATA_DIRECTORY "/movies");
+	SceUID directory;
 	SceIoDirent entry;
 
+	movie_placeholders_remove_stale();
+	directory = sceIoDopen(VITA_DATA_DIRECTORY "/movies");
 	if (directory < 0)
 		return;
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT "/bink", 0777);
@@ -249,7 +296,7 @@ static void movie_placeholders(void)
 
 				if (file >= 0)
 				{
-					sceIoWrite(file, "mp4 stand-in", 12);
+					sceIoWrite(file, MOVIE_STAND_IN, sizeof(MOVIE_STAND_IN) - 1);
 					sceIoClose(file);
 				}
 			}

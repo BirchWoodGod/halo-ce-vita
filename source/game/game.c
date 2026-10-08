@@ -448,11 +448,19 @@ static unsigned long tick_profile_ticks;
 unsigned long long vita_host_time_us(void);
 void platform_log(const char *format, ...);
 static unsigned long long tick_now(void) { return vita_host_time_us ? vita_host_time_us() : 0; }
-static void tick_phase_begin(void) { if (tick_profile_enabled > 0) tick_phase_started = tick_now(); }
-static void tick_phase_end(int phase, const char *name)
+static void tick_profile_check(void)
 {
 	if (tick_profile_enabled < 0) { const char *e = getenv("HALO_TICK_PROFILE"); tick_profile_enabled = e && atoi(e) != 0; }
-	if (tick_profile_enabled <= 0) return;
+}
+/* (the switch read at the first phase's start too: read at its end only,
+the first tick's first phase counted from the clock's zero - the start-up,
+"tick 0 took 4491.8 ms: remove_quitting_players_from_game 4489.6" on the
+hardware) */
+static void tick_phase_begin(void) { tick_profile_check(); if (tick_profile_enabled > 0) tick_phase_started = tick_now(); }
+static void tick_phase_end(int phase, const char *name)
+{
+	tick_profile_check();
+	if (tick_profile_enabled <= 0 || !tick_phase_started) return;
 	{
 		unsigned long long elapsed = tick_now() - tick_phase_started;
 

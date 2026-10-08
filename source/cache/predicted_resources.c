@@ -34,6 +34,8 @@ void *_texture_cache_bitmap_get_hardware_format(
 
 static void predicted_resources_sound_precache(long sound_definition_index);
 static boolean predicted_resource_valid(struct predicted_resource const *predicted_resource);
+/* (cache_files.c: whether the index is a loaded tag of the group) */
+boolean tag_index_is_group(long tag_index, long group_tag);
 
 /* ---------- globals */
 
@@ -82,10 +84,12 @@ void predicted_resources_precache(
 
 /* ---------- private code */
 
-/* port: a predicted resource's tag and bitmap are the map's, and the texture
-and sound caches write through what they name: a tag of another group (or
-none), or a bitmap the group doesn't have, is not precached, said once. Every
-retail one names a tag of its type and one of its bitmaps. */
+/* port (from OpenCE, "Second hardening round"): a predicted resource's tag
+and bitmap are the map's, and the texture and sound caches write through what
+they name: a tag of another group (or none, or past the tags), or a bitmap the
+group doesn't have, is not precached, said once. Every retail one names a tag
+of its type and one of its bitmaps. (tag_index_is_group, not
+tag_get_group_tag: a release build's doesn't check the index) */
 static boolean predicted_resource_valid(
 	struct predicted_resource const *predicted_resource)
 {
@@ -95,16 +99,14 @@ static boolean predicted_resource_valid(
 	switch (predicted_resource->type)
 	{
 	case _predicted_resource_bitmap:
-		valid = predicted_resource->tag_index != NONE &&
-			tag_get_group_tag(predicted_resource->tag_index) == BITMAP_GROUP_TAG &&
+		valid = tag_index_is_group(predicted_resource->tag_index, BITMAP_GROUP_TAG) &&
 			VALID_INDEX(
 				predicted_resource->resource_index,
 				bitmap_group_get(predicted_resource->tag_index)->bitmaps.count);
 		break;
 
 	case _predicted_resource_sound:
-		valid = predicted_resource->tag_index != NONE &&
-			tag_get_group_tag(predicted_resource->tag_index) == SOUND_DEFINITION_TAG;
+		valid = tag_index_is_group(predicted_resource->tag_index, SOUND_DEFINITION_TAG);
 		break;
 	}
 

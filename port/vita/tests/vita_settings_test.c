@@ -42,6 +42,7 @@ volatile unsigned long halo_settings_generation;
 volatile int halo_system_link_request;
 volatile int halo_system_link_answer;
 volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
+volatile int halo_pc_menus_state;
 volatile int halo_text_input_state;
 char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
@@ -53,6 +54,23 @@ int halo_screen_restart_needed(void) { return 0; }
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
 static char log_text[16384];
 static int overlay_level = -1;
+
+/* (vita_ce_installer.c's: whether a Custom Edition installer is there, and
+the extraction started) */
+static int installer_state, installer_starts;
+int vita_ce_installer_state(char *name, int size)
+{
+	snprintf(name, (size_t)size, "halocesetup_en_1.00.exe");
+	return installer_state;
+}
+int vita_ce_installer_start(void)
+{
+	installer_starts++;
+	if (installer_state != 1)
+		return -1;
+	installer_state = 2;
+	return 0;
+}
 
 /* (vita_input.c's) */
 void vita_gyro_status(char *text, int size) { snprintf(text, (size_t)size, "Gyro: yaw -999 pitch -999 roll -999 lay still"); }
@@ -93,7 +111,7 @@ static char menu[2048];
 static int menu_selected, menu_visible;
 static char joined_code[32];
 static int refreshes;
-static int lobby_public = -1, browsing, adhoc_connects, adhoc_mode = -1, adhoc_room = -1, adhoc_state_value;
+static int lobby_public = -1, lobby_coop_public = -1, browsing, adhoc_connects, adhoc_mode = -1, adhoc_room = -1, adhoc_state_value;
 static char lobby_name[64], lobby_password[64], joined_id[40], joined_password[64];
 static int ime_opens, ime_open_now, ime_result, ime_maximum, ime_password;
 static char ime_title[64], ime_initial[64], ime_typed[128];
@@ -139,6 +157,7 @@ int p2p_hosting_code(char *code, int size)
 }
 
 void p2p_lobby_set_public(int listed) { lobby_public = listed; }
+void p2p_lobby_set_coop_public(int listed) { lobby_coop_public = listed; }
 void p2p_lobby_browse(int on) { browsing = on; }
 void p2p_lobby_set_name(const char *name) { snprintf(lobby_name, sizeof(lobby_name), "%s", name ? name : ""); }
 
@@ -763,9 +782,9 @@ static void keyboard_closes(const char *typed)
 	frame(0);
 }
 
-/* the Play page's rows, in order, by their labels ("" between rows of a
-line each); its lines that are not rows ('\x04') counted in info */
-static int play_rows(char *labels, int size, int *info)
+/* the page's rows, in order, by their labels ("|" between them); its lines
+that are not rows ('\x04') counted in info */
+static int rows_of(char *labels, int size, int *info)
 {
 	const char *at = menu;
 	int rows = 0, used = 0;
@@ -792,134 +811,79 @@ static int play_rows(char *labels, int size, int *info)
 static void test_multiplayer_tab(void)
 {
 	char line[128], labels[512];
-	int info, count, longest;
-	char diagram[16];
+	int info;
 
-	/* (the network this session runs: Online, from the environment) */
-	check(!strncmp(menu_line(1, line, sizeof(line)), "Connection*\x02", 12) && strstr(line, "< Online") &&
-		!strcmp(menu_line(2, line, sizeof(line)), "Play\x02  >") &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Modded maps\x02  0 maps  >") &&
-		!menu_line(4, line, sizeof(line))[0],
-		"Multiplayer: Connection, Play, Modded maps (no ad hoc room: Online); a gap");
-	check(!strstr(menu, "Host a game") && !strstr(menu, "Join a game") && !strstr(menu, "Co-op") &&
-		!strstr(menu, "Online games") && !strstr(menu, "Ad hoc") && !strstr(menu, "PC maps") &&
-		!strstr(menu, "Lobby name"), "Multiplayer: no Host, Join, Co-op or Online games rows (all on Play)");
+	/* (the network this session runs: Online, from the environment; the
+	game has not said yet whether its menus have OpenCE's screens) */
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps") && strstr(menu, "< Online"),
+		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
+	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
+		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
+		!strstr(menu, "Games on this network") && !strstr(menu, "Host co-op campaign"),
+		"Multiplayer: hosting, joining and co-op are the game's menus' (the Play page's rows are gone)");
 	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
-		strstr(menu, "\n\x04Online: ready"), "before the game says: this Vita's name, no game, internet play's line");
+		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
+		"before the game says: this Vita's name, no game, internet play's line");
 	check(menu_rows() == 3 && menu_fits(), "Multiplayer: three rows, 46 characters a line");
-	to_line("Play");
-	check(strstr(menu, "\n\x05Host a game, join one, or co-op the campaign\n") != NULL, "Play's help line");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
-	printf("%s\n--\n", menu);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
 
-	/* the Play page, Online: every row */
-	check(open_page("Play") && strstr(menu, "\n\x03Multiplayer > Play\n"), "Play opens its page");
+	/* the game's menus with OpenCE's screens (their Direct Link joins codes):
+	no code row; without them a line says what they need, and the row stays */
+	halo_pc_menus_state = 1;
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Modded maps") && !strstr(menu, "Online menus"),
+		"the PC menus in the game: Connection and Modded maps only");
+	halo_pc_menus_state = -1;
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
-	count = play_rows(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Host a game|  Lobby name|  Max players|  Visibility|  Password|Host co-op campaign|"
-		"Join with a code|Browse public games|Games on this network") && count == 9,
-		"Play, Online: Host a game (lobby name, max players, visibility, password), co-op, a code, browse, this network");
-	check(strstr(menu, "\nHost a game\x02  >\n") && strstr(menu, "\n  Lobby name\x02  vitauser\n") &&
-		strstr(menu, "\n  Max players\x02< 16  \n") && strstr(menu, "\n  Visibility\x02< Public  \n") &&
-		strstr(menu, "\n  Password\x02  none\n") && strstr(menu, "\nGames on this network\x02  >\n"),
-		"Play's values: the lobby name is the Vita's user name, 16 players, Public (OpenCE's default), no password");
-	check(info == 2 && strstr(menu, "\n\x04No game yet: host one or join one\n") && strstr(menu, "\n\x04Online: ready") &&
-		!strstr(menu, "This Vita"), "Play: the game's line and internet play's under the rows");
-	count = menu_lines(&longest, diagram, sizeof(diagram));
-	check(menu_fits() && count <= 17, "Play, Online: 46 characters a line, no longer than Button layout's page");
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps") &&
+		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
+		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
-	/* Host a game: the steps, then cross asks the game for System Link */
-	press(VITA_BUTTON_CROSS);
-	printf("%s\n--\n", menu);
-	check(!strncmp(menu, "HOST A GAME", 11) && strstr(menu, "1 The game's System Link screen opens") &&
-		strstr(menu, "2 A to join if asked, A on a profile, A again") && strstr(menu, "3 SYSTEM LINK GAMES: Y creates a game") &&
-		strstr(menu, "4 A on a map, A on a game type") && strstr(menu, "\n  As \"vitauser\", 16 players at most\n") &&
-		strstr(menu, "Menus: A Cross, B Circle, X Square, Y Triangle") &&
-		strstr(menu, "Cross: open System Link   Circle: back"), "Host a game: the steps, the game as others see it");
-	check(menu_fits() && !strstr(menu, " button") && !strstr(menu, "Co-op"), "the steps: 46 characters a line, no co-op line");
-	check(frame(VITA_BUTTON_CROSS) == 1 && halo_system_link_request == SYSTEM_LINK_REQUEST_HOST &&
-		strstr(menu, "Opening System Link..."), "cross: the game is asked for its System Link screen (host)");
-	/* (the cross still held when the game answers) */
-	halo_system_link_answer = SYSTEM_LINK_ANSWER_OPENED;
-	halo_system_link_request = SYSTEM_LINK_REQUEST_NONE;
-	check(frame(VITA_BUTTON_CROSS) == 1 && !menu_visible && frame(VITA_BUTTON_CROSS) == 1,
-		"the game opened it: the panel closes; the cross still held is not the game's A, that frame or after");
-	check(frame(0) == 0 && frame(VITA_BUTTON_CROSS) == 0, "let go and pressed again: the game has the pad");
-	check(strstr(log_text, "settings: host a game: asked the game for its System Link screen (online)") != NULL,
-		"halo.log says so");
-	frame(0);
-
-	/* the hosted game's settings: the lobby name, on the system's keyboard */
-	open_panel();
-	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "the panel opens again on the tab");
-	open_page("Play");
-	to_line("  Lobby name");
-	check(strstr(menu, "\n\x05The name others see for your game\n") &&
-		strstr(menu, "\n\x06L/R: tabs   Cross: type   Circle: back"), "Lobby name: its help; cross types");
-	press(VITA_BUTTON_RIGHT);
-	check(ime_opens == 0, "right does not open the keyboard");
-	press(VITA_BUTTON_CROSS);
-	check(ime_opens == 1 && !strcmp(ime_title, "Lobby name") && !strcmp(ime_initial, "vitauser") && ime_maximum == 15 &&
-		!ime_password && !menu_visible, "cross: the system's keyboard on the name (15 at most), the panel hidden");
-	check(frame(VITA_BUTTON_CROSS) == 1 && frame(VITA_BUTTON_CIRCLE) == 1 && frame(0) == 1,
-		"the game sees no buttons while the keyboard is up");
-	keyboard_closes("  Birch's game\x01\t of the century  ");
-	printf("%s\n--\n", menu);
-	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "Birch's game of") && !strcmp(lobby_name, "Birch's game of") &&
-		strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME=Birch's game of\n") && menu_visible &&
-		strstr(menu, "\n  Lobby name\x02  Birch's game of\n") && menu_fits(),
-		"the name typed: printable ASCII, trimmed, 15 at most; in the environment, the listing and settings.txt");
-	press(VITA_BUTTON_CROSS);
-	check(!strcmp(ime_initial, "Birch's game of"), "the keyboard opens on the name kept");
-	keyboard_closes(NULL);
-	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "Birch's game of") && menu_visible, "cancelled: the name stays");
-	press(VITA_BUTTON_CROSS);
-	keyboard_closes("\x01\x02   ");
+	/* the hosted game's settings, as the game's Server Setup sets them
+	(vita_settings_set): applied at once and kept in settings.txt */
+	check(vita_settings_set("HALO_NET_LOBBY_NAME", "  Birch's game\x01\t of the century  ") &&
+		!strcmp(getenv("HALO_NET_LOBBY_NAME"), "Birch's game of") && !strcmp(lobby_name, "Birch's game of") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME=Birch's game of\n"),
+		"Server Setup's name: printable ASCII, trimmed, 15 at most; in the environment, the listing and settings.txt");
+	vita_settings_set("HALO_NET_LOBBY_NAME", "\x01\x02   ");
 	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME"),
-		"nothing printable typed: the Vita's user name again, not saved (a new user name shows)");
-	press(VITA_BUTTON_CROSS);
-	keyboard_closes("Birch's game");
-	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "Birch's game"), "Lobby name: Birch's game");
+		"nothing printable: the Vita's user name again, not saved");
+	vita_settings_set("HALO_NET_LOBBY_NAME", "Birch's game");
+	vita_settings_set("HALO_NET_MAX_PLAYERS", "2");
+	check(!strcmp(getenv("HALO_NET_MAX_PLAYERS"), "2") && strstr(file_text(SETTINGS_FILE), "HALO_NET_MAX_PLAYERS=2\n"),
+		"Max players 2, saved");
+	vita_settings_set("HALO_NET_MAX_PLAYERS", "8");
+	check(!strcmp(getenv("HALO_NET_MAX_PLAYERS"), "8") && !strstr(menu, "Restart the game"), "Max players 8, live");
+	vita_settings_set("HALO_NET_HOST_PUBLIC", "false");
+	check(lobby_public == 0 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false"), "Private: at once (network.host_public)");
+	vita_settings_set("HALO_NET_HOST_PUBLIC", "true");
+	check(lobby_public == 1 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "true"), "Public: listed at once");
+	/* (co-op's own, X on its waiting screen: coop_menu.c) */
+	check(!strcmp(getenv("HALO_NET_COOP_PUBLIC"), "false") && lobby_coop_public == -1,
+		"co-op: private unless chosen (network.coop_public)");
+	vita_settings_set("HALO_NET_COOP_PUBLIC", "true");
+	check(lobby_coop_public == 1 && lobby_public == 1 && !strcmp(getenv("HALO_NET_COOP_PUBLIC"), "true") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_PUBLIC=true\n"), "co-op Public: listed at once, saved");
+	vita_settings_set("HALO_NET_HOST_PUBLIC", "false");
+	check(lobby_coop_public == 1 && lobby_public == 0, "the other games' Visibility leaves co-op's alone");
+	vita_settings_set("HALO_NET_COOP_PUBLIC", "false");
+	check(lobby_coop_public == 0 && !strcmp(getenv("HALO_NET_COOP_PUBLIC"), "false"), "co-op Private again: at once");
+	vita_settings_set("HALO_NET_HOST_PUBLIC", "true");
+	vita_settings_set("HALO_NET_LOBBY_PASSWORD", "hunter2");
+	check(!strcmp(getenv("HALO_NET_LOBBY_PASSWORD"), "hunter2") && !strcmp(lobby_password, "hunter2") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PASSWORD=hunter2\n") &&
+		strstr(log_text, "settings: password set (the game)") && !strstr(log_text, "hunter2") && !strstr(menu, "hunter2"),
+		"the password: kept and saved, never in halo.log or the panel");
+	vita_settings_set("HALO_NET_LOBBY_PASSWORD", "");
+	check(!getenv("HALO_NET_LOBBY_PASSWORD")[0] && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PASSWORD"),
+		"an empty password: none, not saved");
 
-	/* Max players: 2 to 16 */
-	to_line("  Max players");
-	check(strstr(menu, "\n\x05The most players your games take (co-op: 2)\n") != NULL, "Max players' help: co-op takes 2");
-	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_NET_MAX_PLAYERS"), "16"), "Max players: 16 is the most");
-	for (int index = 0; index < 20; index++)
-		press(VITA_BUTTON_LEFT);
-	check(!strcmp(getenv("HALO_NET_MAX_PLAYERS"), "2") && strstr(menu, "\n  Max players\x02  2 >\n") &&
-		strstr(file_text(SETTINGS_FILE), "HALO_NET_MAX_PLAYERS=2\n"), "Max players: 2 is the fewest, saved");
-	for (int index = 0; index < 6; index++)
-		press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_NET_MAX_PLAYERS"), "8") && !strstr(menu, "Restart the game"), "Max players: 8, live");
-
-	/* Visibility: Private hides the password; Public at once */
-	to_line("  Visibility");
-	press(VITA_BUTTON_LEFT);
-	check(lobby_public == 0 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false") && !strstr(menu, "Password"),
-		"Visibility Private: at once (network.host_public); no password row");
-	press(VITA_BUTTON_RIGHT);
-	check(lobby_public == 1 && !strcmp(getenv("HALO_NET_HOST_PUBLIC"), "true") && strstr(menu, "\n  Password\x02"),
-		"Visibility Public: listed at once, the password row back");
-
-	/* Password: hidden as typed, "set" */
-	to_line("  Password");
-	press(VITA_BUTTON_CROSS);
-	check(ime_password && strstr(ime_title, "Password") && !ime_initial[0], "Password: the keyboard hides what is typed");
-	keyboard_closes("hunter2");
-	check(!strcmp(getenv("HALO_NET_LOBBY_PASSWORD"), "hunter2") && strstr(menu, "\n  Password\x02  set\n") &&
-		!strstr(menu, "hunter2") && strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PASSWORD=hunter2\n") &&
-		strstr(log_text, "settings: password set (settings panel)") && !strstr(log_text, "hunter2"),
-		"Password: kept and saved, shown as set (not in the panel or halo.log)");
-	check(!strcmp(lobby_password, "hunter2"), "the listing has the password");
-	press(VITA_BUTTON_CROSS);
-	keyboard_closes("");
-	check(!getenv("HALO_NET_LOBBY_PASSWORD")[0] && strstr(menu, "\n  Password\x02  none\n") &&
-		!strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PASSWORD"), "an empty password: none, not saved");
-
-	/* the game's state, on the page */
+	/* the game's state, on the tab */
 	game_status(SYSTEM_LINK_STATE_SEARCHING, 0, 2, 0);
 	check(strstr(menu, "Looking for games: 2 found") != NULL, "the System Link list, two games");
 	status_maximum = 8;
@@ -930,56 +894,22 @@ static void test_multiplayer_tab(void)
 	status_maximum = 0;
 	game_status(SYSTEM_LINK_STATE_HOSTING, 3, 0, 1);
 	check(strstr(menu, "Hosting: 3 Vitas in the lobby") != NULL, "hosting, the game not saying its most: three Vitas");
-
-	/* hosting: Games on this network says why not, and asks nothing */
-	to_line("Games on this network");
-	check(strstr(menu, "\n\x05The System Link list: join a game there\n") != NULL, "Games on this network's help");
-	press(VITA_BUTTON_CROSS);
-	printf("%s\n--\n", menu);
-	check(!strncmp(menu, "JOIN A GAME", 11) && strstr(menu, "A on the host's game") &&
-		strstr(menu, "\n!Already hosting: the game's lobby is open\nCircle: back"),
-		"Games on this network while hosting: Join's steps, and why not now");
-	check(menu_fits(), "Join's steps: 46 characters a line");
-	press(VITA_BUTTON_CROSS);
-	check(halo_system_link_request == SYSTEM_LINK_REQUEST_NONE, "... and cross asks nothing");
-	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "> Play\n") != NULL, "circle: back to the Play page");
 	game_status(SYSTEM_LINK_STATE_LOBBY, 2, 0, 0);
 	check(strstr(menu, "In a lobby: 2 Vitas, the host starts") != NULL, "in another's lobby");
 	game_status(SYSTEM_LINK_STATE_IN_GAME, 4, 0, 1);
 	check(strstr(menu, "In a game: 4 Vitas (you host)") != NULL, "in a game this Vita hosts");
-
-	/* Host co-op campaign: the Campaign screen at once (not in a game) */
-	to_line("Host co-op campaign");
-	check(strstr(menu, "\n\x05" "Campaign: pick a level and difficulty, then Y: Play co-op\n") &&
-		strstr(menu, "\nHost co-op campaign\x02  >\n"), "Host co-op campaign: its note, Y on the difficulty");
-	press(VITA_BUTTON_CROSS);
-	check(halo_system_link_request == SYSTEM_LINK_REQUEST_NONE && menu_visible &&
-		strstr(menu, "\n\x05In a game: Start, then Quit, to leave it\n"), "in a game: it says why, and asks nothing");
 	game_status(SYSTEM_LINK_STATE_PLAYING, 0, 0, 0);
 	check(strstr(menu, "Playing: quit the level to host or join") != NULL, "playing a level");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
-	clock_us += 5000000;
-	press(VITA_BUTTON_CROSS);
-	check(halo_system_link_request == SYSTEM_LINK_REQUEST_CAMPAIGN &&
-		strstr(log_text, "settings: host co-op campaign: asked the game for its Campaign screen (online)"),
-		"in the menus: the game is asked for its Campaign screen");
-	game_answers(SYSTEM_LINK_ANSWER_UNAVAILABLE);
-	check(menu_visible && strstr(menu, "\n\x05The game could not open it (see its message)\n"),
-		"the game could not: the help line says so, over no screen of its own");
-	press(VITA_BUTTON_CROSS);
-	game_answers(SYSTEM_LINK_ANSWER_OPENED);
-	check(!menu_visible && frame(0) == 0, "the Campaign screen opened: the panel closes");
 
-	/* Join with a code: today's code screen, then Join's steps (761c59ce) */
-	open_panel();
-	open_page("Play");
+	/* Join with a code: the code screen, then Join's steps (761c59ce) */
 	to_line("Join with a code");
 	press(VITA_BUTTON_CROSS);
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu, "JOIN WITH A CODE\n(the host's Play page shows it)", 47) &&
-		strstr(menu, "Triangle: browse public games instead"), "Join with a code: the host's code first");
-	check(menu_fits(), "the code: 46 characters a line");
+	check(!strncmp(menu, "JOIN WITH A CODE\n(the host's Multiplayer tab shows it)", 54) &&
+		!strstr(menu, "Triangle") && menu_fits(), "Join with a code: the host's code first (no public games: the game's menus')");
+	press(VITA_BUTTON_TRIANGLE);
+	check(!strncmp(menu, "JOIN WITH A CODE", 16) && browsing == 0, "triangle: nothing");
 	press(VITA_BUTTON_CROSS);
 	check(!strncmp(menu, "JOIN A GAME\n", 12) && strstr(menu, "\nOnline: ") && halo_system_link_request == SYSTEM_LINK_REQUEST_NONE &&
 		!strcmp(joined_code, "AAAA-AAAA"), "the code taken: Join's steps, with how the lookup goes, and nothing asked yet");
@@ -995,11 +925,13 @@ static void test_multiplayer_tab(void)
 	frame(0);
 	check(halo_system_link_request == SYSTEM_LINK_REQUEST_NONE && strstr(menu, "!The game did not answer: try again"),
 		"no answer in 3 s: the request withdrawn, the guide says so");
-	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "> Play\n") != NULL, "circle: the Play page");
+	press(VITA_BUTTON_CROSS);
+	game_answers(SYSTEM_LINK_ANSWER_OPENED);
+	check(!menu_visible && frame(0) == 0, "the System Link screen opened: the panel closes");
+	open_panel();
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "the panel opens again on the tab");
 
 	/* Connection: Same Wi-Fi, Ad hoc, Online (experimental) */
-	to_tab("Multiplayer");
 	to_line("Connection");
 	check(strstr(menu, "\n\x05Internet play by code (experimental)") != NULL, "Connection Online's help line");
 	press(VITA_BUTTON_RIGHT);
@@ -1017,17 +949,12 @@ static void test_multiplayer_tab(void)
 	check(!strstr(menu, "Restart the game"), "the other lines' help again after a few seconds");
 	press(VITA_BUTTON_UP);
 	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
-	check(!strcmp(menu_line(3, line, sizeof(line)), "Ad hoc room\x02  1 >") && menu_rows() == 4,
-		"Ad hoc chosen: the room's row on the tab, under Play");
-	open_page("Play");
-	to_line("Host a game");
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Modded maps"),
+		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
+	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
-	check(strstr(menu, "!Restart the game first: Connection changed") != NULL, "Host a game waits for the restart");
-	press(VITA_BUTTON_CIRCLE);
-	to_line("Host co-op campaign");
-	press(VITA_BUTTON_CROSS);
-	check(halo_system_link_request == SYSTEM_LINK_REQUEST_NONE && strstr(menu, "Restart the game first"),
-		"Host co-op campaign too");
+	check(adhoc_connects == 0 && strstr(menu, "Restart the game for Ad hoc first"), "Join the room waits for the restart");
 
 	/* the next start, in ad hoc play */
 	restart_pending = 0;
@@ -1038,78 +965,44 @@ static void test_multiplayer_tab(void)
 	frame(0);
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps") && menu_fits(),
+		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
+	clock_us += 5000000;
 	to_line("Ad hoc room");
 	check(strstr(menu, "\n\x05Vitas in the same room play together\n") != NULL, "Ad hoc room's help");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_ADHOC_ROOM"), "2"), "Ad hoc room 2");
-	open_page("Play");
-	printf("%s\n--\n", menu);
-	play_rows(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Host a game|  Lobby name|  Max players|Host co-op campaign|Games on this network") &&
-		menu_fits(), "Play, Ad hoc: no visibility, password, code or public games (internet play's)");
-	to_line("Host a game");
+	to_line("Join the room");
 	check(strstr(menu, "\n\x05" "First the system's dialog joins ad hoc room 2\n") != NULL,
-		"not in the group: the help line says it is joined first");
-
-	/* Host a game in ad hoc play, not in a group: the dialog first, then
-	System Link by itself */
-	press(VITA_BUTTON_CROSS);
-	printf("%s\n--\n", menu);
-	check(strstr(menu, "1 The system's dialog joins ad hoc room 2") && strstr(menu, "2 The game's System Link screen") &&
-		menu_fits(), "Host in ad hoc play: the room's group joined first");
+		"Join the room, not in the group: the help says the dialog joins it");
+	/* the room's group: the system's dialog, the panel closed; then the
+	game's own System Link screen */
 	press(VITA_BUTTON_CROSS);
 	check(adhoc_connects == 1 && adhoc_room == 2 && adhoc_mode == 0 && !menu_visible &&
 		halo_system_link_request == SYSTEM_LINK_REQUEST_NONE, "cross: the ad hoc dialog (connect, room 2), the panel closed");
 	check(frame(VITA_BUTTON_CROSS) == 1 && frame(0) == 1, "the game sees no buttons while the dialog is up");
 	adhoc_state_value = 2;
-	frame(0);
-	check(halo_system_link_request == SYSTEM_LINK_REQUEST_HOST, "in the group: System Link asked for");
-	game_answers(SYSTEM_LINK_ANSWER_OPENED);
-	check(!menu_visible && frame(0) == 0, "opened: nothing over the game");
-	/* ... co-op the same way */
-	vita_adhoc_leave();
+	check(frame(0) == 0 && halo_system_link_request == SYSTEM_LINK_REQUEST_NONE,
+		"in the group: the game has the pad, nothing asked (its menus' System Link next)");
 	open_panel();
-	open_page("Play");
-	to_line("Host co-op campaign");
+	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
-	check(adhoc_connects == 2 && !menu_visible && halo_system_link_request == SYSTEM_LINK_REQUEST_NONE,
-		"Host co-op campaign in ad hoc play: the dialog first");
-	adhoc_state_value = 2;
-	frame(0);
-	check(halo_system_link_request == SYSTEM_LINK_REQUEST_CAMPAIGN, "in the group: the Campaign screen asked for");
-	game_answers(SYSTEM_LINK_ANSWER_OPENED);
-	/* ... and a dialog that does not join says so over the game */
-	vita_adhoc_leave();
-	open_panel();
-	open_page("Play");
-	to_line("Games on this network");
-	press(VITA_BUTTON_CROSS);
-	press(VITA_BUTTON_CROSS);
-	adhoc_state_value = -1;
-	frame(0);
-	check(menu_visible && strstr(menu, "Join a game") && strstr(menu, "did not join the ad hoc group") &&
-		halo_system_link_request == 0, "the dialog did not join: a message, System Link not asked");
-	press(VITA_BUTTON_CROSS);
-	check(!menu_visible, "cross closes the message");
-	adhoc_state_value = 2;
-	frame(0);
+	check(adhoc_connects == 1 && strstr(menu, "In room 2's group already"), "in the group already: it says so");
+	press(VITA_BUTTON_CIRCLE);
 
-	/* Same Wi-Fi: the same five rows, no ad hoc room */
+	/* Same Wi-Fi: Connection and Modded maps */
 	vita_settings_set("HALO_VITA_NETWORK", "wifi");
 	restart_pending = 0;
 	vita_settings_load();
 	open_panel();
 	to_tab("Multiplayer");
-	check(menu_rows() == 3 && !strstr(menu, "Ad hoc room"), "Same Wi-Fi: Connection, Play, Modded maps");
-	open_page("Play");
-	play_rows(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Host a game|  Lobby name|  Max players|Host co-op campaign|Games on this network") &&
-		menu_fits(), "Play, Same Wi-Fi: the hosted game's name and size, co-op, the System Link list");
-	press(VITA_BUTTON_CIRCLE);
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Modded maps") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
 	press(VITA_BUTTON_CIRCLE);
 }
 
-/* internet play's rows on the Play page: the public games */
+/* internet play's rows: the code typed */
 static void test_online_rows(void)
 {
 	char labels[512];
@@ -1120,10 +1013,9 @@ static void test_online_rows(void)
 	restart_pending = 0;
 	vita_settings_load();
 	to_tab("Multiplayer");
-	check(open_page("Play") && strstr(menu, "\n\x03Multiplayer > Play\n"), "the Play page, Online");
-	play_rows(labels, sizeof(labels), &info);
-	check(strstr(labels, "|  Visibility|  Password|") && strstr(labels, "|Join with a code|Browse public games|") &&
-		!strstr(menu, "Ad hoc dialog"), "Online: internet play's rows back (the ad hoc dialog stays in Dev)");
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps") && !strstr(menu, "Ad hoc dialog"),
+		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
 	from A: the digits come first) on the fifth, then cross */
@@ -1139,62 +1031,14 @@ static void test_online_rows(void)
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(joined_code, "BAAA-9AAA") && !strncmp(menu, "JOIN A GAME\n", 12), "cross joins the code typed: Join's steps");
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "Looking up BAAA-9AAA") != NULL && strstr(menu, "> Play\n"),
-		"back on the page: the help line says it is looked up");
+	check(strstr(menu, "Looking up BAAA-9AAA") != NULL && strstr(menu, "*Multiplayer"),
+		"back on the tab: the help line says it is looked up");
 
-	/* the public lobby: this Vita's own game is left out */
-	to_line("Browse public games");
-	press(VITA_BUTTON_CROSS);
-	check(browsing == 1 && !strncmp(menu, "PUBLIC GAMES", 12), "Browse public games starts browsing");
-	clock_us += 600000;
-	frame(0);
-	printf("%s\n--\n", menu);
-	check(strstr(menu, "desktop host") && !strstr(menu, "this vita") &&
-		strstr(menu, "\nCross: join   Square: refresh   Circle: back"), "the lobby lists the others' games");
-	check(strstr(menu, "\ndesktop host     2/16 Blood Gulch\n") && strstr(menu, "\nlocked one       1/16 Wizard         [pw] PC\n") &&
-		strstr(menu, "\nSlayer to 25 on Blood Gulch\n2 of 16: alpha, bravo\n"),
-		"each game: name, players of most, map, [pw], PC; the chosen one's Rules and Players lines");
-	press(VITA_BUTTON_SQUARE);
-	check(refreshes == 1, "square refreshes the list");
-	{
-		const char *at = menu;
-		int longest = 0;
-
-		for (; *at; )
-		{
-			int length = (int)strcspn(at, "\n");
-
-			longest = length > longest ? length : longest;
-			at += length + (at[length] == '\n');
-		}
-		check(longest <= 46, "the public games: 46 characters a line");
-	}
-	press(VITA_BUTTON_CROSS);
-	check(!strcmp(joined_id, "00000000000000000000000000000002") && !joined_password[0] && browsing == 0 &&
-		!strncmp(menu, "JOIN A GAME\n", 12), "cross joins the game by its listing, stops browsing; then Join's steps");
-	press(VITA_BUTTON_CIRCLE);
-	/* a locked game: its password first */
-	to_line("Browse public games");
-	press(VITA_BUTTON_CROSS);
-	clock_us += 600000;
-	frame(0);
-	press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_CROSS);
-	check(ime_password && !menu_visible, "a locked game: the keyboard for its password");
-	keyboard_closes("swordfish");
-	check(!strcmp(joined_id, "00000000000000000000000000000003") && !strcmp(joined_password, "swordfish") &&
-		!strncmp(menu, "JOIN A GAME\n", 12), "joined with the password typed");
-	press(VITA_BUTTON_CIRCLE);
-
-	/* hosting: the code shows on the Play page and the tab */
+	/* hosting: the code shows on the tab */
 	hosting = 1;
 	clock_us += 5000000;
 	frame(0);
-	check(strstr(menu, "\n\x04Your code: QX7K-M2PA (public)") != NULL, "hosting online: the Play page shows the code");
-	to_tab("Multiplayer");
-	clock_us += 5000000;
-	frame(0);
-	check(strstr(menu, "\n\x04Your code: QX7K-M2PA (public)") != NULL, "... and the Multiplayer tab");
+	check(strstr(menu, "\n\x04Your code: QX7K-M2PA (public)") != NULL, "hosting online: the Multiplayer tab shows the code");
 	check(menu_fits(), "Multiplayer with internet play: 46 characters a line");
 	hosting = 0;
 	to_tab("Dev");
@@ -1223,9 +1067,9 @@ static void test_variables_kept(void)
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
 		"HALO_BUTTON_ICONS", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
-		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_CPU3_AUX",
+		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
-		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR",
+		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1369,10 +1213,10 @@ static void test_fourth_core(void)
 	char line[128];
 
 	check(row && row->page == PAGE_GRAPHICS_ADVANCED && row->restart && row->count == 3 &&
-		!strcmp(row->values[row->choice], "0") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
+		!strcmp(row->values[row->choice], "2") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
 		!strcmp(row->names[2], "All async") && !strcmp(row->values[1], "1") && !strcmp(row->values[2], "2") &&
-		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "0"),
-		"Fourth core helpers: on Graphics > Advanced, Off, Audio, All async; Off by default (HALO_CPU3_AUX=0), after a restart");
+		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "2"),
+		"Fourth core helpers: on Graphics > Advanced, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
 	check(strstr(row->help, "Needs CapUnlocker") && strstr(row->help, "background work"), "Fourth core helpers: the help names the plugin (the README's words)");
 	{
 		int index, in_profile = 0;
@@ -1383,7 +1227,7 @@ static void test_fourth_core(void)
 	}
 	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 13)
 		press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=1\n") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< Audio >") &&
 		settings[0].choice == profile && restart_pending && menu_fits(),
@@ -1398,7 +1242,10 @@ static void test_fourth_core(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=0\n") &&
-		settings[0].choice == profile, "Fourth core helpers back Off");
+		settings[0].choice == profile, "Fourth core helpers Off");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CPU3_AUX"), "2"), "Fourth core helpers back to All async");
 	while (menu_selected > 2)
 		press(VITA_BUTTON_UP);
 	/* (as after the restart it asked for: the rows after this one say
@@ -1489,13 +1336,12 @@ static void test_button_icons(void)
 
 	/* the guide's steps: the menus' Xbox buttons, and which Vita button each is */
 	to_tab("Multiplayer");
-	open_page("Play");
-	to_line("Host a game");
+	to_line("Join with a code");
+	press(VITA_BUTTON_CROSS);
 	press(VITA_BUTTON_CROSS);
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "SYSTEM LINK GAMES: Y creates a game") && strstr(menu, "Menus: A Cross") && menu_fits(),
-		"PlayStation: Host a game's steps keep the Xbox's buttons");
-	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "A on the host's game") && strstr(menu, "Menus: A Cross") && menu_fits(),
+		"PlayStation: Join's steps keep the Xbox's buttons");
 	press(VITA_BUTTON_CIRCLE);
 
 	/* Reset controls keeps it; Xbox again puts the Xbox's terms back */
@@ -1545,12 +1391,13 @@ int main(void)
 		!strncmp(menu_line(3, line, sizeof(line)), "Aspect ratio\x02", 13) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Upscale filter\x02", 15) &&
 		!strncmp(menu_line(5, line, sizeof(line)), "Frame limit\x02", 12) &&
-		!strncmp(menu_line(6, line, sizeof(line)), "FPS counter\x02", 12) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
-		!strcmp(menu_line(8, line, sizeof(line)), "Advanced\x02  >") &&
-		!strncmp(menu_line(9, line, sizeof(line)), "\x05Sets resolution", 16) &&
-		!strncmp(menu_line(10, line, sizeof(line)), "\x06L/R: tabs", 10),
-		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, FPS counter, weapon motion, Advanced; help, buttons");
+		!strncmp(menu_line(6, line, sizeof(line)), "Frame interpolation\x02", 20) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "FPS counter\x02", 12) &&
+		!strncmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Advanced\x02  >") &&
+		!strncmp(menu_line(10, line, sizeof(line)), "\x05Sets resolution", 16) &&
+		!strncmp(menu_line(11, line, sizeof(line)), "\x06L/R: tabs", 10),
+		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, Frame interpolation, FPS counter, weapon motion, Advanced; help, buttons");
 	check(menu_fits() && menu_rows() <= 10, "Graphics: ten rows at most, each fits");
 	check(!strstr(menu, "Dynamic minimum") && !strstr(menu, "Model detail"),
 		"Graphics: Dynamic minimum hidden (not Dynamic), the detail rows under Advanced");
@@ -1583,6 +1430,28 @@ int main(void)
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.5");
 		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 75%: Balanced again");
 	}
+	{
+		/* Frame interpolation: Off by default (and in the environment the
+		game reads, no longer a fixed default), live (no *), saved; the
+		profile untouched */
+		unsigned long generation = halo_settings_generation;
+
+		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n") &&
+			strstr(menu, "\nFrame interpolation\x02  Off >") && !strstr(menu, "Frame interpolation*"),
+			"Frame interpolation: Off by default, saved, live");
+		check(to_line("Frame interpolation") && strstr(menu, "\n\x05Up to 60 FPS: frames between the 30 Hz ticks\n") &&
+			menu_fits(), "Frame interpolation: its help line fits");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_INTERPOLATION"), "true") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=true\n") &&
+			strstr(menu, "\nFrame interpolation\x02< On") && !strstr(notice, "Restart") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"Frame interpolation On: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n"), "... and Off again");
+	}
 	/* Graphics' Advanced: the detail rows the profile sets */
 	check(open_page("Advanced") && strstr(menu, "\n\x03Graphics > Advanced\n") &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Model detail\x02", 13) &&
@@ -1596,9 +1465,9 @@ int main(void)
 		!strncmp(menu_line(10, line, sizeof(line)), "Scenery updates\x02", 16) &&
 		!strncmp(menu_line(11, line, sizeof(line)), "Object lighting\x02", 16) &&
 		!strcmp(menu_line(12, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
-		!strcmp(menu_line(13, line, sizeof(line)), "Fourth core helpers*\x02  Off >") && menu_rows() == 12 && menu_fits(),
+		!strcmp(menu_line(13, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 12 && menu_fits(),
 		"Graphics, Advanced: model detail, distant objects, shadows (Near only), lights (8), effects, particles (Full), "
-		"sun rays, tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (Off, after a restart)");
+		"sun rays, tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (All async, after a restart)");
 	test_bruno_rows();
 	test_fourth_core();
 	press(VITA_BUTTON_LEFT);
@@ -1638,10 +1507,13 @@ int main(void)
 	printf("%s\n--\n", menu);
 	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(4, line, sizeof(line))[0] &&
-		!strcmp(menu_line(5, line, sizeof(line)), "!Missing: sounds.map loc.map"),
-		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning");
-	check(!strncmp(menu_line(6, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(7, line, sizeof(line)), "inplay\x02", 7) &&
-		!strncmp(menu_line(8, line, sizeof(line)), "mygulch\x02", 8) && menu_line(9, line, sizeof(line))[0] == '\x05',
+		!strcmp(menu_line(5, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita"),
+		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning, and that "
+		"the installer does");
+	check(!strncmp(menu_line(8, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(9, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(10, line, sizeof(line)), "mygulch\x02", 8) && menu_line(11, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
 	/* Map downloads: Ask (the default: public games warn), Not public games,
 	Never; each with its own help, saved and in the environment the game
@@ -1709,6 +1581,21 @@ int main(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
 	check(strstr(menu, "\nModded maps\x02  2 maps  >") != NULL, "back on Multiplayer: two maps now");
+	/* a Custom Edition installer in ux0:data/haloce-vita (PC maps off): the
+	warning, and Extract PC files, which starts taking them */
+	installer_state = 1;
+	open_page("Modded maps");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n!Missing: sounds.map loc.map\n!Extract PC files takes them from the installer\n") &&
+		strstr(menu, "\nExtract PC files\x02") && menu_fits(), "an installer: the warning says Extract PC files, its row");
+	to_line("Extract PC files");
+	check(strstr(menu, "\n\x05The three files out of the Halo CE installer\n") != NULL, "Extract PC files' help");
+	press(VITA_BUTTON_CROSS);
+	check(installer_starts == 1 && strstr(menu, "Taking them from halocesetup_en_1.00.exe") &&
+		strstr(menu, "\n!Taking them from halocesetup_en_1.00.exe\n") && !strstr(menu, "\nExtract PC files\x02") &&
+		menu_fits(), "cross starts it: the row goes, the warning says it is under way");
+	installer_state = 0;
+	press(VITA_BUTTON_CIRCLE);
 
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);
@@ -1852,13 +1739,14 @@ int main(void)
 		check(!strcmp(getenv("HALO_NET_HOST_PUBLIC"), "false") &&
 			choice_of("HALO_NET_HOST_PUBLIC") == 0, "1.0.3's Online games Private: Visibility Private");
 		vita_settings_set("HALO_FRAME_CAP", "30");
-		check(!strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PUBLIC") &&
+		check(!strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_LEVEL") &&
+			!strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_DIFFICULTY") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_PUBLIC") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_NET_HOST_PUBLIC=false\n"),
 			"the next save: no co-op lines, Visibility under its own name");
 		/* (env.txt's co-op level stands: the automated co-op tests) */
 		setenv("HALO_NET_COOP_LEVEL", "a30", 1);
 		vita_settings_load();
-		check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a30") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP"),
+		check(!strcmp(getenv("HALO_NET_COOP_LEVEL"), "a30") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_COOP_LEVEL"),
 			"env.txt's co-op level is left alone (tests), and never saved");
 		unsetenv("HALO_NET_COOP_LEVEL");
 	}

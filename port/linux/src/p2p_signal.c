@@ -31,11 +31,11 @@ invite's token, and goes to topics that are hashes of it, so the brokers
 - the host listens on hceu/3/<HMAC(token, "host" | host)> (a Vita on
   hcev/3/..., and so on: Vitas play only Vitas, halo_port_limits.h),
   where a joiner sends JOIN: its public key (its identifier is the key's
-  hash), a nonce, and its addresses;
+  hash), a nonce, its addresses, and the relays it names (if any: p2p.c);
 - the joiner listens on hceu/3/<HMAC(token, "joiner" | joiner)>, where the
   host answers ACCEPT: its public key, the joiner's nonce, one of its own,
-  its addresses, and a tag that only the two of them can make (from their
-  keys);
+  its addresses, its relays (if any), and a tag that only the two of them
+  can make (from their keys);
 - the joiner then repeats its JOIN with the host's nonce and a tag of its
   own, made the same way, which shows that it holds the key it gave. Only
   then does the host make a session.
@@ -893,6 +893,27 @@ static int put_candidates(unsigned char *message)
 	return 1 + count * 6;
 }
 
+/* the relays this machine offers (p2p.c's relays), after the addresses:
+their count and each one's address and port, as the addresses are; nothing
+at all when it has none, so that a JOIN without them is as it was before
+relays (a host of before relays takes it) */
+static int put_relays(unsigned char *message)
+{
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+	int count = p2p_local_relays(relays, P2P_MAXIMUM_RELAYS);
+	int index;
+
+	if (!count)
+		return 0;
+	message[0] = (unsigned char)count;
+	for (index = 0; index < count; index++)
+	{
+		memcpy(message + 1 + index * 6, &relays[index].address, 4);
+		memcpy(message + 1 + index * 6 + 4, &relays[index].port, 2);
+	}
+	return 1 + count * 6;
+}
+
 static int get_candidates(const unsigned char *message, int size, struct p2p_candidate *candidates)
 {
 	int count;
@@ -912,6 +933,15 @@ static int get_candidates(const unsigned char *message, int size, struct p2p_can
 		memcpy(&candidates[index].port, message + 1 + index * 6 + 4, 2);
 	}
 	return count;
+}
+
+/* the relays a message offers, read as the addresses are (at most
+P2P_MAXIMUM_RELAYS): their count, -1 if the block is not one */
+static int get_relays(const unsigned char *message, int size, struct p2p_candidate *relays)
+{
+	if (size < 1 || message[0] > P2P_MAXIMUM_RELAYS)
+		return -1;
+	return get_candidates(message, size, relays);
 }
 
 /* ---------- the keys: what only a joiner and the host can work out */
@@ -1004,7 +1034,8 @@ static int host_nonce_current(const unsigned char *public_key, const unsigned ch
 
 /* ---------- the messages */
 
-static void send_join(void)
+/* a JOIN, with this machine's relays or without (form 1 or 0) */
+static void send_join_form(int with_relays)
 {
 	unsigned char message[MAXIMUM_MESSAGE_SIZE];
 	unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
@@ -1017,6 +1048,8 @@ static void send_join(void)
 	memcpy(message + size, signalling.join_nonce, NONCE_SIZE);
 	size += NONCE_SIZE;
 	size += put_candidates(message + size);
+	if (with_relays)
+		size += put_relays(message + size);
 	/* answered: the proof that this machine holds its key, of which the host
 	makes the session */
 	if (signalling.join_answered)
@@ -1028,6 +1061,21 @@ static void send_join(void)
 	}
 	size = p2p_seal(signalling.join_key, message, size, sealed);
 	publish_everywhere(signalling.join_host_topic, sealed, size, 0);
+}
+
+/* the JOIN: a request as before relays (a host takes relays only from a
+proof, and a host of before relays takes nothing longer); and its proof,
+once answered, also with this machine's relays if it has any, sent first
+(a host of before relays turns that one down and makes the session of the
+other; a host of now makes it of whichever comes first, and takes the
+relays from the one that has them) */
+static void send_join(void)
+{
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+
+	if (signalling.join_answered && p2p_local_relays(relays, P2P_MAXIMUM_RELAYS))
+		send_join_form(1);
+	send_join_form(0);
 	signalling.join_sent_time = p2p_now();
 }
 
@@ -1100,6 +1148,9 @@ static void send_accept(struct broker *broker, const unsigned char *identifier, 
 	memcpy(answer + size, host_nonce, NONCE_SIZE);
 	size += NONCE_SIZE;
 	size += put_candidates(answer + size);
+	/* (a joiner of before relays reads its addresses and the tag, and
+	nothing between) */
+	size += put_relays(answer + size);
 	message_tag(base, "accept", answer, size, answer + size);
 	size += TAG_SIZE;
 	size = p2p_seal(signalling.host_key, answer, size, sealed);
@@ -1114,6 +1165,7 @@ nonce, and a tag) once the host answered it */
 static void join_received(struct broker *broker, const unsigned char *message, int size)
 {
 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
 	unsigned char identifier[P2P_IDENTIFIER_SIZE];
 	unsigned char request[P2P_IDENTIFIER_SIZE + NONCE_SIZE];
 	unsigned char host_nonce[NONCE_SIZE];
@@ -1127,15 +1179,26 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 	struct used_request *used;
 	int proven;
 	int count;
+	int relay_count = 0;
 
 	if (size < fixed + 1)
 		return;
 	count = get_candidates(message + fixed, size - fixed, candidates);
 	if (count < 0)
 		return;
+	/* (then the relays, unless a joiner of before relays sent it, or one
+	without any: 1 + 6n bytes, never 0 or PROOF_SIZE, so the two are told
+	apart) */
 	proven = size - fixed - 1 - count * 6;
 	if (proven != 0 && proven != PROOF_SIZE)
-		return;
+	{
+		relay_count = get_relays(message + fixed + 1 + count * 6, proven, relays);
+		if (relay_count < 0)
+			return;
+		proven -= 1 + relay_count * 6;
+		if (proven != 0 && proven != PROOF_SIZE)
+			return;
+	}
 	p2p_identifier_for(public_key, identifier);
 	joiner = find_joiner(signalling.joiners, MAXIMUM_JOINERS, public_key, nonce);
 	if (joiner)
@@ -1149,6 +1212,11 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 		{
 			return;
 		}
+		/* (the relays from a proof that has them: the joiner sends its proof
+		with them and without, the two at once, so before the answers' pace;
+		one without leaves them as they were) */
+		if (proven && relay_count > 0)
+			p2p_peer_relays(identifier, joiner->secret, relays, relay_count);
 		if (!elapsed(joiner->answered_broker_times[broker_index], ANSWER_INTERVAL) ||
 			!p2p_peer_reoffered(identifier, joiner->secret, candidates, proven ? count : 0) ||
 			(!proven && !budget_left(&signalling.unproven_answers, MAXIMUM_UNPROVEN_ANSWERS,
@@ -1239,6 +1307,7 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 	session_secret(base, nonce, host_nonce, secret);
 	if (!p2p_peer_offered(identifier, secret, candidates, count, 0))
 		return;
+	p2p_peer_relays(identifier, secret, relays, relay_count);
 	memcpy(used->request, request, sizeof(request));
 	used->time = p2p_now();
 	signalling.used_request_next = (signalling.used_request_next + 1) % MAXIMUM_USED_REQUESTS;
@@ -1263,6 +1332,7 @@ static void join_received(struct broker *broker, const unsigned char *message, i
 static void accept_received(const unsigned char *message, int size)
 {
 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
 	unsigned char hash[P2P_KEY_HASH_SIZE];
 	unsigned char secret[P2P_SHA256_SIZE];
 	const unsigned char *host_public = message + 2;
@@ -1270,6 +1340,8 @@ static void accept_received(const unsigned char *message, int size)
 	const unsigned char *host_nonce = nonce + NONCE_SIZE;
 	int fixed = 2 + P2P_KEY_SIZE + 2 * NONCE_SIZE;
 	int count;
+	int relay_count = 0;
+	int rest;
 
 	if (size < fixed + 1 + TAG_SIZE || memcmp(nonce, signalling.join_nonce, NONCE_SIZE))
 		return;
@@ -1297,8 +1369,20 @@ static void accept_received(const unsigned char *message, int size)
 	count = get_candidates(message + fixed, size - TAG_SIZE - fixed, candidates);
 	if (count < 0)
 		return;
+	/* (the host's relays, if it has any: a host of before relays sends
+	none) */
+	rest = size - TAG_SIZE - fixed - 1 - count * 6;
+	if (rest > 0)
+	{
+		relay_count = get_relays(message + fixed + 1 + count * 6, rest, relays);
+		if (relay_count < 0)
+			return;
+	}
 	session_secret(signalling.join_base, nonce, host_nonce, secret);
-	if (!p2p_peer_offered(signalling.join_host, secret, candidates, count, 1) || signalling.join_answered)
+	if (!p2p_peer_offered(signalling.join_host, secret, candidates, count, 1))
+		return;
+	p2p_peer_relays(signalling.join_host, secret, relays, relay_count);
+	if (signalling.join_answered)
 		return;
 	memcpy(signalling.join_host_nonce, host_nonce, NONCE_SIZE);
 	signalling.join_answered = 1;
@@ -1703,23 +1787,18 @@ static void broker_readable(struct broker *broker)
 port/vita/app0/brokers.txt's) */
 #define DEFAULT_BROKERS "broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
 
-/* the brokers: network.signalling_brokers if set (the tests'), else those in
-network.brokers_file (beside config.toml, unless a full path: on the Vita,
-app0:brokers.txt, port/vita/app0/brokers.txt in its package), one on each
-line, "#" starting a comment, into text: host:port entries separated by
-commas (OpenCE's "Brokers in brokers.txt") */
-static void brokers_list(char *text, size_t size)
+int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size)
 {
-	const char *name = config_string("network.brokers_file");
+	const char *name = config_string(file_setting);
 	const char *colon = strchr(name, ':');
 	char path[1024];
 	char *file;
 	size_t file_size = 0, index, length = 0;
 	int comment = 0;
 
-	snprintf(text, size, "%s", config_string("network.signalling_brokers"));
+	snprintf(text, size, "%s", config_string(override_setting));
 	if (text[0])
-		return;
+		return 1;
 	/* (a full path: "/...", "C:...", "app0:...") */
 	if (name[0] == '/' || name[0] == '\\' || (colon && !memchr(name, '/', (size_t)(colon - name))))
 		snprintf(path, sizeof(path), "%s", name);
@@ -1730,12 +1809,7 @@ static void brokers_list(char *text, size_t size)
 	}
 	file = config_file_read(path, &file_size);
 	if (!file)
-	{
-		platform_log("Internet play: the brokers' file %s cannot be read (network.brokers_file); using the usual ones",
-			path);
-		snprintf(text, size, "%s", DEFAULT_BROKERS);
-		return;
-	}
+		return 0;
 	for (index = 0; index < file_size && length + 1 < size; index++)
 	{
 		char character = file[index];
@@ -1749,6 +1823,22 @@ static void brokers_list(char *text, size_t size)
 	}
 	text[length] = 0;
 	free(file);
+	return 1;
+}
+
+/* the brokers: network.signalling_brokers if set (the tests'), else those in
+network.brokers_file (beside config.toml, unless a full path: on the Vita,
+app0:brokers.txt, port/vita/app0/brokers.txt in its package), one on each
+line, "#" starting a comment, into text: host:port entries separated by
+commas (OpenCE's "Brokers in brokers.txt") */
+static void brokers_list(char *text, size_t size)
+{
+	if (!p2p_list_setting("network.signalling_brokers", "network.brokers_file", text, size))
+	{
+		platform_log("Internet play: the brokers' file %s cannot be read (network.brokers_file); using the usual ones",
+			config_string("network.brokers_file"));
+		snprintf(text, size, "%s", DEFAULT_BROKERS);
+	}
 }
 
 void p2p_signal_start(void)

@@ -274,6 +274,11 @@ static boolean cache_file_structure_bsp_reference_verify(
 /* ---------- globals */
 
 struct cache_file_globals cache_file_globals = { 0 };
+#ifdef HALO_LINUX
+/* port: the loaded tags' count, for tag_groups.h's release tag_get, which
+checks a map's tag references against it */
+long halo_loaded_tag_count = 0;
+#endif
 extern struct cache_file_tag_instance *global_tag_instances;
 char const *data_00316820[] =
 {
@@ -586,15 +591,20 @@ void scenario_tags_unload(
 #endif
 	cache_file_globals.tags_loaded = FALSE;
 	global_tag_instances = NULL;
+#ifdef HALO_LINUX
+	halo_loaded_tag_count = 0;
+#endif
 
 	return;
 }
 
 #ifdef HALO_LINUX
 /* port: the loaded tags' table and its count, for the menus' tags
-(port/linux/game/menu_tags.c), which a copy with theirs added replaces:
-the table first, then its count, so that another thread looking a tag up
-by name meanwhile walks one table or the other */
+(port/linux/game/menu_tags.c), which a copy with theirs added replaces -
+in the tag header too, which the tag checks read (tag_validate.c), and the
+release builds' count (halo_loaded_tag_count): the table first, then its
+count, so that another thread looking a tag up meanwhile walks one table
+or the other */
 void *cache_files_tag_instances(
 	long *count)
 {
@@ -608,14 +618,22 @@ void cache_files_set_tag_instances(
 {
 	if (!cache_file_globals.tags_loaded)
 		return;
+	/* (and the count the release builds' tag_get checks indices against,
+	tag_groups.h: without it, every tag of ours read as the empty one) */
 	if (count > cache_file_globals.tag_header->tag_count)
 	{
 		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_instances, (struct cache_file_tag_instance *)instances,
+			__ATOMIC_RELEASE);
 		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&halo_loaded_tag_count, count, __ATOMIC_RELEASE);
 	}
 	else
 	{
+		__atomic_store_n(&halo_loaded_tag_count, count, __ATOMIC_RELEASE);
 		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_instances, (struct cache_file_tag_instance *)instances,
+			__ATOMIC_RELEASE);
 		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
 	}
 }
@@ -1250,6 +1268,13 @@ long scenario_tags_load(
 	texture_cache_open();
 	sound_cache_open();
 #ifdef HALO_LINUX
+	/* port: the menus' XML read meanwhile, on a thread of its own, for
+	ui.map (port/linux/game/menu_tags.c) */
+	{
+		extern void menu_tags_preload(char const *map_name);
+
+		menu_tags_preload(stripped_scenario_name);
+	}
 	/* a Halo Custom Edition map, when those may run, is read in place into
 	its own tag cache and has no Xbox vertex or index buffers
 	(port/linux/game/custom_edition_cache.c) */
@@ -1261,6 +1286,7 @@ long scenario_tags_load(
 		if (cache_file_globals.tag_header)
 		{
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
+			halo_loaded_tag_count = cache_file_globals.tag_header->tag_count;
 			cache_file_globals.tags_loaded = TRUE;
 			result = cache_file_globals.tag_header->scenario_tag_index;
 		}
@@ -1381,6 +1407,9 @@ long scenario_tags_load(
 			}
 #endif
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
+#ifdef HALO_LINUX
+			halo_loaded_tag_count = cache_file_globals.tag_header->tag_count;
+#endif
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
 			cache_file_globals.tags_loaded = TRUE;
 #ifdef HALO_LINUX
@@ -1704,7 +1733,24 @@ void *tag_get(
 	char expected_group[16];
 	char returned_group[16];
 
-	struct cache_file_tag_instance *tag_instance = cache_get_tag_instance(tag_index);
+	struct cache_file_tag_instance *tag_instance;
+
+#ifdef HALO_LINUX
+	/* port: a map's tag reference is untrusted (tag_groups.h's release
+	tag_get checks the same): an index past the tags, or a tag of another
+	group, gets the empty data rather than memory past the tags */
+	if (!cache_file_globals.tags_loaded || !global_tag_instances ||
+		(short)tag_index < 0 || (short)tag_index >= cache_file_globals.tag_header->tag_count ||
+		!global_tag_instances[(short)tag_index].base_address ||
+		(global_tag_instances[(short)tag_index].group_tag != group_tag &&
+		global_tag_instances[(short)tag_index].parent_group_tags[0] != group_tag &&
+		global_tag_instances[(short)tag_index].parent_group_tags[1] != group_tag))
+	{
+		tag_index_error("tag", tag_index, cache_file_globals.tags_loaded ? cache_file_globals.tag_header->tag_count : 0);
+		return tag_empty_data_sized(0x10000);
+	}
+#endif
+	tag_instance = cache_get_tag_instance(tag_index);
 	match_vassert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",
 		298,

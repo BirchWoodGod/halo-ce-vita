@@ -34,10 +34,10 @@ Evolved.
   between Vitas on the same Wi-Fi; online play (short codes, a server
   browser of public games, from OpenCE) and ad hoc play between Vitas, experimental. Vitas play only
   Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
-- Campaign co-op over the network, experimental: two Vitas play a level
-  together by system link, online or ad hoc (Campaign, a level and a
-  difficulty, then **Y: Play co-op**; the settings panel's Play page opens
-  Campaign for it; [port/vita/README.md](port/vita/README.md#multiplayer)).
+- Campaign co-op over the network, experimental: up to four Vitas play a
+  level together by system link, online or ad hoc (Campaign, a level and a
+  difficulty, then **Y: Play co-op**;
+  [port/vita/README.md](port/vita/README.md#multiplayer)).
 - Profiles, controller settings and the game's settings menus.
 - A settings panel for the Vita's quality, sound, control and multiplayer
   options, custom maps and tester switches: hold **Select + Start** in game.
@@ -65,6 +65,10 @@ one: the biggest fights still drop frames (see [Performance](#performance)).
   levels it loads).
 - Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
   it). It must be the Xbox version: the PC version's maps do not work.
+- **For online play:** Halo PC's `bitmaps.map`, `sounds.map` and `loc.map`
+  (from your own Halo Custom Edition installer, Halo MCC on Steam, or a
+  Custom Edition install). They give the game its online multiplayer menus
+  and Custom Edition maps; see [Online play](#online-play-halo-pc-files).
 
 ### Steps
 
@@ -119,7 +123,14 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v high -level 4.0 -crf 20 -pix_fmt yuv
        -vf scale=640:-2 -c:a aac -b:a 128k -movflags +faststart intro.mp4
 ```
 
-A movie without an MP4 is skipped, as the game skips a missing movie.
+The game needs none of them. With no `movies` folder, or a movie that is
+missing or will not open, that movie is skipped: no intro, no attract
+videos on an idle main menu (its music plays on), and the main menu takes
+input as soon as it is up. Without the intro the main menu appears a few
+seconds after the menu's background, more at the first start: the game
+first checks its saves and writes its default profile and playlists, which
+the intro otherwise plays over. Movies added or removed later are noticed
+at the next start.
 
 A movie is scaled to fill the screen at the shape its file gives, with
 black bars only where that shape needs them: the Xbox's 4:3 movies fill the
@@ -135,23 +146,79 @@ the game's own. Two kinds work:
 - **Xbox custom maps**: copy the `.map` in. Nothing else is needed.
 - **Halo PC / Custom Edition maps** (`.map`, and OpenSauce `.yelo`;
   experimental): these need three resource maps from your own copy of Halo
-  on PC, `bitmaps.map`, `sounds.map` and `loc.map`, copied to the same
-  folder:
-  - **Halo: The Master Chief Collection** (Steam):
-    `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`.
-    Take the three from the `custom_edition` folder, not the ones in
-    `halo1/maps`, which are MCC's own and do not work.
-  - **Halo Custom Edition** (PC): the `maps` folder of the install
-    (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`), or
-    unpacked from the Custom Edition installer with an archive tool.
+  on PC, `bitmaps.map`, `sounds.map` and `loc.map`. Two of them,
+  `bitmaps.map` and `loc.map`, also give the game's Multiplayer menu the PC
+  version's screens (a server browser, Join by code, Server Setup). Three
+  ways to get them, easiest first:
+  1. **The Halo Custom Edition installer**: copy your
+     `halocesetup_en_1.00.exe` (or another language's `halocesetup*.exe`,
+     about 170 MB) to `ux0:data/haloce-vita/`. The name must start with
+     `halocesetup` and end in `.exe`: rename a download called something
+     else. At the next start the game takes the three out of it into the
+     maps folder (under a minute; a progress line shows, Circle stops it),
+     asks whether to delete the installer to free the space, then restarts
+     itself with the PC multiplayer menus. Nothing to unpack on a PC.
+  2. **Halo: The Master Chief Collection** (Steam): copy the three from
+     `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
+     to `ux0:data/haloce-vita/maps/`. Take them from the `custom_edition`
+     folder, not the ones in `halo1/maps`, which are MCC's own and do not
+     work.
+  3. **A Halo Custom Edition install** (PC): copy the three from its `maps`
+     folder (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`)
+     to `ux0:data/haloce-vita/maps/`. (On a PC without an install,
+     `tools/ce_installer_extract.c` takes them out of the installer, as the
+     game does; how to build it is at its top.)
 
   Then turn on **PC maps** in the settings panel (Select + Start,
   Multiplayer, Modded maps). The page lists your custom maps and warns if a
-  resource map is missing.
+  resource map is missing; with an installer in `ux0:data/haloce-vita/`,
+  its **Extract PC files** row takes them out of it again (after a start
+  where you stopped it, say).
 
 Custom Edition maps themselves (race tracks and the like) come from the
 community's Halo CE map archives and forums. This project includes no maps
 and links to no downloads.
+
+### Online play: Halo PC files
+
+**Online play needs Halo PC's `bitmaps.map`, `sounds.map` and `loc.map` in
+`ux0:data/haloce-vita/maps/`.** Get them from your own copy, whichever is
+easiest:
+
+1. **The Halo Custom Edition installer:** copy `halocesetup_en_1.00.exe`
+   (renamed to that if your download is called something else) to
+   `ux0:data/haloce-vita/` and start the game. It unpacks the three files
+   by itself (under a minute), asks before deleting the installer, then
+   restarts itself.
+2. **Halo: The Master Chief Collection** (Steam): the three files in
+   `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`
+   (not the ones directly in `halo1/maps`).
+3. **A Halo Custom Edition install:** its `maps` folder.
+
+With them, the main menu's **Multiplayer** opens the PC version's
+Multiplayer screen, from OpenCE's PC menus:
+
+- **Join Game**: **Internet** is the server browser (the public games, a
+  lock on those with a password; A joins, a locked game's password is typed
+  on the Vita's keyboard; Square refreshes), **LAN** the System Link screen,
+  **Join by code** a host's code.
+- **Create Game**: **Internet** is Server Setup: the lobby name, max players,
+  visibility (public: in everyone's server browser; private: joined by its
+  code) and password, which are kept - then your profile, the map and the
+  gametype; the settings panel's Multiplayer tab shows your game's code.
+  **LAN** is the System Link screen (Y creates a game).
+- **Co-op campaign** (pick a level and a difficulty, then Y; up to four
+  players; online the game is private, joined by its code, unless X on its
+  waiting screen makes it public), **Split screen** and **Edit gametypes**,
+  as before.
+
+Internet and Join by code need **Connection: Online** (settings panel,
+Multiplayer); the screen says so otherwise. The pictures and text are read
+from your own `bitmaps.map` and `loc.map` the first time the screen opens;
+none of Bungie's files are in this project. Without the two files, the
+Xbox's Multiplayer screen opens as before: System Link hosts (online too,
+with the settings last chosen) and joins, and the settings panel's **Join
+with a code** joins a code; the public games' browser needs the files.
 
 Only the host needs the custom map: a Vita that joins without it is asked
 whether to download it from the host in the lobby (and, for a Custom
@@ -256,18 +323,12 @@ restart. Settings are kept in
 it is).
 
 - **Multiplayer**: the network (**Connection**: Same Wi-Fi, Ad hoc or
-  Online), the ad hoc room, and **Play**: one page for hosting and joining.
-  **Host a game** shows the steps, then opens the game's System Link
-  screen; under it, how others see your game: its **Lobby name** (typed on
-  the Vita's keyboard; your Vita's user name until you type one), **Max
-  players** (2 to 16), and online its **Visibility** (Private: joined by
-  code; Public: listed in the public games too) and a **Password**. **Host
-  co-op campaign** opens Campaign: pick a level and a difficulty, then Y.
-  Online, **Join with a code** and **Browse public games**; **Games on this
-  network** opens the System Link list. Rows another Connection uses are
-  hidden. A joiner of a full game is told so. Your game's code and what
-  the game is doing show under the rows (see
-  [port/vita/README.md](port/vita/README.md#multiplayer)).
+  Online), and with Ad hoc the room and **Join the room** (the system's
+  dialog joins its group). Hosting and joining are in the game's own
+  Multiplayer menu ("Online play: Halo PC files" above, or the Xbox's System
+  Link); without the Halo PC files, online, **Join with a code** types a
+  host's code here. Your game's code and what the game is doing show under
+  the rows (see [port/vita/README.md](port/vita/README.md#multiplayer)).
 - **Modded maps** (a Multiplayer page): the custom maps in your maps folder, with their size and
   kind (Xbox, or CE for Halo Custom Edition). Left and right turn a map off
   (it stays on the card but leaves the map list) or on; Square deletes it
@@ -370,8 +431,8 @@ needed, and the game runs the same without them.
 - **[CapUnlocker](https://github.com/GrapheneCt/CapUnlocker)** by GrapheneCt
   lets games use the Vita's fourth CPU core, which the system normally keeps
   for itself. With it, the **Fourth core helpers** setting (Graphics >
-  Advanced; it applies after a restart) moves background work onto that
-  core: **Audio** moves the sound mixer, **All async** also the display
+  Advanced; **All async** by default; it applies after a restart) moves
+  background work onto that core: **Audio** moves the sound mixer, **All async** also the display
   queue, loading, map decompression, checkpoint writing, shader compiling
   and the log. The game, render and tick threads never move. If core 3
   stays very busy and the frame rate drops, use Audio. Without it the setting
@@ -447,8 +508,8 @@ Issues and pull requests are welcome. What is planned next is in the
 
 - **Performance** in the biggest fights: the render on the first core is
   the limit at the peak.
-- **Testing online and ad hoc multiplayer** between Vitas: the settings
-  panel's Play page (see [port/vita/README.md](port/vita/README.md)).
+- **Testing online and ad hoc multiplayer** between Vitas: the game's
+  Multiplayer menu (see [port/vita/README.md](port/vita/README.md)).
 - **The issues listed for the next update** in the roadmap.
 
 ### Reporting a crash or a problem
@@ -487,7 +548,9 @@ This port stands on a lot of other people's work:
   the platform layer, the OpenGL renderer the Vita renderer is modelled on,
   the distributed netcode, system link over the internet, the server
   browser of public games (signed listings, password-protected games, its
-  Players and Rules lines), and much more.
+  Players and Rules lines), the PC menus' multiplayer screens (Server
+  Browser, Server Setup, the password and Direct Link screens and their
+  header art, read with [Expat](https://libexpat.github.io)), and much more.
   Those platforms still build from this tree (`port/linux`, `port/windows`,
   `port/android`, each with its own README). Campaign co-op over the
   network is theirs too (xshxdex98's and MrBruh's work: `network_coop.c`,
@@ -523,8 +586,11 @@ Libraries and tools: [VitaSDK](https://vitasdk.org),
 [KCP](https://github.com/skywind3000/kcp),
 [Monocypher](https://monocypher.org) (the server browser's signatures and
 password keys),
+[Expat](https://libexpat.github.io) (the PC menus' files),
 [Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
 [miniupnpc](https://github.com/miniupnp/miniupnp),
+[libmspack](https://github.com/kyz/libmspack) by Stuart Caie (LGPL 2.1:
+Halo Custom Edition's resource maps out of its installer),
 [musl](https://musl.libc.org)'s math functions,
 [extract-xiso](https://github.com/XboxDev/extract-xiso), and
 [Vita3K](https://vita3k.org) for testing.

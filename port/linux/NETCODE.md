@@ -88,7 +88,7 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
   Only the host runs the AI, so the clients see them as the host's other
   actors. This tree keeps the Xbox's pool of 256 (single player's saves keep
   their layout, and the Vita has no memory for more), so they find no room,
-  and its Vitas default to none (`network.coop_players` 2, extra enemies
+  and its Vitas default to none (`network.coop_players` 4, extra enemies
   "none").
 - **Host authoritative.** The host alone decides damage, deaths, spawns,
   pickups, scores and the game's objects; clients do not decide them but

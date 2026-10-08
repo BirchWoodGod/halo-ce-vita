@@ -17,6 +17,10 @@ bytes (net_fuzz_next_record):
   5  an invite handed over by another copy of the game (sealed)
   6  the clock moves on (the first byte, in tenths of a second)
   7  the game's datagram to the peer, and lookups of addresses
+  8  (a kind byte of 0x88 only) a datagram from the peer's relay: as it is
+     (an answer to an allocation's request), or, the first byte odd, the
+     peer's tunnel packet sealed and passed on in a DATA message on the
+     relay's channel (the rest of the bytes)
 After each record the p2p thread's pass runs (its streams, peers, stand-ins),
 as it would. Every input starts from the same state: one peer connected,
 the game's UDP and TCP port 2302 open.
@@ -57,6 +61,13 @@ void p2p_signal_stop_lookup(void) {}
 void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token) { (void)host_hash; (void)token; }
 void p2p_signal_stop_joining(void) {}
 int p2p_signal_connected(void) { return 1; }
+int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size)
+{
+	(void)override_setting; (void)file_setting;
+	if (size)
+		text[0] = 0;
+	return 0;
+}
 void p2p_adhoc_start(unsigned short tunnel_port) { (void)tunnel_port; }
 void p2p_adhoc_update(void) {}
 void p2p_discord_update(void) {}
@@ -79,7 +90,32 @@ static const unsigned char fuzz_peer_secret[P2P_SHA256_SIZE] = { 1, 2, 3, 4, 5, 
 static const unsigned long fuzz_peer_address = 0x0100A8C0; /* 192.168.0.1 */
 static const unsigned short fuzz_peer_port = 0x0F27;
 static unsigned long long fuzz_peer_counter;
+/* the peer's relay, its allocation ready: where it is, its channel, and the
+nonce of the requests (its answers carry it) */
+static const unsigned long fuzz_relay_address = 0x057100CB; /* 203.0.113.5 */
+static const unsigned short fuzz_relay_port = 0xD8B8;
+static const unsigned long fuzz_relay_channel = 0x12345001;
 static int fuzz_game_udp, fuzz_game_tcp;
+
+/* the peer's relay, ready (as after its ALLOCATED) */
+static void fuzz_relay_setup(void)
+{
+	struct peer *peer = find_peer(fuzz_peer_identifier);
+	struct peer_relay *relay;
+
+	p2p.relay_allowed = 1;
+	if (!peer)
+		return;
+	peer->relaying = 1;
+	peer->relay_count = 1;
+	relay = &peer->relays[0];
+	memset(relay, 0, sizeof(*relay));
+	relay->address.address = fuzz_relay_address;
+	relay->address.port = fuzz_relay_port;
+	relay->state = _relay_ready;
+	relay->channel = fuzz_relay_channel;
+	memset(relay->nonce, 0x77, sizeof(relay->nonce));
+}
 
 static void fuzz_reset(void)
 {
@@ -118,8 +154,9 @@ static void fuzz_reset(void)
 	{
 		struct peer *peer = find_peer(fuzz_peer_identifier);
 
-		peer_heard(peer, fuzz_peer_address, fuzz_peer_port, 1);
+		peer_heard(peer, fuzz_peer_address, fuzz_peer_port, 1, 1);
 	}
+	fuzz_relay_setup();
 	fuzz_peer_counter = 1;
 }
 
@@ -175,7 +212,8 @@ static void fuzz_pass(void)
 	{
 		memset(p2p.retired, 0, sizeof(p2p.retired));
 		p2p_peer_offered(fuzz_peer_identifier, fuzz_peer_secret, NULL, 0, 0);
-		peer_heard(find_peer(fuzz_peer_identifier), fuzz_peer_address, fuzz_peer_port, 1);
+		peer_heard(find_peer(fuzz_peer_identifier), fuzz_peer_address, fuzz_peer_port, 1, 1);
+		fuzz_relay_setup();
 		fuzz_peer_counter = 1;
 	}
 }
@@ -280,6 +318,28 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 		p2p_incoming(data[1] & 1, &address, &port);
 		break;
 	}
+	case 8:
+		from.sin_addr.s_addr = fuzz_relay_address;
+		from.sin_port = fuzz_relay_port;
+		if (size > 0 && (data[0] & 1))
+		{
+			int sealed = fuzz_seal(data + 1, size - 1, ++fuzz_peer_counter, packet + P2P_RELAY_DATA_HEADER_SIZE);
+
+			packet[0] = P2P_RELAY_MAGIC;
+			packet[1] = _relay_data;
+			packet[2] = (unsigned char)(fuzz_relay_channel >> 24);
+			packet[3] = (unsigned char)(fuzz_relay_channel >> 16);
+			packet[4] = (unsigned char)(fuzz_relay_channel >> 8);
+			packet[5] = (unsigned char)fuzz_relay_channel;
+			tunnel_received(packet, P2P_RELAY_DATA_HEADER_SIZE + sealed, &from);
+		}
+		else
+		{
+			if (size > 2048)
+				size = 2048;
+			tunnel_received(data, size, &from);
+		}
+		break;
 	}
 }
 
@@ -291,7 +351,7 @@ static int net_fuzz_next_record(const unsigned char **cursor, const unsigned cha
 
 	if (end - *cursor < 3)
 		return 0;
-	*kind = (*cursor)[0] & 7;
+	*kind = (*cursor)[0] == 0x88 ? 8 : (*cursor)[0] & 7;
 	length = (*cursor)[1] | (*cursor)[2] << 8;
 	*cursor += 3;
 	if (length > end - *cursor)
@@ -407,6 +467,71 @@ int net_fuzz_checks(void)
 		size = fuzz_seal(datagram, sizeof(datagram), 303, packet);
 		tunnel_received(packet, size, &from);
 		fuzz_check(net_fuzz_sent_count == sent + 1, "one to the game's port 2302 is passed on");
+	}
+
+	/* the relay: a ping it passes on is answered through it, on its channel;
+	nothing on another channel, from another address, or in another
+	machine's name; its cookie is taken at once */
+	{
+		unsigned char frame[P2P_RELAY_DATA_HEADER_SIZE + MAXIMUM_PACKET_SIZE];
+		unsigned char answer[P2P_RELAY_ALLOCATED_SIZE];
+		struct peer_relay *relay = &find_peer(fuzz_peer_identifier)->relays[0];
+
+		from.sin_addr.s_addr = fuzz_relay_address;
+		from.sin_port = fuzz_relay_port;
+		frame[0] = P2P_RELAY_MAGIC;
+		frame[1] = _relay_data;
+		frame[2] = 0x12; frame[3] = 0x34; frame[4] = 0x50; frame[5] = 0x01;
+		size = P2P_RELAY_DATA_HEADER_SIZE + fuzz_seal(ping, sizeof(ping), 400, frame + P2P_RELAY_DATA_HEADER_SIZE);
+		sent = net_fuzz_sent_count;
+		tunnel_received(frame, size, &from);
+		fuzz_check(net_fuzz_sent_count == sent + 1 && net_fuzz_sent[0] == P2P_RELAY_MAGIC &&
+			net_fuzz_sent[1] == _relay_data && !memcmp(net_fuzz_sent + 2, frame + 2, 4) &&
+			net_fuzz_sent[P2P_RELAY_DATA_HEADER_SIZE] == TUNNEL_MAGIC,
+			"a ping the relay passes on is answered through the relay, on its channel");
+		size = P2P_RELAY_DATA_HEADER_SIZE + fuzz_seal(ping, sizeof(ping), 401, frame + P2P_RELAY_DATA_HEADER_SIZE);
+		frame[5] = 0x02;
+		tunnel_received(frame, size, &from);
+		frame[5] = 0x01;
+		from.sin_port ^= 1;
+		tunnel_received(frame, size, &from);
+		from.sin_port ^= 1;
+		frame[P2P_RELAY_DATA_HEADER_SIZE + 1] ^= 1;
+		tunnel_received(frame, size, &from);
+		frame[P2P_RELAY_DATA_HEADER_SIZE + 1] ^= 1;
+		fuzz_check(net_fuzz_sent_count == sent + 1,
+			"not on another channel, from another port, or naming another machine");
+		memset(answer, 0, sizeof(answer));
+		answer[0] = P2P_RELAY_MAGIC;
+		answer[1] = _relay_cookie;
+		answer[2] = P2P_RELAY_VERSION;
+		memset(answer + 4, 0x77, P2P_RELAY_NONCE_SIZE);
+		{
+			unsigned char cookie[P2P_RELAY_COOKIE_MESSAGE_SIZE];
+
+			memset(cookie, 0, sizeof(cookie));
+			memcpy(cookie, answer, 4 + P2P_RELAY_NONCE_SIZE);
+			memset(cookie + 4 + P2P_RELAY_NONCE_SIZE, 0xC0, P2P_RELAY_COOKIE_SIZE);
+			cookie[4] = 0x76;
+			tunnel_received(cookie, sizeof(cookie), &from);
+			fuzz_check(net_fuzz_sent_count == sent + 1, "a cookie for another nonce is not taken");
+			cookie[4] = 0x77;
+			tunnel_received(cookie, sizeof(cookie), &from);
+			fuzz_check(net_fuzz_sent_count == sent + 2 && net_fuzz_sent_size == P2P_RELAY_ALLOCATE_SIZE &&
+				net_fuzz_sent[1] == _relay_allocate && net_fuzz_sent[P2P_RELAY_COOKIE_OFFSET] == 0xC0 &&
+				!memcmp(net_fuzz_sent + P2P_RELAY_ALLOCATION_OFFSET, find_peer(fuzz_peer_identifier)->relay_allocation,
+				P2P_RELAY_ALLOCATION_SIZE), "the relay's cookie is taken: the allocation asked for again with it");
+		}
+		answer[1] = _relay_allocated;
+		answer[3] = P2P_RELAY_BUSY;
+		tunnel_received(answer, sizeof(answer), &from);
+		fuzz_check(relay->state == _relay_refused, "a relay that is full refuses");
+		answer[3] = P2P_RELAY_READY;
+		answer[P2P_RELAY_CHANNEL_OFFSET + 3] = 9;
+		tunnel_received(answer, sizeof(answer), &from);
+		fuzz_check(relay->state == _relay_ready && relay->channel == 9, "and then carries, on the channel it gives");
+		from.sin_addr.s_addr = fuzz_peer_address;
+		from.sin_port = fuzz_peer_port;
 	}
 
 	/* invites and codes */

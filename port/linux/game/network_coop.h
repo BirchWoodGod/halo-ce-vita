@@ -57,6 +57,9 @@ void network_coop_note_object_new(long object_index);
 ahead of its host's latest tick (a slow host); and how often it has */
 boolean network_coop_client_hold(void);
 void network_coop_client_pace_statistics(long *holds, long *most_lead);
+/* the holds since the last note, for the frame-hitch line (main.c): its
+length, 0 for none */
+int network_coop_client_pace_note(char *line, int size);
 /* unit_scripting_commands.c: a script set a unit's maximum or current
 vitality; TRUE if it was a co-op player's, now set on every player's */
 boolean network_coop_set_players_vitality(long unit_index, boolean maximum, real body, real shield);

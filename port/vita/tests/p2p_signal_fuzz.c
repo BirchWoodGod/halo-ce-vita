@@ -124,6 +124,20 @@ int p2p_peer_offered(const unsigned char *who, const unsigned char *secret, cons
 	return 1;
 }
 int p2p_peer_turned_away(const unsigned char *who, int is_host) { (void)who; (void)is_host; return 0; }
+int p2p_local_relays(struct p2p_candidate *relays, int maximum_count)
+{
+	(void)maximum_count;
+	relays[0].address = 0x0200000A;
+	relays[0].port = 0x7856;
+	return 1;
+}
+void p2p_peer_relays(const unsigned char *who, const unsigned char *secret, const struct p2p_candidate *relays,
+	int count)
+{
+	(void)who; (void)secret;
+	if (count < 0 || count > P2P_MAXIMUM_RELAYS || (count && !relays))
+		__builtin_trap();
+}
 int p2p_peer_reoffered(const unsigned char *who, const unsigned char *secret, const struct p2p_candidate *candidates,
 	int count)
 {
@@ -178,7 +192,7 @@ static void setup(void)
 	snprintf(signalling.brokers[0].host, sizeof(signalling.brokers[0].host), "broker");
 	p2p_signal_host(token, "ABCD-EFGH");
 	p2p_signal_join(host_hash, token);
-	p2p_signal_lookup_code("ABCDEFGH");
+	p2p_signal_lookup_code("ABCDEFGH", NULL);
 	p2p_signal_lobby_topics(1, 1);
 }
 

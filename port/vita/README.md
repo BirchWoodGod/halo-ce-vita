@@ -58,9 +58,13 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
        -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
 ```
 
-A movie without an MP4 is skipped, as the game skips a missing movie. (The
-game looks for `data/bink/<name>.bik` first; the port creates an empty one
-for each MP4 at start-up.)
+A movie without an MP4 (or one that will not open) is skipped, as the game
+skips a missing movie: no intro, no attract videos, and the main menu takes
+input as soon as it is up - without the intro it comes up once the start-up
+saves and profile checks end, which the intro otherwise plays over. (The
+game looks for `data/bink/<name>.bik` first; the port creates a 12-byte
+stand-in for each MP4 at start-up, and removes the stand-ins whose MP4 is
+gone.)
 
 A movie is scaled to fill the screen at the shape its file gives (letter-
 or pillarboxed only as that needs): the Xbox's 4:3 movies fill the height,
@@ -255,7 +259,13 @@ Square deletes a map, with its `.bmp` picture and `.txt` description, after
 asking (not the map being played). **PC maps** (Off by default,
 experimental) puts the Custom Edition maps in the map list; the page warns
 when the Custom Edition resource maps they need (`bitmaps.map`,
-`sounds.map`, `loc.map`) are not in the maps folder. **Map downloads**
+`sounds.map`, `loc.map`) are not in the maps folder. A Halo Custom Edition
+installer (`halocesetup*.exe`) copied to `ux0:data/haloce-vita/` gives them:
+the game takes the three from it at start-up, on a thread of its own with
+a progress line (Circle stops it), then asks whether to delete the installer;
+**Extract PC files**, shown on the page while an installer is there and a
+file is missing, does the same (`port/vita/host/vita_ce_installer.c`,
+`port/linux/src/posix_ce_installer.c`). **Map downloads**
 decides what happens when you join a game on a custom map you lack:
 **Ask** (the default) asks whether to download it from the host, and in a
 game joined from the public lobby warns that the host is a stranger (only
@@ -270,7 +280,7 @@ is on, and off, `env.txt`'s value (or the default) applies. While any is on,
 
 | Switch | Variable | What it does |
 | --- | --- | --- |
-| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go, in `halo.log` |
+| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1`, `HALO_LOAD_PROFILE=1` | where the frame and the tick go, in `halo.log`, and a `load-profile` line for a frame over 100 ms. A frame over 100 ms is named by its parts whether this is on or not: `frame-hitch` (the game thread's steps, its waits for the cache lock and the mixer, a map copy going on), `frame-hitch waits` (the cache file thread, the texture and sound caches, every file call the game thread or another made, the slowest by name) and `frame-hitch cores` (each core's busy share during the frame, the helpers' run times) |
 | Crash dump on hang | `HALO_HANG_CRASH=1` | a hang of 8 s (no frame presented) crashes on purpose, for a crash dump |
 | FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load, render scale, GPU time, free video memory (VRAM; yellow while part of the texture cache is in main memory) |
 | Debug camera | `HALO_DEBUG_CAMERA=1` | hold Black for a second: follow, orbit, then a flying camera |
@@ -299,21 +309,38 @@ PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
 - **System link** over Wi-Fi: Vitas on the same network host and join each
   other's games under Multiplayer, System Link.
 - **Ad hoc** (Vitas side by side, no router) and **online** (internet
-  play) are **experimental**: the Play page shows their rows while
-  Connection is set to them.
+  play) are **experimental**: set the settings panel's Connection to them.
   Both end in the game's own System Link screens: the other Vita's game
   shows in the list, and you host or join as on a local network.
 
-**Hosting and joining.** Put the Vitas on the same Wi-Fi network, open the
-settings panel (hold Select and Start) and go to **Multiplayer**, **Play**:
+**The game's Multiplayer menu.** Hosting and joining are in the game's own
+menus. With Halo PC's `bitmaps.map` and `loc.map` in the maps folder (from
+MCC's `halo1/maps/custom_edition/` or a Custom Edition install: see the main
+README's "Online play: Halo PC files"), the main menu's **Multiplayer** opens the
+PC version's Multiplayer screen, OpenCE's menus:
 
-1. **Host a game** (or **Games on this network**, to join) shows the steps;
-   Cross opens the game's System Link screen for you.
-2. Press A to join if asked, A on your profile, then A again.
-3. **SYSTEM LINK GAMES** lists the games on the network. The host presses
+| Item | What it does |
+| --- | --- |
+| Join Game: Internet | The server browser: the public games, a lock on those with a password, their map, gametype and players, and the chosen game's Players and Rules lines. A joins (a locked game's password is typed on the Vita's keyboard), X (Square) refreshes. The System Link screen then opens with the host's game in its list. |
+| Join Game: LAN | The System Link screen (games on this network, or reached by internet play or ad hoc). |
+| Join Game: Join by code | Direct Link: type the host's code (ABCD-EFGH) on the keyboard, then JOIN GAME; the System Link screen follows. |
+| Create Game: Internet | Server Setup: Server name (others see it in their lists; 15 characters; your Vita's user name until you type one), Max players (2 to 16; a joiner past it is told the game is full), Visibility (**Public**: listed in every Vita's server browser; **Private**: joined by its code), Password (a public game asks joiners for it; the code still joins). START GAME, then your profile, a map and a gametype: your lobby. The settings are kept. |
+| Create Game: LAN | The System Link screen, where Y creates a game. |
+| Co-op campaign | The Campaign screen: a profile, a level, a difficulty, then **Y** (co-op, below). |
+| Split screen, Edit gametypes | As on the Xbox. |
+
+Internet and Join by code need Connection Online. Without the two Halo PC
+files the Xbox's Multiplayer screen opens as before: **System Link** hosts
+(Y creates a game; online, its Visibility and the rest as last set) and
+joins games, and the settings panel's **Join with a code** joins a code.
+
+**Hosting and joining by System Link.** On the System Link screen:
+
+1. Press A to join if asked, A on your profile, then A again.
+2. **SYSTEM LINK GAMES** lists the games on the network. The host presses
    **Y** to create one (A on a map, A on a game type); the others press
    **A** on the host's game.
-4. Everyone waits in the lobby; A there starts the game sooner. A custom
+3. Everyone waits in the lobby; A there starts the game sooner. A custom
    map a joiner lacks comes from the host (the game asks, naming the host,
    and warns in a public game; Cross: yes; Modded maps, Map downloads),
    before the game starts: the host's game waits for the download, and its
@@ -326,8 +353,7 @@ settings panel (hold Select and Start) and go to **Multiplayer**, **Play**:
    where it stopped when you join for the same map again.
 
 The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
-Triangle, Back Select. The same screens are under Multiplayer, System Link
-Play in the main menu. To host on a PC (Custom Edition) map, turn on PC maps
+Triangle, Back Select. To host on a PC (Custom Edition) map, turn on PC maps
 on the Modded maps page first.
 
 The settings panel's **Multiplayer** tab:
@@ -335,40 +361,27 @@ The settings panel's **Multiplayer** tab:
 | Line | What it does |
 | --- | --- |
 | Connection | **Same Wi-Fi** (the default): system link on this network. **Ad hoc** (experimental): Vitas side by side, without a router. **Online** (experimental): internet play. Applies after a restart. |
-| Play > | Hosting and joining: the page below. |
 | Ad hoc room | With Connection Ad hoc: 1 to 4. Vitas in the same room play together. |
+| Join the room | With Ad hoc: the system's dialog joins (or makes) the room's group; then Multiplayer, System Link (LAN) in the game. |
+| Join with a code | Online, without the PC menus (whose Join by code does it): type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins), then the steps with how the lookup goes, and Cross opens System Link. |
 | Modded maps > | Your custom maps (above). |
 
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many
-players are in of the most it takes, in a lobby, in a game), and with Online
-or Ad hoc, your code or the ad hoc group.
-
-**Play**, one page for hosting and joining. Rows the Connection does not use
-are hidden (Same Wi-Fi and Ad hoc have the first three and the last two):
-
-| Line | What it does |
-| --- | --- |
-| Host a game | The steps above, then the game's System Link screen (from the menus, outside a lobby), where Y creates your game. |
-| Lobby name | The name others see for your game: in their System Link list, your lobby and the public games. Cross types it on the Vita's keyboard (15 characters, letters, digits and punctuation; others are left out). Until you type one, your Vita's user name. |
-| Max players | 2 to 16 (default 16): the most players your games take. A joiner past it is told the game is full. A co-op game takes 2. |
-| Visibility | Online: **Public** (the default): your games are also listed in the public games for any Vita to join. **Private**: others join with your code. Applies at once, also while hosting. |
-| Password | Online and Public: a joiner from the public games is asked for it (typed on the keyboard; empty: none). Your code still joins without it. |
-| Host co-op campaign | Opens the game's Campaign screen: pick a profile, a level and a difficulty, then **Y: Play co-op** (co-op, below). With Ad hoc, the room's group is joined first. |
-| Join with a code | Online: type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins; Triangle: the public games instead), then the steps with how the lookup goes. |
-| Browse public games | Online: the server browser, one line a game (its name, players of the most, map, **[pw]** if it has a password, **PC** on a Halo PC map), and the chosen game's Rules ("Slayer to 50 on Blood Gulch") and Players ("5 of 16: name, name... +3 more") below. Cross joins it (a **[pw]** game asks for its password on the keyboard), then the steps; Square refreshes the list. |
-| Games on this network | The steps, then the System Link list: Cross on the host's game joins it. With Ad hoc, the room's group is joined first. |
+players are in of the most it takes, in a lobby, in a game), with Online
+or Ad hoc your code or the ad hoc group, and without the Halo PC files
+"Online menus need bitmaps.map, loc.map: README".
 
 The ad hoc dialog's mode (Connect, Create or Join) is a Dev switch.
 
-**Online.** Set Connection to Online and restart. To host, create a game (Host a game, or Multiplayer, System Link):
-the Play page and the Multiplayer tab then show your code, **ABCD-EFGH**
-(it stays the same until you quit the game). Tell it to the others; with
-Visibility Public, your game is also listed. To join, choose **Join with a
-code** (Triangle there browses the public games instead) or **Browse public
-games**: either then shows the steps with how the lookup goes. Once it says
-"connected to the host", Cross opens System Link, and the host's game is in
-the list. A code is a convenience, not a password: anyone who has it (or
+**Online.** Set Connection to Online and restart. To host, create a game
+(Multiplayer, Create Game, Internet; or System Link's Y): the settings
+panel's Multiplayer tab then shows your code, **ABCD-EFGH** (it stays the
+same until you quit the game). Tell it to the others; with Visibility
+Public, your game is also listed in the server browser. To join, use the
+server browser or Join by code in the game's Multiplayer menu (without the
+Halo PC files: the settings panel's **Join with a code**); the System Link
+screen then opens, and the host's game is in the list once it is reached. A code is a convenience, not a password: anyone who has it (or
 guesses it) can join that game.
 
 The long invite still works too, as a fallback: the host's is written to
@@ -405,40 +418,49 @@ public game, nor a Vita a PC's. A host can ban by device: the ID the
 game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
 only, not the OpenPSID itself.
 
-**Co-op (experimental).** Play the campaign together on two Vitas, by
+**Co-op (experimental).** Play the campaign together on up to four Vitas, by
 system link, online or ad hoc. The host starts it from the Campaign menu:
 Campaign, a profile, a level and a difficulty as for single player, then on
-the difficulty screen **Y** (Play co-op) instead of **A** (which plays alone,
-as ever). The game's lobby opens as the waiting screen: "Waiting for your
-partner", with the level, the difficulty, this Vita's name and how the game
-is reached (system link, online and its code, or ad hoc); **B** cancels and
-goes back to the difficulty screen. The partner opens the System Link screen
-(the settings panel's Play page: Games on this network, or Join with a code
-online; or Multiplayer, System Link), where the game is listed as
-"<host>: <level> (<difficulty>)" (with the level and "Co-op" and the
-difficulty beside it), and joins it with **A**. Once the partner is in, the
-level starts after a few seconds (the host's **A** sooner). The Play page's
-**Host co-op campaign** opens the Campaign screen for the host. While the
-host waits alone, the lobby's X and A keys are hidden (B cancels), and B
-back on the difficulty screen keeps the difficulty chosen. 1.0.3's Co-op
-page, which made every game the Vita hosted a campaign level, is gone: a
-settings.txt that had a level set loads as Off. The Xbox game had co-op only
-in split screen; this is upstream halo-ce-universal's network co-op
-(credited in the main README):
+the difficulty screen **Y** (Play co-op) instead of **A** (which plays
+alone, as ever). The game's lobby opens as the waiting screen: "Waiting for
+other players", with the level, the difficulty, this Vita's name and how the
+game is reached (system link, online and its code, or ad hoc); **B** cancels
+and goes back to the difficulty screen. Online, a co-op game is **private**
+(joined by its code) unless you choose: **X** on the waiting screen makes it
+public, listed in the server browser (with Server Setup's password, if one
+is set), and X again private (OpenCE's `network.coop_public`, kept). The
+others open the System Link screen (Multiplayer: LAN, the server browser or
+Join by code; without the PC menus, System Link or the settings panel's Join
+with a code), where the game is listed as "<host>: <level> (<difficulty>)"
+(with the level and "Co-op" and the difficulty beside it), and join it with
+**A**. The lobby shows a panel for each of the three others. Once the first
+is in, the level starts after 15 seconds, so the rest can join, or 6 seconds
+once the lobby is full (the host's **A** sooner); a Vita can also join a
+level in progress, and comes in beside the team. The PC menus' **Co-op
+campaign** opens the Campaign screen for the host. While the host waits
+alone, the lobby's X and A keys are hidden (B cancels; X there is the
+visibility, as the screen says), and B back on the difficulty screen keeps
+the difficulty chosen. 1.0.3's Co-op page, which made every game the Vita
+hosted a campaign level, is gone: a settings.txt that had a level set loads
+as Off. The Xbox game had co-op only in split screen; this is upstream
+halo-ce-universal's network co-op (credited in the main README):
 
-- Two players. The host's Vita runs the level's scripts and its AI for both,
-  and a Vita has no time to spare for more, so a co-op game takes two and
-  upstream's extra enemies are off.
+- Up to four players (two in 1.0.3). The host's Vita runs the level's
+  scripts and its AI for everyone, so its frame rate drops with each player
+  (the game's tick took a third to a half longer with four than with two on
+  the desktop test harness; `HALO_NET_COOP_PLAYERS=2` in env.txt keeps a
+  game to two), and upstream's extra enemies are off.
 - Cutscenes are skipped by vote: press **Start** in one, and it is skipped
-  once both Vitas have (the screen shows the count). Only a press while the
-  skip is offered counts (not one from before it, nor from a level before).
-- A loading zone into a part of the level the team has not been in brings
-  the other player along. Going back to a part already visited needs the
-  team there (both players at the loading zone, or near it); one held back
-  is told so.
-- A dead player watches the other and comes back beside them once it is
-  safe. With both dead, both come back where they were at the last
-  checkpoint (the level is not reverted); checkpoints show on both Vitas.
+  once more than half of the Vitas have (the screen shows the count). Only a
+  press while the skip is offered counts (not one from before it, nor from a
+  level before).
+- Loading zones are the host's: its crossing switches the part of the level
+  and brings the others along (anyone's while the host is dead); another
+  player on one is told to wait for the host.
+- A dead player watches a teammate (A switches to the next) and comes back
+  beside one once it is safe. With everyone dead, all come back where they
+  were at the last checkpoint (the level is not reverted); checkpoints show
+  on every Vita.
 - A level won ends the round, and the lobby's next game is the campaign's
   next level (after The Maw, The Pillar of Autumn). Started from the
   Campaign menu, the lobby opens on it with no map to pick, and it starts
@@ -451,10 +473,10 @@ in split screen; this is upstream halo-ce-universal's network co-op
   the player to update.
 
 **Ad hoc.** Set Connection to Ad hoc on every Vita and restart. Choose the
-same Ad hoc room on each (Multiplayer tab), then on the Play page Host a
-game, Host co-op campaign or Games on this network: the system's dialog
-joins (or makes) the room's group first, then the game's screen opens. When
-the line under the page says another machine is in the group, one Vita
+same Ad hoc room on each (Multiplayer tab), then **Join the room**: the
+system's dialog joins (or makes) the room's group. Then in the game,
+Multiplayer, System Link (LAN with the PC menus). When the line under the
+tab says another machine is in the group, one Vita
 creates a System Link game and the others find it in their lists. Ad hoc carries the game the way online play does,
 over the group instead of the internet; nothing goes to the internet.
 
@@ -543,7 +565,8 @@ Useful ones:
 | `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off; no longer a row: AI think rate) |
 | `HALO_TICK_HASH_MASK=2` | (Linux harness) the tick hash also leaves out what the render writes into the objects and lights, to compare render settings |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
-| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host's latest, so it plays at a slow host's pace (default 6; 0 = never) |
+| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host, so it plays at a slow host's pace (default 6; 0 = never); the host's tick counted on from its newest message for as long as that message has waited (a network that holds the host's messages back does not hold the client) |
+| `HALO_NET_COOP_SILENCE_MS=n` | for at most this long (default 1500) |
 | `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |
 
 ## Layout of port/vita

@@ -2882,6 +2882,44 @@ static void network_game_client_update_precache_status(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: how long after a search the next one goes: 1.5 to 2.5 s, by a
+random number of this machine's own (seeded from its transport nonce), so
+that machines which began searching together drift apart. A host answers
+one search in GAME_ADVERTISEMENT_INTERVAL, and its advertisement names that
+searcher's nonce, which the others' refuse: in step, every two seconds, the
+first of them was the only one ever to see the game (four-player co-op, its
+others searching at once) */
+static unsigned long network_game_client_search_interval(
+	struct network_game_client const *client)
+{
+	static unsigned long state = 0;
+	static unsigned long interval = 2000;
+	static unsigned long chosen_for = 0;
+	unsigned long searched = client->last_broadcast_search_time;
+
+	if (!state)
+	{
+		byte nonce[TRANSPORT_NONCE_LENGTH];
+
+		transport_get_nonce(nonce, sizeof(nonce));
+		state = ((unsigned long)nonce[0] | ((unsigned long)nonce[1] << 8) | ((unsigned long)nonce[2] << 16) |
+			((unsigned long)nonce[3] << 24)) ^ ((unsigned long)nonce[4] << 3) ^ ((unsigned long)nonce[5] << 11);
+		state = (state & 0xFFFFFFFFUL) | 1;
+	}
+	/* (a new interval after each search) */
+	if (searched != chosen_for)
+	{
+		chosen_for = searched;
+		state ^= (state << 13) & 0xFFFFFFFFUL;
+		state ^= state >> 17;
+		state ^= (state << 5) & 0xFFFFFFFFUL;
+		interval = 1500 + (state % 1001);
+	}
+	return interval;
+}
+#endif
+
 static boolean network_game_client_idle_searching(
 	struct network_game_client *client)
 {
@@ -2930,7 +2968,11 @@ static boolean network_game_client_idle_searching(
 		{
 			network_event("network_game_client_process_incoming_messages() failed in network_game_client_idle_searching()");
 		}
+#ifdef HALO_LINUX
+		else if (now - client->last_broadcast_search_time > network_game_client_search_interval(client))
+#else
 		else if (now - client->last_broadcast_search_time > 2000)
+#endif
 		{
 			if (!global_network_game_server_get())
 			{

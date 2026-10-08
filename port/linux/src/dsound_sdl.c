@@ -806,6 +806,9 @@ static unsigned long long statistics_now(void)
 /* game threads waiting for mixer_lock: the mixer hands the lock over
 between two voices when it sees one (mix) */
 static volatile int game_lock_wanted;
+/* the game's threads' waits for the mixer, for good (main.c's frame-hitch
+line takes a frame's from it) */
+volatile unsigned long long halo_mixer_game_wait_us;
 
 /* mixer_lock taken by the game's threads: the time spent waiting for the
 mixer is counted (a lock that is free costs no clock read) */
@@ -819,7 +822,9 @@ static void game_lock(void)
 	__atomic_add_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
 	pthread_mutex_lock(&mixer_lock);
 	__atomic_sub_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
-	statistics_wait_us += statistics_now() - started;
+	started = statistics_now() - started;
+	statistics_wait_us += started;
+	halo_mixer_game_wait_us += started;
 	statistics_waits++;
 }
 
@@ -1476,9 +1481,11 @@ VOID WINAPI DirectSoundDoWork(void)
 
 	if (frame_locked_mixing)
 	{
+		/* (HALO_FIXED_TICK_FRAMES: a tick's audio over that many frames) */
+		int halo_fixed_tick_frames(void);
 		static float buffer[(OUTPUT_RATE / 30) * OUTPUT_CHANNELS];
 
-		mix(buffer, OUTPUT_RATE / 30);
+		mix(buffer, OUTPUT_RATE / 30 / halo_fixed_tick_frames());
 	}
 	streams_complete_finished();
 	if (enabled < 0)
@@ -1487,11 +1494,16 @@ VOID WINAPI DirectSoundDoWork(void)
 
 		enabled = setting && atoi(setting) != 0;
 	}
-	if (enabled && ++calls % 300 == 0)
+	/* (every 300 calls, and at most a line a second: a map load calls this
+	from its IO waits hundreds of times a second, and the line flooded the
+	log, a line every 2 ms after "restart level" on the Vita; the counts run
+	on until the line) */
+	if (enabled && ++calls >= 300 && (!last_report || statistics_now() - last_report >= 1000000ull))
 	{
 		unsigned long mixes = statistics_mixes;
 		unsigned long long now = statistics_now();
 		double elapsed_us = last_report && now > last_report ? (double)(now - last_report) : 0.0;
+		unsigned long frames = calls;
 
 		last_report = now;
 		platform_log("sound mixer: %.1f%% of a core (%.2f ms/mix, %.1f voices), game waits for the mixer %.2f ms/frame (%lu waits);"
@@ -1499,8 +1511,9 @@ VOID WINAPI DirectSoundDoWork(void)
 			elapsed_us > 0.0 ? 100.0 * (double)statistics_mix_us / elapsed_us : 0.0,
 			mixes ? (double)statistics_mix_us / 1000.0 / (double)mixes : 0.0,
 			mixes ? (double)statistics_voices / (double)mixes : 0.0,
-			(double)statistics_wait_us / 1000.0 / 300.0, statistics_waits,
+			(double)statistics_wait_us / 1000.0 / (double)frames, statistics_waits,
 			(double)statistics_callback_gap_us / 1000.0, statistics_callbacks_late);
+		calls = 0;
 		statistics_callback_gap_us = 0;
 		statistics_callbacks_late = 0;
 		statistics_mix_us = statistics_wait_us = 0;

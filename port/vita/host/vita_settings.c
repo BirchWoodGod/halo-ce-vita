@@ -63,52 +63,40 @@ second). Advanced: the sticks' deadzone, Reset controls (look, crouch,
 buttons and touch back as shipped; the gyro's rows and Show dev settings
 stay) and Show dev settings.
 
-Multiplayer is for playing with other Vitas: Connection, the Play page,
-the ad hoc room (with the connection Ad hoc) and Modded maps, then lines
-saying this Vita's name and address and what the game is doing: looking for
-games and how many it found, hosting and how many players are in (of the
-most the game takes), in another's lobby, in a game.
+Multiplayer is for playing with other Vitas: Connection, the ad hoc room
+(with the connection Ad hoc), Join with a code (see below) and Modded maps,
+then lines saying this Vita's name and address and what the game is doing:
+looking for games and how many it found, hosting and how many players are
+in (of the most the game takes), in another's lobby, in a game; and,
+hosting online, the game's short code (ABCD-EFGH) for others to type in.
+Hosting, joining and co-op are the game's own Multiplayer menu's: with Halo
+PC's bitmaps.map and loc.map in the maps folder, OpenCE's screens (server
+browser, Server Setup, Direct Link: port/linux/game/menu_functions.c), else
+the Xbox's (System Link, where Y creates a game); then a line says "Online
+menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
 
 - "Connection" (after a restart) chooses how the Vitas reach each other:
   Same Wi-Fi, the default, the system link that works on hardware; Ad hoc
   (p2p_adhoc.c, vita_net.c; not yet verified on hardware): Vitas side by
   side without a router, in the room chosen on the tab (the group joined
-  through the system's ad hoc dialog when a Play row needs it); or Online
-  (internet play, port/linux/src/p2p.c; experimental).
-- "Play >": one page for hosting and joining, its rows those the
-  connection has (setting_shown). "Host a game" shows the steps on a screen
-  of their own (SCREEN_GUIDE), then opens the game's own System Link screen
-  as the main menu's Multiplayer, then System Link, would
-  (port/linux/game/system_link_shortcut.c): A joins with a profile, and the
-  list of games found (SYSTEM LINK GAMES) takes Y to create one. Under it,
-  the hosted game as others see it: "Lobby name" (the system's keyboard,
-  vita_ime.c; the Vita's user name until one is typed; its printable ASCII,
-  15 characters at most: the System Link list's, the host's lobby and the
-  public lobby's name, HALO_NET_LOBBY_NAME, network_server_manager.c),
-  "Max players" (2 to 16: the game's maximum_players, HALO_NET_MAX_PLAYERS;
-  a joiner past it is told the game is full; co-op takes 2), and online
-  "Visibility" (Private: joined by its code; Public: listed in the public
-  lobby too, at once while hosting; HALO_NET_HOST_PUBLIC, OpenCE's name)
-  and, while Public, "Password". "Host co-op campaign" opens the game's
-  Campaign screen (its profiles, then a level and a difficulty, where Y
-  hosts co-op: port/linux/game/coop_menu.c), the one way to host co-op.
-  Online, "Join with a code" types the host's code in with the D-pad
-  (triangle: the public games) and "Browse public games" lists the public
-  lobby (a locked game asks for its password); either then shows Join's
-  steps with how the lookup goes, as a guide that opened System Link before
-  the host was reached would show an empty list. "Games on this network"
-  shows Join's steps, then the System Link list (the host's game shows
-  there once reached). With Ad hoc, each first joins the room's group (the
-  system's dialog). The steps name the buttons as the game's menus do, the
-  Xbox's (A is Cross there, B Circle, X Square, Y Triangle). The game opens
-  its screens only from the menus, outside a lobby, with a network:
-  otherwise the guide says why. Hosting online, the page and the tab show
-  the game's short code (ABCD-EFGH) for others to type in.
-- 1.0.3's Co-op page (HALO_NET_COOP_LEVEL, HALO_NET_COOP_DIFFICULTY) made
-  every game this Vita hosted that campaign level: it is gone, and a
-  settings.txt naming a level loads as Off (the variables stay, from
-  env.txt, for the automated co-op tests). 1.0.3's "Online games" row
-  (HALO_NET_LOBBY_PUBLIC) loads as Visibility.
+  through the system's ad hoc dialog when the game's System Link screen
+  needs it); or Online (internet play, port/linux/src/p2p.c; experimental).
+- "Join with a code" (Online, on a Vita without the PC menus, whose Direct
+  Link does it in the game) types the host's code in with the D-pad, then
+  shows Join's steps with how the lookup goes, and Cross opens the game's
+  System Link screen (port/linux/game/system_link_shortcut.c), where the
+  host's game shows once reached. The steps name the buttons as the game's
+  menus do, the Xbox's (A is Cross there, B Circle, X Square, Y Triangle).
+- The hosted game's settings (HALO_NET_LOBBY_NAME, its printable ASCII, 15
+  characters at most, the Vita's user name until one is typed;
+  HALO_NET_MAX_PLAYERS, 2 to 16; HALO_NET_HOST_PUBLIC, OpenCE's name;
+  HALO_NET_LOBBY_PASSWORD) are the game's Server Setup's, which sets them as
+  this panel sets a row (vita_settings_set) and settings.txt keeps them; the
+  Play page that showed them is gone (its rows are kept on a page no row
+  opens). So is co-op's own visibility (HALO_NET_COOP_PUBLIC, OpenCE's
+  network.coop_public: Private unless chosen), which X on the waiting screen
+  of co-op hosted online sets (port/linux/game/coop_menu.c). 1.0.3's
+  "Online games" row (HALO_NET_LOBBY_PUBLIC) loads as Visibility; 1.0.3's Co-op page variables load as Off.
 
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo), and
@@ -118,7 +106,9 @@ port/linux/game/custom_edition_maps.c each time the list opens); square
 deletes one, with its picture and description, after a confirmation. The
 "PC maps" switch (Custom Edition maps in the level list) is there too, with
 a warning when the Custom Edition resource maps those need (bitmaps.map,
-sounds.map, loc.map) are not in the folder, and "Map downloads": whether a
+sounds.map, loc.map) are not in the folder (copy them in, or the Halo CE
+installer: with one in ux0:data/haloce-vita, "Extract PC files" takes them
+from it, vita_ce_installer.c), and "Map downloads": whether a
 host's map is offered for download in a game joined without it (Ask, the
 default, warns in a game joined from the public lobby; Not public games
 asks only in the others; Never: port/linux/game/map_share.c).
@@ -236,8 +226,13 @@ enum
 	ACTION_JOIN,
 	/* the Campaign screen, where Y on the difficulty hosts co-op */
 	ACTION_CAMPAIGN,
+	/* the ad hoc room's group joined (the system's dialog), for the game's
+	System Link screen */
+	ACTION_ADHOC_JOIN,
 	/* opens the page `opens` */
 	ACTION_PAGE,
+	/* the Custom Edition installer's maps taken (vita_ce_installer.c) */
+	ACTION_CE_EXTRACT,
 };
 
 struct setting
@@ -289,6 +284,12 @@ static struct setting settings[] = {
 		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
 	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
 		"The most frames shown a second", 0, TAB_GRAPHICS },
+	/* (port/linux/game/render_interpolation.c: frames drawn between the
+	game's 30 ticks a second, blended; up to two a tick while both fit
+	(main.c), else one; triple buffered (vita_gxm.c). On, it is the frame
+	limit, and the weapon's blend is part of it. Live) */
+	{ "Frame interpolation", "HALO_INTERPOLATION", 0, 2, { "false", "true" }, { "Off", "On" },
+		"Up to 60 FPS: frames between the 30 Hz ticks", 0, TAB_GRAPHICS },
 	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
 	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
@@ -342,7 +343,7 @@ static struct setting settings[] = {
 	where each went. Off until the hardware says what it is worth; in no
 	profile) */
 	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
-		"Needs CapUnlocker: audio, or all background work", 0, PAGE_GRAPHICS_ADVANCED },
+		"Needs CapUnlocker: audio, or all background work", 2, PAGE_GRAPHICS_ADVANCED },
 
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
@@ -433,50 +434,51 @@ static struct setting settings[] = {
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, PAGE_CONTROLS_ADVANCED },
 
-	/* (Multiplayer: the connection, the Play page (hosting, joining, co-op:
-	its rows by the connection, setting_shown), the ad hoc room (Ad hoc), the
-	modded maps) */
+	/* (Multiplayer: the connection, the ad hoc room (Ad hoc), a code typed
+	in (Online, for a Vita without the in-game PC menus: setting_shown), the
+	modded maps. Hosting, joining and co-op are the game's own Multiplayer
+	menu's: OpenCE's screens, menu_functions.c) */
 	/* (Online: internet play, experimental) */
 	{ "Connection", "HALO_VITA_NETWORK", 1, 3, { "wifi", "adhoc", "online" }, { "Same Wi-Fi", "Ad hoc", "Online" },
 		"Vitas on one Wi-Fi network play together", 0, TAB_MULTIPLAYER },
-	PAGE_ROW("Play", "Host a game, join one, or co-op the campaign", TAB_MULTIPLAYER, PAGE_PLAY),
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
 		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
+	{ "Join the room", NULL, 0, 0, { NULL }, { NULL }, "Then Multiplayer, System Link (LAN) in the game", 0,
+		TAB_MULTIPLAYER, KIND_ACTION, ACTION_ADHOC_JOIN },
+	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
+		TAB_MULTIPLAYER, KIND_ACTION, ACTION_JOIN_CODE },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
-	/* (the Play page: Host a game - its steps, then the game's System Link
-	screen - and the hosted game's settings under it (the name others see,
-	the most players, and online: listed in the public lobby or not, and a
-	password); co-op from the Campaign screen; online: a code typed in, the
-	public games; then the System Link list's games) */
-	{ "Host a game", NULL, 0, 0, { NULL }, { NULL }, "Start a game for other Vitas: the steps", 0, PAGE_PLAY,
-		KIND_ACTION, ACTION_HOST },
+	/* (the hosted game's settings, which the game's Server Setup sets
+	(vita_settings_set, menu_functions.c) and settings.txt keeps: on a page
+	no row opens) */
 	{ "  Lobby name", "HALO_NET_LOBBY_NAME", 0, 0, { NULL }, { NULL }, "The name others see for your game", 0,
 		PAGE_PLAY, KIND_TEXT },
 	/* (network_server_manager.c: the game's maximum_players; co-op takes
-	two) */
+	network.coop_players, four) */
 	{ "  Max players", "HALO_NET_MAX_PLAYERS", 0, 15,
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
-		"The most players your games take (co-op: 2)", 14, PAGE_PLAY },
+		"The most players your games take (co-op: 4)", 14, PAGE_PLAY },
 	/* (network.host_public, OpenCE's: p2p.c) */
 	{ "  Visibility", "HALO_NET_HOST_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
 		"Private: others join by code. Public: listed too", 1, PAGE_PLAY },
 	{ "  Password", "HALO_NET_LOBBY_PASSWORD", 0, 0, { NULL }, { NULL }, "A public game asks joiners for it", 0,
 		PAGE_PLAY, KIND_TEXT },
-	{ "Host co-op campaign", NULL, 0, 0, { NULL }, { NULL }, "Campaign: pick a level and difficulty, then Y: Play co-op",
-		0, PAGE_PLAY, KIND_ACTION, ACTION_CAMPAIGN },
-	{ "Join with a code", NULL, 0, 0, { NULL }, { NULL }, "Type the code another player's game shows", 0,
-		PAGE_PLAY, KIND_ACTION, ACTION_JOIN_CODE },
-	{ "Browse public games", NULL, 0, 0, { NULL }, { NULL }, "The games listed in the public lobby", 0,
-		PAGE_PLAY, KIND_ACTION, ACTION_BROWSE },
-	{ "Games on this network", NULL, 0, 0, { NULL }, { NULL }, "The System Link list: join a game there", 0,
-		PAGE_PLAY, KIND_ACTION, ACTION_JOIN },
+	/* (network.coop_public, OpenCE's: co-op hosted online is private
+	unless chosen with X on its waiting screen, which sets this row; it
+	takes effect at once: port/linux/game/coop_menu.c) */
+	{ "  Co-op visibility", "HALO_NET_COOP_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
+		"Co-op online: Private, by code; Public, listed too", 0, PAGE_PLAY },
 
 	/* (custom maps: the Custom Edition maps join the multiplayer level
 	list; off by default while their colours are wrong on the Vita; the
 	maps themselves follow on the page, page_lines) */
 	{ "PC maps", "HALO_CUSTOM_EDITION", 0, 2, { "0", "1" }, { "Off", "On" },
 		"Experimental: Custom Edition maps in the map list", 0, PAGE_MAPS },
+	/* (shown while a Custom Edition installer is in ux0:data/haloce-vita
+	and the resource maps are missing: vita_ce_installer.c) */
+	{ "Extract PC files", NULL, 0, 0, { NULL }, { NULL }, "The three files out of the Halo CE installer",
+		0, PAGE_MAPS, KIND_ACTION, ACTION_CE_EXTRACT },
 	/* (a host's offer of its map, in a game this Vita joined:
 	port/linux/game/map_share.c; the help is each choice's own,
 	map_downloads_help) */
@@ -544,16 +546,20 @@ static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
 };
 
 /* the variables the performance logging switch sets, and their values */
-static const char *const performance_log_variables[3][2] = {
+/* (HALO_LOAD_PROFILE: a frame over 100 ms names its waits for reads -
+textures, sounds, the cache file thread - with halo.log's frame-hitch line,
+the game thread's steps that frame) */
+#define PERFORMANCE_LOG_VARIABLES 4
+static const char *const performance_log_variables[PERFORMANCE_LOG_VARIABLES][2] = {
 	{ "HALO_FRAME_TIMING", "300" },
 	{ "HALO_RENDER_PROFILE", "1" },
 	{ "HALO_TICK_PROFILE", "1" },
+	{ "HALO_LOAD_PROFILE", "1" },
 };
 
 /* the release's fixed defaults (not in the panel) */
 static const char *const fixed_defaults[][2] = {
 	{ "HALO_TICK_THREAD", "1" },
-	{ "HALO_INTERPOLATION", "false" },
 	{ "HALO_NO_VSYNC", "1" },
 	{ "HALO_STATIC_SCENERY", "1" },
 	/* (the netcode is the distributed one, the only one network version 9
@@ -672,6 +678,10 @@ static int map_count, map_scroll;
 are there), and whether any map listed is a Custom Edition one */
 static char maps_missing[64];
 static int maps_have_custom_edition;
+/* a Custom Edition installer to take them from: vita_ce_installer_state's
+(0 none, 1 there, 2 being read) and its file name */
+static int maps_installer_state;
+static char maps_installer[64];
 /* the maps turned off: their names, commas between (HALO_MAPS_DISABLED) */
 static char maps_disabled[1024];
 
@@ -814,6 +824,12 @@ static void play_listing_set_public(int listed)
 	p2p_lobby_set_public(listed);
 }
 
+/* (a co-op game's own: network.coop_public) */
+static void play_listing_set_coop_public(int listed)
+{
+	p2p_lobby_set_coop_public(listed);
+}
+
 /* (internet play works the password's key out on its own thread, once it
 runs) */
 static void play_listing_set_password(const char *password)
@@ -851,9 +867,15 @@ minimum while Render resolution is Dynamic (each keeps its value
 meanwhile) */
 static int setting_shown(const struct setting *setting)
 {
-	if (setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM"))
+	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
-	if (setting->action == ACTION_JOIN_CODE || setting->action == ACTION_BROWSE ||
+	if (setting->action == ACTION_CE_EXTRACT)
+		return maps_installer_state == 1;
+	/* (a code typed in: online, on a Vita whose game has not got the PC
+	menus' Direct Link, menu_tags.c) */
+	if (setting->action == ACTION_JOIN_CODE)
+		return network_is("online") && halo_pc_menus_state != 1;
+	if (setting->action == ACTION_BROWSE ||
 		(setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC")))
 		return network_is("online");
 	if (setting->variable && !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD"))
@@ -886,7 +908,7 @@ static void apply_value(const struct setting *setting)
 		int index;
 
 		/* (on: env.txt's own values stand, HALO_TICK_PROFILE=3 ...) */
-		for (index = 0; index < 3; index++)
+		for (index = 0; index < PERFORMANCE_LOG_VARIABLES; index++)
 			if (value[0])
 				setenv(performance_log_variables[index][0], performance_log_variables[index][1], 0);
 			else
@@ -1053,7 +1075,7 @@ static void log_dev_switches(void)
 			int variable;
 
 			length += snprintf(message + length, sizeof(message) - length, " %s=1 (", PERFORMANCE_LOG);
-			for (variable = 0; variable < 3 && length < (int)sizeof(message); variable++)
+			for (variable = 0; variable < PERFORMANCE_LOG_VARIABLES && length < (int)sizeof(message); variable++)
 			{
 				const char *value = getenv(performance_log_variables[variable][0]);
 
@@ -1145,8 +1167,8 @@ void vita_settings_load(void)
 		{
 			int variable;
 
-			/* (on when env.txt turns on any of its three) */
-			for (variable = 0; variable < 3; variable++)
+			/* (on when env.txt turns on any of its variables) */
+			for (variable = 0; variable < PERFORMANCE_LOG_VARIABLES; variable++)
 			{
 				const char *timing = getenv(performance_log_variables[variable][0]);
 
@@ -1462,6 +1484,7 @@ static void maps_scan(void)
 	}
 	if (map_scroll >= map_count)
 		map_scroll = 0;
+	maps_installer_state = maps_missing[0] ? vita_ce_installer_state(maps_installer, sizeof(maps_installer)) : 0;
 }
 
 static void size_text(char *text, int size, unsigned long long bytes)
@@ -1663,10 +1686,22 @@ static int page_lines(struct line *lines)
 	}
 	if (page == PAGE_MAPS)
 	{
-		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition))
+		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition || maps_installer_state))
 		{
 			lines[count].type = LINE_INFO;
 			snprintf(lines[count++].text, sizeof(lines[0].text), "!Missing: %s", maps_missing);
+			/* (where they come from: the Halo CE installer copied in does) */
+			lines[count].type = LINE_INFO;
+			if (maps_installer_state == 2)
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!Taking them from %.28s", maps_installer);
+			else if (maps_installer_state == 1)
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!Extract PC files takes them from the installer");
+			else
+			{
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!Copy them in, or the Halo CE installer");
+				lines[count].type = LINE_INFO;
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!(halocesetup*.exe) to ux0:data/haloce-vita");
+			}
 		}
 		if (!map_count)
 		{
@@ -1946,7 +1981,8 @@ static void help_line(char *text, int size, const struct line *line)
 		snprintf(text, (size_t)size, "%.60s", detail);
 	/* (ad hoc: the group is joined first, when not in it) */
 	else if (!strcmp(running_network, "adhoc") && vita_adhoc_state(NULL, 0) != 2 &&
-		(setting->action == ACTION_HOST || setting->action == ACTION_JOIN || setting->action == ACTION_CAMPAIGN))
+		(setting->action == ACTION_HOST || setting->action == ACTION_JOIN || setting->action == ACTION_CAMPAIGN ||
+			setting->action == ACTION_ADHOC_JOIN))
 		snprintf(text, (size_t)size, "First the system's dialog joins ad hoc room %d", choice_of("HALO_ADHOC_ROOM") + 1);
 	else if (setting->variable && !strcmp(setting->variable, "HALO_VITA_NETWORK"))
 		snprintf(text, (size_t)size, "%s", connection_help(setting));
@@ -2163,6 +2199,10 @@ static void show_list(void)
 		{
 			vita_line(status, sizeof(status));
 			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
+			/* (the game's Multiplayer menu without OpenCE's screens) */
+			if (halo_pc_menus_state < 0 && length < (int)sizeof(text))
+				length += snprintf(text + length, sizeof(text) - length,
+					"\n\x04Online menus need bitmaps.map, loc.map: README");
 		}
 		game_line(status, sizeof(status));
 		if (length < (int)sizeof(text))
@@ -2204,10 +2244,9 @@ static void show_code(void)
 		cursor[column++] = ' ';
 	}
 	letters[column] = cursor[column] = 0;
-	snprintf(text, sizeof(text), "%s\n\n    %s\n    %s\n%s\nUp/down: letter  Left/right: move\nCross: join  Circle: back%s",
-		code_for_join ? "JOIN WITH A CODE\n(the host's Play page shows it)" : "JOIN WITH A CODE", letters,
-		cursor, strcmp(running_network, "online") ? "Connection must be Online (restart)" : "",
-		code_for_join ? "\nTriangle: browse public games instead" : "");
+	snprintf(text, sizeof(text), "%s\n\n    %s\n    %s\n%s\nUp/down: letter  Left/right: move\nCross: join  Circle: back",
+		code_for_join ? "JOIN WITH A CODE\n(the host's Multiplayer tab shows it)" : "JOIN WITH A CODE", letters,
+		cursor, strcmp(running_network, "online") ? "Connection must be Online (restart)" : "");
 	vgxm_menu_set(text, 2);
 }
 
@@ -2467,6 +2506,8 @@ static void change(struct setting *setting, int step)
 	/* (listed or not takes effect at once, also while hosting) */
 	if (strcmp(setting->variable, "HALO_NET_HOST_PUBLIC") == 0)
 		play_listing_set_public(choice);
+	if (strcmp(setting->variable, "HALO_NET_COOP_PUBLIC") == 0)
+		play_listing_set_coop_public(choice);
 	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 	save();
 	if (setting->dev)
@@ -2479,9 +2520,10 @@ static void change(struct setting *setting, int step)
 	}
 }
 
-/* (debug, HALO_TEST_COMMANDS "@set VARIABLE value": main.c) a row set as
-the panel sets it, its profile worked out again; 0 if there is no such
-row */
+/* a row set as the panel sets it, its profile worked out again (applied,
+saved); 0 if there is no such row. The game's Server Setup sets the hosted
+game's settings so (port/linux/game/menu_functions.c), and (debug)
+HALO_TEST_COMMANDS "@set VARIABLE value" (main.c) */
 int vita_settings_set(const char *variable, const char *value)
 {
 	struct setting *setting = setting_named(variable);
@@ -2492,8 +2534,14 @@ int vita_settings_set(const char *variable, const char *value)
 		char line[96];
 
 		play_text_set(play_text_named(variable), value, 1);
+		__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 		save();
-		snprintf(line, sizeof(line), "settings: %s=%s (test command)", variable, play_text_named(variable)->value);
+		/* (a password is never written to halo.log) */
+		if (!strcmp(variable, "HALO_NET_LOBBY_PASSWORD"))
+			snprintf(line, sizeof(line), "settings: password %s (the game)",
+				play_text_named(variable)->value[0] ? "set" : "none");
+		else
+			snprintf(line, sizeof(line), "settings: %s=%s (the game)", variable, play_text_named(variable)->value);
 		vita_host_log(line);
 		return 1;
 	}
@@ -2503,7 +2551,7 @@ int vita_settings_set(const char *variable, const char *value)
 	{
 		char line[128];
 
-		snprintf(line, sizeof(line), "settings: %s=%s (test command)", variable, setting->values[setting->choice]);
+		snprintf(line, sizeof(line), "settings: %s=%s (the game)", variable, setting->values[setting->choice]);
 		vita_host_log(line);
 	}
 	return 1;
@@ -2589,6 +2637,8 @@ static size_t format_box(char *formatted, size_t size, const char *title, const 
                 formatted[used++] = '\n';
                 column = 0;
                 if (used >= size - 1) break;
+                /* (a space the line ended at does not start the next) */
+                if (ch == ' ') continue;
             }
             formatted[used++] = ch;
             column = ch == '\n' ? 0 : column + 1;
@@ -2774,6 +2824,21 @@ static void act(const struct setting *setting)
 		browse_count = browse_selected = 0;
 		p2p_lobby_browse(1);
 		break;
+	/* (ad hoc: the room's group joined through the system's dialog, the
+	panel closed meanwhile; the game's System Link screen then finds the
+	others) */
+	case ACTION_ADHOC_JOIN:
+		if (strcmp(running_network, "adhoc"))
+			set_notice("Restart the game for Ad hoc first");
+		else if (vita_adhoc_state(NULL, 0) == 2)
+			set_notice("In room %d's group already", choice_of("HALO_ADHOC_ROOM") + 1);
+		else
+		{
+			close_panel();
+			vita_adhoc_connect(choice_of("HALO_ADHOC_DIALOG_MODE"), choice_of("HALO_ADHOC_ROOM") + 1);
+			vita_host_log("settings: ad hoc: joining the room's group (settings panel)");
+		}
+		break;
 	case ACTION_SAVE_REPORT:
 		report_start();
 		break;
@@ -2784,6 +2849,14 @@ static void act(const struct setting *setting)
 		page = setting->opens;
 		if (page == PAGE_MAPS)
 			maps_scan();
+		break;
+	/* (its progress line then takes the screen) */
+	case ACTION_CE_EXTRACT:
+		if (vita_ce_installer_start() == 0)
+			set_notice("Taking them from %.28s", maps_installer);
+		else
+			set_notice("No installer, or the files are there");
+		maps_scan();
 		break;
 	case ACTION_HOST:
 	case ACTION_JOIN:
@@ -2911,13 +2984,6 @@ static void code_input(unsigned long pressed, unsigned long buttons, unsigned lo
 			set_notice("Looking up %s...", code);
 		}
 		screen = code_for_join && !strcmp(running_network, "online") ? SCREEN_GUIDE : SCREEN_LIST;
-		return;
-	}
-	if ((pressed & VITA_BUTTON_TRIANGLE) && code_for_join)
-	{
-		screen = SCREEN_BROWSE;
-		browse_count = browse_selected = 0;
-		p2p_lobby_browse(1);
 		return;
 	}
 	if (pressed & VITA_BUTTON_LEFT)

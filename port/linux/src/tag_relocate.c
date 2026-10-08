@@ -90,8 +90,16 @@ static struct
 	unsigned long bsp_start, bsp_end;
 	unsigned long pointers, outside, walked;
 	/* port: tag blocks whose count and element pointer are inconsistent with
-	the loaded region (a crafted map): the caller refuses such a map */
+	the loaded region, and tag references to no loaded tag or to a tag of
+	another group than they name (a crafted map): the caller refuses such a
+	map */
 	unsigned long invalid;
+	/* port: the loaded tag instances (32 bytes each, relocated) that tag
+	references are checked against; none: not checked */
+	unsigned char *instances;
+	long instance_count;
+	/* (stale references made to name no tag) */
+	unsigned long stale;
 	int report;
 } relocation;
 
@@ -150,6 +158,15 @@ static unsigned char *relocate_word(unsigned char *location)
 	return (unsigned char *)value;
 }
 
+/* port: an inconsistency the walk found (HALO_TAG_RELOCATION_REPORT=1 logs
+the first few) */
+static void walk_invalid(const char *what, unsigned long a, unsigned long b, unsigned long c)
+{
+	if (relocation.report && relocation.invalid < 8)
+		platform_log("tag-relocate: invalid %s (0x%08lx 0x%08lx 0x%08lx)", what, a, b, c);
+	relocation.invalid++;
+}
+
 static void walk(unsigned short struct_index, unsigned char *address)
 {
 	const struct tag_layout_struct *layout = &tag_layout_structs[struct_index];
@@ -180,7 +197,7 @@ static void walk(unsigned short struct_index, unsigned char *address)
 					(unsigned long)count > relocation.link_size / field->child_size ||
 					!region_fits((unsigned long)(elements - relocation.bias), (unsigned long)count * field->child_size))
 				{
-					relocation.invalid++;
+					walk_invalid("block", (unsigned long)count, (unsigned long)elements, field->child_size);
 				}
 				else if (field->child != NO_LAYOUT)
 				{
@@ -197,6 +214,53 @@ static void walk(unsigned short struct_index, unsigned char *address)
 			break;
 		case _tag_field_reference:
 			relocate_word(at + 4);
+			/* port: a reference names no tag (NONE) or a loaded one, of the
+			group it says (or a group that tag's inherits): checked here,
+			once, rather than in every tag_get (tag_groups.h) */
+			if (relocation.instances)
+			{
+				unsigned long group_tag;
+				long tag_index;
+
+				memcpy(&group_tag, at, 4);
+				memcpy(&tag_index, at + 12, 4);
+				if (tag_index != -1)
+				{
+					short absolute_index = (short)tag_index;
+					unsigned char *instance;
+					unsigned long instance_groups[3];
+					long instance_index;
+
+					if (absolute_index < 0 || absolute_index >= relocation.instance_count)
+					{
+						walk_invalid("reference index", group_tag, (unsigned long)tag_index, (unsigned long)relocation.instance_count);
+						break;
+					}
+					instance = relocation.instances + absolute_index * 32;
+					memcpy(instance_groups, instance, 12);
+					memcpy(&instance_index, instance + 12, 4);
+					if (group_tag && group_tag != 0xFFFFFFFFUL && instance_groups[0] != group_tag &&
+						instance_groups[1] != group_tag && instance_groups[2] != group_tag)
+					{
+						/* (Bungie's own maps have a few stale references: another
+						tag's salt, of another group, which nothing gets - the
+						debug builds would assert. Such a one names no tag now;
+						one of the tag's own salt but another group is a crafted
+						map's) */
+						if (((unsigned long)tag_index & 0xFFFF0000UL) && instance_index != tag_index)
+						{
+							long none = -1;
+
+							memcpy(at + 12, &none, 4);
+							relocation.stale++;
+						}
+						else
+						{
+							walk_invalid("reference group", group_tag, (unsigned long)tag_index, instance_groups[0]);
+						}
+					}
+				}
+			}
 			break;
 		case _tag_field_pointer:
 			relocate_word(at);
@@ -250,15 +314,15 @@ static void begin(void *tag_cache)
 	relocation.report = value && value[0] == '1';
 	relocation.window = tag_cache;
 	relocation.bias = (unsigned long)tag_cache - relocation.link_base;
-	relocation.pointers = relocation.outside = relocation.walked = relocation.invalid = 0;
+	relocation.pointers = relocation.outside = relocation.walked = relocation.invalid = relocation.stale = 0;
 }
 
 static void finish(const char *what, unsigned long size)
 {
 	if (relocation.report)
 		platform_log("tag-relocate: %s: %lu bytes, bias 0x%08lx: %lu pointers relocated, %lu structs walked, "
-			"%lu pointer fields outside the window", what, size, relocation.bias, relocation.pointers,
-			relocation.walked, relocation.outside);
+			"%lu pointer fields outside the window, %lu inconsistencies, %lu stale references", what, size, relocation.bias,
+			relocation.pointers, relocation.walked, relocation.outside, relocation.invalid, relocation.stale);
 }
 
 /* port: the number of inconsistent tag blocks the last relocation walk
@@ -286,8 +350,14 @@ static void relocate_instances(unsigned char *instances, long count)
 	if (!instances || count <= 0 || (unsigned long)count > relocation.link_size / 32 ||
 		!region_fits((unsigned long)(instances - relocation.bias), (unsigned long)count * 32))
 	{
+		relocation.instances = NULL;
+		relocation.instance_count = 0;
 		return;
 	}
+	/* (the references the walk meets are checked against these, and so are
+	the structure BSPs' later) */
+	relocation.instances = instances;
+	relocation.instance_count = count;
 	for (index = 0; index < count; index++)
 	{
 		/* group tags x3, tag index, name, base address, unused x2 */
@@ -328,6 +398,9 @@ void halo_tag_relocate_tags(void *tag_cache, unsigned long size)
 	memset(relocation.relocated, 0, relocation.words / 8);
 	relocation.tags_end = relocation.link_base + size;
 	relocation.bsp_start = relocation.bsp_end = 0;
+	/* (a new map's instances: none until relocate_instances finds them) */
+	relocation.instances = NULL;
+	relocation.instance_count = 0;
 	if (!relocation.bias)
 		return;
 	/* the header: tag instances, count, vertex and index buffers */
@@ -371,6 +444,8 @@ int halo_tag_relocate_linked_tags(void *tag_cache, unsigned long size, unsigned 
 	begin(tag_cache);
 	relocation.tags_end = linked_tags_end = link_base + size;
 	relocation.bsp_start = relocation.bsp_end = 0;
+	relocation.instances = NULL;
+	relocation.instance_count = 0;
 	if (!relocation.bias)
 		return 1;
 	/* the Custom Edition tag index: tag instances, scenario, checksum,
