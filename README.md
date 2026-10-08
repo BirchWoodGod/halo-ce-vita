@@ -280,10 +280,12 @@ it is).
   "TEST MODE" near its top.
 
 The **Profile** row at the top sets the speed-related rows together
-(render resolution, model detail, hide distant objects, scenery updates,
-object lighting and sound occlusion): **Performance**, **Balanced** (the
-defaults) or **Quality** (the game as on the Xbox). Changing one of those
-rows yourself turns the profile to **Custom**.
+(render resolution, model detail, hide distant objects, object shadows,
+dynamic lights, effects quality, particle density, sun rays, scenery
+updates, object lighting, AI think rate, sound occlusion and sound updates):
+**Performance**, **Balanced** (the defaults) or **Quality** (the game as on
+the Xbox). Changing one of those rows yourself turns the profile to
+**Custom**.
 
 **Aspect ratio** 16:9 (the default) fills the Vita's screen with a wider
 view; 4:3 shows the Xbox's own framing, field of view, HUD and menus between
@@ -320,12 +322,23 @@ Recommended settings (the **Profile** row sets these at once):
 | Hide distant objects | Small | Small | Off |
 | Scenery updates | Quarter | Quarter | Every tick |
 | Object lighting | Third | Third | Full |
+| Object shadows | Off | Near only | Full |
+| Dynamic lights | 4 | 8 | All |
+| Effects quality | Performance | Full | Full |
+| Particle density | Half | Full | Full |
 | Sun rays | Off | On | On |
+| AI think rate | Adaptive | Adaptive | Every tick |
 | Sound occlusion | Every 6th | Every 3rd | Every tick |
+| Sound updates | Every 2nd | Every 2nd | Every frame |
 | Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
 
 Performance is the one to pick if the late-game battles feel slow; Quality
-draws and sounds exactly as on the Xbox and runs well in quiet areas. None
+draws, sounds and plays exactly as on the Xbox and runs well in quiet areas.
+Balanced and Performance think less often for far-off enemies and update
+the sounds every other frame, so a fight plays a little differently from
+the Xbox's (the shadows, lights, effects and particles change only what is
+drawn). Object shadows, Dynamic lights, Effects quality, Particle density,
+AI think rate and Sound updates come from Bruno Santana's modified build. None
 of them drops see-through parts such as the Covenant field generators'
 domes or visors: models keep them at the Xbox's detail level, and the
 domes are drawn at any distance.

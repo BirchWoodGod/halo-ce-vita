@@ -1217,8 +1217,10 @@ static void test_variables_kept(void)
 		"HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
-		"HALO_BUTTON_ICONS", "HALO_AI_PERCEPTION_LOD", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
+		"HALO_BUTTON_ICONS", "HALO_DECAL_MIN_PIXELS", "HALO_MAP_SHARE_FROM",
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_CPU3_AUX",
+		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
+		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1254,6 +1256,102 @@ static void test_variables_kept(void)
 	}
 }
 
+/* (the rows below unset: a settings.txt from before them then shows what
+its profile gives them, as env.txt naming none) */
+static void unset_bruno_rows(void)
+{
+	unsetenv("HALO_VITA_SHADOWS");
+	unsetenv("HALO_MAX_SCENE_LIGHTS");
+	unsetenv("HALO_VITA_EFFECTS_QUALITY");
+	unsetenv("HALO_PARTICLE_RENDER_DIVISOR");
+	unsetenv("HALO_AI_THINK_DIVISOR");
+	unsetenv("HALO_SOUND_MANAGER_DIVISOR");
+}
+
+/* Bruno Santana's settings (Graphics > Advanced, and Audio's Sound updates):
+his variables and values, so his build's settings.txt carries over; each in
+the profiles, Quality the Xbox's every one, Balanced the defaults; a row
+changed by hand makes the profile Custom; a settings.txt saved with a
+profile before the rows were added takes the profile's values */
+static void test_bruno_rows(void)
+{
+	static const struct
+	{
+		const char *variable, *performance, *balanced, *quality;
+	} rows[] = {
+		{ "HALO_VITA_SHADOWS", "0", "1", "2" },
+		{ "HALO_MAX_SCENE_LIGHTS", "4", "8", "0" },
+		{ "HALO_VITA_EFFECTS_QUALITY", "1", "2", "2" },
+		{ "HALO_PARTICLE_RENDER_DIVISOR", "2", "1", "1" },
+		{ "HALO_AI_THINK_DIVISOR", "0", "0", "1" },
+		{ "HALO_SOUND_MANAGER_DIVISOR", "2", "2", "1" },
+	};
+	int index, row, all = 1;
+	int profile = settings[0].choice;
+
+	for (index = 0; index < (int)(sizeof(rows) / sizeof(rows[0])); index++)
+	{
+		const struct setting *setting = setting_named(rows[index].variable);
+		const char *values[PROFILE_CUSTOM] = { rows[index].performance, rows[index].balanced, rows[index].quality };
+		int profile_index, in_profile = -1;
+
+		for (row = 0; row < PROFILE_ROWS; row++)
+			if (!strcmp(profile_variables[row], rows[index].variable))
+				in_profile = row;
+		if (!setting || in_profile < 0 || setting->restart)
+		{
+			printf("not a profile row: %s\n", rows[index].variable);
+			all = 0;
+			continue;
+		}
+		for (profile_index = 0; profile_index < PROFILE_CUSTOM; profile_index++)
+			if (strcmp(profile_values[profile_index][in_profile], values[profile_index]) != 0 ||
+				find_choice(setting, values[profile_index]) < 0 ||
+				strcmp(setting->values[find_choice(setting, values[profile_index])], values[profile_index]) != 0)
+			{
+				printf("profile %d's %s: %s\n", profile_index, rows[index].variable, profile_values[profile_index][in_profile]);
+				all = 0;
+			}
+		/* (Balanced is the rows' own defaults) */
+		if (strcmp(setting->values[shipped_choice[setting - settings]], rows[index].balanced) != 0 ||
+			strcmp(getenv(rows[index].variable), rows[index].balanced) != 0)
+		{
+			printf("default of %s: %s\n", rows[index].variable, setting->values[shipped_choice[setting - settings]]);
+			all = 0;
+		}
+	}
+	check(all, "Bruno Santana's rows: in every profile (Quality the Xbox's: Full, All, every tick, every frame), "
+		"Balanced their defaults and in the environment, live");
+	check(!setting_named("HALO_AI_PERCEPTION_LOD"), "1.1's Distant AI row is gone (AI think rate)");
+	check(!strcmp(setting_named("HALO_AI_THINK_DIVISOR")->values[0], "1") && !strcmp(setting_named("HALO_AI_THINK_DIVISOR")->values[1], "0") &&
+		!strcmp(setting_named("HALO_VITA_SHADOWS")->values[0], "2") && !strcmp(setting_named("HALO_VITA_EFFECTS_QUALITY")->values[2], "0"),
+		"his values: AI 1 every tick, 0 Adaptive; shadows 2 Full; effects 0 Minimal");
+	/* a row changed by hand: Custom, then back */
+	vita_settings_set("HALO_VITA_EFFECTS_QUALITY", "1");
+	check(!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_VITA_EFFECTS_QUALITY=1\n") &&
+		!strcmp(settings[0].names[settings[0].choice], "Custom"), "Effects quality Performance: saved, the profile Custom");
+	vita_settings_set("HALO_VITA_EFFECTS_QUALITY", "2");
+	check(settings[0].choice == profile, "... and back");
+	/* Quality sets every one to the Xbox's, Performance to its own */
+	vita_settings_set("HALO_PROFILE", "quality");
+	check(!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") &&
+		!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") &&
+		!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
+		"Quality: the Xbox's shadows, lights, effects, particles, AI and sound");
+	vita_settings_set("HALO_PROFILE", "performance");
+	check(!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") &&
+		!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "1") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "2") &&
+		!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "2"),
+		"Performance: no object shadows, 4 lights, Performance effects, half the particles, Adaptive AI, sound every 2nd");
+	vita_settings_set("HALO_PROFILE", "balanced");
+	check(!strcmp(settings[0].names[settings[0].choice], "Balanced") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8"),
+		"Balanced again");
+	/* his build's settings.txt values off our list: the nearest */
+	vita_settings_set("HALO_MAX_SCENE_LIGHTS", "12");
+	check(!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8"), "Dynamic lights 12 (his build's): 8, the nearest");
+	vita_settings_set("HALO_PROFILE", "balanced");
+}
+
 /* Fourth core helpers (Graphics > Advanced; vita_fourth_core.c): Bruno
 Santana's levels and variable (HALO_CPU3_AUX: Off, Audio, All async), Off
 by default and in no profile, a level saved and in the environment the next
@@ -1278,7 +1376,7 @@ static void test_fourth_core(void)
 			in_profile |= !strcmp(profile_variables[index], "HALO_CPU3_AUX");
 		check(!in_profile, "no profile sets Fourth core helpers");
 	}
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 9)
+	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 13)
 		press(VITA_BUTTON_DOWN);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=1\n") &&
@@ -1452,14 +1550,19 @@ int main(void)
 	check(open_page("Advanced") && strstr(menu, "\n\x03Graphics > Advanced\n") &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Model detail\x02", 13) &&
 		!strncmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02", 21) &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Scenery updates\x02", 16) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Object lighting\x02", 16) &&
-		!strncmp(menu_line(6, line, sizeof(line)), "Sun rays\x02", 9) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "Distant AI\x02", 11) &&
-		!strncmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02", 12) &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Fourth core helpers*\x02  Off >") && menu_rows() == 8 && menu_fits(),
-		"Graphics, Advanced: model detail, distant objects, scenery, lighting, sun rays, distant AI, tiny decals, "
-		"fourth core helpers (Off, after a restart)");
+		!strcmp(menu_line(4, line, sizeof(line)), "Object shadows\x02< Near only >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Dynamic lights\x02< 8 >") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Effects quality\x02  Full >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Particle density\x02  Full >") &&
+		!strncmp(menu_line(8, line, sizeof(line)), "Sun rays\x02", 9) &&
+		!strncmp(menu_line(9, line, sizeof(line)), "Tiny decals\x02", 12) &&
+		!strncmp(menu_line(10, line, sizeof(line)), "Scenery updates\x02", 16) &&
+		!strncmp(menu_line(11, line, sizeof(line)), "Object lighting\x02", 16) &&
+		!strcmp(menu_line(12, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
+		!strcmp(menu_line(13, line, sizeof(line)), "Fourth core helpers*\x02  Off >") && menu_rows() == 12 && menu_fits(),
+		"Graphics, Advanced: model detail, distant objects, shadows (Near only), lights (8), effects, particles (Full), "
+		"sun rays, tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (Off, after a restart)");
+	test_bruno_rows();
 	test_fourth_core();
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
@@ -1477,7 +1580,7 @@ int main(void)
 	check(strstr(menu, "*Controls") && strstr(menu, "Look sensitivity"), "R: Controls");
 	press(VITA_BUTTON_R);
 	check(strstr(menu, "*Audio") && strstr(menu, "\nSound voices*\x02") && strstr(menu, "\nSound occlusion\x02") &&
-		menu_rows() == 2 && menu_fits(), "R: Audio");
+		strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 3 && menu_fits(), "R: Audio");
 	press(VITA_BUTTON_R);
 	check(!strncmp(menu, "\tGraphics|Controls|Audio|*Multiplayer\n", 38), "R: Multiplayer");
 	printf("%s\n--\n", menu);
@@ -1761,14 +1864,27 @@ int main(void)
 
 		write_file(SETTINGS_FILE, performance, sizeof(performance) - 1);
 		unsetenv("HALO_SUN_RAYS");
+		unset_bruno_rows();
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_SUN_RAYS"), "0") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
 			"a Performance settings.txt from before Sun rays: Performance, sun rays off");
 		write_file(SETTINGS_FILE, quality, sizeof(quality) - 1);
 		unsetenv("HALO_SUN_RAYS");
+		unset_bruno_rows();
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_SUN_RAYS"), "1") && !strcmp(settings[0].names[settings[0].choice], "Quality"),
 			"a Quality settings.txt from before Sun rays: Quality, sun rays on");
+		check(!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") &&
+			!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") &&
+			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
+			"... and the rows added in 1.1 (Bruno Santana's) as Quality has them: the Xbox's");
+		write_file(SETTINGS_FILE, performance, sizeof(performance) - 1);
+		unsetenv("HALO_SUN_RAYS");
+		unset_bruno_rows();
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") &&
+			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
+			"a Performance settings.txt from 1.0.3: Performance, the new rows as it has them");
 	}
 
 	/* a settings.txt with Dynamic loads */
