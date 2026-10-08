@@ -963,6 +963,42 @@ void lights_stress_update(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (tick_hash.c, HALO_TICK_HASH_MASK=2) what the render writes into the
+lights, each frame, saved and cleared or put back: the light marker's stamp
+(the scene's light query and each lit object's), the light's index among
+the frame's lights and its first-person weapon flag (lights_preprocess_scene) */
+int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore)
+{
+	long light_index;
+	int count = 0;
+
+	for (light_index = data_next_index(light_data, NONE);
+		light_index != NONE && count + 3 <= maximum;
+		light_index = data_next_index(light_data, light_index))
+	{
+		struct light_datum *light = light_get(light_index);
+
+		if (restore)
+		{
+			light->marker = saved[count++];
+			light->rasterizer_light_index = saved[count++];
+			light->flags = (word)saved[count++];
+		}
+		else
+		{
+			saved[count++] = light->marker;
+			saved[count++] = light->rasterizer_light_index;
+			saved[count++] = light->flags;
+			light->marker = 0;
+			light->rasterizer_light_index = 0;
+			light->flags &= (word)~FLAG(_point_light_attached_to_first_person_weapon_bit);
+		}
+	}
+	return count;
+}
+#endif
+
 void lights_preprocess_scene(
 	void)
 {
