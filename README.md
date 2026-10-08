@@ -153,6 +153,33 @@ Custom Edition maps themselves (race tracks and the like) come from the
 community's Halo CE map archives and forums. This project includes no maps
 and links to no downloads.
 
+### PC multiplayer menus (optional)
+
+With Halo PC's `bitmaps.map` and `loc.map` in `ux0:data/haloce-vita/maps/`
+(the same Custom Edition files as for custom maps above: from MCC's
+`halo1/maps/custom_edition/`, or a Custom Edition install's `maps` folder;
+`sounds.map` is not needed for this), the main menu's **Multiplayer** opens
+the PC version's Multiplayer screen, from OpenCE's PC menus:
+
+- **Join Game**: **Internet** is the server browser (the public games, a
+  lock on those with a password; A joins, a locked game's password is typed
+  on the Vita's keyboard; Square refreshes), **LAN** the System Link screen,
+  **Join by code** a host's code.
+- **Create Game**: **Internet** is Server Setup: the lobby name, max players,
+  visibility (public: in everyone's server browser; private: joined by its
+  code) and password - the same settings as the settings panel's Play page,
+  kept there - then your profile, the map and the gametype; the lobby shows
+  your game's code. **LAN** is the System Link screen (Y creates a game).
+- **Co-op campaign** (pick a level and a difficulty, then Y), **Split
+  screen** and **Edit gametypes**, as before.
+
+Internet and Join by code need **Connection: Online** (settings panel,
+Multiplayer); the screen says so otherwise. The pictures and text are read
+from your own `bitmaps.map` and `loc.map` the first time the screen opens;
+none of Bungie's files are in this project. Without the two files, the
+Xbox's Multiplayer screen opens as before, and the settings panel's Play
+page does all of the above either way.
+
 Only the host needs the custom map: a Vita that joins without it is asked
 whether to download it from the host in the lobby (and, for a Custom
 Edition map, to turn PC maps on). A joiner still needs its own three
@@ -263,7 +290,8 @@ it is).
   players** (2 to 16), and online its **Visibility** (Private: joined by
   code; Public: listed in the public games too) and a **Password**. **Host
   co-op campaign** opens Campaign: pick a level and a difficulty, then Y.
-  Online, **Join with a code** and **Browse public games**; **Games on this
+  Online, **Join with a code** and **Browse public games** (also in the game's
+  own Multiplayer menu with the PC menus: "PC multiplayer menus" above); **Games on this
   network** opens the System Link list. Rows another Connection uses are
   hidden. A joiner of a full game is told so. Your game's code and what
   the game is doing show under the rows (see
@@ -487,7 +515,9 @@ This port stands on a lot of other people's work:
   the platform layer, the OpenGL renderer the Vita renderer is modelled on,
   the distributed netcode, system link over the internet, the server
   browser of public games (signed listings, password-protected games, its
-  Players and Rules lines), and much more.
+  Players and Rules lines), the PC menus' multiplayer screens (Server
+  Browser, Server Setup, the password and Direct Link screens and their
+  header art, read with [Expat](https://libexpat.github.io)), and much more.
   Those platforms still build from this tree (`port/linux`, `port/windows`,
   `port/android`, each with its own README). Campaign co-op over the
   network is theirs too (xshxdex98's and MrBruh's work: `network_coop.c`,
@@ -523,6 +553,7 @@ Libraries and tools: [VitaSDK](https://vitasdk.org),
 [KCP](https://github.com/skywind3000/kcp),
 [Monocypher](https://monocypher.org) (the server browser's signatures and
 password keys),
+[Expat](https://libexpat.github.io) (the PC menus' files),
 [Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
 [miniupnpc](https://github.com/miniupnp/miniupnp),
 [musl](https://musl.libc.org)'s math functions,
