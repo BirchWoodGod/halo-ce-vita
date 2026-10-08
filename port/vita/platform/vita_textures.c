@@ -1425,6 +1425,7 @@ static unsigned long frame_decode_over33, frame_decode_over100, stream_worker_bu
 /* (the frames of a map's or a revert's first 2 s, the streaming off: the
 picture waited for, as the game did) */
 static unsigned long frame_decode_loading_frames;
+static int frame_decode_loading;
 static unsigned long long frame_decode_loading_us;
 
 /* (the hitch log, d3d8_gxm.c) decodes swapped in and stand-ins made since it
@@ -1568,6 +1569,8 @@ static BOOL decode_in_background(const struct texture_entry *entry)
 	if (!background_decoding() || entry->dynamic || first_level > 0 || !swizzled_textures())
 	{
 		stream_worker_reason[0]++;
+		if (!texture_streaming_live())
+			frame_decode_loading = 1;
 		return FALSE;
 	}
 	if (description->width <= STAND_IN_SIZE && description->height <= STAND_IN_SIZE)
@@ -1693,11 +1696,18 @@ job freed */
 static void decode_job_finish(struct decode_job *job)
 {
 	struct texture_entry *entry = job->entry;
+	/* (debug) HALO_TEX_STAND_IN_ONLY=1: the stand-ins kept for good, to see
+	them (Vita3K screenshots) */
+	static int stand_in_only = -1;
 
+	if (stand_in_only < 0)
+		stand_in_only = getenv("HALO_TEX_STAND_IN_ONLY") && atoi(getenv("HALO_TEX_STAND_IN_ONLY"));
 	if (entry && entry->job == job)
 	{
 		entry->job = NULL;
-		if (job->ok && job->pool_serial == pool_serial &&
+		if (stand_in_only)
+			;
+		else if (job->ok && job->pool_serial == pool_serial &&
 			memory_watch_generation(entry->address, entry->size) <= job->generation &&
 			texture_initialize(&entry->texture, &job->build) == 0)
 		{
@@ -1741,13 +1751,24 @@ static void decode_job_cancel(struct texture_entry *entry)
 
 /* (the worker, with each use of a texture whose decode is in the
 background) the decode swapped in if done; one the thread has not started
-by the deadline done here */
-static void decode_job_poll(struct texture_entry *entry)
+by the deadline - or at all, now set - done here, and one it is decoding
+waited for if now is set */
+static void decode_job_poll(struct texture_entry *entry, int now)
 {
 	struct decode_job *job = entry->job;
 	int state = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE), expected = _decode_queued;
 
-	if (state == _decode_queued && vita_host_time_us() - job->queued_us > background_deadline_us() &&
+	if (now && state == _decode_running)
+	{
+		/* (a draw that wants it whole: the decoder's decode waited for) */
+		unsigned long long before = vita_host_time_us();
+
+		while ((state = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE)) == _decode_running)
+			vita_host_sleep_us(100);
+		frame_decode_us += vita_host_time_us() - before;
+		vita_texture_build_us += vita_host_time_us() - before;
+	}
+	if (state == _decode_queued && (now || vita_host_time_us() - job->queued_us > background_deadline_us()) &&
 		__atomic_compare_exchange_n(&job->state, &expected, _decode_running, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 	{
 		unsigned long long before = vita_host_time_us();
@@ -1866,7 +1887,7 @@ static BOOL decode_submit(struct texture_entry *entry)
 }
 
 const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLOR *palette,
-	struct xgpu_texture_description *description)
+	struct xgpu_texture_description *description, int streamed)
 {
 	DWORD data = resource[1], format_word = resource[3], size_word = resource[4];
 	struct texture_entry **bucket = &texture_buckets[bucket_index(data, format_word, size_word)];
@@ -1933,9 +1954,10 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 			entry->checksum_frame = texture_frame;
 		}
 	}
-	/* (its decode in the background: swapped in once done) */
+	/* (its decode in the background: swapped in once done; finished now
+	for a draw that wants it whole) */
 	if (entry->job)
-		decode_job_poll(entry);
+		decode_job_poll(entry, !streamed);
 	if (entry->valid && entry->generation && entry->pool_serial == pool_serial && entry->checked_serial == memory_watch_serial())
 	{
 		entry->last_used_frame = texture_frame;
@@ -1954,7 +1976,7 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 		if (entry->job)
 			decode_job_cancel(entry);
 		if (platform_is_contiguous((void *)entry->address) &&
-			platform_is_contiguous((void *)(entry->address + entry->size - 1)) && decode_in_background(entry))
+			platform_is_contiguous((void *)(entry->address + entry->size - 1)) && streamed && decode_in_background(entry))
 		{
 			unsigned long long before = vita_host_time_us();
 
@@ -2111,7 +2133,7 @@ void vita_texture_cache_begin_frame(void)
 
 	/* (the decodes done in the background swapped in, drawn or not) */
 	decode_jobs_sweep();
-	if (texture_streaming_live() || !frame_decode_us)
+	if (!frame_decode_loading)
 	{
 		if (frame_decode_us > frame_decode_longest_us)
 			frame_decode_longest_us = frame_decode_us;
@@ -2124,6 +2146,7 @@ void vita_texture_cache_begin_frame(void)
 		frame_decode_loading_us += frame_decode_us;
 	}
 	frame_decode_us = 0;
+	frame_decode_loading = 0;
 	texture_frame++;
 	if (rebuild_at == -2)
 		rebuild_at = getenv("HALO_TEX_REBUILD_AT") ? atol(getenv("HALO_TEX_REBUILD_AT")) : -1;

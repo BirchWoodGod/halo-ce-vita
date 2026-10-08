@@ -2618,7 +2618,10 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		}
 		else
 		{
-			source = vita_texture_get(header, command->palette[stage], &description);
+			/* (an immediate draw's - the HUD, the menus, sprites, the screen
+			effects - is whole at once, as the texture streaming waits for
+			theirs: a lower level stood in as blocks) */
+			source = vita_texture_get(header, command->palette[stage], &description, !command->immediate);
 			{
 				/* (experiment) HALO_LINEAR_SCALE_OFF=1: no 1/size scale for
 				linear textures that are not render targets */
