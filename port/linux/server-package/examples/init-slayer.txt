@@ -1,0 +1,18 @@
+# A free-for-all Slayer server (tools/package_server.py: examples/).
+# Copy it to init.txt in the server's folder, and give it a name of your own.
+# The maps are those of your own Xbox game's maps folder.
+sv_name "My Slayer Server"
+sv_maxplayers 12
+sv_public 1
+sv_port 2302
+sv_timelimit 15
+sv_minplayers 1
+sv_mapcycle_add chillout slayer
+sv_mapcycle_add prisoner slayer
+sv_mapcycle_add hangemhigh slayer
+sv_mapcycle_add wizard slayer
+sv_mapcycle_add carousel slayer
+sv_mapcycle_add longest slayer
+sv_mapcycle_add ratrace slayer
+sv_mapcycle_add beavercreek slayer
+sv_mapcycle_add putput slayer
