@@ -276,7 +276,7 @@ is on, and off, `env.txt`'s value (or the default) applies. While any is on,
 
 | Switch | Variable | What it does |
 | --- | --- | --- |
-| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go, in `halo.log` |
+| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1`, `HALO_LOAD_PROFILE=1` | where the frame and the tick go, in `halo.log`, and a `load-profile` line for a frame over 100 ms. A frame over 100 ms is named by its parts whether this is on or not: `frame-hitch` (the game thread's steps, its waits for the cache lock and the mixer, a map copy going on), `frame-hitch waits` (the cache file thread, the texture and sound caches, every file call the game thread or another made, the slowest by name) and `frame-hitch cores` (each core's busy share during the frame, the helpers' run times) |
 | Crash dump on hang | `HALO_HANG_CRASH=1` | a hang of 8 s (no frame presented) crashes on purpose, for a crash dump |
 | FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load, render scale, GPU time, free video memory (VRAM; yellow while part of the texture cache is in main memory) |
 | Debug camera | `HALO_DEBUG_CAMERA=1` | hold Black for a second: follow, orbit, then a flying camera |
@@ -552,7 +552,8 @@ Useful ones:
 | `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off; no longer a row: AI think rate) |
 | `HALO_TICK_HASH_MASK=2` | (Linux harness) the tick hash also leaves out what the render writes into the objects and lights, to compare render settings |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
-| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host's latest, so it plays at a slow host's pace (default 6; 0 = never) |
+| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host, so it plays at a slow host's pace (default 6; 0 = never); the host's tick counted on from its newest message for as long as that message has waited (a network that holds the host's messages back does not hold the client) |
+| `HALO_NET_COOP_SILENCE_MS=n` | for at most this long (default 1500) |
 | `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |
 
 ## Layout of port/vita

@@ -106,13 +106,19 @@ struct vgxm_texture;
 
 /* the GXM texture for an Xbox texture header, decoding it into the
 texture pool when it is new or its memory was written since; *description
-receives what it is. NULL when the format is not handled. */
+receives what it is. NULL when the format is not handled. streamed: it may
+be drawn from a lower level of its own while it decodes in the background
+(vita_textures.c); 0, decoded whole now. */
 const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLOR *palette,
-	struct xgpu_texture_description *description);
+	struct xgpu_texture_description *description, int streamed);
 void vita_texture_cache_begin_frame(void);
 /* forgets the textures decoded into size bytes at base (a texture pool
 segment moved between CDRAM and user RAM: vgxm_pool_demote/promote), each
 decoded again when next used; with the render worker idle. The count */
 unsigned long vita_texture_cache_forget(const void *base, unsigned long size);
+/* the textures decoding in the background stopped before the pool forgets
+or moves memory (the queued given up, the one decoding waited for, those
+done swapped in); the worker, or the game's thread while it is idle */
+void vita_texture_decodes_quiesce(void);
 
 #endif

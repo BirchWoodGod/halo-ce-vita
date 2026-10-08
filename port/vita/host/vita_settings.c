@@ -539,10 +539,15 @@ static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
 };
 
 /* the variables the performance logging switch sets, and their values */
-static const char *const performance_log_variables[3][2] = {
+/* (HALO_LOAD_PROFILE: a frame over 100 ms names its waits for reads -
+textures, sounds, the cache file thread - with halo.log's frame-hitch line,
+the game thread's steps that frame) */
+#define PERFORMANCE_LOG_VARIABLES 4
+static const char *const performance_log_variables[PERFORMANCE_LOG_VARIABLES][2] = {
 	{ "HALO_FRAME_TIMING", "300" },
 	{ "HALO_RENDER_PROFILE", "1" },
 	{ "HALO_TICK_PROFILE", "1" },
+	{ "HALO_LOAD_PROFILE", "1" },
 };
 
 /* the release's fixed defaults (not in the panel) */
@@ -890,7 +895,7 @@ static void apply_value(const struct setting *setting)
 		int index;
 
 		/* (on: env.txt's own values stand, HALO_TICK_PROFILE=3 ...) */
-		for (index = 0; index < 3; index++)
+		for (index = 0; index < PERFORMANCE_LOG_VARIABLES; index++)
 			if (value[0])
 				setenv(performance_log_variables[index][0], performance_log_variables[index][1], 0);
 			else
@@ -1057,7 +1062,7 @@ static void log_dev_switches(void)
 			int variable;
 
 			length += snprintf(message + length, sizeof(message) - length, " %s=1 (", PERFORMANCE_LOG);
-			for (variable = 0; variable < 3 && length < (int)sizeof(message); variable++)
+			for (variable = 0; variable < PERFORMANCE_LOG_VARIABLES && length < (int)sizeof(message); variable++)
 			{
 				const char *value = getenv(performance_log_variables[variable][0]);
 
@@ -1149,8 +1154,8 @@ void vita_settings_load(void)
 		{
 			int variable;
 
-			/* (on when env.txt turns on any of its three) */
-			for (variable = 0; variable < 3; variable++)
+			/* (on when env.txt turns on any of its variables) */
+			for (variable = 0; variable < PERFORMANCE_LOG_VARIABLES; variable++)
 			{
 				const char *timing = getenv(performance_log_variables[variable][0]);
 

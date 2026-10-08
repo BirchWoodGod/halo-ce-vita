@@ -86,6 +86,13 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 	return 0;
 }
 
+/* (the priority is the Vita's: here every thread has the process's) */
+int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core, int priority)
+{
+	(void)priority;
+	return vita_host_thread_start(name, function, argument, core);
+}
+
 void vita_host_cpu_usage(unsigned char busy[4])
 {
 	busy[0] = busy[1] = busy[2] = busy[3] = 255;

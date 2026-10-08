@@ -4632,6 +4632,7 @@ the tick on its thread: the main loop's own work before the render, the
 networked game's above all, and the wait for the tick after the present) */
 enum
 {
+	_main_split_loop,
 	_main_split_input,
 	_main_split_network_start,
 	_main_split_time_ui,
@@ -4639,46 +4640,151 @@ enum
 	_main_split_network_end,
 	_main_split_camera_engine,
 	_main_split_join,
+	_main_split_render,
+	_main_split_present,
 	NUMBER_OF_MAIN_SPLITS
 };
 static int main_split_enabled = -1;
 static unsigned long long main_split_last, main_split_us[NUMBER_OF_MAIN_SPLITS];
 static unsigned long main_split_frames;
+/* (the frame's own, for the frame-hitch line: always measured, a few clock
+reads a frame) */
+static unsigned long long main_split_frame_us[NUMBER_OF_MAIN_SPLITS], main_split_frame_started;
 
 static void main_split_mark(int step)
 {
 	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
 	unsigned long long now;
 
+	if (!vita_host_time_us)
+		return;
 	if (main_split_enabled < 0)
 	{
 		const char *setting = getenv("HALO_RENDER_PROFILE");
 
 		main_split_enabled = setting && atoi(setting) != 0;
 	}
-	if (main_split_enabled <= 0 || !vita_host_time_us)
-		return;
 	now = vita_host_time_us();
 	if (step >= 0 && main_split_last)
-		main_split_us[step] += now - main_split_last;
+	{
+		if (main_split_enabled > 0)
+			main_split_us[step] += now - main_split_last;
+		main_split_frame_us[step] += now - main_split_last;
+	}
 	main_split_last = now;
 }
 
-static void main_split_report(void)
+/* the frame-hitch lines' other parts: the waits the game thread's steps may
+hold (load_profile.c: the cache file thread, the texture and sound caches,
+the file calls; lruv_cache.c: the cache lock; dsound_sdl.c: the mixer's
+lock), a map copy going on (the map's decompression into the cache
+partition: the memory card's busiest), and on the Vita each core's busy
+share and the helpers' run times (vita_fourth_core.c) */
+extern volatile unsigned long long halo_cache_lock_wait_us[2];
+extern volatile unsigned long long halo_mixer_game_wait_us __attribute__((weak));
+#ifdef HALO_VITA
+int vita_host_frame_cores(char *line, int size, int describe);
+#endif
+/* (network_coop.c: a co-op client's frames held for the host) */
+int network_coop_client_pace_note(char *line, int size);
+
+/* the game thread's frames are counted from one drawn frame to the next: a
+loop that draws nothing (a co-op client held for its host, a tick not yet
+due) runs again at once, and its steps add to the drawn frame's, so a gap
+between two drawn frames is named whole. TRUE at a drawn frame's end (or
+one not drawn for 5 s), when the frame's counts start again */
+static boolean main_split_report(boolean presented)
 {
 	static const char *const names[NUMBER_OF_MAIN_SPLITS] =
-		{ "input", "network_start", "time+ui", "player_control", "network_end", "camera+engine", "tick_join" };
-	char line[512];
+		{ "loop", "input", "network_start", "time+ui", "player_control", "network_end", "camera+engine", "tick_join",
+		"render", "present" };
+	static unsigned long long lock_wait_before, mixer_wait_before;
+	static unsigned long loops;
+	char line[900];
 	int n = 0, index;
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	unsigned long long now, total, lock_wait, mixer_wait;
 
+	if (!vita_host_time_us)
+		return TRUE;
+	loops++;
+	now = vita_host_time_us();
+	if (!presented && main_split_frame_started && now - main_split_frame_started < 5000000ull)
+		return FALSE;
+	{
+		/* (a frame over 100 ms, from the last frame's end to this one's:
+		the game thread's steps that frame, by name - "loop" is the main
+		loop's top (a map's load, a revert, a save), "present" holds the
+		wait for the worker - and what it waited for, so a hitch with no
+		texture decoded, no shader and no wait for the worker says what it
+		was, on the hardware too, with no switch on) */
+		static unsigned long hitches;
+
+		lock_wait = halo_cache_lock_wait_us[0];
+		mixer_wait = &halo_mixer_game_wait_us ? halo_mixer_game_wait_us : 0;
+		total = main_split_frame_started && now > main_split_frame_started ? now - main_split_frame_started : 0;
+		if (total > 100000ull && hitches < 1000)
+		{
+			unsigned long long marked = 0;
+			char cores[900];
+
+			hitches++;
+			for (index = 0; index < NUMBER_OF_MAIN_SPLITS; index++)
+			{
+				marked += main_split_frame_us[index];
+				if (main_split_frame_us[index] >= 1000ull || index != _main_split_loop)
+					n += snprintf(line + n, sizeof(line) - n, " %s %.1f", names[index], (double)main_split_frame_us[index] / 1000.0);
+			}
+			n += snprintf(line + n, sizeof(line) - n, ", other %.1f", (double)(total > marked ? total - marked : 0) / 1000.0);
+			if (loops > 1 && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; %lu loops drew nothing%s", loops - 1, presented ? "" : " (nor this one)");
+			if (n < (int)sizeof(line) - 2 &&
+				network_coop_client_pace_note(line + n + 2, (int)sizeof(line) - n - 2) > 0)
+			{
+				line[n] = ';';
+				line[n + 1] = ' ';
+				n += (int)strlen(line + n);
+			}
+			if (lock_wait - lock_wait_before >= 1000ull && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; cache lock waits %.1f ms", (double)(lock_wait - lock_wait_before) / 1000.0);
+			if (mixer_wait - mixer_wait_before >= 1000ull && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; mixer lock waits %.1f ms", (double)(mixer_wait - mixer_wait_before) / 1000.0);
+			if (cache_files_precache_in_progress() && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; a map copy in progress");
+			platform_log("frame-hitch: %.1f ms on the game thread:%s", (double)total / 1000.0, line);
+			if (halo_load_profile_describe(line, sizeof(line)))
+				platform_log("frame-hitch waits: %s", line);
+#ifdef HALO_VITA
+			if (vita_host_frame_cores(cores, sizeof(cores), 1) > 0)
+				platform_log("frame-hitch cores: %s", cores);
+#else
+			(void)cores;
+#endif
+			n = 0;
+		}
+		else
+		{
+			/* (the samples go on; the holds noted are this frame's) */
+#ifdef HALO_VITA
+			vita_host_frame_cores(NULL, 0, 0);
+#endif
+			network_coop_client_pace_note(line, 0);
+		}
+		memset(main_split_frame_us, 0, sizeof(main_split_frame_us));
+		main_split_frame_started = now;
+		lock_wait_before = lock_wait;
+		mixer_wait_before = mixer_wait;
+		loops = 0;
+	}
 	if (main_split_enabled <= 0 || ++main_split_frames % 300)
-		return;
+		return TRUE;
 	for (index = 0; index < NUMBER_OF_MAIN_SPLITS; index++)
 	{
 		n += snprintf(line + n, sizeof(line) - n, " %s %.2f", names[index], (double)main_split_us[index] / 1000.0 / 300.0);
 		main_split_us[index] = 0;
 	}
 	platform_log("main-split (ms/frame):%s", line);
+	return TRUE;
 }
 #define MAIN_SPLIT(step) main_split_mark(step)
 #endif
@@ -4812,7 +4918,7 @@ void main_loop(
 		profile_frame_start();
 #ifdef HALO_LINUX
 		halo_frame_timing(_frame_timing_frame_start, 0);
-		MAIN_SPLIT(-1);
+		MAIN_SPLIT(_main_split_loop);
 		/* (frame interpolation: the setting as this frame has it, and the
 		frame's times for its pacing) */
 		halo_interpolation_latch();
@@ -5059,6 +5165,7 @@ void main_loop(
 			}
 
 #ifdef HALO_LINUX
+			MAIN_SPLIT(_main_split_render);
 			halo_frame_timing(_frame_timing_present_start, 0);
 #endif
 			main_rasterizer_throttle();
@@ -5072,7 +5179,7 @@ void main_loop(
 			}
 #ifdef HALO_LINUX
 			halo_frame_timing(_frame_timing_present_end, 0);
-			MAIN_SPLIT(-1);
+			MAIN_SPLIT(_main_split_present);
 			if (tick_running)
 			{
 				extern unsigned long long vita_host_time_us(void) __attribute__((weak));
@@ -5133,8 +5240,8 @@ void main_loop(
 				halo_interpolation_enabled(), main_interpolation_two_a_tick());
 		}
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
-		halo_load_profile_frame_end();
-		main_split_report();
+		if (main_split_report(presented))
+			halo_load_profile_frame_end();
 		{
 			void halo_net_detail_report(void);
 
