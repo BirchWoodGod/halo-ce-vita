@@ -1,0 +1,912 @@
+/*
+MENU_FILES.C
+
+The menus written in XML (halo_menus.h): the files of the menus folder that
+its menus.txt lists, one name a line (on the Vita app0:menus/, packed from
+port/vita/app0/menus; elsewhere HALO_MENUS_FOLDER, else the tree's
+port/vita/app0/menus beside the build), read with Expat
+(port/third_party/expat) into the description the game builds its widget
+tags from (port/linux/game/menu_tags.c). From OpenCE's menu_files.c (CC0).
+
+Only the files' shape is checked here: their elements, which attributes
+each may have, and numbers; the game checks what the names mean, against
+the loaded map and the player's Halo PC data. Any problem is logged with its
+file and line, and then no file is used: the game keeps its own menus.
+*/
+
+#include "halo_menus.h"
+#include "platform.h"
+#include "port_config.h"
+
+#include "expat.h"
+
+#include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#ifndef HALO_VITA
+#include <unistd.h>
+#endif
+
+#define MAXIMUM_DEPTH 32
+#define MAXIMUM_FILE_BYTES (1024 * 1024)
+
+/* ---------- the files */
+
+struct menu_file
+{
+	char *path;
+	const unsigned char *data;
+	unsigned long size;
+};
+
+static struct menu_file *files;
+static long file_count;
+static char folder[1024];
+
+/* the menus folder, ending in a slash */
+static void folder_find(void)
+{
+	const char *setting = getenv("HALO_MENUS_FOLDER");
+
+	if (folder[0])
+		return;
+#ifdef HALO_VITA
+	snprintf(folder, sizeof(folder), "%s", setting && *setting ? setting : "app0:menus/");
+#else
+	if (setting && *setting)
+		snprintf(folder, sizeof(folder), "%s", setting);
+	else
+	{
+		/* (the build's binary is <tree>/build/linux/halo) */
+		char executable[900];
+		ssize_t length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+		char *slash;
+
+		executable[length > 0 ? length : 0] = 0;
+		slash = strrchr(executable, '/');
+		if (slash)
+			*slash = 0;
+		snprintf(folder, sizeof(folder), "%s/../../port/vita/app0/menus/", executable);
+	}
+#endif
+	if (folder[0] && folder[strlen(folder) - 1] != '/')
+		snprintf(folder + strlen(folder), sizeof(folder) - strlen(folder), "/");
+}
+
+unsigned char *halo_menus_file_read(char const *path, unsigned long *size)
+{
+	char full[1200];
+	size_t length = 0;
+	char *data;
+
+	/* (a name of the folder's own: no folders above it, no drive) */
+	if (!path || !*path || strstr(path, "..") || strchr(path, ':') || path[0] == '/' || path[0] == '\\')
+		return NULL;
+	folder_find();
+	snprintf(full, sizeof(full), "%s%s", folder, path);
+	data = config_file_read(full, &length);
+	if (!data)
+		return NULL;
+	if (length > MAXIMUM_FILE_BYTES)
+	{
+		free(data);
+		return NULL;
+	}
+	*size = (unsigned long)length;
+	return (unsigned char *)data;
+}
+
+void halo_menus_file_free(unsigned char *data)
+{
+	free(data);
+}
+
+/* the files menus.txt lists */
+static void files_gather(void)
+{
+	unsigned long size = 0;
+	unsigned char *list = halo_menus_file_read("menus.txt", &size);
+	unsigned long position = 0;
+
+	if (!list)
+	{
+		platform_log("menus: %smenus.txt cannot be read; the game's own menus", folder);
+		return;
+	}
+	while (position < size)
+	{
+		unsigned long start = position, end;
+		char name[256];
+		struct menu_file *grown;
+		unsigned char *data;
+		unsigned long data_size = 0;
+
+		while (position < size && list[position] != '\n' && list[position] != '\r')
+			position++;
+		end = position;
+		while (position < size && (list[position] == '\n' || list[position] == '\r'))
+			position++;
+		while (start < end && (list[start] == ' ' || list[start] == '\t'))
+			start++;
+		while (end > start && (list[end - 1] == ' ' || list[end - 1] == '\t'))
+			end--;
+		if (end == start || list[start] == '#' || end - start >= sizeof(name))
+			continue;
+		memcpy(name, list + start, end - start);
+		name[end - start] = 0;
+		data = halo_menus_file_read(name, &data_size);
+		if (!data)
+		{
+			platform_log("menus: %s%s cannot be read", folder, name);
+			continue;
+		}
+		grown = realloc(files, (file_count + 1) * sizeof(*files));
+		if (!grown)
+		{
+			free(data);
+			break;
+		}
+		files = grown;
+		files[file_count].path = strdup(name);
+		files[file_count].data = data;
+		files[file_count].size = data_size;
+		if (!files[file_count].path)
+		{
+			free(data);
+			break;
+		}
+		file_count++;
+	}
+	free(list);
+}
+
+/* ---------- reading */
+
+enum element
+{
+	_element_none,
+	_element_menus,
+	_element_bitmap,
+	_element_frame,
+	_element_strings,
+	_element_string,
+	_element_widget,
+	_element_child,
+	_element_on,
+	_element_data,
+	_element_conditional,
+	_element_replace,
+};
+
+/* an attribute an element may have: its text (text) or number (number,
+with given set when it is there) */
+struct attribute
+{
+	const char *name;
+	const char **text;
+	long *number;
+	long *given;
+};
+
+struct reader
+{
+	struct halo_menus menus;
+	const char *file;
+	XML_Parser parser;
+	int failed;
+	/* the open elements, and the widget, bitmap or strings each is in */
+	enum element elements[MAXIMUM_DEPTH];
+	long owners[MAXIMUM_DEPTH];
+	int depth;
+	/* how deep inside an element for the other platform we are (0: not) */
+	int skipping;
+	/* the open <bitmap> has frames= (its <frame>s cannot be added too) */
+	int bitmap_frames_attribute;
+	/* each widget's last child, handler, input, conditional and replace,
+	for adding the next */
+	long *last_child, *last_handler, *last_input, *last_conditional, *last_replace;
+};
+
+static void reader_error(struct reader *reader, const char *format, ...)
+{
+	char message[512];
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(message, sizeof(message), format, arguments);
+	va_end(arguments);
+	if (!reader->failed)
+	{
+		platform_log("menus: %s:%lu: %s", reader->file,
+			(unsigned long)XML_GetCurrentLineNumber(reader->parser), message);
+	}
+	reader->failed = 1;
+	XML_StopParser(reader->parser, XML_FALSE);
+}
+
+static char *copy_length(const char *text, size_t length)
+{
+	char *result = malloc(length + 1);
+
+	if (result)
+	{
+		memcpy(result, text, length);
+		result[length] = 0;
+	}
+	return result;
+}
+
+static char *copy(const char *text)
+{
+	return text ? copy_length(text, strlen(text)) : NULL;
+}
+
+static int parse_long(struct reader *reader, const char *name, const char *text, long *value)
+{
+	char *end;
+
+	errno = 0;
+	*value = strtol(text, &end, 10);
+	if (!*text || *end)
+	{
+		reader_error(reader, "%s=\"%s\" is not a whole number", name, text);
+		return 0;
+	}
+	/* (the tags keep them in shorts) */
+	if (errno == ERANGE || *value < -32768 || *value > 32767)
+	{
+		reader_error(reader, "%s=\"%s\" is out of range (-32768 to 32767)", name, text);
+		return 0;
+	}
+	return 1;
+}
+
+/* the element's attributes into the table's fields; one not in the table
+(but platform, which for_this_platform reads) is an error */
+static void read_attributes(struct reader *reader, const char *element, const XML_Char **attributes,
+	const struct attribute *table, size_t count)
+{
+	int index;
+
+	for (index = 0; attributes[index] && !reader->failed; index += 2)
+	{
+		const char *name = attributes[index], *value = attributes[index + 1];
+		size_t field;
+
+		if (!strcmp(name, "platform"))
+			continue;
+		for (field = 0; field < count; field++)
+		{
+			if (strcmp(name, table[field].name))
+				continue;
+			if (table[field].text)
+			{
+				*table[field].text = copy(value);
+				if (!*table[field].text)
+					reader_error(reader, "out of memory");
+			}
+			else if (parse_long(reader, name, value, table[field].number) && table[field].given)
+				*table[field].given = 1;
+			break;
+		}
+		if (field == count)
+			reader_error(reader, "<%s> has no attribute %s", element, name);
+	}
+}
+
+static long current_line(struct reader *reader)
+{
+	return (long)XML_GetCurrentLineNumber(reader->parser);
+}
+
+/* whether the element is for this platform (its platform attribute: the
+Vita's files are the Vita's, so only "vita" is known) */
+static int for_this_platform(struct reader *reader, const XML_Char **attributes)
+{
+	int index;
+
+	for (index = 0; attributes[index]; index += 2)
+	{
+		if (!strcmp(attributes[index], "platform") && strcmp(attributes[index + 1], "vita"))
+		{
+			reader_error(reader, "platform=\"%s\" is not \"vita\"", attributes[index + 1]);
+			return 1;
+		}
+	}
+	return 1;
+}
+
+/* room for one more element in an array of count; NULL when out of memory,
+which fails the reading (the array is then as it was) */
+static void *grow(struct reader *reader, void *array, long count, size_t size)
+{
+	void *grown = realloc(array, (size_t)(count + 1) * size);
+
+	if (!grown)
+		reader_error(reader, "out of memory");
+	return grown;
+}
+
+static int grow_last(struct reader *reader, long **array, long count)
+{
+	long *grown = grow(reader, *array, count, sizeof(**array));
+
+	if (!grown)
+		return 0;
+	grown[count] = HALO_MENU_NONE;
+	*array = grown;
+	return 1;
+}
+
+/* room in array for one more of its count elements, else the reading
+function returns (out of memory: the reading has failed) */
+#define GROW(reader, array, count) \
+	do \
+	{ \
+		void *grown = grow((reader), (array), (count), sizeof(*(array))); \
+		if (!grown) \
+			return; \
+		(array) = grown; \
+	} while (0)
+
+/* adds index to a widget's list (first, and each item's next) */
+#define LIST_ADD(reader, owner, first, last, items, index) \
+	do \
+	{ \
+		if ((reader)->last[owner] == HALO_MENU_NONE) \
+			(reader)->menus.widgets[owner].first = (index); \
+		else \
+			(reader)->menus.items[(reader)->last[owner]].next = (index); \
+		(reader)->last[owner] = (index); \
+	} while (0)
+
+static void read_bitmap(struct reader *reader, const XML_Char **attributes)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_bitmap bitmap;
+	const char *frames = NULL;
+	long width = 0, height = 0;
+	struct attribute table[] =
+	{
+		{ "name", &bitmap.name }, { "resource", &bitmap.resource }, { "frames", &frames },
+		{ "width", NULL, &width }, { "height", NULL, &height },
+	};
+
+	memset(&bitmap, 0, sizeof(bitmap));
+	bitmap.first_frame = menus->frame_count;
+	bitmap.file = reader->file;
+	bitmap.line = current_line(reader);
+	read_attributes(reader, "bitmap", attributes, table, sizeof(table) / sizeof(*table));
+	reader->bitmap_frames_attribute = frames != NULL || bitmap.resource != NULL;
+	/* (frames="a.png b.png", all width by height, or <frame>s) */
+	while (frames && *frames && !reader->failed)
+	{
+		struct halo_menu_frame *grown;
+		size_t length;
+
+		frames += strspn(frames, " \t\r\n");
+		length = strcspn(frames, " \t\r\n");
+		if (!length)
+			break;
+		/* (a bitmap's count of frames is a short of the game's) */
+		if (bitmap.frame_count >= 32767)
+		{
+			reader_error(reader, "a bitmap has too many frames");
+			break;
+		}
+		grown = grow(reader, menus->frames, menus->frame_count, sizeof(*menus->frames));
+		if (!grown)
+			break;
+		menus->frames = grown;
+		memset(&menus->frames[menus->frame_count], 0, sizeof(*menus->frames));
+		menus->frames[menus->frame_count].png = copy_length(frames, length);
+		if (!menus->frames[menus->frame_count].png)
+		{
+			reader_error(reader, "out of memory");
+			break;
+		}
+		menus->frames[menus->frame_count].width = width;
+		menus->frames[menus->frame_count].height = height;
+		menus->frame_count++;
+		bitmap.frame_count++;
+		frames += length;
+	}
+	if (!reader->failed && !bitmap.name)
+		reader_error(reader, "a <bitmap> needs a name");
+	GROW(reader, menus->bitmaps, menus->bitmap_count);
+	menus->bitmaps[menus->bitmap_count++] = bitmap;
+}
+
+static void read_frame(struct reader *reader, const XML_Char **attributes, long owner)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_frame frame;
+	struct attribute table[] =
+	{
+		{ "png", &frame.png }, { "map", &frame.map }, { "index", NULL, &frame.index },
+		{ "width", NULL, &frame.width }, { "height", NULL, &frame.height },
+		{ "x", NULL, &frame.x }, { "y", NULL, &frame.y },
+	};
+
+	memset(&frame, 0, sizeof(frame));
+	frame.index = -1;
+	read_attributes(reader, "frame", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && (frame.png != NULL) == (frame.map != NULL))
+		reader_error(reader, "a <frame> has a png or a map bitmap, not both");
+	else if (!reader->failed && frame.png && (frame.width <= 0 || frame.height <= 0))
+		reader_error(reader, "a <frame> with a png needs width and height");
+	else if (!reader->failed && frame.map && frame.index < 0)
+		reader_error(reader, "a <frame> of a map bitmap needs its index");
+	else if (!reader->failed && frame.map && (frame.width < 0 || frame.height < 0 || !frame.width != !frame.height))
+		reader_error(reader, "a <frame> of a map bitmap is scaled to a width and a height, or neither");
+	else if (!reader->failed && (frame.x || frame.y) && (!frame.map || !frame.width))
+		reader_error(reader, "only a scaled <frame> of a map bitmap is placed at an x and y");
+	if (!reader->failed && reader->bitmap_frames_attribute)
+		reader_error(reader, "a bitmap's <frame>s, frames= and resource= cannot be mixed");
+	if (frame.index < 0)
+		frame.index = 0;
+	if (menus->bitmaps[owner].frame_count >= 32767)
+	{
+		reader_error(reader, "a bitmap has too many frames");
+		return;
+	}
+	GROW(reader, menus->frames, menus->frame_count);
+	menus->frames[menus->frame_count++] = frame;
+	menus->bitmaps[owner].frame_count++;
+}
+
+static void read_strings(struct reader *reader, const XML_Char **attributes)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_strings strings;
+	struct attribute table[] = { { "name", &strings.name }, { "resource", &strings.resource } };
+
+	memset(&strings, 0, sizeof(strings));
+	strings.first = menus->string_count;
+	strings.file = reader->file;
+	strings.line = current_line(reader);
+	read_attributes(reader, "strings", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && !strings.name)
+		reader_error(reader, "a <strings> needs a name");
+	GROW(reader, menus->string_lists, menus->string_list_count);
+	menus->string_lists[menus->string_list_count++] = strings;
+}
+
+static void read_string(struct reader *reader, const XML_Char **attributes, long owner)
+{
+	struct halo_menus *menus = &reader->menus;
+	const char *text = NULL;
+	struct attribute table[] = { { "text", &text } };
+
+	read_attributes(reader, "string", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && !text)
+		reader_error(reader, "a <string> needs text");
+	if (!reader->failed && menus->string_lists[owner].resource)
+		reader_error(reader, "a <strings> with resource= has no <string>s");
+	GROW(reader, menus->strings, menus->string_count);
+	menus->strings[menus->string_count++] = text ? text : "";
+	menus->string_lists[owner].count++;
+}
+
+static void child_add(struct reader *reader, long parent, long nested, const char *widget, long x, long y,
+	const char *controller)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_child child;
+	long index = menus->child_count;
+
+	memset(&child, 0, sizeof(child));
+	child.nested = nested;
+	child.widget = widget;
+	child.x = x;
+	child.y = y;
+	child.controller = controller;
+	child.next = HALO_MENU_NONE;
+	child.file = reader->file;
+	child.line = current_line(reader);
+	GROW(reader, menus->children, menus->child_count);
+	menus->children[menus->child_count++] = child;
+	LIST_ADD(reader, parent, first_child, last_child, children, index);
+}
+
+static void read_widget(struct reader *reader, const XML_Char **attributes, long parent)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_widget widget;
+	long index = menus->widget_count;
+	const char *child_controller = NULL;
+	struct attribute table[] =
+	{
+		{ "name", &widget.name }, { "type", &widget.type }, { "controller", &widget.controller },
+		{ "flags", &widget.flags }, { "bitmap", &widget.bitmap }, { "text", &widget.text },
+		{ "strings", &widget.strings }, { "values", &widget.values }, { "setting", &widget.setting },
+		{ "font", &widget.font }, { "color", &widget.color }, { "align", &widget.align },
+		{ "description", &widget.description }, { "string_list", &widget.string_list },
+		{ "list_flags", &widget.list_flags }, { "text_flags", &widget.text_flags },
+		{ "header_bitmap", &widget.header_bitmap }, { "footer_bitmap", &widget.footer_bitmap },
+		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
+		{ "child_controller", &child_controller },
+		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },
+		{ "top", NULL, &widget.top }, { "width", NULL, &widget.width, &widget.has_width },
+		{ "height", NULL, &widget.height, &widget.has_height }, { "text_x", NULL, &widget.text_x },
+		{ "text_y", NULL, &widget.text_y }, { "auto_close", NULL, &widget.auto_close },
+		{ "auto_close_fade", NULL, &widget.auto_close_fade }, { "string_index", NULL, &widget.string_index },
+	};
+
+	memset(&widget, 0, sizeof(widget));
+	widget.parent = parent;
+	widget.first_child = widget.first_handler = widget.first_input = HALO_MENU_NONE;
+	widget.first_conditional = widget.first_replace = HALO_MENU_NONE;
+	widget.file = reader->file;
+	widget.line = current_line(reader);
+	read_attributes(reader, "widget", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && !widget.name)
+		reader_error(reader, "a <widget> needs a name");
+	GROW(reader, menus->widgets, index);
+	menus->widgets[index] = widget;
+	menus->widget_count++;
+	if (!grow_last(reader, &reader->last_child, index))
+		return;
+	if (!grow_last(reader, &reader->last_handler, index))
+		return;
+	if (!grow_last(reader, &reader->last_input, index))
+		return;
+	if (!grow_last(reader, &reader->last_conditional, index))
+		return;
+	if (!grow_last(reader, &reader->last_replace, index))
+		return;
+	if (parent != HALO_MENU_NONE)
+		child_add(reader, parent, index, NULL, widget.x, widget.y, child_controller);
+}
+
+static void read_child(struct reader *reader, const XML_Char **attributes, long owner)
+{
+	const char *widget = NULL, *controller = NULL;
+	long x = 0, y = 0;
+	struct attribute table[] =
+	{
+		{ "widget", &widget }, { "controller", &controller }, { "x", NULL, &x }, { "y", NULL, &y },
+	};
+
+	read_attributes(reader, "child", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && !widget)
+		reader_error(reader, "a <child> needs a widget");
+	child_add(reader, owner, HALO_MENU_NONE, widget, x, y, controller);
+}
+
+static void read_handler(struct reader *reader, const XML_Char **attributes, long owner)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_handler handler;
+	long index = menus->handler_count;
+	const char *back = NULL, *branch = NULL;
+	struct attribute table[] =
+	{
+		{ "event", &handler.event }, { "run", &handler.run }, { "script", &handler.script },
+		{ "open", &handler.open }, { "replace", &handler.replace }, { "close", &handler.close },
+		{ "widget", &handler.widget }, { "focus", &handler.focus }, { "reload", &handler.reload },
+		{ "sound", &handler.sound }, { "otherwise", &handler.otherwise }, { "label", &handler.label },
+		{ "back", &back }, { "branch", &branch },
+	};
+
+	memset(&handler, 0, sizeof(handler));
+	handler.next = HALO_MENU_NONE;
+	handler.file = reader->file;
+	handler.line = current_line(reader);
+	read_attributes(reader, "on", attributes, table, sizeof(table) / sizeof(*table));
+	if ((back && strcmp(back, "true") && strcmp(back, "false")) ||
+		(branch && strcmp(branch, "true") && strcmp(branch, "false")))
+		reader_error(reader, "back and branch are \"true\" or \"false\"");
+	handler.back = back && !strcmp(back, "true");
+	handler.branch = branch && !strcmp(branch, "true");
+	if (!reader->failed && !handler.event)
+		reader_error(reader, "an <on> needs an event");
+	GROW(reader, menus->handlers, index);
+	menus->handlers[index] = handler;
+	menus->handler_count++;
+	LIST_ADD(reader, owner, first_handler, last_handler, handlers, index);
+}
+
+static void read_input(struct reader *reader, const XML_Char **attributes, long owner)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_input input;
+	long index = menus->input_count;
+	struct attribute table[] = { { "input", &input.input } };
+
+	memset(&input, 0, sizeof(input));
+	input.next = HALO_MENU_NONE;
+	input.file = reader->file;
+	input.line = current_line(reader);
+	read_attributes(reader, "data", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && !input.input)
+		reader_error(reader, "a <data> needs an input");
+	GROW(reader, menus->inputs, index);
+	menus->inputs[index] = input;
+	menus->input_count++;
+	LIST_ADD(reader, owner, first_input, last_input, inputs, index);
+}
+
+static void read_conditional(struct reader *reader, const XML_Char **attributes, long owner)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_conditional conditional;
+	long index = menus->conditional_count;
+	const char *if_failed = NULL;
+	struct attribute table[] = { { "widget", &conditional.widget }, { "if_failed", &if_failed } };
+
+	memset(&conditional, 0, sizeof(conditional));
+	conditional.next = HALO_MENU_NONE;
+	conditional.file = reader->file;
+	conditional.line = current_line(reader);
+	read_attributes(reader, "conditional", attributes, table, sizeof(table) / sizeof(*table));
+	if (if_failed && strcmp(if_failed, "true") && strcmp(if_failed, "false"))
+		reader_error(reader, "if_failed is \"true\" or \"false\"");
+	conditional.if_failed = if_failed && !strcmp(if_failed, "true");
+	if (!reader->failed && !conditional.widget)
+		reader_error(reader, "a <conditional> needs a widget");
+	GROW(reader, menus->conditionals, index);
+	menus->conditionals[index] = conditional;
+	menus->conditional_count++;
+	LIST_ADD(reader, owner, first_conditional, last_conditional, conditionals, index);
+}
+
+static void read_replace(struct reader *reader, const XML_Char **attributes, long owner)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_replace replace;
+	long index = menus->replace_count;
+	struct attribute table[] = { { "search", &replace.search }, { "function", &replace.function } };
+
+	memset(&replace, 0, sizeof(replace));
+	replace.next = HALO_MENU_NONE;
+	replace.file = reader->file;
+	replace.line = current_line(reader);
+	read_attributes(reader, "replace", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && !replace.search)
+		reader_error(reader, "a <replace> needs a search");
+	GROW(reader, menus->replaces, index);
+	menus->replaces[index] = replace;
+	menus->replace_count++;
+	LIST_ADD(reader, owner, first_replace, last_replace, replaces, index);
+}
+
+static void read_menus(struct reader *reader, const XML_Char **attributes)
+{
+	const char *root = NULL;
+	struct attribute table[] = { { "root", &root } };
+
+	read_attributes(reader, "menus", attributes, table, sizeof(table) / sizeof(*table));
+	if (root)
+		reader->menus.root = root;
+}
+
+static void XMLCALL element_start(void *data, const XML_Char *name, const XML_Char **attributes)
+{
+	struct reader *reader = data;
+	enum element parent = reader->depth ? reader->elements[reader->depth - 1] : _element_none;
+	long owner = reader->depth ? reader->owners[reader->depth - 1] : HALO_MENU_NONE;
+	enum element element = _element_none;
+
+	if (reader->failed)
+		return;
+	if (reader->skipping || !for_this_platform(reader, attributes))
+	{
+		reader->skipping++;
+		return;
+	}
+	if (reader->depth == MAXIMUM_DEPTH)
+	{
+		reader_error(reader, "elements nested too deeply");
+		return;
+	}
+	if (!strcmp(name, "menus") && parent == _element_none)
+	{
+		element = _element_menus;
+		read_menus(reader, attributes);
+	}
+	else if (!strcmp(name, "bitmap") && parent == _element_menus)
+	{
+		element = _element_bitmap;
+		read_bitmap(reader, attributes);
+		owner = reader->menus.bitmap_count - 1;
+	}
+	else if (!strcmp(name, "frame") && parent == _element_bitmap)
+	{
+		element = _element_frame;
+		read_frame(reader, attributes, owner);
+	}
+	else if (!strcmp(name, "strings") && parent == _element_menus)
+	{
+		element = _element_strings;
+		read_strings(reader, attributes);
+		owner = reader->menus.string_list_count - 1;
+	}
+	else if (!strcmp(name, "string") && parent == _element_strings)
+	{
+		element = _element_string;
+		read_string(reader, attributes, owner);
+	}
+	else if (!strcmp(name, "widget") && (parent == _element_menus || parent == _element_widget))
+	{
+		element = _element_widget;
+		read_widget(reader, attributes, parent == _element_widget ? owner : HALO_MENU_NONE);
+		owner = reader->menus.widget_count - 1;
+	}
+	else if (parent == _element_widget)
+	{
+		if (!strcmp(name, "child"))
+		{
+			element = _element_child;
+			read_child(reader, attributes, owner);
+		}
+		else if (!strcmp(name, "on"))
+		{
+			element = _element_on;
+			read_handler(reader, attributes, owner);
+		}
+		else if (!strcmp(name, "data"))
+		{
+			element = _element_data;
+			read_input(reader, attributes, owner);
+		}
+		else if (!strcmp(name, "conditional"))
+		{
+			element = _element_conditional;
+			read_conditional(reader, attributes, owner);
+		}
+		else if (!strcmp(name, "replace"))
+		{
+			element = _element_replace;
+			read_replace(reader, attributes, owner);
+		}
+	}
+	if (element == _element_none)
+	{
+		reader_error(reader, "<%s> cannot be here", name);
+		return;
+	}
+	reader->elements[reader->depth] = element;
+	reader->owners[reader->depth] = owner;
+	reader->depth++;
+}
+
+static void XMLCALL element_end(void *data, const XML_Char *name)
+{
+	struct reader *reader = data;
+
+	(void)name;
+	if (reader->skipping)
+		reader->skipping--;
+	else if (reader->depth)
+		reader->depth--;
+}
+
+static void XMLCALL text(void *data, const XML_Char *characters, int length)
+{
+	struct reader *reader = data;
+	int index;
+
+	if (reader->failed || reader->skipping)
+		return;
+	for (index = 0; index < length; index++)
+	{
+		if (!strchr(" \t\r\n", characters[index]))
+		{
+			reader_error(reader, "text belongs in an attribute (text=\"...\")");
+			return;
+		}
+	}
+}
+
+static int read_file(struct reader *reader, const struct menu_file *file)
+{
+	reader->file = file->path;
+	reader->depth = 0;
+	reader->skipping = 0;
+	reader->parser = XML_ParserCreate("UTF-8");
+	if (!reader->parser)
+	{
+		platform_log("menus: %s: no XML parser (out of memory)", file->path);
+		reader->failed = 1;
+		return 0;
+	}
+	XML_SetUserData(reader->parser, reader);
+	XML_SetElementHandler(reader->parser, element_start, element_end);
+	XML_SetCharacterDataHandler(reader->parser, text);
+	if (XML_Parse(reader->parser, (const char *)file->data, (int)file->size, XML_TRUE) == XML_STATUS_ERROR &&
+		!reader->failed)
+	{
+		platform_log("menus: %s:%lu:%lu: %s", file->path, (unsigned long)XML_GetCurrentLineNumber(reader->parser),
+			(unsigned long)XML_GetCurrentColumnNumber(reader->parser),
+			XML_ErrorString(XML_GetErrorCode(reader->parser)));
+		reader->failed = 1;
+	}
+	XML_ParserFree(reader->parser);
+	return !reader->failed;
+}
+
+/* ---------- public code */
+
+struct halo_menus const *halo_menus_load(void)
+{
+	static int read;
+	static struct halo_menus menus;
+	static int succeeded;
+	struct reader reader;
+	long index;
+
+	if (read)
+		return succeeded ? &menus : NULL;
+	read = 1;
+	files_gather();
+	memset(&reader, 0, sizeof(reader));
+	for (index = 0; index < file_count && !reader.failed; index++)
+		read_file(&reader, &files[index]);
+	/* (the files' text is not kept: the elements hold copies of what they
+	need; their paths stay, for the problems the game logs) */
+	for (index = 0; index < file_count; index++)
+	{
+		free((void *)files[index].data);
+		files[index].data = NULL;
+	}
+	free(reader.last_child);
+	free(reader.last_handler);
+	free(reader.last_input);
+	free(reader.last_conditional);
+	free(reader.last_replace);
+	if (reader.failed || !reader.menus.widget_count)
+	{
+		if (reader.failed)
+			platform_log("menus: the files have a problem; using the game's own menus");
+		return NULL;
+	}
+	if (!reader.menus.root)
+	{
+		platform_log("menus: no <menus root=...> names the Multiplayer screen; the game's own menus");
+		return NULL;
+	}
+	menus = reader.menus;
+	succeeded = 1;
+	return &menus;
+}
+
+long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity)
+{
+	const unsigned char *in = (const unsigned char *)utf8;
+	long count = 0;
+
+	while (*in && count < capacity - 1)
+	{
+		unsigned long code = *in++;
+
+		if (code == '\\' && *in == 'n')
+		{
+			in++;
+			if (count + 2 >= capacity)
+				break;
+			out[count++] = '\r';
+			out[count++] = '\n';
+			continue;
+		}
+		if (code >= 0xC0)
+		{
+			int more = code >= 0xF0 ? 3 : code >= 0xE0 ? 2 : 1;
+
+			code &= 0x3F >> more;
+			while (more-- && (*in & 0xC0) == 0x80)
+				code = (code << 6) | (*in++ & 0x3F);
+		}
+		/* (beyond the 16-bit characters: the game's fonts have none) */
+		out[count++] = code < 0x10000 ? (unsigned short)code : '?';
+	}
+	out[count++] = 0;
+	return count;
+}
+
+void halo_menus_log(char const *file, long line, char const *message, char const *detail)
+{
+	platform_log("menus: %s:%ld: %s%s%s", file ? file : "?", line, message, detail ? " " : "", detail ? detail : "");
+}

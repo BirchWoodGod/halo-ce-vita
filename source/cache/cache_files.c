@@ -559,6 +559,16 @@ void scenario_tags_unload(
 #endif
 	sound_cache_close();
 	texture_cache_close();
+#ifdef HALO_LINUX
+	/* port: the menus' tags go, and the map's own table comes back
+	(port/linux/game/menu_tags.c): after the texture cache, which writes to
+	the bitmaps it has loaded as it closes */
+	{
+		extern void menu_tags_unloaded(void);
+
+		menu_tags_unloaded();
+	}
+#endif
 	cache_file_close();
 #ifdef HALO_LINUX
 	/* a Halo Custom Edition map has no Xbox vertex or index buffers
@@ -579,6 +589,37 @@ void scenario_tags_unload(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port: the loaded tags' table and its count, for the menus' tags
+(port/linux/game/menu_tags.c), which a copy with theirs added replaces:
+the table first, then its count, so that another thread looking a tag up
+by name meanwhile walks one table or the other */
+void *cache_files_tag_instances(
+	long *count)
+{
+	*count = cache_file_globals.tags_loaded ? cache_file_globals.tag_header->tag_count : 0;
+	return cache_file_globals.tags_loaded ? global_tag_instances : NULL;
+}
+
+void cache_files_set_tag_instances(
+	void *instances,
+	long count)
+{
+	if (!cache_file_globals.tags_loaded)
+		return;
+	if (count > cache_file_globals.tag_header->tag_count)
+	{
+		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+	}
+	else
+	{
+		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
+	}
+}
+#endif
 
 void tag_files_open(
 	void)
@@ -1351,6 +1392,16 @@ long scenario_tags_load(
 			}
 #endif
 			result = cache_file_globals.tag_header->scenario_tag_index;
+#ifdef HALO_LINUX
+			/* port: OpenCE's multiplayer screens, added to ui.map's tags
+			when the player's Halo PC data is in the maps folder
+			(port/linux/game/menu_tags.c) */
+			{
+				extern void menu_tags_loaded(char const *map_name);
+
+				menu_tags_loaded(stripped_scenario_name);
+			}
+#endif
 		}
 		/* port: a map refused is closed for the next to open */
 		else

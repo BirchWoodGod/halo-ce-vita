@@ -118,6 +118,9 @@ ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
 # (port/linux/src/p2p_crypto.c, p2p_lobby.c)
 MONOCYPHER_DIR = Path("port/third_party/monocypher")
 MONOCYPHER_SOURCES = ("monocypher.c", "monocypher-ed25519.c")
+# the menus' XML parser (port/linux/src/menu_files.c: OpenCE's menus)
+EXPAT_DIR = Path("port/third_party/expat")
+EXPAT_SOURCES = ("xmlparse.c", "xmlrole.c", "xmltok.c")
 MUSL_MATH_DIR = Path("port/third_party/musl-math")
 # the self-updater's TLS (port/linux/src/posix_update.c)
 MBEDTLS_DIR = Path("port/third_party/mbedtls")
@@ -450,6 +453,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             f"-I{TOML_DIR}",
             f"-I{KCP_DIR}",
             f"-I{MONOCYPHER_DIR}",
+            f"-I{EXPAT_DIR}",
             "-Isource -Isource/cseries",
             sdk_flags,
         ])
@@ -510,6 +514,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
         # internet play's signatures and password keys (port/third_party/monocypher)
         for name in MONOCYPHER_SOURCES:
             add_object(MONOCYPHER_DIR / name, " ".join([abi, "-std=gnu11", "-O2", "-w"]))
+        # the menus' XML parser (port/third_party/expat; menu_files.c)
+        for name in EXPAT_SOURCES:
+            add_object(EXPAT_DIR / name, " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-w"]))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():

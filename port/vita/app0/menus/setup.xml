@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OpenCE's Server Setup (Create Game > Internet) and Direct Link screens (its port_settings.py layout), on the settings panel's Play page settings and internet play's codes -->
+<menus>
+	<widget name="setup/header" left="35" top="11" width="605" height="59" bitmap="header_server_settings"/>
+	<widget name="setup/name_label" left="54" top="73" string_list="setup_options" string_index="0" type="text" width="230" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
+	<widget name="setup/name_value" top="74" type="text" left="284" width="280" height="22" font="ui\small_ui" color="#FF2896FF" align="center" text_y="5" text_flags="no_focus_test"/>
+	<widget name="setup/op_name" top="73" left="54" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port setup edit name"/>
+		<child widget="setup/name_label"/>
+		<child widget="setup/name_value"/>
+	</widget>
+	<widget name="setup/max_label" left="54" top="99" string_list="setup_options" string_index="3" type="text" width="230" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
+	<widget name="setup/max_spinner" top="101" strings="2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" type="spinner" left="377" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="arrow_sm_left" footer_bitmap="arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156"/>
+	<widget name="setup/op_max_players" top="99" left="54" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<child widget="setup/max_label"/>
+		<child widget="setup/max_spinner"/>
+	</widget>
+	<widget name="setup/visibility_label" left="54" top="125" string_list="setup_labels" string_index="0" type="text" width="230" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
+	<widget name="setup/visibility_spinner" top="127" strings="PUBLIC|PRIVATE" type="spinner" left="377" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="arrow_sm_left" footer_bitmap="arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156"/>
+	<widget name="setup/op_visibility" top="125" left="54" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<child widget="setup/visibility_label"/>
+		<child widget="setup/visibility_spinner"/>
+	</widget>
+	<widget name="setup/password_label" left="54" top="151" string_list="setup_options" string_index="1" type="text" width="230" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
+	<widget name="setup/password_value" top="152" type="text" left="284" width="280" height="22" font="ui\small_ui" color="#FF2896FF" align="center" text_y="5" text_flags="no_focus_test"/>
+	<widget name="setup/op_password" top="151" left="54" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port setup edit password"/>
+		<child widget="setup/password_label"/>
+		<child widget="setup/password_value"/>
+	</widget>
+	<widget name="setup/op_start" type="text" left="256" top="200" width="128" height="24" bitmap="text_button_background" string_list="setup_options" string_index="4" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
+		<on event="a start" run="port setup start" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="setup/setup_status" type="text" left="68" top="250" width="520" height="20" font="ui\small_ui" color="#FFE5E500"/>
+	<widget name="setup/setup_help" type="text" left="68" top="290" width="520" height="80" string_list="setup_help" font="ui\large_ui" color="#FFFFFFFF"/>
+	<widget name="setup/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port setup update"/>
+		<child widget="setup/op_name"/>
+		<child widget="setup/op_max_players"/>
+		<child widget="setup/op_visibility"/>
+		<child widget="setup/op_password"/>
+		<child widget="setup/op_start"/>
+	</widget>
+	<widget name="setup/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="created" run="port setup init"/>
+		<child widget="setup/header"/>
+		<child widget="setup/list"/>
+		<child widget="setup/setup_status"/>
+		<child widget="setup/setup_help"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+	<widget name="code/header" left="35" top="11" width="512" height="64" bitmap="header_direct_link"/>
+	<widget name="code/code_label" left="54" top="120" string_list="code_labels" string_index="0" type="text" width="230" height="22" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
+	<widget name="code/code_value" top="121" type="text" left="284" width="280" height="22" font="ui\small_ui" color="#FF2896FF" align="center" text_y="5" text_flags="no_focus_test"/>
+	<widget name="code/op_code" top="120" left="54" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+		<on event="a start" run="port code edit"/>
+		<child widget="code/code_label"/>
+		<child widget="code/code_value"/>
+	</widget>
+	<widget name="code/op_join" type="text" left="256" top="170" width="128" height="24" bitmap="text_button_background" string_list="code_labels" string_index="1" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
+		<on event="a start" run="port code join"/>
+	</widget>
+	<widget name="code/code_help" type="text" left="68" top="220" width="520" height="60" string_list="code_help" font="ui\large_ui" color="#FFFFFFFF"/>
+	<widget name="code/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port code update"/>
+		<child widget="code/op_code"/>
+		<child widget="code/op_join"/>
+	</widget>
+	<widget name="code/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="created" run="port code init"/>
+		<child widget="code/header"/>
+		<child widget="code/list"/>
+		<child widget="code/code_help"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+</menus>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OpenCE's multiplayer screens on the Vita: their pictures and text. A resource is the player's own Halo PC (Custom Edition) bitmaps.map or loc.map's; the PNGs are OpenCE's own art (CC0, README.txt) -->
+<menus>
+	<bitmap name="gradient" resource="ui\shell\bitmaps\gradient"/>
+	<bitmap name="gradient_big" resource="ui\shell\bitmaps\gradient_big"/>
+	<bitmap name="list_item_bkd" resource="ui\shell\bitmaps\list_item_bkd"/>
+	<bitmap name="list_field" resource="ui\shell\bitmaps\list_field"/>
+	<bitmap name="server_item_bkds" resource="ui\shell\bitmaps\server_item_bkds"/>
+	<bitmap name="join_game_border" resource="ui\shell\bitmaps\join_game_border"/>
+	<bitmap name="option_bkds" resource="ui\shell\bitmaps\option_bkds"/>
+	<bitmap name="text_button_background" resource="ui\shell\bitmaps\text_button_background"/>
+	<bitmap name="arrow_sm_left" resource="ui\shell\bitmaps\arrow_sm_left"/>
+	<bitmap name="arrow_sm_right" resource="ui\shell\bitmaps\arrow_sm_right"/>
+	<bitmap name="locked_icon" resource="ui\shell\main_menu\multiplayer_type_select\join_game\locked_icon"/>
+	<bitmap name="header_multiplayer" resource="ui\shell\main_menu\multiplayer_type_select\header_multiplayer"/>
+	<bitmap name="mp_options" resource="ui\shell\main_menu\multiplayer_type_select\mp_options"/>
+	<bitmap name="header_server_settings" resource="ui\shell\main_menu\multiplayer_type_select\server_settings\header_server_settings"/>
+	<bitmap name="header_server_browser">
+		<frame png="header_server_browser.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="header_password">
+		<frame png="header_password.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="header_direct_link">
+		<frame png="header_direct_link.png" width="512" height="64"/>
+	</bitmap>
+	<strings name="mp_options" resource="ui\shell\main_menu\multiplayer_type_select\multiplayer_options"/>
+	<strings name="column_headers" resource="ui\shell\main_menu\multiplayer_type_select\join_game\join_game_column_headers"/>
+	<strings name="ticker_labels" resource="ui\shell\main_menu\multiplayer_type_select\join_game\join_game_ticker_labels"/>
+	<strings name="setup_options" resource="ui\shell\main_menu\multiplayer_type_select\server_settings\server_settings_options"/>
+	<strings name="mp_labels">
+		<string text="JOIN BY CODE"/>
+		<string text="CO-OP CAMPAIGN"/>
+		<string text="SPLIT SCREEN"/>
+	</strings>
+	<strings name="mp_descriptions">
+		<string text="Join a public game on the Internet:\nthe server browser lists them."/>
+		<string text="Join a game on your Wi-Fi network,\nor one reached by internet play."/>
+		<string text="Join an Internet game by its host's\ncode (ABCD-EFGH)."/>
+		<string text="Host a game on the Internet: name\nit, choose who may join, then pick\nthe map and the gametype."/>
+		<string text="Host a game on your Wi-Fi network:\non the System Link screen,\n%y-button creates a game."/>
+		<string text="Host the campaign for a partner:\npick a level and a difficulty,\nthen press %y-button."/>
+		<string text="Play with several controllers\non this screen."/>
+		<string text="Set all the attributes for your\nmultiplayer gametypes and keep\nthem for future use."/>
+	</strings>
+	<strings name="offline">
+		<string text="Internet play is off.\n\nOpen the settings panel (SELECT + START),\nMultiplayer tab, set Connection to Online,\nthen restart the game."/>
+	</strings>
+	<strings name="legend">
+		<string text="%a-button Join     %x-button Refresh     %b-button Back"/>
+	</strings>
+	<strings name="password_labels">
+		<string text="PASSWORD:"/>
+	</strings>
+	<strings name="password_help">
+		<string text=""/>
+		<string text="This game has a password. Press %a-button on\nPASSWORD to type it, then choose JOIN GAME."/>
+		<string text="That is not the game's password. Try again."/>
+		<string text="That game is no longer listed."/>
+		<string text="Joining..."/>
+		<string text=""/>
+	</strings>
+	<strings name="setup_labels">
+		<string text="VISIBILITY"/>
+	</strings>
+	<strings name="setup_help">
+		<string text="The name your game is listed under\n(15 characters at most)."/>
+		<string text="The most players your game takes,\nyou included (2 to 16)."/>
+		<string text="PUBLIC: listed in every Vita's server browser.\nPRIVATE: joined only with its code."/>
+		<string text="A public game asks joiners for it.\nNONE: anyone may join."/>
+		<string text="Next: your profile, then the map and the\ngametype. The lobby shows your game's code."/>
+	</strings>
+	<strings name="code_labels">
+		<string text="CODE:"/>
+		<string text="JOIN GAME"/>
+	</strings>
+	<strings name="code_help">
+		<string text=""/>
+		<string text="Press %a-button on CODE and type the host's\ncode (ABCD-EFGH), then choose JOIN GAME."/>
+		<string text=""/>
+		<string text=""/>
+		<string text="Looking up the code..."/>
+		<string text="That is not a code: 8 letters and digits,\nlike ABCD-EFGH."/>
+	</strings>
+</menus>

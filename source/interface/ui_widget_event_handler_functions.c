@@ -3632,6 +3632,17 @@ boolean ui_widget_event_handler_function_invoke(
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 478,
 		widget != NULL && widget_deleted != NULL,
 		"(widget != NULL) && (widget_deleted != NULL)");
+#ifdef HALO_LINUX
+	/* port: the menus' own functions (port/linux/game/menu_functions.c),
+	from PC_MENU_FUNCTION_BASE (halo_menus.h) */
+	if (function_index >= 256 && function_index < 0x8000)
+	{
+		extern boolean pc_menu_event_function_invoke(struct widget_instance *widget, struct event_record *event,
+			long function_index, boolean *widget_deleted);
+
+		return pc_menu_event_function_invoke(widget, event, function_index - 256, widget_deleted);
+	}
+#endif
 	if ((short)function_index >= 0 && function_index < 102)
 	{
 		result = event_handler_function_list.functions[(short)function_index](widget, event, widget_deleted);
@@ -3642,6 +3653,26 @@ boolean ui_widget_event_handler_function_invoke(
 	error(2, "invalid event_handler_function");
 	return FALSE;
 }
+
+#ifdef HALO_LINUX
+/* port: OpenCE's Create Game > Internet (port/linux/game/menu_functions.c):
+the network game's server started, as the System Link list's Y starts it
+before it opens the map list */
+boolean ui_widget_port_start_network_game_server(
+	void)
+{
+	return network_game_start_new_server(NULL, NULL, NULL);
+}
+
+/* port: a function's name, as the tags name it, by its index (NULL past the
+last), for the menus' files (port/linux/game/menu_tags.c) */
+char const *ui_widget_event_handler_function_name(
+	long function_index)
+{
+	return function_index >= 0 && function_index < NUMBEROF(event_handler_function_list.names) ?
+		event_handler_function_list.names[function_index] : NULL;
+}
+#endif
 
 static boolean new_campaign_chosen(
 	struct widget_instance *widget,

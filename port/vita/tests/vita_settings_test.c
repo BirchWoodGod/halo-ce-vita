@@ -42,6 +42,11 @@ volatile unsigned long halo_settings_generation;
 volatile int halo_system_link_request;
 volatile int halo_system_link_answer;
 volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
+volatile int halo_text_input_state;
+char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
+char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
+int halo_text_input_maximum;
+int halo_text_input_password;
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
 /* (the map in play: never deleted) */
@@ -1403,6 +1408,38 @@ static void test_fourth_core(void)
 
 /* ---------- Button icons: the game's button icons, and the panel's terms */
 
+/* the game's menus' typing (OpenCE's screens, menu_functions.c): the
+system's keyboard opened on the game's request, the game getting no
+buttons while it is up, the text handed back, or cancelled */
+static void test_game_text_input(void)
+{
+	int opens = ime_opens;
+
+	check(frame(0) == 0 && !menu_visible, "typing: the panel closed, the game has the pad");
+	snprintf(halo_text_input_title, sizeof(halo_text_input_title), "Lobby name");
+	snprintf(halo_text_input_text, sizeof(halo_text_input_text), "Halo");
+	halo_text_input_maximum = 15;
+	halo_text_input_password = 0;
+	halo_text_input_state = HALO_TEXT_INPUT_REQUESTED;
+	check(frame(0) == 1 && halo_text_input_state == HALO_TEXT_INPUT_OPEN && ime_opens == opens + 1 &&
+		!strcmp(ime_title, "Lobby name") && !strcmp(ime_initial, "Halo") && ime_maximum == 15 && !ime_password,
+		"typing: the game's request opens the keyboard on its text, title and length");
+	check(frame(VITA_BUTTON_CROSS) == 1, "typing: while it is up the game gets no buttons");
+	snprintf(ime_typed, sizeof(ime_typed), "My game");
+	ime_result = 1;
+	check(frame(VITA_BUTTON_CROSS) == 1 && halo_text_input_state == HALO_TEXT_INPUT_DONE &&
+		!strcmp(halo_text_input_text, "My game"), "typing: the text typed goes back to the game");
+	check(frame(VITA_BUTTON_CROSS) == 1 && frame(0) == 0, "typing: the cross that closed it is not the game's");
+	halo_text_input_state = HALO_TEXT_INPUT_REQUESTED;
+	halo_text_input_password = 1;
+	frame(0);
+	ime_result = -1;
+	check(frame(0) == 1 && halo_text_input_state == HALO_TEXT_INPUT_CANCELLED && ime_password,
+		"typing: a password's keyboard, cancelled");
+	halo_text_input_state = HALO_TEXT_INPUT_IDLE;
+	check(frame(0) == 0, "typing: then the game has the pad again");
+}
+
 static void test_button_icons(void)
 {
 	struct vita_controls_config config;
@@ -1924,6 +1961,7 @@ int main(void)
 	test_controls_tab();
 	test_gyro_page();
 	test_button_icons();
+	test_game_text_input();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

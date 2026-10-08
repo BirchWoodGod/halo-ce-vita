@@ -700,6 +700,17 @@ void ui_widget_game_data_function_invoke(
 		0x10A,
 		widget);
 
+#ifdef HALO_LINUX
+	/* port: the menus' own functions (port/linux/game/menu_functions.c),
+	from PC_MENU_FUNCTION_BASE (halo_menus.h) */
+	if (function >= 256 && function < 0x8000)
+	{
+		extern void pc_menu_game_data_function_invoke(struct widget_instance *widget, long function);
+
+		pc_menu_game_data_function_invoke(widget, function - 256);
+		return;
+	}
+#endif
 	if ((short)function >= 0 && function < NUMBEROF(game_data_input_function_list))
 	{
 		game_data_input_function_list[(short)function](widget);

@@ -81,6 +81,30 @@ enum
 	SYSTEM_LINK_STATUS_COUNT
 };
 
+/* a line of text the game's menus want typed (OpenCE's multiplayer screens,
+port/linux/game/menu_functions.c: a lobby name, a password, a code): the
+game fills halo_text_input_title, _text (the text to start from),
+_maximum and _password and sets halo_text_input_state to REQUESTED; the
+Vita's host opens the system's keyboard on it (vita_ime.c), the game
+getting no buttons meanwhile, and answers DONE (the text typed in
+halo_text_input_text, printable ASCII) or CANCELLED. Elsewhere the game
+answers itself (HALO_TEST_TEXT_INPUT) */
+enum
+{
+	HALO_TEXT_INPUT_IDLE,
+	HALO_TEXT_INPUT_REQUESTED,
+	HALO_TEXT_INPUT_OPEN,
+	HALO_TEXT_INPUT_DONE,
+	HALO_TEXT_INPUT_CANCELLED,
+	HALO_TEXT_INPUT_SIZE = 64,
+};
+
+extern volatile int halo_text_input_state;
+extern char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
+extern char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
+extern int halo_text_input_maximum;
+extern int halo_text_input_password;
+
 extern volatile int halo_system_link_request;
 extern volatile int halo_system_link_answer;
 extern volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];

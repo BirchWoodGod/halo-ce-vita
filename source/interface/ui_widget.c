@@ -2474,6 +2474,21 @@ static __inline boolean widget_instance_can_handle_events(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+/* port: a row of OpenCE's lists (port/linux/game/menu_tags.c) that takes no
+focus: hidden or disabled (a list's rows past its games:
+port/linux/game/menu_functions.c), which up and down pass over */
+static boolean widget_instance_port_skipped(
+	struct widget_instance *list,
+	struct widget_instance *child)
+{
+	extern boolean pc_menu_tag(long tag_index);
+
+	return child && list->type == _ui_widget_type_column_list && pc_menu_tag(list->definition_tag_index) &&
+		(!child->visible || child->disabled);
+}
+
+#endif
 static struct widget_instance *widget_instance_find_by_tag_index_recursive(
 	struct widget_instance *widget,
 	long tag_index)
@@ -2576,6 +2591,38 @@ static void widget_instance_give_focus_by_tag(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the screen open for the local player (its stack's top), or NULL
+(port/linux/game/menu_functions.c) */
+struct widget_instance *ui_widget_port_active_screen(
+	short local_player_index)
+{
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return NULL;
+	return widget_globals.active_widgets[local_player_index];
+}
+
+#endif
+#ifdef HALO_LINUX
+/* port: gives a list's child the focus, as up and down do (OpenCE's lists,
+port/linux/game/menu_functions.c: off a row that went away) */
+void ui_widget_port_give_focus(
+	struct widget_instance *list,
+	struct widget_instance *child)
+{
+	struct widget_instance *sibling;
+	short index = 0;
+
+	for (sibling = list->child; sibling && sibling != child; sibling = sibling->next)
+		index++;
+	if (!sibling)
+		return;
+	widget_instance_give_focus_directly(list, child);
+	if (list->type == _ui_widget_type_column_list || list->type == _ui_widget_type_spinner_list)
+		list->parameters.list.selected_index = index;
+}
+
+#endif
 boolean widget_event_function_list_widget_goto_next_item(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -2673,6 +2720,22 @@ boolean widget_event_function_list_widget_goto_next_item(
 				child = widget->child;
 				item_index = 0;
 			}
+#ifdef HALO_LINUX
+			{
+				long tries = 0;
+
+				while (widget_instance_port_skipped(widget, child) && tries++ < 256)
+				{
+					child = child->next;
+					item_index++;
+					if (!child)
+					{
+						child = widget->child;
+						item_index = 0;
+					}
+				}
+			}
+#endif
 			if (child)
 			{
 				widget_instance_give_focus_by_tag(
@@ -2799,6 +2862,27 @@ boolean widget_event_function_list_widget_goto_previous_item(
 					item_index++;
 				}
 			}
+#ifdef HALO_LINUX
+			{
+				long tries = 0;
+
+				while (widget_instance_port_skipped(widget, child) && tries++ < 256)
+				{
+					child = child->previous;
+					item_index--;
+					if (!child)
+					{
+						child = widget->child;
+						item_index = 0;
+						while (child->next)
+						{
+							child = child->next;
+							item_index++;
+						}
+					}
+				}
+			}
+#endif
 			widget_instance_give_focus_by_tag(
 				widget,
 				child->definition_tag_index,
@@ -3629,6 +3713,10 @@ static boolean ui_widget_load_children_recursive(
 
 			for (child = widget->child; child; child = child->next)
 			{
+#ifdef HALO_LINUX
+				if (widget_instance_port_skipped(widget, child))
+					continue;
+#endif
 				if (widget->type == _ui_widget_type_spinner_list ||
 					widget->type == _ui_widget_type_column_list ||
 					widget_instance_can_handle_events(child))
@@ -3762,6 +3850,17 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 		(widget_stack>=0) && (widget_stack<MAXIMUM_GAMEPADS));
 	if (tag_index == NONE)
 		tag_index = tag_loaded(UI_WIDGET_DEFINITION_TAG, name);
+#ifdef HALO_LINUX
+	/* port: OpenCE's Multiplayer screen in place of the Xbox's when the
+	player's Halo PC data is in the maps folder, and the screens its flows
+	open in place of the game's (port/linux/game/menu_tags.c) */
+	if (!parent)
+	{
+		extern long menu_tags_screen(long tag_index);
+
+		tag_index = menu_tags_screen(tag_index);
+	}
+#endif
 	if (tag_index != NONE)
 	{
 		definition = ui_widget_definition_get(tag_index);
