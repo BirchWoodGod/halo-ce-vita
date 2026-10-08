@@ -5,6 +5,9 @@ Xbox controllers and the debug keyboard for the Linux build.
 
 Port 0 is always connected: it is the keyboard and mouse, merged with the
 first SDL gamepad when one is present. Further SDL gamepads take ports 1-3.
+(debug) debug.test_controllers
+connects ports 1-3 with no device behind them, for automated split screen
+tests (the scripted player and HALO_TEST_PAD's steps play them).
 
 Keyboard and mouse (port 0):
 	W A S D          left stick          arrows           D-pad
@@ -218,6 +221,21 @@ once a frame, at the display's refresh rate. */
 #define WHEEL_PRESS_MS 50
 #define WHEEL_SCROLL_GAP_MS 200
 
+/* (debug) debug.test_controllers: the controllers the automated tests have,
+1 to 4 (ports 1 on with no device behind them) */
+static int test_controller_count(void)
+{
+	static int count;
+
+	if (!count)
+	{
+		long setting = config_integer("debug.test_controllers");
+
+		count = setting < 1 ? 1 : setting > PORT_COUNT ? PORT_COUNT : (int)setting;
+	}
+	return count;
+}
+
 /* debug.test_input "bot:<seed>": a scripted player for the automated
 network tests (port/linux/game/network_test.c), different for each seed:
 it walks and strafes in circles, turns, fires every few seconds, jumps now
@@ -242,7 +260,9 @@ spaces (hold 150 and pause 1500 by default), pressed one after another
 from when the main menu has been up for a second (test_input_main_menu,
 main.c). Names in the Xbox's terms: a b x y black white lt rt up down left
 right start back ls rs, several at once joined by "+"; "wait" presses
-none. halo.log says each step as it is pressed. */
+none; "2." to "4." before a step press it on controller 2 to 4 (the test
+controllers, debug.test_controllers) instead of controller 1. halo.log says
+each step as it is pressed. */
 static struct
 {
 	int parsed;
@@ -252,6 +272,8 @@ static struct
 	struct
 	{
 		char name[24];
+		/* the port pressing it */
+		int port;
 		int buttons;
 		WORD digital;
 		unsigned int hold_ms;
@@ -327,6 +349,11 @@ static void test_pad_parse(void)
 			test_pad.steps[step].pause_ms = (unsigned int)atoi(pause + 1);
 		}
 		snprintf(test_pad.steps[step].name, sizeof(test_pad.steps[step].name), "%s", token);
+		if (token[0] >= '2' && token[0] <= '0' + PORT_COUNT && token[1] == '.')
+		{
+			test_pad.steps[step].port = token[0] - '1';
+			token += 2;
+		}
 		for (key = strtok_r(token, "+", &key_end); key; key = strtok_r(NULL, "+", &key_end))
 		{
 			int index;
@@ -344,7 +371,7 @@ static void test_pad_parse(void)
 	}
 }
 
-static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
+static void test_pad_gamepad(XINPUT_GAMEPAD *pad, int port)
 {
 	Uint64 now;
 
@@ -365,6 +392,8 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 
 		if (elapsed < test_pad.steps[test_pad.index].hold_ms)
 		{
+			if (test_pad.steps[test_pad.index].port != port)
+				return;
 			for (analog = 0; analog < 8; analog++)
 			{
 				if (test_pad.steps[test_pad.index].buttons & (1 << analog))
@@ -384,13 +413,14 @@ static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
 	}
 }
 
-static void test_input_gamepad(XINPUT_GAMEPAD *pad)
+static void test_input_gamepad(XINPUT_GAMEPAD *pad, int port)
 {
 	static int checked;
 	static int seed = -1;
 	/* "bot:<seed>:look": it also looks up and down (the campaign's first
 	level asks for that before the player leaves the cryo tube) */
 	static int look;
+	int player_seed;
 	double t;
 
 	if (!checked)
@@ -410,14 +440,16 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	a level) */
 	if (test_pad_at_menu && test_pad.count > 0)
 		return;
-	if (test_input_holding_action)
+	if (test_input_holding_action && port == 0)
 	{
 		/* (standing still, the button held from a second on) */
 		if (SDL_GetTicks() - test_input_holding_action_since >= 1000)
 			pad->bAnalogButtons[XINPUT_GAMEPAD_X] = 255;
 		return;
 	}
-	t = (double)SDL_GetTicks() / 1000.0 + seed * 1.7;
+	/* (the test controllers' players: seeds of their own) */
+	player_seed = seed + port * 3;
+	t = (double)SDL_GetTicks() / 1000.0 + player_seed * 1.7;
 #ifndef HALO_VITA
 	{
 		/* (debug) HALO_FIXED_TICK: on the game's clock, so the scripted
@@ -426,14 +458,14 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 		extern volatile unsigned long halo_ticks_simulated;
 
 		if (fixed && atoi(fixed))
-			t = (double)halo_ticks_simulated / 30.0 + seed * 1.7;
+			t = (double)halo_ticks_simulated / 30.0 + player_seed * 1.7;
 	}
 #endif
 	pad->sThumbLY = (SHORT)(sin(t * 0.9) * 32000.0);
-	pad->sThumbLX = (SHORT)(cos(t * 0.6 + seed) * 20000.0);
+	pad->sThumbLX = (SHORT)(cos(t * 0.6 + player_seed) * 20000.0);
 	pad->sThumbRX = (SHORT)(sin(t * 0.4) * 14000.0);
 	if (look)
-		pad->sThumbRY = (SHORT)(sin(t * 0.7 + seed) * 20000.0);
+		pad->sThumbRY = (SHORT)(sin(t * 0.7 + player_seed) * 20000.0);
 	if (fmod(t, 3.0) < 0.3)
 		pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 255;
 	if (fmod(t, 5.0) < 0.1)
@@ -598,6 +630,9 @@ static DWORD connected_gamepads(void)
 	/* the first pad shares port 0 with the keyboard */
 	for (port = 1; port < count; port++)
 		mask |= 1UL << port;
+	/* (debug) the automated tests' controllers */
+	for (port = 1; port < test_controller_count(); port++)
+		mask |= 1UL << port;
 	return mask;
 }
 
@@ -696,8 +731,14 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 			keyboard_gamepad(&input, &state->Gamepad);
 		if (count > 0)
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
-		test_input_gamepad(&state->Gamepad);
-		test_pad_gamepad(&state->Gamepad);
+		test_input_gamepad(&state->Gamepad, 0);
+		test_pad_gamepad(&state->Gamepad, 0);
+	}
+	else if (port < test_controller_count())
+	{
+		/* (debug) a test controller: the scripted player's and the steps' */
+		test_input_gamepad(&state->Gamepad, port);
+		test_pad_gamepad(&state->Gamepad, port);
 	}
 	else if (port < count)
 	{

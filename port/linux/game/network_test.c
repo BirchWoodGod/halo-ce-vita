@@ -13,7 +13,10 @@ Automated system link sessions for testing the netcode without the menus
   ("<variant>@<map>" plays that game on another map: a map change);
 - "local:<map>[:<variant>...]" the same with a local (split screen) game
   of one player, which starts only where a local game may have one (the
-  Vita's rules, HALO_PORT_VITA_NETWORK);
+  Vita's rules, HALO_PORT_VITA_NETWORK); with debug.test_controllers
+  (HALO_TEST_CONTROLLERS=2 to 4) a player for each test controller, as
+  pressing START on each does (split screen, the scripted player playing
+  them all with debug.test_input);
 - "join" searches for games and joins the first it finds, as picking it in
   the system link list does;
 - "join-public" first browses internet play's public games (the server
@@ -1200,7 +1203,20 @@ void network_test_update(
 				network_game_server_change_map_name(global_network_game_server_get(), network_test.map_path);
 			}
 			if (!network_test.player_added && network_test.setup_seconds >= 2.0f && global_network_game_client_get())
-				network_test.player_added = network_game_client_add_player(global_network_game_client_get(), 0);
+			{
+				/* (and the test controllers' players: split screen) */
+				short controller;
+				short controllers = (short)PIN(config_integer("debug.test_controllers"), 1, MAXIMUM_LOCAL_PLAYERS);
+
+				network_test.player_added = TRUE;
+				for (controller = 0; controller < controllers; controller++)
+				{
+					network_test.player_added &=
+						network_game_client_add_player(global_network_game_client_get(), controller);
+				}
+				if (controllers > 1)
+					platform_log("network test: %d players on this machine (split screen)", controllers);
+			}
 			if (network_test.setup_seconds >= network_test.start_delay)
 			{
 				network_test.started = TRUE;
