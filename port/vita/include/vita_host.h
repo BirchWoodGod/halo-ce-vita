@@ -55,6 +55,8 @@ int vita_host_fourth_core_move(const char *role);
 void vita_host_thread_watch(const char *role);
 /* with each frame-timing line: the watched threads' and the cores' times */
 void vita_host_thread_times_report(unsigned long frames);
+/* the frame-hitch line's cores and threads, sampled at each frame's end (main.c) */
+int vita_host_frame_cores(char *line, int size, int describe);
 
 /* each core's busy share of the last second, 0-100, or 255 unknown (the
 fourth core's last) */

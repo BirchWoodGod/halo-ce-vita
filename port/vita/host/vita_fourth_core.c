@@ -247,3 +247,93 @@ void vita_host_thread_times_report(unsigned long frames)
 	previous_report = now;
 	have_previous_system = 1;
 }
+
+/* the frame-hitch line's cores (main.c, at each frame's end): each core's
+busy share since the last frame's end, from the kernel's idle clocks (one
+call a frame), and the watched threads' run times since their last sample
+(taken every fourth frame, and after a hitch's report: the window, which
+holds the hitch's frame, is named). A hitch whose game thread waited shows
+which core was busy meanwhile and with what: the fourth core's helpers
+behind a map copy's decompression, or the system there. `describe` 0: the
+samples only. The line's length, 0 when the kernel gives no idle clocks
+(Vita3K) */
+int vita_host_frame_cores(char *line, int size, int describe)
+{
+	static SceKernelSystemInfo previous;
+	static unsigned long long previous_time, threads_time, frames;
+	static unsigned long long thread_run[MAXIMUM_WATCHED];
+	static int have_previous;
+	SceKernelSystemInfo system;
+	unsigned long long now = sceKernelGetProcessTimeWide();
+	int length = 0, count = __atomic_load_n(&watched_count, __ATOMIC_ACQUIRE), index, sample_threads;
+
+	if (count > MAXIMUM_WATCHED)
+		count = MAXIMUM_WATCHED;
+	memset(&system, 0, sizeof(system));
+	system.size = sizeof(system);
+	if (sceKernelGetSystemInfo(&system) < 0 || !(system.activeCpuMask & 0xf000f))
+	{
+		have_previous = 0;
+		return 0;
+	}
+	if (describe && line && size > 0 && have_previous && now > previous_time)
+	{
+		unsigned long long elapsed = now - previous_time;
+		unsigned int core;
+		int shown = 0;
+
+		length = snprintf(line, (size_t)size, "busy over %.1f ms:", (double)elapsed / 1000.0);
+		for (core = 0; core < 4 && length < size; core++)
+		{
+			unsigned long long old_idle = previous.cpuInfo[core].idleClock, idle = system.cpuInfo[core].idleClock;
+
+			if (idle < old_idle || (idle - old_idle > elapsed && idle - old_idle - elapsed > 2000u))
+				length += snprintf(line + length, (size_t)(size - length), " core%u ?", core);
+			else
+				length += snprintf(line + length, (size_t)(size - length), " core%u %u%%", core,
+					idle - old_idle >= elapsed ? 0u : (unsigned)(100 - (idle - old_idle) * 100 / elapsed));
+		}
+		if (threads_time && length < size)
+			length += snprintf(line + length, (size_t)(size - length), "; threads' run over the last %.1f ms",
+				(double)(now - threads_time) / 1000.0);
+		for (index = 0; index < count && threads_time && length < size; index++)
+		{
+			SceKernelThreadInfo info;
+			unsigned long long run;
+
+			if (!__atomic_load_n(&watched[index].ready, __ATOMIC_ACQUIRE))
+				continue;
+			memset(&info, 0, sizeof(info));
+			info.size = sizeof(info);
+			if (sceKernelGetThreadInfo(watched[index].thread, &info) < 0)
+				continue;
+			run = info.runClocks >= thread_run[index] ? info.runClocks - thread_run[index] : 0;
+			/* (a thread that ran under a millisecond is left out) */
+			if (run >= 1000u)
+				length += snprintf(line + length, (size_t)(size - length), "%s %s %.1f ms%s", shown++ ? "," : ":",
+					watched[index].role, (double)run / 1000.0, watched[index].fourth ? " [core 3]" : "");
+		}
+		if (length >= size)
+			line[size - 1] = 0;
+	}
+	previous = system;
+	previous_time = now;
+	have_previous = 1;
+	sample_threads = describe || !(frames++ & 3) || !threads_time;
+	if (sample_threads)
+	{
+		for (index = 0; index < count; index++)
+		{
+			SceKernelThreadInfo info;
+
+			if (!__atomic_load_n(&watched[index].ready, __ATOMIC_ACQUIRE))
+				continue;
+			memset(&info, 0, sizeof(info));
+			info.size = sizeof(info);
+			if (sceKernelGetThreadInfo(watched[index].thread, &info) >= 0)
+				thread_run[index] = info.runClocks;
+		}
+		threads_time = now;
+	}
+	return length;
+}

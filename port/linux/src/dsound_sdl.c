@@ -806,6 +806,9 @@ static unsigned long long statistics_now(void)
 /* game threads waiting for mixer_lock: the mixer hands the lock over
 between two voices when it sees one (mix) */
 static volatile int game_lock_wanted;
+/* the game's threads' waits for the mixer, for good (main.c's frame-hitch
+line takes a frame's from it) */
+volatile unsigned long long halo_mixer_game_wait_us;
 
 /* mixer_lock taken by the game's threads: the time spent waiting for the
 mixer is counted (a lock that is free costs no clock read) */
@@ -819,7 +822,9 @@ static void game_lock(void)
 	__atomic_add_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
 	pthread_mutex_lock(&mixer_lock);
 	__atomic_sub_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
-	statistics_wait_us += statistics_now() - started;
+	started = statistics_now() - started;
+	statistics_wait_us += started;
+	halo_mixer_game_wait_us += started;
 	statistics_waits++;
 }
 
