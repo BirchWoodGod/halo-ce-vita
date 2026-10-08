@@ -2133,7 +2133,7 @@ void vita_texture_cache_begin_frame(void)
 
 	/* (the decodes done in the background swapped in, drawn or not) */
 	decode_jobs_sweep();
-	if (!frame_decode_loading)
+	if (!frame_decode_loading && (texture_streaming_live() || !frame_decode_us))
 	{
 		if (frame_decode_us > frame_decode_longest_us)
 			frame_decode_longest_us = frame_decode_us;
