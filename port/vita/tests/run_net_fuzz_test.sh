@@ -17,6 +17,10 @@
 #                        when it does not link as it is); what it finds goes
 #                        to NET_FUZZ_OUT (default a folder under TMPDIR)
 #   NET_FUZZ_TARGETS     the targets (default all four)
+#   NET_FUZZ_DEDICATED=1 builds them as the dedicated server's code
+#                        (HALO_DEDICATED_SERVER, HALO_NET_AS_VITA: its limits
+#                        on a peer's packets and an address's peers, its
+#                        refusal to join; port/linux/DEDICATED_SERVER.md)
 # Needs the Linux build configured in this tree (build.ninja: its compiler and
 # the game's flags; build/linux/halo_msvc_semantics.h) and clang that targets
 # i686 (CLANG, default the Linux build's compiler).
@@ -47,6 +51,10 @@ game_flags=$(awk '/^build build\/linux\/obj\/source\/networking\/network_message
 	sed 's/^ *cflags = //; s/\$ */ /g; s/-O2/-O1/; s/-march=native//')
 [ -n "$game_flags" ] || { echo "FAIL no Linux build configured in $root (build.ninja)"; exit 1; }
 game_flags="$game_flags -ffunction-sections -fdata-sections -Iport/linux/src"
+if [ "${NET_FUZZ_DEDICATED:-0}" = 1 ]; then
+	platform_flags="$platform_flags -DHALO_DEDICATED_SERVER=1 -DHALO_NET_AS_VITA=1"
+	game_flags="$game_flags -DHALO_DEDICATED_SERVER=1 -DHALO_NET_AS_VITA=1"
+fi
 
 # libFuzzer for i386: as it is, or with its objects' COMDAT groups taken out
 # (clang 22's archive refers to __x86.get_pc_thunk sections the linker

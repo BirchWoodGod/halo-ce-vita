@@ -504,6 +504,23 @@ to `ux0:data/haloce-vita/env.txt`), play a heavy fight for a couple of
 minutes, and attach `halo.log` to an issue. Any frame over 100 ms is named
 in `halo.log` (a `frame-hitch` line) whether it is on or not.
 
+### Dedicated servers
+
+A dedicated server hosts online games on a PC or a Raspberry Pi 4 instead
+of a Vita. It runs the host's game (the simulation, the AI, the scores) with
+no window, sound or player of its own, so no Vita carries the host's work
+and the game goes on when players leave. Vitas join it as they join any
+game: by its code, from the server browser (marked as dedicated in this
+version's browser), or on its LAN. PCs cannot join it: Vitas play only
+Vitas.
+
+The server is built from this repository (`ninja linux-server`) and plays a
+map cycle set up in `init.txt` with Halo PC's dedicated server commands
+(`sv_name`, `sv_mapcycle_add`, `sv_kick`, `sv_ban`...). Its operator
+supplies the game data (their own Xbox `maps` folder). Building it, running
+it on a PC or a Pi, port forwarding and security:
+**[port/linux/DEDICATED_SERVER.md](port/linux/DEDICATED_SERVER.md)**.
+
 ## Saving
 
 Checkpoints are written to the memory card as you play. To continue,

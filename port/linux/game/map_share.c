@@ -106,6 +106,7 @@ Choices:
 #include "custom_edition_maps.h"
 #include "map_share_protocol.h"
 #include "map_share.h"
+#include "dedicated_server.h"
 #include "../src/p2p.h"
 
 #include <stdio.h>
@@ -557,7 +558,12 @@ static enum map_share_refusal map_share_server_check(
 	if (!level_name || !level_name[0] ||
 		csstrcasecmp(tag_name_strip_path(level_name), name) ||
 		!map_share_name_valid(name) ||
-		!custom_edition_maps_shareable(level_name))
+		!custom_edition_maps_shareable(level_name)
+#ifdef HALO_DEDICATED_SERVER
+		/* (a dedicated server's operator says which: sv_map_download) */
+		|| !dedicated_server_map_shareable(level_name)
+#endif
+		)
 	{
 		return _map_share_refusal_not_shared;
 	}

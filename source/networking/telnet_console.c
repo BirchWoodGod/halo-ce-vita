@@ -116,6 +116,11 @@ void telnet_console_initialize(
 	this machine */
 	if (!config_boolean("debug.telnet_console"))
 		return;
+#ifdef HALO_DEDICATED_SERVER
+	/* (never on a dedicated server, which takes commands on its standard
+	input alone: port/linux/DEDICATED_SERVER.md) */
+	return;
+#endif
 
 	telnet_console_globals.listening_endpoint = create_transport_endpoint(_transport_endpoint_type_telnet);
 	if (telnet_console_globals.listening_endpoint)

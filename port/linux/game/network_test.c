@@ -1250,8 +1250,9 @@ void network_test_update(
 				{
 					if (entry.compatible && !entry.own)
 					{
-						platform_log("network test: the public games list \"%s\"%s: %s; %s", entry.name,
-							entry.locked ? " [pw]" : "", entry.rules, entry.players_line);
+						platform_log("network test: the public games list \"%s\"%s%s: %s; %s", entry.name,
+							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "", entry.rules,
+							entry.players_line);
 						snprintf(network_test.lobby_id, sizeof(network_test.lobby_id), "%s", entry.id);
 						network_test.lobby_locked = entry.locked != 0;
 						break;

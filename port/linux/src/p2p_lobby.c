@@ -96,6 +96,10 @@ enum
 	level */
 	_listing_pc_map = 32,
 	_listing_coop = 64,
+	/* a dedicated server's game (port/linux/DEDICATED_SERVER.md): a host
+	with no player of its own. Browsers before it ignore the bit (the
+	listing reads as before), and show the game as any other */
+	_listing_dedicated = 128,
 	STAMP_SIZE = 8,
 	LISTED_PLAYERS = P2P_LISTING_PLAYERS,
 	LISTED_PLAYER_NAME_SIZE = P2P_LISTING_PLAYER_NAME_SIZE,
@@ -343,6 +347,9 @@ static int listing_make(unsigned char *bytes, int flags)
 
 	if (lobby.has_password && !(flags & _listing_closed))
 		flags |= _listing_password;
+#ifdef HALO_DEDICATED_SERVER
+	flags |= _listing_dedicated;
+#endif
 	bytes[size++] = 'H';
 	bytes[size++] = 'L';
 	bytes[size++] = LISTING_FORMAT;
@@ -824,6 +831,7 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	shown->has_teams = (listing->flags & _listing_has_teams) != 0;
 	shown->pc_map = (listing->flags & _listing_pc_map) != 0;
 	shown->coop = (listing->flags & _listing_coop) != 0;
+	shown->dedicated = (listing->flags & _listing_dedicated) != 0;
 	shown->score_limit = listing->score_limit;
 	shown->difficulty = listing->difficulty;
 	shown->listed_player_count = 0;
@@ -1339,6 +1347,7 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	entry->in_progress = listing->in_progress;
 	entry->has_teams = listing->has_teams;
 	entry->failed = listing->failed;
+	entry->dedicated = listing->dedicated;
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)
 	{
@@ -1362,7 +1371,10 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 		length += snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, ": full or starting");
 	length = length < (int)sizeof(entry->rules) ? length : (int)sizeof(entry->rules) - 1;
 	if (listing->pc_map)
-		snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, " (HALO PC)");
+		length += snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, " (HALO PC)");
+	length = length < (int)sizeof(entry->rules) ? length : (int)sizeof(entry->rules) - 1;
+	if (listing->dedicated)
+		snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, " (DEDICATED)");
 	/* the Players line: "5 of 16: name, name... +3 more" (the names that
 fit, with room left for the end) */
 	length = snprintf(entry->players_line, sizeof(entry->players_line), "%d of %d", entry->players, entry->maximum);

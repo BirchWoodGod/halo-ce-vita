@@ -2290,13 +2290,14 @@ static void show_browse(void)
 		length += snprintf(text + length, sizeof(text) - length, "\nLooking for games (%.24s)", detail);
 	}
 	/* (a game a line: its name, players of most, map, [pw] for a password,
-	PC for a Halo PC map) */
+	PC for a Halo PC map, DED for a dedicated server's) */
 	for (index = 0; index < browse_count && length < (int)sizeof(text); index++)
 	{
 		const struct p2p_lobby_entry *entry = &browse_entries[index];
 		char row[64];
-		int end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s", entry->name, entry->players,
-			entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "");
+		int end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s%s", entry->name, entry->players,
+			entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "",
+			entry->dedicated ? " DED" : "");
 
 		while (end > 0 && row[end - 1] == ' ')
 			row[--end] = 0;

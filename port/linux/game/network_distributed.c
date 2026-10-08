@@ -72,6 +72,7 @@ machine (their datum identifiers need not be).
 #include "units/bipeds.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "dedicated_server.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -2702,8 +2703,19 @@ static void distributed_handle_inputs(
 		player = distributed_player(input->player_index);
 		if (!player)
 			continue;
-		/* (the sticks and the trigger no further than a controller's) */
+		/* (the sticks and the trigger no further than a controller's; and
+		no number that is not one, which a client can send as easily: a NaN
+		facing became the unit's aiming vector) */
 		action = input->action;
+		if (!distributed_real_valid(action.desired_facing.yaw) || !distributed_real_valid(action.desired_facing.pitch))
+		{
+			action.desired_facing.yaw = 0.0f;
+			action.desired_facing.pitch = 0.0f;
+		}
+		if (!distributed_real_valid(action.throttle.i) || !distributed_real_valid(action.throttle.j))
+			action.throttle.i = action.throttle.j = 0.0f;
+		if (!distributed_real_valid(action.primary_trigger))
+			action.primary_trigger = 0.0f;
 		action.throttle.i = PIN(action.throttle.i, -1.0f, 1.0f);
 		action.throttle.j = PIN(action.throttle.j, -1.0f, 1.0f);
 		action.primary_trigger = PIN(action.primary_trigger, 0.0f, 1.0f);
@@ -4069,6 +4081,26 @@ void network_distributed_kick(
 		error(_error_log, "%s", notice);
 	}
 }
+
+#ifdef HALO_DEDICATED_SERVER
+/* (the dedicated server's sv_say: port/linux/game/dedicated_server.c) a line
+of the operator's in red on every machine's console, as the host's notices
+are: in game only (a machine in the lobby hears none of the game's
+messages). FALSE if there is no game */
+boolean network_distributed_say(
+	char const *text)
+{
+	char notice[MAXIMUM_NOTICE_LENGTH];
+	char kept[MAXIMUM_NOTICE_LENGTH];
+
+	if (!game_in_progress() || !global_network_game_server_get())
+		return FALSE;
+	distributed_printable(kept, sizeof(kept), text);
+	snprintf(notice, sizeof(notice), "Server: %s", kept);
+	distributed_send_notice(notice);
+	return TRUE;
+}
+#endif
 
 /* (the host) a client machine's tick, which one of its messages is
 stamped with: its clock measured, each window, against the host's; one

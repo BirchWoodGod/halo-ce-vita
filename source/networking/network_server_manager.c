@@ -475,6 +475,7 @@ symbols in this file:
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "map_share.h"
+#include "dedicated_server.h"
 #endif
 
 #include "cache/cache_files.h"
@@ -1173,6 +1174,87 @@ void network_game_server_kick_machine(
 	}
 	network_game_server_kick_pending[machine_index] = kept_out ? _kick_kept_out : _kick_rejoinable;
 }
+
+#ifdef HALO_DEDICATED_SERVER
+/* port (the dedicated server, port/linux/game/dedicated_server.c): the
+remote machines joined to the game */
+long network_game_server_dedicated_machine_count(
+	void)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	long count = 0;
+	long index;
+
+	for (index = 0; server && index < MAXIMUM_NETWORK_MACHINE_COUNT; index++)
+	{
+		struct network_game_server_client_machine *machine = &server->client_machines[index];
+
+		if (network_game_server_client_machine_is_joined_to_game(server, machine) &&
+			!network_game_server_client_machine_is_local(server, machine))
+		{
+			count++;
+		}
+	}
+	return count;
+}
+
+/* port (the dedicated server): its sv_kick and sv_ban by the player's index
+in the game's player list: the player's machine dropped as the console's
+kick and ban drop it (every machine told; banned, its line in bans.txt) */
+boolean network_game_server_dedicated_drop_player(
+	long player_index,
+	boolean ban)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	struct network_player const *player;
+	long machine_index;
+	char names[96];
+	long index;
+
+	if (!server || !VALID_INDEX(player_index, MAXIMUM_NETWORK_PLAYER_COUNT) ||
+		!network_player_is_valid(&server->game.players[player_index]))
+	{
+		console_warning("%s: no player #%ld (sv_players lists them)", ban ? "sv_ban" : "sv_kick", player_index);
+		return FALSE;
+	}
+	player = &server->game.players[player_index];
+	machine_index = player->machine_index;
+	if (!VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ||
+		!network_game_server_client_machine_is_joined_to_game(server, &server->client_machines[machine_index]) ||
+		network_game_server_client_machine_is_local(server, &server->client_machines[machine_index]))
+	{
+		console_warning("%s: player #%ld's machine is not in the game", ban ? "sv_ban" : "sv_kick", player_index);
+		return FALSE;
+	}
+	names[0] = 0;
+	for (index = 0; index < MAXIMUM_NETWORK_PLAYER_COUNT; index++)
+	{
+		char name[NETWORK_GAME_SERVER_NAME_TEXT_SIZE];
+
+		if (!network_player_is_valid(&server->game.players[index]) ||
+			server->game.players[index].machine_index != machine_index)
+		{
+			continue;
+		}
+		network_game_server_player_name_text(&server->game.players[index], name, sizeof(name));
+		if (names[0] && csstrlen(names) + 2 < sizeof(names))
+			csstrcat(names, ", ");
+		if (csstrlen(names) + csstrlen(name) < sizeof(names))
+			csstrcat(names, name);
+	}
+	if (ban)
+	{
+		network_distributed_ban(machine_index, network_game_server_client_machine_addresses[machine_index], names);
+		network_game_server_kick_pending[machine_index] = _kick_kept_out;
+	}
+	else
+	{
+		network_distributed_kick(names);
+		network_game_server_kick_pending[machine_index] = _kick_rejoinable;
+	}
+	return TRUE;
+}
+#endif
 
 /* (a client machine's player queued to add in game: one refused is as one
 the game has no room for) */
@@ -3032,6 +3114,11 @@ boolean server_needs_more_teams(
 	if (network_game_is_splitscreen_local() && server->game.player_count <= 1)
 		return FALSE;
 #endif
+#ifdef HALO_DEDICATED_SERVER
+	/* (port) a dedicated server's team game starts with whoever is there,
+	as Halo PC's does: the others join it in progress */
+	return FALSE;
+#endif
 	if (server->game.variant.universal_variant.teams)
 	{
 		short player_count_by_team[NUMBER_OF_MULTIPLAYER_TEAMS] = { 0, 0 };
@@ -3080,7 +3167,12 @@ boolean server_has_a_player_on_each_machine(
 			&server->client_machines[client_machine_index];
 
 		/* (the machines in the game: not a connection that has not joined) */
-		if (network_game_server_client_machine_is_joined_to_game(server, client_machine))
+		if (network_game_server_client_machine_is_joined_to_game(server, client_machine)
+#ifdef HALO_DEDICATED_SERVER
+			/* (port) a dedicated server's own machine has none: it only hosts */
+			&& !network_game_server_client_machine_is_local(server, client_machine)
+#endif
+			)
 		{
 			boolean has_a_player = FALSE;
 			long player_index;
@@ -3140,6 +3232,10 @@ static long server_minimum_players(
 	player */
 	if (network_game_is_splitscreen_local())
 		return 1;
+#endif
+#ifdef HALO_DEDICATED_SERVER
+	/* (port) the operator's sv_minplayers (1 by default) */
+	return dedicated_server_minimum_players();
 #endif
 	return server->game.minimum_players;
 }
@@ -3323,6 +3419,9 @@ boolean network_game_server_game_can_start(
 {
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x782, server);
 
+#ifdef HALO_DEDICATED_SERVER
+	return server->state == 0 && server->game.player_count >= dedicated_server_minimum_players();
+#endif
 	return server->state == 0 &&
 		server->game.player_count >= server->game.minimum_players;
 }
@@ -3850,6 +3949,10 @@ void network_game_server_update_countdown(
 								server->game.maximum_players > 2 && server->game.player_count < server->game.maximum_players ?
 								NETWORK_GAME_COOP_OPEN_COUNTDOWN_TIME : NETWORK_GAME_COOP_COUNTDOWN_TIME;
 						}
+#ifdef HALO_DEDICATED_SERVER
+						/* (a dedicated server's: sv_start_delay) */
+						countdown = (unsigned long)dedicated_server_countdown_milliseconds();
+#endif
 
 						server->countdown_state.active = TRUE;
 						countdown_timer_set_time_remaining(
@@ -4422,6 +4525,16 @@ static boolean network_game_server_add_new_client(
 							"refusing another connection from %s, which has not joined with those it has",
 							transport_address_to_string(&client_address));
 					}
+#ifdef HALO_DEDICATED_SERVER
+					/* (a dedicated server: so many connections an address a
+					minute, an internet play peer's by its real address) */
+					else if (client_address.address.ipv4_address != IPV4_LOOPBACK_ADDRESS &&
+						!dedicated_server_join_allowed(client_address.address.ipv4_address))
+					{
+						network_event("refusing a connection from %s: too many from its address of late",
+							transport_address_to_string(&client_address));
+					}
+#endif
 					else
 					{
 						server->client_machines[i].connection = new_connection;
@@ -4811,6 +4924,18 @@ static boolean network_game_server_idle_pregame_tasks(
 			network_event("co-op: the partner is in: the countdown starts");
 			network_game_server_update_countdown(server, _network_game_server_countdown_event_player_joined);
 		}
+#ifdef HALO_DEDICATED_SERVER
+		/* port: a dedicated server's lobby starts its game once enough
+		players are in (sv_minplayers) and the server has set the map, with
+		no one pressing A (sv_start_delay; more may join until it starts,
+		and after) */
+		if (dedicated_server_lobby_ready() && !server->countdown_state.active &&
+			!server->countdown_state.paused && server_ok_to_countdown(server))
+		{
+			network_event("dedicated server: the players are in: the countdown starts");
+			network_game_server_update_countdown(server, _network_game_server_countdown_event_player_joined);
+		}
+#endif
 		if (server->countdown_state.active == TRUE)
 		{
 			boolean send_countdown_update = FALSE;

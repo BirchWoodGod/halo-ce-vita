@@ -1,0 +1,60 @@
+# systemd unit for the dedicated server (port/linux/DEDICATED_SERVER.md).
+# Install (as that file's "As a service" says):
+#   sudo useradd --system --home-dir /var/lib/halo-server --shell /usr/sbin/nologin halo-server
+#   sudo install -d -o halo-server -g halo-server -m 750 /var/lib/halo-server
+#   (the game's maps folder and init.txt into /var/lib/halo-server)
+#   sudo install -D -m 755 halo-server /opt/halo-server/halo-server
+#   sudo install -m 644 halo-server.service /etc/systemd/system/halo-server.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now halo-server
+# Then forward UDP 2302 on the router to this machine and open it in the
+# firewall. Logs (and the code Vitas join with): journalctl -u halo-server
+[Unit]
+Description=Halo CE for PS Vita dedicated server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=halo-server
+Group=halo-server
+WorkingDirectory=/var/lib/halo-server
+ExecStart=/opt/halo-server/halo-server -path /var/lib/halo-server
+# (no console under systemd: commands from init.txt; stop with SIGTERM, which
+# closes the server browser's listing)
+StandardInput=null
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=5
+# (no privileges, nothing writable but the server's folder)
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths=/var/lib/halo-server
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# (a 32-bit program: x86 on a 64-bit PC, armhf on a 64-bit Pi)
+SystemCallArchitectures=native x86 arm
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0027
+MemoryMax=1G
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
