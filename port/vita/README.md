@@ -419,6 +419,49 @@ set by default; name one with `HALO_NET_RELAYS=host:port` in `env.txt` (one
 player naming it is enough; a direct connection is tried first and kept
 whenever it works). The Vita has no UPnP.
 
+**When the server browser is empty.** Its status line (top right) and the
+middle of the list say which of three it is: **Looking for public
+games...** (the brokers being reached, the hosts asked), **Can't reach the
+online game list - check your internet connection** (no broker could be
+reached: Wi-Fi, DNS, a firewall; X (Square) tries again at once), or **No
+public games right now** (the list was reached and holds no game of this
+version; "No public games for this version (2 on another)" when it holds
+games of another network version). Server Setup says **Can't reach the
+online game list** before you start a game that could not be listed. While
+you host, the settings panel's Multiplayer tab says whether your game is
+really listed: **Your code: ABCD-EFGH; Listed on 2 of 3 servers** (as many
+brokers as have acknowledged its listing), **getting listed...**, or **not
+listed: no game list**; your code works either way once one broker is
+reached. A broker whose name cannot be looked up (the Vita's resolver
+fails now and then) is reached at the address it had last time: the game
+keeps the last good address of each broker, STUN server and relay in
+`ux0:data/haloce-vita/data/dns_cache.txt` (only those names; safe to
+delete; `network.resolver_cache_file` in `config.toml`, empty for none).
+
+What `halo.log` says (send it with any report of a missing game):
+- `Internet play: broker <name> ready (MQTT 5 at <address>; carries the public games)`,
+  or `broker <name>: <why>; trying again in N s` (cannot look up its address
+  (and the resolver's reason), cannot connect (refused, unreachable), no
+  answer connecting, closed the connection, disconnected this machine (and
+  the broker's reason), no answer in 10 s (the link dropped)). The same
+  failure is said once every five minutes, with how often it happened since.
+- Hosting: `the game is public: its listing is being published`, then
+  `broker <name> has the listing (acknowledged; ...)` for each broker and
+  `the game is listed in everyone's public games (on 2 of 3 brokers: ...)`
+  only once one has acknowledged it; `the listing is on 1 of 3 brokers now`
+  as that changes, and `the game is not listed: no broker has acknowledged
+  its listing in N s (...)` (every minute) while none has.
+- Browsing: `browsing the public games`, then `browser (summary): N listings
+  heard (R retained, A again), G games shown; dropped ...` (why each one not
+  shown was left out: of another version, stale retained copies and how far
+  apart the clocks were, badly signed, on another's slot, with no name)
+  ten seconds after it opens or is refreshed and every minute while listings
+  come; `browser: new game "<name>" (players, map, gametype) from host
+  <first 8 digits of its key's hash>` and `game closed:` / `game gone` as the
+  list changes; `browser: "<the status line>"` as that changes; and `browser
+  (closing): ...` when it closes. No invite, token or password is ever
+  written there.
+
 What others can see: the public MQTT brokers and STUN servers (third
 parties) see each Vita's public IP address while it plays online, and the
 Vitas it plays with learn it too, as in any peer-to-peer game. Everything

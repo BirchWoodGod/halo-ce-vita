@@ -224,6 +224,8 @@ static struct
 	handed on (the System Link screen then opens) */
 	boolean join_watched;
 	char status[96];
+	/* the browser's message as last logged */
+	char message_logged[128];
 	/* the password screen's */
 	char password[P2P_LOBBY_PASSWORD_SIZE];
 	short password_help;
@@ -495,7 +497,7 @@ static void browser_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
 	struct widget_instance *child, *focused = list->focused_child;
-	char line[96];
+	char line[96], message[128];
 	long index, focused_row = NONE;
 
 	join_watch();
@@ -558,16 +560,48 @@ static void browser_update(struct widget_instance *list)
 	text_show(named(screen, "ticker_players_value"), focused_row != NONE ?
 		menu_functions.entries[focused_row].players_line : "");
 	text_show(named(screen, "ticker_rules_value"), focused_row != NONE ? menu_functions.entries[focused_row].rules : "");
+	/* the status at the top right, and with no game to list, why, in the
+	list's own space (the browser_message line): the brokers out of reach,
+	or reached with no public games (p2p_lobby_browse_status) */
+	message[0] = 0;
 	if (menu_functions.status[0])
 		snprintf(line, sizeof(line), "%s", menu_functions.status);
 	else if (!internet_play())
 		snprintf(line, sizeof(line), "Internet play is off");
-	else if (menu_functions.entry_count)
-		snprintf(line, sizeof(line), "%ld public game%s", menu_functions.entry_count,
-			menu_functions.entry_count == 1 ? "" : "s");
 	else
-		snprintf(line, sizeof(line), "Looking for public games...");
+	{
+		char text[96];
+
+		switch (p2p_lobby_browse_status(text, sizeof(text)))
+		{
+		case P2P_LOBBY_BROWSE_UNREACHABLE:
+			snprintf(line, sizeof(line), "Can't reach the game list");
+			snprintf(message, sizeof(message), "%s", text);
+			break;
+		case P2P_LOBBY_BROWSE_EMPTY:
+			snprintf(line, sizeof(line), "No public games");
+			snprintf(message, sizeof(message), "%s", text);
+			break;
+		case P2P_LOBBY_BROWSE_GAMES:
+			snprintf(line, sizeof(line), "%ld public game%s", menu_functions.entry_count,
+				menu_functions.entry_count == 1 ? "" : "s");
+			break;
+		default:
+			snprintf(line, sizeof(line), "Looking for public games...");
+			break;
+		}
+		if (menu_functions.entry_count)
+			message[0] = 0;
+	}
 	text_show(named(screen, "browser_status"), line);
+	text_show(named(screen, "browser_message"), message);
+	/* (said in the log as it changes) */
+	if (strcmp(message, menu_functions.message_logged))
+	{
+		if (message[0])
+			platform_log("menus: the server browser says \"%s\"", message);
+		snprintf(menu_functions.message_logged, sizeof(menu_functions.message_logged), "%s", message);
+	}
 }
 
 /* the game of a row (by its name, row_<n>), or the focused one */
@@ -680,7 +714,17 @@ static void setup_update(struct widget_instance *list)
 	for (child = list->child; child && child != list->focused_child; child = child->next)
 		row++;
 	string_show(named(screen, "setup_help"), row);
-	text_show(named(screen, "setup_status"), internet_play() ? "" : "Internet play is off");
+	if (!internet_play())
+		text_show(named(screen, "setup_status"), "Internet play is off");
+	else
+	{
+		/* (whether the online game list can be reached, before the game is
+		hosted: p2p_lobby_brokers_status) */
+		char text[96];
+
+		p2p_lobby_brokers_status(text, sizeof(text));
+		text_show(named(screen, "setup_status"), text);
+	}
 }
 
 static boolean setup_start(struct widget_instance *widget)
@@ -783,6 +827,9 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_setup_init:
 		setup_initialize(widget);
+		/* (the brokers reached now, so that Server Setup can say whether
+		the online game list is there) */
+		p2p_lobby_reach_brokers();
 		return TRUE;
 	case _function_setup_edit_name:
 		typing_begin(_typing_lobby_name, "Lobby name", menu_functions.lobby_name, LOBBY_NAME_LENGTH, FALSE);

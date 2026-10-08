@@ -3,6 +3,7 @@
 <menus>
 	<widget name="browser/header" left="35" top="0" width="512" height="64" bitmap="header_server_browser"/>
 	<widget name="browser/browser_status" type="text" left="320" top="62" width="290" height="18" align="right" font="ui\small_ui" color="#FFCCCCCC"/>
+	<widget name="browser/browser_message" type="text" left="30" top="190" width="580" height="18" align="center" font="ui\small_ui" color="#FFE5E500"/>
 	<widget name="browser/header_name" left="32" width="250" string_index="0" type="text" top="85" height="16" string_list="column_headers" font="ui\small_ui" color="#FFFFFFFF"/>
 	<widget name="browser/header_map" left="300" width="105" string_index="1" type="text" top="85" height="16" string_list="column_headers" font="ui\small_ui" color="#FFFFFFFF"/>
 	<widget name="browser/header_game" left="410" width="105" string_index="3" type="text" top="85" height="16" string_list="column_headers" font="ui\small_ui" color="#FFFFFFFF"/>
@@ -139,6 +140,7 @@
 		<child widget="browser/header_game"/>
 		<child widget="browser/header_players"/>
 		<child widget="browser/list"/>
+		<child widget="browser/browser_message"/>
 		<child widget="browser/ticker_players_label"/>
 		<child widget="browser/ticker_rules_label"/>
 		<child widget="browser/ticker_players_value"/>

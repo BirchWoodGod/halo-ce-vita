@@ -156,6 +156,23 @@ int p2p_hosting_code(char *code, int size)
 	return 1;
 }
 
+/* the hosted game's listing as p2p_lobby.c says it (P2P_LOBBY_HOSTING_*) */
+static int hosting_listing = P2P_LOBBY_HOSTING_NONE;
+
+int p2p_lobby_hosting_status(char *text, int size)
+{
+	snprintf(text, (size_t)size, "%s", hosting_listing == P2P_LOBBY_HOSTING_LISTED ? "Listed on 2 of 3 servers" :
+		hosting_listing == P2P_LOBBY_HOSTING_UNREACHABLE ? "Not listed: can't reach the online game list" :
+		hosting_listing == P2P_LOBBY_HOSTING_PENDING ? "Getting listed..." : "");
+	return hosting_listing;
+}
+
+int p2p_lobby_browse_status(char *text, int size)
+{
+	snprintf(text, (size_t)size, "Looking for public games...");
+	return P2P_LOBBY_BROWSE_LOOKING;
+}
+
 void p2p_lobby_set_public(int listed) { lobby_public = listed; }
 void p2p_lobby_set_coop_public(int listed) { lobby_coop_public = listed; }
 void p2p_lobby_browse(int on) { browsing = on; }
@@ -1059,6 +1076,22 @@ static void test_online_rows(void)
 	frame(0);
 	check(strstr(menu, "\n\x04Your code: QX7K-M2PA (public)") != NULL, "hosting online: the Multiplayer tab shows the code");
 	check(menu_fits(), "Multiplayer with internet play: 46 characters a line");
+	/* ... and whether the brokers hold its listing */
+	hosting_listing = P2P_LOBBY_HOSTING_LISTED;
+	clock_us += 5000000;
+	frame(0);
+	check(strstr(menu, "\n\x04Your code: QX7K-M2PA; Listed on 2 of 3 servers") != NULL && menu_fits(),
+		"hosting a listed game: on how many servers");
+	hosting_listing = P2P_LOBBY_HOSTING_UNREACHABLE;
+	clock_us += 5000000;
+	frame(0);
+	check(strstr(menu, "\n\x04Your code: QX7K-M2PA; not listed: no game list") != NULL && menu_fits(),
+		"hosting a public game no broker holds: not listed");
+	hosting_listing = P2P_LOBBY_HOSTING_PENDING;
+	clock_us += 5000000;
+	frame(0);
+	check(strstr(menu, "\n\x04Your code: QX7K-M2PA; getting listed...") != NULL, "being listed: getting listed");
+	hosting_listing = P2P_LOBBY_HOSTING_NONE;
 	hosting = 0;
 	to_tab("Dev");
 	to_line("Save report");
