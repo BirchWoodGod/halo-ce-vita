@@ -255,7 +255,13 @@ Square deletes a map, with its `.bmp` picture and `.txt` description, after
 asking (not the map being played). **PC maps** (Off by default,
 experimental) puts the Custom Edition maps in the map list; the page warns
 when the Custom Edition resource maps they need (`bitmaps.map`,
-`sounds.map`, `loc.map`) are not in the maps folder. **Map downloads**
+`sounds.map`, `loc.map`) are not in the maps folder. A Halo Custom Edition
+installer (`halocesetup*.exe`) copied to `ux0:data/haloce-vita/` gives them:
+the game takes the three from it at start-up, on a thread of its own with
+a progress line (Circle stops it), then asks whether to delete the installer;
+**Extract PC files**, shown on the page while an installer is there and a
+file is missing, does the same (`port/vita/host/vita_ce_installer.c`,
+`port/linux/src/posix_ce_installer.c`). **Map downloads**
 decides what happens when you join a game on a custom map you lack:
 **Ask** (the default) asks whether to download it from the host, and in a
 game joined from the public lobby warns that the host is a stranger (only
