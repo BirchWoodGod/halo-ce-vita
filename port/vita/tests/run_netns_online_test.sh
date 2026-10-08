@@ -4,9 +4,12 @@
 # router (Linux masquerade), reach each other only through internet play:
 # MQTT signalling (port/vita/tests/mqtt_test_broker.py) and STUN
 # (stun_test_server.py) run on a third namespace standing for the internet,
-# at 198.51.100.1. Nothing can reach a public broker or STUN server: the
-# namespaces have no route out. Needs unprivileged user namespaces
-# (unshare -rn), ip and iptables; no root.
+# at 198.51.100.1, with a relay (port/relay) on 47320 that every copy is told
+# of (HALO_NET_RELAYS): the online modes must still connect directly (a relay
+# is used only when there is no direct path: relay mode). Nothing can reach a
+# public broker, STUN server or relay: the namespaces have no route out.
+# Needs unprivileged user namespaces (unshare -rn), ip, iptables and a C
+# compiler (CC, default cc: the relay); no root.
 #
 #   run_netns_online_test.sh MODE
 #
@@ -17,6 +20,11 @@
 #            (p2p_lobby.c); the joiner browses it and joins the first game by
 #            its listing; the host's listing is closed (a tombstone, then the
 #            slot cleared) when it quits
+#   relay    code, with both routers' NAT a symmetric one (every destination a
+#            new random port: MASQUERADE --random-fully), so hole punching
+#            cannot connect them: the two must connect through the relay
+#            alone (never directly) and play; the relay's log must name no
+#            address, and its bytes per second are reported
 #   lobbypw  the same with a password (HALO_TEST_LOBBY_PASSWORD, default
 #            "hunter2"): the game is listed locked, and the joiner opens it
 #            with the password
@@ -157,7 +165,8 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 	in_ns "$router" ip link set "l_$name" master "b_$name"
 	in_ns "$router" ip link set "l_$name" up
 	in_ns "$router" sysctl -qw net.ipv4.ip_forward=1
-	in_ns "$router" iptables -t nat -A POSTROUTING -o "w_$name" -j MASQUERADE
+	# (relay mode: a symmetric NAT, a new random port for every destination)
+	in_ns "$router" iptables -t nat -A POSTROUTING -o "w_$name" -j MASQUERADE $([ "$mode" = relay ] && echo --random-fully)
 	# (a datagram from outside that no mapping expects is dropped unseen, as a
 	# home router does; else the kernel keeps a record of it as a flow to the
 	# router itself, and the machine's own datagram to that peer then gets a
@@ -183,6 +192,14 @@ side join 10.10.2 192.168.2
 python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 \
 	$([ "${HALO_TEST_MQTT311:-0}" = 1 ] && echo --mqtt311) > "$out/broker.log" 2>&1 & pids="$pids $!"
 python3 "$here/stun_test_server.py" --host 198.51.100.1 --port 3478 > "$out/stun.log" 2>&1 & pids="$pids $!"
+# the relay, built from this tree
+relay_pid=
+if ${CC:-cc} -std=c11 -O2 -I"$root/port/third_party/monocypher" -o "$out/halo-relay" "$root/port/relay/main.c" \
+	"$root/port/relay/relay.c" "$root/port/third_party/monocypher/monocypher.c" 2> "$out/relay.build.log"; then
+	"$out/halo-relay" --bind 198.51.100.1 > "$out/relay.log" 2>&1 & relay_pid=$!; pids="$pids $relay_pid"
+else
+	echo "the relay did not build (relay.build.log)"; [ "$mode" = relay ] && exit 2
+fi
 sleep 1
 
 # ---- the copies
@@ -202,7 +219,8 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		HALO_DATA_ROOT="$out/$name/data" HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 \
 		HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 \
 		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false \
-		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 "$@" ${HALO_TEST_ENV:-} \
+		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 HALO_NET_RELAYS=198.51.100.1:47320 \
+		"$@" ${HALO_TEST_ENV:-} \
 		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
@@ -223,7 +241,7 @@ status=0
 fail() { echo "FAIL ($mode): $*"; status=1; }
 
 case $mode in
-code|lobby|lobbypw)
+code|lobby|lobbypw|relay)
 	extra=
 	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
 	[ "$mode" = lobby ] && extra="HALO_NET_HOST_PUBLIC=true"
@@ -233,7 +251,7 @@ code|lobby|lobbypw)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
 	case $mode in
-	code) join_mode="join-code:$code" ;;
+	code|relay) join_mode="join-code:$code" ;;
 	lobby) join_mode=join-public ;;
 	lobbypw) join_mode="join-public:$password" ;;
 	esac
@@ -263,7 +281,24 @@ code|lobby|lobbypw)
 		echo "joiner's seconds with two players after joining again: $again"
 		[ "$again" -ge 10 ] || fail "the joiner did not play again after leaving"
 	fi
-	if [ "$mode" != code ]; then
+	if [ "$mode" = relay ]; then
+		# (through the relay alone: never directly; the relay paired them, and
+		# names no address in its log)
+		kill -TERM "$relay_pid" 2>/dev/null; wait "$relay_pid" 2>/dev/null
+		echo "--- relay"; grep -v "^halo-relay: listening" "$out/relay.log" | head -12
+		grep -aq "Internet play: connected to host [0-9a-f]* at 198\.51\.100\.1:47320, through the relay" "$out/joiner/run.log" ||
+			fail "the joiner did not connect to the host through the relay"
+		grep -aq "Internet play: connected to player [0-9a-f]* at 198\.51\.100\.1:47320, through the relay" "$out/host/run.log" ||
+			fail "the host did not reach the joiner through the relay"
+		grep -aqE "Internet play: (connected to .*, directly|.* is now reached directly)" "$out"/host/run.log "$out"/joiner/run.log &&
+			fail "a direct path connected (the NATs were to stop it)"
+		grep -q "allocation [0-9]* ready" "$out/relay.log" || fail "the relay paired no allocation"
+		grep -qE "(10\.10\.|192\.168\.|198\.51\.100\.)[0-9]" <(grep -v "^halo-relay: listening" "$out/relay.log") &&
+			fail "the relay's log names an address"
+		bytes=$(sed -n 's/^summary: .* packets (\([0-9]*\) B) relayed.*/\1/p' "$out/relay.log" | tail -1)
+		echo "relayed ${bytes:-0} B in ${seconds} s: $(( ${bytes:-0} * 8 / seconds / 1000 )) kbit/s both ways together"
+		[ "${bytes:-0}" -gt 0 ] || fail "the relay carried nothing"
+	elif [ "$mode" != code ]; then
 		# (the listing on the host's slot, at least once; republished every 30 s
 		# and when the game changes, at most every 5 s)
 		sends=$(grep -c 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained qos1' "$out/broker.log")
@@ -666,10 +701,21 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu" >&2
+	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu" >&2
 	exit 2
 	;;
 esac
+# (a relay was there for every online copy: a direct path must still have been
+# taken, but in relay mode)
+if [ "$mode" != relay ]; then
+	for log in "$out"/*/run.log; do
+		grep -aq "Internet play: connected to host" "$log" || continue
+		grep -aq "Internet play: connected to host .*, directly" "$log" ||
+			fail "$(basename "$(dirname "$log")") did not connect to the host directly"
+		grep -aqE "Internet play: (connected to .*|.* is now reached) through the relay" "$log" &&
+			fail "$(basename "$(dirname "$log")") went through the relay although a direct path was there"
+	done
+fi
 grep -aiE "segmentation|assert|crash|fatal" "$out"/*/run.log | grep -v "assertions" | head -5
 [ $status = 0 ] && echo "PASS ($mode)"
 echo "logs in $out"
