@@ -1018,6 +1018,11 @@ short cache_file_read(
 	struct cache_file_request *request = cache_request_get(request_index);
 #endif
 
+#ifdef HALO_LINUX
+	/* (a Custom Edition map's bitmap is read from its own files, with no
+	cached map file open) */
+	if (!custom_edition)
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		269,
