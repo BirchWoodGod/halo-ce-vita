@@ -579,18 +579,36 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 	}
 	memset(&data, 0, sizeof(data));
 	data.lx = data.ly = data.rx = data.ry = 128;
-	sceCtrlPeekBufferPositive(0, &data, 1);
-	pad->buttons = data.buttons;
 	/* a PS TV's first controller is port 1 as well, where an Ext2 read
-	has the DualShock's buttons the Vita has not (L2 R2 L3 R3) */
+	has the DualShock's buttons the Vita has not (L2 R2 L3 R3). With other
+	controllers paired (split screen) it is read there alone: port 0 is
+	the system's port for a game of one player, which may answer to any
+	controller (RetroArch reads a PS TV's players from ports 1 to 4 for
+	that reason), and another player's presses must not be player 1's */
 	if (vita_host_is_pstv() && ports_paired()[1])
 	{
 		SceCtrlData first;
+		int alone = vita_host_pad_extra_connected() != 0;
 
 		memset(&first, 0, sizeof(first));
+		first.lx = first.ly = first.rx = first.ry = 128;
+		if (!alone)
+			sceCtrlPeekBufferPositive(0, &data, 1);
 		if (sceCtrlPeekBufferPositiveExt2(1, &first, 1) > 0)
-			pad->buttons |= vita_controls_ext2_buttons(first.buttons);
+		{
+			data.buttons |= vita_controls_ext2_buttons(first.buttons);
+			if (alone)
+			{
+				data.lx = first.lx;
+				data.ly = first.ly;
+				data.rx = first.rx;
+				data.ry = first.ry;
+			}
+		}
 	}
+	else
+		sceCtrlPeekBufferPositive(0, &data, 1);
+	pad->buttons = data.buttons;
 	pad->lx = data.lx;
 	pad->ly = data.ly;
 	pad->rx = data.rx;
