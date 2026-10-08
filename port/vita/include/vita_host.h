@@ -162,6 +162,17 @@ game, while Back (Select) is held, the D-pad and Y are game chat's (Back +
 Y opens its menu, Back + the D-pad sends a phrase), and in the menus Back
 itself waits for the rest of the combo (menus: the game's menus are up) */
 unsigned long vita_settings_game_buttons(unsigned long buttons, int menus);
+/* split screen (a PS TV's other controllers, 1 to 3; vita_pad.c): each
+frame, the controllers connected (a bit each, 1 << controller), before
+vita_settings_input; then, each frame another controller is read, its
+buttons: nonzero if game chat has them (its own menu open, its combo, or
+held when its menu closed: the game then has none of that controller's),
+else *buttons are those the game has (as vita_settings_game_buttons) */
+void vita_settings_controllers(unsigned long extra_connected);
+int vita_settings_extra_input(int controller, unsigned long *buttons, int menus);
+/* the controller (0 to 3) whose game chat menu is open, -1 if none (or the
+system keyboard is up for its line: every controller waits) */
+int vita_settings_chat_owner(void);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
 void vita_settings_message(const char *title, const char *text);

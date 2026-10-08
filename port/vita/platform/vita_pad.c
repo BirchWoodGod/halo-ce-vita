@@ -198,12 +198,18 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 	static struct vita_controls_state controls_state;
 	struct vita_host_pad pad;
 
+	int taken;
+
 	settings_read();
 	vita_host_pad_read(&pad);
+	/* (split screen: game chat's menu is the controller's that opened it) */
+	vita_settings_controllers(vita_host_pad_extra_connected());
 	/* the settings panel has the buttons (and the touch zones) while it is
-	open; the gyro waits */
-	settings_have_input = vita_settings_input(&pad);
-	if (settings_have_input)
+	open; the gyro waits. The other controllers wait too, but while game
+	chat's menu is open for one of the players, the others play on */
+	taken = vita_settings_input(&pad);
+	settings_have_input = taken && vita_settings_chat_owner() < 0;
+	if (taken)
 	{
 		vita_gyro_accumulate(&gyro_state, &gyro_config, pad.gyro, 0);
 		gamepad->sThumbLX = gamepad->sThumbLY = gamepad->sThumbRX = gamepad->sThumbRY = 0;
@@ -225,8 +231,10 @@ The game's controllers 1 to 3 are a PS TV's other DualShocks (sceCtrl ports
 2 to 4: vita_controls.h), with controller 0's layout and settings (the
 panel's Controls tab; their L2 and R2 are L and R too, L3 and R3 the
 sticks' clicks), no touch zones and no gyro. The settings panel opens only
-from controller 0, and while it is open the others are at rest too. The
-Vita has none: its split screen stays one player. */
+from controller 0, and while it is open the others are at rest too. Game
+chat's Back + Y (and Back + the D-pad) works on each: its menu is that
+player's, who alone moves it while the others play on (vita_settings.c).
+The Vita has none: its split screen stays one player. */
 
 unsigned long vita_pad_extra_connected(void)
 {
@@ -245,6 +253,9 @@ void vita_pad_extra_state(int controller, XINPUT_GAMEPAD *gamepad)
 	}
 	settings_read();
 	pad.touch = 0;
+	/* (game chat: its combo on this controller, or its menu open for it) */
+	if (vita_settings_extra_input(controller, &pad.buttons, vita_menus_active))
+		return;
 	pad_gamepad(&pad, &controls_states[controller], gamepad);
 }
 

@@ -677,7 +677,13 @@ spotted, down Need backup, left Follow me, right On my way). While Back is
 held, the D-pad and Y are chat's, not the game's; in the menus (where Back
 is the Xbox's back) Back itself waits until it is let go or held a while,
 so the combo never reaches the lobby (vita_settings_game_buttons). The
-game sends, checks, limits and shows the lines (port/linux/game/chat.c). */
+game sends, checks, limits and shows the lines (port/linux/game/chat.c).
+
+Split screen (a PS TV's other controllers, vita_pad.c): every controller
+has the combo. The menu is the controller's that opened it ("GAME CHAT -
+PLAYER 2"): it alone moves it, its lines are its player's, and the other
+players play on meanwhile (the system keyboard, while it is up, has them
+all wait). The mutes are the Vita's, any player's menu sets them. */
 
 enum
 {
@@ -708,12 +714,23 @@ enum
 	CHAT_BACK_PASSING,
 	CHAT_BACK_USED,
 };
-static int chat_back;
-static unsigned long long chat_back_since;
+/* each controller's (0 the Vita's, 1 to 3 a PS TV's others) */
+#define CHAT_CONTROLLERS 4
+static int chat_back[CHAT_CONTROLLERS];
+static unsigned long long chat_back_since[CHAT_CONTROLLERS];
 /* frames left of a short press of Back handed to the game late */
-static int chat_back_tap;
+static int chat_back_tap[CHAT_CONTROLLERS];
+/* the controller the menu is open for */
+static int chat_controller;
+/* controllers 1 to 3: their buttons at the last read, and those held when
+their menu closed (the game has none of its buttons until they are let
+go, as held_after_close for controller 0) */
+static unsigned long chat_previous[CHAT_CONTROLLERS], chat_held_after_close[CHAT_CONTROLLERS];
+/* a PS TV's other controllers connected (vita_settings_controllers), a bit
+each (1 << controller) */
+static unsigned long chat_extra_connected;
 
-static void chat_request(int request, int value, const char *text);
+static void chat_request(int controller, int request, int value, const char *text);
 
 /* ---------- modded maps */
 
@@ -2571,7 +2588,9 @@ static int chat_player_count(void)
 static void show_chat(void)
 {
 	char text[1024];
-	int length = snprintf(text, sizeof(text), "GAME CHAT");
+	/* (split screen: whose it is) */
+	int length = chat_controller || chat_extra_connected ? snprintf(text, sizeof(text), "GAME CHAT - PLAYER %d",
+		chat_controller + 1) : snprintf(text, sizeof(text), "GAME CHAT");
 	int row, number = 0, highlighted = 0, muted = 0, index;
 	int wait = chat_status(HALO_CHAT_STATUS_WAIT);
 	int teams = chat_status(HALO_CHAT_STATUS_TEAMS) != 0;
@@ -2641,7 +2660,8 @@ static void show_chat_mute(void)
 	if (length < (int)sizeof(text))
 		snprintf(text + length, sizeof(text) - length, "\n\n%s\n%s: mute or hear   %s: back",
 			chat_status(HALO_CHAT_STATUS_HOST) ? "You host: muted for everyone in your game" :
-			"A muted player's lines are not shown", menu_button('A'), menu_button('B'));
+			chat_extra_connected ? "Muted for every player on this system" : "A muted player's lines are not shown",
+			menu_button('A'), menu_button('B'));
 	vgxm_menu_set(text, count ? chat_mute_selected - chat_mute_scroll + 1 : 0);
 }
 
@@ -2790,11 +2810,19 @@ static void close_panel(void)
 {
 	if (screen == SCREEN_BROWSE)
 		p2p_lobby_browse(0);
+	/* (another controller's chat menu: its buttons held now are not its
+	game's; controller 0 plays on) */
+	if ((screen == SCREEN_CHAT || screen == SCREEN_CHAT_MUTE) && chat_controller > 0 &&
+		chat_controller < CHAT_CONTROLLERS)
+	{
+		chat_held_after_close[chat_controller] = chat_previous[chat_controller];
+	}
+	else
+		held_after_close = previous_buttons;
 	panel_open = 0;
 	screen = SCREEN_LIST;
 	/* (it opens again on the tab's own page) */
 	page = tab;
-	held_after_close = previous_buttons;
 	vgxm_menu_set(NULL, 0);
 }
 
@@ -3327,7 +3355,7 @@ static int ime_input(void)
 		chat_typing = 0;
 		if (result > 0 && typed[0] && chat_available())
 		{
-			chat_request(HALO_CHAT_REQUEST_TYPED, 0, typed);
+			chat_request(chat_controller, HALO_CHAT_REQUEST_TYPED, 0, typed);
 			close_panel();
 			return 1;
 		}
@@ -3412,7 +3440,7 @@ static int game_text_input(void)
 
 /* a request to the game (chat_link.h), taken at its next frame (one a
 frame: a second is dropped) */
-static void chat_request(int request, int value, const char *text)
+static void chat_request(int controller, int request, int value, const char *text)
 {
 	char line[96];
 
@@ -3421,17 +3449,20 @@ static void chat_request(int request, int value, const char *text)
 	snprintf(halo_chat_request_text, sizeof(halo_chat_request_text), "%s", text ? text : "");
 	halo_chat_request_value = value;
 	halo_chat_request_team = chat_team && chat_status(HALO_CHAT_STATUS_TEAMS);
+	halo_chat_request_controller = controller >= 0 && controller < CHAT_CONTROLLERS ? controller : 0;
 	__atomic_store_n(&halo_chat_request, request, __ATOMIC_RELEASE);
-	snprintf(line, sizeof(line), "settings: chat %s%s", request == HALO_CHAT_REQUEST_QUICK ? "phrase" :
+	snprintf(line, sizeof(line), "settings: chat %s%s%s", request == HALO_CHAT_REQUEST_QUICK ? "phrase" :
 		request == HALO_CHAT_REQUEST_TYPED ? "line" : request == HALO_CHAT_REQUEST_MUTE ? "mute" : "unmute",
-		halo_chat_request_team ? " to the team" : "");
+		halo_chat_request_team ? " to the team" : "", halo_chat_request_controller == 1 ? " (player 2)" :
+		halo_chat_request_controller == 2 ? " (player 3)" : halo_chat_request_controller == 3 ? " (player 4)" : "");
 	vita_host_log(line);
 }
 
-static void chat_open(void)
+static void chat_open(int controller)
 {
 	panel_open = 1;
 	screen = SCREEN_CHAT;
+	chat_controller = controller;
 	chat_selected = 0;
 	if (!chat_status(HALO_CHAT_STATUS_TEAMS))
 		chat_team = 0;
@@ -3471,7 +3502,7 @@ static void chat_input(unsigned long pressed, unsigned long buttons, unsigned lo
 	{
 		if (chat_selected < HALO_CHAT_PHRASE_COUNT)
 		{
-			chat_request(HALO_CHAT_REQUEST_QUICK, chat_selected, NULL);
+			chat_request(chat_controller, HALO_CHAT_REQUEST_QUICK, chat_selected, NULL);
 			close_panel();
 		}
 		else if (chat_selected == CHAT_ROW_TYPE)
@@ -3507,14 +3538,15 @@ static void chat_mute_input(unsigned long pressed)
 	else if ((pressed & VITA_BUTTON_DOWN) && count)
 		chat_mute_selected = (chat_mute_selected + 1) % count;
 	else if ((pressed & VITA_BUTTON_CROSS) && chat_mute_selected < count)
-		chat_request(halo_chat_player_muted[chat_mute_selected] ? HALO_CHAT_REQUEST_UNMUTE : HALO_CHAT_REQUEST_MUTE, 0,
+		chat_request(chat_controller,
+			halo_chat_player_muted[chat_mute_selected] ? HALO_CHAT_REQUEST_UNMUTE : HALO_CHAT_REQUEST_MUTE, 0,
 			halo_chat_player_names[chat_mute_selected]);
 }
 
 /* (the panel closed) Back and Y, or a direction of the D-pad: the menu
 opens, or a phrase goes at once; nonzero if so (the game then has none of
 this frame's buttons) */
-static int chat_combo(unsigned long buttons, unsigned long pressed)
+static int chat_combo(int controller, unsigned long buttons, unsigned long pressed)
 {
 	static const unsigned long directions[4] = { VITA_BUTTON_UP, VITA_BUTTON_DOWN, VITA_BUTTON_LEFT, VITA_BUTTON_RIGHT };
 	int index;
@@ -3523,58 +3555,125 @@ static int chat_combo(unsigned long buttons, unsigned long pressed)
 		return 0;
 	if (pressed & VITA_BUTTON_TRIANGLE)
 	{
-		chat_back = CHAT_BACK_USED;
-		chat_open();
+		chat_back[controller] = CHAT_BACK_USED;
+		chat_open(controller);
+		/* (its buttons now are no presses in the menu) */
+		chat_previous[controller] = buttons;
 		return 1;
 	}
 	for (index = 0; index < 4; index++)
 		if (pressed & directions[index])
 		{
-			chat_back = CHAT_BACK_USED;
-			chat_request(HALO_CHAT_REQUEST_QUICK, chat_dpad_phrases[index], NULL);
+			chat_back[controller] = CHAT_BACK_USED;
+			chat_request(controller, HALO_CHAT_REQUEST_QUICK, chat_dpad_phrases[index], NULL);
 			return 1;
 		}
 	return 0;
 }
 
-unsigned long vita_settings_game_buttons(unsigned long buttons, int menus)
+/* a controller's buttons the game has, its Back in the combo held back */
+static unsigned long chat_game_buttons(int controller, unsigned long buttons, int menus)
 {
 	if (!chat_available())
 	{
-		chat_back = CHAT_BACK_IDLE;
-		chat_back_tap = 0;
+		chat_back[controller] = CHAT_BACK_IDLE;
+		chat_back_tap[controller] = 0;
 		return buttons;
 	}
 	if (buttons & VITA_BUTTON_SELECT)
 	{
 		/* (while Back is held, the D-pad and Y are chat's) */
 		buttons &= ~(VITA_BUTTON_UP | VITA_BUTTON_DOWN | VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_TRIANGLE);
-		if (chat_back == CHAT_BACK_IDLE)
+		if (chat_back[controller] == CHAT_BACK_IDLE)
 		{
-			chat_back = menus ? CHAT_BACK_WAITING : CHAT_BACK_PASSING;
-			chat_back_since = now_us();
+			chat_back[controller] = menus ? CHAT_BACK_WAITING : CHAT_BACK_PASSING;
+			chat_back_since[controller] = now_us();
 		}
-		if (chat_back == CHAT_BACK_WAITING && now_us() - chat_back_since > CHAT_BACK_WAIT_US)
-			chat_back = CHAT_BACK_PASSING;
+		if (chat_back[controller] == CHAT_BACK_WAITING && now_us() - chat_back_since[controller] > CHAT_BACK_WAIT_US)
+			chat_back[controller] = CHAT_BACK_PASSING;
 		/* (in play Back stays the scoreboard; in the menus a Back that
 		was part of the combo is never the game's) */
-		if (chat_back == CHAT_BACK_WAITING || (chat_back == CHAT_BACK_USED && menus))
+		if (chat_back[controller] == CHAT_BACK_WAITING || (chat_back[controller] == CHAT_BACK_USED && menus))
 			buttons &= ~VITA_BUTTON_SELECT;
 	}
 	else
 	{
 		/* (a short press of Back in the menus, which waited: the game has
 		it now, for a few frames) */
-		if (chat_back == CHAT_BACK_WAITING)
-			chat_back_tap = 3;
-		chat_back = CHAT_BACK_IDLE;
+		if (chat_back[controller] == CHAT_BACK_WAITING)
+			chat_back_tap[controller] = 3;
+		chat_back[controller] = CHAT_BACK_IDLE;
 	}
-	if (chat_back_tap > 0)
+	if (chat_back_tap[controller] > 0)
 	{
-		chat_back_tap--;
+		chat_back_tap[controller]--;
 		buttons |= VITA_BUTTON_SELECT;
 	}
 	return buttons;
+}
+
+unsigned long vita_settings_game_buttons(unsigned long buttons, int menus)
+{
+	return chat_game_buttons(0, buttons, menus);
+}
+
+/* whether game chat's menu is open for another controller than the Vita's
+(the keyboard's line not being typed) */
+static int chat_menu_is_other_controllers(void)
+{
+	return panel_open && (screen == SCREEN_CHAT || screen == SCREEN_CHAT_MUTE) && chat_controller > 0;
+}
+
+int vita_settings_chat_owner(void)
+{
+	return panel_open && (screen == SCREEN_CHAT || screen == SCREEN_CHAT_MUTE) && !chat_typing ? chat_controller : -1;
+}
+
+void vita_settings_controllers(unsigned long extra_connected)
+{
+	chat_extra_connected = extra_connected & 0x0EUL;
+	/* (the controller whose menu is open switched off: it closes) */
+	if (chat_menu_is_other_controllers() && !chat_typing && !(chat_extra_connected & (1UL << chat_controller)))
+	{
+		chat_held_after_close[chat_controller] = 0;
+		close_panel();
+	}
+}
+
+int vita_settings_extra_input(int controller, unsigned long *buttons, int menus)
+{
+	unsigned long held = *buttons, pressed;
+	unsigned long long now = now_us();
+
+	if (controller < 1 || controller >= CHAT_CONTROLLERS)
+		return 0;
+	pressed = held & ~chat_previous[controller];
+	chat_previous[controller] = held;
+	chat_held_after_close[controller] &= held;
+	if (!(held & VITA_BUTTON_SELECT) && chat_back[controller] != CHAT_BACK_WAITING)
+		chat_back[controller] = CHAT_BACK_IDLE;
+	/* (its own menu: it alone moves it) */
+	if (chat_menu_is_other_controllers() && chat_controller == controller)
+	{
+		if (!chat_available())
+			close_panel();
+		else if (!chat_typing)
+		{
+			if (screen == SCREEN_CHAT)
+				chat_input(pressed, held, now);
+			else
+				chat_mute_input(pressed);
+			if (panel_open && !chat_typing && (pressed || now - last_shown > 500000))
+				show();
+		}
+		return 1;
+	}
+	if (chat_held_after_close[controller])
+		return 1;
+	if (!panel_open && chat_combo(controller, held, pressed))
+		return 1;
+	*buttons = chat_game_buttons(controller, held, menus);
+	return 0;
 }
 
 /* to the next tab shown, or the one before */
@@ -3605,8 +3704,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	/* (game chat's Back let go, while the panel had the buttons too: the
 	next press of Back is a new one; one that waited keeps waiting for
 	vita_settings_game_buttons to hand it to the game) */
-	if (!(buttons & VITA_BUTTON_SELECT) && chat_back != CHAT_BACK_WAITING)
-		chat_back = CHAT_BACK_IDLE;
+	if (!(buttons & VITA_BUTTON_SELECT) && chat_back[0] != CHAT_BACK_WAITING)
+		chat_back[0] = CHAT_BACK_IDLE;
 	if (held_after_close && !panel_open)
 		return 1;
 	/* (the system's ad hoc dialog reads the pad itself: the game must not
@@ -3675,12 +3774,12 @@ int vita_settings_input(const struct vita_host_pad *pad)
         return 1;
     }
 	/* (Back and Y, or the D-pad: game chat) */
-	if (!panel_open && chat_combo(buttons, pressed))
+	if (!panel_open && chat_combo(0, buttons, pressed))
 		return 1;
 	if (both)
 	{
 		/* (a Back that waited for game chat's combo was this one's) */
-		chat_back = CHAT_BACK_USED;
+		chat_back[0] = CHAT_BACK_USED;
 		if (!both_since)
 			both_since = now;
 		/* held for 0.8 s: the panel opens or closes, once per hold */
@@ -3736,6 +3835,9 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		/* (closed when the game is left, or chat turned Off) */
 		if (!chat_available())
 			close_panel();
+		/* (another controller's menu, which moves it: this one plays on) */
+		else if (chat_controller > 0)
+			return 0;
 		else if (screen == SCREEN_CHAT)
 			chat_input(pressed, buttons, now);
 		else

@@ -391,6 +391,15 @@ not sent. The host's Game chat setting holds for its whole game: with
 Quick chat only nobody can type, with Off nobody can chat, and a player who
 tries is told so.
 
+With split screen on a PS TV, every player chats with their own
+controller: Back + Y opens *their* menu (GAME CHAT - PLAYER 2), which only
+their controller moves while the others play on, and their lines go out
+under their own name. In the game each player's part of the screen shows
+the lines for everyone, their own team's lines and their own notices (a
+wait, a refusal); in the lobby the lines show once, across the screen.
+Mutes are the PS TV's, not one player's: everyone at the screen reads the
+same lines, so a player muted by anyone is muted for all of you.
+
 The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
