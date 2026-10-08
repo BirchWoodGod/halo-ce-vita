@@ -458,6 +458,14 @@ static void structure_visibility_traverse_subclusters(
 				(short)surface_list_index < subcluster->surface_indices.count;
 				surface_index_buffer++, surface_list_index++)
 			{
+				/* port (from OpenCE, "Harden map and network input"): a surface
+				index (from the map) that is no surface is skipped - it set a
+				bit far outside the render's surface flags (found by the map
+				fuzzer) */
+				if ((unsigned long)*surface_index_buffer >= (unsigned long)structure->surfaces.count)
+				{
+					continue;
+				}
 				if (!BIT_VECTOR_TEST_FLAG(render.environment_surface_flags, *surface_index_buffer))
 				{
 					if (render.environment_surface_count >= MAXIMUM_RENDERED_ENVIRONMENT_SURFACES)
@@ -526,6 +534,12 @@ static void structure_visibility_traverse_surface_lists(
 					"c:\\halo\\SOURCE\\structures\\structure_visibility.c",
 					0x1A0,
 					surface_index_buffer-(long *) cluster->surface_indices.address<=cluster->surface_indices.count);
+				/* port: (as in structure_visibility_traverse_subclusters) */
+				if ((unsigned long)surface_index >= (unsigned long)structure->surfaces.count)
+				{
+					consumed_surface_index_count++;
+					continue;
+				}
 				if (!BIT_VECTOR_TEST_FLAG(render.environment_surface_flags, surface_index))
 				{
 					struct structure_visibility_surface *surface = TAG_BLOCK_GET_ELEMENT(
