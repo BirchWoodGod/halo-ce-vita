@@ -1669,6 +1669,14 @@ static struct interpolated_object *interpolated_object_get(long object_index)
 	}
 	blended = blend_matrices + latest_entry->first_matrix;
 	snap = !previous_entry || previous_entry->node_count != latest_entry->node_count || interpolation_blend >= 1.0f;
+	/* (an object that stood still between the two: drawn as it is, no
+	blend - most of a level's moving kinds stand still most ticks) */
+	if (!snap && !correction_significant(&latest_entry->shift) &&
+		!memcmp(previous->matrices + previous_entry->first_matrix, latest_nodes,
+			latest_entry->node_count * sizeof(real_matrix4x3)))
+	{
+		snap = TRUE;
+	}
 	if (!snap)
 	{
 		real_matrix4x3 const *previous_nodes = previous->matrices + previous_entry->first_matrix;
