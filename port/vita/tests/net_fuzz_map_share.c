@@ -47,7 +47,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size, struct ma
 
 		memset(&answer, 0, sizeof(answer));
 		memcpy(&answer, data, (size_t)(size < (int)sizeof(answer) ? size : (int)sizeof(answer)));
-		if (map_share_answer_valid(&answer, "fuzzmap", 0x1234) && answer.kind == _map_share_answer_offer &&
+		if (map_share_answer_valid(&answer, "fuzzmap", 0x1234, (1u << NUMBER_OF_MAP_SHARE_CAPABILITIES) - 1) && answer.kind == _map_share_answer_offer &&
 			(answer.size < MAP_SHARE_HEADER_BYTES || (uint32_t)answer.size > MAP_SHARE_MAXIMUM_FILE_BYTES))
 		{
 			abort();
@@ -75,7 +75,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size, struct ma
 		/* (the message's whole buffer, as decoded, whatever its length says) */
 		memset(chunk, 0, sizeof(chunk));
 		memcpy(chunk, data + 8, (size_t)(size - 8 < (int)sizeof(chunk) ? size - 8 : (int)sizeof(chunk)));
-		if (map_share_receiver_accept(receiver, offset, length, chunk) == _map_share_chunk_ok &&
+		if (map_share_receiver_accept(receiver, offset, length, chunk, NULL, NULL) == _map_share_chunk_ok &&
 			(receiver->received != received + (uint32_t)length || receiver->received > receiver->size))
 		{
 			abort();

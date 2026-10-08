@@ -801,6 +801,8 @@ static boolean network_game_client_late_join_clock_pending;
 /* whether the automated tests' join has told the player why a host cannot
 be joined (network_game_client_join_first_available_game) */
 static boolean network_game_client_incompatibility_told;
+/* ... and that the game it found is full */
+static boolean network_game_client_full_told;
 
 /* when each controller last asked the host for its player in the pregame
 (network_game_client_add_player): the pregame screen asks every frame, and
@@ -2521,6 +2523,15 @@ void network_game_client_rejected_by_game(
 		"unable to join game: reason= #%d/%s",
 		rejection_code,
 		reason);
+#ifdef HALO_LINUX
+	/* port: a full game says so in words (the game's own error, below, is
+	the one for a closed game) */
+	if (rejection_code == _rejection_code_game_is_full)
+	{
+		platform_show_message("Halo: cannot join this game",
+			"The game is full: it has as many players as its host allows. Try another game.");
+	}
+#endif
 	/* port: the join went to the pregame screen at once (and a machine
 	refused a game in progress, network_game_server_refuse_late_joiner, is in
 	it): with no game behind it, it is left for the main menu, which says
@@ -3290,6 +3301,20 @@ version is this machine's (HALO_PORT_NETWORK_VERSION), and it plays the
 distributed netcode (a host of this version built before the lockstep
 netcode was removed may play that). If not the player is told why (when
 tell), and nothing is joined. */
+boolean network_game_client_advertised_game_full(
+	struct network_advertised_game const *game,
+	boolean tell)
+{
+	boolean full = game && game->maximum_player_count > 0 && game->player_count >= (word)game->maximum_player_count;
+
+	if (full && tell)
+	{
+		platform_show_message("Halo: cannot join this game",
+			"The game is full: it has as many players as its host allows. Try another game.");
+	}
+	return full;
+}
+
 boolean network_game_client_advertised_game_compatible(
 	struct network_game_client *client,
 	struct network_advertised_game const *game,
@@ -3379,6 +3404,13 @@ boolean network_game_client_join_first_available_game(
 	{
 		struct network_advertised_game *game = &client->available_games[game_index];
 
+		/* (a full game, as picking it in the list: the player is told, once) */
+		if (network_game_client_advertised_game_is_valid(game) &&
+			game->platform == network_game_get_local_platform() && !game->open &&
+			network_game_client_advertised_game_full(game, !network_game_client_full_told))
+		{
+			network_game_client_full_told = TRUE;
+		}
 		if (network_game_client_advertised_game_is_valid(game) &&
 			game->platform == network_game_get_local_platform() && game->open)
 		{
@@ -3399,6 +3431,14 @@ boolean network_game_client_join_first_available_game(
 			if (!address.address.long_words[0] || !address.port)
 				return FALSE;
 			network_game_generate_join_game_token(join_parameters.join_token);
+			{
+				char name[NETWORK_GAME_NAME_LENGTH];
+
+				wide_to_ascii(game->game_name, name, NETWORK_GAME_NAME_LENGTH);
+				name[NETWORK_GAME_NAME_LENGTH - 1] = 0;
+				network_event("joining the game '%s' (%d of %d players)", name, (int)game->player_count,
+					(int)game->maximum_player_count);
+			}
 			return network_game_client_initiate_join_game(client, game, &join_parameters, &address);
 		}
 	}

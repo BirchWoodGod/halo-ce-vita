@@ -1142,6 +1142,10 @@ boolean network_game_client_advertised_game_compatible(
 	void *client,
 	void const *game,
 	boolean tell);
+/* ... and whether it is full (the player is told so) */
+boolean network_game_client_advertised_game_full(
+	void const *game,
+	boolean tell);
 #endif
 void *network_game_get_game(
 	void);
@@ -2116,6 +2120,10 @@ static boolean network_game_join_game_from_server_list(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					/* port: a full game (closed in the list) says so */
+					network_game_client_advertised_game_full(server, TRUE);
+#endif
 					error(2, "attempted to join a closed game");
 					ui_play_audio_feedback_sound(4);
 				}
@@ -3422,6 +3430,14 @@ static boolean player_profile_color_picker_menu_initialize(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* port: the level and difficulty co-op was last hosted on from the
+difficulty list (ui_widget_port_cooperative_campaign_host): B in its lobby
+comes back to the list on that difficulty, not the default */
+static char difficulty_menu_cooperative_map[128];
+static short difficulty_menu_cooperative_difficulty = NONE;
+#endif
+
 static boolean difficulty_menu_initialize(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -3431,6 +3447,19 @@ static boolean difficulty_menu_initialize(
 
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 4860,
 		widget->type == 3, "expected column list for difficulty menu widget");
+#ifdef HALO_LINUX
+	if (difficulty_menu_cooperative_difficulty != NONE &&
+		_stricmp(difficulty_menu_cooperative_map, main_get_map_name()) == 0)
+	{
+		difficulty_widget = widget_instance_get_nth_child(widget, difficulty_menu_cooperative_difficulty);
+		if (difficulty_widget)
+		{
+			widget->data3C.selected_index = difficulty_menu_cooperative_difficulty;
+			widget->focused_child = difficulty_widget;
+			return TRUE;
+		}
+	}
+#endif
 	if (persistant_game_data_info.valid == TRUE &&
 		_stricmp(persistant_game_data_info.map_name, main_get_map_name()) == 0)
 	{
@@ -6160,6 +6189,9 @@ boolean ui_widget_port_cooperative_campaign_host(
 
 		platform_log("co-op: hosting %s on difficulty %d from the campaign's menus", map_name, difficulty);
 	}
+	csstrncpy(difficulty_menu_cooperative_map, map_name, sizeof(difficulty_menu_cooperative_map) - 1);
+	difficulty_menu_cooperative_map[sizeof(difficulty_menu_cooperative_map) - 1] = 0;
+	difficulty_menu_cooperative_difficulty = difficulty;
 #endif
 	return TRUE;
 }

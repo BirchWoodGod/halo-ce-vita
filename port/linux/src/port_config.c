@@ -91,6 +91,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_rejoin", _config_real, "0.0", "HALO_NETWORK_TEST_REJOIN", _environment_value, _platform_all,
 		"Seconds into an automated test game after which a joining machine leaves\n"
 		"it (as quitting from the pause menu does) and joins again, once; 0 never." },
+	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
+		"Times a joining machine of an automated test whose join ended before its\n"
+		"game began (a map download cut off, refused) joins again; 0 never." },
 	{ "debug.network_test_pickup_weapon", _config_string, "\"\"", "HALO_NETWORK_TEST_PICKUP_WEAPON", _environment_value,
 		_platform_all,
 		"The weapon network_test_pickup stands the player on: the first whose tag\n"
@@ -170,17 +173,28 @@ static const struct config_setting config_settings[] =
 		"networks whose NAT stops connections: when a player joins this\n"
 		"machine's game, and when joining a game takes too long. False never\n"
 		"asks." },
-	{ "network.signalling_brokers", _config_string,
-		"\"broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883\"",
-		"HALO_NET_BROKERS", _environment_value, _platform_all,
-		"Public MQTT brokers through which the machines of an invite find each\n"
-		"other (its messages are encrypted); comma-separated host:port." },
+	{ "network.brokers_file", _config_string,
+#ifdef HALO_VITA
+		"\"app0:brokers.txt\"",
+#else
+		"\"brokers.txt\"",
+#endif
+		"HALO_NET_BROKERS_FILE", _environment_value, _platform_all,
+		"The file of the public MQTT brokers through which the machines of an\n"
+		"invite find each other (its messages are encrypted) and the server\n"
+		"browser's listings go, beside this file unless a full path (on the\n"
+		"Vita, the one in the game's package): one host:port on each line, up\n"
+		"to 4. Updates replace brokers.txt: keep a list of your own under\n"
+		"another name." },
+	{ "network.signalling_brokers", _config_string, "\"\"", "HALO_NET_BROKERS", _environment_value, _platform_all,
+		"Comma-separated host:port brokers in place of network.brokers_file's\n"
+		"(the automated tests' own); empty for the file's." },
 	{ "network.coop_level", _config_string, "\"\"", "HALO_NET_COOP_LEVEL", _environment_value, _platform_all,
 		"Co-op over the network: a campaign level's short name (\"a10\" ...\n"
 		"\"d40\") makes every game this machine hosts co-op on that level, its\n"
 		"next round the campaign's next level; empty hosts the lobby's\n"
-		"multiplayer game. The Vita's settings panel (Multiplayer, Co-op\n"
-		"campaign) sets it." },
+		"multiplayer game. For tests: the Vita hosts co-op from the Campaign\n"
+		"menu (Y on the difficulty screen)." },
 	{ "network.coop_difficulty", _config_integer, "1", "HALO_NET_COOP_DIFFICULTY", _environment_value, _platform_all,
 		"The difficulty of the co-op games this machine hosts (network.coop_level):\n"
 		"0 easy, 1 normal, 2 heroic, 3 legendary." },
@@ -215,13 +229,33 @@ static const struct config_setting config_settings[] =
 		"group (the Vita's wireless group without a router, joined from its\n"
 		"settings panel), carried as internet play carries it, with or without\n"
 		"network.online; nothing goes to the internet." },
-	{ "network.lobby_public", _config_boolean, "false", "HALO_NET_LOBBY_PUBLIC", _environment_value, _platform_all,
-		"List the games this machine hosts in internet play's public lobby, where\n"
-		"anyone can find and join them; false keeps them to those with the\n"
-		"invite link or its short code." },
+	{ "network.host_public", _config_boolean, "true", "HALO_NET_HOST_PUBLIC", _environment_value, _platform_all,
+		"Whether a game this machine hosts for internet play is public (listed in\n"
+		"everyone's server browser: anyone can find and join it) or, false,\n"
+		"private (only those with its code or invite link can join); the Vita's\n"
+		"settings panel says for each game (OpenCE's setting)." },
+	{ "network.coop_public", _config_boolean, "false", "HALO_NET_COOP_PUBLIC", _environment_value, _platform_all,
+		"Whether a co-op game this machine hosts for internet play is public\n"
+		"(listed in everyone's server browser) or, false, private, until the\n"
+		"settings panel says (network.host_public: the other games')." },
+	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
+		"The server browser: public games are listed through the signalling\n"
+		"brokers, and the settings panel's Browse public games shows them.\n"
+		"False lists no game of this machine's and shows none." },
 	{ "network.lobby_name", _config_string, "\"\"", "HALO_NET_LOBBY_NAME", _environment_value, _platform_all,
-		"The name the public lobby shows for this machine's games; empty for\n"
-		"\"Halo\"." },
+		"The name the server browser and the System Link list show for this\n"
+		"machine's games (printable ASCII, the first 15 characters in the\n"
+		"System Link list); empty for the game's own name (else \"Halo\"). The\n"
+		"Vita's settings panel (Multiplayer, Play, Lobby name) sets it." },
+	{ "network.max_players", _config_integer, "0", "HALO_NET_MAX_PLAYERS", _environment_value, _platform_all,
+		"The most players a game this machine hosts takes (2 to the build's\n"
+		"maximum; 0 for the build's maximum). A co-op game takes\n"
+		"network.coop_players. The Vita's settings panel (Multiplayer, Play,\n"
+		"Max players) sets it." },
+	{ "network.lobby_password", _config_string, "\"\"", "HALO_NET_LOBBY_PASSWORD", _environment_value, _platform_all,
+		"A password for the public games this machine hosts: the server browser\n"
+		"lets only those who know it join (the code and invite link still do);\n"
+		"empty for none." },
 	{ "network.map_downloads", _config_string, "\"ask\"", "HALO_MAP_SHARE_FROM", _environment_value, _platform_all,
 		"A host's custom map, in a game joined without it: \"ask\" asks whether\n"
 		"to download it (in a game joined from the public lobby, with a warning:\n"
@@ -358,6 +392,21 @@ static void config_path(char *path, size_t size)
 
 	snprintf(path, size, "%sconfig.toml", base ? base : "");
 #endif
+}
+
+/* the folder config.toml is in, with its separator */
+void config_folder(char *path, size_t size)
+{
+	char *end;
+
+	config_path(path, size);
+	end = strrchr(path, '/');
+	if (!end)
+		end = strrchr(path, '\\');
+	if (end)
+		end[1] = 0;
+	else
+		path[0] = 0;
 }
 
 /* the whole file, NUL terminated, or NULL; free() it */
@@ -970,6 +1019,11 @@ long config_integer(const char *name)
 double config_real(const char *name)
 {
 	return config_value(name, _config_real)->real;
+}
+
+char *config_file_read(const char *path, size_t *size)
+{
+	return config_read_file(path, size);
 }
 
 const char *config_string(const char *name)
