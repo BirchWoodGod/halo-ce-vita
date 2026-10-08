@@ -144,6 +144,9 @@ typedef char verify_xbox_game_state_globals_prefix_size[
 
 /* ---------- prototypes */
 
+static void game_state_header_terminate(
+	void *header,
+	long header_size);
 static HANDLE game_state_open_persistent_storage(
 	const char *directory);
 #ifdef HALO_LINUX
@@ -646,6 +649,7 @@ boolean game_state_read_from_file(
 {
 	unsigned long bytes_read;
 	boolean result = FALSE;
+	void *image;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
@@ -662,7 +666,7 @@ boolean game_state_read_from_file(
 
 #ifdef HALO_LINUX
 	/* (the last checkpoint's copy holds what the file would give back:
-	above) */
+	above; this build's own, taken without a check) */
 	if (game_state_writer.snapshot_valid)
 	{
 #ifdef HALO_VITA
@@ -675,11 +679,22 @@ boolean game_state_read_from_file(
 	game_state_writer_wait();
 #endif
 
-	if (SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
+	/* port (from OpenCE, MrBruh's "Third hardening round"): the file is
+	read beside the game state, and taken once checked
+	(game_state_image_accept): into the checkpoint copy when there is one
+	(not valid: above), so that no more memory is needed */
+#ifdef HALO_LINUX
+	image = game_state_writer.snapshot ? game_state_writer.snapshot : malloc(xbox_game_state_globals.buffer_size);
+#else
+	image = malloc(xbox_game_state_globals.buffer_size);
+#endif
+	if (image &&
+		SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
 			INVALID_SET_FILE_POINTER &&
-		ReadFile(xbox_game_state_globals.handle, xbox_game_state_globals.buffer,
+		ReadFile(xbox_game_state_globals.handle, image,
 			xbox_game_state_globals.buffer_size, &bytes_read, NULL) &&
-		bytes_read == xbox_game_state_globals.buffer_size)
+		bytes_read == xbox_game_state_globals.buffer_size &&
+		game_state_image_accept(image, xbox_game_state_globals.buffer_size))
 	{
 		result = TRUE;
 	}
@@ -691,6 +706,10 @@ boolean game_state_read_from_file(
 			FALSE,
 			csprintf(temporary, "couldn't read saved game file (#%d)", GetLastError()));
 	}
+#ifdef HALO_LINUX
+	if (image != game_state_writer.snapshot)
+#endif
+		free(image);
 
 	return result;
 }
@@ -740,6 +759,7 @@ boolean game_state_read_core_header(
 		if (ReadFile(file, header, header_size, &bytes_read, NULL) &&
 			bytes_read == header_size)
 		{
+			game_state_header_terminate(header, header_size);
 			result = TRUE;
 		}
 	}
@@ -757,17 +777,23 @@ void game_state_read_core(
 	HANDLE file;
 	unsigned long bytes_read;
 
+	void *image = malloc(buffer_size);
+
 	sprintf(path, "d:\\core\\%s", name);
 	file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
 		NULL);
+	/* port: read beside the game state, and taken once checked */
 	match_vassert(
 		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 		226,
-		file != INVALID_HANDLE_VALUE &&
-			ReadFile(file, buffer, buffer_size, &bytes_read, NULL) &&
-			bytes_read == buffer_size,
+		image && file != INVALID_HANDLE_VALUE &&
+			ReadFile(file, image, buffer_size, &bytes_read, NULL) &&
+			bytes_read == buffer_size &&
+			game_state_image_accept(image, buffer_size),
 		"game state has been corrupted (thank you, come again)");
+	(void)buffer;
 	CloseHandle(file);
+	free(image);
 
 	return;
 }
@@ -887,6 +913,21 @@ static HANDLE game_state_open_persistent_storage(
 	return success ? file : INVALID_HANDLE_VALUE;
 }
 
+/* port: the strings of a header read from a file end in it (the file is
+anyone's) */
+static void game_state_header_terminate(
+	void *header,
+	long header_size)
+{
+	if (header_size == sizeof(struct game_state_header))
+	{
+		struct game_state_header *game_state_header = header;
+
+		game_state_header->map_name[NUMBEROF(game_state_header->map_name) - 1] = 0;
+		game_state_header->build_number[NUMBEROF(game_state_header->build_number) - 1] = 0;
+	}
+}
+
 boolean game_state_read_header_from_persistent_storage(
 	void *header,
 	unsigned long *header_checksum,
@@ -939,6 +980,7 @@ boolean game_state_read_header_from_persistent_storage(
 			!ReadFile(file, header, header_size, &bytes_read, NULL) ||
 			bytes_read != header_size)
 		{
+			game_state_header_terminate(header, header_size);
 			match_vassert(
 				"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 				298,
@@ -983,6 +1025,7 @@ boolean game_state_read_header_from_persistent_storage(
 				return result;
 			}
 #endif
+			game_state_header_terminate(header, header_size);
 			stored_checksum = *header_checksum;
 
 			crc_new(&checksum);
@@ -1118,9 +1161,14 @@ void game_state_read_from_persistent_storage(
 	file = game_state_open_persistent_storage(NULL);
 	if (file != INVALID_HANDLE_VALUE)
 	{
-		if (SetFilePointer(file, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER ||
-			!ReadFile(file, buffer, buffer_size, &bytes_read, NULL) ||
-			bytes_read != buffer_size)
+		/* port: read beside the game state, and taken once checked */
+		void *image = malloc(buffer_size);
+
+		if (!image ||
+			SetFilePointer(file, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER ||
+			!ReadFile(file, image, buffer_size, &bytes_read, NULL) ||
+			bytes_read != buffer_size ||
+			!game_state_image_accept(image, buffer_size))
 		{
 			match_vassert(
 				"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
@@ -1130,6 +1178,8 @@ void game_state_read_from_persistent_storage(
 					GetLastError()));
 			delete_persistent_storage();
 		}
+		(void)buffer;
+		free(image);
 		CloseHandle(file);
 	}
 
@@ -1247,10 +1297,15 @@ int game_state_read_persistent_storage_staged(
 		crc_new(&checksum);
 		crc_checksum_buffer(&checksum, saved_header, header_size);
 		crc_checksum_buffer(&checksum, (byte *)game_state_writer.snapshot + header_size, buffer_size - header_size);
-		if (checksum == stored_checksum)
-			result = 1;
-		else
+		if (checksum != stored_checksum)
 			error(_error_silent, "checksum failed on persistent storage");
+		/* port (from OpenCE, MrBruh's "Third hardening round"): and an image
+		of this build's game state (game_state_image_valid), checked where
+		it was read: a crafted or damaged save is not loaded, and the level
+		starts over */
+		else if (buffer_size == xbox_game_state_globals.buffer_size &&
+			game_state_image_valid(game_state_writer.snapshot, buffer_size))
+			result = 1;
 	}
 	else
 	{
