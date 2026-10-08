@@ -3357,6 +3357,7 @@ static void update_joining(void)
 		p2p.lookup_time = p2p_now();
 		set_status("looking up code %.4s-%.4s", p2p.lookup_code, p2p.lookup_code + 4);
 		p2p_signal_start();
+		p2p_signal_kick();
 		p2p_signal_lookup_code(p2p.lookup_code, p2p.lookup_has_host ? p2p.lookup_host : NULL);
 	}
 	else if (p2p.looking_up && elapsed(p2p.lookup_time, CODE_LOOKUP_TIMEOUT))
@@ -3488,6 +3489,8 @@ static void update_hosting(void)
 		p2p.hosting = 1;
 		p2p.stun_started = 1;
 		p2p_signal_start();
+		/* (a broker waiting after a failure tries now) */
+		p2p_signal_kick();
 		p2p_signal_host(p2p.token, p2p.code);
 		/* (the invite is a bearer token: anyone who reads it can join, so the
 		log shows only the host's part; the link itself goes to the
@@ -3728,6 +3731,18 @@ int p2p_status(char *text, int size)
 		snprintf(text, (size_t)size, "%s", p2p.status);
 	else
 		snprintf(text, (size_t)size, p2p_signal_connected() ? "ready" : "starting");
+	/* (hosting a public game: whether the brokers hold its listing) */
+	if (p2p.hosting && !p2p.adhoc)
+	{
+		char listing[64];
+		size_t length = strlen(text);
+
+		if (p2p_lobby_hosting_status_locked(listing, sizeof(listing)) != P2P_LOBBY_HOSTING_NONE && listing[0] &&
+			length + 3 < (size_t)size)
+		{
+			snprintf(text + length, (size_t)size - length, "; %s", listing);
+		}
+	}
 	pthread_mutex_unlock(&p2p_lock);
 	return 1;
 }
@@ -4067,7 +4082,7 @@ static void *p2p_thread(void *unused)
 		update_hosting();
 		/* the server browser (p2p_lobby.c): signalling while browsing too
 		(not in ad hoc play, which reaches no broker) */
-		if (p2p_lobby_browsing() && !p2p.adhoc)
+		if ((p2p_lobby_browsing() || p2p_lobby_brokers_wanted()) && !p2p.adhoc)
 			p2p_signal_start();
 		if (!p2p.adhoc)
 		{

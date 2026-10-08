@@ -20,6 +20,24 @@
 #            (p2p_lobby.c); the joiner browses it and joins the first game by
 #            its listing; the host's listing is closed (a tombstone, then the
 #            slot cleared) when it quits
+#   lobbyflap lobby, with two brokers, the second blackholed for the host
+#            (its router drops the SYNs): the host's link to the first is
+#            reset for HALO_TEST_FLAP seconds (40) while the broker keeps the
+#            old connection, as a NAT that lost its mapping leaves it; the
+#            host must connect again (the broker taking the old session over,
+#            its will published late: mqtt_test_broker.py) and have its listing
+#            back on the first broker's slot within seconds, and keep it there
+#            (never empty more than 6 s from 15 s after the link is back); a
+#            joiner started later finds the game; the blackholed broker never
+#            gets the listing
+#   lobbydns lobby, the joiners knowing the broker by a name
+#            (broker.halo.test) that the test's own /etc/hosts holds only
+#            from HALO_TEST_DNS_DOWN seconds (25) after the first joiner
+#            starts: it must say it cannot look the broker up and that the
+#            game list cannot be reached, then reach it, show the host's game
+#            and count it (its browser's summary), and keep the broker's
+#            address in its resolver cache file; a second joiner, the name
+#            failing again, must use that last good address and find the game
 #   relay    code, with both routers' NAT a symmetric one (every destination a
 #            new random port: MASQUERADE --random-fully), so hole punching
 #            cannot connect them: the two must connect through the relay
@@ -154,6 +172,8 @@ root=$(cd "$here/../../.." && pwd)
 
 if [ "${HALO_NETNS_INSIDE:-}" != 1 ]; then
 	export HALO_NETNS_INSIDE=1
+	# (lobbydns: a mount namespace too, for an /etc/hosts of its own)
+	[ "${1:-}" = lobbydns ] && exec unshare -rnm --fork "$0" "$@"
 	exec unshare -rn --fork "$0" "$@"
 fi
 
@@ -246,6 +266,8 @@ side join 10.10.2 192.168.2
 [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] && side join2 10.10.3 192.168.3
 python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 \
 	$([ "${HALO_TEST_MQTT311:-0}" = 1 ] && echo --mqtt311) > "$out/broker.log" 2>&1 & pids="$pids $!"
+# (the broker's clock: its "retained SECONDS ..." lines count from about now)
+broker_started=$(python3 -c "import time; print(time.monotonic())")
 python3 "$here/stun_test_server.py" --host 198.51.100.1 --port 3478 > "$out/stun.log" 2>&1 & pids="$pids $!"
 # the relay, built from this tree
 relay_pid=
@@ -505,6 +527,135 @@ menushost)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
+lobbyflap)
+	# (a second broker, 198.51.100.2, which the host's router blackholes: its
+	# SYNs dropped; the joiner reaches both)
+	ip addr add 198.51.100.2/32 dev lo
+	python3 "$here/mqtt_test_broker.py" --host 198.51.100.2 --port 1883 > "$out/broker2.log" 2>&1 & pids="$pids $!"
+	in_ns "$host_router" iptables -I FORWARD -d 198.51.100.2 -p tcp --dport 1883 -j DROP
+	brokers=198.51.100.1:1883,198.51.100.2:1883
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST=host:bloodgulch:slayer \
+		HALO_NETWORK_TEST_START=${HALO_TEST_FLAP_START:-150} HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=FlapHost \
+		HALO_NET_BROKERS=$brokers; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	sleep 15
+	# (the host's link to the first broker reset for a while: every packet it
+	# sends there answered with a reset by its router, while the broker keeps
+	# the old connection open, as a NAT that dropped its mapping leaves it)
+	flap=${HALO_TEST_FLAP:-40}
+	echo "the host's link to 198.51.100.1:1883 reset for $flap s"
+	in_ns "$host_router" iptables -I FORWARD -d 198.51.100.1 -p tcp --dport 1883 -j REJECT --reject-with tcp-reset
+	sleep "$flap"
+	in_ns "$host_router" iptables -D FORWARD -d 198.51.100.1 -p tcp --dport 1883 -j REJECT --reject-with tcp-reset
+	restored=$(python3 -c "import time; print(time.monotonic())")
+	echo "the link is back"
+	# (the joiner later: its query has every host publish again, which would
+	# mend an emptied slot by itself)
+	sleep 40
+	joined=$(python3 -c "import time; print(time.monotonic())")
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_TEST_INPUT=bot:2 HALO_NET_BROKERS=$brokers; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "Internet play" "$hl" | head -40
+	echo "--- broker (the host's slot)"; grep -E "takeover|keep alive|retained .*hcev/3/lobby/s/" "$out/broker.log" | head -30
+	slot=$(sed -n 's/.*hosting with the invite halo:\/\/join\/\([0-9a-f]\{12\}\).*/\1/p' "$hl" | head -1)
+	# (what the first broker's slot held from 15 s after the link came back
+	# to the joiner's start: never empty for more than 6 s at a time, and a
+	# listing at the end; the broker's clock is its start's, broker_started)
+	verdict=$(python3 - "$out/broker.log" "$slot" "$broker_started" "$restored" "$joined" <<'PY'
+import re, sys
+log, slot = sys.argv[1], sys.argv[2]
+started, restored, joined = float(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5])
+since, until = restored - started + 15.0, joined - started
+events = []
+for line in open(log, errors="replace"):
+    m = re.match(r"retained ([0-9.]+) hcev/3/lobby/s/" + slot + r"[0-9a-f]* (.*)", line)
+    if m:
+        events.append((float(m.group(1)), not m.group(2).endswith(" B")))
+empty, empty_since, longest = True, 0.0, 0.0
+for t, is_empty in events:
+    if t >= until:
+        break
+    if is_empty and not empty:
+        empty_since = t
+    if not is_empty and empty and t > since:
+        longest = max(longest, t - max(empty_since, since))
+    empty = is_empty
+if empty:
+    longest = max(longest, until - max(empty_since, since))
+print(f"{longest:.1f} {'empty' if empty else 'listed'}")
+PY
+)
+	echo "the first broker's slot from 15 s after the link came back to the joiner's start: longest empty ${verdict% *} s, at the end ${verdict#* }"
+	grep -q "takeover\|disconnect .*hcev" "$out/broker.log" || fail "the host's connection to the first broker never dropped"
+	awk -v l="${verdict% *}" 'BEGIN { exit !(l <= 6.0) }' || fail "the slot was empty for ${verdict% *} s after the link came back"
+	[ "${verdict#* }" = listed ] || fail "the slot was empty when the joiner started"
+	grep -q "publish hcev-[0-9a-f]* hcev/3/lobby/s/[0-9a-f]* [1-9]" "$out/broker2.log" && fail "the blackholed broker got the listing"
+	grep -aq 'network test: the public games list "FlapHost' "$jl" || fail "the joiner never listed the host's game"
+	grep -aqE "Internet play: browser \(closing\): [1-9][0-9]* listings? heard .*, 1 game shown" "$jl" ||
+		fail "the joiner's browser did not count the one game shown"
+	# (the host: listed only once a broker held the listing, on one of two:
+	# the blackholed one never; its failure said)
+	grep -aq "Internet play: the game is listed in everyone's public games (on 1 of 2 brokers" "$hl" ||
+		fail "the host did not say it was listed on 1 of 2 brokers"
+	grep -aq "Internet play: broker 198.51.100.2: no answer connecting in 10 s" "$hl" ||
+		fail "the host did not say why the blackholed broker failed"
+	grep -aq "Internet play: broker 198.51.100.1: no answer in 10 s (the link dropped)\|Internet play: broker 198.51.100.1: the connection broke" "$hl" ||
+		fail "the host did not notice its link to the first broker dropping"
+	;;
+lobbydns)
+	# (the joiners know the broker by a name, broker.halo.test, which this
+	# namespace's own /etc/hosts holds only from a while after the first
+	# joiner starts: until then its lookups fail, as a Vita's resolver did)
+	cp /etc/hosts "$out/hosts"
+	mount --bind "$out/hosts" /etc/hosts || { echo "cannot give the test an /etc/hosts of its own"; exit 2; }
+	cache=$out/dns_cache.txt
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST=host:bloodgulch:slayer \
+		HALO_NETWORK_TEST_START=300 HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=DnsHost; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_TEST_INPUT=bot:2 HALO_NET_BROKERS=broker.halo.test:1883 HALO_NET_RESOLVER_CACHE="$cache" \
+		HALO_EXIT_AFTER=${HALO_TEST_DNS_JOINER_SECONDS:-80}; join_pid=$last_pid
+	sleep ${HALO_TEST_DNS_DOWN:-25}
+	echo "broker.halo.test resolves now"
+	echo "198.51.100.1 broker.halo.test" >> "$out/hosts"
+	wait $join_pid 2>/dev/null
+	# (a second joiner, the name failing again: the first's last good
+	# address, from the file, stands in)
+	echo "broker.halo.test fails again; a second joiner with the first one's cache file"
+	# (written in place: the bind mount holds the file, not its name)
+	grep -v 'broker\.halo\.test' "$out/hosts" > "$out/hosts.new"; cat "$out/hosts.new" > "$out/hosts"
+	HALO_TEST_DATA_JOINER2=$data run_copy joiner2 "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_TEST_INPUT=bot:3 HALO_NET_BROKERS=broker.halo.test:1883 \
+		HALO_NET_RESOLVER_CACHE="$cache" HALO_EXIT_AFTER=60; join2_pid=$last_pid
+	wait $join2_pid 2>/dev/null
+	kill "$host_pid" 2>/dev/null; wait $host_pid 2>/dev/null
+	jl=$out/joiner/run.log j2=$out/joiner2/run.log
+	echo "--- joiner"; grep -aE "Internet play: (broker|browser|browsing|stopped|cannot)|network test: the public" "$jl" | head -30
+	echo "--- the cache file"; cat "$cache" 2>/dev/null
+	echo "--- second joiner"; grep -aE "Internet play: (broker|browser|browsing|cannot)|network test: the public" "$j2" | head -12
+	grep -aq "Internet play: broker broker.halo.test: cannot look up its address" "$jl" ||
+		fail "the joiner did not say it could not look the broker up"
+	grep -aq "Internet play: browser: \"Can't reach the online game list - check your internet connection\"" "$jl" ||
+		fail "the joiner's browser did not say the game list could not be reached"
+	grep -aq "Internet play: broker broker.halo.test ready" "$jl" || fail "the joiner never reached the broker"
+	grep -aq 'Internet play: browser: new game "DnsHost" (1/[0-9]* players, bloodgulch' "$jl" ||
+		fail "the joiner's browser never showed the host's game"
+	grep -aq 'network test: the public games list "DnsHost' "$jl" || fail "the joiner never listed the host's game"
+	# (the counts: the browser closed on joining, with the one game shown,
+	# and heard at least that one listing)
+	grep -aqE "Internet play: browser \(closing\): [1-9][0-9]* listings? heard .*, 1 game shown" "$jl" ||
+		fail "the joiner's browser did not count the one game shown"
+	grep -q "^broker.halo.test 198.51.100.1 [0-9]*$" "$cache" || fail "the cache file does not hold the broker's address"
+	grep -aq "Internet play: cannot look up broker.halo.test (.*); using its last good address 198.51.100.1" "$j2" ||
+		fail "the second joiner did not use the broker's last good address"
+	grep -aq 'network test: the public games list "DnsHost' "$j2" || fail "the second joiner never listed the host's game"
 	;;
 pc)
 	[ -n "$pc" ] || { echo "pc mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
@@ -1003,7 +1154,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport" >&2
 	exit 2
 	;;
 esac

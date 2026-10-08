@@ -98,9 +98,15 @@ games, but codes, invites, system link and ad hoc play are as they were.)
 #include "port_config.h"
 #include "p2p_internal.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* the platform layer's socket options are Winsock's (posix.h): a pending
+connect's error */
+#define WINSOCK_SOL_SOCKET 0xFFFF
+#define WINSOCK_SO_ERROR 0x1007
 
 enum
 {
@@ -182,6 +188,26 @@ enum
 	/* a hosting machine's code record is sent again this often (a broker
 	that restarted forgets retained messages) */
 	CODE_INTERVAL = 60000,
+	/* while a game is listed or the browser is open: a ping this often,
+	and a link that answers nothing (a ping, a listing) in
+	PING_ANSWER_TIMEOUT is taken for dead (a NAT that dropped its mapping, a
+	Wi-Fi drop) and connected again at once, rather than after
+	SILENCE_TIMEOUT, by when the broker has dropped the listing */
+	LOBBY_PING_INTERVAL = 15000,
+	PING_ANSWER_TIMEOUT = 10000,
+	/* ... and a broker that failed is tried again sooner: after this, twice
+	as long each failure after, to MAXIMUM_LOBBY_RETRY_INTERVAL */
+	LOBBY_RETRY_INTERVAL = 3000,
+	MAXIMUM_LOBBY_RETRY_INTERVAL = 15000,
+	/* the listing is published again on a broker this long after a new
+	connection's first acknowledgement of it: the broker's will of the old
+	connection (its session taken over by the new one) can empty the slot
+	after the new connection's listing */
+	SETTLE_REPUBLISH_TIME = 3000,
+	/* a broker's failure is logged again, the same way, after this; its
+	connection, after this */
+	FAILURE_LOG_INTERVAL = 300000,
+	READY_LOG_INTERVAL = 60000,
 };
 
 /* the topics a broker can be subscribed to at once */
@@ -267,12 +293,40 @@ struct broker
 	int query_pending;
 	/* the code's record, to publish when the bucket allows */
 	int code_pending;
+	/* a ping (or a publish at least once) awaiting any answer: when it was
+	sent; 0 if none (PING_ANSWER_TIMEOUT) */
+	unsigned long ping_time;
+	/* the subscription to the slots: its SUBACK's packet identifier, and
+	whether it was acknowledged (browsing on this broker) */
+	unsigned short slots_identifier;
+	int slots_subscribed;
+	/* this connection acknowledged this machine's listing (its PUBACK); a
+	republish due when a new connection's first acknowledgement has settled
+	(settle_time; 0: none), and whether one is still to come */
+	int listing_acknowledged;
+	int settle_wanted;
+	unsigned long settle_time;
+	/* diagnostics (halo.log): why it last failed, what was last logged and
+	when, the failures since not logged; its connections, and when the last
+	was logged */
+	char failure[96];
+	char logged_failure[96];
+	unsigned long failure_logged_time;
+	int failures_not_logged;
+	int connections;
+	int connections_not_logged;
+	unsigned long ready_logged_time;
+	/* the listing's refusals (MQTT 5's PUBACK reasons) not logged */
+	int refusal_logged;
+	unsigned long refusal_logged_time;
 	/* publishes at least once, awaiting PUBACK */
 	struct
 	{
 		int used;
 		unsigned short identifier;
 		unsigned long sent_time;
+		/* (a listing's) signalling.lobby_version when it was sent */
+		int version;
 		/* a listing, which a newer one replaces (not a tombstone or a
 		clearing) */
 		int listing;
@@ -344,6 +398,13 @@ static struct
 	int lobby_listing_size;
 	int lobby_version;
 	int lobby_closing;
+	/* when signalling started, a broker last became able to carry the
+	browser, and the slots' subscription was last acknowledged (p2p_now; 0:
+	never); when the player last asked for the brokers (p2p_signal_kick) */
+	unsigned long started_time;
+	unsigned long lobby_time;
+	unsigned long browsing_time;
+	unsigned long kick_time;
 
 	/* hosting */
 	int hosting;
@@ -404,6 +465,15 @@ static int elapsed(unsigned long since, unsigned long time)
 {
 	/* (unsigned, as the clock wraps) */
 	return (unsigned int)(p2p_now() - since) >= (unsigned int)time;
+}
+
+/* now, as a time kept where 0 means none (never later than now, which
+elapsed would take for long past) */
+static unsigned long now_stamp(void)
+{
+	unsigned long now = p2p_now();
+
+	return now ? now : (unsigned long)-1;
 }
 
 static unsigned short network_short(unsigned short value)
@@ -481,8 +551,98 @@ static void broker_close(struct broker *broker, int failed)
 	broker->lobby_clear_pending = 0;
 	broker->query_pending = 0;
 	broker->code_pending = 0;
+	broker->ping_time = 0;
+	broker->slots_identifier = 0;
+	broker->slots_subscribed = 0;
+	broker->listing_acknowledged = 0;
+	broker->settle_wanted = 0;
+	broker->settle_time = 0;
 	if (failed)
 		broker->failures++;
+}
+
+/* whether the server browser needs the brokers now: a game listed, or the
+browser open */
+static int lobby_active(void)
+{
+	return signalling.lobby_listed || signalling.lobby_browsing;
+}
+
+/* milliseconds before a broker that failed is tried again */
+static unsigned long retry_interval(const struct broker *broker)
+{
+	int failures = broker->failures < 1 ? 1 : broker->failures > 8 ? 8 : broker->failures;
+
+	if (lobby_active())
+	{
+		unsigned long interval = (unsigned long)LOBBY_RETRY_INTERVAL << (failures - 1);
+
+		return interval > MAXIMUM_LOBBY_RETRY_INTERVAL ? MAXIMUM_LOBBY_RETRY_INTERVAL : interval;
+	}
+	return failures >= 4 ? MAXIMUM_RETRY_INTERVAL : (unsigned long)RETRY_INTERVAL << (failures - 1);
+}
+
+/* a socket error, as the platform layer says it (posix_socket_last_error:
+Winsock's numbers), in words */
+static const char *socket_error_text(int error, char *text, int size)
+{
+	switch (error)
+	{
+	case WSAECONNREFUSED: return "refused";
+	case WSAECONNRESET: return "reset";
+	case WSAETIMEDOUT: return "timed out";
+	case WSAEHOSTUNREACH: return "host unreachable";
+	case WSAENETUNREACH: return "network unreachable";
+	}
+	snprintf(text, (size_t)size, "error %d", error);
+	return text;
+}
+
+/* a pending connect's error (SO_ERROR: the system's own number, Linux's or
+the Vita's BSD one), in words */
+static const char *connect_error_text(int error, char *text, int size)
+{
+	switch (error)
+	{
+	case 111: case 61: return "refused";
+	case 110: case 60: return "timed out";
+	case 113: case 65: return "host unreachable";
+	case 101: case 51: return "network unreachable";
+	case 104: case 54: return "reset";
+	}
+	snprintf(text, (size_t)size, "error %d", error);
+	return text;
+}
+
+/* a broker failed, for why: its connection closed, and why logged (the
+same failure again only each FAILURE_LOG_INTERVAL, with how many times it
+happened since) */
+static void broker_failed(struct broker *broker, const char *format, ...) __attribute__((format(printf, 2, 3)));
+static void broker_failed(struct broker *broker, const char *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(broker->failure, sizeof(broker->failure), format, arguments);
+	va_end(arguments);
+	broker_close(broker, 1);
+	if (strcmp(broker->failure, broker->logged_failure) || !broker->failure_logged_time ||
+		elapsed(broker->failure_logged_time, FAILURE_LOG_INTERVAL))
+	{
+		char again[48] = "";
+
+		if (broker->failures_not_logged)
+			snprintf(again, sizeof(again), " (and %d times since it was last said)", broker->failures_not_logged);
+		platform_log("Internet play: broker %s: %s%s; trying again in %lu s", broker->host, broker->failure, again,
+			retry_interval(broker) / 1000);
+		memcpy(broker->logged_failure, broker->failure, sizeof(broker->failure));
+		broker->failure_logged_time = now_stamp();
+		broker->failures_not_logged = 0;
+	}
+	else
+	{
+		broker->failures_not_logged++;
+	}
 }
 
 static void broker_flush(struct broker *broker)
@@ -494,9 +654,10 @@ static void broker_flush(struct broker *broker)
 		if (sent < 0)
 		{
 			int error = posix_socket_last_error();
+			char text[24];
 
 			if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-				broker_close(broker, 1);
+				broker_failed(broker, "the connection broke sending (%s)", socket_error_text(error, text, sizeof(text)));
 			return;
 		}
 		memmove(broker->output, broker->output + sent, (size_t)(broker->output_size - sent));
@@ -550,7 +711,7 @@ static void broker_send(struct broker *broker, unsigned char type, const unsigne
 	header_size = 1 + put_variable(header + 1, size);
 	if (broker->output_size + header_size + size > BUFFER_SIZE)
 	{
-		broker_close(broker, 1);
+		broker_failed(broker, "it takes nothing in (%d bytes waiting to be sent)", broker->output_size);
 		return;
 	}
 	memcpy(broker->output + broker->output_size, header, (size_t)header_size);
@@ -599,7 +760,8 @@ static int broker_may_publish(struct broker *broker, int reserve)
 	return 1;
 }
 
-static void broker_topic(struct broker *broker, const char *topic, int subscribe, int no_local)
+/* a SUBSCRIBE or UNSUBSCRIBE; returns its packet identifier */
+static unsigned short broker_topic(struct broker *broker, const char *topic, int subscribe, int no_local)
 {
 	unsigned char body[5 + TOPIC_SIZE + 1];
 	unsigned short identifier = next_packet_identifier(broker);
@@ -615,6 +777,7 @@ static void broker_topic(struct broker *broker, const char *topic, int subscribe
 	if (subscribe)
 		body[size++] = (unsigned char)(broker->protocol == 5 && no_local ? 0x04 : 0);
 	broker_send(broker, subscribe ? 0x82 : 0xA2, body, size);
+	return identifier;
 }
 
 /* a PUBLISH at most once: signalling's and queries; retained, the code's
@@ -664,6 +827,9 @@ static void broker_publish_slot(struct broker *broker, unsigned short identifier
 		memcpy(body + size, payload, (size_t)payload_size);
 	/* PUBLISH, QoS 1, retained */
 	broker_send(broker, (unsigned char)(0x30 | (duplicate ? 0x08 : 0) | 0x02 | 0x01), body, size + payload_size);
+	/* (its PUBACK due: a link that answers nothing is dead) */
+	if (!broker->ping_time)
+		broker->ping_time = now_stamp();
 }
 
 /* a listing (or a clearing: size 0) to the own slot, at least once: 0 if
@@ -691,12 +857,47 @@ static int broker_publish_listing(struct broker *broker, const unsigned char *pa
 	broker->in_flight[free_index].identifier = next_packet_identifier(broker);
 	broker->in_flight[free_index].sent_time = p2p_now();
 	broker->in_flight[free_index].listing = listing;
+	broker->in_flight[free_index].version = signalling.lobby_version;
 	broker->in_flight[free_index].refused = 0;
 	broker->in_flight[free_index].size = size;
 	if (size)
 		memcpy(broker->in_flight[free_index].payload, payload, (size_t)size);
 	broker_publish_slot(broker, broker->in_flight[free_index].identifier, payload, size, 0);
 	return 1;
+}
+
+/* a listing's PUBACK: the broker holds it (logged once a connection), or
+refused it (MQTT 5's reason: a quota, a rate; sent again later) */
+static void listing_answered(struct broker *broker, int reason)
+{
+	if (reason < 0x80)
+	{
+		broker->refusal_logged = 0;
+		if (broker->listing_acknowledged)
+			return;
+		broker->listing_acknowledged = 1;
+		/* (published again once settled: a new connection's) */
+		if (broker->settle_wanted)
+		{
+			broker->settle_wanted = 0;
+			broker->settle_time = now_stamp();
+		}
+		if (signalling.lobby_listed && !signalling.lobby_closing)
+		{
+			platform_log("Internet play: broker %s has the listing (acknowledged; retained%s)", broker->host,
+				broker->protocol == 5 ? ", expiring in 90 s unless published again" : "");
+		}
+		return;
+	}
+	if (!broker->refusal_logged || elapsed(broker->refusal_logged_time, FAILURE_LOG_INTERVAL))
+	{
+		platform_log("Internet play: broker %s refused the listing (PUBACK 0x%02x%s); sending it again in %d s",
+			broker->host, reason, reason == 0x97 ? ": quota exceeded" : reason == 0x96 ? ": publishing too fast" :
+			reason == 0x87 ? ": not authorized" : reason == 0x99 ? ": payload format invalid" :
+			reason == 0x90 ? ": topic name invalid" : "", RESEND_INTERVAL / 1000);
+		broker->refusal_logged = 1;
+		broker->refusal_logged_time = now_stamp();
+	}
 }
 
 /* whether the broker carries the server browser: retained messages and
@@ -729,8 +930,23 @@ static void broker_sync_topics(struct broker *broker)
 			continue;
 		if (had[0])
 			broker_topic(broker, had, 0, 0);
+		if (index == _topic_slots)
+		{
+			broker->slots_subscribed = 0;
+			broker->slots_identifier = 0;
+		}
+		/* (the own slot without No Local: an emptying of it is seen and
+		mended, also one by this machine's own old connection's will, whose
+		client identifier is this one's) */
 		if (wanted[index][0])
-			broker_topic(broker, wanted[index], 1, index == _topic_own_slot);
+		{
+			unsigned short identifier = broker_topic(broker, wanted[index], 1, 0);
+
+			if (index == _topic_slots)
+				broker->slots_identifier = identifier;
+			if (!broker->ping_time)
+				broker->ping_time = now_stamp();
+		}
 		/* (once subscribed to the slots, the hosts are asked to publish:
 		retained copies come at once, but may be old) */
 		if (index == _topic_slots && wanted[index][0])
@@ -844,17 +1060,17 @@ static void broker_connect(struct broker *broker)
 		broker->looked_up = 1;
 		if (!broker->address)
 		{
-			if (!broker->failures)
-				platform_log("Internet play: cannot look up the signalling broker %s (%s)", broker->host,
-					p2p_resolve_error());
-			broker_close(broker, 1);
+			broker_failed(broker, "cannot look up its address (%s)", p2p_resolve_error());
 			return;
 		}
 	}
 	broker->socket = posix_socket(AF_INET, SOCK_STREAM, 0);
 	if (broker->socket < 0)
 	{
-		broker_close(broker, 1);
+		char text[24];
+
+		broker_failed(broker, "cannot open a socket (%s)", socket_error_text(posix_socket_last_error(), text,
+			sizeof(text)));
 		return;
 	}
 	posix_socket_set_nonblocking(broker->socket, 1);
@@ -871,9 +1087,10 @@ static void broker_connect(struct broker *broker)
 	else
 	{
 		int error = posix_socket_last_error();
+		char text[24];
 
 		if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-			broker_close(broker, 1);
+			broker_failed(broker, "cannot connect (%s)", socket_error_text(error, text, sizeof(text)));
 	}
 }
 
@@ -1475,7 +1692,7 @@ static void code_received(const unsigned char *message, int size)
 			{
 				platform_log("Internet play: a record of the code names another host than the public game "
 					"listed with it; it is not joined");
-				logged_time = p2p_now() | 1;
+				logged_time = now_stamp();
 			}
 			return;
 		}
@@ -1551,8 +1768,9 @@ static int broker_acknowledged(struct broker *broker, const unsigned char *body,
 	}
 	if (code != 0)
 	{
-		platform_log("Internet play: the signalling broker %s refused the connection", broker->host);
-		broker_close(broker, 1);
+		broker_failed(broker, "refused the connection (CONNACK 0x%02x%s)", code, code == 0x87 || code == 5 ?
+			": not authorized" : code == 0x97 ? ": quota exceeded" : code == 0x9F ? ": connecting too often" :
+			code == 0x89 || code == 3 ? ": busy" : code == 0x9C || code == 0x9D ? ": use another server" : "");
 		return 0;
 	}
 	if (broker->protocol == 5 && get_variable(body, size, &offset, &properties))
@@ -1626,6 +1844,32 @@ static int broker_acknowledged(struct broker *broker, const unsigned char *body,
 	broker->failures = 0;
 	broker->publish_tokens = PUBLISH_BURST;
 	broker->publish_time = p2p_now();
+	broker->connections++;
+	if (broker_carries_lobby(broker))
+		signalling.lobby_time = now_stamp();
+	/* (a listed game's listing, published once connected, again once its
+	acknowledgement has settled) */
+	broker->settle_wanted = signalling.lobby_listed;
+	if (!broker->ready_logged_time || elapsed(broker->ready_logged_time, READY_LOG_INTERVAL))
+	{
+		const unsigned char *bytes = (const unsigned char *)&broker->address;
+		char again[64] = "";
+
+		if (broker->connections_not_logged)
+			snprintf(again, sizeof(again), " (connected %d times since it was last said)",
+				broker->connections_not_logged + 1);
+		platform_log("Internet play: broker %s ready (MQTT %s at %u.%u.%u.%u:%u; %s)%s", broker->host,
+			broker->protocol == 5 ? "5" : "3.1.1", bytes[0], bytes[1], bytes[2], bytes[3],
+			network_short(broker->port), broker_carries_lobby(broker) ? "carries the public games" :
+			!broker->retain_available ? "no retained messages: signalling only, no public games" :
+			"no wildcard subscriptions: signalling only, no public games", again);
+		broker->ready_logged_time = now_stamp();
+		broker->connections_not_logged = 0;
+	}
+	else
+	{
+		broker->connections_not_logged++;
+	}
 	broker_sync_topics(broker);
 	/* a joiner's first request need not wait for the next repeat */
 	if (signalling.joining)
@@ -1661,14 +1905,14 @@ static void broker_parse(struct broker *broker)
 				break;
 			if (shift > 21)
 			{
-				broker_close(broker, 1);
+				broker_failed(broker, "sent a malformed packet");
 				return;
 			}
 		}
 		total = header_size + remaining;
 		if (total > BUFFER_SIZE)
 		{
-			broker_close(broker, 1);
+			broker_failed(broker, "sent a packet too large (%d bytes)", total);
 			return;
 		}
 		if (total > broker->input_size)
@@ -1679,7 +1923,7 @@ static void broker_parse(struct broker *broker)
 			if (broker->state != _broker_awaiting_acknowledgement)
 			{
 				/* (a second CONNACK is a broken broker's) */
-				broker_close(broker, 1);
+				broker_failed(broker, "sent a second CONNACK");
 				return;
 			}
 			if (!broker_acknowledged(broker, broker->input + header_size, remaining))
@@ -1725,7 +1969,8 @@ static void broker_parse(struct broker *broker)
 			(a quota, a rate): sent again later */
 			const unsigned char *body = broker->input + header_size;
 			unsigned short identifier = (unsigned short)(body[0] << 8 | body[1]);
-			int refused = remaining >= 3 && body[2] >= 0x80;
+			int reason = remaining >= 3 ? body[2] : 0;
+			int refused = reason >= 0x80;
 			int index;
 
 			for (index = 0; index < MAXIMUM_IN_FLIGHT; index++)
@@ -1734,13 +1979,51 @@ static void broker_parse(struct broker *broker)
 				{
 					broker->in_flight[index].used = refused;
 					broker->in_flight[index].refused = refused;
+					if (broker->in_flight[index].listing)
+						listing_answered(broker, reason);
+				}
+			}
+		}
+		else if ((type & 0xF0) == 0x90 && remaining >= 3)
+		{
+			/* SUBACK: the slots' subscription taken (0 to 2) or refused (MQTT
+			5: 0x80 and above; 3.1.1: 0x80) */
+			const unsigned char *body = broker->input + header_size;
+			unsigned short identifier = (unsigned short)(body[0] << 8 | body[1]);
+			int offset = 2, properties = 0;
+
+			if (broker->protocol == 5 && (!get_variable(body, remaining, &offset, &properties) ||
+				properties > remaining - offset))
+			{
+				offset = remaining;
+			}
+			else if (broker->protocol == 5)
+				offset += properties;
+			if (identifier && identifier == broker->slots_identifier && offset < remaining)
+			{
+				broker->slots_identifier = 0;
+				if (body[offset] < 0x80)
+				{
+					broker->slots_subscribed = 1;
+					signalling.browsing_time = now_stamp();
+				}
+				else
+				{
+					platform_log("Internet play: broker %s refused the subscription to the public games (0x%02x): "
+						"they are not seen through it", broker->host, body[offset]);
 				}
 			}
 		}
 		else if ((type & 0xF0) == 0xE0)
 		{
-			/* DISCONNECT (MQTT 5): the broker's */
-			broker_close(broker, 1);
+			/* DISCONNECT (MQTT 5): the broker's, and why */
+			int reason = remaining >= 1 ? broker->input[header_size] : 0;
+
+			broker_failed(broker, "disconnected this machine (reason 0x%02x%s)", reason, reason == 0x8E ?
+				": session taken over" : reason == 0x8D ? ": keep alive timeout" : reason == 0x97 ? ": quota exceeded" :
+				reason == 0x96 ? ": publishing too fast" : reason == 0x93 ? ": too many publishes awaiting" :
+				reason == 0x8B ? ": the broker is shutting down" : reason == 0x89 ? ": busy" : reason == 0x9C ||
+				reason == 0x9D ? ": use another server" : reason == 0x87 ? ": not authorized" : "");
 			return;
 		}
 		/* (what it sent in answer may have closed it, emptying input) */
@@ -1763,19 +2046,23 @@ static void broker_readable(struct broker *broker)
 
 		if (size == 0)
 		{
-			broker_close(broker, 1);
+			broker_failed(broker, broker->state == _broker_ready ? "closed the connection" :
+				"closed the connection before it was ready");
 			return;
 		}
 		if (size < 0)
 		{
 			int error = posix_socket_last_error();
+			char text[24];
 
 			if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-				broker_close(broker, 1);
+				broker_failed(broker, "the connection broke (%s)", socket_error_text(error, text, sizeof(text)));
 			return;
 		}
 		broker->input_size += size;
 		broker->heard_time = p2p_now();
+		/* (anything heard answers a ping) */
+		broker->ping_time = 0;
 		broker_parse(broker);
 		if (broker->socket < 0 || broker->input_size == BUFFER_SIZE)
 			return;
@@ -1852,6 +2139,7 @@ void p2p_signal_start(void)
 	if (signalling.started)
 		return;
 	signalling.started = 1;
+	signalling.started_time = now_stamp();
 	posix_random_bytes(random, sizeof(random));
 	p2p_hex(random, sizeof(random), hex);
 	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), SIGNAL_PREFIX "-%s", hex);
@@ -1939,24 +2227,33 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 	for (index = 0; index < signalling.broker_count; index++)
 	{
 		struct broker *broker = &signalling.brokers[index];
-		int retry = broker->failures < 1 ? RETRY_INTERVAL :
-			broker->failures >= 4 ? MAXIMUM_RETRY_INTERVAL : RETRY_INTERVAL << (broker->failures - 1);
+		unsigned long ping_interval;
 
 		switch (broker->state)
 		{
 		case _broker_idle:
-			if (elapsed(broker->state_time, (unsigned long)retry))
+			if (elapsed(broker->state_time, retry_interval(broker)))
 				broker_connect(broker);
 			break;
 		case _broker_connecting:
 			if (list_holds(write, write_count, broker->socket))
 				broker_connected(broker);
 			else if (elapsed(broker->state_time, CONNECT_TIMEOUT))
-				broker_close(broker, 1);
+			{
+				/* (why, if the system knows: a refusal, an unreachable host) */
+				int error = 0, length = sizeof(error);
+				char text[24];
+
+				if (posix_socket_getsockopt(broker->socket, WINSOCK_SOL_SOCKET, WINSOCK_SO_ERROR, &error, &length) == 0 && error)
+					broker_failed(broker, "cannot connect (%s)", connect_error_text(error, text, sizeof(text)));
+				else
+					broker_failed(broker, "no answer connecting in %d s (blocked, or the broker is down)",
+						CONNECT_TIMEOUT / 1000);
+			}
 			break;
 		case _broker_awaiting_acknowledgement:
 			if (elapsed(broker->state_time, CONNECT_TIMEOUT))
-				broker_close(broker, 1);
+				broker_failed(broker, "connected, but no answer to CONNECT in %d s", CONNECT_TIMEOUT / 1000);
 			break;
 		}
 		if (broker->socket < 0 || broker->state == _broker_connecting)
@@ -1970,13 +2267,32 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 		if (elapsed(broker->heard_time, (unsigned long)broker->keep_alive * 1500 > SILENCE_TIMEOUT ?
 			(unsigned long)broker->keep_alive * 1500 : SILENCE_TIMEOUT))
 		{
-			broker_close(broker, 1);
+			broker_failed(broker, "silent for %d s", SILENCE_TIMEOUT / 1000);
 			continue;
 		}
-		if (elapsed(broker->sent_time, (unsigned long)broker->keep_alive * 500 < PING_INTERVAL ?
-			(unsigned long)broker->keep_alive * 500 : PING_INTERVAL))
+		/* (a link that answers nothing, while the browser needs it: dead) */
+		if (lobby_active() && broker->ping_time && elapsed(broker->ping_time, PING_ANSWER_TIMEOUT))
+		{
+			broker_failed(broker, "no answer in %d s (the link dropped)", PING_ANSWER_TIMEOUT / 1000);
+			continue;
+		}
+		ping_interval = (unsigned long)broker->keep_alive * 500 < PING_INTERVAL ?
+			(unsigned long)broker->keep_alive * 500 : PING_INTERVAL;
+		if (lobby_active() && ping_interval > LOBBY_PING_INTERVAL)
+			ping_interval = LOBBY_PING_INTERVAL;
+		if (elapsed(broker->sent_time, ping_interval))
 		{
 			broker_send(broker, 0xC0, NULL, 0);
+			if (!broker->ping_time)
+				broker->ping_time = now_stamp();
+		}
+		/* (a new connection's listing published again, once its slot has
+		settled: the old connection's will may have emptied it since) */
+		if (broker->settle_time && elapsed(broker->settle_time, SETTLE_REPUBLISH_TIME))
+		{
+			broker->settle_time = 0;
+			if (signalling.lobby_listed && !signalling.lobby_closing)
+				broker->lobby_version = 0;
 		}
 		broker_update_lobby(broker);
 	}
@@ -2010,6 +2326,82 @@ static void sync_all_topics(void)
 
 	for (index = 0; index < signalling.broker_count; index++)
 		broker_sync_topics(&signalling.brokers[index]);
+}
+
+void p2p_signal_kick(void)
+{
+	int index;
+
+	if (!signalling.started || (signalling.kick_time && !elapsed(signalling.kick_time, P2P_SIGNAL_KICK_INTERVAL)))
+		return;
+	signalling.kick_time = now_stamp();
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *broker = &signalling.brokers[index];
+
+		/* (one waiting after failing tries at its next pass; a name that
+		failed is looked up again) */
+		if (broker->state == _broker_idle && broker->failures)
+		{
+			broker->state_time = p2p_now() - MAXIMUM_RETRY_INTERVAL;
+			if (!broker->address)
+				broker->looked_up = 0;
+		}
+	}
+}
+
+void p2p_signal_counts(struct p2p_signal_counts *counts)
+{
+	int index;
+
+	memset(counts, 0, sizeof(*counts));
+	counts->brokers = signalling.broker_count;
+	counts->started_time = signalling.started ? signalling.started_time : 0;
+	counts->lobby_time = signalling.lobby_time;
+	counts->browsing_time = signalling.browsing_time;
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		const struct broker *broker = &signalling.brokers[index];
+		int ready = broker->state == _broker_ready;
+
+		counts->tried += broker->connections || broker->failures;
+		counts->ready += ready;
+		counts->lobby += ready && broker_carries_lobby(broker);
+		counts->browsing += ready && broker->slots_subscribed;
+		counts->listing += ready && broker->listing_acknowledged;
+	}
+}
+
+void p2p_signal_brokers_text(char *text, int size, int what)
+{
+	int index, length = 0;
+
+	if (size <= 0)
+		return;
+	text[0] = 0;
+	for (index = 0; index < signalling.broker_count && length < size; index++)
+	{
+		const struct broker *broker = &signalling.brokers[index];
+		const char *state;
+		char why[112];
+
+		if (broker->state == _broker_ready)
+		{
+			state = !broker_carries_lobby(broker) && what ? "signalling only" :
+				what == 1 ? (broker->slots_subscribed ? "browsing" : "subscribing") :
+				what == 2 ? (broker->listing_acknowledged ? "has it" : "not acknowledged yet") : "ready";
+		}
+		else if (broker->state != _broker_idle)
+			state = broker->connections || broker->failures ? "connecting again" : "connecting";
+		else if (broker->failure[0])
+		{
+			snprintf(why, sizeof(why), "%s", broker->failure);
+			state = why;
+		}
+		else
+			state = "not tried yet";
+		length += snprintf(text + length, (size_t)(size - length), "%s%s: %s", index ? ", " : "", broker->host, state);
+	}
 }
 
 void p2p_signal_host(const unsigned char *token, const char *code)

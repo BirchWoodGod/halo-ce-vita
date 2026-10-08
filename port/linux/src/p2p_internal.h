@@ -191,6 +191,33 @@ void p2p_signal_lobby_query(void);
 and the slot cleared on every ready broker now, whatever their buckets, and
 the connections closed cleanly */
 void p2p_signal_lobby_quit(void);
+/* the player just asked for the brokers (opened the server browser,
+refreshed it, hosted, looked up a code): a broker waiting to try again after
+failing tries now (at most once each P2P_SIGNAL_KICK_INTERVAL ms) */
+void p2p_signal_kick(void);
+#define P2P_SIGNAL_KICK_INTERVAL 5000
+/* how the brokers are, for the server browser's and the host's status
+(p2p_lobby.c) */
+struct p2p_signal_counts
+{
+	/* in the list; tried at least once; connected and ready; ready and
+	carrying the server browser (retained messages and wildcards) */
+	int brokers, tried, ready, lobby;
+	/* subscribed to the public games' slots (SUBACK); holding this machine's
+	listing (its PUBACK, on this connection) */
+	int browsing, listing;
+	/* when signalling started (p2p_now), 0 if it has not */
+	unsigned long started_time;
+	/* when a broker last became able to carry the browser, or the slots'
+	subscription was acknowledged (p2p_now), 0 if never */
+	unsigned long lobby_time, browsing_time;
+};
+void p2p_signal_counts(struct p2p_signal_counts *counts);
+/* each broker on one line for the log: "broker.hivemq.com has it,
+broker.emqx.io: cannot connect (refused)"; what: 0 the brokers' state, 1 for
+browsing (subscribed or why not), 2 for the listing (acknowledged or why
+not) */
+void p2p_signal_brokers_text(char *text, int size, int what);
 
 /* ---------- p2p_adhoc.c: ad hoc play's bridge between the group and the
 tunnel */
@@ -337,6 +364,11 @@ void p2p_lobby_join_timed_out(const unsigned char *host_hash);
 void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_player_count);
 /* whether the game hosted is listed now, and whether the browser is open */
 int p2p_lobby_listed(void);
+/* p2p_lobby_hosting_status, under p2p_lock (p2p_status's) */
+int p2p_lobby_hosting_status_locked(char *text, int size);
+/* whether the brokers are wanted though nothing is hosted or browsed
+(p2p_lobby_reach_brokers): the p2p thread starts signalling */
+int p2p_lobby_brokers_wanted(void);
 int p2p_lobby_browsing(void);
 /* a message on a slot (its key hash in hex) through a broker; retained: the
 slot's retained copy, sent on subscribing */
