@@ -294,13 +294,43 @@ BOOL platform_offer_game_data(const char *destination)
 }
 #endif
 
+/* (frames between ticks: port/linux/game/render_interpolation.c) the
+setting as the frame being made has it: read again only as a frame starts
+(halo_interpolation_latch), so the tick on its thread and the frame drawn
+alongside it see the same */
+static int interpolation_enabled = -1;
+
 int halo_interpolation_enabled(void)
 {
-	static int enabled = -1;
+	if (interpolation_enabled < 0)
+		interpolation_enabled = config_boolean("display.interpolation");
+	return interpolation_enabled;
+}
 
-	if (enabled < 0)
-		enabled = config_boolean("display.interpolation");
-	return enabled;
+/* main.c, as a frame starts (no tick running): the Vita's settings panel
+changes HALO_INTERPOLATION mid-game, and takes effect at once */
+void halo_interpolation_latch(void)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen;
+
+	if (interpolation_enabled < 0)
+	{
+		settings_seen = halo_settings_generation;
+		interpolation_enabled = config_boolean("display.interpolation");
+	}
+	else if (settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_INTERPOLATION");
+		int enabled = setting && (!strcmp(setting, "true") || !strcmp(setting, "1"));
+
+		settings_seen = halo_settings_generation;
+		if (setting && enabled != interpolation_enabled)
+		{
+			platform_log("frame interpolation %s (settings panel)", enabled ? "on" : "off");
+			interpolation_enabled = enabled;
+		}
+	}
 }
 
 #if !defined(HALO_NOT_DESKTOP) && !defined(HALO_GXM_NULL)

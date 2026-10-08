@@ -289,6 +289,12 @@ static struct setting settings[] = {
 		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
 	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
 		"The most frames shown a second", 0, TAB_GRAPHICS },
+	/* (port/linux/game/render_interpolation.c: frames drawn between the
+	game's 30 ticks a second, blended; up to two a tick while both fit
+	(main.c), else one; triple buffered (vita_gxm.c). On, it is the frame
+	limit, and the weapon's blend is part of it. Live) */
+	{ "Frame interpolation", "HALO_INTERPOLATION", 0, 2, { "false", "true" }, { "Off", "On" },
+		"Up to 60 FPS: frames between the 30 Hz ticks", 0, TAB_GRAPHICS },
 	{ "FPS counter", "HALO_FRAMERATE_COUNTER", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
 	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
@@ -553,7 +559,6 @@ static const char *const performance_log_variables[3][2] = {
 /* the release's fixed defaults (not in the panel) */
 static const char *const fixed_defaults[][2] = {
 	{ "HALO_TICK_THREAD", "1" },
-	{ "HALO_INTERPOLATION", "false" },
 	{ "HALO_NO_VSYNC", "1" },
 	{ "HALO_STATIC_SCENERY", "1" },
 	/* (the netcode is the distributed one, the only one network version 9

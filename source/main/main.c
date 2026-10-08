@@ -2737,6 +2737,224 @@ static boolean main_tick_pacing_one_tick(
 	return one_tick;
 }
 
+/* (port) frame interpolation's pacing: the settings panel's Frame
+interpolation (HALO_INTERPOLATION, port/linux/game/render_interpolation.c).
+The game still ticks 30 times a second; a frame draws the world between the
+last two ticks, and up to two frames are drawn a tick, one as the tick
+starts and one half a tick on. A frame drawn between ticks costs a render of
+its own (and its update's per-frame work: game_frame, the sounds), so two
+frames a tick only while both fit in half a tick each: from the frames'
+busy times (less the pacing's sleep) averaged, those whose update ran a
+tick and those that ran none, and the game thread's own part of a frame
+(less its wait for the tick: what a frame between ticks would take). Else
+one frame a tick, still blended, phase-locked half a tick past each tick as
+the 30 FPS cap is: the game's rate is never lowered for the frames between,
+and the dynamic resolution's budget stays the tick's (d3d8_gxm.c). Back to
+two a tick only after a wait that doubles each time the two did not fit
+(2 s, up to 32 s), so a scene at the edge does not switch back and forth.
+
+HALO_INTERPOLATION_RATE (debug): 2 always two frames a tick, 1 always one.
+With the performance logging the frame-timing line counts the frames
+presented, those that drew a new tick and those drawn between ticks
+(frame_timing.c), and each switch is logged. */
+#define INTERPOLATION_HALF_TICK_MS (500.0f / TICKS_PER_SECOND)
+
+static struct
+{
+	boolean two_a_tick;
+	/* busy times averaged: frames whose update ran ticks, those that ran
+	none, and the game thread's own part of any */
+	real tick_frame_ms, between_frame_ms, own_ms;
+	long measured, frames_in_mode, overruns;
+	/* this frame: its start, its sleep, its wait for the tick, its update's
+	clock sample and ticks */
+	unsigned long long frame_started_us, slept_us, joined_us, update_us;
+	short update_ticks;
+	/* the game clock: the fraction of a tick an update left over, and when
+	that update's time was taken (main_update_time_unthrottled) */
+	real reference_fraction;
+	unsigned long long reference_us;
+	boolean reference_valid;
+	/* the end of the last paced frame */
+	unsigned long long paced_us;
+	/* two a tick again not before retry_us; the wait after the next miss;
+	when the mode last changed */
+	unsigned long long retry_us, retry_wait_us, changed_us;
+	long changes_logged;
+} main_interpolation_pacing;
+
+int halo_fixed_tick(void);
+int halo_fixed_tick_frames(void);
+int halo_repeatable_run(void);
+
+/* HALO_INTERPOLATION_RATE: 0 adaptive (unset), 1 or 2 frames a tick */
+static int main_interpolation_rate(
+	void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static int rate = -1;
+
+	if (rate < 0)
+	{
+		const char *setting = getenv("HALO_INTERPOLATION_RATE");
+
+		rate = setting && (atoi(setting) == 1 || atoi(setting) == 2) ? atoi(setting) : 0;
+	}
+	return rate;
+}
+
+static boolean main_interpolation_two_a_tick(
+	void)
+{
+	if (main_interpolation_rate())
+		return main_interpolation_rate() == 2;
+	return main_interpolation_pacing.two_a_tick;
+}
+
+/* the clock as an update left it (its leftover; 1 when paused or no game) */
+static void main_interpolation_reference(
+	real fraction)
+{
+	main_interpolation_pacing.reference_fraction = fraction;
+	main_interpolation_pacing.reference_us = main_interpolation_pacing.update_us;
+	main_interpolation_pacing.reference_valid = fraction >= 0.0f && fraction < 1.0f && game_in_progress();
+}
+
+/* (main_rasterizer_throttle) the frame ends at the next slot: half a slot
+past a tick (one a tick) or past a tick and past its half (two) */
+static void main_interpolation_sleep(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	extern void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+	real slot = main_interpolation_two_a_tick() ? 0.5f : 1.0f;
+	unsigned long long period = (unsigned long long)(slot * 1000000.0f / TICKS_PER_SECOND);
+	unsigned long long now, target;
+
+	if (!vita_host_time_us || !vita_host_sleep_us || halo_fixed_tick() || halo_repeatable_run())
+		return;
+	now = vita_host_time_us();
+	/* (only for a frame that fit in its slot, as the 30 FPS cap's phase
+	lock: a longer one is shown at once) */
+	if (main_interpolation_pacing.paced_us && now - main_interpolation_pacing.paced_us < period)
+	{
+		target = main_interpolation_pacing.paced_us + period;
+		if (main_interpolation_pacing.reference_valid)
+		{
+			/* (the clock at the last frame's end, from the last update's) */
+			real fraction = main_interpolation_pacing.reference_fraction +
+				(real)((double)(long long)(main_interpolation_pacing.paced_us - main_interpolation_pacing.reference_us) *
+					(TICKS_PER_SECOND / 1000000.0));
+			real phase = fraction - slot * (real)floor(fraction / slot);
+
+			if (phase >= 0.0f && phase < slot)
+			{
+				target = main_interpolation_pacing.paced_us +
+					(unsigned long long)((1.5f * slot - phase) * (1000000.0f / TICKS_PER_SECOND));
+			}
+		}
+		if (target > now)
+		{
+			vita_host_sleep_us((unsigned long)(target - now));
+			main_interpolation_pacing.slept_us += vita_host_time_us() - now;
+			now = vita_host_time_us();
+		}
+	}
+	main_interpolation_pacing.paced_us = now;
+}
+
+static void main_interpolation_switch(
+	boolean two_a_tick,
+	unsigned long long now)
+{
+	if (two_a_tick == main_interpolation_pacing.two_a_tick)
+		return;
+	if (!two_a_tick)
+	{
+		/* (the two did not fit: the next try waits longer) */
+		main_interpolation_pacing.retry_wait_us = main_interpolation_pacing.retry_wait_us ?
+			main_interpolation_pacing.retry_wait_us * 2 : 2000000ull;
+		if (main_interpolation_pacing.retry_wait_us > 32000000ull)
+			main_interpolation_pacing.retry_wait_us = 32000000ull;
+		main_interpolation_pacing.retry_us = now + main_interpolation_pacing.retry_wait_us;
+	}
+	if (main_interpolation_pacing.changes_logged < 60)
+	{
+		main_interpolation_pacing.changes_logged++;
+		platform_log("frame interpolation: %s a tick (frames that ran a tick %.1f ms, between ticks %.1f ms, "
+			"the game thread's own %.1f ms)",
+			two_a_tick ? "two frames" : "one frame", main_interpolation_pacing.tick_frame_ms,
+			main_interpolation_pacing.between_frame_ms, main_interpolation_pacing.own_ms);
+	}
+	main_interpolation_pacing.two_a_tick = two_a_tick;
+	main_interpolation_pacing.frames_in_mode = 0;
+	main_interpolation_pacing.overruns = 0;
+	main_interpolation_pacing.changed_us = now;
+}
+
+/* the frame is over: its times measured, the number of frames a tick
+decided for the next */
+static void main_interpolation_frame_end(
+	boolean rendered)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	unsigned long long now, busy_us;
+	real busy_ms, own_ms;
+
+	if (!vita_host_time_us || !main_interpolation_pacing.frame_started_us)
+		return;
+	now = vita_host_time_us();
+	busy_us = now - main_interpolation_pacing.frame_started_us;
+	busy_us = busy_us > main_interpolation_pacing.slept_us ? busy_us - main_interpolation_pacing.slept_us : 0;
+	busy_ms = (real)busy_us / 1000.0f;
+	own_ms = busy_us > main_interpolation_pacing.joined_us ?
+		(real)(busy_us - main_interpolation_pacing.joined_us) / 1000.0f : 0.0f;
+	main_interpolation_pacing.frame_started_us = 0;
+	/* (frames of a running game only: a paused one's frames are light) */
+	if (!halo_interpolation_enabled() || !rendered || !game_in_progress() || game_time_get_paused())
+		return;
+	if (main_interpolation_pacing.update_ticks > 0)
+	{
+		main_interpolation_pacing.tick_frame_ms += main_interpolation_pacing.tick_frame_ms > 0.0f ?
+			(busy_ms - main_interpolation_pacing.tick_frame_ms) * 0.125f : busy_ms;
+	}
+	else
+	{
+		main_interpolation_pacing.between_frame_ms += main_interpolation_pacing.between_frame_ms > 0.0f ?
+			(busy_ms - main_interpolation_pacing.between_frame_ms) * 0.125f : busy_ms;
+	}
+	main_interpolation_pacing.own_ms += main_interpolation_pacing.measured ?
+		(own_ms - main_interpolation_pacing.own_ms) * 0.125f : own_ms;
+	main_interpolation_pacing.measured++;
+	main_interpolation_pacing.frames_in_mode++;
+	if (main_interpolation_rate())
+		return;
+	if (main_interpolation_pacing.two_a_tick)
+	{
+		main_interpolation_pacing.overruns = busy_ms > 1.3f * INTERPOLATION_HALF_TICK_MS ?
+			main_interpolation_pacing.overruns + 1 : 0;
+		if (main_interpolation_pacing.overruns >= 3 ||
+			(main_interpolation_pacing.frames_in_mode >= 8 &&
+				(main_interpolation_pacing.tick_frame_ms > 1.05f * INTERPOLATION_HALF_TICK_MS ||
+					main_interpolation_pacing.between_frame_ms > 1.05f * INTERPOLATION_HALF_TICK_MS)))
+		{
+			main_interpolation_switch(FALSE, now);
+		}
+		else if (now - main_interpolation_pacing.changed_us > 10000000ull)
+		{
+			/* (ten seconds of two a tick: the next miss waits 2 s again) */
+			main_interpolation_pacing.retry_wait_us = 0;
+		}
+	}
+	else if (main_interpolation_pacing.frames_in_mode >= 30 && now >= main_interpolation_pacing.retry_us &&
+		main_interpolation_pacing.tick_frame_ms <= 0.85f * INTERPOLATION_HALF_TICK_MS &&
+		main_interpolation_pacing.own_ms <= 0.85f * INTERPOLATION_HALF_TICK_MS)
+	{
+		main_interpolation_switch(TRUE, now);
+	}
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2845,6 +3063,16 @@ static void main_update_time_unthrottled(
 
 		if (halo_fixed_tick() && !main_globals.movie)
 			seconds_elapsed = 1.0f / TICKS_PER_SECOND;
+		/* (debug) HALO_FIXED_TICK_FRAMES=<n>: n frames a tick instead
+		(tick_hash.c), the frames between drawn with frame interpolation */
+		if (halo_fixed_tick() && !main_globals.movie && halo_fixed_tick_frames() > 1)
+			seconds_elapsed = 0.03333333507180214f / (real)halo_fixed_tick_frames();
+	}
+	{
+		/* (frame interpolation's pacing: when this frame's time was taken) */
+		extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+		main_interpolation_pacing.update_us = vita_host_time_us ? vita_host_time_us() : 0;
 	}
 
 	main_globals.frame_start_milliseconds = system_milliseconds();
@@ -3154,7 +3382,14 @@ void main_rasterizer_throttle(
 	}
 
 #ifdef HALO_LINUX
-	if (halo_frame_unthrottled() && !halo_interpolation_enabled())
+	if (halo_frame_unthrottled() && halo_interpolation_enabled())
+	{
+		/* (port) frame interpolation: one or two frames a tick, each ending
+		at its slot of the tick (main_interpolation_pacing), whatever
+		display.frame_cap says */
+		main_interpolation_sleep();
+	}
+	else if (halo_frame_unthrottled() && !halo_interpolation_enabled())
 	{
 		/* (port) unthrottled without interpolation: the picture changes only
 		with the 30 Hz ticks, so frames are capped at 30 a second by sleeping
@@ -4359,6 +4594,7 @@ void main_loop(
 #ifdef HALO_LINUX
 	boolean tick_running = FALSE;
 	boolean simulate;
+	boolean presented;
 #endif
 
 	if (!game_in_editor())
@@ -4480,6 +4716,18 @@ void main_loop(
 #ifdef HALO_LINUX
 		halo_frame_timing(_frame_timing_frame_start, 0);
 		MAIN_SPLIT(-1);
+		/* (frame interpolation: the setting as this frame has it, and the
+		frame's times for its pacing) */
+		halo_interpolation_latch();
+		{
+			extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+			main_interpolation_pacing.frame_started_us = vita_host_time_us ? vita_host_time_us() : 0;
+			main_interpolation_pacing.slept_us = 0;
+			main_interpolation_pacing.joined_us = 0;
+			main_interpolation_pacing.update_ticks = 0;
+		}
+		presented = FALSE;
 #endif
 		input_frame_begin();
 		input_update();
@@ -4591,6 +4839,18 @@ void main_loop(
 						halo_view_points_capture();
 						game_time_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 						halo_frame_timing(_frame_timing_tick_end, 0);
+						main_interpolation_pacing.update_ticks = game_time_get_elapsed();
+						main_interpolation_reference(game_time_get_tick_fraction());
+						/* (frame interpolation draws from the poses as each
+						tick left them: render_interpolation.c) */
+						if (halo_interpolation_enabled())
+						{
+							void render_tick_poses_capture(void);
+							void render_tick_poses_publish(void);
+
+							render_tick_poses_capture();
+							render_tick_poses_publish();
+						}
 					}
 #else
 					game_time_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
@@ -4600,8 +4860,10 @@ void main_loop(
 						(main_globals.halt_time_scale &&
 							(game_time_get_paused() || game_time_get_elapsed()>0 || game_time_get_speed()<1.0f));
 #ifdef HALO_LINUX
-					/* frames between ticks too (render_interpolation.c) */
-					if (halo_interpolation_enabled())
+					/* frames between ticks too (render_interpolation.c),
+					while two a tick fit (main_interpolation_pacing); else
+					one a tick, as without */
+					if (halo_interpolation_enabled() && main_interpolation_two_a_tick())
 						render_frame = main_globals.main_menu_scenario_loaded || main_globals.halt_time_scale;
 #endif
 					render_frame &= !game_engine_running() || game_time_get()>=3;
@@ -4706,14 +4968,28 @@ void main_loop(
 			if (render_frame && !debug_no_drawing)
 			{
 				main_present_frame();
+#ifdef HALO_LINUX
+				presented = TRUE;
+#endif
 			}
 #ifdef HALO_LINUX
 			halo_frame_timing(_frame_timing_present_end, 0);
 			MAIN_SPLIT(-1);
 			if (tick_running)
 			{
+				extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+				unsigned long long join_started = vita_host_time_us ? vita_host_time_us() : 0;
+
 				main_tick_pacing_presented();
 				halo_tick_thread_join();
+				if (join_started)
+					main_interpolation_pacing.joined_us = vita_host_time_us() - join_started;
+				{
+					extern volatile short halo_render_elapsed_ticks;
+
+					main_interpolation_pacing.update_ticks = halo_render_elapsed_ticks;
+				}
+				main_interpolation_reference(halo_render_tick_fraction_get());
 				main_tick_pacing_joined();
 				MAIN_SPLIT(_main_split_join);
 				halo_frame_timing_tick_threaded(halo_tick_thread_last_us() * 1000ull);
@@ -4745,6 +5021,12 @@ void main_loop(
 		input_frame_end();
 		profile_frame_end();
 #ifdef HALO_LINUX
+		/* (frame interpolation: the frame's times for the pacing, and the
+		frames presented, those of a new tick and those between, for the
+		frame-timing line: frame_timing.c) */
+		main_interpolation_frame_end(presented);
+		halo_frame_timing_presented(presented, presented && game_in_progress() && halo_interpolation_enabled() &&
+			!render_interpolation_frame_drew_new_tick(), halo_interpolation_enabled(), main_interpolation_two_a_tick());
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
 		halo_load_profile_frame_end();
 		main_split_report();

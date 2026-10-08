@@ -4777,6 +4777,17 @@ static void dynres_configure(void)
 	int enabled, forced = force && atoi(force) > 0 ? dynres_level_of(atoi(force) / 100.0f) : 0;
 	float budget_ms = cap && atoi(cap) > 0 ? 1000.0f / (float)atoi(cap) : 1000.0f / 30.0f;
 
+	/* (frame interpolation: the tick's budget whatever the frame limit -
+	the frames between ticks are drawn only while there is time for them
+	(main.c), and the resolution is not lowered to make that time; the
+	panel's value, which the game reads as the next frame starts) */
+	{
+		int halo_interpolation_enabled(void);
+		const char *interpolation = getenv("HALO_INTERPOLATION");
+
+		if (interpolation ? !strcmp(interpolation, "true") || !strcmp(interpolation, "1") : halo_interpolation_enabled())
+			budget_ms = 1000.0f / 30.0f;
+	}
 	if (floor < DYNRES_UNITS / 2)
 		floor = DYNRES_UNITS / 2;
 	if (forced && forced < DYNRES_UNITS / 2)
@@ -4784,7 +4795,8 @@ static void dynres_configure(void)
 	if (budget && atof(budget) > 1.0)
 		budget_ms = (float)atof(budget);
 	enabled = (scale && !strcmp(scale, "dynamic")) || forced || (cycle && atoi(cycle) > 0);
-	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force)
+	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force ||
+		(enabled && budget_ms != dynres_config.budget_ms))
 		platform_log("dynamic resolution: %s%s (floor %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
 			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (double)budget_ms,
 			cycle && atoi(cycle) > 0 ? ", cycling" : "", sim && atof(sim) > 0.0 ? ", GPU simulated" : "");
@@ -7030,6 +7042,13 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 
 		halo_frame_timing_recent(&frame_ms, &tick_ms, &render_ms);
 		vgxm_overlay_set(frame_ms > 0.0f ? 1000.0f / frame_ms : 0.0f, tick_ms, render_ms);
+		{
+			/* (frame interpolation's frames go out triple buffered:
+			vita_gxm.c, "the display's buffers") */
+			int halo_interpolation_enabled(void);
+
+			vgxm_display_buffering(halo_interpolation_enabled() ? 3 : 2);
+		}
 		command = command_begin(_command_present);
 		before = vita_host_time_us();
 
