@@ -13,8 +13,13 @@
 #   code     the host (Blood Gulch, slayer then slayer on Chill Out: a map
 #            change) shows a code; the joiner joins it, plays, leaves at
 #            HALO_TEST_REJOIN seconds and joins again
-#   lobby    the host is listed in the public lobby; the joiner browses it
-#            and joins the first game
+#   lobby    the host's game is public: listed, signed, in the server browser
+#            (p2p_lobby.c); the joiner browses it and joins the first game by
+#            its listing; the host's listing is closed (a tombstone, then the
+#            slot cleared) when it quits
+#   lobbypw  the same with a password (HALO_TEST_LOBBY_PASSWORD, default
+#            "hunter2"): the game is listed locked, and the joiner opens it
+#            with the password
 #   pc       the host is a Vita build, the joiner a PC build: by code (it
 #            must find nothing: Vitas signal on their own topics) and on
 #            one LAN with the host (it must never list or join the game)
@@ -25,6 +30,13 @@
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
+#   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
+#            LAN; the host takes HALO_TEST_MAX_PLAYERS players (16, the Play
+#            page's Max players): the joiners past that must be told the
+#            game is full, the others play (HALO_TEST_HOST_ENV: more for the
+#            host, e.g. HALO_TICK_SLOWDOWN=19 for a Vita-like host;
+#            HALO_TEST_JOIN_ENV: more for every joiner; HALO_TEST_JOIN_STAGGER:
+#            seconds between joiners, default 1)
 #   solo     online off (the Vita's default): one copy hosts Blood Gulch
 #            alone; there must be no p2p thread, and the game must run
 #   coop     co-op over the network: the host hosts a campaign level
@@ -73,6 +85,8 @@
 #                    the code as the first does (map sharing: two downloads at
 #                    once); its maps folder HALO_TEST_DATA_JOINER2, its CPUs the
 #                    third of HALO_TEST_CPUS; the caller checks its log
+#   HALO_TEST_MQTT311  1: the broker refuses MQTT 5, as a 3.1.1 broker does
+#                    (the copies must connect again with 3.1.1)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -155,7 +169,8 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
 [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] && side join2 10.10.3 192.168.3
-python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 > "$out/broker.log" 2>&1 & pids="$pids $!"
+python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 \
+	$([ "${HALO_TEST_MQTT311:-0}" = 1 ] && echo --mqtt311) > "$out/broker.log" 2>&1 & pids="$pids $!"
 python3 "$here/stun_test_server.py" --host 198.51.100.1 --port 3478 > "$out/stun.log" 2>&1 & pids="$pids $!"
 sleep 1
 
@@ -197,14 +212,20 @@ status=0
 fail() { echo "FAIL ($mode): $*"; status=1; }
 
 case $mode in
-code|lobby)
+code|lobby|lobbypw)
 	extra=
-	[ "$mode" = lobby ] && extra="HALO_NET_LOBBY_PUBLIC=true"
+	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
+	[ "$mode" = lobby ] && extra="HALO_NET_HOST_PUBLIC=true"
+	[ "$mode" = lobbypw ] && extra="HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_PASSWORD=$password"
 	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $extra; host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
-	if [ "$mode" = code ]; then join_mode="join-code:$code"; else join_mode=join-public; fi
+	case $mode in
+	code) join_mode="join-code:$code" ;;
+	lobby) join_mode=join-public ;;
+	lobbypw) join_mode="join-public:$password" ;;
+	esac
 	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$join_mode \
 		HALO_NETWORK_TEST_REJOIN=$rejoin HALO_TEST_INPUT=bot:2; join_pid=$last_pid
 	join2_pid=
@@ -214,7 +235,7 @@ code|lobby)
 	fi
 	wait $join_pid $host_pid $join2_pid 2>/dev/null
 	grep -aE "Internet play|network test: (hosting|starting|map|game|the next|join|leav|the public)" "$out/host/run.log" | head -30 > "$out/host.summary"
-	grep -aE "Internet play|network test: (join|leav|the public|search)" "$out/joiner/run.log" | head -30 > "$out/joiner.summary"
+	grep -aE "Internet play|network test: (join|leav|the public|search)" "$out/joiner/run.log" | grep -v "join: opening" | head -30 > "$out/joiner.summary"
 	echo "--- host"; cat "$out/host.summary"
 	echo "--- joiner"; cat "$out/joiner.summary"
 	# (seconds the joiner logged a game being played with two players in it;
@@ -231,18 +252,39 @@ code|lobby)
 		echo "joiner's seconds with two players after joining again: $again"
 		[ "$again" -ge 10 ] || fail "the joiner did not play again after leaving"
 	fi
-	if [ "$mode" = lobby ]; then
-		sends=$(grep -c 'publish .*hcev/3/lobby/.* retained' "$out/broker.log")
-		echo "lobby entry sent $sends times in $seconds s"
-		[ "$sends" -le $((seconds / 10 + 5)) ] || fail "the host sent its lobby entry $sends times"
+	if [ "$mode" != code ]; then
+		# (the listing on the host's slot, at least once; republished every 30 s
+		# and when the game changes, at most every 5 s)
+		sends=$(grep -c 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained qos1' "$out/broker.log")
+		echo "listing published $sends times in $seconds s"
+		[ "$sends" -ge 1 ] || fail "the host never published its listing"
+		[ "$sends" -le $((seconds / 5 + 10)) ] || fail "the host published its listing $sends times"
+		grep -aq 'network test: the public games list "' "$out/joiner/run.log" || fail "the joiner never listed the host's game"
+		grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} 0 B retained' "$out/broker.log" ||
+			fail "the host's slot was never cleared (its tombstone and clearing when it quit, or its will)"
+		grep -q 'publish .* hceu/' "$out/broker.log" && fail "a Vita build published on the PCs' topics"
+		if [ "$mode" = lobbypw ]; then
+			grep -aq 'network test: the public games list ".*\[pw\]' "$out/joiner/run.log" ||
+				fail "the game with a password was not listed locked"
+			grep -aq "network test: joining the public game with its password" "$out/joiner/run.log" ||
+				fail "the joiner did not join the locked game with its password"
+		fi
 	fi
 	;;
 pc)
 	[ -n "$pc" ] || { echo "pc mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
-	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_LOBBY_PUBLIC=true; host_pid=$last_pid
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=VitaHost
+	host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; exit 1; }
 	echo "host's code: $code"
+	# browsing the server browser, from a network of its own (it must not list
+	# the Vita's game: the Vita's listings are on the Vitas' topics, signed
+	# under their label; alone there, so that the other PCs' games are not on
+	# its LAN)
+	side browse 10.10.3 192.168.3
+	run_copy pc_browse "$browse_machine" "$pc" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_NET_HOST_PUBLIC=false HALO_EXIT_AFTER=60 HALO_TEST_INPUT=bot:2; pc0=$last_pid
 	# by code, from another network
 	run_copy pc_code "$join_machine" "$pc" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
 		HALO_EXIT_AFTER=70 HALO_TEST_INPUT=bot:2; pc1=$last_pid
@@ -258,8 +300,13 @@ pc)
 	in_ns "$lan" ip route add default via 192.168.1.1
 	run_copy pc_lan "$lan" "$pc" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_EXIT_AFTER=70 \
 		HALO_TEST_INPUT=bot:2; pc2=$last_pid
-	wait $pc1 $pc2 2>/dev/null
+	wait $pc0 $pc1 $pc2 2>/dev/null
 	kill $host_pid 2>/dev/null; wait $host_pid 2>/dev/null
+	echo "--- pc browsing"; grep -aE "Internet play|network test" "$out/pc_browse/run.log" | grep -v tick | head -8
+	grep -aq 'network test: the public games list "VitaHost"' "$out/pc_browse/run.log" &&
+		fail "the PC build listed the Vita's public game"
+	grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log" ||
+		fail "the Vita host never listed its game (so the browsing test proves nothing)"
 	echo "--- pc by code"; grep -aE "Internet play|network test" "$out/pc_code/run.log" | head -12
 	echo "--- pc on the LAN"; grep -aE "network test|Vita|joining" "$out/pc_lan/run.log" | head -12
 	grep -aq "no game has code" "$out/pc_code/run.log" || fail "the PC build did not report the code as unknown"
@@ -271,7 +318,8 @@ pc)
 pchost)
 	# the other way round: a PC hosts, a Vita on its LAN searches
 	[ -n "$pc" ] || { echo "pchost mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
-	run_copy host "$host_machine" "$pc" "$cpu_a" $host_env HALO_EXIT_AFTER=90; host_pid=$last_pid
+	run_copy host "$host_machine" "$pc" "$cpu_a" $host_env HALO_EXIT_AFTER=90 HALO_NET_HOST_PUBLIC=true \
+		HALO_NET_LOBBY_NAME=PCHost; host_pid=$last_pid
 	holder; lan=$held
 	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
 	in_ns "$host_router" ip link set m2_host netns "$lan"
@@ -283,7 +331,17 @@ pchost)
 	in_ns "$lan" ip route add default via 192.168.1.1
 	run_copy vita_lan "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_EXIT_AFTER=80 \
 		HALO_TEST_INPUT=bot:2; vita1=$last_pid
-	wait $vita1 $host_pid 2>/dev/null
+	# a Vita browsing the server browser from a network of its own: the PC's
+	# public game must not show
+	side browse 10.10.3 192.168.3
+	run_copy vita_browse "$browse_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_NET_HOST_PUBLIC=false HALO_EXIT_AFTER=70 HALO_TEST_INPUT=bot:2; vita2=$last_pid
+	wait $vita1 $vita2 $host_pid 2>/dev/null
+	echo "--- vita browsing"; grep -aE "Internet play|network test" "$out/vita_browse/run.log" | grep -v tick | head -8
+	grep -aq 'network test: the public games list "PCHost"' "$out/vita_browse/run.log" &&
+		fail "the Vita build listed the PC's public game"
+	grep -q 'publish .* hceu/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log" ||
+		fail "the PC host never listed its game (so the browsing test proves nothing)"
 	echo "--- vita on the PC's LAN"; grep -aE "network test" "$out/vita_lan/run.log" | grep -v tick | head -8
 	grep -aq "network test: joining$" "$out/vita_lan/run.log" && fail "the Vita build joined the PC's game"
 	grep -aq "ignoring a host that is not a Vita" "$out/vita_lan/data/debug.txt" ||
@@ -478,6 +536,54 @@ coopmenu)
 	echo "joiner's seconds on the next level with both players alive: $again"
 	[ "$again" -ge 10 ] || fail "both players were alive on the next level for $again s (10 wanted)"
 	;;
+many)
+	# online off, the host and HALO_TEST_JOINERS joiners (default 3) on the
+	# host's LAN (system link); the host takes HALO_TEST_MAX_PLAYERS players
+	# (the Play page's Max players; default 16). Every joiner past that is
+	# told the game is full; the others play. The host's frame timing
+	# (HALO_FRAME_TIMING) and net detail go in its log for the caller.
+	joiners=${HALO_TEST_JOINERS:-3}
+	most=${HALO_TEST_MAX_PLAYERS:-16}
+	stagger=${HALO_TEST_JOIN_STAGGER:-1}
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NET_LOBBY_NAME="Many test" \
+		HALO_NET_MAX_PLAYERS=$most HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} \
+		HALO_NETWORK_TEST_START=$((20 + joiners * stagger + 10)) HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50} \
+		HALO_TEST_INPUT=bot:1 HALO_FRAME_TIMING=150 HALO_NET_PROFILE=1 ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	sleep 5
+	join_pids=
+	for i in $(seq 1 "$joiners"); do
+		holder; lan=$held
+		in_ns "$host_router" ip link add "l${i}_h" type veth peer name "m${i}_h"
+		in_ns "$host_router" ip link set "m${i}_h" netns "$lan"
+		in_ns "$host_router" ip link set "l${i}_h" master b_host
+		in_ns "$host_router" ip link set "l${i}_h" up
+		in_ns "$lan" ip link set lo up
+		in_ns "$lan" ip addr add "192.168.1.$((10 + i))/24" broadcast 192.168.1.255 dev "m${i}_h"
+		in_ns "$lan" ip link set "m${i}_h" up
+		in_ns "$lan" ip route add default via 192.168.1.1
+		run_copy "joiner$i" "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_NET_PLAYER_NAME="Joiner$i" HALO_TEST_INPUT=bot:$((i + 1)) ${HALO_TEST_JOIN_ENV:-}; join_pids="$join_pids $last_pid"
+		sleep "$stagger"
+	done
+	wait $join_pids $host_pid 2>/dev/null
+	full=0 played=0
+	for i in $(seq 1 "$joiners"); do
+		log=$out/joiner$i/run.log
+		if grep -aq "The game is full" "$log"; then
+			full=$((full + 1))
+		elif grep -a "network test: tick" "$log" | grep -aq "| playing"; then
+			played=$((played + 1))
+		fi
+	done
+	echo "joiners that played: $played, told the game is full: $full (max players $most)"
+	grep -aE "Many test|the game takes" "$out/host/data/debug.txt" | head -3
+	grep -a "frame-timing" "$out/host/run.log" | tail -4
+	grep -aq "joining the game 'Many test'" "$out/joiner1/data/debug.txt" ||
+		fail "the first joiner did not see the host's lobby name in its list"
+	expected=$((joiners < most - 1 ? joiners : most - 1))
+	[ "$played" -ge "$expected" ] || fail "$played joiners played ($expected wanted)"
+	[ "$full" -eq $((joiners - expected)) ] || fail "$full joiners were told the game is full ($((joiners - expected)) wanted)"
+	;;
 solo)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=local:bloodgulch \
 		HALO_NETWORK_TEST_START=10 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
@@ -489,7 +595,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|lan|pc|pchost|adhoc|solo|coop|coopmenu" >&2
+	echo "usage: $0 code|lobby|lobbypw|lan|pc|pchost|adhoc|many|solo|coop|coopmenu" >&2
 	exit 2
 	;;
 esac

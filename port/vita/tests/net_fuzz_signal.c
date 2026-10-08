@@ -4,20 +4,22 @@ NET_FUZZ_SIGNAL.C
 A fuzz target for internet play's signalling (port/linux/src/p2p_signal.c,
 included here whole for its statics): what anyone who can publish on the
 public MQTT brokers can send a machine, which reads the brokers' packets
-(MQTT 3.1.1), a host's JOIN requests, a joiner's ACCEPT answers, a code's
-record and the public lobby's entries.
+(MQTT 5, and 3.1.1 every other input), a host's JOIN requests, a joiner's
+ACCEPT answers, a code's record and the server browser's slots and queries
+(whose listings p2p_lobby.c reads: p2p_lobby_fuzz.c fuzzes that).
 
 Each input starts with the machine connected to one broker, hosting (with a
-code, and listed in the lobby), joining another host, looking up a code and
-browsing the lobby at once, so that every kind of message is read. An input
+code, and listed in the server browser), joining another host, looking up
+a code and browsing the server browser at once, so that every kind of
+message is read. An input
 is a list of records, each a kind, a 16-bit length and that many bytes:
   0  bytes from the broker, as they come (the framing itself)
   1  a PUBLISH on the host's topic, sealed with its token's key: a JOIN
   2  an ACCEPT from the joined host, sealed and tagged as the real host
      would (its key, the joiner's nonce): the rest is the fuzzer's
   3  a PUBLISH on the code's topic, sealed with the code's key: a record
-  4  a lobby entry: the topic's end (its first byte is the length), then
-     the entry, unsealed (anyone can send one)
+  4  a server browser's slot: the topic's end (its first byte is the
+     length), then the listing, unsealed (anyone can send one)
   5  a JOIN proven as a real joiner would (its own key, the host's nonce
      and a tag): the rest, its nonce and addresses, the fuzzer's
   6  the clock moves on (the first byte, in tenths of a second), and a pass
@@ -126,9 +128,40 @@ void p2p_code_found(const char *text)
 }
 void p2p_invite_received(const char *text) { (void)text; }
 
+/* the server browser's (p2p_lobby.c): what reaches it is within bounds */
+static int fuzz_slots_heard;
+void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, int size, int retained)
+{
+	static unsigned char copy[MAXIMUM_LISTING_SIZE];
+
+	(void)retained;
+	if (strlen(hash_text) >= TOPIC_SIZE || size < 0 || size > MAXIMUM_LISTING_SIZE)
+		abort();
+	if (size)
+		memcpy(copy, payload, (size_t)size);
+	fuzz_slots_heard++;
+}
+void p2p_lobby_query_heard(void) {}
+void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size)
+{
+	char text[2 * P2P_KEY_HASH_SIZE + 1];
+
+	p2p_hex(key_hash, P2P_KEY_HASH_SIZE, text);
+	snprintf(topic, (size_t)size, "%s%s", P2P_LOBBY_SLOT_PREFIX, text);
+}
+void config_folder(char *path, size_t size) { snprintf(path, size, "./"); }
+char *config_file_read(const char *path, size_t *size) { (void)path; (void)size; return NULL; }
+
 /* ---------- the state each input starts from */
 
+static void fuzz_reset_protocol(int protocol);
+
 static void fuzz_reset(void)
+{
+	fuzz_reset_protocol(4);
+}
+
+static void fuzz_reset_protocol(int protocol)
 {
 	static int keys_made;
 	struct broker *broker;
@@ -153,12 +186,22 @@ static void fuzz_reset(void)
 	broker->socket = 9;
 	broker->state = _broker_ready;
 	broker->heard_time = broker->sent_time = net_fuzz_clock;
+	broker->protocol = protocol;
+	broker->retain_available = broker->wildcard_available = 1;
+	broker->keep_alive = KEEP_ALIVE_SECONDS;
+	broker->receive_maximum = MAXIMUM_IN_FLIGHT;
+	broker->publish_tokens = PUBLISH_BURST;
+	broker->publish_time = net_fuzz_clock;
 	p2p_signal_host(fuzz_token, "ABCD-EFGH");
-	p2p_signal_set_lobby(1, "ABCD-EFGH", "fuzz", 1, 16);
+	p2p_signal_lobby_topics(1, 1);
+	{
+		static const unsigned char listing[] = "a listing";
+
+		p2p_signal_lobby_publish(listing, sizeof(listing), 0);
+	}
 	p2p_key_hash(fuzz_host_public, host_hash);
 	p2p_signal_join(host_hash, fuzz_join_token);
 	p2p_signal_lookup_code("WXYZ2345", NULL);
-	p2p_signal_browse(1);
 	broker->input_size = 0;
 	/* (the work of the two keys the harness's messages come from, done:
 	as a joiner that asked before, and a host that answered before) */
@@ -183,6 +226,9 @@ static void fuzz_publish(const char *topic, const unsigned char *payload, int si
 
 	if (broker->socket < 0 || remaining > BUFFER_SIZE - 8)
 		return;
+	/* (MQTT 5: no properties) */
+	if (broker->protocol == 5)
+		remaining++;
 	packet[length++] = 0x30;
 	do
 	{
@@ -195,6 +241,8 @@ static void fuzz_publish(const char *topic, const unsigned char *payload, int si
 	packet[length++] = (unsigned char)topic_size;
 	memcpy(packet + length, topic, (size_t)topic_size);
 	length += topic_size;
+	if (broker->protocol == 5)
+		packet[length++] = 0;
 	memcpy(packet + length, payload, (size_t)size);
 	length += size;
 	if (broker->input_size + length > BUFFER_SIZE)
@@ -262,11 +310,11 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 
 		if (end > size - 1)
 			end = size > 0 ? size - 1 : 0;
-		if (end > (int)sizeof(topic) - (int)strlen(LOBBY_TOPIC_PREFIX) - 1)
-			end = (int)sizeof(topic) - (int)strlen(LOBBY_TOPIC_PREFIX) - 1;
-		snprintf(topic, sizeof(topic), "%s", LOBBY_TOPIC_PREFIX);
-		memcpy(topic + strlen(LOBBY_TOPIC_PREFIX), data + 1, (size_t)end);
-		topic[strlen(LOBBY_TOPIC_PREFIX) + end] = 0;
+		if (end > (int)sizeof(topic) - (int)strlen(P2P_LOBBY_SLOT_PREFIX) - 1)
+			end = (int)sizeof(topic) - (int)strlen(P2P_LOBBY_SLOT_PREFIX) - 1;
+		snprintf(topic, sizeof(topic), "%s", P2P_LOBBY_SLOT_PREFIX);
+		memcpy(topic + strlen(P2P_LOBBY_SLOT_PREFIX), data + 1, (size_t)end);
+		topic[strlen(P2P_LOBBY_SLOT_PREFIX) + end] = 0;
 		/* (topics never hold a 0: the rest is cut there) */
 		fuzz_publish(topic, data + 1 + end, size > 0 ? size - 1 - end : 0);
 		break;
@@ -308,6 +356,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 		broker->socket = 9;
 		broker->state = _broker_ready;
 		broker->heard_time = broker->sent_time = net_fuzz_clock;
+		broker->publish_tokens = PUBLISH_BURST;
 	}
 }
 
@@ -334,25 +383,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	const unsigned char *cursor = data, *end = data + size;
 	const unsigned char *record;
 	int kind, record_size, count = 0;
-	struct p2p_lobby_entry entry;
-	int index;
 
-	fuzz_reset();
+	/* (MQTT 3.1.1, and 5 for an input of odd length) */
+	fuzz_reset_protocol(size & 1 ? 5 : 4);
 	while (count++ < 64 && net_fuzz_next_record(&cursor, end, &kind, &record, &record_size))
 		fuzz_record(kind, record, record_size);
-	/* what a menu shows of the lobby: ended, and only what draws */
-	for (index = 0; p2p_signal_lobby_entry(index, &entry); index++)
-	{
-		const char *character;
-
-		if (!memchr(entry.name, 0, sizeof(entry.name)) || !memchr(entry.code, 0, sizeof(entry.code)))
-			abort();
-		for (character = entry.name; *character; character++)
-		{
-			if ((unsigned char)*character < 32 || (unsigned char)*character > 126)
-				abort();
-		}
-	}
 	return 0;
 }
 
@@ -366,68 +401,25 @@ static void fuzz_check(int condition, const char *what)
 	fuzz_failures += !condition;
 }
 
-static int fuzz_lobby_count(void)
-{
-	struct p2p_lobby_entry entry;
-	int count = 0;
-
-	while (p2p_signal_lobby_entry(count, &entry))
-		count++;
-	return count;
-}
-
 int net_fuzz_checks(void)
 {
 	static unsigned char message[MAXIMUM_MESSAGE_SIZE + 64];
 	static unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD + 64];
-	struct p2p_lobby_entry entry;
 	char topic[TOPIC_SIZE + 16];
 	int size, index, sent;
 
-	/* the public lobby: unsealed, from anyone */
+	/* the server browser's slots: what comes is passed on (p2p_lobby.c
+	checks it), within bounds; a listing too long for one is not */
 	fuzz_reset();
-	size = 0;
-	message[size++] = _message_lobby;
-	message[size++] = RECORD_VERSION;
-	message[size++] = 0;
-	message[size++] = 17;
-	memcpy(message + size, "ABCDEFGH", 8);
-	size += 8;
-	message[size++] = 200;
-	message[size++] = 3;
-	message[size++] = 9;
-	memcpy(message + size, "x%s\n\x1b[2Jy", 9);
-	size += 9;
-	snprintf(topic, sizeof(topic), "%s0123456789ab", LOBBY_TOPIC_PREFIX);
-	fuzz_publish(topic, message, size);
-	fuzz_check(p2p_signal_lobby_entry(0, &entry) && !strcmp(entry.name, "x%s??[2Jy") && entry.players == 200 &&
-		!strcmp(entry.host, "0123456789ab"), "a lobby entry's name is shown only as printable ASCII");
-	message[4] = '1';
-	snprintf(topic, sizeof(topic), "%s0123456789ac", LOBBY_TOPIC_PREFIX);
-	fuzz_publish(topic, message, size);
-	message[4] = 'A';
-	message[size - 10] = 40;
-	fuzz_publish(topic, message, size);
-	snprintf(topic, sizeof(topic), "%s0123456789AB", LOBBY_TOPIC_PREFIX);
-	fuzz_publish(topic, message, size);
-	fuzz_check(fuzz_lobby_count() == 1, "nor a code with a letter not in its alphabet, a name past the entry, an identifier "
-		"not in lower-case hexadecimal");
-	for (index = 0; index < 2 * MAXIMUM_LOBBIES; index++)
-	{
-		message[size - 10] = 9;
-		snprintf(topic, sizeof(topic), "%s%012x", LOBBY_TOPIC_PREFIX, 0x100000 + index);
-		fuzz_publish(topic, message, size);
-	}
-	fuzz_check(fuzz_lobby_count() == MAXIMUM_LOBBIES, "a flood of entries keeps no more than the lobby's places");
-	net_fuzz_clock += LOBBY_STALE_TIME + 1000;
-	{
-		int none[1];
+	memset(message, 'L', 300);
+	snprintf(topic, sizeof(topic), "%s0123456789abcdef0123456789abcdef", P2P_LOBBY_SLOT_PREFIX);
+	fuzz_slots_heard = 0;
+	fuzz_publish(topic, message, 300);
+	fuzz_check(fuzz_slots_heard == 1, "a slot's listing is passed on to the server browser");
+	fuzz_publish(topic, message, MAXIMUM_LISTING_SIZE + 1);
+	fuzz_check(fuzz_slots_heard == 1, "one longer than a listing can be is not");
 
-		p2p_signal_update(none, 0, none, 0);
-	}
-	fuzz_check(fuzz_lobby_count() == 0, "and they go once their senders stop");
-
-	/* a code's record, looked up for a lobby entry's host */
+	/* a code's record, looked up for one host's record alone */
 	fuzz_reset();
 	p2p_signal_lookup_code("WXYZ2345", fuzz_identifier);
 	size = 0;
@@ -436,10 +428,10 @@ int net_fuzz_checks(void)
 	memset(message + size, 0x77, P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE);
 	size += P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE;
 	fuzz_publish(signalling.lookup_topic, sealed, p2p_seal(signalling.lookup_key, message, size, sealed));
-	fuzz_check(signalling.looking_up, "a record of another host than the lobby entry's is not taken");
+	fuzz_check(signalling.looking_up, "a record of another host than the one looked up for is not taken");
 	p2p_key_hash(fuzz_public_key, message + 2);
 	fuzz_publish(signalling.lookup_topic, sealed, p2p_seal(signalling.lookup_key, message, size, sealed));
-	fuzz_check(!signalling.looking_up, "the entry's own host's is");
+	fuzz_check(!signalling.looking_up, "that host's own is");
 
 	/* MQTT framing */
 	fuzz_reset();

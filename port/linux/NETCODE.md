@@ -54,14 +54,13 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
   Until a client has the host's, the host takes none of its players'
   movement and none of its loading zones, and after any switch no loading
   zone switches again until every machine has the new BSP (ten seconds at
-  most). A loading zone into a
-  BSP the team hasn't been in brings every player to whoever crossed it,
-  as split screen does; one back into a BSP it has been in switches only
-  with two thirds of the living players at it (in the trigger, or within
-  15 world units of the player in it, about 45 metres), so one player can't
-  drag the team back through the level; a player held back is told how
-  many are there and how many it needs. A player outside the loaded BSP
-  and falling for two seconds is brought back beside a teammate. A dead
+  most). Only the host's crossing of a loading zone switches the BSP, and
+  it brings every player to the host, however far behind, so no one
+  running ahead or doubling back drags the team through the level (while
+  none of the host's players are alive, anyone's crossing does); a client
+  standing on a loading zone is told it waits for the host. A player
+  outside the loaded BSP and falling for two seconds is brought back beside
+  the host, else a teammate. A dead
   player watches a living teammate (`coop_spectate.c`) and comes back
   beside one once it is safe. With everyone dead they come back where they
   were at the last checkpoint, without a revert. A mission the scripts fail
@@ -78,7 +77,8 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
 
   The host's EXTRA ENEMIES (`coop_enemies.c`, `network.coop_enemies_mode`)
   give each squad of enemies a level places more of itself: PER PLAYER, a
-  percentage of itself for each player past the first; STATIC MULTIPLIER,
+  percentage of itself for each player past the first, to 8 times its size
+  at most (more filled the clients' objects); STATIC MULTIPLIER,
   that many times itself for any number of players. They stand around its
   starting locations on free ground (the same floor, clear of crates and
   other actors, with room to stand), or where none is left on rings about
@@ -177,7 +177,14 @@ presentation; version 16 has a client's input say which structure BSP it
 has loaded; version 17 breaks the host's glass and destructible scenery on
 every machine (and takes a client's hits on scenery), sends the cluster a
 co-op cutscene keeps active, and leaves a failed co-op mission's revert to
-the host. This tree has version 17 and joins only hosts of its own version.
+the host. Version 18 is Halo CE for PS Vita 1.1.0's, one raise for all of
+its changes to what the machines send: killing blows sent once more
+reliably, an object come to rest sent three times, the AI units' shader
+permutation in the object creation message, only the host's crossing of a
+co-op loading zone switching the BSP (from upstream's versions 18 and 21,
+whose numbers mean nothing here), the server browser's signed and
+password-protected listings. This tree has
+version 18 and joins only hosts of its own version.
 Its Vitas (and its Linux build standing in for one) play only Vitas
 (`HALO_PORT_ADVERTISED_VITA_FLAG`), so an upstream build of the same number
 is refused all the same.
@@ -225,7 +232,9 @@ added to `bans.txt` beside `debug.txt` (a line each, as in `cheaters.txt`,
 with `ip=` and `hwid=`): the host refuses a machine joining whose address or
 hardware id is in it (a line taken out unbans). Both are as the player's
 machine tells them: anyone with administrator or root access can change
-them, and players behind one address share it.
+them, and players behind one address share it. The console's `kick <player
+name>` drops a player as `ban` does (every machine told), but adds no line
+and keeps no address out: the player may join again at once.
 A speed hack of less than a tenth is let be: the host's bounds on how far
 and how fast a client's player moves and fires hold it to the host's time
 anyway.
@@ -332,9 +341,12 @@ a pregame keep-alive every five seconds from the host
 4. (Done) Corrections: the host sends each client where its moving objects
    are (vehicles, items, bodies) as often as they are near that client's
    nearest player (every tick within 25 world units, every second within
-   60, every third within 120, every fourth further off), once more to
-   every client as an object comes to rest, and a few of those at rest,
-   round them all. A client puts its copies there, and the difference is
+   60, every third within 120, every fourth further off), to every client
+   three times over half a second as an object comes to rest (one lost
+   would leave a falling body hanging until its turn round all of them),
+   and a few of those at rest, round them all. A client takes the host's
+   word on whether each is at rest even when its copy is close enough to
+   leave where it is. A client puts its copies there, and the difference is
    drawn fading over a few ticks (`render_interpolation.c`) instead of a
    jump. A client drives its own player's vehicle and sends where it is,
    which the host takes within a tolerance, as it does its own player's
@@ -434,9 +446,11 @@ a pregame keep-alive every five seconds from the host
      player's screen effects to that player's machine alone, but for a
      weapon's own shake of the player firing it (no one's damage), which
      that player's machine shows itself at once. The killing blow is sent
-     unreliably: an actor's body the host says is dead (the objects' states
-     say so) that is still alive half a second on is killed with nothing
-     to show (a player's the units' states kill).
+     with the tick's other damage and once more reliably (a client replays
+     one blow of a unit only), so every body falls as the host's did: a
+     body the host says is dead (the objects' states say so of an actor's,
+     the units' states of a player's) that is still alive half a second on
+     is killed with nothing to show.
    - A client's own projectiles respond to what they hit as the game has
      them: the host's shields and health, which the client has, say
      whether the shield or the body took the hit, and how much is left of

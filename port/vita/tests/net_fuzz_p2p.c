@@ -43,14 +43,17 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 }
 void p2p_signal_host(const unsigned char *token, const char *code) { (void)token; (void)code; }
 void p2p_signal_stop_hosting(void) {}
-void p2p_signal_set_lobby(int listed, const char *code, const char *name, int players, int maximum)
+/* (the server browser's, p2p_lobby.c, and its signalling: nothing listed) */
+void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_player_count)
 {
-	(void)listed; (void)code; (void)name; (void)players; (void)maximum;
+	(void)token; (void)player_count; (void)maximum_player_count;
 }
+int p2p_lobby_listed(void) { return 0; }
+int p2p_lobby_browsing(void) { return 0; }
+void p2p_lobby_quit(void) {}
+void p2p_lobby_join_timed_out(const unsigned char *host_hash) { (void)host_hash; }
 void p2p_signal_lookup_code(const char *code, const unsigned char *host) { (void)code; (void)host; }
 void p2p_signal_stop_lookup(void) {}
-void p2p_signal_browse(int on) { (void)on; }
-int p2p_signal_lobby_entry(int index, struct p2p_lobby_entry *entry) { (void)index; (void)entry; return 0; }
 void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token) { (void)host_hash; (void)token; }
 void p2p_signal_stop_joining(void) {}
 int p2p_signal_connected(void) { return 1; }
@@ -420,20 +423,6 @@ int net_fuzz_checks(void)
 	fuzz_check(!parse_code("ABCD-EFG1", code, 0) && !parse_code("ABCD-EFGHI", code, 0) && !parse_code("ABC", code, 0),
 		"letters outside its alphabet, or too many or few, are not one");
 
-	/* a public lobby entry's host, which its code's record must be */
-	{
-		struct p2p_lobby_entry entry;
-
-		memset(&entry, 0, sizeof(entry));
-		snprintf(entry.code, sizeof(entry.code), "ABCD-EFGH");
-		snprintf(entry.host, sizeof(entry.host), "02a1b2c3d4e5");
-		fuzz_check(p2p_join_lobby_entry(&entry) && p2p.lookup_has_host && p2p.lookup_host[1] == 0xA1,
-			"a lobby entry's code is looked up for the host it is listed under");
-		snprintf(entry.host, sizeof(entry.host), "02a1b2c3d4");
-		fuzz_check(!p2p_join_lobby_entry(&entry), "an entry whose host is not an identifier is not joined");
-		p2p_join_code("ABCD-EFGH");
-		fuzz_check(!p2p.lookup_has_host, "a code given by hand takes any host's record");
-	}
 	fuzz_reset();
 	return fuzz_failures;
 }

@@ -58,6 +58,7 @@ ZLIB_SOURCES = ("adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", 
 # (its names prefixed, and the one Z_PREFIX leaves, its error messages, which
 # the game's zlib names the same)
 ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
+MONOCYPHER_DIR = Path("port/third_party/monocypher")
 
 
 def updater_defines(release: bool) -> str:
@@ -387,6 +388,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             f"-I{PORT_DIR / 'include'}",
             f"-I{TOML_DIR}",
             f"-I{KCP_DIR}",
+            f"-I{MONOCYPHER_DIR}",
             # halo_linux_winsock_names.h, but not the Linux build's C runtime
             # wrappers next to it
             f"-iquote {LINUX_DIR / 'include'}",
@@ -428,6 +430,9 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # the port's zlib (map inflation: cache_files_decompress_windows.c)
         for name in ZLIB_SOURCES:
             add_object(ZLIB_DIR / name, " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
+        # internet play's signatures and password keys (port/third_party/monocypher)
+        for name in ("monocypher.c", "monocypher-ed25519.c"):
+            add_object(MONOCYPHER_DIR / name, " ".join([abi, "-std=gnu11", "-w"]))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():

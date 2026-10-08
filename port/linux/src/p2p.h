@@ -87,6 +87,16 @@ are shown). The game's server calls it as they change (calling it with the
 same counts again costs little) */
 void p2p_set_game_player_counts(int count, int maximum);
 
+/* the hosted game's details as the server browser lists them (p2p_lobby.c;
+printable ASCII is kept; NULL leaves one as it was): the game's server calls
+it as they change (calling it with the same again costs little). The
+Vita's listings also carry the score to win (0: none), a co-op game's
+difficulty (0 to 3; -1: not co-op), whether the map is a Halo PC (Custom
+Edition) one, and the players' names (each ended by a newline) */
+void p2p_set_game_listing(const char *name, const char *map, const char *gametype, int engine_type, int open,
+	int in_progress, int has_teams);
+void p2p_set_game_listing_details(int score_limit, int coop_difficulty, int pc_map, const char *player_names);
+
 /* the sizes of a Discord user's id and name as kept (with their end), and
 the text kept of either as told: only the characters allowed (digits in an
 id; letters, digits, "_", "." and "-" in a name), no longer than that */
@@ -115,33 +125,61 @@ virtual address (network byte order): where its packets come from; 0 if
 it is no peer's */
 unsigned long p2p_peer_endpoint_address(unsigned long virtual_address);
 
-/* ---------- short codes and the public lobby (p2p_signal.c), for a
-machine with no clipboard (the Vita's settings panel) and for strangers.
-Every call takes p2p's lock and may come from any thread; nothing waits on
-the network. Plain ints and chars only: the Vita's host side (another ABI)
-calls these too. */
+/* ---------- short codes and the server browser (p2p_signal.c,
+p2p_lobby.c), for a machine with no clipboard (the Vita's settings panel)
+and for strangers. Every call takes p2p's lock (briefly) and may come from
+any thread; nothing waits on the network or on a password's key. Plain ints
+and chars only: the Vita's host side (another ABI) calls these too. */
 
 enum
 {
 	/* "ABCD-EFGH" and a terminator */
 	P2P_CODE_SIZE = 10,
-	P2P_LOBBY_NAME_SIZE = 32,
+	/* a listed game's host (its key's hash) in hex, and a terminator */
+	P2P_LOBBY_ID_SIZE = 33,
+	P2P_LOBBY_NAME_SIZE = 33,
+	P2P_LOBBY_MAP_SIZE = 33,
+	P2P_LOBBY_GAMETYPE_SIZE = 25,
+	P2P_LOBBY_RULES_SIZE = 48,
+	P2P_LOBBY_PLAYERS_SIZE = 64,
+	/* a password's most characters (and a terminator) */
+	P2P_LOBBY_PASSWORD_SIZE = 33,
 };
+
+/* the server browser's API as the Vita's settings panel knows it: 2, the
+signed listings of OpenCE's server browser (1 was the code-based lobby) */
+#define P2P_LOBBY_API 2
 
 /* the letters and digits of a code: no 0, 1, I or O, which read alike */
 #define P2P_CODE_ALPHABET "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
+/* a public game, as the browser shows it: every text printable ASCII */
 struct p2p_lobby_entry
 {
-	char code[P2P_CODE_SIZE];
+	/* what p2p_lobby_join takes: stays the game's while the list changes */
+	char id[P2P_LOBBY_ID_SIZE];
+	/* its name, validated as a player's name */
 	char name[P2P_LOBBY_NAME_SIZE];
-	int players, maximum;
-	/* the same network version as this machine's (else joining fails) */
+	/* the map's title ("Blood Gulch"; a map the Xbox did not ship: its
+	scenario's name) and the gametype's ("Slayer") */
+	char map[P2P_LOBBY_MAP_SIZE];
+	char gametype[P2P_LOBBY_GAMETYPE_SIZE];
+	/* "Slayer to 50 on Blood Gulch", "Co-op: The Pillar of Autumn, Heroic",
+	then ": under way" or ": full or starting", and " (HALO PC)" */
+	char rules[P2P_LOBBY_RULES_SIZE];
+	/* "5 of 16: name, name... +3 more" */
+	char players_line[P2P_LOBBY_PLAYERS_SIZE];
+	int players, maximum, score_limit;
+	/* (always: games of another network version are not listed) */
 	int compatible;
 	/* this machine's own game */
 	int own;
-	/* the identifier the host is listed under (hexadecimal) */
-	char host[2 * 6 + 1];
+	/* it has a password (p2p_lobby_join needs it) */
+	int locked;
+	/* on a Halo PC (Custom Edition) map */
+	int pc_map;
+	/* taking players; started; teams; joining it failed this run */
+	int open, in_progress, has_teams, failed;
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any
@@ -164,23 +202,46 @@ enum
 };
 int p2p_address_origin(unsigned long address);
 
-/* joins a public lobby entry's game by its code, whose record must be the
-host's the entry is listed under (anyone can publish a record for a code
-that the lobby shows: the record of another host is not taken, and the
-lookup goes on until the entry's host's own comes, or it times out);
-nonzero if the entry holds a code */
-int p2p_join_lobby_entry(const struct p2p_lobby_entry *entry);
 /* while this machine hosts with internet play on: copies its code (with
 the dash) and returns nonzero */
 int p2p_hosting_code(char *code, int size);
-/* lists this machine's game in the public lobby while it hosts (or not);
-the name is what others see (network.lobby_name otherwise) */
+/* while this machine hosts for the internet: whether its game is listed in
+everyone's server browser (public) or reached only by its code and invite
+(private); going private makes a new invite, so that one seen in a listing
+lets no one in (the code leads to the new one) */
 void p2p_lobby_set_public(int listed);
+/* the name the browser lists the game under ("": network.lobby_name, else
+the game's own) */
 void p2p_lobby_set_name(const char *name);
-/* browsing the public lobby: on or off, and the index-th entry (nonzero if
-there is one) */
+/* the game's password (NULL or "": none): its listing lets only those who
+know it join from the browser (its code and invite still join it). Its key
+is worked out on a thread of its own (about a second on a Vita); until then
+the game is not listed. Setting or changing it makes a new invite */
+void p2p_lobby_set_password(const char *password);
+/* the server browser: on (the hosts are asked for their listings) or off;
+REFRESH asks again; the index-th game in the order shown (the most players
+first, then those not failed, the open ones, by name; this machine's own
+too, marked own): nonzero if there is one */
 void p2p_lobby_browse(int on);
+void p2p_lobby_refresh(void);
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry);
+/* joins a listed game (id: its entry's), with its password if it is locked
+(the password's key is worked out on a thread of its own); nonzero if the
+game is listed. How it goes: p2p_lobby_join_state */
+int p2p_lobby_join(const char *id, const char *password);
+enum
+{
+	P2P_LOBBY_JOIN_GONE = -2,
+	P2P_LOBBY_JOIN_WRONG_PASSWORD = -1,
+	P2P_LOBBY_JOIN_IDLE = 0,
+	/* the password's key being worked out */
+	P2P_LOBBY_JOIN_UNLOCKING = 1,
+	/* its invite handed on: as an invite's join goes from here */
+	P2P_LOBBY_JOIN_JOINING = 2,
+};
+int p2p_lobby_join_state(void);
+/* a game the browser could not join: kept, marked failed, for this run */
+void p2p_lobby_mark_failed(const char *id);
 /* one line on what internet play is doing (for a menu); returns nonzero
 if internet play runs */
 int p2p_status(char *text, int size);

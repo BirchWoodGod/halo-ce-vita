@@ -19,7 +19,8 @@ point positions and with NEON where there is one) and applies:
 	  direction in listener space, and the low frequency part of the I3DL2
 	  direct path, obstruction and occlusion levels.
 Doppler, the high frequency filters, cones and I3DL2 reverb are not
-modelled.
+modelled. A look-ahead limiter keeps the sum of the voices under full scale
+(limit).
 
 Packets the mixer has finished are completed from DirectSoundDoWork, which
 the game calls every frame, and from Flush, never from the audio thread:
@@ -890,22 +891,110 @@ static void mix_one_voice(struct sdl_stream *stream, float *output, unsigned lon
 	}
 }
 
-/* soft limit rather than wrap or hard clip when many voices pile up */
-static void limit(float *output, unsigned long samples)
+/* ---------- limiter (from OpenCE 5f388f78, Jeff Clark)
+
+The game sets its mix bins' headroom to 0 (sound_dsound_xbox.c), so the voices
+sum at their full level, as on the Xbox, and a pile of loud ones goes over
+full scale. Clipping each sample, or bending it near full scale (the tanh soft
+clipper before this: 23% harmonic distortion on a sine at twice full scale),
+distorts the sound: dialogue over gunfire crackled. Instead the whole mix is
+turned down for as long as it would go over, both channels alike. The output
+is delayed LIMITER_LOOKAHEAD - 1 frames (1.3 ms), so that the gain comes down
+smoothly before each peak: the smallest gain the frames ahead need, averaged
+over the last LIMITER_LOOKAHEAD frames, is never more than a peak needs when
+it plays. The gain comes back up over LIMITER_RELEASE_SECONDS.
+
+(port) The smallest gain the frames ahead need is kept as a sliding minimum
+(a queue of the frames whose needed gains rise, oldest first) instead of
+scanning the look-ahead every frame: the same gains to the bit, at about a
+twelfth of the cost (on a Pi 4 0.11-0.13% of a core against 1.39%;
+triage/mpfix-status.md), which on the Vita's mixer core is the difference
+between a few tenths of a millisecond a frame and two or three. */
+
+#define LIMITER_CEILING 0.891f /* -1 dBFS */
+#define LIMITER_LOOKAHEAD 64
+#define LIMITER_RELEASE_SECONDS 0.1f
+
+struct limiter
 {
-	unsigned long sample;
+	/* the frames the output is delayed by */
+	float delay[LIMITER_LOOKAHEAD][OUTPUT_CHANNELS];
+	/* the gain held down to what the frames ahead need, coming back up */
+	float held;
+	/* its last LIMITER_LOOKAHEAD values, and their sum */
+	float history[LIMITER_LOOKAHEAD];
+	double history_sum;
+	unsigned long position;
+	/* the frames counted, and the sliding minimum of the gains they need:
+	a queue (from head, count long) of frame numbers and their gains, the
+	gains rising */
+	unsigned long frame;
+	unsigned long queue_frames[LIMITER_LOOKAHEAD];
+	float queue_gains[LIMITER_LOOKAHEAD];
+	unsigned long queue_head, queue_count;
+	BOOL initialized;
+};
 
-	for (sample = 0; sample < samples; sample++)
+/* the output's, and HALO_AUDIO_VERIFY's reference mix's */
+static struct limiter output_limiter, verify_limiter;
+
+static void limit(struct limiter *limiter, float *output, unsigned long frames)
+{
+	float release = 1.0f - expf(-1.0f / (LIMITER_RELEASE_SECONDS * OUTPUT_RATE));
+	unsigned long frame, index, channel;
+
+	if (!limiter->initialized)
 	{
-		float value = output[sample];
+		for (index = 0; index < LIMITER_LOOKAHEAD; index++)
+			limiter->history[index] = 1.0f;
+		limiter->held = 1.0f;
+		limiter->history_sum = LIMITER_LOOKAHEAD;
+		limiter->initialized = TRUE;
+	}
+	for (frame = 0; frame < frames; frame++)
+	{
+		float *sample = output + frame * OUTPUT_CHANNELS;
+		unsigned long position = limiter->position;
+		unsigned long oldest = (position + 1) % LIMITER_LOOKAHEAD;
+		float peak = 0.0f, needed, lowest, gain;
 
-		if (value > 0.8f || value < -0.8f)
+		/* the new frame takes the slot of the oldest, which has played */
+		for (channel = 0; channel < OUTPUT_CHANNELS; channel++)
 		{
-			float sign = value < 0.0f ? -1.0f : 1.0f;
-			float excess = fabsf(value) - 0.8f;
-
-			output[sample] = sign * (0.8f + 0.2f * tanhf(excess / 0.2f));
+			if (fabsf(sample[channel]) > peak)
+				peak = fabsf(sample[channel]);
+			limiter->delay[position][channel] = sample[channel];
 		}
+		needed = peak > LIMITER_CEILING ? LIMITER_CEILING / peak : 1.0f;
+		/* (the smallest of the last LIMITER_LOOKAHEAD frames' needs: those
+		before the first frame needed 1) */
+		while (limiter->queue_count &&
+			limiter->queue_gains[(limiter->queue_head + limiter->queue_count - 1) % LIMITER_LOOKAHEAD] >= needed)
+		{
+			limiter->queue_count--;
+		}
+		index = (limiter->queue_head + limiter->queue_count) % LIMITER_LOOKAHEAD;
+		limiter->queue_frames[index] = limiter->frame;
+		limiter->queue_gains[index] = needed;
+		limiter->queue_count++;
+		if (limiter->frame - limiter->queue_frames[limiter->queue_head] >= LIMITER_LOOKAHEAD)
+		{
+			limiter->queue_head = (limiter->queue_head + 1) % LIMITER_LOOKAHEAD;
+			limiter->queue_count--;
+		}
+		lowest = limiter->queue_gains[limiter->queue_head];
+		limiter->frame++;
+		if (lowest < limiter->held)
+			limiter->held = lowest;
+		else
+			limiter->held += (lowest - limiter->held) * release;
+		limiter->history_sum += limiter->held - limiter->history[position];
+		limiter->history[position] = limiter->held;
+		gain = (float)(limiter->history_sum / LIMITER_LOOKAHEAD);
+		/* the frame LIMITER_LOOKAHEAD - 1 frames old plays */
+		for (channel = 0; channel < OUTPUT_CHANNELS; channel++)
+			sample[channel] = limiter->delay[oldest][channel] * gain;
+		limiter->position = oldest;
 	}
 }
 
@@ -992,7 +1081,7 @@ static void mix(float *output, unsigned long frames)
 	statistics_mix_us += statistics_now() - started;
 	statistics_mixes++;
 	statistics_voices += voices;
-	limit(output, frames * OUTPUT_CHANNELS);
+	limit(&output_limiter, output, frames);
 	{
 		/* (debug) HALO_AUDIO_DUMP=<file>: the mix as it goes to the device,
 		raw 32-bit float stereo at 48 kHz, for listening to and measuring
@@ -1003,7 +1092,7 @@ static void mix(float *output, unsigned long frames)
 		dump_mix("HALO_AUDIO_DUMP", &dump, &dump_checked, output, frames);
 		if (audio_verify > 0 && frames <= VERIFY_FRAMES)
 		{
-			limit(verify_mix, frames * OUTPUT_CHANNELS);
+			limit(&verify_limiter, verify_mix, frames);
 			dump_mix("HALO_AUDIO_DUMP_REF", &reference_dump, &reference_dump_checked, verify_mix, frames);
 		}
 	}
