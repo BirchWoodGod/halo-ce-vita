@@ -62,6 +62,12 @@ enum
 	/* a client's Discord user, as its Discord told it (reliable, with its
 	ready: distributed_client_send_identity) */
 	_distributed_message_client_identity,
+	/* every player's ping as the host measures it (the latency meter's
+	round trip to its machine, its own players' 0), every two seconds, for
+	every machine's scoreboard (unreliable; ping_protocol.h). Upstream's
+	number (its version 10), folded into this tree's version 19: a build of
+	19 without it drops it as a kind it does not know */
+	_distributed_message_pings,
 	/* the host's actors' units: their control and state (network_actors.c).
 	A number of its own, clear of the kinds upstream adds: a build without
 	it drops the message as a kind it does not know, so the network version
@@ -230,6 +236,28 @@ long distributed_latest_host_time_age_ms(void);
 /* (a client) how long the host takes to have this machine's players and
 tell it back, in ticks (0 before it is measured) */
 real distributed_own_round_trip_ticks(void);
+/* the latency meter (latency_meter.c) and the scoreboard: the netcode's
+round trips above, timed in milliseconds by when this machine sent the tick
+they come back naming, and what is shown of them, refreshed twice a second
+in the tick (so the render reads them whole). A player's ping, in
+milliseconds: the host knows each client machine's round trip (its own
+players' 0), a client its own players' (its own round trip) and the rest as
+the host tells it (_distributed_message_pings), NONE before it is known */
+long distributed_player_ping(short player_index);
+/* (a client) its round trip to the host in milliseconds, NONE before it is
+known or on the host */
+long distributed_own_ping(void);
+/* (the host) its slowest client's round trip in milliseconds, NONE for none */
+long distributed_slowest_client_ping(void);
+/* (a client) the host has sent nothing for a while (the Xbox's "trouble is
+brewing", sooner) */
+boolean distributed_connection_problem(void);
+/* ... the player's machine (the host: a client's that has sent it nothing
+for a while; a client: its own, as above) */
+boolean distributed_player_connection_problem(short player_index);
+/* (a client) the host has its players (or its vehicle) at that tick of this
+machine's, as told now: its own round trip timed */
+void distributed_note_own_round_trip(long time);
 /* (the host, in its tick) the client machine a player is on, NONE for none
 (the host's own players') */
 long distributed_player_machine(short player_index);

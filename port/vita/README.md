@@ -422,6 +422,20 @@ only in the game. On a PS TV (which has no microphone of its own: a
 headset) push to talk is player 1's controller's, Select + L1, and the
 whole PS TV talks as player 1.
 
+**The latency meter.** In a network game being played (system link, ad
+hoc or online, directly or through a relay; multiplayer or co-op) the top
+right of the screen shows your round trip to the host: **Ping 45 ms** with
+four bars, green below 80 ms, yellow below 150, red above (two bars from
+150, one from 250). It is the game's own round trip, timed as the netcode
+already times it (nothing more is sent): the network both ways plus each
+machine's wait for its next tick to send, up to 33 ms each, so a Wi-Fi
+network shows 15 to 35 ms. If the host has sent nothing for two seconds it
+says **Connection problem** in red instead. The host shows **Max ping**:
+its slowest player's (one silent for a while, as long as it has been). Hold
+Back for the scoreboard: its **Ping** column has every player's, as the
+host measures them (the host's own players 0), yours as your Vita does.
+Latency meter Off hides both.
+
 The settings panel's **Multiplayer** tab:
 
 | Line | What it does |
@@ -436,6 +450,7 @@ The settings panel's **Multiplayer** tab:
 | Open mic level | With Open mic: **Low**, **Medium** (the default) or **High**: how loud you must be to be sent. |
 | Voice volume | How loud others' voices are: 20% to 100% (80%, the default, plays them as they came). |
 | Voice in my games | The games you host: **Private games only** (the default: voice in system link, ad hoc and games joined by code, none in a game listed in the public games), **On** or **Off**. A player who talks in a game without voice is told so. |
+| Latency meter | **On** (the default) or **Off**: your round trip to the host in a network game (the latency meter, below). |
 
 Lines under them say your Vita's name and address and what the game is
 doing (looking for games and how many it found, hosting and how many

@@ -838,7 +838,7 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && strstr(menu, "< Online") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games|Latency meter") && strstr(menu, "< Online") &&
 		strstr(menu, "\nGame chat\x02  On >"),
 		"Multiplayer: Connection, Join with a code (Online), Modded maps, Game chat (On), voice chat's rows; no Play page "
 		"(no ad hoc room: Online)");
@@ -849,7 +849,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
-	check(menu_rows() == 7 && menu_fits(), "Multiplayer: seven rows, 46 characters a line");
+	check(menu_rows() == 8 && menu_fits(), "Multiplayer: eight rows, 46 characters a line");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
 
@@ -858,13 +858,13 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && !strstr(menu, "Online menus"),
+	check(!strcmp(labels, "Connection*|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games|Latency meter") && !strstr(menu, "Online menus"),
 		"the PC menus in the game: Connection and Modded maps only");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
@@ -974,7 +974,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_UP);
 	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games"),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games|Latency meter"),
 		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
 	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
@@ -990,7 +990,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && menu_fits(),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games|Latency meter") && menu_fits(),
 		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
 	clock_us += 5000000;
 	to_line("Ad hoc room");
@@ -1022,8 +1022,18 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && menu_fits(),
+	check(!strcmp(labels, "Connection*|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games|Latency meter") && menu_fits(),
 		"Same Wi-Fi: Connection, Modded maps, Game chat, voice chat's rows");
+	/* Latency meter (latency_meter.c): On as shipped, Off and back, live */
+	to_line("Latency meter");
+	check(strstr(menu, "\nLatency meter\x02  On >") && setting_named("HALO_LATENCY_METER") &&
+		strstr(setting_named("HALO_LATENCY_METER")->help, "Ping to the host in network games"),
+		"Latency meter: On as shipped, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nLatency meter\x02< Off  ") && getenv("HALO_LATENCY_METER") &&
+		!strcmp(getenv("HALO_LATENCY_METER"), "0"), "Latency meter Off: HALO_LATENCY_METER 0");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_LATENCY_METER") && !strcmp(getenv("HALO_LATENCY_METER"), "1"), "Latency meter On again: 1");
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -1039,7 +1049,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection*|Join with a code|Modded maps|Game chat|Voice chat|Voice volume|Voice in my games|Latency meter") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -1074,8 +1084,8 @@ static void test_online_rows(void)
 with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
-players, Visibility, Fourth core helpers, Game chat; the Play page's two
-texts) */
+players, Visibility, Fourth core helpers, Game chat, Latency meter; the Play
+page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1096,7 +1106,7 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_CHAT",
-		"HALO_VOICE", "HALO_VOICE_LEVEL", "HALO_VOICE_VOLUME", "HALO_VOICE_HOST",
+		"HALO_VOICE", "HALO_VOICE_LEVEL", "HALO_VOICE_VOLUME", "HALO_VOICE_HOST", "HALO_LATENCY_METER",
 	};
 	int index, all = 1, choices = 0;
 

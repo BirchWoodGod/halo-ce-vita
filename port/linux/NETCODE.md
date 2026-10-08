@@ -166,7 +166,8 @@ hardware id.
 
 Upstream's version 10 sends every player's ping for the scoreboard and 11
 sends with the game's settings its gametype's PC options; this tree sends
-neither (it has upstream's later co-op, not its scoreboard or PC menus).
+neither until 19 (it has upstream's later co-op, not its scoreboard or PC
+menus), whose pings message is upstream's.
 Version 12 plays the campaign together (co-op, above), drives the host's
 actors on its clients and sends the flinches and deaths the host picked;
 version 13 drives more of the host's AI units (upstream's extra enemies:
@@ -189,7 +190,9 @@ they came in at 18). Version 19 is Halo CE for PS Vita 1.1.1's: game
 chat's two messages (below), which a 1.1.0 host would take for messages it
 does not know, and voice chat's two (below, folded into the same version:
 1.1.1 had not shipped, and a build of 19 without them drops them as kinds
-it does not know). This tree has version 19 and joins only hosts of its own
+it does not know), and upstream's pings message, its number 19 kept, for
+the scoreboard's Ping column (the latency meter, below; folded in the same
+way). This tree has version 19 and joins only hosts of its own
 version; a 1.1.0 Vita and a 1.1.1 one refuse each other's games, as any
 two versions do.
 Its Vitas (and its Linux build standing in for one) play only Vitas
@@ -625,6 +628,25 @@ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
   took to come (the reliable channel's resending holds it up), that is
   when the shooter saw the target (as far back as the host keeps). A
   report made more than three seconds ago is refused.
+- **The latency meter** (`latency_meter.c`) shows the same round trips,
+  timed in milliseconds by when each machine sent the tick they come back
+  naming (the last 64 ticks' send times kept), nothing more sent: the host
+  each client's, by the host tick its input names; a client its own, by its
+  tick the host's state of its player (or, driving, its vehicle) says the
+  host has it at. Each is the network both ways plus each machine's wait for
+  its next tick, so a LAN reads 15 to 35 ms; netem's 80 ms reads 85 to 120.
+  A client that has heard nothing from the host for two seconds says
+  "Connection problem" (the host, of a client, logs it). Every two seconds
+  the host tells every client everyone's (`_distributed_message_pings`,
+  19, upstream's: four bytes a player, unreliable; `ping_protocol.c`): its
+  own measures only, no client reports its own, and a client takes the
+  message whole or not at all (an index below the most players, each
+  once, its pad 0, at most 9999 ms or unknown), one every half second at
+  most, and forgets it after six seconds. A client shows its own players'
+  as it measures them, the rest as told. A client can make
+  its own round trip look shorter or longer to the host than it is (it
+  names the host tick it had), never another's; the host's hit checks take
+  it from the same message already.
 
 ## Testing
 

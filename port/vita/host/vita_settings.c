@@ -473,6 +473,11 @@ static struct setting settings[] = {
 		{ "20%", "40%", "60%", "80%", "100%" }, "How loud the other players' voices are", 3, TAB_MULTIPLAYER },
 	{ "Voice in my games", "HALO_VOICE_HOST", 0, 3, { "private", "on", "off" },
 		{ "Private games only", "On", "Off" }, "Not in your games listed in the public games", 0, TAB_MULTIPLAYER },
+	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
+	to the host at the top right of a network game and in the scoreboard's
+	Ping column; the host's, its slowest player's) */
+	{ "Latency meter", "HALO_LATENCY_METER", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Ping to the host in network games, top right", 0, TAB_MULTIPLAYER },
 	/* (the hosted game's settings, which the game's Server Setup sets
 	(vita_settings_set, menu_functions.c) and settings.txt keeps: on a page
 	no row opens) */
