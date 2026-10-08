@@ -39,11 +39,11 @@ fixes from players' dumps (dropped weapons, HUD sounds, vehicles); fixed
 checkpoints; Warthog windshields, energy shields, camouflage, scopes and
 water drawn correctly.
 
-## In beta: 1.1.0: multiplayer, co-op, chat and custom maps
+## In beta: 1.1.0: multiplayer, co-op and custom maps
 
 The 1.1.0 betas are on the
 [releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases) as
-pre-releases (network version 19: every Vita in a game needs the same
+pre-releases (network version 18: every Vita in a game needs the same
 version).
 
 - **Online play between Vitas** with OpenCE's in-game multiplayer menus: a
@@ -52,11 +52,6 @@ version).
   `sounds.map` and `loc.map`. Built on iamhaller's networking work. Vita to
   Vita only.
 - **Same Wi-Fi** (system link) and **ad hoc** play between Vitas.
-- **Game chat**: quick-chat phrases and typed messages in the lobby and in
-  game (Back + Y), with mutes and the host's On / Quick chat only / Off.
-- **Split screen on the PS TV**: up to four players on one PS TV with
-  DualShock 3 / DualShock 4 controllers, in multiplayer games and in the
-  campaign for two.
 - **Campaign co-op over the network** for up to four Vitas, Private or
   Public, built on OpenCE's network co-op (the Xbox only had split-screen
   co-op on one console).
@@ -80,9 +75,20 @@ version).
 
 ### Coming in the later 1.1.0 betas
 
+- **The Quality profile at 30 fps** in the big fights: the Xbox's full
+  detail at a steadier frame rate (no change to the network, so the betas
+  keep playing together).
+
+## Next: 1.1.1
+
+Done or under way on their own branches; they change what the Vitas send
+each other (a new network version), so they come after 1.1.0:
+
+- **Game chat**: quick-chat phrases and typed messages in the lobby and in
+  game, with mutes and the host's On / Quick chat only / Off setting.
 - **Voice chat** in network games.
-- **A faster Quality profile**: the Xbox's full detail at a better frame
-  rate.
+- **Split screen on the PS TV**: up to four players on one PS TV with
+  DualShock 3 / DualShock 4 controllers.
 
 ## Later
 

@@ -38,11 +38,6 @@ Evolved.
   Create Game with lobby name, max players, public or private and a
   password. It needs the [Halo PC files](#halo-pc-files).
 - **Same Wi-Fi** (system link) and **ad hoc** play between Vitas.
-- **[Game chat](#game-chat)**: quick phrases and typed messages in the lobby
-  and in game (Back + Y), with mutes and the host's On / Quick chat only /
-  Off setting.
-- **[Split screen on the PS TV](#split-screen-ps-tv)**: two to four players
-  on one screen with DualShock 3 / DualShock 4 controllers.
 - **[Co-op campaign](#co-op-campaign)** for up to **four** Vitas, Private or
   Public.
 - **[Custom maps](#custom-maps-and-map-sharing)**: Xbox ones, and Halo PC /
@@ -61,17 +56,18 @@ Evolved.
 - A settings panel in tabs (hold **SELECT + START**), button remapping, touch
   zones, gyro aiming and PlayStation button icons.
 
+Coming in **1.1.1** (see the [roadmap](ROADMAP.md)): game chat, voice chat,
+and split screen on the PS TV with DualShock controllers.
+
 ## What works
 
 - The whole campaign from the menus, with checkpoints, saves and Save and
   Quit, cinematics, and the movies if you convert them (optional).
 - Multiplayer between Vitas: on the same Wi-Fi (system link), online
-  (experimental) and ad hoc (experimental), with game chat. Vitas
+  (experimental) and ad hoc (experimental). The multiplayer maps on your
+  own too (split screen with one player). Vitas
   play only Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
 - Campaign co-op over the network for up to four Vitas (experimental).
-- Split screen on a PS TV for up to four players with DualShock controllers
-  (experimental); on a PS Vita, split screen is one player, to play the
-  multiplayer maps on your own.
 - Custom maps: Xbox maps, Custom Edition multiplayer maps and Custom Edition
   campaign maps (experimental).
 - Profiles, controller settings and the game's settings menus.
@@ -87,8 +83,6 @@ Evolved.
 - Custom Edition maps' Ogg Vorbis sounds are silent.
 - In co-op the host's Vita runs everyone's AI and the level's scripts, so it
   slows down with three or four players.
-- Split screen draws each player's view on its own: with three or four
-  players the frame rate is lower.
 - Master Chief's body can be missing in The Pillar of Autumn's cryo tube
   ([#29](https://github.com/BirchWoodGod/halo-ce-vita/issues/29)).
 
@@ -169,8 +163,8 @@ the line `gxm: no libshacccg.suprx`.
 
 Install the new `halo.vpk` over the old one (the whole VPK). Your maps,
 saves and settings in `ux0:data/haloce-vita/` are kept. Every Vita in a
-multiplayer or co-op game needs the same network version (19 for 1.1.0): a
-Vita joining a game of another version is told which one is newer.
+multiplayer or co-op game needs the same version: a Vita joining a game of
+another version is told which one is newer.
 
 ### Halo PC files
 
@@ -266,8 +260,7 @@ opens the PC version's Multiplayer screen, from OpenCE's menus:
     joiners for it; the code still joins). Then your profile, a map and a
     gametype. The settings panel's Multiplayer tab shows your game's code.
   - **LAN**: the System Link screen, where Y creates a game.
-- **Co-op campaign**, **[Split screen](#split-screen-ps-tv)** and **Edit
-  gametypes**.
+- **Co-op campaign**, **Split screen** and **Edit gametypes**.
 
 Internet and Join by code need Connection **Online**; the screen says so
 otherwise. A code is a convenience, not a password: anyone who has it can
@@ -285,49 +278,6 @@ forwarding a UDP port to the Vita helps. The brokers and the Vitas you play
 with see your public IP address, as in any peer-to-peer game; a public
 game's name, map and players are visible to anyone browsing. See
 [port/vita/README.md](port/vita/README.md#multiplayer) for the details.
-
-### Game chat
-
-In a network game's lobby and in the game, hold **Back** (Select) and press
-**Y** (Triangle): the chat menu opens over the game.
-
-- **Quick chat**: Need backup, Enemy spotted, Follow me, On my way, Thanks,
-  Good game, Yes, No; A sends one. Back and a D-pad direction sends one at
-  once: up Enemy spotted, down Need backup, left Follow me, right On my way.
-- **Type a message...**: the Vita's keyboard, up to 80 characters.
-- **To**: All or Team, in a game with teams.
-- **Mute players**: A mutes a player (their lines are no longer shown) or
-  hears them again, until you close Halo. When you host, a player you mute
-  is muted for everyone in your game.
-
-Lines show at the left of the screen with the sender's name, team lines in
-green. The host limits floods, and lines with a link (a web address, an IP
-address) are not sent. **Game chat** in the settings panel's Multiplayer
-tab is **On** (the default), **Quick chat only** (no typed lines) or **Off**
-(Back + Y is Y again); when you host, your setting holds for everyone in
-your game.
-
-### Split screen (PS TV)
-
-On a **PS TV**, up to three more **DualShock 3** (by its USB cable) or
-**DualShock 4** (over Bluetooth) controllers paired to it give split screen
-for up to four players, each with a profile of their own (experimental).
-In the multiplayer menus, **Split screen**:
-
-- **Multiplayer game**: each player presses A on the Select Profile screen
-  and picks a profile, then the map and the gametype. Split screen games can
-  be system link games too: each Vita or PS TV brings its own players.
-- **Co-op campaign**: the Xbox's Cooperative Play for two: player 1's
-  profile, player 2's with their own controller, then the level and the
-  difficulty.
-
-Every controller uses the settings panel's Controls layout; a DualShock's
-L2 and R2 are also L and R, L3 and R3 the sticks' clicks, and its motors
-rumble. A controller switched off mid-game is asked for on its player's
-part of the screen until it is back. A PS Vita has only its own controls:
-with one controller, a screen says split screen needs a PS TV's
-controllers, and A there plays alone. Each player's view is drawn on its
-own, so expect a lower frame rate with three or four.
 
 ### Co-op campaign
 
@@ -398,7 +348,6 @@ controller** does; this is where each is on the Vita as shipped:
 | D-pad up | right stick click | zoom |
 | Start | Start | pause; skips a cinematic |
 | Select | Back | scoreboard |
-| Select (hold) + Triangle | Back + Y | game chat, in a network game |
 | **SELECT + START** (hold) | | the settings panel |
 
 The settings panel's **Controls** tab:
@@ -492,9 +441,8 @@ The Graphics tab's other rows:
 - **Audio**: Sound voices (fewer is faster), Sound occlusion and Sound
   updates.
 - **Multiplayer**: **Connection** (Same Wi-Fi, Ad hoc or Online), the ad hoc
-  room, **Join with a code**, **Modded maps** (your custom maps, PC maps,
-  Extract PC files, Map downloads) and **Game chat** (On, Quick chat only,
-  Off). Lines under the rows show your
+  room, **Join with a code**, and **Modded maps** (your custom maps, PC
+  maps, Extract PC files, Map downloads). Lines under the rows show your
   Vita's name and address, what the game is doing, and online your game's
   code.
 - **Dev** (testers): timing in `halo.log`, a crash dump when the game hangs,
@@ -640,8 +588,8 @@ Issues and pull requests are welcome. What is planned next is in the
 
 - **Performance** in the biggest fights: the render on the first core is
   the limit at the peak.
-- **Testing online, ad hoc, co-op and game chat** between Vitas, split
-  screen on a PS TV, and Custom Edition maps.
+- **Testing online, ad hoc and co-op** between Vitas, and Custom Edition
+  maps.
 - **The issues listed for the next update** in the roadmap.
 
 ## Credits

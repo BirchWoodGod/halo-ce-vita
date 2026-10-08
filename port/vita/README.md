@@ -473,7 +473,7 @@ halo-ce-universal's network co-op (credited in the main README):
   nor writes it, and Save and Quit in co-op only leaves the game. Levels
   finished in co-op count as finished in the profile, as in the Xbox's
   split screen co-op.
-- Every Vita needs this version (network version 19): a Vita joining a
+- Every Vita needs this version (network version 18): a Vita joining a
   game of another version is told which one is newer.
 
 **Ad hoc.** Set Connection to Ad hoc on every Vita and restart. Choose the
