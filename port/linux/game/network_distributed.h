@@ -214,6 +214,9 @@ ticks (and its jitter), as its players' input messages tell */
 real distributed_machine_round_trip_ticks(long machine_index);
 /* (a client) the host's latest tick it has had a message of, NONE for none */
 long distributed_latest_host_time(void);
+/* (a client) how long ago, in milliseconds, that tick's message came; NONE
+for none */
+long distributed_latest_host_time_age_ms(void);
 /* (a client) how long the host takes to have this machine's players and
 tell it back, in ticks (0 before it is measured) */
 real distributed_own_round_trip_ticks(void);

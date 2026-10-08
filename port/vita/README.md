@@ -546,7 +546,8 @@ Useful ones:
 | `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off; no longer a row: AI think rate) |
 | `HALO_TICK_HASH_MASK=2` | (Linux harness) the tick hash also leaves out what the render writes into the objects and lights, to compare render settings |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
-| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host's latest, so it plays at a slow host's pace (default 6; 0 = never) |
+| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host, so it plays at a slow host's pace (default 6; 0 = never); the host's tick counted on from its newest message for as long as that message has waited (a network that holds the host's messages back does not hold the client) |
+| `HALO_NET_COOP_SILENCE_MS=n` | for at most this long (default 1500) |
 | `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |
 
 ## Layout of port/vita
