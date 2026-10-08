@@ -1148,7 +1148,17 @@ void network_test_update(
 			else
 			{
 				player_ui_fast_setup_network_server();
-				platform_log("network test: hosting %s", network_test.map_name);
+				if (global_network_game_server_get())
+					platform_log("network test: hosting %s", network_test.map_name);
+				else
+				{
+					/* (not hosted: the game's ports taken, by another program
+					or another copy of the game; tried again in 5 s, as a
+					player would, from the main menu it went back to) */
+					platform_log("network test: could not host %s; trying again in 5 s", network_test.map_name);
+					network_test.set_up = FALSE;
+					network_test.menu_seconds = -3.0f;
+				}
 			}
 		}
 		else if (!network_test.started)

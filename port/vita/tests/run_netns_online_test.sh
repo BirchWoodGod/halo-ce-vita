@@ -91,6 +91,18 @@
 #            the list (ms, default 15000); HALO_TEST_COOP_JOINERS: how many
 #            join (1; 3 fills the Vitas' four: the short countdown, not the
 #            one that leaves room for more)
+#   busyport hosting while another program holds the game's ports (another
+#            copy of the game, or a stuck one, on the same machine), online
+#            off, three machines each with a port of its own taken until the
+#            first try has failed: Campaign's co-op (Y on the difficulty) and
+#            the System Link list's Y (Create Game) with the server's port
+#            5150 taken, the harness's host (player_ui_fast_setup_network_server)
+#            with the client's 5151. Each try must fail without a crash, the
+#            player told so in an error dialog and left in the menus (the
+#            list still looking for games), and the next try,
+#            once the port is free, must host: the co-op lobby opens, the
+#            map list opens, the harness's game is joined (a fourth machine
+#            on its LAN) and played
 #
 #   HALO_TEST_VITA   the Linux build on the Vitas' side (configure.py
 #                    --linux-net-vita): build/linux/halo of this tree
@@ -134,6 +146,7 @@ vita=${HALO_TEST_VITA:-$root/build/linux/halo}
 pc=${HALO_TEST_PC:-}
 data=${HALO_TEST_DATA:-$root/../data2276}
 seconds=${HALO_TEST_SECONDS:-180}
+[ "$mode" = busyport ] && seconds=${HALO_TEST_SECONDS:-100}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
@@ -780,6 +793,93 @@ many)
 	[ "$played" -ge "$expected" ] || fail "$played joiners played ($expected wanted)"
 	[ "$full" -eq $((joiners - expected)) ] || fail "$full joiners were told the game is full ($((joiners - expected)) wanted)"
 	;;
+busyport)
+	# (a program on each machine holding its port: TCP and UDP 5150, the
+	# server's, or UDP 5151, the client's; let go once the copy's first try
+	# has failed)
+	busy() { # busy NETNS_PID PORT[/udp] -> busy_pid
+		in_ns "$1" python3 -c '
+import socket, sys, time
+port, _, proto = sys.argv[1].partition("/")
+held = []
+for kind in ((socket.SOCK_DGRAM,) if proto == "udp" else (socket.SOCK_STREAM, socket.SOCK_DGRAM)):
+	s = socket.socket(socket.AF_INET, kind)
+	s.bind(("0.0.0.0", int(port)))
+	if kind == socket.SOCK_STREAM:
+		s.listen(1)
+	held.append(s)
+time.sleep(100000)' "$2" > /dev/null 2>&1 & busy_pid=$!; pids="$pids $busy_pid"
+		sleep 0.5
+	}
+	side list 10.10.3 192.168.3
+	busy "$host_machine" 5150; busy_host=$busy_pid
+	busy "$join_machine" 5151/udp; busy_join=$busy_pid
+	busy "$list_machine" 5150; busy_list=$busy_pid
+	# Campaign, the new profile's name (START: Done), Heroic, Y: refused;
+	# A closes the error, and Y again once the port is free
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
+		"HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y wait:150:4000 a wait:150:15000 y"
+	host_pid=$last_pid
+	# the harness's host, trying again every 5 s, and a machine on its LAN
+	# joining its game
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=host:bloodgulch \
+		HALO_NETWORK_TEST_START=10 HALO_TEST_INPUT=bot:1 HALO_UI_LOG=1; harness_pid=$last_pid
+	holder; lan=$held
+	in_ns "$join_router" ip link add l2_join type veth peer name m2_join
+	in_ns "$join_router" ip link set m2_join netns "$lan"
+	in_ns "$join_router" ip link set l2_join master b_join
+	in_ns "$join_router" ip link set l2_join up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.2.3/24 broadcast 192.168.2.255 dev m2_join
+	in_ns "$lan" ip link set m2_join up
+	in_ns "$lan" ip route add default via 192.168.2.1
+	run_copy harness_joiner "$lan" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_TEST_INPUT=bot:2
+	harness_join_pid=$last_pid
+	# the System Link list (as the settings panel's Join a game opens it), Y
+	# (Create Game): refused; A closes the error, and Y again
+	run_copy list "$list_machine" "$vita" "${cpu_c:-$cpu_b}" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
+		HALO_SYSTEM_LINK_TEST=join "HALO_TEST_PAD=wait:150:6000 a a a wait:150:3000 y wait:150:4000 a wait:150:15000 y"
+	list_pid=$last_pid
+	# (each port let go 2 s after its machine's first refusal)
+	free_after_refusal() { # LOG HOLDER_PID COPY_PID
+		while kill -0 "$3" 2>/dev/null && ! grep -aq "network: could not host a game" "$1" 2>/dev/null; do
+			sleep 1
+		done
+		sleep 2
+		kill "$2" 2>/dev/null
+	}
+	free_after_refusal "$out/host/run.log" "$busy_host" "$host_pid" & pids="$pids $!"
+	free_after_refusal "$out/joiner/run.log" "$busy_join" "$harness_pid" & pids="$pids $!"
+	free_after_refusal "$out/list/run.log" "$busy_list" "$list_pid" & pids="$pids $!"
+	wait $host_pid $harness_pid $harness_join_pid $list_pid 2>/dev/null
+	for name in host joiner list; do
+		log=$out/$name/run.log
+		echo "--- $name"
+		grep -aE "network: could not|network test: (could|hosting|starting)|co-op: hosting|ui: screen .*(error|pregame|map_select|server_list)|system link: (looking|hosting)" \
+			"$log" | head -12
+		grep -aq "segmentation fault" "$log" && fail "$name crashed"
+		grep -aq "network: could not host a game" "$log" || fail "$name's host with its port taken was not refused"
+		grep -aq "ui: screen ui.shell.error.error_modal_fullscreen" "$log" || fail "$name was not told it could not host"
+	done
+	# (any difficulty: the list opens again behind the error, on its first
+	# choice)
+	grep -aq "co-op: hosting levels.a10.a10 on difficulty [0-3] from the campaign's menus" "$out/host/run.log" ||
+		fail "co-op was not hosted from the campaign's menus once the port was free"
+	sed -n '/network: could not host/,$p' "$out/host/run.log" | grep -aq "ui: screen .*connected_pregame_screen" ||
+		fail "the co-op lobby did not open once the port was free"
+	grep -aq "network test: hosting bloodgulch" "$out/joiner/run.log" || fail "the harness did not host once the port was free"
+	two=$(grep -a "network test: tick" "$out/harness_joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "the harness's game: the joiner's seconds with two players playing: $two"
+	[ "$two" -ge 20 ] || fail "the harness's game was played for $two s with two players (20 wanted)"
+	# (the list looked for games again after the refusal, before A closed the
+	# error and opened it again, then hosted)
+	searches=$(awk '/failed to initiate a multiplayer game server/ { on = 1; next } on && /network client disposed/ { exit }
+		on && /sent out a broadcast game search packet/ { n++ } END { print n + 0 }' "$out/list/data/debug.txt")
+	echo "the list's searches after the refusal: $searches"
+	[ "$searches" -ge 1 ] || fail "the System Link list stopped looking for games after the refusal"
+	sed -n '/network: could not host/,$p' "$out/list/run.log" | grep -aq "system link: hosting" ||
+		fail "the System Link list's Y did not host once the port was free"
+	;;
 solo)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=local:bloodgulch \
 		HALO_NETWORK_TEST_START=10 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
@@ -791,7 +891,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline" >&2
+	echo "usage: $0 code|relay|lobby|lobbypw|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport" >&2
 	exit 2
 	;;
 esac

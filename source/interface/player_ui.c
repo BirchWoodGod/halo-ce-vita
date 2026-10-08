@@ -627,6 +627,18 @@ void player_ui_fast_setup_network_server(
 		dispose_global_network_game_client();
 		network_game_accept_remote_connections(FALSE);
 		error(_error_silent, "failed to initiate a multiplayer game server");
+#ifdef HALO_LINUX
+		/* port: told why, at the main menu (the game's ports another
+		program's, or a copy of the game's still running) */
+		{
+			void platform_log(const char *format, ...);
+
+			platform_log("network: could not host a game (the game's network ports in use?)");
+			display_error_text_deferred(
+				L"Can't host a game:\r\nanother program is\r\nusing the network\r\nport. Try again later.",
+				NONE);
+		}
+#endif
 		main_goto_main_menu();
 		return;
 	}
