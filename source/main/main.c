@@ -3921,7 +3921,8 @@ has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device; on the Vita its display, as name<frame>.bmp);
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
 (vita_settings_set, through halo_test_setting_hook; elsewhere the variable, and the settings generation the
-readers watch). Each runs once,
+readers watch); "@host command" asks for a host command (kick, ban,
+bringto) as the Vita's Play page does (main_request_host_command). Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 /* (the Vita's settings panel sets it: vita_settings_load) */
@@ -3936,6 +3937,53 @@ static void main_test_trigger_volume(char const *name);
 static void main_test_bsp_switch_trigger(char const *arguments);
 /* damage.c's */
 void damage_kill_object_for_player(long object_index, long player_index);
+
+/* (main_request_host_command) the host commands asked for, run in order at
+the top of the main loop (main_host_commands_update) */
+#include <pthread.h>
+enum
+{
+	MAXIMUM_REQUESTED_HOST_COMMANDS = 8,
+};
+static pthread_mutex_t main_host_commands_lock = PTHREAD_MUTEX_INITIALIZER;
+static char main_host_commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+static short main_host_command_count;
+
+boolean main_request_host_command(
+	char const *command)
+{
+	boolean queued = FALSE;
+
+	if (!command || strlen(command) >= sizeof(main_host_commands[0]))
+		return FALSE;
+	pthread_mutex_lock(&main_host_commands_lock);
+	if (main_host_command_count < MAXIMUM_REQUESTED_HOST_COMMANDS)
+	{
+		strcpy(main_host_commands[main_host_command_count++], command);
+		queued = TRUE;
+	}
+	pthread_mutex_unlock(&main_host_commands_lock);
+	return queued;
+}
+
+static void main_host_commands_update(
+	void)
+{
+	char commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+	short count;
+	short index;
+
+	pthread_mutex_lock(&main_host_commands_lock);
+	count = main_host_command_count;
+	memcpy(commands, main_host_commands, sizeof(commands[0]) * count);
+	main_host_command_count = 0;
+	pthread_mutex_unlock(&main_host_commands_lock);
+	for (index = 0; index < count; index++)
+	{
+		platform_log("host command (settings panel): %s", commands[index]);
+		hs_compile_and_evaluate(commands[index]);
+	}
+}
 
 static void main_test_commands_update(
 	void)
@@ -4094,6 +4142,10 @@ static void main_test_commands_update(
 				}
 			}
 		}
+		/* (@host <command>: asked for as the settings panel asks,
+		main_request_host_command: run at the next frame's top) */
+		else if (!strncmp(commands[index].command, "@host ", 6))
+			main_request_host_command(commands[index].command + 6);
 		else
 			hs_compile_and_evaluate(commands[index].command);
 	}
@@ -4330,6 +4382,7 @@ void main_loop(
 	{
 #ifdef HALO_LINUX
 		main_test_commands_update();
+		main_host_commands_update();
 		{
 			void halo_shader_tour_update(void);
 

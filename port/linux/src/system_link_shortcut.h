@@ -1,8 +1,8 @@
 /*
 SYSTEM_LINK_SHORTCUT.H
 
-The Vita settings panel's Host a game and Join a game, and what its
-Multiplayer tab says about the network game (port/vita/host/vita_settings.c;
+The Vita settings panel's Play page (hosting, joining, co-op from the
+Campaign screen), and what it says about the network game (port/vita/host/vita_settings.c;
 the game's side: port/linux/game/system_link_shortcut.c). The two share a
 few ints, the panel's side being another ABI: plain ints only.
 */
@@ -19,12 +19,17 @@ enum
 	same screen: its list of games, where Y creates one) */
 	SYSTEM_LINK_REQUEST_HOST,
 	SYSTEM_LINK_REQUEST_JOIN,
+	/* the Campaign screen (its profiles, then the levels and the
+	difficulty, where Y hosts co-op: coop_menu.c), with the main menu
+	behind it: the Play page's Host co-op campaign */
+	SYSTEM_LINK_REQUEST_CAMPAIGN,
 };
 
 enum
 {
 	SYSTEM_LINK_ANSWER_NONE,
-	/* the System Link screen is open, at its first step (press A to join) */
+	/* the System Link screen is open, at its first step (press A to join);
+	or the Campaign screen, at its profiles */
 	SYSTEM_LINK_ANSWER_OPENED,
 	/* not at the menus: a level is being played */
 	SYSTEM_LINK_ANSWER_IN_PLAY,
@@ -70,6 +75,9 @@ enum
 	/* this machine's system link address (network byte order; 0: none),
 	as other machines reach it */
 	SYSTEM_LINK_STATUS_ADDRESS,
+	/* the most players the network game takes (its host's Max players; 2
+	in co-op) */
+	SYSTEM_LINK_STATUS_MAXIMUM,
 	SYSTEM_LINK_STATUS_COUNT
 };
 

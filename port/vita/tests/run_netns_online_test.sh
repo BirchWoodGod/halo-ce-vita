@@ -30,6 +30,13 @@
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
+#   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
+#            LAN; the host takes HALO_TEST_MAX_PLAYERS players (16, the Play
+#            page's Max players): the joiners past that must be told the
+#            game is full, the others play (HALO_TEST_HOST_ENV: more for the
+#            host, e.g. HALO_TICK_SLOWDOWN=19 for a Vita-like host;
+#            HALO_TEST_JOIN_ENV: more for every joiner; HALO_TEST_JOIN_STAGGER:
+#            seconds between joiners, default 1)
 #   solo     online off (the Vita's default): one copy hosts Blood Gulch
 #            alone; there must be no p2p thread, and the game must run
 #   coop     co-op over the network: the host hosts a campaign level
@@ -529,6 +536,54 @@ coopmenu)
 	echo "joiner's seconds on the next level with both players alive: $again"
 	[ "$again" -ge 10 ] || fail "both players were alive on the next level for $again s (10 wanted)"
 	;;
+many)
+	# online off, the host and HALO_TEST_JOINERS joiners (default 3) on the
+	# host's LAN (system link); the host takes HALO_TEST_MAX_PLAYERS players
+	# (the Play page's Max players; default 16). Every joiner past that is
+	# told the game is full; the others play. The host's frame timing
+	# (HALO_FRAME_TIMING) and net detail go in its log for the caller.
+	joiners=${HALO_TEST_JOINERS:-3}
+	most=${HALO_TEST_MAX_PLAYERS:-16}
+	stagger=${HALO_TEST_JOIN_STAGGER:-1}
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NET_LOBBY_NAME="Many test" \
+		HALO_NET_MAX_PLAYERS=$most HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} \
+		HALO_NETWORK_TEST_START=$((20 + joiners * stagger + 10)) HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50} \
+		HALO_TEST_INPUT=bot:1 HALO_FRAME_TIMING=150 HALO_NET_PROFILE=1 ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	sleep 5
+	join_pids=
+	for i in $(seq 1 "$joiners"); do
+		holder; lan=$held
+		in_ns "$host_router" ip link add "l${i}_h" type veth peer name "m${i}_h"
+		in_ns "$host_router" ip link set "m${i}_h" netns "$lan"
+		in_ns "$host_router" ip link set "l${i}_h" master b_host
+		in_ns "$host_router" ip link set "l${i}_h" up
+		in_ns "$lan" ip link set lo up
+		in_ns "$lan" ip addr add "192.168.1.$((10 + i))/24" broadcast 192.168.1.255 dev "m${i}_h"
+		in_ns "$lan" ip link set "m${i}_h" up
+		in_ns "$lan" ip route add default via 192.168.1.1
+		run_copy "joiner$i" "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_NET_PLAYER_NAME="Joiner$i" HALO_TEST_INPUT=bot:$((i + 1)) ${HALO_TEST_JOIN_ENV:-}; join_pids="$join_pids $last_pid"
+		sleep "$stagger"
+	done
+	wait $join_pids $host_pid 2>/dev/null
+	full=0 played=0
+	for i in $(seq 1 "$joiners"); do
+		log=$out/joiner$i/run.log
+		if grep -aq "The game is full" "$log"; then
+			full=$((full + 1))
+		elif grep -a "network test: tick" "$log" | grep -aq "| playing"; then
+			played=$((played + 1))
+		fi
+	done
+	echo "joiners that played: $played, told the game is full: $full (max players $most)"
+	grep -aE "Many test|the game takes" "$out/host/data/debug.txt" | head -3
+	grep -a "frame-timing" "$out/host/run.log" | tail -4
+	grep -aq "joining the game 'Many test'" "$out/joiner1/data/debug.txt" ||
+		fail "the first joiner did not see the host's lobby name in its list"
+	expected=$((joiners < most - 1 ? joiners : most - 1))
+	[ "$played" -ge "$expected" ] || fail "$played joiners played ($expected wanted)"
+	[ "$full" -eq $((joiners - expected)) ] || fail "$full joiners were told the game is full ($((joiners - expected)) wanted)"
+	;;
 solo)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=local:bloodgulch \
 		HALO_NETWORK_TEST_START=10 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
@@ -540,7 +595,7 @@ solo)
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
 *)
-	echo "usage: $0 code|lobby|lobbypw|lan|pc|pchost|adhoc|solo|coop|coopmenu" >&2
+	echo "usage: $0 code|lobby|lobbypw|lan|pc|pchost|adhoc|many|solo|coop|coopmenu" >&2
 	exit 2
 	;;
 esac

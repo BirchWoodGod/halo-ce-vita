@@ -1,15 +1,18 @@
 /*
 SYSTEM_LINK_SHORTCUT.C
 
-The game's side of the Vita settings panel's Host a game and Join a game
-(port/vita/host/vita_settings.c; system_link_shortcut.h holds what the two
-share), called from the main loop every frame (main.c):
+The game's side of the Vita settings panel's Play page: hosting, joining
+and co-op (port/vita/host/vita_settings.c; system_link_shortcut.h holds
+what the two share), called from the main loop every frame (main.c):
 
 - What the game is doing, for the panel's Multiplayer tab: this machine's
   system link address; in the menus,
   looking for games (and how many the System Link list shows), joining,
   hosting or in another's lobby (and the machines and players there), or
   playing (a network game or not).
+- The Play page's Host co-op campaign opens the Campaign screen the same
+  way (main menu, Campaign: its profiles, then the levels and the
+  difficulty, where Y hosts co-op, coop_menu.c), with the same checks.
 - A request from the panel opens the game's System Link screen as the main
   menu's Multiplayer, then System Link, open it - with that history behind
   it, so B goes back the same way - at its first step: press A to join
@@ -22,8 +25,8 @@ share), called from the main loop every frame (main.c):
   ui_widget.c ui_widget_launch_widget, which shows the player why).
 
 halo.log says each request and its answer, and each change of the state.
-(Debug) HALO_SYSTEM_LINK_TEST=host or join makes the request itself, as
-the panel would, 3 seconds after the main menu first loads: the automated
+(Debug) HALO_SYSTEM_LINK_TEST=host, join or campaign makes the request
+itself, as the panel would, 3 seconds after the main menu first loads: the automated
 runs (no panel there; triage/g110/run/run.sh with MAP=-) open the screen
 so.
 */
@@ -66,6 +69,8 @@ static char const system_link_type_select[] =
 	"ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_select_screen";
 static char const system_link_profiles[] =
 	"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\4way_profile_select\\4way_start2join_screen";
+static char const system_link_campaign[] =
+	"ui\\shell\\main_menu\\player_profiles_select\\solo_game_player_profile_select_screen";
 
 static void system_link_shortcut_status(
 	boolean main_menu_loaded)
@@ -74,7 +79,7 @@ static void system_link_shortcut_status(
 	struct network_game_server *server = global_network_game_server_get();
 	/* (split screen: a server that takes no other machines) */
 	boolean network_game = client && !network_game_is_splitscreen_local();
-	int state = SYSTEM_LINK_STATE_MENUS, machines = 0, players = 0, games = 0;
+	int state = SYSTEM_LINK_STATE_MENUS, machines = 0, players = 0, games = 0, maximum = 0;
 	XNADDR address;
 
 	if (network_game)
@@ -83,6 +88,7 @@ static void system_link_shortcut_status(
 
 		machines = game->machine_count;
 		players = game->player_count;
+		maximum = game->maximum_players;
 	}
 	if (!main_menu_loaded)
 	{
@@ -100,7 +106,7 @@ static void system_link_shortcut_status(
 		case _client_searching:
 			state = SYSTEM_LINK_STATE_SEARCHING;
 			games = network_game_client_listed_game_count();
-			machines = players = 0;
+			machines = players = maximum = 0;
 			break;
 		case _client_joining:
 			state = SYSTEM_LINK_STATE_JOINING;
@@ -120,6 +126,7 @@ static void system_link_shortcut_status(
 	halo_multiplayer_status[SYSTEM_LINK_STATUS_MACHINES] = machines;
 	halo_multiplayer_status[SYSTEM_LINK_STATUS_PLAYERS] = players;
 	halo_multiplayer_status[SYSTEM_LINK_STATUS_GAMES] = games;
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_MAXIMUM] = maximum;
 	halo_multiplayer_status[SYSTEM_LINK_STATUS_HOST] = server != NULL && network_game;
 	/* (xnet.c keeps it half a second: no request to the system each frame) */
 	halo_multiplayer_status[SYSTEM_LINK_STATUS_ADDRESS] =
@@ -141,6 +148,21 @@ static boolean system_link_shortcut_open(
 	return ui_widget_load_by_name_or_tag(NULL, main_menu, NULL, NONE, NONE, NONE, NONE) &&
 		ui_widget_load_by_name_or_tag(NULL, type_select, NULL, NONE, main_menu, NONE, NONE) &&
 		ui_widget_load_by_name_or_tag(NULL, profiles, NULL, NONE, type_select, NONE, NONE);
+}
+
+/* the Campaign screen (main menu, Campaign: the profiles, then the levels
+and the difficulty, where Y hosts co-op), the main menu behind it */
+static boolean system_link_shortcut_open_campaign(
+	void)
+{
+	long main_menu = tag_loaded(UI_WIDGET_DEFINITION_TAG, system_link_main_menu);
+	long campaign = tag_loaded(UI_WIDGET_DEFINITION_TAG, system_link_campaign);
+
+	if (main_menu == NONE || campaign == NONE)
+		return FALSE;
+	ui_widgets_close_all();
+	return ui_widget_load_by_name_or_tag(NULL, main_menu, NULL, NONE, NONE, NONE, NONE) &&
+		ui_widget_load_by_name_or_tag(NULL, campaign, NULL, NONE, main_menu, NONE, NONE);
 }
 
 /* (debug) HALO_SYSTEM_LINK_TEST: the panel's request, once, 3 s into the
@@ -171,8 +193,8 @@ static void system_link_shortcut_test(
 		return;
 	done = TRUE;
 	platform_log("system link: HALO_SYSTEM_LINK_TEST=%s", test);
-	__atomic_store_n(&halo_system_link_request, strcmp(test, "join") ? SYSTEM_LINK_REQUEST_HOST :
-		SYSTEM_LINK_REQUEST_JOIN, __ATOMIC_RELEASE);
+	__atomic_store_n(&halo_system_link_request, !strcmp(test, "join") ? SYSTEM_LINK_REQUEST_JOIN :
+		!strcmp(test, "campaign") ? SYSTEM_LINK_REQUEST_CAMPAIGN : SYSTEM_LINK_REQUEST_HOST, __ATOMIC_RELEASE);
 }
 
 void system_link_shortcut_update(
@@ -201,10 +223,14 @@ void system_link_shortcut_update(
 		cache_files_show_multiplayer_unavailable(NULL, build);
 		answer = SYSTEM_LINK_ANSWER_UNAVAILABLE;
 	}
+	else if (request == SYSTEM_LINK_REQUEST_CAMPAIGN)
+		answer = system_link_shortcut_open_campaign() ? SYSTEM_LINK_ANSWER_OPENED : SYSTEM_LINK_ANSWER_UNAVAILABLE;
 	else
 		answer = system_link_shortcut_open() ? SYSTEM_LINK_ANSWER_OPENED : SYSTEM_LINK_ANSWER_UNAVAILABLE;
-	platform_log("system link: the settings panel's %s a game: %s", request == SYSTEM_LINK_REQUEST_HOST ? "host" :
-		"join", answer == SYSTEM_LINK_ANSWER_OPENED ? "the System Link screen opened" :
+	platform_log("system link: the settings panel's %s: %s", request == SYSTEM_LINK_REQUEST_HOST ? "host a game" :
+		request == SYSTEM_LINK_REQUEST_CAMPAIGN ? "host co-op campaign" : "join a game",
+		answer == SYSTEM_LINK_ANSWER_OPENED ? request == SYSTEM_LINK_REQUEST_CAMPAIGN ? "the Campaign screen opened" :
+		"the System Link screen opened" :
 		answer == SYSTEM_LINK_ANSWER_IN_PLAY ? "not at the menus" : answer == SYSTEM_LINK_ANSWER_IN_LOBBY ?
 		"already in a lobby" : answer == SYSTEM_LINK_ANSWER_NO_NETWORK ? "no network" : "the menus did not open");
 	halo_system_link_answer = answer;
