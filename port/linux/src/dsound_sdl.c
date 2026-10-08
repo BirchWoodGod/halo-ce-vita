@@ -1489,11 +1489,16 @@ VOID WINAPI DirectSoundDoWork(void)
 
 		enabled = setting && atoi(setting) != 0;
 	}
-	if (enabled && ++calls % 300 == 0)
+	/* (every 300 calls, and at most a line a second: a map load calls this
+	from its IO waits hundreds of times a second, and the line flooded the
+	log, a line every 2 ms after "restart level" on the Vita; the counts run
+	on until the line) */
+	if (enabled && ++calls >= 300 && (!last_report || statistics_now() - last_report >= 1000000ull))
 	{
 		unsigned long mixes = statistics_mixes;
 		unsigned long long now = statistics_now();
 		double elapsed_us = last_report && now > last_report ? (double)(now - last_report) : 0.0;
+		unsigned long frames = calls;
 
 		last_report = now;
 		platform_log("sound mixer: %.1f%% of a core (%.2f ms/mix, %.1f voices), game waits for the mixer %.2f ms/frame (%lu waits);"
@@ -1501,8 +1506,9 @@ VOID WINAPI DirectSoundDoWork(void)
 			elapsed_us > 0.0 ? 100.0 * (double)statistics_mix_us / elapsed_us : 0.0,
 			mixes ? (double)statistics_mix_us / 1000.0 / (double)mixes : 0.0,
 			mixes ? (double)statistics_voices / (double)mixes : 0.0,
-			(double)statistics_wait_us / 1000.0 / 300.0, statistics_waits,
+			(double)statistics_wait_us / 1000.0 / (double)frames, statistics_waits,
 			(double)statistics_callback_gap_us / 1000.0, statistics_callbacks_late);
+		calls = 0;
 		statistics_callback_gap_us = 0;
 		statistics_callbacks_late = 0;
 		statistics_mix_us = statistics_wait_us = 0;
