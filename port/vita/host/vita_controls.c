@@ -218,6 +218,12 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 	int xbox, zone;
 
 	memset(output, 0, sizeof(*output));
+	/* a DualShock's L2 and R2 (a PS TV's) are the Vita's L and R as well
+	as its L1 and R1 */
+	if (buttons & VITA_BUTTON_L2)
+		buttons |= VITA_BUTTON_L;
+	if (buttons & VITA_BUTTON_R2)
+		buttons |= VITA_BUTTON_R;
 	if (buttons & VITA_BUTTON_START)
 		output->digital |= VITA_PAD_START;
 	if (menus)
@@ -247,6 +253,11 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 		if ((touch & (1UL << zone)) && config->zone_xbox[zone] > VITA_XBOX_OFF &&
 			config->zone_xbox[zone] < VITA_XBOX_COUNT)
 			held[config->zone_xbox[zone]] = 1;
+	/* and its sticks' clicks are the Xbox's */
+	if (buttons & VITA_BUTTON_L3)
+		held[VITA_XBOX_LEFT_STICK] = 1;
+	if (buttons & VITA_BUTTON_R3)
+		held[VITA_XBOX_RIGHT_STICK] = 1;
 	/* the left stick's click is crouch, held, on the Xbox; Toggle (the
 	panel's Crouch) makes a press crouch and the next one stand */
 	if (config->crouch_toggle)
@@ -264,6 +275,34 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 	/* (A to the right trigger: the analog buttons in order) */
 	for (xbox = VITA_XBOX_A; xbox <= VITA_XBOX_RIGHT_TRIGGER; xbox++)
 		output->analog[xbox - VITA_XBOX_A] = held[xbox] ? 255 : 0;
+}
+
+/* ---------- a PS TV's controllers */
+
+unsigned long vita_controls_extra_connected(const unsigned char types[VITA_CONTROLLER_PORTS])
+{
+	unsigned long connected = 0;
+	int controller;
+
+	for (controller = 1; controller <= VITA_EXTRA_CONTROLLERS; controller++)
+		if (types[VITA_EXTRA_PORT(controller)] != 0)
+			connected |= 1UL << controller;
+	return connected;
+}
+
+unsigned long vita_controls_ext2_buttons(unsigned long buttons)
+{
+	/* (the Vita's buttons that keep their bits: Select, L3, R3, Start, the
+	D-pad, the face buttons) */
+	unsigned long result = buttons & (VITA_BUTTON_SELECT | VITA_BUTTON_L3 | VITA_BUTTON_R3 | VITA_BUTTON_START |
+		VITA_BUTTON_UP | VITA_BUTTON_RIGHT | VITA_BUTTON_DOWN | VITA_BUTTON_LEFT | VITA_BUTTON_TRIANGLE |
+		VITA_BUTTON_CIRCLE | VITA_BUTTON_CROSS | VITA_BUTTON_SQUARE);
+
+	if (buttons & VITA_EXT2_L2) result |= VITA_BUTTON_L2;
+	if (buttons & VITA_EXT2_R2) result |= VITA_BUTTON_R2;
+	if (buttons & VITA_EXT2_L1) result |= VITA_BUTTON_L;
+	if (buttons & VITA_EXT2_R1) result |= VITA_BUTTON_R;
+	return result;
 }
 
 /* ---------- button icons */

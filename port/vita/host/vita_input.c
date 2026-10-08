@@ -28,6 +28,7 @@ Vita lying on a table drifts).
 
 #include <psp2/ctrl.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/sysmem.h>
 #include <psp2/motion.h>
 #include <psp2/touch.h>
 
@@ -451,6 +452,115 @@ void vita_gyro_status(char *text, int size)
 			gyro_simulated_at ? "simulated" : gyro_filter.still_count ? "learnt" : "lay still");
 }
 
+/* ---------- a PS TV's controllers (vita_controls.h) */
+
+int vita_host_is_pstv(void)
+{
+	static int model = -1;
+
+	if (model < 0)
+		model = sceKernelGetModel() == SCE_KERNEL_MODEL_VITATV;
+	return model;
+}
+
+/* each sceCtrl port's controller type (0 unpaired), looked up again twice a
+second (a controller paired or switched off meanwhile) */
+static const unsigned char *ports_paired(void)
+{
+	static unsigned char types[VITA_CONTROLLER_PORTS];
+	static unsigned long long looked_up;
+	static int logged = -1;
+	unsigned long long now = sceKernelGetProcessTimeWide();
+
+	if (!looked_up || now - looked_up >= 500000)
+	{
+		SceCtrlPortInfo info;
+		int port, paired = 0;
+
+		looked_up = now;
+		memset(&info, 0, sizeof(info));
+		if (sceCtrlGetControllerPortInfo(&info) < 0)
+			memset(&info, 0, sizeof(info));
+		for (port = 0; port < VITA_CONTROLLER_PORTS; port++)
+		{
+			types[port] = info.port[port];
+			if (port >= 2 && types[port])
+				paired |= 1 << port;
+		}
+		if (paired != logged)
+		{
+			char line[192];
+
+			snprintf(line, sizeof(line), "controllers: %s, ports %d %d %d %d %d (0 none, 1 the Vita's, 2 virtual, "
+				"4 DualShock 3, 8 DualShock 4): %d other controller(s) for split screen",
+				vita_host_is_pstv() ? "PS TV" : "Vita", types[0], types[1], types[2], types[3], types[4],
+				(paired >> 2 & 1) + (paired >> 3 & 1) + (paired >> 4 & 1));
+			vita_host_log(line);
+			logged = paired;
+		}
+	}
+	return types;
+}
+
+unsigned long vita_host_pad_extra_connected(void)
+{
+	return vita_controls_extra_connected(ports_paired());
+}
+
+int vita_host_pad_extra_read(int controller, struct vita_host_pad *pad)
+{
+	SceCtrlData data;
+
+	memset(pad, 0, sizeof(*pad));
+	pad->lx = pad->ly = pad->rx = pad->ry = 128;
+	if (controller < 1 || controller > VITA_EXTRA_CONTROLLERS ||
+		!(vita_host_pad_extra_connected() & (1UL << controller)))
+	{
+		return 0;
+	}
+	memset(&data, 0, sizeof(data));
+	data.lx = data.ly = data.rx = data.ry = 128;
+	/* (Peek: Read would wait for the controller's next sample) */
+	if (sceCtrlPeekBufferPositiveExt2(VITA_EXTRA_PORT(controller), &data, 1) < 0)
+		return 0;
+	pad->buttons = vita_controls_ext2_buttons(data.buttons);
+	pad->lx = data.lx;
+	pad->ly = data.ly;
+	pad->rx = data.rx;
+	pad->ry = data.ry;
+	/* (another player's input keeps the screen awake too) */
+	if (pad->buttons || stick_moved(data.lx) || stick_moved(data.ly) || stick_moved(data.rx) ||
+		stick_moved(data.ry))
+	{
+		vita_host_last_input_us = sceKernelGetProcessTimeWide();
+	}
+	return 1;
+}
+
+void vita_host_pad_rumble(int controller, int large, int small)
+{
+	static unsigned char sent[1 + VITA_EXTRA_CONTROLLERS][2];
+	SceCtrlActuator actuator;
+	int port;
+
+	if (controller < 0 || controller > VITA_EXTRA_CONTROLLERS || !vita_host_is_pstv())
+		return;
+	/* (controller 0 is the first controller's port 1) */
+	port = controller ? VITA_EXTRA_PORT(controller) : 1;
+	large = large < 0 ? 0 : large > 255 ? 255 : large;
+	small = small < 0 ? 0 : small > 255 ? 255 : small;
+	if (!ports_paired()[port] || (sent[controller][0] == large && sent[controller][1] == small))
+		return;
+	memset(&actuator, 0, sizeof(actuator));
+	actuator.large = (unsigned char)large;
+	actuator.small = (unsigned char)small;
+	if (sceCtrlSetActuator(port, &actuator) >= 0)
+	{
+		sent[controller][0] = (unsigned char)large;
+		sent[controller][1] = (unsigned char)small;
+	}
+}
+
 void vita_host_pad_read(struct vita_host_pad *pad)
 {
 	static int started;
@@ -462,6 +572,8 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 	{
 		started = 1;
 		sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
+		/* (the Ext2 reads' sticks: a PS TV's controllers) */
+		sceCtrlSetSamplingModeExt(SCE_CTRL_MODE_ANALOG_WIDE);
 		touch_start();
 		gyro_start();
 	}
@@ -469,6 +581,16 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 	data.lx = data.ly = data.rx = data.ry = 128;
 	sceCtrlPeekBufferPositive(0, &data, 1);
 	pad->buttons = data.buttons;
+	/* a PS TV's first controller is port 1 as well, where an Ext2 read
+	has the DualShock's buttons the Vita has not (L2 R2 L3 R3) */
+	if (vita_host_is_pstv() && ports_paired()[1])
+	{
+		SceCtrlData first;
+
+		memset(&first, 0, sizeof(first));
+		if (sceCtrlPeekBufferPositiveExt2(1, &first, 1) > 0)
+			pad->buttons |= vita_controls_ext2_buttons(first.buttons);
+	}
 	pad->lx = data.lx;
 	pad->ly = data.ly;
 	pad->rx = data.rx;

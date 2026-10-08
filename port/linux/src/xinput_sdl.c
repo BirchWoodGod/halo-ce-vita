@@ -5,7 +5,8 @@ Xbox controllers and the debug keyboard for the Linux build.
 
 Port 0 is always connected: it is the keyboard and mouse, merged with the
 first SDL gamepad when one is present. Further SDL gamepads take ports 1-3.
-(debug) debug.test_controllers
+On the Vita, port 0 is the Vita's own controls and ports 1-3 a PS TV's other
+controllers (port/vita/platform/vita_pad.c). (debug) debug.test_controllers
 connects ports 1-3 with no device behind them, for automated split screen
 tests (the scripted player and HALO_TEST_PAD's steps play them).
 
@@ -627,9 +628,20 @@ static DWORD connected_gamepads(void)
 	DWORD mask = XDEVICE_PORT0_MASK;
 	int port;
 
+#ifdef HALO_VITA
+	/* (the Vita's own controls are port 0: its SDL joystick is not another
+	controller) a PS TV's other controllers (port/vita/platform/vita_pad.c) */
+	{
+		extern unsigned long vita_pad_extra_connected(void);
+
+		(void)count;
+		mask |= vita_pad_extra_connected() & 0x0EUL;
+	}
+#else
 	/* the first pad shares port 0 with the keyboard */
 	for (port = 1; port < count; port++)
 		mask |= 1UL << port;
+#endif
 	/* (debug) the automated tests' controllers */
 	for (port = 1; port < test_controller_count(); port++)
 		mask |= 1UL << port;
@@ -740,10 +752,20 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		test_input_gamepad(&state->Gamepad, port);
 		test_pad_gamepad(&state->Gamepad, port);
 	}
+#ifdef HALO_VITA
+	else
+	{
+		/* a PS TV's other controllers (port/vita/platform/vita_pad.c) */
+		extern void vita_pad_extra_state(int controller, XINPUT_GAMEPAD *gamepad);
+
+		vita_pad_extra_state(port, &state->Gamepad);
+	}
+#else
 	else if (port < count)
 	{
 		sdl_gamepad_state(gamepads[port], &state->Gamepad);
 	}
+#endif
 
 	if (memcmp(&state->Gamepad, &controllers[port].previous, sizeof(state->Gamepad)))
 	{
@@ -765,6 +787,17 @@ DWORD WINAPI XInputSetState(HANDLE device, PXINPUT_FEEDBACK feedback)
 	feedback->Header.dwStatus = ERROR_SUCCESS;
 	if (port < 0)
 		return ERROR_DEVICE_NOT_CONNECTED;
+#ifdef HALO_VITA
+	/* a PS TV's DualShocks (port/vita/platform/vita_pad.c) */
+	{
+		extern void vita_pad_rumble(int controller, unsigned short left, unsigned short right);
+
+		(void)gamepads;
+		(void)count;
+		vita_pad_rumble(port, feedback->Rumble.wLeftMotorSpeed, feedback->Rumble.wRightMotorSpeed);
+		return ERROR_SUCCESS;
+	}
+#endif
 	count = sdl_gamepads(gamepads);
 	if (port < count)
 	{

@@ -227,9 +227,43 @@ struct vita_controls_output
 held. In the game's menus the layout is fixed (the D-pad is the D-pad,
 Cross and Circle A and B) and the touch zones do nothing; in play each Xbox
 button is its Vita button's or a zone's (the left stick's click through the
-crouch toggle) */
+crouch toggle). A DualShock's (a PS TV's): L2 and R2 are L and R as well,
+and in play L3 and R3 the sticks' clicks (L3 through the crouch toggle) */
 void vita_controls_map(const struct vita_controls_config *config, struct vita_controls_state *state,
 	unsigned long buttons, unsigned long touch, int menus, struct vita_controls_output *output);
+
+/* ---------- a PS TV's controllers (split screen)
+
+A PS TV pairs up to four DualShock 3 or 4 controllers. Its sceCtrl ports
+(sceCtrlGetControllerPortInfo's types; 0 unpaired): 0 the virtual one the
+system gives the first controller, which the game reads as controller 0
+(vita_input.c, as on a Vita), 1 that first controller again, 2 to 4 the
+others: the game's controllers 1 to 3, each with the same layout as
+controller 0. Port 1 is never another player's: it is player 1's, and on a
+Vita the plugins that pair a DualShock put it there as well as on port 0.
+The Vita itself has only its own controls (port 0), so its split screen
+stays one player. */
+#define VITA_CONTROLLER_PORTS 5
+#define VITA_EXTRA_CONTROLLERS 3
+/* the sceCtrl port of the game's controller 1 to 3 */
+#define VITA_EXTRA_PORT(controller) ((controller) + 1)
+
+/* the game's controllers 1 to 3 that have a controller paired, a bit each
+(1 << controller), from the ports' types */
+unsigned long vita_controls_extra_connected(const unsigned char types[VITA_CONTROLLER_PORTS]);
+
+/* sceCtrl's Ext2 reads (all of a DualShock's buttons) give L2 and R2 the
+bits of the Vita's L and R, and L1 and R1 bits of their own */
+#define VITA_EXT2_L2 0x00000100UL
+#define VITA_EXT2_R2 0x00000200UL
+#define VITA_EXT2_L1 0x00000400UL
+#define VITA_EXT2_R1 0x00000800UL
+
+/* an Ext2 read's buttons as the Vita's (vita_host_pad.buttons): L1 and R1
+are the Vita's L and R (as the PS TV gives player 1 on port 0), L2 and R2
+VITA_BUTTON_L2 and R2 (which vita_controls_map takes as L and R too), L3
+and R3 the sticks' clicks; the PS button and the rest dropped */
+unsigned long vita_controls_ext2_buttons(unsigned long buttons);
 
 /* ---------- button icons
 

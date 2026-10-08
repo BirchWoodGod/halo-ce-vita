@@ -20,7 +20,10 @@ fitting the panel's value column), one per settings value; and the
 button icons (the panel's Button icons, PlayStation): the Vita button each
 of the game's button icons shows, in play and the menus, following a
 remap, a touch zone for a button on none, each one a button that presses
-it.
+it; a PS TV's other controllers (split screen): the ports that are the
+game's controllers 1 to 3 (never port 1, player 1's; none on a Vita), an
+Ext2 read's buttons as the Vita's, and a DualShock's L2, R2, L3 and R3
+through the mapping.
 
 Run port/vita/tests/run_vita_controls_test.sh.
 */
@@ -851,6 +854,67 @@ static void test_button_glyphs(void)
 	clear_environment();
 }
 
+/* a PS TV's other controllers (split screen): which ports are the game's
+controllers 1 to 3, an Ext2 read's buttons as the Vita's, and a DualShock's
+extra buttons through the mapping */
+static void test_pstv_controllers(void)
+{
+	static const unsigned char pstv_two[VITA_CONTROLLER_PORTS] = { 2, 4, 8, 0, 0 };
+	static const unsigned char pstv_four[VITA_CONTROLLER_PORTS] = { 2, 8, 4, 8, 4 };
+	static const unsigned char pstv_gap[VITA_CONTROLLER_PORTS] = { 2, 4, 0, 0, 8 };
+	static const unsigned char vita_alone[VITA_CONTROLLER_PORTS] = { 1, 0, 0, 0, 0 };
+	static const unsigned char vita_plugin[VITA_CONTROLLER_PORTS] = { 1, 8, 0, 0, 0 };
+	struct vita_controls_config config;
+	struct vita_controls_state state;
+	struct vita_controls_output out;
+	unsigned long buttons;
+
+	check(vita_controls_extra_connected(pstv_two) == 0x2, "PS TV, two controllers: controller 1 (port 2) only");
+	check(vita_controls_extra_connected(pstv_four) == 0xE, "PS TV, four controllers: controllers 1 to 3");
+	check(vita_controls_extra_connected(pstv_gap) == 0x8, "PS TV, ports 2 and 3 unpaired: controller 3 only");
+	check(vita_controls_extra_connected(vita_alone) == 0, "a Vita: no other controller (split screen one player)");
+	check(vita_controls_extra_connected(vita_plugin) == 0,
+		"a Vita with a DualShock on port 1 (a plugin): still none, port 1 is player 1's");
+	check(VITA_EXTRA_PORT(1) == 2 && VITA_EXTRA_PORT(3) == 4, "controllers 1 to 3 are ports 2 to 4");
+
+	/* an Ext2 read: L1/R1 its own bits, L2/R2 the Vita's L/R bits */
+	buttons = vita_controls_ext2_buttons(VITA_EXT2_L1 | VITA_EXT2_R1);
+	check(buttons == (VITA_BUTTON_L | VITA_BUTTON_R), "Ext2: L1 and R1 are the Vita's L and R");
+	buttons = vita_controls_ext2_buttons(VITA_EXT2_L2 | VITA_EXT2_R2);
+	check(buttons == (VITA_BUTTON_L2 | VITA_BUTTON_R2), "Ext2: L2 and R2 move to their own bits");
+	buttons = vita_controls_ext2_buttons(VITA_BUTTON_CROSS | VITA_BUTTON_START | VITA_BUTTON_SELECT |
+		VITA_BUTTON_UP | VITA_BUTTON_L3 | VITA_BUTTON_R3 | 0x00010000UL);
+	check(buttons == (VITA_BUTTON_CROSS | VITA_BUTTON_START | VITA_BUTTON_SELECT | VITA_BUTTON_UP |
+		VITA_BUTTON_L3 | VITA_BUTTON_R3), "Ext2: face, Start, Select, D-pad, L3, R3 kept; the PS button dropped");
+
+	/* the mapping: the same layout as controller 0's */
+	clear_environment();
+	vita_controls_config_load(&config);
+	memset(&state, 0, sizeof(state));
+	out = map(&config, &state, VITA_BUTTON_L2 | VITA_BUTTON_R2, 0, 0);
+	check(out.analog[6] == 255 && out.analog[7] == 255, "play: a DualShock's L2 and R2: the triggers, as L and R");
+	out = map(&config, &state, VITA_BUTTON_L2, 0, 1);
+	check(out.analog[6] == 255, "menus: L2 is L (the left trigger)");
+	out = map(&config, &state, VITA_BUTTON_R3, 0, 0);
+	check(out.digital == VITA_PAD_RIGHT_THUMB, "play: R3 is the right stick's click (zoom)");
+	out = map(&config, &state, VITA_BUTTON_L3, 0, 0);
+	check(out.digital == VITA_PAD_LEFT_THUMB, "play: L3 crouches (the crouch toggle)");
+	out = map(&config, &state, 0, 0, 0);
+	check(out.digital == VITA_PAD_LEFT_THUMB, "play: L3 released: still crouched (toggle)");
+	map(&config, &state, VITA_BUTTON_L3, 0, 0);
+	out = map(&config, &state, 0, 0, 0);
+	check(!out.digital, "play: L3 again: standing");
+	out = map(&config, &state, VITA_BUTTON_L3 | VITA_BUTTON_R3, 0, 1);
+	check(!out.digital, "menus: L3 and R3 do nothing");
+	/* a remap follows: L (and so L1 and L2) to Y */
+	setenv("HALO_XBOX_Y", "l", 1);
+	setenv("HALO_XBOX_LEFT_TRIGGER", "none", 1);
+	vita_controls_config_load(&config);
+	out = map(&config, &state, vita_controls_ext2_buttons(VITA_EXT2_L2), 0, 0);
+	check(out.analog[3] == 255 && !out.analog[6], "play: L remapped to Y: a DualShock's L2 follows");
+	clear_environment();
+}
+
 int main(void)
 {
 	test_names();
@@ -861,6 +925,7 @@ int main(void)
 	test_gyro_filter();
 	test_gyro_aim();
 	test_button_glyphs();
+	test_pstv_controllers();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

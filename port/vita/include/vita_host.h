@@ -116,6 +116,14 @@ unsigned long vita_movie_detect_pitch(const unsigned char *luma, unsigned long r
 #define VITA_BUTTON_CIRCLE 0x00002000UL
 #define VITA_BUTTON_CROSS 0x00004000UL
 #define VITA_BUTTON_SQUARE 0x00008000UL
+/* a DualShock 3's or 4's buttons the Vita has not (a PS TV's controllers,
+read with sceCtrl's Ext2 calls): L3 and R3 are sceCtrl's own bits; L2 and R2
+moved above sceCtrl's (the Ext2 read gives them the Vita's L and R bits, and
+L1 and R1 its own: vita_controls_ext2_buttons swaps them back) */
+#define VITA_BUTTON_L3 0x00000002UL
+#define VITA_BUTTON_R3 0x00000004UL
+#define VITA_BUTTON_L2 0x01000000UL
+#define VITA_BUTTON_R2 0x02000000UL
 
 struct vita_host_pad
 {
@@ -129,6 +137,18 @@ struct vita_host_pad
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);
+/* a PS TV's other controllers, the game's controllers 1 to 3 (split screen;
+vita_input.c): a bit per controller (1 << n) that has one paired, looked up
+twice a second. The Vita itself has none, unless a plugin pairs some */
+unsigned long vita_host_pad_extra_connected(void);
+/* controller 1 to 3's buttons (the bits above) and sticks, no touch, no
+gyro; 0 (and a pad at rest) if it has none */
+int vita_host_pad_extra_read(int controller, struct vita_host_pad *pad);
+/* the motors of controller 0 to 3's DualShock (0 to 255 each: the large
+motor, the small one), on a PS TV; sent only when they change */
+void vita_host_pad_rumble(int controller, int large, int small);
+/* nonzero on a PS TV (sceKernelGetModel) */
+int vita_host_is_pstv(void);
 /* the gyroscope's line on the settings panel's Gyro settings page: the rates now
 (degrees a second), whether the bias was learnt */
 void vita_gyro_status(char *text, int size);
