@@ -349,6 +349,25 @@ What helps, in the settings panel:
 - Keep **Smooth weapon motion** on: it costs almost nothing and makes the
   frame rate feel steadier.
 
+### More performance with plugins (optional)
+
+Two optional plugins give the game more of the Vita's processor. Neither is
+needed, and the game runs the same without them.
+
+- **[CapUnlocker](https://github.com/GrapheneCt/CapUnlocker)** by GrapheneCt
+  lets games use the Vita's fourth CPU core, which the system normally keeps
+  for itself. With it, the **Fourth core helpers** setting moves background
+  work (audio, the display queue, loading and checkpoint writing) onto that
+  core, leaving more of the other three for the game. Without it the setting
+  does nothing and `halo.log` says so. To install: copy `CapUnlocker.skprx`
+  from its releases to `ur0:tai/`, add the line `ur0:tai/CapUnlocker.skprx`
+  under `*KERNEL` in `ur0:tai/config.txt` (keep a copy of the file first: a
+  mistake there stops plugins loading), and reboot.
+- **[PSVshell](https://github.com/Electry/PSVshell)** (or PSVshellPlus)
+  raises the processor to 500 MHz, which helps in the biggest fights at some
+  cost in battery and heat. The game keeps a higher speed set there; it only
+  raises the clock when it is lower than the game needs.
+
 A steady 30 fps in the biggest fights is a goal for 1.1.0 (see the
 [roadmap](ROADMAP.md)). If you want to help measure, add these lines to
 `ux0:data/haloce-vita/env.txt`, play a heavy fight for a couple of minutes,
