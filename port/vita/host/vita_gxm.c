@@ -1248,8 +1248,8 @@ volatile unsigned long vgxm_compiles, vgxm_shader_loads, vgxm_links, vgxm_compil
 
 /* ---------- the shipped programs
 
-The programs the campaign levels and the menu make (265 in the pack of Oct 2
-2026; the multiplayer maps are not collected yet), compiled ahead by
+The programs the campaign levels, the multiplayer maps and the menus make
+(303 in the pack of Oct 8 2026, the blend folds among them), compiled ahead by
 the same SceShaccCg (tools/vita_shader_pack.py, from the sources the Linux
 gxm-null harness collects with HALO_SHADER_COLLECT), so a first visit to an
 area compiles nothing on the device. One file in the VPK, read whole at

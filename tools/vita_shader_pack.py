@@ -14,7 +14,11 @@ How the programs are gathered:
    (configure.py --linux-d3d gxm-null) through the levels with
    HALO_SHADER_COLLECT=<directory>; each program's Cg is written there as
    <hash>.vp.cg / <hash>.fp.cg, the hash being the one the Vita keys its
-   programs by (the Cg is the same text on every platform).
+   programs by (the Cg is the same text on every platform). The campaign:
+   init.txt's level with HALO_SHADER_TOUR=5 and HALO_TEST_INPUT=bot:<n>;
+   the multiplayer maps: HALO_NETWORK_TEST=local:<map>:<variant> (a host
+   alone never starts its game) with the tour, which then walks the
+   starting locations; the menus: no init.txt, HALO_TEST_PAD.
 2. Compile them with the device's own compiler: copy the directory to
    ux0:data/haloce-vita/ on Vita3K (whose libshacccg.suprx is the device's
    module) and start the Vita build once with
@@ -23,9 +27,11 @@ How the programs are gathered:
    HALO_SHADER_COLLECT on that run adds the renderer's built-in programs.
    At start-up the game's heap is still small, so one run compiles them all
    (265 in 32 s on Vita3K, the compiler's heap at ~12 MB); later in a game
-   SceShaccCg runs out of heap after 50-110 compiles. Any program a clean-cache
-   run still compiles in the background ("compiled in the background" in the
-   log) is a source to collect and add.
+   SceShaccCg runs out of heap after 50-110 compiles (so the programs the
+   precompiling run itself then draws, some with texture stages missing, are
+   not sources to add). Any program a clean-cache run still compiles in the
+   background ("compiled in the background" in the log) is a source to
+   collect and add.
 3. Pack them: vita_shader_pack.py --sources <directory> --programs
    <the cache directory> [--output port/vita/app0/shaders.pak].
 
