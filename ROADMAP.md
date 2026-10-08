@@ -51,7 +51,7 @@ version).
   Create Game with Server Setup. Needs Halo PC's `bitmaps.map`,
   `sounds.map` and `loc.map`. Built on iamhaller's networking work. Vita to
   Vita only.
-- **Same Wi-Fi** (system link) and **ad hoc** play between Vitas.
+- **Ad hoc** play between Vitas (no router), next to **Same Wi-Fi** (system link).
 - **Campaign co-op over the network** for up to four Vitas, Private or
   Public, built on OpenCE's network co-op (the Xbox only had split-screen
   co-op on one console).

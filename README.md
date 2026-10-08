@@ -37,7 +37,7 @@ Evolved.
   (from OpenCE): a server browser of public games, **Join by code**, and
   Create Game with lobby name, max players, public or private and a
   password. It needs the [Halo PC files](#halo-pc-files).
-- **Same Wi-Fi** (system link) and **ad hoc** play between Vitas.
+- **Ad hoc** play between Vitas (no router), next to **Same Wi-Fi** (system link).
 - **[Co-op campaign](#co-op-campaign)** for up to **four** Vitas, Private or
   Public.
 - **[Custom maps](#custom-maps-and-map-sharing)**: Xbox ones, and Halo PC /
