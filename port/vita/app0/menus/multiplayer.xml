@@ -20,7 +20,7 @@
 		<on event="a start" open="ui\shell\main_menu\player_profiles_select\solo_game_player_profile_select_screen"/>
 	</widget>
 	<widget name="mp/item_split" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_labels" string_index="2">
-		<on event="a start" run="port mp require controllers" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen" otherwise="mp/controllers"/>
+		<on event="a start" run="port mp require controllers" open="split/screen" otherwise="mp/controllers"/>
 	</widget>
 	<widget name="mp/item_gametypes" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="mp_options" string_index="5">
 		<on event="a start" open="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_select\gametype_select_screen"/>
@@ -58,6 +58,31 @@
 	<widget name="mp/offline" flags="pass_unhandled_to_focused_child" bitmap="gradient">
 		<child widget="mp/header"/>
 		<child widget="mp/offline_text"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+	<widget name="split/item_game" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="split_labels" string_index="0">
+		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\split_screen\4way_profile_select\4way_start2join_screen"/>
+	</widget>
+	<widget name="split/item_campaign" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="split_labels" string_index="1">
+		<on event="a start" run="coop game initialize" open="ui\shell\main_menu\multiplayer_type_select\coop\player1_profile_select_screen"/>
+	</widget>
+	<widget name="split/label" top="78" string_index="2" type="text" left="19" width="232" height="32" string_list="mp_labels" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5"/>
+	<widget name="split/description_picture" left="288" top="82" width="307" height="244" bitmap="mp_options"/>
+	<widget name="split/description_text" type="text" left="290" top="322" width="300" height="72" string_list="split_descriptions" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="split/description" left="275" top="78" width="320" height="322" bitmap="list_field">
+		<child widget="split/description_picture"/>
+		<child widget="split/description_text"/>
+	</widget>
+	<widget name="split/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items" description="split/description">
+		<data input="port split update desc"/>
+		<child widget="split/item_game" y="111"/>
+		<child widget="split/item_campaign" y="144"/>
+	</widget>
+	<widget name="split/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<on event="created" run="mp type menu initialize"/>
+		<child widget="mp/header"/>
+		<child widget="split/label"/>
+		<child widget="split/list"/>
 		<child widget="ui\shell\main_menu\button_key"/>
 	</widget>
 	<widget name="mp/controllers_text" type="text" left="68" top="110" width="520" height="260" string_list="controllers" font="ui\large_ui" color="#FFFFFFFF"/>

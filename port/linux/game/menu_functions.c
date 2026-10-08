@@ -20,7 +20,11 @@ internet play with:
   Xbox's own. SPLIT SCREEN needs a second controller ("port mp require
   controllers": a PS TV's DualShocks, vita_pad.c); with one, a screen says
   so, where A plays alone (the Xbox's split screen of one player) and B
-  goes back.
+  goes back. With more, it asks which: MULTIPLAYER GAME (the Xbox's Split
+  Screen: Select Profile, where each presses START) or CO-OP CAMPAIGN (the
+  Xbox's Cooperative Play, its two players' profiles, then the level and
+  the difficulty), which the Xbox's Multiplayer screen had and OpenCE's
+  CO-OP CAMPAIGN (network co-op) stands in for.
 - The Server Browser ("port browser ...") lists the public games
   (p2p_lobby_entry: a lock for a password, the name, map, gametype and
   players; the chosen one's Players and Rules lines below); A joins the
@@ -128,6 +132,7 @@ enum
 	_input_password_update,
 	_input_setup_update,
 	_input_code_update,
+	_input_split_update_desc,
 };
 
 /* what a line of typing is for */
@@ -486,8 +491,10 @@ static void join_watch(void)
 
 /* (each item's description and picture: by its place in the list) */
 static short const multiplayer_pictures[] = { 0, 1, 0, 0, 1, 0, 1, 2 };
+/* (SPLIT SCREEN's: a multiplayer game, the campaign) */
+static short const split_pictures[] = { 1, 1 };
 
-static void multiplayer_update(struct widget_instance *list)
+static void list_description_update(struct widget_instance *list, short const *pictures, short picture_count)
 {
 	struct widget_instance *description = list->parameters.list.extended_description;
 	struct widget_instance *child;
@@ -502,7 +509,7 @@ static void multiplayer_update(struct widget_instance *list)
 		struct widget_instance *text = named(description, "description_text");
 
 		if (picture)
-			picture->animation.current_frame_index = multiplayer_pictures[index % NUMBEROF(multiplayer_pictures)];
+			picture->animation.current_frame_index = pictures[index % picture_count];
 		string_show(text, index);
 	}
 }
@@ -852,7 +859,11 @@ void pc_menu_game_data_function_invoke(
 	{
 	case _input_mp_update_desc:
 		if (widget->type == _ui_widget_type_column_list)
-			multiplayer_update(widget);
+			list_description_update(widget, multiplayer_pictures, NUMBEROF(multiplayer_pictures));
+		break;
+	case _input_split_update_desc:
+		if (widget->type == _ui_widget_type_column_list)
+			list_description_update(widget, split_pictures, NUMBEROF(split_pictures));
 		break;
 	case _input_browser_update:
 		browser_update(widget);

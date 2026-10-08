@@ -344,6 +344,7 @@ static char const *const port_game_data_input_names[] =
 {
 	"unwired",
 	"port mp update desc", "port browser update", "port password update", "port setup update", "port code update",
+	"port split update desc",
 };
 
 static struct

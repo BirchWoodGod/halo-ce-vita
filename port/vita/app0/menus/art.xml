@@ -43,6 +43,14 @@
 		<string text="Up to four players on this screen,\na controller each: on a PS TV,\nDualShock 3 or 4 controllers."/>
 		<string text="Set all the attributes for your\nmultiplayer gametypes and keep\nthem for future use."/>
 	</strings>
+	<strings name="split_labels">
+		<string text="MULTIPLAYER GAME"/>
+		<string text="CO-OP CAMPAIGN"/>
+	</strings>
+	<strings name="split_descriptions">
+		<string text="Slayer, CTF and the other gametypes\nfor up to four players on this\nscreen, a controller each."/>
+		<string text="The campaign for two players on this\nscreen, each with a profile and a\ncontroller of their own."/>
+	</strings>
 	<strings name="controllers">
 		<string text="Split screen needs a controller for each\nplayer: a PS TV with up to three more\nDualShock 3 or 4 controllers paired\nwith it, then %a-button on each to join.\n\nThe PS Vita has only its own controls:\n%a-button plays alone, %b-button goes back."/>
 	</strings>

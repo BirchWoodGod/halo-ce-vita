@@ -13,18 +13,24 @@
 #           are added again
 #   xbox    without the Halo PC files: the Xbox's Multiplayer screen, nothing
 #           added
-#   split   SPLIT SCREEN with four controllers (debug.test_controllers): each
-#           presses START on the Xbox's Select Profile screen and A on its
+#   split   SPLIT SCREEN with four controllers (debug.test_controllers),
+#           MULTIPLAYER GAME: each presses START on the Xbox's Select Profile
+#           screen and A on its
 #           profile, then player 1 goes through the map, the gametype and the
 #           pregame screens into the game, which splits in four
 #   split1  SPLIT SCREEN with one controller (a Vita): the screen that says
 #           it needs a PS TV's controllers, B back; then A on it plays alone
 #           (the Xbox's Select Profile screen)
+#   splitcoop  SPLIT SCREEN's CO-OP CAMPAIGN with two controllers (the Xbox's
+#           Cooperative Play): a first run's Campaign makes a profile, copied
+#           as a second; then player 1's profile, player 2's (with controller
+#           2), The Pillar of Autumn and the difficulty: the level splits in
+#           two
 #
 # Each must log no "is not a tag index" (a tag of ours read as the empty
 # one), no assertion or exception, and exit by itself.
 #
-#   run_menus_test.sh [CASE...]      (default: fresh level xbox split split1)
+#   run_menus_test.sh [CASE...]      (default: fresh level xbox split split1 splitcoop)
 #   HALO_TEST_VITA        the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA        a folder with the game's maps folder (the Xbox maps)
 #   HALO_TEST_DATA_MENUS  the same with Halo PC's bitmaps.map and loc.map in
@@ -38,7 +44,7 @@ binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
-cases=${*:-fresh level xbox split split1}
+cases=${*:-fresh level xbox split split1 splitcoop}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -54,6 +60,7 @@ run() { # NAME DATA SECONDS PAD [VAR=value...]
 	rm -rf "$out/$name"
 	mkdir -p "$out/$name/data" "$out/$name/save"
 	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
+	[ -n "${save_seed:-}" ] && cp -a "$save_seed/." "$out/$name/save/"
 	[ -n "${init_line:-}" ] && printf '%s\n' "$init_line" > "$out/$name/data/init.txt"
 	(cd "$out/$name" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
 		HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
@@ -111,7 +118,7 @@ for case in $cases; do
 		run xbox "$data" 40 "$pad"
 		check xbox xbox ;;
 	split)
-		run split "$menus_data" 90 "$to_split start:150:1000 2.start:150:1000 3.start:150:1000 4.start:150:2000 a:150:1000 2.a:150:1000 3.a:150:1000 4.a:150:2000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000" \
+		run split "$menus_data" 90 "$to_split a:150:2500 start:150:1000 2.start:150:1000 3.start:150:1000 4.start:150:2000 a:150:1000 2.a:150:1000 3.a:150:1000 4.a:150:2000 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:3000" \
 			HALO_TEST_CONTROLLERS=4 HALO_DISPLAY_WIDTH=848
 		check_split split
 		grep -aq "menus: Split Screen: 4 controllers connected" "$out/split/run.log" || fail split "the four controllers were not counted"
@@ -125,8 +132,27 @@ for case in $cases; do
 			fail split1 "the screen that says split screen needs controllers did not open twice"
 		grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.split_screen.4way_profile_select" "$out/split1/run.log" ||
 			fail split1 "A did not go on to play alone" ;;
+	splitcoop)
+		# (a profile: Campaign on a first start makes one, then the level)
+		run profile "$menus_data" 35 "wait:150:2000 a wait:150:4000 a wait:150:3000"
+		profile=$(ls -d "$out/profile/save/u/UDATA/"*/ 2>/dev/null | head -1)
+		if [ -z "$profile" ]; then
+			fail splitcoop "Campaign made no profile"
+		else
+			mkdir -p "$out/seed/u/UDATA"
+			cp -a "$profile" "$out/seed/u/UDATA/0000000000A1"
+			cp -a "$profile" "$out/seed/u/UDATA/0000000000A2"
+			rm -f "$out/seed/u/UDATA/0000000000A2/savegame.bin"
+			save_seed=$out/seed run splitcoop "$menus_data" 90 \
+				"$to_split down:150:2500 a:150:3000 a:150:3000 2.a:150:3000 a:150:3000 a:150:3000" HALO_TEST_CONTROLLERS=2 HALO_DISPLAY_WIDTH=848
+			check_split splitcoop
+			grep -aq "ui: screen pc.split.screen" "$out/splitcoop/run.log" || fail splitcoop "SPLIT SCREEN did not ask which"
+			grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.coop.player2_profile_select_screen" \
+				"$out/splitcoop/run.log" || fail splitcoop "player 2's profile screen did not open"
+			grep -aq "split screen: 2 windows" "$out/splitcoop/run.log" || fail splitcoop "the level did not split in two"
+		fi ;;
 	*)
-		echo "usage: $0 [fresh|level|xbox|split|split1]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|level|xbox|split|split1|splitcoop]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"
