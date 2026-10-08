@@ -999,6 +999,38 @@ int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore)
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (port) a Vita quality setting: HALO_MAX_SCENE_LIGHTS caps the dynamic
+lights a frame has. Each gets its own additive pass over the environment
+(diffuse and specular), a blended full draw the tile renderer cannot
+hide-surface-remove, the GPU's whole cost in a fight. After Bruno Santana's
+Vita build the cap is the scene's light query's own (lights_preprocess_scene),
+so the lights past it are not the scene's at all: no pass over the
+environment, no light on the objects, no lens flare, none of their work on
+the CPU (before, only the passes were capped). The query walks the clusters
+seen outwards from the camera's, so the lights kept are mostly the nearest.
+Unset or 0: no cap, as the Xbox. */
+#include <stdlib.h>
+static short lights_scene_maximum(
+	void)
+{
+	static int maximum = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (maximum < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_MAX_SCENE_LIGHTS");
+
+		settings_seen = halo_settings_generation;
+		maximum = setting ? atoi(setting) : 0;
+		if (maximum <= 0 || maximum > MAXIMUM_RENDERED_LIGHTS)
+			maximum = MAXIMUM_RENDERED_LIGHTS;
+	}
+	return (short)maximum;
+}
+#endif
+
 void lights_preprocess_scene(
 	void)
 {
@@ -1055,7 +1087,11 @@ void lights_preprocess_scene(
 	light_marker_begin();
 	lights_globals.scene_point_light_count = structure_visibility_find_objects(
 		lights_globals.scene_point_lights,
+#ifdef HALO_LINUX
+		lights_scene_maximum(),
+#else
 		MAXIMUM_RENDERED_LIGHTS,
+#endif
 #ifdef HALO_LINUX
 		/* (port) with the tick on its thread, the lights' cluster lists as
 		the finished tick left them (render_interpolation.c, "the threaded
@@ -1872,28 +1908,7 @@ static void light_get_bounding_sphere(
 	return;
 }
 
-#ifdef HALO_LINUX
-/* (port) a Vita quality setting: HALO_MAX_SCENE_LIGHTS caps the dynamic
-lights that get their own additive pass over the environment (diffuse and
-specular); each such pass is a blended full draw the tile renderer cannot
-hide-surface-remove, the GPU's whole cost in a fight. Unset or 0: no cap. */
-#include <stdlib.h>
-static int vita_max_scene_lights = -1;
-static short vita_scene_light_count(void)
-{
-	if (vita_max_scene_lights < 0)
-	{
-		const char *setting = getenv("HALO_MAX_SCENE_LIGHTS");
-		vita_max_scene_lights = setting ? atoi(setting) : 0;
-	}
-	if (vita_max_scene_lights > 0 && lights_globals.scene_point_light_count > vita_max_scene_lights)
-		return (short)vita_max_scene_lights;
-	return lights_globals.scene_point_light_count;
-}
-#define SCENE_LIGHT_COUNT() vita_scene_light_count()
-#else
 #define SCENE_LIGHT_COUNT() lights_globals.scene_point_light_count
-#endif
 
 void lights_render_diffuse(
 	void)
