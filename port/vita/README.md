@@ -198,7 +198,7 @@ Graphics, **Advanced**:
 | Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
-| AI think rate (P) | Adaptive | how often enemies and allies think (what they see, feel and decide): Every tick (the Xbox's), Adaptive (within 8 world units of a player every tick, within 25 every second tick, farther every third), 15 Hz, 10 Hz. Their movement, aim and firing stay every tick; the game plays a little differently (they notice and decide a tick or two later). Replaces 1.1's Distant AI |
+| AI think rate (P) | Adaptive | how often enemies and allies think (what they see, feel and decide): Every tick (the Xbox's), Adaptive (within 8 world units of a player every tick, within 25 every second tick, farther every third), 15 Hz, 10 Hz. Their movement, aim and firing stay every tick; the game plays a little differently (they notice and decide a tick or two later). Replaces the 1.1.0 test builds' Distant AI |
 
 **Controls**
 
@@ -316,7 +316,7 @@ PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
 **The game's Multiplayer menu.** Hosting and joining are in the game's own
 menus. With Halo PC's `bitmaps.map` and `loc.map` in the maps folder (from
 MCC's `halo1/maps/custom_edition/` or a Custom Edition install: see the main
-README's "Online play: Halo PC files"), the main menu's **Multiplayer** opens the
+README's "Halo PC files"), the main menu's **Multiplayer** opens the
 PC version's Multiplayer screen, OpenCE's menus:
 
 | Item | What it does |
@@ -398,7 +398,11 @@ public MQTT brokers and then connect directly (UDP hole punching). That can
 fail between two networks whose NATs both give each destination its own port
 (some mobile and company networks, double NAT): forwarding a UDP port on one
 router helps (`HALO_NET_TUNNEL_PORT=<port>` in `env.txt`, the same port
-forwarded to that Vita). There is no relay and no UPnP on the Vita yet.
+forwarded to that Vita). A relay (`port/relay`, run by anyone) can carry
+the game where no direct path works, still encrypted end to end: none is
+set by default; name one with `HALO_NET_RELAYS=host:port` in `env.txt` (one
+player naming it is enough; a direct connection is tried first and kept
+whenever it works). The Vita has no UPnP.
 
 What others can see: the public MQTT brokers and STUN servers (third
 parties) see each Vita's public IP address while it plays online, and the
@@ -469,8 +473,8 @@ halo-ce-universal's network co-op (credited in the main README):
   nor writes it, and Save and Quit in co-op only leaves the game. Levels
   finished in co-op count as finished in the profile, as in the Xbox's
   split screen co-op.
-- Every Vita needs this version (network version 17): a 1.1.0 build tells
-  the player to update.
+- Every Vita needs this version (network version 18): a Vita joining a
+  game of another version is told which one is newer.
 
 **Ad hoc.** Set Connection to Ad hoc on every Vita and restart. Choose the
 same Ad hoc room on each (Multiplayer tab), then **Join the room**: the

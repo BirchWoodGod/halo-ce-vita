@@ -35,6 +35,7 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <strings.h>
 
 #include "vita_host.h"
+#include "vita_version.h"
 
 #define VITA_DATA_DIRECTORY "ux0:data/haloce-vita"
 /* the game's own files (settings, log, init.txt); the maps go in
@@ -740,10 +741,11 @@ int main(int argc, char **argv)
 	sceIoRemove(VITA_DATA_DIRECTORY "/halo-prev.log");
 	sceIoRename(VITA_DATA_DIRECTORY "/halo.log", VITA_DATA_DIRECTORY "/halo-prev.log");
 	{
-		/* (the realtime stamp tells one launch's log from the next) */
+		/* (the realtime stamp tells one launch's log from the next; the
+		version, which build a report came from) */
 		char message[96];
 
-		snprintf(message, sizeof(message), "vita: Halo CE starting, realtime %ld", (long)time(NULL));
+		snprintf(message, sizeof(message), "vita: Halo CE " HALO_VITA_VERSION " starting, realtime %ld", (long)time(NULL));
 		vita_host_log(message);
 	}
 

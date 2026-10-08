@@ -144,6 +144,7 @@ Multiplayer tab's way.
 #include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "vita_version.h"
 
 #define DATA_DIRECTORY "ux0:data/haloce-vita"
 #define SETTINGS_FILE DATA_DIRECTORY "/settings.txt"
@@ -1691,6 +1692,12 @@ static int page_lines(struct line *lines)
 		/* (the gyroscope's rates now: redrawn twice a second) */
 		lines[count].type = LINE_INFO;
 		vita_gyro_status(lines[count++].text, sizeof(lines[0].text));
+	}
+	if (page == PAGE_CONTROLS_ADVANCED)
+	{
+		/* (which build this is, for a report: halo.log's first line has it too) */
+		lines[count].type = LINE_INFO;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "Version " HALO_VITA_VERSION);
 	}
 	if (page == PAGE_MAPS)
 	{

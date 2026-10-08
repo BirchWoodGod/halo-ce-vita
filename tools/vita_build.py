@@ -13,6 +13,7 @@ whose parameters are 32-bit scalars and pointers. See port/vita/README.md.
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,8 +32,21 @@ SHADER_GENERATOR_SOURCES = [Path(name) for name in SHADER_GENERATOR_NAMES]
 
 TITLE_ID = "HCEV00001"
 TITLE = "Halo CE"
-# the version the LiveArea and the system show (APP_VER, "XX.YY")
-APP_VERSION = "01.03"
+# the release's version (port/vita/include/vita_version.h, its one place):
+# APP_VER, "XX.YY", what the LiveArea and the system show
+VERSION_HEADER = Path("port/vita/include/vita_version.h")
+
+
+def _version_define(name: str) -> str:
+    match = re.search(rf'^#define {name} "([^"]+)"$', VERSION_HEADER.read_text(), re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"{VERSION_HEADER}: no {name}")
+    return match.group(1)
+
+
+APP_VERSION = _version_define("HALO_VITA_APP_VER")
+if not re.fullmatch(r"\d\d\.\d\d", APP_VERSION):
+    raise RuntimeError(f"{VERSION_HEADER}: HALO_VITA_APP_VER {APP_VERSION!r} is not XX.YY")
 
 # The game's directories compiled without -fmax-type-align=1 (configure.py
 # --vita-aligned hot; EXPERIMENTAL, the default is none). On the hardware
@@ -307,7 +321,7 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
             variables={"libs": " ".join(f"-l{lib}" for lib in VITA_LIBRARIES)})
     n.build(outputs=velf, rule="vita_velf", inputs=elf)
     n.build(outputs=eboot, rule="vita_eboot", inputs=velf)
-    n.build(outputs=sfo, rule="vita_sfo", implicit=[Path("tools/vita_build.py")])
+    n.build(outputs=sfo, rule="vita_sfo", implicit=[Path("tools/vita_build.py"), VERSION_HEADER])
     assets = []
     for asset in sorted((VITA_DIR / "sce_sys").rglob("*")) if (VITA_DIR / "sce_sys").is_dir() else []:
         if asset.is_file():

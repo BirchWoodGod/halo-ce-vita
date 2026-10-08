@@ -39,37 +39,60 @@ fixes from players' dumps (dropped weapons, HUD sounds, vehicles); fixed
 checkpoints; Warthog windshields, energy shields, camouflage, scopes and
 water drawn correctly.
 
-## Next: 1.1.0: multiplayer, custom maps and a steady 30 fps
+## In beta: 1.1.0: multiplayer, co-op and custom maps
 
-- **Online play between Vitas**: host a public lobby or a private one with
-  a short code, join from the settings panel. Built on iamhaller's
-  networking work. Vita to Vita only for now.
-- **Ad hoc play** between Vitas without a router.
-- **QR code invites**: the host shows its lobby code as a QR code, and the
-  joiner scans it with the Vita's camera.
-- **A relay** for networks that cannot connect to each other directly.
-- **A steady 30 fps**, including the biggest fights.
-- **Campaign co-op over the network**: play the campaign together on up to
-  four Vitas over Wi-Fi, online or ad hoc, built on halo-ce-universal's network
-  co-op (the Xbox only had split-screen co-op on one console).
-- **Custom maps**: play community-made maps, Xbox ones and Halo PC / Custom
-  Edition ones, and download a host's map from its Vita when you join.
-- **Easier Custom Edition setup**: the game picks out the `bitmaps.map`,
-  `sounds.map` and `loc.map` that Custom Edition maps need from your own
-  Halo Custom Edition installer or Halo MCC folder copied to the Vita, so
-  no unpacking on a PC. The files themselves are never included.
-- **Settings panel in tabs**, with a Modded maps tab, touch zones and
-  remappable buttons in Xbox controller terms, and dynamic resolution.
+The 1.1.0 betas are on the
+[releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases) as
+pre-releases (network version 18: every Vita in a game needs the same
+version).
+
+- **Online play between Vitas** with OpenCE's in-game multiplayer menus: a
+  server browser of public games (with passwords), Join by code, and
+  Create Game with Server Setup. Needs Halo PC's `bitmaps.map`,
+  `sounds.map` and `loc.map`. Built on iamhaller's networking work. Vita to
+  Vita only.
+- **Ad hoc** play between Vitas (no router), next to **Same Wi-Fi** (system link).
+- **Campaign co-op over the network** for up to four Vitas, Private or
+  Public, built on OpenCE's network co-op (the Xbox only had split-screen
+  co-op on one console).
+- **Custom maps**: Xbox maps, and Halo PC / Custom Edition multiplayer and
+  campaign maps; a joiner downloads the host's map in the lobby.
+- **Easier Custom Edition setup**: the game takes the three files out of
+  your own Halo Custom Edition installer copied to the Vita, and restarts
+  itself; or copy them from Halo MCC or a Custom Edition install. The files
+  themselves are never included.
+- **A relay** for networks that cannot connect to each other directly (none
+  set by default).
+- **Graphics settings** after Bruno Santana's build (shadows, lights,
+  effects, particles, AI think rate, sound updates) in the profiles,
+  **frame interpolation** up to 60 fps, the **fourth CPU core** with
+  CapUnlocker, and dynamic resolution.
+- **Settings panel in tabs**, remappable buttons and touch zones in Xbox
+  controller terms, gyro aiming and PlayStation button icons.
+- **Movies optional**, and a **Windows install tool**.
+- Fixes for #30 (16:9 scopes), #31 (sun glow), #32 (muzzle flash) and #33
+  (The Maw's armoury: shadows, and the cloaked Flood's slowdown).
+
+### Coming in the later 1.1.0 betas
+
+- **The Quality profile at 30 fps** in the big fights: the Xbox's full
+  detail at a steadier frame rate (no change to the network, so the betas
+  keep playing together).
 
 ## Next: 1.1.1
 
+Done or under way on their own branches; they change what the Vitas send
+each other (a new network version), so they come after 1.1.0:
+
 - **Game chat**: quick-chat phrases and typed messages in the lobby and in
-  game, with mute.
-- **Split screen on the PS TV**: more than one player on one PS TV with
-  DualShock 3 / DualShock 4 controllers.
+  game, with mutes and the host's On / Quick chat only / Off setting.
+- **Voice chat** in network games.
 
 ## Later
 
+- **A steady 30 fps** in the biggest fights.
+- **QR code invites**: the host shows its lobby code as a QR code, and the
+  joiner scans it with the Vita's camera.
 - **Loading**: a level start without the remaining few seconds of waiting.
 
 ## Help wanted
@@ -77,5 +100,5 @@ water drawn correctly.
 Bug reports with crash dumps are the most useful contribution: see
 [Reporting a crash](README.md#reporting-a-crash-or-a-problem). Pull
 requests are welcome, especially for performance (the render on the
-Vita's first core), the open issues above, and testing multiplayer with
-two Vitas.
+Vita's first core), the open issues above, and testing multiplayer and
+co-op with two or more Vitas.
