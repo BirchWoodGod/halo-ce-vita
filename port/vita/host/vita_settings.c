@@ -31,6 +31,14 @@ resolution).
 The release's defaults, the ones measured best on the Vita, are set here
 too, under whatever env.txt and settings.txt say.
 
+Everything the panel shows is in the Language row's language (Audio;
+lang.c, port/vita/app0/lang: Automatic, the Vita's system language when
+there is a file of it, else English), the row's labels, values and help
+lines by their English (T() where they are drawn), its other lines and
+messages by T() where they are made; a change of language is live. Lines
+are measured in characters, not UTF-8's bytes (format_box, the tests'
+menu_fits).
+
 The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
 those rows match none of them (the render resolution, on the tab, and the
@@ -145,6 +153,7 @@ Multiplayer tab's way.
 #include <strings.h>
 #include <sys/stat.h>
 
+#include "lang.h"
 #include "p2p.h"
 #include "system_link_shortcut.h"
 #include "vita_controls.h"
@@ -156,7 +165,9 @@ Multiplayer tab's way.
 #define SETTINGS_FILE DATA_DIRECTORY "/settings.txt"
 /* where the system writes its crash dumps (psp2core-*.psp2dmp) */
 #define DUMP_DIRECTORY "ux0:data"
-#define MAXIMUM_CHOICES 16
+#define MAXIMUM_CHOICES 24
+/* the language files (lang.c): in the game's package */
+#define LANG_DIRECTORY "app0:lang"
 /* a code's characters as typed (p2p.h shows them ABCD-EFGH) */
 #define P2P_CODE_LENGTH_TYPED 8
 
@@ -353,6 +364,13 @@ static struct setting settings[] = {
 	{ "Fourth core helpers", "HALO_CPU3_AUX", 1, 3, { "0", "1", "2" }, { "Off", "Audio", "All async" },
 		"Needs CapUnlocker: audio, or all background work", 2, PAGE_GRAPHICS_ADVANCED },
 
+	/* (the port's own text: this panel, its messages over the game, the
+	PC menus' and co-op's lines; lang.c, port/vita/app0/lang. Its choices
+	are Automatic, English and a language a file found: language_choices.
+	The game's own language too (xbox_xapi.c XGetLanguage, at start): the
+	Xbox's maps_es folder of a PAL disc's maps, read when there is one) */
+	{ "Language", "HALO_LANGUAGE", 0, 2, { "auto", "en" }, { "Automatic", "English" },
+		"This panel, the port's messages. Automatic: the Vita's", 0, TAB_AUDIO },
 	{ "Sound voices", "HALO_SOUND_CHANNELS", 1, 4, { "16", "24", "32", "0" },
 		{ "16", "24", "32", "Original" }, "Fewer is faster; the AI then differs (after a restart)", 3, TAB_AUDIO },
 	{ "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", 0, 3, { "1", "3", "6" },
@@ -628,7 +646,7 @@ static int browse_count, browse_selected;
 static int browse_join_pending;
 /* a line about the last action (a code looked up ...), shown in the help
 line for a few seconds */
-static char notice[80];
+static char notice[160];
 static unsigned long long notice_until;
 /* the network the game started with (HALO_VITA_NETWORK at load): what
 internet or ad hoc play can do this session */
@@ -641,7 +659,7 @@ when; why it did not open ("" while nothing went wrong); and the request to
 make once the ad hoc dialog has joined the room's group (0: none) */
 static int guide_action, guide_waiting, adhoc_pending;
 static unsigned long long guide_sent;
-static char guide_problem[64];
+static char guide_problem[128];
 
 /* ---------- the Play page's lines of text
 
@@ -805,6 +823,84 @@ static const char *chosen_network(void)
 	const struct setting *setting = setting_named("HALO_VITA_NETWORK");
 
 	return setting->values[setting->choice];
+}
+
+/* ---------- the language
+
+The port's own text in the Language row's language (lang.c): each language
+whose file is in app0:lang is a choice, under its own name, and Automatic
+(the default) is the Vita's system language when it is one of them, else
+English. A change is live: the panel, and every message after it, in the
+new language at once. The game's own language (xbox_xapi.c XGetLanguage:
+the map folder of a PAL disc's language, maps_es, and its movies) is the
+one at start: HALO_LANGUAGE, and HALO_SYSTEM_LANGUAGE for Automatic. */
+
+/* the Vita's system languages (SCE_SYSTEM_PARAM_LANG_*, 0 to 19) as
+lang.c's codes */
+static const char *const system_language_codes[] = {
+	"ja", "en", "fr", "es", "de", "it", "nl", "pt", "ru", "ko", "zh-TW", "zh-CN", "fi", "sv", "da", "no", "pl",
+	"pt-BR", "en", "tr",
+};
+
+static char system_language[8] = "en";
+static int language_ready;
+
+/* the Language row's choices: Automatic, then English and each language
+found (lang_count's order) */
+static void language_choices(void)
+{
+	struct setting *setting = setting_named("HALO_LANGUAGE");
+	int index;
+
+	for (index = 0; index < lang_count() && index + 1 < MAXIMUM_CHOICES; index++)
+	{
+		setting->values[index + 1] = lang_code(index);
+		setting->names[index + 1] = lang_name(index);
+	}
+	setting->count = index + 1;
+}
+
+/* the language of the Language row's choice, chosen */
+static void language_apply(void)
+{
+	const struct setting *setting = setting_named("HALO_LANGUAGE");
+	const char *value = setting->values[setting->choice];
+
+	lang_select(strcmp(value, "auto") ? value : system_language);
+}
+
+/* the language files read, and the Vita's language chosen (vita_main.c,
+before anything is shown: the missing data screen's too); settings.txt's
+choice follows in vita_settings_load */
+void vita_settings_language_init(void)
+{
+	int value = -1;
+	char line[160];
+	int length, index;
+
+	if (language_ready)
+		return;
+	language_ready = 1;
+	lang_init(LANG_DIRECTORY);
+	if (sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &value) >= 0 && value >= 0 &&
+		value < (int)(sizeof(system_language_codes) / sizeof(system_language_codes[0])))
+		snprintf(system_language, sizeof(system_language), "%s", system_language_codes[value]);
+	setenv("HALO_SYSTEM_LANGUAGE", system_language, 1);
+	lang_select(system_language);
+	language_choices();
+	length = snprintf(line, sizeof(line), "vita: system language %s (%d); the port's text in:", system_language,
+		value);
+	for (index = 0; index < lang_count() && length < (int)sizeof(line); index++)
+		length += snprintf(line + length, sizeof(line) - (size_t)length, " %s", lang_code(index));
+	vita_host_log(line);
+	if (lang_problems(NULL, 0))
+	{
+		char problems[512];
+
+		lang_problems(problems, sizeof(problems));
+		snprintf(line, sizeof(line), "vita: language files: %.120s", problems);
+		vita_host_log(line);
+	}
 }
 
 /* ---------- the Play page's listing
@@ -1153,6 +1249,7 @@ void vita_settings_load(void)
 	const char *old_public = NULL;
 	char old_public_value[8];
 
+	vita_settings_language_init();
 	memset(dev_saved, 0, sizeof(dev_saved));
 	memset(named, 0, sizeof(named));
 	if (!shipped_kept)
@@ -1326,6 +1423,14 @@ void vita_settings_load(void)
 	for (index = 0; index < (int)(sizeof(fixed_defaults) / sizeof(fixed_defaults[0])); index++)
 		setenv(fixed_defaults[index][0], fixed_defaults[index][1], 0);
 	halo_test_setting_hook = vita_settings_set;
+	language_apply();
+	{
+		char message[96];
+
+		snprintf(message, sizeof(message), "settings: language %s (%s)", lang_current(),
+			setting_named("HALO_LANGUAGE")->values[choice_of("HALO_LANGUAGE")]);
+		vita_host_log(message);
+	}
 	{
 		/* (in halo.log: the profile and the rows it sets, the picture's) */
 		char message[600];
@@ -1541,7 +1646,7 @@ static void map_delete(const struct map_entry *map)
 	snprintf(path, sizeof(path), "%s/%s.%s", directory, map->name, map->extension);
 	if (remove(path) != 0)
 	{
-		set_notice("Could not delete %.40s.%s", map->name, map->extension);
+		set_notice(T("Could not delete %.40s.%s"), map->name, map->extension);
 		return;
 	}
 	/* (and a download of it that was cut off, kept to go on: map_share.c) */
@@ -1562,7 +1667,7 @@ static void map_delete(const struct map_entry *map)
 		remove(path);
 		map_set_disabled(map->name, 0);
 	}
-	set_notice("Deleted %.40s.%s", map->name, map->extension);
+	set_notice(T("Deleted %.40s.%s"), map->name, map->extension);
 	{
 		char line[160];
 
@@ -1668,7 +1773,7 @@ static void report_start(void)
 	if (vita_host_thread_start("halo report", report_thread, NULL, -1) < 0)
 	{
 		__atomic_store_n(&report_state, REPORT_FAILED, __ATOMIC_RELEASE);
-		set_notice("Could not start the report");
+		set_notice("%s", T("Could not start the report"));
 	}
 }
 
@@ -1686,7 +1791,7 @@ struct line
 {
 	int type;
 	int index;
-	char text[80];
+	char text[128];
 };
 
 #define MAXIMUM_LINES (SETTING_COUNT + MAXIMUM_MAPS + 4)
@@ -1719,31 +1824,37 @@ static int page_lines(struct line *lines)
 	{
 		/* (which build this is, for a report: halo.log's first line has it too) */
 		lines[count].type = LINE_INFO;
-		snprintf(lines[count++].text, sizeof(lines[0].text), "Version " HALO_VITA_VERSION);
+		snprintf(lines[count++].text, sizeof(lines[0].text), T("Version %s"), HALO_VITA_VERSION);
 	}
 	if (page == PAGE_MAPS)
 	{
 		if (maps_missing[0] && (choice_of("HALO_CUSTOM_EDITION") || maps_have_custom_edition || maps_installer_state))
 		{
 			lines[count].type = LINE_INFO;
-			snprintf(lines[count++].text, sizeof(lines[0].text), "!Missing: %s", maps_missing);
+			snprintf(lines[count].text, sizeof(lines[0].text), "!");
+			snprintf(lines[count].text + 1, sizeof(lines[0].text) - 1, T("Missing: %s"), maps_missing);
+			count++;
 			/* (where they come from: the Halo CE installer copied in does) */
 			lines[count].type = LINE_INFO;
+			lines[count].text[0] = '!';
 			if (maps_installer_state == 2)
-				snprintf(lines[count++].text, sizeof(lines[0].text), "!Taking them from %.28s", maps_installer);
+				snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, T("Taking them from %.28s"), maps_installer);
 			else if (maps_installer_state == 1)
-				snprintf(lines[count++].text, sizeof(lines[0].text), "!Extract PC files takes them from the installer");
+				snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, "%s",
+					T("Extract PC files takes them from the installer"));
 			else
 			{
-				snprintf(lines[count++].text, sizeof(lines[0].text), "!Copy them in, or the Halo CE installer");
+				snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, "%s", T("Copy them in, or the Halo CE installer"));
 				lines[count].type = LINE_INFO;
-				snprintf(lines[count++].text, sizeof(lines[0].text), "!(halocesetup*.exe) to ux0:data/haloce-vita");
+				lines[count].text[0] = '!';
+				snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, "%s",
+					T("(halocesetup*.exe) to ux0:data/haloce-vita"));
 			}
 		}
 		if (!map_count)
 		{
 			lines[count].type = LINE_INFO;
-			snprintf(lines[count++].text, sizeof(lines[0].text), "No custom maps in the maps folder");
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("No custom maps in the maps folder"));
 		}
 		for (index = 0; index < map_count; index++)
 		{
@@ -1767,15 +1878,15 @@ static void vita_line(char *text, int size)
 	const unsigned char *bytes = (const unsigned char *)&address;
 	char name[20];
 
-	snprintf(name, sizeof(name), "%.16s", vita_name[0] ? vita_name : "(no name)");
+	snprintf(name, sizeof(name), "%.16s", vita_name[0] ? vita_name : T("(no name)"));
 	if (!strcmp(running_network, "adhoc"))
-		snprintf(text, (size_t)size, "This Vita: %s, ad hoc room %d", name, choice_of("HALO_ADHOC_ROOM") + 1);
+		snprintf(text, (size_t)size, T("This Vita: %s, ad hoc room %d"), name, choice_of("HALO_ADHOC_ROOM") + 1);
 	else if (address)
-		snprintf(text, (size_t)size, "This Vita: %s  %u.%u.%u.%u", name, bytes[0], bytes[1], bytes[2], bytes[3]);
+		snprintf(text, (size_t)size, T("This Vita: %s  %u.%u.%u.%u"), name, bytes[0], bytes[1], bytes[2], bytes[3]);
 	else if (multiplayer_state() == SYSTEM_LINK_STATE_STARTING)
-		snprintf(text, (size_t)size, "This Vita: %s", name);
+		snprintf(text, (size_t)size, T("This Vita: %s"), name);
 	else
-		snprintf(text, (size_t)size, "This Vita: %s, no Wi-Fi network", name);
+		snprintf(text, (size_t)size, T("This Vita: %s, no Wi-Fi network"), name);
 }
 
 /* one line on the network game: none, looking for games, hosting ... */
@@ -1789,37 +1900,37 @@ static void game_line(char *text, int size)
 	{
 	case SYSTEM_LINK_STATE_SEARCHING:
 		if (games)
-			snprintf(text, (size_t)size, "Looking for games: %d found", games);
+			snprintf(text, (size_t)size, T("Looking for games: %d found"), games);
 		else
-			snprintf(text, (size_t)size, "Looking for games: none yet");
+			snprintf(text, (size_t)size, "%s", T("Looking for games: none yet"));
 		break;
 	case SYSTEM_LINK_STATE_JOINING:
-		snprintf(text, (size_t)size, "Joining a game...");
+		snprintf(text, (size_t)size, "%s", T("Joining a game..."));
 		break;
 	case SYSTEM_LINK_STATE_HOSTING:
 		/* (and the most players the game takes, once the game says) */
 		if (machines > 1 && maximum > 0)
-			snprintf(text, (size_t)size, "Hosting: %d of %d players in the lobby",
+			snprintf(text, (size_t)size, T("Hosting: %d of %d players in the lobby"),
 				halo_multiplayer_status[SYSTEM_LINK_STATUS_PLAYERS], maximum);
 		else if (machines > 1)
-			snprintf(text, (size_t)size, "Hosting: %d Vitas in the lobby", machines);
+			snprintf(text, (size_t)size, T("Hosting: %d Vitas in the lobby"), machines);
 		else if (maximum > 0)
-			snprintf(text, (size_t)size, "Hosting: waiting for players (max %d)", maximum);
+			snprintf(text, (size_t)size, T("Hosting: waiting for players (max %d)"), maximum);
 		else
-			snprintf(text, (size_t)size, "Hosting: waiting for players");
+			snprintf(text, (size_t)size, "%s", T("Hosting: waiting for players"));
 		break;
 	case SYSTEM_LINK_STATE_LOBBY:
-		snprintf(text, (size_t)size, "In a lobby: %d Vitas, the host starts", machines);
+		snprintf(text, (size_t)size, T("In a lobby: %d Vitas, the host starts"), machines);
 		break;
 	case SYSTEM_LINK_STATE_IN_GAME:
-		snprintf(text, (size_t)size, "In a game: %d Vitas%s", machines,
-			halo_multiplayer_status[SYSTEM_LINK_STATUS_HOST] ? " (you host)" : "");
+		snprintf(text, (size_t)size, T("In a game: %d Vitas%s"), machines,
+			halo_multiplayer_status[SYSTEM_LINK_STATUS_HOST] ? T(" (you host)") : "");
 		break;
 	case SYSTEM_LINK_STATE_PLAYING:
-		snprintf(text, (size_t)size, "Playing: quit the level to host or join");
+		snprintf(text, (size_t)size, "%s", T("Playing: quit the level to host or join"));
 		break;
 	default:
-		snprintf(text, (size_t)size, "No game yet: host one or join one");
+		snprintf(text, (size_t)size, "%s", T("No game yet: host one or join one"));
 		break;
 	}
 }
@@ -1839,27 +1950,27 @@ static void status_line(char *text, int size)
 			switch (p2p_lobby_hosting_status(detail, sizeof(detail)))
 			{
 			case P2P_LOBBY_HOSTING_LISTED:
-				snprintf(text, (size_t)size, "Your code: %s; %.30s", code, detail);
+				snprintf(text, (size_t)size, T("Your code: %s; %.30s"), code, detail);
 				break;
 			case P2P_LOBBY_HOSTING_UNREACHABLE:
-				snprintf(text, (size_t)size, "Your code: %s; not listed: no game list", code);
+				snprintf(text, (size_t)size, T("Your code: %s; not listed: no game list"), code);
 				break;
 			case P2P_LOBBY_HOSTING_PENDING:
-				snprintf(text, (size_t)size, "Your code: %s; getting listed...", code);
+				snprintf(text, (size_t)size, T("Your code: %s; getting listed..."), code);
 				break;
 			case P2P_LOBBY_HOSTING_PRIVATE:
-				snprintf(text, (size_t)size, "Your code: %s (private)", code);
+				snprintf(text, (size_t)size, T("Your code: %s (private)"), code);
 				break;
 			default:
-				snprintf(text, (size_t)size, "Your code: %s%s", code, choice_of("HALO_NET_HOST_PUBLIC") ? " (public)" :
+				snprintf(text, (size_t)size, T("Your code: %s%s"), code, choice_of("HALO_NET_HOST_PUBLIC") ? T(" (public)") :
 					"");
 				break;
 			}
 		}
 		else
 		{
-			p2p_status(detail, sizeof(detail));
-			snprintf(text, (size_t)size, "Online: %.26s", detail);
+			p2p_status_shown(detail, sizeof(detail));
+			snprintf(text, (size_t)size, T("Online: %.26s"), detail);
 		}
 	}
 	else if (!strcmp(running_network, "adhoc"))
@@ -1871,12 +1982,12 @@ static void status_line(char *text, int size)
 			char group[64];
 
 			p2p_adhoc_status(group, sizeof(group));
-			snprintf(text, (size_t)size, "Ad hoc: %.27s", group);
+			snprintf(text, (size_t)size, T("Ad hoc: %.27s"), group);
 		}
 		else
 		{
-			snprintf(text, (size_t)size, "%s", state == 1 ? "Ad hoc: joining..." : state == -1 ? "Ad hoc: did not join" :
-				"Ad hoc: not in a group");
+			snprintf(text, (size_t)size, "%s", state == 1 ? T("Ad hoc: joining...") : state == -1 ? T("Ad hoc: did not join") :
+				T("Ad hoc: not in a group"));
 		}
 	}
 }
@@ -1886,8 +1997,8 @@ static const char *connection_help(const struct setting *setting)
 {
 	const char *value = setting->values[setting->choice];
 
-	return !strcmp(value, "adhoc") ? "No router: Vitas side by side (experimental)" : !strcmp(value, "online") ?
-		"Internet play by code (experimental)" : "Vitas on one Wi-Fi network play together";
+	return !strcmp(value, "adhoc") ? T("No router: Vitas side by side (experimental)") : !strcmp(value, "online") ?
+		T("Internet play by code (experimental)") : T("Vitas on one Wi-Fi network play together");
 }
 
 /* ---------- PlayStation's terms
@@ -1948,28 +2059,29 @@ static int playstation_row(const struct setting *setting)
 	return -1;
 }
 
+/* (each shown in the language chosen: lang.c) */
 static const char *setting_label(const struct setting *setting)
 {
 	int row = playstation_row(setting);
 
-	return row >= 0 && playstation_rows[row].label ? playstation_rows[row].label : setting->label;
+	return T(row >= 0 && playstation_rows[row].label ? playstation_rows[row].label : setting->label);
 }
 
 /* Map downloads' help, by choice */
 static const char *const map_downloads_help[3] = {
-	"Asks before a host's map comes; public games warn",
-	"Asks, but not in games from the public lobby",
-	"No downloads: copy the host's map in yourself",
+	N_("Asks before a host's map comes; public games warn"),
+	N_("Asks, but not in games from the public lobby"),
+	N_("No downloads: copy the host's map in yourself"),
 };
 
 static const char *setting_help(const struct setting *setting)
 {
-	static char camera_help[64];
+	static char camera_help[128];
 	int row = playstation_row(setting);
 
 	if (setting->variable && !strcmp(setting->variable, "HALO_MAP_SHARE_FROM") && setting->choice >= 0 &&
 		setting->choice < 3)
-		return map_downloads_help[setting->choice];
+		return T(map_downloads_help[setting->choice]);
 
 	/* (the debug camera's Black: the Vita button it is on) */
 	if (row >= 0 && !strcmp(playstation_rows[row].key, "HALO_DEBUG_CAMERA"))
@@ -1978,21 +2090,24 @@ static const char *setting_help(const struct setting *setting)
 
 		if (black && strcmp(black->values[black->choice], "none"))
 		{
-			snprintf(camera_help, sizeof(camera_help), "Hold %s 1 s: follow, orbit, then a flying camera",
-				black->names[black->choice]);
+			snprintf(camera_help, sizeof(camera_help), T("Hold %s 1 s: follow, orbit, then a flying camera"),
+				T(black->names[black->choice]));
 			return camera_help;
 		}
 	}
-	return row >= 0 ? playstation_rows[row].help : setting->help;
+	return T(row >= 0 ? playstation_rows[row].help : setting->help);
 }
 
-/* the name of a row's choice: a touch zone's Xbox button by what it does */
+/* the name of a row's choice: a touch zone's Xbox button by what it does;
+in the language chosen, but a language's own name (the Language row's) */
 static const char *setting_value_name(const struct setting *setting)
 {
 	if (setting->page == PAGE_TOUCH && setting->values[0] && !strcmp(setting->values[0], "off") &&
 		playstation_terms() && setting->choice < VITA_XBOX_COUNT)
-		return xbox_actions[setting->choice];
-	return setting->names[setting->choice];
+		return T(xbox_actions[setting->choice]);
+	if (setting->variable && !strcmp(setting->variable, "HALO_LANGUAGE") && setting->choice > 0)
+		return setting->names[setting->choice];
+	return T(setting->names[setting->choice]);
 }
 
 /* an Xbox face button in the menus (A B X Y), as the guide names it: the
@@ -2004,7 +2119,7 @@ static const char *menu_button(char xbox)
 	const char *letters = "ABXY";
 	int index = (int)(strchr(letters, xbox) - letters);
 
-	return playstation_terms() ? vita_names[index] : xbox_names[index];
+	return playstation_terms() ? T(vita_names[index]) : xbox_names[index];
 }
 
 /* the longer line at the bottom: what the selected line does, or what the
@@ -2018,31 +2133,31 @@ static void help_line(char *text, int size, const struct line *line)
 	if (notice[0] && now_us() < notice_until)
 		snprintf(text, (size_t)size, "%s", notice);
 	else if (halo_screen_restart_needed())
-		snprintf(text, (size_t)size, "Restart the game for this change");
+		snprintf(text, (size_t)size, "%s", T("Restart the game for this change"));
 	else if (restart_pending && setting && setting->restart)
-		snprintf(text, (size_t)size, "Restart the game for this change");
+		snprintf(text, (size_t)size, "%s", T("Restart the game for this change"));
 	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_SAVING)
-		snprintf(text, (size_t)size, "Saving the report...");
+		snprintf(text, (size_t)size, "%s", T("Saving the report..."));
 	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_SAVED)
-		snprintf(text, (size_t)size, "Saved: %.56s", report_path);
+		snprintf(text, (size_t)size, T("Saved: %.56s"), report_path);
 	else if (setting && setting->action == ACTION_SAVE_REPORT && state == REPORT_FAILED)
-		snprintf(text, (size_t)size, "Could not save the report");
+		snprintf(text, (size_t)size, "%s", T("Could not save the report"));
 	else if (line && line->type == LINE_MAP)
-		snprintf(text, (size_t)size, "%s: on or off, or delete it",
-			maps[line->index].format == MAP_XBOX ? "Xbox map" : maps[line->index].format == MAP_OTHER ?
-			"Not a known map" : maps[line->index].format == MAP_CUSTOM_EDITION_CAMPAIGN ?
-			"PC campaign map, in Campaign's levels (needs PC maps On)" : "PC map (needs PC maps On)");
+		snprintf(text, (size_t)size, T("%s: on or off, or delete it"),
+			maps[line->index].format == MAP_XBOX ? T("Xbox map") : maps[line->index].format == MAP_OTHER ?
+			T("Not a known map") : maps[line->index].format == MAP_CUSTOM_EDITION_CAMPAIGN ?
+			T("PC campaign map, in Campaign's levels (needs PC maps On)") : T("PC map (needs PC maps On)"));
 	else if (!setting)
 		text[0] = 0;
 	else if (!strcmp(running_network, "online") && (setting->action == ACTION_JOIN_CODE ||
 		setting->action == ACTION_BROWSE || (setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC"))) &&
-		p2p_status(detail, sizeof(detail)))
-		snprintf(text, (size_t)size, "%.60s", detail);
+		p2p_status_shown(detail, sizeof(detail)))
+		snprintf(text, (size_t)size, "%.70s", detail);
 	/* (ad hoc: the group is joined first, when not in it) */
 	else if (!strcmp(running_network, "adhoc") && vita_adhoc_state(NULL, 0) != 2 &&
 		(setting->action == ACTION_HOST || setting->action == ACTION_JOIN || setting->action == ACTION_CAMPAIGN ||
 			setting->action == ACTION_ADHOC_JOIN))
-		snprintf(text, (size_t)size, "First the system's dialog joins ad hoc room %d", choice_of("HALO_ADHOC_ROOM") + 1);
+		snprintf(text, (size_t)size, T("First the system's dialog joins ad hoc room %d"), choice_of("HALO_ADHOC_ROOM") + 1);
 	else if (setting->variable && !strcmp(setting->variable, "HALO_VITA_NETWORK"))
 		snprintf(text, (size_t)size, "%s", connection_help(setting));
 	else
@@ -2058,7 +2173,7 @@ static int tab_bar(char *text, int size)
 		if (tab_shown(index))
 		{
 			length += snprintf(text + length, (size_t)(size - length), "%s%s%s", first ? "" : "|",
-				index == tab ? "*" : "", pages[index].name);
+				index == tab ? "*" : "", T(pages[index].name));
 			first = 0;
 		}
 	return length;
@@ -2103,14 +2218,14 @@ static void footer_line(char *text, int size, const struct line *line)
 	const char *middle = "";
 
 	if (line && line->type == LINE_MAP)
-		middle = "Left/right: on/off   Square: delete   ";
+		middle = T("Left/right: on/off   Square: delete   ");
 	else if (setting && setting->kind == KIND_ACTION)
-		middle = "Cross: select   ";
+		middle = T("Cross: select   ");
 	else if (setting && setting->kind == KIND_TEXT)
-		middle = "Cross: type   ";
+		middle = T("Cross: type   ");
 	else if (setting)
-		middle = "Left/right: change   ";
-	snprintf(text, (size_t)size, "L/R: tabs   %sCircle: %s", middle, page < TAB_COUNT ? "close" : "back");
+		middle = T("Left/right: change   ");
+	snprintf(text, (size_t)size, T("L/R: tabs   %sCircle: %s"), middle, page < TAB_COUNT ? T("close") : T("back"));
 }
 
 /* what a row that opens a page says of it ("" for nothing) */
@@ -2126,19 +2241,22 @@ static void page_summary(char *text, int size, const struct setting *setting)
 			if (settings[index].page == PAGE_BUTTONS && settings[index].choice != shipped_choice[index] &&
 				strcmp(settings[index].variable, "HALO_BUTTON_ICONS"))
 				moved = 1;
-		snprintf(text, (size_t)size, "%s", moved ? "Custom" : "As shipped");
+		snprintf(text, (size_t)size, "%s", moved ? T("Custom") : T("As shipped"));
 		break;
 	case PAGE_TOUCH:
 		for (index = 0; index < SETTING_COUNT; index++)
 			if (settings[index].page == PAGE_TOUCH && settings[index].choice)
 				set++;
 		if (set)
-			snprintf(text, (size_t)size, "%d on", set);
+			snprintf(text, (size_t)size, T("%d on"), set);
 		else
-			snprintf(text, (size_t)size, "Off");
+			snprintf(text, (size_t)size, "%s", T("Off"));
 		break;
 	case PAGE_MAPS:
-		snprintf(text, (size_t)size, map_count == 1 ? "1 map" : "%d maps", map_count);
+		if (map_count == 1)
+			snprintf(text, (size_t)size, "%s", T("1 map"));
+		else
+			snprintf(text, (size_t)size, T("%d maps"), map_count);
 		break;
 	}
 }
@@ -2150,11 +2268,11 @@ game's state, the gyroscope's), an empty line for a gap, then the chosen
 row's help ('\x05') and the panel's buttons ('\x06') at the bottom */
 static void show_list(void)
 {
-	char text[2048];
+	char text[3072];
 	struct line lines[MAXIMUM_LINES];
 	int count = page_lines(lines), length, index, number = 0, highlighted = 0;
 	int *selected = &page_selected[page];
-	char status[64], help[96];
+	char status[128], help[192];
 
 	if (*selected >= count)
 		*selected = count - 1;
@@ -2171,7 +2289,7 @@ static void show_list(void)
 	length = tab_bar(text, sizeof(text));
 	if (page >= TAB_COUNT && length < (int)sizeof(text))
 	{
-		length += snprintf(text + length, sizeof(text) - length, "\n\x03%s > %s", pages[tab].name, pages[page].name);
+		length += snprintf(text + length, sizeof(text) - length, "\n\x03%s > %s", T(pages[tab].name), T(pages[page].name));
 		number++;
 	}
 	/* (the map lines scroll: MAP_LINES at once, the chosen one among them) */
@@ -2210,8 +2328,13 @@ static void show_list(void)
 			size_text(size_name, sizeof(size_name), map->size);
 			/* (the .yelo of a name: marked *) */
 			snprintf(name, sizeof(name), "%.19s%s", map->name, strcasecmp(map->extension, "yelo") ? "" : "*");
-			length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %-3s %8s  %s", name,
-				map_disabled(map->name) ? "Off" : "On", size_name, map_format_name(map->format));
+			const char *state = map_disabled(map->name) ? T("Off") : T("On");
+			/* (on or off, three characters wide: a translation's by its
+			characters, not its UTF-8 bytes) */
+			int pad = 3 - lang_utf8_length(state);
+
+			length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s%*s %8s  %s", name, state,
+				pad > 0 ? pad : 0, "", size_name, map_format_name(map->format));
 		}
 		else
 		{
@@ -2223,11 +2346,11 @@ static void show_list(void)
 
 				/* (the password hidden) */
 				length += snprintf(text + length, sizeof(text) - length, "\n%s\x02  %s", setting_label(setting),
-					!value->value[0] ? "none" : !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD") ? "set" : value->value);
+					!value->value[0] ? T("none") : !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD") ? T("set") : value->value);
 			}
 			else if (setting->kind == KIND_ACTION)
 			{
-				char summary[24];
+				char summary[48];
 
 				page_summary(summary, sizeof(summary), setting);
 				/* (two spaces first: the summary, or the >, where the other
@@ -2246,9 +2369,12 @@ static void show_list(void)
 			}
 		}
 	}
-	if (page == PAGE_MAPS && map_count > MAP_LINES && length < (int)sizeof(text))
-		length += snprintf(text + length, sizeof(text) - length, "\n\x04(maps %d-%d of %d)", map_scroll + 1,
+	if (page == PAGE_MAPS && map_count > MAP_LINES && length + 2 < (int)sizeof(text))
+	{
+		length += snprintf(text + length, sizeof(text) - length, "\n\x04");
+		length += snprintf(text + length, sizeof(text) - length, T("(maps %d-%d of %d)"), map_scroll + 1,
 			map_scroll + MAP_LINES < map_count ? map_scroll + MAP_LINES : map_count, map_count);
+	}
 	/* (Multiplayer, after a gap: this Vita, the network game, internet or
 	ad hoc play; the Play page: the last two) */
 	if ((page == TAB_MULTIPLAYER || page == PAGE_PLAY) && length < (int)sizeof(text))
@@ -2260,8 +2386,8 @@ static void show_list(void)
 			length += snprintf(text + length, sizeof(text) - length, "\n\x04%s", status);
 			/* (the game's Multiplayer menu without OpenCE's screens) */
 			if (halo_pc_menus_state < 0 && length < (int)sizeof(text))
-				length += snprintf(text + length, sizeof(text) - length,
-					"\n\x04Online menus need bitmaps.map, loc.map: README");
+				length += snprintf(text + length, sizeof(text) - length, "\n\x04%s",
+					T("Online menus need bitmaps.map, loc.map: README"));
 		}
 		game_line(status, sizeof(status));
 		if (length < (int)sizeof(text))
@@ -2284,7 +2410,7 @@ static void show_list(void)
 
 static void show_code(void)
 {
-	char text[512], letters[32], cursor[32];
+	char text[1024], letters[32], cursor[32];
 	int index, column = 0;
 
 	/* "A B C D - E F G H", and a caret under the cursor's */
@@ -2303,9 +2429,10 @@ static void show_code(void)
 		cursor[column++] = ' ';
 	}
 	letters[column] = cursor[column] = 0;
-	snprintf(text, sizeof(text), "%s\n\n    %s\n    %s\n%s\nUp/down: letter  Left/right: move\nCross: join  Circle: back",
-		code_for_join ? "JOIN WITH A CODE\n(the host's Multiplayer tab shows it)" : "JOIN WITH A CODE", letters,
-		cursor, strcmp(running_network, "online") ? "Connection must be Online (restart)" : "");
+	snprintf(text, sizeof(text), "%s\n\n    %s\n    %s\n%s\n%s\n%s",
+		code_for_join ? T("JOIN WITH A CODE\n(the host's Multiplayer tab shows it)") : T("JOIN WITH A CODE"), letters,
+		cursor, strcmp(running_network, "online") ? T("Connection must be Online (restart)") : "",
+		T("Up/down: letter  Left/right: move"), T("Cross: join  Circle: back"));
 	vgxm_menu_set(text, 2);
 }
 
@@ -2315,13 +2442,13 @@ map), the chosen one's Rules and Players lines below, in the overlay's own
 font: no art */
 static void show_browse(void)
 {
-	char text[2048];
+	char text[3072];
 	int length, index;
 	char detail[64];
 
-	length = snprintf(text, sizeof(text), "PUBLIC GAMES");
+	length = snprintf(text, sizeof(text), "%s", T("PUBLIC GAMES"));
 	if (strcmp(running_network, "online"))
-		length += snprintf(text + length, sizeof(text) - length, "\nConnection must be Online (restart)");
+		length += snprintf(text + length, sizeof(text) - length, "\n%s", T("Connection must be Online (restart)"));
 	else if (!browse_count)
 	{
 		/* (why there is none: the brokers out of reach, or no public game:
@@ -2330,14 +2457,15 @@ static void show_browse(void)
 		int state = p2p_lobby_browse_status(line, sizeof(line));
 
 		if (state == P2P_LOBBY_BROWSE_UNREACHABLE)
-			length += snprintf(text + length, sizeof(text) - length,
-				"\nCan't reach the online game list:\ncheck your internet connection (Square: retry)");
+			length += snprintf(text + length, sizeof(text) - length, "\n%s",
+				T("Can't reach the online game list:\ncheck your internet connection (Square: retry)"));
 		else if (state == P2P_LOBBY_BROWSE_EMPTY)
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", line);
 		else
 		{
-			p2p_status(detail, sizeof(detail));
-			length += snprintf(text + length, sizeof(text) - length, "\nLooking for games (%.24s)", detail);
+			p2p_status_shown(detail, sizeof(detail));
+			length += snprintf(text + length, sizeof(text) - length, "\n");
+			length += snprintf(text + length, sizeof(text) - length, T("Looking for games (%.24s)"), detail);
 		}
 	}
 	/* (a game a line: its name, players of most, map, [pw] for a password,
@@ -2361,13 +2489,13 @@ static void show_browse(void)
 		const struct p2p_lobby_entry *entry = &browse_entries[browse_selected];
 
 		if (entry->rules[0])
-			length += snprintf(text + length, sizeof(text) - length, "\n%s%.*s", entry->failed ? "FAILED: " : "",
-				entry->failed ? 38 : 46, entry->rules);
+			length += snprintf(text + length, sizeof(text) - length, "\n%s%.*s", entry->failed ? T("FAILED: ") : "",
+				entry->failed ? 46 - lang_utf8_length(T("FAILED: ")) : 46, entry->rules);
 		if (entry->players_line[0] && length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->players_line);
 	}
 	if (length < (int)sizeof(text))
-		snprintf(text + length, sizeof(text) - length, "\nCross: join   Square: refresh   Circle: back");
+		snprintf(text + length, sizeof(text) - length, "\n%s", T("Cross: join   Square: refresh   Circle: back"));
 	vgxm_menu_set(text, browse_count ? browse_selected + 1 : 0);
 }
 
@@ -2387,7 +2515,7 @@ static struct map_entry *selected_map(void)
 
 static void show_delete(void)
 {
-	char text[512], size_name[16];
+	char text[1024], size_name[16];
 	const struct map_entry *map = selected_map();
 
 	if (!map)
@@ -2397,8 +2525,8 @@ static void show_delete(void)
 		return;
 	}
 	size_text(size_name, sizeof(size_name), map->size);
-	snprintf(text, sizeof(text), "DELETE MAP\n\n%.40s.%s  (%s)\nand its picture and description, if any.\n\n"
-		"It cannot be undone.\nCross: delete   O: keep", map->name, map->extension, size_name);
+	snprintf(text, sizeof(text), T("DELETE MAP\n\n%.40s.%s  (%s)\nand its picture and description, if any.\n\n"
+		"It cannot be undone.\nCross: delete   O: keep"), map->name, map->extension, size_name);
 	vgxm_menu_set(text, -1);
 }
 
@@ -2408,18 +2536,18 @@ static const char *guide_blocker(void)
 	int state = multiplayer_state();
 
 	if (strcmp(chosen_network(), running_network))
-		return "Restart the game first: Connection changed";
+		return T("Restart the game first: Connection changed");
 	if (state == SYSTEM_LINK_STATE_PLAYING)
-		return "Leave the level first: Start, then Quit";
+		return T("Leave the level first: Start, then Quit");
 	if (state == SYSTEM_LINK_STATE_IN_GAME)
-		return "In a game: Start, then Quit, to leave it";
+		return T("In a game: Start, then Quit, to leave it");
 	if (state == SYSTEM_LINK_STATE_HOSTING)
-		return "Already hosting: the game's lobby is open";
+		return T("Already hosting: the game's lobby is open");
 	if (state == SYSTEM_LINK_STATE_JOINING || state == SYSTEM_LINK_STATE_LOBBY)
-		return "Already in a lobby: B there leaves it";
+		return T("Already in a lobby: B there leaves it");
 	if (strcmp(running_network, "adhoc") && state != SYSTEM_LINK_STATE_STARTING &&
 		!halo_multiplayer_status[SYSTEM_LINK_STATUS_ADDRESS])
-		return "No Wi-Fi: connect the Vita to a network";
+		return T("No Wi-Fi: connect the Vita to a network");
 	return NULL;
 }
 
@@ -2429,14 +2557,14 @@ static const char *guide_answer_text(int answer)
 	switch (answer)
 	{
 	case SYSTEM_LINK_ANSWER_IN_PLAY:
-		return "Leave the level first: Start, then Quit";
+		return T("Leave the level first: Start, then Quit");
 	case SYSTEM_LINK_ANSWER_IN_LOBBY:
-		return "Already in a lobby: B there leaves it";
+		return T("Already in a lobby: B there leaves it");
 	case SYSTEM_LINK_ANSWER_NO_NETWORK:
-		return strcmp(running_network, "adhoc") ? "No Wi-Fi: connect the Vita to a network" :
-			"Not in the ad hoc group: join it first";
+		return strcmp(running_network, "adhoc") ? T("No Wi-Fi: connect the Vita to a network") :
+			T("Not in the ad hoc group: join it first");
 	default:
-		return "The game could not open it (see its message)";
+		return T("The game could not open it (see its message)");
 	}
 }
 
@@ -2445,78 +2573,97 @@ buttons (the Xbox's, or with the Button icons PlayStation the Vita's), then
 cross opens the game's System Link screen */
 static void show_guide(void)
 {
-	char text[1536], line[64];
+	char text[3072], line[128];
 	int length, step = 1, host = guide_action == ACTION_HOST;
 	int adhoc = !strcmp(running_network, "adhoc"), online = !strcmp(running_network, "online");
 	const char *blocker = guide_blocker();
 
 	vita_line(line, sizeof(line));
-	length = snprintf(text, sizeof(text), "%s\n\n%s", host ? "HOST A GAME" : "JOIN A GAME", line);
+	length = snprintf(text, sizeof(text), "%s\n\n%s", host ? T("HOST A GAME") : T("JOIN A GAME"), line);
 	if (adhoc && vita_adhoc_state(NULL, 0) != 2)
-		length += snprintf(text + length, sizeof(text) - length, "\n%d The system's dialog joins ad hoc room %d", step++,
+	{
+		length += snprintf(text + length, sizeof(text) - length, "\n");
+		length += snprintf(text + length, sizeof(text) - length, T("%d The system's dialog joins ad hoc room %d"), step++,
 			choice_of("HALO_ADHOC_ROOM") + 1);
+	}
+	length += snprintf(text + length, sizeof(text) - length, "\n");
 	length += snprintf(text + length, sizeof(text) - length,
-		"\n%d The game's System Link screen opens\n%d %s to join if asked, %s on a profile,%s%s again", step, step + 1,
+		T("%d The game's System Link screen opens\n%d %s to join if asked, %s on a profile,%s%s again"), step, step + 1,
 		menu_button('A'), menu_button('A'), playstation_terms() ? "\n  " : " ", menu_button('A'));
 	step += 2;
 	if (host)
 	{
+		length += snprintf(text + length, sizeof(text) - length, "\n");
 		length += snprintf(text + length, sizeof(text) - length,
-			"\n%d SYSTEM LINK GAMES: %s creates a game\n%d %s on a map, %s on a game type", step, menu_button('Y'),
+			T("%d SYSTEM LINK GAMES: %s creates a game\n%d %s on a map, %s on a game type"), step, menu_button('Y'),
 			step + 1, menu_button('A'), menu_button('A'));
 		step += 2;
 		/* (the Custom Edition maps are in the map list with PC maps on) */
 		if (!choice_of("HALO_CUSTOM_EDITION"))
-			length += snprintf(text + length, sizeof(text) - length, "\n  (PC maps: Modded maps, PC maps On)");
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", T("  (PC maps: Modded maps, PC maps On)"));
 		/* (the game as others see it: the Play page's rows) */
-		length += snprintf(text + length, sizeof(text) - length, "\n  As \"%s\", %s players at most",
+		length += snprintf(text + length, sizeof(text) - length, "\n");
+		length += snprintf(text + length, sizeof(text) - length, T("  As \"%s\", %s players at most"),
 			play_text_named("HALO_NET_LOBBY_NAME")->value, setting_named("HALO_NET_MAX_PLAYERS")->names[choice_of(
 			"HALO_NET_MAX_PLAYERS")]);
+		length += snprintf(text + length, sizeof(text) - length, "\n");
 		length += snprintf(text + length, sizeof(text) - length,
-			"\n%d Wait in the lobby for the others to\n  join; %s there starts the game sooner", step, menu_button('A'));
+			T("%d Wait in the lobby for the others to\n  join; %s there starts the game sooner"), step, menu_button('A'));
 	}
 	else
 	{
+		/* (where the games listed are: a whole sentence each, for the
+		translations) */
+		length += snprintf(text + length, sizeof(text) - length, "\n");
+		length += snprintf(text + length, sizeof(text) - length, adhoc ?
+			T("%d SYSTEM LINK GAMES: %s on the host's game\n  (the games in the room show there)") : online ?
+			T("%d SYSTEM LINK GAMES: %s on the host's game\n  (the games you are connected to show there)") :
+			T("%d SYSTEM LINK GAMES: %s on the host's game\n  (the games on this network show there)"), step,
+			menu_button('A'));
+		length += snprintf(text + length, sizeof(text) - length, "\n");
 		length += snprintf(text + length, sizeof(text) - length,
-			"\n%d SYSTEM LINK GAMES: %s on the host's game\n  (the games %s show there)\n%d Wait in the lobby for the"
-			" host to start\n  A map you lack comes from the host", step, menu_button('A'),
-			adhoc ? "in the room" : online ? "you are connected to" : "on this network", step + 1);
+			T("%d Wait in the lobby for the host to start\n  A map you lack comes from the host"), step + 1);
 	}
 	/* (online: how the code's lookup goes; System Link lists the host's
 	game once connected) */
 	if (online && !host)
 	{
-		char detail[96];
+		char detail[160], english[96];
 
-		p2p_status(detail, sizeof(detail));
+		/* (shown in the language chosen; whether it is connected, by the
+		English, p2p_status's) */
+		p2p_status(english, sizeof(english));
+		p2p_status_shown(detail, sizeof(detail));
 		/* (its first clause: "connected to the host", "code ABCD-EFGH
 		found", "no game has code ABCD-EFGH", in the line's 46) */
 		detail[strcspn(detail, ":;(")] = 0;
 		while (detail[0] && detail[strlen(detail) - 1] == ' ')
 			detail[strlen(detail) - 1] = 0;
-		length += snprintf(text + length, sizeof(text) - length, "\nOnline: %.38s", detail);
+		length += snprintf(text + length, sizeof(text) - length, "\n");
+		length += snprintf(text + length, sizeof(text) - length, T("Online: %.38s"), detail);
 		/* (a public game's password, when the listing says it was wrong) */
 		if (play_join_state() == -1)
-			length += snprintf(text + length, sizeof(text) - length, "\n  The password was wrong: back, and again");
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", T("  The password was wrong: back, and again"));
 		else if (play_join_state() == -2)
-			length += snprintf(text + length, sizeof(text) - length, "\n  The game is gone from the public games");
-		else if (!strstr(detail, "connected to the host"))
-			length += snprintf(text + length, sizeof(text) - length, "\n  Wait for \"connected to the host\"");
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", T("  The game is gone from the public games"));
+		else if (!strstr(english, "connected to the host"))
+			length += snprintf(text + length, sizeof(text) - length, "\n%s", T("  Wait for \"connected to the host\""));
 	}
 	else if (online)
-		length += snprintf(text + length, sizeof(text) - length,
-			"\nOnline: your code shows on the Play page\n  once the game is made; tell it to the others");
+		length += snprintf(text + length, sizeof(text) - length, "\n%s",
+			T("Online: your code shows on the Play page\n  once the game is made; tell it to the others"));
 	/* (the Xbox's names, and which Vita button each is: the game's own
 	menus show the Xbox's icons) */
 	if (!playstation_terms())
-		length += snprintf(text + length, sizeof(text) - length, "\nMenus: A Cross, B Circle, X Square, Y Triangle");
+		length += snprintf(text + length, sizeof(text) - length, "\n%s", T("Menus: A Cross, B Circle, X Square, Y Triangle"));
 	if (guide_waiting)
-		length += snprintf(text + length, sizeof(text) - length, "\n\nOpening System Link...\nCircle: back");
+		length += snprintf(text + length, sizeof(text) - length, "\n\n%s\n%s", T("Opening System Link..."),
+			T("Circle: back"));
 	else if (guide_problem[0] || blocker)
-		length += snprintf(text + length, sizeof(text) - length, "\n\n!%s\nCircle: back",
-			guide_problem[0] ? guide_problem : blocker);
+		length += snprintf(text + length, sizeof(text) - length, "\n\n!%s\n%s",
+			guide_problem[0] ? guide_problem : blocker, T("Circle: back"));
 	else
-		length += snprintf(text + length, sizeof(text) - length, "\n\nCross: open System Link   Circle: back");
+		length += snprintf(text + length, sizeof(text) - length, "\n\n%s", T("Cross: open System Link   Circle: back"));
 	vgxm_menu_set(text, -1);
 }
 
@@ -2552,7 +2699,7 @@ static void change(struct setting *setting, int step)
 	if (setting->restart)
 	{
 		restart_pending = 1;
-		set_notice("Restart the game for this change");
+		set_notice("%s", T("Restart the game for this change"));
 	}
 	if (strcmp(setting->variable, "HALO_PROFILE") == 0)
 	{
@@ -2560,7 +2707,7 @@ static void change(struct setting *setting, int step)
 		if (apply_profile(choice))
 		{
 			restart_pending = 1;
-			set_notice("Restart the game for this change");
+			set_notice("%s", T("Restart the game for this change"));
 		}
 	}
 	else
@@ -2572,6 +2719,8 @@ static void change(struct setting *setting, int step)
 		profile->choice = matching_profile();
 		apply_value(profile);
 	}
+	if (strcmp(setting->variable, "HALO_LANGUAGE") == 0)
+		language_apply();
 	if (strcmp(setting->variable, "XV_FPS") == 0)
 		vgxm_overlay_enable(atoi(setting->values[choice]));
 	if (strcmp(setting->variable, "HALO_UPSCALE_FILTER") == 0)
@@ -2633,7 +2782,8 @@ int vita_settings_set(const char *variable, const char *value)
 /* the name of what a guide's action does, for a message over the game */
 static const char *guide_title(int action)
 {
-	return action == ACTION_HOST ? "Host a game" : action == ACTION_CAMPAIGN ? "Host co-op campaign" : "Join a game";
+	return action == ACTION_HOST ? T("Host a game") : action == ACTION_CAMPAIGN ? T("Host co-op campaign") :
+		T("Join a game");
 }
 
 /* asks the game for its System Link screen, or Campaign's (the answer:
@@ -2671,19 +2821,34 @@ static void close_panel(void)
 
 /* Publish from the game/event thread; only the input thread writes the menu. */
 static pthread_mutex_t message_lock = PTHREAD_MUTEX_INITIALIZER;
-static char pending_message[2048];
+static char pending_message[3072];
 static int message_pending, message_visible;
 /* map sharing's question (port/linux/game/map_share.c): cross yes, circle
 no; -1 until answered */
-static char pending_question[2048];
+static char pending_question[3072];
 static int question_pending, question_visible, question_withdrawn;
 static volatile int question_result = -1;
 /* map sharing's progress: redrawn when it changes; circle cancels */
-static char pending_progress[2048];
+static char pending_progress[3072];
 static int progress_changed, progress_visible, progress_hide;
 static volatile int progress_cancel;
 
-/* `title`, `text` and `footer` in lines of the overlay's width */
+/* the characters of the `bytes` first bytes of UTF-8 text (a translated
+text's accented letters are two bytes, one character) */
+static int utf8_columns(const char *text, size_t bytes)
+{
+    int count = 0;
+    size_t index;
+
+    for (index = 0; index < bytes && text[index]; index++)
+        if (((unsigned char)text[index] & 0xC0) != 0x80)
+            count++;
+    return count;
+}
+
+/* `title`, `text` and `footer` in lines of the overlay's width (46
+characters, not bytes: UTF-8's continuation bytes take no column, and a
+line never ends inside a character) */
 static size_t format_box(char *formatted, size_t size, const char *title, const char *text, const char *footer)
 {
     size_t used = 0;
@@ -2697,7 +2862,8 @@ static size_t format_box(char *formatted, size_t size, const char *title, const 
             if (*cursor != '\n')
             {
                 size_t word = strcspn(cursor, " \n");
-                if (column && word && (cursor == parts[part] || cursor[-1] == ' ') && column + word > 46)
+                if (column && word && (cursor == parts[part] || cursor[-1] == ' ') &&
+                    column + utf8_columns(cursor, word) > 46)
                 {
                     formatted[used++] = '\n';
                     column = 0;
@@ -2705,7 +2871,8 @@ static size_t format_box(char *formatted, size_t size, const char *title, const 
                 }
             }
             char ch = *cursor++;
-            if (column >= 46 && ch != '\n')
+            int continuation = ((unsigned char)ch & 0xC0) == 0x80;
+            if (column >= 46 && ch != '\n' && !continuation)
             {
                 formatted[used++] = '\n';
                 column = 0;
@@ -2714,7 +2881,7 @@ static size_t format_box(char *formatted, size_t size, const char *title, const 
                 if (ch == ' ') continue;
             }
             formatted[used++] = ch;
-            column = ch == '\n' ? 0 : column + 1;
+            column = ch == '\n' ? 0 : column + !continuation;
         }
     }
     formatted[used] = 0;
@@ -2723,8 +2890,8 @@ static size_t format_box(char *formatted, size_t size, const char *title, const 
 
 void vita_settings_message(const char *title, const char *text)
 {
-    char formatted[2048];
-    size_t used = format_box(formatted, sizeof(formatted), title, text, "\n\nCross / Circle: close");
+    char formatted[3072];
+    size_t used = format_box(formatted, sizeof(formatted), title, text, T("\n\nCross / Circle: close"));
 
     pthread_mutex_lock(&message_lock);
     memcpy(pending_message, formatted, used + 1);
@@ -2735,9 +2902,9 @@ void vita_settings_message(const char *title, const char *text)
 /* a yes or no question over the game (NULL withdraws it) */
 void vita_settings_question(const char *title, const char *text)
 {
-    char formatted[2048];
+    char formatted[3072];
     size_t used = text ? format_box(formatted, sizeof(formatted), title ? title : "", text,
-        "\n\nCross: yes     Circle: no") : 0;
+        T("\n\nCross: yes     Circle: no")) : 0;
 
     pthread_mutex_lock(&message_lock);
     question_result = -1;
@@ -2763,9 +2930,9 @@ int vita_settings_question_answer(void)
 /* a progress line over the game (NULL hides it), which circle cancels */
 void vita_settings_progress(const char *title, const char *text)
 {
-    char formatted[2048];
+    char formatted[3072];
     size_t used = text ? format_box(formatted, sizeof(formatted), title ? title : "", text,
-        "\n\nCircle: cancel") : 0;
+        T("\n\nCircle: cancel")) : 0;
 
     pthread_mutex_lock(&message_lock);
     if (text)
@@ -2868,7 +3035,7 @@ static void reset_controls(void)
 	}
 	__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 	save();
-	set_notice("Controls as shipped");
+	set_notice("%s", T("Controls as shipped"));
 	vita_host_log("settings: controls reset (settings panel)");
 }
 
@@ -2902,9 +3069,9 @@ static void act(const struct setting *setting)
 	others) */
 	case ACTION_ADHOC_JOIN:
 		if (strcmp(running_network, "adhoc"))
-			set_notice("Restart the game for Ad hoc first");
+			set_notice("%s", T("Restart the game for Ad hoc first"));
 		else if (vita_adhoc_state(NULL, 0) == 2)
-			set_notice("In room %d's group already", choice_of("HALO_ADHOC_ROOM") + 1);
+			set_notice(T("In room %d's group already"), choice_of("HALO_ADHOC_ROOM") + 1);
 		else
 		{
 			close_panel();
@@ -2926,9 +3093,9 @@ static void act(const struct setting *setting)
 	/* (its progress line then takes the screen) */
 	case ACTION_CE_EXTRACT:
 		if (vita_ce_installer_start() == 0)
-			set_notice("Taking them from %.28s", maps_installer);
+			set_notice(T("Taking them from %.28s"), maps_installer);
 		else
-			set_notice("No installer, or the files are there");
+			set_notice("%s", T("No installer, or the files are there"));
 		maps_scan();
 		break;
 	case ACTION_HOST:
@@ -2992,7 +3159,7 @@ static void guide_poll(unsigned long long now)
 			SYSTEM_LINK_REQUEST_NONE, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			return;
 		guide_waiting = 0;
-		problem = "The game did not answer: try again";
+		problem = T("The game did not answer: try again");
 	}
 	else
 		return;
@@ -3050,11 +3217,11 @@ static void code_input(unsigned long pressed, unsigned long buttons, unsigned lo
 
 		snprintf(code, sizeof(code), "%.4s-%.4s", code_typed, code_typed + 4);
 		if (strcmp(running_network, "online"))
-			set_notice("Connection must be Online (restart)");
+			set_notice("%s", T("Connection must be Online (restart)"));
 		else
 		{
 			p2p_join_code(code);
-			set_notice("Looking up %s...", code);
+			set_notice(T("Looking up %s..."), code);
 		}
 		screen = code_for_join && !strcmp(running_network, "online") ? SCREEN_GUIDE : SCREEN_LIST;
 		return;
@@ -3104,7 +3271,7 @@ static void browse_input(unsigned long pressed)
 		if (entry->locked)
 		{
 			browse_join_pending = 1;
-			if (vita_ime_open("Password", "", PLAY_TEXT_LENGTH, 1) == 0)
+			if (vita_ime_open(T("Password"), "", PLAY_TEXT_LENGTH, 1) == 0)
 			{
 				vgxm_menu_set(NULL, 0);
 				return;
@@ -3112,7 +3279,7 @@ static void browse_input(unsigned long pressed)
 			browse_join_pending = 0;
 		}
 		play_join_entry(entry, NULL);
-		set_notice("Joining %.20s...", entry->name);
+		set_notice(T("Joining %.20s..."), entry->name);
 		p2p_lobby_browse(0);
 		screen = SCREEN_GUIDE;
 	}
@@ -3128,7 +3295,7 @@ static void delete_input(unsigned long pressed)
 	else if ((pressed & VITA_BUTTON_CROSS) && map)
 	{
 		if (halo_cache_map_in_use(map->name))
-			set_notice("%.30s is in play: leave it first", map->name);
+			set_notice(T("%.30s is in play: leave it first"), map->name);
 		else
 		{
 			map_delete(map);
@@ -3168,9 +3335,10 @@ static int text_edit(const struct setting *setting)
 	const struct play_text *text = play_text_named(setting->variable);
 	int password = !strcmp(setting->variable, "HALO_NET_LOBBY_PASSWORD");
 
-	if (vita_ime_open(password ? "Password (empty: none)" : "Lobby name", text->value, PLAY_TEXT_LENGTH, password) != 0)
+	if (vita_ime_open(password ? T("Password (empty: none)") : T("Lobby name"), text->value, PLAY_TEXT_LENGTH,
+		password) != 0)
 	{
-		set_notice("The keyboard did not open");
+		set_notice("%s", T("The keyboard did not open"));
 		return 0;
 	}
 	ime_setting = setting;
@@ -3216,7 +3384,7 @@ static int ime_input(void)
 		if (result > 0 && browse_selected < browse_count)
 		{
 			play_join_entry(&browse_entries[browse_selected], typed);
-			set_notice("Joining %.20s...", browse_entries[browse_selected].name);
+			set_notice(T("Joining %.20s..."), browse_entries[browse_selected].name);
 			p2p_lobby_browse(0);
 			screen = SCREEN_GUIDE;
 		}
@@ -3316,7 +3484,7 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		}
 		else
 			vita_settings_message(guide_title(adhoc_pending),
-				"The Vita did not join the ad hoc group. Try again, or another Ad hoc dialog way (Dev tab).");
+				T("The Vita did not join the ad hoc group. Try again, or another Ad hoc dialog way (Dev tab)."));
 		adhoc_pending = 0;
 	}
 	guide_poll(now);

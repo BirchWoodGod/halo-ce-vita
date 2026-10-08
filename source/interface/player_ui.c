@@ -162,6 +162,7 @@ symbols in this file:
 #include "main/main.h"
 #include "tag_files/tag_groups.h"
 #include "player_ui.h"
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
 /* ---------- constants */
 
@@ -635,7 +636,7 @@ void player_ui_fast_setup_network_server(
 
 			platform_log("network: could not host a game (the game's network ports in use?)");
 			display_error_text_deferred(
-				L"Can't host a game:\r\nanother program is\r\nusing the network\r\nport. Try again later.",
+				TW(L"Can't host a game:\r\nanother program is\r\nusing the network\r\nport. Try again later."),
 				NONE);
 		}
 #endif

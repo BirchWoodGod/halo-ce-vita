@@ -50,6 +50,7 @@ is let go in scenario_tags_unload, before the next map's tags load.
 #include "cache_file_formats.h"
 
 #include "halo_menus.h"
+#include "../src/lang.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -651,6 +652,31 @@ static void parse_bounds(char const *text, rectangle2d *bounds, char const *file
 }
 
 /* a 'ustr' of the strings */
+/* a text of the files in the player's language (port/linux/src/lang.c),
+as the menus are built: each time ui.map loads, so the menus follow the
+settings' Language row from the next main menu on. The key is the file's
+text with its "\n"s made line breaks (tools/lang_check.py reads the XML so);
+`buffer` holds it */
+static char const *menu_text_translated(char const *original, char *buffer, long size)
+{
+	char const *text = original;
+	long used = 0;
+
+	for (; *text && used < size - 1; text++)
+	{
+		if (text[0] == '\\' && text[1] == 'n')
+		{
+			buffer[used++] = '\n';
+			text++;
+		}
+		else
+			buffer[used++] = *text;
+	}
+	buffer[used] = 0;
+	/* (a text longer than the buffer: as the file has it) */
+	return *text ? original : T(buffer);
+}
+
 static void *string_list_build(char const *const *strings, long count)
 {
 	struct string_list *list = allocate(sizeof(struct string_list));
@@ -663,13 +689,15 @@ static void *string_list_build(char const *const *strings, long count)
 	list->strings.address = entries;
 	for (index = 0; index < count; index++)
 	{
-		long length = (long)strlen(strings[index]);
+		char key[1024];
+		char const *text = menu_text_translated(strings[index], key, (long)sizeof(key));
+		long length = (long)strlen(text);
 		unsigned short *characters = allocate((length * 2 + 2) * sizeof(unsigned short));
 		long written;
 
 		if (!characters)
 			return list;
-		written = halo_menus_utf16(strings[index], characters, length * 2 + 2);
+		written = halo_menus_utf16(text, characters, length * 2 + 2);
 		entries[index].string.size = written * (long)sizeof(unsigned short);
 		entries[index].string.address = characters;
 	}

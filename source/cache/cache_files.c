@@ -145,6 +145,9 @@ int halo_epoch_on_mutator(void);
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "tag_schema.h" /* port: tag_validate.c */
+/* port: the port's text in the player's language (port/linux/src/lang.h,
+through the -iquote port/linux/game path) */
+#include "../src/lang.h"
 #endif
 
 /* ---------- constants */
@@ -1192,7 +1195,7 @@ void cache_files_show_multiplayer_unavailable(
 {
 	void platform_log(char const *format, ...);
 	void platform_show_message(char const *title, char const *message);
-	char message[320];
+	char message[480];
 
 	if (map_name)
 	{
@@ -1200,7 +1203,7 @@ void cache_files_show_multiplayer_unavailable(
 		snprintf(
 			message,
 			sizeof(message),
-			"The map %s (build %s) isn't supported for multiplayer yet.\n\nThe README lists the maps multiplayer plays.",
+			T("The map %s (build %s) isn't supported for multiplayer yet.\n\nThe README lists the maps multiplayer plays."),
 			tag_name_strip_path(map_name),
 			build);
 	}
@@ -1210,10 +1213,10 @@ void cache_files_show_multiplayer_unavailable(
 		snprintf(
 			message,
 			sizeof(message),
-			"Your maps (build %s) aren't supported for multiplayer yet.\n\nThe README lists the maps multiplayer plays.",
+			T("Your maps (build %s) aren't supported for multiplayer yet.\n\nThe README lists the maps multiplayer plays."),
 			build);
 	}
-	platform_show_message("Halo: multiplayer unavailable", message);
+	platform_show_message(T("Halo: multiplayer unavailable"), message);
 
 	return;
 }
@@ -1250,7 +1253,7 @@ boolean cache_files_precache_failed(
 	boolean blocking)
 {
 	void platform_log(char const *format, ...);
-	char why[256];
+	char why[320];
 	char const *name = tag_name_strip_path(map_name ? map_name : "");
 
 	if (!csstrcasecmp(name, "ui"))
@@ -1259,7 +1262,7 @@ boolean cache_files_precache_failed(
 	}
 	if (!name[0])
 	{
-		snprintf(why, sizeof(why), "no map was named");
+		snprintf(why, sizeof(why), T("no map was named"));
 		platform_log("map: a map with no name could not be precached");
 		error(_error_silent, "cache: a map with no name could not be precached");
 		if (blocking)
@@ -1281,10 +1284,10 @@ boolean cache_files_precache_failed(
 		if (!map_share_client_precache_failed(map_name, why))
 		{
 			void platform_show_message(char const *title, char const *message);
-			char message[320];
+			char message[480];
 
-			snprintf(message, sizeof(message), "Couldn't load %s: %s.", custom_edition_maps_level_title(map_name), why);
-			platform_show_message("Halo: map", message);
+			snprintf(message, sizeof(message), T("Couldn't load %s: %s."), custom_edition_maps_level_title(map_name), why);
+			platform_show_message(T("Halo: map"), message);
 		}
 		return TRUE;
 	}

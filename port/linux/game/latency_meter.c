@@ -43,8 +43,10 @@ problem), or a game the host plays alone.
 #include "render/render.h"
 #include "text/draw_string.h"
 #include "text/font_group.h"
+#include "text/unicode.h"
 #include "network_distributed.h"
 #include "latency_meter.h"
+#include "../src/lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -182,7 +184,7 @@ void latency_meter_draw(
 	short bars = 0;
 	short index;
 	long ping;
-	char text[32];
+	wchar_t text[48];
 	real_argb_color color;
 	rectangle2d bounds;
 
@@ -202,7 +204,7 @@ void latency_meter_draw(
 		if (ping == NONE)
 			return;
 		bars = latency_bars(ping, &color);
-		snprintf(text, sizeof(text), "Max ping %ld ms", MIN(ping, 9999L));
+		usnprintf(text, NUMBEROF(text), TW(L"Max ping %ld ms"), MIN(ping, 9999L));
 	}
 	else if (distributed_connection_problem())
 	{
@@ -211,7 +213,7 @@ void latency_meter_draw(
 
 		color.alpha = pulse < 0.5f ? 1.0f : 0.45f;
 		color.red = 1.0f; color.green = 0.3f; color.blue = 0.3f;
-		snprintf(text, sizeof(text), "Connection problem");
+		usnprintf(text, NUMBEROF(text), TW(L"Connection problem"));
 	}
 	else
 	{
@@ -220,12 +222,12 @@ void latency_meter_draw(
 		{
 			color.alpha = 1.0f;
 			color.red = color.green = color.blue = 0.6f;
-			snprintf(text, sizeof(text), "Ping -- ms");
+			usnprintf(text, NUMBEROF(text), TW(L"Ping -- ms"));
 		}
 		else
 		{
 			bars = latency_bars(ping, &color);
-			snprintf(text, sizeof(text), "Ping %ld ms", MIN(ping, 9999L));
+			usnprintf(text, NUMBEROF(text), TW(L"Ping %ld ms"), MIN(ping, 9999L));
 		}
 	}
 
@@ -256,6 +258,9 @@ void latency_meter_draw(
 	bounds.x1 = (short)(right - LATENCY_BARS * (LATENCY_BAR_WIDTH + LATENCY_BAR_GAP) - LATENCY_TEXT_GAP);
 	bounds.y0 = top;
 	bounds.y1 = (short)(top + line_height);
+	text[NUMBEROF(text) - 1] = 0;
 	draw_string_set_draw_mode(font_index, NONE, 1, 0, &color);
-	rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
+	/* (wide, as the game's text is: a translation's letters past ASCII,
+	lang.h) */
+	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, text);
 }

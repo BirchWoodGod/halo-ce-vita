@@ -108,6 +108,7 @@ Choices:
 #include "map_share.h"
 #include "dedicated_server.h"
 #include "../src/p2p.h"
+#include "../src/lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -312,7 +313,7 @@ struct map_share_download
 	boolean discard;
 	unsigned long long started_us;
 	/* what the player is told on leaving */
-	char message[600];
+	char message[800];
 	/* about a map that is no custom map (an Xbox level that could not be
 	precached: map_share_client_precache_failed) */
 	boolean plain_map;
@@ -359,7 +360,7 @@ static void map_share_size_text(
 	long text_size,
 	uint32_t bytes)
 {
-	snprintf(text, (size_t)text_size, "%lu.%lu MB", (unsigned long)(bytes >> 20),
+	snprintf(text, (size_t)text_size, T("%lu.%lu MB"), (unsigned long)(bytes >> 20),
 		(unsigned long)(((bytes & 0xFFFFFUL) * 10) >> 20));
 
 	return;
@@ -429,20 +430,6 @@ static void map_share_resource_maps_absent(
 			length += snprintf(missing + length, (size_t)(missing_size - length), "%s%s.map", length ? ", " : "", names[index]);
 		}
 	}
-
-	return;
-}
-
-/* the resource maps the files `missing` names, said in a sentence */
-static void map_share_resource_maps_text(
-	char *text,
-	long text_size,
-	char const *name,
-	char const *missing)
-{
-	snprintf(text, (size_t)text_size,
-		"%s is a PC (Custom Edition) map that needs %s from Halo Custom Edition in your maps folder. Copy %s "
-		"there to play it.", name, missing, strchr(missing, ',') ? "them" : "it");
 
 	return;
 }
@@ -1276,16 +1263,16 @@ static void map_share_client_refusal_text(
 
 	if (download->pc_maps_only)
 	{
-		snprintf(text, (size_t)text_size, "The host is playing the PC (Custom Edition) map %s, and PC maps is off. "
-			"Turn on PC maps (Multiplayer > Modded maps) to play it.\n\n%s", download->name, why);
+		snprintf(text, (size_t)text_size, T("The host is playing the PC (Custom Edition) map %s, and PC maps is off. "
+			"Turn on PC maps (Multiplayer > Modded maps) to play it.\n\n%s"), download->name, why);
 		return;
 	}
 	snprintf(
 		text,
 		(size_t)text_size,
 		!download->replacing ?
-			"The host is playing the custom map %s, which isn't in your maps folder.\n\n%s" :
-			"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.\n\n%s",
+			T("The host is playing the custom map %s, which isn't in your maps folder.\n\n%s") :
+			T("The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.\n\n%s"),
 		download->name,
 		why);
 
@@ -1363,15 +1350,15 @@ static boolean map_share_client_check_file(
 	}
 	if (length < 0)
 	{
-		snprintf(why, (size_t)why_size, "The downloaded map %s couldn't be read back.", download->name);
+		snprintf(why, (size_t)why_size, T("The downloaded map %s couldn't be read back."), download->name);
 		return FALSE;
 	}
 	status = map_share_header_validate_level(header, download->size, download->name,
 		custom_edition_level_name(download->level_name), &custom_edition);
 	if (status != _map_share_header_ok)
 	{
-		snprintf(why, (size_t)why_size, "The host's map %s isn't a map this game can play (%s).",
-			download->name, map_share_header_status_describe(status));
+		snprintf(why, (size_t)why_size, T("The host's map %s isn't a map this game can play (%s)."),
+			download->name, T(map_share_header_status_describe(status)));
 		return FALSE;
 	}
 
@@ -1393,13 +1380,13 @@ static boolean map_share_client_install(
 	if (!map_share_path(final_path, download->name, extension) ||
 		!map_share_path(replaced_path, download->name, REPLACED_EXTENSION))
 	{
-		snprintf(why, (size_t)why_size, "The map's name is too long for this maps folder.");
+		snprintf(why, (size_t)why_size, T("The map's name is too long for this maps folder."));
 		return FALSE;
 	}
 	/* (nor its cache partition copy, which would be played in its place) */
 	if (halo_cache_map_in_use(download->name) || !cache_files_forget_cached_map(download->name))
 	{
-		snprintf(why, (size_t)why_size, "Your copy of %s is in use: leave it first.", download->name);
+		snprintf(why, (size_t)why_size, T("Your copy of %s is in use: leave it first."), download->name);
 		return FALSE;
 	}
 	if (map_share_file_exists(final_path))
@@ -1407,7 +1394,7 @@ static boolean map_share_client_install(
 		remove(replaced_path);
 		if (rename(final_path, replaced_path) != 0)
 		{
-			snprintf(why, (size_t)why_size, "Your copy of %s couldn't be replaced.", download->name);
+			snprintf(why, (size_t)why_size, T("Your copy of %s couldn't be replaced."), download->name);
 			return FALSE;
 		}
 		replaced = TRUE;
@@ -1418,7 +1405,7 @@ static boolean map_share_client_install(
 		{
 			rename(replaced_path, final_path);
 		}
-		snprintf(why, (size_t)why_size, "The downloaded map %s couldn't be put in the maps folder.", download->name);
+		snprintf(why, (size_t)why_size, T("The downloaded map %s couldn't be put in the maps folder."), download->name);
 		return FALSE;
 	}
 	download->temporary_path[0] = 0;
@@ -1444,14 +1431,61 @@ static boolean map_share_client_install(
 	return TRUE;
 }
 
+/* where the download's map is, as map_share_client_unloadable tells it */
+enum map_share_where
+{
+	/* "was downloaded to your maps folder, but" */
+	_map_share_where_downloaded,
+	/* "is the host's map, but" */
+	_map_share_where_hosts,
+	/* "is in your maps folder, but" */
+	_map_share_where_maps_folder,
+	NUMBER_OF_MAP_SHARE_WHERES
+};
+
 /* Whether this machine cannot load the download's map as it is now
-(custom_edition_maps_loadable), and then `why`, its name followed by
-`what` ("was downloaded to your maps folder, but") and the reason. */
+(custom_edition_maps_loadable), and then `why`: its name, where it is
+(`where`) and the reason, a whole sentence for each (translated whole:
+lang.h) */
 static boolean map_share_client_unloadable(
 	char *why,
 	long why_size,
-	char const *what)
+	enum map_share_where where)
 {
+	static char const *const pc_maps_off[NUMBER_OF_MAP_SHARE_WHERES] =
+	{
+		N_("%s was downloaded to your maps folder, but it is a PC (Custom Edition) map, and PC maps is off. "
+			"Turn on PC maps (Multiplayer > Modded maps) to play it."),
+		N_("%s is the host's map, but it is a PC (Custom Edition) map, and PC maps is off. "
+			"Turn on PC maps (Multiplayer > Modded maps) to play it."),
+		N_("%s is in your maps folder, but it is a PC (Custom Edition) map, and PC maps is off. "
+			"Turn on PC maps (Multiplayer > Modded maps) to play it."),
+	};
+	/* (one resource map missing, and more than one) */
+	static char const *const needs_one[NUMBER_OF_MAP_SHARE_WHERES] =
+	{
+		N_("%s was downloaded to your maps folder, but it is a PC (Custom Edition) map that needs %s from "
+			"Halo Custom Edition in your maps folder. Copy it there to play it."),
+		N_("%s is the host's map, but it is a PC (Custom Edition) map that needs %s from "
+			"Halo Custom Edition in your maps folder. Copy it there to play it."),
+		N_("%s is in your maps folder, but it is a PC (Custom Edition) map that needs %s from "
+			"Halo Custom Edition in your maps folder. Copy it there to play it."),
+	};
+	static char const *const needs_more[NUMBER_OF_MAP_SHARE_WHERES] =
+	{
+		N_("%s was downloaded to your maps folder, but it is a PC (Custom Edition) map that needs %s from "
+			"Halo Custom Edition in your maps folder. Copy them there to play it."),
+		N_("%s is the host's map, but it is a PC (Custom Edition) map that needs %s from "
+			"Halo Custom Edition in your maps folder. Copy them there to play it."),
+		N_("%s is in your maps folder, but it is a PC (Custom Edition) map that needs %s from "
+			"Halo Custom Edition in your maps folder. Copy them there to play it."),
+	};
+	static char const *const not_multiplayer[NUMBER_OF_MAP_SHARE_WHERES] =
+	{
+		N_("%s was downloaded to your maps folder, but it isn't a multiplayer map this game can load."),
+		N_("%s is the host's map, but it isn't a multiplayer map this game can load."),
+		N_("%s is in your maps folder, but it isn't a multiplayer map this game can load."),
+	};
 	struct map_share_download *download = &map_share_download;
 	char missing[96];
 
@@ -1460,19 +1494,14 @@ static boolean map_share_client_unloadable(
 	case _custom_edition_maps_loadable:
 		return FALSE;
 	case _custom_edition_maps_needs_pc_maps:
-		snprintf(why, (size_t)why_size, "%s %s it is a PC (Custom Edition) map, and PC maps is off. Turn on PC maps "
-			"(Multiplayer > Modded maps) to play it.", download->name, what);
+		snprintf(why, (size_t)why_size, T(pc_maps_off[where]), download->name);
 		break;
 	case _custom_edition_maps_needs_resource_maps:
-	{
-		char text[256];
-
-		map_share_resource_maps_text(text, sizeof(text), "it", missing);
-		snprintf(why, (size_t)why_size, "%s %s %s", download->name, what, text);
+		snprintf(why, (size_t)why_size, strchr(missing, ',') ? T(needs_more[where]) : T(needs_one[where]),
+			download->name, missing);
 		break;
-	}
 	default:
-		snprintf(why, (size_t)why_size, "%s %s it isn't a multiplayer map this game can load.", download->name, what);
+		snprintf(why, (size_t)why_size, T(not_multiplayer[where]), download->name);
 		break;
 	}
 
@@ -1486,17 +1515,17 @@ static void map_share_client_finish(
 {
 	struct map_share_download *download = &map_share_download;
 	uint8_t digest[MAP_SHARE_DIGEST_BYTES];
-	char why[320];
+	char why[480];
 	boolean missing;
 
 	if (!map_share_receiver_complete(&download->receiver) || (uint32_t)answer->size != download->size)
 	{
-		map_share_client_fail_damaged("The host ended the download early.");
+		map_share_client_fail_damaged(T("The host ended the download early."));
 		return;
 	}
 	if (download->file && (fflush(download->file) != 0 || ferror(download->file)))
 	{
-		map_share_client_fail_damaged("The map couldn't be written (is the memory card full?).");
+		map_share_client_fail_damaged(T("The map couldn't be written (is the memory card full?)."));
 		return;
 	}
 	if (download->file)
@@ -1518,12 +1547,12 @@ static void map_share_client_finish(
 	map_share_receiver_digest(&download->receiver, digest);
 	if (csmemcmp(digest, answer->digest, sizeof(digest)))
 	{
-		map_share_client_fail_damaged("The download was damaged (its SHA-256 isn't the host's).");
+		map_share_client_fail_damaged(T("The download was damaged (its SHA-256 isn't the host's)."));
 		return;
 	}
 	if (map_share_receiver_identity(&download->receiver) != download->identity)
 	{
-		snprintf(why, sizeof(why), "The host sent a copy of %s that isn't the one its game plays.", download->name);
+		snprintf(why, sizeof(why), T("The host sent a copy of %s that isn't the one its game plays."), download->name);
 		map_share_client_fail_damaged(why);
 		return;
 	}
@@ -1545,13 +1574,13 @@ static void map_share_client_finish(
 	platform_show_progress(NULL, NULL);
 	if (!custom_edition_maps_host_copy_matches(download->level_name, download->identity, &missing))
 	{
-		snprintf(why, sizeof(why), "The downloaded map %s doesn't match the host's.", download->name);
+		snprintf(why, sizeof(why), T("The downloaded map %s doesn't match the host's."), download->name);
 		map_share_client_fail(why);
 		return;
 	}
 	/* kept (it is the host's map, checked), but this machine does not play
 	it as it is: told why (a game on it would stop as a damaged disc) */
-	if (map_share_client_unloadable(why, sizeof(why), "was downloaded to your maps folder, but"))
+	if (map_share_client_unloadable(why, sizeof(why), _map_share_where_downloaded))
 	{
 		map_share_client_fail(why);
 		return;
@@ -1570,8 +1599,8 @@ static void map_share_client_ask(
 {
 	struct map_share_download *download = &map_share_download;
 	char size_text[32];
-	char kept_text[96];
-	char text[800];
+	char kept_text[192];
+	char text[1024];
 
 	map_share_size_text(size_text, sizeof(size_text), download->size);
 	kept_text[0] = 0;
@@ -1580,17 +1609,18 @@ static void map_share_client_ask(
 		char kept_size[32];
 
 		map_share_size_text(kept_size, sizeof(kept_size), download->resume_from);
-		snprintf(kept_text, sizeof(kept_text), "\n\n(%s of it was downloaded before: the download goes on from there.)",
+		snprintf(kept_text, sizeof(kept_text), T("\n\n(%s of it was downloaded before: the download goes on from there.)"),
 			kept_size);
 	}
 	if (download->pc_maps_only)
 	{
-		snprintf(text, sizeof(text), "The host is playing the PC (Custom Edition) map %s, which is in your maps "
-			"folder, but PC maps is off.\n\nTurn on PC maps and play it?", download->name);
+		snprintf(text, sizeof(text), T("The host is playing the PC (Custom Edition) map %s, which is in your maps "
+			"folder, but PC maps is off.\n\nTurn on PC maps and play it?"), download->name);
 	}
 	else if (download->turn_on_pc_maps)
 	{
 		char missing[64];
+		size_t length;
 
 		/* (the resource maps most Custom Edition maps need: which this one
 		does is known once it is here) */
@@ -1599,15 +1629,22 @@ static void map_share_client_ask(
 		snprintf(
 			text,
 			sizeof(text),
-			"The host is playing the PC (Custom Edition) map %s (%s), which %s.\n\nDownload it from %s and turn on PC maps?%s%s%s%s",
+			!download->replacing ?
+				T("The host is playing the PC (Custom Edition) map %s (%s), which isn't in your maps folder.\n\n"
+					"Download it from %s and turn on PC maps?") :
+				T("The host is playing the PC (Custom Edition) map %s (%s), which isn't the same as yours.\n\n"
+					"Download it from %s and turn on PC maps?"),
 			download->name,
 			size_text,
-			!download->replacing ? "isn't in your maps folder" : "isn't the same as yours",
-			download->host_name,
-			missing[0] ? "\n\n(Most PC maps also need " : "",
-			missing,
-			missing[0] ? " from Halo Custom Edition, which your maps folder lacks.)" : "",
-			kept_text);
+			download->host_name);
+		length = strlen(text);
+		if (missing[0])
+		{
+			snprintf(text + length, sizeof(text) - length,
+				T("\n\n(Most PC maps also need %s from Halo Custom Edition, which your maps folder lacks.)"), missing);
+			length = strlen(text);
+		}
+		snprintf(text + length, sizeof(text) - length, "%s", kept_text);
 	}
 	else
 	{
@@ -1615,8 +1652,8 @@ static void map_share_client_ask(
 			text,
 			sizeof(text),
 			!download->replacing ?
-				"The host is playing the custom map %s (%s), which isn't in your maps folder.\n\nDownload it from %s?%s" :
-				"The host's custom map %s (%s) isn't the same as yours.\n\nDownload %s's copy in place of yours?%s",
+				T("The host is playing the custom map %s (%s), which isn't in your maps folder.\n\nDownload it from %s?%s") :
+				T("The host's custom map %s (%s) isn't the same as yours.\n\nDownload %s's copy in place of yours?%s"),
 			download->name,
 			size_text,
 			download->host_name,
@@ -1627,7 +1664,7 @@ static void map_share_client_ask(
 	{
 		size_t length = strlen(text);
 
-		snprintf(text + length, sizeof(text) - length, "\n\nThis is a public game: only accept maps from players you trust.");
+		snprintf(text + length, sizeof(text) - length, "%s", T("\n\nThis is a public game: only accept maps from players you trust."));
 	}
 	network_event("map share: asking the player about '%s' (%lu bytes%s%s) from '%s'%s", download->name,
 		(unsigned long)download->size, download->pc_maps_only ? ", PC maps only" : download->turn_on_pc_maps ?
@@ -1635,7 +1672,7 @@ static void map_share_client_ask(
 		download->public_game ? ", a public game" : "");
 	if (!getenv("HALO_MAP_SHARE_ANSWER"))
 	{
-		platform_ask_question("Halo: custom map", text);
+		platform_ask_question(T("Halo: custom map"), text);
 	}
 	download->state = _client_asking;
 	download->state_time = system_milliseconds();
@@ -1724,12 +1761,12 @@ static void map_share_client_begin_stream(
 	}
 	if (download->resume_from && fseek(download->file, (long)download->resume_from, SEEK_SET) != 0)
 	{
-		map_share_client_fail_damaged("The map couldn't be written to the maps folder.");
+		map_share_client_fail_damaged(T("The map couldn't be written to the maps folder."));
 		return;
 	}
 	if (!map_share_client_send(download->client, _map_share_command_start, (short)download->capabilities, download->resume_from))
 	{
-		map_share_client_fail("The host couldn't be asked for the map.");
+		map_share_client_fail(T("The host couldn't be asked for the map."));
 		return;
 	}
 	download->state = _client_starting;
@@ -1764,7 +1801,7 @@ static void map_share_client_start_over(
 	if (!download->file)
 	{
 		download->temporary_path[0] = 0;
-		map_share_client_fail("The map couldn't be written to the maps folder.");
+		map_share_client_fail(T("The map couldn't be written to the maps folder."));
 		return;
 	}
 	setvbuf(download->file, NULL, _IOFBF, FILE_BUFFER_BYTES);
@@ -1781,7 +1818,7 @@ static void map_share_client_start(
 	struct map_share_download *download = &map_share_download;
 	ULARGE_INTEGER free_bytes;
 	char size_text[32];
-	char why[320];
+	char why[480];
 
 	if (GetDiskFreeSpaceExA(cache_files_map_directory(), &free_bytes, NULL, NULL))
 	{
@@ -1791,7 +1828,7 @@ static void map_share_client_start(
 		if (available < needed)
 		{
 			map_share_size_text(size_text, sizeof(size_text), download->size);
-			snprintf(why, sizeof(why), "There isn't room for the host's map %s (%s) on the memory card.", download->name, size_text);
+			snprintf(why, sizeof(why), T("There isn't room for the host's map %s (%s) on the memory card."), download->name, size_text);
 			map_share_client_fail(why);
 			return;
 		}
@@ -1803,7 +1840,7 @@ static void map_share_client_start(
 	if (!map_share_path(download->temporary_path, download->name, TEMPORARY_EXTENSION))
 	{
 		download->temporary_path[0] = 0;
-		map_share_client_fail("The map's name is too long for this maps folder.");
+		map_share_client_fail(T("The map's name is too long for this maps folder."));
 		return;
 	}
 	if (download->resume_from)
@@ -1886,10 +1923,10 @@ static void map_share_client_show_progress(
 	map_share_size_text(received_text, sizeof(received_text), done);
 	map_share_size_text(size_text, sizeof(size_text), total);
 	snprintf(text, sizeof(text), download->state == _client_checking ?
-		"Checking the part of %s downloaded before\n\n%s of %s (%lu%%)" :
-		"Downloading %s from the host\n\n%s of %s (%lu%%)",
+		T("Checking the part of %s downloaded before\n\n%s of %s (%lu%%)") :
+		T("Downloading %s from the host\n\n%s of %s (%lu%%)"),
 		download->name, received_text, size_text, percent);
-	platform_show_progress("Halo: custom map", text);
+	platform_show_progress(T("Halo: custom map"), text);
 
 	return;
 }
@@ -1921,6 +1958,13 @@ static boolean map_share_client_host(
 		(host_order >> 16) & 255, (host_order >> 8) & 255, host_order & 255,
 		origin == P2P_ORIGIN_PUBLIC ? "a public game's" : origin == P2P_ORIGIN_PRIVATE ? "joined by code or invite" :
 		origin == P2P_ORIGIN_ADHOC ? "in the ad hoc group" : "on the LAN");
+	/* (map_share_host_name_text's word for a host with no name, in the
+	player's language for the question; the log above keeps it English) */
+	if (!csstrcmp(host_name, "the host"))
+	{
+		csstrncpy(host_name, T("the host"), (size_t)(host_name_size - 1));
+		host_name[host_name_size - 1] = 0;
+	}
 
 	return origin == P2P_ORIGIN_PUBLIC;
 }
@@ -2020,25 +2064,25 @@ static boolean map_share_client_may_ask(
 	why[0] = 0;
 	if (setting && !csstrcmp(setting, "0"))
 	{
-		snprintf(why, (size_t)why_size, "Map sharing is off on this machine (HALO_MAP_SHARE=0).");
+		snprintf(why, (size_t)why_size, T("Map sharing is off on this machine (HALO_MAP_SHARE=0)."));
 	}
 	else if (downloads == _map_share_downloads_refused)
 	{
-		snprintf(why, (size_t)why_size, "Map downloads are off (Multiplayer > Modded maps).");
+		snprintf(why, (size_t)why_size, T("Map downloads are off (Multiplayer > Modded maps)."));
 	}
 	else if (downloads == _map_share_downloads_refused_public)
 	{
-		snprintf(why, (size_t)why_size, "Map downloads from public games are off (Multiplayer > Modded maps).");
+		snprintf(why, (size_t)why_size, T("Map downloads from public games are off (Multiplayer > Modded maps)."));
 	}
 	else if (state != _network_game_client_state_pregame && state != _network_game_client_state_joining)
 	{
-		snprintf(why, (size_t)why_size, "The host's game had already started: join while the host is in the lobby to "
-			"download it.");
+		snprintf(why, (size_t)why_size, T("The host's game had already started: join while the host is in the lobby to "
+			"download it."));
 	}
 	else if (!map_share_name_valid(name) || strlen(level_name) >= sizeof(map_share_download.level_name))
 	{
-		snprintf(why, (size_t)why_size, "Its file name can't be sent: map sharing sends maps named with at most %d "
-			"plain characters, and none of / \\ : * ? \" < > | , %%. Copy the host's map to your maps folder.",
+		snprintf(why, (size_t)why_size, T("Its file name can't be sent: map sharing sends maps named with at most %d "
+			"plain characters, and none of / \\ : * ? \" < > | , %%. Copy the host's map to your maps folder."),
 			MAP_SHARE_MAXIMUM_NAME_LENGTH);
 	}
 	else
@@ -2072,8 +2116,8 @@ boolean map_share_client_offer(
 	{
 		/* (a host of a version without map sharing sends none: Xbox games
 		and this port's before it, network_server_manager.c) */
-		snprintf(why, (size_t)why_size, "The host's version doesn't share maps (it may be an older version): copy the "
-			"host's map to your maps folder, or ask the host to update.");
+		snprintf(why, (size_t)why_size, T("The host's version doesn't share maps (it may be an older version): copy the "
+			"host's map to your maps folder, or ask the host to update."));
 		network_event("map share: not asking the host about '%s': it sent no fingerprint", name);
 		return FALSE;
 	}
@@ -2116,7 +2160,7 @@ boolean map_share_client_offer_pc_maps(
 	}
 	if (state != _network_game_client_state_pregame && state != _network_game_client_state_joining)
 	{
-		snprintf(why, (size_t)why_size, "The host's game had already started: turn on PC maps, then join again.");
+		snprintf(why, (size_t)why_size, T("The host's game had already started: turn on PC maps, then join again."));
 		return FALSE;
 	}
 	map_share_client_reset();
@@ -2158,7 +2202,7 @@ void map_share_client_dispose(
 	{
 		if (download->state == _client_leaving)
 		{
-			platform_show_message(download->plain_map ? "Halo: map" : "Halo: custom map", download->message);
+			platform_show_message(download->plain_map ? T("Halo: map") : T("Halo: custom map"), download->message);
 		}
 		else
 		{
@@ -2182,8 +2226,8 @@ boolean map_share_client_game_starting(
 	unsigned long host_identity)
 {
 	struct map_share_download *download = &map_share_download;
-	char why[320];
-	char text[480];
+	char why[480];
+	char text[640];
 
 	if (download->state == _client_leaving)
 	{
@@ -2196,8 +2240,8 @@ boolean map_share_client_game_starting(
 		does) */
 		network_event("map share: the host's game started before '%s' was here", download->name);
 		map_share_client_refusal_text(text, sizeof(text), download->pc_maps_only ?
-			"The host's game started before you answered." :
-			"The host's game started before the map could be downloaded: join while the host is in the lobby.");
+			T("The host's game started before you answered.") :
+			T("The host's game started before the map could be downloaded: join while the host is in the lobby."));
 		map_share_client_fail(text);
 		return FALSE;
 	}
@@ -2211,14 +2255,14 @@ boolean map_share_client_game_starting(
 	stopped as a damaged disc) */
 	if (custom_edition_maps_stock_problem(level_name, host_identity, why, sizeof(why)))
 	{
-		char text[480];
+		char text[640];
 
 		map_share_client_reset();
 		download->client = client;
 		csstrncpy(download->level_name, level_name, sizeof(download->level_name) - 1);
 		csstrncpy(download->name, tag_name_strip_path(level_name), sizeof(download->name) - 1);
 		download->plain_map = TRUE;
-		snprintf(text, sizeof(text), "Couldn't load %s: %s.", custom_edition_maps_level_title(level_name), why);
+		snprintf(text, sizeof(text), T("Couldn't load %s: %s."), custom_edition_maps_level_title(level_name), why);
 		network_event("map share: not loading the host's map '%s'", level_name);
 		map_share_client_fail(text);
 		return FALSE;
@@ -2235,9 +2279,9 @@ boolean map_share_client_game_starting(
 	download->client = client;
 	csstrncpy(download->level_name, level_name, sizeof(download->level_name) - 1);
 	csstrncpy(download->name, tag_name_strip_path(level_name), sizeof(download->name) - 1);
-	if (!map_share_client_unloadable(why, sizeof(why), "is the host's map, but"))
+	if (!map_share_client_unloadable(why, sizeof(why), _map_share_where_hosts))
 	{
-		snprintf(why, sizeof(why), "The host's map %s can't be loaded here.", download->name);
+		snprintf(why, sizeof(why), T("The host's map %s can't be loaded here."), download->name);
 	}
 	network_event("map share: not loading the host's map '%s'", level_name);
 	map_share_client_fail(why);
@@ -2252,7 +2296,7 @@ boolean map_share_client_precache_failed(
 	struct map_share_download *download = &map_share_download;
 	struct network_game_client *client = global_network_game_client_get();
 	char const *name = level_name ? tag_name_strip_path(level_name) : "";
-	char text[480];
+	char text[640];
 
 	if (!client || global_network_game_server_get() || network_game_is_splitscreen_local() || !name[0])
 	{
@@ -2267,7 +2311,7 @@ boolean map_share_client_precache_failed(
 	csstrncpy(download->level_name, level_name, sizeof(download->level_name) - 1);
 	csstrncpy(download->name, name, sizeof(download->name) - 1);
 	download->plain_map = !custom_edition_maps_shareable(level_name);
-	snprintf(text, sizeof(text), "Couldn't load %s: %s.", custom_edition_maps_level_title(level_name), why);
+	snprintf(text, sizeof(text), T("Couldn't load %s: %s."), custom_edition_maps_level_title(level_name), why);
 	network_event("map share: the host's map '%s' could not be precached here; leaving", level_name);
 	map_share_client_fail(text);
 
@@ -2295,12 +2339,12 @@ boolean map_share_client_update(
 	if (download->state != _client_leaving &&
 		state != _network_game_client_state_pregame && state != _network_game_client_state_joining)
 	{
-		char text[480];
+		char text[640];
 
 		/* (the host's game began without this machine's map: it cannot
 		load it) */
 		map_share_client_refusal_text(text, sizeof(text),
-			"The host's game started before the map could be downloaded: join while the host is in the lobby.");
+			T("The host's game started before the map could be downloaded: join while the host is in the lobby."));
 		map_share_client_fail(text);
 	}
 
@@ -2309,12 +2353,12 @@ boolean map_share_client_update(
 	case _client_querying:
 		if (now - download->state_time > MAP_SHARE_QUERY_TIMEOUT_MILLISECONDS)
 		{
-			char text[480];
+			char text[640];
 
 			/* a host without map sharing (it ignores the query): as before */
 			map_share_client_refusal_text(text, sizeof(text),
-				"The host didn't answer the request for it: it may be on an older version without map sharing. "
-				"Copy the host's map to your maps folder, or ask the host to update.");
+				T("The host didn't answer the request for it: it may be on an older version without map sharing. "
+				"Copy the host's map to your maps folder, or ask the host to update."));
 			map_share_client_fail(text);
 		}
 		break;
@@ -2325,12 +2369,12 @@ boolean map_share_client_update(
 
 		if (answer > 0 && download->pc_maps_only)
 		{
-			char why[320];
+			char why[480];
 
 			/* the map is here: PC maps on, and it is precached */
 			map_share_pc_maps_turn_on();
 			custom_edition_maps_look_again();
-			if (map_share_client_unloadable(why, sizeof(why), "is in your maps folder, but"))
+			if (map_share_client_unloadable(why, sizeof(why), _map_share_where_maps_folder))
 			{
 				map_share_client_fail(why);
 			}
@@ -2347,10 +2391,10 @@ boolean map_share_client_update(
 		}
 		else if (!answer)
 		{
-			char text[480];
+			char text[640];
 
 			map_share_client_refusal_text(text, sizeof(text), download->pc_maps_only ?
-				"You answered no." : "You answered no to downloading it.");
+				T("You answered no.") : T("You answered no to downloading it."));
 			map_share_client_fail(text);
 		}
 		break;
@@ -2359,7 +2403,7 @@ boolean map_share_client_update(
 	case _client_checking:
 		if (platform_progress_cancelled())
 		{
-			map_share_client_fail("Download cancelled.");
+			map_share_client_fail(T("Download cancelled."));
 			break;
 		}
 		map_share_client_read_back();
@@ -2380,11 +2424,11 @@ boolean map_share_client_update(
 		if (platform_progress_cancelled() || (cancel_at && download->receiver.received >= cancel_at))
 		{
 			cancelled_at |= cancel_at != 0;
-			map_share_client_fail("Download cancelled.");
+			map_share_client_fail(T("Download cancelled."));
 		}
 		else if (now - download->progress_time > MAP_SHARE_STALL_MILLISECONDS)
 		{
-			map_share_client_fail("The download from the host stopped.");
+			map_share_client_fail(T("The download from the host stopped."));
 		}
 		else if (!download->shown_time || now - download->shown_time >= PROGRESS_INTERVAL_MILLISECONDS)
 		{
@@ -2400,7 +2444,7 @@ boolean map_share_client_update(
 
 	if (download->state == _client_leaving)
 	{
-		platform_show_message(download->plain_map ? "Halo: map" : "Halo: custom map", download->message);
+		platform_show_message(download->plain_map ? T("Halo: map") : T("Halo: custom map"), download->message);
 		csmemset(download, 0, sizeof(*download));
 		return FALSE;
 	}
@@ -2417,7 +2461,7 @@ void map_share_client_handle_answer(
 	struct map_share_answer_message answer;
 	short packet_type = _message_server_map_download_answer;
 	short packet_version = HALO_PORT_NETWORK_GAME_MESSAGE_VERSION;
-	char why[320];
+	char why[480];
 
 	message_size -= sizeof(word);
 	if (message_size <= 0 ||
@@ -2434,7 +2478,7 @@ void map_share_client_handle_answer(
 	}
 	if (!map_share_answer_valid(&answer, download->name, download->identity, download->capabilities))
 	{
-		map_share_client_fail("The host's answer about the map wasn't valid.");
+		map_share_client_fail(T("The host's answer about the map wasn't valid."));
 		return;
 	}
 
@@ -2443,13 +2487,13 @@ void map_share_client_handle_answer(
 	case _map_share_answer_refused:
 		if (answer.reason == _map_share_refusal_not_in_lobby)
 		{
-			snprintf(why, sizeof(why), "The host's custom map %s couldn't be downloaded: the host's game had already "
-				"started. Join while the host is in the lobby to download it.", download->name);
+			snprintf(why, sizeof(why), T("The host's custom map %s couldn't be downloaded: the host's game had already "
+				"started. Join while the host is in the lobby to download it."), download->name);
 		}
 		else
 		{
-			snprintf(why, sizeof(why), "The host's custom map %s couldn't be downloaded: %s.",
-				download->name, map_share_refusal_describe((enum map_share_refusal)answer.reason));
+			snprintf(why, sizeof(why), T("The host's custom map %s couldn't be downloaded: %s."),
+				download->name, T(map_share_refusal_describe((enum map_share_refusal)answer.reason)));
 		}
 		map_share_client_fail(why);
 		break;
@@ -2464,10 +2508,10 @@ void map_share_client_handle_answer(
 			a code's, Wi-Fi's or ad hoc's game still offers it) */
 			if (download->public_game && TEST_FLAG(download->flags, _map_share_offer_yelo_bit))
 			{
-				char why[320];
+				char why[480];
 
-				snprintf(why, sizeof(why), "The host's map %s is an OpenSauce map (.yelo), which isn't downloaded "
-					"from public games. Join with the host's code, or copy the map to your maps folder.",
+				snprintf(why, sizeof(why), T("The host's map %s is an OpenSauce map (.yelo), which isn't downloaded "
+					"from public games. Join with the host's code, or copy the map to your maps folder."),
 					download->name);
 				map_share_client_fail(why);
 				break;
@@ -2497,14 +2541,14 @@ void map_share_client_handle_answer(
 		}
 		else
 		{
-			map_share_client_fail("The host's offer of the map changed.");
+			map_share_client_fail(T("The host's offer of the map changed."));
 		}
 		break;
 
 	case _map_share_answer_done:
 		if (download->state != _client_receiving)
 		{
-			map_share_client_fail("The host ended a download that hadn't started.");
+			map_share_client_fail(T("The host ended a download that hadn't started."));
 		}
 		else
 		{
@@ -2545,14 +2589,14 @@ void map_share_client_handle_data(
 		map_share_client_write, download->file);
 	if (status == _map_share_chunk_write_failed)
 	{
-		map_share_client_fail_damaged("The map couldn't be written (is the memory card full?).");
+		map_share_client_fail_damaged(T("The map couldn't be written (is the memory card full?)."));
 		return;
 	}
 	if (status != _map_share_chunk_ok)
 	{
 		network_event("map share: data at %ld (%d bytes) refused (%d)", (long)data.offset, (int)data.length, (int)status);
 		map_share_client_fail_damaged(status == _map_share_chunk_bad_stream ?
-			"The download was damaged (it doesn't inflate)." : "The host sent the map out of order.");
+			T("The download was damaged (it doesn't inflate).") : T("The host sent the map out of order."));
 		return;
 	}
 	download->progress_time = system_milliseconds();
@@ -2570,15 +2614,15 @@ void map_share_client_handle_data(
 		if (header_status == _map_share_header_ok &&
 			!custom_edition != !TEST_FLAG(download->flags, _map_share_offer_custom_edition_bit))
 		{
-			map_share_client_fail_damaged("The host's map isn't the kind of map it offered.");
+			map_share_client_fail_damaged(T("The host's map isn't the kind of map it offered."));
 			return;
 		}
 		if (header_status != _map_share_header_ok)
 		{
-			char why[320];
+			char why[480];
 
-			snprintf(why, sizeof(why), "The host's map %s isn't a map this game can play (%s).",
-				download->name, map_share_header_status_describe(header_status));
+			snprintf(why, sizeof(why), T("The host's map %s isn't a map this game can play (%s)."),
+				download->name, T(map_share_header_status_describe(header_status)));
 			map_share_client_fail_damaged(why);
 			return;
 		}

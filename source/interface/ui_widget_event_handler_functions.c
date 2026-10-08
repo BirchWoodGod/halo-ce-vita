@@ -914,6 +914,7 @@ symbols in this file:
 #include "bungie_net/network/transport_endpoint_winsock.h"
 #include "interface/player_ui.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
 /* port: main.c's and network_server_manager.c's, which this file's headers
 do not declare (network co-op: ui_widget_port_cooperative_level_choose) */
@@ -2825,7 +2826,7 @@ static void network_game_host_failed(
 		game_connection_set(_game_connection_local);
 	platform_log("network: could not host a game (the game's network ports in use?)");
 	display_error_text_deferred(
-		L"Can't host a game:\r\nanother program is\r\nusing the network\r\nport. Try again later.",
+		TW(L"Can't host a game:\r\nanother program is\r\nusing the network\r\nport. Try again later."),
 		controller_index);
 }
 #endif
@@ -4316,7 +4317,7 @@ static boolean player_profile_set_for_game_1wide(
 		if (profile.player_name[0] && !player_name_valid(profile.player_name, NUMBEROF(profile.player_name)))
 		{
 			display_error_text_deferred(
-				L"Sorry, this profile's\r\nname can't be used in\r\nmultiplayer. Please\r\nrename the profile.",
+				TW(L"Sorry, this profile's\r\nname can't be used in\r\nmultiplayer. Please\r\nrename the profile."),
 				controller_index);
 			ui_play_audio_feedback_sound(4);
 			return FALSE;

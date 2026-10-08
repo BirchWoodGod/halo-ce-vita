@@ -2241,6 +2241,7 @@ font, drawn by the callers as the icons that are text are. */
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
 #include "vita_controls.h"
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
 #include <string.h>
 
@@ -2296,7 +2297,8 @@ short hud_vita_glyph_face_icon(
 }
 
 /* the word of a glyph that is text (in the style of the game's own icon
-words, hud_icon_messages: "D-pad up"); NULL for a drawn one or none */
+words, hud_icon_messages: "D-pad up"), in the player's language (lang.h:
+the buttons' own names stay); NULL for a drawn one or none */
 wchar_t const *hud_vita_glyph_text(
 	short glyph)
 {
@@ -2304,13 +2306,13 @@ wchar_t const *hud_vita_glyph_text(
 	{
 		NULL, NULL, NULL, NULL, NULL,
 		L"L", L"R",
-		L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
+		N_(L"D-pad up"), N_(L"D-pad down"), N_(L"D-pad left"), N_(L"D-pad right"),
 		L"START", L"SELECT",
-		L"touch top left", L"touch top right", L"touch left edge", L"touch right edge",
-		L"rear touch left", L"rear touch right"
+		N_(L"touch top left"), N_(L"touch top right"), N_(L"touch left edge"), N_(L"touch right edge"),
+		N_(L"rear touch left"), N_(L"rear touch right")
 	};
 
-	return glyph > VITA_GLYPH_NONE && glyph < VITA_GLYPH_COUNT ? texts[glyph] : NULL;
+	return glyph > VITA_GLYPH_NONE && glyph < VITA_GLYPH_COUNT && texts[glyph] ? TW(texts[glyph]) : NULL;
 }
 
 static void vita_glyph_quad(

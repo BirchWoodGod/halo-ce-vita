@@ -591,6 +591,7 @@ real_argb_color *hud_get_text_color(real_argb_color *color);
 #ifdef HALO_LINUX
 #include "latency_meter.h"
 #endif
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -988,28 +989,30 @@ static void initialize_player_multiplayer_data(
 	return;
 }
 
-/* port: English ordinal for a zero-based place past the string list's 16
-("17th", "22nd", "111th"; "tied for 17th" when tied), in a static buffer */
+/* port: the ordinal for a zero-based place past the string list's 16
+("17th", "22nd", "111th"; "tied for 17th" when tied), in a static buffer;
+in the player's language (lang.h: each suffix a text of its own, so that
+a language with no such suffixes puts its own mark in their place) */
 static wchar_t *place_ordinal_string(
 	long place,
 	boolean tied)
 {
-	static wchar_t string[32];
+	static wchar_t string[48];
 	long number = place + 1;
-	wchar_t const *suffix = L"th";
+	wchar_t const *suffix = TW(L"th");
 
 	if (number % 100 < 11 || number % 100 > 13)
 	{
 		switch (number % 10)
 		{
 		case 1:
-			suffix = L"st";
+			suffix = TW(L"st");
 			break;
 		case 2:
-			suffix = L"nd";
+			suffix = TW(L"nd");
 			break;
 		case 3:
-			suffix = L"rd";
+			suffix = TW(L"rd");
 			break;
 		}
 	}
@@ -1017,7 +1020,7 @@ static wchar_t *place_ordinal_string(
 	usnprintf(
 		string,
 		NUMBEROF(string),
-		tied ? L"tied for %d%s" : L"%d%s",
+		tied ? TW(L"tied for %d%s") : L"%d%s",
 		number,
 		suffix);
 	string[NUMBEROF(string) - 1] = 0;
@@ -1720,7 +1723,7 @@ static void game_engine_rasterize_in_game_score(
 #ifdef HALO_LINUX
 	/* port: a network game's Ping column (latency_meter.c) */
 	if (latency_meter_shown())
-		usprintf(row_string, L"\t%s\t%s\t%s\tPing", column_name, score_name, score_string);
+		usprintf(row_string, L"\t%s\t%s\t%s\t%s", column_name, score_name, score_string, TW(L"Ping"));
 #endif
 	rasterize_in_game_score_draw_line(row_string, FALSE, &color, 1);
 

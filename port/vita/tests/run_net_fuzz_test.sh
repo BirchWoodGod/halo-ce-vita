@@ -80,7 +80,8 @@ status=0
 monocypher="port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c"
 for target in $targets; do
 	case $target in
-	p2p) flags=$platform_flags; sources="port/vita/tests/net_fuzz_p2p.c port/third_party/kcp/ikcp.c $monocypher" ;;
+	p2p) flags=$platform_flags; sources="port/vita/tests/net_fuzz_p2p.c port/third_party/kcp/ikcp.c port/linux/src/lang.c
+		$monocypher" ;;
 	signal) flags=$platform_flags; sources="port/vita/tests/net_fuzz_signal.c $monocypher" ;;
 	map_share) flags=$platform_flags; sources="port/vita/tests/net_fuzz_map_share.c port/linux/src/p2p_crypto.c $monocypher" ;;
 	messages) flags=$game_flags; sources="port/vita/tests/net_fuzz_messages.c source/memory/data_packet_groups.c

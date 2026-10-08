@@ -76,6 +76,7 @@ nothing left that names it is not shown.
 #include "port_config.h"
 #include "p2p_internal.h"
 #include "halo_port_limits.h"
+#include "lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -624,30 +625,30 @@ static int hosting_status(char *text, int size)
 	{
 		if (lobby.details_told && !hosting_public())
 		{
-			snprintf(text, (size_t)size, "Private: not in the server browser");
+			snprintf(text, (size_t)size, "%s", T("Private: not in the server browser"));
 			return P2P_LOBBY_HOSTING_PRIVATE;
 		}
-		snprintf(text, (size_t)size, "%s", lobby.password_failed ? "Not listed: no memory for the password" :
-			"Getting listed...");
+		snprintf(text, (size_t)size, "%s", lobby.password_failed ? T("Not listed: no memory for the password") :
+			T("Getting listed..."));
 		return lobby.password_failed ? P2P_LOBBY_HOSTING_UNREACHABLE : P2P_LOBBY_HOSTING_PENDING;
 	}
 	p2p_signal_counts(&counts);
 	if (counts.listing)
 	{
-		snprintf(text, (size_t)size, "Listed on %d of %d servers", counts.listing, counts.brokers);
+		snprintf(text, (size_t)size, T("Listed on %d of %d servers"), counts.listing, counts.brokers);
 		return P2P_LOBBY_HOSTING_LISTED;
 	}
 	if (!elapsed(lobby.listed_time, LISTING_ACKNOWLEDGE_TIME) && counts.ready)
 	{
-		snprintf(text, (size_t)size, "Getting listed...");
+		snprintf(text, (size_t)size, "%s", T("Getting listed..."));
 		return P2P_LOBBY_HOSTING_PENDING;
 	}
 	if (!elapsed(lobby.listed_time, BROWSE_REACH_TIME) && counts.tried < counts.brokers)
 	{
-		snprintf(text, (size_t)size, "Getting listed...");
+		snprintf(text, (size_t)size, "%s", T("Getting listed..."));
 		return P2P_LOBBY_HOSTING_PENDING;
 	}
-	snprintf(text, (size_t)size, "Not listed: can't reach the online game list");
+	snprintf(text, (size_t)size, "%s", T("Not listed: can't reach the online game list"));
 	return P2P_LOBBY_HOSTING_UNREACHABLE;
 }
 
@@ -1339,7 +1340,7 @@ static void *key_thread(void *unused)
 				tries again) */
 				lobby.password_pending = 0;
 				lobby.password_failed = 1;
-				p2p_set_status("not enough memory for the password: the game is not listed");
+				p2p_set_status(N_("not enough memory for the password: the game is not listed"));
 			}
 			/* (another password since: that one's key next) */
 			else if (generation == lobby.password_generation)
@@ -1384,12 +1385,12 @@ static void *key_thread(void *unused)
 				else if (!made)
 				{
 					lobby.join_state = P2P_LOBBY_JOIN_GONE;
-					p2p_set_status("not enough memory to try the password");
+					p2p_set_status(N_("not enough memory to try the password"));
 				}
 				else
 				{
 					lobby.join_state = P2P_LOBBY_JOIN_WRONG_PASSWORD;
-					p2p_set_status("the password is not that game's");
+					p2p_set_status(N_("the password is not that game's"));
 				}
 			}
 			memset(token, 0, sizeof(token));
@@ -1667,7 +1668,10 @@ static int browse_status(char *text, int size)
 		shown += lobby.games[index].used;
 	if (shown)
 	{
-		snprintf(text, (size_t)size, "%d public game%s", shown, shown == 1 ? "" : "s");
+		if (shown == 1)
+			snprintf(text, (size_t)size, "%s", T("1 public game"));
+		else
+			snprintf(text, (size_t)size, T("%d public games"), shown);
 		return P2P_LOBBY_BROWSE_GAMES;
 	}
 	p2p_signal_counts(&counts);
@@ -1677,23 +1681,23 @@ static int browse_status(char *text, int size)
 		query within seconds) */
 		if (!elapsed(lobby.browse_time, BROWSE_SETTLE_TIME) || !elapsed(counts.browsing_time, BROWSE_SETTLE_TIME))
 		{
-			snprintf(text, (size_t)size, "Looking for public games...");
+			snprintf(text, (size_t)size, "%s", T("Looking for public games..."));
 			return P2P_LOBBY_BROWSE_LOOKING;
 		}
 		if (lobby.other_version_count)
-			snprintf(text, (size_t)size, "No public games for this version (%d on another)", lobby.other_version_count);
+			snprintf(text, (size_t)size, T("No public games for this version (%d on another)"), lobby.other_version_count);
 		else
-			snprintf(text, (size_t)size, "No public games right now");
+			snprintf(text, (size_t)size, "%s", T("No public games right now"));
 		return P2P_LOBBY_BROWSE_EMPTY;
 	}
 	/* (none taking the subscription: still being tried, or out of reach) */
 	if (!elapsed(lobby.browse_time, BROWSE_REACH_TIME) && (!counts.started_time || counts.tried < counts.brokers ||
 		counts.lobby))
 	{
-		snprintf(text, (size_t)size, "Looking for public games...");
+		snprintf(text, (size_t)size, "%s", T("Looking for public games..."));
 		return P2P_LOBBY_BROWSE_LOOKING;
 	}
-	snprintf(text, (size_t)size, "Can't reach the online game list - check your internet connection");
+	snprintf(text, (size_t)size, "%s", T("Can't reach the online game list - check your internet connection"));
 	return P2P_LOBBY_BROWSE_UNREACHABLE;
 }
 
@@ -1728,12 +1732,12 @@ int p2p_lobby_brokers_status(char *text, int size)
 	}
 	else if (!counts.started_time || (counts.tried < counts.brokers && !elapsed(counts.started_time, BROWSE_REACH_TIME)))
 	{
-		snprintf(text, (size_t)size, "Connecting to the online game list...");
+		snprintf(text, (size_t)size, "%s", T("Connecting to the online game list..."));
 		state = P2P_LOBBY_BROWSE_LOOKING;
 	}
 	else
 	{
-		snprintf(text, (size_t)size, "Can't reach the online game list - check your internet connection");
+		snprintf(text, (size_t)size, "%s", T("Can't reach the online game list - check your internet connection"));
 		state = P2P_LOBBY_BROWSE_UNREACHABLE;
 	}
 	pthread_mutex_unlock(&p2p_lock);
@@ -1814,7 +1818,9 @@ static const char *map_title(const char *map, int pc_map)
 
 static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lobby_entry *entry)
 {
-	static const char *const difficulties[] = { "Easy", "Normal", "Heroic", "Legendary" };
+	/* (in the language chosen, lang.c; the maps' and gametypes' names are
+	Halo's own, as its menus show them) */
+	static const char *const difficulties[] = { N_("Easy"), N_("Normal"), N_("Heroic"), N_("Legendary") };
 	unsigned char own[P2P_KEY_HASH_SIZE];
 	int length, index;
 
@@ -1845,33 +1851,33 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)
 	{
-		length = snprintf(entry->rules, sizeof(entry->rules), "Co-op: %s%s%s", entry->map,
-			listing->difficulty < 4 ? ", " : "", listing->difficulty < 4 ? difficulties[listing->difficulty] : "");
+		length = snprintf(entry->rules, sizeof(entry->rules), T("Co-op: %s%s%s"), entry->map,
+			listing->difficulty < 4 ? ", " : "", listing->difficulty < 4 ? T(difficulties[listing->difficulty]) : "");
 	}
 	else if (listing->score_limit > 0)
 	{
-		length = snprintf(entry->rules, sizeof(entry->rules), "%s to %d on %s", entry->gametype[0] ?
-			entry->gametype : "A game", listing->score_limit, entry->map);
+		length = snprintf(entry->rules, sizeof(entry->rules), T("%s to %d on %s"), entry->gametype[0] ?
+			entry->gametype : T("A game"), listing->score_limit, entry->map);
 	}
 	else
 	{
-		length = snprintf(entry->rules, sizeof(entry->rules), "%s on %s", entry->gametype[0] ? entry->gametype :
-			"A game", entry->map);
+		length = snprintf(entry->rules, sizeof(entry->rules), T("%s on %s"), entry->gametype[0] ? entry->gametype :
+			T("A game"), entry->map);
 	}
 	length = length < (int)sizeof(entry->rules) ? length : (int)sizeof(entry->rules) - 1;
 	if (listing->in_progress)
-		length += snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, ": under way");
+		length += snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, "%s", T(": under way"));
 	else if (!listing->open)
-		length += snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, ": full or starting");
+		length += snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, "%s", T(": full or starting"));
 	length = length < (int)sizeof(entry->rules) ? length : (int)sizeof(entry->rules) - 1;
 	if (listing->pc_map)
 		length += snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, " (HALO PC)");
 	length = length < (int)sizeof(entry->rules) ? length : (int)sizeof(entry->rules) - 1;
 	if (listing->dedicated)
-		snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, " (DEDICATED)");
+		snprintf(entry->rules + length, sizeof(entry->rules) - (size_t)length, "%s", T(" (DEDICATED)"));
 	/* the Players line: "5 of 16: name, name... +3 more" (the names that
 fit, with room left for the end) */
-	length = snprintf(entry->players_line, sizeof(entry->players_line), "%d of %d", entry->players, entry->maximum);
+	length = snprintf(entry->players_line, sizeof(entry->players_line), T("%d of %d"), entry->players, entry->maximum);
 	for (index = 0; index < listing->listed_player_count; index++)
 	{
 		const char *name = listing->players[index];
@@ -1885,7 +1891,7 @@ fit, with room left for the end) */
 	}
 	if (index && entry->players > index)
 	{
-		snprintf(entry->players_line + length, sizeof(entry->players_line) - (size_t)length, "... +%d more",
+		snprintf(entry->players_line + length, sizeof(entry->players_line) - (size_t)length, T("... +%d more"),
 			entry->players - index);
 	}
 }
@@ -1927,7 +1933,7 @@ int p2p_lobby_join(const char *id, const char *password)
 			memcpy(lobby.join_sealed_token, game->listing.sealed_token, P2P_SEALED_TOKEN_SIZE);
 			lobby.join_pending = 1;
 			lobby.join_state = P2P_LOBBY_JOIN_UNLOCKING;
-			p2p_set_status("opening the game \"%s\" with its password", game->listing.name);
+			p2p_set_status(N_("opening the game \"%s\" with its password"), game->listing.name);
 			start_key_thread();
 		}
 		else

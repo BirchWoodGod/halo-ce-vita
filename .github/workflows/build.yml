@@ -73,6 +73,11 @@ jobs:
       - name: Test
         run: python -m pytest -q tools/test_linux_port.py
 
+      # (the port's translations: every marked string in each language file,
+      # port/vita/README.md "Translations")
+      - name: Translations
+        run: sh port/vita/tests/run_lang_test.sh
+
       - name: Compile cache
         run: ccache --show-stats
 

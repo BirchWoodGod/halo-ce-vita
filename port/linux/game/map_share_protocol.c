@@ -7,6 +7,9 @@ The rules of map sharing that need nothing of the game
 
 #include "map_share_protocol.h"
 #include "memory/zlib/zlib.h"
+/* (N_ only, lang.h's mark: the descriptions are translated where they are
+shown, map_share.c; this file is also built alone, without lang.c) */
+#include "../src/lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -684,18 +687,18 @@ char const *map_share_header_status_describe(
 	static char const *const descriptions[NUMBER_OF_MAP_SHARE_HEADER_STATUSES] =
 	{
 		"ok",
-		"too small",
-		"no cache header signatures",
-		"not an Xbox or Custom Edition cache",
-		"unended header string",
-		"named otherwise inside",
-		"not a multiplayer map",
-		"compressed Custom Edition cache",
-		"bad file length",
-		"tag data outside the file",
+		N_("too small"),
+		N_("no cache header signatures"),
+		N_("not an Xbox or Custom Edition cache"),
+		N_("unended header string"),
+		N_("named otherwise inside"),
+		N_("not a multiplayer map"),
+		N_("compressed Custom Edition cache"),
+		N_("bad file length"),
+		N_("tag data outside the file"),
 	};
 
-	return (unsigned)status < NUMBER_OF_MAP_SHARE_HEADER_STATUSES ? descriptions[status] : "unknown";
+	return (unsigned)status < NUMBER_OF_MAP_SHARE_HEADER_STATUSES ? descriptions[status] : N_("unknown");
 }
 
 char const *map_share_refusal_describe(
@@ -704,17 +707,17 @@ char const *map_share_refusal_describe(
 	static char const *const descriptions[NUMBER_OF_MAP_SHARE_REFUSALS] =
 	{
 		"none",
-		"the host does not share that map",
-		"the host's copy changed",
-		"the map is too large to share",
-		"the host is sending maps to other players",
-		"the host's game has started",
-		"the host could not read the map",
-		"cancelled",
-		"a bad message",
+		N_("the host does not share that map"),
+		N_("the host's copy changed"),
+		N_("the map is too large to share"),
+		N_("the host is sending maps to other players"),
+		N_("the host's game has started"),
+		N_("the host could not read the map"),
+		N_("cancelled"),
+		N_("a bad message"),
 	};
 
-	return (unsigned)reason < NUMBER_OF_MAP_SHARE_REFUSALS ? descriptions[reason] : "unknown";
+	return (unsigned)reason < NUMBER_OF_MAP_SHARE_REFUSALS ? descriptions[reason] : N_("unknown");
 }
 
 uint32_t map_share_identity(

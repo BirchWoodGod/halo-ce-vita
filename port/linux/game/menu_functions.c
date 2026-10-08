@@ -46,6 +46,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "text/text_group.h"
 
 #include "halo_menus.h"
+#include "../src/lang.h"
 #include "../src/p2p.h"
 #include "../src/system_link_shortcut.h"
 
@@ -273,23 +274,22 @@ static struct widget_instance *screen_of(struct widget_instance *widget)
 	return widget;
 }
 
-/* a text box's own text (one with no string list shows it) */
+/* a text box's own text (one with no string list shows it): UTF-8, as the
+port's text is (a translation's, lang.h, and the game list's), made the
+game's UTF-16 (halo_menus_utf16); at most 120 characters */
 static void text_show(struct widget_instance *widget, char const *text)
 {
-	long length, index;
+	unsigned short characters[121];
+	long length;
 
 	if (!widget || widget->type != _ui_widget_type_text_box)
 		return;
-	length = text ? (long)strlen(text) : 0;
-	if (length > 120)
-		length = 120;
+	length = halo_menus_utf16(text ? text : "", characters, (long)NUMBEROF(characters));
 	widget->parameters.text_box.text = ui_widget_realloc(widget->parameters.text_box.text,
-		(word)((length + 1) * sizeof(wchar_t)), __FILE__, __LINE__);
+		(word)(length * sizeof(wchar_t)), __FILE__, __LINE__);
 	if (!widget->parameters.text_box.text)
 		return;
-	for (index = 0; index < length; index++)
-		widget->parameters.text_box.text[index] = (wchar_t)(unsigned char)text[index];
-	widget->parameters.text_box.text[length] = 0;
+	memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
 }
 
 /* a text box's string of its string list */
@@ -416,14 +416,14 @@ static void join_begin(struct p2p_lobby_entry const *entry, char const *password
 {
 	if (!p2p_lobby_join(entry->id, password ? password : ""))
 	{
-		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s is no longer listed", entry->name);
+		snprintf(menu_functions.status, sizeof(menu_functions.status), T("%s is no longer listed"), entry->name);
 		menu_functions.password_help = _help_gone;
 		platform_log("menus: the public game %s is no longer listed", entry->name);
 		return;
 	}
 	menu_functions.join_watched = TRUE;
 	menu_functions.password_help = _help_joining;
-	snprintf(menu_functions.status, sizeof(menu_functions.status), "Joining %s...", entry->name);
+	snprintf(menu_functions.status, sizeof(menu_functions.status), T("Joining %s..."), entry->name);
 	platform_log("menus: joining the public game %s%s", entry->name, password && *password ? " with its password" : "");
 }
 
@@ -441,14 +441,14 @@ static void join_watch(void)
 		menu_functions.join_watched = FALSE;
 		menu_functions.password_help = _help_wrong;
 		menu_functions.password[0] = 0;
-		snprintf(menu_functions.status, sizeof(menu_functions.status), "Wrong password");
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("Wrong password"));
 		platform_log("menus: the password was wrong");
 	}
 	else if (state == P2P_LOBBY_JOIN_GONE)
 	{
 		menu_functions.join_watched = FALSE;
 		menu_functions.password_help = _help_gone;
-		snprintf(menu_functions.status, sizeof(menu_functions.status), "That game is gone");
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That game is gone"));
 		if (menu_functions.chosen_valid)
 			p2p_lobby_mark_failed(menu_functions.chosen.id);
 		platform_log("menus: the public game is gone");
@@ -567,7 +567,7 @@ static void browser_update(struct widget_instance *list)
 	if (menu_functions.status[0])
 		snprintf(line, sizeof(line), "%s", menu_functions.status);
 	else if (!internet_play())
-		snprintf(line, sizeof(line), "Internet play is off");
+		snprintf(line, sizeof(line), "%s", T("Internet play is off"));
 	else
 	{
 		char text[96];
@@ -575,19 +575,22 @@ static void browser_update(struct widget_instance *list)
 		switch (p2p_lobby_browse_status(text, sizeof(text)))
 		{
 		case P2P_LOBBY_BROWSE_UNREACHABLE:
-			snprintf(line, sizeof(line), "Can't reach the game list");
+			snprintf(line, sizeof(line), "%s", T("Can't reach the game list"));
 			snprintf(message, sizeof(message), "%s", text);
 			break;
 		case P2P_LOBBY_BROWSE_EMPTY:
-			snprintf(line, sizeof(line), "No public games");
+			snprintf(line, sizeof(line), "%s", T("No public games"));
 			snprintf(message, sizeof(message), "%s", text);
 			break;
 		case P2P_LOBBY_BROWSE_GAMES:
-			snprintf(line, sizeof(line), "%ld public game%s", menu_functions.entry_count,
-				menu_functions.entry_count == 1 ? "" : "s");
+			/* (each count's words whole, for the translations) */
+			if (menu_functions.entry_count == 1)
+				snprintf(line, sizeof(line), "%s", T("1 public game"));
+			else
+				snprintf(line, sizeof(line), T("%ld public games"), menu_functions.entry_count);
 			break;
 		default:
-			snprintf(line, sizeof(line), "Looking for public games...");
+			snprintf(line, sizeof(line), "%s", T("Looking for public games..."));
 			break;
 		}
 		if (menu_functions.entry_count)
@@ -628,7 +631,7 @@ static boolean browser_join(struct widget_instance *widget)
 	menu_functions.status[0] = 0;
 	if (entry->own)
 	{
-		snprintf(menu_functions.status, sizeof(menu_functions.status), "That is your own game");
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That is your own game"));
 		return TRUE;
 	}
 	if (entry->locked)
@@ -709,13 +712,13 @@ static void setup_update(struct widget_instance *list)
 		snprintf(menu_functions.lobby_password, sizeof(menu_functions.lobby_password), "%s", text);
 	text_show(named(screen, "name_value"), menu_functions.lobby_name);
 	stars(text, sizeof(text), menu_functions.lobby_password);
-	text_show(named(screen, "password_value"), text[0] ? text : "NONE");
+	text_show(named(screen, "password_value"), text[0] ? text : T("NONE"));
 	/* the help: the focused row's */
 	for (child = list->child; child && child != list->focused_child; child = child->next)
 		row++;
 	string_show(named(screen, "setup_help"), row);
 	if (!internet_play())
-		text_show(named(screen, "setup_status"), "Internet play is off");
+		text_show(named(screen, "setup_status"), T("Internet play is off"));
 	else
 	{
 		/* (whether the online game list can be reached, before the game is
@@ -819,7 +822,7 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.password_help = _help_ask;
 		return TRUE;
 	case _function_password_edit:
-		typing_begin(_typing_password, "Password", "", PASSWORD_LENGTH, TRUE);
+		typing_begin(_typing_password, T("Password"), "", PASSWORD_LENGTH, TRUE);
 		return TRUE;
 	case _function_password_join:
 		if (menu_functions.chosen_valid && !menu_functions.join_watched)
@@ -832,10 +835,10 @@ boolean pc_menu_event_function_invoke(
 		p2p_lobby_reach_brokers();
 		return TRUE;
 	case _function_setup_edit_name:
-		typing_begin(_typing_lobby_name, "Lobby name", menu_functions.lobby_name, LOBBY_NAME_LENGTH, FALSE);
+		typing_begin(_typing_lobby_name, T("Lobby name"), menu_functions.lobby_name, LOBBY_NAME_LENGTH, FALSE);
 		return TRUE;
 	case _function_setup_edit_password:
-		typing_begin(_typing_lobby_password, "Password (empty: none)", menu_functions.lobby_password, PASSWORD_LENGTH,
+		typing_begin(_typing_lobby_password, T("Password (empty: none)"), menu_functions.lobby_password, PASSWORD_LENGTH,
 			TRUE);
 		return TRUE;
 	case _function_setup_start:
@@ -845,7 +848,7 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.code_help = _help_ask;
 		return TRUE;
 	case _function_code_edit:
-		typing_begin(_typing_code, "Code (ABCD-EFGH)", menu_functions.code, 9, FALSE);
+		typing_begin(_typing_code, T("Code (ABCD-EFGH)"), menu_functions.code, 9, FALSE);
 		return TRUE;
 	case _function_code_join:
 		return code_join();

@@ -192,6 +192,9 @@ symbols in this file:
 #include "rasterizer/rasterizer.h"
 #ifdef HALO_LINUX
 #include "custom_edition_cache.h"
+/* port: the port's text in the player's language (port/linux/src/lang.h,
+through the -iquote port/linux/game path) */
+#include "../src/lang.h"
 #endif
 
 #include <xtl.h>
@@ -919,7 +922,7 @@ boolean cache_files_xbox_map_problem(
 	why[0] = 0;
 	if (!name[0])
 	{
-		snprintf(why, (size_t)why_size, "the host named no map");
+		snprintf(why, (size_t)why_size, T("the host named no map"));
 		return TRUE;
 	}
 	cache_file_get_map_path(name, path);
@@ -929,14 +932,14 @@ boolean cache_files_xbox_map_problem(
 	}
 	if (file == INVALID_HANDLE_VALUE)
 	{
-		snprintf(why, (size_t)why_size, "%s.map isn't in your maps folder", name);
+		snprintf(why, (size_t)why_size, T("%s.map isn't in your maps folder"), name);
 		return TRUE;
 	}
 	read = ReadFile(file, &header, sizeof(header), &bytes_read, NULL) && bytes_read == sizeof(header);
 	CloseHandle(file);
 	if (!read)
 	{
-		snprintf(why, (size_t)why_size, "your %s.map is cut short (%lu bytes): copy it to your maps folder again",
+		snprintf(why, (size_t)why_size, T("your %s.map is cut short (%lu bytes): copy it to your maps folder again"),
 			name, bytes_read);
 		return TRUE;
 	}
@@ -944,25 +947,25 @@ boolean cache_files_xbox_map_problem(
 	custom_edition_cache.c's, with PC maps on, and it is not the Xbox map) */
 	if (custom_edition_cache_is_custom_edition(name))
 	{
-		snprintf(why, (size_t)why_size, "your %s.map is the Halo PC (Custom Edition) map, not the Xbox one", name);
+		snprintf(why, (size_t)why_size, T("your %s.map is the Halo PC (Custom Edition) map, not the Xbox one"), name);
 		return TRUE;
 	}
 	/* (Halo PC's own maps, version 7: Halo PC's maps folder copied over the
 	Xbox maps) */
 	if (header.header_signature == 'head' && header.version == 7)
 	{
-		snprintf(why, (size_t)why_size, "your %s.map is the Halo PC map, not the Xbox one", name);
+		snprintf(why, (size_t)why_size, T("your %s.map is the Halo PC map, not the Xbox one"), name);
 		return TRUE;
 	}
 	if (!cache_file_header_verify(&header, path, FALSE))
 	{
-		snprintf(why, (size_t)why_size, "your %s.map isn't an Xbox map this game can load (damaged, or another "
-			"version's): copy the Xbox %s.map to your maps folder again", name, name);
+		snprintf(why, (size_t)why_size, T("your %s.map isn't an Xbox map this game can load (damaged, or another "
+			"version's): copy the Xbox %s.map to your maps folder again"), name, name);
 		return TRUE;
 	}
 	if (_stricmp(header.name, name) != 0)
 	{
-		snprintf(why, (size_t)why_size, "your %s.map is another map (it names itself '%.31s')", name, header.name);
+		snprintf(why, (size_t)why_size, T("your %s.map is another map (it names itself '%.31s')"), name, header.name);
 		return TRUE;
 	}
 	switch (header.scenario_type)
@@ -982,7 +985,7 @@ boolean cache_files_xbox_map_problem(
 	}
 	if (header.file_length >= largest)
 	{
-		snprintf(why, (size_t)why_size, "your %s.map is too big for the game's map cache (%ld bytes)",
+		snprintf(why, (size_t)why_size, T("your %s.map is too big for the game's map cache (%ld bytes)"),
 			name, (long)header.file_length);
 		return TRUE;
 	}
@@ -1012,16 +1015,16 @@ void cache_files_precache_failure_describe(
 		{
 			cached_map_file_get_path(cache_files_last_copy_slot, path);
 		}
-		snprintf(why, (size_t)why_size, "the game's map cache %s couldn't be written (is the memory card full, or the "
-			"data folder read-only?)", path);
+		snprintf(why, (size_t)why_size, T("the game's map cache %s couldn't be written (is the memory card full, or the "
+			"data folder read-only?)"), path);
 		break;
 	}
 	case _cache_copy_read_failure:
 	case _cache_copy_bad_file_failure:
-		snprintf(why, (size_t)why_size, "your %s.map is cut short or damaged: copy it to your maps folder again", name);
+		snprintf(why, (size_t)why_size, T("your %s.map is cut short or damaged: copy it to your maps folder again"), name);
 		break;
 	default:
-		snprintf(why, (size_t)why_size, "your %s.map could not be read", name);
+		snprintf(why, (size_t)why_size, T("your %s.map could not be read"), name);
 		break;
 	}
 

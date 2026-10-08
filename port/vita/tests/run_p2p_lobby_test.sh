@@ -30,6 +30,8 @@ game_flags="-ffunction-sections -fdata-sections -fms-extensions -fshort-wchar -f
 	-include build/linux/platform_msvc_semantics.h -Iport/linux/src -Iport/linux/include -Iport/third_party/monocypher
 	-Isource -Isource/cseries -idirafter port/include/xdk"
 crypto="port/linux/src/p2p_crypto.c port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c"
+# (the player's lines in the language chosen: none here, English)
+crypto="$crypto port/linux/src/lang.c"
 mode=${1:-test}
 if [ "$mode" = fuzz ]; then
 	# (the platform layer is 32-bit only, and the host's clang has no 32-bit

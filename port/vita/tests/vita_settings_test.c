@@ -24,7 +24,9 @@ settings with the gyroscope's line, saved and read back), Button icons
 (PlayStation at once, the panel then naming the Xbox buttons by what they
 do and the guide the Vita's buttons, a remap followed by the game's icon,
 kept by Reset controls), every settings
-variable of 1.0.3 still a row, and a settings.txt of 1.0 loading. It runs
+variable of 1.0.3 still a row, and a settings.txt of 1.0 loading; then the
+Language row and the panel in Spanish (test_languages: every page, line
+and value fitting, every string with a Spanish entry). It runs
 in a folder of its own, with ux0:data/haloce-vita made there.
 
 Run port/vita/tests/run_vita_settings_test.sh.
@@ -107,7 +109,7 @@ static void check(int condition, const char *what)
 /* ---------- what the panel calls, recorded */
 
 static unsigned long long clock_us = 1000000;
-static char menu[2048];
+static char menu[3072];
 static int menu_selected, menu_visible;
 static char joined_code[32];
 static int refreshes;
@@ -123,6 +125,17 @@ int sceAppUtilSystemParamGetString(unsigned int paramId, SceChar8 *buf, SceSize 
 {
 	(void)paramId;
 	snprintf((char *)buf, bufSize, "vitauser");
+	return 0;
+}
+
+/* (the Vita's system language: English US, SCE_SYSTEM_PARAM_LANG_ENGLISH_US) */
+static int system_language_value = 1;
+
+int sceAppUtilSystemParamGetInt(unsigned int paramId, int *value)
+{
+	if (paramId != SCE_SYSTEM_PARAM_ID_LANG)
+		return -1;
+	*value = system_language_value;
 	return 0;
 }
 
@@ -261,6 +274,13 @@ int vita_ime_poll(char *text, int size)
 int p2p_status(char *text, int size)
 {
 	snprintf(text, (size_t)size, "ready");
+	return 1;
+}
+
+/* (p2p.c's, in the language chosen) */
+int p2p_status_shown(char *text, int size)
+{
+	snprintf(text, (size_t)size, "%s", T("ready"));
 	return 1;
 }
 
@@ -454,17 +474,30 @@ static int menu_rows(void)
 	return rows;
 }
 
+/* the characters of `bytes` bytes of UTF-8 text (a translation's accented
+letters: two bytes, one character, as the overlay draws them) */
+static int characters(const char *text, int bytes)
+{
+	int count = 0, index;
+
+	for (index = 0; index < bytes && text[index]; index++)
+		count += ((unsigned char)text[index] & 0xC0) != 0x80;
+	return count;
+}
+
 /* every line fits: a row's label 22 characters at most and its value 24
 (the value column starts 23 characters in, vita_gxm.c menu_build), the
-help and the panel's buttons 70 (drawn smaller), any other line 46 */
+help and the panel's buttons 70 (drawn smaller), any other line 46; in
+characters, a translation's UTF-8 counted as the overlay draws it */
 static int menu_fits(void)
 {
 	const char *at = menu;
 
 	while (*at)
 	{
-		int length = (int)strcspn(at, "\n");
-		int label = (int)strcspn(at, "\x02\n");
+		int bytes = (int)strcspn(at, "\n");
+		int length = characters(at, bytes);
+		int label = characters(at, (int)strcspn(at, "\x02\n"));
 		int fits;
 
 		if (at[0] == '\t' || at[0] == '\x01')
@@ -477,10 +510,10 @@ static int menu_fits(void)
 			fits = length - (at[0] == '\x03' || at[0] == '\x04' || at[0] == '!') <= 46;
 		if (!fits)
 		{
-			printf("too long: %.*s\n", length, at);
+			printf("too long: %.*s\n", bytes, at);
 			return 0;
 		}
-		at += length + (at[length] == '\n');
+		at += bytes + (at[bytes] == '\n');
 	}
 	return 1;
 }
@@ -1142,6 +1175,7 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
+		"HALO_LANGUAGE",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1432,6 +1466,229 @@ static void test_button_icons(void)
 	press(VITA_BUTTON_CIRCLE);
 }
 
+/* ---------- the languages (lang.c, port/vita/app0/lang)
+
+The Language row: Automatic (the Vita's system language), English and each
+language file (Español); a choice live, saved, kept at a restart. In
+Spanish, every page, every row's help and every value of every row fits as
+it does in English (UTF-8 counted as the overlay draws it, the tab bar
+too), the guide's, the code's, the public games' and the delete screens
+and the messages over the game too; and every string the panel asked for
+had a Spanish entry (lang_missing), its table's (labels, values, help) and
+the pages' names included. */
+
+/* the tab bar fits between L and R at the narrower spacing the renderer
+falls back to (vita_gxm.c menu_tabs: a name and a character, 8 pixels
+between, in the 880 - 104 pixels there are) */
+static int tab_bar_fits(void)
+{
+	const char *at = menu + 1;
+	int width = 0;
+
+	while (*at && *at != '\n')
+	{
+		int bytes = (int)strcspn(at, "|\n");
+
+		width += (characters(at, bytes) - (*at == '*') + 1) * 16 + 8;
+		at += bytes + (at[bytes] == '|');
+	}
+	if (width > 776)
+		printf("tab bar too wide: %d pixels: %.*s\n", width, (int)strcspn(menu, "\n"), menu);
+	return width <= 776;
+}
+
+/* every line of the menu shown is 46 characters at most (a screen of its
+own: the guide, a message) */
+static int menu_lines_fit(void)
+{
+	const char *at = menu;
+
+	while (*at)
+	{
+		int bytes = (int)strcspn(at, "\n");
+
+		if (characters(at, bytes) - (at[0] == '!') > 46)
+		{
+			printf("too long: %.*s\n", bytes, at);
+			return 0;
+		}
+		at += bytes + (at[bytes] == '\n');
+	}
+	return 1;
+}
+
+/* each page, each line of it chosen, each value of each row: fits */
+static int every_page_fits(int *shown)
+{
+	int fits = 1, page_index;
+
+	for (page_index = 0; page_index < PAGE_COUNT; page_index++)
+	{
+		struct line lines[MAXIMUM_LINES];
+		int count, line;
+
+		tab = pages[page_index].tab;
+		page = page_index;
+		screen = SCREEN_LIST;
+		count = page_lines(lines);
+		for (line = 0; line < count; line++)
+		{
+			page_selected[page] = line;
+			show();
+			(*shown)++;
+			if (!menu_fits() || !tab_bar_fits())
+				fits = 0;
+			if (lines[line].type == LINE_SETTING && settings[lines[line].index].kind == KIND_CHOICE)
+			{
+				struct setting *setting = &settings[lines[line].index];
+				int kept = setting->choice, choice;
+
+				for (choice = 0; choice < setting->count; choice++)
+				{
+					setting->choice = choice;
+					show();
+					(*shown)++;
+					if (!menu_fits())
+					{
+						printf("(%s, choice %d)\n", setting->label, choice);
+						fits = 0;
+					}
+				}
+				setting->choice = kept;
+			}
+		}
+	}
+	tab = page = TAB_GRAPHICS;
+	return fits;
+}
+
+static void test_languages(void)
+{
+	struct setting *language = setting_named("HALO_LANGUAGE");
+	char report[2048], line[256];
+	int index, shown = 0, missing;
+
+	check(lang_count() >= 2 && !strcmp(lang_code(1), "es") && !strcmp(lang_name(1), "Español"),
+		"the language files: English, then Español (app0:lang/es.txt)");
+	check(lang_problems(report, sizeof(report)) == 0, "es.txt: every line taken (formats as the English's)");
+	if (report[0])
+		printf("%s", report);
+	check(language->count == lang_count() + 1 && !strcmp(language->values[0], "auto") &&
+		!strcmp(language->names[0], "Automatic") && !strcmp(language->values[2], "es") &&
+		!strcmp(language->names[2], "Español"), "the Language row: Automatic, English, Español");
+	check(!strcmp(lang_current(), "en") && !strcmp(getenv("HALO_SYSTEM_LANGUAGE"), "en"),
+		"Automatic on an English Vita: English");
+
+	/* (live: the panel at once in Spanish, saved) */
+	open_panel();
+	vita_settings_set("HALO_LANGUAGE", "es");
+	check(!strcmp(lang_current(), "es") && !strcmp(getenv("HALO_LANGUAGE"), "es") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_LANGUAGE=es\n"), "Español: chosen at once, in settings.txt");
+	tab = page = TAB_GRAPHICS;
+	show();
+	printf("%s\n--\n", menu);
+	check(!strncmp(menu, "\t*Gráficos|Controles|Audio|Multijugador", 40) && strstr(menu, "\nPerfil\x02") &&
+		menu_fits() && tab_bar_fits(), "the panel in Spanish at once: Gráficos, Perfil ...");
+	tab = page = TAB_AUDIO;
+	show();
+	check(strstr(menu, "\nIdioma\x02< Español ") != NULL, "Audio: Idioma, Español (its own name)");
+	lang_missing(NULL, 0);
+
+	/* every page, line and value; with Show dev settings, the Dev tab's
+	too */
+	vita_settings_set("HALO_DEV_SETTINGS", "1");
+	check(every_page_fits(&shown), "Spanish: every page, each line chosen, each row's every value fits");
+	printf("(%d pages shown)\n", shown);
+	vita_settings_set("HALO_DEV_SETTINGS", "0");
+	/* (the screens actions open, and the messages over the game) */
+	tab = page = TAB_MULTIPLAYER;
+	screen = SCREEN_CODE;
+	code_for_join = 1;
+	show();
+	check(menu_lines_fit() && strstr(menu, "UNIRSE CON UN CÓDIGO"), "Spanish: the code screen");
+	screen = SCREEN_BROWSE;
+	browse_count = 0;
+	show();
+	check(menu_lines_fit(), "Spanish: the public games, none");
+	screen = SCREEN_GUIDE;
+	for (index = 0; index < 3; index++)
+	{
+		static const char *const networks[] = { "wifi", "adhoc", "online" };
+
+		snprintf(running_network, sizeof(running_network), "%s", networks[index]);
+		guide_action = ACTION_HOST;
+		show();
+		if (!menu_lines_fit())
+			printf("(host, %s)\n", networks[index]);
+		check(menu_lines_fit(), "Spanish: Host a game's steps fit");
+		guide_action = ACTION_JOIN;
+		show();
+		if (!menu_lines_fit())
+			printf("(join, %s)\n", networks[index]);
+		check(menu_lines_fit(), "Spanish: Join a game's steps fit");
+	}
+	printf("%s\n--\n", menu);
+	snprintf(running_network, sizeof(running_network), "online");
+	screen = SCREEN_LIST;
+	close_panel();
+	vita_settings_message(T("Host a game"), T("The Vita did not join the ad hoc group. Try again, or another Ad hoc dialog way (Dev tab)."));
+	frame(0);
+	check(menu_visible && menu_lines_fit() && strstr(menu, "Crear una partida"), "Spanish: a message, in lines of 46 characters");
+	printf("%s\n--\n", menu);
+	frame(VITA_BUTTON_CROSS);
+	frame(0);
+	vita_settings_question(T("Halo CE: PC map files"), "¿Borrar halocesetup_es.exe (151 MB) para liberar espacio?");
+	frame(0);
+	check(menu_visible && menu_lines_fit() && strstr(menu, "Cruz: sí"), "Spanish: a question, Cross yes, Circle no");
+	frame(VITA_BUTTON_CIRCLE);
+	frame(0);
+
+	/* every string the panel has: its rows' labels, values and help, the
+	pages' names, each with a Spanish entry */
+	for (index = 0; index < SETTING_COUNT; index++)
+	{
+		const struct setting *setting = &settings[index];
+		int choice;
+
+		T(setting->label);
+		if (setting->help)
+			T(setting->help);
+		for (choice = 0; choice < setting->count && setting->kind == KIND_CHOICE; choice++)
+			if (setting != language || choice == 0)
+				T(setting->names[choice]);
+	}
+	for (index = 0; index < PAGE_COUNT; index++)
+		T(pages[index].name);
+	for (index = 0; index < 3; index++)
+		T(map_downloads_help[index]);
+	missing = lang_missing(report, sizeof(report));
+	check(missing == 0, "every string the panel showed or has: a Spanish entry");
+	if (missing)
+		printf("no Spanish entry for:\n%s", report);
+
+	/* (a restart: Spanish still) */
+	vita_settings_load();
+	check(!strcmp(lang_current(), "es"), "a restart: Spanish still (settings.txt)");
+	/* Automatic: the Vita's language, Spanish or one without a file */
+	vita_settings_set("HALO_LANGUAGE", "auto");
+	snprintf(system_language, sizeof(system_language), "es");
+	language_apply();
+	check(!strcmp(lang_current(), "es"), "Automatic on a Spanish Vita: Spanish");
+	snprintf(system_language, sizeof(system_language), "pt-BR");
+	language_apply();
+	check(!strcmp(lang_current(), "en"), "Automatic on a Vita in a language with no file: English");
+	snprintf(system_language, sizeof(system_language), "en");
+	language_apply();
+	vita_settings_set("HALO_LANGUAGE", "en");
+	tab = page = TAB_GRAPHICS;
+	open_panel();
+	check(!strcmp(lang_current(), "en") && strstr(menu, "\t*Graphics|") && strstr(menu, "\nProfile\x02"),
+		"English again, at once");
+	menu_line(0, line, sizeof(line));
+	close_panel();
+	vita_settings_set("HALO_LANGUAGE", "auto");
+}
+
 int main(void)
 {
 	char line[128];
@@ -1557,8 +1814,9 @@ int main(void)
 	press(VITA_BUTTON_R);
 	check(strstr(menu, "*Controls") && strstr(menu, "Look sensitivity"), "R: Controls");
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Audio") && strstr(menu, "\nSound voices*\x02") && strstr(menu, "\nSound occlusion\x02") &&
-		strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 3 && menu_fits(), "R: Audio");
+	check(strstr(menu, "*Audio") && strstr(menu, "\nLanguage\x02  Automatic >") && strstr(menu, "\nSound voices*\x02") &&
+		strstr(menu, "\nSound occlusion\x02") && strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 4 &&
+		menu_fits(), "R: Audio: Language (Automatic), then the sound rows");
 	press(VITA_BUTTON_R);
 	check(!strncmp(menu, "\tGraphics|Controls|Audio|*Multiplayer\n", 38), "R: Multiplayer");
 	printf("%s\n--\n", menu);
@@ -1927,6 +2185,7 @@ int main(void)
 	test_gyro_page();
 	test_button_icons();
 	test_game_text_input();
+	test_languages();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

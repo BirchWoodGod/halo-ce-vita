@@ -140,6 +140,9 @@ int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
 void vita_settings_message(const char *title, const char *text);
+/* the language files read (app0:lang) and the Vita's system language
+chosen for the port's text, before anything is shown (lang.c) */
+void vita_settings_language_init(void);
 /* the Custom Edition installer's maps (vita_ce_installer.c): taken on a
 thread of their own when an installer is there and they are missing (0
 started, else -1); the state for Modded maps: 0 nothing to do, 1 an

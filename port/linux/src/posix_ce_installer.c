@@ -36,6 +36,8 @@ SDK's, and tools/ce_installer_extract.c alone. Not on Windows or Android.
 */
 
 #include "ce_installer.h"
+/* (the errors in the player's language: lang.c, linked with this file) */
+#include "lang.h"
 
 #include <mspack.h>
 /* (libmspack's own: the decompressor's position in the folder it is
@@ -639,13 +641,13 @@ int ce_installer_extract(const char *installer, const char *maps_directory, int 
 	which &= CE_INSTALLER_ALL;
 	if (!file_size(installer, &size) || !(file = fopen(installer, "rb")))
 	{
-		set_error(error, error_size, "%s cannot be read.", installer);
+		set_error(error, error_size, T("%s cannot be read."), installer);
 		return CE_INSTALLER_FAILED;
 	}
 	if (size > INSTALLER_MAXIMUM)
 	{
 		fclose(file);
-		set_error(error, error_size, "%s is too large for a Halo Custom Edition installer.", installer);
+		set_error(error, error_size, T("%s is too large for a Halo Custom Edition installer."), installer);
 		return CE_INSTALLER_FAILED;
 	}
 	window_count = resource_cabinets(file, size, installer, windows, CABINETS_MAXIMUM);
@@ -655,15 +657,15 @@ int ce_installer_extract(const char *installer, const char *maps_directory, int 
 	if (!window_count)
 	{
 		if (cut_short)
-			set_error(error, error_size, "%s is cut short (an unfinished copy?): copy it again.", installer);
+			set_error(error, error_size, T("%s is cut short (an unfinished copy?): copy it again."), installer);
 		else
-			set_error(error, error_size, "%s is not a Halo Custom Edition installer (it holds no cabinet).", installer);
+			set_error(error, error_size, T("%s is not a Halo Custom Edition installer (it holds no cabinet)."), installer);
 		return CE_INSTALLER_FAILED;
 	}
 	decompressor = mspack_create_cab_decompressor(&file_system);
 	if (!decompressor)
 	{
-		set_error(error, error_size, "%s", "Not enough memory to read the installer.");
+		set_error(error, error_size, "%s", T("Not enough memory to read the installer."));
 		return CE_INSTALLER_FAILED;
 	}
 	extraction.decompressor = decompressor;
@@ -720,9 +722,9 @@ int ce_installer_extract(const char *installer, const char *maps_directory, int 
 		if ((which & (1 << index)) && slot == chosen_count)
 		{
 			if (!cabinet_count)
-				set_error(error, error_size, "%s", "The installer's cabinet is damaged.");
+				set_error(error, error_size, "%s", T("The installer's cabinet is damaged."));
 			else
-				set_error(error, error_size, "The installer holds no %s.", resource_maps[index].name);
+				set_error(error, error_size, T("The installer holds no %s."), resource_maps[index].name);
 			goto done;
 		}
 	}
@@ -768,26 +770,26 @@ int ce_installer_extract(const char *installer, const char *maps_directory, int 
 			remove(partial);
 			if (extraction.stopped)
 			{
-				set_error(error, error_size, "%s", "Stopped.");
+				set_error(error, error_size, "%s", T("Stopped."));
 				result = CE_INSTALLER_STOPPED;
 			}
 			else if (output.failed || status == MSPACK_ERR_WRITE || status == MSPACK_ERR_OPEN)
-				set_error(error, error_size, "%s could not be written: is the memory card full?", name);
+				set_error(error, error_size, T("%s could not be written: is the memory card full?"), name);
 			else if (status == MSPACK_ERR_CHECKSUM)
-				set_error(error, error_size, "%s is damaged in the installer (a checksum is wrong).", name);
+				set_error(error, error_size, T("%s is damaged in the installer (a checksum is wrong)."), name);
 			else if (status == MSPACK_ERR_READ || status == MSPACK_ERR_SEEK)
-				set_error(error, error_size, "The installer could not be read (at %s).", name);
+				set_error(error, error_size, T("The installer could not be read (at %s)."), name);
 			else if (status == MSPACK_ERR_NOMEMORY)
-				set_error(error, error_size, "Not enough memory to unpack %s.", name);
+				set_error(error, error_size, T("Not enough memory to unpack %s."), name);
 			else
-				set_error(error, error_size, "%s is damaged in the installer (it does not unpack).", name);
+				set_error(error, error_size, T("%s is damaged in the installer (it does not unpack)."), name);
 			goto done;
 		}
 		if (output.written != map->file->length ||
 			!resource_map_header_valid(partial, resource_maps[map->map].type, output.written))
 		{
 			remove(partial);
-			set_error(error, error_size, "%s from the installer is not a Halo Custom Edition resource map.", name);
+			set_error(error, error_size, T("%s from the installer is not a Halo Custom Edition resource map."), name);
 			goto done;
 		}
 		/* (one copied in meanwhile stays) */
@@ -796,7 +798,7 @@ int ce_installer_extract(const char *installer, const char *maps_directory, int 
 		else if (rename(partial, path) != 0)
 		{
 			remove(partial);
-			set_error(error, error_size, "%s could not be renamed into place.", name);
+			set_error(error, error_size, T("%s could not be renamed into place."), name);
 			goto done;
 		}
 	}

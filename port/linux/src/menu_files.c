@@ -897,9 +897,12 @@ long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity)
 	{
 		unsigned long code = *in++;
 
-		if (code == '\\' && *in == 'n')
+		/* (a "\n" of the file, or a line break of a translation, lang.h:
+		the game's "\r\n") */
+		if ((code == '\\' && *in == 'n') || code == '\n')
 		{
-			in++;
+			if (code == '\\')
+				in++;
 			if (count + 2 >= capacity)
 				break;
 			out[count++] = '\r';

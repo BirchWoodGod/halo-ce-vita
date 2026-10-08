@@ -237,6 +237,7 @@ symbols in this file:
 #include "data.h"
 #include "devices/devices.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
 #include "editor/editor_stubs.h"
 #include "effects/effects.h"
@@ -3274,7 +3275,7 @@ static void players_coop_show_host_wait(
 		*time = game_time_get();
 		error(2 /* _error_silent */, "co-op: local player %d waits at a loading zone for the host to cross",
 			(int)local_player_index);
-		hud_print_message(local_player_index, L"Waiting for the host to cross");
+		hud_print_message(local_player_index, TW(L"Waiting for the host to cross"));
 	}
 }
 

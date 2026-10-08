@@ -397,6 +397,8 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
 #include "map_share.h"
+/* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
+#include "../src/lang.h"
 void platform_show_message(char const *title, char const *message);
 #endif
 
@@ -1397,7 +1399,7 @@ static void network_game_client_map_refusal_show(
 {
 	void platform_log(char const *format, ...);
 	char const *name = tag_name_strip_path(map->name);
-	char message[512];
+	char message[768];
 	int length = 0;
 
 	switch (check)
@@ -1406,36 +1408,39 @@ static void network_game_client_map_refusal_show(
 		cache_files_show_multiplayer_unavailable(map->name, build);
 		return;
 	case _network_game_client_map_custom_missing:
-		length = snprintf(message, sizeof(message), "The host is playing the custom map %s, which isn't in your maps folder.", name);
+		length = snprintf(message, sizeof(message), T("The host is playing the custom map %s, which isn't in your maps folder."), name);
 		break;
 	case _network_game_client_map_custom_different:
 		length = snprintf(message, sizeof(message),
-			"The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder.", name);
+			T("The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder."), name);
 		break;
 	case _network_game_client_map_custom_needs_pc_maps:
 		length = snprintf(message, sizeof(message),
-			"The host is playing the PC (Custom Edition) map %s, and PC maps is off. Turn on PC maps "
-			"(Multiplayer > Modded maps) to play it.", name);
+			T("The host is playing the PC (Custom Edition) map %s, and PC maps is off. Turn on PC maps "
+			"(Multiplayer > Modded maps) to play it."), name);
 		break;
 	case _network_game_client_map_stock_unloadable:
-		length = snprintf(message, sizeof(message), "Couldn't load %s: %s.", custom_edition_maps_level_title(map->name),
+		length = snprintf(message, sizeof(message), T("Couldn't load %s: %s."), custom_edition_maps_level_title(map->name),
 			missing_files);
 		platform_log("map: the host's %s can't be played here: %s", name, missing_files);
 		break;
 	case _network_game_client_map_custom_needs_resource_maps:
-		length = snprintf(message, sizeof(message),
-			"The host is playing the PC (Custom Edition) map %s, which needs %s from Halo Custom Edition in "
-			"your maps folder. Copy %s there to play it.", name, missing_files,
-			strchr(missing_files, ',') ? "them" : "it");
+		/* (one resource map, or more: whole sentences, lang.h) */
+		length = snprintf(message, sizeof(message), strchr(missing_files, ',') ?
+			T("The host is playing the PC (Custom Edition) map %s, which needs %s from Halo Custom Edition in "
+				"your maps folder. Copy them there to play it.") :
+			T("The host is playing the PC (Custom Edition) map %s, which needs %s from Halo Custom Edition in "
+				"your maps folder. Copy it there to play it."),
+			name, missing_files);
 		break;
 	default:
 		length = snprintf(message, sizeof(message),
-			"The host is playing the custom map %s, but your copy isn't a multiplayer map this game can load.", name);
+			T("The host is playing the custom map %s, but your copy isn't a multiplayer map this game can load."), name);
 		break;
 	}
 	if (why && why[0] && length > 0 && length < (int)sizeof(message))
 		snprintf(message + length, sizeof(message) - (size_t)length, "\n\n%s", why);
-	platform_show_message(check == _network_game_client_map_stock_unloadable ? "Halo: map" : "Halo: custom map", message);
+	platform_show_message(check == _network_game_client_map_stock_unloadable ? T("Halo: map") : T("Halo: custom map"), message);
 
 	return;
 }
@@ -1498,7 +1503,7 @@ boolean network_game_client_game_settings_updated(
 			char build[0x20];
 			char missing_files[96];
 			char reason[256];
-			char why[320];
+			char why[480];
 			short check;
 
 			why[0] = 0;
@@ -2586,8 +2591,8 @@ void network_game_client_rejected_by_game(
 	the one for a closed game) */
 	if (rejection_code == _rejection_code_game_is_full)
 	{
-		platform_show_message("Halo: cannot join this game",
-			"The game is full: it has as many players as its host allows. Try another game.");
+		platform_show_message(T("Halo: cannot join this game"),
+			T("The game is full: it has as many players as its host allows. Try another game."));
 	}
 #endif
 	/* port: the join went to the pregame screen at once (and a machine
@@ -3442,8 +3447,8 @@ boolean network_game_client_advertised_game_full(
 
 	if (full && tell)
 	{
-		platform_show_message("Halo: cannot join this game",
-			"The game is full: it has as many players as its host allows. Try another game.");
+		platform_show_message(T("Halo: cannot join this game"),
+			T("The game is full: it has as many players as its host allows. Try another game."));
 	}
 	return full;
 }
@@ -3459,7 +3464,7 @@ boolean network_game_client_advertised_game_compatible(
 	boolean distributed;
 	boolean vita_host;
 	boolean vita_client = FALSE;
-	char message[400];
+	char message[600];
 
 	if (game_index < 0 || game_index >= MAXIMUM_NETWORK_ADVERTISED_GAMES)
 		return FALSE;
@@ -3474,15 +3479,15 @@ boolean network_game_client_advertised_game_compatible(
 	if (vita_host != vita_client && !network_game_client_test_crosses_vita_line())
 	{
 		/* (never listed: add_advertised_game drops them; a defence) */
-		csprintf(message, vita_client ?
-			"This host is not a PlayStation Vita.\n\n"
-			"Online play on the Vita is Vita-only: join a game hosted on another Vita." :
-			"This host is a PlayStation Vita.\n\n"
-			"Online play on the Vita is Vita-only: PCs cannot join Vita games.");
+		snprintf(message, sizeof(message), "%s", vita_client ?
+			T("This host is not a PlayStation Vita.\n\n"
+			"Online play on the Vita is Vita-only: join a game hosted on another Vita.") :
+			T("This host is a PlayStation Vita.\n\n"
+			"Online play on the Vita is Vita-only: PCs cannot join Vita games."));
 		if (tell)
 		{
 			network_event("not joining a host on the other side of the Vita-only line");
-			platform_show_message("Halo: cannot join this game", message);
+			platform_show_message(T("Halo: cannot join this game"), message);
 		}
 		return FALSE;
 	}
@@ -3493,31 +3498,31 @@ boolean network_game_client_advertised_game_compatible(
 	}
 	if (theirs == ours)
 	{
-		csprintf(message,
-			"The host is using the lockstep network code, which this version no longer has.\n\n"
-			"Ask the host to update the game.");
+		snprintf(message, sizeof(message), "%s",
+			T("The host is using the lockstep network code, which this version no longer has.\n\n"
+			"Ask the host to update the game."));
 	}
 	else if (theirs > ours)
 	{
-		csprintf(message,
-			"The host is using a newer version of the network code than you.\n\n"
+		snprintf(message, sizeof(message),
+			T("The host is using a newer version of the network code than you.\n\n"
 			"You are on version %u. The host is on version %u.\n\n"
-			"Update the game to join this host.",
+			"Update the game to join this host."),
 			ours, theirs);
 	}
 	else
 	{
-		csprintf(message,
-			"The host is using an older version of the network code than you.\n\n"
+		snprintf(message, sizeof(message),
+			T("The host is using an older version of the network code than you.\n\n"
 			"You are on version %u. The host is on version %u.\n\n"
-			"Ask the host to update the game.",
+			"Ask the host to update the game."),
 			ours, theirs);
 	}
 	if (tell)
 	{
 		network_event("not joining a host of network version %u%s (this machine's is %u)", theirs,
 			distributed ? "" : " with the lockstep netcode", ours);
-		platform_show_message("Halo: cannot join this game", message);
+		platform_show_message(T("Halo: cannot join this game"), message);
 	}
 	return FALSE;
 }
