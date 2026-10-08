@@ -338,6 +338,10 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
 		"Times a joining machine of an automated test whose join ended before its\n"
 		"game began (a map download cut off, refused) joins again; 0 never." },
+	{ "debug.network_test_public_name", _config_string, "\"\"", "HALO_NETWORK_TEST_PUBLIC_NAME", _environment_value,
+		_platform_all,
+		"An automated test's join-public joins only the public game listed with\n"
+		"this name (several servers listed); empty the first." },
 	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,
 		"Listen on 127.0.0.1 port 23 (telnet) for a script console that runs what\n"
 		"it is sent as the game's console does, with no password; false none." },

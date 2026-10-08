@@ -109,16 +109,17 @@ The server keeps everything in one folder, its data root. Give it with
 | `bans.txt` | The bans, one line each. The server reads it at every join. |
 | `cheaters.txt` | Players the host dropped for cheating (speed hacks). |
 | `debug.txt` | The game's log. |
-| `saves/` | The game's cache and saves. It grows to about 800 MB (the Xbox's map cache). |
+| `saves/` | The game's cache and saves. The map cache's files say 750 MB (the Xbox's six cache slots), but only the maps copied into them take room: about 160 MB for a multiplayer cycle (the menu and three maps, decompressed), up to 550 MB more with co-op (two campaign levels). |
 
 The server needs `ui.map` (the game starts in its main menu) and the
 multiplayer maps in its cycle. Allow about 1 GB of disk for `saves/`
-besides the maps.
+besides the maps. Several servers on one machine can share one map cache
+instead (`sv_map_cache`, see "Several servers on one VPS").
 
 ## Start
 
 ```
-halo-server [-path DIR] [-exec FILE] [-port N]
+halo-server [-path DIR] [-exec FILE] [-port N] [-gameport N] [-mapcache DIR]
 ```
 
 | Option | What it does |
@@ -126,6 +127,8 @@ halo-server [-path DIR] [-exec FILE] [-port N]
 | `-path DIR` | The server's folder (default: the working directory). |
 | `-exec FILE` | The commands to run at the start (default: `init.txt` in the server's folder). |
 | `-port N` | Internet play's UDP port, the one to forward (default 2302). |
+| `-gameport N` | The game's ports on this machine, N and N+1 (`sv_game_port`; default 5150 for port 2302, 5152 for 2303, and so on). Never forwarded. |
+| `-mapcache DIR` | A map cache that several servers share (`sv_map_cache`). |
 | `-help` | Shows the options. |
 
 The server writes its messages to the terminal: the code that Vitas join
@@ -185,6 +188,8 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby. 0 (the default): no downloads. |
 | `sv_port <port>` | Internet play's UDP port (default 2302). `init.txt` only. |
+| `sv_game_port <port>` | The game's own ports on this machine: this one (the host's) and the next (its client's). The default is 5150 for `sv_port` 2302, 5152 for 2303, 5154 for 2304 and so on up to 2401 (5150 past that), so servers on 2302, 2303... never take each other's. Only a server on 5150 is found on its LAN (see "Several servers on one VPS"). Not 5149 or 5151. `init.txt` only. |
+| `sv_map_cache <folder>` | A map cache folder that several servers share: each map is decompressed into it once, by the first server that plays it, and read by all (a path relative to the server's folder, or a full one). `init.txt` only. |
 | `sv_public_address <ip>[:port]` | The address the internet reaches the server at, if it cannot find it itself. `init.txt` only. |
 | `sv_relay <host:port>` | A relay (`port/relay`) for players that cannot reach the server directly. `init.txt` only; up to 2. |
 | `sv_players` | The players: their number, name, team, address and hardware id. |
@@ -296,7 +301,135 @@ port is needed from the internet.
   port, and then connected directly.
 - On a LAN, Vitas with Connection set to System Link find the server in
   their System Link list without the internet (the game's ports 5150 and
-  5151 on the LAN).
+  5151 on the LAN). Only a server on those ports is found that way: see
+  "Several servers on one VPS".
+
+## Several servers on one VPS
+
+One machine can run several servers, each with its own name, cycle and
+players. Each needs its own folder and two things of its own:
+
+- **Its internet play port** (`sv_port`): 2302, 2303, 2304... Forward and
+  open each one (UDP), and nothing else.
+- **Its game ports** (`sv_game_port`): the game's own ports, 5150 (the
+  host's) and 5151 (its client's), which every copy of the game binds. A
+  second server on 5150 cannot host ("network: could not host a game (the
+  game's network ports in use?)"). Each server takes two others on its
+  machine, by default from its `sv_port`: 5150 and 5151 for 2302, 5152 and
+  5153 for 2303, 5154 and 5155 for 2304, 5156 and 5157 for 2305, so four
+  servers on 2302 to 2305 need nothing more. `sv_game_port` sets them
+  (`sv_game_port 5170`: 5170 and 5171). These ports never leave the
+  machine: they are not forwarded.
+
+The Vitas know nothing of this: they still send to 5150 and 5151. The
+server swaps the numbers where its traffic meets its machine (its sockets)
+and internet play's tunnel, so Vitas join a server on any ports by its code
+and from the server browser, as before, and no network message changed
+(network version 18).
+
+On the servers' own LAN, Vitas with Connection set to System Link reach the
+game's ports themselves: they find and join only the server on 5150 (the
+one on 2302). The others do not answer there and do not advertise
+themselves on the LAN (they would be joined at 5150, the first server):
+players on that LAN join them by their code or from the server browser, as
+from anywhere else. On a VPS nobody is on the LAN, and nothing changes.
+
+### A shared map cache
+
+The game plays an Xbox map from a decompressed copy in its cache (six
+fixed slots in `saves/`; the files say 750 MB, but take what was copied:
+about 160 MB for a multiplayer cycle). With `sv_map_cache <folder>`,
+servers share one cache instead: each map is decompressed once, into a file
+of its own in that folder (`bloodgulch-035e2da3-02a46800.map`: its name,
+checksum and length), and every server reads that file. Their own caches
+then stay empty (24 KB on disk each).
+
+- A shared copy is written under a temporary name, synced, then renamed:
+  a file with its name is always whole. The server writing it holds a lock
+  (`<file>.lock`); a server that wants the same map meanwhile waits for it
+  (and writes it itself if the first one stops). Copies are never changed
+  once made.
+- A copy is only read. The folder may be made read-only (or another user's)
+  once it holds the cycles' maps: maps it lacks are then copied into each
+  server's own cache, as without one.
+- A map without a checksum (Invader writes none) cannot be told from
+  another version of it and is not shared.
+- Each map's copy is kept: a cycle of more than three multiplayer maps no
+  longer decompresses each map again when it comes round (the slots are
+  only three). The folder grows to the sum of the cycles' maps, about 40
+  to 46 MB each, plus 32 MB for `ui.map`. Delete its files while no server
+  runs to make room or after changing a map.
+
+What it saves depends on how much the cycles share. Measured
+(`run_netns_online_test.sh dedicatedmulti`): three servers playing Blood
+Gulch and Chill Out took 155 MB of map cache each (465 MB), and 155 MB
+together with `sv_map_cache`. Four servers whose cycles have 13 different
+maps between them take about 170 MB each (670 MB) on their own and about
+580 MB shared: little less, but no map is decompressed again at its turn.
+
+### On a VPS, with systemd
+
+`port/linux/halo-server@.service` runs one server per folder in
+`/opt/halo/servers` (`halo-server@s1` for `/opt/halo/servers/s1`), all as
+the user `halo`, with `/opt/halo/mapcache` as their shared map cache
+(unless a server's `init.txt` names another) and the protections of
+`halo-server.service`. The program is `/opt/halo/bin/halo-server`, and
+`/opt/halo/lib` holds the 32-bit SDL3 (and the 32-bit libraries it needs)
+on a system without them.
+
+Four servers:
+
+```
+sudo useradd --system --home-dir /opt/halo --shell /usr/sbin/nologin halo
+sudo install -D -m 755 build/linux/halo-server /opt/halo/bin/halo-server
+sudo install -d -o halo -g halo -m 750 /opt/halo/mapcache
+for n in 1 2 3 4; do
+	sudo install -d -o halo -g halo -m 750 /opt/halo/servers/s$n
+	sudo ln -s /opt/halo/maps /opt/halo/servers/s$n/maps    # the maps, once
+	sudo install -o halo -g halo -m 640 init-s$n.txt /opt/halo/servers/s$n/init.txt
+done
+sudo install -m 644 port/linux/halo-server@.service /etc/systemd/system/
+sudo install -m 755 tools/halo-servers /usr/local/bin/halo-servers
+sudo systemctl daemon-reload
+sudo halo-servers enable all
+sudo halo-servers start all
+```
+
+Each `init.txt` has its own `sv_name`, cycle and `sv_port` (2302, 2303,
+2304, 2305); give each `sv_game_port` only to move it from the default. The
+maps folder (`/opt/halo/maps`, readable by `halo`) can be one for all.
+Open UDP 2302 to 2305 in the firewall (`sudo ufw allow 2302:2305/udp`).
+
+`tools/halo-servers` manages them:
+
+```
+$ halo-servers list
+SERVER       STATE      PORT   GAME-PORTS  NAME
+s1           active     2302   5150-5151   Vita Official #1 Slayer
+s2           active     2303   5152-5153   Vita Official #2 Big Team
+...
+$ sudo halo-servers status
+s1: active; playing, slayer on prisoner; 3 players (Vita1, Bob, Ann); code ABCD-EFGH
+s2: active; lobby, team_slayer on bloodgulch; 0 players; code JKLM-NPQR
+...
+$ sudo halo-servers restart s2
+$ sudo halo-servers logs s1 -f
+```
+
+`status` reads each server's log since it last started (the code, the game,
+who joined and left). The logs are the journal's (`journalctl -u
+halo-server@s1`), which journald keeps and rotates (`SystemMaxUse=` in
+`/etc/systemd/journald.conf`; a server writes a few lines a game). Reading
+them needs root or the `systemd-journal` group; starting and stopping,
+root.
+
+Each server used 92-117 MB of memory (the unit allows 600 MB) and 2% of a
+PC core with four players: a VPS with 2 GB and two cores holds four with
+room to spare.
+
+The single-server unit (`halo-server.service`, `/var/lib/halo-server`) is
+unchanged; a server moved from it to `/opt/halo/servers` keeps its
+`init.txt` and `bans.txt`.
 
 ## Vitas only
 
@@ -393,6 +526,12 @@ standing in for Vitas in network namespaces, with no internet:
 - `dedicatedban`: `sv_ban`, a restart, and `sv_unban`.
 - `dedicatedcoop`: co-op on The Truth and Reconciliation with two Vitas,
   and the empty round ended.
+- `dedicatedmulti`: three servers on one machine (internet play's ports
+  2302 to 2304; game ports from `sv_port` and from `sv_game_port`), sharing
+  a map cache: each hosts and is listed, two Vitas join each (by its code,
+  and from the server browser by its name), a Vita on their LAN joins the
+  first one alone, and each map is decompressed once
+  (`HALO_TEST_MULTI_SHARED=0`: each server its own cache, to compare).
 
 `HALO_TEST_SYMMETRIC_NAT=joiners` (or `all`, with
 `HALO_TEST_SERVER_PUBLIC=1`) makes the routers' NAT symmetric.

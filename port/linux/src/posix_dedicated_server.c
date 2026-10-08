@@ -9,8 +9,12 @@ HALO_DEDICATED_SERVER):
   -path DIR (the server's folder: maps/, init.txt, config.toml, bans.txt,
   debug.txt; default the working directory), -exec FILE (the commands run at
   start, default init.txt in that folder), -port N (internet play's UDP port,
-  default 2302), -help; and what a server never has: a window, sound, vsync,
-  frame interpolation, the self-updater, Discord, and the telnet console.
+  default 2302), -gameport N (the game's ports on this machine, N and N+1:
+  default 5150 for port 2302, 5152 for 2303..., so that several servers run
+  on one machine), -mapcache DIR (a map cache servers share,
+  shared_map_cache.c), -help; and what a server never has: a window, sound,
+  vsync, frame interpolation, the self-updater, Discord, and the telnet
+  console.
 - The server's commands: the file's lines (read once, at the start) and the
   local console's (standard input, read on a thread of its own and queued),
   handed to the game one at a time (dedicated_platform_next_command). Nothing
@@ -45,6 +49,12 @@ enum
 	MAXIMUM_FILE_COMMANDS = 512,
 	/* internet play's port when -port and sv_port say none: Halo PC's */
 	DEFAULT_TUNNEL_PORT = 2302,
+	/* the game's ports (network_game_protocol.h: the server's, the client's
+	the next), and how many servers on one machine get ports of their own
+	from their internet play ports, DEFAULT_TUNNEL_PORT and the ones after
+	it (two game ports each) */
+	DEFAULT_GAME_PORT = 5150,
+	DERIVED_GAME_PORT_SERVERS = 100,
 };
 
 static char server_folder[PATH_MAX];
@@ -76,7 +86,7 @@ static void usage(void)
 {
 	printf("halo-server: Halo CE for PS Vita's dedicated server (port/linux/DEDICATED_SERVER.md)\n"
 		"\n"
-		"  halo-server [-path DIR] [-exec FILE] [-port N]\n"
+		"  halo-server [-path DIR] [-exec FILE] [-port N] [-gameport N] [-mapcache DIR]\n"
 		"\n"
 		"  -path DIR   the server's folder: maps/ (the game data), init.txt,\n"
 		"              config.toml, bans.txt and debug.txt (default: the working\n"
@@ -84,8 +94,13 @@ static void usage(void)
 		"  -exec FILE  the commands to run at the start (default: init.txt in the\n"
 		"              server's folder): sv_name, sv_mapcycle_add and the rest\n"
 		"  -port N     internet play's UDP port, the one to forward (default %d)\n"
+		"  -gameport N the game's ports on this machine, N and N+1, never forwarded\n"
+		"              (default %d for port %d, %d for %d...: one pair per server)\n"
+		"  -mapcache DIR  a map cache that several servers share (default: each\n"
+		"              server's own, in its folder's saves)\n"
 		"\n"
-		"Commands are typed on the standard input; \"help\" lists them.\n", DEFAULT_TUNNEL_PORT);
+		"Commands are typed on the standard input; \"help\" lists them.\n", DEFAULT_TUNNEL_PORT,
+		DEFAULT_GAME_PORT, DEFAULT_TUNNEL_PORT, DEFAULT_GAME_PORT + 2, DEFAULT_TUNNEL_PORT + 1);
 }
 
 /* the command line's words, from /proc/self/cmdline (NUL separated) */
@@ -143,10 +158,39 @@ int dedicated_platform_quit_requested(void)
 	return quit_signal != 0;
 }
 
+/* a port's text: 1 with its value if it is one (1 to 65535) */
+static int port_value(const char *text, long *value)
+{
+	char *end;
+
+	*value = strtol(text, &end, 10);
+	return text[0] && !*end && *value >= 1 && *value <= 65535;
+}
+
+/* the game's ports here: N and N+1, neither of which may be one of the
+game's own unless N is 5150 (p2p.h swaps them), nor the tunnel's */
+static int game_port_usable(long port, long tunnel_port, const char *what)
+{
+	if (port > 65534 || (port != DEFAULT_GAME_PORT && (port == DEFAULT_GAME_PORT - 1 || port == DEFAULT_GAME_PORT + 1)))
+	{
+		fprintf(stderr, "halo-server: %s %ld: the game's ports are it and the next; not %d or %d, which "
+			"overlap 5150 and 5151\n", what, port, DEFAULT_GAME_PORT - 1, DEFAULT_GAME_PORT + 1);
+		return 0;
+	}
+	if (tunnel_port == port || tunnel_port == port + 1)
+	{
+		fprintf(stderr, "halo-server: %s %ld: the game's ports would take internet play's (%ld)\n", what, port,
+			tunnel_port);
+		return 0;
+	}
+	return 1;
+}
+
 /* the commands that take effect at the start alone, from the file before
 anything reads the settings: sv_port (internet play's UDP port, unless -port
-gave one), sv_public_address and sv_relay */
-static void startup_commands(int port_given)
+gave one), sv_game_port (unless -gameport), sv_map_cache (unless -mapcache),
+sv_public_address and sv_relay */
+static void startup_commands(int port_given, int game_port_given, int map_cache_given)
 {
 	FILE *file = fopen(command_file, "r");
 	char line[512];
@@ -180,6 +224,44 @@ static void startup_commands(int port_given)
 			else
 				force("HALO_NET_TUNNEL_PORT", value);
 		}
+		else if (!strcmp(word, "sv_game_port") && !game_port_given)
+		{
+			long port;
+
+			if (!port_value(value, &port))
+				fprintf(stderr, "halo-server: sv_game_port %s is not a port (1 to 65534)\n", value);
+			else
+				force("HALO_NET_GAME_PORT", value);
+		}
+		else if (!strcmp(word, "sv_map_cache") && !map_cache_given)
+		{
+			/* (the whole rest of the line: a folder's name may have spaces) */
+			char folder[PATH_MAX];
+			const char *start = line + strspn(line, " \t");
+
+			start += strcspn(start, " \t");
+			start += strspn(start, " \t");
+			snprintf(folder, sizeof(folder), "%s", start);
+			folder[strcspn(folder, "\r\n")] = 0;
+			while (folder[0] && (folder[strlen(folder) - 1] == ' ' || folder[strlen(folder) - 1] == '\t'))
+				folder[strlen(folder) - 1] = 0;
+			if (folder[0] == '"')
+			{
+				memmove(folder, folder + 1, strlen(folder));
+				folder[strcspn(folder, "\"")] = 0;
+			}
+			if (folder[0])
+			{
+				char path[PATH_MAX];
+
+				/* (relative: to the server's folder) */
+				if (folder[0] == '/')
+					snprintf(path, sizeof(path), "%s", folder);
+				else
+					snprintf(path, sizeof(path), "%s/%s", server_folder, folder);
+				force("HALO_MAP_CACHE", path);
+			}
+		}
 		else if (!strcmp(word, "sv_public_address"))
 			force("HALO_SERVER_PUBLIC_ADDRESS", value);
 		else if (!strcmp(word, "sv_relay") && strlen(relays) + strlen(value) + 2 < sizeof(relays))
@@ -203,6 +285,8 @@ __attribute__((constructor(200))) static void dedicated_platform_start(void)
 	const char *path = NULL;
 	const char *exec = NULL;
 	const char *port = NULL;
+	const char *game_port = NULL;
+	const char *map_cache = NULL;
 	int index;
 
 	for (index = 1; index < count; index++)
@@ -224,6 +308,10 @@ __attribute__((constructor(200))) static void dedicated_platform_start(void)
 			exec = value, index++;
 		else if (!strcmp(word, "-port") && value)
 			port = value, index++;
+		else if (!strcmp(word, "-gameport") && value)
+			game_port = value, index++;
+		else if (!strcmp(word, "-mapcache") && value)
+			map_cache = value, index++;
 		else
 		{
 			fprintf(stderr, "halo-server: unknown argument %s (-help lists them)\n", words[index]);
@@ -280,7 +368,52 @@ __attribute__((constructor(200))) static void dedicated_platform_start(void)
 		force("HALO_NET_TUNNEL_PORT", text);
 	}
 
-	startup_commands(port != NULL);
+	if (game_port)
+	{
+		long value;
+
+		if (!port_value(game_port, &value) || value > 65534)
+		{
+			fprintf(stderr, "halo-server: -gameport %s is not a port (1 to 65534)\n", game_port);
+			exit(2);
+		}
+		force("HALO_NET_GAME_PORT", game_port);
+	}
+	if (map_cache)
+	{
+		char folder[PATH_MAX];
+
+		absolute(map_cache, folder, sizeof(folder));
+		force("HALO_MAP_CACHE", folder);
+	}
+	startup_commands(port != NULL, game_port != NULL, map_cache != NULL);
+	/* the game's ports here: -gameport, else sv_game_port, else from internet
+	play's port, so that servers on 2302, 2303... never take each other's:
+	5150 and 5151 for 2302 (the game's own: Vitas on the LAN find it), 5152
+	and 5153 for 2303, and so on; past those, 5150 (sv_game_port then) */
+	{
+		long tunnel_port = 0, value = 0;
+		const char *text = getenv("HALO_NET_GAME_PORT");
+
+		port_value(getenv("HALO_NET_TUNNEL_PORT") ? getenv("HALO_NET_TUNNEL_PORT") : "", &tunnel_port);
+		if (!text || !text[0])
+		{
+			char derived[16];
+
+			value = DEFAULT_GAME_PORT;
+			if (tunnel_port > DEFAULT_TUNNEL_PORT && tunnel_port < DEFAULT_TUNNEL_PORT + DERIVED_GAME_PORT_SERVERS)
+				value = DEFAULT_GAME_PORT + 2 * (tunnel_port - DEFAULT_TUNNEL_PORT);
+			snprintf(derived, sizeof(derived), "%ld", value);
+			force("HALO_NET_GAME_PORT", derived);
+		}
+		else if (!port_value(text, &value))
+		{
+			fprintf(stderr, "halo-server: the game's port %s is not a port\n", text);
+			exit(2);
+		}
+		if (!game_port_usable(value, tunnel_port, "the game's port"))
+			exit(2);
+	}
 	{
 		struct sigaction action;
 

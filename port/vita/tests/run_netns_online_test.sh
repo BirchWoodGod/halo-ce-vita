@@ -179,6 +179,18 @@
 #            console drops it, it is refused joining again (bans.txt), the
 #            server restarted (a new code) still refuses it, and sv_unban
 #            lets it in again
+#   dedicatedmulti three servers on one machine (one namespace), internet
+#            play's ports 2302, 2303 and 2304 forwarded (the game's ports:
+#            5150 for the first, 5152 from its sv_port for the second,
+#            sv_game_port 5170 for the third), sharing one map cache
+#            (sv_map_cache) and started at once: each hosts and is listed,
+#            and two Vitas join each, one by its code and one from the
+#            server browser (by its name: HALO_NETWORK_TEST_PUBLIC_NAME),
+#            and play both maps of its cycle; a Vita on the servers' LAN
+#            (online off) finds and joins the first (5150) alone; each map
+#            is decompressed once into the shared cache, and the servers'
+#            own caches stay empty (HALO_TEST_MULTI_SHARED=0: each its own,
+#            for comparing the disk they take)
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -248,6 +260,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedpc ] && seconds=${HALO_TEST_SECONDS:-120}
 [ "$mode" = dedicatedban ] && seconds=${HALO_TEST_SECONDS:-150}
 [ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
@@ -1313,13 +1326,20 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop)
+dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
 	[ "$mode" = dedicatedpc ] && [ -z "$pc" ] && { echo "dedicatedpc needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
 	# (the server's router forwards it internet play's port, as its operator
 	# would: port/linux/DEDICATED_SERVER.md)
 	in_ns "$host_router" iptables -t nat -A PREROUTING -i w_host -p udp --dport 2302 -j DNAT --to-destination 192.168.1.2:2302
+	# (dedicatedmulti: the second and third servers' too)
+	if [ "$mode" = dedicatedmulti ]; then
+		for port in 2303 2304; do
+			in_ns "$host_router" iptables -t nat -A PREROUTING -i w_host -p udp --dport $port -j DNAT \
+				--to-destination 192.168.1.2:$port
+		done
+	fi
 	# run_server NAME: the server in the host's machine, its folder
 	# $out/NAME/data (maps, init.txt), its console a pipe ($out/NAME/console)
 	run_server() {
@@ -1378,6 +1398,45 @@ dedicated|dedicatedpc|dedicatedban|dedicatedcoop)
 		in_ns "$lan" ip link set "m${1}_host" up
 		in_ns "$lan" ip route add default via 192.168.1.1
 	}
+	if [ "$mode" = dedicatedmulti ]; then
+		# three servers in the one machine: their folders, init.txt and consoles
+		# (server1..3), started at once (their first maps decompressed into the
+		# shared cache together: one builds each, the others wait for it)
+		shared_cache=$out/mapcache
+		[ "${HALO_TEST_MULTI_SHARED:-1}" = 1 ] || shared_cache=
+		multi_pids= multi_fds=
+		for n in 1 2 3; do
+			mkdir -p "$out/server$n/data"
+			{
+				echo "# the netns test's server $n of 3 on one machine (run_netns_online_test.sh)"
+				echo "sv_name \"Netns Multi $n\""
+				echo "sv_maxplayers 8"
+				echo "sv_public 1"
+				echo "sv_mapcycle_add bloodgulch slayer"
+				echo "sv_mapcycle_add chillout slayer"
+				echo "sv_timelimit 1"
+				echo "sv_start_delay 5"
+				echo "sv_postgame 5"
+				echo "sv_end_empty 20"
+				echo "sv_port $((2301 + n))"
+				# (the third names its game ports; the second's come from sv_port)
+				[ "$n" = 3 ] && echo "sv_game_port 5170"
+				[ -n "$shared_cache" ] && echo "sv_map_cache $shared_cache"
+			} > "$out/server$n/data/init.txt"
+			run_server "server$n"
+			multi_pids="$multi_pids $server_pid"
+			multi_fds="$multi_fds $console_fd"
+		done
+		codes=
+		for n in 1 2 3; do
+			c=$(server_code "$out/server$n/run.log")
+			[ -n "$c" ] || { fail "server $n never showed a code"; tail -30 "$out/server$n/run.log"; exit 1; }
+			echo "server $n's code: $c"
+			codes="$codes $c"
+		done
+		set -- $codes
+		code1=$1 code2=$2 code3=$3
+	else
 	mkdir -p "$out/server/data"
 	cat > "$out/server/data/init.txt" <<'INIT'
 # the netns test's server (run_netns_online_test.sh)
@@ -1408,8 +1467,121 @@ INIT
 	code=$(server_code "$out/server/run.log")
 	[ -n "$code" ] || { fail "the server never showed a code"; tail -30 "$out/server/run.log"; exit 1; }
 	echo "server's code: $code"
+	fi
 	sl=$out/server/run.log sd=$out/server/data/debug.txt
 	case $mode in
+	dedicatedmulti)
+		# two Vitas a server, each behind a NAT of its own: VitaNc by the code,
+		# VitaNb from the server browser (the server's name)
+		join_pids= names=
+		for n in 1 2 3; do
+			eval "c=\$code$n"
+			for how in c b; do
+				name=joiner$n$how
+				names="$names $name"
+				net=$((30 + 2 * n)); [ $how = b ] && net=$((net + 1))
+				side "m$n$how" "10.10.$net" "192.168.$net"
+				eval "machine=\$m$n${how}_machine"
+				if [ $how = c ]; then
+					run_copy "$name" "$machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+						HALO_NETWORK_TEST=join-code:$c HALO_NET_PLAYER_NAME=Vita${n}c \
+						HALO_EXIT_AFTER=$((seconds - 20)) HALO_TEST_INPUT=bot:2
+				else
+					run_copy "$name" "$machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+						HALO_NETWORK_TEST=join-public "HALO_NETWORK_TEST_PUBLIC_NAME=Netns Multi $n" \
+						HALO_NET_PLAYER_NAME=Vita${n}b HALO_EXIT_AFTER=$((seconds - 20)) HALO_TEST_INPUT=bot:3
+				fi
+				join_pids="$join_pids $last_pid"
+				sleep 1
+			done
+		done
+		# a Vita on the servers' LAN, online off: system link finds the first
+		# server (the game's own ports) and joins it; the others are not on
+		# the LAN (their game ports are others)
+		lan_machine 3
+		run_copy vita_lan "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_NET_PLAYER_NAME=VitaLan HALO_EXIT_AFTER=$((seconds - 20)) HALO_TEST_INPUT=bot:4
+		join_pids="$join_pids $last_pid"
+		sleep 90
+		set -- $multi_fds
+		for n in 1 2 3; do
+			eval "fd=\$$n"
+			echo sv_status >&"$fd"; echo sv_players >&"$fd"
+		done
+		echo "server consoles: sv_status, sv_players"
+		wait $join_pids 2>/dev/null
+		for pid in $multi_pids; do kill -TERM "$pid" 2>/dev/null; done
+		wait $multi_pids 2>/dev/null
+		for n in 1 2 3; do
+			sl=$out/server$n/run.log
+			echo "--- server $n"
+			grep -aE "^server: (ports|hosting|the game starts|player .*(joined|left))" "$sl" | head -14
+			grep -aE "map cache:" "$sl" | head -8
+			grep -aq "^server: hosting; Vitas join with the code" "$sl" || fail "server $n did not host"
+			grep -aq "could not host" "$sl" && fail "server $n could not host at first (its ports)"
+			grep -aq "^server: the game starts: slayer on bloodgulch" "$sl" || fail "server $n never started Blood Gulch"
+			grep -aq "^server: the game starts: slayer on chillout" "$sl" || fail "server $n never went on to Chill Out"
+			for how in c b; do
+				grep -aq "^server: player #[0-9]* Vita$n$how joined" "$sl" || fail "Vita$n$how never joined server $n"
+			done
+			# (no Vita of another server's)
+			grep -aE "^server: player #[0-9]* Vita[0-9][cb] joined" "$sl" | grep -av "Vita$n[cb] joined" |
+				grep -aq . && fail "server $n had another server's Vitas"
+			grep -aq 'network test: the public games list "Netns Multi '$n'" \[dedicated\]' "$out/joiner${n}b/run.log" ||
+				fail "the server browser did not list server $n's game (as dedicated)"
+		done
+		grep -aq "^server: ports: internet play UDP 2302; the game's 5150 and 5151 on this machine$" "$out/server1/run.log" ||
+			fail "server 1's game ports were not 5150 and 5151"
+		grep -aq "^server: ports: internet play UDP 2303; the game's 5152 and 5153 on this machine" "$out/server2/run.log" ||
+			fail "server 2's game ports were not 5152 and 5153 (from its sv_port)"
+		grep -aq "^server: ports: internet play UDP 2304; the game's 5170 and 5171 on this machine" "$out/server3/run.log" ||
+			fail "server 3's game ports were not 5170 and 5171 (sv_game_port)"
+		sends=$(grep -o 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained' "$out/broker.log" |
+			sed 's/.*lobby\/s\/\([0-9a-f]*\) .*/\1/' | sort -u | wc -l)
+		echo "listing slots published: $sends"
+		[ "$sends" -ge 3 ] || fail "the three servers did not each publish a listing ($sends slots)"
+		for name in $names; do
+			p=$(grep -a "network test: tick" "$out/$name/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name's seconds playing with another player: $p"
+			[ "$p" -ge 40 ] || fail "$name played its server's game with another player for $p s (40 wanted)"
+		done
+		# (the LAN's Vita: on the first server, never another)
+		p=$(grep -a "network test: tick" "$out/vita_lan/run.log" | grep -a "| playing" | grep -ac "player [0-9]*:")
+		echo "the Vita on the servers' LAN played $p s"
+		[ "$p" -ge 30 ] || fail "the Vita on the LAN played $p s (30 wanted)"
+		grep -aq "^server: player #[0-9]* VitaLan joined from 192.168.1.3" "$out/server1/run.log" ||
+			fail "the Vita on the LAN did not join the first server (5150)"
+		grep -aq "^server: player #[0-9]* VitaLan joined" "$out/server2/run.log" "$out/server3/run.log" &&
+			fail "the Vita on the LAN joined a server that is not on the LAN"
+		# (the shared map cache: each map decompressed once, by one server; the
+		# servers' own caches hold no map)
+		echo "--- disk: the servers' own map caches (saves/z/cache*.map), and the shared one"
+		for n in 1 2 3; do
+			echo "server $n: $(du -ck --apparent-size "$out"/server$n/data/saves/z/cache*.map | tail -1 | cut -f1) kB" \
+				"apparent, $(du -ck "$out"/server$n/data/saves/z/cache*.map | tail -1 | cut -f1) kB on disk"
+		done
+		if [ -n "$shared_cache" ]; then
+			echo "the shared cache: $(du -sk --apparent-size "$shared_cache" | cut -f1) kB apparent," \
+				"$(du -sk "$shared_cache" | cut -f1) kB on disk"
+			ls -la "$shared_cache"
+			for map in ui bloodgulch chillout; do
+				n=$(ls "$shared_cache" | grep -c "^$map-[0-9a-f]\{8\}-[0-9a-f]\{8\}\.map$")
+				[ "$n" = 1 ] || fail "the shared cache has $n copies of $map (1 wanted)"
+				b=$(grep -al "map cache: decompressing $map into the shared map cache" "$out"/server[123]/run.log | wc -l)
+				[ "$b" = 1 ] || fail "$b servers decompressed $map into the shared cache (1 wanted)"
+			done
+			ls -a "$shared_cache" | grep -q '\.tmp$' && fail "the shared cache kept a temporary file"
+			r=$(grep -ac "map cache: .* from the shared map cache" "$out"/server[123]/run.log | awk -F: '{ s += $NF } END { print s }')
+			echo "maps the servers took from the shared cache: $r"
+			[ "$r" -ge 4 ] || fail "the servers took $r maps from the shared cache (4 wanted at least)"
+			own=$(du -ck "$out"/server[123]/data/saves/z/cache*.map | tail -1 | cut -f1)
+			echo "the servers' own map caches together: $own kB on disk"
+			[ "$own" -le 1024 ] || fail "the servers' own map caches hold $own kB (a map was copied there)"
+		fi
+		for n in 1 2 3; do
+			if grep -aqiE "segmentation|fatal signal" "$out/server$n/run.log"; then fail "server $n crashed"; fi
+		done
+		;;
 	dedicated)
 		joiners=${HALO_TEST_JOINERS:-3}
 		rejoin=${HALO_TEST_REJOIN:-50}
@@ -1576,13 +1748,13 @@ INIT
 		[ "$n" -ge 15 ] || fail "the unbanned joiner did not play ($n s)"
 		;;
 	esac
-	if grep -aqiE "segmentation|fatal signal" "$out"/server/run*.log; then
-		grep -aiE "segmentation|fatal signal" "$out"/server/run*.log | head -3
+	if grep -aqiE "segmentation|fatal signal" "$out"/server*/run*.log; then
+		grep -aiE "segmentation|fatal signal" "$out"/server*/run*.log | head -3
 		fail "the server crashed"
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti" >&2
 	exit 2
 	;;
 esac

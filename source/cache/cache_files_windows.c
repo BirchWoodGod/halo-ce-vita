@@ -459,6 +459,244 @@ static short cached_map_files_find_map(
 
 static struct cache_file_runtime_globals cache_file_globals;
 
+#ifdef HALO_DEDICATED_SERVER
+/* ---------- (port) the dedicated server's shared map cache
+
+port/linux/src/shared_map_cache.c: with sv_map_cache, a map is decompressed
+once into a folder that several servers share, and a cache slot holds that
+file's handle (read-only) in place of its own copy. Under a precache (its
+begin to its end, as game.c drives it) the shared copy is attached at once,
+built (the copy writes the shared folder's temporary file, not the slot's),
+or waited for while another server builds it; a map that cannot be shared
+is copied into the slot as before. */
+
+int shared_map_cache_enabled(void);
+HANDLE shared_map_cache_open(const char *name, unsigned long checksum, long file_length);
+int shared_map_cache_build_begin(const char *name, unsigned long checksum, long file_length, long size,
+	HANDLE *handle);
+HANDLE shared_map_cache_build_end(int finished, long file_length);
+void platform_log(char const *format, ...);
+
+enum
+{
+	_shared_precache_none = 0,
+	/* the shared copy is the slot's: nothing to copy */
+	_shared_precache_attached,
+	/* another server builds it */
+	_shared_precache_waiting,
+	/* this server builds it (the copy writes the shared folder) */
+	_shared_precache_building,
+	/* the slot's own copy, after waiting (the usual copy) */
+	_shared_precache_own,
+
+	/* how long a server waits for another's build before copying the map
+	itself (milliseconds) */
+	SHARED_PRECACHE_WAIT_LIMIT = 5 * 60 * 1000,
+};
+
+static struct
+{
+	short state;
+	boolean blocking;
+	boolean copy_finished;
+	boolean buffer_taken;
+	DWORD wait_started;
+	struct cache_file_header dvd_header;
+	/* the slots holding a shared copy, and their own files meanwhile */
+	boolean slot_shared[NUMBER_OF_CACHED_MAP_FILES];
+	HANDLE slot_own_file[NUMBER_OF_CACHED_MAP_FILES];
+} shared_precache;
+
+/* the slot's own file again (it held a shared copy) */
+static void shared_slot_detach(
+	short map_file_index)
+{
+	struct cached_map_file *map_file = cached_map_file_get(map_file_index);
+
+	if (!shared_precache.slot_shared[map_file_index])
+		return;
+	CloseHandle(map_file->file);
+	map_file->file = shared_precache.slot_own_file[map_file_index];
+	shared_precache.slot_shared[map_file_index] = FALSE;
+	memset(&map_file->header, 0, sizeof(struct cache_file_header));
+}
+
+/* the slot holds the shared copy of handle (which it now owns); FALSE, the
+slot as it was, if the copy is not the map's (its header) */
+static boolean shared_slot_attach(
+	short map_file_index,
+	HANDLE handle)
+{
+	struct cached_map_file *map_file = cached_map_file_get(map_file_index);
+	struct cache_file_header const *dvd_header = &shared_precache.dvd_header;
+	SYSTEMTIME system_time;
+
+	shared_slot_detach(map_file_index);
+	shared_precache.slot_own_file[map_file_index] = map_file->file;
+	shared_precache.slot_shared[map_file_index] = TRUE;
+	map_file->file = handle;
+	cached_map_file_read_header(map_file_index);
+	if (_stricmp(map_file->header.name, dvd_header->name) != 0 ||
+		map_file->header.checksum != dvd_header->checksum ||
+		map_file->header.file_length != dvd_header->file_length)
+	{
+		platform_log("map cache: the shared copy of %s is not that map (its header); copied into this "
+			"server's own cache", dvd_header->name);
+		shared_slot_detach(map_file_index);
+		return FALSE;
+	}
+	/* (newest, for the slots' turns: cached_map_files_find_free_map; the
+	shared file's own time is left alone) */
+	GetSystemTime(&system_time);
+	SystemTimeToFileTime(&system_time, &map_file->last_modification_date);
+
+	return TRUE;
+}
+
+/* the copy of the map into the slot's own file, or (destination) the
+shared folder's */
+static void shared_precache_copy(
+	short map_file_index,
+	HANDLE destination)
+{
+	char path[256];
+	long buffer_size = cache_copy_buffer_size(shared_precache.blocking);
+	void *buffer = texture_cache_steal_memory(buffer_size);
+
+	shared_precache.buffer_taken = TRUE;
+	cache_file_get_map_path(shared_precache.dvd_header.name, path);
+	error(_error_silent, "starting precaching of map '%s'", shared_precache.dvd_header.name);
+	cache_copy_begin(
+		buffer,
+		buffer_size,
+		destination,
+		cached_map_file_get_size(map_file_index),
+		path);
+}
+
+/* tries the shared cache for the map: TRUE if it is attached, built or
+waited for (the precache under way, the rest here); FALSE copies it into the
+slot as without one */
+static boolean shared_precache_try(
+	short map_file_index)
+{
+	struct cache_file_header const *header = &shared_precache.dvd_header;
+	HANDLE handle = shared_map_cache_open(header->name, header->checksum, header->file_length);
+
+	if (handle != INVALID_HANDLE_VALUE)
+	{
+		if (!shared_slot_attach(map_file_index, handle))
+			return FALSE;
+		platform_log("map cache: %s from the shared map cache", header->name);
+		shared_precache.state = _shared_precache_attached;
+		return TRUE;
+	}
+	switch (shared_map_cache_build_begin(header->name, header->checksum, header->file_length,
+		cached_map_file_get_size(map_file_index), &handle))
+	{
+		case 1:
+			shared_precache.state = _shared_precache_building;
+			shared_precache_copy(map_file_index, handle);
+			return TRUE;
+
+		case 0:
+			if (shared_precache.state != _shared_precache_waiting)
+			{
+				platform_log("map cache: waiting for another server to add %s to the shared map cache",
+					header->name);
+				shared_precache.state = _shared_precache_waiting;
+				shared_precache.wait_started = GetTickCount();
+			}
+			return TRUE;
+
+		default:
+			return FALSE;
+	}
+}
+
+/* (precache_map_begin) the shared cache's part: TRUE if it took the map */
+static boolean shared_precache_begin(
+	short map_file_index,
+	struct cache_file_header const *dvd_header,
+	boolean blocking)
+{
+	shared_slot_detach(map_file_index);
+	memset(&shared_precache.dvd_header, 0, sizeof(shared_precache.dvd_header));
+	shared_precache.state = _shared_precache_none;
+	shared_precache.copy_finished = FALSE;
+	shared_precache.buffer_taken = FALSE;
+	shared_precache.blocking = blocking;
+	if (!shared_map_cache_enabled())
+		return FALSE;
+	memcpy(&shared_precache.dvd_header, dvd_header, sizeof(shared_precache.dvd_header));
+
+	return shared_precache_try(map_file_index);
+}
+
+/* (precache_map_status) while waiting for another server's build: the copy
+appeared, the build stopped (this server builds it), or the wait is too
+long (the slot's own copy) */
+static void shared_precache_wait(
+	void)
+{
+	short map_file_index = cache_file_globals.copying_to_map_file_index;
+
+	if (shared_precache_try(map_file_index))
+	{
+		if (shared_precache.state != _shared_precache_waiting)
+			return;
+		if (GetTickCount() - shared_precache.wait_started < SHARED_PRECACHE_WAIT_LIMIT)
+		{
+			Sleep(16);
+			return;
+		}
+	}
+	platform_log("map cache: %s is copied into this server's own cache", shared_precache.dvd_header.name);
+	shared_precache.state = _shared_precache_own;
+	shared_precache_copy(map_file_index, cached_map_file_get_handle(map_file_index));
+}
+
+/* (precache_map_end) the shared cache's end of the precache: TRUE if it
+ended it */
+static boolean shared_precache_end(
+	void)
+{
+	short map_file_index = cache_file_globals.copying_to_map_file_index;
+	short state = shared_precache.state;
+
+	shared_precache.state = _shared_precache_none;
+	switch (state)
+	{
+		case _shared_precache_attached:
+		case _shared_precache_waiting:
+			break;
+
+		case _shared_precache_building:
+		{
+			HANDLE handle;
+
+			cache_copy_end();
+			if (shared_precache.buffer_taken)
+				texture_cache_return_memory();
+			shared_precache.buffer_taken = FALSE;
+			handle = shared_map_cache_build_end(shared_precache.copy_finished,
+				shared_precache.dvd_header.file_length);
+			if (handle != INVALID_HANDLE_VALUE && !shared_slot_attach(map_file_index, handle))
+				memset(&cached_map_file_get(map_file_index)->header, 0, sizeof(struct cache_file_header));
+			break;
+		}
+
+		default:
+			/* (none, or the slot's own copy: the usual end) */
+			return FALSE;
+	}
+	cache_file_globals.copy_in_progress = FALSE;
+	cache_file_globals.copying_to_map_file_index = NONE;
+
+	return TRUE;
+}
+#endif
+
 /* ---------- public code */
 
 void tags_header_register_vertex_and_index_buffers(
@@ -850,7 +1088,11 @@ boolean cache_files_precache_map_begin(
 
 				return FALSE;
 			}
-			buffer = texture_cache_steal_memory(buffer_size);
+#ifdef HALO_DEDICATED_SERVER
+			/* (the slot's own file, if it held a shared copy: the copy
+			below writes it) */
+			shared_slot_detach(map_file_index);
+#endif
 			map_file = cached_map_file_get(map_file_index);
 
 			memset(
@@ -868,6 +1110,14 @@ boolean cache_files_precache_map_begin(
 				sizeof(cache_file_globals.copying_to_map_file_name) - 1);
 			cache_file_globals.copying_to_map_file_name[
 				sizeof(cache_file_globals.copying_to_map_file_name) - 1] = 0;
+#ifdef HALO_DEDICATED_SERVER
+			/* (the shared map cache's copy, attached, built or waited for) */
+			if (shared_precache_begin(map_file_index, &header, copy_map))
+			{
+				return TRUE;
+			}
+#endif
+			buffer = texture_cache_steal_memory(buffer_size);
 			cache_file_get_map_path(cache_map_name, path);
 			error(_error_silent, "starting precaching of map '%s'", cache_map_name);
 			cache_copy_begin(
@@ -930,6 +1180,12 @@ void cache_files_precache_map_end(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		1031,
 		cache_file_globals.copy_in_progress);
+#ifdef HALO_DEDICATED_SERVER
+	if (shared_precache_end())
+	{
+		return;
+	}
+#endif
 	cache_copy_end();
 	texture_cache_return_memory();
 	cached_map_file_set_modification_date(cache_file_globals.copying_to_map_file_index);
@@ -1239,6 +1495,22 @@ short cache_files_precache_map_status(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		984,
 		cache_file_globals.copy_in_progress);
+#ifdef HALO_DEDICATED_SERVER
+	if (shared_precache.state == _shared_precache_waiting)
+	{
+		shared_precache_wait();
+	}
+	if (shared_precache.state == _shared_precache_attached)
+	{
+		*progress = 1.0f;
+		return _cached_map_file_success;
+	}
+	if (shared_precache.state == _shared_precache_waiting)
+	{
+		*progress = 0.0f;
+		return _cached_map_file_in_progress;
+	}
+#endif
 #ifdef HALO_LINUX
 	/* (port: how it failed, for the player: cache_files_precache_failure_describe) */
 	{
@@ -1260,6 +1532,10 @@ short cache_files_precache_map_status(
 			break;
 
 		case _cache_copy_write_failure:
+#ifdef HALO_DEDICATED_SERVER
+			/* (the shared folder's file failed, not the slot's) */
+			if (shared_precache.state != _shared_precache_building)
+#endif
 			cached_map_file_invalidate(cache_file_globals.copying_to_map_file_index);
 			status = _cached_map_file_failed;
 			break;
@@ -1270,6 +1546,9 @@ short cache_files_precache_map_status(
 
 		case _cache_copy_finished:
 			status = _cached_map_file_success;
+#ifdef HALO_DEDICATED_SERVER
+			shared_precache.copy_finished = TRUE;
+#endif
 			break;
 
 		/* status is left unassigned only by this default arm. Not reached unassigned: the
