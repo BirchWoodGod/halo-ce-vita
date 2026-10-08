@@ -1003,12 +1003,16 @@ int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore)
 lights a frame has. Each gets its own additive pass over the environment
 (diffuse and specular), a blended full draw the tile renderer cannot
 hide-surface-remove, the GPU's whole cost in a fight. After Bruno Santana's
-Vita build the cap is the scene's light query's own (lights_preprocess_scene),
-so the lights past it are not the scene's at all: no pass over the
-environment, no light on the objects, no lens flare, none of their work on
-the CPU (before, only the passes were capped). The query walks the clusters
-seen outwards from the camera's, so the lights kept are mostly the nearest.
-Unset or 0: no cap, as the Xbox. */
+Vita build the cap is at the source (lights_preprocess_scene): the lights
+past it are not submitted to the rasterizer, so they get no pass over the
+environment and light no object either (before, only the passes were
+capped, every object still lit by every light). Their colour and radius
+are still worked out each frame (the tick reads the radius the render
+writes: capping the scene's light query itself left the radius stale and
+the game state then differed from the uncapped run's) and
+their lens flares drawn. The query walks the clusters seen outwards from
+the camera's, so the lights kept are mostly the nearest. Unset or 0: no
+cap, as the Xbox. */
 #include <stdlib.h>
 static short lights_scene_maximum(
 	void)
@@ -1086,11 +1090,7 @@ void lights_preprocess_scene(
 	light_marker_begin();
 	lights_globals.scene_point_light_count = structure_visibility_find_objects(
 		lights_globals.scene_point_lights,
-#ifdef HALO_LINUX
-		lights_scene_maximum(),
-#else
 		MAXIMUM_RENDERED_LIGHTS,
-#endif
 #ifdef HALO_LINUX
 		/* (port) with the tick on its thread, the lights' cluster lists as
 		the finished tick left them (render_interpolation.c, "the threaded
@@ -1228,7 +1228,14 @@ void lights_preprocess_scene(
 				light->radius = (definition->radius_modifier_lower_bound * inverse_intensity
 					+ definition->radius_modifier_upper_bound * intensity)
 					* definition->radius;
+#ifdef HALO_LINUX
+				/* (HALO_MAX_SCENE_LIGHTS, above: the lights past the cap are
+				not submitted; their colour and radius are worked out as
+				before, the game reads them) */
+				if (light->radius != 0.0f && debug_rasterizer_light_count < lights_scene_maximum())
+#else
 				if (light->radius != 0.0f)
+#endif
 				{
 					struct rasterizer_light_submit_parameters light_parameters;
 
