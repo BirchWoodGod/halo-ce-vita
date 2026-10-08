@@ -191,6 +191,10 @@ enum
 	/* where a running copy of the game takes invites from another one
 	started to open a link (127.0.0.1), sealed with a key of the user's */
 	HANDOFF_PORT = 47315,
+	/* the game's ports (network_game_protocol.h's NETWORK_GAME_SERVER_PORT and
+	NETWORK_GAME_CLIENT_PORT), which the netcode and every machine use */
+	P2P_GAME_SERVER_PORT = 0x141E,
+	P2P_GAME_CLIENT_PORT = 0x141F,
 
 #ifdef HALO_DEDICATED_SERVER
 	/* a dedicated server, the internet's to reach (port/linux/DEDICATED_SERVER.md):
@@ -2632,6 +2636,62 @@ void p2p_socket_closed(int socket, unsigned short datagram_port)
 	pthread_mutex_unlock(&p2p_lock);
 }
 
+/* the dedicated server's game ports (p2p.h): its server's port here, in
+host byte order (5150: the game's own, nothing moved), read once from
+HALO_NET_GAME_PORT (posix_dedicated_server.c sets it: sv_game_port,
+-gameport, else one for sv_port) */
+static unsigned short game_port_base(void)
+{
+#ifdef HALO_DEDICATED_SERVER
+	static volatile int base;
+
+	if (!base)
+	{
+		const char *text = getenv("HALO_NET_GAME_PORT");
+		long value = text && *text ? strtol(text, NULL, 10) : 0;
+
+		/* (two ports: the server's and the client's after it) */
+		base = value >= 1 && value <= 65534 && value != P2P_GAME_SERVER_PORT - 1 && value != P2P_GAME_CLIENT_PORT ?
+			(int)value : P2P_GAME_SERVER_PORT;
+	}
+	return (unsigned short)base;
+#else
+	return P2P_GAME_SERVER_PORT;
+#endif
+}
+
+int p2p_game_ports_moved(void)
+{
+	return game_port_base() != P2P_GAME_SERVER_PORT;
+}
+
+/* (both ways: the game's 5150 and 5151 and the ports here swap, so that no
+other number reaches the server's, nor the game's numbers another program
+here that has them: another server's) */
+static unsigned short game_port_swap(unsigned short port)
+{
+	unsigned short base = game_port_base();
+	unsigned short value = network_short(port);
+
+	if (base == P2P_GAME_SERVER_PORT)
+		return port;
+	if (value == P2P_GAME_SERVER_PORT || value == P2P_GAME_CLIENT_PORT)
+		return network_short((unsigned short)(base + (value - P2P_GAME_SERVER_PORT)));
+	if (value == base || value == base + 1)
+		return network_short((unsigned short)(P2P_GAME_SERVER_PORT + (value - base)));
+	return port;
+}
+
+unsigned short p2p_game_port_local(unsigned short port)
+{
+	return game_port_swap(port);
+}
+
+unsigned short p2p_game_port_wire(unsigned short port)
+{
+	return game_port_swap(port);
+}
+
 /* whether a peer may reach this port of the game's: one a socket of the
 game's listens on (stream), or a datagram socket's, bound or sent from to a
 peer */
@@ -2668,7 +2728,9 @@ static void datagram_send(struct peer *peer, unsigned short source_port, unsigne
 	if (!game_port_open(0, source_port))
 		p2p.sent_ports[p2p.sent_port_next++ % MAXIMUM_SENT_PORTS] = source_port;
 	inner[0] = _packet_datagram;
-	put_short(inner + 1, source_port);
+	/* (the game's port as the peer knows it: a dedicated server's own here
+	are others, p2p_game_port_local) */
+	put_short(inner + 1, p2p_game_port_wire(source_port));
 	put_short(inner + 3, port);
 	memcpy(inner + 5, data, (size_t)size);
 	peer_send(peer, inner, size + 5);
@@ -2702,14 +2764,18 @@ static void datagram_received(struct peer *peer, const unsigned char *inner, int
 {
 	struct proxy *proxy;
 	struct sockaddr_in to;
+	unsigned short port;
 
-	/* only to the game */
-	if (size < 5 || !game_port_open(0, get_short(inner + 3)))
+	if (size < 5)
+		return;
+	/* only to the game (at its ports here: p2p_game_port_local) */
+	port = p2p_game_port_local(get_short(inner + 3));
+	if (!game_port_open(0, port))
 		return;
 	proxy = find_proxy((int)(peer - p2p.peers), get_short(inner + 1), 1);
 	if (!proxy)
 		return;
-	make_address(&to, p2p.local_address, get_short(inner + 3));
+	make_address(&to, p2p.local_address, port);
 	posix_socket_sendto(proxy->socket, inner + 5, size - 5, 0, &to, sizeof(to));
 }
 
@@ -2838,7 +2904,7 @@ static void listener_readable(struct listener *listener)
 		stream->socket = socket;
 		stream->state = _stream_open_state;
 		put_short(open, listener->remote_port);
-		put_short(open + 2, from.sin_port);
+		put_short(open + 2, p2p_game_port_wire(from.sin_port));
 		stream_message(stream, _stream_open, open, sizeof(open));
 	}
 }
@@ -2847,19 +2913,21 @@ static void listener_readable(struct listener *listener)
 static void stream_opened(struct stream *stream, const unsigned char *data, int size)
 {
 	struct sockaddr_in to;
+	unsigned short port;
 
 	if (stream->state != _stream_awaiting_open || size < 4)
 		return;
 	stream->remote_port = get_short(data + 2);
-	/* only to where the game listens: nothing else here is the peer's to
-	reach */
-	if (game_port_open(1, get_short(data)))
+	/* only to where the game listens (its port here: p2p_game_port_local):
+	nothing else here is the peer's to reach */
+	port = p2p_game_port_local(get_short(data));
+	if (game_port_open(1, port))
 	{
 		stream->socket = open_socket(SOCK_STREAM, p2p.local_address, 0, &stream->local_port);
 		if (stream->socket >= 0)
 			forget_closed(1, stream->local_port);
 	}
-	make_address(&to, p2p.local_address, get_short(data));
+	make_address(&to, p2p.local_address, port);
 	if (stream->socket < 0 || (posix_socket_connect(stream->socket, &to, sizeof(to)) < 0 && !would_block()))
 	{
 		stream->local_port = 0;

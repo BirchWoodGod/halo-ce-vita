@@ -77,6 +77,23 @@ void p2p_port_taken(int stream, unsigned short port);
 a stream's) */
 void p2p_socket_closed(int socket, unsigned short datagram_port);
 
+/* The game's ports, the server's 5150 and the client's 5151, are fixed in
+its netcode and on the wire (every machine, a Vita's too, sends to them).
+A dedicated server (HALO_DEDICATED_SERVER) may bind others on its own
+machine, so that several run on one (sv_game_port, HALO_NET_GAME_PORT: the
+server's port, the client's the next one): its game still uses 5150 and
+5151, and these swap the numbers where its traffic meets the machine
+(xnet.c: binds, this machine's own addresses) and the tunnel (p2p.c), in
+network byte order. Elsewhere, and with the default ports, both return the
+port given. p2p_game_port_local: the port on this machine that the game's
+(or a peer's) port stands for; p2p_game_port_wire: back. */
+unsigned short p2p_game_port_local(unsigned short port);
+unsigned short p2p_game_port_wire(unsigned short port);
+/* whether the game's ports here are not 5150 and 5151 (a dedicated server's
+sv_game_port): system link's broadcasts then reach only peers and this
+machine, not the LAN, whose machines would join 5150 (another server's) */
+int p2p_game_ports_moved(void);
+
 /* text for the clipboard (a new invite link), once; NULL if none. Called
 from the main thread */
 const char *p2p_take_clipboard_text(void);

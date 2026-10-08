@@ -38,6 +38,7 @@ server browser, or on its LAN. Called from the main loop every frame
 #include "networking/network_client_manager.h"
 #include "networking/network_server_manager.h"
 #include "networking/network_server_manager_internal.h"
+#include "networking/network_game_protocol.h"
 #include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
@@ -504,6 +505,10 @@ static void command_help(
 		"  sv_coop <level> [difficulty 0-3] co-op on a campaign level (a10...) instead of the cycle",
 		"  sv_map_download <0|1>            joiners may download the cycle's custom maps (0)",
 		"  sv_port <port>                   internet play's UDP port (init.txt only; -port)",
+		"  sv_game_port <port>              the game's ports on this machine, <port> and the next",
+		"                                   (init.txt only; -gameport; default 5150 for sv_port 2302,",
+		"                                   5152 for 2303...: several servers on one machine)",
+		"  sv_map_cache <folder>            a map cache several servers share (init.txt only; -mapcache)",
 		"  sv_public_address <ip>[:port]    the address the internet reaches this server at (init.txt only)",
 		"  sv_relay <host:port>             a relay for players no direct path reaches (init.txt only)",
 		"  sv_players, sv_status            the players (#, name, address); the server",
@@ -520,6 +525,20 @@ static void command_help(
 		dedicated_platform_print("%s", lines[index]);
 }
 
+/* the game's ports on this machine (sv_game_port: p2p.h), "5150 and 5151" */
+static char const *game_ports_text(
+	void)
+{
+	static char text[32];
+	/* (p2p.h's ports are in network byte order) */
+	unsigned short port = p2p_game_port_local((unsigned short)(NETWORK_GAME_SERVER_PORT << 8 |
+		NETWORK_GAME_SERVER_PORT >> 8));
+
+	port = (unsigned short)(port << 8 | port >> 8);
+	snprintf(text, sizeof(text), "%u and %u", (unsigned)port, (unsigned)port + 1);
+	return text;
+}
+
 static void command_status(
 	void)
 {
@@ -531,6 +550,8 @@ static void command_status(
 		minutes / 60, minutes % 60,
 		state == _server_pregame ? "in the lobby" : state == _server_ingame ? "playing" :
 		state == _server_postgame ? "showing the scores" : "starting");
+	say("ports: internet play UDP %s; the game's %s", getenv("HALO_NET_TUNNEL_PORT") ? getenv("HALO_NET_TUNNEL_PORT") :
+		"(any)", game_ports_text());
 	if (dedicated.code[0])
 		say("code %s; %s%s", dedicated.code, config_boolean("network.host_public") ? "public" : "private (by code only)",
 			config_string("network.lobby_password")[0] ? ", with a password" : "");
@@ -1042,7 +1063,8 @@ static void command(
 			say(value ? "joiners may download the cycle's custom maps (in the lobby)" : "no map downloads");
 		}
 	}
-	else if (!csstrcmp(name, "sv_port") || !csstrcmp(name, "sv_public_address") || !csstrcmp(name, "sv_relay"))
+	else if (!csstrcmp(name, "sv_port") || !csstrcmp(name, "sv_public_address") || !csstrcmp(name, "sv_relay") ||
+		!csstrcmp(name, "sv_game_port") || !csstrcmp(name, "sv_map_cache"))
 	{
 		/* (read from the file before the game starts: posix_dedicated_server.c) */
 		if (!from_file)
@@ -1219,6 +1241,10 @@ void dedicated_server_update(
 		dedicated.started = TRUE;
 		say("Halo CE for PS Vita dedicated server, network version %d; folder %s", HALO_PORT_NETWORK_VERSION,
 			dedicated_platform_folder());
+		say("ports: internet play UDP %s; the game's %s on this machine%s",
+			getenv("HALO_NET_TUNNEL_PORT") ? getenv("HALO_NET_TUNNEL_PORT") : "(any)", game_ports_text(),
+			p2p_game_ports_moved() ? " (Vitas on the LAN find only a server on 5150: this one by code or "
+			"the server browser)" : "");
 		file = dedicated_platform_command_file(&found);
 		say(found ? "commands from %s" : "no %s: the defaults (Blood Gulch slayer, public)", file);
 		while (dedicated_platform_next_command(line, sizeof(line), &from_file))
@@ -1255,7 +1281,8 @@ void dedicated_server_update(
 		player_ui_fast_setup_network_server();
 		if (!global_network_game_server_get())
 		{
-			say("could not host (the game's port 5150 taken by another program?); trying again in 5 s");
+			say("could not host (the game's ports %s taken by another program, another server's? sv_game_port "
+				"gives each server its own); trying again in 5 s", game_ports_text());
 			dedicated.menu_seconds = -3.0f;
 			return;
 		}

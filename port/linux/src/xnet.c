@@ -238,7 +238,19 @@ static unsigned long loopback_address(void)
 	return halo_ws_htonl(0x7F000001);
 }
 
-/* a destination of 127.0.0.1 means the network.address address */
+/* whether an address (network byte order) is this machine's own to the
+game: 127.x.x.x, network.address's, or none (a bind's INADDR_ANY) */
+static int own_address(unsigned long address)
+{
+	unsigned long local;
+
+	return address == INADDR_ANY || (halo_ws_ntohl(address) >> 24) == 127 ||
+		(local_address_setting(&local) && address == local);
+}
+
+/* a destination of 127.0.0.1 means the network.address address; and a
+dedicated server's game ports on this machine are others than the game's
+5150 and 5151 (sv_game_port: p2p_game_port_local) */
 static const struct sockaddr *outgoing_address(const struct sockaddr *address, int address_length,
 	struct sockaddr_in *storage)
 {
@@ -250,12 +262,21 @@ static const struct sockaddr *outgoing_address(const struct sockaddr *address, i
 	{
 		memcpy(storage, address, sizeof(*storage));
 		storage->sin_addr.s_addr = local;
-		return (const struct sockaddr *)storage;
+		address = (const struct sockaddr *)storage;
+	}
+	if (p2p_game_ports_moved() && address && address->sa_family == AF_INET &&
+		address_length >= (int)sizeof(*storage) && own_address(((const struct sockaddr_in *)address)->sin_addr.s_addr))
+	{
+		if (address != (const struct sockaddr *)storage)
+			memcpy(storage, address, sizeof(*storage));
+		storage->sin_port = p2p_game_port_local(storage->sin_port);
+		address = (const struct sockaddr *)storage;
 	}
 	return address;
 }
 
-/* traffic from the network.address address comes from 127.0.0.1 */
+/* traffic from the network.address address comes from 127.0.0.1; and from
+a dedicated server's game ports here, from the game's (p2p_game_port_wire) */
 static void incoming_address(struct sockaddr *address, const int *address_length)
 {
 	unsigned long local;
@@ -265,6 +286,11 @@ static void incoming_address(struct sockaddr *address, const int *address_length
 		((struct sockaddr_in *)address)->sin_addr.s_addr == local)
 	{
 		((struct sockaddr_in *)address)->sin_addr.s_addr = loopback_address();
+	}
+	if (p2p_game_ports_moved() && address && address_length && *address_length >= (int)sizeof(struct sockaddr_in) &&
+		address->sa_family == AF_INET && own_address(((struct sockaddr_in *)address)->sin_addr.s_addr))
+	{
+		((struct sockaddr_in *)address)->sin_port = p2p_game_port_wire(((struct sockaddr_in *)address)->sin_port);
 	}
 }
 
@@ -506,6 +532,15 @@ int WSAAPI halo_ws_bind(SOCKET socket, const struct sockaddr *address, int addre
 		local.sin_addr.s_addr = override;
 		address = (const struct sockaddr *)&local;
 	}
+	/* (a dedicated server's game ports: sv_game_port's here for the game's
+	5150 and 5151) */
+	if (p2p_game_ports_moved() && address && address->sa_family == AF_INET && address_length >= (int)sizeof(local))
+	{
+		if (address != (const struct sockaddr *)&local)
+			memcpy(&local, address, sizeof(local));
+		local.sin_port = p2p_game_port_local(local.sin_port);
+		address = (const struct sockaddr *)&local;
+	}
 	result = posix_socket_bind((int)socket, address, address_length);
 	if (result == 0)
 		note_socket_port(socket, 0);
@@ -633,7 +668,20 @@ int WSAAPI halo_ws_sendto(SOCKET socket, const char *buffer, int length, int fla
 
 		/* one datagram per target; the broadcast counts as sent if any is */
 		memcpy(&target, address, sizeof(target));
-		if (target_count)
+		/* (a dedicated server whose game ports are not 5150 and 5151,
+		sv_game_port: not to the LAN, whose machines would answer or join at
+		5150, another server's; to this machine's own game and the peers
+		alone) */
+		if (p2p_game_ports_moved())
+		{
+			struct sockaddr_in own;
+
+			target.sin_addr.s_addr = loopback_address();
+			result = posix_socket_sendto((int)socket, buffer, length, flags,
+				outgoing_address((const struct sockaddr *)&target, sizeof(target), &own), sizeof(own));
+			target_count = 0;
+		}
+		else if (target_count)
 		{
 			result = 0;
 			for (index = 0; index < target_count; index++)
@@ -1117,7 +1165,16 @@ int WSAAPI halo_ws_getsockopt(SOCKET socket, int level, int name, char *value, i
 
 int WSAAPI halo_ws_getsockname(SOCKET socket, struct sockaddr *address, int *address_length)
 {
-	return winsock_result(posix_socket_getsockname((int)socket, address, address_length));
+	int result = posix_socket_getsockname((int)socket, address, address_length);
+
+	/* (a dedicated server's game ports here are the game's 5150 and 5151 to
+	the game: sv_game_port) */
+	if (result >= 0 && p2p_game_ports_moved() && address && address_length &&
+		*address_length >= (int)sizeof(struct sockaddr_in) && address->sa_family == AF_INET)
+	{
+		((struct sockaddr_in *)address)->sin_port = p2p_game_port_wire(((struct sockaddr_in *)address)->sin_port);
+	}
+	return winsock_result(result);
 }
 
 int WSAAPI halo_ws_getpeername(SOCKET socket, struct sockaddr *address, int *address_length)

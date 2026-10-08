@@ -462,6 +462,27 @@ static HANDLE create_file(LPCSTR file_name, DWORD desired_access, DWORD share_mo
 	return handle;
 }
 
+/* (port) a file HANDLE for a descriptor already open on a host path (not an
+Xbox one): the dedicated server's shared map cache (shared_map_cache.c).
+The handle owns the descriptor (CloseHandle closes it); on failure the
+descriptor is closed and INVALID_HANDLE_VALUE returned */
+HANDLE platform_file_handle(int descriptor, const char *path)
+{
+	struct platform_file *file = calloc(1, sizeof(*file));
+	struct platform_handle *handle = file ? platform_handle_new(_platform_handle_file, file, file_destroy) : NULL;
+
+	if (!handle)
+	{
+		close(descriptor);
+		free(file);
+		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return INVALID_HANDLE_VALUE;
+	}
+	file->descriptor = descriptor;
+	snprintf(file->path, sizeof(file->path), "%s", path);
+	return handle;
+}
+
 HANDLE WINAPI CreateFileA(LPCSTR file_name, DWORD desired_access, DWORD share_mode,
 	LPSECURITY_ATTRIBUTES security_attributes, DWORD creation_disposition,
 	DWORD flags_and_attributes, HANDLE template_file)
