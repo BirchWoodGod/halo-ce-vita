@@ -1201,10 +1201,10 @@ static void test_fourth_core(void)
 	char line[128];
 
 	check(row && row->page == PAGE_GRAPHICS_ADVANCED && row->restart && row->count == 3 &&
-		!strcmp(row->values[row->choice], "0") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
+		!strcmp(row->values[row->choice], "2") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
 		!strcmp(row->names[2], "All async") && !strcmp(row->values[1], "1") && !strcmp(row->values[2], "2") &&
-		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "0"),
-		"Fourth core helpers: on Graphics > Advanced, Off, Audio, All async; Off by default (HALO_CPU3_AUX=0), after a restart");
+		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "2"),
+		"Fourth core helpers: on Graphics > Advanced, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
 	check(strstr(row->help, "Needs CapUnlocker") && strstr(row->help, "background work"), "Fourth core helpers: the help names the plugin (the README's words)");
 	{
 		int index, in_profile = 0;
@@ -1215,7 +1215,7 @@ static void test_fourth_core(void)
 	}
 	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 13)
 		press(VITA_BUTTON_DOWN);
-	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=1\n") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< Audio >") &&
 		settings[0].choice == profile && restart_pending && menu_fits(),
@@ -1230,7 +1230,10 @@ static void test_fourth_core(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=0\n") &&
-		settings[0].choice == profile, "Fourth core helpers back Off");
+		settings[0].choice == profile, "Fourth core helpers Off");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CPU3_AUX"), "2"), "Fourth core helpers back to All async");
 	while (menu_selected > 2)
 		press(VITA_BUTTON_UP);
 	/* (as after the restart it asked for: the rows after this one say
@@ -1450,9 +1453,9 @@ int main(void)
 		!strncmp(menu_line(10, line, sizeof(line)), "Scenery updates\x02", 16) &&
 		!strncmp(menu_line(11, line, sizeof(line)), "Object lighting\x02", 16) &&
 		!strcmp(menu_line(12, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
-		!strcmp(menu_line(13, line, sizeof(line)), "Fourth core helpers*\x02  Off >") && menu_rows() == 12 && menu_fits(),
+		!strcmp(menu_line(13, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 12 && menu_fits(),
 		"Graphics, Advanced: model detail, distant objects, shadows (Near only), lights (8), effects, particles (Full), "
-		"sun rays, tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (Off, after a restart)");
+		"sun rays, tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (All async, after a restart)");
 	test_bruno_rows();
 	test_fourth_core();
 	press(VITA_BUTTON_LEFT);
