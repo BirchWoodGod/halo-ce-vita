@@ -8,7 +8,7 @@
 [![Beta](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?include_prereleases&label=beta&color=d29922)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
 [![Downloads](https://img.shields.io/github/downloads/BirchWoodGod/halo-ce-vita/total?color=blue)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
-[![Platform: PS Vita](https://img.shields.io/badge/platform-PS%20Vita%20%2F%20PS%20TV-003791)](#what-you-need)
+[![Platform: PS Vita](https://img.shields.io/badge/platform-PS%20Vita%20%2F%20PS%20TV-003791)](#requirements)
 
 [**Download**](https://github.com/BirchWoodGod/halo-ce-vita/releases) ·
 [Install](#install) ·
@@ -67,7 +67,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 ## Contents
 
 - [What's new in 1.1](#whats-new-in-11) · [What works](#what-works)
-- [Install](#install): [Windows tool](#easy-install-windows-tool), [what you need](#what-you-need), [steps](#steps), [updating](#updating), [Halo PC files](#halo-pc-files), [movies](#movies-optional)
+- [Install](#install): [requirements](#requirements), [Windows tool](#easy-install-windows-tool), [manual install](#manual-install), [updating](#updating), [Halo PC files](#halo-pc-files), [movies](#movies-optional)
 - [Multiplayer](#multiplayer): [the menus](#the-multiplayer-menus), [co-op campaign](#co-op-campaign), [custom maps](#custom-maps-and-map-sharing), [dedicated servers](#dedicated-servers)
 - [Controls](#controls) · [Settings panel](#settings-panel) · [Performance](#performance) · [Saving](#saving)
 - [Building](#building) · [Contributing](#contributing) · [Reporting a problem](#reporting-a-crash-or-a-problem)
@@ -120,75 +120,52 @@ The current list is in the [roadmap](ROADMAP.md) and the
 
 ## Install
 
+### Requirements
+
+- A PS Vita or PS TV on HENkaku/Ensō (firmware 3.60–3.74) with
+  [VitaShell](https://github.com/TheOfficialFloW/VitaShell/releases).
+- The shader compiler `ur0:data/libshacccg.suprx`: if you don't have it, run
+  [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D/releases) once.
+- About 1.5 GB free on `ux0:`.
+- Your own **Xbox** copy of Halo: Combat Evolved (disc or image). The PC
+  version's maps don't work.
+- For online play and Custom Edition maps: the free
+  [Halo Custom Edition installer](https://www.halomaps.org/hce/detail.cfm?fid=410)
+  (see [Halo PC files](#halo-pc-files)).
+
 ### Easy install (Windows tool)
 
-**`HaloCEVitaInstaller.exe`**, attached to each
-[release](https://github.com/BirchWoodGod/halo-ce-vita/releases) next to
-`halo.vpk`, does the manual steps below for you:
+Download **`HaloCEVitaInstaller.exe`** from the
+[releases](https://github.com/BirchWoodGod/halo-ce-vita/releases) and run it.
+It takes the game files from your disc image, converts the movies, gets the
+Halo PC files, and copies everything plus `halo.vpk` to the Vita over
+VitaShell's FTP. Then install `ux0:data/halo.vpk` with VitaShell.
 
-1. takes the `maps` folder and `default.xbe` out of your Xbox disc image
-   (`.iso`/`.xiso`) or game folder,
-2. converts the movies (optional; ffmpeg is inside the tool),
-3. gets the [Halo PC files](#halo-pc-files) from Halo MCC on Steam, the Halo
-   Custom Edition installer (whatever its file name) or a folder,
-4. copies everything to the Vita over VitaShell's FTP (press SELECT in
-   VitaShell, and keep the Vita awake while it copies),
-5. copies `halo.vpk` to `ux0:data/`; you install it with VitaShell.
+The tool isn't signed: if Windows says "Windows protected your PC", click
+**More info**, then **Run anyway**. Details:
+[README-installer](tools/installer/README-installer.md).
 
-Each step can be skipped. The tool includes no game data. It is not signed:
-Windows SmartScreen says "Windows protected your PC" the first time (click
-**More info**, then **Run anyway**), and some antivirus programs may flag it
-wrongly, as they often do with packed Python programs. On any system with
-Python, [tools/installer/halo_ce_vita_installer.py](tools/installer/halo_ce_vita_installer.py)
-is the same tool. Details, and ffmpeg's licence (GPL v3, as this project):
-[tools/installer/README-installer.md](tools/installer/README-installer.md).
+### Manual install
 
-### What you need
-
-- A PS Vita or PS TV with HENkaku/Ensō (firmware 3.60 to 3.74) and
-  [VitaShell](https://github.com/TheOfficialFloW/VitaShell/releases).
-- **The Vita's shader compiler, `ur0:data/libshacccg.suprx`.** Many ports
-  need it, so you may have it already. If not, install
-  [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D/releases) and
-  run it once: it extracts the file to `ur0:data/`. Without it the game
-  stays on the loading picture while the menu's music and sounds play.
-- About 1.5 GB free on `ux0:` (the game keeps decompressed copies of the
-  levels it loads).
-- Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
-  it). It must be the Xbox version: the PC version's maps do not work.
-- **For online play and Custom Edition maps:** the [Halo PC files](#halo-pc-files)
-  `bitmaps.map`, `sounds.map` and `loc.map`. The free
-  [Halo Custom Edition installer](https://www.halomaps.org/hce/detail.cfm?fid=410)
-  has them: copy it to the Vita and the game takes them out by itself.
-
-### Steps
-
-1. **Download `halo.vpk`** from the
-   [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases).
-2. **Install it.** Copy the VPK to the Vita (VitaShell's USB or FTP mode),
-   open it in VitaShell and confirm. The bubble is called **Halo CE**.
-3. **Get the game files from your disc.** An Xbox disc image (an `.iso`,
-   often called an XISO: the same thing) is unpacked by
+1. **Install `halo.vpk`** from the
+   [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases) with
+   VitaShell. The bubble is called **Halo CE**.
+2. **Extract the game files** from your Xbox disc image with
    [extract-xiso](https://github.com/XboxDev/extract-xiso):
-   `extract-xiso -x "Halo.iso"` makes a folder with the disc's files. You
-   need two things from it: the `maps` folder and `default.xbe`. (Already
-   unpacked game files, as many backups come, work as they are.)
-4. **Copy them to the Vita**, with VitaShell's USB or FTP mode:
+   `extract-xiso -x "Halo.iso"`. You need the `maps` folder and `default.xbe`.
+3. **Copy them to the Vita:**
 
    ```
-   ux0:data/haloce-vita/maps/         <- the whole maps folder (ui.map, a10.map, bloodgulch.map ...)
-   ux0:data/haloce-vita/default.xbe   <- the loading screen's picture is read from it
+   ux0:data/haloce-vita/maps/          <- the whole maps folder
+   ux0:data/haloce-vita/default.xbe
    ```
 
-5. **For online play**, add the [Halo PC files](#halo-pc-files).
-6. **Start the game.** The first load of each level takes a while: the
-   game writes a cache file for it to the memory card.
+4. **Optional:** add the [Halo PC files](#halo-pc-files) for online play and
+   the [movies](#movies-optional).
+5. **Start the game.** Each level's first load takes a while.
 
-Without the maps the game shows where to copy them and exits.
-
-**Stuck on the loading picture** while the menu music plays? The shader
-compiler is missing: see `libshacccg.suprx` above. `halo.log` says so with
-the line `gxm: no libshacccg.suprx`.
+**Stuck on the loading picture with music playing?** The shader compiler is
+missing (see Requirements).
 
 ### Updating
 
