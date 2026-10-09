@@ -14,4 +14,9 @@ their build files, and nothing in them is changed. The default configuration
 
 The Linux build's self-updater (`port/linux/src/posix_update.c`) uses it to
 download new builds over HTTPS, with the system's certificate authorities.
+The update check (`port/linux/src/posix_https.c`: the settings panel's Check
+for updates) uses it on the Vita and the Linux harness alike, against the
+few authorities built into `port/linux/src/update_roots.h`; the Vita builds
+it with `port/vita/include/mbedtls_vita_config.h` (the system's random
+numbers, no sockets or timers of its own).
 The Windows build uses WinHTTP instead, and the Android app Java's HTTPS.

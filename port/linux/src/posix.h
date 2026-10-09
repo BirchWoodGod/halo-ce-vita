@@ -130,6 +130,17 @@ posix_ulong posix_resolve_ipv4(const char *host);
 in a few words ("no such name", "timed out", "no DNS server", "error ...") */
 void posix_resolve_error(char *text, int size);
 
+/* ---------- the update check's one HTTPS request (posix_https.c, with
+port/third_party/mbedtls; update_check.h)
+
+GETs url (https://host[:port]/path; http:// only to a loopback address)
+with the User-Agent given and nothing else about this machine: TLS 1.2 or
+1.3, the certificate chained to the authorities built in (GitHub's) and
+naming the host; no redirect followed; at most capacity - 1 bytes of body,
+NUL terminated, into body. The body's length, or -1 with why in error (a
+status other than 200 too). Blocks for up to 15 seconds. */
+int posix_https_get(const char *url, const char *user_agent, char *body, int capacity, char *error, int error_size);
+
 /* ---------- UPnP (internet play, p2p.c; posix_upnp.c, with
 port/third_party/miniupnpc) */
 
