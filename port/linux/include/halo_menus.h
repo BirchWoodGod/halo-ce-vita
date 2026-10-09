@@ -166,4 +166,45 @@ long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity);
 /* logs a problem in a file's element */
 void halo_menus_log(char const *file, long line, char const *message, char const *detail);
 
+/* The reads the screens make of the player's Halo PC pictures and text the
+first time they open (menu_tags.c's menu_tags_art_load: bitmaps.map's and
+loc.map's index, the bitmaps' tags and pixels, the string lists, the PNGs),
+made beforehand on a thread of their own once ui.map has loaded
+(halo_menus_art_preread): the first opening then takes the bytes from
+memory (halo_menus_art_take, halo_menus_art_png) rather than the memory
+card - 62 file calls, 1.5 MB, 0.5-0.75 s of the game thread on the Vita
+each time the menus loaded. What the thread did not read is read as before.
+halo_menus_art_wait waits for the thread, halo_menus_art_release lets its
+bytes go. */
+struct halo_menus_art_plan
+{
+	char const *map_directory;
+	char const *const *bitmap_paths;
+	long bitmap_count;
+	char const *const *string_paths;
+	long string_count;
+	char const *const *png_names;
+	long png_count;
+	/* (the Halo PC bitmap tag as menu_tags.c reads it: where its bitmaps
+	block is, a bitmap's size and where its pixels' place and size are, and
+	the limits it reads within) */
+	unsigned long bitmaps_block_offset;
+	unsigned long bitmap_data_bytes;
+	unsigned long pixels_offset_offset;
+	unsigned long pixels_size_offset;
+	unsigned long maximum_frames;
+	unsigned long maximum_pixel_bytes;
+	unsigned long maximum_tag_bytes;
+};
+
+void halo_menus_art_preread(struct halo_menus_art_plan const *plan);
+void halo_menus_art_wait(void);
+/* `size` bytes at `offset` of the resource map of `resource_map_type`
+(cache_file_formats.h), when the thread read exactly those: 1 */
+int halo_menus_art_take(int resource_map_type, unsigned long offset, unsigned long size, void *buffer);
+/* the PNG `name` the thread read, now the caller's (halo_menus_file_free),
+or NULL */
+unsigned char *halo_menus_art_png(char const *name, unsigned long *size);
+void halo_menus_art_release(void);
+
 #endif
