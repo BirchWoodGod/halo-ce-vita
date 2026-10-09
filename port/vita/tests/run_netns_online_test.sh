@@ -673,7 +673,16 @@ code|lobby|lobbypw|relay|latency)
 		[ -n "$after" ] && [ "$after" -le $((rtt + 150)) ] || fail "the joiner's latency meter did not come back ($after ms)"
 	fi
 	# (the map change: code mode, which runs long enough for a game to end)
-	[ "$mode" = code ] && [ -z "${HALO_TEST_HOST_GAME:-}" ] && ! grep -aq "network test: map chillout" "$out/host/run.log" && fail "the host never changed map"
+	# (the host's first game ends by the scripted kills, debug.network_test_kill,
+	# one every 20 s from the game's start: its scores where it ended, or as
+	# the run ended, say why when it ran long: kills, deaths and suicides)
+	if [ "$mode" = code ] && [ -z "${HALO_TEST_HOST_GAME:-}" ]; then
+		first_game=$(sed -n '/network test: the next game/q; /network test: tick [0-9]* .*| \(playing\|game over\)/p' "$out/host/run.log" |
+			sed -n '/| game over/{p;q}; $p' |
+			grep -aoE "tick [0-9]+|player [0-9]+: |s-?[0-9]+ k[0-9]+ d[0-9]+ f[0-9]+|\| (playing|game over)" | tr '\n' ' ')
+		echo "host's first game (s score, k kills, d deaths, f own-side kills: suicides): $first_game"
+		grep -aq "network test: map chillout" "$out/host/run.log" || fail "the host never changed map"
+	fi
 	if [ "$rejoin" != 0 ]; then
 		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the joiner never left and joined again"
 		again=$(sed -n '/network test: joining again/,$p' "$out/joiner/run.log" | two_players)
