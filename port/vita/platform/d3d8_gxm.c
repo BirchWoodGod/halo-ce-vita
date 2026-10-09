@@ -2342,8 +2342,12 @@ material settings) */
 /* (the material leaves out the draw's values - render_state_values and the
 stages' bump environment states: they are 0 there - and the state block
 points to them in a block of their own, so an object with the material of
-the one before but its own fog or constants, or a two-sided part's second
-pass, takes the last material) */
+the one before but its own fog or constants takes the last material) */
+/* (the cull mode, also left out of the material, is the record's own
+(render_command.cull): a two-sided part's second pass, the same part with
+the other winding culled, takes its first pass's material, values and state
+blocks - a new values and state block each pass, and each part after it,
+when the values held it) */
 enum
 {
 	RECORD_VALUE_PS_C0 = 0,     /* [8] */
@@ -2354,7 +2358,6 @@ enum
 	RECORD_VALUE_FOG_END,
 	RECORD_VALUE_FOG_DENSITY,
 	RECORD_VALUE_FOG_COLOR,
-	RECORD_VALUE_CULL_MODE,
 	RECORD_VALUE_COUNT
 };
 static const unsigned char record_value_state[RECORD_VALUE_COUNT] = {
@@ -2363,7 +2366,7 @@ static const unsigned char record_value_state[RECORD_VALUE_COUNT] = {
 	D3DRS_PSCONSTANT1_0, D3DRS_PSCONSTANT1_1, D3DRS_PSCONSTANT1_2, D3DRS_PSCONSTANT1_3,
 	D3DRS_PSCONSTANT1_4, D3DRS_PSCONSTANT1_5, D3DRS_PSCONSTANT1_6, D3DRS_PSCONSTANT1_7,
 	D3DRS_PSFINALCOMBINERCONSTANT0, D3DRS_PSFINALCOMBINERCONSTANT1,
-	D3DRS_FOGSTART, D3DRS_FOGEND, D3DRS_FOGDENSITY, D3DRS_FOGCOLOR, D3DRS_CULLMODE,
+	D3DRS_FOGSTART, D3DRS_FOGEND, D3DRS_FOGDENSITY, D3DRS_FOGCOLOR,
 };
 #define RECORD_VALUE_BUMP_COUNT (D3DTSS_BUMPENVLOFFSET - D3DTSS_BUMPENVMAT00 + 1)
 
@@ -2417,6 +2420,8 @@ struct render_command
 	/* the depth target's presence and the constant-program flag */
 	unsigned char has_depth;
 	unsigned char simple;
+	/* (split records) D3DRS_CULLMODE as the draw had it */
+	unsigned short cull;
 	/* a small target drawn before the main scene: no big target is read */
 	BOOL hoistable;
 	/* (hoisted records) the first record of a run into its target, and the
@@ -2972,12 +2977,10 @@ static void worker_fragment_values(const struct record_state *state, float value
 	worker_texture_scale_markers(state, values);
 }
 
-/* the cull mode names the screen winding to discard */
-static unsigned long worker_cull(const struct record_state *state)
+/* the cull mode names the screen winding to discard (the record's) */
+static unsigned long worker_cull(const struct render_command *command)
 {
-	DWORD cull = state->values->render_state[RECORD_VALUE_CULL_MODE];
-
-	return cull == D3DCULL_NONE ? 0 : cull;
+	return command->cull == D3DCULL_NONE ? 0 : command->cull;
 }
 
 /* the parts of a record that depend on its textures rather than its
@@ -3087,7 +3090,7 @@ static BOOL worker_build_record(struct render_command *command)
 		memcpy(command->sampler_state, worker_build.sampler_state, sizeof(command->sampler_state));
 		memcpy(&draw->depth_test, &worker_build.draw_states.depth_test,
 			offsetof(struct vgxm_draw, color_write) + sizeof(draw->color_write) - offsetof(struct vgxm_draw, depth_test));
-		draw->cull = worker_build.draw_states.cull;
+		draw->cull = worker_cull(command);
 		draw->depth_bias_slope = worker_build.draw_states.depth_bias_slope;
 		draw->depth_bias_units = worker_build.draw_states.depth_bias_units;
 		draw->fragment_uniforms[0] = worker_build.fragment_uniforms[0];
@@ -3109,8 +3112,7 @@ static BOOL worker_build_record(struct render_command *command)
 		memcpy(command->sampler_state, worker_build.sampler_state, sizeof(command->sampler_state));
 		memcpy(&draw->depth_test, &worker_build.draw_states.depth_test,
 			offsetof(struct vgxm_draw, color_write) + sizeof(draw->color_write) - offsetof(struct vgxm_draw, depth_test));
-		draw->cull = worker_cull(state);
-		worker_build.draw_states.cull = draw->cull;
+		draw->cull = worker_cull(command);
 		draw->depth_bias_slope = worker_build.draw_states.depth_bias_slope;
 		draw->depth_bias_units = worker_build.draw_states.depth_bias_units;
 		if (state->values != worker_build.values)
@@ -3214,7 +3216,7 @@ static BOOL worker_build_record(struct render_command *command)
 	draw->blend_operation = rs[D3DRS_BLENDOP];
 	draw->blend_color = rs[D3DRS_BLENDCOLOR];
 	draw->color_write = rs[D3DRS_COLORWRITEENABLE];
-	draw->cull = worker_cull(state);
+	draw->cull = worker_cull(command);
 	draw->depth_bias_slope = draw->depth_bias_units = 0.0f;
 	if (rs[D3DRS_SOLIDOFFSETENABLE])
 	{
@@ -5638,9 +5640,11 @@ struct record_shadow_state
 	BOOL immediate;
 	unsigned long ui_offset;
 	/* (held_shadow) the record's material and values blocks, which hold the
-	render and stage states as they were: then they are not copied here */
+	render and stage states as they were but for the cull mode: then they are
+	not copied here */
 	const struct record_material *material;
 	const struct record_values *values;
+	DWORD cull;
 };
 static struct record_shadow_state record_shadow;
 /* the state of the held immediate draw (immediate_end): the next one joins
@@ -5654,6 +5658,7 @@ static void shadow_capture(struct record_shadow_state *shadow, struct vertex_sha
 	in for a copy of them: 1.1 KB per immediate draw) */
 	shadow->material = state ? state->material : NULL;
 	shadow->values = state ? state->values : NULL;
+	shadow->cull = D3D__RenderState[D3DRS_CULLMODE];
 	if (!state)
 	{
 		memcpy(shadow->render_state, D3D__RenderState, sizeof(shadow->render_state));
@@ -5907,6 +5912,8 @@ static BOOL shadow_states_match(const struct record_shadow_state *shadow)
 {
 	if (shadow->material)
 	{
+		if (shadow->cull != D3D__RenderState[D3DRS_CULLMODE])
+			return FALSE;
 		if (!device_state_dirty && material_last == shadow->material && values_last == shadow->values)
 			return TRUE;
 		return material_matches_current(shadow->material) && values_match_current(shadow->values);
@@ -6133,6 +6140,7 @@ static const struct record_state *record_state_current(void)
 			memcpy(material_last->texture_state, D3D__TextureState, sizeof(material_last->texture_state));
 			for (index = 0; index < RECORD_VALUE_COUNT; index++)
 				material_last->render_state[record_value_state[index]] = 0;
+			material_last->render_state[D3DRS_CULLMODE] = 0;
 			for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 				memset(&material_last->texture_state[stage][D3DTSS_BUMPENVMAT00], 0, RECORD_VALUE_BUMP_COUNT * sizeof(DWORD));
 			stats.material_new++;
@@ -6348,6 +6356,7 @@ static struct render_command *record_draw(BOOL immediate)
 		if (state)
 		{
 			command->state = state;
+			command->cull = (unsigned short)D3D__RenderState[D3DRS_CULLMODE];
 			command->has_depth = (unsigned char)(has_depth != 0);
 			command->simple = (unsigned char)simple_fragment;
 			simple_fragment = 0;
