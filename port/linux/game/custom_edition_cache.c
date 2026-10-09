@@ -827,6 +827,20 @@ static boolean custom_edition_cache_tags_convert(
 			"custom edition: %ld Ogg Vorbis sounds are decoded to Xbox ADPCM as they load",
 			(long)conversion.sounds_ogg_vorbis);
 	}
+	if (conversion.sound_permutations_pcm)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld 16-bit PCM sound permutations are encoded to Xbox ADPCM as they load",
+			(long)conversion.sound_permutations_pcm);
+	}
+	if (conversion.sound_permutations_muted)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld sound permutations are not whole frames or blocks and will not play",
+			(long)conversion.sound_permutations_muted);
+	}
 	if (conversion.hud_placements_rescaled)
 	{
 		error(

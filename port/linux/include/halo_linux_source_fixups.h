@@ -118,6 +118,11 @@ void halo_screen_ui_offset(unsigned char centered);
 apart from its size in pixels, 0 otherwise (port/vita/platform/bink_vita.c;
 port/linux/src/bink_null.c: 0) */
 float halo_movie_display_aspect(void);
+/* whether the last BinkOpen failed for now (the Vita's video player did not
+start: memory), not for want of the file: the attract mode tries again
+later (source/interface/attract_mode.c; port/vita/platform/bink_vita.c;
+port/linux/src/bink_null.c: HALO_TEST_MOVIE_FAILS_FOR_NOW) */
+int halo_movie_open_failed_for_now(void);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
 

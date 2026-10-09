@@ -216,21 +216,22 @@ boolean custom_edition_cache_read(
 
 struct sound_permutation;
 
-/* Whether the sound cache loads `permutation` by decoding its Ogg Vorbis
-stream (a Custom Edition map's, compression 3) rather than reading it. */
-boolean custom_edition_sound_is_ogg_vorbis(
+/* Whether the sound cache loads `permutation` by having it made Xbox ADPCM
+(a Custom Edition map's Ogg Vorbis stream, compression 3, or its 16-bit
+PCM, compression none) rather than reading it. */
+boolean custom_edition_sound_is_transcoded(
 	struct sound_permutation const *permutation);
 /* The bytes the sound cache holds for `permutation`: its samples' size, or
-for an Ogg Vorbis one its Xbox ADPCM's (worked out from the stream's first
-and last pages the first time, when the map's own word was not plausible);
-0 when it cannot be played. Called by the sound cache and the channels
-that play what it holds. */
+for an Ogg Vorbis or 16-bit PCM one its Xbox ADPCM's (for Ogg Vorbis
+worked out from the stream's first and last pages the first time, when the
+map's own word was not plausible); 0 when it cannot be played. Called by
+the sound cache and the channels that play what it holds. */
 long custom_edition_sound_cache_bytes(
 	struct sound_permutation *permutation);
-/* Has an Ogg Vorbis permutation decoded into `destination` (its cache
-block, `destination_bytes` long) on the decoding thread, which sets
-`*loaded` when it is done; FALSE when it could not be asked for (the block
-is silence, and loaded, at once). */
+/* Has an Ogg Vorbis or 16-bit PCM permutation made Xbox ADPCM into
+`destination` (its cache block, `destination_bytes` long) on the decoding
+thread, which sets `*loaded` when it is done; FALSE when it could not be
+asked for (the block is silence, and loaded, at once). */
 boolean custom_edition_sound_load(
 	struct sound_permutation const *permutation,
 	void *destination,

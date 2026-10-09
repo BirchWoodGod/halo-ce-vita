@@ -2761,6 +2761,7 @@ static void datagram_send(struct peer *peer, unsigned short source_port, unsigne
 	/* (the peer answers to that port) */
 	if (!game_port_open(0, source_port))
 		p2p.sent_ports[p2p.sent_port_next++ % MAXIMUM_SENT_PORTS] = source_port;
+	p2p_lobby_game_sent(peer->identifier);
 	inner[0] = _packet_datagram;
 	/* (the game's port as the peer knows it: a dedicated server's own here
 	are others, p2p_game_port_local) */
@@ -2802,6 +2803,9 @@ static void datagram_received(struct peer *peer, const unsigned char *inner, int
 
 	if (size < 5)
 		return;
+	/* (the peer's game answers: a game joined from the browser that does
+	not, failed) */
+	p2p_lobby_game_heard(peer->identifier);
 	/* only to the game (at its ports here: p2p_game_port_local) */
 	port = p2p_game_port_local(get_short(inner + 3));
 	if (game_local() || !game_port_open(0, port))
@@ -3974,6 +3978,11 @@ static void update_hosting(void)
 void p2p_set_game_accepts_remote(int accepts)
 {
 	accepts = accepts != 0;
+	/* (a test's: HALO_TEST_HOST_LOCAL_GAME=1 hosts a Split Screen game for
+	internet play, listed, as beta.2 did, though its server answers no other
+	machine: run_netns_online_test.sh unjoinable) */
+	if (!accepts && getenv("HALO_TEST_HOST_LOCAL_GAME") && atoi(getenv("HALO_TEST_HOST_LOCAL_GAME")))
+		accepts = 1;
 	if (accepts == p2p.game_accepts_remote)
 		return;
 	pthread_mutex_lock(&p2p_lock);

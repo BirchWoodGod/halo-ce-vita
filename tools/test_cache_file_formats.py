@@ -203,7 +203,7 @@ SOUND_ENTRY_FIELDS = {"sample_rate": 1, "encoding": 1, "longest_permutation_leng
 
 
 def sound_item(samples_offset, samples_size, pitch_ranges=1, compression=1, buffer_size=0, encoding=None,
-               sample_rate=None):
+               sample_rate=None, permutation_compression=None):
     """A sound as sounds.map holds it: the header again, then pitch ranges and
     permutations whose addresses count from the first pitch range. The
     entry's header has the fields the map's copy leaves zero, and the
@@ -219,7 +219,7 @@ def sound_item(samples_offset, samples_size, pitch_ranges=1, compression=1, buff
         permutation = body.reserve(0x7C)
         mouth = body.add(b"MOUTHDAT")
         body.block(pitch_range + 0x3C, 1, permutation)
-        body.u16(permutation + 0x28, compression)
+        body.u16(permutation + 0x28, compression if permutation_compression is None else permutation_compression)
         body.u32(permutation + 0x38, buffer_size)  # Halo PC's 16-bit PCM bytes
         body.u32(permutation + 0x2C, 0x0BADF00D)
         body.u32(permutation + 0x30, 0x0BADF00D)
@@ -402,9 +402,9 @@ class Map:
     records the file offsets of the fields tests corrupt afterwards."""
 
     def __init__(self, opensauce=None, mod_name="", definitions=b"", trailing=b"",
-                 extra_tags=(), bsp_gap=None, bitmap_pixels_size=16, sound_samples_size=32,
+                 extra_tags=(), bsp_gap=None, bitmap_pixels_size=16, sound_samples_size=72,
                  font_style_reference=NONE, pitch_ranges=1, bsp_sizes=(0x1000,), sound_compression=1,
-                 sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None,
+                 sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None, sound_permutation_compression=None,
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, strings_name="test\\strings", strings=("hello", "world!")):
         self.bsp_sizes = bsp_sizes
@@ -412,6 +412,7 @@ class Map:
         self.sound_buffer_size = sound_buffer_size
         self.sound_encoding = sound_encoding
         self.sound_sample_rate = sound_sample_rate
+        self.sound_permutation_compression = sound_permutation_compression
         # opt-in tags and content, so the defaults above keep their counts
         self.model = model
         self.bsp_material = bsp_material
@@ -447,10 +448,11 @@ class Map:
         ])
         samples_offset = 16
         sounds, _ = resource_map_file(2, [
-            ("test\\sound__permutations", bytes(32)),
+            # (one block of stereo Xbox ADPCM)
+            ("test\\sound__permutations", bytes(72)),
             ("test\\sound", sound_item(samples_offset, self.sound_samples_size, self.pitch_ranges,
                                        self.sound_compression, self.sound_buffer_size, self.sound_encoding,
-                                       self.sound_sample_rate)),
+                                       self.sound_sample_rate, self.sound_permutation_compression)),
         ])
         loc, _ = resource_map_file(3, [
             (self.strings_name, string_list_item(self.strings)),
@@ -1008,6 +1010,42 @@ def test_ogg_vorbis_buffer_sizes_that_are_not_plausible_are_left_to_be_measured(
         assert returncode == 0 and report["sounds_ogg_vorbis"] == "1"
         _, permutation = sound_parts(tags, cache)
         assert u32_at(tags, permutation + 0x38) == 0, buffer_size
+
+
+def test_pcm_permutations_of_xbox_adpcm_sounds_are_encoded_as_they_load(report_tool, tmp_path):
+    # 16-bit PCM (compression none) in an Xbox ADPCM sound, as extinction.map's
+    # scarab bolt: 72 bytes of stereo are 18 frames, one block of 72 bytes;
+    # of mono 36 frames, one block of 36
+    for encoding, adpcm_bytes in ((1, 72), (0, 36)):
+        cache = Map(sound_permutation_compression=0, sound_encoding=encoding)
+        returncode, report, tags = converted(report_tool, cache, tmp_path)
+        assert returncode == 0 and report["sound_permutations_pcm"] == "1", encoding
+        assert report["sound_permutations_muted"] == "0" and report["sounds_undecodable"] == "0"
+        header, permutation = sound_parts(tags, cache)
+        assert u32_at(tags, header + 0x98) == 1 and s16_at(tags, header + 0x6E) == 1
+        assert s16_at(tags, permutation + 0x28) == 0  # the permutation stays 16-bit PCM
+        assert u32_at(tags, permutation + 0x38) == adpcm_bytes  # its Xbox ADPCM's bytes
+        assert u32_at(tags, permutation + 0x40) == 72  # its samples, as they were
+
+
+def test_permutations_that_are_not_whole_frames_or_blocks_are_muted(report_tool, tmp_path):
+    # 16-bit PCM: 70 bytes are not whole stereo frames (4 bytes), nor is none
+    for samples_size in (70, 0):
+        cache = Map(sound_permutation_compression=0, sound_samples_size=samples_size)
+        returncode, report, tags = converted(report_tool, cache, tmp_path)
+        assert returncode == 0 and report["sound_permutations_muted"] == "1", samples_size
+        assert report["sound_permutations_pcm"] == "0" and report["sounds_undecodable"] == "0"
+        _, permutation = sound_parts(tags, cache)
+        assert u32_at(tags, permutation + 0x38) == 0  # the sound cache does not load it
+    # Xbox ADPCM: 64 bytes are not whole stereo blocks (72 bytes)
+    cache = Map(sound_samples_size=64)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["sound_permutations_muted"] == "1"
+    _, permutation = sound_parts(tags, cache)
+    assert u32_at(tags, permutation + 0x40) == 0  # no samples: not loaded
+    # whole blocks are left alone
+    returncode, report, tags = converted(report_tool, Map(), tmp_path)
+    assert returncode == 0 and report["sound_permutations_muted"] == "0" and report["sound_permutations_pcm"] == "0"
 
 
 def test_sounds_this_build_cannot_decode_are_made_unplayable(report_tool, tmp_path):

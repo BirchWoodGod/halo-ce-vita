@@ -360,6 +360,12 @@ int p2p_lobby_clean_name(char *name);
 /* joining the host of that key hash timed out (p2p.c): a game the browser
 joined is marked failed; under p2p_lock */
 void p2p_lobby_join_timed_out(const unsigned char *host_hash);
+/* the game sent a datagram to a peer (its identifier), or one came from
+it (p2p.c): a game joined from the browser whose reached host's game
+answers none of the game's System Link searches is marked failed, and
+hidden a while; under p2p_lock */
+void p2p_lobby_game_sent(const unsigned char *identifier);
+void p2p_lobby_game_heard(const unsigned char *identifier);
 
 /* the p2p thread's pass: the token of the game hosted for the internet
 (NULL if none) and its player counts */

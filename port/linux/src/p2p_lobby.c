@@ -69,6 +69,20 @@ game's frame), from a queue of MAXIMUM_QUEUED; the rest is dropped (hosts
 publish again). A game's name, as the players' names, is cleaned as the game
 cleans a player's name (player_name_clean), and a game whose name has
 nothing left that names it is not shown.
+
+A game the browser joined that cannot be joined is hidden FAILED_HIDE_TIME
+(5 minutes), or until its host lists it anew with anything changed (the
+map, the players, the flags, the stamp: listing_fingerprint), and after
+that shown marked failed (after the others of as many players), for the
+run: one whose host was not reached
+(p2p_lobby_join_timed_out), one gone, and one whose host, reached, has not
+answered JOIN_UNANSWERED_DATAGRAMS of the game's datagrams to it over
+JOIN_UNANSWERED_TIME (p2p.c tells each, p2p_lobby_game_sent and
+p2p_lobby_game_heard): the System Link list searched for it and found
+nothing, as for an older build's Split Screen or bots game, whose server
+takes no other machine, listed by mistake (59a6cbf2, p2p_set_game_accepts_remote, ended that; the
+hosts that still list them are older).
+Nothing changes on the wire.
 */
 
 #include "platform.h"
@@ -142,6 +156,18 @@ enum
 	GAME_LINES_INTERVAL = 30000,
 	/* the hosts of another network version told apart */
 	OTHER_VERSION_HOSTS = 16,
+
+	/* a game joined from the browser whose host, once reached, has not
+	answered this many of the game's datagrams (its System Link searches,
+	one each 2 s or so) over this long (milliseconds) failed: an older
+	build's Split Screen or bots game, listed though its server takes no
+	other machine (long enough for a host loading its next map; and its
+	listing changes after it, which shows the game again); a game that
+	failed is hidden this long, unless its listing changes, and after it
+	shown marked failed (p2p_lobby_games) */
+	JOIN_UNANSWERED_DATAGRAMS = 5,
+	JOIN_UNANSWERED_TIME = 10000,
+	FAILED_HIDE_TIME = 300000,
 };
 
 /* why the browser did not take a listing (its summary's counts) */
@@ -209,7 +235,19 @@ struct game
 	/* as it came (one the same again needs no check) */
 	unsigned char payload[MAXIMUM_LISTING_SIZE];
 	int payload_size;
+	/* what it says, its sequence and time aside (listing_fingerprint) */
+	unsigned long fingerprint;
 	struct p2p_listing listing;
+};
+
+/* a game joining failed (mark_failed): hidden for FAILED_HIDE_TIME while
+its listing says the same (fingerprint; 0 if not known: never hidden),
+after that shown marked failed; a new listing forgets it */
+struct failed_game
+{
+	unsigned char identifier[P2P_IDENTIFIER_SIZE];
+	unsigned long fingerprint;
+	unsigned long time;
 };
 
 struct tombstone
@@ -283,9 +321,19 @@ static struct
 	struct game games[MAXIMUM_GAMES];
 	struct tombstone tombstones[MAXIMUM_TOMBSTONES];
 	int next_tombstone;
-	/* the identifiers of games joining failed */
-	unsigned char failed[MAXIMUM_GAMES][P2P_IDENTIFIER_SIZE];
+	/* the games joining failed, this run */
+	struct failed_game failed[MAXIMUM_GAMES];
 	int failed_count;
+	/* the game last joined from the browser, until its host's game answers
+	this machine's (p2p_lobby_game_heard) or does not (p2p_lobby_game_sent):
+	its host, its listing's fingerprint and name, and the game's datagrams
+	sent to the host since it was reached, from when */
+	int watching;
+	unsigned char watch_identifier[P2P_IDENTIFIER_SIZE];
+	unsigned long watch_fingerprint;
+	char watch_name[P2P_LISTING_NAME_SIZE + 1];
+	int watch_sent;
+	unsigned long watch_sent_time;
 
 	/* joining a game from the browser (p2p_lobby_join): how it goes, the
 	host's key hash, and a locked game's password, key and sealed token
@@ -870,16 +918,80 @@ static struct tombstone *find_tombstone(const unsigned char *key_hash)
 	return NULL;
 }
 
-static int identifier_failed(const unsigned char *identifier)
+static struct failed_game *find_failed(const unsigned char *identifier)
 {
 	int index;
 
 	for (index = 0; index < lobby.failed_count; index++)
 	{
-		if (!memcmp(lobby.failed[index], identifier, P2P_IDENTIFIER_SIZE))
-			return 1;
+		if (!memcmp(lobby.failed[index].identifier, identifier, P2P_IDENTIFIER_SIZE))
+			return &lobby.failed[index];
 	}
-	return 0;
+	return NULL;
+}
+
+static void forget_failed(struct failed_game *failed)
+{
+	*failed = lobby.failed[--lobby.failed_count];
+}
+
+/* joining the game of the host with that identifier failed (why, for the
+log): its listing (fingerprint, 0 if not known) hidden a while; with no
+room, the oldest failure forgotten */
+static void mark_failed(const unsigned char *identifier, unsigned long fingerprint, const char *name, const char *why)
+{
+	struct failed_game *failed = find_failed(identifier);
+	char hex[2 * P2P_IDENTIFIER_SIZE + 1];
+
+	if (!failed)
+	{
+		if (lobby.failed_count < MAXIMUM_GAMES)
+			failed = &lobby.failed[lobby.failed_count++];
+		else
+		{
+			int index, oldest = 0;
+
+			for (index = 1; index < MAXIMUM_GAMES; index++)
+			{
+				if ((long)(lobby.failed[index].time - lobby.failed[oldest].time) < 0)
+					oldest = index;
+			}
+			failed = &lobby.failed[oldest];
+		}
+		memcpy(failed->identifier, identifier, P2P_IDENTIFIER_SIZE);
+	}
+	failed->fingerprint = fingerprint;
+	failed->time = now_stamp();
+	p2p_hex(identifier, P2P_IDENTIFIER_SIZE, hex);
+	platform_log("Internet play: browser: joining \"%s\" (host %s) failed: %s; %s", name && *name ? name : "?",
+		hex, why, fingerprint ? "hidden for 5 minutes, or until its listing changes" : "marked failed");
+}
+
+/* a listing joining failed: 1 shown marked failed, 2 hidden (FAILED_HIDE_TIME while
+it says the same), 0 neither */
+static int listing_failed(const unsigned char *identifier, unsigned long fingerprint)
+{
+	const struct failed_game *failed = find_failed(identifier);
+
+	if (!failed)
+		return 0;
+	return failed->fingerprint && failed->fingerprint == fingerprint && !elapsed(failed->time, FAILED_HIDE_TIME) ?
+		2 : 1;
+}
+
+static int game_hidden(const struct game *game)
+{
+	return game->used && listing_failed(game->listing.identifier, game->fingerprint) == 2;
+}
+
+/* the games the browser shows */
+static int shown_count(void)
+{
+	int index, shown = 0;
+
+	for (index = 0; index < MAXIMUM_GAMES; index++)
+		shown += lobby.games[index].used && !game_hidden(&lobby.games[index]);
+	return shown;
 }
 
 /* hex (lower case, 2 * size digits exactly) to bytes; 0 if it is not */
@@ -973,6 +1085,23 @@ static void make_invite(const unsigned char *key_hash, const unsigned char *toke
 
 static void game_line(const char *what, const struct p2p_listing *listing);
 
+/* what a listing says, its sequence and time (which each publish changes)
+and its signature aside: FNV-1a of the rest, never 0 */
+static unsigned long listing_fingerprint(const unsigned char *payload, int size)
+{
+	unsigned int hash = 2166136261u;
+	int index;
+
+	for (index = 0; index < size - P2P_SIGNATURE_SIZE; index++)
+	{
+		/* ("HL", the format, the version, the flags; the sequence and time) */
+		if (index >= 6 && index < 14)
+			continue;
+		hash = (hash ^ payload[index]) * 16777619u;
+	}
+	return hash ? hash : 1;
+}
+
 /* a queued listing, its signature checked: taken or not */
 static void listing_take(const struct queued *queued, const struct listing *listing)
 {
@@ -1032,6 +1161,7 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	game->heard_time = p2p_now();
 	memcpy(game->payload, queued->payload, (size_t)queued->size);
 	game->payload_size = queued->size;
+	game->fingerprint = listing_fingerprint(queued->payload, queued->size);
 	shown = &game->listing;
 	memset(shown, 0, sizeof(*shown));
 	shown->locked = (listing->flags & _listing_password) != 0;
@@ -1074,6 +1204,16 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	shown->ping = -1;
 	if (new_game)
 		game_line("new game", shown);
+	/* (a game joining failed, listed anew: a new chance) */
+	{
+		struct failed_game *failed = find_failed(shown->identifier);
+
+		if (failed && failed->fingerprint && failed->fingerprint != game->fingerprint)
+		{
+			forget_failed(failed);
+			game_line("game listed anew, shown again after joining it failed:", shown);
+		}
+	}
 }
 
 /* checks a queued listing: 1 if it is to be taken (its signature too, with
@@ -1168,10 +1308,8 @@ static void browse_summary(const char *when)
 {
 	struct browse_counts *counts = &lobby.counts;
 	char line[640], brokers[384];
-	int length, index, shown = 0;
+	int length, index, shown = shown_count();
 
-	for (index = 0; index < MAXIMUM_GAMES; index++)
-		shown += lobby.games[index].used;
 	p2p_signal_brokers_text(brokers, sizeof(brokers), 1);
 	length = snprintf(line, sizeof(line), "Internet play: browser (%s): %d listing%s heard (%d retained, %d again), "
 		"%d game%s shown", when, counts->heard, counts->heard == 1 ? "" : "s", counts->retained, counts->repeated,
@@ -1300,6 +1438,17 @@ int p2p_lobby_browsing(void)
 	return lobby.browsing;
 }
 
+/* a failure of the game joined from the browser (the host with that
+identifier), no longer watched */
+static void watched_failed(const unsigned char *identifier, const char *why)
+{
+	int watched = lobby.watching && !memcmp(identifier, lobby.watch_identifier, P2P_IDENTIFIER_SIZE);
+
+	mark_failed(identifier, watched ? lobby.watch_fingerprint : 0, watched ? lobby.watch_name : NULL, why);
+	if (watched)
+		lobby.watching = 0;
+}
+
 void p2p_lobby_join_timed_out(const unsigned char *host_hash)
 {
 	unsigned char identifier[P2P_IDENTIFIER_SIZE];
@@ -1308,8 +1457,36 @@ void p2p_lobby_join_timed_out(const unsigned char *host_hash)
 		return;
 	lobby.join_state = P2P_LOBBY_JOIN_GONE;
 	p2p_identifier_from_hash(host_hash, identifier);
-	if (!identifier_failed(identifier) && lobby.failed_count < MAXIMUM_GAMES)
-		memcpy(lobby.failed[lobby.failed_count++], identifier, P2P_IDENTIFIER_SIZE);
+	watched_failed(identifier, "its host was not reached");
+}
+
+void p2p_lobby_game_sent(const unsigned char *identifier)
+{
+	if (!lobby.watching || memcmp(identifier, lobby.watch_identifier, P2P_IDENTIFIER_SIZE))
+		return;
+	if (!lobby.watch_sent++)
+		lobby.watch_sent_time = now_stamp();
+	if (lobby.watch_sent >= JOIN_UNANSWERED_DATAGRAMS && elapsed(lobby.watch_sent_time, JOIN_UNANSWERED_TIME))
+	{
+		char why[96];
+
+		snprintf(why, sizeof(why), "its host's game answered none of %d System Link searches in %lu s",
+			lobby.watch_sent, (p2p_now() - lobby.watch_sent_time) / 1000);
+		watched_failed(identifier, why);
+	}
+}
+
+void p2p_lobby_game_heard(const unsigned char *identifier)
+{
+	struct failed_game *failed;
+
+	if (!lobby.watching || memcmp(identifier, lobby.watch_identifier, P2P_IDENTIFIER_SIZE))
+		return;
+	lobby.watching = 0;
+	/* (it answers: joinable, whatever failed before) */
+	failed = find_failed(identifier);
+	if (failed)
+		forget_failed(failed);
 }
 
 /* ---------- the passwords' keys, on a thread of their own: the host's
@@ -1603,10 +1780,8 @@ void p2p_lobby_browse(int on)
 		lobby.browsing = on;
 		if (!on)
 		{
-			int index, shown = 0;
+			int shown = shown_count();
 
-			for (index = 0; index < MAXIMUM_GAMES; index++)
-				shown += lobby.games[index].used;
 			browse_summary("closing");
 			platform_log("Internet play: stopped browsing the public games (%d shown)", shown);
 			memset(lobby.games, 0, sizeof(lobby.games));
@@ -1657,15 +1832,14 @@ void p2p_lobby_refresh(void)
 static int browse_status(char *text, int size)
 {
 	struct p2p_signal_counts counts;
-	int index, shown = 0;
+	int shown;
 
 	if (!lobby.browsing)
 	{
 		snprintf(text, (size_t)size, "%s", "");
 		return P2P_LOBBY_BROWSE_OFF;
 	}
-	for (index = 0; index < MAXIMUM_GAMES; index++)
-		shown += lobby.games[index].used;
+	shown = shown_count();
 	if (shown)
 	{
 		if (shown == 1)
@@ -1779,10 +1953,15 @@ int p2p_lobby_games(struct p2p_listing *games, int maximum_count)
 	pthread_mutex_lock(&p2p_lock);
 	for (index = 0; index < MAXIMUM_GAMES && count < maximum_count; index++)
 	{
+		int failed;
+
 		if (!lobby.games[index].used)
 			continue;
+		failed = listing_failed(lobby.games[index].listing.identifier, lobby.games[index].fingerprint);
+		if (failed == 2)
+			continue;
 		games[count] = lobby.games[index].listing;
-		games[count].failed = (unsigned char)identifier_failed(games[count].identifier);
+		games[count].failed = (unsigned char)failed;
 		count++;
 	}
 	pthread_mutex_unlock(&p2p_lock);
@@ -1926,6 +2105,13 @@ int p2p_lobby_join(const char *id, const char *password)
 	if (game && !(lobby.key_thread_running && lobby.join_state == P2P_LOBBY_JOIN_UNLOCKING))
 	{
 		memcpy(lobby.join_key_hash, key_hash, P2P_KEY_HASH_SIZE);
+		/* (whether its host's game answers: p2p_lobby_game_sent) */
+		lobby.watching = 1;
+		memcpy(lobby.watch_identifier, game->listing.identifier, P2P_IDENTIFIER_SIZE);
+		lobby.watch_fingerprint = game->fingerprint;
+		memcpy(lobby.watch_name, game->listing.name, sizeof(lobby.watch_name));
+		lobby.watch_sent = 0;
+		lobby.watch_sent_time = 0;
 		if (game->listing.locked)
 		{
 			snprintf(lobby.join_password, sizeof(lobby.join_password), "%s", password ? password : "");
@@ -1971,7 +2157,8 @@ void p2p_lobby_mark_failed(const char *id)
 		return;
 	p2p_identifier_from_hash(key_hash, identifier);
 	pthread_mutex_lock(&p2p_lock);
-	if (!identifier_failed(identifier) && lobby.failed_count < MAXIMUM_GAMES)
-		memcpy(lobby.failed[lobby.failed_count++], identifier, P2P_IDENTIFIER_SIZE);
+	/* (a failure marked already, as a timed out join's, is kept as it is) */
+	if (!find_failed(identifier))
+		watched_failed(identifier, "the game is gone");
 	pthread_mutex_unlock(&p2p_lock);
 }

@@ -18,6 +18,11 @@ AddressSanitizer and UBSan:
 	  streams, and bytes changed in them (with the pages' checksums made
 	  good again, so the changes reach the decoder) fail cleanly, writing
 	  only within the output;
+	- 16-bit PCM (Custom Edition's uncompressed permutations,
+	  xbox_adpcm_encoder.c) of the same sines, 22 and 44 kHz, mono and
+	  stereo, read in pieces as custom_edition_sounds.c reads it, plays as
+	  the sine at its pitch; too short and too long outputs, a part frame,
+	  bad arguments and garbage stay within the output;
 	- with --resource-map <sounds.map> (Halo PC's, the player's own; not in
 	  this repository), every Ogg Vorbis permutation in it is decoded to
 	  the length its buffer size says.
@@ -25,6 +30,7 @@ Exits 0 when every test passed.
 */
 
 #include "ogg_sound.h"
+#include "xbox_adpcm_encoder.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -232,6 +238,157 @@ static uint32_t zero_crossings(short const *samples, uint32_t frames, int channe
 			count++;
 	}
 	return count;
+}
+
+/* ---------- 16-bit PCM (xbox_adpcm_encoder.c) */
+
+/* `frames` frames of the half-scale sines (440 Hz, 660 Hz on the right) as
+16-bit little-endian PCM */
+static unsigned char *pcm_sine(uint32_t frames, int channels, long rate)
+{
+	unsigned char *pcm = malloc((size_t)frames * channels * 2 + 1);
+	uint32_t frame;
+	int channel;
+
+	for (frame = 0; frame < frames; frame++)
+	{
+		for (channel = 0; channel < channels; channel++)
+		{
+			double frequency = channel ? 660.0 : 440.0;
+			int value = (int)lrint(0.5 * 32767.0 * sin(2.0 * M_PI * frequency * (double)frame / (double)rate));
+			unsigned char *bytes = pcm + ((size_t)frame * channels + channel) * 2;
+
+			bytes[0] = (unsigned char)(value & 0xff);
+			bytes[1] = (unsigned char)((value >> 8) & 0xff);
+		}
+	}
+	return pcm;
+}
+
+/* the PCM into the output in pieces of `piece` bytes (whole frames), as
+custom_edition_sounds.c reads it; returns the frames of silence after it */
+static uint32_t pcm_encode(unsigned char const *pcm, uint32_t bytes, struct output *output, int channels, uint32_t piece,
+	struct xbox_adpcm_encoder *encoder)
+{
+	uint32_t offset;
+
+	xbox_adpcm_encoder_begin(encoder, output->bytes, output->size, channels);
+	for (offset = 0; offset < bytes && !encoder->full; offset += piece)
+		xbox_adpcm_encoder_pcm(encoder, pcm + offset, bytes - offset < piece ? bytes - offset : piece);
+	return xbox_adpcm_encoder_finish(encoder);
+}
+
+static void test_pcm(void)
+{
+	static long const rates[2] = { 22050, 44100 };
+	struct xbox_adpcm_encoder encoder;
+	int rate_index, channels;
+
+	for (rate_index = 0; rate_index < 2; rate_index++)
+	{
+		for (channels = 1; channels <= 2; channels++)
+		{
+			long rate = rates[rate_index];
+			uint32_t frames = (uint32_t)(rate / 2);
+			uint32_t bytes = frames * channels * 2;
+			unsigned char *pcm = pcm_sine(frames, channels, rate);
+			struct output output = output_new(xbox_adpcm_bytes(frames, channels));
+			short *samples = malloc(sizeof(short) * channels * (frames + 2 * OGG_SOUND_ADPCM_BLOCK_SAMPLES));
+			uint32_t padded = pcm_encode(pcm, bytes, &output, channels, 16 * 1024, &encoder);
+			uint32_t decoded = adpcm_decode(output.bytes, output.size, channels, samples);
+			int channel;
+
+			CHECK(encoder.frames == frames && !encoder.truncated && padded == decoded - frames &&
+				output_guards_intact(&output), "pcm %ld Hz %d ch: %u frames, %u padded", rate, channels,
+				encoder.frames, padded);
+			for (channel = 0; channel < channels; channel++)
+			{
+				double frequency = channel ? 660.0 : 440.0;
+				double snr = sine_signal_to_noise(samples, frames, channels, channel, frequency, rate);
+				uint32_t crossings = zero_crossings(samples, frames, channels, channel);
+				uint32_t expected = (uint32_t)(frequency + 0.5);
+
+				printf("  pcm %ld Hz %d ch, channel %d: %u frames, %.1f dB, %u zero crossings\n", rate, channels,
+					channel, encoder.frames, snr, crossings);
+				CHECK(snr > 20.0, "pcm %ld Hz %d ch: channel %d %.1f dB", rate, channels, channel, snr);
+				CHECK(crossings + 2 >= expected && crossings <= expected + 2, "pcm %ld Hz %d ch: %u crossings",
+					rate, channels, crossings);
+			}
+			/* (pieces of one frame give the same output) */
+			{
+				struct output again = output_new(output.size);
+
+				pcm_encode(pcm, bytes, &again, channels, 2 * channels, &encoder);
+				CHECK(!memcmp(again.bytes, output.bytes, output.size), "pcm %ld Hz %d ch: pieces differ", rate,
+					channels);
+				free(again.memory);
+			}
+			/* too short an output: filled, the rest left out */
+			{
+				struct output shorter = output_new(output.size / 2 + 5);
+
+				padded = pcm_encode(pcm, bytes, &shorter, channels, 16 * 1024, &encoder);
+				CHECK(encoder.truncated && !padded && encoder.frames == encoder.output_blocks * 64 &&
+					output_guards_intact(&shorter), "pcm into a short output: %u frames", encoder.frames);
+				free(shorter.memory);
+			}
+			/* too long an output: silence after it */
+			{
+				struct output longer = output_new(output.size + 10 * 36 * channels);
+				short *more = malloc(sizeof(short) * channels * (frames + 12 * OGG_SOUND_ADPCM_BLOCK_SAMPLES));
+				uint32_t index, total;
+				int silent = 1;
+
+				padded = pcm_encode(pcm, bytes, &longer, channels, 16 * 1024, &encoder);
+				total = adpcm_decode(longer.bytes, longer.size, channels, more);
+				for (index = decoded * channels; index < total * channels; index++)
+					silent &= more[index] == 0;
+				CHECK(!encoder.truncated && encoder.frames == frames && padded == total - frames && silent &&
+					output_guards_intact(&longer), "pcm into a long output: %u frames, %u padded", encoder.frames,
+					padded);
+				free(more);
+				free(longer.memory);
+			}
+			free(samples);
+			free(output.memory);
+			free(pcm);
+		}
+	}
+
+	/* a part frame is left out; nothing, bad arguments, and garbage stay
+	within the output */
+	{
+		unsigned char odd[7] = { 1, 0, 2, 0, 3, 0, 4 };
+		unsigned char garbage[4096];
+		struct output output = output_new(2 * 72);
+		uint32_t index;
+
+		xbox_adpcm_encoder_begin(&encoder, output.bytes, output.size, 2);
+		xbox_adpcm_encoder_pcm(&encoder, odd, sizeof(odd));
+		CHECK(encoder.frames == 1, "a part frame: %u frames", encoder.frames);
+		CHECK(xbox_adpcm_encoder_finish(&encoder) == 127 && output_guards_intact(&output), "a part frame: padding");
+		CHECK(!xbox_adpcm_encoder_begin(&encoder, output.bytes, output.size, 3) && encoder.full,
+			"three channels accepted");
+		xbox_adpcm_encoder_pcm(&encoder, garbage, 0);
+		CHECK(xbox_adpcm_encoder_finish(&encoder) == 0, "three channels: wrote");
+		CHECK(!xbox_adpcm_encoder_begin(&encoder, NULL, 72, 1), "no output accepted");
+		CHECK(xbox_adpcm_encoder_finish(&encoder) == 0, "no output: wrote");
+		xbox_adpcm_encoder_begin(&encoder, output.bytes, 35, 1);
+		xbox_adpcm_encoder_pcm(&encoder, odd, 6);
+		CHECK(encoder.full && encoder.truncated && !encoder.frames && xbox_adpcm_encoder_finish(&encoder) == 0 &&
+			output_guards_intact(&output), "less than a block of output");
+		srand(1);
+		for (index = 0; index < sizeof(garbage); index++)
+			garbage[index] = (unsigned char)rand();
+		xbox_adpcm_encoder_begin(&encoder, output.bytes, output.size, 1);
+		xbox_adpcm_encoder_pcm(&encoder, garbage, sizeof(garbage));
+		xbox_adpcm_encoder_finish(&encoder);
+		CHECK(encoder.truncated && encoder.frames == 256 && output_guards_intact(&output), "garbage: %u frames",
+			encoder.frames);
+		CHECK(xbox_adpcm_bytes(0, 1) == 0 && xbox_adpcm_bytes(1, 1) == 36 && xbox_adpcm_bytes(65, 2) == 144 &&
+			xbox_adpcm_bytes(64, 3) == 0, "xbox_adpcm_bytes");
+		free(output.memory);
+	}
 }
 
 /* ---------- Ogg page checksums (the fuzzing below makes them good again) */
@@ -706,6 +863,8 @@ int main(int argc, char **argv)
 	test_channels();
 	test_refusals();
 	test_measure();
+	printf("16-bit PCM:\n");
+	test_pcm();
 	printf("damage:\n");
 	for (index = 0; index < FIXTURE_COUNT; index++)
 		test_damage(&fixtures[index]);

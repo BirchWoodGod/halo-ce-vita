@@ -1,27 +1,34 @@
 #!/bin/bash
-# Halo Custom Edition maps' Ogg Vorbis sounds on the Linux harness
-# (port/linux/game/custom_edition_sounds.c, port/linux/src/ogg_sound.c):
-# each map below is loaded, a few of its Ogg Vorbis sounds played through
+# Halo Custom Edition maps' Ogg Vorbis and 16-bit PCM sounds on the Linux
+# harness (port/linux/game/custom_edition_sounds.c, port/linux/src/ogg_sound.c,
+# xbox_adpcm_encoder.c): each map below is loaded, a few of its Ogg Vorbis
+# and 16-bit PCM sounds played through
 # HALO_TEST_COMMANDS' "@sound" (main.c: as sound_impulse_start plays a sound
 # with no object), and the map left for the main menu. With HALO_OGG_TRACE
-# the decoder logs each permutation it decodes (its frames, its RMS, its
-# Xbox ADPCM's size and place in the sound cache) and with
+# the decoder logs each permutation it decodes or encodes (its frames, its
+# RMS, its Xbox ADPCM's size and place in the sound cache) and with
 # HALO_AUDIO_PACKET_TRACE the mixer each packet it plays out (its place,
 # size and RMS: dsound_sdl.c). Each sound must decode to non-silent PCM
 # (RMS 300 or more of 32767), and the mixer must play all of its ADPCM, and
-# hear it (RMS 100 or more); no permutation may fail to decode or to be
+# hear it (RMS 100 or more); a 16-bit PCM permutation's ADPCM must play at
+# its PCM's RMS within 3% (read as Xbox ADPCM, as it was before, the scarab
+# bolt's PCM played as noise); no permutation may fail to decode or to be
 # measured, the decoder must give its memory back as the map goes, and no
 # assertion or exception be logged.
 #   extinction                 (Custom Edition maps: HaloMaps) the
 #                              announcer's "slayer", held by Halo PC's
 #                              sounds.map (22 kHz stereo), and the map's own
 #                              gunfire_sounds\fire2 (44 kHz stereo), whose
-#                              buffer sizes give their lengths
+#                              buffer sizes give their lengths; and its 16-bit
+#                              PCM scarab bolt_impact (22 kHz stereo, 34880
+#                              frames) and newghost fire (44 kHz stereo) in
+#                              Xbox ADPCM sounds
 #   Covenant_V_Marines_Beta_5  a protected map: every tag is named
 #                              <protected> and the buffer sizes are
 #                              scrambled, so the lengths come from the
 #                              streams' last pages (the 300th and 600th
-#                              sound, 22 kHz mono)
+#                              sound, 22 kHz mono), and the 1052nd, a 16-bit
+#                              PCM one (22 kHz mono)
 #
 #   run_ce_ogg_sound_test.sh
 #   HALO_TEST_VITA          the harness (default build/linux/halo of this tree)
@@ -81,7 +88,7 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 		ln -sfn "$(cd "$resources" && pwd)/$name.map" "$out/$map/data/maps/$name.map"
 	done
 	cp "$binary" "$out/$map/bin/halo"
-	commands="M240:map_name levels\\test\\$map\\$map;${sounds}L330:@menu;"
+	commands="M240:map_name levels\\test\\$map\\$map;${sounds}L420:@menu;"
 	log="$out/$map/run.log"
 	(cd "$out/$map" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$map/data" \
 		HALO_SAVE_ROOT="$out/$map/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=45 HALO_FULLSCREEN=0 \
@@ -113,18 +120,24 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 		function finish() {
 			if (current == "") return
 			played_rms = played_frames ? sqrt(played_squares / played_frames) : 0
-			printf "  %s: %s, %d frames, rms %d, decoded in %s ms; the mixer played %d of its %d bytes, rms %d\n",
-				map, current, frames, rms, ms, played, bytes, played_rms
+			printf "  %s: %s%s, %d frames, rms %d, %s in %s ms; the mixer played %d of its %d bytes, rms %d\n",
+				map, kind == "pcm" ? "16-bit PCM " : "", current, frames, rms, kind == "pcm" ? "encoded" : "decoded", ms,
+				played, bytes, played_rms
 			if (rms < 300) { printf "FAIL (%s): %s decoded to silence (rms %d)\n", map, current, rms; bad = 1 }
 			if (played != bytes) { printf "FAIL (%s): the mixer played %d of %s'"'"'s %d bytes\n", map, played, current, bytes; bad = 1 }
 			if (played_rms < 100) { printf "FAIL (%s): the mixer played %s as silence (rms %d)\n", map, current, played_rms; bad = 1 }
+			if (kind == "pcm" && (played_rms < rms * 0.97 || played_rms > rms * 1.03)) {
+				printf "FAIL (%s): the mixer played 16-bit PCM %s at rms %d, not its rms %d\n", map, current, played_rms, rms
+				bad = 1
+			}
 			count++
 			current = ""
 		}
-		/ogg sound: .* of .*: / && / frames / {
+		/(ogg|pcm) sound: .* of .*: / && / frames / {
 			finish()
 			line = $0
-			sub(/.*ogg sound: /, "", line)
+			kind = line ~ /pcm sound: / ? "pcm" : "ogg"
+			sub(/.*(ogg|pcm) sound: /, "", line)
 			current = line; sub(/: .*/, "", current)
 			status_ = line; sub(/^[^:]*: /, "", status_); sub(/,.*/, "", status_)
 			if (status_ != "decoded") { printf "FAIL (%s): %s: %s\n", map, current, status_; bad = 1 }
@@ -132,6 +145,8 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 			rms = line; sub(/.*, rms /, "", rms); sub(/ .*/, "", rms)
 			ms = line; sub(/.*peak [0-9-]*, /, "", ms); sub(/ ms.*/, "", ms)
 			bytes = line; sub(/.*adpcm /, "", bytes); sub(/ bytes.*/, "", bytes)
+			# (numbers, not strings: "2739" < 300 compares as text)
+			frames += 0; rms += 0; bytes += 0
 			start = line; sub(/.* at /, "", start); start = hex(start)
 			played = 0; played_squares = 0; played_frames = 0
 			next
@@ -151,16 +166,16 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 		}
 		END {
 			finish()
-			if (count < expected) { printf "FAIL (%s): %d Ogg Vorbis permutations decoded, not %d\n", map, count, expected; bad = 1 }
+			if (count < expected) { printf "FAIL (%s): %d permutations decoded, not %d\n", map, count, expected; bad = 1 }
 			exit bad
 		}' "$log" || status=1
 	grep -a "Ogg Vorbis permutations decoded with the map" "$log" | sed 's/^halo-linux: /  /'
 }
 
 mkdir -p "$out"
-run extinction 'L60:@sound sound\dialog\multiplayer1\slayer;L150:@sound sound\sfx\weapons\gunfire_sounds\fire2;' 2
-run Covenant_V_Marines_Beta_5 'L60:@sound <protected> 300;L150:@sound <protected> 600;' 2
+run extinction 'L60:@sound sound\dialog\multiplayer1\slayer;L150:@sound sound\sfx\weapons\gunfire_sounds\fire2;L250:@sound vehicles\scarab\bolt\bolt_impact;L330:@sound vehicles\newghost\sounds\fire;' 4
+run Covenant_V_Marines_Beta_5 'L60:@sound <protected> 300;L150:@sound <protected> 600;L250:@sound <protected> 1052;' 3
 if [ "$status" = 0 ]; then
-	echo "PASS: Custom Edition Ogg Vorbis sounds decoded and played ($out)"
+	echo "PASS: Custom Edition Ogg Vorbis and 16-bit PCM sounds decoded and played ($out)"
 fi
 exit $status

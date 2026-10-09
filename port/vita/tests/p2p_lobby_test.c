@@ -774,6 +774,204 @@ static void status_checks(void)
 	check(p2p_lobby_browse_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_OFF && !text[0], "closed: nothing");
 }
 
+/* ---------- games joining failed: hidden a while */
+
+/* host's listing (a key of its own) with players of 8: its bytes, and its
+key hash in hex (its slot, and its entry's id) and identifier */
+static int host_listing(int host, int players, unsigned char *bytes, char *slot, unsigned char *identifier)
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	int size;
+
+	memset(seed, 0, sizeof(seed));
+	seed[0] = 200;
+	seed[1] = (unsigned char)host;
+	p2p_ed25519_public(seed, signing_key, x25519_secret);
+	p2p_x25519(x25519_public, x25519_secret, NULL);
+	pthread_mutex_lock(&p2p_lock);
+	lobby.player_count = players;
+	lobby.maximum_player_count = 8;
+	snprintf(lobby.name, sizeof(lobby.name), "Host %d", host);
+	snprintf(lobby.map, sizeof(lobby.map), "%s", "sidewinder");
+	snprintf(lobby.gametype, sizeof(lobby.gametype), "%s", "Slayer");
+	size = listing_make(bytes, _listing_open);
+	pthread_mutex_unlock(&p2p_lock);
+	p2p_key_hash(x25519_public, hash);
+	p2p_hex(hash, P2P_KEY_HASH_SIZE, slot);
+	p2p_identifier_from_hash(hash, identifier);
+	/* (the browser's own key again: none of the hosts') */
+	memset(seed, 0, sizeof(seed));
+	seed[0] = 250;
+	p2p_ed25519_public(seed, signing_key, x25519_secret);
+	p2p_x25519(x25519_public, x25519_secret, NULL);
+	return size;
+}
+
+/* host listed again (a new sequence) with players, and the browser's pass */
+static void host_heard(int host, int players)
+{
+	unsigned char bytes[P2P_MAXIMUM_LISTING_SIZE], identifier[P2P_IDENTIFIER_SIZE];
+	char slot[2 * P2P_KEY_HASH_SIZE + 1];
+	int size = host_listing(host, players, bytes, slot, identifier);
+
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_slot_heard(slot, bytes, size, 0);
+	pthread_mutex_unlock(&p2p_lock);
+	lobby_update(NULL, 0, 0);
+}
+
+/* where the browser shows the game of that id (-1: not shown), and whether
+it is marked failed */
+static int shown_at(const char *id, int *failed)
+{
+	struct p2p_lobby_entry entry;
+	int index;
+
+	for (index = 0; p2p_lobby_entry(index, &entry); index++)
+	{
+		if (!strcmp(entry.id, id))
+		{
+			if (failed)
+				*failed = entry.failed;
+			return index;
+		}
+	}
+	return -1;
+}
+
+/* the game's datagrams to a peer, one each 2 s, and the browser's pass */
+static void searches(const unsigned char *identifier, int count)
+{
+	int index;
+
+	for (index = 0; index < count; index++)
+	{
+		clock_now += 2000;
+		pthread_mutex_lock(&p2p_lock);
+		p2p_lobby_game_sent(identifier);
+		pthread_mutex_unlock(&p2p_lock);
+		lobby_update(NULL, 0, 0);
+	}
+}
+
+static void failed_join_checks(void)
+{
+	unsigned char bytes[P2P_MAXIMUM_LISTING_SIZE];
+	unsigned char blaze[P2P_IDENTIFIER_SIZE], good[P2P_IDENTIFIER_SIZE], gone[P2P_IDENTIFIER_SIZE];
+	char blaze_id[P2P_LOBBY_ID_SIZE], good_id[P2P_LOBBY_ID_SIZE], gone_id[P2P_LOBBY_ID_SIZE];
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	int failed = -1, index, start;
+	char text[128];
+
+	wait_for_keys();
+	p2p_lobby_browse(0);
+	pthread_mutex_lock(&p2p_lock);
+	memset(&lobby, 0, sizeof(lobby));
+	pthread_mutex_unlock(&p2p_lock);
+	signal_counts.browsing = 3;
+	signal_counts.browsing_time = clock_now;
+	host_listing(1, 8, bytes, blaze_id, blaze);
+	host_listing(2, 3, bytes, good_id, good);
+	host_listing(3, 1, bytes, gone_id, gone);
+	p2p_lobby_browse(1);
+	host_heard(1, 8);
+	host_heard(2, 3);
+	host_heard(3, 1);
+	check(shown_at(blaze_id, &failed) == 0 && !failed && shown_at(good_id, NULL) == 1 && shown_at(gone_id, NULL) == 2,
+		"three hosts' games shown, the most players first");
+	/* an older build's Split Screen game: joined, its host reached, the
+	System Link searches unanswered */
+	check(p2p_lobby_join(blaze_id, NULL) && p2p_lobby_join_state() == P2P_LOBBY_JOIN_JOINING, "joining it");
+	searches(good, 6);
+	check(shown_at(blaze_id, NULL) == 0 && shown_at(good_id, NULL) == 1,
+		"another host's datagrams say nothing of the game joined");
+	searches(blaze, 5);
+	check(shown_at(blaze_id, NULL) == 0, "five searches unanswered (8 s): still shown");
+	logged_count = 0;
+	searches(blaze, 1);
+	check(shown_at(blaze_id, NULL) == -1 && shown_at(good_id, NULL) == 0,
+		"six searches over 10 s unanswered: the game is hidden");
+	check(logged_line("joining \"Host 1\"") && logged_line("answered none of 6 System Link searches in 10 s") &&
+		logged_line("hidden for 5 minutes"), "said in the log");
+	check(p2p_lobby_browse_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_GAMES && !strcmp(text, "2 public games"),
+		"the status line counts the games shown");
+	/* its host listing it again, the same: still hidden, through a browser
+	closed and opened too */
+	clock_now += 30000;
+	host_heard(1, 8);
+	check(shown_at(blaze_id, NULL) == -1, "listed again the same: still hidden");
+	p2p_lobby_browse(0);
+	p2p_lobby_browse(1);
+	host_heard(1, 8);
+	host_heard(2, 3);
+	host_heard(3, 1);
+	check(shown_at(blaze_id, NULL) == -1 && shown_at(good_id, NULL) == 0, "the browser opened again: still hidden");
+	/* 5 minutes on: shown again, marked failed */
+	clock_now += FAILED_HIDE_TIME;
+	host_heard(1, 8);
+	host_heard(2, 3);
+	host_heard(3, 1);
+	check(shown_at(blaze_id, &failed) >= 0 && failed == 1,
+		"after 5 minutes: shown again, marked failed (after the others of as many players)");
+	/* failing again, then listed anew with something changed: shown, not
+	failed */
+	check(p2p_lobby_join(blaze_id, NULL), "joining it again");
+	searches(blaze, 6);
+	check(shown_at(blaze_id, NULL) == -1, "failing again: hidden again");
+	host_heard(1, 7);
+	check(shown_at(blaze_id, &failed) == 0 && !failed, "listed anew with another player count: shown, not failed");
+	check(logged_line("shown again after joining it failed"), "said in the log");
+	/* a host whose game answers: never hidden */
+	logged_count = 0;
+	check(p2p_lobby_join(good_id, NULL), "joining a good game");
+	searches(good, 1);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_game_heard(good);
+	pthread_mutex_unlock(&p2p_lock);
+	searches(good, 20);
+	check(shown_at(good_id, &failed) >= 0 && !failed && !logged_line("failed"), "a game that answers is not hidden");
+	/* the datagrams sent before the host was reached do not count (p2p.c
+	sends to reached peers only): an answer late in the window is in time */
+	check(p2p_lobby_join(good_id, NULL), "joining it again");
+	searches(good, 5);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_game_heard(good);
+	pthread_mutex_unlock(&p2p_lock);
+	searches(good, 5);
+	check(shown_at(good_id, &failed) >= 0 && !failed, "an answer after five searches is in time");
+	/* a host never reached (p2p.c's JOIN_TIMEOUT) */
+	check(p2p_lobby_join(gone_id, NULL), "joining a host that is never reached");
+	parse_hex(gone_id, hash, P2P_KEY_HASH_SIZE);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_join_timed_out(hash);
+	pthread_mutex_unlock(&p2p_lock);
+	check(p2p_lobby_join_state() == P2P_LOBBY_JOIN_GONE && shown_at(gone_id, NULL) == -1,
+		"a host not reached: its game hidden");
+	check(logged_line("its host was not reached"), "said in the log");
+	/* the menus' mark (the game gone): listed last, as before, if it was
+	not watched */
+	p2p_lobby_mark_failed(good_id);
+	check(shown_at(good_id, &failed) >= 0 && failed, "a game marked failed by the menus, not watched: shown, marked failed");
+	/* a datagram from no one watched, or with nothing watched: nothing */
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_game_heard(blaze);
+	p2p_lobby_game_sent(blaze);
+	pthread_mutex_unlock(&p2p_lock);
+	/* failures past the room: the oldest forgotten */
+	start = logged_count;
+	for (index = 0; index < 2 * MAXIMUM_GAMES; index++)
+	{
+		char id[P2P_LOBBY_ID_SIZE];
+
+		snprintf(id, sizeof(id), "%08x%024x", index + 1, 0);
+		clock_now += 10;
+		p2p_lobby_mark_failed(id);
+	}
+	check(lobby.failed_count == MAXIMUM_GAMES && logged_count - start == 2 * MAXIMUM_GAMES,
+		"failures past the room: the oldest forgotten");
+	p2p_lobby_browse(0);
+}
+
 #ifndef P2P_LOBBY_FUZZ
 int main(void)
 {
@@ -781,6 +979,7 @@ int main(void)
 	lobby_checks();
 	status_checks();
 	flood_checks();
+	failed_join_checks();
 	printf("%s (%d of %d checks failed)\n", failures ? "FAIL" : "PASS", failures, checks);
 	return failures != 0;
 }

@@ -61,7 +61,7 @@ if [ -z "$resources" ]; then
 	[ -e "$resources/sounds.map" ] ||
 		resources="$HOME/.local/share/Steam/steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition"
 fi
-$cc $bits $sanitize $flags -Wall "$here/ogg_sound_test.c" "$root/port/linux/src/ogg_sound.c" $objects -lm \
+$cc $bits $sanitize $flags -Wall "$here/ogg_sound_test.c" "$root/port/linux/src/ogg_sound.c" "$root/port/linux/src/xbox_adpcm_encoder.c" $objects -lm \
 	-o "$out/ogg_sound_test"
 if [ -e "$resources/sounds.map" ]; then
 	(cd "$out" && ./ogg_sound_test --resource-map "$resources/sounds.map") || status=1
@@ -69,7 +69,7 @@ else
 	echo "(no Halo PC sounds.map: HALO_TEST_CE_RESOURCES)"
 	(cd "$out" && ./ogg_sound_test) || status=1
 fi
-$cc $bits $sanitize $flags -Wall "$here/ogg_sound_fuzz.c" "$root/port/linux/src/ogg_sound.c" $objects -lm \
+$cc $bits $sanitize $flags -Wall "$here/ogg_sound_fuzz.c" "$root/port/linux/src/ogg_sound.c" "$root/port/linux/src/xbox_adpcm_encoder.c" $objects -lm \
 	-o "$out/ogg_sound_fuzz"
 (cd "$out" && ./ogg_sound_fuzz) || status=1
 
@@ -93,7 +93,8 @@ if [ "$seconds" != 0 ]; then
 		{ printf "$first"; cat "$here/ogg_sound_cases/$name.ogg"; } > "$found/corpus/seed_$name"
 	done
 	clang -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all -DOGG_FUZZ_LIBFUZZER $flags \
-		"$here/ogg_sound_fuzz.c" "$root/port/linux/src/ogg_sound.c" $objects64 -lm -o "$out/ogg_sound_libfuzzer"
+		"$here/ogg_sound_fuzz.c" "$root/port/linux/src/ogg_sound.c" "$root/port/linux/src/xbox_adpcm_encoder.c" \
+		$objects64 -lm -o "$out/ogg_sound_libfuzzer"
 	(cd "$out" && ./ogg_sound_libfuzzer -max_total_time="$seconds" -max_len=131072 -print_final_stats=1 \
 		-artifact_prefix="$found/" "$found/corpus" > "$found/fuzz.log" 2>&1) || status=1
 	grep -E 'stat::number_of_executed_units|stat::peak_rss|cov:.*ft:' "$found/fuzz.log" | tail -3 || true

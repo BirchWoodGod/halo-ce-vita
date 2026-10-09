@@ -85,6 +85,17 @@
 #            again, drop the joiner's link, take its listing off the
 #            broker's slot and publish none after; the bots must play; none
 #            of the three may list, reach or join the Split Screen game
+#   unjoinable a game listed that cannot be joined (Oct 8 2026: beta.1 and
+#            beta.2 hosts list their Split Screen and bots games; joining one
+#            bounced from the System Link search to the menus, 8 times): the
+#            host hosts a public lobby (SplitHost) and after
+#            HALO_TEST_LOCAL_AFTER seconds (20) plays a Split Screen game
+#            with HALO_TEST_BOTS offline bots (7: 8/8), listed as beta.2 did
+#            (HALO_TEST_HOST_LOCAL_GAME=1). The joiner, started once that
+#            game has begun, joins it from the server browser: it must reach
+#            the host, search, and say joining it failed (its host's game
+#            answered none of its System Link searches) and that it is
+#            hidden, never in a lobby
 #   pc       the host is a Vita build, the joiner a PC build: by code (it
 #            must find nothing: Vitas signal on their own topics) and on
 #            one LAN with the host (it must never list or join the game)
@@ -347,6 +358,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedreload ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = scoreboard ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = splitscreen ] && seconds=${HALO_TEST_SECONDS:-170}
+[ "$mode" = unjoinable ] && seconds=${HALO_TEST_SECONDS:-110}
 [ "$mode" = pings ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = pingsmixed ] && seconds=${HALO_TEST_SECONDS:-180}
 rejoin=${HALO_TEST_REJOIN:-0}
@@ -925,6 +937,35 @@ fullcache)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
+unjoinable)
+	after=${HALO_TEST_LOCAL_AFTER:-20}
+	bots=${HALO_TEST_BOTS:-7}
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NET_LOBBY_NAME=SplitHost HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_LOCAL_AFTER=$after \
+		HALO_NETWORK_TEST_START=10 HALO_NETWORK_TEST_SCORE=500 HALO_BOTS=$bots HALO_TEST_INPUT=bot:1 \
+		HALO_TEST_HOST_LOCAL_GAME=1; host_pid=$last_pid
+	hl=$out/host/run.log
+	for i in $(seq 1 $((after + 60))); do grep -aq "network test: the hosted game given up for a local one" "$hl" && break; sleep 1; done
+	grep -aq "network test: the hosted game given up for a local one" "$hl" || { fail "the host never went to Split Screen"; exit 1; }
+	echo "the host went to Split Screen"
+	# (once its game has begun and its listing says so)
+	sleep 15
+	rest=$((seconds - after - 25))
+	[ "$rest" -ge 40 ] || rest=40
+	seconds=$rest run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_NETWORK_TEST_PUBLIC_NAME=SplitHost; join_pid=$last_pid
+	jl=$out/joiner/run.log
+	wait $join_pid $host_pid 2>/dev/null
+	echo "--- host"; grep -aE "Internet play: (hosting|listed|a Split)|network test: (hosting|a local|the hosted|starting)" "$hl" | head -12
+	echo "--- joiner"; grep -aE "Internet play: (browser|joining|connected)|system link:|network test: (the public|join)" "$jl" | head -20
+	grep -aq "network test: starting the game" "$hl" || fail "the Split Screen game did not start"
+	grep -aq 'network test: the public games list "SplitHost"' "$jl" || fail "the joiner did not find the listing"
+	grep -aq "Internet play: connected to host" "$jl" || fail "the joiner did not reach the host"
+	grep -aq "system link: looking for games" "$jl" || fail "the joiner did not search"
+	grep -aE 'Internet play: browser: joining "SplitHost" \(host [0-9a-f]+\) failed: its host.s game answered none of [0-9]+ System Link searches in [0-9]+ s; hidden for 5 minutes' "$jl" ||
+		fail "the joiner did not mark the game failed and hide it"
+	grep -aqE "system link: (joining|in another's lobby|in a network game)" "$jl" && fail "the joiner got into the Split Screen game"
 	;;
 splitscreen)
 	after=${HALO_TEST_LOCAL_AFTER:-45}
@@ -2314,7 +2355,7 @@ INIT
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable" >&2
 	exit 2
 	;;
 esac

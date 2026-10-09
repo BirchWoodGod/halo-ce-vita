@@ -369,6 +369,12 @@ struct custom_edition_conversion_report
 	/* Ogg Vorbis sounds made Xbox ADPCM ones, which the sound cache decodes
 	as it loads them (custom_edition_sounds.c) */
 	int32_t sounds_ogg_vorbis;
+	/* 16-bit PCM permutations of Xbox ADPCM sounds, which the sound cache
+	encodes to Xbox ADPCM as it loads them (custom_edition_sounds.c) */
+	int32_t sound_permutations_pcm;
+	/* permutations whose size is not whole frames (16-bit PCM) or blocks
+	(Xbox ADPCM), muted */
+	int32_t sound_permutations_muted;
 	/* HUD element placements with Halo PC's high resolution scale, whose
 	scale was halved */
 	int32_t hud_placements_rescaled;

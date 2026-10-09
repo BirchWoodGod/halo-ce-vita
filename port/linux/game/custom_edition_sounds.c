@@ -1,8 +1,8 @@
 /*
 CUSTOM_EDITION_SOUNDS.C
 
-The Ogg Vorbis sounds of Halo Custom Edition maps, played by this build's
-sound cache as Xbox ADPCM (custom_edition_cache.h).
+The Ogg Vorbis and 16-bit PCM sounds of Halo Custom Edition maps, played
+by this build's sound cache as Xbox ADPCM (custom_edition_cache.h).
 
 The loader makes an Ogg Vorbis sound an Xbox ADPCM one to the sound
 manager, its channels and the mixer (cache_file_formats.c, sound_prepare:
@@ -37,6 +37,14 @@ while its decoding waits is forgotten, and while it runs the decoding is
 cut short and waited for (custom_edition_sound_cancel): nothing is written
 to a block after it has gone.
 
+An Xbox ADPCM sound's 16-bit PCM permutations (compression none: Halo PC
+plays them, and maps made with mods have them, extinction's scarab bolt
+among them) go the same way: the loader leaves them PCM and makes their
+buffer size the Xbox ADPCM's (cache_file_formats.c, sound_prepare), and
+the thread here reads the PCM in pieces and encodes it
+(xbox_adpcm_encoder.c), needing no working memory. Read as Xbox ADPCM they
+were noise.
+
 HALO_OGG_TRACE=1 logs each decoding: the sound, the frames, the decoded
 samples' RMS and peak, the time and working memory it took, and where its
 ADPCM is (run_ce_ogg_sound_test.sh). A permutation that does not decode is
@@ -52,6 +60,7 @@ logged once (a sound's first), whatever the setting, and plays as silence.
 #include "sound/sound_definitions.h"
 #include "custom_edition_cache.h"
 #include "../src/ogg_sound.h"
+#include "../src/xbox_adpcm_encoder.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -61,8 +70,12 @@ logged once (a sound's first), whatever the setting, and plays as silence.
 
 enum
 {
-	/* the permutation's compression: Ogg Vorbis (sound_manager.c) */
+	/* the permutation's compressions made Xbox ADPCM here: 16-bit PCM and
+	Ogg Vorbis (sound_manager.c) */
+	SOUND_PERMUTATION_COMPRESSION_PCM = 0,
 	SOUND_PERMUTATION_COMPRESSION_OGG_VORBIS = 3,
+	/* 16-bit PCM is read this many bytes at a time (whole frames) */
+	PCM_READ_BYTES = 16 * 1024,
 	/* as many decodings can wait as the sound cache has blocks
 	(xbox_sound_cache.c: 512) */
 	MAXIMUM_WAITING_SOUNDS = 512,
@@ -84,8 +97,16 @@ enum
 
 /* ---------- structures */
 
+enum transcoding
+{
+	_transcoding_none,
+	_transcoding_ogg_vorbis,
+	_transcoding_pcm
+};
+
 struct waiting_sound
 {
+	enum transcoding transcoding;
 	/* the stream: in the combined space custom_edition_cache_read serves */
 	unsigned long file_offset;
 	uint32_t file_bytes;
@@ -130,12 +151,17 @@ static struct
 
 	/* the memory block (MEMORY_BLOCK_BYTES) */
 	byte *memory;
-	/* (decodings since the map came, and their time, for the log) */
+	/* (decodings since the map came, and their time, for the log: Ogg
+	Vorbis and 16-bit PCM) */
 	unsigned long decoded_count;
 	unsigned long long decoded_microseconds;
+	unsigned long encoded_count;
+	unsigned long long encoded_microseconds;
 } custom_edition_sounds_globals = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
 
 static boolean failure_reported[MAXIMUM_WAITING_SOUNDS];
+/* (the decoding thread's: a piece of 16-bit PCM) */
+static byte pcm_piece[PCM_READ_BYTES];
 
 /* ---------- private code */
 
@@ -170,11 +196,18 @@ static double log_square_root(double value)
 	return root;
 }
 
-static boolean permutation_is_ogg_vorbis(
+/* how the sound cache loads a permutation: read (Xbox ADPCM), or made Xbox
+ADPCM here */
+static enum transcoding permutation_transcoding(
 	struct sound_permutation const *permutation)
 {
-	return custom_edition_cache_tags_loaded() &&
-		permutation->compression == SOUND_PERMUTATION_COMPRESSION_OGG_VORBIS;
+	if (!custom_edition_cache_tags_loaded())
+		return _transcoding_none;
+	if (permutation->compression == SOUND_PERMUTATION_COMPRESSION_OGG_VORBIS)
+		return _transcoding_ogg_vorbis;
+	if (permutation->compression == SOUND_PERMUTATION_COMPRESSION_PCM)
+		return _transcoding_pcm;
+	return _transcoding_none;
 }
 
 /* the sound a permutation belongs to (its runtime tag index, which the
@@ -199,6 +232,88 @@ static int stream_read(void *context, uint32_t offset, uint32_t size, void *buff
 	return custom_edition_cache_read(NONE, (long)(sound->file_offset + offset), (long)size, buffer);
 }
 
+/* the logs of a decoding (or encoding) of `sound`, which took `took`
+microseconds */
+static void sound_decode_report(
+	struct waiting_sound const *sound,
+	struct ogg_sound_result const *result,
+	unsigned long long took)
+{
+	boolean pcm = sound->transcoding == _transcoding_pcm;
+
+	if (trace_enabled())
+	{
+		double samples = (double)result->frames_decoded * sound->channels;
+
+		platform_log("%s sound: %.32s of %s: %s, %lu frames %d ch %ld Hz%s (+%lu silent%s), rms %.0f peak %d, "
+			"%.2f ms, %lu KB working, adpcm %lu bytes at %p",
+			pcm ? "pcm" : "ogg", sound->permutation->name, tag_get_name((long)sound->permutation->unknown3),
+			ogg_sound_status_describe(result->status), (unsigned long)result->frames_decoded,
+			result->stream_channels, result->stream_rate, result->halved ? " halved" : "",
+			(unsigned long)result->frames_padded, result->truncated ? ", cut off" : "",
+			samples > 0 ? log_square_root(result->sum_of_squares / samples) : 0.0, result->peak,
+			(double)took / 1000.0, (unsigned long)(result->working_peak_bytes / 1024),
+			(unsigned long)sound->destination_bytes, sound->destination);
+	}
+	if (result->status != _ogg_sound_ok && !custom_edition_sounds_globals.running_cancelled)
+	{
+		long index = ((long)sound->permutation->unknown3 & 0xFFFF) % MAXIMUM_WAITING_SOUNDS;
+
+		if (!failure_reported[index])
+		{
+			failure_reported[index] = TRUE;
+			/* (platform_log: error() is the game thread's) */
+			platform_log("custom edition: %s sound of %s (%.32s) does not decode: %s; it is silent",
+				pcm ? "a 16-bit PCM" : "an Ogg Vorbis", tag_get_name((long)sound->permutation->unknown3),
+				sound->permutation->name, ogg_sound_status_describe(result->status));
+		}
+	}
+	return;
+}
+
+/* a 16-bit PCM permutation encoded into its block, read in pieces of
+whole frames: what the samples do not fill is silence, and what does not
+fit is left out (the block is the size the loader worked out from them) */
+static void pcm_encode(struct waiting_sound *sound)
+{
+	struct xbox_adpcm_encoder encoder;
+	struct ogg_sound_result result;
+	unsigned long long started = vita_host_time_us();
+	unsigned long long took;
+	uint32_t piece_bytes = PCM_READ_BYTES / (2 * (uint32_t)sound->channels) * (2 * (uint32_t)sound->channels);
+	uint32_t offset = 0;
+
+	memset(&result, 0, sizeof(result));
+	result.status = _ogg_sound_ok;
+	result.stream_channels = sound->channels;
+	result.stream_rate = sound->rate;
+	xbox_adpcm_encoder_begin(&encoder, sound->destination, sound->destination_bytes, sound->channels);
+	while (offset < sound->file_bytes && !encoder.full)
+	{
+		uint32_t size = sound->file_bytes - offset < piece_bytes ? sound->file_bytes - offset : piece_bytes;
+
+		if (!stream_read(sound, offset, size, pcm_piece))
+		{
+			result.status = _ogg_sound_read_failed;
+			break;
+		}
+		xbox_adpcm_encoder_pcm(&encoder, pcm_piece, size);
+		offset += size;
+	}
+	if (offset < sound->file_bytes)
+		encoder.truncated = 1;
+	result.frames_padded = xbox_adpcm_encoder_finish(&encoder);
+	result.frames_decoded = encoder.frames;
+	result.truncated = encoder.truncated && result.status == _ogg_sound_ok;
+	result.sum_of_squares = encoder.sum_of_squares;
+	result.peak = encoder.peak;
+	took = vita_host_time_us() - started;
+	custom_edition_sounds_globals.encoded_count++;
+	custom_edition_sounds_globals.encoded_microseconds += took;
+	sound_decode_report(sound, &result, took);
+	return;
+}
+
 static void sound_decode(struct waiting_sound *sound)
 {
 	struct ogg_sound_request request;
@@ -206,6 +321,11 @@ static void sound_decode(struct waiting_sound *sound)
 	unsigned long long started = vita_host_time_us();
 	unsigned long long took;
 
+	if (sound->transcoding == _transcoding_pcm)
+	{
+		pcm_encode(sound);
+		return;
+	}
 	memset(&request, 0, sizeof(request));
 	request.read = stream_read;
 	request.read_context = sound;
@@ -231,33 +351,7 @@ static void sound_decode(struct waiting_sound *sound)
 	custom_edition_sounds_globals.decoded_count++;
 	custom_edition_sounds_globals.decoded_microseconds += took;
 
-	if (trace_enabled())
-	{
-		double samples = (double)result.frames_decoded * sound->channels;
-
-		platform_log("ogg sound: %.32s of %s: %s, %lu frames %d ch %ld Hz%s (+%lu silent%s), rms %.0f peak %d, "
-			"%.2f ms, %lu KB working, adpcm %lu bytes at %p",
-			sound->permutation->name, tag_get_name((long)sound->permutation->unknown3),
-			ogg_sound_status_describe(result.status), (unsigned long)result.frames_decoded,
-			result.stream_channels, result.stream_rate, result.halved ? " halved" : "",
-			(unsigned long)result.frames_padded, result.truncated ? ", cut off" : "",
-			samples > 0 ? log_square_root(result.sum_of_squares / samples) : 0.0, result.peak,
-			(double)took / 1000.0, (unsigned long)(result.working_peak_bytes / 1024),
-			(unsigned long)sound->destination_bytes, sound->destination);
-	}
-	if (result.status != _ogg_sound_ok && !custom_edition_sounds_globals.running_cancelled)
-	{
-		long index = ((long)sound->permutation->unknown3 & 0xFFFF) % MAXIMUM_WAITING_SOUNDS;
-
-		if (!failure_reported[index])
-		{
-			failure_reported[index] = TRUE;
-			/* (platform_log: error() is the game thread's) */
-			platform_log("custom edition: an Ogg Vorbis sound of %s (%.32s) does not decode: %s; it is silent",
-				tag_get_name((long)sound->permutation->unknown3), sound->permutation->name,
-				ogg_sound_status_describe(result.status));
-		}
-	}
+	sound_decode_report(sound, &result, took);
 	return;
 }
 
@@ -400,17 +494,25 @@ static uint32_t measured_adpcm_bytes(
 
 /* ---------- public code */
 
-boolean custom_edition_sound_is_ogg_vorbis(
+boolean custom_edition_sound_is_transcoded(
 	struct sound_permutation const *permutation)
 {
-	return permutation_is_ogg_vorbis(permutation);
+	return permutation_transcoding(permutation) != _transcoding_none;
 }
 
 long custom_edition_sound_cache_bytes(
 	struct sound_permutation *permutation)
 {
-	if (!permutation_is_ogg_vorbis(permutation))
+	enum transcoding transcoding = permutation_transcoding(permutation);
+
+	if (transcoding == _transcoding_none)
 		return permutation->samples.size;
+	/* (16-bit PCM: the loader's size, 0 when it was not whole frames) */
+	if (transcoding == _transcoding_pcm)
+	{
+		return permutation->sample_buffer_size <= OGG_SOUND_MAXIMUM_ADPCM_BYTES ?
+			(long)permutation->sample_buffer_size : 0;
+	}
 	if (permutation->sample_buffer_size == 0)
 	{
 		struct sound_definition const *definition = permutation_definition(permutation);
@@ -438,16 +540,20 @@ boolean custom_edition_sound_load(
 	boolean *loaded)
 {
 	struct sound_definition const *definition = permutation_definition(permutation);
+	enum transcoding transcoding = permutation_transcoding(permutation);
 	struct waiting_sound *sound;
 	boolean queued = FALSE;
 
 	pthread_mutex_lock(&custom_edition_sounds_globals.lock);
-	if (definition && destination_bytes > 0 &&
+	if (definition && destination_bytes > 0 && transcoding != _transcoding_none &&
 		custom_edition_sounds_globals.waiting_count < MAXIMUM_WAITING_SOUNDS &&
 		decoder_thread_start())
 	{
-		memory_block();
+		/* (16-bit PCM needs no working memory) */
+		if (transcoding == _transcoding_ogg_vorbis)
+			memory_block();
 		sound = &custom_edition_sounds_globals.waiting[custom_edition_sounds_globals.waiting_count++];
+		sound->transcoding = transcoding;
 		sound->file_offset = (unsigned long)permutation->samples.file_offset;
 		sound->file_bytes = (uint32_t)permutation->samples.size;
 		sound->destination = destination;
@@ -512,14 +618,19 @@ void custom_edition_sounds_stop(
 		halo_custom_edition_memory_free(custom_edition_sounds_globals.memory);
 		custom_edition_sounds_globals.memory = NULL;
 	}
-	if (custom_edition_sounds_globals.decoded_count)
+	if (custom_edition_sounds_globals.decoded_count || custom_edition_sounds_globals.encoded_count)
 	{
-		platform_log("ogg sound: %lu Ogg Vorbis permutations decoded with the map, %.1f ms in all",
+		platform_log("ogg sound: %lu Ogg Vorbis permutations decoded with the map, %.1f ms in all; "
+			"%lu 16-bit PCM ones encoded, %.1f ms",
 			custom_edition_sounds_globals.decoded_count,
-			(double)custom_edition_sounds_globals.decoded_microseconds / 1000.0);
+			(double)custom_edition_sounds_globals.decoded_microseconds / 1000.0,
+			custom_edition_sounds_globals.encoded_count,
+			(double)custom_edition_sounds_globals.encoded_microseconds / 1000.0);
 	}
 	custom_edition_sounds_globals.decoded_count = 0;
 	custom_edition_sounds_globals.decoded_microseconds = 0;
+	custom_edition_sounds_globals.encoded_count = 0;
+	custom_edition_sounds_globals.encoded_microseconds = 0;
 	memset(failure_reported, 0, sizeof(failure_reported));
 	pthread_mutex_unlock(&custom_edition_sounds_globals.lock);
 	return;
