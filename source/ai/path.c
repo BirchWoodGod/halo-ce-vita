@@ -175,6 +175,8 @@ symbols in this file:
 #include <stdlib.h>
 #include <string.h>
 #include "path_state_verify.h"
+/* (HALO_TICK_PROFILE) the searches' and path builds' time and counts (lines_profile.c) */
+#include "lines_profile.h"
 #endif
 
 /* ---------- constants */
@@ -270,7 +272,47 @@ static boolean path_state_traverse(
 
 /* ---------- globals */
 
+#ifdef HALO_LINUX
+/* (port) set on the offline bots' helper thread (bots.c), which searches
+paths beside the tick: its searches are not counted in the lines profile */
+static __thread boolean path_search_on_helper_thread;
+#endif
+
 /* ---------- public code */
+
+#ifdef HALO_LINUX
+void path_search_thread_is_helper(
+	void)
+{
+	path_search_on_helper_thread = TRUE;
+
+	return;
+}
+
+/* (HALO_TICK_PROFILE) a search's time, from started (halo_lines_now; 0 with
+the profile off), and the nodes it made */
+static void path_search_profile(
+	struct path_state const *state,
+	unsigned long long started)
+{
+	unsigned long long elapsed_us;
+
+	if (!started)
+	{
+		return;
+	}
+	elapsed_us = halo_lines_now() - started;
+	halo_lines_stats.path_searches++;
+	halo_lines_stats.path_nodes += state->node_count;
+	halo_lines_stats.path_us += elapsed_us;
+	if (elapsed_us > halo_lines_stats.path_worst_us)
+	{
+		halo_lines_stats.path_worst_us = elapsed_us;
+	}
+
+	return;
+}
+#endif
 
 void paths_initialize(
 	void)
@@ -887,6 +929,9 @@ boolean path_state_build_path(
 	struct path_step avoided_steps[4];
 	short child_node_index;
 	struct path_node *child_node;
+#ifdef HALO_LINUX
+	unsigned long long started = path_search_on_helper_thread ? 0 : halo_lines_now();
+#endif
 
 	if (state->debug)
 	{
@@ -1094,6 +1139,13 @@ boolean path_state_build_path(
 			state->debug->path_build_result != _path_build_result_none);
 	}
 
+#ifdef HALO_LINUX
+	if (started)
+	{
+		halo_lines_stats.path_builds++;
+		halo_lines_stats.path_build_us += halo_lines_now() - started;
+	}
+#endif
 	return path->valid;
 }
 
@@ -1956,8 +2008,10 @@ boolean path_state_find(
 	struct path_state *state)
 {
 	struct path_state *copy = path_state_verify_copy(state);
+	unsigned long long started = path_search_on_helper_thread ? 0 : halo_lines_now();
 	boolean result = path_state_find_once(state);
 
+	path_search_profile(state, started);
 	if (copy)
 	{
 		path_state_verify_compare(state, result, copy);

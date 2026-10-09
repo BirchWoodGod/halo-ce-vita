@@ -799,6 +799,8 @@ static void *bots_helper_main(void *argument)
 #ifdef HALO_VITA
 	vita_host_fourth_core_join("bot paths", 2);
 #endif
+	/* (path.c: this thread's searches are not the tick's) */
+	path_search_thread_is_helper();
 	for (;;)
 	{
 		long index;
