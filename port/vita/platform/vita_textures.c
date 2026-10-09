@@ -2178,6 +2178,24 @@ void vita_texture_cache_begin_frame(void)
 	}
 }
 
+/* (a map gone: d3d8_gxm.c, the worker and the GPU idle, the decodes
+quiesced) every texture forgotten - decoded again at its next use - and the
+pool's segments but its first given back (vgxm_pool_release): the CDRAM
+bytes freed */
+unsigned long vita_texture_pool_release(void)
+{
+	unsigned long freed;
+
+	pool_reuse = NULL;
+	pool_reuse_size = 0;
+	pool_last = NULL;
+	pool_last_size = 0;
+	freed = vgxm_pool_release();
+	pool_serial++;
+	pool_events++;
+	return freed;
+}
+
 unsigned long vita_texture_cache_forget(const void *base, unsigned long size)
 {
 	unsigned long bucket, count = 0;

@@ -328,6 +328,7 @@ void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes)
 }
 
 void (*platform_memory_renderer_report)(char *text, unsigned long size);
+void (*platform_renderer_map_unloaded)(void);
 
 void platform_memory_log(const char *when, const char *map_name)
 {

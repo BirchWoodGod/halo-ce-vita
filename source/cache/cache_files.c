@@ -608,6 +608,10 @@ void scenario_tags_unload(
 	halo_loaded_tag_count = 0;
 	if (unloaded_map[0])
 	{
+		if (platform_renderer_map_unloaded)
+		{
+			platform_renderer_map_unloaded();
+		}
 		platform_memory_log("unloaded", unloaded_map);
 	}
 #endif

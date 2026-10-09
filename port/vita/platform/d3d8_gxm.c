@@ -93,6 +93,7 @@ void halo_screen_ui_offset(unsigned char centered)
 static void screen_settings_apply(void);
 static void dynres_configure(void);
 static void cdram_wanted_relieve(void);
+static void renderer_map_unloaded(void);
 static unsigned long cdram_census_frame(void);
 static void cdram_census(const char *when);
 
@@ -1422,6 +1423,7 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 		else
 			platform_log("Direct3D: running without the GPU (nothing is displayed)");
 		device.created = TRUE;
+		platform_renderer_map_unloaded = renderer_map_unloaded;
 	}
 	*returned_device = device_pointer();
 	return S_OK;
@@ -4645,6 +4647,36 @@ static unsigned long cdram_relieve_pool(void)
 		platform_log("cdram: a texture pool part (%lu KB) moved out of CDRAM, %lu textures to decode again", freed / 1024,
 			textures);
 	return freed;
+}
+
+/* (platform_renderer_map_unloaded: cache_files.c's scenario_tags_unload,
+on the game's thread, between a map's tags going and the next's coming)
+the texture pool's textures - the old map's - forgotten and its segments
+but the first given back to CDRAM, the screen block cache and the small
+targets' spare blocks freed (vgxm_memory_trim): the next map starts with
+the video memory a fresh start has, and makes the segments it fills. On the
+owner's Vita (beta.2, Oct 8) the pool, grown to 56 MB on The Silent
+Cartographer, kept every segment for the session, the block cache 8 MB
+more, 3 MB of CDRAM free: a live change's targets failed, then after a
+join on carousel a pool segment and every texture */
+static void renderer_map_unloaded(void)
+{
+	unsigned long held = vgxm_pool_held(), before = vgxm_cdram_free(), freed, trimmed;
+
+	if (!device.created || !device.gpu_ready)
+		return;
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+	vita_texture_decodes_quiesce();
+	freed = vita_texture_pool_release();
+	trimmed = vgxm_memory_trim();
+	platform_log("cdram: a map gone: the texture pool %lu KB -> %lu KB held (%lu KB of CDRAM given back), %lu KB of cached "
+		"blocks freed: %lu KB -> %lu KB free", held / 1024, vgxm_pool_held() / 1024, freed / 1024, trimmed / 1024,
+		before / 1024, vgxm_cdram_free() / 1024);
 }
 
 /* the texture pool's segments in user RAM moved back to CDRAM while the

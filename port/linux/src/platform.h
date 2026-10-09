@@ -165,6 +165,9 @@ Vita's GXM device), its texture pool, video memory and programs: a session
 that grows from map to map shows it map by map */
 void platform_memory_log(const char *when, const char *map_name);
 extern void (*platform_memory_renderer_report)(char *text, unsigned long size);
+/* (cache_files.c, a map's tags gone: the Vita's renderer gives back what
+its textures held, d3d8_gxm.c) */
+extern void (*platform_renderer_map_unloaded)(void);
 /* Which textures hold their channels where Halo PC keeps them, for the same
 (xbox_textures.c; also declared for the game there) */
 void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order);

@@ -86,6 +86,9 @@ void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
 /* one log line of what memory is in use (the C heap, the window, the
 renderer's), when a map has gone and when one is up (xbox_memory.c) */
 void platform_memory_log(const char *when, const char *map_name);
+/* (the Vita's renderer sets it) a map's tags gone: what its textures held
+given back (d3d8_gxm.c) */
+extern void (*platform_renderer_map_unloaded)(void);
 /* where Halo PC keeps the channels of the pixels a Custom Edition bitmap
 just arrived at (an enum custom_edition_channel_order,
 port/linux/game/cache_file_formats.h), which the renderer then samples in

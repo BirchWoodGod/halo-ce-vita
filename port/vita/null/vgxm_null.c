@@ -331,6 +331,18 @@ void vgxm_pool_reset(void)
 	pool_forget();
 }
 
+unsigned long vgxm_pool_held(void)
+{
+	return pool_held();
+}
+
+unsigned long vgxm_pool_release(void)
+{
+	if (!pool_floor)
+		pool_floor = 65536 * 2;
+	return pool_release();
+}
+
 int vgxm_pool_recycle(void **base, unsigned long *size)
 {
 	if (!pool_floor)

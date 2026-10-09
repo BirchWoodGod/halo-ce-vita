@@ -12,7 +12,9 @@
 # round on (the first fills the caches that last the session: the texture
 # pool, the programs, the frame interpolation's buffers), each map must
 # leave the C heap within 256 KB of what it left the round before, the
-# window as free and video memory as free (no less than 1 MB). Every map
+# window as free and video memory as free (no less than 1 MB), and the
+# texture pool must hold no more than its first segment (4 MB) once a map
+# is unloaded (d3d8_gxm.c gives the rest back to CDRAM). Every map
 # must load, and no assertion or exception be logged.
 #
 #   run_ce_map_memory_test.sh
@@ -129,6 +131,9 @@ awk -v first="${picked[0]}" '
 		heap = line; sub(/.*C heap /, "", heap); sub(/ KB.*/, "", heap)
 		window = line; sub(/.*KB in use, /, "", window); sub(/ KB free.*/, "", window)
 		video = line; sub(/.*video memory /, "", video); sub(/ KB free.*/, "", video)
+		pool = line; sub(/.*texture pool /, "", pool); sub(/ KB held.*/, "", pool)
+		if (pool > 4096)
+			{ printf "FAIL: the texture pool still held %d KB once %s was unloaded (its first 4096 KB segment at most)\n", pool, map; bad = 1 }
 		if (seen[map] && last_round[map] < round) {
 			if (heap - last_heap[map] > 256)
 				{ printf "FAIL: %s left the C heap %d KB fuller than the round before (%d -> %d KB)\n", map, heap - last_heap[map], last_heap[map], heap; bad = 1 }

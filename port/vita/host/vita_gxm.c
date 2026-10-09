@@ -765,6 +765,24 @@ void vgxm_pool_reset(void)
 	pool_forget();
 }
 
+unsigned long vgxm_pool_held(void)
+{
+	return pool_held();
+}
+
+unsigned long vgxm_pool_release(void)
+{
+	if (gxm.in_scene)
+	{
+		sceGxmEndScene(gxm.context, NULL, NULL);
+		gxm.in_scene = 0;
+	}
+	sceGxmFinish(gxm.context);
+	if (!pool_floor)
+		pool_floor = 65536 * 2;
+	return pool_release();
+}
+
 int vgxm_pool_recycle(void **base, unsigned long *size)
 {
 	/* (as vgxm_pool_reset: the GPU done with every texture before one's

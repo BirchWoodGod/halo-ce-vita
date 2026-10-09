@@ -18,8 +18,8 @@ BOOL platform_vita_sdl_initialize(void);
 /* (platform_memory_log) the texture pool, video memory and programs */
 static void renderer_memory_report(char *text, unsigned long size)
 {
-	snprintf(text, size, "texture pool %lu KB, video memory %lu KB free, %s", vgxm_pool_used() / 1024,
-		vgxm_cdram_free() / 1024, vgxm_counts());
+	snprintf(text, size, "texture pool %lu KB held (filled to %lu KB), video memory %lu KB free, %s",
+		vgxm_pool_held() / 1024, vgxm_pool_used() / 1024, vgxm_cdram_free() / 1024, vgxm_counts());
 }
 
 /* GXM, the display and the renderer (port/vita/host/vita_gxm.c) */
