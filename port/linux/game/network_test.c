@@ -172,6 +172,12 @@ static struct
 	real joined_seconds;
 	boolean team_set;
 	real kill_interval;
+	/* debug.network_test_kill: the game time of the last scripted kill (0:
+	none yet: the game's start), the game time last seen (a smaller one: the
+	next game), and whether the first player has had this game's grenades */
+	long kill_time;
+	long kill_seen_time;
+	boolean kill_grenades_given;
 	real shoot_interval;
 	real vehicle_time;
 	real pickup_time;
@@ -1003,9 +1009,24 @@ void network_test_update(
 			}
 		}
 		/* debug.network_test_kill: the host kills the last player every so
-		often, to test deaths and respawns reaching the clients */
+		often, to test deaths and respawns reaching the clients, and so that
+		a short game (debug.network_test_score) ends: the interval after the
+		last kill (or the game's start), at the first second both players
+		are alive from then on. (Not only in the one second at each multiple
+		of the interval: a player dead then lost the whole interval, and the
+		first player's own grenades kill it now and then, a suicide taking
+		its point back; three of those in a game and the first game of
+		run_netns_online_test.sh code outlasted the run, its map change never
+		reached, about one run in five.) */
+		if (network_test.mode == _network_test_host && network_test.kill_interval > 0.0f && game_time_get() <
+			network_test.kill_seen_time)
+		{
+			network_test.kill_time = 0;
+			network_test.kill_grenades_given = FALSE;
+		}
+		network_test.kill_seen_time = game_time_get();
 		if (network_test.mode == _network_test_host && network_test.kill_interval > 0.0f &&
-			game_time_get() % MAX(1, (long)(network_test.kill_interval * TICKS_PER_SECOND)) < TICKS_PER_SECOND)
+			game_time_get() - network_test.kill_time >= MAX(1, (long)(network_test.kill_interval * TICKS_PER_SECOND)))
 		{
 			struct data_iterator iterator;
 			struct player_datum *player;
@@ -1029,7 +1050,10 @@ void network_test_update(
 				/* killed by the first player: a kill that scores */
 				platform_log("network test: the first player kills the last");
 				damage_kill_object_for_player(last->unit_index, first_index);
-				/* and picks up a weapon lying about, and two grenades of each kind */
+				network_test.kill_time = game_time_get();
+				/* and picks up a weapon lying about, and (once a game: the
+				scripted player throws them every seven seconds, and they
+				are what kills it) two grenades of each kind */
 				{
 					struct object_iterator objects;
 					struct unit_datum *unit = unit_get(first->unit_index);
@@ -1049,8 +1073,12 @@ void network_test_update(
 							break;
 						}
 					}
-					unit->unit.grenade_counts[0] = 2;
-					unit->unit.grenade_counts[1] = 2;
+					if (!network_test.kill_grenades_given)
+					{
+						unit->unit.grenade_counts[0] = 2;
+						unit->unit.grenade_counts[1] = 2;
+						network_test.kill_grenades_given = TRUE;
+					}
 				}
 			}
 		}
