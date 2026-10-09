@@ -15,7 +15,10 @@ reads it from here.
 #ifndef VITA_VERSION_H
 #define VITA_VERSION_H
 
+/* (a test may build as another version: run_vita_settings_test.sh) */
+#ifndef HALO_VITA_VERSION
 #define HALO_VITA_VERSION "1.1.0-beta.1"
+#endif
 #define HALO_VITA_APP_VER "01.10"
 
 #endif

@@ -150,7 +150,8 @@ def ogg_sound_sources(tlsf: bool = True) -> List[Path]:
 def ogg_sound_cflags(abi: str) -> str:
     """the decoder's flags: its own, with the platform's ABI"""
     return " ".join([abi, "-std=gnu11", "-O2", LIBOGG_INCLUDE, "-DNDEBUG", "-w"])
-# the self-updater's TLS (port/linux/src/posix_update.c)
+# the self-updater's TLS (port/linux/src/posix_update.c) and the update
+# check's (posix_https.c)
 MBEDTLS_DIR = Path("port/third_party/mbedtls")
 # internet play's UPnP (port/linux/src/posix_upnp.c)
 MINIUPNPC_DIR = Path("port/third_party/miniupnpc")
@@ -508,7 +509,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 continue
             if gxm_null and source.name == "sdl_platform.c":
                 add_object(source, gxm_null_cflags)
-            elif source.name == "posix_update.c":
+            elif source.name in ("posix_update.c", "posix_https.c"):
                 add_object(source, f"{posix_cflags} {mbedtls_include}", posix=True)
             elif source.name == "posix_upnp.c":
                 add_object(source, f"{posix_cflags} -I{MINIUPNPC_DIR / 'include'} -DMINIUPNP_STATICLIB", posix=True)

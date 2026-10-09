@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds and runs the desktop test of the settings panel's multiplayer page
 # (port/vita/host/vita_settings.c; vita_settings_test.c), with the port's
-# translations (port/linux/src/lang.c, port/vita/app0/lang). Only the SDK's
+# translations (port/linux/src/lang.c, port/vita/app0/lang), and again as a
+# release build (the Update channel's Stable offered). Only the SDK's
 # psp2 headers are used, for the types (the C library is the host's).
 #   VITASDK   the SDK (default ~/vitasdk)
 set -e
@@ -14,12 +15,24 @@ ln -s "$sdk/arm-vita-eabi/include/psp2" "$out/include/psp2"
 ln -s "$sdk/arm-vita-eabi/include/psp2common" "$out/include/psp2common"
 ln -s "$sdk/arm-vita-eabi/include/vitasdk" "$out/include/vitasdk" 2>/dev/null || true
 cc=${CC:-gcc}
-$cc -m32 -g -O1 -Wall -Wno-unused-function -D_GNU_SOURCE -I"$out/include" -I"$root/port/linux/src" -I"$root/port/vita/include" \
-	"$here/vita_settings_test.c" "$root/port/vita/host/vita_controls.c" "$root/port/linux/src/lang.c" \
-	-o "$out/vita_settings_test"
+build() { # OUTPUT [FLAGS...]
+	output=$1
+	shift
+	$cc -m32 -g -O1 -Wall -Wno-unused-function -D_GNU_SOURCE -I"$out/include" -I"$root/port/linux/src" \
+		-I"$root/port/vita/include" "$@" "$here/vita_settings_test.c" "$root/port/vita/host/vita_controls.c" \
+		"$root/port/linux/src/lang.c" "$root/port/linux/src/update_check.c" -o "$output"
+}
+build "$out/vita_settings_test"
 # (the language files, where the Vita has them: app0:lang)
 ln -s "$root/port/vita/app0/lang" "$out/app0:lang"
 status=0
 (cd "$out" && ./vita_settings_test) || status=$?
+# (again as a release build, whose Update channel offers Stable: in a
+# folder of its own)
+mkdir -p "$out/release"
+build "$out/release/vita_settings_test" '-DHALO_VITA_VERSION="1.1.0"'
+ln -s "$root/port/vita/app0/lang" "$out/release/app0:lang"
+echo "--- as a release build (1.1.0)"
+(cd "$out/release" && ./vita_settings_test) || status=$?
 rm -rf "$out"
 exit $status

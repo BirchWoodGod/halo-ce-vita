@@ -4226,7 +4226,9 @@ static unsigned int menu_touch_diagram(struct overlay_vertex *vertices, unsigned
 }
 
 /* a row of the settings panel: its label, and after a '\x02' its value,
-which starts at `value_x` (the values of a page make a column) */
+which starts at `value_x` (the values of a page make a column); a '\x07'
+in the value greys out the rest of it (the choices a build does not offer:
+vita_settings.c choice_disabled) */
 static unsigned int menu_row(struct overlay_vertex *vertices, unsigned int count, unsigned int limit, float x,
 	float value_x, float y, uint32_t label_color, uint32_t value_color, const char *line)
 {
@@ -4240,7 +4242,24 @@ static unsigned int menu_row(struct overlay_vertex *vertices, unsigned int count
 	label[length] = 0;
 	count = overlay_text(vertices, count, limit, x, y, 2.0f, label_color, label);
 	if (value)
-		count = overlay_text(vertices, count, limit, value_x, y, 2.0f, value_color, value + 1);
+	{
+		const char *greyed = strchr(value + 1, '\x07');
+		char shown[96];
+		size_t index, characters = 0;
+
+		length = greyed ? (size_t)(greyed - value - 1) : strlen(value + 1);
+		if (length > sizeof(shown) - 1)
+			length = sizeof(shown) - 1;
+		memcpy(shown, value + 1, length);
+		shown[length] = 0;
+		count = overlay_text(vertices, count, limit, value_x, y, 2.0f, value_color, shown);
+		/* (its characters, not UTF-8's bytes, 16 pixels each) */
+		for (index = 0; index < length; index++)
+			characters += ((unsigned char)shown[index] & 0xC0) != 0x80;
+		if (greyed)
+			count = overlay_text(vertices, count, limit, value_x + 16.0f * (float)characters, y, 2.0f, MENU_INFO,
+				greyed + 1);
+	}
 	return count;
 }
 

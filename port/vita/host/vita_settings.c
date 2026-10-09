@@ -69,7 +69,10 @@ is the Vita's yaw or its roll; a line shows the gyroscope's rates now and
 whether its bias was learnt (it is, each time the Vita lies still for a
 second). Advanced: the sticks' deadzone, Reset controls (look, crouch,
 buttons and touch back as shipped; the gyro's rows and Show dev settings
-stay) and Show dev settings.
+stay), Show dev settings, then the update check (update_check.h): Update
+channel (Experimental or Stable; a pre-release build's Stable greyed out:
+choice_disabled) and Check for updates, which asks GitHub in the background
+and shows its answer under the build's version.
 
 Multiplayer is for playing with other Vitas: Connection, the ad hoc room
 (with the connection Ad hoc), Join with a code (see below) and Modded maps,
@@ -156,6 +159,7 @@ Multiplayer tab's way.
 #include "lang.h"
 #include "p2p.h"
 #include "system_link_shortcut.h"
+#include "update_check.h"
 #include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
@@ -252,6 +256,8 @@ enum
 	ACTION_PAGE,
 	/* the Custom Edition installer's maps taken (vita_ce_installer.c) */
 	ACTION_CE_EXTRACT,
+	/* a look for a newer version (update_notify.c), in the background */
+	ACTION_UPDATE_CHECK,
 };
 
 struct setting
@@ -459,6 +465,16 @@ static struct setting settings[] = {
 		PAGE_CONTROLS_ADVANCED, KIND_ACTION, ACTION_RESET_CONTROLS },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, PAGE_CONTROLS_ADVANCED },
+	/* (the update check, update_check.h: nothing asked of the network until
+	Check for updates is pressed, nothing downloaded; its answer on a line
+	below, page_lines. Experimental looks at pre-releases and releases,
+	Stable at releases only; a pre-release build is on Experimental, its
+	Stable greyed out (choice_disabled) and a saved Stable ignored
+	(vita_settings_load); a release build starts on Stable) */
+	{ "Update channel", "HALO_UPDATE_CHANNEL", 0, 2, { "experimental", "stable" }, { "Experimental", "Stable" },
+		"Experimental: betas too. Stable: releases only", 1, PAGE_CONTROLS_ADVANCED },
+	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; nothing is downloaded",
+		0, PAGE_CONTROLS_ADVANCED, KIND_ACTION, ACTION_UPDATE_CHECK },
 
 	/* (Multiplayer: the connection, the ad hoc room (Ad hoc), a code typed
 	in (Online, for a Vita without the in-game PC menus: setting_shown), the
@@ -1021,6 +1037,15 @@ static int choice_last(const struct setting *setting)
 	return setting->count - 1;
 }
 
+/* a choice this build does not offer, shown greyed out: Stable updates on
+a pre-release build (update_check.h) */
+static int choice_disabled(const struct setting *setting, int choice)
+{
+	return setting->variable && !strcmp(setting->variable, "HALO_UPDATE_CHANNEL") && choice >= 0 &&
+		choice < setting->count && !strcmp(setting->values[choice], "stable") &&
+		update_build_is_prerelease(HALO_VITA_VERSION);
+}
+
 /* a setting's value as the environment variable (or variables) it is */
 static void apply_value(const struct setting *setting)
 {
@@ -1252,6 +1277,9 @@ void vita_settings_load(void)
 	vita_settings_language_init();
 	memset(dev_saved, 0, sizeof(dev_saved));
 	memset(named, 0, sizeof(named));
+	/* (a pre-release build's Update channel: Experimental) */
+	if (!shipped_kept && update_build_is_prerelease(HALO_VITA_VERSION))
+		setting_named("HALO_UPDATE_CHANNEL")->choice = find_choice(setting_named("HALO_UPDATE_CHANNEL"), "experimental");
 	if (!shipped_kept)
 	{
 		for (index = 0; index < SETTING_COUNT; index++)
@@ -1410,6 +1438,22 @@ void vita_settings_load(void)
 				setting->choice = find_choice(setting, profile_values[saved_profile][row]);
 		}
 	}
+	/* (a choice this build does not offer, from settings.txt or env.txt -
+	Stable on a pre-release build: the row's first one offered, said once) */
+	for (index = 0; index < SETTING_COUNT; index++)
+		if (settings[index].kind == KIND_CHOICE && choice_disabled(&settings[index], settings[index].choice))
+		{
+			struct setting *setting = &settings[index];
+			char message[160];
+			int choice;
+
+			for (choice = 0; choice < setting->count && choice_disabled(setting, choice); choice++)
+				;
+			snprintf(message, sizeof(message), "settings: %s=%s is not offered by this build (%s): %s",
+				setting->variable, setting->values[setting->choice], HALO_VITA_VERSION, setting->values[choice]);
+			vita_host_log(message);
+			setting->choice = choice;
+		}
 	/* (the profile is what the rows are: Custom when env.txt or the panel
 	set them apart from every profile) */
 	setting_named("HALO_PROFILE")->choice = matching_profile();
@@ -1802,6 +1846,41 @@ static int tab_shown(int index)
 	return index != TAB_DEV || choice_of("HALO_DEV_SETTINGS");
 }
 
+/* the update check's answer (Controls > Advanced, under the version): one
+line, two when a newer version is out (where to get it: always this fixed
+address, never one from the answer); their count */
+static int update_lines(struct line *lines)
+{
+	char version[UPDATE_VERSION_SIZE];
+	int status = update_check_status(version, sizeof(version));
+	int count = 0;
+
+	lines[0].type = LINE_INFO;
+	switch (status)
+	{
+	case UPDATE_STATUS_CHECKING:
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Checking..."));
+		break;
+	case UPDATE_STATUS_UP_TO_DATE:
+		snprintf(lines[count++].text, sizeof(lines[0].text), T("Up to date (%s)"), version);
+		break;
+	case UPDATE_STATUS_AVAILABLE:
+		/* (in amber: '!') */
+		lines[0].text[0] = '!';
+		snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, T("Update available: %s"), version);
+		lines[count].type = LINE_INFO;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", UPDATE_RELEASES_PAGE);
+		break;
+	case UPDATE_STATUS_NO_CONNECTION:
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Couldn't check: no connection"));
+		break;
+	case UPDATE_STATUS_FAILED:
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Couldn't check right now"));
+		break;
+	}
+	return count;
+}
+
 /* the lines of the page shown: its rows, then the gyroscope's line (Gyro
 settings) or the maps (Modded maps) */
 static int page_lines(struct line *lines)
@@ -1825,6 +1904,7 @@ static int page_lines(struct line *lines)
 		/* (which build this is, for a report: halo.log's first line has it too) */
 		lines[count].type = LINE_INFO;
 		snprintf(lines[count++].text, sizeof(lines[0].text), T("Version %s"), HALO_VITA_VERSION);
+		count += update_lines(lines + count);
 	}
 	if (page == PAGE_MAPS)
 	{
@@ -2160,6 +2240,10 @@ static void help_line(char *text, int size, const struct line *line)
 		snprintf(text, (size_t)size, T("First the system's dialog joins ad hoc room %d"), choice_of("HALO_ADHOC_ROOM") + 1);
 	else if (setting->variable && !strcmp(setting->variable, "HALO_VITA_NETWORK"))
 		snprintf(text, (size_t)size, "%s", connection_help(setting));
+	/* (a pre-release build: Experimental only, until the release) */
+	else if (setting->variable && !strcmp(setting->variable, "HALO_UPDATE_CHANNEL") &&
+		update_build_is_prerelease(HALO_VITA_VERSION) && update_version_release(HALO_VITA_VERSION, detail, sizeof(detail)))
+		snprintf(text, (size_t)size, T("Stable updates arrive with %s"), detail);
 	else
 		snprintf(text, (size_t)size, "%s", setting_help(setting));
 }
@@ -2360,12 +2444,23 @@ static void show_list(void)
 			}
 			else
 			{
-				int last = choice_last(setting);
+				int last = choice_last(setting), choice, before = 0, after = 0;
 
+				/* (the arrows: a choice offered that way) */
+				for (choice = 0; choice <= last; choice++)
+					if (!choice_disabled(setting, choice))
+					{
+						before |= choice < setting->choice;
+						after |= choice > setting->choice;
+					}
 				/* (a row that applies after a restart: marked *) */
 				length += snprintf(text + length, sizeof(text) - length, "\n%s%s\x02%c %s %c", setting_label(setting),
-					setting->restart ? "*" : "", setting->choice > 0 ? '<' : ' ', setting_value_name(setting),
-					setting->choice < last ? '>' : ' ');
+					setting->restart ? "*" : "", before ? '<' : ' ', setting_value_name(setting), after ? '>' : ' ');
+				/* (the choices this build does not offer, greyed out after a
+				'\x07', after the arrow's place: vita_gxm.c menu_row) */
+				for (choice = 0; choice <= last && length < (int)sizeof(text); choice++)
+					if (choice_disabled(setting, choice))
+						length += snprintf(text + length, sizeof(text) - length, "\x07%s", T(setting->names[choice]));
 			}
 		}
 	}
@@ -2686,6 +2781,9 @@ static void change(struct setting *setting, int step)
 {
 	int choice = setting->choice + step;
 
+	/* (past the choices this build does not offer) */
+	while (choice >= 0 && choice < setting->count && choice_disabled(setting, choice))
+		choice += step;
 	if (choice < 0 || choice >= setting->count)
 		return;
 	/* (Custom is not chosen: the Profile row reads it when a row it sets
@@ -3043,6 +3141,10 @@ static void act(const struct setting *setting)
 {
 	switch (setting->action)
 	{
+	/* (in the background: the answer shows under the version as it comes) */
+	case ACTION_UPDATE_CHECK:
+		update_check_request();
+		break;
 	/* (online: a game joined by its code, or picked from the public games,
 	then Join's steps with how the lookup goes, as Join a game was in 1.0.3) */
 	case ACTION_JOIN_CODE:

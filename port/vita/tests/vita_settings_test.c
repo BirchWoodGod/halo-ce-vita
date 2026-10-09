@@ -74,6 +74,21 @@ int vita_ce_installer_start(void)
 	return 0;
 }
 
+/* (update_notify.c's: the status a test sets, the presses counted) */
+static int update_status_value = UPDATE_STATUS_NONE, update_requests;
+static char update_version_value[UPDATE_VERSION_SIZE];
+int update_check_request(void)
+{
+	update_requests++;
+	update_status_value = UPDATE_STATUS_CHECKING;
+	return update_status_value;
+}
+int update_check_status(char *version, int size)
+{
+	snprintf(version, (size_t)size, "%s", update_version_value);
+	return update_status_value;
+}
+
 /* (vita_input.c's) */
 void vita_gyro_status(char *text, int size) { snprintf(text, (size_t)size, "Gyro: yaw -999 pitch -999 roll -999 lay still"); }
 
@@ -694,8 +709,10 @@ static void test_controls_tab(void)
 	check(open_page("Advanced") && strstr(menu, "\n\x03" "Controls > Advanced\n") &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Stick deadzone\x02", 15) &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Reset controls\x02  >") &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) && menu_rows() == 3,
-		"Controls, Advanced: Stick deadzone, Reset controls, Show dev settings");
+		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Update channel\x02", 15) &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Check for updates\x02  >") && menu_rows() == 5 && menu_fits(),
+		"Controls, Advanced: Stick deadzone, Reset controls, Show dev settings, Update channel, Check for updates");
 	check(strstr(menu, "\n\x04" "Version " HALO_VITA_VERSION "\n") != NULL,
 		"Controls, Advanced: the build's version (vita_version.h) under the rows");
 	to_line("Reset controls");
@@ -1175,7 +1192,7 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
-		"HALO_LANGUAGE",
+		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1689,6 +1706,93 @@ static void test_languages(void)
 	vita_settings_set("HALO_LANGUAGE", "auto");
 }
 
+/* ---------- the update check's rows (Controls > Advanced) */
+
+/* the page redrawn (a frame after half a second) */
+static void redraw(void)
+{
+	clock_us += 600000;
+	frame(0);
+}
+
+static void test_updates(void)
+{
+	char line[160];
+	int prerelease = update_build_is_prerelease(HALO_VITA_VERSION);
+
+	open_panel();
+	to_tab("Controls");
+	check(open_page("Advanced"), "Controls, Advanced opens");
+	check(to_line("Update channel"), "the Update channel row");
+	printf("%s\n--\n", menu);
+	if (prerelease)
+	{
+		char help[96], release[16];
+
+		update_version_release(HALO_VITA_VERSION, release, sizeof(release));
+		snprintf(help, sizeof(help), "\n\x05Stable updates arrive with %s\n", release);
+		check(strstr(menu, "\nUpdate channel\x02  Experimental  \x07Stable\n") && menu_fits(),
+			"a pre-release build: Experimental, Stable greyed out, no arrows");
+		check(strstr(menu, help) != NULL, "its help: Stable updates arrive with the release");
+		press(VITA_BUTTON_RIGHT);
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "experimental") &&
+			strstr(menu, "\nUpdate channel\x02  Experimental  \x07Stable\n"), "left and right cannot choose Stable");
+		vita_settings_set("HALO_UPDATE_CHANNEL", "stable");
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "experimental"), "nor can the game (vita_settings_set)");
+		/* (a settings.txt that says stable: Experimental, said once) */
+		write_file(SETTINGS_FILE, "HALO_UPDATE_CHANNEL=stable\n", 27);
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "experimental") &&
+			strstr(log_text, "settings: HALO_UPDATE_CHANNEL=stable is not offered by this build") &&
+			!strstr(strstr(log_text, "is not offered") + 1, "is not offered"),
+			"settings.txt's stable is ignored on a pre-release build, logged once");
+		setenv("HALO_UPDATE_CHANNEL", "stable", 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "experimental"), "and env.txt's");
+		unsetenv("HALO_UPDATE_CHANNEL");
+	}
+	else
+	{
+		check(strstr(menu, "\nUpdate channel\x02< Stable  \n") && menu_fits() && !strchr(menu, '\x07'),
+			"a release build: Stable by default, Experimental offered");
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "experimental") &&
+			strstr(menu, "\nUpdate channel\x02  Experimental >\n") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_UPDATE_CHANNEL=experimental\n"), "Experimental chosen, saved");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "stable"), "back to Stable");
+	}
+	/* Check for updates: in the background, its answer under the version */
+	check(to_line("Check for updates") && !update_requests, "nothing asked before the press");
+	press(VITA_BUTTON_CROSS);
+	redraw();
+	check(update_requests == 1 && strstr(menu, "\n\x04" "Checking...\n") && menu_fits(), "pressed: Checking...");
+	update_status_value = UPDATE_STATUS_AVAILABLE;
+	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
+	redraw();
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\n") &&
+		menu_fits(), "an update: the version and where to get it, in amber");
+	update_status_value = UPDATE_STATUS_UP_TO_DATE;
+	snprintf(update_version_value, sizeof(update_version_value), "%s", HALO_VITA_VERSION);
+	redraw();
+	snprintf(line, sizeof(line), "\n\x04Up to date (%s)\n", HALO_VITA_VERSION);
+	check(strstr(menu, line) && !strstr(menu, "github.com") && menu_fits(), "up to date");
+	update_status_value = UPDATE_STATUS_NO_CONNECTION;
+	redraw();
+	check(strstr(menu, "\n\x04" "Couldn't check: no connection\n") && menu_fits(), "no connection");
+	update_status_value = UPDATE_STATUS_FAILED;
+	redraw();
+	check(strstr(menu, "\n\x04" "Couldn't check right now\n") && menu_fits(), "could not check");
+	update_status_value = UPDATE_STATUS_NONE;
+	redraw();
+	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
+}
+
 int main(void)
 {
 	char line[128];
@@ -2185,6 +2289,10 @@ int main(void)
 	test_gyro_page();
 	test_button_icons();
 	test_game_text_input();
+	test_updates();
+	/* (the languages' pages with an update found: its lines in Spanish too) */
+	update_status_value = UPDATE_STATUS_AVAILABLE;
+	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	test_languages();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;

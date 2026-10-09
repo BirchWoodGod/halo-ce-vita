@@ -2276,9 +2276,21 @@ static void set_textbox_to_build_number(
 
 	if (widget->parameters.text_box.text)
 	{
+		wchar_t const *shown = build_number_string;
+
+#ifdef HALO_LINUX
+		/* (port) a newer version the settings panel's Check for updates
+		found, in the build number's corner until the game restarts
+		(port/linux/src/update_notify.c) */
+		static wchar_t update_text[NUMBEROF(build_number_string)];
+		int update_check_menu_text(unsigned short *text, int count);
+
+		if (update_check_menu_text((unsigned short *)update_text, NUMBEROF(update_text)))
+			shown = update_text;
+#endif
 		ustrncpy(
 			widget->parameters.text_box.text,
-			build_number_string,
+			shown,
 			NUMBEROF(build_number_string) - 1);
 		widget->parameters.text_box.text[NUMBEROF(build_number_string) - 1] = 0;
 	}

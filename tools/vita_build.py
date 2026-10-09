@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from .ninja_syntax import Writer
 from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
-from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
+from .linux_build import (MBEDTLS_DIR, GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
                           ZLIB_DEFINES, MONOCYPHER_DIR, MONOCYPHER_SOURCES, EXPAT_DIR, EXPAT_SOURCES, musl_math_sources,
                           LIBOGG_INCLUDE, ogg_sound_sources,
                           MUSL_MATH_DIR, LIBMSPACK_DIR, LIBMSPACK_SOURCES, LIBMSPACK_FLAGS,
@@ -129,6 +129,7 @@ HOST_FLAGS = [
 LINUX_SOURCES_REPLACED = {
     "posix_files.c", "posix_net.c", "posix_update.c", "posix_upnp.c", "posix_profile.c",  # port/vita/host
     "posix_ce_installer.c",  # built with the SDK's ABI below, for port/vita/host
+    "posix_https.c",  # built with the SDK's ABI below, with Mbed TLS (the update check)
     "memory_watch.c",  # port/vita/platform/vita_memory_watch.c
     "bink_null.c",  # port/vita/platform/bink_vita.c (the Vita's video player)
     # the OpenGL renderer: port/vita/platform/d3d8_gxm.c, nv2a_*_cg.c, vita_textures.c
@@ -311,6 +312,14 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         add(source, "vita_host_cc", host_cflags, [generator_header] if source.name == "vita_gxm.c" else None)
     # the shader compiler's heap (vita_gxm.c): port/third_party/tlsf
     add(TLSF_DIR / "tlsf.c", "vita_host_cc", " ".join(HOST_FLAGS + ["-DNDEBUG", "-w"]))
+    # the update check's HTTPS request (port/linux/src/posix_https.c) and its
+    # TLS (port/third_party/mbedtls, the Linux build's, with the Vita's few
+    # changes: port/vita/include/mbedtls_vita_config.h), with the SDK's ABI
+    mbedtls_flags = [f"-I{MBEDTLS_DIR / 'include'}", f"-I{MBEDTLS_DIR / 'library'}",
+                     f"-I{vita_include}", '-DMBEDTLS_USER_CONFIG_FILE=\\"mbedtls_vita_config.h\\"']
+    add(LINUX_DIR / "src" / "posix_https.c", "vita_host_cc", " ".join([host_cflags, *mbedtls_flags]))
+    for source in sorted((MBEDTLS_DIR / "library").glob("*.c")):
+        add(source, "vita_host_cc", " ".join(HOST_FLAGS + mbedtls_flags + ["-w"]))
     # the files half of the Linux host boundary works as it is on newlib
     add(LINUX_DIR / "src" / "posix_files.c", "vita_host_cc", host_cflags + " -D_GNU_SOURCE")
     # the Custom Edition installer's maps (vita_ce_installer.c), with its

@@ -212,7 +212,32 @@ Graphics, **Advanced**:
 | Button layout > | As shipped | Button icons (Xbox; PlayStation: below), then A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back: the Vita button of each in play (Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select as shipped; None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both. The row says Custom once one is moved |
 | Touch zones > | Off | Touch top left, top right, left edge, right edge, Rear touch left, right: the Xbox button each zone presses (A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back). The row says how many are on |
 | Gyro settings > | | Gyro button (L: While holding aims while held; in play it then does nothing else), Gyro sensitivity (1.5x; 0.5x-3x, 1x turns the view as far as the Vita turns, less while zoomed), Gyro vertical (Normal: tilt the top edge towards you to look up; Inverted), Gyro turning (Turn (yaw), or Tilt (roll) it like a wheel) |
-| Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings, Button icons and Show dev settings stay), Show dev settings (Off; shows the Dev tab) |
+| Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings, Button icons and Show dev settings stay), Show dev settings (Off; shows the Dev tab), Update channel and Check for updates (below) |
+
+**Check for updates** (Controls > Advanced, under the rows with the build's
+version): the game asks the network for nothing until this is pressed. A
+press asks GitHub's public API (api.github.com, the releases of
+BirchWoodGod/halo-ce-vita) on a thread of its own and shows one line under
+the version: "Checking...", then "Up to date (1.1.0-beta.3)", "Update
+available: 1.1.0-beta.4" with github.com/BirchWoodGod/halo-ce-vita/releases
+under it (always that address, never one from the answer), "Couldn't check:
+no connection" (ad hoc play, no network, or GitHub unreachable) or
+"Couldn't check right now". A found update also shows in the main menu's
+corner until the game restarts, and halo.log has a line. Nothing is
+downloaded or installed: the player updates as they installed the game. A
+press within a minute of the last look that reached GitHub shows that look
+again (kept in `update_check.txt` in the data folder), as GitHub allows 60
+requests an hour from one address. **Update channel** (`HALO_UPDATE_CHANNEL`):
+Experimental (pre-releases and releases) or Stable (releases only); a beta
+build is on Experimental, its Stable shown greyed out ("Stable updates
+arrive with 1.1.0") and a saved Stable ignored; a release build offers both
+and starts on Stable. The request is HTTPS with Mbed TLS over the Vita's
+sockets (not the system's SceHttp/SceSsl): TLS 1.2 or 1.3, GitHub's
+certificate checked against the few authorities built into the game
+(`port/linux/src/update_roots.h`) and its host name, no redirect followed,
+the answer read to 256 KB at most and only each release's tag, pre-release
+and draft flags looked at; the request carries the User-Agent
+"HaloCEVita/<version>" and nothing else about the player or the Vita.
 
 **Button icons** (`HALO_BUTTON_ICONS`, xbox or playstation; live, kept by
 Reset controls): with PlayStation each of the game's button icons - the
