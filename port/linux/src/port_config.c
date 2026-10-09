@@ -351,6 +351,11 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"A file (in the data folder) an automated test host writes its internet\n"
 		"play invite link to once it hosts; empty none." },
+	{ "debug.network_test_join_file", _config_string, "\"\"", "HALO_NETWORK_TEST_JOIN_FILE", _environment_value,
+		_platform_all,
+		"A file (in the data folder) an automated test's joining machine waits for\n"
+		"(its host's game listed) before it joins: the test makes it at the moment\n"
+		"wanted; empty none." },
 	{ "debug.network_test_public_name", _config_string, "\"\"", "HALO_NETWORK_TEST_PUBLIC_NAME", _environment_value,
 		_platform_all,
 		"An automated test's join-public joins only the public game listed with\n"

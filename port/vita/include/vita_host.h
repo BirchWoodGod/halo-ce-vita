@@ -107,6 +107,9 @@ unsigned long vita_movie_detect_pitch(const unsigned char *luma, unsigned long r
 
 /* the SCE_CTRL_* button bits */
 #define VITA_BUTTON_SELECT 0x00000001UL
+/* (a paired DualShock's stick clicks: vita_ctrl_ports.h) */
+#define VITA_BUTTON_L3 0x00000002UL
+#define VITA_BUTTON_R3 0x00000004UL
 #define VITA_BUTTON_START 0x00000008UL
 #define VITA_BUTTON_UP 0x00000010UL
 #define VITA_BUTTON_RIGHT 0x00000020UL

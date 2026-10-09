@@ -230,6 +230,23 @@
 #            "lost the connection" 20 s on (the official servers, October
 #            2026). Each must precache the server's map and play both games
 #            with the other, the server lose neither
+#   dedicatedreload the dedicated server (Blood Gulch, then Chill Out, the
+#            scores 10 s as on the official servers) and its only player,
+#            a Vita by its code, who quits: the server ends the empty game,
+#            shows the scores and loads its lobby's map. Two more Vitas
+#            start then, by the code and from the server browser, and reach
+#            the server as its game goes back to the lobby; a fourth, waiting
+#            in the System Link list with the game listed open, joins as the
+#            server switches to its scores (HALO_NETWORK_TEST_JOIN_FILE), as
+#            a player pressing A a moment late does (October 2026: such a
+#            join was refused, the Vita sent back to the menus while the
+#            browser listed the game). The server must hold their joins and
+#            answer them once its lobby is up, refuse none, and play its
+#            next game with all three; none may be sent back to the menus.
+#            HALO_TEST_VITA_JOINER=a beta.1/beta.2 build: the same with old
+#            joiners (no change on their side), the fourth by the code
+#            HALO_TEST_RELOAD_STAGGER seconds after the others (3);
+#            HALO_TEST_RELOAD_NETEM: the three's uploads' netem
 #   pings    the host's ping table (network_distributed.c, p2p.c): a
 #            joiner's scoreboard has the other machines' players' pings, as
 #            the host measured them. A dedicated server (Blood Gulch slayer,
@@ -327,6 +344,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
 [ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = dedicatedreload ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = scoreboard ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = splitscreen ] && seconds=${HALO_TEST_SECONDS:-170}
 [ "$mode" = pings ] && seconds=${HALO_TEST_SECONDS:-180}
@@ -1506,7 +1524,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|scoreboard|pings|pingsmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
 	if [ "$mode" = pingsmixed ]; then
@@ -1668,6 +1686,21 @@ INIT
 	# (dedicatedfullcache: first a map none of the joiners' cache files has)
 	if [ "$mode" = dedicatedfullcache ]; then
 		sed -i 's/^sv_mapcycle_add bloodgulch slayer$/sv_mapcycle_add beavercreek slayer/' "$out/server/data/init.txt"
+	fi
+	# (dedicatedreload: the official servers' scores time, no time limit, an
+	# empty game ended 5 s on)
+	if [ "$mode" = dedicatedreload ]; then
+		cat > "$out/server/data/init.txt" <<'INIT'
+sv_name "Netns Reload"
+sv_maxplayers 8
+sv_public 1
+sv_mapcycle_add bloodgulch slayer
+sv_mapcycle_add chillout slayer
+sv_start_delay 5
+sv_postgame 10
+sv_end_empty 5
+sv_port 2302
+INIT
 	fi
 	[ "${HALO_TEST_SERVER_PUBLIC:-0}" = 1 ] && echo "sv_public_address 10.10.1.2:2302" >> "$out/server/data/init.txt"
 	# (HALO_TEST_SERVER_INIT: another init.txt, e.g. one map for measuring)
@@ -2073,6 +2106,99 @@ INIT
 		done
 		grep -aq "^server: the game starts: slayer on chillout" "$sl" || fail "the server never went on to Chill Out"
 		;;
+	dedicatedreload)
+		# (when PATTERN first shows in FILE, in the script's clock; empty if
+		# not within SECONDS)
+		wait_log() { # wait_log FILE PATTERN SECONDS
+			local i
+			for i in $(seq 1 $(($3 * 5))); do
+				grep -aq "$2" "$1" 2>/dev/null && { date +%s.%N; return; }
+				sleep 0.2
+			done
+		}
+		since() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", b - a }'; }
+		# the only player joins by the code, plays, and quits
+		run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=${HALO_TEST_RELOAD_LEAVE:-50} \
+			HALO_TEST_INPUT=bot:2; j1=$last_pid
+		# (this tree's joiners: a fourth starts now and waits in the System
+		# Link list, the game listed open, for join.go, made as the server
+		# switches to its scores: a player pressing A on a game the list
+		# showed open a moment before, whose join reaches the server in the
+		# scores - the join beta.2's server refused. A beta.1/beta.2 joiner
+		# knows no such file: it starts later, below)
+		HALO_TEST_NETEM=${HALO_TEST_RELOAD_NETEM:-${HALO_TEST_NETEM:-}} side d4 10.10.24 192.168.24
+		j4=
+		if [ -z "${HALO_TEST_VITA_JOINER:-}" ]; then
+			rm -f "$out/joiner4/data/join.go"
+			# (no scripted player: its presses in the menus would leave the list)
+			run_copy joiner4 "$d4_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+				HALO_NETWORK_TEST=join-code:$code HALO_NET_PLAYER_NAME=Vita4 HALO_NETWORK_TEST_JOIN_FILE=join.go \
+				HALO_EXIT_AFTER=$((seconds - 50)); j4=$last_pid
+		fi
+		ended=$(wait_log "$sl" "^server: the game ends (nobody is left)" 150)
+		[ -n "$ended" ] || { fail "the server never ended the empty game"; tail -30 "$sl"; exit 1; }
+		echo "the server ended the empty game"
+		# two more Vitas start then, by the code and from the server browser
+		# (and a beta joiner by the code HALO_TEST_RELOAD_STAGGER seconds on,
+		# 3). One by the code reaches the server about 6 s after it starts,
+		# from the browser 5 to 13 s: the game's last seconds (7 s), the
+		# scores (then 3 s, before 10) or the lobby's map loading
+		# (HALO_TEST_RELOAD_NETEM: their uploads' netem, e.g. "delay 1500ms":
+		# a join asked on an advertisement of the game's last seconds then
+		# reaches the server in the scores)
+		HALO_TEST_NETEM=${HALO_TEST_RELOAD_NETEM:-${HALO_TEST_NETEM:-}} side d2 10.10.22 192.168.22
+		HALO_TEST_NETEM=${HALO_TEST_RELOAD_NETEM:-${HALO_TEST_NETEM:-}} side d3 10.10.23 192.168.23
+		run_copy joiner2 "$d2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_NET_PLAYER_NAME=Vita2 HALO_EXIT_AFTER=110 \
+			HALO_TEST_INPUT=bot:3; j2=$last_pid
+		run_copy joiner3 "$d3_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-public "HALO_NETWORK_TEST_PUBLIC_NAME=Netns Reload" HALO_NET_PLAYER_NAME=Vita3 \
+			HALO_EXIT_AFTER=110 HALO_TEST_INPUT=bot:4; j3=$last_pid
+		if [ -n "${HALO_TEST_VITA_JOINER:-}" ]; then
+			sleep "${HALO_TEST_RELOAD_STAGGER:-3}"
+			run_copy joiner4 "$d4_machine" "$HALO_TEST_VITA_JOINER" "$cpu_b" HALO_NET_ONLINE=true \
+				HALO_NETWORK_TEST=join-code:$code HALO_NET_PLAYER_NAME=Vita4 HALO_EXIT_AFTER=107 \
+				HALO_TEST_INPUT=bot:5; j4=$last_pid
+		fi
+		postgame=$(wait_log "$sd" "switching to postgame" 60)
+		[ -z "${HALO_TEST_VITA_JOINER:-}" ] && [ -n "$postgame" ] && : > "$out/joiner4/data/join.go"
+		pregame=$(wait_log "$sd" "server resetting to pregame" 90)
+		[ -n "$postgame" ] && echo "the scores from $(since "$ended" "$postgame") s after the game ended"
+		[ -n "$pregame" ] && echo "the lobby (its map loading) from $(since "$ended" "$pregame") s"
+		wait $j1 $j2 $j3 $j4 2>/dev/null
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"; grep -aE "^server: (the next game|the game|player)" "$sl" | head -30
+		echo "--- the server's joins"
+		grep -aE "holding machine|answering machine|refusing machine|tried to join game when|joins the game in progress|server added machine" "$sd" | cut -c19- | head -20
+		sed -n '/^server: the game ends (nobody is left)/,$p' "$sl" | grep -aq "^server: the game starts: slayer on " ||
+			fail "the server never started its next game"
+		grep -aq "tried to join game when they should not be" "$sd" && fail "the server refused a join (the game not open)"
+		in_scores=$(sed -n '/switching to postgame/,/server resetting to pregame/p' "$sd" | grep -ac "holding machine #[0-9]*'s join")
+		echo "joins held that reached the server in its scores: $in_scores"
+		held=$(grep -ac "holding machine #[0-9]*'s join" "$sd")
+		answered=$(grep -ac "answering machine #[0-9]*'s join held" "$sd")
+		echo "joins held: $held, answered in the lobby: $answered"
+		[ "$held" -ge 1 ] || fail "no join reached the server while its game went back to the lobby (nothing held)"
+		[ "$answered" -ge "$held" ] || fail "a held join was never answered"
+		for name in joiner2 joiner3 joiner4; do
+			jl=$out/$name/run.log
+			echo "--- $name"; grep -aE "system link: |network test: (join|the public)" "$jl" | uniq | head -12
+			# (never back at the menus once it began to join)
+			sed -n '/system link: joining/,$p' "$jl" | grep -aq "system link: menus" &&
+				fail "$name was sent back to the menus after it began to join"
+			grep -aq "XLaunchNewImage" "$jl" && fail "$name went to the dashboard"
+			# (beta.2's server: "reason= #5/_rejection_code_game_is_closed")
+			grep -a "unable to join game" "$out/$name/data/debug.txt" | cut -c19- | head -2
+			grep -aq "unable to join game" "$out/$name/data/debug.txt" && fail "$name's join was refused"
+			n=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name's seconds playing with the other: $n"
+			[ "$n" -ge 40 ] || fail "$name played the server's next game with the other for $n s (40 wanted)"
+		done
+		for n in 2 3 4; do
+			grep -aq "^server: player #[0-9]* Vita$n joined" "$sl" || fail "the server never had Vita$n"
+		done
+		;;
 	dedicatedpc)
 		# a Vita on the server's LAN (online off) so that the PCs' refusal there
 		# proves something
@@ -2188,7 +2314,7 @@ INIT
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|splitscreen|pings|pingsmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed" >&2
 	exit 2
 	;;
 esac

@@ -39,6 +39,16 @@ boolean network_game_server_game_is_open(
 /* joining a distributed game in progress (network_server_manager.c) */
 boolean network_game_server_accepts_late_joins(
 	struct network_game_server *server);
+#ifdef HALO_DEDICATED_SERVER
+/* (the dedicated server) a join asked while the game goes back to its lobby
+(over, or the scores): held, and answered once the lobby is up; FALSE if not
+held (answered now, as before) */
+boolean network_game_server_hold_join(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	word const *message,
+	short message_size);
+#endif
 boolean network_game_server_client_machine_is_loaded(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine);

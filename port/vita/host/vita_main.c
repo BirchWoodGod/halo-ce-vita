@@ -383,9 +383,20 @@ static void show_missing_data(void)
 	sceDisplaySetFrameBuf(&frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
 	for (;;)
 	{
+		int port;
+
 		memset(&pad, 0, sizeof(pad));
 		sceCtrlPeekBufferPositive(0, &pad, 1);
 		if (pad.buttons & SCE_CTRL_START)
+			break;
+		/* (or a paired controller's START: vita_ctrl_ports.c) */
+		for (port = 1; port <= 4; port++)
+		{
+			memset(&pad, 0, sizeof(pad));
+			if (sceCtrlPeekBufferPositive2(port, &pad, 1) >= 0 && (pad.buttons & SCE_CTRL_START))
+				break;
+		}
+		if (port <= 4)
 			break;
 		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 		sceDisplayWaitVblankStart();

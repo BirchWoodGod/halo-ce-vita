@@ -1872,6 +1872,16 @@ static boolean network_game_server_handle_message_client_join_game_request(
 	/* (or a distributed game in progress: network_game_server_accepts_late_joins) */
 	boolean late_join = network_game_server_accepts_late_joins(server);
 
+#ifdef HALO_DEDICATED_SERVER
+	/* port: the dedicated server's game going back to its lobby (over, or
+	the scores): the join held, and answered once the lobby is up, rather
+	than refused or put into a game that is ending */
+	if (!network_game_server_client_machine_is_joined_to_game(server, server_client_machine) &&
+		network_game_server_hold_join(server, server_client_machine, message, message_size))
+	{
+		return TRUE;
+	}
+#endif
 	if (network_game_server_get_state(server, NULL) == _network_game_server_state_pregame || late_join)
 	{
 		struct message_client_join_game_request join_game_request;

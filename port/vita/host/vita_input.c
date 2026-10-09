@@ -2,7 +2,8 @@
 VITA_INPUT.C
 
 The Vita's buttons and sticks for port/vita/platform/vita_pad.c (sceCtrl, in
-the wide analog mode real firmware needs for the sticks to move), and the
+the wide analog mode real firmware needs for the sticks to move) merged
+with a paired controller's on ports 1 to 4 (vita_ctrl_ports.c), and the
 touch zones held on the front screen and the rear pad (sceTouch;
 vita_controls.c says where the zones are and when a finger counts).
 
@@ -36,6 +37,7 @@ Vita lying on a table drifts).
 #include <string.h>
 
 #include "vita_controls.h"
+#include "vita_ctrl_ports.h"
 #include "lang.h"
 #include "vita_host.h"
 
@@ -453,10 +455,61 @@ void vita_gyro_status(char *text, int size)
 			gyro_simulated_at ? T("simulated") : gyro_filter.still_count ? T("learnt") : T("lay still"));
 }
 
+/* ---------- the controller ports (vita_ctrl_ports.c) */
+
+static void ctrl_sample_from(struct vita_ctrl_sample *sample, const SceCtrlData *data)
+{
+	sample->buttons = data->buttons;
+	sample->lx = data->lx;
+	sample->ly = data->ly;
+	sample->rx = data->rx;
+	sample->ry = data->ry;
+}
+
+static int ctrl_read_vita(struct vita_ctrl_sample *sample)
+{
+	SceCtrlData data;
+	int result;
+
+	memset(&data, 0, sizeof(data));
+	data.lx = data.ly = data.rx = data.ry = 128;
+	result = sceCtrlPeekBufferPositive(0, &data, 1);
+	ctrl_sample_from(sample, &data);
+	return result;
+}
+
+static int ctrl_read_port(int port, struct vita_ctrl_sample *sample)
+{
+	SceCtrlData data;
+	int result;
+
+	memset(&data, 0, sizeof(data));
+	data.lx = data.ly = data.rx = data.ry = 128;
+	result = sceCtrlPeekBufferPositive2(port, &data, 1);
+	if (result >= 0)
+		ctrl_sample_from(sample, &data);
+	return result;
+}
+
+static int ctrl_port_types(unsigned char types[VITA_CTRL_PORTS])
+{
+	SceCtrlPortInfo info;
+	int result, port;
+
+	memset(&info, 0, sizeof(info));
+	result = sceCtrlGetControllerPortInfo(&info);
+	for (port = 0; port < VITA_CTRL_PORTS; port++)
+		types[port] = info.port[port];
+	return result;
+}
+
+static const struct vita_ctrl_layer ctrl_layer = { ctrl_read_vita, ctrl_read_port, ctrl_port_types, vita_host_log };
+static struct vita_ctrl_ports ctrl_ports;
+
 void vita_host_pad_read(struct vita_host_pad *pad)
 {
 	static int started;
-	SceCtrlData data;
+	struct vita_ctrl_sample data;
 	unsigned long long now;
 	int touches_started = 0;
 
@@ -464,19 +517,21 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 	{
 		started = 1;
 		sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
+		/* (the paired controllers' calls take the extended mode) */
+		sceCtrlSetSamplingModeExt(SCE_CTRL_MODE_ANALOG_WIDE);
 		touch_start();
 		gyro_start();
 	}
-	memset(&data, 0, sizeof(data));
-	data.lx = data.ly = data.rx = data.ry = 128;
-	sceCtrlPeekBufferPositive(0, &data, 1);
+	now = sceKernelGetProcessTimeWide();
+	/* the Vita's buttons and sticks, and a paired controller's (port 1 to
+	4: a PS TV's DualShocks, or a pad a plugin puts there) */
+	vita_ctrl_ports_read(&ctrl_ports, &ctrl_layer, now, &data);
 	pad->buttons = data.buttons;
 	pad->lx = data.lx;
 	pad->ly = data.ly;
 	pad->rx = data.rx;
 	pad->ry = data.ry;
 
-	now = sceKernelGetProcessTimeWide();
 	pad_script_poll(now);
 	pad_script_apply(pad, now);
 	pad->touch = touch_read(now, &touches_started);
