@@ -6388,6 +6388,59 @@ static boolean actor_perception_lod_resting(
 	}
 	return TRUE;
 }
+
+/* (port) hints (__builtin_prefetch) for the props the walk below reads next:
+an actor's props are a list (next_prop_index) of 312-byte datums spread over
+the props' array, and the walk reads and writes fields across all of a
+prop's cache lines every tick (its timers, then its state); in b30's beach
+fight ~250 props a tick, met cold (~1600 cache misses a tick in callgrind's
+model, where the walk itself executes ~60 K instructions). Each step hints
+the next prop's lines and the one after it (whose index the next prop holds,
+hinted the step before), so the misses overlap one another and the work. A
+hint reads nothing the game sees: the walk, its order and every value read
+are as before. */
+static __inline char const *actor_perception_prop_address(
+	long prop_index)
+{
+	short absolute_index = (short)prop_index;
+
+	if (prop_index != NONE && absolute_index >= 0 && absolute_index < prop_data->count)
+	{
+		return (char const *)prop_data->data + prop_data->size * absolute_index;
+	}
+	return NULL;
+}
+
+static __inline void actor_perception_prefetch_prop(
+	char const *prop)
+{
+	if (prop)
+	{
+		unsigned short offset;
+
+		/* (the Vita's Cortex-A9 has 32-byte lines; a datum 312 bytes long
+		at any alignment spans up to eleven) */
+		for (offset = 0; offset < sizeof(struct prop_datum); offset += 32)
+		{
+			__builtin_prefetch(prop + offset, 1);
+		}
+		__builtin_prefetch(prop + sizeof(struct prop_datum) - 1, 1);
+	}
+}
+
+static __inline void actor_perception_prefetch_props(
+	struct prop_iterator const *iterator,
+	boolean first)
+{
+	char const *next = actor_perception_prop_address(iterator->next_index);
+
+	actor_perception_prefetch_prop(next);
+	if (next && !first)
+	{
+		actor_perception_prefetch_prop(
+			actor_perception_prop_address(((struct prop_datum const *)next)->next_prop_index));
+	}
+}
 #endif
 
 void actor_perception_update(
@@ -6405,8 +6458,11 @@ void actor_perception_update(
 #ifdef HALO_LINUX
 	boolean lod_resting = actor_perception_lod_resting(actor_index, actor);
 	unsigned long long lines_started = halo_lines_now();
+	boolean first_prop = TRUE;
 
 	halo_lines_stats.perception_actors++;
+	/* (the walk's first prop, while the refreshes below run) */
+	actor_perception_prefetch_prop(actor_perception_prop_address(actor->meta.first_prop_index));
 #endif
 
 	if (!actor->meta.dormant)
@@ -6528,6 +6584,8 @@ void actor_perception_update(
 
 #ifdef HALO_LINUX
 		halo_lines_stats.perception_props++;
+		actor_perception_prefetch_props(&iterator, first_prop);
+		first_prop = FALSE;
 #endif
 		if (prop->unit_effect_decay_ticks > 0 &&
 			--prop->unit_effect_decay_ticks == 0)
