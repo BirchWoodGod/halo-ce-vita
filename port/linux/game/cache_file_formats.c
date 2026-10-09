@@ -959,6 +959,107 @@ static uint32_t crc32_update(
 	return crc;
 }
 
+/* (a reflected polynomial product modulo the CRC-32 polynomial, as zlib's
+crc32_combine works one out: `a` times `b`, each x^0 in its top bit) */
+static uint32_t crc32_multiply(
+	uint32_t a,
+	uint32_t b)
+{
+	uint32_t bit = 1UL << 31;
+	uint32_t product = 0;
+
+	while (a)
+	{
+		if (a & bit)
+		{
+			product ^= b;
+			a &= ~bit;
+		}
+		bit >>= 1;
+		b = (b & 1) ? (b >> 1) ^ CRC32_POLYNOMIAL : b >> 1;
+	}
+
+	return product;
+}
+
+uint32_t cache_file_crc32_update(
+	uint32_t crc,
+	void const *bytes,
+	uint32_t size)
+{
+	return crc32_update(crc, (uint8_t const *)bytes, size);
+}
+
+uint32_t cache_file_crc32_shift(
+	uint32_t crc,
+	uint32_t length)
+{
+	/* x^0, and x^8: a byte of zeros */
+	uint32_t power = 1UL << 31;
+	uint32_t square = 1UL << 23;
+
+	while (length)
+	{
+		if (length & 1)
+		{
+			power = crc32_multiply(square, power);
+		}
+		square = crc32_multiply(square, square);
+		length >>= 1;
+	}
+
+	return crc32_multiply(power, crc);
+}
+
+/* (port) the reads of the map custom_edition_cache_load_hooks names, for
+the game's loader (custom_edition_cache.c); none for the tools */
+static struct custom_edition_load_hooks load_hooks;
+
+void custom_edition_cache_load_hooks(
+	struct custom_edition_load_hooks const *hooks)
+{
+	if (hooks)
+	{
+		load_hooks = *hooks;
+	}
+	else
+	{
+		memset(&load_hooks, 0, sizeof(load_hooks));
+	}
+	/* (the tables made here, on the loading thread, before a reader's
+	thread takes a CRC with them) */
+	if (!crc32_table_initialized)
+	{
+		crc32_table_initialize();
+	}
+
+	return;
+}
+
+/* reads `size` bytes at `offset` of `source` into `buffer`, and their
+CRC-32 from 0 into `*crc` when the hooks read that source (*crc_taken) */
+static int source_read_crc(
+	struct cache_file_source *source,
+	uint32_t offset,
+	uint32_t size,
+	void *buffer,
+	uint32_t *crc,
+	int *crc_taken)
+{
+	*crc_taken = 0;
+	if (load_hooks.read_crc && load_hooks.source == source)
+	{
+		if (!load_hooks.read_crc(source->context, offset, size, buffer, crc))
+		{
+			return 0;
+		}
+		*crc_taken = 1;
+		return 1;
+	}
+
+	return source->read(source->context, offset, size, buffer) != 0;
+}
+
 static enum cache_file_status crc32_update_from_file(
 	struct cache_file_source *source,
 	uint32_t *crc,
@@ -1921,6 +2022,8 @@ static enum cache_file_status structure_bsps_verify(
 		uint32_t tag_index = tag_handle & ABSOLUTE_INDEX_MASK;
 		uint8_t *bsp;
 		uint32_t bsp_pointer;
+		uint32_t bsp_crc = 0;
+		int bsp_crc_taken;
 		enum cache_file_status status;
 
 		/* the tag the reference names: a structure BSP, not yet loaded */
@@ -1947,7 +2050,9 @@ static enum cache_file_status structure_bsps_verify(
 		as large (5.75 MB each of Extinction's two) was more than the Vita's
 		had left */
 		bsp = state->tag_cache + (bsp_address - tag_cache_address);
-		if (!state->map->read(state->map->context, (uint32_t)file_offset, (uint32_t)size, bsp))
+		/* (with the hooks, read on the reader's thread with its CRC taken
+		there, used below where the checksum would take it here) */
+		if (!source_read_crc(state->map, (uint32_t)file_offset, (uint32_t)size, bsp, &bsp_crc, &bsp_crc_taken))
 		{
 			return load_fail(state, _cache_file_status_read_failed, (uint32_t)file_offset);
 		}
@@ -1984,7 +2089,11 @@ static enum cache_file_status structure_bsps_verify(
 		/* (where the structure BSP lies at that offset, as tools pack them,
 		its bytes as read above, which nothing has changed: the file was read
 		twice, 11.5 MB of Extinction's load) */
-		if (checksum_offset == (uint32_t)file_offset)
+		if (checksum_offset == (uint32_t)file_offset && bsp_crc_taken)
+		{
+			*checksum = cache_file_crc32_shift(*checksum, (uint32_t)size) ^ bsp_crc;
+		}
+		else if (checksum_offset == (uint32_t)file_offset)
 		{
 			*checksum = crc32_update(*checksum, bsp, (uint32_t)size);
 		}
@@ -2278,6 +2387,28 @@ enum cache_file_status custom_edition_cache_load(
 	return custom_edition_cache_load_linked(map, resource_maps, tag_cache, tag_cache_bytes, report);
 }
 
+void custom_edition_cache_checksum_finish(
+	struct custom_edition_load_report *report,
+	uint32_t model_data_crc)
+{
+	uint32_t checksum;
+
+	if (!report->checksum_deferred)
+	{
+		return;
+	}
+	checksum = cache_file_crc32_shift(report->checksum_before_model_data, report->model_data_bytes) ^ model_data_crc;
+	checksum = cache_file_crc32_shift(checksum, report->tag_data_bytes) ^ report->tag_data_crc;
+	report->computed_checksum = checksum;
+	if (checksum != report->identity.checksum)
+	{
+		report->warnings |= 1UL << _custom_edition_warning_checksum_mismatch_bit;
+	}
+	report->checksum_deferred = 0;
+
+	return;
+}
+
 static enum cache_file_status custom_edition_cache_load_linked(
 	struct cache_file_source *map,
 	struct resource_map *const resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES],
@@ -2293,6 +2424,8 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	uint32_t scenario_offset;
 	uint32_t scenario_handle;
 	uint32_t checksum = CRC32_INITIAL;
+	uint32_t tag_data_crc = 0;
+	int tag_data_crc_taken;
 	uint32_t data_end;
 	int32_t tag_count;
 	int32_t tag_index_value;
@@ -2323,8 +2456,10 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	}
 	state.file_length = identity->file_length;
 
-	/* the tag data, at the start of the tag cache */
-	if (!map->read(map->context, identity->tag_data_offset, identity->tag_data_size, tag_cache))
+	/* the tag data, at the start of the tag cache (nothing below changes
+	it before the checksum takes it: with the hooks, its CRC is taken as it
+	is read) */
+	if (!source_read_crc(map, identity->tag_data_offset, identity->tag_data_size, tag_cache, &tag_data_crc, &tag_data_crc_taken))
 	{
 		return load_fail(&state, _cache_file_status_read_failed, identity->tag_data_offset);
 	}
@@ -2448,16 +2583,33 @@ static enum cache_file_status custom_edition_cache_load_linked(
 
 	/* the header checksum covers the structure BSPs, the model data and the
 	tag data as the map holds it, before anything below changes it */
-	status = crc32_update_from_file(map, &checksum, state.model_data_offset, state.model_data_size);
-	if (status != _cache_file_status_ok)
+	if (!tag_data_crc_taken)
 	{
-		return load_fail(&state, status, state.model_data_offset);
+		tag_data_crc = crc32_update(0, tag_cache, identity->tag_data_size);
 	}
-	checksum = crc32_update(checksum, tag_cache, identity->tag_data_size);
-	report->computed_checksum = checksum;
-	if (checksum != identity->checksum)
+	if (load_hooks.defer_model_checksum && load_hooks.source == map)
 	{
-		report->warnings |= 1UL << _custom_edition_warning_checksum_mismatch_bit;
+		/* (the game's loader: the model data's part taken from its reads of
+		the model data as it converts the models, which read all of it, so
+		the 21 MB of Extinction's are not read twice -
+		custom_edition_cache_checksum_finish) */
+		report->checksum_deferred = 1;
+		report->checksum_before_model_data = checksum;
+		report->tag_data_crc = tag_data_crc;
+	}
+	else
+	{
+		status = crc32_update_from_file(map, &checksum, state.model_data_offset, state.model_data_size);
+		if (status != _cache_file_status_ok)
+		{
+			return load_fail(&state, status, state.model_data_offset);
+		}
+		checksum = cache_file_crc32_shift(checksum, identity->tag_data_size) ^ tag_data_crc;
+		report->computed_checksum = checksum;
+		if (checksum != identity->checksum)
+		{
+			report->warnings |= 1UL << _custom_edition_warning_checksum_mismatch_bit;
+		}
 	}
 	if (flag_is_set(report->warnings, _custom_edition_warning_protected_bit))
 	{

@@ -1083,6 +1083,114 @@ boolean game_map_loading_in_progress(
 	return globals->map_load_in_progress;
 }
 
+#ifdef HALO_LINUX
+/* port: the loading screen while game_load reads a map, as
+game_precache_new_map shows it while the cache file thread copies one: a
+Custom Edition map is read in place, never copied, and its load in
+scenario_tags_load (port/linux/game/custom_edition_cache.c) took the
+owner's Vita 12 s with no frame drawn (Oct 9, Hugeass; the hang watchdog
+spoke at 8 s). Its loader calls game_loading_screen_frame as it goes and
+while it waits for its reader thread, and a frame is drawn and presented
+when one is due: the old map is gone by then (game_dispose_from_old_map
+closed the widgets, game_unload its tags), so main_pregame_render draws the
+loading screen alone, as before the first map. */
+int halo_thread_index(void);
+
+enum
+{
+	/* (30 a second, the precache's rate on the Xbox) */
+	LOADING_SCREEN_FRAME_US = 33000,
+};
+
+static struct
+{
+	boolean active;
+	boolean drawing;
+	int thread;
+	unsigned long long started_us;
+	unsigned long long last_us;
+	unsigned long long longest_us;
+	unsigned long frames;
+} game_loading_screen;
+
+void game_loading_screen_begin(
+	void)
+{
+#ifndef HALO_DEDICATED_SERVER
+	struct game_runtime_globals_prefix *globals = game_globals;
+
+	csmemset(&game_loading_screen, 0, sizeof(game_loading_screen));
+	game_loading_screen.active = TRUE;
+	game_loading_screen.thread = halo_thread_index();
+	game_loading_screen.started_us = tick_now();
+	game_loading_screen.last_us = game_loading_screen.started_us;
+	globals->map_load_in_progress = TRUE;
+	globals->loading_progress = 0.0f;
+	progress_bar_begin(global_scenario_index != NONE);
+#endif
+
+	return;
+}
+
+void game_loading_screen_frame(
+	real progress)
+{
+	struct game_runtime_globals_prefix *globals = game_globals;
+	unsigned long long now;
+
+	if (!game_loading_screen.active ||
+		game_loading_screen.drawing ||
+		halo_thread_index() != game_loading_screen.thread)
+	{
+		return;
+	}
+	now = tick_now();
+	if (now - game_loading_screen.last_us < LOADING_SCREEN_FRAME_US)
+	{
+		return;
+	}
+	if (now - game_loading_screen.last_us > game_loading_screen.longest_us)
+	{
+		game_loading_screen.longest_us = now - game_loading_screen.last_us;
+	}
+	game_loading_screen.drawing = TRUE;
+	globals->loading_progress = PIN(progress, 0.0f, 1.0f);
+	main_pregame_render();
+	main_present_frame();
+	game_loading_screen.drawing = FALSE;
+	game_loading_screen.frames++;
+	game_loading_screen.last_us = tick_now();
+
+	return;
+}
+
+void game_loading_screen_end(
+	void)
+{
+	struct game_runtime_globals_prefix *globals = game_globals;
+	unsigned long long now = tick_now();
+
+	if (!game_loading_screen.active)
+	{
+		return;
+	}
+	if (now - game_loading_screen.last_us > game_loading_screen.longest_us)
+	{
+		game_loading_screen.longest_us = now - game_loading_screen.last_us;
+	}
+	platform_log("loading screen: %lu frames over %lu ms, at most %lu ms between two",
+		game_loading_screen.frames,
+		(unsigned long)((now - game_loading_screen.started_us) / 1000),
+		(unsigned long)(game_loading_screen.longest_us / 1000));
+	progress_bar_end();
+	globals->map_load_in_progress = FALSE;
+	globals->loading_progress = 1.0f;
+	game_loading_screen.active = FALSE;
+
+	return;
+}
+#endif
+
 void game_unload(
 	void)
 {

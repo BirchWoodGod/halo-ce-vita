@@ -46,6 +46,7 @@ read.
 
 #include "memory/zlib/zlib.h"
 
+#include <pthread.h>
 #include <stdlib.h>
 
 /* ---------- constants */
@@ -103,6 +104,30 @@ struct custom_edition_cache_globals
 
 static struct custom_edition_cache_globals custom_edition_cache_globals;
 
+/* ---------- prototypes */
+
+static boolean custom_edition_cache_model_data_crc(
+	struct custom_edition_load_report const *report,
+	byte *buffer,
+	uint32_t buffer_bytes,
+	uint32_t *crc);
+/* (game.c's: the loading screen while a map loads, its frames from the
+thread that loads it) */
+void game_loading_screen_begin(void);
+void game_loading_screen_frame(real progress);
+void game_loading_screen_end(void);
+
+/* the load's progress, 0..1, for the loading screen (the game thread's) */
+static real custom_edition_load_progress;
+
+static void custom_edition_load_frame(
+	void)
+{
+	game_loading_screen_frame(custom_edition_load_progress);
+
+	return;
+}
+
 /* ---------- private code */
 
 /* The map files are read with positioned reads through the platform's
@@ -145,9 +170,13 @@ static int custom_edition_file_read(
 	uint32_t size,
 	void *buffer)
 {
-	unsigned long long started = custom_edition_microseconds();
+	unsigned long long started;
 	uint32_t done = 0;
 
+	/* (a loading screen frame when one is due, on the loading thread: the
+	resource maps' small reads, hundreds of them) */
+	custom_edition_load_frame();
+	started = custom_edition_microseconds();
 	while (done < size)
 	{
 		OVERLAPPED position;
@@ -160,7 +189,8 @@ static int custom_edition_file_read(
 		{
 			break;
 		}
-		custom_edition_file_reads.requests++;
+		/* (the load's reader thread reads too) */
+		__atomic_fetch_add(&custom_edition_file_reads.requests, 1, __ATOMIC_RELAXED);
 		done += read;
 	}
 	{
@@ -175,11 +205,345 @@ static int custom_edition_file_read(
 		if (throttle > 0 && done)
 			Sleep((DWORD)(1 + (unsigned long long)done * 1000ull / ((unsigned long long)throttle * 1024ull)));
 	}
-	custom_edition_file_reads.bytes += done;
-	custom_edition_file_reads.microseconds += custom_edition_microseconds() - started;
+	__atomic_fetch_add(&custom_edition_file_reads.bytes, (unsigned long long)done, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&custom_edition_file_reads.microseconds, custom_edition_microseconds() - started, __ATOMIC_RELAXED);
 	halo_map_read_us[halo_epoch_on_mutator() ? 1 : 0] += custom_edition_microseconds() - started;
 
 	return done == size;
+}
+
+/* ---------- the load's reader */
+
+/* A Custom Edition map is loaded on the game thread
+(custom_edition_cache_tags_load): its tags, their conversion and the
+models' buffers are the game's state, made with the game's own functions
+and its allocator, which are the game thread's alone. Its big reads - the
+tag data, the structure BSPs and the model data, 45-70 MB of a large map -
+are made on a thread of their own, the load's reader (the fourth core's
+with Fourth core helpers), while the game thread shows the loading screen
+(game_loading_screen_frame, game.c) or converts what was read before it: on the
+owner's Vita (Oct 9, Hugeass) the game thread read 74 MB in 1091 file calls
+in one 12 s frame, nothing drawn, the hang watchdog's 8 s passed. The reader
+takes the CRC-32s the map's checksum wants of what it reads, so the model
+data (Extinction's 25 MB) is read once, by the models' conversion, rather
+than once more for the checksum alone. */
+
+enum
+{
+	LOAD_READ_QUEUE_LENGTH = 16,
+	LOAD_READER_STACK_BYTES = 0x10000,
+	/* the model data's pieces the checksum has seen, apart (see
+	model_checksum_take): the conversion reads it a buffer after another,
+	in order or the reverse, so its pieces join as they come */
+	MAXIMUM_MODEL_CHECKSUM_PIECES = 64,
+};
+
+enum
+{
+	_read_job_crc_none,
+	/* the CRC-32 from 0 of the bytes read */
+	_read_job_crc_running,
+	/* the bytes read are model data, whose part of the checksum they are */
+	_read_job_crc_model_data,
+};
+
+static struct
+{
+	pthread_mutex_t lock;
+	pthread_cond_t wake;
+	boolean started;
+	boolean failed;
+	struct custom_edition_read_job *queue[LOAD_READ_QUEUE_LENGTH];
+	short head;
+	short count;
+} load_reader = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER };
+
+/* the model data's pieces whose CRC-32 (from 0) the reader took, in order,
+none touching another (model_checksum_take); only the reader writes them
+while the models convert, and the game thread reads them once it is idle */
+static struct
+{
+	boolean active;
+	boolean overflowed;
+	uint32_t model_data_offset;
+	uint32_t model_data_bytes;
+	short count;
+	struct
+	{
+		uint32_t start;
+		uint32_t end;
+		uint32_t crc;
+	} pieces[MAXIMUM_MODEL_CHECKSUM_PIECES];
+} model_checksum;
+
+void custom_edition_load_progress_set(
+	real progress)
+{
+	custom_edition_load_progress = progress;
+	custom_edition_load_frame();
+
+	return;
+}
+
+/* the piece [start, end) of the model data, `bytes` its bytes, joined to
+the pieces taken before: the parts of it not taken yet have their CRC-32
+taken and are put in their place, a piece next to another joined to it
+(the CRC of A then B: cache_file_crc32_shift(a, length of B) ^ b) */
+static void model_checksum_piece_put(
+	uint32_t start,
+	uint32_t end,
+	uint32_t crc)
+{
+	short index;
+	short at;
+
+	for (at = 0; at < model_checksum.count && model_checksum.pieces[at].end <= start; at++)
+	{
+	}
+	/* after the one before it */
+	if (at > 0 && model_checksum.pieces[at - 1].end == start)
+	{
+		at--;
+		model_checksum.pieces[at].crc = cache_file_crc32_shift(model_checksum.pieces[at].crc, end - start) ^ crc;
+		model_checksum.pieces[at].end = end;
+	}
+	else
+	{
+		if (model_checksum.count == MAXIMUM_MODEL_CHECKSUM_PIECES)
+		{
+			model_checksum.overflowed = TRUE;
+			return;
+		}
+		for (index = model_checksum.count; index > at; index--)
+		{
+			model_checksum.pieces[index] = model_checksum.pieces[index - 1];
+		}
+		model_checksum.count++;
+		model_checksum.pieces[at].start = start;
+		model_checksum.pieces[at].end = end;
+		model_checksum.pieces[at].crc = crc;
+	}
+	/* before the one after it */
+	if (at + 1 < model_checksum.count && model_checksum.pieces[at + 1].start == model_checksum.pieces[at].end)
+	{
+		model_checksum.pieces[at].crc = cache_file_crc32_shift(
+			model_checksum.pieces[at].crc,
+			model_checksum.pieces[at + 1].end - model_checksum.pieces[at + 1].start) ^ model_checksum.pieces[at + 1].crc;
+		model_checksum.pieces[at].end = model_checksum.pieces[at + 1].end;
+		for (index = at + 1; index + 1 < model_checksum.count; index++)
+		{
+			model_checksum.pieces[index] = model_checksum.pieces[index + 1];
+		}
+		model_checksum.count--;
+	}
+
+	return;
+}
+
+/* the bytes of [start, end) of the model data, read into `bytes`: what of
+it no piece holds yet is taken */
+static void model_checksum_take(
+	uint32_t start,
+	uint32_t end,
+	byte const *bytes)
+{
+	uint32_t gaps[MAXIMUM_MODEL_CHECKSUM_PIECES + 1][2];
+	short gap_count = 0;
+	uint32_t cursor = start;
+	short index;
+
+	for (index = 0; index < model_checksum.count && cursor < end; index++)
+	{
+		if (model_checksum.pieces[index].end <= cursor)
+		{
+			continue;
+		}
+		if (model_checksum.pieces[index].start >= end)
+		{
+			break;
+		}
+		if (model_checksum.pieces[index].start > cursor)
+		{
+			gaps[gap_count][0] = cursor;
+			gaps[gap_count++][1] = model_checksum.pieces[index].start;
+		}
+		cursor = model_checksum.pieces[index].end;
+	}
+	if (cursor < end)
+	{
+		gaps[gap_count][0] = cursor;
+		gaps[gap_count++][1] = end;
+	}
+	for (index = 0; index < gap_count && !model_checksum.overflowed; index++)
+	{
+		model_checksum_piece_put(
+			gaps[index][0],
+			gaps[index][1],
+			cache_file_crc32_update(0, bytes + (gaps[index][0] - start), gaps[index][1] - gaps[index][0]));
+	}
+
+	return;
+}
+
+/* (on the reader's thread, or the caller's without it) */
+static void read_job_run(
+	struct custom_edition_read_job *job)
+{
+	uint32_t done = 0;
+	boolean read = TRUE;
+
+	job->crc = 0;
+	while (read && done < job->size)
+	{
+		uint32_t request = MIN(job->size - done, FILE_READ_REQUEST_BYTES);
+
+		read = custom_edition_file_read(job->context, job->offset + done, request, (byte *)job->buffer + done) != 0;
+		if (read && job->crc_kind == _read_job_crc_running)
+		{
+			job->crc = cache_file_crc32_update(job->crc, (byte *)job->buffer + done, request);
+		}
+		done += request;
+	}
+	if (read && job->crc_kind == _read_job_crc_model_data && model_checksum.active)
+	{
+		uint32_t start = job->offset - model_checksum.model_data_offset;
+
+		model_checksum_take(start, start + job->size, (byte const *)job->buffer);
+	}
+	__atomic_store_n(&job->state, read ? _custom_edition_read_job_done : _custom_edition_read_job_failed, __ATOMIC_RELEASE);
+
+	return;
+}
+
+static void *load_reader_thread(
+	void *parameter)
+{
+	(void)parameter;
+#ifdef HALO_VITA
+	/* (Fourth core helpers, All async: with the cache file thread) */
+	vita_host_fourth_core_join("custom map reader", 2);
+#endif
+	pthread_mutex_lock(&load_reader.lock);
+	for (;;)
+	{
+		struct custom_edition_read_job *job;
+
+		while (!load_reader.count)
+		{
+			pthread_cond_wait(&load_reader.wake, &load_reader.lock);
+		}
+		job = load_reader.queue[load_reader.head];
+		load_reader.head = (short)((load_reader.head + 1) % LOAD_READ_QUEUE_LENGTH);
+		load_reader.count--;
+		pthread_mutex_unlock(&load_reader.lock);
+		read_job_run(job);
+		pthread_mutex_lock(&load_reader.lock);
+	}
+
+	return NULL;
+}
+
+/* the reader's thread, started at the first load and kept (HALO_CE_LOAD_READER=0:
+none, every read on the loading thread as before) */
+static boolean load_reader_start(
+	void)
+{
+	pthread_attr_t attributes;
+	pthread_t thread;
+
+	if (load_reader.started || load_reader.failed)
+	{
+		return load_reader.started;
+	}
+	if (getenv("HALO_CE_LOAD_READER") && !atoi(getenv("HALO_CE_LOAD_READER")))
+	{
+		load_reader.failed = TRUE;
+		return FALSE;
+	}
+	pthread_attr_init(&attributes);
+	pthread_attr_setstacksize(&attributes, LOAD_READER_STACK_BYTES);
+	pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+	if (pthread_create(&thread, &attributes, load_reader_thread, NULL) == 0)
+	{
+		load_reader.started = TRUE;
+	}
+	else
+	{
+		load_reader.failed = TRUE;
+		error(_error_silent, "custom edition: no thread for the map's reads; they are made as it loads");
+	}
+	pthread_attr_destroy(&attributes);
+
+	return load_reader.started;
+}
+
+void custom_edition_read_job_submit(
+	struct custom_edition_read_job *job)
+{
+	__atomic_store_n(&job->state, _custom_edition_read_job_queued, __ATOMIC_RELAXED);
+	if (!load_reader.started)
+	{
+		/* (no reader: read here) */
+		read_job_run(job);
+		return;
+	}
+	for (;;)
+	{
+		pthread_mutex_lock(&load_reader.lock);
+		if (load_reader.count < LOAD_READ_QUEUE_LENGTH)
+		{
+			load_reader.queue[(load_reader.head + load_reader.count) % LOAD_READ_QUEUE_LENGTH] = job;
+			load_reader.count++;
+			pthread_cond_signal(&load_reader.wake);
+			pthread_mutex_unlock(&load_reader.lock);
+			return;
+		}
+		pthread_mutex_unlock(&load_reader.lock);
+		/* (its queue full: once there is room, the reads in their order) */
+		custom_edition_load_frame();
+		Sleep(1);
+	}
+}
+
+boolean custom_edition_read_job_wait(
+	struct custom_edition_read_job *job)
+{
+	int state;
+
+	while ((state = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE)) == _custom_edition_read_job_queued)
+	{
+		custom_edition_load_frame();
+		Sleep(1);
+	}
+
+	return state == _custom_edition_read_job_done;
+}
+
+/* (custom_edition_load_hooks' read_crc: the tag data and the structure
+BSPs) */
+static int custom_edition_load_read_crc(
+	void *context,
+	uint32_t offset,
+	uint32_t size,
+	void *buffer,
+	uint32_t *crc)
+{
+	struct custom_edition_read_job job;
+
+	csmemset(&job, 0, sizeof(job));
+	job.context = context;
+	job.offset = offset;
+	job.size = size;
+	job.buffer = buffer;
+	job.crc_kind = _read_job_crc_running;
+	custom_edition_read_job_submit(&job);
+	if (!custom_edition_read_job_wait(&job))
+	{
+		return FALSE;
+	}
+	*crc = job.crc;
+
+	return TRUE;
 }
 
 /* a part of the load, for its line in debug.txt: the time since `phase`
@@ -421,6 +785,7 @@ static boolean custom_edition_cache_tags_convert(
 		COMBINED_BITMAPS_OFFSET,
 		COMBINED_SOUNDS_OFFSET);
 	status = custom_edition_cache_convert(tag_cache, loaded_bytes, &conversion);
+	custom_edition_load_progress_set(0.48f);
 	if (status != _cache_file_status_ok)
 	{
 		error(
@@ -482,6 +847,7 @@ static boolean custom_edition_cache_tags_convert(
 			return FALSE;
 		}
 		custom_edition_cache_tags_moved((uint32_t)(unsigned long)tag_cache);
+		custom_edition_load_progress_set(0.50f);
 		error(
 			_error_silent,
 			"custom edition: tags moved from 0x%08lX to %p",
@@ -499,12 +865,14 @@ static boolean custom_edition_cache_tags_convert(
 	{
 		return FALSE;
 	}
+	custom_edition_load_progress_set(0.53f);
 
 	if (!custom_edition_bitmaps_verify(tag_cache, loaded_bytes))
 	{
 		return FALSE;
 	}
 	custom_edition_bitmaps_reduce(tag_cache, loaded_bytes);
+	custom_edition_load_progress_set(0.55f);
 	return custom_edition_reordered_bitmaps_find(tag_cache, loaded_bytes) &&
 		custom_edition_scripts_convert(tag_cache, loaded_bytes) &&
 		custom_edition_cache_models_convert(tag_cache, report);
@@ -681,6 +1049,7 @@ static void custom_edition_cache_report_log(
 		(long)report->bitmap_data_ranges_checked,
 		(long)report->sound_sample_ranges_checked,
 		(long)report->relocated_pointer_count,
+		report->checksum_deferred ? "taken with the models" :
 		TEST_FLAG(report->warnings, _custom_edition_warning_checksum_mismatch_bit) ? "mismatched" : "matched");
 
 	return;
@@ -1083,7 +1452,7 @@ boolean custom_edition_level_name(
 		map_share_name_valid(level_name + prefix_length);
 }
 
-struct cache_file_tag_header *custom_edition_cache_tags_load(
+static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 	char const *map_name,
 	void *header)
 {
@@ -1184,12 +1553,34 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	}
 
 	phases_length += custom_edition_load_phase_describe(&phase, "opening", phases + phases_length, sizeof(phases) - phases_length);
+	custom_edition_load_progress_set(0.05f);
+	/* the map's big reads on the load's reader, the CRC-32s the checksum
+	takes of them with them, and the model data's left to the models'
+	conversion (custom_edition_cache_model_data_crc) */
+	{
+		struct custom_edition_load_hooks hooks;
+
+		csmemset(&hooks, 0, sizeof(hooks));
+		hooks.source = &globals->map.source;
+		hooks.read_crc = custom_edition_load_read_crc;
+		hooks.defer_model_checksum = TRUE;
+		custom_edition_cache_load_hooks(&hooks);
+	}
 	status = custom_edition_cache_load(
 		&globals->map.source,
 		globals->resource_maps,
 		tag_cache,
 		tag_cache_bytes,
 		&report);
+	custom_edition_cache_load_hooks(NULL);
+	csmemset(&model_checksum, 0, sizeof(model_checksum));
+	if (status == _cache_file_status_ok && report.checksum_deferred)
+	{
+		model_checksum.model_data_offset = report.model_data_offset;
+		model_checksum.model_data_bytes = report.model_data_bytes;
+		model_checksum.active = TRUE;
+	}
+	custom_edition_load_progress_set(0.45f);
 	phases_length += custom_edition_load_phase_describe(
 		&phase,
 		", tags and checksum",
@@ -1224,6 +1615,30 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 		custom_edition_cache_files_close();
 		return NULL;
 	}
+	/* the checksum, now that the models' conversion has read the model
+	data: what it did not read is read now */
+	if (report.checksum_deferred)
+	{
+		enum { CHECKSUM_BUFFER_BYTES = 0x80000 };
+		byte *buffer = halo_custom_edition_memory_alloc(CHECKSUM_BUFFER_BYTES);
+		uint32_t model_data_crc;
+
+		if (buffer && custom_edition_cache_model_data_crc(&report, buffer, CHECKSUM_BUFFER_BYTES, &model_data_crc))
+		{
+			custom_edition_cache_checksum_finish(&report, model_data_crc);
+			error(
+				_error_silent,
+				"custom edition: checksum %s (0x%08lX)",
+				TEST_FLAG(report.warnings, _custom_edition_warning_checksum_mismatch_bit) ? "mismatched" : "matched",
+				(unsigned long)report.computed_checksum);
+		}
+		else
+		{
+			error(_error_silent, "custom edition: the model data could not be read for the checksum");
+		}
+		halo_custom_edition_memory_free(buffer);
+	}
+	model_checksum.active = FALSE;
 	globals->tag_cache = tag_cache;
 	globals->loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
 	globals->tag_cache_bytes = tag_cache_bytes;
@@ -1233,6 +1648,24 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	error(_error_silent, "custom edition: load: %s", phases);
 
 	return (struct cache_file_tag_header *)tag_cache;
+}
+
+struct cache_file_tag_header *custom_edition_cache_tags_load(
+	char const *map_name,
+	void *header)
+{
+	struct cache_file_tag_header *tag_header;
+
+	/* the loading screen meanwhile, and the reader for the big reads */
+	load_reader_start();
+	custom_edition_load_progress = 0.0f;
+	game_loading_screen_begin();
+	tag_header = custom_edition_cache_tags_load_private(map_name, header);
+	model_checksum.active = FALSE;
+	custom_edition_cache_load_hooks(NULL);
+	game_loading_screen_end();
+
+	return tag_header;
 }
 
 void custom_edition_cache_load_failure_note(
@@ -1307,18 +1740,128 @@ boolean custom_edition_cache_load_failure_show(
 	return TRUE;
 }
 
+boolean custom_edition_cache_model_data_submit(
+	struct custom_edition_load_report const *report,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer,
+	struct custom_edition_read_job *job)
+{
+	struct custom_edition_file const *map = &custom_edition_cache_globals.map;
+
+	csmemset(job, 0, sizeof(*job));
+	if (!map->opened ||
+		offset > report->model_data_bytes ||
+		size > report->model_data_bytes - offset)
+	{
+		job->state = _custom_edition_read_job_failed;
+		return FALSE;
+	}
+	job->context = map->source.context;
+	job->offset = report->model_data_offset + (uint32_t)offset;
+	job->size = (uint32_t)size;
+	job->buffer = buffer;
+	job->crc_kind = _read_job_crc_model_data;
+	custom_edition_read_job_submit(job);
+
+	return TRUE;
+}
+
 boolean custom_edition_cache_model_data_read(
 	struct custom_edition_load_report const *report,
 	unsigned long offset,
 	unsigned long size,
 	void *buffer)
 {
-	struct custom_edition_file const *map = &custom_edition_cache_globals.map;
+	struct custom_edition_read_job job;
 
-	return map->opened &&
-		offset <= report->model_data_bytes &&
-		size <= report->model_data_bytes - offset &&
-		map->source.read(map->source.context, report->model_data_offset + (uint32_t)offset, (uint32_t)size, buffer);
+	return custom_edition_cache_model_data_submit(report, offset, size, buffer, &job) &&
+		custom_edition_read_job_wait(&job);
+}
+
+/* The CRC-32 from 0 of the whole model data of the map being loaded, into
+`*crc`: the pieces the models' conversion read (model_checksum), and what
+lies between them read now through `buffer`; or, should they have been too
+many apart, all of it read again. FALSE when the map cannot be read. */
+static boolean custom_edition_cache_model_data_crc(
+	struct custom_edition_load_report const *report,
+	byte *buffer,
+	uint32_t buffer_bytes,
+	uint32_t *crc)
+{
+	uint32_t model_data_bytes = report->model_data_bytes;
+	uint32_t cursor;
+
+	/* the first gap, a buffer of it at a time: each read joins the first
+	piece (or is the first, from 0), so the pieces become one */
+	while (!model_checksum.overflowed)
+	{
+		uint32_t gap_start;
+		uint32_t gap_end;
+
+		if (!model_checksum.count)
+		{
+			gap_start = 0;
+			gap_end = model_data_bytes;
+		}
+		else if (model_checksum.pieces[0].start > 0)
+		{
+			gap_start = 0;
+			gap_end = model_checksum.pieces[0].start;
+		}
+		else
+		{
+			gap_start = model_checksum.pieces[0].end;
+			gap_end = model_checksum.count > 1 ? model_checksum.pieces[1].start : model_data_bytes;
+		}
+		if (gap_start >= gap_end)
+		{
+			break;
+		}
+		if (!custom_edition_cache_model_data_read(report, gap_start, MIN(gap_end - gap_start, buffer_bytes), buffer))
+		{
+			return FALSE;
+		}
+	}
+	if (!model_data_bytes)
+	{
+		*crc = 0;
+		return TRUE;
+	}
+	if (!model_checksum.overflowed &&
+		model_checksum.count == 1 &&
+		model_checksum.pieces[0].start == 0 &&
+		model_checksum.pieces[0].end == model_data_bytes)
+	{
+		*crc = model_checksum.pieces[0].crc;
+		return TRUE;
+	}
+	/* (too many pieces apart: all of it, in order) */
+	error(_error_silent, "custom edition: the model data was read in too many pieces for its checksum; read again");
+	model_checksum.active = FALSE;
+	*crc = 0;
+	for (cursor = 0; cursor < model_data_bytes; )
+	{
+		struct custom_edition_file const *map = &custom_edition_cache_globals.map;
+		struct custom_edition_read_job job;
+		uint32_t size = MIN(model_data_bytes - cursor, buffer_bytes);
+
+		csmemset(&job, 0, sizeof(job));
+		job.context = map->source.context;
+		job.offset = report->model_data_offset + cursor;
+		job.size = size;
+		job.buffer = buffer;
+		job.crc_kind = _read_job_crc_running;
+		custom_edition_read_job_submit(&job);
+		if (!custom_edition_read_job_wait(&job))
+		{
+			return FALSE;
+		}
+		*crc = cache_file_crc32_shift(*crc, size) ^ job.crc;
+		cursor += size;
+	}
+
+	return TRUE;
 }
 
 boolean custom_edition_cache_tags_loaded(

@@ -282,7 +282,49 @@ struct custom_edition_load_report
 	uint32_t computed_checksum;
 	uint32_t trailing_bytes;
 	uint32_t warnings;
+	/* (custom_edition_load_hooks' defer_model_checksum: the checksum before
+	the model data, and the CRC-32 from 0 of the tag data, until
+	custom_edition_cache_checksum_finish takes the model data's) */
+	int32_t checksum_deferred;
+	uint32_t checksum_before_model_data;
+	uint32_t tag_data_crc;
 };
+
+/* (port) The game's loader (custom_edition_cache.c) reads the map named
+`source` through `read_crc`, which reads as source->read does and gives the
+CRC-32 from 0 (cache_file_crc32_update) of the bytes read - on a thread of
+its own, the CRC with it - and with `defer_model_checksum` leaves the model
+data's part of the checksum to custom_edition_cache_checksum_finish, from
+its own reads of the model data. NULL: none (the tools). */
+struct custom_edition_load_hooks
+{
+	struct cache_file_source *source;
+	int (*read_crc)(void *context, uint32_t offset, uint32_t size, void *buffer, uint32_t *crc);
+	int defer_model_checksum;
+};
+
+void custom_edition_cache_load_hooks(
+	struct custom_edition_load_hooks const *hooks);
+
+/* Completes the checksum of a load that deferred the model data's part,
+from the CRC-32 from 0 of all of the model data (report->model_data_bytes
+from report->model_data_offset): computed_checksum and the mismatch warning
+as custom_edition_cache_load would have set them. */
+void custom_edition_cache_checksum_finish(
+	struct custom_edition_load_report *report,
+	uint32_t model_data_crc);
+
+/* CRC-32 as the checksum takes it (reflected 0x04C11DB7, no inversions):
+`crc` updated with `size` bytes, and `crc` as `length` zero bytes would
+leave it - so the CRC of A then B, A's from some start and B's from 0, is
+cache_file_crc32_shift(a, length of B) ^ b */
+uint32_t cache_file_crc32_update(
+	uint32_t crc,
+	void const *bytes,
+	uint32_t size);
+uint32_t cache_file_crc32_shift(
+	uint32_t crc,
+	uint32_t length);
 
 /* Where Halo PC keeps what a texture holds in other channels than this
 build reads it from (docs/custom_edition_caches.md). The renderer samples a
