@@ -687,6 +687,7 @@ Useful ones:
 | `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go |
 | `HALO_GPU_STATS=1` | draws, uniforms, ring use per frame |
 | `HALO_SCREENSHOT_DIR=ux0:data/haloce-vita/shots`, `HALO_SCREENSHOT_EVERY=n` | a BMP every n frames (at 100% resolution) |
+| `HALO_HUD_LOG=1` | each HUD quad's bitmap and rectangle in `halo.log` the first time it is drawn there (`tests/run_hud_layout_test.sh`) |
 | `HALO_NO_MOVIES=1`, `HALO_NO_AUDIO=1` | skip movies or sound |
 | `HALO_DXT_MIPS=0` | compressed textures without their mip chains |
 | `HALO_HEARTBEAT=1` | a line every 2 s in `heartbeat.txt` (is the game still running?) |

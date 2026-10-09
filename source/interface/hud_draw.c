@@ -1555,6 +1555,52 @@ void hud_draw_static_element(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port, debug) HALO_HUD_LOG=1: each HUD quad the first time it is drawn at a
+place and size, "hud quad: <bitmap's tag> x0 y0 x1 y1 (screen <width>)" in the
+window's pixels (port/vita/tests/run_hud_layout_test.sh reads them) */
+static void hud_quad_log(
+	struct bitmap_data const *bitmap,
+	struct dynamic_screen_vertex const *vertices)
+{
+	static int wanted = -1;
+	static unsigned long seen[512];
+	static int seen_count;
+	void platform_log(char const *format, ...);
+	char *tag_get_name(long tag_index);
+	long x0 = (long)vertices[0].position.x, x1 = x0, y0 = (long)vertices[0].position.y, y1 = y0;
+	unsigned long signature;
+	int index;
+
+	if (wanted < 0)
+		wanted = getenv("HALO_HUD_LOG") && atoi(getenv("HALO_HUD_LOG"));
+	if (!wanted)
+		return;
+	for (index = 1; index < 4; index++)
+	{
+		x0 = MIN(x0, (long)vertices[index].position.x);
+		x1 = MAX(x1, (long)vertices[index].position.x);
+		y0 = MIN(y0, (long)vertices[index].position.y);
+		y1 = MAX(y1, (long)vertices[index].position.y);
+	}
+	signature = (unsigned long)bitmap->tag_index * 2654435761UL ^ (unsigned long)(x0 * 73856093L) ^
+		(unsigned long)(y0 * 19349663L) ^ (unsigned long)(x1 * 83492791L) ^ (unsigned long)(y1 * 1234567L) ^
+		(unsigned long)halo_screen_width();
+	for (index = 0; index < seen_count; index++)
+	{
+		if (seen[index] == signature)
+			return;
+	}
+	if (seen_count < (int)NUMBEROF(seen))
+		seen[seen_count++] = signature;
+	platform_log("hud quad: %s %ld %ld %ld %ld (screen %ld)",
+		bitmap->tag_index != NONE && bitmap->tag_index != 0 ? tag_get_name(bitmap->tag_index) : "?",
+		x0, y0, x1, y1, halo_screen_width());
+
+	return;
+}
+#endif
+
 static void hud_draw_bitmap_internal(
 	void *meter_parameters,
 	struct bitmap_data const *bitmap,
@@ -1605,6 +1651,9 @@ static void hud_draw_bitmap_internal(
 		_shader_framebuffer_blend_function_alpha_multiply_add;
 	parameters.map[0] = (struct bitmap_data *)bitmap;
 
+#ifdef HALO_LINUX
+	hud_quad_log(bitmap, vertices);
+#endif
 	rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 985);
