@@ -2,8 +2,8 @@
 PERCEPTION_VERIFY.H
 
 (port, debug) HALO_AI_PERCEPTION_VERIFY=1: the work the AI's perception
-does another way (actor_perception.c) is checked against the original way, every
-time: perception_verify.c
+does another way (actor_perception.c) is checked against the original way,
+every time: perception_verify.c
 */
 
 #ifndef __PERCEPTION_VERIFY_H
@@ -19,6 +19,8 @@ enum
 	_perception_verify_refresh_walk,
 	/* a walk that went on from a reference after a list changed (counted; a change is not expected) */
 	_perception_verify_refresh_resumed,
+	/* an object's type read from its header by the timeslice refresh, against its datum's */
+	_perception_verify_refresh_object_type,
 	NUMBER_OF_PERCEPTION_VERIFY_KINDS
 };
 
@@ -47,6 +49,8 @@ void perception_verify_refresh_cluster_end_checked(void);
 	do { if (perception_verify_enabled()) perception_verify_refresh_object_checked(object_index); } while (0)
 #define perception_verify_refresh_resumed() \
 	do { if (perception_verify_enabled()) perception_verify_result(_perception_verify_refresh_resumed, 1, NULL); } while (0)
+#define perception_verify_refresh_object_type(header_type, datum_type) \
+	do { if (perception_verify_enabled()) perception_verify_result(_perception_verify_refresh_object_type, (header_type) == (datum_type), "header and datum types differ"); } while (0)
 #define perception_verify_refresh_cluster_end() \
 	do { if (perception_verify_enabled()) perception_verify_refresh_cluster_end_checked(); } while (0)
 

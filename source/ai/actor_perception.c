@@ -5357,14 +5357,34 @@ static void actor_perception_refresh_test_object(
 
 	while (object_index != NONE)
 	{
-		current_object = actor_perception_object_get(object_index);
 #ifdef HALO_LINUX
+		/* (port) the object's header looked up once: its datum for the test
+		and object_mark_function's mark (the same compare and write on the
+		same datum), its type from the header (the type the datum holds, both
+		set when the object is made; HALO_AI_PERCEPTION_VERIFY=1 compares) */
+		struct object_header_datum const *header = object_header_get(object_index);
+		short object_type = header->type;
+		boolean newly_marked;
+
+		current_object = (struct object_datum *)header->datum;
 		halo_lines_stats.perception_refresh_objects++;
-#endif
+		perception_verify_refresh_object_type(object_type, current_object->object.type);
+		newly_marked = current_object->object.magic_number != global_object_marker;
+		if (newly_marked)
+		{
+			current_object->object.magic_number = global_object_marker;
+		}
+
+		if (newly_marked)
+		{
+			if (object_type == _object_type_biped)
+#else
+		current_object = actor_perception_object_get(object_index);
 
 		if (object_mark_function(object_index))
 		{
 			if (current_object->object.type == _object_type_biped)
+#endif
 			{
 				struct unit_datum *unit =
 					(struct unit_datum *)current_object;
@@ -5509,7 +5529,11 @@ static void actor_perception_refresh_test_object(
 					}
 				}
 			}
+#ifdef HALO_LINUX
+			else if (object_type == _object_type_vehicle)
+#else
 			else if (current_object->object.type == _object_type_vehicle)
+#endif
 			{
 				struct unit_datum *vehicle =
 					(struct unit_datum *)current_object;
@@ -5523,7 +5547,11 @@ static void actor_perception_refresh_test_object(
 						NULL);
 				}
 			}
+#ifdef HALO_LINUX
+			else if (object_type == _object_type_projectile)
+#else
 			else if (current_object->object.type == _object_type_projectile)
+#endif
 			{
 				struct actor_perception_projectile_datum_view *projectile =
 					(struct actor_perception_projectile_datum_view *)
@@ -5830,19 +5858,19 @@ done:
 #ifdef HALO_LINUX
 /* (port) the objects of one of a visible cluster's lists (collideable or
 not) tested by actor_perception_refresh_test_object, in the list's order as
-before, with hints (__builtin_prefetch): an actor's timeslice refresh tests
-every object in every cluster it can see, ~350-550 in b30's beach fight
-(most of them scenery: a header and three cache lines of a datum each, its
-marker stamp, type, and child and sibling links, met cold) where the walk
-went from one reference to the next between tests. Here the walk reads up
-to ACTOR_PERCEPTION_REFRESH_BATCH references ahead, hinting each object's
-header as it goes, and each test hints the datum lines of the object a few
-places on. The tests change no cluster list (nothing in them connects or
-disconnects an object), but if one did (cluster_partition_changes moved),
-the walk goes on from the reference after the last object tested, read
-then, as the walk between tests read it. HALO_AI_PERCEPTION_VERIFY=1 walks
-each list again the original way afterwards and compares
-(perception_verify.c). */
+before: an actor's timeslice refresh tests every object in every cluster it
+can see, ~350-550 in b30's beach fight, nearly all scenery that it only
+marks. The list is walked up to ACTOR_PERCEPTION_REFRESH_BATCH references
+ahead (cluster_partition_walk_datums: the same references in the same
+order, asking which thread this is once for the batch, not once an object),
+with hints (__builtin_prefetch) for each object's header as it is reached
+and for the datum lines the test reads (marker stamp, child and sibling
+links) of the object a few places on. The tests change no cluster list
+(nothing in them connects or disconnects an object), but if one did
+(cluster_partition_changes moved), the walk goes on from the reference after
+the last object tested, read then, as the walk between tests read it.
+HALO_AI_PERCEPTION_VERIFY=1 walks each list again the original way
+afterwards and compares (perception_verify.c). */
 #define ACTOR_PERCEPTION_REFRESH_BATCH 32
 #define ACTOR_PERCEPTION_REFRESH_AHEAD 4
 
@@ -5859,9 +5887,8 @@ static __inline void actor_perception_prefetch_object_datum(
 
 		if (datum)
 		{
-			/* (the marker stamp; the type; the child and sibling links) */
+			/* (the marker stamp; the child and sibling links) */
 			__builtin_prefetch(datum + offsetof(struct object_datum, object.magic_number), 1);
-			__builtin_prefetch(datum + offsetof(struct object_datum, object.type));
 			__builtin_prefetch(datum + offsetof(struct object_datum, object.next_object_index));
 			__builtin_prefetch(datum + offsetof(struct object_datum, object.parent_object_index));
 		}
@@ -5875,35 +5902,35 @@ static void actor_perception_refresh_cluster(
 	struct actor_perception_refresh_list *enemy_list,
 	struct actor_perception_refresh_list *friend_list)
 {
+	struct cluster_partition const *partition = collideable ?
+		&collideable_object_cluster_partition :
+		&noncollideable_object_cluster_partition;
 	long object_indices[ACTOR_PERCEPTION_REFRESH_BATCH];
 	long references_after[ACTOR_PERCEPTION_REFRESH_BATCH];
-	long reference_index;
-	long object_index = collideable ?
-		cluster_get_first_collideable_object(&reference_index, cluster_index) :
-		cluster_get_first_noncollideable_object(&reference_index, cluster_index);
+	long reference_index = NONE;
+	long count = cluster_partition_walk_datums(
+		partition,
+		cluster_index,
+		&reference_index,
+		object_indices,
+		references_after,
+		ACTOR_PERCEPTION_REFRESH_BATCH);
 
-	while (object_index != NONE)
+	while (count > 0)
 	{
 		unsigned long changes = cluster_partition_changes();
-		short count = 0;
-		short index;
+		boolean resumed = FALSE;
+		long index;
 
-		while (object_index != NONE && count < ACTOR_PERCEPTION_REFRESH_BATCH)
+		for (index = 0; index < count; index++)
 		{
-			short absolute_index = (short)object_index;
+			short absolute_index = (short)object_indices[index];
 
 			if (absolute_index >= 0 && absolute_index < object_header_data->count)
 			{
 				__builtin_prefetch((char const *)object_header_data->data + object_header_data->size * absolute_index);
 			}
-			object_indices[count] = object_index;
-			references_after[count] = reference_index;
-			count++;
-			object_index = collideable ?
-				cluster_get_next_collideable_object(&reference_index) :
-				cluster_get_next_noncollideable_object(&reference_index);
 		}
-
 		for (index = 0; index < count; index++)
 		{
 			if (index + ACTOR_PERCEPTION_REFRESH_AHEAD < count)
@@ -5917,12 +5944,21 @@ static void actor_perception_refresh_cluster(
 				/* (a list changed: on from the reference after this object, as the walk would) */
 				perception_verify_refresh_resumed();
 				reference_index = references_after[index];
-				object_index = collideable ?
-					cluster_get_next_collideable_object(&reference_index) :
-					cluster_get_next_noncollideable_object(&reference_index);
+				resumed = TRUE;
 				break;
 			}
 		}
+		if (!resumed && (count < ACTOR_PERCEPTION_REFRESH_BATCH || reference_index == NONE))
+		{
+			break;
+		}
+		count = cluster_partition_walk_datums(
+			partition,
+			NONE,
+			&reference_index,
+			object_indices,
+			references_after,
+			ACTOR_PERCEPTION_REFRESH_BATCH);
 	}
 
 	return;
