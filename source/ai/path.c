@@ -1882,7 +1882,7 @@ static struct path_state *path_state_verify_copy(
 			(index < offsetof(struct path_state, heap_count) - offsetof(struct path_state, node_list) ||
 				index >= offsetof(struct path_state, heap) - offsetof(struct path_state, node_list)))
 		{
-			path_state_verify_result(FALSE, "a search on a state path_state_new did not just set up");
+			path_state_verify_result(_path_state_verify_search, FALSE, "a search on a state path_state_new did not just set up");
 			return NULL;
 		}
 	}
@@ -1926,7 +1926,7 @@ static void path_state_verify_compare(
 		snprintf(what, sizeof(what), "%s differs (answer %d, %d nodes, heap %d, start surface %ld)",
 			difference, result, state->node_count, state->heap_count, state->input.start_surface_index);
 	}
-	path_state_verify_result(difference == NULL, difference ? what : NULL);
+	path_state_verify_result(_path_state_verify_search, difference == NULL, difference ? what : NULL);
 	free(copy);
 }
 

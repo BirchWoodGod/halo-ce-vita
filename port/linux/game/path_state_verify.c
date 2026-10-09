@@ -29,9 +29,15 @@ long game_time_get(void);
 /* ---------- globals */
 
 static int verify_enabled = -1;
-static unsigned long verify_checks;
-static unsigned long verify_mismatches;
+static unsigned long verify_checks[NUMBER_OF_PATH_STATE_VERIFY_KINDS];
+static unsigned long verify_mismatches[NUMBER_OF_PATH_STATE_VERIFY_KINDS];
 static long verify_reported_time;
+
+static char const *const verify_kind_names[NUMBER_OF_PATH_STATE_VERIFY_KINDS] =
+{
+	"path searches",
+	"nearby firing position answers",
+};
 
 /* ---------- public code */
 
@@ -49,20 +55,29 @@ int path_state_verify_enabled(
 }
 
 void path_state_verify_result(
+	int kind,
 	int same,
 	char const *what)
 {
 	long now = game_time_get();
 
-	__sync_fetch_and_add(&verify_checks, 1);
-	if (!same && __sync_fetch_and_add(&verify_mismatches, 1) < 20)
+	__sync_fetch_and_add(&verify_checks[kind], 1);
+	if (!same && __sync_fetch_and_add(&verify_mismatches[kind], 1) < 20)
 	{
-		platform_log("path state verify mismatch: %s", what ? what : "");
+		platform_log("path state verify mismatch (%s): %s", verify_kind_names[kind], what ? what : "");
 	}
 	if (now - verify_reported_time >= 300 || now < verify_reported_time)
 	{
+		int index;
+		char line[512];
+		int length = 0;
+
 		verify_reported_time = now;
-		platform_log("path-state-verify (tick %ld): path searches %lu checked, %lu different",
-			now, verify_checks, verify_mismatches);
+		for (index = 0; index < NUMBER_OF_PATH_STATE_VERIFY_KINDS; index++)
+		{
+			length += snprintf(line + length, sizeof(line) - length, "%s%s %lu checked, %lu different",
+				index ? ", " : "", verify_kind_names[index], verify_checks[index], verify_mismatches[index]);
+		}
+		platform_log("path-state-verify (tick %ld): %s", now, line);
 	}
 }
