@@ -2337,6 +2337,41 @@ short ai_test_line_of_sight(
 	long ignore_object_index,
 	boolean ignore_vehicles)
 {
+	return ai_test_line_of_sight_unless_moot(
+		p0,
+		p0_cluster_index,
+		p1,
+		p1_cluster_index,
+		mode,
+		test_line_of_fire,
+		ignore_object_index,
+		ignore_vehicles,
+		NULL,
+		NULL);
+}
+
+/* port: ai_test_line_of_sight, asking its caller (answer_needed, when given)
+once the first ray is cast in the expand-source mode whether it needs to know
+which of the two answers the extra lines can still give: occluded, or what the
+first ray says without them (clear when it met nothing; else from cover, to
+cover or obstructed by the distances to what it met, which the extra lines
+do not change). When the caller does not, the extra lines are not cast and
+the answer is NONE. Every ray is cast in the original order up to there, the
+answers offered are computed as the classification below computes them, and
+nothing a ray leaves behind is game state but the collision tests' marker
+stamps (a fresh marker each test; the masked tick hash leaves them out) */
+short ai_test_line_of_sight_unless_moot(
+	real_point3d const *p0,
+	short p0_cluster_index,
+	real_point3d const *p1,
+	short p1_cluster_index,
+	short mode,
+	boolean test_line_of_fire,
+	long ignore_object_index,
+	boolean ignore_vehicles,
+	ai_line_of_sight_answer_needed answer_needed,
+	void *answer_needed_context)
+{
 	struct collision_result collision;
 	real collision_t = 1.0f;
 	unsigned long collision_flags;
@@ -2433,6 +2468,36 @@ short ai_test_line_of_sight(
 
 	if (mode == _ai_line_of_sight_normal)
 		goto classify_visibility;
+
+	if (answer_needed && mode == _ai_line_of_sight_expand_source)
+	{
+		short answer_without_extra_lines;
+
+		if (clear_line_of_sight)
+		{
+			answer_without_extra_lines = _ai_line_of_sight_clear;
+		}
+		else
+		{
+			/* (as classify_collision_distance below) */
+			real distance = distance3d(p0, p1);
+
+			if (distance < 1.0f)
+				answer_without_extra_lines = _ai_line_of_sight_obstructed;
+			else if (distance * collision_t < 1.0f)
+				answer_without_extra_lines = _ai_line_of_sight_from_cover;
+			else if ((1.0f - collision_t) * distance < 4.0f)
+				answer_without_extra_lines = _ai_line_of_sight_to_cover;
+			else
+				answer_without_extra_lines = _ai_line_of_sight_obstructed;
+		}
+
+		if (!answer_needed(answer_needed_context, _ai_line_of_sight_occluded, answer_without_extra_lines))
+		{
+			result = NONE;
+			goto finish;
+		}
+	}
 
 	{
 		real_vector3d perpendicular;

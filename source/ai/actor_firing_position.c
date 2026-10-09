@@ -393,7 +393,8 @@ static boolean firing_position_compare(
 static void firing_position_compute_line_of_sight(
 	long actor_index,
 	struct firing_position_evaluation_context *evaluation_context,
-	struct firing_position *firing_position);
+	struct firing_position *firing_position,
+	real const *best_evaluation);
 static boolean firing_position_forced_evaluation(
 	long actor_index,
 	struct firing_position_evaluation_context *evaluation_context,
@@ -1502,10 +1503,60 @@ static void pre_evaluator_panic(
 	return;
 }
 
+/* port: what a firing position's expand-source line of sight asks its
+selection (firing_position_line_of_sight_needed) */
+struct firing_position_line_of_sight_question
+{
+	long actor_index;
+	struct firing_position_evaluation_context *evaluation_context;
+	struct firing_position const *firing_position;
+	real best_evaluation;
+	short answers[2];
+};
+
+/* port: whether either answer the extra lines of a candidate's line of sight
+can still give would make it the selection's best so far: its post-evaluation
+(the evaluators of its mode; the line of sight is all they look at that the
+rays decide) run on a copy with each answer, as the selection runs it on the
+candidate. When neither would, the selection goes on exactly as it would
+after either: only a candidate valid and better than the best so far changes
+what it chooses, and nothing reads a candidate that is not the best (the
+debug records aside, which are kept only when this is not asked) */
+static boolean firing_position_line_of_sight_needed(
+	void *context,
+	short answer0,
+	short answer1)
+{
+	struct firing_position_line_of_sight_question *question= context;
+	short index;
+
+	question->answers[0]= answer0;
+	question->answers[1]= answer1;
+	for (index= 0; index<2; index++)
+	{
+		struct firing_position copy= *question->firing_position;
+
+		copy.line_of_sight= question->answers[index];
+		copy.pre_evaluation= copy.evaluation;
+		if (firing_position_post_evaluate(question->actor_index, question->evaluation_context, &copy) &&
+			copy.evaluation>question->best_evaluation)
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* port: best_evaluation (the selection's best so far, or NULL) lets the
+expand-source mode's extra lines go uncast when neither answer they can give
+would make the candidate the best: its line of sight is then NONE and the
+selection does not post-evaluate it (firing_position_line_of_sight_needed) */
 static void firing_position_compute_line_of_sight(
 	long actor_index,
 	struct firing_position_evaluation_context *evaluation_context,
-	struct firing_position *firing_position)
+	struct firing_position *firing_position,
+	real const *best_evaluation)
 {
 	struct actor_datum *actor= actor_get(actor_index);
 
@@ -1602,15 +1653,68 @@ static void firing_position_compute_line_of_sight(
 				line_of_sight_mode= _ai_line_of_sight_expand_source;
 			}
 		}
-		firing_position->line_of_sight= ai_test_line_of_sight(
-			&estimated_position,
-			firing_position->definition->cluster_index,
-			&evaluation_context->target_line_of_sight_position,
-			evaluation_context->target_cluster_index,
-			line_of_sight_mode,
-			TRUE,
-			evaluation_context->target_vehicle_index,
-			actor->input.vehicle_index!=NONE);
+		if (best_evaluation && line_of_sight_mode==_ai_line_of_sight_expand_source)
+		{
+			struct firing_position_line_of_sight_question question;
+
+			question.actor_index= actor_index;
+			question.evaluation_context= evaluation_context;
+			question.firing_position= firing_position;
+			question.best_evaluation= *best_evaluation;
+			question.answers[0]= question.answers[1]= NONE;
+			firing_position->line_of_sight= ai_test_line_of_sight_unless_moot(
+				&estimated_position,
+				firing_position->definition->cluster_index,
+				&evaluation_context->target_line_of_sight_position,
+				evaluation_context->target_cluster_index,
+				line_of_sight_mode,
+				TRUE,
+				evaluation_context->target_vehicle_index,
+				actor->input.vehicle_index!=NONE,
+				firing_position_line_of_sight_needed,
+				&question);
+#ifdef HALO_LINUX
+			if (firing_position->line_of_sight==NONE && path_state_verify_enabled())
+			{
+				/* (HALO_AI_PATH_STATE_VERIFY) the line of sight cast in full:
+				its answer one of the two offered, and with it the candidate
+				not the best */
+				struct firing_position copy= *firing_position;
+				boolean same;
+				char what[160];
+
+				copy.line_of_sight= ai_test_line_of_sight(
+					&estimated_position,
+					firing_position->definition->cluster_index,
+					&evaluation_context->target_line_of_sight_position,
+					evaluation_context->target_cluster_index,
+					line_of_sight_mode,
+					TRUE,
+					evaluation_context->target_vehicle_index,
+					actor->input.vehicle_index!=NONE);
+				copy.pre_evaluation= copy.evaluation;
+				same= (copy.line_of_sight==question.answers[0] || copy.line_of_sight==question.answers[1]) &&
+					!(firing_position_post_evaluate(actor_index, evaluation_context, &copy) &&
+						copy.evaluation>question.best_evaluation);
+				snprintf(what, sizeof(what), "mode %d: answer %d of %d/%d, evaluation %.3f valid %d against %.3f",
+					evaluation_context->evaluation_mode, copy.line_of_sight, question.answers[0], question.answers[1],
+					copy.evaluation, copy.valid, question.best_evaluation);
+				path_state_verify_result(_path_state_verify_moot_line_of_sight, same, same ? NULL : what);
+			}
+#endif
+		}
+		else
+		{
+			firing_position->line_of_sight= ai_test_line_of_sight(
+				&estimated_position,
+				firing_position->definition->cluster_index,
+				&evaluation_context->target_line_of_sight_position,
+				evaluation_context->target_cluster_index,
+				line_of_sight_mode,
+				TRUE,
+				evaluation_context->target_vehicle_index,
+				actor->input.vehicle_index!=NONE);
+		}
 	}
 
 	return;
@@ -1642,7 +1746,8 @@ static boolean firing_position_forced_evaluation(
 			firing_position_compute_line_of_sight(
 				actor_index,
 				evaluation_context,
-				firing_position);
+				firing_position,
+				NULL);
 		}
 
 		firing_position->pre_evaluation= firing_position->evaluation;
@@ -2455,6 +2560,7 @@ short actor_select_firing_position(
 			else
 			{
 				boolean expected_to_discard= FALSE;
+				boolean lines_of_sight_may_be_moot;
 				short index;
 
 				firing_position_pre_evaluate(actor_index, evaluation_context, firing_position_count, firing_positions);
@@ -2466,6 +2572,13 @@ short actor_select_firing_position(
 				global_temporary_sort_firing_position_array= firing_positions;
 				qsort_4byte(sorted_indices, firing_position_count, firing_position_compare);
 				evaluation_context->post_evaluation_bounded= firing_positions_get_post_evaluation_bound(actor_index, evaluation_context);
+				/* port: a candidate's expand-source extra lines are left uncast
+				when neither answer they can give would make it the best
+				(firing_position_line_of_sight_needed); not while its debug
+				records are kept or every position is evaluated, nor flying (the
+				flying path test is part of its post-evaluation) */
+				lines_of_sight_may_be_moot= !debug_evaluation && !evaluation_context->flying &&
+					(game_connection()!=_game_connection_local || !ai_debug.evaluate_all_positions);
 
 				for (index= 0; index<firing_position_count; index++)
 				{
@@ -2504,11 +2617,15 @@ short actor_select_firing_position(
 					{
 						if (evaluation_context->has_target)
 						{
-							firing_position_compute_line_of_sight(actor_index, evaluation_context, firing_position);
+							firing_position_compute_line_of_sight(actor_index, evaluation_context, firing_position,
+								lines_of_sight_may_be_moot ? &best_evaluation : NULL);
 						}
 						evaluation_context->debug_post_evaluated_count++;
 						firing_position->pre_evaluation= firing_position->evaluation;
-						if (firing_position_post_evaluate(actor_index, evaluation_context, firing_position) &&
+						/* port: (a line of sight left NONE is one whose answer
+						could not make this candidate the best) */
+						if (firing_position->line_of_sight!=NONE &&
+							firing_position_post_evaluate(actor_index, evaluation_context, firing_position) &&
 							firing_position->evaluation>best_evaluation)
 						{
 							match_assert(
