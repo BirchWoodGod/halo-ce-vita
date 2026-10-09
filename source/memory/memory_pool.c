@@ -454,6 +454,17 @@ static void code_0010dc50(
 	match_assert("c:\\halo\\SOURCE\\memory\\memory_pool.c", 340, pool->signature==POOL_SIGNATURE);
 	match_assert("c:\\halo\\SOURCE\\memory\\memory_pool.c", 341, pool->size>0);
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+	/* (port) a release build checks no assertions, and the walk does
+	nothing else: it is left out. The compiler kept it (a loop it cannot
+	prove ends), so every block allocated, freed, reallocated or compacted
+	in the object pool walked all the pool's blocks - ~1000 in b30's beach
+	fight, a cache miss each on the Vita - for every object made or deleted
+	(a projectile, a casing, an effect's object) */
+	(void)previous_block;
+	(void)block;
+	return;
+#endif
 	previous_block = NULL;
 	for (block = pool->first_block; block; block = block->next_block)
 	{
@@ -484,9 +495,15 @@ static struct memory_pool_block *code_0010ddc0(
 		block->reference==reference,
 		csprintf(temporary, "expected reference %08x but got %08x", block->reference, reference));
 
+#if !defined(HALO_LINUX) || !defined(HALO_RELEASE)
+	/* (port: a release build does not look for the block among the pool's
+	to assert that it is there: code_0010dc50 above) */
 	for (other_block = pool->first_block; other_block && block != other_block; other_block = other_block->next_block)
 	{
 	}
 	match_assert("c:\\halo\\SOURCE\\memory\\memory_pool.c", 388, other_block);
+#else
+	(void)other_block;
+#endif
 	return block;
 }

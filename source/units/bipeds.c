@@ -280,6 +280,13 @@ symbols in this file:
 #include "render/render_debug.h"
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 /* port: port/linux/game/network_objects.c's (a client deletes the host's
 objects on the host's word alone) */
@@ -2366,6 +2373,7 @@ static void biped_find_nearby_support_surface(
 static void biped_update_physics(
 	struct biped_physics *physics)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_physics);
 	real_vector2d facing = { 0.f, 0.f };
 	boolean climbing = TEST_FLAG(physics->in_flags, _biped_physics_in_climb_anything_bit);
 	word in_flags;
@@ -3086,6 +3094,7 @@ static void biped_update_physics(
 	match_assert_valid_real_point3d("c:\\halo\\SOURCE\\units\\bipeds.c", 0xF10, &physics->new_position);
 	match_assert_valid_real_vector3d("c:\\halo\\SOURCE\\units\\bipeds.c", 0xF11, &physics->new_velocity);
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 

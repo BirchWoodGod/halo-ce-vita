@@ -204,6 +204,13 @@ reconnects a light it believes disconnected (the assertion at 0x4F9) */
 #include "game/players.h"
 void platform_log(const char *format, ...);
 #endif
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 /* port: port/linux/src (halo.log) */
 void platform_log(const char *format, ...);
@@ -1666,6 +1673,7 @@ void light_particle(
 void light_disconnect_from_map(
 	long light_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_lights);
 	struct light_datum *light = light_get(light_index);
 
 	if (TEST_FLAG(light->flags, _point_light_connects_to_map_bit))
@@ -1681,6 +1689,7 @@ void light_disconnect_from_map(
 		LIGHT_SET_FLAG(light, _point_light_connected_to_map_bit, FALSE);
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 
@@ -2126,6 +2135,7 @@ void lights_render_specular(
 void light_reconnect_to_map(
 	long light_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_lights);
 	struct light_datum *light = light_get(light_index);
 	struct point_light_definition *definition = light_definition_get(light->definition_index);
 	struct object_marker markers[1];
@@ -2185,6 +2195,7 @@ void light_reconnect_to_map(
 		LIGHT_SET_FLAG(light, _point_light_connected_to_map_bit, TRUE);
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 

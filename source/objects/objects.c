@@ -15,19 +15,17 @@ tick tombstoned this epoch is gone for the tick, one it created is not yet
 there for the render) */
 #define OBJECT_HEADER_LIVE(header, absolute_index) \
 	((header)->identifier && !halo_epoch_datum_hidden_from_caller(object_header_data, (absolute_index)))
-/* object_update's sub-steps, timed for the HALO_TICK_PROFILE report below
-(in the ticks fine_profile.h picks) */
-#include "fine_profile.h"
-static unsigned long long objects_step_us[8], objects_step_started;
-static int objects_step_depth;
-static int objects_profile_on;
-#define OBJECT_STEP_ON() (objects_profile_on > 0 && halo_fine_tick_on && objects_step_depth == 0)
-#define OBJECT_STEP_BEGIN() do { if (OBJECT_STEP_ON()) objects_step_started = halo_fine_tick_now(); } while (0)
-#define OBJECT_STEP_END(k) do { if (OBJECT_STEP_ON()) objects_step_us[k] += halo_fine_tick_now() - objects_step_started; } while (0)
+/* objects_update by object type and phase (HALO_TICK_PROFILE=2:
+objects_phases.h) */
+#include "objects_phases.h"
+#include <stdlib.h>
+void platform_log(const char *format, ...);
+#define OBJECT_STEP_BEGIN(phase) HALO_OBJECTS_PHASE_PUSH(phase)
+#define OBJECT_STEP_END() HALO_OBJECTS_PHASE_POP()
 #else
 #define OBJECT_HEADER_LIVE(header, absolute_index) ((header)->identifier)
-#define OBJECT_STEP_BEGIN() ((void)0)
-#define OBJECT_STEP_END(k) ((void)0)
+#define OBJECT_STEP_BEGIN(phase) ((void)0)
+#define OBJECT_STEP_END() ((void)0)
 #endif
 
 #include "damage.h"
@@ -471,7 +469,29 @@ void objects_fix_for_deleted_object(
 	struct object_datum *object;
 
 	struct object_iterator iterator;
+#ifdef HALO_LINUX
+	/* (port) the types with a handler: object_types.c */
+	unsigned long object_types_handling_deleted_objects(void);
+	unsigned long handling_types = object_types_handling_deleted_objects();
+
+#ifdef HALO_RELEASE
+	/* (port) only the objects of those types are visited: an object's
+	umbrella shield (the other reference cleared here) is never anything
+	but NONE - object_new sets it so, and nothing in the game sets it to an
+	object (damage.c only reads it) - so the clearing below never found an
+	object to clear, and the walk read every object in the game (~1000 in
+	b30's beach fight, a cache miss each on the Vita) for every projectile
+	that hit. The headers are still walked in order; the handlers are
+	called for the same objects in the same order. (Builds with assertions
+	visit every object and check that no umbrella shield names the deleted
+	object.) */
+	object_iterator_new(&iterator, handling_types, 0);
+#else
 	object_iterator_new(&iterator, _object_mask_all, 0);
+#endif
+#else
+	object_iterator_new(&iterator, _object_mask_all, 0);
+#endif
 
 	for (object = (struct object_datum *)object_iterator_next(&iterator);
 		object;
@@ -479,8 +499,15 @@ void objects_fix_for_deleted_object(
 	{
 		if (object->object.umbrella_shield_object_index==deleted_object_index)
 		{
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+			match_vassert("c:\\halo\\SOURCE\\objects\\objects.c", __LINE__, FALSE,
+				"objects_fix_for_deleted_object: an umbrella shield named an object (a release build skips the objects that have no handler)");
+#endif
 			object->object.umbrella_shield_object_index = NONE;
 		}
+#ifdef HALO_LINUX
+		if (TEST_FLAG(handling_types, object->object.type))
+#endif
 		object_type_handle_deleted_object(iterator.index, deleted_object_index);
 	}
 
@@ -2661,6 +2688,7 @@ void object_compute_node_matrices(
 		cannot_interpolate_node_orientations_storage :
 		(real_orientation *)object_header_block_get(object_index, &object->object.node_orientations);
 
+	OBJECT_STEP_BEGIN(_objects_phase_nodes);
 	/* port: a model without nodes is placed like no model (a map's count) */
 	if (object_definition->object.model.index!=NONE &&
 		model_definition_get(object_definition->object.model.index)->nodes.count>0)
@@ -3131,6 +3159,7 @@ void object_compute_node_matrices(
 		object->object.bounding_sphere_radius *= object->object.scale;
 	}
 
+	OBJECT_STEP_END();
 	return;
 }
 
@@ -3624,6 +3653,7 @@ long object_new(
 #endif
 	long definition_index = data->definition_index;
 
+	OBJECT_STEP_BEGIN(_objects_phase_create);
 	match_assert_valid_real_point3d("c:\\halo\\SOURCE\\objects\\objects.c", 618, &data->position)
 	match_assert_valid_real_vector3d_axes2("c:\\halo\\SOURCE\\objects\\objects.c", 619, &data->forward, &data->up);
 	match_assert_valid_real_vector3d("c:\\halo\\SOURCE\\objects\\objects.c", 620, &data->angular_velocity);
@@ -3888,6 +3918,7 @@ long object_new(
 	here on (render_epoch.h) */
 	halo_epoch_scope_ready(epoch_scope);
 #endif
+	OBJECT_STEP_END();
 	return object_index;
 }
 
@@ -4027,6 +4058,9 @@ static boolean object_update(
 	boolean result = TRUE;
 	if (!TEST_FLAG(header->flags, _object_header_do_not_update_bit))
 	{
+#ifdef HALO_LINUX
+		HALO_OBJECTS_OBJECT_PUSH(header->type);
+#endif
 		if (TEST_FLAG(object->object.flags, _object_garbage_bit))
 		{
 			++object_globals->active_garbage_object_count;
@@ -4042,13 +4076,13 @@ static boolean object_update(
 			}
 		}
 
-		OBJECT_STEP_BEGIN(); object_type_update(object_index); OBJECT_STEP_END(0);
+		OBJECT_STEP_BEGIN(_objects_phase_type); object_type_update(object_index); OBJECT_STEP_END();
 		if (object_definition->object.collision_model.index!=NONE)
 		{
-			OBJECT_STEP_BEGIN(); object_damage_update(object_index); OBJECT_STEP_END(1);
+			OBJECT_STEP_BEGIN(_objects_phase_damage); object_damage_update(object_index); OBJECT_STEP_END();
 		}
 
-		OBJECT_STEP_BEGIN(); object_type_export_function_values(object_index); OBJECT_STEP_END(2);
+		OBJECT_STEP_BEGIN(_objects_phase_functions); object_type_export_function_values(object_index); OBJECT_STEP_END();
 
 		if (!TEST_FLAG(object->object.flags, _object_do_not_recompute_node_matrices_bit))
 		{
@@ -4093,15 +4127,17 @@ static boolean object_update(
 			}
 			if (!skip)
 			{
-				OBJECT_STEP_BEGIN(); object_compute_node_matrices(object_index); OBJECT_STEP_END(3);
+				object_compute_node_matrices(object_index);
 			}
 #else
-			OBJECT_STEP_BEGIN(); object_compute_node_matrices(object_index); OBJECT_STEP_END(3);
+			object_compute_node_matrices(object_index);
 #endif
 		}
 
-		OBJECT_STEP_BEGIN(); object_compute_function_values(object_index); OBJECT_STEP_END(4);
+		OBJECT_STEP_BEGIN(_objects_phase_functions);
+		object_compute_function_values(object_index);
 		object_compute_change_colors(object_index);
+		OBJECT_STEP_END();
 
 		if (
 			TEST_FLAG(object->object.flags, _object_dynamic_lighting_recompute_bit) &&
@@ -4111,31 +4147,27 @@ static boolean object_update(
 			)
 		)
 		{
-			OBJECT_STEP_BEGIN(); object_connect_lights(object_index, TRUE, TRUE); OBJECT_STEP_END(5);
+			OBJECT_STEP_BEGIN(_objects_phase_lights); object_connect_lights(object_index, TRUE, TRUE); OBJECT_STEP_END();
 		}
 
 		// Update children (if we have any)
-#ifdef HALO_LINUX
-		/* (the children's and siblings' updates: their own step 7 at the top) */
-		OBJECT_STEP_BEGIN();
-#endif
 		if (object->object.first_child_object_index!=NONE)
 		{
-			{ objects_step_depth++; object_update(object->object.first_child_object_index); objects_step_depth--; }
+			object_update(object->object.first_child_object_index);
 		}
 
 		if (object->object.parent_object_index!=NONE)
 		{
 			if (object->object.next_object_index!=NONE)
 			{
-				{ objects_step_depth++; object_update(object->object.next_object_index); objects_step_depth--; }
+				object_update(object->object.next_object_index);
 			}
 		}
-#ifdef HALO_LINUX
-		OBJECT_STEP_END(7);
-#endif
 
-		OBJECT_STEP_BEGIN(); object_postprocess_node_matrices(object_index); OBJECT_STEP_END(6);
+		OBJECT_STEP_BEGIN(_objects_phase_nodes); object_postprocess_node_matrices(object_index); OBJECT_STEP_END();
+#ifdef HALO_LINUX
+		HALO_OBJECTS_OBJECT_POP();
+#endif
 	}
 
 	return result;
@@ -4320,7 +4352,9 @@ void object_delete_immediately(
 		return;
 #endif
 	object_delete_initial_recursive(object_index, FALSE);
+	OBJECT_STEP_BEGIN(_objects_phase_create);
 	object_delete_recursive(object_index, FALSE);
+	OBJECT_STEP_END();
 
 	return;
 }
@@ -4695,62 +4729,6 @@ void objects_garbage_collection(
 }
 
 
-#ifdef HALO_LINUX
-/* HALO_TICK_PROFILE=1: objects_update's time by object type (game.c logs
-the tick's phases) */
-#include <stdlib.h>
-void platform_log(const char *format, ...);
-static unsigned long long objects_profile_type_us[16];
-static unsigned long objects_profile_type_count[16], objects_profile_ticks;
-static int objects_profile_on = -1;
-static unsigned long long objects_profile_now(void)
-{
-	/* (per-object timing at HALO_TICK_PROFILE=2 only: thousands of clock
-	reads a tick cost the tick itself) */
-	if (objects_profile_on < 0) { const char *e = getenv("HALO_TICK_PROFILE"); objects_profile_on = e && atoi(e) >= 2; }
-	return objects_profile_on > 0 && halo_fine_tick_on ? halo_fine_tick_now() : 0;
-}
-static void objects_profile_add(int type, unsigned long long started)
-{
-	if (objects_profile_on > 0 && halo_fine_tick_on && type >= 0 && type < 16)
-	{
-		objects_profile_type_us[type] += halo_fine_tick_now() - started;
-		objects_profile_type_count[type]++;
-	}
-}
-static void objects_profile_report(void)
-{
-	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
-		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
-	char line[768]; int n = 0, type;
-	/* (per timed tick: fine_profile.h) */
-	static struct halo_fine_mark mark;
-	unsigned long timed;
-	double per;
-
-	if (objects_profile_on <= 0 || ++objects_profile_ticks % 300) return;
-	timed = halo_fine_tick_since(&mark);
-	per = timed ? 1.0 / (timed * 1000.0) : 0.0;
-	for (type = 0; type < 16; type++)
-	{
-		if (!objects_profile_type_count[type]) continue;
-		n += snprintf(line + n, sizeof(line) - n, " %s %.2f(%.0f)", names[type], objects_profile_type_us[type] * per,
-			timed ? (double)objects_profile_type_count[type] / timed : 0.0);
-		objects_profile_type_us[type] = 0; objects_profile_type_count[type] = 0;
-	}
-	{
-		static const char *step_names[8] = { "type", "damage", "export", "node_matrices", "functions", "lights", "postprocess", "children" };
-		int k;
-		for (k = 0; k < 8; k++)
-		{
-			n += snprintf(line + n, sizeof(line) - n, " | %s %.2f", step_names[k], objects_step_us[k] * per);
-			objects_step_us[k] = 0;
-		}
-	}
-	n += snprintf(line + n, sizeof(line) - n, " | %s", mark.note);
-	platform_log("objects-update (ms/tick, objects/tick):%s", line);
-}
-#endif
 
 #ifdef HALO_LINUX
 /* (port) HALO_FRAME_TIMING: the objects in the game by type with each frame
@@ -4970,6 +4948,7 @@ void objects_update(
 	unsigned long long hitch_lock_wait = halo_cache_lock_wait_us[1], hitch_read = halo_map_read_us[1];
 
 	objects_hitch_begin();
+	halo_objects_phases_begin();
 #endif
 
 	profile_enter(section);
@@ -5045,10 +5024,22 @@ void objects_update(
 	object_header = (struct object_header_datum *)object_header_data->data;
 	for (i = 0; i<object_header_data->count; ++object_header)
 	{
+#ifdef HALO_LINUX
+		/* (port) the header's own flags before the liveness test, which asks
+		the render epoch about the slot (a call for every object in the game,
+		twice a tick): the same objects pass, in the same order */
+		if (object_header->identifier &&
+			TEST_FLAG(object_header->flags, _object_header_active_bit) &&
+			!TEST_FLAG(object_header->flags, _object_header_being_created_bit) &&
+			OBJECT_HEADER_LIVE(object_header, i))
+#else
 		if (OBJECT_HEADER_LIVE(object_header, i))
+#endif
 		{
+#ifndef HALO_LINUX
 			if (TEST_FLAG(object_header->flags, _object_header_active_bit) &&
 				!TEST_FLAG(object_header->flags, _object_header_being_created_bit))
+#endif
 			{
 				long object_index = DATUM_INDEX_NEW(i, object_header->identifier);
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 416, object_get(object_index)->object.parent_object_index==NONE);
@@ -5062,10 +5053,7 @@ void objects_update(
 				/* (the scenery divisor: above objects_update) */
 				if (!objects_scenery_update_skipped(i, object_header))
 				{
-					unsigned long long update_started = objects_profile_now();
-
 					objects_hitch_object_update(object_index, object_header->type);
-					objects_profile_add(object_header->type, update_started);
 				}
 #else
 				object_update(object_index);
@@ -5079,7 +5067,17 @@ void objects_update(
 	object_header = (struct object_header_datum *)object_header_data->data;
 	for (i = 0; i<object_header_data->count; ++object_header)
 	{
+#ifdef HALO_LINUX
+		/* (port) a header with none of the three flags below has nothing
+		done to it here (its "do not update" flag is clear already): the
+		liveness test is asked only of the others */
+		if (object_header->identifier &&
+			(object_header->flags & (FLAG(_object_header_do_not_update_bit) |
+				FLAG(_object_header_being_created_bit) | FLAG(_object_header_being_deleted_bit))) &&
+			OBJECT_HEADER_LIVE(object_header, i))
+#else
 		if (OBJECT_HEADER_LIVE(object_header, i))
+#endif
 		{
 			SET_FLAG(object_header->flags, _object_header_do_not_update_bit, FALSE);
 
@@ -5094,17 +5092,21 @@ void objects_update(
 
 			if (TEST_FLAG(object_header->flags, _object_header_being_deleted_bit))
 			{
+				OBJECT_STEP_BEGIN(_objects_phase_create);
 				object_delete_recursive(DATUM_INDEX_NEW(i, object_header->identifier), FALSE);
+				OBJECT_STEP_END();
 			}
 		}
 		++i;
 	}
 
+	OBJECT_STEP_BEGIN(_objects_phase_create);
 	objects_garbage_collection();
+	OBJECT_STEP_END();
 
 	profile_exit(section);
 #ifdef HALO_LINUX
-	objects_profile_report();
+	halo_objects_phases_end();
 	objects_hitch_end(hitch_lock_wait, hitch_read);
 #endif
 

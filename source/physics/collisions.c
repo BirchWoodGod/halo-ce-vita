@@ -117,6 +117,13 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/bipeds.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 #undef REAL_MATH_EXTERNAL_POINT_FROM_LINE3D
 
@@ -238,6 +245,7 @@ boolean collision_test_sphere(
 	real radius,
 	long ignore_object_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean result;
 	struct collision_bsp_test_sphere_result sphere_result;
 
@@ -252,10 +260,12 @@ boolean collision_test_sphere(
 			&sphere_result);
 		if (!result)
 		{
+			HALO_OBJECTS_PHASE_POP();
 			return result;
 		}
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return TRUE;
 }
 
@@ -264,6 +274,7 @@ boolean collision_test_point(
 	real_point3d const *point,
 	long ignore_object_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	unsigned long collision_flags = flags;
 	long leaf_index;
 	long reference_index;
@@ -310,9 +321,11 @@ boolean collision_test_point(
 	}
 
 no_collision:
+	HALO_OBJECTS_PHASE_POP();
 	return FALSE;
 
 collision:
+	HALO_OBJECTS_PHASE_POP();
 	return TRUE;
 }
 
@@ -323,6 +336,7 @@ boolean collision_test_vector(
 	long ignore_object_index,
 	struct collision_result *collision)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean hit = FALSE;
 	boolean test_environment = TEST_FLAG(flags, _collision_test_structure_bit) ||
 		TEST_FLAG(flags, _collision_test_media_bit) ||
@@ -684,6 +698,7 @@ boolean collision_test_vector(
 		scenario_location_from_point(&collision->location, &collision->point);
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return hit;
 }
 
@@ -695,6 +710,7 @@ boolean collision_test_pill(
 	long ignore_object_index,
 	struct collision_result *collision)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean hit = FALSE;
 	struct collision_bsp_test_pill_result bsp_result;
 
@@ -767,6 +783,7 @@ boolean collision_test_pill(
 	COLLISION_POINT_FROM_LINE3D(point, vector, collision->t, &collision->point);
 	scenario_location_from_point(&collision->location, &collision->point);
 
+	HALO_OBJECTS_PHASE_POP();
 	return hit;
 }
 
@@ -776,6 +793,7 @@ boolean collision_test_vector_exit(
 	real_vector3d const *vector,
 	struct collision_result *exit_collision)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean found = FALSE;
 
 	exit_collision->type = NONE;
@@ -841,6 +859,7 @@ boolean collision_test_vector_exit(
 		COLLISION_POINT_FROM_LINE3D(point, vector, exit_collision->t, &exit_collision->point);
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return found;
 }
 
@@ -853,6 +872,7 @@ boolean collision_get_features_in_sphere(
 	long ignore_object_index,
 	struct collision_feature_list *features)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	unsigned long structure_flags;
 
 	collision_features_new(features);
@@ -1002,6 +1022,7 @@ boolean collision_get_features_in_sphere(
 			collision_usage_times.features.QuadPart);
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return features->count[_collision_feature_sphere] != 0 ||
 		features->count[_collision_feature_cylinder] != 0 ||
 		features->count[_collision_feature_prism] != 0;
@@ -1016,6 +1037,7 @@ boolean collision_fix_pill(
 	long ignore_object_index,
 	real_point3d *new_position)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	/* Name, type and function scope: PC demo and HCEX PDBs.
 	 * January confirms the 204-byte array and this function as its sole user.
 	 * The declaration's precise block position is not independently attested.
@@ -1157,6 +1179,7 @@ boolean collision_fix_pill(
 		(halo_epoch_threaded || ( global_current_collision_user_depth > 1)));
 	if (!halo_epoch_threaded) --global_current_collision_user_depth;
 
+	HALO_OBJECTS_PHASE_POP();
 	return result;
 }
 
@@ -1168,6 +1191,7 @@ boolean collision_test_pill_new(
 	long ignore_object_index,
 	struct collision_result *collision)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean result = FALSE;
 	real t;
 	real_vector3d normal;
@@ -1207,6 +1231,7 @@ boolean collision_test_pill_new(
 	collision->plane.n.j = 0.0f;
 	collision->plane.n.k = 0.0f;
 
+	HALO_OBJECTS_PHASE_POP();
 	return result;
 }
 
@@ -1303,6 +1328,7 @@ short collision_move_point(
 	short maximum_collision_count,
 	struct collision_plane *collisions)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	short collision_count = 0;
 	real_point3d position;
 	real_vector3d velocity = *old_velocity;
@@ -1571,6 +1597,7 @@ short collision_move_point(
 	match_assert_valid_real_point3d("c:\\halo\\SOURCE\\physics\\collisions.c", 0x497, new_position);
 	match_assert_valid_real_vector3d("c:\\halo\\SOURCE\\physics\\collisions.c", 0x498, new_velocity);
 
+	HALO_OBJECTS_PHASE_POP();
 	return collision_count;
 }
 
@@ -1586,6 +1613,7 @@ short collision_move_pill(
 	short maximum_collision_count,
 	struct collision_plane *collisions)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	short result = FALSE;
 	struct collision_feature_list features;
 	real_point3d center;
@@ -1627,6 +1655,7 @@ short collision_move_pill(
 	match_assert("c:\\halo\\SOURCE\\physics\\collisions.c", 1230, (halo_epoch_threaded || ( global_current_collision_user_depth > 1)));
 	if (!halo_epoch_threaded) --global_current_collision_user_depth;
 
+	HALO_OBJECTS_PHASE_POP();
 	return result;
 }
 

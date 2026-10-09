@@ -199,6 +199,13 @@ struct powered_mass_point_definition
 #include "mass_point_datum.h"
 
 #include "units/vehicle_datum.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 /* TU-local copy: no shared header declares the game globals falling-damage
  * block yet; identical complete copies live in objects/damage.c and
@@ -2236,6 +2243,7 @@ void physics_update(
 	real_vector3d const *magic_force,
 	real_vector3d const *magic_torque)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_physics);
 	struct object_datum *object = object_get(object_index);
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
 	struct physics_definition *physics = physics_definition_get(
@@ -2253,6 +2261,7 @@ void physics_update(
 			mass_points,
 			magic_force,
 			magic_torque);
+		HALO_OBJECTS_PHASE_POP();
 		return;
 	}
 
@@ -2327,6 +2336,7 @@ void physics_update(
 		&total_torque);
 	physics_compute_unit_collisions(object_index);
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 

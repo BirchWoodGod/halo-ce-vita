@@ -48,6 +48,13 @@ symbols in this file:
 #include "units/biped_definitions.h"
 #include "units/biped_limp_noodle.h"
 #include "units/bipeds.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 /* ---------- constants */
 
@@ -712,6 +719,7 @@ static void biped_limp_noodle_adjust_orientations(
 boolean biped_limp_noodle_relax_nodes_onto_environment(
 	long biped_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_physics);
 	struct biped_datum *biped = biped_get(biped_index);
 	struct biped_definition *definition = biped_definition_get(biped->definition_index);
 	struct animation_graph *animation_graph = animation_graph_definition_get(
@@ -753,6 +761,7 @@ boolean biped_limp_noodle_relax_nodes_onto_environment(
 			biped->biped.limp_body_current_relaxation_iterations++;
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return relaxation_complete;
 }
 

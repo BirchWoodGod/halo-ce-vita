@@ -72,6 +72,13 @@ symbols in this file:
 #include "cluster_partitions.h"
 #include "structure_bsp_definitions.h"
 #include "structures/structures.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 /* ---------- constants */
 
@@ -574,6 +581,7 @@ void cluster_partition_reconnect(
 	float radius,
 	struct location const *location)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_map);
 	short cluster_indices[64];
 	short cluster_count;
 	short cluster_index_index;
@@ -623,6 +631,7 @@ void cluster_partition_reconnect(
 #endif
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 
@@ -631,6 +640,7 @@ void cluster_partition_disconnect(
 	long datum_index,
 	long *first_cluster_reference)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_map);
 	long cluster_reference_index = *first_cluster_reference;
 
 #ifdef HALO_LINUX
@@ -671,6 +681,7 @@ void cluster_partition_disconnect(
 
 	*first_cluster_reference = NONE;
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 
