@@ -357,15 +357,19 @@ static unsigned long convert_texel(unsigned char kind, const unsigned char *sour
 	}
 }
 
-/* one level (or 3D slice set) of an uncompressed texture into BGRA */
+/* one level (or 3D slice set) of an uncompressed texture into BGRA, its
+rows row_texels apart in destination (0: packed, the level's width) */
 static void decode_level(const struct xgpu_texture_description *description, unsigned long level,
-	const unsigned char *source, const D3DCOLOR *palette, unsigned long *destination)
+	const unsigned char *source, const D3DCOLOR *palette, unsigned long *destination, unsigned long row_texels)
 {
 	struct format_information information = format_information(description->format);
 	unsigned long width = level_dimension(description->width, level);
 	unsigned long height = level_dimension(description->height, level);
 	unsigned long depth = level_dimension(description->depth, level);
 	unsigned long x, y, z;
+
+	if (!row_texels)
+		row_texels = width;
 
 	static int fast_rows = -1;
 
@@ -383,7 +387,7 @@ static void decode_level(const struct xgpu_texture_description *description, uns
 		for (y = 0; y < height; y++)
 		{
 			const uint32_t *row = (const uint32_t *)(source + y * description->pitch);
-			unsigned long *out = destination + y * width;
+			unsigned long *out = destination + y * row_texels;
 
 			if (!opaque)
 				memcpy(out, row, width * 4);
@@ -400,7 +404,7 @@ static void decode_level(const struct xgpu_texture_description *description, uns
 			const unsigned char *row = source + y * description->pitch;
 
 			for (x = 0; x < width; x++)
-				destination[y * width + x] = convert_texel(information.kind, row + x * information.bytes, palette, x, row);
+				destination[y * row_texels + x] = convert_texel(information.kind, row + x * information.bytes, palette, x, row);
 		}
 		return;
 	}
@@ -422,7 +426,7 @@ static void decode_level(const struct xgpu_texture_description *description, uns
 				{
 					const unsigned char *texel = source + (x_offsets[x] | y_offset) * information.bytes;
 
-					destination[(z * height + y) * width + x] = convert_texel(information.kind, texel, palette, x, texel);
+					destination[(z * height + y) * row_texels + x] = convert_texel(information.kind, texel, palette, x, texel);
 				}
 			}
 		}
@@ -968,6 +972,8 @@ static BOOL texture_decode(struct texture_build *build)
 	/* (a Custom Edition map's multipurpose maps and HUD meters: decoded and
 	reordered, below) */
 	unsigned char channel_order = build->channel_order;
+	/* (the rows below: decoded in place, no copy in the C heap) */
+	BOOL direct;
 
 	if (description->cube_map)
 	{
@@ -1026,7 +1032,7 @@ static BOOL texture_decode(struct texture_build *build)
 					if (description->compressed)
 						dxt_decode_level(information.kind, source, size_at, size_at, 1, scratch);
 					else
-						decode_level(description, level, source, palette, scratch);
+						decode_level(description, level, source, palette, scratch, 0);
 				}
 				else
 				{
@@ -1174,7 +1180,7 @@ static BOOL texture_decode(struct texture_build *build)
 			free(scratch);
 			return FALSE;
 		}
-		decode_level(description, 0, base, palette, scratch);
+		decode_level(description, 0, base, palette, scratch, 0);
 		for (z = 0; z < depth; z++)
 			for (row = 0; row < height; row++)
 				memcpy(memory + (row * LINEAR_ROW(atlas_width) + z * width) * 4, scratch + (z * height + row) * width,
@@ -1217,7 +1223,7 @@ static BOOL texture_decode(struct texture_build *build)
 			if (description->compressed)
 				dxt_decode_level(information.kind, source, level_width, level_height, 1, scratch);
 			else
-				decode_level(description, level, source, palette, scratch);
+				decode_level(description, level, source, palette, scratch, 0);
 			/* (a Custom Edition multipurpose map - always a power of two, and
 			decoded here rather than kept compressed for this - with its
 			channels where this build reads them, as the rows below and the
@@ -1239,8 +1245,17 @@ static BOOL texture_decode(struct texture_build *build)
 	for (level = 0; level < levels; level++)
 		size += LINEAR_ROW(level_dimension(width, level)) * level_dimension(height, level) * 4;
 	memory = build_alloc(build, size);
-	scratch = malloc(width * height * description->depth * 4);
-	if (!memory || !scratch)
+	/* An uncompressed 2D texture in the Xbox's channel order is decoded
+	straight into its rows (decode_level's row stride); only DXT, volumes
+	and a Custom Edition map's reordered channels go through a whole-level
+	copy in the C heap. The movie's frame is such a texture, rebuilt every
+	frame: a 960x544 movie asked the heap for 2 MB each frame, which
+	v1.1.0-beta.1's start-up left too little of in one piece (issue #38,
+	the picture black while the sound played; 640-wide movies asked for
+	0.9 MB and played) */
+	direct = !description->compressed && description->depth <= 1 && channel_order == _custom_edition_channels_xbox;
+	scratch = memory && !direct ? malloc(width * height * description->depth * 4) : NULL;
+	if (!memory || (!direct && !scratch))
 	{
 		free(scratch);
 		return FALSE;
@@ -1255,10 +1270,16 @@ static BOOL texture_decode(struct texture_build *build)
 			const unsigned char *source = base + xgpu_texture_level_offset(description, level);
 			unsigned long row;
 
+			if (direct)
+			{
+				decode_level(description, level, source, palette, (unsigned long *)destination, LINEAR_ROW(level_width));
+				destination += LINEAR_ROW(level_width) * level_height * 4;
+				continue;
+			}
 			if (description->compressed)
 				dxt_decode_level(information.kind, source, level_width, level_height, 1, scratch);
 			else
-				decode_level(description, level, source, palette, scratch);
+				decode_level(description, level, source, palette, scratch, 0);
 			if (channel_order != _custom_edition_channels_xbox)
 				custom_edition_texels_reorder(scratch, level_width * level_height, channel_order);
 			/* (a volume texture keeps its first slice: GXM has none) */
