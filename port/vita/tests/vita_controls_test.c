@@ -28,6 +28,7 @@ Run port/vita/tests/run_vita_controls_test.sh.
 #include "../host/vita_controls.c"
 
 #include <stdio.h>
+#include <wchar.h>
 
 static int failures, checks;
 
@@ -851,6 +852,37 @@ static void test_button_glyphs(void)
 	clear_environment();
 }
 
+static void test_score_hint(void)
+{
+	wchar_t text[24];
+	wchar_t small[16];
+
+	wcscpy(text, L"Hold BACK for score");
+	check(vita_text_name_button(text, 24, L"BACK", L"SELECT") && !wcscmp(text, L"Hold SELECT for score"),
+		"score hint: Hold SELECT for score");
+	wcscpy(text, L"Hold BACK for score");
+	check(vita_text_name_button(text, 24, L"BACK", L"R") && !wcscmp(text, L"Hold R for score"),
+		"score hint: a shorter name moves the rest back");
+	wcscpy(small, L"Hold BACK for s");
+	check(vita_text_name_button(small, 16, L"BACK", L"SELECT") && !wcscmp(small, L"Hold SELECT for") &&
+		wcslen(small) == 15, "score hint: the rest cut short to the buffer, its 0 kept");
+	wcscpy(small, L"Hold BACK");
+	check(!vita_text_name_button(small, 16, L"BACK", L"touch rear right zone") && !wcscmp(small, L"Hold BACK"),
+		"score hint: a name that does not fit leaves the text");
+	wcscpy(text, L"Hold BACKSPACE, BACK");
+	check(vita_text_name_button(text, 24, L"BACK", L"SELECT") && !wcscmp(text, L"Hold BACKSPACE, SELECT"),
+		"score hint: BACK a word of its own, not in BACKSPACE");
+	wcscpy(text, L"Maintenir RETOUR");
+	check(!vita_text_name_button(text, 24, L"BACK", L"SELECT") && !wcscmp(text, L"Maintenir RETOUR"),
+		"score hint: no BACK, unchanged");
+	text[0] = L'B';
+	for (int i = 1; i < 24; i++)
+		text[i] = L'x';
+	check(!vita_text_name_button(text, 24, L"BACK", L"SELECT"), "score hint: no 0 within the buffer: unchanged");
+	check(!vita_text_name_button(NULL, 24, L"BACK", L"SELECT") && !vita_text_name_button(text, 0, L"BACK", L"SELECT"),
+		"score hint: no buffer");
+}
+
 int main(void)
 {
 	test_names();
@@ -861,6 +893,7 @@ int main(void)
 	test_gyro_filter();
 	test_gyro_aim();
 	test_button_glyphs();
+	test_score_hint();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

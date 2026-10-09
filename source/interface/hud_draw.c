@@ -2344,6 +2344,7 @@ font, drawn by the callers as the icons that are text are. */
 
 /* (vita_pad.c) */
 int vita_pad_button_glyph(short gamepad_button);
+int vita_pad_play_button_glyph(short gamepad_button);
 
 enum
 {
@@ -2358,6 +2359,20 @@ short hud_vita_button_glyph(
 		return VITA_GLYPH_NONE;
 
 	return (short)vita_pad_button_glyph(icon_index);
+}
+
+/* the multiplayer score hint (game_engine.c), "Hold BACK for score" in
+the Xbox maps and a Custom Edition map's (cache_file_formats.c), names the
+Vita button the Xbox's Back is on in play: SELECT as shipped. A face button
+has no word (it is drawn), so BACK stays for one */
+void hud_vita_score_hint(
+	wchar_t *buffer,
+	long buffer_size)
+{
+	wchar_t const *name = hud_vita_glyph_text((short)vita_pad_play_button_glyph(_gamepad_binary_button_back));
+
+	if (name && buffer_size > 0)
+		vita_text_name_button(buffer, (int)buffer_size, L"BACK", name);
 }
 
 /* the glyph of a menu's button hint widget, by its bitmap

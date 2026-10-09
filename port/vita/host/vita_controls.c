@@ -331,6 +331,57 @@ int vita_button_glyph(const struct vita_controls_config *config, int gamepad_but
 	return VITA_GLYPH_NONE;
 }
 
+/* ---------- the score hint
+
+The multiplayer hint "Hold BACK for score" (string 100 of
+ui\multiplayer_game_text: the Xbox maps' own words, and a Custom Edition
+map's Halo PC hint after cache_file_formats.c names the Xbox's BACK in its
+"%s") names the Vita button the Xbox's Back (the scoreboard) is on: SELECT
+as shipped (source/interface/hud_draw.c hud_vita_score_hint). */
+
+static int is_letter(wchar_t character)
+{
+	return (character >= L'A' && character <= L'Z') || (character >= L'a' && character <= L'z');
+}
+
+int vita_text_name_button(wchar_t *text, int capacity, const wchar_t *xbox_name, const wchar_t *vita_name)
+{
+	int length, xbox_length, vita_length, index, tail;
+
+	if (!text || capacity <= 0 || !xbox_name || !vita_name || !xbox_name[0])
+		return 0;
+	for (length = 0; length < capacity && text[length]; length++)
+		;
+	if (length >= capacity)
+		return 0;
+	for (xbox_length = 0; xbox_name[xbox_length]; xbox_length++)
+		;
+	for (vita_length = 0; vita_name[vita_length]; vita_length++)
+		;
+	for (index = 0; index + xbox_length <= length; index++)
+	{
+		int matched = 0;
+
+		while (matched < xbox_length && text[index + matched] == xbox_name[matched])
+			matched++;
+		/* (a word of its own, not part of one) */
+		if (matched < xbox_length || (index > 0 && is_letter(text[index - 1])) ||
+			is_letter(text[index + xbox_length]))
+			continue;
+		/* the rest moved to after the Vita's name, cut short to fit */
+		tail = length - (index + xbox_length);
+		if (index + vita_length >= capacity)
+			return 0;
+		if (index + vita_length + tail >= capacity)
+			tail = capacity - 1 - (index + vita_length);
+		memmove(text + index + vita_length, text + index + xbox_length, (size_t)tail * sizeof(wchar_t));
+		memcpy(text + index, vita_name, (size_t)vita_length * sizeof(wchar_t));
+		text[index + vita_length + tail] = 0;
+		return 1;
+	}
+	return 0;
+}
+
 /* ---------- gyro aiming */
 
 static const char *const gyro_mode_values[VITA_GYRO_MODES] = { "off", "on", "zoomed", "hold" };

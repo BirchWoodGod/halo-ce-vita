@@ -14,6 +14,8 @@ vita_host.h, the structures are of 32-bit scalars only: the platform layer
 #ifndef __HALO_VITA_CONTROLS_H
 #define __HALO_VITA_CONTROLS_H
 
+#include <stddef.h> /* wchar_t (vita_text_name_button) */
+
 /* ---------- touch zones */
 
 enum
@@ -279,6 +281,12 @@ sticks' clicks: 0 to 15), in the menus or in play. A button on a Vita
 button is that button, else the first touch zone set to it, else none (in
 play the D-pad is none: the game reads it only in the menus) */
 int vita_button_glyph(const struct vita_controls_config *config, int gamepad_button, int menus);
+
+/* the first xbox_name in text that is a word of its own (the score hint's
+"BACK") replaced by vita_name, the rest of text moved after it and cut
+short to fit capacity characters with its 0; 1 if replaced, 0 if text
+has no such word or vita_name does not fit */
+int vita_text_name_button(wchar_t *text, int capacity, const wchar_t *xbox_name, const wchar_t *vita_name);
 
 /* ---------- gyro aiming
 

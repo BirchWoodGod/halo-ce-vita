@@ -3508,7 +3508,9 @@ static void hud_placements_convert(
 "%s" in quotes. This build copies the hint as it is, so the Xbox button it
 reads for the score takes the place of the placeholder and its quotes: BACK,
 which the native builds read from F1 and the controller's Back button
-(port/linux/src/xinput_sdl.c). */
+(port/linux/src/xinput_sdl.c). The Vita names its own button there as the
+hint is shown, as it does in the Xbox maps' hint (SELECT as shipped:
+source/interface/hud_draw.c hud_vita_score_hint). */
 static void multiplayer_score_hint_convert(
 	struct load_state const *state,
 	uint32_t string_list_offset,
