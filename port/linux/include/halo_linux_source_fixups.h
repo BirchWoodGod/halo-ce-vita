@@ -100,6 +100,12 @@ void halo_custom_edition_texels_forget(void);
 rewrite until it says otherwise: the Vita's device reads it in place
 (port/vita/platform/d3d8_gxm.c) */
 void halo_d3d_buffer_in_place(const void *buffer, int in_place);
+/* the dynamic triangles' index buffer (NULL: none), which the game writes
+only between a lock and an unlock, and each part of it locked: the Vita's
+device reuses a frame's copy of its indices until that part is locked again
+(port/vita/platform/d3d8_gxm.c) */
+void halo_d3d_indices_tracked(const void *base, unsigned long bytes);
+void halo_d3d_indices_written(const void *data, unsigned long bytes);
 /* whether a Halo Custom Edition map's multiplayer vehicles are chosen by
 their placements' spawn flags, as in retail Halo, and whether a vehicle
 placement is placed in the running game

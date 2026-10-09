@@ -437,6 +437,16 @@ boolean rasterizer_dynamic_geometry_initialize(
 		dynamic_triangles.d3d_index_buffer = NULL;
 		error(_error_silent, "### ERROR failed to create dynamic triangle buffer");
 	}
+#ifdef HALO_LINUX
+	/* (port) the device may reuse its copies of these indices until a part
+	is locked again (halo_d3d_indices_written) */
+	else
+	{
+		halo_d3d_indices_tracked(
+			(void const *)dynamic_triangles.d3d_index_buffer->Data,
+			sizeof(struct rasterizer_triangle)*RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLES);
+	}
+#endif
 
 	for (vertex_type = 0;
 		success && vertex_type<NUMBER_OF_RASTERIZER_VERTEX_TYPES;
@@ -640,6 +650,9 @@ void rasterizer_dynamic_geometry_dispose(
 
 	if (dynamic_triangles.d3d_index_buffer)
 	{
+#ifdef HALO_LINUX
+		halo_d3d_indices_tracked(NULL, 0);
+#endif
 		IDirect3DIndexBuffer8_Release(dynamic_triangles.d3d_index_buffer);
 		dynamic_triangles.d3d_index_buffer = NULL;
 	}
@@ -747,6 +760,13 @@ short *_rasterizer_dynamic_triangles_lock(
 			(byte **)&dynamic_triangle_buffer->triangles,
 			dynamic_triangles.first_lock ? 0 : D3DLOCK_READONLY);
 		dynamic_triangles.first_lock = FALSE;
+#ifdef HALO_LINUX
+		/* (port) what the device copied of this part before is stale from
+		here (its copies are reused within the frame otherwise) */
+		halo_d3d_indices_written(
+			dynamic_triangle_buffer->triangles,
+			sizeof(struct rasterizer_triangle)*dynamic_triangle_buffer->triangle_count);
+#endif
 
 		triangles = dynamic_triangle_buffer->triangles;
 	}
