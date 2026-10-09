@@ -752,6 +752,16 @@ void custom_render_nav_point(
 		real delta_y;
 		real delta_z;
 
+		/* port: with the tick on a thread of its own (HALO_TICK_THREAD) the
+		player may have died, its unit gone, since game_engine_render_nav_points
+		looked: no arrow this frame (unit_get_camera_position read the unit
+		at NULL: a crash in Boarding Action's CTF and King of the Hill with
+		bots) */
+		if (unit_index == NONE ||
+			!object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+		{
+			return;
+		}
 		unit_get_camera_position(unit_index, &camera_position);
 
 		delta_x = position->x-camera_position.x;
