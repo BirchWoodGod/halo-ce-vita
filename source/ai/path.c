@@ -169,6 +169,14 @@ symbols in this file:
 
 #include <stddef.h>
 
+#ifdef HALO_LINUX
+/* (HALO_AI_PATH_STATE_VERIFY) path_state_new's partial clear checked (path_state_verify.c) */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "path_state_verify.h"
+#endif
+
 /* ---------- constants */
 
 enum
@@ -350,7 +358,37 @@ void path_state_new(
 	struct path_state *state,
 	struct path_debug_storage *debug)
 {
-	csmemset(state, 0, sizeof(*state));
+	/* port: a search without debug storage clears the header alone (everything
+	before the node list), not the 82 KB state: every caller runs one
+	path_state_find on a state fresh from here, and that search sets up the rest
+	as it goes. path_state_reset fills the hash table; a node is cleared as it is
+	made (path_state_begin, path_state_traverse), so each node made holds what it
+	held after the whole clear before its fields are written, and nothing reads
+	a node not yet made (path_get_node: node_index < node_count) or a heap entry
+	past heap_count, each written as the heap grows to it. The searches answer
+	exactly as before (HALO_AI_PATH_STATE_VERIFY=1 checks each one against a
+	search from a fully cleared state). The clear was a quarter of each firing
+	position selection's estimated cycles in b30's beach fight (it runs for the
+	selection's area and target searches, actor_path_refresh's and flee's) and
+	flushed as much of the cache. With debug storage the whole state is cleared,
+	as path_state_find copies all of it there. */
+	if (debug)
+	{
+		csmemset(state, 0, sizeof(*state));
+	}
+	else
+	{
+		csmemset(state, 0, offsetof(struct path_state, node_list));
+		state->heap_count = 0;
+#ifdef HALO_LINUX
+		if (path_state_verify_enabled())
+		{
+			memset(state->node_list, PATH_STATE_VERIFY_POISON,
+				sizeof(*state) - offsetof(struct path_state, node_list));
+			state->heap_count = 0;
+		}
+#endif
+	}
 	state->structure = global_structure_bsp_get();
 	state->input = *input;
 	state->debug = debug;
@@ -1125,6 +1163,8 @@ static boolean path_state_begin(
 				state->node_count == 0);
 			node_index = state->node_count++;
 			initial_node = &state->node_list[node_index];
+			/* port: as path_state_new's whole clear left it */
+			csmemset(initial_node, 0, sizeof(*initial_node));
 			initial_node->parent_node_index = NONE;
 			initial_node->parent_node_surface_index = NONE;
 			initial_node->surface_index = state->input.start_surface_index;
@@ -1708,6 +1748,8 @@ static boolean path_state_traverse(
 						{
 							new_node_index = state->node_count++;
 							state->hash_table[hash_slot] = new_node_index;
+							/* port: as path_state_new's whole clear left it */
+							csmemset(&state->node_list[new_node_index], 0, sizeof(state->node_list[new_node_index]));
 							state->node_list[new_node_index].heap_location = NONE;
 						}
 						else if (state->debug &&
@@ -1815,8 +1857,99 @@ static boolean path_state_traverse(
 	return result;
 }
 
+#ifdef HALO_LINUX
+static boolean path_state_find_once(
+	struct path_state *state);
+
+/* (HALO_AI_PATH_STATE_VERIFY) the state as path_state_new's whole clear
+would have left it: a copy of the header, every other byte zero, or NULL
+when the state is not one path_state_new left for checking */
+static struct path_state *path_state_verify_copy(
+	struct path_state const *state)
+{
+	unsigned char const *rest = (unsigned char const *)state->node_list;
+	unsigned long rest_size = sizeof(*state) - offsetof(struct path_state, node_list);
+	struct path_state *copy;
+	unsigned long index;
+
+	if (state->debug || !path_state_verify_enabled())
+	{
+		return NULL;
+	}
+	for (index = 0; index < rest_size; index++)
+	{
+		if (rest[index] != PATH_STATE_VERIFY_POISON &&
+			(index < offsetof(struct path_state, heap_count) - offsetof(struct path_state, node_list) ||
+				index >= offsetof(struct path_state, heap) - offsetof(struct path_state, node_list)))
+		{
+			path_state_verify_result(FALSE, "a search on a state path_state_new did not just set up");
+			return NULL;
+		}
+	}
+	/* (the game's malloc and free: cseries.h) */
+	copy = (struct path_state *)malloc(sizeof(*copy));
+	if (copy)
+	{
+		memset(copy, 0, sizeof(*copy));
+		memcpy(copy, state, offsetof(struct path_state, node_list));
+	}
+
+	return copy;
+}
+
+/* (HALO_AI_PATH_STATE_VERIFY) the search from the cleared copy against the one
+the game goes on with */
+static void path_state_verify_compare(
+	struct path_state const *state,
+	boolean result,
+	struct path_state *copy)
+{
+	boolean copy_result = path_state_find_once(copy);
+	char const *difference = NULL;
+	char what[160];
+
+	if (result != copy_result)
+		difference = "answer";
+	else if (memcmp(state, copy, offsetof(struct path_state, node_list)))
+		difference = "header";
+	else if (state->heap_count != copy->heap_count)
+		difference = "heap count";
+	else if (memcmp(state->node_list, copy->node_list, state->node_count * sizeof(state->node_list[0])))
+		difference = "nodes";
+	else if (state->heap_count > 1 &&
+		memcmp(&state->heap[1], &copy->heap[1], (state->heap_count - 1) * sizeof(state->heap[0])))
+		difference = "heap";
+	else if (memcmp(state->hash_table, copy->hash_table, sizeof(state->hash_table)))
+		difference = "hash table";
+	if (difference)
+	{
+		snprintf(what, sizeof(what), "%s differs (answer %d, %d nodes, heap %d, start surface %ld)",
+			difference, result, state->node_count, state->heap_count, state->input.start_surface_index);
+	}
+	path_state_verify_result(difference == NULL, difference ? what : NULL);
+	free(copy);
+}
+
 boolean path_state_find(
 	struct path_state *state)
+{
+	struct path_state *copy = path_state_verify_copy(state);
+	boolean result = path_state_find_once(state);
+
+	if (copy)
+	{
+		path_state_verify_compare(state, result, copy);
+	}
+
+	return result;
+}
+
+static boolean path_state_find_once(
+	struct path_state *state)
+#else
+boolean path_state_find(
+	struct path_state *state)
+#endif
 {
 	boolean result = FALSE;
 
