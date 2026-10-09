@@ -482,6 +482,22 @@ static struct
 	unsigned long values_new, material_kept;
 	/* materials found kept by a transition from the last */
 	unsigned long material_transitions;
+	/* (the record census, debug.gpu_stats) the bytes of its ring entry a
+	draw's record writes on the game's thread and the 32-byte lines they
+	span (the Vita's cache lines: each a line fill on its first write); the
+	per-frame arena blocks made (state, values, bump, targets, materials in
+	the frame's arena and new kept ones); index bytes copied that the frame
+	had copied before (the same indices, the same count), and vertex
+	constant snapshots equal to the chunk's last one or to one of its last
+	eight, with their bytes */
+	unsigned long record_entry_bytes, record_entry_lines, record_draws;
+	unsigned long arena_state_bytes, arena_values_bytes, arena_bump_bytes, arena_target_bytes, arena_material_bytes,
+		kept_material_bytes;
+	unsigned long copied_indices_repeated, index_copies, index_copies_repeated;
+	unsigned long chunk_snapshots[VITA_VC_CHUNKS], chunk_dup_last[VITA_VC_CHUNKS], chunk_dup_recent[VITA_VC_CHUNKS];
+	unsigned long chunk_dup_recent_bytes;
+	/* new state and values blocks equal to one of the frame's last 8 / 64 */
+	unsigned long state_dup8, state_dup64, values_dup8, values_dup64;
 } stats;
 
 /* draws recorded since start-up, never reset: the render profile counts
@@ -4162,6 +4178,7 @@ static const struct record_targets *record_targets_current(const D3DSurface *col
 		return NULL;
 	}
 	block = &target_arenas[state_arena_index][target_blocks_used++];
+	stats.arena_target_bytes += sizeof(*block);
 	memset(block, 0, sizeof(*block));
 	block->color_valid = color_valid;
 	block->depth_valid = depth_valid;
@@ -4453,8 +4470,23 @@ static void small_target_wave(struct render_command *command)
 	}
 }
 
+/* (the record census) a draw's ring entry: the bytes the game's thread
+wrote and the lines they span */
+static void record_census_draw(const struct render_command *command)
+{
+	unsigned long offset = (unsigned long)((const unsigned char *)command - (const unsigned char *)commands), span;
+
+	span = command->state ? offsetof(struct render_command, draw) + offsetof(struct vgxm_draw, attributes) +
+		command->draw.attribute_count * sizeof(command->draw.attributes[0]) : offsetof(struct render_command, clear_flags);
+	stats.record_draws++;
+	stats.record_entry_bytes += span;
+	stats.record_entry_lines += ((offset + span - 1) >> 5) - (offset >> 5) + 1;
+}
+
 static void command_commit(struct render_command *command)
 {
+	if (gpu_stats_on > 0 && command->kind == _command_draw)
+		record_census_draw(command);
 	if (target_versions_flush_pending)
 	{
 		/* (the first record after the copies started again: the waves
@@ -5461,6 +5493,31 @@ static const void *vertex_uniforms_snapshot(BOOL immediate)
 	return device.vertex_uniform_snapshot;
 }
 
+/* (the record census) a chunk's new snapshot against its last and the
+hashes of its last eight */
+static void chunk_census(int chunk, const float (*values)[4], unsigned long count)
+{
+	static float last[VITA_VC_CHUNKS][VITA_VC_D_COUNT][4];
+	static unsigned long last_count[VITA_VC_CHUNKS], recent[VITA_VC_CHUNKS][8], recent_next[VITA_VC_CHUNKS];
+	unsigned long hash = hash_words(values, count * sizeof(values[0])) ^ count, index;
+
+	stats.chunk_snapshots[chunk]++;
+	if (last_count[chunk] == count && !memcmp(last[chunk], values, count * sizeof(values[0])))
+		stats.chunk_dup_last[chunk]++;
+	for (index = 0; index < 8; index++)
+	{
+		if (recent[chunk][index] == hash)
+		{
+			stats.chunk_dup_recent[chunk]++;
+			stats.chunk_dup_recent_bytes += count * sizeof(values[0]);
+			break;
+		}
+	}
+	recent[chunk][recent_next[chunk]++ % 8] = hash;
+	memcpy(last[chunk], values, count * sizeof(values[0]));
+	last_count[chunk] = count;
+}
+
 /* the program's constants in the ring: a snapshot per chunk it reads, each
 serving later draws until a register of it changes. Chunk D (the node
 matrices) is copied up to the highest register written this frame or the
@@ -5531,6 +5588,8 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 			if (!snapshot)
 				return FALSE;
 			memcpy(snapshot, device.constants[first], count * sizeof(device.constants[0]));
+			if (gpu_stats_on > 0)
+				chunk_census(chunk, &device.constants[first], count);
 			if (span > count)
 				memset(snapshot + (span - 1) * sizeof(device.constants[0]), 0, sizeof(device.constants[0]));
 			stats.copied_bytes += count * sizeof(device.constants[0]);
@@ -6057,6 +6116,7 @@ static const struct record_state *record_state_current(void)
 			if (material_cache_pool && material_cache_used < MATERIAL_CACHE_CAPACITY)
 			{
 				material_last = &material_cache_pool[material_cache_used++];
+				stats.kept_material_bytes += sizeof(*material_last);
 				material_cache[slot].hash = hash;
 				material_cache[slot].material = material_last;
 			}
@@ -6065,6 +6125,7 @@ static const struct record_state *record_state_current(void)
 				if (material_blocks_used >= STATE_BLOCKS_PER_FRAME)
 					return NULL;
 				material_last = &material_arenas[state_arena_index][material_blocks_used++];
+				stats.arena_material_bytes += sizeof(*material_last);
 			}
 			memcpy(material_last->render_state, D3D__RenderState, sizeof(material_last->render_state));
 			memcpy(material_last->texture_state, D3D__TextureState, sizeof(material_last->texture_state));
@@ -6098,10 +6159,32 @@ static const struct record_state *record_state_current(void)
 				if (bump_blocks_used >= STATE_BLOCKS_PER_FRAME)
 					return NULL;
 				bump_last = &bump_arenas[state_arena_index][bump_blocks_used++];
+				stats.arena_bump_bytes += sizeof(*bump_last);
 				for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 					memcpy(bump_last->bump[stage], &D3D__TextureState[stage][D3DTSS_BUMPENVMAT00], sizeof(bump_last->bump[stage]));
 			}
+			if (gpu_stats_on > 0)
+			{
+				unsigned long back;
+
+				for (back = 1; back <= 64 && back <= values_blocks_used; back++)
+				{
+					const struct record_values *old = &values_arenas[state_arena_index][values_blocks_used - back];
+
+					for (index = 0; index < RECORD_VALUE_COUNT; index++)
+						if (old->render_state[index] != D3D__RenderState[record_value_state[index]])
+							break;
+					if (index == RECORD_VALUE_COUNT && old->bump == bump_last)
+					{
+						stats.values_dup64++;
+						if (back <= 8)
+							stats.values_dup8++;
+						break;
+					}
+				}
+			}
 			values_last = &values_arenas[state_arena_index][values_blocks_used++];
+			stats.arena_values_bytes += sizeof(*values_last);
 			for (index = 0; index < RECORD_VALUE_COUNT; index++)
 				values_last->render_state[index] = D3D__RenderState[record_value_state[index]];
 			values_last->bump = bump_last;
@@ -6122,7 +6205,26 @@ static const struct record_state *record_state_current(void)
 	stats.state_new++;
 	if (state_blocks_used >= STATE_BLOCKS_PER_FRAME)
 		return NULL;
+	if (gpu_stats_on > 0)
+	{
+		unsigned long back;
+
+		for (back = 1; back <= 64 && back <= state_blocks_used; back++)
+		{
+			const struct record_state *old = &state_arenas[state_arena_index][state_blocks_used - back];
+
+			if (old->material == material_last && old->values == values_last && old->textures_present == textures_present &&
+				!memcmp(old->palette_data, palette_data, sizeof(palette_data)) && !memcmp(old->texture_header, headers, sizeof(headers)))
+			{
+				stats.state_dup64++;
+				if (back <= 8)
+					stats.state_dup8++;
+				break;
+			}
+		}
+	}
 	block = &state_arenas[state_arena_index][state_blocks_used++];
+	stats.arena_state_bytes += sizeof(*block);
 	block->material = material_last;
 	block->values = values_last;
 	block->textures_present = textures_present;
@@ -6895,6 +6997,36 @@ static void index_extent(const WORD *indices, unsigned long count, unsigned long
 	*maximum = high;
 }
 
+/* (the record census) index copies of indices the frame copied before:
+the same address and count, by an open-addressed table stamped by frame */
+static void index_census(const WORD *indices, unsigned long count)
+{
+	static struct
+	{
+		const WORD *indices;
+		unsigned long count, frame;
+	} seen[4096];
+	unsigned long slot = ((unsigned long)(size_t)indices >> 1) * 2654435761UL % 4096, probe;
+
+	stats.index_copies++;
+	for (probe = 0; probe < 4096; probe++, slot = (slot + 1) % 4096)
+	{
+		if (seen[slot].frame != device.frame + 1)
+		{
+			seen[slot].indices = indices;
+			seen[slot].count = count;
+			seen[slot].frame = device.frame + 1;
+			return;
+		}
+		if (seen[slot].indices == indices && seen[slot].count == count)
+		{
+			stats.index_copies_repeated++;
+			stats.copied_indices_repeated += count * sizeof(WORD);
+			return;
+		}
+	}
+}
+
 static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_count, CONST WORD *index_data)
 {
 	struct render_command *command;
@@ -6959,6 +7091,8 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 		{
 			draw->indices = ring_copy(index_data, vertex_count * sizeof(WORD));
 			stats.copied_indices += vertex_count * sizeof(WORD);
+			if (gpu_stats_on > 0)
+				index_census(index_data, vertex_count);
 			if (!draw->indices)
 				return;
 		}
@@ -7720,6 +7854,29 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			stats.copied_chunk[2] / 1024.0 / stats.presents, stats.copied_chunk[3] / 1024.0 / stats.presents,
 			stats.copied_chunk[4] / 1024.0 / stats.presents, stats.copied_chunk[5] / 1024.0 / stats.presents,
 			stats.copied_vertex_misc / 1024.0 / stats.presents, stats.copied_fragment / 1024.0 / stats.presents);
+		if (stats.record_draws)
+		{
+			double frames = (double)stats.presents;
+
+			platform_log("record census per frame: %.0f draws, entry %.0f B %.2f lines/draw (%.0f KB); arenas KB: state %.1f values %.1f bump %.1f targets %.2f materials %.1f (+%.1f kept new); "
+				"indices %.1f KB copied in %.0f copies, %.1f KB in %.0f copies the frame made before; vertex snapshots (all/same as last/one of last 8) A %.0f/%.0f/%.0f B %.0f/%.0f/%.0f C1 %.0f/%.0f/%.0f C2 %.0f/%.0f/%.0f D %.0f/%.0f/%.0f E %.0f/%.0f/%.0f, %.1f KB repeats",
+				stats.record_draws / frames, stats.record_entry_bytes / (double)stats.record_draws,
+				stats.record_entry_lines / (double)stats.record_draws, stats.record_entry_bytes / 1024.0 / frames,
+				stats.arena_state_bytes / 1024.0 / frames, stats.arena_values_bytes / 1024.0 / frames, stats.arena_bump_bytes / 1024.0 / frames,
+				stats.arena_target_bytes / 1024.0 / frames, stats.arena_material_bytes / 1024.0 / frames, stats.kept_material_bytes / 1024.0 / frames,
+				stats.copied_indices / 1024.0 / frames, stats.index_copies / frames, stats.copied_indices_repeated / 1024.0 / frames,
+				stats.index_copies_repeated / frames,
+				stats.chunk_snapshots[0] / frames, stats.chunk_dup_last[0] / frames, stats.chunk_dup_recent[0] / frames,
+				stats.chunk_snapshots[1] / frames, stats.chunk_dup_last[1] / frames, stats.chunk_dup_recent[1] / frames,
+				stats.chunk_snapshots[2] / frames, stats.chunk_dup_last[2] / frames, stats.chunk_dup_recent[2] / frames,
+				stats.chunk_snapshots[3] / frames, stats.chunk_dup_last[3] / frames, stats.chunk_dup_recent[3] / frames,
+				stats.chunk_snapshots[4] / frames, stats.chunk_dup_last[4] / frames, stats.chunk_dup_recent[4] / frames,
+				stats.chunk_snapshots[5] / frames, stats.chunk_dup_last[5] / frames, stats.chunk_dup_recent[5] / frames,
+				stats.chunk_dup_recent_bytes / 1024.0 / frames);
+			platform_log("record census per frame: new state blocks %lu, equal to one of the last 8 %.0f, 64 %.0f; new values blocks %lu, equal to one of the last 8 %.0f, 64 %.0f",
+				stats.state_new / stats.presents, stats.state_dup8 / frames, stats.state_dup64 / frames,
+				stats.values_new / stats.presents, stats.values_dup8 / frames, stats.values_dup64 / frames);
+		}
 		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu kept materials (%lu by transition, %lu kept in all), %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
 			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
 			stats.material_kept / stats.presents, stats.material_transitions / stats.presents, material_cache_used,
