@@ -1519,6 +1519,8 @@ short main_get_window_count(
 
 #ifdef HALO_LINUX
 static void main_checkpoint_log_new_map(void);
+/* (HALO_TEST_COMMANDS' "M" commands) the maps loaded */
+static unsigned long main_test_maps_loaded;
 #endif
 
 static void main_new_map(
@@ -1598,6 +1600,8 @@ static void main_new_map(
 	game_initial_pulse();
 #ifdef HALO_LINUX
 	platform_log("new map: ready");
+	platform_memory_log("loaded", options->map_name);
+	main_test_maps_loaded++;
 #endif
 
 	main_globals.reset_map = FALSE;
@@ -4287,11 +4291,13 @@ tick, for testing the save paths without a controller, e.g.
 "300:game_save_totally_unsafe;600:game_revert" ("L300:..." waits for a
 level: not the main menu's scenario). Besides the console's
 own, @skip asks for a cinematic skip (as the controller does), @quit
-does the pause menu's Save and Quit, @exit ends the game, and "@camera x y z yaw pitch" puts
+does the pause menu's Save and Quit, @menu goes back to the main menu
+without saving, @exit ends the game, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
 positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
-tick, every frame), "@tv name" puts every player's unit at the centre of
+tick, every frame), "M<tick>:..." runs in turn, each once a map has
+loaded since the one before it ran (map cycles), "@tv name" puts every player's unit at the centre of
 that scenario trigger volume (the benchmarks walk the player through a
 level's encounters this way: triage/perf2-status.md), "@where" logs where
 every vehicle and scenery object is, and "@shot name"
@@ -4370,8 +4376,11 @@ static void main_test_commands_update(
 	static float pan[7];
 	static long pan_start;
 	static int parsed = 0;
-	static struct { long tick; char command[120]; boolean done; boolean in_level; } commands[160];
+	static struct { long tick; char command[120]; boolean done; boolean in_level; boolean after_map; } commands[160];
 	static short command_count;
+	/* ("M" commands: the maps loaded when the last one ran) */
+	static unsigned long after_map_generation;
+	boolean after_map_waiting = FALSE;
 	short index;
 
 	if (!parsed)
@@ -4393,7 +4402,8 @@ static void main_test_commands_update(
 				scenario, whose time runs too: a level reached through the
 				menus, HALO_TEST_PAD) */
 				commands[command_count].in_level = *setting == 'L';
-				commands[command_count].tick = atol(setting + (*setting == 'L'));
+				commands[command_count].after_map = *setting == 'M';
+				commands[command_count].tick = atol(setting + (*setting == 'L' || *setting == 'M'));
 				length = (size_t)(end - colon - 1);
 				if (length >= sizeof(commands[0].command))
 					length = sizeof(commands[0].command) - 1;
@@ -4409,6 +4419,20 @@ static void main_test_commands_update(
 		return;
 	for (index = 0; index < command_count; index++)
 	{
+		/* ("M<tick>:": in turn, each in the next map loaded after the one
+		before it ran - a menu or level reached by the one before - once its
+		time reaches the tick: map changes in a row, harness map cycles) */
+		if (commands[index].after_map && !commands[index].done)
+		{
+			if (after_map_waiting || main_test_maps_loaded == after_map_generation ||
+				game_time_get() < commands[index].tick)
+			{
+				after_map_waiting = TRUE;
+				continue;
+			}
+			after_map_waiting = TRUE;
+			after_map_generation = main_test_maps_loaded;
+		}
 		if (commands[index].done || game_time_get() < commands[index].tick ||
 			(commands[index].in_level && main_globals.main_menu_scenario_loaded))
 		{
@@ -4430,6 +4454,10 @@ static void main_test_commands_update(
 			game_state_save_to_persistent_storage();
 			main_goto_main_menu();
 		}
+		/* (@menu: back to the main menu, as a network game's end or
+		leaving it does, without saving) */
+		else if (!strcmp(commands[index].command, "@menu"))
+			main_goto_main_menu();
 		else if (!strncmp(commands[index].command, "@shot ", 6))
 			csstrncpy(halo_screenshot_name, commands[index].command + 6, sizeof(halo_screenshot_name) - 1);
 		else if (!strncmp(commands[index].command, "@pan ", 5))

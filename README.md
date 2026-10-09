@@ -737,6 +737,8 @@ Libraries and tools: [VitaSDK](https://vitasdk.org),
 [KCP](https://github.com/skywind3000/kcp),
 [Monocypher](https://monocypher.org) (the server browser's signatures and
 password keys),
+[TLSF](https://github.com/mattconte/tlsf) by Matthew Conte (the Vita's
+shader compiler's heap),
 [Expat](https://libexpat.github.io) (the PC menus' files),
 [Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
 [miniupnpc](https://github.com/miniupnp/miniupnp),

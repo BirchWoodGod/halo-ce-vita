@@ -26,6 +26,8 @@ from .linux_build import (GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP
 
 LINUX_DIR = Path("port/linux")
 VITA_DIR = Path("port/vita")
+# the shader compiler's heap (port/vita/host/vita_gxm.c)
+TLSF_DIR = Path("port/third_party/tlsf")
 BUILD = Path("build/vita")
 # what tools/vita_shader_generator_id.py hashes
 SHADER_GENERATOR_SOURCES = [Path(name) for name in SHADER_GENERATOR_NAMES]
@@ -297,9 +299,12 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
             implicit=[Path("tools/vita_shader_generator_id.py"), *SHADER_GENERATOR_SOURCES])
 
     # the Vita side, with the SDK's ABI
-    host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}", f"-I{generator_header.parent}"])
+    host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}", f"-I{generator_header.parent}",
+                                         f"-I{TLSF_DIR}"])
     for source in sorted((VITA_DIR / "host").glob("*.c")):
         add(source, "vita_host_cc", host_cflags, [generator_header] if source.name == "vita_gxm.c" else None)
+    # the shader compiler's heap (vita_gxm.c): port/third_party/tlsf
+    add(TLSF_DIR / "tlsf.c", "vita_host_cc", " ".join(HOST_FLAGS + ["-DNDEBUG", "-w"]))
     # the files half of the Linux host boundary works as it is on newlib
     add(LINUX_DIR / "src" / "posix_files.c", "vita_host_cc", host_cflags + " -D_GNU_SOURCE")
     # the Custom Edition installer's maps (vita_ce_installer.c), with its

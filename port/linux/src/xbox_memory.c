@@ -327,6 +327,31 @@ void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes)
 	*free_bytes = free_pages * PAGE_SIZE_BYTES;
 }
 
+void (*platform_memory_renderer_report)(char *text, unsigned long size);
+void (*platform_renderer_map_unloaded)(void);
+
+void platform_memory_log(const char *when, const char *map_name)
+{
+	unsigned long heap_used, heap_capacity, window_used, window_free;
+	char renderer[192];
+
+	platform_heap_usage(&heap_used, &heap_capacity);
+	platform_contiguous_usage(&window_used, &window_free);
+	renderer[0] = 0;
+	if (platform_memory_renderer_report)
+		platform_memory_renderer_report(renderer, sizeof(renderer));
+	platform_log("memory: %s %s: C heap %lu KB in use (of %lu KB), window %lu KB in use, %lu KB free%s%s", when,
+		map_name && *map_name ? map_name : "-", heap_used / 1024, heap_capacity / 1024, window_used / 1024,
+		window_free / 1024, renderer[0] ? "; " : "", renderer);
+#ifndef HALO_VITA
+	{
+		void platform_heap_census_log(const char *when);
+
+		platform_heap_census_log(when);
+	}
+#endif
+}
+
 BOOL platform_is_contiguous(const void *address)
 {
 	unsigned long value = (unsigned long)address;

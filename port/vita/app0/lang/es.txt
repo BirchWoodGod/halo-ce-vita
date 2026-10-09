@@ -582,6 +582,8 @@
 "Halo: map" = "Halo: mapa"
 "Halo: custom map" = "Halo: mapa personalizado"
 "this map file is damaged or not supported" = "este archivo de mapa está dañado o no es compatible"
+"out of memory: restart the game" = "no queda memoria: reinicia el juego"
+"the main menu" = "el menú principal"
 "there is not enough memory for it" = "no hay memoria suficiente para él"
 "its file could not be read" = "no se pudo leer su archivo"
 "it needs Halo Custom Edition's bitmaps.map, sounds.map and loc.map in the maps folder" = "necesita bitmaps.map, sounds.map y loc.map de Halo Custom Edition en la carpeta de mapas"

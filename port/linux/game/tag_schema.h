@@ -325,6 +325,11 @@ boolean tag_validate_structure_bsp(
 /* how many corrections the last validation made (none for a retail map) */
 long tag_validate_corrections(
 	void);
+/* whether the last validation was refused for want of working memory (the
+C heap full), not for what its tags hold: the player is told the game ran
+out of memory rather than that the map is damaged */
+boolean tag_validate_out_of_memory(
+	void);
 /* whether the last validation found address to be in a tag's root, block or
 data (tools/map_validate.c) */
 boolean tag_validate_claimed(
@@ -361,6 +366,10 @@ void tag_validate_refuse(
 	struct tag_validation *validation,
 	char const *format,
 	...);
+/* the map is refused, the check having no working memory
+(tag_validate_out_of_memory) */
+void tag_validate_refuse_for_memory(
+	struct tag_validation *validation);
 /* a correction was made: what, printf style */
 void tag_validate_correct(
 	struct tag_validation *validation,

@@ -123,6 +123,10 @@ void vita_texture_cache_begin_frame(void);
 segment moved between CDRAM and user RAM: vgxm_pool_demote/promote), each
 decoded again when next used; with the render worker idle. The count */
 unsigned long vita_texture_cache_forget(const void *base, unsigned long size);
+/* (a map gone; the worker and the GPU idle, the decodes quiesced) every
+texture forgotten and the pool's segments but its first given back: the
+CDRAM bytes freed */
+unsigned long vita_texture_pool_release(void);
 /* the textures decoding in the background stopped before the pool forgets
 or moves memory (the queued given up, the one decoding waited for, those
 done swapped in); the worker, or the game's thread while it is idle */

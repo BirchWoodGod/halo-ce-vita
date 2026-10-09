@@ -568,6 +568,11 @@ void scenario_tags_unload(
 	void)
 {
 #ifdef HALO_LINUX
+	/* (platform_memory_log: what the map leaves behind) */
+	char unloaded_map[NUMBEROF(cache_files_loaded_map)];
+
+	csstrncpy(unloaded_map, cache_files_loaded_map, NUMBEROF(unloaded_map) - 1);
+	unloaded_map[NUMBEROF(unloaded_map) - 1] = 0;
 	cache_files_loaded_map[0] = 0;
 #endif
 	sound_cache_close();
@@ -601,6 +606,14 @@ void scenario_tags_unload(
 	global_tag_instances = NULL;
 #ifdef HALO_LINUX
 	halo_loaded_tag_count = 0;
+	if (unloaded_map[0])
+	{
+		if (platform_renderer_map_unloaded)
+		{
+			platform_renderer_map_unloaded();
+		}
+		platform_memory_log("unloaded", unloaded_map);
+	}
 #endif
 
 	return;
@@ -1520,7 +1533,10 @@ long scenario_tags_load(
 				if (!validated)
 				{
 					error(_error_silent, "cache: '%s' failed the tag check (above); refusing it", scenario_name);
-					halo_map_load_refused(scenario_name, "this map file is damaged or not supported");
+					/* (a check with no memory to run in is the session's
+					memory, not the map: the player is told to restart) */
+					halo_map_load_refused(scenario_name, tag_validate_out_of_memory() ?
+						"out of memory: restart the game" : "this map file is damaged or not supported");
 					cache_file_globals.tag_header = NULL;
 					return NONE;
 				}
@@ -1789,7 +1805,8 @@ boolean scenario_structure_bsp_load(
 	{
 		error(_error_silent, "cache: structure BSP %ld failed the tag check (above); refusing it",
 			(long)reference->structure_bsp.index);
-		halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+		halo_map_load_refused(cache_files_loaded_map, tag_validate_out_of_memory() ?
+			"out of memory: restart the game" : "this map file is damaged or not supported");
 		cache_file_globals.structure_bsp_header = NULL;
 		return FALSE;
 	}
