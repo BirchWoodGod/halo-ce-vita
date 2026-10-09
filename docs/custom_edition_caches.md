@@ -762,9 +762,13 @@ every layout used was then checked against the sample maps.
   renderer draws four stages; that Custom Edition's two-stage maps are a
   fallback for older hardware is an inference (BlamLib's exporter makes the
   same choice).
-- **Centroid nodes of local-node parts** are taken to be the model's nodes:
-  they are within the model's node count in every map, and they are only
-  used to sort transparent parts.
+- **Centroid nodes of local-node parts** are taken to be the part's local
+  nodes, and made the model's through its table as its vertices' are (after
+  DamnationCE, a463894c): in `extinction.map`, `Covenant_V_Marines_Beta_5.map`
+  and `firefight-airlock.map` every one of the 368 such parts names centroid
+  nodes within its table of 3 to 8 nodes, in models of up to 43 (taking them
+  as the model's, as this build did, put 322 of them on another node). They
+  are only used to place and sort transparent parts.
 - **Editing-kit pointers are cleared.** The definition pointers of relocated
   blocks and data are set to 0: they refer to nothing in the game process.
 - **Name comparison** is exact (case-sensitive), which matched every sample

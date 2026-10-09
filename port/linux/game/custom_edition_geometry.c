@@ -861,6 +861,25 @@ static boolean custom_edition_model_convert(
 			{
 				csmemcpy(strip_scratch, source_strip, strip_bytes);
 			}
+			/* a part with local nodes names its centroid's nodes among them
+			too, and the renderer places a transparent part by them: made the
+			model's, as its vertices' are (DamnationCE, xshxdex98, CC0,
+			a463894c; in Extinction, Covenant_V_Marines_Beta_5 and Firefight
+			Airlock every such part's centroid nodes, 368 parts, lie within
+			its local node table, of 3 to 8 nodes in a model of up to 43) */
+			if (local_nodes)
+			{
+				if (source.centroid_primary_node_index >= 0 &&
+					source.centroid_primary_node_index < source.local_node_count)
+				{
+					source.centroid_primary_node_index = source.local_node_indices[source.centroid_primary_node_index];
+				}
+				if (source.centroid_secondary_node_index >= 0 &&
+					source.centroid_secondary_node_index < source.local_node_count)
+				{
+					source.centroid_secondary_node_index = source.local_node_indices[source.centroid_secondary_node_index];
+				}
+			}
 			if (!custom_edition_model_part_verify(model, &source, geometry->parts.count, scratch, strip_scratch))
 			{
 				error(
