@@ -343,6 +343,14 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
 		"Times a joining machine of an automated test whose join ended before its\n"
 		"game began (a map download cut off, refused) joins again; 0 never." },
+	{ "debug.network_test_local_after", _config_real, "0.0", "HALO_NETWORK_TEST_LOCAL_AFTER", _environment_value,
+		_platform_all,
+		"Seconds an automated test host (\"host:<map>\") keeps its game's lobby\n"
+		"before it plays a local (Split Screen) game on the map instead; 0 never." },
+	{ "debug.network_test_invite_file", _config_string, "\"\"", "HALO_NETWORK_TEST_INVITE_FILE", _environment_value,
+		_platform_all,
+		"A file (in the data folder) an automated test host writes its internet\n"
+		"play invite link to once it hosts; empty none." },
 	{ "debug.network_test_public_name", _config_string, "\"\"", "HALO_NETWORK_TEST_PUBLIC_NAME", _environment_value,
 		_platform_all,
 		"An automated test's join-public joins only the public game listed with\n"

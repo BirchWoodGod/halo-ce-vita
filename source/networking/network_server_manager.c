@@ -1628,9 +1628,10 @@ boolean network_game_server_idle(
 	/* (what Discord shows of a game hosted for internet play, and the
 	server browser's listing: after the settings above, so that a game they
 	make co-op is never listed as the game it was, co-op's visibility being
-	its own, network.coop_public) */
-	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
+	its own, network.coop_public; the listing's details before the counts,
+	which a game is listed only once it has: p2p.c) */
 	network_game_server_list(server);
+	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
 
 	if (network_game_server_game_is_valid(server))
 	{

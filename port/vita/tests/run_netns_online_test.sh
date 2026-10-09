@@ -71,6 +71,20 @@
 #            settings come later, which the link alone seldom makes) must
 #            wait for the host's map, precache it and play, never at the
 #            dashboard
+#   splitscreen a Split Screen game is never hosted (Oct 8 2026: beta.2
+#            listed a Split Screen game with offline bots, 8/8, in the server
+#            browser). The host hosts a public game's lobby (Blood Gulch, never
+#            started) for HALO_TEST_LOCAL_AFTER seconds (45; its code and
+#            invite kept), and the joiner joins it by the code; then the host
+#            backs out and plays a Split Screen game on the map with
+#            HALO_TEST_BOTS offline bots (7: 8/8). The joiner, its link to the
+#            host kept, tries again every 5 s (the code, then System Link);
+#            a second joiner browsing the server browser, and a third opening
+#            the kept invite link, start once the Split Screen game has
+#            begun. The host must say the game is not hosted, show no code
+#            again, drop the joiner's link, take its listing off the
+#            broker's slot and publish none after; the bots must play; none
+#            of the three may list, reach or join the Split Screen game
 #   pc       the host is a Vita build, the joiner a PC build: by code (it
 #            must find nothing: Vitas signal on their own topics) and on
 #            one LAN with the host (it must never list or join the game)
@@ -291,6 +305,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
 [ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = scoreboard ] && seconds=${HALO_TEST_SECONDS:-240}
+[ "$mode" = splitscreen ] && seconds=${HALO_TEST_SECONDS:-170}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
@@ -373,7 +388,8 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 }
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
-{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ]; } && side join2 10.10.3 192.168.3
+{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ]; } && side join2 10.10.3 192.168.3
+[ "$mode" = splitscreen ] && side join3 10.10.4 192.168.4
 python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 \
 	$([ "${HALO_TEST_MQTT311:-0}" = 1 ] && echo --mqtt311) > "$out/broker.log" 2>&1 & pids="$pids $!"
 # (the broker's clock: its "retained SECONDS ..." lines count from about now)
@@ -390,6 +406,8 @@ fi
 sleep 1
 
 # ---- the copies
+# (copy_args: the command line run_copy gives the binary: a link it opens)
+copy_args=
 run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	local name=$1 ns=$2 binary=$3 cores=$4
 	shift 4
@@ -409,7 +427,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 HALO_NET_RELAYS=198.51.100.1:47320 \
 		"$@" ${HALO_TEST_ENV:-} \
 		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
-		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" > "$out/$name/run.log" 2>&1) &
+		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" $copy_args > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!
 }
@@ -864,6 +882,108 @@ fullcache)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
+splitscreen)
+	after=${HALO_TEST_LOCAL_AFTER:-45}
+	bots=${HALO_TEST_BOTS:-7}
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NET_LOBBY_NAME=SplitHost HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_LOCAL_AFTER=$after \
+		HALO_NETWORK_TEST_START=10 HALO_NETWORK_TEST_SCORE=500 HALO_NETWORK_TEST_INVITE_FILE=invite.txt \
+		HALO_BOTS=$bots HALO_TEST_INPUT=bot:1; host_pid=$last_pid
+	hl=$out/host/run.log
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$hl"; exit 1; }
+	echo "host's code: $code"
+	invite=
+	for i in $(seq 1 30); do invite=$(grep -ao 'halo://join/[0-9a-f]*' "$out/host/data/invite.txt" 2>/dev/null | head -1); [ -n "$invite" ] && break; sleep 1; done
+	[ -n "$invite" ] || fail "the host wrote no invite"
+	# (the joiner: into the hosted lobby by the code; once the host has gone
+	# to Split Screen, again every 5 s: the code, then System Link through
+	# the link it kept. The joiners have no scripted input: in the System
+	# Link list its presses would create a game of their own)
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_NETWORK_TEST_RETRY=40; join_pid=$last_pid
+	jl=$out/joiner/run.log
+	for i in $(seq 1 $((after + 60))); do grep -aq "network test: the hosted game given up for a local one" "$hl" && break; sleep 1; done
+	grep -aq "network test: the hosted game given up for a local one" "$hl" || { fail "the host never went to Split Screen"; exit 1; }
+	switched=$(python3 -c "import time; print(time.monotonic())")
+	echo "the host went to Split Screen"
+	# (once its game has begun: the browser, and the invite kept from before)
+	sleep 15
+	rest=$((seconds - after - 40))
+	[ "$rest" -ge 40 ] || rest=40
+	seconds=$rest run_copy joiner2 "$join2_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public; \
+		join2_pid=$last_pid
+	copy_args=$invite seconds=$rest run_copy joiner3 "$join3_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join HALO_NETWORK_TEST_RETRY=20; join3_pid=$last_pid
+	copy_args=
+	wait $join_pid $join2_pid $join3_pid $host_pid 2>/dev/null
+	j2=$out/joiner2/run.log j3=$out/joiner3/run.log
+	echo "--- host"; grep -aE "Internet play|network test: (hosting|a local|the hosted|starting|the invite)" "$hl" | head -30
+	echo "--- joiner"; grep -aE "Internet play|system link:|network test: (join|search)" "$jl" | head -30
+	echo "--- joiner2 (browsing)"; grep -aE "Internet play: browser|network test: (the public|join)" "$j2" | head -10
+	echo "--- joiner3 (the kept invite)"; grep -aE "Internet play|system link:|network test: (join|search)" "$j3" | head -10
+	# (the host's side)
+	after_switch() { sed -n '/network test: the hosted game given up for a local one/,$p' "$1"; }
+	after_switch "$hl" | grep -aq "Internet play: a Split Screen game: not hosted" ||
+		fail "the host did not say the Split Screen game is not hosted"
+	after_switch "$hl" | grep -aqE "Internet play: hosting with the invite|others join with the code" &&
+		fail "the host hosted the Split Screen game (an invite or a code)"
+	after_switch "$hl" | grep -aq "Internet play: player [0-9a-f]*: this machine's game is a Split Screen one" ||
+		fail "the host kept the joiner's link"
+	after_switch "$hl" | grep -aq "network test: starting the game" || fail "the Split Screen game did not start"
+	# (the bots and the host's player: the seconds of the game logged with
+	# all of them in it)
+	full=$(after_switch "$hl" | grep -a "network test: tick" | grep -a "| playing to [1-9]" |
+		awk -v want=$((bots + 1)) '{ if (gsub(/ player [0-9]+:/, "&") >= want) n++ } END { print n + 0 }')
+	echo "the Split Screen game: $full s played with its $((bots + 1)) players"
+	[ "$full" -ge 30 ] || fail "the Split Screen game was played $full s with its $((bots + 1)) players (the bots)"
+	# (the joiner: in the hosted lobby first, never in the Split Screen game)
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner never got into the hosted game's lobby"
+	# (again: the code, then System Link's search to the end, through the
+	# link it had)
+	grep -aq "network test: joining again" "$jl" || fail "the joiner did not try again"
+	sed -n '/network test: joining again/,$p' "$jl" | grep -aq "system link: looking for games" ||
+		fail "the joiner did not look for the host's game again"
+	sed -n '/network test: joining again/,$p' "$jl" | grep -aqE "system link: (joining|in another's lobby|in a network game)" &&
+		fail "the joiner got into the Split Screen game"
+	# (joiner2: nothing listed; joiner3: the invite reaches nothing)
+	grep -aqE "Internet play: browser: new game|network test: the public games list" "$j2" &&
+		fail "the Split Screen game was listed in the server browser"
+	grep -aq 'Internet play: browser: "' "$j2" || fail "joiner2 never browsed"
+	grep -aq "Internet play: connected to" "$j3" && fail "the kept invite reached the Split Screen game's host"
+	grep -aqE "system link: (joining|in another's lobby|in a network game)" "$j3" && fail "the kept invite joined the Split Screen game"
+	grep -aqE "Internet play: (joining|reaching host)" "$j3" || fail "joiner3 did not open the invite"
+	grep -aq "system link: looking for games" "$j3" || fail "joiner3 did not look for the game"
+	# (the broker: the hosted game's listing on the host's slot, then the slot
+	# emptied at the switch, and nothing on it after)
+	slot=$(sed -n 's/.*hosting with the invite halo:\/\/join\/\([0-9a-f]\{12\}\).*/\1/p' "$hl" | head -1)
+	verdict=$(python3 - "$out/broker.log" "$slot" "$broker_started" "$switched" <<'PY'
+import re, sys
+log, slot = sys.argv[1], sys.argv[2]
+started, switched = float(sys.argv[3]), float(sys.argv[4]) - float(sys.argv[3])
+listed = False
+removed = None
+late = []
+for line in open(log, errors="replace"):
+    m = re.match(r"retained ([0-9.]+) hcev/3/lobby/s/(" + slot + r"[0-9a-f]*) (.*)", line.strip())
+    if not m:
+        continue
+    t, what = float(m.group(1)), m.group(3)
+    if t < switched - 5:
+        listed = listed or what.endswith(" B")
+    elif what == "removed":
+        if removed is None:
+            removed = t
+    elif removed is not None:
+        late.append(t)
+print("listed" if listed else "never-listed", "removed=%s" % (round(removed - switched, 1) if removed is not None else None), "late=%d" % len(late))
+PY
+)
+	echo "the host's slot on the broker: $verdict"
+	case $verdict in listed*) ;; *) fail "the hosted game was never listed (before the switch)" ;; esac
+	case $verdict in *removed=None*) fail "the host's slot was not emptied at the switch" ;; esac
+	case $verdict in *late=0) ;; *) fail "the host listed something after its slot was emptied" ;; esac
 	;;
 pc)
 	[ -n "$pc" ] || { echo "pc mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
@@ -1891,7 +2011,7 @@ INIT
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|splitscreen" >&2
 	exit 2
 	;;
 esac

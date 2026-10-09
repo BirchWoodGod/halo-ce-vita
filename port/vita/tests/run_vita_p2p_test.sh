@@ -6,6 +6,10 @@
 # each way and a stream message each way through the tunnel
 # (vita_p2p_test.c).
 #   run_vita_p2p_test.sh [code]   by short code, through the test broker
+#   run_vita_p2p_test.sh local    a System Link game, then a Split Screen one
+#                                 (p2p_set_game_accepts_remote 0): no code,
+#                                 the joiner dropped, nothing reaches the
+#                                 game, the kept code and invite reach nothing
 #   run_vita_p2p_test.sh adhoc    in an ad hoc group: the dialog scripted,
 #                                 PDP mocked over UDP, ad hoc play's bridge Needs the Linux build configured and built in this
 # tree (build/linux: the platform layer's generated semantics header) and
@@ -61,8 +65,10 @@ else
 	sleep 0.5
 	# (the address each "console" reports for itself, which internet play
 	# offers the other: both are on this computer)
-	export TEST_BROKER=127.0.0.1:$port VITA_NET_TEST_LOG=1 MOCK_LOCAL_ADDRESS=127.0.0.1
-	timeout -k 2 60 "$out/vita_p2p_test" host > "$out/host.log" 2>&1 &
+	export TEST_BROKER=127.0.0.1:$port VITA_NET_TEST_LOG=1 MOCK_LOCAL_ADDRESS=127.0.0.1 TEST_SYNC=$out/local
+	side=host
+	[ "$mode" = local ] && side=local-host
+	timeout -k 2 90 "$out/vita_p2p_test" $side > "$out/host.log" 2>&1 &
 	host=$!
 	code=
 	for i in $(seq 1 30); do
@@ -73,13 +79,16 @@ else
 	if [ -z "$code" ]; then
 		echo "FAIL the host never showed a code"
 		status=1
+	elif [ "$mode" = local ]; then
+		invite=$(sed -n 's/^INVITE //p' "$out/host.log")
+		timeout -k 2 90 "$out/vita_p2p_test" local-join "$code" "$invite" > "$out/join.log" 2>&1 || status=1
 	else
 		timeout -k 2 60 "$out/vita_p2p_test" join "$code" > "$out/join.log" 2>&1 || status=1
 	fi
 fi
 wait $host || status=1
-echo "--- host"; grep -E '^(PASS|FAIL)|connected|code|ad ?hoc' "$out/host.log"
-echo "--- joiner"; grep -E '^(PASS|FAIL)|connected|code|ad ?hoc' "$out/join.log" 2>/dev/null
+echo "--- host"; grep -E '^(PASS|FAIL)|connected|code|ad ?hoc|Split Screen' "$out/host.log"
+echo "--- joiner"; grep -E '^(PASS|FAIL)|connected|code|ad ?hoc|^joiner:' "$out/join.log" 2>/dev/null
 if grep -q '^FAIL' "$out/host.log" "$out/join.log" 2>/dev/null; then status=1; fi
 [ $status = 0 ] && echo "PASS ($mode) internet play over the Vita's socket layer" || echo "FAIL ($mode; logs in $out)"
 [ $status = 0 ] && rm -rf "$out"

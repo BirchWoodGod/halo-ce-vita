@@ -385,10 +385,19 @@ boolean network_game_player_is_local(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* port: internet play (port/linux/src/p2p.c) hosts only a game whose server
+takes other machines, never a Split Screen game's, whose server listens too */
+void p2p_set_game_accepts_remote(int accepts);
+#endif
+
 void network_game_accept_remote_connections(
 	boolean accept_remote_connections)
 {
 	bss_004566dc.accept_remote_connections = accept_remote_connections;
+#ifdef HALO_LINUX
+	p2p_set_game_accepts_remote(accept_remote_connections != FALSE);
+#endif
 
 	return;
 }
