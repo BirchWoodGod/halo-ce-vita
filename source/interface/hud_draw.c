@@ -1994,9 +1994,13 @@ void hud_draw_meter(
 
 		meter_parameters.background_color =
 			((UNSIGNED_CHAR_MAX - (meter->empty_color>>24))<<24) | (meter->empty_color&0xFFFFFF);
+		/* port: fade and opacity clamped to [0, 1], as the tools keep them; a
+		Custom Edition map's meter can be outside that, which asserted, and
+		packed into the wrong channels in a release build (DamnationCE /
+		OpenCE f823a18d, CC0) */
 		meter_parameters.tint_color = real_alpha_intensity_to_pixel32(
-			meter->fade,
-			1.0f-meter->opacity);
+			PIN(meter->fade, 0.0f, 1.0f),
+			PIN(1.0f-meter->opacity, 0.0f, 1.0f));
 		meter_parameters.gradient = 1.0f;
 		meter_parameters.flash_color_is_negative = FALSE;
 		meter_parameters.tint_mode_2 = TRUE;
