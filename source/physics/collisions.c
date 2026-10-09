@@ -125,6 +125,9 @@ symbols in this file:
 #include "object_bounds_cache.h"
 /* the point physics' leaves and cells (point_leaf_cache.c) */
 #include "point_leaf_cache.h"
+/* a cluster's objects with their types for the walks below
+(cluster_object_types.c) */
+#include "cluster_object_types.h"
 #include <string.h>
 #else
 #define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
@@ -762,12 +765,21 @@ boolean collision_test_vector(
 					/* (port) the cluster's objects taken in one walk, and the
 					ones object_test_vector would pass over at its first test
 					(a top-level object, no siblings: no other effect) passed
-					over here, without the call */
+					over here, without the call. The objects and their types
+					from the cluster's table when it has one (the types and
+					child flags their headers hold: cluster_object_types.c),
+					the headers read for the objects that get past them) */
 					long object_indices[COLLISION_CLUSTER_OBJECT_BATCH];
-					long object_count = cluster_get_collideable_objects(
-						(short)cluster_index,
-						object_indices,
-						NUMBEROF(object_indices));
+					struct cluster_object_type_table const *table = use_bounds_cache ?
+						cluster_object_types_get((short)cluster_index) :
+						NULL;
+					long const *objects = table ? table->object_indices : object_indices;
+					long object_count = table ?
+						table->count :
+						cluster_get_collideable_objects(
+							(short)cluster_index,
+							object_indices,
+							NUMBEROF(object_indices));
 
 					if (object_count != NONE)
 					{
@@ -777,6 +789,8 @@ boolean collision_test_vector(
 						{
 							struct object_datum *object;
 							struct object_header_datum const *header;
+							long type;
+							boolean child;
 
 							/* (object_mark_function, with the object looked up once;
 							an object of a type the test leaves out passed over by
@@ -789,10 +803,21 @@ boolean collision_test_vector(
 							line of sight vehicles too, and a fight's clusters are
 							mostly bipeds, weapons and projectiles, each object read
 							and written for nothing) */
-							object_index = object_indices[object_slot];
-							header = object_header_get(object_index);
-							if (!TEST_FLAG(flags, header->type + _collision_test_objects_first_type_bit) &&
-								!TEST_FLAG(header->flags, _object_header_child_bit))
+							object_index = objects[object_slot];
+							if (table)
+							{
+								header = NULL;
+								type = table->types[object_slot] & ~CLUSTER_OBJECT_TYPE_CHILD;
+								child = (table->types[object_slot] & CLUSTER_OBJECT_TYPE_CHILD) != 0;
+							}
+							else
+							{
+								header = object_header_get(object_index);
+								type = header->type;
+								child = TEST_FLAG(header->flags, _object_header_child_bit);
+							}
+							if (!TEST_FLAG(flags, type + _collision_test_objects_first_type_bit) &&
+								!child)
 							{
 								continue;
 							}
@@ -803,7 +828,7 @@ boolean collision_test_vector(
 							cluster's object having no siblings; unmarked, a
 							second visit in this test passes it over again.
 							object_bounds_cache.c) */
-							if (use_bounds_cache && !TEST_FLAG(header->flags, _object_header_child_bit))
+							if (use_bounds_cache && !child)
 							{
 								struct object_bounds const *bounds = object_bounds_cache_get(object_index);
 
@@ -816,6 +841,10 @@ boolean collision_test_vector(
 								{
 									continue;
 								}
+							}
+							if (!header)
+							{
+								header = object_header_get(object_index);
 							}
 							object = header->datum;
 							if (object->object.magic_number == global_object_marker)
@@ -848,6 +877,10 @@ boolean collision_test_vector(
 									break;
 								}
 							}
+						}
+						if (table)
+						{
+							cluster_object_types_release();
 						}
 						if (any_hit && hit)
 						{

@@ -245,6 +245,11 @@ symbols in this file:
 
 #include <stddef.h>
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) the lines of sight's time and counts (lines_profile.c) */
+#include "lines_profile.h"
+#endif
+
 #undef COLLISIONS_EXTERNAL_COLLISION_TEST_LINE
 #undef REAL_MATH_EXTERNAL_NORMALIZE3D
 #undef REAL_MATH_EXTERNAL_POINT_FROM_LINE3D
@@ -2338,6 +2343,11 @@ short ai_test_line_of_sight(
 	boolean clear_line_of_sight;
 	boolean blocked;
 	short result;
+#ifdef HALO_LINUX
+	unsigned long long lines_started = halo_lines_now();
+
+	halo_lines_stats.ai_los_calls++;
+#endif
 
 	if (ai_debug.render_lineofsight)
 		ai_debug_lineofsight(p0, p0_cluster_index, p1, p1_cluster_index);
@@ -2396,6 +2406,16 @@ short ai_test_line_of_sight(
 			clear_line_of_sight = FALSE;
 			collision_t = collision.t;
 		}
+#ifdef HALO_LINUX
+		halo_lines_stats.ai_los_rays++;
+		if (!clear_line_of_sight)
+		{
+			if (collision.type == _collision_result_object)
+				halo_lines_stats.ai_los_object_hits++;
+			else
+				halo_lines_stats.ai_los_other_hits++;
+		}
+#endif
 	}
 
 	{
@@ -2437,6 +2457,9 @@ short ai_test_line_of_sight(
 			p0b.z = p0->z - perpendicular.k * 0.25f;
 
 			ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+			halo_lines_stats.ai_los_extra_lines++;
+#endif
 			if (clear_line_of_sight)
 			{
 				blocked = collision_test_line(
@@ -2449,6 +2472,9 @@ short ai_test_line_of_sight(
 				if (!blocked)
 				{
 					ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+					halo_lines_stats.ai_los_extra_lines++;
+#endif
 					blocked = collision_test_line(
 						collision_flags,
 						&p0b,
@@ -2469,6 +2495,9 @@ short ai_test_line_of_sight(
 				if (!blocked)
 				{
 					ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+					halo_lines_stats.ai_los_extra_lines++;
+#endif
 					blocked = !collision_test_line(
 						collision_flags,
 						&p0b,
@@ -2492,6 +2521,9 @@ short ai_test_line_of_sight(
 			point_from_line3d(p1, global_down3d, 0.1f, &p1c);
 
 			ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+			halo_lines_stats.ai_los_extra_lines++;
+#endif
 			blocked = collision_test_line(
 				collision_flags,
 				&p1a,
@@ -2502,6 +2534,9 @@ short ai_test_line_of_sight(
 			if (!blocked)
 			{
 				ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+				halo_lines_stats.ai_los_extra_lines++;
+#endif
 				blocked = collision_test_line(
 					collision_flags,
 					&p1b,
@@ -2513,6 +2548,9 @@ short ai_test_line_of_sight(
 			if (!blocked)
 			{
 				ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+				halo_lines_stats.ai_los_extra_lines++;
+#endif
 				blocked = collision_test_line(
 					collision_flags,
 					&p1c,
@@ -2559,6 +2597,10 @@ occluded:
 	result = _ai_line_of_sight_occluded;
 
 finish:
+#ifdef HALO_LINUX
+	if (lines_started)
+		halo_lines_stats.ai_los_us += halo_lines_now() - lines_started;
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\ai\\ai.c",
 		0x3F0,
