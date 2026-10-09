@@ -1604,7 +1604,7 @@ static void test_languages(void)
 	tab = page = TAB_GRAPHICS;
 	show();
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu, "\t*Gráficos|Controles|Audio|Multijugador", 40) && strstr(menu, "\nPerfil\x02") &&
+	check(!strncmp(menu, "\t*Gráficos|General|Audio|Multijugador", sizeof("\t*Gráficos|General|Audio|Multijugador") - 1) && strstr(menu, "\nPerfil\x02") &&
 		menu_fits() && tab_bar_fits(), "the panel in Spanish at once: Gráficos, Perfil ...");
 	tab = page = TAB_AUDIO;
 	show();
@@ -1922,7 +1922,7 @@ int main(void)
 		strstr(menu, "\nSound occlusion\x02") && strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 4 &&
 		menu_fits(), "R: Audio: Language (Automatic), then the sound rows");
 	press(VITA_BUTTON_R);
-	check(!strncmp(menu, "\tGraphics|General|Audio|*Multiplayer\n", 38), "R: Multiplayer");
+	check(!strncmp(menu, "\tGraphics|General|Audio|*Multiplayer\n", sizeof("\tGraphics|General|Audio|*Multiplayer\n") - 1), "R: Multiplayer");
 	printf("%s\n--\n", menu);
 
 	test_multiplayer_tab();
