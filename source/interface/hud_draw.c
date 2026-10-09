@@ -105,12 +105,21 @@ symbols in this file:
 #include "render/render.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "cache_file_formats.h" /* port: port/linux/game/cache_file_formats.c */
+#include "custom_edition_cache.h"
+#endif
 
 /* ---------- constants */
 
 enum
 {
 	_hud_dont_scale_offset_bit = 0,
+#ifdef HALO_LINUX
+	/* port: Halo PC's, which the Xbox's tags never set (a Custom Edition
+	map's numbers keep it: cache_file_formats.c hud_placement_convert) */
+	_hud_use_high_resolution_scale_bit = 2,
+#endif
 };
 
 /* hud number and meter definitions (no shared header declares these yet;
@@ -211,6 +220,15 @@ enum bitmap_group_type
 {
 	_bitmap_group_type_interface_bitmaps = 4,
 };
+
+#ifdef HALO_LINUX
+/* port: Halo PC's bitmap group flags, which the Xbox's tags never set */
+enum
+{
+	_bitmap_group_half_hud_scale_bit = 4,
+	_bitmap_group_force_hud_use_highres_scale_bit = 7,
+};
+#endif
 
 enum
 {
@@ -569,6 +587,35 @@ static boolean hud_draw_multitexture_overlay_get_current_weapon_definition(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port: Halo PC picks an overlay's shader by the value this build turns its
+blend function into (add, subtract, multiply, multiply2x, dot), from shaders
+listed alphabetically (add, dot, multiply, multiply2x, subtract). For the
+Custom Edition maps made around that (Chimera's multitexture_overlay_fix.cpp,
+by SnowyMouse; from DamnationCE, CC0), each function becomes the one Halo PC
+drew with. */
+static short hud_multitexture_overlay_blend_function(
+	short blend_function)
+{
+	static short const halo_pc_blend_functions[NUMBER_OF_HUD_MULTITEXTURE_OVERLAY_BLEND_FUNCTIONS] =
+	{
+		_hud_multitexture_overlay_blend_function_add,
+		_hud_multitexture_overlay_blend_function_multiply,
+		_hud_multitexture_overlay_blend_function_dot,
+		_hud_multitexture_overlay_blend_function_multiply2x,
+		_hud_multitexture_overlay_blend_function_subtract,
+	};
+
+	if (blend_function >= 0 && blend_function < NUMBER_OF_HUD_MULTITEXTURE_OVERLAY_BLEND_FUNCTIONS &&
+		custom_edition_cache_relies_on(_custom_edition_behaviour_gearbox_multitexture_blend_modes))
+	{
+		return halo_pc_blend_functions[blend_function];
+	}
+
+	return blend_function;
+}
+#endif
+
 static void hud_draw_multitexture_overlay(
 	struct multitexture_overlay_hud_element_definition const *overlay,
 	short local_player_index,
@@ -700,7 +747,11 @@ static void hud_draw_multitexture_overlay(
 				&parameters.map1_to_2_blend_function
 			};
 
+#ifdef HALO_LINUX
+			switch (hud_multitexture_overlay_blend_function(overlay->map_blending_function[map_index]))
+#else
 			switch (overlay->map_blending_function[map_index])
+#endif
 			{
 			case _hud_multitexture_overlay_blend_function_add:
 				*out_modes[map_index] =
@@ -1486,7 +1537,13 @@ void hud_draw_static_element(
 			FALSE);
 
 		for (overlay_index = 0;
-			overlay_index < static_element->multitexture_overlays.count;
+			overlay_index < static_element->multitexture_overlays.count
+#ifdef HALO_LINUX
+				/* port: none on the Custom Edition maps Chimera lists as
+				drawing none (from DamnationCE, CC0) */
+				&& !custom_edition_cache_relies_on(_custom_edition_behaviour_block_multitexture_overlays)
+#endif
+				;
 			overlay_index++)
 		{
 			struct multitexture_overlay_hud_element_definition const *overlay =
@@ -2062,6 +2119,7 @@ void hud_draw_numbers(
 			real decimal_point_width = (real)(numbers->fractional_digits ?
 				hud_number->decimal_point_width : 0);
 			real scale;
+			real digit_scale;
 			point2d origin;
 			point2d cursor;
 			short digit_index;
@@ -2075,6 +2133,21 @@ void hud_draw_numbers(
 				scale = hud_globals_get_scale(
 					TEST_FLAG(draw_flags, _hud_draw_in_multiplayer_bit));
 			}
+			digit_scale = scale;
+#ifdef HALO_LINUX
+			/* port: Halo PC draws the digits at half their size, spaced as
+			the digits tag says, for a number flagged to use its high
+			resolution scale (a Custom Edition map's digits are twice the
+			Xbox's) or digits whose bitmap has a HUD scale flag (from
+			DamnationCE, CC0) */
+			if (custom_edition_cache_tags_loaded() &&
+				(TEST_FLAG(numbers->placement.multiplayer_scaling_flags, _hud_use_high_resolution_scale_bit) ||
+					TEST_FLAG(bitmap_group->flags, _bitmap_group_half_hud_scale_bit) ||
+					TEST_FLAG(bitmap_group->flags, _bitmap_group_force_hud_use_highres_scale_bit)))
+			{
+				digit_scale = scale * 0.5f;
+			}
+#endif
 
 			if (TEST_FLAG(numbers->number_flags, _hud_number_show_trailing_m_bit))
 			{
@@ -2156,7 +2229,7 @@ void hud_draw_numbers(
 						absolute_placement->corner,
 						&point,
 						clip,
-						scale,
+						digit_scale,
 						0.0f,
 						color,
 						bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2197,7 +2270,7 @@ void hud_draw_numbers(
 							absolute_placement->corner,
 							&point,
 							clip,
-							scale,
+							digit_scale,
 							0.0f,
 							color,
 							bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2232,7 +2305,7 @@ void hud_draw_numbers(
 							absolute_placement->corner,
 							&point,
 							clip,
-							scale,
+							digit_scale,
 							0.0f,
 							color,
 							bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2269,7 +2342,7 @@ void hud_draw_numbers(
 						absolute_placement->corner,
 						&point,
 						clip,
-						scale,
+						digit_scale,
 						0.0f,
 						color,
 						bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2302,7 +2375,7 @@ void hud_draw_numbers(
 						absolute_placement->corner,
 						&point,
 						clip,
-						scale,
+						digit_scale,
 						0.0f,
 						color,
 						bitmap_group->type == _bitmap_group_type_interface_bitmaps);

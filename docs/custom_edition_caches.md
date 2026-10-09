@@ -309,12 +309,45 @@ changed:
   This build ignores the flag, so it drew them twice too large; the
   placements of the unit, weapon and grenade HUD interfaces and the HUD
   globals' messages that have it get half their scale, and lose the flag (32
-  in `bloodgulch.map`, 14 in `beavercreek_halo3.yelo`).
+  in `bloodgulch.map`, 14 in `beavercreek_halo3.yelo`). Halo PC reads the
+  flag only on statics, meters and numbers (Chimera's `hud_bitmap_scale.cpp`):
+  crosshair and overlay items keep their scale. A number's scale is not its
+  digits', so a flagged number keeps the flag and `hud_draw_numbers` draws
+  its digits at half their size, spaced as the digits tag says. A bitmap may ask the
+  same of every element that draws it, with Halo PC's bitmap flags *half hud
+  scale* and *force hud use highres scale* (Invader's `bitmap.json`): an
+  element drawing such a bitmap (a static or meter, its bitmap after its
+  placement; a crosshair's or overlay's items, their crosshair's or
+  overlay's) gets half its scale too. None of the 18 Custom Edition maps on
+  hand, nor `bitmaps.map`, sets either. On the four maps on hand in October
+  2026 (pcgulch, extinction, Covenant_V_Marines_Beta_5, firefight-airlock)
+  no crosshair or overlay item and no number has the flag
+  (`hud_placements_kept` 0 in `cache_file_report`), so they draw as before.
+  (From DamnationCE, CC0, 31ad6c39 and 1f3cc6ab.)
+- **Maps made around Halo PC's own behaviour.** Chimera fixes Halo PC to draw
+  as the Xbox does, and keeps a list of the maps made around Halo PC's way
+  instead, by map name (in lower case) and tag data checksum, with the
+  behaviours each relies on (`map_hacks_config.json`, by SnowyMouse; here
+  `port/linux/game/custom_edition_behaviours.inc`, generated from it). This
+  build draws as the Xbox does, so for a listed map it follows these where it
+  can, and logs each (from DamnationCE, CC0): HUD multitexture overlays' blend functions in Halo PC's
+  order (`gearbox_multitexture_blend_modes`: Halo PC picks its shader by the
+  Xbox's value from shaders in alphabetical order), overlays not drawn
+  (`block_multitexture_overlays`), the HUD digits' metrics halved and every
+  number's digits drawn at half size (`hud_number_scale`), bitmaps' HUD scale
+  flags cleared (`disable_bitmap_hud_scale_flags`; a bitmap of `bitmaps.map`
+  keeps them, as Chimera leaves them), and model shaders'
+  detail after reflection flag flipped (`invert_detail_after_reflection`).
+  Not yet: Halo PC's fixed-function meters (`gearbox_meters`), its
+  transparent chicago multiply, bump attenuation and environment shader
+  types, the old widescreen HUD and embedded Lua.
 - **The score hint.** String 100 of `ui\multiplayer_game_text` is Halo PC's
   `Hold "%s" for score`, which Halo PC fills in with its score key; this
   build copies it as it is (`game_engine.c`, the press-back-for-score
   message), so `"%s"` becomes `BACK`, the button this build reads for the
-  score, in the same four characters.
+  score, in the same four characters. The Vita names its own button there
+  as the hint is shown, as in the Xbox maps' hint: `SELECT` as shipped
+  (`hud_draw.c`, `hud_vita_score_hint`).
 
 ### In the game (`custom_edition_cache.c`, `custom_edition_geometry.c`, `custom_edition_bitmaps.c`)
 
@@ -456,7 +489,9 @@ silences them.
   ones not whole frames or blocks muted; upgraded
   script nodes reduced, stock ones kept, too many refused; animation overlays
   kept and disabled; HUD placements with the high resolution scale halved
-  (in a weapon HUD's statics and crosshair items) and ones without it kept;
+  (in a weapon HUD's statics and crosshair items) and ones without it kept,
+  and those drawing a bitmap with either of Halo PC's half scale flags
+  halved;
   the score hint made to name BACK, and a placeholder left alone in another
   string list and in another string.
 - Malformed input: every check of the loader and the conversion, with at

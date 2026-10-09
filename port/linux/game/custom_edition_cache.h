@@ -188,6 +188,10 @@ void custom_edition_load_progress_set(
 	real progress);
 boolean custom_edition_cache_tags_loaded(
 	void);
+/* Whether the Custom Edition map loaded relies on a Halo PC behaviour (enum
+custom_edition_behaviour, cache_file_formats.h); FALSE when none is loaded. */
+boolean custom_edition_cache_relies_on(
+	short behaviour);
 /* The tag cache the loaded map's tags are in and its size, in bytes
 (cache_file_tag_cache_contains); NULL and 0 when none is loaded. */
 void *custom_edition_cache_tag_cache(
