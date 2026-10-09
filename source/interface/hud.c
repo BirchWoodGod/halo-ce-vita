@@ -1033,9 +1033,21 @@ static void hud_draw_friendly_indicator(
 	struct bitmap_data *bitmap;
 	real depth_factor;
 	real fade;
+	long unit_index = player->unit_index;
 
+#ifdef HALO_LINUX
+	/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+	Vita's) the teammate may have died, its unit gone, since
+	hud_draw_friendly_indicators looked: no indicator this frame
+	(unit_get_head_position read the unit at NULL: a crash in Chill Out's
+	CTF with bots on the player's team) */
+	if (unit_index == NONE || !object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+	{
+		return;
+	}
+#endif
 	unit_get_head_position(
-		player->unit_index,
+		unit_index,
 		&head_position);
 	head_position.z += 0.30000001f;
 	matrix4x3_transform_point(
