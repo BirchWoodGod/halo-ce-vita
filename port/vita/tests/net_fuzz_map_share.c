@@ -14,6 +14,12 @@ bytes:
   2  a file starts: the first 4 bytes its size
   3  a data message: offset, length, then the bytes (as many as there are)
   4  a cache header, then the file's size (4 bytes)
+  5  a host's choice to serve its map (map_share_host_serves) and its
+     limits (map_share_host_limits): its state, the joiner's capabilities,
+     the machine joining in progress, the game taking late joiners, the
+     host's setting, then the settings' rates and shares (4 bytes each)
+  6  an answer with the joiner's capabilities first (4 bytes): an offer's
+     flags only those it said it can (the in-progress flag among them)
 Built as net_fuzz_p2p.c is, by run_net_fuzz_test.sh.
 */
 
@@ -83,6 +89,66 @@ static void fuzz_record(int kind, const unsigned char *data, int size, struct ma
 		map_share_receiver_ack_due(receiver);
 		break;
 	}
+	case 5:
+	{
+		uint32_t field[9];
+		struct map_share_limits limits;
+		enum map_share_refusal refusal;
+		int in_progress = -1;
+
+		memset(field, 0, sizeof(field));
+		memcpy(field, data, (size_t)(size < (int)sizeof(field) ? size : (int)sizeof(field)));
+		refusal = map_share_host_serves((enum map_share_host_state)field[0], field[1], (int)field[2], (int)field[3],
+			(int)field[4], &in_progress);
+		/* (never after the game; in game only to a joiner that can wait for
+		it, still joining, the game open, the host willing; the flag only in
+		game) */
+		if ((refusal != _map_share_refusal_none && refusal != _map_share_refusal_not_in_lobby) ||
+			(refusal == _map_share_refusal_none && field[0] != _map_share_host_lobby &&
+				(field[0] != _map_share_host_in_game || !(field[1] & 1u << _map_share_capability_in_progress_bit) ||
+				!field[2] || !field[3] || !field[4])) ||
+			(field[0] == _map_share_host_lobby && refusal != _map_share_refusal_none) ||
+			in_progress != (refusal == _map_share_refusal_none && field[0] == _map_share_host_in_game))
+		{
+			abort();
+		}
+		map_share_host_limits((int)(field[0] & 1), field[5], field[6], field[7], field[8], &limits);
+		if (limits.bytes_per_second < MAP_SHARE_CHUNK_BYTES || !limits.window_bytes || limits.window_bytes > MAP_SHARE_WINDOW_BYTES ||
+			!limits.cpu_percent || limits.cpu_percent > 100 || limits.frame_microseconds < 1000 ||
+			limits.frame_microseconds > 100000)
+		{
+			abort();
+		}
+		if (field[0] & 1)
+		{
+			struct map_share_limits lobby;
+
+			map_share_host_limits(0, field[5], field[6], field[7], field[8], &lobby);
+			if (limits.bytes_per_second > lobby.bytes_per_second)
+				abort();
+		}
+		break;
+	}
+	case 6:
+	{
+		struct map_share_answer_message answer;
+		uint32_t capabilities = 0;
+
+		if (size < 4)
+			break;
+		memcpy(&capabilities, data, 4);
+		memset(&answer, 0, sizeof(answer));
+		memcpy(&answer, data + 4, (size_t)(size - 4 < (int)sizeof(answer) ? size - 4 : (int)sizeof(answer)));
+		if (map_share_answer_valid(&answer, "fuzzmap", 0x1234, capabilities) && answer.kind == _map_share_answer_offer &&
+			(((answer.flags & 1 << _map_share_offer_in_progress_bit) && !(capabilities & 1u << _map_share_capability_in_progress_bit)) ||
+			((answer.flags & 1 << _map_share_offer_deflate_bit) && !(capabilities & 1u << _map_share_capability_deflate_bit)) ||
+			((answer.flags & 1 << _map_share_offer_resume_bit) && !(capabilities & 1u << _map_share_capability_resume_bit)) ||
+			((uint32_t)answer.flags >> NUMBER_OF_MAP_SHARE_OFFER_FLAGS)))
+		{
+			abort();
+		}
+		break;
+	}
 	case 4:
 	{
 		uint8_t header[MAP_SHARE_HEADER_BYTES];
@@ -108,7 +174,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	map_share_receiver_begin(&receiver, 0x10000);
 	while (count++ < 64 && end - cursor >= 3)
 	{
-		int kind = cursor[0] % 5;
+		int kind = cursor[0] % 7;
 		int length = cursor[1] | cursor[2] << 8;
 
 		cursor += 3;

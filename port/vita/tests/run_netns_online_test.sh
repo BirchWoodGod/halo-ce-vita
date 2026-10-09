@@ -270,6 +270,34 @@
 #            nothing of the tables it is sent (dropped unread); a new joiner
 #            must have the old joiner's ping from a new host, and "-" (never
 #            a number) for other machines' players with an old host
+#   mapmid   joining a game in progress without its map (map sharing,
+#            port/linux/game/map_share.c): a dedicated server (sv_map_download
+#            1) and a Vita host each play the Halo PC Custom Edition map
+#            HALO_TEST_CE_MAP (one whose resource maps are not needed:
+#            pcgulch is such a map) in one long game, each with a first Vita
+#            that has the map (a Vita host's game starts once another machine
+#            is in). Once each game is under way a Vita
+#            without the map joins it (by its code): the server's with PC
+#            maps on, the Vita host's with PC maps off (the question turns
+#            them on). Each must be told the game is in progress, keep its
+#            player out of it while it downloads (at the host's in-game
+#            rate, MAP_SHARE_INGAME_BYTES_PER_SECOND or
+#            HALO_TEST_MAPMID_RATE_KB), check the map, join the game in
+#            progress ("joined the game in progress at game tick #") and
+#            play 45 s with another player; the hosts' uploads' CPU and
+#            rate are reported and checked, and nobody may lose a
+#            connection or reach the dashboard
+#   mapmidmixed the same with old builds (HALO_TEST_VITA_OLD,
+#            HALO_TEST_SERVER_OLD: v1.1.0-beta.2's, which know nothing of it):
+#            on the new server and the new Vita host an old joiner arrives
+#            beside the new one, and must be refused as before ("the host's
+#            game had already started"); an old server (with an old first
+#            Vita that has the map) and an old Vita host each get a new joiner
+#            without the map, which must be refused the same way. Every
+#            refused copy must stay up (never the dashboard), a new host must
+#            add no player of an old joiner it refused (that player's leaving
+#            ended a game with one player left), the new joiners of the new
+#            hosts download and play, and the games go on
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -349,6 +377,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = splitscreen ] && seconds=${HALO_TEST_SECONDS:-170}
 [ "$mode" = pings ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = pingsmixed ] && seconds=${HALO_TEST_SECONDS:-180}
+[ "$mode" = mapmid ] && seconds=${HALO_TEST_SECONDS:-300}
+[ "$mode" = mapmidmixed ] && seconds=${HALO_TEST_SECONDS:-300}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
@@ -461,6 +491,10 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	joiner) folder=${HALO_TEST_DATA_JOINER:-$data} ;;
 	joiner2) folder=${HALO_TEST_DATA_JOINER2:-$data} ;;
 	esac
+	# (a copy's own data folder, copy_data_NAME: mapmid's maps folders)
+	local override
+	eval "override=\${copy_data_$name:-}"
+	[ -n "$override" ] && folder=$override
 	ln -sfn "$(cd "$folder" && pwd)/maps" "$out/$name/data/maps"
 	rm -f "$out/$name/data/init.txt"
 	(cd "$out/$name" && exec nsenter -t "$ns" -n env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen \
@@ -1524,8 +1558,30 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
+	if [ "$mode" = mapmidmixed ]; then
+		vita_old=${HALO_TEST_VITA_OLD:-} server_old=${HALO_TEST_SERVER_OLD:-}
+		[ -x "$vita_old" ] && [ -x "$server_old" ] ||
+			{ echo "mapmidmixed needs HALO_TEST_VITA_OLD and HALO_TEST_SERVER_OLD (builds of v1.1.0-beta.2)"; exit 2; }
+	fi
+	if [ "$mode" = mapmid ] || [ "$mode" = mapmidmixed ]; then
+		ce_map=${HALO_TEST_CE_MAP:-}
+		[ -f "$ce_map" ] || { echo "$mode needs HALO_TEST_CE_MAP (a Halo PC Custom Edition multiplayer map)"; exit 2; }
+		ce_name=$(basename "$ce_map" .map)
+		# maps_folder NAME [with]: NAME's own maps folder ($out/maps-NAME): the
+		# game's maps, and the Custom Edition map with "with" (a joiner's
+		# download goes in its own)
+		maps_folder() {
+			local d=$out/maps-$1
+			mkdir -p "$d/maps"
+			for f in "$data"/maps/*.map; do ln -sfn "$(readlink -f "$f")" "$d/maps/$(basename "$f")"; done
+			[ "${2:-}" = with ] && ln -sfn "$(readlink -f "$ce_map")" "$d/maps/$ce_name.map"
+			echo "$d"
+		}
+		HALO_TEST_DATA_HOST=$(maps_folder server with)
+		export HALO_TEST_SERVER_ENV="${HALO_TEST_SERVER_ENV:-} HALO_CUSTOM_EDITION=1 ${HALO_TEST_MAPMID_RATE_KB:+HALO_MAP_SHARE_INGAME_RATE_KB=$HALO_TEST_MAPMID_RATE_KB}"
+	fi
 	[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
 	if [ "$mode" = pingsmixed ]; then
 		vita_old=${HALO_TEST_VITA_OLD:-} server_old=${HALO_TEST_SERVER_OLD:-}
@@ -1699,6 +1755,22 @@ sv_mapcycle_add chillout slayer
 sv_start_delay 5
 sv_postgame 10
 sv_end_empty 5
+sv_port 2302
+INIT
+	fi
+	# (mapmid: the Custom Edition map, one long game, downloads allowed)
+	if [ "$mode" = mapmid ] || [ "$mode" = mapmidmixed ]; then
+		cat > "$out/server/data/init.txt" <<INIT
+sv_name "Netns Mapmid"
+sv_maxplayers 8
+sv_public 1
+sv_mapcycle_add $ce_name slayer
+sv_timelimit 20
+sv_scorelimit 500
+sv_start_delay 5
+sv_postgame 5
+sv_end_empty 20
+sv_map_download 1
 sv_port 2302
 INIT
 	fi
@@ -2067,6 +2139,200 @@ INIT
 			[ "${dashes:-0}" -gt 0 ] || fail "$name never drew \"-\" for another machine's player"
 		done
 		;;
+	mapmid|mapmidmixed)
+		# whether PATTERN shows in FILE within SECONDS
+		wait_for() { # wait_for FILE PATTERN SECONDS
+			local i
+			for i in $(seq 1 $(($3 * 2))); do
+				grep -aqE "$2" "$1" 2>/dev/null && return 0
+				sleep 0.5
+			done
+			return 1
+		}
+		# the seconds a copy (its log) played with another player in the game
+		played() { grep -a "network test: tick" "$1" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:"; }
+		# copy_code LOG: a Vita host's code, once it hosts
+		copy_code() {
+			local c= i
+			for i in $(seq 1 90); do
+				c=$(sed -n 's/.*others join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' "$1" 2>/dev/null | head -1)
+				[ -n "$c" ] && break
+				sleep 1
+			done
+			echo "$c"
+		}
+		nets=60
+		# vita_on NAME CODE BINARY with|without [ENV...]: a Vita build joining
+		# CODE from a network of its own, with a maps folder of its own (the
+		# Custom Edition map in it, or not)
+		vita_on() {
+			local name=$1 c=$2 binary=$3 maps=$4
+			shift 4
+			nets=$((nets + 1))
+			side "n$nets" "10.10.$nets" "192.168.$nets"
+			eval "local m=\$n${nets}_machine"
+			eval "copy_data_$name=\$(maps_folder $name $maps)"
+			run_copy "$name" "$m" "$binary" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$c \
+				HALO_NET_PLAYER_NAME="$name" HALO_TEST_INPUT=bot:$((nets - 58)) HALO_EXIT_AFTER=$((seconds - 10)) "$@"
+			joined="$joined $last_pid"
+		}
+		# vita_host NAME BINARY: a Vita host of a long game on the Custom
+		# Edition map, on a network of its own; its code in vcode
+		vita_host() {
+			nets=$((nets + 1))
+			side "n$nets" "10.10.$nets" "192.168.$nets"
+			eval "local m=\$n${nets}_machine"
+			eval "copy_data_$1=\$(maps_folder $1 with)"
+			run_copy "$1" "$m" "$2" "$cpu_a" HALO_NET_ONLINE=true HALO_NETWORK_TEST=host:$ce_name:slayer \
+				HALO_NETWORK_TEST_START=20 HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
+				HALO_NET_PLAYER_NAME="$1" HALO_CUSTOM_EDITION=1 HALO_EXIT_AFTER=$((seconds - 5)) \
+				${HALO_TEST_MAPMID_RATE_KB:+HALO_MAP_SHARE_INGAME_RATE_KB=$HALO_TEST_MAPMID_RATE_KB}
+			hosts="$hosts $last_pid"
+			vcode=$(copy_code "$out/$1/run.log")
+			[ -n "$vcode" ] || fail "$1 never showed a code"
+			echo "$1's code: $vcode"
+		}
+		ce=HALO_CUSTOM_EDITION=1 yes=HALO_MAP_SHARE_ANSWER=yes
+		joined= hosts= old_server_pid=
+		# the server's first player (with the map), and the Vita host with its
+		# own (a Vita host's game starts once another machine is in)
+		vita_on sfirst "$code" "$vita" with $ce
+		vita_host vhost "$vita"
+		vhost_code=$vcode
+		vita_on vfirst "$vhost_code" "$vita" with $ce
+		if [ "$mode" = mapmidmixed ]; then
+			# the old server, on a network of its own, its port forwarded
+			side os 10.10.50 192.168.50
+			in_ns "$os_router" iptables -t nat -A PREROUTING -i w_os -p udp --dport 2302 -j DNAT \
+				--to-destination 192.168.50.2:2302
+			mkdir -p "$out/oldserver/data"
+			sed 's/^sv_name .*/sv_name "Netns Mapmid Old"/' "$out/server/data/init.txt" > "$out/oldserver/data/init.txt"
+			new_console_fd=$console_fd new_server_pid=$server_pid
+			run_server oldserver "$os_machine" "$server_old"
+			old_server_pid=$server_pid console_fd=$new_console_fd server_pid=$new_server_pid
+			ocode=$(server_code "$out/oldserver/run.log")
+			[ -n "$ocode" ] || fail "the old server never showed a code"
+			echo "the old server's code: $ocode"
+			# (the old hosts' first players: new builds, the map theirs; beta.2's
+			# own joiner was seen to crash precaching a Custom Edition map in a
+			# lobby, nothing of this test's)
+			vita_on osfirst "$ocode" "$vita" with $ce
+			vita_host ovhost "$vita_old"
+			ovhost_code=$vcode
+			vita_on ovfirst "$ovhost_code" "$vita" with $ce
+		fi
+		# (the games under way: started, and loaded a while)
+		wait_for "$sl" "^server: the game starts: " 120 || fail "the server's game never started"
+		wait_for "$out/vhost/data/debug.txt" "signalling client machines to begin loading" 120 || fail "vhost's game never started"
+		if [ "$mode" = mapmidmixed ]; then
+			wait_for "$out/oldserver/run.log" "^server: the game starts: " 120 || fail "the old server's game never started"
+			wait_for "$out/ovhost/data/debug.txt" "signalling client machines to begin loading" 120 || fail "ovhost's game never started"
+		fi
+		sleep 15
+		echo "the games are under way: the joiners without the map start"
+		# the joiners without the map: PC maps on for the server's, off for
+		# the Vita host's (the question turns them on with the download)
+		vita_on smid "$code" "$vita" without $ce $yes
+		vita_on vmid "$vhost_code" "$vita" without $yes
+		new_mids="smid vmid" refused=
+		if [ "$mode" = mapmidmixed ]; then
+			vita_on smid_old "$code" "$vita_old" without $ce $yes
+			vita_on vmid_old "$vhost_code" "$vita_old" without $ce $yes
+			vita_on osmid "$ocode" "$vita" without $ce $yes
+			vita_on ovmid "$ovhost_code" "$vita" without $ce $yes
+			refused="smid_old vmid_old osmid ovmid"
+		fi
+		wait $joined 2>/dev/null
+		kill -TERM "$server_pid" $hosts $old_server_pid 2>/dev/null; wait "$server_pid" $hosts $old_server_pid 2>/dev/null
+		echo "--- server"; grep -aE "^server: (the game|player)" "$sl" | head -12
+		# (the new joiners of the new hosts: told, held out, downloaded,
+		# checked, joined in progress, played)
+		for name in $new_mids; do
+			l=$out/$name/run.log d=$out/$name/data/debug.txt
+			echo "--- $name"
+			grep -ahE "map share: (the host's game is in progress|asking the player|downloading|'.*' (received|verified|downloaded))|PC maps turned on|joined the game in progress|Halo: custom map" "$d" "$l" | head -12
+			grep -aq "map share: the host's game is in progress: the players wait for '$ce_name'" "$d" ||
+				fail "$name was not told the host's game is in progress"
+			grep -aq "map share: '$ce_name' verified" "$d" || fail "$name did not download and check $ce_name"
+			grep -aq "joined the game in progress at game tick #" "$d" || fail "$name did not join the game in progress"
+			grep -a "Halo: custom map:" "$l" | grep -avq "Halo: custom map: \(Downloading\|Checking the part\)" &&
+				fail "$name was told it could not play the map"
+			grep -aq "XLaunchNewImage" "$l" && fail "$name went to the dashboard"
+			n=$(played "$l")
+			echo "$name: $n s playing with another player"
+			[ "$n" -ge 45 ] || fail "$name played with another player for $n s (45 wanted)"
+		done
+		grep -aq "map share: PC maps turned on" "$out/vmid/data/debug.txt" || fail "vmid's PC maps were not turned on with the download"
+		# (the new hosts: sent it to join in progress, at the in-game rate, in a
+		# small share of their frames; nobody's game lost)
+		rate_cap=${HALO_TEST_MAPMID_RATE_KB:-256}
+		for host in server vhost; do
+			hd=$out/$host/data/debug.txt
+			[ "$host" = server ] && hd=$sd
+			echo "--- $host"
+			grep -a "map share: \(sending\|'$ce_name' sent\|the uploads took\)" "$hd" | head -8
+			grep -aq "map share: sending '$ce_name' (.*to join the game in progress) to a machine" "$hd" ||
+				fail "$host did not send $ce_name to join its game in progress"
+			sent=$(grep -a "map share: '$ce_name' sent: " "$hd" | head -1)
+			[ -n "$sent" ] || { fail "$host never finished sending $ce_name"; continue; }
+			stream=$(sed -n 's/.* bytes of the file as \([0-9]*\) in \([0-9]*\) ms.*/\1 \2/p' <<< "$sent")
+			kbs=$(awk '{ if ($2 > 0) printf "%d", $1 * 1000 / 1024 / $2 }' <<< "$stream")
+			echo "$host: the stream went at ${kbs:-?} KB/s (the cap ${rate_cap} KB/s)"
+			[ -n "$kbs" ] && [ "$kbs" -le $((rate_cap * 110 / 100)) ] || fail "$host sent faster than its in-game cap (${kbs:-?} KB/s)"
+			[ -n "$kbs" ] && [ "$kbs" -ge $((rate_cap / 4)) ] || fail "$host sent far slower than its in-game cap (${kbs:-?} KB/s)"
+			most=$(sed -n 's/.*map share: the uploads took .*(\([0-9]*\) us at most in a frame, the game under way).*/\1/p' "$hd" | sort -n | tail -1)
+			used=$(sed -n 's/.*map share: the uploads took \([0-9]*\) ms of the CPU in \([0-9]*\) ms (.*the game under way).*/\1 \2/p' "$hd" |
+				awk '{ u += $1; t += $2 } END { if (t) printf "%.2f", u * 100 / t }')
+			echo "$host: the uploads took ${used:-?}% of its time in game, ${most:-?} us at most in a frame"
+			[ -n "$most" ] && [ "$most" -le "${HALO_TEST_MAPMID_FRAME_US:-5000}" ] ||
+				fail "$host's uploads took ${most:-?} us of a frame (${HALO_TEST_MAPMID_FRAME_US:-5000} at most)"
+			sed '/exiting after debug.exit_after/q' "$out/$host/run.log" | grep -aq "lost the connection" &&
+				fail "$host lost a player's connection"
+		done
+		for name in sfirst vhost vfirst $([ "$mode" = mapmidmixed ] && echo ovhost ovfirst); do
+			n=$(played "$out/$name/run.log")
+			echo "$name: $n s playing with another player"
+			[ "$n" -ge 60 ] || fail "$name played with another player for $n s (60 wanted)"
+			grep -aq "XLaunchNewImage" "$out/$name/run.log" && fail "$name went to the dashboard"
+		done
+		# (the old server's only player: its game goes on, the new joiner
+		# refused)
+		if [ "$mode" = mapmidmixed ]; then
+			n=$(grep -a "network test: tick" "$out/osfirst/run.log" | grep -ac "| playing")
+			echo "osfirst: $n s playing"
+			[ "$n" -ge 120 ] || fail "osfirst played for $n s (120 wanted)"
+		fi
+		# (mixed: refused as before, and still up at the end)
+		for name in $refused; do
+			l=$out/$name/run.log
+			echo "--- $name"; grep -aE "Halo: custom map|exiting after" "$l" | head -3
+			grep -aq "Halo: custom map: .*the host's game had already started" "$l" ||
+				fail "$name was not refused as before (the host's game had already started)"
+			grep -aq "exiting after debug.exit_after" "$l" || fail "$name did not run to its end"
+			grep -aq "XLaunchNewImage" "$l" && fail "$name went to the dashboard"
+			grep -aq "joined the game in progress" "$out/$name/data/debug.txt" && fail "$name joined without the map"
+		done
+		if [ "$mode" = mapmidmixed ]; then
+			for host in server vhost; do
+				hd=$out/$host/data/debug.txt
+				[ "$host" = server ] && hd=$sd
+				grep -aq "map share: refusing '$ce_name' to a machine: the host's game has started" "$hd" ||
+					fail "$host did not refuse its old joiner"
+			done
+			for host in oldserver ovhost; do
+				sed '/exiting after debug.exit_after/q' "$out/$host/run.log" | grep -aq "lost the connection" &&
+					fail "$host lost a player's connection"
+			done
+			# (the new hosts put no player of an old joiner refused the map into
+			# their games)
+			for host in server vhost; do
+				hd=$out/$host/data/debug.txt
+				[ "$host" = server ] && hd=$sd
+				grep -aq "not adding a player of a machine refused the map of the game in progress" "$hd" ||
+					fail "$host added a player of its old joiner refused the map"
+			done
+		fi
+		;;
 	dedicatedfullcache)
 		# (both joiners' cache files filled at once, then checked here: the
 		# prefill's own check runs in its subshell)
@@ -2314,7 +2580,7 @@ INIT
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|mapmid|mapmidmixed" >&2
 	exit 2
 	;;
 esac
