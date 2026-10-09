@@ -10,9 +10,17 @@ in the lobby, before the game starts: the host's countdown already waits
 for every machine to have the map precached, so nobody starts without it.
 
 Choices:
-- Only in the lobby (pregame): a host whose game starts, or that is already
-  playing (a joiner in progress), refuses, and the joiner leaves with the
-  old message. Gameplay traffic never shares the link with a download.
+- In the lobby (pregame), or to join a game in progress: a host whose game
+  starts refuses a download from its lobby, and the joiner leaves with the
+  old message. A joiner that joins a game in progress without the map (one
+  that can: the in-progress capability, map_share_protocol.h) adds no player
+  to it while it asks and downloads, and joins it once the map is here; the
+  host sends it the map only while that machine is still joining (no player
+  of it in the game), at the in-game limits below, and keeps it from being
+  dropped as a machine that adds no player meanwhile
+  (map_share_server_machine_waits). A joiner or a host of an older version
+  is refused in game as before. HALO_MAP_SHARE_IN_PROGRESS=0 turns it off
+  (a host refuses as before; a joiner does not ask for it).
 - Rate: all of a host's uploads together send at most
   MAP_SHARE_DEFAULT_BYTES_PER_SECOND (HALO_MAP_SHARE_RATE_KB), and each
   keeps at most MAP_SHARE_WINDOW_BYTES ahead of the joiner's
@@ -22,7 +30,14 @@ Choices:
   each in turn (two joiners share the upload evenly), and the reading,
   hashing and deflating of all of them take at most
   MAP_SHARE_DEFAULT_CPU_PERCENT of the host's frame
-  (HALO_MAP_SHARE_CPU_PERCENT).
+  (HALO_MAP_SHARE_CPU_PERCENT). While the host's game is under way the
+  limits are lower (map_share_host_limits): MAP_SHARE_INGAME_BYTES_PER_SECOND
+  for all the uploads together (HALO_MAP_SHARE_INGAME_RATE_KB),
+  MAP_SHARE_INGAME_WINDOW_BYTES ahead of each joiner, and
+  MAP_SHARE_INGAME_CPU_PERCENT of the host's time, never more than
+  MAP_SHARE_INGAME_FRAME_MICROSECONDS in a frame
+  (HALO_MAP_SHARE_INGAME_CPU_PERCENT, HALO_MAP_SHARE_INGAME_FRAME_US): the
+  players' game keeps the link and the frame.
 - Deflate (map_share_protocol.h): a Custom Edition map goes as a deflate
   stream (40-55% of it) to a joiner that can take one. A host whose CPU,
   not the link, holds an upload back (a Vita on a fast LAN) tries storing
@@ -173,11 +188,15 @@ log) */
 /* the C library's buffer of a file sent or written (the Vita's memory card
 takes few large writes better than many of a message each) */
 #define FILE_BUFFER_BYTES 0x8000
-/* a deflating upload's reads */
+/* a deflating upload's reads (smaller while the host's game is under way:
+what one message may take of its frame past its share) */
 #define DEFLATE_INPUT_BYTES 0x4000
+#define INGAME_DEFLATE_INPUT_BYTES 0x1000
 /* the reads of a host's hash catching up, and of a joiner's kept part read
 back */
 #define READ_BACK_BYTES 0x10000
+/* ... a host's while its game is under way (its frame's share is small) */
+#define INGAME_READ_BACK_BYTES 0x4000
 /* a joiner's frame's share of reading its kept part back */
 #define READ_BACK_MICROSECONDS 15000
 /* the most of a host's CPU share its uploads save up (the work a frame may
@@ -211,6 +230,8 @@ struct map_share_upload
 	/* the stream's bytes: sent, and acknowledged */
 	uint32_t sent;
 	uint32_t acknowledged;
+	/* to a machine joining the game in progress (the offer said so) */
+	boolean in_progress;
 	/* the stream's last byte sent */
 	boolean stream_ended;
 	boolean done_sent;
@@ -271,6 +292,30 @@ struct map_share_host
 	unsigned long long cpu_used_most;
 	unsigned long cpu_logged_time;
 	struct map_share_digest_cache digest_cache;
+	/* this frame's limits (the lobby's, or the game's while it is under way) */
+	struct map_share_limits limits;
+	/* each machine joining the game in progress the map was offered to (by
+	its index, its connection and when it joined telling it from a later
+	machine there): kept
+	until then though it adds no player (map_share_server_machine_waits) */
+	struct
+	{
+		struct network_connection *connection;
+		unsigned long joined;
+		unsigned long until;
+		/* never past this (from its first offer: the question, the map at
+		MAP_SHARE_INGAME_MINIMUM_BYTES_PER_SECOND, its install), however it
+		asks again or trickles its download */
+		unsigned long deadline;
+	} waits[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	/* (by index, its connection and when it joined) each machine joining
+	the game in progress that was refused the map: it cannot play, and its
+	players are not added (map_share_server_machine_refused) */
+	struct
+	{
+		struct network_connection *connection;
+		unsigned long joined;
+	} refused[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
 };
 
 struct map_share_download
@@ -302,6 +347,9 @@ struct map_share_download
 	boolean public_game;
 	/* what this joiner said it can do (its query's and start's) */
 	uint32_t capabilities;
+	/* the host's game is under way (its offer said so): the joiner adds no
+	player to it until the map is here (map_share_client_holds_players) */
+	boolean in_progress;
 	/* the kept part of an earlier download it continues from (0: none),
 	as written down, and read back this far */
 	uint32_t resume_from;
@@ -436,6 +484,10 @@ static void map_share_resource_maps_absent(
 
 /* ---------- private code: host */
 
+static enum map_share_host_state map_share_server_host_state(struct network_game_server *server);
+static boolean map_share_server_machine_index(struct network_game_server *server,
+	struct network_game_server_client_machine *machine, long *machine_index);
+
 static boolean map_share_server_send_answer(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,
@@ -460,6 +512,21 @@ static void map_share_server_refuse(
 	csstrncpy(answer.name, name, MAP_SHARE_NAME_BYTES - 1);
 	network_event("map share: refusing '%s' to a machine: %s", name, map_share_refusal_describe(reason));
 	map_share_server_send_answer(server, machine, &answer);
+	/* (a machine joining the game in progress, which cannot play it now:
+	its players, which an older joiner asks for as it asks for the map, are
+	not added, so that none is put into the game and taken out again as the
+	machine leaves, which ended a game it left one player in) */
+	{
+		long index;
+
+		if (map_share_server_host_state(server) == _map_share_host_in_game &&
+			network_game_server_client_machine_joining_in_progress(server, machine) &&
+			map_share_server_machine_index(server, machine, &index))
+		{
+			map_share_host.refused[index].connection = network_game_server_get_client_connection(machine);
+			map_share_host.refused[index].joined = network_game_server_client_machine_join_time(server, machine);
+		}
+	}
 
 	return;
 }
@@ -519,11 +586,34 @@ static long map_share_file_modified(
 	return (long)(data.ftLastWriteTime.dwLowDateTime ^ data.ftLastWriteTime.dwHighDateTime);
 }
 
-/* Whether the host serves `name`, fingerprinted `identity`, now: opens it
-(*file, at `path`, its *size and offer *flags) when it does, else says why
-not. */
+/* where the host's game is, as map_share_host_serves takes it */
+static enum map_share_host_state map_share_server_host_state(
+	struct network_game_server *server)
+{
+	word state = network_game_server_get_state(server, NULL);
+
+	return state == _network_game_server_state_pregame ? _map_share_host_lobby :
+		state == _network_game_server_state_ingame ? _map_share_host_in_game : _map_share_host_postgame;
+}
+
+/* whether a host sends its map to joiners of its game in progress
+(HALO_MAP_SHARE_IN_PROGRESS=0: not) */
+static boolean map_share_in_progress_allowed(
+	void)
+{
+	char const *value = getenv("HALO_MAP_SHARE_IN_PROGRESS");
+
+	return !(value && !csstrcmp(value, "0"));
+}
+
+/* Whether the host serves `name`, fingerprinted `identity`, now, to the
+machine `machine` that said it can do `capabilities`: opens it (*file, at
+`path`, its *size and offer *flags, the in-progress flag among them for a
+machine joining the game in progress) when it does, else says why not. */
 static enum map_share_refusal map_share_server_check(
 	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	uint32_t capabilities,
 	char const *name,
 	int32_t identity,
 	FILE **file,
@@ -532,15 +622,22 @@ static enum map_share_refusal map_share_server_check(
 	int32_t *flags)
 {
 	char const *level_name = main_get_multiplayer_map_name();
+	enum map_share_refusal refusal;
+	int in_progress;
 	long length;
 	long path_length;
 
 	*file = NULL;
 	*size = 0;
 	*flags = 0;
-	if (network_game_server_get_state(server, NULL) != _network_game_server_state_pregame)
+	/* (in the lobby; or in game, to a machine still joining it in progress
+	that can wait out of it for the map) */
+	refusal = map_share_host_serves(map_share_server_host_state(server), capabilities,
+		network_game_server_client_machine_joining_in_progress(server, machine),
+		network_game_server_accepts_late_joins(server), map_share_in_progress_allowed(), &in_progress);
+	if (refusal != _map_share_refusal_none)
 	{
-		return _map_share_refusal_not_in_lobby;
+		return refusal;
 	}
 	/* the map the game plays, and no other: one of the Xbox's own levels, a
 	map turned off or not in the level list, a resource map, any other
@@ -594,8 +691,72 @@ static enum map_share_refusal map_share_server_check(
 	{
 		*flags |= 1 << _map_share_offer_yelo_bit;
 	}
+	if (in_progress)
+	{
+		*flags |= 1 << _map_share_offer_in_progress_bit;
+	}
 
 	return _map_share_refusal_none;
+}
+
+/* the machine's index (FALSE: not one of the host's machines) */
+static boolean map_share_server_machine_index(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	long *machine_index)
+{
+	long index;
+
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_MACHINES; index++)
+	{
+		if (network_game_server_get_client_machine_at_index(server, index) == machine)
+		{
+			*machine_index = index;
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* A machine joining the game in progress is kept, though it adds no player,
+`milliseconds` from now (the question, or the install after its download),
+and never past its deadline: set at its first offer (`size` the map's).
+FALSE when it is past it. */
+static boolean map_share_server_machine_wait(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	unsigned long milliseconds,
+	uint32_t size)
+{
+	struct network_connection *connection = network_game_server_get_client_connection(machine);
+	unsigned long joined = network_game_server_client_machine_join_time(server, machine);
+	unsigned long now = system_milliseconds();
+	long index;
+
+	if (!map_share_server_machine_index(server, machine, &index))
+	{
+		return FALSE;
+	}
+	if (map_share_host.waits[index].connection != connection || map_share_host.waits[index].joined != joined)
+	{
+		map_share_host.waits[index].connection = connection;
+		map_share_host.waits[index].joined = joined;
+		map_share_host.waits[index].deadline = now + MAP_SHARE_QUESTION_MILLISECONDS + MAP_SHARE_INSTALL_MILLISECONDS +
+			(unsigned long)((unsigned long long)size * 1000 / MAP_SHARE_INGAME_MINIMUM_BYTES_PER_SECOND);
+		map_share_host.waits[index].until = now;
+	}
+	if ((long)(now - map_share_host.waits[index].deadline) >= 0)
+	{
+		return FALSE;
+	}
+	/* (never shortened: a question asked again does not end the install's) */
+	if ((long)(now + milliseconds - map_share_host.waits[index].until) > 0)
+	{
+		map_share_host.waits[index].until = MIN(now + milliseconds, map_share_host.waits[index].deadline);
+	}
+
+	return TRUE;
 }
 
 /* the offer's flags of what the host does of the joiner's `capabilities`:
@@ -665,19 +826,30 @@ static void map_share_server_query_or_start(
 	{
 		map_share_upload_close(upload);
 	}
-	refusal = map_share_server_check(server, name, request->identity, &file, path, &size, &flags);
+	refusal = map_share_server_check(server, machine, capabilities, name, request->identity, &file, path, &size, &flags);
 	if (refusal != _map_share_refusal_none)
 	{
 		map_share_server_refuse(server, machine, name, refusal);
 		return;
 	}
 	flags = map_share_server_offer_flags(flags, capabilities);
+	/* (a machine joining the game in progress: kept while the player answers,
+	until its deadline: else refused as before) */
+	if (TEST_FLAG(flags, _map_share_offer_in_progress_bit) &&
+		!map_share_server_machine_wait(server, machine,
+			request->command == _map_share_command_query ? MAP_SHARE_QUESTION_MILLISECONDS : MAP_SHARE_INSTALL_MILLISECONDS, size))
+	{
+		fclose(file);
+		map_share_server_refuse(server, machine, name, _map_share_refusal_not_in_lobby);
+		return;
+	}
 	if (request->command == _map_share_command_query)
 	{
 		fclose(file);
-		network_event("map share: offering '%s' (%lu bytes%s%s) to a machine", name, (unsigned long)size,
+		network_event("map share: offering '%s' (%lu bytes%s%s%s) to a machine", name, (unsigned long)size,
 			TEST_FLAG(flags, _map_share_offer_resume_bit) ? ", resumable" : "",
-			TEST_FLAG(flags, _map_share_offer_deflate_bit) ? ", deflated" : "");
+			TEST_FLAG(flags, _map_share_offer_deflate_bit) ? ", deflated" : "",
+			TEST_FLAG(flags, _map_share_offer_in_progress_bit) ? ", to join the game in progress" : "");
 		map_share_server_answer_offer(server, machine, name, request->identity, size, flags);
 		return;
 	}
@@ -720,6 +892,7 @@ static void map_share_server_query_or_start(
 	csstrncpy(upload->name, name, MAP_SHARE_NAME_BYTES - 1);
 	upload->identity = request->identity;
 	upload->size = size;
+	upload->in_progress = TEST_FLAG(flags, _map_share_offer_in_progress_bit);
 	upload->start = upload->position = start;
 	upload->progress_time = upload->level_time = system_milliseconds();
 	upload->started_us = vita_host_time_us();
@@ -771,8 +944,9 @@ static void map_share_server_query_or_start(
 	{
 		upload->sent = upload->acknowledged = start;
 	}
-	network_event("map share: sending '%s' (%lu bytes%s%s%s) to a machine", name, (unsigned long)size,
-		upload->deflating ? ", deflated" : "", start ? ", from " : "", start ? "its kept part" : "");
+	network_event("map share: sending '%s' (%lu bytes%s%s%s%s) to a machine", name, (unsigned long)size,
+		upload->deflating ? ", deflated" : "", start ? ", from " : "", start ? "its kept part" : "",
+		upload->in_progress ? ", to join the game in progress" : "");
 	if (start)
 	{
 		network_event("map share: the machine has %lu bytes of '%s'", (unsigned long)start, name);
@@ -834,7 +1008,8 @@ static boolean map_share_upload_fill(
 
 			if (upload->input_used == upload->input_size && upload->position < upload->size)
 			{
-				uint32_t length = MIN(upload->size - upload->position, (uint32_t)DEFLATE_INPUT_BYTES);
+				uint32_t length = MIN(upload->size - upload->position, upload->in_progress ?
+					(uint32_t)INGAME_DEFLATE_INPUT_BYTES : (uint32_t)DEFLATE_INPUT_BYTES);
 
 				if (!map_share_upload_read(upload, upload->input, length))
 				{
@@ -888,7 +1063,7 @@ static boolean map_share_upload_may_send(
 	struct map_share_upload const *upload)
 {
 	return upload->active && !upload->stream_ended &&
-		upload->sent - upload->acknowledged < MAP_SHARE_WINDOW_BYTES &&
+		upload->sent - upload->acknowledged < map_share_host.limits.window_bytes &&
 		map_share_host.rate_budget >= MAP_SHARE_CHUNK_BYTES &&
 		network_connection_reliable_queued_bytes(upload->connection) < MAP_SHARE_QUEUE_BYTES;
 }
@@ -946,10 +1121,12 @@ static boolean map_share_upload_hash(
 			return FALSE;
 		}
 	}
-	/* (at least a read a frame, so that it ends) */
+	/* (at least a read a frame, so that it ends; a small one while the game
+	is under way) */
 	do
 	{
-		uint32_t length = MIN(upload->position - upload->hashed, (uint32_t)sizeof(buffer));
+		uint32_t length = MIN(upload->position - upload->hashed, upload->in_progress ?
+			(uint32_t)INGAME_READ_BACK_BYTES : (uint32_t)sizeof(buffer));
 
 		if (fread(buffer, 1, length, upload->hash_file) != length)
 		{
@@ -1074,13 +1251,17 @@ static boolean map_share_setting_off(
 	return value && !csstrcmp(value, "0");
 }
 
-/* what this joiner can do (HALO_MAP_SHARE_RESUME=0, HALO_MAP_SHARE_COMPRESS=0
-turn either off) */
+/* what this joiner can do (HALO_MAP_SHARE_RESUME=0, HALO_MAP_SHARE_COMPRESS=0,
+HALO_MAP_SHARE_IN_PROGRESS=0 turn each off) */
 static uint32_t map_share_client_capabilities(
 	void)
 {
 	uint32_t capabilities = 0;
 
+	if (!map_share_setting_off("HALO_MAP_SHARE_IN_PROGRESS"))
+	{
+		capabilities |= 1u << _map_share_capability_in_progress_bit;
+	}
 	if (!map_share_setting_off("HALO_MAP_SHARE_RESUME"))
 	{
 		capabilities |= 1u << _map_share_capability_resume_bit;
@@ -1586,7 +1767,8 @@ static void map_share_client_finish(
 		return;
 	}
 
-	network_event("map share: '%s' verified; precaching map '%s'...", download->name, download->level_name);
+	network_event("map share: '%s' verified; precaching map '%s'...%s", download->name, download->level_name,
+		download->in_progress ? " (its players join the game in progress)" : "");
 	main_set_multiplayer_map_name(download->level_name);
 	download->state = _client_idle;
 	download->client = NULL;
@@ -1659,6 +1841,14 @@ static void map_share_client_ask(
 			download->host_name,
 			kept_text);
 	}
+	/* (a game in progress: the player waits out of it for the map) */
+	if (download->in_progress && !download->pc_maps_only)
+	{
+		size_t length = strlen(text);
+
+		snprintf(text + length, sizeof(text) - length, "%s",
+			T("\n\nThe host's game is under way: you join it once the map is here."));
+	}
 	/* (a public lobby's game: its host is a stranger) */
 	if (download->public_game && !download->pc_maps_only)
 	{
@@ -1666,10 +1856,10 @@ static void map_share_client_ask(
 
 		snprintf(text + length, sizeof(text) - length, "%s", T("\n\nThis is a public game: only accept maps from players you trust."));
 	}
-	network_event("map share: asking the player about '%s' (%lu bytes%s%s) from '%s'%s", download->name,
+	network_event("map share: asking the player about '%s' (%lu bytes%s%s) from '%s'%s%s", download->name,
 		(unsigned long)download->size, download->pc_maps_only ? ", PC maps only" : download->turn_on_pc_maps ?
 		", and PC maps" : "", download->resume_from ? ", a part kept" : "", download->host_name,
-		download->public_game ? ", a public game" : "");
+		download->public_game ? ", a public game" : "", download->in_progress ? ", its game in progress" : "");
 	if (!getenv("HALO_MAP_SHARE_ANSWER"))
 	{
 		platform_ask_question(T("Halo: custom map"), text);
@@ -1923,7 +2113,8 @@ static void map_share_client_show_progress(
 	map_share_size_text(received_text, sizeof(received_text), done);
 	map_share_size_text(size_text, sizeof(size_text), total);
 	snprintf(text, sizeof(text), download->state == _client_checking ?
-		T("Checking the part of %s downloaded before\n\n%s of %s (%lu%%)") :
+		T("Checking the part of %s downloaded before\n\n%s of %s (%lu%%)") : download->in_progress ?
+		T("Downloading %s from the host to join its game in progress\n\n%s of %s (%lu%%)") :
 		T("Downloading %s from the host\n\n%s of %s (%lu%%)"),
 		download->name, received_text, size_text, percent);
 	platform_show_progress(T("Halo: custom map"), text);
@@ -2220,6 +2411,25 @@ boolean map_share_client_busy(
 	return map_share_download.state != _client_idle;
 }
 
+boolean map_share_client_holds_players(
+	void)
+{
+	switch (map_share_download.state)
+	{
+	/* (the host's answer says whether its game is under way: a player added
+	to a game in progress would start this machine into it without the map) */
+	case _client_querying:
+		return TRUE;
+	case _client_asking:
+	case _client_checking:
+	case _client_starting:
+	case _client_receiving:
+		return map_share_download.in_progress;
+	default:
+		return FALSE;
+	}
+}
+
 boolean map_share_client_game_starting(
 	struct network_game_client *client,
 	char const *level_name,
@@ -2503,6 +2713,11 @@ void map_share_client_handle_answer(
 		{
 			download->size = (uint32_t)answer.size;
 			download->flags = answer.flags;
+			download->in_progress = TEST_FLAG(answer.flags, _map_share_offer_in_progress_bit);
+			if (download->in_progress)
+			{
+				network_event("map share: the host's game is in progress: the players wait for '%s'", download->name);
+			}
 			/* (an OpenSauce map, .yelo: more for the loader to trust than a
 			plain map, so never from a stranger's game - the owner's choice;
 			a code's, Wi-Fi's or ad hoc's game still offers it) */
@@ -2526,8 +2741,12 @@ void map_share_client_handle_answer(
 		}
 		else if (download->state == _client_starting &&
 			(uint32_t)answer.size == download->size &&
-			(answer.flags | FLAG(_map_share_offer_deflate_bit)) == (download->flags | FLAG(_map_share_offer_deflate_bit)))
+			(answer.flags | FLAG(_map_share_offer_deflate_bit) | FLAG(_map_share_offer_in_progress_bit)) ==
+				(download->flags | FLAG(_map_share_offer_deflate_bit) | FLAG(_map_share_offer_in_progress_bit)))
 		{
+			/* (the host's game started or ended since its offer: in progress
+			or not as it is now, the players held or not) */
+			download->in_progress = TEST_FLAG(answer.flags, _map_share_offer_in_progress_bit);
 			/* (deflated as offered, or the file's own bytes: a host short of
 			memory sends them) */
 			if (!TEST_FLAG(answer.flags, _map_share_offer_deflate_bit) && download->receiver.inflater)
@@ -2699,8 +2918,14 @@ void map_share_server_handle_request(
 				map_share_upload_close(upload);
 				break;
 			}
+			/* (only an acknowledgement that takes more counts as progress: one
+			that repeats itself would keep an upload, and the machine
+			waiting for it, for ever) */
+			if ((uint32_t)request.offset > upload->acknowledged)
+			{
+				upload->progress_time = system_milliseconds();
+			}
 			upload->acknowledged = (uint32_t)request.offset;
-			upload->progress_time = system_milliseconds();
 			if (upload->done_sent && upload->acknowledged == upload->sent)
 			{
 				network_event("map share: '%s' sent to a machine", name);
@@ -2729,9 +2954,10 @@ void map_share_server_update(
 	struct map_share_host *host = &map_share_host;
 	unsigned long now = system_milliseconds();
 	unsigned long long now_us = vita_host_time_us();
-	unsigned long rate = map_share_environment_number("HALO_MAP_SHARE_RATE_KB", MAP_SHARE_DEFAULT_BYTES_PER_SECOND / 1024) * 1024;
-	unsigned long cpu_percent = map_share_environment_number("HALO_MAP_SHARE_CPU_PERCENT", MAP_SHARE_DEFAULT_CPU_PERCENT);
-	boolean pregame = network_game_server_get_state(server, NULL) == _network_game_server_state_pregame;
+	enum map_share_host_state host_state = map_share_server_host_state(server);
+	boolean in_game = host_state == _map_share_host_in_game;
+	unsigned long rate;
+	unsigned long cpu_percent;
 	unsigned long long until_us;
 	boolean sent;
 	short count;
@@ -2750,6 +2976,15 @@ void map_share_server_update(
 		host->cpu_logged_time = 0;
 		return;
 	}
+	/* the limits: the lobby's, or lower while the game is under way */
+	map_share_host_limits(in_game,
+		(uint32_t)map_share_environment_number("HALO_MAP_SHARE_RATE_KB", 0),
+		(uint32_t)map_share_environment_number("HALO_MAP_SHARE_INGAME_RATE_KB", 0),
+		(uint32_t)map_share_environment_number(in_game ? "HALO_MAP_SHARE_INGAME_CPU_PERCENT" : "HALO_MAP_SHARE_CPU_PERCENT", 0),
+		(uint32_t)map_share_environment_number(in_game ? "HALO_MAP_SHARE_INGAME_FRAME_US" : "HALO_MAP_SHARE_FRAME_US", 0),
+		&host->limits);
+	rate = host->limits.bytes_per_second;
+	cpu_percent = host->limits.cpu_percent;
 	/* the rate, saved up to a few chunks */
 	{
 		unsigned long elapsed = now - host->rate_time;
@@ -2758,9 +2993,10 @@ void map_share_server_update(
 		host->rate_budget += (unsigned long)((unsigned long long)rate * MIN(elapsed, 1000UL) / 1000);
 		host->rate_budget = MIN(host->rate_budget, MAX(MAXIMUM_RATE_BURST_BYTES, rate / 30));
 	}
-	/* the CPU's share (of the time since the last look) */
+	/* the CPU's share (of the time since the last look), saved up to what a
+	frame may take */
 	host->cpu_allowance += (now_us - host->cpu_time) * cpu_percent / 100;
-	host->cpu_allowance = MIN(host->cpu_allowance, (unsigned long long)MAXIMUM_CPU_ALLOWANCE_MICROSECONDS);
+	host->cpu_allowance = MIN(host->cpu_allowance, (unsigned long long)host->limits.frame_microseconds);
 	host->cpu_time = now_us;
 	until_us = now_us + host->cpu_allowance;
 
@@ -2779,8 +3015,24 @@ void map_share_server_update(
 			map_share_upload_close(upload);
 			continue;
 		}
-		if (!pregame)
+		/* (the lobby's downloads end as its game starts; one to join the game
+		in progress goes on while that machine is still joining it, also
+		should the host go back to its lobby; any ends with the game) */
+		if (host_state == _map_share_host_postgame ||
+			(in_game && !(upload->in_progress && network_game_server_client_machine_joining_in_progress(server, upload->machine))))
 		{
+			map_share_server_refuse(server, upload->machine, upload->name, _map_share_refusal_not_in_lobby);
+			map_share_upload_close(upload);
+			continue;
+		}
+		/* (a machine joining the game in progress: kept while it downloads,
+		and while it puts the map in place after; refused once it has taken
+		longer than its deadline allows) */
+		if (upload->in_progress && in_game &&
+			!map_share_server_machine_wait(server, upload->machine, MAP_SHARE_INSTALL_MILLISECONDS, upload->size))
+		{
+			network_event("map share: machine #%d took too long over '%s' to join the game in progress",
+				(int)upload->machine_index, upload->name);
 			map_share_server_refuse(server, upload->machine, upload->name, _map_share_refusal_not_in_lobby);
 			map_share_upload_close(upload);
 			continue;
@@ -2795,8 +3047,9 @@ void map_share_server_update(
 		if (!upload->logged_time || now - upload->logged_time >= 5000)
 		{
 			upload->logged_time = now;
-			network_event("map share: machine #%d is downloading '%s' (%d%%)", (int)upload->machine_index,
-				upload->name, (int)(upload->size ? (unsigned long long)map_share_upload_progress(upload) * 100 / upload->size : 0));
+			network_event("map share: machine #%d is downloading '%s' (%d%%)%s", (int)upload->machine_index,
+				upload->name, (int)(upload->size ? (unsigned long long)map_share_upload_progress(upload) * 100 / upload->size : 0),
+				in_game ? ", to join the game in progress" : "");
 		}
 		map_share_upload_level(upload, now);
 		upload->frames++;
@@ -2865,9 +3118,9 @@ void map_share_server_update(
 		{
 			if (host->cpu_logged_time)
 			{
-				network_event("map share: the uploads took %lu ms of the CPU in %lu ms (%lu ms at most in a frame)",
+				network_event("map share: the uploads took %lu ms of the CPU in %lu ms (%lu us at most in a frame%s)",
 					(unsigned long)(host->cpu_used / 1000), now - host->cpu_logged_time,
-					(unsigned long)(host->cpu_used_most / 1000));
+					(unsigned long)host->cpu_used_most, in_game ? ", the game under way" : "");
 			}
 			host->cpu_logged_time = now;
 			host->cpu_used = host->cpu_used_most = 0;
@@ -2875,6 +3128,39 @@ void map_share_server_update(
 	}
 
 	return;
+}
+
+boolean map_share_server_machine_waits(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	long index;
+
+	if (!map_share_server_machine_index(server, machine, &index) || !map_share_host.waits[index].connection)
+	{
+		return FALSE;
+	}
+	/* (another machine at its index since, or the time up) */
+	if (map_share_host.waits[index].connection != network_game_server_get_client_connection(machine) ||
+		map_share_host.waits[index].joined != network_game_server_client_machine_join_time(server, machine) ||
+		(long)(system_milliseconds() - map_share_host.waits[index].until) >= 0)
+	{
+		map_share_host.waits[index].connection = NULL;
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+boolean map_share_server_machine_refused(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	long index;
+
+	return map_share_server_machine_index(server, machine, &index) && map_share_host.refused[index].connection &&
+		map_share_host.refused[index].connection == network_game_server_get_client_connection(machine) &&
+		map_share_host.refused[index].joined == network_game_server_client_machine_join_time(server, machine);
 }
 
 short map_share_server_machine_percent(
@@ -2935,6 +3221,8 @@ void map_share_server_dispose(
 			map_share_upload_close(&map_share_host.uploads[index]);
 		}
 	}
+	csmemset(map_share_host.waits, 0, sizeof(map_share_host.waits));
+	csmemset(map_share_host.refused, 0, sizeof(map_share_host.refused));
 
 	return;
 }

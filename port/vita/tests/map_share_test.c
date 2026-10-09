@@ -187,6 +187,79 @@ static void test_answer(void)
 	CHECK(!map_share_answer_valid(&answer, "mygulch", 0x0BADF00D, 0));
 }
 
+/* joining a game in progress (beta.3): the capability is still a reason to
+an older host, which masks it out; the offer's flag only to a joiner that
+said it can; a host serves in game only to such a joiner still joining */
+static void test_in_progress(void)
+{
+	struct map_share_request request;
+	struct map_share_answer_message answer;
+	struct map_share_limits limits;
+	uint32_t all = (1u << NUMBER_OF_MAP_SHARE_CAPABILITIES) - 1;
+	uint32_t in_progress = 1u << _map_share_capability_in_progress_bit;
+	int flag;
+
+	memset(&request, 0, sizeof(request));
+	request.command = _map_share_command_query;
+	request.identity = 0x1234;
+	request.reason = (int16_t)all;
+	strcpy(request.name, "mygulch");
+	/* (beta.1 and beta.2 check a query's reason as this, below the refusals) */
+	CHECK(all == 7 && request.reason < NUMBER_OF_MAP_SHARE_REFUSALS);
+	CHECK(map_share_request_valid(&request));
+	CHECK(map_share_request_capabilities(&request) == all);
+	/* (beta.1 and beta.2 mask what they know: resume and deflate) */
+	CHECK((map_share_request_capabilities(&request) & 3u) == 3u);
+	request.command = _map_share_command_ack;
+	CHECK(map_share_request_capabilities(&request) == 0);
+
+	memset(&answer, 0, sizeof(answer));
+	answer.kind = _map_share_answer_offer;
+	answer.size = 46198208;
+	answer.identity = 0x0BADF00D;
+	answer.flags = 1 << _map_share_offer_in_progress_bit;
+	strcpy(answer.name, "pcgulch");
+	CHECK(!map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, 0));
+	CHECK(!map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, 3));
+	CHECK(map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, in_progress));
+	answer.flags |= 1 << _map_share_offer_custom_edition_bit | 1 << _map_share_offer_deflate_bit;
+	CHECK(map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, all));
+	CHECK(!map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, in_progress));
+	answer.flags = 1 << NUMBER_OF_MAP_SHARE_OFFER_FLAGS;
+	CHECK(!map_share_answer_valid(&answer, "pcgulch", 0x0BADF00D, all));
+
+	/* the host: the lobby always; in game only so; never after */
+	CHECK(map_share_host_serves(_map_share_host_lobby, 0, 0, 0, 0, &flag) == _map_share_refusal_none && !flag);
+	CHECK(map_share_host_serves(_map_share_host_lobby, all, 1, 1, 1, &flag) == _map_share_refusal_none && !flag);
+	CHECK(map_share_host_serves(_map_share_host_in_game, all, 1, 1, 1, &flag) == _map_share_refusal_none && flag);
+	CHECK(map_share_host_serves(_map_share_host_in_game, 3, 1, 1, 1, &flag) == _map_share_refusal_not_in_lobby && !flag);
+	CHECK(map_share_host_serves(_map_share_host_in_game, all, 0, 1, 1, &flag) == _map_share_refusal_not_in_lobby && !flag);
+	CHECK(map_share_host_serves(_map_share_host_in_game, all, 1, 0, 1, &flag) == _map_share_refusal_not_in_lobby && !flag);
+	CHECK(map_share_host_serves(_map_share_host_in_game, all, 1, 1, 0, &flag) == _map_share_refusal_not_in_lobby && !flag);
+	CHECK(map_share_host_serves(_map_share_host_postgame, all, 1, 1, 1, &flag) == _map_share_refusal_not_in_lobby && !flag);
+	CHECK(map_share_host_serves((enum map_share_host_state)7, all, 1, 1, 1, &flag) == _map_share_refusal_not_in_lobby && !flag);
+
+	/* the limits: the lobby's as before; lower in game, never above the
+	lobby's, never nothing */
+	map_share_host_limits(0, 0, 0, 0, 0, &limits);
+	CHECK(limits.bytes_per_second == MAP_SHARE_DEFAULT_BYTES_PER_SECOND && limits.window_bytes == MAP_SHARE_WINDOW_BYTES &&
+		limits.cpu_percent == MAP_SHARE_DEFAULT_CPU_PERCENT && limits.frame_microseconds == 15000);
+	map_share_host_limits(1, 0, 0, 0, 0, &limits);
+	CHECK(limits.bytes_per_second == MAP_SHARE_INGAME_BYTES_PER_SECOND && limits.window_bytes == MAP_SHARE_INGAME_WINDOW_BYTES &&
+		limits.cpu_percent == MAP_SHARE_INGAME_CPU_PERCENT && limits.frame_microseconds == MAP_SHARE_INGAME_FRAME_MICROSECONDS);
+	map_share_host_limits(1, 100, 0, 0, 0, &limits);
+	CHECK(limits.bytes_per_second == 100 * 1024);
+	map_share_host_limits(1, 0, 64, 0, 0, &limits);
+	CHECK(limits.bytes_per_second == 64 * 1024);
+	map_share_host_limits(1, 0, 0xFFFFFFFFu, 400, 1, &limits);
+	CHECK(limits.bytes_per_second == MAP_SHARE_DEFAULT_BYTES_PER_SECOND && limits.cpu_percent == 100 &&
+		limits.frame_microseconds == 1000);
+	map_share_host_limits(0, 0xFFFFFFFFu, 0, 0, 0xFFFFFFFFu, &limits);
+	CHECK(limits.bytes_per_second == 0x100000u * 1024u && limits.frame_microseconds == 100000);
+	CHECK(MAP_SHARE_INGAME_BYTES_PER_SECOND <= MAP_SHARE_DEFAULT_BYTES_PER_SECOND &&
+		MAP_SHARE_INGAME_WINDOW_BYTES <= MAP_SHARE_WINDOW_BYTES && MAP_SHARE_INGAME_WINDOW_BYTES > MAP_SHARE_ACK_BYTES);
+}
+
 static void test_sha256(void)
 {
 	static uint8_t const abc[32] = {
@@ -1027,6 +1100,7 @@ int main(void)
 	test_names();
 	test_request();
 	test_answer();
+	test_in_progress();
 	test_sha256();
 	test_receiver();
 	test_headers();

@@ -55,6 +55,17 @@ boolean network_game_server_client_machine_is_loaded(
 void network_game_server_late_joiner_loaded(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine);
+#ifdef HALO_LINUX
+/* port: a machine joining the game in progress with no player in it yet,
+not started nor loaded (map sharing's downloads to join in progress) */
+boolean network_game_server_client_machine_joining_in_progress(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
+/* port: when the machine joined (0: not one that joined) */
+unsigned long network_game_server_client_machine_join_time(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
+#endif
 /* the machine was heard from (its timeout, network_server_manager.c) */
 void network_game_server_client_machine_heard(
 	struct network_game_server *server,

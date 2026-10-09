@@ -3,8 +3,9 @@ MAP_SHARE.H
 
 Map sharing (map_share.c): a joiner without the host's custom map, or with
 another copy of it, is offered the host's copy instead of being turned away,
-and downloads it over its connection to the host in the lobby. The rules
-and checks are map_share_protocol.c's.
+and downloads it over its connection to the host in the lobby, or before it
+joins the host's game in progress. The rules and checks are
+map_share_protocol.c's.
 */
 
 #ifndef __MAP_SHARE_H
@@ -65,6 +66,13 @@ precached meanwhile. */
 boolean map_share_client_busy(
 	void);
 
+/* (network_game_client_add_player) Whether the joiner adds no player to the
+host's game now: while it asks the host about its map (the host's game may
+be under way), and while it asks and downloads the map of a game in
+progress, which it joins once the map is here. */
+boolean map_share_client_holds_players(
+	void);
+
 /* (network_client_message_handler.c) The host started the game on
 `level_name` (the host's copy `host_identity`, the game's map version):
 FALSE when this machine cannot load it (a question or a download under way,
@@ -110,9 +118,25 @@ void map_share_server_handle_request(
 	short message_size);
 
 /* Each frame of a host (network_server_manager.c): sends what the uploads'
-windows and the rate allow; outside the lobby, refuses them. */
+windows and the rate allow (lower while its game is under way); refuses
+them as its game starts, but for those to machines joining it in progress,
+and as it ends. */
 void map_share_server_update(
 	struct network_game_server *server);
+
+/* (network_server_manager.c) Whether a machine joining the game in
+progress, which adds no player, is kept: it was offered the map and is
+asking, downloading it, or putting it in place (else the host drops a
+machine that adds no player, as one that holds its place for nothing). */
+boolean map_share_server_machine_waits(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
+
+/* (network_server_message_handler.c) Whether a machine joining the game in
+progress was refused the map (it cannot play): its players are not added. */
+boolean map_share_server_machine_refused(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
 
 /* (the lobby's machine list, ui_widget_game_data_input_functions.c) How
 much of the map the host is sending to the machine `machine_index` it has

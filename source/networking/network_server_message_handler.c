@@ -2215,6 +2215,19 @@ static boolean network_game_server_handle_message_client_add_player_request_preg
 			network_event("server failed to decode a message_client_add_player_request_pregame packet");
 		}
 	}
+#ifdef HALO_LINUX
+	/* port: a machine joining the game in progress that was refused the
+	map (port/linux/game/map_share.c: a joiner of a version that cannot wait
+	out of the game for it) cannot play it: its players are not added, so
+	that none is put into the game and taken out again as the machine leaves
+	(which, one player left, ended the game) */
+	else if (network_game_server_get_state(server, NULL) == _network_game_server_state_ingame &&
+		!network_game_server_client_machine_is_loaded(server, client_machine) &&
+		map_share_server_machine_refused(server, client_machine))
+	{
+		network_event("not adding a player of a machine refused the map of the game in progress");
+	}
+#endif
 	/* a machine joining the game in progress: its players are added as in
 	game (network_game_server_start_late_joiner then starts it; one that
 	cannot, the game full, is refused there) */

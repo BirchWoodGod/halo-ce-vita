@@ -82,7 +82,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | 📶 **Ad hoc** | Vitas side by side with no router, next to **Same Wi-Fi** (system link). |
 | 🤝 **[Co-op campaign](#co-op-campaign)** | Up to **four** Vitas, Private or Public. |
 | 🤖 **Offline bots** | Up to 15 computer players in Split Screen games, from Easy to Legendary. |
-| 🗺️ **[Custom maps](#custom-maps-and-map-sharing)** | Xbox maps, and Halo PC / Custom Edition multiplayer and campaign maps. A Vita that joins without the host's map downloads it in the lobby. |
+| 🗺️ **[Custom maps](#custom-maps-and-map-sharing)** | Xbox maps, and Halo PC / Custom Edition multiplayer and campaign maps. A Vita that joins without the host's map downloads it, in the lobby or before it joins a game under way. |
 | ⚙️ **[Graphics settings](#graphics)** | Profiles, object shadows, dynamic lights, effects quality, particle density, AI think rate and sound updates, after **Bruno Santana**'s modified build. |
 | 🎞️ **[Frame interpolation](#graphics)** | Up to 60 frames a second between the game's 30 ticks. |
 | 🧠 **[Fourth CPU core](#more-performance-with-plugins-optional)** | With the CapUnlocker plugin. |
@@ -107,8 +107,9 @@ chat.
 ### Known issues
 
 - The biggest fights still drop frames (see [Performance](#performance)).
-- A Custom Edition map can't be downloaded once the match has started: join
-  while the host is in the lobby.
+- Downloading a map to join a game under way works only when both the host
+  and the joiner have 1.1.0-beta.3 or later; with an older host or joiner,
+  join while the host is in the lobby.
 - In co-op the host's Vita runs everyone's AI and the level's scripts, so it
   slows down with three or four players.
 - Master Chief's body can be missing in The Pillar of Autumn's cryo tube
@@ -374,12 +375,13 @@ Custom maps go in `ux0:data/haloce-vita/maps/`, next to the game's own:
   save is kept. What its scripts ask for that the Vita can't do (OpenSauce
   extras, restarting or switching the map) does nothing.
 
-**Map sharing:** only the host needs the map. Host the game and stay in the
-lobby: a Vita that joins without the map is asked "Download it from the
-host?" (Cross: yes; for a Custom Edition map, it is also offered to turn PC
-maps on). The host's lobby shows each download's progress, and the match
-waits for it; a download that stops goes on from where it stopped next
-time. A joiner still needs its own Halo PC files for a Custom Edition map.
+**Map sharing:** only the host needs the map. A Vita that joins without
+the map is asked "Download it from the host?" (Cross: yes; for a Custom
+Edition map, it is also offered to turn PC maps on). In the lobby, the
+host's lobby shows each download's progress, and the match waits for it. A
+Vita that joins a game already under way downloads the map first, out of
+the game, at a lower speed that leaves the players' game alone, and then
+joins it. A download that stops goes on from where it stopped next time. A joiner still needs its own Halo PC files for a Custom Edition map.
 In a game from the public server browser the question warns that the host
 is a stranger: only accept maps from players you trust. **Map downloads**
 (Modded maps) is **Ask** (the default), **Not public games** or **Never**,

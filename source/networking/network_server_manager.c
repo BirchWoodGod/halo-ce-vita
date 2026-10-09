@@ -2965,6 +2965,39 @@ static boolean network_game_server_machine_has_players(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+/* port: a machine joining the game in progress that has not begun to join
+it yet: no player of it in the game, being added or waiting to be, and not
+started into it nor loaded. Map sharing (port/linux/game/map_share.c) sends
+such a machine the map it lacks before it adds its players, and no other. */
+boolean network_game_server_client_machine_joining_in_progress(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	return server->state == _network_game_server_state_ingame &&
+		network_game_server_client_machine_is_joined_to_game(server, machine) &&
+		!network_game_server_client_machine_is_local(server, machine) &&
+		VALID_INDEX(machine->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
+		!TEST_FLAG(machine->flags, _network_client_machine_level_loaded_bit) &&
+		!TEST_FLAG(machine->flags, _network_client_machine_started_late_bit) &&
+		!network_game_server_machine_has_players(server, machine->machine_index) &&
+		!network_game_server_machine_has_waiting_players(server, machine->machine_index) &&
+		!(server->queued_player_valid && server->queued_player.machine_index == machine->machine_index);
+}
+
+/* port: when the machine joined (system_milliseconds; 0: not one that
+joined): with its connection, what tells it from a later machine at its
+index (a connection's memory is used again) */
+unsigned long network_game_server_client_machine_join_time(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	return network_game_server_client_machine_is_joined_to_game(server, machine) &&
+		VALID_INDEX(machine->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ?
+		network_game_server_client_machine_join_times[machine->machine_index] : 0;
+}
+#endif
+
 /* a machine joining the game in progress none of whose players could join
 (the game filled up): told the game is full, and let go */
 static void network_game_server_refuse_late_joiner(
@@ -3858,6 +3891,10 @@ static boolean network_game_server_client_machine_timed_out(
 	the pregame holds its slot for nothing: OpenCE's) */
 	if (!network_game_server_machine_has_players(server, machine->machine_index) &&
 		!network_game_server_machine_has_waiting_players(server, machine->machine_index) &&
+#ifdef HALO_LINUX
+		/* (nor one downloading the map first: port/linux/game/map_share.c) */
+		!map_share_server_machine_waits(server, machine) &&
+#endif
 		VALID_INDEX(machine->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
 		system_milliseconds() - network_game_server_client_machine_join_times[machine->machine_index] >
 			NETWORK_GAME_SERVER_PLAYERLESS_MACHINE_TIMEOUT)
@@ -5208,6 +5245,11 @@ static boolean network_game_server_idle_pregame_tasks(
 			else if (network_game_server_client_machine_is_joined_to_game(server, client_machine) &&
 				!network_game_server_client_machine_is_local(server, client_machine) &&
 				!network_game_server_machine_has_players(server, client_machine->machine_index) &&
+#ifdef HALO_LINUX
+				/* (a machine that joined the game in progress, downloading
+				its map, and the host back in its lobby: map_share.c) */
+				!map_share_server_machine_waits(server, client_machine) &&
+#endif
 				(!network_game_has_free_player_slot(&server->game) ||
 					system_milliseconds() - network_game_server_client_machine_join_times[client_machine->machine_index] >
 						NETWORK_GAME_SERVER_PLAYERLESS_MACHINE_TIMEOUT))

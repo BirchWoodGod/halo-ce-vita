@@ -242,7 +242,7 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_postgame <seconds>` | How long the scores are shown (default 10; 3 when nobody is in the game). |
 | `sv_end_empty <seconds>` | A game that nobody is in ends after this (default 30; 0: never). |
 | `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
-| `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby. 0 (the default): no downloads. |
+| `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby or before they join a game in progress (then at most 256 KB/s for all of them together: `HALO_MAP_SHARE_INGAME_RATE_KB` in the server's environment changes it). 0 (the default): no downloads. |
 | `sv_port <port>` | Internet play's UDP port (default 2302). `init.txt` only. |
 | `sv_game_port <port>` | The game's own ports on this machine: this one (the host's) and the next (its client's). The default is 5150 for `sv_port` 2302, 5152 for 2303, 5154 for 2304 and so on up to 2401 (5150 past that), so servers on 2302, 2303... never take each other's. Only a server on 5150 is found on its LAN (see "Several servers on one VPS"). Not 5149 or 5151. `init.txt` only. |
 | `sv_map_cache <folder>` | A map cache folder that several servers share: each map is decompressed into it once, by the first server that plays it, and read by all (a path relative to the server's folder, or a full one). `init.txt` only. |
@@ -520,8 +520,9 @@ The server is on the internet, so it is built to expect hostile traffic:
   any file or client.
 - **No file names from clients.** A client never names a file. Map sharing
   sends only the map being played, by the server's own path, and only if
-  `sv_map_download 1` and the map is in the cycle. Downloads happen only in
-  the lobby, at a limited rate.
+  `sv_map_download 1` and the map is in the cycle. Downloads happen in the
+  lobby, or to a Vita joining a game in progress before it is in the game,
+  at a limited rate (lower while a game is under way).
 - **Limits per address:**
   - 6 connections to the game a minute from one address (by the player's
     real address, through internet play). More are refused.
