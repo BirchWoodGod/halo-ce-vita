@@ -213,7 +213,7 @@ static const struct
 	int tab;
 } pages[PAGE_COUNT] = {
 	{ "Graphics", TAB_GRAPHICS },
-	{ "Controls", TAB_CONTROLS },
+	{ "General", TAB_CONTROLS },
 	{ "Audio", TAB_AUDIO },
 	{ "Multiplayer", TAB_MULTIPLAYER },
 	{ "Dev", TAB_DEV },

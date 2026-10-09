@@ -16,7 +16,7 @@
 
 # ---------- the settings panel: tabs and pages
 "Graphics" = "Gráficos"
-"Controls" = "Controles"
+"General" = "General"
 "Audio" = "Audio"
 "Multiplayer" = "Multijugador"
 "Dev" = "Dev"

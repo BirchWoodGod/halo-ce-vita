@@ -389,7 +389,7 @@ controller** does; this is where each is on the Vita as shipped:
 | Select | Back | scoreboard |
 | **SELECT + START** (hold) | | the settings panel |
 
-The settings panel's **Controls** tab:
+The settings panel's **General** tab:
 
 - **Button layout** puts each Xbox button (A, B, X, Y, Black, White, the
   triggers, the sticks' clicks, Back) on the Vita button of your choice, in
@@ -415,7 +415,7 @@ The settings panel's **Controls** tab:
 ## Settings panel
 
 Hold **SELECT + START** for a second, in play or in the menus. **L and R**
-switch between its tabs, **Graphics**, **Controls**, **Audio** and
+switch between its tabs, **Graphics**, **General**, **Audio** and
 **Multiplayer** (and **Dev**, once **Show dev settings** in Controls,
 Advanced is on). Up and down choose a line, left and right change it, Cross
 opens a line marked `>` (a page of rows few players change) or does what

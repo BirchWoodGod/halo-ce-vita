@@ -19,7 +19,7 @@ maps page (a folder of fake maps: listed, turned off and on, deleted after
 a confirmation, the map in play kept; Map downloads' three choices), the
 Dev tab behind its switch (switches saved only while on, the timing
 variables, Save report's folder),
-Controls' pages (Button layout and Touch zones in Xbox terms, Gyro
+General' pages (Button layout and Touch zones in Xbox terms, Gyro
 settings with the gyroscope's line, saved and read back), Button icons
 (PlayStation at once, the panel then naming the Xbox buttons by what they
 do and the guide the Vita's buttons, a remap followed by the game's icon,
@@ -565,7 +565,7 @@ static int open_page(const char *label)
 	return strstr(menu, title) != NULL;
 }
 
-/* ---------- the Controls tab and its pages */
+/* ---------- the General tab and its pages */
 
 /* one frame with these buttons held and these touch zones */
 static int frame_touch(unsigned long buttons, unsigned long touch)
@@ -590,7 +590,7 @@ static void test_controls_tab(void)
 		!strcmp(getenv("HALO_XBOX_A"), "cross") && !strcmp(getenv("HALO_XBOX_WHITE"), "right") &&
 		!strcmp(getenv("HALO_XBOX_BACK"), "select"), "a 1.0 settings.txt: touch zones Off, Xbox buttons as shipped");
 	open_panel();
-	to_tab("Controls");
+	to_tab("General");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
 	check(!strncmp(menu_line(1, line, sizeof(line)), "Look sensitivity\x02", 17) &&
@@ -602,20 +602,20 @@ static void test_controls_tab(void)
 		!strcmp(menu_line(7, line, sizeof(line)), "Touch zones\x02  Off  >") &&
 		!strcmp(menu_line(8, line, sizeof(line)), "Gyro settings\x02  >") &&
 		!strcmp(menu_line(9, line, sizeof(line)), "Advanced\x02  >"),
-		"Controls: look, invert, crouch, gyro aiming, rear guard; then Button layout, Touch zones, Gyro settings, Advanced");
+		"General: look, invert, crouch, gyro aiming, rear guard; then Button layout, Touch zones, Gyro settings, Advanced");
 	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
 		!strstr(menu, "\nStick deadzone\x02") && !strstr(menu, "\nShow dev settings\x02"),
-		"Controls: the zones, the buttons, the gyro's details and the rare rows on their pages");
-	check(menu_rows() == 9 && count == 12 && menu_fits(), "Controls: 9 rows (and the tab bar, help, buttons), each fits");
+		"General: the zones, the buttons, the gyro's details and the rare rows on their pages");
+	check(menu_rows() == 9 && count == 12 && menu_fits(), "General: 9 rows (and the tab bar, help, buttons), each fits");
 	check(strstr(menu, "\nRear touch guard\x02< Normal >") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal"),
 		"Rear touch guard: Normal as shipped (a 1.0 settings.txt has none)");
-	check(!diagram[0], "Controls: no zone diagram");
+	check(!diagram[0], "General: no zone diagram");
 	to_line("Look sensitivity");
 	check(strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: close") != NULL,
 		"the panel's buttons on one line: a value row's, on a tab");
 
 	/* Touch zones: its page, the zones drawn beside */
-	check(open_page("Touch zones") && strstr(menu, "\n\x03" "Controls > Touch zones\n"), "Touch zones opens its page");
+	check(open_page("Touch zones") && strstr(menu, "\n\x03" "General > Touch zones\n"), "Touch zones opens its page");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\nTouch top left\x02") && strstr(menu, "\nTouch top right\x02") &&
@@ -644,9 +644,9 @@ static void test_controls_tab(void)
 	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back  ") && !strcmp(diagram, "-S--A- alaaea"),
 		"Touch top right: Back, the last choice; the rear zone still marked set");
 	press(VITA_BUTTON_CIRCLE);
-	check(menu_visible && strstr(menu, "*Controls") && !strstr(menu, "\n\x03") &&
+	check(menu_visible && strstr(menu, "*General") && !strstr(menu, "\n\x03") &&
 		!strncmp(menu_line(menu_selected, line, sizeof(line)), "Touch zones\x02  2 on  >", 21),
-		"circle: back to Controls, on Touch zones, which says two are on");
+		"circle: back to General, on Touch zones, which says two are on");
 
 	/* the rear guard, on the tab */
 	to_line("Rear touch guard");
@@ -665,7 +665,7 @@ static void test_controls_tab(void)
 		VITA_REAR_GUARD_LIGHT, "Rear touch guard: Light, as the touch reader takes it");
 
 	/* Button layout: the Xbox buttons by name */
-	check(open_page("Button layout") && strstr(menu, "\n\x03" "Controls > Button layout\n"), "Button layout opens its page");
+	check(open_page("Button layout") && strstr(menu, "\n\x03" "General > Button layout\n"), "Button layout opens its page");
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\nA\x02") && strstr(menu, "\nB\x02") && strstr(menu, "\nX\x02") && strstr(menu, "\nY\x02") &&
 		strstr(menu, "\nBlack\x02") && strstr(menu, "\nWhite\x02") && strstr(menu, "\nLeft trigger\x02") &&
@@ -684,7 +684,7 @@ static void test_controls_tab(void)
 	check(config.zone_xbox[VITA_ZONE_REAR_LEFT] == VITA_XBOX_Y && config.zone_xbox[VITA_ZONE_TOP_RIGHT] == VITA_XBOX_BACK &&
 		config.xbox_button[VITA_XBOX_WHITE] == VITA_BUTTON_LEFT, "the pad reads the panel's choices");
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "\nButton layout\x02  Custom  >") != NULL, "back on Controls: Button layout says Custom");
+	check(strstr(menu, "\nButton layout\x02  Custom  >") != NULL, "back on General: Button layout says Custom");
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible && frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 0,
 		"circle on a tab closes the panel: the touch zones reach the game");
@@ -705,16 +705,16 @@ static void test_controls_tab(void)
 
 	/* Advanced: the deadzone, Reset controls (Show dev settings kept) */
 	open_panel();
-	check(strstr(menu, "*Controls") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
-	check(open_page("Advanced") && strstr(menu, "\n\x03" "Controls > Advanced\n") &&
+	check(strstr(menu, "*General") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
+	check(open_page("Advanced") && strstr(menu, "\n\x03" "General > Advanced\n") &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Stick deadzone\x02", 15) &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Reset controls\x02  >") &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) &&
 		!strncmp(menu_line(5, line, sizeof(line)), "Update channel\x02", 15) &&
 		!strcmp(menu_line(6, line, sizeof(line)), "Check for updates\x02  >") && menu_rows() == 5 && menu_fits(),
-		"Controls, Advanced: Stick deadzone, Reset controls, Show dev settings, Update channel, Check for updates");
+		"General, Advanced: Stick deadzone, Reset controls, Show dev settings, Update channel, Check for updates");
 	check(strstr(menu, "\n\x04" "Version " HALO_VITA_VERSION "\n") != NULL,
-		"Controls, Advanced: the build's version (vita_version.h) under the rows");
+		"General, Advanced: the build's version (vita_version.h) under the rows");
 	to_line("Reset controls");
 	check(strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: back") != NULL, "an action row's buttons: cross selects");
 	press(VITA_BUTTON_CROSS);
@@ -731,11 +731,11 @@ static void test_controls_tab(void)
 	check(!strcmp(getenv("HALO_DEV_SETTINGS"), "1") && strstr(menu, "|Dev"), "Reset controls keeps Show dev settings");
 	press(VITA_BUTTON_CIRCLE);
 	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "\nTouch zones\x02  Off  >"),
-		"back on Controls: buttons as shipped, touch zones Off");
+		"back on General: buttons as shipped, touch zones Off");
 	press(VITA_BUTTON_CIRCLE);
 }
 
-/* ---------- gyro aiming: its row on Controls, its page */
+/* ---------- gyro aiming: its row on General, its page */
 
 static void test_gyro_page(void)
 {
@@ -748,7 +748,7 @@ static void test_gyro_page(void)
 		!strcmp(getenv("HALO_GYRO_SENS"), "150") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "0") &&
 		!strcmp(getenv("HALO_GYRO_TURN"), "yaw"), "a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw");
 	open_panel();
-	to_tab("Controls");
+	to_tab("General");
 	to_line("Gyro aiming");
 	check(strstr(menu, "Turn the Vita to aim") != NULL, "Gyro aiming's help line");
 	press(VITA_BUTTON_RIGHT);
@@ -760,7 +760,7 @@ static void test_gyro_page(void)
 	check(open_page("Gyro settings"), "Gyro settings opens its page");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
-	check(!strcmp(menu_line(1, line, sizeof(line)), "\x03" "Controls > Gyro settings") &&
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x03" "General > Gyro settings") &&
 		strstr(menu_line(2, line, sizeof(line)), "Gyro button\x02") && strstr(line, "< L >") &&
 		strstr(menu_line(3, line, sizeof(line)), "Gyro sensitivity\x02") && strstr(line, "< 1.5x >") &&
 		strstr(menu_line(4, line, sizeof(line)), "Gyro vertical\x02") && strstr(line, "Normal") &&
@@ -808,7 +808,7 @@ static void test_gyro_page(void)
 
 	/* Reset controls leaves the gyro's rows (as when they had a tab) */
 	open_panel();
-	to_tab("Controls");
+	to_tab("General");
 	open_page("Advanced");
 	to_line("Reset controls");
 	press(VITA_BUTTON_CROSS);
@@ -1418,7 +1418,7 @@ static void test_button_icons(void)
 	int longest;
 
 	open_panel();
-	to_tab("Controls");
+	to_tab("General");
 	check(open_page("Button layout") && to_line("Button icons") &&
 		strstr(menu, "\n\x05Halo's prompts: Xbox icons, or the Vita's\n"), "Button icons: its row and help");
 	generation = halo_settings_generation;
@@ -1443,8 +1443,8 @@ static void test_button_icons(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
 	check(strstr(menu, "\nButton layout\x02  As shipped  >") != NULL,
-		"back on Controls: Button icons is not the layout (As shipped)");
-	check(strstr(menu, "\nCrouch\x02") != NULL, "Controls: Crouch keeps its label");
+		"back on General: Button icons is not the layout (As shipped)");
+	check(strstr(menu, "\nCrouch\x02") != NULL, "General: Crouch keeps its label");
 
 	/* the touch zones: the Xbox's names too */
 	check(open_page("Touch zones") && to_line("Rear touch left"), "Touch zones opens");
@@ -1455,7 +1455,7 @@ static void test_button_icons(void)
 	vita_controls_config_load(&config);
 	check(vita_button_glyph(&config, 0, 0) == VITA_GLYPH_CROSS, "A on Cross and a zone: Cross shows");
 	press(VITA_BUTTON_LEFT);
-	to_tab("Controls");
+	to_tab("General");
 
 	/* the guide's steps: the menus' Xbox buttons, and which Vita button each is */
 	to_tab("Multiplayer");
@@ -1468,11 +1468,11 @@ static void test_button_icons(void)
 	press(VITA_BUTTON_CIRCLE);
 
 	/* Reset controls keeps it; Xbox again puts the Xbox's terms back */
-	to_tab("Controls");
+	to_tab("General");
 	check(open_page("Advanced") && to_line("Reset controls"), "Advanced: Reset controls");
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "playstation"), "Reset controls keeps the Button icons");
-	to_tab("Controls");
+	to_tab("General");
 	check(open_page("Button layout") && to_line("Button icons"), "Button layout again");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "xbox") && !vita_button_icons_playstation() &&
@@ -1706,7 +1706,7 @@ static void test_languages(void)
 	vita_settings_set("HALO_LANGUAGE", "auto");
 }
 
-/* ---------- the update check's rows (Controls > Advanced) */
+/* ---------- the update check's rows (General > Advanced) */
 
 /* the page redrawn (a frame after half a second) */
 static void redraw(void)
@@ -1721,8 +1721,8 @@ static void test_updates(void)
 	int prerelease = update_build_is_prerelease(HALO_VITA_VERSION);
 
 	open_panel();
-	to_tab("Controls");
-	check(open_page("Advanced"), "Controls, Advanced opens");
+	to_tab("General");
+	check(open_page("Advanced"), "General, Advanced opens");
 	check(to_line("Update channel"), "the Update channel row");
 	printf("%s\n--\n", menu);
 	if (prerelease)
@@ -1817,7 +1817,7 @@ int main(void)
 	check(!frame(0), "closed: the game gets the buttons");
 	open_panel();
 	printf("%s\n--\n", menu);
-	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Graphics|Controls|Audio|Multiplayer\n"),
+	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Graphics|General|Audio|Multiplayer\n"),
 		"SELECT+START opens the Graphics tab; four tabs (Dev hidden)");
 	check(!strncmp(menu_line(1, line, sizeof(line)), "Profile\x02", 8) &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Render resolution\x02", 18) &&
@@ -1916,13 +1916,13 @@ int main(void)
 	check(strstr(menu, "*Multiplayer") != NULL, "L from the first tab wraps to the last shown");
 	press(VITA_BUTTON_R);
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Controls") && strstr(menu, "Look sensitivity"), "R: Controls");
+	check(strstr(menu, "*General") && strstr(menu, "Look sensitivity"), "R: General");
 	press(VITA_BUTTON_R);
 	check(strstr(menu, "*Audio") && strstr(menu, "\nLanguage\x02  Automatic >") && strstr(menu, "\nSound voices*\x02") &&
 		strstr(menu, "\nSound occlusion\x02") && strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 4 &&
 		menu_fits(), "R: Audio: Language (Automatic), then the sound rows");
 	press(VITA_BUTTON_R);
-	check(!strncmp(menu, "\tGraphics|Controls|Audio|*Multiplayer\n", 38), "R: Multiplayer");
+	check(!strncmp(menu, "\tGraphics|General|Audio|*Multiplayer\n", 38), "R: Multiplayer");
 	printf("%s\n--\n", menu);
 
 	test_multiplayer_tab();
@@ -2039,12 +2039,12 @@ int main(void)
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);
 	check(strstr(menu, "*Graphics") != NULL, "R from Multiplayer: Graphics (Dev hidden)");
-	to_tab("Controls");
+	to_tab("General");
 	open_page("Advanced");
 	to_line("Show dev settings");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\t*Graphics|*Controls") == NULL && strstr(menu, "|Multiplayer|Dev\n") != NULL,
-		"Show dev settings (Controls, Advanced): the Dev tab");
+	check(strstr(menu, "\t*Graphics|*General") == NULL && strstr(menu, "|Multiplayer|Dev\n") != NULL,
+		"Show dev settings (General, Advanced): the Dev tab");
 	to_tab("Dev");
 	printf("%s\n--\n", menu);
 	check(!strncmp(menu_line(1, line, sizeof(line)), "Performance logging*\x02", 21) &&

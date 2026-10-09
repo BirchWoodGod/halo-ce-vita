@@ -160,7 +160,7 @@ took (debug).
 ## Settings panel
 
 Hold **Select + Start** for about a second, in play or in the menus. **L and
-R** switch between four tabs, **Graphics**, **Controls**, **Audio** and
+R** switch between four tabs, **Graphics**, **General**, **Audio** and
 **Multiplayer** (and **Dev**, once Show dev settings is on); up and down
 choose a line, left and right change it, Cross opens a line marked `>` (a
 page of rarely changed rows, or an action), and Circle goes back from a
@@ -200,7 +200,7 @@ Graphics, **Advanced**:
 | Object lighting (P) | Third | how often object lighting is recomputed |
 | AI think rate (P) | Adaptive | how often enemies and allies think (what they see, feel and decide): Every tick (the Xbox's), Adaptive (within 8 world units of a player every tick, within 25 every second tick, farther every third), 15 Hz, 10 Hz. Their movement, aim and firing stay every tick; the game plays a little differently (they notice and decide a tick or two later). Replaces the 1.1.0 test builds' Distant AI |
 
-**Controls**
+**General**
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -214,7 +214,7 @@ Graphics, **Advanced**:
 | Gyro settings > | | Gyro button (L: While holding aims while held; in play it then does nothing else), Gyro sensitivity (1.5x; 0.5x-3x, 1x turns the view as far as the Vita turns, less while zoomed), Gyro vertical (Normal: tilt the top edge towards you to look up; Inverted), Gyro turning (Turn (yaw), or Tilt (roll) it like a wheel) |
 | Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings, Button icons and Show dev settings stay), Show dev settings (Off; shows the Dev tab), Update channel and Check for updates (below) |
 
-**Check for updates** (Controls > Advanced, under the rows with the build's
+**Check for updates** (General > Advanced, under the rows with the build's
 version): the game asks the network for nothing until this is pressed. A
 press asks GitHub's public API (api.github.com, the releases of
 BirchWoodGod/halo-ce-vita) on a thread of its own and shows one line under
