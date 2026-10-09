@@ -135,6 +135,10 @@ char const *custom_edition_maps_level_title(
 downloaded into the folder: map_share.c). */
 void custom_edition_maps_look_again(
 	void);
+/* forgets what the map file `name` (.map or .yelo) was found to be, whose
+file a download has just replaced */
+void custom_edition_maps_file_forget(
+	char const *name);
 
 /* The campaign's level list: looks for the maps anew and returns how many
 Custom Edition campaign maps there are, in the order of their names; then

@@ -1343,6 +1343,7 @@ void custom_edition_cache_map_identity_forget(
 	short index;
 
 	remembered_answers_forget(name);
+	custom_edition_maps_file_forget(name);
 
 	for (index = 0; index < REMEMBERED_IDENTITIES; index++)
 	{
