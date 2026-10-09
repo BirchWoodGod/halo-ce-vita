@@ -972,6 +972,36 @@ void hud_draw_set_scope_centered(
 	return;
 }
 
+/* (port) a centre-anchored element at least as wide as the Xbox's 640
+columns (Firefight Airlock's ODST visor and its low-shield glow: a 1024-pixel
+frame at 0.625, made to fill the 4:3 screen) is a full-screen overlay: on a
+wide screen it is widened to the window, as Chimera's widescreen fix widens a
+menu element spanning the whole 640x480 frame, rather than leaving the sides
+bare. Other centred elements keep their 4:3 size (crosshairs, the scope), and
+only static elements are looked at: a crosshair hiding the area outside its
+reticle (hud_weapon.c) is already drawn over the whole viewport. */
+static boolean hud_draw_static_element_drawing = FALSE;
+
+static void hud_full_screen_element_widen(
+	short corner,
+	real_rectangle2d const *bounds,
+	real_vector2d *xy_scale)
+{
+	long screen_width = halo_screen_width();
+	real window_width = (real)(render.camera.window_bounds.x1 - render.camera.window_bounds.x0);
+	real columns_640 = window_width * 640.0f / (real)screen_width;
+
+	if (hud_draw_static_element_drawing &&
+		corner == _hud_anchor_center &&
+		screen_width > 640 &&
+		(bounds->x1 - bounds->x0) * xy_scale->i >= columns_640 - 2.0f)
+	{
+		xy_scale->i *= (real)screen_width / 640.0f;
+	}
+
+	return;
+}
+
 /* (port) whether a static element is part of a zoomed scope: one of its
 multitexture overlays is driven by the zoom level (the sniper rifle's two
 range ladders, drawn as overlays faded in by the zoom, are anchored to the top
@@ -1439,6 +1469,9 @@ void hud_draw_static_element(
 		is_interface_bitmap =
 			bitmap_group->type == _bitmap_group_type_interface_bitmaps;
 
+#ifdef HALO_LINUX
+		hud_draw_static_element_drawing = TRUE;
+#endif
 		hud_draw_bitmap_with_meter(
 			NULL,
 			bitmap,
@@ -1499,6 +1532,9 @@ void hud_draw_static_element(
 				clip,
 				&bounds,
 				is_interface_bitmap);
+#ifdef HALO_LINUX
+			hud_full_screen_element_widen(absolute_placement->corner, &bounds, &xy_scale);
+#endif
 			hud_draw_multitexture_overlay(
 				overlay,
 				local_player_index,
@@ -1509,6 +1545,9 @@ void hud_draw_static_element(
 				0.0f,
 				color);
 		}
+#ifdef HALO_LINUX
+		hud_draw_static_element_drawing = FALSE;
+#endif
 	}
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 685);
@@ -1630,6 +1669,9 @@ static void hud_draw_bitmap_with_meter(
 		clip,
 		&bounds,
 		is_interface_bitmap);
+#ifdef HALO_LINUX
+	hud_full_screen_element_widen(absolute_placement->corner, &bounds, &xy_scale);
+#endif
 	hud_draw_bitmap_internal(
 		meter_parameters,
 		bitmap,
