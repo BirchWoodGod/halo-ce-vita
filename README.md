@@ -109,7 +109,6 @@ chat.
 - The biggest fights still drop frames (see [Performance](#performance)).
 - A Custom Edition map can't be downloaded once the match has started: join
   while the host is in the lobby.
-- Custom Edition maps' Ogg Vorbis sounds are silent.
 - In co-op the host's Vita runs everyone's AI and the level's scripts, so it
   slows down with three or four players.
 - Master Chief's body can be missing in The Pillar of Autumn's cryo tube
@@ -738,7 +737,10 @@ Libraries and tools: [VitaSDK](https://vitasdk.org),
 [Monocypher](https://monocypher.org) (the server browser's signatures and
 password keys),
 [TLSF](https://github.com/mattconte/tlsf) by Matthew Conte (the Vita's
-shader compiler's heap),
+shader compiler's heap, and the Ogg Vorbis decoder's),
+[Tremor](https://gitlab.xiph.org/xiph/tremor) and
+[libogg](https://gitlab.xiph.org/xiph/ogg) by Xiph.Org (Halo Custom
+Edition maps' Ogg Vorbis sounds),
 [Expat](https://libexpat.github.io) (the PC menus' files),
 [Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
 [miniupnpc](https://github.com/miniupnp/miniupnp),

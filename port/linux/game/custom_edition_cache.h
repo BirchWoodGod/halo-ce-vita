@@ -162,12 +162,47 @@ void custom_edition_cache_tags_unload(
 combined space of the map, its bitmaps.map and its sounds.map
 (custom_edition_cache_combine_resource_offsets), for the tag `tag_index` as
 cache_file_read names it (NONE, or a tag handle, or for sounds whatever the
-permutation holds); bitmap pixels are converted as they arrive. */
-void custom_edition_cache_read(
+permutation holds); bitmap pixels are converted as they arrive. FALSE when
+they could not be read (the buffer then holds zeros). */
+boolean custom_edition_cache_read(
 	long tag_index,
 	long offset,
 	long size,
 	void *buffer);
+
+/* ---------- prototypes/CUSTOM_EDITION_SOUNDS.C */
+
+struct sound_permutation;
+
+/* Whether the sound cache loads `permutation` by decoding its Ogg Vorbis
+stream (a Custom Edition map's, compression 3) rather than reading it. */
+boolean custom_edition_sound_is_ogg_vorbis(
+	struct sound_permutation const *permutation);
+/* The bytes the sound cache holds for `permutation`: its samples' size, or
+for an Ogg Vorbis one its Xbox ADPCM's (worked out from the stream's first
+and last pages the first time, when the map's own word was not plausible);
+0 when it cannot be played. Called by the sound cache and the channels
+that play what it holds. */
+long custom_edition_sound_cache_bytes(
+	struct sound_permutation *permutation);
+/* Has an Ogg Vorbis permutation decoded into `destination` (its cache
+block, `destination_bytes` long) on the decoding thread, which sets
+`*loaded` when it is done; FALSE when it could not be asked for (the block
+is silence, and loaded, at once). */
+boolean custom_edition_sound_load(
+	struct sound_permutation const *permutation,
+	void *destination,
+	long destination_bytes,
+	boolean *loaded);
+/* The cache block whose loaded flag is `loaded` is being deleted: its
+decoding is forgotten if it waits, and cut short and waited for if it
+runs. */
+void custom_edition_sound_cancel(
+	boolean *loaded);
+/* The map is going: the waiting decodings are forgotten, the one running
+waited for, and the decoder's working memory given back. */
+void custom_edition_sounds_stop(
+	void);
 
 /* ---------- prototypes/CUSTOM_EDITION_BITMAPS.C */
 

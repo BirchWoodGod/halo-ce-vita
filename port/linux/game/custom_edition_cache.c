@@ -448,8 +448,15 @@ static boolean custom_edition_cache_tags_convert(
 	{
 		error(
 			_error_silent,
-			"custom edition: %ld sounds use a compression this build cannot decode (Custom Edition's Ogg Vorbis) and will not play",
+			"custom edition: %ld sounds use a compression this build cannot decode and will not play",
 			(long)conversion.sounds_undecodable);
+	}
+	if (conversion.sounds_ogg_vorbis)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld Ogg Vorbis sounds are decoded to Xbox ADPCM as they load",
+			(long)conversion.sounds_ogg_vorbis);
 	}
 	if (conversion.hud_placements_rescaled)
 	{
@@ -1338,6 +1345,8 @@ void custom_edition_cache_tags_unload(
 	custom_edition_structure_bsp_unload();
 	custom_edition_models_dispose();
 	custom_edition_bitmaps_dispose();
+	/* (before the files: a decoding reads them) */
+	custom_edition_sounds_stop();
 	custom_edition_cache_files_close();
 	custom_edition_cache_globals.tags_loaded = FALSE;
 	custom_edition_cache_globals.tag_cache = NULL;
@@ -1369,7 +1378,7 @@ void custom_edition_cache_structure_bsp_moved(
 	return;
 }
 
-void custom_edition_cache_read(
+boolean custom_edition_cache_read(
 	long tag_index,
 	long offset,
 	long size,
@@ -1431,5 +1440,5 @@ void custom_edition_cache_read(
 	}
 	__atomic_store_n(&globals->read_lock, 0, __ATOMIC_RELEASE);
 
-	return;
+	return read;
 }

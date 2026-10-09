@@ -320,9 +320,13 @@ struct custom_edition_conversion_report
 	/* animation graph object overlays that named an animation the graph
 	does not have, made to name none */
 	int32_t animation_overlays_disabled;
-	/* sounds in a compression this build cannot decode (Ogg Vorbis), made
+	/* sounds in a compression this build cannot decode (Halo PC's IMA
+	ADPCM, or permutations of another compression than their sound's), made
 	unplayable */
 	int32_t sounds_undecodable;
+	/* Ogg Vorbis sounds made Xbox ADPCM ones, which the sound cache decodes
+	as it loads them (custom_edition_sounds.c) */
+	int32_t sounds_ogg_vorbis;
 	/* HUD element placements with Halo PC's high resolution scale, whose
 	scale was halved */
 	int32_t hud_placements_rescaled;
