@@ -22,6 +22,8 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/ce_installer_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 cc=${CC:-$(command -v clang >/dev/null 2>&1 && echo clang || echo cc)}
 mkdir -p "$out"
 sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
@@ -114,5 +116,5 @@ loc.map 1321e17b5a86be84b1930b6eb2e7fdfe9285275d5d54cbe3d4a3635e2bf04041"
 fi
 
 [ $status = 0 ] && echo "PASS Custom Edition installer extraction" || echo "FAIL (in $out)"
-[ $status = 0 ] && rm -rf "$out"
+test_out_done $status
 exit $status

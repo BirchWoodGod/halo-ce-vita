@@ -13,8 +13,10 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/vita_movie_aspect_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out"
-trap 'rm -rf "$out"' EXIT
+trap 'test_out_done $?' EXIT
 make() { name=$1; shift; ffmpeg -loglevel error -f lavfi -i testsrc=size=640x480:rate=30:duration=1 "$@" -c:v libx264 -pix_fmt yuv420p "$out/$name.mp4"; }
 make square43
 make flag169 -aspect 16:9

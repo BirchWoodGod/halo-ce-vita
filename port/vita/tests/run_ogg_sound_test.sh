@@ -29,6 +29,8 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/ogg_sound_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 cc=${CC:-$(command -v clang >/dev/null 2>&1 && echo clang || echo cc)}
 mkdir -p "$out/obj"
 sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
@@ -101,5 +103,5 @@ if [ "$seconds" != 0 ]; then
 	ls "$found" | grep -E '^(crash|leak|timeout|oom)-' && status=1
 fi
 
-[ "$status" = 0 ] && rm -rf "$out"
+test_out_done $status
 exit $status

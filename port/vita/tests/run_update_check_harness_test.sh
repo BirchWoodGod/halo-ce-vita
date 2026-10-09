@@ -30,6 +30,8 @@ root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_update_check_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 cases=${*:-idle newer same older cached stale stable offline}
 version=$(sed -n 's/^#define HALO_VITA_VERSION "\(.*\)"$/\1/p' "$root/port/vita/include/vita_version.h")
 status=0
@@ -158,10 +160,6 @@ for case in $cases; do
 		echo "usage: $0 [idle|newer|same|older|cached|stale|stable|offline]..." >&2; exit 2 ;;
 	esac
 done
-if [ $status = 0 ]; then
-	[ "${HALO_TEST_KEEP:-0}" = 1 ] && echo "runs in $out" || rm -rf "${out:?}"
-	echo PASS
-else
-	echo "runs in $out"
-fi
+[ $status = 0 ] && echo PASS
+test_out_done $status
 exit $status

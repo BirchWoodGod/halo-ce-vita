@@ -41,13 +41,18 @@ boolean map_share_client_offer(
 	long why_size);
 
 /* (a joiner, network_client_manager.c) The host's game settings name
-`level_name`, a Custom Edition map this machine has (the host's copy), with
-PC maps off: the player is asked to turn PC maps on (then it is precached),
-and leaves the game, told why, if not. FALSE when the joiner cannot be
-asked (the game started: `why`): the caller refuses. */
+`level_name`, a Custom Edition map this machine has (the host's copy,
+`identity`), with PC maps off: the player is asked to turn PC maps on (then
+it is precached), and leaves the game, told why, if not. A host that shares
+maps is asked about the map first (its offer says whether its game is under
+way: the joiner then adds no player while the player answers, and joins the
+game in progress after); any other answer, or none, asks as before. FALSE
+when the joiner cannot be asked (the game started: `why`): the caller
+refuses. */
 boolean map_share_client_offer_pc_maps(
 	struct network_game_client *client,
 	char const *level_name,
+	unsigned long identity,
 	char *why,
 	long why_size);
 
@@ -68,8 +73,9 @@ boolean map_share_client_busy(
 
 /* (network_game_client_add_player) Whether the joiner adds no player to the
 host's game now: while it asks the host about its map (the host's game may
-be under way), and while it asks and downloads the map of a game in
-progress, which it joins once the map is here. */
+be under way), while it asks and downloads the map of a game in progress,
+which it joins once the map is here, or asks to turn PC maps on for it,
+and while it leaves. */
 boolean map_share_client_holds_players(
 	void);
 

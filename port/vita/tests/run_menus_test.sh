@@ -23,7 +23,12 @@
 #   HALO_TEST_DATA_MENUS  the same with Halo PC's bitmaps.map and loc.map in
 #                         its maps folder (never in the repository; skipped
 #                         when missing)
-#   HALO_TEST_OUT         where the logs go (kept)
+#   HALO_MENUS_FOLDER     the menus' XML (default this tree's
+#                         port/vita/app0/menus: the game looks beside its
+#                         binary, <tree>/build/linux, and a copy of the
+#                         harness elsewhere found none and kept the Xbox's
+#                         Multiplayer screen)
+#   HALO_TEST_OUT         where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -31,12 +36,19 @@ binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 cases=${*:-fresh level xbox}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
-if [ ! -e "$menus_data/maps/bitmaps.map" ] || [ ! -e "$menus_data/maps/loc.map" ]; then
+if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "$menus_data/maps/loc.map" ]; then
 	echo "SKIP: no Halo PC bitmaps.map and loc.map in $menus_data/maps (HALO_TEST_DATA_MENUS)"
+	exit 0
+fi
+export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
+if [ ! -r "$HALO_MENUS_FOLDER/menus.txt" ]; then
+	echo "SKIP: no menus.txt in $HALO_MENUS_FOLDER (HALO_MENUS_FOLDER)"
 	exit 0
 fi
 mkdir -p "$out"
@@ -67,6 +79,7 @@ check() { # NAME SCREENS_WANTED
 	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
 	grep -aqi "is not a tag index" "$log" "$debug" 2>/dev/null && fail "$name" "a tag was read as the empty one"
 	grep -aqiE "assert|exception|halt" "$log" && fail "$name" "an assertion, exception or halt"
+	grep -aq "menus: .*menus.txt cannot be read" "$log" && fail "$name" "the menus' XML was not found (HALO_MENUS_FOLDER)"
 	if [ "$2" = pc ]; then
 		[ "$(grep -ac 'ui: screen pc.mp.screen' "$log")" -ge 3 ] || fail "$name" "OpenCE's Multiplayer screen did not open twice"
 		grep -aq "ui: screen pc.mp.offline" "$log" || fail "$name" "Create Game Internet did not say internet play is off"
@@ -96,4 +109,5 @@ for case in $cases; do
 done
 echo "logs in $out"
 [ $status = 0 ] && echo PASS
+test_out_done $status
 exit $status

@@ -27,7 +27,7 @@
 #                           (default the data's maps folder, else Steam's MCC
 #                           halo1/maps/custom_edition)
 #   HALO_TEST_CE_CYCLES     rounds (5)
-#   HALO_TEST_OUT           where the log goes (kept)
+#   HALO_TEST_OUT           where the log goes (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps it)
 # Without Custom Edition maps or resource maps (none are in the repository)
 # it says SKIP and passes.
 set -u
@@ -38,6 +38,8 @@ data=${HALO_TEST_DATA:-$root/../data2276}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 cycles=${HALO_TEST_CE_CYCLES:-5}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_ce_map_memory_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -155,4 +157,5 @@ awk -v first="${picked[0]}" '
 if [ "$status" = 0 ]; then
 	echo "PASS: ${picked[0]} -> menu -> carousel -> menu -> ${picked[1]} -> menu, $cycles rounds: memory back where it was after each map ($log)"
 fi
+test_out_done $status
 exit $status

@@ -24,13 +24,15 @@
 #   run_cryo_body_test.sh
 #   HALO_TEST_VITA   the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA   a folder with the game's maps folder (the Xbox maps)
-#   HALO_TEST_OUT    where the logs go (kept)
+#   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_cryo_body_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -111,4 +113,5 @@ echo "logs: $out"
 if [ "$status" = 0 ]; then
 	echo "PASS"
 fi
+test_out_done $status
 exit $status

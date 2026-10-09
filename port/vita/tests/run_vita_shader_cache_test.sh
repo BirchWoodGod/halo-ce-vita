@@ -10,8 +10,10 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/vita_shader_cache_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out/collect/progs"
-trap 'rm -rf "$out"' EXIT
+trap 'test_out_done $?' EXIT
 cc -O1 -Wall -Wextra -I"$root/port/vita/include" "$here/vita_shader_cache_test.c" "$root/port/vita/host/vita_shader_cache.c" \
 	-o "$out/test"
 "$out/test"

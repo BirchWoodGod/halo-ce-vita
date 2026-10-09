@@ -20,6 +20,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 sdk=${VITASDK:-$HOME/vitasdk}
 out=${TMPDIR:-/tmp}/vita_p2p_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
 mkdir -p "$out/include"
@@ -91,5 +93,5 @@ echo "--- host"; grep -E '^(PASS|FAIL)|connected|code|ad ?hoc|Split Screen' "$ou
 echo "--- joiner"; grep -E '^(PASS|FAIL)|connected|code|ad ?hoc|^joiner:' "$out/join.log" 2>/dev/null
 if grep -q '^FAIL' "$out/host.log" "$out/join.log" 2>/dev/null; then status=1; fi
 [ $status = 0 ] && echo "PASS ($mode) internet play over the Vita's socket layer" || echo "FAIL ($mode; logs in $out)"
-[ $status = 0 ] && rm -rf "$out"
+test_out_done $status
 exit $status

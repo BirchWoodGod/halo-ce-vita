@@ -38,7 +38,7 @@
 #   HALO_TEST_CE_RESOURCES  Halo PC's bitmaps.map, sounds.map and loc.map
 #                           (default the data's maps folder, else Steam's MCC
 #                           halo1/maps/custom_edition)
-#   HALO_TEST_OUT           where the logs go (kept)
+#   HALO_TEST_OUT           where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 # Without either map or the resource maps (none are in the repository) it
 # says SKIP and passes.
 set -u
@@ -48,6 +48,8 @@ binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_ce_ogg_sound_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -178,4 +180,5 @@ run Covenant_V_Marines_Beta_5 'L60:@sound <protected> 300;L150:@sound <protected
 if [ "$status" = 0 ]; then
 	echo "PASS: Custom Edition Ogg Vorbis and 16-bit PCM sounds decoded and played ($out)"
 fi
+test_out_done $status
 exit $status

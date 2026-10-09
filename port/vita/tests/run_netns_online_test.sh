@@ -297,7 +297,10 @@
 #            progress ("joined the game in progress at game tick #") and
 #            play 45 s with another player; the hosts' uploads' CPU and
 #            rate are reported and checked, and nobody may lose a
-#            connection or reach the dashboard
+#            connection or reach the dashboard. A joiner of each that has
+#            the map with PC maps off must have its player held while it is
+#            asked to turn PC maps on, download nothing, join the game in
+#            progress and play 45 s
 #   mapmidmixed the same with old builds (HALO_TEST_VITA_OLD,
 #            HALO_TEST_SERVER_OLD: v1.1.0-beta.2's, which know nothing of it):
 #            on the new server and the new Vita host an old joiner arrives
@@ -308,7 +311,9 @@
 #            refused copy must stay up (never the dashboard), a new host must
 #            add no player of an old joiner it refused (that player's leaving
 #            ended a game with one player left), the new joiners of the new
-#            hosts download and play, and the games go on
+#            hosts download and play, and the games go on; a new joiner with
+#            the map, PC maps off, on the old Vita host is asked about PC
+#            maps at once, as before, and stays up
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -333,7 +338,7 @@
 #   HALO_TEST_JOIN_ENV   more VAR=value settings for the joiner
 #   HALO_TEST_SECONDS  how long the copies run (default 180)
 #   HALO_TEST_REJOIN   seconds into its game the joiner leaves (code; 0 never)
-#   HALO_TEST_OUT    where the logs go (kept)
+#   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 #   HALO_TEST_CPUS   taskset CPU lists for the two copies ("0-7 8-15")
 #   HALO_TEST_ENV    more VAR=value settings for both copies (profiling)
 #   HALO_TEST_NETEM  a home connection's link: netem settings (tc-netem(8):
@@ -357,6 +362,9 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
+# (the menus' XML of this tree: the game looks beside its binary, and a copy
+# of the harness elsewhere found none: run_menus_test.sh)
+export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 
 if [ "${HALO_NETNS_INSIDE:-}" != 1 ]; then
 	export HALO_NETNS_INSIDE=1
@@ -393,6 +401,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = mapmidmixed ] && seconds=${HALO_TEST_SECONDS:-300}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
 cpu_a=${cpus%% *}
 cpu_b=${cpus#* }
@@ -404,11 +414,14 @@ pids=
 # changes it, put back at the end: coopmenuonline)
 config_kept=
 cleanup() {
+	local rc=$?
 	for pid in $pids; do kill "$pid" 2>/dev/null; done; wait 2>/dev/null
 	if [ -n "$config_kept" ]; then
 		config=$(dirname "$vita")/config.toml
 		if [ -f "$config_kept" ]; then cp "$config_kept" "$config"; else rm -f "$config"; fi
 	fi
+	# (deleted after a pass: the copies' folders are 0.6-1.7 GB)
+	test_out_done $rc
 }
 trap cleanup EXIT
 
@@ -2275,13 +2288,21 @@ INIT
 		# the Vita host's (the question turns them on with the download)
 		vita_on smid "$code" "$vita" without $ce $yes
 		vita_on vmid "$vhost_code" "$vita" without $yes
-		new_mids="smid vmid" refused=
+		# (and a joiner of each with the map, PC maps off: only the question,
+		# its player held while it is asked)
+		vita_on spc "$code" "$vita" with $yes
+		vita_on vpc "$vhost_code" "$vita" with $yes
+		new_mids="smid vmid" new_pcs="spc vpc" refused= old_pcs=
 		if [ "$mode" = mapmidmixed ]; then
 			vita_on smid_old "$code" "$vita_old" without $ce $yes
 			vita_on vmid_old "$vhost_code" "$vita_old" without $ce $yes
 			vita_on osmid "$ocode" "$vita" without $ce $yes
 			vita_on ovmid "$ovhost_code" "$vita" without $ce $yes
 			refused="smid_old vmid_old osmid ovmid"
+			# (a new joiner with the map, PC maps off, on the old Vita host:
+			# asked at once, as before)
+			vita_on ovpc "$ovhost_code" "$vita" with $yes
+			old_pcs=ovpc
 		fi
 		wait $joined 2>/dev/null
 		kill -TERM "$server_pid" $hosts $old_server_pid 2>/dev/null; wait "$server_pid" $hosts $old_server_pid 2>/dev/null
@@ -2304,6 +2325,34 @@ INIT
 			[ "$n" -ge 45 ] || fail "$name played with another player for $n s (45 wanted)"
 		done
 		grep -aq "map share: PC maps turned on" "$out/vmid/data/debug.txt" || fail "vmid's PC maps were not turned on with the download"
+		# (the joiners with the map, PC maps off: asked the question with their
+		# players held, PC maps turned on, nothing downloaded, joined in
+		# progress, played)
+		for name in $new_pcs; do
+			l=$out/$name/run.log d=$out/$name/data/debug.txt
+			echo "--- $name"
+			grep -ahE "map share: (asking|the host's game is in progress|the host did not offer|asking the player)|PC maps (turned on|on;)|joined the game in progress|Halo: custom map" "$d" "$l" | head -12
+			grep -aq "map share: the host's game is in progress: the players wait for the PC maps question about '$ce_name'" "$d" ||
+				fail "$name's player was not held for the PC maps question"
+			grep -aq "map share: PC maps turned on" "$d" || fail "$name's PC maps were not turned on"
+			grep -aq "map share: '$ce_name' verified" "$d" && fail "$name downloaded the map it has"
+			grep -aq "joined the game in progress at game tick #" "$d" || fail "$name did not join the game in progress"
+			grep -aq "Halo: custom map:" "$l" && fail "$name was told it could not play the map"
+			grep -aq "XLaunchNewImage" "$l" && fail "$name went to the dashboard"
+			n=$(played "$l")
+			echo "$name: $n s playing with another player"
+			[ "$n" -ge 45 ] || fail "$name played with another player for $n s (45 wanted)"
+		done
+		# (an old host: the question asked at once, as before, and the copy up)
+		for name in $old_pcs; do
+			l=$out/$name/run.log d=$out/$name/data/debug.txt
+			echo "--- $name"
+			grep -ahE "map share: (asking|the host did not offer|asking the player)|PC maps turned on|joined the game in progress|Halo: custom map|exiting after" "$d" "$l" | head -8
+			grep -aq "map share: the host did not offer '$ce_name' (the host's game has started): asking about PC maps as before" "$d" ||
+				fail "$name was not asked about PC maps as before"
+			grep -aq "exiting after debug.exit_after" "$l" || fail "$name did not run to its end"
+			grep -aq "XLaunchNewImage" "$l" && fail "$name went to the dashboard"
+		done
 		# (the new hosts: sent it to join in progress, at the in-game rate, in a
 		# small share of their frames; nobody's game lost)
 		rate_cap=${HALO_TEST_MAPMID_RATE_KB:-256}

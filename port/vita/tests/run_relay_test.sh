@@ -14,9 +14,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 relay=$root/port/relay
 out=${RELAY_FUZZ_OUT:-${TMPDIR:-/tmp}/relay_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 clang=${CLANG:-clang}
 seconds=${RELAY_FUZZ_SECONDS:-60}
 mkdir -p "$out"
+trap 'test_out_done $?' EXIT
 sources="$relay/relay.c $root/port/third_party/monocypher/monocypher.c"
 flags="-std=c11 -g -Wall -Wextra -Werror -I$root/port/third_party/monocypher"
 
@@ -38,5 +41,4 @@ if [ "$seconds" -gt 0 ]; then
 		"$relay/tests/fuzz_cases" > fuzz.log 2>&1) || { tail -40 "$out/fuzz.log"; echo "relay fuzz: FAILED ($out)"; exit 1; }
 	grep -E "^stat::number_of_executed_units" "$out/fuzz.log" | sed 's/^/relay fuzz: /'
 fi
-rm -rf "$out"
 echo "relay test: PASS"

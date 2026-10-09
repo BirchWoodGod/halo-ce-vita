@@ -75,7 +75,11 @@ Choices:
   damaged disc. The question about such a map asks to turn PC maps on with
   the download (turned on, and saved, as the settings panel does, once the
   map is in place); one the joiner has already is asked about alone
-  (map_share_client_offer_pc_maps). A downloaded Custom Edition map whose
+  (map_share_client_offer_pc_maps), after a query to the host as for a
+  download: a host's offer to join its game in progress keeps the machine
+  while the player answers, the joiner adds no player meanwhile, and joins
+  the game in progress after (a host that refuses, or does not answer, as
+  before: asked at once, its players not held). A downloaded Custom Edition map whose
   resource maps (bitmaps.map, sounds.map, loc.map) are not in the maps
   folder is kept, and the player told which are missing.
 - Why not: a joiner that is not asked (the host's version, a name that
@@ -515,11 +519,17 @@ static void map_share_server_refuse(
 	/* (a machine joining the game in progress, which cannot play it now:
 	its players, which an older joiner asks for as it asks for the map, are
 	not added, so that none is put into the game and taken out again as the
-	machine leaves, which ended a game it left one player in) */
+	machine leaves, which ended a game it left one player in. Only the
+	refusal of the game in progress itself, the one an older joiner gets: a
+	joiner that can wait out of the game adds no player while it asks, nor
+	as it leaves (map_share_client_holds_players), and one asked only to
+	turn PC maps on for a map it has, which this host does not share
+	(sv_map_download 0), then asks as before and adds its player) */
 	{
 		long index;
 
-		if (map_share_server_host_state(server) == _map_share_host_in_game &&
+		if (reason == _map_share_refusal_not_in_lobby &&
+			map_share_server_host_state(server) == _map_share_host_in_game &&
 			network_game_server_client_machine_joining_in_progress(server, machine) &&
 			map_share_server_machine_index(server, machine, &index))
 		{
@@ -1841,12 +1851,14 @@ static void map_share_client_ask(
 			download->host_name,
 			kept_text);
 	}
-	/* (a game in progress: the player waits out of it for the map) */
-	if (download->in_progress && !download->pc_maps_only)
+	/* (a game in progress: the player waits out of it for the map, or for
+	the answer) */
+	if (download->in_progress)
 	{
 		size_t length = strlen(text);
 
-		snprintf(text + length, sizeof(text) - length, "%s",
+		snprintf(text + length, sizeof(text) - length, "%s", download->pc_maps_only ?
+			T("\n\nThe host's game is under way: you join it once PC maps is on.") :
 			T("\n\nThe host's game is under way: you join it once the map is here."));
 	}
 	/* (a public lobby's game: its host is a stranger) */
@@ -2337,6 +2349,7 @@ boolean map_share_client_offer(
 boolean map_share_client_offer_pc_maps(
 	struct network_game_client *client,
 	char const *level_name,
+	unsigned long identity,
 	char *why,
 	long why_size)
 {
@@ -2359,9 +2372,42 @@ boolean map_share_client_offer_pc_maps(
 	csstrncpy(download->level_name, level_name, sizeof(download->level_name) - 1);
 	csstrncpy(download->name, name, sizeof(download->name) - 1);
 	download->pc_maps_only = TRUE;
+	download->identity = (uint32_t)identity;
+	download->capabilities = map_share_client_capabilities();
+	/* (the host asked about the map first, as a download is: its offer says
+	whether its game is under way, and keeps this machine, which adds no
+	player while the player answers, from the host's drop of a machine with
+	none. Not a host without map sharing (no fingerprint), a name that
+	cannot be sent, nor with map sharing or joining in progress off here: a
+	host refuses a query from a game in progress without the capability,
+	and adds none of that machine's players. Those are asked at once, as
+	before; so is a joiner the host refuses, or does not answer.) */
+	if (identity && map_share_name_valid(name) && !map_share_setting_off("HALO_MAP_SHARE") &&
+		TEST_FLAG(download->capabilities, _map_share_capability_in_progress_bit) &&
+		map_share_client_send(client, _map_share_command_query, (short)download->capabilities, 0))
+	{
+		download->state = _client_querying;
+		download->state_time = system_milliseconds();
+		network_event("map share: asking the host about '%s' (0x%08lX) before the PC maps question", name, identity);
+		return TRUE;
+	}
 	map_share_client_ask();
 
 	return TRUE;
+}
+
+/* (a PC maps question whose host refused the query, or did not answer it)
+asked as before: the players not held */
+static void map_share_client_ask_pc_maps_unheld(
+	char const *why)
+{
+	struct map_share_download *download = &map_share_download;
+
+	network_event("map share: the host did not offer '%s' (%s): asking about PC maps as before", download->name, why);
+	download->in_progress = FALSE;
+	map_share_client_ask();
+
+	return;
 }
 
 void map_share_client_map_changed(
@@ -2419,6 +2465,10 @@ boolean map_share_client_holds_players(
 	/* (the host's answer says whether its game is under way: a player added
 	to a game in progress would start this machine into it without the map) */
 	case _client_querying:
+		return TRUE;
+	/* (refused or given up: the machine leaves, and a player added now
+	would only be put into the host's game and taken out again) */
+	case _client_leaving:
 		return TRUE;
 	case _client_asking:
 	case _client_checking:
@@ -2561,7 +2611,11 @@ boolean map_share_client_update(
 	switch (download->state)
 	{
 	case _client_querying:
-		if (now - download->state_time > MAP_SHARE_QUERY_TIMEOUT_MILLISECONDS)
+		if (now - download->state_time > MAP_SHARE_QUERY_TIMEOUT_MILLISECONDS && download->pc_maps_only)
+		{
+			map_share_client_ask_pc_maps_unheld("no answer");
+		}
+		else if (now - download->state_time > MAP_SHARE_QUERY_TIMEOUT_MILLISECONDS)
 		{
 			char text[640];
 
@@ -2695,7 +2749,14 @@ void map_share_client_handle_answer(
 	switch (answer.kind)
 	{
 	case _map_share_answer_refused:
-		if (answer.reason == _map_share_refusal_not_in_lobby)
+		if (download->pc_maps_only)
+		{
+			if (download->state == _client_querying)
+			{
+				map_share_client_ask_pc_maps_unheld(map_share_refusal_describe((enum map_share_refusal)answer.reason));
+			}
+		}
+		else if (answer.reason == _map_share_refusal_not_in_lobby)
 		{
 			snprintf(why, sizeof(why), T("The host's custom map %s couldn't be downloaded: the host's game had already "
 				"started. Join while the host is in the lobby to download it."), download->name);
@@ -2709,7 +2770,23 @@ void map_share_client_handle_answer(
 		break;
 
 	case _map_share_answer_offer:
-		if (download->state == _client_querying)
+		/* (the PC maps question about a map this machine has: the offer
+		says only whether the host's game is under way, and nothing is
+		downloaded) */
+		if (download->pc_maps_only)
+		{
+			if (download->state == _client_querying)
+			{
+				download->in_progress = TEST_FLAG(answer.flags, _map_share_offer_in_progress_bit);
+				if (download->in_progress)
+				{
+					network_event("map share: the host's game is in progress: the players wait for the PC maps question about '%s'",
+						download->name);
+				}
+				map_share_client_ask();
+			}
+		}
+		else if (download->state == _client_querying)
 		{
 			download->size = (uint32_t)answer.size;
 			download->flags = answer.flags;

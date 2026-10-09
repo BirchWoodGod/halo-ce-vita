@@ -24,6 +24,9 @@ data=${HALO_TEST_DATA:?a folder with the maps folder}
 map=${HALO_TEST_MAP:-b30}
 seconds=${HALO_TEST_SECONDS:-100}
 out=$(mktemp -d "${TMPDIR:-/tmp}/hitch_pacing_test.XXXXXX")
+. "$here/test_out.sh"
+test_out_begin "$out"
+test_out_made=1
 mkdir -p "$out/data" "$out/save"
 ln -sfn "$(cd "$data" && pwd)/maps" "$out/data/maps"
 printf 'map_name levels\\%s\\%s\n' "$map" "$map" > "$out/data/init.txt"
@@ -50,5 +53,5 @@ else
 	fi
 	echo "hitches: $(grep -c 'hitch:' "$out/run.log"), stalls not caught up: $(grep -c 'stall not caught up' "$out/run.log")"
 fi
-rm -rf "$out"
+test_out_done $status
 exit $status
