@@ -547,20 +547,55 @@ static long interface_get_weapon_hud_index(
 	{
 		struct player_datum *player = player_get(player_index);
 		director_perspective perspective = director_get_perspective(render.local_player_index);
+		long unit_index;
+#ifdef HALO_LINUX
+		struct unit_datum *unit;
+#endif
 
 		if (hud_scripted_globals &&
 			hud_scripted_globals->show_hud &&
 			perspective != _director_perspective_neutral &&
 			perspective != _director_perspective_scripted &&
-			player->unit_index != NONE)
+#ifdef HALO_LINUX
+			/* port: with the tick on a thread of its own (HALO_TICK_THREAD,
+			the Vita's) the player may die, or get out of a vehicle, between
+			the checks here and the reads after them: the unit read once (no
+			weapon HUD index this frame when it is gone), its seat read once
+			and checked (unit_render_get_seat: the parent was read again
+			after the check and unit_get(NONE) crashed) */
+			(unit_index = *(volatile long *)&player->unit_index) != NONE &&
+			(unit = unit_try_and_get(unit_index)) != NULL)
 		{
 			long weapon_index = unit_inventory_get_weapon(
-				player->unit_index,
-				unit_get(player->unit_index)->unit.current_weapon_index);
+				unit_index,
+				unit->unit.current_weapon_index);
 
 			if (weapon_index == NONE)
 			{
-				struct unit_datum *unit = unit_get(player->unit_index);
+				long parent_unit_index;
+				struct unit_seat *seat = unit_render_get_seat(unit, &parent_unit_index);
+
+				if (seat && TEST_FLAG(seat->flags, _unit_seat_gunner_bit))
+				{
+					weapon_index = unit_inventory_get_weapon(
+						parent_unit_index,
+						unit_get(parent_unit_index)->unit.current_weapon_index);
+				}
+			}
+			else
+			{
+				flashlight = unit->unit.integrated_night_vision_power;
+			}
+#else
+			(unit_index = player->unit_index) != NONE)
+		{
+			long weapon_index = unit_inventory_get_weapon(
+				unit_index,
+				unit_get(unit_index)->unit.current_weapon_index);
+
+			if (weapon_index == NONE)
+			{
+				struct unit_datum *unit = unit_get(unit_index);
 
 				if (unit->object.parent_object_index != NONE &&
 					unit->unit.parent_seat_index != NONE)
@@ -581,8 +616,9 @@ static long interface_get_weapon_hud_index(
 			}
 			else
 			{
-				flashlight = unit_get(player->unit_index)->unit.integrated_night_vision_power;
+				flashlight = unit_get(unit_index)->unit.integrated_night_vision_power;
 			}
+#endif
 
 			if (weapon_index != NONE)
 			{
@@ -594,7 +630,7 @@ static long interface_get_weapon_hud_index(
 				{
 					weapon_hud_index = hud_index;
 				}
-				else if (!unit_get_weapon_count(player->unit_index))
+				else if (!unit_get_weapon_count(unit_index))
 				{
 					weapon_hud_index = hud_globals->defaults.default_weapon_hud.index;
 				}

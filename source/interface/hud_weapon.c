@@ -2044,14 +2044,52 @@ void hud_update_weapon(
 void hud_render_weapon_interface(
 	struct player_datum *player)
 {
+#ifdef HALO_LINUX
+	/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+	Vita's) the player may have died since hud_draw_screen looked, and the
+	unit may be getting out of its vehicle: the unit read once (no weapon
+	HUD this frame when it is gone), its seat read once and checked
+	(unit_render_get_seat: the parent was read again after the check and
+	unit_get(NONE) crashed) */
+	long unit_index = *(volatile long *)&player->unit_index;
+	struct unit_datum *player_unit = unit_index != NONE ? unit_try_and_get(unit_index) : NULL;
+	long weapon_index = player_unit ? unit_inventory_get_weapon(
+		unit_index,
+		player_unit->unit.current_weapon_index) : NONE;
+#else
+	long unit_index = player->unit_index;
 	long weapon_index = unit_inventory_get_weapon(
-		player->unit_index,
-		unit_get(player->unit_index)->unit.current_weapon_index);
+		unit_index,
+		unit_get(unit_index)->unit.current_weapon_index);
+#endif
 	boolean seat_disallows_hud = FALSE;
 
+#ifdef HALO_LINUX
+	if (!player_unit)
+		return;
 	if (weapon_index == NONE)
 	{
-		struct unit_datum *unit = unit_get(player->unit_index);
+		long parent_unit_index;
+		struct unit_seat *seat = unit_render_get_seat(player_unit, &parent_unit_index);
+
+		if (seat)
+		{
+			if (TEST_FLAG(seat->flags, _unit_seat_gunner_bit))
+			{
+				weapon_index = unit_inventory_get_weapon(
+					parent_unit_index,
+					unit_get(parent_unit_index)->unit.current_weapon_index);
+			}
+			else
+			{
+				seat_disallows_hud = TRUE;
+			}
+		}
+	}
+#else
+	if (weapon_index == NONE)
+	{
+		struct unit_datum *unit = unit_get(unit_index);
 
 		if (unit->object.parent_object_index != NONE && unit->unit.parent_seat_index != NONE)
 		{
@@ -2073,6 +2111,7 @@ void hud_render_weapon_interface(
 			}
 		}
 	}
+#endif
 
 	match_assert(
 		"c:\\halo\\SOURCE\\interface\\hud_weapon.c",
@@ -2112,7 +2151,7 @@ void hud_render_weapon_interface(
 				&weapon_state);
 		}
 	}
-	else if (!seat_disallows_hud && !unit_get_weapon_count(player->unit_index))
+	else if (!seat_disallows_hud && !unit_get_weapon_count(unit_index))
 	{
 		struct weapon_interface_state weapon_state = { 0 };
 
@@ -2125,7 +2164,7 @@ void hud_render_weapon_interface(
 
 	render_grenade_hud(
 		player->local_player_index,
-		player->unit_index);
+		unit_index);
 	if (player->local_player_index != NONE)
 	{
 		get_hud_state(player->local_player_index)->last_weapon_index = weapon_index;

@@ -545,6 +545,18 @@ struct unit_datum
 
 struct unit_control_data;
 
+#ifdef HALO_LINUX
+/* port: the seat a unit rides in, for the render, which with the tick on
+a thread of its own (HALO_TICK_THREAD, the Vita's) runs while the tick
+takes units out of their seats: the unit's parent and seat read once and
+checked (the HUD and particles checked them, then read the parent again
+and looked up unit NONE). The seat, and its vehicle in *parent_unit_index;
+NULL (and NONE) when the unit rides in no seat the render can see. */
+struct unit_seat *unit_render_get_seat(
+	struct unit_datum const *unit,
+	long *parent_unit_index);
+#endif
+
 void unit_control(
 	long unit_index,
 	struct unit_control_data const *control_data);
