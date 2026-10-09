@@ -24,7 +24,7 @@ long game_time_get(void);
 
 /* ---------- constants */
 
-#define VERIFY_WALK_MAXIMUM 1024
+#define VERIFY_WALK_MAXIMUM 512
 
 /* ---------- globals */
 
