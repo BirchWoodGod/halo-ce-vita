@@ -766,6 +766,12 @@ static void hud_update_weapon_local_player(
 		unsigned long render_flags = 0;
 		short definition_count = 1;
 		short crosshair_index;
+		/* port: a weapon of one magazine has no secondary ammunition to warn
+		of. Its second magazine (empty) set the secondary states off: "fired
+		secondary with no ammo" at every pull of the trigger, a master HUD's
+		NO FUEL beside the weapon's own NO AMMO (DamnationCE, xshxdex98, CC0,
+		488bd83e) */
+		boolean const secondary_magazine = weapon_state->magazine_count > 1;
 
 		if (weapon_index != get_hud_state(local_player_index)->last_weapon_index &&
 			weapon_index == NONE)
@@ -809,7 +815,7 @@ static void hud_update_weapon_local_player(
 					break;
 
 				case _crosshair_state_secondary_trigger_ready:
-					result = weapon_state->magazines[1].can_fire;
+					result = secondary_magazine && weapon_state->magazines[1].can_fire;
 					break;
 
 				case _crosshair_state_aim:
@@ -894,32 +900,36 @@ static void hud_update_weapon_local_player(
 					break;
 
 				case _crosshair_state_flash_secondary_ammo:
-					result = (weapon_state->magazines[1].rounds_remaining || weapon_state->magazines[1].rounds_loaded) &&
+					result = secondary_magazine &&
+						(weapon_state->magazines[1].rounds_remaining || weapon_state->magazines[1].rounds_loaded) &&
 						weapon_state->magazines[1].rounds_remaining &&
 						weapon_state->magazines[1].rounds_loaded <= root_definition->flash_cutoffs.loaded_ammo;
 					break;
 
 				case _crosshair_state_flash_secondary_total_ammo:
-					result = weapon_state->magazines[1].rounds_remaining <=
+					result = secondary_magazine &&
+						weapon_state->magazines[1].rounds_remaining <=
 							root_definition->flash_cutoffs.total_ammo &&
 						!weapon_state->magazines[1].reloading;
 					break;
 
 				case _crosshair_state_secondary_reload:
-					result = weapon_state->magazines[1].reloading;
+					result = secondary_magazine && weapon_state->magazines[1].reloading;
 					break;
 
 				case _crosshair_state_fired_secondary_with_no_ammo:
 					/* January (T+0x3b7 shared tail `test ch,8`) and the later /Od build (0x638a07
 					   `and edx,0x800`) both test the primary trigger for this secondary state. */
-					result = (!weapon_state->magazines[1].rounds_loaded &&
+					result = secondary_magazine &&
+						((!weapon_state->magazines[1].rounds_loaded &&
 							!weapon_state->magazines[1].rounds_remaining &&
 							TEST_FLAG(unit->unit.control_flags, _unit_control_weapon_primary_trigger_bit)) ||
-						state->value.reference_data != NONE;
+						state->value.reference_data != NONE);
 					break;
 
 				case _crosshair_state_flash_secondary_ammo_none_for_reload:
-					result = (weapon_state->magazines[1].rounds_remaining || weapon_state->magazines[1].rounds_loaded) &&
+					result = secondary_magazine &&
+						(weapon_state->magazines[1].rounds_remaining || weapon_state->magazines[1].rounds_loaded) &&
 						!weapon_state->magazines[1].rounds_remaining &&
 						weapon_state->magazines[1].rounds_loaded <= root_definition->flash_cutoffs.loaded_ammo;
 					break;
@@ -1636,7 +1646,10 @@ static void render_weapon_hud(
 		SET_FLAG(flags, _weapon_overlay_on_always_bit, TRUE);
 		overlay_flags[3] = flags;
 
-		flags = overlay_flags[0];
+		/* port: the secondary magazine's overlays are 4 and 5, as its states
+		and numbers are: these wrote over the primary's 0 and 1 (OpenCE #180,
+		DamnationCE 91566224) */
+		flags = overlay_flags[4];
 		SET_FLAG(
 			flags,
 			_weapon_overlay_on_flashing_bit,
@@ -1655,9 +1668,9 @@ static void render_weapon_hud(
 			_weapon_overlay_on_default_bit,
 			flags == 0);
 		SET_FLAG(flags, _weapon_overlay_on_always_bit, TRUE);
-		overlay_flags[0] = flags;
+		overlay_flags[4] = flags;
 
-		flags = overlay_flags[1];
+		flags = overlay_flags[5];
 		SET_FLAG(
 			flags,
 			_weapon_overlay_on_flashing_bit,
@@ -1675,7 +1688,12 @@ static void render_weapon_hud(
 			_weapon_overlay_on_default_bit,
 			flags == 0);
 		SET_FLAG(flags, _weapon_overlay_on_always_bit, TRUE);
-		overlay_flags[1] = flags;
+		overlay_flags[5] = flags;
+		/* port: a weapon without a second magazine draws none of its overlays,
+		as the Xbox never set these; its states above read an empty one, whose
+		total ammunition is drawn disabled (DamnationCE 1eb4122a) */
+		if (weapon_state->magazine_count < 2)
+			overlay_flags[4] = overlay_flags[5] = 0;
 
 		number_values[0] = weapon_state->magazines[0].rounds_remaining;
 		number_values[1] = weapon_state->magazines[0].rounds_loaded;
