@@ -28,6 +28,9 @@ the game gave their surface, as in the OpenGL device.
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef HALO_VITA
+#include <sys/mman.h>
+#endif
 #include "vita_compat.h"
 #include "vita_host.h"
 #include "frame_timing.h"
@@ -2357,6 +2360,60 @@ struct render_command
 
 #define COMMAND_RING 6144
 
+/* The recording's buffers that last the whole run - the command ring (6 MB),
+the state, material, values and bump arenas of the three frames in flight
+(~7 MB), the material cache and the target arenas, ~16 MB in all - in
+memory blocks of user RAM rather than the C heap: on the Vita newlib's
+fixed 48 MB, which the game, the system's libraries and the shader compiler
+share, and which they had filled to ~42 MB by the main menu, leaving a
+session's later allocations ~6 MB. Zeroed; never freed. A request of
+LASTING_OWN_BYTES or more has a block of its own, the smaller ones are
+carved from blocks of LASTING_BLOCK_BYTES; the C heap when there is no
+block. (The harness maps them: its C heap figures stay the Vita's.) */
+#define LASTING_BLOCK_BYTES (1024ul * 1024)
+#define LASTING_OWN_BYTES (512ul * 1024)
+
+static void *lasting_alloc(unsigned long bytes, const char *name)
+{
+	static unsigned char *block;
+	static unsigned long block_left;
+	unsigned char *memory = NULL;
+
+	bytes = (bytes + 63) & ~63ul;
+	if (bytes > block_left)
+	{
+		unsigned long size = bytes >= LASTING_OWN_BYTES ? (bytes + 4095) & ~4095ul : LASTING_BLOCK_BYTES;
+#ifdef HALO_VITA
+		int uid = -1;
+
+		memory = vita_host_block_alloc("halo renderer buffers", size, &uid);
+		if (memory)
+			memset(memory, 0, size);
+#else
+		memory = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (memory == MAP_FAILED)
+			memory = NULL;
+#endif
+		if (!memory)
+		{
+			platform_log("Direct3D: no memory block for the %s (%lu KB): in the C heap", name, bytes / 1024);
+			return calloc(1, bytes);
+		}
+		/* (a block of its own keeps what is left of the last one) */
+		if (bytes < LASTING_OWN_BYTES)
+		{
+			block = memory;
+			block_left = size;
+		}
+		else
+			return memory;
+	}
+	memory = block;
+	block += bytes;
+	block_left -= bytes;
+	return memory;
+}
+
 /* a single-producer, single-consumer ring: the game's thread advances the
 head, the worker the tail; neither locks, and a thread with nothing to do
 sleeps briefly rather than being signalled (a signal per draw is a system
@@ -3641,7 +3698,7 @@ static void worker_start(void)
 	const char *setting = getenv("HALO_RENDER_THREAD");
 
 	worker_enabled = !setting || atoi(setting) != 0;
-	commands = calloc(COMMAND_RING, sizeof(*commands));
+	commands = lasting_alloc(COMMAND_RING * sizeof(*commands), "command ring");
 	if (!commands)
 		worker_enabled = 0;
 	if (worker_enabled)
@@ -4009,7 +4066,7 @@ static const struct record_targets *record_targets_current(const D3DSurface *col
 		int index;
 
 		for (index = 0; index < 3; index++)
-			target_arenas[index] = calloc(TARGET_BLOCKS_PER_FRAME, sizeof(struct record_targets));
+			target_arenas[index] = lasting_alloc(TARGET_BLOCKS_PER_FRAME * sizeof(struct record_targets), "target arenas");
 	}
 	if (!target_arenas[state_arena_index] || target_blocks_used >= TARGET_BLOCKS_PER_FRAME)
 	{
@@ -5633,10 +5690,11 @@ static int record_split_enabled(void)
 		enabled = !setting || atoi(setting) != 0;
 		for (index = 0; enabled && index < 3; index++)
 		{
-			state_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_state));
-			material_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_material));
-			values_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_values));
-			bump_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_bump));
+			state_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_state), "state arenas");
+			material_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_material),
+				"material arenas");
+			values_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_values), "values arenas");
+			bump_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_bump), "bump arenas");
 			if (!state_arenas[index] || !material_arenas[index] || !values_arenas[index] || !bump_arenas[index])
 				enabled = 0;
 		}
@@ -5707,7 +5765,7 @@ static const struct record_state *record_state_current(void)
 				goto material_found;
 			}
 			if (!material_cache_pool)
-				material_cache_pool = malloc(MATERIAL_CACHE_CAPACITY * sizeof(*material_cache_pool));
+				material_cache_pool = lasting_alloc(MATERIAL_CACHE_CAPACITY * sizeof(*material_cache_pool), "material cache");
 			if (material_cache_pool && material_cache_used < MATERIAL_CACHE_CAPACITY)
 			{
 				material_last = &material_cache_pool[material_cache_used++];
