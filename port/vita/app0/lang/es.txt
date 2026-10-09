@@ -681,6 +681,7 @@
 "Downloading %s from the host\n\n%s of %s (%lu%%)" = "Descargando %s del anfitrión\n\n%s de %s (%lu%%)"
 "Downloading %s from the host to join its game in progress\n\n%s of %s (%lu%%)" = "Descargando %s del anfitrión para unirte a su partida en curso\n\n%s de %s (%lu%%)"
 "\n\nThe host's game is under way: you join it once the map is here." = "\n\nLa partida del anfitrión ya está en curso: te unes a ella en cuanto tengas el mapa."
+"\n\nThe host's game is under way: you join it once PC maps is on." = "\n\nLa partida del anfitrión ya está en curso: te unes a ella en cuanto actives Mapas de PC."
 "the host" = "el anfitrión"
 "Map sharing is off on this machine (HALO_MAP_SHARE=0)." = "Compartir mapas está desactivado en esta consola (HALO_MAP_SHARE=0)."
 "Map downloads are off (Multiplayer > Modded maps)." = "Las descargas de mapas están desactivadas (Multijugador > Mapas modificados)."

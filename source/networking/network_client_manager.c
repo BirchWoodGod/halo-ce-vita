@@ -1537,7 +1537,8 @@ boolean network_game_client_game_settings_updated(
 			/* port: the host's Custom Edition map, which this machine has,
 			with PC maps off: the player is asked to turn it on */
 			else if (check == _network_game_client_map_custom_needs_pc_maps &&
-				map_share_client_offer_pc_maps(client, message_packet->map.name, why, sizeof(why)))
+				map_share_client_offer_pc_maps(client, message_packet->map.name, (unsigned long)message_packet->map.version,
+					why, sizeof(why)))
 			{
 				network_event("asking the player to turn on PC maps for '%s'...", message_packet->map.name);
 			}
