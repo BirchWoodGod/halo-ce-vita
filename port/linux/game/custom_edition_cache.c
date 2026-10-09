@@ -1665,7 +1665,16 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	load_reader_start();
 	custom_edition_load_progress = 0.0f;
 	game_loading_screen_begin();
+	/* (and through the tags' check and move, which take a while each) */
+	tag_validate_progress = custom_edition_load_frame;
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+	halo_tag_relocate_progress = custom_edition_load_frame;
+#endif
 	tag_header = custom_edition_cache_tags_load_private(map_name, header);
+	tag_validate_progress = NULL;
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+	halo_tag_relocate_progress = NULL;
+#endif
 	model_checksum.active = FALSE;
 	custom_edition_cache_load_hooks(NULL);
 	/* (loaded: the screen stays up while scenario_load reads the first

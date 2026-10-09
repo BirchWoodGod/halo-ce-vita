@@ -300,6 +300,10 @@ boolean tag_validate_tags(
 	long file_length,
 	char const *map_name);
 
+/* (port) called now and then as tags are checked (the loading screen's
+frames: custom_edition_cache.c), or NULL */
+extern void (*tag_validate_progress)(void);
+
 /* the tags of a Custom Edition map, as custom_edition_cache_load loaded and
 custom_edition_cache_convert converted them (loaded_size bytes at
 tag_header, the start of a tag cache of tag_cache_size bytes), whose bitmap
