@@ -362,6 +362,9 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
+# (the menus' XML of this tree: the game looks beside its binary, and a copy
+# of the harness elsewhere found none: run_menus_test.sh)
+export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 
 if [ "${HALO_NETNS_INSIDE:-}" != 1 ]; then
 	export HALO_NETNS_INSIDE=1
