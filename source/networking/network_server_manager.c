@@ -763,6 +763,10 @@ static void network_game_server_refuse_late_joiner(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,
 	word reason);
+#ifdef HALO_DEDICATED_SERVER
+static void network_game_server_held_joins_update(
+	struct network_game_server *server);
+#endif
 static boolean network_game_server_drop_client_machine(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *client);
@@ -1674,6 +1678,11 @@ boolean network_game_server_idle(
 			if (success)
 			{
 				HALO_NET_DETAIL("server:client_machines", success = network_game_server_handle_client_machines(server));
+#ifdef HALO_DEDICATED_SERVER
+				/* port: the joins held while the game went back to the lobby */
+				if (success)
+					network_game_server_held_joins_update(server);
+#endif
 				if (success)
 				{
 					switch (server->state)
@@ -2750,6 +2759,170 @@ boolean network_game_server_accepts_late_joins(
 		network_game_has_free_player_slot(&server->game);
 }
 
+#ifdef HALO_DEDICATED_SERVER
+/* ---------- joins held while the dedicated server goes back to its lobby
+
+The last player gone, the dedicated server ends its game, shows the scores
+and loads its lobby's map (the official servers: about 20 seconds from the
+game's end to the next lobby, October 2026). A join asked then was refused
+(the game not open; or, in the game's last seconds, it loaded a game that was
+ending), the joiner sent back to the menus while the server browser still
+listed the game. Such a join is held instead: kept as it came, its
+connection kept alive with a postgame keep-alive a second (a joining machine
+drops a connection it hears nothing on for 5 seconds; it takes the keep-alive
+for nothing, every build so far, beta.1 and beta.2 too), and answered as a
+lobby's join once the lobby is up (dedicated_server_lobby_ready), so the
+joiner lands in the next game's lobby. Refused as before if the lobby is not
+up in NETWORK_GAME_SERVER_HELD_JOIN_LIMIT. Nothing new on the wire: network
+version 18's messages, and a client needs no change. */
+
+enum
+{
+	NETWORK_GAME_SERVER_HELD_JOIN_LIMIT = 45 * MILLISECONDS_PER_SECOND,
+	NETWORK_GAME_SERVER_HELD_JOIN_KEEP_ALIVE = 1 * MILLISECONDS_PER_SECOND,
+	/* (a join request is a few dozen bytes; a longer message is not held) */
+	NETWORK_GAME_SERVER_HELD_JOIN_SIZE = 512,
+};
+
+struct network_game_server_held_join
+{
+	/* the machine's connection when its join was held (none: no join held) */
+	struct network_connection *connection;
+	unsigned long held_time;
+	unsigned long keep_alive_time;
+	short size;
+	word message[NETWORK_GAME_SERVER_HELD_JOIN_SIZE / sizeof(word)];
+};
+
+static struct network_game_server_held_join network_game_server_held_joins[MAXIMUM_NETWORK_MACHINE_COUNT];
+
+/* the game is on its way back to the lobby: over, its last seconds or the
+scores (the lobby's map loads in the frame it switches to the pregame) */
+static boolean network_game_server_going_to_lobby(
+	struct network_game_server *server)
+{
+	return server->state == _network_game_server_state_postgame ||
+		(server->state == _network_game_server_state_ingame && game_engine_running() && !game_engine_can_score());
+}
+
+static struct network_game_server_held_join *network_game_server_held_join_of(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	long index = machine - server->client_machines;
+
+	return index >= 0 && index < MAXIMUM_NETWORK_MACHINE_COUNT ? &network_game_server_held_joins[index] : NULL;
+}
+
+static boolean network_game_server_join_is_held(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine)
+{
+	struct network_game_server_held_join *held = network_game_server_held_join_of(server, machine);
+
+	return held && held->connection && held->connection == machine->connection;
+}
+
+boolean network_game_server_hold_join(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	word const *message,
+	short message_size)
+{
+	struct network_game_server_held_join *held = network_game_server_held_join_of(server, machine);
+	unsigned long now = system_milliseconds();
+
+	if (!held || !machine->connection || network_game_server_client_machine_is_joined_to_game(server, machine) ||
+		!network_game_server_going_to_lobby(server) || message_size <= 0 ||
+		message_size > (short)sizeof(held->message))
+	{
+		return FALSE;
+	}
+	if (network_game_server_join_is_held(server, machine))
+	{
+		network_event("ignoring a second join request from machine #%d (its first is held)", machine->machine_index);
+		return TRUE;
+	}
+	csmemcpy(held->message, message, message_size);
+	held->size = message_size;
+	held->connection = machine->connection;
+	held->held_time = now;
+	held->keep_alive_time = 0;
+	network_event("holding machine #%d's join until the lobby is up (the game is going back to it)",
+		machine->machine_index);
+	return TRUE;
+}
+
+/* each frame: the held joins answered once the lobby is up, refused past
+their time, kept alive meanwhile */
+static void network_game_server_held_joins_update(
+	struct network_game_server *server)
+{
+	unsigned long now = system_milliseconds();
+	long index;
+
+	for (index = 0; index < MAXIMUM_NETWORK_MACHINE_COUNT; index++)
+	{
+		struct network_game_server_held_join *held = &network_game_server_held_joins[index];
+		struct network_game_server_client_machine *machine = &server->client_machines[index];
+
+		if (!held->connection)
+			continue;
+		/* (the machine gone, or joined some other way) */
+		if (machine->machine_index == NONE || machine->connection != held->connection ||
+			network_game_server_client_machine_is_joined_to_game(server, machine))
+		{
+			held->connection = NULL;
+			continue;
+		}
+		if (server->state == _network_game_server_state_pregame && dedicated_server_lobby_ready())
+		{
+			word message[NETWORK_GAME_SERVER_HELD_JOIN_SIZE / sizeof(word)];
+			short size = held->size;
+
+			csmemcpy(message, held->message, size);
+			held->connection = NULL;
+			network_event("answering machine #%d's join held %lu ms: the lobby is up", machine->machine_index,
+				now - held->held_time);
+			/* (from now, the time a connection has to join) */
+			machine->last_heard_time = now;
+			if (!network_game_server_handle_client_message(server, machine, message, size))
+			{
+				short machine_index = machine->machine_index;
+
+				if (machine->machine_index != NONE && network_game_server_drop_client_machine(server, machine))
+					network_event("client machine %x removed from game", machine_index);
+			}
+		}
+		else if (now - held->held_time > NETWORK_GAME_SERVER_HELD_JOIN_LIMIT)
+		{
+			struct message_server_machine_rejected rejection = { _rejection_code_game_is_closed };
+			struct network_message *reply;
+
+			held->connection = NULL;
+			network_event("refusing machine #%d's join held %lu ms: the lobby is not up", machine->machine_index,
+				now - held->held_time);
+			reply = create_network_game_message(_message_server_machine_rejected, &rejection, sizeof(rejection));
+			if (reply)
+				network_game_server_send_message_to_client_machine(server, machine, reply);
+			/* (its time to join over: dropped by the join timeout) */
+			machine->last_heard_time = now - NETWORK_GAME_SERVER_JOIN_TIMEOUT;
+		}
+		else if (now - held->keep_alive_time >= NETWORK_GAME_SERVER_HELD_JOIN_KEEP_ALIVE)
+		{
+			struct message_server_postgame_keep_alive keep_alive = { 0 };
+			struct network_message *message;
+
+			held->keep_alive_time = now;
+			message = create_network_game_message(_message_server_postgame_keep_alive, &keep_alive,
+				sizeof(keep_alive));
+			if (message)
+				network_game_server_send_message_to_client_machine(server, machine, message);
+		}
+	}
+}
+#endif
+
 boolean network_game_server_client_machine_is_loaded(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine)
@@ -3665,7 +3838,14 @@ static boolean network_game_server_client_machine_timed_out(
 	unsigned long silence = system_milliseconds() - machine->last_heard_time;
 
 	if (!network_game_server_client_machine_is_joined_to_game(server, machine))
+	{
+#ifdef HALO_DEDICATED_SERVER
+		/* (a held join: until it is answered, or refused) */
+		if (network_game_server_join_is_held(server, machine))
+			return FALSE;
+#endif
 		return silence > NETWORK_GAME_SERVER_JOIN_TIMEOUT;
+	}
 	if (server->state != _network_game_server_state_ingame ||
 		network_game_server_client_machine_is_local(server, machine))
 	{

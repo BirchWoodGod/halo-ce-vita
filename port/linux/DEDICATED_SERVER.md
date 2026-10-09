@@ -20,8 +20,11 @@ Vitas of network version 18 (Halo CE for PS Vita 1.1.0).
   shown, then the next game of the cycle starts in the lobby.
 - Starts a game when the first player is in (`sv_minplayers`), after a
   short countdown (`sv_start_delay`). Others join the game in progress.
+  A Vita that joins while a game is ending, or while the scores are shown,
+  waits and lands in the next game's lobby.
 - Ends a game that nobody is in after 30 seconds (`sv_end_empty`) and
-  waits in its lobby. While nobody is connected, it uses almost no CPU.
+  waits in its lobby (the scores shown only 3 seconds, to nobody). While
+  nobody is connected, it uses almost no CPU.
 - Is listed in the server browser (public by default) or is joined only by
   its code (`sv_public 0`), with or without a password.
 - Takes commands from `init.txt` at the start, and from its console (the
@@ -236,7 +239,7 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_scorelimit <score>` | The score that wins. 0 (the default): the gametype's. |
 | `sv_minplayers <n>` | The players a game needs to start (default 1). |
 | `sv_start_delay <seconds>` | The lobby's countdown once they are in (default 10). |
-| `sv_postgame <seconds>` | How long the scores are shown (default 10). |
+| `sv_postgame <seconds>` | How long the scores are shown (default 10; 3 when nobody is in the game). |
 | `sv_end_empty <seconds>` | A game that nobody is in ends after this (default 30; 0: never). |
 | `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby. 0 (the default): no downloads. |

@@ -90,6 +90,8 @@ enum
 	DEDICATED_JOINS_PER_MINUTE = 6,
 	JOIN_REFILL_SECONDS = 60 / DEDICATED_JOINS_PER_MINUTE,
 	MAXIMUM_JOIN_ADDRESSES = 128,
+	/* sv_postgame's least: the scores' seconds when nobody is in the game */
+	MINIMUM_POSTGAME_SECONDS = 3,
 	/* frames a second with machines connected (the tick rate), and without */
 	ACTIVE_FRAME_CAP = 30,
 	IDLE_FRAME_CAP = 10,
@@ -429,6 +431,16 @@ static boolean apply_entry(
 	return TRUE;
 }
 
+/* how long the scores are shown: sv_postgame, or its least (3 s) when no
+machine is in the game to see them (the last player gone: a Vita joining
+then waits in its held join, network_server_manager.c, for the lobby) */
+static real postgame_seconds_wanted(
+	void)
+{
+	return network_game_server_dedicated_machine_count() > 0 ? (real)dedicated.postgame_seconds_setting :
+		(real)MINIMUM_POSTGAME_SECONDS;
+}
+
 /* ends the game being played (sv_end_game, the time limit, nobody left) */
 static boolean end_game(
 	char const *why,
@@ -500,7 +512,7 @@ static void command_help(
 		"  sv_scorelimit <score>            the score that wins (0: the gametype's)",
 		"  sv_minplayers <n>                players a game needs to start (1)",
 		"  sv_start_delay <seconds>         the lobby's countdown once they are in (10)",
-		"  sv_postgame <seconds>            the scores shown after a game (10)",
+		"  sv_postgame <seconds>            the scores shown after a game (10; 3 if nobody is in it)",
 		"  sv_end_empty <seconds>           a game nobody is in ends after this (30; 0 never)",
 		"  sv_coop <level> [difficulty 0-3] co-op on a campaign level (a10...) instead of the cycle",
 		"  sv_map_download <0|1>            joiners may download the cycle's custom maps (0)",
@@ -1028,7 +1040,7 @@ static void command(
 	}
 	else if (!csstrcmp(name, "sv_postgame"))
 	{
-		if (integer_argument(name, argument, 3, 120, &dedicated.postgame_seconds_setting))
+		if (integer_argument(name, argument, MINIMUM_POSTGAME_SECONDS, 120, &dedicated.postgame_seconds_setting))
 			say("the scores are shown %ld seconds", dedicated.postgame_seconds_setting);
 	}
 	else if (!csstrcmp(name, "sv_end_empty"))
@@ -1383,7 +1395,7 @@ void dedicated_server_update(
 			if (game_engine_showing_postgame())
 			{
 				dedicated.postgame_seconds += seconds;
-				if (dedicated.postgame_seconds >= (real)dedicated.postgame_seconds_setting && !dedicated.back_to_lobby)
+				if (dedicated.postgame_seconds >= postgame_seconds_wanted() && !dedicated.back_to_lobby)
 				{
 					dedicated.back_to_lobby = TRUE;
 					network_game_server_reset_to_pregame(server);
@@ -1422,7 +1434,7 @@ void dedicated_server_update(
 	case _server_postgame:
 		/* (co-op: a level won; the server's next round is the next level) */
 		dedicated.postgame_seconds += seconds;
-		if (dedicated.postgame_seconds >= (real)dedicated.postgame_seconds_setting && !dedicated.back_to_lobby)
+		if (dedicated.postgame_seconds >= postgame_seconds_wanted() && !dedicated.back_to_lobby)
 		{
 			dedicated.back_to_lobby = TRUE;
 			network_game_server_reset_to_pregame(server);
