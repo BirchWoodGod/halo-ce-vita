@@ -32,15 +32,12 @@ Tremor's remaining stack use is bounded by Vorbis's largest block (8192
 samples: two arrays of 4096 entries in vorbis_book_decodevs_add, 32 KB on
 a 32-bit machine).
 
-The ADPCM is the format the mixer decodes (dsound_sdl.c,
-decode_adpcm_blocks): per block and channel, the first sample and the step
-index in a 4-byte header, then 63 nibbles in 4-byte groups alternating
-between channels, low nibble first, and a padding nibble of 0. The encoder
-predicts with the decoder's own arithmetic, so what is played is what the
-encoder chose, and carries its step index from block to block.
+The ADPCM is written by xbox_adpcm_encoder.c, which also writes Custom
+Edition's 16-bit PCM permutations (custom_edition_sounds.c).
 */
 
 #include "ogg_sound.h"
+#include "xbox_adpcm_encoder.h"
 
 #include <string.h>
 
@@ -65,88 +62,9 @@ enum
 	WORKING_ALIGNMENT = 8,
 };
 
-/* ---------- IMA ADPCM */
-
-static const short ima_step_table[89] =
-{
-	7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
-	50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
-	253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963,
-	1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327,
-	3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442,
-	11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
-	32767,
-};
-
-static const signed char ima_index_table[16] =
-{
-	-1, -1, -1, -1, 2, 4, 6, 8,
-	-1, -1, -1, -1, 2, 4, 6, 8,
-};
-
-/* the nibble that brings the decoder nearest `target` from `*predictor` at
-step index `*index`, and the decoder's state after it (dsound_sdl.c,
-ima_expand_fast: the same arithmetic) */
-static int ima_encode(int target, int *predictor, int *index)
-{
-	int step = ima_step_table[*index];
-	int difference = target - *predictor;
-	int nibble = 0;
-	int decoded;
-	int next;
-
-	if (difference < 0)
-	{
-		nibble = 8;
-		difference = -difference;
-	}
-	if (difference >= step)
-	{
-		nibble |= 4;
-		difference -= step;
-	}
-	if (difference >= step >> 1)
-	{
-		nibble |= 2;
-		difference -= step >> 1;
-	}
-	if (difference >= step >> 2)
-	{
-		nibble |= 1;
-	}
-
-	decoded = step >> 3;
-	if (nibble & 1)
-		decoded += step >> 2;
-	if (nibble & 2)
-		decoded += step >> 1;
-	if (nibble & 4)
-		decoded += step;
-	if (nibble & 8)
-		decoded = -decoded;
-	decoded += *predictor;
-	if (decoded > 32767)
-		decoded = 32767;
-	if (decoded < -32768)
-		decoded = -32768;
-	next = *index + ima_index_table[nibble];
-	if (next < 0)
-		next = 0;
-	if (next > 88)
-		next = 88;
-	*predictor = decoded;
-	*index = next;
-	return nibble;
-}
-
 uint32_t ogg_sound_adpcm_bytes(uint32_t frames, int channels)
 {
-	uint32_t blocks = frames / OGG_SOUND_ADPCM_BLOCK_SAMPLES +
-		(frames % OGG_SOUND_ADPCM_BLOCK_SAMPLES ? 1 : 0);
-
-	if (channels < 1 || channels > MAXIMUM_CHANNELS)
-		return 0;
-	return blocks * OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	return xbox_adpcm_bytes(frames, channels);
 }
 
 uint32_t ogg_sound_output_frames(uint64_t frames, long stream_rate, long rate)
@@ -277,22 +195,13 @@ static struct
 	jmp_buf out_of_memory;
 
 	/* the output */
-	uint8_t *output;
-	uint32_t output_blocks;
-	uint32_t block_bytes;
-	uint32_t blocks_written;
-	/* the block being filled: frames of the output's channels */
-	short block[OGG_SOUND_ADPCM_BLOCK_SAMPLES][MAXIMUM_CHANNELS];
-	int block_frames;
-	/* the encoder's step index, by channel */
-	int step_index[MAXIMUM_CHANNELS];
+	struct xbox_adpcm_encoder encoder;
 	/* the stream's rate is halved: the stream's frame before the pair being
 	filtered, the pair's first frame, and whether there is one */
 	int previous[MAXIMUM_CHANNELS];
 	int pending[MAXIMUM_CHANNELS];
 	int have_pending;
 	int halved;
-	int full;
 
 	/* the stream */
 	ogg_sync_state sync;
@@ -371,76 +280,10 @@ void *halo_ogg_realloc(void *pointer, size_t bytes)
 
 /* ---------- the output */
 
-static void block_encode(void)
-{
-	int channels = decoder.request->channels;
-	uint8_t *data;
-	int channel;
-	int frame;
-
-	/* (a part block is held: the last sample repeats, which the ear does
-	not hear where silence would click) */
-	for (frame = decoder.block_frames; frame < OGG_SOUND_ADPCM_BLOCK_SAMPLES; frame++)
-		for (channel = 0; channel < channels; channel++)
-			decoder.block[frame][channel] = frame ? decoder.block[frame - 1][channel] : 0;
-
-	data = decoder.output + decoder.blocks_written * decoder.block_bytes;
-	memset(data, 0, decoder.block_bytes);
-	for (channel = 0; channel < channels; channel++)
-	{
-		int predictor = decoder.block[0][channel];
-		int index = decoder.step_index[channel];
-		int sample;
-
-		data[channel * 4 + 0] = (uint8_t)(predictor & 0xff);
-		data[channel * 4 + 1] = (uint8_t)((predictor >> 8) & 0xff);
-		data[channel * 4 + 2] = (uint8_t)index;
-		data[channel * 4 + 3] = 0;
-		for (sample = 1; sample < OGG_SOUND_ADPCM_BLOCK_SAMPLES; sample++)
-		{
-			int nibble = ima_encode(decoder.block[sample][channel], &predictor, &index);
-			int group = (sample - 1) / 8;
-			int position = (sample - 1) % 8;
-			uint8_t *byte = data + 4 * channels + (group * channels + channel) * 4 + position / 2;
-
-			*byte |= (uint8_t)(position & 1 ? nibble << 4 : nibble);
-		}
-		decoder.step_index[channel] = index;
-	}
-	decoder.blocks_written++;
-	decoder.block_frames = 0;
-	if (decoder.blocks_written >= decoder.output_blocks)
-		decoder.full = 1;
-}
-
 /* one frame of the output's channels */
 static void output_frame(int const *frame)
 {
-	int channel;
-
-	if (decoder.full)
-	{
-		decoder.result->truncated = 1;
-		return;
-	}
-	for (channel = 0; channel < decoder.request->channels; channel++)
-	{
-		int value = frame[channel];
-
-		if (value > 32767)
-			value = 32767;
-		if (value < -32768)
-			value = -32768;
-		decoder.block[decoder.block_frames][channel] = (short)value;
-		decoder.result->sum_of_squares += (double)value * value;
-		if (value < 0)
-			value = -value;
-		if (value > decoder.result->peak)
-			decoder.result->peak = value;
-	}
-	decoder.result->frames_decoded++;
-	if (++decoder.block_frames == OGG_SOUND_ADPCM_BLOCK_SAMPLES)
-		block_encode();
+	xbox_adpcm_encoder_frame(&decoder.encoder, frame);
 }
 
 /* one frame of the stream, in 16-bit PCM by stream channel */
@@ -496,12 +339,12 @@ static void pcm_drain(void)
 	ogg_int32_t **pcm;
 	int frames;
 
-	while (!decoder.full && (frames = vorbis_synthesis_pcmout(&decoder.dsp, &pcm)) > 0)
+	while (!decoder.encoder.full && (frames = vorbis_synthesis_pcmout(&decoder.dsp, &pcm)) > 0)
 	{
 		int stream_channels = decoder.info.channels;
 		int frame;
 
-		for (frame = 0; frame < frames && !decoder.full; frame++)
+		for (frame = 0; frame < frames && !decoder.encoder.full; frame++)
 		{
 			int samples[MAXIMUM_CHANNELS];
 			int channel;
@@ -588,7 +431,7 @@ static int page_take(ogg_page *page, enum ogg_sound_status *status)
 		if (result < 0)
 			continue;
 		*status = packet_take(&packet);
-		if (*status != _ogg_sound_ok || decoder.full)
+		if (*status != _ogg_sound_ok || decoder.encoder.full)
 			return 1;
 	}
 	return ogg_page_eos(page);
@@ -651,10 +494,7 @@ enum ogg_sound_status ogg_sound_transcode(
 	}
 	decoder.request = request;
 	decoder.result = result;
-	decoder.output = (uint8_t *)request->output;
-	decoder.block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)request->channels;
-	decoder.output_blocks = request->output_bytes / decoder.block_bytes;
-	decoder.full = decoder.output_blocks == 0;
+	xbox_adpcm_encoder_begin(&decoder.encoder, request->output, request->output_bytes, request->channels);
 
 	decoder.heap = tlsf_create_with_pool(request->working, request->working_bytes);
 	if (!decoder.heap)
@@ -665,7 +505,7 @@ enum ogg_sound_status ogg_sound_transcode(
 	{
 		status = stream_decode();
 		/* (the last frame of a halved stream, and the last part block) */
-		if (decoder.have_pending && !decoder.full)
+		if (decoder.have_pending && !decoder.encoder.full)
 			output_frame(decoder.pending);
 	}
 	else
@@ -675,17 +515,12 @@ enum ogg_sound_status ogg_sound_transcode(
 	/* the heap goes whole: nothing in it is used again */
 	decoder.heap = NULL;
 
-	if (decoder.block_frames && !decoder.full)
-		block_encode();
-	/* the rest is silence: blocks of zeros (a first sample of 0 and
-	nibbles of 0 are 0 throughout) */
-	if (decoder.blocks_written < decoder.output_blocks)
-	{
-		memset(decoder.output + decoder.blocks_written * decoder.block_bytes, 0,
-			(size_t)(decoder.output_blocks - decoder.blocks_written) * decoder.block_bytes);
-	}
-	if (result->frames_decoded < decoder.output_blocks * OGG_SOUND_ADPCM_BLOCK_SAMPLES)
-		result->frames_padded = decoder.output_blocks * OGG_SOUND_ADPCM_BLOCK_SAMPLES - result->frames_decoded;
+	/* (the last part block, and silence after it) */
+	result->frames_padded = xbox_adpcm_encoder_finish(&decoder.encoder);
+	result->frames_decoded = decoder.encoder.frames;
+	result->truncated |= decoder.encoder.truncated;
+	result->sum_of_squares = decoder.encoder.sum_of_squares;
+	result->peak = decoder.encoder.peak;
 	result->status = status;
 	decoder.request = NULL;
 	decoder.result = NULL;
@@ -701,7 +536,6 @@ enum ogg_sound_status ogg_sound_transcode(
 	memset(result, 0, sizeof(*result));
 	if (request && request->output)
 		memset(request->output, 0, request->output_bytes);
-	(void)ima_encode;
 	result->status = _ogg_sound_unsupported_format;
 	return result->status;
 }
