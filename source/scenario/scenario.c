@@ -195,6 +195,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "load_profile.h"
 #include "custom_edition_cache.h"
+#include "point_leaf_cache.h"
 #endif
 
 /* ---------- constants */
@@ -425,6 +426,9 @@ void scenario_unload(
 	global_structure_bsp = NULL;
 	global_collision_bsp = NULL;
 	global_bsp3d = NULL;
+#ifdef HALO_LINUX
+	halo_structure_bsp_generation++;
+#endif
 	global_game_globals = NULL;
 
 	return;
@@ -861,16 +865,62 @@ short scenario_get_structure_reference_index_from_tag_index(
 	return result;
 }
 
+#ifdef HALO_LINUX
+static void scenario_location_from_leaf(struct location *location);
+
+/* (port) scenario_location_from_point with the leaf found by
+point_leaf_cache.c, the walk's own answer: the point physics' points */
+void scenario_location_from_point_keyed(
+	struct location *location,
+	const real_point3d *point,
+	long key)
+{
+	location->leaf_index = point_leaf_cache_leaf_from_point(key, point);
+	scenario_location_from_leaf(location);
+
+	return;
+}
+
+/* (port) and with the point's cell kept for a particle yet to be made */
+void scenario_location_from_point_seed(
+	struct location *location,
+	const real_point3d *point,
+	struct point_leaf_cell *seed)
+{
+	location->leaf_index = point_leaf_cache_seed(point, seed);
+	scenario_location_from_leaf(location);
+
+	return;
+}
+#endif
+
 void scenario_location_from_point(
 	struct location *location,
 	const real_point3d *point)
 {
+#ifdef HALO_LINUX
+	location->leaf_index = bsp3d_test_point(
+		global_bsp3d_get(),
+		0,
+		point);
+	scenario_location_from_leaf(location);
+
+	return;
+}
+
+/* (the rest of scenario_location_from_point: the leaf's cluster) */
+static void scenario_location_from_leaf(
+	struct location *location)
+{
+	long cluster_index;
+#else
 	long cluster_index;
 
 	location->leaf_index = bsp3d_test_point(
 		global_bsp3d_get(),
 		0,
 		point);
+#endif
 
 	if (location->leaf_index == NONE)
 	{
@@ -1181,6 +1231,9 @@ boolean scenario_switch_structure_bsp(
 			global_structure_bsp = NULL;
 			global_collision_bsp = NULL;
 			global_bsp3d = NULL;
+#ifdef HALO_LINUX
+			halo_structure_bsp_generation++;
+#endif
 			if (old_structure_bsp_index != NONE)
 			{
 				structure_bsp_index = old_structure_bsp_index;
@@ -1211,6 +1264,10 @@ boolean scenario_switch_structure_bsp(
 				&global_structure_bsp->collision_bsp,
 				0,
 				struct collision_bsp);
+#ifdef HALO_LINUX
+			/* (port: the cells point_leaf_cache.c knows were the old one's) */
+			halo_structure_bsp_generation++;
+#endif
 			scenario_globals->structure_bsp_index = structure_bsp_index;
 			global_structure_bsp_index = structure_bsp_index;
 

@@ -100,6 +100,8 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "render_epoch.h"
 void platform_log(const char *format, ...);
+/* (HALO_TICK_PROFILE) the obstruction rays' counts (lines_profile.c) */
+#include "lines_profile.h"
 #else
 #define halo_epoch_threaded 0
 #endif
@@ -1064,6 +1066,36 @@ static void source_obstruction_store(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (debug) HALO_SOUND_OBSTRUCTION_VERIFY=1: each obstruction ray is cast a
+second time by the full test (collision_test_vector), any difference logged */
+static boolean source_obstruction_verify(
+	void)
+{
+	static int verify = -1;
+
+	if (verify < 0)
+	{
+		const char *setting = getenv("HALO_SOUND_OBSTRUCTION_VERIFY");
+
+		verify = setting && atoi(setting) != 0;
+	}
+	return verify;
+}
+
+static void source_obstruction_mismatch(
+	real_point3d const *camera,
+	real_point3d const *position,
+	boolean obstructed)
+{
+	static unsigned long mismatches;
+
+	if (mismatches++ < 20)
+		platform_log("sound obstruction mismatch: camera %.9g %.9g %.9g, source %.9g %.9g %.9g, obstructed %d",
+			camera->x, camera->y, camera->z, position->x, position->y, position->z, obstructed);
+}
+#endif
+
 void compute_sound_obstruction(
 	short local_player_index,
 	struct sound_source *source,
@@ -1074,6 +1106,7 @@ void compute_sound_obstruction(
 	long slot = obstruction_cache_slot(local_player_index, &source->location.position);
 	long now = game_time_get();
 
+	halo_lines_stats.obstruction_calls++;
 	if (obstruction_cache[slot].valid &&
 		obstruction_cache[slot].game_time == now &&
 		obstruction_cache[slot].local_player_index == local_player_index &&
@@ -1083,10 +1116,14 @@ void compute_sound_obstruction(
 	{
 		source->obstruction = obstruction_cache[slot].obstruction;
 		source->occlusion = obstruction_cache[slot].occlusion;
+		halo_lines_stats.obstruction_same_tick++;
 		return;
 	}
 	if (source_obstruction_reused(local_player_index, source, &camera->position, now))
+	{
+		halo_lines_stats.obstruction_reused++;
 		return;
+	}
 #endif
 
 	match_assert(
@@ -1123,13 +1160,46 @@ void compute_sound_obstruction(
 				source->location.game_location.cluster_index))
 			{
 				real_vector3d listener_to_source;
+#ifdef HALO_LINUX
+				unsigned long const flags =
+					FLAG(_collision_test_front_facing_surfaces_bit) |
+					FLAG(_collision_test_structure_bit) |
+					FLAG(_collision_test_media_bit) |
+					FLAG(_collision_test_objects_bit) |
+					FLAG(_collision_test_objects_scenery_bit) |
+					FLAG(_collision_test_objects_machines_bit);
+				unsigned long long started = halo_lines_now();
+				boolean obstructed;
+#else
 				struct collision_result collision;
+#endif
 
 				source->obstruction = 0.45f;
 				vector_from_points3d(
 					&camera->position,
 					&source->location.position,
 					&listener_to_source);
+#ifdef HALO_LINUX
+				/* (port) only whether the ray meets anything counts: the test
+				stops at the first thing it meets (collisions.c) */
+				obstructed = collision_test_vector_obstructed(
+					flags,
+					&camera->position,
+					&listener_to_source,
+					NONE);
+				if (started)
+					halo_lines_stats.obstruction_us += halo_lines_now() - started;
+				halo_lines_stats.obstruction_rays++;
+				halo_lines_stats.obstruction_ray_hits += obstructed ? 1 : 0;
+				if (source_obstruction_verify())
+				{
+					struct collision_result collision;
+
+					if (collision_test_vector(flags, &camera->position, &listener_to_source, NONE, &collision) != obstructed)
+						source_obstruction_mismatch(&camera->position, &source->location.position, obstructed);
+				}
+				if (!obstructed)
+#else
 				if (!collision_test_vector(
 					FLAG(_collision_test_front_facing_surfaces_bit) |
 						FLAG(_collision_test_structure_bit) |
@@ -1141,6 +1211,7 @@ void compute_sound_obstruction(
 					&listener_to_source,
 					NONE,
 					&collision))
+#endif
 				{
 					source->obstruction = 0.0f;
 					source->occlusion = 0.0f;

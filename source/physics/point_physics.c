@@ -64,6 +64,24 @@ real point_physics_definition_get_mass(
 	return definition->runtime_mass_over_radius_cubed * radius * radius * radius;
 }
 
+#ifdef HALO_LINUX
+/* (port) point_physics_update, its point named by a key (point_leaf_cache.h:
+a particle's or contrail point's datum) for the collision test, whose leaf or
+cell may be known already (point_leaf_cache.c); NONE: none */
+unsigned long point_physics_update_keyed(
+	long key,
+	unsigned long flags,
+	struct point_physics_definition const *definition,
+	struct location *location,
+	short force_weather_palette_index,
+	real_point3d *position,
+	real_vector3d *translational_velocity,
+	real_vector3d const *translational_force,
+	real_vector3d *collision_normal,
+	short *collision_material_type,
+	real radius,
+	real dt)
+#else
 unsigned long point_physics_update(
 	unsigned long flags,
 	struct point_physics_definition const *definition,
@@ -76,6 +94,7 @@ unsigned long point_physics_update(
 	short *collision_material_type,
 	real radius,
 	real dt)
+#endif
 {
 	unsigned long result = 0;
 
@@ -178,7 +197,11 @@ unsigned long point_physics_update(
 			delta.j = translational_velocity->j * dt;
 			delta.k = translational_velocity->k * dt;
 
+#ifdef HALO_LINUX
+			if (!collision_test_vector_keyed(collision_flags, position, &delta, NONE, &collision, key))
+#else
 			if (!collision_test_vector(collision_flags, position, &delta, NONE, &collision))
+#endif
 			{
 				if (collision.location.leaf_index != NONE)
 				{
@@ -238,6 +261,25 @@ unsigned long point_physics_update(
 
 	return result;
 }
+
+#ifdef HALO_LINUX
+unsigned long point_physics_update(
+	unsigned long flags,
+	struct point_physics_definition const *definition,
+	struct location *location,
+	short force_weather_palette_index,
+	real_point3d *position,
+	real_vector3d *translational_velocity,
+	real_vector3d const *translational_force,
+	real_vector3d *collision_normal,
+	short *collision_material_type,
+	real radius,
+	real dt)
+{
+	return point_physics_update_keyed(NONE, flags, definition, location, force_weather_palette_index, position,
+		translational_velocity, translational_force, collision_normal, collision_material_type, radius, dt);
+}
+#endif
 
 struct point_physics_definition *point_physics_definition_interpolate(
 	struct point_physics_definition const *physics1,

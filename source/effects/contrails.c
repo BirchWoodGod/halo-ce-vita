@@ -76,6 +76,9 @@ symbols in this file:
 #include "physics/point_physics.h"
 #include "saved games/game_state.h"
 #include "scenario/scenario.h"
+#ifdef HALO_LINUX
+#include "point_leaf_cache.h"
+#endif
 
 /* ---------- constants */
 
@@ -691,7 +694,13 @@ static void contrail_update_points(
 
 				if (state->physics.index != NONE)
 				{
+#ifdef HALO_LINUX
+					/* (port) the point names its cell (point_leaf_cache.c) */
+					point_physics_update_keyed(
+						POINT_LEAF_KEY(_point_leaf_contrail_point, contrail_point_index),
+#else
 					point_physics_update(
+#endif
 						0,
 						point_physics_definition_get(state->physics.index),
 						&contrail_point->location,

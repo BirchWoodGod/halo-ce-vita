@@ -49,6 +49,12 @@ symbols in this file:
 #include "scenario/wind_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 #include "tag_files/tag_groups.h"
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#include "structures/structures.h"
+#include "render_epoch.h"
+#include "point_leaf_cache.h"
+#endif
 
 /* ---------- constants */
 
@@ -350,11 +356,193 @@ void wind_initialize_for_new_map(
 	return;
 }
 
-boolean scenario_get_current(
+#ifdef HALO_LINUX
+/* (port) what scenario_get_current reads of the structure bsp's tags for a
+location, by cluster, read once for each bsp: the point physics asks for each
+particle's current every frame (~600 times a tick in b30's fight, ~0.26 M of
+the Vita's cycles a tick in callgrind's Cortex-A9 model), each call a dozen
+tag reads and two or three tag lookups whose answers never change. A cluster's
+weather palette entry and its fog: none, a fog region, or a fog plane (its
+plane, the offset its fog adds, and the region a point behind it is in, as
+scenario_get_fog_region_index finds them); a region's weather palette entry
+and whether its fog is water, when it has both. The same values, compared and
+chosen as scenario_get_current and scenario_get_fog_region_index do; the
+tick's thread only (the point physics runs there), others reading the tags as
+before; built again when the bsp changes (halo_structure_bsp_generation) */
+enum
+{
+	_current_fog_none,
+	_current_fog_region,
+	_current_fog_plane
+};
+
+static struct
+{
+	unsigned long generation;
+	boolean usable;
+	short cluster_count;
+	struct
+	{
+		short weather_palette_index;
+		short fog_kind;
+		/* the region (a plane's for a point behind it), valid */
+		short fog_region_index;
+		real_plane3d const *plane;
+		real plane_distance;
+	} clusters[MAXIMUM_CLUSTERS_PER_STRUCTURE];
+	struct
+	{
+		/* (its palette entry valid, its weather palette entry and fog not NONE) */
+		boolean has_weather;
+		boolean water;
+		short weather_palette_index;
+	} regions[MAXIMUM_FOG_REGIONS_PER_STRUCTURE];
+} current_clusters;
+
+static boolean current_clusters_ready(
+	void)
+{
+	struct structure_bsp *structure_bsp;
+	short cluster_index;
+	short region_index;
+
+	if (halo_epoch_threaded && !halo_epoch_on_mutator_inline())
+	{
+		return FALSE;
+	}
+	if (current_clusters.generation == halo_structure_bsp_generation)
+	{
+		return current_clusters.usable;
+	}
+	current_clusters.generation = halo_structure_bsp_generation;
+	current_clusters.usable = FALSE;
+	structure_bsp = global_structure_bsp_get();
+	if (!structure_bsp ||
+		structure_bsp->clusters.count > MAXIMUM_CLUSTERS_PER_STRUCTURE ||
+		structure_bsp->fog_regions.count > MAXIMUM_FOG_REGIONS_PER_STRUCTURE)
+	{
+		return FALSE;
+	}
+	for (region_index = 0; region_index < structure_bsp->fog_regions.count; region_index++)
+	{
+		struct structure_fog_region *fog_region = TAG_BLOCK_GET_ELEMENT(
+			&structure_bsp->fog_regions,
+			region_index,
+			struct structure_fog_region);
+
+		current_clusters.regions[region_index].has_weather = FALSE;
+		current_clusters.regions[region_index].water = FALSE;
+		current_clusters.regions[region_index].weather_palette_index = fog_region->weather_palette_index;
+		if (VALID_INDEX(fog_region->fog_palette_index, structure_bsp->fog_palette.count) &&
+			fog_region->weather_palette_index != NONE)
+		{
+			struct structure_fog_palette_entry *fog_palette = TAG_BLOCK_GET_ELEMENT(
+				&structure_bsp->fog_palette,
+				fog_region->fog_palette_index,
+				struct structure_fog_palette_entry);
+
+			if (fog_palette->fog.index != NONE)
+			{
+				current_clusters.regions[region_index].has_weather = TRUE;
+				current_clusters.regions[region_index].water =
+					TEST_FLAG(fog_definition_get(fog_palette->fog.index)->flags, 0) ? TRUE : FALSE;
+			}
+		}
+	}
+	for (cluster_index = 0; cluster_index < structure_bsp->clusters.count; cluster_index++)
+	{
+		struct structure_cluster *cluster = TAG_BLOCK_GET_ELEMENT(
+			&structure_bsp->clusters,
+			cluster_index,
+			struct structure_cluster);
+		short fog_reference = cluster->fog_reference;
+
+		current_clusters.clusters[cluster_index].weather_palette_index = cluster->weather_palette_index;
+		current_clusters.clusters[cluster_index].fog_kind = _current_fog_none;
+		current_clusters.clusters[cluster_index].fog_region_index = NONE;
+		current_clusters.clusters[cluster_index].plane = NULL;
+		current_clusters.clusters[cluster_index].plane_distance = 0.0f;
+		if (fog_reference == NONE)
+		{
+			continue;
+		}
+		if (TEST_FLAG((word)fog_reference, 15))
+		{
+			struct structure_fog_plane *fog_plane;
+			long fog_index;
+
+			if ((fog_reference & SHORT_MAX) >= structure_bsp->fog_planes.count)
+			{
+				continue;
+			}
+			fog_plane = TAG_BLOCK_GET_ELEMENT(
+				&structure_bsp->fog_planes,
+				fog_reference & SHORT_MAX,
+				struct structure_fog_plane);
+			if (!VALID_INDEX(fog_plane->region_index, structure_bsp->fog_regions.count))
+			{
+				continue;
+			}
+			fog_index = scenario_fog_region_get_fog_index(fog_plane->region_index);
+			if (fog_index != NONE)
+			{
+				struct fog_definition *fog = fog_definition_get(fog_index);
+
+				if (TEST_FLAG(fog->flags, 0))
+					current_clusters.clusters[cluster_index].plane_distance = fog->plane_distance;
+			}
+			current_clusters.clusters[cluster_index].fog_kind = _current_fog_plane;
+			current_clusters.clusters[cluster_index].fog_region_index = fog_plane->region_index;
+			current_clusters.clusters[cluster_index].plane = &fog_plane->plane;
+		}
+		else if (VALID_INDEX(fog_reference & SHORT_MAX, structure_bsp->fog_regions.count))
+		{
+			current_clusters.clusters[cluster_index].fog_kind = _current_fog_region;
+			current_clusters.clusters[cluster_index].fog_region_index = fog_reference & SHORT_MAX;
+		}
+	}
+	current_clusters.cluster_count = (short)structure_bsp->clusters.count;
+	current_clusters.usable = TRUE;
+
+	return TRUE;
+}
+
+/* (debug) HALO_SCENARIO_CURRENT_VERIFY=1: each answer from the table read
+from the tags as well, any difference logged */
+static boolean current_clusters_verify(
+	void)
+{
+	static int verify = -1;
+
+	if (verify < 0)
+	{
+		char const *setting = getenv("HALO_SCENARIO_CURRENT_VERIFY");
+
+		verify = setting && atoi(setting) != 0;
+	}
+	return verify;
+}
+
+static void current_clusters_mismatch(
+	struct location const *location,
+	short tags_weather_palette_index,
+	short weather_palette_index)
+{
+	static unsigned long mismatches;
+	void platform_log(const char *format, ...);
+
+	if (mismatches++ < 20)
+		platform_log("scenario current mismatch: cluster %d, weather palette entry %d from the tags, %d from the table",
+			location->cluster_index, tags_weather_palette_index, weather_palette_index);
+}
+#endif
+
+/* (the weather palette entry and water of a location, from the tags) */
+static short scenario_current_weather_palette_index(
 	struct location const *location,
 	real_point3d const *position,
-	real_vector3d *current,
-	long flags)
+	long flags,
+	boolean *water)
 {
 	boolean in_water = FALSE;
 	short weather_palette_index = NONE;
@@ -408,6 +596,75 @@ boolean scenario_get_current(
 				}
 			}
 		}
+	}
+
+	*water = in_water;
+	return weather_palette_index;
+}
+
+boolean scenario_get_current(
+	struct location const *location,
+	real_point3d const *position,
+	real_vector3d *current,
+	long flags)
+{
+	boolean in_water = FALSE;
+	short weather_palette_index = NONE;
+
+#ifdef HALO_LINUX
+	if (location->cluster_index != NONE &&
+		location->cluster_index >= 0 &&
+		current_clusters_ready() &&
+		location->cluster_index < current_clusters.cluster_count)
+	{
+		short fog_region_index = NONE;
+		short cluster_index = location->cluster_index;
+
+		weather_palette_index = current_clusters.clusters[cluster_index].weather_palette_index;
+		switch (current_clusters.clusters[cluster_index].fog_kind)
+		{
+		case _current_fog_region:
+			fog_region_index = current_clusters.clusters[cluster_index].fog_region_index;
+			break;
+		case _current_fog_plane:
+			/* (scenario_get_fog_region_index: no position with the water forced) */
+			if (TEST_FLAG(flags, _scenario_current_force_water_bit) ||
+				!position ||
+				plane3d_distance_to_point(current_clusters.clusters[cluster_index].plane, position) +
+					current_clusters.clusters[cluster_index].plane_distance < 0.0f)
+			{
+				fog_region_index = current_clusters.clusters[cluster_index].fog_region_index;
+			}
+			break;
+		}
+		if (fog_region_index != NONE && current_clusters.regions[fog_region_index].has_weather)
+		{
+			if (current_clusters.regions[fog_region_index].water)
+			{
+				if (!TEST_FLAG(flags, _scenario_current_force_no_water_bit))
+				{
+					weather_palette_index = current_clusters.regions[fog_region_index].weather_palette_index;
+					in_water = TRUE;
+				}
+			}
+			else if (!TEST_FLAG(flags, _scenario_current_force_water_bit))
+			{
+				weather_palette_index = current_clusters.regions[fog_region_index].weather_palette_index;
+			}
+		}
+		if (current_clusters_verify())
+		{
+			boolean water;
+			short tags_weather_palette_index = scenario_current_weather_palette_index(location, position, flags, &water);
+
+			if (tags_weather_palette_index != weather_palette_index || water != in_water)
+				current_clusters_mismatch(location, tags_weather_palette_index, weather_palette_index);
+		}
+	}
+	else
+#endif
+	{
+		weather_palette_index = scenario_current_weather_palette_index(location, position, flags, &in_water);
 	}
 
 	scenario_get_current_from_weather_palette(

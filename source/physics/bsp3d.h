@@ -47,6 +47,26 @@ typedef char bsp3d_node_size_check[
 /* ---------- prototypes/BSP3D.C */
 
 long bsp3d_test_point(struct bsp3d const *bsp, long node_index, union real_point3d const *point);
+#ifdef HALO_LINUX
+/* (port) the planes a point came nearest to in its walk
+(bsp3d_test_point_nearest_planes): each plane's index, its complement (~)
+where the point was on its back */
+enum
+{
+	BSP3D_POINT_NEAREST_PLANES = 3
+};
+
+struct bsp3d_point_planes
+{
+	short count;
+	/* the least distance to the other planes tested */
+	real rest;
+	long signed_indices[BSP3D_POINT_NEAREST_PLANES];
+};
+
+long bsp3d_test_point_nearest_planes(struct bsp3d const *bsp, long node_index, union real_point3d const *point,
+	struct bsp3d_point_planes *planes);
+#endif
 
 /* ---------- globals */
 
