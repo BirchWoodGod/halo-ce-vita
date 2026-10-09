@@ -3182,6 +3182,41 @@ static void sound_prepare(
 	return;
 }
 
+/* A weapon's four exported functions (its A to D inputs): Halo PC has two
+this build has not, primary and secondary firing on (17 and 18, Invader's
+weapon.json), after its primary and secondary firing (15 and 16), which
+they are made; else the validator would make them none. From DamnationCE
+(OpenCE f823a18d, CC0). The modes follow the item (0x308 bytes), the
+weapon's flags, label, secondary trigger mode and alternate shots. */
+#define WEAPON_GROUP_TAG 'weap'
+#define WEAPON_BYTES 0x508
+#define WEAPON_FUNCTION_MODES_OFFSET 0x330
+#define WEAPON_FUNCTION_MODE_COUNT 4
+#define WEAPON_FUNCTION_PRIMARY_FIRING 15
+#define WEAPON_FUNCTION_PRIMARY_FIRING_ON 17
+#define WEAPON_FUNCTION_SECONDARY_FIRING_ON 18
+
+static void weapon_functions_convert(
+	uint8_t *weapon,
+	struct custom_edition_conversion_report *report)
+{
+	int index;
+
+	for (index = 0; index < WEAPON_FUNCTION_MODE_COUNT; index++)
+	{
+		uint8_t *mode = weapon + WEAPON_FUNCTION_MODES_OFFSET + index * 2;
+		int16_t value = read_s16(mode);
+
+		if (value == WEAPON_FUNCTION_PRIMARY_FIRING_ON || value == WEAPON_FUNCTION_SECONDARY_FIRING_ON)
+		{
+			write_u16(mode, (uint16_t)(value - WEAPON_FUNCTION_PRIMARY_FIRING_ON + WEAPON_FUNCTION_PRIMARY_FIRING));
+			report->weapon_functions_converted++;
+		}
+	}
+
+	return;
+}
+
 /* Object overlays of the animation graph at `graph_offset` that name an
 animation the graph does not have are made to name none, which the game
 skips (objects.c, object_compute_node_matrices). Maps built with the editing
@@ -3559,6 +3594,11 @@ enum cache_file_status custom_edition_cache_convert(
 			tag_cache_offset(&state, read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET), BITMAP_GROUP_BYTES, &offset))
 		{
 			bitmaps_prepare(&state, offset, read_u32(instance + TAG_INSTANCE_HANDLE_OFFSET), report);
+		}
+		if (group_tag == WEAPON_GROUP_TAG &&
+			tag_cache_offset(&state, read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET), WEAPON_BYTES, &offset))
+		{
+			weapon_functions_convert(tag_cache + offset, report);
 		}
 		if (group_tag == ANIMATION_GRAPH_GROUP_TAG &&
 			tag_cache_offset(&state, read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET), ANIMATION_GRAPH_BYTES, &offset))

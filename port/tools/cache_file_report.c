@@ -327,6 +327,7 @@ static int report_custom_edition_cache(
 			printf("bitmaps_prepared: %" PRId32 "\n", conversion.bitmaps_prepared);
 			printf("script_nodes_reduced: %" PRId32 "\n", conversion.script_nodes_reduced);
 			printf("animation_overlays_disabled: %" PRId32 "\n", conversion.animation_overlays_disabled);
+			printf("weapon_functions_converted: %" PRId32 "\n", conversion.weapon_functions_converted);
 			printf("sounds_undecodable: %" PRId32 "\n", conversion.sounds_undecodable);
 			printf("sounds_ogg_vorbis: %" PRId32 "\n", conversion.sounds_ogg_vorbis);
 			printf("sound_permutations_pcm: %" PRId32 "\n", conversion.sound_permutations_pcm);

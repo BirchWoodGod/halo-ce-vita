@@ -818,6 +818,11 @@ static boolean custom_edition_cache_tags_convert(
 			"custom edition: %ld animation overlays named animations their graphs do not have and were disabled",
 			(long)conversion.animation_overlays_disabled);
 	}
+	if (conversion.weapon_functions_converted)
+	{
+		error(_error_silent, "custom edition: %ld weapon functions of Halo PC's \"firing on\" made this build's firing",
+			(long)conversion.weapon_functions_converted);
+	}
 	if (conversion.sounds_undecodable)
 	{
 		error(

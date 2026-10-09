@@ -406,7 +406,8 @@ class Map:
                  font_style_reference=NONE, pitch_ranges=1, bsp_sizes=(0x1000,), sound_compression=1,
                  sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None, sound_permutation_compression=None,
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
-                 weapon_hud=None, strings_name="test\\strings", strings=("hello", "world!")):
+                 weapon_hud=None, strings_name="test\\strings", strings=("hello", "world!"),
+                 weapon_function_modes=None):
         self.bsp_sizes = bsp_sizes
         self.sound_compression = sound_compression
         self.sound_buffer_size = sound_buffer_size
@@ -420,6 +421,7 @@ class Map:
         self.animation_overlay = animation_overlay
         self.script_nodes = script_nodes
         self.weapon_hud = weapon_hud
+        self.weapon_function_modes = weapon_function_modes
         self.strings_name = strings_name
         self.strings = strings
         self.addresses = {}
@@ -550,7 +552,13 @@ class Map:
         sound = tag_data.reserve(0xA4)
         tag_data.u32(sound + 0x98, self.pitch_ranges)
         address_of["test\\sound"] = sound
-        address_of["test\\weapon"] = tag_data.add(bytes(0x100))
+        if self.weapon_function_modes is None:
+            address_of["test\\weapon"] = tag_data.add(bytes(0x100))
+        else:
+            # a whole weapon (0x508 bytes), its exported functions' modes at 0x330
+            weapon = bytearray(0x508)
+            struct.pack_into("<4h", weapon, 0x330, *self.weapon_function_modes)
+            address_of["test\\weapon"] = tag_data.add(bytes(weapon))
         for group_name, name, external in self.extra_tags:
             address_of[name] = tag_data.add(bytes(0x40))
         if self.model is not None:
@@ -1091,6 +1099,18 @@ def test_animation_overlays_naming_real_animations_are_kept(report_tool, tmp_pat
     _, report, tags = converted(report_tool, cache, tmp_path)
     assert report["animation_overlays_disabled"] == "0"
     assert s16_at(tags, u32_at(tags, cache.addresses["test\\animations"] + 0x04)) == 0
+
+
+def test_weapon_functions_firing_on_become_firing(report_tool, tmp_path):
+    """Halo PC's primary and secondary firing on (17, 18) are this build's
+    primary and secondary firing (15, 16); the others are kept."""
+    cache = Map(weapon_function_modes=(17, 18, 15, 3))
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["weapon_functions_converted"] == "2"
+    weapon = cache.addresses["test\\weapon"]
+    assert struct.unpack_from("<4h", tags, weapon - BASE + 0x330) == (15, 16, 15, 3)
+    _, report, _ = converted(report_tool, Map(weapon_function_modes=(0, 16, 19, -1)), tmp_path)
+    assert report["weapon_functions_converted"] == "0"
 
 
 def f32_at(tags, address):

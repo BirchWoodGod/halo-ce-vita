@@ -293,6 +293,11 @@ changed:
   name none, which the game skips. `beavercreek_halo3.yelo` has two; Custom
   Edition reads past the graph's animations there, and this build's debug
   builds stop on it.
+- **Weapon functions.** A weapon's exported functions (its A to D inputs)
+  may be Halo PC's *primary firing on* and *secondary firing on* (17 and 18,
+  Invader's `weapon.json`), which this build has not: they are made its
+  primary and secondary firing (15 and 16), where the validator made them
+  none (after DamnationCE/OpenCE `weapon_functions_convert`).
 - **HUD elements drawn from double-resolution bitmaps.** Halo PC added a
   third scaling flag to HUD placements, *use high resolution scale*
   (OpenSauce `hud_definitions.hpp`), and draws a flagged element at half the
