@@ -155,6 +155,9 @@ short hud_vita_glyph_face_icon(
 	short glyph);
 wchar_t const *hud_vita_glyph_text(
 	short glyph);
+void hud_vita_score_hint(
+	wchar_t *buffer,
+	long buffer_size);
 boolean hud_vita_glyph_draw(
 	short glyph,
 	struct bitmap_data const *bitmap,

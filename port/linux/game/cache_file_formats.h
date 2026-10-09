@@ -347,6 +347,44 @@ enum custom_edition_channel_order
 	NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS
 };
 
+/* Halo PC behaviours some Custom Edition maps were made around, where Chimera
+fixes Halo PC to draw as the Xbox does (Chimera's map_hacks.hpp, by
+SnowyMouse; from DamnationCE, CC0). This build draws as the Xbox does, so a
+map listed as relying on one (custom_edition_behaviours.inc, by name and tag
+data checksum) is drawn as Halo PC drew it where this build can. */
+enum custom_edition_behaviour
+{
+	_custom_edition_behaviour_gearbox_chicago_multiply,
+	_custom_edition_behaviour_gearbox_meters,
+	/* HUD multitexture overlays' blend functions in Halo PC's order
+	(hud_draw.c) */
+	_custom_edition_behaviour_gearbox_multitexture_blend_modes,
+	_custom_edition_behaviour_alternate_bump_attenuation,
+	_custom_edition_behaviour_gearbox_bump_attenuation,
+	/* model shaders' detail after reflection flag means the opposite */
+	_custom_edition_behaviour_invert_detail_after_reflection,
+	_custom_edition_behaviour_embedded_lua,
+	/* the HUD digits are at the Xbox's size, not twice it */
+	_custom_edition_behaviour_hud_number_scale,
+	/* bitmaps' half HUD scale flags were set by mistake */
+	_custom_edition_behaviour_disable_bitmap_hud_scale_flags,
+	_custom_edition_behaviour_old_widescreen_fix,
+	_custom_edition_behaviour_gearbox_shader_environment_types,
+	/* HUD multitexture overlays are not drawn (hud_draw.c) */
+	_custom_edition_behaviour_block_multitexture_overlays,
+
+	NUMBER_OF_CUSTOM_EDITION_BEHAVIOURS
+};
+
+/* A permutation's compression as custom_edition_cache_convert leaves it for
+the sound cache (custom_edition_sounds.c) when its sound is a 44 kHz mono
+one made 22 kHz: its samples (16-bit PCM, or Xbox ADPCM) taken at half
+their rate. Halo PC has no such compression, and a map's permutation in
+one makes its sound unplayable (sound_prepare). */
+#define CUSTOM_EDITION_PERMUTATION_HALVED 0x100
+#define CUSTOM_EDITION_PERMUTATION_PCM_HALVED (CUSTOM_EDITION_PERMUTATION_HALVED | 0)
+#define CUSTOM_EDITION_PERMUTATION_XBOX_ADPCM_HALVED (CUSTOM_EDITION_PERMUTATION_HALVED | 1)
+
 /* what custom_edition_cache_convert changed */
 struct custom_edition_conversion_report
 {
@@ -380,12 +418,31 @@ struct custom_edition_conversion_report
 	/* permutations whose size is not whole frames (16-bit PCM) or blocks
 	(Xbox ADPCM), muted */
 	int32_t sound_permutations_muted;
+	/* 44 kHz mono sounds of Xbox ADPCM or 16-bit PCM, which the game plays
+	at 22 kHz only (it refused them), made 22 kHz ones whose permutations
+	the sound cache takes at half their rate as it loads them
+	(custom_edition_sounds.c), and those permutations */
+	int32_t sounds_halved;
+	int32_t sound_permutations_halved;
 	/* HUD element placements with Halo PC's high resolution scale, whose
 	scale was halved */
 	int32_t hud_placements_rescaled;
+	/* placements with it that keep their scale and the flag: crosshair and
+	overlay items, which Halo PC does not halve by their own flag, and
+	numbers, whose digits hud_draw_numbers halves */
+	int32_t hud_placements_kept;
 	/* 1 when the multiplayer hint that a key shows the score was made to
 	name the Xbox button */
 	int32_t score_hint_converted;
+	/* widget event handlers numbered as the port's own menu functions,
+	made to fail as Halo PC's own do, and game data inputs of Halo PC's own
+	functions, made to run none; and 1 when the multiplayer pause menu was
+	made the Xbox's resume and quit */
+	int32_t widget_functions_cleared;
+	int32_t pause_menu_trimmed;
+	/* the Halo PC behaviours the map relies on (enum
+	custom_edition_behaviour, flags) */
+	uint32_t behaviours;
 	/* the tag of the problem, when there was one, else NONE (-1) */
 	int32_t problem_tag_index;
 };
@@ -472,12 +529,18 @@ bitmaps and sound permutations in the state of ones not yet drawn or played
 and naming their own tags, sounds this build cannot decode made unplayable,
 animation overlays naming animations that do not exist made to name none,
 and OpenSauce's upgraded script node array made this build's size when its
-nodes fit. Returns the first problem: tags already converted stay
+nodes fit; and what this build can of the Halo PC behaviours the map named
+`map_name` relies on. Returns the first problem: tags already converted stay
 converted. */
 enum cache_file_status custom_edition_cache_convert(
 	uint8_t *tag_cache,
 	uint32_t loaded_bytes,
+	char const *map_name,
 	struct custom_edition_conversion_report *report);
+
+/* the name of a Halo PC behaviour, as Chimera's map list names it */
+char const *custom_edition_behaviour_name(
+	short behaviour);
 
 /* In a tag cache custom_edition_cache_load filled (`loaded_bytes` of it in
 use), the definition of the next tag of group `group_tag` after tag

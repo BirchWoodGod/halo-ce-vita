@@ -71,11 +71,7 @@ uint32_t ogg_sound_output_frames(uint64_t frames, long stream_rate, long rate)
 {
 	if (rate <= 0 || rate > OGG_SOUND_MAXIMUM_RATE || frames > UINT32_MAX)
 		return 0;
-	if (stream_rate == rate)
-		return (uint32_t)frames;
-	if (stream_rate == 2 * rate)
-		return (uint32_t)((frames + 1) / 2);
-	return 0;
+	return xbox_adpcm_rate_frames(frames, stream_rate, rate);
 }
 
 /* ---------- a stream's first and last pages */
@@ -194,14 +190,10 @@ static struct
 	size_t heap_in_use;
 	jmp_buf out_of_memory;
 
-	/* the output */
+	/* the output, and the stream's frames taken at its rate (halved, or
+	interpolated from another rate: xbox_adpcm_encoder.c) */
 	struct xbox_adpcm_encoder encoder;
-	/* the stream's rate is halved: the stream's frame before the pair being
-	filtered, the pair's first frame, and whether there is one */
-	int previous[MAXIMUM_CHANNELS];
-	int pending[MAXIMUM_CHANNELS];
-	int have_pending;
-	int halved;
+	struct xbox_adpcm_rate rate;
 
 	/* the stream */
 	ogg_sync_state sync;
@@ -280,12 +272,6 @@ void *halo_ogg_realloc(void *pointer, size_t bytes)
 
 /* ---------- the output */
 
-/* one frame of the output's channels */
-static void output_frame(int const *frame)
-{
-	xbox_adpcm_encoder_frame(&decoder.encoder, frame);
-}
-
 /* one frame of the stream, in 16-bit PCM by stream channel */
 static void stream_frame(int const *samples, int stream_channels)
 {
@@ -308,29 +294,7 @@ static void stream_frame(int const *samples, int stream_channels)
 		converted[0] = converted[1] = samples[0];
 	}
 
-	if (decoder.halved)
-	{
-		/* each pair of frames one frame, low-passed (1 2 1)/4 around the
-		pair's first */
-		if (!decoder.have_pending)
-		{
-			for (channel = 0; channel < decoder.request->channels; channel++)
-				decoder.pending[channel] = converted[channel];
-			decoder.have_pending = 1;
-			return;
-		}
-		for (channel = 0; channel < decoder.request->channels; channel++)
-		{
-			int middle = decoder.pending[channel];
-
-			decoder.pending[channel] = (decoder.previous[channel] + 2 * middle + converted[channel]) / 4;
-			decoder.previous[channel] = converted[channel];
-		}
-		decoder.have_pending = 0;
-		output_frame(decoder.pending);
-		return;
-	}
-	output_frame(converted);
+	xbox_adpcm_rate_frame(&decoder.rate, converted);
 }
 
 /* the frames the decoder has ready */
@@ -375,10 +339,10 @@ static enum ogg_sound_status packet_take(ogg_packet *packet)
 		{
 			decoder.result->stream_channels = decoder.info.channels;
 			decoder.result->stream_rate = decoder.info.rate;
-			decoder.halved = decoder.info.rate != decoder.request->rate;
-			decoder.result->halved = decoder.halved;
+			decoder.result->halved = decoder.info.rate == 2 * decoder.request->rate;
 			if (decoder.info.channels < 1 || decoder.info.channels > MAXIMUM_CHANNELS ||
-				!ogg_sound_output_frames(1, decoder.info.rate, decoder.request->rate))
+				!ogg_sound_output_frames(1, decoder.info.rate, decoder.request->rate) ||
+				!xbox_adpcm_rate_begin(&decoder.rate, &decoder.encoder, decoder.info.rate, decoder.request->rate))
 			{
 				return _ogg_sound_unsupported_format;
 			}
@@ -504,9 +468,8 @@ enum ogg_sound_status ogg_sound_transcode(
 	else if (setjmp(decoder.out_of_memory) == 0)
 	{
 		status = stream_decode();
-		/* (the last frame of a halved stream, and the last part block) */
-		if (decoder.have_pending && !decoder.encoder.full)
-			output_frame(decoder.pending);
+		/* (the last frames of a stream of another rate) */
+		xbox_adpcm_rate_finish(&decoder.rate);
 	}
 	else
 	{
@@ -548,7 +511,7 @@ char const *ogg_sound_status_describe(enum ogg_sound_status status)
 		"decoded",
 		"the stream could not be read",
 		"not an Ogg Vorbis stream, or a damaged one",
-		"a format the sound cannot play (more than two channels, or another rate)",
+		"a format the sound cannot play (more than two channels, or a rate out of bounds)",
 		"the stream needs more working memory than the decoder has",
 		"bad arguments",
 	};

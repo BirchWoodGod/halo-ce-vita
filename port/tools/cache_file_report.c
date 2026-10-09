@@ -314,7 +314,8 @@ static int report_custom_edition_cache(
 		{
 			uint32_t loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
 			struct custom_edition_conversion_report conversion;
-			enum cache_file_status conversion_status = custom_edition_cache_convert(tag_cache, loaded_bytes, &conversion);
+			enum cache_file_status conversion_status = custom_edition_cache_convert(tag_cache, loaded_bytes, report.identity.name, &conversion);
+			int behaviour;
 
 			printf("convert: %s\n", cache_file_status_describe(conversion_status));
 			if (conversion_status != _cache_file_status_ok)
@@ -332,8 +333,20 @@ static int report_custom_edition_cache(
 			printf("sounds_ogg_vorbis: %" PRId32 "\n", conversion.sounds_ogg_vorbis);
 			printf("sound_permutations_pcm: %" PRId32 "\n", conversion.sound_permutations_pcm);
 			printf("sound_permutations_muted: %" PRId32 "\n", conversion.sound_permutations_muted);
+			printf("sounds_halved: %" PRId32 " (%" PRId32 " permutations)\n", conversion.sounds_halved,
+				conversion.sound_permutations_halved);
 			printf("hud_placements_rescaled: %" PRId32 "\n", conversion.hud_placements_rescaled);
+			printf("hud_placements_kept: %" PRId32 "\n", conversion.hud_placements_kept);
 			printf("score_hint_converted: %" PRId32 "\n", conversion.score_hint_converted);
+			printf("widget_functions_cleared: %" PRId32 "\n", conversion.widget_functions_cleared);
+			printf("pause_menu_trimmed: %" PRId32 "\n", conversion.pause_menu_trimmed);
+			printf("halo_pc_behaviours:");
+			for (behaviour = 0; behaviour < NUMBER_OF_CUSTOM_EDITION_BEHAVIOURS; behaviour++)
+			{
+				if ((conversion.behaviours >> behaviour) & 1)
+					printf(" %s", custom_edition_behaviour_name((short)behaviour));
+			}
+			printf("%s\n", conversion.behaviours ? "" : " none");
 			if (dump_path)
 			{
 				FILE *dump = fopen(dump_path, "wb");

@@ -552,6 +552,9 @@ symbols in this file:
 #include "interface/interface.h"
 #include "interface/hud.h"
 #include "interface/hud_definitions.h"
+#ifdef HALO_VITA
+#include "interface/hud_draw.h" /* (port) hud_vita_score_hint */
+#endif
 #include "interface/hud_messaging.h"
 #include "interface/player_ui.h"
 #include "interface/terminal.h"
@@ -7488,6 +7491,11 @@ static boolean internal_rasterize_score(
 			buffer,
 			format,
 			buffer_size);
+#ifdef HALO_VITA
+		/* (port) the Vita button the scoreboard is on, not the Xbox's BACK */
+		buffer[buffer_size - 1] = 0;
+		hud_vita_score_hint(buffer, buffer_size);
+#endif
 		break;
 	default:
 		result = FALSE;

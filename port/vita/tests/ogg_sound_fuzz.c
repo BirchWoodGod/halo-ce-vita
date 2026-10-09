@@ -18,7 +18,14 @@ played:
 then the stream. ogg_sound_measure reads the stream's first 512 and last
 8192 bytes as the sound cache does (custom_edition_sounds.c), and
 ogg_sound_transcode decodes it into an output with guards each side; every
-input must only fail or succeed, writing within the output.
+input must only fail or succeed, writing within the output. A stream whose
+identification header (its checksums made good) says another rate than the
+sound's goes through the rate converter (xbox_adpcm_encoder.c). The same
+bytes are then taken as Xbox ADPCM blocks of those channels, decoded
+(xbox_adpcm_block_decode) and taken from a rate the bytes give (any from
+1 kHz to 192 kHz, some out of those bounds) to one of the output's, as the
+sound cache does a Custom Edition map's 44 kHz mono sounds, into an output
+with guards (its length as above); none may write outside it.
 run_ogg_sound_test.sh builds it with AddressSanitizer and UBSan, with
 libFuzzer (OGG_FUZZ_SECONDS), and without it, when main below runs
 OGG_FUZZ_ITERATIONS changes (bytes flipped, set to edge values, cut,
@@ -27,6 +34,7 @@ fixed seed.
 */
 
 #include "ogg_sound.h"
+#include "xbox_adpcm_encoder.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -46,6 +54,7 @@ static double working_memory[OGG_SOUND_WORKING_BYTES / sizeof(double)];
 static unsigned char stream_copy[MAXIMUM_INPUT_BYTES];
 static uint32_t stream_size;
 static unsigned long statuses[NUMBER_OF_OGG_SOUND_STATUSES];
+static unsigned long adpcm_passes;
 
 static uint32_t crc_table[256];
 
@@ -105,6 +114,68 @@ static int stream_read(void *context, uint32_t offset, uint32_t size, void *buff
 		abort(); /* (the decoder reads only within the stream) */
 	memcpy(buffer, stream_copy + offset, size);
 	return 1;
+}
+
+/* the stream's bytes as Xbox ADPCM blocks, decoded and taken from a rate
+its last two bytes give to one its third from last picks */
+static void adpcm_rate_pass(const uint8_t *data, int channels, int length)
+{
+	static long const output_rates[] = { 22050, 44100, 11025, 16000, 32000, 48000, 8000, 48001 };
+	uint32_t block_bytes = XBOX_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	uint32_t blocks = stream_size / block_bytes;
+	struct xbox_adpcm_encoder encoder;
+	struct xbox_adpcm_rate rate;
+	unsigned char *output;
+	uint32_t output_bytes, frames, block, index;
+	long input_rate = 44100, output_rate = 22050;
+
+	(void)data;
+	if (stream_size >= 3)
+	{
+		/* (500 Hz to 197 kHz: the bounds and past them) */
+		input_rate = 500 + (long)((stream_copy[stream_size - 1] | stream_copy[stream_size - 2] << 8) * 3);
+		output_rate = output_rates[stream_copy[stream_size - 3] & 7];
+	}
+	frames = xbox_adpcm_rate_frames((uint64_t)blocks * XBOX_ADPCM_BLOCK_SAMPLES, input_rate, output_rate);
+	output_bytes = xbox_adpcm_bytes((uint32_t)((uint64_t)frames * length / 8), channels);
+	if (output_bytes > OGG_SOUND_MAXIMUM_ADPCM_BYTES)
+		output_bytes = OGG_SOUND_MAXIMUM_ADPCM_BYTES;
+	output = malloc(output_bytes + 2 * GUARD_BYTES);
+	if (!output)
+		return;
+	memset(output, GUARD_VALUE, output_bytes + 2 * GUARD_BYTES);
+	xbox_adpcm_encoder_begin(&encoder, output + GUARD_BYTES, output_bytes, channels);
+	if (xbox_adpcm_rate_begin(&rate, &encoder, input_rate, output_rate) != (xbox_adpcm_rate_frames(1, input_rate, output_rate) != 0))
+		abort(); /* (the converter and the count agree on the bounds) */
+	for (block = 0; block < blocks && !encoder.full; block++)
+	{
+		short decoded[XBOX_ADPCM_BLOCK_SAMPLES * XBOX_ADPCM_MAXIMUM_CHANNELS];
+		int frame;
+
+		xbox_adpcm_block_decode(stream_copy + block * block_bytes, channels, decoded);
+		for (frame = 0; frame < XBOX_ADPCM_BLOCK_SAMPLES; frame++)
+		{
+			int values[XBOX_ADPCM_MAXIMUM_CHANNELS];
+			int channel;
+
+			for (channel = 0; channel < channels; channel++)
+				values[channel] = decoded[frame * channels + channel];
+			xbox_adpcm_rate_frame(&rate, values);
+		}
+	}
+	xbox_adpcm_rate_finish(&rate);
+	xbox_adpcm_encoder_finish(&encoder);
+	/* (the converter gives out at most the frames counted, and the output
+	holds no more than its blocks) */
+	if (encoder.frames > frames || encoder.frames > output_bytes / block_bytes * XBOX_ADPCM_BLOCK_SAMPLES)
+		abort();
+	for (index = 0; index < GUARD_BYTES; index++)
+	{
+		if (output[index] != GUARD_VALUE || output[GUARD_BYTES + output_bytes + index] != GUARD_VALUE)
+			abort();
+	}
+	adpcm_passes++;
+	free(output);
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
@@ -169,6 +240,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			abort();
 	}
 	free(output);
+	adpcm_rate_pass(data, channels, length);
 	return 0;
 }
 
@@ -297,6 +369,7 @@ int main(int argc, char **argv)
 		"%lu other\n", iterations + seed_count, statuses[_ogg_sound_ok], statuses[_ogg_sound_not_vorbis],
 		statuses[_ogg_sound_unsupported_format], statuses[_ogg_sound_out_of_memory],
 		statuses[_ogg_sound_read_failed] + statuses[_ogg_sound_bad_arguments]);
+	printf("PASS: %lu of them also as Xbox ADPCM at other rates, written within the output\n", adpcm_passes);
 	for (index = 0; index < seed_count; index++)
 		free(seeds[index].data);
 	return 0;

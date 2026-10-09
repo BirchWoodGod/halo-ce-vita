@@ -45,6 +45,17 @@ the thread here reads the PCM in pieces and encodes it
 (xbox_adpcm_encoder.c), needing no working memory. Read as Xbox ADPCM they
 were noise.
 
+A 44 kHz mono sound of Xbox ADPCM or 16-bit PCM, which the game would not
+play (mono sounds at 22 kHz only), the loader makes a 22 kHz one and marks
+its permutations (CUSTOM_EDITION_PERMUTATION_*_HALVED, cache_file_formats.h)
+with their buffer size the halved ADPCM's; the thread here reads their
+samples in pieces (Xbox ADPCM decoded a block at a time,
+xbox_adpcm_block_decode), takes them at half their rate and encodes them
+(xbox_adpcm_rate, xbox_adpcm_encoder.c), as it does the Ogg Vorbis streams
+(an Ogg Vorbis stream of another rate than its sound's is taken at the
+sound's: ogg_sound.c). Nothing is decoded as the map loads: a permutation
+is when the sound cache loads it, into the block it gives it.
+
 HALO_OGG_TRACE=1 logs each decoding: the sound, the frames, the decoded
 samples' RMS and peak, the time and working memory it took, and where its
 ADPCM is (run_ce_ogg_sound_test.sh). A permutation that does not decode is
@@ -59,6 +70,7 @@ logged once (a sound's first), whatever the setting, and plays as silence.
 #include "tag_files/tag_files.h"
 #include "sound/sound_definitions.h"
 #include "custom_edition_cache.h"
+#include "cache_file_formats.h"
 #include "../src/ogg_sound.h"
 #include "../src/xbox_adpcm_encoder.h"
 
@@ -101,7 +113,10 @@ enum transcoding
 {
 	_transcoding_none,
 	_transcoding_ogg_vorbis,
-	_transcoding_pcm
+	_transcoding_pcm,
+	/* (a 44 kHz mono sound's, made 22 kHz: CUSTOM_EDITION_PERMUTATION_*_HALVED) */
+	_transcoding_pcm_halved,
+	_transcoding_adpcm_halved
 };
 
 struct waiting_sound
@@ -207,6 +222,10 @@ static enum transcoding permutation_transcoding(
 		return _transcoding_ogg_vorbis;
 	if (permutation->compression == SOUND_PERMUTATION_COMPRESSION_PCM)
 		return _transcoding_pcm;
+	if (permutation->compression == CUSTOM_EDITION_PERMUTATION_PCM_HALVED)
+		return _transcoding_pcm_halved;
+	if (permutation->compression == CUSTOM_EDITION_PERMUTATION_XBOX_ADPCM_HALVED)
+		return _transcoding_adpcm_halved;
 	return _transcoding_none;
 }
 
@@ -239,7 +258,8 @@ static void sound_decode_report(
 	struct ogg_sound_result const *result,
 	unsigned long long took)
 {
-	boolean pcm = sound->transcoding == _transcoding_pcm;
+	boolean pcm = sound->transcoding == _transcoding_pcm || sound->transcoding == _transcoding_pcm_halved;
+	boolean adpcm = sound->transcoding == _transcoding_adpcm_halved;
 
 	if (trace_enabled())
 	{
@@ -247,7 +267,7 @@ static void sound_decode_report(
 
 		platform_log("%s sound: %.32s of %s: %s, %lu frames %d ch %ld Hz%s (+%lu silent%s), rms %.0f peak %d, "
 			"%.2f ms, %lu KB working, adpcm %lu bytes at %p",
-			pcm ? "pcm" : "ogg", sound->permutation->name, tag_get_name((long)sound->permutation->unknown3),
+			pcm ? "pcm" : adpcm ? "adpcm" : "ogg", sound->permutation->name, tag_get_name((long)sound->permutation->unknown3),
 			ogg_sound_status_describe(result->status), (unsigned long)result->frames_decoded,
 			result->stream_channels, result->stream_rate, result->halved ? " halved" : "",
 			(unsigned long)result->frames_padded, result->truncated ? ", cut off" : "",
@@ -264,31 +284,81 @@ static void sound_decode_report(
 			failure_reported[index] = TRUE;
 			/* (platform_log: error() is the game thread's) */
 			platform_log("custom edition: %s sound of %s (%.32s) does not decode: %s; it is silent",
-				pcm ? "a 16-bit PCM" : "an Ogg Vorbis", tag_get_name((long)sound->permutation->unknown3),
+				pcm ? "a 16-bit PCM" : adpcm ? "a 44 kHz Xbox ADPCM" : "an Ogg Vorbis", tag_get_name((long)sound->permutation->unknown3),
 				sound->permutation->name, ogg_sound_status_describe(result->status));
 		}
 	}
 	return;
 }
 
+/* the frames of a piece of 16-bit PCM (whole frames) or of Xbox ADPCM
+(whole blocks), taken at the output's rate */
+static void piece_frames(struct waiting_sound const *sound, struct xbox_adpcm_rate *rate, uint32_t size)
+{
+	int channels = sound->channels;
+	int values[XBOX_ADPCM_MAXIMUM_CHANNELS];
+	uint32_t offset;
+	int channel;
+
+	if (sound->transcoding == _transcoding_adpcm_halved)
+	{
+		uint32_t block_bytes = XBOX_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+
+		for (offset = 0; offset + block_bytes <= size && !rate->encoder->full; offset += block_bytes)
+		{
+			short frames[XBOX_ADPCM_BLOCK_SAMPLES * XBOX_ADPCM_MAXIMUM_CHANNELS];
+			int frame;
+
+			xbox_adpcm_block_decode(pcm_piece + offset, channels, frames);
+			for (frame = 0; frame < XBOX_ADPCM_BLOCK_SAMPLES; frame++)
+			{
+				for (channel = 0; channel < channels; channel++)
+					values[channel] = frames[frame * channels + channel];
+				xbox_adpcm_rate_frame(rate, values);
+			}
+		}
+	}
+	else
+	{
+		for (offset = 0; offset + 2 * (uint32_t)channels <= size && !rate->encoder->full; offset += 2 * (uint32_t)channels)
+		{
+			for (channel = 0; channel < channels; channel++)
+				values[channel] = (int16_t)(uint16_t)(pcm_piece[offset + 2 * channel] | pcm_piece[offset + 2 * channel + 1] << 8);
+			xbox_adpcm_rate_frame(rate, values);
+		}
+	}
+	/* (the block full before the piece's end: the rest left out) */
+	if (offset < size && rate->encoder->full)
+		rate->encoder->truncated = 1;
+}
+
 /* a 16-bit PCM permutation encoded into its block, read in pieces of
-whole frames: what the samples do not fill is silence, and what does not
-fit is left out (the block is the size the loader worked out from them) */
+whole frames (a halved one's, or Xbox ADPCM's, of whole blocks, decoded and
+taken at half their rate): what the samples do not fill is silence, and
+what does not fit is left out (the block is the size the loader worked out
+from them) */
 static void pcm_encode(struct waiting_sound *sound)
 {
 	struct xbox_adpcm_encoder encoder;
+	struct xbox_adpcm_rate rate;
 	struct ogg_sound_result result;
 	unsigned long long started = vita_host_time_us();
 	unsigned long long took;
-	uint32_t piece_bytes = PCM_READ_BYTES / (2 * (uint32_t)sound->channels) * (2 * (uint32_t)sound->channels);
+	boolean halved = sound->transcoding != _transcoding_pcm;
+	uint32_t unit_bytes = sound->transcoding == _transcoding_adpcm_halved ?
+		XBOX_ADPCM_BLOCK_BYTES * (uint32_t)sound->channels : 2 * (uint32_t)sound->channels;
+	uint32_t piece_bytes = PCM_READ_BYTES / unit_bytes * unit_bytes;
 	uint32_t offset = 0;
 
 	memset(&result, 0, sizeof(result));
 	result.status = _ogg_sound_ok;
 	result.stream_channels = sound->channels;
-	result.stream_rate = sound->rate;
+	result.stream_rate = halved ? 2 * sound->rate : sound->rate;
+	result.halved = halved;
 	xbox_adpcm_encoder_begin(&encoder, sound->destination, sound->destination_bytes, sound->channels);
-	while (offset < sound->file_bytes && !encoder.full)
+	if (!xbox_adpcm_rate_begin(&rate, &encoder, result.stream_rate, sound->rate))
+		result.status = _ogg_sound_unsupported_format;
+	while (result.status == _ogg_sound_ok && offset < sound->file_bytes && !encoder.full)
 	{
 		uint32_t size = sound->file_bytes - offset < piece_bytes ? sound->file_bytes - offset : piece_bytes;
 
@@ -297,11 +367,12 @@ static void pcm_encode(struct waiting_sound *sound)
 			result.status = _ogg_sound_read_failed;
 			break;
 		}
-		xbox_adpcm_encoder_pcm(&encoder, pcm_piece, size);
+		piece_frames(sound, &rate, size);
 		offset += size;
 	}
 	if (offset < sound->file_bytes)
 		encoder.truncated = 1;
+	xbox_adpcm_rate_finish(&rate);
 	result.frames_padded = xbox_adpcm_encoder_finish(&encoder);
 	result.frames_decoded = encoder.frames;
 	result.truncated = encoder.truncated && result.status == _ogg_sound_ok;
@@ -321,7 +392,7 @@ static void sound_decode(struct waiting_sound *sound)
 	unsigned long long started = vita_host_time_us();
 	unsigned long long took;
 
-	if (sound->transcoding == _transcoding_pcm)
+	if (sound->transcoding != _transcoding_ogg_vorbis)
 	{
 		pcm_encode(sound);
 		return;
@@ -507,8 +578,9 @@ long custom_edition_sound_cache_bytes(
 
 	if (transcoding == _transcoding_none)
 		return permutation->samples.size;
-	/* (16-bit PCM: the loader's size, 0 when it was not whole frames) */
-	if (transcoding == _transcoding_pcm)
+	/* (16-bit PCM, and a halved permutation: the loader's size, 0 when it
+	was not whole frames) */
+	if (transcoding != _transcoding_ogg_vorbis)
 	{
 		return permutation->sample_buffer_size <= OGG_SOUND_MAXIMUM_ADPCM_BYTES ?
 			(long)permutation->sample_buffer_size : 0;

@@ -284,6 +284,29 @@ changed:
   encoder the Ogg Vorbis decoding also uses). A PCM permutation that is not
   whole frames, and an Xbox ADPCM one that is not whole 36-byte blocks a
   channel, is muted (none in the maps run): either would play as noise.
+- **44 kHz mono sounds of Xbox ADPCM or 16-bit PCM.** The game plays mono
+  sounds at 22 kHz only (`sound_manager.c`: "attempt to play a sound that
+  was not a mono 22k compressed sound ..."), so these played nothing:
+  extinction's spectre `open` and `close`, three of
+  Covenant_V_Marines_Beta_5's (none in pcgulch or firefight-airlock; an
+  October 2026 census of every sound of the four maps, Halo PC's `sounds.map`
+  ones included). Such a sound is made a 22 kHz one and its permutations
+  are marked (`CUSTOM_EDITION_PERMUTATION_*_HALVED`, a compression Halo PC
+  does not have: a map's own permutation in it makes its sound unplayable),
+  their buffer size the halved ADPCM's. The sound cache's decoding thread
+  reads their samples in 16 KB pieces, decodes Xbox ADPCM a block at a time
+  as the mixer does, takes the frames at half their rate with the low-pass
+  the Ogg Vorbis halving uses, and encodes them (`xbox_adpcm_encoder.c`,
+  `xbox_adpcm_rate`): nothing is decoded as the map loads, and no memory is
+  taken but the cache block the permutation gets (at most 1 MB) as an Xbox
+  ADPCM one does. A sound of 16-bit PCM alone (none on hand) is made an
+  Xbox ADPCM one, which the game plays, where it was refused too.
+- **Ogg Vorbis streams of another rate than their sound's** (none in the
+  four maps: every stream there is at its sound's rate) are interpolated to
+  the sound's rate (low-passed first when the rate goes down), within 1 kHz
+  to 192 kHz, where they were refused and played as silence; a buffer size
+  made from the sound's rate then gives the output's length, the stream's
+  own when it is measured.
 - **OpenSauce's script nodes.** OpenSauce's memory upgrades make room for
   28501 script syntax nodes instead of 19001, and OpenSauce patches the game
   to accept that. This build takes the scenario's nodes only at its own
@@ -309,12 +332,64 @@ changed:
   This build ignores the flag, so it drew them twice too large; the
   placements of the unit, weapon and grenade HUD interfaces and the HUD
   globals' messages that have it get half their scale, and lose the flag (32
-  in `bloodgulch.map`, 14 in `beavercreek_halo3.yelo`).
+  in `bloodgulch.map`, 14 in `beavercreek_halo3.yelo`). Halo PC reads the
+  flag only on statics, meters and numbers (Chimera's `hud_bitmap_scale.cpp`):
+  crosshair and overlay items keep their scale. A number's scale is not its
+  digits', so a flagged number keeps the flag and `hud_draw_numbers` draws
+  its digits at half their size, spaced as the digits tag says. A bitmap may ask the
+  same of every element that draws it, with Halo PC's bitmap flags *half hud
+  scale* and *force hud use highres scale* (Invader's `bitmap.json`): an
+  element drawing such a bitmap (a static or meter, its bitmap after its
+  placement; a crosshair's or overlay's items, their crosshair's or
+  overlay's) gets half its scale too. None of the 18 Custom Edition maps on
+  hand, nor `bitmaps.map`, sets either. On the four maps on hand in October
+  2026 (pcgulch, extinction, Covenant_V_Marines_Beta_5, firefight-airlock)
+  no crosshair or overlay item and no number has the flag
+  (`hud_placements_kept` 0 in `cache_file_report`), so they draw as before.
+  (From DamnationCE, CC0, 31ad6c39 and 1f3cc6ab.)
+- **Maps made around Halo PC's own behaviour.** Chimera fixes Halo PC to draw
+  as the Xbox does, and keeps a list of the maps made around Halo PC's way
+  instead, by map name (in lower case) and tag data checksum, with the
+  behaviours each relies on (`map_hacks_config.json`, by SnowyMouse; here
+  `port/linux/game/custom_edition_behaviours.inc`, generated from it). This
+  build draws as the Xbox does, so for a listed map it follows these where it
+  can, and logs each (from DamnationCE, CC0): HUD multitexture overlays' blend functions in Halo PC's
+  order (`gearbox_multitexture_blend_modes`: Halo PC picks its shader by the
+  Xbox's value from shaders in alphabetical order), overlays not drawn
+  (`block_multitexture_overlays`), the HUD digits' metrics halved and every
+  number's digits drawn at half size (`hud_number_scale`), bitmaps' HUD scale
+  flags cleared (`disable_bitmap_hud_scale_flags`; a bitmap of `bitmaps.map`
+  keeps them, as Chimera leaves them), and model shaders'
+  detail after reflection flag flipped (`invert_detail_after_reflection`).
+  Not yet: Halo PC's fixed-function meters (`gearbox_meters`), its
+  transparent chicago multiply, bump attenuation and environment shader
+  types, the old widescreen HUD and embedded Lua.
 - **The score hint.** String 100 of `ui\multiplayer_game_text` is Halo PC's
   `Hold "%s" for score`, which Halo PC fills in with its score key; this
   build copies it as it is (`game_engine.c`, the press-back-for-score
   message), so `"%s"` becomes `BACK`, the button this build reads for the
-  score, in the same four characters.
+  score, in the same four characters. The Vita names its own button there
+  as the hint is shown, as in the Xbox maps' hint: `SELECT` as shipped
+  (`hud_draw.c`, `hud_vita_score_hint`).
+- **Halo PC's menu functions.** A Custom Edition map's widgets are Halo
+  PC's, whose event handlers may run Halo PC's own functions, numbered past
+  the Xbox's 102, and whose game data inputs may run its own past the Xbox's
+  41; this build has none of them. Such a handler fails, as before (the
+  invalid function logged, its other actions not taken), but one numbered
+  from 256 would have run one of the port's own menu functions
+  (`PC_MENU_FUNCTION_BASE`, `menu_functions.c`), made for its own screens:
+  it is given 102 and fails as the others do (none in the four maps on
+  hand, whose 242, 242 and 235 such handlers are all below 256). A game
+  data input past 41 runs the first, which does nothing, where it logged an
+  invalid function each frame (22 in extinction and
+  Covenant_V_Marines_Beta_5, 18 in firefight-airlock, none in pcgulch).
+  Halo PC's multiplayer pause menu adds game options and settings between
+  the Xbox's resume and quit, whose handlers fail: its list keeps resume and
+  quit, in the middle of its rows (extinction, Covenant_V_Marines_Beta_5).
+  From DamnationCE (CC0, c34563f0), which makes every handler of Halo PC's
+  own functions run none so that its other actions are taken; here they
+  stay as they were. `widget_functions_cleared` and `pause_menu_trimmed` in
+  `cache_file_report`.
 
 ### In the game (`custom_edition_cache.c`, `custom_edition_geometry.c`, `custom_edition_bitmaps.c`)
 
@@ -456,7 +531,9 @@ silences them.
   ones not whole frames or blocks muted; upgraded
   script nodes reduced, stock ones kept, too many refused; animation overlays
   kept and disabled; HUD placements with the high resolution scale halved
-  (in a weapon HUD's statics and crosshair items) and ones without it kept;
+  (in a weapon HUD's statics and crosshair items) and ones without it kept,
+  and those drawing a bitmap with either of Halo PC's half scale flags
+  halved;
   the score hint made to name BACK, and a placeholder left alone in another
   string list and in another string.
 - Malformed input: every check of the loader and the conversion, with at

@@ -322,9 +322,47 @@ def add_hud_placement(blob, placement, scale, flags):
     blob.u16(placement + 0x0C, flags)
 
 
-def add_weapon_hud(blob, placements):
+PAUSE_FOLDER = "ui\\shell\\multiplayer_game\\pause_game\\"
+PAUSE_LIST = PAUSE_FOLDER + "mp_pause_list"
+# each button: its event handler's function (run, with close current widget),
+# and its game data inputs' functions
+PAUSE_BUTTONS = [
+    ("resume_game_button", 3, (5,)),
+    ("game_options_button", 120, ()),
+    ("change_settings_button", 300, (50, 300)),
+    ("quit_netgame_button", 101, ()),
+]
+
+
+def add_widget(blob, handler_function, game_data_functions, children=()):
+    """A widget definition (0x3EC bytes): an event handler running
+    handler_function (none if None), game data inputs, and children
+    (tag index, vertical offset)."""
+    widget = blob.reserve(0x3EC)
+    if handler_function is not None:
+        handler = blob.reserve(0x48)
+        blob.u32(handler, 0x80 | 0x01)
+        blob.u16(handler + 6, handler_function)
+        blob.block(widget + 0x54, 1, handler)
+    if game_data_functions:
+        inputs = blob.reserve(0x24 * len(game_data_functions))
+        for index, function in enumerate(game_data_functions):
+            blob.u16(inputs + index * 0x24, function)
+        blob.block(widget + 0x48, len(game_data_functions), inputs)
+    if children:
+        elements = blob.reserve(0x50 * len(children))
+        for index, (tag_index, vertical) in enumerate(children):
+            blob.u32(elements + index * 0x50, code("DeLa"))
+            blob.u32(elements + index * 0x50 + 0x0C, 0xE174 << 16 | tag_index)
+            blob.u16(elements + index * 0x50 + 0x36, vertical)
+        blob.block(widget + 0x3E0, len(children), elements)
+    return widget
+
+
+def add_weapon_hud(blob, placements, bitmap_index=None):
     """A weapon HUD interface with a static element for each of the first two
-    placements and a crosshair of one item for the third, each (scale, flags)."""
+    placements and a crosshair of one item for the third, each (scale, flags);
+    the first static and the crosshair draw the bitmap of tag bitmap_index."""
     hud = blob.reserve(0x17C)
     statics = blob.reserve(2 * 0xB4)
     crosshairs = blob.reserve(0x68)
@@ -335,6 +373,9 @@ def add_weapon_hud(blob, placements):
     add_hud_placement(blob, statics + 0x24, *placements[0])
     add_hud_placement(blob, statics + 0xB4 + 0x24, *placements[1])
     add_hud_placement(blob, items, *placements[2])
+    if bitmap_index is not None:
+        blob.u32(statics + 0x48 + 0x0C, bitmap_index)
+        blob.u32(crosshairs + 0x24 + 0x0C, bitmap_index)
     return hud
 
 
@@ -406,9 +447,13 @@ class Map:
                  font_style_reference=NONE, pitch_ranges=1, bsp_sizes=(0x1000,), sound_compression=1,
                  sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None, sound_permutation_compression=None,
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
-                 weapon_hud=None, strings_name="test\\strings", strings=("hello", "world!"),
-                 weapon_function_modes=None):
+                 weapon_hud=None, hud_bitmap_flags=None, strings_name="test\\strings", strings=("hello", "world!"),
+                 weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False):
         self.bsp_sizes = bsp_sizes
+        # the header's name and the tag data's checksum, by which Chimera's
+        # map list knows a map
+        self.name = name
+        self.tags_checksum = tags_checksum
         self.sound_compression = sound_compression
         self.sound_buffer_size = sound_buffer_size
         self.sound_encoding = sound_encoding
@@ -421,6 +466,9 @@ class Map:
         self.animation_overlay = animation_overlay
         self.script_nodes = script_nodes
         self.weapon_hud = weapon_hud
+        self.hud_bitmap_flags = hud_bitmap_flags
+        # Halo PC's multiplayer pause menu: its list and four buttons
+        self.pause_menu = pause_menu
         self.weapon_function_modes = weapon_function_modes
         self.strings_name = strings_name
         self.strings = strings
@@ -482,6 +530,8 @@ class Map:
             tags.append(("antr", "test\\animations", False))
         if self.weapon_hud is not None:
             tags.append(("wphi", "test\\weapon hud", False))
+        if self.pause_menu:
+            tags += [("DeLa", PAUSE_LIST, False)] + [("DeLa", PAUSE_FOLDER + button, False) for button, _, _ in PAUSE_BUTTONS]
         # further structure BSPs go last, so the indices above never move
         bsp_tag_indices = [1] + [len(tags) + extra for extra in range(len(self.bsp_sizes) - 1)]
         tags += [("sbsp", f"test\\bsp {extra + 2}", False) for extra in range(len(self.bsp_sizes) - 1)]
@@ -508,6 +558,7 @@ class Map:
         instances = tag_data.reserve(len(tags) * 0x20)
         tag_data.u32(index + 0x00, instances)
         tag_data.u32(index + 0x04, salt << 16)
+        tag_data.u32(index + 0x08, self.tags_checksum)
         tag_data.u32(index + 0x0C, len(tags))
         tag_data.u32(index + 0x10, 3)
         tag_data.u32(index + 0x14, model_offset)
@@ -568,9 +619,19 @@ class Map:
         if self.animation_overlay is not None:
             address_of["test\\animations"] = add_animation_graph(tag_data, self.animation_overlay)
         if self.weapon_hud is not None:
-            address_of["test\\weapon hud"] = add_weapon_hud(tag_data, self.weapon_hud)
+            hud_bitmap_index = None
+            if self.hud_bitmap_flags is not None:
+                tag_data.u16(address_of["test\\in map bitmap"] + 6, self.hud_bitmap_flags)
+                hud_bitmap_index = [name for _, name, _ in tags].index("test\\in map bitmap")
+            address_of["test\\weapon hud"] = add_weapon_hud(tag_data, self.weapon_hud, hud_bitmap_index)
         if self.script_nodes is not None:
             add_script_nodes(tag_data, scenario, *self.script_nodes)
+        if self.pause_menu:
+            names = [name for _, name, _ in tags]
+            for button, handler_function, game_data_functions in PAUSE_BUTTONS:
+                address_of[PAUSE_FOLDER + button] = add_widget(tag_data, handler_function, game_data_functions)
+            address_of[PAUSE_LIST] = add_widget(tag_data, None, (), children=[
+                (names.index(PAUSE_FOLDER + button), 35 * index) for index, (button, _, _) in enumerate(PAUSE_BUTTONS)])
         for tag_index, (group_name, name, external) in enumerate(tags):
             if name in address_of:
                 tag_data.u32(instances + tag_index * 0x20 + 0x14, address_of[name])
@@ -586,7 +647,7 @@ class Map:
         header = data
         struct.pack_into("<IiIIII", header, 0, code("head"), 609, file_length, 0,
                          tag_data_offset, len(tag_data.bytes))
-        header[0x20:0x20 + 5] = b"test\0"
+        header[0x20:0x20 + len(self.name) + 1] = self.name + b"\0"
         header[0x40:0x40 + 14] = b"01.00.00.0609\0"
         struct.pack_into("<h", header, 0x60, 1)
         struct.pack_into("<I", header, 0x7FC, code("foot"))
@@ -612,6 +673,7 @@ class Map:
         if self.model is not None:
             self.where["model"] = tag_data_offset + (address_of["test\\model"] - BASE)
         self.addresses = dict(address_of, instances=instances)
+        self.tags = tags
         self.tag_indices = {name: index for index, (_, name, _) in enumerate(tags)}
         self.salt = salt
         return bytes(data)
@@ -1023,9 +1085,9 @@ def test_ogg_vorbis_buffer_sizes_that_are_not_plausible_are_left_to_be_measured(
 def test_pcm_permutations_of_xbox_adpcm_sounds_are_encoded_as_they_load(report_tool, tmp_path):
     # 16-bit PCM (compression none) in an Xbox ADPCM sound, as extinction.map's
     # scarab bolt: 72 bytes of stereo are 18 frames, one block of 72 bytes;
-    # of mono 36 frames, one block of 36
+    # of mono 36 frames, one block of 36 (22 kHz: a 44 kHz mono one is halved)
     for encoding, adpcm_bytes in ((1, 72), (0, 36)):
-        cache = Map(sound_permutation_compression=0, sound_encoding=encoding)
+        cache = Map(sound_permutation_compression=0, sound_encoding=encoding, sound_sample_rate=0)
         returncode, report, tags = converted(report_tool, cache, tmp_path)
         assert returncode == 0 and report["sound_permutations_pcm"] == "1", encoding
         assert report["sound_permutations_muted"] == "0" and report["sounds_undecodable"] == "0"
@@ -1034,6 +1096,49 @@ def test_pcm_permutations_of_xbox_adpcm_sounds_are_encoded_as_they_load(report_t
         assert s16_at(tags, permutation + 0x28) == 0  # the permutation stays 16-bit PCM
         assert u32_at(tags, permutation + 0x38) == adpcm_bytes  # its Xbox ADPCM's bytes
         assert u32_at(tags, permutation + 0x40) == 72  # its samples, as they were
+
+
+@pytest.mark.parametrize("permutation_compression, samples_size, adpcm_bytes, marker", [
+    # Xbox ADPCM: 5 blocks of 36 bytes, 320 frames at 44 kHz, 160 at 22 kHz: 3 blocks
+    (1, 5 * 36, 3 * 36, 0x101),
+    # 16-bit PCM: 72 bytes, 36 frames at 44 kHz, 18 at 22 kHz: 1 block
+    (0, 72, 36, 0x100),
+], ids=["xbox adpcm", "16-bit pcm"])
+def test_mono_44khz_sounds_are_taken_at_22khz_as_they_load(report_tool, tmp_path, permutation_compression, samples_size,
+                                                          adpcm_bytes, marker):
+    """The game plays mono sounds at 22 kHz only: a 44 kHz mono Xbox ADPCM
+    sound (extinction's spectre open and close) was refused. It is made a
+    22 kHz one, its permutations marked for the sound cache to take at half
+    their rate, their buffer size the halved ADPCM's."""
+    cache = Map(sound_encoding=0, sound_sample_rate=1, sound_samples_size=samples_size,
+                sound_permutation_compression=permutation_compression)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["sounds_halved"] == "1 (1 permutations)"
+    assert report["sounds_undecodable"] == "0" and report["sound_permutations_muted"] == "0"
+    header, permutation = sound_parts(tags, cache)
+    assert u16_at(tags, header + 0x06) == 0 and s16_at(tags, header + 0x6E) == 1  # 22 kHz Xbox ADPCM to the game
+    assert u16_at(tags, permutation + 0x28) == marker
+    assert u32_at(tags, permutation + 0x38) == adpcm_bytes
+    assert u32_at(tags, permutation + 0x40) == samples_size  # its samples, as they were
+
+
+def test_a_halved_compression_in_a_map_makes_its_sound_unplayable(report_tool, tmp_path):
+    """Only the loader marks a permutation to be halved: a map's own
+    permutation in that compression is one this build cannot decode."""
+    for marker in (0x100, 0x101):
+        cache = Map(sound_encoding=0, sound_sample_rate=1, sound_permutation_compression=marker)
+        returncode, report, tags = converted(report_tool, cache, tmp_path)
+        assert returncode == 0 and report["sounds_undecodable"] == "1" and report["sounds_halved"] == "0 (0 permutations)"
+        assert u32_at(tags, cache.addresses["test\\sound"] + 0x98) == 0
+
+
+def test_stereo_44khz_and_mono_22khz_sounds_are_left_alone(report_tool, tmp_path):
+    for encoding, sample_rate in ((1, 1), (0, 0)):
+        cache = Map(sound_encoding=encoding, sound_sample_rate=sample_rate)
+        returncode, report, tags = converted(report_tool, cache, tmp_path)
+        assert returncode == 0 and report["sounds_halved"] == "0 (0 permutations)"
+        header, permutation = sound_parts(tags, cache)
+        assert u16_at(tags, header + 0x06) == sample_rate and u16_at(tags, permutation + 0x28) == 1
 
 
 def test_permutations_that_are_not_whole_frames_or_blocks_are_muted(report_tool, tmp_path):
@@ -1119,15 +1224,18 @@ def f32_at(tags, address):
 
 def test_hud_elements_with_the_high_resolution_scale_are_halved(report_tool, tmp_path):
     """Halo PC draws them from bitmaps at twice the Xbox's size; this build
-    ignores the flag, so the scale takes it in and the flag goes."""
+    ignores the flag, so the scale takes it in and the flag goes. Halo PC
+    reads it only on statics, meters and numbers: a crosshair's item keeps
+    its scale and flag."""
     cache = Map(weapon_hud=[((1.0, 0.5), 4 | 1), ((1.0, 1.0), 1), ((2.0, 2.0), 4)])
     returncode, report, tags = converted(report_tool, cache, tmp_path)
-    assert returncode == 0 and report["hud_placements_rescaled"] == "2"
+    assert returncode == 0 and report["hud_placements_rescaled"] == "1"
+    assert report["hud_placements_kept"] == "1"
     hud = cache.addresses["test\\weapon hud"]
     statics = u32_at(tags, hud + 0x64)
     items = u32_at(tags, u32_at(tags, hud + 0x88) + 0x38)
     assert (f32_at(tags, statics + 0x28), f32_at(tags, statics + 0x2C), u16_at(tags, statics + 0x30)) == (0.5, 0.25, 1)
-    assert (f32_at(tags, items + 4), f32_at(tags, items + 8), u16_at(tags, items + 0x0C)) == (1.0, 1.0, 0)
+    assert (f32_at(tags, items + 4), f32_at(tags, items + 8), u16_at(tags, items + 0x0C)) == (2.0, 2.0, 4)
 
 
 def test_hud_elements_without_the_high_resolution_scale_keep_theirs(report_tool, tmp_path):
@@ -1136,6 +1244,73 @@ def test_hud_elements_without_the_high_resolution_scale_keep_theirs(report_tool,
     assert returncode == 0 and report["hud_placements_rescaled"] == "0"
     statics = u32_at(tags, cache.addresses["test\\weapon hud"] + 0x64)
     assert (f32_at(tags, statics + 0xB4 + 0x28), u16_at(tags, statics + 0xB4 + 0x30)) == (0.75, 3)
+
+
+@pytest.mark.parametrize("flag", [1 << 4, 1 << 7], ids=["half hud scale", "force hud use highres scale"])
+def test_hud_elements_drawing_a_halo_pc_half_scale_bitmap_are_halved(report_tool, tmp_path, flag):
+    """Halo PC's bitmap flags halve the scale of every HUD element drawing the
+    bitmap, as the element's own high resolution scale does: the first static
+    and the crosshair's item draw it, the second static does not."""
+    cache = Map(weapon_hud=[((1.0, 0.5), 1), ((1.0, 1.0), 1), ((2.0, 2.0), 0)], hud_bitmap_flags=flag)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["hud_placements_rescaled"] == "2"
+    hud = cache.addresses["test\\weapon hud"]
+    statics = u32_at(tags, hud + 0x64)
+    items = u32_at(tags, u32_at(tags, hud + 0x88) + 0x38)
+    assert (f32_at(tags, statics + 0x28), f32_at(tags, statics + 0x2C), u16_at(tags, statics + 0x30)) == (0.5, 0.25, 1)
+    assert (f32_at(tags, statics + 0xB4 + 0x28), u16_at(tags, statics + 0xB4 + 0x30)) == (1.0, 1)
+    assert (f32_at(tags, items + 4), f32_at(tags, items + 8)) == (1.0, 1.0)
+
+
+@pytest.mark.parametrize("name, tags_checksum, listed", [
+    (b"rev_snowcast_cavebeta", 1683840640, True),
+    (b"Rev_Snowcast_CaveBeta", 1683840640, True),
+    (b"rev_snowcast_cavebeta", 1683840641, False),
+], ids=["listed", "name in another case", "another checksum"])
+def test_maps_chimera_lists_get_halo_pc_behaviours(report_tool, tmp_path, name, tags_checksum, listed):
+    """Chimera's map list knows a map by its name in lower case and its tag
+    data checksum. This one relies on, among others, bitmaps' half HUD scale
+    flags being ignored, so the static drawing a bitmap with one keeps its
+    scale."""
+    cache = Map(weapon_hud=[((1.0, 0.5), 1), ((1.0, 1.0), 1), ((2.0, 2.0), 0)], hud_bitmap_flags=1 << 4,
+                name=name, tags_checksum=tags_checksum)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["halo_pc_behaviours"] == (
+        "gearbox_chicago_multiply gearbox_meters hud_number_scale disable_bitmap_hud_scale_flags" if listed else "none")
+    assert report["hud_placements_rescaled"] == ("0" if listed else "2")
+
+
+def test_halo_pc_widget_functions_run_none_and_the_pause_menu_is_the_xboxs(report_tool, tmp_path):
+    """Handlers running Halo PC's own functions (past the Xbox's 102) keep
+    failing as before, but none numbered as the port's menu functions (from
+    256) reaches them: it gets the Xbox's first invalid number. Game data
+    inputs past the Xbox's 41 run the first (nothing). The multiplayer pause
+    list keeps resume and quit, in the middle of its four rows (from
+    DamnationCE, c34563f0)."""
+    cache = Map(pause_menu=True)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["widget_functions_cleared"] == "3" and report["pause_menu_trimmed"] == "1"
+    button = {name: cache.addresses[PAUSE_FOLDER + name] for name, _, _ in PAUSE_BUTTONS}
+
+    def handler(name):
+        address = u32_at(tags, button[name] + 0x54 + 4)
+        return u32_at(tags, address), u16_at(tags, address + 6)
+
+    def game_data(name):
+        count, address = u32_at(tags, button[name] + 0x48), u32_at(tags, button[name] + 0x48 + 4)
+        return [u16_at(tags, address + index * 0x24) for index in range(count)]
+
+    assert handler("resume_game_button") == (0x81, 3) and handler("quit_netgame_button") == (0x81, 101)
+    assert handler("game_options_button") == (0x81, 120) and handler("change_settings_button") == (0x81, 102)
+    assert game_data("resume_game_button") == [5] and game_data("change_settings_button") == [0, 0]
+    pause_list = cache.addresses[PAUSE_LIST]
+    count, children = u32_at(tags, pause_list + 0x3E0), u32_at(tags, pause_list + 0x3E0 + 4)
+    names = [name for _, name, _ in cache.tags]
+    kept = [(names[u32_at(tags, children + index * 0x50 + 0x0C) & 0xFFFF].split("\\")[-1],
+             s16_at(tags, children + index * 0x50 + 0x36)) for index in range(count)]
+    assert kept == [("resume_game_button", 35), ("quit_netgame_button", 70)]
 
 
 SCORE_HINT = 'Hold "%s" for score'

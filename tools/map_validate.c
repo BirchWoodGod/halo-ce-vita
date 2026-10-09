@@ -769,7 +769,7 @@ static int custom_edition_check(struct memory_file *map, struct custom_edition_r
 	*loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
 	custom_edition_cache_combine_resource_offsets(tag_cache, *loaded_bytes, CUSTOM_EDITION_BITMAPS_OFFSET,
 		CUSTOM_EDITION_SOUNDS_OFFSET);
-	status = custom_edition_cache_convert(tag_cache, *loaded_bytes, &conversion);
+	status = custom_edition_cache_convert(tag_cache, *loaded_bytes, report.identity.name, &conversion);
 	if (status != _cache_file_status_ok)
 	{
 		if (!quiet)

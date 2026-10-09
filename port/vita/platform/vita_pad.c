@@ -97,6 +97,14 @@ int vita_pad_button_glyph(short gamepad_button)
 	return vita_button_glyph(&icons_controls, gamepad_button, vita_menus_active);
 }
 
+/* (the score hint, source/interface/hud_draw.c hud_vita_score_hint) the
+glyph of the Vita button an Xbox button is on in play, whatever the button
+icons are; VITA_GLYPH_NONE if on none, or before the settings are read */
+int vita_pad_play_button_glyph(short gamepad_button)
+{
+	return vita_button_glyph(&icons_controls, gamepad_button, 0);
+}
+
 static int setting(const char *name, int fallback, int low, int high)
 {
 	const char *value = getenv(name);

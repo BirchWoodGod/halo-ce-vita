@@ -85,6 +85,9 @@ struct custom_edition_file
 struct custom_edition_cache_globals
 {
 	boolean tags_loaded;
+	/* the Halo PC behaviours the loaded map relies on (enum
+	custom_edition_behaviour, flags) */
+	uint32_t behaviours;
 	/* the tag cache and the bytes of it the loaded tags use */
 	uint8_t *tag_cache;
 	uint32_t loaded_bytes;
@@ -770,6 +773,37 @@ static boolean custom_edition_cache_tags_validate(
 	return TRUE;
 }
 
+/* the Halo PC behaviours this build follows (cache_file_formats.c and
+hud_draw.c), of those Chimera's map list names (from DamnationCE, CC0) */
+#define FOLLOWED_BEHAVIOURS ( \
+	1U << _custom_edition_behaviour_gearbox_multitexture_blend_modes | \
+	1U << _custom_edition_behaviour_invert_detail_after_reflection | \
+	1U << _custom_edition_behaviour_hud_number_scale | \
+	1U << _custom_edition_behaviour_disable_bitmap_hud_scale_flags | \
+	1U << _custom_edition_behaviour_block_multitexture_overlays)
+
+/* logs each Halo PC behaviour the map relies on, and whether this build
+follows it */
+static void custom_edition_behaviours_log(
+	uint32_t behaviours)
+{
+	short behaviour;
+
+	for (behaviour = 0; behaviour < NUMBER_OF_CUSTOM_EDITION_BEHAVIOURS; behaviour++)
+	{
+		if (!((behaviours >> behaviour) & 1))
+			continue;
+		error(
+			_error_silent,
+			(FOLLOWED_BEHAVIOURS >> behaviour) & 1 ?
+				"custom edition: relies on Halo PC's %s (Chimera's map list), which this build follows" :
+				"custom edition: relies on Halo PC's %s (Chimera's map list), which this build does not do",
+			custom_edition_behaviour_name(behaviour));
+	}
+
+	return;
+}
+
 /* Makes the tags custom_edition_cache_load loaded into `tag_cache` this
 build's: their resource offsets combined, their bytes converted, then
 checked as an Xbox map's tags are; then their bitmaps checked, their
@@ -788,7 +822,7 @@ static boolean custom_edition_cache_tags_convert(
 		loaded_bytes,
 		COMBINED_BITMAPS_OFFSET,
 		COMBINED_SOUNDS_OFFSET);
-	status = custom_edition_cache_convert(tag_cache, loaded_bytes, &conversion);
+	status = custom_edition_cache_convert(tag_cache, loaded_bytes, report->identity.name, &conversion);
 	custom_edition_load_progress_set(0.48f);
 	if (status != _cache_file_status_ok)
 	{
@@ -844,6 +878,13 @@ static boolean custom_edition_cache_tags_convert(
 			"custom edition: %ld 16-bit PCM sound permutations are encoded to Xbox ADPCM as they load",
 			(long)conversion.sound_permutations_pcm);
 	}
+	if (conversion.sounds_halved)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld 44 kHz mono sounds (%ld permutations) are taken at 22 kHz as they load",
+			(long)conversion.sounds_halved, (long)conversion.sound_permutations_halved);
+	}
 	if (conversion.sound_permutations_muted)
 	{
 		error(
@@ -858,9 +899,26 @@ static boolean custom_edition_cache_tags_convert(
 			"custom edition: %ld HUD elements drawn from Halo PC's double resolution bitmaps were given half their scale",
 			(long)conversion.hud_placements_rescaled);
 	}
+	custom_edition_cache_globals.behaviours = conversion.behaviours;
+	custom_edition_behaviours_log(conversion.behaviours);
+	if (conversion.hud_placements_kept)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld HUD crosshair, overlay and number placements keep Halo PC's high resolution scale flag (numbers' digits drawn at half size)",
+			(long)conversion.hud_placements_kept);
+	}
 	if (conversion.score_hint_converted)
 	{
 		error(_error_silent, "custom edition: the multiplayer score hint names the BACK button where Halo PC names a key");
+	}
+	if (conversion.widget_functions_cleared || conversion.pause_menu_trimmed)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld menu game data inputs of Halo PC's own functions, and event handlers numbered as the port's, run none%s",
+			(long)conversion.widget_functions_cleared,
+			conversion.pause_menu_trimmed ? "; the multiplayer pause menu is the Xbox's resume and quit" : "");
 	}
 
 #ifdef HALO_RELOCATABLE_TAG_CACHE
@@ -1917,6 +1975,14 @@ boolean custom_edition_cache_tags_loaded(
 	return custom_edition_cache_globals.tags_loaded;
 }
 
+boolean custom_edition_cache_relies_on(
+	short behaviour)
+{
+	return custom_edition_cache_globals.tags_loaded &&
+		behaviour >= 0 && behaviour < NUMBER_OF_CUSTOM_EDITION_BEHAVIOURS &&
+		((custom_edition_cache_globals.behaviours >> behaviour) & 1);
+}
+
 void *custom_edition_cache_tag_cache(
 	unsigned long *size)
 {
@@ -1939,6 +2005,7 @@ void custom_edition_cache_tags_unload(
 	custom_edition_sounds_stop();
 	custom_edition_cache_files_close();
 	custom_edition_cache_globals.tags_loaded = FALSE;
+	custom_edition_cache_globals.behaviours = 0;
 	custom_edition_cache_globals.tag_cache = NULL;
 	custom_edition_cache_globals.loaded_bytes = 0;
 	custom_edition_cache_globals.tag_cache_bytes = 0;

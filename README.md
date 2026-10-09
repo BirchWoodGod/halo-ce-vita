@@ -690,6 +690,11 @@ This port stands on a lot of other people's work:
 - **[Invader](https://github.com/SnowyMouse/invader)** by SnowyMouse: the
   tag definitions `port/linux/src/tag_layouts.h` is generated from (by
   `tools/gen_tag_layouts.py`), which let the port relocate the maps' tags.
+- **[Chimera](https://github.com/SnowyMouse/chimera)** by SnowyMouse
+  (GPL-3.0-only): its list of the Custom Edition maps made around Halo PC's
+  own behaviour (`port/linux/game/custom_edition_behaviours.inc`, generated
+  from its `map_hacks_config.json`) and what it found of Halo PC's HUD
+  scaling, brought over by DamnationCE.
 - **[Xita](https://github.com/Xita-Project/xita)**: the earlier work on running Halo on the Vita, whose
   findings (the register combiner translation, the GPU and threading
   lessons, the tools) went into this port.

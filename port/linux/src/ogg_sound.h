@@ -48,8 +48,8 @@ enum ogg_sound_status
 	_ogg_sound_read_failed,
 	/* not an Ogg Vorbis stream, or a damaged one */
 	_ogg_sound_not_vorbis,
-	/* a stream of more than two channels, or of another rate than the
-	sound says */
+	/* a stream of more than two channels, or of a rate out of the rate
+	converter's bounds (1 to 192 kHz: xbox_adpcm_encoder.h) */
 	_ogg_sound_unsupported_format,
 	/* the stream needed more working memory than it is given */
 	_ogg_sound_out_of_memory,
@@ -77,9 +77,10 @@ struct ogg_sound_request
 	void *output;
 	uint32_t output_bytes;
 	int channels;
-	/* the rate the sound is played at (Hz): the stream's, or half of it
-	(a 44 kHz mono sound is played at 22 kHz, the only rate the game plays
-	mono sounds at: each pair of frames becomes one) */
+	/* the rate the sound is played at (Hz): the stream's, half of it (a
+	44 kHz mono sound is played at 22 kHz, the only rate the game plays
+	mono sounds at: each pair of frames becomes one), or any other the
+	stream is interpolated to (a stream of another rate than its sound's) */
 	long rate;
 
 	/* the decoder's working memory (OGG_SOUND_WORKING_BYTES; at least
@@ -127,8 +128,9 @@ struct ogg_sound_result
 uint32_t ogg_sound_adpcm_bytes(uint32_t frames, int channels);
 
 /* frames of output for a stream of `frames` frames at `stream_rate` played
-at `rate`: as many, or half (rounded up) when the stream's rate is twice
-the output's; 0 when the rates do not go together */
+at `rate`: as many, half (rounded up) when the stream's rate is twice the
+output's, else as many as lie before its end at the output's rate
+(xbox_adpcm_rate_frames); 0 when a rate is out of bounds */
 uint32_t ogg_sound_output_frames(uint64_t frames, long stream_rate, long rate);
 
 /* A stream's channels and rate from its first page (`head`: the stream's
