@@ -333,6 +333,8 @@ static int report_custom_edition_cache(
 			printf("sounds_ogg_vorbis: %" PRId32 "\n", conversion.sounds_ogg_vorbis);
 			printf("sound_permutations_pcm: %" PRId32 "\n", conversion.sound_permutations_pcm);
 			printf("sound_permutations_muted: %" PRId32 "\n", conversion.sound_permutations_muted);
+			printf("sounds_halved: %" PRId32 " (%" PRId32 " permutations)\n", conversion.sounds_halved,
+				conversion.sound_permutations_halved);
 			printf("hud_placements_rescaled: %" PRId32 "\n", conversion.hud_placements_rescaled);
 			printf("hud_placements_kept: %" PRId32 "\n", conversion.hud_placements_kept);
 			printf("score_hint_converted: %" PRId32 "\n", conversion.score_hint_converted);

@@ -3094,12 +3094,13 @@ static uint32_t ogg_vorbis_adpcm_bytes(
 }
 
 /* The Xbox ADPCM bytes a 16-bit PCM permutation of `pcm_bytes` (its
-samples' size) and `channels` channels encodes to, at most what the sound
-cache gives a permutation (the rest is cut off); 0 when it is not whole
-frames, or empty. */
+samples' size) and `channels` channels encodes to, halved in rate when
+`halved`, at most what the sound cache gives a permutation (the rest is cut
+off); 0 when it is not whole frames, or empty. */
 static uint32_t pcm_adpcm_bytes(
 	uint32_t pcm_bytes,
-	int channels)
+	int channels,
+	int halved)
 {
 	uint32_t frame_bytes = 2 * (uint32_t)channels;
 	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
@@ -3109,7 +3110,26 @@ static uint32_t pcm_adpcm_bytes(
 	if (!pcm_bytes || pcm_bytes % frame_bytes)
 		return 0;
 	frames = pcm_bytes / frame_bytes;
+	if (halved)
+		frames = frames / 2 + frames % 2;
 	blocks = frames / OGG_SOUND_ADPCM_BLOCK_SAMPLES + (frames % OGG_SOUND_ADPCM_BLOCK_SAMPLES ? 1 : 0);
+	if (blocks > OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes)
+		blocks = OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes;
+	return blocks * block_bytes;
+}
+
+/* The Xbox ADPCM bytes an Xbox ADPCM permutation of `adpcm_bytes` (whole
+blocks of `channels` channels) takes at half its rate, at most what the
+sound cache gives a permutation (the rest is cut off). */
+static uint32_t adpcm_halved_bytes(
+	uint32_t adpcm_bytes,
+	int channels)
+{
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	uint32_t blocks = adpcm_bytes / block_bytes;
+
+	/* (64 frames a block, halved: 32) */
+	blocks = blocks / 2 + blocks % 2;
 	if (blocks > OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes)
 		blocks = OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes;
 	return blocks * block_bytes;
@@ -3133,7 +3153,14 @@ blocks (its samples' size made 0, which the sound cache does not load). A
 sound in another compression (Halo PC's IMA ADPCM, 2), or whose
 permutations are not all of its own, would be played as Xbox ADPCM noise,
 and is made unplayable: with no pitch ranges the game neither plays nor
-loads it (sound_manager.c, sound_definition_is_playable). */
+loads it (sound_manager.c, sound_definition_is_playable). A 44 kHz mono
+sound of Xbox ADPCM or 16-bit PCM, which the game refused to play (mono
+sounds at 22 kHz only), is made a 22 kHz one, its permutations' compression
+CUSTOM_EDITION_PERMUTATION_*_HALVED and their buffer size the halved
+ADPCM's: the sound cache decodes them, halves their rate and encodes them
+as it loads them, as it does Ogg Vorbis ones (custom_edition_sounds.c). A
+sound of 16-bit PCM alone is made an Xbox ADPCM one, the compression the
+game plays. */
 static void sound_prepare(
 	struct load_state const *state,
 	uint32_t sound_offset,
@@ -3145,7 +3172,8 @@ static void sound_prepare(
 	int ogg_vorbis = compression == SOUND_COMPRESSION_OGG_VORBIS;
 	int decodable = compression == SOUND_COMPRESSION_NONE || compression == SOUND_COMPRESSION_XBOX_ADPCM || ogg_vorbis;
 	int channels = read_s16(sound + SOUND_ENCODING_OFFSET) == SOUND_ENCODING_STEREO ? 2 : 1;
-	int halved = ogg_vorbis && channels == 1 && read_s16(sound + SOUND_SAMPLE_RATE_OFFSET) == SOUND_SAMPLE_RATE_44KHZ;
+	int halved = decodable && channels == 1 && read_s16(sound + SOUND_SAMPLE_RATE_OFFSET) == SOUND_SAMPLE_RATE_44KHZ;
+	int32_t halved_permutations = 0;
 	int32_t pitch_range_count;
 	uint32_t pitch_ranges_offset;
 	int32_t pitch_range_index;
@@ -3201,21 +3229,33 @@ static void sound_prepare(
 			else if (permutation_compression == SOUND_COMPRESSION_NONE)
 			{
 				uint32_t adpcm_bytes = pcm_adpcm_bytes(
-					read_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET), channels);
+					read_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET), channels, halved);
 
 				write_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET, adpcm_bytes);
 				if (adpcm_bytes)
 					report->sound_permutations_pcm++;
 				else
 					report->sound_permutations_muted++;
+				if (adpcm_bytes && halved)
+				{
+					write_u16(permutation + SOUND_PERMUTATION_COMPRESSION_OFFSET, CUSTOM_EDITION_PERMUTATION_PCM_HALVED);
+					halved_permutations++;
+				}
 			}
 			else if (permutation_compression == SOUND_COMPRESSION_XBOX_ADPCM)
 			{
-				if (read_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET) %
-					(OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels))
+				uint32_t samples_bytes = read_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET);
+
+				if (samples_bytes % (OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels))
 				{
 					write_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET, 0);
 					report->sound_permutations_muted++;
+				}
+				else if (halved && samples_bytes)
+				{
+					write_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET, adpcm_halved_bytes(samples_bytes, channels));
+					write_u16(permutation + SOUND_PERMUTATION_COMPRESSION_OFFSET, CUSTOM_EDITION_PERMUTATION_XBOX_ADPCM_HALVED);
+					halved_permutations++;
 				}
 			}
 			else
@@ -3237,6 +3277,17 @@ static void sound_prepare(
 			write_u16(sound + SOUND_SAMPLE_RATE_OFFSET, SOUND_SAMPLE_RATE_22KHZ);
 		}
 		report->sounds_ogg_vorbis++;
+	}
+	else
+	{
+		/* (16-bit PCM alone: encoded as it loads, as Xbox ADPCM) */
+		write_u16(sound + SOUND_COMPRESSION_OFFSET, SOUND_COMPRESSION_XBOX_ADPCM);
+		if (halved)
+		{
+			write_u16(sound + SOUND_SAMPLE_RATE_OFFSET, SOUND_SAMPLE_RATE_22KHZ);
+			report->sounds_halved++;
+			report->sound_permutations_halved += halved_permutations;
+		}
 	}
 
 	return;

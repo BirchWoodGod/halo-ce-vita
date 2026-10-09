@@ -878,6 +878,13 @@ static boolean custom_edition_cache_tags_convert(
 			"custom edition: %ld 16-bit PCM sound permutations are encoded to Xbox ADPCM as they load",
 			(long)conversion.sound_permutations_pcm);
 	}
+	if (conversion.sounds_halved)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld 44 kHz mono sounds (%ld permutations) are taken at 22 kHz as they load",
+			(long)conversion.sounds_halved, (long)conversion.sound_permutations_halved);
+	}
 	if (conversion.sound_permutations_muted)
 	{
 		error(

@@ -284,6 +284,29 @@ changed:
   encoder the Ogg Vorbis decoding also uses). A PCM permutation that is not
   whole frames, and an Xbox ADPCM one that is not whole 36-byte blocks a
   channel, is muted (none in the maps run): either would play as noise.
+- **44 kHz mono sounds of Xbox ADPCM or 16-bit PCM.** The game plays mono
+  sounds at 22 kHz only (`sound_manager.c`: "attempt to play a sound that
+  was not a mono 22k compressed sound ..."), so these played nothing:
+  extinction's spectre `open` and `close`, three of
+  Covenant_V_Marines_Beta_5's (none in pcgulch or firefight-airlock; an
+  October 2026 census of every sound of the four maps, Halo PC's `sounds.map`
+  ones included). Such a sound is made a 22 kHz one and its permutations
+  are marked (`CUSTOM_EDITION_PERMUTATION_*_HALVED`, a compression Halo PC
+  does not have: a map's own permutation in it makes its sound unplayable),
+  their buffer size the halved ADPCM's. The sound cache's decoding thread
+  reads their samples in 16 KB pieces, decodes Xbox ADPCM a block at a time
+  as the mixer does, takes the frames at half their rate with the low-pass
+  the Ogg Vorbis halving uses, and encodes them (`xbox_adpcm_encoder.c`,
+  `xbox_adpcm_rate`): nothing is decoded as the map loads, and no memory is
+  taken but the cache block the permutation gets (at most 1 MB) as an Xbox
+  ADPCM one does. A sound of 16-bit PCM alone (none on hand) is made an
+  Xbox ADPCM one, which the game plays, where it was refused too.
+- **Ogg Vorbis streams of another rate than their sound's** (none in the
+  four maps: every stream there is at its sound's rate) are interpolated to
+  the sound's rate (low-passed first when the rate goes down), within 1 kHz
+  to 192 kHz, where they were refused and played as silence; a buffer size
+  made from the sound's rate then gives the output's length, the stream's
+  own when it is measured.
 - **OpenSauce's script nodes.** OpenSauce's memory upgrades make room for
   28501 script syntax nodes instead of 19001, and OpenSauce patches the game
   to accept that. This build takes the scenario's nodes only at its own

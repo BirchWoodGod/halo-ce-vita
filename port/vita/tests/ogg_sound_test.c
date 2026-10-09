@@ -521,6 +521,220 @@ static void test_fixture(struct fixture *fixture)
 	free(output.memory);
 }
 
+/* ---------- other rates (xbox_adpcm_encoder.c: the rate converter and the
+block decoder): Halo PC's 44 kHz mono sounds, played at 22 kHz, and streams
+of another rate than their sound's */
+
+/* `bytes` of Xbox ADPCM of `channels` channels decoded by
+xbox_adpcm_block_decode and taken at `output_rate` into `output`; returns
+the frames of silence after them */
+static uint32_t adpcm_rate_encode(unsigned char const *adpcm, uint32_t bytes, int channels, long input_rate,
+	long output_rate, struct output *output, struct xbox_adpcm_encoder *encoder)
+{
+	struct xbox_adpcm_rate rate;
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	uint32_t offset;
+
+	xbox_adpcm_encoder_begin(encoder, output->bytes, output->size, channels);
+	CHECK(xbox_adpcm_rate_begin(&rate, encoder, input_rate, output_rate), "rate %ld for %ld refused", input_rate,
+		output_rate);
+	for (offset = 0; offset + block_bytes <= bytes && !encoder->full; offset += block_bytes)
+	{
+		short frames[XBOX_ADPCM_BLOCK_SAMPLES * XBOX_ADPCM_MAXIMUM_CHANNELS];
+		int frame;
+
+		xbox_adpcm_block_decode(adpcm + offset, channels, frames);
+		for (frame = 0; frame < XBOX_ADPCM_BLOCK_SAMPLES; frame++)
+		{
+			int values[XBOX_ADPCM_MAXIMUM_CHANNELS];
+			int channel;
+
+			for (channel = 0; channel < channels; channel++)
+				values[channel] = frames[frame * channels + channel];
+			xbox_adpcm_rate_frame(&rate, values);
+		}
+	}
+	xbox_adpcm_rate_finish(&rate);
+	return xbox_adpcm_encoder_finish(encoder);
+}
+
+/* a sine's ADPCM played at `rate` as the mixer decodes it: its SNR and zero
+crossings, checked */
+static void rate_check(char const *what, struct output const *output, uint32_t frames, int channels, long rate)
+{
+	short *samples = malloc(sizeof(short) * channels * (output->size / OGG_SOUND_ADPCM_BLOCK_BYTES + 1) *
+		OGG_SOUND_ADPCM_BLOCK_SAMPLES);
+	uint32_t decoded = adpcm_decode(output->bytes, output->size, channels, samples);
+	int channel;
+
+	CHECK(decoded >= frames && output_guards_intact(output), "%s: %u frames of ADPCM, guards", what, decoded);
+	for (channel = 0; channel < channels; channel++)
+	{
+		double frequency = channel ? 660.0 : 440.0;
+		/* (the interpolation's first and last frames aside) */
+		double snr = sine_signal_to_noise(samples, frames - 2, channels, channel, frequency, rate);
+		uint32_t crossings = zero_crossings(samples, frames, channels, channel);
+		uint32_t expected = (uint32_t)(2.0 * frequency * frames / rate);
+
+		printf("  %s, channel %d: %u frames, %.1f dB, %u zero crossings (%u)\n", what, channel, frames, snr,
+			crossings, expected);
+		CHECK(snr > 20.0, "%s channel %d: %.1f dB", what, channel, snr);
+		CHECK(crossings + 4 >= expected && crossings <= expected + 4, "%s channel %d: %u crossings", what, channel,
+			crossings);
+	}
+	free(samples);
+}
+
+static void test_rates(void)
+{
+	struct xbox_adpcm_encoder encoder;
+	struct xbox_adpcm_rate rate;
+	int channels;
+
+	/* Halo PC's 44 kHz mono sounds (16-bit PCM or Xbox ADPCM) at 22 kHz,
+	and stereo the same */
+	for (channels = 1; channels <= 2; channels++)
+	{
+		uint32_t frames = 22051;
+		unsigned char *pcm = pcm_sine(frames, channels, 44100);
+		struct output adpcm = output_new(xbox_adpcm_bytes(frames, channels));
+		uint32_t halved_frames = xbox_adpcm_rate_frames(frames, 44100, 22050);
+		struct output output = output_new(xbox_adpcm_bytes(halved_frames, channels));
+		uint32_t padded;
+		char what[64];
+
+		CHECK(halved_frames == 11026, "44 kHz halved: %u frames", halved_frames);
+		pcm_encode(pcm, frames * channels * 2, &adpcm, channels, 16 * 1024, &encoder);
+		padded = adpcm_rate_encode(adpcm.bytes, adpcm.size, channels, 44100, 22050, &output, &encoder);
+		/* (the ADPCM's whole blocks: its padding halved too) */
+		CHECK(encoder.frames == (adpcm.size / (36 * (uint32_t)channels) * 64 + 1) / 2 && !encoder.truncated,
+			"ADPCM 44 kHz %d ch at 22 kHz: %u frames, %u padded", channels, encoder.frames, padded);
+		snprintf(what, sizeof(what), "ADPCM 44100 Hz %d ch at 22050 Hz", channels);
+		rate_check(what, &output, halved_frames, channels, 22050);
+		free(output.memory);
+		free(adpcm.memory);
+		free(pcm);
+	}
+
+	/* any other rate, up and down, mono and stereo */
+	{
+		static long const pairs[][2] = { { 44100, 32000 }, { 22050, 16000 }, { 22050, 44100 }, { 11025, 22050 },
+			{ 48000, 22050 }, { 8000, 22050 } };
+		size_t index;
+
+		for (index = 0; index < sizeof(pairs) / sizeof(pairs[0]); index++)
+		{
+			for (channels = 1; channels <= 2; channels++)
+			{
+				long input_rate = pairs[index][0], output_rate = pairs[index][1];
+				uint32_t frames = (uint32_t)(input_rate / 2);
+				unsigned char *pcm = pcm_sine(frames, channels, input_rate);
+				uint32_t output_frames = xbox_adpcm_rate_frames(frames, input_rate, output_rate);
+				struct output output = output_new(xbox_adpcm_bytes(output_frames, channels));
+				struct xbox_adpcm_rate converter;
+				uint32_t frame;
+				char what[64];
+
+				CHECK(output_frames == (uint32_t)(((uint64_t)frames * (uint64_t)output_rate + (uint64_t)input_rate - 1) /
+					(uint64_t)input_rate), "%ld for %ld: %u frames", input_rate, output_rate, output_frames);
+				xbox_adpcm_encoder_begin(&encoder, output.bytes, output.size, channels);
+				xbox_adpcm_rate_begin(&converter, &encoder, input_rate, output_rate);
+				for (frame = 0; frame < frames; frame++)
+				{
+					int values[2];
+					int channel;
+
+					for (channel = 0; channel < channels; channel++)
+						values[channel] = (int16_t)(uint16_t)(pcm[(frame * channels + channel) * 2] |
+							pcm[(frame * channels + channel) * 2 + 1] << 8);
+					xbox_adpcm_rate_frame(&converter, values);
+				}
+				xbox_adpcm_rate_finish(&converter);
+				xbox_adpcm_encoder_finish(&encoder);
+				CHECK(encoder.frames == output_frames && !encoder.truncated, "%ld for %ld %d ch: %u frames, not %u",
+					input_rate, output_rate, channels, encoder.frames, output_frames);
+				snprintf(what, sizeof(what), "pcm %ld Hz %d ch at %ld Hz", input_rate, channels, output_rate);
+				rate_check(what, &output, output_frames, channels, output_rate);
+				free(output.memory);
+				free(pcm);
+			}
+		}
+	}
+
+	/* an Ogg Vorbis stream of another rate than its sound's: 44.1 kHz at
+	32 kHz, 22 kHz at 16 kHz */
+	{
+		static struct { int fixture; long rate; } const cases[] = { { 2, 32000 }, { 0, 16000 }, { 1, 32000 } };
+		size_t index;
+
+		for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
+		{
+			struct fixture *fixture = &fixtures[cases[index].fixture];
+			struct ogg_sound_result result;
+			uint32_t input_frames = (uint32_t)(fixture->stream_rate / 2);
+			uint32_t output_frames = xbox_adpcm_rate_frames(input_frames, fixture->stream_rate, cases[index].rate);
+			struct output output = output_new(xbox_adpcm_bytes(output_frames, fixture->stream_channels));
+			char what[64];
+
+			transcode(&fixture->stream, &output, fixture->stream_channels, cases[index].rate, working_memory,
+				sizeof(working_memory), &result);
+			CHECK(result.status == _ogg_sound_ok && !result.halved && result.frames_decoded == output_frames,
+				"%s at %ld Hz: %s, %u frames, not %u", fixture->name, cases[index].rate,
+				ogg_sound_status_describe(result.status), result.frames_decoded, output_frames);
+			snprintf(what, sizeof(what), "%s at %ld Hz", fixture->name, cases[index].rate);
+			rate_check(what, &output, output_frames, fixture->stream_channels, cases[index].rate);
+			free(output.memory);
+		}
+	}
+
+	/* the block decoder is the mixer's, on any bytes (step indices past 88
+	among them) */
+	{
+		unsigned char garbage[72 * 64];
+		short ours[XBOX_ADPCM_BLOCK_SAMPLES * XBOX_ADPCM_MAXIMUM_CHANNELS];
+		short mixer[XBOX_ADPCM_BLOCK_SAMPLES * XBOX_ADPCM_MAXIMUM_CHANNELS];
+		uint32_t index;
+		int same = 1;
+
+		srand(7);
+		for (index = 0; index < sizeof(garbage); index++)
+			garbage[index] = (unsigned char)rand();
+		for (channels = 1; channels <= 2; channels++)
+		{
+			for (index = 0; index + 36 * (uint32_t)channels <= sizeof(garbage); index += 36 * (uint32_t)channels)
+			{
+				xbox_adpcm_block_decode(garbage + index, channels, ours);
+				adpcm_decode(garbage + index, 36 * (uint32_t)channels, channels, mixer);
+				same &= !memcmp(ours, mixer, sizeof(short) * 64 * channels);
+			}
+		}
+		CHECK(same, "the block decoder differs from the mixer's");
+	}
+
+	/* rates out of bounds: refused, and nothing written */
+	{
+		struct output output = output_new(72);
+		int frame[2] = { 1000, 1000 };
+
+		xbox_adpcm_encoder_begin(&encoder, output.bytes, output.size, 1);
+		CHECK(!xbox_adpcm_rate_begin(&rate, &encoder, 999, 22050) && !xbox_adpcm_rate_begin(&rate, &encoder, 22050, 48001) &&
+			!xbox_adpcm_rate_begin(&rate, &encoder, -44100, 22050) && !xbox_adpcm_rate_begin(&rate, NULL, 44100, 22050),
+			"a rate out of bounds accepted");
+		xbox_adpcm_rate_frame(&rate, frame);
+		xbox_adpcm_rate_finish(&rate);
+		CHECK(encoder.frames == 0 && output_guards_intact(&output), "a refused rate converter wrote");
+		/* (a full output: the converter stops) */
+		xbox_adpcm_encoder_begin(&encoder, output.bytes, 36, 1);
+		xbox_adpcm_rate_begin(&rate, &encoder, 8000, 48000);
+		for (int repeat = 0; repeat < 100; repeat++)
+			xbox_adpcm_rate_frame(&rate, frame);
+		xbox_adpcm_rate_finish(&rate);
+		CHECK(encoder.full && encoder.truncated && encoder.frames == 64 && output_guards_intact(&output),
+			"a full output: %u frames", encoder.frames);
+		free(output.memory);
+	}
+}
+
 /* an output shorter than the stream, and one longer */
 static void test_lengths(struct fixture *fixture)
 {
@@ -611,9 +825,11 @@ static void test_refusals(void)
 		;
 	CHECK(index == output.size && output_guards_intact(&output), "too little working memory: the output is not silence");
 
-	/* a 22 kHz stream for a 44 kHz sound, or a 11025 Hz one */
+	/* a 22 kHz stream for a 44 kHz sound (interpolated: the output, twice
+	as long, does not hold all of it), or a 11025 Hz one */
 	transcode(&fixture->stream, &output, 2, 44100, working_memory, sizeof(working_memory), &result);
-	CHECK(result.status == _ogg_sound_unsupported_format, "22 kHz for 44 kHz: %s", ogg_sound_status_describe(result.status));
+	CHECK(result.status == _ogg_sound_ok && !result.halved && result.truncated && output_guards_intact(&output),
+		"22 kHz for 44 kHz: %s, truncated %d", ogg_sound_status_describe(result.status), result.truncated);
 	transcode(&fixture->stream, &output, 2, 11025, working_memory, sizeof(working_memory), &result);
 	CHECK(result.status == _ogg_sound_ok && result.halved && result.frames_decoded == (fixture->frames + 1) / 2,
 		"22 kHz for 11 kHz: %s, halved %d, %u frames", ogg_sound_status_describe(result.status), result.halved,
@@ -699,8 +915,10 @@ static void test_measure(void)
 		free(copy);
 	}
 	CHECK(ogg_sound_output_frames(100, 44100, 22050) == 50 && ogg_sound_output_frames(101, 44100, 22050) == 51 &&
-		ogg_sound_output_frames(100, 22050, 22050) == 100 && ogg_sound_output_frames(100, 32000, 22050) == 0 &&
-		ogg_sound_output_frames(100, 22050, 44100) == 0 && ogg_sound_output_frames(1ull << 33, 22050, 22050) == 0,
+		ogg_sound_output_frames(100, 22050, 22050) == 100 && ogg_sound_output_frames(100, 32000, 22050) == 69 &&
+		ogg_sound_output_frames(100, 22050, 44100) == 200 && ogg_sound_output_frames(1ull << 33, 22050, 22050) == 0 &&
+		ogg_sound_output_frames(100, 999, 22050) == 0 && ogg_sound_output_frames(100, 192001, 22050) == 0 &&
+		ogg_sound_output_frames(100, 22050, 48001) == 0 && ogg_sound_output_frames(100, 192000, 1000) == 1,
 		"output frames");
 	CHECK(ogg_sound_adpcm_bytes(1, 1) == 36 && ogg_sound_adpcm_bytes(64, 2) == 72 && ogg_sound_adpcm_bytes(65, 2) == 144 &&
 		ogg_sound_adpcm_bytes(0, 1) == 0 && ogg_sound_adpcm_bytes(64, 3) == 0, "ADPCM bytes");
@@ -865,6 +1083,8 @@ int main(int argc, char **argv)
 	test_measure();
 	printf("16-bit PCM:\n");
 	test_pcm();
+	printf("other rates:\n");
+	test_rates();
 	printf("damage:\n");
 	for (index = 0; index < FIXTURE_COUNT; index++)
 		test_damage(&fixtures[index]);

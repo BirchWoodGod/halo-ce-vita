@@ -376,6 +376,15 @@ enum custom_edition_behaviour
 	NUMBER_OF_CUSTOM_EDITION_BEHAVIOURS
 };
 
+/* A permutation's compression as custom_edition_cache_convert leaves it for
+the sound cache (custom_edition_sounds.c) when its sound is a 44 kHz mono
+one made 22 kHz: its samples (16-bit PCM, or Xbox ADPCM) taken at half
+their rate. Halo PC has no such compression, and a map's permutation in
+one makes its sound unplayable (sound_prepare). */
+#define CUSTOM_EDITION_PERMUTATION_HALVED 0x100
+#define CUSTOM_EDITION_PERMUTATION_PCM_HALVED (CUSTOM_EDITION_PERMUTATION_HALVED | 0)
+#define CUSTOM_EDITION_PERMUTATION_XBOX_ADPCM_HALVED (CUSTOM_EDITION_PERMUTATION_HALVED | 1)
+
 /* what custom_edition_cache_convert changed */
 struct custom_edition_conversion_report
 {
@@ -409,6 +418,12 @@ struct custom_edition_conversion_report
 	/* permutations whose size is not whole frames (16-bit PCM) or blocks
 	(Xbox ADPCM), muted */
 	int32_t sound_permutations_muted;
+	/* 44 kHz mono sounds of Xbox ADPCM or 16-bit PCM, which the game plays
+	at 22 kHz only (it refused them), made 22 kHz ones whose permutations
+	the sound cache takes at half their rate as it loads them
+	(custom_edition_sounds.c), and those permutations */
+	int32_t sounds_halved;
+	int32_t sound_permutations_halved;
 	/* HUD element placements with Halo PC's high resolution scale, whose
 	scale was halved */
 	int32_t hud_placements_rescaled;

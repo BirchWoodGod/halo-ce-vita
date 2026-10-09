@@ -1085,9 +1085,9 @@ def test_ogg_vorbis_buffer_sizes_that_are_not_plausible_are_left_to_be_measured(
 def test_pcm_permutations_of_xbox_adpcm_sounds_are_encoded_as_they_load(report_tool, tmp_path):
     # 16-bit PCM (compression none) in an Xbox ADPCM sound, as extinction.map's
     # scarab bolt: 72 bytes of stereo are 18 frames, one block of 72 bytes;
-    # of mono 36 frames, one block of 36
+    # of mono 36 frames, one block of 36 (22 kHz: a 44 kHz mono one is halved)
     for encoding, adpcm_bytes in ((1, 72), (0, 36)):
-        cache = Map(sound_permutation_compression=0, sound_encoding=encoding)
+        cache = Map(sound_permutation_compression=0, sound_encoding=encoding, sound_sample_rate=0)
         returncode, report, tags = converted(report_tool, cache, tmp_path)
         assert returncode == 0 and report["sound_permutations_pcm"] == "1", encoding
         assert report["sound_permutations_muted"] == "0" and report["sounds_undecodable"] == "0"
@@ -1096,6 +1096,49 @@ def test_pcm_permutations_of_xbox_adpcm_sounds_are_encoded_as_they_load(report_t
         assert s16_at(tags, permutation + 0x28) == 0  # the permutation stays 16-bit PCM
         assert u32_at(tags, permutation + 0x38) == adpcm_bytes  # its Xbox ADPCM's bytes
         assert u32_at(tags, permutation + 0x40) == 72  # its samples, as they were
+
+
+@pytest.mark.parametrize("permutation_compression, samples_size, adpcm_bytes, marker", [
+    # Xbox ADPCM: 5 blocks of 36 bytes, 320 frames at 44 kHz, 160 at 22 kHz: 3 blocks
+    (1, 5 * 36, 3 * 36, 0x101),
+    # 16-bit PCM: 72 bytes, 36 frames at 44 kHz, 18 at 22 kHz: 1 block
+    (0, 72, 36, 0x100),
+], ids=["xbox adpcm", "16-bit pcm"])
+def test_mono_44khz_sounds_are_taken_at_22khz_as_they_load(report_tool, tmp_path, permutation_compression, samples_size,
+                                                          adpcm_bytes, marker):
+    """The game plays mono sounds at 22 kHz only: a 44 kHz mono Xbox ADPCM
+    sound (extinction's spectre open and close) was refused. It is made a
+    22 kHz one, its permutations marked for the sound cache to take at half
+    their rate, their buffer size the halved ADPCM's."""
+    cache = Map(sound_encoding=0, sound_sample_rate=1, sound_samples_size=samples_size,
+                sound_permutation_compression=permutation_compression)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["sounds_halved"] == "1 (1 permutations)"
+    assert report["sounds_undecodable"] == "0" and report["sound_permutations_muted"] == "0"
+    header, permutation = sound_parts(tags, cache)
+    assert u16_at(tags, header + 0x06) == 0 and s16_at(tags, header + 0x6E) == 1  # 22 kHz Xbox ADPCM to the game
+    assert u16_at(tags, permutation + 0x28) == marker
+    assert u32_at(tags, permutation + 0x38) == adpcm_bytes
+    assert u32_at(tags, permutation + 0x40) == samples_size  # its samples, as they were
+
+
+def test_a_halved_compression_in_a_map_makes_its_sound_unplayable(report_tool, tmp_path):
+    """Only the loader marks a permutation to be halved: a map's own
+    permutation in that compression is one this build cannot decode."""
+    for marker in (0x100, 0x101):
+        cache = Map(sound_encoding=0, sound_sample_rate=1, sound_permutation_compression=marker)
+        returncode, report, tags = converted(report_tool, cache, tmp_path)
+        assert returncode == 0 and report["sounds_undecodable"] == "1" and report["sounds_halved"] == "0 (0 permutations)"
+        assert u32_at(tags, cache.addresses["test\\sound"] + 0x98) == 0
+
+
+def test_stereo_44khz_and_mono_22khz_sounds_are_left_alone(report_tool, tmp_path):
+    for encoding, sample_rate in ((1, 1), (0, 0)):
+        cache = Map(sound_encoding=encoding, sound_sample_rate=sample_rate)
+        returncode, report, tags = converted(report_tool, cache, tmp_path)
+        assert returncode == 0 and report["sounds_halved"] == "0 (0 permutations)"
+        header, permutation = sound_parts(tags, cache)
+        assert u16_at(tags, header + 0x06) == sample_rate and u16_at(tags, permutation + 0x28) == 1
 
 
 def test_permutations_that_are_not_whole_frames_or_blocks_are_muted(report_tool, tmp_path):

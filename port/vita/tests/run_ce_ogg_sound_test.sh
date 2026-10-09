@@ -22,7 +22,12 @@
 #                              buffer sizes give their lengths; and its 16-bit
 #                              PCM scarab bolt_impact (22 kHz stereo, 34880
 #                              frames) and newghost fire (44 kHz stereo) in
-#                              Xbox ADPCM sounds
+#                              Xbox ADPCM sounds; and the spectre's open, a
+#                              44 kHz mono Xbox ADPCM sound the game refused
+#                              (mono sounds at 22 kHz only), now decoded and
+#                              taken at 22 kHz as it loads; its ADPCM must
+#                              play at the halved samples' RMS within 3%, and
+#                              no sound may be refused as "not a mono 22k"
 #   Covenant_V_Marines_Beta_5  a protected map: every tag is named
 #                              <protected> and the buffer sizes are
 #                              scrambled, so the lengths come from the
@@ -104,6 +109,8 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 		sed 's/^/  /'
 	grep -aqE "does not decode|has no length|not in the map" "$log" "$out/$map/data/debug.txt" 2>/dev/null &&
 		fail "$map" "a sound was not found, measured or decoded ($log)"
+	grep -aq "not a mono 22k compressed sound" "$log" "$out/$map/data/debug.txt" 2>/dev/null &&
+		fail "$map" "a sound was refused as not a mono 22 kHz one ($log)"
 	grep -aq "Ogg Vorbis permutations decoded with the map" "$log" ||
 		fail "$map" "the decoder did not stop as the map went ($log)"
 	# each decoded permutation, and the mixer's packets from its ADPCM
@@ -121,13 +128,14 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 			if (current == "") return
 			played_rms = played_frames ? sqrt(played_squares / played_frames) : 0
 			printf "  %s: %s%s, %d frames, rms %d, %s in %s ms; the mixer played %d of its %d bytes, rms %d\n",
-				map, kind == "pcm" ? "16-bit PCM " : "", current, frames, rms, kind == "pcm" ? "encoded" : "decoded", ms,
+				map, kind == "pcm" ? "16-bit PCM " : kind == "adpcm" ? "44 kHz Xbox ADPCM " : "", current, frames, rms,
+				kind == "pcm" ? "encoded" : kind == "adpcm" ? "taken at 22 kHz" : "decoded", ms,
 				played, bytes, played_rms
 			if (rms < 300) { printf "FAIL (%s): %s decoded to silence (rms %d)\n", map, current, rms; bad = 1 }
 			if (played != bytes) { printf "FAIL (%s): the mixer played %d of %s'"'"'s %d bytes\n", map, played, current, bytes; bad = 1 }
 			if (played_rms < 100) { printf "FAIL (%s): the mixer played %s as silence (rms %d)\n", map, current, played_rms; bad = 1 }
-			if (kind == "pcm" && (played_rms < rms * 0.97 || played_rms > rms * 1.03)) {
-				printf "FAIL (%s): the mixer played 16-bit PCM %s at rms %d, not its rms %d\n", map, current, played_rms, rms
+			if (kind != "ogg" && (played_rms < rms * 0.97 || played_rms > rms * 1.03)) {
+				printf "FAIL (%s): the mixer played %s %s at rms %d, not its rms %d\n", map, kind, current, played_rms, rms
 				bad = 1
 			}
 			count++
@@ -136,7 +144,7 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 		/(ogg|pcm) sound: .* of .*: / && / frames / {
 			finish()
 			line = $0
-			kind = line ~ /pcm sound: / ? "pcm" : "ogg"
+			kind = line ~ /adpcm sound: / ? "adpcm" : line ~ /pcm sound: / ? "pcm" : "ogg"
 			sub(/.*(ogg|pcm) sound: /, "", line)
 			current = line; sub(/: .*/, "", current)
 			status_ = line; sub(/^[^:]*: /, "", status_); sub(/,.*/, "", status_)
@@ -173,7 +181,7 @@ run() { # MAP SOUND_COMMANDS EXPECTED_SOUNDS
 }
 
 mkdir -p "$out"
-run extinction 'L60:@sound sound\dialog\multiplayer1\slayer;L150:@sound sound\sfx\weapons\gunfire_sounds\fire2;L250:@sound vehicles\scarab\bolt\bolt_impact;L330:@sound vehicles\newghost\sounds\fire;' 4
+run extinction 'L60:@sound sound\dialog\multiplayer1\slayer;L150:@sound sound\sfx\weapons\gunfire_sounds\fire2;L250:@sound vehicles\scarab\bolt\bolt_impact;L330:@sound vehicles\newghost\sounds\fire;L380:@sound vehicles\spectre\open;' 5
 run Covenant_V_Marines_Beta_5 'L60:@sound <protected> 300;L150:@sound <protected> 600;L250:@sound <protected> 1052;' 3
 if [ "$status" = 0 ]; then
 	echo "PASS: Custom Edition Ogg Vorbis and 16-bit PCM sounds decoded and played ($out)"
