@@ -170,6 +170,13 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) the firing position selections' time and counts (lines_profile.c) */
+#include "lines_profile.h"
+/* (HALO_AI_PATH_STATE_VERIFY) the nearby test's search made when needed, checked (path_state_verify.c) */
+#include "path_state_verify.h"
+#endif
+
 /* ---------- constants */
 
 enum
@@ -1502,6 +1509,9 @@ static void firing_position_compute_line_of_sight(
 {
 	struct actor_datum *actor= actor_get(actor_index);
 
+#ifdef HALO_LINUX
+	halo_lines_stats.firing_position_lines_of_sight++;
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\ai\\actor_firing_position.c",
 		828,
@@ -1646,6 +1656,134 @@ static boolean firing_position_forced_evaluation(
 	return firing_position->valid;
 }
 
+/* port: the nearby test of actor_nearby_firing_positions, its search made
+before the walk (search_first, the original order) or when the walk first
+meets a position near enough to need it. The search's state is the function's
+own and nothing else reads it, so the answer is the same either way; a test
+point with no position of the groups within 4 world units (most pursuit
+candidates) no longer searches at all: each search cleared and filled an 8 KB
+hash table and flooded the surfaces within 4 units, 33 of them a pursuit
+selection on c10 (HALO_AI_PATH_STATE_VERIFY=1 answers each test both ways and
+compares) */
+static void nearby_firing_positions_search(
+	struct actor_definition *definition,
+	real_point3d const *test_point,
+	long test_surface_index,
+	struct path_state *state)
+{
+	struct path_input input;
+
+	path_input_new(
+		&input,
+		definition->moving.pathfinding_radius,
+		TRUE,
+		NONE);
+	path_input_set_start(&input, test_point, test_surface_index);
+	path_input_set_search_bounds(&input, 4.0f);
+	path_state_new(&input, state, NULL);
+	path_state_find(state);
+
+	return;
+}
+
+static boolean nearby_firing_positions_test(
+	struct actor_datum *actor,
+	struct actor_definition *definition,
+	struct encounter_definition *encounter,
+	long firing_position_groups,
+	real_point3d const *test_point,
+	long test_surface_index,
+	boolean search_first)
+{
+	struct path_state state;
+	boolean searched= FALSE;
+	short firing_position_index;
+
+	if (search_first && !actor->state.flying)
+	{
+		nearby_firing_positions_search(definition, test_point, test_surface_index, &state);
+		searched= TRUE;
+	}
+	else if (!actor->state.flying && test_surface_index!=NONE && test_point->z>-1000.0f)
+	{
+		/* a position of the groups at the test point itself, on its surface,
+		answers TRUE whatever else the walk meets: the search starts there
+		(path_state_begin makes the start node on the test surface, entry point
+		the test point, nothing cheaper ever replacing it), so its estimated
+		distance is exactly 0. A pursuit candidate's own position is one when
+		its group is among the searching groups */
+		for (firing_position_index= 0;
+			firing_position_index<encounter->firing_positions.count;
+			firing_position_index++)
+		{
+			struct firing_position_definition *firing_position= TAG_BLOCK_GET_ELEMENT(
+				&encounter->firing_positions,
+				firing_position_index,
+				struct firing_position_definition);
+
+			if (TEST_FLAG(firing_position_groups, firing_position->group_index) &&
+				firing_position->surface_index==test_surface_index &&
+				firing_position->position.x==test_point->x &&
+				firing_position->position.y==test_point->y &&
+				firing_position->position.z==test_point->z)
+			{
+				return TRUE;
+			}
+		}
+	}
+
+	for (firing_position_index= 0;
+		firing_position_index<encounter->firing_positions.count;
+		firing_position_index++)
+	{
+		struct firing_position_definition *firing_position= TAG_BLOCK_GET_ELEMENT(
+			&encounter->firing_positions,
+			firing_position_index,
+			struct firing_position_definition);
+
+		if (TEST_FLAG(firing_position_groups, firing_position->group_index) &&
+			distance_squared3d(test_point, &firing_position->position)<16.0f)
+		{
+			if (actor->state.flying)
+			{
+				if (path_3d_available(
+					global_structure_bsp_get(),
+					test_point,
+					0.0f,
+					&firing_position->position,
+					NULL,
+					NULL))
+				{
+					return TRUE;
+				}
+			}
+			else
+			{
+				real distance;
+
+				if (!searched)
+				{
+					nearby_firing_positions_search(definition, test_point, test_surface_index, &state);
+					searched= TRUE;
+				}
+				path_state_estimated_distance(
+					&state,
+					&firing_position->position,
+					firing_position->surface_index,
+					&distance,
+					NULL,
+					NULL);
+				if (distance<4.0f)
+				{
+					return TRUE;
+				}
+			}
+		}
+	}
+
+	return FALSE;
+}
+
 boolean actor_nearby_firing_positions(
 	long actor_index,
 	real_point3d const *test_point,
@@ -1675,67 +1813,20 @@ boolean actor_nearby_firing_positions(
 			actor_index,
 			_firing_point_evaluation_mode_fight,
 			group_selection_mode);
-		struct path_state state;
-		short firing_position_index;
+		boolean result= nearby_firing_positions_test(actor, definition, encounter,
+			firing_position_groups, test_point, test_surface_index, FALSE);
 
-		if (!actor->state.flying)
+#ifdef HALO_LINUX
+		if (path_state_verify_enabled())
 		{
-			struct path_input input;
+			boolean original= nearby_firing_positions_test(actor, definition, encounter,
+				firing_position_groups, test_point, test_surface_index, TRUE);
 
-			path_input_new(
-				&input,
-				definition->moving.pathfinding_radius,
-				TRUE,
-				NONE);
-			path_input_set_start(&input, test_point, test_surface_index);
-			path_input_set_search_bounds(&input, 4.0f);
-			path_state_new(&input, &state, NULL);
-			path_state_find(&state);
+			path_state_verify_result(_path_state_verify_nearby_firing_positions, result==original,
+				"actor_nearby_firing_positions answers differently when it searches first");
 		}
-
-		for (firing_position_index= 0;
-			firing_position_index<encounter->firing_positions.count;
-			firing_position_index++)
-		{
-			struct firing_position_definition *firing_position= TAG_BLOCK_GET_ELEMENT(
-				&encounter->firing_positions,
-				firing_position_index,
-				struct firing_position_definition);
-
-			if (TEST_FLAG(firing_position_groups, firing_position->group_index) &&
-				distance_squared3d(test_point, &firing_position->position)<16.0f)
-			{
-				if (actor->state.flying)
-				{
-					if (path_3d_available(
-						global_structure_bsp_get(),
-						test_point,
-						0.0f,
-						&firing_position->position,
-						NULL,
-						NULL))
-					{
-						return TRUE;
-					}
-				}
-				else
-				{
-					real distance;
-
-					path_state_estimated_distance(
-						&state,
-						&firing_position->position,
-						firing_position->surface_index,
-						&distance,
-						NULL,
-						NULL);
-					if (distance<4.0f)
-					{
-						return TRUE;
-					}
-				}
-			}
-		}
+#endif
+		return result;
 	}
 
 	return FALSE;
@@ -1753,6 +1844,9 @@ short actor_select_firing_position(
 	short best_index= NONE;
 	real best_evaluation= 0.0f;
 	boolean debug_evaluation= FALSE;
+#ifdef HALO_LINUX
+	unsigned long long lines_started= halo_lines_now();
+#endif
 
 	if (actor->meta.encounter_index==ai_debug.selected_squad_index &&
 		(ai_debug.selected_actor_index==NONE || ai_debug.selected_actor_index==actor_index))
@@ -2163,6 +2257,10 @@ short actor_select_firing_position(
 		}
 		evaluation_context->debug_encounter_count= (short)encounter->firing_positions.count;
 		evaluation_context->debug_considered_count= firing_position_count;
+#ifdef HALO_LINUX
+		halo_lines_stats.firing_position_calls++;
+		halo_lines_stats.firing_position_considered+= firing_position_count;
+#endif
 
 		if (firing_position_count==0)
 		{
@@ -2471,6 +2569,18 @@ short actor_select_firing_position(
 		}
 	}
 
+#ifdef HALO_LINUX
+	if (lines_started)
+	{
+		unsigned long long lines_us= halo_lines_now()-lines_started;
+
+		halo_lines_stats.firing_position_us+= lines_us;
+		if (lines_us>halo_lines_stats.firing_position_worst_us)
+		{
+			halo_lines_stats.firing_position_worst_us= lines_us;
+		}
+	}
+#endif
 	return best_index;
 }
 

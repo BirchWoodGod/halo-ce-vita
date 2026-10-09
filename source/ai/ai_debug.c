@@ -5019,6 +5019,23 @@ struct path_debug_storage *ai_debug_get_path_storage(
 	short storage_index = NONE;
 	short index;
 
+	/* port: the storage is for the AI debug renders of paths alone
+	(ai_render_paths draws an actor's last path, ai_render_paths_failed the
+	failed ones): with both off nothing reads it, so no storage is handed out
+	and the path search runs without one (state->debug NULL, as path_state_new's
+	other callers). Handing one out cleared all 117 KB of it here and copied the
+	82 KB path state into it after every search (path_state_find): ~0.7 MB of
+	memory traffic a tick in b30's beach fight, for actor_select_firing_position's
+	area searches and actor_path_refresh's. The searches themselves read nothing
+	from it (path.c and path_obstacle_avoidance.c write their results there; the
+	obstacle avoidance keeps its obstacles and path on its stack instead, set up
+	the same way by obstacles_new and path_new; use_stored_obstacles is never
+	set). Turning either render on hands storage out again from then on. */
+	if (!ai_debug.render_paths && !ai_debug.render_paths_failed)
+	{
+		return NULL;
+	}
+
 	for (index = 0; index<MAXIMUM_AI_DEBUG_PATH_STORAGE; index++)
 	{
 		struct path_debug_storage *path = &actor_path_debug_array[index];
