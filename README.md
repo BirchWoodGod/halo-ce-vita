@@ -1,79 +1,108 @@
+<div align="center">
+
 # Halo: Combat Evolved for the PS Vita
 
-A native PlayStation Vita port of **Halo: Combat Evolved**, built from the
-decompilation of the Xbox game. It is not an emulator: the game's own code
-is compiled for the Vita's ARM processor, and its Direct3D rendering is
-translated to the Vita's GPU.
+**A native PlayStation Vita port of Halo: Combat Evolved, built from the decompilation of the Xbox game.**
 
-**No game data is included.** You need your own Xbox copy of Halo: Combat
-Evolved.
+[![Latest release](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?label=stable&color=2ea44f)](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
+[![Beta](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?include_prereleases&label=beta&color=d29922)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
+[![Downloads](https://img.shields.io/github/downloads/BirchWoodGod/halo-ce-vita/total?color=blue)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
+[![Platform: PS Vita](https://img.shields.io/badge/platform-PS%20Vita%20%2F%20PS%20TV-003791)](#what-you-need)
 
-![A Warthog on The Silent Cartographer's beach, on a PS Vita](docs/screenshots/warthog-beach.png)
+[**Download**](https://github.com/BirchWoodGod/halo-ce-vita/releases) ·
+[Install](#install) ·
+[Online play](#multiplayer) ·
+[Controls](#controls) ·
+[Performance](#performance) ·
+[Roadmap](ROADMAP.md) ·
+[Report a problem](#reporting-a-crash-or-a-problem)
 
-| | | |
-| --- | --- | --- |
-| ![Two Pelicans over the sea in The Silent Cartographer's opening](docs/screenshots/pelicans.png) | ![Landing on The Silent Cartographer's beach](docs/screenshots/beach-landing.png) | ![Covenant at a Blood Gulch base](docs/screenshots/blood-gulch.png) |
+<img src="docs/screenshots/warthog-beach.png" alt="A Warthog on The Silent Cartographer's beach, on a PS Vita" width="90%">
 
-*Screenshots taken on a PS Vita.*
+<table>
+  <tr>
+    <td><img src="docs/screenshots/pelicans.png" alt="Two Pelicans over the sea in The Silent Cartographer's opening"></td>
+    <td><img src="docs/screenshots/beach-landing.png" alt="Landing on The Silent Cartographer's beach"></td>
+    <td><img src="docs/screenshots/blood-gulch.png" alt="Covenant at a Blood Gulch base"></td>
+  </tr>
+</table>
 
-[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+<sub><i>Screenshots taken on a PS Vita.</i></sub>
 
-*Video: [Halo CE PS Vita port v1.0.3 | Stability Update](https://youtu.be/S6CrPv_F2jU).*
+</div>
 
+It is not an emulator: the game's own code is compiled for the Vita's ARM
+processor, and its Direct3D rendering is translated to the Vita's GPU.
+
+> [!NOTE]
+> **1.1.0 is in beta.** This README describes 1.1.0. Its betas are on the
+> [releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases) as
+> pre-releases, for players who want to help test; the stable version is
+> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3).
+
+> [!IMPORTANT]
+> **No game data is included.** You need your own **Xbox** copy of Halo:
+> Combat Evolved. Online play also needs three files from the PC version,
+> which the free [Halo Custom Edition installer](https://www.halomaps.org/hce/detail.cfm?fid=410)
+> has (see [Halo PC files](#halo-pc-files)).
+
+> [!WARNING]
 > **Official sources.** The only official downloads are the
 > [releases on this GitHub repository](https://github.com/BirchWoodGod/halo-ce-vita/releases),
 > published by **BirchWoodGod**. VPKs, "updates", mods or donation requests
 > offered anywhere else under this project's or the developer's name are not
 > from me. If in doubt, check that a build is listed on the releases page.
 
-> **1.1.0 is in beta.** The 1.1.0 betas are on the releases page as
-> pre-releases, for players who want to help test; the stable version is
-> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3).
-> This README describes 1.1.0.
+<div align="center">
+
+### Watch it run
+
+[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+
+<sub><i><a href="https://youtu.be/S6CrPv_F2jU">Halo CE PS Vita port v1.0.3 | Stability Update</a></i></sub>
+
+</div>
+
+## Contents
+
+- [What's new in 1.1](#whats-new-in-11) · [What works](#what-works)
+- [Install](#install): [Windows tool](#easy-install-windows-tool), [what you need](#what-you-need), [steps](#steps), [updating](#updating), [Halo PC files](#halo-pc-files), [movies](#movies-optional)
+- [Multiplayer](#multiplayer): [the menus](#the-multiplayer-menus), [co-op campaign](#co-op-campaign), [custom maps](#custom-maps-and-map-sharing), [dedicated servers](#dedicated-servers)
+- [Controls](#controls) · [Settings panel](#settings-panel) · [Performance](#performance) · [Saving](#saving)
+- [Building](#building) · [Contributing](#contributing) · [Reporting a problem](#reporting-a-crash-or-a-problem)
+- [Credits](#credits) · [License](#license)
 
 ## What's new in 1.1
 
-- **[Online play](#multiplayer)** with the PC version's multiplayer menus
-  (from OpenCE): a server browser of public games, **Join by code**, and
-  Create Game with lobby name, max players, public or private and a
-  password. It needs the [Halo PC files](#halo-pc-files).
-- **Ad hoc** play between Vitas (no router), next to **Same Wi-Fi** (system link).
-- **[Co-op campaign](#co-op-campaign)** for up to **four** Vitas, Private or
-  Public.
-- **[Custom maps](#custom-maps-and-map-sharing)**: Xbox ones, and Halo PC /
-  Custom Edition multiplayer and campaign maps. A Vita that joins without
-  the host's map downloads it in the lobby.
-- **[Graphics settings and profiles](#graphics)**: object shadows, dynamic
-  lights, effects quality, particle density, AI think rate and sound
-  updates, after **Bruno Santana**'s modified build.
-- **[Frame interpolation](#graphics)**: up to 60 frames a second between the
-  game's 30 ticks.
-- **[The Vita's fourth CPU core](#more-performance-with-plugins-optional)**
-  with the CapUnlocker plugin.
-- **[Movies are optional](#movies-optional)**: the game runs without them.
-- **[A Windows install tool](#easy-install-windows-tool)** that gathers your
-  files and copies them to the Vita.
-- A settings panel in tabs (hold **SELECT + START**), button remapping, touch
-  zones, gyro aiming and PlayStation button icons.
+| | |
+| --- | --- |
+| 🌐 **Online play** | The PC version's multiplayer menus (from OpenCE): a server browser of public games, **Join by code**, and Create Game with lobby name, max players, public or private and a password. Needs the [Halo PC files](#halo-pc-files). |
+| 🖥️ **Dedicated servers** | Official US servers in the server browser (Slayer, Big Team, Oddball, King of the Hill), and [your own](#dedicated-servers) on a Linux PC or a Raspberry Pi. |
+| 📶 **Ad hoc** | Vitas side by side with no router, next to **Same Wi-Fi** (system link). |
+| 🤝 **[Co-op campaign](#co-op-campaign)** | Up to **four** Vitas, Private or Public. |
+| 🤖 **Offline bots** | Up to 15 computer players in Split Screen games, from Easy to Legendary. |
+| 🗺️ **[Custom maps](#custom-maps-and-map-sharing)** | Xbox maps, and Halo PC / Custom Edition multiplayer and campaign maps. A Vita that joins without the host's map downloads it in the lobby. |
+| ⚙️ **[Graphics settings](#graphics)** | Profiles, object shadows, dynamic lights, effects quality, particle density, AI think rate and sound updates, after **Bruno Santana**'s modified build. |
+| 🎞️ **[Frame interpolation](#graphics)** | Up to 60 frames a second between the game's 30 ticks. |
+| 🧠 **[Fourth CPU core](#more-performance-with-plugins-optional)** | With the CapUnlocker plugin. |
+| 📊 **Latency meter** | Your ping in network games, and a Ping column on the scoreboard. |
+| 🇪🇸 **Spanish** | The port's own text in Spanish (settings panel > Audio > Language). |
+| 🧰 **[Windows install tool](#easy-install-windows-tool)** | Gathers your files and copies them to the Vita. |
+| 🎮 **Controls** | A settings panel in tabs (hold **SELECT + START**), button remapping, touch zones, gyro aiming and PlayStation button icons. |
 
 Coming in **1.1.1** (see the [roadmap](ROADMAP.md)): game chat and voice
 chat.
 
 ## What works
 
-- The whole campaign from the menus, with checkpoints, saves and Save and
-  Quit, cinematics, and the movies if you convert them (optional).
-- Multiplayer between Vitas: on the same Wi-Fi (system link), online
-  (experimental) and ad hoc (experimental). The multiplayer maps on your
-  own too. Vitas
-  play only Vitas: PCs cannot join a Vita's game, nor a Vita a PC's.
-- Campaign co-op over the network for up to four Vitas (experimental).
-- Custom maps: Xbox maps, Custom Edition multiplayer maps and Custom Edition
-  campaign maps (experimental).
-- Profiles, controller settings and the game's settings menus.
-- Up to 30 fps, or up to 60 with frame interpolation. Quiet areas and
-  cinematics hold 25 to 30 fps; the biggest fights drop lower. See
-  [Performance](#performance).
+| | |
+| --- | --- |
+| 🎮 **Campaign** | The whole campaign from the menus, with checkpoints, saves and Save and Quit, cinematics, and the movies if you convert them ([optional](#movies-optional)). |
+| 🏁 **Multiplayer** | Between Vitas: same Wi-Fi (system link), online and ad hoc (both experimental), and the multiplayer maps on your own or with bots. Vitas play only Vitas: PCs can't join a Vita's game, nor a Vita a PC's. |
+| 🤝 **Co-op** | The campaign over the network for up to four Vitas (experimental). |
+| 🗺️ **Custom maps** | Xbox maps, Custom Edition multiplayer maps and Custom Edition campaign maps (experimental). |
+| ⏱️ **Frame rate** | Up to 30 fps, or up to 60 with frame interpolation. Quiet areas and cinematics hold 25 to 30 fps; the biggest fights drop lower. See [Performance](#performance). |
 
 ### Known issues
 
@@ -128,7 +157,9 @@ is the same tool. Details, and ffmpeg's licence (GPL v3, as this project):
 - Your own **Xbox** copy of Halo: Combat Evolved (the disc, or an image of
   it). It must be the Xbox version: the PC version's maps do not work.
 - **For online play and Custom Edition maps:** the [Halo PC files](#halo-pc-files)
-  `bitmaps.map`, `sounds.map` and `loc.map`, from your own copy of Halo PC.
+  `bitmaps.map`, `sounds.map` and `loc.map`. The free
+  [Halo Custom Edition installer](https://www.halomaps.org/hce/detail.cfm?fid=410)
+  has them: copy it to the Vita and the game takes them out by itself.
 
 ### Steps
 
