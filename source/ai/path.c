@@ -1304,6 +1304,28 @@ static short build_path_edges_for_surface(
 
 		edge->adjacent_surface_index =
 			collision_edge->surface_indices[!right_surface];
+		/* port: hints (__builtin_prefetch) for what is read next and soon: the
+		ring's next edge (the next turn's first read, its index known here), the
+		neighbour's pathfinding flags (read below, after the vertices) and the
+		neighbour's surface (read when the search expands it, most neighbours
+		becoming nodes). The search reads the same values in the same order; an
+		index that is not the bsp's is not asked for */
+		if (VALID_INDEX(collision_edge->edge_indices[right_surface], bsp->edges.count))
+		{
+			__builtin_prefetch(TAG_BLOCK_GET_ELEMENT(
+				&bsp->edges,
+				collision_edge->edge_indices[right_surface],
+				struct collision_edge));
+		}
+		if (VALID_INDEX(edge->adjacent_surface_index, bsp->surfaces.count) &&
+			VALID_INDEX(edge->adjacent_surface_index, structure->pathfinding_surfaces.count))
+		{
+			__builtin_prefetch(&pathfinding_surfaces[edge->adjacent_surface_index]);
+			__builtin_prefetch(TAG_BLOCK_GET_ELEMENT(
+				&bsp->surfaces,
+				edge->adjacent_surface_index,
+				struct collision_surface));
+		}
 		if (edge->adjacent_surface_index != NONE)
 		{
 			match_assert(
