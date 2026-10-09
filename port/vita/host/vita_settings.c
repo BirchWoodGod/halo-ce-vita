@@ -3113,9 +3113,9 @@ static int question_progress_input(unsigned long pressed)
     return 0;
 }
 
-/* the Controls tab's rows as shipped, its pages' too (but the gyro's rows
-and Show dev settings): the touch zones Off, the buttons in Xita's layout,
-look and crouch as they were */
+/* the General tab's control rows as shipped, its pages' too (but the gyro's
+rows, Show dev settings and the Update channel, which are no controls): the
+touch zones Off, the buttons in Xita's layout, look and crouch as they were */
 static void reset_controls(void)
 {
 	int index;
@@ -3126,7 +3126,7 @@ static void reset_controls(void)
 
 		if (pages[setting->page].tab != TAB_CONTROLS || setting->kind != KIND_CHOICE ||
 			strcmp(setting->variable, "HALO_DEV_SETTINGS") == 0 || strncmp(setting->variable, "HALO_GYRO", 9) == 0 ||
-			strcmp(setting->variable, "HALO_BUTTON_ICONS") == 0)
+			strcmp(setting->variable, "HALO_BUTTON_ICONS") == 0 || strcmp(setting->variable, "HALO_UPDATE_CHANNEL") == 0)
 			continue;
 		setting->choice = shipped_choice[index];
 		apply_value(setting);

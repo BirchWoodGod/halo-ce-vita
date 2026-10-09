@@ -582,6 +582,8 @@ static int frame_touch(unsigned long buttons, unsigned long touch)
 static void test_controls_tab(void)
 {
 	struct vita_controls_config config;
+	struct setting *channel;
+	int channel_kept;
 	char diagram[16], line[128];
 	int longest, count, index;
 
@@ -717,7 +719,14 @@ static void test_controls_tab(void)
 		"General, Advanced: the build's version (vita_version.h) under the rows");
 	to_line("Reset controls");
 	check(strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: back") != NULL, "an action row's buttons: cross selects");
+	/* (the Update channel, on the same page, is no control: kept) */
+	channel = setting_named("HALO_UPDATE_CHANNEL");
+	channel_kept = channel->choice;
+	channel->choice = !shipped_choice[channel - settings];
 	press(VITA_BUTTON_CROSS);
+	check(channel->choice != shipped_choice[channel - settings], "Reset controls keeps the Update channel");
+	channel->choice = channel_kept;
+	apply_value(channel);
 	printf("%s\n--\n", menu);
 	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "off") && !strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "off") &&
 		!strcmp(getenv("HALO_XBOX_WHITE"), "right") && !strcmp(getenv("XV_LOOK_SENS"), "100") &&
