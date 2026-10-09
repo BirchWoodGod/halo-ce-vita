@@ -5024,10 +5024,22 @@ void objects_update(
 	object_header = (struct object_header_datum *)object_header_data->data;
 	for (i = 0; i<object_header_data->count; ++object_header)
 	{
+#ifdef HALO_LINUX
+		/* (port) the header's own flags before the liveness test, which asks
+		the render epoch about the slot (a call for every object in the game,
+		twice a tick): the same objects pass, in the same order */
+		if (object_header->identifier &&
+			TEST_FLAG(object_header->flags, _object_header_active_bit) &&
+			!TEST_FLAG(object_header->flags, _object_header_being_created_bit) &&
+			OBJECT_HEADER_LIVE(object_header, i))
+#else
 		if (OBJECT_HEADER_LIVE(object_header, i))
+#endif
 		{
+#ifndef HALO_LINUX
 			if (TEST_FLAG(object_header->flags, _object_header_active_bit) &&
 				!TEST_FLAG(object_header->flags, _object_header_being_created_bit))
+#endif
 			{
 				long object_index = DATUM_INDEX_NEW(i, object_header->identifier);
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 416, object_get(object_index)->object.parent_object_index==NONE);
@@ -5055,7 +5067,17 @@ void objects_update(
 	object_header = (struct object_header_datum *)object_header_data->data;
 	for (i = 0; i<object_header_data->count; ++object_header)
 	{
+#ifdef HALO_LINUX
+		/* (port) a header with none of the three flags below has nothing
+		done to it here (its "do not update" flag is clear already): the
+		liveness test is asked only of the others */
+		if (object_header->identifier &&
+			(object_header->flags & (FLAG(_object_header_do_not_update_bit) |
+				FLAG(_object_header_being_created_bit) | FLAG(_object_header_being_deleted_bit))) &&
+			OBJECT_HEADER_LIVE(object_header, i))
+#else
 		if (OBJECT_HEADER_LIVE(object_header, i))
+#endif
 		{
 			SET_FLAG(object_header->flags, _object_header_do_not_update_bit, FALSE);
 
