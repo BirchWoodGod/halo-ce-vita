@@ -469,6 +469,11 @@ void objects_fix_for_deleted_object(
 	struct object_datum *object;
 
 	struct object_iterator iterator;
+#ifdef HALO_LINUX
+	/* (port) the types with a handler: object_types.c */
+	unsigned long object_types_handling_deleted_objects(void);
+	unsigned long handling_types = object_types_handling_deleted_objects();
+#endif
 	object_iterator_new(&iterator, _object_mask_all, 0);
 
 	for (object = (struct object_datum *)object_iterator_next(&iterator);
@@ -479,6 +484,9 @@ void objects_fix_for_deleted_object(
 		{
 			object->object.umbrella_shield_object_index = NONE;
 		}
+#ifdef HALO_LINUX
+		if (TEST_FLAG(handling_types, object->object.type))
+#endif
 		object_type_handle_deleted_object(iterator.index, deleted_object_index);
 	}
 
