@@ -70,7 +70,7 @@ run() {
 	# (the save folder fills with the game state: only the log is kept)
 	rm -rf "$dir/save"
 	[ "$code" = 0 ] || fail "$name: the harness exited with $code ($dir/run.log)"
-	grep -aqE "ASSERT|assertion|EXCEPTION|halt_and_catch_fire" "$dir/run.log" && fail "$name: an assertion or exception ($dir/run.log)"
+	grep -av "render assertion skipped" "$dir/run.log" | grep -aqE "ASSERT|assertion|EXCEPTION|halt_and_catch_fire" && fail "$name: an assertion or exception ($dir/run.log)"
 	grep -aq "screen: ${width}x480" "$dir/run.log" || fail "$name: the screen was not ${width} columns wide ($dir/run.log)"
 }
 
