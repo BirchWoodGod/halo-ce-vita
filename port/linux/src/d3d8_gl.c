@@ -1487,6 +1487,12 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 	(void)value;
 }
 
+void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value)
+{
+	if (state < D3DRS_MAX)
+		D3D__RenderState[state] = value;
+}
+
 void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWORD value)
 {
 	if ((unsigned long)state < D3DRS_MAX)

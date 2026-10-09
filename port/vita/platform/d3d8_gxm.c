@@ -1671,6 +1671,17 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 		device_state_dirty |= simple_dirty_bit_of_method[slot];
 }
 
+void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value)
+{
+	/* (D3DDevice_SetRenderState_Simple and the caller's store: the state
+	is a simple one, below D3DRS_SIMPLE_MAX) */
+	if (state < D3DRS_MAX && D3D__RenderState[state] != value)
+	{
+		device_state_dirty |= render_state_dirty_bit(state);
+		D3D__RenderState[state] = value;
+	}
+}
+
 void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWORD value)
 {
 	if ((unsigned long)state < D3DRS_MAX)
