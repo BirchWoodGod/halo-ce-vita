@@ -582,8 +582,12 @@ Edition map loading says which texels hold which order as they arrive
 (port/linux/game/custom_edition_bitmaps.c), and textures made of them are
 sampled with each channel taken from where Halo PC keeps it, which leaves
 them as compressed as they were. Addresses stay listed until other texels
-arrive there, which the loading also says, or the map goes; the game and the
-renderer share a thread. */
+arrive there, which the loading also says, or the map goes. The arrivals
+come from the cache file thread (since v1.1.0-beta.1: cache_files_windows.c
+reads a Custom Edition map's bitmaps there), or the tick's or the render's
+when they are read in place, and the uploads from the render: the list is
+shared under a lock, as vita_textures.c's (a growth of it on the cache file
+thread freed the array an upload was reading). */
 
 /* for each order, the channel (red, green, blue, alpha) of the texels each
 channel is sampled from */
@@ -605,18 +609,37 @@ struct custom_edition_texels
 static struct custom_edition_texels *custom_edition_texels;
 static unsigned long custom_edition_texel_count;
 static unsigned long custom_edition_texel_capacity;
+static volatile int custom_edition_texels_lock;
+
+static void custom_edition_texels_take(void)
+{
+	while (__atomic_load_n(&custom_edition_texels_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&custom_edition_texels_lock, 1, __ATOMIC_ACQUIRE))
+		;
+}
+
+static void custom_edition_texels_give(void)
+{
+	__atomic_store_n(&custom_edition_texels_lock, 0, __ATOMIC_RELEASE);
+}
 
 /* the order of the texels at `address` */
 static unsigned char custom_edition_texels_order(unsigned long address)
 {
+	unsigned char order = _custom_edition_channels_xbox;
 	unsigned long index;
 
+	custom_edition_texels_take();
 	for (index = 0; index < custom_edition_texel_count; index++)
 	{
 		if (custom_edition_texels[index].address == address)
-			return custom_edition_texels[index].channel_order;
+		{
+			order = custom_edition_texels[index].channel_order;
+			break;
+		}
 	}
-	return _custom_edition_channels_xbox;
+	custom_edition_texels_give();
+	return order;
 }
 
 void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order)
@@ -630,6 +653,7 @@ void halo_custom_edition_texels_channels(const void *texels, unsigned char chann
 			address, (unsigned)channel_order);
 		channel_order = _custom_edition_channels_xbox;
 	}
+	custom_edition_texels_take();
 	for (index = 0; index < custom_edition_texel_count && custom_edition_texels[index].address != address; index++)
 	{
 	}
@@ -649,6 +673,7 @@ void halo_custom_edition_texels_channels(const void *texels, unsigned char chann
 
 			if (!grown)
 			{
+				custom_edition_texels_give();
 				platform_log("no memory to list the texels at %08lx: they are sampled in Halo PC's channel order",
 					address);
 				return;
@@ -660,14 +685,20 @@ void halo_custom_edition_texels_channels(const void *texels, unsigned char chann
 		custom_edition_texels[custom_edition_texel_count].channel_order = channel_order;
 		custom_edition_texel_count++;
 	}
+	custom_edition_texels_give();
 }
 
 void halo_custom_edition_texels_forget(void)
 {
-	free(custom_edition_texels);
+	struct custom_edition_texels *texels;
+
+	custom_edition_texels_take();
+	texels = custom_edition_texels;
 	custom_edition_texels = NULL;
 	custom_edition_texel_count = 0;
 	custom_edition_texel_capacity = 0;
+	custom_edition_texels_give();
+	free(texels);
 }
 
 static void upload(GLuint texture, GLenum target, const struct xgpu_texture_description *description,
