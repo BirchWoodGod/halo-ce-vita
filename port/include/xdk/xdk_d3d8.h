@@ -349,8 +349,9 @@ D3DDevice_SetTextureStageState, D3DDevice_BeginScene and _EndScene; the
 game's retained copies of D3DDevice_GetRenderState, _GetTextureStageState,
 D3DIndexBuffer_Lock, the Unlock functions and Direct3D_Release, listed in
 the sources' symbol comments):
-- simple render states go to D3DDevice_SetRenderState_Simple with their
-  method and are kept in D3D__RenderState, deferred ones go to
+- simple render states go to D3DDevice_SetRenderState_SimpleIndex (the
+  port's: D3DDevice_SetRenderState_Simple with their method, and kept in
+  D3D__RenderState), deferred ones go to
   D3DDevice_SetRenderState_Deferred, and every other state to its own
   function (anything past D3DRS_MAX is ignored);
 - texture stage states below D3DTSS_DEFERRED_MAX are deferred, the rest go
@@ -360,14 +361,20 @@ the sources' symbol comments):
 - an index buffer's data is ordinary memory at its Data address;
 - the Direct3D object is never freed (Release returns 1). */
 
+/* (port) a simple render state set by its index: the platform stores the
+value in D3D__RenderState itself (D3DDevice_SetRenderState_Simple and a
+store by the caller, in one call that takes no push buffer method; the
+game sets 6500 simple states a frame on b30, most to the value they had,
+and each call site is smaller) */
+void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value);
+
 /* declared in xdk_pdb.h; __forceinline (not D3DINLINE) marks it for the
 Linux build's list of pick-any inline functions */
 __forceinline void __stdcall D3DDevice_SetRenderState(D3DRENDERSTATETYPE state, DWORD value)
 {
 	if (state < D3DRS_SIMPLE_MAX)
 	{
-		D3DDevice_SetRenderState_Simple(D3DSIMPLERENDERSTATEENCODE[state], value);
-		D3D__RenderState[state] = value;
+		D3DDevice_SetRenderState_SimpleIndex(state, value);
 	}
 	else if (state < D3DRS_DEFERRED_MAX)
 	{
