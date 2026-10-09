@@ -64,6 +64,9 @@ long cluster_partition_get_next_datum(
 	struct cluster_partition const *partition,
 	long *reference_index);
 #ifdef HALO_LINUX
+/* (port) a count bumped whenever any list of any partition may change: a
+connect, a disconnect, a partition made, made again, invalid or copied */
+unsigned long cluster_partition_changes(void);
 long cluster_partition_get_cluster_datums(
 	struct cluster_partition const *partition,
 	short cluster_index,

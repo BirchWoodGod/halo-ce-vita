@@ -10,7 +10,9 @@ how many met something), the point physics' leaf lookups, with how many
 were answered from a known cell (point_leaf_cache.c), and the AI's lines of
 sight (ai.c: ai_test_line_of_sight, run by the tick between two game frames;
 its calls, the rays they cast, the share of those that met an object or the
-structure, and the extra lines of the expanded modes).
+structure, and the extra lines of the expanded modes), with the collision
+tests' cluster walks: how many a frame, and how many found their cluster's
+table of objects and types (cluster_object_types.c).
 */
 
 /* ---------- headers */
@@ -26,6 +28,8 @@ unsigned long long vita_host_time_us(void) __attribute__((weak));
 void platform_log(const char *format, ...);
 /* (collisions.c) the obstruction rays' structure tests answered as before, and not */
 extern unsigned long obstruction_memo_hits, obstruction_memo_misses;
+/* (cluster_object_types.c) the collision walks' cluster tables found, and made */
+extern unsigned long cluster_object_types_found, cluster_object_types_made;
 
 /* ---------- globals */
 
@@ -61,8 +65,8 @@ void halo_lines_profile_step(int step, unsigned long long started)
 
 void halo_lines_profile_frame(void)
 {
-	static unsigned long points_seen, point_hits_seen, memo_hits_seen, memo_misses_seen;
-	unsigned long points, point_hits, memo_hits, memo_misses;
+	static unsigned long points_seen, point_hits_seen, memo_hits_seen, memo_misses_seen, tables_found_seen, tables_made_seen;
+	unsigned long points, point_hits, memo_hits, memo_misses, tables_found, tables_made;
 	double frames;
 	int step;
 
@@ -73,10 +77,13 @@ void halo_lines_profile_frame(void)
 	point_hits = point_leaf_cache_point_hits - point_hits_seen;
 	memo_hits = obstruction_memo_hits - memo_hits_seen;
 	memo_misses = obstruction_memo_misses - memo_misses_seen;
+	tables_found = cluster_object_types_found - tables_found_seen;
+	tables_made = cluster_object_types_made - tables_made_seen;
 	platform_log("lines-profile (ms/frame): particles %.3f contrails %.3f particle_systems %.3f widgets %.3f "
 		"game_sound %.3f rest %.3f | obstruction rays %.3f: %.1f calls, %.1f same tick, %.1f reused, %.1f rays "
 		"(%.0f%% met something, %.0f%% of their structure tests as before) a frame | point physics: %.1f leaf lookups a frame, %.0f%% from a known cell"
-		" | ai line of sight %.3f: %.1f calls, %.1f rays (%.0f%% met an object, %.0f%% the structure), %.1f extra lines a frame",
+		" | ai line of sight %.3f: %.1f calls, %.1f rays (%.0f%% met an object, %.0f%% the structure), %.1f extra lines a frame"
+		" | cluster walks %.1f a frame, %.0f%% from a kept table",
 		lines_step_us[_lines_step_particles] / 1000.0 / frames,
 		lines_step_us[_lines_step_contrails] / 1000.0 / frames,
 		lines_step_us[_lines_step_particle_systems] / 1000.0 / frames,
@@ -96,7 +103,9 @@ void halo_lines_profile_frame(void)
 		halo_lines_stats.ai_los_rays / frames,
 		halo_lines_stats.ai_los_rays ? 100.0 * halo_lines_stats.ai_los_object_hits / halo_lines_stats.ai_los_rays : 0.0,
 		halo_lines_stats.ai_los_rays ? 100.0 * halo_lines_stats.ai_los_other_hits / halo_lines_stats.ai_los_rays : 0.0,
-		halo_lines_stats.ai_los_extra_lines / frames);
+		halo_lines_stats.ai_los_extra_lines / frames,
+		(tables_found + tables_made) / frames,
+		tables_found + tables_made ? 100.0 * tables_found / (tables_found + tables_made) : 0.0);
 	for (step = 0; step < NUMBER_OF_LINES_STEPS; step++)
 		lines_step_us[step] = 0;
 	halo_lines_stats.obstruction_calls = 0;
@@ -115,5 +124,7 @@ void halo_lines_profile_frame(void)
 	point_hits_seen = point_leaf_cache_point_hits;
 	memo_hits_seen = obstruction_memo_hits;
 	memo_misses_seen = obstruction_memo_misses;
+	tables_found_seen = cluster_object_types_found;
+	tables_made_seen = cluster_object_types_made;
 	lines_frames = 0;
 }

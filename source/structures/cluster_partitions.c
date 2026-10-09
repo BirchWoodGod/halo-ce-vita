@@ -492,6 +492,12 @@ collision queries walk ~6000 objects a tick (b30's beach fight), and a call
 or two per object, each asking which thread it is on, cost more than the
 tests most of them fail. A render walk that must skip the tick's new datums,
 and a list longer than maximum, are left to those (NONE). */
+unsigned long cluster_partition_changes(
+	void)
+{
+	return cluster_datums_changes;
+}
+
 long cluster_partition_get_cluster_datums(
 	struct cluster_partition const *partition,
 	short cluster_index,
