@@ -123,6 +123,8 @@ symbols in this file:
 /* the objects' bounding spheres packed for the walks below
 (object_bounds_cache.c) */
 #include "object_bounds_cache.h"
+/* the point physics' leaves and cells (point_leaf_cache.c) */
+#include "point_leaf_cache.h"
 #else
 #define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
 #define HALO_OBJECTS_PHASE_POP() ((void)0)
@@ -333,9 +335,11 @@ collision:
 }
 
 #ifdef HALO_LINUX
-/* (port) collision_test_vector's body, made two ways (each call below passes
-a constant): as itself, and for the sound obstruction rays, whose callers ask
-only whether anything is hit (any_hit): the result and the collision record are then left
+/* (port) collision_test_vector's body, made three ways (each call below
+passes constants): as itself; with a key (point_leaf_cache.c: the point
+physics names its particle, whose end point's leaf may be known already); and
+for the sound obstruction rays, whose callers ask only whether anything is
+hit (any_hit): the result and the collision record are then left
 as soon as the answer is known - a structure or water hit, or the first object
 hit - where the full test would go on to find the nearest. The answer is the
 same: before the first hit the objects are tested against the whole vector
@@ -346,6 +350,7 @@ static __inline__ __attribute__((always_inline)) boolean collision_test_vector_i
 	real_vector3d const *vector,
 	long ignore_object_index,
 	struct collision_result *collision,
+	long key,
 	boolean any_hit)
 #else
 boolean collision_test_vector(
@@ -788,6 +793,13 @@ boolean collision_test_vector(
 			(real_vector3d const *)point,
 			vector,
 			(real_vector3d *)&collision->point);
+#ifdef HALO_LINUX
+		if (key != NONE)
+		{
+			scenario_location_from_point_keyed(&collision->location, &collision->point, key);
+		}
+		else
+#endif
 		scenario_location_from_point(&collision->location, &collision->point);
 	}
 
@@ -806,7 +818,20 @@ boolean collision_test_vector(
 	long ignore_object_index,
 	struct collision_result *collision)
 {
-	return collision_test_vector_internal(flags, point, vector, ignore_object_index, collision, FALSE);
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, collision, NONE, FALSE);
+}
+
+/* (port) collision_test_vector for the point physics, its point named by the
+key (point_leaf_cache.c) */
+boolean collision_test_vector_keyed(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision,
+	long key)
+{
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, collision, key, FALSE);
 }
 
 /* (port) whether collision_test_vector would hit anything, answered as soon
@@ -819,7 +844,7 @@ boolean collision_test_vector_obstructed(
 {
 	struct collision_result collision;
 
-	return collision_test_vector_internal(flags, point, vector, ignore_object_index, &collision, TRUE);
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, &collision, NONE, TRUE);
 }
 #endif
 

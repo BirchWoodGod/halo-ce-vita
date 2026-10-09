@@ -94,6 +94,9 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "sound/game_sound.h"
 #include "sound/sound_definitions.h"
+#ifdef HALO_LINUX
+#include "point_leaf_cache.h"
+#endif
 
 /* ---------- constants */
 
@@ -681,7 +684,13 @@ static boolean particle_update_physics(
 			short collision_material_type;
 			unsigned long collision_flags;
 
+#ifdef HALO_LINUX
+			/* (port) the particle names its cell (point_leaf_cache.c) */
+			collision_flags = point_physics_update_keyed(
+				POINT_LEAF_KEY(_point_leaf_particle, particle_index),
+#else
 			collision_flags = point_physics_update(
+#endif
 				0,
 				physics,
 				&particle->location,
@@ -850,6 +859,9 @@ void particle_new(
 	struct location location;
 	real_point3d position;
 	long particle_index;
+#ifdef HALO_LINUX
+	struct point_leaf_cell seed;
+#endif
 
 	match_assert_valid_real_vector3d(
 		"c:\\halo\\SOURCE\\effects\\particles.c",
@@ -891,7 +903,13 @@ void particle_new(
 		position = data->position;
 	}
 
+#ifdef HALO_LINUX
+	/* (port) the point's cell kept for the particle's first move
+	(point_leaf_cache.c): the same leaf */
+	scenario_location_from_point_seed(&location, &position, &seed);
+#else
 	scenario_location_from_point(&location, &position);
+#endif
 
 	if (location.leaf_index == NONE ||
 		!new_particle_is_visible(definition, &location, &position, data->radius))
@@ -903,6 +921,9 @@ void particle_new(
 
 	if (particle_index == NONE)
 		return;
+#ifdef HALO_LINUX
+	point_leaf_cache_seed_store(POINT_LEAF_KEY(_point_leaf_particle, particle_index), &seed);
+#endif
 
 	particle = particle_get(particle_index);
 

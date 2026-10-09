@@ -142,6 +142,15 @@ boolean collision_test_vector(
 	long ignore_object_index,
 	struct collision_result *collision);
 #ifdef HALO_LINUX
+/* (port) the point physics' test, its particle named by the key
+(point_leaf_cache.c; NONE: none) */
+boolean collision_test_vector_keyed(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision,
+	long key);
 /* (port) whether collision_test_vector would hit anything (the sound
 obstruction rays), answered as soon as known */
 boolean collision_test_vector_obstructed(

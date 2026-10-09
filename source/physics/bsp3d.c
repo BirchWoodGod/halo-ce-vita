@@ -148,6 +148,110 @@ long bsp3d_test_point(
 	return NONE;
 }
 
+#ifdef HALO_LINUX
+/* (port) bsp3d_test_point's walk, the same choices on the same values, which
+also gives the planes the point came nearest to on its way: the leaf's cell is
+where every one of the walk's tests comes out as it did, so a point on the
+same sides of the nearest planes as this one, and nearer to this one than any
+other plane it was tested against is (less the arithmetic's error), is in the
+same leaf (port/linux/game/point_leaf_cache.c). The four nearest distances
+are kept in order (m0 <= m1 <= m2 <= m3) with the planes of the first three:
+every other plane is at least the fourth's distance away. (A plane whose
+distance is not a number sends every point the same way: it is passed over) */
+long bsp3d_test_point_nearest_planes(
+	struct bsp3d const *bsp,
+	long node_index,
+	union real_point3d const *point,
+	struct bsp3d_point_planes *planes)
+{
+	short depth = 0;
+	real m0 = REAL_MAX, m1 = REAL_MAX, m2 = REAL_MAX, m3 = REAL_MAX;
+	long p0 = 0, p1 = 0, p2 = 0;
+
+	do
+	{
+		struct bsp3d_node const *node;
+		real_plane3d const *plane;
+		real distance;
+		real magnitude;
+
+		if (node_index < 0 ||
+			node_index >= bsp->nodes.count ||
+			depth++ >= MAXIMUM_BSP3D_TRAVERSAL_DEPTH)
+		{
+			if (!warned_about_bsp3d_nodes)
+			{
+				error(_error_silent, "a bsp3d node is not one of the bsp's, or is more than %d deep",
+					MAXIMUM_BSP3D_TRAVERSAL_DEPTH);
+				warned_about_bsp3d_nodes = TRUE;
+			}
+			planes->count = 0;
+			planes->rest = 0.0f;
+			return NONE;
+		}
+		node = TAG_BLOCK_GET_ELEMENT(
+			&bsp->nodes,
+			node_index,
+			struct bsp3d_node);
+		plane = TAG_BLOCK_GET_ELEMENT(
+			&bsp->planes,
+			node->plane_designator,
+			real_plane3d);
+
+		distance = plane3d_distance_to_point(plane, point);
+		magnitude = distance < 0.f ? -distance : distance;
+		if (magnitude < m3)
+		{
+			/* (the plane's index, its complement for the back side) */
+			long designator = distance >= 0.f ? node->plane_designator : ~node->plane_designator;
+
+			if (magnitude < m2)
+			{
+				m3 = m2;
+				if (magnitude < m1)
+				{
+					m2 = m1;
+					p2 = p1;
+					if (magnitude < m0)
+					{
+						m1 = m0;
+						p1 = p0;
+						m0 = magnitude;
+						p0 = designator;
+					}
+					else
+					{
+						m1 = magnitude;
+						p1 = designator;
+					}
+				}
+				else
+				{
+					m2 = magnitude;
+					p2 = designator;
+				}
+			}
+			else
+			{
+				m3 = magnitude;
+			}
+		}
+		node_index = node->children[distance >= 0.f];
+	}
+	while (!(node_index & LONG_MIN));
+
+	planes->count = (short)((m0 < REAL_MAX) + (m1 < REAL_MAX) + (m2 < REAL_MAX));
+	planes->rest = m3;
+	planes->signed_indices[0] = p0;
+	planes->signed_indices[1] = p1;
+	planes->signed_indices[2] = p2;
+	if (node_index != NONE)
+		return node_index & LONG_MAX;
+
+	return NONE;
+}
+#endif
+
 long bsp3d_clip_line_to_leaves(
 	struct bsp3d const *bsp,
 	long node_index,
