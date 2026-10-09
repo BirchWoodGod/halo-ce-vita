@@ -391,6 +391,13 @@ controller** does; this is where each is on the Vita as shipped:
 
 The settings panel's **General** tab:
 
+- **Check for updates** is its first row: press Cross and the game asks
+  GitHub for the newest version (nothing is downloaded). The answer shows
+  right under it, beside the build's version: "Version 1.1.0-beta.3 - Up to
+  date", or, in amber, "Update available: 1.1.0-beta.4" and where to get it
+  (github.com/BirchWoodGod/halo-ce-vita/releases).
+- Look sensitivity, Invert look, Crouch, Gyro aiming and Rear touch guard,
+  then the pages below.
 - **Button layout** puts each Xbox button (A, B, X, Y, Black, White, the
   triggers, the sticks' clicks, Back) on the Vita button of your choice, in
   play (the menus keep Cross / Circle and the D-pad). Its first row, **Button
@@ -410,13 +417,14 @@ The settings panel's **General** tab:
   Tilt steering. Lay the Vita still for a second now and then: that teaches
   it the gyroscope's drift.
 - **Advanced**: Stick deadzone, **Reset controls**, Show dev settings, and
-  the version of the build.
+  the **Update channel** Check for updates looks at (Experimental: betas
+  too; Stable: releases only, greyed out on a beta build).
 
 ## Settings panel
 
 Hold **SELECT + START** for a second, in play or in the menus. **L and R**
 switch between its tabs, **Graphics**, **General**, **Audio** and
-**Multiplayer** (and **Dev**, once **Show dev settings** in Controls,
+**Multiplayer** (and **Dev**, once **Show dev settings** in General,
 Advanced is on). Up and down choose a line, left and right change it, Cross
 opens a line marked `>` (a page of rows few players change) or does what
 it says, Circle goes back from a page or closes the panel. The chosen line's
