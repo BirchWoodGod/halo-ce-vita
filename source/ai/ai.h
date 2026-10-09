@@ -160,6 +160,23 @@ short ai_test_line_of_sight(
 	boolean test_line_of_fire,
 	long ignore_object_index,
 	boolean ignore_vehicles);
+/* port: whether the caller needs to know which of two answers a line of
+sight gives (ai_test_line_of_sight_unless_moot, ai.c) */
+typedef boolean (*ai_line_of_sight_answer_needed)(
+	void *context,
+	short answer0,
+	short answer1);
+short ai_test_line_of_sight_unless_moot(
+	union real_point3d const *point0,
+	short cluster0,
+	union real_point3d const *point1,
+	short cluster1,
+	short mode,
+	boolean test_line_of_fire,
+	long ignore_object_index,
+	boolean ignore_vehicles,
+	ai_line_of_sight_answer_needed answer_needed,
+	void *answer_needed_context);
 void ai_handle_editing(
 	long encounter_index);
 void ai_handle_spatial_effect(

@@ -50,6 +50,18 @@ struct halo_lines_stats
 	unsigned long firing_position_lines_of_sight;
 	unsigned long long firing_position_us;
 	unsigned long long firing_position_worst_us;
+	/* path_state_find (path.c): the AI's path searches (firing position
+	selections' area and target floods, their nearby tests, path refreshes,
+	flight), the nodes (surfaces reached) they made, the time and the longest
+	search; path_state_build_path's path smoothing and obstacle avoidance:
+	builds and time. Counted on the tick's thread only (the offline bots'
+	helper thread searches too) */
+	unsigned long path_searches;
+	unsigned long path_nodes;
+	unsigned long long path_us;
+	unsigned long long path_worst_us;
+	unsigned long path_builds;
+	unsigned long long path_build_us;
 };
 
 /* ---------- globals */

@@ -16,7 +16,10 @@ table of objects and types (cluster_object_types.c), and the AI's firing
 position selections (actor_firing_position.c: actor_select_firing_position,
 run by the tick when an actor's timeslice comes up or it begins to flee or
 guard; a frame, with the positions they considered and the lines of sight
-they tested, and the longest one: one selection is a spike in its tick).
+they tested, and the longest one: one selection is a spike in its tick),
+and the AI's path searches (path.c: path_state_find, inside those selections
+and in path refreshes; a frame, the nodes each made and the longest) and path
+builds (path_state_build_path: smoothing and obstacle avoidance).
 */
 
 /* ---------- headers */
@@ -88,7 +91,8 @@ void halo_lines_profile_frame(void)
 		"(%.0f%% met something, %.0f%% of their structure tests as before) a frame | point physics: %.1f leaf lookups a frame, %.0f%% from a known cell"
 		" | ai line of sight %.3f: %.1f calls, %.1f rays (%.0f%% met an object, %.0f%% the structure), %.1f extra lines a frame"
 		" | cluster walks %.1f a frame, %.0f%% from a kept table"
-		" | ai firing positions %.3f: %.2f selections a frame (%.1f positions, %.1f lines of sight a selection), longest %.3f ms",
+		" | ai firing positions %.3f: %.2f selections a frame (%.1f positions, %.1f lines of sight a selection), longest %.3f ms"
+		" | ai path searches %.3f: %.2f a frame (%.1f nodes a search), longest %.3f ms; path builds %.3f: %.2f a frame",
 		lines_step_us[_lines_step_particles] / 1000.0 / frames,
 		lines_step_us[_lines_step_contrails] / 1000.0 / frames,
 		lines_step_us[_lines_step_particle_systems] / 1000.0 / frames,
@@ -115,7 +119,13 @@ void halo_lines_profile_frame(void)
 		halo_lines_stats.firing_position_calls / frames,
 		halo_lines_stats.firing_position_calls ? (double)halo_lines_stats.firing_position_considered / halo_lines_stats.firing_position_calls : 0.0,
 		halo_lines_stats.firing_position_calls ? (double)halo_lines_stats.firing_position_lines_of_sight / halo_lines_stats.firing_position_calls : 0.0,
-		halo_lines_stats.firing_position_worst_us / 1000.0);
+		halo_lines_stats.firing_position_worst_us / 1000.0,
+		halo_lines_stats.path_us / 1000.0 / frames,
+		halo_lines_stats.path_searches / frames,
+		halo_lines_stats.path_searches ? (double)halo_lines_stats.path_nodes / halo_lines_stats.path_searches : 0.0,
+		halo_lines_stats.path_worst_us / 1000.0,
+		halo_lines_stats.path_build_us / 1000.0 / frames,
+		halo_lines_stats.path_builds / frames);
 	for (step = 0; step < NUMBER_OF_LINES_STEPS; step++)
 		lines_step_us[step] = 0;
 	halo_lines_stats.obstruction_calls = 0;
@@ -135,6 +145,12 @@ void halo_lines_profile_frame(void)
 	halo_lines_stats.firing_position_lines_of_sight = 0;
 	halo_lines_stats.firing_position_us = 0;
 	halo_lines_stats.firing_position_worst_us = 0;
+	halo_lines_stats.path_searches = 0;
+	halo_lines_stats.path_nodes = 0;
+	halo_lines_stats.path_us = 0;
+	halo_lines_stats.path_worst_us = 0;
+	halo_lines_stats.path_builds = 0;
+	halo_lines_stats.path_build_us = 0;
 	points_seen = point_leaf_cache_points;
 	point_hits_seen = point_leaf_cache_point_hits;
 	memo_hits_seen = obstruction_memo_hits;

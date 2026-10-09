@@ -379,6 +379,13 @@ boolean path_state_estimated_distance(
 	real *closest_approach_to_attractor_reference,
 	real_vector3d *estimated_direction_reference);
 
+#ifdef HALO_LINUX
+/* (port) the offline bots' helper thread, which searches paths beside the
+tick, says so once (bots.c) */
+void path_search_thread_is_helper(
+	void);
+#endif
+
 void paths_initialize(
 	void);
 void paths_dispose(
