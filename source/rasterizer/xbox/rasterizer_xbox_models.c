@@ -685,6 +685,17 @@ static boolean local_part_state_valid = FALSE;
 static struct shader *local_part_state_shader = NULL;
 static short local_part_state_permutation = NONE;
 static short local_part_state_vertex_type = NONE;
+/* (port) the device's state serial (halo_d3d_state_serial) when the last
+part had set its states: while it is the same, no other draw changed a
+state since, and the states every part sets alike (the culling, the colour
+writes, the blend function, the alpha reference, the stages' addressing and
+filters) are as that part left them */
+unsigned long halo_d3d_state_serial(void);
+static boolean local_static_states_valid = FALSE;
+static unsigned long local_static_states_serial;
+#define MODEL_STATIC_STATE if (set_static_states)
+#else
+#define MODEL_STATIC_STATE
 #endif
 extern boolean rasterizer_model_cortana_hack;
 extern struct rasterizer_window_begin_parameters global_window_parameters;
@@ -722,6 +733,7 @@ void _rasterizer_models_begin(
 		local_pixel_shader_dirty_flag = TRUE;
 #ifdef HALO_LINUX
 		local_part_state_valid = FALSE;
+		local_static_states_valid = FALSE;
 #endif
 		local_sky_flag = sky;
 		if (sky)
@@ -1795,6 +1807,7 @@ void _rasterizer_model_draw(
 #ifdef HALO_LINUX
 	unsigned long long part_from;
 	short part_vertex_type;
+	boolean set_static_states = TRUE;
 
 	if (model_part_profile_on < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); model_part_profile_on = e && atoi(e) != 0; }
 	part_from = MODEL_PART_NOW();
@@ -1936,6 +1949,8 @@ void _rasterizer_model_draw(
 					goto part_drawn;
 				}
 				local_part_state_valid = FALSE;
+				set_static_states = !local_static_states_valid ||
+					halo_d3d_state_serial() != local_static_states_serial;
 
 				if (local_model_constants_valid)
 				{
@@ -2007,10 +2022,12 @@ void _rasterizer_model_draw(
 							0);
 				}
 
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetRenderState(
 					global_d3d_device,
 					D3DRS_CULLMODE,
 					D3DCULL_CCW);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetRenderState(
 					global_d3d_device,
 					D3DRS_COLORWRITEENABLE,
@@ -2021,14 +2038,17 @@ void _rasterizer_model_draw(
 					global_d3d_device,
 					D3DRS_ALPHABLENDENABLE,
 					alpha_blended_decal);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetRenderState(
 					global_d3d_device,
 					D3DRS_SRCBLEND,
 					D3DBLEND_SRCALPHA);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetRenderState(
 					global_d3d_device,
 					D3DRS_DESTBLEND,
 					D3DBLEND_INVSRCALPHA);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetRenderState(
 					global_d3d_device,
 					D3DRS_BLENDOP,
@@ -2040,6 +2060,7 @@ void _rasterizer_model_draw(
 					!TEST_FLAG(
 						shader_model->model.flags,
 						_shader_model_not_alpha_tested_bit));
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetRenderState(
 					global_d3d_device,
 					D3DRS_ALPHAREF,
@@ -2051,14 +2072,19 @@ void _rasterizer_model_draw(
 					1,
 					shader_model->model.base_map.index,
 					shader_permutation_index);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
 
@@ -2068,14 +2094,19 @@ void _rasterizer_model_draw(
 					2,
 					shader_model->model.detail_map.index,
 					shader_permutation_index);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 1, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 1, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 1, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 1, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetTextureStageState(
 					global_d3d_device, 1, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
 
@@ -2085,14 +2116,19 @@ void _rasterizer_model_draw(
 					1,
 					shader_model->model.multipurpose_map.index,
 					shader_permutation_index);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					2, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					2, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					2, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					2, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					2, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
 
@@ -2102,16 +2138,22 @@ void _rasterizer_model_draw(
 					0,
 					shader_model->model.reflection_cube_map.index,
 					shader_permutation_index);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					3, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					3, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					3, D3DTSS_ADDRESSW, D3DTADDRESS_CLAMP);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					3, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					3, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+				MODEL_STATIC_STATE
 				SetTextureStageStateSmart(
 					3, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
 
@@ -2580,12 +2622,15 @@ void _rasterizer_model_draw(
 						shader_model->model.flags,
 						_shader_model_true_atmospheric_fog_bit));
 
+				MODEL_STATIC_STATE
 				IDirect3DDevice8_SetRenderState(
 					global_d3d_device,
 					D3DRS_CULLMODE,
 					D3DCULL_CCW);
 
 #ifdef HALO_LINUX
+				local_static_states_serial = halo_d3d_state_serial();
+				local_static_states_valid = TRUE;
 				MODEL_PART_ADD(3, part_from);
 #endif
 				rasterizer_draw(

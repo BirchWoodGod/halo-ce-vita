@@ -1487,6 +1487,16 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 	(void)value;
 }
 
+/* (port) the Vita device's count of state changes (port/vita/platform/
+d3d8_gxm.c), which this device does not keep: a new value at every call,
+so the game sets every state anew */
+unsigned long halo_d3d_state_serial(void)
+{
+	static unsigned long serial;
+
+	return ++serial;
+}
+
 void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value)
 {
 	if (state < D3DRS_MAX)

@@ -218,12 +218,23 @@ static void material_log_reset(void)
 	}
 }
 
+/* (port) bumped by every change of a render or texture stage state's value
+(halo_d3d_state_serial): the game's model parts set again only the states
+some other draw may have changed (rasterizer_xbox_models.c) */
+static unsigned long d3d_state_serial;
+
+unsigned long halo_d3d_state_serial(void)
+{
+	return d3d_state_serial;
+}
+
 /* a render state's value is about to change: the dirty bit, and the log
 for a material state */
 static void render_state_changed(unsigned long state)
 {
 	int bit = render_state_dirty_bit(state);
 
+	d3d_state_serial++;
 	device_state_dirty |= bit;
 	if (bit == STATE_DIRTY_MATERIAL)
 		material_log_note(state, D3D__RenderState[state]);
@@ -1728,11 +1739,13 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 	}
 	if ((method & 3) || slot >= sizeof(simple_state_of_method) || !simple_state_of_method[slot])
 	{
+		d3d_state_serial++;
 		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
 		material_log_overflow();
 	}
 	else if (D3D__RenderState[simple_state_of_method[slot] - 1] != value)
 	{
+		d3d_state_serial++;
 		device_state_dirty |= simple_dirty_bit_of_method[slot];
 		if (simple_dirty_bit_of_method[slot] == STATE_DIRTY_MATERIAL)
 			material_log_note(simple_state_of_method[slot] - 1UL, D3D__RenderState[simple_state_of_method[slot] - 1]);
@@ -1839,6 +1852,7 @@ static void texture_state_store(DWORD stage, unsigned long type, DWORD value)
 	{
 		int bit = texture_state_dirty_bit(type);
 
+		d3d_state_serial++;
 		device_state_dirty |= bit;
 		if (bit == STATE_DIRTY_MATERIAL)
 			material_log_note(D3DRS_MAX + stage * D3DTSS_MAX + type, D3D__TextureState[stage][type]);
