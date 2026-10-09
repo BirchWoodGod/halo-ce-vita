@@ -249,7 +249,9 @@ changed:
   as shader type 7, so its water, glass, meter and plasma shaders are types
   8 to 11 where this build has 7 to 10 (and would draw a Custom Edition glass
   shader as meter, and so on, unnoticed). Every shader gets this build's
-  number; a shader whose type is not its group's is refused.
+  number for its group; a type field saying otherwise (as map protection
+  leaves them) is counted and given the group's (after DamnationCE,
+  2ba7b1b8), where it refused the map.
 - **Transparent chicago extended shaders** (`scex`) become transparent
   chicago shaders (`schi`): the two layouts agree up to the maps, of which
   `scex` has two sets, for four and for two texture stages; the four-stage
@@ -291,6 +293,11 @@ changed:
   name none, which the game skips. `beavercreek_halo3.yelo` has two; Custom
   Edition reads past the graph's animations there, and this build's debug
   builds stop on it.
+- **Weapon functions.** A weapon's exported functions (its A to D inputs)
+  may be Halo PC's *primary firing on* and *secondary firing on* (17 and 18,
+  Invader's `weapon.json`), which this build has not: they are made its
+  primary and secondary firing (15 and 16), where the validator made them
+  none (after DamnationCE/OpenCE `weapon_functions_convert`).
 - **HUD elements drawn from double-resolution bitmaps.** Halo PC added a
   third scaling flag to HUD placements, *use high resolution scale*
   (OpenSauce `hud_definitions.hpp`), and draws a flagged element at half the
@@ -319,8 +326,21 @@ changed:
   its strip copied unchanged; the game's own `rasterizer_vertex_buffer_new`
   and `rasterizer_triangle_buffer_new` make its buffers, and the tags become
   `mode` tags. Before any of that, every index a part holds is checked
-  against what it names (shaders, nodes, parts, vertices), and a model with
-  44 nodes or more is refused, since this build's renderer skins at most 43.
+  against what it names (shaders, nodes, parts, vertices). This build's
+  renderer skins at most 43 nodes at once (the vertex shader's constants);
+  Halo PC skins up to 64, and a model of 44 to 64 nodes is drawn a part's
+  own nodes at a time, after DamnationCE (xshxdex98/DamnationCE, CC0,
+  3493a094 and 327f65a7): its parts' vertices keep naming their part's local
+  nodes (or, in a model whose parts have none, the nodes each part's
+  vertices name are made its own, up to 43 of them; a part naming more
+  refuses the map), and before such a part is drawn, on every path (opaque,
+  transparent, shadows, fog), the renderer is given its own nodes' matrices
+  alone (`custom_edition_part_palette`, `rasterizer_model_part_skinning` in
+  `rasterizer_xbox.c`). Models of 43 nodes or fewer are drawn as before. No
+  map on hand has such a model: `run_ce_part_palette_test.sh` draws every
+  model of 2 nodes or more so (`HALO_CE_PART_PALETTE_NODES=2`), and the
+  desktop build drew Blood Gulch's first-person arms (37 nodes) and weapons
+  so as without it.
 - **Structure BSPs.** When the game loads a BSP, every material's vertices
   are compressed the same way (environment and lightmap vertices), and the
   material gets buffers and the compressed vertices the game reads for
@@ -428,7 +448,8 @@ silences them.
   present, absent, and substituted; resource maps of each type; the `--maps`
   option.
 - Conversion: every shader group's type; chicago extended shaders with and
-  without four-stage maps; a shader with another group's type (refused);
+  without four-stage maps; a shader with another group's type (given its
+  group's);
   bitmaps and sound permutations naming their own tags; sound header fields
   taken from `sounds.map`; an Ogg Vorbis sound made an Xbox ADPCM one with its permutations' sizes; 16-bit
   PCM permutations of an Xbox ADPCM sound given their Xbox ADPCM sizes, and
@@ -517,7 +538,8 @@ Conversion of the two maps that were run:
 | `beavercreek_halo3.yelo` | 67 | 14 | 4 | 1005 | 10 | yes | 2 | 673 (201,787) |
 
 Of the other maps: `celer_exile_odst_v2.yelo` loads and converts in the
-report tool, but the game refuses it for a model of 46 nodes; the two
+report tool, but the game refused it for a model of 46 nodes (drawn a
+part's nodes at a time since, above); the two
 mod-set maps need their mod sets, which were not available.
 
 ### In the game
@@ -740,9 +762,13 @@ every layout used was then checked against the sample maps.
   renderer draws four stages; that Custom Edition's two-stage maps are a
   fallback for older hardware is an inference (BlamLib's exporter makes the
   same choice).
-- **Centroid nodes of local-node parts** are taken to be the model's nodes:
-  they are within the model's node count in every map, and they are only
-  used to sort transparent parts.
+- **Centroid nodes of local-node parts** are taken to be the part's local
+  nodes, and made the model's through its table as its vertices' are (after
+  DamnationCE, a463894c): in `extinction.map`, `Covenant_V_Marines_Beta_5.map`
+  and `firefight-airlock.map` every one of the 368 such parts names centroid
+  nodes within its table of 3 to 8 nodes, in models of up to 43 (taking them
+  as the model's, as this build did, put 322 of them on another node). They
+  are only used to place and sort transparent parts.
 - **Editing-kit pointers are cleared.** The definition pointers of relocated
   blocks and data are set to 0: they refer to nothing in the game process.
 - **Name comparison** is exact (case-sensitive), which matched every sample

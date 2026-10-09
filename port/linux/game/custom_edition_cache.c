@@ -806,12 +806,22 @@ static boolean custom_edition_cache_tags_convert(
 		(long)conversion.chicago_extended_shaders,
 		(long)conversion.bitmaps_prepared,
 		conversion.script_nodes_reduced ? ", OpenSauce's script nodes made this build's number" : "");
+	if (conversion.shaders_mistyped)
+	{
+		error(_error_silent, "custom edition: %ld shaders whose type was not their group's were given their group's",
+			(long)conversion.shaders_mistyped);
+	}
 	if (conversion.animation_overlays_disabled)
 	{
 		error(
 			_error_silent,
 			"custom edition: %ld animation overlays named animations their graphs do not have and were disabled",
 			(long)conversion.animation_overlays_disabled);
+	}
+	if (conversion.weapon_functions_converted)
+	{
+		error(_error_silent, "custom edition: %ld weapon functions of Halo PC's \"firing on\" made this build's firing",
+			(long)conversion.weapon_functions_converted);
 	}
 	if (conversion.sounds_undecodable)
 	{

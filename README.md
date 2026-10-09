@@ -682,6 +682,10 @@ This port stands on a lot of other people's work:
   conversions (`port/linux/game/cache_file_formats.c`,
   `custom_edition_*.c`, `docs/custom_edition_caches.md`), which the
   custom maps work builds on.
+- **[DamnationCE](https://github.com/xshxdex98/DamnationCE)** by xshxdex98
+  (CC0), the OpenCE fork: Custom Edition models of up to 64 nodes drawn a
+  part's own nodes at a time, and other Custom Edition map fixes, brought
+  over from it (each commit says which).
 - **[Invader](https://github.com/SnowyMouse/invader)** by SnowyMouse: the
   tag definitions `port/linux/src/tag_layouts.h` is generated from (by
   `tools/gen_tag_layouts.py`), which let the port relocate the maps' tags.

@@ -322,6 +322,19 @@ boolean custom_edition_models_convert(
 void custom_edition_models_dispose(
 	void);
 
+/* (the renderer, rasterizer_xbox.c) A model of at least
+custom_edition_part_palette_nodes() nodes - more than the vertex shader's
+constants hold, RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1, up to Halo PC's
+MAXIMUM_NODES_PER_MODEL - is drawn a part's own nodes at a time: for the
+part whose vertex buffer is `vertex_buffer`, the model's nodes its vertices
+name by their place (`*nodes`), and their count; 0 for any other vertex
+buffer. From DamnationCE (xshxdex98, CC0). */
+short custom_edition_part_palette_nodes(
+	void);
+short custom_edition_part_palette(
+	struct vertex_buffer const *vertex_buffer,
+	byte const **nodes);
+
 /* Called by scenario_structure_bsp_load and scenario_structure_bsp_unload
 for the structure BSPs of a Custom Edition map: gives its materials
 compressed vertices and buffers, or releases them. The load returns FALSE

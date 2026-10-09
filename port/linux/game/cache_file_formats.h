@@ -354,6 +354,8 @@ struct custom_edition_conversion_report
 	chicago extended shaders made transparent chicago ones */
 	int32_t shaders_retyped;
 	int32_t chicago_extended_shaders;
+	/* shaders whose type was not their group's, given their group's */
+	int32_t shaders_mistyped;
 	/* bitmaps given their own tag and the state of a bitmap not yet drawn */
 	int32_t bitmaps_prepared;
 	/* 1 when the scenario's script syntax nodes, upgraded by OpenSauce, were
@@ -362,6 +364,9 @@ struct custom_edition_conversion_report
 	/* animation graph object overlays that named an animation the graph
 	does not have, made to name none */
 	int32_t animation_overlays_disabled;
+	/* weapon exported functions of Halo PC's "primary/secondary firing on",
+	made primary/secondary firing */
+	int32_t weapon_functions_converted;
 	/* sounds in a compression this build cannot decode (Halo PC's IMA
 	ADPCM, or permutations of another compression than their sound's), made
 	unplayable */
