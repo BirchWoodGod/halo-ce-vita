@@ -28,7 +28,7 @@
 #   HALO_TEST_DATA   a folder with the game's maps folder (the Xbox maps)
 #   HALO_TEST_BOTS   how many bots (default 6)
 #   HALO_TEST_SECONDS  seconds of play (default 180)
-#   HALO_TEST_OUT    where the logs go (kept)
+#   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 # The cases run at once, each in a network namespace of its own (unshare -rn:
 # a local game opens the game's ports too).
 set -u
@@ -37,6 +37,8 @@ root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 seconds=${HALO_TEST_SECONDS:-180}
 cases=${*:-slayer teams}
@@ -174,4 +176,5 @@ for name in $cases; do
 done
 [ $status = 0 ] && echo "PASS"
 echo "logs in $out"
+test_out_done $status
 exit $status

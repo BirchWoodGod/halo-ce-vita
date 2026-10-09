@@ -13,10 +13,12 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/map_share_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
 mkdir -p "$out"
-trap 'rm -rf "$out"' EXIT
+trap 'test_out_done $?' EXIT
 cd "$root"
 game_flags="--target=i686-linux-gnu -m32 -fms-extensions -fshort-wchar -malign-double -fcommon -fno-pic
 	-fno-strict-aliasing -fwrapv -freg-struct-return -ffunction-sections -fdata-sections -O2 -g -std=gnu11 -D_GNU_SOURCE -DHALO_LINUX_PLATFORM_LAYER

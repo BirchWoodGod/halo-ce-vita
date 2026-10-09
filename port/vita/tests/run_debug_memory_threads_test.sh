@@ -14,8 +14,10 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/debug_memory_threads_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out"
-trap 'rm -rf "$out"' EXIT
+trap 'test_out_done $?' EXIT
 cc=${CC:-clang}
 rounds=${HALO_TEST_ROUNDS:-5}
 threads=${HALO_TEST_THREADS:-8}

@@ -7,6 +7,8 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/port_config_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out/vita" "$out/desktop"
 cc=${CC:-gcc}
 flags="-g -O1 -Wall -Wno-unused-function -D_GNU_SOURCE -I$root/port/linux/src -I$root/port/third_party/tomlc17"
@@ -16,5 +18,5 @@ $cc $flags "$here/port_config_test.c" "$root/port/third_party/tomlc17/tomlc17.c"
 status=0
 "$out/port_config_test_vita" "$out/vita" "$here/config_110_vita.toml" || status=$?
 "$out/port_config_test_desktop" "$out/desktop" "$here/config_110_vita.toml" || status=$?
-rm -rf "$out"
+test_out_done $status
 exit $status

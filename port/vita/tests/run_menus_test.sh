@@ -23,7 +23,7 @@
 #   HALO_TEST_DATA_MENUS  the same with Halo PC's bitmaps.map and loc.map in
 #                         its maps folder (never in the repository; skipped
 #                         when missing)
-#   HALO_TEST_OUT         where the logs go (kept)
+#   HALO_TEST_OUT         where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
@@ -31,6 +31,8 @@ binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 cases=${*:-fresh level xbox}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -96,4 +98,5 @@ for case in $cases; do
 done
 echo "logs in $out"
 [ $status = 0 ] && echo PASS
+test_out_done $status
 exit $status

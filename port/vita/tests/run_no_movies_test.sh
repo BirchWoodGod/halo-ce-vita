@@ -37,13 +37,15 @@
 #   run_no_movies_test.sh [CASE...]   (default: fresh panel attract)
 #   HALO_TEST_VITA   the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA   a folder with the game's maps folder (the Xbox maps)
-#   HALO_TEST_OUT    where the logs go (kept; the harness copies are removed)
+#   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them; the harness copies are removed)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_no_movies_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 cases=${*:-fresh panel attract attractretry}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -167,4 +169,5 @@ for case in $cases; do
 done
 echo "logs in $out"
 [ $status = 0 ] && echo PASS
+test_out_done $status
 exit $status

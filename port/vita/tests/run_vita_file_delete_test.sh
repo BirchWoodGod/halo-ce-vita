@@ -18,7 +18,7 @@
 #   run_vita_file_delete_test.sh
 #   HALO_TEST_VITA   the harness (default build/linux/halo of this tree)
 #   HALO_TEST_DATA   a folder with the game's maps folder (the Xbox maps)
-#   HALO_TEST_OUT    where the logs go (kept; the harness copy is removed)
+#   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them; the harness copy is removed)
 #   HALO_TEST_CC     a compiler for the 32-bit preload (default clang)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -26,6 +26,8 @@ root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_file_delete_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -100,4 +102,5 @@ grep -aqE "player_profile_delete\(\) failed|XDeleteSaveGame\(\) failed|remove_nt
 rm -rf "$out/bin"
 echo "logs in $out"
 [ $status = 0 ] && echo PASS
+test_out_done $status
 exit $status

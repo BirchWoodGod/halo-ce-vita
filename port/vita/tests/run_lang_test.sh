@@ -9,8 +9,10 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/lang_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out"
-trap 'rm -rf "$out"' EXIT
+trap 'test_out_done $?' EXIT
 cc=${CC:-gcc}
 # (16-bit wchar_t, as the game is built: lang_text_wide)
 $cc -m32 -g -O1 -Wall -Wextra -fshort-wchar -I"$root/port/linux/src" "$here/lang_test.c" "$root/port/linux/src/lang.c" \

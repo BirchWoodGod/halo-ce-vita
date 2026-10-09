@@ -9,8 +9,10 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/vita_texture_rows_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out"
-trap 'rm -rf "$out"' EXIT
+trap 'test_out_done $?' EXIT
 cc=${CC:-clang}
 python3 "$root/tools/linux_msvc_semantics.py" --output "$out/platform_msvc_semantics.h" "$root/port/include/xdk/xdk_d3d8.h" \
 	> /dev/null 2>&1 || : > "$out/platform_msvc_semantics.h"

@@ -10,6 +10,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 sdk=${VITASDK:-$HOME/vitasdk}
 out=${TMPDIR:-/tmp}/vita_settings_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out/include"
 ln -s "$sdk/arm-vita-eabi/include/psp2" "$out/include/psp2"
 ln -s "$sdk/arm-vita-eabi/include/psp2common" "$out/include/psp2common"
@@ -34,5 +36,5 @@ build "$out/release/vita_settings_test" '-DHALO_VITA_VERSION="1.1.0"'
 ln -s "$root/port/vita/app0/lang" "$out/release/app0:lang"
 echo "--- as a release build (1.1.0)"
 (cd "$out/release" && ./vita_settings_test) || status=$?
-rm -rf "$out"
+test_out_done $status
 exit $status

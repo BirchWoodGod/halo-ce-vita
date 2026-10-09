@@ -19,12 +19,15 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/update_check_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 cc=${CC:-gcc}
 mkdir -p "$out"
 server_pids=
 cleanup() {
+	rc=$?
 	for pid in $server_pids; do kill "$pid" 2>/dev/null || true; done
-	rm -rf "$out"
+	test_out_done $rc
 }
 trap cleanup EXIT
 sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"

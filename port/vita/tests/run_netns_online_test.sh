@@ -338,7 +338,7 @@
 #   HALO_TEST_JOIN_ENV   more VAR=value settings for the joiner
 #   HALO_TEST_SECONDS  how long the copies run (default 180)
 #   HALO_TEST_REJOIN   seconds into its game the joiner leaves (code; 0 never)
-#   HALO_TEST_OUT    where the logs go (kept)
+#   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 #   HALO_TEST_CPUS   taskset CPU lists for the two copies ("0-7 8-15")
 #   HALO_TEST_ENV    more VAR=value settings for both copies (profiling)
 #   HALO_TEST_NETEM  a home connection's link: netem settings (tc-netem(8):
@@ -398,6 +398,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = mapmidmixed ] && seconds=${HALO_TEST_SECONDS:-300}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
+. "$here/test_out.sh"
+test_out_begin "$out"
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
 cpu_a=${cpus%% *}
 cpu_b=${cpus#* }
@@ -409,11 +411,14 @@ pids=
 # changes it, put back at the end: coopmenuonline)
 config_kept=
 cleanup() {
+	local rc=$?
 	for pid in $pids; do kill "$pid" 2>/dev/null; done; wait 2>/dev/null
 	if [ -n "$config_kept" ]; then
 		config=$(dirname "$vita")/config.toml
 		if [ -f "$config_kept" ]; then cp "$config_kept" "$config"; else rm -f "$config"; fi
 	fi
+	# (deleted after a pass: the copies' folders are 0.6-1.7 GB)
+	test_out_done $rc
 }
 trap cleanup EXIT
 

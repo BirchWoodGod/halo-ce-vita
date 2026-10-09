@@ -28,6 +28,8 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/net_fuzz_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
 targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share"}
@@ -122,5 +124,5 @@ for target in $targets; do
 	fi
 done
 [ $status = 0 ] && echo "PASS network fuzz targets: checks and kept cases" || echo "FAIL (in $out)"
-[ $status = 0 ] && rm -rf "$out"
+test_out_done $status
 exit $status

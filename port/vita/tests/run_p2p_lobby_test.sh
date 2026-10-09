@@ -19,10 +19,12 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${TMPDIR:-/tmp}/p2p_lobby_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
 mkdir -p "$out"
-trap 'rm -rf "$out"' EXIT
+trap 'test_out_done $?' EXIT
 cd "$root"
 # the game's ABI, as the platform layer is built, with HALO_VITA
 game_flags="-ffunction-sections -fdata-sections -fms-extensions -fshort-wchar -fcommon -fno-strict-aliasing -fwrapv -g -std=gnu11 -D_GNU_SOURCE
