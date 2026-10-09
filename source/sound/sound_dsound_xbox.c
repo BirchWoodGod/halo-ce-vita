@@ -19,6 +19,7 @@ SOUND_DSOUND_XBOX.C
 
 #include <xtl.h>
 #ifdef HALO_LINUX
+#include "custom_edition_cache.h"
 #include <stdlib.h>
 void platform_log(const char *format, ...);
 #endif
@@ -2488,6 +2489,14 @@ static boolean dsound_channel_queue_packet(
 
 	if (channel->playing_permutation)
 	{
+#ifdef HALO_LINUX
+		/* (port: what the cache holds of it: a Custom Edition Ogg Vorbis
+		permutation's Xbox ADPCM, custom_edition_sounds.c) */
+		long cached_size= custom_edition_sound_cache_bytes(channel->playing_permutation);
+#else
+		long cached_size= channel->playing_permutation->samples.size;
+#endif
+
 		if (channel->playing_permutation->cache_base_address)
 		{
 			/* port: the size is the map's: one that is negative, or runs
@@ -2496,17 +2505,17 @@ static boolean dsound_channel_queue_packet(
 			packet of nearly 4 GB) */
 			if ((byte *)channel->playing_permutation->cache_base_address>=
 					(byte *)physical_memory_get_sound_cache_base_address() &&
-				channel->playing_permutation->samples.size>=0 &&
-				channel->playing_permutation->samples.size<=SOUND_CACHE_SIZE &&
+				cached_size>=0 &&
+				cached_size<=SOUND_CACHE_SIZE &&
 				(unsigned long)((byte *)channel->playing_permutation->cache_base_address-
 					(byte *)physical_memory_get_sound_cache_base_address())<=
-					(unsigned long)(SOUND_CACHE_SIZE-channel->playing_permutation->samples.size) &&
+					(unsigned long)(SOUND_CACHE_SIZE-cached_size) &&
 				channel->sample_offset>=0 &&
-				channel->sample_offset<=channel->playing_permutation->samples.size)
+				channel->sample_offset<=cached_size)
 			{
 				struct sound_permutation *sound= channel->playing_permutation;
 				XMEDIAPACKET packet;
-				long remaining_size= sound->samples.size-channel->sample_offset;
+				long remaining_size= cached_size-channel->sample_offset;
 				HRESULT result;
 
 				channel->packet_count++;

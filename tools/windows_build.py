@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .linux_build import (ZLIB_DIR, ZLIB_SOURCES, ZLIB_DEFINES, LINUX_PROFILE, MINIUPNPC_DIR, OPTIMISATION, WINDOWS_PROFILE, XDK_INCLUDE, lto_mode,
+                          LIBOGG_INCLUDE, ogg_sound_cflags, ogg_sound_sources,
                           march_flag, miniupnpc_sources, pgo_mode, compile_launcher, musl_math_cflags,
                           musl_math_sources, pgo_profile, profile_use_flags, xdk_headers)
 from .ninja_syntax import Writer
@@ -394,6 +395,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             f"-I{EXPAT_DIR}",
             f"-I{KCP_DIR}",
             f"-I{MONOCYPHER_DIR}",
+            LIBOGG_INCLUDE,
             # halo_linux_winsock_names.h, but not the Linux build's C runtime
             # wrappers next to it
             f"-iquote {LINUX_DIR / 'include'}",
@@ -442,6 +444,9 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # internet play's signatures and password keys (port/third_party/monocypher)
         for name in ("monocypher.c", "monocypher-ed25519.c"):
             add_object(MONOCYPHER_DIR / name, " ".join([abi, "-std=gnu11", "-w"]))
+        # Custom Edition's Ogg Vorbis sounds (port/linux/src/ogg_sound.c)
+        for source in ogg_sound_sources():
+            add_object(source, ogg_sound_cflags(abi))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():

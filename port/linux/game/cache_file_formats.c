@@ -28,6 +28,7 @@ docs/custom_edition_caches.md lists each with its evidence.
 they are shown to the player, custom_edition_cache.c; this file is also
 built alone, without lang.c) */
 #include "../src/lang.h"
+#include "../src/ogg_sound.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -363,10 +364,21 @@ names in reads and messages) */
 #define SOUND_PERMUTATION_CACHE_BASE_ADDRESS_OFFSET 0x30
 #define SOUND_PERMUTATION_CACHE_TAG_INDEX_OFFSET 0x34
 #define SOUND_PERMUTATION_RUNTIME_TAG_INDEX_OFFSET 0x3C
+/* the permutation's buffer size: Halo PC's 16-bit PCM bytes, which an Ogg
+Vorbis permutation decodes to (Invader's sound.json, "buffer size"); this
+build's Xbox ADPCM bytes for it once converted (custom_edition_sounds.c) */
+#define SOUND_PERMUTATION_BUFFER_SIZE_OFFSET 0x38
 /* the compressions this build plays or refuses cleanly (sound_manager.c:
-none and Xbox ADPCM; Custom Edition also has Ogg Vorbis, 3) */
+none and Xbox ADPCM; Custom Edition also has Ogg Vorbis, 3, which this
+build decodes to Xbox ADPCM as the sound cache loads it) */
 #define SOUND_COMPRESSION_NONE 0
 #define SOUND_COMPRESSION_XBOX_ADPCM 1
+#define SOUND_COMPRESSION_OGG_VORBIS 3
+/* sound_definitions.h's sample rates and encodings */
+#define SOUND_SAMPLE_RATE_22KHZ 0
+#define SOUND_SAMPLE_RATE_44KHZ 1
+#define SOUND_ENCODING_MONO 0
+#define SOUND_ENCODING_STEREO 1
 
 /* font (BlamLib Misc.cs, font_group: 156 bytes, 36 bytes of padding after
 the heights; the block offsets below hold for every font in loc.map) */
@@ -2838,14 +2850,46 @@ static void bitmaps_prepare(
 	return;
 }
 
+/* The Xbox ADPCM bytes an Ogg Vorbis permutation decodes to, from its
+buffer size (`pcm_bytes`, Halo PC's 16-bit PCM of `channels` channels),
+halved in rate when `halved`; at most what the sound cache gives a
+permutation (ogg_sound.h). 0 when the buffer size is not plausible (none,
+not whole frames, or more than that: protected maps scramble it), which
+the sound cache then measures from the stream (custom_edition_sounds.c). */
+static uint32_t ogg_vorbis_adpcm_bytes(
+	uint32_t pcm_bytes,
+	int channels,
+	int halved)
+{
+	uint32_t frame_bytes = 2 * (uint32_t)channels;
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	uint32_t frames;
+	uint32_t blocks;
+
+	if (!pcm_bytes || pcm_bytes % frame_bytes)
+		return 0;
+	frames = pcm_bytes / frame_bytes;
+	if (halved)
+		frames = frames / 2 + frames % 2;
+	blocks = frames / OGG_SOUND_ADPCM_BLOCK_SAMPLES + (frames % OGG_SOUND_ADPCM_BLOCK_SAMPLES ? 1 : 0);
+	if (blocks > OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes)
+		return 0;
+	return blocks * block_bytes;
+}
+
 /* Gives every permutation of the sound at `sound_offset` (tag `handle`)
 the state the game expects of one it has not played: its tag is its own
 (sounds.map holds the handles of whatever map it was built with), with no
-cache block or samples. A sound whose compression this build cannot decode
-is made unplayable: this build plays Xbox ADPCM (and refuses uncompressed
-sounds), and Custom Edition also has Ogg Vorbis, which would be decoded as
-ADPCM noise. With no pitch ranges the game neither plays nor loads it
-(sound_manager.c, sound_definition_is_playable). */
+cache block or samples. This build plays Xbox ADPCM (and refuses
+uncompressed sounds). A Custom Edition Ogg Vorbis sound is made an Xbox
+ADPCM one to the game, a mono 44 kHz one 22 kHz (sound_manager.c plays
+mono sounds at 22 kHz only), its permutations left Ogg Vorbis with their
+buffer size made the Xbox ADPCM's: the sound cache decodes them as it loads
+them (custom_edition_sounds.c). A sound in another compression (Halo PC's
+IMA ADPCM, 2), or whose permutations are not all of its own, would be
+played as Xbox ADPCM noise, and is made unplayable: with no pitch ranges
+the game neither plays nor loads it (sound_manager.c,
+sound_definition_is_playable). */
 static void sound_prepare(
 	struct load_state const *state,
 	uint32_t sound_offset,
@@ -2854,7 +2898,10 @@ static void sound_prepare(
 {
 	uint8_t *sound = state->tag_cache + sound_offset;
 	int16_t compression = read_s16(sound + SOUND_COMPRESSION_OFFSET);
-	int decodable = compression == SOUND_COMPRESSION_NONE || compression == SOUND_COMPRESSION_XBOX_ADPCM;
+	int ogg_vorbis = compression == SOUND_COMPRESSION_OGG_VORBIS;
+	int decodable = compression == SOUND_COMPRESSION_NONE || compression == SOUND_COMPRESSION_XBOX_ADPCM || ogg_vorbis;
+	int channels = read_s16(sound + SOUND_ENCODING_OFFSET) == SOUND_ENCODING_STEREO ? 2 : 1;
+	int halved = ogg_vorbis && channels == 1 && read_s16(sound + SOUND_SAMPLE_RATE_OFFSET) == SOUND_SAMPLE_RATE_44KHZ;
 	int32_t pitch_range_count;
 	uint32_t pitch_ranges_offset;
 	int32_t pitch_range_index;
@@ -2895,7 +2942,19 @@ static void sound_prepare(
 			write_u32(permutation + SOUND_PERMUTATION_CACHE_BASE_ADDRESS_OFFSET, 0);
 			write_u32(permutation + SOUND_PERMUTATION_CACHE_TAG_INDEX_OFFSET, handle);
 			write_u32(permutation + SOUND_PERMUTATION_RUNTIME_TAG_INDEX_OFFSET, handle);
-			if (permutation_compression != SOUND_COMPRESSION_NONE && permutation_compression != SOUND_COMPRESSION_XBOX_ADPCM)
+			if (ogg_vorbis)
+			{
+				if (permutation_compression != SOUND_COMPRESSION_OGG_VORBIS)
+				{
+					decodable = 0;
+				}
+				else
+				{
+					write_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET, ogg_vorbis_adpcm_bytes(
+						read_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET), channels, halved));
+				}
+			}
+			else if (permutation_compression != SOUND_COMPRESSION_NONE && permutation_compression != SOUND_COMPRESSION_XBOX_ADPCM)
 			{
 				decodable = 0;
 			}
@@ -2905,6 +2964,15 @@ static void sound_prepare(
 	{
 		write_u32(sound + SOUND_PITCH_RANGES_OFFSET + TAG_BLOCK_COUNT_OFFSET, 0);
 		report->sounds_undecodable++;
+	}
+	else if (ogg_vorbis)
+	{
+		write_u16(sound + SOUND_COMPRESSION_OFFSET, SOUND_COMPRESSION_XBOX_ADPCM);
+		if (halved)
+		{
+			write_u16(sound + SOUND_SAMPLE_RATE_OFFSET, SOUND_SAMPLE_RATE_22KHZ);
+		}
+		report->sounds_ogg_vorbis++;
 	}
 
 	return;

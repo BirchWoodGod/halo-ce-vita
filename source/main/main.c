@@ -4306,7 +4306,9 @@ has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
 (vita_settings_set, through halo_test_setting_hook; elsewhere the variable, and the settings generation the
 readers watch); "@host command" asks for a host command (kick, ban,
-bringto) as the Vita's Play page does (main_request_host_command). Each runs once,
+bringto) as the Vita's Play page does (main_request_host_command), and
+"@sound tag [n]" plays that sound tag (the nth so named) as
+sound_impulse_start does with no object. Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 /* (the Vita's settings panel sets it: vita_settings_load) */
@@ -4552,6 +4554,36 @@ static void main_test_commands_update(
 		main_request_host_command: run at the next frame's top) */
 		else if (!strncmp(commands[index].command, "@host ", 6))
 			main_request_host_command(commands[index].command + 6);
+		/* (@sound <tag> [n]: the sound of that name (the nth of them:
+		protected maps name every tag alike) played as a script's
+		sound_impulse_start with no object plays it, any sound the map
+		has, where a script names only the scenario's references:
+		run_ce_ogg_sound_test.sh) */
+		else if (!strncmp(commands[index].command, "@sound ", 7))
+		{
+			void scripted_sound_new(long definition_index, long source_object_index, real scale);
+			char name[128];
+			long wanted = 0;
+			long definition_index = NONE;
+			struct tag_iterator iterator;
+			long tag_index;
+
+			name[0] = '\0';
+			sscanf(commands[index].command + 7, "%127s %ld", name, &wanted);
+			tag_iterator_new(&iterator, 'snd!');
+			while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+			{
+				if (!_stricmp(tag_get_name(tag_index), name) && wanted-- == 0)
+				{
+					definition_index = tag_index;
+					break;
+				}
+			}
+			platform_log("test command: sound %s %s", commands[index].command + 7,
+				definition_index != NONE ? "played" : "not in the map");
+			if (definition_index != NONE)
+				scripted_sound_new(definition_index, NONE, 1.f);
+		}
 		else
 			hs_compile_and_evaluate(commands[index].command);
 	}

@@ -108,6 +108,7 @@ symbols in this file:
 #include <xtl.h>
 #ifdef HALO_LINUX
 #include "cache/cache_files.h"
+#include "custom_edition_cache.h"
 #include "load_profile.h"
 #include <stdlib.h>
 
@@ -308,6 +309,18 @@ void sound_cache_sound_delete(
 				((struct xbox_cache_sound_datum *)datum_get(
 					xbox_sound_cache_globals.cache_sounds,
 					sound->cache_block_index))->sound));
+#ifdef HALO_LINUX
+		/* (port: a Custom Edition Ogg Vorbis permutation still decoding into
+		the block is stopped first: custom_edition_sounds.c) */
+		{
+			struct xbox_cache_sound_datum *cache_sound = datum_get(
+				xbox_sound_cache_globals.cache_sounds,
+				sound->cache_block_index);
+
+			if (!cache_sound->loaded)
+				custom_edition_sound_cancel(&cache_sound->loaded);
+		}
+#endif
 		lruv_block_delete(
 			xbox_sound_cache_globals.cache,
 			sound->cache_block_index);
@@ -573,12 +586,20 @@ static void sound_cache_start_loading_sound(
 	struct sound_permutation *sound)
 {
 	long cache_block_index;
+#ifdef HALO_LINUX
+	/* (port: a Custom Edition map's Ogg Vorbis permutation is held as Xbox
+	ADPCM, decoded into its block: custom_edition_sounds.c) */
+	boolean ogg_vorbis = custom_edition_sound_is_ogg_vorbis(sound);
+	long size = custom_edition_sound_cache_bytes(sound);
+#else
+	long size = sound->samples.size;
+#endif
 
 	/* port: the size is the map's (retail: 288 bytes to 377064): none, or
 	more than the cache holds (1024 pages of 4k), is not loaded, said once
 	(the cache halts on a block of no pages) */
-	if (sound->samples.size <= 0 ||
-		sound->samples.size > SOUND_CACHE_PAGE_COUNT << SOUND_CACHE_PAGE_SIZE_BITS)
+	if (size <= 0 ||
+		size > SOUND_CACHE_PAGE_COUNT << SOUND_CACHE_PAGE_SIZE_BITS)
 	{
 		static boolean bad_size_reported = FALSE;
 
@@ -589,7 +610,7 @@ static void sound_cache_start_loading_sound(
 				_error_silent,
 				"sound permutation %.32s of %d bytes not loaded",
 				sound->name,
-				sound->samples.size);
+				size);
 		}
 
 		return;
@@ -597,7 +618,7 @@ static void sound_cache_start_loading_sound(
 
 	cache_block_index = lruv_block_new(
 		xbox_sound_cache_globals.cache,
-		sound->samples.size);
+		size);
 	if (cache_block_index != NONE)
 	{
 		byte *cache_address;
@@ -622,6 +643,9 @@ static void sound_cache_start_loading_sound(
 		sound->cache_base_address = (unsigned long)cache_address;
 		cache_sound->sound = sound;
 #ifdef HALO_LINUX
+		if (ogg_vorbis)
+			custom_edition_sound_load(sound, cache_address, size, &cache_sound->loaded);
+		else
 		/* (port) ahead of the textures' reads (cache_files_windows.c) */
 		cache_file_read_urgent(
 			sound->cache_tag_index,
@@ -675,7 +699,7 @@ static void sound_cache_start_loading_sound(
 		lruv_debug_to_file(
 			"d:\\stabbed.txt",
 			sound->name,
-			sound->samples.size,
+			size,
 			xbox_sound_cache_globals.cache,
 			scenario_debug_to_file,
 			cache_block_get_sound_permutation_name);

@@ -1264,6 +1264,31 @@ static void packet_release(struct voice_packet *entry)
 	entry->samples = NULL;
 }
 
+/* (debug) HALO_AUDIO_PACKET_TRACE=1: each packet the mixer played out, with
+where its data was and the RMS of what it decoded of it
+(run_ce_ogg_sound_test.sh: a Custom Edition Ogg Vorbis sound's Xbox ADPCM,
+custom_edition_sounds.c, is played) */
+static void packet_trace(const struct sdl_stream *stream, const struct voice_packet *entry)
+{
+	static int trace = -1;
+	unsigned long frames, index, count;
+	double sum = 0.0;
+
+	if (trace < 0)
+		trace = getenv("HALO_AUDIO_PACKET_TRACE") && atoi(getenv("HALO_AUDIO_PACKET_TRACE"));
+	if (!trace || !entry->finished || !entry->samples)
+		return;
+	frames = stream->adpcm ? entry->decoded_frames : entry->frames;
+	if (frames > entry->frames)
+		frames = entry->frames;
+	count = frames * stream->channels;
+	for (index = 0; index < count; index++)
+		sum += (double)entry->samples[index] * entry->samples[index];
+	platform_log("mixer: played %lu frames of a %s %lu-channel packet at %p (%lu bytes), rms %.0f",
+		frames, stream->adpcm ? "adpcm" : "pcm", stream->channels, entry->packet.pvBuffer,
+		(unsigned long)entry->packet.dwMaxSize, count ? sqrt(sum / (double)count) : 0.0);
+}
+
 /* completes the head packet; called with the lock held, which the game's
 callback runs without */
 static void stream_complete_head(struct sdl_stream *stream, DWORD status, DWORD completed_size)
@@ -1271,6 +1296,7 @@ static void stream_complete_head(struct sdl_stream *stream, DWORD status, DWORD 
 	struct voice_packet *entry = &stream->packets[stream->packet_head];
 	XMEDIAPACKET packet = entry->packet;
 
+	packet_trace(stream, entry);
 	packet_release(entry);
 	entry->finished = FALSE;
 	stream->packet_head = (stream->packet_head + 1) % MAXIMUM_STREAM_PACKETS;

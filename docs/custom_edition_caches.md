@@ -34,7 +34,7 @@ usually do.
 | --- | --- | --- |
 | **1. Recognize** | Tell the format and variant from the header alone, check every header field against the file, and name what the map needs: its resource maps, an OpenSauce mod set, memory upgrades | **Done**, in the loader, the report tool and the game (which, by default, names the format and refuses the map) |
 | **2. Load** | Put the map's tag data where its pointers expect it (`0x40440000`), read the tags kept in resource maps and relocate their pointers, and check every tag instance, name and address, every structure BSP (file range, header, lightmap materials), every model part's geometry, every bitmap's pixels and every sound's samples (range in their file), and the header checksum | **Done** in the loader, the report tool (`cache_file_report`) and the game, with the limits under [Assumptions](#assumptions-not-verified) |
-| **3. Run** | The game starts the map, draws it, plays its sounds and runs its scripts | **Reached for `bloodgulch.map`, `beavercreek_halo3.yelo` and `hugeass.map`, as far as observed** (below); not established for any other map, and not for Ogg Vorbis sounds or OpenSauce's own features |
+| **3. Run** | The game starts the map, draws it, plays its sounds and runs its scripts | **Reached for `bloodgulch.map`, `beavercreek_halo3.yelo` and `hugeass.map`, as far as observed** (below); not established for any other map, nor for OpenSauce's own features; Ogg Vorbis sounds decode and play in the Linux harness (`extinction.map`, `Covenant_V_Marines_Beta_5.map`, run_ce_ogg_sound_test.sh), not yet heard on a Vita |
 
 ## On the PS Vita (halo-ce-vita)
 
@@ -258,8 +258,18 @@ changed:
 - **Bitmaps and sound permutations** get the state of ones not yet drawn or
   played, and name their own tags: `bitmaps.map` and `sounds.map` hold the
   tag handles of whatever map they were built with.
-- **Sounds this build cannot decode** (Custom Edition's Ogg Vorbis) are made
-  unplayable, by emptying their pitch ranges, which the game skips.
+- **Ogg Vorbis sounds** (compression 3) are made Xbox ADPCM ones to the
+  game: the sound's compression, and a 44 kHz mono sound's rate made 22 kHz
+  (the game plays mono sounds at 22 kHz only). Their permutations stay Ogg
+  Vorbis, their buffer size (Halo PC's 16-bit PCM bytes) made the Xbox
+  ADPCM's, or 0 where it is not plausible (protected maps scramble it). The
+  sound cache gives such a permutation a block of that size and a thread of
+  its own decodes the stream into it with Tremor and re-encodes it as Xbox
+  ADPCM (`custom_edition_sounds.c`, `port/linux/src/ogg_sound.c`); a length
+  of 0 is measured first from the stream's first and last pages. Sounds in
+  any other compression (Halo PC's IMA ADPCM), or whose permutations are
+  not all of the sound's own, are made unplayable, by emptying their pitch
+  ranges, which the game skips.
 - **OpenSauce's script nodes.** OpenSauce's memory upgrades make room for
   28501 script syntax nodes instead of 19001, and OpenSauce patches the game
   to accept that. This build takes the scenario's nodes only at its own
@@ -408,7 +418,7 @@ silences them.
 - Conversion: every shader group's type; chicago extended shaders with and
   without four-stage maps; a shader with another group's type (refused);
   bitmaps and sound permutations naming their own tags; sound header fields
-  taken from `sounds.map`; an Ogg Vorbis sound made unplayable; upgraded
+  taken from `sounds.map`; an Ogg Vorbis sound made an Xbox ADPCM one with its permutations' sizes; upgraded
   script nodes reduced, stock ones kept, too many refused; animation overlays
   kept and disabled; HUD placements with the high resolution scale halved
   (in a weapon HUD's statics and crosshair items) and ones without it kept;
@@ -487,7 +497,7 @@ valid resource maps. Two retail Xbox caches of build 01.10.12.2276 (`ui.map`,
 
 Conversion of the two maps that were run:
 
-| Map | BSP materials | Shaders renumbered | `scex` made `schi` | Bitmaps | Ogg Vorbis sounds silenced | Script nodes reduced | Overlays disabled | Model parts (vertices) |
+| Map | BSP materials | Shaders renumbered | `scex` made `schi` | Bitmaps | Ogg Vorbis sounds (silenced then; decoded since) | Script nodes reduced | Overlays disabled | Model parts (vertices) |
 |---|---|---|---|---|---|---|---|---|
 | `bloodgulch.map` | 79 | 21 | 10 | 676 | 39 | no | 0 | 447 (100,945) |
 | `beavercreek_halo3.yelo` | 67 | 14 | 4 | 1005 | 10 | yes | 2 | 673 (201,787) |
@@ -550,7 +560,7 @@ checks first.
 Before the sound conversion, the log filled with that message: the map's
 copy of every resource-held sound's header says it is uncompressed. The game
 checks a sound's format before its pitch ranges (`sound_new_impulse` in
-`sound_manager.c`), so a silenced Ogg Vorbis sound still logs the message
+`sound_manager.c`), so a silenced sound (an Ogg Vorbis one, then) still logs the message
 when played; that the one left is such a sound is likely but was not
 checked. The sound system accepting sounds is what was observed; whether
 they are heard right was not checked, on a machine whose audio output could
@@ -731,9 +741,13 @@ every layout used was then checked against the sample maps.
   crash the game can still do so, as an Xbox map could; debug builds also
   stop on data that Custom Edition's release build reads past unchecked, as
   with the animation overlays above, and other such data may turn up.
-- **Ogg Vorbis sounds do not play** (39 of `bloodgulch.map`'s sounds, among
-  them announcer and dialogue lines): a decoder, under a licence that fits a
-  CC0 repository, would be needed.
+- **Ogg Vorbis sounds are re-encoded.** They play as Xbox ADPCM, decoded as
+  the sound cache loads them: an Ogg Vorbis permutation takes the cache
+  memory an Xbox ADPCM one of its length would (at most 1 MB; longer ones
+  are cut off there), and its first play waits for the decoding (a few
+  milliseconds on x86, ~40 ms for a 5 s stereo music link on a Raspberry Pi
+  4; the Vita is slower). The ADPCM costs ~30 dB of signal to noise on a
+  sine (run_ogg_sound_test.sh), as the Xbox's own sounds do.
 - **Models of 44 nodes or more** cannot be drawn by this build's renderer:
   such maps are refused (`celer_exile_odst_v2.yelo`).
 - **Linear bitmaps whose rows are not a multiple of 64 bytes** are drawn with
@@ -756,9 +770,10 @@ every layout used was then checked against the sample maps.
 - **The texture cache** holds 44 MB; a map that draws more in a frame is
   drawn with default textures where they do not fit, and the game reports
   it (`YOU GOT STABBED`).
-- **Silenced sounds still log.** Playing a silenced Ogg Vorbis sound logs
-  `attempt to play a sound that was not a mono 22k compressed sound ...`,
-  which the game also prints on the screen, in the release build too.
+- **Silenced sounds still log.** Playing a sound made unplayable (Halo
+  PC's IMA ADPCM) logs `attempt to play a sound that was not a mono 22k
+  compressed sound ...`, which the game also prints on the screen, in the
+  release build too.
 - **Scripts that use what this build does not have** are refused: of the
   sample, `extinctionrevanepic2.map` calls OpenSauce's
   `pp_set_effect_instance_active` (4 times), and needs a mod set anyway.

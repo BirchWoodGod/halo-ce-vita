@@ -127,6 +127,29 @@ LIBMSPACK_DIR = Path("port/third_party/libmspack")
 LIBMSPACK_SOURCES = ("cabd.c", "lzxd.c", "mszipd.c", "qtmd.c", "system.c")
 LIBMSPACK_FLAGS = (f"-I{LIBMSPACK_DIR}", "-DHAVE_INTTYPES_H=1")
 MUSL_MATH_DIR = Path("port/third_party/musl-math")
+# Halo Custom Edition's Ogg Vorbis sounds (port/linux/src/ogg_sound.c):
+# Xiph's Tremor (integer Vorbis) and libogg, allocating only from the
+# decoder's working memory through TLSF (port/third_party/tlsf); the
+# include folder holds the port's ogg/os_types.h
+TREMOR_DIR = Path("port/third_party/tremor")
+TREMOR_SOURCES = ("block.c", "codebook.c", "floor0.c", "floor1.c", "info.c", "mapping0.c", "mdct.c", "registry.c",
+                  "res012.c", "sharedbook.c", "synthesis.c", "window.c")
+LIBOGG_DIR = Path("port/third_party/libogg")
+LIBOGG_SOURCES = ("src/framing.c", "src/bitwise.c")
+LIBOGG_INCLUDE = f"-I{LIBOGG_DIR / 'include'}"
+TLSF_DIR = Path("port/third_party/tlsf")
+
+
+def ogg_sound_sources(tlsf: bool = True) -> List[Path]:
+    """Tremor's and libogg's sources, and TLSF's unless the build has it
+    already (the Vita's host layer)"""
+    sources = [TREMOR_DIR / name for name in TREMOR_SOURCES] + [LIBOGG_DIR / name for name in LIBOGG_SOURCES]
+    return sources + ([TLSF_DIR / "tlsf.c"] if tlsf else [])
+
+
+def ogg_sound_cflags(abi: str) -> str:
+    """the decoder's flags: its own, with the platform's ABI"""
+    return " ".join([abi, "-std=gnu11", "-O2", LIBOGG_INCLUDE, "-DNDEBUG", "-w"])
 # the self-updater's TLS (port/linux/src/posix_update.c)
 MBEDTLS_DIR = Path("port/third_party/mbedtls")
 # internet play's UPnP (port/linux/src/posix_upnp.c)
@@ -459,6 +482,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             f"-I{KCP_DIR}",
             f"-I{MONOCYPHER_DIR}",
             f"-I{EXPAT_DIR}",
+            LIBOGG_INCLUDE,
             "-Isource -Isource/cseries",
             sdk_flags,
         ])
@@ -529,6 +553,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
         # the menus' XML parser (port/third_party/expat; menu_files.c)
         for name in EXPAT_SOURCES:
             add_object(EXPAT_DIR / name, " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-w"]))
+        # Custom Edition's Ogg Vorbis sounds (port/linux/src/ogg_sound.c)
+        for source in ogg_sound_sources():
+            add_object(source, ogg_sound_cflags(abi))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():

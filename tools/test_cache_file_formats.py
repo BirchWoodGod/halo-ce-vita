@@ -202,14 +202,15 @@ def bitmap_item(pixels_offset, pixels_size):
 SOUND_ENTRY_FIELDS = {"sample_rate": 1, "encoding": 1, "longest_permutation_length": 1234}
 
 
-def sound_item(samples_offset, samples_size, pitch_ranges=1, compression=1):
+def sound_item(samples_offset, samples_size, pitch_ranges=1, compression=1, buffer_size=0, encoding=None,
+               sample_rate=None):
     """A sound as sounds.map holds it: the header again, then pitch ranges and
     permutations whose addresses count from the first pitch range. The
     entry's header has the fields the map's copy leaves zero, and the
     permutations the runtime fields of the map sounds.map was built with."""
     header = bytearray(0xA4)
-    struct.pack_into("<H", header, 0x06, SOUND_ENTRY_FIELDS["sample_rate"])
-    struct.pack_into("<hh", header, 0x6C, SOUND_ENTRY_FIELDS["encoding"], compression)
+    struct.pack_into("<H", header, 0x06, SOUND_ENTRY_FIELDS["sample_rate"] if sample_rate is None else sample_rate)
+    struct.pack_into("<hh", header, 0x6C, SOUND_ENTRY_FIELDS["encoding"] if encoding is None else encoding, compression)
     struct.pack_into("<i", header, 0x84, SOUND_ENTRY_FIELDS["longest_permutation_length"])
     struct.pack_into("<iII", header, 0x98, pitch_ranges, 0x5A1D818, 0xD39A3C)  # stale editing-kit pointers
     body = Blob()
@@ -219,6 +220,7 @@ def sound_item(samples_offset, samples_size, pitch_ranges=1, compression=1):
         mouth = body.add(b"MOUTHDAT")
         body.block(pitch_range + 0x3C, 1, permutation)
         body.u16(permutation + 0x28, compression)
+        body.u32(permutation + 0x38, buffer_size)  # Halo PC's 16-bit PCM bytes
         body.u32(permutation + 0x2C, 0x0BADF00D)
         body.u32(permutation + 0x30, 0x0BADF00D)
         body.u32(permutation + 0x34, STALE_HANDLE)
@@ -402,10 +404,14 @@ class Map:
     def __init__(self, opensauce=None, mod_name="", definitions=b"", trailing=b"",
                  extra_tags=(), bsp_gap=None, bitmap_pixels_size=16, sound_samples_size=32,
                  font_style_reference=NONE, pitch_ranges=1, bsp_sizes=(0x1000,), sound_compression=1,
+                 sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None,
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, strings_name="test\\strings", strings=("hello", "world!")):
         self.bsp_sizes = bsp_sizes
         self.sound_compression = sound_compression
+        self.sound_buffer_size = sound_buffer_size
+        self.sound_encoding = sound_encoding
+        self.sound_sample_rate = sound_sample_rate
         # opt-in tags and content, so the defaults above keep their counts
         self.model = model
         self.bsp_material = bsp_material
@@ -443,7 +449,8 @@ class Map:
         sounds, _ = resource_map_file(2, [
             ("test\\sound__permutations", bytes(32)),
             ("test\\sound", sound_item(samples_offset, self.sound_samples_size, self.pitch_ranges,
-                                       self.sound_compression)),
+                                       self.sound_compression, self.sound_buffer_size, self.sound_encoding,
+                                       self.sound_sample_rate)),
         ])
         loc, _ = resource_map_file(3, [
             (self.strings_name, string_list_item(self.strings)),
@@ -967,11 +974,47 @@ def test_sounds_take_what_the_maps_copy_lacks_from_sounds_map(report_tool, tmp_p
     assert [u32_at(tags, permutation + offset) for offset in (0x2C, 0x30, 0x34, 0x3C)] == [NONE, 0, handle, handle]
 
 
-def test_sounds_this_build_cannot_decode_are_made_unplayable(report_tool, tmp_path):
-    cache = Map(sound_compression=3)  # Ogg Vorbis
+def test_ogg_vorbis_sounds_are_made_xbox_adpcm_ones(report_tool, tmp_path):
+    # 44 kHz stereo, 1000 frames of 16-bit PCM: 16 blocks of 72 bytes
+    cache = Map(sound_compression=3, sound_buffer_size=4000)
     returncode, report, tags = converted(report_tool, cache, tmp_path)
     assert returncode == 0
-    assert report["sounds_undecodable"] == "1"
+    assert report["sounds_ogg_vorbis"] == "1" and report["sounds_undecodable"] == "0"
+    header, permutation = sound_parts(tags, cache)
+    assert u32_at(tags, header + 0x98) == 1  # its pitch range kept
+    assert s16_at(tags, header + 0x6E) == 1  # the game sees Xbox ADPCM
+    assert u16_at(tags, header + 0x06) == 1  # at 44 kHz still
+    assert s16_at(tags, permutation + 0x28) == 3  # the permutation stays Ogg Vorbis
+    assert u32_at(tags, permutation + 0x38) == 16 * 72  # its Xbox ADPCM's bytes
+    assert u32_at(tags, permutation + 0x40) == cache.sound_samples_size  # its stream, as it was
+
+
+def test_mono_44khz_ogg_vorbis_sounds_are_played_at_22khz(report_tool, tmp_path):
+    # 1000 frames of mono 44 kHz: 500 at 22 kHz, 8 blocks of 36 bytes
+    cache = Map(sound_compression=3, sound_buffer_size=2000, sound_encoding=0, sound_sample_rate=1)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["sounds_ogg_vorbis"] == "1"
+    header, permutation = sound_parts(tags, cache)
+    assert u16_at(tags, header + 0x06) == 0
+    assert u32_at(tags, permutation + 0x38) == 8 * 36
+
+
+def test_ogg_vorbis_buffer_sizes_that_are_not_plausible_are_left_to_be_measured(report_tool, tmp_path):
+    # protected maps scramble the buffer size: none, or not whole frames, or
+    # more than the sound cache gives a permutation
+    for buffer_size in (0, 4001, 0xFEF60000):
+        cache = Map(sound_compression=3, sound_buffer_size=buffer_size)
+        returncode, report, tags = converted(report_tool, cache, tmp_path)
+        assert returncode == 0 and report["sounds_ogg_vorbis"] == "1"
+        _, permutation = sound_parts(tags, cache)
+        assert u32_at(tags, permutation + 0x38) == 0, buffer_size
+
+
+def test_sounds_this_build_cannot_decode_are_made_unplayable(report_tool, tmp_path):
+    cache = Map(sound_compression=2)  # Halo PC's IMA ADPCM
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["sounds_undecodable"] == "1" and report["sounds_ogg_vorbis"] == "0"
     assert u32_at(tags, cache.addresses["test\\sound"] + 0x98) == 0
 
 
@@ -1483,12 +1526,13 @@ def test_real_maps_convert_as_recorded(report_tool, real_maps):
         "bloodgulch.map": {"structure_bsp_materials_checked": "79", "shaders_renumbered": "21",
                            "chicago_extended_shaders_converted": "10", "bitmaps_prepared": "676",
                            "script_nodes_reduced": "0", "animation_overlays_disabled": "0",
-                           "sounds_undecodable": "39", "hud_placements_rescaled": "32",
+                           "sounds_undecodable": "0", "sounds_ogg_vorbis": "39", "hud_placements_rescaled": "32",
                            "score_hint_converted": "1"},
         "beavercreek_halo3.yelo": {"structure_bsp_materials_checked": "67", "shaders_renumbered": "14",
                                    "chicago_extended_shaders_converted": "4", "bitmaps_prepared": "1005",
                                    "script_nodes_reduced": "1", "animation_overlays_disabled": "2",
-                                   "sounds_undecodable": "10", "hud_placements_rescaled": "14",
+                                   "sounds_undecodable": "0", "sounds_ogg_vorbis": "10",
+                                   "hud_placements_rescaled": "14",
                                    "score_hint_converted": "1"},
     }
     present = [real_maps / name for name in recorded if (real_maps / name).is_file()]

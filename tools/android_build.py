@@ -443,6 +443,9 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     # the platform layer shared with Linux, and the guest runtime
     platform_cflags = " ".join([
         guest_abi, guest_code, "-std=gnu11", "-D_GNU_SOURCE", "-DHALO_LINUX_PLATFORM_LAYER", "-w", profile_flags,
+        # (the guest's C library has no setjmp, which the Ogg Vorbis decoder ends on:
+        # port/linux/src/ogg_sound.c plays Custom Edition's Ogg Vorbis sounds as silence)
+        "-DHALO_OGG_SOUND_NO_DECODER",
         f"-include {prefix_header}", f"-include {platform_semantics_header}",
         f"-I{LINUX_DIR}/src", f"-I{LINUX_DIR}/include", f"-I{PORT_DIR}/guest/runtime",
         f"-I{PORT_DIR}/include", f"-I{TOML_DIR}", f"-I{EXPAT_DIR}", f"-I{KCP_DIR}", f"-I{MONOCYPHER_DIR}",
