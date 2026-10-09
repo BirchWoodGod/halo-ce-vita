@@ -278,6 +278,9 @@ symbols in this file:
 #include <stdlib.h>
 /* (HALO_TICK_PROFILE) the perception's time and counts (lines_profile.c) */
 #include "lines_profile.h"
+/* (HALO_AI_PERCEPTION_VERIFY) */
+#include "perception_verify.h"
+#include "structures/cluster_partitions.h"
 #endif
 
 /* ---------- constants */
@@ -5824,6 +5827,108 @@ done:
 }
 
 
+#ifdef HALO_LINUX
+/* (port) the objects of one of a visible cluster's lists (collideable or
+not) tested by actor_perception_refresh_test_object, in the list's order as
+before, with hints (__builtin_prefetch): an actor's timeslice refresh tests
+every object in every cluster it can see, ~350-550 in b30's beach fight
+(most of them scenery: a header and three cache lines of a datum each, its
+marker stamp, type, and child and sibling links, met cold) where the walk
+went from one reference to the next between tests. Here the walk reads up
+to ACTOR_PERCEPTION_REFRESH_BATCH references ahead, hinting each object's
+header as it goes, and each test hints the datum lines of the object a few
+places on. The tests change no cluster list (nothing in them connects or
+disconnects an object), but if one did (cluster_partition_changes moved),
+the walk goes on from the reference after the last object tested, read
+then, as the walk between tests read it. HALO_AI_PERCEPTION_VERIFY=1 walks
+each list again the original way afterwards and compares
+(perception_verify.c). */
+#define ACTOR_PERCEPTION_REFRESH_BATCH 32
+#define ACTOR_PERCEPTION_REFRESH_AHEAD 4
+
+static __inline void actor_perception_prefetch_object_datum(
+	long object_index)
+{
+	short absolute_index = (short)object_index;
+
+	if (absolute_index >= 0 && absolute_index < object_header_data->count)
+	{
+		struct object_header_datum const *header = (struct object_header_datum const *)
+			((char const *)object_header_data->data + object_header_data->size * absolute_index);
+		char const *datum = (char const *)header->datum;
+
+		if (datum)
+		{
+			/* (the marker stamp; the type; the child and sibling links) */
+			__builtin_prefetch(datum + offsetof(struct object_datum, object.magic_number), 1);
+			__builtin_prefetch(datum + offsetof(struct object_datum, object.type));
+			__builtin_prefetch(datum + offsetof(struct object_datum, object.next_object_index));
+			__builtin_prefetch(datum + offsetof(struct object_datum, object.parent_object_index));
+		}
+	}
+}
+
+static void actor_perception_refresh_cluster(
+	long actor_index,
+	short cluster_index,
+	boolean collideable,
+	struct actor_perception_refresh_list *enemy_list,
+	struct actor_perception_refresh_list *friend_list)
+{
+	long object_indices[ACTOR_PERCEPTION_REFRESH_BATCH];
+	long references_after[ACTOR_PERCEPTION_REFRESH_BATCH];
+	long reference_index;
+	long object_index = collideable ?
+		cluster_get_first_collideable_object(&reference_index, cluster_index) :
+		cluster_get_first_noncollideable_object(&reference_index, cluster_index);
+
+	while (object_index != NONE)
+	{
+		unsigned long changes = cluster_partition_changes();
+		short count = 0;
+		short index;
+
+		while (object_index != NONE && count < ACTOR_PERCEPTION_REFRESH_BATCH)
+		{
+			short absolute_index = (short)object_index;
+
+			if (absolute_index >= 0 && absolute_index < object_header_data->count)
+			{
+				__builtin_prefetch((char const *)object_header_data->data + object_header_data->size * absolute_index);
+			}
+			object_indices[count] = object_index;
+			references_after[count] = reference_index;
+			count++;
+			object_index = collideable ?
+				cluster_get_next_collideable_object(&reference_index) :
+				cluster_get_next_noncollideable_object(&reference_index);
+		}
+
+		for (index = 0; index < count; index++)
+		{
+			if (index + ACTOR_PERCEPTION_REFRESH_AHEAD < count)
+			{
+				actor_perception_prefetch_object_datum(object_indices[index + ACTOR_PERCEPTION_REFRESH_AHEAD]);
+			}
+			perception_verify_refresh_object(object_indices[index]);
+			actor_perception_refresh_test_object(actor_index, object_indices[index], enemy_list, friend_list);
+			if (cluster_partition_changes() != changes && index + 1 < count)
+			{
+				/* (a list changed: on from the reference after this object, as the walk would) */
+				perception_verify_refresh_resumed();
+				reference_index = references_after[index];
+				object_index = collideable ?
+					cluster_get_next_collideable_object(&reference_index) :
+					cluster_get_next_noncollideable_object(&reference_index);
+				break;
+			}
+		}
+	}
+
+	return;
+}
+#endif
+
 static void actor_perception_refresh(
 	long actor_index)
 {
@@ -6022,6 +6127,15 @@ static void actor_perception_refresh(
 		{
 			if (BIT_VECTOR_TEST_FLAG(pvs, cluster_index))
 			{
+#ifdef HALO_LINUX
+				/* (actor_perception_refresh_cluster, above) */
+				perception_verify_refresh_cluster_begin(cluster_index, TRUE);
+				actor_perception_refresh_cluster(actor_index, cluster_index, TRUE, &enemies, &friends);
+				perception_verify_refresh_cluster_end();
+				perception_verify_refresh_cluster_begin(cluster_index, FALSE);
+				actor_perception_refresh_cluster(actor_index, cluster_index, FALSE, &enemies, &friends);
+				perception_verify_refresh_cluster_end();
+#else
 				long reference_index;
 				long object_index;
 
@@ -6038,6 +6152,7 @@ static void actor_perception_refresh(
 				{
 					actor_perception_refresh_test_object(actor_index, object_index, &enemies, &friends);
 				}
+#endif
 			}
 		}
 	}
