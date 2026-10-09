@@ -4306,7 +4306,9 @@ has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
 (vita_settings_set, through halo_test_setting_hook; elsewhere the variable, and the settings generation the
 readers watch); "@host command" asks for a host command (kick, ban,
-bringto) as the Vita's Play page does (main_request_host_command), and
+bringto) as the Vita's Play page does (main_request_host_command),
+"@update" presses the settings panel's Check for updates
+(update_check_request, port/linux/src/update_notify.c), and
 "@sound tag [n]" plays that sound tag (the nth so named) as
 sound_impulse_start does with no object. Each runs once,
 at the first frame whose game time has reached its tick. */
@@ -4493,6 +4495,14 @@ static void main_test_commands_update(
 				setenv(variable, value, 1);
 				__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 			}
+		}
+		/* (@update: the settings panel's Check for updates pressed,
+		port/linux/src/update_notify.c) */
+		else if (!strcmp(commands[index].command, "@update"))
+		{
+			int update_check_request(void);
+
+			update_check_request();
 		}
 		else if (!strncmp(commands[index].command, "@tv ", 4))
 			main_test_trigger_volume(commands[index].command + 4);
