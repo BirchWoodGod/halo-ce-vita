@@ -2,7 +2,8 @@
 LINES_PROFILE.H
 
 (port, HALO_TICK_PROFILE) The game frame's particles and sounds, and the
-sound obstruction rays and point physics lookups in them: lines_profile.c
+sound obstruction rays and point physics lookups in them, and the tick's AI
+lines of sight: lines_profile.c
 */
 
 #ifndef __LINES_PROFILE_H
@@ -32,6 +33,15 @@ struct halo_lines_stats
 	unsigned long obstruction_rays;
 	unsigned long obstruction_ray_hits;
 	unsigned long long obstruction_us;
+	/* ai_test_line_of_sight (ai.c): calls, their rays (those the visibility
+	of the two clusters lets through), what the rays met, the extra lines of
+	the expanded modes, and the time */
+	unsigned long ai_los_calls;
+	unsigned long ai_los_rays;
+	unsigned long ai_los_object_hits;
+	unsigned long ai_los_other_hits;
+	unsigned long ai_los_extra_lines;
+	unsigned long long ai_los_us;
 };
 
 /* ---------- globals */
