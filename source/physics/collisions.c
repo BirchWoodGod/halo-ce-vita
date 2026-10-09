@@ -332,12 +332,29 @@ collision:
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* (port) collision_test_vector's body, made two ways (each call below passes
+a constant): as itself, and for the sound obstruction rays, whose callers ask
+only whether anything is hit (any_hit): the result and the collision record are then left
+as soon as the answer is known - a structure or water hit, or the first object
+hit - where the full test would go on to find the nearest. The answer is the
+same: before the first hit the objects are tested against the whole vector
+(t 1) in both, and every later test could only find a nearer hit */
+static __inline__ __attribute__((always_inline)) boolean collision_test_vector_internal(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision,
+	boolean any_hit)
+#else
 boolean collision_test_vector(
 	unsigned long flags,
 	real_point3d const *point,
 	real_vector3d const *vector,
 	long ignore_object_index,
 	struct collision_result *collision)
+#endif
 {
 	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean hit = FALSE;
@@ -462,6 +479,12 @@ boolean collision_test_vector(
 		collision_log_end_time(
 			_collision_function_vector_structure,
 			collision_usage_times.vector_structure.QuadPart);
+#ifdef HALO_LINUX
+		if (any_hit && hit)
+		{
+			goto answered;
+		}
+#endif
 
 		if (TEST_FLAG(flags, _collision_test_media_bit) &&
 			collision->location.cluster_index != NONE)
@@ -529,6 +552,12 @@ boolean collision_test_vector(
 			}
 		}
 
+#ifdef HALO_LINUX
+		if (any_hit && hit)
+		{
+			goto answered;
+		}
+#endif
 		if (test_objects && bsp_result.leaf_count > 0)
 		{
 			long leaf_index;
@@ -662,7 +691,15 @@ boolean collision_test_vector(
 								collision))
 							{
 								hit = TRUE;
+								if (any_hit)
+								{
+									break;
+								}
 							}
+						}
+						if (any_hit && hit)
+						{
+							break;
 						}
 						continue;
 					}
@@ -683,8 +720,20 @@ boolean collision_test_vector(
 								collision))
 						{
 							hit = TRUE;
+#ifdef HALO_LINUX
+							if (any_hit)
+							{
+								break;
+							}
+#endif
 						}
 					}
+#ifdef HALO_LINUX
+					if (any_hit && hit)
+					{
+						break;
+					}
+#endif
 				}
 			}
 			object_marker_end();
@@ -693,6 +742,12 @@ boolean collision_test_vector(
 				_collision_function_vector_objects,
 				collision_usage_times.vector_objects.QuadPart);
 		}
+#ifdef HALO_LINUX
+		if (any_hit)
+		{
+			goto answered;
+		}
+#endif
 
 		if (!hit)
 		{
@@ -736,9 +791,37 @@ boolean collision_test_vector(
 		scenario_location_from_point(&collision->location, &collision->point);
 	}
 
+#ifdef HALO_LINUX
+answered:
+#endif
 	HALO_OBJECTS_PHASE_POP();
 	return hit;
 }
+
+#ifdef HALO_LINUX
+boolean collision_test_vector(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision)
+{
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, collision, FALSE);
+}
+
+/* (port) whether collision_test_vector would hit anything, answered as soon
+as known (the sound obstruction rays: collision_test_vector_internal) */
+boolean collision_test_vector_obstructed(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index)
+{
+	struct collision_result collision;
+
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, &collision, TRUE);
+}
+#endif
 
 boolean collision_test_pill(
 	unsigned long flags,

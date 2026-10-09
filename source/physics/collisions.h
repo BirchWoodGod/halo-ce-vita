@@ -141,6 +141,15 @@ boolean collision_test_vector(
 	real_vector3d const *vector,
 	long ignore_object_index,
 	struct collision_result *collision);
+#ifdef HALO_LINUX
+/* (port) whether collision_test_vector would hit anything (the sound
+obstruction rays), answered as soon as known */
+boolean collision_test_vector_obstructed(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index);
+#endif
 boolean collision_fix_pill(
 	unsigned long flags,
 	real_point3d const *old_position,
