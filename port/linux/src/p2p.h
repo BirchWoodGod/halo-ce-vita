@@ -315,7 +315,11 @@ enum
 	P2P_LOBBY_JOIN_JOINING = 2,
 };
 int p2p_lobby_join_state(void);
-/* a game the browser could not join: kept, marked failed, for this run */
+/* a game the browser could not join: hidden for 5 minutes unless its
+listing changes, then shown marked failed (after the others of as many
+players), for this run (p2p_lobby.c marks a game
+whose host was not reached, or whose host's game did not answer the System
+Link searches, itself) */
 void p2p_lobby_mark_failed(const char *id);
 /* how the server browser is doing, for its status line: the games found,
 looking still (a broker being tried, the hosts' answers on their way), the

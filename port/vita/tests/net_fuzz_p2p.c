@@ -67,6 +67,8 @@ int p2p_lobby_hosting_status_locked(char *text, int size)
 void p2p_signal_kick(void) {}
 void p2p_lobby_quit(void) {}
 void p2p_lobby_join_timed_out(const unsigned char *host_hash) { (void)host_hash; }
+void p2p_lobby_game_sent(const unsigned char *identifier) { (void)identifier; }
+void p2p_lobby_game_heard(const unsigned char *identifier) { (void)identifier; }
 void p2p_signal_lookup_code(const char *code, const unsigned char *host) { (void)code; (void)host; }
 void p2p_signal_stop_lookup(void) {}
 void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token) { (void)host_hash; (void)token; }
