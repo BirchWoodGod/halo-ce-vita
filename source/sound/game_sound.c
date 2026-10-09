@@ -100,6 +100,8 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "render_epoch.h"
 void platform_log(const char *format, ...);
+/* (HALO_TICK_PROFILE) the obstruction rays' counts (lines_profile.c) */
+#include "lines_profile.h"
 #else
 #define halo_epoch_threaded 0
 #endif
@@ -1074,6 +1076,7 @@ void compute_sound_obstruction(
 	long slot = obstruction_cache_slot(local_player_index, &source->location.position);
 	long now = game_time_get();
 
+	halo_lines_stats.obstruction_calls++;
 	if (obstruction_cache[slot].valid &&
 		obstruction_cache[slot].game_time == now &&
 		obstruction_cache[slot].local_player_index == local_player_index &&
@@ -1083,10 +1086,14 @@ void compute_sound_obstruction(
 	{
 		source->obstruction = obstruction_cache[slot].obstruction;
 		source->occlusion = obstruction_cache[slot].occlusion;
+		halo_lines_stats.obstruction_same_tick++;
 		return;
 	}
 	if (source_obstruction_reused(local_player_index, source, &camera->position, now))
+	{
+		halo_lines_stats.obstruction_reused++;
 		return;
+	}
 #endif
 
 	match_assert(
@@ -1124,12 +1131,34 @@ void compute_sound_obstruction(
 			{
 				real_vector3d listener_to_source;
 				struct collision_result collision;
+#ifdef HALO_LINUX
+				unsigned long long started = halo_lines_now();
+				boolean obstructed;
+#endif
 
 				source->obstruction = 0.45f;
 				vector_from_points3d(
 					&camera->position,
 					&source->location.position,
 					&listener_to_source);
+#ifdef HALO_LINUX
+				obstructed = collision_test_vector(
+					FLAG(_collision_test_front_facing_surfaces_bit) |
+						FLAG(_collision_test_structure_bit) |
+						FLAG(_collision_test_media_bit) |
+						FLAG(_collision_test_objects_bit) |
+						FLAG(_collision_test_objects_scenery_bit) |
+						FLAG(_collision_test_objects_machines_bit),
+					&camera->position,
+					&listener_to_source,
+					NONE,
+					&collision);
+				if (started)
+					halo_lines_stats.obstruction_us += halo_lines_now() - started;
+				halo_lines_stats.obstruction_rays++;
+				halo_lines_stats.obstruction_ray_hits += obstructed ? 1 : 0;
+				if (!obstructed)
+#else
 				if (!collision_test_vector(
 					FLAG(_collision_test_front_facing_surfaces_bit) |
 						FLAG(_collision_test_structure_bit) |
@@ -1141,6 +1170,7 @@ void compute_sound_obstruction(
 					&listener_to_source,
 					NONE,
 					&collision))
+#endif
 				{
 					source->obstruction = 0.0f;
 					source->occlusion = 0.0f;

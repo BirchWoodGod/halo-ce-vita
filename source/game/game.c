@@ -180,6 +180,10 @@ struct game_options;
 #include "sound/game_sound.h"
 #include "sound/sound_classes.h"
 #include "sound/sound_manager.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) game_frame's steps (lines_profile.c) */
+#include "lines_profile.h"
+#endif
 #include "structures/structures.h"
 #include "units/units.h"
 #include "units/vehicles.h"
@@ -1494,6 +1498,32 @@ void game_frame(
 		game_globals->active);
 
 	collision_log_begin_period(1);
+#ifdef HALO_LINUX
+	{
+		unsigned long long started = halo_lines_now();
+
+		particles_update(frame_dt);
+		halo_lines_profile_step(_lines_step_particles, started);
+		started = halo_lines_now();
+		contrails_update(frame_dt);
+		halo_lines_profile_step(_lines_step_contrails, started);
+		started = halo_lines_now();
+		particle_systems_update(frame_dt);
+		halo_lines_profile_step(_lines_step_particle_systems, started);
+		started = halo_lines_now();
+		widgets_update(frame_dt);
+		halo_lines_profile_step(_lines_step_widgets, started);
+		started = halo_lines_now();
+		game_sound_update(frame_dt);
+		halo_lines_profile_step(_lines_step_game_sound, started);
+		started = halo_lines_now();
+		scenario_frame_update(frame_dt);
+		rasterizer_frame_update(frame_dt);
+		numeric_countdown_timer_update();
+		halo_lines_profile_step(_lines_step_rest, started);
+		halo_lines_profile_frame();
+	}
+#else
 	particles_update(frame_dt);
 	contrails_update(frame_dt);
 	particle_systems_update(frame_dt);
@@ -1502,6 +1532,7 @@ void game_frame(
 	scenario_frame_update(frame_dt);
 	rasterizer_frame_update(frame_dt);
 	numeric_countdown_timer_update();
+#endif
 	collision_log_end_period();
 
 	return;
