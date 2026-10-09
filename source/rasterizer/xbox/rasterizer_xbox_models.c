@@ -662,6 +662,19 @@ static boolean local_environment_fog_screen_flag = FALSE;
 static boolean local_do_not_change_z_stencil_states = FALSE;
 static boolean local_reported_too_many_transparent_geometry_groups = FALSE;
 static boolean local_pixel_shader_dirty_flag = TRUE;
+#ifdef HALO_LINUX
+/* (port) what a model's parts share, worked out at its first part and kept
+until the next rasterizer_model_begin: the camera's distance to the model's
+centroid, the fog's combiner colours (from that distance and the window's
+fog), and the seeded phase of the self-illumination (from the model's
+unique identifier) - each part worked them out again, the same */
+static boolean local_model_constants_valid = FALSE;
+static real local_model_camera_distance;
+static boolean local_model_fog_valid = FALSE;
+static pixel32 local_model_cc0_pixel, local_model_cc0_error_pixel, local_model_cc1_pixel;
+static boolean local_model_phase_valid = FALSE;
+static real local_model_self_illumination_phase;
+#endif
 extern boolean rasterizer_model_cortana_hack;
 extern struct rasterizer_window_begin_parameters global_window_parameters;
 extern struct rasterizer_models_frame_statistics rasterizer_frame_statistics;
@@ -779,6 +792,11 @@ void _rasterizer_model_begin(
 
 		local_parameters = parameters;
 		local_parameters_queued_flag = FALSE;
+#ifdef HALO_LINUX
+		local_model_constants_valid = FALSE;
+		local_model_fog_valid = FALSE;
+		local_model_phase_valid = FALSE;
+#endif
 		local_do_not_change_z_stencil_states =
 			do_not_change_z_stencil_states;
 
@@ -1864,6 +1882,14 @@ void _rasterizer_model_draw(
 					771,
 					local_model_effect_type==_render_model_effect_type_none);
 
+#ifdef HALO_LINUX
+				if (local_model_constants_valid)
+				{
+					camera_distance = local_model_camera_distance;
+				}
+				else
+#endif
+				{
 				vector_from_points3d(
 					&global_window_parameters.camera.position,
 					&local_parameters->centroid,
@@ -1871,6 +1897,11 @@ void _rasterizer_model_draw(
 				camera_distance = dot_product3d(
 					&camera_to_model,
 					&global_window_parameters.camera.forward);
+#ifdef HALO_LINUX
+				local_model_camera_distance = camera_distance;
+				local_model_constants_valid = TRUE;
+#endif
+				}
 
 				if (shader_model->model.reflection_cutoff_distance != 0.0f)
 				{
@@ -2039,7 +2070,20 @@ void _rasterizer_model_draw(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					if (local_model_phase_valid)
+					{
+						self_illumination_phase = local_model_self_illumination_phase;
+					}
+					else
+					{
+						self_illumination_phase = real_seed_random(&seed);
+						local_model_self_illumination_phase = self_illumination_phase;
+						local_model_phase_valid = TRUE;
+					}
+#else
 					self_illumination_phase = real_seed_random(&seed);
+#endif
 				}
 
 				match_assert(
@@ -2330,6 +2374,14 @@ void _rasterizer_model_draw(
 
 #ifdef HALO_LINUX
 				MODEL_PART_ADD(2, part_from);
+				if (local_model_fog_valid)
+				{
+					cc0_pixel = local_model_cc0_pixel;
+					cc0_error_pixel = local_model_cc0_error_pixel;
+					cc1_pixel = local_model_cc1_pixel;
+				}
+				else
+				{
 #endif
 				if (rasterizer_debug_options.fog &&
 					!TEST_FLAG(
@@ -2451,6 +2503,13 @@ void _rasterizer_model_draw(
 					cc0_error_pixel = 0xFF000000;
 					cc0_pixel = 0xFF000000;
 				}
+#ifdef HALO_LINUX
+				local_model_cc0_pixel = cc0_pixel;
+				local_model_cc0_error_pixel = cc0_error_pixel;
+				local_model_cc1_pixel = cc1_pixel;
+				local_model_fog_valid = TRUE;
+				}
+#endif
 
 				set_environment_shader_pixel_shader(
 					real_rgb_color_to_pixel32(&self_illumination_color),
@@ -2502,6 +2561,13 @@ void _rasterizer_model_draw(
 						shader_model->model.flags,
 						_shader_model_two_sided_bit))
 				{
+#ifdef HALO_LINUX
+					/* (port) the second pass's constants are the first's but
+					for the winding's sign: the texture transform (registers 1
+					and 2), evaluated from the same shader, parameters and time,
+					is the one the first pass left there */
+					vertex_constants[0].n[3] = -1.0f;
+#else
 					vertex_constants[0].n[0] =
 						shader_model->model.detail_map_scale;
 					vertex_constants[0].n[1] =
@@ -2533,6 +2599,7 @@ void _rasterizer_model_draw(
 						&vertex_constants[2]);
 					vertex_constants[2].n[2] =
 						shader_model->model.translucency;
+#endif
 
 					IDirect3DDevice8_SetVertexShaderConstant(
 						global_d3d_device,
