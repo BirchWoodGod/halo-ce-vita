@@ -80,6 +80,7 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "shaders/shader_definitions.h"
 #include "shaders/shaders.h"
+#include "tag_files/tag_files.h"
 
 /* ---------- constants */
 
@@ -1322,6 +1323,77 @@ static short model_detail_level_keeping_transparency(
 	}
 	return level;
 }
+
+/* (port) HALO_MODEL_LOD_SCALE leaves a model whose bounding sphere holds the
+camera at the game's own detail level: it fills the view at any level, and
+its highest level can carry what the lower ones leave out for the view from
+inside. a10's cryotube draws the Master Chief's armour below the
+first-person camera in its super-high level alone (3000 pixels, which only
+the view from inside the tube reaches: 3300 to 5700 there at 4:3); the player's
+own biped is passed over in first person as on the Xbox (render_objects.c),
+so at 0.5 the tube's lower level left no body in view (issue #29) */
+static boolean model_sphere_holds_camera(
+	real_point3d const *centroid,
+	real radius)
+{
+	return centroid && radius > 0.0f &&
+		distance_squared3d(centroid, &render.camera.position) < radius * radius;
+}
+
+/* (port, debug) HALO_MODEL_LOD_LOG=1: each model's detail level logged when
+it first draws at a level, with the level the game itself would have
+chosen ("model detail: <model> level <n> (game <n>, <pixels> pixels,
+scale <s>)", or for a model around the camera "..., camera inside: game
+level kept, scaled <the level the scale would have chosen>)");
+run_cryo_body_test.sh reads it */
+static void model_detail_level_log(
+	long model_index,
+	struct model const *model,
+	short level,
+	real game_pixels,
+	float lod_scale,
+	boolean camera_inside)
+{
+	static int enabled = -1;
+	static unsigned long seen[1024];
+	unsigned long key;
+	unsigned long slot;
+	short game_level = NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1;
+	short scaled_level = NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_MODEL_LOD_LOG");
+
+		enabled = setting && atoi(setting) != 0;
+	}
+	if (!enabled)
+		return;
+	while (game_level>0 && game_pixels<model->detail_cutoff_pixels[game_level])
+	{
+		game_level--;
+	}
+	while (scaled_level>0 && game_pixels * lod_scale<model->detail_cutoff_pixels[scaled_level])
+	{
+		scaled_level--;
+	}
+	key = ((unsigned long)(model_index & 0xFFFF) << 12) | ((unsigned long)level << 9) |
+		((unsigned long)game_level << 6) | ((unsigned long)(camera_inside ? scaled_level : 7) << 3) | 0x80000000ul;
+	slot = ((unsigned long)(model_index & 0xFFFF) * 31u + ((key >> 3) & 0x1FFu) * 7u) & (NUMBEROF(seen) - 1);
+	if (seen[slot] == key)
+		return;
+	seen[slot] = key;
+	if (camera_inside)
+	{
+		platform_log("model detail: %s level %d (game %d, %.0f pixels, scale %.2f, camera inside: game level kept, scaled %d)",
+			tag_get_name(model_index), (int)level, (int)game_level, game_pixels, lod_scale, (int)scaled_level);
+	}
+	else
+	{
+		platform_log("model detail: %s level %d (game %d, %.0f pixels, scale %.2f)",
+			tag_get_name(model_index), (int)level, (int)game_level, game_pixels, lod_scale);
+	}
+}
 #endif
 
 /* port: a map's model with an index past what it has */
@@ -1440,12 +1512,15 @@ void render_model(
 
 #ifdef HALO_LINUX
 		real game_level_of_detail_pixels = -1.0f;
+		real unscaled_level_of_detail_pixels = level_of_detail_pixels;
+		boolean camera_inside = FALSE;
+		static float lod_scale = -1.0f;
 
 		{
 			/* (port) HALO_MODEL_LOD_SCALE=<real>: the detail level is chosen as
 			if the model covered that fraction of its pixels (a handheld quality
-			setting: 0.5 picks a level or so lower; the game state is untouched) */
-			static float lod_scale = -1.0f;
+			setting: 0.5 picks a level or so lower; the game state is untouched),
+			except for a model around the camera (model_sphere_holds_camera) */
 			static unsigned long settings_seen;
 			extern volatile unsigned long halo_settings_generation;
 
@@ -1457,8 +1532,12 @@ void render_model(
 			}
 			if (lod_scale != 1.0f)
 			{
-				game_level_of_detail_pixels = level_of_detail_pixels;
-				level_of_detail_pixels *= lod_scale;
+				camera_inside = model_sphere_holds_camera(centroid, radius);
+				if (!camera_inside)
+				{
+					game_level_of_detail_pixels = level_of_detail_pixels;
+					level_of_detail_pixels *= lod_scale;
+				}
 			}
 		}
 #endif
@@ -1481,6 +1560,11 @@ void render_model(
 			}
 			geometry_detail_level_index = model_detail_level_keeping_transparency(model_index, model,
 				region_permutation_indices, geometry_detail_level_index, game_level);
+		}
+		if (!TEST_FLAG(flags, _render_model_shadow_bit))
+		{
+			model_detail_level_log(model_index, model, geometry_detail_level_index,
+				unscaled_level_of_detail_pixels, lod_scale, camera_inside);
 		}
 #endif
 		if (rasterizer_debug_options.debug_model_lod!=NONE)
