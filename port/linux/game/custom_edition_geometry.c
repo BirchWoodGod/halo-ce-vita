@@ -832,7 +832,9 @@ boolean custom_edition_structure_bsp_load(
 	}
 	else
 	{
+		/* (the buffers are the window's: it had no room for them) */
 		error(_error_silent, "custom edition: cannot make the buffers of the structure BSP's materials");
+		custom_edition_cache_load_failure_note(T("there is not enough memory for its level geometry"));
 		custom_edition_structure_bsp_unload();
 	}
 

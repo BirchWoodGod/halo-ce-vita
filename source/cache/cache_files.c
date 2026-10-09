@@ -1529,7 +1529,10 @@ long scenario_tags_load(
 				if (!validated)
 				{
 					error(_error_silent, "cache: '%s' failed the tag check (above); refusing it", scenario_name);
-					halo_map_load_refused(scenario_name, "this map file is damaged or not supported");
+					/* (a check with no memory to run in is the session's
+					memory, not the map: the player is told to restart) */
+					halo_map_load_refused(scenario_name, tag_validate_out_of_memory() ?
+						"out of memory: restart the game" : "this map file is damaged or not supported");
 					cache_file_globals.tag_header = NULL;
 					return NONE;
 				}
@@ -1798,7 +1801,8 @@ boolean scenario_structure_bsp_load(
 	{
 		error(_error_silent, "cache: structure BSP %ld failed the tag check (above); refusing it",
 			(long)reference->structure_bsp.index);
-		halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+		halo_map_load_refused(cache_files_loaded_map, tag_validate_out_of_memory() ?
+			"out of memory: restart the game" : "this map file is damaged or not supported");
 		cache_file_globals.structure_bsp_header = NULL;
 		return FALSE;
 	}

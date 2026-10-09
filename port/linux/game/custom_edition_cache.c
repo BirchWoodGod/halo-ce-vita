@@ -389,7 +389,8 @@ static boolean custom_edition_cache_tags_validate(
 		report->identity.name))
 	{
 		error(_error_silent, "custom edition: the map's tags failed the tag check (above)");
-		custom_edition_cache_load_failure_reason(T("this map file is damaged or not supported"));
+		custom_edition_cache_load_failure_reason(tag_validate_out_of_memory() ?
+			T("out of memory: restart the game") : T("this map file is damaged or not supported"));
 		return FALSE;
 	}
 	if (tag_validate_corrections())
@@ -1251,11 +1252,15 @@ void halo_map_load_refused(
 		return;
 	}
 	custom_edition_cache_load_failure_begin(map_name);
-	/* (the loader's generic reason, cache_files.c's and main.c's, in the
+	/* (the loader's generic reasons, cache_files.c's and main.c's, in the
 	player's language; the others come translated) */
 	if (!csstrcmp(reason, "this map file is damaged or not supported"))
 	{
 		reason = T("this map file is damaged or not supported");
+	}
+	else if (!csstrcmp(reason, "out of memory: restart the game"))
+	{
+		reason = T("out of memory: restart the game");
 	}
 	custom_edition_cache_load_failure_reason(reason);
 
@@ -1273,10 +1278,13 @@ boolean custom_edition_cache_load_failure_show(
 	{
 		return FALSE;
 	}
-	/* (an Xbox level's file, which could not be precached: cache_files.c) */
+	/* (an Xbox level's file, which could not be precached: cache_files.c;
+	the menus' own map, ui, is no custom map either) */
 	{
-		char const *title = custom_edition_maps_level_title(custom_edition_load_failure.map_name);
-		boolean xbox_level = csstrcmp(title, custom_edition_load_failure.map_name) != 0;
+		boolean menus = !csstrcasecmp(custom_edition_load_failure.map_name, "ui");
+		char const *title = menus ? T("the main menu") :
+			custom_edition_maps_level_title(custom_edition_load_failure.map_name);
+		boolean xbox_level = menus || csstrcmp(title, custom_edition_load_failure.map_name) != 0;
 
 		snprintf(
 			message,
