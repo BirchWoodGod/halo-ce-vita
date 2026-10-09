@@ -289,6 +289,15 @@ struct vertex_shader_object
 	/* its instructions' hash (the draw hash) */
 	unsigned long instruction_hash;
 	struct vertex_variant *variants;
+	/* (setup_streams) the vertex layout of a stream draw whose declared
+	streams all have data, without halo_d3d_stream_attribute's register:
+	worked out at the first such draw (layout_made), and pointed to by the
+	records instead of written into each; layout_streams names the stream
+	each of the draw's stream slots takes. No layout (layout_count 0) for a
+	declaration of more streams than a draw takes */
+	unsigned char layout_made, layout_count, layout_stream_count;
+	unsigned char layout_streams[VGXM_STREAM_COUNT];
+	struct vgxm_attribute layout[XGPU_VERTEX_ATTRIBUTE_COUNT];
 };
 
 /* ---------- pixel shaders */
@@ -2466,11 +2475,83 @@ struct render_command
 	unsigned long frame;
 };
 
+/* the viewport and clip of the records (record_view): a block in a
+per-frame arena that consecutive records share */
+struct record_view
+{
+	float viewport_offset[3];
+	float viewport_scale[3];
+	long clip[4];
+};
+
+/* A ring entry: what the game's thread writes of a record, and only that,
+in as few of the Vita's 32-byte cache lines as it fits - a record is
+written into a cold entry, where the first write to each line is a line
+fill from memory (the entry was 1 KB, the record's part of it 270 bytes over
+9.4 lines; now ~150 bytes over 5). The worker expands a draw's into the
+render_command it executes (execute_command): the vertex layout, constants
+and indices from here, the rest from the state block as before, or from the
+full record the game's thread built (a record built in full, by
+HALO_RECORD_SPLIT=0 or a frame out of state blocks). */
+struct render_record
+{
+	unsigned char kind;
+	unsigned char has_depth, simple, hoistable;
+	unsigned char new_run, wave, flush_before;
+	signed char phase;
+	unsigned char sky_depth, immediate, attribute_count, stream_count;
+	unsigned short cull;
+	unsigned char primitive;
+	/* the copy of a small target this run renders into, and the copy each
+	stage reads (at most MAXIMUM_TARGET_VERSIONS) */
+	unsigned char color_version;
+	unsigned char texture_version[D3DTSS_MAXSTAGES];
+	unsigned short visibility_index, segment_count;
+	unsigned char vertex_chunk_d_registers;
+	unsigned char reserved[3];
+	const struct record_targets *targets;
+	union
+	{
+		struct
+		{
+			const struct record_state *state;
+			struct render_command *full;
+			struct vertex_shader_object *program;
+			unsigned long provided_mask, packed_mask, color_mask;
+			const struct record_view *view;
+			const struct draw_segment *segments;
+			const unsigned short *indices;
+			unsigned long index_count;
+			const void *vertex_uniforms;
+			/* the declaration's vertex layout (vertex_shader_object.layout),
+			or NULL: the attributes below */
+			const struct vgxm_attribute *layout;
+			const void *vertex_chunks[VITA_VC_CHUNKS];
+			const void *streams[VGXM_STREAM_COUNT];
+			unsigned short strides[VGXM_STREAM_COUNT];
+			/* (read up to attribute_count) */
+			struct vgxm_attribute attributes[VGXM_ATTRIBUTE_COUNT];
+		} draw;
+		struct
+		{
+			unsigned long flags, color, stencil;
+			float depth;
+			long clip[4];
+		} clear;
+		struct
+		{
+			BOOL screenshot;
+			unsigned long frame;
+		} present;
+	};
+} __attribute__((aligned(32)));
+
 #define COMMAND_RING 6144
 
-/* The recording's buffers that last the whole run - the command ring (6 MB),
-the state, material, values and bump arenas of the three frames in flight
-(~7 MB), the material cache and the target arenas, ~16 MB in all - in
+/* The recording's buffers that last the whole run - the command ring (1.5 MB;
+6 MB before its entries held only the game thread's part of a record), the
+state, material, values, bump and view arenas of the three frames in flight
+(~8 MB), the material cache and the target arenas, ~12 MB in all - in
 memory blocks of user RAM rather than the C heap: on the Vita newlib's
 fixed 48 MB, which the game, the system's libraries and the shader compiler
 share, and which they had filled to ~42 MB by the main menu, leaving a
@@ -2526,7 +2607,7 @@ static void *lasting_alloc(unsigned long bytes, const char *name)
 head, the worker the tail; neither locks, and a thread with nothing to do
 sleeps briefly rather than being signalled (a signal per draw is a system
 call per draw) */
-static struct render_command *commands;
+static struct render_record *commands;
 static volatile unsigned long command_head, command_tail;
 static volatile unsigned long frames_requested, frames_presented;
 void vita_host_sleep_us(unsigned long microseconds);
@@ -2585,7 +2666,7 @@ void halo_fill_stats_clear(unsigned long flags, float depth, const long clip[4],
 void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsigned long height);
 extern int halo_render_phase;
 
-static BOOL bind_recorded_targets(const struct render_command *command, BOOL *has_depth)
+static BOOL bind_recorded_targets(const struct record_targets *targets, unsigned long color_version, BOOL *has_depth)
 {
 	/* the entries of the last record's targets, reused while the surfaces
 	are the same (hundreds of draws in a row go to the same targets; each
@@ -2599,10 +2680,8 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 	} last;
 	struct render_target_entry *color, *depth;
 
-	const struct record_targets *targets = command->targets;
-
 	if (last.color_valid == targets->color_valid && last.depth_valid == targets->depth_valid &&
-		last.color_version == command->color_version &&
+		last.color_version == color_version &&
 		(!targets->color_valid || !memcmp(&last.color, &targets->color_surface, sizeof(last.color))) &&
 		(!targets->depth_valid || !memcmp(&last.depth, &targets->depth_surface, sizeof(last.depth))))
 	{
@@ -2616,7 +2695,7 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 	}
 	else
 	{
-		color = targets->color_valid ? render_target_get_version(&targets->color_surface, command->color_version) : NULL;
+		color = targets->color_valid ? render_target_get_version(&targets->color_surface, color_version) : NULL;
 		depth = targets->depth_valid ? render_target_get(&targets->depth_surface) : NULL;
 		if (depth && !depth->target.depth)
 			depth = NULL;
@@ -2624,7 +2703,7 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 			color = NULL;
 		last.color = targets->color_surface;
 		last.depth = targets->depth_surface;
-		last.color_version = command->color_version;
+		last.color_version = color_version;
 		last.color_valid = targets->color_valid;
 		last.depth_valid = targets->depth_valid;
 		last.color_entry = color;
@@ -3347,7 +3426,7 @@ static void execute_draw(struct render_command *command)
 	if (command->state && !worker_build_record(command))
 		return;
 	DRAW_PROFILE_ADD(4, profile_from);
-	if (!bind_recorded_targets(command, &has_depth))
+	if (!bind_recorded_targets(command->targets, command->color_version, &has_depth))
 	{
 		stats.skipped_no_target++;
 		return;
@@ -3617,7 +3696,65 @@ static void write_display_screenshot(unsigned long frame);
 int halo_trace_active(void);
 static void dynres_frame_end(void);
 
-static void execute_command(struct render_command *command)
+/* a draw record as the render_command execute_draw runs (worker-local,
+hot): the record's parts, and a full record's own */
+static void expand_record(const struct render_record *record, struct render_command *command)
+{
+	struct vgxm_draw *draw = &command->draw;
+	unsigned long streams = record->stream_count < VGXM_STREAM_COUNT ? record->stream_count : VGXM_STREAM_COUNT;
+	unsigned long attributes = record->attribute_count < VGXM_ATTRIBUTE_COUNT ? record->attribute_count :
+		VGXM_ATTRIBUTE_COUNT;
+	unsigned long index;
+
+	if (record->draw.full)
+		memcpy(command, record->draw.full, offsetof(struct render_command, clear_flags));
+	command->kind = _command_draw;
+	command->state = record->draw.state;
+	command->targets = record->targets;
+	command->has_depth = record->has_depth;
+	command->simple = record->simple;
+	command->cull = record->cull;
+	command->hoistable = record->hoistable;
+	command->new_run = record->new_run;
+	command->wave = record->wave;
+	command->flush_before = record->flush_before;
+	command->phase = record->phase;
+	command->sky_depth = record->sky_depth;
+	command->color_version = record->color_version;
+	command->program = record->draw.program;
+	command->provided_mask = record->draw.provided_mask;
+	command->packed_mask = record->draw.packed_mask;
+	command->color_mask = record->draw.color_mask;
+	command->immediate = record->immediate;
+	for (index = 0; index < D3DTSS_MAXSTAGES; index++)
+	{
+		command->texture_version[index] = record->texture_version[index];
+		command->texture_target_data[index] = 0;
+	}
+	command->segment_count = record->segment_count;
+	command->segments = record->draw.segments;
+	draw->attribute_count = attributes;
+	draw->stream_count = streams;
+	draw->primitive = record->primitive;
+	draw->index_count = record->draw.index_count;
+	draw->indices = record->draw.indices;
+	draw->visibility_index = record->visibility_index;
+	draw->vertex_uniforms = record->draw.vertex_uniforms;
+	draw->vertex_chunk_d_registers = record->vertex_chunk_d_registers;
+	memcpy(draw->vertex_chunks, record->draw.vertex_chunks, sizeof(draw->vertex_chunks));
+	memcpy(draw->viewport_offset, record->draw.view->viewport_offset, sizeof(draw->viewport_offset));
+	memcpy(draw->viewport_scale, record->draw.view->viewport_scale, sizeof(draw->viewport_scale));
+	memcpy(draw->clip, record->draw.view->clip, sizeof(draw->clip));
+	for (index = 0; index < streams; index++)
+	{
+		draw->strides[index] = record->draw.strides[index];
+		draw->streams[index] = record->draw.streams[index];
+	}
+	memcpy(draw->attributes, record->draw.layout ? record->draw.layout : record->draw.attributes,
+		attributes * sizeof(draw->attributes[0]));
+}
+
+static void execute_command(struct render_record *command)
 {
 	/* (timed for the statistics only, as layer_enter) */
 	int timed = gpu_stats_on > 0;
@@ -3627,42 +3764,28 @@ static void execute_command(struct render_command *command)
 	switch (command->kind)
 	{
 	case _command_draw:
-		if (command->state)
-		{
-			/* A split record is expanded into a copy of what the game's
-			thread wrote, not into its ring entry: the expansion (the key,
-			texture headers, samplers and states, ~600 bytes) was written into
-			the entry and read back once, right here, but the entry is cold -
-			the ring holds two frames, ~6 MB - so each draw wrote ~19 lines no
-			cache held, ~1 MB a frame streamed through the 512 KB L2 the
-			game's and tick's threads share with the worker. The copy is
-			hot. (A record built in full on the game's thread has its
-			expansion in the entry already: run in place.) */
-			static struct render_command expanded;
-			const struct vgxm_draw *recorded = &command->draw;
-			unsigned long streams = recorded->stream_count < VGXM_STREAM_COUNT ? recorded->stream_count : VGXM_STREAM_COUNT;
-			unsigned long attributes = recorded->attribute_count < VGXM_ATTRIBUTE_COUNT ? recorded->attribute_count :
-				VGXM_ATTRIBUTE_COUNT;
+	{
+		/* A record is expanded into a copy the worker keeps, not into its
+		ring entry: the entry is cold - the ring holds two frames - and what
+		the worker makes of a record (the key, texture headers, samplers and
+		states, ~600 bytes) written there would stream through the 512 KB L2
+		the game's and tick's threads share with the worker. The copy is hot. */
+		static struct render_command expanded;
 
-			memcpy(&expanded, command, offsetof(struct render_command, draw) + offsetof(struct vgxm_draw, strides));
-			memcpy(expanded.draw.strides, recorded->strides, streams * sizeof(recorded->strides[0]));
-			memcpy(expanded.draw.streams, recorded->streams, streams * sizeof(recorded->streams[0]));
-			memcpy(expanded.draw.attributes, recorded->attributes, attributes * sizeof(recorded->attributes[0]));
-			execute_draw(&expanded);
-		}
-		else
-			execute_draw(command);
+		expand_record(command, &expanded);
+		execute_draw(&expanded);
 		break;
+	}
 	case _command_clear:
-		if (bind_recorded_targets(command, &has_depth))
+		if (bind_recorded_targets(command->targets, command->color_version, &has_depth))
 		{
-			unsigned long flags = command->clear_flags;
+			unsigned long flags = command->clear.flags;
 
 			if (!has_depth)
 				flags &= ~(D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL);
-			vgxm_clear(flags, command->clear_color, command->clear_depth, command->clear_stencil, command->clip);
+			vgxm_clear(flags, command->clear.color, command->clear.depth, command->clear.stencil, command->clear.clip);
 			if (halo_fill_stats_sampled())
-				halo_fill_stats_clear(flags, command->clear_depth, command->clip, worker_depth_id);
+				halo_fill_stats_clear(flags, command->clear.depth, command->clear.clip, worker_depth_id);
 			if (worker_color_entry && (flags & D3DCLEAR_TARGET))
 				worker_color_entry->drawn = TRUE;
 		}
@@ -3672,20 +3795,20 @@ static void execute_command(struct render_command *command)
 		struct render_target_entry *back_buffer = command->targets->color_valid ? render_target_get(&command->targets->color_surface) : NULL;
 
 		if (halo_trace_active())
-			platform_log("trace: worker present %lu", command->frame);
+			platform_log("trace: worker present %lu", command->present.frame);
 		if (back_buffer)
 		{
-			if (command->screenshot)
+			if (command->present.screenshot)
 				write_screenshot(back_buffer);
 			/* (the frame's visibility counts: the game's frame they are of) */
-			vgxm_visibility_frame(command->frame);
+			vgxm_visibility_frame(command->present.frame);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			halo_fill_stats_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
-			if (command->screenshot)
-				write_display_screenshot(command->frame);
+			if (command->present.screenshot)
+				write_display_screenshot(command->present.frame);
 		}
 		if (halo_trace_active())
-			platform_log("trace: worker presented %lu", command->frame);
+			platform_log("trace: worker presented %lu", command->present.frame);
 		/* (the next frame's render scale, between the two) */
 		dynres_frame_end();
 		render_target_atlas_frame_end();
@@ -3693,7 +3816,7 @@ static void execute_command(struct render_command *command)
 			/* (the census during play: cdram_census) */
 			static int census_done;
 
-			if (!census_done && command->frame >= cdram_census_frame())
+			if (!census_done && command->present.frame >= cdram_census_frame())
 			{
 				census_done = 1;
 				cdram_census("during play");
@@ -3732,7 +3855,7 @@ static void *render_worker(void *unused)
 
 		for (;;)
 		{
-			struct render_command *command;
+			struct render_record *command;
 			unsigned long spins = 0;
 
 			while (__atomic_load_n(&command_head, __ATOMIC_ACQUIRE) == command_tail + index)
@@ -3871,7 +3994,7 @@ static unsigned long *target_version_slot(unsigned long data);
 an in-order surface is not hoisted, and a run into a copy of a small target
 that reads a screen-sized target makes the small one an in-order surface
 (this draw, and the rest of the frame, already without the copy) */
-static void record_reads_surface(struct render_command *command, unsigned long data)
+static void record_reads_surface(struct render_record *command, unsigned long data)
 {
 	const struct render_target_entry *read;
 	unsigned long *version;
@@ -4004,7 +4127,7 @@ draw. Anything else recorded commits the held draw first
 (command_begin). HALO_IMMEDIATE_MERGE=0 draws each on its own */
 static struct
 {
-	struct render_command *command;
+	struct render_record *command;
 	D3DPRIMITIVETYPE type;
 	unsigned long count, stride, constants;
 	float *vertices;
@@ -4074,7 +4197,7 @@ static int immediate_hold_triangles(D3DPRIMITIVETYPE type, unsigned long base, u
 }
 static unsigned long merged_immediate_draws, merge_rejected[5];
 
-static void command_commit(struct render_command *command);
+static void command_commit(struct render_record *command);
 static unsigned short *converted_indices(D3DPRIMITIVETYPE type, const unsigned short *indices, unsigned long count,
 	unsigned long *out_count, unsigned long *out_primitive);
 static BOOL needs_conversion(D3DPRIMITIVETYPE type);
@@ -4082,15 +4205,13 @@ static unsigned long gxm_primitive(D3DPRIMITIVETYPE type);
 
 static void immediate_commit_held(void)
 {
-	struct render_command *command = held_immediate.command;
-	struct vgxm_draw *draw;
+	struct render_record *command = held_immediate.command;
 	unsigned long bytes;
 	float *packed;
 
 	if (!command)
 		return;
 	held_immediate.command = NULL;
-	draw = &command->draw;
 	bytes = held_immediate.count * held_immediate.stride;
 	packed = vgxm_ring_alloc(bytes, 16);
 	stats.copied_immediate += bytes;
@@ -4098,7 +4219,7 @@ static void immediate_commit_held(void)
 	if (!packed)
 		return;
 	memcpy(packed, held_immediate.vertices, bytes);
-	draw->streams[0] = packed;
+	command->draw.streams[0] = packed;
 	if (held_immediate.triangles)
 	{
 		unsigned short *indices = held_immediate.index_count ?
@@ -4107,9 +4228,9 @@ static void immediate_commit_held(void)
 		if (!indices)
 			return;
 		memcpy(indices, held_immediate.indices, held_immediate.index_count * sizeof(unsigned short));
-		draw->indices = indices;
-		draw->index_count = held_immediate.index_count;
-		draw->primitive = D3DPT_TRIANGLELIST;
+		command->draw.indices = indices;
+		command->draw.index_count = held_immediate.index_count;
+		command->primitive = D3DPT_TRIANGLELIST;
 		stats.copied_indices += held_immediate.index_count * sizeof(unsigned short);
 		if (held_immediate.segment_count > 1)
 		{
@@ -4125,22 +4246,25 @@ static void immediate_commit_held(void)
 					held_immediate.segments[segment + 1].first_index : held_immediate.index_count) -
 					held_immediate.segments[segment].first_index;
 			}
-			command->segments = segments;
-			command->segment_count = held_immediate.segment_count;
+			command->draw.segments = segments;
+			command->segment_count = (unsigned short)held_immediate.segment_count;
 		}
 	}
 	else if (needs_conversion(held_immediate.type))
 	{
-		draw->indices = converted_indices(held_immediate.type, NULL, held_immediate.count, &draw->index_count,
-			&draw->primitive);
-		if (!draw->indices)
+		unsigned long primitive;
+
+		command->draw.indices = converted_indices(held_immediate.type, NULL, held_immediate.count, &command->draw.index_count,
+			&primitive);
+		if (!command->draw.indices)
 			return;
+		command->primitive = (unsigned char)primitive;
 	}
 	else
 	{
-		draw->primitive = gxm_primitive(held_immediate.type);
-		draw->indices = device.sequential_indices;
-		draw->index_count = held_immediate.count;
+		command->primitive = (unsigned char)gxm_primitive(held_immediate.type);
+		command->draw.indices = device.sequential_indices;
+		command->draw.index_count = held_immediate.count;
 	}
 	command_commit(command);
 }
@@ -4194,9 +4318,9 @@ static const struct record_targets *record_targets_current(const D3DSurface *col
 	return block;
 }
 
-static struct render_command *command_begin(unsigned long kind)
+static struct render_record *command_begin(unsigned long kind)
 {
-	struct render_command *command;
+	struct render_record *command;
 
 	/* (the held immediate draw goes first, in its place) */
 	immediate_commit_held();
@@ -4313,10 +4437,15 @@ static struct render_command *command_begin(unsigned long kind)
 		if (kind != _command_present && !(targets = record_targets_current(device.render_target, device.depth_stencil)))
 			return NULL;
 		command = &commands[command_head % COMMAND_RING];
-		command->kind = kind;
-		command->state = NULL;
+		command->kind = (unsigned char)kind;
 		command->segment_count = 0;
 		command->targets = targets;
+		if (kind == _command_draw)
+		{
+			command->draw.state = NULL;
+			command->draw.full = NULL;
+			command->draw.layout = NULL;
+		}
 	}
 	command->color_version = 0;
 	command->hoistable = FALSE;
@@ -4337,7 +4466,7 @@ static struct render_command *command_begin(unsigned long kind)
 				(*version)++;
 			else if (last_recorded_target != command->targets->color_surface.Data)
 				target_versions_ran_out(version);
-			command->color_version = *version;
+			command->color_version = (unsigned char)*version;
 			command->hoistable = *version > 0;
 		}
 	}
@@ -4401,7 +4530,34 @@ static int wave_target_find(unsigned long data, unsigned long version, BOOL add)
 	return (int)wave_target_count++;
 }
 
-static void small_target_wave(struct render_command *command)
+/* the surface a draw's stage reads as a render target (its texture's data
+while the pixel shader samples the stage), 0 for none: what the record's
+state block or full record says of the stage */
+static unsigned long record_stage_data(const struct render_record *record, int stage)
+{
+	const DWORD *header;
+	DWORD modes;
+
+	if (record->draw.state)
+	{
+		if (!((record->draw.state->textures_present >> stage) & 1))
+			return 0;
+		header = record->draw.state->texture_header[stage];
+		modes = record->draw.state->material->render_state[D3DRS_PSTEXTUREMODES];
+	}
+	else if (record->draw.full)
+	{
+		if (!record->draw.full->texture_present[stage])
+			return 0;
+		header = record->draw.full->texture_header[stage];
+		modes = record->draw.full->key.texture_modes;
+	}
+	else
+		return 0;
+	return (modes >> (5 * stage)) & 0x1f ? header[1] : 0;
+}
+
+static void small_target_wave(struct render_record *command)
 {
 	unsigned int wave = 0;
 	int target, stage;
@@ -4441,9 +4597,9 @@ static void small_target_wave(struct render_command *command)
 		{
 			int read;
 
-			if (!command->texture_version[stage] || !command->texture_target_data[stage])
+			if (!command->texture_version[stage] || !record_stage_data(command, stage))
 				continue;
-			read = wave_target_find(command->texture_target_data[stage], command->texture_version[stage], FALSE);
+			read = wave_target_find(record_stage_data(command, stage), command->texture_version[stage], FALSE);
 			/* (a run reading the copy it draws into: no order to keep) */
 			if (read == target)
 				continue;
@@ -4465,9 +4621,9 @@ static void small_target_wave(struct render_command *command)
 		{
 			int read;
 
-			if (!command->texture_version[stage] || !command->texture_target_data[stage])
+			if (!command->texture_version[stage] || !record_stage_data(command, stage))
 				continue;
-			read = wave_target_find(command->texture_target_data[stage], command->texture_version[stage], TRUE);
+			read = wave_target_find(record_stage_data(command, stage), command->texture_version[stage], TRUE);
 			if (read >= 0 && read != target && wave_targets[read].read_wave < wave)
 				wave_targets[read].read_wave = (unsigned char)wave;
 		}
@@ -4476,18 +4632,25 @@ static void small_target_wave(struct render_command *command)
 
 /* (the record census) a draw's ring entry: the bytes the game's thread
 wrote and the lines they span */
-static void record_census_draw(const struct render_command *command)
+static void record_census_draw(const struct render_record *command)
 {
 	unsigned long offset = (unsigned long)((const unsigned char *)command - (const unsigned char *)commands), span;
 
-	span = command->state ? offsetof(struct render_command, draw) + offsetof(struct vgxm_draw, attributes) +
-		command->draw.attribute_count * sizeof(command->draw.attributes[0]) : offsetof(struct render_command, clear_flags);
+	span = offsetof(struct render_record, draw.attributes) +
+		(command->draw.layout ? 0 : command->attribute_count * sizeof(command->draw.attributes[0]));
 	stats.record_draws++;
 	stats.record_entry_bytes += span;
 	stats.record_entry_lines += ((offset + span - 1) >> 5) - (offset >> 5) + 1;
+	if (command->draw.full)
+	{
+		/* (and the full record's part, in an arena of its own) */
+		span = offsetof(struct render_command, clear_flags);
+		stats.record_entry_bytes += span;
+		stats.record_entry_lines += (span + 31) >> 5;
+	}
 }
 
-static void command_commit(struct render_command *command)
+static void command_commit(struct render_record *command)
 {
 	if (gpu_stats_on > 0 && command->kind == _command_draw)
 		record_census_draw(command);
@@ -5527,7 +5690,7 @@ serving later draws until a register of it changes. Chunk D (the node
 matrices) is copied up to the highest register written this frame or the
 last (an object's matrices are written just before its draws; a program's
 absolute reads in D are covered too). FALSE when the ring is full. */
-static BOOL constants_snapshot(const struct vertex_shader_object *program, struct vgxm_draw *draw)
+static BOOL constants_snapshot(const struct vertex_shader_object *program, struct render_record *record)
 {
 	int chunk;
 
@@ -5535,7 +5698,7 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 	{
 		unsigned long first = chunk_first[chunk], count = chunk_end[chunk] - chunk_first[chunk];
 
-		draw->vertex_chunks[chunk] = NULL;
+		record->draw.vertex_chunks[chunk] = NULL;
 		if (!(program->usage.chunk_mask & (1UL << chunk)))
 			continue;
 		if (chunk == VITA_VC_D)
@@ -5604,7 +5767,7 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 			stats.copied_uniforms += count * sizeof(device.constants[0]);
 			stats.copied_chunk[chunk] += count * sizeof(device.constants[0]);
 		}
-		draw->vertex_chunks[chunk] = device.chunk_snapshot[chunk];
+		record->draw.vertex_chunks[chunk] = device.chunk_snapshot[chunk];
 		if (chunk == VITA_VC_D)
 		{
 			/* (the draw hash covers the program's absolute reads and the
@@ -5613,7 +5776,7 @@ static BOOL constants_snapshot(const struct vertex_shader_object *program, struc
 
 			if (program->usage.relative && device.d_last_object_extent > hashed)
 				hashed = device.d_last_object_extent;
-			draw->vertex_chunk_d_registers = hashed < device.d_snapshot_count ? hashed : device.d_snapshot_count;
+			record->vertex_chunk_d_registers = (unsigned char)(hashed < device.d_snapshot_count ? hashed : device.d_snapshot_count);
 		}
 	}
 	return TRUE;
@@ -5954,7 +6117,7 @@ static BOOL shadow_matches(const struct record_shadow_state *shadow, struct vert
 		!memcmp(shadow->viewport_offset, device.viewport_offset, sizeof(shadow->viewport_offset)) &&
 		shadow_states_match(shadow);
 }
-static struct render_command *record_previous;
+static struct render_record *record_previous;
 
 static void record_shadow_fields(struct vertex_shader_object *program, BOOL immediate)
 {
@@ -6030,8 +6193,24 @@ static int record_split_enabled(void)
 	return enabled;
 }
 
+/* the records' view blocks (record_view): per-frame arenas like the state
+blocks, the last shared while the viewport and the clip are the same */
+#define VIEW_BLOCKS_PER_FRAME 2048
+static struct record_view *view_arenas[3];
+static unsigned long view_blocks_used;
+static struct record_view *view_last;
+
+/* the records built in full (HALO_RECORD_SPLIT=0, or a frame out of state
+blocks): the part of each the ring entry has no room for, in per-frame
+arenas made the first time one is needed */
+static struct render_command *full_arenas[3];
+static unsigned long full_records_used, full_records_per_frame;
+
 static void record_state_frame_end(void)
 {
+	view_blocks_used = 0;
+	view_last = NULL;
+	full_records_used = 0;
 	device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
 	state_arena_index = (state_arena_index + 1) % 3;
 	state_blocks_used = 0;
@@ -6244,9 +6423,81 @@ static const struct record_state *record_state_current(void)
 	return block;
 }
 
+static const struct record_view *record_view_current(void)
+{
+	struct record_view view, *block;
+
+	view.viewport_scale[0] = device.viewport_scale[0] != 0.0f ? device.viewport_scale[0] : 1.0f;
+	view.viewport_scale[1] = device.viewport_scale[1] != 0.0f ? device.viewport_scale[1] : 1.0f;
+	view.viewport_scale[2] = device.viewport.MaxZ - device.viewport.MinZ;
+	view.viewport_offset[0] = device.viewport_offset[0];
+	view.viewport_offset[1] = device.viewport_offset[1];
+	view.viewport_offset[2] = device.viewport.MinZ;
+	view.clip[0] = (long)device.viewport.X;
+	view.clip[1] = (long)device.viewport.Y;
+	view.clip[2] = (long)(device.viewport.X + device.viewport.Width);
+	view.clip[3] = (long)(device.viewport.Y + device.viewport.Height);
+	scissor_apply(view.clip);
+	if (view_last)
+	{
+		/* (word by word: a call to memcmp cost more than the compare) */
+		const unsigned long *a = (const unsigned long *)view_last, *b = (const unsigned long *)&view;
+		unsigned int word;
+
+		for (word = 0; word < sizeof(view) / sizeof(unsigned long) && a[word] == b[word]; word++)
+			;
+		if (word == sizeof(view) / sizeof(unsigned long))
+			return view_last;
+	}
+	if (!view_arenas[0])
+	{
+		int index;
+
+		for (index = 0; index < 3; index++)
+			view_arenas[index] = lasting_alloc(VIEW_BLOCKS_PER_FRAME * sizeof(struct record_view), "view arenas");
+	}
+	if (!view_arenas[state_arena_index] || view_blocks_used >= VIEW_BLOCKS_PER_FRAME)
+	{
+		static int warned;
+
+		if (!warned++)
+			platform_log("Direct3D: more than %d viewport changes in a frame: the rest are not recorded", VIEW_BLOCKS_PER_FRAME);
+		return NULL;
+	}
+	block = &view_arenas[state_arena_index][view_blocks_used++];
+	*block = view;
+	view_last = block;
+	return block;
+}
+
+/* a record built in full: the rest of it, which the ring entry has no room
+for (this frame's arena) */
+static struct render_command *full_record_alloc(void)
+{
+	if (!full_arenas[0])
+	{
+		int index;
+
+		/* (a few a frame when the state blocks run out; every draw with the
+		split records off) */
+		full_records_per_frame = record_split_enabled() ? 256 : 2048;
+		for (index = 0; index < 3; index++)
+			full_arenas[index] = lasting_alloc(full_records_per_frame * sizeof(struct render_command), "full record arenas");
+	}
+	if (!full_arenas[state_arena_index] || full_records_used >= full_records_per_frame)
+	{
+		static int warned;
+
+		if (!warned++)
+			platform_log("Direct3D: more than %lu draws a frame recorded in full: the rest are not drawn", full_records_per_frame);
+		return NULL;
+	}
+	return &full_arenas[state_arena_index][full_records_used++];
+}
+
 /* records everything but the vertex data and the primitives; NULL when the
 draw cannot be made */
-static struct render_command *record_draw(BOOL immediate)
+static struct render_record *record_draw(BOOL immediate)
 {
 	unsigned long long profile_from;
 
@@ -6255,6 +6506,8 @@ static struct render_command *record_draw(BOOL immediate)
 	int computed_stage_draw = 0;
 	struct vertex_shader_object *program = current_program();
 	struct vertex_shader_object *declaration = device.vertex_shader;
+	struct render_record *record;
+	/* (a record built in full: its part outside the ring entry) */
 	struct render_command *command;
 	struct vgxm_draw *draw;
 	struct nv2a_pixel_shader_key *key;
@@ -6272,25 +6525,30 @@ static struct render_command *record_draw(BOOL immediate)
 		stats.skipped_no_target++;
 		return NULL;
 	}
-	command = command_begin(_command_draw);
-	if (!command)
+	record = command_begin(_command_draw);
+	if (!record)
 		return NULL;
-	command->phase = (signed char)halo_render_phase;
-	command->sky_depth = (unsigned char)device_sky_depth;
+	record->phase = (signed char)halo_render_phase;
+	record->sky_depth = (unsigned char)device_sky_depth;
 	DRAW_FINE_ADD(0, profile_from);
-	draw = &command->draw;
-	/* (not the whole draw, 478 bytes into a cold ring entry: every field is
-	set before it is read - the layout grows from these counts, the worker
-	sets the programs, textures, states and fragment uniforms of a split
-	record, the full record below sets them here - and the attribute and
-	stream arrays are read up to their counts) */
-	draw->attribute_count = 0;
-	draw->stream_count = 0;
-	draw->vertex_chunk_d_registers = 0;
-	has_depth = command->targets->depth_valid && surface_is_depth_cached(&command->targets->depth_surface);
+	/* (every field is set before it is read: the attribute and stream
+	arrays up to their counts, which grow from 0 here) */
+	record->attribute_count = 0;
+	record->stream_count = 0;
+	record->vertex_chunk_d_registers = 0;
+	record->cull = (unsigned short)rs[D3DRS_CULLMODE];
+	record->immediate = (unsigned char)(immediate != 0);
+	record->simple = 0;
+	record->draw.program = program;
+	record->visibility_index = (unsigned short)(device.visibility_test_active ? device.visibility_index : 0);
+	if (!(record->draw.view = record_view_current()))
+		return NULL;
+	has_depth = record->targets->depth_valid && surface_is_depth_cached(&record->targets->depth_surface);
+	record->has_depth = (unsigned char)(has_depth != 0);
 	{
 		/* HALO_RECORD_SHORTCUT=1 turns the same-state shortcut on (opt-in:
-		a run with it froze the Vita at 110 s, cause unknown) */
+		a run with it froze the Vita at 110 s, cause unknown; records built
+		in full only) */
 		static int shortcut = -1;
 
 		if (shortcut < 0)
@@ -6301,42 +6559,34 @@ static struct render_command *record_draw(BOOL immediate)
 		if (!shortcut)
 			record_previous = NULL;
 	}
-	if (device.extra_attribute_reg < 0 && record_state_unchanged(program, immediate) && record_previous != command)
+	if (device.extra_attribute_reg < 0 && record_previous && record_previous->draw.full &&
+		record_state_unchanged(program, immediate) && record_previous != record)
 	{
-		const struct render_command *previous = record_previous;
+		const struct render_record *previous = record_previous;
 
-		command->program = previous->program;
-		command->provided_mask = previous->provided_mask;
-		command->packed_mask = previous->packed_mask;
-		command->color_mask = previous->color_mask;
-		command->immediate = previous->immediate;
-		command->key = previous->key;
-		memcpy(command->texture_header, previous->texture_header, sizeof(command->texture_header));
-		memcpy(command->texture_present, previous->texture_present, sizeof(command->texture_present));
-		memcpy(command->texture_version, previous->texture_version, sizeof(command->texture_version));
-		memcpy(command->texture_target_data, previous->texture_target_data, sizeof(command->texture_target_data));
-		memcpy(command->palette, previous->palette, sizeof(command->palette));
-		memcpy(command->sampler_state, previous->sampler_state, sizeof(command->sampler_state));
-		memcpy(&draw->depth_test, &previous->draw.depth_test,
-			offsetof(struct vgxm_draw, color_write) + sizeof(draw->color_write) - offsetof(struct vgxm_draw, depth_test));
-		draw->cull = previous->draw.cull;
-		draw->depth_bias_slope = previous->draw.depth_bias_slope;
-		draw->depth_bias_units = previous->draw.depth_bias_units;
-		memcpy(draw->viewport_offset, previous->draw.viewport_offset, sizeof(draw->viewport_offset));
-		memcpy(draw->viewport_scale, previous->draw.viewport_scale, sizeof(draw->viewport_scale));
-		memcpy(draw->clip, previous->draw.clip, sizeof(draw->clip));
-		command->hoistable = command->hoistable && previous->hoistable;
-		simple_fragment = 0;
-		draw->fragment_uniforms[0] = device.fragment_snapshot[0];
-		draw->fragment_uniforms[1] = device.fragment_snapshot[1];
-		draw->vertex_uniforms = vertex_uniforms_snapshot(immediate);
-		if (!draw->fragment_uniforms[0] || !draw->fragment_uniforms[1] || !draw->vertex_uniforms ||
-			!constants_snapshot(program, draw))
+		if (!(command = full_record_alloc()))
 		{
 			record_previous = NULL;
 			return NULL;
 		}
-		draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
+		*command = *previous->draw.full;
+		record->draw.full = command;
+		draw = &command->draw;
+		record->draw.provided_mask = previous->draw.provided_mask;
+		record->draw.packed_mask = previous->draw.packed_mask;
+		record->draw.color_mask = previous->draw.color_mask;
+		memcpy(record->texture_version, previous->texture_version, sizeof(record->texture_version));
+		record->hoistable = record->hoistable && previous->hoistable;
+		simple_fragment = 0;
+		draw->fragment_uniforms[0] = device.fragment_snapshot[0];
+		draw->fragment_uniforms[1] = device.fragment_snapshot[1];
+		record->draw.vertex_uniforms = vertex_uniforms_snapshot(immediate);
+		if (!draw->fragment_uniforms[0] || !draw->fragment_uniforms[1] || !record->draw.vertex_uniforms ||
+			!constants_snapshot(program, record))
+		{
+			record_previous = NULL;
+			return NULL;
+		}
 		if (immediate)
 			{ stats.immediate_draws++; draw_counter_immediate++; }
 		else
@@ -6344,8 +6594,8 @@ static struct render_command *record_draw(BOOL immediate)
 		stats.same_state_draws++;
 		if (draw_sampled)
 			draw_profile_draws++;
-		record_previous = command;
-		return command;
+		record_previous = record;
+		return record;
 	}
 	DRAW_PROFILE_ADD(0, profile_from);
 	if (record_split_enabled())
@@ -6355,53 +6605,35 @@ static struct render_command *record_draw(BOOL immediate)
 		DRAW_PROFILE_ADD(1, profile_from);
 		if (state)
 		{
-			command->state = state;
-			command->cull = (unsigned short)D3D__RenderState[D3DRS_CULLMODE];
-			command->has_depth = (unsigned char)(has_depth != 0);
-			command->simple = (unsigned char)simple_fragment;
+			record->draw.state = state;
+			record->simple = (unsigned char)simple_fragment;
 			simple_fragment = 0;
-			command->program = program;
-			command->immediate = immediate;
-			declaration_masks(declaration, &command->provided_mask, &command->packed_mask, &command->color_mask);
+			declaration_masks(declaration, &record->draw.provided_mask, &record->draw.packed_mask, &record->draw.color_mask);
 			for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 			{
 				D3DBaseTexture *texture = device.textures[stage];
 
-				command->texture_version[stage] = 0;
-				command->texture_target_data[stage] = 0;
+				record->texture_version[stage] = 0;
 				if (texture)
 				{
-					unsigned long index;
+					unsigned long index, data = 0;
 
 					for (index = 0; index < target_version_count; index++)
 						if (target_versions[index].data == texture->Data)
-							command->texture_version[stage] = target_versions[index].version;
+							record->texture_version[stage] = (unsigned char)target_versions[index].version;
 					if ((D3D__RenderState[D3DRS_PSTEXTUREMODES] >> (stage * 5)) & 0x1f)
-						command->texture_target_data[stage] = texture->Data;
-					if (command->hoistable && command->texture_target_data[stage] && !command->texture_version[stage] &&
-						render_target_entry_find(texture->Data))
-						command->hoistable = FALSE;
-					if (command->texture_target_data[stage])
-						record_reads_surface(command, texture->Data);
+						data = texture->Data;
+					if (record->hoistable && data && !record->texture_version[stage] && render_target_entry_find(texture->Data))
+						record->hoistable = FALSE;
+					if (data)
+						record_reads_surface(record, texture->Data);
 				}
 			}
 			DRAW_PROFILE_ADD(2, profile_from);
-			draw->vertex_uniforms = vertex_uniforms_snapshot(immediate);
-			if (!draw->vertex_uniforms || !constants_snapshot(program, draw))
+			record->draw.vertex_uniforms = vertex_uniforms_snapshot(immediate);
+			if (!record->draw.vertex_uniforms || !constants_snapshot(program, record))
 				return NULL;
 			DRAW_PROFILE_ADD(8, profile_from);
-			draw->viewport_scale[0] = device.viewport_scale[0] != 0.0f ? device.viewport_scale[0] : 1.0f;
-			draw->viewport_scale[1] = device.viewport_scale[1] != 0.0f ? device.viewport_scale[1] : 1.0f;
-			draw->viewport_scale[2] = device.viewport.MaxZ - device.viewport.MinZ;
-			draw->viewport_offset[0] = device.viewport_offset[0];
-			draw->viewport_offset[1] = device.viewport_offset[1];
-			draw->viewport_offset[2] = device.viewport.MinZ;
-			draw->clip[0] = (long)device.viewport.X;
-			draw->clip[1] = (long)device.viewport.Y;
-			draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
-			draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
-			scissor_apply(draw->clip);
-			draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 			if (immediate)
 				{ stats.immediate_draws++; draw_counter_immediate++; }
 			else
@@ -6409,12 +6641,17 @@ static struct render_command *record_draw(BOOL immediate)
 			if (draw_sampled)
 				draw_profile_draws++;
 			DRAW_PROFILE_ADD(9, profile_from);
-			return command;
+			return record;
 		}
 	}
-	command->program = program;
-	command->immediate = immediate;
-	declaration_masks(declaration, &command->provided_mask, &command->packed_mask, &command->color_mask);
+	if (!(command = full_record_alloc()))
+	{
+		record_previous = NULL;
+		return NULL;
+	}
+	record->draw.full = command;
+	draw = &command->draw;
+	declaration_masks(declaration, &record->draw.provided_mask, &record->draw.packed_mask, &record->draw.color_mask);
 
 	key = &command->key;
 	memset(key, 0, sizeof(*key));
@@ -6432,10 +6669,10 @@ static struct render_command *record_draw(BOOL immediate)
 		key->alpha_kill[stage] = state[D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE;
 		key->color_sign[stage] = (unsigned char)((state[D3DTSS_COLORSIGN] >> 28) & 0xf);
 		key_border(key, stage, state);
+		unsigned long data = texture && ((D3D__RenderState[D3DRS_PSTEXTUREMODES] >> (stage * 5)) & 0x1f) ? texture->Data : 0;
+
 		command->texture_present[stage] = texture != NULL;
-		command->texture_version[stage] = 0;
-		command->texture_target_data[stage] = texture && ((D3D__RenderState[D3DRS_PSTEXTUREMODES] >> (stage * 5)) & 0x1f) ?
-			texture->Data : 0;
+		record->texture_version[stage] = 0;
 		if (texture)
 		{
 			unsigned long index;
@@ -6473,7 +6710,7 @@ static struct render_command *record_draw(BOOL immediate)
 			for (index = 0; index < target_version_count; index++)
 			{
 				if (target_versions[index].data == texture->Data)
-					command->texture_version[stage] = target_versions[index].version;
+					record->texture_version[stage] = (unsigned char)target_versions[index].version;
 			}
 			/* reading a target that is not a copy (the main scene): the
 			draw must stay in order. Only a stage the pixel shader samples
@@ -6483,11 +6720,10 @@ static struct render_command *record_draw(BOOL immediate)
 			cloaked units are drawn - held the motion sensor's blips in
 			the frame's order, a scene of their own and a split of the
 			main scene more each frame a cloaked unit was in view (#33) */
-			if (command->hoistable && command->texture_target_data[stage] && !command->texture_version[stage] &&
-				render_target_entry_find(texture->Data))
-				command->hoistable = FALSE;
-			if (command->texture_target_data[stage])
-				record_reads_surface(command, texture->Data);
+			if (record->hoistable && data && !record->texture_version[stage] && render_target_entry_find(texture->Data))
+				record->hoistable = FALSE;
+			if (data)
+				record_reads_surface(record, texture->Data);
 		}
 		command->palette[stage] = device.palettes[stage] && device.palettes[stage]->Data ?
 			(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[stage]->Data) : NULL;
@@ -6568,8 +6804,9 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->fragment_uniforms[0] = device.fragment_snapshot[0];
 	draw->fragment_uniforms[1] = device.fragment_snapshot[1];
 	DRAW_PROFILE_ADD(1, profile_from);
-	draw->vertex_uniforms = vertex_uniforms_snapshot(immediate);
-	if (!draw->fragment_uniforms[0] || !draw->fragment_uniforms[1] || !draw->vertex_uniforms || !constants_snapshot(program, draw))
+	record->draw.vertex_uniforms = vertex_uniforms_snapshot(immediate);
+	if (!draw->fragment_uniforms[0] || !draw->fragment_uniforms[1] || !record->draw.vertex_uniforms ||
+		!constants_snapshot(program, record))
 	{
 		record_previous = NULL;
 		return NULL;
@@ -6601,18 +6838,6 @@ static struct render_command *record_draw(BOOL immediate)
 		draw->depth_bias_slope = dword_to_float(rs[D3DRS_POLYGONOFFSETZSLOPESCALE]);
 		draw->depth_bias_units = dword_to_float(rs[D3DRS_POLYGONOFFSETZOFFSET]);
 	}
-	draw->viewport_scale[0] = device.viewport_scale[0] != 0.0f ? device.viewport_scale[0] : 1.0f;
-	draw->viewport_scale[1] = device.viewport_scale[1] != 0.0f ? device.viewport_scale[1] : 1.0f;
-	draw->viewport_scale[2] = device.viewport.MaxZ - device.viewport.MinZ;
-	draw->viewport_offset[0] = device.viewport_offset[0];
-	draw->viewport_offset[1] = device.viewport_offset[1];
-	draw->viewport_offset[2] = device.viewport.MinZ;
-	draw->clip[0] = (long)device.viewport.X;
-	draw->clip[1] = (long)device.viewport.Y;
-	draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
-	draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
-	scissor_apply(draw->clip);
-	draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 	if (immediate)
 		{ stats.immediate_draws++; draw_counter_immediate++; }
 	else
@@ -6620,7 +6845,7 @@ static struct render_command *record_draw(BOOL immediate)
 	memcpy(record_shadow.render_state, D3D__RenderState, sizeof(record_shadow.render_state));
 	memcpy(record_shadow.texture_state, D3D__TextureState, sizeof(record_shadow.texture_state));
 	record_shadow_fields(program, immediate);
-	record_previous = command;
+	record_previous = record;
 	DRAW_PROFILE_ADD(2, profile_from);
 	if (draw_sampled)
 		draw_profile_draws++;
@@ -6647,7 +6872,7 @@ static struct render_command *record_draw(BOOL immediate)
 				command->texture_present[2] ? "2" : "", command->texture_present[3] ? "3" : "");
 		}
 	}
-	return command;
+	return record;
 }
 
 /* ---------- vertex data */
@@ -6682,12 +6907,89 @@ static void attribute_format(unsigned long type, unsigned char *format, unsigned
 count) of each stream, where index i of the draw reads vertex first + i;
 streams outside the loaded map are copied into the ring. FALSE if the ring
 is full. */
-static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned long count)
+/* the declaration's vertex layout for draws whose declared streams all have
+data (vertex_shader_object.layout): the attributes and slots setup_streams
+gives such a draw */
+static void declaration_layout_make(struct vertex_shader_object *declaration)
+{
+	unsigned long stream_slot[16], index, slots = 0, attributes = 0;
+
+	declaration->layout_made = 1;
+	declaration->layout_count = 0;
+	for (index = 0; index < 16; index++)
+		stream_slot[index] = ~0UL;
+	for (index = 0; index < declaration->element_count; index++)
+	{
+		const struct vertex_element *element = &declaration->elements[index];
+		struct vgxm_attribute *attribute;
+
+		if (element->type == D3DVSDT_NONE)
+			continue;
+		if (stream_slot[element->stream] == ~0UL)
+		{
+			if (slots >= VGXM_STREAM_COUNT)
+				return;
+			declaration->layout_streams[slots] = element->stream;
+			stream_slot[element->stream] = slots++;
+		}
+		attribute = &declaration->layout[attributes++];
+		attribute->reg = element->reg;
+		attribute->stream = (unsigned char)stream_slot[element->stream];
+		attribute->offset = element->offset;
+		attribute->pad = 0;
+		attribute_format(element->type, &attribute->format, &attribute->components);
+	}
+	declaration->layout_stream_count = (unsigned char)slots;
+	declaration->layout_count = (unsigned char)attributes;
+}
+
+static BOOL setup_streams(struct render_record *record, unsigned long first, unsigned long count)
 {
 	struct vertex_shader_object *declaration = device.vertex_shader;
 	unsigned long stream_slot[16];
 	unsigned long index;
 
+	/* (a record points to its declaration's layout when the declared
+	streams all have data and halo_d3d_stream_attribute adds no register:
+	the same attributes and slots the loop below gives, unwritten) */
+	if (!declaration->layout_made)
+		declaration_layout_make(declaration);
+	if (declaration->layout_count && !(device.extra_attribute_reg >= 0 &&
+		!(declaration->provided_mask & (1UL << device.extra_attribute_reg)) && device.streams[device.extra_attribute_stream].data))
+	{
+		for (index = 0; index < declaration->layout_stream_count; index++)
+			if (!device.streams[declaration->layout_streams[index]].data)
+				break;
+		if (index == declaration->layout_stream_count)
+		{
+			for (index = 0; index < declaration->layout_stream_count; index++)
+			{
+				unsigned long stream = declaration->layout_streams[index];
+				unsigned long stride = device.streams[stream].stride;
+				const unsigned char *base = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[stream].data);
+				unsigned long bytes = stride ? stride * count : 64;
+				const unsigned char *start = base + first * stride;
+
+				record->draw.strides[index] = (unsigned short)stride;
+				if (device.streams[stream].in_place || memory_is_static(start, bytes))
+				{
+					stats.direct_bytes += bytes;
+					record->draw.streams[index] = start;
+				}
+				else
+				{
+					stats.copied_streams += bytes;
+					record->draw.streams[index] = ring_copy(start, bytes);
+					if (!record->draw.streams[index])
+						return FALSE;
+				}
+			}
+			record->stream_count = declaration->layout_stream_count;
+			record->attribute_count = declaration->layout_count;
+			record->draw.layout = declaration->layout;
+			return TRUE;
+		}
+	}
 	for (index = 0; index < 16; index++)
 		stream_slot[index] = ~0UL;
 	for (index = 0; index < declaration->element_count; index++)
@@ -6699,7 +7001,7 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 
 		if (element->type == D3DVSDT_NONE || !device.streams[stream].data)
 			continue;
-		if (stream_slot[stream] == ~0UL && draw->stream_count >= VGXM_STREAM_COUNT)
+		if (stream_slot[stream] == ~0UL && record->stream_count >= VGXM_STREAM_COUNT)
 		{
 			static int warned;
 
@@ -6713,29 +7015,29 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 			unsigned long bytes = stride ? stride * count : 64;
 			const unsigned char *start = base + first * stride;
 
-			stream_slot[stream] = draw->stream_count++;
-			draw->strides[stream_slot[stream]] = stride;
+			stream_slot[stream] = record->stream_count++;
+			record->draw.strides[stream_slot[stream]] = (unsigned short)stride;
 			if (device.streams[stream].in_place || memory_is_static(start, bytes))
 			{
 				stats.direct_bytes += bytes;
-				draw->streams[stream_slot[stream]] = start;
+				record->draw.streams[stream_slot[stream]] = start;
 			}
 			else
 			{
 				stats.copied_streams += bytes;
-				draw->streams[stream_slot[stream]] = ring_copy(start, bytes);
-				if (!draw->streams[stream_slot[stream]])
+				record->draw.streams[stream_slot[stream]] = ring_copy(start, bytes);
+				if (!record->draw.streams[stream_slot[stream]])
 					return FALSE;
 			}
 		}
-		attribute = &draw->attributes[draw->attribute_count++];
+		attribute = &record->draw.attributes[record->attribute_count++];
 		attribute->reg = element->reg;
 		attribute->stream = (unsigned char)stream_slot[stream];
 		attribute->offset = element->offset;
 		attribute_format(element->type, &attribute->format, &attribute->components);
 	}
 	if (device.extra_attribute_reg >= 0 && !(declaration->provided_mask & (1UL << device.extra_attribute_reg)) &&
-		device.streams[device.extra_attribute_stream].data && draw->attribute_count < VGXM_ATTRIBUTE_COUNT)
+		device.streams[device.extra_attribute_stream].data && record->attribute_count < VGXM_ATTRIBUTE_COUNT)
 	{
 		/* (halo_d3d_stream_attribute's register, after the declaration's) */
 		unsigned long stream = (unsigned long)device.extra_attribute_stream;
@@ -6744,26 +7046,26 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 			first * stride;
 		struct vgxm_attribute *attribute;
 
-		if (stream_slot[stream] == ~0UL && draw->stream_count >= VGXM_STREAM_COUNT)
+		if (stream_slot[stream] == ~0UL && record->stream_count >= VGXM_STREAM_COUNT)
 			return FALSE;
 		if (stream_slot[stream] == ~0UL)
 		{
-			stream_slot[stream] = draw->stream_count++;
-			draw->strides[stream_slot[stream]] = stride;
+			stream_slot[stream] = record->stream_count++;
+			record->draw.strides[stream_slot[stream]] = (unsigned short)stride;
 			if (memory_is_static(start, stride * count))
 			{
 				stats.direct_bytes += stride * count;
-				draw->streams[stream_slot[stream]] = start;
+				record->draw.streams[stream_slot[stream]] = start;
 			}
 			else
 			{
 				stats.copied_streams += stride * count;
-				draw->streams[stream_slot[stream]] = ring_copy(start, stride * count);
-				if (!draw->streams[stream_slot[stream]])
+				record->draw.streams[stream_slot[stream]] = ring_copy(start, stride * count);
+				if (!record->draw.streams[stream_slot[stream]])
 					return FALSE;
 			}
 		}
-		attribute = &draw->attributes[draw->attribute_count++];
+		attribute = &record->draw.attributes[record->attribute_count++];
 		attribute->reg = (unsigned char)device.extra_attribute_reg;
 		attribute->stream = (unsigned char)stream_slot[stream];
 		attribute->offset = 0;
@@ -6959,27 +7261,28 @@ void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_in
 
 static void draw_vertices(D3DPRIMITIVETYPE primitive_type, UINT start_vertex, UINT vertex_count)
 {
-	struct render_command *command;
-	struct vgxm_draw *draw;
+	struct render_record *command;
 	unsigned long long profile_from;
 
 	if (!vertex_count || vertex_count > 65536 || !(command = record_draw(FALSE)))
 		return;
 	profile_from = DRAW_PROFILE_NOW();
-	draw = &command->draw;
-	if (!setup_streams(draw, start_vertex, vertex_count))
+	if (!setup_streams(command, start_vertex, vertex_count))
 		return;
 	if (needs_conversion(primitive_type))
 	{
-		draw->indices = converted_indices(primitive_type, NULL, vertex_count, &draw->index_count, &draw->primitive);
-		if (!draw->indices)
+		unsigned long primitive;
+
+		command->draw.indices = converted_indices(primitive_type, NULL, vertex_count, &command->draw.index_count, &primitive);
+		if (!command->draw.indices)
 			return;
+		command->primitive = (unsigned char)primitive;
 	}
 	else
 	{
-		draw->primitive = gxm_primitive(primitive_type);
-		draw->indices = device.sequential_indices;
-		draw->index_count = vertex_count;
+		command->primitive = (unsigned char)gxm_primitive(primitive_type);
+		command->draw.indices = device.sequential_indices;
+		command->draw.index_count = vertex_count;
 	}
 	DRAW_PROFILE_ADD(3, profile_from);
 	command_commit(command);
@@ -7165,8 +7468,7 @@ static void index_census(const WORD *indices, unsigned long count)
 
 static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_count, CONST WORD *index_data)
 {
-	struct render_command *command;
-	struct vgxm_draw *draw;
+	struct render_record *command;
 	unsigned long minimum, maximum, stream;
 	BOOL streams_static = TRUE;
 	struct vertex_shader_object *declaration;
@@ -7176,7 +7478,6 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 	if (!vertex_count || !index_data || !(command = record_draw(FALSE)))
 		return;
 	profile_from = DRAW_PROFILE_NOW();
-	draw = &command->draw;
 	declaration = device.vertex_shader;
 	for (stream = 0; stream < declaration->element_count; stream++)
 	{
@@ -7198,44 +7499,47 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 	{
 		minimum = 0;
 		maximum = 0;
-		if (!setup_streams(draw, device.base_vertex_index, 1))
+		if (!setup_streams(command, device.base_vertex_index, 1))
 			return;
 	}
 	else
 	{
 		index_extent(index_data, vertex_count, &minimum, &maximum);
-		if (!setup_streams(draw, device.base_vertex_index + minimum, maximum - minimum + 1))
+		if (!setup_streams(command, device.base_vertex_index + minimum, maximum - minimum + 1))
 			return;
-		for (stream = 0; stream < draw->stream_count; stream++)
-			draw->streams[stream] = (const unsigned char *)draw->streams[stream] - minimum * draw->strides[stream];
+		for (stream = 0; stream < command->stream_count; stream++)
+			command->draw.streams[stream] = (const unsigned char *)command->draw.streams[stream] - minimum * command->draw.strides[stream];
 	}
 	if (needs_conversion(primitive_type))
 	{
-		draw->indices = converted_indices(primitive_type, index_data, vertex_count, &draw->index_count, &draw->primitive);
-		if (!draw->indices)
+		unsigned long primitive;
+
+		command->draw.indices = converted_indices(primitive_type, index_data, vertex_count, &command->draw.index_count, &primitive);
+		if (!command->draw.indices)
 			return;
+		command->primitive = (unsigned char)primitive;
 	}
 	else
 	{
-		draw->primitive = gxm_primitive(primitive_type);
-		draw->index_count = vertex_count;
+		command->primitive = (unsigned char)gxm_primitive(primitive_type);
+		command->draw.index_count = vertex_count;
 		if (memory_is_static(index_data, vertex_count * sizeof(WORD)))
 		{
-			draw->indices = index_data;
+			command->draw.indices = index_data;
 		}
-		else if ((draw->indices = index_reuse_find(index_data, vertex_count)) != NULL)
+		else if ((command->draw.indices = index_reuse_find(index_data, vertex_count)) != NULL)
 		{
 			stats.reused_indices += vertex_count * sizeof(WORD);
 		}
 		else
 		{
-			draw->indices = ring_copy(index_data, vertex_count * sizeof(WORD));
+			command->draw.indices = ring_copy(index_data, vertex_count * sizeof(WORD));
 			stats.copied_indices += vertex_count * sizeof(WORD);
 			if (gpu_stats_on > 0)
 				index_census(index_data, vertex_count);
-			if (!draw->indices)
+			if (!command->draw.indices)
 				return;
-			index_reuse_keep(index_data, vertex_count, draw->indices);
+			index_reuse_keep(index_data, vertex_count, command->draw.indices);
 		}
 	}
 	DRAW_PROFILE_ADD(3, profile_from);
@@ -7370,9 +7674,8 @@ static int held_segment_add(unsigned long first_index, unsigned long visibility_
 }
 
 /* the vertices, as the draw carries them (emitted packed already) */
-static void immediate_pack(const struct vgxm_draw *draw, unsigned long first, unsigned long count, float *packed)
+static void immediate_pack(unsigned long first, unsigned long count, float *packed)
 {
-	(void)draw;
 	memcpy(packed, device.immediate_vertices + first * device.immediate_floats, count * device.immediate_floats * sizeof(float));
 }
 
@@ -7405,8 +7708,7 @@ static void immediate_end(void)
 {
 	unsigned long index, count = device.immediate_count;
 	D3DPRIMITIVETYPE type = device.immediate_type;
-	struct render_command *command;
-	struct vgxm_draw *draw;
+	struct render_record *command;
 	/* the vertices carry only the input registers the program reads (its
 	other inputs come from the uniform buffer, unread): a vertex's 16
 	registers would be 256 bytes into uncached memory */
@@ -7440,12 +7742,11 @@ static void immediate_end(void)
 		{
 			unsigned long first_index = held_immediate.index_count;
 
-			draw = &held_immediate.command->draw;
 			if (immediate_hold_room((held_immediate.count + count) * (held_immediate.stride / sizeof(float))) &&
 				immediate_hold_triangles(type, held_immediate.count, count) &&
 				(!segment || held_segment_add(first_index, visibility_index)))
 			{
-				immediate_pack(draw, 0, count, held_immediate.vertices + held_immediate.count * (held_immediate.stride / sizeof(float)));
+				immediate_pack(0, count, held_immediate.vertices + held_immediate.count * (held_immediate.stride / sizeof(float)));
 				held_immediate.count += count;
 				merged_immediate_draws++;
 				if (segment)
@@ -7462,40 +7763,39 @@ static void immediate_end(void)
 	immediate_commit_held();
 	if (!(command = record_draw(TRUE)))
 		return;
-	draw = &command->draw;
 	/* (the registers the vertices were gathered with at Begin: the program
 	cannot change between Begin and End) */
 	mask = device.immediate_mask;
-	if (mask != immediate_input_mask(command->program))
+	if (mask != immediate_input_mask(command->draw.program))
 	{
 		static int warned;
 
 		if (!warned++)
 			platform_log("immediate draw: the vertex program changed between Begin and End");
 	}
-	draw->attribute_count = 0;
+	command->attribute_count = 0;
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
 		struct vgxm_attribute *attribute;
 
 		if (!(mask & (1UL << index)))
 			continue;
-		attribute = &draw->attributes[draw->attribute_count];
+		attribute = &command->draw.attributes[command->attribute_count];
 		attribute->reg = (unsigned char)index;
 		attribute->format = _vgxm_attribute_f32;
 		attribute->components = 4;
 		attribute->stream = 0;
-		attribute->offset = (unsigned short)(draw->attribute_count * 4 * sizeof(float));
-		draw->attribute_count++;
+		attribute->offset = (unsigned short)(command->attribute_count * 4 * sizeof(float));
+		command->attribute_count++;
 	}
-	stride = draw->attribute_count * 4 * sizeof(float);
-	draw->stream_count = 1;
-	draw->strides[0] = stride;
-	command->provided_mask = mask;
+	stride = command->attribute_count * 4 * sizeof(float);
+	command->stream_count = 1;
+	command->draw.strides[0] = (unsigned short)stride;
+	command->draw.provided_mask = mask;
 	/* held, not yet committed: the next immediate draw may join it */
 	if (!immediate_hold_room(count * (stride / sizeof(float))))
 		return;
-	immediate_pack(draw, 0, count, held_immediate.vertices);
+	immediate_pack(0, count, held_immediate.vertices);
 	held_immediate.command = command;
 	held_immediate.type = type;
 	held_immediate.count = count;
@@ -7503,8 +7803,8 @@ static void immediate_end(void)
 	held_immediate.constants = constant_generation;
 	held_immediate.index_count = 0;
 	held_immediate.segment_count = 0;
-	held_segment_add(0, draw->visibility_index);
-	shadow_capture(&held_shadow, current_program(), TRUE, command->state);
+	held_segment_add(0, command->visibility_index);
+	shadow_capture(&held_shadow, current_program(), TRUE, command->draw.state);
 	held_immediate.triangles = immediate_triangle_family(type) && immediate_merge_enabled() &&
 		immediate_hold_triangles(type, 0, count);
 	if (!immediate_merge_enabled())
@@ -7575,15 +7875,15 @@ void WINAPI D3DDevice_SetVertexDataColor(INT reg, D3DCOLOR color)
 
 static void record_clear(unsigned long flags, D3DCOLOR color, float z, DWORD stencil, const long clip[4])
 {
-	struct render_command *command = command_begin(_command_clear);
+	struct render_record *command = command_begin(_command_clear);
 
 	if (!command)
 		return;
-	command->clear_flags = flags;
-	command->clear_color = color;
-	command->clear_depth = z;
-	command->clear_stencil = stencil;
-	memcpy(command->clip, clip, sizeof(command->clip));
+	command->clear.flags = flags;
+	command->clear.color = color;
+	command->clear.depth = z;
+	command->clear.stencil = stencil;
+	memcpy(command->clear.clip, clip, sizeof(command->clear.clip));
 	command_commit(command);
 }
 
@@ -7780,7 +8080,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 
 	if (device.gpu_ready)
 	{
-		struct render_command *command;
+		struct render_record *command;
 		unsigned long long before;
 		float frame_ms, tick_ms, render_ms;
 
@@ -7804,7 +8104,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			targets->color_surface = device.back_buffer;
 			targets->color_valid = TRUE;
 			command->targets = targets;
-			command->screenshot = screenshot_every > 0 && device.frame && device.frame % (unsigned long)screenshot_every == 0;
+			command->present.screenshot = screenshot_every > 0 && device.frame && device.frame % (unsigned long)screenshot_every == 0;
 			{
 				/* (debug) HALO_SCREENSHOT_FIRST / _LAST=n: only the frames
 				from / up to n (a burst of every frame around one moment) */
@@ -7816,7 +8116,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 					last = getenv("HALO_SCREENSHOT_LAST") ? atol(getenv("HALO_SCREENSHOT_LAST")) : -1;
 				}
 				if ((first >= 0 && device.frame < (unsigned long)first) || (last >= 0 && device.frame > (unsigned long)last))
-					command->screenshot = FALSE;
+					command->present.screenshot = FALSE;
 			}
 			{
 				/* (debug) "@shot name" (HALO_TEST_COMMANDS): this frame's
@@ -7826,14 +8126,14 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				shot_names[device.frame & 3][0] = 0;
 				if (halo_screenshot_name[0])
 				{
-					command->screenshot = TRUE;
+					command->present.screenshot = TRUE;
 					shot_frames[device.frame & 3] = device.frame;
 					strncpy(shot_names[device.frame & 3], halo_screenshot_name, sizeof(shot_names[0]) - 1);
 					shot_names[device.frame & 3][sizeof(shot_names[0]) - 1] = 0;
 					halo_screenshot_name[0] = 0;
 				}
 			}
-			command->frame = device.frame;
+			command->present.frame = device.frame;
 			frames_requested++;
 			command_commit(command);
 		}
