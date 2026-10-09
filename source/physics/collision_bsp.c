@@ -1874,6 +1874,31 @@ static void bsp3d_test_sphere_recursive(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) the vector walk's node, its children that are nodes asked for
+(__builtin_prefetch, a hint) while the walk reads and measures its plane: the
+next turn reads one of them. A large bsp's nodes and planes are seldom still
+cached when the AI looks (b30: 12,071 nodes, 4,616 planes, ~40 nodes a line
+of sight), each node a cache miss and its plane another behind it */
+static __inline__ struct bsp3d_node const *collision_bsp_vector_node(
+	struct tag_block const *nodes,
+	long node_index)
+{
+	struct bsp3d_node const *node = TAG_BLOCK_GET_ELEMENT(nodes, node_index, struct bsp3d_node);
+
+	if (node->children[0] >= 0)
+	{
+		__builtin_prefetch(TAG_BLOCK_GET_ELEMENT(nodes, node->children[0], struct bsp3d_node));
+	}
+	if (node->children[1] >= 0)
+	{
+		__builtin_prefetch(TAG_BLOCK_GET_ELEMENT(nodes, node->children[1], struct bsp3d_node));
+	}
+
+	return node;
+}
+#endif
+
 static boolean collision_bsp_test_vector_recursive(
 	struct collision_bsp_test_vector_context *data,
 	long node_index,
@@ -1901,10 +1926,7 @@ static boolean collision_bsp_test_vector_recursive(
 
 	while (!(node_index & LONG_MIN))
 	{
-		struct bsp3d_node const *node = TAG_BLOCK_GET_ELEMENT(
-			&nodes,
-			node_index,
-			struct bsp3d_node);
+		struct bsp3d_node const *node = collision_bsp_vector_node(&nodes, node_index);
 		real_plane3d const *plane = TAG_BLOCK_GET_ELEMENT(
 			&planes,
 			node->plane_designator,
