@@ -1111,23 +1111,23 @@ void hud_calculate_point(
 			break;
 
 		case _hud_anchor_top_right:
-			point.x += (bitmap_data->registration_point.x - bitmap_data->width) * scale;
+			point.x += (bitmap_data->registration_point.x - bitmap_placed_width(bitmap_data)) * scale;
 			point.y += bitmap_data->registration_point.y * scale;
 			break;
 
 		case _hud_anchor_bottom_left:
 			point.x += bitmap_data->registration_point.x * scale;
-			point.y += (bitmap_data->registration_point.y - bitmap_data->height) * scale;
+			point.y += (bitmap_data->registration_point.y - bitmap_placed_height(bitmap_data)) * scale;
 			break;
 
 		case _hud_anchor_bottom_right:
-			point.x += (bitmap_data->registration_point.x - bitmap_data->width) * scale;
-			point.y += (bitmap_data->registration_point.y - bitmap_data->height) * scale;
+			point.x += (bitmap_data->registration_point.x - bitmap_placed_width(bitmap_data)) * scale;
+			point.y += (bitmap_data->registration_point.y - bitmap_placed_height(bitmap_data)) * scale;
 			break;
 
 		case _hud_anchor_center:
-			point.x += (bitmap_data->registration_point.x + bitmap_data->width / 2) * scale;
-			point.y += (bitmap_data->registration_point.y + bitmap_data->width / 2) * scale;
+			point.x += (bitmap_data->registration_point.x + bitmap_placed_width(bitmap_data) / 2) * scale;
+			point.y += (bitmap_data->registration_point.y + bitmap_placed_width(bitmap_data) / 2) * scale;
 			break;
 
 		default:
@@ -1699,8 +1699,10 @@ static void hud_calculate_bitmap_bounds(
 
 	csmemset(stack_buffer, 0x62, sizeof(stack_buffer));
 
-	width = (clip->x1-clip->x0)*(is_interface_bitmap ? 1 : bitmap->width);
-	height = (clip->y1-clip->y0)*(is_interface_bitmap ? 1 : bitmap->height);
+	/* (port) a Custom Edition texture drawn from its second level at its
+	first's size (bitmap_placed_width) */
+	width = (clip->x1-clip->x0)*(is_interface_bitmap ? 1 : bitmap_placed_width(bitmap));
+	height = (clip->y1-clip->y0)*(is_interface_bitmap ? 1 : bitmap_placed_height(bitmap));
 
 	switch (placement_type)
 	{

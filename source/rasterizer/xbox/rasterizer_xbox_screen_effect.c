@@ -275,12 +275,14 @@ static void rasterizer_screen_effect_set_texture_transforms(
 		else
 			noise_bitmap = &viewport_map;
 
-		convolution_size.i = convolution_bitmap->width;
-		convolution_size.j = convolution_bitmap->height;
-		scanline_size.i = scanline_bitmap->width;
-		scanline_size.j = scanline_bitmap->height;
-		noise_size.i = noise_bitmap->width;
-		noise_size.j = noise_bitmap->height;
+		/* (port) mapped by their pixels: a Custom Edition map's texture drawn
+		from its second level at its first's size (bitmap_placed_width) */
+		convolution_size.i = bitmap_placed_width(convolution_bitmap);
+		convolution_size.j = bitmap_placed_height(convolution_bitmap);
+		scanline_size.i = bitmap_placed_width(scanline_bitmap);
+		scanline_size.j = bitmap_placed_height(scanline_bitmap);
+		noise_size.i = bitmap_placed_width(noise_bitmap);
+		noise_size.j = bitmap_placed_height(noise_bitmap);
 		screen_size.i = viewport_map.width;
 		screen_size.j = viewport_map.height;
 

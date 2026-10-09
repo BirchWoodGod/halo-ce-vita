@@ -899,11 +899,11 @@ void custom_render_nav_point(
 					FLAG(_hud_number_show_trailing_m_bit);
 
 				bitmap_extent =
-					((clip->x1-clip->x0)*(real)bitmap->width)*0.5f;
+					((clip->x1-clip->x0)*(real)bitmap_placed_width(bitmap))*0.5f;
 				numbers.placement.offset.x = (short)(long)(
 					bitmap_extent*arrow_scale*0.33000001f + (real)point.x);
 				bitmap_extent =
-					((clip->y1-clip->y0)*(real)bitmap->height)*0.5f;
+					((clip->y1-clip->y0)*(real)bitmap_placed_height(bitmap))*0.5f;
 				numbers.placement.offset.y = (short)(long)(
 					bitmap_extent*arrow_scale*0.66000003f + (real)point.y);
 				numbers.placement.offset.x -= render.camera.window_bounds.x0;

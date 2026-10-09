@@ -605,12 +605,12 @@ static void render_state_bitmap(
 		else if (clip)
 		{
 			cursor_bounds->x0 = (short)(
-				((clip->x1 - clip->x0) * bitmap->width + icon->width_offset) * scale + point.x);
+				((clip->x1 - clip->x0) * bitmap_placed_width(bitmap) + icon->width_offset) * scale + point.x);
 		}
 		else
 		{
 			cursor_bounds->x0 = (short)(
-				(bitmap->width + icon->width_offset) * scale + point.x);
+				(bitmap_placed_width(bitmap) + icon->width_offset) * scale + point.x);
 		}
 	}
 
