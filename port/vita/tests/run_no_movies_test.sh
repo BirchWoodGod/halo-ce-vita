@@ -24,6 +24,13 @@
 #            with no attract movie: no movie is tried (the menu's music is not
 #            stopped and started over, the intro's is the only failed open),
 #            and the menu still takes a press after it
+#   attractretry the three attract movies there (empty bink files), each open
+#            failing for now (HALO_TEST_MOVIE_FAILS_FOR_NOW=1: as the Vita's
+#            video player that did not start for want of memory, Oct 8,
+#            beta.2: "sceAvPlayerInit failed" for each movie, 75 s apart):
+#            the main menu left alone 165 s tries one movie, once, says the
+#            next is in 300 s, and plays its music on (stopped once, started
+#            twice); the menu still takes a press after it
 #
 # Each must log no assertion or exception, and exit by itself.
 #
@@ -37,7 +44,7 @@ root=$(cd "$here/../../.." && pwd)
 binary=$(readlink -f "${HALO_TEST_VITA:-$root/build/linux/halo}")
 data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_no_movies_test.$$}
-cases=${*:-fresh panel attract}
+cases=${*:-fresh panel attract attractretry}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
 
@@ -57,6 +64,8 @@ run() { # NAME SECONDS PAD [VAR=value...]
 	rm -rf "$out/$name"
 	mkdir -p "$out/$name/data" "$out/$name/save" "$out/$name/bin"
 	ln -sfn "$(cd "$data" && pwd)/maps" "$out/$name/data/maps"
+	# (bink_files: empty movie files the game finds)
+	for file in ${bink_files:-}; do mkdir -p "$out/$name/data/bink"; : > "$out/$name/data/bink/$file"; done
 	cp "$binary" "$out/$name/bin/halo"
 	(cd "$out/$name" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
 		HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
@@ -84,7 +93,7 @@ check() { # NAME
 	grep -aE "main menu|movie|bink" "$debug" 2>/dev/null
 	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
 	grep -aqiE "assert|exception|halt" "$log" && fail "$name" "an assertion, exception or halt"
-	[ -e "$out/$name/data/bink" ] && fail "$name" "a bink folder in the data folder (the test wants none)"
+	[ -e "$out/$name/data/bink" ] && [ -z "${bink_files:-}" ] && fail "$name" "a bink folder in the data folder (the test wants none)"
 	grep -aq "ui: screen ui.shell.main_menu.main_menu" "$log" || fail "$name" "the main menu did not come up"
 	first_press_taken "$log" || fail "$name" "the first press after the main menu came up did not reach a screen"
 }
@@ -137,8 +146,23 @@ for case in $cases; do
 		[ "$(grep -ac 'starting main menu music' "$debug")" = 1 ] ||
 			fail attract "the menu's music was started $(grep -ac 'starting main menu music' "$debug") times"
 		;;
+	attractretry)
+		bink_files="attract1.bik attract2.bik attract3.bik" run attractretry 175 \
+			"wait:150:165000 down:150:1000 a:150:3000 b:150:2000" HALO_TEST_MOVIE_FAILS_FOR_NOW=1
+		bink_files=x check attractretry
+		log=$out/attractretry/run.log debug=$out/attractretry/data/debug.txt
+		grep -aE "attract mode|skipping" "$log"
+		tries=$(grep -ac 'skipping "d:.bink.attract[1-3].bik" (failed for now' "$log")
+		[ "$tries" = 1 ] || fail attractretry "$tries attract movies tried in 165 s (1 wanted: the next 300 s after a failure)"
+		[ "$(grep -ac 'attract mode: the movie failed for now; the next in 300 s' "$log")" = 1 ] ||
+			fail attractretry "the failure's wait was not said once"
+		[ "$(grep -ac 'stopping main menu music' "$debug")" = 1 ] ||
+			fail attractretry "the menu's music was stopped $(grep -ac 'stopping main menu music' "$debug") times (once wanted)"
+		[ "$(grep -ac 'starting main menu music' "$debug")" = 2 ] ||
+			fail attractretry "the menu's music was started $(grep -ac 'starting main menu music' "$debug") times (twice wanted)"
+		;;
 	*)
-		echo "usage: $0 [fresh|panel|attract]..." >&2; exit 2 ;;
+		echo "usage: $0 [fresh|panel|attract|attractretry]..." >&2; exit 2 ;;
 	esac
 done
 echo "logs in $out"

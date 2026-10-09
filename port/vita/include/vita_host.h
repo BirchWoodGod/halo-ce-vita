@@ -78,6 +78,9 @@ int vita_movie_poll(void);
 /* the waiting frame as rows of X8R8G8B8 */
 void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigned long height);
 void vita_movie_close(void);
+/* whether the last vita_movie_open failed for now (the video player did not
+start: memory), not for want of the file */
+int vita_movie_open_failed_for_now(void);
 /* the open movie's display shape (width / height), which an MP4 may give
 apart from its size in pixels; 0 with no movie open */
 float vita_movie_display_aspect(void);

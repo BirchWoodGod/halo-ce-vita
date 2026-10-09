@@ -26,6 +26,7 @@ the picture to fit the screen at its display shape.
 #include <psp2/sysmodule.h>
 
 #include <malloc.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,15 +86,88 @@ static unsigned long frame_room(const void *address)
 
 /* ---------- the player's memory */
 
+/* the player's own allocations (its state, the demuxer's buffers): the C
+heap's, else - the C heap full or too broken up, as on beta.2's main menu
+after a long session (Oct 8: newlib's 48 MB had ~6 MB left by the menus,
+and sceAvPlayerInit, which says nothing but NULL, failed for each attract
+movie) - whole pages of a memory block of their own, at most
+MAXIMUM_OWN_BLOCKS of them at a time; the counts for the log */
+#define MAXIMUM_OWN_BLOCKS 64
+#define MAXIMUM_OWN_BLOCK_SIZE (32u << 20)
+static struct
+{
+	void *base;
+	SceUID block;
+} own_blocks[MAXIMUM_OWN_BLOCKS];
+static pthread_mutex_t own_blocks_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct
+{
+	unsigned int own_blocks, own_kilobytes, refused;
+	unsigned long largest_refused;
+} movie_memory;
+
 static void *movie_allocate(void *argument, uint32_t alignment, uint32_t size)
 {
+	void *pointer;
+	unsigned int index;
+
 	(void)argument;
-	return memalign(alignment < 16 ? 16 : alignment, size);
+	if (alignment < 16)
+		alignment = 16;
+	pointer = memalign(alignment, size);
+	if (pointer || !size)
+		return pointer;
+	pthread_mutex_lock(&own_blocks_lock);
+	/* (a block's pages are 4 KB aligned) */
+	for (index = 0; index < MAXIMUM_OWN_BLOCKS && alignment <= 0x1000 && size <= MAXIMUM_OWN_BLOCK_SIZE; index++)
+	{
+		SceUID block;
+		void *base = NULL;
+
+		if (own_blocks[index].base)
+			continue;
+		block = sceKernelAllocMemBlock("movie player", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, ALIGN(size, 0x1000), NULL);
+		if (block >= 0 && sceKernelGetMemBlockBase(block, &base) >= 0 && base)
+		{
+			own_blocks[index].base = base;
+			own_blocks[index].block = block;
+			movie_memory.own_blocks++;
+			movie_memory.own_kilobytes += ALIGN(size, 0x1000) / 1024;
+			pointer = base;
+		}
+		else if (block >= 0)
+			sceKernelFreeMemBlock(block);
+		break;
+	}
+	if (!pointer)
+	{
+		movie_memory.refused++;
+		if (size > movie_memory.largest_refused)
+			movie_memory.largest_refused = size;
+	}
+	pthread_mutex_unlock(&own_blocks_lock);
+	return pointer;
 }
 
 static void movie_free(void *argument, void *pointer)
 {
+	unsigned int index;
+
 	(void)argument;
+	if (!pointer)
+		return;
+	pthread_mutex_lock(&own_blocks_lock);
+	for (index = 0; index < MAXIMUM_OWN_BLOCKS; index++)
+	{
+		if (own_blocks[index].base == pointer)
+		{
+			sceKernelFreeMemBlock(own_blocks[index].block);
+			own_blocks[index].base = NULL;
+			pthread_mutex_unlock(&own_blocks_lock);
+			return;
+		}
+	}
+	pthread_mutex_unlock(&own_blocks_lock);
 	free(pointer);
 }
 
@@ -208,6 +282,15 @@ static int audio_thread(SceSize arguments_size, void *arguments)
 
 /* ---------- the movie */
 
+/* why the last open failed: 0 it did not, 1 no file (for good), 2 the
+player failed (for now: vita_movie_open_failed_for_now) */
+static int open_failure;
+
+int vita_movie_open_failed_for_now(void)
+{
+	return open_failure == 2;
+}
+
 int vita_movie_open(const char *path, unsigned long *width, unsigned long *height)
 {
 	SceAvPlayerInitData initialize;
@@ -218,6 +301,7 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 		vita_movie_close();
 	memset(&movie, 0, sizeof(movie));
 	movie.audio_port = -1;
+	open_failure = 1;
 	{
 		/* (the player's module, once) */
 		static int loaded;
@@ -248,13 +332,29 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 	initialize.basePriority = 0xA0;
 	initialize.numOutputVideoFrameBuffers = 2;
 	initialize.autoStart = 1;
-	movie.player = sceAvPlayerInit(&initialize);
-	/* (the handle is an address: an error is a 0x80xxxxxx code) */
-	if (!movie.player || ((unsigned)movie.player >> 24) == 0x80)
 	{
-		snprintf(message, sizeof(message), "movie: sceAvPlayerInit failed: 0x%08x", (unsigned)movie.player);
-		vita_host_log(message);
-		return -1;
+		unsigned int refused = movie_memory.refused;
+
+		movie.player = sceAvPlayerInit(&initialize);
+		/* (the handle is an address; a failure is NULL - the player says no
+		more - or a 0x80xxxxxx code. Nothing of it is kept: the game skips
+		the movie, and the attract mode tries again later,
+		vita_movie_open_failed_for_now) */
+		if (!movie.player || ((unsigned)movie.player >> 24) == 0x80)
+		{
+			struct mallinfo heap = mallinfo();
+			extern unsigned int _newlib_heap_size_user;
+
+			snprintf(message, sizeof(message), "movie: the video player did not start (sceAvPlayerInit: %s%08x) for %s; "
+				"C heap %d KB free, %u allocations refused now (largest %lu bytes), %u blocks of its own so far (%u KB)",
+				movie.player ? "0x" : "no handle, 0x", (unsigned)movie.player, path,
+				(int)(_newlib_heap_size_user / 1024) - heap.uordblks / 1024, movie_memory.refused - refused,
+				movie_memory.largest_refused, movie_memory.own_blocks, movie_memory.own_kilobytes);
+			vita_host_log(message);
+			movie.player = 0;
+			open_failure = 2;
+			return -1;
+		}
 	}
 	if (sceAvPlayerAddSource(movie.player, path) < 0)
 	{
@@ -264,6 +364,7 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 		movie.player = 0;
 		return -1;
 	}
+	open_failure = 0;
 	movie.open = 1;
 	/* (debug) HALO_MOVIE_AUDIO=0: no sound thread */
 	if (!getenv("HALO_MOVIE_AUDIO") || atoi(getenv("HALO_MOVIE_AUDIO")) != 0)
