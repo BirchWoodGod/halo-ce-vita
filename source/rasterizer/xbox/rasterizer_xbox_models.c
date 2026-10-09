@@ -674,10 +674,24 @@ static boolean local_model_fog_valid = FALSE;
 static pixel32 local_model_cc0_pixel, local_model_cc0_error_pixel, local_model_cc1_pixel;
 static boolean local_model_phase_valid = FALSE;
 static real local_model_self_illumination_phase;
+/* (port) the last part drawn with all of its states set, in this model:
+another part with the same shader, permutation and vertex type right after
+it needs every state, texture and constant it set (they are made from the
+shader, the model's parameters and the frame's time, the same), and is
+drawn with them as they are. Not after a part that changed them again (a
+two-sided part's second pass), submitted a fog screen or an effect, nor
+with the statistics or the debug vertices on. */
+static boolean local_part_state_valid = FALSE;
+static struct shader *local_part_state_shader = NULL;
+static short local_part_state_permutation = NONE;
+static short local_part_state_vertex_type = NONE;
 #endif
 extern boolean rasterizer_model_cortana_hack;
 extern struct rasterizer_window_begin_parameters global_window_parameters;
 extern struct rasterizer_models_frame_statistics rasterizer_frame_statistics;
+#ifdef HALO_LINUX
+boolean rasterizer_debug_model_vertices_on(void);
+#endif
 
 /* ---------- public code */
 
@@ -706,6 +720,9 @@ void _rasterizer_models_begin(
 	if (rasterizer_debug_options.draw_models)
 	{
 		local_pixel_shader_dirty_flag = TRUE;
+#ifdef HALO_LINUX
+		local_part_state_valid = FALSE;
+#endif
 		local_sky_flag = sky;
 		if (sky)
 		{
@@ -760,6 +777,9 @@ void _rasterizer_model_end(
 			rasterizer_set_frustum_z(0.0f, 0.0f);
 		}
 		local_parameters = NULL;
+#ifdef HALO_LINUX
+		local_part_state_valid = FALSE;
+#endif
 	}
 
 	return;
@@ -796,6 +816,7 @@ void _rasterizer_model_begin(
 		local_model_constants_valid = FALSE;
 		local_model_fog_valid = FALSE;
 		local_model_phase_valid = FALSE;
+		local_part_state_valid = FALSE;
 #endif
 		local_do_not_change_z_stencil_states =
 			do_not_change_z_stencil_states;
@@ -1773,6 +1794,7 @@ void _rasterizer_model_draw(
 	real self_illumination_animation_fraction;
 #ifdef HALO_LINUX
 	unsigned long long part_from;
+	short part_vertex_type;
 
 	if (model_part_profile_on < 0) { const char *e = getenv("HALO_RENDER_PROFILE"); model_part_profile_on = e && atoi(e) != 0; }
 	part_from = MODEL_PART_NOW();
@@ -1798,6 +1820,9 @@ void _rasterizer_model_draw(
 
 		if (local_parameters->effect.shader)
 		{
+#ifdef HALO_LINUX
+			local_part_state_valid = FALSE;
+#endif
 			intensity_exponent_source = NONE;
 
 			if (local_parameters->effect.shader->base.type ==
@@ -1844,6 +1869,9 @@ void _rasterizer_model_draw(
 				729,
 				shader->base.type==_shader_type_model);
 
+#ifdef HALO_LINUX
+			local_part_state_valid = FALSE;
+#endif
 			rasterizer_model_transparent_geometry_submit(
 				shader,
 				shader_permutation_index,
@@ -1860,6 +1888,9 @@ void _rasterizer_model_draw(
 		{
 			if (shader->base.type == _shader_type_environment)
 			{
+#ifdef HALO_LINUX
+				local_part_state_valid = FALSE;
+#endif
 				rasterizer_model_draw_environment_shader(
 					shader,
 					shader_permutation_index,
@@ -1883,6 +1914,29 @@ void _rasterizer_model_draw(
 					local_model_effect_type==_render_model_effect_type_none);
 
 #ifdef HALO_LINUX
+				part_vertex_type = vertex_buffer ?
+					vertex_buffer->type :
+					rasterizer_dynamic_vertices_get_type(dynamic_vertex_buffer_index);
+				if (local_part_state_valid &&
+					local_part_state_shader == shader &&
+					local_part_state_permutation == shader_permutation_index &&
+					local_part_state_vertex_type == part_vertex_type)
+				{
+					/* (the last part's states, textures and constants are this
+					one's: only the draw) */
+					MODEL_PART_ADD(3, part_from);
+					rasterizer_draw(
+						triangle_buffer,
+						dynamic_triangle_buffer_index,
+						0,
+						triangle_count,
+						vertex_buffer,
+						dynamic_vertex_buffer_index);
+					MODEL_PART_ADD(4, part_from);
+					goto part_drawn;
+				}
+				local_part_state_valid = FALSE;
+
 				if (local_model_constants_valid)
 				{
 					camera_distance = local_model_camera_distance;
@@ -2634,6 +2688,22 @@ void _rasterizer_model_draw(
 								vertex_buffer);
 					}
 				}
+#ifdef HALO_LINUX
+				/* (the part's states stand for the next part with the same
+				shader, unless something follows that changes them) */
+				if (!TEST_FLAG(shader_model->model.flags, _shader_model_two_sided_bit) &&
+					!local_environment_fog_screen_flag &&
+					!local_parameters->effect.shader &&
+					rasterizer_debug_options.statistics_mode == 0 &&
+					!rasterizer_debug_model_vertices_on())
+				{
+					local_part_state_valid = TRUE;
+					local_part_state_shader = shader;
+					local_part_state_permutation = shader_permutation_index;
+					local_part_state_vertex_type = part_vertex_type;
+				}
+			part_drawn:;
+#endif
 			}
 
 			if (local_environment_fog_screen_flag)
@@ -2679,6 +2749,10 @@ struct transparent_geometry_group *_rasterizer_model_transparent_geometry_submit
 	boolean alpha_blended_decal;
 	boolean submit_decals;
 
+#ifdef HALO_LINUX
+	/* (a submission may draw now: the states are not the last part's) */
+	local_part_state_valid = FALSE;
+#endif
 	if (rasterizer_debug_options.draw_models &&
 		rasterizer_debug_options.draw_transparent_models)
 	{
