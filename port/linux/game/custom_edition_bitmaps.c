@@ -472,7 +472,11 @@ level the Vita's screen samples on all but the nearest surfaces. Halo PC
 lays a bitmap's levels one after another, so its pixels start a level later
 and its levels are one fewer. Interface bitmaps, sprites and 3D and cube
 textures keep their size (the HUD and menus place theirs by their pixels);
-so do textures without levels, the lightmaps among them.
+so do textures without levels, the lightmaps among them. A reduced texture
+says so (levels_dropped): what places a 2D texture by its pixels - a HUD
+drawn from ones outside ui\, such as Firefight Airlock's ODST visor
+(odst_hud\, 1024x1024), or a screen effect's mask - places it at its first
+level's size (bitmap_placed_width), so it is not drawn at half its size.
 HALO_CE_TEXTURE_LEVEL_KB=<n>: a texture whose first level takes n KB or more
 drops it (128 by default; 0 none). */
 #define REDUCED_TEXTURE_LEVEL_DEFAULT_KB 128
@@ -496,29 +500,26 @@ void custom_edition_bitmaps_reduce(
 	long reduced_count = 0;
 	unsigned long before_bytes = 0, saved_bytes = 0;
 
-	if (!threshold)
-	{
-		return;
-	}
 	while ((group = custom_edition_cache_tag_next(tag_cache, loaded_bytes, BITMAP_GROUP_TAG, sizeof(*group), &tag_index)) != NULL)
 	{
 		char const *name = custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index);
+		boolean reducible = threshold &&
+			group->type == _bitmap_group_type_2d_textures &&
+			name &&
+			_strnicmp(name, "ui\\", 3) &&
+			_strnicmp(name, "interface\\", 10);
 		long bitmap_index;
 
-		if (group->type != _bitmap_group_type_2d_textures ||
-			!name ||
-			!_strnicmp(name, "ui\\", 3) ||
-			!_strnicmp(name, "interface\\", 10))
-		{
-			continue;
-		}
 		for (bitmap_index = 0; bitmap_index < group->bitmaps.count; bitmap_index++)
 		{
 			struct bitmap_data *bitmap = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, bitmap_index, struct bitmap_data);
 			long first_level_bytes;
 			long rest_bytes;
 
-			if (bitmap->type != _bitmap_type_2d ||
+			/* (Halo PC's padding there: whatever the map holds) */
+			bitmap->levels_dropped = 0;
+			if (!reducible ||
+				bitmap->type != _bitmap_type_2d ||
 				TEST_FLAG(bitmap->flags, _bitmap_linear_bit) ||
 				bitmap->mipmap_count < 1 ||
 				bitmap->width < 8 ||
@@ -549,6 +550,7 @@ void custom_edition_bitmaps_reduce(
 				before_bytes -= bitmap->pixels_size;
 				continue;
 			}
+			bitmap->levels_dropped = 1;
 			saved_bytes += first_level_bytes;
 			reduced_count++;
 		}

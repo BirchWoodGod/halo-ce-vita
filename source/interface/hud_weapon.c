@@ -1309,14 +1309,14 @@ static void crosshairs_draw(
 												clip.x1 = (real)(interface_bitmap ? bitmap->width : 1);
 												clip.y0 = 0.0f;
 												clip.y1 = (real)(interface_bitmap ? bitmap->height : 1);
-												texel_scale_u = interface_bitmap ? 1.0 : (1.0f / bitmap->width) * 1.25;
-												texel_scale_v = interface_bitmap ? 1.0 : (1.0f / bitmap->height) * 1.25;
+												texel_scale_u = interface_bitmap ? 1.0 : (1.0f / bitmap_placed_width(bitmap)) * 1.25;
+												texel_scale_v = interface_bitmap ? 1.0 : (1.0f / bitmap_placed_height(bitmap)) * 1.25;
 											}
 
 											inverse_scale = 1.0f / scale;
-											expand_u = (bitmap->width - (render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0) * inverse_scale) *
+											expand_u = (bitmap_placed_width(bitmap) - (render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0) * inverse_scale) *
 												texel_scale_u * -0.5f;
-											expand_v = (bitmap->height - (render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0) * inverse_scale) *
+											expand_v = (bitmap_placed_height(bitmap) - (render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0) * inverse_scale) *
 												texel_scale_v * -0.5f;
 											clip.x0 -= expand_u;
 											clip.x1 += expand_u;

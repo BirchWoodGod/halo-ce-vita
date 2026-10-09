@@ -972,6 +972,36 @@ void hud_draw_set_scope_centered(
 	return;
 }
 
+/* (port) a centre-anchored element at least as wide as the Xbox's 640
+columns (Firefight Airlock's ODST visor and its low-shield glow: a 1024-pixel
+frame at 0.625, made to fill the 4:3 screen) is a full-screen overlay: on a
+wide screen it is widened to the window, as Chimera's widescreen fix widens a
+menu element spanning the whole 640x480 frame, rather than leaving the sides
+bare. Other centred elements keep their 4:3 size (crosshairs, the scope), and
+only static elements are looked at: a crosshair hiding the area outside its
+reticle (hud_weapon.c) is already drawn over the whole viewport. */
+static boolean hud_draw_static_element_drawing = FALSE;
+
+static void hud_full_screen_element_widen(
+	short corner,
+	real_rectangle2d const *bounds,
+	real_vector2d *xy_scale)
+{
+	long screen_width = halo_screen_width();
+	real window_width = (real)(render.camera.window_bounds.x1 - render.camera.window_bounds.x0);
+	real columns_640 = window_width * 640.0f / (real)screen_width;
+
+	if (hud_draw_static_element_drawing &&
+		corner == _hud_anchor_center &&
+		screen_width > 640 &&
+		(bounds->x1 - bounds->x0) * xy_scale->i >= columns_640 - 2.0f)
+	{
+		xy_scale->i *= (real)screen_width / 640.0f;
+	}
+
+	return;
+}
+
 /* (port) whether a static element is part of a zoomed scope: one of its
 multitexture overlays is driven by the zoom level (the sniper rifle's two
 range ladders, drawn as overlays faded in by the zoom, are anchored to the top
@@ -1111,23 +1141,23 @@ void hud_calculate_point(
 			break;
 
 		case _hud_anchor_top_right:
-			point.x += (bitmap_data->registration_point.x - bitmap_data->width) * scale;
+			point.x += (bitmap_data->registration_point.x - bitmap_placed_width(bitmap_data)) * scale;
 			point.y += bitmap_data->registration_point.y * scale;
 			break;
 
 		case _hud_anchor_bottom_left:
 			point.x += bitmap_data->registration_point.x * scale;
-			point.y += (bitmap_data->registration_point.y - bitmap_data->height) * scale;
+			point.y += (bitmap_data->registration_point.y - bitmap_placed_height(bitmap_data)) * scale;
 			break;
 
 		case _hud_anchor_bottom_right:
-			point.x += (bitmap_data->registration_point.x - bitmap_data->width) * scale;
-			point.y += (bitmap_data->registration_point.y - bitmap_data->height) * scale;
+			point.x += (bitmap_data->registration_point.x - bitmap_placed_width(bitmap_data)) * scale;
+			point.y += (bitmap_data->registration_point.y - bitmap_placed_height(bitmap_data)) * scale;
 			break;
 
 		case _hud_anchor_center:
-			point.x += (bitmap_data->registration_point.x + bitmap_data->width / 2) * scale;
-			point.y += (bitmap_data->registration_point.y + bitmap_data->width / 2) * scale;
+			point.x += (bitmap_data->registration_point.x + bitmap_placed_width(bitmap_data) / 2) * scale;
+			point.y += (bitmap_data->registration_point.y + bitmap_placed_width(bitmap_data) / 2) * scale;
 			break;
 
 		default:
@@ -1439,6 +1469,9 @@ void hud_draw_static_element(
 		is_interface_bitmap =
 			bitmap_group->type == _bitmap_group_type_interface_bitmaps;
 
+#ifdef HALO_LINUX
+		hud_draw_static_element_drawing = TRUE;
+#endif
 		hud_draw_bitmap_with_meter(
 			NULL,
 			bitmap,
@@ -1499,6 +1532,9 @@ void hud_draw_static_element(
 				clip,
 				&bounds,
 				is_interface_bitmap);
+#ifdef HALO_LINUX
+			hud_full_screen_element_widen(absolute_placement->corner, &bounds, &xy_scale);
+#endif
 			hud_draw_multitexture_overlay(
 				overlay,
 				local_player_index,
@@ -1509,12 +1545,61 @@ void hud_draw_static_element(
 				0.0f,
 				color);
 		}
+#ifdef HALO_LINUX
+		hud_draw_static_element_drawing = FALSE;
+#endif
 	}
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 685);
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port, debug) HALO_HUD_LOG=1: each HUD quad the first time it is drawn at a
+place and size, "hud quad: <bitmap's tag> x0 y0 x1 y1 (screen <width>)" in the
+window's pixels (port/vita/tests/run_hud_layout_test.sh reads them) */
+static void hud_quad_log(
+	struct bitmap_data const *bitmap,
+	struct dynamic_screen_vertex const *vertices)
+{
+	static int wanted = -1;
+	static unsigned long seen[512];
+	static int seen_count;
+	void platform_log(char const *format, ...);
+	char *tag_get_name(long tag_index);
+	long x0 = (long)vertices[0].position.x, x1 = x0, y0 = (long)vertices[0].position.y, y1 = y0;
+	unsigned long signature;
+	int index;
+
+	if (wanted < 0)
+		wanted = getenv("HALO_HUD_LOG") && atoi(getenv("HALO_HUD_LOG"));
+	if (!wanted)
+		return;
+	for (index = 1; index < 4; index++)
+	{
+		x0 = MIN(x0, (long)vertices[index].position.x);
+		x1 = MAX(x1, (long)vertices[index].position.x);
+		y0 = MIN(y0, (long)vertices[index].position.y);
+		y1 = MAX(y1, (long)vertices[index].position.y);
+	}
+	signature = (unsigned long)bitmap->tag_index * 2654435761UL ^ (unsigned long)(x0 * 73856093L) ^
+		(unsigned long)(y0 * 19349663L) ^ (unsigned long)(x1 * 83492791L) ^ (unsigned long)(y1 * 1234567L) ^
+		(unsigned long)halo_screen_width();
+	for (index = 0; index < seen_count; index++)
+	{
+		if (seen[index] == signature)
+			return;
+	}
+	if (seen_count < (int)NUMBEROF(seen))
+		seen[seen_count++] = signature;
+	platform_log("hud quad: %s %ld %ld %ld %ld (screen %ld)",
+		bitmap->tag_index != NONE && bitmap->tag_index != 0 ? tag_get_name(bitmap->tag_index) : "?",
+		x0, y0, x1, y1, halo_screen_width());
+
+	return;
+}
+#endif
 
 static void hud_draw_bitmap_internal(
 	void *meter_parameters,
@@ -1566,6 +1651,9 @@ static void hud_draw_bitmap_internal(
 		_shader_framebuffer_blend_function_alpha_multiply_add;
 	parameters.map[0] = (struct bitmap_data *)bitmap;
 
+#ifdef HALO_LINUX
+	hud_quad_log(bitmap, vertices);
+#endif
 	rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 985);
@@ -1630,6 +1718,9 @@ static void hud_draw_bitmap_with_meter(
 		clip,
 		&bounds,
 		is_interface_bitmap);
+#ifdef HALO_LINUX
+	hud_full_screen_element_widen(absolute_placement->corner, &bounds, &xy_scale);
+#endif
 	hud_draw_bitmap_internal(
 		meter_parameters,
 		bitmap,
@@ -1699,8 +1790,10 @@ static void hud_calculate_bitmap_bounds(
 
 	csmemset(stack_buffer, 0x62, sizeof(stack_buffer));
 
-	width = (clip->x1-clip->x0)*(is_interface_bitmap ? 1 : bitmap->width);
-	height = (clip->y1-clip->y0)*(is_interface_bitmap ? 1 : bitmap->height);
+	/* (port) a Custom Edition texture drawn from its second level at its
+	first's size (bitmap_placed_width) */
+	width = (clip->x1-clip->x0)*(is_interface_bitmap ? 1 : bitmap_placed_width(bitmap));
+	height = (clip->y1-clip->y0)*(is_interface_bitmap ? 1 : bitmap_placed_height(bitmap));
 
 	switch (placement_type)
 	{

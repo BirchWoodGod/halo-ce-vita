@@ -513,8 +513,8 @@ void interface_draw_bitmap(
 	{
 		real u = ((vertex_index+1)&2) ? clip->x1 : clip->x0;
 		real v = (vertex_index>1) ? clip->y1 : clip->y0;
-		real local_x = (bitmap->width*u - bitmap->registration_point.x)*scale;
-		real local_y = (bitmap->height*v - bitmap->registration_point.y)*scale;
+		real local_x = (bitmap_placed_width(bitmap)*u - bitmap->registration_point.x)*scale;
+		real local_y = (bitmap_placed_height(bitmap)*v - bitmap->registration_point.y)*scale;
 
 		vertices[vertex_index].position.x = point->x + local_x*cosine_theta - local_y*sine_theta;
 		vertices[vertex_index].position.y = point->y + local_x*sine_theta + local_y*cosine_theta;

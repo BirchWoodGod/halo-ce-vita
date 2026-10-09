@@ -837,6 +837,7 @@ short bitmap_group_add_bitmap(
 	new_bitmap_data.registration_point.y = 0;
 	new_bitmap_data.registration_point.x = 0;
 	new_bitmap_data.mipmap_count = mipmap_count;
+	new_bitmap_data.levels_dropped = 0; /* (port) */
 	new_bitmap_data.pixels_offset = 0;
 	new_bitmap_data.hardware_format = NULL;
 	new_bitmap_data.base_address = NULL;
