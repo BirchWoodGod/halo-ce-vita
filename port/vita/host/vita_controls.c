@@ -225,7 +225,7 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 		/* the menus' fixed layout: D-pad, A B X Y, the triggers; the
 		crouch toggle starts over standing */
 		state->crouched = 0;
-		state->crouch_was_down = (buttons & config->xbox_button[VITA_XBOX_LEFT_STICK]) != 0;
+		state->crouch_was_down = (buttons & (config->xbox_button[VITA_XBOX_LEFT_STICK] | VITA_BUTTON_L3)) != 0;
 		if (buttons & VITA_BUTTON_SELECT) output->digital |= VITA_PAD_BACK;
 		if (buttons & VITA_BUTTON_UP) output->digital |= VITA_PAD_DPAD_UP;
 		if (buttons & VITA_BUTTON_DOWN) output->digital |= VITA_PAD_DPAD_DOWN;
@@ -247,6 +247,12 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 		if ((touch & (1UL << zone)) && config->zone_xbox[zone] > VITA_XBOX_OFF &&
 			config->zone_xbox[zone] < VITA_XBOX_COUNT)
 			held[config->zone_xbox[zone]] = 1;
+	/* a paired DualShock's stick clicks are the Xbox sticks' (whatever
+	Vita buttons those are on) */
+	if (buttons & VITA_BUTTON_L3)
+		held[VITA_XBOX_LEFT_STICK] = 1;
+	if (buttons & VITA_BUTTON_R3)
+		held[VITA_XBOX_RIGHT_STICK] = 1;
 	/* the left stick's click is crouch, held, on the Xbox; Toggle (the
 	panel's Crouch) makes a press crouch and the next one stand */
 	if (config->crouch_toggle)
