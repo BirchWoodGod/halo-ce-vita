@@ -491,14 +491,30 @@ void first_person_weapon_draw(
 		{
 			long unit_index= player_get(
 				local_player_get_player_index(render.local_player_index))->unit_index;
+#ifdef HALO_LINUX
+			/* port: with the tick on a thread of its own (HALO_TICK_THREAD,
+			the Vita's) a weapon switch or drop sets the weapon NONE, and a
+			death the unit, while the render draws them: each read once and
+			checked (the weapon was checked, then read again for weapon_get) */
+			long weapon_index= *(volatile long *)&first_person_weapon->weapon_index;
+
+			if (unit_index!=NONE &&
+				unit_try_and_get(unit_index) &&
+				first_person_weapon->visible &&
+				first_person_weapon->unit_index!=NONE &&
+				weapon_index!=NONE &&
+				weapon_try_and_get(weapon_index))
+#else
+			long weapon_index= first_person_weapon->weapon_index;
 
 			if (unit_index!=NONE &&
 				first_person_weapon->visible &&
 				first_person_weapon->unit_index!=NONE &&
-				first_person_weapon->weapon_index!=NONE)
+				weapon_index!=NONE)
+#endif
 			{
 				struct unit_datum *unit= unit_get(unit_index);
-				struct weapon_datum *weapon= weapon_get(first_person_weapon->weapon_index);
+				struct weapon_datum *weapon= weapon_get(weapon_index);
 				struct weapon_definition *weapon_definition= weapon_definition_get(weapon->definition_index);
 
 				if (weapon_definition->weapon.interface_definition.first_person_animations.index!=NONE)
@@ -549,7 +565,7 @@ void first_person_weapon_draw(
 							&render.camera.position,
 							0.0f,
 							&model_effect,
-							first_person_weapon->weapon_index,
+							weapon_index,
 							0,
 							FLAG(_render_model_first_person_bit));
 					}
@@ -574,7 +590,7 @@ void first_person_weapon_draw(
 							&render.camera.position,
 							0.0f,
 							&model_effect,
-							first_person_weapon->weapon_index,
+							weapon_index,
 							0,
 							FLAG(_render_model_first_person_bit));
 					}
@@ -1226,6 +1242,7 @@ static void first_person_weapon_build_node_matrices(
 	short local_player_index)
 {
 	struct first_person_weapon *first_person_weapon= first_person_weapon_get(local_player_index);
+	long weapon_index;
 
 	if (!first_person_weapon->rendered)
 	{
@@ -1257,20 +1274,30 @@ static void first_person_weapon_build_node_matrices(
 	first_person_weapon->render_forward= render.camera.forward;
 	first_person_weapon->rendered= TRUE;
 
-	if (first_person_weapon->weapon_index!=NONE &&
-		!weapon_try_and_get(first_person_weapon->weapon_index))
+#ifdef HALO_LINUX
+	/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+	Vita's) a weapon switch or drop sets the weapon NONE while the render
+	builds its matrices: the weapon read once (it was checked, then read
+	again for weapon_get) */
+	weapon_index= *(volatile long *)&first_person_weapon->weapon_index;
+#else
+	weapon_index= first_person_weapon->weapon_index;
+#endif
+	if (weapon_index!=NONE &&
+		!weapon_try_and_get(weapon_index))
 	{
 		error(
 			_error_log,
 			"local player %d, weapon (0x%x), deleted unexpectedly",
 			local_player_index,
-			first_person_weapon->weapon_index);
+			weapon_index);
 		first_person_weapon_forget_weapon(local_player_index);
+		weapon_index= NONE;
 	}
 
-	if (first_person_weapon->weapon_index!=NONE)
+	if (weapon_index!=NONE)
 	{
-		struct weapon_datum *weapon= weapon_get(first_person_weapon->weapon_index);
+		struct weapon_datum *weapon= weapon_get(weapon_index);
 		struct weapon_definition *weapon_definition= weapon_definition_get(weapon->definition_index);
 		struct model *model= model_definition_get(
 			weapon_definition->weapon.interface_definition.first_person_model.index);
@@ -2453,6 +2480,22 @@ static short first_person_weapon_index_from_weapon_index(
 		{
 			long unit_index= player_get(player_index)->unit_index;
 
+#ifdef HALO_LINUX
+			/* port: the render asks this (lights_preprocess_scene's lens
+			flares) while the tick, on a thread of its own (HALO_TICK_THREAD,
+			the Vita's), switches and drops weapons: the current weapon read
+			once (it was checked, then read again as the index of the weapon
+			slot, -1 once the tick put the weapon away) */
+			struct unit_datum *unit= unit_index!=NONE ? unit_try_and_get(unit_index) : NULL;
+			short current_weapon_index= unit ? *(volatile short *)&unit->unit.current_weapon_index : NONE;
+
+			if (current_weapon_index>=0 &&
+				current_weapon_index<MAXIMUM_WEAPONS_PER_UNIT &&
+				weapon_index==unit->unit.weapon_object_indices[current_weapon_index])
+			{
+				return local_player_index;
+			}
+#else
 			if (unit_index!=NONE)
 			{
 				struct unit_datum *unit= unit_get(unit_index);
@@ -2463,6 +2506,7 @@ static short first_person_weapon_index_from_weapon_index(
 					return local_player_index;
 				}
 			}
+#endif
 		}
 	}
 
