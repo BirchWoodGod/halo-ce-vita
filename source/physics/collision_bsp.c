@@ -1883,19 +1883,34 @@ static boolean collision_bsp_test_vector_recursive(
 #ifdef HALO_LINUX
 	/* (port) the calls in tail position (the one child a node's span
 	reaches, and the far child after the near one) made as the loop's next
-	turn: the same nodes in the same order, with the same values */
+	turn: the same nodes in the same order, with the same values. The point,
+	the vector and the bsp's node and plane blocks read once a call, where
+	each node read them again through the context (a store in the loop - the
+	split's last plane, the call - keeping the compiler from holding them):
+	nothing the walk writes is any of them, and the plane's distance and dot
+	product are plane3d_distance_to_point's and dot_product3d's operations in
+	their order (a product's operands in either order are the same product) */
+	real const point_x = data->point->x;
+	real const point_y = data->point->y;
+	real const point_z = data->point->z;
+	real const vector_i = data->vector->i;
+	real const vector_j = data->vector->j;
+	real const vector_k = data->vector->k;
+	struct tag_block const nodes = data->bsp->bsp3d.nodes;
+	struct tag_block const planes = data->bsp->bsp3d.planes;
+
 	while (!(node_index & LONG_MIN))
 	{
 		struct bsp3d_node const *node = TAG_BLOCK_GET_ELEMENT(
-			&data->bsp->bsp3d.nodes,
+			&nodes,
 			node_index,
 			struct bsp3d_node);
 		real_plane3d const *plane = TAG_BLOCK_GET_ELEMENT(
-			&data->bsp->bsp3d.planes,
+			&planes,
 			node->plane_designator,
 			real_plane3d);
-		real distance = plane3d_distance_to_point(plane, data->point);
-		real dot = dot_product3d(data->vector, &plane->n);
+		real distance = (point_x*plane->n.i + point_y*plane->n.j + point_z*plane->n.k) - plane->d;
+		real dot = vector_i*plane->n.i + vector_j*plane->n.j + vector_k*plane->n.k;
 		real distance0 = dot*t0 + distance;
 		real distance1 = dot*t1 + distance;
 		boolean reaches_back = distance0 < 0.f || distance1 < 0.f;
