@@ -430,8 +430,11 @@ static struct
 	int stun_started;
 	int reported_symmetric;
 
-	/* hosting: while the game listens on hosting_socket */
+	/* hosting: while the game listens on hosting_socket and its server
+	takes other machines (game_accepts_remote: p2p_set_game_accepts_remote;
+	a Split Screen game's listens and takes none: game_local) */
 	int hosting_socket;
+	int game_accepts_remote;
 	int hosting;
 	int has_token;
 	unsigned char token[P2P_TOKEN_SIZE];
@@ -2707,6 +2710,17 @@ unsigned short p2p_game_port_wire(unsigned short port)
 	return game_port_swap(port);
 }
 
+/* whether the game's server is a Split Screen game's: it listens, but takes
+no other machine (p2p_set_game_accepts_remote). Nothing of it is hosted,
+and no peer reaches the game: the game turns away a machine not on this one
+itself (network_game_server_add_new_client), and does not answer searches
+(network_server_message_handler.c), but a peer from before (a game hosted
+earlier, a game joined) is kept out here too */
+static int game_local(void)
+{
+	return p2p.hosting_socket >= 0 && !p2p.game_accepts_remote;
+}
+
 /* whether a peer may reach this port of the game's: one a socket of the
 game's listens on (stream), or a datagram socket's, bound or sent from to a
 peer */
@@ -2785,7 +2799,7 @@ static void datagram_received(struct peer *peer, const unsigned char *inner, int
 		return;
 	/* only to the game (at its ports here: p2p_game_port_local) */
 	port = p2p_game_port_local(get_short(inner + 3));
-	if (!game_port_open(0, port))
+	if (game_local() || !game_port_open(0, port))
 		return;
 	proxy = find_proxy((int)(peer - p2p.peers), get_short(inner + 1), 1);
 	if (!proxy)
@@ -2936,7 +2950,7 @@ static void stream_opened(struct stream *stream, const unsigned char *data, int 
 	/* only to where the game listens (its port here: p2p_game_port_local):
 	nothing else here is the peer's to reach */
 	port = p2p_game_port_local(get_short(data));
-	if (game_port_open(1, port))
+	if (!game_local() && game_port_open(1, port))
 	{
 		stream->socket = open_socket(SOCK_STREAM, p2p.local_address, 0, &stream->local_port);
 		if (stream->socket >= 0)
@@ -3625,17 +3639,58 @@ void p2p_new_invite_if_listed(void)
 	}
 }
 
+/* the most players a game this machine hosts takes until its server says
+(network_server_manager.c's network_game_server_port_maximum_players): a
+Vita, and a build that plays as one, offers the Xbox's 16 at most */
+#if defined(HALO_VITA) || defined(HALO_NET_AS_VITA)
+#define UNSAID_MAXIMUM_PLAYERS 16
+#else
+#define UNSAID_MAXIMUM_PLAYERS (P2P_MAXIMUM_PEERS + 1)
+#endif
+
 /* the hosted game's players, as the game says; else the host and the
-machines the tunnel reaches */
+machines the tunnel reaches, of the build's most */
 static void hosted_player_counts(int *count, int *maximum)
 {
 	*count = p2p.game_player_maximum > 0 ? p2p.game_player_count : connected_player_count() + 1;
-	*maximum = p2p.game_player_maximum > 0 ? p2p.game_player_maximum : P2P_MAXIMUM_PEERS + 1;
+	*maximum = p2p.game_player_maximum > 0 ? p2p.game_player_maximum : UNSAID_MAXIMUM_PLAYERS;
+	if (*count > *maximum)
+		*count = *maximum;
+}
+
+/* a Split Screen game began: the players who reached this machine for a
+game it hosted before are let go (the tunnel would carry nothing of theirs
+to the game: game_local), as the host they reached hosts no more. Not in ad
+hoc play, whose peers are the group's machines */
+static void drop_joiners(void)
+{
+	int index;
+
+	if (p2p.adhoc)
+		return;
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+	{
+		struct peer *peer = &p2p.peers[index];
+
+		if (peer->used && !peer->is_host)
+			drop_peer(peer, "this machine's game is a Split Screen one, which no one joins");
+	}
 }
 
 static void update_hosting(void)
 {
-	int want = p2p.hosting_socket >= 0;
+	/* (a Split Screen game's server listens too, and is not hosted) */
+	int want = p2p.hosting_socket >= 0 && p2p.game_accepts_remote;
+	int local = game_local();
+	static int was_local;
+
+	if (local && !was_local)
+	{
+		platform_log("Internet play: a Split Screen game: not hosted (no invite, code or server browser listing, "
+			"and no one reaches it)");
+		drop_joiners();
+	}
+	was_local = local;
 
 	if (p2p.adhoc)
 	{
@@ -3699,6 +3754,8 @@ static void update_hosting(void)
 		p2p.hosting = 0;
 		p2p_signal_stop_hosting();
 		p2p_discord_set_hosting(NULL, 0, 0);
+		/* (the code is no longer shown as this machine's) */
+		set_status(N_("stopped hosting"));
 	}
 	if (p2p.hosting)
 	{
@@ -3712,6 +3769,16 @@ static void update_hosting(void)
 			p2p_discord_set_hosting(p2p.invite + strlen("halo://join/"), count, maximum);
 		}
 	}
+}
+
+void p2p_set_game_accepts_remote(int accepts)
+{
+	accepts = accepts != 0;
+	if (accepts == p2p.game_accepts_remote)
+		return;
+	pthread_mutex_lock(&p2p_lock);
+	p2p.game_accepts_remote = accepts;
+	pthread_mutex_unlock(&p2p_lock);
 }
 
 void p2p_set_game_player_counts(int count, int maximum)
@@ -3899,6 +3966,22 @@ int p2p_hosting_code(char *code, int size)
 	if (p2p.hosting && p2p.code[0])
 	{
 		memcpy(code, p2p.code, P2P_CODE_SIZE);
+		result = 1;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+int p2p_hosting_invite(char *invite, int size)
+{
+	int result = 0;
+
+	if (!p2p.running || size < P2P_LINK_SIZE)
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	if (p2p.hosting && p2p.has_token)
+	{
+		memcpy(invite, p2p.invite, P2P_LINK_SIZE);
 		result = 1;
 	}
 	pthread_mutex_unlock(&p2p_lock);
@@ -4291,7 +4374,11 @@ static void *p2p_thread(void *unused)
 			int count, maximum;
 
 			hosted_player_counts(&count, &maximum);
-			p2p_lobby_update(p2p.hosting && p2p.has_token ? p2p.token : NULL, count, maximum);
+			/* (listed once the game's server has said its players: until
+			then the listing would be the last game's, with the tunnel's
+			count) */
+			p2p_lobby_update(p2p.hosting && p2p.has_token && p2p.game_player_maximum > 0 ? p2p.token : NULL, count,
+				maximum);
 			if (p2p_lobby_listed())
 			{
 				p2p.token_listed = 1;

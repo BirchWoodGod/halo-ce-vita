@@ -23,6 +23,15 @@ port/vita/tests/mqtt_test_broker.py as the signalling broker:
   (as the game's client connects to its host: here the other way round,
   which takes the same path), carried over KCP; they exchange a message.
 
+With "local-host" and "local-join CODE INVITE" (run_vita_p2p_test.sh
+local) the host hosts a System Link game, the joiner reaches it by the code
+and passes a datagram; then the host's game becomes a Split Screen one (its
+server listening again, taking no other machine: p2p_set_game_accepts_remote
+0), as a player backing out and picking Split Screen does. The host must
+show no code or invite, drop the joiner, and nothing the joiner sends may
+reach the game's sockets; the code and the invite kept from before must
+reach nothing.
+
 With "adhoc-host" and "adhoc-join" (run_vita_p2p_test.sh adhoc) there is
 no broker: each process joins an ad hoc group through vita_net.c's connect
 thread (the network check dialog scripted by the mock) and internet play
@@ -51,6 +60,10 @@ xbox_kernel.c, platform.c), here */
 
 static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int connected;
+/* (local: the connections made, and the host's lines) */
+static volatile int connections;
+static volatile int dropped_joiner;
+static volatile int local_said;
 
 void platform_log(const char *format, ...)
 {
@@ -65,7 +78,11 @@ void platform_log(const char *format, ...)
 	fflush(stdout);
 	pthread_mutex_unlock(&log_lock);
 	if (strstr(line, "Internet play: connected to"))
-		connected = 1;
+		connected = 1, connections++;
+	if (strstr(line, "this machine's game is a Split Screen one"))
+		dropped_joiner = 1;
+	if (strstr(line, "Internet play: a Split Screen game: not hosted"))
+		local_said = 1;
 }
 
 const char *platform_data_root(void)
@@ -272,7 +289,9 @@ static int host(void)
 	listener = bound_socket(SOCK_STREAM, local, htons(2302));
 	datagrams = bound_socket(SOCK_DGRAM, local, htons(2302));
 	check(listener >= 0 && datagrams >= 0 && posix_socket_listen(listener, 4) == 0, "host: sockets on 2302");
-	/* (as xnet.c tells internet play: the ports peers may reach) */
+	/* (as xnet.c tells internet play: the ports peers may reach; and as the
+	game does making a System Link server: one that takes other machines) */
+	p2p_set_game_accepts_remote(1);
 	p2p_socket_port(listener, 1, 1, htons(2302));
 	p2p_socket_port(datagrams, 0, 0, htons(2302));
 	if (!getenv("TEST_ADHOC"))
@@ -332,6 +351,7 @@ static int joiner(const char *code)
 	datagrams = bound_socket(SOCK_DGRAM, local, htons(2302));
 	listener = bound_socket(SOCK_STREAM, local, htons(2302));
 	check(datagrams >= 0 && listener >= 0 && posix_socket_listen(listener, 4) == 0, "joiner: sockets on 2302");
+	p2p_set_game_accepts_remote(1);
 	p2p_socket_port(listener, 1, 1, htons(2302));
 	p2p_socket_port(datagrams, 0, 0, htons(2302));
 	if (code)
@@ -369,12 +389,169 @@ static int joiner(const char *code)
 	return failures;
 }
 
+
+/* ---------- local: a Split Screen game is not hosted */
+
+/* the file the host makes once its game is a Split Screen one (TEST_SYNC) */
+static void local_signal(void)
+{
+	FILE *file = fopen(getenv("TEST_SYNC"), "w");
+
+	if (file)
+		fclose(file);
+}
+
+static int local_wait(int seconds)
+{
+	int tenth;
+
+	for (tenth = 0; tenth < seconds * 10; tenth++)
+	{
+		if (!access(getenv("TEST_SYNC"), F_OK))
+			return 1;
+		usleep(100000);
+	}
+	return 0;
+}
+
+static int local_host(void)
+{
+	unsigned long local = inet_addr("127.0.0.1");
+	int listener, datagrams, tenth, size, arrived = 0;
+	char code[P2P_CODE_SIZE];
+	char invite[256];
+	char buffer[256];
+	struct sockaddr_in from;
+	int from_length = sizeof(from);
+
+	p2p_initialize(local);
+	/* a System Link game first: hosted, with a code and an invite */
+	p2p_set_game_accepts_remote(1);
+	listener = bound_socket(SOCK_STREAM, local, htons(2302));
+	datagrams = bound_socket(SOCK_DGRAM, local, htons(2302));
+	check(listener >= 0 && datagrams >= 0 && posix_socket_listen(listener, 4) == 0, "host: sockets on 2302");
+	p2p_socket_port(listener, 1, 1, htons(2302));
+	p2p_socket_port(datagrams, 0, 0, htons(2302));
+	for (tenth = 0; tenth < 100 && !p2p_hosting_code(code, sizeof(code)); tenth++)
+		usleep(100000);
+	check(p2p_hosting_code(code, sizeof(code)) && p2p_hosting_invite(invite, sizeof(invite)),
+		"host: hosting the System Link game, with a code and an invite");
+	printf("CODE %s\nINVITE %s\n", code, invite);
+	fflush(stdout);
+	check(wait_connected(40), "host: the tunnel reached the joiner");
+	size = readable(datagrams, 15000) ? posix_socket_recvfrom(datagrams, buffer, sizeof(buffer), 0, &from, &from_length) : -1;
+	check(size == 11 && !memcmp(buffer, "hello host!", 11), "host: the joiner's datagram arrived");
+	/* backed out to the main menu (the server's sockets closed), then Split
+	Screen: the game says it takes no other machine, and listens again */
+	p2p_socket_closed(listener, 0);
+	posix_socket_close(listener);
+	p2p_socket_closed(datagrams, htons(2302));
+	posix_socket_close(datagrams);
+	p2p_set_game_accepts_remote(0);
+	listener = bound_socket(SOCK_STREAM, local, htons(2302));
+	datagrams = bound_socket(SOCK_DGRAM, local, htons(2302));
+	check(listener >= 0 && datagrams >= 0 && posix_socket_listen(listener, 4) == 0, "host: the Split Screen game's sockets on 2302");
+	p2p_socket_port(listener, 1, 1, htons(2302));
+	p2p_socket_port(datagrams, 0, 0, htons(2302));
+	for (tenth = 0; tenth < 30 && (p2p_hosting_code(code, sizeof(code)) || !dropped_joiner); tenth++)
+		usleep(100000);
+	check(local_said, "host: said the Split Screen game is not hosted");
+	check(!p2p_hosting_code(code, sizeof(code)) && !p2p_hosting_invite(invite, sizeof(invite)),
+		"host: no code or invite in the Split Screen game");
+	check(dropped_joiner, "host: let the joiner of the System Link game go");
+	local_signal();
+	/* what the joiner tries (its datagrams and stream through the link it had,
+	the code and the invite again) never reaches the game */
+	for (tenth = 0; tenth < 250; tenth++)
+	{
+		if (readable(datagrams, 100) && posix_socket_recv(datagrams, buffer, sizeof(buffer), 0) >= 0)
+			arrived++;
+		if (readable(listener, 0))
+		{
+			int accepted = posix_socket_accept(listener, NULL, NULL);
+
+			arrived++;
+			if (accepted >= 0)
+				posix_socket_close(accepted);
+		}
+	}
+	check(!arrived, "host: nothing from the joiner reached the Split Screen game");
+	check(connections == 1, "host: no one connected again");
+	check(!p2p_hosting_code(code, sizeof(code)), "host: still no code");
+	return failures;
+}
+
+static int local_joiner(const char *code, const char *invite)
+{
+	unsigned long local = inet_addr("127.0.0.2");
+	int datagrams, tenth, count, sent = 0, stream;
+	unsigned long targets[4];
+	unsigned short ports[4];
+	unsigned long host_address = 0;
+	struct sockaddr_in to;
+
+	p2p_initialize(local);
+	datagrams = bound_socket(SOCK_DGRAM, local, htons(2302));
+	check(datagrams >= 0, "joiner: a socket on 2302");
+	p2p_socket_port(datagrams, 0, 0, htons(2302));
+	check(p2p_join_code(code), "joiner: the code is a code");
+	check(wait_connected(40), "joiner: the tunnel reached the host");
+	count = 0;
+	for (tenth = 0; tenth < 50 && !count; tenth++)
+	{
+		count = p2p_broadcast_targets(htons(2302), targets, ports, 4);
+		if (!count)
+			usleep(100000);
+	}
+	check(count == 1, "joiner: one stand-in for the host's port 2302");
+	if (!count)
+		return 1;
+	host_address = targets[0];
+	winsock_address(&to, targets[0], ports[0]);
+	check(posix_socket_sendto(datagrams, "hello host!", 11, 0, &to, sizeof(to)) == 11, "joiner: sent a datagram");
+	check(local_wait(60), "joiner: the host's game is a Split Screen one");
+	/* through the link it had: datagrams to the game's port, and a stream */
+	for (tenth = 0; tenth < 20; tenth++)
+	{
+		sent += posix_socket_sendto(datagrams, "hello again", 11, 0, &to, sizeof(to)) == 11;
+		usleep(100000);
+	}
+	{
+		unsigned long address = host_address;
+		unsigned short port = htons(2302);
+
+		if (p2p_outgoing(1, -1, &address, &port) == 1)
+		{
+			struct sockaddr_in target;
+
+			stream = posix_socket(AF_INET, SOCK_STREAM, 0);
+			posix_socket_set_nonblocking(stream, 1);
+			winsock_address(&target, address, port);
+			posix_socket_connect(stream, &target, sizeof(target));
+			sleep(2);
+			posix_socket_send(stream, "stream to host!!", 16, 0);
+		}
+	}
+	printf("joiner: %d datagrams sent through the old link\n", sent);
+	/* the code again, then the invite: neither reaches the host */
+	connected = 0;
+	check(p2p_join_code(code), "joiner: the kept code again");
+	check(!wait_connected(10), "joiner: the kept code reached nothing");
+	check(p2p_join_invite(invite), "joiner: the kept invite");
+	check(!wait_connected(10), "joiner: the kept invite reached nothing");
+	return failures;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc >= 2 && !strcmp(argv[1], "host"))
 		return host();
 	if (argc >= 3 && !strcmp(argv[1], "join"))
 		return joiner(argv[2]);
+	if (argc >= 2 && !strcmp(argv[1], "local-host"))
+		return local_host();
+	if (argc >= 4 && !strcmp(argv[1], "local-join"))
+		return local_joiner(argv[2], argv[3]);
 	if (argc >= 2 && !strcmp(argv[1], "adhoc-host"))
 		return setenv("TEST_ADHOC", "1", 1), host();
 	if (argc >= 2 && !strcmp(argv[1], "adhoc-join"))

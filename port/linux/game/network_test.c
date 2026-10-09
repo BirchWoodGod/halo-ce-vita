@@ -14,6 +14,14 @@ Automated system link sessions for testing the netcode without the menus
 - "local:<map>[:<variant>...]" the same with a local (split screen) game
   of one player, which starts only where a local game may have one (the
   Vita's rules, HALO_PORT_VITA_NETWORK);
+  debug.network_test_local_after: a "host:" machine hosts its game's lobby
+  for that many seconds (never starting it), then goes back as the main menu
+  does and plays a local game on the map instead, as a player who hosted
+  and then picked Split Screen does (internet play must host nothing of the
+  local game: p2p.c); debug.network_test_invite_file: a hosting machine
+  writes its invite link to that file of the data folder once it hosts for
+  internet play (a test's joiner opens it later, as a link kept from
+  before);
 - "join" searches for games and joins the first it finds, as picking it in
   the system link list does;
 - "join-public" first browses internet play's public games (the server
@@ -127,6 +135,13 @@ static struct
 	short mode;
 	/* "local:": a local (split screen) game, not a system link one */
 	boolean local;
+	/* debug.network_test_local_after: the seconds the hosted game's lobby
+	lasts before a local game takes its place, and how long it has; and
+	debug.network_test_invite_file, written once */
+	real local_after;
+	real hosted_seconds;
+	char invite_file[256];
+	boolean invite_written;
 	char map_name[64];
 	char variant_name[64];
 	/* ... the variant of this game, of variant_name's list; and the seconds
@@ -287,6 +302,9 @@ static void network_test_read_settings(
 	network_test.retries = (long)config_integer("debug.network_test_retry");
 	snprintf(network_test.lobby_name, sizeof(network_test.lobby_name), "%s",
 		config_string("debug.network_test_public_name"));
+	network_test.local_after = network_test.local ? 0.0f : (real)config_real("debug.network_test_local_after");
+	snprintf(network_test.invite_file, sizeof(network_test.invite_file), "%s",
+		config_string("debug.network_test_invite_file"));
 	if (network_test.mode != _network_test_off)
 		platform_log("network test: %s", setting);
 }
@@ -1148,6 +1166,51 @@ void network_test_update(
 		}
 	}
 
+	/* debug.network_test_invite_file: the invite, once hosting (the test
+	keeps it for a joiner that opens it later) */
+	if (network_test.mode == _network_test_host && network_test.invite_file[0] && !network_test.invite_written)
+	{
+		char invite[256];
+
+		if (p2p_hosting_invite(invite, sizeof(invite)))
+		{
+			FILE *file = fopen(network_test.invite_file, "w");
+
+			network_test.invite_written = TRUE;
+			if (file)
+			{
+				fprintf(file, "%s\n", invite);
+				fclose(file);
+			}
+			platform_log("network test: the invite written to %s%s", network_test.invite_file, file ? "" : " (failed)");
+		}
+	}
+	/* debug.network_test_local_after: the hosted lobby given up for a local
+	(Split Screen) game, as a player backing out to the main menu and
+	picking Split Screen does */
+	if (network_test.mode == _network_test_host && network_test.local_after > 0.0f && !network_test.local &&
+		network_test.set_up && main_menu_loaded)
+	{
+		network_test.hosted_seconds += seconds;
+		if (network_test.hosted_seconds >= network_test.local_after)
+		{
+			ui_widgets_close_all();
+			dispose_global_network_game_client();
+			dispose_global_network_game_server();
+			network_game_accept_remote_connections(FALSE);
+			network_test.local = TRUE;
+			network_test.set_up = FALSE;
+			network_test.started = FALSE;
+			network_test.map_set = FALSE;
+			network_test.map_path[0] = 0;
+			network_test.map_checked_seconds = 0.0f;
+			network_test.player_added = FALSE;
+			network_test.setup_seconds = 0.0f;
+			network_test.menu_seconds = 0.0f;
+			platform_log("network test: the hosted game given up for a local one");
+		}
+	}
+
 	if (!main_menu_loaded)
 		return;
 	network_test.menu_seconds += seconds;
@@ -1185,6 +1248,10 @@ void network_test_update(
 			else
 			{
 				player_ui_fast_setup_network_server();
+				/* (debug.network_test_local_after: its lobby kept, a joiner's
+				countdown held, as Create Game's is) */
+				if (global_network_game_server_get() && network_test.local_after > 0.0f)
+					network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
 				if (global_network_game_server_get())
 					platform_log("network test: hosting %s", network_test.map_name);
 				else
@@ -1248,7 +1315,10 @@ void network_test_update(
 			}
 			if (!network_test.player_added && network_test.setup_seconds >= 2.0f && global_network_game_client_get())
 				network_test.player_added = network_game_client_add_player(global_network_game_client_get(), 0);
-			if (network_test.setup_seconds >= network_test.start_delay)
+			/* (debug.network_test_local_after: the hosted game's lobby is
+			never started, the local game is) */
+			if (network_test.setup_seconds >= network_test.start_delay &&
+				(network_test.local || network_test.local_after <= 0.0f))
 			{
 				network_test.started = TRUE;
 				network_game_client_request_immediate_start();

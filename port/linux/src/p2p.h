@@ -104,6 +104,16 @@ are shown). The game's server calls it as they change (calling it with the
 same counts again costs little) */
 void p2p_set_game_player_counts(int count, int maximum);
 
+/* whether the game's server takes other machines (the game's
+network_game_accept_remote_connections, which it sets before it makes its
+server): System Link, Create Game (Internet or LAN), co-op hosted online, a
+dedicated server. A Split Screen game's server listens too but takes none
+(the game's network_game_is_splitscreen_local), so while it listens with
+this 0 nothing is hosted: no invite or code, no server browser listing, no
+Discord invite, no signalling for joiners, and no peer reaches the game's
+ports. 0 until the game says (a server listening before it is not hosted) */
+void p2p_set_game_accepts_remote(int accepts);
+
 /* the hosted game's details as the server browser lists them (p2p_lobby.c;
 printable ASCII is kept; NULL leaves one as it was): the game's server calls
 it as they change (calling it with the same again costs little). The
@@ -226,6 +236,9 @@ int p2p_address_origin(unsigned long address);
 /* while this machine hosts with internet play on: copies its code (with
 the dash) and returns nonzero */
 int p2p_hosting_code(char *code, int size);
+/* ... its invite link (halo://join/...; a bearer token: for the automated
+tests, network_test.c's debug.network_test_invite_file), returning nonzero */
+int p2p_hosting_invite(char *invite, int size);
 /* while this machine hosts for the internet: whether its game is listed in
 everyone's server browser (public) or reached only by its code and invite
 (private); going private makes a new invite, so that one seen in a listing

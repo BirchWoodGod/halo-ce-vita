@@ -156,6 +156,7 @@ static void fuzz_reset(void)
 	/* the game's sockets: UDP 2302, and TCP 2302 listening (it hosts) */
 	fuzz_game_udp = 50;
 	fuzz_game_tcp = 51;
+	p2p_set_game_accepts_remote(1);
 	p2p_socket_port(fuzz_game_udp, 0, 0, network_short(2302));
 	p2p_socket_port(fuzz_game_tcp, 1, 1, network_short(2302));
 	/* the peer, reached */
