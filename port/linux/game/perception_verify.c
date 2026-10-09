@@ -38,6 +38,7 @@ static char const *const verify_kind_names[NUMBER_OF_PERCEPTION_VERIFY_KINDS] =
 	"refresh walks",
 	"refresh walks resumed after a change",
 	"refresh object types",
+	"status reachable weights",
 };
 
 /* the walk being checked */

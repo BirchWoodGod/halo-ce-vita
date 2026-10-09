@@ -21,6 +21,8 @@ enum
 	_perception_verify_refresh_resumed,
 	/* an object's type read from its header by the timeslice refresh, against its datum's */
 	_perception_verify_refresh_object_type,
+	/* a status refresh's reachable mark: the weights it computed as before, against the refresh's own at its end */
+	_perception_verify_reachable_weights,
 	NUMBER_OF_PERCEPTION_VERIFY_KINDS
 };
 

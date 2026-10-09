@@ -275,6 +275,7 @@ symbols in this file:
 #include "units/biped_definitions.h"
 #ifdef HALO_LINUX
 #include "game/players.h"
+#include <string.h>
 #include <stdlib.h>
 /* (HALO_TICK_PROFILE) the perception's time and counts (lines_profile.c) */
 #include "lines_profile.h"
@@ -3929,6 +3930,44 @@ boolean actor_perception_become_acknowledged(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) actor_perception_unreachable(actor_index, prop_index, FALSE) as
+prop_status_refresh calls it: the prop is marked reachable (unreachable_ticks
+0, last_unreachable_time NONE), but its unopposable_enemy and target_weight
+are not computed here, as the end of prop_status_refresh computes them again
+and keeps those. Nothing between reads either of them, or the unopposable
+trigger and retreat fields actor_compute_prop_unopposable may clear
+(actor_perception_desire_prop reads the actor, its encounter and the unit;
+the second unreachable test reads last_unreachable_time, set here as
+before), and both computations read the same values: the second call of
+actor_compute_prop_unopposable would find the prop as the first left it, and
+clear (or not) what the first did; actor_compute_prop_target_weight writes
+nothing. An enemy prop the actor can reach with its weapon goes through here
+on every refresh of its status. HALO_AI_PERCEPTION_VERIFY=1 computes both
+here as before and compares them with the end's (perception_verify.c). */
+static boolean actor_perception_reachable_verify_pending;
+static boolean actor_perception_reachable_verify_unopposable;
+static real actor_perception_reachable_verify_target_weight;
+
+static void actor_perception_reachable_in_refresh(
+	long actor_index,
+	long prop_index)
+{
+	struct prop_datum *prop = prop_get(prop_index);
+
+	if (perception_verify_enabled())
+	{
+		actor_perception_unreachable(actor_index, prop_index, FALSE);
+		actor_perception_reachable_verify_pending = TRUE;
+		actor_perception_reachable_verify_unopposable = prop->unopposable_enemy;
+		actor_perception_reachable_verify_target_weight = prop->target_weight;
+		return;
+	}
+	prop->unreachable_ticks = 0;
+	prop->last_unreachable_time = NONE;
+}
+#endif
+
 void prop_status_refresh(
 	long actor_index,
 	long prop_index,
@@ -4503,14 +4542,23 @@ void prop_status_refresh(
 				(TEST_FLAG(definition->flags, _actor_definition_suicidal_melee_attack_bit) &&
 					prop->distance < definition->berserk.melee_attack_range))
 			{
+#ifdef HALO_LINUX
+				/* (actor_perception_reachable_in_refresh, above) */
+				actor_perception_reachable_in_refresh(actor_index, prop_index);
+#else
 				actor_perception_unreachable(actor_index, prop_index, FALSE);
+#endif
 			}
 		}
 
 		if (prop->last_unreachable_time != NONE &&
 			prop->last_unreachable_time + 150 < game_time)
 		{
+#ifdef HALO_LINUX
+			actor_perception_reachable_in_refresh(actor_index, prop_index);
+#else
 			actor_perception_unreachable(actor_index, prop_index, FALSE);
+#endif
 		}
 
 		if (prop->delay_requirement_decision)
@@ -4538,6 +4586,17 @@ void prop_status_refresh(
 
 		prop->unopposable_enemy = actor_compute_prop_unopposable(actor_index, prop_index);
 		prop->target_weight = actor_compute_prop_target_weight(actor_index, prop_index);
+#ifdef HALO_LINUX
+		if (actor_perception_reachable_verify_pending)
+		{
+			actor_perception_reachable_verify_pending = FALSE;
+			perception_verify_result(
+				_perception_verify_reachable_weights,
+				actor_perception_reachable_verify_unopposable == prop->unopposable_enemy &&
+					!memcmp(&actor_perception_reachable_verify_target_weight, &prop->target_weight, sizeof(real)),
+				"unopposable or target weight differs from the reachable mark's");
+		}
+#endif
 		prop->look_interest = actor_look_compute_prop_interest(actor_index, prop_index);
 		prop->refresh_stimuli = TRUE;
 	}
