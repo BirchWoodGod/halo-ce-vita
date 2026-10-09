@@ -275,7 +275,13 @@ symbols in this file:
 #include "units/biped_definitions.h"
 #ifdef HALO_LINUX
 #include "game/players.h"
+#include <string.h>
 #include <stdlib.h>
+/* (HALO_TICK_PROFILE) the perception's time and counts (lines_profile.c) */
+#include "lines_profile.h"
+/* (HALO_AI_PERCEPTION_VERIFY) */
+#include "perception_verify.h"
+#include "structures/cluster_partitions.h"
 #endif
 
 /* ---------- constants */
@@ -3924,6 +3930,44 @@ boolean actor_perception_become_acknowledged(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) actor_perception_unreachable(actor_index, prop_index, FALSE) as
+prop_status_refresh calls it: the prop is marked reachable (unreachable_ticks
+0, last_unreachable_time NONE), but its unopposable_enemy and target_weight
+are not computed here, as the end of prop_status_refresh computes them again
+and keeps those. Nothing between reads either of them, or the unopposable
+trigger and retreat fields actor_compute_prop_unopposable may clear
+(actor_perception_desire_prop reads the actor, its encounter and the unit;
+the second unreachable test reads last_unreachable_time, set here as
+before), and both computations read the same values: the second call of
+actor_compute_prop_unopposable would find the prop as the first left it, and
+clear (or not) what the first did; actor_compute_prop_target_weight writes
+nothing. An enemy prop the actor can reach with its weapon goes through here
+on every refresh of its status. HALO_AI_PERCEPTION_VERIFY=1 computes both
+here as before and compares them with the end's (perception_verify.c). */
+static boolean actor_perception_reachable_verify_pending;
+static boolean actor_perception_reachable_verify_unopposable;
+static real actor_perception_reachable_verify_target_weight;
+
+static void actor_perception_reachable_in_refresh(
+	long actor_index,
+	long prop_index)
+{
+	struct prop_datum *prop = prop_get(prop_index);
+
+	if (perception_verify_enabled())
+	{
+		actor_perception_unreachable(actor_index, prop_index, FALSE);
+		actor_perception_reachable_verify_pending = TRUE;
+		actor_perception_reachable_verify_unopposable = prop->unopposable_enemy;
+		actor_perception_reachable_verify_target_weight = prop->target_weight;
+		return;
+	}
+	prop->unreachable_ticks = 0;
+	prop->last_unreachable_time = NONE;
+}
+#endif
+
 void prop_status_refresh(
 	long actor_index,
 	long prop_index,
@@ -4498,14 +4542,23 @@ void prop_status_refresh(
 				(TEST_FLAG(definition->flags, _actor_definition_suicidal_melee_attack_bit) &&
 					prop->distance < definition->berserk.melee_attack_range))
 			{
+#ifdef HALO_LINUX
+				/* (actor_perception_reachable_in_refresh, above) */
+				actor_perception_reachable_in_refresh(actor_index, prop_index);
+#else
 				actor_perception_unreachable(actor_index, prop_index, FALSE);
+#endif
 			}
 		}
 
 		if (prop->last_unreachable_time != NONE &&
 			prop->last_unreachable_time + 150 < game_time)
 		{
+#ifdef HALO_LINUX
+			actor_perception_reachable_in_refresh(actor_index, prop_index);
+#else
 			actor_perception_unreachable(actor_index, prop_index, FALSE);
+#endif
 		}
 
 		if (prop->delay_requirement_decision)
@@ -4533,6 +4586,17 @@ void prop_status_refresh(
 
 		prop->unopposable_enemy = actor_compute_prop_unopposable(actor_index, prop_index);
 		prop->target_weight = actor_compute_prop_target_weight(actor_index, prop_index);
+#ifdef HALO_LINUX
+		if (actor_perception_reachable_verify_pending)
+		{
+			actor_perception_reachable_verify_pending = FALSE;
+			perception_verify_result(
+				_perception_verify_reachable_weights,
+				actor_perception_reachable_verify_unopposable == prop->unopposable_enemy &&
+					!memcmp(&actor_perception_reachable_verify_target_weight, &prop->target_weight, sizeof(real)),
+				"unopposable or target weight differs from the reachable mark's");
+		}
+#endif
 		prop->look_interest = actor_look_compute_prop_interest(actor_index, prop_index);
 		prop->refresh_stimuli = TRUE;
 	}
@@ -5352,11 +5416,34 @@ static void actor_perception_refresh_test_object(
 
 	while (object_index != NONE)
 	{
+#ifdef HALO_LINUX
+		/* (port) the object's header looked up once: its datum for the test
+		and object_mark_function's mark (the same compare and write on the
+		same datum), its type from the header (the type the datum holds, both
+		set when the object is made; HALO_AI_PERCEPTION_VERIFY=1 compares) */
+		struct object_header_datum const *header = object_header_get(object_index);
+		short object_type = header->type;
+		boolean newly_marked;
+
+		current_object = (struct object_datum *)header->datum;
+		halo_lines_stats.perception_refresh_objects++;
+		perception_verify_refresh_object_type(object_type, current_object->object.type);
+		newly_marked = current_object->object.magic_number != global_object_marker;
+		if (newly_marked)
+		{
+			current_object->object.magic_number = global_object_marker;
+		}
+
+		if (newly_marked)
+		{
+			if (object_type == _object_type_biped)
+#else
 		current_object = actor_perception_object_get(object_index);
 
 		if (object_mark_function(object_index))
 		{
 			if (current_object->object.type == _object_type_biped)
+#endif
 			{
 				struct unit_datum *unit =
 					(struct unit_datum *)current_object;
@@ -5501,7 +5588,11 @@ static void actor_perception_refresh_test_object(
 					}
 				}
 			}
+#ifdef HALO_LINUX
+			else if (object_type == _object_type_vehicle)
+#else
 			else if (current_object->object.type == _object_type_vehicle)
+#endif
 			{
 				struct unit_datum *vehicle =
 					(struct unit_datum *)current_object;
@@ -5515,7 +5606,11 @@ static void actor_perception_refresh_test_object(
 						NULL);
 				}
 			}
+#ifdef HALO_LINUX
+			else if (object_type == _object_type_projectile)
+#else
 			else if (current_object->object.type == _object_type_projectile)
+#endif
 			{
 				struct actor_perception_projectile_datum_view *projectile =
 					(struct actor_perception_projectile_datum_view *)
@@ -5819,6 +5914,116 @@ done:
 }
 
 
+#ifdef HALO_LINUX
+/* (port) the objects of one of a visible cluster's lists (collideable or
+not) tested by actor_perception_refresh_test_object, in the list's order as
+before: an actor's timeslice refresh tests every object in every cluster it
+can see, ~350-550 in b30's beach fight, nearly all scenery that it only
+marks. The list is walked up to ACTOR_PERCEPTION_REFRESH_BATCH references
+ahead (cluster_partition_walk_datums: the same references in the same
+order, asking which thread this is once for the batch, not once an object),
+with hints (__builtin_prefetch) for each object's header as it is reached
+and for the datum lines the test reads (marker stamp, child and sibling
+links) of the object a few places on. The tests change no cluster list
+(nothing in them connects or disconnects an object), but if one did
+(cluster_partition_changes moved), the walk goes on from the reference after
+the last object tested, read then, as the walk between tests read it.
+HALO_AI_PERCEPTION_VERIFY=1 walks each list again the original way
+afterwards and compares (perception_verify.c). */
+#define ACTOR_PERCEPTION_REFRESH_BATCH 32
+#define ACTOR_PERCEPTION_REFRESH_AHEAD 4
+
+static __inline void actor_perception_prefetch_object_datum(
+	long object_index)
+{
+	short absolute_index = (short)object_index;
+
+	if (absolute_index >= 0 && absolute_index < object_header_data->count)
+	{
+		struct object_header_datum const *header = (struct object_header_datum const *)
+			((char const *)object_header_data->data + object_header_data->size * absolute_index);
+		char const *datum = (char const *)header->datum;
+
+		if (datum)
+		{
+			/* (the marker stamp; the child and sibling links) */
+			__builtin_prefetch(datum + offsetof(struct object_datum, object.magic_number), 1);
+			__builtin_prefetch(datum + offsetof(struct object_datum, object.next_object_index));
+			__builtin_prefetch(datum + offsetof(struct object_datum, object.parent_object_index));
+		}
+	}
+}
+
+static void actor_perception_refresh_cluster(
+	long actor_index,
+	short cluster_index,
+	boolean collideable,
+	struct actor_perception_refresh_list *enemy_list,
+	struct actor_perception_refresh_list *friend_list)
+{
+	struct cluster_partition const *partition = collideable ?
+		&collideable_object_cluster_partition :
+		&noncollideable_object_cluster_partition;
+	long object_indices[ACTOR_PERCEPTION_REFRESH_BATCH];
+	long references_after[ACTOR_PERCEPTION_REFRESH_BATCH];
+	long reference_index = NONE;
+	long count = cluster_partition_walk_datums(
+		partition,
+		cluster_index,
+		&reference_index,
+		object_indices,
+		references_after,
+		ACTOR_PERCEPTION_REFRESH_BATCH);
+
+	while (count > 0)
+	{
+		unsigned long changes = cluster_partition_changes();
+		boolean resumed = FALSE;
+		long index;
+
+		for (index = 0; index < count; index++)
+		{
+			short absolute_index = (short)object_indices[index];
+
+			if (absolute_index >= 0 && absolute_index < object_header_data->count)
+			{
+				__builtin_prefetch((char const *)object_header_data->data + object_header_data->size * absolute_index);
+			}
+		}
+		for (index = 0; index < count; index++)
+		{
+			if (index + ACTOR_PERCEPTION_REFRESH_AHEAD < count)
+			{
+				actor_perception_prefetch_object_datum(object_indices[index + ACTOR_PERCEPTION_REFRESH_AHEAD]);
+			}
+			perception_verify_refresh_object(object_indices[index]);
+			actor_perception_refresh_test_object(actor_index, object_indices[index], enemy_list, friend_list);
+			if (cluster_partition_changes() != changes && index + 1 < count)
+			{
+				/* (a list changed: on from the reference after this object, as the walk would) */
+				perception_verify_refresh_resumed();
+				reference_index = references_after[index];
+				resumed = TRUE;
+				break;
+			}
+		}
+		if (!resumed && (count < ACTOR_PERCEPTION_REFRESH_BATCH || reference_index == NONE))
+		{
+			break;
+		}
+		count = cluster_partition_walk_datums(
+			partition,
+			NONE,
+			&reference_index,
+			object_indices,
+			references_after,
+			ACTOR_PERCEPTION_REFRESH_BATCH);
+	}
+
+	return;
+}
+#endif
+
 static void actor_perception_refresh(
 	long actor_index)
 {
@@ -5836,6 +6041,9 @@ static void actor_perception_refresh(
 	enemies.accepted_count = 0;
 	friends.entry_count = 0;
 	friends.accepted_count = 0;
+#ifdef HALO_LINUX
+	halo_lines_stats.perception_refreshes++;
+#endif
 
 	if (actor->meta.swarm)
 	{
@@ -6014,6 +6222,15 @@ static void actor_perception_refresh(
 		{
 			if (BIT_VECTOR_TEST_FLAG(pvs, cluster_index))
 			{
+#ifdef HALO_LINUX
+				/* (actor_perception_refresh_cluster, above) */
+				perception_verify_refresh_cluster_begin(cluster_index, TRUE);
+				actor_perception_refresh_cluster(actor_index, cluster_index, TRUE, &enemies, &friends);
+				perception_verify_refresh_cluster_end();
+				perception_verify_refresh_cluster_begin(cluster_index, FALSE);
+				actor_perception_refresh_cluster(actor_index, cluster_index, FALSE, &enemies, &friends);
+				perception_verify_refresh_cluster_end();
+#else
 				long reference_index;
 				long object_index;
 
@@ -6030,6 +6247,7 @@ static void actor_perception_refresh(
 				{
 					actor_perception_refresh_test_object(actor_index, object_index, &enemies, &friends);
 				}
+#endif
 			}
 		}
 	}
@@ -6380,6 +6598,65 @@ static boolean actor_perception_lod_resting(
 	}
 	return TRUE;
 }
+
+/* (port) hints (__builtin_prefetch) for the props the walk below reads next:
+an actor's props are a list (next_prop_index) of 312-byte datums spread over
+the props' array, and the walk reads and writes fields across most of a
+prop's cache lines every tick (its timers, then its state); in b30's beach
+fight ~250 props a tick, met cold (~1600 cache misses a tick in callgrind's
+model, where the walk itself executes ~60 K instructions). The walk's first
+step hints the next two props, each later step the one after the next (whose
+index the next prop holds, hinted the step before), so the misses overlap
+one another and the work. A hint reads nothing the game sees: the walk, its
+order and every value read are as before. */
+static __inline char const *actor_perception_prop_address(
+	long prop_index)
+{
+	short absolute_index = (short)prop_index;
+
+	if (prop_index != NONE && absolute_index >= 0 && absolute_index < prop_data->count)
+	{
+		return (char const *)prop_data->data + prop_data->size * absolute_index;
+	}
+	return NULL;
+}
+
+static __inline void actor_perception_prefetch_prop(
+	char const *prop)
+{
+	if (prop)
+	{
+		/* (the lines the walk reads, 32 bytes apart for the Vita's Cortex-A9,
+		at any alignment: up to body_position, and from distance on; the
+		positions and vectors between are the refreshes') */
+		__builtin_prefetch(prop, 1);
+		__builtin_prefetch(prop + 32, 1);
+		__builtin_prefetch(prop + 64, 1);
+		__builtin_prefetch(prop + 96, 1);
+		__builtin_prefetch(prop + 128, 1);
+		__builtin_prefetch(prop + 160, 1);
+		__builtin_prefetch(prop + offsetof(struct prop_datum, body_position) - 1, 1);
+		__builtin_prefetch(prop + offsetof(struct prop_datum, distance), 1);
+		__builtin_prefetch(prop + sizeof(struct prop_datum) - 1, 1);
+	}
+}
+
+static __inline void actor_perception_prefetch_props(
+	struct prop_iterator const *iterator,
+	boolean first)
+{
+	char const *next = actor_perception_prop_address(iterator->next_index);
+
+	if (first)
+	{
+		actor_perception_prefetch_prop(next);
+	}
+	if (next)
+	{
+		actor_perception_prefetch_prop(
+			actor_perception_prop_address(((struct prop_datum const *)next)->next_prop_index));
+	}
+}
 #endif
 
 void actor_perception_update(
@@ -6396,6 +6673,12 @@ void actor_perception_update(
 	struct actor_position_data position;
 #ifdef HALO_LINUX
 	boolean lod_resting = actor_perception_lod_resting(actor_index, actor);
+	unsigned long long lines_started = halo_lines_now();
+	boolean first_prop = TRUE;
+
+	halo_lines_stats.perception_actors++;
+	/* (the walk's first prop, while the refreshes below run) */
+	actor_perception_prefetch_prop(actor_perception_prop_address(actor->meta.first_prop_index));
 #endif
 
 	if (!actor->meta.dormant)
@@ -6515,6 +6798,11 @@ void actor_perception_update(
 		boolean became_acknowledged = FALSE;
 		boolean expected_acknowledgement = FALSE;
 
+#ifdef HALO_LINUX
+		halo_lines_stats.perception_props++;
+		actor_perception_prefetch_props(&iterator, first_prop);
+		first_prop = FALSE;
+#endif
 		if (prop->unit_effect_decay_ticks > 0 &&
 			--prop->unit_effect_decay_ticks == 0)
 		{
@@ -6676,6 +6964,9 @@ void actor_perception_update(
 
 			if (refresh_position)
 			{
+#ifdef HALO_LINUX
+				halo_lines_stats.perception_positions++;
+#endif
 				prop_position_refresh(
 					actor_index,
 					iterator.index,
@@ -6686,6 +6977,9 @@ void actor_perception_update(
 
 			if (refresh_status)
 			{
+#ifdef HALO_LINUX
+				halo_lines_stats.perception_statuses++;
+#endif
 				prop_status_refresh(actor_index, iterator.index, &position);
 			}
 		}
@@ -7245,6 +7539,13 @@ void actor_perception_update(
 
 	actor->meta.highest_prop_timer = highest_prop_timer;
 	actor->meta.interesting_orphan_index = interesting_orphan_index;
+
+#ifdef HALO_LINUX
+	if (lines_started)
+	{
+		halo_lines_stats.perception_us += halo_lines_now() - lines_started;
+	}
+#endif
 
 	return;
 }

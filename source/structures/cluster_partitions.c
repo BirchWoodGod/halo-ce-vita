@@ -691,6 +691,48 @@ void cluster_partition_disconnect(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) cluster_partition_get_first_datum and _get_next_datum's walk, a
+batch at a time: the same references read in the same order, each datum
+passed over as cluster_partition_next_ready_datum would (a render's walk
+skips the datums the tick is still constructing), with which thread this is
+asked once for the batch rather than for each datum (see the header) */
+long cluster_partition_walk_datums(
+	struct cluster_partition const *partition,
+	short cluster_index,
+	long *reference_index,
+	long *indices,
+	long *references_after,
+	long maximum)
+{
+	boolean skip_constructing = partition->datum_data && !halo_epoch_on_mutator();
+	long count = 0;
+
+	if (*reference_index == NONE && cluster_index != NONE)
+	{
+		*reference_index = *code_00180fa0((struct cluster_partition *)partition, cluster_index);
+	}
+	while (count < maximum)
+	{
+		long datum_index = reference_list_walk_next(partition->data_reference_data, reference_index);
+
+		while (datum_index != NONE && skip_constructing &&
+			halo_epoch_datum_state(partition->datum_data, datum_index & 0xFFFF) == _halo_epoch_datum_created)
+		{
+			datum_index = reference_list_walk_next(partition->data_reference_data, reference_index);
+		}
+		if (datum_index == NONE)
+		{
+			break;
+		}
+		indices[count] = datum_index;
+		references_after[count] = *reference_index;
+		count++;
+	}
+	return count;
+}
+#endif
+
 long cluster_partition_get_first_datum(
 	struct cluster_partition const *partition,
 	long *reference_index,

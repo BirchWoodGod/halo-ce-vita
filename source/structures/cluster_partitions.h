@@ -72,6 +72,18 @@ long cluster_partition_get_cluster_datums(
 	short cluster_index,
 	long *indices,
 	long maximum);
+/* (port) the walk cluster_partition_get_first_datum and _get_next_datum
+make, up to maximum datums at a time: a cluster_index (with *reference_index
+NONE) begins the cluster's list, NONE goes on from *reference_index, which
+is left where the next call goes on (NONE at the end); each datum's
+references_after is the walk's reference after it */
+long cluster_partition_walk_datums(
+	struct cluster_partition const *partition,
+	short cluster_index,
+	long *reference_index,
+	long *indices,
+	long *references_after,
+	long maximum);
 #endif
 long cluster_partition_get_first_cluster(
 	struct cluster_partition const *partition,
