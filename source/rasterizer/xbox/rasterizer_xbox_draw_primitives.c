@@ -336,6 +336,11 @@ typedef char rasterizer_triangle_size_assert[
 
 /* ---------- prototypes */
 
+#ifdef HALO_LINUX
+/* (rasterizer_xbox.c) */
+void rasterizer_model_part_skinning(struct vertex_buffer const *vertex_buffer);
+#endif
+
 static D3DVertexBuffer *dynamic_vertex_group_get_d3d_vertex_buffer(
 	struct dynamic_vertex_group const *group);
 static void draw_primitives_data_error(
@@ -1341,6 +1346,11 @@ void rasterizer_draw_dynamic_triangles_static_vertices(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		823,
 		global_d3d_device);
+#ifdef HALO_LINUX
+	/* port: a part of a model of many nodes, its own nodes' constants
+	(rasterizer_xbox.c, from DamnationCE) */
+	rasterizer_model_part_skinning(vertex_buffer);
+#endif
 
 	while (triangle_count>0)
 	{
@@ -1477,6 +1487,11 @@ void rasterizer_draw_dynamic_triangles_static_vertices2(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		890,
 		global_d3d_device);
+#ifdef HALO_LINUX
+	/* port: a part of a model of many nodes, its own nodes' constants
+	(rasterizer_xbox.c, from DamnationCE) */
+	rasterizer_model_part_skinning(vertex_buffer0);
+#endif
 
 	while (triangle_count>0)
 	{
@@ -1802,6 +1817,11 @@ void rasterizer_draw_static_triangles_static_vertices(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		1063,
 		global_d3d_device);
+#ifdef HALO_LINUX
+	/* port: a part of a model of many nodes, its own nodes' constants
+	(rasterizer_xbox.c, from DamnationCE) */
+	rasterizer_model_part_skinning(vertex_buffer);
+#endif
 
 	while (triangle_count>0)
 	{

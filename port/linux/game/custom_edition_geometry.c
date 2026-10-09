@@ -35,6 +35,7 @@ Edition vertices (docs/custom_edition_caches.md).
 #include "../src/lang.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 /* ---------- constants */
@@ -139,6 +140,24 @@ typedef char verify_custom_edition_model_part_vertex_offset[
 typedef char verify_structure_material_size[
 	sizeof(struct structure_material) == 0x100 ? 1 : -1];
 
+/* the most nodes a part of a model of many nodes may name: as many as the
+vertex shader's constants hold */
+#define PART_PALETTE_MAXIMUM_NODES (RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1)
+
+/* A part of a model with more nodes than the renderer skins at once
+(RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1, 43; Halo PC skins up to
+MAXIMUM_NODES_PER_MODEL, 64): its vertices name the part's own nodes, by
+their place in `nodes`, and before it is drawn the renderer is given those
+nodes' matrices alone (rasterizer_model_part_skinning, by its vertex
+buffer). From DamnationCE (xshxdex98/DamnationCE, CC0, 3493a094 and
+327f65a7). */
+struct part_palette
+{
+	struct vertex_buffer const *vertex_buffer;
+	byte node_count;
+	byte nodes[PART_PALETTE_MAXIMUM_NODES];
+};
+
 /* what the models of a map need, counted before any is converted */
 struct model_geometry_totals
 {
@@ -147,6 +166,8 @@ struct model_geometry_totals
 	long strip_index_count;
 	long largest_part_vertex_count;
 	long largest_part_strip_index_count;
+	/* the parts of models of more nodes than the renderer skins at once */
+	long many_node_part_count;
 };
 
 /* The map's model data, read a part at a time rather than whole (Extinction's
@@ -218,6 +239,19 @@ struct custom_edition_geometry_globals
 	compressed vertices and strip) */
 	struct model_geometry_part **model_parts;
 	long model_part_count;
+	/* the parts of the models of many nodes, by their vertex buffers'
+	addresses once every model is converted (custom_edition_part_palette) */
+	struct part_palette *palettes;
+	long palette_count;
+	/* their vertices as compressed, and those naming a node past their
+	palette (none, unless the compressor writes other node indices than
+	it is given: logged, and the tests check it) */
+	long palette_vertex_count;
+	long palette_vertices_out_of_range;
+	/* the fewest nodes a model drawn a part's nodes at a time has
+	(RASTERIZER_MAXIMUM_NODES_PER_MODEL; HALO_CE_PART_PALETTE_NODES for the
+	tests) */
+	long many_nodes;
 
 	/* the structure BSP whose materials have buffers, and the compressed
 	vertices those were made from */
@@ -301,10 +335,20 @@ static boolean custom_edition_model_part_verify(
 	return TRUE;
 }
 
-/* Whether this build can draw `model`: its renderer skins at most
-RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1 nodes (each part is checked against
-its vertices and strip as it is converted, custom_edition_model_convert).
-Adds what its parts need to `totals`. */
+/* whether the model has more nodes than the renderer skins at once, and so
+is drawn a part's own nodes at a time (struct part_palette) */
+static boolean model_has_many_nodes(
+	struct model const *model)
+{
+	return model->nodes.count >= custom_edition_geometry_globals.many_nodes;
+}
+
+/* Whether this build can draw `model`: of 1 to MAXIMUM_NODES_PER_MODEL
+nodes, as Halo PC draws; one of more than its renderer skins at once
+(RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1) is drawn a part's own nodes at a
+time (each part is checked against its vertices and strip as it is
+converted, custom_edition_model_convert). Adds what its parts need to
+`totals`. */
 static boolean custom_edition_model_count(
 	struct model const *model,
 	char const *name,
@@ -312,14 +356,14 @@ static boolean custom_edition_model_count(
 {
 	long geometry_index;
 
-	if (model->nodes.count < 1 || model->nodes.count >= RASTERIZER_MAXIMUM_NODES_PER_MODEL)
+	if (model->nodes.count < 1 || model->nodes.count > MAXIMUM_NODES_PER_MODEL)
 	{
 		error(
 			_error_silent,
 			"custom edition: the model '%s' has %ld nodes; this build draws models of 1 to %d",
 			name,
 			model->nodes.count,
-			RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1);
+			MAXIMUM_NODES_PER_MODEL);
 		return FALSE;
 	}
 	for (geometry_index = 0; geometry_index < model->geometries.count; geometry_index++)
@@ -338,6 +382,10 @@ static boolean custom_edition_model_count(
 				struct custom_edition_model_part);
 
 			totals->part_count++;
+			if (model_has_many_nodes(model))
+			{
+				totals->many_node_part_count++;
+			}
 			totals->vertex_count += part->vertex_count;
 			totals->strip_index_count += part->strip_triangle_count + 2;
 			totals->largest_part_vertex_count = MAX(totals->largest_part_vertex_count, part->vertex_count);
@@ -601,6 +649,66 @@ static void const *model_data_stream_read(
 	return stream->buffer + (offset - stream->start);
 }
 
+/* (a part of a model of many nodes) Makes `palette` the nodes the part
+`source`'s vertices `vertices` name: its own nodes, when the model's parts
+have them, which the vertices already name by their place; else the model's
+nodes its vertices name, at most PART_PALETTE_MAXIMUM_NODES, which the
+vertices are made to name by their place in the palette (DamnationCE's
+model_local_nodes_make, done a part at a time: the vertices are this
+conversion's copy, never the map's). FALSE when they name more. */
+static boolean part_palette_make(
+	struct part_palette *palette,
+	struct custom_edition_model_part const *source,
+	boolean local_nodes,
+	struct model_vertex_uncompressed *vertices)
+{
+	long vertex_index;
+
+	if (local_nodes)
+	{
+		/* (custom_edition_model_part_verify checked the vertices name
+		entries of the table, and the table the model's nodes) */
+		palette->node_count = source->local_node_count;
+		csmemcpy(palette->nodes, source->local_node_indices, source->local_node_count);
+		return TRUE;
+	}
+	palette->node_count = 0;
+	for (vertex_index = 0; vertex_index < source->vertex_count; vertex_index++)
+	{
+		long slot;
+
+		for (slot = 0; slot < 2; slot++)
+		{
+			short node = vertices[vertex_index].nodes[slot];
+			short local;
+
+			for (local = 0; local < palette->node_count && palette->nodes[local] != node; local++)
+				;
+			if (local == palette->node_count)
+			{
+				if (palette->node_count == PART_PALETTE_MAXIMUM_NODES)
+				{
+					return FALSE;
+				}
+				palette->nodes[palette->node_count++] = (byte)node;
+			}
+			vertices[vertex_index].nodes[slot] = local;
+		}
+	}
+
+	return TRUE;
+}
+
+static int part_palette_compare(
+	void const *a,
+	void const *b)
+{
+	uintptr_t address_a = (uintptr_t)((struct part_palette const *)a)->vertex_buffer;
+	uintptr_t address_b = (uintptr_t)((struct part_palette const *)b)->vertex_buffer;
+
+	return address_a < address_b ? -1 : address_a > address_b;
+}
+
 /* Makes `part` this build's part for the Custom Edition part `source`,
 compressing its vertices (by way of `scratch`, room for all of them) to
 `vertices` and copying its strip to `strip`, and gives it buffers. */
@@ -618,7 +726,8 @@ static boolean custom_edition_model_part_convert(
 	long uncompressed_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_uncompressed);
 	long strip_index_count = source->strip_triangle_count + 2;
 
-	/* the renderer skins with the model's nodes */
+	/* the renderer skins with the model's nodes (or a part's own, which a
+	part of a model of many nodes names: local_nodes FALSE then) */
 	if (scratch != source_vertices)
 	{
 		csmemcpy(scratch, source_vertices, source->vertex_count * uncompressed_vertex_size);
@@ -696,6 +805,9 @@ static boolean custom_edition_model_convert(
 {
 	struct custom_edition_geometry_globals *globals = &custom_edition_geometry_globals;
 	boolean local_nodes = TEST_FLAG(model->flags, _gbxmodel_parts_have_local_nodes_bit);
+	/* (the renderer skins with the model's nodes, or a part's own when the
+	model has more than it skins at once) */
+	boolean part_palettes = model_has_many_nodes(model);
 	long uncompressed_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_uncompressed);
 	long geometry_index;
 
@@ -760,11 +872,30 @@ static boolean custom_edition_model_convert(
 				return FALSE;
 			}
 
+			if (part_palettes)
+			{
+				struct part_palette *palette = &globals->palettes[globals->palette_count];
+
+				if (!part_palette_make(palette, &source, local_nodes, scratch))
+				{
+					error(
+						_error_silent,
+						"custom edition: part %ld of geometry %ld of the model '%s' (%ld nodes) names more than the %d nodes this build skins at once",
+						part_index,
+						geometry_index,
+						name,
+						model->nodes.count,
+						PART_PALETTE_MAXIMUM_NODES);
+					return FALSE;
+				}
+				palette->vertex_buffer = &part->vertex_buffer;
+				globals->palette_count++;
+			}
 			globals->model_parts[globals->model_part_count++] = part;
 			if (!custom_edition_model_part_convert(
 				part,
 				&source,
-				local_nodes,
+				local_nodes && !part_palettes,
 				scratch,
 				strip_scratch,
 				scratch,
@@ -773,12 +904,35 @@ static boolean custom_edition_model_convert(
 			{
 				return FALSE;
 			}
+			if (part_palettes)
+			{
+				struct part_palette const *palette = &globals->palettes[globals->palette_count - 1];
+				long vertex_index;
+
+				for (vertex_index = 0; vertex_index < source.vertex_count; vertex_index++)
+				{
+					byte const *nodes = reader->compressed[vertex_index].nodes;
+
+					if (nodes[0] % 3 || nodes[0] / 3 >= palette->node_count ||
+						nodes[1] % 3 || nodes[1] / 3 >= palette->node_count)
+					{
+						globals->palette_vertices_out_of_range++;
+					}
+				}
+				globals->palette_vertex_count += source.vertex_count;
+			}
 			reader->parts_done++;
 			custom_edition_load_progress_set(0.55f + 0.43f * (real)reader->parts_done / (real)MAX(reader->parts_total, 1));
 		}
 	}
-	/* the parts' node indices are now the model's */
+	/* the parts' node indices are now the model's, or their own as their
+	palettes say: the game's code knows nothing of local nodes */
 	model->flags &= ~FLAG(_gbxmodel_parts_have_local_nodes_bit);
+	if (part_palettes)
+	{
+		error(_error_silent, "custom edition: the model '%s', of %ld nodes, is drawn a part's nodes at a time", name,
+			model->nodes.count);
+	}
 
 	return TRUE;
 }
@@ -884,7 +1038,7 @@ boolean custom_edition_models_convert(
 	struct custom_edition_load_report const *report)
 {
 	struct custom_edition_geometry_globals *globals = &custom_edition_geometry_globals;
-	struct model_geometry_totals totals = { 0, 0, 0, 0, 0 };
+	struct model_geometry_totals totals = { 0, 0, 0, 0, 0, 0 };
 	long vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_compressed);
 	struct model_data_reader reader;
 	struct model_vertex_uncompressed *scratch;
@@ -902,6 +1056,16 @@ boolean custom_edition_models_convert(
 	boolean prefetching = FALSE;
 
 	assert(!globals->model_parts);
+	globals->many_nodes = RASTERIZER_MAXIMUM_NODES_PER_MODEL;
+	{
+		/* (the tests draw models of fewer nodes a part's nodes at a time) */
+		char const *setting = getenv("HALO_CE_PART_PALETTE_NODES");
+
+		if (setting && atol(setting) >= 1 && atol(setting) < RASTERIZER_MAXIMUM_NODES_PER_MODEL)
+		{
+			globals->many_nodes = atol(setting);
+		}
+	}
 	while ((model = custom_edition_cache_tag_next(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, sizeof(*model), &tag_index)) != NULL)
 	{
 		if (!custom_edition_model_count(model, custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index), &totals))
@@ -925,6 +1089,7 @@ boolean custom_edition_models_convert(
 	plan_limit = 2 * totals.part_count;
 	plan_bytes = ((unsigned long)plan_limit * sizeof(struct model_data_window) + 15) & ~15UL;
 	globals->model_parts = malloc((totals.part_count + 1) * sizeof(*globals->model_parts));
+	globals->palettes = malloc((totals.many_node_part_count + 1) * sizeof(*globals->palettes));
 	working = halo_custom_edition_memory_alloc(working_bytes + plan_bytes + MODEL_DATA_PREFETCH_BUFFERS * MODEL_DATA_READ_AHEAD_BYTES);
 	if (working)
 	{
@@ -934,7 +1099,7 @@ boolean custom_edition_models_convert(
 	{
 		working = halo_custom_edition_memory_alloc(working_bytes);
 	}
-	if (!globals->model_parts || !working)
+	if (!globals->model_parts || !globals->palettes || !working)
 	{
 		error(
 			_error_silent,
@@ -983,11 +1148,15 @@ boolean custom_edition_models_convert(
 	halo_custom_edition_memory_free(working);
 	if (success)
 	{
+		qsort(globals->palettes, (size_t)globals->palette_count, sizeof(*globals->palettes), part_palette_compare);
 		custom_edition_cache_tags_regroup(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, MODELS_GROUP_TAG);
 		error(
 			_error_silent,
-			"custom edition: %ld model parts converted (%ld vertices compressed, %lu KB in their buffers; model data read in %lu buffers, %lu KB, %lu read ahead)",
+			"custom edition: %ld model parts converted (%ld drawn with their own nodes, %ld vertices, %ld naming a node past them; %ld vertices compressed, %lu KB in their buffers; model data read in %lu buffers, %lu KB, %lu read ahead)",
 			totals.part_count,
+			globals->palette_count,
+			globals->palette_vertex_count,
+			globals->palette_vertices_out_of_range,
 			totals.vertex_count,
 			(totals.vertex_count * vertex_size + totals.strip_index_count * sizeof(word)) / 1024,
 			reader.vertices.reads + reader.strips.reads,
@@ -1016,10 +1185,61 @@ void custom_edition_models_dispose(
 	{
 		free(globals->model_parts);
 	}
+	if (globals->palettes)
+	{
+		free(globals->palettes);
+	}
 	globals->model_parts = NULL;
 	globals->model_part_count = 0;
+	globals->palettes = NULL;
+	globals->palette_count = 0;
+	globals->palette_vertex_count = 0;
+	globals->palette_vertices_out_of_range = 0;
+	globals->many_nodes = 0;
 
 	return;
+}
+
+short custom_edition_part_palette_nodes(
+	void)
+{
+	long many_nodes = custom_edition_geometry_globals.many_nodes;
+
+	/* (no Custom Edition map's models converted: RASTERIZER_MAXIMUM_NODES_PER_MODEL) */
+	return (short)(many_nodes > 0 ? many_nodes : RASTERIZER_MAXIMUM_NODES_PER_MODEL);
+}
+
+short custom_edition_part_palette(
+	struct vertex_buffer const *vertex_buffer,
+	byte const **nodes)
+{
+	struct custom_edition_geometry_globals *globals = &custom_edition_geometry_globals;
+	long first = 0;
+	long last = globals->palette_count;
+
+	/* (sorted by the buffers' addresses as the models' conversion ended;
+	the render thread asks while no map loads or unloads) */
+	while (first < last)
+	{
+		long middle = first + (last - first) / 2;
+		struct part_palette const *palette = &globals->palettes[middle];
+
+		if (palette->vertex_buffer == vertex_buffer)
+		{
+			*nodes = palette->nodes;
+			return palette->node_count;
+		}
+		if ((uintptr_t)palette->vertex_buffer < (uintptr_t)vertex_buffer)
+		{
+			first = middle + 1;
+		}
+		else
+		{
+			last = middle;
+		}
+	}
+
+	return 0;
 }
 
 boolean custom_edition_structure_bsp_load(

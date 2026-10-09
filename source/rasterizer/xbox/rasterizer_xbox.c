@@ -410,6 +410,7 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_draw_primitives.h"
 #include "render/render.h"
 #ifdef HALO_LINUX
+#include "models/model_definitions.h" /* port: MAXIMUM_NODES_PER_MODEL */
 int halo_epoch_on_mutator(void);
 extern int halo_epoch_threaded;
 #endif
@@ -1290,6 +1291,48 @@ void rasterizer_set_model_lighting(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: a node's matrix as the vertex shader's three constants, as
+rasterizer_set_model_skinning writes them */
+static void node_matrix_constants_make(
+	real (*constants)[4],
+	real_matrix4x3 const *matrix)
+{
+	real scale = matrix->scale;
+
+	constants[0][0] = scale * matrix->forward.i;
+	constants[0][1] = scale * matrix->left.i;
+	constants[0][2] = scale * matrix->up.i;
+	constants[0][3] = matrix->position.x;
+	constants[1][0] = scale * matrix->forward.j;
+	constants[1][1] = scale * matrix->left.j;
+	constants[1][2] = scale * matrix->up.j;
+	constants[1][3] = matrix->position.y;
+	constants[2][0] = scale * matrix->forward.k;
+	constants[2][1] = scale * matrix->left.k;
+	constants[2][2] = scale * matrix->up.k;
+	constants[2][3] = matrix->position.z;
+}
+
+/* port: the constants of every node of the model being drawn, when it has
+more nodes than the vertex shader's constants hold (a Custom Edition model
+of RASTERIZER_MAXIMUM_NODES_PER_MODEL to MAXIMUM_NODES_PER_MODEL nodes):
+none are sent then, and each of its parts is given its own nodes' alone as
+it is drawn (rasterizer_model_part_skinning, from DamnationCE by xshxdex98;
+port/linux/game/custom_edition_geometry.c). Copied, not pointed at: the
+matrices are the caller's. 0 while the model being drawn fits. */
+static real many_node_constants[MAXIMUM_NODES_PER_MODEL][3][4];
+static short many_node_count = 0;
+/* whether the constants of the model being drawn were sent whole, for a
+part without its own nodes */
+static boolean many_node_constants_sent = FALSE;
+
+/* (custom_edition_geometry.c) the fewest nodes a model drawn a part's nodes
+at a time has, and a part's own nodes */
+extern short custom_edition_part_palette_nodes(void);
+extern short custom_edition_part_palette(struct vertex_buffer const *vertex_buffer, byte const **nodes);
+#endif
+
 void rasterizer_set_model_skinning(
 	struct rasterizer_model_skinning_parameters const *skinning)
 {
@@ -1303,10 +1346,28 @@ void rasterizer_set_model_skinning(
 		"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox.c",
 		2750,
 		skinning->node_matrices);
+#ifdef HALO_LINUX
+	match_assert(
+		"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox.c",
+		2751,
+		skinning->node_matrix_count>0 && skinning->node_matrix_count<=MAXIMUM_NODES_PER_MODEL);
+	if (skinning->node_matrix_count >= custom_edition_part_palette_nodes())
+	{
+		many_node_count = (short)MIN(skinning->node_matrix_count, MAXIMUM_NODES_PER_MODEL);
+		many_node_constants_sent = FALSE;
+		for (node_index = 0; node_index < many_node_count; node_index++)
+		{
+			node_matrix_constants_make(many_node_constants[node_index], &skinning->node_matrices[node_index]);
+		}
+		return;
+	}
+	many_node_count = 0;
+#else
 	match_assert(
 		"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox.c",
 		2751,
 		skinning->node_matrix_count>0 && skinning->node_matrix_count<RASTERIZER_MAXIMUM_NODES_PER_MODEL);
+#endif
 	for (node_index = 0; node_index < skinning->node_matrix_count; node_index++)
 	{
 		real scale = skinning->node_matrices[node_index].scale;
@@ -1335,6 +1396,68 @@ void rasterizer_set_model_skinning(
 			skinning->node_matrix_count * sizeof(node_matrix_constants[0]);
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port: (rasterizer_xbox_draw_primitives.c, before static vertices are
+drawn) a part of a model of many nodes is given its own nodes' constants,
+in the order its vertices name them (custom_edition_part_palette); nothing
+for any other vertices, or while the model being drawn fits */
+void rasterizer_model_part_skinning(
+	struct vertex_buffer const *vertex_buffer)
+{
+	byte const *nodes;
+	short node_count;
+	short node_index;
+
+	if (!many_node_count)
+		return;
+	node_count = custom_edition_part_palette(vertex_buffer, &nodes);
+	if (node_count <= 0)
+	{
+		/* (a part without its own nodes - none of a model of more nodes
+		than the constants hold has none: the model's, as many as fit, as
+		they would have been sent before) */
+		if (!many_node_constants_sent)
+		{
+			node_count = (short)MIN(many_node_count, RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1);
+			csmemcpy(node_matrix_constants, many_node_constants, node_count * sizeof(node_matrix_constants[0]));
+			D3DDevice_SetVertexShaderConstant(-36, node_matrix_constants, node_count * 3);
+			many_node_constants_sent = TRUE;
+		}
+		return;
+	}
+	node_count = (short)MIN(node_count, RASTERIZER_MAXIMUM_NODES_PER_MODEL - 1);
+	for (node_index = 0; node_index < node_count; node_index++)
+	{
+		csmemcpy(node_matrix_constants[node_index],
+			many_node_constants[MIN(nodes[node_index], many_node_count - 1)],
+			sizeof(node_matrix_constants[0]));
+	}
+	D3DDevice_SetVertexShaderConstant(-36, node_matrix_constants, node_count * 3);
+	many_node_constants_sent = FALSE;
+	{
+		/* (HALO_CE_PALETTE_LOG=1, the tests: the draws given a part's own
+		nodes, counted at each power of two) */
+		static int palette_log = -1;
+		static unsigned long palette_draws = 0;
+
+		if (palette_log < 0)
+			palette_log = getenv("HALO_CE_PALETTE_LOG") && atoi(getenv("HALO_CE_PALETTE_LOG")) != 0;
+		palette_draws++;
+		if (palette_log && (palette_draws & (palette_draws - 1)) == 0)
+		{
+			void platform_log(const char *format, ...);
+
+			platform_log("part palettes: %lu draws given a part's own nodes (this one %d of a model of %d)",
+				palette_draws, node_count, many_node_count);
+		}
+	}
+	if (rasterizer_debug_options.stats)
+		rasterizer_frame_statistics.vertex_shader_skinning_constant_bytes +=
+			node_count * sizeof(node_matrix_constants[0]);
+	return;
+}
+#endif
 
 boolean rasterizer_set_texture_non_blocking(
 	short stage,

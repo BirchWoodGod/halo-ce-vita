@@ -319,8 +319,21 @@ changed:
   its strip copied unchanged; the game's own `rasterizer_vertex_buffer_new`
   and `rasterizer_triangle_buffer_new` make its buffers, and the tags become
   `mode` tags. Before any of that, every index a part holds is checked
-  against what it names (shaders, nodes, parts, vertices), and a model with
-  44 nodes or more is refused, since this build's renderer skins at most 43.
+  against what it names (shaders, nodes, parts, vertices). This build's
+  renderer skins at most 43 nodes at once (the vertex shader's constants);
+  Halo PC skins up to 64, and a model of 44 to 64 nodes is drawn a part's
+  own nodes at a time, after DamnationCE (xshxdex98/DamnationCE, CC0,
+  3493a094 and 327f65a7): its parts' vertices keep naming their part's local
+  nodes (or, in a model whose parts have none, the nodes each part's
+  vertices name are made its own, up to 43 of them; a part naming more
+  refuses the map), and before such a part is drawn, on every path (opaque,
+  transparent, shadows, fog), the renderer is given its own nodes' matrices
+  alone (`custom_edition_part_palette`, `rasterizer_model_part_skinning` in
+  `rasterizer_xbox.c`). Models of 43 nodes or fewer are drawn as before. No
+  map on hand has such a model: `run_ce_part_palette_test.sh` draws every
+  model of 2 nodes or more so (`HALO_CE_PART_PALETTE_NODES=2`), and the
+  desktop build drew Blood Gulch's first-person arms (37 nodes) and weapons
+  so as without it.
 - **Structure BSPs.** When the game loads a BSP, every material's vertices
   are compressed the same way (environment and lightmap vertices), and the
   material gets buffers and the compressed vertices the game reads for
@@ -517,7 +530,8 @@ Conversion of the two maps that were run:
 | `beavercreek_halo3.yelo` | 67 | 14 | 4 | 1005 | 10 | yes | 2 | 673 (201,787) |
 
 Of the other maps: `celer_exile_odst_v2.yelo` loads and converts in the
-report tool, but the game refuses it for a model of 46 nodes; the two
+report tool, but the game refused it for a model of 46 nodes (drawn a
+part's nodes at a time since, above); the two
 mod-set maps need their mod sets, which were not available.
 
 ### In the game
