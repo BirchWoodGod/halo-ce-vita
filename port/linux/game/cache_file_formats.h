@@ -419,6 +419,12 @@ struct custom_edition_conversion_report
 	/* 1 when the multiplayer hint that a key shows the score was made to
 	name the Xbox button */
 	int32_t score_hint_converted;
+	/* widget event handlers numbered as the port's own menu functions,
+	made to fail as Halo PC's own do, and game data inputs of Halo PC's own
+	functions, made to run none; and 1 when the multiplayer pause menu was
+	made the Xbox's resume and quit */
+	int32_t widget_functions_cleared;
+	int32_t pause_menu_trimmed;
 	/* the Halo PC behaviours the map relies on (enum
 	custom_edition_behaviour, flags) */
 	uint32_t behaviours;

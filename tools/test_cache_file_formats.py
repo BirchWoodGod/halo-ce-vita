@@ -322,6 +322,43 @@ def add_hud_placement(blob, placement, scale, flags):
     blob.u16(placement + 0x0C, flags)
 
 
+PAUSE_FOLDER = "ui\\shell\\multiplayer_game\\pause_game\\"
+PAUSE_LIST = PAUSE_FOLDER + "mp_pause_list"
+# each button: its event handler's function (run, with close current widget),
+# and its game data inputs' functions
+PAUSE_BUTTONS = [
+    ("resume_game_button", 3, (5,)),
+    ("game_options_button", 120, ()),
+    ("change_settings_button", 300, (50, 300)),
+    ("quit_netgame_button", 101, ()),
+]
+
+
+def add_widget(blob, handler_function, game_data_functions, children=()):
+    """A widget definition (0x3EC bytes): an event handler running
+    handler_function (none if None), game data inputs, and children
+    (tag index, vertical offset)."""
+    widget = blob.reserve(0x3EC)
+    if handler_function is not None:
+        handler = blob.reserve(0x48)
+        blob.u32(handler, 0x80 | 0x01)
+        blob.u16(handler + 6, handler_function)
+        blob.block(widget + 0x54, 1, handler)
+    if game_data_functions:
+        inputs = blob.reserve(0x24 * len(game_data_functions))
+        for index, function in enumerate(game_data_functions):
+            blob.u16(inputs + index * 0x24, function)
+        blob.block(widget + 0x48, len(game_data_functions), inputs)
+    if children:
+        elements = blob.reserve(0x50 * len(children))
+        for index, (tag_index, vertical) in enumerate(children):
+            blob.u32(elements + index * 0x50, code("DeLa"))
+            blob.u32(elements + index * 0x50 + 0x0C, 0xE174 << 16 | tag_index)
+            blob.u16(elements + index * 0x50 + 0x36, vertical)
+        blob.block(widget + 0x3E0, len(children), elements)
+    return widget
+
+
 def add_weapon_hud(blob, placements, bitmap_index=None):
     """A weapon HUD interface with a static element for each of the first two
     placements and a crosshair of one item for the third, each (scale, flags);
@@ -411,7 +448,7 @@ class Map:
                  sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None, sound_permutation_compression=None,
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, hud_bitmap_flags=None, strings_name="test\\strings", strings=("hello", "world!"),
-                 weapon_function_modes=None, name=b"test", tags_checksum=0):
+                 weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False):
         self.bsp_sizes = bsp_sizes
         # the header's name and the tag data's checksum, by which Chimera's
         # map list knows a map
@@ -430,6 +467,8 @@ class Map:
         self.script_nodes = script_nodes
         self.weapon_hud = weapon_hud
         self.hud_bitmap_flags = hud_bitmap_flags
+        # Halo PC's multiplayer pause menu: its list and four buttons
+        self.pause_menu = pause_menu
         self.weapon_function_modes = weapon_function_modes
         self.strings_name = strings_name
         self.strings = strings
@@ -491,6 +530,8 @@ class Map:
             tags.append(("antr", "test\\animations", False))
         if self.weapon_hud is not None:
             tags.append(("wphi", "test\\weapon hud", False))
+        if self.pause_menu:
+            tags += [("DeLa", PAUSE_LIST, False)] + [("DeLa", PAUSE_FOLDER + button, False) for button, _, _ in PAUSE_BUTTONS]
         # further structure BSPs go last, so the indices above never move
         bsp_tag_indices = [1] + [len(tags) + extra for extra in range(len(self.bsp_sizes) - 1)]
         tags += [("sbsp", f"test\\bsp {extra + 2}", False) for extra in range(len(self.bsp_sizes) - 1)]
@@ -585,6 +626,12 @@ class Map:
             address_of["test\\weapon hud"] = add_weapon_hud(tag_data, self.weapon_hud, hud_bitmap_index)
         if self.script_nodes is not None:
             add_script_nodes(tag_data, scenario, *self.script_nodes)
+        if self.pause_menu:
+            names = [name for _, name, _ in tags]
+            for button, handler_function, game_data_functions in PAUSE_BUTTONS:
+                address_of[PAUSE_FOLDER + button] = add_widget(tag_data, handler_function, game_data_functions)
+            address_of[PAUSE_LIST] = add_widget(tag_data, None, (), children=[
+                (names.index(PAUSE_FOLDER + button), 35 * index) for index, (button, _, _) in enumerate(PAUSE_BUTTONS)])
         for tag_index, (group_name, name, external) in enumerate(tags):
             if name in address_of:
                 tag_data.u32(instances + tag_index * 0x20 + 0x14, address_of[name])
@@ -626,6 +673,7 @@ class Map:
         if self.model is not None:
             self.where["model"] = tag_data_offset + (address_of["test\\model"] - BASE)
         self.addresses = dict(address_of, instances=instances)
+        self.tags = tags
         self.tag_indices = {name: index for index, (_, name, _) in enumerate(tags)}
         self.salt = salt
         return bytes(data)
@@ -1188,6 +1236,38 @@ def test_maps_chimera_lists_get_halo_pc_behaviours(report_tool, tmp_path, name, 
     assert report["halo_pc_behaviours"] == (
         "gearbox_chicago_multiply gearbox_meters hud_number_scale disable_bitmap_hud_scale_flags" if listed else "none")
     assert report["hud_placements_rescaled"] == ("0" if listed else "2")
+
+
+def test_halo_pc_widget_functions_run_none_and_the_pause_menu_is_the_xboxs(report_tool, tmp_path):
+    """Handlers running Halo PC's own functions (past the Xbox's 102) keep
+    failing as before, but none numbered as the port's menu functions (from
+    256) reaches them: it gets the Xbox's first invalid number. Game data
+    inputs past the Xbox's 41 run the first (nothing). The multiplayer pause
+    list keeps resume and quit, in the middle of its four rows (from
+    DamnationCE, c34563f0)."""
+    cache = Map(pause_menu=True)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["widget_functions_cleared"] == "3" and report["pause_menu_trimmed"] == "1"
+    button = {name: cache.addresses[PAUSE_FOLDER + name] for name, _, _ in PAUSE_BUTTONS}
+
+    def handler(name):
+        address = u32_at(tags, button[name] + 0x54 + 4)
+        return u32_at(tags, address), u16_at(tags, address + 6)
+
+    def game_data(name):
+        count, address = u32_at(tags, button[name] + 0x48), u32_at(tags, button[name] + 0x48 + 4)
+        return [u16_at(tags, address + index * 0x24) for index in range(count)]
+
+    assert handler("resume_game_button") == (0x81, 3) and handler("quit_netgame_button") == (0x81, 101)
+    assert handler("game_options_button") == (0x81, 120) and handler("change_settings_button") == (0x81, 102)
+    assert game_data("resume_game_button") == [5] and game_data("change_settings_button") == [0, 0]
+    pause_list = cache.addresses[PAUSE_LIST]
+    count, children = u32_at(tags, pause_list + 0x3E0), u32_at(tags, pause_list + 0x3E0 + 4)
+    names = [name for _, name, _ in cache.tags]
+    kept = [(names[u32_at(tags, children + index * 0x50 + 0x0C) & 0xFFFF].split("\\")[-1],
+             s16_at(tags, children + index * 0x50 + 0x36)) for index in range(count)]
+    assert kept == [("resume_game_button", 35), ("quit_netgame_button", 70)]
 
 
 SCORE_HINT = 'Hold "%s" for score'

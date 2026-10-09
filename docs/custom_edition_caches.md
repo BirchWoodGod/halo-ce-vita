@@ -348,6 +348,25 @@ changed:
   score, in the same four characters. The Vita names its own button there
   as the hint is shown, as in the Xbox maps' hint: `SELECT` as shipped
   (`hud_draw.c`, `hud_vita_score_hint`).
+- **Halo PC's menu functions.** A Custom Edition map's widgets are Halo
+  PC's, whose event handlers may run Halo PC's own functions, numbered past
+  the Xbox's 102, and whose game data inputs may run its own past the Xbox's
+  41; this build has none of them. Such a handler fails, as before (the
+  invalid function logged, its other actions not taken), but one numbered
+  from 256 would have run one of the port's own menu functions
+  (`PC_MENU_FUNCTION_BASE`, `menu_functions.c`), made for its own screens:
+  it is given 102 and fails as the others do (none in the four maps on
+  hand, whose 242, 242 and 235 such handlers are all below 256). A game
+  data input past 41 runs the first, which does nothing, where it logged an
+  invalid function each frame (22 in extinction and
+  Covenant_V_Marines_Beta_5, 18 in firefight-airlock, none in pcgulch).
+  Halo PC's multiplayer pause menu adds game options and settings between
+  the Xbox's resume and quit, whose handlers fail: its list keeps resume and
+  quit, in the middle of its rows (extinction, Covenant_V_Marines_Beta_5).
+  From DamnationCE (CC0, c34563f0), which makes every handler of Halo PC's
+  own functions run none so that its other actions are taken; here they
+  stay as they were. `widget_functions_cleared` and `pause_menu_trimmed` in
+  `cache_file_report`.
 
 ### In the game (`custom_edition_cache.c`, `custom_edition_geometry.c`, `custom_edition_bitmaps.c`)
 

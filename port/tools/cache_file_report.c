@@ -336,6 +336,8 @@ static int report_custom_edition_cache(
 			printf("hud_placements_rescaled: %" PRId32 "\n", conversion.hud_placements_rescaled);
 			printf("hud_placements_kept: %" PRId32 "\n", conversion.hud_placements_kept);
 			printf("score_hint_converted: %" PRId32 "\n", conversion.score_hint_converted);
+			printf("widget_functions_cleared: %" PRId32 "\n", conversion.widget_functions_cleared);
+			printf("pause_menu_trimmed: %" PRId32 "\n", conversion.pause_menu_trimmed);
 			printf("halo_pc_behaviours:");
 			for (behaviour = 0; behaviour < NUMBER_OF_CUSTOM_EDITION_BEHAVIOURS; behaviour++)
 			{
