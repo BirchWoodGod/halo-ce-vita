@@ -473,8 +473,25 @@ void objects_fix_for_deleted_object(
 	/* (port) the types with a handler: object_types.c */
 	unsigned long object_types_handling_deleted_objects(void);
 	unsigned long handling_types = object_types_handling_deleted_objects();
-#endif
+
+#ifdef HALO_RELEASE
+	/* (port) only the objects of those types are visited: an object's
+	umbrella shield (the other reference cleared here) is never anything
+	but NONE - object_new sets it so, and nothing in the game sets it to an
+	object (damage.c only reads it) - so the clearing below never found an
+	object to clear, and the walk read every object in the game (~1000 in
+	b30's beach fight, a cache miss each on the Vita) for every projectile
+	that hit. The headers are still walked in order; the handlers are
+	called for the same objects in the same order. (Builds with assertions
+	visit every object and check that no umbrella shield names the deleted
+	object.) */
+	object_iterator_new(&iterator, handling_types, 0);
+#else
 	object_iterator_new(&iterator, _object_mask_all, 0);
+#endif
+#else
+	object_iterator_new(&iterator, _object_mask_all, 0);
+#endif
 
 	for (object = (struct object_datum *)object_iterator_next(&iterator);
 		object;
@@ -482,6 +499,10 @@ void objects_fix_for_deleted_object(
 	{
 		if (object->object.umbrella_shield_object_index==deleted_object_index)
 		{
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+			match_vassert("c:\\halo\\SOURCE\\objects\\objects.c", __LINE__, FALSE,
+				"objects_fix_for_deleted_object: an umbrella shield named an object (a release build skips the objects that have no handler)");
+#endif
 			object->object.umbrella_shield_object_index = NONE;
 		}
 #ifdef HALO_LINUX
