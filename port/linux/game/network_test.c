@@ -31,7 +31,8 @@ Automated system link sessions for testing the netcode without the menus
   locked game, with that password; a game listed with a password is joined
   only so). "join-code:ABCD-EFGH" joins that code the same way;
   debug.network_test_rejoin has a joining machine leave the game that many
-  seconds in and join again, once.
+  seconds in and join again, once; debug.network_test_join_file has it
+  wait, the game found, until that file is there.
 
 Once the game runs, every second each machine logs where every player's
 unit is, so the machines' views of the game can be compared.
@@ -64,6 +65,7 @@ Called from the main loop every frame (main.c).
 */
 
 #include "cseries.h"
+#include "cseries/cseries_windows.h"
 #include "main/main.h"
 #include "interface/player_ui.h"
 #include "interface/ui_widget.h"
@@ -143,6 +145,11 @@ static struct
 	real hosted_seconds;
 	char invite_file[256];
 	boolean invite_written;
+	/* debug.network_test_join_file: a joining machine joins the game it
+	found once this file is there (the test's moment: a dedicated server's
+	scores, run_netns_online_test.sh dedicatedreload), logged once */
+	char join_file[256];
+	boolean join_file_logged;
 	char map_name[64];
 	char variant_name[64];
 	/* ... the variant of this game, of variant_name's list; and the seconds
@@ -306,8 +313,38 @@ static void network_test_read_settings(
 	network_test.local_after = network_test.local ? 0.0f : (real)config_real("debug.network_test_local_after");
 	snprintf(network_test.invite_file, sizeof(network_test.invite_file), "%s",
 		config_string("debug.network_test_invite_file"));
+	snprintf(network_test.join_file, sizeof(network_test.join_file), "%s",
+		config_string("debug.network_test_join_file"));
 	if (network_test.mode != _network_test_off)
 		platform_log("network test: %s", setting);
+}
+
+/* debug.network_test_join_file: whether the test has made it (checked
+twice a second) */
+static boolean network_test_join_file_there(
+	void)
+{
+	static unsigned long checked;
+	static boolean there;
+	unsigned long now = system_milliseconds();
+	FILE *file;
+
+	if (there || (checked && now - checked < 500))
+		return there;
+	checked = now ? now : 1;
+	file = fopen(network_test.join_file, "r");
+	if (file)
+	{
+		fclose(file);
+		there = TRUE;
+		platform_log("network test: %s is there: joining", network_test.join_file);
+	}
+	else if (!network_test.join_file_logged)
+	{
+		network_test.join_file_logged = TRUE;
+		platform_log("network test: waiting for %s to join", network_test.join_file);
+	}
+	return there;
 }
 
 /* appends to a line, cut short when it is full */
@@ -1413,6 +1450,9 @@ void network_test_update(
 					p2p_join_code(network_test.code) ? "looking it up" : "not a code");
 			}
 		}
+		/* (debug.network_test_join_file: not before the test makes it) */
+		else if (!network_test.joined && network_test.join_file[0] && !network_test_join_file_there())
+			;
 		else if (!network_test.joined && network_game_client_join_first_available_game())
 		{
 			network_test.joined = TRUE;
