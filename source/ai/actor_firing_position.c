@@ -170,6 +170,11 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) the firing position selections' time and counts (lines_profile.c) */
+#include "lines_profile.h"
+#endif
+
 /* ---------- constants */
 
 enum
@@ -1502,6 +1507,9 @@ static void firing_position_compute_line_of_sight(
 {
 	struct actor_datum *actor= actor_get(actor_index);
 
+#ifdef HALO_LINUX
+	halo_lines_stats.firing_position_lines_of_sight++;
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\ai\\actor_firing_position.c",
 		828,
@@ -1753,6 +1761,9 @@ short actor_select_firing_position(
 	short best_index= NONE;
 	real best_evaluation= 0.0f;
 	boolean debug_evaluation= FALSE;
+#ifdef HALO_LINUX
+	unsigned long long lines_started= halo_lines_now();
+#endif
 
 	if (actor->meta.encounter_index==ai_debug.selected_squad_index &&
 		(ai_debug.selected_actor_index==NONE || ai_debug.selected_actor_index==actor_index))
@@ -2163,6 +2174,10 @@ short actor_select_firing_position(
 		}
 		evaluation_context->debug_encounter_count= (short)encounter->firing_positions.count;
 		evaluation_context->debug_considered_count= firing_position_count;
+#ifdef HALO_LINUX
+		halo_lines_stats.firing_position_calls++;
+		halo_lines_stats.firing_position_considered+= firing_position_count;
+#endif
 
 		if (firing_position_count==0)
 		{
@@ -2471,6 +2486,18 @@ short actor_select_firing_position(
 		}
 	}
 
+#ifdef HALO_LINUX
+	if (lines_started)
+	{
+		unsigned long long lines_us= halo_lines_now()-lines_started;
+
+		halo_lines_stats.firing_position_us+= lines_us;
+		if (lines_us>halo_lines_stats.firing_position_worst_us)
+		{
+			halo_lines_stats.firing_position_worst_us= lines_us;
+		}
+	}
+#endif
 	return best_index;
 }
 

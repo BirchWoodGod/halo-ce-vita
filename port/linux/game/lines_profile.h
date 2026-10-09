@@ -3,7 +3,7 @@ LINES_PROFILE.H
 
 (port, HALO_TICK_PROFILE) The game frame's particles and sounds, and the
 sound obstruction rays and point physics lookups in them, and the tick's AI
-lines of sight: lines_profile.c
+lines of sight and firing position selections: lines_profile.c
 */
 
 #ifndef __LINES_PROFILE_H
@@ -42,6 +42,14 @@ struct halo_lines_stats
 	unsigned long ai_los_other_hits;
 	unsigned long ai_los_extra_lines;
 	unsigned long long ai_los_us;
+	/* actor_select_firing_position (actor_firing_position.c): selections,
+	the positions they considered and the lines of sight they tested, the
+	time, and the longest selection */
+	unsigned long firing_position_calls;
+	unsigned long firing_position_considered;
+	unsigned long firing_position_lines_of_sight;
+	unsigned long long firing_position_us;
+	unsigned long long firing_position_worst_us;
 };
 
 /* ---------- globals */
