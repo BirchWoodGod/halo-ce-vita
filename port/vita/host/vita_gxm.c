@@ -48,6 +48,7 @@ each frame's presentation.
 #include "vita_shader_generator_id.h"
 #include "lang.h"
 #include "overlay_font.h"
+#include "tlsf.h"
 
 #define DISPLAY_WIDTH 960
 #define DISPLAY_HEIGHT 544
@@ -800,6 +801,154 @@ static SceShaccCgSourceFile *shacccg_open(const char *name, const SceShaccCgSour
 
 static SceShaccCgCallbackList shacccg_callbacks;
 
+/* ---------- the shader compiler's heap
+
+SceShaccCg allocates through the callbacks it is given, and was given the
+C heap's malloc and free: newlib's 48 MB, which the game, the system's
+libraries and the renderer share, ~42 MB of it in use at the main menu.
+Measured in Vita3K (its SceShaccCg is the device's own, Oct 8 2026, with
+the shipped programs off so that every one compiled): the first compile
+kept 1.5 MB of it, each later one a few KB to 550 KB more (the compiler
+keeps what it grew to), and one program wanted 6 MB at once and left 4 MB
+behind when it failed: 6.9 MB kept after 26 compiles, 1.4 MB of the heap
+left, and the next custom map refused ("there is not enough memory for
+it"). On the owner's Vita (Oct 8, test 8), after Yoyorast Island, carousel
+and Extinction in one session, the compiles of Extinction's programs ran
+the C heap out: 113 programs did not compile ("fatal internal error"), the
+game's own allocations failed (its bitmaps' rebuilds, the menus' tag check:
+"this map file is damaged") and it crashed.
+
+So the compiler has a heap of its own: TLSF (port/third_party/tlsf) in a
+memory block of user RAM (HALO_SHADER_HEAP_MB, 10 by default), made at the
+first compile (a session that compiles nothing - its programs shipped or
+on the memory card - never makes it). Past it the compiler may borrow from
+the C heap only while that keeps SHADER_HEAP_C_RESERVE free for the game;
+an allocation it has no room for is refused (NULL), the compile fails
+("fatal internal error", as it did when newlib's heap was full) and that
+program's surfaces are not drawn, while the game goes on. In Vita3K with
+every program compiled (the shipped ones off), 50 programs took the heap
+to 7.0 MB at most and left 4.0 MB in it. The compiler is never released:
+sceShaccCgReleaseCompiler after a failed compile took a recursive lock and
+called sceClibAbort (Vita3K, Oct 8 2026, with this heap and with
+SceLibKernel's mspace alike), which ends the process on the hardware, and
+the compile after a release faulted in Oct 2's test. A program compiled is
+kept on the memory card (cache_write_file), so a session compiles each one
+once and the next session not at all. Without the block (no room), the C
+heap is used as before. Allocations carry their size in front (8 bytes)
+for the heap's figures. */
+/* newlib's fixed C heap (vita_main.c) */
+extern unsigned int _newlib_heap_size_user;
+
+#define SHADER_HEAP_DEFAULT_MB 10
+#define SHADER_HEAP_C_RESERVE (8u * 1024 * 1024)
+#define SHADER_HEAP_HEADER 8
+
+static struct
+{
+	SceUID block;
+	unsigned char *base;
+	unsigned long size;
+	tlsf_t heap;
+	/* bytes given out (with their headers) now and at most */
+	unsigned long in_use, peak;
+	/* compiles; compiles that found the heap full; allocations it borrowed
+	from the C heap */
+	unsigned long compiles, exhausted, borrowed;
+	/* an allocation the heap refused since the last compile began */
+	volatile int refused;
+} shader_heap = { -1 };
+
+static int shader_heap_owns(const void *pointer)
+{
+	return shader_heap.heap && (const unsigned char *)pointer >= shader_heap.base &&
+		(const unsigned char *)pointer < shader_heap.base + shader_heap.size;
+}
+
+static void *shader_heap_malloc(unsigned int size)
+{
+	unsigned char *block;
+
+	if (!shader_heap.heap)
+		return malloc(size);
+	block = size <= 0x7fffffffU - SHADER_HEAP_HEADER ? tlsf_malloc(shader_heap.heap, size + SHADER_HEAP_HEADER) : NULL;
+	if (!block)
+	{
+		/* (the C heap's, while it keeps its reserve) */
+		void *borrowed = NULL;
+
+		if (size < SHADER_HEAP_C_RESERVE &&
+			(unsigned long)mallinfo().uordblks + size + SHADER_HEAP_C_RESERVE <= _newlib_heap_size_user)
+		{
+			borrowed = malloc(size);
+		}
+		if (!borrowed)
+			shader_heap.refused = 1;
+		else
+			shader_heap.borrowed++;
+		return borrowed;
+	}
+	*(unsigned int *)block = size + SHADER_HEAP_HEADER;
+	shader_heap.in_use += size + SHADER_HEAP_HEADER;
+	if (shader_heap.in_use > shader_heap.peak)
+		shader_heap.peak = shader_heap.in_use;
+	return block + SHADER_HEAP_HEADER;
+}
+
+static void shader_heap_free(void *pointer)
+{
+	unsigned char *block;
+
+	if (!pointer)
+		return;
+	if (!shader_heap_owns(pointer))
+	{
+		free(pointer);
+		return;
+	}
+	block = (unsigned char *)pointer - SHADER_HEAP_HEADER;
+	shader_heap.in_use -= *(unsigned int *)block;
+	tlsf_free(shader_heap.heap, block);
+}
+
+/* the heap's block, if there is none yet */
+static void shader_heap_make(void)
+{
+	const char *setting = getenv("HALO_SHADER_HEAP_MB");
+	long megabytes = setting ? atol(setting) : SHADER_HEAP_DEFAULT_MB;
+	void *base = NULL;
+
+	if (shader_heap.heap || megabytes <= 0)
+		return;
+	shader_heap.size = (unsigned long)megabytes * 1024 * 1024;
+	shader_heap.block = sceKernelAllocMemBlock("shader compiler heap", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW,
+		shader_heap.size, NULL);
+	if (shader_heap.block >= 0 && sceKernelGetMemBlockBase(shader_heap.block, &base) >= 0 && base)
+		shader_heap.heap = tlsf_create_with_pool(base, shader_heap.size);
+	if (!shader_heap.heap)
+	{
+		log_line("gxm: no room for the shader compiler's %ld MB heap (0x%08x): it compiles in the C heap",
+			megabytes, (unsigned)shader_heap.block);
+		if (shader_heap.block >= 0)
+			sceKernelFreeMemBlock(shader_heap.block);
+		shader_heap.block = -1;
+		shader_heap.size = 0;
+		return;
+	}
+	shader_heap.base = base;
+	shader_heap.in_use = shader_heap.peak = 0;
+}
+
+/* (the logs) the compiler heap's line */
+static void shader_heap_describe(char *text, size_t size)
+{
+	if (shader_heap.heap)
+		snprintf(text, size, "shader compiler heap %lu KB in use (peak %lu KB) of %lu KB after %lu compiles, %lu borrowed from the C heap, %lu found no room",
+			shader_heap.in_use / 1024, shader_heap.peak / 1024, shader_heap.size / 1024, shader_heap.compiles,
+			shader_heap.borrowed, shader_heap.exhausted);
+	else
+		snprintf(text, size, "shader compiler heap not made");
+}
+
 static int shacccg_start(void)
 {
 	static const char *const paths[] = {
@@ -818,7 +967,8 @@ static int shacccg_start(void)
 			continue;
 		if (sceKernelLoadStartModule(paths[index], 0, NULL, 0, NULL, NULL) >= 0)
 		{
-			sceShaccCgSetDefaultAllocator(malloc, free);
+			/* (its own heap: shader_heap) */
+			sceShaccCgSetDefaultAllocator(shader_heap_malloc, shader_heap_free);
 			sceShaccCgInitializeCallbackList(&shacccg_callbacks, SCE_SHACCCG_TRIVIAL);
 			shacccg_callbacks.openFile = shacccg_open;
 			gxm.shacccg_ready = 1;
@@ -855,16 +1005,38 @@ static void shader_ids_make(void)
 		(unsigned long long)shader_ids.generator_id);
 }
 
-/* a malloc'd GXP program for the source, or NULL */
+/* (the logs) the C heap's bytes the compiles left behind, all told */
+static volatile long compile_heap_kept;
+
+static SceGxmProgram *compile_once(const char *source, int fragment);
+
+/* a malloc'd GXP program for the source (the C heap's, not the compiler's),
+or NULL */
 static SceGxmProgram *compile(const char *source, int fragment)
+{
+	SceGxmProgram *program = NULL;
+	long heap_before = mallinfo().uordblks;
+
+	if (!shacccg_start())
+		return NULL;
+	shader_heap_make();
+	shader_heap.refused = 0;
+	program = compile_once(source, fragment);
+	shader_heap.compiles++;
+	if (!program && shader_heap.refused)
+		shader_heap.exhausted++;
+	compile_heap_kept += (long)mallinfo().uordblks - heap_before - (program ? (long)sceGxmProgramGetSize(program) : 0);
+	return program;
+}
+
+/* compile's one attempt */
+static SceGxmProgram *compile_once(const char *source, int fragment)
 {
 	SceShaccCgCompileOptions options;
 	const SceShaccCgCompileOutput *output;
 	SceGxmProgram *program = NULL;
 	int index;
 
-	if (!shacccg_start())
-		return NULL;
 	sceShaccCgInitializeCompileOptions(&options);
 	options.mainSourceFile = shader_compile_settings.main_file;
 	options.targetProfile = fragment ? SCE_SHACCCG_PROFILE_FP : SCE_SHACCCG_PROFILE_VP;
@@ -881,17 +1053,23 @@ static SceGxmProgram *compile(const char *source, int fragment)
 	if (output->programData && output->programSize)
 	{
 		program = malloc(output->programSize);
-		memcpy(program, output->programData, output->programSize);
+		if (program)
+			memcpy(program, output->programData, output->programSize);
+		else
+			log_line("gxm: no room in the C heap for a compiled %u byte program", (unsigned)output->programSize);
 	}
 	else
 	{
 		{
-			/* (the heap, which the compiler allocates from: a compile
-			that fails for want of memory says "fatal internal error") */
+			/* (the heaps: a compile that fails for want of memory says
+			"fatal internal error") */
 			struct mallinfo heap = mallinfo();
+			char compiler_heap[160];
 
-			log_line("gxm: a %s program does not compile (heap: %d KB in use, %d KB free of %d KB)",
-				fragment ? "fragment" : "vertex", heap.uordblks / 1024, heap.fordblks / 1024, heap.arena / 1024);
+			shader_heap_describe(compiler_heap, sizeof(compiler_heap));
+			log_line("gxm: a %s program does not compile (%s%s; C heap %d KB in use, %d KB free of %d KB)",
+				fragment ? "fragment" : "vertex", compiler_heap, shader_heap.refused ? ", which refused an allocation" : "",
+				heap.uordblks / 1024, heap.fordblks / 1024, heap.arena / 1024);
 		}
 		for (index = 0; index < output->diagnosticCount; index++)
 		{
@@ -903,14 +1081,6 @@ static SceGxmProgram *compile(const char *source, int fragment)
 		}
 	}
 	sceShaccCgDestroyCompileOutput(output);
-	/* HALO_SHADER_RELEASE=1 (off; experimental): the compiler's memory
-	handed back after each compile - in Vita3K the heap grows ~100 KB a
-	compile until compiles fail ("fatal internal error") after 50-110 of
-	them. Tried in Vita3K (Oct 2 2026): the compile after the first release
-	faults inside _malloc_r (a corrupted heap), so it stays off; the
-	shipped pack (app0:shaders.pak) is what keeps the compiles few */
-	if (getenv("HALO_SHADER_RELEASE") && atoi(getenv("HALO_SHADER_RELEASE")))
-		sceShaccCgReleaseCompiler();
 	return program;
 }
 
@@ -1427,6 +1597,40 @@ static unsigned long shader_register(uint64_t hash, int fragment, SceGxmProgram 
 	return ++gxm.shader_count;
 }
 
+/* Programs that did not compile, by hash: asked for again - the same Cg
+comes from many of the renderer's keys, each its own entry - they are not
+compiled again. On the owner's Vita (Oct 8) the same failing programs were
+queued and compiled again and again, six times for one, each failing at
+once for want of memory, while the frames waited on the full heap. Kept
+for the session, as the renderer keeps a failed program's entry. */
+#define FAILED_SHADERS 512
+
+static struct
+{
+	uint64_t hashes[FAILED_SHADERS];
+	unsigned int count, next;
+} failed_shaders;
+
+static int shader_failed(uint64_t hash)
+{
+	unsigned int index;
+
+	for (index = 0; index < failed_shaders.count; index++)
+		if (failed_shaders.hashes[index] == hash)
+			return 1;
+	return 0;
+}
+
+static void shader_failed_add(uint64_t hash)
+{
+	if (shader_failed(hash))
+		return;
+	failed_shaders.hashes[failed_shaders.next] = hash;
+	failed_shaders.next = (failed_shaders.next + 1) % FAILED_SHADERS;
+	if (failed_shaders.count < FAILED_SHADERS)
+		failed_shaders.count++;
+}
+
 unsigned long vgxm_shader_get(const char *source, int fragment)
 {
 	uint64_t hash = source_hash(source, fragment);
@@ -1436,6 +1640,8 @@ unsigned long vgxm_shader_get(const char *source, int fragment)
 
 	if ((id = shader_find(hash)) != 0)
 		return id;
+	if (shader_failed(hash))
+		return 0;
 	if (gxm.shader_count >= MAXIMUM_SHADERS)
 		return 0;
 	if (getenv("HALO_TRACE_FILES"))
@@ -1457,7 +1663,10 @@ unsigned long vgxm_shader_get(const char *source, int fragment)
 		vgxm_compile_us += before - compile_from;
 		vgxm_compiles++;
 		if (!program)
+		{
+			shader_failed_add(hash);
 			return 0;
+		}
 		cache_write(hash, program);
 	}
 	id = shader_register(hash, fragment, program);
@@ -1577,7 +1786,7 @@ unsigned long vgxm_shader_request(const char *source, int fragment)
 	hash = source_hash(source, fragment);
 	if ((id = shader_find(hash)) != 0)
 		return id;
-	if (gxm.shader_count >= MAXIMUM_SHADERS)
+	if (gxm.shader_count >= MAXIMUM_SHADERS || shader_failed(hash))
 		return 0;
 	sceKernelWaitSema(shader_async.lock, 1, NULL);
 	for (link = &shader_async.jobs; (job = *link) != NULL; link = &job->next)
@@ -1599,10 +1808,13 @@ unsigned long vgxm_shader_request(const char *source, int fragment)
 		if (!job->from_cache)
 		{
 			vgxm_compiles_background++;
-			log_line("gxm: shader %016llx compiled in the background in %.1f ms (ready %.1f ms after it was first drawn)",
-				(unsigned long long)hash, job->compile_us / 1000.0, (job->done_us - job->queued_us) / 1000.0);
+			log_line("gxm: shader %016llx compiled in the background in %.1f ms (ready %.1f ms after it was first drawn)%s; "
+				"the compiles have kept %ld KB of the C heap", (unsigned long long)hash, job->compile_us / 1000.0,
+				(job->done_us - job->queued_us) / 1000.0, program ? "" : ", but it does not compile", compile_heap_kept / 1024);
 		}
 		free(job);
+		if (!program)
+			shader_failed_add(hash);
 		id = program ? shader_register(hash, fragment, program) : 0;
 		vgxm_shader_load_us += sceKernelGetProcessTimeWide() - before;
 		vgxm_shader_loads++;
@@ -4560,6 +4772,19 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 			log_line("gxm: %u frames in %llu ms: %.2f ms/frame waiting for the GPU, %.1f scenes/frame (%.1f splits), ring %u KB; present: end-scene %.2f begin-display %.2f blit+end %.2f queue %.2f ms/frame",
 				frames, elapsed / 1000, waited / 1000.0 / frames, (double)gxm_scene_count / frames, (double)gxm_scene_splits / frames, gxm.ring_offset_peak / 1024,
 				present_step_us[0] / 1000.0 / frames, present_step_us[1] / 1000.0 / frames, present_step_us[2] / 1000.0 / frames, present_step_us[3] / 1000.0 / frames);
+			/* (a session's memory as it goes: the C heap, which the game,
+			the system's libraries and the shader compiler share, and the
+			programs) */
+			{
+				struct mallinfo heap = mallinfo();
+
+				char compiler_heap[160];
+
+				shader_heap_describe(compiler_heap, sizeof(compiler_heap));
+				log_line("gxm: C heap %d KB in use, %d KB free; %s; %s; compiles kept %ld KB of the C heap",
+					heap.uordblks / 1024, (int)(_newlib_heap_size_user / 1024) - heap.uordblks / 1024, vgxm_counts(),
+					compiler_heap, compile_heap_kept / 1024);
+			}
 			if (gxm.dependency_waits || gxm.dependency_splits)
 				log_line("gxm: render to texture: %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
 					(double)gxm.dependency_waits / frames, (double)gxm.dependency_splits / frames);
