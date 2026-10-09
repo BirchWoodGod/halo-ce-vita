@@ -587,9 +587,9 @@ static void sound_cache_start_loading_sound(
 {
 	long cache_block_index;
 #ifdef HALO_LINUX
-	/* (port: a Custom Edition map's Ogg Vorbis permutation is held as Xbox
-	ADPCM, decoded into its block: custom_edition_sounds.c) */
-	boolean ogg_vorbis = custom_edition_sound_is_ogg_vorbis(sound);
+	/* (port: a Custom Edition map's Ogg Vorbis or 16-bit PCM permutation is
+	held as Xbox ADPCM, made so in its block: custom_edition_sounds.c) */
+	boolean transcoded = custom_edition_sound_is_transcoded(sound);
 	long size = custom_edition_sound_cache_bytes(sound);
 #else
 	long size = sound->samples.size;
@@ -643,7 +643,7 @@ static void sound_cache_start_loading_sound(
 		sound->cache_base_address = (unsigned long)cache_address;
 		cache_sound->sound = sound;
 #ifdef HALO_LINUX
-		if (ogg_vorbis)
+		if (transcoded)
 			custom_edition_sound_load(sound, cache_address, size, &cache_sound->loaded);
 		else
 		/* (port) ahead of the textures' reads (cache_files_windows.c) */

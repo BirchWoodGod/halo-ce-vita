@@ -328,6 +328,8 @@ static int report_custom_edition_cache(
 			printf("animation_overlays_disabled: %" PRId32 "\n", conversion.animation_overlays_disabled);
 			printf("sounds_undecodable: %" PRId32 "\n", conversion.sounds_undecodable);
 			printf("sounds_ogg_vorbis: %" PRId32 "\n", conversion.sounds_ogg_vorbis);
+			printf("sound_permutations_pcm: %" PRId32 "\n", conversion.sound_permutations_pcm);
+			printf("sound_permutations_muted: %" PRId32 "\n", conversion.sound_permutations_muted);
 			printf("hud_placements_rescaled: %" PRId32 "\n", conversion.hud_placements_rescaled);
 			printf("score_hint_converted: %" PRId32 "\n", conversion.score_hint_converted);
 			if (dump_path)

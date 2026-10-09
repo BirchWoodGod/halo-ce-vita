@@ -365,12 +365,16 @@ names in reads and messages) */
 #define SOUND_PERMUTATION_CACHE_TAG_INDEX_OFFSET 0x34
 #define SOUND_PERMUTATION_RUNTIME_TAG_INDEX_OFFSET 0x3C
 /* the permutation's buffer size: Halo PC's 16-bit PCM bytes, which an Ogg
-Vorbis permutation decodes to (Invader's sound.json, "buffer size"); this
-build's Xbox ADPCM bytes for it once converted (custom_edition_sounds.c) */
+Vorbis permutation decodes to and a 16-bit PCM one holds (Invader's
+sound.json, "buffer size"); this build's Xbox ADPCM bytes for it once
+converted (custom_edition_sounds.c) */
 #define SOUND_PERMUTATION_BUFFER_SIZE_OFFSET 0x38
+/* its samples' size (the tag data's first field) */
+#define SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET SOUND_PERMUTATION_SAMPLES_OFFSET
 /* the compressions this build plays or refuses cleanly (sound_manager.c:
-none and Xbox ADPCM; Custom Edition also has Ogg Vorbis, 3, which this
-build decodes to Xbox ADPCM as the sound cache loads it) */
+Xbox ADPCM sounds; a permutation's none is Halo PC's 16-bit PCM, little-
+endian in its caches, and Custom Edition also has Ogg Vorbis, 3: this
+build encodes both to Xbox ADPCM as the sound cache loads them) */
 #define SOUND_COMPRESSION_NONE 0
 #define SOUND_COMPRESSION_XBOX_ADPCM 1
 #define SOUND_COMPRESSION_OGG_VORBIS 3
@@ -2877,19 +2881,47 @@ static uint32_t ogg_vorbis_adpcm_bytes(
 	return blocks * block_bytes;
 }
 
+/* The Xbox ADPCM bytes a 16-bit PCM permutation of `pcm_bytes` (its
+samples' size) and `channels` channels encodes to, at most what the sound
+cache gives a permutation (the rest is cut off); 0 when it is not whole
+frames, or empty. */
+static uint32_t pcm_adpcm_bytes(
+	uint32_t pcm_bytes,
+	int channels)
+{
+	uint32_t frame_bytes = 2 * (uint32_t)channels;
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	uint32_t frames;
+	uint32_t blocks;
+
+	if (!pcm_bytes || pcm_bytes % frame_bytes)
+		return 0;
+	frames = pcm_bytes / frame_bytes;
+	blocks = frames / OGG_SOUND_ADPCM_BLOCK_SAMPLES + (frames % OGG_SOUND_ADPCM_BLOCK_SAMPLES ? 1 : 0);
+	if (blocks > OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes)
+		blocks = OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes;
+	return blocks * block_bytes;
+}
+
 /* Gives every permutation of the sound at `sound_offset` (tag `handle`)
 the state the game expects of one it has not played: its tag is its own
 (sounds.map holds the handles of whatever map it was built with), with no
-cache block or samples. This build plays Xbox ADPCM (and refuses
-uncompressed sounds). A Custom Edition Ogg Vorbis sound is made an Xbox
-ADPCM one to the game, a mono 44 kHz one 22 kHz (sound_manager.c plays
-mono sounds at 22 kHz only), its permutations left Ogg Vorbis with their
-buffer size made the Xbox ADPCM's: the sound cache decodes them as it loads
-them (custom_edition_sounds.c). A sound in another compression (Halo PC's
-IMA ADPCM, 2), or whose permutations are not all of its own, would be
-played as Xbox ADPCM noise, and is made unplayable: with no pitch ranges
-the game neither plays nor loads it (sound_manager.c,
-sound_definition_is_playable). */
+cache block or samples. This build plays Xbox ADPCM sounds only. A Custom
+Edition Ogg Vorbis sound is made an Xbox ADPCM one to the game, a mono
+44 kHz one 22 kHz (sound_manager.c plays mono sounds at 22 kHz only), its
+permutations left Ogg Vorbis with their buffer size made the Xbox ADPCM's:
+the sound cache decodes them as it loads them (custom_edition_sounds.c).
+An Xbox ADPCM sound's permutations may be 16-bit PCM (compression none:
+Halo PC plays both, and extinction.map mixes them); they stay so, their
+buffer size made the Xbox ADPCM's, and the sound cache encodes them as it
+loads them, as it does Ogg Vorbis ones. Either would play as noise if read
+as Xbox ADPCM, so a 16-bit PCM permutation that is not whole frames is
+muted (buffer size 0), and so is an Xbox ADPCM one that is not whole
+blocks (its samples' size made 0, which the sound cache does not load). A
+sound in another compression (Halo PC's IMA ADPCM, 2), or whose
+permutations are not all of its own, would be played as Xbox ADPCM noise,
+and is made unplayable: with no pitch ranges the game neither plays nor
+loads it (sound_manager.c, sound_definition_is_playable). */
 static void sound_prepare(
 	struct load_state const *state,
 	uint32_t sound_offset,
@@ -2954,7 +2986,27 @@ static void sound_prepare(
 						read_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET), channels, halved));
 				}
 			}
-			else if (permutation_compression != SOUND_COMPRESSION_NONE && permutation_compression != SOUND_COMPRESSION_XBOX_ADPCM)
+			else if (permutation_compression == SOUND_COMPRESSION_NONE)
+			{
+				uint32_t adpcm_bytes = pcm_adpcm_bytes(
+					read_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET), channels);
+
+				write_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET, adpcm_bytes);
+				if (adpcm_bytes)
+					report->sound_permutations_pcm++;
+				else
+					report->sound_permutations_muted++;
+			}
+			else if (permutation_compression == SOUND_COMPRESSION_XBOX_ADPCM)
+			{
+				if (read_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET) %
+					(OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels))
+				{
+					write_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET, 0);
+					report->sound_permutations_muted++;
+				}
+			}
+			else
 			{
 				decodable = 0;
 			}

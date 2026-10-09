@@ -270,6 +270,18 @@ changed:
   any other compression (Halo PC's IMA ADPCM), or whose permutations are
   not all of the sound's own, are made unplayable, by emptying their pitch
   ranges, which the game skips.
+- **16-bit PCM permutations** (compression 0, little-endian in Halo PC's
+  caches) of Xbox ADPCM sounds: Halo PC plays a sound's permutations each
+  in its own compression, and maps built with mods mix them
+  (`extinction.map` has 7, among them the scarab's `bolt_impact`; the
+  protected `Covenant_V_Marines_Beta_5.map` 3). Read as Xbox ADPCM they
+  played as noise. They stay PCM, their buffer size made the Xbox ADPCM's
+  (at most 1 MB, the rest cut off), and the sound cache's decoding thread
+  reads the PCM in pieces and encodes it into the block
+  (`custom_edition_sounds.c`, `port/linux/src/xbox_adpcm_encoder.c`, the
+  encoder the Ogg Vorbis decoding also uses). A PCM permutation that is not
+  whole frames, and an Xbox ADPCM one that is not whole 36-byte blocks a
+  channel, is muted (none in the maps run): either would play as noise.
 - **OpenSauce's script nodes.** OpenSauce's memory upgrades make room for
   28501 script syntax nodes instead of 19001, and OpenSauce patches the game
   to accept that. This build takes the scenario's nodes only at its own
@@ -418,7 +430,9 @@ silences them.
 - Conversion: every shader group's type; chicago extended shaders with and
   without four-stage maps; a shader with another group's type (refused);
   bitmaps and sound permutations naming their own tags; sound header fields
-  taken from `sounds.map`; an Ogg Vorbis sound made an Xbox ADPCM one with its permutations' sizes; upgraded
+  taken from `sounds.map`; an Ogg Vorbis sound made an Xbox ADPCM one with its permutations' sizes; 16-bit
+  PCM permutations of an Xbox ADPCM sound given their Xbox ADPCM sizes, and
+  ones not whole frames or blocks muted; upgraded
   script nodes reduced, stock ones kept, too many refused; animation overlays
   kept and disabled; HUD placements with the high resolution scale halved
   (in a weapon HUD's statics and crosshair items) and ones without it kept;
@@ -702,6 +716,7 @@ every layout used was then checked against the sample maps.
 | Compressed color plates are left out of caches: size kept, address 0 | every bitmap in `bitmaps.map` |
 | Font style references in `loc.map` are all `NONE` | all 3 fonts |
 | Sound compression value 3 is Ogg Vorbis, value 1 is Xbox ADPCM | in `sounds.map`, all 106 value-3 permutations start with `OggS`; all 1,365 value-1 permutations are whole 36-byte blocks |
+| A permutation's compression 0 is 16-bit PCM, little-endian, and can be in an Xbox ADPCM sound | `extinction.map`'s 7 and `Covenant_V_Marines_Beta_5.map`'s 3 value-0 permutations, all in value-1 sounds: their buffer size equals their samples' size (as Invader requires of 16-bit PCM, `tag/parser/compile/sound.cpp`, which also turns the tag's big-endian samples little-endian for the cache), all are whole frames and none whole 36-byte blocks; `bolt_impact` read little-endian has an RMS of 8047 and of its first difference 2687 (big-endian 17834 and 24755); read as Xbox ADPCM it is 46% clipped, RMS 25584. Every value-1 permutation of both maps is whole blocks |
 | `bitmaps.map` bitmaps are not swizzled, and cube maps hold each level's six faces together | all 1,467; 38 of 40 cube maps match that order when checked against their next level (one is uniform, one does not match) |
 | Multipurpose maps: Custom Edition's red, green, blue and alpha hold what the Xbox's alpha, green, red and blue do | the multipurpose maps the Custom Edition and the Xbox `bloodgulch.map` share, decoded and compared channel by channel (the cyborg's, the warthog's, the boulders') |
 | HUD meters: Custom Edition's alpha holds the Xbox's color (the fill order), and its color the Xbox's alpha (the shape) | `hud_ammo_meters`: Custom Edition's 512×512 A8R8G8B8 averaged down to the Xbox's 256×256 A8Y8 differs from the Xbox's luminance by 6.6 on average in alpha and 23 in color, and from its alpha by 12.3 in color and 23.4 in alpha; `hud_unit_meters` has its sprites rearranged, and shows the same swap when viewed. January's meter shader reads the fill order from color and discards texels without alpha |
@@ -741,8 +756,9 @@ every layout used was then checked against the sample maps.
   crash the game can still do so, as an Xbox map could; debug builds also
   stop on data that Custom Edition's release build reads past unchecked, as
   with the animation overlays above, and other such data may turn up.
-- **Ogg Vorbis sounds are re-encoded.** They play as Xbox ADPCM, decoded as
-  the sound cache loads them: an Ogg Vorbis permutation takes the cache
+- **Ogg Vorbis and 16-bit PCM sounds are re-encoded.** They play as Xbox
+  ADPCM, decoded as the sound cache loads them (encoding a 16-bit PCM one
+  takes about a millisecond on x86): an Ogg Vorbis permutation takes the cache
   memory an Xbox ADPCM one of its length would (at most 1 MB; longer ones
   are cut off there), and its first play waits for the decoding (a few
   milliseconds on x86, ~40 ms for a 5 s stereo music link on a Raspberry Pi
