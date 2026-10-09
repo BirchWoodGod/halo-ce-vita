@@ -3362,6 +3362,21 @@ void halo_d3d_buffer_in_place(const void *buffer, int in_place)
 	(void)in_place;
 }
 
+/* (port) the dynamic triangles' index buffer, and its parts the game locks
+to write: the Vita's device reuses its copies of them within a frame
+(port/vita/platform/d3d8_gxm.c); OpenGL uploads every draw's indices anyway */
+void halo_d3d_indices_tracked(const void *base, unsigned long bytes)
+{
+	(void)base;
+	(void)bytes;
+}
+
+void halo_d3d_indices_written(const void *data, unsigned long bytes)
+{
+	(void)data;
+	(void)bytes;
+}
+
 void halo_d3d_stream_attribute(long reg, long stream)
 {
 	device.extra_attribute_active = reg >= 0 && reg < XGPU_VERTEX_ATTRIBUTE_COUNT && stream >= 0 && stream < 16;

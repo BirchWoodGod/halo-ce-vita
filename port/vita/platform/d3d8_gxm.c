@@ -494,6 +494,8 @@ static struct
 	unsigned long arena_state_bytes, arena_values_bytes, arena_bump_bytes, arena_target_bytes, arena_material_bytes,
 		kept_material_bytes;
 	unsigned long copied_indices_repeated, index_copies, index_copies_repeated;
+	/* index bytes a draw took from the frame's copy instead of copying */
+	unsigned long reused_indices;
 	unsigned long chunk_snapshots[VITA_VC_CHUNKS], chunk_dup_last[VITA_VC_CHUNKS], chunk_dup_recent[VITA_VC_CHUNKS];
 	unsigned long chunk_dup_recent_bytes;
 	/* new state and values blocks equal to one of the frame's last 8 / 64 */
@@ -6997,6 +6999,131 @@ static void index_extent(const WORD *indices, unsigned long count, unsigned long
 	*maximum = high;
 }
 
+/* (port) The dynamic triangles' indices (rasterizer_xbox_draw_primitives.c:
+one index buffer the game rewrites every frame, in the C heap) are copied
+into the frame's ring by every draw that reads them, and the structure draws
+the same visible triangles once per pass - lightmaps, diffuse and specular
+lights, fog, reflections: 49 of b30's 76 KB of index copies a frame and 158
+of a10's 208 KB were indices the frame had copied before. A draw now takes
+the frame's copy of the same indices (the same address and count) while the
+game has not locked that part of the buffer since: the game writes the
+buffer only between a lock and an unlock (halo_d3d_indices_written, from
+_rasterizer_dynamic_triangles_lock), and the copies are this frame's ring's,
+forgotten at the present. Only indices inside the buffer the game named
+(halo_d3d_indices_tracked) are taken so; any other memory is copied as
+before. HALO_INDEX_REUSE=0: every draw copies its own;
+HALO_INDEX_REUSE_VERIFY=1 compares every copy taken with the indices it
+stands for (logged; the null renderer's ring is ordinary memory). */
+#define INDEX_REUSE_ENTRIES 512
+#define INDEX_REUSE_SLOTS 1024
+static struct
+{
+	const WORD *indices;
+	unsigned long count;
+	/* NULL once the game locked a part of the buffer it overlaps */
+	const unsigned short *copy;
+} index_reuse_entries[INDEX_REUSE_ENTRIES];
+static unsigned long index_reuse_used;
+/* by the indices' address: an entry's index + 1, valid while its epoch is
+the current one (the epoch moves on at each present) */
+static struct
+{
+	unsigned long entry, epoch;
+} index_reuse_slots[INDEX_REUSE_SLOTS];
+static unsigned long index_reuse_epoch = 1;
+static const unsigned char *index_tracked_base;
+static unsigned long index_tracked_bytes;
+static int index_reuse_on = -1, index_reuse_verify;
+static unsigned long index_reuse_mismatches;
+
+void halo_d3d_indices_tracked(const void *base, unsigned long bytes)
+{
+	index_tracked_base = (const unsigned char *)base;
+	index_tracked_bytes = base ? bytes : 0;
+	index_reuse_used = 0;
+	index_reuse_epoch++;
+}
+
+void halo_d3d_indices_written(const void *data, unsigned long bytes)
+{
+	const unsigned char *from = (const unsigned char *)data, *to = from + bytes;
+	unsigned long index;
+
+	for (index = 0; index < index_reuse_used; index++)
+	{
+		const unsigned char *start = (const unsigned char *)index_reuse_entries[index].indices;
+
+		if (index_reuse_entries[index].copy && start < to && start + index_reuse_entries[index].count * sizeof(WORD) > from)
+			index_reuse_entries[index].copy = NULL;
+	}
+}
+
+/* the frame's next ring: the copies are forgotten */
+static void index_reuse_frame_end(void)
+{
+	index_reuse_used = 0;
+	index_reuse_epoch++;
+}
+
+static unsigned long index_reuse_slot(const WORD *indices, unsigned long count)
+{
+	return (((unsigned long)(size_t)indices >> 1) ^ count * 40503UL) * 2654435761UL % INDEX_REUSE_SLOTS;
+}
+
+/* the frame's copy of these indices, or NULL */
+static const unsigned short *index_reuse_find(const WORD *indices, unsigned long count)
+{
+	unsigned long slot, entry;
+
+	if (index_reuse_on < 0)
+	{
+		const char *setting = getenv("HALO_INDEX_REUSE"), *verify = getenv("HALO_INDEX_REUSE_VERIFY");
+
+		index_reuse_on = !setting || atoi(setting) != 0;
+		index_reuse_verify = verify && atoi(verify) != 0;
+	}
+	if (!index_reuse_on || (const unsigned char *)indices < index_tracked_base ||
+		(const unsigned char *)(indices + count) > index_tracked_base + index_tracked_bytes)
+	{
+		return NULL;
+	}
+	slot = index_reuse_slot(indices, count);
+	if (index_reuse_slots[slot].epoch != index_reuse_epoch)
+		return NULL;
+	entry = index_reuse_slots[slot].entry;
+	if (index_reuse_entries[entry].indices != indices || index_reuse_entries[entry].count != count ||
+		!index_reuse_entries[entry].copy)
+	{
+		return NULL;
+	}
+	if (index_reuse_verify && memcmp(index_reuse_entries[entry].copy, indices, count * sizeof(WORD)))
+	{
+		if (index_reuse_mismatches++ < 16)
+			platform_log("index reuse: the copy of %lu indices at %p differs from them (frame %lu)", count, (const void *)indices,
+				device.frame);
+		return NULL;
+	}
+	return index_reuse_entries[entry].copy;
+}
+
+/* a copy just made, for the frame's later draws of the same indices */
+static void index_reuse_keep(const WORD *indices, unsigned long count, const unsigned short *copy)
+{
+	unsigned long slot;
+
+	if (!index_reuse_on || index_reuse_used >= INDEX_REUSE_ENTRIES || (const unsigned char *)indices < index_tracked_base ||
+		(const unsigned char *)(indices + count) > index_tracked_base + index_tracked_bytes)
+	{
+		return;
+	}
+	slot = index_reuse_slot(indices, count);
+	index_reuse_entries[index_reuse_used].indices = indices;
+	index_reuse_entries[index_reuse_used].count = count;
+	index_reuse_entries[index_reuse_used].copy = copy;
+	index_reuse_slots[slot].entry = index_reuse_used++;
+	index_reuse_slots[slot].epoch = index_reuse_epoch;
+}
+
 /* (the record census) index copies of indices the frame copied before:
 the same address and count, by an open-addressed table stamped by frame */
 static void index_census(const WORD *indices, unsigned long count)
@@ -7087,6 +7214,10 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 		{
 			draw->indices = index_data;
 		}
+		else if ((draw->indices = index_reuse_find(index_data, vertex_count)) != NULL)
+		{
+			stats.reused_indices += vertex_count * sizeof(WORD);
+		}
 		else
 		{
 			draw->indices = ring_copy(index_data, vertex_count * sizeof(WORD));
@@ -7095,6 +7226,7 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 				index_census(index_data, vertex_count);
 			if (!draw->indices)
 				return;
+			index_reuse_keep(index_data, vertex_count, draw->indices);
 		}
 	}
 	DRAW_PROFILE_ADD(3, profile_from);
@@ -7705,6 +7837,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		present_wait_time += frame_drain_us;
 		/* the next frame's ring: every snapshot is written anew */
 		vgxm_ring_next(device.frame + 1);
+		index_reuse_frame_end();
 		device.vertex_uniform_snapshot = NULL;
 		device.fragment_snapshot[0] = device.fragment_snapshot[1] = NULL;
 		memset(device.chunk_snapshot, 0, sizeof(device.chunk_snapshot));
@@ -7859,13 +7992,13 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			double frames = (double)stats.presents;
 
 			platform_log("record census per frame: %.0f draws, entry %.0f B %.2f lines/draw (%.0f KB); arenas KB: state %.1f values %.1f bump %.1f targets %.2f materials %.1f (+%.1f kept new); "
-				"indices %.1f KB copied in %.0f copies, %.1f KB in %.0f copies the frame made before; vertex snapshots (all/same as last/one of last 8) A %.0f/%.0f/%.0f B %.0f/%.0f/%.0f C1 %.0f/%.0f/%.0f C2 %.0f/%.0f/%.0f D %.0f/%.0f/%.0f E %.0f/%.0f/%.0f, %.1f KB repeats",
+				"indices %.1f KB copied in %.0f copies, %.1f KB in %.0f copies the frame made before, %.1f KB reused; vertex snapshots (all/same as last/one of last 8) A %.0f/%.0f/%.0f B %.0f/%.0f/%.0f C1 %.0f/%.0f/%.0f C2 %.0f/%.0f/%.0f D %.0f/%.0f/%.0f E %.0f/%.0f/%.0f, %.1f KB repeats",
 				stats.record_draws / frames, stats.record_entry_bytes / (double)stats.record_draws,
 				stats.record_entry_lines / (double)stats.record_draws, stats.record_entry_bytes / 1024.0 / frames,
 				stats.arena_state_bytes / 1024.0 / frames, stats.arena_values_bytes / 1024.0 / frames, stats.arena_bump_bytes / 1024.0 / frames,
 				stats.arena_target_bytes / 1024.0 / frames, stats.arena_material_bytes / 1024.0 / frames, stats.kept_material_bytes / 1024.0 / frames,
 				stats.copied_indices / 1024.0 / frames, stats.index_copies / frames, stats.copied_indices_repeated / 1024.0 / frames,
-				stats.index_copies_repeated / frames,
+				stats.index_copies_repeated / frames, stats.reused_indices / 1024.0 / frames,
 				stats.chunk_snapshots[0] / frames, stats.chunk_dup_last[0] / frames, stats.chunk_dup_recent[0] / frames,
 				stats.chunk_snapshots[1] / frames, stats.chunk_dup_last[1] / frames, stats.chunk_dup_recent[1] / frames,
 				stats.chunk_snapshots[2] / frames, stats.chunk_dup_last[2] / frames, stats.chunk_dup_recent[2] / frames,
