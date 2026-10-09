@@ -125,6 +125,7 @@ symbols in this file:
 #include "object_bounds_cache.h"
 /* the point physics' leaves and cells (point_leaf_cache.c) */
 #include "point_leaf_cache.h"
+#include <string.h>
 #else
 #define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
 #define HALO_OBJECTS_PHASE_POP() ((void)0)
@@ -335,6 +336,106 @@ collision:
 }
 
 #ifdef HALO_LINUX
+/* (port) the structure tests of the sound obstruction rays, kept: a sound's
+ray from the camera is cast again every few ticks (HALO_SOUND_OBSTRUCTION_TICKS)
+and every frame a new sound starts, and while the player and the sound stand
+still (b30's fight: two thirds of the rays with the player standing, half
+under the benchmark's fixed cameras, a twentieth with the player running about)
+it is the same ray, bit for bit. collision_bsp_test_vector's answer is a
+function of the bsp, the test's flags, the breakable surfaces' state, the point
+and the vector alone: a ray asked again (the same values) is answered with the
+answer it had - a surface met, or none and the leaves it passed through (32 at
+most kept) - while the bsp (halo_structure_bsp_generation) and the breakable
+surfaces' flags (compared each time) are as they were. Its objects are tested
+again as before (they move). The tick's thread only (the sound manager runs
+there) */
+enum
+{
+	OBSTRUCTION_MEMO_ENTRIES = 256,
+	OBSTRUCTION_MEMO_LEAVES = 32
+};
+
+static struct
+{
+	unsigned long generation;
+	unsigned long structure_bsp_generation;
+	byte breakable_surface_flags[MAXIMUM_BREAKABLE_SURFACES_PER_MAP / 8];
+	struct
+	{
+		unsigned long generation;
+		unsigned long bsp_flags;
+		unsigned long point_vector[6];
+		boolean surface_met;
+		short leaf_count;
+		long leaf_indices[OBSTRUCTION_MEMO_LEAVES];
+	} entries[OBSTRUCTION_MEMO_ENTRIES];
+} obstruction_memo = { 1 };
+
+/* the entry for the ray's values (a stale one when none is kept for them) and
+whether it holds their answer */
+static boolean obstruction_memo_find(
+	unsigned long bsp_flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long *entry_index)
+{
+	unsigned long words[6];
+	unsigned long hash;
+	byte const *flags = breakable_surface_flags_get();
+	long index;
+
+	if (obstruction_memo.structure_bsp_generation != halo_structure_bsp_generation ||
+		memcmp(obstruction_memo.breakable_surface_flags, flags, sizeof(obstruction_memo.breakable_surface_flags)))
+	{
+		obstruction_memo.generation++;
+		obstruction_memo.structure_bsp_generation = halo_structure_bsp_generation;
+		memcpy(obstruction_memo.breakable_surface_flags, flags, sizeof(obstruction_memo.breakable_surface_flags));
+	}
+	memcpy(&words[0], point, sizeof(real_point3d));
+	memcpy(&words[3], vector, sizeof(real_vector3d));
+	hash = bsp_flags;
+	for (index = 0; index < 6; index++)
+	{
+		hash = (hash ^ words[index]) * 16777619UL;
+	}
+	index = (long)((hash >> 8) % OBSTRUCTION_MEMO_ENTRIES);
+	*entry_index = index;
+
+	return obstruction_memo.entries[index].generation == obstruction_memo.generation &&
+		obstruction_memo.entries[index].bsp_flags == bsp_flags &&
+		!memcmp(obstruction_memo.entries[index].point_vector, words, sizeof(words));
+}
+
+static void obstruction_memo_store(
+	long entry_index,
+	unsigned long bsp_flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	boolean surface_met,
+	struct collision_bsp_test_vector_result const *bsp_result)
+{
+	if (!surface_met && bsp_result->leaf_count > OBSTRUCTION_MEMO_LEAVES)
+	{
+		obstruction_memo.entries[entry_index].generation = 0;
+		return;
+	}
+	obstruction_memo.entries[entry_index].generation = obstruction_memo.generation;
+	obstruction_memo.entries[entry_index].bsp_flags = bsp_flags;
+	memcpy(&obstruction_memo.entries[entry_index].point_vector[0], point, sizeof(real_point3d));
+	memcpy(&obstruction_memo.entries[entry_index].point_vector[3], vector, sizeof(real_vector3d));
+	obstruction_memo.entries[entry_index].surface_met = surface_met;
+	obstruction_memo.entries[entry_index].leaf_count = surface_met ? 0 : (short)bsp_result->leaf_count;
+	if (!surface_met)
+	{
+		memcpy(obstruction_memo.entries[entry_index].leaf_indices, bsp_result->leaf_indices,
+			bsp_result->leaf_count * sizeof(long));
+	}
+}
+
+unsigned long obstruction_memo_hits, obstruction_memo_misses;
+#endif
+
+#ifdef HALO_LINUX
 /* (port) collision_test_vector's body, made three ways (each call below
 passes constants): as itself; with a key (point_leaf_cache.c: the point
 physics names its particle, whose end point's leaf may be known already); and
@@ -405,6 +506,52 @@ boolean collision_test_vector(
 
 		collision_log_usage(_collision_function_vector_structure);
 		collision_log_start_time(&collision_usage_times.vector_structure);
+#ifdef HALO_LINUX
+		/* (port) a sound obstruction ray asked again: its structure test's answer
+		as it was (obstruction_memo, above; a surface met answers it) */
+		if (any_hit &&
+			TEST_FLAG(flags, _collision_test_structure_bit) &&
+			object_bounds_cache_usable())
+		{
+			long entry_index;
+
+			if (obstruction_memo_find(bsp_flags, point, vector, &entry_index))
+			{
+				collision_log_usage(4 + 1);
+				obstruction_memo_hits++;
+				if (obstruction_memo.entries[entry_index].surface_met)
+				{
+					hit = TRUE;
+					goto answered;
+				}
+				bsp_result.t = REAL_MAX;
+				bsp_result.leaf_count = obstruction_memo.entries[entry_index].leaf_count;
+				memcpy(bsp_result.leaf_indices, obstruction_memo.entries[entry_index].leaf_indices,
+					bsp_result.leaf_count * sizeof(long));
+			}
+			else
+			{
+				boolean surface_met = collision_bsp_test_vector(
+					bsp_flags,
+					global_collision_bsp_get(),
+					MAXIMUM_BREAKABLE_SURFACES_PER_MAP,
+					breakable_surface_flags_get(),
+					point,
+					vector,
+					REAL_MAX,
+					&bsp_result);
+
+				obstruction_memo_misses++;
+				obstruction_memo_store(entry_index, bsp_flags, point, vector, surface_met, &bsp_result);
+				if (surface_met)
+				{
+					hit = TRUE;
+					goto answered;
+				}
+			}
+		}
+		else
+#endif
 		if (collision_bsp_test_vector(
 			bsp_flags,
 			global_collision_bsp_get(),

@@ -21,6 +21,8 @@ were answered from a known cell (point_leaf_cache.c).
 
 unsigned long long vita_host_time_us(void) __attribute__((weak));
 void platform_log(const char *format, ...);
+/* (collisions.c) the obstruction rays' structure tests answered as before, and not */
+extern unsigned long obstruction_memo_hits, obstruction_memo_misses;
 
 /* ---------- globals */
 
@@ -56,8 +58,8 @@ void halo_lines_profile_step(int step, unsigned long long started)
 
 void halo_lines_profile_frame(void)
 {
-	static unsigned long points_seen, point_hits_seen;
-	unsigned long points, point_hits;
+	static unsigned long points_seen, point_hits_seen, memo_hits_seen, memo_misses_seen;
+	unsigned long points, point_hits, memo_hits, memo_misses;
 	double frames;
 	int step;
 
@@ -66,9 +68,11 @@ void halo_lines_profile_frame(void)
 	frames = (double)lines_frames;
 	points = point_leaf_cache_points - points_seen;
 	point_hits = point_leaf_cache_point_hits - point_hits_seen;
+	memo_hits = obstruction_memo_hits - memo_hits_seen;
+	memo_misses = obstruction_memo_misses - memo_misses_seen;
 	platform_log("lines-profile (ms/frame): particles %.3f contrails %.3f particle_systems %.3f widgets %.3f "
 		"game_sound %.3f rest %.3f | obstruction rays %.3f: %.1f calls, %.1f same tick, %.1f reused, %.1f rays "
-		"(%.0f%% met something) a frame | point physics: %.1f leaf lookups a frame, %.0f%% from a known cell",
+		"(%.0f%% met something, %.0f%% of their structure tests as before) a frame | point physics: %.1f leaf lookups a frame, %.0f%% from a known cell",
 		lines_step_us[_lines_step_particles] / 1000.0 / frames,
 		lines_step_us[_lines_step_contrails] / 1000.0 / frames,
 		lines_step_us[_lines_step_particle_systems] / 1000.0 / frames,
@@ -81,6 +85,7 @@ void halo_lines_profile_frame(void)
 		halo_lines_stats.obstruction_reused / frames,
 		halo_lines_stats.obstruction_rays / frames,
 		halo_lines_stats.obstruction_rays ? 100.0 * halo_lines_stats.obstruction_ray_hits / halo_lines_stats.obstruction_rays : 0.0,
+		memo_hits + memo_misses ? 100.0 * memo_hits / (memo_hits + memo_misses) : 0.0,
 		points / frames, points ? 100.0 * point_hits / points : 0.0);
 	for (step = 0; step < NUMBER_OF_LINES_STEPS; step++)
 		lines_step_us[step] = 0;
@@ -92,5 +97,7 @@ void halo_lines_profile_frame(void)
 	halo_lines_stats.obstruction_us = 0;
 	points_seen = point_leaf_cache_points;
 	point_hits_seen = point_leaf_cache_point_hits;
+	memo_hits_seen = obstruction_memo_hits;
+	memo_misses_seen = obstruction_memo_misses;
 	lines_frames = 0;
 }
