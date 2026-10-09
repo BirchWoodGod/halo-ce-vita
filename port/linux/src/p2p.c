@@ -215,6 +215,11 @@ enum
 	_packet_datagram,
 	_packet_stream,
 	_packet_bye,
+	/* (the host to a client) every player's round trip as the host has it,
+	for the scoreboard (ping_table_received). 1.1.0's betas drop a type they
+	do not know unread (tunnel_received's switch has no default), so this
+	is no network change */
+	_packet_ping_table,
 };
 
 /* the messages of a stream, inside KCP */
@@ -3095,6 +3100,198 @@ static void stream_writeable(struct stream *stream)
 	stream_flush_pending(stream);
 }
 
+/* ---------- the scoreboard's pings (p2p.h, network_distributed.c) */
+
+/* A host's game tells each client machine every player's round trip as the
+host measured it, every few seconds, in a tunnel packet of its own (the
+game never sees it), so a client's scoreboard has the others' pings too:
+
+  _packet_ping_table, a version (1), the host's tick it is of (4 bytes, big
+  endian), the count of players named (at most P2P_PING_TABLE_PLAYERS), and
+  for each its index (below P2P_PING_TABLE_PLAYERS, each once) and its ping
+  in milliseconds (2 bytes, big endian, at most P2P_PING_MAXIMUM)
+
+7 bytes and 3 a player: 55 for 16. A client takes one only from the peer
+the game says is its host (p2p_set_ping_table_host), whole or not at all,
+into a table of fixed size: nothing a peer sends allocates anything. A
+table of another version is ignored, as the betas ignore the packet. */
+
+enum
+{
+	PING_TABLE_VERSION = 1,
+	PING_TABLE_HEADER_SIZE = 1 + 4 + 1,
+	PING_TABLE_ENTRY_SIZE = 1 + 2,
+};
+
+static struct
+{
+	/* (a client) the host's virtual address, 0 for none; its latest table:
+	whether there is one, when it came (p2p_now), the host's tick it is of,
+	and each player's ping (P2P_PING_UNKNOWN for one it does not name) */
+	unsigned long host;
+	int valid;
+	unsigned long received;
+	long tick;
+	unsigned short pings[P2P_PING_TABLE_PLAYERS];
+	/* tables dropped as malformed, and whether one was logged */
+	unsigned long dropped;
+	int dropped_logged;
+} ping_table;
+
+/* a table's body (after its type) into pings: 1 if it is one, whole and
+valid (version 1), 0 if it is not (pings may then be part written) */
+static int ping_table_parse(const unsigned char *data, int size, long *tick, unsigned short *pings)
+{
+	unsigned char named[P2P_PING_TABLE_PLAYERS];
+	unsigned long value;
+	int count;
+	int index;
+
+	if (!data || size < PING_TABLE_HEADER_SIZE || data[0] != PING_TABLE_VERSION)
+		return 0;
+	value = (unsigned long)data[1] << 24 | (unsigned long)data[2] << 16 | (unsigned long)data[3] << 8 | data[4];
+	count = data[5];
+	if (value > 0x7FFFFFFFUL || count > P2P_PING_TABLE_PLAYERS ||
+		size != PING_TABLE_HEADER_SIZE + count * PING_TABLE_ENTRY_SIZE)
+	{
+		return 0;
+	}
+	memset(named, 0, sizeof(named));
+	for (index = 0; index < P2P_PING_TABLE_PLAYERS; index++)
+		pings[index] = P2P_PING_UNKNOWN;
+	for (index = 0; index < count; index++)
+	{
+		const unsigned char *entry = data + PING_TABLE_HEADER_SIZE + index * PING_TABLE_ENTRY_SIZE;
+		int player = entry[0];
+		unsigned short ping = (unsigned short)(entry[1] << 8 | entry[2]);
+
+		if (player >= P2P_PING_TABLE_PLAYERS || named[player] || ping > P2P_PING_MAXIMUM)
+			return 0;
+		named[player] = 1;
+		pings[player] = ping;
+	}
+	*tick = (long)value;
+	return 1;
+}
+
+/* a table's body (after its type) of the pings named (those not
+P2P_PING_UNKNOWN, at most P2P_PING_MAXIMUM), into data (room for
+PING_TABLE_HEADER_SIZE + P2P_PING_TABLE_PLAYERS * PING_TABLE_ENTRY_SIZE):
+its size */
+static int ping_table_write(unsigned char *data, long tick, const unsigned short *pings, int count)
+{
+	int size = PING_TABLE_HEADER_SIZE;
+	int named = 0;
+	int index;
+
+	data[0] = PING_TABLE_VERSION;
+	data[1] = (unsigned char)((unsigned long)tick >> 24 & 0x7F);
+	data[2] = (unsigned char)((unsigned long)tick >> 16);
+	data[3] = (unsigned char)((unsigned long)tick >> 8);
+	data[4] = (unsigned char)tick;
+	for (index = 0; index < count && index < P2P_PING_TABLE_PLAYERS; index++)
+	{
+		unsigned short ping = pings[index];
+
+		if (ping == P2P_PING_UNKNOWN)
+			continue;
+		if (ping > P2P_PING_MAXIMUM)
+			ping = P2P_PING_MAXIMUM;
+		data[size] = (unsigned char)index;
+		data[size + 1] = (unsigned char)(ping >> 8);
+		data[size + 2] = (unsigned char)ping;
+		size += PING_TABLE_ENTRY_SIZE;
+		named++;
+	}
+	data[5] = (unsigned char)named;
+	return size;
+}
+
+/* a peer's table (its body, after the type): the host's alone is taken */
+static void ping_table_received(struct peer *peer, const unsigned char *data, int size)
+{
+	unsigned short pings[P2P_PING_TABLE_PLAYERS];
+	long tick;
+
+	if (!ping_table.host || peer->virtual_address != ping_table.host)
+		return;
+	if (!ping_table_parse(data, size, &tick, pings))
+	{
+		/* (a newer version's is not malformed: left alone, unlogged) */
+		if (size >= 1 && data[0] == PING_TABLE_VERSION)
+		{
+			ping_table.dropped++;
+			if (!ping_table.dropped_logged)
+			{
+				ping_table.dropped_logged = 1;
+				platform_log("Internet play: a ping table from %s %s was malformed (%d bytes): dropped",
+					peer_role(peer->is_host), peer->name, size);
+			}
+		}
+		return;
+	}
+	memcpy(ping_table.pings, pings, sizeof(pings));
+	ping_table.tick = tick;
+	ping_table.received = p2p_now();
+	ping_table.valid = 1;
+}
+
+int p2p_send_ping_table(unsigned long virtual_address, long tick, const unsigned short *pings, int count)
+{
+	unsigned char inner[1 + PING_TABLE_HEADER_SIZE + P2P_PING_TABLE_PLAYERS * PING_TABLE_ENTRY_SIZE];
+	struct peer *peer;
+	int sent = 0;
+
+	if (!p2p.running || !pings || count < 0 || tick < 0 || !is_virtual_address(virtual_address))
+		return 0;
+	inner[0] = _packet_ping_table;
+	pthread_mutex_lock(&p2p_lock);
+	peer = find_peer_by_address(virtual_address);
+	if (peer && peer->connected)
+	{
+		peer_send(peer, inner, 1 + ping_table_write(inner + 1, tick, pings, count));
+		sent = 1;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return sent;
+}
+
+void p2p_set_ping_table_host(unsigned long virtual_address)
+{
+	if (!p2p.running)
+		return;
+	if (!is_virtual_address(virtual_address))
+		virtual_address = 0;
+	pthread_mutex_lock(&p2p_lock);
+	if (ping_table.host != virtual_address)
+	{
+		ping_table.host = virtual_address;
+		ping_table.valid = 0;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+long p2p_ping_table(unsigned short *pings, int count, long *tick)
+{
+	long age = -1;
+
+	if (!p2p.running || !pings || count < 0)
+		return -1;
+	pthread_mutex_lock(&p2p_lock);
+	if (ping_table.host && ping_table.valid)
+	{
+		int index;
+
+		for (index = 0; index < count; index++)
+			pings[index] = index < P2P_PING_TABLE_PLAYERS ? ping_table.pings[index] : P2P_PING_UNKNOWN;
+		if (tick)
+			*tick = ping_table.tick;
+		age = (long)(unsigned long)((unsigned int)(p2p_now() - ping_table.received) & 0x7FFFFFFF);
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return age;
+}
+
 /* ---------- the tunnel */
 
 #ifdef HALO_DEDICATED_SERVER
@@ -3239,6 +3436,9 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		break;
 	case _packet_bye:
 		drop_peer(peer, "left");
+		break;
+	case _packet_ping_table:
+		ping_table_received(peer, inner + 1, inner_size - 1);
 		break;
 	}
 }

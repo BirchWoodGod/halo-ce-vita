@@ -551,6 +551,20 @@ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
   its own round trip look shorter or longer to the host than it is (it
   names the host tick it had), never another's; the host's hit checks take
   it from the same message already.
+- **The host's ping table** (`network_distributed.c`, `p2p.c`): a client
+  measures its own round trip alone, so every 3 s the host sends each client
+  machine every player's ping as it measured it (its own players' 0), for
+  the scoreboard's Ping column. It goes as a tunnel packet of internet
+  play's own (type 6: a version, the host's tick, then a player index and 2
+  bytes of milliseconds each; 55 bytes for 16 players), not a game message:
+  the game's messages and network version 18 are as they were, and 1.1.0's
+  betas, whose tunnel drops a packet type it does not know unread, are not
+  sent anything they act on. A client takes a table only from the peer the
+  game says is its host, whole (sizes, player indices below 128, each once,
+  pings at most 9999 ms) or not at all, into a fixed table; one older than
+  10 s, or of a host tick far from the host's latest (another game's), is
+  stale and its pings shown as "-". A LAN's system link has no tunnel: there
+  a client shows the others as "-".
 
 ## Testing
 

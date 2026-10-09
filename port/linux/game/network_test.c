@@ -103,6 +103,7 @@ void test_input_hold_action(int hold);
 void test_input_hold_back(int hold);
 /* game_engine.c's */
 long game_engine_in_game_score_draw_count(void);
+void game_engine_in_game_score_ping_counts(long *other_pings, long *unknown_pings);
 /* network co-op's (port/linux/game/network_coop.c, coop_spectate.c) */
 boolean network_coop_active(void);
 boolean network_coop_skip_vote_status(short *votes, short *voters, boolean *voted);
@@ -1058,8 +1059,15 @@ void network_test_update(
 			if (hold)
 			{
 				network_test.scores_shown++;
+				long other_pings, unknown_pings;
+
 				platform_log("network test: scoreboard held (%ld; drawn in %ld frames so far)", network_test.scores_shown,
 					game_engine_in_game_score_draw_count());
+				/* (its Ping column: other machines' players' pings, a
+				client's from the host's table; and "-") */
+				game_engine_in_game_score_ping_counts(&other_pings, &unknown_pings);
+				platform_log("network test: scoreboard pings so far: %ld rows with another machine's player's ping, %ld with \"-\"",
+					other_pings, unknown_pings);
 			}
 		}
 	}
