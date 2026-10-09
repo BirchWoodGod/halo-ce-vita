@@ -188,7 +188,7 @@ Graphics, **Advanced**:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Model detail (P) | Low | level of detail of characters, vehicles and props |
+| Model detail (P) | Low | level of detail of characters, vehicles and props (a model around the camera, like a10's cryotube, keeps the Xbox's) |
 | Hide distant objects (P) | Small | skips objects that cover only a few pixels (before their lighting is prepared) |
 | Object shadows (P) | Near only | the shadows under characters and vehicles: Full (the Xbox's, for objects over 30 pixels across), Near only (over 60 pixels), Off |
 | Dynamic lights (P) | 8 | the most dynamic lights (shots, explosions, muzzle flashes) a frame lights the scene and objects with, the nearest first: All (the Xbox's), 8, 4, 2 |
@@ -688,6 +688,7 @@ Useful ones:
 | `HALO_GPU_STATS=1` | draws, uniforms, ring use per frame |
 | `HALO_SCREENSHOT_DIR=ux0:data/haloce-vita/shots`, `HALO_SCREENSHOT_EVERY=n` | a BMP every n frames (at 100% resolution) |
 | `HALO_HUD_LOG=1` | each HUD quad's bitmap and rectangle in `halo.log` the first time it is drawn there (`tests/run_hud_layout_test.sh`) |
+| `HALO_MODEL_LOD_LOG=1` | each model's detail level in `halo.log` the first time it draws at it, with the level the Xbox would have chosen (`tests/run_cryo_body_test.sh`) |
 | `HALO_NO_MOVIES=1`, `HALO_NO_AUDIO=1` | skip movies or sound |
 | `HALO_DXT_MIPS=0` | compressed textures without their mip chains |
 | `HALO_HEARTBEAT=1` | a line every 2 s in `heartbeat.txt` (is the game still running?) |
