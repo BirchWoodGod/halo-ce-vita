@@ -19,7 +19,10 @@ guard; a frame, with the positions they considered and the lines of sight
 they tested, and the longest one: one selection is a spike in its tick),
 and the AI's path searches (path.c: path_state_find, inside those selections
 and in path refreshes; a frame, the nodes each made and the longest) and path
-builds (path_state_build_path: smoothing and obstacle avoidance).
+builds (path_state_build_path: smoothing and obstacle avoidance), and the
+AI's perception (actor_perception.c: actor_perception_update, each actor's
+walk of its props with their position and status refreshes, and its
+timeslice refresh of the units nearby).
 */
 
 /* ---------- headers */
@@ -92,7 +95,8 @@ void halo_lines_profile_frame(void)
 		" | ai line of sight %.3f: %.1f calls, %.1f rays (%.0f%% met an object, %.0f%% the structure), %.1f extra lines a frame"
 		" | cluster walks %.1f a frame, %.0f%% from a kept table"
 		" | ai firing positions %.3f: %.2f selections a frame (%.1f positions, %.1f lines of sight a selection), longest %.3f ms"
-		" | ai path searches %.3f: %.2f a frame (%.1f nodes a search), longest %.3f ms; path builds %.3f: %.2f a frame",
+		" | ai path searches %.3f: %.2f a frame (%.1f nodes a search), longest %.3f ms; path builds %.3f: %.2f a frame"
+		" | ai perception %.3f: %.1f actors, %.1f props, %.1f position and %.1f status refreshes, %.2f timeslice refreshes (%.0f objects each) a frame",
 		lines_step_us[_lines_step_particles] / 1000.0 / frames,
 		lines_step_us[_lines_step_contrails] / 1000.0 / frames,
 		lines_step_us[_lines_step_particle_systems] / 1000.0 / frames,
@@ -125,7 +129,14 @@ void halo_lines_profile_frame(void)
 		halo_lines_stats.path_searches ? (double)halo_lines_stats.path_nodes / halo_lines_stats.path_searches : 0.0,
 		halo_lines_stats.path_worst_us / 1000.0,
 		halo_lines_stats.path_build_us / 1000.0 / frames,
-		halo_lines_stats.path_builds / frames);
+		halo_lines_stats.path_builds / frames,
+		halo_lines_stats.perception_us / 1000.0 / frames,
+		halo_lines_stats.perception_actors / frames,
+		halo_lines_stats.perception_props / frames,
+		halo_lines_stats.perception_positions / frames,
+		halo_lines_stats.perception_statuses / frames,
+		halo_lines_stats.perception_refreshes / frames,
+		halo_lines_stats.perception_refreshes ? (double)halo_lines_stats.perception_refresh_objects / halo_lines_stats.perception_refreshes : 0.0);
 	for (step = 0; step < NUMBER_OF_LINES_STEPS; step++)
 		lines_step_us[step] = 0;
 	halo_lines_stats.obstruction_calls = 0;
@@ -151,6 +162,13 @@ void halo_lines_profile_frame(void)
 	halo_lines_stats.path_worst_us = 0;
 	halo_lines_stats.path_builds = 0;
 	halo_lines_stats.path_build_us = 0;
+	halo_lines_stats.perception_actors = 0;
+	halo_lines_stats.perception_props = 0;
+	halo_lines_stats.perception_positions = 0;
+	halo_lines_stats.perception_statuses = 0;
+	halo_lines_stats.perception_refreshes = 0;
+	halo_lines_stats.perception_refresh_objects = 0;
+	halo_lines_stats.perception_us = 0;
 	points_seen = point_leaf_cache_points;
 	point_hits_seen = point_leaf_cache_point_hits;
 	memo_hits_seen = obstruction_memo_hits;

@@ -276,6 +276,8 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "game/players.h"
 #include <stdlib.h>
+/* (HALO_TICK_PROFILE) the perception's time and counts (lines_profile.c) */
+#include "lines_profile.h"
 #endif
 
 /* ---------- constants */
@@ -5353,6 +5355,9 @@ static void actor_perception_refresh_test_object(
 	while (object_index != NONE)
 	{
 		current_object = actor_perception_object_get(object_index);
+#ifdef HALO_LINUX
+		halo_lines_stats.perception_refresh_objects++;
+#endif
 
 		if (object_mark_function(object_index))
 		{
@@ -5836,6 +5841,9 @@ static void actor_perception_refresh(
 	enemies.accepted_count = 0;
 	friends.entry_count = 0;
 	friends.accepted_count = 0;
+#ifdef HALO_LINUX
+	halo_lines_stats.perception_refreshes++;
+#endif
 
 	if (actor->meta.swarm)
 	{
@@ -6396,6 +6404,9 @@ void actor_perception_update(
 	struct actor_position_data position;
 #ifdef HALO_LINUX
 	boolean lod_resting = actor_perception_lod_resting(actor_index, actor);
+	unsigned long long lines_started = halo_lines_now();
+
+	halo_lines_stats.perception_actors++;
 #endif
 
 	if (!actor->meta.dormant)
@@ -6515,6 +6526,9 @@ void actor_perception_update(
 		boolean became_acknowledged = FALSE;
 		boolean expected_acknowledgement = FALSE;
 
+#ifdef HALO_LINUX
+		halo_lines_stats.perception_props++;
+#endif
 		if (prop->unit_effect_decay_ticks > 0 &&
 			--prop->unit_effect_decay_ticks == 0)
 		{
@@ -6676,6 +6690,9 @@ void actor_perception_update(
 
 			if (refresh_position)
 			{
+#ifdef HALO_LINUX
+				halo_lines_stats.perception_positions++;
+#endif
 				prop_position_refresh(
 					actor_index,
 					iterator.index,
@@ -6686,6 +6703,9 @@ void actor_perception_update(
 
 			if (refresh_status)
 			{
+#ifdef HALO_LINUX
+				halo_lines_stats.perception_statuses++;
+#endif
 				prop_status_refresh(actor_index, iterator.index, &position);
 			}
 		}
@@ -7245,6 +7265,13 @@ void actor_perception_update(
 
 	actor->meta.highest_prop_timer = highest_prop_timer;
 	actor->meta.interesting_orphan_index = interesting_orphan_index;
+
+#ifdef HALO_LINUX
+	if (lines_started)
+	{
+		halo_lines_stats.perception_us += halo_lines_now() - lines_started;
+	}
+#endif
 
 	return;
 }

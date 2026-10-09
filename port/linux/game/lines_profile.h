@@ -3,7 +3,8 @@ LINES_PROFILE.H
 
 (port, HALO_TICK_PROFILE) The game frame's particles and sounds, and the
 sound obstruction rays and point physics lookups in them, and the tick's AI
-lines of sight and firing position selections: lines_profile.c
+lines of sight, firing position selections, path searches and perception:
+lines_profile.c
 */
 
 #ifndef __LINES_PROFILE_H
@@ -62,6 +63,18 @@ struct halo_lines_stats
 	unsigned long long path_worst_us;
 	unsigned long path_builds;
 	unsigned long long path_build_us;
+	/* actor_perception_update (actor_perception.c): the actors it ran for,
+	the props they walked, the props' position refreshes and status
+	refreshes (a line of sight each) in that walk, the timeslice refreshes
+	(actor_perception_refresh: the nearby units looked for in the actor's
+	visible clusters) and the objects those tested, and the time */
+	unsigned long perception_actors;
+	unsigned long perception_props;
+	unsigned long perception_positions;
+	unsigned long perception_statuses;
+	unsigned long perception_refreshes;
+	unsigned long perception_refresh_objects;
+	unsigned long long perception_us;
 };
 
 /* ---------- globals */
