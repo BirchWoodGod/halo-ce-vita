@@ -340,6 +340,10 @@ static void use_xbox_window(void)
 	relocation.relocated = xbox_relocated;
 }
 
+/* (called every 32 tags the walk takes: the loading screen's frames while
+a Custom Edition map loads, custom_edition_cache.c; NULL: none) */
+void (*halo_tag_relocate_progress)(void);
+
 /* walks the tags of every instance */
 static void relocate_instances(unsigned char *instances, long count)
 {
@@ -366,6 +370,8 @@ static void relocate_instances(unsigned char *instances, long count)
 		unsigned char *base;
 		unsigned short group;
 
+		if (halo_tag_relocate_progress && !(index & 31))
+			halo_tag_relocate_progress();
 		relocate_word(instance + 16);
 		base = relocate_word(instance + 20);
 		if (!base || !loaded((unsigned long)(base - relocation.bias)))

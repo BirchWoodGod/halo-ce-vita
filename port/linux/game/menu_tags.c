@@ -1316,12 +1316,17 @@ struct menu_resource_file
 	struct cache_file_source source;
 	struct resource_map map;
 	boolean opened;
+	enum resource_map_type type;
 };
 
 static int menu_resource_read(void *context, uint32_t offset, uint32_t size, void *buffer)
 {
+	struct menu_resource_file *file = context;
 	uint32_t done = 0;
 
+	/* (read ahead once ui.map loaded: halo_menus_art_preread) */
+	if (halo_menus_art_take(file->type, offset, size, buffer))
+		return TRUE;
 	while (done < size)
 	{
 		OVERLAPPED position;
@@ -1329,7 +1334,7 @@ static int menu_resource_read(void *context, uint32_t offset, uint32_t size, voi
 
 		memset(&position, 0, sizeof(position));
 		position.Offset = offset + done;
-		if (!ReadFile((HANDLE)context, (byte *)buffer + done, size - done, &read, &position) || !read)
+		if (!ReadFile(file->handle, (byte *)buffer + done, size - done, &read, &position) || !read)
 			break;
 		done += read;
 	}
@@ -1355,7 +1360,8 @@ static boolean menu_resource_open(struct menu_resource_file *file, char const *n
 		CloseHandle(file->handle);
 		return FALSE;
 	}
-	file->source.context = file->handle;
+	file->type = type;
+	file->source.context = file;
 	file->source.read = menu_resource_read;
 	file->source.size = (uint32_t)size;
 	file->opened = TRUE;
@@ -1707,8 +1713,12 @@ static boolean menu_png_frame_load(struct menu_png_frame const *frame)
 {
 	struct bitmap_data *bitmap = frame->bitmap;
 	unsigned long size = 0;
-	byte *data = halo_menus_file_read(frame->png, &size);
-	byte *pixels = data && size <= MAXIMUM_PNG_BYTES ? png_decode(data, size, bitmap->width, bitmap->height) : NULL;
+	byte *data = halo_menus_art_png(frame->png, &size);
+	byte *pixels;
+
+	if (!data)
+		data = halo_menus_file_read(frame->png, &size);
+	pixels = data && size <= MAXIMUM_PNG_BYTES ? png_decode(data, size, bitmap->width, bitmap->height) : NULL;
 
 	halo_menus_file_free(data);
 	if (!pixels)
@@ -1743,13 +1753,19 @@ static boolean menu_tags_art_load(void)
 	boolean success = TRUE;
 	long index;
 
+	/* (what was read ahead, once read: halo_menus_art_preread) */
+	halo_menus_art_wait();
 	platform_heap_usage(&heap_before, &heap_capacity);
 	platform_contiguous_usage(&window_before, &window_free);
 	if (!menu_resource_open(&bitmaps, "bitmaps", _resource_map_bitmaps, TRUE))
+	{
+		halo_menus_art_release();
 		return FALSE;
+	}
 	if (!menu_resource_open(&locale, "loc", _resource_map_locale, TRUE))
 	{
 		menu_resource_close(&bitmaps, TRUE);
+		halo_menus_art_release();
 		return FALSE;
 	}
 	for (index = 0; index < menu_tags.bitmap_resource_count && success; index++)
@@ -1763,6 +1779,8 @@ static boolean menu_tags_art_load(void)
 	success = success && !build.failed;
 	platform_heap_usage(&heap_after, &heap_capacity);
 	platform_contiguous_usage(&window_after, &window_free);
+	/* (after the measure: what was read ahead was there before it too) */
+	halo_menus_art_release();
 	platform_log("menus: the Halo PC pictures and text %s in %lu ms (%ld bitmaps, %ld string lists, %ld PNGs); "
 		"C heap %+ld KB, memory window %+ld KB (%lu KB free)",
 		success ? "read" : "could not be read", (unsigned long)((vita_host_time_us() - started) / 1000),
@@ -1770,6 +1788,45 @@ static boolean menu_tags_art_load(void)
 		((long)heap_after - (long)heap_before) / 1024, ((long)window_after - (long)window_before) / 1024,
 		window_free / 1024);
 	return success;
+}
+
+/* the reads menu_tags_art_load will make, begun on a thread of their own
+now that the screens are added (halo_menus_art_preread) */
+static void menu_tags_art_preread(void)
+{
+	struct halo_menus_art_plan plan;
+	char const **paths;
+	long count = menu_tags.bitmap_resource_count + menu_tags.string_resource_count + menu_tags.png_frame_count;
+	long index, at = 0;
+
+	if (menu_tags.art)
+		return;
+	paths = malloc((count ? count : 1) * sizeof(*paths));
+	if (!paths)
+		return;
+	memset(&plan, 0, sizeof(plan));
+	plan.map_directory = cache_files_map_directory();
+	plan.bitmap_paths = paths + at;
+	for (index = 0; index < menu_tags.bitmap_resource_count; index++)
+		paths[at++] = menu_tags.bitmap_resources[index].path;
+	plan.bitmap_count = menu_tags.bitmap_resource_count;
+	plan.string_paths = paths + at;
+	for (index = 0; index < menu_tags.string_resource_count; index++)
+		paths[at++] = menu_tags.string_resources[index].path;
+	plan.string_count = menu_tags.string_resource_count;
+	plan.png_names = paths + at;
+	for (index = 0; index < menu_tags.png_frame_count; index++)
+		paths[at++] = menu_tags.png_frames[index].png;
+	plan.png_count = menu_tags.png_frame_count;
+	plan.bitmaps_block_offset = RESOURCE_BITMAP_BITMAPS_OFFSET;
+	plan.bitmap_data_bytes = RESOURCE_BITMAP_DATA_BYTES;
+	plan.pixels_offset_offset = offsetof(struct bitmap_data, pixels_offset);
+	plan.pixels_size_offset = offsetof(struct bitmap_data, pixels_size);
+	plan.maximum_frames = MAXIMUM_RESOURCE_FRAMES;
+	plan.maximum_pixel_bytes = MAXIMUM_RESOURCE_BYTES;
+	plan.maximum_tag_bytes = 0x10000;
+	halo_menus_art_preread(&plan);
+	free(paths);
 }
 
 /* whether the maps folder has a bitmaps.map and a loc.map (a quick look:
@@ -1927,6 +1984,7 @@ void menu_tags_loaded(
 	menu_tags.root_tag = build.widget_tags[widget_named(menus->root)];
 	menu_tags.loaded = TRUE;
 	halo_pc_menus_state = 1;
+	menu_tags_art_preread();
 	platform_log("menus: OpenCE's multiplayer screens: %ld widgets, %ld string lists and %ld bitmaps added to "
 		"ui.map's %ld tags in %lu us (the Halo PC files checked %lu, the XML read %lu, the tags %lu; the pictures "
 		"and text are read when they first open)",
@@ -1951,6 +2009,8 @@ done:
 void menu_tags_unloaded(
 	void)
 {
+	/* (what was read ahead and never taken) */
+	halo_menus_art_release();
 	if (menu_tags.loaded || menu_tags.block_count || menu_tags.original_instances)
 		menu_tags_release();
 }

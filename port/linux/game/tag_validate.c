@@ -191,6 +191,11 @@ struct tag_validation
 
 /* ---------- globals */
 
+/* (port) called now and then as the tags are checked (every 32 tags of the
+table): the loading screen's frames while a Custom Edition map loads
+(custom_edition_cache.c); NULL: none */
+void (*tag_validate_progress)(void);
+
 static struct
 {
 	/* the tags last checked (tag_validate_tags), in a tag cache of
@@ -1265,6 +1270,8 @@ static boolean validate_tag_table(
 		struct tag_schema_group const *group = schema_group_get(instance->group_tag);
 		unsigned long parent_group_tags[2];
 
+		if (tag_validate_progress && !(absolute_index & 31))
+			tag_validate_progress();
 		validation->tag_index = instance->tag_index;
 		if ((short)instance->tag_index != absolute_index)
 		{

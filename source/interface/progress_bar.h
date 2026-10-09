@@ -29,6 +29,10 @@ void progress_bar_begin(
 	boolean skip_frame_capture);
 void progress_bar_end(
 	void);
+#ifdef HALO_LINUX
+boolean progress_bar_has_picture(
+	void);
+#endif
 boolean progress_bar_is_active(
 	void);
 void progress_bar_enable(

@@ -136,14 +136,56 @@ then leaves for the menu rather than stopping the game (also declared for
 the game in halo_linux_source_fixups.h). */
 boolean custom_edition_cache_load_failure_show(
 	char const *map_name);
+/* A read of the map being loaded, made on the load's reader thread
+(custom_edition_cache.c) while the loading thread goes on: submitted, then
+waited for (the loading screen drawn meanwhile). */
+enum
+{
+	_custom_edition_read_job_idle,
+	_custom_edition_read_job_queued,
+	_custom_edition_read_job_done,
+	_custom_edition_read_job_failed,
+};
+
+struct custom_edition_read_job
+{
+	void *context;
+	unsigned long offset;
+	unsigned long size;
+	void *buffer;
+	int crc_kind;
+	unsigned long crc;
+	volatile int state;
+};
+
+void custom_edition_read_job_submit(
+	struct custom_edition_read_job *job);
+/* TRUE once read, FALSE when the map could not be read */
+boolean custom_edition_read_job_wait(
+	struct custom_edition_read_job *job);
+
 /* Reads `size` bytes at `offset` in the model data of the map being loaded
 (the report's), for custom_edition_models_convert; FALSE when they are not
-in it or cannot be read. */
+in it or cannot be read. What it reads counts towards the map's checksum.
+custom_edition_cache_model_data_submit starts the read, `job`'s, to be
+waited for (custom_edition_read_job_wait); FALSE, and nothing read, when the
+range is not in the model data. */
 boolean custom_edition_cache_model_data_read(
 	struct custom_edition_load_report const *report,
 	unsigned long offset,
 	unsigned long size,
 	void *buffer);
+boolean custom_edition_cache_model_data_submit(
+	struct custom_edition_load_report const *report,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer,
+	struct custom_edition_read_job *job);
+
+/* the load's progress for the loading screen, 0..1, with a frame of it if
+one is due (the loading thread's) */
+void custom_edition_load_progress_set(
+	real progress);
 boolean custom_edition_cache_tags_loaded(
 	void);
 /* The tag cache the loaded map's tags are in and its size, in bytes

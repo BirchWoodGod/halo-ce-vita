@@ -22,4 +22,8 @@ void halo_tag_relocate_linked_structure_bsp(void *tag_cache, void *bsp, unsigned
 /* that tag cache is gone */
 void halo_tag_relocate_linked_release(void);
 
+/* called now and then as tags are walked (the loading screen's frames:
+custom_edition_cache.c), or NULL */
+extern void (*halo_tag_relocate_progress)(void);
+
 #endif

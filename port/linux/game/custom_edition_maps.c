@@ -136,9 +136,49 @@ struct custom_edition_maps_globals
 	char *levels[MAXIMUM_XBOX_LEVELS + MAXIMUM_CUSTOM_EDITION_MAPS];
 };
 
+/* What each map file of the maps folder was found to be, by its name and
+the time it was last written, and the text of a description file by the
+same, so that looking for the maps again - each time the level list opens -
+opens none of the files it has seen (custom_edition_maps_look_for): each
+was opened, its header read and closed, and its <name>.txt looked for, ~180
+file calls and 0.5-0.7 s of the game thread on the Vita at each opening of
+the level list (Oct 8 and 9). A file written since, or the setting changed,
+is looked at again; a map share download forgets its map's
+(custom_edition_maps_file_forget). */
+#define MAXIMUM_REMEMBERED_MAP_FILES 192
+/* the folder's files a look takes in (the maps and their descriptions) */
+#define MAXIMUM_LISTED_FILES 512
+#define LISTED_NAME_BYTES 64
+
+struct remembered_map_file
+{
+	/* (its name and extension, as lower case, hashed: 0 is none) */
+	unsigned long hash;
+	struct file_last_modification_date date;
+	boolean custom_edition_enabled;
+	boolean xbox_cache;
+	boolean multiplayer;
+	boolean campaign;
+	/* its description file's text, as read when it was last written */
+	boolean description_known;
+	struct file_last_modification_date description_date;
+	wchar_t description[MAXIMUM_DESCRIPTION_LENGTH + 1];
+};
+
+struct listed_file
+{
+	char name[LISTED_NAME_BYTES];
+	char extension[8];
+	struct file_last_modification_date date;
+};
+
 /* ---------- globals */
 
 static struct custom_edition_maps_globals custom_edition_maps_globals;
+static struct remembered_map_file remembered_map_files[MAXIMUM_REMEMBERED_MAP_FILES];
+static short next_remembered_map_file;
+static struct listed_file listed_files[MAXIMUM_LISTED_FILES];
+
 
 /* the Xbox's own levels, whose copies differ by region (the PAL and NTSC
 maps play together: port/linux/game/pal_tags.c), so they are never
@@ -293,7 +333,10 @@ character beyond printable ASCII as a '?', and at most
 MAXIMUM_DESCRIPTION_LENGTH characters. A map without one, or with an empty
 one, has the default description. */
 static void custom_edition_map_description_read(
-	struct custom_edition_map *map)
+	struct custom_edition_map *map,
+	struct remembered_map_file *remembered,
+	boolean description_listed,
+	struct file_last_modification_date const *description_date)
 {
 	char path[MAXIMUM_FILENAME_LENGTH + 1];
 	byte text[MAXIMUM_DESCRIPTION_FILE_BYTES];
@@ -302,8 +345,24 @@ static void custom_edition_map_description_read(
 	long text_index = 0;
 	short length = 0;
 
-	csprintf(path, "%s%s%s", cache_files_map_directory(), map->name, DESCRIPTION_EXTENSION);
-	stream = fopen(path, "rb");
+	/* (the folder's listing said whether there is one, and when it was
+	written: none is not looked for, one read before is not read again) */
+	if (description_listed && !description_date)
+	{
+		stream = NULL;
+	}
+	else if (remembered && description_date && remembered->description_known &&
+		!csmemcmp(&remembered->description_date, description_date, sizeof(*description_date)))
+	{
+		csmemcpy(map->description, remembered->description, sizeof(map->description));
+		length = (short)ustrlen(map->description);
+		goto described;
+	}
+	else
+	{
+		csprintf(path, "%s%s%s", cache_files_map_directory(), map->name, DESCRIPTION_EXTENSION);
+		stream = fopen(path, "rb");
+	}
 	if (stream)
 	{
 		text_size = (long)fread(text, 1, sizeof(text), stream);
@@ -349,7 +408,14 @@ static void custom_edition_map_description_read(
 		length--;
 	}
 	map->description[length] = 0;
+	if (remembered && description_date)
+	{
+		csmemcpy(remembered->description, map->description, sizeof(remembered->description));
+		remembered->description_date = *description_date;
+		remembered->description_known = TRUE;
+	}
 
+described:
 	/* (none: the default, in the manner of the Xbox levels', in the
 	player's language, lang.h) */
 	if (!length && map->xbox_cache)
@@ -368,14 +434,64 @@ static void custom_edition_map_description_read(
 /* Adds the map the file `name`.`extension` of the maps folder holds, when it
 is a Custom Edition multiplayer or campaign map not added yet (as a .map and
 a .yelo of one name are, which the loader reads the .map of). */
-static void custom_edition_map_add(
+static unsigned long map_file_hash(
 	char const *name,
 	char const *extension)
 {
+	/* (FNV-1a of "name.extension" in lower case) */
+	unsigned long hash = 2166136261UL;
+	char const *part;
+	short part_index;
+
+	for (part_index = 0; part_index < 3; part_index++)
+	{
+		part = part_index == 0 ? name : part_index == 1 ? "." : extension;
+		for (; *part; part++)
+		{
+			hash = (hash ^ (unsigned char)LOWER_CASE(*part)) * 16777619UL;
+		}
+	}
+
+	return hash ? hash : 1;
+}
+
+static struct remembered_map_file *remembered_map_file_find(
+	unsigned long hash)
+{
+	short index;
+
+	for (index = 0; index < MAXIMUM_REMEMBERED_MAP_FILES; index++)
+	{
+		if (remembered_map_files[index].hash == hash)
+		{
+			return &remembered_map_files[index];
+		}
+	}
+
+	return NULL;
+}
+
+/* Adds the map the file `name`.`extension` of the maps folder holds, when it
+is a Custom Edition multiplayer or campaign map not added yet (as a .map and
+a .yelo of one name are, which the loader reads the .map of). With `date`,
+when the file was last written, what it was found to be before is taken
+rather than looked at again (remembered_map_files); with `listed`, whether
+it has a description file is known: when it was last written, or NULL for
+none. */
+static void custom_edition_map_add(
+	char const *name,
+	char const *extension,
+	struct file_last_modification_date const *date,
+	boolean description_listed,
+	struct file_last_modification_date const *description_date)
+{
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	struct custom_edition_map *map;
+	struct remembered_map_file *remembered = NULL;
+	boolean custom_edition_enabled = halo_custom_edition_enabled();
 	short map_index;
 	boolean xbox_cache;
+	boolean multiplayer;
 	boolean campaign = FALSE;
 
 	if (csstrcasecmp(extension, "map") && csstrcasecmp(extension, "yelo"))
@@ -398,17 +514,48 @@ static void custom_edition_map_add(
 		error(_error_silent, "custom edition: the map '%s' is turned off (HALO_MAPS_DISABLED)", name);
 		return;
 	}
-	/* a modded or newly built Xbox map plays as the Xbox levels do; a
-	Custom Edition one only with the setting on */
-	xbox_cache = !csstrcasecmp(extension, "map") && custom_edition_cache_xbox_multiplayer(name);
-	if (!xbox_cache && !(halo_custom_edition_enabled() && custom_edition_cache_multiplayer(name)))
+	if (date)
 	{
-		/* (a campaign map: the campaign's level list's) */
-		campaign = halo_custom_edition_enabled() && custom_edition_cache_campaign(name);
-		if (!campaign)
+		remembered = remembered_map_file_find(map_file_hash(name, extension));
+		if (remembered &&
+			(csmemcmp(&remembered->date, date, sizeof(*date)) ||
+				remembered->custom_edition_enabled != custom_edition_enabled))
 		{
-			return;
+			/* (written since, or the setting changed: looked at again) */
+			csmemset(remembered, 0, sizeof(*remembered));
+			remembered = NULL;
 		}
+	}
+	if (remembered)
+	{
+		xbox_cache = remembered->xbox_cache;
+		multiplayer = remembered->multiplayer;
+		campaign = remembered->campaign;
+	}
+	else
+	{
+		/* a modded or newly built Xbox map plays as the Xbox levels do; a
+		Custom Edition one only with the setting on */
+		xbox_cache = !csstrcasecmp(extension, "map") && custom_edition_cache_xbox_multiplayer(name);
+		multiplayer = !xbox_cache && custom_edition_enabled && custom_edition_cache_multiplayer(name);
+		/* (a campaign map: the campaign's level list's) */
+		campaign = !xbox_cache && !multiplayer && custom_edition_enabled && custom_edition_cache_campaign(name);
+		if (date)
+		{
+			remembered = &remembered_map_files[next_remembered_map_file];
+			next_remembered_map_file = (short)((next_remembered_map_file + 1) % MAXIMUM_REMEMBERED_MAP_FILES);
+			csmemset(remembered, 0, sizeof(*remembered));
+			remembered->hash = map_file_hash(name, extension);
+			remembered->date = *date;
+			remembered->custom_edition_enabled = custom_edition_enabled;
+			remembered->xbox_cache = xbox_cache;
+			remembered->multiplayer = multiplayer;
+			remembered->campaign = campaign;
+		}
+	}
+	if (!xbox_cache && !multiplayer && !campaign)
+	{
+		return;
 	}
 	if (csstrlen(name) > MAXIMUM_MAP_NAME_LENGTH)
 	{
@@ -443,7 +590,7 @@ static void custom_edition_map_add(
 		csprintf(map->level_name, LEVEL_NAME_FORMAT, name, name);
 	}
 	display_name_make(name, map->display_name);
-	custom_edition_map_description_read(map);
+	custom_edition_map_description_read(map, remembered, description_listed, description_date);
 
 	return;
 }
@@ -471,19 +618,73 @@ static void custom_edition_maps_look_for(
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	struct file_reference directory;
 	struct file_reference file;
+	struct file_last_modification_date date;
 	char name[MAXIMUM_FILENAME_LENGTH + 1];
 	char extension[MAXIMUM_FILENAME_LENGTH + 1];
+	short listed_count = 0;
+	short index;
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
 
 	file_reference_create_from_path(&directory, cache_files_map_directory(), TRUE);
 	find_files_start(0, &directory);
-	while (find_files_next(&file, NULL))
+	/* the maps and their description files listed first (a map's own is
+	then known to be there or not), each with when it was last written; a
+	name too long to list is looked at as it is found */
+	while (find_files_next(&file, &date))
 	{
 		file_reference_get_name(&file, FLAG(_name_filename_bit), name);
 		file_reference_get_name(&file, FLAG(_name_extension_bit), extension);
-		custom_edition_map_add(name, extension);
+		if (csstrcasecmp(extension, "map") && csstrcasecmp(extension, "yelo") && csstrcasecmp(extension, "txt"))
+		{
+			continue;
+		}
+		if (csstrlen(name) < LISTED_NAME_BYTES && csstrlen(extension) < (long)sizeof(listed_files[0].extension) &&
+			listed_count < MAXIMUM_LISTED_FILES)
+		{
+			csstrcpy(listed_files[listed_count].name, name);
+			csstrcpy(listed_files[listed_count].extension, extension);
+			listed_files[listed_count].date = date;
+			listed_count++;
+		}
+		else if (csstrcasecmp(extension, "txt"))
+		{
+			custom_edition_map_add(name, extension, NULL, FALSE, NULL);
+		}
+	}
+	for (index = 0; index < listed_count; index++)
+	{
+		struct file_last_modification_date const *description_date = NULL;
+		boolean description_listed = TRUE;
+		short other;
+
+		if (!csstrcasecmp(listed_files[index].extension, "txt"))
+		{
+			continue;
+		}
+		for (other = 0; other < listed_count; other++)
+		{
+			if (!csstrcasecmp(listed_files[other].extension, "txt") &&
+				!csstrcasecmp(listed_files[other].name, listed_files[index].name))
+			{
+				/* (one named in another case than the map: read as
+				before, by the map's name) */
+				if (csstrcmp(listed_files[other].name, listed_files[index].name) ||
+					csstrcmp(listed_files[other].extension, "txt"))
+				{
+					description_listed = FALSE;
+				}
+				description_date = &listed_files[other].date;
+				break;
+			}
+		}
+		custom_edition_map_add(
+			listed_files[index].name,
+			listed_files[index].extension,
+			&listed_files[index].date,
+			description_listed,
+			description_listed ? description_date : NULL);
 	}
 	qsort(globals->maps, globals->map_count, sizeof(globals->maps[0]), custom_edition_map_compare);
 	for (globals->multiplayer_count = 0;
@@ -867,6 +1068,23 @@ void custom_edition_maps_look_again(
 	void)
 {
 	custom_edition_maps_globals.looked_for = FALSE;
+
+	return;
+}
+
+void custom_edition_maps_file_forget(
+	char const *name)
+{
+	struct remembered_map_file *remembered;
+
+	while ((remembered = remembered_map_file_find(map_file_hash(name, "map"))) != NULL)
+	{
+		csmemset(remembered, 0, sizeof(*remembered));
+	}
+	while ((remembered = remembered_map_file_find(map_file_hash(name, "yelo"))) != NULL)
+	{
+		csmemset(remembered, 0, sizeof(*remembered));
+	}
 
 	return;
 }

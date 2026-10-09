@@ -19,6 +19,7 @@ file and line, and then no file is used: the game keeps its own menus.
 #include "port_config.h"
 
 #include "expat.h"
+#include "../game/cache_file_formats.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -979,4 +980,367 @@ struct halo_menus const *halo_menus_load(void)
 	result = preload_started ? preload_result : menus_load();
 	pthread_mutex_unlock(&preload_lock);
 	return result;
+}
+
+/* ---------- the Halo PC pictures and text, read ahead (halo_menus.h) */
+
+enum
+{
+	MAXIMUM_ART_READS = 256,
+	MAXIMUM_ART_PNGS = 32,
+	/* (all of it: the screens' are 1.5 MB) */
+	MAXIMUM_ART_BYTES = 8 * 1024 * 1024,
+};
+
+struct art_read
+{
+	int type;
+	unsigned long offset;
+	unsigned long size;
+	unsigned char *data;
+};
+
+static struct
+{
+	pthread_t thread;
+	int started;
+	int joined;
+	struct halo_menus_art_plan plan;
+	/* the plan's strings, the thread's own copies */
+	char *strings;
+	char const **paths;
+	struct art_read reads[MAXIMUM_ART_READS];
+	long read_count;
+	unsigned long read_bytes;
+	struct
+	{
+		char *name;
+		unsigned char *data;
+		unsigned long size;
+	} pngs[MAXIMUM_ART_PNGS];
+	long png_count;
+	unsigned long long microseconds;
+	/* (ui.map going before the thread is done: it stops) */
+	volatile int stop;
+} art;
+
+struct art_file
+{
+	HANDLE handle;
+	int type;
+	struct cache_file_source source;
+};
+
+/* (the thread's reads of a resource map: each kept) */
+static int art_file_read(void *context, uint32_t offset, uint32_t size, void *buffer)
+{
+	struct art_file *file = context;
+	uint32_t done = 0;
+
+	if (__atomic_load_n(&art.stop, __ATOMIC_RELAXED))
+		return 0;
+	while (done < size)
+	{
+		OVERLAPPED position;
+		DWORD read = 0;
+
+		memset(&position, 0, sizeof(position));
+		position.Offset = offset + done;
+		if (!ReadFile(file->handle, (unsigned char *)buffer + done, size - done, &read, &position) || !read)
+			break;
+		done += read;
+	}
+	if (done != size)
+		return 0;
+	if (art.read_count < MAXIMUM_ART_READS && size <= MAXIMUM_ART_BYTES - art.read_bytes)
+	{
+		unsigned char *copy = malloc(size ? size : 1);
+
+		if (copy)
+		{
+			memcpy(copy, buffer, size);
+			art.reads[art.read_count].type = file->type;
+			art.reads[art.read_count].offset = offset;
+			art.reads[art.read_count].size = size;
+			art.reads[art.read_count].data = copy;
+			art.read_count++;
+			art.read_bytes += size;
+		}
+	}
+	return 1;
+}
+
+static int art_file_open(struct art_file *file, char const *name, int type)
+{
+	char path[1200];
+	DWORD size;
+
+	memset(file, 0, sizeof(*file));
+	snprintf(path, sizeof(path), "%s%s.map", art.plan.map_directory, name);
+	file->handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	if (file->handle == INVALID_HANDLE_VALUE)
+		return 0;
+	size = GetFileSize(file->handle, NULL);
+	if (size == INVALID_FILE_SIZE)
+	{
+		CloseHandle(file->handle);
+		return 0;
+	}
+	file->type = type;
+	file->source.context = file;
+	file->source.read = art_file_read;
+	file->source.size = (uint32_t)size;
+	return 1;
+}
+
+static struct resource_map_item const *art_find(struct resource_map const *map, char const *path)
+{
+	int32_t index;
+
+	for (index = 0; index < map->item_count; index++)
+	{
+		if (map->items[index].name && !strcmp(map->items[index].name, path))
+			return &map->items[index];
+	}
+	return NULL;
+}
+
+static uint32_t art_u32(unsigned char const *bytes)
+{
+	return bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+}
+
+/* (as menu_tags.c's menu_resource_bitmap_load reads one: its tag, then
+each frame's pixels; where it would refuse one, the thread reads no
+further) */
+static void art_bitmap_read(struct art_file *file, struct resource_map const *map, char const *path)
+{
+	struct halo_menus_art_plan const *plan = &art.plan;
+	struct resource_map_item const *item = art_find(map, path);
+	unsigned char *tag;
+	uint32_t count, address, frame;
+
+	if (!item || item->size < plan->bitmaps_block_offset + 8 || item->size > plan->maximum_tag_bytes)
+		return;
+	tag = malloc(item->size);
+	if (!tag || !file->source.read(file, item->data_offset, item->size, tag))
+	{
+		free(tag);
+		return;
+	}
+	count = art_u32(tag + plan->bitmaps_block_offset);
+	address = art_u32(tag + plan->bitmaps_block_offset + 4);
+	if (count >= 1 && count <= plan->maximum_frames && address <= item->size &&
+		count * plan->bitmap_data_bytes <= item->size - address)
+	{
+		for (frame = 0; frame < count; frame++)
+		{
+			unsigned char const *data = tag + address + frame * plan->bitmap_data_bytes;
+			uint32_t pixels_offset = art_u32(data + plan->pixels_offset_offset);
+			uint32_t pixels_size = art_u32(data + plan->pixels_size_offset);
+			unsigned char *pixels;
+
+			if (!pixels_size || pixels_size > plan->maximum_pixel_bytes || (int32_t)pixels_offset < 0 ||
+				pixels_offset > file->source.size || pixels_size > file->source.size - pixels_offset)
+				break;
+			pixels = malloc(pixels_size);
+			if (!pixels || !file->source.read(file, pixels_offset, pixels_size, pixels))
+			{
+				free(pixels);
+				break;
+			}
+			free(pixels);
+		}
+	}
+	free(tag);
+}
+
+static void art_strings_read(struct art_file *file, struct resource_map const *map, char const *path)
+{
+	struct resource_map_item const *item = art_find(map, path);
+	unsigned char *tag;
+
+	if (!item || item->size > art.plan.maximum_tag_bytes)
+		return;
+	tag = malloc(item->size ? item->size : 1);
+	if (tag)
+		file->source.read(file, item->data_offset, item->size, tag);
+	free(tag);
+}
+
+static void *art_preread_proc(void *unused)
+{
+	unsigned long long started = platform_microseconds_now();
+	struct art_file file;
+	struct resource_map map;
+	long index;
+
+	(void)unused;
+	if (art_file_open(&file, "bitmaps", _resource_map_bitmaps))
+	{
+		if (resource_map_open(&file.source, _resource_map_bitmaps, &map) == _cache_file_status_ok)
+		{
+			for (index = 0; index < art.plan.bitmap_count; index++)
+				art_bitmap_read(&file, &map, art.plan.bitmap_paths[index]);
+			resource_map_close(&map);
+		}
+		CloseHandle(file.handle);
+	}
+	if (art_file_open(&file, "loc", _resource_map_locale))
+	{
+		if (resource_map_open(&file.source, _resource_map_locale, &map) == _cache_file_status_ok)
+		{
+			for (index = 0; index < art.plan.string_count; index++)
+				art_strings_read(&file, &map, art.plan.string_paths[index]);
+			resource_map_close(&map);
+		}
+		CloseHandle(file.handle);
+	}
+	for (index = 0; index < art.plan.png_count && art.png_count < MAXIMUM_ART_PNGS &&
+		!__atomic_load_n(&art.stop, __ATOMIC_RELAXED); index++)
+	{
+		unsigned long size = 0;
+		unsigned char *data = halo_menus_file_read(art.plan.png_names[index], &size);
+
+		if (!data)
+			continue;
+		art.pngs[art.png_count].name = strdup(art.plan.png_names[index]);
+		if (!art.pngs[art.png_count].name)
+		{
+			free(data);
+			continue;
+		}
+		art.pngs[art.png_count].data = data;
+		art.pngs[art.png_count].size = size;
+		art.png_count++;
+	}
+	art.microseconds = platform_microseconds_now() - started;
+	return NULL;
+}
+
+void halo_menus_art_release(void)
+{
+	long index;
+
+	__atomic_store_n(&art.stop, 1, __ATOMIC_RELAXED);
+	halo_menus_art_wait();
+	for (index = 0; index < art.read_count; index++)
+		free(art.reads[index].data);
+	for (index = 0; index < art.png_count; index++)
+	{
+		free(art.pngs[index].name);
+		free(art.pngs[index].data);
+	}
+	free(art.strings);
+	free(art.paths);
+	memset(&art, 0, sizeof(art));
+}
+
+void halo_menus_art_preread(struct halo_menus_art_plan const *plan)
+{
+	long count = plan->bitmap_count + plan->string_count + plan->png_count, index;
+	size_t bytes = strlen(plan->map_directory) + 1;
+	pthread_attr_t attributes;
+	char const *const *lists[3];
+	long list_counts[3];
+	char *cursor;
+	long list, at = 0;
+
+	halo_menus_art_release();
+	if (getenv("HALO_MENUS_ART_PREREAD") && !atoi(getenv("HALO_MENUS_ART_PREREAD")))
+		return;
+	lists[0] = plan->bitmap_paths;
+	lists[1] = plan->string_paths;
+	lists[2] = plan->png_names;
+	list_counts[0] = plan->bitmap_count;
+	list_counts[1] = plan->string_count;
+	list_counts[2] = plan->png_count;
+	for (list = 0; list < 3; list++)
+		for (index = 0; index < list_counts[list]; index++)
+			bytes += strlen(lists[list][index] ? lists[list][index] : "") + 1;
+	art.strings = malloc(bytes);
+	art.paths = malloc((count ? count : 1) * sizeof(*art.paths));
+	if (!art.strings || !art.paths)
+	{
+		halo_menus_art_release();
+		return;
+	}
+	/* (copies: the thread reads them while the game goes on) */
+	art.plan = *plan;
+	cursor = art.strings;
+	strcpy(cursor, plan->map_directory);
+	art.plan.map_directory = cursor;
+	cursor += strlen(cursor) + 1;
+	for (list = 0; list < 3; list++)
+	{
+		long first = at;
+
+		for (index = 0; index < list_counts[list]; index++)
+		{
+			strcpy(cursor, lists[list][index] ? lists[list][index] : "");
+			art.paths[at++] = cursor;
+			cursor += strlen(cursor) + 1;
+		}
+		if (list == 0)
+			art.plan.bitmap_paths = art.paths + first;
+		else if (list == 1)
+			art.plan.string_paths = art.paths + first;
+		else
+			art.plan.png_names = art.paths + first;
+	}
+	pthread_attr_init(&attributes);
+	pthread_attr_setstacksize(&attributes, 128 * 1024);
+	art.started = pthread_create(&art.thread, &attributes, art_preread_proc, NULL) == 0;
+	pthread_attr_destroy(&attributes);
+	if (!art.started)
+		halo_menus_art_release();
+}
+
+void halo_menus_art_wait(void)
+{
+	if (art.started && !art.joined)
+	{
+		pthread_join(art.thread, NULL);
+		art.joined = 1;
+		platform_log("menus: the Halo PC pictures and text read ahead in %lu ms (%ld reads, %lu KB, %ld PNGs)",
+			(unsigned long)(art.microseconds / 1000), art.read_count, art.read_bytes / 1024, art.png_count);
+	}
+}
+
+int halo_menus_art_take(int resource_map_type, unsigned long offset, unsigned long size, void *buffer)
+{
+	long index;
+
+	if (!art.started || !art.joined)
+		return 0;
+	for (index = 0; index < art.read_count; index++)
+	{
+		if (art.reads[index].type == resource_map_type && art.reads[index].offset == offset &&
+			art.reads[index].size == size)
+		{
+			memcpy(buffer, art.reads[index].data, size);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+unsigned char *halo_menus_art_png(char const *name, unsigned long *size)
+{
+	long index;
+
+	if (!art.started || !art.joined || !name)
+		return NULL;
+	for (index = 0; index < art.png_count; index++)
+	{
+		if (art.pngs[index].data && !strcmp(art.pngs[index].name, name))
+		{
+			unsigned char *data = art.pngs[index].data;
+
+			art.pngs[index].data = NULL;
+			*size = art.pngs[index].size;
+			return data;
+		}
+	}
+	return NULL;
 }

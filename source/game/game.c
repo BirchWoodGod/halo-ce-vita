@@ -955,6 +955,10 @@ void set_random_seed(
 	return;
 }
 
+#ifdef HALO_LINUX
+void game_loading_screen_end(void);
+#endif
+
 boolean game_load(
 	struct game_options *options)
 {
@@ -977,6 +981,11 @@ boolean game_load(
 	{
 		game_globals->map_loaded = TRUE;
 	}
+#ifdef HALO_LINUX
+	/* port: a Custom Edition map's loading screen, up from its tags' load
+	through its first structure BSP's (custom_edition_cache.c) */
+	game_loading_screen_end();
+#endif
 
 	return game_globals->map_loaded;
 }
@@ -1082,6 +1091,140 @@ boolean game_map_loading_in_progress(
 
 	return globals->map_load_in_progress;
 }
+
+#ifdef HALO_LINUX
+/* port: the loading screen while game_load reads a map, as
+game_precache_new_map shows it while the cache file thread copies one: a
+Custom Edition map is read in place, never copied, and its load in
+scenario_tags_load (port/linux/game/custom_edition_cache.c) took the
+owner's Vita 12 s with no frame drawn (Oct 9, Hugeass; the hang watchdog
+spoke at 8 s). Its loader calls game_loading_screen_frame as it goes and
+while it waits for its reader thread, and a frame is drawn and presented
+when one is due: the old map is gone by then (game_dispose_from_old_map
+closed the widgets, game_unload its tags), so main_pregame_render draws the
+loading screen alone, as before the first map. */
+int halo_thread_index(void);
+
+enum
+{
+	/* (30 a second, the precache's rate on the Xbox) */
+	LOADING_SCREEN_FRAME_US = 33000,
+};
+
+static struct
+{
+	boolean active;
+	boolean drawing;
+	/* the progress bar drawn (a picture to show), or the pregame render's
+	frame alone */
+	boolean progress_bar;
+	int thread;
+	unsigned long long started_us;
+	unsigned long long last_us;
+	unsigned long long longest_us;
+	unsigned long frames;
+} game_loading_screen;
+
+void game_loading_screen_begin(
+	void)
+{
+#ifndef HALO_DEDICATED_SERVER
+	struct game_runtime_globals_prefix *globals = game_globals;
+
+	csmemset(&game_loading_screen, 0, sizeof(game_loading_screen));
+	game_loading_screen.active = TRUE;
+	game_loading_screen.thread = halo_thread_index();
+	game_loading_screen.started_us = tick_now();
+	game_loading_screen.last_us = game_loading_screen.started_us;
+	/* (without the retail picture the progress bar draws a black screen:
+	the pregame render's frame alone is one, and makes none of the progress
+	bar's textures and front buffer in the memory window - 2 MB the map's
+	load then has as before) */
+	game_loading_screen.progress_bar = progress_bar_has_picture();
+	if (game_loading_screen.progress_bar)
+	{
+		globals->map_load_in_progress = TRUE;
+		globals->loading_progress = 0.0f;
+		progress_bar_begin(global_scenario_index != NONE);
+	}
+#endif
+
+	return;
+}
+
+void game_loading_screen_frame(
+	real progress)
+{
+	struct game_runtime_globals_prefix *globals = game_globals;
+	unsigned long long now;
+
+	if (!game_loading_screen.active ||
+		game_loading_screen.drawing ||
+		halo_thread_index() != game_loading_screen.thread)
+	{
+		return;
+	}
+	now = tick_now();
+	if (now - game_loading_screen.last_us < LOADING_SCREEN_FRAME_US)
+	{
+		return;
+	}
+	if (now - game_loading_screen.last_us > game_loading_screen.longest_us)
+	{
+		game_loading_screen.longest_us = now - game_loading_screen.last_us;
+	}
+	game_loading_screen.drawing = TRUE;
+	if (game_loading_screen.progress_bar)
+	{
+		globals->loading_progress = PIN(progress, 0.0f, 1.0f);
+	}
+	main_pregame_render();
+	main_present_frame();
+	game_loading_screen.drawing = FALSE;
+	game_loading_screen.frames++;
+	game_loading_screen.last_us = tick_now();
+
+	return;
+}
+
+/* whether the loading screen is up and the caller is the thread that
+draws it (a read it waits for can show it meanwhile) */
+boolean game_loading_screen_up_here(
+	void)
+{
+	return game_loading_screen.active && halo_thread_index() == game_loading_screen.thread;
+}
+
+void game_loading_screen_end(
+	void)
+{
+	struct game_runtime_globals_prefix *globals = game_globals;
+	unsigned long long now = tick_now();
+
+	if (!game_loading_screen.active)
+	{
+		return;
+	}
+	if (now - game_loading_screen.last_us > game_loading_screen.longest_us)
+	{
+		game_loading_screen.longest_us = now - game_loading_screen.last_us;
+	}
+	platform_log("loading screen: %lu frames over %lu ms, at most %lu ms between two%s",
+		game_loading_screen.frames,
+		(unsigned long)((now - game_loading_screen.started_us) / 1000),
+		(unsigned long)(game_loading_screen.longest_us / 1000),
+		game_loading_screen.progress_bar ? "" : " (no picture: no progress bar)");
+	if (game_loading_screen.progress_bar)
+	{
+		progress_bar_end();
+		globals->map_load_in_progress = FALSE;
+		globals->loading_progress = 1.0f;
+	}
+	game_loading_screen.active = FALSE;
+
+	return;
+}
+#endif
 
 void game_unload(
 	void)

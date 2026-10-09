@@ -167,6 +167,38 @@ struct model_data_stream
 	unsigned long read_bytes;
 };
 
+/* The buffers the two streams will read, in the order they will, worked
+out from the parts before any is converted (model_data_plan_make), are read
+ahead on the load's reader thread (custom_edition_cache.c) into buffers of
+their own while the parts before them are compressed, and taken in place of
+the stream's buffer when the stream reaches them: the same buffers read as
+without, the memory card's time (2.2 s of Hugeass's 4.9 s conversion on the
+Vita) spent under the compression's. A stream that asks for another buffer
+than the plan's next reads it itself, as without, and reads ahead no more. */
+#define MODEL_DATA_PREFETCH_BUFFERS 4
+
+struct model_data_window
+{
+	unsigned long start;
+	unsigned long length;
+	/* the vertices' stream (0) or the strips' (1) */
+	long stream;
+};
+
+struct model_data_prefetch
+{
+	struct model_data_window *plan;
+	long plan_count;
+	/* the plan's next buffer a stream takes, and the next to read ahead */
+	long next;
+	long submitted;
+	boolean abandoned;
+	byte *buffers[MODEL_DATA_PREFETCH_BUFFERS];
+	struct custom_edition_read_job jobs[MODEL_DATA_PREFETCH_BUFFERS];
+	/* buffers taken from the plan (logged) */
+	unsigned long taken;
+};
+
 struct model_data_reader
 {
 	struct custom_edition_load_report const *report;
@@ -174,6 +206,10 @@ struct model_data_reader
 	struct model_vertex_compressed *compressed;
 	struct model_data_stream vertices;
 	struct model_data_stream strips;
+	struct model_data_prefetch prefetch;
+	/* (the loading screen's progress) */
+	long parts_done;
+	long parts_total;
 };
 
 struct custom_edition_geometry_globals
@@ -314,11 +350,215 @@ static boolean custom_edition_model_count(
 	return TRUE;
 }
 
+/* the plan's entry `index` read ahead into its buffer */
+static void model_data_prefetch_submit(
+	struct model_data_reader *reader,
+	long index)
+{
+	struct model_data_prefetch *prefetch = &reader->prefetch;
+	long slot = index % MODEL_DATA_PREFETCH_BUFFERS;
+
+	custom_edition_cache_model_data_submit(
+		reader->report,
+		prefetch->plan[index].start,
+		prefetch->plan[index].length,
+		prefetch->buffers[slot],
+		&prefetch->jobs[slot]);
+	prefetch->submitted = index + 1;
+
+	return;
+}
+
+/* (before the buffers go: what is being read ahead, read) */
+static void model_data_prefetch_drain(
+	struct model_data_reader *reader)
+{
+	struct model_data_prefetch *prefetch = &reader->prefetch;
+	long index;
+
+	for (index = prefetch->next; index < prefetch->submitted; index++)
+	{
+		custom_edition_read_job_wait(&prefetch->jobs[index % MODEL_DATA_PREFETCH_BUFFERS]);
+	}
+	prefetch->next = prefetch->submitted;
+
+	return;
+}
+
+static void model_data_prefetch_start(
+	struct model_data_reader *reader)
+{
+	struct model_data_prefetch *prefetch = &reader->prefetch;
+	long index;
+
+	for (index = 0; index < MIN(prefetch->plan_count, MODEL_DATA_PREFETCH_BUFFERS); index++)
+	{
+		model_data_prefetch_submit(reader, index);
+	}
+
+	return;
+}
+
+/* the buffer `stream` is to read now (its start and length), when it is
+the plan's next: it waits for it and takes it, its own buffer reading the
+plan's entry after those being read ahead. FALSE when it is not (the
+stream then reads it itself) or it could not be read. */
+static boolean model_data_prefetch_take(
+	struct model_data_reader *reader,
+	struct model_data_stream *stream)
+{
+	struct model_data_prefetch *prefetch = &reader->prefetch;
+	struct model_data_window const *window;
+	long slot;
+	byte *buffer;
+
+	if (!prefetch->plan || prefetch->abandoned || prefetch->next >= prefetch->submitted)
+	{
+		return FALSE;
+	}
+	window = &prefetch->plan[prefetch->next];
+	if (window->stream != (stream == &reader->strips) ||
+		window->start != stream->start ||
+		window->length != stream->length)
+	{
+		error(
+			_error_silent,
+			"custom edition: the model data read ahead (buffer %ld of %ld) is not the one asked for; read as asked from here",
+			prefetch->next,
+			prefetch->plan_count);
+		model_data_prefetch_drain(reader);
+		prefetch->abandoned = TRUE;
+		return FALSE;
+	}
+	slot = prefetch->next % MODEL_DATA_PREFETCH_BUFFERS;
+	if (!custom_edition_read_job_wait(&prefetch->jobs[slot]))
+	{
+		prefetch->next++;
+		model_data_prefetch_drain(reader);
+		prefetch->abandoned = TRUE;
+		return FALSE;
+	}
+	buffer = stream->buffer;
+	stream->buffer = prefetch->buffers[slot];
+	prefetch->buffers[slot] = buffer;
+	prefetch->next++;
+	prefetch->taken++;
+	if (prefetch->next + MODEL_DATA_PREFETCH_BUFFERS - 1 < prefetch->plan_count)
+	{
+		model_data_prefetch_submit(reader, prefetch->next + MODEL_DATA_PREFETCH_BUFFERS - 1);
+	}
+
+	return TRUE;
+}
+
+/* (model_data_plan_make: what model_data_stream_read does with `stream`
+for `size` bytes at `offset`, without reading: a buffer it would read is
+added to the plan) */
+static void model_data_plan_read(
+	struct model_data_reader *reader,
+	struct model_data_stream *stream,
+	long stream_index,
+	unsigned long offset,
+	unsigned long size,
+	long plan_limit)
+{
+	struct model_data_prefetch *prefetch = &reader->prefetch;
+	unsigned long model_data_bytes = reader->report->model_data_bytes;
+
+	if (offset >= stream->start && offset + size <= stream->start + stream->length)
+	{
+		return;
+	}
+	if (size > MODEL_DATA_READ_AHEAD_BYTES)
+	{
+		return;
+	}
+	if (stream->length && offset < stream->start && offset + size > MODEL_DATA_READ_AHEAD_BYTES)
+	{
+		stream->start = offset + size - MODEL_DATA_READ_AHEAD_BYTES;
+	}
+	else if (stream->length && offset < stream->start)
+	{
+		stream->start = 0;
+	}
+	else
+	{
+		stream->start = offset;
+	}
+	stream->length = MIN(MODEL_DATA_READ_AHEAD_BYTES, model_data_bytes - stream->start);
+	if (prefetch->plan_count < plan_limit)
+	{
+		prefetch->plan[prefetch->plan_count].start = stream->start;
+		prefetch->plan[prefetch->plan_count].length = stream->length;
+		prefetch->plan[prefetch->plan_count].stream = stream_index;
+		prefetch->plan_count++;
+	}
+
+	return;
+}
+
+/* The buffers the streams will read as every model's parts are converted
+in turn (custom_edition_model_convert's reads, in its order), into the
+reader's plan, at most `plan_limit` of them. */
+static void model_data_plan_make(
+	byte *tag_cache,
+	unsigned long loaded_bytes,
+	struct model_data_reader *reader,
+	long plan_limit)
+{
+	long uncompressed_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_uncompressed);
+	struct model_data_stream vertices;
+	struct model_data_stream strips;
+	struct model *model;
+	int32_t tag_index = NONE;
+
+	csmemset(&vertices, 0, sizeof(vertices));
+	csmemset(&strips, 0, sizeof(strips));
+	while ((model = custom_edition_cache_tag_next(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, sizeof(*model), &tag_index)) != NULL)
+	{
+		long geometry_index;
+
+		for (geometry_index = 0; geometry_index < model->geometries.count; geometry_index++)
+		{
+			struct model_geometry const *geometry = TAG_BLOCK_GET_ELEMENT(
+				&model->geometries,
+				geometry_index,
+				struct model_geometry);
+			long part_index;
+
+			for (part_index = 0; part_index < geometry->parts.count; part_index++)
+			{
+				struct custom_edition_model_part const *part = TAG_BLOCK_GET_ELEMENT(
+					&geometry->parts,
+					part_index,
+					struct custom_edition_model_part);
+
+				model_data_plan_read(
+					reader,
+					&vertices,
+					0,
+					part->vertex_offset,
+					(unsigned long)part->vertex_count * uncompressed_vertex_size,
+					plan_limit);
+				model_data_plan_read(
+					reader,
+					&strips,
+					1,
+					reader->report->model_index_data_offset + part->strip_offset,
+					(unsigned long)(part->strip_triangle_count + 2) * sizeof(word),
+					plan_limit);
+			}
+		}
+	}
+
+	return;
+}
+
 /* `size` bytes at `offset` in the model data through `stream`'s read-ahead
 buffer (cache_file_formats.c checked every part's range lies within the
 model data); NULL when the map cannot be read */
 static void const *model_data_stream_read(
-	struct model_data_reader const *reader,
+	struct model_data_reader *reader,
 	struct model_data_stream *stream,
 	unsigned long offset,
 	unsigned long size,
@@ -351,7 +591,8 @@ static void const *model_data_stream_read(
 	stream->length = MIN(MODEL_DATA_READ_AHEAD_BYTES, model_data_bytes - stream->start);
 	stream->reads++;
 	stream->read_bytes += stream->length;
-	if (!custom_edition_cache_model_data_read(reader->report, stream->start, stream->length, stream->buffer))
+	if (!model_data_prefetch_take(reader, stream) &&
+		!custom_edition_cache_model_data_read(reader->report, stream->start, stream->length, stream->buffer))
 	{
 		stream->length = 0;
 		return NULL;
@@ -532,6 +773,8 @@ static boolean custom_edition_model_convert(
 			{
 				return FALSE;
 			}
+			reader->parts_done++;
+			custom_edition_load_progress_set(0.55f + 0.43f * (real)reader->parts_done / (real)MAX(reader->parts_total, 1));
 		}
 	}
 	/* the parts' node indices are now the model's */
@@ -654,6 +897,9 @@ boolean custom_edition_models_convert(
 	struct model *model;
 	int32_t tag_index = NONE;
 	boolean success = TRUE;
+	long plan_limit;
+	unsigned long plan_bytes;
+	boolean prefetching = FALSE;
 
 	assert(!globals->model_parts);
 	while ((model = custom_edition_cache_tag_next(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, sizeof(*model), &tag_index)) != NULL)
@@ -674,8 +920,20 @@ boolean custom_edition_models_convert(
 	strip_scratch_bytes = (totals.largest_part_strip_index_count * sizeof(*strip_scratch) + 15) & ~15UL;
 	compressed_bytes = (totals.largest_part_vertex_count * vertex_size + 15) & ~15UL;
 	working_bytes = scratch_bytes + strip_scratch_bytes + compressed_bytes + 2 * MODEL_DATA_READ_AHEAD_BYTES;
+	/* (and the plan, and the buffers read ahead: without room for them,
+	the streams read for themselves) */
+	plan_limit = 2 * totals.part_count;
+	plan_bytes = ((unsigned long)plan_limit * sizeof(struct model_data_window) + 15) & ~15UL;
 	globals->model_parts = malloc((totals.part_count + 1) * sizeof(*globals->model_parts));
-	working = halo_custom_edition_memory_alloc(working_bytes);
+	working = halo_custom_edition_memory_alloc(working_bytes + plan_bytes + MODEL_DATA_PREFETCH_BUFFERS * MODEL_DATA_READ_AHEAD_BYTES);
+	if (working)
+	{
+		prefetching = TRUE;
+	}
+	else
+	{
+		working = halo_custom_edition_memory_alloc(working_bytes);
+	}
 	if (!globals->model_parts || !working)
 	{
 		error(
@@ -694,6 +952,19 @@ boolean custom_edition_models_convert(
 	reader.compressed = (struct model_vertex_compressed *)(working + scratch_bytes + strip_scratch_bytes);
 	reader.vertices.buffer = working + scratch_bytes + strip_scratch_bytes + compressed_bytes;
 	reader.strips.buffer = reader.vertices.buffer + MODEL_DATA_READ_AHEAD_BYTES;
+	reader.parts_total = totals.part_count;
+	if (prefetching)
+	{
+		long buffer_index;
+
+		reader.prefetch.plan = (struct model_data_window *)(working + working_bytes);
+		for (buffer_index = 0; buffer_index < MODEL_DATA_PREFETCH_BUFFERS; buffer_index++)
+		{
+			reader.prefetch.buffers[buffer_index] = working + working_bytes + plan_bytes + buffer_index * MODEL_DATA_READ_AHEAD_BYTES;
+		}
+		model_data_plan_make(tag_cache, loaded_bytes, &reader, plan_limit);
+		model_data_prefetch_start(&reader);
+	}
 
 	tag_index = NONE;
 	while (success &&
@@ -708,18 +979,20 @@ boolean custom_edition_models_convert(
 			custom_edition_cache_load_failure_note(T("there is not enough memory for its models"));
 		}
 	}
+	model_data_prefetch_drain(&reader);
 	halo_custom_edition_memory_free(working);
 	if (success)
 	{
 		custom_edition_cache_tags_regroup(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, MODELS_GROUP_TAG);
 		error(
 			_error_silent,
-			"custom edition: %ld model parts converted (%ld vertices compressed, %lu KB in their buffers; model data read in %lu buffers, %lu KB)",
+			"custom edition: %ld model parts converted (%ld vertices compressed, %lu KB in their buffers; model data read in %lu buffers, %lu KB, %lu read ahead)",
 			totals.part_count,
 			totals.vertex_count,
 			(totals.vertex_count * vertex_size + totals.strip_index_count * sizeof(word)) / 1024,
 			reader.vertices.reads + reader.strips.reads,
-			(reader.vertices.read_bytes + reader.strips.read_bytes) / 1024);
+			(reader.vertices.read_bytes + reader.strips.read_bytes) / 1024,
+			reader.prefetch.taken);
 	}
 
 	return success;
