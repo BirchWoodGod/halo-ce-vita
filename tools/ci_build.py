@@ -95,6 +95,10 @@ def main() -> int:
     # internet play's UPnP (port/third_party/miniupnpc), in every build,
     # whose BSD license asks binaries to carry its notice
     shutil.copy2(ROOT / "port/third_party/miniupnpc/LICENSE", dist / "miniupnpc-LICENSE.txt")
+    # Custom Edition's Ogg Vorbis sounds (port/third_party/tremor and libogg),
+    # in every build, whose BSD licenses ask the same
+    shutil.copy2(ROOT / "port/third_party/tremor/COPYING", dist / "tremor-COPYING.txt")
+    shutil.copy2(ROOT / "port/third_party/libogg/COPYING", dist / "libogg-COPYING.txt")
     return 0
 
 
