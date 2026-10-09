@@ -935,11 +935,20 @@ long game_globals_get_weapon(
 	struct game_globals *game_globals,
 	long weapon_list_index)
 {
-	struct tag_reference *weapon = TAG_BLOCK_GET_ELEMENT(
+	struct tag_reference *weapon;
+	long weapon_definition_index;
+
+	/* port: none past the end of the list (DamnationCE, xshxdex98, CC0,
+	d15b6ca9). A Custom Edition map's globals can list fewer weapons than the
+	Xbox's fourteen (stopping before the grenades), and a release build read
+	past the block. */
+	if (weapon_list_index < 0 || weapon_list_index >= game_globals->weapon_list.count)
+		return NONE;
+	weapon = TAG_BLOCK_GET_ELEMENT(
 		&game_globals->weapon_list,
 		weapon_list_index,
 		struct tag_reference);
-	long weapon_definition_index = weapon->index;
+	weapon_definition_index = weapon->index;
 
 	return weapon_definition_index;
 }
