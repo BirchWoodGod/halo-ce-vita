@@ -1679,11 +1679,23 @@ static long select_players_to_display(
 /* port: the frames the in-game score has been drawn (the automated tests,
 network_test.c: the scoreboard held open was drawn) */
 static volatile long game_engine_in_game_score_draws;
+/* ... and the rows of its Ping column with another machine's player's ping
+(a client: from the host's table), and with "-" (none known) */
+static volatile long game_engine_in_game_score_other_pings;
+static volatile long game_engine_in_game_score_unknown_pings;
 
 long game_engine_in_game_score_draw_count(
 	void)
 {
 	return game_engine_in_game_score_draws;
+}
+
+void game_engine_in_game_score_ping_counts(
+	long *other_pings,
+	long *unknown_pings)
+{
+	*other_pings = game_engine_in_game_score_other_pings;
+	*unknown_pings = game_engine_in_game_score_unknown_pings;
 }
 #endif
 
@@ -1839,12 +1851,24 @@ static void game_engine_rasterize_in_game_score(
 						usprintf(ping_string, L"\t\t\t\t999+");
 					else
 						usprintf(ping_string, L"\t\t\t\t%ld", ping);
-					rasterize_in_game_score_draw_line(
-						ping_string,
-						FALSE,
-						&ping_color,
-						entry_index + 2);
+					if (player->local_player_index == NONE)
+						game_engine_in_game_score_other_pings++;
 				}
+				else
+				{
+					/* (not known here: another machine's with no
+					fresh table from the host, network_distributed.c)
+					"-", grey */
+					ping_color.alpha = alpha;
+					ping_color.red = ping_color.green = ping_color.blue = 0.6f;
+					usprintf(ping_string, L"\t\t\t\t-");
+					game_engine_in_game_score_unknown_pings++;
+				}
+				rasterize_in_game_score_draw_line(
+					ping_string,
+					FALSE,
+					&ping_color,
+					entry_index + 2);
 			}
 #endif
 		}

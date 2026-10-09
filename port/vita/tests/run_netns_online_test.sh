@@ -230,6 +230,29 @@
 #            "lost the connection" 20 s on (the official servers, October
 #            2026). Each must precache the server's map and play both games
 #            with the other, the server lose neither
+#   pings    the host's ping table (network_distributed.c, p2p.c): a
+#            joiner's scoreboard has the other machines' players' pings, as
+#            the host measured them. A dedicated server (Blood Gulch slayer,
+#            then Chill Out, sv_timelimit 1) with two Vita builds joining
+#            by its code, and at once a Vita host (Blood Gulch, then Chill
+#            Out) with two joiners by its code, every player holding the
+#            scoreboard (HALO_TEST_SCORES_EVERY, 4 s). Each host must send
+#            the table to its two client machines; each joiner must take
+#            tables naming another machine's player (halo.log's "latency:
+#            the host's ping table", every 10 s) and draw such pings in its
+#            scoreboard's Ping column, and play 60 s with the others
+#   pingsmixed the ping table with HALO_TEST_VITA_OLD (a build of
+#            v1.1.0-beta.2 or beta.1, which know nothing of it) and
+#            HALO_TEST_SERVER_OLD (beta.2's server): an old joiner and a new
+#            one on a new Vita host, and on a new dedicated server (the
+#            official servers once redeployed); a new joiner on an old Vita
+#            host, and on an old server (as the official servers are now),
+#            with an old joiner there to play with.
+#            Every copy must play 60 s with another player, no host lose a
+#            connection, nobody reach the dashboard; an old joiner must log
+#            nothing of the tables it is sent (dropped unread); a new joiner
+#            must have the old joiner's ping from a new host, and "-" (never
+#            a number) for other machines' players with an old host
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -306,6 +329,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = scoreboard ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = splitscreen ] && seconds=${HALO_TEST_SECONDS:-170}
+[ "$mode" = pings ] && seconds=${HALO_TEST_SECONDS:-180}
+[ "$mode" = pingsmixed ] && seconds=${HALO_TEST_SECONDS:-180}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 cpus=${HALO_TEST_CPUS:-"0-7 8-15"}
@@ -1481,9 +1506,14 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|scoreboard)
+dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|scoreboard|pings|pingsmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
+	if [ "$mode" = pingsmixed ]; then
+		vita_old=${HALO_TEST_VITA_OLD:-} server_old=${HALO_TEST_SERVER_OLD:-}
+		[ -x "$vita_old" ] && [ -x "$server_old" ] ||
+			{ echo "pingsmixed needs HALO_TEST_VITA_OLD and HALO_TEST_SERVER_OLD (builds of v1.1.0-beta.2)"; exit 2; }
+	fi
 	[ "$mode" = dedicatedpc ] && [ -z "$pc" ] && { echo "dedicatedpc needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
 	# (the server's router forwards it internet play's port, as its operator
 	# would: port/linux/DEDICATED_SERVER.md)
@@ -1495,17 +1525,18 @@ dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcac
 				--to-destination 192.168.1.2:$port
 		done
 	fi
-	# run_server NAME: the server in the host's machine, its folder
-	# $out/NAME/data (maps, init.txt), its console a pipe ($out/NAME/console)
+	# run_server NAME [MACHINE [BINARY]]: the server in the host's machine (or
+	# MACHINE's), its folder $out/NAME/data (maps, init.txt), its console a
+	# pipe ($out/NAME/console)
 	run_server() {
-		local name=$1 sdir=$out/$1
+		local name=$1 sdir=$out/$1 smachine=${2:-$host_machine} sbinary=${3:-$server}
 		mkdir -p "$sdir/data"
 		ln -sfn "$(cd "${HALO_TEST_DATA_HOST:-$data}" && pwd)/maps" "$sdir/data/maps"
 		[ -p "$sdir/console" ] || mkfifo "$sdir/console"
-		(cd "$sdir" && exec nsenter -t "$host_machine" -n env HALO_EXIT_AFTER="$seconds" HALO_UPDATE_AUTO=false \
+		(cd "$sdir" && exec nsenter -t "$smachine" -n env HALO_EXIT_AFTER="$seconds" HALO_UPDATE_AUTO=false \
 			HALO_NET_ALLOW_UPNP=false HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 \
 			HALO_NET_RELAYS=198.51.100.1:47320 ${HALO_TEST_SERVER_ENV:-} \
-			taskset -c "$cpu_a" timeout -k 5 $((seconds + 60)) "$server" -path "$sdir/data" \
+			taskset -c "$cpu_a" timeout -k 5 $((seconds + 60)) "$sbinary" -path "$sdir/data" \
 			< "$sdir/console" > "$sdir/run.log" 2>&1) &
 		pids="$pids $!"
 		server_pid=$!
@@ -1536,7 +1567,7 @@ dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcac
 	server_code() { # the server's code once it hosts (its log: $1)
 		local code= i
 		for i in $(seq 1 90); do
-			code=$(sed -n 's/.*Vitas join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' "$1" | tail -1)
+			code=$(sed -n 's/.*Vitas join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' "$1" 2>/dev/null | tail -1)
 			[ -n "$code" ] && break
 			sleep 1
 		done
@@ -1631,6 +1662,9 @@ sv_end_empty 20
 sv_port 2302
 INIT
 	fi
+	# (pings, pingsmixed: two games, Blood Gulch and Chill Out, the second's
+	# table not the first's)
+	[ "$mode" = pings ] || [ "$mode" = pingsmixed ] && sed -i 's/^sv_name .*/sv_name "Netns Pings"/' "$out/server/data/init.txt"
 	# (dedicatedfullcache: first a map none of the joiners' cache files has)
 	if [ "$mode" = dedicatedfullcache ]; then
 		sed -i 's/^sv_mapcycle_add bloodgulch slayer$/sv_mapcycle_add beavercreek slayer/' "$out/server/data/init.txt"
@@ -1857,6 +1891,149 @@ INIT
 			grep -aq "XLaunchNewImage" "$l" && fail "$name went to the dashboard"
 		done
 		;;
+	pings|pingsmixed)
+		scores="HALO_NETWORK_TEST_SCORES=${HALO_TEST_SCORES_EVERY:-4}"
+		# copy_code LOG: a Vita host's code, once it hosts
+		copy_code() {
+			local c= i
+			for i in $(seq 1 90); do
+				c=$(sed -n 's/.*others join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' "$1" 2>/dev/null | head -1)
+				[ -n "$c" ] && break
+				sleep 1
+			done
+			echo "$c"
+		}
+		# joiner_on NAME CODE BINARY NUMBER: a Vita build joining CODE from a
+		# network of its own (10.10.(40 + NUMBER)), holding the scoreboard
+		joiner_on() {
+			side "p$4" "10.10.$((40 + $4))" "192.168.$((40 + $4))"
+			eval "local m=\$p${4}_machine"
+			run_copy "$1" "$m" "$3" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$2 \
+				HALO_NET_PLAYER_NAME="$1" HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:$(($4 + 1)) $scores
+			joined="$joined $last_pid"
+		}
+		# vita_host NAME BINARY NUMBER: a Vita host (Blood Gulch, then Chill
+		# Out) on a network of its own (10.10.(30 + NUMBER)); its code in vcode
+		vita_host() {
+			side "h$3" "10.10.$((30 + $3))" "192.168.$((30 + $3))"
+			eval "local m=\$h${3}_machine"
+			run_copy "$1" "$m" "$2" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_NET_PLAYER_NAME="$1" $scores
+			hosts="$hosts $last_pid"
+			vcode=$(copy_code "$out/$1/run.log")
+			[ -n "$vcode" ] || fail "$1 never showed a code"
+			echo "$1's code: $vcode"
+		}
+		joined= hosts=
+		if [ "$mode" = pings ]; then
+			# the server's two joiners, and a Vita host's two
+			joiner_on joiner "$code" "$vita" 1
+			joiner_on joiner2 "$code" "$vita" 2
+			vita_host vhost "$vita" 1
+			joiner_on vjoiner "$vcode" "$vita" 3
+			joiner_on vjoiner2 "$vcode" "$vita" 4
+			new_joiners="joiner joiner2 vjoiner vjoiner2" old_joiners= old_host_joiners=
+			new_hosts="server vhost"
+		else
+			# the old server, on a network of its own, its port forwarded
+			side os 10.10.50 192.168.50
+			in_ns "$os_router" iptables -t nat -A PREROUTING -i w_os -p udp --dport 2302 -j DNAT \
+				--to-destination 192.168.50.2:2302
+			mkdir -p "$out/oldserver/data"
+			sed 's/^sv_name .*/sv_name "Netns Pings Old"/' "$out/server/data/init.txt" > "$out/oldserver/data/init.txt"
+			new_console_fd=$console_fd new_server_pid=$server_pid
+			run_server oldserver "$os_machine" "$server_old"
+			old_server_pid=$server_pid console_fd=$new_console_fd server_pid=$new_server_pid
+			ocode=$(server_code "$out/oldserver/run.log")
+			[ -n "$ocode" ] || fail "the old server never showed a code"
+			echo "the old server's code: $ocode"
+			# the new server: an old joiner and a new one
+			joiner_on old_on_server "$code" "$vita_old" 1
+			joiner_on new_on_server "$code" "$vita" 2
+			# a new Vita host: an old joiner and a new one
+			vita_host vhost "$vita" 1
+			joiner_on old_on_vhost "$vcode" "$vita_old" 3
+			joiner_on new_on_vhost "$vcode" "$vita" 4
+			# the old server, and an old Vita host: a new joiner each (and an
+			# old one on the old server, to play with)
+			joiner_on new_on_oldserver "$ocode" "$vita" 5
+			joiner_on old_on_oldserver "$ocode" "$vita_old" 7
+			vita_host oldvhost "$vita_old" 2
+			joiner_on new_on_oldvhost "$vcode" "$vita" 6
+			new_joiners="new_on_server new_on_vhost" old_joiners="old_on_server old_on_vhost"
+			old_host_joiners="new_on_oldserver new_on_oldvhost" others=old_on_oldserver
+			new_hosts="server vhost"
+		fi
+		wait $joined 2>/dev/null
+		kill -TERM "$server_pid" $hosts ${old_server_pid:-} 2>/dev/null; wait "$server_pid" $hosts ${old_server_pid:-} 2>/dev/null
+		echo "--- server"; grep -aE "^server: (the game|player)|latency: the players' pings" "$sl" | head -20
+		for game in "slayer on bloodgulch" "slayer on chillout"; do
+			grep -aq "^server: the game starts: $game" "$sl" || fail "the server never played $game"
+		done
+		# (the hosts: each sent its table to its two client machines)
+		for name in $new_hosts; do
+			l=$out/$name/run.log
+			sent=$(sed -n "s/.*latency: the players' pings go to \([0-9]*\) client machines\? every.*/\1/p" "$l" | sort -n | tail -1)
+			echo "$name: its ping table went to ${sent:-no} client machines at most"
+			[ "${sent:-0}" -ge 2 ] || fail "$name sent its ping table to ${sent:-no} client machines (2 wanted)"
+		done
+		for name in server vhost oldserver oldvhost; do
+			[ -f "$out/$name/run.log" ] || continue
+			grep -aq "lost the connection" "$out/$name/run.log" && fail "$name lost a player's connection"
+		done
+		# (every joiner: played with the others, never at the dashboard)
+		for name in $new_joiners $old_joiners $old_host_joiners ${others:-}; do
+			l=$out/$name/run.log
+			n=$(grep -a "network test: tick" "$l" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name: $n s playing with another player"
+			[ "$n" -ge 60 ] || fail "$name played with another player for $n s (60 wanted)"
+			grep -aq "XLaunchNewImage" "$l" && fail "$name went to the dashboard"
+		done
+		# (a new joiner of a new host: tables naming other machines' players,
+		# and such pings drawn in its scoreboard)
+		for name in $new_joiners; do
+			l=$out/$name/run.log
+			tables=$(grep -ac "latency: the host's ping table" "$l")
+			others=$(grep -a "latency: the host's ping table" "$l" | grep -aEc "player [0-9]+ [0-9]+ ms(,|$)")
+			drawn=$(sed -n 's/.*network test: scoreboard pings so far: \([0-9]*\) rows with another.*/\1/p' "$l" | tail -1)
+			echo "$name: $tables ping tables logged, $others naming another machine's player; ${drawn:-0} scoreboard rows with one"
+			grep -a "latency: the host's ping table" "$l" | tail -1
+			[ "$others" -ge 3 ] || fail "$name logged $others ping tables naming another machine's player (3 wanted)"
+			[ "${drawn:-0}" -gt 0 ] || fail "$name drew no other machine's player's ping in its scoreboard"
+			bad=$(grep -a "latency: the host's ping table" "$l" | grep -aoE "player [0-9]+ [0-9]+ ms" | awk '$3 > 999' | head -1)
+			[ -z "$bad" ] || fail "$name was told an unlikely ping on a LAN of namespaces ($bad)"
+		done
+		# (an old joiner: the tables dropped unread, nothing logged of them)
+		for name in $old_joiners; do
+			l=$out/$name/run.log
+			spam=$(grep -acE "Internet play: .*(unknown|malformed|dropped|left)|ping table" "$l")
+			echo "$name (the old build): $spam lines of the tables or of a peer dropped"
+			[ "$spam" = 0 ] || { fail "$name logged the tables it was sent"; grep -aE "Internet play: .*(unknown|malformed|dropped|left)|ping table" "$l" | head -3; }
+			# (beta.2's latency meter; beta.1 had none)
+			if grep -aq "latency: round trip to the host" "$vita_old"; then
+				grep -aq "latency: round trip to the host [0-9]* ms" "$l" || fail "$name's own latency meter said nothing"
+			fi
+		done
+		# (a new joiner of a new host has the old joiner's ping from it)
+		if [ "$mode" = pingsmixed ]; then
+			for pair in new_on_server:old_on_server new_on_vhost:old_on_vhost; do
+				newer=${pair%%:*} older=${pair#*:}
+				last=$(grep -a "latency: the host's ping table" "$out/$newer/run.log" | grep -aE "player [0-9]+ [0-9]+ ms(,|$)" | tail -1)
+				[ -n "$last" ] || fail "$newer never had $older's ping from the host"
+			done
+		fi
+		# (a new joiner of an old host: no table, "-" for the others, never a number)
+		for name in $old_host_joiners; do
+			l=$out/$name/run.log
+			none=$(grep -ac "latency: no ping table from the host" "$l")
+			tables=$(grep -ac "latency: the host's ping table" "$l")
+			drawn=$(sed -n 's/.*network test: scoreboard pings so far: \([0-9]*\) rows with another.*/\1/p' "$l" | tail -1)
+			dashes=$(sed -n 's/.*network test: scoreboard pings so far: [0-9]* rows with another machine.s player.s ping, \([0-9]*\) with.*/\1/p' "$l" | tail -1)
+			echo "$name (an old host): $none times no table, $tables tables; scoreboard rows: ${drawn:-0} with another's ping, ${dashes:-0} with \"-\""
+			[ "$none" -ge 3 ] && [ "$tables" = 0 ] || fail "$name had a table from an old host ($tables), or never said it had none ($none)"
+			[ "${drawn:-0}" = 0 ] || fail "$name drew another machine's ping with an old host"
+			[ "${dashes:-0}" -gt 0 ] || fail "$name never drew \"-\" for another machine's player"
+		done
+		;;
 	dedicatedfullcache)
 		# (both joiners' cache files filled at once, then checked here: the
 		# prefill's own check runs in its subshell)
@@ -2011,7 +2188,7 @@ INIT
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|splitscreen" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|splitscreen|pings|pingsmixed" >&2
 	exit 2
 	;;
 esac

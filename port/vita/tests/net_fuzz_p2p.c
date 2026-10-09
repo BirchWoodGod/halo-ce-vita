@@ -17,6 +17,8 @@ bytes (net_fuzz_next_record):
   5  an invite handed over by another copy of the game (sealed)
   6  the clock moves on (the first byte, in tenths of a second)
   7  the game's datagram to the peer, and lookups of addresses
+     (and the host's ping table: the peer is this machine's game's host,
+     p2p_set_ping_table_host)
   8  (a kind byte of 0x88 only) a datagram from the peer's relay: as it is
      (an answer to an allocation's request), or, the first byte odd, the
      peer's tunnel packet sealed and passed on in a DATA message on the
@@ -168,6 +170,28 @@ static void fuzz_reset(void)
 	}
 	fuzz_relay_setup();
 	fuzz_peer_counter = 1;
+	/* (the peer is the game's host: its ping tables are taken) */
+	memset(&ping_table, 0, sizeof(ping_table));
+	ping_table.host = find_peer(fuzz_peer_identifier)->virtual_address;
+}
+
+/* after each record: a table taken holds only pings it may (at most
+P2P_PING_MAXIMUM, or none), and is read whole */
+static void fuzz_ping_table_invariant(void)
+{
+	unsigned short pings[P2P_PING_TABLE_PLAYERS + 4];
+	long tick = -1;
+	int index;
+
+	if (!ping_table.valid)
+		return;
+	if (p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS + 4, &tick) < 0 || tick < 0)
+		abort();
+	for (index = 0; index < P2P_PING_TABLE_PLAYERS + 4; index++)
+	{
+		if (pings[index] != P2P_PING_UNKNOWN && (index >= P2P_PING_TABLE_PLAYERS || pings[index] > P2P_PING_MAXIMUM))
+			abort();
+	}
 }
 
 /* a tunnel packet the peer seals (with the key of its direction) */
@@ -225,6 +249,7 @@ static void fuzz_pass(void)
 		peer_heard(find_peer(fuzz_peer_identifier), fuzz_peer_address, fuzz_peer_port, 1, 1);
 		fuzz_relay_setup();
 		fuzz_peer_counter = 1;
+		ping_table.host = find_peer(fuzz_peer_identifier)->virtual_address;
 	}
 }
 
@@ -383,6 +408,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	{
 		fuzz_record(kind, record, record_size);
 		fuzz_pass();
+		fuzz_ping_table_invariant();
 	}
 	return 0;
 }
@@ -542,6 +568,158 @@ int net_fuzz_checks(void)
 		fuzz_check(relay->state == _relay_ready && relay->channel == 9, "and then carries, on the channel it gives");
 		from.sin_addr.s_addr = fuzz_peer_address;
 		from.sin_port = fuzz_peer_port;
+	}
+
+	/* the host's ping table (p2p_send_ping_table, ping_table_received) */
+	{
+		unsigned char table[1 + PING_TABLE_HEADER_SIZE + (P2P_PING_TABLE_PLAYERS + 1) * PING_TABLE_ENTRY_SIZE];
+		unsigned short pings[P2P_PING_TABLE_PLAYERS];
+		unsigned short sent_pings[P2P_PING_TABLE_PLAYERS];
+		unsigned long counter = 500;
+		long tick = 0;
+		int body, index, lines;
+
+		/* (a table of three players: 0 at 0 ms, 3 at 45, 15 at 9999) */
+		table[0] = _packet_ping_table;
+		for (index = 0; index < P2P_PING_TABLE_PLAYERS; index++)
+			sent_pings[index] = P2P_PING_UNKNOWN;
+		sent_pings[0] = 0;
+		sent_pings[3] = 45;
+		sent_pings[15] = 12000;
+		body = ping_table_write(table + 1, 0x12345, sent_pings, P2P_PING_TABLE_PLAYERS);
+		fuzz_check(body == PING_TABLE_HEADER_SIZE + 3 * PING_TABLE_ENTRY_SIZE, "a table of three players is 15 bytes");
+		size = fuzz_seal(table, 1 + body, counter++, packet);
+		tunnel_received(packet, size, &from);
+		fuzz_check(p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) >= 0 && tick == 0x12345 && pings[0] == 0 &&
+			pings[3] == 45 && pings[15] == P2P_PING_MAXIMUM && pings[1] == P2P_PING_UNKNOWN &&
+			pings[127] == P2P_PING_UNKNOWN, "the host's table is taken (a ping past 9999 sent as 9999)");
+		fuzz_check(find_peer(fuzz_peer_identifier) && find_peer(fuzz_peer_identifier)->connected,
+			"and the host stays connected");
+
+		/* malformed: each dropped whole, the table had kept */
+		lines = net_fuzz_log_lines;
+		{
+			static const struct
+			{
+				int offset;
+				int value;
+				int size_change;
+				const char *what;
+			} bad[] = {
+				{ 6, 4, 0, "a count past its entries" },
+				{ 6, 2, 0, "entries past its count" },
+				{ 0, 0, -1, "a byte short" },
+				{ 0, 0, 1, "a byte more" },
+				{ 7 + 3, 0, 0, "a player named twice" },
+				{ 7 + 3, 128, 0, "a player index of 128" },
+				{ 7 + 3, 255, 0, "a player index of 255" },
+				{ 8 + 3, 0x27, 0, "a ping of 10000 ms or more (0x2710)" },
+				{ 2, 0x80, 0, "a tick past 2^31" },
+				{ 6, 255, 0, "a count of 255" },
+			};
+			int case_index;
+
+			for (case_index = 0; case_index < (int)(sizeof(bad) / sizeof(bad[0])); case_index++)
+			{
+				unsigned char altered[sizeof(table)];
+				int altered_size = 1 + body + bad[case_index].size_change;
+
+				memcpy(altered, table, sizeof(table));
+				if (bad[case_index].offset)
+					altered[bad[case_index].offset] = (unsigned char)bad[case_index].value;
+				/* (a ping of 0x27xx: its low byte past 0x0F) */
+				if (bad[case_index].offset == 8 + 3)
+					altered[9 + 3] = 0x10;
+				size = fuzz_seal(altered, altered_size, counter++, packet);
+				tunnel_received(packet, size, &from);
+				p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick);
+				snprintf(text, sizeof(text), "a table with %s is dropped (the one had kept)", bad[case_index].what);
+				fuzz_check(tick == 0x12345 && pings[3] == 45 && pings[15] == P2P_PING_MAXIMUM, text);
+			}
+		}
+		fuzz_check(net_fuzz_log_lines <= lines + 1 && ping_table.dropped == 10,
+			"malformed tables are counted, and logged once");
+		/* another version's: ignored, unlogged (a later format) */
+		table[1] = PING_TABLE_VERSION + 1;
+		size = fuzz_seal(table, 1 + body, counter++, packet);
+		tunnel_received(packet, size, &from);
+		table[1] = PING_TABLE_VERSION;
+		fuzz_check(ping_table.dropped == 10 && p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) >= 0 &&
+			tick == 0x12345, "a table of another version is ignored");
+		/* nothing but its type, and a table of no player */
+		size = fuzz_seal(table, 1, counter++, packet);
+		tunnel_received(packet, size, &from);
+		sent_pings[0] = sent_pings[3] = sent_pings[15] = P2P_PING_UNKNOWN;
+		body = ping_table_write(table + 1, 7, sent_pings, P2P_PING_TABLE_PLAYERS);
+		size = fuzz_seal(table, 1 + body, counter++, packet);
+		tunnel_received(packet, size, &from);
+		fuzz_check(body == PING_TABLE_HEADER_SIZE && p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) >= 0 &&
+			tick == 7 && pings[3] == P2P_PING_UNKNOWN, "an empty table is one (no player known)");
+		/* every player */
+		for (index = 0; index < P2P_PING_TABLE_PLAYERS; index++)
+			sent_pings[index] = (unsigned short)(index * 3);
+		body = ping_table_write(table + 1, 8, sent_pings, P2P_PING_TABLE_PLAYERS);
+		size = fuzz_seal(table, 1 + body, counter++, packet);
+		tunnel_received(packet, size, &from);
+		fuzz_check(body == PING_TABLE_HEADER_SIZE + P2P_PING_TABLE_PLAYERS * PING_TABLE_ENTRY_SIZE &&
+			p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) >= 0 && tick == 8 && pings[127] == 381,
+			"a table of 128 players (390 bytes) is taken");
+		/* a count of 128 with a 129th entry */
+		table[1 + 5] = 128;
+		memcpy(table + 1 + body, table + 1 + body - PING_TABLE_ENTRY_SIZE, PING_TABLE_ENTRY_SIZE);
+		size = fuzz_seal(table, 1 + body + PING_TABLE_ENTRY_SIZE, counter++, packet);
+		tunnel_received(packet, size, &from);
+		fuzz_check(p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) >= 0 && tick == 8,
+			"one with a 129th entry is not");
+		/* only the game's host's: another peer (or none) is not */
+		ping_table.host = other;
+		body = ping_table_write(table + 1, 9, sent_pings, P2P_PING_TABLE_PLAYERS);
+		size = fuzz_seal(table, 1 + body, counter++, packet);
+		tunnel_received(packet, size, &from);
+		ping_table.host = virtual_address;
+		fuzz_check(p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) >= 0 && tick == 8,
+			"a table from a peer that is not the game's host is not taken");
+		p2p_set_ping_table_host(0);
+		fuzz_check(p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) < 0, "no host: no table");
+		size = fuzz_seal(table, 1 + body, counter++, packet);
+		tunnel_received(packet, size, &from);
+		fuzz_check(p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) < 0, "nor one taken");
+		p2p_set_ping_table_host(virtual_address);
+		size = fuzz_seal(table, 1 + body, counter++, packet);
+		tunnel_received(packet, size, &from);
+		net_fuzz_clock += 2500;
+		fuzz_check(p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) == 2500 && tick == 9,
+			"the host again: its table taken, its age told");
+		p2p_set_ping_table_host(other);
+		fuzz_check(p2p_ping_table(pings, P2P_PING_TABLE_PLAYERS, &tick) < 0, "another host: the table had is dropped");
+		p2p_set_ping_table_host(virtual_address);
+
+		/* the host's side: one packet, the table's size and the seal's */
+		sent = net_fuzz_sent_count;
+		fuzz_check(p2p_send_ping_table(virtual_address, 10, sent_pings, P2P_PING_TABLE_PLAYERS) == 1 &&
+			net_fuzz_sent_count == sent + 1 &&
+			net_fuzz_sent_size == TUNNEL_HEADER_SIZE + 1 + body + P2P_TAG_SIZE, "the host sends a client one packet");
+		fuzz_check(!p2p_send_ping_table(other, 10, sent_pings, P2P_PING_TABLE_PLAYERS) &&
+			!p2p_send_ping_table(network_long(0xC0A80105), 10, sent_pings, P2P_PING_TABLE_PLAYERS) &&
+			!p2p_send_ping_table(virtual_address, -1, sent_pings, P2P_PING_TABLE_PLAYERS) &&
+			net_fuzz_sent_count == sent + 1, "and nothing to an address no peer has (a LAN's), or of a tick below 0");
+
+		/* a type this build does not know (as the betas do the table):
+		dropped unread, the peer kept, nothing logged or answered */
+		{
+			unsigned char unknown[3] = { _packet_ping_table + 1, 1, 2 };
+
+			lines = net_fuzz_log_lines;
+			sent = net_fuzz_sent_count;
+			size = fuzz_seal(unknown, sizeof(unknown), counter++, packet);
+			tunnel_received(packet, size, &from);
+			unknown[0] = 0xFF;
+			size = fuzz_seal(unknown, sizeof(unknown), counter++, packet);
+			tunnel_received(packet, size, &from);
+			fuzz_check(net_fuzz_sent_count == sent && net_fuzz_log_lines == lines &&
+				find_peer(fuzz_peer_identifier) && find_peer(fuzz_peer_identifier)->connected,
+				"a packet of a type not known is dropped unread: no answer, no log, the peer kept");
+		}
 	}
 
 	/* invites and codes */

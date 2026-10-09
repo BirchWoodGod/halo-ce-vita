@@ -152,6 +152,39 @@ virtual address (network byte order): where its packets come from; 0 if
 it is no peer's */
 unsigned long p2p_peer_endpoint_address(unsigned long virtual_address);
 
+/* ---------- the scoreboard's pings (network_distributed.c): the host tells
+each client machine every player's round trip as it measured it, every few
+seconds, in a tunnel packet of its own that the game never sees (and that
+1.1.0's betas drop unread: no network change), so a client's scoreboard has
+the other machines' players' pings too. Internet play and ad hoc alone (a
+LAN's system link has no tunnel). Every call takes p2p's lock (briefly).
+Plain ints and shorts only. */
+
+enum
+{
+	/* the players a table names at most (halo_port_limits.h's
+	HALO_PORT_MAXIMUM_NETWORK_PLAYERS) */
+	P2P_PING_TABLE_PLAYERS = 128,
+	/* a table's ping of a player it does not name */
+	P2P_PING_UNKNOWN = 0xFFFF,
+	/* the longest ping a table carries (milliseconds) */
+	P2P_PING_MAXIMUM = 9999,
+};
+
+/* (the host) sends the client machine at virtual_address (network byte
+order) the table of count pings (player index i's in milliseconds, or
+P2P_PING_UNKNOWN), as of the host's tick: 1 if sent, 0 if the address is no
+peer reached */
+int p2p_send_ping_table(unsigned long virtual_address, long tick, const unsigned short *pings, int count);
+/* (a client) the game's host, by its virtual address (network byte order):
+only its tables are taken; 0 (or an address no peer can have) for none.
+Another host than before drops the table had */
+void p2p_set_ping_table_host(unsigned long virtual_address);
+/* (a client) the host's latest table into pings (count of them;
+P2P_PING_UNKNOWN for a player it does not name) and the host's tick it is
+of into tick (if not NULL): its age in milliseconds, -1 if there is none */
+long p2p_ping_table(unsigned short *pings, int count, long *tick);
+
 /* ---------- short codes and the server browser (p2p_signal.c,
 p2p_lobby.c), for a machine with no clipboard (the Vita's settings panel)
 and for strangers. Every call takes p2p's lock (briefly) and may come from

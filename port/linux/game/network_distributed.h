@@ -225,8 +225,9 @@ round trips above, timed in milliseconds by when this machine sent the tick
 they come back naming, and what is shown of them, refreshed twice a second
 in the tick (so the render reads them whole). A player's ping, in
 milliseconds: the host knows each client machine's round trip (its own
-players' 0), a client its own players' (its own round trip), NONE before it
-is known or for another machine's player */
+players' 0), a client its own players' (its own round trip) and the others'
+as the host's table has them (p2p.c), NONE before it is known (or with no
+fresh table) */
 long distributed_player_ping(short player_index);
 /* (a client) its round trip to the host in milliseconds, NONE before it is
 known or on the host */

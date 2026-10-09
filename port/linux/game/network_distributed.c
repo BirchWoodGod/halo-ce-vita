@@ -62,6 +62,7 @@ machine (their datum identifiers need not be).
 #include "main/main.h"
 #include "game/player_queues_new.h"
 #include "networking/network_game_globals.h"
+#include "bungie_net/network/transport.h"
 #include "objects/objects.h"
 #include "objects/damage.h"
 #include "scenario/scenario.h"
@@ -73,6 +74,8 @@ machine (their datum identifiers need not be).
 #include "network_coop.h"
 #include "network_distributed.h"
 #include "dedicated_server.h"
+#include "latency_meter.h"
+#include "../src/p2p.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -104,6 +107,9 @@ void p2p_hardware_id_sanitize(char *destination, int size, const char *source);
 void p2p_discord_sanitize(char *destination, int size, const char *source, int name);
 void p2p_discord_identity(char *id, int id_size, char *name, int name_size);
 unsigned long p2p_peer_endpoint_address(unsigned long virtual_address);
+struct network_game_client;
+struct network_connection *network_game_client_get_connection(struct network_game_client *client);
+void network_game_client_get_remote_server_address(struct network_game_client *client, struct transport_address *address);
 unsigned long system_milliseconds(void);
 void platform_log(char const *format, ...);
 void console_warning(const char *format, ...);
@@ -1408,6 +1414,170 @@ real distributed_machine_round_trip_ticks(
 	return distributed_round_trips[machine_index].average + 2.0f * distributed_round_trips[machine_index].deviation;
 }
 
+/* ---------- the host's ping table (p2p.c): the other machines' pings on a
+client */
+
+/* The host measures every client machine's round trip (its players' pings,
+distributed_shown_pings) and a client only its own, so the host tells its
+clients every player's, every PING_TABLE_INTERVAL_TICKS, in a tunnel packet
+of internet play's (and ad hoc's) own: the game's messages and the network
+version are as they were, and 1.1.0's betas drop the packet unread. A
+client takes the host's alone, and shows each other machine's player's
+ping from it (its own players' are its own round trip), "-" once it is
+stale: older than PING_TABLE_STALE_MILLISECONDS, or of a tick of the host's
+too far from the host's latest (another game's). A LAN's system link has no
+tunnel: there a client knows its own alone (the others "-"). Sent and taken
+with Latency meter On (on the host, on the client). */
+
+enum
+{
+	PING_TABLE_INTERVAL_TICKS = 3 * TICKS_PER_SECOND,
+	PING_TABLE_STALE_MILLISECONDS = 10000,
+	PING_TABLE_STALE_TICKS = 10 * TICKS_PER_SECOND,
+	/* (a table may come a little before the messages of its tick) */
+	PING_TABLE_LEAD_TICKS = 2 * TICKS_PER_SECOND,
+};
+
+typedef char distributed_ping_table_size_assert[MAXIMUM_TRACKED_PLAYERS <= P2P_PING_TABLE_PLAYERS ? 1 : -1];
+
+/* a client: the host's latest table, if fresh (its pings, P2P_PING_UNKNOWN
+for a player it does not name), and its age and the host's tick it is of
+(logged) */
+static struct
+{
+	boolean valid;
+	long age;
+	long tick;
+	unsigned short pings[MAXIMUM_TRACKED_PLAYERS];
+} distributed_host_table;
+/* the host: the client machines its table went to last (logged as it
+changes) */
+static short distributed_ping_table_machines = NONE;
+
+/* a client machine's (or the host's) address as the game has it (host
+byte order) as internet play has it (network byte order) */
+static unsigned long distributed_network_address(
+	unsigned long address)
+{
+	return (address >> 24) | ((address >> 8) & 0xFF00) | ((address << 8) & 0xFF0000) | (address << 24);
+}
+
+/* (the host, as what is shown is refreshed) the table, to each client
+machine every PING_TABLE_INTERVAL_TICKS while a game is played */
+static void distributed_send_ping_table(
+	void)
+{
+	unsigned short pings[MAXIMUM_TRACKED_PLAYERS];
+	long machine_indices[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	short count;
+	short sent = 0;
+	short index;
+
+	/* (a host takes no table: none from the host this machine last joined) */
+	p2p_set_ping_table_host(0);
+	if (game_time_get() % PING_TABLE_INTERVAL_TICKS != 0 || !game_engine_in_play() || !latency_meter_enabled())
+		return;
+	for (index = 0; index < MAXIMUM_TRACKED_PLAYERS; index++)
+	{
+		long ping = distributed_shown_pings[index];
+
+		pings[index] = ping == NONE || ping < 0 ? (unsigned short)P2P_PING_UNKNOWN :
+			(unsigned short)MIN(ping, (long)P2P_PING_MAXIMUM);
+	}
+	count = distributed_client_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+	for (index = 0; index < count; index++)
+	{
+		unsigned long address = network_game_server_machine_address(machine_indices[index]);
+
+		/* (one on the LAN is no peer: nothing sent) */
+		if (address && p2p_send_ping_table(distributed_network_address(address), game_time_get(), pings,
+			MAXIMUM_TRACKED_PLAYERS))
+		{
+			sent++;
+		}
+	}
+	if (sent != distributed_ping_table_machines)
+	{
+		distributed_ping_table_machines = sent;
+		platform_log("latency: the players' pings go to %d client machine%s every %d s", sent, sent == 1 ? "" : "s",
+			PING_TABLE_INTERVAL_TICKS / TICKS_PER_SECOND);
+	}
+}
+
+/* (a client, as what is shown is refreshed) the host's table, if fresh */
+static void distributed_take_ping_table(
+	void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	unsigned long host = 0;
+	long host_time = distributed_latest_host_time();
+	long tick = NONE;
+	long age;
+
+	distributed_host_table.valid = FALSE;
+	distributed_ping_table_machines = NONE;
+	if (client && network_game_client_get_connection(client) && latency_meter_enabled())
+	{
+		struct transport_address address;
+
+		csmemset(&address, 0, sizeof(address));
+		network_game_client_get_remote_server_address(client, &address);
+		host = distributed_network_address(address.address.long_words[0]);
+	}
+	/* (none: any table had is dropped, and none taken) */
+	p2p_set_ping_table_host(host);
+	if (!host)
+		return;
+	age = p2p_ping_table(distributed_host_table.pings, MAXIMUM_TRACKED_PLAYERS, &tick);
+	distributed_host_table.age = age;
+	distributed_host_table.tick = tick;
+	if (age < 0 || age > PING_TABLE_STALE_MILLISECONDS || host_time == NONE || tick > host_time + PING_TABLE_LEAD_TICKS ||
+		host_time - tick > PING_TABLE_STALE_TICKS)
+	{
+		return;
+	}
+	distributed_host_table.valid = TRUE;
+}
+
+/* (a client) another machine's player's ping, as the host's table has it:
+NONE if it is not known (no table, or a stale one) */
+static long distributed_host_table_ping(
+	short player_index)
+{
+	if (!distributed_host_table.valid || player_index < 0 || player_index >= MAXIMUM_TRACKED_PLAYERS ||
+		distributed_host_table.pings[player_index] == P2P_PING_UNKNOWN)
+	{
+		return NONE;
+	}
+	return (long)distributed_host_table.pings[player_index];
+}
+
+/* (a client, in the log every ten seconds) the host's table as taken */
+static void distributed_log_ping_table(
+	void)
+{
+	char line[512];
+	int length = 0;
+	short player_index;
+
+	if (!distributed_host_table.valid)
+	{
+		platform_log("latency: no ping table from the host%s", distributed_host_table.age >= 0 ? " (stale)" : "");
+		return;
+	}
+	line[0] = 0;
+	for (player_index = 0; player_index < MAXIMUM_TRACKED_PLAYERS && length < (int)sizeof(line) - 64; player_index++)
+	{
+		if (distributed_host_table.pings[player_index] == P2P_PING_UNKNOWN || !distributed_player(player_index))
+			continue;
+		length += snprintf(line + length, sizeof(line) - length, "%s player %d %u ms%s", length ? "," : "", player_index,
+			distributed_host_table.pings[player_index],
+			distributed_player_is_local(player_index) ? " (this machine's)" : "");
+	}
+	platform_log("latency: the host's ping table (%ld ms old, its tick %ld):%s", distributed_host_table.age,
+		distributed_host_table.tick, length ? line : " none");
+}
+
 /* ---------- the latency meter's pings */
 
 /* the milliseconds since this machine sent the messages of its tick (at
@@ -1475,6 +1645,10 @@ static void distributed_refresh_pings(
 	long slowest = NONE;
 	short player_index;
 
+	/* (a client: the host's table of the others' first) */
+	if (connection == _game_connection_network_client)
+		distributed_take_ping_table();
+
 	for (player_index = 0; player_index < MAXIMUM_TRACKED_PLAYERS; player_index++)
 	{
 		long ping = NONE;
@@ -1504,6 +1678,11 @@ static void distributed_refresh_pings(
 			distributed_own_ping_valid)
 		{
 			ping = (long)(distributed_own_ping_milliseconds + 0.5f);
+		}
+		else if (connection == _game_connection_network_client && !distributed_player_is_local(player_index))
+		{
+			/* (another machine's: the host's table, p2p.c) */
+			ping = distributed_host_table_ping(player_index);
 		}
 		distributed_shown_pings[player_index] = ping;
 	}
@@ -1586,7 +1765,12 @@ static void distributed_refresh_pings(
 				(long)(distributed_own_ping_milliseconds + 0.5f), distributed_own_round_trip,
 				distributed_connection_problem() ? ", connection problem" : "");
 		}
+		if (connection == _game_connection_network_client)
+			distributed_log_ping_table();
 	}
+	/* (the host: what is shown, to its clients every few seconds) */
+	if (connection == _game_connection_network_server)
+		distributed_send_ping_table();
 }
 
 long distributed_player_ping(
