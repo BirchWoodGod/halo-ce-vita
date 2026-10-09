@@ -499,7 +499,7 @@ static struct
 	had copied before (the same indices, the same count), and vertex
 	constant snapshots equal to the chunk's last one or to one of its last
 	eight, with their bytes */
-	unsigned long record_entry_bytes, record_entry_lines, record_draws;
+	unsigned long record_entry_bytes, record_entry_lines, record_draws, record_twins;
 	unsigned long arena_state_bytes, arena_values_bytes, arena_bump_bytes, arena_target_bytes, arena_material_bytes,
 		kept_material_bytes, arena_texture_bytes, arena_view_bytes;
 	unsigned long copied_indices_repeated, index_copies, index_copies_repeated;
@@ -4665,6 +4665,30 @@ static void record_census_draw(const struct render_record *command)
 		stats.record_entry_bytes += span;
 		stats.record_entry_lines += (span + 31) >> 5;
 	}
+	{
+		/* a draw the one before it made but for the cull mode and vertex
+		chunk B (a two-sided part's second pass): what one record drawn
+		twice could stand for */
+		static struct render_record previous;
+		int chunk;
+
+		if (previous.kind == _command_draw && command->draw.state && previous.draw.state == command->draw.state &&
+			previous.cull != command->cull && previous.draw.program == command->draw.program &&
+			previous.targets == command->targets && previous.draw.view == command->draw.view &&
+			previous.draw.indices == command->draw.indices && previous.draw.index_count == command->draw.index_count &&
+			previous.primitive == command->primitive && previous.stream_count == command->stream_count &&
+			previous.draw.streams[0] == command->draw.streams[0] && previous.draw.layout == command->draw.layout &&
+			previous.draw.vertex_uniforms == command->draw.vertex_uniforms &&
+			previous.visibility_index == command->visibility_index)
+		{
+			for (chunk = 0; chunk < VITA_VC_CHUNKS; chunk++)
+				if (chunk != VITA_VC_B && previous.draw.vertex_chunks[chunk] != command->draw.vertex_chunks[chunk])
+					break;
+			if (chunk == VITA_VC_CHUNKS)
+				stats.record_twins++;
+		}
+		previous = *command;
+	}
 }
 
 static void command_commit(struct render_record *command)
@@ -8403,9 +8427,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				stats.chunk_snapshots[4] / frames, stats.chunk_dup_last[4] / frames, stats.chunk_dup_recent[4] / frames,
 				stats.chunk_snapshots[5] / frames, stats.chunk_dup_last[5] / frames, stats.chunk_dup_recent[5] / frames,
 				stats.chunk_dup_recent_bytes / 1024.0 / frames);
-			platform_log("record census per frame: new state blocks %lu, equal to one of the last 8 %.0f, 64 %.0f; new values blocks %lu, equal to one of the last 8 %.0f, 64 %.0f",
+			platform_log("record census per frame: new state blocks %lu, equal to one of the last 8 %.0f, 64 %.0f; new values blocks %lu, equal to one of the last 8 %.0f, 64 %.0f; draws the draw before made but for the cull mode and chunk B %.0f",
 				stats.state_new / stats.presents, stats.state_dup8 / frames, stats.state_dup64 / frames,
-				stats.values_new / stats.presents, stats.values_dup8 / frames, stats.values_dup64 / frames);
+				stats.values_new / stats.presents, stats.values_dup8 / frames, stats.values_dup64 / frames, stats.record_twins / frames);
 		}
 		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu kept materials (%lu by transition, %lu kept in all), %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
 			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
