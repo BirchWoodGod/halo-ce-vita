@@ -501,7 +501,7 @@ static struct
 	eight, with their bytes */
 	unsigned long record_entry_bytes, record_entry_lines, record_draws;
 	unsigned long arena_state_bytes, arena_values_bytes, arena_bump_bytes, arena_target_bytes, arena_material_bytes,
-		kept_material_bytes;
+		kept_material_bytes, arena_texture_bytes, arena_view_bytes;
 	unsigned long copied_indices_repeated, index_copies, index_copies_repeated;
 	/* index bytes a draw took from the frame's copy instead of copying */
 	unsigned long reused_indices;
@@ -2393,15 +2393,25 @@ struct record_values
 	const struct record_bump *bump;
 };
 
+/* a texture as the records read it: its header's data, format and size
+words (the worker and the texture cache read no other) and its palette's
+colours - a block in a per-frame arena that the frame's draws of the same
+texture share (record_texture_current) */
+struct record_texture
+{
+	DWORD data, format, size;
+	const D3DCOLOR *palette;
+};
+
+/* (24 bytes: the textures were their headers and palettes here, 108
+bytes over 3.4 cache lines, and most draws make a new state block - each
+part of a model has textures of its own) */
 struct record_state
 {
 	const struct record_material *material;
 	const struct record_values *values;
-	/* the stages with a texture (bit per stage), the textures' headers
-and their palettes' colours: what the worker reads of them */
-	unsigned long textures_present;
-	DWORD texture_header[D3DTSS_MAXSTAGES][5];
-	const D3DCOLOR *palette_data[D3DTSS_MAXSTAGES];
+	/* per stage, its texture's block; NULL: no texture */
+	const struct record_texture *texture[D3DTSS_MAXSTAGES];
 };
 
 /* the targets as the game had them set (copies of the surfaces): a block
@@ -2999,24 +3009,24 @@ static void worker_texture_scale_markers(const struct record_state *state, float
 
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
-		const DWORD *header = state->texture_header[stage];
+		const struct record_texture *texture = state->texture[stage];
 
 		values[VITA_FU_TEXTURE_SCALE + stage][0] = 1.0f;
 		values[VITA_FU_TEXTURE_SCALE + stage][1] = 1.0f;
 		values[VITA_FU_TEXTURE_SCALE + stage][2] = 1.0f;
 		values[VITA_FU_TEXTURE_SCALE + stage][3] = 1.0f;
-		if (state->textures_present & (1UL << stage))
+		if (texture)
 		{
 			struct xgpu_texture_description description;
 
-			xgpu_texture_describe(header[3], header[4], &description);
+			xgpu_texture_describe(texture->format, texture->size, &description);
 			if (description.linear)
 			{
 				/* (identity markers, as fragment_uniforms_update: the
 				worker writes the real scale in execute_draw) */
-				values[VITA_FU_TEXTURE_SCALE + stage][0] = (float)header[1];
-				values[VITA_FU_TEXTURE_SCALE + stage][1] = (float)header[3];
-				values[VITA_FU_TEXTURE_SCALE + stage][2] = (float)header[4];
+				values[VITA_FU_TEXTURE_SCALE + stage][0] = (float)texture->data;
+				values[VITA_FU_TEXTURE_SCALE + stage][1] = (float)texture->format;
+				values[VITA_FU_TEXTURE_SCALE + stage][2] = (float)texture->size;
 				values[VITA_FU_TEXTURE_SCALE + stage][3] = (float)((rs[D3DRS_PSTEXTUREMODES] >> (5 * stage)) & 0x1f);
 			}
 		}
@@ -3083,16 +3093,23 @@ static int worker_texture_bits(struct render_command *command, const struct reco
 	{
 		unsigned long mode = (rs[D3DRS_PSTEXTUREMODES] >> (5 * stage)) & 0x1f;
 
-		command->texture_present[stage] = (state->textures_present >> stage) & 1;
-		memcpy(command->texture_header[stage], state->texture_header[stage], sizeof(command->texture_header[stage]));
-		command->palette[stage] = state->palette_data[stage];
-		if (state->textures_present & (1UL << stage))
+		const struct record_texture *texture = state->texture[stage];
+
+		/* (the header as the worker reads it: data, format and size) */
+		command->texture_present[stage] = texture != NULL;
+		command->texture_header[stage][0] = 0;
+		command->texture_header[stage][1] = texture ? texture->data : 0;
+		command->texture_header[stage][2] = 0;
+		command->texture_header[stage][3] = texture ? texture->format : 0;
+		command->texture_header[stage][4] = texture ? texture->size : 0;
+		command->palette[stage] = texture ? texture->palette : NULL;
+		if (texture)
 		{
 			if (raw_texcoords && mode == 1)
 			{
 				struct xgpu_texture_description description;
 
-				xgpu_texture_describe(state->texture_header[stage][3], state->texture_header[stage][4], &description);
+				xgpu_texture_describe(texture->format, texture->size, &description);
 				if (!description.linear && !description.cube_map)
 				{
 					if (!(program->texcoord_w_mask & (1UL << stage)))
@@ -4540,10 +4557,10 @@ static unsigned long record_stage_data(const struct render_record *record, int s
 
 	if (record->draw.state)
 	{
-		if (!((record->draw.state->textures_present >> stage) & 1))
+		if (!record->draw.state->texture[stage])
 			return 0;
-		header = record->draw.state->texture_header[stage];
 		modes = record->draw.state->material->render_state[D3DRS_PSTEXTUREMODES];
+		return (modes >> (5 * stage)) & 0x1f ? record->draw.state->texture[stage]->data : 0;
 	}
 	else if (record->draw.full)
 	{
@@ -6206,8 +6223,11 @@ arenas made the first time one is needed */
 static struct render_command *full_arenas[3];
 static unsigned long full_records_used, full_records_per_frame;
 
+static void record_texture_frame_end(void);
+
 static void record_state_frame_end(void)
 {
+	record_texture_frame_end();
 	view_blocks_used = 0;
 	view_last = NULL;
 	full_records_used = 0;
@@ -6225,25 +6245,92 @@ static void record_state_frame_end(void)
 	bump_last = NULL;
 }
 
+/* the frame's texture blocks (record_texture): per-frame arenas like the
+state blocks, each texture's found again by its words (the stage's last,
+else an open-addressed table stamped with the frame) */
+#define TEXTURE_BLOCKS_PER_FRAME 2048
+#define TEXTURE_SLOTS 4096
+static struct record_texture *texture_arenas[3];
+static unsigned long texture_blocks_used;
+static struct
+{
+	const struct record_texture *texture;
+	unsigned long epoch;
+} texture_slots[TEXTURE_SLOTS];
+static unsigned long texture_epoch = 1;
+static const struct record_texture *texture_stage_last[D3DTSS_MAXSTAGES];
+
+static void record_texture_frame_end(void)
+{
+	texture_blocks_used = 0;
+	texture_epoch++;
+	memset(texture_stage_last, 0, sizeof(texture_stage_last));
+}
+
+/* the block of the stage's texture as it is now; NULL when the frame's
+arena is full */
+static const struct record_texture *record_texture_current(int stage)
+{
+	const D3DBaseTexture *texture = device.textures[stage];
+	const D3DCOLOR *palette = device.palettes[stage] && device.palettes[stage]->Data ?
+		(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[stage]->Data) : NULL;
+	const struct record_texture *last = texture_stage_last[stage];
+	struct record_texture *block;
+	unsigned long slot;
+
+	if (last && last->data == texture->Data && last->format == texture->Format && last->size == texture->Size &&
+		last->palette == palette)
+	{
+		return last;
+	}
+	slot = ((texture->Data >> 4) ^ texture->Format * 40503UL ^ texture->Size * 2654435761UL ^
+		(unsigned long)(size_t)palette) % TEXTURE_SLOTS;
+	for (;;)
+	{
+		const struct record_texture *kept = texture_slots[slot].texture;
+
+		if (texture_slots[slot].epoch != texture_epoch)
+			break;
+		if (kept->data == texture->Data && kept->format == texture->Format && kept->size == texture->Size &&
+			kept->palette == palette)
+		{
+			texture_stage_last[stage] = kept;
+			return kept;
+		}
+		slot = (slot + 1) % TEXTURE_SLOTS;
+	}
+	if (!texture_arenas[0])
+	{
+		int index;
+
+		for (index = 0; index < 3; index++)
+			texture_arenas[index] = lasting_alloc(TEXTURE_BLOCKS_PER_FRAME * sizeof(struct record_texture), "texture arenas");
+	}
+	if (!texture_arenas[state_arena_index] || texture_blocks_used >= TEXTURE_BLOCKS_PER_FRAME)
+		return NULL;
+	block = &texture_arenas[state_arena_index][texture_blocks_used++];
+	stats.arena_texture_bytes += sizeof(*block);
+	block->data = texture->Data;
+	block->format = texture->Format;
+	block->size = texture->Size;
+	block->palette = palette;
+	texture_slots[slot].texture = block;
+	texture_slots[slot].epoch = texture_epoch;
+	texture_stage_last[stage] = block;
+	return block;
+}
+
 static const struct record_state *record_state_current(void)
 {
-	DWORD headers[D3DTSS_MAXSTAGES][5];
-	const D3DCOLOR *palette_data[D3DTSS_MAXSTAGES];
+	const struct record_texture *textures[D3DTSS_MAXSTAGES];
 	struct record_state *block;
-	unsigned long textures_present = 0;
 	int stage;
 
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
-		if (device.textures[stage])
-		{
-			memcpy(headers[stage], device.textures[stage], sizeof(headers[stage]));
-			textures_present |= 1UL << stage;
-		}
-		else
-			memset(headers[stage], 0, sizeof(headers[stage]));
-		palette_data[stage] = device.palettes[stage] && device.palettes[stage]->Data ?
-			(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[stage]->Data) : NULL;
+		textures[stage] = NULL;
+		if (device.textures[stage] && !(textures[stage] = record_texture_current(stage)))
+			return NULL;
 	}
 	/* the render and stage states: the last material while nothing of it
 	changed, or one equal to it; else a new one (with the draw's values at
@@ -6384,9 +6471,8 @@ static const struct record_state *record_state_current(void)
 	/* (a texture is what its header says; another texture object with the
 	same header draws the same) */
 	if (state_last && state_last->material == material_last && state_last->values == values_last &&
-		state_last->textures_present == textures_present &&
-		!memcmp(state_last->palette_data, palette_data, sizeof(palette_data)) &&
-		!memcmp(state_last->texture_header, headers, sizeof(headers)))
+		state_last->texture[0] == textures[0] && state_last->texture[1] == textures[1] &&
+		state_last->texture[2] == textures[2] && state_last->texture[3] == textures[3])
 	{
 		stats.state_quick++;
 		return state_last;
@@ -6402,8 +6488,7 @@ static const struct record_state *record_state_current(void)
 		{
 			const struct record_state *old = &state_arenas[state_arena_index][state_blocks_used - back];
 
-			if (old->material == material_last && old->values == values_last && old->textures_present == textures_present &&
-				!memcmp(old->palette_data, palette_data, sizeof(palette_data)) && !memcmp(old->texture_header, headers, sizeof(headers)))
+			if (old->material == material_last && old->values == values_last && !memcmp(old->texture, textures, sizeof(textures)))
 			{
 				stats.state_dup64++;
 				if (back <= 8)
@@ -6416,9 +6501,10 @@ static const struct record_state *record_state_current(void)
 	stats.arena_state_bytes += sizeof(*block);
 	block->material = material_last;
 	block->values = values_last;
-	block->textures_present = textures_present;
-	memcpy(block->palette_data, palette_data, sizeof(palette_data));
-	memcpy(block->texture_header, headers, sizeof(headers));
+	block->texture[0] = textures[0];
+	block->texture[1] = textures[1];
+	block->texture[2] = textures[2];
+	block->texture[3] = textures[3];
 	state_last = block;
 	return block;
 }
@@ -6465,6 +6551,7 @@ static const struct record_view *record_view_current(void)
 		return NULL;
 	}
 	block = &view_arenas[state_arena_index][view_blocks_used++];
+	stats.arena_view_bytes += sizeof(*block);
 	*block = view;
 	view_last = block;
 	return block;
@@ -8300,12 +8387,13 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		{
 			double frames = (double)stats.presents;
 
-			platform_log("record census per frame: %.0f draws, entry %.0f B %.2f lines/draw (%.0f KB); arenas KB: state %.1f values %.1f bump %.1f targets %.2f materials %.1f (+%.1f kept new); "
+			platform_log("record census per frame: %.0f draws, entry %.0f B %.2f lines/draw (%.0f KB); arenas KB: state %.1f values %.1f bump %.1f targets %.2f materials %.1f (+%.1f kept new) textures %.1f views %.2f; "
 				"indices %.1f KB copied in %.0f copies, %.1f KB in %.0f copies the frame made before, %.1f KB reused; vertex snapshots (all/same as last/one of last 8) A %.0f/%.0f/%.0f B %.0f/%.0f/%.0f C1 %.0f/%.0f/%.0f C2 %.0f/%.0f/%.0f D %.0f/%.0f/%.0f E %.0f/%.0f/%.0f, %.1f KB repeats",
 				stats.record_draws / frames, stats.record_entry_bytes / (double)stats.record_draws,
 				stats.record_entry_lines / (double)stats.record_draws, stats.record_entry_bytes / 1024.0 / frames,
 				stats.arena_state_bytes / 1024.0 / frames, stats.arena_values_bytes / 1024.0 / frames, stats.arena_bump_bytes / 1024.0 / frames,
 				stats.arena_target_bytes / 1024.0 / frames, stats.arena_material_bytes / 1024.0 / frames, stats.kept_material_bytes / 1024.0 / frames,
+				stats.arena_texture_bytes / 1024.0 / frames, stats.arena_view_bytes / 1024.0 / frames,
 				stats.copied_indices / 1024.0 / frames, stats.index_copies / frames, stats.copied_indices_repeated / 1024.0 / frames,
 				stats.index_copies_repeated / frames, stats.reused_indices / 1024.0 / frames,
 				stats.chunk_snapshots[0] / frames, stats.chunk_dup_last[0] / frames, stats.chunk_dup_recent[0] / frames,
