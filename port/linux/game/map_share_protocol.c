@@ -363,12 +363,92 @@ int map_share_answer_valid(
 	{
 		known_flags |= 1u << _map_share_offer_deflate_bit;
 	}
+	if (capabilities & 1u << _map_share_capability_in_progress_bit)
+	{
+		known_flags |= 1u << _map_share_offer_in_progress_bit;
+	}
 
 	return (uint32_t)answer->identity == expected_identity &&
 		answer->identity != 0 &&
 		answer->size >= MAP_SHARE_HEADER_BYTES &&
 		(uint32_t)answer->size <= MAP_SHARE_MAXIMUM_FILE_BYTES &&
 		!((uint32_t)answer->flags & ~known_flags);
+}
+
+enum map_share_refusal map_share_host_serves(
+	enum map_share_host_state host_state,
+	uint32_t capabilities,
+	int machine_joining,
+	int accepts_late_joins,
+	int in_progress_allowed,
+	int *in_progress)
+{
+	*in_progress = 0;
+	if (host_state == _map_share_host_lobby)
+	{
+		return _map_share_refusal_none;
+	}
+	if (host_state != _map_share_host_in_game || !(capabilities & 1u << _map_share_capability_in_progress_bit) ||
+		!machine_joining || !accepts_late_joins || !in_progress_allowed)
+	{
+		return _map_share_refusal_not_in_lobby;
+	}
+	*in_progress = 1;
+
+	return _map_share_refusal_none;
+}
+
+void map_share_host_limits(
+	int in_game,
+	uint32_t rate_kb,
+	uint32_t ingame_rate_kb,
+	uint32_t cpu_percent,
+	uint32_t frame_microseconds,
+	struct map_share_limits *limits)
+{
+	/* (KB/s past this would overflow the bytes: no link is that fast) */
+	const uint32_t most_kb = 0x100000;
+	uint32_t lobby_rate = rate_kb ? (rate_kb < most_kb ? rate_kb : most_kb) * 1024u : MAP_SHARE_DEFAULT_BYTES_PER_SECOND;
+
+	if (!in_game)
+	{
+		limits->bytes_per_second = lobby_rate;
+		limits->window_bytes = MAP_SHARE_WINDOW_BYTES;
+		limits->cpu_percent = cpu_percent ? cpu_percent : MAP_SHARE_DEFAULT_CPU_PERCENT;
+		limits->frame_microseconds = frame_microseconds ? frame_microseconds : 15000;
+	}
+	else
+	{
+		limits->bytes_per_second = ingame_rate_kb ?
+			(ingame_rate_kb < most_kb ? ingame_rate_kb : most_kb) * 1024u : MAP_SHARE_INGAME_BYTES_PER_SECOND;
+		if (limits->bytes_per_second > lobby_rate)
+		{
+			limits->bytes_per_second = lobby_rate;
+		}
+		limits->window_bytes = MAP_SHARE_INGAME_WINDOW_BYTES;
+		limits->cpu_percent = cpu_percent ? cpu_percent : MAP_SHARE_INGAME_CPU_PERCENT;
+		limits->frame_microseconds = frame_microseconds ? frame_microseconds : MAP_SHARE_INGAME_FRAME_MICROSECONDS;
+	}
+	/* (at least a chunk a second, a percent and a millisecond: never stuck;
+	a share of the time no more than all of it) */
+	if (limits->bytes_per_second < MAP_SHARE_CHUNK_BYTES)
+	{
+		limits->bytes_per_second = MAP_SHARE_CHUNK_BYTES;
+	}
+	if (limits->cpu_percent > 100)
+	{
+		limits->cpu_percent = 100;
+	}
+	if (limits->frame_microseconds < 1000)
+	{
+		limits->frame_microseconds = 1000;
+	}
+	if (limits->frame_microseconds > 100000)
+	{
+		limits->frame_microseconds = 100000;
+	}
+
+	return;
 }
 
 void map_share_receiver_begin(

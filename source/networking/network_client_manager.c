@@ -1734,6 +1734,17 @@ boolean network_game_client_add_player(
 		0x530,
 		client && (local_player_index>=0) && (local_player_index<MAXIMUM_LOCAL_PLAYERS));
 
+#ifdef HALO_LINUX
+	/* port: no player while the joiner asks the host about its map, and
+	while it downloads the map of a game in progress: a player added to a
+	game in progress starts the machine into it at once, without the map
+	(port/linux/game/map_share.c). The pregame screen asks again each
+	frame, and the player is added once the map is here. */
+	if (client->state == _network_game_client_state_pregame && map_share_client_holds_players())
+	{
+		return TRUE;
+	}
+#endif
 	/* port: the pregame screen asks each frame until the host's settings
 	have the player: once every half second, not each frame (the host
 	refused and logged each repeat) */

@@ -4,8 +4,8 @@ MAP_SHARE_PROTOCOL.H
 The rules of map sharing (map_share.c): a joiner that lacks the host's
 custom map, or has another copy of it, downloads the host's copy over the
 game's own connection to the host (its reliable stream: TCP on a LAN, the
-internet play tunnel's KCP streams, the ad hoc bridge), in the pregame lobby
-only. This unit holds what can be checked without the game, so that it is
+internet play tunnel's KCP streams, the ad hoc bridge), in the pregame lobby,
+or before it joins a game in progress (the in-progress capability). This unit holds what can be checked without the game, so that it is
 tested on its own (port/vita/tests/map_share_test.c): the messages' fields,
 the file names a map may have, the receiving side's bookkeeping, and the
 cache header a downloaded map must have before it is ever opened as a map.
@@ -32,7 +32,9 @@ The conversation (one download at a time on a joiner, a few on a host):
   ack (stream bytes taken)     ->      (every MAP_SHARE_ACK_BYTES)
                                <-      done (SHA-256 of the whole file)
   ack (all of it)              ->
-  cancel (either way, at any time; a host that leaves pregame refuses)
+  cancel (either way, at any time; a host that leaves pregame refuses, but
+    for a download to join its game in progress, which it refuses once the
+    game ends)
 
 Capabilities (1.1.0's test builds 1-3, network version 17, have none; their
 messages are the same): a joiner says what it can do in its query's and
@@ -48,6 +50,21 @@ sees). Without them the transfer is as before: the file's bytes from 0.
   the stream's bytes. A host deflates a Custom Edition map only (an Xbox map
   is compressed already), and may store blocks as they are while its CPU,
   not the link, is what limits it (map_share_packer).
+- in progress (1.1.0-beta.3): the joiner adds no player to a game in
+  progress while it downloads its map, and joins it once the map is here.
+  A host whose game is under way offers its map only to such a joiner, and
+  only while that joiner's machine is still joining (no player of it in the
+  game, not started into it: map_share_host_serves), with the offer's
+  in-progress flag; it sends at MAP_SHARE_INGAME_BYTES_PER_SECOND, with a
+  smaller window and a smaller share of its frame than in the lobby, and
+  keeps the joining machine from being dropped as one that adds no player
+  while it asks, downloads, and briefly after. A joiner without the
+  capability (beta.1, beta.2) is refused in game as before
+  (_map_share_refusal_not_in_lobby); a host without it (beta.1, beta.2)
+  refuses a joiner that has it the same way (its query's reason, at most 7,
+  is still a reason to it, and the bit is masked out), so either way at
+  worst the old refusal. Nothing else on the wire changes: network
+  version 18's three messages.
 */
 
 #ifndef __MAP_SHARE_PROTOCOL_H
@@ -84,6 +101,28 @@ wait behind at most this much */
 lobby's messages to the other machines keep the rest of the link);
 HALO_MAP_SHARE_RATE_KB changes it */
 #define MAP_SHARE_DEFAULT_BYTES_PER_SECOND (2UL * 1024UL * 1024UL)
+/* ... and while its game is under way (a joiner downloading the map to join
+it in progress): what all of them send per second at most (the players'
+game keeps the rest of the host's upload: a game's own traffic is a few
+KB/s per player), the bytes each sends ahead of the joiner's acknowledgement
+(a quarter of a second at that rate over a 500 ms round trip), and the share
+of the host's time, and of any one frame, their reading, hashing and
+deflating may take (HALO_MAP_SHARE_INGAME_RATE_KB,
+HALO_MAP_SHARE_INGAME_CPU_PERCENT, HALO_MAP_SHARE_INGAME_FRAME_US) */
+#define MAP_SHARE_INGAME_BYTES_PER_SECOND (256UL * 1024UL)
+#define MAP_SHARE_INGAME_WINDOW_BYTES 0x20000
+#define MAP_SHARE_INGAME_CPU_PERCENT 5
+#define MAP_SHARE_INGAME_FRAME_MICROSECONDS 2000
+/* a machine joining a game in progress that was offered the map keeps its
+place this long while the player answers, and this long after its download
+ends (to install the map and add its players): the host otherwise drops a
+machine that adds no player in 15 s */
+#define MAP_SHARE_QUESTION_MILLISECONDS 90000
+#define MAP_SHARE_INSTALL_MILLISECONDS 20000
+/* ... and in all no longer than the question, the install and the map at
+this rate (a machine that asks again, or takes its download a trickle at a
+time, holds no place for ever) */
+#define MAP_SHARE_INGAME_MINIMUM_BYTES_PER_SECOND (32UL * 1024UL)
 /* the uploads a host serves at once */
 #define MAP_SHARE_MAXIMUM_UPLOADS 4
 /* a transfer that moves nothing for this long is given up */
@@ -117,6 +156,9 @@ enum
 	_map_share_capability_resume_bit = 0,
 	/* it takes the file as a deflate stream */
 	_map_share_capability_deflate_bit,
+	/* it joins a game in progress once it has the map, adding no player to
+	it while it downloads (beta.3) */
+	_map_share_capability_in_progress_bit,
 	NUMBER_OF_MAP_SHARE_CAPABILITIES
 };
 
@@ -170,7 +212,19 @@ enum
 	_map_share_offer_resume_bit,
 	/* (likewise) the data is a deflate stream */
 	_map_share_offer_deflate_bit,
+	/* (to a joiner that said it can) the host's game is under way: the
+	joiner stays out of it until the map is here, then joins it in progress */
+	_map_share_offer_in_progress_bit,
 	NUMBER_OF_MAP_SHARE_OFFER_FLAGS
+};
+
+/* where a host's game is (map_share_host_serves) */
+enum map_share_host_state
+{
+	_map_share_host_lobby = 0,
+	_map_share_host_in_game,
+	/* the scores, and anything else */
+	_map_share_host_postgame,
 };
 
 /* map_share_header_validate's verdicts */
@@ -340,12 +394,58 @@ int map_share_request_valid(
 /* Whether a decoded answer's fields are in range: a known kind and reason;
 an offer for `expected_name` and `expected_identity` (the joiner's),
 1 to MAP_SHARE_MAXIMUM_FILE_BYTES long, at least a cache header, with only
-known flags, and only those of `capabilities` (the joiner's) it said. */
+known flags, and only those of `capabilities` (the joiner's) it said (the
+in-progress flag only to a joiner with the in-progress capability). */
 int map_share_answer_valid(
 	struct map_share_answer_message const *answer,
 	char const *expected_name,
 	uint32_t expected_identity,
 	uint32_t capabilities);
+
+/* Whether a host whose game is in `host_state` serves its map to a joined
+machine that asked with `capabilities` (map_share_request_capabilities):
+in the lobby, always; in game, only to a joiner with the in-progress
+capability whose machine is still joining (`machine_joining`: no player of
+it in the game nor waiting to be, not started into it nor loaded), while
+the game takes late joiners (`accepts_late_joins`: open, a player slot free)
+and the host allows it (`in_progress_allowed`: HALO_MAP_SHARE_IN_PROGRESS);
+never in the postgame. _map_share_refusal_none and *in_progress (the offer's
+flag: the game is under way) when it does; else the refusal
+(_map_share_refusal_not_in_lobby: as before, the game has started). The
+rest of the host's checks (the map, its copy, the file) are map_share.c's. */
+enum map_share_refusal map_share_host_serves(
+	enum map_share_host_state host_state,
+	uint32_t capabilities,
+	int machine_joining,
+	int accepts_late_joins,
+	int in_progress_allowed,
+	int *in_progress);
+
+/* the limits on a host's uploads (map_share_host_limits) */
+struct map_share_limits
+{
+	/* all the uploads together */
+	uint32_t bytes_per_second;
+	/* each one's bytes sent ahead of the joiner's acknowledgement */
+	uint32_t window_bytes;
+	/* the share of the host's time their work takes, and of a frame at most */
+	uint32_t cpu_percent;
+	uint32_t frame_microseconds;
+};
+
+/* A host's limits in the lobby, or while its game is under way
+(`in_game`): MAP_SHARE_DEFAULT_BYTES_PER_SECOND (MAP_SHARE_INGAME_...)
+unless `rate_kb` is given (nonzero: the settings' KB/s); the in-game rate
+never above the lobby's, and every limit at least a chunk's worth or a
+percent, so that an upload always ends. `cpu_percent` and
+`frame_microseconds` likewise (0: the default). */
+void map_share_host_limits(
+	int in_game,
+	uint32_t rate_kb,
+	uint32_t ingame_rate_kb,
+	uint32_t cpu_percent,
+	uint32_t frame_microseconds,
+	struct map_share_limits *limits);
 
 /* A request's capabilities (a query's, a start's): only those known. */
 uint32_t map_share_request_capabilities(
