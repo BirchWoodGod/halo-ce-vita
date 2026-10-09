@@ -169,6 +169,65 @@ static int texture_state_dirty_bit(unsigned long type)
 {
 	return type >= D3DTSS_BUMPENVMAT00 && type <= D3DTSS_BUMPENVLOFFSET ? STATE_DIRTY_VALUES : STATE_DIRTY_MATERIAL;
 }
+
+/* The material states (a record_material's words: the render states, then
+the stages' states, as one array) the setters changed since the split
+records last resolved their material (record_state_current): the states
+are the last material's but for these. A setter that changes a value of
+the material notes its word here, once; more than MATERIAL_LOG_CAPACITY
+words, or a change whose state is not known, leave the log overflowed, and
+the material is then found as before, by its whole states. */
+#define MATERIAL_STATE_WORDS (D3DRS_MAX + D3DTSS_MAXSTAGES * D3DTSS_MAX)
+#define MATERIAL_LOG_CAPACITY 96
+static unsigned short material_log[MATERIAL_LOG_CAPACITY];
+/* (each word's value when it was first changed: the last material's) */
+static DWORD material_log_old[MATERIAL_LOG_CAPACITY];
+/* (MATERIAL_LOG_CAPACITY + 1: overflowed) */
+static unsigned int material_log_count = MATERIAL_LOG_CAPACITY + 1;
+static unsigned short material_log_mark[MATERIAL_STATE_WORDS];
+static unsigned short material_log_generation = 1;
+
+static void material_log_note(unsigned long word, DWORD old)
+{
+	if (material_log_mark[word] != material_log_generation)
+	{
+		material_log_mark[word] = material_log_generation;
+		if (material_log_count < MATERIAL_LOG_CAPACITY)
+		{
+			material_log_old[material_log_count] = old;
+			material_log[material_log_count++] = (unsigned short)word;
+		}
+		else
+			material_log_count = MATERIAL_LOG_CAPACITY + 1;
+	}
+}
+
+static void material_log_overflow(void)
+{
+	material_log_count = MATERIAL_LOG_CAPACITY + 1;
+}
+
+/* (the states are the material's again) */
+static void material_log_reset(void)
+{
+	material_log_count = 0;
+	if (++material_log_generation == 0)
+	{
+		memset(material_log_mark, 0, sizeof(material_log_mark));
+		material_log_generation = 1;
+	}
+}
+
+/* a render state's value is about to change: the dirty bit, and the log
+for a material state */
+static void render_state_changed(unsigned long state)
+{
+	int bit = render_state_dirty_bit(state);
+
+	device_state_dirty |= bit;
+	if (bit == STATE_DIRTY_MATERIAL)
+		material_log_note(state, D3D__RenderState[state]);
+}
 DWORD D3D__TextureState[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 WORD *D3D__IndexData;
 BYTE D3D__StateBlockDirty[1024];
@@ -410,6 +469,8 @@ static struct
 	unsigned long material_new, worker_texture_builds;
 	/* new values blocks (record_values); materials found kept */
 	unsigned long values_new, material_kept;
+	/* materials found kept by a transition from the last */
+	unsigned long material_transitions;
 } stats;
 
 /* draws recorded since start-up, never reset: the render profile counts
@@ -1666,9 +1727,16 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 		simple_state_tables_made = 1;
 	}
 	if ((method & 3) || slot >= sizeof(simple_state_of_method) || !simple_state_of_method[slot])
+	{
 		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
+		material_log_overflow();
+	}
 	else if (D3D__RenderState[simple_state_of_method[slot] - 1] != value)
+	{
 		device_state_dirty |= simple_dirty_bit_of_method[slot];
+		if (simple_dirty_bit_of_method[slot] == STATE_DIRTY_MATERIAL)
+			material_log_note(simple_state_of_method[slot] - 1UL, D3D__RenderState[simple_state_of_method[slot] - 1]);
+	}
 }
 
 void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value)
@@ -1677,7 +1745,7 @@ void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value)
 	is a simple one, below D3DRS_SIMPLE_MAX) */
 	if (state < D3DRS_MAX && D3D__RenderState[state] != value)
 	{
-		device_state_dirty |= render_state_dirty_bit(state);
+		render_state_changed(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1687,7 +1755,7 @@ void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWO
 	if ((unsigned long)state < D3DRS_MAX)
 	{
 		if (D3D__RenderState[state] != value)
-			device_state_dirty |= render_state_dirty_bit(state);
+			render_state_changed(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1701,7 +1769,7 @@ void WINAPI D3DDevice_SetRenderStateNotInline(D3DRENDERSTATETYPE state, DWORD va
 	else if ((unsigned long)state < D3DRS_MAX)
 	{
 		if (D3D__RenderState[state] != value)
-			device_state_dirty |= render_state_dirty_bit(state);
+			render_state_changed(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1711,7 +1779,7 @@ static void render_state_store(unsigned long state, DWORD value)
 {
 	if (D3D__RenderState[state] != value)
 	{
-		device_state_dirty |= render_state_dirty_bit(state);
+		render_state_changed(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1769,7 +1837,11 @@ static void texture_state_store(DWORD stage, unsigned long type, DWORD value)
 {
 	if (stage < D3DTSS_MAXSTAGES && type < D3DTSS_MAX && D3D__TextureState[stage][type] != value)
 	{
-		device_state_dirty |= texture_state_dirty_bit(type);
+		int bit = texture_state_dirty_bit(type);
+
+		device_state_dirty |= bit;
+		if (bit == STATE_DIRTY_MATERIAL)
+			material_log_note(D3DRS_MAX + stage * D3DTSS_MAX + type, D3D__TextureState[stage][type]);
 		D3D__TextureState[stage][type] = value;
 	}
 }
@@ -1817,44 +1889,30 @@ void WINAPI D3DDevice_SetPalette(DWORD stage, D3DPalette *palette)
 void WINAPI D3DDevice_SetPixelShaderProgram(D3DPIXELSHADERDEF *definition)
 {
 	/* (a definition the same as what the states hold, field by field, is
-	no change: the dirty flag is kept as it is) */
+	no change: the dirty flag is kept as it is; each state it changes is
+	marked as its setter would) */
+	unsigned long index;
+
 	if (!definition)
 		return;
-	if (memcmp(&D3D__RenderState[D3DRS_PSALPHAINPUTS0], definition->PSAlphaInputs, sizeof(definition->PSAlphaInputs)) ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSABCD] != definition->PSFinalCombinerInputsABCD ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSEFG] != definition->PSFinalCombinerInputsEFG ||
-		memcmp(&D3D__RenderState[D3DRS_PSCONSTANT0_0], definition->PSConstant0, sizeof(definition->PSConstant0)) ||
-		memcmp(&D3D__RenderState[D3DRS_PSCONSTANT1_0], definition->PSConstant1, sizeof(definition->PSConstant1)) ||
-		memcmp(&D3D__RenderState[D3DRS_PSALPHAOUTPUTS0], definition->PSAlphaOutputs, sizeof(definition->PSAlphaOutputs)) ||
-		memcmp(&D3D__RenderState[D3DRS_PSRGBINPUTS0], definition->PSRGBInputs, sizeof(definition->PSRGBInputs)) ||
-		D3D__RenderState[D3DRS_PSCOMPAREMODE] != definition->PSCompareMode ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT0] != definition->PSFinalCombinerConstant0 ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT1] != definition->PSFinalCombinerConstant1 ||
-		memcmp(&D3D__RenderState[D3DRS_PSRGBOUTPUTS0], definition->PSRGBOutputs, sizeof(definition->PSRGBOutputs)) ||
-		D3D__RenderState[D3DRS_PSCOMBINERCOUNT] != definition->PSCombinerCount ||
-		D3D__RenderState[D3DRS_PSTEXTUREMODES] != definition->PSTextureModes ||
-		D3D__RenderState[D3DRS_PSDOTMAPPING] != definition->PSDotMapping ||
-		D3D__RenderState[D3DRS_PSINPUTTEXTURE] != definition->PSInputTexture)
+	for (index = 0; index < 8; index++)
 	{
-		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
+		render_state_store(D3DRS_PSALPHAINPUTS0 + index, definition->PSAlphaInputs[index]);
+		render_state_store(D3DRS_PSCONSTANT0_0 + index, definition->PSConstant0[index]);
+		render_state_store(D3DRS_PSCONSTANT1_0 + index, definition->PSConstant1[index]);
+		render_state_store(D3DRS_PSALPHAOUTPUTS0 + index, definition->PSAlphaOutputs[index]);
+		render_state_store(D3DRS_PSRGBINPUTS0 + index, definition->PSRGBInputs[index]);
+		render_state_store(D3DRS_PSRGBOUTPUTS0 + index, definition->PSRGBOutputs[index]);
 	}
-	else
-		return;
-	memcpy(&D3D__RenderState[D3DRS_PSALPHAINPUTS0], definition->PSAlphaInputs, sizeof(definition->PSAlphaInputs));
-	D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSABCD] = definition->PSFinalCombinerInputsABCD;
-	D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSEFG] = definition->PSFinalCombinerInputsEFG;
-	memcpy(&D3D__RenderState[D3DRS_PSCONSTANT0_0], definition->PSConstant0, sizeof(definition->PSConstant0));
-	memcpy(&D3D__RenderState[D3DRS_PSCONSTANT1_0], definition->PSConstant1, sizeof(definition->PSConstant1));
-	memcpy(&D3D__RenderState[D3DRS_PSALPHAOUTPUTS0], definition->PSAlphaOutputs, sizeof(definition->PSAlphaOutputs));
-	memcpy(&D3D__RenderState[D3DRS_PSRGBINPUTS0], definition->PSRGBInputs, sizeof(definition->PSRGBInputs));
-	D3D__RenderState[D3DRS_PSCOMPAREMODE] = definition->PSCompareMode;
-	D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT0] = definition->PSFinalCombinerConstant0;
-	D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT1] = definition->PSFinalCombinerConstant1;
-	memcpy(&D3D__RenderState[D3DRS_PSRGBOUTPUTS0], definition->PSRGBOutputs, sizeof(definition->PSRGBOutputs));
-	D3D__RenderState[D3DRS_PSCOMBINERCOUNT] = definition->PSCombinerCount;
-	D3D__RenderState[D3DRS_PSTEXTUREMODES] = definition->PSTextureModes;
-	D3D__RenderState[D3DRS_PSDOTMAPPING] = definition->PSDotMapping;
-	D3D__RenderState[D3DRS_PSINPUTTEXTURE] = definition->PSInputTexture;
+	render_state_store(D3DRS_PSFINALCOMBINERINPUTSABCD, definition->PSFinalCombinerInputsABCD);
+	render_state_store(D3DRS_PSFINALCOMBINERINPUTSEFG, definition->PSFinalCombinerInputsEFG);
+	render_state_store(D3DRS_PSCOMPAREMODE, definition->PSCompareMode);
+	render_state_store(D3DRS_PSFINALCOMBINERCONSTANT0, definition->PSFinalCombinerConstant0);
+	render_state_store(D3DRS_PSFINALCOMBINERCONSTANT1, definition->PSFinalCombinerConstant1);
+	render_state_store(D3DRS_PSCOMBINERCOUNT, definition->PSCombinerCount);
+	render_state_store(D3DRS_PSTEXTUREMODES, definition->PSTextureModes);
+	render_state_store(D3DRS_PSDOTMAPPING, definition->PSDotMapping);
+	render_state_store(D3DRS_PSINPUTTEXTURE, definition->PSInputTexture);
 }
 
 /* ---------- vertex shaders */
@@ -5610,6 +5668,150 @@ static unsigned long material_hash_current(void)
 	return hash;
 }
 
+/* Transitions between kept materials: from a material, a set of material
+states changed to new values (the log's words whose values differ from the
+material's, in word order) led to a material, found by its whole states
+then. From the same material, the same changes lead to the same material:
+the states are that material's but for the logged words (every setter that
+changes a material state logs it, as it marks the state dirty), and the
+words hold the same values. A transition is kept only between materials
+of the kept pool, which are never rewritten nor freed. The whole-state
+search compared 1.1 KB of states with a kept material, missing the caches
+on most of its lines (b30: a fifth of the game thread's record cost). */
+#define MATERIAL_PATCH_MAX 48
+#define MATERIAL_TRANSITION_SLOTS 4096
+#define MATERIAL_TRANSITION_PROBES 4
+/* (the patches' words and values, in a pool emptied with the table when
+it is full: b30 keeps ~3700 transitions in 150 s, of 12 words on average) */
+#define MATERIAL_PATCH_POOL 32768
+struct material_transition
+{
+	const struct record_material *from, *to;
+	unsigned long hash;
+	unsigned long first;
+	unsigned short count;
+};
+static struct material_transition *material_transitions;
+static unsigned short *material_patch_words;
+static DWORD *material_patch_values;
+static unsigned long material_patch_used;
+
+/* the states' current value of a material word */
+static DWORD material_word_current(unsigned long word)
+{
+	return word < D3DRS_MAX ? D3D__RenderState[word] :
+		D3D__TextureState[(word - D3DRS_MAX) / D3DTSS_MAX][(word - D3DRS_MAX) % D3DTSS_MAX];
+}
+
+static BOOL material_in_pool(const struct record_material *material)
+{
+	return material_cache_pool && material >= material_cache_pool && material < material_cache_pool + material_cache_used;
+}
+
+/* the logged words whose current values differ from the last material's
+(the values they had when first changed), in word order; FALSE when there
+are more than MATERIAL_PATCH_MAX */
+static BOOL material_patch_current(unsigned short *word, DWORD *value, unsigned short *count)
+{
+	unsigned int index, found = 0;
+
+	for (index = 0; index < material_log_count; index++)
+	{
+		unsigned short at = material_log[index];
+		DWORD current = material_word_current(at);
+
+		if (current != material_log_old[index])
+		{
+			unsigned int place = found;
+
+			if (found >= MATERIAL_PATCH_MAX)
+				return FALSE;
+			while (place > 0 && word[place - 1] > at)
+			{
+				word[place] = word[place - 1];
+				value[place] = value[place - 1];
+				place--;
+			}
+			word[place] = at;
+			value[place] = current;
+			found++;
+		}
+	}
+	*count = (unsigned short)found;
+	return TRUE;
+}
+
+static unsigned long material_patch_hash(const struct record_material *from, const unsigned short *word,
+	const DWORD *value, unsigned short count)
+{
+	unsigned long hash = (2166136261UL ^ (unsigned long)(size_t)from) * 16777619UL;
+	unsigned short index;
+
+	for (index = 0; index < count; index++)
+		hash = ((hash ^ word[index]) * 16777619UL ^ value[index]) * 16777619UL;
+	return hash;
+}
+
+static const struct record_material *material_transition_find(const struct record_material *from, unsigned long hash,
+	const unsigned short *word, const DWORD *value, unsigned short count)
+{
+	unsigned long probe;
+
+	if (!material_transitions)
+		return NULL;
+	for (probe = 0; probe < MATERIAL_TRANSITION_PROBES; probe++)
+	{
+		const struct material_transition *entry = &material_transitions[(hash + probe) % MATERIAL_TRANSITION_SLOTS];
+
+		if (entry->from == from && entry->hash == hash && entry->count == count &&
+			!memcmp(&material_patch_words[entry->first], word, count * sizeof(word[0])) &&
+			!memcmp(&material_patch_values[entry->first], value, count * sizeof(value[0])))
+		{
+			return entry->to;
+		}
+	}
+	return NULL;
+}
+
+static __attribute__((noinline)) void material_transition_keep(const struct record_material *from, const struct record_material *to,
+	unsigned long hash, const unsigned short *word, const DWORD *value, unsigned short count)
+{
+	struct material_transition *entry = NULL;
+	unsigned long probe;
+
+	if (!material_transitions)
+	{
+		material_transitions = lasting_alloc(MATERIAL_TRANSITION_SLOTS * sizeof(*material_transitions), "material transitions");
+		material_patch_words = lasting_alloc(MATERIAL_PATCH_POOL * sizeof(*material_patch_words), "material transitions");
+		material_patch_values = lasting_alloc(MATERIAL_PATCH_POOL * sizeof(*material_patch_values), "material transitions");
+		if (!material_transitions || !material_patch_words || !material_patch_values)
+		{
+			material_transitions = NULL;
+			return;
+		}
+	}
+	if (material_patch_used + count > MATERIAL_PATCH_POOL)
+	{
+		/* (full: begun again) */
+		memset(material_transitions, 0, MATERIAL_TRANSITION_SLOTS * sizeof(*material_transitions));
+		material_patch_used = 0;
+	}
+	for (probe = 0; probe < MATERIAL_TRANSITION_PROBES && !entry; probe++)
+		if (!material_transitions[(hash + probe) % MATERIAL_TRANSITION_SLOTS].from)
+			entry = &material_transitions[(hash + probe) % MATERIAL_TRANSITION_SLOTS];
+	/* (all taken: the first gives way) */
+	if (!entry)
+		entry = &material_transitions[hash % MATERIAL_TRANSITION_SLOTS];
+	entry->from = from;
+	entry->to = to;
+	entry->hash = hash;
+	entry->count = count;
+	entry->first = material_patch_used;
+	memcpy(&material_patch_words[material_patch_used], word, count * sizeof(word[0]));
+	memcpy(&material_patch_values[material_patch_used], value, count * sizeof(value[0]));
+	material_patch_used += count;
+}
+
 static BOOL values_match_current(const struct record_values *values)
 {
 	int index, stage;
@@ -5787,6 +5989,33 @@ static const struct record_state *record_state_current(void)
 	0); likewise the values */
 	if (!material_last || (device_state_dirty & STATE_DIRTY_MATERIAL))
 	{
+		/* (the last material and the logged changes: the same material
+		when none changed a value, else the material a transition kept) */
+		const struct record_material *from = material_last;
+		unsigned short patch_word[MATERIAL_PATCH_MAX], patch_count = 0;
+		DWORD patch_value[MATERIAL_PATCH_MAX];
+		unsigned long patch_hash = 0;
+		BOOL patched = material_last && material_log_count <= MATERIAL_LOG_CAPACITY && material_in_pool(material_last) &&
+			material_patch_current(patch_word, patch_value, &patch_count);
+
+		if (patched && !patch_count)
+		{
+			stats.state_equal++;
+			goto material_found;
+		}
+		if (patched)
+		{
+			const struct record_material *to;
+
+			patch_hash = material_patch_hash(material_last, patch_word, patch_value, patch_count);
+			if ((to = material_transition_find(material_last, patch_hash, patch_word, patch_value, patch_count)) != NULL)
+			{
+				material_last = (struct record_material *)to;
+				stats.material_kept++;
+				stats.material_transitions++;
+				goto material_found;
+			}
+		}
 		if (!material_last || !material_matches_current(material_last))
 		{
 			int index, stage;
@@ -5805,6 +6034,8 @@ static const struct record_state *record_state_current(void)
 			{
 				material_last = kept;
 				stats.material_kept++;
+				if (patched && material_in_pool(material_last))
+					material_transition_keep(from, material_last, patch_hash, patch_word, patch_value, patch_count);
 				goto material_found;
 			}
 			if (!material_cache_pool)
@@ -5828,10 +6059,13 @@ static const struct record_state *record_state_current(void)
 			for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 				memset(&material_last->texture_state[stage][D3DTSS_BUMPENVMAT00], 0, RECORD_VALUE_BUMP_COUNT * sizeof(DWORD));
 			stats.material_new++;
+			if (patched && material_in_pool(material_last))
+				material_transition_keep(from, material_last, patch_hash, patch_word, patch_value, patch_count);
 		}
 		else
 			stats.state_equal++;
-	material_found:;
+	material_found:
+		material_log_reset();
 	}
 	if (!values_last || (device_state_dirty & STATE_DIRTY_VALUES))
 	{
@@ -7472,9 +7706,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			stats.copied_chunk[2] / 1024.0 / stats.presents, stats.copied_chunk[3] / 1024.0 / stats.presents,
 			stats.copied_chunk[4] / 1024.0 / stats.presents, stats.copied_chunk[5] / 1024.0 / stats.presents,
 			stats.copied_vertex_misc / 1024.0 / stats.presents, stats.copied_fragment / 1024.0 / stats.presents);
-		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu kept materials (%lu kept in all), %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
+		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu kept materials (%lu by transition, %lu kept in all), %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
 			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
-			stats.material_kept / stats.presents, material_cache_used,
+			stats.material_kept / stats.presents, stats.material_transitions / stats.presents, material_cache_used,
 			stats.values_new / stats.presents,
 			stats.state_equal / stats.presents, stats.worker_builds / stats.presents, stats.worker_texture_builds / stats.presents);
 		memset(&stats, 0, sizeof(stats));
