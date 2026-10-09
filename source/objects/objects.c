@@ -18,6 +18,9 @@ there for the render) */
 /* objects_update by object type and phase (HALO_TICK_PROFILE=2:
 objects_phases.h) */
 #include "objects_phases.h"
+/* the bounding spheres' packed copy for the collision walks
+(object_bounds_cache.c) */
+#include "object_bounds_cache.h"
 #include <stdlib.h>
 void platform_log(const char *format, ...);
 #define OBJECT_STEP_BEGIN(phase) HALO_OBJECTS_PHASE_PUSH(phase)
@@ -3158,6 +3161,11 @@ void object_compute_node_matrices(
 	{
 		object->object.bounding_sphere_radius *= object->object.scale;
 	}
+#ifdef HALO_LINUX
+	/* (port) and the packed copy the collision walks read
+	(object_bounds_cache.c) */
+	object_bounds_cache_update(object_index, &object->object.bounding_sphere_center, object->object.bounding_sphere_radius);
+#endif
 
 	OBJECT_STEP_END();
 	return;
@@ -3706,6 +3714,11 @@ long object_new(
 			struct object_datum *object = object_get(object_index);
 			boolean success = TRUE;
 
+#ifdef HALO_LINUX
+			/* (port) a datum's earlier object's packed bounding sphere is not
+			this one's (object_bounds_cache.c) */
+			object_bounds_cache_forget(object_index);
+#endif
 			SET_FLAG(object_header->flags, _object_header_being_created_bit, TRUE);
 			SET_FLAG(object_header->flags, _object_header_automatically_deactivate_bit, TRUE);
 

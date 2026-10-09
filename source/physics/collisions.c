@@ -120,6 +120,9 @@ symbols in this file:
 #ifdef HALO_LINUX
 /* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
 #include "objects_phases.h"
+/* the objects' bounding spheres packed for the walks below
+(object_bounds_cache.c) */
+#include "object_bounds_cache.h"
 #else
 #define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
 #define HALO_OBJECTS_PHASE_POP() ((void)0)
@@ -529,6 +532,11 @@ boolean collision_test_vector(
 		if (test_objects && bsp_result.leaf_count > 0)
 		{
 			long leaf_index;
+#ifdef HALO_LINUX
+			real_point3d point_value;
+			real_vector3d vector_value;
+			boolean use_bounds_cache;
+#endif
 
 			collision_log_usage(_collision_function_vector_objects);
 			collision_log_start_time(&collision_usage_times.vector_objects);
@@ -539,6 +547,15 @@ boolean collision_test_vector(
 
 			structure_cluster_marker_begin();
 			object_marker_begin();
+#ifdef HALO_LINUX
+			/* (port) the vector read once for the objects' sphere tests below
+			(a call between two reads them again through their pointers), and
+			whether the bounding spheres' packed copy may be read
+			(object_bounds_cache.c): the same values */
+			point_value = *point;
+			vector_value = *vector;
+			use_bounds_cache = object_bounds_cache_usable();
+#endif
 			for (leaf_index = 0; leaf_index < bsp_result.leaf_count; leaf_index++)
 			{
 				long leaf = bsp_result.leaf_indices[leaf_index];
@@ -598,6 +615,27 @@ boolean collision_test_vector(
 							{
 								continue;
 							}
+							/* (an object whose bounding sphere the vector
+							misses, by its packed copy, passed over without
+							reading it: below it would be marked, then passed
+							over by the same test on the same values, a
+							cluster's object having no siblings; unmarked, a
+							second visit in this test passes it over again.
+							object_bounds_cache.c) */
+							if (use_bounds_cache && !TEST_FLAG(header->flags, _object_header_child_bit))
+							{
+								struct object_bounds const *bounds = object_bounds_cache_get(object_index);
+
+								if (bounds &&
+									!fast_vector_intersects_sphere_inline(
+										&point_value,
+										&vector_value,
+										&bounds->center,
+										bounds->radius))
+								{
+									continue;
+								}
+							}
 							object = header->datum;
 							if (object->object.magic_number == global_object_marker)
 								continue;
@@ -607,8 +645,8 @@ boolean collision_test_vector(
 									TEST_FLAG(object->object.flags, _object_invisible_bit) ||
 									!TEST_FLAG(flags, object->object.type + _collision_test_objects_first_type_bit) ||
 									!fast_vector_intersects_sphere_inline(
-										point,
-										vector,
+										&point_value,
+										&vector_value,
 										&object->object.bounding_sphere_center,
 										(object->object.bounding_sphere_radius))))
 							{
@@ -916,6 +954,10 @@ boolean collision_get_features_in_sphere(
 		if (objects && result.leaf_count > 0)
 		{
 			short leaf_reference_index;
+#ifdef HALO_LINUX
+			real_point3d center_value;
+			boolean use_bounds_cache;
+#endif
 
 			if (!(flags & _collision_test_objects_all_types_flags))
 			{
@@ -924,6 +966,12 @@ boolean collision_get_features_in_sphere(
 
 			structure_cluster_marker_begin();
 			object_marker_begin();
+#ifdef HALO_LINUX
+			/* (port) the center read once for the objects' sphere tests below
+			(as collision_test_vector's): the same values */
+			center_value = *center;
+			use_bounds_cache = object_bounds_cache_usable();
+#endif
 			for (leaf_reference_index = 0;
 				leaf_reference_index < result.leaf_count;
 				leaf_reference_index++)
@@ -959,6 +1007,27 @@ boolean collision_get_features_in_sphere(
 							object_get_features_in_sphere would pass over at its
 							first tests passed over without the call) */
 							object_index = object_indices[object_slot];
+							/* (an object out of the sphere's reach by its
+							bounding sphere's packed copy passed over without
+							reading it: below it would be marked, then passed
+							over by the same test on the same values, a
+							cluster's object having no siblings; unmarked, a
+							second visit in this query passes it over again.
+							object_bounds_cache.c) */
+							if (use_bounds_cache &&
+								!TEST_FLAG(object_header_get(object_index)->flags, _object_header_child_bit))
+							{
+								struct object_bounds const *bounds = object_bounds_cache_get(object_index);
+
+								if (bounds &&
+									!point_in_sphere(
+										&center_value,
+										&bounds->center,
+										bounds->radius + radius))
+								{
+									continue;
+								}
+							}
 							object = object_get(object_index);
 							if (object->object.magic_number == global_object_marker)
 								continue;
@@ -970,7 +1039,7 @@ boolean collision_get_features_in_sphere(
 									(TEST_FLAG(object->object.damage_flags, _object_dead_bit) &&
 										object->object.type == _object_type_biped) ||
 									!point_in_sphere(
-										center,
+										&center_value,
 										&object->object.bounding_sphere_center,
 										object->object.bounding_sphere_radius + radius)))
 							{
