@@ -774,9 +774,22 @@ boolean first_person_weapon_adjust_light(
 	real_vector3d *forward,
 	real_vector3d *up)
 {
+#ifdef HALO_LINUX
+	/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+	Vita's) the weapon's holder may have died, the weapon dropped (its parent
+	NONE), since lights_preprocess_scene looked at its parent: the parent
+	read once and checked, and a weapon no unit holds is not in anyone's
+	first person view (unit_get read the unit at NONE: a segmentation fault
+	with offline bots, a plasma pistol's light in Carousel's Oddball) */
+	struct weapon_datum *weapon= weapon_try_and_get(weapon_index);
+	long parent_object_index= weapon ? *(volatile long *)&weapon->object.parent_object_index : NONE;
+	struct unit_datum *unit= parent_object_index!=NONE ? unit_try_and_get(parent_object_index) : NULL;
+	long player_index= unit ? unit->unit.player_index : NONE;
+#else
 	struct weapon_datum *weapon= weapon_get(weapon_index);
 	struct unit_datum *unit= unit_get(weapon->object.parent_object_index);
 	long player_index= unit->unit.player_index;
+#endif
 	boolean adjusted= FALSE;
 
 	if (player_index!=NONE)
