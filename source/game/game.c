@@ -1115,6 +1115,9 @@ static struct
 {
 	boolean active;
 	boolean drawing;
+	/* the progress bar drawn (a picture to show), or the pregame render's
+	frame alone */
+	boolean progress_bar;
 	int thread;
 	unsigned long long started_us;
 	unsigned long long last_us;
@@ -1133,9 +1136,17 @@ void game_loading_screen_begin(
 	game_loading_screen.thread = halo_thread_index();
 	game_loading_screen.started_us = tick_now();
 	game_loading_screen.last_us = game_loading_screen.started_us;
-	globals->map_load_in_progress = TRUE;
-	globals->loading_progress = 0.0f;
-	progress_bar_begin(global_scenario_index != NONE);
+	/* (without the retail picture the progress bar draws a black screen:
+	the pregame render's frame alone is one, and makes none of the progress
+	bar's textures and front buffer in the memory window - 2 MB the map's
+	load then has as before) */
+	game_loading_screen.progress_bar = progress_bar_has_picture();
+	if (game_loading_screen.progress_bar)
+	{
+		globals->map_load_in_progress = TRUE;
+		globals->loading_progress = 0.0f;
+		progress_bar_begin(global_scenario_index != NONE);
+	}
 #endif
 
 	return;
@@ -1163,7 +1174,10 @@ void game_loading_screen_frame(
 		game_loading_screen.longest_us = now - game_loading_screen.last_us;
 	}
 	game_loading_screen.drawing = TRUE;
-	globals->loading_progress = PIN(progress, 0.0f, 1.0f);
+	if (game_loading_screen.progress_bar)
+	{
+		globals->loading_progress = PIN(progress, 0.0f, 1.0f);
+	}
 	main_pregame_render();
 	main_present_frame();
 	game_loading_screen.drawing = FALSE;
@@ -1195,13 +1209,17 @@ void game_loading_screen_end(
 	{
 		game_loading_screen.longest_us = now - game_loading_screen.last_us;
 	}
-	platform_log("loading screen: %lu frames over %lu ms, at most %lu ms between two",
+	platform_log("loading screen: %lu frames over %lu ms, at most %lu ms between two%s",
 		game_loading_screen.frames,
 		(unsigned long)((now - game_loading_screen.started_us) / 1000),
-		(unsigned long)(game_loading_screen.longest_us / 1000));
-	progress_bar_end();
-	globals->map_load_in_progress = FALSE;
-	globals->loading_progress = 1.0f;
+		(unsigned long)(game_loading_screen.longest_us / 1000),
+		game_loading_screen.progress_bar ? "" : " (no picture: no progress bar)");
+	if (game_loading_screen.progress_bar)
+	{
+		progress_bar_end();
+		globals->map_load_in_progress = FALSE;
+		globals->loading_progress = 1.0f;
+	}
 	game_loading_screen.active = FALSE;
 
 	return;

@@ -1836,6 +1836,18 @@ void progress_bar_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) whether the loading screen has a picture to show: the player's
+retail executable's; without it the screen is black, which a frame of the
+pregame render with no progress bar shows as well, without its textures and
+front buffer (game_loading_screen_begin) */
+boolean progress_bar_has_picture(
+	void)
+{
+	return retail_loading_image.runs != NULL;
+}
+#endif
+
 boolean progress_bar_is_active(
 	void)
 {
