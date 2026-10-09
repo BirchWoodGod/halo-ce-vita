@@ -116,6 +116,7 @@ thread that loads it) */
 void game_loading_screen_begin(void);
 void game_loading_screen_frame(real progress);
 void game_loading_screen_end(void);
+boolean game_loading_screen_up_here(void);
 
 /* the load's progress, 0..1, for the loading screen (the game thread's) */
 static real custom_edition_load_progress;
@@ -230,6 +231,9 @@ than once more for the checksum alone. */
 
 enum
 {
+	/* (custom_edition_cache_read: a read this large, while the loading
+	screen is up, is made on the reader) */
+	LOADING_SCREEN_READ_BYTES = 0x40000,
 	LOAD_READ_QUEUE_LENGTH = 16,
 	LOAD_READER_STACK_BYTES = 0x10000,
 	/* the model data's pieces the checksum has seen, apart (see
@@ -1664,7 +1668,16 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	tag_header = custom_edition_cache_tags_load_private(map_name, header);
 	model_checksum.active = FALSE;
 	custom_edition_cache_load_hooks(NULL);
-	game_loading_screen_end();
+	/* (loaded: the screen stays up while scenario_load reads the first
+	structure BSP, and game_load takes it down) */
+	if (!tag_header)
+	{
+		game_loading_screen_end();
+	}
+	else
+	{
+		custom_edition_load_progress_set(0.98f);
+	}
 
 	return tag_header;
 }
@@ -1964,7 +1977,21 @@ boolean custom_edition_cache_read(
 	/* (straight into the reader's memory: the platform's file layer fills
 	write-watched memory through a bounce buffer where pages are protected,
 	and on the Vita in one request) */
-	if (read && size > 0)
+	if (read && size >= LOADING_SCREEN_READ_BYTES && game_loading_screen_up_here())
+	{
+		/* (a structure BSP as the map loads: on the load's reader, the
+		loading screen drawn meanwhile) */
+		struct custom_edition_read_job job;
+
+		csmemset(&job, 0, sizeof(job));
+		job.context = file->source.context;
+		job.offset = (uint32_t)file_offset;
+		job.size = (uint32_t)size;
+		job.buffer = buffer;
+		custom_edition_read_job_submit(&job);
+		read = custom_edition_read_job_wait(&job);
+	}
+	else if (read && size > 0)
 	{
 		read = file->source.read(file->source.context, file_offset, (uint32_t)size, buffer);
 	}

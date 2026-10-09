@@ -955,6 +955,10 @@ void set_random_seed(
 	return;
 }
 
+#ifdef HALO_LINUX
+void game_loading_screen_end(void);
+#endif
+
 boolean game_load(
 	struct game_options *options)
 {
@@ -977,6 +981,11 @@ boolean game_load(
 	{
 		game_globals->map_loaded = TRUE;
 	}
+#ifdef HALO_LINUX
+	/* port: a Custom Edition map's loading screen, up from its tags' load
+	through its first structure BSP's (custom_edition_cache.c) */
+	game_loading_screen_end();
+#endif
 
 	return game_globals->map_loaded;
 }
@@ -1162,6 +1171,14 @@ void game_loading_screen_frame(
 	game_loading_screen.last_us = tick_now();
 
 	return;
+}
+
+/* whether the loading screen is up and the caller is the thread that
+draws it (a read it waits for can show it meanwhile) */
+boolean game_loading_screen_up_here(
+	void)
+{
+	return game_loading_screen.active && halo_thread_index() == game_loading_screen.thread;
 }
 
 void game_loading_screen_end(
