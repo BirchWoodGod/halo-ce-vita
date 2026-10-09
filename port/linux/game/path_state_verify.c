@@ -8,8 +8,11 @@ PATH_STATE_VERIFY_POISON; path_state_find then runs each such search a second
 time from a copy of the state cleared the original way (every byte zero but
 the header) and compares the two: the answer, the header, the nodes made, the
 heap's live entries and the hash table. The game goes on with the first
-answer. The firing position selections' nearby tests and the lines of sight
-left without their extra lines report here too (actor_firing_position.c). A difference is logged ("path state verify mismatch", the first 20)
+answer; that second search builds every surface's edges from the map, and
+each surface's edges the first takes from the search's cache are checked
+against the edges built again (path.c). The firing position selections'
+nearby tests and the lines of sight left without their extra lines report
+here too (actor_firing_position.c). A difference is logged ("path state verify mismatch", the first 20)
 and every 300 ticks "path-state-verify" counts the checks and differences so
 far, so a run that checked nothing is told from one that found nothing. The
 searches run on the tick's thread (and the offline bots' helper thread), so
@@ -39,6 +42,7 @@ static char const *const verify_kind_names[NUMBER_OF_PATH_STATE_VERIFY_KINDS] =
 	"path searches",
 	"nearby firing position answers",
 	"moot lines of sight",
+	"cached surface edges",
 };
 
 /* ---------- public code */

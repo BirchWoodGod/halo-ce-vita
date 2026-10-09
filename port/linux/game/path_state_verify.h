@@ -6,8 +6,9 @@ without clearing their whole state (path.c: path_state_new) are checked
 against a search from a fully cleared state, and the nearby firing position
 tests that search only when a position is near enough to need it
 (actor_firing_position.c) against the test that searches first, every time,
-and the firing position lines of sight whose extra lines were left uncast
-(their answers moot) against the line cast in full: path_state_verify.c
+the firing position lines of sight whose extra lines were left uncast (their
+answers moot) against the line cast in full, and the surface edges the path
+search takes from its cache against the edges built again: path_state_verify.c
 */
 
 #ifndef __PATH_STATE_VERIFY_H
@@ -33,6 +34,9 @@ enum
 	answers moot (actor_firing_position.c): cast in full, its answer one of
 	those offered and the candidate not the best with it */
 	_path_state_verify_moot_line_of_sight,
+	/* a surface's edges from the path search's cache (path.c) against the
+	edges built again from the map */
+	_path_state_verify_surface_edges,
 	NUMBER_OF_PATH_STATE_VERIFY_KINDS
 };
 
