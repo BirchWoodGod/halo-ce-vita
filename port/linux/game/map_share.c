@@ -606,14 +606,21 @@ static enum map_share_host_state map_share_server_host_state(
 		state == _network_game_server_state_ingame ? _map_share_host_in_game : _map_share_host_postgame;
 }
 
-/* whether a host sends its map to joiners of its game in progress
-(HALO_MAP_SHARE_IN_PROGRESS=0: not) */
+/* whether a host sends its map to joiners of its game in progress: a
+dedicated server does unless HALO_MAP_SHARE_IN_PROGRESS=0; a Vita (or any
+other) host only with HALO_MAP_SHARE_IN_PROGRESS=1, until its cost while it
+plays is measured on a Vita (1.1.0 beta 3; on by default in beta 4). A
+joiner asks for it either way (map_share_client_capabilities). */
 static boolean map_share_in_progress_allowed(
 	void)
 {
 	char const *value = getenv("HALO_MAP_SHARE_IN_PROGRESS");
 
+#ifdef HALO_DEDICATED_SERVER
 	return !(value && !csstrcmp(value, "0"));
+#else
+	return value && !csstrcmp(value, "1");
+#endif
 }
 
 /* Whether the host serves `name`, fingerprinted `identity`, now, to the

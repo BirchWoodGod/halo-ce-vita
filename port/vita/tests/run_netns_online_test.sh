@@ -2240,6 +2240,7 @@ INIT
 			run_copy "$1" "$m" "$2" "$cpu_a" HALO_NET_ONLINE=true HALO_NETWORK_TEST=host:$ce_name:slayer \
 				HALO_NETWORK_TEST_START=20 HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
 				HALO_NET_PLAYER_NAME="$1" HALO_CUSTOM_EDITION=1 HALO_EXIT_AFTER=$((seconds - 5)) \
+				HALO_MAP_SHARE_IN_PROGRESS=1 \
 				${HALO_TEST_MAPMID_RATE_KB:+HALO_MAP_SHARE_INGAME_RATE_KB=$HALO_TEST_MAPMID_RATE_KB}
 			hosts="$hosts $last_pid"
 			vcode=$(copy_code "$out/$1/run.log")

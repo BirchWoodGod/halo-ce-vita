@@ -107,9 +107,10 @@ chat.
 ### Known issues
 
 - The biggest fights still drop frames (see [Performance](#performance)).
-- Downloading a map to join a game under way works only when both the host
-  and the joiner have 1.1.0-beta.3 or later; with an older host or joiner,
-  join while the host is in the lobby.
+- Downloading a map to join a game under way works from dedicated servers
+  (with `sv_map_download 1`) when the joiner has 1.1.0-beta.3 or later. A
+  Vita host offers it from beta 4; until then, join a Vita's game while it
+  is in the lobby.
 - In co-op the host's Vita runs everyone's AI and the level's scripts, so it
   slows down with three or four players.
 - Master Chief's body can be missing in The Pillar of Autumn's cryo tube
@@ -356,9 +357,9 @@ Custom maps go in `ux0:data/haloce-vita/maps/`, next to the game's own:
 the map is asked "Download it from the host?" (Cross: yes; for a Custom
 Edition map, it is also offered to turn PC maps on). In the lobby, the
 host's lobby shows each download's progress, and the match waits for it. A
-Vita that joins a game already under way downloads the map first, out of
-the game, at a lower speed that leaves the players' game alone, and then
-joins it. A download that stops goes on from where it stopped next time. A joiner still needs its own Halo PC files for a Custom Edition map.
+Vita that joins a dedicated server's game already under way downloads the
+map first, out of the game, at a lower speed that leaves the players' game
+alone, and then joins it (a Vita host does this from beta 4). A download that stops goes on from where it stopped next time. A joiner still needs its own Halo PC files for a Custom Edition map.
 In a game from the public server browser the question warns that the host
 is a stranger: only accept maps from players you trust. **Map downloads**
 (Modded maps) is **Ask** (the default), **Not public games** or **Never**,
