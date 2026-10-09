@@ -83,6 +83,9 @@ void halo_custom_edition_memory_free(void *address);
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
 /* the contiguous window's bytes in blocks and free (where blocks are laid out) */
 void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
+/* one log line of what memory is in use (the C heap, the window, the
+renderer's), when a map has gone and when one is up (xbox_memory.c) */
+void platform_memory_log(const char *when, const char *map_name);
 /* where Halo PC keeps the channels of the pixels a Custom Edition bitmap
 just arrived at (an enum custom_edition_channel_order,
 port/linux/game/cache_file_formats.h), which the renderer then samples in

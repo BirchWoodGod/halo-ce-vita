@@ -891,20 +891,288 @@ static int heap_limit_refuses(size_t size)
 	return 1;
 }
 
+/* (harness, debug) HALO_HEAP_CENSUS=1: every allocation of the C heap
+(malloc, calloc, realloc; not memalign's) is remembered with the four
+callers above it, and platform_memory_log (a map unloaded or loaded) logs
+the call sites that hold the most and those whose bytes grew since the last
+census ("heap census:" lines, addresses for addr2line -f -e halo): what a
+map leaves behind, by who allocated it */
+#include <execinfo.h>
+#include <pthread.h>
+
+extern void __libc_free(void *pointer);
+
+#define HEAP_CENSUS_FRAMES 4
+#define HEAP_CENSUS_BUCKETS (1 << 20)
+#define HEAP_CENSUS_NODES (1 << 22)
+#define HEAP_CENSUS_SITES (1 << 16)
+
+struct heap_census_node
+{
+	void *pointer;
+	unsigned int size;
+	unsigned int site;
+	struct heap_census_node *next;
+};
+
+struct heap_census_site
+{
+	void *frames[HEAP_CENSUS_FRAMES];
+	unsigned long bytes, count, reported_bytes;
+};
+
+static struct
+{
+	int state; /* 0 not asked yet, 1 on, -1 off */
+	pthread_mutex_t lock;
+	struct heap_census_node **buckets;
+	struct heap_census_node *nodes, *free_nodes;
+	unsigned long nodes_used;
+	struct heap_census_site *sites;
+	unsigned long site_count;
+} heap_census = { 0, PTHREAD_MUTEX_INITIALIZER };
+static __thread int heap_census_busy;
+
+/* (HALO_HEAP_CENSUS_FILE=path) every site's bytes, count and callers at
+the exit, one line each, for comparing two builds */
+static void heap_census_write(void)
+{
+	const char *path = getenv("HALO_HEAP_CENSUS_FILE");
+	FILE *file;
+	unsigned long index;
+
+	if (!path || !*path || heap_census.state <= 0)
+		return;
+	heap_census_busy = 1;
+	file = fopen(path, "w");
+	if (file)
+	{
+		pthread_mutex_lock(&heap_census.lock);
+		for (index = 0; index < HEAP_CENSUS_SITES; index++)
+		{
+			struct heap_census_site *site = &heap_census.sites[index];
+
+			if (site->frames[0] && site->bytes)
+				fprintf(file, "%lu %lu %p %p %p %p\n", site->bytes, site->count, site->frames[0], site->frames[1],
+					site->frames[2], site->frames[3]);
+		}
+		pthread_mutex_unlock(&heap_census.lock);
+		fclose(file);
+	}
+	heap_census_busy = 0;
+}
+
+static int heap_census_on(void)
+{
+	if (heap_census.state == 0)
+	{
+		const char *setting;
+
+		heap_census_busy = 1;
+		setting = getenv("HALO_HEAP_CENSUS");
+		heap_census.state = -1;
+		if (setting && atoi(setting))
+		{
+			void *frames[2];
+
+			/* (backtrace loads its unwinder, which allocates, now) */
+			backtrace(frames, 2);
+			heap_census.buckets = mmap(NULL, HEAP_CENSUS_BUCKETS * sizeof(*heap_census.buckets),
+				PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			heap_census.nodes = mmap(NULL, HEAP_CENSUS_NODES * sizeof(*heap_census.nodes), PROT_READ | PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			heap_census.sites = mmap(NULL, HEAP_CENSUS_SITES * sizeof(*heap_census.sites), PROT_READ | PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			if (heap_census.buckets != MAP_FAILED && heap_census.nodes != MAP_FAILED &&
+				heap_census.sites != MAP_FAILED)
+			{
+				heap_census.state = 1;
+				atexit(heap_census_write);
+			}
+		}
+		heap_census_busy = 0;
+	}
+	return heap_census.state > 0;
+}
+
+static unsigned long heap_census_bucket(const void *pointer)
+{
+	return ((unsigned long)pointer >> 4) * 2654435761UL % HEAP_CENSUS_BUCKETS;
+}
+
+static void heap_census_add(void *pointer, size_t size)
+{
+	void *frames[HEAP_CENSUS_FRAMES + 2];
+	int count, index;
+	unsigned long site, hash = 0;
+	struct heap_census_node *node;
+
+	if (!pointer || heap_census_busy || !heap_census_on())
+		return;
+	heap_census_busy = 1;
+	memset(frames, 0, sizeof(frames));
+	count = backtrace(frames, HEAP_CENSUS_FRAMES + 2);
+	(void)count;
+	pthread_mutex_lock(&heap_census.lock);
+	/* (frames[0] is this, frames[1] the wrapper) */
+	for (index = 0; index < HEAP_CENSUS_FRAMES; index++)
+		hash = (hash ^ (unsigned long)frames[index + 2]) * 16777619UL;
+	for (site = hash % HEAP_CENSUS_SITES;; site = (site + 1) % HEAP_CENSUS_SITES)
+	{
+		struct heap_census_site *entry = &heap_census.sites[site];
+
+		if (!entry->count && !entry->bytes && !entry->frames[0])
+		{
+			memcpy(entry->frames, frames + 2, sizeof(entry->frames));
+			heap_census.site_count++;
+			break;
+		}
+		if (!memcmp(entry->frames, frames + 2, sizeof(entry->frames)))
+			break;
+	}
+	node = heap_census.free_nodes;
+	if (node)
+		heap_census.free_nodes = node->next;
+	else if (heap_census.nodes_used < HEAP_CENSUS_NODES)
+		node = &heap_census.nodes[heap_census.nodes_used++];
+	if (node)
+	{
+		unsigned long bucket = heap_census_bucket(pointer);
+
+		node->pointer = pointer;
+		node->size = (unsigned int)size;
+		node->site = (unsigned int)site;
+		node->next = heap_census.buckets[bucket];
+		heap_census.buckets[bucket] = node;
+		heap_census.sites[site].bytes += size;
+		heap_census.sites[site].count++;
+	}
+	pthread_mutex_unlock(&heap_census.lock);
+	heap_census_busy = 0;
+}
+
+static void heap_census_remove(void *pointer)
+{
+	struct heap_census_node **link, *node;
+
+	if (!pointer || heap_census.state <= 0)
+		return;
+	pthread_mutex_lock(&heap_census.lock);
+	for (link = &heap_census.buckets[heap_census_bucket(pointer)]; (node = *link) != NULL; link = &node->next)
+	{
+		if (node->pointer == pointer)
+		{
+			*link = node->next;
+			heap_census.sites[node->site].bytes -= node->size;
+			heap_census.sites[node->site].count--;
+			node->next = heap_census.free_nodes;
+			heap_census.free_nodes = node;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&heap_census.lock);
+}
+
+void platform_heap_census_log(const char *when)
+{
+	enum { TOP = 24 };
+	unsigned long top[TOP], grown[TOP], index, slot, total = 0;
+	long growth_total = 0;
+	int list;
+
+	if (heap_census.state <= 0)
+		return;
+	memset(top, 0xff, sizeof(top));
+	memset(grown, 0xff, sizeof(grown));
+	pthread_mutex_lock(&heap_census.lock);
+	for (index = 0; index < HEAP_CENSUS_SITES; index++)
+	{
+		struct heap_census_site *site = &heap_census.sites[index];
+		long growth = (long)site->bytes - (long)site->reported_bytes;
+
+		if (!site->frames[0])
+			continue;
+		total += site->bytes;
+		growth_total += growth;
+		for (slot = 0; slot < TOP; slot++)
+		{
+			if (top[slot] == ~0UL || heap_census.sites[top[slot]].bytes < site->bytes)
+			{
+				memmove(top + slot + 1, top + slot, (TOP - slot - 1) * sizeof(top[0]));
+				top[slot] = index;
+				break;
+			}
+		}
+		for (slot = 0; growth > 0 && slot < TOP; slot++)
+		{
+			if (grown[slot] == ~0UL ||
+				(long)heap_census.sites[grown[slot]].bytes - (long)heap_census.sites[grown[slot]].reported_bytes < growth)
+			{
+				memmove(grown + slot + 1, grown + slot, (TOP - slot - 1) * sizeof(grown[0]));
+				grown[slot] = index;
+				break;
+			}
+		}
+	}
+	platform_log("heap census %s: %lu KB in %lu sites, %+ld KB since the last census", when, total / 1024,
+		heap_census.site_count, growth_total / 1024);
+	for (list = 0; list < 2; list++)
+	{
+		unsigned long *sites = list ? grown : top;
+
+		for (slot = 0; slot < TOP && sites[slot] != ~0UL; slot++)
+		{
+			struct heap_census_site *site = &heap_census.sites[sites[slot]];
+
+			platform_log("heap census %s %s: %lu KB (%+ld KB) in %lu: %p %p %p %p", when, list ? "grew" : "holds",
+				site->bytes / 1024, ((long)site->bytes - (long)site->reported_bytes) / 1024, site->count,
+				site->frames[0], site->frames[1], site->frames[2], site->frames[3]);
+		}
+	}
+	for (index = 0; index < HEAP_CENSUS_SITES; index++)
+		heap_census.sites[index].reported_bytes = heap_census.sites[index].bytes;
+	pthread_mutex_unlock(&heap_census.lock);
+}
+
 void *malloc(size_t size)
 {
-	return heap_limit_refuses(size) ? NULL : __libc_malloc(size);
+	void *pointer = heap_limit_refuses(size) ? NULL : __libc_malloc(size);
+
+	heap_census_add(pointer, size);
+	return pointer;
 }
 
 void *calloc(size_t count, size_t size)
 {
-	return count && size > (size_t)-1 / count ? NULL :
+	void *pointer = count && size > (size_t)-1 / count ? NULL :
 		heap_limit_refuses(count * size) ? NULL : __libc_calloc(count, size);
+
+	heap_census_add(pointer, count * size);
+	return pointer;
 }
 
 void *realloc(void *pointer, size_t size)
 {
-	return heap_limit_refuses(size) ? NULL : __libc_realloc(pointer, size);
+	void *result;
+
+	if (heap_limit_refuses(size))
+		return NULL;
+	result = __libc_realloc(pointer, size);
+	if (result || !size)
+		heap_census_remove(pointer);
+	heap_census_add(result, size);
+	return result;
+}
+
+void free(void *pointer)
+{
+	heap_census_remove(pointer);
+	__libc_free(pointer);
+}
+#else
+void platform_heap_census_log(const char *when)
+{
+	(void)when;
 }
 #endif
 

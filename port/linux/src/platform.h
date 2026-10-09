@@ -159,6 +159,12 @@ void halo_custom_edition_memory_free(void *address);
 void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
 /* the contiguous window's bytes in blocks and free (where blocks are laid out) */
 void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
+/* One log line ("memory: <when> <map>: C heap ...") of the C heap, the
+window and, where the renderer has set platform_memory_renderer_report (the
+Vita's GXM device), its texture pool, video memory and programs: a session
+that grows from map to map shows it map by map */
+void platform_memory_log(const char *when, const char *map_name);
+extern void (*platform_memory_renderer_report)(char *text, unsigned long size);
 /* Which textures hold their channels where Halo PC keeps them, for the same
 (xbox_textures.c; also declared for the game there) */
 void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order);

@@ -568,6 +568,11 @@ void scenario_tags_unload(
 	void)
 {
 #ifdef HALO_LINUX
+	/* (platform_memory_log: what the map leaves behind) */
+	char unloaded_map[NUMBEROF(cache_files_loaded_map)];
+
+	csstrncpy(unloaded_map, cache_files_loaded_map, NUMBEROF(unloaded_map) - 1);
+	unloaded_map[NUMBEROF(unloaded_map) - 1] = 0;
 	cache_files_loaded_map[0] = 0;
 #endif
 	sound_cache_close();
@@ -601,6 +606,10 @@ void scenario_tags_unload(
 	global_tag_instances = NULL;
 #ifdef HALO_LINUX
 	halo_loaded_tag_count = 0;
+	if (unloaded_map[0])
+	{
+		platform_memory_log("unloaded", unloaded_map);
+	}
 #endif
 
 	return;
