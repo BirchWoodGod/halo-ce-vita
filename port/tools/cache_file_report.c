@@ -323,6 +323,7 @@ static int report_custom_edition_cache(
 			}
 			printf("shaders_renumbered: %" PRId32 "\n", conversion.shaders_retyped);
 			printf("chicago_extended_shaders_converted: %" PRId32 "\n", conversion.chicago_extended_shaders);
+			printf("shaders_mistyped: %" PRId32 "\n", conversion.shaders_mistyped);
 			printf("bitmaps_prepared: %" PRId32 "\n", conversion.bitmaps_prepared);
 			printf("script_nodes_reduced: %" PRId32 "\n", conversion.script_nodes_reduced);
 			printf("animation_overlays_disabled: %" PRId32 "\n", conversion.animation_overlays_disabled);

@@ -354,6 +354,8 @@ struct custom_edition_conversion_report
 	chicago extended shaders made transparent chicago ones */
 	int32_t shaders_retyped;
 	int32_t chicago_extended_shaders;
+	/* shaders whose type was not their group's, given their group's */
+	int32_t shaders_mistyped;
 	/* bitmaps given their own tag and the state of a bitmap not yet drawn */
 	int32_t bitmaps_prepared;
 	/* 1 when the scenario's script syntax nodes, upgraded by OpenSauce, were

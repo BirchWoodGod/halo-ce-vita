@@ -931,13 +931,13 @@ def test_chicago_extended_shaders_become_chicago_shaders(report_tool, tmp_path):
         assert tags[shader - BASE + 0x64:shader - BASE + 0x6C] == bytes(8)
 
 
-def test_a_shader_with_another_groups_type_is_rejected(report_tool, tmp_path):
+def test_a_shader_with_another_groups_type_is_given_its_groups(report_tool, tmp_path):
     cache = Map(shaders=[("swat", {"type": 7})])
-    returncode, report, _ = converted(report_tool, cache, tmp_path)
-    assert returncode == 1
-    assert report["load"] == "ok"
-    assert report["convert"] == "a shader's type is not the one Custom Edition gives its group"
-    assert report["convert_problem_tag"] == str(cache.tag_indices["test\\shader 0"])
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["shaders_mistyped"] == "1"
+    shader = cache.addresses["test\\shader 0"]
+    assert u16_at(tags, shader + 0x24) == SHADER_TYPES["swat"][1]
 
 
 def test_bitmaps_name_their_own_tag(report_tool, tmp_path):

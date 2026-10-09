@@ -3589,11 +3589,17 @@ enum cache_file_status custom_edition_cache_convert(
 				&state,
 				read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET),
 				group_tag == TRANSPARENT_CHICAGO_EXTENDED_GROUP_TAG ? TRANSPARENT_CHICAGO_EXTENDED_BYTES : SHADER_BYTES,
-				&offset) ||
-			read_s16(tag_cache + offset + SHADER_TYPE_OFFSET) != shader_type->custom_edition_type)
+				&offset))
 		{
 			report->problem_tag_index = tag_index;
 			return _cache_file_status_bad_shader_type;
+		}
+		/* (the group says what the shader is; a type field saying otherwise,
+		as map protection leaves them, is given the group's: DamnationCE,
+		xshxdex98, CC0, 2ba7b1b8) */
+		if (read_s16(tag_cache + offset + SHADER_TYPE_OFFSET) != shader_type->custom_edition_type)
+		{
+			report->shaders_mistyped++;
 		}
 		write_u16(tag_cache + offset + SHADER_TYPE_OFFSET, (uint16_t)shader_type->type);
 		if (shader_type->type != shader_type->custom_edition_type)
