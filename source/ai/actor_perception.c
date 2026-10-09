@@ -6601,14 +6601,14 @@ static boolean actor_perception_lod_resting(
 
 /* (port) hints (__builtin_prefetch) for the props the walk below reads next:
 an actor's props are a list (next_prop_index) of 312-byte datums spread over
-the props' array, and the walk reads and writes fields across all of a
+the props' array, and the walk reads and writes fields across most of a
 prop's cache lines every tick (its timers, then its state); in b30's beach
 fight ~250 props a tick, met cold (~1600 cache misses a tick in callgrind's
-model, where the walk itself executes ~60 K instructions). Each step hints
-the next prop's lines and the one after it (whose index the next prop holds,
-hinted the step before), so the misses overlap one another and the work. A
-hint reads nothing the game sees: the walk, its order and every value read
-are as before. */
+model, where the walk itself executes ~60 K instructions). The walk's first
+step hints the next two props, each later step the one after the next (whose
+index the next prop holds, hinted the step before), so the misses overlap
+one another and the work. A hint reads nothing the game sees: the walk, its
+order and every value read are as before. */
 static __inline char const *actor_perception_prop_address(
 	long prop_index)
 {
@@ -6626,14 +6626,17 @@ static __inline void actor_perception_prefetch_prop(
 {
 	if (prop)
 	{
-		unsigned short offset;
-
-		/* (the Vita's Cortex-A9 has 32-byte lines; a datum 312 bytes long
-		at any alignment spans up to eleven) */
-		for (offset = 0; offset < sizeof(struct prop_datum); offset += 32)
-		{
-			__builtin_prefetch(prop + offset, 1);
-		}
+		/* (the lines the walk reads, 32 bytes apart for the Vita's Cortex-A9,
+		at any alignment: up to body_position, and from distance on; the
+		positions and vectors between are the refreshes') */
+		__builtin_prefetch(prop, 1);
+		__builtin_prefetch(prop + 32, 1);
+		__builtin_prefetch(prop + 64, 1);
+		__builtin_prefetch(prop + 96, 1);
+		__builtin_prefetch(prop + 128, 1);
+		__builtin_prefetch(prop + 160, 1);
+		__builtin_prefetch(prop + offsetof(struct prop_datum, body_position) - 1, 1);
+		__builtin_prefetch(prop + offsetof(struct prop_datum, distance), 1);
 		__builtin_prefetch(prop + sizeof(struct prop_datum) - 1, 1);
 	}
 }
@@ -6644,8 +6647,11 @@ static __inline void actor_perception_prefetch_props(
 {
 	char const *next = actor_perception_prop_address(iterator->next_index);
 
-	actor_perception_prefetch_prop(next);
-	if (next && !first)
+	if (first)
+	{
+		actor_perception_prefetch_prop(next);
+	}
+	if (next)
 	{
 		actor_perception_prefetch_prop(
 			actor_perception_prop_address(((struct prop_datum const *)next)->next_prop_index));
