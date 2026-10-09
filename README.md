@@ -168,30 +168,58 @@ another version is told which one is newer.
 
 ### Halo PC files
 
-Online play's menus and the Custom Edition maps need three files from your
-own copy of Halo on PC: **`bitmaps.map`, `sounds.map` and `loc.map`**, in
-`ux0:data/haloce-vita/maps/`. They come from any of these:
+Online play's menus (the server browser, Join by code, Create Game >
+Internet) and Custom Edition maps need **3 files from the PC version of
+Halo**: `bitmaps.map`, `sounds.map` and `loc.map`. They aren't included in
+this project. Get them **one** of these ways:
 
-1. **The Halo Custom Edition installer** (easiest): copy
-   `halocesetup_en_1.00.exe` (or another language's, about 170 MB) to
-   `ux0:data/haloce-vita/`. Its name must start with `halocesetup` and end
-   in `.exe`: rename a download called something else. At the next start
-   the game takes the three files out of it by itself (under a minute; a
-   progress line shows, Circle stops it), asks whether to delete the
-   installer to free the space, then restarts itself. Nothing to unpack on a
-   PC.
-2. **Halo: The Master Chief Collection** (Steam): copy the three from
+#### Option A: the Halo Custom Edition installer (easiest)
+
+1. Download the free Halo Custom Edition installer,
+   `halocesetup_en_1.00.exe` (about 170 MB), for example from
+   [HaloMaps](https://www.halomaps.org/hce/detail.cfm?fid=410).
+2. Copy it to `ux0:data/haloce-vita/` on the Vita (over VitaShell's FTP or
+   USB). You don't run it on a PC. If your download has another name, rename
+   it so it starts with `halocesetup` and ends with `.exe`.
+3. Start Halo. It finds the installer and takes the 3 files out of it (under
+   a minute; Circle cancels), asks whether to delete the installer, and
+   restarts.
+
+#### Option B: Halo: The Master Chief Collection (Steam)
+
+1. On the PC, open
    `steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition/`.
-   Take them from the `custom_edition` folder, not the ones directly in
-   `halo1/maps`, which are MCC's own and do not work.
-3. **A Halo Custom Edition install** (PC): copy the three from its `maps`
-   folder (`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`).
+   Use this `custom_edition` folder: the files directly in `halo1/maps` are
+   MCC's own and don't work.
+2. Copy `bitmaps.map`, `sounds.map` and `loc.map` from it to
+   `ux0:data/haloce-vita/maps/` on the Vita.
 
-The Windows install tool does any of the three for you. The game checks each
-file; the settings panel's **Modded maps** page says which are missing,
-and its **Extract PC files** row takes them out of an installer again
-(after a start where you stopped it, say). None of Bungie's files are in
-this project.
+#### Option C: Halo Custom Edition installed on a PC
+
+Copy the same 3 files from its `maps` folder (usually
+`C:\Program Files (x86)\Microsoft Games\Halo Custom Edition\maps\`) to
+`ux0:data/haloce-vita/maps/` on the Vita.
+
+The [Windows install tool](#easy-install-windows-tool) can do any of these
+for you.
+
+#### Then turn on online play
+
+1. In the game, hold **SELECT + START** to open the settings panel.
+2. Go to **Multiplayer** and set **Connection** to **Online**.
+3. Restart the game.
+4. On the main menu, open **Multiplayer**: **Join Game > Internet** is the
+   server browser, **Join by code** joins a friend's code, and **Create Game >
+   Internet** hosts.
+
+#### If the online menus don't show up
+
+The settings panel's **Multiplayer** tab says why: which file is missing,
+the folder the game looked in, or that a file isn't the Custom Edition one.
+The **Modded maps** page lists the missing files, and its **Extract PC
+files** row takes them out of an installer again (if you stopped it, say).
+
+None of Bungie's files are in this project.
 
 ### Movies (optional)
 
@@ -224,7 +252,8 @@ Movies added or removed later are noticed at the next start. A movie is
 scaled to fill the screen at the shape its file gives, with black bars only
 where that shape needs them: the Xbox's 4:3 movies fill the height, and any
 16:9 encoding fills the width (640x360, 848x480, 960x544, or 640x480 made
-with ffmpeg `-aspect 16:9`). Any size up to 960x544 plays.
+with ffmpeg `-aspect 16:9`). Any size up to 960x544 plays (on 1.1.0 beta 1
+and 2, keep movies 640 wide: wider ones can play without a picture, #38).
 `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
 
 ## Multiplayer
