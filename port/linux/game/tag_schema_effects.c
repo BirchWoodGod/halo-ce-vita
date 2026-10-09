@@ -2889,7 +2889,7 @@ static boolean ui_widget_check(
 	widget_walk = tag_validate_scratch(_tag_validate_scratch_widget_walk, sizeof(*widget_walk));
 	if (!widget_walk)
 	{
-		tag_validate_refuse(validation, "cannot be checked: there is no memory for the check");
+		tag_validate_refuse_for_memory(validation);
 		return FALSE;
 	}
 	widget_walk->frames[0].widget = base;

@@ -205,6 +205,9 @@ static struct
 	boolean custom_edition;
 	char map_name[64];
 	long corrections;
+	/* (port) the last check was refused for want of working memory, not
+	for its tags (tag_validate_out_of_memory) */
+	boolean out_of_memory;
 } tag_validate_globals;
 
 /* (port) a bit for each byte of what is being checked (the tags, or a
@@ -224,6 +227,12 @@ static struct
 	for the heap's */
 	byte *scratch;
 	unsigned long scratch_size;
+	/* (port) the tag cache's free bytes past them, which the checks'
+	working memory (tag_validate_scratch) is taken from before the C heap:
+	from free to free_end, free_used of them given out (given back filled) */
+	byte *free;
+	byte *free_end;
+	unsigned long free_used;
 } tag_validate_claims;
 
 static char const tag_validate_empty_name[] = "";
@@ -434,6 +443,11 @@ static boolean claims_acquire(
 		tag_validate_claims.scratch = aligned;
 		tag_validate_claims.scratch_size = bytes;
 		tag_validate_claims.bits = (unsigned long *)aligned;
+		/* (the rest for the checks' working memory) */
+		tag_validate_claims.free = (byte *)(((unsigned long)(aligned + bytes) + 7) & ~7UL);
+		tag_validate_claims.free_end = scratch_end;
+		if (tag_validate_claims.free > scratch_end)
+			tag_validate_claims.free = scratch_end;
 	}
 	else
 	{
@@ -461,13 +475,22 @@ static void scratch_release(
 {
 	short slot;
 
-	/* (the game's free halts on NULL) */
+	/* (the game's free halts on NULL; a block in the tag cache's free part
+	is given back filled, below) */
 	for (slot = 0; slot < NUMBER_OF_TAG_VALIDATE_SCRATCH_SLOTS; slot++)
 	{
-		if (tag_validate_scratch_blocks[slot])
-			free(tag_validate_scratch_blocks[slot]);
+		byte *block = tag_validate_scratch_blocks[slot];
+
+		if (block && !(tag_validate_claims.free && block >= tag_validate_claims.free &&
+			block < tag_validate_claims.free_end))
+		{
+			free(block);
+		}
 		tag_validate_scratch_blocks[slot] = NULL;
 	}
+	if (tag_validate_claims.free_used)
+		memset(tag_validate_claims.free, TAG_CACHE_FREE_FILL, tag_validate_claims.free_used);
+	tag_validate_claims.free_used = 0;
 
 	return;
 }
@@ -1494,7 +1517,7 @@ boolean tag_validate_tags(
 		struct tag_validation validation;
 
 		validation_begin(&validation, tag_header, tag_data_size, TAG_CACHE_SIZE, FALSE, map_name);
-		tag_validate_refuse(&validation, "cannot be checked: there is no memory for the check");
+		tag_validate_refuse_for_memory(&validation);
 		return FALSE;
 	}
 	result = validate_tags_in(tag_header, tag_data_size, file_length, map_name);
@@ -1524,7 +1547,15 @@ boolean tag_validate_custom_edition_tags(
 		struct tag_validation validation;
 
 		validation_begin(&validation, tag_header, loaded_size, tag_cache_size, TRUE, map_name);
-		tag_validate_refuse(&validation, "cannot be checked: its tag cache is not one this build has, or there is no memory for the check");
+		if (loaded_size < 0 || (unsigned long)loaded_size > tag_cache_size ||
+			tag_cache_size > TAG_VALIDATE_MAXIMUM_TAG_CACHE_SIZE)
+		{
+			tag_validate_refuse(&validation, "cannot be checked: its tag cache is not one this build has");
+		}
+		else
+		{
+			tag_validate_refuse_for_memory(&validation);
+		}
 		return FALSE;
 	}
 	result = validate_custom_edition_tags_in(tag_header, loaded_size, tag_cache_size, file_ranges, file_range_count,
@@ -1554,6 +1585,8 @@ boolean tag_validate_structure_bsp(
 	byte *scratch = NULL;
 	byte *scratch_end = NULL;
 
+	tag_validate_globals.out_of_memory = FALSE;
+
 	/* (a bsp loads to the top of the tag cache, after the tags: the free
 	part is between them, or after the bsp) */
 	if (in_tag_cache)
@@ -1578,7 +1611,7 @@ boolean tag_validate_structure_bsp(
 
 		validation_new(&validation, base, (unsigned long)size);
 		validation.tag_index = tag_index;
-		tag_validate_refuse(&validation, "cannot be checked: there is no memory for the check");
+		tag_validate_refuse_for_memory(&validation);
 		return FALSE;
 	}
 	corrections = tag_validate_globals.corrections;
@@ -1655,10 +1688,26 @@ void *tag_validate_scratch(
 {
 	if (slot < 0 || slot >= NUMBER_OF_TAG_VALIDATE_SCRATCH_SLOTS)
 		return NULL;
-	/* (the game's malloc and free: cseries.h's debug allocator) */
+	/* (the tag cache's free part past the claims when it has room: the C
+	heap can be all but full when a map loads after a long session (the
+	menus' widget walk, 256 KB, found none on the Vita, Oct 8, and the menu
+	map was refused); otherwise the game's malloc and free: cseries.h's
+	debug allocator) */
 	if (!tag_validate_scratch_blocks[slot])
 	{
-		tag_validate_scratch_blocks[slot] = malloc(size ? size : 1);
+		unsigned long bytes = ((size ? size : 1) + 7) & ~7UL;
+
+		if (tag_validate_claims.free &&
+			bytes <= (unsigned long)(tag_validate_claims.free_end - tag_validate_claims.free) -
+				tag_validate_claims.free_used)
+		{
+			tag_validate_scratch_blocks[slot] = tag_validate_claims.free + tag_validate_claims.free_used;
+			tag_validate_claims.free_used += bytes;
+		}
+		else
+		{
+			tag_validate_scratch_blocks[slot] = malloc(size ? size : 1);
+		}
 		if (tag_validate_scratch_blocks[slot])
 			memset(tag_validate_scratch_blocks[slot], 0, size ? size : 1);
 	}
@@ -1674,6 +1723,21 @@ void tag_validate_keep_claims(
 	tag_validate_keep_claims_flag = keep;
 
 	return;
+}
+
+void tag_validate_refuse_for_memory(
+	struct tag_validation *validation)
+{
+	tag_validate_refuse(validation, "cannot be checked: there is no memory for the check");
+	tag_validate_globals.out_of_memory = TRUE;
+
+	return;
+}
+
+boolean tag_validate_out_of_memory(
+	void)
+{
+	return tag_validate_globals.out_of_memory;
 }
 
 void tag_validate_refuse(

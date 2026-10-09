@@ -1003,7 +1003,7 @@ static boolean animation_graph_check(
 	}
 	if (!states)
 	{
-		tag_validate_refuse(validation, "cannot be checked: there is no memory for the check");
+		tag_validate_refuse_for_memory(validation);
 		return FALSE;
 	}
 	memset(states, 0, (size_t)graph->animations.count);

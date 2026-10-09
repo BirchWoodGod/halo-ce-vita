@@ -24,6 +24,7 @@ their Cg; they are never compiled.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -149,9 +150,14 @@ static int memory_os_allocate(int user, unsigned int size, const char *name, str
 
 	(void)user;
 	(void)name;
-	block->base = malloc(size);
-	if (!block->base)
+	/* (mapped, not the C heap's: on the Vita these are memory blocks of
+	their own, and the logs' C heap figures stay the Vita's) */
+	block->base = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (block->base == MAP_FAILED)
+	{
+		block->base = NULL;
 		return 0;
+	}
 	block->uid = ++uids;
 	block->size = size;
 	return 1;
@@ -159,7 +165,8 @@ static int memory_os_allocate(int user, unsigned int size, const char *name, str
 
 static void memory_os_free(struct block *block)
 {
-	free(block->base);
+	if (block->base)
+		munmap(block->base, block->size);
 }
 
 static long memory_os_free_kb(int user)
@@ -322,6 +329,18 @@ void vgxm_pool_reset(void)
 	if (!pool_floor)
 		pool_floor = 65536 * 2;
 	pool_forget();
+}
+
+unsigned long vgxm_pool_held(void)
+{
+	return pool_held();
+}
+
+unsigned long vgxm_pool_release(void)
+{
+	if (!pool_floor)
+		pool_floor = 65536 * 2;
+	return pool_release();
 }
 
 int vgxm_pool_recycle(void **base, unsigned long *size)

@@ -188,7 +188,7 @@ once hung its renderer (triage/live-status.md; on the hardware the GPU has
 no such cache). The oldest is freed first when the cache is full, and the
 whole cache when CDRAM runs out (target_memory_get, pool_part_make,
 vgxm_memory_trim). */
-#define SCREEN_BLOCK_CACHE_BYTES (16u * 1024 * 1024)
+#define SCREEN_BLOCK_CACHE_BYTES (8u * 1024 * 1024)
 #define SCREEN_BLOCK_CACHE_COUNT 24
 
 static struct
@@ -498,8 +498,9 @@ static struct pool_part pool_segments[POOL_SEGMENTS], pool_jumbo[POOL_JUMBO_BLOC
 /* the next free offset, the offset a reset goes back to (what the
 sequential indices take), the large textures' bytes */
 static unsigned int pool_offset, pool_floor, pool_jumbo_bytes;
-/* the segments moved by pool_demote / pool_promote */
+/* the segments moved by pool_demote / pool_promote; the pool's releases */
 static unsigned long pool_moves[2];
+static unsigned long pool_releases;
 
 /* The ring (pool_recycle). Once the pool has been filled to its end it is
 filled again from its start, a segment at a time: the next segment's
@@ -613,6 +614,41 @@ static void pool_forget(void)
 	pool_offset = pool_floor;
 	pool_ring_lap = 0;
 	pool_ring_clear = 0;
+}
+
+/* (the GPU idle; a map gone) every allocation forgotten and every part
+but the first segment freed - CDRAM ones too, which pool_forget keeps -
+to be made again as the next map fills the pool: a pool grown to a large
+map's 56 MB otherwise held all of CDRAM but the targets' headroom for the
+rest of the session (the owner's Vita, beta.2, Oct 8: 14 segments held,
+then a live change's depth target and, after joining a game on carousel, a
+texture pool segment found no CDRAM, and every texture failed). The
+CDRAM bytes given back */
+/* the bytes the pool's parts hold (CDRAM and user RAM) */
+static unsigned long pool_held(void)
+{
+	unsigned long held = pool_jumbo_bytes;
+	int index;
+
+	for (index = 0; index < POOL_SEGMENTS; index++)
+		held += pool_segments[index].memory.base ? pool_segments[index].memory.size : 0;
+	return held;
+}
+
+static unsigned long pool_release(void)
+{
+	unsigned long freed = 0;
+	int index;
+
+	pool_forget();
+	for (index = 1; index < POOL_SEGMENTS; index++)
+		if (pool_segments[index].memory.base)
+		{
+			freed += pool_segments[index].user ? 0 : pool_segments[index].memory.size;
+			pool_part_free(&pool_segments[index]);
+		}
+	pool_releases++;
+	return freed;
 }
 
 /* (the GPU idle) the pool full ahead of the next allocation: the next
@@ -784,11 +820,13 @@ static int memory_census_line(char *text, unsigned long size, int part)
 		else if (pool_segments[index].memory.base)
 			cdram_segments++;
 	}
-	length = snprintf(text, size, "texture pool: %u KB decoded (+%u KB large), segments %u in CDRAM, %u in user RAM "
+	length = snprintf(text, size, "texture pool: filled to %u KB (+%u KB large), segments %u in CDRAM, %u in user RAM "
 		"(%lu KB), %u not made; headroom kept for the targets %lu KB; segments moved to user RAM %lu, back to CDRAM %lu",
 		pool_offset / 1024, pool_jumbo_bytes / 1024, cdram_segments, user_segments,
 		memory_bytes[_memory_pool_user] / 1024, POOL_SEGMENTS - cdram_segments - user_segments,
 		memory_target_headroom() / 1024, pool_moves[0], pool_moves[1]);
+	if (pool_releases && length > 0 && (unsigned long)length < size)
+		length += snprintf(text + length, size - length, "; given back at map changes %lu times", pool_releases);
 	if (pool_ring_recycled && length > 0 && (unsigned long)length < size)
 		length += snprintf(text + length, size - length, "; segments recycled %lu (filled again from the start)",
 			pool_ring_recycled);

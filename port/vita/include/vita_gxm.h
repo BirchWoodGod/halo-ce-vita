@@ -51,6 +51,11 @@ void *vgxm_worker_alloc(unsigned long size, unsigned long alignment);
 void *vgxm_pool_alloc(unsigned long size, unsigned long alignment);
 /* waits for the GPU and forgets every pool allocation */
 void vgxm_pool_reset(void);
+/* as vgxm_pool_reset, and every segment but the first freed (a map gone):
+the CDRAM bytes given back */
+unsigned long vgxm_pool_release(void);
+/* the bytes the pool's segments and large blocks hold */
+unsigned long vgxm_pool_held(void);
 /* the pool full: waits for the GPU and frees the pool's next segment (the
 oldest allocations, from the start again past the end), its memory in
 *base and *size (0 if it had none) for what was decoded there to be
