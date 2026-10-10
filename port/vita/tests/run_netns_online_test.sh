@@ -324,7 +324,7 @@
 #            now and then (HALO_NETWORK_TEST_SHOOT). The server's sv_items
 #            (every 10 s) must show in the SWAT games no weapon but the human
 #            pistol, lying about or carried (no plasma pistol, no grenade, no
-#            overshield), every player with that pistol alone, no shield and
+#            power-up), every player with that pistol alone, no shield and
 #            no grenades; in Team Snipers no weapon but the sniper rifle; in
 #            Big Team the map's Warthogs, Ghosts and Scorpions; in Team
 #            Slayer players starting with an assault rifle (Battle Creek's own
@@ -2168,8 +2168,8 @@ for g in games[:len(WANTED)]:
         continue
     alive = [p for p in g["players"] if p["weapons"]]
     if kind(name) in ("swat", "team_swat"):
-        if weapons != [PISTOL] or any("grenade" in k or "shield" in k for k in kinds):
-            fail("%s had items other than the pistol and powerups: %s" % (name, ", ".join(kinds)))
+        if kinds != [PISTOL]:
+            fail("%s had items other than the pistol (no grenades or power-ups): %s" % (name, ", ".join(kinds)))
         if lying == 0:
             fail("%s had no pistols lying about (the map's weapons)" % name)
         if shields != [0.0] or any(p["shield"] != 0.0 for p in g["players"]):
@@ -2272,8 +2272,8 @@ for name in ("joiner2", "joiner", "joiner3"):
                 fail("%s saw grenades in %s: %s" % (name, game, grenades))
             if len(carried) != 1:
                 fail("%s saw %d kinds of weapons carried in %s" % (name, len(carried), game))
-            if not old and (census_weapons != [PISTOL] or [c for c in census_kinds if "grenade" in c or "shield" in c]):
-                fail("%s had items other than the pistol and powerups in %s: %s" % (name, game, census_kinds))
+            if not old and census_kinds != [PISTOL]:
+                fail("%s had items other than the pistol (no grenades or power-ups) in %s: %s" % (name, game, census_kinds))
             if carried and names.get(carried[0]) != PISTOL:
                 fail("%s's players carried %s in %s, not the pistol" % (name, names.get(carried[0], carried[0]), game))
             if hurt == 0:
