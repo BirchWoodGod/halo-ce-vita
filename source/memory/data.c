@@ -417,6 +417,19 @@ long datum_new(
 		absolute_index++;
 		header = (struct datum_header *)((byte *)header+size);
 	}
+#ifdef HALO_LINUX
+	/* port (from OpenCE, MrBruh's "Improve performance by ~80% with many
+	enemies"): none free from first_free_absolute_index to where the search
+	ended (the array's end, or a local game's limit), and none before it, as
+	ever: the next search starts there until a datum is deleted (datum_delete
+	lowers it, as the render epoch's late deletes do), rather than walking a
+	full array again. A full particle array was walked from where its last
+	new particle went for every particle a fight's effects asked for. The same
+	slot is found as before; only first_free_absolute_index differs
+	(HALO_TICK_HASH_MASK_FREE in tick_hash.c) */
+	if (result == NONE)
+		data->first_free_absolute_index = absolute_index;
+#endif
 
 	return result;
 }
