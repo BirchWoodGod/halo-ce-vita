@@ -127,6 +127,8 @@ long game_engine_port_player_goals(long player_index, real_point3d *positions, l
 #define BOTS_PATH_RADIUS 0.25f
 /* the most teleporters a map's bots use (Chiron TL34 has 30) */
 #define BOTS_MAXIMUM_TELEPORTERS 48
+/* how near a path's step a bot is when it has reached it (across) */
+#define BOTS_STEP_REACHED 0.35f
 /* a pathfinding surface's flag: walkable (path.c's) */
 #define BOTS_PATHFINDING_WALKABLE_BIT 6
 
@@ -346,6 +348,8 @@ static struct
 	long search_overflows;
 	/* paths taken without the obstacle avoidance, which found no way */
 	long search_unavoided;
+	/* the paths whose smoothing went nowhere, taken unsmoothed */
+	long search_unsmoothed;
 	long flag_grabs;
 	long ball_grabs;
 	/* CTF: the times a bot stood at the other team's flag stand (with the
@@ -1291,6 +1295,7 @@ void bots_initialize_for_new_map(void)
 	bots_globals.search_partials = 0;
 	bots_globals.search_overflows = 0;
 	bots_globals.search_unavoided = 0;
+	bots_globals.search_unsmoothed = 0;
 	bots_globals.flag_grabs = 0;
 	bots_globals.ball_grabs = 0;
 	bots_globals.stand_visits = 0;
@@ -1569,6 +1574,50 @@ static boolean bots_search_teleporter(struct bots_bot *bot, struct bots_search *
 	return TRUE;
 }
 
+/* the search's way to its destination (or as near as it came): each
+surface's entry point (path_state_build_path's raw steps, at most 64), the
+endpoint last. TRUE with steps */
+static boolean bots_path_raw_steps(struct path_state *state, struct path_step *raw_steps, short *raw_step_count,
+	boolean *steps_finish_path, real_point3d *endpoint)
+{
+	short node_index, child_index = NONE;
+
+	*steps_finish_path = TRUE;
+	*raw_step_count = 0;
+	if (!state->destination_valid || state->node_count <= 0)
+		return FALSE;
+	node_index = path_node_from_hash_table(state, state->destination.surface_index);
+	*endpoint = state->destination.point;
+	if (node_index == NONE)
+	{
+		node_index = state->closest_node_index;
+		*endpoint = state->closest_point;
+	}
+	if (node_index < 0 || node_index >= state->node_count)
+		return FALSE;
+	*raw_step_count = (short)MIN(state->node_list[node_index].depth + 1, 64);
+	while (node_index != NONE)
+	{
+		struct path_node *node;
+
+		if (node_index < 0 || node_index >= state->node_count)
+			return FALSE;
+		node = &state->node_list[node_index];
+		if (node->depth >= 64)
+			*steps_finish_path = FALSE;
+		else if (node->depth >= 0 && node->depth < *raw_step_count)
+		{
+			raw_steps[node->depth].surface_index = node->surface_index;
+			raw_steps[node->depth].point = child_index == NONE ? *endpoint : state->node_list[child_index].entry_point;
+		}
+		else
+			return FALSE;
+		child_index = node_index;
+		node_index = node->parent_node_index;
+	}
+	return *raw_step_count > 0;
+}
+
 /* the path as path_state_build_path makes it, the steps smoothed, but not
 taken round the objects about (the obstacle avoidance found no way round:
 the other bots crowding a narrow way out of a base, Longest's, all waiting
@@ -1579,42 +1628,12 @@ static boolean bots_build_path_unavoided(struct path_state *state, struct path_r
 	struct path_step raw_steps[64];
 	struct path_step smoothed_steps[MAXIMUM_SMOOTHED_PATH_STEPS];
 	short raw_step_count, smoothed_step_count = 0;
-	short node_index, child_index = NONE;
-	boolean steps_finish_path = TRUE;
+	boolean steps_finish_path;
 	real_point3d endpoint;
 
 	csmemset(path, 0, sizeof(*path));
-	if (!state->destination_valid || state->node_count <= 0)
+	if (!bots_path_raw_steps(state, raw_steps, &raw_step_count, &steps_finish_path, &endpoint))
 		return FALSE;
-	node_index = path_node_from_hash_table(state, state->destination.surface_index);
-	endpoint = state->destination.point;
-	if (node_index == NONE)
-	{
-		node_index = state->closest_node_index;
-		endpoint = state->closest_point;
-	}
-	if (node_index < 0 || node_index >= state->node_count)
-		return FALSE;
-	raw_step_count = (short)MIN(state->node_list[node_index].depth + 1, 64);
-	while (node_index != NONE)
-	{
-		struct path_node *node;
-
-		if (node_index < 0 || node_index >= state->node_count)
-			return FALSE;
-		node = &state->node_list[node_index];
-		if (node->depth >= 64)
-			steps_finish_path = FALSE;
-		else if (node->depth >= 0 && node->depth < raw_step_count)
-		{
-			raw_steps[node->depth].surface_index = node->surface_index;
-			raw_steps[node->depth].point = child_index == NONE ? endpoint : state->node_list[child_index].entry_point;
-		}
-		else
-			return FALSE;
-		child_index = node_index;
-		node_index = node->parent_node_index;
-	}
 	path_smooth(state, raw_step_count, raw_steps, &smoothed_step_count, smoothed_steps, &steps_finish_path);
 	if (smoothed_step_count <= 0)
 		return FALSE;
@@ -1626,6 +1645,49 @@ static boolean bots_build_path_unavoided(struct path_state *state, struct path_r
 	path->step_count = (char)smoothed_step_count;
 	path->step_index = 0;
 	csmemcpy(path->steps, smoothed_steps, smoothed_step_count * sizeof(struct path_step));
+	return TRUE;
+}
+
+/* a path that goes nowhere: short of its end, every step where the bot
+stands. The smoothing (path_smooth) gave one at the foot of a steep bank:
+all four of its steps the same point a few centimetres from the bot, which
+it took as reached at once and searched again, the same, while it slid
+about (Sidewinder's banks up to the side ledges, under Team Race's flags,
+where the bots went round in circles: issue #40) */
+static boolean bots_path_stalls(struct path_result const *path, real_point3d const *start)
+{
+	return path->valid && !path->steps_finish_path && path->step_count > 0 &&
+		bots_distance2d(&path->steps[path->step_count - 1].point, start) <= BOTS_STEP_REACHED;
+}
+
+/* a stalling path's steps instead the search's own, unsmoothed: the next
+surfaces' entry points beyond where the bot stands (up the bank), four at
+most. TRUE when made */
+static boolean bots_path_unsmoothed(struct path_state *state, real_point3d const *start, struct path_result *path)
+{
+	struct path_step raw_steps[64];
+	short raw_step_count, step, count = 0;
+	boolean steps_finish_path;
+	real_point3d endpoint;
+	struct path_result result;
+
+	if (!bots_path_raw_steps(state, raw_steps, &raw_step_count, &steps_finish_path, &endpoint))
+		return FALSE;
+	csmemset(&result, 0, sizeof(result));
+	for (step = 0; step < raw_step_count && count < (short)NUMBEROF(result.steps); step++)
+	{
+		if (!count && bots_distance2d(&raw_steps[step].point, start) <= BOTS_STEP_REACHED)
+			continue;
+		result.steps[count++] = raw_steps[step];
+	}
+	if (!count)
+		return FALSE;
+	result.valid = TRUE;
+	result.steps_finish_path = steps_finish_path && step >= raw_step_count;
+	result.step_count = (char)count;
+	result.endpoint.point = endpoint;
+	result.endpoint.surface_index = result.steps[count - 1].surface_index;
+	*path = result;
 	return TRUE;
 }
 
@@ -1705,6 +1767,11 @@ static void bots_search_take(struct bots_bot *bot, boolean alive)
 		bot->via_teleporter = FALSE;
 		if (bots_search_build(bot, search, reached, &path))
 		{
+			if (bots_path_stalls(&path, &search->start_point) &&
+				bots_path_unsmoothed(&search->state_memory, &search->start_point, &path))
+			{
+				bots_globals.search_unsmoothed++;
+			}
 			bot->path = path;
 			bot->path.step_index = 0;
 			bot->path_failures = 0;
@@ -2210,7 +2277,7 @@ static boolean bots_follow_path(struct bots_bot *bot, long unit_index, real_poin
 		{
 			struct path_step *step = &bot->path.steps[(long)bot->path.step_index];
 
-			if (bots_distance2d(&step->point, position) > 0.35f)
+			if (bots_distance2d(&step->point, position) > BOTS_STEP_REACHED)
 				break;
 			bot->path.step_index++;
 		}
@@ -2870,13 +2937,13 @@ static void bots_report(void)
 	line[length] = 0;
 	if (!count || !bots_globals.ticks)
 		return;
-	platform_log("bots: tick %ld, %ld bots (%s): %.0f us/tick (%.1f a bot), searches %ld (%ld failed, %ld short, %ld full, %ld unavoided, tick %.0f us, "
+	platform_log("bots: tick %ld, %ld bots (%s): %.0f us/tick (%.1f a bot), searches %ld (%ld failed, %ld short, %ld full, %ld unavoided, %ld unsmoothed, tick %.0f us, "
 		"helper %.0f us), shots %ld hit %ld, flag taken %ld (enemy stand reached %ld), ball taken %ld, kills/deaths%s", now, count,
 		bots_skills[bots_skill()].name,
 		(double)bots_globals.tick_us / (double)bots_globals.ticks,
 		bots_globals.bot_ticks ? (double)bots_globals.tick_us / (double)bots_globals.bot_ticks : 0.0,
 		bots_globals.searches, bots_globals.search_failures, bots_globals.search_partials, bots_globals.search_overflows,
-		bots_globals.search_unavoided,
+		bots_globals.search_unavoided, bots_globals.search_unsmoothed,
 		(double)bots_globals.search_us / (double)bots_globals.ticks,
 		(double)bots_helper.helper_us / (double)bots_globals.ticks, fired, hit, bots_globals.flag_grabs,
 		bots_globals.stand_visits, bots_globals.ball_grabs, line);
