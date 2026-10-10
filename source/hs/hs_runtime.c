@@ -1240,6 +1240,15 @@ void hs_runtime_update(
 				console_command_running = TRUE;
 			if (thread->sleep_until>=0 && thread->sleep_until<=time)
 				hs_thread_main(thread_index);
+#ifdef HALO_LINUX
+			/* port: with few list headers left, the lists no global holds
+			are collected after this script too, as after them all below:
+			between two scripts no list is held but by a global (a thread
+			that sleeps holds no value), and a map whose scripts make more
+			than 48 lists an update got NONE for the rest (object_lists.c) */
+			if (object_lists_nearly_full())
+				object_list_gc();
+#endif
 		}
 
 		object_list_gc();
