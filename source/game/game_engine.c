@@ -1197,7 +1197,7 @@ static void game_engine_generate_title_string(
 			}
 			else
 				outcome_string = L"";
-			ustrncpy(title_string, outcome_string, 80);
+			ustrncpy_terminated(title_string, outcome_string, 80);
 			break;
 
 		case FALSE:
@@ -1213,7 +1213,7 @@ static void game_engine_generate_title_string(
 				}
 				else
 					outcome_string = L"";
-				ustrncpy(title_string, outcome_string, 80);
+				ustrncpy_terminated(title_string, outcome_string, 80);
 			}
 			else
 			{
@@ -1227,7 +1227,7 @@ static void game_engine_generate_title_string(
 				}
 				else
 					outcome_string = L"";
-				ustrncpy(title_string, outcome_string, 80);
+				ustrncpy_terminated(title_string, outcome_string, 80);
 			}
 			break;
 
@@ -1244,7 +1244,7 @@ static void game_engine_generate_title_string(
 				}
 				else
 					outcome_string = L"";
-				ustrncpy(title_string, outcome_string, 80);
+				ustrncpy_terminated(title_string, outcome_string, 80);
 			}
 			else
 			{
@@ -1258,7 +1258,7 @@ static void game_engine_generate_title_string(
 				}
 				else
 					outcome_string = L"";
-				ustrncpy(title_string, outcome_string, 80);
+				ustrncpy_terminated(title_string, outcome_string, 80);
 			}
 			break;
 		}
@@ -1773,11 +1773,13 @@ static void game_engine_rasterize_in_game_score(
 		score_name = L"";
 
 	game_engine->format_score_name(score_string);
-	usprintf(row_string, L"\t%s\t%s\t%s", column_name, score_name, score_string);
+	/* port: bounded (the map's column and score names) */
+	usnprintf(row_string, NUMBEROF(row_string), L"\t%s\t%s\t%s", column_name, score_name, score_string);
 #ifdef HALO_LINUX
 	/* port: a network game's Ping column (latency_meter.c) */
 	if (latency_meter_shown())
-		usprintf(row_string, L"\t%s\t%s\t%s\t%s", column_name, score_name, score_string, TW(L"Ping"));
+		usnprintf(row_string, NUMBEROF(row_string), L"\t%s\t%s\t%s\t%s", column_name, score_name, score_string,
+			TW(L"Ping"));
 #endif
 	rasterize_in_game_score_draw_line(row_string, FALSE, &color, 1);
 
@@ -1835,8 +1837,9 @@ static void game_engine_rasterize_in_game_score(
 
 			place_string = get_place_string(&entries[entry_index]);
 
-			usprintf(
+			usnprintf(
 				row_string,
+				NUMBEROF(row_string),
 				L"\t%s\t%s\t%s",
 				place_string,
 				player->name,
