@@ -728,6 +728,11 @@ void hs_effect_new(
 		cutscene_flag_index,
 		struct scenario_cutscene_flag);
 	vector3d_from_euler_angles2d(&forward, &cutscene_flag->facing);
+#ifdef HALO_LINUX
+	/* port: a script's effect keeps all its particles (the particle budget,
+	effects.c) */
+	effect_new_scripted = TRUE;
+#endif
 	effect_new_unattached_from_markers(
 		effect_definition_index,
 		NONE,
@@ -741,6 +746,9 @@ void hs_effect_new(
 		NULL,
 		NULL,
 		TRUE);
+#ifdef HALO_LINUX
+	effect_new_scripted = FALSE;
+#endif
 
 	return;
 }
@@ -765,6 +773,10 @@ void hs_effect_new_from_object_marker(
 				&marker,
 				1))
 			{
+#ifdef HALO_LINUX
+				/* port: as hs_effect_new's */
+				effect_new_scripted = TRUE;
+#endif
 				effect_new_attached_from_markers(
 					effect_definition_index,
 					NONE,
@@ -778,6 +790,9 @@ void hs_effect_new_from_object_marker(
 					1.f,
 					NULL,
 					NULL);
+#ifdef HALO_LINUX
+				effect_new_scripted = FALSE;
+#endif
 			}
 		}
 	}

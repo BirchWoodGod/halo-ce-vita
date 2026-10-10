@@ -95,6 +95,7 @@ symbols in this file:
 #include "sound/game_sound.h"
 #include "sound/sound_definitions.h"
 #ifdef HALO_LINUX
+#include "particle_budget.h"
 #include "point_leaf_cache.h"
 #endif
 
@@ -231,6 +232,38 @@ static char const *particle_effect_marker_names[NUMBER_OF_PARTICLE_EFFECT_MARKER
 };
 
 /* ---------- public code */
+
+#ifdef HALO_LINUX
+/* (tick_hash.c, HALO_TICK_HASH_MASK_FRAMES) each live particle's
+last_rendered_frame_index made its distance from render.frame_index for the
+hash, or put back: the game only ever compares the two (particles_update),
+and the frames a run drew before the game began - the menus' and the
+loading's, more or fewer with the machine's load - shift every one alike */
+int halo_tick_hash_particle_frames(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	if (!particle_data || !particle_data->valid)
+		return 0;
+	for (absolute_index = 0; absolute_index < particle_data->count && count < maximum; absolute_index++)
+	{
+		struct particle_datum *particle = (struct particle_datum *)
+			((char *)particle_data->data + particle_data->size * absolute_index);
+
+		if (!particle->header.identifier)
+			continue;
+		if (restore)
+			particle->last_rendered_frame_index = saved[count++];
+		else
+		{
+			saved[count++] = particle->last_rendered_frame_index;
+			particle->last_rendered_frame_index = render.frame_index - particle->last_rendered_frame_index;
+		}
+	}
+	return count;
+}
+#endif
 
 void particles_initialize(
 	void)
@@ -916,6 +949,19 @@ void particle_new(
 	{
 		return;
 	}
+#ifdef HALO_LINUX
+	/* port: a particle the budget thins is not made when the budget's
+	particles are all live, nor when no view could see it drawn (at its
+	largest, from where it starts: particle_budget.c) */
+	if (particle_budget_applies &&
+		!particle_budget_admits(
+			&position,
+			MAX(definition->radius_lower_bound, definition->radius_upper_bound) * data->radius,
+			definition->lod_cutoff))
+	{
+		return;
+	}
+#endif
 
 	particle_index = datum_new(particle_data);
 
@@ -965,6 +1011,11 @@ void particle_new(
 		particle->lifespan = (particle->lifespan - PARTICLE_SHARED_LIFESPAN) /
 			local_player_count() + PARTICLE_SHARED_LIFESPAN;
 	}
+#ifdef HALO_LINUX
+	/* port: and the particle budget's share (particle_budget.c) */
+	if (particle_budget_applies)
+		particle->lifespan = particle_budget_lifespan(particle->lifespan);
+#endif
 
 	particle->frame_span = definition->frames_per_second_upper_bound != 0.0f
 		? 1.0f / real_local_random_range(

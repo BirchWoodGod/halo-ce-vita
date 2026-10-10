@@ -2319,6 +2319,14 @@ long game_engine_remap_equipment(
 	{
 		if (equipment)
 		{
+			/* port: the dedicated server's SWAT: no power-ups (camouflage,
+			overshield, health packs) */
+			if (game_engine_magnums_only() &&
+				equipment->equipment.powerup_type != _equipment_powerup_none)
+			{
+				return NONE;
+			}
+
 			if (equipment->equipment.powerup_type == _equipment_powerup_overshield)
 			{
 				if (TEST_FLAG(global_variant.universal_variant.flags, _game_variant_no_shields_bit))
@@ -6663,6 +6671,8 @@ void game_engine_make_swat_variant(
 	SET_FLAG(variant->universal_variant.flags, _game_variant_no_shields_bit, TRUE);
 	SET_FLAG(variant->universal_variant.flags, _game_variant_infinite_grenades_bit, FALSE);
 	SET_FLAG(variant->universal_variant.flags, _game_variant_generic_starting_equipment_bit, TRUE);
+	/* (no players on the motion tracker, as the game's own Snipers) */
+	SET_FLAG(variant->universal_variant.flags, _game_variant_draw_object_in_motion_sensor_bit, FALSE);
 	variant->universal_variant.weapon_set = _game_engine_weapons_pistols;
 	variant->universal_variant.vehicle_set = _game_engine_vehicles_none;
 	csmemset(variant->human_readable_game_description, 0, sizeof(variant->human_readable_game_description));

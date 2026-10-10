@@ -103,6 +103,11 @@ void effects_start_on_first_person_weapon(
 
 extern boolean effects_corpse_nonviolent;
 extern boolean debug_effects_nonviolent;
+#ifdef HALO_LINUX
+/* (port) set while a script makes an effect: its particles are kept whole
+by the particle budget (effects.c, particle_budget.c) */
+extern boolean effect_new_scripted;
+#endif
 
 /* ---------- public code */
 

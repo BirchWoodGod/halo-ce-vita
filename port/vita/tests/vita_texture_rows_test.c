@@ -42,7 +42,15 @@ static void *test_malloc(size_t size)
 void platform_log(const char *format, ...) { (void)format; }
 void *vgxm_pool_alloc(unsigned long size, unsigned long alignment) { (void)size; (void)alignment; return NULL; }
 void vgxm_pool_reset(void) {}
-int vgxm_pool_recycle(void **base, unsigned long *size) { *base = NULL; *size = 0; return 0; }
+int vgxm_pool_segment_of(const void *memory) { (void)memory; return -1; }
+int vgxm_pool_recycle(void **base, unsigned long *size, const unsigned long *segment_frames, unsigned long frame)
+{
+	(void)segment_frames;
+	(void)frame;
+	*base = NULL;
+	*size = 0;
+	return 0;
+}
 unsigned long vgxm_pool_used(void) { return 0; }
 unsigned long long vita_host_time_us(void) { return 0; }
 unsigned long memory_watch_generation(unsigned long address, unsigned long size) { (void)address; (void)size; return 1; }

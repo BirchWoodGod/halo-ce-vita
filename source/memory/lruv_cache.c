@@ -1176,6 +1176,19 @@ void lruv_cache_verify(
 	match_assert("c:\\halo\\SOURCE\\memory\\lruv_cache.c", 755, cache->signature==LRUV_CACHE_SIGNATURE);
 	data_verify(cache->blocks);
 
+#if defined(HALO_LINUX) && defined(HALO_RELEASE)
+	/* (port) a release build checks no assertions, and the walk does
+	nothing else: it is left out, as memory_pool.c's integrity walk is. The
+	compiler kept it (a loop it cannot prove ends), so each block made or
+	deleted walked all of the cache's blocks twice - the decal vertex cache's
+	for every decal a fight's shots leave, the sound cache's for every sound
+	loaded */
+	verify_blocks = FALSE;
+	(void)block_index;
+	(void)block;
+	(void)next_block;
+	(void)previous_block;
+#endif
 	if (verify_blocks)
 	{
 		block_index = cache->first_block_index;

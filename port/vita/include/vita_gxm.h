@@ -56,11 +56,17 @@ the CDRAM bytes given back */
 unsigned long vgxm_pool_release(void);
 /* the bytes the pool's segments and large blocks hold */
 unsigned long vgxm_pool_held(void);
-/* the pool full: waits for the GPU and frees the pool's next segment (the
-oldest allocations, from the start again past the end), its memory in
-*base and *size (0 if it had none) for what was decoded there to be
-forgotten; 0 when none is left to free so (vgxm_pool_reset then) */
-int vgxm_pool_recycle(void **base, unsigned long *size);
+/* the pool's segments (vgxm_memory.h), and the segment an allocation is
+in: -1 for none (a large texture's block of its own, not the pool's) */
+#define VGXM_POOL_SEGMENTS 14
+int vgxm_pool_segment_of(const void *memory);
+/* the pool full: waits for the GPU and frees one of the pool's segments -
+the one drawn from longest ago by segment_frames[VGXM_POOL_SEGMENTS], each
+segment's last frame drawn from (frame: this one; NULL: the next round the
+pool) - its memory in *base and *size (0 if it had none) for what was
+decoded there to be forgotten; 0 when none is left to free so
+(vgxm_pool_reset then) */
+int vgxm_pool_recycle(void **base, unsigned long *size, const unsigned long *segment_frames, unsigned long frame);
 unsigned long vgxm_pool_used(void);
 
 /* ---------- textures: 16-byte GXM control words */

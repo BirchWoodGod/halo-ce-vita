@@ -294,9 +294,11 @@ these.
   another gives its ammunition);
 - no grenades: none at the start, none placed on the map ("magnums only",
   as SWAT has always been);
-- no vehicles. Active camouflage and health packs stay where the map has
-  them, the motion tracker stays on, and the score to win is Slayer's
-  (15 kills, 50 for teams) unless `sv_scorelimit` sets one.
+- no vehicles and no power-ups: active camouflage, overshields and health
+  packs are not placed;
+- players do not show on the motion tracker (as in Snipers), and the score
+  to win is Slayer's (15 kills, 50 for teams) unless `sv_scorelimit` sets
+  one.
 
 ### Snipers
 

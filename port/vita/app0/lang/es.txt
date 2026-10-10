@@ -58,6 +58,9 @@
 "The game's frame counter, bottom right" = "El contador de cuadros del juego, abajo a la derecha"
 "Smooth weapon motion" = "Movimiento del arma"
 "The weapon's animation blended between game ticks" = "La animación del arma, suavizada entre ticks del juego"
+"Particles" = "Partículas"
+"Fewer sparks, smoke and debris in big fights" = "Menos chispas, humo y escombros en combates grandes"
+"Reduced" = "Reducido"
 "Detail and update rates (the Profile sets them)" = "Detalle y frecuencias (el Perfil los ajusta)"
 
 # ---------- Graphics > Advanced
@@ -280,6 +283,8 @@
 "Legendary" = "Legendario"
 "  Bot teams" = "  Equipos de bots"
 "Team games: bots on both teams, or all against you" = "Juegos por equipos: bots en ambos equipos, o todos contra ti"
+"  Bot vehicles" = "  Vehículos de bots"
+"Bots drive and ride the map's vehicles" = "Los bots conducen y viajan en los vehículos del mapa"
 "Even" = "Parejos"
 "Against you" = "Contra ti"
 "Custom maps: on, off, delete; PC maps" = "Mapas personalizados: activar, desactivar, borrar; mapas de PC"

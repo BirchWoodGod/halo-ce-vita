@@ -384,6 +384,9 @@ boolean path_state_estimated_distance(
 tick, says so once (bots.c) */
 void path_search_thread_is_helper(
 	void);
+/* (port) bumped (bots.c) whenever the walkable surfaces the helper thread's
+searches read change (path.c: its cache of surfaces' edges is emptied) */
+extern volatile unsigned long path_pathfinding_surfaces_generation;
 #endif
 
 void paths_initialize(

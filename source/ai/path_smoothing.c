@@ -47,6 +47,11 @@ symbols in this file:
 #include "physics/collision_bsp_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 
+#ifdef HALO_LINUX
+#include <stdio.h>
+#include "path_state_verify.h"
+#endif
+
 /* ---------- constants */
 
 enum
@@ -582,6 +587,81 @@ void path_smooth(
 			collision_edge_index = NONE;
 			collision_active = FALSE;
 
+#ifdef HALO_LINUX
+			/* port: the steps tested from the last back. The scan from the
+			first (below) ends with a collision only if the last step's pill
+			collides, and then names the first of the run of colliding steps
+			that reaches the last one, with that step's edge: tested from the
+			last back, the run is found as it ends, and the steps before it
+			(every one when the last is clear: the whole way seen, each
+			smoothing's last pass) are not tested. A pill test reads the
+			structure alone (its surfaces and the breakable surfaces' state,
+			which nothing changes while a path is smoothed) and changes
+			nothing, so each step answers as it did.
+			HALO_AI_PATH_STATE_VERIFY=1 scans from the first too and compares */
+			for (i = raw_step_count - 1; i >= step_index; i--)
+			{
+				if (!structure_test_pill2d(
+					state->structure,
+					state->input.ignore_broken_surfaces,
+					&current_position,
+					current_surface_index,
+					(real_point2d const *)&raw_steps[i].point,
+					raw_steps[i].surface_index,
+					0.3f,
+					FLAG(_path_test_pill_endpoint_near_wall_ok_bit),
+					&collision_result))
+				{
+					break;
+				}
+				collision_edge_index = collision_result.edge_index;
+				collision_step_index = i;
+				collision_active = TRUE;
+			}
+			if (path_state_verify_enabled())
+			{
+				short forward_step_index = NONE;
+				long forward_edge_index = NONE;
+				boolean forward_active = FALSE;
+				char what[96];
+
+				for (i = step_index; i < raw_step_count; i++)
+				{
+					if (structure_test_pill2d(
+						state->structure,
+						state->input.ignore_broken_surfaces,
+						&current_position,
+						current_surface_index,
+						(real_point2d const *)&raw_steps[i].point,
+						raw_steps[i].surface_index,
+						0.3f,
+						FLAG(_path_test_pill_endpoint_near_wall_ok_bit),
+						&collision_result))
+					{
+						if (!forward_active)
+						{
+							forward_edge_index = collision_result.edge_index;
+							forward_step_index = i;
+							forward_active = TRUE;
+						}
+					}
+					else if (forward_active)
+					{
+						forward_step_index = NONE;
+						forward_edge_index = NONE;
+						forward_active = FALSE;
+					}
+				}
+				snprintf(what, sizeof(what), "steps %d-%d: from the last %d step %d edge %ld, from the first %d step %d edge %ld",
+					(int)step_index, (int)raw_step_count - 1, (int)collision_active, (int)collision_step_index,
+					collision_edge_index, (int)forward_active, (int)forward_step_index, forward_edge_index);
+				path_state_verify_result(_path_state_verify_smoothing_scan,
+					forward_active == collision_active &&
+						(!collision_active ||
+							(forward_step_index == collision_step_index && forward_edge_index == collision_edge_index)),
+					what);
+			}
+#else
 			for (i = step_index; i < raw_step_count; i++)
 			{
 				if (structure_test_pill2d(
@@ -609,6 +689,7 @@ void path_smooth(
 					collision_active = FALSE;
 				}
 			}
+#endif
 
 			if (!collision_active || collision_edge_index == NONE)
 				break;

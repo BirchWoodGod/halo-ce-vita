@@ -45,7 +45,8 @@ What a bot does each tick, in a player's terms:
   through a teleporter (Chiron TL34's rooms), else as near as they go and
   on with jumps; an item on a ledge is left be. Bots in each other's way
   give way by their order.
-- Vehicles (port: the bots' own; HALO_BOT_VEHICLES=0 leaves them on foot):
+- Vehicles (port: the bots' own; bots.vehicles 0, the settings panel's Bot
+  vehicles Off, HALO_BOT_VEHICLES=0, leaves them on foot):
   a bot whose goal is a long way off (35 units: Blood Gulch, Sidewinder)
   goes for an empty Warthog, Ghost or Scorpion on its way there, as driver,
   or for a Warthog's gunner's (else passenger's) seat when a teammate, bot
@@ -110,6 +111,7 @@ bot line: their ticks' time (us/tick), the searches and how many failed.
 #include "items/equipment.h"
 #include "items/equipment_definitions.h"
 #include "physics/collisions.h"
+#include "physics/breakable_surfaces.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "structures/structure_bsp_definitions.h"
@@ -139,6 +141,10 @@ unsigned long long vita_host_time_us(void);
 int vita_host_fourth_core_join(const char *role, int level);
 void vita_host_thread_watch(const char *role);
 #endif
+/* render_epoch.c's: bumped as each map (and game state) is loaded */
+extern unsigned long halo_map_generation;
+/* point_leaf_cache.c's: bumped as the structure's bsp changes */
+extern unsigned long halo_structure_bsp_generation;
 /* game_engine.c's (port): the nav points a player is shown */
 long game_engine_port_player_goals(long player_index, real_point3d *positions, long maximum);
 /* units.c's: where a unit stands to get into a seat (the seat's entrance),
@@ -466,6 +472,18 @@ static struct
 		real_point3d exit;
 	} teleporters[BOTS_MAXIMUM_TELEPORTERS];
 	struct bots_bot bots[BOTS_MAXIMUM];
+	/* the skill setting, read once a tick (bots_update_actions) for every
+	bot (a lookup of the environment and the settings, twice a bot a tick
+	before) */
+	short skill;
+	/* CTF: the flags (weapon_is_flag) among the weapons, in the objects'
+	order, found once a tick when a bot first asks (every bot walked every
+	weapon for them every tick before); nothing a bot does in its tick makes
+	or deletes an object */
+	boolean flags_found;
+	boolean flags_overflow;
+	long flag_count;
+	long flag_indices[8];
 	/* the path searches (allocated once a game has bots) */
 	struct bots_search *search_slots;
 
@@ -544,6 +562,54 @@ static struct
 	volatile long generation;
 	volatile unsigned long long helper_us;
 } bots_helper = { FALSE, FALSE, 0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0 };
+
+/* (HALO_TICK_PROFILE) the bots' tick by part, and the rays they cast, for
+halo.log's bots line */
+enum
+{
+	_bots_part_look = 0,
+	_bots_part_fight,
+	_bots_part_goal,
+	_bots_part_take,
+	_bots_part_walk,
+	_bots_part_rest,
+	_bots_part_scan,
+	NUMBER_OF_BOTS_PARTS,
+};
+
+static struct
+{
+	int enabled;
+	unsigned long long part_us[NUMBER_OF_BOTS_PARTS];
+	/* rays down to the ground and lines of sight: cast, and their time */
+	long below_rays;
+	long sight_rays;
+	unsigned long long below_us;
+	unsigned long long sight_us;
+} bots_profile = { -1 };
+
+static int bots_profile_enabled(void)
+{
+	if (bots_profile.enabled < 0)
+	{
+		char const *setting = getenv("HALO_TICK_PROFILE");
+
+		bots_profile.enabled = setting && atoi(setting) ? 1 : 0;
+	}
+	return bots_profile.enabled;
+}
+
+/* a part's time to here from *started, which moves on to now */
+static void bots_profile_part(int part, unsigned long long *started)
+{
+	unsigned long long now;
+
+	if (!bots_profile.enabled)
+		return;
+	now = vita_host_time_us();
+	bots_profile.part_us[part] += now - *started;
+	*started = now;
+}
 
 /* ---------- settings */
 
@@ -641,19 +707,12 @@ static boolean bots_peaceful(void)
 	return peaceful != 0;
 }
 
-/* whether bots take vehicles ((debug) HALO_BOT_VEHICLES=0: never, the bots
-on foot as before, to compare) */
+/* whether bots take vehicles (bots.vehicles, the Vita's settings panel's
+Bot vehicles; HALO_BOT_VEHICLES=0: never, the bots on foot as before; read
+each time, as the panel changes it at any time) */
 static boolean bots_vehicles_enabled(void)
 {
-	static int enabled = -1;
-
-	if (enabled < 0)
-	{
-		char const *setting = getenv("HALO_BOT_VEHICLES");
-
-		enabled = setting && setting[0] && !atoi(setting) ? 0 : 1;
-	}
-	return enabled != 0;
+	return bots_setting_integer("HALO_BOT_VEHICLES", "bots.vehicles") != 0;
 }
 
 static unsigned long bots_random(struct bots_bot *bot)
@@ -706,6 +765,50 @@ static real bots_distance3d(real_point3d const *a, real_point3d const *b)
 	return (real)sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+/* the answers of bots_surface_below's rays kept by the point they were cast
+from, while the bots' tick runs (the stands, the nav points and the flags
+lying still that the bots ask for every tick): a structure test's answer is a
+function of the bsp, its flags, the breakable surfaces' state and the ray
+alone (collisions.c's obstruction memo is kept so), and this one tests no
+objects nor water, so a point asked again (the same bits) is answered as it
+was while the bsp (halo_structure_bsp_generation), the map and the breakable
+surfaces' flags (compared as each bots' tick starts; nothing in it breaks
+one) are as they were */
+#define BOTS_GROUND_MEMO_ENTRIES 64
+static struct
+{
+	boolean active;
+	unsigned long map_generation;
+	unsigned long structure_bsp_generation;
+	byte breakable_surface_flags[MAXIMUM_BREAKABLE_SURFACES_PER_MAP / 8];
+	struct
+	{
+		boolean used;
+		unsigned long point[3];
+		long surface_index;
+		real_point3d ground;
+	} entries[BOTS_GROUND_MEMO_ENTRIES];
+} bots_ground_memo;
+
+/* at a bots' tick's start: the answers kept dropped if the level changed */
+static void bots_ground_memo_begin(void)
+{
+	byte const *flags = breakable_surface_flags_get();
+	long index;
+
+	if (bots_ground_memo.map_generation != halo_map_generation ||
+		bots_ground_memo.structure_bsp_generation != halo_structure_bsp_generation ||
+		memcmp(bots_ground_memo.breakable_surface_flags, flags, sizeof(bots_ground_memo.breakable_surface_flags)))
+	{
+		for (index = 0; index < BOTS_GROUND_MEMO_ENTRIES; index++)
+			bots_ground_memo.entries[index].used = FALSE;
+		bots_ground_memo.map_generation = halo_map_generation;
+		bots_ground_memo.structure_bsp_generation = halo_structure_bsp_generation;
+		memcpy(bots_ground_memo.breakable_surface_flags, flags, sizeof(bots_ground_memo.breakable_surface_flags));
+	}
+	bots_ground_memo.active = TRUE;
+}
+
 /* the surface of the level under a point (a step up included), and the
 ground point there; NONE over nothing */
 static long bots_surface_below(real_point3d const *point, real_point3d *ground)
@@ -713,10 +816,44 @@ static long bots_surface_below(real_point3d const *point, real_point3d *ground)
 	struct collision_result collision;
 	real_point3d start = *point;
 	real_vector3d down = { 0.0f, 0.0f, -6.0f };
+	unsigned long long started;
+	unsigned long bits[3];
+	long entry_index = NONE;
+	boolean hit;
 
+	if (bots_ground_memo.active)
+	{
+		unsigned long hash = 2166136261UL;
+		long index;
+
+		memcpy(bits, point, sizeof(bits));
+		for (index = 0; index < 3; index++)
+			hash = (hash ^ bits[index]) * 16777619UL;
+		entry_index = (long)((hash >> 8) % BOTS_GROUND_MEMO_ENTRIES);
+		if (bots_ground_memo.entries[entry_index].used && !memcmp(bots_ground_memo.entries[entry_index].point, bits, sizeof(bits)))
+		{
+			if (bots_ground_memo.entries[entry_index].surface_index != NONE && ground)
+				*ground = bots_ground_memo.entries[entry_index].ground;
+			return bots_ground_memo.entries[entry_index].surface_index;
+		}
+	}
+	started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
 	start.z += 0.4f;
-	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
-		&start, &down, NONE, &collision) && collision.type == _collision_result_structure)
+	hit = collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
+		&start, &down, NONE, &collision) && collision.type == _collision_result_structure;
+	if (started)
+	{
+		bots_profile.below_rays++;
+		bots_profile.below_us += vita_host_time_us() - started;
+	}
+	if (entry_index != NONE)
+	{
+		bots_ground_memo.entries[entry_index].used = TRUE;
+		memcpy(bots_ground_memo.entries[entry_index].point, bits, sizeof(bits));
+		bots_ground_memo.entries[entry_index].surface_index = hit ? collision.surface_index : NONE;
+		bots_ground_memo.entries[entry_index].ground = collision.point;
+	}
+	if (hit)
 	{
 		if (ground)
 			*ground = collision.point;
@@ -849,9 +986,9 @@ static real bots_weapon_loaded(long weapon_index)
 
 /* the speed of the weapon's projectile (world units a tick; 0 for one
 that hits at once or none) */
-static real bots_projectile_speed(long weapon_index)
+static real bots_projectile_speed_compute(long definition_index)
 {
-	struct weapon_definition *definition = weapon_definition_get(weapon_get(weapon_index)->definition_index);
+	struct weapon_definition *definition = weapon_definition_get(definition_index);
 
 	if (definition->weapon.triggers.count > 0)
 	{
@@ -870,7 +1007,7 @@ static real bots_projectile_speed(long weapon_index)
 
 /* how much a bot wants a weapon (the stock weapons, by their tags' names),
 -1 for the game's own (a flag, a ball) */
-static short bots_weapon_value(long definition_index)
+static short bots_weapon_value_compute(long definition_index)
 {
 	static struct
 	{
@@ -899,9 +1036,9 @@ static short bots_weapon_value(long definition_index)
 press at a time (a latched trigger: the pistols, the sniper rifle, the
 rocket launcher; or one that charges while held: the plasma pistol), 0 for
 one held down in bursts */
-static short bots_weapon_tap_ticks(long weapon_index)
+static short bots_weapon_tap_ticks_compute(long definition_index)
 {
-	struct weapon_definition *definition = weapon_definition_get(weapon_get(weapon_index)->definition_index);
+	struct weapon_definition *definition = weapon_definition_get(definition_index);
 	struct weapon_trigger_definition *trigger;
 	real rate;
 
@@ -915,9 +1052,9 @@ static short bots_weapon_tap_ticks(long weapon_index)
 }
 
 /* the distance a bot keeps from its enemy with the weapon */
-static real bots_weapon_range(long weapon_index)
+static real bots_weapon_range_compute(long definition_index)
 {
-	char const *name = weapon_index != NONE ? tag_get_name(weapon_get(weapon_index)->definition_index) : NULL;
+	char const *name = tag_get_name(definition_index);
 
 	if (!name)
 		return 6.0f;
@@ -932,6 +1069,78 @@ static real bots_weapon_range(long weapon_index)
 	if (strstr(name, "pistol"))
 		return 9.0f;
 	return 7.0f;
+}
+
+/* what the bots know of a weapon definition (its value, the distance kept
+with it, how it fires, its projectile's speed), made once a map: the
+functions above read only its tag, its name and its trigger, which a map
+never changes, and each answers the same for it every time (a bot asked them
+of its weapon every tick: a dozen name searches and a few tag lookups) */
+#define BOTS_WEAPON_KINDS 32
+struct bots_weapon_kind
+{
+	long definition_index;
+	short value;
+	short tap_ticks;
+	real range;
+	real projectile_speed;
+};
+
+static struct
+{
+	unsigned long map_generation;
+	long count;
+	struct bots_weapon_kind kinds[BOTS_WEAPON_KINDS];
+	/* (the one made when the table is full) */
+	struct bots_weapon_kind spare;
+} bots_weapon_kinds;
+
+static void bots_weapon_kinds_flush(void)
+{
+	bots_weapon_kinds.count = 0;
+	bots_weapon_kinds.map_generation = halo_map_generation;
+}
+
+static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
+{
+	struct bots_weapon_kind *kind;
+	long index;
+
+	if (bots_weapon_kinds.map_generation != halo_map_generation)
+		bots_weapon_kinds_flush();
+	for (index = 0; index < bots_weapon_kinds.count; index++)
+	{
+		if (bots_weapon_kinds.kinds[index].definition_index == definition_index)
+			return &bots_weapon_kinds.kinds[index];
+	}
+	kind = bots_weapon_kinds.count < BOTS_WEAPON_KINDS ? &bots_weapon_kinds.kinds[bots_weapon_kinds.count++] :
+		&bots_weapon_kinds.spare;
+	kind->definition_index = definition_index;
+	kind->value = bots_weapon_value_compute(definition_index);
+	kind->tap_ticks = bots_weapon_tap_ticks_compute(definition_index);
+	kind->range = bots_weapon_range_compute(definition_index);
+	kind->projectile_speed = bots_projectile_speed_compute(definition_index);
+	return kind;
+}
+
+static short bots_weapon_value(long definition_index)
+{
+	return bots_weapon_kind(definition_index)->value;
+}
+
+static real bots_projectile_speed(long weapon_index)
+{
+	return bots_weapon_kind(weapon_get(weapon_index)->definition_index)->projectile_speed;
+}
+
+static short bots_weapon_tap_ticks(long weapon_index)
+{
+	return bots_weapon_kind(weapon_get(weapon_index)->definition_index)->tap_ticks;
+}
+
+static real bots_weapon_range(long weapon_index)
+{
+	return weapon_index != NONE ? bots_weapon_kind(weapon_get(weapon_index)->definition_index)->range : 6.0f;
 }
 
 /* an item on the ground worth fetching near the bot: a weapon better than
@@ -1046,6 +1255,7 @@ static void bots_paths_release(void)
 	if (bots_paths.walkable)
 		free(bots_paths.walkable);
 	bots_paths.walkable = NULL;
+	path_pathfinding_surfaces_generation++;
 	if (bots_paths.vehicle_walkable)
 		free(bots_paths.vehicle_walkable);
 	bots_paths.vehicle_walkable = NULL;
@@ -1160,6 +1370,8 @@ static boolean bots_paths_copy(void)
 	csmemcpy(bots_paths.vehicle_walkable, structure->pathfinding_surfaces.address, (size_t)count);
 	bots_paths.structure = *structure;
 	bots_paths.structure.pathfinding_surfaces.address = bots_paths.walkable;
+	/* (path.c: the helper's cache of surfaces' edges made again) */
+	path_pathfinding_surfaces_generation++;
 	bots_paths.vehicle_structure = *structure;
 	bots_paths.vehicle_structure.pathfinding_surfaces.address = bots_paths.vehicle_walkable;
 	pthread_mutex_lock(&bots_helper.lock);
@@ -1228,6 +1440,8 @@ static void bots_paths_close_object(long object_index, char const *why)
 		}
 	}
 	bots_paths.closed_count += closed;
+	if (closed)
+		path_pathfinding_surfaces_generation++;
 	platform_log("bots: %s %s at (%.1f %.1f %.1f): %ld walkable surfaces closed (%.1f ms)", why,
 		tag_get_name(object->definition_index), object->object.bounding_sphere_center.x,
 		object->object.bounding_sphere_center.y, object->object.bounding_sphere_center.z, closed,
@@ -1351,6 +1565,7 @@ static void bots_paths_scan(void)
 			bots_paths.walkable[surface_index] &= (byte)~FLAG(BOTS_PATHFINDING_WALKABLE_BIT);
 			bots_paths.vehicle_walkable[surface_index] &= (byte)~FLAG(BOTS_PATHFINDING_WALKABLE_BIT);
 			bots_paths.roofed_count++;
+			path_pathfinding_surfaces_generation++;
 		}
 	}
 	bots_paths.scan_us += vita_host_time_us() - started;
@@ -1429,6 +1644,21 @@ static boolean bots_object_marks_place(struct object_datum *object)
 	return FALSE;
 }
 
+/* port: whether the point stands on the object (the level or another object
+under it first) */
+static boolean bots_object_supports(long object_index, real_point3d const *point)
+{
+	struct collision_result collision;
+	real_point3d start = *point;
+	real_vector3d down = { 0.0f, 0.0f, -1.2f };
+
+	start.z += 0.4f;
+	return collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_scenery_bit) |
+		FLAG(_collision_test_objects_machines_bit), &start, &down, NONE, &collision) &&
+		collision.type == _collision_result_object && collision.object_index == object_index;
+}
+
 static long bots_paths_learn(real_point3d const *position, real_point3d const *goal)
 {
 	struct object_iterator iterator;
@@ -1441,11 +1671,15 @@ static long bots_paths_learn(real_point3d const *position, real_point3d const *g
 		struct object_definition *definition = object_definition_get(object->definition_index);
 
 		/* (not what the bot or its goal stands on or in: a flag's stand, a
-		teleporter's base) */
+		teleporter's base; port: what the bot stands beside, within its
+		bounding sphere but on the level, is learnt - a bot pressed against
+		Sidewinder's blast door before it was learnt never learnt it, and the
+		flag carriers and their escorts stood there all game) */
 		if (definition->object.collision_model.index == NONE ||
 			bots_distance2d(&object->object.bounding_sphere_center, position) > object->object.bounding_sphere_radius + 4.5f ||
 			fabs(object->object.bounding_sphere_center.z - position->z) > object->object.bounding_sphere_radius + 2.0f ||
-			bots_object_holds(object, position) || bots_object_holds(object, goal) ||
+			(bots_object_holds(object, position) && bots_object_supports(iterator.index, position)) ||
+			bots_object_holds(object, goal) ||
 			bots_paths_learned(iterator.index) || bots_object_marks_place(object))
 		{
 			continue;
@@ -1646,6 +1880,11 @@ void bots_initialize_for_new_map(void)
 	bots_globals.flag_grabs = 0;
 	bots_globals.ball_grabs = 0;
 	bots_globals.stand_visits = 0;
+	csmemset(bots_profile.part_us, 0, sizeof(bots_profile.part_us));
+	bots_profile.below_rays = 0;
+	bots_profile.sight_rays = 0;
+	bots_profile.below_us = 0;
+	bots_profile.sight_us = 0;
 	/* (the first line a minute into the game) */
 	bots_globals.last_report_tick = 0;
 	bots_globals.vehicle_entries = 0;
@@ -2206,12 +2445,20 @@ static boolean bots_line_of_sight(long unit_index, real_point3d const *eye, real
 {
 	struct collision_result collision;
 	real_vector3d vector;
+	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
+	boolean hit;
 	long vehicle_index = bots_unit_vehicle(unit_index);
 
 	vector.i = point->x - eye->x;
 	vector.j = point->y - eye->y;
 	vector.k = point->z - eye->z;
-	if (!collision_test_vector(_collision_test_for_line_of_sight_flags, eye, &vector, unit_index, &collision))
+	hit = collision_test_vector(_collision_test_for_line_of_sight_flags, eye, &vector, unit_index, &collision);
+	if (started)
+	{
+		bots_profile.sight_rays++;
+		bots_profile.sight_us += vita_host_time_us() - started;
+	}
+	if (!hit)
 		return TRUE;
 	/* port: riding, its own vehicle (a Warthog's gun before its gunner's
 	eyes) or a rider in it is no wall: again past the vehicle */
@@ -2245,58 +2492,131 @@ static boolean bots_is_enemy(struct player_datum *player, struct player_datum *o
 	return TRUE;
 }
 
-/* the enemy the bot sees best now, NONE for none */
+/* the enemy the bot sees best now, NONE for none: of the enemies in its
+sight's reach and view, the one of the least score (nearest, most ahead, the
+one it fights favoured) a line of sight reaches, the first in the players'
+order of those of that score. The enemies are scored first and their lines
+of sight cast from the least score up, until one reaches its enemy, which is
+the answer: cast in the players' order, as before, every enemy scoring less
+than the best seen so far had its line cast, and the best was the same one
+(the lines of sight change nothing in the game but the collision tests'
+marker stamps). A score that is not a number (none is: the players'
+positions are) is compared as before, in the players' order */
+struct bots_target_candidate
+{
+	long player_index;
+	long unit_index;
+	real score;
+	real_point3d point;
+};
+
+/* an enemy's score as a target (its point the bounding sphere's centre);
+FALSE for one out of reach or view, or not an enemy */
+static boolean bots_target_score(struct bots_bot *bot, struct player_datum *player, struct player_datum *other,
+	long player_index, real_point3d const *eye, struct bots_skill_definition const *skill, boolean hurt,
+	struct bots_target_candidate *candidate)
+{
+	struct object_datum *object;
+	struct unit_datum *other_unit;
+	real distance, reach, bearing;
+	real half_view = 0.5f * skill->field_of_view_degrees * BOTS_DEGREES;
+
+	if (!bots_is_enemy(player, other))
+		return FALSE;
+	object = object_get(other->unit_index);
+	other_unit = unit_get(other->unit_index);
+	if (TEST_FLAG(object->object.damage_flags, _object_dead_bit))
+		return FALSE;
+	candidate->point = object->object.bounding_sphere_center;
+	distance = bots_distance3d(eye, &candidate->point);
+	reach = skill->sight_distance;
+	/* (active camouflage: seen only close) */
+	if (TEST_FLAG(other_unit->unit.flags, _unit_active_camouflaged_bit))
+		reach *= 0.3f;
+	/* (the one it fights: a little further) */
+	if (player_index == bot->target_player_index)
+		reach *= 1.25f;
+	if (distance > reach)
+		return FALSE;
+	bearing = (real)fabs(bots_angle_difference((real)atan2(candidate->point.y - eye->y, candidate->point.x - eye->x),
+		bot->yaw));
+	/* (out of view: unless close by, it shot the bot, or it is the one
+	the bot fights) */
+	if (bearing > half_view && distance > 3.0f && !hurt && player_index != bot->target_player_index)
+		return FALSE;
+	candidate->player_index = player_index;
+	candidate->unit_index = other->unit_index;
+	candidate->score = distance + bearing * 4.0f - (player_index == bot->target_player_index ? 6.0f : 0.0f);
+	return TRUE;
+}
+
 static long bots_find_target(struct bots_bot *bot, struct player_datum *player, struct unit_datum *unit,
 	real_point3d const *eye)
 {
-	struct bots_skill_definition const *skill = &bots_skills[bots_skill()];
+	struct bots_skill_definition const *skill = &bots_skills[bots_globals.skill];
 	struct data_iterator iterator;
 	struct player_datum *other;
-	long best_index = NONE;
-	real best_score = REAL_MAX;
-	real half_view = 0.5f * skill->field_of_view_degrees * BOTS_DEGREES;
 	boolean hurt = game_time_get() - bot->hurt_tick < TICKS_PER_SECOND * 2;
+	struct bots_target_candidate candidates[BOTS_MAXIMUM + MAXIMUM_LOCAL_PLAYERS];
+	long candidate_count = 0, index;
+	boolean ordered = TRUE;
 
-	data_iterator_new(&iterator, player_data);
-	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
-	{
-		struct object_datum *object;
-		struct unit_datum *other_unit;
-		real distance, reach, bearing, score;
-		real_point3d point;
-
-		if (!bots_is_enemy(player, other))
-			continue;
-		object = object_get(other->unit_index);
-		other_unit = unit_get(other->unit_index);
-		if (TEST_FLAG(object->object.damage_flags, _object_dead_bit))
-			continue;
-		point = object->object.bounding_sphere_center;
-		distance = bots_distance3d(eye, &point);
-		reach = skill->sight_distance;
-		/* (active camouflage: seen only close) */
-		if (TEST_FLAG(other_unit->unit.flags, _unit_active_camouflaged_bit))
-			reach *= 0.3f;
-		/* (the one it fights: a little further) */
-		if (iterator.datum_index == bot->target_player_index)
-			reach *= 1.25f;
-		if (distance > reach)
-			continue;
-		bearing = (real)fabs(bots_angle_difference((real)atan2(point.y - eye->y, point.x - eye->x), bot->yaw));
-		/* (out of view: unless close by, it shot the bot, or it is the one
-		the bot fights) */
-		if (bearing > half_view && distance > 3.0f && !hurt && iterator.datum_index != bot->target_player_index)
-			continue;
-		score = distance + bearing * 4.0f - (iterator.datum_index == bot->target_player_index ? 6.0f : 0.0f);
-		if (score >= best_score)
-			continue;
-		if (!bots_line_of_sight(player->unit_index, eye, &point, other->unit_index))
-			continue;
-		best_score = score;
-		best_index = iterator.datum_index;
-	}
 	(void)unit;
-	return best_index;
+	data_iterator_new(&iterator, player_data);
+	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL && ordered)
+	{
+		if (candidate_count >= (long)NUMBEROF(candidates))
+			ordered = FALSE;
+		else if (bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, &candidates[candidate_count]))
+		{
+			real score = candidates[candidate_count].score;
+
+			if (score != score)
+				ordered = FALSE;
+			else if (score < REAL_MAX)
+				candidate_count++;
+		}
+	}
+	if (!ordered)
+	{
+		/* (more enemies than kept, or a score not a number: the players'
+		order, each scoring less than the best so far) */
+		struct bots_target_candidate candidate;
+		long best_index = NONE;
+		real best_score = REAL_MAX;
+
+		data_iterator_new(&iterator, player_data);
+		while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (!bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, &candidate) ||
+				candidate.score >= best_score ||
+				!bots_line_of_sight(player->unit_index, eye, &candidate.point, candidate.unit_index))
+			{
+				continue;
+			}
+			best_score = candidate.score;
+			best_index = candidate.player_index;
+		}
+		return best_index;
+	}
+	while (candidate_count > 0)
+	{
+		long least = 0;
+
+		/* (the least score, the first of it in the players' order) */
+		for (index = 1; index < candidate_count; index++)
+		{
+			if (candidates[index].score < candidates[least].score)
+				least = index;
+		}
+		if (bots_line_of_sight(player->unit_index, eye, &candidates[least].point, candidates[least].unit_index))
+			return candidates[least].player_index;
+		/* (out, the others kept in their order) */
+		candidate_count--;
+		for (index = least; index < candidate_count; index++)
+			candidates[index] = candidates[index + 1];
+	}
+	return NONE;
 }
 
 /* ---------- moving */
@@ -2414,6 +2734,43 @@ static boolean bots_ctf_stand(long team_index, real_point3d *position)
 	return FALSE;
 }
 
+/* the flags among the weapons (weapon_is_flag: CTF's flags), in the objects'
+order: found by the first bot to ask in a tick, the same for the others;
+FALSE when there are more than kept (the weapons are walked then) */
+static boolean bots_ctf_flags(void)
+{
+	if (!bots_globals.flags_found)
+	{
+		struct object_iterator iterator;
+
+		bots_globals.flags_found = TRUE;
+		bots_globals.flags_overflow = FALSE;
+		bots_globals.flag_count = 0;
+		object_iterator_new(&iterator, _object_mask_weapon, 0);
+		while (object_iterator_next(&iterator))
+		{
+			if (!weapon_is_flag(iterator.index))
+				continue;
+			if (bots_globals.flag_count >= (long)NUMBEROF(bots_globals.flag_indices))
+			{
+				bots_globals.flags_overflow = TRUE;
+				break;
+			}
+			bots_globals.flag_indices[bots_globals.flag_count++] = iterator.index;
+		}
+	}
+	return !bots_globals.flags_overflow;
+}
+
+/* the next flag (bots_ctf_flags) from *position on, or the next weapon
+when they were too many; NONE after the last */
+static long bots_ctf_next_flag(struct object_iterator *iterator, long *position)
+{
+	if (bots_globals.flags_overflow)
+		return object_iterator_next(iterator) ? iterator->index : NONE;
+	return *position < bots_globals.flag_count ? bots_globals.flag_indices[(*position)++] : NONE;
+}
+
 /* CTF's own goals: carrying the enemy flag, its team's stand (bots_ctf_stand:
 the HUD's nav point is beside it, and a capture needs the carrier on it),
 or, where a capture needs its own flag home (the variant's flag at home to
@@ -2432,12 +2789,14 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 	long surface_index;
 	struct object_iterator iterator;
 	long chase_index = NONE, escort_index = NONE;
+	long flag_index, flag_position = 0;
 
 	if (game_engine_get_variant()->game_engine_index != game_engine_ctf ||
 		!bots_ctf_stand(player->team_index, &stand))
 	{
 		return FALSE;
 	}
+	bots_ctf_flags();
 	if (weapon_index != NONE && weapon_is_flag(weapon_index))
 	{
 		/* (its own flag carried off where a capture needs it home - the
@@ -2446,11 +2805,12 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 		struct ctf_variant const *rules = &game_engine_get_variant()->game_engine_variant.ctf;
 
 		object_iterator_new(&iterator, _object_mask_weapon, 0);
-		while (rules->flag_at_home_to_score && rules->single_flag_time == 0 && object_iterator_next(&iterator))
+		while (rules->flag_at_home_to_score && rules->single_flag_time == 0 &&
+			(flag_index = bots_ctf_next_flag(&iterator, &flag_position)) != NONE)
 		{
-			struct weapon_datum *flag = weapon_get(iterator.index);
+			struct weapon_datum *flag = weapon_get(flag_index);
 
-			if (weapon_is_flag(iterator.index) && flag->object.owner_team_index == player->team_index &&
+			if (weapon_is_flag(flag_index) && flag->object.owner_team_index == player->team_index &&
 				flag->object.parent_object_index != NONE &&
 				object_try_and_get_and_verify_type(flag->object.parent_object_index, _object_mask_unit))
 			{
@@ -2470,11 +2830,12 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 		return TRUE;
 	}
 	object_iterator_new(&iterator, _object_mask_weapon, 0);
-	while (object_iterator_next(&iterator))
+	flag_position = 0;
+	while ((flag_index = bots_ctf_next_flag(&iterator, &flag_position)) != NONE)
 	{
-		struct weapon_datum *flag = weapon_get(iterator.index);
+		struct weapon_datum *flag = weapon_get(flag_index);
 
-		if (!weapon_is_flag(iterator.index))
+		if (!weapon_is_flag(flag_index))
 			continue;
 		if (flag->object.parent_object_index != NONE)
 		{
@@ -2886,6 +3247,9 @@ struct bots_tick
 	struct unit_datum *unit;
 	struct object_datum *object;
 	long now;
+	/* the unit's eyes (its head marker), found when first needed: the look
+	(every third tick) and the fight (bots_tick_eye) */
+	boolean eye_found;
 	real_point3d eye;
 	real_point3d position;
 	long weapon_index;
@@ -2900,6 +3264,19 @@ struct bots_tick
 	struct player_action *action;
 };
 
+/* the unit's eyes: its head marker, as unit_get_head_position finds it
+(the marker's matrix from the object's node matrices, which nothing in the
+bot's tick changes, so it is the same found now or at the tick's start) */
+static real_point3d const *bots_tick_eye(struct bots_tick *tick)
+{
+	if (!tick->eye_found)
+	{
+		unit_get_head_position(tick->player->unit_index, &tick->eye);
+		tick->eye_found = TRUE;
+	}
+	return &tick->eye;
+}
+
 /* looking for enemies (every third tick, the bots in turn; (debug)
 HALO_BOT_PEACEFUL=1: never, for the moving alone), and forgetting the one
 gone a while */
@@ -2907,7 +3284,7 @@ static void bots_bot_look(struct bots_bot *bot, struct bots_tick *tick)
 {
 	if (tick->now >= bot->next_look_tick && !bots_peaceful())
 	{
-		long target = bots_find_target(bot, tick->player, tick->unit, &tick->eye);
+		long target = bots_find_target(bot, tick->player, tick->unit, bots_tick_eye(tick));
 
 		bot->next_look_tick = tick->now + 3;
 		if (target != NONE)
@@ -2960,6 +3337,7 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	real settle = (real)exp(-1.0f / (skill->aim_settle_seconds * TICKS_PER_SECOND) * 1.1f);
 
 	tick->fighting = TRUE;
+	bots_tick_eye(tick);
 	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
 	/* (leading a moving target by the projectile's flight) */
 	if (tick->weapon_index != NONE && skill->lead > 0.0f)
@@ -3579,6 +3957,10 @@ static void bots_bot_drive(struct bots_bot *bot, struct bots_tick *tick, long ve
 				before.y += vehicle->object.forward.j * 0.5f;
 				bots_paths_close_for_vehicles(&before, &vehicle->object.position, &bot->goal_point);
 			}
+			/* (stuck a second time: the scenery and machines about it learnt
+			too, as a bot on foot learns them when its path finds no way) */
+			if (bot->ride_stuck_count >= 1)
+				bots_paths_learn(&vehicle->object.position, &bot->goal_point);
 			if (getenv("HALO_BOT_TRACE"))
 			{
 				platform_log("bots: trace bot %ld stuck %d driving at (%.1f %.1f %.1f) heading %.0f yaw %.0f: %s %s %s",
@@ -4029,10 +4411,11 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 {
 	struct bots_tick tick;
 	real vitality;
+	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
 	long vehicle_index;
 
 	csmemset(&tick, 0, sizeof(tick));
-	tick.skill = &bots_skills[bots_skill()];
+	tick.skill = &bots_skills[bots_globals.skill];
 	tick.player = player_get(bot->player_index);
 	tick.now = game_time_get();
 	tick.throttle_scale = 1.0f;
@@ -4081,7 +4464,6 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bots_vehicle_forget(bot);
 		bot->ride_vehicle_index = NONE;
 	}
-	unit_get_head_position(tick.player->unit_index, &tick.eye);
 	/* port: riding, it is where its vehicle is (a rider's own position is
 	its seat's) */
 	vehicle_index = bots_unit_vehicle(tick.player->unit_index);
@@ -4109,7 +4491,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->hurt_tick = tick.now;
 	bot->last_vitality = vitality;
 
+	bots_profile_part(_bots_part_rest, &started);
 	bots_bot_look(bot, &tick);
+	bots_profile_part(_bots_part_look, &started);
 	tick.weapon_index = bots_current_weapon(tick.unit);
 	/* (the flag or the ball taken: halo.log's count) */
 	{
@@ -4141,13 +4525,16 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 			bots_globals.stand_visits++;
 		bot->at_enemy_stand = at;
 	}
-	/* port: riding a vehicle: driving, gunning or riding along, and out */
+	bots_profile_part(_bots_part_rest, &started);
+	/* port: riding a vehicle: driving, gunning or riding along, and out
+	(the lines profile's walk) */
 	if (vehicle_index != NONE)
 		bots_bot_ride(bot, &tick, vehicle_index);
 	else
 	{
 		if (bot->target_player_index != NONE && tick.now - bot->target_seen_tick <= TICKS_PER_SECOND / 2)
 			bots_bot_fight(bot, &tick);
+		bots_profile_part(_bots_part_fight, &started);
 
 		/* the goal, and the path to it (while fighting, only the game's
 		objective, a weapon close by or a vehicle it goes for: towards it,
@@ -4159,7 +4546,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 			bots_choose_goal(bot, bot->player_index, &tick.position, tick.fighting);
 		}
 		bots_vehicle_consider(bot, &tick);
+		bots_profile_part(_bots_part_goal, &started);
 		bots_search_take(bot, TRUE);
+		bots_profile_part(_bots_part_take, &started);
 		if (!tick.fighting)
 		{
 			bots_bot_walk(bot, &tick);
@@ -4174,9 +4563,11 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 				tick.move_direction = direction;
 		}
 		bots_vehicle_approach(bot, &tick);
+		bots_profile_part(_bots_part_walk, &started);
 		bots_bot_weapons(bot, &tick);
 		bots_bot_unstick(bot, &tick);
 	}
+	bots_profile_part(_bots_part_walk, &started);
 
 	if (tick.moving)
 	{
@@ -4205,6 +4596,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	action->control_flags = tick.flags;
 	action->primary_trigger = TEST_FLAG(tick.flags, _unit_control_weapon_primary_trigger_bit) ? 1.0f : 0.0f;
 	bots_bot_trace(bot, bot_index, &tick);
+	bots_profile_part(_bots_part_rest, &started);
 }
 
 static void bots_report(void)
@@ -4245,6 +4637,18 @@ static void bots_report(void)
 		(double)bots_globals.search_us / (double)bots_globals.ticks,
 		(double)bots_helper.helper_us / (double)bots_globals.ticks, fired, hit, bots_globals.flag_grabs,
 		bots_globals.stand_visits, bots_globals.ball_grabs, line);
+	if (bots_profile.enabled > 0)
+	{
+		double ticks = (double)bots_globals.ticks;
+
+		platform_log("bots: tick %ld split (us/tick): look %.1f fight %.1f goal %.1f take %.1f walk %.1f rest %.1f scan %.1f | "
+			"rays a tick: down %.2f (%.1f us) sight %.2f (%.1f us)", now,
+			bots_profile.part_us[_bots_part_look] / ticks, bots_profile.part_us[_bots_part_fight] / ticks,
+			bots_profile.part_us[_bots_part_goal] / ticks, bots_profile.part_us[_bots_part_take] / ticks,
+			bots_profile.part_us[_bots_part_walk] / ticks, bots_profile.part_us[_bots_part_rest] / ticks,
+			bots_profile.part_us[_bots_part_scan] / ticks, bots_profile.below_rays / ticks,
+			bots_profile.below_us / ticks, bots_profile.sight_rays / ticks, bots_profile.sight_us / ticks);
+	}
 }
 
 void bots_update_actions(struct player_action *actions)
@@ -4257,6 +4661,9 @@ void bots_update_actions(struct player_action *actions)
 	if (!game_engine_running() || !network_game_is_splitscreen_local())
 		return;
 	started = vita_host_time_us();
+	bots_profile_enabled();
+	bots_globals.skill = bots_skill();
+	bots_globals.flags_found = FALSE;
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
 	{
@@ -4272,7 +4679,13 @@ void bots_update_actions(struct player_action *actions)
 		if (!bots_globals.map_ready)
 			bots_prepare_map();
 		if (!count)
+		{
+			unsigned long long scan_started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
+
+			bots_ground_memo_begin();
 			bots_paths_scan();
+			bots_profile_part(_bots_part_scan, &scan_started);
+		}
 		bot_index = player->network_player_data.machine_index - BOTS_FIRST_MACHINE;
 		bot = &bots_globals.bots[bot_index];
 		if (bot->player_index != iterator.datum_index)
@@ -4281,6 +4694,7 @@ void bots_update_actions(struct player_action *actions)
 			bots_bot_update(bot, bot_index, &actions[absolute_index]);
 		count++;
 	}
+	bots_ground_memo.active = FALSE;
 	if (count)
 	{
 		bots_globals.tick_us += vita_host_time_us() - started;

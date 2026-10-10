@@ -85,6 +85,27 @@ long cluster_partition_walk_datums(
 	long *references_after,
 	long maximum);
 #endif
+#ifdef HALO_LINUX
+/* (port) the most clusters a datum is put in (cluster_partition_reconnect) */
+enum
+{
+	CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS = 64
+};
+
+/* (port) cluster_partition_reconnect's halves: the clusters the sphere
+spans, then the datum put in their lists */
+short cluster_partition_clusters_in_sphere(
+	real_point3d const *position,
+	float radius,
+	struct location const *location,
+	short *cluster_indices);
+void cluster_partition_reconnect_to_clusters(
+	struct cluster_partition *partition,
+	long datum_index,
+	long *first_cluster_reference,
+	short cluster_count,
+	short const *cluster_indices);
+#endif
 long cluster_partition_get_first_cluster(
 	struct cluster_partition const *partition,
 	long *reference_index,

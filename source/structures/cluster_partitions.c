@@ -579,6 +579,74 @@ long cluster_partition_get_next_cluster(
 #endif
 }
 
+#ifdef HALO_LINUX
+/* (port) cluster_partition_reconnect's two halves, so the lights can keep the
+clusters of a sphere they asked for (object_lights.c,
+light_reconnect_to_map): the clusters a sphere at position in location's
+cluster spans, at most CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS (said in
+the log past that, as before), which is a function of the structure bsp, the
+cluster, the position and the radius alone; and the datum put in those
+clusters' lists (the caller's objects phase: HALO_TICK_PROFILE=2) */
+short cluster_partition_clusters_in_sphere(
+	real_point3d const *position,
+	float radius,
+	struct location const *location,
+	short *cluster_indices)
+{
+	short cluster_count;
+
+	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x72, position);
+	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x73, location);
+
+	cluster_count = structure_clusters_in_sphere(
+		location->cluster_index,
+		position,
+		radius,
+		CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS,
+		cluster_indices);
+
+	if (cluster_count > CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS)
+	{
+		error(_error_silent, "an object or light spanned %d clusters.", cluster_count);
+		cluster_count = CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS;
+	}
+
+	return cluster_count;
+}
+
+void cluster_partition_reconnect_to_clusters(
+	struct cluster_partition *partition,
+	long datum_index,
+	long *first_cluster_reference,
+	short cluster_count,
+	short const *cluster_indices)
+{
+	short cluster_index_index;
+
+	cluster_datums_changes++;
+
+	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x6f, partition);
+	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x70, first_cluster_reference);
+	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x71, *first_cluster_reference==NONE);
+
+	for (cluster_index_index = 0; cluster_index_index < cluster_count; cluster_index_index++)
+	{
+		short const cluster_index = cluster_indices[cluster_index_index];
+
+		reference_list_add(
+			partition->cluster_reference_data,
+			first_cluster_reference,
+			cluster_index);
+		cluster_list_add_last(
+			partition->data_reference_data,
+			code_00180fa0(partition, cluster_index),
+			datum_index);
+	}
+
+	return;
+}
+#endif
+
 void cluster_partition_reconnect(
 	struct cluster_partition *partition,
 	long datum_index,
@@ -587,14 +655,19 @@ void cluster_partition_reconnect(
 	float radius,
 	struct location const *location)
 {
+#ifdef HALO_LINUX
+	short cluster_indices[CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS];
+	short cluster_count;
+
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_map);
+	cluster_count = cluster_partition_clusters_in_sphere(position, radius, location, cluster_indices);
+	cluster_partition_reconnect_to_clusters(partition, datum_index, first_cluster_reference, cluster_count, cluster_indices);
+	HALO_OBJECTS_PHASE_POP();
+#else
 	HALO_OBJECTS_PHASE_PUSH(_objects_phase_map);
 	short cluster_indices[64];
 	short cluster_count;
 	short cluster_index_index;
-
-#ifdef HALO_LINUX
-	cluster_datums_changes++;
-#endif
 
 	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x6f, partition);
 	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x70, first_cluster_reference);
@@ -624,20 +697,14 @@ void cluster_partition_reconnect(
 			first_cluster_reference,
 			cluster_index);
 
-#ifdef HALO_LINUX
-		cluster_list_add_last(
-			partition->data_reference_data,
-			code_00180fa0(partition, cluster_index),
-			datum_index);
-#else
 		reference_list_add(
 			partition->data_reference_data,
 			code_00180fa0(partition, cluster_index),
 			datum_index);
-#endif
 	}
 
 	HALO_OBJECTS_PHASE_POP();
+#endif
 	return;
 }
 

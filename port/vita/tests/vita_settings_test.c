@@ -963,9 +963,9 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|  Bot skill|  Bot teams|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
-		"Bots 3: Bot skill and Bot teams below it, live");
+		"Bots 3: Bot skill, Bot teams and Bot vehicles below it, live");
 	to_line("  Bot skill");
 	press(VITA_BUTTON_RIGHT);
 	check(getenv("HALO_BOT_SKILL") && !strcmp(getenv("HALO_BOT_SKILL"), "heroic"), "Bot skill: Normal, then Heroic");
@@ -1225,8 +1225,8 @@ static void test_online_rows(void)
 with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
-players, Visibility, Fourth core helpers, Latency meter; the Play page's
-two texts) */
+players, Visibility, Fourth core helpers, Latency meter, Particles; the
+Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1247,7 +1247,8 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
-		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL",
+		"HALO_BOT_VEHICLES",
+		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1293,6 +1294,8 @@ static void unset_bruno_rows(void)
 	unsetenv("HALO_PARTICLE_RENDER_DIVISOR");
 	unsetenv("HALO_AI_THINK_DIVISOR");
 	unsetenv("HALO_SOUND_MANAGER_DIVISOR");
+	/* (and Particles, added in 1.1.0-beta.4) */
+	unsetenv("HALO_PARTICLE_BUDGET");
 }
 
 /* Bruno Santana's settings (Graphics > Advanced, and Audio's Sound updates):
@@ -1384,6 +1387,56 @@ Santana's levels and variable (HALO_CPU3_AUX: Off, Audio, All async), Off
 by default and in no profile, a level saved and in the environment the next
 start reads, a restart's row, the profile left as it was; his build's
 settings.txt line read; back Off */
+/* Particles (the particle budget, port/linux/game/particle_budget.c): on the
+Graphics tab, Full, Reduced, Low; Full by default and in Balanced and
+Quality, Reduced in Performance; live (no restart), saved as a word; a
+change by hand makes the profile Custom */
+static void test_particles_row(void)
+{
+	struct setting *row = setting_named("HALO_PARTICLE_BUDGET");
+	int profile = settings[0].choice;
+	int index, in_profile = -1;
+	char line[128];
+
+	for (index = 0; index < PROFILE_ROWS; index++)
+		if (!strcmp(profile_variables[index], "HALO_PARTICLE_BUDGET"))
+			in_profile = index;
+	check(row && row->page == TAB_GRAPHICS && !row->restart && row->count == 3 &&
+		!strcmp(row->names[0], "Full") && !strcmp(row->names[1], "Reduced") && !strcmp(row->names[2], "Low") &&
+		!strcmp(row->values[0], "full") && !strcmp(row->values[1], "reduced") && !strcmp(row->values[2], "low") &&
+		!strcmp(row->values[shipped_choice[row - settings]], "full") && getenv("HALO_PARTICLE_BUDGET") &&
+		!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full"),
+		"Particles: on the Graphics tab, Full, Reduced, Low (full, reduced, low); Full by default, in the environment, live");
+	check(in_profile >= 0 && !strcmp(profile_values[0][in_profile], "reduced") &&
+		!strcmp(profile_values[1][in_profile], "full") && !strcmp(profile_values[2][in_profile], "full"),
+		"Particles in the profiles: Performance Reduced, Balanced and Quality Full");
+	check(to_line("Particles") && strstr(menu, "\n\x05" "Fewer sparks, smoke and debris in big fights\n") && menu_fits(),
+		"Particles: its help line fits");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=reduced\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Particles\x02< Reduced >") && !restart_pending &&
+		!strcmp(settings[0].names[settings[0].choice], "Custom"),
+		"Particles Reduced: saved, in the environment, no restart, the profile Custom");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "low") && strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=low\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Particles\x02< Low  "), "Particles Low: the last");
+	vita_settings_load();
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "low"), "Particles Low: read back from settings.txt");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && settings[0].choice == profile, "Particles Full: the profile again");
+	vita_settings_set("HALO_PROFILE", "performance");
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
+		"Performance: Reduced particles");
+	vita_settings_set("HALO_PROFILE", "quality");
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full"), "Quality: Full particles, the Xbox's");
+	vita_settings_set("HALO_PROFILE", "balanced");
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
+		"Balanced: Full particles");
+	while (menu_selected > 2)
+		press(VITA_BUTTON_UP);
+}
+
 static void test_fourth_core(void)
 {
 	struct setting *row = setting_named("HALO_CPU3_AUX");
@@ -1933,10 +1986,12 @@ int main(void)
 		!strncmp(menu_line(6, line, sizeof(line)), "Frame interpolation\x02", 20) &&
 		!strncmp(menu_line(7, line, sizeof(line)), "FPS counter\x02", 12) &&
 		!strncmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Advanced\x02  >") &&
-		!strncmp(menu_line(10, line, sizeof(line)), "\x05Sets resolution", 16) &&
-		!strncmp(menu_line(11, line, sizeof(line)), "\x06L/R: tabs", 10),
-		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, Frame interpolation, FPS counter, weapon motion, Advanced; help, buttons");
+		!strcmp(menu_line(9, line, sizeof(line)), "Particles\x02  Full >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "Advanced\x02  >") &&
+		!strncmp(menu_line(11, line, sizeof(line)), "\x05Sets resolution", 16) &&
+		!strncmp(menu_line(12, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
+		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, Frame interpolation, FPS counter, weapon motion, "
+		"Particles (Full), Advanced; help, buttons");
 	check(menu_fits() && menu_rows() <= 10, "Graphics: ten rows at most, each fits");
 	check(!strstr(menu, "Dynamic minimum") && !strstr(menu, "Model detail"),
 		"Graphics: Dynamic minimum hidden (not Dynamic), the detail rows under Advanced");
@@ -1991,6 +2046,7 @@ int main(void)
 		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n"), "... and Off again");
 	}
+	test_particles_row();
 	/* Graphics' Advanced: the detail rows the profile sets */
 	check(open_page("Advanced") && strstr(menu, "\n\x03Graphics > Advanced\n") &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Model detail\x02", 13) &&
@@ -2338,12 +2394,16 @@ int main(void)
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_SUN_RAYS"), "0") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
 			"a Performance settings.txt from before Sun rays: Performance, sun rays off");
+		check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced"),
+			"... and from before Particles: Reduced, as Performance has them");
 		write_file(SETTINGS_FILE, quality, sizeof(quality) - 1);
 		unsetenv("HALO_SUN_RAYS");
 		unset_bruno_rows();
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_SUN_RAYS"), "1") && !strcmp(settings[0].names[settings[0].choice], "Quality"),
 			"a Quality settings.txt from before Sun rays: Quality, sun rays on");
+		check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full"),
+			"... and from before Particles: Full, as Quality has them");
 		check(!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") &&
 			!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") &&
 			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),

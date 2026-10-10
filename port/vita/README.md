@@ -182,6 +182,7 @@ of `settings.txt`: a file from an older version loads as it is.
 | Frame limit | 30 FPS | the most frames shown a second |
 | FPS counter | Off | the game's own frame counter, bottom right |
 | Smooth weapon motion | On | the first-person weapon blended between game ticks |
+| Particles (P) | Full | the particles a fight's shots, impacts and explosions make (applies at once). Reduced (the Performance profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera). Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
 | Advanced > | | the page below |
 
 Graphics, **Advanced**:

@@ -101,6 +101,12 @@ static const struct config_setting config_settings[] =
 	{ "display.interpolation", _config_boolean, "true", "HALO_INTERPOLATION", _environment_value, _platform_all,
 		"Draw a frame for every display refresh, blending between the game's 30\n"
 		"ticks a second; false keeps the original 30 frames a second." },
+	/* (port/linux/game/particle_budget.c; the Vita's settings panel's
+	Particles row, Reduced in its Performance profile) */
+	{ "graphics.particles", _config_string, "\"full\"", "HALO_PARTICLE_BUDGET", _environment_value, _platform_all,
+		"The particles a fight's effects make: \"full\" (the Xbox's), \"reduced\" or\n"
+		"\"low\": fewer sparks, smoke, dust and debris, gone sooner; muzzle\n"
+		"flashes, flashes and scripted effects kept." },
 
 	{ "audio.enabled", _config_boolean, "true", "HALO_NO_AUDIO", _environment_set_is_false, _platform_all,
 		"Play sound." },
@@ -283,6 +289,10 @@ static const struct config_setting config_settings[] =
 	{ "bots.teams", _config_string, "\"even\"", "HALO_BOT_TEAMS", _environment_value, _platform_all,
 		"In team games: \"even\" puts the bots on both teams, evening them with\n"
 		"the players; \"against\" puts them all on the team the players are not on." },
+	{ "bots.vehicles", _config_integer, "1", "HALO_BOT_VEHICLES", _environment_value, _platform_all,
+		"1: the bots drive and ride the map's vehicles (Warthogs, Ghosts and\n"
+		"Scorpions) to goals a long way off; 0: they stay on foot. The Vita's\n"
+		"settings panel (Multiplayer, Bot vehicles) sets it." },
 	{ "network.lobby_password", _config_string, "\"\"", "HALO_NET_LOBBY_PASSWORD", _environment_value, _platform_all,
 		"A password for the public games this machine hosts: the server browser\n"
 		"lets only those who know it join (the code and invite link still do);\n"
