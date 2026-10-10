@@ -201,7 +201,10 @@ a mod-set cache with the stock resource maps instead, for inspection only
 (OpenSauce itself refuses such a map). `--dump-tags` writes the converted
 tags to a file, as they would sit at `0x40440000`.
 
-Loading, step by step (`custom_edition_cache_load`):
+Loading, step by step (`custom_edition_cache_load`; a Halo: CE
+Anniversary cache, version 13, from a mod's folder takes the same steps,
+linked to 0x50000000, with its structure BSPs' vertices in the file:
+[mcc_cea_maps.md](mcc_cea_maps.md#playing-a-mod-natively)):
 
 1. The header: signatures, version 609, terminated strings, file length
    within the file and the size limit (`0x18000000`, or `0x24000000` with
