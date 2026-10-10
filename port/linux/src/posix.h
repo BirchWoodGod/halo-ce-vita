@@ -141,6 +141,28 @@ NUL terminated, into body. The body's length, or -1 with why in error (a
 status other than 200 too). Blocks for up to 15 seconds. */
 int posix_https_get(const char *url, const char *user_agent, char *body, int capacity, char *error, int error_size);
 
+/* ---------- a file downloaded over HTTPS (the Vita's updater,
+port/vita/host/vita_update_install.c; posix_https.c)
+
+GETs url as posix_https_get does (the same TLS, authorities and limits on
+headers) into the file at path, streamed. A redirect (301, 302, 303, 307,
+308) is followed, at most 5 of them, only to a URL redirect_allowed takes
+(NULL: none). The body must come by Content-Length, at most maximum bytes in
+all; with expected_size (nonzero) it must be exactly that many. With
+expected_size, a shorter file already at path is resumed (Range; a server
+that answers the whole file again rewrites it) and a complete one is taken
+as it is; without, path is written anew. progress (may be NULL) hears the
+bytes so far and the total after each read, and stops the download by
+returning nonzero. Each wait has a deadline (15 s to connect and shake
+hands, 30 s without a byte). 1 when the file is complete, -1 when progress
+stopped it, else 0 with why in error; the file is left as far as it got
+(the caller resumes or deletes it). */
+typedef int (*posix_https_progress_proc)(void *context, posix_ulong received, posix_ulong total);
+typedef int (*posix_https_redirect_proc)(const char *from_url, const char *to_url);
+int posix_https_download(const char *url, const char *user_agent, const char *path, posix_ulong expected_size,
+	posix_ulong maximum, posix_https_redirect_proc redirect_allowed, posix_https_progress_proc progress, void *context,
+	char *error, int error_size);
+
 /* ---------- UPnP (internet play, p2p.c; posix_upnp.c, with
 port/third_party/miniupnpc) */
 
