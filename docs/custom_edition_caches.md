@@ -869,10 +869,6 @@ every layout used was then checked against the sample maps.
   sine (run_ogg_sound_test.sh), as the Xbox's own sounds do.
 - **Models of 44 nodes or more** cannot be drawn by this build's renderer:
   such maps are refused (`celer_exile_odst_v2.yelo`).
-- **Linear bitmaps whose rows are not a multiple of 64 bytes** are drawn with
-  the wrong row pitch: the texture cache gives the texture header the
-  unpadded pitch rounded down. They are logged; none is in the maps run (the
-  6 known are in `extinctionrevanepic2.map`).
 - **Button prompts on replaced icon sheets.** HUD messages draw a button
   from sequence 0 to 3 of the HUD globals' icon bitmap, as the Xbox does;
   Halo PC names the key instead. `beavercreek_halo3.yelo` replaces the icon
