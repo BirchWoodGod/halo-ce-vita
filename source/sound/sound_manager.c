@@ -2106,7 +2106,7 @@ static real source_distance_squared(
 	short listener_index,
 	struct sound_source *source)
 {
-	real distance_squared;
+	real distance_squared = 0.0f;
 
 	switch (source->spatialization_mode)
 	{

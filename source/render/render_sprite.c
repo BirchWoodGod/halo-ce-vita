@@ -991,6 +991,25 @@ void build_sprite_rotational(
 		&transformed_axis_of_rotation) - quarter_circle;
 	fraction = angle*angle/(quarter_circle*quarter_circle);
 	fraction = PIN(fraction, 0.f, 1.f);
+	/* port: the edge-on sprite is in the next sequence and the face-on in
+	this one, which a Custom Edition map's bitmap may not have, or have no
+	sprites in (foundation's, Hornets Nest's): without the next, the face-on
+	sprite alone; without this one, neither (each read past the bitmap's
+	sequences and took a sprite modulo a count of zero) */
+	{
+		struct tag_block const *sequences = &bitmap_group_get(data->bitmap_group_index)->sequences;
+
+		if (!VALID_INDEX(sequence_index, sequences->count) ||
+			TAG_BLOCK_GET_ELEMENT(sequences, sequence_index, struct bitmap_group_sequence)->sprites.count <= 0)
+		{
+			return;
+		}
+		if (sequence_index+1 >= sequences->count ||
+			TAG_BLOCK_GET_ELEMENT(sequences, sequence_index+1, struct bitmap_group_sequence)->sprites.count <= 0)
+		{
+			fraction = 0.f;
+		}
+	}
 
 	if (fraction>0.05f)
 	{

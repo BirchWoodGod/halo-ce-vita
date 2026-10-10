@@ -2208,7 +2208,7 @@ void rasterizer_transparent_geometry_group_draw(
 								{
 									real vsh_constants__texscale[3][4];
 									short fade_source = shader_transparent_generic->generic.framebuffer_fade_source;
-									unsigned long combiner_constant;
+									unsigned long combiner_constant = 0; /* port: a map's fade mode outside the switch's (a release build's assertion returns) */
 
 									vsh_constants__texscale[0][0] = 0.0f;
 									vsh_constants__texscale[0][1] = 0.0f;
@@ -2743,7 +2743,7 @@ void rasterizer_transparent_geometry_group_draw(
 								{
 									real vsh_constants__texscale[3][4];
 									short fade_source = shader_transparent_chicago->chicago.framebuffer_fade_source;
-									unsigned long combiner_constant;
+									unsigned long combiner_constant = 0; /* port: a map's fade mode outside the switch's (a release build's assertion returns) */
 
 									vsh_constants__texscale[0][0] = 0.0f;
 									vsh_constants__texscale[0][1] = 0.0f;

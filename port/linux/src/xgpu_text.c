@@ -26,7 +26,16 @@ void xgpu_text_append(struct xgpu_text *text, const char *format, ...)
 			text->length += (unsigned long)needed;
 			return;
 		}
-		text->capacity = (text->capacity + (unsigned long)needed + 1) * 2;
-		text->buffer = realloc(text->buffer, text->capacity);
+		/* port: out of memory, the text stays as it is, short (the
+		buffer was lost, and the loop never ended), from OpenCE */
+		{
+			unsigned long capacity = (text->capacity + (unsigned long)needed + 1) * 2;
+			char *buffer = realloc(text->buffer, capacity);
+
+			if (!buffer)
+				return;
+			text->buffer = buffer;
+			text->capacity = capacity;
+		}
 	}
 }

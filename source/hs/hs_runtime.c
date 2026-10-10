@@ -1072,7 +1072,7 @@ void render_debug_trigger_volumes(
 {
 	if (debug_trigger_volumes)
 	{
-		real_matrix4x3 matrix;
+		real_matrix4x3 matrix = { 0 };
 		short volume_index;
 		struct scenario *scenario = global_scenario_get();
 
@@ -1682,7 +1682,9 @@ static void hs_inspect_enum(
 static union hs_conversion_result hs_long_to_boolean(
 	union hs_conversion_result value)
 {
-	value.boolean = value.long_integer==0;
+	/* port: the whole value (only its low byte was written, the rest left
+	as the long's bytes, which the scripts' stacks and globals carried) */
+	value.long_integer = value.long_integer==0;
 
 	return value;
 }
@@ -1690,7 +1692,8 @@ static union hs_conversion_result hs_long_to_boolean(
 static union hs_conversion_result hs_short_to_boolean(
 	union hs_conversion_result value)
 {
-	value.boolean = value.short_integer==0;
+	/* port: the whole value, as hs_long_to_boolean's */
+	value.long_integer = value.short_integer==0;
 
 	return value;
 }
@@ -1700,7 +1703,9 @@ static union hs_conversion_result hs_string_to_boolean(
 {
 	union hs_conversion_result result;
 
-	result.boolean = csstrlen(value.string)==0;
+	/* port: the whole value (only its low byte was set; the rest was
+	whatever the stack held) */
+	result.long_integer = csstrlen(value.string)==0;
 
 	return result;
 }
@@ -1748,7 +1753,9 @@ static union hs_conversion_result hs_enum_to_real(
 static union hs_conversion_result hs_real_to_short(
 	union hs_conversion_result value)
 {
-	value.short_integer = (short)value.real;
+	/* port: the whole value, the short sign-extended (only the low word was
+	written, the high one left as the real's bits) */
+	value.long_integer = (short)value.real;
 
 	return value;
 }
@@ -1764,7 +1771,9 @@ static long hs_long_to_short(
 {
 	union hs_conversion_result result;
 
-	result.short_integer = value.short_integer;
+	/* port: the whole value, the short sign-extended (only the low word was
+	set; the rest was whatever the stack held) */
+	result.long_integer = value.short_integer;
 
 	return result.long_integer;
 }
@@ -2019,7 +2028,8 @@ void hs_evaluate_equality(
 		if (function_index==_hs_function_not_equal)
 			equal = !equal;
 
-		result.boolean = equal;
+		/* port: the whole value (only its low byte was set) */
+		result.long_integer = equal;
 		hs_return(thread_index, result.long_integer);
 	}
 
@@ -2064,7 +2074,8 @@ void hs_evaluate_inequality(
 			break;
 		}
 
-		result.boolean = comparison;
+		/* port: the whole value (only its low byte was set) */
+		result.long_integer = comparison;
 		hs_return(thread_index, result.long_integer);
 	}
 
@@ -2113,7 +2124,8 @@ void hs_evaluate_logical(
 	}
 	else
 	{
-		value_out.boolean = *result;
+		/* port: the whole value (only its low byte was set) */
+		value_out.long_integer = *result;
 
 		hs_return(thread_index, value_out.long_integer);
 	}
@@ -2701,6 +2713,27 @@ static void hs_thread_main(
 	hs_runtime_globals.executing_thread_index = (short)thread_index;
 	if (thread->type==_hs_thread_type_script)
 	{
+		/* port: a thread of no script of the scenario's (a corrupted one, or
+		a saved game's: observed on a10 with the sound cache under pressure,
+		0x4CAC000E against 185 scripts) sleeps for good, said once, as a
+		disabled script's does below, instead of running the empty data as a
+		script (a halt with assertions) */
+		if (thread->script_index<0 ||
+			thread->script_index>=global_scenario_get()->hs_scripts.count)
+		{
+			static boolean reported = FALSE;
+
+			if (!reported)
+			{
+				reported = TRUE;
+				error(_error_silent, "hs thread #%08lX has a bad script index #%08lX; it sleeps for good",
+					(unsigned long)thread_index, (unsigned long)thread->script_index);
+			}
+			thread->sleep_until = NONE;
+			hs_runtime_globals.executing_thread_index = NONE;
+
+			return;
+		}
 		script = TAG_BLOCK_GET_ELEMENT(
 			&global_scenario_get()->hs_scripts,
 			thread->script_index,

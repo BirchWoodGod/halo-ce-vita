@@ -95,10 +95,6 @@ enum
 	_bitmap_linear_bit,
 };
 
-/* xbox_texture_cache.c makes linear textures with the row pitch in units
-of this, rounded down */
-#define LINEAR_TEXTURE_PITCH_ALIGNMENT 64
-
 /* ---------- structures */
 
 /* A model shader, to its reflection cube map: the bitmaps it draws with.
@@ -572,7 +568,6 @@ boolean custom_edition_bitmaps_verify(
 	struct bitmap_group *group;
 	int32_t tag_index = NONE;
 	long bitmap_count = 0;
-	long misaligned_count = 0;
 
 	while ((group = custom_edition_cache_tag_next(tag_cache, loaded_bytes, BITMAP_GROUP_TAG, sizeof(*group), &tag_index)) != NULL)
 	{
@@ -597,27 +592,13 @@ boolean custom_edition_bitmaps_verify(
 					bitmap->flags);
 				return FALSE;
 			}
-			if (TEST_FLAG(bitmap->flags, _bitmap_linear_bit) &&
-				bitmap_mipmap_get_row_pitch(bitmap, 0) % LINEAR_TEXTURE_PITCH_ALIGNMENT)
-			{
-				/* rasterizer_xbox_bitmap_rebuild_hardware_format pads the rows,
-				but the texture's header gets the unpadded pitch rounded down */
-				error(
-					_error_silent,
-					"custom edition: bitmap %ld of '%s' is linear with %ld-byte rows, which this build draws with the wrong row pitch",
-					bitmap_index,
-					custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index),
-					bitmap_mipmap_get_row_pitch(bitmap, 0));
-				misaligned_count++;
-			}
 			bitmap_count++;
 		}
 	}
 	error(
 		_error_silent,
-		"custom edition: %ld bitmaps can be drawn (%ld with misaligned rows)",
-		bitmap_count,
-		misaligned_count);
+		"custom edition: %ld bitmaps can be drawn",
+		bitmap_count);
 
 	return TRUE;
 }

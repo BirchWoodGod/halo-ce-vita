@@ -897,7 +897,7 @@ boolean unit_scream(
 	short scream_type)
 {
 	struct unit_datum *unit = unit_get(unit_index);
-	short vocalization_type;
+	short vocalization_type = 0;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\units\\unit_dialogue.c",
@@ -1142,7 +1142,10 @@ static long unit_find_dialogue_variant(
 			variant_index,
 			struct unit_dialogue_variant);
 
-		if (variant_number == NONE || variant->variant_number == variant_number)
+		/* port: a variant with no dialogue is passed over (a Custom Edition
+		map's unit can have one, which asserted when picked) */
+		if ((variant_number == NONE || variant->variant_number == variant_number) &&
+			variant->dialogue_index != NONE)
 		{
 			/* port: no more than the array holds (a map's count; released
 			maps have at most 6 variants) */

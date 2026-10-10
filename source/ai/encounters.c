@@ -2204,7 +2204,7 @@ void encounter_create(
 			struct squad_definition *squad_definition = TAG_BLOCK_GET_ELEMENT(
 				&encounter_definition->squads, squad_index, struct squad_definition);
 			short initial_variant;
-			short count;
+			short count = 0;
 			short actor_type;
 			short i;
 

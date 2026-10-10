@@ -610,6 +610,13 @@ void player_profile_save_level_completed(
 	flags hold the campaign's ten */
 	if (level == NONE)
 		return;
+	/* port: nor one past the campaign's levels, nor a difficulty past the
+	profile's (the flags are indexed by both) */
+	if (level < 0 || level >= NUMBER_OF_SINGLE_PLAYER_LEVELS ||
+		difficulty < 0 || difficulty >= NUMBER_OF_GAME_DIFFICULTY_LEVELS)
+	{
+		return;
+	}
 #endif
 
 	match_assert("c:\\halo\\SOURCE\\saved games\\player_profile.c", 0x19D, (level>=0) && (level<NUMBER_OF_SINGLE_PLAYER_LEVELS) && (difficulty >= 0) && (difficulty < NUMBER_OF_GAME_DIFFICULTY_LEVELS));

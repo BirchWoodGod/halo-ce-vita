@@ -1297,6 +1297,10 @@ static void stream_complete_head(struct sdl_stream *stream, DWORD status, DWORD 
 	XMEDIAPACKET packet = entry->packet;
 
 	packet_trace(stream, entry);
+	/* (one not played to its end, flushed: the cursor was its place, and the
+	mixer may take the next while the lock is let go below) */
+	if (!entry->finished)
+		stream->cursor = 0.0;
 	packet_release(entry);
 	entry->finished = FALSE;
 	stream->packet_head = (stream->packet_head + 1) % MAXIMUM_STREAM_PACKETS;

@@ -320,6 +320,7 @@ symbols in this file:
 #include "saved games/game_state.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
+#include "interface/player_ui.h" /* port: player_ui_saved_game_file_removed */
 #include "text/text_group.h"
 #include "tag_files/tag_groups.h"
 /* the saved game file checksum is an XDK content signature, and enumerated
@@ -851,17 +852,22 @@ void saved_game_file_remember_last_used_multiplayer_map(
 	char const *map_name)
 {
 	struct file_reference file;
+	/* port: the name in a buffer of the size written (callers' may be
+	smaller: the menus' map list's are 64 bytes), the rest zeros */
+	char name[MAXIMUM_FILENAME_LENGTH+1];
 
 	match_assert(
 		"c:\\halo\\SOURCE\\saved games\\saved_game_files.c",
 		1207,
 		map_name);
+	csmemset(name, 0, sizeof(name));
+	csstrncpy(name, map_name, sizeof(name) - 1);
 
 	if (file_reference_create_from_path(&file, "z:\\lastmpmp.txt", FALSE) &&
 		file_create(&file) &&
 		file_open(&file, FLAG(_permission_write_bit)))
 	{
-		if (!file_write(&file, MAXIMUM_FILENAME_LENGTH+1, map_name))
+		if (!file_write(&file, MAXIMUM_FILENAME_LENGTH+1, name))
 		{
 			error(_error_silent, "failed to write to '%s'", "z:\\lastmpmp.txt");
 		}
@@ -1541,6 +1547,12 @@ boolean delete_enumerated_saved_game_file(
 						error(_error_silent, "remove_nth_entry_in_mapfile() failed");
 						success = FALSE;
 					}
+					else
+					{
+						/* port: the files after it moved down the list; the
+						indices the players hold follow them */
+						player_ui_saved_game_file_removed(profile_index);
+					}
 
 					if (memory_unit != _memory_unit_hard_drive)
 					{
@@ -1568,6 +1580,30 @@ boolean delete_enumerated_saved_game_file(
 	return success;
 }
 
+/* port: a file's index once the file of removed_index has left its memory
+unit's list (delete_enumerated_saved_game_file): the files after it move
+down one, so their indices do; NONE for the file removed */
+long saved_game_file_index_after_removal(
+	long profile_index,
+	long removed_index)
+{
+	long n;
+	long removed_n;
+
+	if (profile_index == NONE || removed_index == NONE ||
+		SAVED_GAME_FILE_INDEX_MEMORY_UNIT(profile_index) != SAVED_GAME_FILE_INDEX_MEMORY_UNIT(removed_index))
+	{
+		return profile_index;
+	}
+	n = SAVED_GAME_FILE_INDEX_FILE_INDEX(profile_index);
+	removed_n = SAVED_GAME_FILE_INDEX_FILE_INDEX(removed_index);
+	if (n == removed_n)
+		return NONE;
+	if (n < removed_n)
+		return profile_index;
+	return (long)(((unsigned long)profile_index & ~(0xFFFUL << 16)) | ((unsigned long)(n - 1) << 16));
+}
+
 void saved_game_file_get_useable_untitled_profile_name(
 	wchar_t *display_name)
 {
@@ -1593,7 +1629,7 @@ void saved_game_file_get_useable_untitled_profile_name(
 		for (index = 0; index < MAXIMUM_UNTITLED_SAVED_GAMES; index++)
 		{
 			usnprintf(display_name, MAX_GAMENAME-1,
-				unicode_string_list_get_string(string_list_index, _saved_game_file_string_untitled_name_format),
+				ustring_format_checked(unicode_string_list_get_string(string_list_index, _saved_game_file_string_untitled_name_format), "d"),
 				index+1);
 			display_name[MAX_GAMENAME-1] = 0;
 
@@ -1878,14 +1914,11 @@ static void enumerate_memory_units(
 										find_data.szSaveGameName,
 										find_data.wfd.cFileName);
 									message[MAXIMUM_FILENAME_LENGTH] = 0;
-									/* BUG (preserved for exact matching): the message embeds the save's display name
-									 * and file name and is passed as the format (January 0x5b4b00 +0x263 pushes the
-									 * converted text as error's format), so a '%' in either is taken as a conversion.
-									 * Reached for a saved-game directory holding neither blam.sav nor blam.lst; whether
-									 * such a directory occurs is not shown. A corrected build should pass the text
-									 * through "%s". Source-policy approval pending (2026-09-27 audit). */
+									/* port: through "%s" (the save's names
+									are not a format) */
 									error(
 										_error_silent,
+										"%s",
 										wide_to_ascii(message, (char *)message, sizeof(message)));
 									file.type = NONE;
 								}

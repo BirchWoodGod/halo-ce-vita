@@ -727,8 +727,8 @@ short convex_hull2d(
 		real accumulated_angle = 0.f;
 		real minimum_x = REAL_MAX;
 		real minimum_y = REAL_MAX;
-		short current_index;
-		short best_index;
+		short current_index = 0; /* port: (a non-finite point leaves the scans without one) */
+		short best_index = 0;
 		short index;
 
 		for (index = 0; index < vertex_count; index++)

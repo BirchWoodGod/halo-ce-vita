@@ -433,12 +433,14 @@ void render_contrail(
 						_error_silent,
 						"contrail %s uses an unsupported render type.",
 						tag_get_name(contrail->definition_index));
-					/*
-					 * Original bug preserved: this return bypasses the buffer
-					 * unlock/delete calls and leaves current_lock_operation set.
-					 * A non-matching safety fix would route this arm through the
-					 * common cleanup at the end of the function.
-					 */
+					/* port: its buffers let go of first (the original returned
+					with them locked and allocated, and the rasterizer's lock
+					operation set, every frame such a contrail was drawn) */
+					rasterizer_dynamic_triangles_unlock(triangle_buffer_index);
+					rasterizer_dynamic_vertices_unlock(vertex_buffer_index);
+					rasterizer_dynamic_triangles_delete(triangle_buffer_index);
+					rasterizer_dynamic_vertices_delete(vertex_buffer_index);
+					rasterizer_globals.current_lock_operation = _rasterizer_lock_none;
 					return;
 				}
 

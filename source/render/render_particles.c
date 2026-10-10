@@ -382,7 +382,7 @@ void render_particles(
 			{
 				struct rendered_particle_datum *rendered_particle =
 					rendered_particles;
-				short *current_sprite_group;
+				short *current_sprite_group = NULL;
 				short previous_definition_index = NONE;
 				short previous_cluster_index = NONE;
 				boolean previous_attached_to_first_person_weapon = FALSE;
@@ -636,12 +636,11 @@ void render_particles(
 						rendered_particle++;
 					}
 
-					/* BUG (original): a fully culled group divides zero by zero.
-					 * A corrected non-matching build would store 0.0f when
-					 * built_particle_count is zero. */
+					/* port: 0 for a fully culled group (the original divided
+					zero by zero, leaving a NaN in the shader's tag) */
 					((struct shader_effect_definition *)sprite_data.shader)->
-						secondary_map_radius =
-						total_radius / built_particle_count;
+						secondary_map_radius = built_particle_count ?
+						total_radius / built_particle_count : 0.0f;
 #ifdef HALO_LINUX
 					PARTICLES_PROFILE_ADD(2, group_from);
 					particles_profile_counts[2] += (unsigned long)built_particle_count;

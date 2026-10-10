@@ -668,7 +668,9 @@ void object_pvs_set_camera_point(
 void objects_port_set_activating_cluster(
 	short cluster_index)
 {
-	if (cluster_index == NONE || cluster_index >= global_structure_bsp_get()->clusters.count)
+	/* port: any negative index is none (a co-op host's, from the network:
+	-5 or 0x8001 were stored, and the cluster PVS read before its array) */
+	if (cluster_index < 0 || cluster_index >= global_structure_bsp_get()->clusters.count)
 	{
 		object_globals->pvs_activation_type = _pvs_activation_normal;
 		return;
@@ -3939,7 +3941,9 @@ long object_new(
 	if (object_index==NONE && definition_index!=NONE)
 	{
 		char string[512];
-		sprintf(string, "OUT OF OBJECTS: cannot create %s", tag_name_strip_path(tag_get_name(definition_index)));
+		/* port: snprintf (a map's tag's name may be any length) */
+		snprintf(string, sizeof(string), "OUT OF OBJECTS: cannot create %s",
+			tag_name_strip_path(tag_get_name(definition_index)));
 		console_printf(FALSE, "%s", string);
 		error(_error_log, "%s", string);
 	}

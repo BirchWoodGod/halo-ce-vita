@@ -724,13 +724,11 @@ static void actor_verify_unit_activation(
 	struct unit_datum *unit = unit_get(unit_index);
 	struct actor_datum *actor = actor_get(actor_index);
 
-	/* BUG (preserved for exact matching): January tests
-	 * unit->unit.last_vehicle_index + 30 < game_time_get() here; the exact
-	 * unit_exit_seat_end proves last_vehicle_index at 0x2DC with the exit time in
-	 * the following long.  A corrected build should compare
-	 * unit->unit.game_time_at_last_vehicle_exit. */
+	/* port: the time the unit left its last vehicle (the vehicle's index was
+	compared with the time, which could report a false error just after an
+	exit) */
 	if (unit->object.parent_object_index == NONE &&
-		unit->unit.last_vehicle_index + 30 < game_time_get())
+		unit->unit.game_time_at_last_vehicle_exit + 30 < game_time_get())
 	{
 		if (actor->meta.dormant != !TEST_FLAG(object_header->flags, _object_header_active_bit))
 		{

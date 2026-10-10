@@ -688,8 +688,8 @@ void hud_render_damage_indicators(
 	{
 		struct hud_damage_indicators_definition *definition =
 			&hud_globals->damage_indicators;
-		real theta;
-		real_point2d screen_position;
+		real theta = 0.0f;
+		real_point2d screen_position = { 0 };
 		real scale = hud_globals_get_scale(local_player_count() > 1);
 		byte damage_indicators[NUMBER_OF_HUD_DAMAGE_INDICATOR_DIRECTIONS];
 		short direction;

@@ -2979,6 +2979,10 @@ void _rasterizer_present(
 				error(_error_silent, "### ERROR rasterizer_present: failed to get backbuffer surface");
 				success = FALSE;
 			}
+			/* port: the reference GetBackBuffer gave is given back, from
+			OpenCE's leak fixes */
+			if (d3d_backbuffer)
+				IDirect3DSurface8_Release(d3d_backbuffer);
 		}
 		else
 		{

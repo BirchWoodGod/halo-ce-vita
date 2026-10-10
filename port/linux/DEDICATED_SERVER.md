@@ -296,6 +296,8 @@ these.
   as SWAT has always been);
 - no vehicles and no power-ups: active camouflage, overshields and health
   packs are not placed;
+- a player is back 3 seconds after dying (Team Slayer's is 10; a suicide
+  still adds the game type's penalty);
 - players do not show on the motion tracker (as in Snipers), and the score
   to win is Slayer's (15 kills, 50 for teams) unless `sv_scorelimit` sets
   one.

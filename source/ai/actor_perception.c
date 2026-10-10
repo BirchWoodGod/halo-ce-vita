@@ -3512,30 +3512,9 @@ void actor_emotion_update(
 		actor->emotions.forced_to_charge = TRUE;
 	}
 
-	/* BUG (preserved for exact matching): the scan starts at
-	 * NUMBER_OF_ACTOR_THREAT_TYPES rather than NUMBER_OF_ACTOR_THREAT_TYPES-1,
-	 * so its first iteration reads specific_threats[9] - one element past the
-	 * end of the nine-element array, which is cumulative_threats[0].
-	 * Evidence: January emits `mov eax,9` at +0xf5, then the six-byte alignment
-	 * nop 8d 9b 00 00 00 00 (`lea ebx,[ebx]`, which touches neither EAX nor
-	 * memory), and falls into the loop head at +0x100, `movsx edx,ax` followed by
-	 * `cmp byte ptr [edx+esi+0x1ee],0`; the `dec eax` is at +0x10d, AFTER that
-	 * load. In the same object actor_situation_update increments
-	 * cumulative_threats for threat types 1..8 at esi+0x1f8..esi+0x1ff and
-	 * area_friends at esi+0x200, which fixes cumulative_threats at esi+0x1f7 and
-	 * so specific_threats at esi+0x1ee with exactly nine elements.
-	 * Layout is asserted, not assumed: see
-	 * actor_perception_specific_threats_size_assert and
-	 * actor_perception_threat_arrays_adjacent_assert above, which fail to compile
-	 * if the two arrays ever stop being adjacent or change length.
-	 * Consequence: none observable. cumulative_threats[_actor_threat_none] is the
-	 * one element of that array nothing ever writes - every write in the tree
-	 * uses _actor_threat_visible..._actor_threat_damaging_me, i.e. 1..8, and the
-	 * single variable-index use is a read-only csprintf argument in the
-	 * actor_debug_print_threat macro - so the stray byte is always zero, the
-	 * early-out is never taken on the stray iteration, and the scan falls through
-	 * to the intended starting index. */
-	for (priority = NUMBER_OF_ACTOR_THREAT_TYPES;
+	/* port: the scan starts at the last threat type (it read one past
+	specific_threats first: cumulative_threats[0], always zero) */
+	for (priority = NUMBER_OF_ACTOR_THREAT_TYPES - 1;
 		priority > 0 &&
 			actor->situation.specific_threats[priority] <= 0;
 		priority--)
@@ -7027,7 +7006,7 @@ void actor_perception_update(
 				{
 					short knowledge_type = actor_get_perception_knowledge(actor_index, iterator.index);
 					short awareness_speed;
-					real awareness_delta;
+					real awareness_delta = 0.0f;
 
 #line 489 "c:\\halo\\SOURCE\\ai\\actor_perception.c"
 					assert((knowledge_type >= 0) && (knowledge_type < NUMBER_OF_ACTOR_KNOWLEDGE_TYPES));

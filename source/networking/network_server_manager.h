@@ -46,6 +46,10 @@ void network_game_server_pause_countdown(
 	boolean pause_countdown);
 void network_game_generate_join_game_token(
 	byte *join_token);
+/* port: the rejection code of the last machine
+network_game_server_accept_client_machine_into_game refused */
+short network_game_server_last_refusal_code(
+	void);
 void network_game_server_kick_machine(
 	long machine_index,
 	boolean kept_out);

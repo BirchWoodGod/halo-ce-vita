@@ -1672,6 +1672,21 @@ static void particle_system_render(
 					{
 						sequence_index = state_definition->sequence_index;
 					}
+					/* port: a rotational sprite's sequence is the one after its
+					state's, which a Custom Edition map's bitmap may not have
+					(foundation's, Hornets Nest's): its state's own then; a
+					particle whose bitmap has neither, or no sprites in it, is not
+					drawn, where this read past the bitmap's sequences and divided
+					by a sprite count of zero */
+					if (sequence_index >= bitmap->sequences.count)
+						sequence_index = state_definition->sequence_index;
+					if (!VALID_INDEX(sequence_index, bitmap->sequences.count) ||
+						TAG_BLOCK_GET_ELEMENT(&bitmap->sequences, sequence_index,
+							struct bitmap_group_sequence)->sprites.count <= 0)
+					{
+						particle_index = (short)particle->next_particle_index;
+						continue;
+					}
 					sequence = TAG_BLOCK_GET_ELEMENT(
 						&bitmap->sequences,
 						sequence_index,
