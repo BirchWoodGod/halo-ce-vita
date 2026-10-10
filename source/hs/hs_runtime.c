@@ -1682,7 +1682,9 @@ static void hs_inspect_enum(
 static union hs_conversion_result hs_long_to_boolean(
 	union hs_conversion_result value)
 {
-	value.boolean = value.long_integer==0;
+	/* port: the whole value (only its low byte was written, the rest left
+	as the long's bytes, which the scripts' stacks and globals carried) */
+	value.long_integer = value.long_integer==0;
 
 	return value;
 }
@@ -1690,7 +1692,8 @@ static union hs_conversion_result hs_long_to_boolean(
 static union hs_conversion_result hs_short_to_boolean(
 	union hs_conversion_result value)
 {
-	value.boolean = value.short_integer==0;
+	/* port: the whole value, as hs_long_to_boolean's */
+	value.long_integer = value.short_integer==0;
 
 	return value;
 }
@@ -1700,7 +1703,9 @@ static union hs_conversion_result hs_string_to_boolean(
 {
 	union hs_conversion_result result;
 
-	result.boolean = csstrlen(value.string)==0;
+	/* port: the whole value (only its low byte was set; the rest was
+	whatever the stack held) */
+	result.long_integer = csstrlen(value.string)==0;
 
 	return result;
 }
@@ -1748,7 +1753,9 @@ static union hs_conversion_result hs_enum_to_real(
 static union hs_conversion_result hs_real_to_short(
 	union hs_conversion_result value)
 {
-	value.short_integer = (short)value.real;
+	/* port: the whole value, the short sign-extended (only the low word was
+	written, the high one left as the real's bits) */
+	value.long_integer = (short)value.real;
 
 	return value;
 }
@@ -1764,7 +1771,9 @@ static long hs_long_to_short(
 {
 	union hs_conversion_result result;
 
-	result.short_integer = value.short_integer;
+	/* port: the whole value, the short sign-extended (only the low word was
+	set; the rest was whatever the stack held) */
+	result.long_integer = value.short_integer;
 
 	return result.long_integer;
 }
@@ -2019,7 +2028,8 @@ void hs_evaluate_equality(
 		if (function_index==_hs_function_not_equal)
 			equal = !equal;
 
-		result.boolean = equal;
+		/* port: the whole value (only its low byte was set) */
+		result.long_integer = equal;
 		hs_return(thread_index, result.long_integer);
 	}
 
@@ -2064,7 +2074,8 @@ void hs_evaluate_inequality(
 			break;
 		}
 
-		result.boolean = comparison;
+		/* port: the whole value (only its low byte was set) */
+		result.long_integer = comparison;
 		hs_return(thread_index, result.long_integer);
 	}
 
@@ -2113,7 +2124,8 @@ void hs_evaluate_logical(
 	}
 	else
 	{
-		value_out.boolean = *result;
+		/* port: the whole value (only its low byte was set) */
+		value_out.long_integer = *result;
 
 		hs_return(thread_index, value_out.long_integer);
 	}
