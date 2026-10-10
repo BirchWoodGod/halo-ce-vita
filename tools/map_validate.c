@@ -755,7 +755,7 @@ static int custom_edition_check(struct memory_file *map, struct custom_edition_r
 	*corrections = 0;
 	*loaded_bytes = 0;
 	memset(tag_cache, 0xCD, custom_edition_tag_cache_size);
-	status = custom_edition_cache_load(&map->source, resources->maps, tag_cache, custom_edition_tag_cache_size,
+	status = custom_edition_cache_load(&map->source, resources->maps, tag_cache, custom_edition_tag_cache_size, 0,
 		&report);
 	if (status != _cache_file_status_ok)
 	{
