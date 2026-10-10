@@ -63,6 +63,10 @@ static void test_versions(void)
 	check(compare("1.1.0-beta.03", "1.1.0-beta.3") == 0, "leading zeros of a number");
 	check(update_is_newer("1.1.0", "1.1.0-beta.3"), "1.1.0 newer than beta.3");
 	check(update_is_newer("1.1.0-beta.4", "1.1.0-beta.3"), "beta.4 newer than beta.3");
+	check(update_is_newer("1.1.0-rc.1", "1.1.0-beta.4"), "rc.1 newer than beta.4");
+	check(update_is_newer("1.1.0", "1.1.0-rc.1"), "1.1.0 newer than rc.1");
+	check(update_is_newer("1.1.0-rc.2", "1.1.0-rc.1") && !update_is_newer("1.1.0-beta.9", "1.1.0-rc.1"),
+		"rc.2 after rc.1, any beta before an rc");
 	check(!update_is_newer("1.1.0-beta.3", "1.1.0-beta.3"), "same is not newer");
 	check(!update_is_newer("1.0.3", "1.1.0-beta.3"), "1.0.3 older than 1.1.0-beta.3");
 	check(!update_is_newer("garbage", "1.0.0") && !update_is_newer("1.0.0", "garbage"), "not versions: never newer");
@@ -92,10 +96,10 @@ static void test_versions(void)
 
 static void test_tags(void)
 {
-	static const char *const good[] = { "v1.1.0", "v1.1.0-beta.3", "v0.0.0", "v999.999.999-beta.999", "v1.0.3" };
+	static const char *const good[] = { "v1.1.0", "v1.1.0-beta.3", "v0.0.0", "v999.999.999-beta.999", "v1.0.3", "v1.1.0-rc.1", "v1.1.0-rc.12" };
 	static const char *const bad[] = {
 		"1.1.0", "V1.1.0", "v1.1", "v1.1.0.2", "v1.0.2.2", "v1000.0.0", "v1.1.0-beta", "v1.1.0-beta.", "v1.1.0-beta.1000",
-		"v1.1.0-rc.1", "v1.1.0-BETA.1", "v1.1.0-beta.3 ", " v1.1.0", "v1.1.0+1", "v1.1.0-beta.3.1", "v", "", "v1..0",
+		"v1.1.0-rc", "v1.1.0-rc.", "v1.1.0-RC.1", "v1.1.0-rc.1000", "v1.1.0-BETA.1", "v1.1.0-beta.3 ", " v1.1.0", "v1.1.0+1", "v1.1.0-beta.3.1", "v", "", "v1..0",
 		"v1.1.0-beta.-1", "v-1.1.0",
 	};
 	char text[96];
@@ -168,7 +172,11 @@ static void test_releases(void)
 		"a draft key that is not a boolean");
 	check(pick("[{\"tag_name\":12}]", UPDATE_CHANNEL_STABLE, latest) == 0, "a tag_name that is not a string");
 	check(pick("[{\"tag_name\":\"v1.2.0\\u0000\"}]", UPDATE_CHANNEL_STABLE, latest) == 0, "a tag with a NUL escape");
-	check(pick("[{\"tag_name\":\"v1.2.0-rc.1\"}]", UPDATE_CHANNEL_EXPERIMENTAL, latest) == 0, "a tag of another form");
+	check(pick("[{\"tag_name\":\"v1.2.0-alpha.1\"}]", UPDATE_CHANNEL_EXPERIMENTAL, latest) == 0, "a tag of another form");
+	check(pick("[{\"tag_name\":\"v1.1.0-rc.1\",\"prerelease\":true},{\"tag_name\":\"v1.1.0-beta.4\",\"prerelease\":true}]",
+		UPDATE_CHANNEL_EXPERIMENTAL, latest) == 1 && !strcmp(latest, "1.1.0-rc.1"), "Experimental: a release candidate after beta 4");
+	check(pick("[{\"tag_name\":\"v1.1.0-rc.1\",\"prerelease\":true}]", UPDATE_CHANNEL_STABLE, latest) == 0,
+		"Stable: a release candidate passed over");
 	check(pick("[{\"tag_name\":\"v1.2.0\"},5,\"x\",null,[1,[2]],true]", UPDATE_CHANNEL_STABLE, latest) == 1,
 		"other values among the releases");
 	{

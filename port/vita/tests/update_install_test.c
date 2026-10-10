@@ -250,7 +250,7 @@ static void malformed(void)
 		UPDATE_MANIFEST_MAGIC "\nversion 1.1.0-beta.4\ntitle HCEV00001\nfile halo.vpk\nsize 100\nsha512 " SHA "\nx 1\n",
 		UPDATE_MANIFEST_MAGIC "\r\nversion 1.1.0-beta.4\ntitle HCEV00001\nfile halo.vpk\nsize 100\nsha512 " SHA "\n",
 		UPDATE_MANIFEST_MAGIC "\ntitle HCEV00001\nversion 1.1.0-beta.4\nfile halo.vpk\nsize 100\nsha512 " SHA "\n",
-		UPDATE_MANIFEST_MAGIC "\nversion 1.1.0-rc.1\ntitle HCEV00001\nfile halo.vpk\nsize 100\nsha512 " SHA "\n",
+		UPDATE_MANIFEST_MAGIC "\nversion 1.1.0-alpha.1\ntitle HCEV00001\nfile halo.vpk\nsize 100\nsha512 " SHA "\n",
 		UPDATE_MANIFEST_MAGIC "\nversion v1.1.0\ntitle HCEV00001\nfile halo.vpk\nsize 100\nsha512 " SHA "\n",
 		UPDATE_MANIFEST_MAGIC "\nversion 1.1.0-beta.4 \ntitle HCEV00001\nfile halo.vpk\nsize 100\nsha512 " SHA "\n",
 		UPDATE_MANIFEST_MAGIC "\nversion  1.1.0-beta.4\ntitle HCEV00001\nfile halo.vpk\nsize 100\nsha512 " SHA "\n",
@@ -307,7 +307,8 @@ static void urls(void)
 		"the signature's URL");
 	check(update_asset_url(url, sizeof(url), "http://127.0.0.1:8080/dl", "1.1.0", "halo-update.txt") &&
 		!strcmp(url, "http://127.0.0.1:8080/dl/v1.1.0/halo-update.txt"), "the tests' server");
-	check(!update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0-rc.1", "halo.vpk"), "not a tag: no URL");
+	check(!update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0-alpha.1", "halo.vpk"), "not a tag: no URL");
+	check(update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0-rc.1", "halo.vpk"), "a release candidate: a URL");
 	check(!update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0/../../x", "halo.vpk"), "a path: no URL");
 	check(!update_asset_url(url, sizeof(url), UPDATE_DOWNLOAD_BASE, "1.1.0", "eboot.bin"), "another asset: no URL");
 	check(!update_asset_url(url, sizeof(url), "https://evil.example/dl", "1.1.0", "halo.vpk"), "another host: no URL");
