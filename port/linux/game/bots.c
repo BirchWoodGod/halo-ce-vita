@@ -111,6 +111,8 @@ unsigned long long vita_host_time_us(void);
 int vita_host_fourth_core_join(const char *role, int level);
 void vita_host_thread_watch(const char *role);
 #endif
+/* render_epoch.c's: bumped as each map (and game state) is loaded */
+extern unsigned long halo_map_generation;
 /* game_engine.c's (port): the nav points a player is shown */
 long game_engine_port_player_goals(long player_index, real_point3d *positions, long maximum);
 
@@ -663,9 +665,9 @@ static real bots_weapon_loaded(long weapon_index)
 
 /* the speed of the weapon's projectile (world units a tick; 0 for one
 that hits at once or none) */
-static real bots_projectile_speed(long weapon_index)
+static real bots_projectile_speed_compute(long definition_index)
 {
-	struct weapon_definition *definition = weapon_definition_get(weapon_get(weapon_index)->definition_index);
+	struct weapon_definition *definition = weapon_definition_get(definition_index);
 
 	if (definition->weapon.triggers.count > 0)
 	{
@@ -684,7 +686,7 @@ static real bots_projectile_speed(long weapon_index)
 
 /* how much a bot wants a weapon (the stock weapons, by their tags' names),
 -1 for the game's own (a flag, a ball) */
-static short bots_weapon_value(long definition_index)
+static short bots_weapon_value_compute(long definition_index)
 {
 	static struct
 	{
@@ -713,9 +715,9 @@ static short bots_weapon_value(long definition_index)
 press at a time (a latched trigger: the pistols, the sniper rifle, the
 rocket launcher; or one that charges while held: the plasma pistol), 0 for
 one held down in bursts */
-static short bots_weapon_tap_ticks(long weapon_index)
+static short bots_weapon_tap_ticks_compute(long definition_index)
 {
-	struct weapon_definition *definition = weapon_definition_get(weapon_get(weapon_index)->definition_index);
+	struct weapon_definition *definition = weapon_definition_get(definition_index);
 	struct weapon_trigger_definition *trigger;
 	real rate;
 
@@ -729,9 +731,9 @@ static short bots_weapon_tap_ticks(long weapon_index)
 }
 
 /* the distance a bot keeps from its enemy with the weapon */
-static real bots_weapon_range(long weapon_index)
+static real bots_weapon_range_compute(long definition_index)
 {
-	char const *name = weapon_index != NONE ? tag_get_name(weapon_get(weapon_index)->definition_index) : NULL;
+	char const *name = tag_get_name(definition_index);
 
 	if (!name)
 		return 6.0f;
@@ -746,6 +748,78 @@ static real bots_weapon_range(long weapon_index)
 	if (strstr(name, "pistol"))
 		return 9.0f;
 	return 7.0f;
+}
+
+/* what the bots know of a weapon definition (its value, the distance kept
+with it, how it fires, its projectile's speed), made once a map: the
+functions above read only its tag, its name and its trigger, which a map
+never changes, and each answers the same for it every time (a bot asked them
+of its weapon every tick: a dozen name searches and a few tag lookups) */
+#define BOTS_WEAPON_KINDS 32
+struct bots_weapon_kind
+{
+	long definition_index;
+	short value;
+	short tap_ticks;
+	real range;
+	real projectile_speed;
+};
+
+static struct
+{
+	unsigned long map_generation;
+	long count;
+	struct bots_weapon_kind kinds[BOTS_WEAPON_KINDS];
+	/* (the one made when the table is full) */
+	struct bots_weapon_kind spare;
+} bots_weapon_kinds;
+
+static void bots_weapon_kinds_flush(void)
+{
+	bots_weapon_kinds.count = 0;
+	bots_weapon_kinds.map_generation = halo_map_generation;
+}
+
+static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
+{
+	struct bots_weapon_kind *kind;
+	long index;
+
+	if (bots_weapon_kinds.map_generation != halo_map_generation)
+		bots_weapon_kinds_flush();
+	for (index = 0; index < bots_weapon_kinds.count; index++)
+	{
+		if (bots_weapon_kinds.kinds[index].definition_index == definition_index)
+			return &bots_weapon_kinds.kinds[index];
+	}
+	kind = bots_weapon_kinds.count < BOTS_WEAPON_KINDS ? &bots_weapon_kinds.kinds[bots_weapon_kinds.count++] :
+		&bots_weapon_kinds.spare;
+	kind->definition_index = definition_index;
+	kind->value = bots_weapon_value_compute(definition_index);
+	kind->tap_ticks = bots_weapon_tap_ticks_compute(definition_index);
+	kind->range = bots_weapon_range_compute(definition_index);
+	kind->projectile_speed = bots_projectile_speed_compute(definition_index);
+	return kind;
+}
+
+static short bots_weapon_value(long definition_index)
+{
+	return bots_weapon_kind(definition_index)->value;
+}
+
+static real bots_projectile_speed(long weapon_index)
+{
+	return bots_weapon_kind(weapon_get(weapon_index)->definition_index)->projectile_speed;
+}
+
+static short bots_weapon_tap_ticks(long weapon_index)
+{
+	return bots_weapon_kind(weapon_get(weapon_index)->definition_index)->tap_ticks;
+}
+
+static real bots_weapon_range(long weapon_index)
+{
+	return weapon_index != NONE ? bots_weapon_kind(weapon_get(weapon_index)->definition_index)->range : 6.0f;
 }
 
 /* an item on the ground worth fetching near the bot: a weapon better than
