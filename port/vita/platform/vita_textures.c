@@ -672,9 +672,13 @@ struct texture_entry
 	unsigned long checksum, checksum_frame;
 	/* the pool memory the texels were decoded into, reused when a dynamic
 	texture changes (the movie's frame each frame would otherwise fill the
-	pool in seconds) */
+	pool in seconds), and the pool segment it is in (-1: none) */
 	void *memory;
 	unsigned long memory_size;
+	int segment;
+	/* the frame its pool segment was filled again and it was forgotten,
+	plus one (0: not forgotten so); the pool's pressure, below */
+	unsigned long forgotten_frame;
 	/* (the decoder, below) its decode in the background, while a lower
 	level of it is drawn (texture holds that level meanwhile) */
 	struct decode_job *job;
@@ -685,6 +689,20 @@ struct texture_entry
 
 static struct texture_entry *texture_buckets[TEXTURE_BUCKET_COUNT];
 static unsigned long texture_frame;
+/* each pool segment's last frame drawn from or decoded into: the pool,
+full, fills again the one drawn from longest ago (vgxm_memory.h
+pool_recycle) */
+static unsigned long pool_segment_frames[VGXM_POOL_SEGMENTS];
+
+/* the pool segment of memory (-1: none), marked as drawn from this frame */
+static int pool_segment_mark(const void *memory)
+{
+	int segment = memory ? vgxm_pool_segment_of(memory) : -1;
+
+	if (segment >= 0)
+		pool_segment_frames[segment] = texture_frame;
+	return segment;
+}
 /* changes when the pool is emptied, which invalidates every entry */
 static unsigned long pool_serial = 1;
 
@@ -722,9 +740,8 @@ this many at most for one texture before it is emptied */
 
 unsigned long vita_texture_cache_forget(const void *base, unsigned long size);
 void vita_texture_decodes_quiesce(void);
-/* (counts the pool's recycles and resets: an allocation that saw one may
-have had the memory allocated before it forgotten) */
-static unsigned long pool_events;
+static void decodes_quiesce_range(const void *base, unsigned long size);
+static unsigned long texture_cache_forget(const void *base, unsigned long size, int recycled);
 
 /* HALO_TEX_RECYCLE=0: a full pool is emptied at once, as before the ring */
 static int pool_recycling(void)
@@ -749,19 +766,17 @@ static void *pool_alloc(unsigned long size)
 		return memory;
 	}
 	memory = vgxm_pool_alloc(size, 128);
-	if (!memory)
-	{
-		/* (the background decodes stopped first: none may write into
-		memory forgotten here) */
-		vita_texture_decodes_quiesce();
-		pool_events++;
-	}
 	if (!memory && pool_recycling())
 	{
-		/* full: the next segment's textures forgotten (decoded again when
-		next used) and its memory decoded into, a segment at a time round
-		the pool (vgxm_memory.h, the ring); a texture bigger than the
-		segments, or a pool that will not take it so, empties it */
+		/* full: the textures of the segment drawn from longest ago
+		forgotten (decoded again when next used) and its memory decoded
+		into, a segment at a time (vgxm_memory.h pool_recycle); a texture
+		bigger than the segments, or a pool that will not take it so,
+		empties it. The background decodes into that segment alone are
+		stopped first (none may write into memory forgotten here); the
+		others go on - stopping them all made each segment filled again
+		give up every queued decode, whose memory was taken already, and
+		take it again for each at its next use */
 		unsigned long attempts;
 
 		for (attempts = 0; !memory && attempts <= POOL_RECYCLE_ATTEMPTS; attempts++)
@@ -769,17 +784,22 @@ static void *pool_alloc(unsigned long size)
 			void *base;
 			unsigned long bytes;
 
-			if (!vgxm_pool_recycle(&base, &bytes))
+			if (!vgxm_pool_recycle(&base, &bytes, pool_segment_frames, texture_frame))
 				break;
 			if (bytes)
-				vita_texture_cache_forget(base, bytes);
+			{
+				decodes_quiesce_range(base, bytes);
+				texture_cache_forget(base, bytes, 1);
+			}
 			stats_pool_recycles++;
 			memory = vgxm_pool_alloc(size, 128);
 		}
 	}
 	if (!memory)
 	{
-		/* full: start again, and every texture is decoded again as it is used */
+		/* full: start again, and every texture is decoded again as it is
+		used (the background decodes stopped first) */
+		vita_texture_decodes_quiesce();
 		platform_log("texture pool full (%lu KB): emptied", vgxm_pool_used() / 1024);
 		vgxm_pool_reset();
 		pool_serial++;
@@ -790,6 +810,7 @@ static void *pool_alloc(unsigned long size)
 	{
 		stats_builds++;
 		stats_build_bytes += size;
+		pool_segment_mark(memory);
 	}
 	pool_last = memory;
 	pool_last_size = size;
@@ -1360,20 +1381,43 @@ static void decode_rate_emulate(unsigned long long started_us, unsigned long byt
 		vita_host_sleep_us((unsigned long)(wanted - elapsed));
 }
 
+/* a texture's levels from drop down (its top drop levels left out) as a
+texture of their own: the first one's texels at *offset, their bytes in
+*bytes */
+static void texture_lowered(const struct xgpu_texture_description *description, unsigned long drop,
+	struct xgpu_texture_description *lower, unsigned long *offset, unsigned long *bytes)
+{
+	*lower = *description;
+	lower->width = level_dimension(description->width, drop);
+	lower->height = level_dimension(description->height, drop);
+	lower->levels = description->levels - drop;
+	lower->pitch = lower->width * format_information(description->format).bytes;
+	*offset = xgpu_texture_level_offset(description, drop);
+	*bytes = xgpu_texture_level_offset(lower, lower->levels);
+}
+
 /* the Xbox texture's decoding on the worker, into the pool, and its
-control words */
-static BOOL texture_build(struct texture_entry *entry, const unsigned char *base, const D3DCOLOR *palette)
+control words; from its level drop down (the pool's pressure, below) */
+static BOOL texture_build(struct texture_entry *entry, const unsigned char *base, const D3DCOLOR *palette,
+	unsigned long drop)
 {
 	struct texture_build build;
+	struct xgpu_texture_description lower;
+	unsigned long offset = 0, bytes = entry->size;
 
 	memset(&build, 0, sizeof(build));
 	build.description = &entry->description;
-	build.base = base;
+	if (drop)
+	{
+		texture_lowered(&entry->description, drop, &lower, &offset, &bytes);
+		build.description = &lower;
+	}
+	build.base = base + offset;
 	build.palette = palette;
 	build.channel_order = custom_edition_texels_order(entry->address);
 	build.format_word = entry->format_word;
 	build.size_word = entry->size_word;
-	build.bytes = entry->size;
+	build.bytes = bytes;
 	return texture_decode(&build) && texture_initialize(&entry->texture, &build) == 0;
 }
 
@@ -1421,6 +1465,8 @@ struct decode_job
 	struct xgpu_texture_description description;
 	struct texture_build build;
 	unsigned long generation, pool_serial;
+	/* the pool segment of the memory it decodes into (-1: none) */
+	int segment;
 	int ok;
 	unsigned long long queued_us, decode_us;
 };
@@ -1575,14 +1621,31 @@ static int decoder_start(void)
 	return decoder_state > 0;
 }
 
+/* whether a texture's lower levels make a texture of their own: a
+power-of-two 2D one (not a cube map, a volume, linear rows or palettized
+texels) */
+static BOOL texture_lowerable(const struct xgpu_texture_description *description)
+{
+	return !description->cube_map && description->depth <= 1 && !description->linear && description->format != 0x0b &&
+		power_of_two(description->width) && power_of_two(description->height);
+}
+
+/* whether the texture is one of the map's bitmaps: in the texture cache or
+the tag data, texels that change only when the cache reads others there */
+static BOOL texture_of_map_bitmaps(const struct texture_entry *entry)
+{
+	unsigned long texture_cache = (unsigned long)physical_memory_get_texture_cache_base_address();
+	unsigned long tag_cache = (unsigned long)physical_memory_get_tag_cache_base_address();
+
+	return (texture_cache && entry->address >= texture_cache && entry->address + entry->size <= texture_cache + 0x1600000UL) ||
+		(tag_cache && entry->address >= tag_cache && entry->address + entry->size <= tag_cache + TAG_CACHE_BYTES);
+}
+
 /* whether the texture is decoded in the background: one of the map's
-bitmaps (texels that change only when the texture cache reads others
-there), a power-of-two 2D texture with a lower level worth drawing first */
+bitmaps, a power-of-two 2D texture with a lower level worth drawing first */
 static BOOL decode_in_background(const struct texture_entry *entry)
 {
 	const struct xgpu_texture_description *description = &entry->description;
-	unsigned long texture_cache = (unsigned long)physical_memory_get_texture_cache_base_address();
-	unsigned long tag_cache = (unsigned long)physical_memory_get_tag_cache_base_address();
 	static int first_level = -1;
 
 	if (first_level < 0)
@@ -1599,19 +1662,133 @@ static BOOL decode_in_background(const struct texture_entry *entry)
 		stream_worker_reason[1]++;
 		return FALSE;
 	}
-	if (description->cube_map || description->depth > 1 || description->linear || description->format == 0x0b ||
-		!power_of_two(description->width) || !power_of_two(description->height))
+	if (!texture_lowerable(description))
 	{
 		stream_worker_reason[2]++;
 		return FALSE;
 	}
-	if (!((texture_cache && entry->address >= texture_cache && entry->address + entry->size <= texture_cache + 0x1600000UL) ||
-		(tag_cache && entry->address >= tag_cache && entry->address + entry->size <= tag_cache + TAG_CACHE_BYTES)))
+	if (!texture_of_map_bitmaps(entry))
 	{
 		stream_worker_reason[3]++;
 		return FALSE;
 	}
 	return decoder_start();
+}
+
+/* ---------- the pool's pressure
+
+The pool full, it fills again the segment drawn from longest ago
+(vgxm_memory.h pool_recycle). When the view's textures take more than the
+pool the Vita could make (CDRAM short: a Custom Edition map's 56 MB of
+textures against the 48 MB of pool a Vita made in a 16-player Extinction
+game, Oct 9 2026), even that segment holds textures in view: forgotten,
+they are decoded again at once into the next, which forgets others, and
+the pool goes round decoding the view again and again, 100-500 ms frames.
+So the textures forgotten that way and decoded again within
+PRESSURE_SOON_FRAMES are counted (not those a new view left behind - a
+respawn, a teleporter - which are not asked for again); once they come to
+PRESSURE_SOON_BYTES within PRESSURE_WINDOW_FRAMES, the pool's pressure
+goes up a level (at most HALO_TEX_PRESSURE, 2; 0 never): a map bitmap
+drawn by the scene (not an immediate draw: the HUD, the menus, sprites and
+the screen effects keep theirs) whose top level would take
+PRESSURE_LEVEL_BYTES or more in the pool, power-of-two 2D with levels
+below, is decoded from one level lower for each pressure level (half its
+width and height, a quarter of its bytes; Halo PC's bitmaps, a Custom
+Edition map's, are often four times the Xbox's), as its lower level is
+drawn while it is decoded (the texture streaming). The textures in the
+pool keep their size until next decoded (their segment filled again). The
+pressure stays until the map goes (vita_texture_pool_release): a pool that
+could not hold the view at full size would not hold it again. */
+#define PRESSURE_SOON_FRAMES 30
+#define PRESSURE_SOON_BYTES (8ul * 1024 * 1024)
+#define PRESSURE_WINDOW_FRAMES 150
+#define PRESSURE_LEVEL_BYTES (128ul * 1024)
+#define PRESSURE_DEFAULT_MAXIMUM 2
+
+static int texture_pressure;
+static unsigned long pressure_soon_bytes, pressure_window_start, pressure_lowered, pressure_lowered_bytes;
+
+static int pressure_maximum(void)
+{
+	static int maximum = -1;
+
+	if (maximum < 0)
+	{
+		const char *setting = getenv("HALO_TEX_PRESSURE");
+
+		maximum = setting && *setting ? atoi(setting) : PRESSURE_DEFAULT_MAXIMUM;
+		if (maximum < 0)
+			maximum = 0;
+	}
+	return maximum;
+}
+
+/* (the entry about to be decoded again) its bytes counted if its pool
+segment was filled again within PRESSURE_SOON_FRAMES, and the pressure up
+a level when they come to PRESSURE_SOON_BYTES within PRESSURE_WINDOW_FRAMES */
+static void pool_pressure_note(struct texture_entry *entry)
+{
+	unsigned long forgotten = entry->forgotten_frame;
+
+	entry->forgotten_frame = 0;
+	if (!forgotten || texture_frame + 1 - forgotten > PRESSURE_SOON_FRAMES)
+		return;
+	if (texture_frame - pressure_window_start > PRESSURE_WINDOW_FRAMES)
+	{
+		pressure_window_start = texture_frame;
+		pressure_soon_bytes = 0;
+	}
+	pressure_soon_bytes += entry->size;
+	if (pressure_soon_bytes < PRESSURE_SOON_BYTES || texture_pressure >= pressure_maximum())
+		return;
+	texture_pressure++;
+	pressure_soon_bytes = 0;
+	pressure_window_start = texture_frame;
+	platform_log("texture pool: the view no longer fits (%lu KB of textures decoded again within %d frames of being "
+		"forgotten, in %d frames): large textures drawn from %d level%s lower from now on (pressure %d)",
+		PRESSURE_SOON_BYTES / 1024, PRESSURE_SOON_FRAMES, PRESSURE_WINDOW_FRAMES, texture_pressure,
+		texture_pressure == 1 ? "" : "s", texture_pressure);
+}
+
+/* the bytes a level of the texture takes in the pool: DXT kept as blocks,
+anything else (a Custom Edition map's reordered DXT too) as BGRA */
+static unsigned long pool_level_bytes(const struct xgpu_texture_description *description, unsigned char channel_order,
+	unsigned long level)
+{
+	unsigned long width = level_dimension(description->width, level), height = level_dimension(description->height, level);
+
+	if (description->compressed && channel_order == _custom_edition_channels_xbox)
+		return ((width + 3) / 4) * ((height + 3) / 4) * format_information(description->format).bytes;
+	return width * height * 4;
+}
+
+/* the top levels the texture is decoded without under the pool's pressure
+(0: none) */
+static unsigned long pressure_drop(const struct texture_entry *entry, int streamed)
+{
+	const struct xgpu_texture_description *description = &entry->description;
+	unsigned long drop = 0;
+	unsigned char channel_order;
+
+	if (!texture_pressure || !streamed || entry->dynamic || description->levels < 2 || !texture_lowerable(description) ||
+		!texture_of_map_bitmaps(entry))
+	{
+		return 0;
+	}
+	channel_order = custom_edition_texels_order(entry->address);
+	while (drop < (unsigned long)texture_pressure && drop + 1 < description->levels &&
+		level_dimension(description->width, drop + 1) >= 4 && level_dimension(description->height, drop + 1) >= 4 &&
+		pool_level_bytes(description, channel_order, drop) >= PRESSURE_LEVEL_BYTES)
+	{
+		drop++;
+	}
+	if (drop)
+	{
+		pressure_lowered++;
+		pressure_lowered_bytes += pool_level_bytes(description, channel_order, 0) -
+			pool_level_bytes(description, channel_order, drop);
+	}
+	return drop;
 }
 
 /* no lower level small enough: the stand-in is the lowest level there is,
@@ -1673,7 +1850,7 @@ no larger than STAND_IN_SIZE a side and those below it */
 static BOOL stand_in_build(struct texture_entry *entry, unsigned char channel_order)
 {
 	const struct xgpu_texture_description *description = &entry->description;
-	struct xgpu_texture_description lower = *description;
+	struct xgpu_texture_description lower;
 	struct texture_build build;
 	unsigned long drop = 0;
 	BOOL ok;
@@ -1690,13 +1867,11 @@ static BOOL stand_in_build(struct texture_entry *entry, unsigned char channel_or
 	build.base = (const unsigned char *)entry->address;
 	if (drop < description->levels)
 	{
-		lower.width = level_dimension(description->width, drop);
-		lower.height = level_dimension(description->height, drop);
-		lower.levels = description->levels - drop;
-		lower.pitch = lower.width * format_information(description->format).bytes;
+		unsigned long offset;
+
+		texture_lowered(description, drop, &lower, &offset, &build.bytes);
 		build.description = &lower;
-		build.base += xgpu_texture_level_offset(description, drop);
-		build.bytes = xgpu_texture_level_offset(&lower, lower.levels);
+		build.base += offset;
 		ok = texture_decode(&build);
 	}
 	else
@@ -1708,6 +1883,7 @@ static BOOL stand_in_build(struct texture_entry *entry, unsigned char channel_or
 		return FALSE;
 	entry->memory = build.memory;
 	entry->memory_size = build.memory_size;
+	entry->segment = pool_segment_mark(build.memory);
 	return TRUE;
 }
 
@@ -1736,6 +1912,10 @@ static void decode_job_finish(struct decode_job *job)
 
 			entry->memory = job->build.memory;
 			entry->memory_size = job->build.memory_size;
+			entry->segment = job->segment;
+			/* (its stand-in's segment may have been filled again since:
+			the texture is in the decode's memory now) */
+			entry->pool_serial = job->pool_serial;
 			stream_background++;
 			stream_background_bytes += entry->size;
 			stream_decode_us += job->decode_us;
@@ -1848,15 +2028,54 @@ void vita_texture_decodes_quiesce(void)
 	decode_jobs_sweep();
 }
 
+/* as vita_texture_decodes_quiesce, for the decodes into the size bytes at
+base alone (a pool segment about to be filled again): those queued there
+given up, the one decoding there waited for, those done swapped in; the
+decodes into other memory go on */
+static void decodes_quiesce_range(const void *base, unsigned long size)
+{
+	int index, waited = 0;
+
+	if (decoder_state <= 0)
+		return;
+	for (index = 0; index < DECODE_JOBS; index++)
+	{
+		struct decode_job *job = &decode_jobs[index];
+		int expected = _decode_queued;
+
+		if (__atomic_load_n(&job->state, __ATOMIC_ACQUIRE) == _decode_free ||
+			(const unsigned char *)job->build.preallocated < (const unsigned char *)base ||
+			(const unsigned char *)job->build.preallocated >= (const unsigned char *)base + size)
+		{
+			continue;
+		}
+		if (__atomic_compare_exchange_n(&job->state, &expected, _decode_free, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
+			job->entry)
+		{
+			job->entry->job = NULL;
+			job->entry->generation = 0;
+			job->entry = NULL;
+		}
+		while (__atomic_load_n(&job->state, __ATOMIC_ACQUIRE) == _decode_running)
+		{
+			waited = 1;
+			vita_host_sleep_us(100);
+		}
+	}
+	stream_quiesce_waits += waited;
+	decode_jobs_sweep();
+}
+
 /* (the worker) the entry's texture decoded in the background, its stand-in
 drawn meanwhile: FALSE if it cannot be (no job free, no pool memory), to be
 decoded on the worker */
-static BOOL decode_submit(struct texture_entry *entry)
+static BOOL decode_submit(struct texture_entry *entry, unsigned long drop)
 {
 	struct decode_job *job = NULL;
 	struct texture_build measure;
 	unsigned char channel_order = custom_edition_texels_order(entry->address);
-	unsigned long events;
+	struct xgpu_texture_description description;
+	unsigned long serial, offset = 0, bytes = entry->size;
 	void *memory;
 	int index;
 
@@ -1869,8 +2088,11 @@ static BOOL decode_submit(struct texture_entry *entry)
 		return FALSE;
 	}
 	memset(&measure, 0, sizeof(measure));
-	measure.description = &entry->description;
-	measure.base = (const unsigned char *)entry->address;
+	description = entry->description;
+	if (drop)
+		texture_lowered(&entry->description, drop, &description, &offset, &bytes);
+	measure.description = &description;
+	measure.base = (const unsigned char *)entry->address + offset;
 	measure.channel_order = channel_order;
 	measure.measure = 1;
 	texture_decode(&measure);
@@ -1879,23 +2101,25 @@ static BOOL decode_submit(struct texture_entry *entry)
 	pool_reuse = NULL;
 	if (!stand_in_build(entry, channel_order))
 		return FALSE;
-	/* (the stand-in's memory is the entry's; the pool recycled while the
-	decode's was taken may have forgotten it: decoded here, then) */
-	events = pool_events;
+	/* (the stand-in's memory is the entry's; the pool filled again while
+	the decode's was taken may have forgotten it - its segment filled again,
+	or the whole pool emptied: decoded here, then) */
+	serial = pool_serial;
 	memory = pool_alloc(measure.measured);
-	if (!memory || events != pool_events)
+	if (!memory || !entry->memory || serial != pool_serial)
 		return FALSE;
 	memset(job, 0, sizeof(*job));
 	job->entry = entry;
 	job->sequence = ++decode_sequence;
-	job->description = entry->description;
-	job->build.base = (const unsigned char *)entry->address;
+	job->description = description;
+	job->build.base = (const unsigned char *)entry->address + offset;
 	job->build.channel_order = channel_order;
 	job->build.format_word = entry->format_word;
 	job->build.size_word = entry->size_word;
-	job->build.bytes = entry->size;
+	job->build.bytes = bytes;
 	job->build.preallocated = memory;
 	job->build.preallocated_size = pool_last_size;
+	job->segment = vgxm_pool_segment_of(memory);
 	job->generation = entry->generation;
 	job->pool_serial = pool_serial;
 	job->queued_us = vita_host_time_us();
@@ -1913,7 +2137,7 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 	DWORD data = resource[1], format_word = resource[3], size_word = resource[4];
 	struct texture_entry **bucket = &texture_buckets[bucket_index(data, format_word, size_word)];
 	struct texture_entry *entry, *oldest_variant = NULL;
-	unsigned long generation, variant_count = 0;
+	unsigned long generation, variant_count = 0, drop;
 	BOOL palettized = ((format_word & D3DFORMAT_FORMAT_MASK) >> D3DFORMAT_FORMAT_SHIFT) == 0x0b;
 	unsigned long hash = palettized ? palette_hash(palette) : 0;
 
@@ -1945,6 +2169,7 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 		entry->address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(data);
 		entry->size = xgpu_texture_face_size(&entry->description) * (entry->description.cube_map ? 6 : 1);
 		entry->dynamic = -1;
+		entry->segment = -1;
 		entry->next = *bucket;
 		*bucket = entry;
 	}
@@ -1983,8 +2208,14 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 	{
 		entry->last_used_frame = texture_frame;
 		*description = entry->description;
+		if (entry->segment >= 0)
+			pool_segment_frames[entry->segment] = texture_frame;
 		if (entry->job)
+		{
 			stream_stand_in_draws++;
+			if (entry->job->segment >= 0)
+				pool_segment_frames[entry->job->segment] = texture_frame;
+		}
 		return &entry->texture;
 	}
 	entry->checked_serial = memory_watch_serial();
@@ -1996,13 +2227,15 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 		/* (a decode in the background of what was there before: given up) */
 		if (entry->job)
 			decode_job_cancel(entry);
+		pool_pressure_note(entry);
+		drop = pressure_drop(entry, streamed);
 		if (platform_is_contiguous((void *)entry->address) &&
 			platform_is_contiguous((void *)(entry->address + entry->size - 1)) && streamed && decode_in_background(entry))
 		{
 			unsigned long long before = vita_host_time_us();
 
 			/* (its stand-in now, the texture in the background) */
-			entry->valid = decode_submit(entry);
+			entry->valid = decode_submit(entry, drop);
 			vita_texture_build_us += vita_host_time_us() - before;
 			frame_decode_us += vita_host_time_us() - before;
 		}
@@ -2029,10 +2262,11 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 							entry->description.width, entry->description.height, (unsigned long)entry->description.format,
 							entry->description.levels);
 				}
-				entry->valid = texture_build(entry, (const unsigned char *)entry->address, palette);
+				entry->valid = texture_build(entry, (const unsigned char *)entry->address, palette, drop);
 				pool_reuse = NULL;
 				entry->memory = pool_last;
 				entry->memory_size = pool_last ? pool_last_size : 0;
+				entry->segment = pool_segment_mark(pool_last);
 				decode_rate_emulate(before, entry->size);
 				vita_texture_build_us += vita_host_time_us() - before;
 				frame_decode_us += vita_host_time_us() - before;
@@ -2070,9 +2304,10 @@ void halo_texture_stats_report(void)
 	extern volatile unsigned long halo_texture_cache_loads, halo_texture_cache_load_bytes, halo_texture_cache_evictions;
 
 	platform_log("texture-stats: game cache %lu reads (%lu KB), %lu evicted | pool %lu decodes (%lu KB), at %lu KB, "
-		"%lu segments recycled, emptied %lu times", halo_texture_cache_loads, halo_texture_cache_load_bytes / 1024,
-		halo_texture_cache_evictions, stats_builds, stats_build_bytes / 1024, (unsigned long)(vgxm_pool_used() / 1024),
-		stats_pool_recycles, stats_pool_resets);
+		"%lu segments recycled, emptied %lu times; pressure %d (%lu textures drawn smaller, %lu KB less)",
+		halo_texture_cache_loads, halo_texture_cache_load_bytes / 1024, halo_texture_cache_evictions, stats_builds,
+		stats_build_bytes / 1024, (unsigned long)(vgxm_pool_used() / 1024), stats_pool_recycles, stats_pool_resets,
+		texture_pressure, pressure_lowered, pressure_lowered_bytes / 1024);
 	platform_log("texture decoding on the worker: %lu textures (%lu KB); in play, frames it held up over 33 ms %lu, over "
 		"100 ms %lu, longest %.1f ms; %.1f ms in %lu frames of a map's or a revert's first 2 s; on the worker for: the "
 		"streaming off %lu, small %lu, not power-of-two 2D %lu, not the map's bitmaps %lu", stream_worker_builds,
@@ -2192,18 +2427,30 @@ unsigned long vita_texture_pool_release(void)
 	pool_last_size = 0;
 	freed = vgxm_pool_release();
 	pool_serial++;
-	pool_events++;
+	/* (the next map starts with no pressure) */
+	if (texture_pressure)
+		platform_log("texture pool: the pressure back to 0 with the map gone (%lu textures were drawn smaller, %lu KB "
+			"less in the pool)", pressure_lowered, pressure_lowered_bytes / 1024);
+	texture_pressure = 0;
+	pressure_soon_bytes = 0;
+	pressure_lowered = pressure_lowered_bytes = 0;
 	return freed;
 }
 
 unsigned long vita_texture_cache_forget(const void *base, unsigned long size)
+{
+	return texture_cache_forget(base, size, 0);
+}
+
+/* (vita_texture_cache_forget's) with recycled set, a pool segment filled
+again: the entries forgotten are marked for the pool's pressure */
+static unsigned long texture_cache_forget(const void *base, unsigned long size, int recycled)
 {
 	unsigned long bucket, count = 0;
 	struct texture_entry *entry;
 
 	if (!size)
 		return 0;
-	pool_events++;
 	for (bucket = 0; bucket < TEXTURE_BUCKET_COUNT; bucket++)
 		for (entry = texture_buckets[bucket]; entry; entry = entry->next)
 			if (entry->memory && (const unsigned char *)entry->memory >= (const unsigned char *)base &&
@@ -2214,6 +2461,8 @@ unsigned long vita_texture_cache_forget(const void *base, unsigned long size)
 				entry->pool_serial = 0;
 				entry->memory = NULL;
 				entry->memory_size = 0;
+				entry->segment = -1;
+				entry->forgotten_frame = recycled ? texture_frame + 1 : 0;
 				count++;
 			}
 	return count;

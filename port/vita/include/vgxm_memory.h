@@ -468,9 +468,9 @@ static unsigned long memory_headroom_from(unsigned long screen_ceiling)
 /* ---------- the texture pool
 
 Decoded textures, bump-allocated until the pool is full, then filled
-again from its start a segment at a time (the ring, pool_recycle), or all
-forgotten at once when that cannot be (vita_textures.c decodes each again
-as it is used). The
+again a segment at a time - the segment whose textures were drawn longest
+ago (pool_recycle) - or all forgotten at once when that cannot be
+(vita_textures.c decodes each again as it is used). The
 pool's offsets run over POOL_SEGMENTS segments of POOL_SEGMENT_BYTES, each
 a block of its own, made when the pool first reaches it (a level's
 textures took 22 MB at b30 and 39 MB at a10 in their first 150 s; the pool
@@ -482,7 +482,7 @@ bigger than a segment (a Custom Edition map's 2048x2048) has a block of its
 own (pool_jumbo). The first segment (the sequential indices at its start,
 d3d8_gxm.c) is CDRAM and stays. */
 #define POOL_SEGMENT_BYTES (4u * 1024 * 1024)
-#define POOL_SEGMENTS 14
+#define POOL_SEGMENTS VGXM_POOL_SEGMENTS
 #define POOL_BYTES (POOL_SEGMENTS * POOL_SEGMENT_BYTES)
 #define POOL_JUMBO_BLOCKS 8
 #define POOL_USER_MAXIMUM (32u * 1024 * 1024)
@@ -496,22 +496,37 @@ struct pool_part
 
 static struct pool_part pool_segments[POOL_SEGMENTS], pool_jumbo[POOL_JUMBO_BLOCKS];
 /* the next free offset, the offset a reset goes back to (what the
-sequential indices take), the large textures' bytes */
-static unsigned int pool_offset, pool_floor, pool_jumbo_bytes;
+sequential indices take), the large textures' bytes; the highest offset
+allocated since the pool was last emptied (below it every segment made
+holds textures, wherever the next free offset is) */
+static unsigned int pool_offset, pool_floor, pool_jumbo_bytes, pool_high;
 /* the segments moved by pool_demote / pool_promote; the pool's releases */
 static unsigned long pool_moves[2];
 static unsigned long pool_releases;
 
-/* The ring (pool_recycle). Once the pool has been filled to its end it is
-filled again from its start, a segment at a time: the next segment's
-textures - the oldest decoded - are forgotten as the allocations reach it,
-and the rest stay. Emptying the whole pool at once made the Vita decode
-every texture in view again in one frame (1-2 s of Custom Edition maps,
-16-18 MB). In a later lap, an allocation must end below pool_ring_clear,
-where the last lap's textures have been forgotten up to. */
+/* The recycling (pool_recycle). Once the pool has been filled to its end
+(or to a segment that could not be made) it is filled again a segment at a
+time: one segment's textures are forgotten, and the allocations go there
+until it is full, the rest staying. Emptying the whole pool at once made
+the Vita decode every texture in view again in one frame (1-2 s of Custom
+Edition maps, 16-18 MB). The segment taken is the one whose textures were
+drawn longest ago (vita_textures.c marks each segment's last frame drawn
+from), the oldest filled first among equals. Taking them in turn round the
+pool as a ring, whatever they held, made a large map's full pool forget
+textures in view as soon as their turn came: each was decoded again into
+the segment being filled, and filled it, and the next segment in turn -
+in view too - went next, so a pool that held all the view (44 MB of the
+48 MB a Vita made in a 16-player Extinction game) went round decoding 4 MB
+a frame and more, at 3-10 frames a second, for as long as the game lasted
+(the owner's, Oct 9 2026; the harness the same with the Vita's free CDRAM
+and user RAM: HALO_CDRAM_RESERVE_MB, HALO_USER_FREE_MB). Once filled again,
+an allocation must end below pool_ring_clear, the end of the segment being
+filled (pool_ring_current). */
 static int pool_ring_lap;
-static unsigned int pool_ring_clear;
+static unsigned int pool_ring_clear, pool_ring_current;
 static unsigned long pool_ring_recycled;
+/* (the census) the recycled segments drawn from in the frame before */
+static unsigned long pool_ring_recycled_recent;
 
 static void pool_part_free(struct pool_part *part)
 {
@@ -589,11 +604,17 @@ static void *pool_allocate(unsigned long size, unsigned long alignment)
 	if (pool_ring_lap && offset + size > pool_ring_clear)
 		return NULL;
 	if (!pool_segments[index].memory.base &&
-		!pool_part_make(&pool_segments[index], POOL_SEGMENT_BYTES, "texture pool", 0))
+		(pool_ring_lap || !pool_part_make(&pool_segments[index], POOL_SEGMENT_BYTES, "texture pool", 0)))
 	{
+		/* (once filled again, no segment is made: one that found no room
+		the first time is not asked for at every allocation that reaches
+		it - the owner's Vita asked the kernel again twice a second) */
 		return NULL;
 	}
 	pool_offset = offset + (unsigned int)size;
+	if (pool_offset > pool_high)
+		pool_high = pool_offset;
+	pool_ring_current = index;
 	return (unsigned char *)pool_segments[index].memory.base + offset % POOL_SEGMENT_BYTES;
 }
 
@@ -611,9 +632,10 @@ static void pool_forget(void)
 	for (index = 1; index < POOL_SEGMENTS; index++)
 		if (pool_segments[index].user)
 			pool_part_free(&pool_segments[index]);
-	pool_offset = pool_floor;
+	pool_offset = pool_high = pool_floor;
 	pool_ring_lap = 0;
 	pool_ring_clear = 0;
+	pool_ring_current = 0;
 }
 
 /* (the GPU idle; a map gone) every allocation forgotten and every part
@@ -651,41 +673,51 @@ static unsigned long pool_release(void)
 	return freed;
 }
 
-/* (the GPU idle) the pool full ahead of the next allocation: the next
-segment made free - from the first again once the end is reached - with its
-memory in *base and *size for the textures decoded there to be forgotten
-(size 0: no memory there); 0 when no segment is left to free this way */
-static int pool_recycle(void **base, unsigned long *size)
+/* whether a segment can be filled again: made, and below the share the
+large textures leave */
+static int pool_segment_recyclable(unsigned int index)
 {
-	/* (the segment the failed allocation needed: the one after the last
-	allocation's, or the one it ended at) */
-	unsigned int target = ALIGN(pool_offset, POOL_SEGMENT_BYTES) / POOL_SEGMENT_BYTES, index;
+	return pool_segments[index].memory.base && index * POOL_SEGMENT_BYTES + POOL_SEGMENT_BYTES + pool_jumbo_bytes <=
+		POOL_BYTES;
+}
+
+/* (the GPU idle) the pool full ahead of the next allocation: a segment made
+free for the allocations to go on in - of those made, the one whose
+textures were drawn from longest ago by segment_frames[] (each segment's
+last frame; NULL: the next after the one being filled, round the pool),
+the first after the one being filled among equals, never that one while
+another can be - with its memory in *base and *size for the textures
+decoded there to be forgotten (size 0: no memory there); 0 when no segment
+can be filled again */
+static int pool_recycle(void **base, unsigned long *size, const unsigned long *segment_frames, unsigned long frame)
+{
+	unsigned int step, index, chosen = POOL_SEGMENTS;
 
 	*base = NULL;
 	*size = 0;
-	/* from the start again: at the first lap's end, past the last segment
-	or the share the large textures leave, or at a segment freed this lap
-	that could not be made */
-	if (!pool_ring_lap || target >= POOL_SEGMENTS ||
-		target * POOL_SEGMENT_BYTES + POOL_SEGMENT_BYTES + pool_jumbo_bytes > POOL_BYTES ||
-		(!pool_segments[target].memory.base && pool_ring_clear > target * POOL_SEGMENT_BYTES))
+	for (step = 1; step <= POOL_SEGMENTS; step++)
 	{
-		pool_ring_lap = 1;
-		pool_ring_clear = 0;
-		pool_offset = pool_floor;
+		index = (pool_ring_current + step) % POOL_SEGMENTS;
+		if (!pool_segment_recyclable(index) || (index == pool_ring_current && chosen < POOL_SEGMENTS))
+			continue;
+		if (chosen == POOL_SEGMENTS ||
+			(segment_frames && (long)(segment_frames[index] - segment_frames[chosen]) < 0))
+		{
+			chosen = index;
+		}
 	}
-	index = pool_ring_clear / POOL_SEGMENT_BYTES;
-	if (index >= POOL_SEGMENTS)
+	if (chosen == POOL_SEGMENTS)
 		return 0;
-	if (pool_segments[index].memory.base)
-	{
-		*base = pool_segments[index].memory.base;
-		*size = POOL_SEGMENT_BYTES;
-	}
-	pool_ring_clear = (index + 1) * POOL_SEGMENT_BYTES;
-	if (pool_offset < index * POOL_SEGMENT_BYTES)
-		pool_offset = index * POOL_SEGMENT_BYTES;
+	*base = pool_segments[chosen].memory.base;
+	*size = POOL_SEGMENT_BYTES;
+	pool_ring_lap = 1;
+	pool_ring_current = chosen;
+	pool_ring_clear = (chosen + 1) * POOL_SEGMENT_BYTES;
+	/* (the first segment's start: the sequential indices) */
+	pool_offset = chosen ? chosen * POOL_SEGMENT_BYTES : pool_floor;
 	pool_ring_recycled++;
+	if (segment_frames && frame - segment_frames[chosen] <= 1)
+		pool_ring_recycled_recent++;
 	return 1;
 }
 
@@ -706,7 +738,7 @@ static unsigned long pool_demote(void **base, unsigned long *size)
 		if (pool_segments[index].memory.base && !pool_segments[index].user)
 		{
 			part = &pool_segments[index];
-			used = pool_offset > (unsigned int)index * POOL_SEGMENT_BYTES;
+			used = pool_high > (unsigned int)index * POOL_SEGMENT_BYTES;
 		}
 	for (index = 0; index < POOL_JUMBO_BLOCKS && !part; index++)
 		if (pool_jumbo[index].memory.base && !pool_jumbo[index].user)
@@ -766,11 +798,26 @@ static int pool_promote(void **base, unsigned long *size)
 	}
 	moved.user = 0;
 	*base = pool_segments[index].memory.base;
-	*size = pool_offset > (unsigned int)index * POOL_SEGMENT_BYTES ? pool_segments[index].memory.size : 0;
+	*size = pool_high > (unsigned int)index * POOL_SEGMENT_BYTES ? pool_segments[index].memory.size : 0;
 	pool_part_free(&pool_segments[index]);
 	pool_segments[index] = moved;
 	pool_moves[1]++;
 	return 1;
+}
+
+/* the segment a pool address is in; -1 outside the segments (a large
+texture's block, or none) */
+static int pool_segment_of(const void *data)
+{
+	int index;
+
+	for (index = 0; index < POOL_SEGMENTS; index++)
+		if (pool_segments[index].memory.base && (const unsigned char *)data >= (unsigned char *)pool_segments[index].memory.base &&
+			(const unsigned char *)data < (unsigned char *)pool_segments[index].memory.base + POOL_SEGMENT_BYTES)
+		{
+			return index;
+		}
+	return -1;
 }
 
 /* a pool address's offset (the harness's draw hash: the same in every
@@ -822,14 +869,14 @@ static int memory_census_line(char *text, unsigned long size, int part)
 	}
 	length = snprintf(text, size, "texture pool: filled to %u KB (+%u KB large), segments %u in CDRAM, %u in user RAM "
 		"(%lu KB), %u not made; headroom kept for the targets %lu KB; segments moved to user RAM %lu, back to CDRAM %lu",
-		pool_offset / 1024, pool_jumbo_bytes / 1024, cdram_segments, user_segments,
+		pool_high / 1024, pool_jumbo_bytes / 1024, cdram_segments, user_segments,
 		memory_bytes[_memory_pool_user] / 1024, POOL_SEGMENTS - cdram_segments - user_segments,
 		memory_target_headroom() / 1024, pool_moves[0], pool_moves[1]);
 	if (pool_releases && length > 0 && (unsigned long)length < size)
 		length += snprintf(text + length, size - length, "; given back at map changes %lu times", pool_releases);
 	if (pool_ring_recycled && length > 0 && (unsigned long)length < size)
-		length += snprintf(text + length, size - length, "; segments recycled %lu (filled again from the start)",
-			pool_ring_recycled);
+		length += snprintf(text + length, size - length, "; segments filled again %lu (%lu drawn from in the frame "
+			"before)", pool_ring_recycled, pool_ring_recycled_recent);
 	if (memory_reserve_bytes && length > 0 && (unsigned long)length < size)
 		length += snprintf(text + length, size - length, "; %lu KB reserved (HALO_CDRAM_RESERVE_MB)",
 			memory_reserve_bytes / 1024);

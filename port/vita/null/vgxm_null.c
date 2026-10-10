@@ -144,11 +144,15 @@ struct block
 
 #define log_line platform_log
 
+/* the user RAM blocks made, by address (HALO_USER_FREE_MB) */
+#define MEMORY_USER_BLOCKS 64
+static void *memory_user_bases[MEMORY_USER_BLOCKS];
+static unsigned long memory_user_bytes;
+
 static int memory_os_allocate(int user, unsigned int size, const char *name, struct block *block)
 {
 	static int uids;
 
-	(void)user;
 	(void)name;
 	/* (mapped, not the C heap's: on the Vita these are memory blocks of
 	their own, and the logs' C heap figures stay the Vita's) */
@@ -160,19 +164,52 @@ static int memory_os_allocate(int user, unsigned int size, const char *name, str
 	}
 	block->uid = ++uids;
 	block->size = size;
+	if (user)
+	{
+		int index;
+
+		for (index = 0; index < MEMORY_USER_BLOCKS && memory_user_bases[index]; index++)
+			;
+		if (index < MEMORY_USER_BLOCKS)
+		{
+			memory_user_bases[index] = block->base;
+			memory_user_bytes += size;
+		}
+	}
 	return 1;
 }
 
 static void memory_os_free(struct block *block)
 {
-	if (block->base)
-		munmap(block->base, block->size);
+	int index;
+
+	if (!block->base)
+		return;
+	for (index = 0; index < MEMORY_USER_BLOCKS; index++)
+		if (memory_user_bases[index] == block->base)
+		{
+			memory_user_bases[index] = NULL;
+			memory_user_bytes -= block->size;
+		}
+	munmap(block->base, block->size);
 }
 
+/* (debug) HALO_USER_FREE_MB=<n>: the user RAM free is n MB less the blocks
+made there (the texture pool's segments in user RAM), so a Vita whose user
+RAM is short - a Custom Edition map's tag cache in it, 16-20 MB free on the
+owner's in a 16-player game on Extinction - can be tried here; unset, it is
+not known (-1) and the pool takes user RAM up to POOL_USER_MAXIMUM */
 static long memory_os_free_kb(int user)
 {
-	(void)user;
-	return -1;
+	static long free_kb = -2;
+
+	if (!user)
+		return -1;
+	if (free_kb == -2)
+		free_kb = getenv("HALO_USER_FREE_MB") ? atol(getenv("HALO_USER_FREE_MB")) * 1024 : -1;
+	if (free_kb < 0)
+		return -1;
+	return free_kb > (long)(memory_user_bytes / 1024) ? free_kb - (long)(memory_user_bytes / 1024) : 0;
 }
 
 static unsigned long memory_target_headroom(void);
@@ -343,11 +380,16 @@ unsigned long vgxm_pool_release(void)
 	return pool_release();
 }
 
-int vgxm_pool_recycle(void **base, unsigned long *size)
+int vgxm_pool_segment_of(const void *memory)
+{
+	return pool_segment_of(memory);
+}
+
+int vgxm_pool_recycle(void **base, unsigned long *size, const unsigned long *segment_frames, unsigned long frame)
 {
 	if (!pool_floor)
 		pool_floor = 65536 * 2;
-	return pool_recycle(base, size);
+	return pool_recycle(base, size, segment_frames, frame);
 }
 
 unsigned long vgxm_pool_used(void)
