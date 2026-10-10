@@ -2713,6 +2713,27 @@ static void hs_thread_main(
 	hs_runtime_globals.executing_thread_index = (short)thread_index;
 	if (thread->type==_hs_thread_type_script)
 	{
+		/* port: a thread of no script of the scenario's (a corrupted one, or
+		a saved game's: observed on a10 with the sound cache under pressure,
+		0x4CAC000E against 185 scripts) sleeps for good, said once, as a
+		disabled script's does below, instead of running the empty data as a
+		script (a halt with assertions) */
+		if (thread->script_index<0 ||
+			thread->script_index>=global_scenario_get()->hs_scripts.count)
+		{
+			static boolean reported = FALSE;
+
+			if (!reported)
+			{
+				reported = TRUE;
+				error(_error_silent, "hs thread #%08lX has a bad script index #%08lX; it sleeps for good",
+					(unsigned long)thread_index, (unsigned long)thread->script_index);
+			}
+			thread->sleep_until = NONE;
+			hs_runtime_globals.executing_thread_index = NONE;
+
+			return;
+		}
 		script = TAG_BLOCK_GET_ELEMENT(
 			&global_scenario_get()->hs_scripts,
 			thread->script_index,
