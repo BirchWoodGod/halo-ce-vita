@@ -82,6 +82,7 @@ bot line: their ticks' time (us/tick), the searches and how many failed.
 #include "items/equipment.h"
 #include "items/equipment_definitions.h"
 #include "physics/collisions.h"
+#include "physics/breakable_surfaces.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "structures/structure_bsp_definitions.h"
@@ -113,6 +114,8 @@ void vita_host_thread_watch(const char *role);
 #endif
 /* render_epoch.c's: bumped as each map (and game state) is loaded */
 extern unsigned long halo_map_generation;
+/* point_leaf_cache.c's: bumped as the structure's bsp changes */
+extern unsigned long halo_structure_bsp_generation;
 /* game_engine.c's (port): the nav points a player is shown */
 long game_engine_port_player_goals(long player_index, real_point3d *positions, long maximum);
 
@@ -600,6 +603,50 @@ static real bots_distance3d(real_point3d const *a, real_point3d const *b)
 	return (real)sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+/* the answers of bots_surface_below's rays kept by the point they were cast
+from, while the bots' tick runs (the stands, the nav points and the flags
+lying still that the bots ask for every tick): a structure test's answer is a
+function of the bsp, its flags, the breakable surfaces' state and the ray
+alone (collisions.c's obstruction memo is kept so), and this one tests no
+objects nor water, so a point asked again (the same bits) is answered as it
+was while the bsp (halo_structure_bsp_generation), the map and the breakable
+surfaces' flags (compared as each bots' tick starts; nothing in it breaks
+one) are as they were */
+#define BOTS_GROUND_MEMO_ENTRIES 64
+static struct
+{
+	boolean active;
+	unsigned long map_generation;
+	unsigned long structure_bsp_generation;
+	byte breakable_surface_flags[MAXIMUM_BREAKABLE_SURFACES_PER_MAP / 8];
+	struct
+	{
+		boolean used;
+		unsigned long point[3];
+		long surface_index;
+		real_point3d ground;
+	} entries[BOTS_GROUND_MEMO_ENTRIES];
+} bots_ground_memo;
+
+/* at a bots' tick's start: the answers kept dropped if the level changed */
+static void bots_ground_memo_begin(void)
+{
+	byte const *flags = breakable_surface_flags_get();
+	long index;
+
+	if (bots_ground_memo.map_generation != halo_map_generation ||
+		bots_ground_memo.structure_bsp_generation != halo_structure_bsp_generation ||
+		memcmp(bots_ground_memo.breakable_surface_flags, flags, sizeof(bots_ground_memo.breakable_surface_flags)))
+	{
+		for (index = 0; index < BOTS_GROUND_MEMO_ENTRIES; index++)
+			bots_ground_memo.entries[index].used = FALSE;
+		bots_ground_memo.map_generation = halo_map_generation;
+		bots_ground_memo.structure_bsp_generation = halo_structure_bsp_generation;
+		memcpy(bots_ground_memo.breakable_surface_flags, flags, sizeof(bots_ground_memo.breakable_surface_flags));
+	}
+	bots_ground_memo.active = TRUE;
+}
+
 /* the surface of the level under a point (a step up included), and the
 ground point there; NONE over nothing */
 static long bots_surface_below(real_point3d const *point, real_point3d *ground)
@@ -607,9 +654,28 @@ static long bots_surface_below(real_point3d const *point, real_point3d *ground)
 	struct collision_result collision;
 	real_point3d start = *point;
 	real_vector3d down = { 0.0f, 0.0f, -6.0f };
-	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
+	unsigned long long started;
+	unsigned long bits[3];
+	long entry_index = NONE;
 	boolean hit;
 
+	if (bots_ground_memo.active)
+	{
+		unsigned long hash = 2166136261UL;
+		long index;
+
+		memcpy(bits, point, sizeof(bits));
+		for (index = 0; index < 3; index++)
+			hash = (hash ^ bits[index]) * 16777619UL;
+		entry_index = (long)((hash >> 8) % BOTS_GROUND_MEMO_ENTRIES);
+		if (bots_ground_memo.entries[entry_index].used && !memcmp(bots_ground_memo.entries[entry_index].point, bits, sizeof(bits)))
+		{
+			if (bots_ground_memo.entries[entry_index].surface_index != NONE && ground)
+				*ground = bots_ground_memo.entries[entry_index].ground;
+			return bots_ground_memo.entries[entry_index].surface_index;
+		}
+	}
+	started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
 	start.z += 0.4f;
 	hit = collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
 		&start, &down, NONE, &collision) && collision.type == _collision_result_structure;
@@ -617,6 +683,13 @@ static long bots_surface_below(real_point3d const *point, real_point3d *ground)
 	{
 		bots_profile.below_rays++;
 		bots_profile.below_us += vita_host_time_us() - started;
+	}
+	if (entry_index != NONE)
+	{
+		bots_ground_memo.entries[entry_index].used = TRUE;
+		memcpy(bots_ground_memo.entries[entry_index].point, bits, sizeof(bits));
+		bots_ground_memo.entries[entry_index].surface_index = hit ? collision.surface_index : NONE;
+		bots_ground_memo.entries[entry_index].ground = collision.point;
 	}
 	if (hit)
 	{
@@ -3327,6 +3400,7 @@ void bots_update_actions(struct player_action *actions)
 		{
 			unsigned long long scan_started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
 
+			bots_ground_memo_begin();
 			bots_paths_scan();
 			bots_profile_part(_bots_part_scan, &scan_started);
 		}
@@ -3338,6 +3412,7 @@ void bots_update_actions(struct player_action *actions)
 			bots_bot_update(bot, bot_index, &actions[absolute_index]);
 		count++;
 	}
+	bots_ground_memo.active = FALSE;
 	if (count)
 	{
 		bots_globals.tick_us += vita_host_time_us() - started;
