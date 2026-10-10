@@ -1119,6 +1119,53 @@ boolean custom_edition_maps_campaign_level(
 	return level_name && (main_get_solo_level_from_name(level_name) != NONE || custom_edition_level_name(level_name));
 }
 
+char const *custom_edition_maps_campaign_next_level(
+	char const *level_name)
+{
+	enum { FIRST_CAMPAIGN_LEVEL = 13, CAMPAIGN_LEVEL_NAME_LENGTH = 3 };
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	char next_name[MAXIMUM_MAP_NAME_LENGTH + 1];
+	char const *name;
+	long length;
+	short level_index;
+	short map_index;
+
+	if (!level_name || !custom_edition_level_name(level_name))
+	{
+		return NULL;
+	}
+	name = level_name + csstrlen(CUSTOM_EDITION_LEVEL_NAME_PREFIX);
+	length = (long)csstrlen(name);
+	/* (a prefix, then a campaign level's name, not the last's) */
+	if (length <= CAMPAIGN_LEVEL_NAME_LENGTH || length > MAXIMUM_MAP_NAME_LENGTH)
+	{
+		return NULL;
+	}
+	for (level_index = FIRST_CAMPAIGN_LEVEL; level_index < NUMBEROF(xbox_level_names) - 1; level_index++)
+	{
+		if (!csstrcasecmp(name + length - CAMPAIGN_LEVEL_NAME_LENGTH, xbox_level_names[level_index]))
+		{
+			break;
+		}
+	}
+	if (level_index >= NUMBEROF(xbox_level_names) - 1)
+	{
+		return NULL;
+	}
+	csmemcpy(next_name, name, length - CAMPAIGN_LEVEL_NAME_LENGTH);
+	csstrcpy(next_name + length - CAMPAIGN_LEVEL_NAME_LENGTH, xbox_level_names[level_index + 1]);
+	custom_edition_maps_look_for();
+	for (map_index = 0; map_index < globals->map_count; map_index++)
+	{
+		if (globals->maps[map_index].campaign && !csstrcasecmp(globals->maps[map_index].name, next_name))
+		{
+			return globals->maps[map_index].level_name;
+		}
+	}
+
+	return NULL;
+}
+
 boolean custom_edition_maps_shareable(
 	char const *level_name)
 {

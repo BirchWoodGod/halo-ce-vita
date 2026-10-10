@@ -401,6 +401,7 @@ void platform_log(const char *format, ...);
 #ifdef HALO_LINUX
 #include "load_profile.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
+#include "custom_edition_maps.h" /* port: custom_edition_maps_campaign_next_level */
 #endif
 #include "render/render.h"
 #include "text/draw_string.h"
@@ -2495,6 +2496,17 @@ static void main_won_map_private(
 	(OpenCE's main.c, ce41b41d, rolls the credits instead) */
 	if (level == NONE)
 	{
+		/* port: a mod's campaign rebuilt as Custom Edition maps (ruby_a10,
+		ruby_a30 ...: custom_edition_maps_campaign_next_level) goes on to
+		its next map */
+		char const *next_level_name = custom_edition_maps_campaign_next_level(main_globals.soloplayer_map_name);
+
+		if (next_level_name)
+		{
+			error(_error_silent, "won '%s': on to '%s'", main_globals.soloplayer_map_name, next_level_name);
+			main_set_map_name(next_level_name);
+			return;
+		}
 		error(_error_silent, "won '%s', not a campaign level: back to the main menu", main_globals.soloplayer_map_name);
 		return;
 	}
