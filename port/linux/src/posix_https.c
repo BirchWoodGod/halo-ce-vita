@@ -3,7 +3,7 @@ POSIX_HTTPS.C
 
 One HTTPS GET for the update check (update_check.h), and the Vita
 updater's downloads (posix_https_download, below; port/vita/host/
-vita_update_install.c): Mbed TLS
+vita_update_download.c): Mbed TLS
 (port/third_party/mbedtls) over the platform's own sockets (posix.h: vita_net.c
 on the Vita, posix_net.c on Linux), so the Vita runs the same TLS as the
 Linux harness and the tests, and none of the system's: its SceHttp/SceSsl
@@ -54,7 +54,7 @@ the SDK's: tools/vita_build.py, with port/vita/include/mbedtls_vita_config.h).
 
 #include "update_roots.h"
 #ifdef POSIX_HTTPS_TEST_ROOTS
-/* (tests only, never a game build: run_update_install_test.sh's own
+/* (tests only, never a game build: run_update_download_test.sh's own
 authority, posix_https_test_roots_pem) */
 #include POSIX_HTTPS_TEST_ROOTS
 #endif

@@ -1,29 +1,30 @@
 /*
 VITA_UPDATE.C
 
-The update installed from the settings panel (vita_update.h): the player's
-second press of Check for updates, once it found a newer version, asks
-whether to download and install it (the panel's question over the game),
-and on yes, on a thread below the game's:
-
-- only from the main menu with no network game (halo_main_menu_idle, as the
-  Custom Edition installer's restart): the install ends in a restart;
-- vita_update_install.c's prepare: the release's signed manifest, halo.vpk,
-  its checks and unpacking, with the panel's progress line (circle stops it);
-- then its commit (the progress line stays; it cannot be stopped) and the
-  restart into the new version (sceAppMgrLoadExec of app0:eboot.bin, as
-  VitaDB Downloader restarts itself after its update);
-- any failure: a message saying why, the game as it was, a halo.log line.
+The update downloaded from the settings panel (vita_update.h): the
+player's second press of Check for updates, once it found a newer version,
+asks whether to download it (the panel's question over the game), and on
+yes, on a thread below the game's (any time: a download of a few MB on a
+low-priority thread does not cost the game frames), runs
+vita_update_download.c's fetch with the panel's progress line (circle stops
+it): the release's signed manifest checked, halo.vpk downloaded and its
+SHA-512 checked, then kept as ux0:data/haloce-vita/update/halo-<version>.vpk.
+The game is a safe homebrew (vita-make-fself -s) and cannot write its own
+folder: the message says to install that file with VitaShell, and the panel
+and the main menu's corner say so until the player has (each start checks
+the kept file again: vita_update_scan_at_start).
 
 Builds holding the placeholder key (vita_update_key.h) refuse at once and
-say to install new versions with VitaShell; a Vita without HENkaku's unsafe
-homebrew is told how to turn it on.
+point to the releases page. Only a test build (HALO_UPDATE_TEST_SOURCES,
+tools/release/README.md) takes HALO_UPDATE_DOWNLOAD_BASE from env.txt; a
+release build downloads from BirchWoodGod/halo-ce-vita alone.
 */
 
 #include <psp2/appmgr.h>
 #include <psp2/io/devctl.h>
 #include <psp2/kernel/processmgr.h>
 
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +34,7 @@ homebrew is told how to turn it on.
 #include "update_check.h"
 #include "vita_host.h"
 #include "vita_update.h"
-#include "vita_update_install.h"
+#include "vita_update_download.h"
 #include "vita_version.h"
 
 #define DATA_DIRECTORY "ux0:data/haloce-vita"
@@ -44,11 +45,15 @@ int vita_settings_progress_cancelled(void);
 void vita_settings_question(const char *title, const char *text);
 int vita_settings_question_answer(void);
 void vita_settings_message(const char *title, const char *text);
-/* (main.c) the main menu is up, no network game: a restart loses nothing */
-int halo_main_menu_idle(void);
 
 static volatile int running;
 static char update_version[UPDATE_VERSION_SIZE];
+/* the downloaded and verified VPK to install */
+static pthread_mutex_t ready_lock = PTHREAD_MUTEX_INITIALIZER;
+static char ready_version[UPDATE_VERSION_SIZE];
+static char ready_path[512];
+/* (one look at the update folder at a time: the start's and a download) */
+static pthread_mutex_t work_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void log_line(const char *line)
 {
@@ -70,12 +75,12 @@ static unsigned long long free_space(const char *path)
 		return space.free;
 	if (sceAppMgrGetDevInfo(device, &maximum, &free_bytes) >= 0)
 		return free_bytes;
-	/* (unknown: a full card shows as a write that fails, which is undone) */
+	/* (unknown: a full card shows as a write that fails) */
 	return ~0ULL;
 }
 
-/* the paths, the running game's title and version */
-static int configure(struct update_install_config *config)
+/* the folder, the running game's title and version, where the files are */
+static int configure(struct update_download_config *config)
 {
 	const char *data = getenv("HALO_DATA_ROOT");
 	char title[256];
@@ -87,12 +92,12 @@ static int configure(struct update_install_config *config)
 		return 0;
 	snprintf(config->title, sizeof(config->title), "%s", title);
 	snprintf(config->data, sizeof(config->data), "%s", data && data[0] ? data : DATA_DIRECTORY);
-	snprintf(config->app, sizeof(config->app), "ux0:app/%s", title);
 	snprintf(config->current_version, sizeof(config->current_version), "%s", HALO_VITA_VERSION);
 	snprintf(config->base, sizeof(config->base), "%s", UPDATE_DOWNLOAD_BASE);
+#ifdef HALO_UPDATE_TEST_SOURCES
 	{
-		/* (tests: HALO_UPDATE_DOWNLOAD_BASE, another repository's releases
-		on GitHub or a loopback http:// server, Vita3K's; only what
+		/* (a test build: HALO_UPDATE_DOWNLOAD_BASE, another repository's
+		releases on GitHub or a loopback http:// server, Vita3K's; only what
 		update_asset_url takes, and the files still need this build's key) */
 		const char *base = getenv("HALO_UPDATE_DOWNLOAD_BASE");
 		char probe[600];
@@ -108,10 +113,35 @@ static int configure(struct update_install_config *config)
 				vita_host_log("update: HALO_UPDATE_DOWNLOAD_BASE is not one taken: GitHub's own is used");
 		}
 	}
+#endif
 	snprintf(config->user_agent, sizeof(config->user_agent), "HaloCEVita/" HALO_VITA_VERSION);
 	config->free_space = free_space;
 	config->log = log_line;
 	return 1;
+}
+
+static void ready_set(const char *version, const char *path)
+{
+	pthread_mutex_lock(&ready_lock);
+	snprintf(ready_version, sizeof(ready_version), "%s", version);
+	snprintf(ready_path, sizeof(ready_path), "%s", path);
+	pthread_mutex_unlock(&ready_lock);
+	/* (the main menu's corner: update_notify.c) */
+	update_check_set_ready(version);
+}
+
+int vita_update_ready(char *version, int version_size, char *path, int path_size)
+{
+	int ready;
+
+	pthread_mutex_lock(&ready_lock);
+	ready = ready_version[0] && update_is_newer(ready_version, HALO_VITA_VERSION);
+	if (version && version_size > 0)
+		snprintf(version, (size_t)version_size, "%s", ready ? ready_version : "");
+	if (path && path_size > 0)
+		snprintf(path, (size_t)path_size, "%s", ready ? ready_path : "");
+	pthread_mutex_unlock(&ready_lock);
+	return ready;
 }
 
 static int show_progress(void *context, int stage, unsigned long done, unsigned long total)
@@ -131,19 +161,22 @@ static int show_progress(void *context, int stage, unsigned long done, unsigned 
 		snprintf(status, sizeof(status), T("Downloading: %lu.%lu of %lu.%lu MB (%lu%%)"), done >> 20,
 			(done & 0xFFFFF) * 10 >> 20, total >> 20, (total & 0xFFFFF) * 10 >> 20, percent);
 		break;
-	case UPDATE_STAGE_VERIFY:
-		snprintf(status, sizeof(status), T("Checking the download: %lu%%"), percent);
-		break;
-	case UPDATE_STAGE_UNPACK:
-		snprintf(status, sizeof(status), T("Unpacking: %lu%%"), percent);
-		break;
 	default:
-		snprintf(status, sizeof(status), T("Installing: %lu of %lu files. Do not turn the Vita off."), done, total);
+		snprintf(status, sizeof(status), T("Checking the download: %lu%%"), percent);
 		break;
 	}
 	snprintf(text, sizeof(text), T("Halo CE %s\n\n%s"), update_version, status);
 	vita_settings_progress(TITLE, text);
-	return stage < UPDATE_STAGE_INSTALL && vita_settings_progress_cancelled();
+	return vita_settings_progress_cancelled();
+}
+
+/* where the kept VPK is, as the message says it */
+static void say_ready(const char *version, const char *path)
+{
+	char text[1024];
+
+	snprintf(text, sizeof(text), T("%s downloaded and verified. Install it with VitaShell: %s"), version, path);
+	vita_settings_message(TITLE, text);
 }
 
 /* the message for a failure */
@@ -153,26 +186,21 @@ static void say_failure(int result, const char *error)
 
 	switch (result)
 	{
-	case UPDATE_INSTALL_CANCELLED:
-		snprintf(text, sizeof(text), "%s", T("Stopped. Nothing was installed."));
+	case UPDATE_DOWNLOAD_CANCELLED:
+		snprintf(text, sizeof(text), "%s", T("Stopped. Nothing was kept."));
 		break;
-	case UPDATE_INSTALL_NO_KEY:
-		snprintf(text, sizeof(text), T("This build cannot install updates itself (it has no update key). Install %s "
-			"with VitaShell from %s."), update_version, UPDATE_RELEASES_PAGE);
+	case UPDATE_DOWNLOAD_NO_KEY:
+		snprintf(text, sizeof(text), T("This build cannot check updates (it has no update key). Get %s from %s and "
+			"install it with VitaShell."), update_version, UPDATE_RELEASES_PAGE);
 		break;
-	case UPDATE_INSTALL_NO_ACCESS:
-		snprintf(text, sizeof(text), T("Halo cannot write its own folder. Turn on Enable Unsafe Homebrew in HENkaku "
-			"Settings (Settings > HENkaku Settings), then try again, or install %s with VitaShell from %s."),
-			update_version, UPDATE_RELEASES_PAGE);
+	case UPDATE_DOWNLOAD_NO_SPACE:
+		snprintf(text, sizeof(text), T("Not enough space on the memory card: %s. Nothing was kept."), error);
 		break;
-	case UPDATE_INSTALL_NO_SPACE:
-		snprintf(text, sizeof(text), T("Not enough space on the memory card: %s. Nothing was installed."), error);
-		break;
-	case UPDATE_INSTALL_NO_CONNECTION:
-		snprintf(text, sizeof(text), T("Could not reach GitHub (%s). Nothing was installed; try again later."), error);
+	case UPDATE_DOWNLOAD_NO_CONNECTION:
+		snprintf(text, sizeof(text), T("Could not reach GitHub (%s). Try again later."), error);
 		break;
 	default:
-		snprintf(text, sizeof(text), T("The update was refused or failed: %s. Halo is unchanged."), error);
+		snprintf(text, sizeof(text), T("The update was refused or failed: %s. Nothing was kept."), error);
 		break;
 	}
 	vita_settings_message(TITLE, text);
@@ -180,14 +208,13 @@ static void say_failure(int result, const char *error)
 
 static void update_thread(void *argument)
 {
-	struct update_install_config config;
-	struct update_install_staged *staged = NULL;
-	char text[1024], error[512] = "", line[700];
-	int answer, result, error_code;
+	struct update_download_config config;
+	char text[1024], error[512] = "", path[512];
+	int answer, result;
 
 	(void)argument;
-	snprintf(text, sizeof(text), T("Halo CE %s is out (this is %s).\n\nDownload and install it now? Its signature is "
-		"checked before anything is installed, then the game restarts into it. Saves, settings and maps stay."),
+	snprintf(text, sizeof(text), T("Halo CE %s is out (this is %s).\n\nDownload it now? Its signature is checked, then "
+		"it is kept in the data folder for you to install with VitaShell. Saves, settings and maps stay."),
 		update_version, HALO_VITA_VERSION);
 	vita_settings_question(TITLE, text);
 	while ((answer = vita_settings_question_answer()) < 0)
@@ -201,72 +228,45 @@ static void update_thread(void *argument)
 	if (!configure(&config))
 	{
 		vita_host_log("update: cannot read this app's title ID");
-		say_failure(UPDATE_INSTALL_FAILED, "this app's title ID is unknown");
+		say_failure(UPDATE_DOWNLOAD_FAILED, "this app's title ID is unknown");
 		running = 0;
 		return;
 	}
 	show_progress(NULL, UPDATE_STAGE_MANIFEST, 0, 1);
-	result = update_install_prepare(&config, update_version, show_progress, NULL, &staged, error, sizeof(error));
-	if (result != UPDATE_INSTALL_OK)
-	{
-		vita_settings_progress(NULL, NULL);
-		say_failure(result, error);
-		running = 0;
-		return;
-	}
-	/* (the restart that ends it: only with nothing to lose) */
-	if (!halo_main_menu_idle())
-	{
-		vita_settings_progress(NULL, NULL);
-		update_install_discard(&config, staged);
-		vita_host_log("update: downloaded and checked, put off: a game is under way");
-		snprintf(text, sizeof(text), T("%s is downloaded and checked. Return to the main menu, then press Check for "
-			"updates again to install it (the game restarts)."), update_version);
-		vita_settings_message(TITLE, text);
-		running = 0;
-		return;
-	}
-	result = update_install_commit(&config, staged, show_progress, NULL, error, sizeof(error));
-	if (result != UPDATE_INSTALL_OK)
-	{
-		vita_settings_progress(NULL, NULL);
-		say_failure(result, error);
-		running = 0;
-		return;
-	}
-	snprintf(text, sizeof(text), T("Halo CE %s is installed. Restarting..."), update_version);
-	vita_settings_progress(TITLE, text);
-	snprintf(line, sizeof(line), "update: %s installed; restarting into it", update_version);
-	vita_host_log(line);
-	vita_host_sleep_us(1500000);
-	error_code = sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
+	pthread_mutex_lock(&work_lock);
+	result = update_download_fetch(&config, update_version, show_progress, NULL, path, sizeof(path), error,
+		sizeof(error));
+	pthread_mutex_unlock(&work_lock);
 	vita_settings_progress(NULL, NULL);
-	snprintf(line, sizeof(line), "update: the restart failed (0x%08X)", (unsigned int)error_code);
-	vita_host_log(line);
-	snprintf(text, sizeof(text), T("Halo CE %s is installed. Close Halo and start it again to play it."), update_version);
-	vita_settings_message(TITLE, text);
+	if (result != UPDATE_DOWNLOAD_OK)
+		say_failure(result, error);
+	else
+	{
+		ready_set(update_version, path);
+		say_ready(update_version, path);
+	}
 	running = 0;
 }
 
 int vita_update_start(void)
 {
-	char version[UPDATE_VERSION_SIZE];
+	char version[UPDATE_VERSION_SIZE], ready[UPDATE_VERSION_SIZE], path[512];
 
 	if (__atomic_exchange_n(&running, 1, __ATOMIC_ACQ_REL))
-		return -1;
+		return 0;
 	if (update_check_status(version, sizeof(version)) != UPDATE_STATUS_AVAILABLE)
 	{
 		running = 0;
 		return -1;
 	}
-	snprintf(update_version, sizeof(update_version), "%s", version);
-	if (!halo_main_menu_idle())
+	/* (downloaded already: where it is, again) */
+	if (vita_update_ready(ready, sizeof(ready), path, sizeof(path)) && !update_is_newer(version, ready))
 	{
-		vita_settings_message(TITLE, T("Updates install from the main menu, between games: the game restarts at the "
-			"end. Leave this game, then press Check for updates again."));
 		running = 0;
+		say_ready(ready, path);
 		return 0;
 	}
+	snprintf(update_version, sizeof(update_version), "%s", version);
 	/* (below the game's threads, on any core) */
 	if (vita_host_thread_start_priority("halo update", update_thread, NULL, -1, 180) != 0)
 	{
@@ -281,21 +281,21 @@ int vita_update_running(void)
 	return running;
 }
 
-void vita_update_recover_at_start(void)
+static void scan_thread(void *argument)
 {
-	struct update_install_config config;
+	struct update_download_config config;
+	char version[UPDATE_VERSION_SIZE], path[512];
 
-	if (!configure(&config))
-		return;
-	if (update_install_recover(&config) > 0)
-	{
-		int error_code;
-		char line[96];
+	(void)argument;
+	pthread_mutex_lock(&work_lock);
+	if (configure(&config) && update_download_kept(&config, version, sizeof(version), path, sizeof(path)))
+		ready_set(version, path);
+	pthread_mutex_unlock(&work_lock);
+}
 
-		/* (the game's files were put back: the old game, started afresh) */
-		vita_host_log("update: an install cut short was undone; restarting");
-		error_code = sceAppMgrLoadExec("app0:eboot.bin", NULL, NULL);
-		snprintf(line, sizeof(line), "update: the restart failed (0x%08X)", (unsigned int)error_code);
-		vita_host_log(line);
-	}
+void vita_update_scan_at_start(void)
+{
+	/* (checking a kept VPK's SHA-512 takes a moment: not on the start's way) */
+	if (vita_host_thread_start_priority("halo update scan", scan_thread, NULL, -1, 190) != 0)
+		vita_host_log("update: cannot start the check of a kept update");
 }

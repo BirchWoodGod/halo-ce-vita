@@ -3,8 +3,8 @@ UPDATE_CHECK.H
 
 Telling the player whether a newer Halo CE for PS Vita is out, when they ask
 (nothing is asked of the network unless the player asks; this part only
-tells: installing a found update, on the player's next press, is the
-Vita's updater's, port/vita/include/vita_update.h). The settings panel's "Check
+tells: downloading a found update for VitaShell to install, on the
+player's next press, is the Vita's updater's, port/vita/include/vita_update.h). The settings panel's "Check
 for updates" (the General tab's first row) asks GitHub's public API for the
 project's releases on a thread of its own and shows one line: up to date,
 the newer version and where to get it, or that it could not check. halo.log
@@ -148,9 +148,14 @@ int update_check_request(void);
 /* the status, and the version it is about (the newer one for AVAILABLE,
 this build's for UP_TO_DATE; else "") */
 int update_check_status(char *version, int size);
-/* the main menu's line once a look found a newer version ("Update:
-1.1.0-beta.4", in the player's language) as the game's UTF-16:
-1, else 0 and text empty */
+/* (the Vita's updater, vita_update.c) a downloaded and verified VPK of this
+version waits to be installed with VitaShell: the main menu says so while
+it is newer than this build */
+void update_check_set_ready(const char *version);
+/* the main menu's line: a downloaded update waiting to be installed ("To
+install: 1.1.0-beta.4"; the panel says where it is), else a newer version
+a look found ("Update: 1.1.0-beta.4"), in the player's language, as the
+game's UTF-16: 1, else 0 and text empty */
 int update_check_menu_text(unsigned short *text, int count);
 
 #endif

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A stand-in for GitHub's release downloads, for the Vita updater's tests
-(run_update_install_test.sh, update_install_harness.c).
+(run_update_download_test.sh, update_download_harness.c).
 
-  update_install_server.py ROOT PORT_FILE REQUEST_LOG [--tls CERT KEY]
+  update_download_server.py ROOT PORT_FILE REQUEST_LOG [--tls CERT KEY]
 
 Listens on 127.0.0.1 (a free port, written to PORT_FILE) and serves the
 files under ROOT; each request's path and Range header go to REQUEST_LOG.

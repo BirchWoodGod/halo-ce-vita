@@ -1,16 +1,16 @@
 /*
 VITA_UPDATE_VERIFY.C
 
-The checks an update passes before the Vita installs it
-(vita_update_verify.h): the Ed25519 signature of the release's manifest
-(Monocypher's crypto_ed25519_check, RFC 8032 with SHA-512, which refuses a
-non-canonical signature), the manifest's strict text, the version it names
-against the tag asked for and the running build, where a download may be
-redirected, which names a VPK's files may have, and a param.sfo's TITLE_ID.
+The checks a downloaded update passes before the Vita keeps it for the
+player to install (vita_update_verify.h): the Ed25519 signature of the
+release's manifest (Monocypher's crypto_ed25519_check, RFC 8032 with
+SHA-512, which refuses a non-canonical signature), the manifest's strict
+text, the version it names against the tag asked for and the running
+build, and where a download may be redirected.
 
 Everything read here is untrusted until the signature is checked and is
 read by length within fixed bounds; nothing read is run, opened or followed
-here. tests/update_install_test.c and tests/update_install_fuzz.c build it
+here. tests/update_download_test.c and tests/update_download_fuzz.c build it
 alone (under AddressSanitizer and UBSan).
 */
 
@@ -412,101 +412,4 @@ int update_redirect_allowed(const char *from_url, const char *to_url)
 	}
 	/* (the tests: loopback to loopback, plain http) */
 	return loopback_url(from_url) && loopback_url(to_url) && path_clean(strchr(to_url + 7, '/'));
-}
-
-/* ---------- the VPK's names and its param.sfo */
-
-int update_entry_name_safe(const char *name, size_t length)
-{
-	size_t at = 0;
-	int parts = 0;
-
-	if (!name || !length || length > 200)
-		return 0;
-	while (at < length)
-	{
-		size_t start = at;
-
-		while (at < length && name[at] != '/')
-		{
-			char character = name[at];
-
-			if (!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
-				(character >= '0' && character <= '9') || character == '.' || character == '_' || character == '-'))
-			{
-				return 0;
-			}
-			at++;
-		}
-		/* (an empty part: a leading, doubled or trailing '/') */
-		if (at == start || ++parts > 8)
-			return 0;
-		if ((at - start == 1 && name[start] == '.') || (at - start == 2 && name[start] == '.' && name[start + 1] == '.'))
-			return 0;
-		if (at < length)
-		{
-			at++;
-			if (at == length)
-				return 0;
-		}
-	}
-	return 1;
-}
-
-static unsigned long little_long(const unsigned char *bytes)
-{
-	return (unsigned long)bytes[0] | (unsigned long)bytes[1] << 8 | (unsigned long)bytes[2] << 16 |
-		(unsigned long)bytes[3] << 24;
-}
-
-int update_sfo_title(const unsigned char *sfo, size_t size, char *title, int title_size)
-{
-	unsigned long key_table, data_table, count, index;
-
-	if (title && title_size > 0)
-		title[0] = 0;
-	if (!sfo || !title || title_size < 10 || size < 20 || size > 65536 || little_long(sfo) != 0x46535000)
-		return 0;
-	key_table = little_long(sfo + 8);
-	data_table = little_long(sfo + 12);
-	count = little_long(sfo + 16);
-	if (count > 256 || 20 + count * 16 > size || key_table > size || data_table > size || key_table < 20 + count * 16)
-		return 0;
-	for (index = 0; index < count; index++)
-	{
-		const unsigned char *entry = sfo + 20 + index * 16;
-		unsigned long key_offset = (unsigned long)entry[0] | (unsigned long)entry[1] << 8;
-		unsigned long length = little_long(entry + 4), data_offset = little_long(entry + 12), data;
-		static const char name[] = "TITLE_ID";
-
-		/* (offsets compared before added: no wrap) */
-		if (key_offset >= size - key_table || size - key_table - key_offset < sizeof(name) ||
-			memcmp(sfo + key_table + key_offset, name, sizeof(name)))
-		{
-			continue;
-		}
-		/* (a UTF-8 string: 9 characters and its NUL) */
-		if (data_offset >= size - data_table)
-			return 0;
-		data = data_table + data_offset;
-		if (length < 9 || length > size - data)
-			return 0;
-		{
-			unsigned long at;
-
-			for (at = 0; at < 9; at++)
-			{
-				char character = (char)sfo[data + at];
-
-				if (!((character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9')))
-					return 0;
-				title[at] = character;
-			}
-			if (length > 9 && sfo[data + 9] != 0)
-				return 0;
-			title[9] = 0;
-		}
-		return 1;
-	}
-	return 0;
 }

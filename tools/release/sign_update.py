@@ -11,7 +11,7 @@ then checks them as the game does. Upload both beside halo.vpk to the
 release tagged v<version>; the game refuses the update without them, or if
 halo.vpk is not the file they name.
 
-Refuses a version that is not a release tag's (x.y.z or x.y.z-beta.n), a VPK
+Refuses a version that is not a release tag's (x.y.z, x.y.z-beta.n or x.y.z-rc.n), a VPK
 that is not one (no eboot.bin, no param.sfo) or is larger than 64 MB, a
 title other than the one in the VPK, and warns when the version is not the
 source's (vita_version.h) or the key is not the one in vita_update_key.h.
@@ -32,12 +32,21 @@ def main():
     parser.add_argument("--version", required=True, help="the release's version: its tag without the v")
     parser.add_argument("--out", required=True, help="the folder for halo-update.txt and halo-update.txt.sig")
     parser.add_argument("--title", help="the title ID (default: the VPK's param.sfo's)")
+    parser.add_argument("--test-build", action="store_true",
+                        help="sign a TEST build (configure.py --vita-update-test-sources/--vita-update-key/--vita-version)")
     arguments = parser.parse_args()
     common.ed25519.self_test()
     version = arguments.version[1:] if arguments.version.startswith("v") else arguments.version
     if not common.TAG.fullmatch(version):
-        common.fail(f"{version} is not a release version (x.y.z or x.y.z-beta.n)")
+        common.fail(f"{version} is not a release version (x.y.z, x.y.z-beta.n or x.y.z-rc.n)")
     vpk = Path(arguments.vpk)
+    # (a test build of this tree is never signed as a release by mistake)
+    ninja = common.REPOSITORY / "build.ninja"
+    if (vpk.resolve() == (common.REPOSITORY / "build/vita/halo.vpk").resolve() and ninja.is_file() and
+            "TEST BUILD of the updater" in ninja.read_text(encoding="utf-8", errors="replace") and
+            not arguments.test_build):
+        common.fail(f"{vpk} is a TEST build (configure.py's --vita-update-* / --vita-version): reconfigure without "
+                    "them for a release, or pass --test-build to sign it for a test")
     title = common.vpk_title(vpk)
     if not title or not common.TITLE.fullmatch(title):
         common.fail(f"{vpk}'s param.sfo has no usable TITLE_ID ({title})")

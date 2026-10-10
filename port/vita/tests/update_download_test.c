@@ -1,8 +1,8 @@
 /*
-UPDATE_INSTALL_TEST.C
+UPDATE_DOWNLOAD_TEST.C
 
 The Vita updater's checks (port/vita/host/vita_update_verify.c), built by
-run_update_install_test.sh with a throwaway key made at test time
+run_update_download_test.sh with a throwaway key made at test time
 (HALO_UPDATE_PUBLIC_KEY, and its seed HALO_TEST_SEED so this test signs
 manifests of its own with Monocypher), and again without one (the
 placeholder: HALO_TEST_PLACEHOLDER):
@@ -12,8 +12,8 @@ placeholder: HALO_TEST_PLACEHOLDER):
   replay), another title, another file, a size of 0 or over 64 MB,
   manifests signed but malformed (each line's form, order, extra text);
 - the placeholder key refuses everything ("no update key in this build");
-- the assets' URLs, the redirect allow-list, the VPK's names, param.sfo's
-  TITLE_ID.
+- the assets' URLs (GitHub's, a test repository's, the tests' server) and
+  the redirect allow-list.
 */
 
 #include "vita_update_verify.h"
@@ -389,101 +389,6 @@ static void redirects(void)
 	check(!update_redirect_allowed(NULL, allowed[0]) && !update_redirect_allowed(from, NULL), "NULLs refused");
 }
 
-static void names(void)
-{
-	static const char *const good[] =
-	{
-		"eboot.bin", "sce_sys/param.sfo", "sce_sys/livearea/contents/template.xml", "lang/es.txt", "a/b/c/d/e/f/g/h",
-		"shaders.pak", "x..y", ".hidden",
-	};
-	static const char *const bad[] =
-	{
-		"", "/eboot.bin", "../eboot.bin", "a/../../b", "a/./b", ".", "..", "a//b", "a/", "a\\b", "C:x", "ux0:app/x",
-		"a b", "a/b/c/d/e/f/g/h/i", "\xc3\xa9", "a\tb",
-	};
-	size_t index;
-	char longer[260];
-
-	for (index = 0; index < sizeof(good) / sizeof(*good); index++)
-		check(update_entry_name_safe(good[index], strlen(good[index])), good[index]);
-	for (index = 0; index < sizeof(bad) / sizeof(*bad); index++)
-	{
-		char what[80];
-
-		snprintf(what, sizeof(what), "name refused: %s", bad[index]);
-		check(!update_entry_name_safe(bad[index], strlen(bad[index])), what);
-	}
-	check(!update_entry_name_safe("eboot.bin\0x", 11), "a NUL in a name refused");
-	memset(longer, 'a', sizeof(longer));
-	check(update_entry_name_safe(longer, 200) && !update_entry_name_safe(longer, 201), "200 bytes at most");
-}
-
-/* a param.sfo of (key, value) strings, as vita-mksfoex lays one out */
-static size_t sfo_make(unsigned char *sfo, const char *const *keys, const char *const *values, int count)
-{
-	size_t key_table = 20 + (size_t)count * 16, key_size = 0, data_size = 0, data_table;
-	int index;
-
-	for (index = 0; index < count; index++)
-		key_size += strlen(keys[index]) + 1;
-	data_table = key_table + ((key_size + 3) & ~(size_t)3);
-	memset(sfo, 0, 4096);
-	memcpy(sfo, "\0PSF\x01\x01\0\0", 8);
-	sfo[8] = (unsigned char)key_table;
-	sfo[9] = (unsigned char)(key_table >> 8);
-	sfo[12] = (unsigned char)data_table;
-	sfo[13] = (unsigned char)(data_table >> 8);
-	sfo[16] = (unsigned char)count;
-	key_size = 0;
-	for (index = 0; index < count; index++)
-	{
-		unsigned char *entry = sfo + 20 + index * 16;
-		size_t length = strlen(values[index]) + 1;
-
-		entry[0] = (unsigned char)key_size;
-		entry[2] = 4;
-		entry[3] = 2;
-		entry[4] = (unsigned char)length;
-		entry[8] = (unsigned char)((length + 3) & ~3u);
-		entry[12] = (unsigned char)data_size;
-		entry[13] = (unsigned char)(data_size >> 8);
-		strcpy((char *)sfo + key_table + key_size, keys[index]);
-		strcpy((char *)sfo + data_table + data_size, values[index]);
-		key_size += strlen(keys[index]) + 1;
-		data_size += (length + 3) & ~(size_t)3;
-	}
-	return data_table + data_size;
-}
-
-static void sfo(void)
-{
-	static const char *const keys[] = { "APP_VER", "TITLE", "TITLE_ID" };
-	static const char *const values[] = { "01.10", "Halo CE", "HCEV00001" };
-	static const char *const lower[] = { "01.10", "Halo CE", "hcev00001" };
-	unsigned char data[4096];
-	char title[16];
-	size_t size = sfo_make(data, keys, values, 3), cut;
-	int refused = 1;
-
-	check(update_sfo_title(data, size, title, sizeof(title)) && !strcmp(title, "HCEV00001"), "param.sfo's TITLE_ID");
-	check(!update_sfo_title(data, size, title, 9), "a title buffer too small refused");
-	for (cut = 0; cut < size; cut++)
-		refused &= !update_sfo_title(data, cut, title, sizeof(title)) || cut >= size - 4;
-	check(refused, "a param.sfo cut short refused");
-	size = sfo_make(data, keys, lower, 3);
-	check(!update_sfo_title(data, size, title, sizeof(title)), "a lowercase title refused");
-	size = sfo_make(data, keys, values, 2);
-	check(!update_sfo_title(data, size, title, sizeof(title)), "no TITLE_ID");
-	size = sfo_make(data, keys, values, 3);
-	data[20 + 2 * 16 + 12] = 0xff;
-	data[20 + 2 * 16 + 15] = 0xff;
-	check(!update_sfo_title(data, size, title, sizeof(title)), "a value offset past the end refused");
-	size = sfo_make(data, keys, values, 3);
-	data[16] = 0xff;
-	data[17] = 0xff;
-	check(!update_sfo_title(data, size, title, sizeof(title)), "a huge count refused");
-}
-
 int main(void)
 {
 	unsigned char key[32];
@@ -513,8 +418,6 @@ int main(void)
 #endif
 	urls();
 	redirects();
-	names();
-	sfo();
 	printf("%d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;
 }

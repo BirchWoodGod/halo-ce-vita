@@ -52,8 +52,9 @@ Check for updates, its first row, asks GitHub in the background and shows
 its answer beside the build's version on the lines under it ("Version
 1.1.0-beta.3 - Up to date"; a newer version in amber with where to get it),
 where a player sees it as the tab opens; once it found one, the next press
-downloads, checks and installs it (vita_update.h: a build with the update
-key; one without says where to get it). Then the rows players change (look,
+downloads and checks it, and the lines say where it is kept for VitaShell
+to install (vita_update.h: a build with the update key; one without says
+where to get it). Then the rows players change (look,
 crouch, gyro aiming, the rear touch guard) and three pages laid out as the
 Xbox controller. Button
 layout puts each Xbox button (A B X Y, Black, White, the triggers, the
@@ -405,10 +406,11 @@ static struct setting settings[] = {
 
 	/* (General: first the update check, update_check.h - nothing asked of
 	the network until Check for updates is pressed, nothing downloaded
-	until it is pressed again with an update found, vita_update.h; the
+	until it is pressed again with an update found, vita_update.h, and
+	nothing installed: VitaShell does that; the
 	build's version and the answer on the lines under it, page_lines - then
 	the rows players change, then the pages laid out as the Xbox controller) */
-	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; again to install it",
+	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; again to download it",
 		0, TAB_CONTROLS, KIND_ACTION, ACTION_UPDATE_CHECK },
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
 		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2, TAB_CONTROLS },
@@ -1865,6 +1867,28 @@ static int tab_shown(int index)
 	return index != TAB_DEV || choice_of("HALO_DEV_SETTINGS");
 }
 
+/* port: the downloaded and verified VPK waiting to be installed with
+VitaShell (vita_update.c), on two lines under the version in amber: the
+folder, then the file (its name holds the version; a line is 46
+characters); 1 when there is one */
+static int update_ready_lines(struct line *lines, int *count)
+{
+	char version[UPDATE_VERSION_SIZE], path[512], folder[512];
+	const char *slash;
+
+	if (!vita_update_ready(version, sizeof(version), path, sizeof(path)))
+		return 0;
+	slash = strrchr(path, '/');
+	snprintf(folder, sizeof(folder), "%.*s", slash ? (int)(slash - path + 1) : 0, path);
+	lines[*count].type = LINE_INFO;
+	lines[*count].text[0] = '!';
+	snprintf(lines[(*count)++].text + 1, sizeof(lines[0].text) - 1, T("VitaShell: %s"), folder);
+	lines[*count].type = LINE_INFO;
+	lines[*count].text[0] = '!';
+	snprintf(lines[(*count)++].text + 1, sizeof(lines[0].text) - 1, T("%s (verified, to install)"), slash ? slash + 1 : path);
+	return 1;
+}
+
 /* the info lines under Check for updates (General): the build's version
 (for a report too: halo.log's first line has it) and the update check's
 answer - on one line while both fit ("Version 1.1.0-beta.3 - Up to date"),
@@ -1889,18 +1913,21 @@ static int update_lines(struct line *lines)
 		snprintf(answer, sizeof(answer), "%s", T("Up to date"));
 		break;
 	case UPDATE_STATUS_AVAILABLE:
+		/* port: a newer version downloaded already: where it is, below */
+		if (update_ready_lines(lines, &count))
+			return count;
 		/* (in amber: '!') */
 		lines[count].type = LINE_INFO;
 		lines[count].text[0] = '!';
 		snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, T("Update available: %s"), version);
-		/* port: a build with the update key installs it on the next press
+		/* port: a build with the update key downloads it on the next press
 		(vita_update.c); one without says where to get it */
 		lines[count].type = LINE_INFO;
 		{
 			unsigned char key[32];
 
 			if (update_public_key(key))
-				snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", T("Press again to download and install it"));
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", T("Press again to download it"));
 			else
 				snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", UPDATE_RELEASES_PAGE);
 		}
@@ -1912,6 +1939,10 @@ static int update_lines(struct line *lines)
 		snprintf(answer, sizeof(answer), "%s", T("Couldn't check right now"));
 		break;
 	}
+	/* port: a downloaded update waiting to be installed, whatever the last
+	look said */
+	if (update_ready_lines(lines, &count))
+		return count;
 	if (!answer[0])
 		return count;
 	/* (46 characters a line: the panel's width, in characters, not UTF-8's
@@ -3193,12 +3224,11 @@ static void act(const struct setting *setting)
 	{
 	/* (in the background: the answer shows under the version as it comes) */
 	case ACTION_UPDATE_CHECK:
-		/* port: an update found: the press installs it (vita_update.c) */
+		/* port: an update found: the press downloads it, or says where it
+		is (vita_update.c); else a look for one */
 		if (vita_update_running())
 			break;
-		if (update_check_status(NULL, 0) == UPDATE_STATUS_AVAILABLE)
-			vita_update_start();
-		else
+		if (vita_update_start() < 0)
 			update_check_request();
 		break;
 	/* (online: a game joined by its code, or picked from the public games,

@@ -1,11 +1,11 @@
 /*
 VITA_UPDATE_VERIFY.H
 
-What decides whether a downloaded update may be installed (the Vita's
-updater: vita_update.c, vita_update_install.c), with no system in it, so the
-tests and the fuzzer build it alone.
+What decides whether a downloaded update is kept for the player to install
+(the Vita's updater: vita_update.c, vita_update_download.c), with no system
+in it, so the tests and the fuzzer build it alone.
 
-A release that the game may install carries three assets beside each other
+A release that the game may download carries three assets beside each other
 (https://github.com/BirchWoodGod/halo-ce-vita/releases/download/v<version>/):
 
   halo.vpk             the game, as VitaShell installs it
@@ -20,8 +20,9 @@ the manifest names the version it asked for (the tag's: an old manifest
 replayed under a newer tag is refused), that this version is newer than the
 running build (no downgrade), its own title and halo.vpk, and a size it
 takes; only then is halo.vpk downloaded (to that size at most), and it is
-installed only if its SHA-512 is the manifest's. The private key never
-leaves the owner's machine (tools/release/README.md).
+kept (for the player to install with VitaShell) only if its SHA-512 is the
+manifest's. The private key never leaves the owner's machine
+(tools/release/README.md).
 
 The signature is checked before anything of the manifest is read; the
 manifest is strict text (each line in its place, nothing more) read by
@@ -86,7 +87,7 @@ int update_signature_parse(const char *text, size_t size, unsigned char signatur
 /* the manifest's text, exactly
 
 	halo-ce-vita-update 1\n
-	version <x.y.z or x.y.z-beta.n, as a tag without its v>\n
+	version <x.y.z, x.y.z-beta.n or x.y.z-rc.n: a tag without its v>\n
 	title <9 capitals or digits>\n
 	file halo.vpk\n
 	size <1-9 digits>\n
@@ -117,16 +118,5 @@ https:// to GitHub's release-asset hosts (release-assets.githubusercontent.com,
 objects.githubusercontent.com) on the default port, nothing else; or, for the
 tests, from a loopback http://127.x.x.x URL to another one */
 int update_redirect_allowed(const char *from_url, const char *to_url);
-
-/* whether a VPK entry's name (length bytes, no NUL needed) may be written
-into the game's folder: a relative path of at most 8 parts, each of
-letters, digits, '.', '_' and '-', none "." or "..", no leading, doubled or
-trailing '/' (a folder entry's trailing '/' is the caller's to strip),
-at most 200 bytes */
-int update_entry_name_safe(const char *name, size_t length);
-
-/* the TITLE_ID of a param.sfo's bytes (size of them): 1 with it in title
-(9 capitals or digits), else 0 */
-int update_sfo_title(const unsigned char *sfo, size_t size, char *title, int title_size);
 
 #endif

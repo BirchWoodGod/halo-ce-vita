@@ -142,7 +142,7 @@ status other than 200 too). Blocks for up to 15 seconds. */
 int posix_https_get(const char *url, const char *user_agent, char *body, int capacity, char *error, int error_size);
 
 /* ---------- a file downloaded over HTTPS (the Vita's updater,
-port/vita/host/vita_update_install.c; posix_https.c)
+port/vita/host/vita_update_download.c; posix_https.c)
 
 GETs url as posix_https_get does (the same TLS, authorities and limits on
 headers) into the file at path, streamed. A redirect (301, 302, 303, 307,

@@ -5,7 +5,7 @@ make_update_key.py, verify_update.py).
 Only the owner's machine runs this, once per release: slow and simple on
 purpose, no third-party package to install or trust. The game checks the
 signatures with Monocypher's crypto_ed25519_check
-(port/vita/host/vita_update_verify.c); port/vita/tests/run_update_install_test.sh
+(port/vita/host/vita_update_verify.c); port/vita/tests/run_update_download_test.sh
 checks the two agree, and self_test() checks RFC 8032's test vectors.
 
 The code is RFC 8032's (Simplified BSD License, IETF Trust and the authors:

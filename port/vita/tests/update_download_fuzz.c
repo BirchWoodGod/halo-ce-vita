@@ -1,11 +1,11 @@
 /*
-UPDATE_INSTALL_FUZZ.C
+UPDATE_DOWNLOAD_FUZZ.C
 
 Arbitrary bytes at the Vita updater's readers (port/vita/host/
 vita_update_verify.c), under AddressSanitizer and UBSan
-(run_update_install_test.sh): the manifest's parser, the whole check of a
-manifest with its signature, the signature file's parser, param.sfo's
-TITLE_ID, the VPK's names and the redirect allow-list. Built with the
+(run_update_download_test.sh): the manifest's parser, the whole check of a
+manifest with its signature, the signature file's parser, the assets' URLs
+and the redirect allow-list. Built with the
 tests' key (HALO_UPDATE_PUBLIC_KEY, HALO_TEST_SEED):
 
 - every truncation of a signed manifest and its signature file, then
@@ -45,13 +45,11 @@ static int one_input(const unsigned char *data, size_t size)
 	size_t manifest_size = zero ? (size_t)(zero - data) : size;
 	struct update_manifest manifest;
 	unsigned char signature[64];
-	char title[16], error[200], text[4096];
+	char error[200], text[4096];
 	int accepted;
 
 	update_manifest_parse((const char *)data, size, &manifest);
 	update_signature_parse((const char *)data, size, signature);
-	update_sfo_title(data, size, title, sizeof(title));
-	update_entry_name_safe((const char *)data, size);
 	accepted = update_manifest_check((const char *)data, manifest_size,
 		zero ? (const char *)zero + 1 : "", zero ? size - manifest_size - 1 : 0, public_key, "1.1.0-beta.4",
 		"1.1.0-beta.3", "HCEV00001", &manifest, error, sizeof(error)) == UPDATE_VERIFY_OK;

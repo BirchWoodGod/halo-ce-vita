@@ -6,14 +6,14 @@ GitHub's api.github.com chains to (October 2026: *.github.com, issued by
 Sectigo Public Server Authentication CA DV E36, under Sectigo Public Server
 Authentication Root E46, itself cross-signed by USERTrust ECC), the RSA
 twins of those two, and DigiCert's (GitHub's earlier issuer); and for the updater's downloads
-(vita_update_install.c), ISRG's (Let's Encrypt), where github.com sends a
+(vita_update_download.c), ISRG's (Let's Encrypt), where github.com sends a
 release's files: release-assets.githubusercontent.com (October 2026: its
 *.githubusercontent.com certificate from Let's Encrypt YR1, under ISRG Root
 YR, cross-signed by ISRG Root X1), and X2, ISRG's ECDSA root. All from
 Mozilla's bundle as a Linux distribution ships it (ca-certificates). Should
 GitHub move to another authority, the look for a new version (or the
 download) fails until this list has it. (The update's signature, not TLS,
-is what lets a download be installed: vita_update_verify.h.)
+is what lets a download be kept for installing: vita_update_verify.h.)
 
 Each: its subject, its expiry and its SHA-256 fingerprint.
 */

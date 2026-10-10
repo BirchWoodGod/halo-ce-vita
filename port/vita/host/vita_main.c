@@ -783,9 +783,9 @@ int main(int argc, char **argv)
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);
-	/* port: an in-game update cut short (a crash, a power cut) undone
-	before anything reads the game's files (vita_update.c) */
-	vita_update_recover_at_start();
+	/* port: a downloaded update checked again, in the background: the panel
+	and the main menu point to it until it is installed (vita_update.c) */
+	vita_update_scan_at_start();
 	{
 		/* (the maps where this game keeps them, else Xita's copy) */
 		SceIoStat stat;
