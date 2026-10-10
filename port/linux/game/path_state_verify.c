@@ -43,6 +43,7 @@ static char const *const verify_kind_names[NUMBER_OF_PATH_STATE_VERIFY_KINDS] =
 	"nearby firing position answers",
 	"moot lines of sight",
 	"cached surface edges",
+	"smoothing scans",
 };
 
 /* ---------- public code */

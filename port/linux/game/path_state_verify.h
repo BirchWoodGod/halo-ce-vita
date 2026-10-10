@@ -8,7 +8,9 @@ tests that search only when a position is near enough to need it
 (actor_firing_position.c) against the test that searches first, every time,
 the firing position lines of sight whose extra lines were left uncast (their
 answers moot) against the line cast in full, and the surface edges the path
-search takes from its cache against the edges built again: path_state_verify.c
+search takes from its cache against the edges built again, and the path
+smoothing's scan of the raw steps from the last back against the scan from
+the first: path_state_verify.c
 */
 
 #ifndef __PATH_STATE_VERIFY_H
@@ -37,6 +39,9 @@ enum
 	/* a surface's edges from the path search's cache (path.c) against the
 	edges built again from the map */
 	_path_state_verify_surface_edges,
+	/* the path smoothing's scan of the raw steps from the last back
+	(path_smoothing.c) against its scan from the first */
+	_path_state_verify_smoothing_scan,
 	NUMBER_OF_PATH_STATE_VERIFY_KINDS
 };
 
