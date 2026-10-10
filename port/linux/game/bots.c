@@ -334,6 +334,10 @@ static struct
 		real_point3d exit;
 	} teleporters[BOTS_MAXIMUM_TELEPORTERS];
 	struct bots_bot bots[BOTS_MAXIMUM];
+	/* the skill setting, read once a tick (bots_update_actions) for every
+	bot (a lookup of the environment and the settings, twice a bot a tick
+	before) */
+	short skill;
 	/* the path searches (allocated once a game has bots) */
 	struct bots_search *search_slots;
 
@@ -2040,7 +2044,7 @@ static boolean bots_is_enemy(struct player_datum *player, struct player_datum *o
 static long bots_find_target(struct bots_bot *bot, struct player_datum *player, struct unit_datum *unit,
 	real_point3d const *eye)
 {
-	struct bots_skill_definition const *skill = &bots_skills[bots_skill()];
+	struct bots_skill_definition const *skill = &bots_skills[bots_globals.skill];
 	struct data_iterator iterator;
 	struct player_datum *other;
 	long best_index = NONE;
@@ -2539,6 +2543,9 @@ struct bots_tick
 	struct unit_datum *unit;
 	struct object_datum *object;
 	long now;
+	/* the unit's eyes (its head marker), found when first needed: the look
+	(every third tick) and the fight (bots_tick_eye) */
+	boolean eye_found;
 	real_point3d eye;
 	real_point3d position;
 	long weapon_index;
@@ -2553,6 +2560,19 @@ struct bots_tick
 	struct player_action *action;
 };
 
+/* the unit's eyes: its head marker, as unit_get_head_position finds it
+(the marker's matrix from the object's node matrices, which nothing in the
+bot's tick changes, so it is the same found now or at the tick's start) */
+static real_point3d const *bots_tick_eye(struct bots_tick *tick)
+{
+	if (!tick->eye_found)
+	{
+		unit_get_head_position(tick->player->unit_index, &tick->eye);
+		tick->eye_found = TRUE;
+	}
+	return &tick->eye;
+}
+
 /* looking for enemies (every third tick, the bots in turn; (debug)
 HALO_BOT_PEACEFUL=1: never, for the moving alone), and forgetting the one
 gone a while */
@@ -2560,7 +2580,7 @@ static void bots_bot_look(struct bots_bot *bot, struct bots_tick *tick)
 {
 	if (tick->now >= bot->next_look_tick && !bots_peaceful())
 	{
-		long target = bots_find_target(bot, tick->player, tick->unit, &tick->eye);
+		long target = bots_find_target(bot, tick->player, tick->unit, bots_tick_eye(tick));
 
 		bot->next_look_tick = tick->now + 3;
 		if (target != NONE)
@@ -2613,6 +2633,7 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	real settle = (real)exp(-1.0f / (skill->aim_settle_seconds * TICKS_PER_SECOND) * 1.1f);
 
 	tick->fighting = TRUE;
+	bots_tick_eye(tick);
 	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
 	/* (leading a moving target by the projectile's flight) */
 	if (tick->weapon_index != NONE && skill->lead > 0.0f)
@@ -2949,7 +2970,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
 
 	csmemset(&tick, 0, sizeof(tick));
-	tick.skill = &bots_skills[bots_skill()];
+	tick.skill = &bots_skills[bots_globals.skill];
 	tick.player = player_get(bot->player_index);
 	tick.now = game_time_get();
 	tick.throttle_scale = 1.0f;
@@ -2993,7 +3014,6 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->escape_until_tick = 0;
 		bot->last_position = tick.object->object.position;
 	}
-	unit_get_head_position(tick.player->unit_index, &tick.eye);
 	tick.position = tick.object->object.position;
 	/* (through a teleporter: a new path from where it came out) */
 	if (bots_distance3d(&tick.position, &bot->last_position) > 3.0f && bot->goal_kind != _bots_goal_none &&
@@ -3165,6 +3185,7 @@ void bots_update_actions(struct player_action *actions)
 		return;
 	started = vita_host_time_us();
 	bots_profile_enabled();
+	bots_globals.skill = bots_skill();
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
 	{
