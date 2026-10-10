@@ -197,6 +197,7 @@ symbols in this file:
 #include "input/input.h"
 #include "input/input_abstraction.h"
 #include "interface/player_ui.h"
+#include "interface/ui_widget.h" /* port: ui_widgets_active_for_local_player */
 #include "items/weapons.h"
 #include "main/main.h"
 #include "objects/objects.h"
@@ -554,6 +555,19 @@ static void player_action_clear(
 	return;
 }
 
+/* port: whether a menu of the player's own is up (a network game's pause
+menu, which pauses nothing): its controller drives the menu, not the
+player, whose D-pad and sticks would otherwise walk and turn them as they
+choose an item. The buttons still held as it closes are let go of first
+(ui_widget_delete) */
+static boolean player_control_menu_has_controller(
+	short local_player_index)
+{
+	return local_player_get_player_index(local_player_index) != NONE &&
+		local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS &&
+		ui_widgets_active_for_local_player(local_player_index);
+}
+
 static void handle_one_player_input(
 	short local_player_index,
 	real time_delta_sec)
@@ -586,7 +600,8 @@ static void handle_one_player_input(
 			player->desired_angles.yaw);
 	}
 
-	if (director_inhibited_input(local_player_index))
+	if (director_inhibited_input(local_player_index) ||
+		player_control_menu_has_controller(local_player_index))
 	{
 		csmemset(&input, 0, sizeof(input));
 	}
