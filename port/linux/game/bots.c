@@ -1923,13 +1923,23 @@ static void bots_pick_roam_goal(struct bots_bot *bot, real_point3d const *positi
 	}
 }
 
-/* CTF: its own team's flag stand (the scenario's netgame flag), FALSE for
-none */
+/* CTF: where a team's flag is at home, which is also where that team
+captures the other's flag: its own stand (the scenario's netgame flag of its
+team), but in an assault game (Invasion: ctf.assault) the other team's
+stand - the flags change bases (ctf_engine_initialize_for_new_map's flag
+slots), so a team takes the flag lying at its own base and runs it to the
+other's (the bots took it and stood on the stand they took it from, issue
+#40). FALSE for none */
 static boolean bots_ctf_stand(long team_index, real_point3d *position)
 {
 	struct scenario *scenario = global_scenario_get();
 	long index;
 
+	if (game_engine_get_variant()->game_engine_index == game_engine_ctf &&
+		game_engine_get_variant()->game_engine_variant.ctf.assault)
+	{
+		team_index = team_index ? 0 : 1;
+	}
 	for (index = 0; scenario && index < scenario->netgame_flags.count; index++)
 	{
 		struct scenario_netgame_flag *flag =
@@ -1944,9 +1954,11 @@ static boolean bots_ctf_stand(long team_index, real_point3d *position)
 	return FALSE;
 }
 
-/* CTF's own goals: carrying the enemy flag, its team's stand (the HUD's nav
-point is beside it, and a capture needs the carrier on it), or its own
-flag's carrier while its own flag is carried off; its own flag
+/* CTF's own goals: carrying the enemy flag, its team's stand (bots_ctf_stand:
+the HUD's nav point is beside it, and a capture needs the carrier on it),
+or, where a capture needs its own flag home (the variant's flag at home to
+score; not CTF's or Invasion's own), its own flag's carrier while its own
+flag is carried off; its own flag
 lying away from home, there (touching it returns it); its own flag carried
 off, after the carrier; the enemy flag carried by a teammate, along with the
 carrier (not waiting at the empty stand: two teams each holding the other's
@@ -1968,10 +1980,13 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 	}
 	if (weapon_index != NONE && weapon_is_flag(weapon_index))
 	{
-		/* (its own flag carried off: no capture till it is home, after its
-		carrier) */
+		/* (its own flag carried off where a capture needs it home - the
+		variant's flag at home to score, as ctf_engine_player_update reads
+		it: after its carrier; else straight to the capture) */
+		struct ctf_variant const *rules = &game_engine_get_variant()->game_engine_variant.ctf;
+
 		object_iterator_new(&iterator, _object_mask_weapon, 0);
-		while (object_iterator_next(&iterator))
+		while (rules->flag_at_home_to_score && rules->single_flag_time == 0 && object_iterator_next(&iterator))
 		{
 			struct weapon_datum *flag = weapon_get(iterator.index);
 
