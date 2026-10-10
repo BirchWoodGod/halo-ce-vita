@@ -234,6 +234,52 @@ boolean custom_edition_cache_read(
 	long size,
 	void *buffer);
 
+/* (port) The loaded map and its sounds.map opened again for a reader of
+its own (custom_edition_sounds.c's thread), read in the combined space with
+positioned reads and no lock: only sounds' samples, which need no
+conversion. */
+struct custom_edition_cache_reader
+{
+	boolean opened;
+	void *map;
+	unsigned long map_bytes;
+	void *sounds;
+	unsigned long sounds_bytes;
+};
+boolean custom_edition_cache_reader_open(
+	struct custom_edition_cache_reader *reader);
+boolean custom_edition_cache_reader_read(
+	struct custom_edition_cache_reader const *reader,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer);
+void custom_edition_cache_reader_close(
+	struct custom_edition_cache_reader *reader);
+
+/* (port) Where the loaded map's sound cache is kept (custom_edition_sounds.c):
+a mod's map's in its mod's folder, d:\mods\<mod>\cache\<map>.sndcache, a
+maps folder map's in d:\sound_cache\<map>.sndcache; the folder into
+`directory`, the file into `path`, and what the map is into `source`. FALSE
+for a map whose file's name is not letters, digits, '_' and '-'. */
+#define CUSTOM_EDITION_SOUND_CACHE_DIRECTORY "d:\\sound_cache"
+#define CUSTOM_EDITION_SOUND_CACHE_EXTENSION ".sndcache"
+#define CUSTOM_EDITION_SOUND_CACHE_NAME_BYTES 32
+struct custom_edition_sound_cache_source
+{
+	/* the map file's name, lower case, and its size and header's CRC-32,
+	and sounds.map's size (0 without one) */
+	char name[CUSTOM_EDITION_SOUND_CACHE_NAME_BYTES];
+	unsigned long map_bytes;
+	unsigned long map_header_crc;
+	unsigned long sounds_bytes;
+};
+boolean custom_edition_cache_sound_cache_path(
+	char *path,
+	long path_size,
+	char *directory,
+	long directory_size,
+	struct custom_edition_sound_cache_source *source);
+
 /* ---------- prototypes/CUSTOM_EDITION_SOUNDS.C */
 
 struct sound_permutation;
@@ -260,12 +306,18 @@ boolean custom_edition_sound_load(
 	long destination_bytes,
 	boolean *loaded);
 /* The cache block whose loaded flag is `loaded` is being deleted: its
-decoding is forgotten if it waits, and cut short and waited for if it
-runs. */
+decoding is forgotten if it waits, and if it runs writes nothing more into
+the block (it is not waited for). */
 void custom_edition_sound_cancel(
 	boolean *loaded);
+/* (port) A Custom Edition map's tags are loaded (cache_files.c): its Ogg
+Vorbis permutations are listed and its sound cache file opened on the
+decoding thread (HALO_SOUND_CACHE=0: not). */
+void custom_edition_sounds_map_loaded(
+	void);
 /* The map is going: the waiting decodings are forgotten, the one running
-waited for, and the decoder's working memory given back. */
+waited for, the sound cache file closed and the decoder's working memory
+given back. */
 void custom_edition_sounds_stop(
 	void);
 

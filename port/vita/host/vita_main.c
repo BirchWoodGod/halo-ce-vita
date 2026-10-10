@@ -102,6 +102,14 @@ void vita_host_sleep_us(unsigned long microseconds)
 	sceKernelDelayThread((SceUInt)microseconds);
 }
 
+/* the calling thread's priority (64-191, the lower the sooner): the Ogg
+Vorbis decoder below every other thread (custom_edition_sounds.c) */
+void vita_host_thread_priority_set(int priority)
+{
+	if (priority >= 64 && priority <= 191)
+		sceKernelChangeThreadPriority(sceKernelGetThreadId(), priority);
+}
+
 void vita_host_pin_current_thread(int core)
 {
 	static const int masks[3] = { 0x10000, 0x20000, 0x40000 }; /* SCE_KERNEL_CPU_MASK_USER_0..2 */

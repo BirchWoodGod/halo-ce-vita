@@ -29,6 +29,7 @@ enum
 	_halo_load_cache_wait,
 	_halo_load_sound_cache_wait,
 	_halo_load_texture_cache_wait,
+	_halo_load_custom_read_lock_wait,
 	_halo_load_persistent_after_load,
 	_halo_load_file_game_thread,
 	_halo_load_file_other,
