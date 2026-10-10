@@ -2204,10 +2204,124 @@ char const *resource_map_type_describe(
 uint32_t custom_edition_tag_cache_bytes(
 	struct cache_file_identity const *identity)
 {
-	return identity->has_opensauce_header &&
-		flag_is_set(identity->opensauce.flags, _opensauce_cache_uses_memory_upgrades_bit) ?
-		CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED :
+	if (identity->has_opensauce_header &&
+		flag_is_set(identity->opensauce.flags, _opensauce_cache_uses_memory_upgrades_bit))
+	{
+		return CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED;
+	}
+
+	return identity->structure_bsp_tag_cache_bytes > CUSTOM_EDITION_TAG_CACHE_BYTES ?
+		identity->structure_bsp_tag_cache_bytes :
 		CUSTOM_EDITION_TAG_CACHE_BYTES;
+}
+
+/* (port) The room above CUSTOM_EDITION_TAG_CACHE_ADDRESS a Custom Edition
+cache's structure BSPs reach, read from its tag index, its scenario's
+structure bsp references and nothing else (a few small reads, as
+custom_edition_cache_resource_maps_used reads the instances), rounded up to
+64 KB; 0 when it cannot be read or reaches no further than 23 MB. Halo PC's
+tools and Invader put the structure BSPs at the top of the tag space they
+build for, so a cache built for a larger one (Invader's --tag-space: Halo:
+CE Anniversary maps rebuilt by port/tools/mcc_map_convert.py, docs/mcc_cea_maps.md)
+says so here. Anything larger than OpenSauce's memory upgrades allow, 1.5
+times 23 MB, is not taken: such a map is refused as before, its structure
+BSPs found outside the tag cache (structure_bsps_verify checks each one,
+whatever this read). */
+static uint32_t custom_edition_structure_bsp_tag_cache_bytes(
+	struct cache_file_source *map,
+	struct cache_file_identity const *identity)
+{
+	enum { GRANULARITY = 0x10000 };
+	uint8_t tag_index[TAG_INDEX_BYTES];
+	uint8_t instance[TAG_INSTANCE_BYTES];
+	uint8_t block[TAG_BLOCK_BYTES];
+	uint8_t references[MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO * STRUCTURE_BSP_REFERENCE_BYTES];
+	uint32_t instances_address;
+	uint32_t scenario_handle;
+	uint32_t scenario_index;
+	uint32_t scenario_address;
+	uint32_t references_address;
+	uint32_t top = 0;
+	int32_t tag_count;
+	int32_t count;
+	int32_t index;
+
+	if (identity->format != _cache_file_format_custom_edition_cache ||
+		identity->tag_data_size < TAG_INDEX_BYTES ||
+		!map->read(map->context, identity->tag_data_offset, TAG_INDEX_BYTES, tag_index) ||
+		read_u32(tag_index + TAG_INDEX_SIGNATURE_OFFSET) != TAG_INDEX_SIGNATURE)
+	{
+		return 0;
+	}
+	tag_count = read_s32(tag_index + TAG_INDEX_COUNT_OFFSET);
+	instances_address = read_u32(tag_index + TAG_INDEX_INSTANCES_OFFSET);
+	scenario_handle = read_u32(tag_index + TAG_INDEX_SCENARIO_OFFSET);
+	scenario_index = scenario_handle & ABSOLUTE_INDEX_MASK;
+	if (tag_count <= 0 ||
+		(uint32_t)tag_count > ABSOLUTE_INDEX_MASK + 1 ||
+		scenario_index >= (uint32_t)tag_count ||
+		instances_address < CUSTOM_EDITION_TAG_CACHE_ADDRESS ||
+		!range_fits(instances_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS, (uint32_t)tag_count * TAG_INSTANCE_BYTES,
+			identity->tag_data_size) ||
+		!map->read(map->context,
+			identity->tag_data_offset + (instances_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS) +
+				scenario_index * TAG_INSTANCE_BYTES,
+			TAG_INSTANCE_BYTES,
+			instance) ||
+		read_u32(instance + TAG_INSTANCE_HANDLE_OFFSET) != scenario_handle ||
+		read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != SCENARIO_GROUP_TAG)
+	{
+		return 0;
+	}
+	scenario_address = read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET);
+	if (scenario_address < CUSTOM_EDITION_TAG_CACHE_ADDRESS ||
+		!range_fits(scenario_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS, SCENARIO_STRUCTURE_BSPS_OFFSET + TAG_BLOCK_BYTES,
+			identity->tag_data_size) ||
+		!map->read(map->context,
+			identity->tag_data_offset + (scenario_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS) + SCENARIO_STRUCTURE_BSPS_OFFSET,
+			TAG_BLOCK_BYTES,
+			block))
+	{
+		return 0;
+	}
+	count = read_s32(block + TAG_BLOCK_COUNT_OFFSET);
+	references_address = read_u32(block + TAG_BLOCK_ADDRESS_OFFSET);
+	if (count <= 0 ||
+		count > MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO ||
+		references_address < CUSTOM_EDITION_TAG_CACHE_ADDRESS ||
+		!range_fits(references_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS, (uint32_t)count * STRUCTURE_BSP_REFERENCE_BYTES,
+			identity->tag_data_size) ||
+		!map->read(map->context,
+			identity->tag_data_offset + (references_address - CUSTOM_EDITION_TAG_CACHE_ADDRESS),
+			(uint32_t)count * STRUCTURE_BSP_REFERENCE_BYTES,
+			references))
+	{
+		return 0;
+	}
+	for (index = 0; index < count; index++)
+	{
+		uint8_t const *reference = references + (uint32_t)index * STRUCTURE_BSP_REFERENCE_BYTES;
+		uint32_t address = read_u32(reference + STRUCTURE_BSP_REFERENCE_ADDRESS_OFFSET);
+		int32_t size = read_s32(reference + STRUCTURE_BSP_REFERENCE_SIZE_OFFSET);
+
+		if (address < CUSTOM_EDITION_TAG_CACHE_ADDRESS ||
+			size <= 0 ||
+			!range_fits(address - CUSTOM_EDITION_TAG_CACHE_ADDRESS, (uint32_t)size, CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED))
+		{
+			return 0;
+		}
+		if (address - CUSTOM_EDITION_TAG_CACHE_ADDRESS + (uint32_t)size > top)
+		{
+			top = address - CUSTOM_EDITION_TAG_CACHE_ADDRESS + (uint32_t)size;
+		}
+	}
+	top = (top + GRANULARITY - 1) & ~(uint32_t)(GRANULARITY - 1);
+	if (top <= CUSTOM_EDITION_TAG_CACHE_BYTES || top > CUSTOM_EDITION_TAG_CACHE_BYTES_UPGRADED)
+	{
+		return 0;
+	}
+
+	return top;
 }
 
 uint32_t custom_edition_cache_resource_maps_used(
@@ -2300,7 +2414,18 @@ enum cache_file_status cache_file_identify(
 	}
 	if (read_u32(header) == CACHE_HEADER_SIGNATURE)
 	{
-		return cache_header_identify(header, header_bytes, identity);
+		enum cache_file_status status = cache_header_identify(header, header_bytes, identity);
+
+		/* (port) a Custom Edition cache built for a larger tag space: its
+		structure BSPs say how much (the header's check of the tag data's
+		size against 23 MB, made above, holds within it) */
+		if (status == _cache_file_status_ok &&
+			identity->format == _cache_file_format_custom_edition_cache &&
+			!identity->has_opensauce_header)
+		{
+			identity->structure_bsp_tag_cache_bytes = custom_edition_structure_bsp_tag_cache_bytes(source, identity);
+		}
+		return status;
 	}
 
 	return resource_map_header_identify(header, identity);

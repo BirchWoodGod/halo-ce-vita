@@ -448,8 +448,12 @@ class Map:
                  sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None, sound_permutation_compression=None,
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, hud_bitmap_flags=None, strings_name="test\\strings", strings=("hello", "world!"),
-                 weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False):
+                 weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False,
+                 tag_space=None):
         self.bsp_sizes = bsp_sizes
+        # the tag space the structure BSPs are placed at the top of (Invader's
+        # --tag-space), without OpenSauce's header
+        self.tag_space = tag_space
         # the header's name and the tag data's checksum, by which Chimera's
         # map list knows a map
         self.name = name
@@ -548,6 +552,8 @@ class Map:
         pixels_offset = model_offset + len(model_data)
         tag_data_offset = pixels_offset + len(in_map_pixels)
         tag_cache_bytes = TAG_CACHE_BYTES_UPGRADED if self.upgraded else TAG_CACHE_BYTES
+        if self.tag_space is not None:
+            tag_cache_bytes = self.tag_space
         if self.bsp_gap is None:
             bsp_addresses = [BASE + tag_cache_bytes - size for size in self.bsp_sizes]
         else:
@@ -804,6 +810,32 @@ def test_opensauce_structure_bsp_beyond_the_stock_tag_cache_needs_the_upgrade_fl
     path.write_bytes(data)
     _, report = report_one(report_tool, path)
     assert report["load"] == "a structure BSP does not fit in the file or in the tag cache"
+
+
+def test_a_larger_tag_space_is_read_from_the_structure_bsps(report_tool, tmp_path):
+    """A cache built for more tag space than Custom Edition's 23 MB (Invader's
+    --tag-space: Halo: CE Anniversary maps rebuilt by mcc_map_convert.py), its
+    structure BSPs at the top of it, gets that room, rounded up to 64 KB."""
+    tag_space = 0x018F8000
+    path = Map(tag_space=tag_space, bsp_sizes=(0x1000, 0x2000)).write(tmp_path)
+    returncode, report = report_one(report_tool, path)
+    assert returncode == 0 and report["load"] == "ok"
+    assert report["tag_cache_bytes"] == hex(0x01900000)
+    assert report["lowest_structure_bsp_address"] == hex(BASE + tag_space - 0x2000)
+
+
+@pytest.mark.parametrize("tag_space", [TAG_CACHE_BYTES_UPGRADED + 0x10000, 0x7FFF0000])
+def test_a_tag_space_past_the_memory_upgrades_is_not_taken(report_tool, tmp_path, tag_space):
+    """No more room than OpenSauce's memory upgrades give: the structure BSPs
+    are then outside the tag cache, as before."""
+    _, report = report_one(report_tool, Map(tag_space=tag_space).write(tmp_path))
+    assert report["tag_cache_bytes"] == hex(TAG_CACHE_BYTES)
+    assert report["load"] == "a structure BSP does not fit in the file or in the tag cache"
+
+
+def test_a_structure_bsp_below_the_stock_top_keeps_the_stock_tag_cache(report_tool, tmp_path):
+    _, report = report_one(report_tool, Map(bsp_gap=0x100000).write(tmp_path))
+    assert report["tag_cache_bytes"] == hex(TAG_CACHE_BYTES) and report["load"] == "ok"
 
 
 def test_opensauce_definitions_are_accepted_after_the_cache_data(report_tool, tmp_path):
@@ -1472,7 +1504,9 @@ MALFORMED_CACHES = {
                       "a structure BSP does not fit in the file or in the tag cache"),
     "bsp over tag data": (tag_data_case("reference", 0x08, "<I", BASE + 0x100), "load",
                           "a structure BSP does not fit in the file or in the tag cache"),
-    "bsp beyond tag cache": (tag_data_case("reference", 0x08, "<I", BASE + TAG_CACHE_BYTES - 0x800), "load",
+    # (past the most room a map's structure BSPs may say it was built for:
+    # OpenSauce's memory upgrades)
+    "bsp beyond tag cache": (tag_data_case("reference", 0x08, "<I", BASE + TAG_CACHE_BYTES_UPGRADED - 0x800), "load",
                              "a structure BSP does not fit in the file or in the tag cache"),
     "bsp signature": (lambda cache, path: patched(path, cache.where["bsp"] + 0x14, "<I", code("psbs")), "load",
                       "a structure BSP header is not valid"),

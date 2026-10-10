@@ -227,6 +227,13 @@ struct cache_file_identity
 	char build[CACHE_FILE_STRING_BYTES];
 	int has_opensauce_header;
 	struct opensauce_cache_header opensauce;
+	/* (port) the room above CUSTOM_EDITION_TAG_CACHE_ADDRESS a Custom
+	Edition cache without OpenSauce's memory upgrades puts its structure
+	BSPs at the top of, when that is more than Custom Edition's 23 MB and no
+	more than the upgrades' 1.5 times it: a map built with a larger tag
+	space (Invader's --tag-space), as port/tools/mcc_map_convert.py builds
+	Halo: CE Anniversary maps; 0 otherwise (cache_file_identify) */
+	uint32_t structure_bsp_tag_cache_bytes;
 
 	/* resource maps */
 	enum resource_map_type resource_map_type;
@@ -471,7 +478,8 @@ enum cache_file_format cache_file_header_format(
 
 /* The room for tag data a Custom Edition cache needs at
 CUSTOM_EDITION_TAG_CACHE_ADDRESS: 23 MB, or 1.5 times that with memory
-upgrades. */
+upgrades, or what its structure BSPs say it was built for, up to that
+(structure_bsp_tag_cache_bytes). */
 uint32_t custom_edition_tag_cache_bytes(
 	struct cache_file_identity const *identity);
 

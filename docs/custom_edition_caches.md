@@ -206,7 +206,10 @@ Loading, step by step (`custom_edition_cache_load`):
 1. The header: signatures, version 609, terminated strings, file length
    within the file and the size limit (`0x18000000`, or `0x24000000` with
    OpenSauce memory upgrades), no compression, tag data within the file and
-   the tag cache (23 MB, or 1.5 times that with memory upgrades). An
+   the tag cache (23 MB, or 1.5 times that with memory upgrades, or, for a
+   map without OpenSauce's header, the room its structure BSPs reach up to
+   that: a map built for a larger tag space, as Invader's `--tag-space`
+   builds Halo: CE Anniversary maps, [mcc_cea_maps.md](mcc_cea_maps.md)). An
    OpenSauce header at offset `0x70` is checked as OpenSauce checks it:
    header version 1 or 2, `project_yellow` and `project_yellow_globals` tag
    versions 2, memory upgrade factor at most 1.5, no undefined flags, a mod
