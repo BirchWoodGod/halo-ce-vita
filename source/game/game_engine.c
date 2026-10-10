@@ -6632,7 +6632,7 @@ static boolean game_engine_magnums_only(
 /* port: SWAT's variant from Slayer's or Team Slayer's (dedicated_server.c):
 no shields, the Pistols weapon set (the magnums are the server's own,
 game_engine_sole_weapon_list_index), the generic starting weapons, no
-vehicles, and its name in the server browser */
+vehicles, a 3-second respawn, and its name in the server browser */
 void game_engine_make_swat_variant(
 	struct game_variant *variant)
 {
@@ -6645,6 +6645,10 @@ void game_engine_make_swat_variant(
 	SET_FLAG(variant->universal_variant.flags, _game_variant_draw_object_in_motion_sensor_bit, FALSE);
 	variant->universal_variant.weapon_set = _game_engine_weapons_pistols;
 	variant->universal_variant.vehicle_set = _game_engine_vehicles_none;
+	/* (back in 3 seconds, game_engine_player_killed's least, not Team
+	Slayer's 10: a headshot game is quick) */
+	variant->universal_variant.respawn_time = 3 * TICKS_PER_SECOND;
+	variant->universal_variant.respawn_time_growth = 0;
 	csmemset(variant->human_readable_game_description, 0, sizeof(variant->human_readable_game_description));
 	ustrncpy(variant->human_readable_game_description, name, NUMBEROF(variant->human_readable_game_description) - 1);
 }
