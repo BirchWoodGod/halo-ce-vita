@@ -1596,11 +1596,7 @@ void ai_scripting_follow_target_ai(
 		char target_ai_name[512];
 
 		ai_index_to_string(ai_reference, global_scenario_get(), ai_name, sizeof(ai_name));
-		/* BUG (preserved for exact matching): January formats ai_reference again instead of
-		 * target_ai_reference, so the log prints the first name twice. A corrected build should
-		 * pass target_ai_reference here.
-		 */
-		ai_index_to_string(ai_reference, global_scenario_get(), target_ai_name, sizeof(target_ai_name));
+		ai_index_to_string(target_ai_reference, global_scenario_get(), target_ai_name, sizeof(target_ai_name));
 		error(_error_silent, "%s: ai_follow_target_ai %s %s", hs_runtime_get_executing_thread_name(), ai_name, target_ai_name);
 	}
 
@@ -2762,28 +2758,16 @@ void ai_scripting_migrate_and_speak(
 			global_scenario_get(),
 			target_name,
 			sizeof(target_name));
-		/* BUG (preserved for exact matching): the format has four %s conversions
-		 * but January supplies only three values, so the fourth conversion reads
-		 * past the end of the argument list.
-		 * Evidence: January's .rdata holds the 34-byte literal
-		 * "%s: ai_migrate_and_speak %s %s %s", which has four conversions, while
-		 * its call site cleans 0x14 bytes - five dwords, i.e. only three values -
-		 * and loads speech_type only afterwards, at +0x7d. The same defect
-		 * survives unrepaired in the 2020 build.
-		 * Consequence: with January's prologue the fourth slot lands on the saved
-		 * EDI home, so vsprintf dereferences the caller's entry EDI as a char *.
-		 * The branch is gated on ai_debug.print_migration or
-		 * ai_debug.print_scripting. Both default to false, but they are exposed as
-		 * the HaloScript globals ai_print_migration and ai_print_scripting, so a
-		 * scenario script or the debug console can reach this path at runtime.
-		 * A corrected build should pass speech_type as the fourth value.
-		 */
+		/* port: the speech type for the fourth %s (January passed three:
+		vsprintf took the next stack word for a string; a map's script can
+		set ai_print_migration or ai_print_scripting) */
 		error(
 			_error_silent,
 			"%s: ai_migrate_and_speak %s %s %s",
 			hs_runtime_get_executing_thread_name(),
 			source_name,
-			target_name);
+			target_name,
+			speech_type);
 	}
 
 	if (_stricmp(speech_type, "advance") == 0)
