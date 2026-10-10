@@ -188,7 +188,7 @@ void _byte_swap_data(
 {
 	long code;
 	long offset;
-	long code_index;
+	long code_index = 0;
 	register long array_count;
 	long repeat_count;
 	long local_size;

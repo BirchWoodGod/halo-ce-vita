@@ -1072,7 +1072,7 @@ void render_debug_trigger_volumes(
 {
 	if (debug_trigger_volumes)
 	{
-		real_matrix4x3 matrix;
+		real_matrix4x3 matrix = { 0 };
 		short volume_index;
 		struct scenario *scenario = global_scenario_get();
 

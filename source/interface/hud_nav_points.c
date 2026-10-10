@@ -962,7 +962,7 @@ void hud_render_nav_points(
 		for (nav_point_index = 0; nav_point_index<MAXIMUM_NUMBER_OF_NAV_POINTS; nav_point_index++)
 		{
 			struct hud_nav_point_datum *nav_point = &datum->nav_points[nav_point_index];
-			real_point3d position;
+			real_point3d position = { 0 };
 #ifdef HALO_LINUX
 			/* port: with the tick on a thread of its own (HALO_TICK_THREAD,
 			the Vita's) a script's deactivate_nav_point (b30's Warthog's, as

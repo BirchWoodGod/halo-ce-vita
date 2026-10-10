@@ -415,7 +415,7 @@ boolean recorded_animation_apply_event_stream(
 	byte const *playback_stream_end)
 {
 	struct animation_event_header const *header;
-	word time_delta;
+	word time_delta = 0;
 	word header_size;
 	recorded_animation_apply_proc apply;
 

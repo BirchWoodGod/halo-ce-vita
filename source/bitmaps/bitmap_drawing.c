@@ -373,8 +373,8 @@ void bitmap_fill_rectangle(
 	short alpha, inverse_alpha;
 	short x_minimum, x_maximum, y_minimum, y_maximum;
 	short width, y;
-	short mode;
-	long pixel;
+	short mode = 0;
+	long pixel = 0;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\bitmaps\\bitmap_drawing.c",
@@ -1044,8 +1044,8 @@ void bitmap_draw_line(
 	short y_maximum = destination->height;
 	short alpha = color >> 24;
 	short inverse_alpha = 255 - alpha;
-	short mode;
-	long pixel;
+	short mode = 0;
+	long pixel = 0;
 	point2d point0, point1;
 	struct bitmap_line_state state;
 

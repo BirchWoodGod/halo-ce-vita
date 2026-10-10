@@ -897,7 +897,7 @@ boolean unit_scream(
 	short scream_type)
 {
 	struct unit_datum *unit = unit_get(unit_index);
-	short vocalization_type;
+	short vocalization_type = 0;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\units\\unit_dialogue.c",

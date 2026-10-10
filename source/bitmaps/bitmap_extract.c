@@ -1365,7 +1365,7 @@ struct bitmap_data *extract_build_debug_plate(
 	struct bitmap_data *converted_bitmap = NULL;
 	struct bitmap_data *debug_bitmap = NULL;
 	short mipmap_index;
-	short slice_count;
+	short slice_count = 0;
 
 	switch (bitmap->type)
 	{
@@ -1512,7 +1512,7 @@ struct bitmap_data *extract_build_debug_plate(
 
 				if (slice_bitmap && slice_bitmap->base_address)
 				{
-					short mipmap_slice_count;
+					short mipmap_slice_count = 0;
 					short slice_index;
 
 					switch (converted_bitmap->type)

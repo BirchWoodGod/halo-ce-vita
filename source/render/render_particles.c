@@ -382,7 +382,7 @@ void render_particles(
 			{
 				struct rendered_particle_datum *rendered_particle =
 					rendered_particles;
-				short *current_sprite_group;
+				short *current_sprite_group = NULL;
 				short previous_definition_index = NONE;
 				short previous_cluster_index = NONE;
 				boolean previous_attached_to_first_person_weapon = FALSE;

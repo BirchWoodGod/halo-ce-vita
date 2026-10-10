@@ -818,7 +818,7 @@ static void hud_draw_multitexture_overlay(
 	{
 		static real theta;
 		struct multitexture_overlay_hud_element_effector_definition *effector;
-		real source_value;
+		real source_value = 0.0f; /* port: a map's source outside the switch's */
 		real dest_value;
 		real_rgb_color dest_color;
 

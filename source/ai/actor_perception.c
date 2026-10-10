@@ -7006,7 +7006,7 @@ void actor_perception_update(
 				{
 					short knowledge_type = actor_get_perception_knowledge(actor_index, iterator.index);
 					short awareness_speed;
-					real awareness_delta;
+					real awareness_delta = 0.0f;
 
 #line 489 "c:\\halo\\SOURCE\\ai\\actor_perception.c"
 					assert((knowledge_type >= 0) && (knowledge_type < NUMBER_OF_ACTOR_KNOWLEDGE_TYPES));

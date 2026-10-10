@@ -833,8 +833,8 @@ static long actor_look_idle_timer(
 	struct actor_datum *actor = actor_get(actor_index);
 	struct actor_definition *definition = actor_definition_get(actor->meta.definition_index);
 	struct weapon_definition *weapon_definition = actor_get_weapon_definition(actor_index);
-	real time_lower_bound;
-	real time_upper_bound;
+	real time_lower_bound = 0.0f;
+	real time_upper_bound = 0.0f;
 	real time;
 	long ticks;
 
