@@ -44,3 +44,7 @@ original/
 # CI build outputs (tools/ci_build.py)
 dist/
 invader/
+# the Vita updater's signing key belongs offline, never here
+# (tools/release/README.md)
+*.key
+halo-update-key/

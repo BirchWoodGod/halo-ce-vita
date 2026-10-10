@@ -226,8 +226,23 @@ for one: in amber "Update available: 1.1.0-beta.4" with
 github.com/BirchWoodGod/halo-ce-vita/releases under it (always that
 address, never one from the answer), "Couldn't check: no connection" (ad
 hoc play, no network, or GitHub unreachable) or "Couldn't check right now". A found update also shows in the main menu's
-corner until the game restarts, and halo.log has a line. Nothing is
-downloaded or installed: the player updates as they installed the game. A
+corner until the game restarts, and halo.log has a line. With an update
+found, **pressing Check for updates again installs it** (from the main menu,
+between games): after the player says yes, the game downloads the release's
+signed manifest (`halo-update.txt` and `halo-update.txt.sig`) and checks its
+Ed25519 signature against the key built into the game
+(`port/vita/include/vita_update_key.h`), that it names that release's version,
+newer than the running one, and this game; then downloads `halo.vpk` (at
+most the signed size, 64 MB at most; resumed if the connection drops),
+checks its SHA-512, unpacks it into `update/stage` in the data folder (each
+name and size checked), replaces the game's files in `ux0:app/HCEV00001`
+with a journal (a failure, crash or power cut is undone, then or at the next
+start), and restarts into the new version. Circle stops it until the files
+start moving. The data folder (saves, `settings.txt`, `config.toml`, maps,
+movies) is not touched. It needs HENkaku's Enable Unsafe Homebrew (the game
+says so when it is off), and a build whose key is the placeholder (64 zeros)
+installs nothing and points to the releases page. Releases are signed on the
+owner's machine: `tools/release/README.md`. A
 press within a minute of the last look that reached GitHub shows that look
 again (kept in `update_check.txt` in the data folder), as GitHub allows 60
 requests an hour from one address. **Update channel** (`HALO_UPDATE_CHANNEL`,
@@ -238,7 +253,9 @@ arrive with 1.1.0") and a saved Stable ignored; a release build offers both
 and starts on Stable. The request is HTTPS with Mbed TLS over the Vita's
 sockets (not the system's SceHttp/SceSsl): TLS 1.2 or 1.3, GitHub's
 certificate checked against the few authorities built into the game
-(`port/linux/src/update_roots.h`) and its host name, no redirect followed,
+(`port/linux/src/update_roots.h`) and its host name, no redirect followed
+(the install's downloads follow GitHub's one redirect, only to its
+release-asset hosts),
 the answer read to 256 KB at most and only each release's tag, pre-release
 and draft flags looked at; the request carries the User-Agent
 "HaloCEVita/<version>" and nothing else about the player or the Vita.
