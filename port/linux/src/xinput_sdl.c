@@ -236,6 +236,16 @@ void test_input_hold_action(int hold)
 	test_input_holding_action = hold;
 }
 
+/* the automated tests (network_test.c's HALO_NETWORK_TEST_PLAYER_DRIVES):
+the scripted player lets go of everything while held (its vehicle stops,
+for the offline bots to get in beside it) */
+static int test_input_holding_still;
+
+void test_input_hold_still(int hold)
+{
+	test_input_holding_still = hold;
+}
+
 /* the automated tests (network_test.c's debug.network_test_scores): the
 player holds Back, the scoreboard, as the scripted player plays on */
 static int test_input_holding_back;
@@ -424,6 +434,8 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	/* (HALO_TEST_PAD presses the menus: the scripted player plays only in
 	a level) */
 	if (test_pad_at_menu && test_pad.count > 0)
+		return;
+	if (test_input_holding_still)
 		return;
 	if (test_input_holding_action)
 	{

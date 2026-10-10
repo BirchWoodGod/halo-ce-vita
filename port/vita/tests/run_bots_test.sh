@@ -22,6 +22,24 @@
 #            second checkpoint at least
 #   rockets  Rockets (Slayer, rocket launchers)
 #   teamball Team Oddball
+#   vctf     CTF with every vehicle the map places (the variant's default
+#            vehicle set: Blood Gulch's Warthogs, Ghosts and Scorpions;
+#            "ctf+vehicles"), the bots on both teams, Heroic; the player
+#            stops a Warthog at its base 4 s in, for 20 s
+#            (HALO_NETWORK_TEST_PLAYER_DRIVES), and a teammate bot must get
+#            in beside it
+#   vslayer  Slayer likewise ("slayer+vehicles"): every bot for itself, a
+#            driver's seat alone (no one rides with an enemy)
+#   vteams   Team Slayer likewise ("team_slayer+vehicles"), Legendary
+#   vehicles vctf, vslayer and vteams (HALO_TEST_BOTS 8 is the brief's)
+#
+# The vehicle cases: the bots must take the vehicles - their census in
+# halo.log every ten seconds (bots.c: riding, driving, gunning, the distance
+# driven, in and out and why) - two bots in at least, two at once at some
+# census, the bots' vehicles driven 150 units at least, and some bot out
+# again; in vctf a bot in a Warthog's gunner's or passenger's seat beside a
+# teammate driving, and (on Blood Gulch, whose bases have room for it) one
+# beside the player. The census and the bots' tick cost are printed.
 #
 # CTF and Invasion: each team must spawn at its own base, at the start and
 # after (each life's first place nearer its own team's flag stand, which the
@@ -80,6 +98,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
 test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 cases=${*:-slayer teams}
+cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams /')
 map=${HALO_TEST_BOTS_MAP:-bloodgulch}
 seconds=${HALO_TEST_SECONDS:-180}
 case " $cases " in *" maps "*) seconds=${HALO_TEST_SECONDS:-120} ;; esac
@@ -163,6 +182,9 @@ for name in $cases; do
 	race) run race team_race HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
 	rockets) run rockets rockets HALO_BOT_SKILL=heroic & ;;
 	teamball) run teamball team_oddball HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
+	vctf) run vctf ctf+vehicles HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_NETWORK_TEST_PLAYER_DRIVES=4 & ;;
+	vslayer) run vslayer slayer+vehicles HALO_BOT_SKILL=heroic & ;;
+	vteams) run vteams team_slayer+vehicles HALO_BOT_SKILL=legendary HALO_BOT_TEAMS=even & ;;
 	maps) continue ;;
 	*) echo "unknown case $name"; exit 2 ;;
 	esac
@@ -188,9 +210,9 @@ check() { # NAME
 	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
 	grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt" &&
 		fail "$name" "an assertion, exception or halt"
-	python3 - "$log" "$bots" "$name" <<'EOF' || status=1
+	python3 - "$log" "$bots" "$name" "$map" <<'EOF' || status=1
 import re, sys, math
-log, bots, name = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+log, bots, name, game_map = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 named = {}
 places = {}
 last = {}
@@ -258,7 +280,7 @@ if name == "against":
 # starting locations' team), at the start and after: each life's first place
 # nearer its own team's stand (the scenario's flag of its team, which the
 # bots log; in Invasion the flags sit at the other base, the spawns do not)
-if name in ("ctf", "invasion"):
+if name in ("ctf", "invasion", "vctf"):
     stands, team_of, alive, spawns, wrong = None, {}, {}, 0, []
     for line in open(log, errors="replace"):
         m = re.search(r"bots: CTF.*the stands: team 0 \(([-\d.]+) ([-\d.]+) [-\d.]+\) team 1 \(([-\d.]+) ([-\d.]+)", line)
@@ -301,8 +323,44 @@ if kills <= bots:
 if died * 2 < bots:
     fail("only %d bots died" % died)
 # (CTF's score is captures, which three minutes may not see)
-if name != "ctf" and (not scores or max(scores) <= 0):
+if name not in ("ctf", "vctf") and (not scores or max(scores) <= 0):
     fail("no score")
+# (the vehicle cases: the bots' census of their vehicles)
+if name.startswith("v"):
+    census = [line for line in open(log, errors="replace") if "bots: vehicles at tick" in line]
+    most = most_driving = most_gunning = 0
+    for line in census:
+        m = re.search(r"(\d+) of \d+ bots riding \((\d+) driving, (\d+) gunning, (\d+) passengers", line)
+        if m:
+            most = max(most, int(m.group(1)))
+            most_driving = max(most_driving, int(m.group(2)))
+            most_gunning = max(most_gunning, int(m.group(3)) + int(m.group(4)))
+    last_census = census[-1] if census else ""
+    def count(pattern, kind=int):
+        m = re.search(pattern, last_census)
+        return kind(m.group(1)) if m else kind(0)
+    driven, entries, exits = count(r"driven (\d+) units"), count(r"in (\d+) \("), count(r"out (\d+) \(")
+    beside = count(r"gunner (\d+)") + count(r"passenger (\d+)")
+    print("  vehicles: %s" % (last_census.split("bots: ", 1)[-1].strip() if last_census else "no census"))
+    print("  at most %d bots riding at once (%d driving, %d gunning or passengers)" % (most, most_driving, most_gunning))
+    if entries < 2:
+        fail("the bots got into vehicles %d times" % entries)
+    if most < 2:
+        fail("at most %d bots rode at once" % most)
+    if driven < 150:
+        fail("the bots drove only %d units" % driven)
+    if exits < 1:
+        fail("no bot got out of a vehicle")
+    print("  %d times a bot got in beside a teammate driving" % beside)
+    if name == "vctf" and beside < 1:
+        fail("no bot rode beside a teammate driving")
+    # (vctf: the scripted player stops a Warthog at its base a few seconds
+    # in, HALO_NETWORK_TEST_PLAYER_DRIVES, for its teammates to get in)
+    if name == "vctf":
+        with_player = sum(1 for line in open(log, errors="replace") if re.search(r"bots: bot \d+ in .*a player driving", line))
+        print("  %d times a bot got in beside the player driving" % with_player)
+        if with_player < 1 and game_map == "bloodgulch":
+            fail("no bot got into the Warthog the player drove")
 sys.exit(1 if failed else 0)
 EOF
 }

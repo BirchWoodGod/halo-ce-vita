@@ -11,7 +11,8 @@ Automated system link sessions for testing the netcode without the menus
   screen's fast setup does, and starts it debug.network_test_start seconds
   later; with more variants, once a game is over (debug.network_test_score
   makes it short) the next, as the host's button on the scores does
-  ("<variant>@<map>" plays that game on another map: a map change);
+  ("<variant>@<map>" plays that game on another map: a map change;
+  "<variant>+vehicles" the variant with every vehicle the map places);
 - "local:<map>[:<variant>...]" the same with a local (split screen) game
   of one player, which starts only where a local game may have one (the
   Vita's rules, HALO_PORT_VITA_NETWORK);
@@ -60,7 +61,11 @@ seconds later stands them at a vehicle's driver's entrance, where a joining
 machine's player holds the action button, as getting in does)
 and debug.network_test_pickup (the last player stands on a weapon lying
 about that many seconds in, and a joining machine's player holds the action
-button a second later, to pick it up).
+button a second later, to pick it up). HALO_NETWORK_TEST_PLAYER_DRIVES
+(seconds; a "local:" game) seats this machine's player as the nearest
+Warthog's driver that many seconds in, the scripted player letting go of
+everything for 20 seconds (the vehicle stops: the offline bots get in beside
+it, run_bots_test.sh), then driving it about as it walks.
 
 Called from the main loop every frame (main.c).
 */
@@ -93,6 +98,7 @@ Called from the main loop every frame (main.c).
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* internet play's codes and lobby (port/linux/src/p2p.c) */
@@ -113,6 +119,7 @@ void network_damage_statistics(long *sent_reports, long *dealt_reports, long *re
 /* xinput_sdl.c's */
 void test_input_hold_action(int hold);
 void test_input_hold_back(int hold);
+void test_input_hold_still(int hold);
 /* game_engine.c's */
 long game_engine_in_game_score_draw_count(void);
 void game_engine_in_game_score_ping_counts(long *other_pings, long *unknown_pings);
@@ -262,16 +269,31 @@ static void network_test_variant_by_name(struct game_variant *variant, char cons
 		{ "juggernaut", build_game_variant_juggernaut },
 	};
 	size_t index;
+	/* "<variant>+vehicles": the variant with every vehicle the map places
+	(the default vehicle set, as the dedicated server's Big Team has it:
+	game_engine_make_big_team_variant; the game's own sets place Warthogs
+	alone), for the offline bots' vehicles (run_bots_test.sh) */
+	char base[64];
+	size_t length = strlen(name);
+	boolean all_vehicles = length > 9 && !strcmp(name + length - 9, "+vehicles");
 
+	if (all_vehicles)
+	{
+		snprintf(base, sizeof(base), "%.*s", (int)(length - 9), name);
+		name = base;
+	}
 	for (index = 0; index < NUMBEROF(others); index++)
 	{
 		if (!strcmp(name, others[index].name))
 		{
 			others[index].build(variant);
-			return;
+			break;
 		}
 	}
-	game_engine_get_variant_by_name(variant, name);
+	if (index == NUMBEROF(others))
+		game_engine_get_variant_by_name(variant, name);
+	if (all_vehicles)
+		variant->universal_variant.vehicle_set = 0;
 }
 
 /* the map of the game at the index of the variant list: "<variant>@<map>"
@@ -843,7 +865,8 @@ static void network_test_gather(
 }
 
 static void network_test_vehicle(
-	boolean enter)
+	boolean enter,
+	boolean first_player)
 {
 	struct data_iterator iterator;
 	struct player_datum *player;
@@ -851,7 +874,15 @@ static void network_test_vehicle(
 
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		/* (HALO_NETWORK_TEST_PLAYER_DRIVES: this machine's first player, the
+		Warthog nearest it; "last" names it below) */
+		if (first_player && player->local_player_index == NONE)
+			continue;
 		last = player;
+		if (first_player)
+			break;
+	}
 	if (!last || last->unit_index == NONE)
 		return;
 	if (!enter)
@@ -863,6 +894,9 @@ static void network_test_vehicle(
 		}
 		return;
 	}
+	/* (this machine's player in a vehicle already: left be) */
+	if (first_player && object_get(last->unit_index)->object.parent_object_index != NONE)
+		return;
 	{
 		struct object_iterator vehicles;
 		long nearest_index = NONE;
@@ -876,6 +910,11 @@ static void network_test_vehicle(
 			real_point3d const *vehicle_position = &object_get(vehicles.index)->object.position;
 			real distance = distance_squared3d(position, vehicle_position);
 
+			if (first_player && (unit_get(vehicles.index)->unit.driver_object_index != NONE ||
+				!strstr(tag_get_name(object_get(vehicles.index)->definition_index), "warthog")))
+			{
+				continue;
+			}
 			if (nearest_index == NONE || distance < nearest_distance)
 			{
 				nearest_index = vehicles.index;
@@ -892,11 +931,11 @@ static void network_test_vehicle(
 			if (unit_seat_is_driver(nearest_index, seat_index) &&
 				unit_enter_seat(last->unit_index, nearest_index, seat_index))
 			{
-				platform_log("network test: the last player drives vehicle %lx", nearest_index);
+				platform_log("network test: the %s player drives vehicle %lx", first_player ? "first" : "last", nearest_index);
 				return;
 			}
 		}
-		platform_log("network test: the last player cannot drive vehicle %lx", nearest_index);
+		platform_log("network test: the %s player cannot drive vehicle %lx", first_player ? "first" : "last", nearest_index);
 	}
 }
 
@@ -1112,12 +1151,23 @@ void network_test_update(
 			long enter_time = (long)(network_test.vehicle_time * TICKS_PER_SECOND);
 
 			if (game_time_get() >= enter_time && game_time_get() - enter_time < TICKS_PER_SECOND)
-				network_test_vehicle(TRUE);
+				network_test_vehicle(TRUE, FALSE);
 			if (game_time_get() >= enter_time + 15 * TICKS_PER_SECOND &&
 				game_time_get() - enter_time - 15 * TICKS_PER_SECOND < TICKS_PER_SECOND)
 			{
-				network_test_vehicle(FALSE);
+				network_test_vehicle(FALSE, FALSE);
 			}
+		}
+		/* HALO_NETWORK_TEST_PLAYER_DRIVES: this machine's player drives a
+		Warthog, still for 20 seconds (the offline bots get in beside it) */
+		if (network_test.local && getenv("HALO_NETWORK_TEST_PLAYER_DRIVES"))
+		{
+			long drive_time = (long)(atof(getenv("HALO_NETWORK_TEST_PLAYER_DRIVES")) * TICKS_PER_SECOND);
+
+			if (drive_time > 0 && game_time_get() >= drive_time && game_time_get() - drive_time < TICKS_PER_SECOND)
+				network_test_vehicle(TRUE, TRUE);
+			test_input_hold_still(drive_time > 0 && game_time_get() >= drive_time &&
+				game_time_get() < drive_time + 20 * TICKS_PER_SECOND);
 		}
 		/* ... and 20 seconds on, the last player getting in as a player does:
 		at the entrance, the button held for three seconds */
