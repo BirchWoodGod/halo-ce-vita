@@ -56,6 +56,14 @@ end: data.c's datum_new) make the same datums in the same slots, and compare
 with this. Every data array in the game state, an lruv cache's blocks among
 them.
 
+HALO_TICK_HASH_MASK_FRAMES=1: also each particle's last_rendered_frame_index,
+hashed as its distance from the render's frame index (particles.c), which is
+all the game compares: the frames a run draws before the game begins (the
+menus', the loading's) are more or fewer with the machine's load, and shift
+every particle's alike; two runs of one build under load otherwise part at
+the game's first particles (Blood Gulch Slayer's tick 20, in some runs of
+eight at once).
+
 <file>.alloc gets each allocation's own hash after every tick (binary:
 a 32-bit game time and one 64-bit hash per allocation), <file>.names their
 names in the same order: tools/tick_hash_compare.py names the allocations
@@ -73,6 +81,8 @@ void halo_game_state_gpu_range(void **base, unsigned long *size);
 int halo_game_state_allocation(int index, const char **name, void **base, unsigned long *size);
 int halo_game_state_allocation_is_lruv_cache(int index);
 short *halo_game_state_allocation_first_free(int index);
+/* (HALO_TICK_HASH_MASK_FRAMES) particles.c */
+int halo_tick_hash_particle_frames(long *saved, int maximum, int restore);
 long game_time_get(void);
 
 /* HALO_FIXED_TICK=1: the knobs that make a run's simulation independent of
@@ -121,6 +131,9 @@ int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore);
 
 static int mask = -1;
 static int mask_free = -1;
+static int mask_frames = -1;
+#define MAXIMUM_SAVED_PARTICLE_FRAMES 8192
+static long saved_particle_frames[MAXIMUM_SAVED_PARTICLE_FRAMES];
 
 /* (HALO_TICK_HASH_MASK_FREE) each data array's first_free_absolute_index,
 zeroed for the hash and put back */
@@ -192,7 +205,7 @@ static long saved_light_fields[MAXIMUM_SAVED_LIGHT_FIELDS];
 
 void halo_tick_hash_after_tick(void)
 {
-	int saved_mark_count = 0, saved_render_state_count = 0, saved_light_field_count = 0;
+	int saved_mark_count = 0, saved_render_state_count = 0, saved_light_field_count = 0, saved_particle_frame_count = 0;
 	void *base, *gpu_base;
 	unsigned long size, gpu_size;
 	unsigned long long hash = 0xCBF29CE484222325ULL;
@@ -226,6 +239,10 @@ void halo_tick_hash_after_tick(void)
 		saved_mark_count = halo_tick_hash_object_marks(saved_marks, MAXIMUM_SAVED_MARKS, 0);
 	if (mask_free)
 		free_hints(0);
+	if (mask_frames < 0)
+		mask_frames = getenv("HALO_TICK_HASH_MASK_FRAMES") ? atoi(getenv("HALO_TICK_HASH_MASK_FRAMES")) : 0;
+	if (mask_frames)
+		saved_particle_frame_count = halo_tick_hash_particle_frames(saved_particle_frames, MAXIMUM_SAVED_PARTICLE_FRAMES, 0);
 	if (mask >= 2)
 	{
 		saved_render_state_count = halo_tick_hash_object_render_states(saved_render_states, MAXIMUM_SAVED_MARKS, 0);
@@ -310,6 +327,8 @@ void halo_tick_hash_after_tick(void)
 		halo_tick_hash_object_marks(saved_marks, saved_mark_count, 1);
 	if (mask_free)
 		free_hints(1);
+	if (mask_frames)
+		halo_tick_hash_particle_frames(saved_particle_frames, saved_particle_frame_count, 1);
 	if (mask >= 2)
 	{
 		halo_tick_hash_object_render_states(saved_render_states, saved_render_state_count, 1);
