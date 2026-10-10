@@ -232,6 +232,38 @@ static char const *particle_effect_marker_names[NUMBER_OF_PARTICLE_EFFECT_MARKER
 
 /* ---------- public code */
 
+#ifdef HALO_LINUX
+/* (tick_hash.c, HALO_TICK_HASH_MASK_FRAMES) each live particle's
+last_rendered_frame_index made its distance from render.frame_index for the
+hash, or put back: the game only ever compares the two (particles_update),
+and the frames a run drew before the game began - the menus' and the
+loading's, more or fewer with the machine's load - shift every one alike */
+int halo_tick_hash_particle_frames(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	if (!particle_data || !particle_data->valid)
+		return 0;
+	for (absolute_index = 0; absolute_index < particle_data->count && count < maximum; absolute_index++)
+	{
+		struct particle_datum *particle = (struct particle_datum *)
+			((char *)particle_data->data + particle_data->size * absolute_index);
+
+		if (!particle->header.identifier)
+			continue;
+		if (restore)
+			particle->last_rendered_frame_index = saved[count++];
+		else
+		{
+			saved[count++] = particle->last_rendered_frame_index;
+			particle->last_rendered_frame_index = render.frame_index - particle->last_rendered_frame_index;
+		}
+	}
+	return count;
+}
+#endif
+
 void particles_initialize(
 	void)
 {
