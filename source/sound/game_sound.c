@@ -1141,7 +1141,20 @@ void compute_sound_obstruction(
 		source->spatialization_mode==_sound_spatialization_mode_absolute);
 
 	if (source->location.game_location.cluster_index != NONE &&
-		camera->location.cluster_index != NONE)
+		camera->location.cluster_index != NONE
+#ifdef HALO_LINUX
+		/* (port) both clusters this structure BSP's: a sound's location can
+		still name a cluster of the one before a switch - a10's switches
+		with the sound manager's work every other frame
+		(HALO_SOUND_MANAGER_DIVISOR=2, the Balanced profile's) halted every
+		harness run at the fourth ("to_cluster_index>=0 &&
+		to_cluster_index<structure_bsp->clusters.count"), where a release
+		build reads past the cluster tables; such a sound is muffled as one
+		with no cluster until its location is made again */
+		&& source->location.game_location.cluster_index < global_structure_bsp_get()->clusters.count &&
+		camera->location.cluster_index < global_structure_bsp_get()->clusters.count
+#endif
+		)
 	{
 		struct structure_bsp *structure_bsp = global_structure_bsp_get();
 		byte encoded_distance = structure_bsp_get_cluster_encoded_sound_distance(
