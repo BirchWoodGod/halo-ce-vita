@@ -672,9 +672,10 @@ struct texture_entry
 	unsigned long checksum, checksum_frame;
 	/* the pool memory the texels were decoded into, reused when a dynamic
 	texture changes (the movie's frame each frame would otherwise fill the
-	pool in seconds) */
+	pool in seconds), and the pool segment it is in (-1: none) */
 	void *memory;
 	unsigned long memory_size;
+	int segment;
 	/* (the decoder, below) its decode in the background, while a lower
 	level of it is drawn (texture holds that level meanwhile) */
 	struct decode_job *job;
@@ -685,6 +686,20 @@ struct texture_entry
 
 static struct texture_entry *texture_buckets[TEXTURE_BUCKET_COUNT];
 static unsigned long texture_frame;
+/* each pool segment's last frame drawn from or decoded into: the pool,
+full, fills again the one drawn from longest ago (vgxm_memory.h
+pool_recycle) */
+static unsigned long pool_segment_frames[VGXM_POOL_SEGMENTS];
+
+/* the pool segment of memory (-1: none), marked as drawn from this frame */
+static int pool_segment_mark(const void *memory)
+{
+	int segment = memory ? vgxm_pool_segment_of(memory) : -1;
+
+	if (segment >= 0)
+		pool_segment_frames[segment] = texture_frame;
+	return segment;
+}
 /* changes when the pool is emptied, which invalidates every entry */
 static unsigned long pool_serial = 1;
 
@@ -722,9 +737,7 @@ this many at most for one texture before it is emptied */
 
 unsigned long vita_texture_cache_forget(const void *base, unsigned long size);
 void vita_texture_decodes_quiesce(void);
-/* (counts the pool's recycles and resets: an allocation that saw one may
-have had the memory allocated before it forgotten) */
-static unsigned long pool_events;
+static void decodes_quiesce_range(const void *base, unsigned long size);
 
 /* HALO_TEX_RECYCLE=0: a full pool is emptied at once, as before the ring */
 static int pool_recycling(void)
@@ -749,19 +762,17 @@ static void *pool_alloc(unsigned long size)
 		return memory;
 	}
 	memory = vgxm_pool_alloc(size, 128);
-	if (!memory)
-	{
-		/* (the background decodes stopped first: none may write into
-		memory forgotten here) */
-		vita_texture_decodes_quiesce();
-		pool_events++;
-	}
 	if (!memory && pool_recycling())
 	{
-		/* full: the next segment's textures forgotten (decoded again when
-		next used) and its memory decoded into, a segment at a time round
-		the pool (vgxm_memory.h, the ring); a texture bigger than the
-		segments, or a pool that will not take it so, empties it */
+		/* full: the textures of the segment drawn from longest ago
+		forgotten (decoded again when next used) and its memory decoded
+		into, a segment at a time (vgxm_memory.h pool_recycle); a texture
+		bigger than the segments, or a pool that will not take it so,
+		empties it. The background decodes into that segment alone are
+		stopped first (none may write into memory forgotten here); the
+		others go on - stopping them all made each segment filled again
+		give up every queued decode, whose memory was taken already, and
+		take it again for each at its next use */
 		unsigned long attempts;
 
 		for (attempts = 0; !memory && attempts <= POOL_RECYCLE_ATTEMPTS; attempts++)
@@ -769,17 +780,22 @@ static void *pool_alloc(unsigned long size)
 			void *base;
 			unsigned long bytes;
 
-			if (!vgxm_pool_recycle(&base, &bytes))
+			if (!vgxm_pool_recycle(&base, &bytes, pool_segment_frames, texture_frame))
 				break;
 			if (bytes)
+			{
+				decodes_quiesce_range(base, bytes);
 				vita_texture_cache_forget(base, bytes);
+			}
 			stats_pool_recycles++;
 			memory = vgxm_pool_alloc(size, 128);
 		}
 	}
 	if (!memory)
 	{
-		/* full: start again, and every texture is decoded again as it is used */
+		/* full: start again, and every texture is decoded again as it is
+		used (the background decodes stopped first) */
+		vita_texture_decodes_quiesce();
 		platform_log("texture pool full (%lu KB): emptied", vgxm_pool_used() / 1024);
 		vgxm_pool_reset();
 		pool_serial++;
@@ -790,6 +806,7 @@ static void *pool_alloc(unsigned long size)
 	{
 		stats_builds++;
 		stats_build_bytes += size;
+		pool_segment_mark(memory);
 	}
 	pool_last = memory;
 	pool_last_size = size;
@@ -1421,6 +1438,8 @@ struct decode_job
 	struct xgpu_texture_description description;
 	struct texture_build build;
 	unsigned long generation, pool_serial;
+	/* the pool segment of the memory it decodes into (-1: none) */
+	int segment;
 	int ok;
 	unsigned long long queued_us, decode_us;
 };
@@ -1708,6 +1727,7 @@ static BOOL stand_in_build(struct texture_entry *entry, unsigned char channel_or
 		return FALSE;
 	entry->memory = build.memory;
 	entry->memory_size = build.memory_size;
+	entry->segment = pool_segment_mark(build.memory);
 	return TRUE;
 }
 
@@ -1736,6 +1756,10 @@ static void decode_job_finish(struct decode_job *job)
 
 			entry->memory = job->build.memory;
 			entry->memory_size = job->build.memory_size;
+			entry->segment = job->segment;
+			/* (its stand-in's segment may have been filled again since:
+			the texture is in the decode's memory now) */
+			entry->pool_serial = job->pool_serial;
 			stream_background++;
 			stream_background_bytes += entry->size;
 			stream_decode_us += job->decode_us;
@@ -1848,6 +1872,44 @@ void vita_texture_decodes_quiesce(void)
 	decode_jobs_sweep();
 }
 
+/* as vita_texture_decodes_quiesce, for the decodes into the size bytes at
+base alone (a pool segment about to be filled again): those queued there
+given up, the one decoding there waited for, those done swapped in; the
+decodes into other memory go on */
+static void decodes_quiesce_range(const void *base, unsigned long size)
+{
+	int index, waited = 0;
+
+	if (decoder_state <= 0)
+		return;
+	for (index = 0; index < DECODE_JOBS; index++)
+	{
+		struct decode_job *job = &decode_jobs[index];
+		int expected = _decode_queued;
+
+		if (__atomic_load_n(&job->state, __ATOMIC_ACQUIRE) == _decode_free ||
+			(const unsigned char *)job->build.preallocated < (const unsigned char *)base ||
+			(const unsigned char *)job->build.preallocated >= (const unsigned char *)base + size)
+		{
+			continue;
+		}
+		if (__atomic_compare_exchange_n(&job->state, &expected, _decode_free, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
+			job->entry)
+		{
+			job->entry->job = NULL;
+			job->entry->generation = 0;
+			job->entry = NULL;
+		}
+		while (__atomic_load_n(&job->state, __ATOMIC_ACQUIRE) == _decode_running)
+		{
+			waited = 1;
+			vita_host_sleep_us(100);
+		}
+	}
+	stream_quiesce_waits += waited;
+	decode_jobs_sweep();
+}
+
 /* (the worker) the entry's texture decoded in the background, its stand-in
 drawn meanwhile: FALSE if it cannot be (no job free, no pool memory), to be
 decoded on the worker */
@@ -1856,7 +1918,7 @@ static BOOL decode_submit(struct texture_entry *entry)
 	struct decode_job *job = NULL;
 	struct texture_build measure;
 	unsigned char channel_order = custom_edition_texels_order(entry->address);
-	unsigned long events;
+	unsigned long serial;
 	void *memory;
 	int index;
 
@@ -1879,11 +1941,12 @@ static BOOL decode_submit(struct texture_entry *entry)
 	pool_reuse = NULL;
 	if (!stand_in_build(entry, channel_order))
 		return FALSE;
-	/* (the stand-in's memory is the entry's; the pool recycled while the
-	decode's was taken may have forgotten it: decoded here, then) */
-	events = pool_events;
+	/* (the stand-in's memory is the entry's; the pool filled again while
+	the decode's was taken may have forgotten it - its segment filled again,
+	or the whole pool emptied: decoded here, then) */
+	serial = pool_serial;
 	memory = pool_alloc(measure.measured);
-	if (!memory || events != pool_events)
+	if (!memory || !entry->memory || serial != pool_serial)
 		return FALSE;
 	memset(job, 0, sizeof(*job));
 	job->entry = entry;
@@ -1896,6 +1959,7 @@ static BOOL decode_submit(struct texture_entry *entry)
 	job->build.bytes = entry->size;
 	job->build.preallocated = memory;
 	job->build.preallocated_size = pool_last_size;
+	job->segment = vgxm_pool_segment_of(memory);
 	job->generation = entry->generation;
 	job->pool_serial = pool_serial;
 	job->queued_us = vita_host_time_us();
@@ -1945,6 +2009,7 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 		entry->address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(data);
 		entry->size = xgpu_texture_face_size(&entry->description) * (entry->description.cube_map ? 6 : 1);
 		entry->dynamic = -1;
+		entry->segment = -1;
 		entry->next = *bucket;
 		*bucket = entry;
 	}
@@ -1983,8 +2048,14 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 	{
 		entry->last_used_frame = texture_frame;
 		*description = entry->description;
+		if (entry->segment >= 0)
+			pool_segment_frames[entry->segment] = texture_frame;
 		if (entry->job)
+		{
 			stream_stand_in_draws++;
+			if (entry->job->segment >= 0)
+				pool_segment_frames[entry->job->segment] = texture_frame;
+		}
 		return &entry->texture;
 	}
 	entry->checked_serial = memory_watch_serial();
@@ -2033,6 +2104,7 @@ const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLO
 				pool_reuse = NULL;
 				entry->memory = pool_last;
 				entry->memory_size = pool_last ? pool_last_size : 0;
+				entry->segment = pool_segment_mark(pool_last);
 				decode_rate_emulate(before, entry->size);
 				vita_texture_build_us += vita_host_time_us() - before;
 				frame_decode_us += vita_host_time_us() - before;
@@ -2192,7 +2264,6 @@ unsigned long vita_texture_pool_release(void)
 	pool_last_size = 0;
 	freed = vgxm_pool_release();
 	pool_serial++;
-	pool_events++;
 	return freed;
 }
 
@@ -2203,7 +2274,6 @@ unsigned long vita_texture_cache_forget(const void *base, unsigned long size)
 
 	if (!size)
 		return 0;
-	pool_events++;
 	for (bucket = 0; bucket < TEXTURE_BUCKET_COUNT; bucket++)
 		for (entry = texture_buckets[bucket]; entry; entry = entry->next)
 			if (entry->memory && (const unsigned char *)entry->memory >= (const unsigned char *)base &&
@@ -2214,6 +2284,7 @@ unsigned long vita_texture_cache_forget(const void *base, unsigned long size)
 				entry->pool_serial = 0;
 				entry->memory = NULL;
 				entry->memory_size = 0;
+				entry->segment = -1;
 				count++;
 			}
 	return count;

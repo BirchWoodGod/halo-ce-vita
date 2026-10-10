@@ -380,11 +380,16 @@ unsigned long vgxm_pool_release(void)
 	return pool_release();
 }
 
-int vgxm_pool_recycle(void **base, unsigned long *size)
+int vgxm_pool_segment_of(const void *memory)
+{
+	return pool_segment_of(memory);
+}
+
+int vgxm_pool_recycle(void **base, unsigned long *size, const unsigned long *segment_frames, unsigned long frame)
 {
 	if (!pool_floor)
 		pool_floor = 65536 * 2;
-	return pool_recycle(base, size);
+	return pool_recycle(base, size, segment_frames, frame);
 }
 
 unsigned long vgxm_pool_used(void)
