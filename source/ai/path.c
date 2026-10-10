@@ -216,6 +216,11 @@ maps' walkable floors) */
 enum
 {
 	PATH_SURFACE_EDGES_CACHE_SETS = 128,
+	/* the offline bots' helper thread's: its searches flood up to the
+	1024 nodes a search holds across a level's walkable floors (Blood
+	Gulch's 2807): 128 sets kept 14% of its surfaces there, 512 sets 92%
+	(256 KB, allocated as the helper starts) */
+	PATH_SURFACE_EDGES_HELPER_CACHE_SETS = 512,
 	PATH_SURFACE_EDGES_CACHE_WAYS = 4,
 	PATH_SURFACE_EDGES_CACHE_EDGES = 4,
 };
@@ -327,26 +332,73 @@ static __thread boolean path_search_on_helper_thread;
 original way: its surfaces' edges built from the map, not taken from the cache */
 static __thread boolean path_search_building_edges;
 
-/* (port) the surface edges cache (path_surface_edges): the structure bsp,
-collision bsp, pathfinding surfaces and game state its ways were made from */
-static struct
+/* (port) a surface edges cache (path_surface_edges): its sets (a power of
+two) and ways, and the structure bsp, collision bsp, pathfinding surfaces and
+game state its ways were made from (and for the helper thread's, the
+pathfinding surfaces' generation) */
+struct path_surface_edges_cache_data
 {
+	long set_count;
+	struct path_surface_edges_cache_set *sets;
+	struct path_surface_edges_cache_way (*ways)[PATH_SURFACE_EDGES_CACHE_WAYS];
 	struct structure_bsp const *structure;
 	struct collision_bsp const *bsp;
 	void const *pathfinding_surfaces;
 	unsigned long map_generation;
-	struct path_surface_edges_cache_set sets[PATH_SURFACE_EDGES_CACHE_SETS];
-	struct path_surface_edges_cache_way ways[PATH_SURFACE_EDGES_CACHE_SETS][PATH_SURFACE_EDGES_CACHE_WAYS];
-} path_surface_edges_cache __attribute__((aligned(64)));
+	unsigned long pathfinding_generation;
+};
+
+/* (port) the tick's (68 KB of BSS) */
+static struct path_surface_edges_cache_set path_surface_edges_tick_sets[PATH_SURFACE_EDGES_CACHE_SETS]
+	__attribute__((aligned(64)));
+static struct path_surface_edges_cache_way path_surface_edges_tick_ways[PATH_SURFACE_EDGES_CACHE_SETS]
+	[PATH_SURFACE_EDGES_CACHE_WAYS] __attribute__((aligned(128)));
+static struct path_surface_edges_cache_data path_surface_edges_cache =
+{
+	PATH_SURFACE_EDGES_CACHE_SETS,
+	path_surface_edges_tick_sets,
+	path_surface_edges_tick_ways,
+};
+/* (port) the offline bots' helper thread's own, allocated as it starts
+(path_search_thread_is_helper; NULL: its edges built each time) */
+static struct path_surface_edges_cache_data *path_surface_edges_helper_cache;
 #endif
 
 /* ---------- public code */
 
 #ifdef HALO_LINUX
+static void path_surface_edges_cache_flush(
+	struct path_surface_edges_cache_data *cache);
+
+/* (port) bumped by the offline bots (bots.c) whenever they change their copy
+of the walkable surfaces, which their helper thread's searches read: its cache
+of edges, which hold the neighbours' pathfinding flags, is emptied when it
+next looks (the tick's cache is as it was) */
+volatile unsigned long path_pathfinding_surfaces_generation;
+
 void path_search_thread_is_helper(
 	void)
 {
 	path_search_on_helper_thread = TRUE;
+	if (!path_surface_edges_helper_cache)
+	{
+		static struct path_surface_edges_cache_data helper_cache;
+		/* (the ways aligned to their 128 bytes) */
+		long set_count = PATH_SURFACE_EDGES_HELPER_CACHE_SETS;
+		unsigned long ways_size = set_count * sizeof(struct path_surface_edges_cache_way) * PATH_SURFACE_EDGES_CACHE_WAYS;
+		byte *block = (byte *)malloc(ways_size + set_count * sizeof(struct path_surface_edges_cache_set) + 128);
+
+		if (block)
+		{
+			byte *ways = (byte *)(((unsigned long)block + 127) & ~(unsigned long)127);
+
+			helper_cache.set_count = set_count;
+			helper_cache.ways = (struct path_surface_edges_cache_way (*)[PATH_SURFACE_EDGES_CACHE_WAYS])ways;
+			helper_cache.sets = (struct path_surface_edges_cache_set *)(ways + ways_size);
+			path_surface_edges_cache_flush(&helper_cache);
+			path_surface_edges_helper_cache = &helper_cache;
+		}
+	}
 
 	return;
 }
@@ -388,16 +440,11 @@ void paths_dispose(
 	return;
 }
 
-#ifdef HALO_LINUX
-static void path_surface_edges_cache_flush(
-	void);
-#endif
-
 void paths_initialize_for_new_map(
 	void)
 {
 #ifdef HALO_LINUX
-	path_surface_edges_cache_flush();
+	path_surface_edges_cache_flush(&path_surface_edges_cache);
 #endif
 	return;
 }
@@ -406,7 +453,7 @@ void paths_dispose_from_old_map(
 	void)
 {
 #ifdef HALO_LINUX
-	path_surface_edges_cache_flush();
+	path_surface_edges_cache_flush(&path_surface_edges_cache);
 #endif
 	return;
 }
@@ -1510,15 +1557,15 @@ static short build_path_edges_for_surface(
 }
 
 #ifdef HALO_LINUX
-/* (port) the cache emptied: every way of every set, and the map it was made from */
+/* (port) a cache emptied: every way of every set, and the map it was made from */
 static void path_surface_edges_cache_flush(
-	void)
+	struct path_surface_edges_cache_data *cache)
 {
-	short set_index;
+	long set_index;
 
-	for (set_index = 0; set_index < PATH_SURFACE_EDGES_CACHE_SETS; set_index++)
+	for (set_index = 0; set_index < cache->set_count; set_index++)
 	{
-		struct path_surface_edges_cache_set *set = &path_surface_edges_cache.sets[set_index];
+		struct path_surface_edges_cache_set *set = &cache->sets[set_index];
 		short way_index;
 
 		for (way_index = 0; way_index < PATH_SURFACE_EDGES_CACHE_WAYS; way_index++)
@@ -1527,12 +1574,26 @@ static void path_surface_edges_cache_flush(
 			set->recent_ways[way_index] = (byte)way_index;
 		}
 	}
-	path_surface_edges_cache.structure = NULL;
-	path_surface_edges_cache.bsp = NULL;
-	path_surface_edges_cache.pathfinding_surfaces = NULL;
-	path_surface_edges_cache.map_generation = 0;
+	cache->structure = NULL;
+	cache->bsp = NULL;
+	cache->pathfinding_surfaces = NULL;
+	cache->map_generation = 0;
+	cache->pathfinding_generation = 0;
 
 	return;
+}
+
+/* (port) this thread's cache: the tick's, or the helper thread's own; NULL
+for none (a search run again by HALO_AI_PATH_STATE_VERIFY builds its edges) */
+static __inline__ struct path_surface_edges_cache_data *path_surface_edges_thread_cache(
+	void)
+{
+	if (path_search_building_edges)
+	{
+		return NULL;
+	}
+
+	return path_search_on_helper_thread ? path_surface_edges_helper_cache : &path_surface_edges_cache;
 }
 
 /* (port) hints (__builtin_prefetch) for a surface's edges the search will
@@ -1544,9 +1605,11 @@ neither), so the cache holds what it would without them */
 static __inline__ void path_surface_edges_hint_set(
 	long surface_index)
 {
-	if (!path_search_on_helper_thread && !path_search_building_edges && surface_index >= 0)
+	struct path_surface_edges_cache_data *cache = path_surface_edges_thread_cache();
+
+	if (cache && surface_index >= 0)
 	{
-		__builtin_prefetch(&path_surface_edges_cache.sets[surface_index & (PATH_SURFACE_EDGES_CACHE_SETS - 1)]);
+		__builtin_prefetch(&cache->sets[surface_index & (cache->set_count - 1)]);
 	}
 
 	return;
@@ -1556,20 +1619,20 @@ static void path_surface_edges_hint_way(
 	struct structure_bsp const *structure,
 	long surface_index)
 {
+	struct path_surface_edges_cache_data *cache = path_surface_edges_thread_cache();
 	struct path_surface_edges_cache_set const *set;
 	short way_index;
 
-	if (path_search_on_helper_thread || path_search_building_edges || surface_index < 0 ||
-		path_surface_edges_cache.structure != structure)
+	if (!cache || surface_index < 0 || cache->structure != structure)
 	{
 		return;
 	}
-	set = &path_surface_edges_cache.sets[surface_index & (PATH_SURFACE_EDGES_CACHE_SETS - 1)];
+	set = &cache->sets[surface_index & (cache->set_count - 1)];
 	for (way_index = 0; way_index < PATH_SURFACE_EDGES_CACHE_WAYS; way_index++)
 	{
 		if (set->surface_indices[way_index] == surface_index)
 		{
-			char const *way = (char const *)&path_surface_edges_cache.ways[set - path_surface_edges_cache.sets][way_index];
+			char const *way = (char const *)&cache->ways[set - cache->sets][way_index];
 
 			/* (two of the Pi's lines, four of the Vita's) */
 			__builtin_prefetch(way);
@@ -1602,12 +1665,18 @@ made (path_surface_edges_hint_set). 128 sets of four ways, the least recently
 used made again: 68 KB of BSS (the program's data stays within its megabyte,
 so the memory window does not move). Surfaces of more edges than a way holds
 are built each time. The offline bots' helper thread, which searches beside
-the tick, builds its own (the cache is the tick's) */
+the tick, keeps a cache of its own the same way (512 sets: its searches
+flood far more surfaces than a firing position's): they read the bots' copy
+of the walkable surfaces (bots.c), whose pathfinding flags the bots
+change as they learn what is in their way (path_pathfinding_surfaces_generation
+bumped), and a change empties it as the next surface is asked for, so each
+way it holds is what building the edges then makes */
 static short path_surface_edges(
 	struct structure_bsp const *structure,
 	long surface_index,
 	struct path_edge *edges)
 {
+	struct path_surface_edges_cache_data *cache = path_surface_edges_thread_cache();
 	struct collision_bsp const *bsp;
 	struct path_surface_edges_cache_set *set;
 	struct path_surface_edges_cache_way *way;
@@ -1615,8 +1684,9 @@ static short path_surface_edges(
 	short recent_index;
 	short edge_count;
 	short edge_index;
+	unsigned long pathfinding_generation;
 
-	if (path_search_on_helper_thread || path_search_building_edges || surface_index < 0)
+	if (!cache || surface_index < 0)
 	{
 		return build_path_edges_for_surface(structure, surface_index, edges);
 	}
@@ -1625,19 +1695,24 @@ static short path_surface_edges(
 		&structure->collision_bsp,
 		0,
 		struct collision_bsp);
-	if (path_surface_edges_cache.structure != structure ||
-		path_surface_edges_cache.bsp != bsp ||
-		path_surface_edges_cache.pathfinding_surfaces != structure->pathfinding_surfaces.address ||
-		path_surface_edges_cache.map_generation != halo_map_generation)
+	/* (the tick's cache keeps no generation: its searches are the
+	campaign's, over the structure's own surfaces, as before) */
+	pathfinding_generation = cache == path_surface_edges_helper_cache ? path_pathfinding_surfaces_generation : 0;
+	if (cache->structure != structure ||
+		cache->bsp != bsp ||
+		cache->pathfinding_surfaces != structure->pathfinding_surfaces.address ||
+		cache->map_generation != halo_map_generation ||
+		cache->pathfinding_generation != pathfinding_generation)
 	{
-		path_surface_edges_cache_flush();
-		path_surface_edges_cache.structure = structure;
-		path_surface_edges_cache.bsp = bsp;
-		path_surface_edges_cache.pathfinding_surfaces = structure->pathfinding_surfaces.address;
-		path_surface_edges_cache.map_generation = halo_map_generation;
+		path_surface_edges_cache_flush(cache);
+		cache->structure = structure;
+		cache->bsp = bsp;
+		cache->pathfinding_surfaces = structure->pathfinding_surfaces.address;
+		cache->map_generation = halo_map_generation;
+		cache->pathfinding_generation = pathfinding_generation;
 	}
 
-	set = &path_surface_edges_cache.sets[surface_index & (PATH_SURFACE_EDGES_CACHE_SETS - 1)];
+	set = &cache->sets[surface_index & (cache->set_count - 1)];
 	for (recent_index = 0; recent_index < PATH_SURFACE_EDGES_CACHE_WAYS; recent_index++)
 	{
 		way_index = set->recent_ways[recent_index];
@@ -1649,7 +1724,7 @@ static short path_surface_edges(
 
 	if (recent_index < PATH_SURFACE_EDGES_CACHE_WAYS)
 	{
-		way = &path_surface_edges_cache.ways[set - path_surface_edges_cache.sets][way_index];
+		way = &cache->ways[set - cache->sets][way_index];
 		edge_count = way->edge_count;
 		for (edge_index = 0; edge_index < edge_count; edge_index++)
 		{
@@ -1686,7 +1761,7 @@ static short path_surface_edges(
 		}
 		recent_index = PATH_SURFACE_EDGES_CACHE_WAYS - 1;
 		way_index = set->recent_ways[recent_index];
-		way = &path_surface_edges_cache.ways[set - path_surface_edges_cache.sets][way_index];
+		way = &cache->ways[set - cache->sets][way_index];
 		set->surface_indices[way_index] = surface_index;
 		way->edge_count = edge_count;
 		for (edge_index = 0; edge_index < edge_count; edge_index++)

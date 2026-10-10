@@ -1019,6 +1019,7 @@ static void bots_paths_release(void)
 	if (bots_paths.walkable)
 		free(bots_paths.walkable);
 	bots_paths.walkable = NULL;
+	path_pathfinding_surfaces_generation++;
 }
 
 /* the surface's corners (at most BOTS_SURFACE_CORNERS), from its ring of
@@ -1122,6 +1123,8 @@ static boolean bots_paths_copy(void)
 	csmemcpy(bots_paths.walkable, structure->pathfinding_surfaces.address, (size_t)count);
 	bots_paths.structure = *structure;
 	bots_paths.structure.pathfinding_surfaces.address = bots_paths.walkable;
+	/* (path.c: the helper's cache of surfaces' edges made again) */
+	path_pathfinding_surfaces_generation++;
 	pthread_mutex_lock(&bots_helper.lock);
 	bots_paths.source = structure;
 	bots_paths.active = TRUE;
@@ -1187,6 +1190,8 @@ static void bots_paths_close_object(long object_index, char const *why)
 		}
 	}
 	bots_paths.closed_count += closed;
+	if (closed)
+		path_pathfinding_surfaces_generation++;
 	platform_log("bots: %s %s at (%.1f %.1f %.1f): %ld walkable surfaces closed (%.1f ms)", why,
 		tag_get_name(object->definition_index), object->object.bounding_sphere_center.x,
 		object->object.bounding_sphere_center.y, object->object.bounding_sphere_center.z, closed,
@@ -1260,6 +1265,7 @@ static void bots_paths_scan(void)
 		{
 			bots_paths.walkable[surface_index] &= (byte)~FLAG(BOTS_PATHFINDING_WALKABLE_BIT);
 			bots_paths.roofed_count++;
+			path_pathfinding_surfaces_generation++;
 		}
 	}
 	bots_paths.scan_us += vita_host_time_us() - started;
