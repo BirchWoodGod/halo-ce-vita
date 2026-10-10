@@ -145,7 +145,7 @@
 "Which Vita button each Xbox button is on, in play" = "Qué botón de la Vita es cada botón de Xbox, al jugar"
 "Front and rear touch zones as Xbox buttons" = "Zonas táctiles delanteras y traseras como botones de Xbox"
 "Gyro button, sensitivity, direction" = "Botón de giro, sensibilidad, dirección"
-"Stick deadzone, Reset controls, Show dev settings" = "Zona muerta, Restablecer controles, Opciones de desarrollo"
+"Stick deadzone, Reset controls, dev settings, Update channel" = "Zona muerta, Restablecer controles, Desarrollo, Canal de actualización"
 
 # ---------- Controls > Button layout (the Xbox buttons keep their names)
 "Button icons" = "Iconos de botones"
@@ -238,7 +238,8 @@
 "Show dev settings" = "Opciones de desarrollo"
 "The Dev tab: switches for testers, Save report" = "La pestaña Dev: opciones para testers, Guardar informe"
 "Version %s" = "Versión %s"
-# (the update check: Controls > Advanced, and the main menu's corner)
+# (the update check: General's first rows, its Update channel on General >
+# Advanced, and the main menu's corner)
 "Update channel" = "Canal de actualización"
 "Experimental" = "Experimental"
 "Stable" = "Estable"
@@ -248,6 +249,7 @@
 "Asks GitHub for the newest version; nothing is downloaded" = "Pregunta a GitHub por la última versión; no descarga nada"
 "Checking..." = "Comprobando..."
 "Up to date (%s)" = "Actualizado (%s)"
+"Up to date" = "Actualizado"
 "Update available: %s" = "Actualización disponible: %s"
 "Update: %s" = "Nueva: %s"
 "Couldn't check: no connection" = "No se pudo comprobar: sin conexión"

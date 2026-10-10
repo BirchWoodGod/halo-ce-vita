@@ -3,10 +3,10 @@ VITA_SETTINGS.C
 
 The settings panel: hold SELECT and START together for a moment, in play
 or in the menus, and a panel over the game shows the Vita's settings in
-four tabs that L and R switch between: Graphics, Controls, Audio and
-Multiplayer, and Dev once "Show dev settings" (Controls, Advanced) is on.
+four tabs that L and R switch between: Graphics, General, Audio and
+Multiplayer, and Dev once "Show dev settings" (General, Advanced) is on.
 No tab is longer than a screen: the rows few players change open from a
-row marked > as a page of their own (Graphics' Advanced; Controls' Button
+row marked > as a page of their own (Graphics' Advanced; General's Button
 layout, Touch zones, Gyro settings and Advanced; Multiplayer's Play and
 Modded maps; Dev's A/B switches), and
 circle goes back.
@@ -47,8 +47,13 @@ particles and the AI's think rate, under Advanced, and Audio's sound
 updates and occlusion). Quality is the Xbox game's every one. Rows marked *
 apply after a restart (the sound voices, the network, most dev switches).
 
-Controls has the rows players change (look, crouch, gyro aiming, the rear
-touch guard) and three pages laid out as the Xbox controller. Button
+General (TAB_CONTROLS) starts with the update check (update_check.h):
+Check for updates, its first row, asks GitHub in the background and shows
+its answer beside the build's version on the lines under it ("Version
+1.1.0-beta.3 - Up to date"; a newer version in amber with where to get it),
+where a player sees it as the tab opens. Then the rows players change (look,
+crouch, gyro aiming, the rear touch guard) and three pages laid out as the
+Xbox controller. Button
 layout puts each Xbox button (A B X Y, Black, White, the triggers, the
 sticks' clicks, Back) on a Vita button of the player's choosing, in play.
 Touch zones: each zone (the front screen's top corners and its left and
@@ -68,11 +73,10 @@ the view turns as far as the Vita), vertical direction and whether turning
 is the Vita's yaw or its roll; a line shows the gyroscope's rates now and
 whether its bias was learnt (it is, each time the Vita lies still for a
 second). Advanced: the sticks' deadzone, Reset controls (look, crouch,
-buttons and touch back as shipped; the gyro's rows and Show dev settings
-stay), Show dev settings, then the update check (update_check.h): Update
-channel (Experimental or Stable; a pre-release build's Stable greyed out:
-choice_disabled) and Check for updates, which asks GitHub in the background
-and shows its answer under the build's version.
+buttons and touch back as shipped; the gyro's rows, Show dev settings and
+the Update channel stay), Show dev settings, then the Update channel that
+Check for updates looks at (Experimental or Stable; a pre-release build's
+Stable greyed out: choice_disabled).
 
 Multiplayer is for playing with other Vitas: Connection, the ad hoc room
 (with the connection Ad hoc), Join with a code (see below) and Modded maps,
@@ -387,8 +391,12 @@ static struct setting settings[] = {
 	{ "Sound updates", "HALO_SOUND_MANAGER_DIVISOR", 0, 3, { "1", "2", "3" },
 		{ "Every frame", "Every 2nd", "Every 3rd" }, "Sounds placed and started; lower is faster", 1, TAB_AUDIO },
 
-	/* (Controls: the rows players change, then the pages laid out as the
-	Xbox controller) */
+	/* (General: first the update check, update_check.h - nothing asked of
+	the network until Check for updates is pressed, nothing downloaded; the
+	build's version and the answer on the lines under it, page_lines - then
+	the rows players change, then the pages laid out as the Xbox controller) */
+	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; nothing is downloaded",
+		0, TAB_CONTROLS, KIND_ACTION, ACTION_UPDATE_CHECK },
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
 		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2, TAB_CONTROLS },
 	{ "Invert look", "XV_INVERT_Y", 0, 2, { "0", "1" }, { "No", "Yes" }, "Reverse the right stick's up and down", 0,
@@ -406,7 +414,8 @@ static struct setting settings[] = {
 	PAGE_ROW("Button layout", "Which Vita button each Xbox button is on, in play", TAB_CONTROLS, PAGE_BUTTONS),
 	PAGE_ROW("Touch zones", "Front and rear touch zones as Xbox buttons", TAB_CONTROLS, PAGE_TOUCH),
 	PAGE_ROW("Gyro settings", "Gyro button, sensitivity, direction", TAB_CONTROLS, PAGE_GYRO),
-	PAGE_ROW("Advanced", "Stick deadzone, Reset controls, Show dev settings", TAB_CONTROLS, PAGE_CONTROLS_ADVANCED),
+	PAGE_ROW("Advanced", "Stick deadzone, Reset controls, dev settings, Update channel", TAB_CONTROLS,
+		PAGE_CONTROLS_ADVANCED),
 	/* (the game's button icons: the Xbox's, or the Vita button each is on,
 	in the menus and in play: vita_controls.h; not part of the layout,
 	which Reset controls and the page's summary leave out) */
@@ -465,16 +474,13 @@ static struct setting settings[] = {
 		PAGE_CONTROLS_ADVANCED, KIND_ACTION, ACTION_RESET_CONTROLS },
 	{ "Show dev settings", "HALO_DEV_SETTINGS", 0, 2, { "0", "1" }, { "Off", "On" },
 		"The Dev tab: switches for testers, Save report", 0, PAGE_CONTROLS_ADVANCED },
-	/* (the update check, update_check.h: nothing asked of the network until
-	Check for updates is pressed, nothing downloaded; its answer on a line
-	below, page_lines. Experimental looks at pre-releases and releases,
-	Stable at releases only; a pre-release build is on Experimental, its
-	Stable greyed out (choice_disabled) and a saved Stable ignored
-	(vita_settings_load); a release build starts on Stable) */
+	/* (the channel Check for updates, on the tab, looks at: Experimental at
+	pre-releases and releases, Stable at releases only; a pre-release build
+	is on Experimental, its Stable greyed out (choice_disabled) and a saved
+	Stable ignored (vita_settings_load); a release build starts on Stable.
+	Rarely changed, so here rather than beside Check for updates) */
 	{ "Update channel", "HALO_UPDATE_CHANNEL", 0, 2, { "experimental", "stable" }, { "Experimental", "Stable" },
 		"Experimental: betas too. Stable: releases only", 1, PAGE_CONTROLS_ADVANCED },
-	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; nothing is downloaded",
-		0, PAGE_CONTROLS_ADVANCED, KIND_ACTION, ACTION_UPDATE_CHECK },
 
 	/* (Multiplayer: the connection, the ad hoc room (Ad hoc), a code typed
 	in (Online, for a Vita without the in-game PC menus: setting_shown), the
@@ -1846,42 +1852,65 @@ static int tab_shown(int index)
 	return index != TAB_DEV || choice_of("HALO_DEV_SETTINGS");
 }
 
-/* the update check's answer (Controls > Advanced, under the version): one
-line, two when a newer version is out (where to get it: always this fixed
-address, never one from the answer); their count */
+/* the info lines under Check for updates (General): the build's version
+(for a report too: halo.log's first line has it) and the update check's
+answer - on one line while both fit ("Version 1.1.0-beta.3 - Up to date"),
+else the answer on a line of its own; a newer version in amber, on two lines
+under the version, with where to get it (always this fixed address, never
+one from the answer); their count */
 static int update_lines(struct line *lines)
 {
-	char version[UPDATE_VERSION_SIZE];
+	char version[UPDATE_VERSION_SIZE], answer[96];
 	int status = update_check_status(version, sizeof(version));
 	int count = 0;
 
-	lines[0].type = LINE_INFO;
+	lines[count].type = LINE_INFO;
+	snprintf(lines[count++].text, sizeof(lines[0].text), T("Version %s"), HALO_VITA_VERSION);
+	answer[0] = 0;
 	switch (status)
 	{
 	case UPDATE_STATUS_CHECKING:
-		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Checking..."));
+		snprintf(answer, sizeof(answer), "%s", T("Checking..."));
 		break;
 	case UPDATE_STATUS_UP_TO_DATE:
-		snprintf(lines[count++].text, sizeof(lines[0].text), T("Up to date (%s)"), version);
+		snprintf(answer, sizeof(answer), "%s", T("Up to date"));
 		break;
 	case UPDATE_STATUS_AVAILABLE:
 		/* (in amber: '!') */
-		lines[0].text[0] = '!';
+		lines[count].type = LINE_INFO;
+		lines[count].text[0] = '!';
 		snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, T("Update available: %s"), version);
 		lines[count].type = LINE_INFO;
 		snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", UPDATE_RELEASES_PAGE);
-		break;
+		return count;
 	case UPDATE_STATUS_NO_CONNECTION:
-		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Couldn't check: no connection"));
+		snprintf(answer, sizeof(answer), "%s", T("Couldn't check: no connection"));
 		break;
 	case UPDATE_STATUS_FAILED:
-		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Couldn't check right now"));
+		snprintf(answer, sizeof(answer), "%s", T("Couldn't check right now"));
 		break;
 	}
+	if (!answer[0])
+		return count;
+	/* (46 characters a line: the panel's width, in characters, not UTF-8's
+	bytes) */
+	if (lang_utf8_length(lines[0].text) + 3 + lang_utf8_length(answer) <= 46)
+	{
+		size_t length = strlen(lines[0].text);
+
+		snprintf(lines[0].text + length, sizeof(lines[0].text) - length, " - %s", answer);
+		return count;
+	}
+	lines[count].type = LINE_INFO;
+	if (status == UPDATE_STATUS_UP_TO_DATE)
+		snprintf(lines[count++].text, sizeof(lines[0].text), T("Up to date (%s)"), version);
+	else
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", answer);
 	return count;
 }
 
-/* the lines of the page shown: its rows, then the gyroscope's line (Gyro
+/* the lines of the page shown: its rows (General's first, Check for updates,
+with the version and the answer under it), then the gyroscope's line (Gyro
 settings) or the maps (Modded maps) */
 static int page_lines(struct line *lines)
 {
@@ -1892,19 +1921,16 @@ static int page_lines(struct line *lines)
 		{
 			lines[count].type = LINE_SETTING;
 			lines[count++].index = index;
+			/* (General: the version and the update check's answer right
+			under Check for updates, its first row) */
+			if (settings[index].action == ACTION_UPDATE_CHECK)
+				count += update_lines(lines + count);
 		}
 	if (page == PAGE_GYRO)
 	{
 		/* (the gyroscope's rates now: redrawn twice a second) */
 		lines[count].type = LINE_INFO;
 		vita_gyro_status(lines[count++].text, sizeof(lines[0].text));
-	}
-	if (page == PAGE_CONTROLS_ADVANCED)
-	{
-		/* (which build this is, for a report: halo.log's first line has it too) */
-		lines[count].type = LINE_INFO;
-		snprintf(lines[count++].text, sizeof(lines[0].text), T("Version %s"), HALO_VITA_VERSION);
-		count += update_lines(lines + count);
 	}
 	if (page == PAGE_MAPS)
 	{
@@ -2392,8 +2418,10 @@ static void show_list(void)
 
 		if (line->type == LINE_MAP && (line->index < map_scroll || line->index >= map_scroll + MAP_LINES))
 			continue;
-		/* (Modded maps: a gap between its switch and the maps) */
-		if (page == PAGE_MAPS && line->type != LINE_SETTING && index && lines[index - 1].type == LINE_SETTING)
+		/* (Modded maps: a gap between its switch and the maps; General:
+		between the update check's lines and the controls' rows) */
+		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
+			(page == TAB_CONTROLS && line->type == LINE_SETTING && lines[index - 1].type == LINE_INFO)))
 		{
 			length += snprintf(text + length, sizeof(text) - length, "\n");
 			number++;
@@ -3113,9 +3141,9 @@ static int question_progress_input(unsigned long pressed)
     return 0;
 }
 
-/* the Controls tab's rows as shipped, its pages' too (but the gyro's rows
-and Show dev settings): the touch zones Off, the buttons in Xita's layout,
-look and crouch as they were */
+/* the General tab's control rows as shipped, its pages' too (but the gyro's
+rows, Show dev settings and the Update channel, which are no controls): the
+touch zones Off, the buttons in Xita's layout, look and crouch as they were */
 static void reset_controls(void)
 {
 	int index;
@@ -3126,7 +3154,7 @@ static void reset_controls(void)
 
 		if (pages[setting->page].tab != TAB_CONTROLS || setting->kind != KIND_CHOICE ||
 			strcmp(setting->variable, "HALO_DEV_SETTINGS") == 0 || strncmp(setting->variable, "HALO_GYRO", 9) == 0 ||
-			strcmp(setting->variable, "HALO_BUTTON_ICONS") == 0)
+			strcmp(setting->variable, "HALO_BUTTON_ICONS") == 0 || strcmp(setting->variable, "HALO_UPDATE_CHANNEL") == 0)
 			continue;
 		setting->choice = shipped_choice[index];
 		apply_value(setting);

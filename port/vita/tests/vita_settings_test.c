@@ -533,6 +533,42 @@ static int menu_fits(void)
 	return 1;
 }
 
+/* the settings panel's lines fit its height (vita_gxm.c menu_build, at
+960x544: the rows from 76 pixels down, 28 a row, 36 for a page's title,
+14 for a gap; the chosen row's bar, 22 pixels under its line's top, above
+the rule at 468 over the help and the buttons): 14 lines on a tab, 12 on a
+page; a screen without a tab bar fits by its own height */
+static int menu_height_fits(void)
+{
+	const char *at = menu;
+	int y = 76, last = 0, first = 1;
+
+	if (menu[0] != '\t')
+		return 1;
+	while (*at)
+	{
+		int bytes = (int)strcspn(at, "\n");
+
+		if (first)
+			first = 0;
+		else if (at[0] == '\x01' || at[0] == '\x05' || at[0] == '\x06')
+			;
+		else if (at[0] == '\x03')
+			y += 36;
+		else if (!bytes)
+			y += 14;
+		else
+		{
+			last = y;
+			y += 28;
+		}
+		at += bytes + (at[bytes] == '\n');
+	}
+	if (last + 22 > 468)
+		printf("too many lines: the last row at %d pixels\n", last);
+	return last + 22 <= 468;
+}
+
 /* the line that starts with `prefix` ("" if none) */
 static const char *menu_find(const char *prefix, char *line, int size)
 {
@@ -582,6 +618,8 @@ static int frame_touch(unsigned long buttons, unsigned long touch)
 static void test_controls_tab(void)
 {
 	struct vita_controls_config config;
+	struct setting *channel;
+	int channel_kept;
 	char diagram[16], line[128];
 	int longest, count, index;
 
@@ -593,20 +631,28 @@ static void test_controls_tab(void)
 	to_tab("General");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu_line(1, line, sizeof(line)), "Look sensitivity\x02", 17) &&
-		!strncmp(menu_line(2, line, sizeof(line)), "Invert look\x02", 12) &&
-		!strncmp(menu_line(3, line, sizeof(line)), "Crouch\x02", 7) &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Gyro aiming\x02", 12) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Rear touch guard\x02", 17) &&
-		!strcmp(menu_line(6, line, sizeof(line)), "Button layout\x02  As shipped  >") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "Touch zones\x02  Off  >") &&
-		!strcmp(menu_line(8, line, sizeof(line)), "Gyro settings\x02  >") &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Advanced\x02  >"),
-		"General: look, invert, crouch, gyro aiming, rear guard; then Button layout, Touch zones, Gyro settings, Advanced");
+	check(!strcmp(menu_line(1, line, sizeof(line)), "Check for updates\x02  >") &&
+		!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strcmp(menu_line(3, line, sizeof(line)), "") &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Look sensitivity\x02", 17) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Invert look\x02", 12) &&
+		!strncmp(menu_line(6, line, sizeof(line)), "Crouch\x02", 7) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "Gyro aiming\x02", 12) &&
+		!strncmp(menu_line(8, line, sizeof(line)), "Rear touch guard\x02", 17) &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Button layout\x02  As shipped  >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "Touch zones\x02  Off  >") &&
+		!strcmp(menu_line(11, line, sizeof(line)), "Gyro settings\x02  >") &&
+		!strcmp(menu_line(12, line, sizeof(line)), "Advanced\x02  >"),
+		"General: Check for updates, the version under it, a gap; look, invert, crouch, gyro aiming, rear guard; "
+		"then Button layout, Touch zones, Gyro settings, Advanced");
+	check(to_line("Check for updates") && menu_selected == 1 &&
+		strstr(menu, "\n\x05" "Asks GitHub for the newest version; nothing is downloaded\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
 	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
 		!strstr(menu, "\nStick deadzone\x02") && !strstr(menu, "\nShow dev settings\x02"),
 		"General: the zones, the buttons, the gyro's details and the rare rows on their pages");
-	check(menu_rows() == 9 && count == 12 && menu_fits(), "General: 9 rows (and the tab bar, help, buttons), each fits");
+	check(menu_rows() == 10 && count == 15 && menu_fits() && menu_height_fits(),
+		"General: 10 rows, the version line and a gap (and the tab bar, help, buttons), each fits");
 	check(strstr(menu, "\nRear touch guard\x02< Normal >") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal"),
 		"Rear touch guard: Normal as shipped (a 1.0 settings.txt has none)");
 	check(!diagram[0], "General: no zone diagram");
@@ -706,18 +752,27 @@ static void test_controls_tab(void)
 	/* Advanced: the deadzone, Reset controls (Show dev settings kept) */
 	open_panel();
 	check(strstr(menu, "*General") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
+	to_line("Advanced");
+	check(strstr(menu, "\n\x05" "Stick deadzone, Reset controls, dev settings, Update channel\n") != NULL,
+		"the Advanced row's help says what is there");
 	check(open_page("Advanced") && strstr(menu, "\n\x03" "General > Advanced\n") &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Stick deadzone\x02", 15) &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Reset controls\x02  >") &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Update channel\x02", 15) &&
-		!strcmp(menu_line(6, line, sizeof(line)), "Check for updates\x02  >") && menu_rows() == 5 && menu_fits(),
-		"General, Advanced: Stick deadzone, Reset controls, Show dev settings, Update channel, Check for updates");
-	check(strstr(menu, "\n\x04" "Version " HALO_VITA_VERSION "\n") != NULL,
-		"General, Advanced: the build's version (vita_version.h) under the rows");
+		!strncmp(menu_line(5, line, sizeof(line)), "Update channel\x02", 15) && menu_rows() == 4 && menu_fits() &&
+		!strstr(menu, "Check for updates") && !strstr(menu, "Version "),
+		"General, Advanced: Stick deadzone, Reset controls, Show dev settings, Update channel (Check for updates and "
+		"the version on the tab)");
 	to_line("Reset controls");
 	check(strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: back") != NULL, "an action row's buttons: cross selects");
+	/* (the Update channel, on the same page, is no control: kept) */
+	channel = setting_named("HALO_UPDATE_CHANNEL");
+	channel_kept = channel->choice;
+	channel->choice = !shipped_choice[channel - settings];
 	press(VITA_BUTTON_CROSS);
+	check(channel->choice != shipped_choice[channel - settings], "Reset controls keeps the Update channel");
+	channel->choice = channel_kept;
+	apply_value(channel);
 	printf("%s\n--\n", menu);
 	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "off") && !strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "off") &&
 		!strcmp(getenv("HALO_XBOX_WHITE"), "right") && !strcmp(getenv("XV_LOOK_SENS"), "100") &&
@@ -1553,7 +1608,7 @@ static int every_page_fits(int *shown)
 			page_selected[page] = line;
 			show();
 			(*shown)++;
-			if (!menu_fits() || !tab_bar_fits())
+			if (!menu_fits() || !tab_bar_fits() || !menu_height_fits())
 				fits = 0;
 			if (lines[line].type == LINE_SETTING && settings[lines[line].index].kind == KIND_CHOICE)
 			{
@@ -1617,6 +1672,40 @@ static void test_languages(void)
 	check(every_page_fits(&shown), "Spanish: every page, each line chosen, each row's every value fits");
 	printf("(%d pages shown)\n", shown);
 	vita_settings_set("HALO_DEV_SETTINGS", "0");
+	/* (General with each answer of the update check: the version and the
+	answer still fit, beside each other or not, and so do the tab's rows) */
+	{
+		static const int statuses[] = { UPDATE_STATUS_NONE, UPDATE_STATUS_CHECKING, UPDATE_STATUS_UP_TO_DATE,
+			UPDATE_STATUS_AVAILABLE, UPDATE_STATUS_NO_CONNECTION, UPDATE_STATUS_FAILED };
+		int fits = 1;
+
+		tab = page = TAB_CONTROLS;
+		page_selected[page] = 0;
+		snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.10");
+		for (index = 0; index < (int)(sizeof(statuses) / sizeof(statuses[0])); index++)
+		{
+			update_status_value = statuses[index];
+			show();
+			if (!menu_fits() || !menu_height_fits() || menu_rows() != 10 ||
+				strncmp(menu_line(1, line, sizeof(line)), "Buscar actualizaciones\x02", 23) ||
+				strncmp(menu_line(2, line, sizeof(line)), "\x04Versión ", 10))
+			{
+				printf("(update status %d)\n%s\n--\n", statuses[index], menu);
+				fits = 0;
+			}
+			if (statuses[index] == UPDATE_STATUS_AVAILABLE || statuses[index] == UPDATE_STATUS_UP_TO_DATE)
+				printf("%s\n--\n", menu);
+		}
+		check(fits && update_status_value == UPDATE_STATUS_FAILED &&
+			strstr(menu, "No se pudo comprobar ahora\n\n"),
+			"Spanish: General with each answer of the update check fits, Buscar actualizaciones first");
+		update_status_value = UPDATE_STATUS_UP_TO_DATE;
+		show();
+		check(strstr(menu, "\n\x04Versión " HALO_VITA_VERSION " - Actualizado\n") != NULL,
+			"Spanish: up to date beside the version");
+		update_status_value = UPDATE_STATUS_NONE;
+		update_version_value[0] = 0;
+	}
 	/* (the screens actions open, and the messages over the game) */
 	tab = page = TAB_MULTIPLAYER;
 	screen = SCREEN_CODE;
@@ -1706,7 +1795,8 @@ static void test_languages(void)
 	vita_settings_set("HALO_LANGUAGE", "auto");
 }
 
-/* ---------- the update check's rows (General > Advanced) */
+/* ---------- the update check: General's first rows, its channel on General >
+Advanced */
 
 /* the page redrawn (a frame after half a second) */
 static void redraw(void)
@@ -1723,7 +1813,7 @@ static void test_updates(void)
 	open_panel();
 	to_tab("General");
 	check(open_page("Advanced"), "General, Advanced opens");
-	check(to_line("Update channel"), "the Update channel row");
+	check(to_line("Update channel"), "the Update channel row, on Advanced");
 	printf("%s\n--\n", menu);
 	if (prerelease)
 	{
@@ -1764,32 +1854,48 @@ static void test_updates(void)
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_UPDATE_CHANNEL"), "stable"), "back to Stable");
 	}
-	/* Check for updates: in the background, its answer under the version */
-	check(to_line("Check for updates") && !update_requests, "nothing asked before the press");
+	/* Check for updates: General's first row, in the background, its
+	answer beside the version under it; the controls' rows after a gap */
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*General") && !strstr(menu, "\n\x03") && to_line("Check for updates") && menu_selected == 1 &&
+		!update_requests, "back on General: Check for updates its first row, nothing asked before the press");
+	check(!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strcmp(menu_line(3, line, sizeof(line)), "") && !strncmp(menu_line(4, line, sizeof(line)), "Look sensitivity\x02", 17),
+		"no look yet: the version alone under it, then a gap and the controls");
 	press(VITA_BUTTON_CROSS);
 	redraw();
-	check(update_requests == 1 && strstr(menu, "\n\x04" "Checking...\n") && menu_fits(), "pressed: Checking...");
+	check(update_requests == 1 && !strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Checking...") &&
+		menu_fits() && menu_height_fits(), "pressed: Checking..., beside the version");
 	update_status_value = UPDATE_STATUS_AVAILABLE;
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	redraw();
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\n") &&
-		menu_fits(), "an update: the version and where to get it, in amber");
+	check(strstr(menu, "\nCheck for updates\x02  >\n\x04" "Version " HALO_VITA_VERSION "\n"
+		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\n\nLook sensitivity\x02") &&
+		menu_fits() && menu_height_fits() && menu_rows() == 10,
+		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits");
+	to_line("Look sensitivity");
+	press(VITA_BUTTON_UP);
+	check(menu_selected == 1, "up from the first control: Check for updates (the info lines are stepped over)");
 	update_status_value = UPDATE_STATUS_UP_TO_DATE;
 	snprintf(update_version_value, sizeof(update_version_value), "%s", HALO_VITA_VERSION);
 	redraw();
-	snprintf(line, sizeof(line), "\n\x04Up to date (%s)\n", HALO_VITA_VERSION);
-	check(strstr(menu, line) && !strstr(menu, "github.com") && menu_fits(), "up to date");
+	check(!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Up to date") &&
+		!strstr(menu, "github.com") && !strcmp(menu_line(3, line, sizeof(line)), "") && menu_fits(), "up to date");
 	update_status_value = UPDATE_STATUS_NO_CONNECTION;
 	redraw();
-	check(strstr(menu, "\n\x04" "Couldn't check: no connection\n") && menu_fits(), "no connection");
+	/* (beside the version while the line is 46 characters at most: a
+	release's short version; else on a line of its own) */
+	check(strstr(menu, sizeof("Version " HALO_VITA_VERSION " - Couldn't check: no connection") - 1 <= 46 ?
+		"\n\x04" "Version " HALO_VITA_VERSION " - Couldn't check: no connection\n\n" :
+		"\n\x04" "Version " HALO_VITA_VERSION "\n\x04" "Couldn't check: no connection\n\n") && menu_fits(),
+		"no connection: beside the version, or on a line of its own when that is too long");
 	update_status_value = UPDATE_STATUS_FAILED;
 	redraw();
-	check(strstr(menu, "\n\x04" "Couldn't check right now\n") && menu_fits(), "could not check");
+	check(strstr(menu, "Couldn't check right now\n\n") && menu_fits() && menu_height_fits(), "could not check");
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
 	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
-	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
 
