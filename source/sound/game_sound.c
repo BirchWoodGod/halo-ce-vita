@@ -1096,6 +1096,32 @@ static void source_obstruction_mismatch(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (port) both clusters the structure BSP's. A looping sound's location
+outliving a structure switch named the old structure's cluster (a10 with
+the sound manager's work every other frame, HALO_SOUND_MANAGER_DIVISOR=2:
+sound_reconnect_to_structure_bsp now makes the loops' locations again too).
+Should a location still name a cluster the structure does not have, a
+build with assertions says so (a warning: the game plays on) and every
+build muffles the sound as one with no cluster rather than read past the
+cluster tables */
+static boolean sound_obstruction_clusters_valid(
+	short source_cluster_index,
+	short camera_cluster_index)
+{
+	short cluster_count = global_structure_bsp_get()->clusters.count;
+	boolean valid = source_cluster_index < cluster_count &&
+		camera_cluster_index < cluster_count;
+
+	match_warn(
+		"c:\\halo\\SOURCE\\sound\\game_sound.c",
+		888,
+		source_cluster_index < cluster_count && camera_cluster_index < cluster_count);
+
+	return valid;
+}
+#endif
+
 void compute_sound_obstruction(
 	short local_player_index,
 	struct sound_source *source,
@@ -1143,16 +1169,9 @@ void compute_sound_obstruction(
 	if (source->location.game_location.cluster_index != NONE &&
 		camera->location.cluster_index != NONE
 #ifdef HALO_LINUX
-		/* (port) both clusters this structure BSP's: a sound's location can
-		still name a cluster of the one before a switch - a10's switches
-		with the sound manager's work every other frame
-		(HALO_SOUND_MANAGER_DIVISOR=2, the Balanced profile's) halted every
-		harness run at the fourth ("to_cluster_index>=0 &&
-		to_cluster_index<structure_bsp->clusters.count"), where a release
-		build reads past the cluster tables; such a sound is muffled as one
-		with no cluster until its location is made again */
-		&& source->location.game_location.cluster_index < global_structure_bsp_get()->clusters.count &&
-		camera->location.cluster_index < global_structure_bsp_get()->clusters.count
+		&& sound_obstruction_clusters_valid(
+			source->location.game_location.cluster_index,
+			camera->location.cluster_index)
 #endif
 		)
 	{

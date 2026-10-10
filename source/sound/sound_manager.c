@@ -897,6 +897,50 @@ void sound_reconnect_to_structure_bsp(
 
 			sound_index = data_next_index(sound_data, sound_index);
 		}
+
+#ifdef HALO_LINUX
+		/* (port) the looping sounds' locations too. Every sound that
+		tracks a looping sound copies the loop's location at each refresh
+		(track_loop_track_sound, track_loop_impulse_sound). On the Xbox no
+		loop's location outlived a switch: game_sound_update makes each
+		audible loop's again every frame, after the ticks, and the frame's
+		process_looping_sounds deletes the loops it did not refresh before
+		refresh_sounds copies from them. With the sound manager's work every
+		nth frame (HALO_SOUND_MANAGER_DIVISOR, the Balanced profile's 2) a
+		loop refreshed in a frame without the work keeps its old location
+		through the next frame's switch, when the work falls on that frame
+		(the flip flop then still matches, so the loop is kept), though the
+		new structure no longer hears its object: a10's switch into its
+		two-cluster cinematic structure left a dozen loops in cluster 2, and
+		their tracks took it into compute_sound_obstruction (half the
+		harness runs halted on "to_cluster_index>=0 &&
+		to_cluster_index<structure_bsp->clusters.count"; a release build
+		read past the cluster tables). Made again here, such a loop has the
+		new structure's cluster for its point, or none, until it is
+		refreshed or deleted; with the work every frame no loop's location
+		is read before it is made again, so nothing changes there */
+		{
+			long looping_sound_index = data_next_index(looping_sound_data, NONE);
+
+			while (looping_sound_index != NONE)
+			{
+				struct looping_sound_datum *looping_sound =
+					looping_sound_get(looping_sound_index);
+
+				if (looping_sound->source.spatialization_mode ==
+					_sound_spatialization_mode_absolute)
+				{
+					scenario_location_from_point(
+						&looping_sound->source.location.game_location,
+						&looping_sound->source.location.position);
+				}
+
+				looping_sound_index = data_next_index(
+					looping_sound_data,
+					looping_sound_index);
+			}
+		}
+#endif
 	}
 
 	return;
