@@ -1055,6 +1055,153 @@ static void test_resource_map(char const *path)
 	free(map.data);
 }
 
+/* ---------- a sink (xbox_adpcm_encoder_begin_sink): the output a piece at
+a time through a staging, as custom_edition_sounds.c takes it into a block
+and its sound cache file */
+
+struct sink_capture
+{
+	struct output output;
+	uint32_t next_offset;
+	uint32_t pieces;
+	/* (stop after this many pieces: 0 never) */
+	uint32_t stop_after;
+	int out_of_order;
+};
+
+static int sink_capture_take(void *context, uint8_t const *bytes, uint32_t size, uint32_t offset)
+{
+	struct sink_capture *capture = (struct sink_capture *)context;
+
+	if (offset != capture->next_offset || offset > capture->output.size || size > capture->output.size - offset ||
+		size % OGG_SOUND_ADPCM_BLOCK_BYTES)
+	{
+		capture->out_of_order = 1;
+		return 0;
+	}
+	memcpy(capture->output.bytes + offset, bytes, size);
+	capture->next_offset += size;
+	capture->pieces++;
+	return !capture->stop_after || capture->pieces < capture->stop_after;
+}
+
+static void test_sink(struct fixture *fixture)
+{
+	static uint32_t const staging_sizes[] = { 36, 72, 1000, 16128, 1 << 20 };
+	uint32_t const lengths[] = { ogg_sound_adpcm_bytes(fixture->frames, fixture->stream_channels),
+		ogg_sound_adpcm_bytes(fixture->frames / 3, fixture->stream_channels),
+		ogg_sound_adpcm_bytes(fixture->frames * 2, fixture->stream_channels) };
+	int length_index;
+
+	for (length_index = 0; length_index < 3; length_index++)
+	{
+		uint32_t bytes = lengths[length_index];
+		struct output direct = output_new(bytes);
+		struct ogg_sound_result direct_result;
+		int staging_index;
+
+		transcode(&fixture->stream, &direct, fixture->stream_channels, fixture->rate, working_memory, sizeof(working_memory),
+			&direct_result);
+		for (staging_index = 0; staging_index < (int)(sizeof(staging_sizes) / sizeof(staging_sizes[0])); staging_index++)
+		{
+			uint32_t staging_bytes = staging_sizes[staging_index];
+			struct output staging = output_new(staging_bytes);
+			struct sink_capture capture;
+			struct ogg_sound_request request;
+			struct ogg_sound_result result;
+			uint32_t staging_blocks = staging_bytes / (OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)fixture->stream_channels);
+			int stop;
+
+			for (stop = 0; stop < 2; stop++)
+			{
+				memset(&capture, 0, sizeof(capture));
+				capture.output = output_new(bytes);
+				memset(capture.output.bytes, 0x5A, bytes);
+				capture.stop_after = stop ? 2 : 0;
+				memset(&request, 0, sizeof(request));
+				request.read = stream_read;
+				request.read_context = &fixture->stream;
+				request.input_bytes = fixture->stream.size;
+				request.output = staging.bytes;
+				request.output_bytes = bytes;
+				request.sink = sink_capture_take;
+				request.sink_context = &capture;
+				request.staging_bytes = staging_bytes;
+				request.channels = fixture->stream_channels;
+				request.rate = fixture->rate;
+				request.working = working_memory;
+				request.working_bytes = sizeof(working_memory);
+				ogg_sound_transcode(&request, &result);
+				if (!staging_blocks)
+				{
+					/* (a staging smaller than a block is refused, nothing given) */
+					CHECK(result.status == _ogg_sound_bad_arguments && !capture.pieces,
+						"%s: a %u byte staging taken (%s)", fixture->name, staging_bytes,
+						ogg_sound_status_describe(result.status));
+					free(capture.output.memory);
+					continue;
+				}
+				CHECK(!capture.out_of_order && output_guards_intact(&staging) && output_guards_intact(&capture.output),
+					"%s, %u bytes through %u: pieces out of order or outside", fixture->name, bytes, staging_bytes);
+				if (!stop || capture.pieces < 2)
+				{
+					CHECK(result.status == direct_result.status && !result.stopped && capture.next_offset == bytes &&
+						!memcmp(capture.output.bytes, direct.bytes, bytes) &&
+						result.frames_decoded == direct_result.frames_decoded &&
+						result.frames_padded == direct_result.frames_padded &&
+						result.truncated == direct_result.truncated,
+						"%s, %u bytes through %u: not the output written whole (%u of %u bytes, %s, stopped %d)",
+						fixture->name, bytes, staging_bytes, capture.next_offset, bytes,
+						ogg_sound_status_describe(result.status), result.stopped);
+				}
+				else
+				{
+					/* stopped at the second piece: two pieces given, as written whole */
+					CHECK(result.stopped && capture.pieces == 2 &&
+						(capture.next_offset == 2 * staging_blocks * OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)fixture->stream_channels ||
+						capture.next_offset == bytes) &&
+						!memcmp(capture.output.bytes, direct.bytes, capture.next_offset),
+						"%s, %u bytes through %u: stopped after %u pieces (%u bytes), stopped %d", fixture->name, bytes,
+						staging_bytes, capture.pieces, capture.next_offset, result.stopped);
+				}
+				free(capture.output.memory);
+			}
+			free(staging.memory);
+		}
+		free(direct.memory);
+	}
+	/* 16-bit PCM through a sink, as written whole */
+	{
+		uint32_t frames = 5000;
+		unsigned char *pcm = pcm_sine(frames, fixture->stream_channels, fixture->rate);
+		uint32_t bytes = ogg_sound_adpcm_bytes(frames + 300, fixture->stream_channels);
+		struct output direct = output_new(bytes);
+		struct output staging = output_new(1000);
+		struct sink_capture capture;
+		struct xbox_adpcm_encoder encoder;
+		uint32_t padded;
+
+		xbox_adpcm_encoder_begin(&encoder, direct.bytes, bytes, fixture->stream_channels);
+		xbox_adpcm_encoder_pcm(&encoder, pcm, frames * 2 * (uint32_t)fixture->stream_channels);
+		padded = xbox_adpcm_encoder_finish(&encoder);
+		memset(&capture, 0, sizeof(capture));
+		capture.output = output_new(bytes);
+		CHECK(xbox_adpcm_encoder_begin_sink(&encoder, staging.bytes, staging.size, bytes, fixture->stream_channels,
+			sink_capture_take, &capture), "pcm sink refused");
+		xbox_adpcm_encoder_pcm(&encoder, pcm, frames * 2 * (uint32_t)fixture->stream_channels);
+		CHECK(xbox_adpcm_encoder_finish(&encoder) == padded && !encoder.stopped && capture.next_offset == bytes &&
+			!memcmp(capture.output.bytes, direct.bytes, bytes) && output_guards_intact(&staging),
+			"%s: pcm through a sink not as written whole", fixture->name);
+		CHECK(!xbox_adpcm_encoder_begin_sink(&encoder, staging.bytes, staging.size, bytes, 1, NULL, NULL) && encoder.full,
+			"a sink of none taken");
+		free(capture.output.memory);
+		free(staging.memory);
+		free(direct.memory);
+		free(pcm);
+	}
+	printf("  %s: through a sink, as written whole (3 lengths, 5 stagings, stopped)\n", fixture->name);
+}
+
 int main(int argc, char **argv)
 {
 	char const *cases = getenv("OGG_SOUND_CASES") ? getenv("OGG_SOUND_CASES") : "ogg_sound_cases";
@@ -1085,6 +1232,9 @@ int main(int argc, char **argv)
 	test_pcm();
 	printf("other rates:\n");
 	test_rates();
+	printf("sinks:\n");
+	for (index = 0; index < FIXTURE_COUNT; index++)
+		test_sink(&fixtures[index]);
 	printf("damage:\n");
 	for (index = 0; index < FIXTURE_COUNT; index++)
 		test_damage(&fixtures[index]);
