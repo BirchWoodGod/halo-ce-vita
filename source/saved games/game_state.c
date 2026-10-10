@@ -236,6 +236,31 @@ int halo_game_state_allocation_is_lruv_cache(int index)
 	return type && !csstrcmp(type, "lruv cache");
 }
 
+/* the first_free_absolute_index of the data array an allocation holds - a
+data array's own, an lruv cache's blocks after its header - or NULL
+(tick_hash.c's HALO_TICK_HASH_MASK_FREE) */
+short *halo_game_state_allocation_first_free(int index)
+{
+	const char *type;
+	struct data_array *data = NULL;
+
+	if (index < 0 || index >= halo_game_state_allocation_count)
+		return NULL;
+	type = halo_game_state_allocations[index].type;
+	if (type && !csstrcmp(type, "data array") &&
+		halo_game_state_allocations[index].size >= (long)sizeof(struct data_array))
+	{
+		data = (struct data_array *)((byte *)game_state_globals.base_address + halo_game_state_allocations[index].offset);
+	}
+	else if (type && !csstrcmp(type, "lruv cache") &&
+		halo_game_state_allocations[index].size >= (long)(sizeof(struct lruv_cache) + sizeof(struct data_array)))
+	{
+		data = (struct data_array *)((byte *)game_state_globals.base_address + halo_game_state_allocations[index].offset +
+			sizeof(struct lruv_cache));
+	}
+	return data && data->signature == 'd@t@' && data->data == (void *)(data + 1) ? &data->first_free_absolute_index : NULL;
+}
+
 /* the GPU half of the arena, allocated down from its top (tick_hash.c) */
 void halo_game_state_gpu_range(void **base, unsigned long *size)
 {

@@ -47,6 +47,15 @@ The render-only settings (the objects too small to draw, the shadows, the
 dynamic lights' cap...) change those and nothing else: compared with this,
 two runs of one build with different render settings agree.
 
+HALO_TICK_HASH_MASK_FREE=1 (with or without HALO_TICK_HASH_MASK): also
+each data array's first_free_absolute_index (data.c), the slot datum_new's
+search starts at. No slot below it is free, whatever its value, and
+datum_new gives the lowest free slot from it, so it names no state of its
+own: builds that move it differently (a full array's search starting at the
+end: data.c's datum_new) make the same datums in the same slots, and compare
+with this. Every data array in the game state, an lruv cache's blocks among
+them.
+
 <file>.alloc gets each allocation's own hash after every tick (binary:
 a 32-bit game time and one 64-bit hash per allocation), <file>.names their
 names in the same order: tools/tick_hash_compare.py names the allocations
@@ -63,6 +72,7 @@ void halo_game_state_range(void **base, unsigned long *size);
 void halo_game_state_gpu_range(void **base, unsigned long *size);
 int halo_game_state_allocation(int index, const char **name, void **base, unsigned long *size);
 int halo_game_state_allocation_is_lruv_cache(int index);
+short *halo_game_state_allocation_first_free(int index);
 long game_time_get(void);
 
 /* HALO_FIXED_TICK=1: the knobs that make a run's simulation independent of
@@ -110,6 +120,37 @@ int halo_tick_hash_object_render_states(long *saved, int maximum, int restore);
 int halo_tick_hash_light_render_fields(long *saved, int maximum, int restore);
 
 static int mask = -1;
+static int mask_free = -1;
+
+/* (HALO_TICK_HASH_MASK_FREE) each data array's first_free_absolute_index,
+zeroed for the hash and put back */
+#define MAXIMUM_SAVED_FREE_HINTS 512
+static short saved_free_hints[MAXIMUM_SAVED_FREE_HINTS];
+
+static int free_hints(int restore)
+{
+	void *allocation;
+	unsigned long allocation_size;
+	const char *name;
+	int index, count = 0;
+
+	for (index = 0; halo_game_state_allocation(index, &name, &allocation, &allocation_size); index++)
+	{
+		short *first_free = halo_game_state_allocation_first_free(index);
+
+		if (!first_free || count >= MAXIMUM_SAVED_FREE_HINTS)
+			continue;
+		if (restore)
+			*first_free = saved_free_hints[count];
+		else
+		{
+			saved_free_hints[count] = *first_free;
+			*first_free = 0;
+		}
+		count++;
+	}
+	return count;
+}
 
 /* (HALO_TICK_HASH_MASK=2, too: the first-person weapons, whose view
 model the render poses from its camera, and the scenario's atmospheric fog
@@ -179,8 +220,12 @@ void halo_tick_hash_after_tick(void)
 		return;
 	if (mask < 0)
 		mask = getenv("HALO_TICK_HASH_MASK") ? atoi(getenv("HALO_TICK_HASH_MASK")) : 0;
+	if (mask_free < 0)
+		mask_free = getenv("HALO_TICK_HASH_MASK_FREE") ? atoi(getenv("HALO_TICK_HASH_MASK_FREE")) : 0;
 	if (mask)
 		saved_mark_count = halo_tick_hash_object_marks(saved_marks, MAXIMUM_SAVED_MARKS, 0);
+	if (mask_free)
+		free_hints(0);
 	if (mask >= 2)
 	{
 		saved_render_state_count = halo_tick_hash_object_render_states(saved_render_states, MAXIMUM_SAVED_MARKS, 0);
@@ -263,6 +308,8 @@ void halo_tick_hash_after_tick(void)
 	/* (the dump above is masked too) */
 	if (mask)
 		halo_tick_hash_object_marks(saved_marks, saved_mark_count, 1);
+	if (mask_free)
+		free_hints(1);
 	if (mask >= 2)
 	{
 		halo_tick_hash_object_render_states(saved_render_states, saved_render_state_count, 1);
