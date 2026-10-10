@@ -240,6 +240,7 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_minplayers <n>` | The players a game needs to start (default 1). |
 | `sv_start_delay <seconds>` | The lobby's countdown once they are in (default 10). |
 | `sv_postgame <seconds>` | How long the scores are shown (default 10; 3 when nobody is in the game). |
+| `sv_starting_weapons <generic\|map>` | The players' first weapons in every gametype: `generic`, an assault rifle and a pistol; `map` (the default), the gametype's own (most maps' own: see "Starting weapons"). From the next game. |
 | `sv_end_empty <seconds>` | A game that nobody is in ends after this (default 30; 0: never). |
 | `sv_coop <level> [difficulty]` | Co-op on a campaign level (`a10`, `a30`...; difficulty 0 to 3, default 1) instead of the cycle; the server runs the AI and the scripts. `init.txt` only. |
 | `sv_map_download <0\|1>` | 1: Vitas without a custom map of the cycle may download it from the server, in the lobby or before they join a game in progress (then at most 256 KB/s for all of them together: `HALO_MAP_SHARE_INGAME_RATE_KB` in the server's environment changes it). 0 (the default): no downloads. |
@@ -249,6 +250,7 @@ These commands work in `init.txt` and on the console. The names are
 | `sv_public_address <ip>[:port]` | The address the internet reaches the server at, if it cannot find it itself. `init.txt` only. |
 | `sv_relay <host:port>` | A relay (`port/relay`) for players that cannot reach the server directly. `init.txt` only; up to 2. |
 | `sv_players` | The players: their number, name, team, address and hardware id. |
+| `sv_items` | In a game: its weapons and equipment by kind (how many lie about, how many are carried), and each player's weapons, shield, health and grenades. A check that a gametype gives what it should (SWAT: the pistol alone, no shields). |
 | `sv_status` | The server's name, code, game and players. |
 | `sv_kick <#\|name>` | Removes a player. They can join again. |
 | `sv_ban <#\|name>` | Removes a player and bans their address and hardware id (a line in `bans.txt`). |
@@ -261,7 +263,104 @@ These commands work in `init.txt` and on the console. The names are
 The gametypes are the game's own: `slayer`, `team_slayer`, `ctf`,
 `ironctf`, `king`, `team_king`, `oddball`, `team_oddball`, `race`,
 `team_race`, `rally`, `elimination`, `stalker` and `accumulation`
-(Halo PC's `ffa` and `koth` are taken too).
+(Halo PC's `ffa` and `koth` are taken too), and the server's own:
+
+| Gametype | Also taken | What it is |
+| --- | --- | --- |
+| `swat` | `ffa_swat` | SWAT: Slayer with no shields and the pistol (magnum) the only weapon. |
+| `team_swat` | `teamswat`, `tswat` | SWAT for two teams (Team Slayer's rules and score). |
+| `snipers` | `ffa_snipers` | Snipers: the game's own Snipers variant with the sniper rifle the only weapon. |
+| `team_snipers` | `teamsnipers`, `tsnipers`, `team_sniper` | Snipers for two teams (score 50). |
+| `btb` | `big_team_slayer`, `big_team`, `bigteam`, `team_slayer_vehicles` | Big Team Battle: Team Slayer with every vehicle the map places. |
+
+The server browser and the Vitas show them as "SWAT", "Team SWAT",
+"Snipers", "Team Sniper" (the name has room for eleven characters) and
+"Big Team". Every Vita plays them as they are, 1.1.0-beta.1 and later,
+with nothing new on its side: the Vitas are sent a game they have always
+known (a variant of the game's own weapon sets and options), and the
+server, which makes every weapon in the game and the players' starting
+weapons, makes the one weapon of SWAT and Snipers itself; the Vitas take
+its weapons as they are. A Vita hosting a game of its own has none of
+these.
+
+### SWAT
+
+`swat` (free for all) and `team_swat` are Slayer and Team Slayer with:
+
+- no shields: a player has health alone, and the pistol's headshot kills
+  at once. Overshields are not placed;
+- the human pistol (the magnum) as the only weapon: every weapon the map
+  places is a pistol, and each player starts with one pistol (picking up
+  another gives its ammunition);
+- no grenades: none at the start, none placed on the map ("magnums only",
+  as SWAT has always been);
+- no vehicles. Active camouflage and health packs stay where the map has
+  them, the motion tracker stays on, and the score to win is Slayer's
+  (15 kills, 50 for teams) unless `sv_scorelimit` sets one.
+
+### Snipers
+
+`snipers` and `team_snipers` are the game's own Snipers variant: the
+sniper rifle as the only weapon (every weapon the map places is a sniper
+rifle, and each player starts with one), shields, grenades as the map
+places them, no motion tracker, and the map's Warthogs (Blood Gulch's and
+Sidewinder's: a long walk otherwise). The game's Snipers alone would leave
+the maps' pistols about and start players with a pistol too; the server
+makes those sniper rifles.
+
+### Big Team Battle
+
+`btb` is Team Slayer with all of the map's vehicles. The game's own team
+gametypes place only the Warthogs; `btb` places every Warthog, Ghost and
+Scorpion of the map. Of the Xbox maps only Blood Gulch and Sidewinder
+place vehicles (each two Warthogs, four Ghosts and two Scorpions); on the
+others `btb` plays as Team Slayer.
+
+### Starting weapons
+
+`sv_starting_weapons generic` starts the players of every gametype with
+the generic weapons: an assault rifle and a pistol (as the gametype's
+weapon set has them). `sv_starting_weapons map` (the default) gives them
+what the gametype gives: for Slayer, Team Slayer, CTF and the rest, the
+map's own starting weapons, which in Slayer on most Xbox maps are one
+weapon (a plasma pistol on Battle Creek, Blood Gulch, Derelict, Damnation,
+Longest, Prisoner and Wizard; a pistol on Boarding Action, Chiron TL-34,
+Hang 'em High and Sidewinder; an assault rifle on Chill Out; both on Rat
+Race). SWAT and Snipers always start with their one weapon. It takes
+effect from the next game.
+
+```
+sv_name "My SWAT Server"
+sv_maxplayers 12
+sv_timelimit 10
+sv_starting_weapons generic
+sv_mapcycle_add prisoner team_swat
+sv_mapcycle_add wizard swat
+sv_mapcycle_add bloodgulch btb
+sv_mapcycle_add damnation team_snipers
+```
+
+### The maps' players
+
+The game's map list gives each Xbox map a number of players; choose a
+server's maps for its `sv_maxplayers` (12 plays well on the 8-player maps,
+not on the 6-player ones):
+
+| Map | Players |
+| --- | --- |
+| `beavercreek` (Battle Creek) | 2-8 |
+| `bloodgulch` (Blood Gulch) | 4-16, vehicles |
+| `boardingaction` (Boarding Action) | 4-16 |
+| `carousel` (Derelict) | 4-8 |
+| `chillout` (Chill Out) | 2-6 |
+| `damnation` (Damnation) | 4-8 |
+| `hangemhigh` (Hang 'em High) | 4-16 |
+| `longest` (Longest) | 2-8 |
+| `prisoner` (Prisoner) | 2-8 |
+| `putput` (Chiron TL-34) | 2-6 |
+| `ratrace` (Rat Race) | 2-8 |
+| `sidewinder` (Sidewinder) | 4-16, vehicles |
+| `wizard` (Wizard) | 2-8 |
 
 Halo CE (Custom Edition) maps need `game.custom_edition = true` in the
 server's `config.toml` and the Halo PC resource maps (`bitmaps.map`,

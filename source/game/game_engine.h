@@ -565,6 +565,19 @@ void game_show_score_extended(
 	long score,
 	long team_index);
 long game_engine_remap_weapon(long weapon_definition_index);
+/* port: the dedicated server's one-weapon games (game_engine.c) */
+enum
+{
+	_game_engine_sole_weapon_none = 0,
+	_game_engine_sole_weapon_pistol,
+	_game_engine_sole_weapon_sniper_rifle,
+};
+#ifdef HALO_DEDICATED_SERVER
+void game_engine_make_swat_variant(struct game_variant *variant);
+void game_engine_make_snipers_variant(struct game_variant *variant, boolean teams);
+void game_engine_make_big_team_variant(struct game_variant *variant);
+void game_engine_variant_set_generic_starting_equipment(struct game_variant *variant, boolean generic);
+#endif
 
 
 boolean game_engine_allow_integrated_lights(

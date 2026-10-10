@@ -42,6 +42,9 @@ server browser, or on its LAN. Called from the main loop every frame
 #include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
+#include "objects/objects.h"
+#include "items/items.h"
+#include "units/units.h"
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
 #include "dedicated_server.h"
@@ -148,6 +151,10 @@ static struct
 	boolean has_next_game;
 	struct cycle_entry playing;
 	char level_path[128];
+	/* the game set in the lobby is one of one weapon (SWAT's magnum,
+	Snipers' sniper rifle), which is the server's own
+	(game_engine_sole_weapon_list_index): _game_engine_sole_weapon_ */
+	short sole_weapon;
 	/* a game: seconds played, its scores shown, its end asked for (the time
 	limit's, sv_end_game's), and with nobody in it; back in the lobby the
 	cycle goes on (or, restart, plays it again) */
@@ -170,6 +177,9 @@ static struct
 	long score_limit;
 	boolean map_download;
 	boolean coop;
+	/* sv_starting_weapons generic: every gametype's players start with the
+	generic weapons (an assault rifle and a pistol), never the map's own */
+	boolean generic_starting_weapons;
 	struct join_address joins[MAXIMUM_JOIN_ADDRESSES];
 } dedicated =
 {
@@ -286,10 +296,20 @@ static void lowercase(
 }
 
 /* a gametype of the game's own (game_engine_get_variant_by_name), by its
-name or Halo PC's: FALSE if none */
+name or Halo PC's, or the server's own: SWAT (swat, team_swat: Slayer's and
+Team Slayer's with no shields and the magnum the only weapon,
+game_engine_make_swat_variant), Snipers (snipers, team_snipers: the game's
+own Snipers with the sniper rifle the only weapon,
+game_engine_make_snipers_variant) and Big Team Battle (btb: Team Slayer's
+with every vehicle the map places, game_engine_make_big_team_variant);
+sole_weapon, if given, says which one weapon a game has
+(_game_engine_sole_weapon_). The players' starting weapons are
+sv_starting_weapons' (SWAT's and Snipers' always the generic, made the one
+weapon). FALSE if none */
 static boolean gametype_variant(
 	char const *name,
-	struct game_variant *variant)
+	struct game_variant *variant,
+	short *sole_weapon)
 {
 	static struct
 	{
@@ -306,10 +326,26 @@ static boolean gametype_variant(
 		{ "iron_ctf", "ironctf" },
 		{ "teamrace", "team_race" },
 		{ "teamoddball", "team_oddball" },
+		{ "ffa_swat", "swat" },
+		{ "teamswat", "team_swat" },
+		{ "tswat", "team_swat" },
+		{ "big_team_slayer", "btb" },
+		{ "bigteam", "btb" },
+		{ "big_team", "btb" },
+		{ "team_slayer_vehicles", "btb" },
+		{ "ffa_snipers", "snipers" },
+		{ "teamsnipers", "team_snipers" },
+		{ "tsnipers", "team_snipers" },
+		{ "team_sniper", "team_snipers" },
 	};
 	char lower[GAMETYPE_NAME_SIZE];
 	long index;
+	boolean swat;
+	boolean big_team;
+	boolean snipers;
 
+	if (sole_weapon)
+		*sole_weapon = _game_engine_sole_weapon_none;
 	if (csstrlen(name) >= sizeof(lower))
 		return FALSE;
 	csstrcpy(lower, name);
@@ -317,8 +353,34 @@ static boolean gametype_variant(
 	for (index = 0; index < (long)NUMBEROF(aliases); index++)
 		if (!csstrcmp(lower, aliases[index].alias))
 			csstrcpy(lower, aliases[index].name);
+	swat = !csstrcmp(lower, "swat") || !csstrcmp(lower, "team_swat");
+	big_team = !csstrcmp(lower, "btb");
+	snipers = !csstrcmp(lower, "snipers") || !csstrcmp(lower, "team_snipers");
+	if (swat)
+		csstrcpy(lower, !csstrcmp(lower, "swat") ? "slayer" : "team_slayer");
+	if (big_team || snipers)
+		csstrcpy(lower, !csstrcmp(lower, "snipers") ? "slayer" : "team_slayer");
 	game_engine_get_variant_by_name(variant, lower);
-	return variant->game_engine_index != 0;
+	if (!variant->game_engine_index)
+		return FALSE;
+	/* (generic: every gametype's; map: the gametype's own) */
+	if (dedicated.generic_starting_weapons)
+		game_engine_variant_set_generic_starting_equipment(variant, TRUE);
+	if (big_team)
+		game_engine_make_big_team_variant(variant);
+	if (swat)
+	{
+		game_engine_make_swat_variant(variant);
+		if (sole_weapon)
+			*sole_weapon = _game_engine_sole_weapon_pistol;
+	}
+	if (snipers)
+	{
+		game_engine_make_snipers_variant(variant, variant->universal_variant.teams);
+		if (sole_weapon)
+			*sole_weapon = _game_engine_sole_weapon_sniper_rifle;
+	}
+	return TRUE;
 }
 
 /* the level's name of a multiplayer map (Xbox or Custom Edition: both are
@@ -417,9 +479,11 @@ static boolean apply_entry(
 {
 	struct network_game_server *server = global_network_game_server_get();
 	struct game_variant variant;
+	short sole_weapon;
 
-	if (!server || !gametype_variant(entry->gametype, &variant))
+	if (!server || !gametype_variant(entry->gametype, &variant, &sole_weapon))
 		return FALSE;
+	dedicated.sole_weapon = sole_weapon;
 	level_path(entry->map, dedicated.level_path, sizeof(dedicated.level_path));
 	network_game_server_change_map_name(server, dedicated.level_path);
 	if (dedicated.score_limit > 0)
@@ -502,7 +566,10 @@ static void command_help(
 		"  sv_public <0|1>                  listed in the server browser, or by code only",
 		"  sv_mapcycle_add <map> <gametype> a game for the cycle (gametypes: slayer, team_slayer, ctf,",
 		"                                   ironctf, king, team_king, oddball, team_oddball, race,",
-		"                                   team_race, rally, elimination, stalker, accumulation)",
+		"                                   team_race, rally, elimination, stalker, accumulation;",
+		"                                   the server's swat, team_swat: no shields, magnums only;",
+		"                                   snipers, team_snipers: sniper rifles only;",
+		"                                   btb: team_slayer with all the map's vehicles)",
 		"  sv_mapcycle_del <#>              takes a game out of the cycle",
 		"  sv_mapcycle_clear, sv_mapcycle   empties, lists the cycle",
 		"  sv_map <map> <gametype>          plays that game now (the cycle goes on after it)",
@@ -514,6 +581,8 @@ static void command_help(
 		"  sv_start_delay <seconds>         the lobby's countdown once they are in (10)",
 		"  sv_postgame <seconds>            the scores shown after a game (10; 3 if nobody is in it)",
 		"  sv_end_empty <seconds>           a game nobody is in ends after this (30; 0 never)",
+		"  sv_starting_weapons <generic|map> the players' first weapons: an assault rifle and a pistol,",
+		"                                   or the map's own (the default); from the next game",
 		"  sv_coop <level> [difficulty 0-3] co-op on a campaign level (a10...) instead of the cycle",
 		"  sv_map_download <0|1>            joiners may download the cycle's custom maps (0)",
 		"  sv_port <port>                   internet play's UDP port (init.txt only; -port)",
@@ -524,6 +593,7 @@ static void command_help(
 		"  sv_public_address <ip>[:port]    the address the internet reaches this server at (init.txt only)",
 		"  sv_relay <host:port>             a relay for players no direct path reaches (init.txt only)",
 		"  sv_players, sv_status            the players (#, name, address); the server",
+		"  sv_items                         the game's weapons and equipment; the players' weapons, shields",
 		"  sv_kick <#|name>                 drops a player (they may join again)",
 		"  sv_ban <#|name>                  drops a player and bans their address and hardware id",
 		"  sv_ban_ip <a.b.c.d>              bans an address",
@@ -599,6 +669,141 @@ static void command_players(
 	}
 	if (!count)
 		say("no players");
+}
+
+/* the game's weapons and equipment by kind (lying about, carried), and what
+each player's unit carries, its shield and its body: what a gametype gives
+(SWAT's magnums, no shields), as the server has it */
+static void command_items(
+	void)
+{
+	enum
+	{
+		MAXIMUM_KINDS = 32,
+	};
+	struct
+	{
+		long definition_index;
+		long lying;
+		long carried;
+	} kinds[MAXIMUM_KINDS];
+	long kind_count = 0;
+	long lying = 0;
+	long carried = 0;
+	char line[512];
+	int length;
+	long index;
+
+	if (!game_engine_running() || server_state() != _server_ingame)
+	{
+		say("sv_items: only in a game");
+		return;
+	}
+	{
+		struct object_iterator iterator;
+
+		object_iterator_new(&iterator, _object_mask_weapon | _object_mask_equipment, 0);
+		while (object_iterator_next(&iterator))
+		{
+			struct item_datum *item = item_get(iterator.index);
+			boolean on_ground = item->object.parent_object_index == NONE &&
+				TEST_FLAG(item->object.flags, _object_connected_to_map_bit) &&
+				!TEST_FLAG(item->item.flags, _item_attached_to_unit_bit);
+
+			for (index = 0; index < kind_count && kinds[index].definition_index != item->definition_index; index++)
+				;
+			if (index == kind_count && kind_count < MAXIMUM_KINDS)
+			{
+				kinds[kind_count].definition_index = item->definition_index;
+				kinds[kind_count].lying = kinds[kind_count].carried = 0;
+				kind_count++;
+			}
+			if (index < kind_count)
+			{
+				if (on_ground)
+					kinds[index].lying++;
+				else
+					kinds[index].carried++;
+			}
+			if (on_ground)
+				lying++;
+			else
+				carried++;
+		}
+	}
+	length = snprintf(line, sizeof(line), "items: %ld lying about, %ld carried:", lying, carried);
+	for (index = 0; index < kind_count && length < (int)sizeof(line); index++)
+	{
+		length += snprintf(line + length, sizeof(line) - (size_t)length, " %s %ld+%ld",
+			tag_get_name(kinds[index].definition_index), kinds[index].lying, kinds[index].carried);
+	}
+	say("%s", line);
+	{
+		struct object_iterator iterator;
+		long vehicles = 0;
+
+		kind_count = 0;
+		object_iterator_new(&iterator, _object_mask_vehicle, 0);
+		while (object_iterator_next(&iterator))
+		{
+			struct object_datum *object = object_get(iterator.index);
+
+			vehicles++;
+			for (index = 0; index < kind_count && kinds[index].definition_index != object->definition_index; index++)
+				;
+			if (index == kind_count && kind_count < MAXIMUM_KINDS)
+			{
+				kinds[kind_count].definition_index = object->definition_index;
+				kinds[kind_count].lying = 0;
+				kind_count++;
+			}
+			if (index < kind_count)
+				kinds[index].lying++;
+		}
+		length = snprintf(line, sizeof(line), "vehicles: %ld", vehicles);
+		for (index = 0; index < kind_count && length < (int)sizeof(line); index++)
+		{
+			length += snprintf(line + length, sizeof(line) - (size_t)length, " %s %ld",
+				tag_get_name(kinds[index].definition_index), kinds[index].lying);
+		}
+		say("%s", line);
+	}
+	{
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			struct unit_datum *unit;
+			char name[16];
+			short slot;
+
+			for (index = 0; index < (long)sizeof(name) - 1 && index < 12 && player->name[index]; index++)
+				name[index] = player->name[index] >= 32 && player->name[index] < 127 ? (char)player->name[index] : '?';
+			name[index] = 0;
+			if (player->unit_index == NONE || !(unit = unit_try_and_get(player->unit_index)))
+			{
+				say("player #%ld %s: dead", (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index), name);
+				continue;
+			}
+			length = snprintf(line, sizeof(line), "player #%ld %s: shield %.2f of %.2f, body %.2f, grenades %d/%d, weapons:",
+				(long)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index), name, unit->object.shield_vitality,
+				unit->object.maximum_shield_vitality, unit->object.body_vitality, unit->unit.grenade_counts[0],
+				unit->unit.grenade_counts[1]);
+			for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT && length < (int)sizeof(line); slot++)
+			{
+				long weapon_index = unit->unit.weapon_object_indices[slot];
+
+				if (weapon_index != NONE)
+				{
+					length += snprintf(line + length, sizeof(line) - (size_t)length, " %s",
+						tag_get_name(object_get(weapon_index)->definition_index));
+				}
+			}
+			say("%s", line);
+		}
+	}
 }
 
 /* bans.txt's lines (empty ones left out), read; how many */
@@ -924,7 +1129,7 @@ static void command(
 			say("sv_mapcycle_add: give a map and a gametype (sv_mapcycle_add bloodgulch ctf)");
 		else if (!map_name_valid(words[1]))
 			say("sv_mapcycle_add: %s is not a map's name", words[1]);
-		else if (!gametype_variant(words[2], &variant))
+		else if (!gametype_variant(words[2], &variant, NULL))
 			say("sv_mapcycle_add: %s is not a gametype (help lists them)", words[2]);
 		else if (dedicated.cycle_count == MAXIMUM_CYCLE_ENTRIES)
 			say("sv_mapcycle_add: the cycle is full (%d games)", MAXIMUM_CYCLE_ENTRIES);
@@ -984,7 +1189,7 @@ static void command(
 			say("sv_map: give a map and a gametype (sv_map bloodgulch ctf)");
 		else if (!map_name_valid(words[1]))
 			say("sv_map: %s is not a map's name", words[1]);
-		else if (!gametype_variant(words[2], &variant))
+		else if (!gametype_variant(words[2], &variant, NULL))
 			say("sv_map: %s is not a gametype (help lists them)", words[2]);
 		else if (map_playable(words[1], name))
 		{
@@ -1043,6 +1248,22 @@ static void command(
 		if (integer_argument(name, argument, MINIMUM_POSTGAME_SECONDS, 120, &dedicated.postgame_seconds_setting))
 			say("the scores are shown %ld seconds", dedicated.postgame_seconds_setting);
 	}
+	else if (!csstrcmp(name, "sv_starting_weapons"))
+	{
+		if (argument && (!csstrcasecmp(argument, "generic") || !csstrcmp(argument, "1")))
+			dedicated.generic_starting_weapons = TRUE;
+		else if (argument && (!csstrcasecmp(argument, "map") || !csstrcmp(argument, "0")))
+			dedicated.generic_starting_weapons = FALSE;
+		else
+		{
+			say("sv_starting_weapons: generic (an assault rifle and a pistol) or map (the map's own); now %s",
+				dedicated.generic_starting_weapons ? "generic" : "map");
+			return;
+		}
+		say(dedicated.generic_starting_weapons ?
+			"starting weapons: generic, an assault rifle and a pistol (from the next game)" :
+			"starting weapons: the map's own for the gametype (from the next game)");
+	}
 	else if (!csstrcmp(name, "sv_end_empty"))
 	{
 		if (integer_argument(name, argument, 0, 3600, &dedicated.end_empty_seconds))
@@ -1084,6 +1305,8 @@ static void command(
 	}
 	else if (!csstrcmp(name, "sv_players"))
 		command_players();
+	else if (!csstrcmp(name, "sv_items"))
+		command_items();
 	else if (!csstrcmp(name, "sv_status") || !csstrcmp(name, "status"))
 		command_status();
 	else if (!csstrcmp(name, "sv_kick"))
@@ -1197,6 +1420,12 @@ boolean dedicated_server_map_shareable(
 		if (!csstrcasecmp(name, dedicated.cycle[index].map))
 			return TRUE;
 	return FALSE;
+}
+
+short dedicated_server_sole_weapon(
+	void)
+{
+	return dedicated.coop ? (short)_game_engine_sole_weapon_none : dedicated.sole_weapon;
 }
 
 long dedicated_server_frame_cap(

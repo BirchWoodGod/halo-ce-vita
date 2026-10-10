@@ -26,6 +26,10 @@ boolean dedicated_server_join_allowed(unsigned long address);
 /* (map_share.c) whether the operator lets joiners download this map
 (sv_map_download) */
 boolean dedicated_server_map_shareable(char const *level_name);
+/* (game_engine.c) the game's one weapon, if it has one (SWAT's magnum,
+Snipers' sniper rifle: _game_engine_sole_weapon_, game_engine.h): every
+weapon made that one */
+short dedicated_server_sole_weapon(void);
 /* (main.c) frames a second: fewer while no one is connected */
 long dedicated_server_frame_cap(void);
 
