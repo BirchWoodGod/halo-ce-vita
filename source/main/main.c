@@ -402,6 +402,7 @@ void platform_log(const char *format, ...);
 #include "load_profile.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
 #include "custom_edition_maps.h" /* port: custom_edition_maps_campaign_next_level */
+#include "custom_edition_mods.h" /* port: custom_edition_mods_level_name */
 #endif
 #include "render/render.h"
 #include "text/draw_string.h"
@@ -1341,8 +1342,9 @@ short main_get_solo_level_from_name(
 #ifdef HALO_LINUX
 	/* port: a Custom Edition campaign map (custom_maps\firefight-airlock)
 	is never one of the campaign's levels, whatever its name holds: not its
-	saved game, its progress or its next level (custom_edition_cache.h) */
-	if (custom_edition_level_name(name))
+	saved game, its progress or its next level (custom_edition_cache.h);
+	nor is a mod's map (mods\ruby_a10, custom_edition_mods.h) */
+	if (custom_edition_level_name(name) || custom_edition_mods_level_name(name))
 		return NONE;
 #endif
 	csstrncpy(lower_name, name, NUMBEROF(lower_name) - 1);

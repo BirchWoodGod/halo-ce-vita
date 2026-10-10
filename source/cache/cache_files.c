@@ -1722,7 +1722,12 @@ boolean scenario_structure_bsp_load(
 		}
 	}
 	else
-		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size);
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size, reference->file_offset);
+#elif defined(HALO_LINUX)
+	/* (port: a Custom Edition map's tags may be linked elsewhere than they
+	are in every build: a Halo: CE Anniversary map's always are) */
+	if (custom_edition_cache_tags_loaded())
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size, reference->file_offset);
 #endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_relocate, started, 0);

@@ -1826,6 +1826,24 @@ boolean tag_validate_custom_edition(
 	return tag_validate_globals.custom_edition;
 }
 
+/* (port) a Halo: CE Anniversary map's structure bsps' vertices are in its
+file, not its bsps (custom_edition_cache.c says so while one is loaded) */
+static boolean structure_vertices_in_file;
+
+void tag_validate_structure_vertices_in_file(
+	boolean in_file)
+{
+	structure_vertices_in_file = in_file;
+
+	return;
+}
+
+boolean tag_validate_structure_vertices_are_in_file(
+	struct tag_validation *validation)
+{
+	return tag_validate_custom_edition(validation) && structure_vertices_in_file;
+}
+
 boolean tag_validate_contains(
 	struct tag_validation *validation,
 	void const *address,

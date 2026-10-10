@@ -22,6 +22,13 @@ custom_maps\<name> (custom_edition_cache.h), which no campaign level has.
 They come after the multiplayer maps in the maps array, with display
 indices of their own.
 
+(port) The maps of the mods folder's mods, Halo: CE Anniversary campaign
+maps (custom_edition_mods.c), come after the Custom Edition campaign maps
+in the campaign's level list, in their mods' order, with the titles and
+descriptions their campaign files give; their level name is mods\<name>,
+and they are played alone, never hosted (custom_edition_maps_campaign_level
+does not take them) nor shared.
+
 A map's picture is the Windows bitmap <name>.bmp beside it, when there is one
 (bmp_files.c): the middle of it with the shape of the menus' level pictures,
 in a texture of its own that is drawn over the whole picture widget. A map
@@ -43,8 +50,10 @@ in lines of about 20 characters.
 #include "bitmaps/bitmap_group.h"
 #include "cache/cache_files.h"
 #include "bmp_files.h"
+#include "png_files.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "custom_edition_mods.h"
 #include "text/unicode.h"
 #include "../src/lang.h"
 
@@ -92,6 +101,13 @@ level pictures */
 #define PICTURE_TEXTURE_SIZE 256
 
 #define DESCRIPTION_EXTENSION ".txt"
+/* (port) the characters of a map's name in the menus kept: a mod map's
+title ("The Truth and Reconciliation") is longer than a file's name */
+#define MAXIMUM_DISPLAY_NAME_LENGTH 47
+/* (port) a mod map's description's lines, as the Xbox levels' are, and
+their number */
+#define MOD_DESCRIPTION_LINE_LENGTH 22
+#define MOD_DESCRIPTION_LINES 8
 /* the bytes of a description file read, and the characters of it kept: the
 menus' descriptions are a few short lines */
 #define MAXIMUM_DESCRIPTION_FILE_BYTES 1024
@@ -112,7 +128,7 @@ struct custom_edition_map
 	/* saved_game_file_remember_last_used_multiplayer_map writes
 	MAXIMUM_FILENAME_LENGTH+1 characters of a level name */
 	char level_name[MAXIMUM_FILENAME_LENGTH + 1];
-	wchar_t display_name[MAXIMUM_MAP_NAME_LENGTH + 1];
+	wchar_t display_name[MAXIMUM_DISPLAY_NAME_LENGTH + 1];
 	wchar_t description[MAXIMUM_DESCRIPTION_LENGTH + 1];
 	boolean picture_read;
 	struct bitmap_data *picture;
@@ -121,6 +137,11 @@ struct custom_edition_map
 	boolean xbox_cache;
 	/* a Custom Edition campaign map (a solo scenario) */
 	boolean campaign;
+	/* (port) a mod's map (custom_edition_mods.c), at `mod_order` in the
+	mods' maps, with its picture's file (none: empty) */
+	boolean mod;
+	short mod_order;
+	char picture_path[MAXIMUM_FILENAME_LENGTH + 1];
 };
 
 struct custom_edition_maps_globals
@@ -608,8 +629,144 @@ static int custom_edition_map_compare(
 	{
 		return first_map->campaign ? 1 : -1;
 	}
+	/* (the mods' maps last, in their order) */
+	if (first_map->mod != second_map->mod)
+	{
+		return first_map->mod ? 1 : -1;
+	}
+	if (first_map->mod)
+	{
+		return first_map->mod_order - second_map->mod_order;
+	}
 
 	return (int)csstrcasecmp(first_map->name, second_map->name);
+}
+
+/* (port) Appends the words of `text` to `description` (`*length`
+characters of it so far) in lines of MOD_DESCRIPTION_LINE_LENGTH, while
+there are fewer than MOD_DESCRIPTION_LINES of them (`*lines`). */
+static void mod_description_append(
+	wchar_t *description,
+	short *length,
+	short *lines,
+	char const *text)
+{
+	short line_length = 0;
+
+	while (*text && *lines < MOD_DESCRIPTION_LINES)
+	{
+		short word_length = 0;
+		short index;
+
+		while (*text == ' ')
+		{
+			text++;
+		}
+		while (text[word_length] && text[word_length] != ' ')
+		{
+			word_length++;
+		}
+		if (!word_length)
+		{
+			break;
+		}
+		if (line_length && line_length + 1 + word_length > MOD_DESCRIPTION_LINE_LENGTH)
+		{
+			if (*lines + 1 >= MOD_DESCRIPTION_LINES || *length + 2 > MAXIMUM_DESCRIPTION_LENGTH)
+			{
+				break;
+			}
+			description[(*length)++] = '\r';
+			description[(*length)++] = '\n';
+			(*lines)++;
+			line_length = 0;
+		}
+		else if (line_length && *length < MAXIMUM_DESCRIPTION_LENGTH)
+		{
+			description[(*length)++] = ' ';
+			line_length++;
+		}
+		for (index = 0; index < word_length && *length < MAXIMUM_DESCRIPTION_LENGTH; index++)
+		{
+			description[(*length)++] = (wchar_t)(unsigned char)text[index];
+		}
+		line_length += word_length;
+		text += word_length;
+	}
+	description[*length] = 0;
+
+	return;
+}
+
+/* (port) Adds the mods' maps (custom_edition_mods.c), looked for anew, as
+campaign maps: each mod map not turned off (HALO_MAPS_DISABLED), named by
+its title, described by its mod's title and its own description. */
+static void custom_edition_mods_maps_add(
+	void)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	short count = custom_edition_mods_look_for();
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		char const *name = custom_edition_mods_map_name(index);
+		char const *title = custom_edition_mods_map_title(index);
+		char const *mod_title = custom_edition_mods_map_mod_title(index);
+		char const *picture_path = custom_edition_mods_map_picture_path(index);
+		struct custom_edition_map *map;
+		short length = 0;
+		short lines = 0;
+		short character;
+
+		if (custom_edition_map_disabled(name))
+		{
+			error(_error_silent, "custom edition: the map '%s' is turned off (HALO_MAPS_DISABLED)", name);
+			continue;
+		}
+		if (globals->map_count == MAXIMUM_CUSTOM_EDITION_MAPS)
+		{
+			error(_error_silent, "custom edition: the map '%s' is not in a level list, which hold %d of them", name,
+				MAXIMUM_CUSTOM_EDITION_MAPS);
+			break;
+		}
+		map = &globals->maps[globals->map_count++];
+		csmemset(map, 0, sizeof(*map));
+		map->campaign = TRUE;
+		map->mod = TRUE;
+		map->mod_order = index;
+		csstrcpy(map->name, name);
+		csprintf(map->level_name, "%s%s", CUSTOM_EDITION_MODS_LEVEL_NAME_PREFIX, name);
+		if (picture_path && csstrlen(picture_path) < (long)sizeof(map->picture_path))
+		{
+			csstrcpy(map->picture_path, picture_path);
+		}
+		if (title && title[0])
+		{
+			for (character = 0; title[character] && character < MAXIMUM_DISPLAY_NAME_LENGTH; character++)
+			{
+				map->display_name[character] = (wchar_t)(unsigned char)title[character];
+			}
+			map->display_name[character] = 0;
+		}
+		else
+		{
+			display_name_make(name, map->display_name);
+		}
+		mod_description_append(map->description, &length, &lines, mod_title && mod_title[0] ? mod_title : name);
+		if (lines + 2 < MOD_DESCRIPTION_LINES && length + 4 <= MAXIMUM_DESCRIPTION_LENGTH)
+		{
+			map->description[length++] = '\r';
+			map->description[length++] = '\n';
+			map->description[length++] = '\r';
+			map->description[length++] = '\n';
+			map->description[length] = 0;
+			lines += 2;
+			mod_description_append(map->description, &length, &lines, custom_edition_mods_map_description(index));
+		}
+	}
+
+	return;
 }
 
 static void custom_edition_maps_look_for(
@@ -686,6 +843,12 @@ static void custom_edition_maps_look_for(
 			description_listed,
 			description_listed ? description_date : NULL);
 	}
+	/* (port: the mods' maps, Halo: CE Anniversary campaign maps, which PC
+	maps turns on too) */
+	if (halo_custom_edition_enabled())
+	{
+		custom_edition_mods_maps_add();
+	}
 	qsort(globals->maps, globals->map_count, sizeof(globals->maps[0]), custom_edition_map_compare);
 	for (globals->multiplayer_count = 0;
 		globals->multiplayer_count < globals->map_count && !globals->maps[globals->multiplayer_count].campaign;
@@ -712,10 +875,24 @@ static struct bitmap_data *custom_edition_map_picture_read(
 	enum bmp_file_status status;
 	struct bitmap_data *bitmap = NULL;
 	uint8_t *file = NULL;
+	/* (port: a PNG's bitmap, png_files.c's memory) */
+	uint8_t *converted = NULL;
 	FILE *stream;
 	long size = 0;
 
-	csprintf(path, "%s%s%s", cache_files_map_directory(), map->name, PICTURE_EXTENSION);
+	if (map->mod)
+	{
+		/* (port: a mod map's, beside it in the mods folder, or none) */
+		if (!map->picture_path[0])
+		{
+			return NULL;
+		}
+		csstrcpy(path, map->picture_path);
+	}
+	else
+	{
+		csprintf(path, "%s%s%s", cache_files_map_directory(), map->name, PICTURE_EXTENSION);
+	}
 	stream = fopen(path, "rb");
 	if (!stream)
 	{
@@ -740,15 +917,30 @@ static struct bitmap_data *custom_edition_map_picture_read(
 		error(_error_silent, "custom edition: the picture '%s' could not be read", path);
 		return NULL;
 	}
+	/* (port: a mod map's PNG, made a bitmap first, png_files.c) */
+	if (map->mod && csstrlen(path) > 4 && !csstrcasecmp(path + csstrlen(path) - 4, ".png"))
+	{
+		uint32_t converted_size;
+		enum png_file_status png_status = png_file_to_bitmap(file, (uint32_t)size, &converted, &converted_size);
 
-	status = bmp_file_open(file, (uint32_t)size, &picture);
+		free(file);
+		file = NULL;
+		if (png_status != _png_file_status_ok)
+		{
+			error(_error_silent, "custom edition: the picture '%s' cannot be shown: %s", path, png_file_status_describe(png_status));
+			return NULL;
+		}
+		size = (long)converted_size;
+	}
+
+	status = bmp_file_open(converted ? converted : file, (uint32_t)size, &picture);
 	if (status == _bmp_file_status_ok)
 	{
 		bitmap = bitmap_2d_new(PICTURE_TEXTURE_SIZE, PICTURE_TEXTURE_SIZE, 0, _bitmap_format_a8r8g8b8);
 		if (bitmap && bitmap->base_address)
 		{
 			bmp_file_fit(
-				file,
+				converted ? converted : file,
 				&picture,
 				LEVEL_PICTURE_SHAPE_WIDTH,
 				LEVEL_PICTURE_SHAPE_HEIGHT,
@@ -767,7 +959,11 @@ static struct bitmap_data *custom_edition_map_picture_read(
 	{
 		error(_error_silent, "custom edition: the picture '%s' cannot be shown: %s", path, bmp_file_status_describe(status));
 	}
-	free(file);
+	if (file)
+	{
+		free(file);
+	}
+	png_file_bitmap_free(converted);
 
 	return bitmap;
 }
@@ -1130,6 +1326,11 @@ char const *custom_edition_maps_campaign_next_level(
 	short level_index;
 	short map_index;
 
+	/* (port: a mod map's goes on as its campaign lists, custom_edition_mods.c) */
+	if (custom_edition_mods_level_name(level_name))
+	{
+		return custom_edition_mods_next_level(level_name);
+	}
 	if (!level_name || !custom_edition_level_name(level_name))
 	{
 		return NULL;
@@ -1157,7 +1358,8 @@ char const *custom_edition_maps_campaign_next_level(
 	custom_edition_maps_look_for();
 	for (map_index = 0; map_index < globals->map_count; map_index++)
 	{
-		if (globals->maps[map_index].campaign && !csstrcasecmp(globals->maps[map_index].name, next_name))
+		if (globals->maps[map_index].campaign && !globals->maps[map_index].mod &&
+			!csstrcasecmp(globals->maps[map_index].name, next_name))
 		{
 			return globals->maps[map_index].level_name;
 		}
@@ -1178,8 +1380,11 @@ boolean custom_edition_maps_shareable(
 	name = tag_name_strip_path(level_name);
 
 	/* (turned off since the list was made: HALO_MAPS_DISABLED is the panel's
-	switch, read anew) */
+	switch, read anew; port: a mod's map never) */
 	return !xbox_level_stock(name) &&
+		!custom_edition_mods_level_name(level_name) &&
+		(custom_edition_maps_display_index(level_name) == NONE ||
+			!custom_edition_map_get(custom_edition_maps_display_index(level_name))->mod) &&
 		!custom_edition_map_disabled(name) &&
 		custom_edition_maps_display_index(level_name) != NONE;
 }

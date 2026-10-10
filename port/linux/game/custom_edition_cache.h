@@ -196,11 +196,29 @@ boolean custom_edition_cache_relies_on(
 (cache_file_tag_cache_contains); NULL and 0 when none is loaded. */
 void *custom_edition_cache_tag_cache(
 	unsigned long *size);
-/* A structure BSP of the loaded map was just read to `structure_bsp`: its
-pointers are moved there too when the tags were (custom_edition_cache.c). */
+/* A structure BSP of the loaded map was just read to `structure_bsp` from
+`file_offset`: its pointers are moved there too when the tags were
+(custom_edition_cache.c); (port) a Halo: CE Anniversary map's from where the
+map links it, its header made Custom Edition's (or, should it not be one
+the map was checked with, made no header at all). */
 void custom_edition_cache_structure_bsp_moved(
 	void *structure_bsp,
-	long size);
+	long size,
+	long file_offset);
+/* (port) Where in the loaded Halo: CE Anniversary map's file the vertices of
+the structure BSP just read are (custom_edition_geometry.c); FALSE for any
+other map's. */
+boolean custom_edition_cache_structure_bsp_vertices(
+	unsigned long *offset,
+	unsigned long *size);
+/* (port) Whether the map loaded is a mod's Halo: CE Anniversary map. */
+boolean custom_edition_cache_mcc_cea(
+	void);
+/* (port) Whether the file at `path` (a mod's map, custom_edition_mods.c) is
+a Halo: CE Anniversary cache of a solo scenario this build loads (its
+header and tag index alone are read); logs why not. */
+boolean custom_edition_cache_mod_map_identify(
+	char const *path);
 void custom_edition_cache_tags_unload(
 	void);
 

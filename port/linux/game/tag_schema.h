@@ -393,6 +393,15 @@ void *tag_validate_root(
 /* whether the tags being checked are a Custom Edition map's */
 boolean tag_validate_custom_edition(
 	struct tag_validation *validation);
+/* (port) whether the Custom Edition map's structure bsps keep their
+vertices in its file rather than in each bsp, as a Halo: CE Anniversary
+map's do (custom_edition_geometry.c reads them as the bsp loads): its
+materials' vertex counts are then checked there, not against their
+uncompressed vertex data, which they have none of */
+void tag_validate_structure_vertices_in_file(
+	boolean in_file);
+boolean tag_validate_structure_vertices_are_in_file(
+	struct tag_validation *validation);
 /* whether size bytes at address are in the tags (or the bsp) being checked */
 boolean tag_validate_contains(
 	struct tag_validation *validation,
