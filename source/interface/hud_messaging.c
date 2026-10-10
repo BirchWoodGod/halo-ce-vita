@@ -1747,7 +1747,17 @@ void hud_messaging_update(
 								}
 								else
 								{
-									error(_error_silent, "help text cannot use custom icons");
+									/* port: left out, said once (the icon index is
+									still NONE, which went on to the button icons,
+									remap_sticks_for_local_player and the block) */
+									static boolean help_custom_icon_reported = FALSE;
+
+									if (!help_custom_icon_reported)
+									{
+										help_custom_icon_reported = TRUE;
+										error(_error_silent, "help text cannot use custom icons");
+									}
+									break;
 								}
 							}
 							else
@@ -1755,7 +1765,8 @@ void hud_messaging_update(
 								icon_index = element->data;
 							}
 
-							if (icon_index < hud_globals->messaging.button_icons.count)
+							/* port: and not below the list (a map's element data) */
+							if (icon_index >= 0 && icon_index < hud_globals->messaging.button_icons.count)
 							{
 								struct icon_hud_element_definition const *icon;
 
