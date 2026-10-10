@@ -117,10 +117,55 @@ As it loads (`cache_file_formats.c`, `custom_edition_cache.c`,
 | `mcc_mission_segment`, `player_effect_set_max_vibrate` | no such functions | the calls do nothing (`custom_edition_scripts.c`) |
 | two objects of one name | | the first placed has it (`objects.c`) |
 | more than 48 object lists in one update (b40, c20) | | collected between scripts (`feat/mcc-maps`) |
+| a HUD laid out on a canvas twice the Xbox's ([The HUD](#the-hud)) | the Xbox's 640x480 | placements, margins and digit metrics halved, bitmaps drawn at a quarter (also converted maps) |
 
 The rest is a Custom Edition map's: shaders renumbered, Ogg Vorbis sounds
 decoded as they load, models converted, HUD scales halved, linear sprites
 (`custom_edition_cache_convert`, `custom_edition_cache.c`).
+
+### The HUD
+
+MCC lays the HUD out on a canvas twice the Xbox's 640x480, and its HUD
+tags (MCC's own `ui\hud\*`, which Ruby's maps keep) are made for it:
+every offset in the unit, weapon and grenade HUD interfaces and the HUD
+globals is twice the Xbox b30's (the shield panel meter 14,0 against 7,0,
+the health panel 72,34 against 36,17, the grenade count 164,2 against
+82,1, the HUD messages 0,130 against 0,60, the damage indicators 20
+against 10), the digits' metrics are twice theirs (18 screen width against
+9), and the bitmaps the placements draw are four times the Xbox's with
+Halo PC's *half HUD scale* flag (`hud_unit_backgrounds` 512x128 against
+128x32, `hud_reticles` 512 against 128, the digits 72x48 against 18x12, the
+HUD message icons 486x104 against 122x26). Halo PC's own maps draw on the
+Xbox's canvas, so this build drew such a HUD twice its size and pushed in
+from the corners (the owner's Vita, October 10 2026, Ruby's b30 converted).
+
+As the map loads, a HUD globals tag with MCC's remaps of HUD bitmaps to its
+remastered ones (Invader's *anniversary hud remaps*, MCC's alone: 14 in
+each Ruby map, natively and converted, and in MCC's own b30; the Xbox's and
+Halo PC's tags leave the place zero) marks the HUD as MCC's
+(`hud_mcc_canvas` in `cache_file_report`, "the HUD is Halo: CE
+Anniversary's" in the load log), and `mcc_hud_placements_convert` brings it
+to the Xbox's canvas: each placement's offset halved, its size halved and
+halved again by its bitmap's half HUD scale; a placement with the *use high
+res scale* flag keeps its offset (MCC reads the flag, made for Halo PC, as
+an offset on the Xbox's canvas and doubles it: Invader's
+`hud_interface.cpp`) and loses the flag; the waypoint and damage indicator
+margins and the digits' metrics halved. What no placement sizes,
+`hud_mcc_bitmap_scale` draws: the digits and the HUD messages' icons at a
+quarter of their bitmaps, the waypoint arrows, the damage indicators and
+the scopes' masks (a weapon HUD's screen effect: the sniper rifle's
+1024x512, the pistol's 512), which are only twice the Xbox's with the half
+HUD scale, at half. The meters are filtered, not point sampled (a quarter
+of a bitmap without mipmaps comes out as broken dots), and a weapon HUD
+element's own anchor, MCC's (in its header's padding: the sniper rifle's
+range ladders, anchored to the centre where its HUD anchors the top left),
+is followed for the corners and the centre. Ruby's HUD then draws at the
+Xbox b30's sizes and places, the motion sensor 10 further in from the
+corner (MCC's own margin); `port/vita/tests/run_hud_layout_test.sh` checks
+it, natively and converted. Not followed: MCC's anchors at the edges'
+centres (none in Ruby's HUD), its remastered HUD bitmaps (the remaps), and
+its finer filtering: a HUD bitmap a quarter of its size here aliases
+somewhat (the ammunition counter's rounds).
 
 ## How version 13 differs from 609
 
