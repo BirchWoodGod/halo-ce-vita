@@ -2040,58 +2040,131 @@ static boolean bots_is_enemy(struct player_datum *player, struct player_datum *o
 	return TRUE;
 }
 
-/* the enemy the bot sees best now, NONE for none */
+/* the enemy the bot sees best now, NONE for none: of the enemies in its
+sight's reach and view, the one of the least score (nearest, most ahead, the
+one it fights favoured) a line of sight reaches, the first in the players'
+order of those of that score. The enemies are scored first and their lines
+of sight cast from the least score up, until one reaches its enemy, which is
+the answer: cast in the players' order, as before, every enemy scoring less
+than the best seen so far had its line cast, and the best was the same one
+(the lines of sight change nothing in the game but the collision tests'
+marker stamps). A score that is not a number (none is: the players'
+positions are) is compared as before, in the players' order */
+struct bots_target_candidate
+{
+	long player_index;
+	long unit_index;
+	real score;
+	real_point3d point;
+};
+
+/* an enemy's score as a target (its point the bounding sphere's centre);
+FALSE for one out of reach or view, or not an enemy */
+static boolean bots_target_score(struct bots_bot *bot, struct player_datum *player, struct player_datum *other,
+	long player_index, real_point3d const *eye, struct bots_skill_definition const *skill, boolean hurt,
+	struct bots_target_candidate *candidate)
+{
+	struct object_datum *object;
+	struct unit_datum *other_unit;
+	real distance, reach, bearing;
+	real half_view = 0.5f * skill->field_of_view_degrees * BOTS_DEGREES;
+
+	if (!bots_is_enemy(player, other))
+		return FALSE;
+	object = object_get(other->unit_index);
+	other_unit = unit_get(other->unit_index);
+	if (TEST_FLAG(object->object.damage_flags, _object_dead_bit))
+		return FALSE;
+	candidate->point = object->object.bounding_sphere_center;
+	distance = bots_distance3d(eye, &candidate->point);
+	reach = skill->sight_distance;
+	/* (active camouflage: seen only close) */
+	if (TEST_FLAG(other_unit->unit.flags, _unit_active_camouflaged_bit))
+		reach *= 0.3f;
+	/* (the one it fights: a little further) */
+	if (player_index == bot->target_player_index)
+		reach *= 1.25f;
+	if (distance > reach)
+		return FALSE;
+	bearing = (real)fabs(bots_angle_difference((real)atan2(candidate->point.y - eye->y, candidate->point.x - eye->x),
+		bot->yaw));
+	/* (out of view: unless close by, it shot the bot, or it is the one
+	the bot fights) */
+	if (bearing > half_view && distance > 3.0f && !hurt && player_index != bot->target_player_index)
+		return FALSE;
+	candidate->player_index = player_index;
+	candidate->unit_index = other->unit_index;
+	candidate->score = distance + bearing * 4.0f - (player_index == bot->target_player_index ? 6.0f : 0.0f);
+	return TRUE;
+}
+
 static long bots_find_target(struct bots_bot *bot, struct player_datum *player, struct unit_datum *unit,
 	real_point3d const *eye)
 {
 	struct bots_skill_definition const *skill = &bots_skills[bots_globals.skill];
 	struct data_iterator iterator;
 	struct player_datum *other;
-	long best_index = NONE;
-	real best_score = REAL_MAX;
-	real half_view = 0.5f * skill->field_of_view_degrees * BOTS_DEGREES;
 	boolean hurt = game_time_get() - bot->hurt_tick < TICKS_PER_SECOND * 2;
+	struct bots_target_candidate candidates[BOTS_MAXIMUM + MAXIMUM_LOCAL_PLAYERS];
+	long candidate_count = 0, index;
+	boolean ordered = TRUE;
 
-	data_iterator_new(&iterator, player_data);
-	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
-	{
-		struct object_datum *object;
-		struct unit_datum *other_unit;
-		real distance, reach, bearing, score;
-		real_point3d point;
-
-		if (!bots_is_enemy(player, other))
-			continue;
-		object = object_get(other->unit_index);
-		other_unit = unit_get(other->unit_index);
-		if (TEST_FLAG(object->object.damage_flags, _object_dead_bit))
-			continue;
-		point = object->object.bounding_sphere_center;
-		distance = bots_distance3d(eye, &point);
-		reach = skill->sight_distance;
-		/* (active camouflage: seen only close) */
-		if (TEST_FLAG(other_unit->unit.flags, _unit_active_camouflaged_bit))
-			reach *= 0.3f;
-		/* (the one it fights: a little further) */
-		if (iterator.datum_index == bot->target_player_index)
-			reach *= 1.25f;
-		if (distance > reach)
-			continue;
-		bearing = (real)fabs(bots_angle_difference((real)atan2(point.y - eye->y, point.x - eye->x), bot->yaw));
-		/* (out of view: unless close by, it shot the bot, or it is the one
-		the bot fights) */
-		if (bearing > half_view && distance > 3.0f && !hurt && iterator.datum_index != bot->target_player_index)
-			continue;
-		score = distance + bearing * 4.0f - (iterator.datum_index == bot->target_player_index ? 6.0f : 0.0f);
-		if (score >= best_score)
-			continue;
-		if (!bots_line_of_sight(player->unit_index, eye, &point, other->unit_index))
-			continue;
-		best_score = score;
-		best_index = iterator.datum_index;
-	}
 	(void)unit;
-	return best_index;
+	data_iterator_new(&iterator, player_data);
+	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL && ordered)
+	{
+		if (candidate_count >= (long)NUMBEROF(candidates))
+			ordered = FALSE;
+		else if (bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, &candidates[candidate_count]))
+		{
+			real score = candidates[candidate_count].score;
+
+			if (score != score)
+				ordered = FALSE;
+			else if (score < REAL_MAX)
+				candidate_count++;
+		}
+	}
+	if (!ordered)
+	{
+		/* (more enemies than kept, or a score not a number: the players'
+		order, each scoring less than the best so far) */
+		struct bots_target_candidate candidate;
+		long best_index = NONE;
+		real best_score = REAL_MAX;
+
+		data_iterator_new(&iterator, player_data);
+		while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (!bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, &candidate) ||
+				candidate.score >= best_score ||
+				!bots_line_of_sight(player->unit_index, eye, &candidate.point, candidate.unit_index))
+			{
+				continue;
+			}
+			best_score = candidate.score;
+			best_index = candidate.player_index;
+		}
+		return best_index;
+	}
+	while (candidate_count > 0)
+	{
+		long least = 0;
+
+		/* (the least score, the first of it in the players' order) */
+		for (index = 1; index < candidate_count; index++)
+		{
+			if (candidates[index].score < candidates[least].score)
+				least = index;
+		}
+		if (bots_line_of_sight(player->unit_index, eye, &candidates[least].point, candidates[least].unit_index))
+			return candidates[least].player_index;
+		/* (out, the others kept in their order) */
+		candidate_count--;
+		for (index = least; index < candidate_count; index++)
+			candidates[index] = candidates[index + 1];
+	}
+	return NONE;
 }
 
 /* ---------- moving */
