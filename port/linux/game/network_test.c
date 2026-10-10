@@ -63,7 +63,7 @@ and debug.network_test_pickup (the last player stands on a weapon lying
 about that many seconds in, and a joining machine's player holds the action
 button a second later, to pick it up). HALO_NETWORK_TEST_PLAYER_DRIVES
 (seconds; a "local:" game) seats this machine's player as the nearest
-Warthog's driver that many seconds in, the scripted player letting go of
+Warthog's driver (one no one drives, within 30 units) that many seconds in, the scripted player letting go of
 everything for 20 seconds (the vehicle stops: the offline bots get in beside
 it, run_bots_test.sh), then driving it about as it walks.
 
@@ -910,8 +910,11 @@ static void network_test_vehicle(
 			real_point3d const *vehicle_position = &object_get(vehicles.index)->object.position;
 			real distance = distance_squared3d(position, vehicle_position);
 
+			/* (HALO_NETWORK_TEST_PLAYER_DRIVES: a Warthog no one drives, near:
+			not one across the map, at the other team's base) */
 			if (first_player && (unit_get(vehicles.index)->unit.driver_object_index != NONE ||
-				!strstr(tag_get_name(object_get(vehicles.index)->definition_index), "warthog")))
+				!strstr(tag_get_name(object_get(vehicles.index)->definition_index), "warthog") ||
+				distance > 30.0f * 30.0f))
 			{
 				continue;
 			}

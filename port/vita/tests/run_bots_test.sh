@@ -18,14 +18,15 @@
 #            the one at its own base to the other's), the bots on both teams
 #            and not fighting (HALO_BOT_PEACEFUL=1): a capture is asked, not
 #            kills
-#   race     Team Race, on foot (the bots drive no vehicle): a bot on to a
-#            second checkpoint at least
+#   race     Team Race: a bot on to a second checkpoint at least (the bots
+#            drive the race's Warthogs to the checkpoints, else run; kills
+#            are not asked, the bots in their vehicles fighting little)
 #   rockets  Rockets (Slayer, rocket launchers)
 #   teamball Team Oddball
 #   vctf     CTF with every vehicle the map places (the variant's default
 #            vehicle set: Blood Gulch's Warthogs, Ghosts and Scorpions;
 #            "ctf+vehicles"), the bots on both teams, Heroic; the player
-#            stops a Warthog at its base 4 s in, for 20 s
+#            stops a Warthog at its base 1 s in, for 20 s
 #            (HALO_NETWORK_TEST_PLAYER_DRIVES), and a teammate bot must get
 #            in beside it
 #   vslayer  Slayer likewise ("slayer+vehicles"): every bot for itself, a
@@ -182,7 +183,7 @@ for name in $cases; do
 	race) run race team_race HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
 	rockets) run rockets rockets HALO_BOT_SKILL=heroic & ;;
 	teamball) run teamball team_oddball HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
-	vctf) run vctf ctf+vehicles HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_NETWORK_TEST_PLAYER_DRIVES=4 & ;;
+	vctf) run vctf ctf+vehicles HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_NETWORK_TEST_PLAYER_DRIVES=1 & ;;
 	vslayer) run vslayer slayer+vehicles HALO_BOT_SKILL=heroic & ;;
 	vteams) run vteams team_slayer+vehicles HALO_BOT_SKILL=legendary HALO_BOT_TEAMS=even & ;;
 	maps) continue ;;
@@ -318,9 +319,9 @@ if name == "invasion":
 # laps and checkpoints)
 if name == "race" and (not scores or max(scores) < 2):
     fail("no bot touched a second checkpoint")
-if kills <= bots:
+if name != "race" and kills <= bots:
     fail("the bots killed only %d times" % kills)
-if died * 2 < bots:
+if name != "race" and died * 2 < bots:
     fail("only %d bots died" % died)
 # (CTF's score is captures, which three minutes may not see)
 if name not in ("ctf", "vctf") and (not scores or max(scores) <= 0):
@@ -478,7 +479,8 @@ if game in ("oddball", "team_oddball") and balls <= 0 and best <= 0:
 # nothing: a capture, the flag run to the other base, is asked)
 if game == "invasion" and best <= 0:
     objective_failed = "no capture"
-# (Team Race: a checkpoint touched, the bots on foot: they drive no vehicle)
+# (Team Race: a checkpoint touched, the bots driving the race's vehicles or
+# on foot)
 if game == "team_race" and best <= 0:
     objective_failed = "no checkpoint touched"
 if objective_failed and name in KNOWN:

@@ -2452,7 +2452,11 @@ static boolean bots_line_of_sight(long unit_index, real_point3d const *eye, real
 	vector.i = point->x - eye->x;
 	vector.j = point->y - eye->y;
 	vector.k = point->z - eye->z;
-	hit = collision_test_vector(_collision_test_for_line_of_sight_flags, eye, &vector, unit_index, &collision);
+	/* port: riding, its own vehicle (a Warthog's gun before its gunner's
+	eyes) and the riders in it are no wall: the ray ignores the vehicle, and
+	with it everything riding it (object_test_vector) */
+	hit = collision_test_vector(_collision_test_for_line_of_sight_flags, eye, &vector,
+		vehicle_index != NONE ? vehicle_index : unit_index, &collision);
 	if (started)
 	{
 		bots_profile.sight_rays++;
@@ -2460,19 +2464,6 @@ static boolean bots_line_of_sight(long unit_index, real_point3d const *eye, real
 	}
 	if (!hit)
 		return TRUE;
-	/* port: riding, its own vehicle (a Warthog's gun before its gunner's
-	eyes) or a rider in it is no wall: again past the vehicle */
-	if (vehicle_index != NONE && collision.type == _collision_result_object &&
-		(collision.object_index == vehicle_index ||
-			object_get(collision.object_index)->object.parent_object_index == vehicle_index))
-	{
-		if (!collision_test_vector(_collision_test_for_line_of_sight_flags, eye, &vector, vehicle_index, &collision) ||
-			(collision.type == _collision_result_object &&
-				object_get(collision.object_index)->object.parent_object_index == vehicle_index))
-		{
-			return TRUE;
-		}
-	}
 	/* (the target's vehicle: seen) */
 	if (collision.type == _collision_result_object && target_unit_index != NONE &&
 		(collision.object_index == target_unit_index ||
@@ -3632,12 +3623,12 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 	long best_index = NONE;
 	short best_seat = NONE;
 
-	if (!bots_vehicles_enabled() || bot->vehicle_index != NONE || now < bot->vehicle_check_tick ||
-		now < bot->vehicle_rest_until_tick)
-	{
+	if (bot->vehicle_index != NONE || now < bot->vehicle_check_tick || now < bot->vehicle_rest_until_tick)
 		return;
-	}
 	bot->vehicle_check_tick = now + TICKS_PER_SECOND;
+	/* (the setting looked at once a second: a configuration lookup) */
+	if (!bots_vehicles_enabled())
+		return;
 	if (bot->goal_kind == _bots_goal_none || bot->goal_kind == _bots_goal_item || bot->held_objective ||
 		(tick->fighting && tick->target_distance < 15.0f))
 	{
@@ -4183,7 +4174,9 @@ static void bots_bot_ride(struct bots_bot *bot, struct bots_tick *tick, long veh
 	}
 	else
 		bot->ride_driverless_tick = 0;
-	bots_choose_goal(bot, bot->player_index, &tick->position, FALSE);
+	/* (the goal looked at again every fourth tick, the bots in turn) */
+	if (!((now + (long)(bot - bots_globals.bots)) % 4) || bot->goal_kind == _bots_goal_none)
+		bots_choose_goal(bot, bot->player_index, &tick->position, FALSE);
 	bots_search_take(bot, TRUE);
 	/* (stuck fast; or stuck twice near a goal that wants it on foot: a
 	base's doors, which no vehicle goes through) */
