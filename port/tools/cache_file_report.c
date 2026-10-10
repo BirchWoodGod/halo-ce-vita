@@ -326,6 +326,7 @@ static int report_custom_edition_cache(
 			printf("chicago_extended_shaders_converted: %" PRId32 "\n", conversion.chicago_extended_shaders);
 			printf("shaders_mistyped: %" PRId32 "\n", conversion.shaders_mistyped);
 			printf("bitmaps_prepared: %" PRId32 "\n", conversion.bitmaps_prepared);
+			printf("bitmaps_made_linear: %" PRId32 "\n", conversion.bitmaps_made_linear);
 			printf("script_nodes_reduced: %" PRId32 "\n", conversion.script_nodes_reduced);
 			printf("animation_overlays_disabled: %" PRId32 "\n", conversion.animation_overlays_disabled);
 			printf("weapon_functions_converted: %" PRId32 "\n", conversion.weapon_functions_converted);

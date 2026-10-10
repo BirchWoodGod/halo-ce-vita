@@ -403,6 +403,12 @@ struct custom_edition_conversion_report
 	int32_t shaders_mistyped;
 	/* bitmaps given their own tag and the state of a bitmap not yet drawn */
 	int32_t bitmaps_prepared;
+	/* (port) uncompressed 2D bitmaps of other dimensions than powers of two,
+	without mipmaps, not marked linear (sprites of Halo: CE Anniversary
+	maps rebuilt by Invader, which marks only interface bitmaps' so), made
+	linear: the layout of every unswizzled bitmap, which this build draws
+	only so at those dimensions */
+	int32_t bitmaps_made_linear;
 	/* 1 when the scenario's script syntax nodes, upgraded by OpenSauce, were
 	made this build's number */
 	int32_t script_nodes_reduced;

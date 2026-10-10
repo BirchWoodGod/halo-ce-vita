@@ -449,11 +449,13 @@ class Map:
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, hud_bitmap_flags=None, strings_name="test\\strings", strings=("hello", "world!"),
                  weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False,
-                 tag_space=None):
+                 tag_space=None, in_map_bitmap=None):
         self.bsp_sizes = bsp_sizes
         # the tag space the structure BSPs are placed at the top of (Invader's
         # --tag-space), without OpenSauce's header
         self.tag_space = tag_space
+        # the bitmap kept in the map: (width, height, type, flags, mipmaps)
+        self.in_map_bitmap = in_map_bitmap
         # the header's name and the tag data's checksum, by which Chimera's
         # map list knows a map
         self.name = name
@@ -604,6 +606,15 @@ class Map:
         tag_data.block(group + 0x60, 1, bitmap)
         tag_data.u32(bitmap + 0x18, pixels_offset)
         tag_data.u32(bitmap + 0x1C, len(in_map_pixels))
+        if self.in_map_bitmap is not None:
+            width, height, bitmap_type, flags, mipmaps = self.in_map_bitmap
+            tag_data.u16(bitmap + 0x04, width)
+            tag_data.u16(bitmap + 0x06, height)
+            tag_data.u16(bitmap + 0x08, 1)
+            tag_data.u16(bitmap + 0x0A, bitmap_type)
+            tag_data.u16(bitmap + 0x0E, flags)
+            tag_data.u16(bitmap + 0x14, mipmaps)
+        address_of["in map bitmap data"] = bitmap
         address_of["test\\in map bitmap"] = group
         # the header the map keeps of a sound held by sounds.map
         sound = tag_data.reserve(0xA4)
@@ -836,6 +847,27 @@ def test_a_tag_space_past_the_memory_upgrades_is_not_taken(report_tool, tmp_path
 def test_a_structure_bsp_below_the_stock_top_keeps_the_stock_tag_cache(report_tool, tmp_path):
     _, report = report_one(report_tool, Map(bsp_gap=0x100000).write(tmp_path))
     assert report["tag_cache_bytes"] == hex(TAG_CACHE_BYTES) and report["load"] == "ok"
+
+
+@pytest.mark.parametrize("bitmap, linear", [
+    ((47, 44, 0, 0, 0), True),  # Halo: CE Anniversary's HUD message icons, as Invader builds them
+    ((3, 5, 0, 1, 0), True),  # (Invader's "power of two" flag, set whatever the size)
+    ((64, 32, 0, 0, 0), False),  # powers of two
+    ((47, 44, 0, 0x2, 0), False),  # compressed
+    ((47, 44, 0, 0x8, 0), False),  # swizzled
+    ((47, 44, 0, 0, 3), False),  # mipmaps
+    ((47, 44, 2, 0, 0), False),  # a cube map
+    ((0, 0, 0, 0, 0), False),  # no size
+])
+def test_unswizzled_bitmaps_of_other_sizes_than_powers_of_two_are_made_linear(report_tool, tmp_path, bitmap, linear):
+    cache = Map(in_map_bitmap=bitmap)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["bitmaps_made_linear"] == ("1" if linear else "0")
+    flags = u16_at(tags, cache.addresses["in map bitmap data"] + 0x0E)
+    assert bool(flags & 0x10) == linear
+    if linear:
+        assert not flags & 1
 
 
 def test_opensauce_definitions_are_accepted_after_the_cache_data(report_tool, tmp_path):

@@ -327,6 +327,10 @@ static boolean texture_cache_start_loading_bitmap(
 	boolean block);
 static boolean texture_cache_bitmap_valid(
 	struct bitmap_data *bitmap);
+#ifdef HALO_LINUX
+static long texture_cache_linear_pitch(
+	struct bitmap_data *bitmap);
+#endif
 
 /* ---------- globals */
 
@@ -706,6 +710,20 @@ static void texture_cache_delete_block_proc(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: a linear bitmap's row pitch as rasterizer_xbox_bitmap_rebuild_hardware_format
+lays its rows out in the cache block: whole D3DTEXTURE_PITCH_ALIGNMENT steps */
+static long texture_cache_linear_pitch(
+	struct bitmap_data *bitmap)
+{
+	long row_pitch = bitmap_mipmap_get_row_pitch(bitmap, 0);
+
+	return row_pitch > 0 ?
+		(row_pitch + D3DTEXTURE_PITCH_ALIGNMENT - 1) / D3DTEXTURE_PITCH_ALIGNMENT * D3DTEXTURE_PITCH_ALIGNMENT :
+		row_pitch;
+}
+#endif
+
 static void texture_cache_initialize_hardware_format(
 	struct bitmap_data *bitmap,
 	D3DBaseTexture *texture)
@@ -730,10 +748,23 @@ static void texture_cache_initialize_hardware_format(
 			(2 << D3DFORMAT_DIMENSION_SHIFT) |
 			D3DFORMAT_BORDERSOURCE_COLOR |
 			D3DFORMAT_DMACHANNEL_A;
+#ifdef HALO_LINUX
+		/* port: the pitch of the rows as rasterizer_xbox_bitmap_rebuild_hardware_format
+		lays them out, padded to D3DTEXTURE_PITCH_ALIGNMENT: a Custom Edition
+		map's linear bitmaps have rows of any length (Halo: CE Anniversary's
+		HUD message icons, 8 to 1912 bytes), drawn with the unpadded pitch
+		rounded down where they were not refused (texture_cache_bitmap_valid);
+		the Xbox maps' rows are whole steps, so theirs is as before */
+		texture->Size =
+			((texture_cache_linear_pitch(bitmap) / D3DTEXTURE_PITCH_ALIGNMENT - 1) << D3DSIZE_PITCH_SHIFT) |
+			((bitmap->height - 1) << D3DSIZE_HEIGHT_SHIFT) |
+			(bitmap->width - 1);
+#else
 		texture->Size =
 			((bitmap_mipmap_get_row_pitch(bitmap, 0) / D3DTEXTURE_PITCH_ALIGNMENT - 1) << D3DSIZE_PITCH_SHIFT) |
 			((bitmap->height - 1) << D3DSIZE_HEIGHT_SHIFT) |
 			(bitmap->width - 1);
+#endif
 	}
 	else
 	{
@@ -891,7 +922,8 @@ static boolean texture_cache_bitmap_valid(
 	}
 	if (valid && linear)
 	{
-		long row_pitch = bitmap_mipmap_get_row_pitch(bitmap, 0);
+		/* port: the rows as laid out, padded (texture_cache_linear_pitch) */
+		long row_pitch = texture_cache_linear_pitch(bitmap);
 
 		valid =
 			row_pitch>0 &&

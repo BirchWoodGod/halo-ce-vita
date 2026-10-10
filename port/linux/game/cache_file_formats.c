@@ -382,7 +382,11 @@ s_bitmap_group_sequence 0x40, s_bitmap_group_sprite 0x20, s_bitmap_data 0x30) */
 #define BITMAP_GROUP_BYTES 0x6C
 #define BITMAP_GROUP_BITMAPS_OFFSET 0x60
 #define BITMAP_DATA_BYTES 0x30
+#define BITMAP_DATA_WIDTH_OFFSET 0x04
+#define BITMAP_DATA_HEIGHT_OFFSET 0x06
+#define BITMAP_DATA_TYPE_OFFSET 0x0A
 #define BITMAP_DATA_FLAGS_OFFSET 0x0E
+#define BITMAP_DATA_MIPMAP_COUNT_OFFSET 0x14
 #define BITMAP_DATA_PIXELS_OFFSET_OFFSET 0x18
 #define BITMAP_DATA_PIXELS_SIZE_OFFSET 0x1C
 /* the fields the game fills while it draws a bitmap (bitmap_group.h): the
@@ -394,6 +398,13 @@ texture and pixels once they are loaded */
 #define BITMAP_DATA_BASE_ADDRESS_OFFSET 0x2C
 /* s_bitmap_data::_flags::in_data_file: the pixels are in bitmaps.map */
 #define BITMAP_DATA_IN_RESOURCE_MAP_BIT 8
+/* s_bitmap_data::_flags: power of two dimensions, compressed, palettized,
+swizzled, linear (Invader's bitmap.json) */
+#define BITMAP_DATA_POWER_OF_TWO_BIT 0
+#define BITMAP_DATA_COMPRESSED_BIT 1
+#define BITMAP_DATA_SWIZZLED_BIT 3
+#define BITMAP_DATA_LINEAR_BIT 4
+#define BITMAP_DATA_TYPE_2D 0
 
 /* sound (OpenSauce sound_definitions.hpp: sound_definition 0xA4,
 s_sound_pitch_range 0x48, s_sound_permutation 0x7C) */
@@ -3157,6 +3168,12 @@ static void transparent_chicago_extended_convert(
 state the game expects of a bitmap it has not drawn yet: its tag is its own
 (bitmaps.map holds the handles of whatever map it was built with), and it
 has no texture cache block, hardware texture or pixels. */
+static int power_of_two(
+	uint32_t value)
+{
+	return value && !(value & (value - 1));
+}
+
 static void bitmaps_prepare(
 	struct load_state const *state,
 	uint32_t group_offset,
@@ -3186,6 +3203,27 @@ static void bitmaps_prepare(
 		write_u32(bitmap + BITMAP_DATA_HARDWARE_FORMAT_OFFSET, 0);
 		write_u32(bitmap + BITMAP_DATA_BASE_ADDRESS_OFFSET, 0);
 		report->bitmaps_prepared++;
+		/* (port) an unswizzled 2D bitmap of other dimensions than powers
+		of two is laid out as a linear one, which is how this build draws
+		those dimensions; Invader's builds mark only interface bitmaps' so,
+		where Halo: CE Anniversary has sprites of them too (its HUD message
+		icons, hud_msg_icons) */
+		{
+			uint16_t flags = read_u16(bitmap + BITMAP_DATA_FLAGS_OFFSET);
+
+			if (read_s16(bitmap + BITMAP_DATA_TYPE_OFFSET) == BITMAP_DATA_TYPE_2D &&
+				!read_s16(bitmap + BITMAP_DATA_MIPMAP_COUNT_OFFSET) &&
+				!(flags & ((1U << BITMAP_DATA_COMPRESSED_BIT) | (1U << BITMAP_DATA_SWIZZLED_BIT) |
+					(1U << BITMAP_DATA_LINEAR_BIT))) &&
+				read_u16(bitmap + BITMAP_DATA_WIDTH_OFFSET) && read_u16(bitmap + BITMAP_DATA_HEIGHT_OFFSET) &&
+				(!power_of_two(read_u16(bitmap + BITMAP_DATA_WIDTH_OFFSET)) ||
+					!power_of_two(read_u16(bitmap + BITMAP_DATA_HEIGHT_OFFSET))))
+			{
+				flags = (uint16_t)((flags | (1U << BITMAP_DATA_LINEAR_BIT)) & ~(1U << BITMAP_DATA_POWER_OF_TWO_BIT));
+				write_u16(bitmap + BITMAP_DATA_FLAGS_OFFSET, flags);
+				report->bitmaps_made_linear++;
+			}
+		}
 	}
 
 	return;

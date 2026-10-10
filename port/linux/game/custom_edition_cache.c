@@ -840,6 +840,11 @@ static boolean custom_edition_cache_tags_convert(
 		(long)conversion.chicago_extended_shaders,
 		(long)conversion.bitmaps_prepared,
 		conversion.script_nodes_reduced ? ", OpenSauce's script nodes made this build's number" : "");
+	if (conversion.bitmaps_made_linear)
+	{
+		error(_error_silent, "custom edition: %ld bitmaps of other dimensions than powers of two made linear",
+			(long)conversion.bitmaps_made_linear);
+	}
 	if (conversion.shaders_mistyped)
 	{
 		error(_error_silent, "custom edition: %ld shaders whose type was not their group's were given their group's",
