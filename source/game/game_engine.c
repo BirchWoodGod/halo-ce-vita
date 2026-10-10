@@ -603,6 +603,13 @@ void network_distributed_player_killed(long *killing_player_index, long *killing
 	long dead_player_index, boolean *friendly_fire);
 /* port/linux/game/network_damage.c's */
 boolean network_damage_killer_score(long player_index, long *score);
+static long game_engine_sole_weapon_list_index(void);
+static boolean game_engine_magnums_only(void);
+#ifdef HALO_DEDICATED_SERVER
+/* port: port/linux/game/dedicated_server.c's (SWAT and Snipers,
+game_engine_sole_weapon_list_index) */
+short dedicated_server_sole_weapon(void);
+#endif
 
 /* ---------- constants */
 
@@ -2340,6 +2347,10 @@ long game_engine_remap_equipment(
 			weapon_list_index = NONE;
 			break;
 		}
+
+		/* port: the dedicated server's SWAT: no grenades either */
+		if (game_engine_magnums_only())
+			weapon_list_index = NONE;
 
 		if (!TEST_FLAG(game_engine_globals.flags, _game_engine_5_or_more_players_bit))
 		{
@@ -6596,6 +6607,115 @@ long game_engine_remap_vehicle(
 	return result;
 }
 
+/* port: the dedicated server's one-weapon games (port/linux/DEDICATED_SERVER.md):
+SWAT, with no shields, the human pistol (the magnum) the only weapon and no
+grenades, and Snipers, the sniper rifle the only weapon. The Vitas are sent
+a variant every version knows (game_engine_make_swat_variant: Slayer's with
+the Pistols weapon set and no shields; game_engine_make_snipers_variant: the
+game's own Snipers, its Sniping weapon set), which on its own still leaves
+plasma pistols, or pistols, about; the one weapon alone is the host's: the
+host makes every weapon in the game, the players' starting weapons among
+them, and a Vita takes the host's objects as they are, never remapping them
+(object_new, network_objects_creating_host_object), nor spawning items or
+players itself. The weapon (its _weapon_list_ index) only on the dedicated
+server, in such a game (dedicated_server.c's choice, checked against the
+variant playing); NONE otherwise */
+static long game_engine_sole_weapon_list_index(
+	void)
+{
+#ifdef HALO_DEDICATED_SERVER
+	switch (dedicated_server_sole_weapon())
+	{
+	case _game_engine_sole_weapon_pistol:
+		if (global_variant.universal_variant.weapon_set == _game_engine_weapons_pistols &&
+			TEST_FLAG(global_variant.universal_variant.flags, _game_variant_no_shields_bit))
+		{
+			return _weapon_list_pistol;
+		}
+		break;
+
+	case _game_engine_sole_weapon_sniper_rifle:
+		if (global_variant.universal_variant.weapon_set == _game_engine_weapons_sniping)
+			return _weapon_list_sniper_rifle;
+		break;
+	}
+#endif
+	return NONE;
+}
+
+/* port: SWAT: the magnum alone, and no grenades either */
+static boolean game_engine_magnums_only(
+	void)
+{
+	return game_engine_sole_weapon_list_index() == _weapon_list_pistol;
+}
+
+#ifdef HALO_DEDICATED_SERVER
+/* port: SWAT's variant from Slayer's or Team Slayer's (dedicated_server.c):
+no shields, the Pistols weapon set (the magnums are the server's own,
+game_engine_sole_weapon_list_index), the generic starting weapons, no
+vehicles, and its name in the server browser */
+void game_engine_make_swat_variant(
+	struct game_variant *variant)
+{
+	wchar_t const *name = variant->universal_variant.teams ? L"Team SWAT" : L"SWAT";
+
+	SET_FLAG(variant->universal_variant.flags, _game_variant_no_shields_bit, TRUE);
+	SET_FLAG(variant->universal_variant.flags, _game_variant_infinite_grenades_bit, FALSE);
+	SET_FLAG(variant->universal_variant.flags, _game_variant_generic_starting_equipment_bit, TRUE);
+	variant->universal_variant.weapon_set = _game_engine_weapons_pistols;
+	variant->universal_variant.vehicle_set = _game_engine_vehicles_none;
+	csmemset(variant->human_readable_game_description, 0, sizeof(variant->human_readable_game_description));
+	ustrncpy(variant->human_readable_game_description, name, NUMBEROF(variant->human_readable_game_description) - 1);
+}
+
+/* port: Snipers' variant (dedicated_server.c): the game's own Snipers
+(build_game_variant_snipers: the Sniping weapon set, the generic starting
+weapons, shields, grenades, no motion tracker, the map's Warthogs to cross
+Blood Gulch and Sidewinder in), for teams with Team Slayer's score (the
+sniper rifles alone are the server's own,
+game_engine_sole_weapon_list_index), and its name in the server browser
+(eleven characters at most) */
+void game_engine_make_snipers_variant(
+	struct game_variant *variant,
+	boolean teams)
+{
+	build_game_variant_snipers(variant);
+	if (teams)
+	{
+		variant->universal_variant.teams = TRUE;
+		variant->universal_variant.score_to_win = 50;
+	}
+	csmemset(variant->human_readable_game_description, 0, sizeof(variant->human_readable_game_description));
+	ustrncpy(variant->human_readable_game_description, teams ? L"Team Sniper" : L"Snipers",
+		NUMBEROF(variant->human_readable_game_description) - 1);
+}
+
+/* port: Big Team Battle's variant from Team Slayer's (dedicated_server.c):
+every vehicle the map places for a game (the default vehicle set: its
+Warthogs, Ghosts and Scorpions, game_engine_remap_vehicle; Team Slayer's
+own has Warthogs alone), and its name in the server browser */
+void game_engine_make_big_team_variant(
+	struct game_variant *variant)
+{
+	variant->universal_variant.vehicle_set = _game_engine_vehicles_default;
+	csmemset(variant->human_readable_game_description, 0, sizeof(variant->human_readable_game_description));
+	ustrncpy(variant->human_readable_game_description, L"Big Team",
+		NUMBEROF(variant->human_readable_game_description) - 1);
+}
+
+/* port: the players' starting weapons (dedicated_server.c's
+sv_starting_weapons): generic ones (the multiplayer cyborg's own, an
+assault rifle and a pistol, as the weapon set has them), or the map's own
+starting equipment for the game type where it has one */
+void game_engine_variant_set_generic_starting_equipment(
+	struct game_variant *variant,
+	boolean generic)
+{
+	SET_FLAG(variant->universal_variant.flags, _game_variant_generic_starting_equipment_bit, generic);
+}
+#endif
+
 long game_engine_remap_weapon(
 	long weapon_definition_index)
 {
@@ -6608,6 +6728,10 @@ long game_engine_remap_weapon(
 	{
 		return weapon_definition_index;
 	}
+
+	/* port: the dedicated server's SWAT and Snipers: every weapon the one */
+	if (game_engine_sole_weapon_list_index() != NONE)
+		return list_index_to_weapon_definition_index(game_engine_sole_weapon_list_index());
 
 	if (weapon_list_index == _weapon_list_flamethrower)
 		weapon_list_index = _weapon_list_rocket_launcher;
@@ -7869,6 +7993,13 @@ void game_engine_postspawn_player_update(
 					starting_plasma_grenade_count = 0;
 				}
 				break;
+			}
+
+			/* port: the dedicated server's SWAT: the magnum alone */
+			if (game_engine_magnums_only())
+			{
+				starting_fragmentation_grenade_count = 0;
+				starting_plasma_grenade_count = 0;
 			}
 
 			starting_fragmentation_grenade_count = MIN(
