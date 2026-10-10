@@ -30,6 +30,7 @@ symbols in this file:
 #include "units/unit_definitions.h"
 #include "units/units.h"
 #ifdef HALO_LINUX
+#include "particle_budget.h"
 #include "render_epoch.h"
 #endif
 
@@ -312,6 +313,16 @@ void render_particles(
 	{
 		short local_player_index = render.local_player_index;
 		long particle_index;
+
+#ifdef HALO_LINUX
+		/* (port) the view the particle budget tests a new particle's size
+		against (particle_budget.c) */
+		particle_budget_note_view(
+			render.local_player_index,
+			&render.camera.position,
+			&render.camera.forward,
+			render.frustum.projection_world_to_screen.j);
+#endif
 
 		if (local_player_index == NONE ||
 			!local_player_is_first_person(local_player_index))

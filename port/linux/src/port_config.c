@@ -101,6 +101,12 @@ static const struct config_setting config_settings[] =
 	{ "display.interpolation", _config_boolean, "true", "HALO_INTERPOLATION", _environment_value, _platform_all,
 		"Draw a frame for every display refresh, blending between the game's 30\n"
 		"ticks a second; false keeps the original 30 frames a second." },
+	/* (port/linux/game/particle_budget.c; the Vita's settings panel's
+	Particles row, Reduced in its Performance profile) */
+	{ "graphics.particles", _config_string, "\"full\"", "HALO_PARTICLE_BUDGET", _environment_value, _platform_all,
+		"The particles a fight's effects make: \"full\" (the Xbox's), \"reduced\" or\n"
+		"\"low\": fewer sparks, smoke, dust and debris, gone sooner; muzzle\n"
+		"flashes, flashes and scripted effects kept." },
 
 	{ "audio.enabled", _config_boolean, "true", "HALO_NO_AUDIO", _environment_set_is_false, _platform_all,
 		"Play sound." },

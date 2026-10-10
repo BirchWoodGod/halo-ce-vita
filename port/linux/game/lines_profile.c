@@ -2,8 +2,9 @@
 LINES_PROFILE.C
 
 (port, HALO_TICK_PROFILE) Every 300 game frames, "lines-profile (ms/frame)":
-the game frame's steps (game.c: the particles, contrails, particle systems,
-widgets and looping sounds, on the tick's thread when it has one), the sound
+the game frame's steps (game.c: the particles, with how many are live on
+average, contrails, particle systems, widgets and looping sounds, on the
+tick's thread when it has one), the sound
 obstruction rays' time and counts (game_sound.c: calls, those answered by the
 same tick's ray, those reused by HALO_SOUND_OBSTRUCTION_TICKS, rays cast and
 how many met something), the point physics' leaf lookups, with how many
@@ -31,6 +32,7 @@ timeslice refresh of the units nearby).
 
 #include "cseries.h"
 #include "math/real_math.h"
+#include "effects/particles.h"
 #include "lines_profile.h"
 #include "point_leaf_cache.h"
 
@@ -48,6 +50,8 @@ struct halo_lines_stats halo_lines_stats;
 static int lines_enabled = -1;
 static unsigned long long lines_step_us[NUMBER_OF_LINES_STEPS];
 static unsigned long lines_frames;
+/* the live particles, summed at each frame */
+static unsigned long lines_particles_live;
 
 /* ---------- public code */
 
@@ -80,7 +84,11 @@ void halo_lines_profile_frame(void)
 	double frames;
 	int step;
 
-	if (!halo_lines_profile_enabled() || ++lines_frames < 300)
+	if (!halo_lines_profile_enabled())
+		return;
+	if (particle_data && particle_data->valid)
+		lines_particles_live += (unsigned long)particle_data->actual_count;
+	if (++lines_frames < 300)
 		return;
 	frames = (double)lines_frames;
 	points = point_leaf_cache_points - points_seen;
@@ -89,7 +97,7 @@ void halo_lines_profile_frame(void)
 	memo_misses = obstruction_memo_misses - memo_misses_seen;
 	tables_found = cluster_object_types_found - tables_found_seen;
 	tables_made = cluster_object_types_made - tables_made_seen;
-	platform_log("lines-profile (ms/frame): particles %.3f contrails %.3f particle_systems %.3f widgets %.3f "
+	platform_log("lines-profile (ms/frame): particles %.3f (%.0f live) contrails %.3f particle_systems %.3f widgets %.3f "
 		"game_sound %.3f rest %.3f | obstruction rays %.3f: %.1f calls, %.1f same tick, %.1f reused, %.1f rays "
 		"(%.0f%% met something, %.0f%% of their structure tests as before) a frame | point physics: %.1f leaf lookups a frame, %.0f%% from a known cell"
 		" | ai line of sight %.3f: %.1f calls, %.1f rays (%.0f%% met an object, %.0f%% the structure), %.1f extra lines a frame"
@@ -98,6 +106,7 @@ void halo_lines_profile_frame(void)
 		" | ai path searches %.3f: %.2f a frame (%.1f nodes a search), longest %.3f ms; path builds %.3f: %.2f a frame"
 		" | ai perception %.3f: %.1f actors, %.1f props, %.1f position and %.1f status refreshes, %.2f timeslice refreshes (%.0f objects each) a frame",
 		lines_step_us[_lines_step_particles] / 1000.0 / frames,
+		lines_particles_live / frames,
 		lines_step_us[_lines_step_contrails] / 1000.0 / frames,
 		lines_step_us[_lines_step_particle_systems] / 1000.0 / frames,
 		lines_step_us[_lines_step_widgets] / 1000.0 / frames,
@@ -176,4 +185,5 @@ void halo_lines_profile_frame(void)
 	tables_found_seen = cluster_object_types_found;
 	tables_made_seen = cluster_object_types_made;
 	lines_frames = 0;
+	lines_particles_live = 0;
 }

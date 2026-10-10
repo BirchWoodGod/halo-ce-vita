@@ -41,10 +41,10 @@ menu_fits).
 
 The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
-those rows match none of them (the render resolution, on the tab, and the
-detail and update rates, the sun rays, the shadows, lights, effects and
-particles and the AI's think rate, under Advanced, and Audio's sound
-updates and occlusion). Quality is the Xbox game's every one. Rows marked *
+those rows match none of them (the render resolution and the particles, on
+the tab, and the detail and update rates, the sun rays, the shadows, lights,
+effects and particle density and the AI's think rate, under Advanced, and
+Audio's sound updates and occlusion). Quality is the Xbox game's every one. Rows marked *
 apply after a restart (the sound voices, the network, most dev switches).
 
 General (TAB_CONTROLS) starts with the update check (update_check.h):
@@ -323,6 +323,14 @@ static struct setting settings[] = {
 		"The game's frame counter, bottom right", 0, TAB_GRAPHICS },
 	{ "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", 0, 2, { "1", "0" }, { "On", "Off" },
 		"The weapon's animation blended between game ticks", 0, TAB_GRAPHICS },
+	/* (the particle budget, port/linux/game/particle_budget.c: the
+	particles a fight's effects make - an entry's count and a long life span
+	cut, those too small to see at their distance not made; muzzle flashes,
+	the first-person weapon's and scripted effects whole. Live; Reduced in
+	the Performance profile. Particle density, under Advanced, draws fewer of
+	those made) */
+	{ "Particles", "HALO_PARTICLE_BUDGET", 0, 3, { "full", "reduced", "low" }, { "Full", "Reduced", "Low" },
+		"Fewer sparks, smoke and debris in big fights", 0, TAB_GRAPHICS },
 	PAGE_ROW("Advanced", "Detail and update rates (the Profile sets them)", TAB_GRAPHICS, PAGE_GRAPHICS_ADVANCED),
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
 		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 2,
@@ -581,30 +589,30 @@ static int shipped_kept;
 /* the profiles (the Profile row's first three choices): the value of each
 row a profile sets. Balanced is the release's defaults (the rows' own) */
 #define PROFILE_CUSTOM 3
-#define PROFILE_ROWS 13
+#define PROFILE_ROWS 14
 
 static const char *const profile_variables[PROFILE_ROWS] = {
 	"HALO_RENDER_SCALE", "HALO_MODEL_LOD_SCALE", "HALO_MIN_OBJECT_PIXELS", "HALO_SCENERY_UPDATE_DIVISOR",
 	"HALO_LIGHTING_REFRESH_DIVISOR", "HALO_SOUND_OBSTRUCTION_TICKS", "HALO_SUN_RAYS",
 	"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
-	"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR",
+	"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_PARTICLE_BUDGET",
 };
 
 /* (a settings.txt saved with a profile before a row was added takes the
 profile's value for it: vita_settings_load) */
 static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
 	/* Performance: 50%, Low, Small, Quarter, Third, Every 6th, no sun rays;
-	no object shadows, 4 lights, Performance effects, half the particles,
-	Adaptive AI, sound every 2nd frame */
-	{ "0.5", "0.5", "8", "4", "3", "6", "0", "0", "4", "1", "2", "0", "2" },
+	no object shadows, 4 lights, Performance effects, half the particles
+	drawn, Adaptive AI, sound every 2nd frame; Reduced particles */
+	{ "0.5", "0.5", "8", "4", "3", "6", "0", "0", "4", "1", "2", "0", "2", "reduced" },
 	/* Balanced (the release's defaults): 75%, Low, Small, Quarter, Third,
 	Every 3rd, sun rays; shadows near only, 8 lights, Full effects and
-	particles, Adaptive AI, sound every 2nd frame */
-	{ "0.75", "0.5", "8", "4", "3", "3", "1", "1", "8", "2", "1", "0", "2" },
+	particles, Adaptive AI, sound every 2nd frame; Full particles */
+	{ "0.75", "0.5", "8", "4", "3", "3", "1", "1", "8", "2", "1", "0", "2", "full" },
 	/* Quality, the Xbox's: 100%, High, Off, Every tick, Full, Every tick,
 	sun rays; all shadows, lights, effects and particles, AI every tick,
-	sound every frame */
-	{ "1", "1", "0", "1", "1", "1", "1", "2", "0", "2", "1", "1", "1" },
+	sound every frame; Full particles */
+	{ "1", "1", "0", "1", "1", "1", "1", "2", "0", "2", "1", "1", "1", "full" },
 };
 
 /* the variables the performance logging switch sets, and their values */
@@ -1434,8 +1442,8 @@ void vita_settings_load(void)
 		int row;
 
 		/* a row the saved profile sets that settings.txt does not name
-		(one added since: Sun rays, in 1.1) takes the profile's value,
-		unless env.txt names it */
+		(one added since: Sun rays, in 1.1; Particles, in 1.1.0-beta.4)
+		takes the profile's value, unless env.txt names it */
 		for (row = 0; row < PROFILE_ROWS; row++)
 		{
 			struct setting *setting = setting_named(profile_variables[row]);

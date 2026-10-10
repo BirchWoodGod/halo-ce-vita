@@ -172,6 +172,10 @@ symbols in this file:
 #include "tag_files/tag_groups.h"
 #include "units/bipeds.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "cutscene/cinematics.h"
+#include "particle_budget.h"
+#endif
 #undef real_local_random
 
 /* ---------- constants */
@@ -610,6 +614,18 @@ effect_marker_list_get_markers_by_name (January's own name for this static is un
 static struct effect_marker_list const *global_effect_marker_list;
 
 static struct profile_section effects_update_section = {"effects_update", NONE, TRUE};
+
+#ifdef HALO_LINUX
+/* (port, the particle budget: particle_budget.c) set while a script makes an
+effect (hs effect_new and effect_new_on_object_marker, network co-op's
+copies of them): the effects made then are kept whole, each by its slot's
+identifier (0: not a script's) */
+boolean effect_new_scripted = FALSE;
+static short effect_scripted_identifiers[HALO_PORT_MAXIMUM_EFFECTS];
+
+static boolean effect_particles_thinned(
+	struct effect_datum const *effect);
+#endif
 
 /* ---------- public code */
 
@@ -1549,6 +1565,10 @@ static long effect_allocate(
 				effect->owner_object_index = owner_object_index;
 				effect->local_player_index = NONE;
 				effect->header.flags = 0;
+#ifdef HALO_LINUX
+				effect_scripted_identifiers[DATUM_INDEX_TO_ABSOLUTE_INDEX(effect_index)] =
+					effect_new_scripted ? effect->header.identifier : 0;
+#endif
 
 				effect_set_event(effect_index, 0);
 			}
@@ -1914,6 +1934,10 @@ static void effect_generate_particles(
 	real last_event_fraction = effect->last_event_fraction;
 	real event_fraction;
 	short particle_index;
+#ifdef HALO_LINUX
+	/* (the particle budget: particle_budget.c) */
+	boolean thinned = effect_particles_thinned(effect);
+#endif
 
 	if (effect->event_duration > 0.0f)
 		event_fraction = effect->event_time / effect->event_duration;
@@ -1934,6 +1958,15 @@ static void effect_generate_particles(
 		long last_particle_count;
 		long location_datum_index;
 		struct effect_location_datum *instance;
+#ifdef HALO_LINUX
+		/* (port, the particle budget) the particles made of the entry this
+		update at the budget's level: the same share of the event's count, cut
+		(particle_budget_count). An entry attached to the object (a muzzle
+		flash) or seen only in first person, and every instance on the
+		first-person weapon (below), make the map's count */
+		short thinned_count_delta = 0;
+		boolean entry_thinned;
+#endif
 
 		/* port: and a location the effect holds */
 		if (particles->location_index < 0 ||
@@ -1965,8 +1998,30 @@ static void effect_generate_particles(
 			1411,
 			count_delta>=0);
 
+#ifdef HALO_LINUX
+		entry_thinned = thinned &&
+			!TEST_FLAG(particles->flags, _effect_particle_attached_bit) &&
+			particles->camera_mode != _effect_camera_mode_first_person_only;
+		if (entry_thinned)
+		{
+			short count = particle_budget_count(effect->particle_counts[particle_index]);
+
+			thinned_count_delta = (short)((long)(effect_evaluate_function_integral(
+					particles->distribution_function,
+					event_fraction) * count) -
+				(long)(effect_evaluate_function_integral(
+					particles->distribution_function,
+					last_event_fraction) * count));
+			/* (the pressure's cut can change between two updates) */
+			if (thinned_count_delta < 0)
+				thinned_count_delta = 0;
+		}
+		if (count_delta <= 0 && (!entry_thinned || thinned_count_delta <= 0))
+			continue;
+#else
 		if (count_delta <= 0)
 			continue;
+#endif
 
 		location_datum_index =
 			effect->location_datum_indices[particles->location_index];
@@ -1978,9 +2033,18 @@ static void effect_generate_particles(
 		while (instance)
 		{
 			short instance_particle_index;
+#ifdef HALO_LINUX
+			boolean instance_thinned = entry_thinned &&
+				!(instance->node_designator != NONE &&
+					TEST_FLAG(instance->node_designator, _effect_location_first_person_bit));
+			short instance_count = instance_thinned ? thinned_count_delta : count_delta;
+#define EFFECT_INSTANCE_PARTICLE_COUNT instance_count
+#else
+#define EFFECT_INSTANCE_PARTICLE_COUNT count_delta
+#endif
 
 			for (instance_particle_index = 0;
-				instance_particle_index < count_delta;
+				instance_particle_index < EFFECT_INSTANCE_PARTICLE_COUNT;
 				instance_particle_index++)
 			{
 				struct new_particle_data data;
@@ -2168,10 +2232,19 @@ static void effect_generate_particles(
 					data.dont_draw_third_person =
 						particles->camera_mode == _effect_camera_mode_first_person_only;
 
+#ifdef HALO_LINUX
+					/* (the particle budget: whether particle_new shortens
+					its life and may decline it) */
+					particle_budget_applies = instance_thinned;
+#endif
 					particle_new(&data);
+#ifdef HALO_LINUX
+					particle_budget_applies = FALSE;
+#endif
 				}
 			}
 
+#undef EFFECT_INSTANCE_PARTICLE_COUNT
 			instance = effect_location_get_next_instance(
 				effect,
 				&location_datum_index,
@@ -2642,6 +2715,42 @@ static boolean effect_part_allowed_by_disposition(
 
 	return disposition != _effect_disposition_nonviolent;
 }
+
+#ifdef HALO_LINUX
+/* (port, the particle budget: particle_budget.c) whether the effect's
+particles are thinned: not at Full, nor while a cinematic plays, nor a
+script's effect, nor one on scenery, a device, a light fixture, a
+placeholder or sound scenery (a map's ambient fires, steam, waterfalls): a
+fight's (shots, impacts, explosions, units, vehicles, weapons) */
+static boolean effect_particles_thinned(
+	struct effect_datum const *effect)
+{
+	long absolute_index = (long)(((char const *)effect - (char const *)effect_data->data) / effect_data->size);
+
+	if (particle_budget_level() == _particle_budget_full ||
+		cinematic_in_progress() ||
+		(effect_scripted_identifiers[absolute_index] == effect->header.identifier &&
+			effect->header.identifier != 0))
+	{
+		return FALSE;
+	}
+	if (effect->object_index != NONE && object_try_and_get(effect->object_index))
+	{
+		switch (object_get_type(effect->object_index))
+		{
+		case _object_type_scenery:
+		case _object_type_machine:
+		case _object_type_control:
+		case _object_type_light_fixture:
+		case _object_type_placeholder:
+		case _object_type_sound_scenery:
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+#endif
 
 static real_matrix4x3 *effect_get_node_matrix(
 	struct effect_datum const *effect,

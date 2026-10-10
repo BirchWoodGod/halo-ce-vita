@@ -95,6 +95,7 @@ symbols in this file:
 #include "sound/game_sound.h"
 #include "sound/sound_definitions.h"
 #ifdef HALO_LINUX
+#include "particle_budget.h"
 #include "point_leaf_cache.h"
 #endif
 
@@ -948,6 +949,19 @@ void particle_new(
 	{
 		return;
 	}
+#ifdef HALO_LINUX
+	/* port: a particle the budget thins is not made when the budget's
+	particles are all live, nor when no view could see it drawn (at its
+	largest, from where it starts: particle_budget.c) */
+	if (particle_budget_applies &&
+		!particle_budget_admits(
+			&position,
+			MAX(definition->radius_lower_bound, definition->radius_upper_bound) * data->radius,
+			definition->lod_cutoff))
+	{
+		return;
+	}
+#endif
 
 	particle_index = datum_new(particle_data);
 
@@ -997,6 +1011,11 @@ void particle_new(
 		particle->lifespan = (particle->lifespan - PARTICLE_SHARED_LIFESPAN) /
 			local_player_count() + PARTICLE_SHARED_LIFESPAN;
 	}
+#ifdef HALO_LINUX
+	/* port: and the particle budget's share (particle_budget.c) */
+	if (particle_budget_applies)
+		particle->lifespan = particle_budget_lifespan(particle->lifespan);
+#endif
 
 	particle->frame_span = definition->frames_per_second_upper_bound != 0.0f
 		? 1.0f / real_local_random_range(
