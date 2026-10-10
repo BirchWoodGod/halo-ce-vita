@@ -392,6 +392,54 @@ static struct
 	volatile unsigned long long helper_us;
 } bots_helper = { FALSE, FALSE, 0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0 };
 
+/* (HALO_TICK_PROFILE) the bots' tick by part, and the rays they cast, for
+halo.log's bots line */
+enum
+{
+	_bots_part_look = 0,
+	_bots_part_fight,
+	_bots_part_goal,
+	_bots_part_take,
+	_bots_part_walk,
+	_bots_part_rest,
+	_bots_part_scan,
+	NUMBER_OF_BOTS_PARTS,
+};
+
+static struct
+{
+	int enabled;
+	unsigned long long part_us[NUMBER_OF_BOTS_PARTS];
+	/* rays down to the ground and lines of sight: cast, and their time */
+	long below_rays;
+	long sight_rays;
+	unsigned long long below_us;
+	unsigned long long sight_us;
+} bots_profile = { -1 };
+
+static int bots_profile_enabled(void)
+{
+	if (bots_profile.enabled < 0)
+	{
+		char const *setting = getenv("HALO_TICK_PROFILE");
+
+		bots_profile.enabled = setting && atoi(setting) ? 1 : 0;
+	}
+	return bots_profile.enabled;
+}
+
+/* a part's time to here from *started, which moves on to now */
+static void bots_profile_part(int part, unsigned long long *started)
+{
+	unsigned long long now;
+
+	if (!bots_profile.enabled)
+		return;
+	now = vita_host_time_us();
+	bots_profile.part_us[part] += now - *started;
+	*started = now;
+}
+
 /* ---------- settings */
 
 static long bots_setting_integer(char const *variable, char const *name)
@@ -545,10 +593,18 @@ static long bots_surface_below(real_point3d const *point, real_point3d *ground)
 	struct collision_result collision;
 	real_point3d start = *point;
 	real_vector3d down = { 0.0f, 0.0f, -6.0f };
+	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
+	boolean hit;
 
 	start.z += 0.4f;
-	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
-		&start, &down, NONE, &collision) && collision.type == _collision_result_structure)
+	hit = collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
+		&start, &down, NONE, &collision) && collision.type == _collision_result_structure;
+	if (started)
+	{
+		bots_profile.below_rays++;
+		bots_profile.below_us += vita_host_time_us() - started;
+	}
+	if (hit)
 	{
 		if (ground)
 			*ground = collision.point;
@@ -1340,6 +1396,11 @@ void bots_initialize_for_new_map(void)
 	bots_globals.flag_grabs = 0;
 	bots_globals.ball_grabs = 0;
 	bots_globals.stand_visits = 0;
+	csmemset(bots_profile.part_us, 0, sizeof(bots_profile.part_us));
+	bots_profile.below_rays = 0;
+	bots_profile.sight_rays = 0;
+	bots_profile.below_us = 0;
+	bots_profile.sight_us = 0;
 	/* (the first line a minute into the game) */
 	bots_globals.last_report_tick = 0;
 	bots_helper.helper_us = 0;
@@ -1868,11 +1929,19 @@ static boolean bots_line_of_sight(long unit_index, real_point3d const *eye, real
 {
 	struct collision_result collision;
 	real_vector3d vector;
+	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
+	boolean hit;
 
 	vector.i = point->x - eye->x;
 	vector.j = point->y - eye->y;
 	vector.k = point->z - eye->z;
-	if (!collision_test_vector(_collision_test_for_line_of_sight_flags, eye, &vector, unit_index, &collision))
+	hit = collision_test_vector(_collision_test_for_line_of_sight_flags, eye, &vector, unit_index, &collision);
+	if (started)
+	{
+		bots_profile.sight_rays++;
+		bots_profile.sight_us += vita_host_time_us() - started;
+	}
+	if (!hit)
 		return TRUE;
 	/* (the target's vehicle: seen) */
 	if (collision.type == _collision_result_object && target_unit_index != NONE &&
@@ -2803,6 +2872,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 {
 	struct bots_tick tick;
 	real vitality;
+	unsigned long long started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
 
 	csmemset(&tick, 0, sizeof(tick));
 	tick.skill = &bots_skills[bots_skill()];
@@ -2868,7 +2938,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->hurt_tick = tick.now;
 	bot->last_vitality = vitality;
 
+	bots_profile_part(_bots_part_rest, &started);
 	bots_bot_look(bot, &tick);
+	bots_profile_part(_bots_part_look, &started);
 	tick.weapon_index = bots_current_weapon(tick.unit);
 	/* (the flag or the ball taken: halo.log's count) */
 	{
@@ -2900,14 +2972,18 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 			bots_globals.stand_visits++;
 		bot->at_enemy_stand = at;
 	}
+	bots_profile_part(_bots_part_rest, &started);
 	if (bot->target_player_index != NONE && tick.now - bot->target_seen_tick <= TICKS_PER_SECOND / 2)
 		bots_bot_fight(bot, &tick);
+	bots_profile_part(_bots_part_fight, &started);
 
 	/* the goal, and the path to it (while fighting, only the game's
 	objective or a weapon close by: towards it, still facing the enemy) */
 	if (!tick.fighting || bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_item)
 		bots_choose_goal(bot, bot->player_index, &tick.position, tick.fighting);
+	bots_profile_part(_bots_part_goal, &started);
 	bots_search_take(bot, TRUE);
+	bots_profile_part(_bots_part_take, &started);
 	if (!tick.fighting)
 	{
 		bots_bot_walk(bot, &tick);
@@ -2920,6 +2996,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		if (bots_follow_path(bot, tick.player->unit_index, &tick.position, &direction))
 			tick.move_direction = direction;
 	}
+	bots_profile_part(_bots_part_walk, &started);
 	bots_bot_weapons(bot, &tick);
 	bots_bot_unstick(bot, &tick);
 
@@ -2948,6 +3025,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	action->control_flags = tick.flags;
 	action->primary_trigger = TEST_FLAG(tick.flags, _unit_control_weapon_primary_trigger_bit) ? 1.0f : 0.0f;
 	bots_bot_trace(bot, bot_index, &tick);
+	bots_profile_part(_bots_part_rest, &started);
 }
 
 static void bots_report(void)
@@ -2988,6 +3066,18 @@ static void bots_report(void)
 		(double)bots_globals.search_us / (double)bots_globals.ticks,
 		(double)bots_helper.helper_us / (double)bots_globals.ticks, fired, hit, bots_globals.flag_grabs,
 		bots_globals.stand_visits, bots_globals.ball_grabs, line);
+	if (bots_profile.enabled > 0)
+	{
+		double ticks = (double)bots_globals.ticks;
+
+		platform_log("bots: tick %ld split (us/tick): look %.1f fight %.1f goal %.1f take %.1f walk %.1f rest %.1f scan %.1f | "
+			"rays a tick: down %.2f (%.1f us) sight %.2f (%.1f us)", now,
+			bots_profile.part_us[_bots_part_look] / ticks, bots_profile.part_us[_bots_part_fight] / ticks,
+			bots_profile.part_us[_bots_part_goal] / ticks, bots_profile.part_us[_bots_part_take] / ticks,
+			bots_profile.part_us[_bots_part_walk] / ticks, bots_profile.part_us[_bots_part_rest] / ticks,
+			bots_profile.part_us[_bots_part_scan] / ticks, bots_profile.below_rays / ticks,
+			bots_profile.below_us / ticks, bots_profile.sight_rays / ticks, bots_profile.sight_us / ticks);
+	}
 }
 
 void bots_update_actions(struct player_action *actions)
@@ -3000,6 +3090,7 @@ void bots_update_actions(struct player_action *actions)
 	if (!game_engine_running() || !network_game_is_splitscreen_local())
 		return;
 	started = vita_host_time_us();
+	bots_profile_enabled();
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
 	{
@@ -3015,7 +3106,12 @@ void bots_update_actions(struct player_action *actions)
 		if (!bots_globals.map_ready)
 			bots_prepare_map();
 		if (!count)
+		{
+			unsigned long long scan_started = bots_profile.enabled > 0 ? vita_host_time_us() : 0;
+
 			bots_paths_scan();
+			bots_profile_part(_bots_part_scan, &scan_started);
+		}
 		bot_index = player->network_player_data.machine_index - BOTS_FIRST_MACHINE;
 		bot = &bots_globals.bots[bot_index];
 		if (bot->player_index != iterator.datum_index)
