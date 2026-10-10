@@ -335,6 +335,11 @@ void game_time_set_speed(
 {
 	match_assert("c:\\halo\\SOURCE\\game\\game_time.c", 562, game_time_globals);
 
+	/* port: a speed (a map's script's game_speed, or the console's) that is
+	a number from 0 to 100: a NaN or an infinity stopped the game's time for
+	good */
+	if (!(speed >= 0.0f && speed <= 100.0f))
+		return;
 	game_time_globals->speed = speed;
 
 	return;
