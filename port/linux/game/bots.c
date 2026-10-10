@@ -1259,6 +1259,29 @@ static void bots_prepare_map(void)
 
 		bots_add_roam_point(&location->position);
 	}
+	/* (debug: HALO_BOT_TRACE, the map's starting locations and netgame
+	flags) */
+	if (getenv("HALO_BOT_TRACE"))
+	{
+		for (index = 0; index < scenario->players.count; index++)
+		{
+			struct player_starting_location *location =
+				TAG_BLOCK_GET_ELEMENT(&scenario->players, index, struct player_starting_location);
+
+			platform_log("bots: trace starting location %ld at (%.1f %.1f %.1f) team %d games %d %d %d %d", index,
+				location->position.x, location->position.y, location->position.z, (int)location->team_index,
+				(int)location->game_types[0], (int)location->game_types[1], (int)location->game_types[2],
+				(int)location->game_types[3]);
+		}
+		for (index = 0; index < scenario->netgame_flags.count; index++)
+		{
+			struct scenario_netgame_flag *flag =
+				TAG_BLOCK_GET_ELEMENT(&scenario->netgame_flags, index, struct scenario_netgame_flag);
+
+			platform_log("bots: trace netgame flag %ld at (%.1f %.1f %.1f) type %d team %d", index,
+				flag->position.x, flag->position.y, flag->position.z, (int)flag->type, (int)flag->team_index);
+		}
+	}
 	{
 		real_point3d low = { REAL_MAX, REAL_MAX, REAL_MAX }, high = { -REAL_MAX, -REAL_MAX, -REAL_MAX };
 
@@ -1271,6 +1294,24 @@ static void bots_prepare_map(void)
 		}
 		platform_log("bots: %ld places to roam on this map, over %.0f units; %ld teleporters", bots_globals.roam_point_count,
 			bots_globals.roam_point_count > 0 ? (double)bots_distance2d(&low, &high) : 0.0, bots_globals.teleporter_count);
+	}
+	/* (CTF: the teams' stands, the scenario's netgame flags, for the tests:
+	run_bots_test.sh checks that each team spawns at its own) */
+	if (game_engine_get_variant()->game_engine_index == game_engine_ctf)
+	{
+		real_point3d stands[2] = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
+
+		for (index = 0; index < scenario->netgame_flags.count; index++)
+		{
+			struct scenario_netgame_flag *flag =
+				TAG_BLOCK_GET_ELEMENT(&scenario->netgame_flags, index, struct scenario_netgame_flag);
+
+			if (flag->type == _netgame_flag_ctf_flag && (flag->team_index == 0 || flag->team_index == 1))
+				stands[flag->team_index] = flag->position;
+		}
+		platform_log("bots: CTF%s, the stands: team 0 (%.1f %.1f %.1f) team 1 (%.1f %.1f %.1f)",
+			game_engine_get_variant()->game_engine_variant.ctf.assault ? " (assault: each team's flag at the other's)" : "",
+			stands[0].x, stands[0].y, stands[0].z, stands[1].x, stands[1].y, stands[1].z);
 	}
 }
 

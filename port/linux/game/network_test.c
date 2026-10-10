@@ -6,7 +6,8 @@ Automated system link sessions for testing the netcode without the menus
 
 - "host:<map>[:<variant>[,<variant>...]]" hosts a game on that
   multiplayer map (bloodgulch, ...) with one of the built-in game variants
-  (slayer by default; game_engine_get_variant_by_name), as the pregame
+  (slayer by default; game_engine_get_variant_by_name's, invasion, rockets,
+  snipers: network_test_variant_by_name), as the pregame
   screen's fast setup does, and starts it debug.network_test_start seconds
   later; with more variants, once a game is over (debug.network_test_score
   makes it short) the next, as the host's button on the scores does
@@ -74,6 +75,7 @@ Called from the main loop every frame (main.c).
 #include "networking/network_server_manager.h"
 #include "game/game.h"
 #include "game/game_engine.h"
+#include "game/game_engine_playlist.h"
 #include "game/players.h"
 #include "objects/objects.h"
 #include "units/units.h"
@@ -237,6 +239,39 @@ static boolean network_test_variant(
 		snprintf(name, size, "%.*s", (int)length, variant);
 	}
 	return TRUE;
+}
+
+/* a built-in game variant by its name: the game's own names
+(game_engine_get_variant_by_name), and the game list's others it does not
+know (the playlist's builders, game_engine_playlist.h): Invasion (CTF with
+the flags at the other team's base), Rockets, Snipers, Team Rally, ... */
+static void network_test_variant_by_name(struct game_variant *variant, char const *name)
+{
+	static struct
+	{
+		char const *name;
+		struct game_variant *(*build)(struct game_variant *variant);
+	} const others[] =
+	{
+		{ "invasion", build_game_variant_invasion },
+		{ "rockets", build_game_variant_rockets },
+		{ "snipers", build_game_variant_snipers },
+		{ "ctf_pro", build_game_variant_ctf_pro },
+		{ "team_rally", build_game_variant_team_rally },
+		{ "crazy_king", build_game_variant_crazy_king },
+		{ "juggernaut", build_game_variant_juggernaut },
+	};
+	size_t index;
+
+	for (index = 0; index < NUMBEROF(others); index++)
+	{
+		if (!strcmp(name, others[index].name))
+		{
+			others[index].build(variant);
+			return;
+		}
+	}
+	game_engine_get_variant_by_name(variant, name);
 }
 
 /* the map of the game at the index of the variant list: "<variant>@<map>"
@@ -1367,7 +1402,7 @@ void network_test_update(
 					char variant_name[64];
 
 					network_test_variant(network_test.variant_index, variant_name, sizeof(variant_name));
-					variant = *game_engine_get_variant_by_name(&variant, variant_name);
+					network_test_variant_by_name(&variant, variant_name);
 					platform_log("network test: game %d, %s", network_test.variant_index + 1, variant_name);
 				}
 				/* debug.network_test_score: a short game, to test the next */

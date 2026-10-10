@@ -14,6 +14,18 @@
 #   ctf      CTF, the bots on both teams, Heroic
 #   king     King of the Hill, Easy
 #   oddball  Oddball
+#   invasion Invasion (CTF, the flags at the other team's base: a team runs
+#            the one at its own base to the other's), the bots on both teams
+#            and not fighting (HALO_BOT_PEACEFUL=1): a capture is asked, not
+#            kills
+#   race     Team Race, on foot (the bots drive no vehicle): a bot on to a
+#            second checkpoint at least
+#   rockets  Rockets (Slayer, rocket launchers)
+#   teamball Team Oddball
+#
+# CTF and Invasion: each team must spawn at its own base, at the start and
+# after (each life's first place nearer its own team's flag stand, which the
+# bots log; issue #40).
 #
 # Every case must exit by itself with no assertion, exception or halt, have
 # its bots join the lobby (named, on machines of their own) and play: each
@@ -26,7 +38,8 @@
 #
 #   maps     every stock multiplayer map in HALO_TEST_DATA's maps folder
 #            (beavercreek, bloodgulch, ..., wizard: those there) with every
-#            game the bots play (slayer, team_slayer, ctf, king, oddball;
+#            game the bots play (slayer, team_slayer, ctf, king, oddball,
+#            invasion, team_race, rockets, team_oddball;
 #            HALO_TEST_BOTS_GAMES), a shorter game each (HALO_TEST_SECONDS,
 #            default 120 here), HALO_TEST_JOBS of them at once (default a
 #            quarter of the processors). Each game must exit cleanly with its
@@ -35,10 +48,12 @@
 #            least half of them; 25 units at most is asked), and play the
 #            game: kills in Slayer, a flag taken (or captured, or a bot at
 #            the other team's stand) in CTF, a hill held (a score) in King of
-#            the Hill, the ball taken in Oddball; but for the games listed
+#            the Hill, the ball taken in Oddball and Team Oddball, a capture in
+#            Invasion, a checkpoint touched in Team Race, kills in Rockets;
+#            but for the games listed
 #            (KNOWN) whose goal the maps' walkable surfaces do not reach.
-#            CTF games are half as long again, and the bots do not fight in
-#            them (HALO_BOT_PEACEFUL=1: the flags' ways alone; kills are not
+#            CTF and Invasion games are half as long again, and the bots do
+#            not fight in them (HALO_BOT_PEACEFUL=1: the flags' ways alone; kills are not
 #            asked there).
 #            A table of every game follows: how far the bots walked and
 #            spread, their path searches and how many failed, the objective
@@ -70,7 +85,7 @@ seconds=${HALO_TEST_SECONDS:-180}
 case " $cases " in *" maps "*) seconds=${HALO_TEST_SECONDS:-120} ;; esac
 stock_maps="beavercreek bloodgulch boardingaction chillout carousel damnation dangercanyon deathisland
 	gephyrophobia hangemhigh icefields infinity longest prisoner putput ratrace sidewinder timberland wizard"
-games=${HALO_TEST_BOTS_GAMES:-slayer team_slayer ctf king oddball}
+games=${HALO_TEST_BOTS_GAMES:-slayer team_slayer ctf king oddball invasion team_race rockets team_oddball}
 jobs=${HALO_TEST_JOBS:-$(( ($(nproc) + 3) / 4 ))}
 status=0
 fail() { echo "FAIL ($1): $2"; status=1; }
@@ -126,10 +141,10 @@ run_matrix() { # MAP-GAME
 	# (CTF half as long again, and without fighting: a flag is a map's
 	# length away, a minute's walk each way on Sidewinder, and three minutes
 	# of fighting mid-map may see no bot through; the ctf case fights)
-	[ "$g" = ctf ] && seconds=$((seconds * 3 / 2))
+	case $g in ctf | invasion) seconds=$((seconds * 3 / 2)) ;; esac
 	case $g in
-	team_slayer) run "$1" "$g" MAP="$m" HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even ;;
-	ctf) run "$1" "$g" MAP="$m" HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_BOT_PEACEFUL=1 ;;
+	team_slayer | team_race | team_oddball) run "$1" "$g" MAP="$m" HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even ;;
+	ctf | invasion) run "$1" "$g" MAP="$m" HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_BOT_PEACEFUL=1 ;;
 	*) run "$1" "$g" MAP="$m" HALO_BOT_SKILL=heroic ;;
 	esac
 }
@@ -144,6 +159,10 @@ for name in $cases; do
 	ctf) run ctf ctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
 	king) run king king HALO_BOT_SKILL=easy & ;;
 	oddball) run oddball oddball & ;;
+	invasion) run invasion invasion HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_BOT_PEACEFUL=1 & ;;
+	race) run race team_race HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
+	rockets) run rockets rockets HALO_BOT_SKILL=heroic & ;;
+	teamball) run teamball team_oddball HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
 	maps) continue ;;
 	*) echo "unknown case $name"; exit 2 ;;
 	esac
@@ -235,6 +254,48 @@ if name == "against":
     if human_deaths < 3:
         fail("the bots killed the player only %d times" % human_deaths)
     sys.exit(1 if failed else 0)
+# CTF and Invasion: each team spawns at its own base (the game's rule, its
+# starting locations' team), at the start and after: each life's first place
+# nearer its own team's stand (the scenario's flag of its team, which the
+# bots log; in Invasion the flags sit at the other base, the spawns do not)
+if name in ("ctf", "invasion"):
+    stands, team_of, alive, spawns, wrong = None, {}, {}, 0, []
+    for line in open(log, errors="replace"):
+        m = re.search(r"bots: CTF.*the stands: team 0 \(([-\d.]+) ([-\d.]+) [-\d.]+\) team 1 \(([-\d.]+) ([-\d.]+)", line)
+        if m:
+            stands = ((float(m.group(1)), float(m.group(2))), (float(m.group(3)), float(m.group(4))))
+        if "network test: tick " not in line:
+            continue
+        tick = int(re.search(r"tick (\d+)", line).group(1))
+        seen = set()
+        for m in re.finditer(r"player (\d+): \(([-\d.]+) ([-\d.]+) [-\d.]+\)[^|]*? s-?\d+ k\d+ d\d+ f\d+ t(-?\d+) m\d+", line):
+            i, x, y, t = int(m.group(1)), float(m.group(2)), float(m.group(3)), int(m.group(4))
+            seen.add(i)
+            if not alive.get(i) and stands and t in (0, 1):
+                spawns += 1
+                own = math.hypot(x - stands[t][0], y - stands[t][1])
+                other = math.hypot(x - stands[1 - t][0], y - stands[1 - t][1])
+                if own >= other:
+                    wrong.append("tick %d player %d (team %d) at (%.1f %.1f)" % (tick, i, t, x, y))
+            alive[i] = True
+        for m in re.finditer(r"player (\d+): dead", line):
+            alive[int(m.group(1))] = False
+    print("  %d spawns, %d at the other team's base" % (spawns, len(wrong)))
+    if stands is None:
+        fail("no CTF stands in the log")
+    for text in wrong[:5]:
+        fail("spawned at the other team's base: %s" % text)
+# (Invasion is played without fighting: the flags' ways alone, a capture
+# asked; the flag starts at its takers' own base, so taking it is nothing)
+if name == "invasion":
+    if not scores or max(scores) <= 0:
+        fail("no capture")
+    sys.exit(1 if failed else 0)
+# (Team Race: on from checkpoint to checkpoint, not round in circles at one:
+# Sidewinder's second, on a ledge, issue #40; the race's score is a player's
+# laps and checkpoints)
+if name == "race" and (not scores or max(scores) < 2):
+    fail("no bot touched a second checkpoint")
 if kills <= bots:
     fail("the bots killed only %d times" % kills)
 if died * 2 < bots:
@@ -297,9 +358,12 @@ flags, balls = number(r"flag taken (\d+)"), number(r"ball taken (\d+)")
 stands = number(r"enemy stand reached (\d+)")
 kills = sum(last[i][1] for i in bot_players)
 best = max([v[0] for v in last.values()] or [0])
-objective = {"slayer": "kills %d" % kills, "team_slayer": "kills %d" % kills,
+objective = {"slayer": "kills %d" % kills, "team_slayer": "kills %d" % kills, "rockets": "kills %d" % kills,
     "ctf": "flag taken %d (stand reached %d), captures %d" % (flags, stands, max(best, 0)), "king": "best score %d" % best,
-    "oddball": "ball taken %d, best score %d" % (balls, best)}[game]
+    "invasion": "flag taken %d, captures %d" % (flags, max(best, 0)),
+    "team_race": "best score %d (laps and checkpoints)" % best,
+    "oddball": "ball taken %d, best score %d" % (balls, best),
+    "team_oddball": "ball taken %d, best score %d" % (balls, best)}[game]
 def share(count):
     return 100.0 * count / searches if searches else 0.0
 print("  %-26s walked %4.0f (least %4.0f) spread %3.0f of %3.0f  searches %5d failed %4.1f%% short %4.1f%% unavoided %4.1f%%"
@@ -307,8 +371,6 @@ print("  %-26s walked %4.0f (least %4.0f) spread %3.0f of %3.0f  searches %5d fa
     share(failures), share(short), share(unavoided), cost, objective))
 if len(bot_players) != bots:
     failed.append("%d bots played, not %d" % (len(bot_players), bots))
-if walks and walks[0] < 40.0:
-    failed.append("a bot walked only %.0f units" % walks[0])
 if median(spreads) < min(25.0, extent / 3.0):
     failed.append("the bots spread over %.0f units, the map %.0f" % (median(spreads), extent))
 # the games whose goal the walkable surfaces (the AI's data the bots' path
@@ -317,18 +379,34 @@ if median(spreads) < min(25.0, extent / 3.0):
 # and fighting are still checked)
 KNOWN = {
     "boardingaction-ctf": "each ship's rooms are islands of walkable surfaces, the flags in others",
+    "boardingaction-invasion": "each ship's rooms are islands of walkable surfaces, the flags in others",
+    "boardingaction-oddball": "each ship's rooms are islands of walkable surfaces, the ball's spawn in another",
+    "boardingaction-team_oddball": "each ship's rooms are islands of walkable surfaces, the ball's spawn in another",
+    "damnation-team_race": "the first checkpoint is on the walkway over the middle, which the bots' paths end under",
     "damnation-oddball": "the ball's spawn is picked at random, some on ledges no walkable surface reaches",
+    "damnation-team_oddball": "the ball's spawn is picked at random, some on ledges no walkable surface reaches",
     "hangemhigh-king": "the hill is on a ledge no walkable surface reaches",
     "hangemhigh-oddball": "the ball spawns on a ledge no walkable surface reaches",
+    "hangemhigh-team_oddball": "the ball spawns on a ledge no walkable surface reaches",
     "prisoner-ctf": "the flags are on the upper floor, which no walkable surface reaches",
+    "prisoner-invasion": "the flags are on the upper floor, which no walkable surface reaches",
     "prisoner-oddball": "the ball spawns on the upper floor",
+    "prisoner-team_oddball": "the ball spawns on the upper floor",
     "putput-king": "the hill is in a room the walkable surfaces and teleporters do not reach",
+    "putput-invasion": "the bases are rooms and teleporters apart, most searches short: a flag taken, never run home in time (CTF captures none either)",
     "wizard-ctf": "the flags are on corner platforms no walkable surface reaches",
+    "wizard-invasion": "the flags are on corner platforms no walkable surface reaches",
     "wizard-king": "the hill is on a platform no walkable surface reaches",
     "wizard-oddball": "the ball spawns on a platform no walkable surface reaches",
+    "wizard-team_oddball": "the ball spawns on a platform no walkable surface reaches",
 }
+# (a game whose goal is out of reach: the bots near it, jumping and coming
+# back to it, walk less; half the walk is asked there)
+least_walk = 20.0 if name in KNOWN else 40.0
+if walks and walks[0] < least_walk:
+    failed.append("a bot walked only %.0f units" % walks[0])
 objective_failed = None
-if game in ("slayer", "team_slayer") and kills <= 0:
+if game in ("slayer", "team_slayer", "rockets") and kills <= 0:
     failed.append("no kills")
 # (a bot at the other team's stand would have taken the flag had it been
 # there: on the big maps three minutes of fighting may not see one taken)
@@ -336,8 +414,15 @@ if game == "ctf" and flags <= 0 and best <= 0 and stands <= 0:
     objective_failed = "no flag taken, no bot at the other team's stand"
 if game == "king" and best <= 0:
     objective_failed = "no hill held"
-if game == "oddball" and balls <= 0 and best <= 0:
+if game in ("oddball", "team_oddball") and balls <= 0 and best <= 0:
     objective_failed = "no ball taken"
+# (Invasion: the flag a team takes lies at its own base, so taking it is
+# nothing: a capture, the flag run to the other base, is asked)
+if game == "invasion" and best <= 0:
+    objective_failed = "no capture"
+# (Team Race: a checkpoint touched, the bots on foot: they drive no vehicle)
+if game == "team_race" and best <= 0:
+    objective_failed = "no checkpoint touched"
 if objective_failed and name in KNOWN:
     print("KNOWN (%s): %s: %s" % (name, objective_failed, KNOWN[name]))
 elif objective_failed:
