@@ -376,6 +376,10 @@ static int report_custom_edition_cache(
 			printf("weapon_functions_converted: %" PRId32 "\n", conversion.weapon_functions_converted);
 			printf("sounds_undecodable: %" PRId32 "\n", conversion.sounds_undecodable);
 			printf("sounds_ogg_vorbis: %" PRId32 "\n", conversion.sounds_ogg_vorbis);
+			printf("sound_permutations_ogg_vorbis: %" PRId32 " (%" PRIu32 " bytes, %" PRIu32 " bytes of Xbox ADPCM, %" PRId32
+				" to be measured)\n",
+				conversion.sound_permutations_ogg_vorbis, conversion.sound_ogg_vorbis_bytes,
+				conversion.sound_ogg_vorbis_adpcm_bytes, conversion.sound_permutations_ogg_vorbis_unsized);
 			printf("sound_permutations_pcm: %" PRId32 "\n", conversion.sound_permutations_pcm);
 			printf("sound_permutations_muted: %" PRId32 "\n", conversion.sound_permutations_muted);
 			printf("sounds_halved: %" PRId32 " (%" PRId32 " permutations)\n", conversion.sounds_halved,
