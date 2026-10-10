@@ -2303,6 +2303,14 @@ long game_engine_remap_equipment(
 	{
 		if (equipment)
 		{
+			/* port: the dedicated server's SWAT: no power-ups (camouflage,
+			overshield, health packs) */
+			if (game_engine_magnums_only() &&
+				equipment->equipment.powerup_type != _equipment_powerup_none)
+			{
+				return NONE;
+			}
+
 			if (equipment->equipment.powerup_type == _equipment_powerup_overshield)
 			{
 				if (TEST_FLAG(global_variant.universal_variant.flags, _game_variant_no_shields_bit))
