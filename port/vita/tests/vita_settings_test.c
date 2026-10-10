@@ -85,9 +85,24 @@ int update_check_request(void)
 }
 int update_check_status(char *version, int size)
 {
-	snprintf(version, (size_t)size, "%s", update_version_value);
+	if (version && size > 0)
+		snprintf(version, (size_t)size, "%s", update_version_value);
 	return update_status_value;
 }
+/* (the updater's, vita_update.c, vita_update_verify.c: whether this build
+holds an update key, the presses that start an install) */
+static int test_update_key, update_starts;
+int update_public_key(unsigned char key[32])
+{
+	memset(key, test_update_key, 32);
+	return test_update_key;
+}
+int vita_update_start(void)
+{
+	update_starts++;
+	return 0;
+}
+int vita_update_running(void) { return 0; }
 
 /* (vita_input.c's) */
 void vita_gyro_status(char *text, int size) { snprintf(text, (size_t)size, "Gyro: yaw -999 pitch -999 roll -999 lay still"); }
@@ -646,7 +661,7 @@ static void test_controls_tab(void)
 		"General: Check for updates, the version under it, a gap; look, invert, crouch, gyro aiming, rear guard; "
 		"then Button layout, Touch zones, Gyro settings, Advanced");
 	check(to_line("Check for updates") && menu_selected == 1 &&
-		strstr(menu, "\n\x05" "Asks GitHub for the newest version; nothing is downloaded\n") &&
+		strstr(menu, "\n\x05" "Asks GitHub for the newest version; again to install it\n") &&
 		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
 	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
 		!strstr(menu, "\nStick deadzone\x02") && !strstr(menu, "\nShow dev settings\x02"),
@@ -1926,6 +1941,16 @@ static void test_updates(void)
 		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\n\nLook sensitivity\x02") &&
 		menu_fits() && menu_height_fits() && menu_rows() == 10,
 		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits");
+	/* (a build with the update key: the next press installs it) */
+	test_update_key = 1;
+	redraw();
+	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!Press again to download and install it\n\nLook sensitivity\x02") &&
+		menu_fits() && menu_height_fits(), "with the update key: press again to install it");
+	to_line("Check for updates");
+	press(VITA_BUTTON_CROSS);
+	check(update_starts == 1 && update_requests == 1, "the press with an update found installs it, asks GitHub nothing");
+	test_update_key = 0;
+	redraw();
 	to_line("Look sensitivity");
 	press(VITA_BUTTON_UP);
 	check(menu_selected == 1, "up from the first control: Check for updates (the info lines are stepped over)");

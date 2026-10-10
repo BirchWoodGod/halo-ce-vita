@@ -308,8 +308,12 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     # the Vita side, with the SDK's ABI
     host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}", f"-I{generator_header.parent}",
                                          f"-I{TLSF_DIR}"])
+    # (the updater's checks and unpacking: Monocypher's Ed25519 and SHA-512,
+    # the port's zlib with its z_ names, both built above)
+    updater_cflags = " ".join([host_cflags, f"-I{MONOCYPHER_DIR}", f"-I{ZLIB_DIR}", *ZLIB_DEFINES])
     for source in sorted((VITA_DIR / "host").glob("*.c")):
-        add(source, "vita_host_cc", host_cflags, [generator_header] if source.name == "vita_gxm.c" else None)
+        cflags = updater_cflags if source.name.startswith("vita_update") else host_cflags
+        add(source, "vita_host_cc", cflags, [generator_header] if source.name == "vita_gxm.c" else None)
     # the shader compiler's heap (vita_gxm.c): port/third_party/tlsf
     add(TLSF_DIR / "tlsf.c", "vita_host_cc", " ".join(HOST_FLAGS + ["-DNDEBUG", "-w"]))
     # the update check's HTTPS request (port/linux/src/posix_https.c) and its

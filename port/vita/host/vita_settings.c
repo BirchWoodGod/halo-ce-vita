@@ -51,7 +51,9 @@ General (TAB_CONTROLS) starts with the update check (update_check.h):
 Check for updates, its first row, asks GitHub in the background and shows
 its answer beside the build's version on the lines under it ("Version
 1.1.0-beta.3 - Up to date"; a newer version in amber with where to get it),
-where a player sees it as the tab opens. Then the rows players change (look,
+where a player sees it as the tab opens; once it found one, the next press
+downloads, checks and installs it (vita_update.h: a build with the update
+key; one without says where to get it). Then the rows players change (look,
 crouch, gyro aiming, the rear touch guard) and three pages laid out as the
 Xbox controller. Button
 layout puts each Xbox button (A B X Y, Black, White, the triggers, the
@@ -167,6 +169,8 @@ Multiplayer tab's way.
 #include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "vita_update.h"
+#include "vita_update_verify.h"
 #include "vita_version.h"
 
 #define DATA_DIRECTORY "ux0:data/haloce-vita"
@@ -400,10 +404,11 @@ static struct setting settings[] = {
 		{ "Every frame", "Every 2nd", "Every 3rd" }, "Sounds placed and started; lower is faster", 1, TAB_AUDIO },
 
 	/* (General: first the update check, update_check.h - nothing asked of
-	the network until Check for updates is pressed, nothing downloaded; the
+	the network until Check for updates is pressed, nothing downloaded
+	until it is pressed again with an update found, vita_update.h; the
 	build's version and the answer on the lines under it, page_lines - then
 	the rows players change, then the pages laid out as the Xbox controller) */
-	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; nothing is downloaded",
+	{ "Check for updates", NULL, 0, 0, { NULL }, { NULL }, "Asks GitHub for the newest version; again to install it",
 		0, TAB_CONTROLS, KIND_ACTION, ACTION_UPDATE_CHECK },
 	{ "Look sensitivity", "XV_LOOK_SENS", 0, 6, { "50", "75", "100", "125", "150", "200" },
 		{ "50%", "75%", "100%", "125%", "150%", "200%" }, "Right stick turning speed", 2, TAB_CONTROLS },
@@ -1888,8 +1893,17 @@ static int update_lines(struct line *lines)
 		lines[count].type = LINE_INFO;
 		lines[count].text[0] = '!';
 		snprintf(lines[count++].text + 1, sizeof(lines[0].text) - 1, T("Update available: %s"), version);
+		/* port: a build with the update key installs it on the next press
+		(vita_update.c); one without says where to get it */
 		lines[count].type = LINE_INFO;
-		snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", UPDATE_RELEASES_PAGE);
+		{
+			unsigned char key[32];
+
+			if (update_public_key(key))
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", T("Press again to download and install it"));
+			else
+				snprintf(lines[count++].text, sizeof(lines[0].text), "!%s", UPDATE_RELEASES_PAGE);
+		}
 		return count;
 	case UPDATE_STATUS_NO_CONNECTION:
 		snprintf(answer, sizeof(answer), "%s", T("Couldn't check: no connection"));
@@ -3179,7 +3193,13 @@ static void act(const struct setting *setting)
 	{
 	/* (in the background: the answer shows under the version as it comes) */
 	case ACTION_UPDATE_CHECK:
-		update_check_request();
+		/* port: an update found: the press installs it (vita_update.c) */
+		if (vita_update_running())
+			break;
+		if (update_check_status(NULL, 0) == UPDATE_STATUS_AVAILABLE)
+			vita_update_start();
+		else
+			update_check_request();
 		break;
 	/* (online: a game joined by its code, or picked from the public games,
 	then Join's steps with how the lookup goes, as Join a game was in 1.0.3) */

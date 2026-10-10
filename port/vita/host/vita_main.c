@@ -36,6 +36,7 @@ ux0:data/haloce-vita/log.txt (stderr).
 
 #include "lang.h"
 #include "vita_host.h"
+#include "vita_update.h"
 #include "vita_version.h"
 
 #define VITA_DATA_DIRECTORY "ux0:data/haloce-vita"
@@ -782,6 +783,9 @@ int main(int argc, char **argv)
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);
+	/* port: an in-game update cut short (a crash, a power cut) undone
+	before anything reads the game's files (vita_update.c) */
+	vita_update_recover_at_start();
 	{
 		/* (the maps where this game keeps them, else Xita's copy) */
 		SceIoStat stat;

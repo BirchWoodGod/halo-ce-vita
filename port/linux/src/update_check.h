@@ -2,8 +2,9 @@
 UPDATE_CHECK.H
 
 Telling the player whether a newer Halo CE for PS Vita is out, when they ask
-(notification only: nothing is downloaded or installed, and nothing is
-asked of the network unless the player asks). The settings panel's "Check
+(nothing is asked of the network unless the player asks; this part only
+tells: installing a found update, on the player's next press, is the
+Vita's updater's, port/vita/include/vita_update.h). The settings panel's "Check
 for updates" (the General tab's first row) asks GitHub's public API for the
 project's releases on a thread of its own and shows one line: up to date,
 the newer version and where to get it, or that it could not check. halo.log
