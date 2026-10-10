@@ -373,6 +373,95 @@ static void network_test_append(
 		*length = MIN(*length + written, size - 1);
 }
 
+/* every ten seconds of a game, the weapons and equipment this machine has,
+by kind (tag name and index: the players' lines name the weapons they carry
+by index), lying about and carried: what a game type gives (the dedicated
+server's SWAT: magnums alone, no grenades) as a machine sees it */
+static void network_test_log_items(
+	void)
+{
+	enum
+	{
+		MAXIMUM_KINDS = 32,
+	};
+	static long logged_time = -1;
+	struct
+	{
+		long definition_index;
+		long lying;
+		long carried;
+	} kinds[MAXIMUM_KINDS];
+	long kind_count = 0;
+	struct object_iterator iterator;
+	char line[2048];
+	int length = 0;
+	long index;
+
+	if (logged_time >= 0 && game_time_get() >= logged_time && game_time_get() - logged_time < 10 * TICKS_PER_SECOND)
+		return;
+	logged_time = game_time_get();
+	object_iterator_new(&iterator, _object_mask_weapon | _object_mask_equipment, 0);
+	while (object_iterator_next(&iterator))
+	{
+		struct item_datum *item = item_get(iterator.index);
+
+		for (index = 0; index < kind_count && kinds[index].definition_index != item->definition_index; index++)
+			;
+		if (index == kind_count)
+		{
+			if (kind_count == MAXIMUM_KINDS)
+				continue;
+			kinds[kind_count].definition_index = item->definition_index;
+			kinds[kind_count].lying = kinds[kind_count].carried = 0;
+			kind_count++;
+		}
+		if (item->object.parent_object_index == NONE &&
+			TEST_FLAG(item->object.flags, _object_connected_to_map_bit) &&
+			!TEST_FLAG(item->item.flags, _item_attached_to_unit_bit))
+		{
+			kinds[index].lying++;
+		}
+		else
+			kinds[index].carried++;
+	}
+	line[0] = 0;
+	for (index = 0; index < kind_count; index++)
+	{
+		network_test_append(line, (int)sizeof(line), &length, " %s(%lx) %ld+%ld",
+			tag_get_name(kinds[index].definition_index), (unsigned long)kinds[index].definition_index & 0xFFFF,
+			kinds[index].lying, kinds[index].carried);
+	}
+	platform_log("network test: items at tick %ld (lying+carried):%s", game_time_get(), kind_count ? line : " none");
+	/* (and the vehicles, by kind) */
+	kind_count = 0;
+	object_iterator_new(&iterator, _object_mask_vehicle, 0);
+	while (object_iterator_next(&iterator))
+	{
+		struct object_datum *object = object_get(iterator.index);
+
+		for (index = 0; index < kind_count && kinds[index].definition_index != object->definition_index; index++)
+			;
+		if (index == kind_count)
+		{
+			if (kind_count == MAXIMUM_KINDS)
+				continue;
+			kinds[kind_count].definition_index = object->definition_index;
+			kinds[kind_count].lying = 0;
+			kind_count++;
+		}
+		kinds[index].lying++;
+	}
+	length = 0;
+	line[0] = 0;
+	for (index = 0; index < kind_count; index++)
+	{
+		network_test_append(line, (int)sizeof(line), &length, " %s(%lx) %ld",
+			tag_get_name(kinds[index].definition_index), (unsigned long)kinds[index].definition_index & 0xFFFF,
+			kinds[index].lying);
+	}
+	platform_log("network test: vehicles at tick %ld:%s", game_time_get(), kind_count ? line : " none");
+}
+
 /* every player's unit, as this machine sees it */
 static void network_test_log_players(
 	void)
@@ -942,6 +1031,7 @@ void network_test_update(
 	{
 		network_test.logged_time = game_time_get();
 		network_test_log_players();
+		network_test_log_items();
 		if (network_test.shoot_interval > 0.0f &&
 			game_time_get() % MAX(1, (long)(network_test.shoot_interval * TICKS_PER_SECOND)) < TICKS_PER_SECOND)
 		{

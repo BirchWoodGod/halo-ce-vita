@@ -314,6 +314,28 @@
 #            hosts download and play, and the games go on; a new joiner with
 #            the map, PC maps off, on the old Vita host is asked about PC
 #            maps at once, as before, and stays up
+#   swat     the dedicated server's own gametypes (DEDICATED_SERVER.md), with
+#            sv_starting_weapons generic: a cycle of SWAT on Chill Out (no
+#            shields, magnums only, no grenades), Team SWAT on Prisoner, Big
+#            Team (btb) on Blood Gulch, Team Slayer on Battle Creek and Team
+#            Snipers on Damnation (sv_timelimit 1), three Vita builds joining
+#            (the first and third by its code, the second from the server
+#            browser, which must list "SWAT"), each shooting the next player
+#            now and then (HALO_NETWORK_TEST_SHOOT). The server's sv_items
+#            (every 10 s) must show in the SWAT games no weapon but the human
+#            pistol, lying about or carried (no plasma pistol, no grenade, no
+#            overshield), every player with that pistol alone, no shield and
+#            no grenades; in Team Snipers no weapon but the sniper rifle; in
+#            Big Team the map's Warthogs, Ghosts and Scorpions; in Team
+#            Slayer players starting with an assault rifle (Battle Creek's own
+#            start is a plasma pistol), and shields back. The joiners' own
+#            views the same: their census (network test's, every 10 s) and
+#            their players' lines (shields, grenades, the kinds of weapons
+#            carried), some player hurt with no shield in SWAT
+#   swatmixed the same with HALO_TEST_VITA_OLD (a v1.1.0-beta.3 build, or
+#            beta.2/beta.1: no change on their side) as the first and third
+#            joiners: they must play every game with the others and see in
+#            their players' lines what the new ones see (they have no census)
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -399,6 +421,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = pingsmixed ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = mapmid ] && seconds=${HALO_TEST_SECONDS:-300}
 [ "$mode" = mapmidmixed ] && seconds=${HALO_TEST_SECONDS:-300}
+[ "$mode" = swat ] && seconds=${HALO_TEST_SECONDS:-500}
+[ "$mode" = swatmixed ] && seconds=${HALO_TEST_SECONDS:-500}
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -1621,8 +1645,12 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
+	if [ "$mode" = swatmixed ]; then
+		vita_old=${HALO_TEST_VITA_OLD:-}
+		[ -x "$vita_old" ] || { echo "swatmixed needs HALO_TEST_VITA_OLD (a build of v1.1.0-beta.3, beta.2 or beta.1)"; exit 2; }
+	fi
 	if [ "$mode" = mapmidmixed ]; then
 		vita_old=${HALO_TEST_VITA_OLD:-} server_old=${HALO_TEST_SERVER_OLD:-}
 		[ -x "$vita_old" ] && [ -x "$server_old" ] ||
@@ -1837,6 +1865,25 @@ sv_map_download 1
 sv_port 2302
 INIT
 	fi
+	# (swat: the server's SWAT on a small map, Team SWAT, then Slayer)
+	if [ "$mode" = swat ] || [ "$mode" = swatmixed ]; then
+		cat > "$out/server/data/init.txt" <<'INIT'
+sv_name "Netns SWAT"
+sv_maxplayers 8
+sv_public 1
+sv_starting_weapons generic
+sv_mapcycle_add chillout swat
+sv_mapcycle_add prisoner team_swat
+sv_mapcycle_add bloodgulch btb
+sv_mapcycle_add beavercreek team_slayer
+sv_mapcycle_add damnation team_snipers
+sv_timelimit 1
+sv_start_delay 5
+sv_postgame 5
+sv_end_empty 20
+sv_port 2302
+INIT
+	fi
 	[ "${HALO_TEST_SERVER_PUBLIC:-0}" = 1 ] && echo "sv_public_address 10.10.1.2:2302" >> "$out/server/data/init.txt"
 	# (HALO_TEST_SERVER_INIT: another init.txt, e.g. one map for measuring)
 	[ -n "${HALO_TEST_SERVER_INIT:-}" ] && cp "$HALO_TEST_SERVER_INIT" "$out/server/data/init.txt"
@@ -2017,6 +2064,243 @@ INIT
 			[ "$(grep -ac '^server: player #[0-9]* Vita1 joined' "$sl")" -ge 2 ] || fail "the server did not see Vita1 join twice"
 			grep -aq "^server: player #[0-9]* Vita1 left" "$sl" || fail "the server did not see Vita1 leave"
 		fi
+		;;
+	swat|swatmixed)
+		join_pids= names=
+		for i in 1 2 3; do
+			name=joiner; [ "$i" -gt 1 ] && name=joiner$i
+			names="$names $name"
+			machine=$join_machine
+			if [ "$i" -gt 1 ]; then side "d$i" "10.10.$((20 + i))" "192.168.$((20 + i))"; eval "machine=\$d${i}_machine"; fi
+			how=join-code:$code binary=$vita
+			[ "$i" = 2 ] && how=join-public
+			[ "$mode" = swatmixed ] && [ "$i" != 2 ] && binary=$vita_old
+			run_copy "$name" "$machine" "$binary" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$how \
+				HALO_NET_PLAYER_NAME=Vita$i HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:$((i + 1)) \
+				HALO_NETWORK_TEST_SHOOT=${HALO_TEST_SWAT_SHOOT:-2}
+			join_pids="$join_pids $last_pid"
+			sleep 2
+		done
+		# (the server's census every 10 s while the copies play)
+		(
+			for i in $(seq 1 $(((seconds - 30) / 10))); do
+				sleep 10
+				echo sv_items >&"$console_fd" 2>/dev/null || exit 0
+			done
+		) & census_pid=$!; pids="$pids $census_pid"
+		wait $join_pids 2>/dev/null
+		kill "$census_pid" 2>/dev/null; wait "$census_pid" 2>/dev/null
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"; grep -aE "^server: (the next game|the game|player #[0-9]+ Vita[0-9] (joined|left)|starting weapons)" "$sl" | head -40
+		grep -aq "lost the connection" "$sl" && fail "the server lost a player's connection"
+		grep -aq 'network test: the public games list "Netns SWAT" \[dedicated\]: SWAT to [0-9]* on Chill Out' \
+			"$out/joiner2/run.log" || fail "the server browser did not list the game as SWAT"
+		grep -a 'network test: the public games list "Netns SWAT"' "$out/joiner2/run.log" | head -1
+		for name in $names; do
+			n=$(grep -a "network test: tick" "$out/$name/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name's seconds playing with another player: $n"
+			[ "$n" -ge 200 ] || fail "$name played the server's games with another player for $n s (200 wanted)"
+			grep -aq "XLaunchNewImage" "$out/$name/run.log" && fail "$name went to the dashboard"
+		done
+		# the server's census and the joiners' views, game by game
+		old_names=
+		[ "$mode" = swatmixed ] && old_names="joiner joiner3"
+		python3 - "$sl" "$out" "$old_names" <<'CHECK' || status=1
+import re, sys
+server_log, out, old_names = sys.argv[1], sys.argv[2], sys.argv[3].split()
+PISTOL = "weapons\\pistol\\pistol"
+SNIPER = "weapons\\sniper rifle\\sniper rifle"
+RIFLE = "weapons\\assault rifle\\assault rifle"
+# the cycle (the server's init.txt): what each game must have
+WANTED = ["swat on chillout", "team_swat on prisoner", "btb on bloodgulch", "team_slayer on beavercreek",
+    "team_snipers on damnation"]
+failures = []
+def fail(text):
+    failures.append(text)
+    print("FAIL (%s): %s" % ("swat", text))
+def weapon(name):
+    # (a weapon: not equipment, a grenade or a powerup)
+    return name.startswith("weapons\\") and "grenade" not in name
+def kind(game):
+    return game.split(" on ")[0]
+
+# the server: its games in order, each with its sv_items lines
+games = []
+for line in open(server_log, errors="replace"):
+    m = re.match(r"server: the game starts: (\S+) on ([^,\s]+)", line)
+    if m:
+        games.append({"name": m.group(1) + " on " + m.group(2), "items": [], "vehicles": [], "players": []})
+        continue
+    if not games:
+        continue
+    g = games[-1]
+    m = re.match(r"server: items: (\d+) lying about, (\d+) carried:(.*)", line)
+    if m:
+        g["items"].append((int(m.group(1)), int(m.group(2)), re.findall(r" (\S+(?: \S+)*?) (\d+)\+(\d+)", m.group(3))))
+        continue
+    m = re.match(r"server: vehicles: (\d+)(.*)", line)
+    if m:
+        g["vehicles"].append((int(m.group(1)), m.group(2)))
+        continue
+    m = re.match(r"server: player #(\d+) (.*?): shield (\S+) of (\S+), body (\S+), grenades (\d+)/(\d+), weapons:(.*)", line)
+    if m:
+        g["players"].append({"shield": float(m.group(3)), "maximum": float(m.group(4)), "body": float(m.group(5)),
+            "grenades": int(m.group(6)) + int(m.group(7)), "weapons": re.findall(r"weapons\\[^\\]+\\\S+(?: \S+)*?(?= weapons\\|$)", m.group(8).strip())})
+print("the server's games: " + ", ".join(g["name"] for g in games))
+if [g["name"] for g in games[:len(WANTED)]] != WANTED:
+    fail("the server did not play its cycle (%s wanted)" % ", ".join(WANTED))
+for g in games[:len(WANTED)]:
+    name = g["name"]
+    kinds = sorted({k[0] for _, _, ks in g["items"] for k in ks})
+    weapons = [k for k in kinds if weapon(k)]
+    lying = max([l for l, _, _ in g["items"]] or [0])
+    vehicles = " ".join(v[1] for v in g["vehicles"])
+    shields = sorted({p["maximum"] for p in g["players"]})
+    grenades = sorted({p["grenades"] for p in g["players"]})
+    carried = sorted({w for p in g["players"] for w in p["weapons"]})
+    print("server, %s: sv_items %d times, at most %d lying about; items %s; vehicles %s; players %d times,"
+        " most shields %s, grenades %s, carrying %s" % (name, len(g["items"]), lying, ", ".join(kinds) or "none",
+        max([v[0] for v in g["vehicles"]] or [0]), len(g["players"]), shields, grenades, ", ".join(carried) or "nothing"))
+    for v in sorted({v[1] for v in g["vehicles"]}):
+        print("    vehicles:" + v)
+    if len(g["items"]) < 3 or len(g["players"]) < 3:
+        fail("the server's census saw too little of %s (%d sv_items, %d players' lines)" % (name, len(g["items"]), len(g["players"])))
+        continue
+    alive = [p for p in g["players"] if p["weapons"]]
+    if kind(name) in ("swat", "team_swat"):
+        if weapons != [PISTOL] or any("grenade" in k or "shield" in k for k in kinds):
+            fail("%s had items other than the pistol and powerups: %s" % (name, ", ".join(kinds)))
+        if lying == 0:
+            fail("%s had no pistols lying about (the map's weapons)" % name)
+        if shields != [0.0] or any(p["shield"] != 0.0 for p in g["players"]):
+            fail("%s's players had shields: %s" % (name, shields))
+        if grenades != [0]:
+            fail("%s's players had grenades: %s" % (name, grenades))
+        if carried != [PISTOL] or any(len(p["weapons"]) != 1 for p in alive):
+            fail("%s's players did not carry one pistol alone" % name)
+        if g["vehicles"] and max(v[0] for v in g["vehicles"]):
+            fail("%s had vehicles" % name)
+    elif kind(name) == "team_snipers":
+        if weapons != [SNIPER]:
+            fail("%s had weapons other than the sniper rifle: %s" % (name, ", ".join(weapons)))
+        if carried != [SNIPER]:
+            fail("%s's players carried %s, not the sniper rifle alone" % (name, ", ".join(carried)))
+        if not shields or max(shields) <= 0:
+            fail("%s's players had no shields" % name)
+    else:
+        if not shields or max(shields) <= 0:
+            fail("%s (after SWAT) had no shields" % name)
+        if len(weapons) < 3:
+            fail("%s (after SWAT) had %d kinds of weapons about (its weapons not back)" % (name, len(weapons)))
+        if kind(name) == "btb":
+            for v in ("warthog", "ghost", "scorpion"):
+                if v not in vehicles:
+                    fail("%s had no %s" % (name, v))
+        if kind(name) == "team_slayer":
+            # (sv_starting_weapons generic: an assault rifle and a pistol, not
+            # Battle Creek's own plasma pistol)
+            with_rifle = sum(1 for p in alive if RIFLE in p["weapons"])
+            print("    players carrying an assault rifle: %d of %d" % (with_rifle, len(alive)))
+            if with_rifle * 2 < len(alive):
+                fail("%s's players did not start with the assault rifle (%d of %d carry one)" % (name, with_rifle, len(alive)))
+
+# the joiners: their census (new builds) and their players' lines, game by
+# game in the order the server played them (all three join in the first);
+# the second joiner (a new build) first: its census names the weapons the
+# old builds' lines give by index (one map, one index)
+shared_names = {}
+for name in ("joiner2", "joiner", "joiner3"):
+    old = name in old_names
+    path = "%s/%s/run.log" % (out, name)
+    segments, current, last_tick = [], None, None
+    for line in open(path, errors="replace"):
+        m = re.search(r"network test: tick (\d+)(.*)\| items", line)
+        if m and "| playing" in line:
+            tick = int(m.group(1))
+            if current is None or (last_tick is not None and tick < last_tick):
+                current = {"players": [], "census": [], "vehicles": []}
+                segments.append(current)
+            last_tick = tick
+            for p in re.finditer(r"player \d+: \([^)]*\) h(-?[\d.]+)/(-?[\d.]+)(?: riding)?(?: camo)? g(\d+)/(\d+) w a\S+ f\S+ l\S+ as\S+ st\S+ thr\S+((?: [0-9a-f]+:-?\d+)*) s-?\d", m.group(2)):
+                current["players"].append((float(p.group(1)), float(p.group(2)), int(p.group(3)) + int(p.group(4)),
+                    [w.split(":")[0] for w in p.group(5).split()]))
+            continue
+        m = re.search(r"network test: items at tick (\d+) \(lying\+carried\):(.*)", line)
+        if m and current is not None:
+            current["census"].append((int(m.group(1)), re.findall(r" ([^()]+?)\(([0-9a-f]+)\) (\d+)\+(\d+)", m.group(2))))
+            continue
+        m = re.search(r"network test: vehicles at tick (\d+):(.*)", line)
+        if m and current is not None:
+            current["vehicles"].append((int(m.group(1)), m.group(2)))
+    print("%s%s: %d games seen playing" % (name, " (old build)" if old else "", len(segments)))
+    if len(segments) < len(WANTED):
+        fail("%s saw %d games playing (%d wanted)" % (name, len(segments), len(WANTED)))
+    for index, (game, segment) in enumerate(zip(WANTED, segments)):
+        k = kind(game)
+        lines = segment["players"]
+        shields = sorted({p[1] for p in lines})
+        carried = sorted({w for p in lines for w in p[3]})
+        # (a unit the host has just spawned has its definition's grenades on
+        # a client until the host's word on what it carries, its weapons
+        # with it: as in every game, those lines are not the game's)
+        grenades = sorted({p[2] for p in lines if p[3]})
+        hurt = sum(1 for p in lines if 0 < p[0] < 0.99 and p[1] == 0.0)
+        census = [c for c in segment["census"] if c[0] >= 300]
+        early = [c for c in segment["census"] if c[0] < 300]
+        names = dict(shared_names.get(index, {})) if old else {}
+        for _, ks in segment["census"]:
+            for n, i, _, _ in ks:
+                names[i] = n
+        if not old:
+            shared_names.setdefault(index, {}).update(names)
+        census_kinds = sorted({c[0] for _, ks in census for c in ks})
+        census_weapons = [c for c in census_kinds if weapon(c)]
+        vehicles = " ".join(v[1] for v in segment["vehicles"])
+        two = sum(1 for p in lines if len(p[3]) == 2)
+        armed = sum(1 for p in lines if p[3])
+        print("  %s: %d players' lines, shields %s, grenades %s, carried %s, hurt with no shield %d, carrying two %d of %d;"
+            " census %d times, items %s%s" % (game, len(lines), shields, grenades,
+            ", ".join(names.get(c, c) for c in carried), hurt, two, armed, len(census), ", ".join(census_kinds) or "-",
+            "; early census: " + ", ".join(sorted({c[0] for _, ks in early for c in ks})) if early else ""))
+        if len(lines) < 20:
+            fail("%s's %s had %d players' lines" % (name, game, len(lines)))
+            continue
+        if k in ("swat", "team_swat"):
+            if shields != [0.0]:
+                fail("%s saw shields in %s: %s" % (name, game, shields))
+            if grenades != [0]:
+                fail("%s saw grenades in %s: %s" % (name, game, grenades))
+            if len(carried) != 1:
+                fail("%s saw %d kinds of weapons carried in %s" % (name, len(carried), game))
+            if not old and (census_weapons != [PISTOL] or [c for c in census_kinds if "grenade" in c or "shield" in c]):
+                fail("%s had items other than the pistol and powerups in %s: %s" % (name, game, census_kinds))
+            if carried and names.get(carried[0]) != PISTOL:
+                fail("%s's players carried %s in %s, not the pistol" % (name, names.get(carried[0], carried[0]), game))
+            if hurt == 0:
+                fail("%s never saw a player hurt with no shield in %s" % (name, game))
+        elif k == "team_snipers":
+            if len(carried) != 1:
+                fail("%s saw %d kinds of weapons carried in %s" % (name, len(carried), game))
+            if 1.0 not in shields:
+                fail("%s saw no shields in %s" % (name, game))
+            if not old and census_weapons != [SNIPER]:
+                fail("%s had weapons other than the sniper rifle in %s: %s" % (name, game, census_weapons))
+            if carried and names.get(carried[0]) != SNIPER:
+                fail("%s's players carried %s in %s, not the sniper rifle" % (name, names.get(carried[0], carried[0]), game))
+        else:
+            if 1.0 not in shields:
+                fail("%s saw no shields in %s (after SWAT)" % (name, game))
+            if k == "team_slayer" and two * 2 < armed:
+                fail("%s's players did not start with two weapons in %s (%d of %d lines)" % (name, game, two, armed))
+            if k == "team_slayer" and RIFLE not in [names.get(c) for c in carried]:
+                fail("%s saw no assault rifle carried in %s" % (name, game))
+            if k == "btb" and not old:
+                print("    vehicles:" + max([v[1] for v in segment["vehicles"]] or ["-"], key=len))
+                for v in ("warthog", "ghost", "scorpion"):
+                    if v not in vehicles:
+                        fail("%s saw no %s in %s" % (name, v, game))
+sys.exit(1 if failures else 0)
+CHECK
 		;;
 	scoreboard)
 		scores="HALO_NETWORK_TEST_SCORES=${HALO_TEST_SCORES_EVERY:-4}"
@@ -2680,7 +2964,7 @@ INIT
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
 	exit 2
 	;;
 esac
