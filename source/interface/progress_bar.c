@@ -2348,8 +2348,15 @@ static D3DSurface *progress_bar_front_buffer(
 			IDirect3DDevice8_SetRenderTarget(global_d3d_device, progress_bar_front_buffer_surface, NULL);
 			IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, 0xf0, 0, 0.f, 0);
 			IDirect3DDevice8_SetRenderTarget(global_d3d_device, back_buffer, depth_buffer);
+			/* port: the reference GetDepthStencilSurface gave is given back
+			(none when no depth buffer is set), from OpenCE's leak fixes */
+			if (depth_buffer)
+				IDirect3DSurface8_Release(depth_buffer);
 		}
 	}
+	/* port: and GetBackBuffer's (each loading frame took one, which the
+	surface's 16-bit count overflows after enough loads) */
+	IDirect3DSurface8_Release(back_buffer);
 
 	return progress_bar_front_buffer_surface;
 }
@@ -2408,6 +2415,11 @@ static void progress_bar_present_to_front_buffer(
 	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHABLENDENABLE, TRUE);
 	/* (as make_stuff_ready puts the targets back) */
 	IDirect3DDevice8_SetRenderTarget(global_d3d_device, back_buffer, depth_buffer);
+	/* port: the references GetBackBuffer and GetDepthStencilSurface gave
+	are given back (no depth buffer: none), from OpenCE's leak fixes */
+	IDirect3DSurface8_Release(back_buffer);
+	if (depth_buffer)
+		IDirect3DSurface8_Release(depth_buffer);
 
 	return;
 }
@@ -2672,7 +2684,13 @@ static void progress_bar_make_stuff_ready(
 		IDirect3DDevice8_SetRenderTarget(global_d3d_device, back_buffer, depth_buffer);
 		IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, 0xf0, 0, 0.f, 0);
 		IDirect3DDevice8_SetRenderTarget(global_d3d_device, front_buffer, depth_buffer);
+		IDirect3DSurface8_Release(back_buffer);
 #endif
+		/* port: the references the capture took are given back (no depth
+		buffer: none), from OpenCE's leak fixes and DamnationCE's ff654a77 */
+		IDirect3DSurface8_Release(front_buffer);
+		if (depth_buffer)
+			IDirect3DSurface8_Release(depth_buffer);
 	}
 #ifdef HALO_LINUX
 	else
