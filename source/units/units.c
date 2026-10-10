@@ -7347,7 +7347,67 @@ void unit_get_camera_position(
 
 	struct unit_datum *unit = unit_get(unit_index);
 	struct unit_definition *unit_definition = unit_definition_get(unit->definition_index);
+#ifdef HALO_LINUX
+	/* port: the render asks this too (the HUD's nav point arrows, the
+	motion sensor) while the tick, on a thread of its own (HALO_TICK_THREAD,
+	the Vita's), takes the unit out of its vehicle, or its gunner out of it:
+	the parent, seat and gunner read once (as the tick reads them, so its
+	answer is the one it was) and checked; a link the render no longer sees
+	counts as none (the parent was checked, then read again for object_get:
+	NONE as the unit got out) */
+	long parent_object_index = *(volatile long *)&unit->object.parent_object_index;
+	short parent_seat_index = *(volatile short *)&unit->unit.parent_seat_index;
+	long gunner_object_index = *(volatile long *)&unit->unit.gunner_object_index;
+	struct object_datum *parent = parent_object_index!=NONE ? object_try_and_get(parent_object_index) : NULL;
 
+	if (!parent)
+		parent_object_index = NONE;
+	if (parent_object_index!=NONE || TEST_FLAG(unit->object.damage_flags, _object_dead_bit) || unit->object.type!=_object_type_biped)
+	{
+		if (parent_object_index==NONE)
+		{
+			struct unit_datum *gunner_unit = gunner_object_index!=NONE ? unit_try_and_get(gunner_object_index) : NULL;
+			short gunner_seat_index = gunner_unit ? *(volatile short *)&gunner_unit->unit.parent_seat_index : NONE;
+
+			if (gunner_seat_index<0 || gunner_seat_index>=unit_definition->unit.seats.count)
+			{
+				object_get_marker_by_name(unit_index, "head", &marker, 1);
+				*camera_position = marker.matrix.position;
+			}
+			else
+			{
+				struct unit_seat *parent_seat = TAG_BLOCK_GET_ELEMENT(&unit_definition->unit.seats, gunner_seat_index, struct unit_seat);
+
+				object_get_marker_by_name(unit_index, parent_seat->marker_name, &marker, 1);
+				*camera_position = marker.matrix.position;
+			}
+		}
+		else
+		{
+			*camera_position = parent->object.position;
+
+			if (TEST_FLAG(_object_mask_unit, parent->object.type) && parent_seat_index!=NONE)
+			{
+				struct unit_definition *parent_unit_definition = unit_definition_get(parent->definition_index);
+
+				if (parent_seat_index>=0 && parent_seat_index<parent_unit_definition->unit.seats.count)
+				{
+					struct unit_seat *parent_seat = TAG_BLOCK_GET_ELEMENT(&parent_unit_definition->unit.seats, parent_seat_index, struct unit_seat);
+
+					if (parent->object.type!=_object_type_vehicle || parent_seat->camera.marker_name[0])
+					{
+						object_get_marker_by_name(parent_object_index, parent_seat->camera.marker_name, &marker, 1);
+						*camera_position = marker.matrix.position;
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		biped_get_sight_position(unit_index, 0.f, NULL, NULL, NULL, camera_position);
+	}
+#else
 	if (unit->object.parent_object_index!=NONE || TEST_FLAG(unit->object.damage_flags, _object_dead_bit) || unit->object.type!=_object_type_biped)
 	{
 		if (unit->object.parent_object_index==NONE)
@@ -7389,6 +7449,7 @@ void unit_get_camera_position(
 	{
 		biped_get_sight_position(unit_index, 0.f, NULL, NULL, NULL, camera_position);
 	}
+#endif
 
 	return;
 }
@@ -7599,6 +7660,38 @@ long unit_inventory_get_weapon(
 
 	return unit_get_weapon(unit, index);
 }
+
+#ifdef HALO_LINUX
+struct unit_seat *unit_render_get_seat(
+	struct unit_datum const *unit,
+	long *parent_unit_index)
+{
+	/* the tick may take the unit out of its seat (or move it to another
+	vehicle's) between any two reads: each read once, and the seat checked
+	against the vehicle read */
+	long parent_object_index = *(volatile long const *)&unit->object.parent_object_index;
+	short parent_seat_index = *(volatile short const *)&unit->unit.parent_seat_index;
+	struct unit_datum *parent_unit = parent_object_index != NONE && parent_seat_index != NONE ?
+		unit_try_and_get(parent_object_index) : NULL;
+	struct unit_seat *seat = NULL;
+
+	if (parent_unit)
+	{
+		struct unit_definition *parent_definition = unit_definition_get(parent_unit->definition_index);
+
+		if (parent_seat_index >= 0 && parent_seat_index < parent_definition->unit.seats.count)
+		{
+			seat = TAG_BLOCK_GET_ELEMENT(
+				&parent_definition->unit.seats,
+				parent_seat_index,
+				struct unit_seat);
+		}
+	}
+	*parent_unit_index = seat ? parent_object_index : NONE;
+
+	return seat;
+}
+#endif
 
 static void unit_ready_desired_weapon(
 	long unit_index,

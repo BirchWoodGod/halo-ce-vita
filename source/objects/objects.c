@@ -1629,10 +1629,28 @@ void object_get_velocities(
 {
 	struct object_datum *ultimate_parent = object_get(object_index);
 
+#ifdef HALO_LINUX
+	/* port: the render asks this too (object_render_state_refresh's
+	lighting interpolation, the motion sensor) while the tick, on a thread
+	of its own (HALO_TICK_THREAD, the Vita's), detaches objects (a weapon
+	dropped, a unit out of its vehicle): each parent read once (as the tick
+	reads it) and checked, the walk stopping at one the render no longer
+	sees (it was checked, then read again: object_get(NONE)) */
+	for (;;)
+	{
+		long parent_object_index = *(volatile long *)&ultimate_parent->object.parent_object_index;
+		struct object_datum *parent = parent_object_index!=NONE ? object_try_and_get(parent_object_index) : NULL;
+
+		if (!parent)
+			break;
+		ultimate_parent = parent;
+	}
+#else
 	while (ultimate_parent->object.parent_object_index!=NONE)
 	{
 		ultimate_parent = object_get(ultimate_parent->object.parent_object_index);
 	}
+#endif
 
 	if (translational_velocity)
 	{

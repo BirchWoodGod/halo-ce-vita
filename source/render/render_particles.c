@@ -211,6 +211,24 @@ boolean local_player_is_first_person(
 		long player_index = local_player_get_player_index(local_player_index);
 		struct player_datum *player = player_get(player_index);
 
+#ifdef HALO_LINUX
+		/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+		Vita's) the player may die, or get out of a vehicle, while the
+		particles are drawn: the unit read once, its seat read once and
+		checked (unit_render_get_seat: the parent was read again after the
+		check and unit_get(NONE) crashed) */
+		long unit_index = *(volatile long *)&player->unit_index;
+		struct unit_datum *unit = unit_index != NONE ? unit_try_and_get(unit_index) : NULL;
+
+		if (unit)
+		{
+			long parent_unit_index;
+			struct unit_seat *seat = unit_render_get_seat(unit, &parent_unit_index);
+
+			if (seat && TEST_FLAG(seat->flags, _unit_seat_gunner_bit))
+				result = TRUE;
+		}
+#else
 		if (player->unit_index != NONE)
 		{
 			struct unit_datum *unit = unit_get(player->unit_index);
@@ -229,6 +247,7 @@ boolean local_player_is_first_person(
 					result = TRUE;
 			}
 		}
+#endif
 	}
 
 	return result;

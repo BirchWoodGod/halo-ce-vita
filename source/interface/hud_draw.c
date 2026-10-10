@@ -542,6 +542,31 @@ static boolean hud_draw_multitexture_overlay_get_current_weapon_definition(
 
 	csmemset(stack_buffer, 0x62, sizeof(stack_buffer));
 
+#ifdef HALO_LINUX
+	/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+	Vita's) the player may die, or get out of a vehicle, while the HUD is
+	drawn: the unit read once (no weapon this frame when it is gone), its
+	seat read once and checked (unit_render_get_seat: the parent was read
+	again after the check and unit_get(NONE) crashed) */
+	{
+		long unit_index = *(volatile long *)&player->unit_index;
+		struct unit_datum *unit = unit_index != NONE ? unit_try_and_get(unit_index) : NULL;
+
+		weapon_index = unit ? unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index) : NONE;
+		if (unit && weapon_index == NONE)
+		{
+			long parent_unit_index;
+			struct unit_seat *seat = unit_render_get_seat(unit, &parent_unit_index);
+
+			if (seat && TEST_FLAG(seat->flags, _unit_seat_gunner_bit))
+			{
+				weapon_index = unit_inventory_get_weapon(
+					parent_unit_index,
+					unit_get(parent_unit_index)->unit.current_weapon_index);
+			}
+		}
+	}
+#else
 	weapon_index = unit_inventory_get_weapon(
 		player->unit_index,
 		unit_get(player->unit_index)->unit.current_weapon_index);
@@ -567,6 +592,7 @@ static boolean hud_draw_multitexture_overlay_get_current_weapon_definition(
 			}
 		}
 	}
+#endif
 
 	match_assert(
 		"c:\\halo\\SOURCE\\interface\\hud_draw.c",

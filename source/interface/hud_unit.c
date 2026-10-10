@@ -857,16 +857,32 @@ void hud_render_unit_interface(
 	unit_hud_shield_meter_mapper_tick();
 	unit_hud_outline_mapper_tick();
 
+#ifdef HALO_LINUX
+	/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+	Vita's) the player may die, or get out of a vehicle, while the HUD is
+	drawn: the unit read once (no unit HUD this frame when it is gone), its
+	seat and its vehicle's riders' seats read once and checked
+	(unit_render_get_seat: the parent was read again after the check and
+	unit_get(NONE) crashed) */
+	long player_unit_index = *(volatile long *)&player->unit_index;
+
 	if (player->local_player_index == render.local_player_index &&
-		player->unit_index != NONE)
+		player_unit_index != NONE &&
+		unit_try_and_get(player_unit_index))
+#else
+	long player_unit_index = player->unit_index;
+
+	if (player->local_player_index == render.local_player_index &&
+		player_unit_index != NONE)
+#endif
 	{
-		struct unit_datum *unit = unit_get(player->unit_index);
+		struct unit_datum *unit = unit_get(player_unit_index);
 		struct unit_definition const *unit_definition =
 			unit_definition_get(unit->definition_index);
 		short local_player_index = player->local_player_index;
 		long player_index = local_player_get_player_index(local_player_index);
 		struct unit_hud_state *hud_state = get_hud_state(local_player_index);
-		long unit_indices[18] = { player->unit_index };
+		long unit_indices[18] = { player_unit_index };
 		long unit_hud_indices[18] =
 		{
 			unit_definition_get_active_hud_index(
@@ -880,8 +896,19 @@ void hud_render_unit_interface(
 
 		if (hud_state->last_unit_index == NONE)
 			initialize_hud_state(get_hud_state(player->local_player_index));
-		hud_state->last_unit_index = player->unit_index;
+		hud_state->last_unit_index = player_unit_index;
 
+#ifdef HALO_LINUX
+		long parent_unit_index;
+		struct unit_seat const *seat = unit_render_get_seat(unit, &parent_unit_index);
+
+		if (seat)
+		{
+			struct unit_datum *parent_unit = unit_get(parent_unit_index);
+			struct unit_definition const *parent_unit_definition =
+				unit_definition_get(parent_unit->definition_index);
+			long parent_hud_index;
+#else
 		if (unit->object.parent_object_index != NONE &&
 			unit->unit.parent_seat_index != NONE)
 		{
@@ -894,6 +921,7 @@ void hud_render_unit_interface(
 				unit->unit.parent_seat_index,
 				struct unit_seat);
 			long parent_hud_index;
+#endif
 
 			get_hud_state(local_player_index);
 			parent_hud_index = unit_definition_get_active_hud_index(
@@ -916,6 +944,26 @@ void hud_render_unit_interface(
 				{
 					struct object_datum *child_object = object_get(child_unit_index);
 					struct unit_datum *child_unit = unit_try_and_get(child_unit_index);
+#ifdef HALO_LINUX
+					/* (port: a rider's seat read once, and checked against
+					the vehicle's seats, as the tick may take it out) */
+					short child_seat_index = child_unit ?
+						*(volatile short *)&child_unit->unit.parent_seat_index : NONE;
+
+					if (child_unit &&
+						child_unit->object.parent_object_index == parent_unit_index &&
+						child_seat_index >= 0 &&
+						child_seat_index < parent_unit_definition->unit.seats.count)
+					{
+						unit_indices[unit_count] = child_unit_index;
+						unit_hud_indices[unit_count] =
+							unit_definition_get_seat_active_hud_index(
+								parent_unit_definition,
+								child_seat_index,
+								local_player_count() > 1);
+						unit_count++;
+					}
+#else
 
 					if (child_unit &&
 						child_unit->object.parent_object_index == parent_unit_index &&
@@ -929,6 +977,7 @@ void hud_render_unit_interface(
 								local_player_count() > 1);
 						unit_count++;
 					}
+#endif
 
 					child_unit_index = child_object->object.next_object_index;
 				}

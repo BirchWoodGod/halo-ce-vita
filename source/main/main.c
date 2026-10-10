@@ -389,6 +389,10 @@ void platform_log(const char *format, ...);
 #include "camera/director.h"
 #include "camera/observer.h"
 #include "objects/objects.h"
+#ifdef HALO_LINUX
+/* (@seat) */
+#include "units/units.h"
+#endif
 #include "cutscene/cinematics.h"
 #include "effects/player_effects.h"
 #include "physics/collision_usage.h"
@@ -4300,7 +4304,8 @@ tick, every frame), "M<tick>:..." runs in turn, each once a map has
 loaded since the one before it ran (map cycles), "@tv name" puts every player's unit at the centre of
 that scenario trigger volume (the benchmarks walk the player through a
 level's encounters this way: triage/perf2-status.md), "@where" logs where
-every vehicle and scenery object is, and "@shot name"
+every vehicle and scenery object is, "@seat" which vehicle and seat each
+player's unit rides in, and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device; on the Vita its display, as name<frame>.bmp);
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
@@ -4484,6 +4489,28 @@ static void main_test_commands_update(
 				platform_log("where %lx %s at %.2f %.2f %.2f", (unsigned long)iterator.index,
 					tag_get_name(object->definition_index), object->object.position.x, object->object.position.y,
 					object->object.position.z);
+		}
+		/* (@seat: each player's unit's vehicle and seat, or on foot, in
+		the log: run_seat_race_test.sh sees its unit get in and out) */
+		else if (!strcmp(commands[index].command, "@seat"))
+		{
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			data_iterator_new(&iterator, player_data);
+			while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+			{
+				struct object_datum *unit = player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+
+				if (!unit)
+					platform_log("seat: player %ld has no unit", (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index));
+				else if (unit->object.parent_object_index == NONE)
+					platform_log("seat: player %ld on foot", (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index));
+				else
+					platform_log("seat: player %ld in %lx seat %d", (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index),
+						(unsigned long)unit->object.parent_object_index,
+						(int)((struct unit_datum *)unit)->unit.parent_seat_index);
+			}
 		}
 		else if (!strncmp(commands[index].command, "@set ", 5))
 		{

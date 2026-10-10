@@ -840,9 +840,21 @@ static char blip_type_get(
 		return _blip_type_custom;
 
 	owner_player_index = player_index_from_unit_index(object_index);
+#ifdef HALO_LINUX
+	/* port: the render draws the motion sensor (hud_draw_screen) while
+	the tick, on a thread of its own (HALO_TICK_THREAD, the Vita's), takes
+	units out of vehicles and players' units away: the owner looked up
+	once (a second lookup could find no player after the first found
+	one), and the vehicle's gunner and driver read once and checked (read
+	again after the check, unit_get(NONE) crashed as one got out) */
+	controlling_local_player_index = owner_player_index == NONE
+		? NONE
+		: player_get(owner_player_index)->local_player_index;
+#else
 	controlling_local_player_index = owner_player_index == NONE
 		? NONE
 		: player_get(player_index_from_unit_index(object_index))->local_player_index;
+#endif
 	if (controlling_local_player_index == local_player_index)
 		return _blip_type_self;
 
@@ -853,6 +865,22 @@ static char blip_type_get(
 	if (vehicle_try_and_get(object_index))
 	{
 		struct unit_datum *vehicle = vehicle_get(object_index);
+#ifdef HALO_LINUX
+		long gunner_index = *(volatile long *)&vehicle->unit.gunner_object_index;
+		long driver_index = *(volatile long *)&vehicle->unit.driver_object_index;
+		struct unit_datum *seat_unit = gunner_index != NONE ? unit_try_and_get(gunner_index) : NULL;
+
+		if (!seat_unit && driver_index != NONE)
+			seat_unit = unit_try_and_get(driver_index);
+		if (seat_unit)
+		{
+			blip_type = (game_team_is_enemy(
+				seat_unit->object.owner_team_index,
+				local_player_team) != FALSE) + _blip_type_vehicle_friend;
+
+			return blip_type;
+		}
+#else
 
 		if (vehicle->unit.gunner_object_index != NONE)
 		{
@@ -875,6 +903,7 @@ static char blip_type_get(
 
 			return blip_type;
 		}
+#endif
 
 		{
 			struct unit_definition *definition =

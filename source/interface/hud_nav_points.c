@@ -963,12 +963,29 @@ void hud_render_nav_points(
 		{
 			struct hud_nav_point_datum *nav_point = &datum->nav_points[nav_point_index];
 			real_point3d position;
+#ifdef HALO_LINUX
+			/* port: with the tick on a thread of its own (HALO_TICK_THREAD,
+			the Vita's) a script's deactivate_nav_point (b30's Warthog's, as
+			the player gets in) or the tick's own update clears a nav point
+			(its type, object and arrow NONE) while the render draws it: the
+			nav point read once and drawn from the copy (its object was
+			checked, then read again for object_get_bounding_sphere, and its
+			arrow looked up after the check) */
+			struct hud_nav_point_datum nav_point_copy = *(volatile struct hud_nav_point_datum *)nav_point;
+			struct hud_nav_point_datum *live_nav_point = nav_point;
+
+			nav_point = &nav_point_copy;
+#endif
 
 			if (nav_point->nav_index==NONE ||
 				nav_point->reference_index==NONE ||
 				nav_point->type==NONE)
 			{
+#ifdef HALO_LINUX
+				live_nav_point->type = NONE;
+#else
 				nav_point->type = NONE;
+#endif
 				continue;
 			}
 

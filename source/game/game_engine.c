@@ -2218,7 +2218,23 @@ static long find_closest_player_index(
 			player_control_get_target_object_index(player->local_player_index);
 	}
 
+#ifdef HALO_LINUX
+	/* port: the render asks this (internal_rasterize_target_name, the name
+	over the player aimed at) while the tick, on a thread of its own
+	(HALO_TICK_THREAD, the Vita's), takes a dead player's unit away: the
+	unit read once and checked, no one aimed at without it (the caller
+	checked it, then this read it again: unit_get_camera_position read the
+	unit at NONE) */
+	long unit_index = *(volatile long *)&player->unit_index;
+
+	if (best_object_index == NONE &&
+		unit_index != NONE &&
+		object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+#else
+	long unit_index = player->unit_index;
+
 	if (best_object_index == NONE)
+#endif
 	{
 		long object_indices[32];
 		real_point3d camera_position;
@@ -2226,7 +2242,7 @@ static long find_closest_player_index(
 		long object_count;
 		long object_index;
 
-		unit_get_camera_position(player->unit_index, &camera_position);
+		unit_get_camera_position(unit_index, &camera_position);
 		player_control_get_facing_direction(
 			player->local_player_index,
 			&facing_direction);
@@ -2256,7 +2272,7 @@ static long find_closest_player_index(
 					object_indices[object_index],
 					&camera_position,
 					&facing_direction,
-					player->unit_index,
+					unit_index,
 					&target_position,
 					&target_direction,
 					&target_distance,
@@ -4711,12 +4727,26 @@ void game_engine_render_nav_points(
 		{
 			struct player_datum *player = player_get(player_index);
 			long goal_index;
+#ifdef HALO_LINUX
+			/* port: the HUD draws these (hud_render_nav_points) while the
+			tick, on a thread of its own (HALO_TICK_THREAD, the Vita's), takes
+			a dead player's unit away: the unit read once and checked (it was
+			checked, then read again: unit_get_head_position's marker lookup
+			read the unit at NONE) */
+			long unit_index = *(volatile long *)&player->unit_index;
 
+			if (unit_index != NONE && object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+			{
+				real_point3d head_position;
+
+				unit_get_head_position(unit_index, &head_position);
+#else
 			if (player->unit_index != NONE)
 			{
 				real_point3d head_position;
 
 				unit_get_head_position(player->unit_index, &head_position);
+#endif
 		/* port: every goal, one per player in the native builds' sessions */
 		for (goal_index = 0; goal_index < (long)NUMBEROF(global_goal); goal_index++)
 				{
@@ -7922,6 +7952,31 @@ boolean game_engine_get_state_message(
 				message,
 				message_character_count);
 		}
+#ifdef HALO_LINUX
+		/* port: the HUD asks this (hud_show_action_response) while the
+		tick, on a thread of its own (HALO_TICK_THREAD, the Vita's), sets
+		the message: King of the Hill and Oddball clear it every tick (the
+		message, then its player NONE) and set it again (the message, then
+		its player), and the render read the new message with the cleared
+		player and looked up player NONE ("you are on the hill", "you have
+		the ball"). Each read once, and a message without its player (every
+		message the engines set names one) waits for the next frame. */
+		else
+		{
+			long current_message = *(volatile long *)&player->state_message;
+			long current_message_player_index = *(volatile long *)&player->state_message_player_index;
+
+			if (current_message != NONE && current_message_player_index != NONE)
+			{
+				result = multiplayer_message_internal(
+					player_index,
+					current_message,
+					current_message_player_index,
+					message,
+					message_character_count);
+			}
+		}
+#else
 		else if (player->state_message != NONE)
 		{
 			result = multiplayer_message_internal(
@@ -7931,6 +7986,7 @@ boolean game_engine_get_state_message(
 				message,
 				message_character_count);
 		}
+#endif
 	}
 
 	return result;
