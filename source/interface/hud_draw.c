@@ -1079,6 +1079,38 @@ static void hud_full_screen_element_widen(
 	return;
 }
 
+/* (port) the scale at which a map whose HUD is Halo: CE Anniversary's
+(custom_edition_cache_hud_mcc_canvas) draws a HUD bitmap no placement
+scales, 1 for any other: on MCC's canvas twice the Xbox's (`on_canvas`, the
+HUD messages' icons) half, and half again for Halo PC's half HUD scale on
+the bitmap, which MCC's HUD bitmaps have: the icons are four times the
+Xbox's, the waypoint arrows and damage indicators twice (hud_waypoints'
+68 against 34), drawn at the screen's size (as the motion sensor's blips,
+at the Xbox's distances from its centre) */
+real hud_mcc_bitmap_scale(
+	long bitmap_group_index,
+	boolean on_canvas)
+{
+	real scale = 1.0f;
+
+	if (custom_edition_cache_hud_mcc_canvas())
+	{
+		if (on_canvas)
+			scale *= 0.5f;
+		if (bitmap_group_index != NONE)
+		{
+			struct bitmap_group const *bitmap_group = bitmap_group_get(bitmap_group_index);
+
+			if (TEST_FLAG(bitmap_group->flags, _bitmap_group_half_hud_scale_bit) ||
+				TEST_FLAG(bitmap_group->flags, _bitmap_group_force_hud_use_highres_scale_bit))
+			{
+				scale *= 0.5f;
+			}
+		}
+	}
+	return scale;
+}
+
 /* (port) whether a static element is part of a zoomed scope: one of its
 multitexture overlays is driven by the zoom level (the sniper rifle's two
 range ladders, drawn as overlays faded in by the zoom, are anchored to the top
@@ -1730,6 +1762,14 @@ static void hud_draw_bitmap_internal(
 	parameters.map_scale[0].i = 1.0f;
 	parameters.meter_parameters = meter_parameters;
 	parameters.point_sampled = meter_parameters && local_player_count()==1;
+#ifdef HALO_LINUX
+	/* port: but filtered on Halo: CE Anniversary's HUD, whose meters' bitmaps
+	(four times the Xbox's, with no mipmaps) are drawn at a quarter of their
+	size: point sampled they came out as broken dots (the ammunition's
+	rounds) */
+	if (custom_edition_cache_hud_mcc_canvas())
+		parameters.point_sampled = FALSE;
+#endif
 	parameters.framebuffer_blend_function =
 		_shader_framebuffer_blend_function_alpha_multiply_add;
 	parameters.map[0] = (struct bitmap_data *)bitmap;
@@ -2173,6 +2213,11 @@ void hud_draw_numbers(
 			{
 				digit_scale = scale * 0.5f;
 			}
+			/* port: and half again on Halo: CE Anniversary's canvas, twice
+			the Xbox's, whose digits are four times the Xbox's (their
+			spacing was halved as the map loaded: cache_file_formats.c
+			mcc_hud_digits_convert) */
+			digit_scale *= hud_mcc_bitmap_scale(NONE, TRUE);
 #endif
 
 			if (TEST_FLAG(numbers->number_flags, _hud_number_show_trailing_m_bit))

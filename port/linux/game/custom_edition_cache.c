@@ -98,6 +98,9 @@ struct custom_edition_cache_globals
 	/* the Halo PC behaviours the loaded map relies on (enum
 	custom_edition_behaviour, flags) */
 	uint32_t behaviours;
+	/* (port) the HUD is laid out on Halo: CE Anniversary's canvas
+	(custom_edition_cache_hud_mcc_canvas) */
+	boolean hud_mcc_canvas;
 	/* the tag cache and the bytes of it the loaded tags use */
 	uint8_t *tag_cache;
 	uint32_t loaded_bytes;
@@ -939,7 +942,15 @@ static boolean custom_edition_cache_tags_convert(
 			"custom edition: %ld HUD elements drawn from Halo PC's double resolution bitmaps were given half their scale",
 			(long)conversion.hud_placements_rescaled);
 	}
+	if (conversion.hud_mcc_canvas)
+	{
+		error(
+			_error_silent,
+			"custom edition: the HUD is Halo: CE Anniversary's, made for a canvas twice the Xbox's: %ld HUD placements brought to the Xbox's",
+			(long)conversion.hud_mcc_placements);
+	}
 	custom_edition_cache_globals.behaviours = conversion.behaviours;
+	custom_edition_cache_globals.hud_mcc_canvas = conversion.hud_mcc_canvas != 0;
 	custom_edition_behaviours_log(conversion.behaviours);
 	if (conversion.hud_placements_kept)
 	{
@@ -2124,6 +2135,12 @@ boolean custom_edition_cache_relies_on(
 		((custom_edition_cache_globals.behaviours >> behaviour) & 1);
 }
 
+boolean custom_edition_cache_hud_mcc_canvas(
+	void)
+{
+	return custom_edition_cache_globals.tags_loaded && custom_edition_cache_globals.hud_mcc_canvas;
+}
+
 void *custom_edition_cache_tag_cache(
 	unsigned long *size)
 {
@@ -2150,6 +2167,7 @@ void custom_edition_cache_tags_unload(
 	custom_edition_cache_globals.structure_bsp_vertices_known = FALSE;
 	tag_validate_structure_vertices_in_file(FALSE);
 	custom_edition_cache_globals.behaviours = 0;
+	custom_edition_cache_globals.hud_mcc_canvas = FALSE;
 	custom_edition_cache_globals.tag_cache = NULL;
 	custom_edition_cache_globals.loaded_bytes = 0;
 	custom_edition_cache_globals.tag_cache_bytes = 0;

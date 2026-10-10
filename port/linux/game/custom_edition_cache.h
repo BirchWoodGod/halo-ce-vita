@@ -192,6 +192,13 @@ boolean custom_edition_cache_tags_loaded(
 custom_edition_behaviour, cache_file_formats.h); FALSE when none is loaded. */
 boolean custom_edition_cache_relies_on(
 	short behaviour);
+/* (port) Whether the loaded map's HUD is Halo: CE Anniversary's, made for
+MCC's canvas twice the Xbox's: its placements were brought to the Xbox's
+canvas as it loaded (cache_file_formats.c mcc_hud_placements_convert), and
+hud_draw.c draws what no placement scales (hud_mcc_bitmap_scale); FALSE
+when no Custom Edition map is loaded. */
+boolean custom_edition_cache_hud_mcc_canvas(
+	void);
 /* The tag cache the loaded map's tags are in and its size, in bytes
 (cache_file_tag_cache_contains); NULL and 0 when none is loaded. */
 void *custom_edition_cache_tag_cache(

@@ -534,6 +534,14 @@ struct custom_edition_conversion_report
 	overlay items, which Halo PC does not halve by their own flag, and
 	numbers, whose digits hud_draw_numbers halves */
 	int32_t hud_placements_kept;
+	/* (port) 1 when the HUD is Halo: CE Anniversary's, laid out by MCC on
+	a canvas twice the Xbox's 640x480 (its hud_globals remaps HUD bitmaps
+	to MCC's remastered ones: custom_edition_cache_convert), and the
+	placements, waypoint and damage indicator margins and digit metrics
+	brought to the Xbox's canvas; hud_draw.c draws what no placement scales
+	by it (custom_edition_cache_hud_mcc_canvas) */
+	int32_t hud_mcc_canvas;
+	int32_t hud_mcc_placements;
 	/* 1 when the multiplayer hint that a key shows the score was made to
 	name the Xbox button */
 	int32_t score_hint_converted;

@@ -333,6 +333,18 @@ starting with its placement */
 #define HUD_GLOBALS_GROUP_TAG 'hudg'
 #define HUD_GLOBALS_BYTES 0x450
 #define HUD_GLOBALS_MESSAGING_PLACEMENT_OFFSET 0x24
+/* (port) Halo: CE Anniversary's HUD (Invader's hud_globals.json and
+weapon_hud_interface.json): the waypoint arrows' distances from the
+window's edges (top, bottom, left, right: reals), the damage indicators'
+(int16s), and MCC's remaps of HUD bitmaps to its remastered ones, a block
+in what the Xbox's and Halo PC's tags leave as padding */
+#define HUD_GLOBALS_WAYPOINT_OFFSETS_OFFSET 0x120
+#define HUD_GLOBALS_WAYPOINT_OFFSET_COUNT 4
+#define HUD_GLOBALS_DAMAGE_OFFSETS_OFFSET 0x310
+#define HUD_GLOBALS_DAMAGE_OFFSET_COUNT 4
+#define HUD_GLOBALS_ANNIVERSARY_REMAPS_OFFSET 0x3F0
+#define HUD_GLOBALS_ANNIVERSARY_REMAP_BYTES 28
+#define HUD_GLOBALS_MAXIMUM_ANNIVERSARY_REMAPS 32
 /* the HUD digits, named by the first of the globals' interface bitmaps
 (Chimera's jason_jones_hacks.cpp): their bitmap, then their metrics in
 bytes (character width, screen width, x and y offset, decimal point and
@@ -4190,6 +4202,258 @@ static void weapon_hud_items_convert(
 	return;
 }
 
+/* (port) Halo: CE Anniversary's HUD. MCC lays the HUD out on a canvas
+twice the Xbox's 640x480, and its HUD tags are made for it: every offset in
+Ruby's Rebalanced Halo: CE's unit, weapon and grenade HUD interfaces and
+HUD globals (MCC's own, ui\hud\*) is twice the Xbox b30's (the shield panel
+meter 14,0 against 7,0, the grenade count 164,2 against 82,1, the HUD
+messages 0,130 against 0,60, the damage indicators 20 against 10), the
+digits' metrics are twice theirs, and the bitmaps the placements draw are
+four times the Xbox's with Halo PC's half HUD scale (hud_unit_backgrounds
+512x128 against 128x32, hud_reticles 512 against 128, the digits' sprites
+72x48 against 18x12). This build draws the Xbox's canvas, so such a HUD
+came out twice its size and pushed in from the corners. Its placements are
+brought to the Xbox's canvas here: the offset halved, and the size halved
+as well as by its bitmap's half HUD scale. MCC reads the high resolution
+scale flag (made for Halo PC's canvas: Halo PC halves the size) as an
+offset made for the Xbox's canvas, which it doubles (Invader's
+hud_interface.cpp), so such a placement keeps its offset, and the flag is
+cleared. (What no placement places, a scope's mask, the waypoint arrows,
+the damage indicators and the HUD messages' icons, hud_draw.c draws:
+hud_mcc_bitmap_scale.) */
+static void mcc_hud_placement_convert(
+	uint8_t *placement,
+	int bitmap_halves_scale,
+	struct custom_edition_conversion_report *report)
+{
+	uint16_t flags = read_u16(placement + HUD_PLACEMENT_SCALING_FLAGS_OFFSET);
+	float scale = bitmap_halves_scale ? 0.25f : 0.5f;
+
+	if (!flag_is_set(flags, HUD_SCALING_USE_HIGH_RESOLUTION_SCALE_BIT))
+	{
+		/* (MCC's offsets are even, but for the odd row of a motion sensor's
+		centre: 103 is 51, as the Xbox's 41 and its sensor's 10 make it) */
+		write_u16(placement + 0, (uint16_t)(read_s16(placement + 0) / 2));
+		write_u16(placement + 2, (uint16_t)(read_s16(placement + 2) / 2));
+	}
+	write_f32(placement + HUD_PLACEMENT_WIDTH_SCALE_OFFSET, read_f32(placement + HUD_PLACEMENT_WIDTH_SCALE_OFFSET) * scale);
+	write_f32(placement + HUD_PLACEMENT_HEIGHT_SCALE_OFFSET, read_f32(placement + HUD_PLACEMENT_HEIGHT_SCALE_OFFSET) * scale);
+	write_u16(
+		placement + HUD_PLACEMENT_SCALING_FLAGS_OFFSET,
+		(uint16_t)(flags & ~(1U << HUD_SCALING_USE_HIGH_RESOLUTION_SCALE_BIT)));
+	report->hud_mcc_placements++;
+
+	return;
+}
+
+/* the placement at `placement_offset` in each element of the block at
+`block`, drawing the bitmap `bitmap_offset` bytes after it (NO_HUD_BITMAP:
+none); `item_bitmap_halves_scale`: the items of a crosshair or overlay,
+whose bitmap is their element's */
+static void mcc_hud_placement_block_convert(
+	struct load_state const *state,
+	uint8_t const *block,
+	uint32_t element_bytes,
+	uint32_t placement_offset,
+	int32_t bitmap_offset,
+	int item_bitmap_halves_scale,
+	struct custom_edition_conversion_report *report)
+{
+	int32_t element_count;
+	uint32_t elements_offset;
+	int32_t element_index;
+
+	if (!loaded_block_get(block, tag_cache_address, state->used_bytes, element_bytes, &element_count, &elements_offset))
+	{
+		return;
+	}
+	for (element_index = 0; element_index < element_count; element_index++)
+	{
+		uint8_t *placement = state->tag_cache + elements_offset + (uint32_t)element_index * element_bytes + placement_offset;
+
+		mcc_hud_placement_convert(
+			placement,
+			bitmap_offset != NO_HUD_BITMAP ?
+				hud_bitmap_halves_scale(state, placement + bitmap_offset) :
+				item_bitmap_halves_scale,
+			report);
+	}
+
+	return;
+}
+
+/* the items of each crosshair or overlay in the block at `block` */
+static void mcc_weapon_hud_items_convert(
+	struct load_state const *state,
+	uint8_t const *block,
+	uint32_t item_bytes,
+	struct custom_edition_conversion_report *report)
+{
+	int32_t element_count;
+	uint32_t elements_offset;
+	int32_t element_index;
+
+	if (!loaded_block_get(
+		block,
+		tag_cache_address,
+		state->used_bytes,
+		WEAPON_HUD_CROSSHAIRS_OR_OVERLAYS_BYTES,
+		&element_count,
+		&elements_offset))
+	{
+		return;
+	}
+	for (element_index = 0; element_index < element_count; element_index++)
+	{
+		uint8_t const *element = state->tag_cache + elements_offset +
+			(uint32_t)element_index * WEAPON_HUD_CROSSHAIRS_OR_OVERLAYS_BYTES;
+
+		mcc_hud_placement_block_convert(
+			state,
+			element + WEAPON_HUD_ITEMS_OFFSET,
+			item_bytes,
+			0,
+			NO_HUD_BITMAP,
+			hud_bitmap_halves_scale(state, element + WEAPON_HUD_CROSSHAIRS_OR_OVERLAYS_BITMAP_OFFSET),
+			report);
+	}
+
+	return;
+}
+
+/* every placement of the HUD definition of group `group_tag` at `offset`,
+and the HUD globals' margins, brought to the Xbox's canvas */
+static void mcc_hud_placements_convert(
+	struct load_state const *state,
+	uint32_t group_tag,
+	uint32_t offset,
+	struct custom_edition_conversion_report *report)
+{
+	uint8_t *definition = state->tag_cache + offset;
+	size_t index;
+
+	switch (group_tag)
+	{
+	case UNIT_HUD_INTERFACE_GROUP_TAG:
+		for (index = 0; index < sizeof(unit_hud_interface_elements) / sizeof(unit_hud_interface_elements[0]); index++)
+		{
+			uint8_t *placement = definition + unit_hud_interface_elements[index];
+
+			mcc_hud_placement_convert(placement, hud_bitmap_halves_scale(state, placement + HUD_ELEMENT_BITMAP_OFFSET), report);
+		}
+		mcc_hud_placement_convert(definition + UNIT_HUD_INTERFACE_BLIPS_OFFSET, 0, report);
+		mcc_hud_placement_block_convert(state, definition + UNIT_HUD_INTERFACE_AUXILIARY_OVERLAYS_OFFSET,
+			UNIT_HUD_INTERFACE_AUXILIARY_OVERLAY_BYTES, 0, HUD_ELEMENT_BITMAP_OFFSET, 0, report);
+		mcc_hud_placement_block_convert(state, definition + UNIT_HUD_INTERFACE_AUXILIARY_METERS_OFFSET,
+			UNIT_HUD_INTERFACE_AUXILIARY_METER_BYTES, UNIT_HUD_INTERFACE_AUXILIARY_METER_BACKGROUND_OFFSET,
+			HUD_ELEMENT_BITMAP_OFFSET, 0, report);
+		mcc_hud_placement_block_convert(state, definition + UNIT_HUD_INTERFACE_AUXILIARY_METERS_OFFSET,
+			UNIT_HUD_INTERFACE_AUXILIARY_METER_BYTES, UNIT_HUD_INTERFACE_AUXILIARY_METER_METER_OFFSET,
+			HUD_ELEMENT_BITMAP_OFFSET, 0, report);
+		break;
+	case WEAPON_HUD_INTERFACE_GROUP_TAG:
+		mcc_hud_placement_block_convert(state, definition + WEAPON_HUD_INTERFACE_STATICS_OFFSET,
+			WEAPON_HUD_STATIC_OR_METER_BYTES, WEAPON_HUD_ELEMENT_PLACEMENT_OFFSET, HUD_ELEMENT_BITMAP_OFFSET, 0, report);
+		mcc_hud_placement_block_convert(state, definition + WEAPON_HUD_INTERFACE_METERS_OFFSET,
+			WEAPON_HUD_STATIC_OR_METER_BYTES, WEAPON_HUD_ELEMENT_PLACEMENT_OFFSET, HUD_ELEMENT_BITMAP_OFFSET, 0, report);
+		/* (a number's digits are the HUD digits', drawn at a size of their
+		own: mcc_hud_digits_convert, hud_draw_numbers) */
+		mcc_hud_placement_block_convert(state, definition + WEAPON_HUD_INTERFACE_NUMBERS_OFFSET,
+			WEAPON_HUD_NUMBER_BYTES, WEAPON_HUD_ELEMENT_PLACEMENT_OFFSET, NO_HUD_BITMAP, 0, report);
+		mcc_weapon_hud_items_convert(state, definition + WEAPON_HUD_INTERFACE_CROSSHAIRS_OFFSET, WEAPON_HUD_CROSSHAIR_ITEM_BYTES, report);
+		mcc_weapon_hud_items_convert(state, definition + WEAPON_HUD_INTERFACE_OVERLAYS_OFFSET, WEAPON_HUD_OVERLAY_ITEM_BYTES, report);
+		break;
+	case GRENADE_HUD_INTERFACE_GROUP_TAG:
+		for (index = 0; index < sizeof(grenade_hud_interface_elements) / sizeof(grenade_hud_interface_elements[0]); index++)
+		{
+			uint8_t *placement = definition + grenade_hud_interface_elements[index];
+
+			mcc_hud_placement_convert(placement, hud_bitmap_halves_scale(state, placement + HUD_ELEMENT_BITMAP_OFFSET), report);
+		}
+		mcc_hud_placement_convert(definition + GRENADE_HUD_INTERFACE_NUMBERS_OFFSET, 0, report);
+		mcc_hud_placement_block_convert(state, definition + GRENADE_HUD_INTERFACE_OVERLAY_ITEMS_OFFSET,
+			WEAPON_HUD_OVERLAY_ITEM_BYTES, 0, NO_HUD_BITMAP,
+			hud_bitmap_halves_scale(state, definition + GRENADE_HUD_INTERFACE_OVERLAY_BITMAP_OFFSET), report);
+		break;
+	case HUD_GLOBALS_GROUP_TAG:
+		mcc_hud_placement_convert(definition + HUD_GLOBALS_MESSAGING_PLACEMENT_OFFSET, 0, report);
+		for (index = 0; index < HUD_GLOBALS_WAYPOINT_OFFSET_COUNT; index++)
+		{
+			uint8_t *margin = definition + HUD_GLOBALS_WAYPOINT_OFFSETS_OFFSET + index * 4;
+
+			write_f32(margin, read_f32(margin) * 0.5f);
+		}
+		for (index = 0; index < HUD_GLOBALS_DAMAGE_OFFSET_COUNT; index++)
+		{
+			uint8_t *margin = definition + HUD_GLOBALS_DAMAGE_OFFSETS_OFFSET + index * 2;
+
+			write_u16(margin, (uint16_t)(read_s16(margin) / 2));
+		}
+		break;
+	default:
+		break;
+	}
+
+	return;
+}
+
+/* the metrics of the HUD digits (any hud_number tag) halved, as
+hud_digits_halve halves them: their spacing on MCC's canvas; their size
+hud_draw_numbers halves */
+static void mcc_hud_digits_convert(
+	uint8_t *digits)
+{
+	int metric;
+
+	for (metric = 0; metric < HUD_NUMBER_METRIC_COUNT; metric++)
+	{
+		int value = (int8_t)digits[HUD_NUMBER_METRICS_OFFSET + metric];
+
+		digits[HUD_NUMBER_METRICS_OFFSET + metric] = (uint8_t)(value >= 0 ? (value + 1) / 2 : value / 2);
+	}
+
+	return;
+}
+
+/* whether the map's HUD is Halo: CE Anniversary's: a HUD globals tag
+remapping HUD bitmaps to MCC's remastered ones (Invader's "anniversary hud
+remaps", MCC's alone: the Xbox's and Halo PC's tags leave the block's
+place as padding, zero; each of Ruby's Rebalanced Halo: CE's ten maps has
+14 of them, natively and rebuilt by port/tools/mcc_map_convert.py, whose
+Invader keeps them) */
+static int hud_globals_mcc_canvas(
+	struct load_state const *state)
+{
+	int32_t tag_count;
+	uint8_t const *instances = loaded_tag_instances(state, &tag_count);
+	int32_t tag_index;
+
+	for (tag_index = 0; instances && tag_index < tag_count; tag_index++)
+	{
+		uint8_t const *instance = instances + (uint32_t)tag_index * TAG_INSTANCE_BYTES;
+		uint32_t offset;
+		int32_t remap_count;
+		uint32_t remaps_offset;
+
+		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) == HUD_GLOBALS_GROUP_TAG &&
+			tag_cache_offset(state, read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET), HUD_GLOBALS_BYTES, &offset) &&
+			loaded_block_get(
+				state->tag_cache + offset + HUD_GLOBALS_ANNIVERSARY_REMAPS_OFFSET,
+				tag_cache_address,
+				state->used_bytes,
+				HUD_GLOBALS_ANNIVERSARY_REMAP_BYTES,
+				&remap_count,
+				&remaps_offset) &&
+			remap_count > 0 &&
+			remap_count <= HUD_GLOBALS_MAXIMUM_ANNIVERSARY_REMAPS)
+		{
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 /* the size of a HUD definition whose placements hud_placements_convert
 converts, or 0 for any other group */
 static uint32_t hud_definition_bytes(
@@ -4220,6 +4484,11 @@ static void hud_placements_convert(
 	uint8_t *definition = state->tag_cache + offset;
 	size_t index;
 
+	if (report->hud_mcc_canvas)
+	{
+		mcc_hud_placements_convert(state, group_tag, offset, report);
+		return;
+	}
 	switch (group_tag)
 	{
 	case UNIT_HUD_INTERFACE_GROUP_TAG:
@@ -4643,6 +4912,7 @@ enum cache_file_status custom_edition_cache_convert(
 	{
 		hud_digits_halve(&state);
 	}
+	report->hud_mcc_canvas = hud_globals_mcc_canvas(&state);
 	for (tag_index = 0; tag_index < tag_count; tag_index++)
 	{
 		uint8_t const *instance = instances + (uint32_t)tag_index * TAG_INSTANCE_BYTES;
@@ -4682,6 +4952,12 @@ enum cache_file_status custom_edition_cache_convert(
 			tag_cache_offset(&state, read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET), hud_definition_bytes(group_tag), &offset))
 		{
 			hud_placements_convert(&state, group_tag, offset, report);
+		}
+		if (group_tag == HUD_NUMBER_GROUP_TAG &&
+			report->hud_mcc_canvas &&
+			tag_cache_offset(&state, read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET), HUD_NUMBER_BYTES, &offset))
+		{
+			mcc_hud_digits_convert(tag_cache + offset);
 		}
 		if (group_tag == UNICODE_STRING_LIST_GROUP_TAG &&
 			!strcmp(custom_edition_cache_tag_name(tag_cache, loaded_bytes, tag_index), MULTIPLAYER_GAME_TEXT_NAME) &&

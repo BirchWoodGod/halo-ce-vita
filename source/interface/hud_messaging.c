@@ -145,6 +145,9 @@ symbols in this file:
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#ifdef HALO_LINUX
+#include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#endif
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -579,6 +582,48 @@ static void render_state_bitmap(
 		(struct bitmap_data *)bitmap, FALSE, TRUE))
 	{
 		scale = local_player_count() > 1 ? 0.75f : 1.0f;
+#ifdef HALO_LINUX
+		/* port: Halo: CE Anniversary's icons, their offsets made for MCC's
+		canvas twice the Xbox's and their bitmap four times the Xbox's with
+		Halo PC's half HUD scale, drawn at the Xbox's size and spaced as the
+		Xbox's are (hud_draw.c hud_mcc_bitmap_scale) */
+		if (custom_edition_cache_hud_mcc_canvas())
+		{
+			real canvas_scale = scale * hud_mcc_bitmap_scale(NONE, TRUE);
+			real bitmap_scale = scale * hud_mcc_bitmap_scale(bitmap_group_index, TRUE);
+
+			point.x = (short)(icon->offset.x * canvas_scale + cursor_bounds->x0);
+			point.y = (short)(cursor_bounds->y1 - icon->offset.y * canvas_scale);
+#ifdef HALO_VITA
+			if (face_icon == NONE || face_icon >= button_icon_count || !hud_vita_glyph_draw(
+				glyph,
+				bitmap,
+				_hud_corner_bottom_left,
+				&point,
+				clip,
+				bitmap_scale,
+				TEST_FLAG(button_icons[face_icon].flags, _hud_icon_use_color_bit) ? button_icons[face_icon].color : color))
+#endif
+			hud_draw_bitmap_direct(
+				bitmap,
+				_hud_corner_bottom_left,
+				&point,
+				clip,
+				bitmap_scale,
+				0.0f,
+				TEST_FLAG(icon->flags, _hud_icon_use_color_bit) ? icon->color : color,
+				FALSE);
+			if (TEST_FLAG(icon->flags, _hud_icon_absolute_width_bit))
+				cursor_bounds->x0 = (short)(icon->width_offset * canvas_scale + point.x);
+			else
+			{
+				cursor_bounds->x0 = (short)(
+					(clip ? clip->x1 - clip->x0 : 1.0f) * bitmap_placed_width(bitmap) * bitmap_scale +
+					icon->width_offset * canvas_scale + point.x);
+			}
+			return;
+		}
+#endif
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale);
 #ifdef HALO_VITA

@@ -382,6 +382,8 @@ static int report_custom_edition_cache(
 				conversion.sound_permutations_halved);
 			printf("hud_placements_rescaled: %" PRId32 "\n", conversion.hud_placements_rescaled);
 			printf("hud_placements_kept: %" PRId32 "\n", conversion.hud_placements_kept);
+			printf("hud_mcc_canvas: %" PRId32 " (%" PRId32 " placements)\n", conversion.hud_mcc_canvas,
+				conversion.hud_mcc_placements);
 			printf("score_hint_converted: %" PRId32 "\n", conversion.score_hint_converted);
 			printf("widget_functions_cleared: %" PRId32 "\n", conversion.widget_functions_cleared);
 			printf("pause_menu_trimmed: %" PRId32 "\n", conversion.pause_menu_trimmed);

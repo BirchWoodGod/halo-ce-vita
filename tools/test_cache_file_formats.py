@@ -317,8 +317,8 @@ def add_shader(blob, group, options):
     return shader
 
 
-def add_hud_placement(blob, placement, scale, flags):
-    struct.pack_into("<ff", blob.bytes, placement + 4 - blob.base, *scale)
+def add_hud_placement(blob, placement, scale, flags, offset=(0, 0)):
+    struct.pack_into("<hhff", blob.bytes, placement - blob.base, *offset, *scale)
     blob.u16(placement + 0x0C, flags)
 
 
@@ -377,6 +377,39 @@ def add_weapon_hud(blob, placements, bitmap_index=None):
         blob.u32(statics + 0x48 + 0x0C, bitmap_index)
         blob.u32(crosshairs + 0x24 + 0x0C, bitmap_index)
     return hud
+
+
+HUD_GLOBALS_REFERENCES = (0x48, 0x58, 0x94, 0xA4, 0xB4, 0xF0, 0x150, 0x2C0, 0x338, 0x3C8, 0x3E0)
+
+
+def add_hud_globals(blob, remap_count):
+    """HUD globals laid out on Halo: CE Anniversary's canvas (twice the
+    Xbox's): the messages at 0,130, the waypoint arrows 70 and 100 from the
+    window's edges, the damage indicators 20; and `remap_count` of MCC's
+    remaps of HUD bitmaps to its remastered ones (at 0x3F0), which mark such
+    a HUD."""
+    hud = blob.reserve(0x450)
+    for reference in HUD_GLOBALS_REFERENCES:
+        blob.u32(hud + reference + 0x0C, NONE)
+    struct.pack_into("<hh", blob.bytes, hud + 0x24 - blob.base, 0, 130)
+    struct.pack_into("<4f", blob.bytes, hud + 0x120 - blob.base, 70.0, 70.0, 100.0, 100.0)
+    struct.pack_into("<4h", blob.bytes, hud + 0x310 - blob.base, 20, 20, 20, 20)
+    if remap_count:
+        remaps = blob.reserve(max(remap_count, 1) * 28)
+        for index in range(remap_count):
+            blob.u32(remaps + index * 28 + 0x0C, NONE)
+        blob.block(hud + 0x3F0, remap_count, remaps)
+    return hud
+
+
+def add_hud_digits(blob):
+    """HUD digits (a hud_number) whose metrics are Halo: CE Anniversary's,
+    twice the Xbox's: digit 24, screen 18, x 2, y 0, decimal point and colon
+    12."""
+    digits = blob.reserve(0x64)
+    blob.u32(digits + 0x0C, NONE)
+    blob.put(digits + 0x10, struct.pack("<6b", 24, 18, 2, 0, 12, 12))
+    return digits
 
 
 def add_animation_graph(blob, overlay_animation_index):
@@ -449,7 +482,7 @@ class Map:
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, hud_bitmap_flags=None, strings_name="test\\strings", strings=("hello", "world!"),
                  weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False,
-                 tag_space=None, in_map_bitmap=None):
+                 tag_space=None, in_map_bitmap=None, mcc_hud=None):
         self.bsp_sizes = bsp_sizes
         # the tag space the structure BSPs are placed at the top of (Invader's
         # --tag-space), without OpenSauce's header
@@ -473,6 +506,9 @@ class Map:
         self.script_nodes = script_nodes
         self.weapon_hud = weapon_hud
         self.hud_bitmap_flags = hud_bitmap_flags
+        # HUD globals and digits on Halo: CE Anniversary's canvas, with this
+        # many of MCC's HUD bitmap remaps (0: none, a HUD of Halo PC's)
+        self.mcc_hud = mcc_hud
         # Halo PC's multiplayer pause menu: its list and four buttons
         self.pause_menu = pause_menu
         self.weapon_function_modes = weapon_function_modes
@@ -536,6 +572,8 @@ class Map:
             tags.append(("antr", "test\\animations", False))
         if self.weapon_hud is not None:
             tags.append(("wphi", "test\\weapon hud", False))
+        if self.mcc_hud is not None:
+            tags += [("hudg", "test\\hud globals", False), ("hud#", "test\\digits", False)]
         if self.pause_menu:
             tags += [("DeLa", PAUSE_LIST, False)] + [("DeLa", PAUSE_FOLDER + button, False) for button, _, _ in PAUSE_BUTTONS]
         # further structure BSPs go last, so the indices above never move
@@ -641,6 +679,9 @@ class Map:
                 tag_data.u16(address_of["test\\in map bitmap"] + 6, self.hud_bitmap_flags)
                 hud_bitmap_index = [name for _, name, _ in tags].index("test\\in map bitmap")
             address_of["test\\weapon hud"] = add_weapon_hud(tag_data, self.weapon_hud, hud_bitmap_index)
+        if self.mcc_hud is not None:
+            address_of["test\\hud globals"] = add_hud_globals(tag_data, self.mcc_hud)
+            address_of["test\\digits"] = add_hud_digits(tag_data)
         if self.script_nodes is not None:
             add_script_nodes(tag_data, scenario, *self.script_nodes)
         if self.pause_menu:
@@ -1324,6 +1365,58 @@ def test_hud_elements_drawing_a_halo_pc_half_scale_bitmap_are_halved(report_tool
     assert (f32_at(tags, statics + 0x28), f32_at(tags, statics + 0x2C), u16_at(tags, statics + 0x30)) == (0.5, 0.25, 1)
     assert (f32_at(tags, statics + 0xB4 + 0x28), u16_at(tags, statics + 0xB4 + 0x30)) == (1.0, 1)
     assert (f32_at(tags, items + 4), f32_at(tags, items + 8)) == (1.0, 1.0)
+
+
+def placement_at(tags, address):
+    """A placement's offset, scale and scaling flags."""
+    return (struct.unpack_from("<hh", tags, address - BASE), (f32_at(tags, address + 4), f32_at(tags, address + 8)),
+            u16_at(tags, address + 0x0C))
+
+
+def test_mcc_hud_is_brought_to_the_xboxs_canvas(report_tool, tmp_path):
+    """Halo: CE Anniversary's HUD (its globals remap HUD bitmaps to MCC's
+    remastered ones) is laid out on a canvas twice the Xbox's: offsets
+    halved, sizes halved and halved again by the bitmap's half HUD scale; a
+    placement with the high resolution scale flag keeps its offset (MCC
+    doubles it) and loses the flag; the HUD globals' margins and the digits'
+    metrics are halved too."""
+    cache = Map(weapon_hud=[((1.0, 1.0), 0, (14, -6)), ((1.0, 1.0), 4, (14, 44)), ((1.0, 1.0), 0, (0, 121))],
+                hud_bitmap_flags=1 << 4, mcc_hud=1)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["hud_mcc_canvas"] == "1 (4 placements)"
+    assert report["hud_placements_rescaled"] == "0" and report["hud_placements_kept"] == "0"
+    hud = cache.addresses["test\\weapon hud"]
+    statics = u32_at(tags, hud + 0x64)
+    items = u32_at(tags, u32_at(tags, hud + 0x88) + 0x38)
+    assert placement_at(tags, statics + 0x24) == ((7, -3), (0.25, 0.25), 0)
+    assert placement_at(tags, statics + 0xB4 + 0x24) == ((14, 44), (0.5, 0.5), 0)
+    assert placement_at(tags, items) == ((0, 60), (0.25, 0.25), 0)
+    globals_ = cache.addresses["test\\hud globals"]
+    assert struct.unpack_from("<hh", tags, globals_ + 0x24 - BASE) == (0, 65)
+    assert struct.unpack_from("<4f", tags, globals_ + 0x120 - BASE) == (35.0, 35.0, 50.0, 50.0)
+    assert struct.unpack_from("<4h", tags, globals_ + 0x310 - BASE) == (10, 10, 10, 10)
+    assert struct.unpack_from("<6b", tags, cache.addresses["test\\digits"] + 0x10 - BASE) == (12, 9, 1, 0, 6, 6)
+
+
+@pytest.mark.parametrize("remaps", [0, 33], ids=["no remaps", "more remaps than MCC's 32"])
+def test_hud_without_mccs_remaps_is_halo_pcs(report_tool, tmp_path, remaps):
+    """HUD globals without MCC's remaps (the Xbox's and Halo PC's leave the
+    place zero), or with more than MCC allows, are not Halo: CE
+    Anniversary's: Halo PC's high resolution scale is converted as before,
+    and nothing else moves."""
+    cache = Map(weapon_hud=[((1.0, 0.5), 4 | 1, (14, -6)), ((1.0, 1.0), 1), ((2.0, 2.0), 4, (0, 121))], mcc_hud=remaps)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["hud_mcc_canvas"] == "0 (0 placements)"
+    assert report["hud_placements_rescaled"] == "1" and report["hud_placements_kept"] == "1"
+    hud = cache.addresses["test\\weapon hud"]
+    statics = u32_at(tags, hud + 0x64)
+    items = u32_at(tags, u32_at(tags, hud + 0x88) + 0x38)
+    assert placement_at(tags, statics + 0x24) == ((14, -6), (0.5, 0.25), 1)
+    assert placement_at(tags, items) == ((0, 121), (2.0, 2.0), 4)
+    globals_ = cache.addresses["test\\hud globals"]
+    assert struct.unpack_from("<hh", tags, globals_ + 0x24 - BASE) == (0, 130)
+    assert struct.unpack_from("<4h", tags, globals_ + 0x310 - BASE) == (20, 20, 20, 20)
+    assert struct.unpack_from("<6b", tags, cache.addresses["test\\digits"] + 0x10 - BASE) == (24, 18, 2, 0, 12, 12)
 
 
 @pytest.mark.parametrize("name, tags_checksum, listed", [
