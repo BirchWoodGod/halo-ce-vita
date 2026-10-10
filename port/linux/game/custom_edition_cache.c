@@ -1285,8 +1285,23 @@ boolean custom_edition_cache_refuse(
 	boolean fatal)
 {
 	int has_opensauce_header;
+	enum cache_file_format format = cache_file_header_format(header, &has_opensauce_header);
 
-	if (cache_file_header_format(header, &has_opensauce_header) != _cache_file_format_custom_edition_cache)
+	/* (port) a Halo: CE Anniversary map anywhere but a mod's folder (one in
+	the maps folder, where map sharing writes): refused, as a damaged map is
+	(the menu says so: halo_map_load_refused), never stopping a debug build,
+	whatever the file */
+	if (format == _cache_file_format_mcc_cea_cache)
+	{
+		csprintf(
+			temporary,
+			"'%.96s' is a Halo: CE Anniversary map (build %.31s): this build plays one only from a mod's folder, offline (docs/mcc_cea_maps.md)",
+			scenario_name,
+			build);
+		error(_error_silent, "%s", temporary);
+		return TRUE;
+	}
+	if (format != _cache_file_format_custom_edition_cache)
 	{
 		return FALSE;
 	}
