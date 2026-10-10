@@ -338,6 +338,14 @@ static struct
 	bot (a lookup of the environment and the settings, twice a bot a tick
 	before) */
 	short skill;
+	/* CTF: the flags (weapon_is_flag) among the weapons, in the objects'
+	order, found once a tick when a bot first asks (every bot walked every
+	weapon for them every tick before); nothing a bot does in its tick makes
+	or deletes an object */
+	boolean flags_found;
+	boolean flags_overflow;
+	long flag_count;
+	long flag_indices[8];
 	/* the path searches (allocated once a game has bots) */
 	struct bots_search *search_slots;
 
@@ -2282,6 +2290,43 @@ static boolean bots_ctf_stand(long team_index, real_point3d *position)
 	return FALSE;
 }
 
+/* the flags among the weapons (weapon_is_flag: CTF's flags), in the objects'
+order: found by the first bot to ask in a tick, the same for the others;
+FALSE when there are more than kept (the weapons are walked then) */
+static boolean bots_ctf_flags(void)
+{
+	if (!bots_globals.flags_found)
+	{
+		struct object_iterator iterator;
+
+		bots_globals.flags_found = TRUE;
+		bots_globals.flags_overflow = FALSE;
+		bots_globals.flag_count = 0;
+		object_iterator_new(&iterator, _object_mask_weapon, 0);
+		while (object_iterator_next(&iterator))
+		{
+			if (!weapon_is_flag(iterator.index))
+				continue;
+			if (bots_globals.flag_count >= (long)NUMBEROF(bots_globals.flag_indices))
+			{
+				bots_globals.flags_overflow = TRUE;
+				break;
+			}
+			bots_globals.flag_indices[bots_globals.flag_count++] = iterator.index;
+		}
+	}
+	return !bots_globals.flags_overflow;
+}
+
+/* the next flag (bots_ctf_flags) from *position on, or the next weapon
+when they were too many; NONE after the last */
+static long bots_ctf_next_flag(struct object_iterator *iterator, long *position)
+{
+	if (bots_globals.flags_overflow)
+		return object_iterator_next(iterator) ? iterator->index : NONE;
+	return *position < bots_globals.flag_count ? bots_globals.flag_indices[(*position)++] : NONE;
+}
+
 /* CTF's own goals: carrying the enemy flag, its team's stand (bots_ctf_stand:
 the HUD's nav point is beside it, and a capture needs the carrier on it),
 or, where a capture needs its own flag home (the variant's flag at home to
@@ -2300,12 +2345,14 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 	long surface_index;
 	struct object_iterator iterator;
 	long chase_index = NONE, escort_index = NONE;
+	long flag_index, flag_position = 0;
 
 	if (game_engine_get_variant()->game_engine_index != game_engine_ctf ||
 		!bots_ctf_stand(player->team_index, &stand))
 	{
 		return FALSE;
 	}
+	bots_ctf_flags();
 	if (weapon_index != NONE && weapon_is_flag(weapon_index))
 	{
 		/* (its own flag carried off where a capture needs it home - the
@@ -2314,11 +2361,12 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 		struct ctf_variant const *rules = &game_engine_get_variant()->game_engine_variant.ctf;
 
 		object_iterator_new(&iterator, _object_mask_weapon, 0);
-		while (rules->flag_at_home_to_score && rules->single_flag_time == 0 && object_iterator_next(&iterator))
+		while (rules->flag_at_home_to_score && rules->single_flag_time == 0 &&
+			(flag_index = bots_ctf_next_flag(&iterator, &flag_position)) != NONE)
 		{
-			struct weapon_datum *flag = weapon_get(iterator.index);
+			struct weapon_datum *flag = weapon_get(flag_index);
 
-			if (weapon_is_flag(iterator.index) && flag->object.owner_team_index == player->team_index &&
+			if (weapon_is_flag(flag_index) && flag->object.owner_team_index == player->team_index &&
 				flag->object.parent_object_index != NONE &&
 				object_try_and_get_and_verify_type(flag->object.parent_object_index, _object_mask_unit))
 			{
@@ -2338,11 +2386,12 @@ static boolean bots_ctf_goal(struct bots_bot *bot, struct player_datum *player, 
 		return TRUE;
 	}
 	object_iterator_new(&iterator, _object_mask_weapon, 0);
-	while (object_iterator_next(&iterator))
+	flag_position = 0;
+	while ((flag_index = bots_ctf_next_flag(&iterator, &flag_position)) != NONE)
 	{
-		struct weapon_datum *flag = weapon_get(iterator.index);
+		struct weapon_datum *flag = weapon_get(flag_index);
 
-		if (!weapon_is_flag(iterator.index))
+		if (!weapon_is_flag(flag_index))
 			continue;
 		if (flag->object.parent_object_index != NONE)
 		{
@@ -3259,6 +3308,7 @@ void bots_update_actions(struct player_action *actions)
 	started = vita_host_time_us();
 	bots_profile_enabled();
 	bots_globals.skill = bots_skill();
+	bots_globals.flags_found = FALSE;
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
 	{
