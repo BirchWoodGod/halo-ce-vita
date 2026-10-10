@@ -200,6 +200,7 @@ reconnects a light it believes disconnected (the assertion at 0x4F9) */
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include <stdlib.h>
+#include <string.h>
 #include "cache/cache_files.h"
 #include "game/players.h"
 void platform_log(const char *format, ...);
@@ -2132,6 +2133,123 @@ void lights_render_specular(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_LIGHT_CLUSTER_CACHE (1, the default; 0 off; 2 verify): the
+clusters each light's bounding sphere was last found to span, kept by the
+light. A weapon's, a unit's or a vehicle's lights are taken out of their
+clusters and put back every tick their object's lighting is recomputed
+(objects.c, object_connect_lights: ~250 a tick in a 15-bot Blood Gulch),
+moved or not, each with a walk of the structure's portals from its cluster
+(structure_clusters_in_sphere, through cluster_partition_reconnect). That
+walk's answer is a function of the structure bsp, the cluster it starts in,
+the sphere's center and its radius alone, so a light put back with all four
+as when it was last put back (bit for bit; the bsp by
+halo_structure_bsp_generation) spans the clusters it spanned then, in the
+same order, and is put back into them without the walk; anything else walks
+as before, and its answer is kept. The lists are changed as before (each
+light taken out and added last), so every walk of a cluster's lights finds
+them in the same order. Verify walks a kept answer again and compares it
+(light_cluster_cache_mismatches, said in halo.log). */
+enum
+{
+	/* by the light's absolute index (the local game's 896 lights mostly fit) */
+	LIGHT_CLUSTER_CACHE_ENTRIES = 1024,
+	/* the most clusters an answer kept spans (one spanning more walks) */
+	LIGHT_CLUSTER_CACHE_CLUSTERS = 12
+};
+
+struct light_cluster_cache_entry
+{
+	long light_index;
+	unsigned long structure_bsp_generation;
+	real_point3d position;
+	real radius;
+	short location_cluster_index;
+	short cluster_count;
+	short cluster_indices[LIGHT_CLUSTER_CACHE_CLUSTERS];
+};
+
+/* (lines_profile.c: HALO_TICK_PROFILE) */
+unsigned long light_cluster_cache_hits, light_cluster_cache_misses, light_cluster_cache_mismatches;
+
+static short light_clusters_in_sphere(
+	long light_index,
+	real_point3d const *position,
+	real radius,
+	struct location const *location,
+	short *cluster_indices)
+{
+	extern unsigned long halo_structure_bsp_generation;
+	static int mode = -1;
+	static struct light_cluster_cache_entry *entries;
+	struct light_cluster_cache_entry *entry;
+	short cluster_count;
+
+	if (mode < 0)
+	{
+		char const *setting = getenv("HALO_LIGHT_CLUSTER_CACHE");
+
+		mode = setting && *setting ? atoi(setting) : 1;
+		if (mode)
+		{
+			entries = (struct light_cluster_cache_entry *)calloc(LIGHT_CLUSTER_CACHE_ENTRIES, sizeof(*entries));
+			if (!entries)
+				mode = 0;
+		}
+	}
+	if (!mode)
+		return cluster_partition_clusters_in_sphere(position, radius, location, cluster_indices);
+
+	entry = &entries[DATUM_INDEX_TO_ABSOLUTE_INDEX(light_index) % LIGHT_CLUSTER_CACHE_ENTRIES];
+	if (entry->light_index == light_index &&
+		entry->structure_bsp_generation == halo_structure_bsp_generation &&
+		entry->location_cluster_index == location->cluster_index &&
+		!memcmp(&entry->position, position, sizeof(entry->position)) &&
+		!memcmp(&entry->radius, &radius, sizeof(entry->radius)))
+	{
+		light_cluster_cache_hits++;
+		csmemcpy(cluster_indices, entry->cluster_indices, entry->cluster_count * sizeof(*cluster_indices));
+		cluster_count = entry->cluster_count;
+		if (mode == 2)
+		{
+			short walked_indices[CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS];
+			short walked_count = cluster_partition_clusters_in_sphere(position, radius, location, walked_indices);
+
+			if (walked_count != cluster_count ||
+				memcmp(walked_indices, cluster_indices, cluster_count * sizeof(*cluster_indices)))
+			{
+				if (light_cluster_cache_mismatches++ < 8)
+				{
+					platform_log("light cluster cache: light 0x%08lx kept %d clusters, the walk found %d",
+						(unsigned long)light_index, (int)cluster_count, (int)walked_count);
+				}
+				csmemcpy(cluster_indices, walked_indices, walked_count * sizeof(*cluster_indices));
+				cluster_count = walked_count;
+			}
+		}
+		return cluster_count;
+	}
+
+	light_cluster_cache_misses++;
+	cluster_count = cluster_partition_clusters_in_sphere(position, radius, location, cluster_indices);
+	if (cluster_count <= LIGHT_CLUSTER_CACHE_CLUSTERS)
+	{
+		entry->light_index = light_index;
+		entry->structure_bsp_generation = halo_structure_bsp_generation;
+		entry->position = *position;
+		entry->radius = radius;
+		entry->location_cluster_index = location->cluster_index;
+		entry->cluster_count = cluster_count;
+		csmemcpy(entry->cluster_indices, cluster_indices, cluster_count * sizeof(*cluster_indices));
+	}
+	else
+	{
+		entry->light_index = NONE;
+	}
+	return cluster_count;
+}
+#endif
+
 void light_reconnect_to_map(
 	long light_index)
 {
@@ -2185,6 +2303,24 @@ void light_reconnect_to_map(
 		{
 			scenario_location_from_point(&location, &position);
 		}
+#ifdef HALO_LINUX
+		/* (port) cluster_partition_reconnect, the clusters the light's
+		sphere spans kept while it stays (light_clusters_in_sphere) */
+		{
+			short cluster_indices[CLUSTER_PARTITION_MAXIMUM_SPHERE_CLUSTERS];
+			short cluster_count;
+
+			HALO_OBJECTS_PHASE_PUSH(_objects_phase_map);
+			cluster_count = light_clusters_in_sphere(light_index, &position, radius, &location, cluster_indices);
+			cluster_partition_reconnect_to_clusters(
+				&light_cluster_partition,
+				light_index,
+				&light->cluster_reference,
+				cluster_count,
+				cluster_indices);
+			HALO_OBJECTS_PHASE_POP();
+		}
+#else
 		cluster_partition_reconnect(
 			&light_cluster_partition,
 			light_index,
@@ -2192,6 +2328,7 @@ void light_reconnect_to_map(
 			&position,
 			radius,
 			&location);
+#endif
 		LIGHT_SET_FLAG(light, _point_light_connected_to_map_bit, TRUE);
 	}
 

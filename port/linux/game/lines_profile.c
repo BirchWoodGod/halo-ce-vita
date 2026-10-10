@@ -13,7 +13,9 @@ sight (ai.c: ai_test_line_of_sight, run by the tick between two game frames;
 its calls, the rays they cast, the share of those that met an object or the
 structure, and the extra lines of the expanded modes), with the collision
 tests' cluster walks: how many a frame, and how many found their cluster's
-table of objects and types (cluster_object_types.c), and the AI's firing
+table of objects and types (cluster_object_types.c), the lights put back
+in their clusters and how many found the clusters they span kept
+(object_lights.c, light_clusters_in_sphere), and the AI's firing
 position selections (actor_firing_position.c: actor_select_firing_position,
 run by the tick when an actor's timeslice comes up or it begins to flee or
 guard; a frame, with the positions they considered and the lines of sight
@@ -42,6 +44,8 @@ void platform_log(const char *format, ...);
 extern unsigned long obstruction_memo_hits, obstruction_memo_misses;
 /* (cluster_object_types.c) the collision walks' cluster tables found, and made */
 extern unsigned long cluster_object_types_found, cluster_object_types_made;
+/* (object_lights.c) the lights' clusters found kept, and walked */
+extern unsigned long light_cluster_cache_hits, light_cluster_cache_misses;
 
 /* ---------- globals */
 
@@ -80,7 +84,8 @@ void halo_lines_profile_step(int step, unsigned long long started)
 void halo_lines_profile_frame(void)
 {
 	static unsigned long points_seen, point_hits_seen, memo_hits_seen, memo_misses_seen, tables_found_seen, tables_made_seen;
-	unsigned long points, point_hits, memo_hits, memo_misses, tables_found, tables_made;
+	static unsigned long light_hits_seen, light_misses_seen;
+	unsigned long points, point_hits, memo_hits, memo_misses, tables_found, tables_made, light_hits, light_misses;
 	double frames;
 	int step;
 
@@ -97,11 +102,13 @@ void halo_lines_profile_frame(void)
 	memo_misses = obstruction_memo_misses - memo_misses_seen;
 	tables_found = cluster_object_types_found - tables_found_seen;
 	tables_made = cluster_object_types_made - tables_made_seen;
+	light_hits = light_cluster_cache_hits - light_hits_seen;
+	light_misses = light_cluster_cache_misses - light_misses_seen;
 	platform_log("lines-profile (ms/frame): particles %.3f (%.0f live) contrails %.3f particle_systems %.3f widgets %.3f "
 		"game_sound %.3f rest %.3f | obstruction rays %.3f: %.1f calls, %.1f same tick, %.1f reused, %.1f rays "
 		"(%.0f%% met something, %.0f%% of their structure tests as before) a frame | point physics: %.1f leaf lookups a frame, %.0f%% from a known cell"
 		" | ai line of sight %.3f: %.1f calls, %.1f rays (%.0f%% met an object, %.0f%% the structure), %.1f extra lines a frame"
-		" | cluster walks %.1f a frame, %.0f%% from a kept table"
+		" | cluster walks %.1f a frame, %.0f%% from a kept table; lights placed %.1f a frame, %.0f%% in kept clusters"
 		" | ai firing positions %.3f: %.2f selections a frame (%.1f positions, %.1f lines of sight a selection), longest %.3f ms"
 		" | ai path searches %.3f: %.2f a frame (%.1f nodes a search), longest %.3f ms; path builds %.3f: %.2f a frame"
 		" | ai perception %.3f: %.1f actors, %.1f props, %.1f position and %.1f status refreshes, %.2f timeslice refreshes (%.0f objects each) a frame",
@@ -128,6 +135,8 @@ void halo_lines_profile_frame(void)
 		halo_lines_stats.ai_los_extra_lines / frames,
 		(tables_found + tables_made) / frames,
 		tables_found + tables_made ? 100.0 * tables_found / (tables_found + tables_made) : 0.0,
+		(light_hits + light_misses) / frames,
+		light_hits + light_misses ? 100.0 * light_hits / (light_hits + light_misses) : 0.0,
 		halo_lines_stats.firing_position_us / 1000.0 / frames,
 		halo_lines_stats.firing_position_calls / frames,
 		halo_lines_stats.firing_position_calls ? (double)halo_lines_stats.firing_position_considered / halo_lines_stats.firing_position_calls : 0.0,
@@ -184,6 +193,8 @@ void halo_lines_profile_frame(void)
 	memo_misses_seen = obstruction_memo_misses;
 	tables_found_seen = cluster_object_types_found;
 	tables_made_seen = cluster_object_types_made;
+	light_hits_seen = light_cluster_cache_hits;
+	light_misses_seen = light_cluster_cache_misses;
 	lines_frames = 0;
 	lines_particles_live = 0;
 }
