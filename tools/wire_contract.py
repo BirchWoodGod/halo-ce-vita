@@ -701,7 +701,7 @@ def main():
 		"(take it out of EXPECTED_OPEN in tools/wire_contract.py)")
 	if ok and made_work and not arguments.keep:
 		shutil.rmtree(work, ignore_errors=True)
-	else:
+	elif not ok or arguments.keep:
 		print(f"work in {work}")
 	return 0 if ok else 1
 
