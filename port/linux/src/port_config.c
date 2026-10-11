@@ -185,6 +185,16 @@ static const struct config_setting config_settings[] =
 		"Vita, the one in the game's package): one host:port on each line, up\n"
 		"to 4. Updates replace brokers.txt: keep a list of your own under\n"
 		"another name." },
+	{ "network.crossplay_brokers_file", _config_string,
+#ifdef HALO_VITA
+		"\"app0:brokers_crossplay.txt\"",
+#else
+		"\"brokers_crossplay.txt\"",
+#endif
+		"HALO_NET_CROSSPLAY_BROKERS_FILE", _environment_value, _platform_all,
+		"With network.crossplay on, the brokers' file in place of\n"
+		"network.brokers_file's: OpenCE's list, where the PC hosts list their\n"
+		"games (the same format)." },
 	{ "network.signalling_brokers", _config_string, "\"\"", "HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Comma-separated host:port brokers in place of network.brokers_file's\n"
 		"(the automated tests' own); empty for the file's." },

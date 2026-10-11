@@ -2427,6 +2427,10 @@ static void broker_readable(struct broker *broker)
 /* the brokers if network.brokers_file cannot be read (the Vita's
 port/vita/app0/brokers.txt's) */
 #define DEFAULT_BROKERS "broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
+/* ... and with Crossplay on, if network.crossplay_brokers_file cannot be
+read: OpenCE's (port/vita/app0/brokers_crossplay.txt's) */
+#define DEFAULT_CROSSPLAY_BROKERS \
+	"opence.milenko.org:1883/0,broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
 
 int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size)
 {
@@ -2474,11 +2478,15 @@ line, "#" starting a comment, into text: host:port entries separated by
 commas (OpenCE's "Brokers in brokers.txt") */
 static void brokers_list(char *text, size_t size)
 {
-	if (!p2p_list_setting("network.signalling_brokers", "network.brokers_file", text, size))
+	/* (Crossplay on: OpenCE's list, where the PC hosts list their games;
+	off: the Vitas' own, with the project's broker first) */
+	const char *file_setting = network_wire_crossplay() ? "network.crossplay_brokers_file" : "network.brokers_file";
+
+	if (!p2p_list_setting("network.signalling_brokers", file_setting, text, size))
 	{
-		platform_log("Internet play: the brokers' file %s cannot be read (network.brokers_file); using the usual ones",
-			config_string("network.brokers_file"));
-		snprintf(text, size, "%s", DEFAULT_BROKERS);
+		platform_log("Internet play: the brokers' file %s cannot be read (%s); using the usual ones",
+			config_string(file_setting), file_setting);
+		snprintf(text, size, "%s", network_wire_crossplay() ? DEFAULT_CROSSPLAY_BROKERS : DEFAULT_BROKERS);
 	}
 }
 

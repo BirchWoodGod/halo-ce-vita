@@ -1,0 +1,12 @@
+# The MQTT brokers with Crossplay on (network.crossplay_brokers_file): OpenCE's
+# own list (port/assets/network/brokers.txt of OpenCE), so that a Vita sees
+# the PC games wherever PC hosts list them. opence.milenko.org is the OpenCE
+# community's broker (Milenko's, ChupathingyCE): PC hosts list there too, and
+# it carried them on Oct 11 2026 while the three public brokers were down (the
+# owner agreed to use it). With Crossplay off, brokers.txt's list is used.
+# One host:port on each line, up to 4; "#" starts a comment; a plain port that
+# fails is tried over TLS on 8883 (host:port/0: no TLS).
+opence.milenko.org:1883/0
+broker.emqx.io:1883
+broker.hivemq.com:1883
+test.mosquitto.org:1883
