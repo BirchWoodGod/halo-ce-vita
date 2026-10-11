@@ -270,7 +270,8 @@ int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 		snprintf(entry->rules, sizeof(entry->rules), index == 2 ? "Co-op: Halo" : "Slayer on Blood Gulch");
 		entry->players = index == 1 ? 20 : 2;
 		entry->maximum = index == 1 ? 128 : 16;
-		entry->experimental = index == 1;
+		/* (p2p_lobby.c's: a co-op game is experimental too) */
+		entry->experimental = index == 1 || index == 2;
 		entry->coop = index == 2;
 		entry->dedicated = index == 3;
 		snprintf(entry->badge, sizeof(entry->badge), "%s", index == 1 ? "PC EXPERIMENTAL" : index == 2 ? "PC CO-OP" :
@@ -1261,7 +1262,7 @@ static void test_multiplayer_tab(void)
 static int menu_lines_fit(void);
 
 /* the public games with Crossplay on (crossplay_guard.h, docs/crossplay.md
-6): badges; a PC co-op game refused; a large one asked about once */
+6): badges; a large or co-op PC game asked about once */
 static void test_crossplay_browser(void)
 {
 	int saved_screen = screen;
@@ -1274,21 +1275,37 @@ static void test_crossplay_browser(void)
 	browse_refresh();
 	show();
 	check(browse_count == 3 && strstr(menu, "\npc host         20/128 Blood Gulch  PC EXP\n") &&
-		strstr(menu, "\npc coop          2/16 Halo         PC COOP\n") &&
+		strstr(menu, "\npc coop          2/16 Halo         PC COOP EXP\n") &&
 		strstr(menu, "\npc server        2/16 Blood Gulch  SRV\n") &&
 		strstr(menu, "\nExperimental: over 16 players may lag\n") && menu_lines_fit(),
-		"Crossplay: the public games badged: PC or SRV, EXP (more than 16), COOP; the chosen one's in words");
+		"Crossplay: the public games badged: PC or SRV, EXP (more than 16), COOP EXP; the chosen one's in words");
 	if (!strstr(menu, "pc host         20/128"))
 		printf("%s\n--\n", menu);
-	/* a PC co-op game: not joined, told why */
+	/* a PC co-op game: experimental, asked about once (no: not joined; yes:
+	joined, remembered) */
 	joined_id[0] = 0;
 	message_pending = 0;
 	browse_selected = 1;
 	show();
-	check(strstr(menu, "\nPC co-op: can't be joined with Crossplay\n") != NULL, "a PC co-op game: can't be joined, it says");
+	check(strstr(menu, "\nPC co-op: experimental on the Vita\n") != NULL, "a PC co-op game: experimental, it says");
 	browse_input(VITA_BUTTON_CROSS);
-	check(!joined_id[0] && screen == SCREEN_BROWSE && message_pending && strstr(pending_message, "PC co-op game"),
-		"cross on a PC co-op game: not joined, the message says why");
+	show();
+	check(screen == SCREEN_LARGE && !joined_id[0] && !message_pending && strstr(menu, "PC co-op game") &&
+		strstr(menu, "Join anyway?") && !strstr(menu, "more than 4") && strstr(menu, "pc coop  2/16") && menu_lines_fit(),
+		"cross on a PC co-op game: Join anyway? first, the co-op question");
+	printf("%s\n--\n", menu);
+	large_input(VITA_BUTTON_CIRCLE);
+	now = (unsigned long)(now_us() / 1000);
+	check(screen == SCREEN_BROWSE && !joined_id[0] && crossplay_guard_answered("pc coop", now) == 0,
+		"circle on the co-op question: not joined, the no remembered");
+	browse_input(VITA_BUTTON_CROSS);
+	large_input(VITA_BUTTON_CROSS);
+	now = (unsigned long)(now_us() / 1000);
+	check(screen == SCREEN_GUIDE && !strcmp(joined_id, "00000000000000000000000000000012") &&
+		crossplay_guard_answered("pc coop", now) == 1, "asked again, cross: the co-op game joined, the yes remembered");
+	screen = SCREEN_BROWSE;
+	browsing = 1;
+	joined_id[0] = 0;
 	message_pending = 0;
 	/* a large one: asked, no; asked again, yes (remembered for its lobby);
 	then joined at once */

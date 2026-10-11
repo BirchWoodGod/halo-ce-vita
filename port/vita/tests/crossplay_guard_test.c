@@ -45,7 +45,10 @@ int main(void)
 	check(crossplay_guard_judge(0, 17, 16) == CROSSPLAY_GUARD_LARGE, "17 players (past its own maximum): large");
 	check(crossplay_guard_judge(0, 5, 128) == CROSSPLAY_GUARD_LARGE, "OpenCE's fast setup (128): large");
 	check(crossplay_guard_judge(1, 2, 4) == CROSSPLAY_GUARD_COOP && crossplay_guard_judge(1, 40, 128) == CROSSPLAY_GUARD_COOP,
-		"co-op: refused, whatever its size");
+		"co-op: its own verdict, whatever its size");
+	check(crossplay_guard_experimental(1, 1, 2) && crossplay_guard_experimental(1, 40, 128) &&
+		crossplay_guard_experimental(0, 17, 16) && !crossplay_guard_experimental(0, 16, 16) &&
+		!crossplay_guard_experimental(0, INT_MIN, INT_MIN), "co-op and large games are Experimental, others not");
 	check(crossplay_guard_judge(0, INT_MIN, INT_MIN) == CROSSPLAY_GUARD_OK &&
 		crossplay_guard_judge(0, INT_MAX, -1) == CROSSPLAY_GUARD_LARGE &&
 		crossplay_guard_judge(0, -1, INT_MAX) == CROSSPLAY_GUARD_LARGE, "counts at the ends of an int: no refusal, no overflow");
@@ -119,7 +122,20 @@ int main(void)
 		!strcmp(crossplay_guard_badge(0, 0), "VITA") && !strcmp(crossplay_guard_badge(0, 1), "SERVER"), "the badges");
 	check(!strcmp(crossplay_guard_large_question(),
 		"Large PC game: more than 16 players can make the Vita lag. Join anyway?") &&
-		strstr(crossplay_guard_coop_refusal(), "co-op") != NULL, "the owner's question, word for word; the co-op refusal");
+		crossplay_guard_question(CROSSPLAY_GUARD_LARGE, 40) == crossplay_guard_large_question() &&
+		crossplay_guard_title(CROSSPLAY_GUARD_LARGE) == crossplay_guard_large_title(), "the owner's question, word for word");
+	check(strstr(crossplay_guard_question(CROSSPLAY_GUARD_COOP, 2), "co-op") &&
+		strstr(crossplay_guard_question(CROSSPLAY_GUARD_COOP, 2), "Join anyway?") &&
+		!strstr(crossplay_guard_question(CROSSPLAY_GUARD_COOP, CROSSPLAY_GUARD_COOP_PLAYERS), "more than 4") &&
+		strstr(crossplay_guard_question(CROSSPLAY_GUARD_COOP, CROSSPLAY_GUARD_COOP_PLAYERS + 1), "more than 4") &&
+		strstr(crossplay_guard_question(CROSSPLAY_GUARD_COOP, INT_MAX), "more than 4") &&
+		!strstr(crossplay_guard_question(CROSSPLAY_GUARD_COOP, INT_MIN), "more than 4") &&
+		strstr(crossplay_guard_title(CROSSPLAY_GUARD_COOP), "co-op"),
+		"the co-op question, past 4 players saying so; its title");
+	check(!strcmp(crossplay_guard_badge_suffix(CROSSPLAY_GUARD_COOP), " CO-OP EXPERIMENTAL") &&
+		!strcmp(crossplay_guard_badge_suffix(CROSSPLAY_GUARD_LARGE), " EXPERIMENTAL") &&
+		!strcmp(crossplay_guard_badge_suffix(CROSSPLAY_GUARD_OK), "") && !strcmp(crossplay_guard_badge_suffix(-7), ""),
+		"the badges' suffixes");
 	printf("%s (%d of %d checks failed)\n", failures ? "FAIL" : "PASS", failures, checks);
 	return failures != 0;
 }

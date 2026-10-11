@@ -1711,25 +1711,20 @@ void network_test_update(
 						platform_log("network test: the public games list \"%s\"%s%s%s%s: %s; %s", entry.name,
 							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "",
 							entry.badge[0] ? " badge " : "", entry.badge, entry.rules, entry.players_line);
-						/* (as the browsers do, crossplay_guard.h: a PC co-op game
-						refused; a large one asked about once, the answer
+						/* (as the browsers do, crossplay_guard.h: a large or co-op
+						PC game asked about once, the answer
 						HALO_CROSSPLAY_LARGE_ANSWER's) */
-						if (network_wire_crossplay() && entry.coop)
-						{
-							platform_log("network test: not joining the public game \"%s\": a PC co-op game (crossplay)",
-								entry.name);
-							continue;
-						}
-						if (network_wire_crossplay() && entry.experimental &&
+						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) < 0)
 						{
 							int answer = crossplay_guard_test_answer();
 
-							platform_log("crossplay: asking about the large PC game %s (%d of %d players): %s", entry.name,
-								entry.players, entry.maximum, answer > 0 ? "join anyway" : "no");
+							platform_log("crossplay: asking about the %s PC game %s (%d of %d players): %s",
+								entry.coop ? "co-op" : "large", entry.name, entry.players, entry.maximum,
+								answer > 0 ? "join anyway" : "no");
 							crossplay_guard_answer(entry.name, answer > 0, system_milliseconds());
 						}
-						if (network_wire_crossplay() && entry.experimental &&
+						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) == 0)
 						{
 							continue;

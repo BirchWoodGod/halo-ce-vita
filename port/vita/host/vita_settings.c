@@ -2726,7 +2726,7 @@ static void show_browse(void)
 	/* (a game a line: its name, players of most, map, [pw] for a password,
 	PC for a Halo PC map, DED for a dedicated server's. With Crossplay on,
 	every game a PC's (crossplay_guard.h): PC, or SRV for a server, then EXP
-	for a large one, COOP for co-op, which is not joined) */
+	for a large one, COOP EXP for co-op: both asked about once) */
 	for (index = 0; index < browse_count && length < (int)sizeof(text); index++)
 	{
 		const struct p2p_lobby_entry *entry = &browse_entries[index];
@@ -2736,7 +2736,7 @@ static void show_browse(void)
 		if (entry->badge[0])
 			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-12.12s%s %s%s", entry->name, entry->players,
 				entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->dedicated ? "SRV" : "PC",
-				entry->coop ? " COOP" : entry->experimental ? " EXP" : "");
+				entry->coop ? " COOP EXP" : entry->experimental ? " EXP" : "");
 		else
 			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s%s", entry->name, entry->players,
 				entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "",
@@ -2760,7 +2760,7 @@ static void show_browse(void)
 		/* (a PC game's badges in words) */
 		if (entry->badge[0] && length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->coop ?
-				T("PC co-op: can't be joined with Crossplay") : entry->experimental ?
+				T("PC co-op: experimental on the Vita") : entry->experimental ?
 				T("Experimental: over 16 players may lag") : entry->dedicated ? T("A PC server") : T("A PC game"));
 	}
 	if (length < (int)sizeof(text))
@@ -2775,9 +2775,11 @@ static void show_large(void)
 {
 	char body[256], text[1024];
 
+	int verdict = browse_large.coop ? CROSSPLAY_GUARD_COOP : CROSSPLAY_GUARD_LARGE;
+
 	snprintf(body, sizeof(body), "%.20s  %d/%d  %.20s\n\n%s", browse_large.name, browse_large.players,
-		browse_large.maximum, browse_large.map, crossplay_guard_large_question());
-	format_box(text, sizeof(text), crossplay_guard_large_title(), body, T("\n\nCross: join anyway   Circle: back"));
+		browse_large.maximum, browse_large.map, crossplay_guard_question(verdict, browse_large.players));
+	format_box(text, sizeof(text), crossplay_guard_title(verdict), body, T("\n\nCross: join anyway   Circle: back"));
 	vgxm_menu_set(text, -1);
 }
 
@@ -3586,15 +3588,9 @@ static void browse_input(unsigned long pressed)
 	{
 		const struct p2p_lobby_entry *entry = &browse_entries[browse_selected];
 
-		/* (crossplay_guard.h: a PC co-op game refused; a large PC game asked
+		/* (crossplay_guard.h: a large or co-op PC game, Experimental, asked
 		about once, on a screen of its own) */
-		if (network_wire_crossplay() && entry->coop)
-		{
-			set_notice("%s", T("PC co-op games can't be joined"));
-			vita_settings_message(T("Halo: cannot join this game"), crossplay_guard_coop_refusal());
-			return;
-		}
-		if (network_wire_crossplay() && entry->experimental &&
+		if (network_wire_crossplay() && (entry->experimental || entry->coop) &&
 			crossplay_guard_answered(entry->name, (unsigned long)(now_us() / 1000)) != 1)
 		{
 			browse_large = *entry;
@@ -3614,8 +3610,9 @@ static void large_input(unsigned long pressed)
 	if (!(pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_CIRCLE)))
 		return;
 	crossplay_guard_answer(browse_large.name, (pressed & VITA_BUTTON_CROSS) != 0, (unsigned long)(now_us() / 1000));
-	snprintf(line, sizeof(line), "settings: the large PC game %.20s (%d of %d players): %s", browse_large.name,
-		browse_large.players, browse_large.maximum, (pressed & VITA_BUTTON_CROSS) ? "join anyway" : "no");
+	snprintf(line, sizeof(line), "settings: the %s PC game %.20s (%d of %d players): %s",
+		browse_large.coop ? "co-op" : "large", browse_large.name, browse_large.players, browse_large.maximum,
+		(pressed & VITA_BUTTON_CROSS) ? "join anyway" : "no");
 	vita_host_log(line);
 	screen = SCREEN_BROWSE;
 	if (pressed & VITA_BUTTON_CROSS)
