@@ -174,16 +174,22 @@ of `settings.txt`: a file from an older version loads as it is.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Profile | Balanced | sets the rows marked (P) at once: Performance, Balanced, Quality; Custom when they match none |
-| Render resolution (P) | 75% | the 3D view's resolution (applies at once); Dynamic: lowered in heavy scenes, from the Dynamic minimum up to 100% |
-| Dynamic minimum | 50% | shown with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes |
-| Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
-| Upscale filter | Smooth | Sharp: crisp pixels |
+| Profile | Balanced | sets the rows marked (P) at once: Performance, Balanced, Quality; Custom when they match none. All three are Dynamic resolution, from 50%, 63% and 75%; Quality is otherwise the Xbox's but for the AI think rate (Adaptive). A `settings.txt` saved with a profile by an older version loads as that profile with this version's values (a Custom one keeps its rows) |
+| Render resolution (P) | Dynamic | the 3D view's resolution (applies at once): 100% to 50%, or Dynamic, lowered in heavy scenes from the Dynamic minimum up to 100% |
+| Dynamic minimum (P) | 63% | shown with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes. Performance 50%, Balanced 63%, Quality 75% |
 | Frame limit | 30 FPS | the most frames shown a second |
 | FPS counter | Off | the game's own frame counter, bottom right |
 | Smooth weapon motion | On | the first-person weapon blended between game ticks |
 | Particles (P) | Full | the particles a fight's shots, impacts and explosions make (applies at once). Reduced (the Performance profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera). Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
-| Advanced > | | the page below |
+| Display > | 16:9, Smooth | the page below |
+| Advanced > | | the page after it |
+
+Graphics, **Display**:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
+| Upscale filter | Smooth | Sharp: crisp pixels |
 
 Graphics, **Advanced**:
 

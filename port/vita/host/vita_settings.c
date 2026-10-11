@@ -6,10 +6,10 @@ or in the menus, and a panel over the game shows the Vita's settings in
 four tabs that L and R switch between: Graphics, General, Audio and
 Multiplayer, and Dev once "Show dev settings" (General, Advanced) is on.
 No tab is longer than a screen: the rows few players change open from a
-row marked > as a page of their own (Graphics' Advanced; General's Button
-layout, Touch zones, Gyro settings and Advanced; Multiplayer's Play and
-Modded maps; Dev's A/B switches), and
-circle goes back.
+row marked > as a page of their own (Graphics' Display and Advanced;
+General's Button layout, Touch zones, Gyro settings and Advanced;
+Multiplayer's Play and Modded maps; Dev's A/B switches), and circle goes
+back.
 Up and down choose a line, left and right change it, cross does what an
 action line says, circle (or SELECT+START again) closes the panel; the
 game sees no buttons while it is open. Each row's value is drawn in a
@@ -41,10 +41,12 @@ menu_fits).
 
 The Profile row at the top of Graphics sets the speed-related rows at once
 (Performance, Balanced - the defaults - or Quality); it reads Custom when
-those rows match none of them (the render resolution and the particles, on
-the tab, and the detail and update rates, the sun rays, the shadows, lights,
-effects and particle density and the AI's think rate, under Advanced, and
-Audio's sound updates and occlusion). Quality is the Xbox game's every one. Rows marked *
+those rows match none of them (the render resolution, its Dynamic minimum
+and the particles, on the tab, and the detail and update rates, the sun
+rays, the shadows, lights, effects and particle density and the AI's think
+rate, under Advanced, and Audio's sound updates and occlusion). All three
+are Dynamic resolution, from 50%, 63% and 75%; Quality is otherwise the
+Xbox game's every one but the AI's think rate (Adaptive). Rows marked *
 apply after a restart (the sound voices, the network, most dev switches).
 
 General (TAB_CONTROLS) starts with the update check (update_check.h):
@@ -202,6 +204,7 @@ enum
 	TAB_COUNT,
 
 	PAGE_GRAPHICS_ADVANCED = TAB_COUNT,
+	PAGE_GRAPHICS_DISPLAY,
 	PAGE_BUTTONS,
 	PAGE_TOUCH,
 	PAGE_GYRO,
@@ -224,6 +227,7 @@ static const struct
 	{ "Multiplayer", TAB_MULTIPLAYER },
 	{ "Dev", TAB_DEV },
 	{ "Advanced", TAB_GRAPHICS },
+	{ "Display", TAB_GRAPHICS },
 	{ "Button layout", TAB_CONTROLS },
 	{ "Touch zones", TAB_CONTROLS },
 	{ "Gyro settings", TAB_CONTROLS },
@@ -304,15 +308,11 @@ static struct setting settings[] = {
 	/* (Dynamic: the dynamic resolution, d3d8_gxm.c - the scale follows the
 	GPU's load, from the Dynamic minimum up to 100%) */
 	{ "Render resolution", "HALO_RENDER_SCALE", 0, 6, { "1", "0.875", "0.75", "0.625", "0.5", "dynamic" },
-		{ "100%", "88%", "75%", "63%", "50%", "Dynamic" }, "Lower is faster, softer. Dynamic: by GPU load", 2,
+		{ "100%", "88%", "75%", "63%", "50%", "Dynamic" }, "Lower is faster, softer. Dynamic: by GPU load", 5,
 		TAB_GRAPHICS },
 	/* (shown while Render resolution is Dynamic: setting_shown) */
 	{ "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", 0, 3, { "0.5", "0.625", "0.75" }, { "50%", "63%", "75%" },
-		"The lowest Dynamic goes in heavy scenes", 0, TAB_GRAPHICS },
-	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
-		"4:3: the Xbox's framing, black bars", 0, TAB_GRAPHICS },
-	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
-		"Scaling to the screen: Sharp = crisp pixels", 0, TAB_GRAPHICS },
+		"The lowest Dynamic goes in heavy scenes", 1, TAB_GRAPHICS },
 	{ "Frame limit", "HALO_FRAME_CAP", 0, 3, { "30", "60", "0" }, { "30 FPS", "60 FPS", "Off" },
 		"The most frames shown a second", 0, TAB_GRAPHICS },
 	/* (port/linux/game/render_interpolation.c: frames drawn between the
@@ -333,6 +333,14 @@ static struct setting settings[] = {
 	those made) */
 	{ "Particles", "HALO_PARTICLE_BUDGET", 0, 3, { "full", "reduced", "low" }, { "Full", "Reduced", "Low" },
 		"Fewer sparks, smoke and debris in big fights", 0, TAB_GRAPHICS },
+	/* (the picture's framing and scaling, set once: on a page of their
+	own, which keeps the tab to a screen with Dynamic minimum shown; the
+	row says both, page_summary) */
+	PAGE_ROW("Display", "Aspect ratio and upscale filter", TAB_GRAPHICS, PAGE_GRAPHICS_DISPLAY),
+	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
+		"4:3: the Xbox's framing, black bars", 0, PAGE_GRAPHICS_DISPLAY },
+	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
+		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_DISPLAY },
 	PAGE_ROW("Advanced", "Detail and update rates (the Profile sets them)", TAB_GRAPHICS, PAGE_GRAPHICS_ADVANCED),
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
 		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 2,
@@ -593,30 +601,33 @@ static int shipped_kept;
 /* the profiles (the Profile row's first three choices): the value of each
 row a profile sets. Balanced is the release's defaults (the rows' own) */
 #define PROFILE_CUSTOM 3
-#define PROFILE_ROWS 14
+#define PROFILE_ROWS 15
 
 static const char *const profile_variables[PROFILE_ROWS] = {
 	"HALO_RENDER_SCALE", "HALO_MODEL_LOD_SCALE", "HALO_MIN_OBJECT_PIXELS", "HALO_SCENERY_UPDATE_DIVISOR",
 	"HALO_LIGHTING_REFRESH_DIVISOR", "HALO_SOUND_OBSTRUCTION_TICKS", "HALO_SUN_RAYS",
 	"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
-	"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_PARTICLE_BUDGET",
+	"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_PARTICLE_BUDGET", "HALO_DYNAMIC_RES_MIN",
 };
 
-/* (a settings.txt saved with a profile before a row was added takes the
-profile's value for it: vita_settings_load) */
+/* (a settings.txt saved with a profile takes the profile's values as this
+build has them, rows added or changed since: vita_settings_load) */
 static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
-	/* Performance: 50%, Low, Small, Quarter, Third, Every 6th, no sun rays;
-	no object shadows, 4 lights, Performance effects, half the particles
-	drawn, Adaptive AI, sound every 2nd frame; Reduced particles */
-	{ "0.5", "0.5", "8", "4", "3", "6", "0", "0", "4", "1", "2", "0", "2", "reduced" },
-	/* Balanced (the release's defaults): 75%, Low, Small, Quarter, Third,
-	Every 3rd, sun rays; shadows near only, 8 lights, Full effects and
-	particles, Adaptive AI, sound every 2nd frame; Full particles */
-	{ "0.75", "0.5", "8", "4", "3", "3", "1", "1", "8", "2", "1", "0", "2", "full" },
-	/* Quality, the Xbox's: 100%, High, Off, Every tick, Full, Every tick,
-	sun rays; all shadows, lights, effects and particles, AI every tick,
-	sound every frame; Full particles */
-	{ "1", "1", "0", "1", "1", "1", "1", "2", "0", "2", "1", "1", "1", "full" },
+	/* Performance: Dynamic resolution from 50%, Low, Small, Quarter, Third,
+	Every 6th, no sun rays; no object shadows, 4 lights, Performance
+	effects, half the particles drawn, Adaptive AI, sound every 2nd frame;
+	Reduced particles */
+	{ "dynamic", "0.5", "8", "4", "3", "6", "0", "0", "4", "1", "2", "0", "2", "reduced", "0.5" },
+	/* Balanced (the release's defaults): Dynamic resolution from 63%, Low,
+	Small, Quarter, Third, Every 3rd, sun rays; shadows near only, 8 lights,
+	Full effects and particles, Adaptive AI, sound every 2nd frame; Full
+	particles */
+	{ "dynamic", "0.5", "8", "4", "3", "3", "1", "1", "8", "2", "1", "0", "2", "full", "0.625" },
+	/* Quality, the Xbox's but for two: Dynamic resolution from 75% (100%
+	held in heavy fights is too slow), High, Off, Every tick, Full, Every
+	tick, sun rays; all shadows, lights, effects and particles, Adaptive AI
+	(every tick was too slow too), sound every frame; Full particles */
+	{ "dynamic", "1", "0", "1", "1", "1", "1", "2", "0", "2", "1", "0", "1", "full", "0.75" },
 };
 
 /* the variables the performance logging switch sets, and their values */
@@ -1446,14 +1457,18 @@ void vita_settings_load(void)
 	{
 		int row;
 
-		/* a row the saved profile sets that settings.txt does not name
-		(one added since: Sun rays, in 1.1; Particles, in 1.1.0-beta.4)
-		takes the profile's value, unless env.txt names it */
+		/* the saved profile's rows take its values as this build has them,
+		those added since (Sun rays, in 1.1; Particles, in 1.1.0-beta.4) and
+		those changed (1.1.0-beta.4: Dynamic resolution in all three, with
+		their minimums; Quality's Adaptive AI) - HALO_PROFILE is saved only
+		while the rows match it (Custom otherwise), so a player's own
+		choices are never taken back. A row env.txt names keeps what env.txt
+		and settings.txt give it (settings.txt's last, as for any row) */
 		for (row = 0; row < PROFILE_ROWS; row++)
 		{
 			struct setting *setting = setting_named(profile_variables[row]);
 
-			if (setting && !named[setting - settings] && !getenv(setting->variable))
+			if (setting && !getenv(setting->variable))
 				setting->choice = find_choice(setting, profile_values[saved_profile][row]);
 		}
 	}
@@ -2374,6 +2389,10 @@ static void page_summary(char *text, int size, const struct setting *setting)
 			snprintf(text, (size_t)size, T("%d on"), set);
 		else
 			snprintf(text, (size_t)size, "%s", T("Off"));
+		break;
+	case PAGE_GRAPHICS_DISPLAY:
+		snprintf(text, (size_t)size, "%s, %s", T(setting_named("HALO_DISPLAY_WIDTH")->names[choice_of("HALO_DISPLAY_WIDTH")]),
+			T(setting_named("HALO_UPSCALE_FILTER")->names[choice_of("HALO_UPSCALE_FILTER")]));
 		break;
 	case PAGE_MAPS:
 		if (map_count == 1)

@@ -438,11 +438,15 @@ version loads as it is).
 
 The **Profile** row at the top sets the speed-related rows together:
 **Performance**, **Balanced** (the defaults) or **Quality** (the game as on
-the Xbox). Changing one of those rows yourself makes the profile **Custom**.
+the Xbox, but for the resolution and the AI's think rate). All three use
+Dynamic resolution, each with its own minimum. Changing one of those rows
+yourself makes the profile **Custom**. A settings file saved with a profile
+by an older version loads as that profile with these values.
 
 | Setting | Performance | Balanced (default) | Quality |
 | --- | --- | --- | --- |
-| Render resolution | 50% | 75% | 100% |
+| Render resolution | Dynamic | Dynamic | Dynamic |
+| Dynamic minimum | 50% | 63% | 75% |
 | Model detail | Low | Low | High |
 | Hide distant objects | Small | Small | Off |
 | Scenery updates | Quarter | Quarter | Every tick |
@@ -452,7 +456,7 @@ the Xbox). Changing one of those rows yourself makes the profile **Custom**.
 | Effects quality | Performance | Full | Full |
 | Particle density | Half | Full | Full |
 | Sun rays | Off | On | On |
-| AI think rate | Adaptive | Adaptive | Every tick |
+| AI think rate | Adaptive | Adaptive | Adaptive |
 | Sound occlusion | Every 6th | Every 3rd | Every tick |
 | Sound updates | Every 2nd | Every 2nd | Every frame |
 | Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
@@ -467,12 +471,10 @@ see-through parts such as the Covenant field generators' domes or visors.
 
 The Graphics tab's other rows:
 
-- **Render resolution**: lower is faster and softer. **Dynamic**
-  (experimental) lowers it only while the graphics chip is the limit, down
-  to the **Dynamic minimum** (50% by default).
-- **Aspect ratio**: 16:9 (the default) fills the screen with a wider view;
-  4:3 shows the Xbox's own framing, HUD and menus between black bars.
-- **Upscale filter**: Smooth (the default) or Sharp (crisp, blocky pixels).
+- **Render resolution**: **Dynamic** (the default) lowers it only while
+  the graphics chip is the limit, down to the **Dynamic minimum** (shown
+  while Dynamic is chosen; 63% in Balanced); or a fixed 100% to 50%, lower
+  being faster and softer.
 - **Frame limit**: 30 FPS (the default), 60 FPS or Off.
 - **Frame interpolation** (Off by default): the game runs 30 ticks a second;
   with this On the Vita draws frames between them, blended, for up to 60
@@ -480,6 +482,10 @@ The Graphics tab's other rows:
   applies at once.
 - **FPS counter**, and **Smooth weapon motion** (On: the weapon blended
   between ticks; it costs almost nothing).
+- **Display >**: **Aspect ratio**, 16:9 (the default) fills the screen with
+  a wider view, 4:3 shows the Xbox's own framing, HUD and menus between
+  black bars; **Upscale filter**, Smooth (the default) or Sharp (crisp,
+  blocky pixels).
 - **Advanced >**: the rows the profiles set, Tiny decals, and **Fourth core
   helpers** (see [plugins](#more-performance-with-plugins-optional)).
 
@@ -513,12 +519,12 @@ The biggest fights are limited by different things in different places. On
 The Silent Cartographer's beach the Vita's processor is the limit (drawing
 many characters, and the game's own simulation of them), so the render
 resolution changes little there. In Pillar of Autumn's firefights the
-graphics chip is the limit, and **Render resolution 50%** (the Performance
-profile) helps a lot: in one test a firefight went from about 16 fps at 75%
-to about 26 fps at 50%.
+graphics chip is the limit, and a lower render resolution helps a lot: in
+one test a firefight went from about 16 fps at 75% to about 26 fps at 50%
+(the Performance profile's Dynamic minimum).
 
 What helps, in the settings panel: the **Performance** profile; **Render
-resolution** 50% or Dynamic; **Model detail** Low or Lowest; **Hide distant
+resolution** Dynamic with a lower **Dynamic minimum**, or 50%; **Model detail** Low or Lowest; **Hide distant
 objects** Small or Medium; **Sun rays** Off; **Sound voices** 16. Keep
 **Smooth weapon motion** on: it makes the frame rate feel steadier.
 

@@ -172,6 +172,44 @@ int main(void)
 	simulate(&controller, &run, 30 * 10, 0.0f, 150.0f, 0.0f, 0.8f, 20.0f);
 	check(controller.level == 20, "an impossible scene: held at the floor (63%)");
 
+	/* ---------- each profile's Dynamic minimum (vita_settings.c: Performance
+	50%, Balanced 63%, Quality 75% - HALO_DYNAMIC_RES_MIN, in 32nds as
+	d3d8_gxm.c dynres_level_of rounds it): a heavy fight with noise never
+	below it, the light scene after it back at the ceiling */
+	{
+		static const int floors[] = { 16, 20, 24 };
+		int index;
+
+		for (index = 0; index < 3; index++)
+		{
+			char what[128];
+
+			dynres_controller_init(&controller, floors[index], 32, budget);
+			run_reset(&run, &controller);
+			simulate(&controller, &run, 30 * 30, 0.0f, 150.0f, 0.10f, 0.8f, 20.0f);
+			printf("  floor %d/32, 150 ms fight for 30 s: levels %d..%d, %d changes\n", floors[index], run.minimum,
+				run.maximum, run.changes);
+			snprintf(what, sizeof(what), "floor %d%%: a fight too heavy for it held at it, never under", (floors[index] * 100 + 16) / 32);
+			check(run.minimum == floors[index] && controller.level == floors[index], what);
+			run_reset(&run, &controller);
+			simulate(&controller, &run, 30 * 20, 0.0f, 16.0f, 0.05f, 0.8f, 20.0f);
+			printf("  then a light scene: %d/32 after 20 s\n", controller.level);
+			snprintf(what, sizeof(what), "floor %d%%: a light scene after it back at the ceiling within 20 s", (floors[index] * 100 + 16) / 32);
+			check(controller.level == 32 && run.minimum >= floors[index], what);
+		}
+		/* (Quality's 75%: a 48 ms fight - 27 ms at 75% - settles above it,
+		under the high mark: measured after its first 2 s) */
+		dynres_controller_init(&controller, 24, 32, budget);
+		run_reset(&run, &controller);
+		simulate(&controller, &run, 30 * 2, 0.0f, 48.0f, 0.10f, 0.8f, 20.0f);
+		run_reset(&run, &controller);
+		simulate(&controller, &run, 30 * 60, 0.0f, 48.0f, 0.10f, 0.8f, 20.0f);
+		printf("  floor 24/32, 48 ms fight for 60 s: levels %d..%d, %d changes, GPU mean %.1f ms\n", run.minimum,
+			run.maximum, run.changes, run.gpu_sum / run.frames);
+		check(run.minimum >= 24 && run.maximum <= 27 && run.changes <= 6 && run.gpu_sum / run.frames < budget * DYNRES_HIGH,
+			"floor 75%: a 48 ms fight kept between 75% and 84%, under the high mark, steady");
+	}
+
 	/* ---------- a lower ceiling (the targets made smaller: CDRAM) */
 	dynres_controller_init(&controller, 16, 24, budget);
 	check(controller.level == 24, "starts at a lower ceiling");

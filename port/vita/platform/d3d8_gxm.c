@@ -5240,10 +5240,12 @@ HALO_RENDER_SCALE=dynamic (the settings panel's Render resolution: Dynamic):
 the screen-sized targets are made at the full size (the render scale 1, or
 the old size when a live change found no CDRAM for it: vgxm_render_scale is
 the ceiling) and each frame is drawn into the top left part of them, from
-HALO_DYNAMIC_RES_MIN (0.5) of the size up to the whole, in 32nds. The
-scale follows the GPU's time for the frames before (vgxm_gpu_frame_next;
-dynamic_resolution.c: down fast, up slowly) against the frame limit's
-budget (HALO_FRAME_CAP: 33.3 ms at 30 FPS and when off, 16.7 at 60). It
+HALO_DYNAMIC_RES_MIN (the panel's Dynamic minimum, 0.5, 0.625 or 0.75 -
+the profiles' 50%, 63% and 75%; 0.5 unset) of the size up to the whole, in
+32nds (16, 20 or 24: no rounding). The scale follows the GPU's time for
+the frames before (vgxm_gpu_frame_next; dynamic_resolution.c: down fast, up
+slowly) against the frame limit's budget (HALO_FRAME_CAP: 33.3 ms at 30 FPS
+and when off, 16.7 at 60). It
 changes on the worker, after a present and before the next frame's first
 record: the targets' rectangles (vgxm_render_rect_set) and their entries'
 textures move together, and every effect that samples the screen or a copy

@@ -24,7 +24,10 @@ settings with the gyroscope's line, saved and read back), Button icons
 (PlayStation at once, the panel then naming the Xbox buttons by what they
 do and the guide the Vita's buttons, a remap followed by the game's icon,
 kept by Reset controls), every settings
-variable of 1.0.3 still a row, and a settings.txt of 1.0 loading; then the
+variable of 1.0.3 still a row, a settings.txt of 1.0 loading, and one saved
+with a profile (1.0.3's, the 1.1 betas') loading as this build's profile
+(all three Dynamic resolution, from 50%, 63% and 75%; Quality's AI
+Adaptive), Custom's rows kept and env.txt's standing; then the
 Language row and the panel in Spanish (test_languages: every page, line
 and value fitting, every string with a Spanish entry). It runs
 in a folder of its own, with ux0:data/haloce-vita made there.
@@ -1298,9 +1301,50 @@ static void unset_bruno_rows(void)
 	unsetenv("HALO_PARTICLE_BUDGET");
 }
 
+/* a new start for the profile's rows: as shipped, none in the environment
+(env.txt naming none of them; vita_settings_load sets the environment, and
+in a test it runs again) */
+static void profile_rows_fresh(void)
+{
+	int row;
+
+	for (row = 0; row < PROFILE_ROWS; row++)
+	{
+		struct setting *setting = setting_named(profile_variables[row]);
+
+		unsetenv(profile_variables[row]);
+		setting->choice = shipped_choice[setting - settings];
+	}
+	unsetenv("HALO_PROFILE");
+	settings[0].choice = shipped_choice[0];
+}
+
+/* the profile's rows as `profile` (0 Performance, 1 Balanced, 2 Quality)
+has them in this build, in the environment; the first that is not, in
+`report` */
+static int profile_rows_are(int profile, char *report, int size)
+{
+	int row;
+
+	report[0] = 0;
+	for (row = 0; row < PROFILE_ROWS; row++)
+	{
+		const char *value = getenv(profile_variables[row]);
+
+		if (!value || strcmp(value, profile_values[profile][row]) != 0)
+		{
+			snprintf(report, (size_t)size, "%s=%s, not %s", profile_variables[row], value ? value : "(unset)",
+				profile_values[profile][row]);
+			return 0;
+		}
+	}
+	return 1;
+}
+
 /* Bruno Santana's settings (Graphics > Advanced, and Audio's Sound updates):
 his variables and values, so his build's settings.txt carries over; each in
-the profiles, Quality the Xbox's every one, Balanced the defaults; a row
+the profiles, Quality the Xbox's every one but the AI's think rate
+(Adaptive, 1.1.0-beta.4: every tick was too slow), Balanced the defaults; a row
 changed by hand makes the profile Custom; a settings.txt saved with a
 profile before the rows were added takes the profile's values */
 static void test_bruno_rows(void)
@@ -1313,7 +1357,7 @@ static void test_bruno_rows(void)
 		{ "HALO_MAX_SCENE_LIGHTS", "4", "8", "0" },
 		{ "HALO_VITA_EFFECTS_QUALITY", "1", "2", "2" },
 		{ "HALO_PARTICLE_RENDER_DIVISOR", "2", "1", "1" },
-		{ "HALO_AI_THINK_DIVISOR", "0", "0", "1" },
+		{ "HALO_AI_THINK_DIVISOR", "0", "0", "0" },
 		{ "HALO_SOUND_MANAGER_DIVISOR", "2", "2", "1" },
 	};
 	int index, row, all = 1;
@@ -1350,7 +1394,7 @@ static void test_bruno_rows(void)
 			all = 0;
 		}
 	}
-	check(all, "Bruno Santana's rows: in every profile (Quality the Xbox's: Full, All, every tick, every frame), "
+	check(all, "Bruno Santana's rows: in every profile (Quality the Xbox's: Full, All, every frame; Adaptive AI), "
 		"Balanced their defaults and in the environment, live");
 	check(!setting_named("HALO_AI_PERCEPTION_LOD"), "1.1's Distant AI row is gone (AI think rate)");
 	check(!strcmp(setting_named("HALO_AI_THINK_DIVISOR")->values[0], "1") && !strcmp(setting_named("HALO_AI_THINK_DIVISOR")->values[1], "0") &&
@@ -1362,20 +1406,27 @@ static void test_bruno_rows(void)
 		!strcmp(settings[0].names[settings[0].choice], "Custom"), "Effects quality Performance: saved, the profile Custom");
 	vita_settings_set("HALO_VITA_EFFECTS_QUALITY", "2");
 	check(settings[0].choice == profile, "... and back");
-	/* Quality sets every one to the Xbox's, Performance to its own */
+	/* Quality sets every one to the Xbox's but the AI's (Adaptive),
+	Performance to its own; each profile its Dynamic resolution's minimum */
 	vita_settings_set("HALO_PROFILE", "quality");
 	check(!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") &&
 		!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") &&
-		!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
-		"Quality: the Xbox's shadows, lights, effects, particles, AI and sound");
+		!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
+		"Quality: the Xbox's shadows, lights, effects, particles and sound; Adaptive AI");
+	check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
+		!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(settings[0].names[settings[0].choice], "Quality"),
+		"Quality: Dynamic resolution from 75%, High model detail");
 	vita_settings_set("HALO_PROFILE", "performance");
 	check(!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") &&
 		!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "1") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "2") &&
 		!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "2"),
 		"Performance: no object shadows, 4 lights, Performance effects, half the particles, Adaptive AI, sound every 2nd");
+	check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") &&
+		!strcmp(settings[0].names[settings[0].choice], "Performance"), "Performance: Dynamic resolution from 50%");
 	vita_settings_set("HALO_PROFILE", "balanced");
-	check(!strcmp(settings[0].names[settings[0].choice], "Balanced") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8"),
-		"Balanced again");
+	check(!strcmp(settings[0].names[settings[0].choice], "Balanced") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8") &&
+		!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625"),
+		"Balanced again: Dynamic resolution from 63%");
 	/* his build's settings.txt values off our list: the nearest */
 	vita_settings_set("HALO_MAX_SCENE_LIGHTS", "12");
 	check(!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8"), "Dynamic lights 12 (his build's): 8, the nearest");
@@ -1980,49 +2031,81 @@ int main(void)
 		"SELECT+START opens the Graphics tab; four tabs (Dev hidden)");
 	check(!strncmp(menu_line(1, line, sizeof(line)), "Profile\x02", 8) &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Render resolution\x02", 18) &&
-		!strncmp(menu_line(3, line, sizeof(line)), "Aspect ratio\x02", 13) &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Upscale filter\x02", 15) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Frame limit\x02", 12) &&
-		!strncmp(menu_line(6, line, sizeof(line)), "Frame interpolation\x02", 20) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "FPS counter\x02", 12) &&
-		!strncmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Particles\x02  Full >") &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Frame interpolation\x02", 20) &&
+		!strncmp(menu_line(6, line, sizeof(line)), "FPS counter\x02", 12) &&
+		!strncmp(menu_line(7, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Particles\x02  Full >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Display\x02  16:9, Smooth  >") &&
 		!strcmp(menu_line(10, line, sizeof(line)), "Advanced\x02  >") &&
 		!strncmp(menu_line(11, line, sizeof(line)), "\x05Sets resolution", 16) &&
 		!strncmp(menu_line(12, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
-		"Graphics: Profile, Render resolution, Aspect, Upscale, Frame limit, Frame interpolation, FPS counter, weapon motion, "
-		"Particles (Full), Advanced; help, buttons");
+		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter, weapon "
+		"motion, Particles (Full), Display (16:9, Smooth), Advanced; help, buttons");
 	check(menu_fits() && menu_rows() <= 10, "Graphics: ten rows at most, each fits");
-	check(!strstr(menu, "Dynamic minimum") && !strstr(menu, "Model detail"),
-		"Graphics: Dynamic minimum hidden (not Dynamic), the detail rows under Advanced");
-	check(strstr(menu, "\nProfile\x02< Balanced >") && strstr(menu, "\nRender resolution\x02< 75% >") &&
-		strstr(menu, "\nAspect ratio\x02  16:9 >"), "values in a column: '< ' or two spaces before each");
-	check(!strstr(menu, "Render resolution*") && !strstr(menu, "Aspect ratio*"), "resolution and aspect: live, no *");
+	check(!strstr(menu, "Aspect ratio") && !strstr(menu, "Upscale filter") && !strstr(menu, "Model detail"),
+		"Graphics: the aspect ratio and upscale filter under Display, the detail rows under Advanced");
+	check(strstr(menu, "\nProfile\x02< Balanced >") && strstr(menu, "\nRender resolution\x02< Dynamic  ") &&
+		strstr(menu, "\nDynamic minimum\x02< 63% >") && strstr(menu, "\nFrame limit\x02  30 FPS >"),
+		"values in a column: '< ' or two spaces before each; Balanced: Dynamic, from 63%");
+	check(!strstr(menu, "Render resolution*") && !strstr(menu, "Dynamic minimum*"), "resolution and its minimum: live, no *");
+	check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") &&
+		!strcmp(setting_named("HALO_RENDER_SCALE")->values[shipped_choice[1]], "dynamic") &&
+		!strcmp(setting_named("HALO_DYNAMIC_RES_MIN")->values[shipped_choice[2]], "0.625"),
+		"the defaults (Balanced): Render resolution Dynamic, Dynamic minimum 63%, in the environment");
 	{
-		/* Render resolution's Dynamic: saved as a word, the profile Custom,
-		back to a number, and the minimum's row */
+		/* Render resolution: a fixed scale hides the minimum (kept) and
+		makes the profile Custom; Dynamic again, Balanced; the minimum, a
+		row the profiles set, changed by hand: Custom */
 		unsigned long generation = halo_settings_generation;
 
-		vita_settings_set("HALO_RENDER_SCALE", "dynamic");
-		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && halo_settings_generation != generation &&
-			strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=dynamic\n") &&
+		vita_settings_set("HALO_RENDER_SCALE", "0.75");
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=0.75\n") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.625\n") &&
 			!strcmp(settings[0].names[settings[0].choice], "Custom"),
-			"Render resolution Dynamic: in the environment and settings.txt at once, the profile Custom");
+			"Render resolution 75%: in the environment and settings.txt at once (the minimum kept), the profile Custom");
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
-		check(!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) && !strstr(line, "*"),
-			"Dynamic: the Dynamic minimum row shows, under it (live, no *)");
-		check(strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.5\n") != NULL, "Dynamic minimum: 50% by default, saved");
-		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
-		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
-			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.75\n"), "Dynamic minimum 75%");
+		check(!strstr(menu, "Dynamic minimum") && !strncmp(menu_line(3, line, sizeof(line)), "Frame limit\x02", 12) &&
+			menu_rows() == 9, "not Dynamic: the Dynamic minimum row hidden");
 		vita_settings_set("HALO_RENDER_SCALE", "0.3");
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5"), "a scale off the list goes to the nearest number, not Dynamic");
-		vita_settings_set("HALO_RENDER_SCALE", "0.75");
+		vita_settings_set("HALO_RENDER_SCALE", "dynamic");
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=dynamic\n") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Dynamic again (from 63%): Balanced again");
+		press(VITA_BUTTON_DOWN);
+		press(VITA_BUTTON_UP);
+		check(!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 10 && menu_fits(),
+			"Dynamic: the Dynamic minimum row shows, under it");
+		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
-			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.75\n"), "not Dynamic: the minimum kept (hidden)");
-		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.5");
-		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 75%: Balanced again");
+			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.75\n") &&
+			!strcmp(settings[0].names[settings[0].choice], "Custom"), "Dynamic minimum 75%: saved, the profile Custom");
+		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.625");
+		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 63%: Balanced again");
+	}
+	{
+		/* Display: the aspect ratio and the upscale filter, on a page of
+		their own (live, no *); the row says both */
+		check(to_line("Display") && strstr(menu, "\n\x05" "Aspect ratio and upscale filter\n") && menu_fits(),
+			"Display: its help says what is there");
+		check(open_page("Display") && strstr(menu, "\n\x03Graphics > Display\n") &&
+			!strcmp(menu_line(2, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
+			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") && menu_rows() == 2 &&
+			menu_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
+			"Graphics, Display: Aspect ratio (16:9), Upscale filter (Smooth), live");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && strstr(file_text(SETTINGS_FILE), "HALO_DISPLAY_WIDTH=640\n") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Aspect ratio 4:3: saved, the profile kept");
+		press(VITA_BUTTON_CIRCLE);
+		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Display\x02  4:3, Smooth  >"),
+			"circle: back to Graphics, on Display, which says 4:3");
+		vita_settings_set("HALO_DISPLAY_WIDTH", "848");
+		while (menu_selected > 2)
+			press(VITA_BUTTON_UP);
 	}
 	{
 		/* Frame interpolation: Off by default (and in the environment the
@@ -2310,14 +2393,18 @@ int main(void)
 
 		write_file(SETTINGS_FILE, old, sizeof(old) - 1);
 		unsetenv("XV_FPS");
+		profile_rows_fresh();
 		vita_settings_load();
 		check(!strcmp(getenv("XV_FPS"), "1") && !strcmp(getenv("HALO_RENDER_SCALE"), "0.5") &&
 			!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && !strcmp(getenv("XV_LOOK_SENS"), "150") &&
 			!strcmp(getenv("XV_INVERT_Y"), "1") && !strcmp(getenv("HALO_SOUND_CHANNELS"), "24") &&
 			!strcmp(getenv("HALO_CROUCH_TOGGLE"), "0") && !strcmp(getenv("HALO_FRAME_CAP"), "60") &&
 			!strcmp(settings[0].names[settings[0].choice], "Custom"), "a 1.0 settings.txt loads, row for row");
-		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") && choice_of("HALO_DYNAMIC_RES_MIN") == 0,
-			"a 1.0 settings.txt: Dynamic minimum at its default");
+		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") && choice_of("HALO_DYNAMIC_RES_MIN") == 1,
+			"a 1.0 settings.txt (Custom): Dynamic minimum at its default, 63%");
+		check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(getenv("HALO_SOUND_OBSTRUCTION_TICKS"), "6") &&
+			!strcmp(getenv("HALO_SUN_RAYS"), "1") && !strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0"),
+			"a 1.0 settings.txt (Custom): its own rows kept, the rows it does not name at their defaults");
 	}
 
 	/* 1.0.3's co-op choice (every game hosted became that level, the
@@ -2378,43 +2465,174 @@ int main(void)
 		vita_settings_set("HALO_NET_LOBBY_NAME", "");
 	}
 
-	/* a settings.txt saved with the Performance profile before Sun rays
-	was a row: still Performance, the sun rays off as the profile has them */
+	/* settings.txt files saved with a profile (HALO_PROFILE is saved only
+	while the rows match it) load as that profile with this build's values:
+	the rows added since (Sun rays, 1.1; Bruno Santana's, 1.1; Particles,
+	1.1.0-beta.4) and the ones changed (1.1.0-beta.4: Dynamic resolution
+	in all three with their minimums, Quality's Adaptive AI). Custom keeps
+	its rows; a row env.txt names is left to env.txt (and settings.txt,
+	which has the last word over it, as for any row) */
 	{
+		char report[160];
+		/* (1.0.3: no Sun rays, no Bruno Santana's rows, no Particles, no
+		Dynamic) */
 		static const char performance[] = "HALO_PROFILE=performance\nHALO_RENDER_SCALE=0.5\nHALO_MODEL_LOD_SCALE=0.5\n"
 			"HALO_MIN_OBJECT_PIXELS=8\nHALO_SCENERY_UPDATE_DIVISOR=4\nHALO_LIGHTING_REFRESH_DIVISOR=3\n"
 			"HALO_SOUND_OBSTRUCTION_TICKS=6\n";
+		static const char balanced_103[] = "HALO_PROFILE=balanced\nHALO_RENDER_SCALE=0.75\nHALO_MODEL_LOD_SCALE=0.5\n"
+			"HALO_MIN_OBJECT_PIXELS=8\nHALO_SCENERY_UPDATE_DIVISOR=4\nHALO_LIGHTING_REFRESH_DIVISOR=3\n"
+			"HALO_SOUND_OBSTRUCTION_TICKS=3\nHALO_DISPLAY_WIDTH=640\n";
 		static const char quality[] = "HALO_PROFILE=quality\nHALO_RENDER_SCALE=1\nHALO_MODEL_LOD_SCALE=1\n"
 			"HALO_MIN_OBJECT_PIXELS=0\nHALO_SCENERY_UPDATE_DIVISOR=1\nHALO_LIGHTING_REFRESH_DIVISOR=1\n"
 			"HALO_SOUND_OBSTRUCTION_TICKS=1\n";
+		/* (the 1.1 betas, before Particles: every row saved, the minimum
+		50% and hidden) */
+		static const char balanced_11[] = "HALO_PROFILE=balanced\nHALO_RENDER_SCALE=0.75\nHALO_DYNAMIC_RES_MIN=0.5\n"
+			"HALO_DISPLAY_WIDTH=848\nHALO_UPSCALE_FILTER=1\nHALO_MODEL_LOD_SCALE=0.5\nHALO_MIN_OBJECT_PIXELS=8\n"
+			"HALO_VITA_SHADOWS=1\nHALO_MAX_SCENE_LIGHTS=8\nHALO_VITA_EFFECTS_QUALITY=2\nHALO_PARTICLE_RENDER_DIVISOR=1\n"
+			"HALO_SUN_RAYS=1\nHALO_SCENERY_UPDATE_DIVISOR=4\nHALO_LIGHTING_REFRESH_DIVISOR=3\nHALO_AI_THINK_DIVISOR=0\n"
+			"HALO_SOUND_OBSTRUCTION_TICKS=3\nHALO_SOUND_MANAGER_DIVISOR=2\nHALO_FRAME_CAP=30\n";
+		static const char quality_11[] = "HALO_PROFILE=quality\nHALO_RENDER_SCALE=1\nHALO_DYNAMIC_RES_MIN=0.5\n"
+			"HALO_MODEL_LOD_SCALE=1\nHALO_MIN_OBJECT_PIXELS=0\nHALO_VITA_SHADOWS=2\nHALO_MAX_SCENE_LIGHTS=0\n"
+			"HALO_VITA_EFFECTS_QUALITY=2\nHALO_PARTICLE_RENDER_DIVISOR=1\nHALO_SUN_RAYS=1\nHALO_SCENERY_UPDATE_DIVISOR=1\n"
+			"HALO_LIGHTING_REFRESH_DIVISOR=1\nHALO_AI_THINK_DIVISOR=1\nHALO_SOUND_OBSTRUCTION_TICKS=1\n"
+			"HALO_SOUND_MANAGER_DIVISOR=1\n";
+		static const char performance_11[] = "HALO_PROFILE=performance\nHALO_RENDER_SCALE=0.5\nHALO_DYNAMIC_RES_MIN=0.5\n"
+			"HALO_MODEL_LOD_SCALE=0.5\nHALO_MIN_OBJECT_PIXELS=8\nHALO_VITA_SHADOWS=0\nHALO_MAX_SCENE_LIGHTS=4\n"
+			"HALO_VITA_EFFECTS_QUALITY=1\nHALO_PARTICLE_RENDER_DIVISOR=2\nHALO_SUN_RAYS=0\nHALO_SCENERY_UPDATE_DIVISOR=4\n"
+			"HALO_LIGHTING_REFRESH_DIVISOR=3\nHALO_AI_THINK_DIVISOR=0\nHALO_SOUND_OBSTRUCTION_TICKS=6\n"
+			"HALO_SOUND_MANAGER_DIVISOR=2\nHALO_PARTICLE_BUDGET=reduced\n";
+		/* (Custom: the player's own rows, a fixed 75% and AI every tick
+		among them) */
+		static const char custom_11[] = "HALO_PROFILE=custom\nHALO_RENDER_SCALE=0.75\nHALO_DYNAMIC_RES_MIN=0.5\n"
+			"HALO_MODEL_LOD_SCALE=0.75\nHALO_MIN_OBJECT_PIXELS=8\nHALO_VITA_SHADOWS=1\nHALO_MAX_SCENE_LIGHTS=8\n"
+			"HALO_VITA_EFFECTS_QUALITY=2\nHALO_PARTICLE_RENDER_DIVISOR=1\nHALO_SUN_RAYS=1\nHALO_SCENERY_UPDATE_DIVISOR=4\n"
+			"HALO_LIGHTING_REFRESH_DIVISOR=3\nHALO_AI_THINK_DIVISOR=1\nHALO_SOUND_OBSTRUCTION_TICKS=3\n"
+			"HALO_SOUND_MANAGER_DIVISOR=2\nHALO_PARTICLE_BUDGET=full\n";
+		/* (Custom by its minimum alone: Dynamic from 75%, Balanced's rows
+		otherwise) */
+		static const char custom_dynamic[] = "HALO_PROFILE=custom\nHALO_RENDER_SCALE=dynamic\nHALO_DYNAMIC_RES_MIN=0.75\n";
 
 		write_file(SETTINGS_FILE, performance, sizeof(performance) - 1);
-		unsetenv("HALO_SUN_RAYS");
-		unset_bruno_rows();
+		profile_rows_fresh();
 		vita_settings_load();
-		check(!strcmp(getenv("HALO_SUN_RAYS"), "0") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
-			"a Performance settings.txt from before Sun rays: Performance, sun rays off");
-		check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced"),
-			"... and from before Particles: Reduced, as Performance has them");
+		check(profile_rows_are(0, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Performance"),
+			"a Performance settings.txt from 1.0.3: Performance, every row as Performance has them now");
+		if (report[0])
+			printf("(%s)\n", report);
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") &&
+			!strcmp(getenv("HALO_SUN_RAYS"), "0") && !strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") &&
+			!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") &&
+			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0"),
+			"... its 50% Dynamic from 50%; sun rays off, Reduced particles, no shadows, 4 lights, Adaptive AI (rows added since)");
+		write_file(SETTINGS_FILE, balanced_103, sizeof(balanced_103) - 1);
+		profile_rows_fresh();
+		vita_settings_load();
+		check(profile_rows_are(1, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Balanced") &&
+			!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") &&
+			!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640"),
+			"a Balanced settings.txt from 1.0.3: Balanced, its 75% Dynamic from 63%; its 4:3 kept (no profile's row)");
+		if (report[0])
+			printf("(%s)\n", report);
 		write_file(SETTINGS_FILE, quality, sizeof(quality) - 1);
-		unsetenv("HALO_SUN_RAYS");
-		unset_bruno_rows();
+		profile_rows_fresh();
 		vita_settings_load();
-		check(!strcmp(getenv("HALO_SUN_RAYS"), "1") && !strcmp(settings[0].names[settings[0].choice], "Quality"),
-			"a Quality settings.txt from before Sun rays: Quality, sun rays on");
-		check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full"),
-			"... and from before Particles: Full, as Quality has them");
-		check(!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") &&
-			!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") &&
-			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
-			"... and the rows added in 1.1 (Bruno Santana's) as Quality has them: the Xbox's");
-		write_file(SETTINGS_FILE, performance, sizeof(performance) - 1);
-		unsetenv("HALO_SUN_RAYS");
-		unset_bruno_rows();
+		check(profile_rows_are(2, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Quality"),
+			"a Quality settings.txt from 1.0.3 (before Sun rays): Quality, every row as Quality has them now");
+		if (report[0])
+			printf("(%s)\n", report);
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
+			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(getenv("HALO_SUN_RAYS"), "1") &&
+			!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && !strcmp(getenv("HALO_VITA_SHADOWS"), "2") &&
+			!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") && !strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") &&
+			!strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
+			"... its 100% Dynamic from 75%, Adaptive AI; sun rays, Full particles, the Xbox's shadows, lights, effects, sound");
+
+		write_file(SETTINGS_FILE, balanced_11, sizeof(balanced_11) - 1);
+		profile_rows_fresh();
 		vita_settings_load();
-		check(!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") &&
-			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
-			"a Performance settings.txt from 1.0.3: Performance, the new rows as it has them");
+		check(profile_rows_are(1, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Balanced") &&
+			!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") &&
+			!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && !strcmp(getenv("HALO_UPSCALE_FILTER"), "1"),
+			"a Balanced settings.txt of the 1.1 betas (75%, minimum 50%, before Particles): Balanced, Dynamic from 63%, "
+			"Full particles; its Sharp filter kept");
+		if (report[0])
+			printf("(%s)\n", report);
+		/* (saved again: this build's values, still Balanced) */
+		vita_settings_set("HALO_FRAME_CAP", "30");
+		check(strstr(file_text(SETTINGS_FILE), "HALO_PROFILE=balanced\n") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=dynamic\n") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.625\n") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=full\n"),
+			"... saved again: Balanced with Dynamic from 63%");
+		write_file(SETTINGS_FILE, quality_11, sizeof(quality_11) - 1);
+		profile_rows_fresh();
+		vita_settings_load();
+		check(profile_rows_are(2, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Quality") &&
+			!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
+			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1"),
+			"a Quality settings.txt of the 1.1 betas (100%, AI every tick): Quality, Dynamic from 75%, Adaptive AI");
+		if (report[0])
+			printf("(%s)\n", report);
+		write_file(SETTINGS_FILE, performance_11, sizeof(performance_11) - 1);
+		profile_rows_fresh();
+		vita_settings_load();
+		check(profile_rows_are(0, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Performance") &&
+			!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5"),
+			"a Performance settings.txt of 1.1.0-beta.4's first builds (50%, Particles): Performance, Dynamic from 50%");
+		if (report[0])
+			printf("(%s)\n", report);
+
+		/* Custom: the player's rows, as saved */
+		write_file(SETTINGS_FILE, custom_11, sizeof(custom_11) - 1);
+		profile_rows_fresh();
+		vita_settings_load();
+		check(!strcmp(settings[0].names[settings[0].choice], "Custom") && !strcmp(getenv("HALO_RENDER_SCALE"), "0.75") &&
+			!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") && !strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") &&
+			!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75"),
+			"a Custom settings.txt: Custom, its own rows kept (75%, minimum 50%, AI every tick, Medium models)");
+		write_file(SETTINGS_FILE, custom_dynamic, sizeof(custom_dynamic) - 1);
+		profile_rows_fresh();
+		vita_settings_load();
+		check(!strcmp(settings[0].names[settings[0].choice], "Custom") && !strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") &&
+			!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.5"),
+			"a Custom settings.txt, Dynamic from 75% on Balanced's rows: Custom, its minimum kept");
+
+		/* env.txt's rows stand: a 1.0.3 Quality file (no AI row) with env.txt
+		naming the AI's think rate and the minimum - those as env.txt has
+		them, the profile Custom; the others Quality's */
+		write_file(SETTINGS_FILE, quality, sizeof(quality) - 1);
+		profile_rows_fresh();
+		setenv("HALO_AI_THINK_DIVISOR", "1", 1);
+		setenv("HALO_DYNAMIC_RES_MIN", "0.5", 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") &&
+			!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") &&
+			!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+			"env.txt's AI every tick and minimum 50% over a Quality settings.txt: env.txt's, the rest Quality's, Custom");
+		/* (and a row env.txt names that settings.txt names too: settings.txt's,
+		as for any row - the 1.0.3 Balanced file's 75% under env.txt's 50%) */
+		write_file(SETTINGS_FILE, balanced_103, sizeof(balanced_103) - 1);
+		profile_rows_fresh();
+		setenv("HALO_RENDER_SCALE", "0.5", 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") &&
+			!strcmp(settings[0].names[settings[0].choice], "Custom"),
+			"env.txt naming the render resolution over a Balanced settings.txt: not moved by the profile (settings.txt's), Custom");
+		/* (env.txt's HALO_PROFILE: that profile's rows, under the ones it
+		names itself) */
+		unlink(SETTINGS_FILE);
+		profile_rows_fresh();
+		setenv("HALO_PROFILE", "quality", 1);
+		setenv("HALO_AI_THINK_DIVISOR", "1", 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
+			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+			"env.txt's HALO_PROFILE=quality: Dynamic from 75%, its own AI every tick, Custom");
+		profile_rows_fresh();
+		vita_settings_load();
+		check(profile_rows_are(1, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"no settings.txt, no env.txt: Balanced");
 	}
 
 	/* a settings.txt with Dynamic loads */
