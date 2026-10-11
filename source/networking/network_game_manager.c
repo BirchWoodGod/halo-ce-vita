@@ -808,6 +808,15 @@ boolean network_game_create_game_objects(
 			}
 		}
 	}
+	else if (network_game_record_format_current() == _network_game_record_crossplay)
+	{
+		void platform_log(char const *format, ...);
+
+		/* port: (a PC host's co-op game, no engine: its difficulty and its
+		co-op switches, PLAYER COLLISIONS off for one) */
+		platform_log("game: the host's co-op game on difficulty %d; co-op switches %d", (int)game->difficulty,
+			(int)game->cooperative_flags);
+	}
 
 	if (game_load(&options))
 	{

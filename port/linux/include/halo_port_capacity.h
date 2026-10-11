@@ -41,7 +41,11 @@ the Vita keeps the campaign's: a larger game state would leave single
 player's saves behind (their layout) and take memory the Vita does not have,
 and its co-op host has no extra enemies (network.coop_enemies_mode "none",
 port_config.c). With these the extra enemies find no room
-(coop_enemies.c leaves a level's 256 actors to it). */
+(coop_enemies.c leaves a level's 256 actors to it). These pools are a host's
+only: a client of the distributed netcode runs no AI, and as one (Crossplay
+on) it joins a PC co-op host whose pools are these four times over; the AI
+units it drives go in a table of their own, which holds that host's 1056
+(port/linux/game/network_actor_table.h; docs/crossplay.md 6.2). */
 
 #define HALO_PORT_MAXIMUM_ACTORS 256 /* (256) */
 #define HALO_PORT_MAXIMUM_PROPS 768 /* (768) */

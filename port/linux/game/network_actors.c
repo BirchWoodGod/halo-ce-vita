@@ -43,6 +43,7 @@ an AI unit the same way it kills a player's.
 #include "units/units.h"
 #include "units/unit_control_data.h"
 #include "network_coop.h"
+#include "network_actor_table.h"
 #include "network_distributed.h"
 #include "network_wire.h"
 
@@ -62,9 +63,7 @@ enum
 	enemies give each squad more of itself for each player. A client runs
 	no AI, so only this table, not the actor pools, holds what such a host
 	drives (docs/crossplay.md 6.2) */
-	MAXIMUM_CROSSPLAY_CLIENT_ACTORS = 1024 + 32,
-	MAXIMUM_CLIENT_NETWORK_ACTORS = MAXIMUM_CROSSPLAY_CLIENT_ACTORS > MAXIMUM_NETWORK_ACTORS ?
-		MAXIMUM_CROSSPLAY_CLIENT_ACTORS : MAXIMUM_NETWORK_ACTORS,
+	MAXIMUM_CROSSPLAY_CLIENT_ACTORS = NETWORK_ACTOR_TABLE_CAPACITY,
 	MAXIMUM_ENTRIES_PER_MESSAGE = 64,
 	/* A client keeps applying a control for this long after the host last
 	sent one. After that the unit is left alone: the actor let go of it, or
@@ -254,11 +253,14 @@ one counter, so a unit that drops out of the table and comes back can't
 repeat the number a client last played */
 static byte host_event_number;
 
-static struct client_actor client_actors[MAXIMUM_CLIENT_NETWORK_ACTORS];
-static short client_actor_count;
-/* client: each unit's entry by its object's absolute index, plus one (0:
-none), so an entry is found at once among a thousand */
-static short client_actor_slots[MAXIMUM_OBJECTS_PER_MAP];
+typedef char network_actor_table_objects_assert[NETWORK_ACTOR_TABLE_OBJECTS == MAXIMUM_OBJECTS_PER_MAP ? 1 : -1];
+typedef char network_actor_table_capacity_assert[NETWORK_ACTOR_TABLE_CAPACITY >= MAXIMUM_NETWORK_ACTORS ? 1 : -1];
+
+/* client: the units, found by their object's absolute index
+(network_actor_table.c), and each one's entry here by the same index */
+static struct network_actor_table client_actor_table;
+static struct client_actor client_actors[NETWORK_ACTOR_TABLE_CAPACITY];
+#define client_actor_count (client_actor_table.count)
 /* client: the most entries this game, the units whose states found the
 table full (each told once a game: logged the first time), and the entries
 refused for their values */
@@ -330,64 +332,33 @@ static short client_actor_limit(
 	return network_wire_crossplay() ? MAXIMUM_CROSSPLAY_CLIENT_ACTORS : MAXIMUM_NETWORK_ACTORS;
 }
 
-/* client: the unit's entry, NULL for none (a unit_index a valid object
-index: distributed_object_index_valid) */
+/* client: the unit's entry, NULL for none */
 static struct client_actor *client_actor_find(
 	long unit_index)
 {
-	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(unit_index);
-	short slot;
+	short index = network_actor_table_find(&client_actor_table, unit_index);
 
-	if (absolute_index < 0 || absolute_index >= MAXIMUM_OBJECTS_PER_MAP)
-		return NULL;
-	slot = client_actor_slots[absolute_index];
-	if (slot <= 0 || slot > client_actor_count || client_actors[slot - 1].unit_index != unit_index)
-		return NULL;
-	return &client_actors[slot - 1];
+	return index >= 0 ? &client_actors[index] : NULL;
 }
 
 /* client: the entry at index removed, the last put in its place */
 static void client_actor_remove(
 	short index)
 {
-	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(client_actors[index].unit_index);
+	short moved = network_actor_table_remove(&client_actor_table, index);
 
-	if (absolute_index >= 0 && absolute_index < MAXIMUM_OBJECTS_PER_MAP &&
-		client_actor_slots[absolute_index] == index + 1)
-	{
-		client_actor_slots[absolute_index] = 0;
-	}
-	client_actors[index] = client_actors[--client_actor_count];
-	if (index < client_actor_count)
-	{
-		absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(client_actors[index].unit_index);
-		if (absolute_index >= 0 && absolute_index < MAXIMUM_OBJECTS_PER_MAP)
-			client_actor_slots[absolute_index] = (short)(index + 1);
-	}
+	if (moved >= 0)
+		client_actors[index] = client_actors[moved];
 }
 
 static struct client_actor *client_actor_for(
 	long unit_index)
 {
-	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(unit_index);
-	struct client_actor *actor = client_actor_find(unit_index);
-	short slot;
+	struct client_actor *actor;
+	long previous;
+	short index = network_actor_table_add(&client_actor_table, unit_index, client_actor_limit(), &previous);
 
-	if (actor)
-		return actor;
-	if (absolute_index < 0 || absolute_index >= MAXIMUM_OBJECTS_PER_MAP)
-		return NULL;
-	/* (an entry of the object this index held before, gone: its place is the
-	new unit's) */
-	slot = client_actor_slots[absolute_index];
-	if (slot > 0 && slot <= client_actor_count &&
-		DATUM_INDEX_TO_ABSOLUTE_INDEX(client_actors[slot - 1].unit_index) == absolute_index)
-	{
-		actor = &client_actors[slot - 1];
-		if (actor->driven && object_try_and_get_and_verify_type(actor->unit_index, _object_mask_unit))
-			unit_set_actively_controlled(actor->unit_index, FALSE);
-	}
-	else if (client_actor_count >= client_actor_limit())
+	if (index < 0)
 	{
 		/* (its object states still place it: an OpenCE host sends them for
 		every unit; it is not driven) */
@@ -399,13 +370,15 @@ static struct client_actor *client_actor_for(
 		client_actor_statistics.untracked++;
 		return NULL;
 	}
-	else
-	{
-		actor = &client_actors[client_actor_count++];
-		client_actor_slots[absolute_index] = client_actor_count;
-		if (client_actor_count > client_actor_statistics.most)
-			client_actor_statistics.most = client_actor_count;
-	}
+	actor = &client_actors[index];
+	if (previous == unit_index)
+		return actor;
+	/* (an entry of the object this index held before, gone: its place is the
+	new unit's) */
+	if (previous != NONE && actor->driven && object_try_and_get_and_verify_type(previous, _object_mask_unit))
+		unit_set_actively_controlled(previous, FALSE);
+	if (client_actor_count > client_actor_statistics.most)
+		client_actor_statistics.most = client_actor_count;
 	csmemset(actor, 0, sizeof(*actor));
 	actor->unit_index = unit_index;
 	actor->impulse = NONE;
@@ -512,6 +485,23 @@ static void actor_state_from_unit(
 	distributed_vector_pack(&unit->object.up, DISTRIBUTED_UNIT_SCALE, &state->up);
 }
 
+/* client: an entry refused for a value: counted, the first of a game
+logged with what was wrong (FALSE) */
+static boolean actor_state_refused(
+	struct distributed_actor_state const *state,
+	char const *what)
+{
+	if (!client_actor_statistics.rejected)
+	{
+		error(_error_silent, "AI sync: the host's state of unit %lx refused: its %s (animation state %d, aiming speed %d, "
+			"control %04x, impulse %d, speech %lx, animation %lx/%d)", (unsigned long)state->unit_index, what,
+			(int)state->animation_state, (int)state->aiming_speed, (unsigned)state->control_flags, (int)state->impulse,
+			(unsigned long)state->speech_sound, (unsigned long)state->user_animation_graph, (int)state->user_animation);
+	}
+	client_actor_statistics.rejected++;
+	return FALSE;
+}
+
 /* Client: stores the entry's control and applies its state to the unit.
 Returns FALSE for an entry with invalid values. */
 static boolean actor_state_apply(
@@ -538,27 +528,32 @@ static boolean actor_state_apply(
 	{
 		unit_port_resurrect(state->unit_index);
 	}
-	if (!actor_unit_valid(state->unit_index) ||
-		state->animation_state >= NUMBER_OF_UNIT_ANIMATION_STATES ||
-		state->aiming_speed >= NUMBER_OF_UNIT_AIMING_SPEEDS ||
-		!VALID_FLAGS(state->control_flags, NUMBER_OF_UNIT_CONTROL_FLAGS) ||
-		(state->impulse != NO_IMPULSE && state->impulse >= NUMBER_OF_ACTOR_ACTIONS) ||
-		(state->speech_sound != NONE && !distributed_tag_of_group(state->speech_sound, SOUND_DEFINITION_TAG)) ||
-		(state->user_animation_graph != NONE &&
-			!distributed_graph_animation(state->user_animation_graph, state->user_animation)) ||
-		!distributed_point_valid(&state->position, UNIT_WORLD_BOUND))
-	{
-		client_actor_statistics.rejected++;
+	/* (a unit no longer an AI's here: dead, or a player's, a moment before
+	the host's state says so; not a value refused) */
+	if (!actor_unit_valid(state->unit_index))
 		return FALSE;
+	if (state->animation_state >= NUMBER_OF_UNIT_ANIMATION_STATES)
+		return actor_state_refused(state, "animation state");
+	if (state->aiming_speed >= NUMBER_OF_UNIT_AIMING_SPEEDS)
+		return actor_state_refused(state, "aiming speed");
+	if (!VALID_FLAGS(state->control_flags, NUMBER_OF_UNIT_CONTROL_FLAGS))
+		return actor_state_refused(state, "control flags");
+	if (state->impulse != NO_IMPULSE && state->impulse >= NUMBER_OF_ACTOR_ACTIONS)
+		return actor_state_refused(state, "impulse");
+	if (state->speech_sound != NONE && !distributed_tag_of_group(state->speech_sound, SOUND_DEFINITION_TAG))
+		return actor_state_refused(state, "speech sound");
+	if (state->user_animation_graph != NONE &&
+		!distributed_graph_animation(state->user_animation_graph, state->user_animation))
+	{
+		return actor_state_refused(state, "custom animation");
 	}
+	if (!distributed_point_valid(&state->position, UNIT_WORLD_BOUND))
+		return actor_state_refused(state, "position");
 	distributed_vector_unpack(&state->velocity, DISTRIBUTED_VELOCITY_SCALE, &velocity);
 	distributed_vector_unpack(&state->forward, DISTRIBUTED_UNIT_SCALE, &forward);
 	distributed_vector_unpack(&state->up, DISTRIBUTED_UNIT_SCALE, &up);
 	if (!distributed_axes_make_valid(&forward, &up))
-	{
-		client_actor_statistics.rejected++;
-		return FALSE;
-	}
+		return actor_state_refused(state, "axes");
 	actor = client_actor_for(state->unit_index);
 	if (!actor)
 		return TRUE;
@@ -682,8 +677,7 @@ void network_actors_new_game(
 	void)
 {
 	host_actor_count = 0;
-	client_actor_count = 0;
-	csmemset(client_actor_slots, 0, sizeof(client_actor_slots));
+	network_actor_table_clear(&client_actor_table);
 	csmemset(&client_actor_statistics, 0, sizeof(client_actor_statistics));
 }
 
