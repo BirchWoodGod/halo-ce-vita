@@ -5,7 +5,7 @@
 # here by tools/release/make_update_key.py (never a real one):
 #   update_download_test.c     the signature, manifest, version, title, size,
 #                              URL and redirect checks; again built with the
-#                              placeholder key (refuses all)
+#                              placeholder key, 64 zeros given (refuses all)
 #   update_download_fuzz.c     every truncation and UPDATE_FUZZ_ITERATIONS
 #                              (default 30000) changes of a signed manifest,
 #                              random inputs to every reader; with
@@ -59,7 +59,7 @@ verify_sources="$root/port/vita/host/vita_update_verify.c $root/port/linux/src/u
 $cc $flags $sanitize $keyflags "$here/update_download_test.c" $verify_sources -o "$out/update_download_test"
 "$out/update_download_test" || status=1
 echo "--- update_download_test (placeholder key)"
-$cc $flags $sanitize -DHALO_TEST_PLACEHOLDER "$here/update_download_test.c" $verify_sources -o "$out/update_download_placeholder"
+$cc $flags $sanitize -DHALO_TEST_PLACEHOLDER -DHALO_UPDATE_PUBLIC_KEY=\"0000000000000000000000000000000000000000000000000000000000000000\" "$here/update_download_test.c" $verify_sources -o "$out/update_download_placeholder"
 "$out/update_download_placeholder" || status=1
 
 echo "--- update_download_fuzz"
@@ -109,7 +109,7 @@ harness_sources="$here/update_download_harness.c $root/port/vita/host/vita_updat
 printf '#define POSIX_HTTPS_TEST_ROOTS "%s"\n' "$out/test_roots.h" > "$out/test_roots_define.h"
 $cc $flags $sanitize $keyflags -include "$out/test_roots_define.h" -I"$root/port/third_party/mbedtls/include" \
 	$harness_sources "$out"/mbedtls/*.o -lpthread -o "$out/harness"
-$cc $flags $sanitize -I"$root/port/third_party/mbedtls/include" $harness_sources "$out"/mbedtls/*.o -lpthread \
+$cc $flags $sanitize -DHALO_UPDATE_PUBLIC_KEY=\"0000000000000000000000000000000000000000000000000000000000000000\" -I"$root/port/third_party/mbedtls/include" $harness_sources "$out"/mbedtls/*.o -lpthread \
 	-o "$out/harness_placeholder"
 
 # ---------- the releases (tools/release/sign_update.py, as the owner signs)
