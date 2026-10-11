@@ -124,8 +124,11 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   Legendary), "Bot teams" (HALO_BOT_TEAMS: in team games Even, on both
   teams, or Against you, all on the other team) and "Bot vehicles"
   (HALO_BOT_VEHICLES: On, the bots drive and ride the map's Warthogs, Ghosts
-  and Scorpions, or Off, on foot) show below it. Live: the lobby and the
-  bots follow them.
+  and Scorpions, or Off, on foot) and "Bot playlist" (HALO_BOT_PLAYLIST:
+  Off; Small maps, Big maps, Everything or Custom, bots_playlist.txt in the
+  data folder: after the scores the game goes on to the next map and
+  gametype by itself, port/linux/game/bots_playlist.c) show below it. Live:
+  the lobby and the bots follow them.
 
 Multiplayer's Modded maps page lists the maps in the maps folder that are not the Xbox's own:
 name, size, Xbox or Custom Edition (CE; CE+OS for OpenSauce's .yelo; CE SP
@@ -545,6 +548,12 @@ static struct setting settings[] = {
 		"Team games: bots on both teams, or all against you", 0, TAB_MULTIPLAYER },
 	{ "  Bot vehicles", "HALO_BOT_VEHICLES", 0, 2, { "1", "0" }, { "On", "Off" },
 		"Bots drive and ride the map's vehicles", 0, TAB_MULTIPLAYER },
+	/* (port/linux/game/bots_playlist.c: after the scores the next map and
+	gametype by itself; Custom reads bots_playlist.txt in the data folder.
+	Live: read at each game's scores) */
+	{ "  Bot playlist", "HALO_BOT_PLAYLIST", 0, 5, { "off", "small", "big", "all", "custom" },
+		{ "Off", "Small maps", "Big maps", "Everything", "Custom" },
+		"Split Screen: next map and game by itself. Custom: bots_playlist.txt", 0, TAB_MULTIPLAYER },
 	/* (network.coop_players: co-op games this Vita hosts take 2 players by
 	default, the Xbox's; 3 and 4 are experimental, the host running the
 	campaign's AI and scripts for everyone: network_server_manager.c) */
@@ -1101,7 +1110,7 @@ static int setting_shown(const struct setting *setting)
 	if (setting->action == ACTION_CE_EXTRACT)
 		return maps_installer_state == 1;
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
-		!strcmp(setting->variable, "HALO_BOT_VEHICLES")))
+		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
 		return choice_of("HALO_BOTS") != 0;
 	/* (a code typed in: online, on a Vita whose game has not got the PC
 	menus' Direct Link, menu_tags.c) */

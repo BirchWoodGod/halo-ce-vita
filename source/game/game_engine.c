@@ -3095,6 +3095,19 @@ boolean game_engine_get_current_stage(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+void game_engine_port_set_stage(
+	char const *map_name,
+	struct game_variant const *variant)
+{
+	csstrncpy(global_stage.map_name, map_name, sizeof(global_stage.map_name) - 1);
+	global_stage.map_name[sizeof(global_stage.map_name) - 1] = 0;
+	csmemcpy(&global_stage.variant, variant, sizeof(global_stage.variant));
+
+	return;
+}
+#endif
+
 long list_index_to_weapon_definition_index(
 	long weapon_list_index)
 {

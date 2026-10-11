@@ -94,6 +94,9 @@ symbols in this file:
 #include "objects/objects.h"
 #include "units/units.h"
 #include "text/unicode.h"
+#ifdef HALO_LINUX
+#include "bots.h"
+#endif
 
 #include <xtl.h>
 
@@ -817,6 +820,18 @@ boolean network_game_create_game_objects(
 					game->cooperative_flags);
 			}
 		}
+#ifdef HALO_LINUX
+		/* port: a game of the offline bots' playlist, a local one: its options
+		(the time limit), which the legacy wire's game record does not carry
+		to this machine's own client (port/linux/game/bots_playlist.c) */
+		else
+		{
+			struct game_variant_options playlist_options;
+
+			if (bots_playlist_options(game->map.name, &playlist_options))
+				game_set_game_variant_options(&playlist_options);
+		}
+#endif
 	}
 	else if (network_game_record_format_current() == _network_game_record_crossplay)
 	{

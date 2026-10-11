@@ -351,6 +351,14 @@ void game_engine_playlist_begin(
 boolean game_engine_get_current_stage(
 	struct game_variant *variant,
 	char *map_name);
+#ifdef HALO_LINUX
+/* port: the next game the server's lobby is set up from as it goes back to
+it from the scores (network_game_server_setup_game_from_playlist): the
+offline bots' playlist's (port/linux/game/bots_playlist.c) */
+void game_engine_port_set_stage(
+	char const *map_name,
+	struct game_variant const *variant);
+#endif
 
 long list_index_to_weapon_definition_index(
 	long weapon_list_index);

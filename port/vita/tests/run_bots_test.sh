@@ -48,6 +48,30 @@
 #            which the walkable surfaces do not join: the ladders (bots.c
 #            finds sixteen) must be climbed once at least
 #   new      powerups, turret and ladders
+#   playlist the bots' playlist (port/linux/game/bots_playlist.c): a Slayer
+#            game on Chill Out to 3, then Everything (bots.playlist all,
+#            HALO_TEST_BOT_PLAYLIST_SEED 3) game after game by itself, each
+#            to 3 or a minute (HALO_TEST_BOT_PLAYLIST_SCORE, _MINUTES), the
+#            scores 4 s (HALO_TEST_BOT_PLAYLIST_SCORES), 6 bots, Heroic, for
+#            HALO_TEST_PLAYLIST_SECONDS (780): HALO_TEST_PLAYLIST_GAMES (7)
+#            playlist games at least started, each the map and gametype it
+#            set up (the map unloaded after it), no map twice in a row, the
+#            bots in every game and walking (a team gametype with both
+#            teams), and memory steady over the map changes: halo.log's
+#            "memory: unloaded ui" between games, from the third on, the C
+#            heap rising 96 KB a change at most on average (1 MB in all), the
+#            texture pool at its first segment (4 MB) and video memory as
+#            free (1 MB)
+#   playlistcancel  Custom (bots.playlist custom): a bots_playlist.txt with
+#            good lines and bad (no gametype, extra words, maps not there or
+#            not multiplayer, paths, format strings, a gametype the bots do
+#            not play, a name too long, a 5000-character line, a NUL, bytes
+#            beyond ASCII, a UTF-8 mark, CR LF, and past 8 KB a line that
+#            must not be read): its four games and every bad line skipped
+#            with the reason; B two seconds into the second playlist game's
+#            countdown (HALO_TEST_BOT_PLAYLIST_CANCEL=2): the playlist stops,
+#            no second game starts and Split Screen is not left
+#   playlists  playlist and playlistcancel
 #
 # The vehicle cases: the bots must take the vehicles - their census in
 # halo.log every ten seconds (bots.c: riding, driving, gunning, the distance
@@ -118,7 +142,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
 test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 cases=${*:-slayer teams}
-cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams /; s/ new / powerups turret ladders /')
+cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /')
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 ce_resources=${HALO_TEST_CE_RESOURCES:-}
 if [ -z "$ce_resources" ]; then
@@ -132,6 +156,8 @@ case_bots() { # NAME
 	case $1 in
 	powerups) echo 12 ;;
 	turret) echo 6 ;;
+	playlist) echo 6 ;;
+	playlistcancel) echo 3 ;;
 	ladders) echo 8 ;;
 	*) echo "$bots" ;;
 	esac
@@ -139,6 +165,8 @@ case_bots() { # NAME
 map=${HALO_TEST_BOTS_MAP:-bloodgulch}
 seconds=${HALO_TEST_SECONDS:-180}
 case " $cases " in *" maps "*) seconds=${HALO_TEST_SECONDS:-120} ;; esac
+playlist_seconds=${HALO_TEST_PLAYLIST_SECONDS:-780}
+playlist_games=${HALO_TEST_PLAYLIST_GAMES:-7}
 stock_maps="beavercreek bloodgulch boardingaction chillout carousel damnation dangercanyon deathisland
 	gephyrophobia hangemhigh icefields infinity longest prisoner putput ratrace sidewinder timberland wizard"
 games=${HALO_TEST_BOTS_GAMES:-slayer team_slayer ctf king oddball invasion team_race rockets team_oddball}
@@ -163,6 +191,8 @@ run() { # NAME VARIANT [MAP=map] [VAR=value...]
 	[ "${HALO_TEST_RECHECK:-0}" = 1 ] && return 0
 	rm -rf "$out/$name"
 	mkdir -p "$out/$name/data" "$out/$name/save"
+	# (the playlist's custom file, in the data folder)
+	[ -n "${playlist_file:-}" ] && cp "$playlist_file" "$out/$name/data/bots_playlist.txt"
 	if [ -e "$data/maps/$game_map.map" ]; then
 		ln -sfn "$(cd "$data" && pwd)/maps" "$out/$name/data/maps"
 	else
@@ -218,6 +248,42 @@ run_matrix() { # MAP-GAME
 	esac
 }
 
+# the playlistcancel case's bots_playlist.txt: four good lines (a UTF-8 mark
+# first, a comment, upper case and spaces, a tab and a CR LF), the bad lines
+# check's playlistcancel part expects skipped, comments to past 8 KB, and a
+# line there that must not be read
+write_playlist_file() { # FILE
+	python3 - "$1" <<'EOF'
+import sys
+lines = [
+    b"\xef\xbb\xbf# the bots' custom playlist (run_bots_test.sh)",
+    b"chillout slayer",
+    b"  Prisoner   TEAM_SLAYER   # a comment after",
+    b"bloodgulch ctf+vehicles",
+    b"",
+    b"wizard",
+    b"wizard slayer extra",
+    b"nosuchmap slayer",
+    b"a10 slayer",
+    b"ui slayer",
+    b"../../etc/passwd slayer",
+    b"..\\..\\maps\\bloodgulch slayer",
+    b"bloodgulch juggernaut",
+    b"bloodgulch %s%s%n%x",
+    b"a" * 40 + b" slayer",
+    b"x" * 5000,
+    b"long\x00est slayer",
+    b"\xff\xfe\x80 slayer",
+    b"damnation +vehicles",
+    b"hangemhigh\tctf\r",
+]
+while sum(len(line) + 1 for line in lines) < 8400:
+    lines.append(b"# " + b"-" * 68)
+lines.append(b"boardingaction slayer")
+open(sys.argv[1], "wb").write(b"\n".join(lines) + b"\n")
+EOF
+}
+
 pids=""
 single=""
 for name in $cases; do
@@ -251,6 +317,18 @@ for name in $cases; do
 		done
 		run turret slayer+vehicles MAP=extinction HALO_BOT_SKILL=heroic "HALO_TEST_COMMANDS=$commands" & ;;
 	ladders) run ladders oddball MAP=boardingaction HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 & ;;
+	playlist)
+		(seconds=$playlist_seconds
+			run playlist slayer MAP=chillout HALO_BOT_SKILL=heroic HALO_NETWORK_TEST_SCORE=3 HALO_BOT_PLAYLIST=all \
+				HALO_TEST_BOT_PLAYLIST_SEED=3 HALO_TEST_BOT_PLAYLIST_SCORE=3 HALO_TEST_BOT_PLAYLIST_MINUTES=1 \
+				HALO_TEST_BOT_PLAYLIST_SCORES=4) & ;;
+	playlistcancel)
+		mkdir -p "$out"
+		write_playlist_file "$out/bots_playlist.txt"
+		(seconds=200 playlist_file=$out/bots_playlist.txt
+			run playlistcancel slayer MAP=chillout HALO_BOT_SKILL=heroic HALO_NETWORK_TEST_SCORE=2 \
+				HALO_BOT_PLAYLIST=custom HALO_TEST_BOT_PLAYLIST_SEED=11 HALO_TEST_BOT_PLAYLIST_SCORE=2 \
+				HALO_TEST_BOT_PLAYLIST_MINUTES=1 HALO_TEST_BOT_PLAYLIST_SCORES=3 HALO_TEST_BOT_PLAYLIST_CANCEL=2) & ;;
 	maps) continue ;;
 	*) echo "unknown case $name"; exit 2 ;;
 	esac
@@ -276,6 +354,9 @@ check() { # NAME
 	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
 	grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt" &&
 		fail "$name" "an assertion, exception or halt"
+	case $name in playlist | playlistcancel) check_playlist "$name"; return ;; esac
+	# (bots.playlist off, as in every other case: the playlist does nothing)
+	grep -aq "bots playlist" "$log" && fail "$name" "the playlist logged with bots.playlist off"
 	python3 - "$log" "$(case_bots "$name")" "$name" "$map" "$budget" <<'EOF' || status=1
 import re, sys, math
 log, bots, name, game_map, budget = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], float(sys.argv[5])
@@ -477,6 +558,167 @@ sys.exit(1 if failed else 0)
 EOF
 }
 
+# the playlist cases (port/linux/game/bots_playlist.c's halo.log lines; the
+# network test's player lines each second, by game)
+check_playlist() { # NAME
+	local name=$1 log=$out/$1/run.log
+	python3 - "$log" "$(case_bots "$name")" "$name" "$playlist_games" "$budget" <<'EOF' || status=1
+import re, sys, math
+log, bots, name, wanted_games, budget = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), float(sys.argv[5])
+lines = [line.rstrip("\n") for line in open(log, errors="replace")]
+failed = False
+def fail(text):
+    global failed
+    print("FAIL (%s): %s" % (name, text))
+    failed = True
+def has(text):
+    return any(text in line for line in lines)
+
+if name == "playlistcancel":
+    # the custom file: its games, and each bad line skipped with its reason
+    expected = {
+        6: "a map and a gametype are asked", 7: "more than a map and a gametype",
+        8: "no such map in the maps folder", 9: "not a multiplayer map of the level list",
+        10: "not a multiplayer map of the level list", 11: "not a file's", 12: "not a file's",
+        13: "not a gametype the bots play", 14: "not a gametype the bots play", 15: "the map's name is too long",
+        16: "longer than 120 characters", 17: "not plain text", 18: "not plain text",
+        19: "not a gametype the bots play",
+    }
+    skipped = {}
+    for line in lines:
+        m = re.search(r"bots playlist: bots_playlist\.txt line (\d+) skipped \((.*?)\)", line)
+        if m:
+            skipped[int(m.group(1))] = m.group(2)
+    for number, reason in sorted(expected.items()):
+        if number not in skipped:
+            fail("bots_playlist.txt line %d not skipped (%s asked)" % (number, reason))
+        elif reason not in skipped[number]:
+            fail("bots_playlist.txt line %d skipped for %s, not %s" % (number, skipped[number], reason))
+    for number in sorted(set(skipped) - set(expected)):
+        fail("bots_playlist.txt line %d skipped (%s): a good line" % (number, skipped[number]))
+    games = [line for line in lines if re.search(r"bots playlist: \d+ games: ", line)]
+    listed = games[-1].split(" games: ", 1)[1] if games else ""
+    print("  custom: %s; %d lines skipped" % (listed, len(skipped)))
+    if listed != "chillout slayer, prisoner team_slayer, bloodgulch ctf+vehicles, hangemhigh ctf":
+        fail("the custom games are %r" % listed)
+    if not has("bots_playlist.txt read only to line"):
+        fail("the file was read past 8 KB")
+    if not has("bots playlist: game 1 started"):
+        fail("the first playlist game did not start")
+    if not has("bots playlist: (test) B held") or not has("bots playlist: stopped (B"):
+        fail("B in the second game's countdown did not stop the playlist")
+    if has("bots playlist: game 2 started") or has("bots playlist: next game 3"):
+        fail("a playlist game started after B")
+    if has("bots playlist: Split Screen left"):
+        fail("B left Split Screen (the lobby, not the main menu, is asked)")
+    sys.exit(1 if failed else 0)
+
+# the playlist: the games set up and started, each one's player lines
+games = []          # [number, map, gametype, started, map unloaded after it, {player: [(x, y)]}, last stats, teams]
+current = None
+memory = []
+order_ok = True
+for line in lines:
+    m = re.search(r"bots playlist: next game (\d+): (\S+) (\S+)", line)
+    if m:
+        games.append({"number": int(m.group(1)), "map": m.group(2), "gametype": m.group(3), "started": False,
+            "unloaded": None, "places": {}, "last": {}, "teams": {}})
+        continue
+    m = re.search(r"bots playlist: game (\d+) started", line)
+    if m:
+        if games and games[-1]["number"] == int(m.group(1)):
+            games[-1]["started"] = True
+            current = games[-1]
+        else:
+            fail("game %s started, not the one set up" % m.group(1))
+        continue
+    if "bots playlist: the scores" in line:
+        current = None
+        continue
+    m = re.search(r"memory: unloaded (\S+): C heap (\d+) KB.*?texture pool (\d+) KB held.*?video memory (\d+) KB free", line)
+    if m:
+        if m.group(1) == "ui":
+            memory.append((int(m.group(2)), int(m.group(3)), int(m.group(4))))
+        else:
+            for game in reversed(games):
+                if game["started"]:
+                    if game["unloaded"] is None:
+                        game["unloaded"] = m.group(1)
+                    break
+        continue
+    if current is None or "network test: tick " not in line:
+        continue
+    for m in re.finditer(r"player (\d+): \(([-\d.]+) ([-\d.]+) ([-\d.]+)\)[^|]*? s(-?\d+) k(\d+) d(\d+) f\d+ t(-?\d+) m(\d+)", line):
+        index = int(m.group(1))
+        current["places"].setdefault(index, []).append((float(m.group(2)), float(m.group(3))))
+        current["last"][index] = (int(m.group(5)), int(m.group(6)), int(m.group(7)), int(m.group(9)))
+        current["teams"][index] = int(m.group(8))
+    for m in re.finditer(r"player (\d+): dead s(-?\d+) k(\d+) d(\d+) f\d+ t(-?\d+) m(\d+)", line):
+        index = int(m.group(1))
+        current["last"][index] = (int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(6)))
+started = [game for game in games if game["started"]]
+print("  %d playlist games started" % len(started))
+if len(started) < wanted_games:
+    fail("%d playlist games started, not %d" % (len(started), wanted_games))
+previous = "chillout"
+for game in started:
+    bot_players = [i for i, v in game["last"].items() if v[3] >= 113]
+    walks = []
+    for i in bot_players:
+        track = game["places"].get(i, [])
+        walks.append(sum(math.hypot(x1 - x0, y1 - y0) for (x0, y0), (x1, y1) in zip(track, track[1:])
+            if math.hypot(x1 - x0, y1 - y0) < 8.0))
+    walks.sort()
+    median = walks[len(walks) // 2] if walks else 0.0
+    kills = sum(game["last"][i][1] for i in game["last"])
+    teams = set(game["teams"].values())
+    print("  game %d: %-15s %-21s unloaded %-15s bots %d, walked %5.1f (median), kills %d, teams %s" % (game["number"],
+        game["map"], game["gametype"], game["unloaded"] or "-", len(bot_players), median, kills, sorted(teams)))
+    if game["map"] == previous:
+        fail("game %d: %s twice in a row" % (game["number"], game["map"]))
+    previous = game["map"]
+    if game["unloaded"] is not None and game["unloaded"] != game["map"]:
+        fail("game %d: %s set up, %s played" % (game["number"], game["map"], game["unloaded"]))
+    if len(bot_players) != bots:
+        fail("game %d: %d bots played, not %d" % (game["number"], len(bot_players), bots))
+    if median < 15.0:
+        fail("game %d: the bots walked %.1f units (median)" % (game["number"], median))
+    team_game = game["gametype"].split("+")[0] in ("team_slayer", "ctf", "team_king", "team_oddball", "team_race", "invasion")
+    if team_game and len(teams & {0, 1}) < 2:
+        fail("game %d: a team gametype with the teams %s" % (game["number"], sorted(teams)))
+    if not team_game and len(teams) < 2:
+        fail("game %d: a free-for-all with everyone on team %s" % (game["number"], sorted(teams)))
+# memory between games (the menus' level unloaded): from the third on, as the third
+print("  memory between games (C heap KB, texture pool KB held, video memory KB free): %s" %
+    " ".join("%d/%d/%d" % entry for entry in memory))
+if len(memory) < wanted_games:
+    fail("%d unloads of the menus between games, not %d" % (len(memory), wanted_games))
+if len(memory) >= 3:
+    heap, pool, video = memory[2]
+    # (the C heap creeps a few tens of KB a change on the harness with or
+    # without the playlist - the network test's own game list, Oct 11 2026:
+    # 26 to 187 KB a change - as the session's caches fill; a map's data
+    # left behind would be megabytes)
+    if len(memory) > 3:
+        rise = (memory[-1][0] - heap) / float(len(memory) - 3)
+        print("  the C heap from the third change on: %+d KB, %.0f KB a change" % (memory[-1][0] - heap, rise))
+        if rise > 96 or memory[-1][0] - heap > 1024:
+            fail("the C heap rose %d KB over %d changes from the third" % (memory[-1][0] - heap, len(memory) - 3))
+    for index, (h, p, v) in enumerate(memory[2:], 3):
+        if p > 4096:
+            fail("the texture pool held %d KB at the %dth change" % (p, index))
+        if v < video - 1024:
+            fail("video memory %d KB free at the %dth change, %d KB less than at the third" % (v, index, video - v))
+reports = [line for line in lines if "bots: tick " in line and "us/tick" in line]
+if reports:
+    cost = float(re.search(r"\(([\d.]+) a bot\)", reports[-1]).group(1))
+    print("  a bot's tick %.1f us (budget %.0f)" % (cost, budget))
+    if cost > budget:
+        fail("a bot's tick cost %.1f us, over the budget of %.0f" % (cost, budget))
+sys.exit(1 if failed else 0)
+EOF
+}
+
 # a game of the maps case: its row of the table, and its checks
 check_matrix() { # NAME
 	local name=$1 log=$out/$1/run.log
@@ -484,6 +726,7 @@ check_matrix() { # NAME
 	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
 	grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt" &&
 		fail "$name" "an assertion, exception or halt"
+	grep -aq "bots playlist" "$log" && fail "$name" "the playlist logged with bots.playlist off"
 	python3 - "$log" "$bots" "$name" <<'EOF' || status=1
 import re, sys, math
 log, bots, name = sys.argv[1], int(sys.argv[2]), sys.argv[3]

@@ -859,6 +859,31 @@ short custom_edition_maps_display_index(
 	return NONE;
 }
 
+boolean custom_edition_maps_multiplayer_listed(
+	char const *name)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	short map_index;
+
+	if (!name || !name[0] || custom_edition_map_disabled(name))
+	{
+		return FALSE;
+	}
+	if (!globals->looked_for)
+	{
+		custom_edition_maps_look_for();
+	}
+	for (map_index = 0; map_index < globals->multiplayer_count; map_index++)
+	{
+		if (!csstrcasecmp(globals->maps[map_index].name, name))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
 wchar_t *custom_edition_maps_name(
 	short display_index)
 {

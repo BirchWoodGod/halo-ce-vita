@@ -299,6 +299,21 @@ static const struct config_setting config_settings[] =
 		"1: the bots drive and ride the map's vehicles (Warthogs, Ghosts and\n"
 		"Scorpions) to goals a long way off; 0: they stay on foot. The Vita's\n"
 		"settings panel (Multiplayer, Bot vehicles) sets it." },
+	{ "bots.playlist", _config_string, "\"off\"", "HALO_BOT_PLAYLIST", _environment_value, _platform_all,
+		"A local game with bots goes on to the next map and gametype by itself\n"
+		"after the scores (port/linux/game/bots_playlist.c): \"off\" (the player\n"
+		"picks each), \"small\", \"big\" or \"all\" (the stock maps' games the\n"
+		"bots play), or \"custom\" (bots.playlist_file's). B in the next game's\n"
+		"countdown stops it. The Vita's settings panel (Multiplayer, Bot playlist)\n"
+		"sets it." },
+	{ "bots.playlist_file", _config_string, "\"bots_playlist.txt\"", "HALO_BOT_PLAYLIST_FILE", _environment_value,
+		_platform_all,
+		"The custom bot playlist: a file of the data folder (a name, no folders),\n"
+		"a game a line, \"<map> <gametype>\" (bloodgulch ctf; a custom map the\n"
+		"level list has by its file's name; gametypes slayer, team_slayer, ctf,\n"
+		"king, team_king, oddball, team_oddball, race, team_race, rockets,\n"
+		"snipers, invasion, each with \"+vehicles\" for every vehicle the map\n"
+		"places); # starts a comment. Lines it cannot play are skipped and logged." },
 	{ "network.lobby_password", _config_string, "\"\"", "HALO_NET_LOBBY_PASSWORD", _environment_value, _platform_all,
 		"A password for the public games this machine hosts: the server browser\n"
 		"lets only those who know it join (the code and invite link still do);\n"

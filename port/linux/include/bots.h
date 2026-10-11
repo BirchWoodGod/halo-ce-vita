@@ -12,6 +12,7 @@ drawn for them. */
 
 struct player_action;
 struct network_player;
+struct game_variant_options;
 
 /* the most bots in one game (with one player, the Xbox's 16) */
 #define BOTS_MAXIMUM 15
@@ -46,5 +47,22 @@ void bots_update_actions(struct player_action *actions);
 /* a map's start and end (players.c) */
 void bots_initialize_for_new_map(void);
 void bots_dispose_from_old_map(void);
+
+/* the bots' playlist (port/linux/game/bots_playlist.c, bots.playlist): a
+local game with bots goes on to its next map and gametype by itself after
+the scores. Every frame (main.c), with whether the main menu's level is
+loaded and the frame's seconds; */
+void bots_playlist_update(int main_menu_loaded, float seconds);
+/* the server leaving its scores for the lobby (network_server_manager.c):
+the next game into the stage the lobby is set up from */
+void bots_playlist_before_pregame(void);
+/* the lobby's screen after the scores (ui_widget.c): nonzero when the
+playlist put up its own (the lobby, the countdown on), in place of the
+map choice */
+int bots_playlist_pregame_ui(void);
+/* the game on the level `map_name` the lobby starts: nonzero when it is one
+the playlist set up, with its options (network_game_manager.c: the time
+limit) */
+int bots_playlist_options(char const *map_name, struct game_variant_options *options);
 
 #endif

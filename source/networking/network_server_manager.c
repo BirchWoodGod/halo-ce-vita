@@ -4452,6 +4452,41 @@ static void network_game_server_cooperative_round(
 	network_game_server_cooperative_next_map[0] = 0;
 }
 
+#ifdef HALO_LINUX
+/* port: the offline bots' playlist's next game (port/linux/game/bots_playlist.c):
+its lobby's countdown started as a player's A on the pregame screen starts
+it, once the lobby may count down (every machine with a player, the bots
+in); TRUE while it runs. Not a held countdown's (paused), nor after the
+start. */
+boolean network_game_server_port_start_countdown(
+	struct network_game_server *server)
+{
+	if (!server || server->state != _network_game_server_state_pregame || server->sent_start_game_message ||
+		server->countdown_state.paused)
+	{
+		return FALSE;
+	}
+	if (!server->countdown_state.active && server_ok_to_countdown(server))
+		network_game_server_update_countdown(server, _network_game_server_countdown_event_player_joined);
+
+	return server->countdown_state.active;
+}
+
+/* port: ... and stopped (B in it: the playlist stops, the players pick the
+next game themselves) */
+void network_game_server_port_stop_countdown(
+	struct network_game_server *server)
+{
+	if (server && server->state == _network_game_server_state_pregame && !server->sent_start_game_message &&
+		server->countdown_state.active)
+	{
+		network_game_server_update_countdown(server, _network_game_server_countdown_event_stop);
+	}
+
+	return;
+}
+#endif
+
 /* port: the gametype's PC options the game sends on the crossplay wire,
 in place of its variant's defaults (the network test's
 HALO_NETWORK_TEST_VARIANT_OPTIONS: a stand-in for a PC host's); a later
@@ -5488,6 +5523,13 @@ boolean network_game_server_reset_to_pregame(
 
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x324, server);
 
+#ifdef HALO_LINUX
+	/* port: from the scores of a local game with bots, the bots' playlist's
+	next game, into the stage the lobby is set up from below
+	(port/linux/game/bots_playlist.c; nothing with bots.playlist off) */
+	if (server->state == _network_game_server_state_postgame)
+		bots_playlist_before_pregame();
+#endif
 	csmemset(&server->countdown_state, 0, sizeof(server->countdown_state));
 	server->next_update_number = 0;
 	server->time_of_first_client_loading_completion = 0;
