@@ -1,7 +1,8 @@
 /*
 VITA_SETTINGS.C
 
-The settings panel: hold SELECT and START together for a moment, in play
+The settings panel: press SELECT and D-pad down together (or hold SELECT
+and START together for a moment, as before 1.1.0-beta.4), in play
 or in the menus, and a panel over the game shows the Vita's settings in
 four tabs that L and R switch between: Graphics, General, Audio and
 Multiplayer, and Dev once "Show dev settings" (General, Advanced) is on.
@@ -11,7 +12,7 @@ General's Button layout, Touch zones, Gyro settings and Advanced;
 Multiplayer's Play and Modded maps; Dev's A/B switches), and circle goes
 back.
 Up and down choose a line, left and right change it, cross does what an
-action line says, circle (or SELECT+START again) closes the panel; the
+action line says, circle (or SELECT + down again) closes the panel; the
 game sees no buttons while it is open. Each row's value is drawn in a
 column of its own (a '\x02' between label and value, vita_gxm.c
 menu_build), the selected row's help on one line below the rows and the
@@ -3666,7 +3667,11 @@ int vita_settings_input(const struct vita_host_pad *pad)
 {
 	unsigned long buttons = pad->buttons;
 	unsigned long pressed = buttons & ~previous_buttons;
-	int both = (buttons & VITA_BUTTON_SELECT) && (buttons & VITA_BUTTON_START);
+	/* port: SELECT + D-pad down opens or closes the panel at once (the
+	owner's: holding SELECT + START was a stretch); SELECT + START held, as
+	before 1.1.0-beta.4, still does */
+	int chord = (buttons & VITA_BUTTON_SELECT) && (buttons & VITA_BUTTON_DOWN);
+	int both = chord || ((buttons & VITA_BUTTON_SELECT) && (buttons & VITA_BUTTON_START));
 	unsigned long long now = now_us();
     int message_opened = 0;
 
@@ -3747,8 +3752,9 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	{
 		if (!both_since)
 			both_since = now;
-		/* held for 0.8 s: the panel opens or closes, once per hold */
-		if (both_since != 1 && now - both_since > 800000)
+		/* at once (SELECT + down), or held for 0.8 s (SELECT + START): the
+		panel opens or closes, once per hold */
+		if (both_since != 1 && (chord || now - both_since > 800000))
 		{
 			if (panel_open)
 				close_panel();

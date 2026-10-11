@@ -2101,6 +2101,18 @@ int main(void)
 	check(!strstr(log_text, "TEST MODE"), "no dev switch on: halo.log does not say test mode");
 
 	check(!frame(0), "closed: the game gets the buttons");
+	/* SELECT + D-pad down: open at once, neither button the game's; held,
+	once; again, closed; SELECT alone still the game's (Back, the scoreboard) */
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible && strstr(menu, "\t*Graphics|"),
+		"SELECT + down opens the panel at once, the game gets neither");
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible, "SELECT + down held: still open, once per press");
+	frame(0);
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && !menu_visible, "SELECT + down again closes it");
+	frame(0);
+	check(!frame(VITA_BUTTON_SELECT), "SELECT alone still reaches the game (Back: the scoreboard)");
+	frame(0);
+	check(!frame(VITA_BUTTON_DOWN), "D-pad down alone still reaches the game (crouch)");
+	frame(0);
 	open_panel();
 	printf("%s\n--\n", menu);
 	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Graphics|General|Audio|Multiplayer\n"),

@@ -159,7 +159,7 @@ took (debug).
 
 ## Settings panel
 
-Hold **Select + Start** for about a second, in play or in the menus. **L and
+Press **Select + D-pad down** (or hold **Select + Start** for about a second), in play or in the menus. **L and
 R** switch between four tabs, **Graphics**, **General**, **Audio** and
 **Multiplayer** (and **Dev**, once Show dev settings is on); up and down
 choose a line, left and right change it, Cross opens a line marked `>` (a

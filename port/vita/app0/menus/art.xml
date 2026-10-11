@@ -44,7 +44,7 @@
 		<string text="Set all the attributes for your\nmultiplayer gametypes and keep\nthem for future use."/>
 	</strings>
 	<strings name="offline">
-		<string text="Internet play is off.\n\nOpen the settings panel (SELECT + START),\nMultiplayer tab, set Connection to Online,\nthen restart the game."/>
+		<string text="Internet play is off.\n\nOpen the settings panel (SELECT + DOWN),\nMultiplayer tab, set Connection to Online,\nthen restart the game."/>
 	</strings>
 	<strings name="legend">
 		<string text="%a-button Join     %x-button Refresh     %b-button Back"/>

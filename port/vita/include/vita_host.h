@@ -141,7 +141,7 @@ void vita_host_pad_read(struct vita_host_pad *pad);
 (degrees a second), whether the bias was learnt */
 void vita_gyro_status(char *text, int size);
 /* the settings panel (vita_settings.c): nonzero when it took the buttons
-(open, or SELECT+START held), and the game should see none */
+(open, or SELECT + down pressed, or SELECT+START held), and the game should see none */
 int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);

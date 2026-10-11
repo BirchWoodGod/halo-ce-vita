@@ -89,7 +89,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | 📊 **Latency meter** | Your ping in network games, and a Ping column on the scoreboard. |
 | 🇪🇸 **Spanish** | The port's own text in Spanish (settings panel > Audio > Language). |
 | 🧰 **[Windows install tool](#easy-install-windows-tool)** | Gathers your files and copies them to the Vita. |
-| 🎮 **Controls** | A settings panel in tabs (hold **SELECT + START**), button remapping, touch zones, gyro aiming and PlayStation button icons. |
+| 🎮 **Controls** | A settings panel in tabs (**SELECT + D-pad down**), button remapping, touch zones, gyro aiming and PlayStation button icons. |
 
 Coming in **1.1.1** (see the [roadmap](ROADMAP.md)): game chat and voice
 chat.
@@ -214,7 +214,7 @@ for you.
 
 #### Then turn on online play
 
-1. In the game, hold **SELECT + START** to open the settings panel.
+1. In the game, press **SELECT + D-pad down** to open the settings panel.
 2. Go to **Multiplayer** and set **Connection** to **Online**.
 3. Restart the game.
 4. On the main menu, open **Multiplayer**: **Join Game > Internet** is the
@@ -270,7 +270,7 @@ and 2, keep movies 640 wide: wider ones can play without a picture, #38).
 **Vitas play only Vitas**, and every Vita in a game needs the same version
 of this port and Xbox maps of a supported build (NTSC 01.10.12.2276 or
 01.08.15.1749, PAL 01.01.14.2342). Choose how your Vita connects in the
-settings panel (hold **SELECT + START**), **Multiplayer**, **Connection**
+settings panel (**SELECT + D-pad down**), **Multiplayer**, **Connection**
 (it applies after a restart):
 
 | Connection | What it is |
@@ -387,7 +387,7 @@ controller** does; this is where each is on the Vita as shipped:
 | D-pad up | right stick click | zoom |
 | Start | Start | pause; skips a cinematic |
 | Select | Back | scoreboard |
-| **SELECT + START** (hold) | | the settings panel |
+| **SELECT + D-pad down** | | the settings panel (holding **SELECT + START** still works) |
 
 The settings panel's **General** tab:
 
@@ -422,7 +422,7 @@ The settings panel's **General** tab:
 
 ## Settings panel
 
-Hold **SELECT + START** for a second, in play or in the menus. **L and R**
+Press **SELECT + D-pad down** (or hold **SELECT + START** for a second), in play or in the menus. **L and R**
 switch between its tabs, **Graphics**, **General**, **Audio** and
 **Multiplayer** (and **Dev**, once **Show dev settings** in General,
 Advanced is on). Up and down choose a line, left and right change it, Cross
