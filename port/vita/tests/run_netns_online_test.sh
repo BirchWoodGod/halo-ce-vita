@@ -1537,7 +1537,11 @@ coopmenu)
 		both=$(first "$out/$name/run.log" | grep -a "network test: tick" | grep -aEc "$pattern")
 		echo "$name's seconds on the first level with all $players players alive: $both"
 		[ "$both" -ge 15 ] || fail "all $players players were alive on the first level for $both s (15 wanted)"
-		grep -aq "precaching map 'levels.a30.a30'" "$out/$name/data/debug.txt" || fail "$name did not load the next level"
+		# (either line: the settings naming the new map first, or the lobby's
+		# reset having taken it already, which starts its precaching without
+		# the first)
+		grep -aqE "precaching map 'levels.a30.a30'|starting precaching of map 'a30'" "$out/$name/data/debug.txt" ||
+			fail "$name did not load the next level"
 		again=$(next_level "$out/$name/run.log" | grep -a "network test: tick" | grep -aEc "$pattern")
 		echo "$name's seconds on the next level with all $players players alive: $again"
 		[ "$again" -ge 10 ] || fail "all $players players were alive on the next level for $again s (10 wanted)"
