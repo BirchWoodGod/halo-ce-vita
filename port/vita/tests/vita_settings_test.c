@@ -1211,22 +1211,22 @@ static void test_multiplayer_tab(void)
 		!strcmp(getenv("HALO_LATENCY_METER"), "0"), "Latency meter Off: HALO_LATENCY_METER 0");
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_LATENCY_METER") && !strcmp(getenv("HALO_LATENCY_METER"), "1"), "Latency meter On again: 1");
-	/* Unseen players (objects.c, objects_remote_lod_skipped): Full as
-	shipped (the owner's choice), Auto (more than 16 players) and Reduced
-	(1), live */
+	/* Unseen players (objects.c, objects_remote_lod_skipped): Auto as
+	shipped (more than 16 players: crossplay's large PC games), Reduced (1)
+	and Full (0), live */
 	to_line("Unseen players");
-	check(strstr(menu, "\nUnseen players\x02< Full  ") &&
-		(!getenv("HALO_NET_REMOTE_LOD") || !strcmp(getenv("HALO_NET_REMOTE_LOD"), "0")),
-		"Unseen players: Full as shipped");
-	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nUnseen players\x02  Auto >") &&
+		(!getenv("HALO_NET_REMOTE_LOD") || !strcmp(getenv("HALO_NET_REMOTE_LOD"), "auto")),
+		"Unseen players: Auto as shipped");
+	press(VITA_BUTTON_RIGHT);
 	check(strstr(menu, "\nUnseen players\x02< Reduced >") && getenv("HALO_NET_REMOTE_LOD") &&
 		!strcmp(getenv("HALO_NET_REMOTE_LOD"), "1"), "Unseen players Reduced: HALO_NET_REMOTE_LOD 1");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nUnseen players\x02< Full  ") && !strcmp(getenv("HALO_NET_REMOTE_LOD"), "0"),
+		"Unseen players Full: 0");
 	press(VITA_BUTTON_LEFT);
-	check(strstr(menu, "\nUnseen players\x02  Auto >") && !strcmp(getenv("HALO_NET_REMOTE_LOD"), "auto"),
-		"Unseen players Auto: auto");
-	press(VITA_BUTTON_RIGHT);
-	press(VITA_BUTTON_RIGHT);
-	check(getenv("HALO_NET_REMOTE_LOD") && !strcmp(getenv("HALO_NET_REMOTE_LOD"), "0"), "Unseen players Full again: 0");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_NET_REMOTE_LOD") && !strcmp(getenv("HALO_NET_REMOTE_LOD"), "auto"), "Unseen players Auto again: auto");
 	/* Crossplay (docs/crossplay.md): Off as shipped, On and back */
 	to_line("Crossplay");
 	check(strstr(menu, "\nCrossplay*\x02  Off >") && setting_named("HALO_CROSSPLAY") &&

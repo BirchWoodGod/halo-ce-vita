@@ -552,11 +552,11 @@ static struct setting settings[] = {
 		"Co-op you host. 3-4: your Vita may lag", 0, TAB_MULTIPLAYER },
 	/* (network.remote_lod, objects.c's objects_remote_lod_skipped: in a game
 	this Vita joined, another player out of view, on foot and doing nothing
-	but moving, updated every other tick. Full (never) by default, the
-	owner's choice (Oct 11 2026); Auto in games of more than 16 players; a
-	sixth to a third less of a 24-player game's tick. Live) */
+	but moving, updated every other tick. Auto by default (the owner, Oct 11
+	2026): in games of more than 16 players, which only crossplay's PC games
+	are; a sixth to a third less of a 24-player game's tick. Live) */
 	{ "Unseen players", "HALO_NET_REMOTE_LOD", 0, 3, { "auto", "1", "0" }, { "Auto", "Reduced", "Full" },
-		"Reduced: smoother big games. Auto: over 16 players", 2, TAB_MULTIPLAYER },
+		"Reduced: smoother big games. Auto: over 16 players", 0, TAB_MULTIPLAYER },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
 	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
 	to the host at the top right of a network game and in the scoreboard's
