@@ -541,6 +541,9 @@ symbols in this file:
 #include "errors.h"
 #include "aim_assist.h"
 #include "game_engine.h"
+#ifdef HALO_LINUX
+#include "network_game_record.h" /* (port) the wire */
+#endif
 #include "game_engine_list.h"
 #include "game_engine_place.h"
 
@@ -6893,6 +6896,16 @@ long game_engine_remap_weapon(
 
 	if (weapon_list_index == _weapon_list_flamethrower)
 		weapon_list_index = _weapon_list_rocket_launcher;
+#ifdef HALO_LINUX
+	/* port: and on the crossplay wire the gravity rifle, a cut weapon, as
+	the flamethrower, which OpenCE's machines make rocket launchers
+	(c9ee319a); the legacy wire's games keep it, as the betas do */
+	if (weapon_list_index == _weapon_list_gravity_rifle &&
+		network_game_record_format_current() == _network_game_record_crossplay)
+	{
+		weapon_list_index = _weapon_list_rocket_launcher;
+	}
+#endif
 
 	/* port: a custom loadout (game_variant_options: a PC host's) has no
 	weapon set (OpenCE's, c9ee319a) */
