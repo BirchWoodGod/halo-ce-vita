@@ -789,7 +789,7 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 			busy) why="refused the connection (CONNACK 0x89: busy)" ;;
 			reset) why="the connection broke\|closed the connection before it was ready\|cannot connect (reset)" ;;
 			silent) why="connected, but no answer to CONNECT in 10 s" ;;
-			refuse) why="the connection broke sending (refused)\|cannot connect (refused)" ;;
+			refuse) why="the connection broke sending (re[a-z]*)\|cannot connect (re[a-z]*)" ;;
 			esac
 			echo "--- the broker's connections"; grep -E "^(connect|plain)" "$out/broker.log" | sort | uniq -c | head
 			for side in host joiner; do

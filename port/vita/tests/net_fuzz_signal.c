@@ -389,8 +389,12 @@ static void fuzz_publish(const char *topic, const unsigned char *payload, int si
 	int remaining = 2 + topic_size + size;
 	int length = 0;
 
-	if (broker->socket < 0 || remaining > BUFFER_SIZE - 8)
+	/* (nothing is read from a broker still connecting or shaking hands) */
+	if (broker->socket < 0 || broker->state == _broker_connecting || broker->state == _broker_handshaking ||
+		remaining > BUFFER_SIZE - 8)
+	{
 		return;
+	}
 	/* (MQTT 5: no properties) */
 	if (broker->protocol == 5)
 		remaining++;
@@ -496,7 +500,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 	switch (kind)
 	{
 	case 0:
-		if (broker->socket < 0)
+		if (broker->socket < 0 || broker->state == _broker_connecting || broker->state == _broker_handshaking)
 			break;
 		if (size > BUFFER_SIZE - broker->input_size)
 			size = BUFFER_SIZE - broker->input_size;

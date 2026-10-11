@@ -1359,10 +1359,13 @@ static void *tls_thread(void *unused)
 			pthread_mutex_unlock(&tls_lock);
 		}
 		/* (the sockets of those still going: their descriptors stay open
-		while they are handshaking, as only this thread closes them) */
-		if (read_count || write_count)
+		while they are handshaking, as only this thread closes them; a wait
+		that fails is a wait all the same, never a loop that spins) */
+		if ((read_count || write_count) &&
+			posix_socket_select(read, &read_count, write, &write_count, NULL, &none, 0, TLS_WAIT_MS * 1000, 0) < 0)
 		{
-			posix_socket_select(read, &read_count, write, &write_count, NULL, &none, 0, TLS_WAIT_MS * 1000, 0);
+			read_count = write_count = 0;
+			posix_socket_select(NULL, &read_count, NULL, &write_count, NULL, &none, 0, TLS_WAIT_MS * 1000, 0);
 		}
 	}
 }
