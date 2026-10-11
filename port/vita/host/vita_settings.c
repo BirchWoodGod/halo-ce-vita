@@ -550,6 +550,13 @@ static struct setting settings[] = {
 	campaign's AI and scripts for everyone: network_server_manager.c) */
 	{ "Co-op players", "HALO_NET_COOP_PLAYERS", 0, 3, { "2", "3", "4" }, { "2", "3 (experimental)", "4 (experimental)" },
 		"Co-op you host. 3-4: your Vita may lag", 0, TAB_MULTIPLAYER },
+	/* (network.remote_lod, objects.c's objects_remote_lod_skipped: in a game
+	this Vita joined, another player out of view, on foot and doing nothing
+	but moving, updated every other tick. Auto in games of more than 16
+	players, the owner's choice (Oct 11 2026); a sixth to a third less of a
+	24-player game's tick. Live) */
+	{ "Unseen players", "HALO_NET_REMOTE_LOD", 0, 3, { "auto", "1", "0" }, { "Auto", "Reduced", "Full" },
+		"Reduced: smoother big games. Auto: over 16 players", 0, TAB_MULTIPLAYER },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
 	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
 	to the host at the top right of a network game and in the scoreboard's

@@ -307,6 +307,12 @@ static const struct config_setting config_settings[] =
 		"Play OpenCE's games (PC hosts and servers running OpenCE,\n"
 		"ChupathingyCE or DamnationCE) instead of Vitas' (docs/crossplay.md).\n"
 		"Off, the default, plays Vita to Vita as betas 1-4 do." },
+	{ "network.remote_lod", _config_string, "\"auto\"", "HALO_NET_REMOTE_LOD", _environment_value, _platform_all,
+		"In a game this machine joined, another player out of view (on foot,\n"
+		"not shooting, throwing, meleeing, reloading, jumping or acting) updated\n"
+		"every other tick: their place still follows the host every tick, their\n"
+		"animation, footsteps and weapon run at half rate until seen. \"auto\"\n"
+		"in games of more than 16 players, \"1\" always, \"0\" never." },
 	{ "network.latency_meter", _config_boolean, "true", "HALO_LATENCY_METER", _environment_value, _platform_all,
 		"Show the round trip to the host in a network game, in milliseconds,\n"
 		"at the screen's top right (the host: its slowest player's), and\n"
