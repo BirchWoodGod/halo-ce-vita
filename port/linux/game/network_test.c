@@ -12,7 +12,10 @@ Automated system link sessions for testing the netcode without the menus
   later; with more variants, once a game is over (debug.network_test_score
   makes it short) the next, as the host's button on the scores does
   ("<variant>@<map>" plays that game on another map: a map change;
-  "<variant>+vehicles" the variant with every vehicle the map places);
+  "<variant>+vehicles" the variant with every vehicle the map places); a
+  map with a path is that level (custom_maps\pcgulch: a Custom Edition map
+  named as a PC host names it, OpenCE's, for the crossplay wire's map
+  checks: port/vita/tests/run_crossplay_maps_test.sh);
 - "local:<map>[:<variant>...]" the same with a local (split screen) game
   of one player, which starts only where a local game may have one (the
   Vita's rules, HALO_PORT_VITA_NETWORK);
@@ -1602,7 +1605,13 @@ void network_test_update(
 				struct game_variant variant;
 
 				network_test_variant_map(network_test.variant_index, map_name, sizeof(map_name));
-				snprintf(path, sizeof(path), "levels\\test\\%s\\%s", map_name, map_name);
+				/* (a map with a path is that level, as OpenCE's network test has
+				it: custom_maps\pcgulch names a Custom Edition map as a PC host
+				does, the crossplay wire's stand-in for one, crossplay_maps.h) */
+				if (strchr(map_name, '\\'))
+					snprintf(path, sizeof(path), "%s", map_name);
+				else
+					snprintf(path, sizeof(path), "levels\\test\\%s\\%s", map_name, map_name);
 				network_game_server_change_map_name(global_network_game_server_get(), path);
 				snprintf(network_test.map_path, sizeof(network_test.map_path), "%s", path);
 				platform_log("network test: map %s", map_name);

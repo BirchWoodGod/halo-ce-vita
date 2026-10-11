@@ -396,6 +396,8 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
+#include "crossplay_maps.h"
+#include "network_game_record.h"
 #include "map_share.h"
 /* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
 #include "../src/lang.h"
@@ -1326,6 +1328,15 @@ A custom map missing or different (check 2) may then be downloaded from
 the host (port/linux/game/map_share.c) rather than refused, and a Custom
 Edition map with PC maps off (check 3) played once the player turns PC
 maps on there.
+With crossplay on (network.crossplay: the host is a PC's, OpenCE's wire)
+the map is named and its copy said as OpenCE does since its network version
+22 (custom_maps\<name> and the raw header checksum for a Custom Edition map,
+the Xbox's own maps by their level names, 0), and checked so instead
+(custom_edition_maps_crossplay_check, port/linux/game/crossplay_maps.h): the
+name first, then this machine's file of it; a PC host has no map download,
+so whatever is not playable here is refused (`crossplay_verdict` why),
+naming the map, and never asked of the host. The build check (1) still
+applies to the Xbox's maps.
 Between 2 and 3, an Xbox level the host plays as one: this machine's file of
 it must be the Xbox map, whole (custom_edition_maps_stock_problem). Missing,
 cut short, or a Halo PC map of that name (Halo PC's beavercreek.map in the
@@ -1344,6 +1355,9 @@ enum network_game_client_map_check
 	/* an Xbox level whose file here is missing, damaged or a Halo PC map
 	(the reason in `reason`) */
 	_network_game_client_map_stock_unloadable,
+	/* crossplay: a PC host's map this machine does not play (why: the
+	check's crossplay verdict, crossplay_maps.h) */
+	_network_game_client_map_crossplay_refused,
 };
 
 static short network_game_client_map_check(
@@ -1352,15 +1366,35 @@ static short network_game_client_map_check(
 	char *missing_files,
 	long missing_files_size,
 	char *reason,
-	long reason_size)
+	long reason_size,
+	short *crossplay_verdict)
 {
 	boolean missing;
 
 	build[0] = 0;
 	missing_files[0] = 0;
 	reason[0] = 0;
+	*crossplay_verdict = _crossplay_map_playable;
 	if (network_game_is_splitscreen_local())
 		return _network_game_client_map_playable;
+	/* port: a PC host's (crossplay): its map named and compared as OpenCE's
+	are (the host's own machine plays the map it chose; this build hosts no
+	crossplay game, docs/crossplay.md) */
+	if (network_game_record_format_current() == _network_game_record_crossplay)
+	{
+		char file[CROSSPLAY_MAP_FILE_BYTES];
+
+		if (global_network_game_server_get())
+			return _network_game_client_map_playable;
+		*crossplay_verdict = custom_edition_maps_crossplay_check(map->name, (long)sizeof(map->name),
+			(unsigned long)map->version, file, reason, reason_size);
+		if (*crossplay_verdict != _crossplay_map_playable)
+			return _network_game_client_map_crossplay_refused;
+		/* (a Custom Edition map's is passed: custom_edition_maps_display_index) */
+		if (!cache_files_map_plays_multiplayer(map->name, build))
+			return _network_game_client_map_build_unsupported;
+		return _network_game_client_map_playable;
+	}
 	/* 1. the build */
 	if (!cache_files_map_plays_multiplayer(map->name, build))
 		return _network_game_client_map_build_unsupported;
@@ -1445,6 +1479,94 @@ static void network_game_client_map_refusal_show(
 	return;
 }
 
+/* tells the player why a PC host's map is not played here (crossplay:
+`verdict`, crossplay_maps.h; `why` the resource maps missing, or why the
+file cannot be loaded): each names the map, and none offers a download, which
+a PC host does not have */
+static void network_game_client_crossplay_map_refusal_show(
+	struct network_game_map const *map,
+	short verdict,
+	char const *why)
+{
+	void platform_log(char const *format, ...);
+	char file[CROSSPLAY_MAP_FILE_BYTES];
+	short kind = crossplay_map_name_parse(map->name, (long)sizeof(map->name), file);
+	char const *title;
+	char message[768];
+
+	/* (what a message shows of a name refused: crossplay_maps.c's printable
+	part, never the host's text as it is) */
+	if (kind == _crossplay_map_kind_invalid)
+		crossplay_map_name_printable(map->name, (long)sizeof(map->name), file);
+	title = custom_edition_maps_level_title(file);
+	message[0] = 0;
+	switch (verdict)
+	{
+	case _crossplay_map_missing:
+	case _crossplay_map_stock_unloadable:
+		/* (one of the Xbox's levels: why its file here is not the Xbox map,
+		as on the legacy wire) */
+		if (why && why[0] && kind == _crossplay_map_kind_xbox && crossplay_map_file_is_stock(file))
+			snprintf(message, sizeof(message), T("Couldn't load %s: %s."), title, why);
+		else
+			snprintf(message, sizeof(message),
+				T("The PC host is playing the map %s, which isn't in your maps folder. PC hosts can't send maps: copy "
+				"the host's %s.map there to play it."), title, file);
+		break;
+	case _crossplay_map_custom_edition_different:
+		snprintf(message, sizeof(message),
+			T("Your %s.map isn't the same version as the PC host's. PC hosts can't send maps: copy the host's %s.map "
+			"to your maps folder to play it."), file, file);
+		break;
+	case _crossplay_map_custom_edition_is_xbox_here:
+		snprintf(message, sizeof(message),
+			T("The PC host is playing the PC (Custom Edition) map %s, but your %s.map is an Xbox map. Copy the host's "
+			"%s.map to your maps folder to play it."), title, file, file);
+		break;
+	case _crossplay_map_xbox_is_custom_edition_here:
+		snprintf(message, sizeof(message),
+			T("The PC host is playing the Xbox map %s, but your %s.map is a PC (Custom Edition) map."), title, file);
+		break;
+	case _crossplay_map_unusable:
+		snprintf(message, sizeof(message), T("Couldn't load %s: %s."), title, why && why[0] ? why : "?");
+		break;
+	case _crossplay_map_needs_resource_maps:
+		/* (one resource map, or more: whole sentences, lang.h) */
+		snprintf(message, sizeof(message), why && strchr(why, ',') ?
+			T("The host is playing the PC (Custom Edition) map %s, which needs %s from Halo Custom Edition in "
+				"your maps folder. Copy them there to play it.") :
+			T("The host is playing the PC (Custom Edition) map %s, which needs %s from Halo Custom Edition in "
+				"your maps folder. Copy it there to play it."),
+			title, why ? why : "");
+		break;
+	case _crossplay_map_needs_pc_maps:
+		snprintf(message, sizeof(message),
+			T("The PC host is playing the PC (Custom Edition) map %s, and PC maps is off. Turn on PC maps "
+			"(Multiplayer > Modded maps), then join again."), title);
+		break;
+	case _crossplay_map_not_multiplayer:
+		snprintf(message, sizeof(message),
+			T("The host is playing the custom map %s, but your copy isn't a multiplayer map this game can load."), title);
+		break;
+	case _crossplay_map_halomd:
+		snprintf(message, sizeof(message), T("The PC host is playing the HaloMD map %s, which this game can't play."),
+			file);
+		break;
+	case _crossplay_map_halo_pc_retail:
+		snprintf(message, sizeof(message),
+			T("The PC host is playing the Halo PC map %s (from the Halo PC disc), which this game can't play."), file);
+		break;
+	default:
+		snprintf(message, sizeof(message),
+			T("The PC host's map %s isn't one this game can check, so its game can't be joined."), file);
+		break;
+	}
+	platform_log("map: the PC host's %s can't be played here (%s)", file, crossplay_map_verdict_describe(verdict));
+	platform_show_message(T("Halo: map"), message);
+
+	return;
+}
+
 boolean network_game_client_game_settings_updated(
 	struct network_game_client *client,
 	struct network_game *message_packet)
@@ -1505,6 +1627,7 @@ boolean network_game_client_game_settings_updated(
 			char reason[256];
 			char why[480];
 			short check;
+			short crossplay_verdict;
 
 			why[0] = 0;
 			/* port: which map the host's game settings name, in halo.log: the
@@ -1518,7 +1641,7 @@ boolean network_game_client_game_settings_updated(
 			/* port: a download of another map stops (the host changed maps) */
 			map_share_client_map_changed(message_packet->map.name);
 			check = network_game_client_map_check(&message_packet->map, build, missing_files, sizeof(missing_files),
-				reason, sizeof(reason));
+				reason, sizeof(reason), &crossplay_verdict);
 			/* port: a custom map missing here, or another copy, is offered
 			for download from the host; the joiner stays in the lobby, and
 			precaches it once it has it (map_share.c) */
@@ -1541,6 +1664,15 @@ boolean network_game_client_game_settings_updated(
 					why, sizeof(why)))
 			{
 				network_event("asking the player to turn on PC maps for '%s'...", message_packet->map.name);
+			}
+			/* port: a PC host's map this machine does not play (crossplay):
+			said, naming it, and the game left; never asked of the host, which
+			has no map download (map sharing is this port's alone) */
+			else if (check == _network_game_client_map_crossplay_refused)
+			{
+				network_game_client_crossplay_map_refusal_show(&message_packet->map, crossplay_verdict, reason);
+				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
+				return FALSE;
 			}
 			/* port: a map this machine cannot play with the host's: said,
 			and the game left (the menu's error the join's, not the

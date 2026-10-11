@@ -37,6 +37,7 @@ read.
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "crossplay_maps.h"
 #include "map_share_protocol.h"
 #include "tag_schema.h"
 #include "../src/lang.h"
@@ -1506,6 +1507,50 @@ unsigned long custom_edition_cache_map_identity(
 	custom_edition_file_close(&file);
 
 	return result;
+}
+
+void custom_edition_cache_crossplay_facts(
+	char const *file_name,
+	struct crossplay_local_map *local)
+{
+	char path[MAP_PATH_SIZE];
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	enum cache_file_status status;
+
+	csmemset(local, 0, sizeof(*local));
+	local->file = _crossplay_map_file_absent;
+	local->pc_maps_on = halo_custom_edition_enabled();
+	if (!file_name || !file_name[0] || !custom_edition_map_path(file_name, path))
+	{
+		return;
+	}
+	if (!custom_edition_file_open(&file, path))
+	{
+		local->file = _crossplay_map_file_unusable;
+		local->status = _cache_file_status_read_failed;
+		return;
+	}
+	status = cache_file_identify(&file.source, &identity);
+	custom_edition_file_close(&file);
+	if (status == _cache_file_status_ok && identity.format == _cache_file_format_custom_edition_cache)
+	{
+		local->file = _crossplay_map_file_custom_edition;
+		/* (the header's checksum as it is: OpenCE's custom_edition_map_checksum) */
+		local->checksum = identity.checksum;
+	}
+	else if (status == _cache_file_status_ok && identity.format == _cache_file_format_xbox_cache)
+	{
+		local->file = _crossplay_map_file_xbox;
+		local->xbox_multiplayer = custom_edition_cache_xbox_multiplayer(file_name);
+	}
+	else
+	{
+		local->file = _crossplay_map_file_unusable;
+		local->status = (short)(status != _cache_file_status_ok ? status : _cache_file_status_unsupported_version);
+	}
+
+	return;
 }
 
 boolean custom_edition_cache_multiplayer(

@@ -11,6 +11,9 @@
 #   variant_options  the game settings record a host sends, on the legacy
 #              Vita wire and on the crossplay wire (OpenCE's: the gametype's PC
 #              options and co-op's switches; port/linux/game/network_game_record.c)
+#   crossplay_maps  the map a PC host's game settings name and its version,
+#              as the crossplay join checks them (OpenCE's custom_maps\<name>
+#              and raw checksum; port/linux/game/crossplay_maps.c)
 # Each is built 32-bit as the game is, with AddressSanitizer and UBSan, and
 # runs its checks and the cases kept in net_fuzz_cases/<target> (inputs that
 # found bugs, and seeds); any out-of-bounds access, overflow or failed
@@ -19,7 +22,7 @@
 #                        (clang's i386 runtime, its COMDAT groups taken out
 #                        when it does not link as it is); what it finds goes
 #                        to NET_FUZZ_OUT (default a folder under TMPDIR)
-#   NET_FUZZ_TARGETS     the targets (default all five)
+#   NET_FUZZ_TARGETS     the targets (default all six)
 #   NET_FUZZ_DEDICATED=1 builds them as the dedicated server's code
 #                        (HALO_DEDICATED_SERVER, HALO_NET_AS_VITA: its limits
 #                        on a peer's packets and an address's peers, its
@@ -35,7 +38,7 @@ out=${TMPDIR:-/tmp}/net_fuzz_test.$$
 test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
-targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options"}
+targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options crossplay_maps"}
 seconds=${NET_FUZZ_SECONDS:-0}
 mkdir -p "$out"
 cd "$root"
@@ -89,6 +92,8 @@ for target in $targets; do
 		$monocypher" ;;
 	signal) flags=$platform_flags; sources="port/vita/tests/net_fuzz_signal.c $monocypher" ;;
 	map_share) flags=$platform_flags; sources="port/vita/tests/net_fuzz_map_share.c port/linux/src/p2p_crypto.c $monocypher" ;;
+	crossplay_maps) flags=$platform_flags; sources="port/vita/tests/net_fuzz_crossplay_maps.c port/linux/game/crossplay_maps.c
+		port/linux/game/map_share_protocol.c port/linux/src/p2p_crypto.c $monocypher" ;;
 	messages) flags=$game_flags; sources="port/vita/tests/net_fuzz_messages.c source/memory/data_packet_groups.c
 		source/memory/data_packets.c source/memory/data_encoding.c source/memory/byte_swapping.c
 		source/bungie_net/common/message_header.c" ;;

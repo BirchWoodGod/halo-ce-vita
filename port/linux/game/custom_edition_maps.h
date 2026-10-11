@@ -126,6 +126,23 @@ boolean custom_edition_maps_stock_problem(
 	char *why,
 	long why_size);
 
+/* With crossplay on (a PC host's game: crossplay_maps.h), whether this
+machine plays the host's level `level_name` (the record's map name,
+`level_name_size` bytes, which need not be ended) of which the host sent
+`host_version` (OpenCE's meaning: a Custom Edition map's raw header
+checksum, else 0): enum crossplay_map_verdict. The map's file name, or what a
+message may show of the name, in `file` (CROSSPLAY_MAP_FILE_BYTES); in `why`
+(`why_size` characters) the resource maps missing, or why the file cannot
+be loaded. Logs why not. Only the maps folder's file of that name is looked
+at, and only for a name crossplay_map_name_parse takes. */
+short custom_edition_maps_crossplay_check(
+	char const *level_name,
+	long level_name_size,
+	unsigned long host_version,
+	char *file,
+	char *why,
+	long why_size);
+
 /* The title of the level `level_name` for the player: an Xbox level's as the
 menus have it ("Battle Creek"), else its map's file name. */
 char const *custom_edition_maps_level_title(

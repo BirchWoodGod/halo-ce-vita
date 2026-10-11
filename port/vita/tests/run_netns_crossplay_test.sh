@@ -67,6 +67,22 @@
 #               (section 6, T11): a game of 32 players, a co-op game, a map
 #               our client does not have; today it refuses for the Vita line
 #               or not at all, so the check is on the message
+#   crossmaps   a PC host's map (docs/crossplay.md T3, crossplay_maps.h): OpenCE
+#               hosts on LANs of their own, each with our client: Blood Gulch
+#               (levels\test\bloodgulch\bloodgulch, version 0: the Xbox map
+#               on both, joins and plays), custom_maps\<XPPC_CE_MAP> (its
+#               raw checksum) with our client holding the same file and PC
+#               maps on (joins and plays), and the same map with our client
+#               without it (refused with the map named, joining nothing, no
+#               map share query); controls: OpenCE clients on the first two.
+#               Needs XPPC_CE_MAP (or HALO_TEST_CE_MAP), a Custom Edition map
+#               needing no resource maps here (Invader's pcgulch.map), and
+#               XPPC_CE_RESOURCES, a folder with Custom Edition's bitmaps.map,
+#               sounds.map and loc.map (OpenCE wants them for any Custom
+#               Edition map), both linked into the OpenCE copies' custom_maps
+#               folder; else SKIP. Until T4 our
+#               client stops at the version (XFAIL); the map check itself
+#               runs today against a stand-in host: run_crossplay_maps_test.sh
 #   all         every mode above, one after the other (expected failures as
 #               XFAIL), and a summary
 #
@@ -100,7 +116,7 @@
 #   XPPC_MQTT311=1     the broker refuses MQTT 5 (every copy must fall back to
 #                      3.1.1)
 #   XPPC_EXPECTED_FAIL the expected-fail modes ("opencelan opencehost chupahost
-#                      chupaserver damnserver crossrefuse")
+#                      chupaserver damnserver crossrefuse crossmaps")
 #   HALO_TEST_OUT      where the logs go (deleted after a pass unless
 #                      HALO_TEST_KEEP=1; default a new folder under
 #                      ~/halo-test-out)
@@ -120,11 +136,20 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
-expected_fail=${XPPC_EXPECTED_FAIL:-opencelan opencehost chupahost chupaserver damnserver crossrefuse}
+expected_fail=${XPPC_EXPECTED_FAIL:-opencelan opencehost chupahost chupaserver damnserver crossrefuse crossmaps}
 mode=${1:-}
 
 case $mode in
 pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse) ;;
+crossmaps)
+	ce_map=${XPPC_CE_MAP:-${HALO_TEST_CE_MAP:-}}
+	ce_resources=${XPPC_CE_RESOURCES:-}
+	[ -n "$ce_map" ] && [ -f "$ce_map" ] ||
+		{ echo "SKIP (crossmaps): wants XPPC_CE_MAP (a Custom Edition map that needs no resource maps)"; exit 0; }
+	for f in bitmaps sounds loc; do
+		[ -f "$ce_resources/$f.map" ] ||
+			{ echo "SKIP (crossmaps): wants XPPC_CE_RESOURCES (a folder with Custom Edition's $f.map, for OpenCE)"; exit 0; }
+	done ;;
 crossmixed)
 	echo "SKIP (crossmixed): wants T4's wire switch (HALO_CROSSPLAY=1 speaking OpenCE's wire); then: a crossplay"
 	echo "client cannot see or join a legacy Vita host, and a legacy client a crossplay one, each told why"
@@ -140,7 +165,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossrefuse crossmixed crossversion; do
+	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossrefuse crossmaps crossmixed crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -318,6 +343,8 @@ run_copy() {
 	shift 5
 	mkdir -p "$dir/data" "$dir/save" "$dir/home" "$dir/bin"
 	ln -sfn "${copy_maps:-$data/maps}" "$dir/data/maps"
+	# (crossmaps: a PC copy's Custom Edition maps, beside its maps folder)
+	[ -n "${copy_custom_maps:-}" ] && [ "$kind" != ours ] && ln -sfn "$copy_custom_maps" "$dir/data/custom_maps"
 	# (playlists for the dedicated servers)
 	printf 'bloodgulch slayer\n' > "$dir/data/xp-playlist.txt"
 	printf '%s:1883\n' "$broker" > "$dir/bin/brokers.txt"
@@ -444,7 +471,7 @@ pair() {
 			echo "$name: the host's invite: ${invite:-none in its log}"
 		fi
 		copy_args=$invite copy_maps=${client_maps:-} run_copy "$name/client" "$client_ns" "$clientkind" "$client_ip" "$broker_address" \
-			$(client_env "$clientkind" "$transport" $((17 + pairs))) $extra
+			$(client_env "$clientkind" "$transport" $((17 + pairs))) $extra ${client_extra:-}
 		mine="$mine $last_pid"; client_pid=$last_pid
 		back_pid= late_pid= started=$SECONDS seen= seen_at=$SECONDS
 		while kill -0 "$host_pid" 2>/dev/null; do
@@ -459,7 +486,7 @@ pair() {
 			# host crashed when the copy coming back joined its postgame)
 			if [ -z "$late_pid" ] && [ "$first" -ge "$late_at" ]; then
 				copy_args=$invite copy_maps=${client_maps:-} run_copy "$name/late" "$late_ns" "$clientkind" "$late_ip" "$broker_address" \
-					$(client_env "$clientkind" "$transport" $((29 + pairs))) $extra
+					$(client_env "$clientkind" "$transport" $((29 + pairs))) $extra ${client_extra:-}
 				mine="$mine $last_pid"; late_pid=$last_pid
 			fi
 			# (the client leaves 11 s into the first game, if it is in it, and
@@ -472,7 +499,7 @@ pair() {
 					sleep 1
 				done
 				copy_args=$invite copy_maps=${client_maps:-} run_copy "$name/back" "$client_ns" "$clientkind" "$client_ip" "$broker_address" \
-					$(client_env "$clientkind" "$transport" $((37 + pairs))) $extra
+					$(client_env "$clientkind" "$transport" $((37 + pairs))) $extra ${client_extra:-}
 				mine="$mine $last_pid"; back_pid=$last_pid
 			fi
 			{ [ "$games" -ge 2 ] && [ "$(game_seconds "$out/$name/host/run.log" 2)" -ge "$second_game_play" ]; } && break
@@ -711,6 +738,52 @@ crossrefuse)
 		grep -aq "network test: hosting" "$out/$name/host/run.log" ||
 			{ controls_ok=0; echo "BROKEN ($mode): the OpenCE host of $name never hosted"; }
 	done
+	;;
+crossmaps)
+	# three OpenCE hosts on LANs of their own (docs/crossplay.md T3): Blood
+	# Gulch (the Xbox map both sides have), and a Custom Edition map as OpenCE
+	# names it (custom_maps\<name>, its raw checksum) with our client holding
+	# the same file, then lacking it. The OpenCE copies have the map in their
+	# custom_maps folder; ours in its maps folder, with PC maps on
+	ce_name=$(basename "$ce_map" .map)
+	mkdir -p "$out/custom_maps" "$out/maps-with-ce"
+	ln -sfn "$(readlink -f "$ce_map")" "$out/custom_maps/$ce_name.map"
+	for f in bitmaps sounds loc; do ln -sfn "$(readlink -f "$ce_resources/$f.map")" "$out/custom_maps/$f.map"; done
+	for f in "$data"/maps/*.map; do ln -sfn "$f" "$out/maps-with-ce/$(basename "$f")"; done
+	ln -sfn "$(readlink -f "$ce_map")" "$out/maps-with-ce/$ce_name.map"
+	export copy_custom_maps=$out/custom_maps
+	control xmap-stock-opence && pair xmap-stock-opence lan opence opence
+	control xmap-ce-opence && host_game="custom_maps\\$ce_name" host_variants=slayer pair xmap-ce-opence lan opence opence
+	test_names="xmap-stock-ours xmap-ce-ours"
+	host_variants=slayer pair xmap-stock-ours lan opence ours
+	client_maps=$out/maps-with-ce client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer \
+		pair xmap-ce-ours lan opence ours
+	client_extra=HALO_CUSTOM_EDITION=1 host_game="custom_maps\\$ce_name" host_variants=slayer pair xmap-cemissing-ours lan opence ours
+	run_our_modes
+	# (the map our client lacks: refused, the map named, never asked of the
+	# host, never joined)
+	name=xmap-cemissing-ours
+	want="The PC host is playing the map $ce_name, which isn't in your maps folder"
+	got=$(grep -ahF "$want" "$out/$name/client/run.log" "$out/$name/client/data/debug.txt" 2>/dev/null | head -1)
+	# (ticks played after the host's settings named its map: its game)
+	joined=$(sed -n "/join: the host's map is custom_maps.$ce_name /,\$ p" "$out/$name/client/run.log" 2>/dev/null |
+		grep -ac "network test: tick [0-9]* ")
+	asked=$(grep -acE "map share: asking the host|asking the host for its map" "$out/$name/client/run.log" 2>/dev/null)
+	echo "--- $name: our client played ${joined:-0} ticks, asked the host for the map ${asked:-0} times; the refusal: ${got:-none}"
+	if [ "${asked:-0}" != 0 ]; then
+		our_results="$our_results $name:asked-a-PC-host-for-its-map"
+	elif [ -n "$got" ] && [ "${joined:-0}" = 0 ]; then
+		our_results="$our_results $name:pass"
+	elif [ "${joined:-0}" != 0 ]; then
+		our_results="$our_results $name:joined-instead-of-refusing"
+	else
+		stage=refusal-message
+		grep -aqiE "not joining a host of network version" "$out/$name/client/data/debug.txt" "$out/$name/client/run.log" \
+			2>/dev/null && stage="$stage(refused-for-the-network-version-instead)"
+		our_results="$our_results $name:$stage"
+	fi
+	grep -aq "network test: hosting" "$out/$name/host/run.log" && ! grep -aq "map missing" "$out/$name/host/run.log" ||
+		{ controls_ok=0; echo "BROKEN ($mode): the OpenCE host of $name never hosted its map"; }
 	;;
 esac
 
