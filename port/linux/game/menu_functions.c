@@ -22,7 +22,10 @@ internet play with:
   (p2p_lobby_entry: a lock for a password, the name, map, gametype and
   players; the chosen one's Players and Rules lines below); A joins the
   game chosen (a locked one's password asked first, on the password
-  screen), X asks the hosts again, B goes back. A joined game's host is
+  screen), X asks the hosts again, Y sorts the list another way (players,
+  name, map, gametype), the triggers page through it, B goes back. Every
+  game listed is there (up to P2P_LOBBY_MAXIMUM_ENTRIES), its rows scrolling
+  past the screen's twelve (browser_list.h). A joined game's host is
   reached as a system link game: the System Link screen then opens (with
   the main menu and Multiplayer behind it), where it is listed.
 - JOIN BY CODE ("port code ...") joins a host's code (ABCD-EFGH), then the
@@ -50,6 +53,7 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "../src/p2p.h"
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
+#include "browser_list.h"
 #include "../src/system_link_shortcut.h"
 
 #include <stdio.h>
@@ -116,6 +120,9 @@ enum
 	_function_code_join,
 	_function_code_back,
 	_function_coop_campaign,
+	_function_browser_sort,
+	_function_browser_page_up,
+	_function_browser_page_down,
 };
 
 /* in port_game_data_input_names' order */
@@ -220,8 +227,15 @@ typedef char verify_widget_instance_size[sizeof(struct widget_instance) == 0x58 
 
 static struct
 {
-	/* the browser's rows, and the game chosen (its id stays its own as the
-	list changes) */
+	/* every game listed, sorted as the player chose (Y: browser_list.h),
+	and the rows showing some of them (entries, entry_count: the rows
+	filled), which scroll (view; page: a trigger's page asked for); the game
+	chosen (its id stays its own as the list changes) */
+	struct p2p_lobby_entry games[P2P_LOBBY_MAXIMUM_ENTRIES];
+	long game_count;
+	short sort;
+	short page;
+	struct browser_view view;
 	struct p2p_lobby_entry entries[BROWSER_ROWS];
 	long entry_count;
 	struct p2p_lobby_entry chosen;
@@ -504,22 +518,70 @@ static void row_column(struct widget_instance *row, char const *name, char const
 	text_show(named(row, name), text);
 }
 
+/* (automated tests only, never in release builds) HALO_TEST_BROWSER_GAMES=N:
+N made-up games after those listed, for the browser's scrolling and sorts
+(run_netns_online_test.sh browserscroll); not joinable */
+static void browser_test_games(void)
+{
+#ifndef HALO_RELEASE
+	static char const *const maps[] = { "Blood Gulch", "Wizard", "Hang 'Em High", "Prisoner", "Chill Out" };
+	static char const *const gametypes[] = { "Slayer", "CTF", "King", "Oddball" };
+	char const *value = getenv("HALO_TEST_BROWSER_GAMES");
+	long count = value ? atol(value) : 0, index;
+
+	for (index = 0; index < count && menu_functions.game_count < P2P_LOBBY_MAXIMUM_ENTRIES; index++)
+	{
+		struct p2p_lobby_entry *entry = &menu_functions.games[menu_functions.game_count++];
+
+		memset(entry, 0, sizeof(*entry));
+		snprintf(entry->id, sizeof(entry->id), "test%02ld", index);
+		snprintf(entry->name, sizeof(entry->name), "Test game %02ld", index);
+		snprintf(entry->map, sizeof(entry->map), "%s", maps[index % 5]);
+		snprintf(entry->gametype, sizeof(entry->gametype), "%s", gametypes[index % 4]);
+		entry->players = (int)(index * 7 % 16);
+		entry->maximum = 16;
+		entry->open = entry->compatible = 1;
+	}
+#endif
+}
+
 static void browser_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
-	struct widget_instance *child, *focused = list->focused_child;
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
 	char line[96], message[128];
-	long index, focused_row = NONE;
+	long index, focused_row = NONE, chosen = NONE, target;
 
 	join_watch();
 	browser_large_watch();
-	menu_functions.entry_count = 0;
-	while (menu_functions.entry_count < BROWSER_ROWS &&
-		p2p_lobby_entry((int)menu_functions.entry_count, &menu_functions.entries[menu_functions.entry_count]))
+	menu_functions.game_count = p2p_lobby_entries(menu_functions.games, P2P_LOBBY_MAXIMUM_ENTRIES);
+	browser_test_games();
+	browser_list_sort(menu_functions.games, (int)menu_functions.game_count, menu_functions.sort);
+	/* the row the menus focus (a step up or down past the first or last
+	scrolls: browser_view_follow), and where the game chosen went */
+	for (index = 0, child = list->child; child; child = child->next)
 	{
-		menu_functions.entry_count++;
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
 	}
-	/* the rows: one for each game, the rest hidden */
+	for (index = 0; menu_functions.chosen_valid && index < menu_functions.game_count; index++)
+	{
+		if (!strcmp(menu_functions.games[index].id, menu_functions.chosen.id))
+		{
+			chosen = index;
+			break;
+		}
+	}
+	target = browser_view_follow(&menu_functions.view, BROWSER_ROWS, (int)menu_functions.game_count, (int)focused_row,
+		(int)chosen, menu_functions.page);
+	menu_functions.page = 0;
+	menu_functions.entry_count = menu_functions.view.visible;
+	for (index = 0; index < menu_functions.entry_count; index++)
+		menu_functions.entries[index] = menu_functions.games[menu_functions.view.offset + index];
+	/* the rows: one for each game shown, the rest hidden */
 	for (index = 0, child = list->child; child; child = child->next)
 	{
 		struct p2p_lobby_entry const *entry;
@@ -553,34 +615,38 @@ static void browser_update(struct widget_instance *list)
 		row_column(child, "row_game", entry->gametype);
 		snprintf(text, sizeof(text), "%d/%d", entry->players, entry->maximum);
 		row_column(child, "row_players", text);
-		/* (the focused row outlined: its focused frame, 812ffeea) */
-		child->animation.current_frame_index = child == focused ? 1 : 0;
-		if (child == focused)
-			focused_row = index;
+		if (index == menu_functions.view.row)
+			focus = child;
 		index++;
 	}
-	/* (off a row that went away: the first game's, if any) */
-	if (focused && (focused->disabled || !focused->visible))
+	/* the focus on the chosen game's row (the menus' own step undone where
+	the rows scrolled instead), the focused row outlined (its focused frame,
+	812ffeea) */
+	if (focus && focus != focused)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
 	{
-		for (child = list->child; child; child = child->next)
-		{
-			if (!strncmp(child->name, "row_", 4) && !child->disabled)
-			{
-				ui_widget_port_give_focus(list, child);
-				break;
-			}
-		}
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
 	}
-	if (focused_row != NONE)
+	if (target != NONE)
 	{
-		menu_functions.chosen = menu_functions.entries[focused_row];
+#ifndef HALO_RELEASE
+		/* (the tests': each game chosen, said once) */
+		if (getenv("HALO_TEST_BROWSER_GAMES") &&
+			(!menu_functions.chosen_valid || strcmp(menu_functions.chosen.id, menu_functions.games[target].id)))
+		{
+			platform_log("menus: the server browser's game %ld of %ld chosen: %s (rows from %d)", target + 1,
+				menu_functions.game_count, menu_functions.games[target].name, menu_functions.view.offset + 1);
+		}
+#endif
+		menu_functions.chosen = menu_functions.games[target];
 		menu_functions.chosen_valid = TRUE;
 	}
 	else
 		menu_functions.chosen_valid = FALSE;
-	text_show(named(screen, "ticker_players_value"), focused_row != NONE ?
-		menu_functions.entries[focused_row].players_line : "");
-	text_show(named(screen, "ticker_rules_value"), focused_row != NONE ? menu_functions.entries[focused_row].rules : "");
+	text_show(named(screen, "ticker_players_value"), target != NONE ? menu_functions.chosen.players_line : "");
+	text_show(named(screen, "ticker_rules_value"), target != NONE ? menu_functions.chosen.rules : "");
 	/* the status at the top right, and with no game to list, why, in the
 	list's own space (the browser_message line): the brokers out of reach,
 	or reached with no public games (p2p_lobby_browse_status) */
@@ -605,10 +671,27 @@ static void browser_update(struct widget_instance *list)
 			break;
 		case P2P_LOBBY_BROWSE_GAMES:
 			/* (each count's words whole, for the translations) */
-			if (menu_functions.entry_count == 1)
+			if (menu_functions.game_count == 1)
 				snprintf(line, sizeof(line), "%s", T("1 public game"));
 			else
-				snprintf(line, sizeof(line), T("%ld public games"), menu_functions.entry_count);
+				snprintf(line, sizeof(line), T("%ld public games"), menu_functions.game_count);
+			/* (the rows shown, when they scroll, and the sort: Y) */
+			if (menu_functions.game_count > BROWSER_ROWS)
+			{
+				size_t length = strlen(line);
+
+				snprintf(line + length, sizeof(line) - length, ", %ld-%ld", (long)menu_functions.view.offset + 1,
+					(long)menu_functions.view.offset + menu_functions.entry_count);
+			}
+			{
+				static char const *const sorts[NUMBER_OF_BROWSER_SORTS] =
+				{
+					"by players", "by name", "by map", "by gametype"
+				};
+				size_t length = strlen(line);
+
+				snprintf(line + length, sizeof(line) - length, ", %s", T(sorts[menu_functions.sort]));
+			}
 			break;
 		default:
 			snprintf(line, sizeof(line), "%s", T("Looking for public games..."));
@@ -887,6 +970,8 @@ boolean pc_menu_event_function_invoke(
 		menu_functions.status[0] = 0;
 		menu_functions.join_watched = FALSE;
 		menu_functions.chosen_valid = FALSE;
+		menu_functions.page = 0;
+		browser_view_reset(&menu_functions.view);
 		p2p_lobby_browse(1);
 		return TRUE;
 	case _function_browser_dispose:
@@ -898,6 +983,21 @@ boolean pc_menu_event_function_invoke(
 	case _function_browser_refresh:
 		menu_functions.status[0] = 0;
 		p2p_lobby_refresh();
+		return TRUE;
+	case _function_browser_sort:
+		/* (Y: the next sort, from the top) */
+		menu_functions.sort = (short)((menu_functions.sort + 1) % NUMBER_OF_BROWSER_SORTS);
+		menu_functions.chosen_valid = FALSE;
+		browser_view_reset(&menu_functions.view);
+		platform_log("menus: the server browser sorts %s", menu_functions.sort == _browser_sort_players ? "by players" :
+			menu_functions.sort == _browser_sort_name ? "by name" : menu_functions.sort == _browser_sort_map ? "by map" :
+			"by gametype");
+		return TRUE;
+	case _function_browser_page_up:
+		menu_functions.page = -1;
+		return TRUE;
+	case _function_browser_page_down:
+		menu_functions.page = 1;
 		return TRUE;
 	case _function_browser_join:
 		return browser_join(widget);

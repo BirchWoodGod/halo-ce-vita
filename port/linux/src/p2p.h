@@ -308,6 +308,13 @@ too, marked own): nonzero if there is one */
 void p2p_lobby_browse(int on);
 void p2p_lobby_refresh(void);
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry);
+/* every game listed, in that order, up to maximum_count (one copy of the
+list for all of them; P2P_LOBBY_MAXIMUM_ENTRIES at most): how many */
+enum
+{
+	P2P_LOBBY_MAXIMUM_ENTRIES = 64,
+};
+int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count);
 /* joins a listed game (id: its entry's), with its password if it is locked
 (the password's key is worked out on a thread of its own); nonzero if the
 game is listed. How it goes: p2p_lobby_join_state */

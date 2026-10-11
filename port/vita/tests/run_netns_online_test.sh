@@ -113,6 +113,11 @@
 #            screen the profile and the game (HALO_TEST_PAD)
 #   menuspw  the same with a password (HALO_TEST_LOBBY_PASSWORD), typed on
 #            the password screen (HALO_TEST_TEXT_INPUT)
+#   browserscroll  the server browser's scrolling and sorts
+#            (browser_list.h): 20 made-up games beside the host's
+#            (HALO_TEST_BROWSER_GAMES, test builds only); down past the twelve
+#            rows, a page down (rt), Y sorts by name (the host's VitaHost
+#            last), up on the first game wraps to it, A joins it and plays
 #   menushost the host creates its game from the menus: Multiplayer, CREATE
 #            GAME INTERNET, Server Setup (its name typed, Max players,
 #            public), START GAME, the profile, the map and the gametype; the
@@ -779,6 +784,43 @@ menus|menuspw)
 		grep -aq "ui: screen pc.join.password.screen" "$jl" || fail "the password screen did not open"
 		grep -aq "menus: joining the public game VitaHost with its password" "$jl" || fail "the password was not given"
 	fi
+	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	;;
+browserscroll)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST_START=${HALO_TEST_MENUS_START:-90} \
+		HALO_NET_LOBBY_NAME=VitaHost HALO_NET_HOST_PUBLIC=true; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	# (the server browser as in menus; once the host is listed (21 games):
+	# down 14 times (the 15th game, the rows from the 4th), a page down (the
+	# last), Y (by name: Test game 00 first), up (wrapped: VitaHost, the last),
+	# A joins it; then the System Link screen as in menus)
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do pad="$pad down:150:400"; done
+	pad="$pad rt:150:800 y:150:800 up:150:800 a"
+	pad="$pad wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a"
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
+		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
+		HALO_TEST_BROWSER_GAMES=20; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	echo "--- joiner"; grep -aE "menus:|system link: (joining|in another)" "$jl" | head -40
+	grep -aq "ui: screen pc.browser.screen" "$jl" || fail "the server browser did not open"
+	grep -aq "menus: the server browser's game 15 of 21 chosen: .* (rows from 4)" "$jl" ||
+		fail "down past the last row did not scroll the rows (the 15th game, from the 4th)"
+	grep -aq "menus: the server browser's game 21 of 21 chosen: .* (rows from 10)" "$jl" ||
+		fail "a page down did not reach the last game"
+	grep -aq "menus: the server browser sorts by name" "$jl" || fail "Y did not sort by name"
+	grep -aq "menus: the server browser's game 1 of 21 chosen: Test game 00 (rows from 1)" "$jl" ||
+		fail "sorted by name, the first game was not Test game 00"
+	grep -aq "menus: the server browser's game 21 of 21 chosen: VitaHost (rows from 10)" "$jl" ||
+		fail "up on the first game did not wrap to the last (VitaHost)"
+	grep -aq "menus: joining the public game VitaHost" "$jl" || fail "the joiner did not join VitaHost from the scrolled list"
 	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
@@ -2966,7 +3008,7 @@ CHECK
 	fi
 	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
+	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
 	exit 2
 	;;
 esac

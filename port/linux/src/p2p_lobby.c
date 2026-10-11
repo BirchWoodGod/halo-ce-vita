@@ -130,7 +130,7 @@ enum
 		1 + LISTED_PLAYERS * (1 + LISTED_PLAYER_NAME_SIZE) + STAMP_SIZE + P2P_SIGNATURE_SIZE,
 	MINIMUM_LISTING_SIZE = 2 + 1 + 2 + 1 + 4 + 4 + P2P_KEY_SIZE + P2P_TOKEN_SIZE + 3 + 3 + 2 + 1 + 1 + STAMP_SIZE +
 		P2P_SIGNATURE_SIZE,
-	MAXIMUM_GAMES = 64,
+	MAXIMUM_GAMES = P2P_LOBBY_MAXIMUM_ENTRIES,
 	MAXIMUM_TOMBSTONES = 128,
 	MAXIMUM_QUEUED = 64,
 
@@ -2145,6 +2145,23 @@ int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 		entry_from_listing(&games[index], entry);
 	pthread_mutex_unlock(&games_lock);
 	return index < count;
+}
+
+int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count)
+{
+	static struct p2p_listing games[MAXIMUM_GAMES];
+	static pthread_mutex_t games_lock = PTHREAD_MUTEX_INITIALIZER;
+	int count, index;
+
+	if (!entries || maximum_count <= 0)
+		return 0;
+	pthread_mutex_lock(&games_lock);
+	count = p2p_lobby_games(games, MAXIMUM_GAMES);
+	count = count < maximum_count ? count : maximum_count;
+	for (index = 0; index < count; index++)
+		entry_from_listing(&games[index], &entries[index]);
+	pthread_mutex_unlock(&games_lock);
+	return count;
 }
 
 int p2p_lobby_join(const char *id, const char *password)
