@@ -22,6 +22,9 @@ a Windows bitmap <map>.bmp beside the map takes the place of. A map its campaign
 list comes after those it does, in the stock levels' order and then the
 order of their names.
 
+None of it is looked at unless the player turned it on (game.mcc_mods,
+HALO_MCC_MODS: halo_mcc_mods_enabled, which needs PC maps on too).
+
 Everything read here is the mod's, untrusted: names are taken only of the
 characters above, a campaign file only of the mod's own campaign folder
 and of a name without a path, and each file only to
@@ -587,6 +590,12 @@ short custom_edition_mods_look_for(
 	globals->looked_for = TRUE;
 	globals->mod_count = 0;
 	globals->map_count = 0;
+	/* (experimental and off unless chosen: game.mcc_mods, with PC maps on;
+	off, the mods folder is not looked at) */
+	if (!halo_mcc_mods_enabled())
+	{
+		return 0;
+	}
 	find = FindFirstFileA(CUSTOM_EDITION_MODS_DIRECTORY "*", &data);
 	if (find == INVALID_HANDLE_VALUE)
 	{
@@ -687,7 +696,7 @@ boolean custom_edition_mods_map_path(
 	char *path,
 	long path_size)
 {
-	struct custom_edition_mod_map const *map = mod_map_named(name);
+	struct custom_edition_mod_map const *map = halo_mcc_mods_enabled() ? mod_map_named(name) : NULL;
 
 	if (!map ||
 		snprintf(path, (size_t)path_size, "%s%s\\maps\\%s.map", CUSTOM_EDITION_MODS_DIRECTORY,

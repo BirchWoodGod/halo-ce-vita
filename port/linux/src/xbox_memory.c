@@ -178,6 +178,20 @@ int halo_custom_edition_enabled(void)
 	return config_boolean("game.custom_edition");
 }
 
+int halo_mcc_mods_enabled(void)
+{
+	/* game.mcc_mods (port_config.c): experimental, off unless chosen; read
+	as halo_custom_edition_enabled is (the Vita's panel sets the variable,
+	"0" off), and only with PC maps on */
+	const char *setting = getenv("HALO_MCC_MODS");
+
+	if (!halo_custom_edition_enabled())
+		return 0;
+	if (setting)
+		return setting[0] && strcmp(setting, "0") != 0 && strcmp(setting, "false") != 0;
+	return config_boolean("game.mcc_mods");
+}
+
 void *halo_custom_edition_tag_cache(void)
 {
 	return custom_edition_tag_cache;

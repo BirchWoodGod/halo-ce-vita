@@ -35,7 +35,11 @@ ux0:data/haloce-vita/
       assets/*.png                      the pictures they name (optional)
 ```
 
-Turn PC maps on (Settings, as for Custom Edition maps). The campaign's
+Turn PC maps on, then MCC mods (Settings > Multiplayer > Modded maps; the
+MCC mods row shows once the mods folder has a folder in it; on a PC,
+`game.mcc_mods = true` with `game.custom_edition`). MCC mods is
+experimental and off by default: off, the mods folder is not looked at
+and no mod map loads. The campaign's
 level list then shows the mod's maps after the ten levels (and any Custom
 Edition campaign maps), in the order its `CampaignInfo.json` plays them,
 by their titles ("The Pillar of Autumn"), described by the mod's title and

@@ -10,7 +10,8 @@
 # exception may be logged. Then the first map's campaign must go on when it is
 # won ((game_won) loads the next map its campaign lists), and a version 13 map
 # anywhere but a mod's folder (its first map linked into the maps folder, as a
-# Custom Edition campaign map would be) must be refused.
+# Custom Edition campaign map would be) must be refused. With MCC mods off (HALO_MCC_MODS=0;
+# game.mcc_mods is off by default) the mods folder must not be looked at.
 #
 #   run_mcc_native_test.sh
 #   HALO_TEST_VITA         the harness (default build/linux/halo of this tree)
@@ -78,7 +79,7 @@ run() {
 	# shellcheck disable=SC2086
 	(cd "$dir" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" \
 		HALO_SAVE_ROOT="$dir/save" HALO_NO_VSYNC=1 HALO_EXIT_AFTER="$run_seconds" HALO_FULLSCREEN=0 \
-		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_CUSTOM_EDITION=1 \
+		HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_CUSTOM_EDITION=1 HALO_MCC_MODS=${HALO_TEST_MCC_MODS_SETTING:-1} \
 		HALO_INTERPOLATION=false HALO_STATIC_SCENERY=1 HALO_SCENERY_UPDATE_DIVISOR=4 HALO_MIN_OBJECT_PIXELS=8 \
 		HALO_MODEL_LOD_SCALE=0.5 HALO_LIGHTING_REFRESH_DIVISOR=3 HALO_SOUND_OBSTRUCTION_TICKS=3 \
 		HALO_FIXED_DT=1 HALO_FIXED_TICK=1 HALO_TICK_THREAD=0 HALO_FRAME_CAP=0 HALO_FRAME_TIMING=300 \
@@ -133,6 +134,15 @@ if [ -n "$first" ]; then
 		fail "a Halo: CE Anniversary map in the maps folder was not refused ($out/outside)"
 	else
 		echo "${key}x (a version 13 map in the maps folder): refused"
+	fi
+
+	# the mods folder is not looked at with MCC mods off (game.mcc_mods,
+	# HALO_MCC_MODS: experimental, off by default)
+	HALO_TEST_MCC_MODS_SETTING=0 run off "mods\\$first" 30 ''
+	if grep -aq "memory: loaded mods" "$out/off/run.log" || grep -aq "^mods: [0-9]* maps of" "$out/off/data/debug.txt"; then
+		fail "MCC mods off: the mods folder was looked at ($out/off)"
+	else
+		echo "MCC mods off: mods\\$first not loaded, the mods folder not looked at"
 	fi
 fi
 

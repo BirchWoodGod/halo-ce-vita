@@ -179,7 +179,7 @@ else
 	mods_folder=$(cd "$mcc_mod" && pwd)
 	for width in 640 848; do
 		name="mcc-native-$width"
-		run "$name" "$width" 60 'map_name mods\ruby_b30' HALO_CUSTOM_EDITION=1
+		run "$name" "$width" 60 'map_name mods\ruby_b30' HALO_CUSTOM_EDITION=1 HALO_MCC_MODS=1
 		grep -aq "the HUD is Halo: CE Anniversary's" "$out/$name/data/debug.txt" 2>/dev/null ||
 			fail "$name: the HUD was not taken for Halo: CE Anniversary's ($out/$name/data/debug.txt)"
 		grep -aq "HUD meters are shaded as the Xbox's" "$out/$name/data/debug.txt" 2>/dev/null ||
