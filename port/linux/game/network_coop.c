@@ -115,6 +115,17 @@ index and tag, since the map placed them at the same index everywhere.
 
 #include <stdlib.h>
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) the host's co-op work timed, in the net-tick report
+(tick_detail.c) */
+unsigned long long halo_net_tick_begin(void);
+void halo_net_tick_end(const char *name, unsigned long long started);
+#define COOP_DETAIL(name, statement) do { unsigned long long coop_detail_started = halo_net_tick_begin(); \
+	statement; halo_net_tick_end(name, coop_detail_started); } while (0)
+#else
+#define COOP_DETAIL(name, statement) do { statement; } while (0)
+#endif
+
 /* hud.c's: what the scripts show of the HUD (its struct hud_scripted_globals,
 which hud.c keeps to itself) */
 struct coop_hud_scripted_globals
@@ -3129,23 +3140,23 @@ void network_coop_host_tick(
 
 	if (!coop_game())
 		return;
-	host_resend_update();
-	players_vitality_keep();
-	coop_enemies_update();
+	COOP_DETAIL("coop:resend", host_resend_update());
+	COOP_DETAIL("coop:vitality", players_vitality_keep());
+	COOP_DETAIL("coop:enemies", coop_enemies_update());
 	host_count_skip_votes();
-	host_presentation(&message.presentation);
-	send_to_clients(&message, _distributed_message_coop_presentation, 1, sizeof(message.presentation));
+	COOP_DETAIL("coop:presentation", host_presentation(&message.presentation);
+		send_to_clients(&message, _distributed_message_coop_presentation, 1, sizeof(message.presentation)));
 	/* (first: it lists the devices, which the device groups go through) */
-	host_census_update();
-	host_send_device_groups();
+	COOP_DETAIL("coop:census", host_census_update());
+	COOP_DETAIL("coop:device_groups", host_send_device_groups());
 	if (host_resend.joined || game_time_get() % OBJECT_NAMES_INTERVAL_TICKS == 0)
-		host_send_object_names();
-	host_send_screen_effect();
-	host_send_attachments();
-	host_send_looping_sounds();
-	host_send_hud_state();
-	host_send_broken_surfaces();
-	host_send_events();
+		COOP_DETAIL("coop:names", host_send_object_names());
+	COOP_DETAIL("coop:rest", host_send_screen_effect();
+		host_send_attachments();
+		host_send_looping_sounds();
+		host_send_hud_state();
+		host_send_broken_surfaces();
+		host_send_events());
 }
 
 /* client, after each tick */

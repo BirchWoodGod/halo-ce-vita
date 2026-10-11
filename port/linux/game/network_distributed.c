@@ -83,6 +83,18 @@ machine (their datum identifiers need not be).
 #include <time.h>
 #include <math.h>
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) the host's per-tick work timed, in the net-tick
+report (tick_detail.c) */
+unsigned long long halo_net_tick_begin(void);
+void halo_net_tick_end(const char *name, unsigned long long started);
+void halo_net_tick_report(void);
+#define DISTRIBUTED_DETAIL(name, statement) do { unsigned long long distributed_detail_started = halo_net_tick_begin(); \
+	statement; halo_net_tick_end(name, distributed_detail_started); } while (0)
+#else
+#define DISTRIBUTED_DETAIL(name, statement) do { statement; } while (0)
+#endif
+
 /* network_game_globals.c's and network_server_message_handler.c's */
 boolean network_distributed_client_send(void *message, word size);
 boolean network_distributed_client_send_reliably(void *message, word size);
@@ -943,7 +955,7 @@ static void distributed_batch_flush(
 	if (sender == HOST_SENDER)
 		network_distributed_client_send(batch->data, batch->size);
 	else
-		network_distributed_server_send_to_machine(sender, batch->data, batch->size);
+		DISTRIBUTED_DETAIL("datagram", network_distributed_server_send_to_machine(sender, batch->data, batch->size));
 	batch->size = 0;
 }
 
@@ -3862,13 +3874,13 @@ void network_distributed_tick(
 		decided first: the damage goes where the players it hurt do), and a
 		kill's statistics before the kill, so that a client announcing it
 		counts it (a double kill, a killing spree) */
-		distributed_apply_predictions();
-		network_objects_apply_vehicle_predictions();
-		network_objects_host_tick();
-		distributed_host_plan_players();
+		DISTRIBUTED_DETAIL("apply_predictions", distributed_apply_predictions());
+		DISTRIBUTED_DETAIL("vehicle_predictions", network_objects_apply_vehicle_predictions());
+		DISTRIBUTED_DETAIL("objects", network_objects_host_tick());
+		DISTRIBUTED_DETAIL("plan_players", distributed_host_plan_players());
 		if (game_time_get() % PING_REFRESH_TICKS == 0)
 			distributed_refresh_pings();
-		network_damage_host_tick();
+		DISTRIBUTED_DETAIL("damage", network_damage_host_tick());
 		if (distributed_statistics_due || game_time_get() % STATISTICS_INTERVAL_TICKS == 0)
 			distributed_send_statistics(game_time_get() % STATISTICS_REFRESH_TICKS == 0);
 		distributed_statistics_due = FALSE;
@@ -3879,9 +3891,9 @@ void network_distributed_tick(
 		{
 			distributed_send_structure_bsp();
 		}
-		distributed_host_send_players();
-		network_actors_host_tick();
-		network_coop_host_tick();
+		DISTRIBUTED_DETAIL("send_players", distributed_host_send_players());
+		DISTRIBUTED_DETAIL("actors", network_actors_host_tick());
+		DISTRIBUTED_DETAIL("coop", network_coop_host_tick());
 		distributed_send_pickups();
 		if (game_time_get() % GAME_STATE_INTERVAL_TICKS == 0)
 			distributed_send_game_state(NONE);
@@ -3901,7 +3913,11 @@ void network_distributed_tick(
 	it) */
 	distributed_tick_sent_times[game_time_get() & (TICK_SENT_TIMES - 1)].time = game_time_get();
 	distributed_tick_sent_times[game_time_get() & (TICK_SENT_TIMES - 1)].milliseconds = system_milliseconds();
-	distributed_batches_flush();
+	DISTRIBUTED_DETAIL("flush", distributed_batches_flush());
+#ifdef HALO_LINUX
+	if (connection == _game_connection_network_server)
+		halo_net_tick_report();
+#endif
 	distributed_machines.in_tick = FALSE;
 	distributed_machines.valid = FALSE;
 }
