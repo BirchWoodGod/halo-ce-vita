@@ -1382,8 +1382,11 @@ boolean custom_edition_cache_playable(
 
 	/* (port: or a mod's Halo: CE Anniversary map, which only the cache file
 	loader asks of, and which custom_edition_cache_tags_load loads only for
-	a game of this machine's own) */
-	return halo_custom_edition_enabled() && custom_edition_cache_identify_file(map_name, &identity, NULL, TRUE);
+	a game of this machine's own: for any other, a network game's or a
+	film's, the mods folder is not looked in at all, whatever name the
+	network gave) */
+	return halo_custom_edition_enabled() &&
+		custom_edition_cache_identify_file(map_name, &identity, NULL, game_connection() == _game_connection_local);
 }
 
 boolean custom_edition_cache_mod_map_identify(
@@ -1729,7 +1732,10 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 	assert(!globals->tags_loaded);
 	custom_edition_cache_load_failure_begin(map_name);
 	globals->mcc_cea = FALSE;
-	if (!custom_edition_map_path(map_name, path, &from_mods) || !custom_edition_file_open(&globals->map, path))
+	/* (the mods folder looked in only for a game of this machine's own, as
+	the check below loads one only for that) */
+	if (!custom_edition_map_path(map_name, path, game_connection() == _game_connection_local ? &from_mods : NULL) ||
+		!custom_edition_file_open(&globals->map, path))
 	{
 		error(_error_silent, "custom edition: cannot open the map '%s'", map_name);
 		custom_edition_cache_load_failure_reason(T("its file could not be opened"));
