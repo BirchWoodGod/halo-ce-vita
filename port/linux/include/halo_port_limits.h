@@ -48,8 +48,18 @@ machines, 16 players) are 0x226 and 0x434. */
 #define HALO_PORT_NETWORK_GAME_PLAYERS_END \
 	(HALO_PORT_NETWORK_GAME_PLAYERS_OFFSET + HALO_PORT_MAXIMUM_NETWORK_PLAYERS * HALO_PORT_NETWORK_PLAYER_SIZE)
 #define HALO_PORT_NETWORK_GAME_RANDOM_SEED_OFFSET (HALO_PORT_NETWORK_GAME_PLAYERS_END + 2)
-#define HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET (HALO_PORT_NETWORK_GAME_PLAYERS_END + 0xA)
-#define HALO_PORT_NETWORK_GAME_SIZE (HALO_PORT_NETWORK_GAME_PLAYERS_END + 0xE)
+/* (then the gametype's PC options, struct game_variant_options: 0x1C bytes;
+OpenCE's network game, as this build keeps it and the crossplay wire sends
+it) */
+#define HALO_PORT_NETWORK_GAME_VARIANT_OPTIONS_OFFSET (HALO_PORT_NETWORK_GAME_PLAYERS_END + 0xA)
+#define HALO_PORT_NETWORK_GAME_VARIANT_OPTIONS_SIZE 0x1C
+#define HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET (HALO_PORT_NETWORK_GAME_PLAYERS_END + 0x26)
+#define HALO_PORT_NETWORK_GAME_SIZE (HALO_PORT_NETWORK_GAME_PLAYERS_END + 0x2A)
+/* the legacy Vita wire's record (network version 18, betas 1-4): no PC
+options, its local data where they begin (13,092 bytes);
+port/linux/game/network_game_record.c */
+#define HALO_PORT_NETWORK_GAME_LEGACY_LOCAL_DATA_OFFSET (HALO_PORT_NETWORK_GAME_PLAYERS_END + 0xA)
+#define HALO_PORT_NETWORK_GAME_LEGACY_SIZE (HALO_PORT_NETWORK_GAME_PLAYERS_END + 0xE)
 
 /* ---------- system link protocol
 
@@ -103,9 +113,9 @@ header included; the per-tick update of 128 players is 3,857 */
 update of 128 players decodes to 0x1010 bytes */
 #define HALO_PORT_NETWORK_PACKET_SIZE 0x1100
 
-/* the game settings record (HALO_PORT_NETWORK_GAME_SIZE, 13,092 bytes at 128
-machines and players) does not fit one message; it is sent in pieces of
-this many bytes (4 pieces), each 3,594 bytes on the wire */
+/* the game settings record (13,120 bytes on the crossplay wire, 13,092 on
+the legacy one, at 128 machines and players) does not fit one message; it is
+sent in pieces of this many bytes (4 pieces), each 3,594 bytes on the wire */
 #define HALO_PORT_NETWORK_GAME_SETTINGS_FRAGMENT_SIZE 0xE00
 
 #endif /* __HALO_PORT_LIMITS_H */

@@ -4489,7 +4489,12 @@ boolean unit_throw_grenade_begin(
 			break;
 
 		default:
-			if (!weapon_prevents_grenade_throwing(weapon_index))
+			/* port: and with no weapon in a game whose PC options give a
+			custom loadout (game_variant_options: a PC host's loadout of none),
+			as melee (bipeds.c), which weapon_prevents_grenade_throwing(NONE)
+			prevents (OpenCE's, 933aac61) */
+			if ((weapon_index == NONE && game_variant_options_get()->loadout == _loadout_custom) ||
+				!weapon_prevents_grenade_throwing(weapon_index))
 			{
 				struct animation_graph *animation_graph;
 				struct animation *animation;

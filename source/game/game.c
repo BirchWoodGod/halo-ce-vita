@@ -373,6 +373,9 @@ void numeric_countdown_timer_update(
 
 static struct game_runtime_globals_prefix *game_globals = NULL;
 extern struct game_variant game_variant_global;
+/* port: the PC options the game plays by (game_set_game_variant_options;
+OpenCE's, c9ee319a) */
+static struct game_variant_options game_variant_options_global;
 extern struct data_array *player_data;
 extern short player_spawn_count;
 
@@ -725,8 +728,29 @@ void game_set_game_variant(
 	{
 		game_variant_global = *variant;
 	}
+	/* port: its PC options, until the network game's are given */
+	game_variant_options_default(&game_variant_global, &game_variant_options_global);
 
 	return;
+}
+
+/* port: the network game's PC options (network_game_create_game_objects),
+or with NULL the variant's defaults */
+void game_set_game_variant_options(
+	struct game_variant_options const *options)
+{
+	if (options)
+		game_variant_options_global = *options;
+	else
+		game_variant_options_default(&game_variant_global, &game_variant_options_global);
+
+	return;
+}
+
+struct game_variant_options const *game_variant_options_get(
+	void)
+{
+	return &game_variant_options_global;
 }
 
 void game_set_game_engine_index(

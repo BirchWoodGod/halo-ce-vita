@@ -263,6 +263,7 @@ symbols in this file:
 #include "networking/network_server_message_handler.h"
 #include "text/unicode.h"
 #include "map_share.h"
+#include "network_game_record.h"
 #include "main/main.h"
 #include "custom_edition_maps.h"
 /* system_milliseconds(), for the settings update interval */
@@ -773,6 +774,25 @@ boolean network_game_server_send_message_to_client_machine(
 	return network_game_server_write(connection, buffer, size, NULL, 1);
 }
 
+/* port: the game settings record (struct network_game) as the wire sends
+it: the legacy Vita wire's 13,092 bytes, or the crossplay wire's 13,120
+(network_game_record.c); its size in game_size. NULL if it cannot be. */
+static void const *network_game_server_settings_on_wire(
+	void const *game,
+	long *game_size)
+{
+	static byte record[HALO_PORT_NETWORK_GAME_SIZE];
+	short format = network_game_record_format_current();
+
+	if (*game_size != sizeof(struct network_game) ||
+		!network_game_record_encode(format, (struct network_game const *)game, record, sizeof(record)))
+	{
+		return NULL;
+	}
+	*game_size = network_game_record_size(format);
+	return record;
+}
+
 boolean network_game_server_send_game_settings_to_client_machine(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,
@@ -782,6 +802,10 @@ boolean network_game_server_send_game_settings_to_client_machine(
 	struct message_server_game_settings_update message;
 	long offset;
 
+	/* port: the record as the wire sends it (network_game_record.c) */
+	game = network_game_server_settings_on_wire(game, &game_size);
+	if (!game)
+		return FALSE;
 	for (offset = 0; offset < game_size; offset += sizeof(message.data))
 	{
 		void *encoded_message;
@@ -1065,6 +1089,13 @@ boolean network_game_server_send_game_settings_to_all_machines(
 		0x1C8,
 		server);
 
+	/* port: the record as the wire sends it (network_game_record.c) */
+	game = network_game_server_settings_on_wire(game, &game_size);
+	if (!game)
+	{
+		network_event("failed to encode the game settings record for the wire");
+		return FALSE;
+	}
 	/* every piece goes out even if one fails for a machine: the others
 	would otherwise keep the old settings (a machine whose connection failed
 	is closed, and is skipped when the update is sent again) */

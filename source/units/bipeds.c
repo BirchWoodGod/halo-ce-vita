@@ -303,6 +303,20 @@ void halo_tick_detail_end(const char *name, unsigned long long started);
 #define HALO_DETAIL_END(name) ((void)0)
 #endif
 
+/* port: an unarmed player's melee's length, in ticks (a weapon's is about
+this: its first person melee animation, sped up a quarter; OpenCE's) */
+#define UNARMED_MELEE_TICKS 16
+
+/* port: whether a player with no weapon may melee: in a game whose PC
+options give a custom loadout (game_variant_options: a PC host's, whose
+loadout may be none; OpenCE's, c9ee319a). The Xbox game, and the legacy
+wire's games, never let one. */
+static boolean biped_unarmed_melee_allowed(
+	void)
+{
+	return game_variant_options_get()->loadout == _loadout_custom;
+}
+
 /* ---------- constants */
 
 enum
@@ -4351,12 +4365,27 @@ boolean biped_update(
 					biped_index,
 					unit_get(biped_index)->unit.current_weapon_index);
 
-				if (!weapon_prevents_melee_attack(weapon_index) &&
+				/* (port: and with no weapon in a PC host's game whose loadout
+				may give none, game_variant_options: UNARMED_MELEE_TICKS) */
+				boolean unarmed = weapon_index == NONE && biped_unarmed_melee_allowed();
+
+				if ((unarmed || !weapon_prevents_melee_attack(weapon_index)) &&
 					biped->unit.current_zoom_level==NONE)
 				{
 					short melee_speedup_ticks;
 
 					unit_animation_start_action(biped_index, _unit_animation_action_melee);
+					/* port: a player with no weapon melees in a weapon's usual
+					time, the hit halfway (OpenCE's, c9ee319a: the Xbox game read
+					the timing from the weapon's animations, through a weapon it
+					did not check) */
+					if (unarmed)
+					{
+						biped->biped.player_melee_ticks = UNARMED_MELEE_TICKS;
+						biped->biped.player_melee_attack_tick = UNARMED_MELEE_TICKS / 2;
+					}
+					else
+					{
 					weapon_stop_reload(weapon_index);
 					first_person_weapon_message_from_unit(
 						biped_index,
@@ -4372,6 +4401,7 @@ boolean biped_update(
 							_weapon_first_person_animation_time_private_key_frame,
 							_first_person_weapon_animation_melee,
 							NONE);
+					}
 
 					melee_speedup_ticks = biped->biped.player_melee_ticks >> 2;
 					biped->biped.player_melee_ticks -= melee_speedup_ticks;

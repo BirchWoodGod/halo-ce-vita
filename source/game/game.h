@@ -151,6 +151,10 @@ short game_difficulty_level_get(void);
 short game_difficulty_level_get_ignore_easy(void);
 void game_set_game_variant(struct game_variant *variant);
 void game_set_game_engine_index(short index);
+/* port: the gametype's PC options (game_engine.h; OpenCE's) */
+struct game_variant_options;
+void game_set_game_variant_options(struct game_variant_options const *options);
+struct game_variant_options const *game_variant_options_get(void);
 boolean game_all_quiet(
 	void);
 boolean game_safe_to_save(

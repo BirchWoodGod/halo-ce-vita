@@ -42,12 +42,29 @@ struct network_game_local_data
 	byte __padding431[3];
 };
 
+/* port: network_game's cooperative_flags (OpenCE's, 62fa7e13: network
+version 19 of OpenCE's wire) */
+enum
+{
+	/* the players pass through each other (co-op's PLAYER COLLISIONS: OFF) */
+	_network_game_cooperative_no_player_collisions_bit = 0,
+	NUMBER_OF_NETWORK_GAME_COOPERATIVE_FLAGS
+};
+
+/* The game settings record, as this build keeps it: OpenCE's (its network
+version 26: 13,120 bytes at 128 machines and players). The crossplay wire
+sends it as it is; the legacy Vita wire (network version 18, betas 1-4)
+without cooperative_flags and variant_options (13,092 bytes):
+port/linux/game/network_game_record.c translates at the send and the
+receive. */
 struct network_game
 {
 	wchar_t name[16];
 	struct network_game_map map;
 	struct game_variant variant;
-	byte __padding10C;
+	/* port: co-op's switches (_network_game_cooperative_*_bit), in a byte the
+	Xbox's game left as padding (OpenCE's; the legacy wire's padding, 0) */
+	byte cooperative_flags;
 	char minimum_players;
 	/* port: 128 does not fit a signed char */
 	byte maximum_players;
@@ -62,6 +79,9 @@ struct network_game
 	short __unknown426;
 	unsigned long random_seed;
 	long number_of_games_played;
+	/* port: the gametype's PC options (game_engine.h; OpenCE's, its network
+	version 11): the crossplay wire's only */
+	struct game_variant_options variant_options;
 	struct network_game_local_data local_data;
 };
 

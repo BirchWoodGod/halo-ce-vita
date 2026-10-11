@@ -138,6 +138,7 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "units/bipeds.h"
+#include "game/game_engine.h"
 
 /* ---------- constants */
 
@@ -1354,6 +1355,11 @@ void object_types_place_all(
 	{
 		short object_type;
 
+#ifdef HALO_LINUX
+		/* port: the gametype's vehicles counted afresh (game_variant_options) */
+		game_engine_vehicle_placement_begin();
+#endif
+
 		for (object_type = 0; object_type < NUMBER_OF_OBJECT_TYPES; object_type++)
 		{
 			struct object_type_definition *definition;
@@ -1391,9 +1397,13 @@ void object_types_place_all(
 #ifdef HALO_LINUX
 					/* a Halo Custom Edition map places the vehicles its placements'
 					multiplayer spawn flags name for the game type, as retail Halo
-					does (port/linux/game/custom_edition_objects.c) */
+					does (port/linux/game/custom_edition_objects.c); then the
+					gametype's vehicles of each team (game_variant_options: a PC
+					host's; every machine places the same; OpenCE's), asked last as
+					it counts those it places */
 					if (object_type == _object_type_vehicle &&
-						!custom_edition_vehicle_placement_allowed(scenario_object))
+						(!custom_edition_vehicle_placement_allowed(scenario_object) ||
+						!game_engine_vehicle_placement_allowed(scenario_object, scenario_palette)))
 					{
 						continue;
 					}
