@@ -974,7 +974,7 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") && strstr(menu, "< Online"),
+	check(!strcmp(labels, "Connection*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && strstr(menu, "< Online"),
 		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
@@ -983,14 +983,14 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
-	check(menu_rows() == 5 && menu_fits(), "Multiplayer: five rows, 46 characters a line");
+	check(menu_rows() == 6 && menu_fits(), "Multiplayer: six rows, 46 characters a line");
 	/* the offline bots: Bots on, its skill and teams rows below it, live */
 	to_line("Bots");
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Co-op players|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
 		"Bots 3: Bot skill, Bot teams and Bot vehicles below it, live");
 	to_line("  Bot skill");
@@ -1001,7 +1001,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
+	check(!strcmp(labels, "Connection*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
 		"Bots Off: the bot rows hidden again");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
@@ -1011,13 +1011,13 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Bots|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
+	check(!strcmp(labels, "Connection*|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
 		"the PC menus in the game: Connection and Modded maps only");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
@@ -1127,7 +1127,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_UP);
 	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Bots|Modded maps|Latency meter"),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Bots|Co-op players|Modded maps|Latency meter"),
 		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
 	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
@@ -1143,7 +1143,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Bots|Modded maps|Latency meter") && menu_fits(),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Bots|Co-op players|Modded maps|Latency meter") && menu_fits(),
 		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
 	clock_us += 5000000;
 	to_line("Ad hoc room");
@@ -1175,7 +1175,7 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Bots|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
+	check(!strcmp(labels, "Connection*|Bots|Co-op players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
 	/* Latency meter (latency_meter.c): On as shipped, Off and back, live */
 	to_line("Latency meter");
 	check(strstr(menu, "\nLatency meter\x02  On >") && setting_named("HALO_LATENCY_METER") &&
@@ -1186,6 +1186,19 @@ static void test_multiplayer_tab(void)
 		!strcmp(getenv("HALO_LATENCY_METER"), "0"), "Latency meter Off: HALO_LATENCY_METER 0");
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_LATENCY_METER") && !strcmp(getenv("HALO_LATENCY_METER"), "1"), "Latency meter On again: 1");
+	/* Co-op players (network.coop_players): 2 as shipped, 3 and 4 experimental */
+	to_line("Co-op players");
+	check(strstr(menu, "\nCo-op players\x02  2 >") && strstr(setting_named("HALO_NET_COOP_PLAYERS")->help, "may lag"),
+		"Co-op players: 2 as shipped, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nCo-op players\x02< 3 (experimental) >") && getenv("HALO_NET_COOP_PLAYERS") &&
+		!strcmp(getenv("HALO_NET_COOP_PLAYERS"), "3"), "Co-op players 3, experimental: HALO_NET_COOP_PLAYERS 3");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nCo-op players\x02< 4 (experimental)  ") && !strcmp(getenv("HALO_NET_COOP_PLAYERS"), "4"),
+		"Co-op players 4, experimental, the last");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_NET_COOP_PLAYERS") && !strcmp(getenv("HALO_NET_COOP_PLAYERS"), "2"), "Co-op players 2 again");
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -1201,7 +1214,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -1274,7 +1287,7 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
-		"HALO_BOT_VEHICLES",
+		"HALO_BOT_VEHICLES", "HALO_NET_COOP_PLAYERS",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET",
 	};
 	int index, all = 1, choices = 0;

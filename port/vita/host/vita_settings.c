@@ -532,6 +532,11 @@ static struct setting settings[] = {
 		"Team games: bots on both teams, or all against you", 0, TAB_MULTIPLAYER },
 	{ "  Bot vehicles", "HALO_BOT_VEHICLES", 0, 2, { "1", "0" }, { "On", "Off" },
 		"Bots drive and ride the map's vehicles", 0, TAB_MULTIPLAYER },
+	/* (network.coop_players: co-op games this Vita hosts take 2 players by
+	default, the Xbox's; 3 and 4 are experimental, the host running the
+	campaign's AI and scripts for everyone: network_server_manager.c) */
+	{ "Co-op players", "HALO_NET_COOP_PLAYERS", 0, 3, { "2", "3", "4" }, { "2", "3 (experimental)", "4 (experimental)" },
+		"Co-op you host. 3-4: your Vita may lag", 0, TAB_MULTIPLAYER },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
 	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
 	to the host at the top right of a network game and in the scoreboard's
@@ -544,11 +549,11 @@ static struct setting settings[] = {
 	{ "  Lobby name", "HALO_NET_LOBBY_NAME", 0, 0, { NULL }, { NULL }, "The name others see for your game", 0,
 		PAGE_PLAY, KIND_TEXT },
 	/* (network_server_manager.c: the game's maximum_players; co-op takes
-	network.coop_players, four) */
+	network.coop_players, the Co-op players row) */
 	{ "  Max players", "HALO_NET_MAX_PLAYERS", 0, 15,
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
-		"The most players your games take (co-op: 4)", 14, PAGE_PLAY },
+		"The most players your games take (not co-op)", 14, PAGE_PLAY },
 	/* (network.host_public, OpenCE's: p2p.c) */
 	{ "  Visibility", "HALO_NET_HOST_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
 		"Private: others join by code. Public: listed too", 1, PAGE_PLAY },

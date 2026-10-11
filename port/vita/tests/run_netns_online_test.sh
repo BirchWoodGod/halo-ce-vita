@@ -151,7 +151,7 @@
 #            votes, loading zones, kills, game_won); the rest of the logs
 #            are checked by the caller. Each joiner must see every player
 #            alive at once for 15 s. HALO_TEST_COOP_JOINERS: how many join
-#            (1; up to network.coop_players, 4 on the Vitas),
+#            (1; the host takes joiners + 1: network.coop_players),
 #            HALO_TEST_COOP_STAGGER seconds apart
 #            (1; past the host's start, HALO_NETWORK_TEST_START 20, a late
 #            join); HALO_TEST_COOP_HOST_ENV: more for the host
@@ -1347,7 +1347,7 @@ coop)
 	stagger=${HALO_TEST_COOP_STAGGER:-1}
 	# (the network test's game is first on the level's map by its file name,
 	# which the co-op setting then makes co-op)
-	coop_host="HALO_NET_COOP_LEVEL=$level HALO_NETWORK_TEST=host:${level##*\\} HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look"
+	coop_host="HALO_NET_COOP_LEVEL=$level HALO_NETWORK_TEST=host:${level##*\\} HALO_NETWORK_TEST_START=20 HALO_TEST_INPUT=bot:1:look HALO_NET_COOP_PLAYERS=$((joiners < 1 ? 2 : joiners + 1))"
 	# (more joiners, online: each behind a NAT of its own; system link: each
 	# on the host's LAN)
 	if [ "${HALO_TEST_COOP_LAN:-0}" = 1 ]; then
@@ -1442,8 +1442,10 @@ coopmenu)
 	joiners=${HALO_TEST_COOP_JOINERS:-1}
 	players=$((joiners + 1))
 	# (the main menu, Campaign, the new profile's name (START: Done), Heroic, Y)
+	# (the host takes as many as play: Co-op players, 2 by default on the
+	# Vitas, 3 and 4 experimental)
 	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_NETWORK_TEST=watch HALO_UI_LOG=1 \
-		"HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y" \
+		HALO_NET_COOP_PLAYERS=$players "HALO_TEST_PAD=a:150:3000 start:150:3000 wait:150:6000 down:150:800 y" \
 		"HALO_TEST_COMMANDS=L60:@vote;L${HALO_TEST_COOP_WIN:-1200}:game_won"; host_pid=$last_pid
 	sleep 5
 	# (each joiner on the host's LAN: the System Link screen, A joins, A picks
@@ -1475,7 +1477,7 @@ coopmenu)
 	grep -aq "ui: screen .*connected_pregame_screen" "$hl" || fail "the host's lobby (the waiting screen) did not open"
 	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
 	# (the countdown from its last start to the loading: 15 s while a game of
-	# four, network.coop_players on the Vitas, has room, 6 s once it is full)
+	# more, network.coop_players, has room, 6 s once it is full)
 	wait_s=$(awk '/co-op: the partner is in: the countdown starts/ { t = $2 } /signalling client machines to begin loading/ && t {
 		split(t, a, ":"); split($2, b, ":"); print (b[1] * 3600 + b[2] * 60 + b[3]) - (a[1] * 3600 + a[2] * 60 + a[3]); exit }' "$hd")
 	echo "the lobby's countdown: ${wait_s:-?} s"
