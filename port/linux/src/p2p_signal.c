@@ -16,6 +16,20 @@ The listings, MQTT 5 and the publishing below are OpenCE's
 (https://github.com/OpenCommunityEdition/OpenCE, "Server browser of public
 internet games").
 
+Each broker is reached on its plain port (1883), or, when that fails before
+the broker is ready (refused, reset, no CONNACK in time, a CONNACK that
+says busy), on its MQTT over TLS port (8883) at once: the same broker
+behind it, so the same topics, and a PC's listings and signalling meet
+this machine's whichever way each came (Oct 11 2026: EMQX answered 1883
+busy and Mosquitto reset it everywhere, while their 8883 took connections).
+The way that failed is tried again in the next round, after the round's
+wait: plain first, unless TLS was the way the broker last became ready, in
+the last PLAIN_AGAIN_TIME. TLS is posix_tls_* (posix_https.c, Mbed TLS: the
+broker's certificate checked against broker_roots.h's authorities, its
+handshake on a thread of its own); a brokers.txt entry "host:1883/8883"
+names its TLS port ("/0": none). TLS keeps a broker reachable, not secret:
+what goes through it is sealed or signed as below.
+
 A broker may drop a connection's publishes past about 10 a second without a
 word (EMQX), and a host's answers to a flood of JOINs would reach that: each
 broker's publishes spend from a bucket (PUBLISH_BURST at once, one more each
@@ -153,8 +167,19 @@ enum
 	restart */
 	LISTING_EXPIRY = 90,
 
+	/* a broker's MQTT over TLS port, unless its entry names another
+	("host:1883/8883"; "/0": none) */
+	DEFAULT_TLS_PORT = 8883,
+	/* the ways a broker is reached (a broker's ways_failed) */
+	WAY_PLAIN = 1,
+	WAY_TLS = 2,
+	BOTH_WAYS = WAY_PLAIN | WAY_TLS,
+
 	/* milliseconds */
 	CONNECT_TIMEOUT = 10000,
+	/* a broker that last became ready over TLS is tried over TLS first
+	for this long after; then plain first again */
+	PLAIN_AGAIN_TIME = 300000,
 	/* a broker that failed is tried again after this, twice as long each
 	failure after, to MAXIMUM_RETRY_INTERVAL */
 	RETRY_INTERVAL = 15000,
@@ -243,6 +268,8 @@ enum
 {
 	_broker_idle,
 	_broker_connecting,
+	/* (over TLS) its handshake, on posix_tls_*'s thread */
+	_broker_handshaking,
 	_broker_awaiting_acknowledgement,
 	_broker_ready,
 };
@@ -268,7 +295,29 @@ enum
 struct broker
 {
 	char host[128];
+	/* its plain port, and its TLS port (0: none); network byte order */
 	unsigned short port;
+	unsigned short tls_port;
+	/* this connection (or the next) over TLS, and its session
+	(posix_tls_open's handle + 1; 0 none: the socket is then this file's to
+	close) */
+	int tls;
+	int tls_session;
+	/* this round's ways that failed before the broker was ready (WAY_*),
+	the rounds failed since it last was (the wait before the next), whether
+	every way failed since then (none left to try: the browser's "can't
+	reach", p2p_signal_counts), and a way to try at once (the other, after
+	one failed) */
+	int ways_failed;
+	int rounds;
+	int exhausted;
+	int retry_at_once;
+	/* (broker_connect) the failure is its name's: every way failed */
+	int every_way;
+	/* when it last became ready over TLS (0: it last did plain, or never) */
+	unsigned long tls_ready_time;
+	/* the last handshake's description (posix_tls_handshake), for the log */
+	char tls_description[96];
 	unsigned long address;
 	int looked_up;
 	int socket;
@@ -313,16 +362,19 @@ struct broker
 	int listing_acknowledged;
 	int settle_wanted;
 	unsigned long settle_time;
-	/* diagnostics (halo.log): why it last failed, what was last logged and
-	when, the failures since not logged; its connections, and when the last
-	was logged */
-	char failure[96];
-	char logged_failure[96];
-	unsigned long failure_logged_time;
-	int failures_not_logged;
+	/* diagnostics (halo.log): why it last failed; for each way (plain, TLS:
+	failing in turn, each its own), what was last logged and when, the
+	failures since not logged; its connections, and when the last was
+	logged */
+	char failure[160];
+	char logged_failure[2][160];
+	unsigned long failure_logged_time[2];
+	int failures_not_logged[2];
 	int connections;
 	int connections_not_logged;
 	unsigned long ready_logged_time;
+	/* (whether the connection last logged was over TLS) */
+	int ready_logged_tls;
 	/* the listing's refusals (MQTT 5's PUBACK reasons) not logged */
 	int refusal_logged;
 	unsigned long refusal_logged_time;
@@ -393,6 +445,9 @@ static struct
 	struct broker brokers[MAXIMUM_BROKERS];
 	int broker_count;
 	char client_identifier[24];
+	/* the authorities' file of the tests' brokers' TLS (network.brokers_ca_file,
+	a full path; "" none) */
+	char ca_file[512];
 
 	/* the server browser (p2p_lobby.c): this machine's slot (its will
 	clears it), whether its game is listed and whether it browses; the
@@ -551,10 +606,48 @@ static void make_topic(const unsigned char *token, const char *label, const unsi
 
 /* ---------- MQTT */
 
+/* whether the broker is tried over TLS first: it last became ready over
+TLS, in the last PLAIN_AGAIN_TIME */
+static int broker_prefers_tls(const struct broker *broker)
+{
+	return broker->tls_port && broker->tls_ready_time && !elapsed(broker->tls_ready_time, PLAIN_AGAIN_TIME);
+}
+
+/* after a failure (before the broker was ready, or after; every_way: its
+name's, which no port mends): its other way at once, if this round has not
+tried it; else the round is over (the broker exhausted if it failed before
+it was ready), and the next starts after retry_interval, the way it
+prefers */
+static void broker_next_way(struct broker *broker, int before_ready, int every_way)
+{
+	if (before_ready)
+		broker->ways_failed |= every_way || !broker->tls_port ? BOTH_WAYS : broker->tls ? WAY_TLS : WAY_PLAIN;
+	if (before_ready && (broker->ways_failed & BOTH_WAYS) != BOTH_WAYS)
+	{
+		broker->tls = !broker->tls;
+		broker->retry_at_once = 1;
+		return;
+	}
+	if (before_ready)
+		broker->exhausted = 1;
+	broker->ways_failed = 0;
+	broker->retry_at_once = 0;
+	if (broker->rounds < 1000)
+		broker->rounds++;
+	broker->tls = broker_prefers_tls(broker);
+}
+
 static void broker_close(struct broker *broker, int failed)
 {
-	if (broker->socket >= 0)
+	int before_ready = broker->state != _broker_ready;
+
+	/* (a TLS session closes its socket: at once, or its handshake's thread
+	does) */
+	if (broker->tls_session)
+		posix_tls_close(broker->tls_session - 1);
+	else if (broker->socket >= 0)
 		posix_socket_close(broker->socket);
+	broker->tls_session = 0;
 	broker->socket = -1;
 	broker->state = _broker_idle;
 	broker->state_time = p2p_now();
@@ -574,7 +667,11 @@ static void broker_close(struct broker *broker, int failed)
 	broker->settle_wanted = 0;
 	broker->settle_time = 0;
 	if (failed)
+	{
 		broker->failures++;
+		broker_next_way(broker, before_ready, broker->every_way);
+	}
+	broker->every_way = 0;
 }
 
 /* whether the server browser needs the brokers now: a game listed, or the
@@ -587,7 +684,8 @@ static int lobby_active(void)
 /* milliseconds before a broker that failed is tried again */
 static unsigned long retry_interval(const struct broker *broker)
 {
-	int failures = broker->failures < 1 ? 1 : broker->failures > 8 ? 8 : broker->failures;
+	/* (by the rounds failed: a round tries each way once) */
+	int failures = broker->rounds < 1 ? 1 : broker->rounds > 8 ? 8 : broker->rounds;
 
 	if (lobby_active())
 	{
@@ -637,27 +735,40 @@ static void broker_failed(struct broker *broker, const char *format, ...) __attr
 static void broker_failed(struct broker *broker, const char *format, ...)
 {
 	va_list arguments;
+	/* (a failure over TLS said so: one of its name's is either way's) */
+	int way = broker->tls && !broker->every_way;
+	int prefix = way ? snprintf(broker->failure, sizeof(broker->failure), "over TLS, ") : 0;
 
 	va_start(arguments, format);
-	vsnprintf(broker->failure, sizeof(broker->failure), format, arguments);
+	vsnprintf(broker->failure + prefix, sizeof(broker->failure) - (size_t)prefix, format, arguments);
 	va_end(arguments);
 	broker_close(broker, 1);
-	if (strcmp(broker->failure, broker->logged_failure) || !broker->failure_logged_time ||
-		elapsed(broker->failure_logged_time, FAILURE_LOG_INTERVAL))
+	if (strcmp(broker->failure, broker->logged_failure[way]) || !broker->failure_logged_time[way] ||
+		elapsed(broker->failure_logged_time[way], FAILURE_LOG_INTERVAL))
 	{
 		char again[48] = "";
+		char next[64];
 
-		if (broker->failures_not_logged)
-			snprintf(again, sizeof(again), " (and %d times since it was last said)", broker->failures_not_logged);
-		platform_log("Internet play: broker %s: %s%s; trying again in %lu s", broker->host, broker->failure, again,
-			retry_interval(broker) / 1000);
-		memcpy(broker->logged_failure, broker->failure, sizeof(broker->failure));
-		broker->failure_logged_time = now_stamp();
-		broker->failures_not_logged = 0;
+		if (broker->failures_not_logged[way])
+			snprintf(again, sizeof(again), " (and %d times since it was last said)", broker->failures_not_logged[way]);
+		if (broker->retry_at_once)
+		{
+			snprintf(next, sizeof(next), broker->tls ? "trying it over TLS (port %u) at once" :
+				"trying its plain port %u at once", network_short(broker->tls ? broker->tls_port : broker->port));
+		}
+		else
+		{
+			snprintf(next, sizeof(next), "trying again in %lu s%s", retry_interval(broker) / 1000,
+				broker->tls ? " (over TLS)" : "");
+		}
+		platform_log("Internet play: broker %s: %s%s; %s", broker->host, broker->failure, again, next);
+		memcpy(broker->logged_failure[way], broker->failure, sizeof(broker->failure));
+		broker->failure_logged_time[way] = now_stamp();
+		broker->failures_not_logged[way] = 0;
 	}
 	else
 	{
-		broker->failures_not_logged++;
+		broker->failures_not_logged[way]++;
 	}
 }
 
@@ -665,8 +776,20 @@ static void broker_flush(struct broker *broker)
 {
 	while (broker->output_size > 0)
 	{
-		int sent = posix_socket_send(broker->socket, broker->output, broker->output_size, 0);
+		int sent;
 
+		if (broker->tls_session)
+		{
+			/* (TLS: 0 when the socket takes nothing now; the bytes it took
+			stay its own until sent, the same ones given first again) */
+			sent = posix_tls_send(broker->tls_session - 1, broker->output, broker->output_size);
+			if (sent < 0)
+				broker_failed(broker, "the connection broke sending");
+			if (sent <= 0)
+				return;
+		}
+		else
+			sent = posix_socket_send(broker->socket, broker->output, broker->output_size, 0);
 		if (sent < 0)
 		{
 			int error = posix_socket_last_error();
@@ -1066,10 +1189,13 @@ static void broker_connected(struct broker *broker)
 	broker_send(broker, 0x10, body, size);
 }
 
+static void broker_start_tls(struct broker *broker);
+
 static void broker_connect(struct broker *broker)
 {
 	struct sockaddr_in address;
 
+	broker->retry_at_once = 0;
 	if (!broker->looked_up || !broker->address || broker->failures >= 2)
 	{
 		/* may wait for DNS; only at the start, or after failing (twice: the
@@ -1078,6 +1204,8 @@ static void broker_connect(struct broker *broker)
 		broker->looked_up = 1;
 		if (!broker->address)
 		{
+			/* (neither way: the round is over) */
+			broker->every_way = 1;
 			broker_failed(broker, "cannot look up its address (%s)", p2p_resolve_error());
 			return;
 		}
@@ -1094,13 +1222,16 @@ static void broker_connect(struct broker *broker)
 	posix_socket_set_nonblocking(broker->socket, 1);
 	memset(&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
-	address.sin_port = broker->port;
+	address.sin_port = broker->tls ? broker->tls_port : broker->port;
 	address.sin_addr.s_addr = broker->address;
 	broker->state = _broker_connecting;
 	broker->state_time = p2p_now();
 	if (posix_socket_connect(broker->socket, &address, sizeof(address)) == 0)
 	{
-		broker_connected(broker);
+		if (broker->tls)
+			broker_start_tls(broker);
+		else
+			broker_connected(broker);
 	}
 	else
 	{
@@ -1110,6 +1241,32 @@ static void broker_connect(struct broker *broker)
 		if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
 			broker_failed(broker, "cannot connect (%s)", socket_error_text(error, text, sizeof(text)));
 	}
+}
+
+/* (over TLS) its connection made: the handshake begun, on posix_tls_*'s
+thread, which owns the socket from now on */
+static void broker_start_tls(struct broker *broker)
+{
+	int error = 0, length = sizeof(error);
+	char why[160];
+
+	/* (a refused connection is writable too: its error says so) */
+	if (posix_socket_getsockopt(broker->socket, WINSOCK_SOL_SOCKET, WINSOCK_SO_ERROR, &error, &length) == 0 && error)
+	{
+		char text[24];
+
+		broker_failed(broker, "cannot connect (%s)", connect_error_text(error, text, sizeof(text)));
+		return;
+	}
+	broker->tls_session = posix_tls_open(broker->socket, broker->host, signalling.ca_file, why, sizeof(why)) + 1;
+	if (broker->tls_session <= 0)
+	{
+		broker->tls_session = 0;
+		broker_failed(broker, "%s", why);
+		return;
+	}
+	broker->state = _broker_handshaking;
+	broker->state_time = p2p_now();
 }
 
 /* ---------- addresses */
@@ -2005,6 +2162,11 @@ static int broker_acknowledged(struct broker *broker, const unsigned char *body,
 	}
 	broker->state = _broker_ready;
 	broker->failures = 0;
+	/* (a new start: every way open again; over TLS, TLS first for a while) */
+	broker->rounds = 0;
+	broker->ways_failed = 0;
+	broker->exhausted = 0;
+	broker->tls_ready_time = broker->tls ? now_stamp() : 0;
 	broker->publish_tokens = PUBLISH_BURST;
 	broker->publish_time = p2p_now();
 	broker->connections++;
@@ -2013,20 +2175,27 @@ static int broker_acknowledged(struct broker *broker, const unsigned char *body,
 	/* (a listed game's listing, published once connected, again once its
 	acknowledgement has settled) */
 	broker->settle_wanted = signalling.lobby_listed;
-	if (!broker->ready_logged_time || elapsed(broker->ready_logged_time, READY_LOG_INTERVAL))
+	/* (logged again at once when it changed ways) */
+	if (!broker->ready_logged_time || elapsed(broker->ready_logged_time, READY_LOG_INTERVAL) ||
+		broker->ready_logged_tls != broker->tls)
 	{
 		const unsigned char *bytes = (const unsigned char *)&broker->address;
 		char again[64] = "";
+		char over[112] = "";
 
 		if (broker->connections_not_logged)
 			snprintf(again, sizeof(again), " (connected %d times since it was last said)",
 				broker->connections_not_logged + 1);
-		platform_log("Internet play: broker %s ready (MQTT %s at %u.%u.%u.%u:%u; %s)%s", broker->host,
-			broker->protocol == 5 ? "5" : "3.1.1", bytes[0], bytes[1], bytes[2], bytes[3],
-			network_short(broker->port), broker_carries_lobby(broker) ? "carries the public games" :
+		if (broker->tls)
+			snprintf(over, sizeof(over), " over TLS (%s)", broker->tls_description);
+		platform_log("Internet play: broker %s ready (MQTT %s%s at %u.%u.%u.%u:%u; %s)%s", broker->host,
+			broker->protocol == 5 ? "5" : "3.1.1", over, bytes[0], bytes[1], bytes[2], bytes[3],
+			network_short(broker->tls ? broker->tls_port : broker->port), broker_carries_lobby(broker) ?
+			"carries the public games" :
 			!broker->retain_available ? "no retained messages: signalling only, no public games" :
 			"no wildcard subscriptions: signalling only, no public games", again);
 		broker->ready_logged_time = now_stamp();
+		broker->ready_logged_tls = broker->tls;
 		broker->connections_not_logged = 0;
 	}
 	else
@@ -2204,9 +2373,30 @@ static void broker_readable(struct broker *broker)
 	/* (the rest in the next pass) */
 	for (reads = 0; reads < MAXIMUM_BROKER_READS; reads++)
 	{
-		int size = posix_socket_recv(broker->socket, broker->input + broker->input_size,
-			BUFFER_SIZE - broker->input_size, 0);
+		int size;
 
+		if (broker->input_size >= BUFFER_SIZE)
+			return;
+		if (broker->tls_session)
+		{
+			char why[112];
+
+			/* (TLS: 0 when nothing more now, -1 closed, -2 broken) */
+			size = posix_tls_receive(broker->tls_session - 1, broker->input + broker->input_size,
+				BUFFER_SIZE - broker->input_size, why, sizeof(why));
+			if (size == 0)
+				return;
+			if (size < -1)
+			{
+				broker_failed(broker, "the connection broke (%s)", why);
+				return;
+			}
+			if (size < 0)
+				size = 0;
+		}
+		else
+			size = posix_socket_recv(broker->socket, broker->input + broker->input_size, BUFFER_SIZE - broker->input_size,
+				0);
 		if (size == 0)
 		{
 			broker_failed(broker, broker->state == _broker_ready ? "closed the connection" :
@@ -2292,6 +2482,20 @@ static void brokers_list(char *text, size_t size)
 	}
 }
 
+/* a port's digits (1 to 65535, nothing else), or 0 */
+static int port_number(const char *text)
+{
+	int value = 0, digits = 0;
+
+	for (; *text >= '0' && *text <= '9'; text++)
+	{
+		if (++digits > 5)
+			return 0;
+		value = value * 10 + (*text - '0');
+	}
+	return *text || value > 65535 ? 0 : value;
+}
+
 void p2p_signal_start(void)
 {
 	char list[1024];
@@ -2313,6 +2517,23 @@ void p2p_signal_start(void)
 		p2p_lobby_slot_topic(hash, signalling.own_slot, sizeof(signalling.own_slot));
 	}
 	brokers_list(list, sizeof(list));
+	/* (the tests' brokers' authorities: beside config.toml unless a full
+	path, as network.brokers_file) */
+	{
+		const char *name = config_string("network.brokers_ca_file");
+		const char *colon = strchr(name, ':');
+
+		if (!name[0])
+			signalling.ca_file[0] = 0;
+		else if (name[0] == '/' || name[0] == '\\' || (colon && !memchr(name, '/', (size_t)(colon - name))))
+			snprintf(signalling.ca_file, sizeof(signalling.ca_file), "%s", name);
+		else
+		{
+			config_folder(signalling.ca_file, sizeof(signalling.ca_file));
+			snprintf(signalling.ca_file + strlen(signalling.ca_file), sizeof(signalling.ca_file) -
+				strlen(signalling.ca_file), "%s", name);
+		}
+	}
 	text = list;
 	while (*text && signalling.broker_count < MAXIMUM_BROKERS)
 	{
@@ -2328,22 +2549,37 @@ void p2p_signal_start(void)
 			length--;
 		if (length > 0 && length < (int)sizeof(broker->host))
 		{
+			char *slash;
+
 			memset(broker, 0, sizeof(*broker));
 			memcpy(broker->host, text, (size_t)length);
 			broker->socket = -1;
 			broker->port = network_short(1883);
+			broker->tls_port = network_short(DEFAULT_TLS_PORT);
+			/* ("host:1883/8883": its TLS port; "/0", or one that is no
+			port, none) */
+			slash = strchr(broker->host, '/');
+			if (slash)
+			{
+				*slash = 0;
+				broker->tls_port = network_short((unsigned short)port_number(slash + 1));
+			}
 			colon = strchr(broker->host, ':');
 			if (colon)
 			{
 				broker->port = network_short((unsigned short)atoi(colon + 1));
 				*colon = 0;
 			}
-			/* (its address kept for when looking it up fails: one of this
-			machine's own settings) */
-			p2p_resolver_cache_allow(broker->host);
-			/* connect at once */
-			broker->state_time = p2p_now() - RETRY_INTERVAL;
-			signalling.broker_count++;
+			/* (an entry without a name, ":1883" or "/8883", is none) */
+			if (broker->host[0])
+			{
+				/* (its address kept for when looking it up fails: one of
+				this machine's own settings) */
+				p2p_resolver_cache_allow(broker->host);
+				/* connect at once */
+				broker->state_time = p2p_now() - RETRY_INTERVAL;
+				signalling.broker_count++;
+			}
 		}
 		text = *end ? end + 1 : end;
 	}
@@ -2362,7 +2598,8 @@ void p2p_signal_select_sets(int *read, int *read_count, int *write, int *write_c
 	{
 		struct broker *broker = &signalling.brokers[index];
 
-		if (broker->socket < 0)
+		/* (not while its TLS handshake's thread has it) */
+		if (broker->socket < 0 || broker->state == _broker_handshaking)
 			continue;
 		read[(*read_count)++] = broker->socket;
 		if (broker->state == _broker_connecting || broker->output_size)
@@ -2395,12 +2632,17 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 		switch (broker->state)
 		{
 		case _broker_idle:
-			if (elapsed(broker->state_time, retry_interval(broker)))
+			if (broker->retry_at_once || elapsed(broker->state_time, retry_interval(broker)))
 				broker_connect(broker);
 			break;
 		case _broker_connecting:
 			if (list_holds(write, write_count, broker->socket))
-				broker_connected(broker);
+			{
+				if (broker->tls)
+					broker_start_tls(broker);
+				else
+					broker_connected(broker);
+			}
 			else if (elapsed(broker->state_time, CONNECT_TIMEOUT))
 			{
 				/* (why, if the system knows: a refusal, an unreachable host) */
@@ -2414,17 +2656,38 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 						CONNECT_TIMEOUT / 1000);
 			}
 			break;
+		case _broker_handshaking:
+		{
+			char why[160];
+			int result = posix_tls_handshake(broker->tls_session - 1, why, sizeof(why));
+
+			if (result > 0)
+			{
+				snprintf(broker->tls_description, sizeof(broker->tls_description), "%s", why);
+				broker_connected(broker);
+			}
+			else if (result < 0)
+				broker_failed(broker, "%s", why);
+			else if (elapsed(broker->state_time, CONNECT_TIMEOUT))
+				broker_failed(broker, "no TLS handshake in %d s", CONNECT_TIMEOUT / 1000);
+			break;
+		}
 		case _broker_awaiting_acknowledgement:
 			if (elapsed(broker->state_time, CONNECT_TIMEOUT))
 				broker_failed(broker, "connected, but no answer to CONNECT in %d s", CONNECT_TIMEOUT / 1000);
 			break;
 		}
-		if (broker->socket < 0 || broker->state == _broker_connecting)
+		if (broker->socket < 0 || broker->state == _broker_connecting || broker->state == _broker_handshaking)
 			continue;
 		if (list_holds(write, write_count, broker->socket))
 			broker_flush(broker);
-		if (broker->socket >= 0 && list_holds(read, read_count, broker->socket))
+		/* (TLS: what it holds decrypted, or still to decrypt, though the
+		socket has nothing more) */
+		if (broker->socket >= 0 && (list_holds(read, read_count, broker->socket) ||
+			(broker->tls_session && posix_tls_pending(broker->tls_session - 1))))
+		{
 			broker_readable(broker);
+		}
 		if (broker->state != _broker_ready)
 			continue;
 		if (elapsed(broker->heard_time, (unsigned long)broker->keep_alive * 1500 > SILENCE_TIMEOUT ?
@@ -2528,6 +2791,7 @@ void p2p_signal_counts(struct p2p_signal_counts *counts)
 		int ready = broker->state == _broker_ready;
 
 		counts->tried += broker->connections || broker->failures;
+		counts->exhausted += !ready && broker->exhausted;
 		counts->ready += ready;
 		counts->lobby += ready && broker_carries_lobby(broker);
 		counts->browsing += ready && broker->slots_subscribed;
@@ -2546,7 +2810,7 @@ void p2p_signal_brokers_text(char *text, int size, int what)
 	{
 		const struct broker *broker = &signalling.brokers[index];
 		const char *state;
-		char why[112];
+		char why[168];
 
 		if (broker->state == _broker_ready)
 		{

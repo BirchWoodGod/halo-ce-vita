@@ -22,13 +22,30 @@ gone), so that a test can tell what a topic held when.
 
     python3 mqtt_test_broker.py [--port 18830] [--host 127.0.0.1] [--mqtt311]
         [--takeover-will-delay 0.5]
+        [--tls-port 8883 --tls-cert CERT.pem --tls-key KEY.pem]
+        [--plain ok|refuse|reset|silent|busy]
 
 --mqtt311 refuses MQTT 5 as a 3.1.1 broker does (CONNACK 1), so the client
 must connect again with 3.1.1.
+
+--tls-port adds an MQTT over TLS listener (the public brokers' 8883) with
+that certificate and key (a test authority's, made by the test at run time),
+on the same host, the same broker behind both: a subscriber on one gets
+what is published on the other, as on the public brokers. Its connections
+are logged with "tls" after the client identifier.
+
+--plain makes the plain listener misbehave as the public brokers' 1883 did
+(October 11 2026), while TLS works: refuse (not listening: refused),
+reset (each connection reset at once), silent (connected, the CONNECT never
+answered), busy (CONNACK "server busy": 0x89, or 3.1.1's 3, then closed).
+Each misbehaviour is logged ("plain refused"...).
 """
 
 import argparse
 import asyncio
+import socket
+import ssl
+import struct
 import sys
 import time
 
@@ -37,6 +54,7 @@ retained = {}
 clients = set()
 only_311 = False
 takeover_will_delay = 0.5
+plain_mode = "ok"
 started = time.monotonic()
 
 
@@ -112,9 +130,10 @@ def properties(data, offset):
 
 
 class Client:
-    def __init__(self, reader, writer):
+    def __init__(self, reader, writer, tls=False):
         self.reader = reader
         self.writer = writer
+        self.tls = tls
         self.subscriptions = []
         self.will = None
         self.name = "?"
@@ -188,8 +207,47 @@ async def read_packet(reader):
     return header[0], body
 
 
-async def handle(reader, writer):
-    client = Client(reader, writer)
+async def handle_tls(reader, writer):
+    await handle(reader, writer, True)
+
+
+async def handle_plain(reader, writer):
+    """the plain listener, misbehaving as --plain says"""
+    if plain_mode == "reset":
+        log("plain reset")
+        sock = writer.get_extra_info("socket")
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        except OSError:
+            pass
+        writer.transport.abort()
+        return
+    if plain_mode == "silent":
+        log("plain silent")
+        try:
+            while await reader.read(4096):
+                pass
+        except (ConnectionError, OSError):
+            pass
+        writer.close()
+        return
+    if plain_mode == "busy":
+        try:
+            packet_type, body = await read_packet(reader)
+            _, offset = string(body, 0)
+            level = body[offset]
+            log(f"plain busy (mqtt{5 if level == 5 else 4})")
+            writer.write(b"\x20\x03\x00\x89\x00" if level == 5 else b"\x20\x02\x00\x03")
+            await writer.drain()
+        except (asyncio.IncompleteReadError, ConnectionError, OSError, IndexError):
+            pass
+        writer.close()
+        return
+    await handle(reader, writer, False)
+
+
+async def handle(reader, writer, tls=False):
+    client = Client(reader, writer, tls)
     clean = False
     try:
         while True:
@@ -233,7 +291,8 @@ async def handle(reader, writer):
                     clients.discard(old)
                     old.writer.close()
                 clients.add(client)
-                log(f"connect {client.name} mqtt{client.protocol} will={client.will[0] if client.will else None}")
+                log(f"connect {client.name} mqtt{client.protocol} will={client.will[0] if client.will else None}"
+                    f"{' tls' if client.tls else ''}")
                 client.send(0x20, b"\x00\x00\x00" if client.protocol == 5 else b"\x00\x00")
             elif kind == 3:  # PUBLISH
                 topic, offset = string(body, 0)
@@ -311,15 +370,28 @@ async def main():
     parser.add_argument("--port", type=int, default=18830)
     parser.add_argument("--mqtt311", action="store_true")
     parser.add_argument("--takeover-will-delay", type=float, default=0.5)
+    parser.add_argument("--tls-port", type=int, default=0)
+    parser.add_argument("--tls-cert")
+    parser.add_argument("--tls-key")
+    parser.add_argument("--plain", choices=["ok", "refuse", "reset", "silent", "busy"], default="ok")
     arguments = parser.parse_args()
-    global only_311, takeover_will_delay
+    global only_311, takeover_will_delay, plain_mode
     only_311 = arguments.mqtt311
     takeover_will_delay = arguments.takeover_will_delay
-    server = await asyncio.start_server(handle, arguments.host, arguments.port)
-    log(f"listening on {arguments.host}:{arguments.port}")
+    plain_mode = arguments.plain
+    servers = []
+    if plain_mode != "refuse":
+        servers.append(await asyncio.start_server(handle_plain, arguments.host, arguments.port))
+        log(f"listening on {arguments.host}:{arguments.port}{'' if plain_mode == 'ok' else ' (plain ' + plain_mode + ')'}")
+    else:
+        log(f"plain refused: not listening on {arguments.host}:{arguments.port}")
+    if arguments.tls_port:
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.load_cert_chain(arguments.tls_cert, arguments.tls_key)
+        servers.append(await asyncio.start_server(handle_tls, arguments.host, arguments.tls_port, ssl=context))
+        log(f"listening on {arguments.host}:{arguments.tls_port} (tls)")
     asyncio.get_running_loop().create_task(expire_retained())
-    async with server:
-        await server.serve_forever()
+    await asyncio.gather(*(server.serve_forever() for server in servers))
 
 
 if __name__ == "__main__":

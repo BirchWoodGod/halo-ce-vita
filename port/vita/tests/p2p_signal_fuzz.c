@@ -90,6 +90,24 @@ int posix_socket_send(int socket, const void *buffer, int length, int flags)
 	return length;
 }
 
+/* (the brokers' TLS, posix_https.c's: the stream here is plain) */
+int posix_tls_open(int socket, const char *host, const char *ca_file, char *error, int error_size)
+{
+	(void)socket; (void)host; (void)ca_file;
+	snprintf(error, (size_t)error_size, "fuzz");
+	return -1;
+}
+int posix_tls_handshake(int handle, char *error, int error_size) { (void)handle; (void)error_size; error[0] = 0; return -1; }
+int posix_tls_send(int handle, const void *buffer, int size) { (void)handle; (void)buffer; (void)size; return -1; }
+int posix_tls_receive(int handle, void *buffer, int size, char *error, int error_size)
+{
+	(void)handle; (void)buffer; (void)size; (void)error_size;
+	error[0] = 0;
+	return -2;
+}
+int posix_tls_pending(int handle) { (void)handle; return 0; }
+void posix_tls_close(int handle) { (void)handle; }
+
 void p2p_hex(const unsigned char *bytes, int size, char *text)
 {
 	int index;

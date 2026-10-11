@@ -60,6 +60,13 @@
 #   opencehost  OpenCE host behind NAT A, public; our client behind NAT B
 #               joins it from the server browser, and another opens its
 #               invite link (halo://join/..., on the command line)
+#   crosstls    opencehost's server browser join with our client's way to
+#               the broker's plain port (1883) reset by its routers (as EMQX's
+#               and Mosquitto's were on Oct 11 2026), the broker's MQTT over
+#               TLS port (8883, a certificate from an authority made for this
+#               run, in the test's folder, never a real key) open: our client
+#               must fall back to TLS, see the OpenCE host's game listed over
+#               plain, signal it and play (the same broker behind both ports)
 #   chupahost   ChupathingyCE host (a player's game) on a LAN (over the
 #               internet: chupaserver)
 #   chupaserver ChupathingyCE's dedicated server (chupathingyce-server,
@@ -204,7 +211,7 @@ expected_fail=${XPPC_EXPECTED_FAIL:-}
 mode=${1:-}
 
 case $mode in
-pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop) ;;
+pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop) ;;
 crosscoopcensus) ;;
 crosscoopfuzz)
 	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
@@ -229,7 +236,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossmaps crossmixed crossrefuse crossbig crosscoop crossversion; do
+	for m in pcself chupaopence opencelan opencehost crosstls chupahost chupaserver damnserver crossmaps crossmixed crossrefuse crossbig crosscoop crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -385,10 +392,29 @@ while True:
     s.sendto(reply, sender)
 PYTHON
 brokers=0
+# (crosstls: every broker's TLS port too, with a certificate for each
+# broker's address from an authority made here, in the test's folder; our
+# copies told of it)
+broker_tls=
+if [ "$mode" = crosstls ]; then
+	mkdir -p "$out/tls"
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj "/CN=Halo Broker Test CA" \
+		-addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign" \
+		-keyout "$out/tls/ca_key.pem" -out "$out/tls/ca.pem" 2>/dev/null &&
+	openssl req -newkey rsa:2048 -nodes -subj "/CN=broker.halo.test" -keyout "$out/tls/broker_key.pem" \
+		-out "$out/tls/broker.csr" 2>/dev/null &&
+	printf 'subjectAltName=DNS:broker.halo.test%s\nbasicConstraints=CA:FALSE\n' \
+		"$(for i in $(seq 10 40); do printf ',IP:198.51.100.%d' "$i"; done)" > "$out/tls/broker.ext" &&
+	openssl x509 -req -in "$out/tls/broker.csr" -CA "$out/tls/ca.pem" -CAkey "$out/tls/ca_key.pem" -CAcreateserial \
+		-days 2 -extfile "$out/tls/broker.ext" -out "$out/tls/broker.pem" 2>/dev/null ||
+		{ echo "BROKEN ($mode): the test's authority could not be made (openssl)"; exit 2; }
+	broker_tls="--tls-port 8883 --tls-cert $out/tls/broker.pem --tls-key $out/tls/broker_key.pem"
+	XPPC_OUR_ENV="${XPPC_OUR_ENV:-} HALO_NET_BROKERS_CA_FILE=$out/tls/ca.pem"
+fi
 broker() { # broker -> broker_address: a broker of its own (198.51.100.10+), for one pair
 	broker_address=198.51.100.$((10 + brokers))
 	ip addr add "$broker_address/32" dev lo
-	python3 "$here/mqtt_test_broker.py" --host "$broker_address" --port 1883 \
+	python3 "$here/mqtt_test_broker.py" --host "$broker_address" --port 1883 $broker_tls \
 		$([ "${XPPC_MQTT311:-0}" = 1 ] && echo --mqtt311) > "$out/broker-$broker_address.log" 2>&1 & pids="$pids $!"
 	brokers=$((brokers + 1))
 }
@@ -499,6 +525,13 @@ subnet=0
 # (and the copy that comes back after the first leaves), in the background;
 # checked by check_pair. A server's: SERVERKIND and two clients, the first
 # an OpenCE one (pair_server)
+# block_plain_mqtt KIND: (crosstls) a client of KIND (block_plain) has its
+# router reset its connections to a broker's plain port, 1883
+block_plain_mqtt() {
+	[ -n "${block_plain:-}" ] && [ "$1" = "$block_plain" ] &&
+		in_ns "$side_router" iptables -I FORWARD 1 -p tcp --dport 1883 -j REJECT --reject-with tcp-reset
+	return 0
+}
 pair() {
 	local name=$1 transport=$2 hostkind=$3 clientkind=$4 extra=${5:-}
 	local host_ns client_ns late_ns host_ip client_ip late_ip broker_address=198.51.100.1 n
@@ -510,7 +543,9 @@ pair() {
 	else
 		broker
 		subnet=$((subnet + 1)); side "$subnet"; client_ns=$side_machine; client_ip=192.168.$subnet.2
+		block_plain_mqtt "$clientkind"
 		subnet=$((subnet + 1)); side "$subnet"; late_ns=$side_machine; late_ip=192.168.$subnet.2
+		block_plain_mqtt "$clientkind"
 	fi
 	mkdir -p "$out/$name"
 	echo "$name: $hostkind host, $clientkind client, $transport" | tee "$out/$name/what"
@@ -871,6 +906,30 @@ opencehost)
 	probe net-opence-ours-probe && pair net-opence-ours-probe net opence ours "$cross_line"
 	run_our_modes
 	echo "--- the brokers: what each kind of client published and subscribed to (hceu: OpenCE's topics, hcev: ours)"; broker_topics
+	;;
+crosstls)
+	# (our client's way to the plain port reset by its routers; the OpenCE
+	# host's open: it lists over plain, our client browses and signals over
+	# TLS, through the one broker)
+	control net-opence-opence && pair net-opence-opence net opence opence
+	test_names="net-opence-ours-tls"
+	block_plain=ours pair net-opence-ours-tls net opence ours
+	run_our_modes
+	tls_ok=1
+	for copy in client late back; do
+		log=$out/net-opence-ours-tls/$copy/run.log
+		[ -f "$log" ] || continue
+		grep -a "Internet play: broker 198.51.100" "$log" | head -3 | sed "s/^/  $copy: /"
+		grep -aqE "Internet play: broker 198\.51\.100\.[0-9]+: .*; trying it over TLS \(port 8883\) at once" "$log" &&
+			grep -aqE "Internet play: broker 198\.51\.100\.[0-9]+ ready \(MQTT 5 over TLS \(TLS.*\) at 198\.51\.100\.[0-9]+:8883; carries the public games\)" "$log" ||
+			{ echo "  our $copy did not fall back to the broker's TLS port"; tls_ok=0; }
+	done
+	tls_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep -c "^connect hceu-[0-9a-f]* mqtt5 .* tls$")
+	plain_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep "^connect " | grep -vc " tls$")
+	echo "  the brokers' connections: $tls_connects over TLS (ours), $plain_connects plain (OpenCE's)"
+	{ [ "$tls_connects" -ge 1 ] && [ "$plain_connects" -ge 2 ]; } || tls_ok=0
+	[ $tls_ok = 1 ] || our_results="$our_results net-opence-ours-tls:tls"
+	echo "--- the brokers' topics"; broker_topics
 	;;
 chupahost)
 	# (a player's ChupathingyCE game on a LAN only: its network test neither

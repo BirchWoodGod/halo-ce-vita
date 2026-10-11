@@ -188,6 +188,11 @@ static const struct config_setting config_settings[] =
 	{ "network.signalling_brokers", _config_string, "\"\"", "HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Comma-separated host:port brokers in place of network.brokers_file's\n"
 		"(the automated tests' own); empty for the file's." },
+	{ "network.brokers_ca_file", _config_string, "\"\"", "HALO_NET_BROKERS_CA_FILE", _environment_value, _platform_all,
+		"A PEM file of more certificate authorities for the brokers' TLS\n"
+		"(their port 8883, tried when the plain one fails), beside this file\n"
+		"unless a full path: the automated tests' own brokers. Empty: only the\n"
+		"authorities built in." },
 	{ "network.relays_file", _config_string,
 #ifdef HALO_VITA
 		"\"app0:relays.txt\"",

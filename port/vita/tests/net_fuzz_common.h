@@ -208,9 +208,13 @@ int posix_socket_last_error(void) { return net_fuzz_last_error; }
 int posix_socket(int family, int type, int protocol) { (void)family; (void)type; (void)protocol; return net_fuzz_next_socket++; }
 int posix_socket_close(int socket) { (void)socket; return 0; }
 int posix_socket_bind(int socket, const void *address, int address_length) { (void)socket; (void)address; (void)address_length; return 0; }
+/* (the port of the last connection begun, network byte order) */
+static unsigned short net_fuzz_connect_port;
 int posix_socket_connect(int socket, const void *address, int address_length)
 {
-	(void)socket; (void)address; (void)address_length;
+	(void)socket;
+	if (address && address_length >= (int)sizeof(struct sockaddr_in))
+		net_fuzz_connect_port = ((const struct sockaddr_in *)address)->sin_port;
 	net_fuzz_last_error = WSAEWOULDBLOCK;
 	return -1;
 }

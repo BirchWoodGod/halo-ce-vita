@@ -173,6 +173,24 @@ int posix_upnp_forward_udp(unsigned short port, unsigned short preferred_port, p
 	return 0;
 }
 void posix_upnp_stop_forwarding_udp(unsigned short external_port) { (void)external_port; }
+/* (the brokers' TLS, posix_https.c's: none in the test, whose broker's plain
+port works) */
+int posix_tls_open(int socket, const char *host, const char *ca_file, char *error, int error_size)
+{
+	(void)socket; (void)host; (void)ca_file;
+	snprintf(error, (size_t)error_size, "no TLS in the test");
+	return -1;
+}
+int posix_tls_handshake(int handle, char *error, int error_size) { (void)handle; (void)error_size; error[0] = 0; return -1; }
+int posix_tls_send(int handle, const void *buffer, int size) { (void)handle; (void)buffer; (void)size; return -1; }
+int posix_tls_receive(int handle, void *buffer, int size, char *error, int error_size)
+{
+	(void)handle; (void)buffer; (void)size; (void)error_size;
+	error[0] = 0;
+	return -2;
+}
+int posix_tls_pending(int handle) { (void)handle; return 0; }
+void posix_tls_close(int handle) { (void)handle; }
 int posix_user_secret(unsigned char *secret, int size) { (void)secret; (void)size; return 0; }
 void p2p_discord_user(char *id, int id_size, char *name, int name_size)
 {
