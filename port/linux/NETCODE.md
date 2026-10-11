@@ -96,7 +96,9 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
 - **Corrections.** The host sends each client the authoritative state of
   the players' units and the game's moving objects; a client moves its
   copies toward it, a small error half of the way each tick, a larger one
-  at once, drawn gliding from where they were. A client's own unit and
+  at once, drawn gliding from where they were (a player's moved at once
+  is on the teleporter it lands on, as a teleporter leaves one it sends,
+  so the client's does not send it back). A client's own unit and
   vehicle are only corrected past a tolerance, so prediction does not
   rubber-band: the host tells the client which of the client's ticks it
   has its player at (its prediction come back), and the client compares
@@ -326,7 +328,9 @@ a pregame keep-alive every five seconds from the host
      indices from the upper half of the object array, clear of the host's.
    - Ten times a second, what every unit carries (the host's weapons, slot
      for slot, their ammunition, the weapon in hand, the grenades); a
-     client moves the same weapon objects in and out of its units. A
+     client moves the same weapon objects in and out of its units, which
+     carry no grenades until the host says (not the unit tag's: a player
+     spawned with the button held threw one the host's copy had not). A
      change of weapons or grenades goes to every client at once; one of
      ammunition only to the unit's player's machine at once, and to the
      others as often as they are sent that player. A client takes its own
@@ -380,8 +384,9 @@ a pregame keep-alive every five seconds from the host
      player; damage one of their weapons (a vehicle's a driver's or
      gunner's; now or in the last ten seconds), a grenade the host's own game
      saw them throw in the last ten seconds that has not gone off (each
-     throw's explosion is taken once, its other hits that tick with it:
-     holding grenades deals nothing) or the vehicle they drove (in the
+     throw's explosion is taken once, its other hits and its other damage
+     (a frag grenade's shock wave) that tick with it: holding grenades
+     deals nothing) or the vehicle they drove (in the
      last ten seconds: its collisions) can deal (its projectiles' impacts
      and detonations, followed through the tags), no harder than it can be
      (all of it, but an airborne melee blow's half again); of the shape the
