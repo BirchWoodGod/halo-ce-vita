@@ -112,6 +112,9 @@
 	<widget name="browser/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items" bitmap="join_game_border">
 		<data input="port browser update"/>
 		<on event="x" run="port browser refresh"/>
+		<on event="y" run="port browser sort"/>
+		<on event="left_trigger" run="port browser page up"/>
+		<on event="right_trigger" run="port browser page down"/>
 		<child widget="browser/row_1" x="10" y="102"/>
 		<child widget="browser/row_2" x="10" y="119"/>
 		<child widget="browser/row_3" x="10" y="136"/>
