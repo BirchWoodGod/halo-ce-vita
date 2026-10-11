@@ -364,6 +364,11 @@ static struct
 		long vehicle_indices[MAXIMUM_LOCAL_PLAYERS];
 		short vehicle_player_indices[MAXIMUM_LOCAL_PLAYERS];
 	} machines[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	/* a co-op cutscene's camera, which every client looks through (found
+	once a tick too: the sends' distances are measured from it, for every
+	object and every machine) */
+	boolean cinematic_camera;
+	real_point3d camera_position;
 } objects_host_viewers;
 /* ... each machine it has told all its objects: when, and which players it
 had then (another machine in its place has others) */
@@ -1254,6 +1259,9 @@ static void distributed_host_find_viewers(
 
 	objects_host_viewers.count = distributed_client_machines(objects_host_viewers.indices,
 		HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+	objects_host_viewers.cinematic_camera = network_coop_active() && cinematic_in_progress();
+	if (objects_host_viewers.cinematic_camera)
+		objects_host_viewers.camera_position = observer_get_camera(0)->position;
 	objects_host_viewers.player_unit_count = 0;
 	data_iterator_new(&iterator, player_data);
 	while ((player = data_iterator_next(&iterator)) != NULL &&
@@ -1321,9 +1329,9 @@ static short distributed_host_object_period(
 	/* in a co-op cutscene every client looks through the host's camera, so
 	what it films is sent as often as what's next to the client's players
 	(b30's sword Elite walking out of the door) */
-	if (network_coop_active() && cinematic_in_progress())
+	if (objects_host_viewers.cinematic_camera)
 	{
-		real_point3d const *camera = &observer_get_camera(0)->position;
+		real_point3d const *camera = &objects_host_viewers.camera_position;
 		real dx = position->x - camera->x;
 		real dy = position->y - camera->y;
 		real dz = position->z - camera->z;
@@ -1349,19 +1357,29 @@ static short distributed_host_object_period(
 		nearest < FAR_OBJECT_DISTANCE * FAR_OBJECT_DISTANCE ? 3 : MAXIMUM_OBJECT_PERIOD_TICKS;
 }
 
-/* ... for other units sent by a machine's index (network_actors.c) */
-short network_objects_send_period(
-	long machine_index,
-	real_point3d const *position)
+/* ... for other units (network_actors.c): a machine's number among this
+tick's viewers (NONE: not one) */
+short network_objects_viewer_number(
+	long machine_index)
 {
 	short machine_number;
 
 	for (machine_number = 0; machine_number < objects_host_viewers.count; machine_number++)
 	{
 		if (objects_host_viewers.indices[machine_number] == machine_index)
-			return distributed_host_object_period(machine_number, position);
+			return machine_number;
 	}
-	return 1;
+	return NONE;
+}
+
+/* ... and the period by that number, found once for each machine (one not
+a viewer: every tick) */
+short network_objects_viewer_send_period(
+	short machine_number,
+	real_point3d const *position)
+{
+	return machine_number >= 0 && machine_number < objects_host_viewers.count ?
+		distributed_host_object_period(machine_number, position) : 1;
 }
 
 /* the kinds of states sent this tick */
