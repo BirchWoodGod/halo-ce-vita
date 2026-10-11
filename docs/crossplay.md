@@ -820,7 +820,11 @@ PASS (co-op refused before any join; a second local player refused on
 every copy, the game played every step); `crossbig` PASS (asked exactly
 once on a LAN and from the browser, the listing badged EXPERIMENTAL, every
 step passed; answering no: left, no tick played). `XPPC_EXPECTED_FAIL` is
-now empty.
+now empty. The strict suite (`XPPC_STRICT=1 all`) passes every mode but
+crossversion (SKIP, T10), with no leaks. It found one bug, now fixed: a
+ChupathingyCE host's settings record between games names Blood Gulch with
+no game engine for a moment, so no engine on one of the Xbox's multiplayer
+levels is not co-op.
 
 ---
 
