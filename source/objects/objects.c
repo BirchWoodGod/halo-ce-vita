@@ -4995,6 +4995,58 @@ static long objects_scenery_update_divisor = -1;
 static unsigned long objects_scenery_update_pass;
 static unsigned long objects_scenery_update_settings_seen;
 
+/* (port) HALO_NET_REMOTE_LOD=1 (opt-in, off by default: the owner's call,
+triage/large-game-status.md): on a client of a multiplayer game, another
+machine's player's living biped, on foot, that the render has not drawn in
+the last 4 frames and whose player is not firing, throwing, meleeing,
+reloading, swapping, jumping or acting this tick, is updated every other
+tick (its held weapon with it). Its place still follows the host's word
+every tick (network_distributed.c moves it toward where the host has it);
+what runs at half rate while it is out of view is its own movement between
+the host's words, its animation, its footsteps and its weapon's upkeep. In
+view, or doing any of those, it is updated every tick. A 24-player client:
+-16% of its tick (24 players on Hang 'Em High, most remote players out of
+view at any time). */
+static int objects_remote_lod_enabled = -1;
+static unsigned long objects_remote_lod_settings_seen;
+
+static boolean objects_remote_lod_skipped(
+	short absolute_index,
+	struct object_header_datum const *header)
+{
+	extern volatile unsigned long halo_settings_generation;
+	struct unit_datum const *unit;
+	struct player_datum const *player;
+
+	if (objects_remote_lod_enabled < 0 || objects_remote_lod_settings_seen != halo_settings_generation)
+	{
+		char const *setting = getenv("HALO_NET_REMOTE_LOD");
+
+		objects_remote_lod_settings_seen = halo_settings_generation;
+		objects_remote_lod_enabled = setting && atoi(setting) != 0;
+	}
+	if (!objects_remote_lod_enabled || header->type != _object_type_biped ||
+		((absolute_index + game_time_get()) & 1) == 0)
+	{
+		return FALSE;
+	}
+	unit = (struct unit_datum const *)header->datum;
+	if (unit->unit.player_index == NONE ||
+		unit->object.parent_object_index != NONE ||
+		TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ||
+		(unit->unit.control_flags & (FLAG(_unit_control_jump_bit) | FLAG(_unit_control_action_bit) |
+			FLAG(_unit_control_use_equipment_bit) | FLAG(_unit_control_weapon_reload_bit) |
+			FLAG(_unit_control_weapon_primary_trigger_bit) | FLAG(_unit_control_weapon_secondary_trigger_bit) |
+			FLAG(_unit_control_throw_grenade_bit) | FLAG(_unit_control_swap_weapons_bit))) ||
+		!network_game_distributed_client() || !game_engine_running())
+	{
+		return FALSE;
+	}
+	player = (struct player_datum const *)player_try_and_get(unit->unit.player_index);
+	return player && player->local_player_index == NONE &&
+		!object_drawn_within(DATUM_INDEX_NEW(absolute_index, header->identifier), 4);
+}
+
 static boolean objects_scenery_update_skipped(
 	short absolute_index,
 	struct object_header_datum const *header)
@@ -5245,7 +5297,8 @@ void objects_update(
 				{
 	#ifdef HALO_LINUX
 				/* (the scenery divisor: above objects_update) */
-				if (!objects_scenery_update_skipped(i, object_header))
+				if (!objects_scenery_update_skipped(i, object_header) &&
+					!objects_remote_lod_skipped(i, object_header))
 				{
 					objects_hitch_object_update(object_index, object_header->type);
 				}
