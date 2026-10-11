@@ -5,7 +5,7 @@ Reports what the native builds can do with Halo 1 map files: which format
 each file is, whether it can be loaded, and why not
 (port/linux/game/cache_file_formats.c; docs/custom_edition_caches.md).
 
-	cache_file_report [--maps DIRECTORY] [--stock-data-files] [--dump-tags FILE] FILE...
+	cache_file_report [--maps DIRECTORY] [--stock-data-files] [--dump-tags FILE] [--no-mcc-cea] FILE...
 
 A Custom Edition cache is loaded with the resource maps it needs, looked for
 in DIRECTORY (by default the cache's own directory): bitmaps.map, sounds.map
@@ -15,9 +15,14 @@ stock resource maps instead, for inspection only: OpenSauce itself refuses to
 load them without their mod set, and the report says the substitution was
 made. A cache that loads is then converted for this build as far as its
 bytes alone go (custom_edition_cache_convert), and --dump-tags writes the
-converted tags, as they would sit at 0x40440000, to FILE. Every file gets a
-block of "key: value" lines; the exit status is 0 when every file was
-recognized and every Custom Edition cache loaded and converted.
+converted tags, as they would sit at 0x40440000, to FILE. A Halo: CE
+Anniversary cache (MCC's version 13, docs/mcc_cea_maps.md) is loaded as the
+game loads one from a mod's folder, with no resource maps and its tags made
+this build's first (mcc_cea_cache_fix); its tags would sit at 0x50000000.
+--no-mcc-cea loads it as the game loads one from anywhere else: refused.
+Every file gets a block of "key: value" lines; the exit status is 0 when
+every file was recognized and every Custom Edition cache loaded and
+converted.
 */
 
 /* ---------- headers */
@@ -32,6 +37,12 @@ recognized and every Custom Edition cache loaded and converted.
 /* ---------- constants */
 
 #define PATH_BYTES 1024
+
+/* ---------- globals */
+
+/* whether a Halo: CE Anniversary cache is loaded (--no-mcc-cea: as the game
+loads one from anywhere but a mod's folder, refused) */
+static int mcc_cea_allowed = 1;
 
 /* ---------- structures */
 
@@ -163,6 +174,13 @@ static void print_identity(
 	printf("tag_data: 0x%" PRIx32 "+0x%" PRIx32 "\n", identity->tag_data_offset, identity->tag_data_size);
 	printf("checksum: 0x%08" PRIx32 "\n", identity->checksum);
 	printf("opensauce_header: %s\n", identity->has_opensauce_header ? "yes" : "no");
+	if (identity->format == _cache_file_format_mcc_cea_cache)
+	{
+		printf("mcc_cea_flags: 0x%x\n", identity->mcc_cea_flags);
+		printf("mcc_cea_tag_cache: 0x%" PRIx32 " bytes, structure BSPs from 0x%" PRIx32 "\n",
+			identity->structure_bsp_tag_cache_bytes,
+			identity->mcc_cea_structure_bsp_offset);
+	}
 	if (identity->has_opensauce_header)
 	{
 		struct opensauce_cache_header const *opensauce = &identity->opensauce;
@@ -251,7 +269,7 @@ static int report_custom_edition_cache(
 	{
 		printf("resource_maps_substituted: stock files instead of mod set '%s'\n", identity->opensauce.mod_name);
 	}
-	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES; type++)
+	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES && identity->format != _cache_file_format_mcc_cea_cache; type++)
 	{
 		char path[PATH_BYTES];
 
@@ -280,7 +298,7 @@ static int report_custom_edition_cache(
 	}
 	else
 	{
-		status = custom_edition_cache_load(source, resource_maps, tag_cache, tag_cache_bytes, &report);
+		status = custom_edition_cache_load(source, resource_maps, tag_cache, tag_cache_bytes, mcc_cea_allowed, &report);
 		printf("load: %s\n", cache_file_status_describe(status));
 		if (status != _cache_file_status_ok)
 		{
@@ -310,6 +328,32 @@ static int report_custom_edition_cache(
 		printf("computed_checksum: 0x%08" PRIx32 "\n", report.computed_checksum);
 		printf("trailing_bytes: 0x%" PRIx32 "\n", report.trailing_bytes);
 		print_flags("warnings", report.warnings, warning_names, NUMBER_OF_CUSTOM_EDITION_WARNINGS);
+		if (status == _cache_file_status_ok && identity->format == _cache_file_format_mcc_cea_cache)
+		{
+			struct mcc_cea_fix_report fix;
+			int32_t bsp_index;
+
+			printf("mcc_cea_structure_bsp_address: 0x%08" PRIx32 "\n", report.mcc_cea_structure_bsp_address);
+			for (bsp_index = 0; bsp_index < report.structure_bsp_count; bsp_index++)
+			{
+				struct mcc_cea_structure_bsp const *bsp = &report.mcc_cea_structure_bsps[bsp_index];
+
+				printf("mcc_cea_structure_bsp.%" PRId32 ": 0x%" PRIx32 "+0x%" PRIx32 " linked to 0x%08" PRIx32
+					", vertices 0x%" PRIx32 "+0x%" PRIx32 "\n",
+					bsp_index, bsp->file_offset, bsp->size, bsp->linked_address, bsp->vertices_offset, bsp->vertices_size);
+			}
+			status = mcc_cea_cache_fix(tag_cache, report.tag_data_bytes, &fix);
+			printf("mcc_cea_fix: %s\n", cache_file_status_describe(status));
+			if (status != _cache_file_status_ok)
+			{
+				printf("mcc_cea_fix_problem_tag: %" PRId32 "\n", fix.problem_tag_index);
+			}
+			printf("script_nodes_packed: %" PRId32 "\n", fix.script_nodes_packed);
+			printf("object_names_moved: %" PRId32 "\n", fix.object_names_moved);
+			printf("object_names_dropped: %" PRId32 "\n", fix.object_names_dropped);
+			printf("bitmaps_marked_compressed: %" PRId32 "\n", fix.bitmaps_marked_compressed);
+			printf("bitmaps_flags_cleared: %" PRId32 "\n", fix.bitmaps_flags_cleared);
+		}
 		if (status == _cache_file_status_ok)
 		{
 			uint32_t loaded_bytes = report.tag_data_bytes + report.resource_tag_bytes;
@@ -326,6 +370,7 @@ static int report_custom_edition_cache(
 			printf("chicago_extended_shaders_converted: %" PRId32 "\n", conversion.chicago_extended_shaders);
 			printf("shaders_mistyped: %" PRId32 "\n", conversion.shaders_mistyped);
 			printf("bitmaps_prepared: %" PRId32 "\n", conversion.bitmaps_prepared);
+			printf("bitmaps_made_linear: %" PRId32 "\n", conversion.bitmaps_made_linear);
 			printf("script_nodes_reduced: %" PRId32 "\n", conversion.script_nodes_reduced);
 			printf("animation_overlays_disabled: %" PRId32 "\n", conversion.animation_overlays_disabled);
 			printf("weapon_functions_converted: %" PRId32 "\n", conversion.weapon_functions_converted);
@@ -337,6 +382,8 @@ static int report_custom_edition_cache(
 				conversion.sound_permutations_halved);
 			printf("hud_placements_rescaled: %" PRId32 "\n", conversion.hud_placements_rescaled);
 			printf("hud_placements_kept: %" PRId32 "\n", conversion.hud_placements_kept);
+			printf("hud_mcc_canvas: %" PRId32 " (%" PRId32 " placements)\n", conversion.hud_mcc_canvas,
+				conversion.hud_mcc_placements);
 			printf("score_hint_converted: %" PRId32 "\n", conversion.score_hint_converted);
 			printf("widget_functions_cleared: %" PRId32 "\n", conversion.widget_functions_cleared);
 			printf("pause_menu_trimmed: %" PRId32 "\n", conversion.pause_menu_trimmed);
@@ -400,7 +447,8 @@ static int report_file(
 	printf("identify: %s\n", cache_file_status_describe(status));
 	print_identity(&identity);
 	succeeded = status == _cache_file_status_ok && identity.format != _cache_file_format_unrecognized;
-	if (succeeded && identity.format == _cache_file_format_custom_edition_cache)
+	if (succeeded &&
+		(identity.format == _cache_file_format_custom_edition_cache || identity.format == _cache_file_format_mcc_cea_cache))
 	{
 		if (maps_directory_option)
 		{
@@ -459,6 +507,11 @@ int main(
 			use_stock_data_files = 1;
 			continue;
 		}
+		if (!strcmp(arguments[argument_index], "--no-mcc-cea"))
+		{
+			mcc_cea_allowed = 0;
+			continue;
+		}
 		if (!strcmp(arguments[argument_index], "--dump-tags") && argument_index + 1 < argument_count)
 		{
 			dump_path = arguments[++argument_index];
@@ -472,7 +525,7 @@ int main(
 	}
 	if (!file_count)
 	{
-		fprintf(stderr, "usage: cache_file_report [--maps DIRECTORY] [--stock-data-files] [--dump-tags FILE] FILE...\n");
+		fprintf(stderr, "usage: cache_file_report [--maps DIRECTORY] [--stock-data-files] [--dump-tags FILE] [--no-mcc-cea] FILE...\n");
 		return 2;
 	}
 

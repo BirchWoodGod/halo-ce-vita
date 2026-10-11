@@ -201,12 +201,18 @@ a mod-set cache with the stock resource maps instead, for inspection only
 (OpenSauce itself refuses such a map). `--dump-tags` writes the converted
 tags to a file, as they would sit at `0x40440000`.
 
-Loading, step by step (`custom_edition_cache_load`):
+Loading, step by step (`custom_edition_cache_load`; a Halo: CE
+Anniversary cache, version 13, from a mod's folder takes the same steps,
+linked to 0x50000000, with its structure BSPs' vertices in the file:
+[mcc_cea_maps.md](mcc_cea_maps.md#playing-a-mod-natively)):
 
 1. The header: signatures, version 609, terminated strings, file length
    within the file and the size limit (`0x18000000`, or `0x24000000` with
    OpenSauce memory upgrades), no compression, tag data within the file and
-   the tag cache (23 MB, or 1.5 times that with memory upgrades). An
+   the tag cache (23 MB, or 1.5 times that with memory upgrades, or, for a
+   map without OpenSauce's header, the room its structure BSPs reach up to
+   that: a map built for a larger tag space, as Invader's `--tag-space`
+   builds Halo: CE Anniversary maps, [mcc_cea_maps.md](mcc_cea_maps.md)). An
    OpenSauce header at offset `0x70` is checked as OpenSauce checks it:
    header version 1 or 2, `project_yellow` and `project_yellow_globals` tag
    versions 2, memory upgrade factor at most 1.5, no undefined flags, a mod

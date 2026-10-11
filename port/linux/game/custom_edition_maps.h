@@ -175,6 +175,14 @@ game on one with no game engine is co-op. */
 boolean custom_edition_maps_campaign_level(
 	char const *level_name);
 
+/* The level a Custom Edition campaign map's campaign goes on to when it is
+won alone: for a map named a prefix and a campaign level's name (ruby_a10,
+as port/tools/mcc_map_convert.py names a Halo: CE Anniversary mod's maps),
+the campaign map of that prefix and the next level's name (ruby_a30) when
+the maps folder has it; NULL otherwise (the main menu, as before). */
+char const *custom_edition_maps_campaign_next_level(
+	char const *level_name);
+
 /* Whether a host may send its copy of the level `level_name` to a joiner
 (map_share.c): a custom map it has, which is in its level list (on, and one
 this machine plays: an Xbox multiplayer map, or a Custom Edition one with
