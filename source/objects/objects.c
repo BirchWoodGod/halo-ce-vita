@@ -78,6 +78,7 @@ void platform_log(const char *format, ...);
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include "render/render.h"
+#include "units/bipeds.h"
 #endif
 
 /* ---------- constants */
@@ -4127,9 +4128,11 @@ light's sphere, its clusters' reference lists. In a multiplayer game the
 weapons lying about and the bodies (24 players: about 30 and 20) did it
 every tick at rest, unmoved, for 7% of a client's objects update. Such an
 object's lights are left connected when nothing they are placed from has
-changed since the last time: the object's node matrices, its function
-values (a light's size and brightness) and its attachments, kept as a hash
-by the object's slot. The lights stay in the same clusters at the same
+changed since the last time: the object's place, scale and animation state
+(its node matrices', so its markers'), its function values (a light's size
+and brightness), its attachments and its location, kept as a hash by the
+object's slot; a body still relaxing onto the ground moves its nodes, and
+is put back every tick until done. The lights stay in the same clusters at the same
 places; only the order of the clusters' light lists differs (a light put
 back goes last), which the render alone reads. Moving, carried, living or
 outside a multiplayer game: put back every tick as before. */
@@ -4141,10 +4144,20 @@ static unsigned long objects_resting_lights_mix(
 	void const *data,
 	long size)
 {
+	/* (a word at a time: the data are words, sizes multiples of 4 but for
+	a byte array's tail) */
 	byte const *bytes = (byte const *)data;
 	long i;
 
-	for (i = 0; i < size; i++)
+	for (i = 0; i + 4 <= size; i += 4)
+	{
+		unsigned long word;
+
+		memcpy(&word, bytes + i, sizeof(word));
+		hash = (hash ^ word) * 16777619ul;
+		hash ^= hash >> 15;
+	}
+	for (; i < size; i++)
 		hash = (hash ^ bytes[i]) * 16777619ul;
 	return hash;
 }
@@ -4160,6 +4173,7 @@ static boolean objects_resting_lights_unchanged(
 	boolean resting;
 
 	resting = game_engine_running() &&
+		TEST_FLAG(object->object.flags, _object_has_attached_lights_bit) &&
 		object->object.parent_object_index == NONE &&
 		TEST_FLAG(object->object.flags, _object_at_rest_bit) &&
 		(TEST_FLAG(_object_mask_item, header->type) ||
@@ -4184,8 +4198,25 @@ static boolean objects_resting_lights_unchanged(
 			return FALSE;
 		}
 	}
-	hash = objects_resting_lights_mix(hash,
-		object_header_block_get(object_index, &object->object.node_matrices), object->object.node_matrices.size);
+	/* (what the node matrices, and so the lights' markers, are made from
+	at rest: the root's place and the animation's state; a body's
+	relaxation, which moves its nodes, is waited out) */
+	if (header->type == _object_type_biped)
+	{
+		struct biped_datum *biped = biped_get(object_index);
+
+		if (TEST_FLAG(biped->biped.flags, _biped_limp_body_physics_active_bit) &&
+			biped->biped.limp_body_current_relaxation_iterations < biped->biped.limp_body_max_relaxation_iterations)
+		{
+			objects_resting_lights_identifier[absolute_index] = 0;
+			return FALSE;
+		}
+	}
+	hash = objects_resting_lights_mix(hash, &object->object.position, sizeof(object->object.position));
+	hash = objects_resting_lights_mix(hash, &object->object.forward, sizeof(object->object.forward));
+	hash = objects_resting_lights_mix(hash, &object->object.up, sizeof(object->object.up));
+	hash = objects_resting_lights_mix(hash, &object->object.scale, sizeof(object->object.scale));
+	hash = objects_resting_lights_mix(hash, &object->object.animation, sizeof(object->object.animation));
 	hash = objects_resting_lights_mix(hash, object->object.incoming_function_values, sizeof(object->object.incoming_function_values));
 	hash = objects_resting_lights_mix(hash, object->object.outgoing_function_values, sizeof(object->object.outgoing_function_values));
 	hash = objects_resting_lights_mix(hash, object->object.attachment_types, sizeof(object->object.attachment_types));
