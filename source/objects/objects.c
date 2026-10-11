@@ -76,6 +76,10 @@ void platform_log(const char *format, ...);
 #include "sound/game_sound.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "render/render.h"
+#include "units/bipeds.h"
+#endif
 
 /* ---------- constants */
 
@@ -4083,6 +4087,152 @@ boolean object_force_inside_bsp(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) the render frame each object was last drawn in, by slot: the
+render stamps it as it draws the object (render_objects.c), and the tick
+asks it before cosmetic work nobody would see (object_drawn_within). Read
+across threads: a frame index read mid-change only says "not drawn" or
+"drawn" a frame early or late. */
+static volatile long objects_drawn_frame[HALO_PORT_MAXIMUM_OBJECTS_PER_MAP];
+static volatile short objects_drawn_identifier[HALO_PORT_MAXIMUM_OBJECTS_PER_MAP];
+
+void object_note_drawn(
+	long object_index)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+
+	if (object_index != NONE && absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP)
+	{
+		objects_drawn_frame[absolute_index] = render.frame_index;
+		objects_drawn_identifier[absolute_index] = DATUM_INDEX_TO_IDENTIFIER(object_index);
+	}
+}
+
+boolean object_drawn_within(
+	long object_index,
+	long frames)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+
+	return object_index != NONE && absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP &&
+		objects_drawn_identifier[absolute_index] == DATUM_INDEX_TO_IDENTIFIER(object_index) &&
+		render.frame_index - objects_drawn_frame[absolute_index] <= frames;
+}
+#endif
+
+#ifdef HALO_LINUX
+/* (port) An object's attached lights are taken off the map and put back
+every tick (object_connect_lights below, for every unit and item: the
+dynamic lighting flag is never cleared): the marker found by name, the
+light's sphere, its clusters' reference lists. In a multiplayer game the
+weapons lying about and the bodies (24 players: about 30 and 20) did it
+every tick at rest, unmoved, for 7% of a client's objects update. Such an
+object's lights are left connected when nothing they are placed from has
+changed since the last time: the object's place, scale and animation state
+(its node matrices', so its markers'), its function values (a light's size
+and brightness), its attachments and its location, kept as a hash by the
+object's slot; a body still relaxing onto the ground moves its nodes, and
+is put back every tick until done. The lights stay in the same clusters at the same
+places; only the order of the clusters' light lists differs (a light put
+back goes last), which the render alone reads. Moving, carried, living or
+outside a multiplayer game: put back every tick as before. */
+static unsigned long *objects_resting_lights_hash;
+static short *objects_resting_lights_identifier;
+
+static unsigned long objects_resting_lights_mix(
+	unsigned long hash,
+	void const *data,
+	long size)
+{
+	/* (a word at a time: the data are words, sizes multiples of 4 but for
+	a byte array's tail) */
+	byte const *bytes = (byte const *)data;
+	long i;
+
+	for (i = 0; i + 4 <= size; i += 4)
+	{
+		unsigned long word;
+
+		memcpy(&word, bytes + i, sizeof(word));
+		hash = (hash ^ word) * 16777619ul;
+		hash ^= hash >> 15;
+	}
+	for (; i < size; i++)
+		hash = (hash ^ bytes[i]) * 16777619ul;
+	return hash;
+}
+
+static boolean objects_resting_lights_unchanged(
+	long object_index,
+	struct object_header_datum *header,
+	struct object_datum *object)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+	short identifier = DATUM_INDEX_TO_IDENTIFIER(object_index);
+	unsigned long hash = 2166136261ul;
+	boolean resting;
+
+	resting = game_engine_running() &&
+		TEST_FLAG(object->object.flags, _object_has_attached_lights_bit) &&
+		object->object.parent_object_index == NONE &&
+		TEST_FLAG(object->object.flags, _object_at_rest_bit) &&
+		(TEST_FLAG(_object_mask_item, header->type) ||
+			(header->type == _object_type_biped && TEST_FLAG(object->object.damage_flags, _object_dead_bit))) &&
+		absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP;
+	if (!resting)
+	{
+		if (objects_resting_lights_identifier && absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP)
+			objects_resting_lights_identifier[absolute_index] = 0;
+		return FALSE;
+	}
+	if (!objects_resting_lights_hash)
+	{
+		objects_resting_lights_hash = (unsigned long *)calloc(HALO_PORT_MAXIMUM_OBJECTS_PER_MAP, sizeof(*objects_resting_lights_hash));
+		objects_resting_lights_identifier = (short *)calloc(HALO_PORT_MAXIMUM_OBJECTS_PER_MAP, sizeof(*objects_resting_lights_identifier));
+		if (!objects_resting_lights_hash || !objects_resting_lights_identifier)
+		{
+			free(objects_resting_lights_hash);
+			free(objects_resting_lights_identifier);
+			objects_resting_lights_hash = NULL;
+			objects_resting_lights_identifier = NULL;
+			return FALSE;
+		}
+	}
+	/* (what the node matrices, and so the lights' markers, are made from
+	at rest: the root's place and the animation's state; a body's
+	relaxation, which moves its nodes, is waited out) */
+	if (header->type == _object_type_biped)
+	{
+		struct biped_datum *biped = biped_get(object_index);
+
+		if (TEST_FLAG(biped->biped.flags, _biped_limp_body_physics_active_bit) &&
+			biped->biped.limp_body_current_relaxation_iterations < biped->biped.limp_body_max_relaxation_iterations)
+		{
+			objects_resting_lights_identifier[absolute_index] = 0;
+			return FALSE;
+		}
+	}
+	hash = objects_resting_lights_mix(hash, &object->object.position, sizeof(object->object.position));
+	hash = objects_resting_lights_mix(hash, &object->object.forward, sizeof(object->object.forward));
+	hash = objects_resting_lights_mix(hash, &object->object.up, sizeof(object->object.up));
+	hash = objects_resting_lights_mix(hash, &object->object.scale, sizeof(object->object.scale));
+	hash = objects_resting_lights_mix(hash, &object->object.animation, sizeof(object->object.animation));
+	hash = objects_resting_lights_mix(hash, object->object.incoming_function_values, sizeof(object->object.incoming_function_values));
+	hash = objects_resting_lights_mix(hash, object->object.outgoing_function_values, sizeof(object->object.outgoing_function_values));
+	hash = objects_resting_lights_mix(hash, object->object.attachment_types, sizeof(object->object.attachment_types));
+	hash = objects_resting_lights_mix(hash, object->object.attachment_indices, sizeof(object->object.attachment_indices));
+	hash = objects_resting_lights_mix(hash, &object->object.location, sizeof(object->object.location));
+	if (objects_resting_lights_identifier[absolute_index] == identifier && identifier &&
+		objects_resting_lights_hash[absolute_index] == hash)
+	{
+		return TRUE;
+	}
+	objects_resting_lights_identifier[absolute_index] = identifier;
+	objects_resting_lights_hash[absolute_index] = hash;
+	return FALSE;
+}
+#endif
+
 static boolean object_update(
 	long object_index)
 {
@@ -4094,7 +4244,10 @@ static boolean object_update(
 	if (!TEST_FLAG(header->flags, _object_header_do_not_update_bit))
 	{
 #ifdef HALO_LINUX
-		HALO_OBJECTS_OBJECT_PUSH(header->type);
+		/* (dead bipeds counted apart: "corpse", and "corpse_rest" once at
+		rest; objects_phases.c's slots 12 and 13) */
+		HALO_OBJECTS_OBJECT_PUSH(header->type == _object_type_biped && TEST_FLAG(object->object.damage_flags, _object_dead_bit) ?
+			(TEST_FLAG(object->object.flags, _object_at_rest_bit) ? 13 : 12) : header->type);
 #endif
 		if (TEST_FLAG(object->object.flags, _object_garbage_bit))
 		{
@@ -4182,7 +4335,13 @@ static boolean object_update(
 			)
 		)
 		{
+#ifdef HALO_LINUX
+			/* (port: left as they are at rest, above) */
+			if (!objects_resting_lights_unchanged(object_index, header, object))
+#endif
+			{
 			OBJECT_STEP_BEGIN(_objects_phase_lights); object_connect_lights(object_index, TRUE, TRUE); OBJECT_STEP_END();
+			}
 		}
 
 		// Update children (if we have any)
@@ -4836,6 +4995,58 @@ static long objects_scenery_update_divisor = -1;
 static unsigned long objects_scenery_update_pass;
 static unsigned long objects_scenery_update_settings_seen;
 
+/* (port) HALO_NET_REMOTE_LOD=1 (opt-in, off by default: the owner's call,
+triage/large-game-status.md): on a client of a multiplayer game, another
+machine's player's living biped, on foot, that the render has not drawn in
+the last 4 frames and whose player is not firing, throwing, meleeing,
+reloading, swapping, jumping or acting this tick, is updated every other
+tick (its held weapon with it). Its place still follows the host's word
+every tick (network_distributed.c moves it toward where the host has it);
+what runs at half rate while it is out of view is its own movement between
+the host's words, its animation, its footsteps and its weapon's upkeep. In
+view, or doing any of those, it is updated every tick. A 24-player client:
+-16% of its tick (24 players on Hang 'Em High, most remote players out of
+view at any time). */
+static int objects_remote_lod_enabled = -1;
+static unsigned long objects_remote_lod_settings_seen;
+
+static boolean objects_remote_lod_skipped(
+	short absolute_index,
+	struct object_header_datum const *header)
+{
+	extern volatile unsigned long halo_settings_generation;
+	struct unit_datum const *unit;
+	struct player_datum const *player;
+
+	if (objects_remote_lod_enabled < 0 || objects_remote_lod_settings_seen != halo_settings_generation)
+	{
+		char const *setting = getenv("HALO_NET_REMOTE_LOD");
+
+		objects_remote_lod_settings_seen = halo_settings_generation;
+		objects_remote_lod_enabled = setting && atoi(setting) != 0;
+	}
+	if (!objects_remote_lod_enabled || header->type != _object_type_biped ||
+		((absolute_index + game_time_get()) & 1) == 0)
+	{
+		return FALSE;
+	}
+	unit = (struct unit_datum const *)header->datum;
+	if (unit->unit.player_index == NONE ||
+		unit->object.parent_object_index != NONE ||
+		TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ||
+		(unit->unit.control_flags & (FLAG(_unit_control_jump_bit) | FLAG(_unit_control_action_bit) |
+			FLAG(_unit_control_use_equipment_bit) | FLAG(_unit_control_weapon_reload_bit) |
+			FLAG(_unit_control_weapon_primary_trigger_bit) | FLAG(_unit_control_weapon_secondary_trigger_bit) |
+			FLAG(_unit_control_throw_grenade_bit) | FLAG(_unit_control_swap_weapons_bit))) ||
+		!network_game_distributed_client() || !game_engine_running())
+	{
+		return FALSE;
+	}
+	player = (struct player_datum const *)player_try_and_get(unit->unit.player_index);
+	return player && player->local_player_index == NONE &&
+		!object_drawn_within(DATUM_INDEX_NEW(absolute_index, header->identifier), 4);
+}
+
 static boolean objects_scenery_update_skipped(
 	short absolute_index,
 	struct object_header_datum const *header)
@@ -5086,7 +5297,8 @@ void objects_update(
 				{
 	#ifdef HALO_LINUX
 				/* (the scenery divisor: above objects_update) */
-				if (!objects_scenery_update_skipped(i, object_header))
+				if (!objects_scenery_update_skipped(i, object_header) &&
+					!objects_remote_lod_skipped(i, object_header))
 				{
 					objects_hitch_object_update(object_index, object_header->type);
 				}

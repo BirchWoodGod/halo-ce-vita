@@ -47,6 +47,10 @@ largest (half its diameter), whose definition draws it only over
 `lod_cutoff` pixels, is made: not when the budget's particles are all live,
 nor when no view drew one lately could see it at that size */
 boolean particle_budget_admits(real_point3d const *position, real maximum_radius, real lod_cutoff);
+/* the frames and ticks a free particle (attached to no object) may go
+undrawn before it is deleted, `full` (the game's) at Full; fewer at
+Reduced and Low in a multiplayer game (particles.c) */
+long particle_budget_unrendered_ticks(long full);
 /* (render_particles.c) the view a local player's particles were drawn from:
 the camera's position and forward and the pixels a unit spans at a depth of
 one */

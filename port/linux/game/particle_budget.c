@@ -43,6 +43,7 @@ fewer local random numbers, which nothing in the game state depends on.
 #include "effects/particles.h"
 #include "math/real_math.h"
 #include "render/render.h"
+#include "game/game_engine.h"
 #include "particle_budget.h"
 
 const char *config_string(const char *name);
@@ -161,6 +162,26 @@ real particle_budget_lifespan(
 			PARTICLE_BUDGET_SHARED_LIFESPAN;
 	}
 	return lifespan;
+}
+
+long particle_budget_unrendered_ticks(
+	long full)
+{
+	/* (Reduced and Low: a spark, a puff or a casing out of view goes after
+	a sixth of a second (Low: a tenth) instead of half a second, its
+	collision tests with it: in a big multiplayer fight most particles are
+	made out of the client's view - other players' shots and impacts - and
+	half of them used to live out that half second unseen. Multiplayer
+	only: the campaign's look is left as it is) */
+	static long const unrendered_ticks[NUMBER_OF_PARTICLE_BUDGET_LEVELS] = { 0, 5, 3 };
+	short level = particle_budget_level();
+
+	if (level != _particle_budget_full && VALID_INDEX(level, NUMBER_OF_PARTICLE_BUDGET_LEVELS) &&
+		game_engine_running())
+	{
+		return MIN(full, unrendered_ticks[level]);
+	}
+	return full;
 }
 
 boolean particle_budget_admits(

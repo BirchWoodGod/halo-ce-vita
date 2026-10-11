@@ -6103,7 +6103,18 @@ boolean unit_update(
 
 	if (used_time || unit->unit.player_index!=NONE)
 	{
+#ifdef HALO_LINUX
+		/* (port) a unit's ambient and self illumination are read only by
+		the debug line below: nothing in the game, the AI or the render
+		uses them. Their refresh - a ray down to the lightmap, a texture
+		cache lookup of its bitmap and a walk of the cluster's lights, for
+		every player's unit every tick - was 8% of a 24-player client's
+		tick (triage/large-game-status.md), so it runs only for that line */
+		if (debug_unit_illumination)
+			unit_refresh_illumination(unit_index);
+#else
 		unit_refresh_illumination(unit_index);
+#endif
 
 		if (debug_unit_illumination)
 		{

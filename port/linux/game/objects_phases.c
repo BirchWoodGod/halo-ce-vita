@@ -47,7 +47,7 @@ static unsigned long children;
 
 static const char *const type_names[TYPES + 1] = {
 	"biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery", "machine", "control",
-	"light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15", "loop"
+	"light_fixture", "placeholder", "sound_scenery", "corpse", "corpse_rest", "t14", "t15", "loop"
 };
 static const char *const phase_names[NUMBER_OF_OBJECTS_PHASES] = {
 	"object", "type", "collision", "physics", "map", "nodes", "lights", "damage", "functions", "create"

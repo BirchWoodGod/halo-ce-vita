@@ -1117,6 +1117,9 @@ void particles_update(
 	real dt)
 {
 	long particle_index;
+#ifdef HALO_LINUX
+	long unrendered_free;
+#endif
 
 	profile_enter(particles_update_section);
 
@@ -1137,6 +1140,7 @@ void particles_update(
 		}
 	}
 
+	unrendered_free = particle_budget_unrendered_ticks(MAXIMUM_PARTICLE_UNRENDERED_FRAME_COUNT);
 #endif
 	for (particle_index = data_next_index(particle_data, NONE);
 		particle_index != NONE;
@@ -1147,10 +1151,14 @@ void particles_update(
 		boolean was_new = (particle->age == 0.0f);
 
 #ifdef HALO_LINUX
+		/* (a free particle's undrawn time at Reduced and Low: particle_budget.c) */
+		long unrendered = particle->object_index == NONE ? unrendered_free : MAXIMUM_PARTICLE_UNRENDERED_FRAME_COUNT;
+
 		if (render.frame_index - particle->last_rendered_frame_index >
-			MAXIMUM_PARTICLE_UNRENDERED_FRAME_COUNT &&
+			unrendered &&
 			particle->last_rendered_frame_index < particles_tick_frame_indices[
-				(particles_tick_frame_head + 1) % NUMBEROF(particles_tick_frame_indices)])
+				(particles_tick_frame_head + NUMBEROF(particles_tick_frame_indices) - unrendered) %
+					NUMBEROF(particles_tick_frame_indices)])
 #else
 		if (render.frame_index - particle->last_rendered_frame_index >
 			MAXIMUM_PARTICLE_UNRENDERED_FRAME_COUNT)
