@@ -443,6 +443,11 @@ from the listing or advertisement, and again on the settings record:
 | game in progress (flag 0x02) | allowed | Late join costs a precache. Our texture-streaming work applies. |
 | split screen in a PC game (PS TV) | 1 local player in crossplay games until measured | |
 
+As built (T11, Oct 11 2026; section 10.3): `port/linux/src/crossplay_guard.c`
+holds the rules and texts, `port/linux/game/network_crossplay_guard.c` the
+game client's hooks. A co-op game is one with no game engine (how OpenCE
+lists and hosts co-op) or on a campaign level.
+
 **Our hosts with PC clients** (phase 3, task T12):
 - The 16-player cap stays (`network_game_server_port_maximum_players`).
 - The Vita host picks only maps and settings it can run. PC clients can't
@@ -611,7 +616,7 @@ order follows the phases; tasks within a phase run in parallel up to the
 | Task | What | Days | Test |
 |---|---|---|---|
 | T10 Signed table | Fetch, cache, verify (Ed25519, two keys), widen-only, kill switch; key generation and signing script for the owner (offline); `HALO_CROSSPLAY_TABLE` override for tests | 4–5 | Unit + fuzz; netns serves a signed table from the test broker host over HTTP (local, no internet) |
-| T11 Client guardrails | Refusals of section 6, browser badges (PC / Vita / dedicated), clear messages | 3–4 | netns: an OpenCE host with 32 maximum is refused; co-op refused; missing map named |
+| T11 Client guardrails | Refusals of section 6, browser badges (PC / Vita / dedicated), clear messages | 3–4 | netns `crossrefuse`: co-op refused, a second local player refused, missing map named (T3's text); `crossbig`: an OpenCE host of 128 joined after asking once (done Oct 11, 10.3) |
 | T12 Browser for PC games | List hceu games (OpenCE/Chupa/Damnation hosts and servers), passwords (Argon2id cost on Vita: measure), invite link entry; optionally halo.milenko.org's list (**owner decision**: a third-party service; ask its operator first) | 3–4 | netns `browseropence` |
 | T13 Votekick | Port OpenCE 3b20ef87 (78/79) | 3 | OpenCE harness test `votekick_count.c` ported; netns mixed vote |
 | T14 Security pass 2 | Port missing ChupathingyCE map-hardening items; index audit for co-op messages; a security review of the branch | 3–4 | Map fuzz under ASan with CE maps from the owner's MCC folder (not in repo) |
@@ -667,7 +672,8 @@ support; OpenCE falls back to 3.1.1) and `stun_test_server.py`.
 | `dedicatedopence` | our crossplay server, one OpenCE client + one of ours + bots | full game, both scoreboards agree (tick hash on our side), map rotation |
 | `pcjoinsvita` | our Vita-path host with `HALO_TICK_SLOWDOWN=19`, OpenCE clients | 16 cap holds, the 17th is refused, host frame budget logged |
 | `crossmixed` | beta.4 (v18) binaries (`HALO_TEST_VITA_OLD`) + beta.5 + OpenCE | legacy and crossplay games each work; beta.4 on a crossplay host gets the update message |
-| `crossrefuse` | OpenCE host with 32 maximum / co-op / missing map | our client refuses with the right message |
+| `crossrefuse` | OpenCE host: co-op / a second local player / missing map | our client refuses with the right message |
+| `crossbig` | OpenCE host of 128 (more than 16: Experimental) | our client asks once, then plays; answering no, it plays none of it |
 | `crossversion` | an OpenCE build one version ahead, table not widened, then widened (signed test key) | refused, then plays |
 | `crossfuzz` | ASan build of ours, `debug.network_corrupt` a third of datagrams on the PC peer | no ASan report, game continues |
 | `crossvoice` (phase 4) | OpenCE + ours with voice test tones (`HALO_VOICE_TEST`) | frames heard both ways, at most 4 decoded on ours |
@@ -773,6 +779,48 @@ pass every step, so they are now acceptance tests (`XPPC_EXPECTED_FAIL`
 defaults to `crossrefuse`, which waits for T11). The new `crossmixed` mode
 checks that the two worlds stay apart. The wire contract test closes G2,
 G3, G4, G5, G12, G13 and G15; still open: G6 (T3), G9, G10, G11, G14.
+
+### 10.3 The client guardrails as built (T11, Oct 11 2026)
+
+Branch feat/xp-guardrails. With Crossplay on (and only then):
+
+- **PC co-op games are refused** (G14), with "This is a PC co-op game.
+  Co-op games on PC hosts can't be joined with Crossplay on: they run more
+  AI than the Vita can hold." Checked in both server browsers (the PC
+  menus', `menu_functions.c`, and the settings panel's), on a LAN
+  advertisement before any join (`network_game_client_advertised_game_compatible`)
+  and again on the settings record (the game left). OpenCE's listing has
+  no co-op bit: a format-1 listing with game engine 0 is co-op, shown
+  without a difficulty it never sent.
+- **Large PC games are allowed** (more than 16 players in the game, or a
+  maximum above 16): the browsers badge them EXPERIMENTAL, and joining one
+  asks once: "Large PC game: more than 16 players can make the Vita lag.
+  Join anyway?" The browser asks before the join and remembers the answer
+  by the game's name for two minutes, so the lobby doesn't ask again. A game
+  joined from System Link is asked about in its lobby when the settings
+  record arrives, and "no" leaves it. Player counts never refuse a game.
+  `HALO_CROSSPLAY_LARGE_ANSWER=yes|no` answers for automated runs.
+- **Badges** (crossplay wire only; the legacy wire's rows are unchanged,
+  all of them Vitas'): "PC" or "PC SERVER" (OpenCE's listing has
+  ChupathingyCE's dedicated bit), then " EXPERIMENTAL" or " CO-OP". The PC
+  menus put them before the name, `[PC SERVER EXPERIMENTAL] XpServer`. The
+  panel's rows end in PC/SRV and EXP/COOP, and the chosen game gets a line
+  in words. A "VITA" badge exists (`crossplay_guard_badge`) but never shows:
+  with one switch, a listing never mixes the two worlds.
+- **Join with a code** is hidden on the panel while the running wire is
+  the crossplay one (codes join Vita games).
+- **Split screen** (PS TV): one local player in a crossplay game. Another
+  controller's join isn't sent, and that controller is told once.
+  `HALO_NETWORK_TEST_SECOND_PLAYER` tests it.
+- Missing, too-big and unsupported maps are T3's (feat/xp-map-identity).
+  `crossrefuse` checks its refusal once the build has T3's text.
+
+**Results (netns, our client with `HALO_CROSSPLAY=1`):** `crossrefuse`
+PASS (co-op refused before any join; a second local player refused on
+every copy, the game played every step); `crossbig` PASS (asked exactly
+once on a LAN and from the browser, the listing badged EXPERIMENTAL, every
+step passed; answering no: left, no tick played). `XPPC_EXPECTED_FAIL` is
+now empty.
 
 ---
 
