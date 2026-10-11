@@ -761,6 +761,16 @@ static void render_model_parts(
 			{
 				if (sort_filth[i].next_part_index==sort_filth[j].part_index && sort_filth[i].next_part_index>0)
 				{
+#ifdef HALO_LINUX
+					/* port: a part drawn with no transparent group (the groups
+					ran out: "too many transparent geometry groups") has no
+					references, NULL (rasterizer_xbox_models.c) */
+					if (!sort_filth[i].next_group_presorted_index_reference ||
+						!sort_filth[j].previous_group_presorted_index_reference)
+					{
+						break;
+					}
+#endif
 					*sort_filth[i].next_group_presorted_index_reference = sort_filth[j].group_index;
 					*sort_filth[j].previous_group_presorted_index_reference = sort_filth[i].group_index;
 					break;
