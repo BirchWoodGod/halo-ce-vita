@@ -123,6 +123,10 @@
 # lines that say why; the brokers' topics (hceu: OpenCE's, hcev: ours) are
 # listed for the internet modes.
 set -u
+# (a sanitizer build's stack trace runs llvm-symbolizer, which asks the
+# debuginfod servers DEBUGINFOD_URLS names: a name lookup the leak check
+# rightly fails; the copies symbolize from their own debug information)
+unset DEBUGINFOD_URLS
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
