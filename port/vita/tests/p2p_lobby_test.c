@@ -693,8 +693,17 @@ static void status_checks(void)
 	signal_counts.tried = 3;
 	lobby_update(token, 1, 16);
 	state = p2p_lobby_hosting_status(text, sizeof(text));
+	check(state == P2P_LOBBY_HOSTING_PENDING, "every broker tried, none acknowledging: getting listed still, before "
+		"BROWSE_REACH_TIME");
+	clock_now += BROWSE_REACH_TIME;
+	signal_counts.exhausted = 2;
+	state = p2p_lobby_hosting_status(text, sizeof(text));
+	check(state == P2P_LOBBY_HOSTING_PENDING, "and after it while a broker has a way left to try (its TLS port)");
+	signal_counts.exhausted = 3;
+	lobby_update(token, 1, 16);
+	state = p2p_lobby_hosting_status(text, sizeof(text));
 	check(state == P2P_LOBBY_HOSTING_UNREACHABLE && !strcmp(text, "Not listed: can't reach the online game list"),
-		"no broker acknowledged it: not listed, the list out of reach");
+		"every way of every broker failed: not listed, the list out of reach");
 	check(logged_line("the game is not listed: no broker has acknowledged its listing"), "and the log says so");
 	signal_counts.ready = signal_counts.lobby = signal_counts.listing = 2;
 	lobby_update(token, 1, 16);
@@ -725,11 +734,26 @@ static void status_checks(void)
 		"looking while signalling starts");
 	signal_counts.started_time = clock_now;
 	signal_counts.tried = 3;
+	signal_counts.exhausted = 3;
+	lobby_update(NULL, 0, 0);
+	state = p2p_lobby_browse_status(text, sizeof(text));
+	check(state == P2P_LOBBY_BROWSE_LOOKING, "every broker failed at once: looking still, for BROWSE_REACH_TIME "
+		"(Oct 11 2026: \"can't reach\" after 10 s while TLS worked)");
+	check(p2p_lobby_brokers_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_LOOKING, "Server Setup's line too");
+	clock_now += BROWSE_REACH_TIME - 1000;
+	lobby_update(NULL, 0, 0);
+	check(p2p_lobby_browse_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_LOOKING, "a second before it, still");
+	clock_now += 2000;
+	signal_counts.exhausted = 2;
+	lobby_update(NULL, 0, 0);
+	check(p2p_lobby_browse_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_LOOKING,
+		"past it, a broker with a way left to try (its TLS port): looking still");
+	signal_counts.exhausted = 3;
 	lobby_update(NULL, 0, 0);
 	state = p2p_lobby_browse_status(text, sizeof(text));
 	check(state == P2P_LOBBY_BROWSE_UNREACHABLE &&
 		!strcmp(text, "Can't reach the online game list - check your internet connection"),
-		"every broker failed: the list is out of reach");
+		"every way of every broker failed: the list is out of reach");
 	check(logged_line("browser: \"Can't reach the online game list - check your internet connection\""),
 		"and the log says so");
 	check(p2p_lobby_brokers_status(text, sizeof(text)) == P2P_LOBBY_BROWSE_UNREACHABLE &&
@@ -753,8 +777,10 @@ static void status_checks(void)
 	state = p2p_lobby_browse_status(text, sizeof(text));
 	check(state == P2P_LOBBY_BROWSE_EMPTY && !strcmp(text, "No public games for this version (1 on another)"),
 		"a game of another version: said, not shown");
-	/* the summary, once due: the counts and why */
-	clock_now += BROWSE_SUMMARY_TIME;
+	/* the summary, once due: the counts and why (the first, settled after
+	opening, came with none, while the brokers were out of reach: the next
+	BROWSE_SUMMARY_INTERVAL after it, as listings come) */
+	clock_now += BROWSE_SUMMARY_INTERVAL;
 	lobby_update(NULL, 0, 0);
 	check(logged_line("browser (summary): 1 listing heard (0 retained, 0 again), 0 games shown") &&
 		logged_line("dropped 1 of another version (1 host)"), "the summary counts the listing and why it was dropped");

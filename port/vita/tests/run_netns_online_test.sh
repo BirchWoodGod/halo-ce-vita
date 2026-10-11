@@ -43,7 +43,7 @@
 #            took be a TLS one
 #   lobbydns lobby, the joiners knowing the broker by a name
 #            (broker.halo.test) that the test's own /etc/hosts holds only
-#            from HALO_TEST_DNS_DOWN seconds (25) after the first joiner
+#            from HALO_TEST_DNS_DOWN seconds (40) after the first joiner
 #            starts: it must say it cannot look the broker up and that the
 #            game list cannot be reached, then reach it, show the host's game
 #            and count it (its browser's summary), and keep the broker's
@@ -997,8 +997,8 @@ lobbydns)
 	echo "host's code: $code"
 	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
 		HALO_TEST_INPUT=bot:2 HALO_NET_BROKERS=broker.halo.test:1883 HALO_NET_RESOLVER_CACHE="$cache" \
-		HALO_EXIT_AFTER=${HALO_TEST_DNS_JOINER_SECONDS:-80}; join_pid=$last_pid
-	sleep ${HALO_TEST_DNS_DOWN:-25}
+		HALO_EXIT_AFTER=${HALO_TEST_DNS_JOINER_SECONDS:-100}; join_pid=$last_pid
+	sleep ${HALO_TEST_DNS_DOWN:-40}
 	echo "broker.halo.test resolves now"
 	echo "198.51.100.1 broker.halo.test" >> "$out/hosts"
 	wait $join_pid 2>/dev/null

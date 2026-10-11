@@ -150,11 +150,14 @@ enum
 	LISTING_ACKNOWLEDGE_TIME = 15000,
 	NOT_LISTED_LOG_INTERVAL = 60000,
 	LISTING_COUNT_LOG_INTERVAL = 10000,
-	/* the browser: looking (not yet "can't reach") this long after it opens
-	while a broker is still being tried; "looking" this long after a broker
-	took the subscription, before "no public games"; its summary this long
-	after it opens or is refreshed, and again this often while listings come */
-	BROWSE_REACH_TIME = 12000,
+	/* the browser: looking (not yet "can't reach") at least this long after
+	it opens, and after that while a broker has a way left to try (its plain
+	port, then its TLS one: brokers_out_of_reach; Oct 11 2026, "can't reach"
+	after 10 s while two brokers took TLS); "looking" this long after a
+	broker took the subscription, before "no public games"; its summary this
+	long after it opens or is refreshed, and again this often while listings
+	come. (Server Setup's and a hosted game's "can't reach" the same.) */
+	BROWSE_REACH_TIME = 30000,
 	BROWSE_SETTLE_TIME = 5000,
 	BROWSE_SUMMARY_TIME = 10000,
 	BROWSE_SUMMARY_INTERVAL = 60000,
@@ -686,6 +689,15 @@ static void stop_listing(void)
 
 static int hosting_public(void);
 
+/* whether the brokers are out of reach: every one either ready (yet not
+carrying what is wanted: the caller's case) or failed every way since it
+last was (each still retried in the background, and the line changes as
+soon as one is reached) */
+static int brokers_out_of_reach(const struct p2p_signal_counts *counts)
+{
+	return counts->started_time && counts->exhausted + counts->ready >= counts->brokers;
+}
+
 /* the hosted game's listing, as the brokers hold it: a
 P2P_LOBBY_HOSTING_*, and its line for the player; under p2p_lock */
 static int hosting_status(char *text, int size)
@@ -719,7 +731,7 @@ static int hosting_status(char *text, int size)
 		snprintf(text, (size_t)size, "%s", T("Getting listed..."));
 		return P2P_LOBBY_HOSTING_PENDING;
 	}
-	if (!elapsed(lobby.listed_time, BROWSE_REACH_TIME) && counts.tried < counts.brokers)
+	if (!elapsed(lobby.listed_time, BROWSE_REACH_TIME) || !brokers_out_of_reach(&counts))
 	{
 		snprintf(text, (size_t)size, "%s", T("Getting listed..."));
 		return P2P_LOBBY_HOSTING_PENDING;
@@ -1911,9 +1923,9 @@ static int browse_status(char *text, int size)
 			snprintf(text, (size_t)size, "%s", T("No public games right now"));
 		return P2P_LOBBY_BROWSE_EMPTY;
 	}
-	/* (none taking the subscription: still being tried, or out of reach) */
-	if (!elapsed(lobby.browse_time, BROWSE_REACH_TIME) && (!counts.started_time || counts.tried < counts.brokers ||
-		counts.lobby))
+	/* (none taking the subscription: still being tried, or out of reach,
+	which is never said in its first BROWSE_REACH_TIME) */
+	if (!elapsed(lobby.browse_time, BROWSE_REACH_TIME) || !brokers_out_of_reach(&counts))
 	{
 		snprintf(text, (size_t)size, "%s", T("Looking for public games..."));
 		return P2P_LOBBY_BROWSE_LOOKING;
@@ -1951,7 +1963,8 @@ int p2p_lobby_brokers_status(char *text, int size)
 		snprintf(text, (size_t)size, "%s", "");
 		state = P2P_LOBBY_BROWSE_EMPTY;
 	}
-	else if (!counts.started_time || (counts.tried < counts.brokers && !elapsed(counts.started_time, BROWSE_REACH_TIME)))
+	else if (!counts.started_time || !elapsed(counts.started_time, BROWSE_REACH_TIME) ||
+		(lobby.reach_time && !elapsed(lobby.reach_time, BROWSE_REACH_TIME)) || !brokers_out_of_reach(&counts))
 	{
 		snprintf(text, (size_t)size, "%s", T("Connecting to the online game list..."));
 		state = P2P_LOBBY_BROWSE_LOOKING;
