@@ -94,6 +94,7 @@ Called from the main loop every frame (main.c).
 #include "items/items.h"
 #include "objects/damage.h"
 #include "scenario/scenario.h"
+#include "scenario/scenario_definitions.h"
 #include "tag_files/tag_files.h"
 #include "camera/observer.h"
 #include "cutscene/cinematics.h"
@@ -773,9 +774,10 @@ static void network_test_log_players(
 			}
 		}
 		network_actors_client_statistics(&tracked, &most, &untracked, &rejected);
-		platform_log("network test: co-op tick %ld | bsp %d | cinematic %d skip %s %d/%d%s | watching %lx | held %ld lead %ld"
-			" | objects %ld units %ld living ai %ld | ai tracked %ld most %ld untracked %ld rejected %ld",
-			game_time_get(), (int)global_structure_bsp_index_get(), (int)cinematic_in_progress(),
+		platform_log("network test: co-op tick %ld | bsp %d | bsps %d | cinematic %d skip %s %d/%d%s | watching %lx | held %ld"
+			" lead %ld | objects %ld units %ld living ai %ld | ai tracked %ld most %ld untracked %ld rejected %ld",
+			game_time_get(), (int)global_structure_bsp_index_get(),
+			(int)global_scenario_get()->structure_bsp_references.count, (int)cinematic_in_progress(),
 			offered ? "offered" : "no", (int)votes, (int)voters, voted ? " voted" : "", (unsigned long)watched,
 			holds, most_lead, objects, units, ai_units, tracked, most, untracked, rejected);
 	}
