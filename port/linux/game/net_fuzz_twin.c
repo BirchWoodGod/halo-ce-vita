@@ -1,0 +1,210 @@
+/*
+NET_FUZZ_TWIN.C
+
+In-game mutation fuzzing of the game's message handlers (net_fuzz_twin.h):
+tests only, compiled out unless HALO_NET_FUZZ_TWIN is defined (never in
+release builds).
+
+  HALO_NET_FUZZ_RATE=N   one message in N gets a twin (0, the default: none)
+  HALO_NET_FUZZ_SEED=n   the mutations' sequence (1)
+  HALO_NET_FUZZ_DUMP=f   the last twins, and the messages they came from, as
+                         hex, written to f when a sanitizer ends the process
+                         and every 1024 twins (so that a hang leaves them too)
+*/
+
+#include "net_fuzz_twin.h"
+
+#ifdef NET_FUZZ_TWIN_ENABLED
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* (AddressSanitizer's, when the build has it) */
+#if defined(__SANITIZE_ADDRESS__)
+#define NET_FUZZ_TWIN_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define NET_FUZZ_TWIN_SANITIZER 1
+#endif
+#endif
+#ifdef NET_FUZZ_TWIN_SANITIZER
+void __sanitizer_set_death_callback(void (*callback)(void));
+#endif
+
+enum
+{
+	NET_FUZZ_TWIN_RING = 64,
+	NET_FUZZ_TWIN_MAXIMUM = 0x1100,
+};
+
+static struct
+{
+	int ready;
+	int rate;
+	unsigned long state;
+	unsigned long count;
+	char dump_path[512];
+	struct
+	{
+		unsigned long sequence;
+		int direction;
+		unsigned short original_size, size;
+		unsigned char original[NET_FUZZ_TWIN_MAXIMUM];
+		unsigned char bytes[NET_FUZZ_TWIN_MAXIMUM];
+	} ring[NET_FUZZ_TWIN_RING];
+} net_fuzz;
+
+static int net_fuzz_random(
+	void)
+{
+	net_fuzz.state = net_fuzz.state * 1103515245UL + 12345UL;
+	return (int)((net_fuzz.state >> 8) & 0x7FFFFF);
+}
+
+static void net_fuzz_dump(
+	void)
+{
+	unsigned long first = net_fuzz.count > NET_FUZZ_TWIN_RING ? net_fuzz.count - NET_FUZZ_TWIN_RING : 0;
+	unsigned long sequence;
+	FILE *file;
+
+	if (!net_fuzz.dump_path[0] || !(file = fopen(net_fuzz.dump_path, "w")))
+		return;
+	for (sequence = first; sequence < net_fuzz.count; sequence++)
+	{
+		int slot = (int)(sequence % NET_FUZZ_TWIN_RING);
+		int index;
+
+		fprintf(file, "twin %lu direction %d size %d original %d\noriginal ", net_fuzz.ring[slot].sequence,
+			net_fuzz.ring[slot].direction, net_fuzz.ring[slot].size, net_fuzz.ring[slot].original_size);
+		for (index = 0; index < net_fuzz.ring[slot].original_size; index++)
+			fprintf(file, "%02x", net_fuzz.ring[slot].original[index]);
+		fprintf(file, "\ntwin ");
+		for (index = 0; index < net_fuzz.ring[slot].size; index++)
+			fprintf(file, "%02x", net_fuzz.ring[slot].bytes[index]);
+		fprintf(file, "\n");
+	}
+	fclose(file);
+}
+
+int net_fuzz_twin(
+	void const *message,
+	unsigned short size,
+	unsigned short buffer_size,
+	void *twin,
+	unsigned short *twin_size,
+	int direction)
+{
+	static unsigned char const interesting[] = { 0, 1, 2, 0x7F, 0x80, 0xFF, 0xFE, 0x10, 0x40, 0x81 };
+	unsigned char *bytes = twin;
+	int mutations, mutation;
+	int length = size;
+	int slot;
+
+	if (!net_fuzz.ready)
+	{
+		char const *rate = getenv("HALO_NET_FUZZ_RATE");
+		char const *seed = getenv("HALO_NET_FUZZ_SEED");
+		char const *dump = getenv("HALO_NET_FUZZ_DUMP");
+
+		net_fuzz.ready = 1;
+		net_fuzz.rate = rate ? atoi(rate) : 0;
+		net_fuzz.state = seed ? strtoul(seed, NULL, 10) : 1;
+		if (dump)
+		{
+			snprintf(net_fuzz.dump_path, sizeof(net_fuzz.dump_path), "%s", dump);
+#ifdef NET_FUZZ_TWIN_SANITIZER
+			__sanitizer_set_death_callback(net_fuzz_dump);
+#endif
+		}
+	}
+	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM ||
+		net_fuzz_random() % net_fuzz.rate)
+	{
+		return 0;
+	}
+	memcpy(bytes, message, size);
+	mutations = 1 + net_fuzz_random() % 6;
+	for (mutation = 0; mutation < mutations; mutation++)
+	{
+		/* (after the message header, the first 2 bytes) */
+		int at = 2 + net_fuzz_random() % (length > 2 ? length - 2 : 1);
+
+		switch (net_fuzz_random() % 9)
+		{
+		case 0: case 1:
+			bytes[at] ^= (unsigned char)(1 << (net_fuzz_random() % 8));
+			break;
+		case 2: case 3:
+			bytes[at] = interesting[net_fuzz_random() % sizeof(interesting)];
+			break;
+		case 4:
+			bytes[at] = (unsigned char)net_fuzz_random();
+			break;
+		case 5:
+			/* a 16- or 32-bit value at an extreme */
+			if (at + 4 <= length)
+			{
+				unsigned long value = net_fuzz_random() % 2 ? 0x7FFFFFFFUL : 0x80000000UL;
+
+				if (net_fuzz_random() % 2)
+					value = 0xFFFFFFFFUL;
+				memcpy(bytes + at, &value, net_fuzz_random() % 2 ? 2 : 4);
+			}
+			break;
+		case 6:
+			/* shorter */
+			if (length > 3)
+				length = 3 + net_fuzz_random() % (length - 3);
+			break;
+		case 7:
+			/* longer */
+			{
+				int more = 1 + net_fuzz_random() % 64;
+				int index;
+
+				if (length + more > buffer_size)
+					more = buffer_size - length;
+				for (index = 0; index < more; index++)
+					bytes[length + index] = (unsigned char)net_fuzz_random();
+				length += more;
+			}
+			break;
+		case 8:
+			/* another packet type (a game message's last byte) */
+			bytes[length - 1] = (unsigned char)(net_fuzz_random() % 48);
+			break;
+		}
+	}
+	/* (the header's size the twin's, mostly: else only the handlers' size
+	check runs) */
+	if (net_fuzz_random() % 8)
+	{
+		unsigned short header;
+
+		memcpy(&header, bytes, 2);
+		header = (unsigned short)((header & 15) | (length << 4));
+		memcpy(bytes, &header, 2);
+	}
+	*twin_size = (unsigned short)length;
+	slot = (int)(net_fuzz.count % NET_FUZZ_TWIN_RING);
+	net_fuzz.ring[slot].sequence = net_fuzz.count;
+	net_fuzz.ring[slot].direction = direction;
+	net_fuzz.ring[slot].original_size = size;
+	net_fuzz.ring[slot].size = (unsigned short)length;
+	memcpy(net_fuzz.ring[slot].original, message, size);
+	memcpy(net_fuzz.ring[slot].bytes, bytes, (size_t)length);
+	net_fuzz.count++;
+	if (!(net_fuzz.count % 1024))
+	{
+		fprintf(stderr, "net fuzz twin: %lu twins (direction %d)\n", net_fuzz.count, direction);
+		net_fuzz_dump();
+	}
+	return 1;
+}
+
+#endif
+
+/* (a translation unit with something in it, built without the twins) */
+typedef int net_fuzz_twin_translation_unit;

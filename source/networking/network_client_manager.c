@@ -398,6 +398,7 @@ symbols in this file:
 #include "custom_edition_maps.h"
 #include "network_wire.h"
 #include "map_share.h"
+#include "net_fuzz_twin.h"
 /* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
 #include "../src/lang.h"
 void platform_show_message(char const *title, char const *message);
@@ -2907,6 +2908,22 @@ static boolean network_game_client_process_messages(
 		{
 			network_event("network_game_client_handle_message() failed in network_game_client_process_incoming_messages()");
 		}
+#ifdef NET_FUZZ_TWIN_ENABLED
+		/* (tests only: a mutated twin of the message handled too, its result
+		ignored; not the host's own client, whose server is this machine over
+		127.0.0.1: net_fuzz_twin.h) */
+		else if (!global_network_game_server_get())
+		{
+			static word twin[MAXIMUM_NETWORK_MESSAGE_SIZE / sizeof(word)];
+			unsigned short twin_size;
+
+			if (net_fuzz_twin(message_packet, message_packet_size, sizeof(twin), twin, &twin_size,
+				_net_fuzz_twin_client_from_host))
+			{
+				network_game_client_handle_message(client, twin, (short)twin_size, &source_address);
+			}
+		}
+#endif
 
 		message_packet_size = sizeof(message_packet);
 		if (budgeted && system_milliseconds() - start_time >= MAXIMUM_MESSAGE_MILLISECONDS_PER_IDLE)
