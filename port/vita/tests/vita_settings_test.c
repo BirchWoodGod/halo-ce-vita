@@ -88,8 +88,32 @@ int update_check_request(void)
 }
 int update_check_status(char *version, int size)
 {
-	snprintf(version, (size_t)size, "%s", update_version_value);
+	if (version && size > 0)
+		snprintf(version, (size_t)size, "%s", update_version_value);
 	return update_status_value;
+}
+/* (the updater's, vita_update.c, vita_update_verify.c: whether this build
+holds an update key, the presses that start a download, a downloaded VPK) */
+static int test_update_key, update_starts;
+static char update_ready_version[UPDATE_VERSION_SIZE];
+int update_public_key(unsigned char key[32])
+{
+	memset(key, test_update_key, 32);
+	return test_update_key;
+}
+int vita_update_start(void)
+{
+	if (update_status_value != UPDATE_STATUS_AVAILABLE)
+		return -1;
+	update_starts++;
+	return 0;
+}
+int vita_update_running(void) { return 0; }
+int vita_update_ready(char *version, int version_size, char *path, int path_size)
+{
+	snprintf(version, (size_t)version_size, "%s", update_ready_version);
+	snprintf(path, (size_t)path_size, "ux0:data/haloce-vita/update/halo-%s.vpk", update_ready_version);
+	return update_ready_version[0] != 0;
 }
 
 /* (vita_input.c's) */
@@ -649,7 +673,7 @@ static void test_controls_tab(void)
 		"General: Check for updates, the version under it, a gap; look, invert, crouch, gyro aiming, rear guard; "
 		"then Button layout, Touch zones, Gyro settings, Advanced");
 	check(to_line("Check for updates") && menu_selected == 1 &&
-		strstr(menu, "\n\x05" "Asks GitHub for the newest version; nothing is downloaded\n") &&
+		strstr(menu, "\n\x05" "Asks GitHub for the newest version; again to download it\n") &&
 		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
 	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
 		!strstr(menu, "\nStick deadzone\x02") && !strstr(menu, "\nShow dev settings\x02"),
@@ -1978,6 +2002,28 @@ static void test_updates(void)
 		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\n\nLook sensitivity\x02") &&
 		menu_fits() && menu_height_fits() && menu_rows() == 10,
 		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits");
+	/* (a build with the update key: the next press downloads it) */
+	test_update_key = 1;
+	redraw();
+	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!Press again to download it\n\nLook sensitivity\x02") &&
+		menu_fits() && menu_height_fits(), "with the update key: press again to download it");
+	to_line("Check for updates");
+	press(VITA_BUTTON_CROSS);
+	check(update_starts == 1 && update_requests == 1, "the press with an update found downloads it, asks GitHub nothing");
+	/* (downloaded and verified: where it is, for VitaShell) */
+	snprintf(update_ready_version, sizeof(update_ready_version), "1.1.0-beta.4");
+	redraw();
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n!VitaShell: ux0:data/haloce-vita/update/\n!halo-1.1.0-beta.4.vpk (verified, to install)\n"
+		"\nLook sensitivity\x02") && menu_fits() && menu_height_fits() && menu_rows() == 10,
+		"downloaded: where the VPK is, for VitaShell; all of the tab still fits");
+	update_status_value = UPDATE_STATUS_NONE;
+	redraw();
+	check(strstr(menu, "\n!halo-1.1.0-beta.4.vpk (verified, to install)\n") != NULL, "a downloaded VPK shows without a look this session");
+	update_status_value = UPDATE_STATUS_AVAILABLE;
+	update_ready_version[0] = 0;
+	test_update_key = 0;
+	redraw();
 	to_line("Look sensitivity");
 	press(VITA_BUTTON_UP);
 	check(menu_selected == 1, "up from the first control: Check for updates (the info lines are stepped over)");
@@ -2000,6 +2046,36 @@ static void test_updates(void)
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
 	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
+	press(VITA_BUTTON_CIRCLE);
+
+	/* the update download's dialogs as vita_update.c drives them, from its
+	thread: the question, the progress line, then the line withdrawn and the
+	last message at once - closing the message leaves nothing over the game
+	(the progress line came back over it, "frozen", on hardware) */
+	vita_settings_question("Halo CE: update", "Download it now?");
+	frame(0);
+	check(menu_visible && strstr(menu, "Download it now?") != NULL, "the download's question");
+	press(VITA_BUTTON_CROSS);
+	check(vita_settings_question_answer() == 1, "Cross: yes");
+	vita_settings_progress("Halo CE: update", "Downloading: 2.4 of 4.8 MB (50%)");
+	frame(0);
+	check(menu_visible && strstr(menu, "Downloading: 2.4 of 4.8 MB") != NULL, "its progress line over the game");
+	vita_settings_progress("Halo CE: update", "Checking the download: 100%");
+	frame(0);
+	check(strstr(menu, "Checking the download: 100%") != NULL, "the progress line follows");
+	vita_settings_progress(NULL, NULL);
+	vita_settings_message("Halo CE: update", "1.1.0-beta.4 downloaded and verified. Install it with VitaShell: "
+		"ux0:data/haloce-vita/update/halo-1.1.0-beta.4.vpk");
+	frame(0);
+	check(menu_visible && strstr(menu, "downloaded and verified") != NULL && !strstr(menu, "Checking the download"),
+		"the last message replaces the progress line");
+	press(VITA_BUTTON_CROSS);
+	frame(0);
+	redraw();
+	check(!menu_visible && !strstr(menu, "Checking the download"),
+		"closing it leaves nothing over the game (no progress line again)");
+	open_panel();
+	check(menu_visible && strstr(menu, "*General") != NULL, "the panel opens again as before");
 	press(VITA_BUTTON_CIRCLE);
 }
 

@@ -199,9 +199,14 @@ int update_tag_valid(const char *tag)
 		{
 			if (!*cursor)
 				return 1;
-			if (strncmp(cursor, "-beta.", 6))
+			/* port: a beta or a release candidate (v1.1.0-rc.1, the last
+			pre-release before 1.1.0: a beta 4 has to find it) */
+			if (!strncmp(cursor, "-beta.", 6))
+				cursor += 6;
+			else if (!strncmp(cursor, "-rc.", 4))
+				cursor += 4;
+			else
 				return 0;
-			cursor += 6;
 		}
 	}
 	return *cursor == 0;

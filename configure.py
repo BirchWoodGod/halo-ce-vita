@@ -136,6 +136,25 @@ parser.add_argument(
     "fault (a crash) on the Vita",
 )
 parser.add_argument(
+    "--vita-update-test-sources",
+    action="store_true",
+    help="TEST builds only, never a release: the Vita build takes HALO_UPDATE_URL and HALO_UPDATE_DOWNLOAD_BASE "
+    "from env.txt (HALO_UPDATE_TEST_SOURCES), so its updater can look at a test repository "
+    "(tools/release/README.md); a build without it asks BirchWoodGod/halo-ce-vita alone",
+)
+parser.add_argument(
+    "--vita-update-key",
+    type=str,
+    help="TEST builds only: the updater's Ed25519 public key (64 hexadecimal digits) in place of "
+    "port/vita/include/vita_update_key.h's (HALO_UPDATE_PUBLIC_KEY)",
+)
+parser.add_argument(
+    "--vita-version",
+    type=str,
+    help="TEST builds only: the version the Vita build says it is (HALO_VITA_VERSION) in place of "
+    "port/vita/include/vita_version.h's, e.g. 1.1.0-beta.4 for an update test's newer build",
+)
+parser.add_argument(
     "--android-ndk",
     type=str,
     help="Android NDK for `ninja android` (default: ANDROID_NDK_HOME, or the newest under the Android SDK)",
@@ -212,6 +231,9 @@ sln.port_portable = args.portable
 sln.port_pgo = args.pgo
 sln.port_pgo_profile = args.pgo_profile
 sln.vita_aligned = args.vita_aligned
+sln.vita_update_test_sources = args.vita_update_test_sources
+sln.vita_update_key = args.vita_update_key
+sln.vita_version = args.vita_version
 sln.android_ndk = args.android_ndk
 sln.android_guest_cc = args.android_guest_cc
 if not is_windows():

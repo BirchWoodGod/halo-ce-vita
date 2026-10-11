@@ -1,7 +1,9 @@
 /*
 POSIX_HTTPS.C
 
-One HTTPS GET for the update check (update_check.h): Mbed TLS
+One HTTPS GET for the update check (update_check.h), and the Vita
+updater's downloads (posix_https_download, below; port/vita/host/
+vita_update_download.c): Mbed TLS
 (port/third_party/mbedtls) over the platform's own sockets (posix.h: vita_net.c
 on the Vita, posix_net.c on Linux), so the Vita runs the same TLS as the
 Linux harness and the tests, and none of the system's: its SceHttp/SceSsl
@@ -24,6 +26,13 @@ authorities.
 - Every wait has a deadline: CONNECT_TIMEOUT_SECONDS to connect,
   TIMEOUT_SECONDS for the whole request. No cookie is kept or sent.
 
+posix_https_download streams a file to disk with the same TLS and limits
+on headers; it follows a redirect only where its caller's allow-list says
+(the updater's: GitHub's release-asset hosts, vita_update_verify.h), takes
+a body only by Content-Length, at most the size given (exactly the signed
+size for halo.vpk), resumes with Range, and has 30 s without a byte as its
+deadline instead of a whole-request one.
+
 Built with the host's ABI, as the other posix_*.c (and on the Vita with
 the SDK's: tools/vita_build.py, with port/vita/include/mbedtls_vita_config.h).
 */
@@ -44,6 +53,11 @@ the SDK's: tools/vita_build.py, with port/vita/include/mbedtls_vita_config.h).
 #include <time.h>
 
 #include "update_roots.h"
+#ifdef POSIX_HTTPS_TEST_ROOTS
+/* (tests only, never a game build: run_update_download_test.sh's own
+authority, posix_https_test_roots_pem) */
+#include POSIX_HTTPS_TEST_ROOTS
+#endif
 
 #define WSAEWOULDBLOCK 10035
 #define WSAEINPROGRESS 10036
@@ -51,7 +65,8 @@ the SDK's: tools/vita_build.py, with port/vita/include/mbedtls_vita_config.h).
 #define TIMEOUT_SECONDS 15
 #define HEADER_MAXIMUM 16384
 #define HOST_MAXIMUM 254
-#define PATH_MAXIMUM 1024
+/* (a release file's redirect to GitHub's storage is ~900 characters) */
+#define PATH_MAXIMUM 2048
 
 /* ---------- certificate authorities and randomness */
 
@@ -67,6 +82,10 @@ static void roots_load(void)
 	moved to it) */
 	roots_ready = mbedtls_x509_crt_parse(&roots, (const unsigned char *)update_roots_pem, sizeof(update_roots_pem)) ==
 		0;
+#ifdef POSIX_HTTPS_TEST_ROOTS
+	roots_ready = roots_ready && mbedtls_x509_crt_parse(&roots, (const unsigned char *)posix_https_test_roots_pem,
+		sizeof(posix_https_test_roots_pem)) == 0;
+#endif
 }
 
 static int random_bytes(void *context, unsigned char *buffer, size_t size)
@@ -114,19 +133,24 @@ static int socket_wait(int socket, int writing, time_t deadline)
 {
 	for (;;)
 	{
-		int list[1];
-		int count = 1, none = 0, result;
+		int list[1], errors[1];
+		int count = 1, error_count = 1, none = 0, result;
 		time_t now = time(NULL);
 
 		if (now >= deadline)
 			return 0;
 		list[0] = socket;
+		errors[0] = socket;
 		/* (a second at a time: the deadline is in whole seconds) */
 		if (writing)
-			result = posix_socket_select(NULL, &none, list, &count, NULL, &none, 1, 0, 0);
+			result = posix_socket_select(NULL, &none, list, &count, errors, &error_count, 1, 0, 0);
 		else
 			result = posix_socket_select(list, &count, NULL, &none, NULL, &none, 1, 0, 0);
 		if (result < 0)
+			return 0;
+		/* port: a connect that failed is in the error set, as Winsock has it
+		(and not writable: once its error is read, it would look so) */
+		if (writing && result > 0 && error_count > 0)
 			return 0;
 		if (result > 0 && count > 0)
 			return 1;
@@ -381,13 +405,14 @@ static long dechunk(const char *raw, size_t size, char *body, int capacity)
 	return (long)total;
 }
 
-/* ---------- the request */
+/* ---------- the connection made */
 
-int posix_https_get(const char *url_text, const char *user_agent, char *body, int capacity, char *error, int error_size)
+/* url's host looked up, connected to and (https) its certificate checked
+in TLS's handshake, by connection->deadline; 1, else 0 with why in error
+(the caller frees connection and config either way: connection_close) */
+static int connection_open(const struct url *url, struct connection *connection, mbedtls_ssl_config *config,
+	char *error, int error_size)
 {
-	struct url url;
-	struct connection connection;
-	mbedtls_ssl_config config;
 	struct
 	{
 		unsigned short family, port;
@@ -395,6 +420,127 @@ int posix_https_get(const char *url_text, const char *user_agent, char *body, in
 		unsigned char zero[8];
 	} address;
 	posix_ulong ip;
+
+	if (url->tls)
+	{
+		pthread_once(&roots_once, roots_load);
+		if (!crypto_ready || !roots_ready)
+		{
+			snprintf(error, (size_t)error_size, "TLS not available");
+			return 0;
+		}
+	}
+	ip = posix_resolve_ipv4(url->host);
+	if (!ip)
+	{
+		char why[64];
+
+		posix_resolve_error(why, sizeof(why));
+		snprintf(error, (size_t)error_size, "cannot look up %s (%s)", url->host, why);
+		return 0;
+	}
+	connection->socket = posix_socket(2 /* AF_INET */, 1 /* SOCK_STREAM */, 0);
+	if (connection->socket < 0)
+	{
+		snprintf(error, (size_t)error_size, "no socket (%d)", posix_socket_last_error());
+		return 0;
+	}
+	posix_socket_set_nonblocking(connection->socket, 1);
+	memset(&address, 0, sizeof(address));
+	address.family = 2;
+	address.port = (unsigned short)(url->port >> 8 | (url->port & 0xff) << 8);
+	address.address = ip;
+	if (posix_socket_connect(connection->socket, &address, sizeof(address)) < 0)
+	{
+		int code = posix_socket_last_error();
+
+		time_t connect_deadline = time(NULL) + CONNECT_TIMEOUT_SECONDS;
+
+		if (connect_deadline > connection->deadline)
+			connect_deadline = connection->deadline;
+		if ((code != WSAEWOULDBLOCK && code != WSAEINPROGRESS) || !socket_wait(connection->socket, 1, connect_deadline))
+		{
+			snprintf(error, (size_t)error_size, "cannot connect to %s (%d)", url->host, code);
+			return 0;
+		}
+		/* port: a refused connection is writable too: its own error says so */
+		{
+			int socket_error = 0, length = (int)sizeof(socket_error);
+
+			if (posix_socket_getsockopt(connection->socket, 0xffff /* SOL_SOCKET */, 0x1007 /* SO_ERROR */, &socket_error,
+				&length) == 0 && socket_error)
+			{
+				snprintf(error, (size_t)error_size, "cannot connect to %s (%d)", url->host, socket_error);
+				return 0;
+			}
+		}
+	}
+	if (url->tls)
+	{
+		int code;
+
+		if (mbedtls_ssl_config_defaults(config, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
+			MBEDTLS_SSL_PRESET_DEFAULT) != 0)
+		{
+			snprintf(error, (size_t)error_size, "TLS set-up failed");
+			return 0;
+		}
+		mbedtls_ssl_conf_min_tls_version(config, MBEDTLS_SSL_VERSION_TLS1_2);
+		mbedtls_ssl_conf_authmode(config, MBEDTLS_SSL_VERIFY_REQUIRED);
+		mbedtls_ssl_conf_ca_chain(config, &roots, NULL);
+		mbedtls_ssl_conf_rng(config, random_bytes, NULL);
+		if (mbedtls_ssl_setup(&connection->ssl, config) != 0 || mbedtls_ssl_set_hostname(&connection->ssl, url->host) != 0)
+		{
+			snprintf(error, (size_t)error_size, "TLS set-up failed");
+			return 0;
+		}
+		mbedtls_ssl_set_bio(&connection->ssl, connection, bio_send, bio_receive, NULL);
+		while ((code = mbedtls_ssl_handshake(&connection->ssl)) != 0)
+		{
+			if (code == MBEDTLS_ERR_SSL_WANT_READ || code == MBEDTLS_ERR_SSL_WANT_WRITE)
+				continue;
+			{
+				unsigned int flags = mbedtls_ssl_get_verify_result(&connection->ssl);
+				char why[128];
+
+				if (code == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED && flags != (unsigned int)-1 && flags)
+				{
+					mbedtls_x509_crt_verify_info(why, sizeof(why), "", flags);
+					why[strcspn(why, "\n")] = 0;
+					snprintf(error, (size_t)error_size, "%s's certificate refused: %s", url->host, why);
+				}
+				else
+				{
+					mbedtls_strerror(code, why, sizeof(why));
+					snprintf(error, (size_t)error_size, "TLS handshake with %s failed: %s", url->host, why);
+				}
+			}
+			return 0;
+		}
+		connection->tls = 1;
+	}
+	return 1;
+}
+
+static void connection_close(struct connection *connection, mbedtls_ssl_config *config)
+{
+	if (connection->tls)
+		mbedtls_ssl_close_notify(&connection->ssl);
+	mbedtls_ssl_free(&connection->ssl);
+	mbedtls_ssl_config_free(config);
+	if (connection->socket >= 0)
+		posix_socket_close(connection->socket);
+	connection->socket = -1;
+	connection->tls = 0;
+}
+
+/* ---------- the request */
+
+int posix_https_get(const char *url_text, const char *user_agent, char *body, int capacity, char *error, int error_size)
+{
+	struct url url;
+	struct connection connection;
+	mbedtls_ssl_config config;
 	char request[PATH_MAXIMUM + HOST_MAXIMUM + 512];
 	char *raw = NULL;
 	size_t raw_size = 0, raw_capacity;
@@ -416,93 +562,8 @@ int posix_https_get(const char *url_text, const char *user_agent, char *body, in
 	connection.deadline = time(NULL) + TIMEOUT_SECONDS;
 	mbedtls_ssl_init(&connection.ssl);
 	mbedtls_ssl_config_init(&config);
-	if (url.tls)
-	{
-		pthread_once(&roots_once, roots_load);
-		if (!crypto_ready || !roots_ready)
-		{
-			snprintf(error, (size_t)error_size, "TLS not available");
-			goto done;
-		}
-	}
-	ip = posix_resolve_ipv4(url.host);
-	if (!ip)
-	{
-		char why[64];
-
-		posix_resolve_error(why, sizeof(why));
-		snprintf(error, (size_t)error_size, "cannot look up %s (%s)", url.host, why);
+	if (!connection_open(&url, &connection, &config, error, error_size))
 		goto done;
-	}
-	connection.socket = posix_socket(2 /* AF_INET */, 1 /* SOCK_STREAM */, 0);
-	if (connection.socket < 0)
-	{
-		snprintf(error, (size_t)error_size, "no socket (%d)", posix_socket_last_error());
-		goto done;
-	}
-	posix_socket_set_nonblocking(connection.socket, 1);
-	memset(&address, 0, sizeof(address));
-	address.family = 2;
-	address.port = (unsigned short)(url.port >> 8 | (url.port & 0xff) << 8);
-	address.address = ip;
-	if (posix_socket_connect(connection.socket, &address, sizeof(address)) < 0)
-	{
-		int code = posix_socket_last_error();
-
-		time_t connect_deadline = time(NULL) + CONNECT_TIMEOUT_SECONDS;
-
-		if (connect_deadline > connection.deadline)
-			connect_deadline = connection.deadline;
-		if ((code != WSAEWOULDBLOCK && code != WSAEINPROGRESS) || !socket_wait(connection.socket, 1, connect_deadline))
-		{
-			snprintf(error, (size_t)error_size, "cannot connect to %s (%d)", url.host, code);
-			goto done;
-		}
-	}
-	if (url.tls)
-	{
-		int code;
-
-		if (mbedtls_ssl_config_defaults(&config, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
-			MBEDTLS_SSL_PRESET_DEFAULT) != 0)
-		{
-			snprintf(error, (size_t)error_size, "TLS set-up failed");
-			goto done;
-		}
-		mbedtls_ssl_conf_min_tls_version(&config, MBEDTLS_SSL_VERSION_TLS1_2);
-		mbedtls_ssl_conf_authmode(&config, MBEDTLS_SSL_VERIFY_REQUIRED);
-		mbedtls_ssl_conf_ca_chain(&config, &roots, NULL);
-		mbedtls_ssl_conf_rng(&config, random_bytes, NULL);
-		if (mbedtls_ssl_setup(&connection.ssl, &config) != 0 || mbedtls_ssl_set_hostname(&connection.ssl, url.host) != 0)
-		{
-			snprintf(error, (size_t)error_size, "TLS set-up failed");
-			goto done;
-		}
-		mbedtls_ssl_set_bio(&connection.ssl, &connection, bio_send, bio_receive, NULL);
-		while ((code = mbedtls_ssl_handshake(&connection.ssl)) != 0)
-		{
-			if (code == MBEDTLS_ERR_SSL_WANT_READ || code == MBEDTLS_ERR_SSL_WANT_WRITE)
-				continue;
-			{
-				unsigned int flags = mbedtls_ssl_get_verify_result(&connection.ssl);
-				char why[128];
-
-				if (code == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED && flags != (unsigned int)-1 && flags)
-				{
-					mbedtls_x509_crt_verify_info(why, sizeof(why), "", flags);
-					why[strcspn(why, "\n")] = 0;
-					snprintf(error, (size_t)error_size, "%s's certificate refused: %s", url.host, why);
-				}
-				else
-				{
-					mbedtls_strerror(code, why, sizeof(why));
-					snprintf(error, (size_t)error_size, "TLS handshake with %s failed: %s", url.host, why);
-				}
-			}
-			goto done;
-		}
-		connection.tls = 1;
-	}
 	request_length = snprintf(request, sizeof(request),
 		"GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: application/vnd.github+json\r\n"
 		"X-GitHub-Api-Version: 2022-11-28\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
@@ -659,12 +720,344 @@ done:
 	/* (nothing of a failed response is left for the caller) */
 	if (result < 0)
 		memset(body, 0, (size_t)capacity);
-	if (connection.tls)
-		mbedtls_ssl_close_notify(&connection.ssl);
-	mbedtls_ssl_free(&connection.ssl);
-	mbedtls_ssl_config_free(&config);
-	if (connection.socket >= 0)
-		posix_socket_close(connection.socket);
+	connection_close(&connection, &config);
 	free(raw);
 	return result;
+}
+
+/* ---------- a file downloaded (posix_https_download) */
+
+#define IDLE_TIMEOUT_SECONDS 30
+#define REDIRECT_MAXIMUM 5
+#define URL_MAXIMUM (8 + HOST_MAXIMUM + 7 + PATH_MAXIMUM + 1)
+
+enum
+{
+	DOWNLOAD_FAILED = 0,
+	DOWNLOAD_DONE = 1,
+	DOWNLOAD_CANCELLED = -1,
+	DOWNLOAD_REDIRECT = 2,
+};
+
+/* a decimal number (1-10 digits, nothing else) of the length bytes at text:
+1, else 0 */
+static int read_decimal(const char *text, size_t length, unsigned long long *value)
+{
+	size_t index;
+
+	*value = 0;
+	if (!length || length > 10)
+		return 0;
+	for (index = 0; index < length; index++)
+	{
+		if (text[index] < '0' || text[index] > '9')
+			return 0;
+		*value = *value * 10 + (unsigned long long)(text[index] - '0');
+	}
+	return 1;
+}
+
+/* "bytes <first>-<last>/<total>": 1, else 0 */
+static int read_content_range(const char *text, size_t length, unsigned long long *first, unsigned long long *last,
+	unsigned long long *total)
+{
+	const char *dash, *slash, *end = text + length;
+
+	if (length < 6 || memcmp(text, "bytes ", 6))
+		return 0;
+	text += 6;
+	dash = memchr(text, '-', (size_t)(end - text));
+	slash = dash ? memchr(dash, '/', (size_t)(end - dash)) : NULL;
+	return dash && slash && read_decimal(text, (size_t)(dash - text), first) &&
+		read_decimal(dash + 1, (size_t)(slash - dash - 1), last) && read_decimal(slash + 1, (size_t)(end - slash - 1), total);
+}
+
+/* the size of the file at path, 0 when there is none */
+static unsigned long long file_size(const char *path)
+{
+	FILE *file = fopen(path, "rb");
+	long size;
+
+	if (!file)
+		return 0;
+	size = fseek(file, 0, SEEK_END) == 0 ? ftell(file) : -1;
+	fclose(file);
+	return size > 0 ? (unsigned long long)size : 0;
+}
+
+/* one request for url: DOWNLOAD_DONE, _CANCELLED, _FAILED (why in error) or
+_REDIRECT with where in next (URL_MAXIMUM bytes) */
+static int download_once(const char *url_text, const char *user_agent, const char *path, posix_ulong expected_size,
+	posix_ulong maximum, posix_https_progress_proc progress, void *context, char *next, char *error, int error_size)
+{
+	struct url url;
+	struct connection connection;
+	mbedtls_ssl_config config;
+	char request[PATH_MAXIMUM + HOST_MAXIMUM + 512], range[48] = "", host[HOST_MAXIMUM + 8];
+	char header[HEADER_MAXIMUM + 1];
+	unsigned char buffer[16384];
+	size_t header_size = 0;
+	long header_end = -1;
+	unsigned long long have = 0, content_length = 0, total, received = 0;
+	unsigned long long range_first = 0, range_last = 0, range_total = 0;
+	int status = 0, has_length = 0, chunked = 0, has_range = 0, request_length, result = DOWNLOAD_FAILED;
+	const char *location = NULL;
+	size_t location_length = 0;
+	FILE *file = NULL;
+
+	if (!url_parse(url_text, &url, error, error_size))
+		return DOWNLOAD_FAILED;
+	/* (what is there already: kept and resumed when its size is known) */
+	if (expected_size)
+	{
+		have = file_size(path);
+		if (have == expected_size)
+			return DOWNLOAD_DONE;
+		if (have > expected_size)
+			have = 0;
+	}
+	memset(&connection, 0, sizeof(connection));
+	connection.socket = -1;
+	connection.deadline = time(NULL) + TIMEOUT_SECONDS;
+	mbedtls_ssl_init(&connection.ssl);
+	mbedtls_ssl_config_init(&config);
+	if (!connection_open(&url, &connection, &config, error, error_size))
+		goto done;
+	connection.deadline = time(NULL) + IDLE_TIMEOUT_SECONDS;
+	if (have)
+		snprintf(range, sizeof(range), "Range: bytes=%llu-\r\n", have);
+	if (url.port != (url.tls ? 443 : 80))
+		snprintf(host, sizeof(host), "%s:%u", url.host, (unsigned int)url.port);
+	else
+		snprintf(host, sizeof(host), "%s", url.host);
+	request_length = snprintf(request, sizeof(request),
+		"GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: application/octet-stream\r\n"
+		"Accept-Encoding: identity\r\n%sConnection: close\r\n\r\n", url.path, host, user_agent, range);
+	if (request_length <= 0 || request_length >= (int)sizeof(request) ||
+		!connection_write(&connection, request, (size_t)request_length))
+	{
+		snprintf(error, (size_t)error_size, "cannot send the request");
+		goto done;
+	}
+	/* the headers (and whatever of the body came with them) */
+	while (header_end < 0)
+	{
+		int count;
+		char *end;
+
+		if (header_size >= HEADER_MAXIMUM)
+		{
+			snprintf(error, (size_t)error_size, "headers too large");
+			goto done;
+		}
+		count = connection_read(&connection, header + header_size, HEADER_MAXIMUM - header_size);
+		if (count <= 0)
+		{
+			snprintf(error, (size_t)error_size, count < 0 && time(NULL) >= connection.deadline ? "timed out" :
+				"connection lost");
+			goto done;
+		}
+		header_size += (size_t)count;
+		header[header_size] = 0;
+		end = strstr(header, "\r\n\r\n");
+		if (end)
+			header_end = (long)(end - header) + 4;
+	}
+	if (strncmp(header, "HTTP/1.", 7) || sscanf(header + 8, " %3d", &status) != 1)
+	{
+		snprintf(error, (size_t)error_size, "not an HTTP response");
+		goto done;
+	}
+	{
+		const char *line = strstr(header, "\r\n") + 2, *end = header + header_end - 2;
+
+		while (line < end)
+		{
+			const char *line_end = strstr(line, "\r\n");
+			size_t length = (size_t)(line_end - line), value_length;
+			const char *value;
+
+			if (header_is(line, length, "content-length"))
+			{
+				value = header_value(line, length, &value_length);
+				if (has_length || !read_decimal(value, value_length, &content_length))
+				{
+					snprintf(error, (size_t)error_size, "bad Content-Length");
+					goto done;
+				}
+				has_length = 1;
+			}
+			else if (header_is(line, length, "transfer-encoding"))
+				chunked = 1;
+			else if (header_is(line, length, "location"))
+			{
+				if (location)
+				{
+					snprintf(error, (size_t)error_size, "two Locations");
+					goto done;
+				}
+				location = header_value(line, length, &location_length);
+			}
+			else if (header_is(line, length, "content-range"))
+			{
+				value = header_value(line, length, &value_length);
+				if (has_range || !read_content_range(value, value_length, &range_first, &range_last, &range_total))
+				{
+					snprintf(error, (size_t)error_size, "bad Content-Range");
+					goto done;
+				}
+				has_range = 1;
+			}
+			line = line_end + 2;
+		}
+	}
+	if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
+	{
+		if (!location || !location_length || location_length >= URL_MAXIMUM)
+		{
+			snprintf(error, (size_t)error_size, "a redirect without a usable Location");
+			goto done;
+		}
+		memcpy(next, location, location_length);
+		next[location_length] = 0;
+		result = DOWNLOAD_REDIRECT;
+		goto done;
+	}
+	if (status == 200)
+		have = 0;
+	else if (status == 206 && have)
+	{
+		/* (exactly the rest asked for) */
+		if (!has_range || range_first != have || range_last + 1 != range_total || !has_length ||
+			content_length != range_total - have)
+		{
+			snprintf(error, (size_t)error_size, "the server sent another part than the one asked for");
+			goto done;
+		}
+	}
+	else
+	{
+		snprintf(error, (size_t)error_size, "the server answered %d", status);
+		goto done;
+	}
+	if (chunked || !has_length)
+	{
+		snprintf(error, (size_t)error_size, chunked ? "a chunked download" : "no Content-Length");
+		goto done;
+	}
+	total = have + content_length;
+	if (total > maximum)
+	{
+		snprintf(error, (size_t)error_size, "the file is too large (%llu bytes)", total);
+		goto done;
+	}
+	if (expected_size && total != expected_size)
+	{
+		snprintf(error, (size_t)error_size, "the file is %llu bytes, not %lu", total, (unsigned long)expected_size);
+		goto done;
+	}
+	file = fopen(path, have ? "r+b" : "wb");
+	if (!file || (have && fseek(file, (long)have, SEEK_SET) != 0))
+	{
+		snprintf(error, (size_t)error_size, "cannot write %s", path);
+		goto done;
+	}
+	/* the body: what came with the headers, then the rest as it comes */
+	{
+		size_t already = header_size - (size_t)header_end;
+
+		if (already > content_length)
+			already = (size_t)content_length;
+		if (already && fwrite(header + header_end, 1, already, file) != already)
+		{
+			snprintf(error, (size_t)error_size, "cannot write %s (is the memory card full?)", path);
+			goto done;
+		}
+		received = already;
+	}
+	if (progress && progress(context, (posix_ulong)(have + received), (posix_ulong)total))
+	{
+		result = DOWNLOAD_CANCELLED;
+		goto done;
+	}
+	while (received < content_length)
+	{
+		unsigned long long left = content_length - received;
+		int count = connection_read(&connection, (char *)buffer, left < sizeof(buffer) ? (size_t)left : sizeof(buffer));
+
+		if (count <= 0)
+		{
+			snprintf(error, (size_t)error_size, count < 0 && time(NULL) >= connection.deadline ? "timed out" :
+				"connection lost");
+			goto done;
+		}
+		connection.deadline = time(NULL) + IDLE_TIMEOUT_SECONDS;
+		if (fwrite(buffer, 1, (size_t)count, file) != (size_t)count)
+		{
+			snprintf(error, (size_t)error_size, "cannot write %s (is the memory card full?)", path);
+			goto done;
+		}
+		received += (unsigned long long)count;
+		if (progress && progress(context, (posix_ulong)(have + received), (posix_ulong)total))
+		{
+			result = DOWNLOAD_CANCELLED;
+			goto done;
+		}
+	}
+	if (fclose(file) != 0)
+	{
+		file = NULL;
+		snprintf(error, (size_t)error_size, "cannot write %s (is the memory card full?)", path);
+		goto done;
+	}
+	file = NULL;
+	result = DOWNLOAD_DONE;
+
+done:
+	if (file)
+		fclose(file);
+	connection_close(&connection, &config);
+	return result;
+}
+
+int posix_https_download(const char *url, const char *user_agent, const char *path, posix_ulong expected_size,
+	posix_ulong maximum, posix_https_redirect_proc redirect_allowed, posix_https_progress_proc progress, void *context,
+	char *error, int error_size)
+{
+	char current[URL_MAXIMUM], next[URL_MAXIMUM];
+	int redirects;
+
+	error[0] = 0;
+	if (!url || !path || !user_agent || strlen(user_agent) > 128 || strpbrk(user_agent, "\r\n") ||
+		strlen(url) >= sizeof(current))
+	{
+		snprintf(error, (size_t)error_size, "bad arguments");
+		return 0;
+	}
+	snprintf(current, sizeof(current), "%s", url);
+	for (redirects = 0;; redirects++)
+	{
+		int result = download_once(current, user_agent, path, expected_size, maximum, progress, context, next, error,
+			error_size);
+
+		if (result != DOWNLOAD_REDIRECT)
+			return result;
+		if (redirects >= REDIRECT_MAXIMUM)
+		{
+			snprintf(error, (size_t)error_size, "too many redirects");
+			return 0;
+		}
+		/* (only where the caller allows: never a host taken on trust) */
+		if (!redirect_allowed || !redirect_allowed(current, next))
+		{
+			char shown[80];
+			const char *host = strstr(next, "://");
+
+			snprintf(shown, sizeof(shown), "%.79s", host ? host + 3 : next);
+			shown[strcspn(shown, "/?")] = 0;
+			snprintf(error, (size_t)error_size, "a redirect to a place not allowed (%s)", shown);
+			return 0;
+		}
+		memcpy(current, next, sizeof(current));
+	}
 }

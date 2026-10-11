@@ -18,7 +18,8 @@ play, or no address) the look stops before any request: "no connection".
 
 (tests) HALO_UPDATE_URL asks another URL instead of GitHub's - only an
 http:// one to this machine (127.x.x.x, the tests' server) or another of
-api.github.com.
+api.github.com; on the Vita only in a test build (HALO_UPDATE_TEST_SOURCES:
+configure.py --vita-update-test-sources), never in a release build.
 */
 
 #include "lang.h"
@@ -46,6 +47,8 @@ static int update_status = UPDATE_STATUS_NONE;
 static int update_status_channel;
 static char update_version[UPDATE_VERSION_SIZE];
 static int update_menu_logged;
+/* a downloaded and verified update waiting to be installed (the Vita's) */
+static char update_ready[UPDATE_VERSION_SIZE];
 
 /* the Update channel: the setting, unless this build may not use it (a
 pre-release on Stable: Experimental, said once) */
@@ -149,6 +152,22 @@ static const char *request_url(int channel, int *loopback)
 	const char *test = getenv("HALO_UPDATE_URL");
 
 	*loopback = 0;
+	/* port: on the Vita only a test build (HALO_UPDATE_TEST_SOURCES,
+	tools/release/README.md) takes another URL; a release build asks
+	BirchWoodGod/halo-ce-vita's releases alone */
+#if defined(__vita__) && !defined(HALO_UPDATE_TEST_SOURCES)
+	if (test && *test)
+	{
+		static int ignored_logged;
+
+		if (!ignored_logged)
+		{
+			ignored_logged = 1;
+			platform_log("update: HALO_UPDATE_URL is for test builds: GitHub's is asked");
+		}
+		test = NULL;
+	}
+#endif
 	if (test && *test)
 	{
 		if (!strncmp(test, "http://127.", 11))
@@ -304,19 +323,34 @@ int update_check_status(char *version, int size)
 	return status;
 }
 
+void update_check_set_ready(const char *version)
+{
+	pthread_mutex_lock(&update_lock);
+	snprintf(update_ready, sizeof(update_ready), "%s", version ? version : "");
+	update_menu_logged = 0;
+	pthread_mutex_unlock(&update_lock);
+}
+
 int update_check_menu_text(unsigned short *text, int count)
 {
-	char version[UPDATE_VERSION_SIZE], line[160];
+	char version[UPDATE_VERSION_SIZE], ready[UPDATE_VERSION_SIZE], line[160];
 	const unsigned char *cursor;
 	int length = 0;
 
 	if (count <= 0)
 		return 0;
 	text[0] = 0;
-	if (update_check_status(version, sizeof(version)) != UPDATE_STATUS_AVAILABLE)
+	pthread_mutex_lock(&update_lock);
+	snprintf(ready, sizeof(ready), "%s", update_ready);
+	pthread_mutex_unlock(&update_lock);
+	/* (short: the build number's text box is about 24 characters wide; the
+	panel says where the file is) */
+	if (ready[0] && update_is_newer(ready, HALO_VITA_VERSION))
+		snprintf(line, sizeof(line), T("To install: %s"), ready);
+	else if (update_check_status(version, sizeof(version)) == UPDATE_STATUS_AVAILABLE)
+		snprintf(line, sizeof(line), T("Update: %s"), version);
+	else
 		return 0;
-	/* (short: the build number's text box is about 24 characters wide) */
-	snprintf(line, sizeof(line), T("Update: %s"), version);
 	if (!update_menu_logged)
 	{
 		update_menu_logged = 1;

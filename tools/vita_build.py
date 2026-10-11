@@ -144,6 +144,26 @@ VITA_LIBRARIES = [
 ]
 
 
+def vita_update_test_defines(sln: Any) -> List[str]:
+    """configure.py's --vita-update-test-sources, --vita-update-key and
+    --vita-version: the defines of a TEST build of the updater
+    (tools/release/README.md), none for a release"""
+    defines = []
+    if getattr(sln, "vita_update_test_sources", False):
+        defines.append("-DHALO_UPDATE_TEST_SOURCES=1")
+    key = getattr(sln, "vita_update_key", None)
+    if key:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", key) or not key.strip("0"):
+            raise RuntimeError("--vita-update-key: 64 hexadecimal digits, not all zero")
+        defines.append(f'-DHALO_UPDATE_PUBLIC_KEY=\\"{key.lower()}\\"')
+    version = getattr(sln, "vita_version", None)
+    if version:
+        if not re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}(-(beta|rc)\.\d{1,3})?", version):
+            raise RuntimeError("--vita-version: x.y.z, x.y.z-beta.n or x.y.z-rc.n")
+        defines.append(f'-DHALO_VITA_VERSION=\\"{version}\\"')
+    return defines
+
+
 def vita_sdk(sln: Any) -> Path:
     explicit = getattr(sln, "vita_sdk", None) or os.environ.get("VITASDK")
     return Path(explicit) if explicit else Path.home() / "vitasdk"
@@ -213,9 +233,12 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     )
 
     lto = getattr(sln, "port_lto", "off") != "off"
+    test_defines = vita_update_test_defines(sln)
+    if test_defines:
+        n.comment("TEST BUILD of the updater (not for release): " + " ".join(test_defines))
     abi = " ".join(VITA_ABI_FLAGS + [f"--sysroot={_quote(sysroot)}", f"-isystem {_quote(sysroot / 'include')}"] +
                    (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []) +
-                   (["-flto"] if lto else []))
+                   (["-flto"] if lto else []) + test_defines)
     port_include = LINUX_DIR / "include"
     vita_include = VITA_DIR / "include"
     sdk_flags = f"-idirafter {XDK_INCLUDE}"
@@ -307,9 +330,12 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
 
     # the Vita side, with the SDK's ABI
     host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}", f"-I{generator_header.parent}",
-                                         f"-I{TLSF_DIR}"])
+                                         f"-I{TLSF_DIR}"] + test_defines)
+    # (the updater's checks: Monocypher's Ed25519 and SHA-512, built above)
+    updater_cflags = " ".join([host_cflags, f"-I{MONOCYPHER_DIR}"])
     for source in sorted((VITA_DIR / "host").glob("*.c")):
-        add(source, "vita_host_cc", host_cflags, [generator_header] if source.name == "vita_gxm.c" else None)
+        cflags = updater_cflags if source.name.startswith("vita_update") else host_cflags
+        add(source, "vita_host_cc", cflags, [generator_header] if source.name == "vita_gxm.c" else None)
     # the shader compiler's heap (vita_gxm.c): port/third_party/tlsf
     add(TLSF_DIR / "tlsf.c", "vita_host_cc", " ".join(HOST_FLAGS + ["-DNDEBUG", "-w"]))
     # the update check's HTTPS request (port/linux/src/posix_https.c) and its
