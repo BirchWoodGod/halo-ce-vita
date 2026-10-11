@@ -437,34 +437,47 @@ version loads as it is).
 ### Graphics
 
 The **Profile** row at the top sets the speed-related rows together:
-**Performance**, **Balanced** (the defaults) or **Quality** (the game as on
-the Xbox, but for the resolution and the AI's think rate). All three use
-Dynamic resolution, each with its own minimum. Changing one of those rows
-yourself makes the profile **Custom**. A settings file saved with a profile
-by an older version loads as that profile with these values.
+**Performance**, **Balanced** (the defaults) or **Quality** (the best look
+that stays playable on the Vita). All three use Dynamic resolution, each
+with its own minimum. Changing one of those rows yourself makes the profile
+**Custom**. A settings file saved with a profile by an older version loads
+as that profile with these values.
 
 | Setting | Performance | Balanced (default) | Quality |
 | --- | --- | --- | --- |
 | Render resolution | Dynamic | Dynamic | Dynamic |
 | Dynamic minimum | 50% | 63% | 75% |
-| Model detail | Low | Low | High |
-| Hide distant objects | Small | Small | Off |
-| Scenery updates | Quarter | Quarter | Every tick |
-| Object lighting | Third | Third | Full |
-| Object shadows | Off | Near only | Full |
-| Dynamic lights | 4 | 8 | All |
+| Particles | Reduced | Reduced | Reduced |
+| Model detail | Low | Medium | High |
+| Hide distant objects | Small | Small | Tiny |
+| Object shadows | Off | Off | Near only |
+| Dynamic lights | 4 | 4 | 8 |
 | Effects quality | Performance | Full | Full |
 | Particle density | Half | Full | Full |
-| Sun rays | Off | On | On |
+| Sun rays | Off | Off | On |
+| Scenery updates | Quarter | Quarter | Half |
+| Object lighting | Third | Third | Half |
 | AI think rate | Adaptive | Adaptive | Adaptive |
-| Sound occlusion | Every 6th | Every 3rd | Every tick |
+| Sound occlusion | Every 6th | Every 3rd | Every 3rd |
 | Sound updates | Every 2nd | Every 2nd | Every frame |
-| Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
+| Best for | the biggest fights, 60 FPS | most of the game | quiet areas, cinematics, screenshots |
+
+Balanced costs the Vita about what Performance does: it adds nothing that
+gives the graphics chip extra passes, only reflections, shine and grass,
+every particle drawn, better models and a sharper picture. Object shadows
+and Sun rays are the slow extras on the Vita: each is a set of small extra
+scenes for the graphics chip every frame, so they are in Quality only.
+Quality also costs the processor up to about a tenth more than
+Performance in big fights (Particles Full adds as much again in big
+multiplayer fights, so it is Reduced in all three). The Xbox's every row (Full shadows, all lights, everything
+updated every tick) is too slow on the Vita; set it yourself under Advanced
+if you want it (Custom).
 
 Object shadows, Dynamic lights, Effects quality, Particle density, AI think
 rate, Sound updates and the fourth core's helpers come from **Bruno
-Santana**'s modified build of this port. Balanced and Performance think less
-often for far-off enemies and update the sounds every other frame, so a
+Santana**'s modified build of this port. All three profiles think less often
+for far-off enemies, and Balanced and Performance update the sounds every
+other frame, so a
 fight plays a little differently from the Xbox's; the shadows, lights,
 effects and particles change only what is drawn. None of them drops
 see-through parts such as the Covenant field generators' domes or visors.
@@ -526,8 +539,9 @@ one test a firefight went from about 16 fps at 75% to about 26 fps at 50%
 (the Performance profile's Dynamic minimum).
 
 What helps, in the settings panel: the **Performance** profile; **Render
-resolution** Dynamic with a lower **Dynamic minimum**, or 50%; **Model detail** Low or Lowest; **Hide distant
-objects** Small or Medium; **Sun rays** Off; **Sound voices** 16. Keep
+resolution** Dynamic with a lower **Dynamic minimum**, or 50%; **Object shadows** Off and **Sun rays** Off
+(extra scenes for the graphics chip); **Particles** Reduced (the processor's work in big multiplayer fights);
+**Model detail** Low or Lowest; **Hide distant objects** Small or Medium; **Sound voices** 16. Keep
 **Smooth weapon motion** on: it makes the frame rate feel steadier.
 
 ### More performance with plugins (optional)

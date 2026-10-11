@@ -102,7 +102,7 @@ static const struct config_setting config_settings[] =
 		"Draw a frame for every display refresh, blending between the game's 30\n"
 		"ticks a second; false keeps the original 30 frames a second." },
 	/* (port/linux/game/particle_budget.c; the Vita's settings panel's
-	Particles row, Reduced in its Performance profile) */
+	Particles row, Reduced in all three of its profiles) */
 	{ "graphics.particles", _config_string, "\"full\"", "HALO_PARTICLE_BUDGET", _environment_value, _platform_all,
 		"The particles a fight's effects make: \"full\" (the Xbox's), \"reduced\" or\n"
 		"\"low\": fewer sparks, smoke, dust and debris, gone sooner; muzzle\n"
