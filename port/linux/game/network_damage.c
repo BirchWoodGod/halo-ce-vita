@@ -56,6 +56,7 @@ being hit looks and feels like on the clients).
 #include "scenario/scenario.h"
 #include "units/units.h"
 #include "network_distributed.h"
+#include "network_wire.h"
 
 #include <math.h>
 
@@ -1162,25 +1163,33 @@ static short distributed_grenade_throw(
 /* whether an explosion of the type of grenade is among the player's this
 tick (distributed_report_paid), of any damage the grenade deals (one
 explosion deals more than one, each reported: a frag grenade's explosion
-and its shock wave): at the epicenter, or (NULL) anywhere */
+and its shock wave): at the epicenter, or (NULL) anywhere. That is OpenCE's
+check (792711ca) and the crossplay wire's (network_wire.h); on the legacy
+Vita wire it is the betas' (and so a beta's host and a newer one agree):
+an explosion of the damage reported itself (damage_index) */
 static boolean distributed_explosion_this_tick(
 	short player_index,
 	short grenade_type,
+	long damage_index,
 	real_point3d const *epicenter)
 {
 	struct game_globals_grenade *grenade = TAG_BLOCK_GET_ELEMENT(&scenario_get_game_globals()->grenades,
 		grenade_type, struct game_globals_grenade);
+	boolean crossplay = network_wire_crossplay() != 0;
 	short index;
 
-	if (damage_explosions[player_index].time != game_time_get() || grenade->projectile.index == NONE)
+	if (damage_explosions[player_index].time != game_time_get() || (crossplay && grenade->projectile.index == NONE))
 		return FALSE;
 	for (index = 0; index < damage_explosions[player_index].count; index++)
 	{
 		byte kinds;
 		struct damage_reach reach;
+		boolean of_it = crossplay
+			? distributed_source_deals(grenade->projectile.index,
+				damage_explosions[player_index].explosions[index].definition_index, TRUE, &kinds, &reach) > 0.0f
+			: damage_explosions[player_index].explosions[index].definition_index == damage_index;
 
-		if (distributed_source_deals(grenade->projectile.index,
-				damage_explosions[player_index].explosions[index].definition_index, TRUE, &kinds, &reach) > 0.0f &&
+		if (of_it &&
 			(!epicenter || (damage_explosions[player_index].explosions[index].epicenter.x == epicenter->x &&
 				damage_explosions[player_index].explosions[index].epicenter.y == epicenter->y &&
 				damage_explosions[player_index].explosions[index].epicenter.z == epicenter->z)))
@@ -1253,7 +1262,7 @@ static real distributed_player_deals(
 			struct game_globals_grenade);
 		boolean thrown = distributed_grenade_throw(player_index, index) != NONE;
 
-		if ((thrown || distributed_explosion_this_tick(player_index, index, NULL)) &&
+		if ((thrown || distributed_explosion_this_tick(player_index, index, damage_index, NULL)) &&
 			grenade->projectile.index != NONE)
 		{
 			byte this_kinds;
@@ -1834,7 +1843,8 @@ static boolean distributed_report_valid(
 	that tick come free, distributed_report_paid, and its other damage takes
 	no throw of its own), what it hits at a point while it is about */
 	if (grenade_type != NONE &&
-		!distributed_explosion_this_tick(player_index, grenade_type, &report->damage.epicenter))
+		!distributed_explosion_this_tick(player_index, grenade_type, report->damage.definition_index,
+			&report->damage.epicenter))
 	{
 		throw_index = distributed_grenade_throw(player_index, grenade_type);
 		if (throw_index == NONE)

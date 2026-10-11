@@ -90,6 +90,11 @@ it, and a host refuses joiners of the other kind (their join tokens differ,
 network_game_generate_join_game_token); internet play's signalling topics
 differ too (p2p_signal.c) */
 #define HALO_PORT_ADVERTISED_VITA_FLAG 0x02
+/* ... on the crossplay wire (OpenCE's, network_wire.h) the same bit is
+OpenCE's "the game is under way, not in its lobby", and the bits past it
+are other projects' (ChupathingyCE's 0x04 is its Delta): a crossplay client
+reads none of this wire's own (Vita, co-op and its difficulty) */
+#define HALO_PORT_ADVERTISED_IN_PROGRESS_FLAG 0x02
 /* ... the game is co-op on a campaign level, on the difficulty in the byte
 at HALO_PORT_ADVERTISED_COOP_DIFFICULTY_OFFSET (0 to 3): the game lists show
 it by level and difficulty (a host without the flag, by its name alone) */

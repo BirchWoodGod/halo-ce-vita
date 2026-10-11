@@ -234,8 +234,9 @@ enum
 };
 
 /* the prefix of the topics, of the key derivation's label and of the MQTT
-client identifier: Vitas signal on their own (P2P_SIGNAL_PREFIX) */
-#define SIGNAL_PREFIX P2P_SIGNAL_PREFIX
+client identifier: Vitas signal on their own (P2P_SIGNAL_PREFIX), but on
+the crossplay wire on OpenCE's (P2P_CROSSPLAY_SIGNAL_PREFIX, network_wire.h) */
+#define SIGNAL_PREFIX P2P_WIRE_SIGNAL_PREFIX
 
 enum
 {
@@ -249,8 +250,13 @@ enum
 {
 	_message_join = 'J',
 	_message_accept = 'A',
-	/* 3: a JOIN proves its key before the host makes a session */
+	/* 3: a JOIN proves its key before the host makes a session (the
+	legacy Vita wire's, with this build's relays after the addresses) */
 	MESSAGE_VERSION = 3,
+	/* 4: OpenCE's (the crossplay wire's, network_wire.h): a WebRTC block
+	after the addresses, no relays; this build's always of kind none (no
+	browser player joins a Vita, nor a Vita a browser's game) */
+	CROSSPLAY_MESSAGE_VERSION = 4,
 	/* a code's record: the host's key hash and the invite's token */
 	_message_code = 'C',
 	/* 2: the record holds the key hash (1, of the older invites, held the
@@ -505,6 +511,12 @@ static int budget_left(struct budget *budget, int maximum, int interval, int spe
 	return 1;
 }
 
+/* the JOIN/ACCEPT version of this machine's wire */
+static int message_version(void)
+{
+	return network_wire_crossplay() ? CROSSPLAY_MESSAGE_VERSION : MESSAGE_VERSION;
+}
+
 /* ---------- what is derived from a token */
 
 static void derive(const unsigned char *token, const char *label, const unsigned char *identifier,
@@ -530,7 +542,10 @@ static void make_topic(const unsigned char *token, const char *label, const unsi
 
 	derive(token, label, identifier, digest);
 	p2p_hex(digest, 16, text);
-	snprintf(topic, TOPIC_SIZE, SIGNAL_PREFIX "/3/%s", text);
+	if (network_wire_crossplay())
+		snprintf(topic, TOPIC_SIZE, P2P_CROSSPLAY_SIGNAL_PREFIX "/3/%s", text);
+	else
+		snprintf(topic, TOPIC_SIZE, P2P_SIGNAL_PREFIX "/3/%s", text);
 }
 
 /* ---------- MQTT */
@@ -911,17 +926,19 @@ static int broker_carries_lobby(const struct broker *broker)
 static void broker_sync_topics(struct broker *broker)
 {
 	const char *wanted[NUMBER_OF_TOPICS];
+	char slots[TOPIC_SIZE];
 	int lobby = broker_carries_lobby(broker);
 	int index;
 
 	if (broker->state != _broker_ready)
 		return;
+	snprintf(slots, sizeof(slots), "%s+", P2P_LOBBY_SLOT_PREFIX);
 	wanted[_topic_host] = signalling.hosting ? signalling.host_topic : "";
 	wanted[_topic_join] = signalling.joining ? signalling.join_topic : "";
 	wanted[_topic_code] = signalling.looking_up ? signalling.lookup_topic : "";
 	wanted[_topic_own_slot] = lobby && signalling.lobby_listed ? signalling.own_slot : "";
 	wanted[_topic_query] = lobby && signalling.lobby_listed ? P2P_LOBBY_QUERY_TOPIC : "";
-	wanted[_topic_slots] = lobby && signalling.lobby_browsing ? P2P_LOBBY_SLOT_PREFIX "+" : "";
+	wanted[_topic_slots] = lobby && signalling.lobby_browsing ? slots : "";
 	for (index = 0; index < NUMBER_OF_TOPICS; index++)
 	{
 		char *had = broker->topics[index];
@@ -1153,6 +1170,129 @@ static int get_candidates(const unsigned char *message, int size, struct p2p_can
 	return count;
 }
 
+/* ---------- the crossplay wire's WebRTC block (OpenCE's message version 4)
+
+After the addresses OpenCE's JOIN and ACCEPT carry the machine's WebRTC
+(p2p_webrtc.c there): its kind (0 none, 1 a native build's, 2 a browser's)
+and, unless none, its certificate's hash (32), the ICE username fragment and
+password (a length byte each, then RFC 8839 ice-chars: 4 to 32, 22 to 64, or
+both empty) and its mDNS names (a count, at most 2, each a length byte, up
+to 63 characters of a ".local" name, then its port). This build has no
+WebRTC: it sends kind none (no browser player joins it), and reads a host's
+block only to check it and step past it (the tunnel stays plain UDP, as
+between OpenCE's native builds). Ported from OpenCE's p2p_signal.c
+(put_addresses, get_addresses, get_ice_text, webrtc_name_valid; 6399ed9d,
+CC0). */
+
+enum
+{
+	WEBRTC_NONE = 0,
+	WEBRTC_NATIVE = 1,
+	WEBRTC_BROWSER = 2,
+	WEBRTC_FINGERPRINT_SIZE = 32,
+	WEBRTC_MAXIMUM_NAMES = 2,
+	WEBRTC_NAME_SIZE = 64,
+	WEBRTC_UFRAG_SIZE = 33,
+	WEBRTC_PASSWORD_SIZE = 65,
+};
+
+/* this machine's block: kind none */
+static int put_webrtc_none(unsigned char *message)
+{
+	message[0] = WEBRTC_NONE;
+	return 1;
+}
+
+/* whether the length bytes at offset are an mDNS name of a browser's
+address: letters, digits and "-" before ".local" */
+static int webrtc_name_valid(const unsigned char *text, int length)
+{
+	int index;
+
+	if (length <= 6 || memcmp(text + length - 6, ".local", 6))
+		return 0;
+	for (index = 0; index < length - 6; index++)
+	{
+		unsigned char character = text[index];
+
+		if (!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '-'))
+		{
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* ICE's text (ice-char: letters, digits, "+" and "/") of a length from
+minimum to maximum, or none, after its length byte: steps past it */
+static int skip_ice_text(const unsigned char *message, int size, int *offset, int minimum, int maximum, int *length)
+{
+	int index;
+
+	if (*offset >= size)
+		return 0;
+	*length = message[(*offset)++];
+	if ((*length && (*length < minimum || *length > maximum)) || *offset + *length > size)
+		return 0;
+	for (index = 0; index < *length; index++)
+	{
+		unsigned char character = message[*offset + index];
+
+		if (!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '+' || character == '/'))
+		{
+			return 0;
+		}
+	}
+	*offset += *length;
+	return 1;
+}
+
+/* a peer's block (size bytes at most): the bytes it takes, -1 if it is not
+one OpenCE makes */
+static int skip_webrtc(const unsigned char *message, int size)
+{
+	int offset = 0;
+	int kind;
+	int ufrag, password;
+	int count;
+	int index;
+
+	if (size < 1)
+		return -1;
+	kind = message[offset++];
+	if (kind == WEBRTC_NONE)
+		return offset;
+	if ((kind != WEBRTC_NATIVE && kind != WEBRTC_BROWSER) || offset + WEBRTC_FINGERPRINT_SIZE > size)
+		return -1;
+	offset += WEBRTC_FINGERPRINT_SIZE;
+	if (!skip_ice_text(message, size, &offset, 4, WEBRTC_UFRAG_SIZE - 1, &ufrag) ||
+		!skip_ice_text(message, size, &offset, 22, WEBRTC_PASSWORD_SIZE - 1, &password) ||
+		!ufrag != !password || offset >= size)
+	{
+		return -1;
+	}
+	count = message[offset++];
+	if (count > WEBRTC_MAXIMUM_NAMES)
+		return -1;
+	for (index = 0; index < count; index++)
+	{
+		int length;
+
+		if (offset >= size)
+			return -1;
+		length = message[offset++];
+		if (length >= WEBRTC_NAME_SIZE || offset + length + 2 > size ||
+			!webrtc_name_valid(message + offset, length) || (!message[offset + length] && !message[offset + length + 1]))
+		{
+			return -1;
+		}
+		offset += length + 2;
+	}
+	return offset;
+}
+
 /* the relays a message offers, read as the addresses are (at most
 P2P_MAXIMUM_RELAYS): their count, -1 if the block is not one */
 static int get_relays(const unsigned char *message, int size, struct p2p_candidate *relays)
@@ -1174,7 +1314,7 @@ static int pair_base(const unsigned char *joiner_public, const unsigned char *ho
 
 	if (!p2p_shared_secret(other, shared))
 		return 0;
-	memcpy(data, SIGNAL_PREFIX "/2", 6);
+	memcpy(data, network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX "/2" : P2P_SIGNAL_PREFIX "/2", 6);
 	memcpy(data + 6, joiner_public, P2P_KEY_SIZE);
 	memcpy(data + 6 + P2P_KEY_SIZE, host_public, P2P_KEY_SIZE);
 	p2p_hmac_sha256(shared, P2P_KEY_SIZE, data, sizeof(data), base);
@@ -1260,13 +1400,17 @@ static void send_join_form(int with_relays)
 	int size = 0;
 
 	message[size++] = _message_join;
-	message[size++] = MESSAGE_VERSION;
+	message[size++] = (unsigned char)message_version();
 	memcpy(message + size, p2p_public_key(), P2P_KEY_SIZE);
 	size += P2P_KEY_SIZE;
 	memcpy(message + size, signalling.join_nonce, NONCE_SIZE);
 	size += NONCE_SIZE;
 	size += put_candidates(message + size);
-	if (with_relays)
+	/* (the crossplay wire: OpenCE's WebRTC block, of kind none, and never
+	this build's relays, which OpenCE's hosts refuse as trailing bytes) */
+	if (network_wire_crossplay())
+		size += put_webrtc_none(message + size);
+	else if (with_relays)
 		size += put_relays(message + size);
 	/* answered: the proof that this machine holds its key, of which the host
 	makes the session */
@@ -1291,7 +1435,7 @@ static void send_join(void)
 {
 	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
 
-	if (signalling.join_answered && p2p_local_relays(relays, P2P_MAXIMUM_RELAYS))
+	if (signalling.join_answered && !network_wire_crossplay() && p2p_local_relays(relays, P2P_MAXIMUM_RELAYS))
 		send_join_form(1);
 	send_join_form(0);
 	signalling.join_sent_time = p2p_now();
@@ -1587,10 +1731,17 @@ static void accept_received(const unsigned char *message, int size)
 	count = get_candidates(message + fixed, size - TAG_SIZE - fixed, candidates);
 	if (count < 0)
 		return;
+	rest = size - TAG_SIZE - fixed - 1 - count * 6;
+	/* (the crossplay wire: the host's WebRTC block, exactly the rest; no
+	relays) */
+	if (network_wire_crossplay())
+	{
+		if (skip_webrtc(message + fixed + 1 + count * 6, rest) != rest)
+			return;
+	}
 	/* (the host's relays, if it has any: a host of before relays sends
 	none) */
-	rest = size - TAG_SIZE - fixed - 1 - count * 6;
-	if (rest > 0)
+	else if (rest > 0)
 	{
 		relay_count = get_relays(message + fixed + 1 + count * 6, rest, relays);
 		if (relay_count < 0)
@@ -1713,10 +1864,10 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 	if (size > MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD)
 		return;
 	/* the server browser's: a slot (p2p_lobby.c checks the rest), a query */
-	if (!strncmp(topic, P2P_LOBBY_SLOT_PREFIX, sizeof(P2P_LOBBY_SLOT_PREFIX) - 1))
+	if (!strncmp(topic, P2P_LOBBY_SLOT_PREFIX, strlen(P2P_LOBBY_SLOT_PREFIX)))
 	{
 		if (size <= MAXIMUM_LISTING_SIZE)
-			p2p_lobby_slot_heard(topic + sizeof(P2P_LOBBY_SLOT_PREFIX) - 1, payload, size, retained);
+			p2p_lobby_slot_heard(topic + strlen(P2P_LOBBY_SLOT_PREFIX), payload, size, retained);
 		return;
 	}
 	if (!strcmp(topic, P2P_LOBBY_QUERY_TOPIC))
@@ -1727,13 +1878,13 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 	if (signalling.hosting && !strcmp(topic, signalling.host_topic))
 	{
 		message_size = p2p_open(signalling.host_key, payload, size, message);
-		if (message_size >= 2 && message[0] == _message_join && message[1] == MESSAGE_VERSION)
+		if (message_size >= 2 && message[0] == _message_join && message[1] == message_version())
 			join_received(broker, message, message_size);
 	}
 	else if (signalling.joining && !strcmp(topic, signalling.join_topic))
 	{
 		message_size = p2p_open(signalling.join_key, payload, size, message);
-		if (message_size >= 2 && message[0] == _message_accept && message[1] == MESSAGE_VERSION)
+		if (message_size >= 2 && message[0] == _message_accept && message[1] == message_version())
 			accept_received(message, message_size);
 	}
 	else if (signalling.looking_up && !strcmp(topic, signalling.lookup_topic))
@@ -2142,7 +2293,7 @@ void p2p_signal_start(void)
 	signalling.started_time = now_stamp();
 	posix_random_bytes(random, sizeof(random));
 	p2p_hex(random, sizeof(random), hex);
-	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), SIGNAL_PREFIX "-%s", hex);
+	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), "%s-%s", SIGNAL_PREFIX, hex);
 	{
 		unsigned char hash[P2P_KEY_HASH_SIZE];
 
@@ -2406,6 +2557,10 @@ void p2p_signal_brokers_text(char *text, int size, int what)
 
 void p2p_signal_host(const unsigned char *token, const char *code)
 {
+	/* (never on the crossplay wire: a Vita joins PC games, it hosts none,
+	network_wire.h; nor are this build's codes for PC machines) */
+	if (network_wire_crossplay())
+		return;
 	if (!signalling.has_nonce_key)
 	{
 		posix_random_bytes(signalling.nonce_key, P2P_SHA256_SIZE);
@@ -2446,6 +2601,10 @@ void p2p_signal_lookup_code(const char *code, const unsigned char *host)
 {
 	unsigned char token[P2P_TOKEN_SIZE];
 
+	/* (codes are this build's own, never looked up on the crossplay wire:
+	no PC host has one) */
+	if (network_wire_crossplay())
+		return;
 	signalling.lookup_has_host = host != NULL;
 	if (host)
 		memcpy(signalling.lookup_host, host, P2P_IDENTIFIER_SIZE);
@@ -2486,6 +2645,9 @@ void p2p_signal_stop_joining(void)
 
 void p2p_signal_lobby_topics(int listed, int browsing)
 {
+	/* (the crossplay wire: browsing only, never listed) */
+	if (network_wire_crossplay())
+		listed = 0;
 	signalling.lobby_listed = listed;
 	signalling.lobby_browsing = browsing;
 	sync_all_topics();
@@ -2495,7 +2657,7 @@ void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closin
 {
 	int index;
 
-	if (size > MAXIMUM_LISTING_SIZE)
+	if (size > MAXIMUM_LISTING_SIZE || network_wire_crossplay())
 		return;
 	memcpy(signalling.lobby_listing, listing, (size_t)size);
 	signalling.lobby_listing_size = size;

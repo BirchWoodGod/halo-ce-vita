@@ -55,6 +55,9 @@ int halo_text_input_maximum;
 int halo_text_input_password;
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
+/* (port/linux/src/network_wire.c's: the wire the game runs, a test's) */
+static int test_crossplay_wire;
+int network_wire_crossplay(void) { return test_crossplay_wire; }
 /* (the map in play: never deleted) */
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
 static char log_text[16384];
@@ -974,7 +977,7 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && strstr(menu, "< Online"),
+	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && strstr(menu, "< Online"),
 		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
@@ -990,7 +993,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Co-op players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Co-op players|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
 		"Bots 3: Bot skill, Bot teams and Bot vehicles below it, live");
 	to_line("  Bot skill");
@@ -1001,7 +1004,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
+	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
 		"Bots Off: the bot rows hidden again");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
@@ -1011,13 +1014,13 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
+	check(!strcmp(labels, "Connection*|Crossplay*|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
 		"the PC menus in the game: Connection and Modded maps only");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
@@ -1175,7 +1178,7 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Bots|Co-op players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
+	check(!strcmp(labels, "Connection*|Crossplay*|Bots|Co-op players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
 	/* Latency meter (latency_meter.c): On as shipped, Off and back, live */
 	to_line("Latency meter");
 	check(strstr(menu, "\nLatency meter\x02  On >") && setting_named("HALO_LATENCY_METER") &&
@@ -1188,13 +1191,35 @@ static void test_multiplayer_tab(void)
 	check(getenv("HALO_LATENCY_METER") && !strcmp(getenv("HALO_LATENCY_METER"), "1"), "Latency meter On again: 1");
 	/* Crossplay (docs/crossplay.md): Off as shipped, On and back */
 	to_line("Crossplay");
-	check(strstr(menu, "\nCrossplay\x02  Off >") && setting_named("HALO_CROSSPLAY") &&
+	check(strstr(menu, "\nCrossplay*\x02  Off >") && setting_named("HALO_CROSSPLAY") &&
 		strstr(setting_named("HALO_CROSSPLAY")->help, "play PCs (OpenCE)"), "Crossplay: Off as shipped, its help");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\nCrossplay\x02< On  ") && getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "1"),
+	check(strstr(menu, "\nCrossplay*\x02< On  ") && getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "1"),
 		"Crossplay On: HALO_CROSSPLAY 1");
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "0"), "Crossplay Off again: 0");
+	/* (after a restart: the game reads it once; with it on the Vita hosts
+	nothing, Host a game and Host co-op campaign say why) */
+	check(setting_named("HALO_CROSSPLAY")->restart, "Crossplay: after a restart");
+	{
+		char saved_network[sizeof(running_network)];
+		int saved_action = guide_action;
+
+		snprintf(saved_network, sizeof(saved_network), "%s", running_network);
+		snprintf(running_network, sizeof(running_network), "%s", chosen_network());
+		test_crossplay_wire = 1;
+		guide_action = ACTION_HOST;
+		check(guide_blocker() && strstr(guide_blocker(), "Crossplay is on"), "Crossplay on: Host a game says to turn it off");
+		guide_action = ACTION_CAMPAIGN;
+		check(guide_blocker() && strstr(guide_blocker(), "Crossplay is on"), "Crossplay on: Host co-op campaign too");
+		guide_action = ACTION_JOIN;
+		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "Crossplay on: Join a game is not blocked by it");
+		test_crossplay_wire = 0;
+		guide_action = ACTION_HOST;
+		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "Crossplay off: Host a game is not blocked by it");
+		guide_action = saved_action;
+		snprintf(running_network, sizeof(running_network), "%s", saved_network);
+	}
 	/* Co-op players (network.coop_players): 2 as shipped, 3 and 4 experimental */
 	to_line("Co-op players");
 	check(strstr(menu, "\nCo-op players\x02  2 >") && strstr(setting_named("HALO_NET_COOP_PLAYERS")->help, "may lag"),
@@ -1223,7 +1248,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down

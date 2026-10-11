@@ -518,8 +518,10 @@ static struct setting settings[] = {
 	/* (Crossplay, a switch between two worlds: Off, Vita to Vita, as betas
 	1-4; On, OpenCE's games (OpenCE, ChupathingyCE, DamnationCE hosts and
 	servers): network.crossplay, docs/crossplay.md. Not with Ad hoc, which
-	no PC reaches: setting_shown) */
-	{ "Crossplay", "HALO_CROSSPLAY", 0, 2, { "0", "1" }, { "Off", "On" },
+	no PC reaches: setting_shown. After a restart: the game reads it once,
+	at the network's start, port/linux/include/network_wire.h. With it on
+	the Vita joins PC games and hosts none: guide_blocker) */
+	{ "Crossplay", "HALO_CROSSPLAY", 1, 2, { "0", "1" }, { "Off", "On" },
 		"On: play PCs (OpenCE). Off: play Vitas", 0, TAB_MULTIPLAYER },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
 		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
@@ -2772,12 +2774,18 @@ static void show_delete(void)
 }
 
 /* why Host or Join cannot open System Link now (NULL: it can) */
+/* the wire the game runs (port/linux/src/network_wire.c): nonzero on the
+crossplay wire, where the Vita joins PC games and hosts none */
+int network_wire_crossplay(void);
+
 static const char *guide_blocker(void)
 {
 	int state = multiplayer_state();
 
 	if (strcmp(chosen_network(), running_network))
 		return T("Restart the game first: Connection changed");
+	if ((guide_action == ACTION_HOST || guide_action == ACTION_CAMPAIGN) && network_wire_crossplay())
+		return T("Crossplay is on: turn it off to host");
 	if (state == SYSTEM_LINK_STATE_PLAYING)
 		return T("Leave the level first: Start, then Quit");
 	if (state == SYSTEM_LINK_STATE_IN_GAME)

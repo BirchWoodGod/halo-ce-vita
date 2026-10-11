@@ -1859,7 +1859,9 @@ static void relay_setup(void)
 	char text[1024];
 	const char *entry;
 
-	p2p.relay_allowed = config_boolean("network.allow_relay") && !p2p.adhoc;
+	/* (never on the crossplay wire: relays are this build's, which no PC
+	machine knows, network_wire.h) */
+	p2p.relay_allowed = config_boolean("network.allow_relay") && !p2p.adhoc && !network_wire_crossplay();
 	if (!p2p.relay_allowed)
 		return;
 	p2p_list_setting("network.relays", "network.relays_file", text, sizeof(text));
@@ -3260,8 +3262,12 @@ int p2p_send_ping_table(unsigned long virtual_address, long tick, const unsigned
 	struct peer *peer;
 	int sent = 0;
 
-	if (!p2p.running || !pings || count < 0 || tick < 0 || !is_virtual_address(virtual_address))
+	/* (this build's own: never on the crossplay wire, network_wire.h) */
+	if (!p2p.running || !pings || count < 0 || tick < 0 || !is_virtual_address(virtual_address) ||
+		network_wire_crossplay())
+	{
 		return 0;
+	}
 	inner[0] = _packet_ping_table;
 	pthread_mutex_lock(&p2p_lock);
 	peer = find_peer_by_address(virtual_address);
@@ -3456,7 +3462,10 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		drop_peer(peer, "left");
 		break;
 	case _packet_ping_table:
-		ping_table_received(peer, inner + 1, inner_size - 1);
+		/* (this build's own: not on the crossplay wire, whose hosts are PC
+		builds that send none, network_wire.h) */
+		if (!network_wire_crossplay())
+			ping_table_received(peer, inner + 1, inner_size - 1);
 		break;
 	}
 }
@@ -3593,6 +3602,13 @@ static int join_code(const char *code, int public, const unsigned char *host)
 	set_status(N_("a dedicated server joins no games (code %.4s-%.4s ignored)"), code, code + 4);
 	return 1;
 #endif
+	/* (codes are Vita games', the legacy wire's: no PC host has one,
+	network_wire.h) */
+	if (network_wire_crossplay())
+	{
+		set_status(N_("codes join Vita games: turn Crossplay off to use code %.4s-%.4s"), code, code + 4);
+		return 1;
+	}
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
 		set_status(N_("that is this machine's own code"));

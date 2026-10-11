@@ -48,6 +48,16 @@ void posix_random_bytes(void *buffer, unsigned long size)
 		bytes[index] = (unsigned char)(counter++ * 13 + 1);
 }
 unsigned long p2p_now(void) { return clock_now; }
+/* (port/linux/src/network_wire.c's: the wire, for the whole run, as the
+game reads it once; P2P_SIGNAL_FUZZ_CROSSPLAY=1, the crossplay wire) */
+int network_wire_crossplay(void)
+{
+	static int wire = -1;
+
+	if (wire < 0)
+		wire = getenv("P2P_SIGNAL_FUZZ_CROSSPLAY") && !strcmp(getenv("P2P_SIGNAL_FUZZ_CROSSPLAY"), "1");
+	return wire;
+}
 const char *config_string(const char *name) { (void)name; return ""; }
 void config_folder(char *path, size_t size) { snprintf(path, size, "./"); }
 char *config_file_read(const char *path, size_t *size) { (void)path; (void)size; return NULL; }

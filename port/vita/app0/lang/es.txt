@@ -488,6 +488,7 @@
 "Circle: back" = "Círculo: volver"
 "Cross: open System Link   Circle: back" = "Cruz: abrir System Link   Círculo: volver"
 "Restart the game first: Connection changed" = "Reinicia el juego: cambió la Conexión"
+"Crossplay is on: turn it off to host" = "Juego cruzado activo: desactívalo para crear"
 "Leave the level first: Start, then Quit" = "Sal del nivel primero: Start, luego Salir"
 "In a game: Start, then Quit, to leave it" = "En partida: Start, luego Salir, para dejarla"
 "Already hosting: the game's lobby is open" = "Ya eres anfitrión: la sala está abierta"
@@ -530,6 +531,7 @@
 "Restart Halo after this game to get the PC multiplayer menus." = "Reinicia Halo después de esta partida para tener los menús multijugador de PC."
 
 # ---------- internet play's status (p2p.c, p2p_lobby.c, p2p_adhoc.c)
+"codes join Vita games: turn Crossplay off to use code %.4s-%.4s" = "los códigos son de partidas de Vita: desactiva el Juego cruzado para usar %.4s-%.4s"
 "off" = "apagado"
 "ready" = "listo"
 "starting" = "iniciando"
@@ -658,6 +660,10 @@
 "your %s.map could not be read" = "no se pudo leer tu %s.map"
 
 # ---------- joining a game (source/networking/network_client_manager.c)
+"This game is on the Vita-to-Vita network (Crossplay off).\n\nCrossplay is on: turn it off (Settings, Multiplayer) and restart to join Vita games." = "Esta partida es de la red entre Vitas (Juego cruzado desactivado).\n\nEl Juego cruzado está activado: desactívalo (Ajustes, Multijugador) y reinicia para unirte a partidas de Vita."
+"This PC game's network version (%u) is not one this version of the game can join (%u).\n\nUpdate the game, or join another game." = "La versión de red de esta partida de PC (%u) no es una a la que esta versión del juego pueda unirse (%u).\n\nActualiza el juego o únete a otra partida."
+"Crossplay is on: a Vita joins PC games but does not host them. To host a game, turn Crossplay off (Settings, Multiplayer) and restart." = "El Juego cruzado está activado: una Vita se une a partidas de PC pero no las crea. Para crear una partida, desactiva el Juego cruzado (Ajustes, Multijugador) y reinicia."
+"Crossplay is on:\r\nthe Vita joins PC\r\ngames but does not\r\nhost. Turn Crossplay\r\noff to host a game." = "Juego cruzado activo:\r\nla Vita se une a\r\npartidas de PC pero\r\nno crea. Desactívalo\r\npara crear una."
 "The host is playing the custom map %s, which isn't in your maps folder." = "El anfitrión está jugando el mapa personalizado %s, que no está en tu carpeta de mapas."
 "The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder." = "El mapa personalizado %s del anfitrión no es igual al tuyo. Copia el mapa del anfitrión a tu carpeta de mapas."
 "The host is playing the PC (Custom Edition) map %s, and PC maps is off. Turn on PC maps (Multiplayer > Modded maps) to play it." = "El anfitrión está jugando el mapa de PC (Custom Edition) %s, y Mapas de PC está en No. Activa Mapas de PC (Multijugador > Mapas modificados) para jugarlo."

@@ -11,6 +11,7 @@ p2p_discord.c; see p2p.c for the design).
 #include "p2p.h"
 
 #include "halo_port_limits.h"
+#include "network_wire.h"
 
 #include <pthread.h>
 #include <stddef.h>
@@ -50,10 +51,18 @@ code or public game never reaches a Vita's game, nor a Vita's a PC's */
 #define P2P_SIGNAL_PREFIX "hceu"
 #endif
 
+/* ... and on the crossplay wire (network_wire.h: OpenCE's, which a Vita
+speaks with Crossplay on) OpenCE's: the wire's, P2P_WIRE_SIGNAL_PREFIX,
+chosen at run time (the switch is read once, at the network's start) */
+#define P2P_CROSSPLAY_SIGNAL_PREFIX "hceu"
+#define P2P_WIRE_SIGNAL_PREFIX (network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX : P2P_SIGNAL_PREFIX)
+
 /* the prefix of a public game's slot (a key hash in hex follows), and the
-topic of queries (p2p_lobby.c) */
-#define P2P_LOBBY_SLOT_PREFIX P2P_SIGNAL_PREFIX "/3/lobby/s/"
-#define P2P_LOBBY_QUERY_TOPIC P2P_SIGNAL_PREFIX "/3/lobby/q"
+topic of queries (p2p_lobby.c): the wire's (pointers, not literals) */
+#define P2P_LOBBY_SLOT_PREFIX \
+	(network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX "/3/lobby/s/" : P2P_SIGNAL_PREFIX "/3/lobby/s/")
+#define P2P_LOBBY_QUERY_TOPIC \
+	(network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX "/3/lobby/q" : P2P_SIGNAL_PREFIX "/3/lobby/q")
 
 /* internet play's state (p2p.c), which the game's threads and the p2p
 thread share */
