@@ -677,6 +677,67 @@ support; OpenCE falls back to 3.1.1) and `stun_test_server.py`.
 namespaces. Its pass criteria list (join, spawn, kills, damage, score, end,
 rejoin, stability) is worth copying into our checks, with credit.
 
+### 10.1 The harness as built (T8, Oct 11 2026)
+
+**Scripts** (in `port/vita/tests/`):
+- `build_pc_crossplay.sh PROJECT CHECKOUT COMMIT [OUT]` builds `opence`,
+  `chupa` (with `server-x86`) or `damnation` from a pinned commit into a
+  new `~/halo-test-out/xppc-PROJECT.XXXX`, with `clang-sdl32`. It writes
+  `BUILD_INFO` (full commit, compiler, binaries' sha256). No patches were
+  needed for OpenCE 6399ed9d (build-185), ChupathingyCE 8cb79900 or
+  DamnationCE 7be58b2b.
+- `run_netns_crossplay_test.sh MODE` (`XPPC_BUILDS=<the builds' folder>`)
+  runs the modes. `all` runs every one and prints a summary.
+- `crossplay_check.py` holds the steps, ported from ChupathingyCE's
+  `crossplay_test.py` with credit.
+
+Our client runs with `HALO_CROSSPLAY=1`. The modes cover only our client
+joining PC hosts and servers: `dedicatedopence` and `pcjoinsvita` were
+dropped, since our servers and Vita hosts stay off the crossplay wire.
+
+**No leaks.** The namespaces have no route out. On top of that, each router
+drops and counts packets bound anywhere else, and names resolve only
+through a test DNS that answers none. Each PC copy gets its own
+`brokers.txt`, and the game list, Delta table fetch, UPnP, updates and
+Discord are off. A run fails on any leak. None were seen; every client
+spoke MQTT 5. With `XPPC_MQTT311=1` the broker refuses MQTT 5: OpenCE falls
+back to 3.1.1 and `pcself` still passes.
+
+**Results on f94d8961 (network version 18).** The PC-only modes pass. Our
+client's modes are expected failures: they report XFAIL (exit 0) at their
+first failing stage, next to an OpenCE-client control that passes.
+
+| Mode | Result | Where our client stops |
+|---|---|---|
+| `pcself` | PASS | (OpenCE against OpenCE: LAN; internet through the server browser) |
+| `chupaopence` | PASS | (both ways on a LAN; OpenCE host, ChupathingyCE client by invite) |
+| `opencelan` | XFAIL | version: "not joining a host of network version 26 (this machine's is 18)" |
+| `opencehost` | XFAIL | browser: discover (the host lists on `hceu`, our client reads `hcev`); invite: signal (our client signals on `hcev` and never reaches the host) |
+| `chupahost` (LAN) | XFAIL | discover: "ignoring a host that is not a Vita" |
+| `chupaserver` | XFAIL | LAN: version; internet: discover (`hceu` listing) |
+| `damnserver` | XFAIL | LAN: version; internet by invite: signal |
+| `crossrefuse` | XFAIL | no right refusal message yet (T11); refused for the network version instead |
+| `crossmixed`, `crossversion` | SKIP | wait for T4 and T10 |
+
+**Findings for the wire tasks:**
+- **G2 seen live.** Our client reads OpenCE's 0x02 "in progress" flag as
+  the Vita flag. A PC host in its lobby is ignored as "not a Vita". Once its
+  game is under way, the host passes that check and is refused on the
+  version instead.
+- **Default maximum players.** An OpenCE host made by fast setup (as its
+  network test hosts) takes 128 players (`HALO_PORT_MAXIMUM_NETWORK_PLAYERS`).
+  T11's "refuse > 16 maximum" would refuse every such game, so it may need
+  to look at current players, or at what the host set.
+- **DamnationCE's server** is listed only on halo.milenko.org, not in the
+  MQTT lobby. Without that list (owner question 6), a Vita reaches it only
+  by its invite link.
+- **ChupathingyCE's network test** can't browse or list a player's game,
+  and its host logs only the start of its invite. That leaves its player
+  hosts LAN-only in the harness; its server covers the internet.
+- **OpenCE build-185 host crash.** The host crashed twice when a client
+  joined its postgame while the network test was moving players (with
+  ChupathingyCE's score of 4). Score 10 and a second client avoid it.
+
 **Hardware.** Hardware checks come last and are owner-run: one Vita on an
 official crossplay server with a PC player, then a Vita joining a PC host.
 Ask before any deploy or quit on a Vita.
