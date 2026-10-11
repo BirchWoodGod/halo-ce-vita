@@ -1762,14 +1762,6 @@ static void hud_draw_bitmap_internal(
 	parameters.map_scale[0].i = 1.0f;
 	parameters.meter_parameters = meter_parameters;
 	parameters.point_sampled = meter_parameters && local_player_count()==1;
-#ifdef HALO_LINUX
-	/* port: but filtered on Halo: CE Anniversary's HUD, whose meters' bitmaps
-	(four times the Xbox's, with no mipmaps) are drawn at a quarter of their
-	size: point sampled they came out as broken dots (the ammunition's
-	rounds) */
-	if (custom_edition_cache_hud_mcc_canvas())
-		parameters.point_sampled = FALSE;
-#endif
 	parameters.framebuffer_blend_function =
 		_shader_framebuffer_blend_function_alpha_multiply_add;
 	parameters.map[0] = (struct bitmap_data *)bitmap;

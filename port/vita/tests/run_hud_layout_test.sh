@@ -26,7 +26,9 @@
 #    made, its *b30.map too, at 640 and 848 columns: drawn at the Xbox b30's
 #    size and place (the shield panel 128x32 on the frame, the crosshair 66
 #    wide and centred, the digits 12 rows), the motion sensor 128 wide, 10 in
-#    from the frame's corner (MCC's own margin, 20 on its canvas).
+#    from the frame's corner (MCC's own margin, 20 on its canvas); its
+#    meters (MCC's "use xbox shading") keep their channels, not swapped as
+#    Halo PC's (swapped, they drew only full or empty).
 #
 #   run_hud_layout_test.sh
 #   HALO_TEST_VITA          the harness (default build/linux/halo of this tree)
@@ -180,6 +182,8 @@ else
 		run "$name" "$width" 60 'map_name mods\ruby_b30' HALO_CUSTOM_EDITION=1
 		grep -aq "the HUD is Halo: CE Anniversary's" "$out/$name/data/debug.txt" 2>/dev/null ||
 			fail "$name: the HUD was not taken for Halo: CE Anniversary's ($out/$name/data/debug.txt)"
+		grep -aq "HUD meters are shaded as the Xbox's" "$out/$name/data/debug.txt" 2>/dev/null ||
+			fail "$name: MCC's meters were not kept in the Xbox's channels ($out/$name/data/debug.txt)"
 		mcc_expect "$name" "$width"
 	done
 	mods_folder=

@@ -155,17 +155,21 @@ margins and the digits' metrics halved. What no placement sizes,
 quarter of their bitmaps, the waypoint arrows, the damage indicators and
 the scopes' masks (a weapon HUD's screen effect: the sniper rifle's
 1024x512, the pistol's 512), which are only twice the Xbox's with the half
-HUD scale, at half. The meters are filtered, not point sampled (a quarter
-of a bitmap without mipmaps comes out as broken dots), and a weapon HUD
+HUD scale, at half. MCC's meters carry its *use xbox shading* flag and are
+laid out as the Xbox's (the order they fill in luminance, their shape in
+alpha), so they keep their channels where a Halo PC meter's are swapped
+(`custom_edition_bitmaps.c` `hud_meter_bitmap_add`; swapped, the shield,
+health and rounds drew full above three quarters and empty below, and
+seemed not to change: the owner's Vita, October 10 2026), and a weapon HUD
 element's own anchor, MCC's (in its header's padding: the sniper rifle's
 range ladders, anchored to the centre where its HUD anchors the top left),
 is followed for the corners and the centre. Ruby's HUD then draws at the
 Xbox b30's sizes and places, the motion sensor 10 further in from the
 corner (MCC's own margin); `port/vita/tests/run_hud_layout_test.sh` checks
 it, natively and converted. Not followed: MCC's anchors at the edges'
-centres (none in Ruby's HUD), its remastered HUD bitmaps (the remaps), and
-its finer filtering: a HUD bitmap a quarter of its size here aliases
-somewhat (the ammunition counter's rounds).
+centres (none in Ruby's HUD) and its remastered HUD bitmaps (the remaps);
+a HUD bitmap drawn at a quarter of its size, point sampled as the Xbox's
+meters are, is a little rougher than MCC's.
 
 ## How version 13 differs from 609
 

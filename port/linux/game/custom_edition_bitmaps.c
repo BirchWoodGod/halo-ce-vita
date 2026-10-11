@@ -324,6 +324,35 @@ static void reordered_bitmap_drawn_otherwise(
 	return;
 }
 
+/* (port) MCC's meter flag "use xbox shading" (Invader's
+HUDInterfaceMeterFlags, after the five the Xbox has: hud_draw.c) */
+#define HUD_METER_USE_XBOX_SHADING_BIT 5
+
+/* (port) the bitmap of the HUD meter `meter`, listed in Halo PC's meter
+order - its shape in colour, the order it fills in alpha - unless the meter
+says it is shaded as the Xbox's: Halo: The Master Chief Collection's own
+meters (every meter of Ruby's Rebalanced Halo: CE, natively and converted:
+hud_unit_meters and hud_ammo_meters hold the order they fill in luminance,
+256 values, the shape in alpha, 40-50) are laid out as the Xbox's, and
+reordered as Halo PC's their fill order became their shape: a meter drawn
+full above three quarters and empty below, so the shield, health and
+ammunition seemed not to change (the owner's Vita, October 10 2026). Such a
+bitmap is listed in this build's order, so a Halo PC meter drawing it too
+leaves it as it is. */
+static boolean hud_meter_bitmap_add(
+	byte *tag_cache,
+	unsigned long loaded_bytes,
+	struct meter_hud_element_definition const *meter)
+{
+	return reordered_bitmap_add(
+		tag_cache,
+		loaded_bytes,
+		meter->meter_bitmap.index,
+		TEST_FLAG(meter->meter_flags, HUD_METER_USE_XBOX_SHADING_BIT) ?
+			_custom_edition_channels_xbox :
+			_custom_edition_channels_hud_meter);
+}
+
 /* the bitmaps of the HUD meters of a unit HUD interface */
 static boolean unit_hud_meters_add(
 	byte *tag_cache,
@@ -331,8 +360,8 @@ static boolean unit_hud_meters_add(
 	struct unit_hud_interface_definition *hud)
 {
 	boolean added =
-		reordered_bitmap_add(tag_cache, loaded_bytes, hud->shield_meter.meter.meter_bitmap.index, _custom_edition_channels_hud_meter) &&
-		reordered_bitmap_add(tag_cache, loaded_bytes, hud->health_meter.meter.meter_bitmap.index, _custom_edition_channels_hud_meter);
+		hud_meter_bitmap_add(tag_cache, loaded_bytes, &hud->shield_meter.meter) &&
+		hud_meter_bitmap_add(tag_cache, loaded_bytes, &hud->health_meter.meter);
 	long meter_index;
 
 	for (meter_index = 0; added && meter_index < hud->auxilary_meters.count; meter_index++)
@@ -349,7 +378,7 @@ static boolean unit_hud_meters_add(
 		{
 			break;
 		}
-		added = reordered_bitmap_add(tag_cache, loaded_bytes, meter->panel.meter.meter_bitmap.index, _custom_edition_channels_hud_meter);
+		added = hud_meter_bitmap_add(tag_cache, loaded_bytes, &meter->panel.meter);
 	}
 
 	return added;
@@ -424,7 +453,7 @@ static boolean weapon_hud_meters_add(
 		{
 			break;
 		}
-		added = reordered_bitmap_add(tag_cache, loaded_bytes, meter->meter_element.meter_bitmap.index, _custom_edition_channels_hud_meter);
+		added = hud_meter_bitmap_add(tag_cache, loaded_bytes, &meter->meter_element);
 	}
 
 	return added;
@@ -629,6 +658,7 @@ boolean custom_edition_reordered_bitmaps_find(
 	long multipurpose_count = 0;
 	long meter_count = 0;
 	long kept_count = 0;
+	long xbox_meter_count = 0;
 	long bitmap_index;
 
 	/* the bitmaps drawn in Halo PC's orders: model shaders' multipurpose
@@ -684,7 +714,13 @@ boolean custom_edition_reordered_bitmaps_find(
 	{
 		struct reordered_bitmap *bitmap = &globals->reordered_bitmaps[bitmap_index];
 
-		if (bitmap->drawn_otherwise)
+		if (bitmap->channel_order == _custom_edition_channels_xbox)
+		{
+			/* (an Xbox-shaded meter's: its channels are this build's) */
+			*bitmap = globals->reordered_bitmaps[--globals->reordered_bitmap_count];
+			xbox_meter_count++;
+		}
+		else if (bitmap->drawn_otherwise)
 		{
 			error(
 				_error_silent,
@@ -713,6 +749,13 @@ boolean custom_edition_reordered_bitmaps_find(
 		multipurpose_count,
 		meter_count,
 		kept_count);
+	if (xbox_meter_count)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld HUD meters are shaded as the Xbox's (MCC's flag) and keep their channels",
+			xbox_meter_count);
+	}
 
 	return TRUE;
 }
