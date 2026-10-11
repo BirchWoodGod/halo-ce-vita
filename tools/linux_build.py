@@ -488,7 +488,10 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             sdk_flags,
         ])
         posix_cflags = " ".join(POSIX_FLAGS + [march_flag(sln), f"-I{platform_dir}"])
-        mbedtls_include = f"-I{MBEDTLS_DIR / 'include'}"
+        # (with the Linux build's changes to its configuration: its threading,
+        # port/linux/src/mbedtls_linux_config.h)
+        mbedtls_include = (f"-I{MBEDTLS_DIR / 'include'} -I{platform_dir} "
+                           '-DMBEDTLS_USER_CONFIG_FILE=\\"mbedtls_linux_config.h\\"')
         # --linux-d3d gxm-null: the Vita's Direct3D device and its texture
         # and shader translators (port/vita/platform) in place of the OpenGL
         # ones, over a GXM renderer that draws nothing (port/vita/null), so
