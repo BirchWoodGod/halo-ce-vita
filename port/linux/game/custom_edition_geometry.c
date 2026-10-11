@@ -1157,8 +1157,9 @@ static boolean file_material_vertices_read(
 		}
 		*window_bytes_held = read_bytes;
 	}
-	*vertices = window + (offsets->offset - *window_start);
-	*lightmap_vertices = window + (offsets->lightmap_offset - *window_start);
+	/* (none of a kind it has none of: its offset may be anywhere) */
+	*vertices = vertex_bytes ? window + (offsets->offset - *window_start) : NULL;
+	*lightmap_vertices = lightmap_vertex_bytes ? window + (offsets->lightmap_offset - *window_start) : NULL;
 	/* (an environment vertex: its position, then its normal, binormal and
 	tangent; a lightmap vertex: its incident radiosity, then its texture
 	coordinates) */
