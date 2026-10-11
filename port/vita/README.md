@@ -485,7 +485,9 @@ whenever it works). The Vita has no UPnP.
 middle of the list say which of three it is: **Looking for public
 games...** (the brokers being reached, the hosts asked), **Can't reach the
 online game list - check your internet connection** (no broker could be
-reached: Wi-Fi, DNS, a firewall; X (Square) tries again at once), or **No
+reached, on its plain port or its TLS one, for 30 seconds: Wi-Fi, DNS, a
+firewall; X (Square) tries again at once, and the brokers are tried again
+in the background, the list shown as soon as one answers), or **No
 public games right now** (the list was reached and holds no game of this
 version; "No public games for this version (2 on another)" when it holds
 games of another network version). Server Setup says **Can't reach the

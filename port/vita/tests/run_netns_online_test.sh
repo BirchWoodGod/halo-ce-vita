@@ -30,9 +30,20 @@
 #            (never empty more than 6 s from 15 s after the link is back); a
 #            joiner started later finds the game; the blackholed broker never
 #            gets the listing
+#   lobbytls lobby, the broker's plain port misbehaving (HALO_TEST_PLAIN:
+#            busy, its CONNACK 0x89 as EMQX's was on Oct 11 2026; reset,
+#            every connection reset, as Mosquitto's was; silent, the CONNECT
+#            never answered; refuse, nothing listening) while its MQTT over
+#            TLS port, 8883, works (a certificate for 198.51.100.1 from an
+#            authority made for this run in the test's folder, never a real
+#            key, given to the copies as network.brokers_ca_file): both
+#            copies must say the plain port failed and reach the broker over
+#            TLS at once, the host be listed, the joiner find the game (never
+#            "can't reach") and join it, and every connection the broker
+#            took be a TLS one (HALO_TEST_MQTT311=1: MQTT 3.1.1 over TLS)
 #   lobbydns lobby, the joiners knowing the broker by a name
 #            (broker.halo.test) that the test's own /etc/hosts holds only
-#            from HALO_TEST_DNS_DOWN seconds (25) after the first joiner
+#            from HALO_TEST_DNS_DOWN seconds (40) after the first joiner
 #            starts: it must say it cannot look the broker up and that the
 #            game list cannot be reached, then reach it, show the host's game
 #            and count it (its browser's summary), and keep the broker's
@@ -518,7 +529,24 @@ side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
 { [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ]; } && side join2 10.10.3 192.168.3
 [ "$mode" = splitscreen ] && side join3 10.10.4 192.168.4
-python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 \
+# (lobbytls: the broker's TLS port too, with a certificate from an
+# authority made here, in the test's folder; its plain port misbehaving)
+broker_tls=
+if [ "$mode" = lobbytls ]; then
+	mkdir -p "$out/tls"
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj "/CN=Halo Broker Test CA" \
+		-addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign" \
+		-keyout "$out/tls/ca_key.pem" -out "$out/tls/ca.pem" 2>/dev/null &&
+	openssl req -newkey rsa:2048 -nodes -subj "/CN=broker.halo.test" -keyout "$out/tls/broker_key.pem" \
+		-out "$out/tls/broker.csr" 2>/dev/null &&
+	printf 'subjectAltName=DNS:broker.halo.test,IP:198.51.100.1\nbasicConstraints=CA:FALSE\n' > "$out/tls/broker.ext" &&
+	openssl x509 -req -in "$out/tls/broker.csr" -CA "$out/tls/ca.pem" -CAkey "$out/tls/ca_key.pem" -CAcreateserial \
+		-days 2 -extfile "$out/tls/broker.ext" -out "$out/tls/broker.pem" 2>/dev/null ||
+		{ echo "the test's authority could not be made (openssl)"; exit 2; }
+	broker_tls="--tls-port 8883 --tls-cert $out/tls/broker.pem --tls-key $out/tls/broker_key.pem --plain ${HALO_TEST_PLAIN:-busy}"
+	export HALO_TEST_ENV="${HALO_TEST_ENV:-} HALO_NET_BROKERS_CA_FILE=$out/tls/ca.pem"
+fi
+python3 "$here/mqtt_test_broker.py" --host 198.51.100.1 --port 1883 $broker_tls \
 	$([ "${HALO_TEST_MQTT311:-0}" = 1 ] && echo --mqtt311) > "$out/broker.log" 2>&1 & pids="$pids $!"
 # (the broker's clock: its "retained SECONDS ..." lines count from about now)
 broker_started=$(python3 -c "import time; print(time.monotonic())")
@@ -625,10 +653,11 @@ check_latency() { # check_latency LOW HIGH
 }
 
 case $mode in
-code|lobby|lobbypw|relay|latency)
+code|lobby|lobbytls|lobbypw|relay|latency)
 	extra=
 	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
 	[ "$mode" = lobby ] && extra="HALO_NET_HOST_PUBLIC=true"
+	[ "$mode" = lobbytls ] && extra="HALO_NET_HOST_PUBLIC=true"
 	[ "$mode" = lobbypw ] && extra="HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_PASSWORD=$password"
 	# (latency: one game the whole run, no game over in the blackout)
 	[ "$mode" = latency ] && extra="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50}"
@@ -638,7 +667,7 @@ code|lobby|lobbypw|relay|latency)
 	echo "host's code: $code"
 	case $mode in
 	code|relay|latency) join_mode="join-code:$code" ;;
-	lobby) join_mode=join-public ;;
+	lobby|lobbytls) join_mode=join-public ;;
 	lobbypw) join_mode="join-public:$password" ;;
 	esac
 	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=$join_mode \
@@ -752,6 +781,30 @@ code|lobby|lobbypw|relay|latency)
 				fail "the game with a password was not listed locked"
 			grep -aq "network test: joining the public game with its password" "$out/joiner/run.log" ||
 				fail "the joiner did not join the locked game with its password"
+		fi
+		if [ "$mode" = lobbytls ]; then
+			# (the plain port's failure said, TLS tried at once, and every
+			# connection over TLS: the broker's log marks each)
+			plain=${HALO_TEST_PLAIN:-busy}
+			case $plain in
+			busy) why="refused the connection (CONNACK 0x89: busy)" ;;
+			reset) why="the connection broke\|closed the connection before it was ready\|cannot connect (reset)" ;;
+			silent) why="connected, but no answer to CONNECT in 10 s" ;;
+			refuse) why="the connection broke sending (re[a-z]*)\|cannot connect (re[a-z]*)" ;;
+			esac
+			echo "--- the broker's connections"; grep -E "^(connect|plain)" "$out/broker.log" | sort | uniq -c | head
+			for side in host joiner; do
+				log=$out/$side/run.log
+				grep -a "Internet play: broker 198.51.100.1" "$log" | head -4 | sed "s/^/$side: /"
+				grep -aq "Internet play: broker 198.51.100.1: \($why\).*; trying it over TLS (port 8883) at once" "$log" ||
+					fail "the $side did not say the plain port failed ($plain) and try TLS at once"
+				grep -aq "Internet play: broker 198.51.100.1 ready (MQTT [0-9.]* over TLS (TLS.*) at 198.51.100.1:8883; carries the public games)" "$log" ||
+					fail "the $side did not reach the broker over TLS"
+				grep -aq "Can't reach the online game list" "$log" && fail "the $side said the game list could not be reached"
+			done
+			grep -q "^connect hcev-[0-9a-f]* mqtt[45] .* tls$" "$out/broker.log" || fail "the broker took no TLS connection"
+			grep -E "^connect hcev-" "$out/broker.log" | grep -vq " tls$" && fail "the broker took a plain connection"
+			grep -aq 'Internet play: browser: new game "' "$out/joiner/run.log" || fail "the joiner's browser showed no game"
 		fi
 	fi
 	;;
@@ -950,8 +1003,8 @@ lobbydns)
 	echo "host's code: $code"
 	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
 		HALO_TEST_INPUT=bot:2 HALO_NET_BROKERS=broker.halo.test:1883 HALO_NET_RESOLVER_CACHE="$cache" \
-		HALO_EXIT_AFTER=${HALO_TEST_DNS_JOINER_SECONDS:-80}; join_pid=$last_pid
-	sleep ${HALO_TEST_DNS_DOWN:-25}
+		HALO_EXIT_AFTER=${HALO_TEST_DNS_JOINER_SECONDS:-100}; join_pid=$last_pid
+	sleep ${HALO_TEST_DNS_DOWN:-40}
 	echo "broker.halo.test resolves now"
 	echo "198.51.100.1 broker.halo.test" >> "$out/hosts"
 	wait $join_pid 2>/dev/null

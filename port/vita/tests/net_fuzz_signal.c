@@ -24,6 +24,16 @@ is a list of records, each a kind, a 16-bit length and that many bytes:
      and a tag): the rest, its nonce and addresses, the fuzzer's
   6  the clock moves on (the first byte, in tenths of a second), and a pass
      of the signalling's update runs
+  7  the broker over TLS (posix_tls_*'s stand-ins): the first byte says how
+     its sends go (all, part, none now, failed) and how much a read gives;
+     the rest arrives through TLS, read as the socket allows or as what TLS
+     holds decrypted (posix_tls_pending), over passes of the update
+  8  a broker's failure, and the ways tried after it (plain 1883, TLS 8883):
+     each byte an event (a failure before it was ready, after, of its name,
+     a TLS handshake that fails or succeeds, a CONNACK, time passing), the
+     invariants checked after each
+  9  the brokers' list (brokers.txt's entries, "host:port/tlsport"): the
+     rest as network.signalling_brokers, read by p2p_signal_start
 An input whose length has bit 1 set runs on the crossplay wire
 (network_wire.h: OpenCE's message version 4, its WebRTC block after the
 host's addresses, no relays, no hosting, codes or listing of its own).
@@ -56,7 +66,129 @@ static unsigned char fuzz_host_bases[2][P2P_SHA256_SIZE];
 #define fuzz_host_base (fuzz_host_bases[net_fuzz_crossplay != 0])
 
 unsigned long p2p_now(void) { return net_fuzz_clock; }
-unsigned long p2p_resolve(const char *host) { (void)host; return 0x01020304; }
+
+/* ---------- the brokers' TLS (posix_https.c's posix_tls_*), stood in for:
+one session at a time, what its peer sends queued, its sends as the input
+says */
+static struct
+{
+	int open, handshake, closed_count, opened_count;
+	/* how sends go: 0 all, 1 part, 2 none now, 3 failed; a read's most */
+	int send_mode, read_most;
+	/* the record of a send held (posix_tls_send's contract: the same bytes
+	first again), the bytes sent */
+	int pending;
+	unsigned char pending_bytes[64];
+	unsigned long sent_bytes;
+	unsigned char input[8192];
+	int input_size;
+	char host[256];
+} fuzz_tls;
+
+int posix_tls_open(int socket, const char *host, const char *ca_file, char *error, int error_size)
+{
+	(void)ca_file;
+	if (socket < 0 || !host || strlen(host) >= sizeof(fuzz_tls.host))
+		abort();
+	if (fuzz_tls.open)
+	{
+		snprintf(error, (size_t)error_size, "too many TLS sessions");
+		return -1;
+	}
+	snprintf(fuzz_tls.host, sizeof(fuzz_tls.host), "%s", host);
+	fuzz_tls.open = 1;
+	fuzz_tls.opened_count++;
+	fuzz_tls.handshake = 0;
+	fuzz_tls.pending = 0;
+	fuzz_tls.input_size = 0;
+	return 0;
+}
+int posix_tls_handshake(int handle, char *error, int error_size)
+{
+	if (handle != 0 || !fuzz_tls.open)
+		abort();
+	snprintf(error, (size_t)error_size, fuzz_tls.handshake < 0 ? "its certificate refused: fuzz" :
+		fuzz_tls.handshake ? "TLS 1.3, fuzz, 1 ms" : "");
+	return fuzz_tls.handshake;
+}
+int posix_tls_send(int handle, const void *buffer, int size)
+{
+	int taken;
+
+	if (handle != 0 || !fuzz_tls.open || fuzz_tls.handshake != 1 || size <= 0 || !buffer)
+		abort();
+	/* (a held record's bytes must come first again, and as many) */
+	if (fuzz_tls.pending)
+	{
+		int compare = fuzz_tls.pending < (int)sizeof(fuzz_tls.pending_bytes) ? fuzz_tls.pending :
+			(int)sizeof(fuzz_tls.pending_bytes);
+
+		if (size < fuzz_tls.pending || memcmp(buffer, fuzz_tls.pending_bytes, (size_t)compare))
+			abort();
+		if (fuzz_tls.send_mode == 2)
+			return 0;
+		taken = fuzz_tls.pending;
+		fuzz_tls.pending = 0;
+		fuzz_tls.sent_bytes += (unsigned long)taken;
+		return taken;
+	}
+	switch (fuzz_tls.send_mode)
+	{
+	case 1:
+		taken = size > 3 ? size / 2 : 1;
+		break;
+	case 2:
+		fuzz_tls.pending = size > 100 ? 100 : size;
+		memcpy(fuzz_tls.pending_bytes, buffer, (size_t)(fuzz_tls.pending < (int)sizeof(fuzz_tls.pending_bytes) ?
+			fuzz_tls.pending : (int)sizeof(fuzz_tls.pending_bytes)));
+		return 0;
+	case 3:
+		return -1;
+	default:
+		taken = size;
+	}
+	fuzz_tls.sent_bytes += (unsigned long)taken;
+	return taken;
+}
+int posix_tls_receive(int handle, void *buffer, int size, char *error, int error_size)
+{
+	int count;
+
+	error[0] = 0;
+	if (handle != 0 || !fuzz_tls.open || fuzz_tls.handshake != 1 || size <= 0 || !buffer)
+		abort();
+	if (!fuzz_tls.input_size)
+		return 0;
+	count = fuzz_tls.input_size < size ? fuzz_tls.input_size : size;
+	if (fuzz_tls.read_most && count > fuzz_tls.read_most)
+		count = fuzz_tls.read_most;
+	memcpy(buffer, fuzz_tls.input, (size_t)count);
+	memmove(fuzz_tls.input, fuzz_tls.input + count, (size_t)(fuzz_tls.input_size - count));
+	fuzz_tls.input_size -= count;
+	/* (a peer that closes: an empty record's flag, the last byte 0xEE) */
+	if (!fuzz_tls.input_size && count && ((unsigned char *)buffer)[count - 1] == 0xEE && fuzz_tls.read_most == 7)
+	{
+		snprintf(error, (size_t)error_size, "TLS: fuzz");
+		return -2;
+	}
+	return count;
+}
+int posix_tls_pending(int handle)
+{
+	if (handle != 0 || !fuzz_tls.open)
+		abort();
+	return fuzz_tls.handshake == 1 && fuzz_tls.input_size > 0;
+}
+void posix_tls_close(int handle)
+{
+	if (handle != 0 || !fuzz_tls.open)
+		abort();
+	fuzz_tls.open = 0;
+	fuzz_tls.closed_count++;
+}
+/* (fuzz_resolve_fails: the name cannot be looked up) */
+static int fuzz_resolve_fails;
+unsigned long p2p_resolve(const char *host) { (void)host; return fuzz_resolve_fails ? 0 : 0x01020304; }
 const char *p2p_resolve_error(void) { return "fuzz"; }
 void p2p_resolver_cache_allow(const char *host) { (void)host; }
 void p2p_register_url_scheme(const char *scheme, const char *description) { (void)scheme; (void)description; }
@@ -210,6 +342,8 @@ static void fuzz_reset_protocol(int protocol)
 		keys_made = 1;
 	}
 	memset(&signalling, 0, sizeof(signalling));
+	memset(&fuzz_tls, 0, sizeof(fuzz_tls));
+	fuzz_resolve_fails = 0;
 	net_fuzz_clock = 1000000;
 	net_fuzz_random_state = 0x9E3779B97F4A7C15ULL;
 	p2p_signal_start();
@@ -255,8 +389,12 @@ static void fuzz_publish(const char *topic, const unsigned char *payload, int si
 	int remaining = 2 + topic_size + size;
 	int length = 0;
 
-	if (broker->socket < 0 || remaining > BUFFER_SIZE - 8)
+	/* (nothing is read from a broker still connecting or shaking hands) */
+	if (broker->socket < 0 || broker->state == _broker_connecting || broker->state == _broker_handshaking ||
+		remaining > BUFFER_SIZE - 8)
+	{
 		return;
+	}
 	/* (MQTT 5: no properties) */
 	if (broker->protocol == 5)
 		remaining++;
@@ -283,6 +421,76 @@ static void fuzz_publish(const char *topic, const unsigned char *payload, int si
 	broker_parse(broker);
 }
 
+/* what must hold of a broker whatever it was sent, and whatever failed */
+static void fuzz_broker_invariants(const struct broker *broker)
+{
+	if ((broker->ways_failed & ~BOTH_WAYS) || broker->ways_failed == BOTH_WAYS || (broker->tls && !broker->tls_port) ||
+		broker->rounds < 0 || broker->rounds > 1000 || retry_interval(broker) > MAXIMUM_RETRY_INTERVAL ||
+		(broker->state == _broker_ready && (broker->exhausted || broker->rounds || broker->ways_failed)) ||
+		(broker->tls_session != 0) != (fuzz_tls.open != 0) || (broker->tls_session && broker->tls_session != 1) ||
+		(broker->state == _broker_handshaking && !broker->tls_session) ||
+		(broker->retry_at_once && broker->state != _broker_idle) || broker->input_size < 0 ||
+		broker->input_size > BUFFER_SIZE || broker->output_size < 0 || broker->output_size > BUFFER_SIZE ||
+		strlen(broker->failure) >= sizeof(broker->failure))
+	{
+		abort();
+	}
+}
+
+/* an update pass, the broker's socket readable and/or writable as said */
+static void fuzz_pass(int readable, int writable)
+{
+	struct broker *broker = &signalling.brokers[0];
+	int read[1], write[1];
+
+	read[0] = write[0] = broker->socket;
+	p2p_signal_update(read, readable && broker->socket >= 0, write, writable && broker->socket >= 0);
+}
+
+/* the broker's answer: plain (queued on its socket) or over TLS */
+static void fuzz_answer(const unsigned char *bytes, int size)
+{
+	struct broker *broker = &signalling.brokers[0];
+
+	if (broker->tls_session)
+	{
+		if (fuzz_tls.input_size + size <= (int)sizeof(fuzz_tls.input))
+		{
+			memcpy(fuzz_tls.input + fuzz_tls.input_size, bytes, (size_t)size);
+			fuzz_tls.input_size += size;
+		}
+	}
+	else if (broker->socket >= 0)
+		net_fuzz_queue_receive(broker->socket, bytes, size, 0, 0);
+}
+
+/* a CONNACK as the broker's protocol frames it: its code */
+static void fuzz_connack(int code)
+{
+	struct broker *broker = &signalling.brokers[0];
+	unsigned char packet[5] = { 0x20, 2, 0, (unsigned char)code, 0 };
+
+	if (broker->protocol == 5)
+		packet[1] = 3;
+	fuzz_answer(packet, broker->protocol == 5 ? 5 : 4);
+}
+
+/* the broker as a TLS one, ready (record 7) */
+static void fuzz_tls_ready(void)
+{
+	struct broker *broker = &signalling.brokers[0];
+	char error[64];
+
+	if (broker->tls_session)
+		return;
+	if (!broker->tls_port)
+		broker->tls_port = network_short(DEFAULT_TLS_PORT);
+	broker->tls = 1;
+	broker->tls_session = posix_tls_open(broker->socket >= 0 ? broker->socket : 9, broker->host, "", error,
+		sizeof(error)) + 1;
+	fuzz_tls.handshake = 1;
+}
+
 static void fuzz_record(int kind, const unsigned char *data, int size)
 {
 	static unsigned char message[MAXIMUM_MESSAGE_SIZE + 64];
@@ -292,7 +500,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 	switch (kind)
 	{
 	case 0:
-		if (broker->socket < 0)
+		if (broker->socket < 0 || broker->state == _broker_connecting || broker->state == _broker_handshaking)
 			break;
 		if (size > BUFFER_SIZE - broker->input_size)
 			size = BUFFER_SIZE - broker->input_size;
@@ -380,15 +588,127 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 		p2p_signal_update(none, 0, none, 0);
 		break;
 	}
+	case 7:
+	{
+		/* the broker over TLS: its sends and reads as the first byte says,
+		the rest arriving through it */
+		int pass;
+
+		if (broker->socket < 0 || broker->state != _broker_ready)
+			break;
+		fuzz_tls_ready();
+		fuzz_tls.send_mode = size ? data[0] & 3 : 0;
+		fuzz_tls.read_most = size ? (data[0] >> 2) & 7 : 0;
+		if (size > 1)
+			fuzz_answer(data + 1, size - 1);
+		/* (some of what goes out: a query, a ping) */
+		if (size && (data[0] & 0x20))
+			p2p_signal_lobby_query();
+		for (pass = 0; pass < 8 && broker->socket >= 0; pass++)
+		{
+			if (size && (data[0] & 0x40))
+				net_fuzz_clock += 16000;
+			fuzz_pass(pass & 1, size && (data[0] & 0x80));
+		}
+		break;
 	}
-	/* (a broker closed for what it sent is connected again) */
+	case 8:
+	{
+		/* failures, and the ways tried after them */
+		int index;
+
+		for (index = 0; index < size && index < 48; index++)
+		{
+			int event = data[index] & 7, more = data[index] >> 3;
+
+			switch (event)
+			{
+			case 0:
+				/* (its name's, now and then) */
+				broker->every_way = more == 31;
+				broker_failed(broker, "fuzz %d", more);
+				break;
+			case 1:
+				net_fuzz_clock += (unsigned long)more * 500UL;
+				fuzz_pass(more & 1, more & 2);
+				break;
+			case 2:
+				if (broker->state == _broker_handshaking)
+					fuzz_tls.handshake = 1;
+				fuzz_pass(0, 0);
+				break;
+			case 3:
+				if (broker->state == _broker_handshaking)
+					fuzz_tls.handshake = -1;
+				fuzz_pass(0, 0);
+				break;
+			case 4:
+				fuzz_connack(0);
+				fuzz_pass(1, 0);
+				break;
+			case 5:
+				fuzz_connack(more & 1 ? 0x89 : more & 2 ? 3 : 0x84);
+				fuzz_pass(1, 0);
+				break;
+			case 6:
+				fuzz_resolve_fails = more & 1;
+				broker->looked_up = !(more & 2);
+				break;
+			default:
+				if (more & 1)
+					p2p_signal_kick();
+				else
+					p2p_signal_lobby_topics(more & 2, more & 4);
+				signalling.kick_time = 0;
+				break;
+			}
+			fuzz_broker_invariants(broker);
+		}
+		break;
+	}
+	case 9:
+	{
+		/* the brokers' list */
+		static char text[1100];
+		const char *kept = net_fuzz_brokers;
+		int length = size < 1023 ? size : 1023, index, protocol = broker->protocol == 5 ? 5 : 4;
+
+		memcpy(text, data, (size_t)length);
+		text[length] = 0;
+		/* (closed first: a session open stays the stand-in's) */
+		broker_close(broker, 0);
+		net_fuzz_brokers = text;
+		memset(&signalling, 0, sizeof(signalling));
+		p2p_signal_start();
+		if (signalling.broker_count < 0 || signalling.broker_count > MAXIMUM_BROKERS)
+			abort();
+		for (index = 0; index < signalling.broker_count; index++)
+		{
+			const struct broker *each = &signalling.brokers[index];
+
+			if (memchr(each->host, 0, sizeof(each->host)) == NULL || !each->host[0] || strchr(each->host, ':') ||
+				strchr(each->host, '/') || strchr(each->host, ',') || each->socket != -1 || each->tls_session ||
+				each->tls)
+			{
+				abort();
+			}
+		}
+		net_fuzz_brokers = kept;
+		fuzz_reset_protocol(protocol);
+		break;
+	}
+	}
+	/* (a broker closed for what it sent is connected again, plain) */
 	if (broker->socket < 0)
 	{
 		broker->socket = 9;
 		broker->state = _broker_ready;
 		broker->heard_time = broker->sent_time = net_fuzz_clock;
 		broker->publish_tokens = PUBLISH_BURST;
+		broker->tls = broker->rounds = broker->ways_failed = broker->exhausted = broker->retry_at_once = 0;
+		fuzz_resolve_fails = 0;
 	}
+	fuzz_broker_invariants(broker);
 }
 
 static int net_fuzz_next_record(const unsigned char **cursor, const unsigned char *end, int *kind,
@@ -398,7 +718,7 @@ static int net_fuzz_next_record(const unsigned char **cursor, const unsigned cha
 
 	if (end - *cursor < 3)
 		return 0;
-	*kind = (*cursor)[0] % 7;
+	*kind = (*cursor)[0] % 10;
 	length = (*cursor)[1] | (*cursor)[2] << 8;
 	*cursor += 3;
 	if (length > end - *cursor)
@@ -575,6 +895,117 @@ static void fuzz_crossplay_checks(void)
 	fuzz_check(!strcmp(topic, P2P_SIGNAL_PREFIX "/3/lobby/s/"), "legacy: its own slots");
 }
 
+/* the ways a broker is reached: plain, its TLS port at once when that
+fails before it is ready, the round's wait when both have, TLS first while
+it last worked; the brokers' list's TLS ports */
+static void fuzz_tls_checks(void)
+{
+	struct broker *broker;
+	struct p2p_signal_counts counts;
+	const char *kept = net_fuzz_brokers;
+	unsigned long sent;
+
+	/* the list */
+	net_fuzz_brokers = "a.test:1883/8884, b.test/0 ,:1883,/8883,c.test:1884,d.test:1/99999,e.test:2";
+	fuzz_reset();
+	fuzz_check(signalling.broker_count == 4 && !strcmp(signalling.brokers[0].host, "a.test") &&
+		signalling.brokers[0].port == network_short(1883) && signalling.brokers[0].tls_port == network_short(8884) &&
+		!strcmp(signalling.brokers[1].host, "b.test") && signalling.brokers[1].port == network_short(1883) &&
+		!signalling.brokers[1].tls_port && signalling.brokers[2].port == network_short(1884) &&
+		signalling.brokers[2].tls_port == network_short(8883) && !strcmp(signalling.brokers[3].host, "d.test") &&
+		!signalling.brokers[3].tls_port,
+		"brokers.txt: \"host:port/tlsport\" its TLS port, \"/0\" or a bad one none, 8883 unless said; no "
+		"entry without a name; at most 4");
+	net_fuzz_brokers = kept;
+
+	/* plain busy: TLS at once */
+	fuzz_reset();
+	broker = &signalling.brokers[0];
+	broker_close(broker, 0);
+	broker->retry_at_once = 1;
+	fuzz_pass(0, 0);
+	fuzz_check(broker->state == _broker_connecting && !broker->tls && net_fuzz_connect_port == network_short(1883),
+		"a broker is tried on its plain port first");
+	fuzz_pass(0, 1);
+	fuzz_connack(3);
+	fuzz_pass(1, 0);
+	fuzz_check(broker->state == _broker_idle && broker->tls && broker->retry_at_once && !broker->exhausted &&
+		!broker->rounds && broker->ways_failed == WAY_PLAIN && strstr(broker->failure, "busy"),
+		"its plain port busy (CONNACK 3): its TLS port next, at once, the broker not out of reach");
+	fuzz_pass(0, 0);
+	fuzz_check(broker->state == _broker_connecting && net_fuzz_connect_port == network_short(8883),
+		"connecting to its TLS port, 8883");
+	fuzz_pass(0, 1);
+	fuzz_check(broker->state == _broker_handshaking && fuzz_tls.open && !strcmp(fuzz_tls.host, "broker.test"),
+		"connected: the TLS handshake begun, for the broker's name");
+	sent = fuzz_tls.sent_bytes;
+	fuzz_pass(1, 1);
+	fuzz_check(broker->state == _broker_handshaking && fuzz_tls.sent_bytes == sent, "nothing sent while it shakes hands");
+	fuzz_tls.handshake = 1;
+	fuzz_pass(0, 0);
+	fuzz_check(broker->state == _broker_awaiting_acknowledgement && fuzz_tls.sent_bytes > sent,
+		"the handshake done: CONNECT sent over TLS");
+	fuzz_connack(0);
+	fuzz_pass(0, 0);
+	p2p_signal_counts(&counts);
+	fuzz_check(broker->state == _broker_ready && broker->tls && broker->tls_ready_time && !broker->exhausted &&
+		counts.ready == 1 && !counts.exhausted, "CONNACK over TLS (read as TLS holds it, the socket quiet): ready");
+	/* a dropped TLS connection: TLS first again */
+	broker_failed(broker, "fuzz");
+	fuzz_check(broker->state == _broker_idle && broker->tls && !broker->retry_at_once && broker->rounds == 1 &&
+		!broker->exhausted && fuzz_tls.closed_count == 1 && !fuzz_tls.open,
+		"its TLS connection dropped: the session closed, TLS first again after the wait");
+	net_fuzz_clock += MAXIMUM_RETRY_INTERVAL;
+	fuzz_pass(0, 0);
+	fuzz_pass(0, 1);
+	fuzz_tls.handshake = -1;
+	fuzz_pass(0, 0);
+	fuzz_check(broker->state == _broker_idle && !broker->tls && broker->retry_at_once && strstr(broker->failure, "over TLS"),
+		"its handshake failed (said to be TLS's): its plain port at once");
+	fuzz_pass(0, 0);
+	broker_failed(broker, "fuzz");
+	p2p_signal_counts(&counts);
+	fuzz_check(broker->state == _broker_idle && broker->exhausted && !broker->retry_at_once && broker->rounds == 2 &&
+		!broker->ways_failed && counts.exhausted == 1, "both ways failed: out of reach, the round's wait");
+	net_fuzz_clock += PLAIN_AGAIN_TIME;
+	fuzz_check(!broker_prefers_tls(broker), "plain first again once TLS last worked long ago");
+	/* its name: no port mends that */
+	fuzz_reset();
+	broker = &signalling.brokers[0];
+	broker_close(broker, 0);
+	broker->looked_up = 0;
+	broker->retry_at_once = 1;
+	fuzz_resolve_fails = 1;
+	fuzz_pass(0, 0);
+	fuzz_check(broker->state == _broker_idle && broker->exhausted && !broker->retry_at_once && !broker->tls &&
+		!strstr(broker->failure, "TLS"), "a name that cannot be looked up: out of reach at once, TLS not tried");
+	fuzz_resolve_fails = 0;
+	/* a broker without a TLS port */
+	net_fuzz_brokers = "plain.test:1883/0";
+	fuzz_reset();
+	broker = &signalling.brokers[0];
+	broker_close(broker, 0);
+	broker->retry_at_once = 1;
+	fuzz_pass(0, 0);
+	broker_failed(broker, "fuzz");
+	fuzz_check(broker->exhausted && !broker->tls && !broker->retry_at_once,
+		"a broker without a TLS port: out of reach once its plain port fails");
+	net_fuzz_brokers = kept;
+	/* sends over TLS that wait: the same bytes first again (the stand-in
+	aborts otherwise) */
+	fuzz_reset();
+	broker = &signalling.brokers[0];
+	fuzz_tls_ready();
+	fuzz_tls.send_mode = 2;
+	p2p_signal_lobby_query();
+	broker_send(broker, 0xC0, NULL, 0);
+	fuzz_check(broker->output_size > 0 && fuzz_tls.pending, "a send TLS cannot take now is kept, its record held");
+	fuzz_tls.send_mode = 0;
+	fuzz_pass(0, 1);
+	fuzz_check(broker->output_size == 0 && !fuzz_tls.pending, "and goes once the socket takes it");
+	fuzz_reset();
+}
+
 int net_fuzz_checks(void)
 {
 	static unsigned char message[MAXIMUM_MESSAGE_SIZE + 64];
@@ -647,6 +1078,7 @@ int net_fuzz_checks(void)
 	fuzz_publish(signalling.host_topic, sealed, p2p_seal(signalling.host_key, message, size, sealed));
 	fuzz_check(net_fuzz_sent_count == sent + 1, "and the same again (a replay) not at once");
 
+	fuzz_tls_checks();
 	fuzz_crossplay_checks();
 	net_fuzz_crossplay = 0;
 	fuzz_reset();

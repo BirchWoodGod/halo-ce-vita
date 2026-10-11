@@ -33,8 +33,14 @@ a body only by Content-Length, at most the size given (exactly the signed
 size for halo.vpk), resumes with Range, and has 30 s without a byte as its
 deadline instead of a whole-request one.
 
+posix_tls_* (at the end) carry internet play's brokers over TLS
+(p2p_signal.c's fallback from their plain port): the same Mbed TLS,
+non-blocking, the handshake on a thread of its own, against the authorities
+of broker_roots.h.
+
 Built with the host's ABI, as the other posix_*.c (and on the Vita with
-the SDK's: tools/vita_build.py, with port/vita/include/mbedtls_vita_config.h).
+the SDK's: tools/vita_build.py, with port/vita/include/mbedtls_vita_config.h;
+on Linux with port/linux/src/mbedtls_linux_config.h).
 */
 
 #include "posix.h"
@@ -52,6 +58,7 @@ the SDK's: tools/vita_build.py, with port/vita/include/mbedtls_vita_config.h).
 #include <string.h>
 #include <time.h>
 
+#include "broker_roots.h"
 #include "update_roots.h"
 #ifdef POSIX_HTTPS_TEST_ROOTS
 /* (tests only, never a game build: run_update_download_test.sh's own
@@ -1060,4 +1067,524 @@ int posix_https_download(const char *url, const char *user_agent, const char *pa
 		}
 		memcpy(current, next, sizeof(current));
 	}
+}
+
+/* ---------- internet play's brokers over TLS (posix_tls_*; p2p_signal.c)
+
+A broker's session: its socket (p2p_signal.c's, connected and non-blocking,
+then this layer's), Mbed TLS's context over it, and a state the handshake's
+thread and the caller share under tls_lock:
+
+- handshaking: the handshake's thread steps it (the caller never touches
+  its context, only asks how it goes); a session closed meanwhile is marked
+  cancelled, and that thread frees it and closes its socket;
+- open, or failed: the caller's alone (sends, receives, closes).
+
+The thread runs while a handshake does (made again for the next): each pass
+steps every handshake, then waits up to TLS_WAIT_MS for their sockets. Its
+public key work (an ECDHE and the chain's signatures: tens of milliseconds
+on the Vita) is thus never the caller's, whose thread carries the tunnels.
+The authorities are parsed once, at the first session (none of this costs
+anything while no broker needs TLS). Mbed TLS's own state shared by threads
+(PSA's keys) is guarded by MBEDTLS_THREADING_C (the update check may run at
+once). */
+
+#define TLS_WAIT_MS 100
+#define TLS_CA_FILE_MAXIMUM 65536
+#define TLS_THREAD_STACK (256 * 1024)
+
+enum
+{
+	_tls_free,
+	_tls_handshaking,
+	_tls_open,
+	_tls_failed,
+};
+
+struct tls_session
+{
+	int state;
+	/* closed while handshaking: the handshake's thread frees it */
+	int cancelled;
+	int socket;
+	/* (the handshake's thread's) what its last step waits for */
+	int wants_write;
+	/* the bytes of a record that could not all go yet (posix_tls_send) */
+	int write_pending;
+	/* the handshake's time, and its longest step, in milliseconds */
+	unsigned long started_ms;
+	unsigned long longest_step_ms;
+	unsigned long handshake_ms;
+	char error[160];
+	mbedtls_ssl_context ssl;
+};
+
+static pthread_mutex_t tls_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct tls_session tls_sessions[POSIX_TLS_MAXIMUM];
+static int tls_thread_running;
+/* the authorities: every broker's (broker_roots_pem, and ca_file's), and
+test.mosquitto.org's (its own beside those); their configurations, which
+the sessions share; loaded once (tls_loaded), with ca_file as it was then */
+static int tls_loaded, tls_usable;
+static char tls_load_error[160];
+static mbedtls_x509_crt tls_roots, tls_mosquitto_roots;
+static mbedtls_ssl_config tls_config, tls_mosquitto_config;
+
+static unsigned long tls_milliseconds(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned long)now.tv_sec * 1000UL + (unsigned long)(now.tv_nsec / 1000000);
+}
+
+/* ca_file's certificates added to chain: 1, else 0 with why in error */
+static int tls_add_file(mbedtls_x509_crt *chain, const char *ca_file, char *error, int error_size)
+{
+	FILE *file = fopen(ca_file, "rb");
+	unsigned char *text;
+	size_t size;
+	int code;
+
+	if (!file)
+	{
+		snprintf(error, (size_t)error_size, "the brokers' authorities file %s cannot be read", ca_file);
+		return 0;
+	}
+	text = malloc(TLS_CA_FILE_MAXIMUM + 1);
+	size = text ? fread(text, 1, TLS_CA_FILE_MAXIMUM + 1, file) : 0;
+	fclose(file);
+	if (!text || size == 0 || size > TLS_CA_FILE_MAXIMUM)
+	{
+		free(text);
+		snprintf(error, (size_t)error_size, "the brokers' authorities file %s is empty or too large", ca_file);
+		return 0;
+	}
+	/* (PEM: its size with the terminating zero) */
+	text[size] = 0;
+	code = mbedtls_x509_crt_parse(chain, text, size + 1);
+	free(text);
+	if (code != 0)
+	{
+		snprintf(error, (size_t)error_size, "the brokers' authorities file %s is not PEM certificates (%d)", ca_file,
+			code);
+		return 0;
+	}
+	return 1;
+}
+
+static int tls_configure(mbedtls_ssl_config *config, mbedtls_x509_crt *roots)
+{
+	if (mbedtls_ssl_config_defaults(config, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
+		MBEDTLS_SSL_PRESET_DEFAULT) != 0)
+	{
+		return 0;
+	}
+	mbedtls_ssl_conf_min_tls_version(config, MBEDTLS_SSL_VERSION_TLS1_2);
+	mbedtls_ssl_conf_authmode(config, MBEDTLS_SSL_VERIFY_REQUIRED);
+	mbedtls_ssl_conf_ca_chain(config, roots, NULL);
+	mbedtls_ssl_conf_rng(config, random_bytes, NULL);
+	return 1;
+}
+
+/* the authorities and configurations, once; under tls_lock */
+static void tls_load(const char *ca_file)
+{
+	int good;
+
+	tls_loaded = 1;
+	mbedtls_x509_crt_init(&tls_roots);
+	mbedtls_x509_crt_init(&tls_mosquitto_roots);
+	mbedtls_ssl_config_init(&tls_config);
+	mbedtls_ssl_config_init(&tls_mosquitto_config);
+	if (psa_crypto_init() != PSA_SUCCESS)
+	{
+		snprintf(tls_load_error, sizeof(tls_load_error), "TLS not available (no randomness)");
+		return;
+	}
+	/* (each must parse: a root left out would be noticed only when a
+	broker moved to it) */
+	good = mbedtls_x509_crt_parse(&tls_roots, (const unsigned char *)broker_roots_pem, sizeof(broker_roots_pem)) == 0 &&
+		mbedtls_x509_crt_parse(&tls_mosquitto_roots, (const unsigned char *)broker_mosquitto_pem,
+		sizeof(broker_mosquitto_pem)) == 0 &&
+		mbedtls_x509_crt_parse(&tls_mosquitto_roots, (const unsigned char *)broker_roots_pem,
+		sizeof(broker_roots_pem)) == 0;
+	if (!good)
+	{
+		snprintf(tls_load_error, sizeof(tls_load_error), "TLS not available (its authorities did not parse)");
+		return;
+	}
+	if (ca_file && ca_file[0] && (!tls_add_file(&tls_roots, ca_file, tls_load_error, sizeof(tls_load_error)) ||
+		!tls_add_file(&tls_mosquitto_roots, ca_file, tls_load_error, sizeof(tls_load_error))))
+	{
+		return;
+	}
+	if (!tls_configure(&tls_config, &tls_roots) || !tls_configure(&tls_mosquitto_config, &tls_mosquitto_roots))
+	{
+		snprintf(tls_load_error, sizeof(tls_load_error), "TLS set-up failed");
+		return;
+	}
+	tls_usable = 1;
+}
+
+/* the session's end: its context freed, its socket closed; under tls_lock */
+static void tls_free(struct tls_session *session)
+{
+	mbedtls_ssl_free(&session->ssl);
+	if (session->socket >= 0)
+		posix_socket_close(session->socket);
+	session->socket = -1;
+	session->state = _tls_free;
+	session->cancelled = 0;
+}
+
+static int tls_bio_send(void *context, const unsigned char *buffer, size_t length)
+{
+	struct tls_session *session = context;
+	int size = length > 16384 ? 16384 : (int)length;
+	int sent = posix_socket_send(session->socket, buffer, size, 0);
+
+	if (sent >= 0)
+		return sent;
+	if (posix_socket_last_error() == WSAEWOULDBLOCK || posix_socket_last_error() == WSAEINPROGRESS)
+		return MBEDTLS_ERR_SSL_WANT_WRITE;
+	return MBEDTLS_ERR_NET_SEND_FAILED;
+}
+
+static int tls_bio_receive(void *context, unsigned char *buffer, size_t length)
+{
+	struct tls_session *session = context;
+	int size = length > 16384 ? 16384 : (int)length;
+	int received = posix_socket_recv(session->socket, buffer, size, 0);
+
+	if (received >= 0)
+		return received;
+	if (posix_socket_last_error() == WSAEWOULDBLOCK || posix_socket_last_error() == WSAEINPROGRESS)
+		return MBEDTLS_ERR_SSL_WANT_READ;
+	return MBEDTLS_ERR_NET_RECV_FAILED;
+}
+
+/* a handshake's step: under no lock (the session is this thread's while
+handshaking); the state it leads to */
+static int tls_step(struct tls_session *session)
+{
+	unsigned long before = tls_milliseconds(), took;
+	int code = mbedtls_ssl_handshake(&session->ssl);
+
+	took = tls_milliseconds() - before;
+	if (took > session->longest_step_ms)
+		session->longest_step_ms = took;
+	if (code == MBEDTLS_ERR_SSL_WANT_READ || code == MBEDTLS_ERR_SSL_WANT_WRITE)
+	{
+		session->wants_write = code == MBEDTLS_ERR_SSL_WANT_WRITE;
+		return _tls_handshaking;
+	}
+	session->handshake_ms = tls_milliseconds() - session->started_ms;
+	if (code == 0)
+		return _tls_open;
+	{
+		unsigned int flags = mbedtls_ssl_get_verify_result(&session->ssl);
+		char why[128];
+
+		if (code == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED && flags != (unsigned int)-1 && flags)
+		{
+			mbedtls_x509_crt_verify_info(why, sizeof(why), "", flags);
+			why[strcspn(why, "\n")] = 0;
+			snprintf(session->error, sizeof(session->error), "its certificate refused: %s", why);
+		}
+		else if (code == MBEDTLS_ERR_SSL_CONN_EOF || code == MBEDTLS_ERR_NET_RECV_FAILED ||
+			code == MBEDTLS_ERR_NET_SEND_FAILED)
+		{
+			snprintf(session->error, sizeof(session->error), "the connection %s in the TLS handshake",
+				code == MBEDTLS_ERR_SSL_CONN_EOF ? "closed" : "broke");
+		}
+		else
+		{
+			mbedtls_strerror(code, why, sizeof(why));
+			snprintf(session->error, sizeof(session->error), "TLS handshake failed: %s", why);
+		}
+	}
+	return _tls_failed;
+}
+
+static void *tls_thread(void *unused)
+{
+	(void)unused;
+	for (;;)
+	{
+		int indices[POSIX_TLS_MAXIMUM];
+		int read[POSIX_TLS_MAXIMUM], write[POSIX_TLS_MAXIMUM];
+		int count = 0, read_count = 0, write_count = 0, none = 0;
+		int index;
+
+		/* the handshakes to step (the cancelled ones freed) */
+		pthread_mutex_lock(&tls_lock);
+		for (index = 0; index < POSIX_TLS_MAXIMUM; index++)
+		{
+			struct tls_session *session = &tls_sessions[index];
+
+			if (session->state != _tls_handshaking)
+				continue;
+			if (session->cancelled)
+				tls_free(session);
+			else
+				indices[count++] = index;
+		}
+		if (!count)
+		{
+			tls_thread_running = 0;
+			pthread_mutex_unlock(&tls_lock);
+			return NULL;
+		}
+		pthread_mutex_unlock(&tls_lock);
+		for (index = 0; index < count; index++)
+		{
+			struct tls_session *session = &tls_sessions[indices[index]];
+			int state = tls_step(session);
+
+			pthread_mutex_lock(&tls_lock);
+			if (session->cancelled)
+				tls_free(session);
+			else
+			{
+				session->state = state;
+				if (state == _tls_handshaking)
+				{
+					if (session->wants_write)
+						write[write_count++] = session->socket;
+					else
+						read[read_count++] = session->socket;
+				}
+			}
+			pthread_mutex_unlock(&tls_lock);
+		}
+		/* (the sockets of those still going: their descriptors stay open
+		while they are handshaking, as only this thread closes them; a wait
+		that fails is a wait all the same, never a loop that spins) */
+		if ((read_count || write_count) &&
+			posix_socket_select(read, &read_count, write, &write_count, NULL, &none, 0, TLS_WAIT_MS * 1000, 0) < 0)
+		{
+			read_count = write_count = 0;
+			posix_socket_select(NULL, &read_count, NULL, &write_count, NULL, &none, 0, TLS_WAIT_MS * 1000, 0);
+		}
+	}
+}
+
+int posix_tls_open(int socket, const char *host, const char *ca_file, char *error, int error_size)
+{
+	struct tls_session *session = NULL;
+	mbedtls_ssl_config *config;
+	int index;
+
+	error[0] = 0;
+	if (socket < 0 || !host || !host[0] || strlen(host) > HOST_MAXIMUM)
+	{
+		snprintf(error, (size_t)error_size, "bad arguments");
+		return -1;
+	}
+	pthread_mutex_lock(&tls_lock);
+	if (!tls_loaded)
+		tls_load(ca_file);
+	if (!tls_usable)
+	{
+		snprintf(error, (size_t)error_size, "%s", tls_load_error);
+		pthread_mutex_unlock(&tls_lock);
+		return -1;
+	}
+	for (index = 0; index < POSIX_TLS_MAXIMUM; index++)
+	{
+		if (tls_sessions[index].state == _tls_free)
+		{
+			session = &tls_sessions[index];
+			break;
+		}
+	}
+	if (!session)
+	{
+		snprintf(error, (size_t)error_size, "too many TLS sessions");
+		pthread_mutex_unlock(&tls_lock);
+		return -1;
+	}
+	memset(session, 0, sizeof(*session));
+	session->socket = -1;
+	mbedtls_ssl_init(&session->ssl);
+	/* (test.mosquitto.org's own authority for that host alone) */
+	config = !strcmp(host, "test.mosquitto.org") ? &tls_mosquitto_config : &tls_config;
+	if (mbedtls_ssl_setup(&session->ssl, config) != 0 || mbedtls_ssl_set_hostname(&session->ssl, host) != 0)
+	{
+		mbedtls_ssl_free(&session->ssl);
+		snprintf(error, (size_t)error_size, "TLS set-up failed (out of memory?)");
+		pthread_mutex_unlock(&tls_lock);
+		return -1;
+	}
+	mbedtls_ssl_set_bio(&session->ssl, session, tls_bio_send, tls_bio_receive, NULL);
+	session->socket = socket;
+	session->started_ms = tls_milliseconds();
+	session->state = _tls_handshaking;
+	if (!tls_thread_running)
+	{
+		pthread_t thread;
+		pthread_attr_t attributes;
+		int made;
+
+		pthread_attr_init(&attributes);
+		pthread_attr_setstacksize(&attributes, TLS_THREAD_STACK);
+		pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+		made = pthread_create(&thread, &attributes, tls_thread, NULL) == 0;
+		pthread_attr_destroy(&attributes);
+		if (!made)
+		{
+			/* (the socket stays the caller's) */
+			session->socket = -1;
+			tls_free(session);
+			snprintf(error, (size_t)error_size, "no thread for the TLS handshake");
+			pthread_mutex_unlock(&tls_lock);
+			return -1;
+		}
+		tls_thread_running = 1;
+	}
+	pthread_mutex_unlock(&tls_lock);
+	return index;
+}
+
+/* the session of a handle, NULL if it is none; under tls_lock */
+static struct tls_session *tls_session_of(int handle)
+{
+	if (handle < 0 || handle >= POSIX_TLS_MAXIMUM || tls_sessions[handle].state == _tls_free ||
+		tls_sessions[handle].cancelled)
+	{
+		return NULL;
+	}
+	return &tls_sessions[handle];
+}
+
+int posix_tls_handshake(int handle, char *error, int error_size)
+{
+	struct tls_session *session;
+	int result;
+
+	error[0] = 0;
+	pthread_mutex_lock(&tls_lock);
+	session = tls_session_of(handle);
+	if (!session)
+		result = -1, snprintf(error, (size_t)error_size, "no such TLS session");
+	else if (session->state == _tls_handshaking)
+		result = 0;
+	else if (session->state == _tls_failed)
+		result = -1, snprintf(error, (size_t)error_size, "%s", session->error);
+	else
+	{
+		result = 1;
+		snprintf(error, (size_t)error_size, "%s, %s, %lu ms (its longest step %lu ms)",
+			mbedtls_ssl_get_version(&session->ssl), mbedtls_ssl_get_ciphersuite(&session->ssl),
+			session->handshake_ms, session->longest_step_ms);
+	}
+	pthread_mutex_unlock(&tls_lock);
+	return result;
+}
+
+/* the session of a handle, if open: the caller's alone then (no lock held
+while it is used: only the caller closes it) */
+static struct tls_session *tls_open_session(int handle)
+{
+	struct tls_session *session;
+
+	pthread_mutex_lock(&tls_lock);
+	session = tls_session_of(handle);
+	if (session && session->state != _tls_open)
+		session = NULL;
+	pthread_mutex_unlock(&tls_lock);
+	return session;
+}
+
+int posix_tls_send(int handle, const void *buffer, int size)
+{
+	struct tls_session *session = tls_open_session(handle);
+	int length, sent;
+
+	if (!session || size < 0)
+		return -1;
+	if (!size)
+		return 0;
+	/* (a record not all sent yet goes first: Mbed TLS takes the same
+	length again, its bytes already in the record) */
+	length = session->write_pending ? session->write_pending : size;
+	if (length > size)
+		return -1;
+	sent = mbedtls_ssl_write(&session->ssl, buffer, (size_t)length);
+	if (sent == MBEDTLS_ERR_SSL_WANT_WRITE || sent == MBEDTLS_ERR_SSL_WANT_READ)
+	{
+		session->write_pending = length;
+		return 0;
+	}
+	session->write_pending = 0;
+	if (sent <= 0 || sent > length)
+		return -1;
+	return sent;
+}
+
+int posix_tls_receive(int handle, void *buffer, int size, char *error, int error_size)
+{
+	struct tls_session *session = tls_open_session(handle);
+	int tries;
+
+	error[0] = 0;
+	if (!session || size <= 0)
+	{
+		snprintf(error, (size_t)error_size, "no such TLS session");
+		return -2;
+	}
+	/* (a TLS 1.3 session ticket is no data: read on, a few times) */
+	for (tries = 0; tries < 4; tries++)
+	{
+		int received = mbedtls_ssl_read(&session->ssl, buffer, (size_t)size);
+
+		if (received > 0)
+			return received > size ? -2 : received;
+		if (received == MBEDTLS_ERR_SSL_WANT_READ || received == MBEDTLS_ERR_SSL_WANT_WRITE)
+			return 0;
+#ifdef MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
+		if (received == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET)
+			continue;
+#endif
+		if (received == 0 || received == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || received == MBEDTLS_ERR_SSL_CONN_EOF)
+			return -1;
+		{
+			char why[96];
+
+			mbedtls_strerror(received, why, sizeof(why));
+			snprintf(error, (size_t)error_size, "TLS: %s", why);
+		}
+		return -2;
+	}
+	return 0;
+}
+
+int posix_tls_pending(int handle)
+{
+	struct tls_session *session = tls_open_session(handle);
+
+	return session && (mbedtls_ssl_get_bytes_avail(&session->ssl) || mbedtls_ssl_check_pending(&session->ssl));
+}
+
+void posix_tls_close(int handle)
+{
+	struct tls_session *session;
+
+	pthread_mutex_lock(&tls_lock);
+	session = tls_session_of(handle);
+	if (session)
+	{
+		if (session->state == _tls_handshaking)
+			session->cancelled = 1;
+		else
+		{
+			/* (its close_notify if it goes at once: the socket is
+			non-blocking) */
+			if (session->state == _tls_open)
+				mbedtls_ssl_close_notify(&session->ssl);
+			tls_free(session);
+		}
+	}
+	pthread_mutex_unlock(&tls_lock);
 }

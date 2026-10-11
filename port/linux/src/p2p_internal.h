@@ -220,6 +220,10 @@ struct p2p_signal_counts
 	/* when a broker last became able to carry the browser, or the slots'
 	subscription was acknowledged (p2p_now), 0 if never */
 	unsigned long lobby_time, browsing_time;
+	/* not ready, and every way of reaching it (its plain port, and its TLS
+	one) failed since it last was: retried in the background, but none
+	left to wait for (the browser's "can't reach" once all are so) */
+	int exhausted;
 };
 void p2p_signal_counts(struct p2p_signal_counts *counts);
 /* each broker on one line for the log: "broker.hivemq.com has it,

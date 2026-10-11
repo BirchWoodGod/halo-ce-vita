@@ -4,7 +4,9 @@
 #   p2p        internet play's tunnel, streams (KCP), STUN, invites, codes
 #              (port/linux/src/p2p.c)
 #   signal     MQTT 5 and 3.1.1, JOIN/ACCEPT, code records, the server
-#              browser's slots and queries (p2p_signal.c)
+#              browser's slots and queries (p2p_signal.c), over a broker's
+#              plain port and its TLS one (posix_tls_*'s stand-ins), the
+#              ways tried after failures, the brokers' list
 #   messages   the game's message decoder (source/networking/
 #              network_messages.c, source/memory/data_packet*.c)
 #   map_share  map sharing's message rules (port/linux/game/map_share_protocol.c)

@@ -163,6 +163,41 @@ int posix_https_download(const char *url, const char *user_agent, const char *pa
 	posix_ulong maximum, posix_https_redirect_proc redirect_allowed, posix_https_progress_proc progress, void *context,
 	char *error, int error_size);
 
+/* ---------- internet play's brokers over TLS (p2p_signal.c; posix_https.c,
+with port/third_party/mbedtls)
+
+MQTT over TLS (TLS 1.2 or 1.3) on a stream socket p2p_signal.c connected,
+non-blocking: the TLS layer then owns the socket and closes it
+(posix_tls_close). The handshake runs on a thread of its own, so its
+public key work never holds the caller's thread (on the Vita, tens of
+milliseconds); the caller polls it. The broker's certificate must name host
+and chain to an authority built in (broker_roots.h: the public ones for
+every host; test.mosquitto.org's own for that host alone) or one in
+ca_file (network.brokers_ca_file, the tests'; "" none): nothing is sent
+before that is checked. At most POSIX_TLS_MAXIMUM sessions at once. */
+enum
+{
+	POSIX_TLS_MAXIMUM = 8,
+};
+/* a session for socket (connected; its handshake started): a handle (0 or
+more), or -1 with why in error (the socket still the caller's then) */
+int posix_tls_open(int socket, const char *host, const char *ca_file, char *error, int error_size);
+/* the handshake: 1 done (its description, "TLS 1.3, ... 85 ms", in error),
+0 not yet, -1 failed (why in error) */
+int posix_tls_handshake(int handle, char *error, int error_size);
+/* the bytes taken of buffer (sent, or held to be: the next call must give
+the same bytes first), 0 if none can be now, -1 if the connection failed */
+int posix_tls_send(int handle, const void *buffer, int size);
+/* bytes received into buffer (at most size), 0 if none now, -1 if the
+peer closed the connection, -2 if it failed (why in error) */
+int posix_tls_receive(int handle, void *buffer, int size, char *error, int error_size);
+/* nonzero if bytes are held decrypted or still to decrypt (the socket may
+not look readable while they are) */
+int posix_tls_pending(int handle);
+/* the session ended and freed, and its socket closed (at once, or by the
+handshake's thread when it holds it) */
+void posix_tls_close(int handle);
+
 /* ---------- UPnP (internet play, p2p.c; posix_upnp.c, with
 port/third_party/miniupnpc) */
 
