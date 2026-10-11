@@ -974,7 +974,7 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") && strstr(menu, "< Online"),
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") && strstr(menu, "< Online"),
 		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
@@ -983,14 +983,14 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
-	check(menu_rows() == 5 && menu_fits(), "Multiplayer: five rows, 46 characters a line");
+	check(menu_rows() == 6 && menu_fits(), "Multiplayer: six rows, 46 characters a line");
 	/* the offline bots: Bots on, its skill and teams rows below it, live */
 	to_line("Bots");
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
 		"Bots 3: Bot skill, Bot teams and Bot vehicles below it, live");
 	to_line("  Bot skill");
@@ -1001,7 +1001,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
 		"Bots Off: the bot rows hidden again");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
@@ -1011,13 +1011,13 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Bots|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
+	check(!strcmp(labels, "Connection*|Crossplay|Bots|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
 		"the PC menus in the game: Connection and Modded maps only");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
@@ -1175,7 +1175,7 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Bots|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
+	check(!strcmp(labels, "Connection*|Crossplay|Bots|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
 	/* Latency meter (latency_meter.c): On as shipped, Off and back, live */
 	to_line("Latency meter");
 	check(strstr(menu, "\nLatency meter\x02  On >") && setting_named("HALO_LATENCY_METER") &&
@@ -1186,6 +1186,15 @@ static void test_multiplayer_tab(void)
 		!strcmp(getenv("HALO_LATENCY_METER"), "0"), "Latency meter Off: HALO_LATENCY_METER 0");
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_LATENCY_METER") && !strcmp(getenv("HALO_LATENCY_METER"), "1"), "Latency meter On again: 1");
+	/* Crossplay (docs/crossplay.md): Off as shipped, On and back */
+	to_line("Crossplay");
+	check(strstr(menu, "\nCrossplay\x02  Off >") && setting_named("HALO_CROSSPLAY") &&
+		strstr(setting_named("HALO_CROSSPLAY")->help, "play PCs (OpenCE)"), "Crossplay: Off as shipped, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nCrossplay\x02< On  ") && getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "1"),
+		"Crossplay On: HALO_CROSSPLAY 1");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "0"), "Crossplay Off again: 0");
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -1201,7 +1210,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Join with a code|Bots|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -1266,7 +1275,7 @@ static void test_variables_kept(void)
 		"HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
 		"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
 		"HALO_XBOX_BACK", "HALO_DEV_SETTINGS", "HALO_GYRO", "HALO_GYRO_BUTTON", "HALO_GYRO_SENS",
-		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_VITA_NETWORK",
+		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_VITA_NETWORK", "HALO_CROSSPLAY",
 		"HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",

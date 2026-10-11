@@ -310,6 +310,8 @@
 "Against you" = "Contra ti"
 "Custom maps: on, off, delete; PC maps" = "Mapas personalizados: activar, desactivar, borrar; mapas de PC"
 "Latency meter" = "Medidor de ping"
+"Crossplay" = "Juego cruzado"
+"On: play PCs (OpenCE). Off: play Vitas" = "Sí: jugar con PC (OpenCE). No: jugar con Vitas"
 "Ping to the host in network games, top right" = "Ping al anfitrión en partidas en red, arriba a la derecha"
 "  Lobby name" = "  Nombre de sala"
 "The name others see for your game" = "El nombre de tu partida que ven los demás"

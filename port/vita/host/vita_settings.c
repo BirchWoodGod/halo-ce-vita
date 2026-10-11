@@ -515,6 +515,12 @@ static struct setting settings[] = {
 	/* (Online: internet play, experimental) */
 	{ "Connection", "HALO_VITA_NETWORK", 1, 3, { "wifi", "adhoc", "online" }, { "Same Wi-Fi", "Ad hoc", "Online" },
 		"Vitas on one Wi-Fi network play together", 0, TAB_MULTIPLAYER },
+	/* (Crossplay, a switch between two worlds: Off, Vita to Vita, as betas
+	1-4; On, OpenCE's games (OpenCE, ChupathingyCE, DamnationCE hosts and
+	servers): network.crossplay, docs/crossplay.md. Not with Ad hoc, which
+	no PC reaches: setting_shown) */
+	{ "Crossplay", "HALO_CROSSPLAY", 0, 2, { "0", "1" }, { "Off", "On" },
+		"On: play PCs (OpenCE). Off: play Vitas", 0, TAB_MULTIPLAYER },
 	{ "Ad hoc room", "HALO_ADHOC_ROOM", 0, 4, { "1", "2", "3", "4" }, { "1", "2", "3", "4" },
 		"Vitas in the same room play together", 0, TAB_MULTIPLAYER },
 	{ "Join the room", NULL, 0, 0, { NULL }, { NULL }, "Then Multiplayer, System Link (LAN) in the game", 0,
@@ -1043,6 +1049,8 @@ static int setting_shown(const struct setting *setting)
 {
 	if ((setting->variable && !strcmp(setting->variable, "HALO_ADHOC_ROOM")) || setting->action == ACTION_ADHOC_JOIN)
 		return network_is("adhoc");
+	if (setting->variable && !strcmp(setting->variable, "HALO_CROSSPLAY"))
+		return !network_is("adhoc");
 	if (setting->action == ACTION_CE_EXTRACT)
 		return maps_installer_state == 1;
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||

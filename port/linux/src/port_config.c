@@ -302,6 +302,10 @@ static const struct config_setting config_settings[] =
 		"to download it (in a game joined from the public lobby, with a warning:\n"
 		"its host is a stranger), \"private\" asks except in public lobby games,\n"
 		"\"never\" never offers one." },
+	{ "network.crossplay", _config_boolean, "false", "HALO_CROSSPLAY", _environment_value, _platform_all,
+		"Play OpenCE's games (PC hosts and servers running OpenCE,\n"
+		"ChupathingyCE or DamnationCE) instead of Vitas' (docs/crossplay.md).\n"
+		"Off, the default, plays Vita to Vita as betas 1-4 do." },
 	{ "network.latency_meter", _config_boolean, "true", "HALO_LATENCY_METER", _environment_value, _platform_all,
 		"Show the round trip to the host in a network game, in milliseconds,\n"
 		"at the screen's top right (the host: its slowest player's), and\n"
