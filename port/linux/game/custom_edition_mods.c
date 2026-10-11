@@ -596,12 +596,18 @@ short custom_edition_mods_look_for(
 	globals->looked_for = TRUE;
 	globals->mod_count = 0;
 	globals->map_count = 0;
+#ifdef HALO_DEDICATED_SERVER
+	/* (the dedicated server plays no mod's map: its mods folder is never
+	looked in, and no name finds a map there) */
+	return 0;
+#else
 	/* (experimental and off unless chosen: game.mcc_mods, with PC maps on;
 	off, the mods folder is not looked at) */
 	if (!halo_mcc_mods_enabled())
 	{
 		return 0;
 	}
+#endif
 	find = FindFirstFileA(CUSTOM_EDITION_MODS_DIRECTORY "*", &data);
 	if (find == INVALID_HANDLE_VALUE)
 	{
