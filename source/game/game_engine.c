@@ -1107,6 +1107,8 @@ static void game_engine_generate_title_string(
 	wchar_t *secondary_string;
 	wchar_t life_string[128];
 	wchar_t score_string[256];
+	/* port: (game_variant_options' time limit) */
+	wchar_t time_left_string[160];
 	long string_list_index;
 	wchar_t *format_string;
 
@@ -1176,6 +1178,25 @@ static void game_engine_generate_title_string(
 			secondary_string = life_string;
 			break;
 		}
+	}
+
+	/* port: the gametype's time limit's time left (game_variant_options: a
+	PC host's; OpenCE's, c9ee319a) */
+	if (game_variant_options_get()->time_limit > 0 &&
+		game_engine_globals.postgame_state == game_engine_mode_active)
+	{
+		long left = game_variant_options_get()->time_limit * 60L * TICKS_PER_SECOND - game_time_get();
+		wchar_t time_string[32];
+
+		ticks_to_unicode_time_string(MAX(left, 0), NUMBEROF(time_string), time_string);
+		if (secondary_string[0] && secondary_string != time_left_string)
+		{
+			usnprintf(time_left_string, NUMBEROF(time_left_string), L"%s, %s left", secondary_string, time_string);
+		}
+		else
+			usnprintf(time_left_string, NUMBEROF(time_left_string), L"%s left", time_string);
+		time_left_string[NUMBEROF(time_left_string) - 1] = 0;
+		secondary_string = time_left_string;
 	}
 
 	if (game_engine_globals.postgame_state == game_engine_mode_postgame_delay)
@@ -4260,6 +4281,16 @@ boolean game_engine_has_shield(
 	return has_shield;
 }
 
+/* port: the local player whose motion sensor is drawn (motion_sensor.c),
+for the gametype's FRIENDS radar (game_variant_options; OpenCE's, c9ee319a) */
+static short game_engine_motion_sensor_local_player = NONE;
+
+void game_engine_motion_sensor_viewer(
+	short local_player_index)
+{
+	game_engine_motion_sensor_local_player = local_player_index;
+}
+
 boolean game_engine_draw_object_in_motion_sensor(
 	long unit_index)
 {
@@ -4267,6 +4298,16 @@ boolean game_engine_draw_object_in_motion_sensor(
 
 	if (game_engine)
 		draw_object = TEST_FLAG(global_variant.universal_variant.flags, _game_variant_draw_object_in_motion_sensor_bit);
+	/* port: friends only: the viewer's team's */
+	if (draw_object && game_engine && global_variant.universal_variant.teams &&
+		game_variant_options_get()->radar_players == _radar_players_friends &&
+		game_engine_motion_sensor_local_player != NONE)
+	{
+		long player_index = local_player_get_player_index(game_engine_motion_sensor_local_player);
+		struct player_datum *viewer = player_index != NONE ? player_try_and_get(player_index) : NULL;
+
+		draw_object = viewer && object_get(unit_index)->object.owner_team_index == viewer->team_index;
+	}
 
 	return draw_object;
 }
@@ -4528,6 +4569,12 @@ boolean game_engine_should_end_game(
 
 	if (game_engine && !multiple_teams_alive())
 		should_end_game = TRUE;
+	/* port: the gametype's time limit (game_variant_options; OpenCE's) */
+	if (game_engine && game_variant_options_get()->time_limit > 0 &&
+		game_time_get() >= game_variant_options_get()->time_limit * 60L * TICKS_PER_SECOND)
+	{
+		should_end_game = TRUE;
+	}
 
 	return should_end_game;
 }
@@ -6525,6 +6572,123 @@ real game_engine_get_damage_multiplier(
 	return result;
 }
 
+/* port: the gametype's vehicles of each team (game_variant_options: a PC
+host's; OpenCE's, c9ee319a, and its PC set of 6b1d81c7, network version 24).
+Every machine places the map's vehicles itself, so a client places the
+host's choice or its objects are not the host's. */
+typedef char game_engine_vehicle_set_first_type_assert[_game_engine_vehicles_warthog == 2 ? 1 : -1];
+static byte game_engine_vehicles_placed[2][NUMBER_OF_VARIANT_VEHICLES];
+
+void game_engine_vehicle_placement_begin(
+	void)
+{
+	csmemset(game_engine_vehicles_placed, 0, sizeof(game_engine_vehicles_placed));
+}
+
+/* a vehicle definition's type: the globals' multiplayer vehicles (warthog,
+ghost, scorpion), else by its tag's name; NONE for none of them */
+static short game_engine_variant_vehicle_type(
+	long definition_index)
+{
+	struct game_globals *game_globals = scenario_get_game_globals();
+	struct game_globals_multiplayer_information *information;
+	char const *name;
+	short index;
+
+	if (definition_index == NONE)
+		return NONE;
+	if (game_globals->multiplayer_information.count > 0)
+	{
+		information = TAG_BLOCK_GET_ELEMENT(&game_globals->multiplayer_information, 0,
+			struct game_globals_multiplayer_information);
+		for (index = 0; index < 3 && index < information->vehicles.count; index++)
+		{
+			if (TAG_BLOCK_GET_ELEMENT(&information->vehicles, index, struct game_globals_vehicle)->vehicle.index ==
+				definition_index)
+			{
+				return index == 0 ? _variant_vehicle_warthog : index == 1 ? _variant_vehicle_ghost :
+					_variant_vehicle_scorpion;
+			}
+		}
+	}
+	name = tag_get_name(definition_index);
+	if (!name)
+		return NONE;
+	if (strstr(name, "rwarthog") || strstr(name, "rocket"))
+		return _variant_vehicle_rocket_warthog;
+	if (strstr(name, "banshee"))
+		return _variant_vehicle_banshee;
+	if (strstr(name, "turret"))
+		return _variant_vehicle_gun_turret;
+	if (strstr(name, "warthog"))
+		return _variant_vehicle_warthog;
+	if (strstr(name, "ghost"))
+		return _variant_vehicle_ghost;
+	if (strstr(name, "scorpion"))
+		return _variant_vehicle_scorpion;
+	return NONE;
+}
+
+/* the team whose spawn points are nearest the point (red's if none) */
+static short game_engine_nearest_team(
+	real_point3d const *point)
+{
+	struct scenario *scenario = global_scenario_get();
+	real best = -1.0f;
+	short team = 0;
+	long index;
+
+	for (index = 0; index < scenario->players.count; index++)
+	{
+		struct player_starting_location *location =
+			TAG_BLOCK_GET_ELEMENT(&scenario->players, index, struct player_starting_location);
+		real dx = location->position.x - point->x;
+		real dy = location->position.y - point->y;
+		real dz = location->position.z - point->z;
+		real distance = dx * dx + dy * dy + dz * dz;
+
+		if (VALID_INDEX(location->team_index, 2) && (best < 0.0f || distance < best))
+		{
+			best = distance;
+			team = location->team_index;
+		}
+	}
+	return team;
+}
+
+boolean game_engine_vehicle_placement_allowed(
+	struct scenario_object_datum const *placement,
+	struct tag_block *palette)
+{
+	struct game_variant_options const *options = game_variant_options_get();
+	short side, type;
+	byte set;
+
+	if (!game_engine || placement->palette_entry_index == NONE)
+		return TRUE;
+	side = global_variant.universal_variant.teams ? game_engine_nearest_team(&placement->position) : 0;
+	set = options->vehicle_set[side];
+	if (set == VARIANT_VEHICLE_SET_PC)
+		return TRUE;
+	type = game_engine_variant_vehicle_type(TAG_BLOCK_GET_ELEMENT(palette, placement->palette_entry_index,
+		struct scenario_object_palette_entry)->reference.index);
+	/* (the map's own: the multiplayer ones of the globals, as the Xbox
+	game's remap allows) */
+	if (set == _game_engine_vehicles_default)
+		return type == NONE || type <= _variant_vehicle_scorpion;
+	if (type == NONE)
+		return set != _game_engine_vehicles_none;
+	if (set == VARIANT_VEHICLE_SET_CUSTOM)
+	{
+		if (game_engine_vehicles_placed[side][type] >= options->vehicle_counts[side][type])
+			return FALSE;
+		game_engine_vehicles_placed[side][type]++;
+		return TRUE;
+	}
+	/* (the sets: none, then each type alone, in the options' order) */
+	return set != _game_engine_vehicles_none && set - _game_engine_vehicles_warthog == type;
+}
+
 long game_engine_remap_vehicle(
 	long vehicle_definition_index)
 {
@@ -6538,6 +6702,13 @@ long game_engine_remap_vehicle(
 		return result;
 	}
 #endif
+	/* port: and the PC vehicle set's are every one the map places
+	(game_engine_vehicle_placement_allowed; OpenCE's) */
+	if (game_engine && (game_variant_options_get()->vehicle_set[0] == VARIANT_VEHICLE_SET_PC ||
+		game_variant_options_get()->vehicle_set[1] == VARIANT_VEHICLE_SET_PC))
+	{
+		return result;
+	}
 	if (game_engine)
 	{
 		/* port: NONE for one the map's globals lack (a Custom Edition map's
@@ -6546,14 +6717,23 @@ long game_engine_remap_vehicle(
 		long vehicle1 = game_engine_multiplayer_vehicle(1);
 		long vehicle2 = game_engine_multiplayer_vehicle(2);
 
+		/* (port: and the other types a gametype's sets name, which a map may
+		have: game_engine_variant_vehicle_type; with the variant's own sets,
+		as the legacy wire's games have, the Xbox game's) */
 		if (result != vehicle0 &&
 			result != vehicle1 &&
-			result != vehicle2)
+			result != vehicle2 &&
+			((game_variant_options_get()->vehicle_set[0] == _game_engine_vehicles_default &&
+				game_variant_options_get()->vehicle_set[1] == _game_engine_vehicles_default) ||
+				game_engine_variant_vehicle_type(result) == NONE))
 		{
 			result = NONE;
 		}
 
-		switch (global_variant.universal_variant.vehicle_set)
+		/* port: the per-team sets decide at placement
+		(game_engine_vehicle_placement_allowed) */
+		switch (game_variant_options_get()->vehicle_set[0] == game_variant_options_get()->vehicle_set[1] ?
+			global_variant.universal_variant.vehicle_set : _game_engine_vehicles_default)
 		{
 		case _game_engine_vehicles_none:
 			result = NONE;
@@ -6713,6 +6893,11 @@ long game_engine_remap_weapon(
 
 	if (weapon_list_index == _weapon_list_flamethrower)
 		weapon_list_index = _weapon_list_rocket_launcher;
+
+	/* port: a custom loadout (game_variant_options: a PC host's) has no
+	weapon set (OpenCE's, c9ee319a) */
+	if (game_variant_options_get()->loadout == _loadout_custom)
+		return list_index_to_weapon_definition_index(weapon_list_index);
 
 	switch (global_variant.universal_variant.weapon_set)
 	{

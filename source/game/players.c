@@ -1566,6 +1566,13 @@ void network_player_attach_unit(
 	struct player_datum *player = player_get(player_index);
 	struct unit_datum *unit = unit_get(unit_index);
 
+	/* port: the host's team for the player (a PC host's auto team balance,
+	game_variant_options, moves a player to the other team at his death,
+	and his next unit is the other team's; OpenCE's, c9ee319a; only with
+	the option, as the legacy wire's games never have it) */
+	if (game_engine_has_teams() && game_variant_options_get()->auto_team_balance &&
+		unit->object.owner_team_index >= 0 && unit->object.owner_team_index < 2)
+		player->team_index = unit->object.owner_team_index;
 	unit->object.owner_player_index = player_index;
 	unit->object.owner_team_index = (short)player->team_index;
 	unit->unit.player_index = player_index;
