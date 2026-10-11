@@ -113,7 +113,7 @@
 #            screen the profile and the game (HALO_TEST_PAD)
 #   menuspw  the same with a password (HALO_TEST_LOBBY_PASSWORD), typed on
 #            the password screen (HALO_TEST_TEXT_INPUT)
-#   browserscroll  the server browser's scrolling and sorts
+#   browserscroll  the server browser's scrolling and sorts, its game joined by itself
 #            (browser_list.h): 20 made-up games beside the host's
 #            (HALO_TEST_BROWSER_GAMES, test builds only); down past the twelve
 #            rows, a page down (rt), Y sorts by name (the host's VitaHost
@@ -803,7 +803,10 @@ browserscroll)
 	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
 	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do pad="$pad down:150:400"; done
 	pad="$pad rt:150:800 y:150:800 up:150:800 a"
-	pad="$pad wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a"
+	# (then the System Link screen's start and profile (A A A), and no pick
+	# in its list: the browser's game is joined by itself once the host is
+	# reached, network_game_client_listed_game_of / ui_widget_port_join_listed_game)
+	pad="$pad wait:150:6000 a a a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		HALO_TEST_BROWSER_GAMES=20; join_pid=$last_pid
@@ -821,6 +824,8 @@ browserscroll)
 	grep -aq "menus: the server browser's game 21 of 21 chosen: VitaHost (rows from 10)" "$jl" ||
 		fail "up on the first game did not wrap to the last (VitaHost)"
 	grep -aq "menus: joining the public game VitaHost" "$jl" || fail "the joiner did not join VitaHost from the scrolled list"
+	grep -aq "system link: the joined host's game joined by itself" "$jl" ||
+		fail "the browser's game was not joined by itself once its host was reached (no pick in the System Link list)"
 	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"

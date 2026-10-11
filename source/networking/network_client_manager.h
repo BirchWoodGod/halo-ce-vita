@@ -37,6 +37,10 @@ short network_game_client_get_state(
 	short *state_data);
 boolean network_game_client_join_first_available_game(
 	void);
+#ifdef HALO_LINUX
+void const *network_game_client_listed_game_of(
+	unsigned char const *host);
+#endif
 short network_game_client_listed_game_count(
 	void);
 boolean network_game_client_set_team(

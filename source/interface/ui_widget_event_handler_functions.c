@@ -1283,6 +1283,71 @@ static boolean network_game_join_game_from_server_list(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted);
+
+#ifdef HALO_LINUX
+struct widget_instance *ui_widget_port_active_screen(short local_player_index);
+
+/* the list (in widget and its siblings, and below them) whose rows are
+generated from the advertised games, and the row of this one */
+static struct widget_instance *port_server_list_with(
+	struct widget_instance *widget,
+	void const *server,
+	short *row,
+	short depth)
+{
+	for (; widget; widget = widget->next)
+	{
+		short index;
+
+		if (widget->generated_list && widget->generated_count > 0)
+		{
+			for (index = 0; index < widget->generated_count; index++)
+			{
+				if (((void **)widget->generated_list)[index] == server)
+				{
+					*row = index;
+					return widget;
+				}
+			}
+		}
+		if (widget->child && depth < 8)
+		{
+			struct widget_instance *found = port_server_list_with(widget->child, server, row, (short)(depth + 1));
+
+			if (found)
+				return found;
+		}
+	}
+	return NULL;
+}
+
+/* port: the advertised game joined as A on its row in the System Link list
+joins it (network_game_join_game_from_server_list: the same checks, the
+pregame screen next), when that list is the screen open: the game of the
+host an invite, a code or the server browser joined, with no second pick
+(port/linux/game/system_link_shortcut.c). 1 joined; 0 the list shows it
+but it was not joined (the player told why, as for a pick); -1 the list
+does not show it (yet) */
+int ui_widget_port_join_listed_game(
+	void const *server)
+{
+	struct widget_instance *screen = ui_widget_port_active_screen(0);
+	struct widget_instance *list;
+	boolean deleted = FALSE;
+	short row = 0;
+
+	if (!screen || !server)
+		return -1;
+	list = port_server_list_with(screen->child, server, &row, 0);
+	if (!list || !list->child)
+		return -1;
+	if (!list->focused_child)
+		list->focused_child = list->child;
+	list->data3C.selected_index = row;
+	return network_game_join_game_from_server_list(list, NULL, &deleted) ? 1 : 0;
+}
+#endif
+
 static boolean network_server_list_dispose(
 	struct widget_instance *widget,
 	struct event_record *event,
