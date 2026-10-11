@@ -775,7 +775,15 @@ boolean network_game_create_game_objects(
 	}
 
 	if (game->variant.game_engine_index)
+	{
 		game_set_game_variant(&game->variant);
+		/* port: and its PC options, as the host sent them (the crossplay
+		wire: a PC host's; on the legacy wire the variant's defaults, which
+		game_set_game_variant has set). A host plays the defaults: this
+		build has no editor for them. */
+		if (!global_network_game_server_get())
+			game_set_game_variant_options(&game->variant_options);
+	}
 
 	if (game_load(&options))
 	{

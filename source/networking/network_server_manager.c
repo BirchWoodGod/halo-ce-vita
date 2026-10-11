@@ -3730,6 +3730,9 @@ void network_game_server_change_game_variant(
 		server->state == _network_game_server_state_pregame);
 
 	csmemcpy(&server->game.variant, variant, sizeof(server->game.variant));
+	/* port: and its PC options: this build's hosts play the defaults (the
+	crossplay wire sends them: network_game_record.c) */
+	game_variant_options_default(&server->game.variant, &server->game.variant_options);
 
 	if (!network_game_server_send_game_data_pregame(server))
 	{
@@ -4429,6 +4432,7 @@ static void network_game_server_cooperative_round(
 	ustrncpy(variant.human_readable_game_description, L"Co-op",
 		NUMBEROF(variant.human_readable_game_description) - 1);
 	csmemcpy(&server->game.variant, &variant, sizeof(server->game.variant));
+	game_variant_options_default(&server->game.variant, &server->game.variant_options);
 	csstrncpy(server->game.map.name, network_game_server_cooperative_next_map, sizeof(server->game.map.name) - 1);
 	server->game.map.name[sizeof(server->game.map.name) - 1] = 0;
 	/* (the settings' or the menus' co-op choice goes on from here: the next

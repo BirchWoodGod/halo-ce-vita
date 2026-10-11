@@ -201,6 +201,7 @@ symbols in this file:
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
 #include "map_share.h"
+#include "network_game_record.h"
 
 /* port/linux/game/network_distributed.c's */
 void network_distributed_handle_message(long machine_index, word const *message, word size);
@@ -961,20 +962,23 @@ static boolean network_game_client_handle_message_server_machine_rejected(
 	return result;
 }
 
-/* the game settings record as its pieces arrive; it is applied once the last
-piece is in */
-static struct network_game network_game_client_settings_staging;
+/* the game settings record as its pieces arrive, as the wire sends it (the
+legacy Vita wire's or the crossplay wire's: network_game_record.c); it is
+decoded and applied once the last piece is in */
+static byte network_game_client_settings_staging[HALO_PORT_NETWORK_GAME_SIZE];
 static long network_game_client_settings_staging_size = 0;
+static struct network_game network_game_client_settings_record;
 
 static boolean network_game_client_receive_game_settings_piece(
 	struct network_game_client *client,
 	struct message_server_game_settings_update const *piece)
 {
 	boolean result = TRUE;
+	long record_size = network_game_record_size(network_game_record_format_current());
 
-	if (piece->total_size != sizeof(network_game_client_settings_staging) ||
+	if (piece->total_size != record_size ||
 		piece->length > sizeof(piece->data) ||
-		piece->offset + piece->length > sizeof(network_game_client_settings_staging))
+		piece->offset + piece->length > record_size)
 	{
 		network_event("got a message_server_game_settings_update piece for a different game layout");
 		network_game_client_settings_staging_size = 0;
@@ -995,17 +999,30 @@ static boolean network_game_client_receive_game_settings_piece(
 		else
 		{
 			csmemcpy(
-				(byte *)&network_game_client_settings_staging + piece->offset,
+				network_game_client_settings_staging + piece->offset,
 				piece->data,
 				piece->length);
 			network_game_client_settings_staging_size += piece->length;
 			if (network_game_client_settings_staging_size == piece->total_size)
 			{
+				char const *why = NULL;
+
 				network_game_client_settings_staging_size = 0;
-				result = network_game_client_game_settings_updated(client, &network_game_client_settings_staging);
-				if (!result)
+				/* port: a record a host sent, checked (a PC host's options
+				and co-op switches on the crossplay wire) */
+				if (!network_game_record_decode(network_game_record_format_current(), network_game_client_settings_staging,
+					piece->total_size, &network_game_client_settings_record, &why))
 				{
-					network_event("network_game_client_game_settings_updated() failed");
+					network_event("refused the host's game settings: %s", why ? why : "");
+					result = FALSE;
+				}
+				else
+				{
+					result = network_game_client_game_settings_updated(client, &network_game_client_settings_record);
+					if (!result)
+					{
+						network_event("network_game_client_game_settings_updated() failed");
+					}
 				}
 			}
 		}

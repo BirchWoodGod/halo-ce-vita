@@ -147,6 +147,99 @@ struct game_variant
 
 typedef char verify_game_variant_size[sizeof(struct game_variant) == 0x68 ? 1 : -1];
 
+/* port: the PC version's gametype options that the Xbox's variant has not
+(OpenCE's, c9ee319a, 6b1d81c7: its gametype editor's). The network game
+carries them on the crossplay wire (network_game_manager.h,
+port/linux/game/network_game_record.c, which checks a host's), and the game
+plays by them (game_variant_options_get). This build has no editor for
+them: a game hosted here plays the defaults (game_variant_options_default),
+the Xbox game's play. */
+enum
+{
+	_friendly_fire_on = 0,
+	_friendly_fire_off,
+	_friendly_fire_shields_only,
+	_friendly_fire_explosives_only,
+	NUMBER_OF_FRIENDLY_FIRE_MODES
+};
+
+enum
+{
+	/* other players on the motion tracker: all (the variant's draw object
+	in motion sensor bit set), friends only, none */
+	_radar_players_all = 0,
+	_radar_players_friends,
+	_radar_players_none,
+	NUMBER_OF_RADAR_PLAYERS
+};
+
+enum
+{
+	_loadout_category = 0,
+	_loadout_custom,
+	NUMBER_OF_LOADOUTS
+};
+
+enum
+{
+	_loadout_weapon_none = 0,
+	_loadout_weapon_random,
+	_loadout_weapon_assault_rifle,
+	_loadout_weapon_pistol,
+	_loadout_weapon_shotgun,
+	_loadout_weapon_sniper_rifle,
+	_loadout_weapon_rocket_launcher,
+	_loadout_weapon_plasma_pistol,
+	_loadout_weapon_plasma_rifle,
+	_loadout_weapon_needler,
+	NUMBER_OF_LOADOUT_WEAPONS
+};
+
+enum
+{
+	_variant_vehicle_warthog = 0,
+	_variant_vehicle_ghost,
+	_variant_vehicle_scorpion,
+	_variant_vehicle_rocket_warthog,
+	_variant_vehicle_banshee,
+	_variant_vehicle_gun_turret,
+	NUMBER_OF_VARIANT_VEHICLES,
+	MAXIMUM_VARIANT_VEHICLE_COUNT = 4,
+	/* a team's vehicles: those of a vehicle set (universal_variant's
+	vehicle_set values), else every one the map places, as Halo PC places
+	them (PC), else its counts */
+	VARIANT_VEHICLE_SET_PC = 0xFE,
+	VARIANT_VEHICLE_SET_CUSTOM = 0xFF
+};
+
+/* (the starting equipment, generic or the map's, is the variant's own:
+_game_variant_generic_starting_equipment_bit) */
+struct game_variant_options
+{
+	/* minutes; 0: none */
+	short time_limit;
+	short friendly_fire;
+	/* seconds added to a team killer's respawn */
+	short friendly_fire_penalty;
+	/* seconds; 0: never (the Xbox game's) */
+	short vehicle_respawn_time;
+	boolean auto_team_balance;
+	byte radar_players;
+	/* red's and blue's (free for all: red's) */
+	byte vehicle_set[2];
+	byte vehicle_counts[2][NUMBER_OF_VARIANT_VEHICLES];
+	/* the weapons: the weapon set's (category), else each player starts
+	with these (custom: _loadout_weapon_none, _random, or a weapon) */
+	byte loadout;
+	byte primary_weapon;
+	byte secondary_weapon;
+	/* no weapons spawn on the map (its grenades and powerups do): for
+	a loadout of none, melee only */
+	boolean no_map_weapons;
+};
+
+typedef char verify_game_variant_options_size[sizeof(struct game_variant_options) == 0x1C ? 1 : -1];
+
 struct game_engine
 {
 	char const *name;
@@ -550,6 +643,32 @@ void game_engine_intialize_queued_sounds(
 long game_engine_remap_object_definition(long definition_index);
 
 long game_engine_remap_vehicle(long vehicle_definition_index);
+/* port: the gametype's vehicles of each team (game_variant_options): the
+map's placement of a vehicle allowed, by its type and the nearer team's
+spawn points (counted from game_engine_vehicle_placement_begin); every
+machine places the same (OpenCE's, network version 24) */
+struct scenario_object_datum;
+struct tag_block;
+void game_engine_vehicle_placement_begin(
+	void);
+boolean game_engine_vehicle_placement_allowed(
+	struct scenario_object_datum const *placement,
+	struct tag_block *palette);
+/* port: the local player whose motion sensor is drawn (FRIENDS radar) */
+void game_engine_motion_sensor_viewer(
+	short local_player_index);
+/* port: the PC options of a game whose host sent none (the legacy wire, a
+variant built in): the Xbox game's play (port/linux/game/network_game_record.c) */
+void game_variant_options_default(
+	struct game_variant const *variant,
+	struct game_variant_options *options);
+/* port: the options the game plays by (game.c) */
+struct game_variant_options const *game_variant_options_get(
+	void);
+/* port: whether options a host sent are ones this game can play by: every
+value in its range (network_game_record.c) */
+boolean game_variant_options_valid(
+	struct game_variant_options const *options);
 long game_engine_remap_equipment(long equipment_definition_index);
 void game_show_score_team(
 	long team_index,
