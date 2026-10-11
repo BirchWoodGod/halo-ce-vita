@@ -199,9 +199,9 @@ report tool:
 | Tag space | 23 MB (OpenSauce: 34.5 MB) | 64 MB (the tag data 13.8-20.3 MB; each structure BSP linked to the top) |
 | Structure BSP | its header's vertex buffer fields zero; each material's uncompressed vertices in the BSP | the header's second and third words say where in the file the BSP's vertices are and how many bytes; each material's rendered and lightmap vertices at offsets into those (its vertex buffers' offsets), its vertex data empty (Invader's `ScenarioStructureBSPCompiledHeaderCEA`); the BSPs 40 KB-5.5 MB without them, their vertices 0-8 MB |
 | Script syntax nodes | 19001 (OpenSauce 28501) | 32767, with holes (a10: 18480 in use up to node 19722) |
-| File size limit | 384 MB | 2 GB |
+| File size limit | 384 MB | 2 GB (this build loads one of at most 1 GB: `MCC_CEA_CACHE_FILE_MAXIMUM_BYTES`) |
 | Compression | none | none for these maps (file size = the header's) |
-| Bitmaps and sounds | in the map, or in `bitmaps.map`/`sounds.map` (Halo PC's) | in the map, or in MCC's shared caches; the Ruby maps keep all theirs (Invader: "External tags: None"), so MCC's own files are not needed |
+| Bitmaps and sounds | in the map, or in `bitmaps.map`/`sounds.map` (Halo PC's) | in the map, or in MCC's shared caches; the Ruby maps keep all theirs (Invader: "External tags: None"), so MCC's own files are not needed; a map that keeps pixels or samples outside reads them from its mod's own (above) |
 | Bitmap formats | DXT1-5 and the uncompressed ones | BC7 added (none in the Ruby maps) |
 | Sounds | Xbox ADPCM, Ogg Vorbis, PCM | the same (Ruby a10: 1101 Ogg Vorbis sounds, 5 PCM permutations) |
 | Script functions | Halo PC's | `mcc_mission_segment` (MCC's mission statistics; 13-34 calls a map) and other MCC additions (none used by the Ruby maps) |
@@ -411,6 +411,38 @@ nothing done yet): the converted maps would hold the ADPCM themselves
 xbox_adpcm_encoder.c) or Invader's invader-recover and invader-sound, which
 rebuild sound tags from recovered audio (their gains and skip fractions not
 kept as the map has them).
+
+## GulchCE, compared (October 11 2026)
+
+[GulchCE](https://github.com/chestahh/GulchCE) (chestahh, CC0, an OpenCE
+fork) plays version 13 maps too, natively, on desktop Windows (its own
+docs call Linux and Android gameplay unverified), with its own adapter
+(`port/linux/game/mcc_*.c`, about 8500 lines written October 9-11 2026).
+Compared at its commit 56f598a, feature by feature, for what this build
+lacks and could take on a Vita (CC0 code may come into this GPL tree;
+every piece taken names GulchCE where it lands). None of its MCC art
+(its `mcc_*_butn*.png` button glyphs, generated pause menu art) is taken.
+
+| Area | GulchCE | This build | Taken / kept |
+| --- | --- | --- | --- |
+| Memory | a fixed 64 MB window at the maps' 0x50000000; every bitmap decoded and kept in memory (522 MB for Mercury Falling), every sound decoded to ADPCM at load (100+ MB) | tags moved into a tag cache of at most 34.5 MB, textures streamed through the texture cache, sounds transcoded lazily into the mod's sound cache file | kept: GulchCE's model cannot fit a Vita |
+| Header, layout | solo and multiplayer scenarios, any 64 KB tag base, compressed length ignored | solo only, tag base 0x50000000, flags 1-4, a file of at most 1 GB, fuzzed | kept (multiplayer v13 maps would be offline-only anyway) |
+| Resource packages | a package folder's `bitmaps.map`/`sounds.map`, items matched by offset, name and size, a stale offset moved to a unique name | refused | taken: a mod's own `bitmaps.map`/`sounds.map` beside its maps, each range one of their items by offset and size; a missing sound silent; no name matching or moving (the files are the mod's) |
+| Recordings | 0xFF00 weapon indices made none | passed through: a release build read the unit's inventory 256 entries before it | taken, for every map |
+| Cutscene cameras | field of view past 90 degrees made 90 | passed through: the scripted camera asserts | taken, for every map |
+| Model shaders | MCC's "use xbox multipurpose channel order" flag keeps the masks' channels | every multipurpose map reordered as Halo PC's: MCC's flagged ones drew wrong | taken |
+| Script parameters | runs them (its own runtime, 32767 nodes) | would have run them as globals | refused instead (no map examined has one) |
+| `mcc_mission_segment` | true | false (the pause before each cinematic skipped) | taken: true |
+| `player_effect_set_max_vibrate` | `player_effect_set_max_rumble` | nothing | taken |
+| Other MCC script functions | `objects_distance_to_*`, breadcrumb nav points, gravity, effects gain, ~30 in all | nothing (a call gives its type's default) | left: MCC's own maps call the distance functions only from their breadcrumb nav point scripts; Ruby's maps call none |
+| Weapon export values 17/18 | 15/16 | 15/16 already (from DamnationCE) | - |
+| HUD | converted for every v13 map; edge-centre anchors 5-8 | converted when the HUD globals carry MCC's remaps (MCC's maps and Ruby's do); anchors past 4 the top left | left: no MCC or Ruby HUD uses anchors 5-8 (Combat Revolved does) |
+| Bitmaps | BC7 decoded; other sizes than powers of two in DXT made linear ARGB | refused | left: a BC7 transcode would be disk-cached work on a 444 MHz core, ARGB four times the memory |
+| Geometry | broken model tangents rebuilt | such a model refuses the map | left (only Mercury and ML's pelican need it) |
+| Checkpoints, grenades 3/4, pause menus | extra checkpoint state, grenade side tables (36 engine hooks), generated pause menus | none | left: large, and not needed by the maps tested |
+| Campaign flow | levels chosen by hand | `CampaignInfo.json` order, titles, pictures, next level when won | kept |
+| Network | mod maps hosted for co-op and multiplayer | never on any wire | kept: never |
+| Parsers | bounded reads, some allocations sized by the file (a BSP up to 64 MB, sounds up to 256 MB) | bounded reads, allocations capped by the tag cache, seeded corruptions under AddressSanitizer | kept; what was taken is fuzzed the same way |
 
 ## Tested
 
