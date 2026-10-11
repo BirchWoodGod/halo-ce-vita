@@ -169,7 +169,8 @@
 #            opened, the game listed as co-op, both played the level, the
 #            cutscene skipped by both votes, and after the host's game_won
 #            (HALO_TEST_COOP_WIN, tick 1200) both played The Truth and
-#            Reconciliation. HALO_TEST_COOP_LIST_WAIT: the joiner's wait in
+#            Reconciliation, the level won in both machines' profiles
+#            (coop_progress.c). HALO_TEST_COOP_LIST_WAIT: the joiner's wait in
 #            the list (ms, default 15000); HALO_TEST_COOP_JOINERS: how many
 #            join (1; 3 fills the Vitas' four: the short countdown, not the
 #            one that leaves room for more)
@@ -1548,6 +1549,14 @@ coopmenu)
 	done
 	# (skipped once more than half the machines voted)
 	grep -aqE "skipping the cutscene \([0-9]+ of $players voted\)" "$hd" || fail "the cutscene was not skipped by the votes"
+	# (the level won recorded in every machine's profile, so that the
+	# Campaign screen offers the next: coop_progress.c)
+	grep -aq "co-op: level 1 won on difficulty 2 (this machine hosted it): recorded in 1 profile" "$hl" ||
+		fail "the host's profile did not record The Pillar of Autumn won on Heroic"
+	for name in $names; do
+		grep -aq "co-op: level 1 won on difficulty 2 (the host went on to the next level): recorded in 1 profile" \
+			"$out/$name/run.log" || fail "$name's profile did not record The Pillar of Autumn won on Heroic"
+	done
 	;;
 many)
 	# online off, the host and HALO_TEST_JOINERS joiners (default 3) on the

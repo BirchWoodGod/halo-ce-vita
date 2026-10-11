@@ -592,6 +592,24 @@ void player_profile_save_last_level_played(
 	return;
 }
 
+#ifdef HALO_LINUX
+void player_profile_save_level_completed(
+	short local_player_index)
+{
+	player_profile_save_level_completed_at(local_player_index, main_get_current_solo_level(),
+		game_difficulty_level_get());
+}
+
+void player_profile_save_level_completed_at(
+	short local_player_index,
+	short level,
+	short difficulty)
+{
+	struct player_profile profile;
+	long player_profile_index;
+
+	match_assert("c:\\halo\\SOURCE\\saved games\\player_profile.c", 0x197, (local_player_index>=0) && (local_player_index<MAXIMUM_NUMBER_OF_LOCAL_PLAYERS));
+#else
 void player_profile_save_level_completed(
 	short local_player_index)
 {
@@ -604,6 +622,7 @@ void player_profile_save_level_completed(
 
 	level = main_get_current_solo_level();
 	difficulty = game_difficulty_level_get();
+#endif
 #ifdef HALO_LINUX
 	/* port: a level not in the campaign (a Custom Edition campaign map's,
 	played alone or as network co-op) is not the profile's to record: its

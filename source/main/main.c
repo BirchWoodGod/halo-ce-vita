@@ -331,6 +331,9 @@ symbols in this file:
 
 /* ---------- headers */
 
+#ifdef HALO_LINUX
+#include "coop_progress.h"
+#endif
 #include "cseries.h"
 #include "errors.h"
 #include "cseries/profile.h"
@@ -2480,7 +2483,14 @@ static void main_won_map_private(
 
 		main_globals.won_map = FALSE;
 		level = game ? main_get_solo_level_from_name(game->map.name) : NONE;
+#ifdef HALO_LINUX
+		/* port: the level from the network game's map (the solo map name a
+		network game never sets: nothing was recorded), in every local
+		player's profile (coop_progress.c) */
+		coop_progress_host_won(game ? game->map.name : NULL, game_difficulty_level_get());
+#else
 		player_profile_save_level_completed(0);
+#endif
 		network_game_server_port_cooperative_won(level != NONE ?
 			main_get_solo_level_name((level + 1) % NUMBER_OF_SINGLE_PLAYER_LEVELS) : NULL);
 		return;

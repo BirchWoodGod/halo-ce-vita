@@ -1050,6 +1050,15 @@ boolean network_game_client_switch_to_pregame(
 		network_game_client_late_join_time = 0;
 		network_game_client_late_join_clock_pending = FALSE;
 		network_event("switching to pregame");
+#ifdef HALO_LINUX
+		/* port: a co-op round over: the lobby's map says whether it was won
+		(coop_progress.c) */
+		{
+			void coop_progress_client_round_ended(void);
+
+			coop_progress_client_round_ended();
+		}
+#endif
 		network_game_reset_to_pregame_ui();
 		network_connection_keep_alive(client->connection);
 	}
@@ -1642,6 +1651,14 @@ boolean network_game_client_game_settings_updated(
 				player_name_clean(message_packet->machines[index].name, NUMBEROF(message_packet->machines[index].name));
 			for (index = 0; index < (long)NUMBEROF(message_packet->players); index++)
 				player_name_clean(message_packet->players[index].name, NUMBEROF(message_packet->players[index].name));
+		}
+		/* port: the lobby after a co-op round: its map, the campaign's next
+		level, says the round was won (coop_progress.c) */
+		if (client->state == _network_game_client_state_pregame)
+		{
+			void coop_progress_client_lobby_map(char const *map_name);
+
+			coop_progress_client_lobby_map(message_packet->map.name);
 		}
 #endif
 		if (csstrcmp(message_packet->map.name, client->game.map.name))
