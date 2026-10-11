@@ -575,8 +575,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
 
         # (from OpenCE) the tag validator (port/linux/game/tag_validate.c,
         # tag_schema*.c) alone on map files: the game's objects of it and of
-        # the Custom Edition loader (cache_file_formats.c), the port's zlib,
-        # and a program that reads maps (tools/map_validate.c)
+        # the Custom Edition loader (cache_file_formats.c), the tag walk that
+        # moves a Halo: CE Anniversary map's tags (tag_relocate.c), the port's
+        # zlib, and a program that reads maps (tools/map_validate.c)
         if validator is not None:
             game_dir = Path(config["game_sources"])
             tool = Path("tools/map_validate.c")
@@ -593,6 +594,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             )
             tool_objects = [tool_object, obj_dir / (game_dir / "tag_validate.o"),
                             obj_dir / (game_dir / "cache_file_formats.o"),
+                            obj_dir / "port/linux/src/tag_relocate.o",
                             *(obj_dir / source.with_suffix(".o") for source in sorted(game_dir.glob("tag_schema*.c"))),
                             *(obj_dir / (ZLIB_DIR / name).with_suffix(".o") for name in ZLIB_SOURCES)]
             n.build(
