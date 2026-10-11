@@ -33,6 +33,21 @@
 #            driver's seat alone (no one rides with an enemy)
 #   vteams   Team Slayer likewise ("team_slayer+vehicles"), Legendary
 #   vehicles vctf, vslayer and vteams (HALO_TEST_BOTS 8 is the brief's)
+#   powerups Slayer, 12 bots, Heroic: the hurt go for the health packs (Blood
+#            Gulch's two on the bases' roofs) - one taken at least, or a
+#            body restored (halo.log's moves line, bots.c)
+#   turret   Slayer with every vehicle on Extinction (a Custom Edition map,
+#            from HALO_TEST_CE_MAPS with Halo PC's resource maps, as
+#            run_ce_map_memory_test.sh finds them; SKIP without): its gun
+#            towers stand far from where anyone plays, so the bots are set
+#            about one every ten seconds (HALO_TEST_COMMANDS' @pos) and fight
+#            there; a bot must man it and fire from it (the census's
+#            turrets), and get off again
+#   ladders  Oddball on Boarding Action, not fighting (HALO_BOT_PEACEFUL=1),
+#            8 bots: the ball's spawn is on another of the ship's floors,
+#            which the walkable surfaces do not join: the ladders (bots.c
+#            finds sixteen) must be climbed once at least
+#   new      powerups, turret and ladders
 #
 # The vehicle cases: the bots must take the vehicles - their census in
 # halo.log every ten seconds (bots.c: riding, driving, gunning, the distance
@@ -53,7 +68,10 @@
 # bots) and die (most bots at least once), and the score moves (but in CTF,
 # whose score is captures). Against: every bot on the other team from the
 # player, who dies again and again (the scripted player hardly fights back). The bots'
-# tick cost (us/tick, a bot) and path searches are printed from halo.log.
+# tick cost (us/tick, a bot) and path searches are printed from halo.log; a bot's
+# tick may cost HALO_TEST_BOT_BUDGET_US (30) at most on average (the harness is
+# some ten times the Vita's speed: the Vita's budget, 300 us a bot, a tenth of a
+# frame for fifteen).
 #
 #   maps     every stock multiplayer map in HALO_TEST_DATA's maps folder
 #            (beavercreek, bloodgulch, ..., wizard: those there) with every
@@ -87,6 +105,7 @@
 #   HALO_TEST_SECONDS  seconds of play (default 180; 120 for the maps case)
 #   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 #   HALO_TEST_RECHECK=1  the logs a kept HALO_TEST_OUT holds checked again, nothing played
+#   HALO_TEST_CE_MAPS, HALO_TEST_CE_RESOURCES  the turret case's Extinction and Halo PC's resource maps
 # The cases run at once, each in a network namespace of its own (unshare -rn:
 # a local game opens the game's ports too).
 set -u
@@ -99,7 +118,24 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
 test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 cases=${*:-slayer teams}
-cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams /')
+cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams /; s/ new / powerups turret ladders /')
+ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
+ce_resources=${HALO_TEST_CE_RESOURCES:-}
+if [ -z "$ce_resources" ]; then
+	ce_resources="$data/maps"
+	[ -e "$ce_resources/bitmaps.map" ] ||
+		ce_resources="$HOME/.local/share/Steam/steamapps/common/Halo The Master Chief Collection/halo1/maps/custom_edition"
+fi
+budget=${HALO_TEST_BOT_BUDGET_US:-30}
+# the bots a case plays with
+case_bots() { # NAME
+	case $1 in
+	powerups) echo 12 ;;
+	turret) echo 6 ;;
+	ladders) echo 8 ;;
+	*) echo "$bots" ;;
+	esac
+}
 map=${HALO_TEST_BOTS_MAP:-bloodgulch}
 seconds=${HALO_TEST_SECONDS:-180}
 case " $cases " in *" maps "*) seconds=${HALO_TEST_SECONDS:-120} ;; esac
@@ -121,19 +157,32 @@ fi
 mkdir -p "$out"
 
 run() { # NAME VARIANT [MAP=map] [VAR=value...]
-	local name=$1 variant=$2 game_map=$map
+	local name=$1 variant=$2 game_map=$map file
 	shift 2
 	case ${1:-} in MAP=*) game_map=${1#MAP=}; shift ;; esac
 	[ "${HALO_TEST_RECHECK:-0}" = 1 ] && return 0
 	rm -rf "$out/$name"
 	mkdir -p "$out/$name/data" "$out/$name/save"
-	ln -sfn "$(cd "$data" && pwd)/maps" "$out/$name/data/maps"
+	if [ -e "$data/maps/$game_map.map" ]; then
+		ln -sfn "$(cd "$data" && pwd)/maps" "$out/$name/data/maps"
+	else
+		# (a Custom Edition map: the Xbox maps, it and Halo PC's resource maps)
+		mkdir -p "$out/$name/data/maps"
+		for file in "$(cd "$data" && pwd)"/maps/*.map; do
+			ln -sfn "$file" "$out/$name/data/maps/"
+		done
+		ln -sfn "$(cd "$ce_maps" && pwd)/$game_map.map" "$out/$name/data/maps/$game_map.map"
+		for file in bitmaps sounds loc; do
+			ln -sfn "$(cd "$ce_resources" && pwd)/$file.map" "$out/$name/data/maps/$file.map"
+		done
+		set -- HALO_CUSTOM_EDITION=1 "$@"
+	fi
 	(cd "$out/$name" && exec unshare -rn sh -c 'ip link set lo up 2> /dev/null; exec "$@"' sh \
 		env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" \
 		HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=$((seconds + 20)) \
 		HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false \
 		HALO_NET_ONLINE=false HALO_NETWORK_TEST="local:$game_map:$variant" HALO_NETWORK_TEST_START=5 \
-		HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1 HALO_BOTS="$bots" "$@" \
+		HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1 HALO_BOTS="$(case_bots "$name")" "$@" \
 		timeout -k 5 $((seconds + 120)) "$binary" > "$out/$name/run.log" 2>&1)
 	echo $? > "$out/$name/exit"
 }
@@ -186,6 +235,22 @@ for name in $cases; do
 	vctf) run vctf ctf+vehicles HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_NETWORK_TEST_PLAYER_DRIVES=1 & ;;
 	vslayer) run vslayer slayer+vehicles HALO_BOT_SKILL=heroic & ;;
 	vteams) run vteams team_slayer+vehicles HALO_BOT_SKILL=legendary HALO_BOT_TEAMS=even & ;;
+	powerups) run powerups slayer HALO_BOT_SKILL=heroic & ;;
+	turret)
+		if [ ! -e "$ce_maps/extinction.map" ] || [ ! -e "$ce_resources/bitmaps.map" ] ||
+			[ ! -e "$ce_resources/sounds.map" ] || [ ! -e "$ce_resources/loc.map" ]; then
+			echo "SKIP (turret): no extinction.map in $ce_maps (HALO_TEST_CE_MAPS) or no Halo PC resource maps"
+			continue
+		fi
+		# (Extinction's gun tower at (-444.5 -165.2 11.1), on a platform: the
+		# bots set about it every ten seconds from the game's 20th second)
+		commands=""
+		for tick in $(seq 600 300 $(( (seconds + 5) * 30 ))); do
+			commands="${commands}L$tick:@pos 1 -440 -160 11.6;L$tick:@pos 2 -449 -160 11.6;L$tick:@pos 3 -444.5 -158 11.6;"
+			commands="${commands}L$tick:@pos 4 -440 -170 11.6;L$tick:@pos 5 -449 -170 11.6;"
+		done
+		run turret slayer+vehicles MAP=extinction HALO_BOT_SKILL=heroic "HALO_TEST_COMMANDS=$commands" & ;;
+	ladders) run ladders oddball MAP=boardingaction HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 & ;;
 	maps) continue ;;
 	*) echo "unknown case $name"; exit 2 ;;
 	esac
@@ -211,9 +276,9 @@ check() { # NAME
 	[ "$(cat "$out/$name/exit")" = 0 ] || fail "$name" "exit $(cat "$out/$name/exit")"
 	grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt" &&
 		fail "$name" "an assertion, exception or halt"
-	python3 - "$log" "$bots" "$name" "$map" <<'EOF' || status=1
+	python3 - "$log" "$(case_bots "$name")" "$name" "$map" "$budget" <<'EOF' || status=1
 import re, sys, math
-log, bots, name, game_map = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+log, bots, name, game_map, budget = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], float(sys.argv[5])
 named = {}
 places = {}
 last = {}
@@ -241,6 +306,52 @@ bot_players = [i for i, v in last.items() if v[3] >= 113]
 humans = [i for i, v in last.items() if v[3] < 113]
 if len(bot_players) != bots:
     fail("%d bots played, not %d" % (len(bot_players), bots))
+# (every case: a bot's tick within the budget, halo.log's last bots line)
+reports = [line for line in open(log, errors="replace") if "bots: tick " in line and "us/tick" in line]
+if reports:
+    cost = float(re.search(r"\(([\d.]+) a bot\)", reports[-1]).group(1))
+    print("  a bot's tick %.1f us (budget %.0f)" % (cost, budget))
+    if cost > budget:
+        fail("a bot's tick cost %.1f us, over the budget of %.0f" % (cost, budget))
+moves = [line for line in open(log, errors="replace") if "bots: moves at tick" in line]
+census = [line for line in open(log, errors="replace") if "bots: vehicles at tick" in line]
+if moves:
+    print("  moves: %s" % moves[-1].split(": ", 2)[-1].strip())
+def moves_number(pattern):
+    m = re.search(pattern, moves[-1]) if moves else None
+    return int(m.group(1)) if m else 0
+# (powerups: the hurt bots to the health packs)
+if name == "powerups":
+    sought, taken = moves_number(r"health (\d+)/"), moves_number(r"health \d+/(\d+)")
+    restored = moves_number(r"bodies restored (\d+)")
+    if not moves:
+        fail("no moves line in halo.log")
+    elif sought < 1:
+        fail("no bot went for a health pack")
+    elif taken < 1 and restored < 1:
+        fail("no bot took a health pack (%d went for one)" % sought)
+# (the turret on Extinction: manned, fired from, left)
+if name == "turret":
+    m = re.search(r"turrets (\d+), manned (\d+) times, ([\d.]+) s of their fire, (\d+) kills", census[-1]) if census else None
+    exits = len([line for line in open(log, errors="replace") if re.search(r"bots: bot \d+ out of .*\((no enemy before it|hurt)\)", line)])
+    print("  turrets: %s" % (m.group(0) if m else "no census"))
+    if not m or int(m.group(1)) < 1:
+        fail("no turret found")
+    elif int(m.group(2)) < 1:
+        fail("no bot manned the turret")
+    elif float(m.group(3)) <= 0.0:
+        fail("no bot fired from the turret")
+    if m and int(m.group(2)) >= 1 and exits < 1:
+        fail("no bot got off the turret (no enemy, or hurt)")
+    sys.exit(1 if failed else 0)
+# (the ladders on Boarding Action: climbed)
+if name == "ladders":
+    count, climbs = moves_number(r"ladders (\d+)"), moves_number(r"climbed (\d+)")
+    if count < 1:
+        fail("no ladders found")
+    elif climbs < 1:
+        fail("no bot climbed a ladder (%d gone to)" % moves_number(r"gone to (\d+)"))
+    sys.exit(1 if failed else 0)
 kills = deaths = died = 0
 for i in sorted(bot_players):
     track = places.get(i, [])

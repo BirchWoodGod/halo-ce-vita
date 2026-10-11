@@ -838,9 +838,15 @@ static void hud_draw_multitexture_overlay(
 				real_vector3d direction;
 				real_euler_angles2d angles;
 
-				unit_get_aiming_vector(unit_index, &direction);
-				euler_angles2d_from_vector3d(&angles, &direction);
-				source_value = angles.pitch;
+				/* port: (no unit - the player dead, the render a tick behind
+				as it respawns - no pitch: the HUD of a Custom Edition map
+				with this effector, Extinction's, read none and crashed) */
+				if (unit_index != NONE && object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+				{
+					unit_get_aiming_vector(unit_index, &direction);
+					euler_angles2d_from_vector3d(&angles, &direction);
+					source_value = angles.pitch;
+				}
 			}
 			break;
 
