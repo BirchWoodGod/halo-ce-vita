@@ -3532,6 +3532,56 @@ static void refresh_sounds(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) a speaking unit's mouth, from the mouth data of the permutation its
+channel plays, at the channel's estimated time plus ticks_since_estimate
+(update_channels, with none; with HALO_SOUND_MANAGER_DIVISOR also every call
+of sound_render that skips the work, with the sound time since the work last
+moved the estimate). The Xbox set it once a frame, and unit_update closes it
+by 0.1 every tick: set only every nth frame, from an estimate moved by one
+frame's time in n (channel_get_state), the mouths of the Vita's Balanced
+profile ran at half the speech's pace, a second and more behind its end,
+and closed between the frames that set them.
+HALO_MOUTH_LOG=1 logs each mouth set: "mouth: unit <index> sample <n> of
+<count> aperture <a>" (run_cutscene_lipsync_test.sh) */
+static void channel_set_mouth_aperture(
+	short channel_index,
+	real ticks_since_estimate)
+{
+	static int log_wanted = -1;
+	struct sound_channel_datum *channel = channel_get(channel_index);
+	struct sound_datum *sound;
+	long tick_index;
+	real mouth_aperture;
+
+	if (channel->sound_index == NONE || !channel->playing_permutation)
+	{
+		return;
+	}
+	sound = sound_get(channel->sound_index);
+	if (!sound_class_get(sound_definition_get(sound->definition_index)->sound_class)->speech ||
+		sound->track_proc != track_object_impulse_sound)
+	{
+		return;
+	}
+	tick_index = (long)(channel->estimated_tick_time + channel->pitch * ticks_since_estimate);
+	mouth_aperture = sound_permutation_get_real_mouth_aperture(
+		channel->playing_permutation,
+		tick_index);
+	game_sound_set_mouth_aperture(sound->source_identifier, mouth_aperture);
+	if (log_wanted < 0)
+		log_wanted = getenv("HALO_MOUTH_LOG") && atoi(getenv("HALO_MOUTH_LOG")) != 0;
+	if (log_wanted)
+	{
+		platform_log("mouth: unit %08lx sample %ld of %ld aperture %.3f",
+			(unsigned long)sound->source_identifier, tick_index,
+			(long)channel->playing_permutation->mouth_data.size, (double)mouth_aperture);
+	}
+
+	return;
+}
+#endif
+
 static void update_channels(
 	void)
 {
@@ -3694,6 +3744,10 @@ static void update_channels(
 				update_channel_for_looping_sound(channel_index, fade);
 			}
 
+#ifdef HALO_LINUX
+			/* port: the same, shared with the calls the work skips */
+			channel_set_mouth_aperture(channel_index, 0.f);
+#else
 			if (sound_class_get(definition->sound_class)->speech &&
 				sound->track_proc == track_object_impulse_sound)
 			{
@@ -3703,6 +3757,7 @@ static void update_channels(
 						channel->playing_permutation,
 						(long)channel->estimated_tick_time));
 			}
+#endif
 		}
 	}
 
@@ -4189,6 +4244,9 @@ static boolean sound_render_manager_this_call(
 	}
 	return divisor == 1 || calls++ % (unsigned long)divisor == 0;
 }
+
+/* the sound time (ticks) of the calls since the last that did the work */
+static real sound_render_skipped_ticks = 0.f;
 #endif
 
 void sound_render(
@@ -4256,6 +4314,14 @@ void sound_render(
 			if (sound_render_manager_this_call())
 #endif
 			{
+#ifdef HALO_LINUX
+			/* (the sound time of the calls that skipped the work is this
+			one's too: the channels' estimated times (channel_get_state) and
+			the other sounds' fall under dialogue (refresh_sounds) keep the
+			speech's pace) */
+			sound_manager_globals.ticks_elapsed += sound_render_skipped_ticks;
+			sound_render_skipped_ticks = 0.f;
+#endif
 			process_looping_sounds();
 			SOUND_SPLIT(2);
 			refresh_sounds();
@@ -4266,6 +4332,22 @@ void sound_render(
 			SOUND_SPLIT(5);
 			sound_manager_globals.flip_flop = !sound_manager_globals.flip_flop;
 			}
+#ifdef HALO_LINUX
+			else
+			{
+				/* (a call the work skips: the speaking units' mouths still
+				follow their speech every frame, as on the Xbox) */
+				short channel_index;
+
+				sound_render_skipped_ticks += sound_manager_globals.ticks_elapsed;
+				for (channel_index = 0;
+					channel_index < sound_manager_globals.channel_count;
+					channel_index++)
+				{
+					channel_set_mouth_aperture(channel_index, sound_render_skipped_ticks);
+				}
+			}
+#endif
 		}
 
 		sound_manager_globals.platform_definition->end_scene();
