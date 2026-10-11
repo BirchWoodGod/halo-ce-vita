@@ -1054,7 +1054,7 @@ void rasterizer_lens_flares_submit_occlusion_tests(
 
 #ifdef HALO_LINUX
 /* (port) HALO_SUN_RAYS=0: no sun glow and rays (rasterizer_sun_glow_draw),
-the settings panel's Sun rays, off in its Performance profile. With the sun
+the settings panel's Sun rays, off in its Performance and Balanced profiles. With the sun
 in view they cost the Vita's GPU seven 64x64 scenes a frame, six of them
 waiting for the one before, and the main scene stored and loaded again
 around them (port/vita/platform/d3d8_gxm.c, small targets drawn in order) */
