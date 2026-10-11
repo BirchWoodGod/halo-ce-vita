@@ -12,6 +12,7 @@ drawn for them. */
 
 struct player_action;
 struct network_player;
+struct game_variant_options;
 
 /* the most bots in one game (with one player, the Xbox's 16) */
 #define BOTS_MAXIMUM 15
@@ -59,9 +60,9 @@ void bots_playlist_before_pregame(void);
 playlist put up its own (the lobby, the countdown on), in place of the
 map choice */
 int bots_playlist_pregame_ui(void);
-/* whether the game on the level `map_name` the lobby starts is one the
-playlist set up (network_game_manager.c: its options, the time limit, played
-as a client plays the host's) */
-int bots_playlist_set_up(char const *map_name);
+/* the game on the level `map_name` the lobby starts: nonzero when it is one
+the playlist set up, with its options (network_game_manager.c: the time
+limit) */
+int bots_playlist_options(char const *map_name, struct game_variant_options *options);
 
 #endif

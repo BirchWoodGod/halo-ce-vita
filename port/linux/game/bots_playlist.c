@@ -268,6 +268,7 @@ static struct
 	is it (its options played: the time limit) */
 	short next;
 	boolean set_up;
+	struct game_variant_options options;
 	struct game_variant variant;
 	char last_map[BOTS_PLAYLIST_MAP_NAME_CHARACTERS + 1];
 	/* games the playlist has started this session */
@@ -456,8 +457,9 @@ static boolean bots_playlist_add(char const *map, char const *gametype, char con
 	}
 	game = &bots_playlist.games[bots_playlist.count++];
 	snprintf(game->map, sizeof(game->map), "%s", map);
-	/* (the file's name in lower case, as the level list names the Xbox's) */
-	for (c = game->map; *c; c++)
+	/* (an Xbox map's name in lower case, as the level list names it; a
+	custom map's as its file has it) */
+	for (c = game->map; *c && bots_playlist_xbox_map(map); c++)
 	{
 		if (*c >= 'A' && *c <= 'Z')
 			*c = (char)(*c - 'A' + 'a');
@@ -752,7 +754,6 @@ playlist off), the playlist off until the players leave Split Screen */
 static void bots_playlist_stop(void)
 {
 	struct network_game_server *server = global_network_game_server_get();
-	struct game_variant_options options;
 
 	/* (the B taken from the menus' events: the map choice put up below saw
 	it pressed and left Split Screen) */
@@ -761,12 +762,7 @@ static void bots_playlist_stop(void)
 	bots_playlist.state = _bots_playlist_state_idle;
 	bots_playlist.set_up = FALSE;
 	if (server)
-	{
 		network_game_server_port_stop_countdown(server);
-		/* (the game's own options again: no playlist time limit) */
-		game_variant_options_default(&bots_playlist.variant, &options);
-		network_game_server_port_set_variant_options(server, &options);
-	}
 	ui_widgets_close_all();
 	ui_widget_load_by_name_or_tag(BOTS_PLAYLIST_MAP_CHOICE_SCREEN, NONE, NULL, NONE, NONE, NONE, NONE);
 	platform_log("bots playlist: stopped (B in the lobby): the map choice, the playlist off until Split Screen is left");
@@ -814,7 +810,6 @@ void bots_playlist_before_pregame(void)
 int bots_playlist_pregame_ui(void)
 {
 	struct network_game_server *server = global_network_game_server_get();
-	struct game_variant_options options;
 	struct bots_playlist_game *game;
 	char level[64];
 
@@ -827,12 +822,14 @@ int bots_playlist_pregame_ui(void)
 	snprintf(level, sizeof(level), BOTS_PLAYLIST_LEVEL_FORMAT, game->map, game->map);
 	/* (as the map choice does: the next map precached in the lobby) */
 	main_set_multiplayer_map_name(level);
-	game_variant_options_default(&bots_playlist.variant, &options);
-	options.time_limit = BOTS_PLAYLIST_TIME_LIMIT;
+	/* (the game's own options and the time limit: played as it starts,
+	network_game_manager.c) */
+	game_variant_options_default(&bots_playlist.variant, &bots_playlist.options);
+	bots_playlist.options.time_limit = BOTS_PLAYLIST_TIME_LIMIT;
 #ifndef HALO_RELEASE
-	options.time_limit = (short)bots_playlist_test_number("HALO_TEST_BOT_PLAYLIST_MINUTES", options.time_limit);
+	bots_playlist.options.time_limit = (short)PIN(
+		bots_playlist_test_number("HALO_TEST_BOT_PLAYLIST_MINUTES", bots_playlist.options.time_limit), 0, 60);
 #endif
-	network_game_server_port_set_variant_options(server, &options);
 	if (!ui_widget_load_by_name_or_tag(BOTS_PLAYLIST_PREGAME_SCREEN, NONE, NULL, NONE, NONE, NONE, NONE))
 	{
 		platform_log("bots playlist: the lobby's screen did not load: the map choice");
@@ -845,7 +842,7 @@ int bots_playlist_pregame_ui(void)
 	return TRUE;
 }
 
-int bots_playlist_set_up(char const *map_name)
+int bots_playlist_options(char const *map_name, struct game_variant_options *options)
 {
 	char level[64];
 
@@ -853,7 +850,11 @@ int bots_playlist_set_up(char const *map_name)
 		return FALSE;
 	snprintf(level, sizeof(level), BOTS_PLAYLIST_LEVEL_FORMAT, bots_playlist.games[bots_playlist.next].map,
 		bots_playlist.games[bots_playlist.next].map);
-	return !csstrcasecmp(level, map_name);
+	if (csstrcasecmp(level, map_name))
+		return FALSE;
+	*options = bots_playlist.options;
+	platform_log("bots playlist: the game's time limit %d min", options->time_limit);
+	return TRUE;
 }
 
 void bots_playlist_update(int main_menu_loaded, float seconds)
