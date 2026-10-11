@@ -14,8 +14,9 @@ build refuses an MCC map's tags without:
 2. the scenario's scripts, which invader-extract decompiles into the
    scenario, are written out as a source file, with the calls of MCC's own
    script functions (mcc_mission_segment, which marks a mission's segments
-   for MCC's statistics) made constants of their type: `(not true)` for a
-   boolean, as this port's script loader makes any call it lacks;
+   for MCC's statistics) made constants: `true`, what it gives in MCC (its
+   maps test it before a cinematic's pause) and this port's script loader
+   makes of it;
 3. a lens flare reflection naming a bitmap past the end of its flare's
    bitmap (MCC draws none) is given the first, other indices past the end
    of what they index are made none (invader-bludgeon invalid-indices, as
@@ -68,7 +69,7 @@ import zlib
 # definitions: in "mcc-cea" but not "gbx-custom"), with what a call becomes
 MCC_ONLY_FUNCTIONS = {
 	# (boolean mcc_mission_segment <string>)
-	"mcc_mission_segment": "(not true)",
+	"mcc_mission_segment": "true",
 }
 
 # Custom Edition's tag space, and the most this port gives a map (OpenSauce's

@@ -118,7 +118,8 @@ As it loads (`cache_file_formats.c`, `custom_edition_cache.c`,
 | a DXT bitmap not marked compressed (the HUD wraith icon) | marked | marked, its mipmaps cut to those its pixels hold whole |
 | indices out of range, enumerators past their values | | none or valid ones, as any map's (`tag_validate.c`) |
 | a sixth `weapon_type` | 5 values | 0 (`tag_validate.c`: the rocket warthog's gun) |
-| `mcc_mission_segment`, `player_effect_set_max_vibrate` | no such functions | the calls do nothing (`custom_edition_scripts.c`) |
+| `mcc_mission_segment` | no such function | a call gives true, as in MCC, and does nothing else (`custom_edition_scripts.c`) |
+| `player_effect_set_max_vibrate` | `player_effect_set_max_rumble` | called by that name |
 | two objects of one name | | the first placed has it (`objects.c`) |
 | more than 48 object lists in one update (b40, c20) | | collected between scripts (`feat/mcc-maps`) |
 | a HUD laid out on a canvas twice the Xbox's ([The HUD](#the-hud)) | the Xbox's 640x480 | placements, margins and digit metrics halved, bitmaps drawn at a quarter (also converted maps) |
@@ -218,8 +219,8 @@ game makes of a version 13 map](#what-the-game-makes-of-a-version-13-map)):
 - more than 512 object names: those the scripts, AI conversations and
   command lists name come first, the rest past 512 are dropped (their
   objects unnamed; nothing names them);
-- `mcc_mission_segment` calls: `(not true)`, what this build's script loader
-  makes of a call it lacks.
+- `mcc_mission_segment` calls: `true`, what MCC gives (its maps test it
+  before a cinematic's pause) and this build's script loader makes of one.
 
 What the converted map needs of this build (branch `feat/mcc-maps`):
 

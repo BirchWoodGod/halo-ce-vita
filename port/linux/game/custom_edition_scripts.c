@@ -223,7 +223,26 @@ static boolean function_call_convert(
 		first_argument = &conversion->nodes[DATUM_INDEX_TO_ABSOLUTE_INDEX(name_node->next_node_index)];
 	}
 	function_index = hs_find_function_by_name(name);
-	if (function_index == NONE)
+	/* (port) MCC's name for Halo PC's player_effect_set_max_rumble (the
+	same two reals: Halo: CE Anniversary's maps call it 4-16 times each) */
+	if (function_index == NONE && !strcmp(name, "player_effect_set_max_vibrate"))
+	{
+		function_index = hs_find_function_by_name("player_effect_set_max_rumble");
+	}
+	if (function_index == NONE && !strcmp(name, "mcc_mission_segment") && call->type == _hs_type_boolean)
+	{
+		/* (port) MCC's mission statistics: a call that gives true there,
+		which its maps test before a cinematic's pause ("(if
+		(mcc_mission_segment cine1_intro) (sleep ...))": MCC's b30 5 times,
+		a10 8), so it gives true here too, doing nothing else (GulchCE's
+		mcc_scripts.c, CC0, gives true as well) */
+		node_make_inert(conversion, call, "function", name, NULL);
+		if (TEST_FLAG(call->flags, _hs_syntax_node_primitive_bit))
+		{
+			call->data = TRUE;
+		}
+	}
+	else if (function_index == NONE)
 	{
 		node_make_inert(conversion, call, "function", name, NULL);
 	}

@@ -80,7 +80,7 @@ def test_mcc_mission_segment_calls_become_constants():
     rewritten, count = convert.make_mcc_calls_constant(source)
     assert count == 3
     assert "mcc_" not in rewritten
-    assert rewritten.startswith("(if (not true) (sleep 1))")
+    assert rewritten.startswith("(if true (sleep 1))")
 
 
 def test_the_script_source_is_read_from_the_scenario_tag(tmp_path):
