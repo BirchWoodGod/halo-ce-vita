@@ -107,7 +107,10 @@ nothing. */
 struct shader_model_maps
 {
 	struct shader shader;
-	byte reserved28[0x7C];
+	/* (bit 6: MCC's "use xbox multipurpose channel order",
+	SHADER_MODEL_XBOX_MULTIPURPOSE_BIT) */
+	word model_flags;
+	byte reserved2A[0x7A];
 	struct tag_reference base_map;
 	byte reservedB4[0x8];
 	struct tag_reference multipurpose_map;
@@ -117,6 +120,8 @@ struct shader_model_maps
 	struct tag_reference reflection_cube_map;
 };
 
+typedef char verify_shader_model_maps_model_flags_offset[
+	offsetof(struct shader_model_maps, model_flags) == 0x28 ? 1 : -1];
 typedef char verify_shader_model_maps_base_map_index_offset[
 	offsetof(struct shader_model_maps, base_map.index) == 0xB0 ? 1 : -1];
 typedef char verify_shader_model_maps_multipurpose_map_index_offset[
@@ -168,6 +173,8 @@ struct reordered_bitmap
 	build's: the renderer has one order for each texture, so this one keeps
 	its channels as they are */
 	boolean drawn_otherwise;
+	/* first listed by a model shader (else a HUD meter): for the load log */
+	boolean multipurpose;
 };
 
 struct custom_edition_bitmaps_globals
@@ -301,6 +308,7 @@ static boolean reordered_bitmap_add(
 	bitmap->handle = handle;
 	bitmap->channel_order = channel_order;
 	bitmap->drawn_otherwise = FALSE;
+	bitmap->multipurpose = FALSE;
 
 	return TRUE;
 }
@@ -323,6 +331,13 @@ static void reordered_bitmap_drawn_otherwise(
 /* (port) MCC's meter flag "use xbox shading" (Invader's
 HUDInterfaceMeterFlags, after the five the Xbox has: hud_draw.c) */
 #define HUD_METER_USE_XBOX_SHADING_BIT 5
+/* (port) A model shader's flag of MCC's tools (Invader: shader_model flags
+bit 6, "use xbox multipurpose channel order"): its multipurpose map's masks
+are in the Xbox's channels, as MCC's own model shaders keep them (most of
+Halo: CE Anniversary's: 109 of a10's 128, and Ruby's Rebalanced Halo: CE's,
+natively and converted), so they are not Halo PC's to reorder (GulchCE's
+mcc_bitmaps.c, CC0, reads the flag so). Halo PC's tools leave it clear. */
+#define SHADER_MODEL_XBOX_MULTIPURPOSE_BIT 6
 
 /* (port) the bitmap of the HUD meter `meter`, listed in Halo PC's meter
 order - its shape in colour, the order it fills in alpha - unless the meter
@@ -645,6 +660,7 @@ boolean custom_edition_reordered_bitmaps_find(
 	long meter_count = 0;
 	long kept_count = 0;
 	long xbox_meter_count = 0;
+	long xbox_multipurpose_count = 0;
 	long bitmap_index;
 
 	/* the bitmaps drawn in Halo PC's orders: model shaders' multipurpose
@@ -652,9 +668,21 @@ boolean custom_edition_reordered_bitmaps_find(
 	tag_index = NONE;
 	while ((shader = custom_edition_cache_tag_next(tag_cache, loaded_bytes, SHADER_MODEL_GROUP_TAG, sizeof(*shader), &tag_index)) != NULL)
 	{
-		if (!reordered_bitmap_add(tag_cache, loaded_bytes, shader->multipurpose_map.index, _custom_edition_channels_multipurpose))
+		long count = globals->reordered_bitmap_count;
+
+		if (!reordered_bitmap_add(
+			tag_cache,
+			loaded_bytes,
+			shader->multipurpose_map.index,
+			TEST_FLAG(shader->model_flags, SHADER_MODEL_XBOX_MULTIPURPOSE_BIT) ?
+				_custom_edition_channels_xbox :
+				_custom_edition_channels_multipurpose))
 		{
 			return FALSE;
+		}
+		if (globals->reordered_bitmap_count > count)
+		{
+			globals->reordered_bitmaps[count].multipurpose = TRUE;
 		}
 	}
 	tag_index = NONE;
@@ -702,9 +730,17 @@ boolean custom_edition_reordered_bitmaps_find(
 
 		if (bitmap->channel_order == _custom_edition_channels_xbox)
 		{
-			/* (an Xbox-shaded meter's: its channels are this build's) */
+			/* (an Xbox-shaded meter's, or the multipurpose map of a model
+			shader with MCC's flag: its channels are this build's) */
+			if (bitmap->multipurpose)
+			{
+				xbox_multipurpose_count++;
+			}
+			else
+			{
+				xbox_meter_count++;
+			}
 			*bitmap = globals->reordered_bitmaps[--globals->reordered_bitmap_count];
-			xbox_meter_count++;
 		}
 		else if (bitmap->drawn_otherwise)
 		{
@@ -741,6 +777,13 @@ boolean custom_edition_reordered_bitmaps_find(
 			_error_silent,
 			"custom edition: %ld HUD meters are shaded as the Xbox's (MCC's flag) and keep their channels",
 			xbox_meter_count);
+	}
+	if (xbox_multipurpose_count)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld multipurpose maps are in the Xbox's channel order (MCC's model shader flag) and keep their channels",
+			xbox_multipurpose_count);
 	}
 
 	return TRUE;
