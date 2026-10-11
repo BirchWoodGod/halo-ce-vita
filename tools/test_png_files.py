@@ -4,7 +4,7 @@ shows (custom_edition_mods.c, custom_edition_maps.c).
 
 The pictures are made here (no mod's are stored) with every one of PNG's
 row filters, and the report tool port/tools/png_file_report.c is built with
-the game's own zlib (source/memory/zlib, as port/vita/tests/run_map_share_test.sh
+the port's zlib (port/third_party/zlib, its names prefixed z_ as the game
 builds it), warnings as errors, undefined behaviour trapping and, where the
 compiler has it, AddressSanitizer: the bitmap each picture becomes is
 compared pixel for pixel, the kinds not read are refused, and every
@@ -24,8 +24,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "port/linux/game/png_files.c"
 TOOL = ROOT / "port/tools/png_file_report.c"
-ZLIB = ROOT / "source/memory/zlib"
-ZLIB_SOURCES = ["adler32", "crc32", "infblock", "infcodes", "inffast", "inflate", "inftrees", "infutil", "zutil"]
+ZLIB = ROOT / "port/third_party/zlib"
+ZLIB_SOURCES = ["adler32", "crc32", "inffast", "inflate", "inftrees", "zutil"]
 
 STRICT_FLAGS = ["-Wall", "-Wextra", "-Wpedantic", "-Werror"]
 UB_TRAP_FLAGS = ["-fsanitize=undefined", "-fsanitize-trap=undefined"]
@@ -44,16 +44,13 @@ def report_tool(tmp_path_factory):
     if clang is None:
         pytest.skip("clang is needed to build the report tool")
     folder = tmp_path_factory.mktemp("png-file-report")
-    # (the game's zlib takes debug_malloc from cseries.h: the C library's here)
-    (folder / "cseries.h").write_text("#include <stdlib.h>\n#define debug_malloc(size, clear, file, line) calloc(1, (size))\n"
-                                      "#define debug_free(pointer, file, line) free(pointer)\n")
     output = folder / ("png_file_report.exe" if sys.platform == "win32" else "png_file_report")
     errors = []
     for extra in (["-fsanitize=address", "-fno-omit-frame-pointer"], []):
         objects = []
         for source in ZLIB_SOURCES:
             target = folder / f"{source}.o"
-            result = subprocess.run([clang, "-O1", "-w", *extra, f"-I{folder}", "-c", str(ZLIB / f"{source}.c"),
+            result = subprocess.run([clang, "-O1", "-w", *extra, "-DZ_PREFIX", "-c", str(ZLIB / f"{source}.c"),
                                      "-o", str(target)], capture_output=True, text=True)
             if result.returncode:
                 errors.append(result.stderr)

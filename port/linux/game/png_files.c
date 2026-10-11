@@ -4,7 +4,8 @@ PNG_FILES.C
 (port) Reading of a Halo: The Master Chief Collection mod's PNG pictures
 (png_files.h): the chunks walked within the file, the header's kind and
 size checked before anything is allocated, the image data inflated into
-rows of exactly the size the header gives (zlib, the game's own), each row
+rows of exactly the size the header gives (the port's zlib, 1.3.2, which
+inflates other people's data: not the game's 1.1.3), each row
 unfiltered (PNG's five filters) and written out as a 32-bit Windows bitmap,
 top row first, alpha dropped (the menus' pictures are opaque).
 */
@@ -13,7 +14,7 @@ top row first, alpha dropped (the menus' pictures are opaque).
 
 #include "png_files.h"
 
-#include "memory/zlib/zlib.h"
+#include "../../third_party/zlib/zlib_prefixed.h"
 
 #include <stdlib.h>
 #include <string.h>
