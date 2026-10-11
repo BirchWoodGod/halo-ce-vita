@@ -775,6 +775,16 @@ boolean network_game_create_game_objects(
 		game_unload();
 	}
 
+#ifdef HALO_LINUX
+	/* port: a client's co-op level begun, for its profile when won
+	(coop_progress.c) */
+	if (!game->variant.game_engine_index && !global_network_game_server_get())
+	{
+		void coop_progress_client_level_started(char const *map_name, short difficulty);
+
+		coop_progress_client_level_started(game->map.name, game->difficulty);
+	}
+#endif
 	if (game->variant.game_engine_index)
 	{
 		game_set_game_variant(&game->variant);

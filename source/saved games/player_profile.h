@@ -104,6 +104,14 @@ real_rgb_color player_profile_get_rgb_color(
 	long color_index);
 void player_profile_save_level_completed(
 	short local_player_index);
+#ifdef HALO_LINUX
+/* port: a level (of the campaign's ten) won on a difficulty, recorded in a
+local player's profile: network co-op's, port/linux/game/coop_progress.c */
+void player_profile_save_level_completed_at(
+	short local_player_index,
+	short level,
+	short difficulty);
+#endif
 void player_profiles_enumerate_available_to_local_player_index(
 	short local_player_index,
 	word *number_of_profiles,
