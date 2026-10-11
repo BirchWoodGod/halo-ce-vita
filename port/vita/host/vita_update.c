@@ -82,7 +82,6 @@ static unsigned long long free_space(const char *path)
 /* the folder, the running game's title and version, where the files are */
 static int configure(struct update_download_config *config)
 {
-	const char *data = getenv("HALO_DATA_ROOT");
 	char title[256];
 
 	memset(config, 0, sizeof(*config));
@@ -91,7 +90,9 @@ static int configure(struct update_download_config *config)
 	if (sceAppMgrAppParamGetString(0, 12, title, sizeof(title)) < 0 || strlen(title) != 9)
 		return 0;
 	snprintf(config->title, sizeof(config->title), "%s", title);
-	snprintf(config->data, sizeof(config->data), "%s", data && data[0] ? data : DATA_DIRECTORY);
+	/* (the app's own folder, ux0:data/haloce-vita, not the game's data root
+	under it, HALO_DATA_ROOT: update/ is where players find it in VitaShell) */
+	snprintf(config->data, sizeof(config->data), "%s", DATA_DIRECTORY);
 	snprintf(config->current_version, sizeof(config->current_version), "%s", HALO_VITA_VERSION);
 	snprintf(config->base, sizeof(config->base), "%s", UPDATE_DOWNLOAD_BASE);
 #ifdef HALO_UPDATE_TEST_SOURCES

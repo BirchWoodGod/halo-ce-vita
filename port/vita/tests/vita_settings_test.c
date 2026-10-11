@@ -1995,6 +1995,36 @@ static void test_updates(void)
 	redraw();
 	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
 	press(VITA_BUTTON_CIRCLE);
+
+	/* the update download's dialogs as vita_update.c drives them, from its
+	thread: the question, the progress line, then the line withdrawn and the
+	last message at once - closing the message leaves nothing over the game
+	(the progress line came back over it, "frozen", on hardware) */
+	vita_settings_question("Halo CE: update", "Download it now?");
+	frame(0);
+	check(menu_visible && strstr(menu, "Download it now?") != NULL, "the download's question");
+	press(VITA_BUTTON_CROSS);
+	check(vita_settings_question_answer() == 1, "Cross: yes");
+	vita_settings_progress("Halo CE: update", "Downloading: 2.4 of 4.8 MB (50%)");
+	frame(0);
+	check(menu_visible && strstr(menu, "Downloading: 2.4 of 4.8 MB") != NULL, "its progress line over the game");
+	vita_settings_progress("Halo CE: update", "Checking the download: 100%");
+	frame(0);
+	check(strstr(menu, "Checking the download: 100%") != NULL, "the progress line follows");
+	vita_settings_progress(NULL, NULL);
+	vita_settings_message("Halo CE: update", "1.1.0-beta.4 downloaded and verified. Install it with VitaShell: "
+		"ux0:data/haloce-vita/update/halo-1.1.0-beta.4.vpk");
+	frame(0);
+	check(menu_visible && strstr(menu, "downloaded and verified") != NULL && !strstr(menu, "Checking the download"),
+		"the last message replaces the progress line");
+	press(VITA_BUTTON_CROSS);
+	frame(0);
+	redraw();
+	check(!menu_visible && !strstr(menu, "Checking the download"),
+		"closing it leaves nothing over the game (no progress line again)");
+	open_panel();
+	check(menu_visible && strstr(menu, "*General") != NULL, "the panel opens again as before");
+	press(VITA_BUTTON_CIRCLE);
 }
 
 int main(void)

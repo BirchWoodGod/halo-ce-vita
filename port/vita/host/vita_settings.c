@@ -3704,7 +3704,11 @@ int vita_settings_input(const struct vita_host_pad *pad)
                 question_visible = 0;
                 question_pending = 1;
             }
-            else if (progress_visible)
+            /* port: not a progress line withdrawn meanwhile (a thread's last
+            message comes with its line's end: shown again, the line stayed
+            over the game for good, holding the buttons - the update download
+            and the CE installer looked frozen) */
+            else if (progress_visible && !progress_hide)
                 progress_changed = 1;
             pthread_mutex_unlock(&message_lock);
         }
