@@ -161,7 +161,7 @@ netns modes pingsmixed, mapmidmixed and swatmixed test this.
 | G3 | Join token | XOR "Vita-only game!" on Vita builds (`network_server_manager.c:3539-3550`) | Constant | Blocking by design | 1 |
 | G4 | Signalling (MQTT) | Topic prefix and key label `hcev` (the label goes into the session key HMAC). MESSAGE_VERSION 3. Our optional relays block sits right after the address list. | `hceu`, MESSAGE_VERSION 4: a WebRTC block follows the address list. OpenCE's JOIN parser accepts no trailing bytes other than the 32-byte proof, and ACCEPT must match exactly (`p2p_signal.c:1181-1186, 1347`). | **Format, blocking** | 1 |
 | G5 | Server browser listing | "HL" **format 2**, `hcev/3/lobby/...`, label `hcev-lobby-1`, version must equal ours (`p2p_lobby.c:556, 1228`) | Format 1, `hceu/3/lobby/...`, `hceu-lobby-1`, version must equal 26 | Format | 1 |
-| G6 | `map.version` in the game record | Our map-share identity (checksum ^ size·0x9E3779B1, or a CRC-32). CE multiplayer maps keep `levels\test\<n>\<n>` names (`custom_edition_maps.c:584-591`, `map_share_protocol.c:803-823`). | Raw CE header checksum; CE maps named `custom_maps\<name>` (v22, 4e8ed2f1; 9d309f8d) | Meaning: each side refuses the other's CE maps | 1 (CE maps), stock maps unaffected |
+| G6 | `map.version` in the game record | Legacy wire: our map-share identity (checksum ^ size·0x9E3779B1, or a CRC-32), CE multiplayer maps named `levels\test\<n>\<n>` (`custom_edition_maps.c`, `map_share_protocol.c`). Crossplay: **closed for our client (T3, section 6.1)** | Raw CE header checksum; CE maps named `custom_maps\<name>` (v22, 4e8ed2f1; 9d309f8d) | Meaning: each side refuses the other's CE maps | 1 (CE maps), stock maps unaffected |
 | G7 | v24 PC vehicle set | Missing | New enum value in `game_variant_options.vehicle_set` | Meaning (rides G1) | 1 |
 | G8 | v19 co-op player collisions | `__padding10C` | `cooperative_flags` bit 0 in byte 0x10C | Meaning; harmless if ignored | 2 |
 | G9 | v10 pings (distributed 19) | Missing on 1.1. 1.1.1 has the same id and entry, but rejects values over 9999 other than 0xFFFF, while OpenCE sends up to 0xFFFE. | Every 2 s, unreliable | Additive | 1 (port 1.1.1's, relax the check) |
@@ -438,9 +438,41 @@ from the listing or advertisement, and again on the settings record:
 |---|---|---|
 | players (owner, Oct 11) | **allow**, marked **Experimental** past 16 | Not a refusal: OpenCE's quick-setup hosts allow 128 slots, and our tree holds 128 machines (`HALO_PORT_MAXIMUM_NETWORK_MACHINES`), so it is a frame-rate question, not a limit. With Crossplay On, the browser badges a game with more than 16 players in it, or a maximum above 16, "Experimental", and joining one asks once ("Large PC game: more than 16 players can make the Vita lag. Join anyway?"). Judged on current players and the maximum, from the listing and again on the settings record. |
 | co-op | refuse the crossplay wire's co-op hosts | G14: a PC co-op host drives up to 1056 actors; ours hold 288. The other direction (PC client, Vita co-op host) is safe in principle and can open in phase 3 after an index audit. |
-| map | must be present locally and pass `custom_edition_maps` limits (23 MB tag cache, file ≤ 0x18000000, no compressed CE maps, resource maps from the player) | OpenCE has no map download, so a PC host's custom map needs the player's own copy. The v22 missing-map message names it. |
+| map | must be present locally and pass `custom_edition_maps` limits (23 MB tag cache, file ≤ 0x18000000, no compressed CE maps, resource maps from the player) | Built (T3, section 6.1). OpenCE has no map download, so a PC host's custom map needs the player's own copy; a missing one is refused with a message naming it, and map share is never asked of a PC host. |
 | game in progress (flag 0x02) | allowed | Late join costs a precache. Our texture-streaming work applies. |
 | split screen in a PC game (PS TV) | 1 local player in crossplay games until measured | |
+
+### 6.1 A PC host's map (T3, built Oct 11 2026)
+
+With Crossplay on, our client takes a PC host's map as OpenCE names it
+since network version 22 (`port/linux/game/crossplay_maps.c`,
+`custom_edition_maps_crossplay_check`; the legacy check is untouched):
+
+| The host names | map.version | Our client plays it when |
+|---|---|---|
+| `levels\test\<n>\<n>` (a multiplayer level) | 0 | its `<n>.map` is the Xbox map, whole (NTSC 2276 or PAL 2342) |
+| another level path (a modded Xbox map) | 0 | its `<n>.map` is an Xbox multiplayer cache |
+| `custom_maps\<n>` (a CE map) | raw CE header checksum (0: nothing compared) | its `<n>.map`/`.yelo` is a CE cache with that checksum, its resource maps are there and PC maps is on |
+| `maps_md\<n>.md`, `maps_pc\<n>.pc` (ChupathingyCE's HaloMD and Halo PC retail, cache v7) | checksum | never |
+| one of the game's own maps with a version, or a name refused | | never |
+
+**The stock-map rule.** OpenCE, ChupathingyCE and DamnationCE run the Xbox
+game's own caches: their "stock" multiplayer maps are the Xbox maps, NTSC
+01.10.12.2276 or PAL 01.01.14.2342 (the same build list as ours), named by
+their Xbox level paths with version 0. They join as on the legacy wire:
+never compared (regions play together), our file checked to be the Xbox map.
+Halo PC's versions of those levels are other maps with other tags: a PC host
+plays them as Custom Edition maps (`custom_maps\bloodgulch`), compared by
+checksum like any other; our client with the Xbox `bloodgulch.map` is told
+the host plays the PC map. They can't be made equivalent: objects are named
+by tag index.
+
+Names are untrusted: at most 63 characters, printable, no `/`, `:` or
+`..`, a file name of at most 25 characters that map sharing would take (or
+an Xbox level's), no device or resource map name, nothing under
+`custom_maps\` but the file. Only a name that passed is looked for, and
+only as a file of the maps folder. Each refusal names the map (es.txt has
+the messages) and offers no download.
 
 **Our hosts with PC clients** (phase 3, task T12):
 - The 16-player cap stays (`network_game_server_port_maximum_players`).
@@ -597,7 +629,7 @@ order follows the phases; tasks within a phase run in parallel up to the
 |---|---|---|---|
 | T1 Wire contract test | Tool comparing our message tables, enum values, struct offsets (`network_game`, advertisement, listing) and encoded bytes against a pinned OpenCE checkout; reports each gap of section 3.2 | 2–3 | Fails today on G1/G2/G5/G11; passes as tasks land |
 | T2 Settings record v11 + v24 + v19 | Add `game_variant_options` to `network_game` (13,120 bytes), the PC gametype options' behaviour (vehicle set incl. v24, loadouts, radar, friendly fire, respawn) with receive-side validation; `cooperative_flags`; audit the upstream behaviour fixes listed in 3.2 | 4–5 | T1 passes for the record; net_fuzz target for variant options; host/join on the harness with each option |
-| T3 Map identity v22 | Host sends the raw CE checksum in `map.version` and `custom_maps\<name>` for CE multiplayer maps on the crossplay wire; map share keeps its own identity inside its own messages (answer carries checksum and size) | 3–4 | netns `badmap`/`mapmid`; a CE map game between our two builds, with and without a download |
+| T3 Map identity v22 | Client side (owner, Oct 11: we never host on the crossplay wire): take a PC host's `custom_maps\<name>` and raw CE checksum, find the local map, refuse what is missing or unloadable naming it, never map share toward a PC host (section 6.1). Done Oct 11 (feat/xp-map-identity) | 3–4 | `run_crossplay_maps_test.sh` (unit + stand-in host), `crossplay_maps` fuzz target, netns `crossmaps` (XFAIL until T4); `badmap`/`mapmid`/`mapmidmixed`/`code` with Crossplay off |
 | T4 Two wires | The legacy v18 wire and the crossplay wire behind one runtime switch: record translation, token XOR, flags (0x40/0x80 reserved for ours), version announce/accept, prefix/label, listing format; the crossplay setting and `sv_crossplay` | 4–6 | netns `crossmixed`: beta.4 (v18) host + beta.5 joiner, and the reverse, on legacy; beta.5 pair on crossplay; existing `*mixed` modes still pass |
 | T5 Signalling v4 + listing v1 | MESSAGE_VERSION 4 with WebRTC kind "none"; relays moved out of JOIN/ACCEPT for crossplay (a separate sealed message, or only on legacy); hceu topics and label; publish format-1 listings (and format 2 on legacy) | 4–5 | `run_p2p_lobby_test.sh` + signal fuzz; netns `code`/`lobby`/`relay` on both wires |
 | T6 Capability handshake | The XV distributed message, peer capability table, gating of map share, ping table, relays; pre-join bits | 3–4 | Unit test + fuzz; netns with an OpenCE peer shows no extension traffic (log greps) |
@@ -716,6 +748,7 @@ first failing stage, next to an OpenCE-client control that passes.
 | `chupaserver` | XFAIL | LAN: version; internet: discover (`hceu` listing) |
 | `damnserver` | XFAIL | LAN: version; internet by invite: signal |
 | `crossrefuse` | XFAIL | no right refusal message yet (T11); refused for the network version instead |
+| `crossmaps` (T3) | XFAIL | version (OpenCE hosts on Blood Gulch and on `custom_maps\pcgulch`, had and lacked; the OpenCE controls pass). The map check itself runs today against our build standing in for a PC host: `run_crossplay_maps_test.sh` |
 | `crossmixed`, `crossversion` | SKIP | wait for T4 and T10 |
 
 **Findings for the wire tasks:**
