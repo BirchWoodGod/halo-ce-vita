@@ -399,6 +399,7 @@ symbols in this file:
 #include "network_wire.h"
 #include "crossplay_maps.h"
 #include "network_game_record.h"
+#include "network_crossplay_guard.h"
 #include "map_share.h"
 /* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
 #include "../src/lang.h"
@@ -1271,6 +1272,13 @@ boolean network_game_client_idle(
 		display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
 		return FALSE;
 	}
+	/* port: a large PC game the player said no to, asked in its lobby
+	(crossplay: network_crossplay_guard.c), is left */
+	if (!network_crossplay_guard_update(client))
+	{
+		display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
+		return FALSE;
+	}
 #endif
 
 	switch (client->state)
@@ -1603,6 +1611,16 @@ boolean network_game_client_game_settings_updated(
 			return FALSE;
 		}
 #ifdef HALO_LINUX
+		/* port: a PC host's game this machine does not play (crossplay: a
+		co-op game), refused, the player told and the game left; a large
+		one asked about once (network_crossplay_guard.c) */
+		if (!network_crossplay_guard_record(client, message_packet))
+		{
+			display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
+			return FALSE;
+		}
+#endif
+#ifdef HALO_LINUX
 		/* (the host's map name - a tag path with backslashes, such as the
 		Blood Gulch scenario's - is ended here, and one that climbs out of
 		the maps folder is refused: unended, it ran past the path built from it; with
@@ -1880,6 +1898,14 @@ boolean network_game_client_add_player(
 	(port/linux/game/map_share.c). The pregame screen asks again each
 	frame, and the player is added once the map is here. */
 	if (client->state == _network_game_client_state_pregame && map_share_client_holds_players())
+	{
+		return TRUE;
+	}
+	/* port: one local player in a crossplay game (split screen in PC games
+	not measured yet): another is not added, and told why once; the pregame
+	screen's asking each frame is no failure */
+	if (!network_crossplay_guard_local_player(&client->game, client->machine_index, local_player_index,
+		network_game_client_add_player_requested, MAXIMUM_LOCAL_PLAYERS))
 	{
 		return TRUE;
 	}
@@ -2648,6 +2674,9 @@ void network_game_client_reset(
 	network_game_client_late_join_clock_pending = FALSE;
 	network_game_client_incompatibility_told = FALSE;
 	csmemset(network_game_client_add_player_requested, 0, sizeof(network_game_client_add_player_requested));
+#ifdef HALO_LINUX
+	network_crossplay_guard_reset();
+#endif
 
 	return;
 }
@@ -3631,6 +3660,13 @@ boolean network_game_client_advertised_game_compatible(
 	{
 		if (distributed && network_wire_version_accepted(theirs))
 		{
+			/* (docs/crossplay.md 6, T11: a PC co-op game refused, a large one
+			joined as experimental: network_crossplay_guard.c) */
+			if (!network_crossplay_guard_advertisement(game->game_name, game->map.name, (long)sizeof(game->map.name),
+				game->engine_type, (long)game->player_count, (long)game->maximum_player_count, tell))
+			{
+				return FALSE;
+			}
 			network_event("joining a host of network version %u (crossplay)", theirs);
 			return TRUE;
 		}
@@ -3746,6 +3782,10 @@ boolean network_game_client_join_first_available_game(
 				network_game_client_incompatibility_told = TRUE;
 				return FALSE;
 			}
+			/* (a large PC game the player said no to a moment ago: not joined
+			again by itself, network_crossplay_guard.c) */
+			if (network_crossplay_guard_declined(game->game_name, TRUE))
+				return FALSE;
 
 			csmemset(&join_parameters, 0, sizeof(join_parameters));
 			transport_client_start((XNADDR const *)&game->xnaddr, (XNKEY const *)&game->key,

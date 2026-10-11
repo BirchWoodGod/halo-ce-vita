@@ -253,9 +253,30 @@ int p2p_lobby_join(const char *id, const char *password)
 
 int p2p_lobby_join_state(void) { return P2P_LOBBY_JOIN_IDLE; }
 
-/* this Vita's own game, an open one and a locked Halo PC one */
+/* this Vita's own game, an open one and a locked Halo PC one; with
+Crossplay on, PC games (p2p_lobby.c's badges, crossplay_guard.h): a large
+one, a co-op one and a server */
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 {
+	if (test_crossplay_wire && browsing && index > 0 && index < 4)
+	{
+		static const char *const names[] = { "", "pc host", "pc coop", "pc server" };
+
+		memset(entry, 0, sizeof(*entry));
+		entry->compatible = 1;
+		snprintf(entry->id, sizeof(entry->id), "%032d", 10 + index);
+		snprintf(entry->name, sizeof(entry->name), "%s", names[index]);
+		snprintf(entry->map, sizeof(entry->map), index == 2 ? "Halo" : "Blood Gulch");
+		snprintf(entry->rules, sizeof(entry->rules), index == 2 ? "Co-op: Halo" : "Slayer on Blood Gulch");
+		entry->players = index == 1 ? 20 : 2;
+		entry->maximum = index == 1 ? 128 : 16;
+		entry->experimental = index == 1;
+		entry->coop = index == 2;
+		entry->dedicated = index == 3;
+		snprintf(entry->badge, sizeof(entry->badge), "%s", index == 1 ? "PC EXPERIMENTAL" : index == 2 ? "PC CO-OP" :
+			"PC SERVER");
+		return 1;
+	}
 	if (!browsing || index >= 3)
 		return 0;
 	memset(entry, 0, sizeof(*entry));
@@ -1237,6 +1258,77 @@ static void test_multiplayer_tab(void)
 }
 
 /* internet play's rows: the code typed */
+static int menu_lines_fit(void);
+
+/* the public games with Crossplay on (crossplay_guard.h, docs/crossplay.md
+6): badges; a PC co-op game refused; a large one asked about once */
+static void test_crossplay_browser(void)
+{
+	int saved_screen = screen;
+	unsigned long now;
+
+	crossplay_guard_forget();
+	browsing = 1;
+	screen = SCREEN_BROWSE;
+	browse_count = browse_selected = 0;
+	browse_refresh();
+	show();
+	check(browse_count == 3 && strstr(menu, "\npc host         20/128 Blood Gulch  PC EXP\n") &&
+		strstr(menu, "\npc coop          2/16 Halo         PC COOP\n") &&
+		strstr(menu, "\npc server        2/16 Blood Gulch  SRV\n") &&
+		strstr(menu, "\nExperimental: over 16 players may lag\n") && menu_lines_fit(),
+		"Crossplay: the public games badged: PC or SRV, EXP (more than 16), COOP; the chosen one's in words");
+	if (!strstr(menu, "pc host         20/128"))
+		printf("%s\n--\n", menu);
+	/* a PC co-op game: not joined, told why */
+	joined_id[0] = 0;
+	message_pending = 0;
+	browse_selected = 1;
+	show();
+	check(strstr(menu, "\nPC co-op: can't be joined with Crossplay\n") != NULL, "a PC co-op game: can't be joined, it says");
+	browse_input(VITA_BUTTON_CROSS);
+	check(!joined_id[0] && screen == SCREEN_BROWSE && message_pending && strstr(pending_message, "PC co-op game"),
+		"cross on a PC co-op game: not joined, the message says why");
+	message_pending = 0;
+	/* a large one: asked, no; asked again, yes (remembered for its lobby);
+	then joined at once */
+	browse_selected = 0;
+	browse_input(VITA_BUTTON_CROSS);
+	show();
+	check(screen == SCREEN_LARGE && !joined_id[0] &&
+		strstr(menu, "Large PC game: more than 16 players can make") && strstr(menu, "Join anyway?") &&
+		strstr(menu, "pc host  20/128") && menu_lines_fit(), "cross on a large PC game: Join anyway? first");
+	printf("%s\n--\n", menu);
+	large_input(VITA_BUTTON_CIRCLE);
+	now = (unsigned long)(now_us() / 1000);
+	check(screen == SCREEN_BROWSE && !joined_id[0] && crossplay_guard_answered("pc host", now) == 0,
+		"circle: not joined, the no remembered");
+	browse_input(VITA_BUTTON_CROSS);
+	check(screen == SCREEN_LARGE && !joined_id[0], "chosen again: asked again");
+	large_input(VITA_BUTTON_CROSS);
+	now = (unsigned long)(now_us() / 1000);
+	check(screen == SCREEN_GUIDE && !strcmp(joined_id, "00000000000000000000000000000011") &&
+		crossplay_guard_answered("pc host", now) == 1, "cross: joined, the yes remembered (its lobby asks no more)");
+	screen = SCREEN_BROWSE;
+	browsing = 1;
+	joined_id[0] = 0;
+	browse_selected = 0;
+	browse_input(VITA_BUTTON_CROSS);
+	check(screen == SCREEN_GUIDE && !strcmp(joined_id, "00000000000000000000000000000011"),
+		"asked once: chosen again, joined at once");
+	/* a server of 16: joined at once */
+	screen = SCREEN_BROWSE;
+	browsing = 1;
+	joined_id[0] = 0;
+	browse_selected = 2;
+	browse_input(VITA_BUTTON_CROSS);
+	check(screen == SCREEN_GUIDE && !strcmp(joined_id, "00000000000000000000000000000013"), "a PC server of 16: joined at once");
+	crossplay_guard_forget();
+	browsing = 0;
+	browse_count = browse_selected = 0;
+	screen = saved_screen;
+}
+
 static void test_online_rows(void)
 {
 	char labels[512];
@@ -1291,6 +1383,22 @@ static void test_online_rows(void)
 	check(strstr(menu, "\n\x04Your code: QX7K-M2PA; getting listed...") != NULL, "being listed: getting listed");
 	hosting_listing = P2P_LOBBY_HOSTING_NONE;
 	hosting = 0;
+
+	/* Crossplay on (the wire the game runs): no code row, codes join Vita
+	games (docs/crossplay.md T11); the public games are PCs' */
+	test_crossplay_wire = 1;
+	to_tab("Dev");
+	to_tab("Multiplayer");
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Crossplay*|Bots|Co-op players|Modded maps|Latency meter"),
+		"Crossplay on: no Join with a code row (codes join Vita games)");
+	test_crossplay_browser();
+	test_crossplay_wire = 0;
+	to_tab("Dev");
+	to_tab("Multiplayer");
+	rows_of(labels, sizeof(labels), &info);
+	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Modded maps|Latency meter"),
+		"Crossplay off: Join with a code back");
 	to_tab("Dev");
 	to_line("Save report");
 }
@@ -1898,6 +2006,28 @@ static void test_languages(void)
 	browse_count = 0;
 	show();
 	check(menu_lines_fit(), "Spanish: the public games, none");
+	/* (with Crossplay on: the PC games' badges, a co-op one chosen, a large
+	one's question) */
+	test_crossplay_wire = 1;
+	browsing = 1;
+	browse_refresh();
+	for (index = 0; index < browse_count; index++)
+	{
+		browse_selected = index;
+		show();
+		if (!menu_lines_fit())
+			printf("%s\n--\n", menu);
+		check(menu_lines_fit(), "Spanish: the PC games with their badges fit");
+	}
+	browse_large = browse_entries[0];
+	screen = SCREEN_LARGE;
+	show();
+	printf("%s\n--\n", menu);
+	check(menu_lines_fit() && strstr(menu, "Cruz"), "Spanish: the large PC game's question fits");
+	screen = SCREEN_BROWSE;
+	test_crossplay_wire = 0;
+	browsing = 0;
+	browse_count = browse_selected = 0;
 	screen = SCREEN_GUIDE;
 	for (index = 0; index < 3; index++)
 	{

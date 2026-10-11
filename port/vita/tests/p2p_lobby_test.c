@@ -375,8 +375,9 @@ static void lobby_checks(void)
 		"the players' names, cleaned (one that names nothing left out)");
 	check(p2p_lobby_entry(0, &entry) && !strcmp(entry.id, id) && entry.own && !strcmp(entry.map, "Blood Gulch") &&
 		!strcmp(entry.rules, "Slayer to 50 on Blood Gulch") &&
-		!strcmp(entry.players_line, "3 of 16: alpha, bravo, charlie") && !entry.locked && !entry.pc_map,
-		"the entry's map, Rules and Players lines");
+		!strcmp(entry.players_line, "3 of 16: alpha, bravo, charlie") && !entry.locked && !entry.pc_map &&
+		!entry.badge[0] && !entry.experimental && !entry.coop,
+		"the entry's map, Rules and Players lines (no badges: the legacy wire's games are all the Vitas')");
 	/* joining it: its invite, at once */
 	check(p2p_lobby_join(id, NULL) && p2p_lobby_join_state() == P2P_LOBBY_JOIN_JOINING &&
 		!strcmp(joined_invite, expected_invite), "joining an open game joins its invite");
@@ -985,6 +986,10 @@ static void failed_join_checks(void)
 
 /* ---------- the crossplay wire: OpenCE's listings */
 
+/* (opence_listing's players, most players and game engine: a check's) */
+static int opence_players = 5, opence_maximum = 128, opence_engine = 2;
+static const char *opence_map = "bloodgulch";
+
 /* an OpenCE host's listing (its p2p_lobby.c listing_make at 6399ed9d, CC0):
 format, version, flags and label given, signed with the PC host's key; its
 size */
@@ -995,7 +1000,7 @@ static int opence_listing(unsigned char *bytes, const unsigned char *pc_seed, co
 	unsigned char data[64 + P2P_MAXIMUM_LISTING_SIZE];
 	int size = 0, label_size = (int)strlen(label), index;
 	unsigned long now = (unsigned long)time(NULL);
-	static const char *const texts[3] = { "PC game", "bloodgulch", "Slayer" };
+	const char *const texts[3] = { "PC game", opence_map, "Slayer" };
 
 	bytes[size++] = 'H';
 	bytes[size++] = 'L';
@@ -1011,9 +1016,9 @@ static int opence_listing(unsigned char *bytes, const unsigned char *pc_seed, co
 	size += P2P_KEY_SIZE;
 	memcpy(bytes + size, token, P2P_TOKEN_SIZE);
 	size += P2P_TOKEN_SIZE;
-	bytes[size++] = 5;
-	bytes[size++] = 128;
-	bytes[size++] = 2;
+	bytes[size++] = (unsigned char)opence_players;
+	bytes[size++] = (unsigned char)opence_maximum;
+	bytes[size++] = (unsigned char)opence_engine;
 	for (index = 0; index < 3; index++)
 	{
 		bytes[size++] = (unsigned char)strlen(texts[index]);
@@ -1099,6 +1104,53 @@ static void crossplay_checks(void)
 		snprintf(invite, sizeof(invite), "halo://join/%s", text);
 	}
 	check(p2p_lobby_join(slot, NULL) && !strcmp(joined_invite, invite), "crossplay: joining it joins its invite");
+	/* the guardrails' badges (crossplay_guard.h, docs/crossplay.md 6): a
+	maximum above 16 is Experimental (that server's 128), so is a game of
+	more than 16 players; 16 of 16 is not; no game engine is co-op (OpenCE's
+	listing has no co-op bit), shown without a difficulty it never sent */
+	check(entry.experimental && !entry.coop && !strcmp(entry.badge, "PC SERVER EXPERIMENTAL"),
+		"crossplay: a PC server of 128: badged PC SERVER EXPERIMENTAL");
+	opence_players = 16;
+	opence_maximum = 16;
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && !entry.experimental && !entry.coop && !entry.dedicated && !strcmp(entry.badge, "PC"),
+		"crossplay: a PC host of 16 of 16: badged PC, not Experimental");
+	opence_players = 17;
+	opence_maximum = 16;
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && entry.experimental && !strcmp(entry.badge, "PC EXPERIMENTAL"),
+		"crossplay: 17 players (more than its maximum says): Experimental by its players");
+	opence_players = 2;
+	opence_maximum = 16;
+	opence_engine = 0;
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && !entry.coop && !strcmp(entry.badge, "PC"),
+		"crossplay: no game engine on Blood Gulch (a host between games): not co-op");
+	opence_map = "a10";
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && entry.coop && !entry.experimental && !strcmp(entry.badge, "PC CO-OP") &&
+		!strcmp(entry.rules, "Co-op: The Pillar of Autumn") && !strstr(entry.rules, "Easy"),
+		"crossplay: no game engine on a10: a PC co-op game, badged PC CO-OP, no difficulty made up");
+	opence_map = "bloodgulch";
+	opence_players = 255;
+	opence_maximum = 0;
+	opence_engine = 255;
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && entry.experimental && !entry.coop && strlen(entry.badge) < sizeof(entry.badge),
+		"crossplay: counts and engine at their ends: Experimental, not co-op, the badge whole");
+	opence_players = 5;
+	opence_maximum = 128;
+	opence_engine = 2;
 	/* back on the legacy wire: an OpenCE listing is not taken */
 	test_crossplay = 0;
 	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,

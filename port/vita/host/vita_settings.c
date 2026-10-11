@@ -170,6 +170,7 @@ Multiplayer tab's way.
 
 #include "lang.h"
 #include "p2p.h"
+#include "crossplay_guard.h"
 #include "system_link_shortcut.h"
 #include "update_check.h"
 #include "vita_controls.h"
@@ -178,6 +179,10 @@ Multiplayer tab's way.
 #include "vita_update.h"
 #include "vita_update_verify.h"
 #include "vita_version.h"
+
+/* the wire the game runs (port/linux/src/network_wire.c): nonzero on the
+crossplay wire, where the Vita joins PC games and hosts none */
+int network_wire_crossplay(void);
 
 #define DATA_DIRECTORY "ux0:data/haloce-vita"
 #define SETTINGS_FILE DATA_DIRECTORY "/settings.txt"
@@ -720,6 +725,9 @@ enum
 	SCREEN_BROWSE,
 	SCREEN_DELETE,
 	SCREEN_GUIDE,
+	/* a large PC game chosen in the public games (crossplay_guard.h): join
+	anyway? */
+	SCREEN_LARGE,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -733,6 +741,8 @@ static struct p2p_lobby_entry browse_entries[BROWSE_LINES];
 static int browse_count, browse_selected;
 /* the chosen game asks for its password: the keyboard is up for it */
 static int browse_join_pending;
+/* the large PC game asked about (SCREEN_LARGE) */
+static struct p2p_lobby_entry browse_large;
 /* a line about the last action (a code looked up ...), shown in the help
 line for a few seconds */
 static char notice[160];
@@ -1088,8 +1098,10 @@ static int setting_shown(const struct setting *setting)
 		return choice_of("HALO_BOTS") != 0;
 	/* (a code typed in: online, on a Vita whose game has not got the PC
 	menus' Direct Link, menu_tags.c) */
+	/* (not with Crossplay on: codes join Vita games, which a crossplay
+	machine does not, network_wire.h) */
 	if (setting->action == ACTION_JOIN_CODE)
-		return network_is("online") && halo_pc_menus_state != 1;
+		return network_is("online") && halo_pc_menus_state != 1 && !network_wire_crossplay();
 	if (setting->action == ACTION_BROWSE ||
 		(setting->variable && !strcmp(setting->variable, "HALO_NET_HOST_PUBLIC")))
 		return network_is("online");
@@ -2712,14 +2724,23 @@ static void show_browse(void)
 		}
 	}
 	/* (a game a line: its name, players of most, map, [pw] for a password,
-	PC for a Halo PC map, DED for a dedicated server's) */
+	PC for a Halo PC map, DED for a dedicated server's. With Crossplay on,
+	every game a PC's (crossplay_guard.h): PC, or SRV for a server, then EXP
+	for a large one, COOP for co-op, which is not joined) */
 	for (index = 0; index < browse_count && length < (int)sizeof(text); index++)
 	{
 		const struct p2p_lobby_entry *entry = &browse_entries[index];
 		char row[64];
-		int end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s%s", entry->name, entry->players,
-			entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "",
-			entry->dedicated ? " DED" : "");
+		int end;
+
+		if (entry->badge[0])
+			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-12.12s%s %s%s", entry->name, entry->players,
+				entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->dedicated ? "SRV" : "PC",
+				entry->coop ? " COOP" : entry->experimental ? " EXP" : "");
+		else
+			end = snprintf(row, sizeof(row), "%-15.15s %2d/%-2d %-14.14s%s%s%s", entry->name, entry->players,
+				entry->maximum, entry->map, entry->locked ? " [pw]" : "", entry->pc_map ? " PC" : "",
+				entry->dedicated ? " DED" : "");
 
 		while (end > 0 && row[end - 1] == ' ')
 			row[--end] = 0;
@@ -2736,10 +2757,28 @@ static void show_browse(void)
 				entry->failed ? 46 - lang_utf8_length(T("FAILED: ")) : 46, entry->rules);
 		if (entry->players_line[0] && length < (int)sizeof(text))
 			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->players_line);
+		/* (a PC game's badges in words) */
+		if (entry->badge[0] && length < (int)sizeof(text))
+			length += snprintf(text + length, sizeof(text) - length, "\n%.46s", entry->coop ?
+				T("PC co-op: can't be joined with Crossplay") : entry->experimental ?
+				T("Experimental: over 16 players may lag") : entry->dedicated ? T("A PC server") : T("A PC game"));
 	}
 	if (length < (int)sizeof(text))
 		snprintf(text + length, sizeof(text) - length, "\n%s", T("Cross: join   Square: refresh   Circle: back"));
 	vgxm_menu_set(text, browse_count ? browse_selected + 1 : 0);
+}
+
+static size_t format_box(char *formatted, size_t size, const char *title, const char *text, const char *footer);
+
+/* the large PC game's question (crossplay_guard.h), in the overlay's lines */
+static void show_large(void)
+{
+	char body[256], text[1024];
+
+	snprintf(body, sizeof(body), "%.20s  %d/%d  %.20s\n\n%s", browse_large.name, browse_large.players,
+		browse_large.maximum, browse_large.map, crossplay_guard_large_question());
+	format_box(text, sizeof(text), crossplay_guard_large_title(), body, T("\n\nCross: join anyway   Circle: back"));
+	vgxm_menu_set(text, -1);
 }
 
 /* the map chosen on the Modded maps page, or NULL */
@@ -2774,9 +2813,6 @@ static void show_delete(void)
 }
 
 /* why Host or Join cannot open System Link now (NULL: it can) */
-/* the wire the game runs (port/linux/src/network_wire.c): nonzero on the
-crossplay wire, where the Vita joins PC games and hosts none */
-int network_wire_crossplay(void);
 
 static const char *guide_blocker(void)
 {
@@ -2927,6 +2963,8 @@ static void show(void)
 		show_delete();
 	else if (screen == SCREEN_GUIDE)
 		show_guide();
+	else if (screen == SCREEN_LARGE)
+		show_large();
 	else
 		show_list();
 }
@@ -3061,7 +3099,7 @@ static void guide_request(void)
 
 static void close_panel(void)
 {
-	if (screen == SCREEN_BROWSE)
+	if (screen == SCREEN_BROWSE || screen == SCREEN_LARGE)
 		p2p_lobby_browse(0);
 	panel_open = 0;
 	screen = SCREEN_LIST;
@@ -3508,6 +3546,26 @@ static void code_input(unsigned long pressed, unsigned long buttons, unsigned lo
 	}
 }
 
+/* joins a public game chosen (a locked one's password first, on the
+system's keyboard) */
+static void browse_join(const struct p2p_lobby_entry *entry)
+{
+	if (entry->locked)
+	{
+		browse_join_pending = 1;
+		if (vita_ime_open(T("Password"), "", PLAY_TEXT_LENGTH, 1) == 0)
+		{
+			vgxm_menu_set(NULL, 0);
+			return;
+		}
+		browse_join_pending = 0;
+	}
+	play_join_entry(entry, NULL);
+	set_notice(T("Joining %.20s..."), entry->name);
+	p2p_lobby_browse(0);
+	screen = SCREEN_GUIDE;
+}
+
 /* the public lobby screen's buttons */
 static void browse_input(unsigned long pressed)
 {
@@ -3528,22 +3586,40 @@ static void browse_input(unsigned long pressed)
 	{
 		const struct p2p_lobby_entry *entry = &browse_entries[browse_selected];
 
-		/* (a locked game: its password first, on the system's keyboard) */
-		if (entry->locked)
+		/* (crossplay_guard.h: a PC co-op game refused; a large PC game asked
+		about once, on a screen of its own) */
+		if (network_wire_crossplay() && entry->coop)
 		{
-			browse_join_pending = 1;
-			if (vita_ime_open(T("Password"), "", PLAY_TEXT_LENGTH, 1) == 0)
-			{
-				vgxm_menu_set(NULL, 0);
-				return;
-			}
-			browse_join_pending = 0;
+			set_notice("%s", T("PC co-op games can't be joined"));
+			vita_settings_message(T("Halo: cannot join this game"), crossplay_guard_coop_refusal());
+			return;
 		}
-		play_join_entry(entry, NULL);
-		set_notice(T("Joining %.20s..."), entry->name);
-		p2p_lobby_browse(0);
-		screen = SCREEN_GUIDE;
+		if (network_wire_crossplay() && entry->experimental &&
+			crossplay_guard_answered(entry->name, (unsigned long)(now_us() / 1000)) != 1)
+		{
+			browse_large = *entry;
+			screen = SCREEN_LARGE;
+			return;
+		}
+		browse_join(entry);
 	}
+}
+
+/* ... its buttons: the answer remembered, so that the game's lobby does
+not ask again (port/linux/game/network_crossplay_guard.c) */
+static void large_input(unsigned long pressed)
+{
+	char line[96];
+
+	if (!(pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_CIRCLE)))
+		return;
+	crossplay_guard_answer(browse_large.name, (pressed & VITA_BUTTON_CROSS) != 0, (unsigned long)(now_us() / 1000));
+	snprintf(line, sizeof(line), "settings: the large PC game %.20s (%d of %d players): %s", browse_large.name,
+		browse_large.players, browse_large.maximum, (pressed & VITA_BUTTON_CROSS) ? "join anyway" : "no");
+	vita_host_log(line);
+	screen = SCREEN_BROWSE;
+	if (pressed & VITA_BUTTON_CROSS)
+		browse_join(&browse_large);
 }
 
 /* the delete confirmation's buttons */
@@ -3845,6 +3921,16 @@ int vita_settings_input(const struct vita_host_pad *pad)
 	if (screen == SCREEN_DELETE)
 	{
 		delete_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
+	if (screen == SCREEN_LARGE)
+	{
+		large_input(pressed);
+		/* (the keyboard took the screen for a password) */
+		if (browse_join_pending)
+			return 1;
 		if (pressed)
 			show();
 		return 1;
