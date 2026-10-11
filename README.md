@@ -4,7 +4,7 @@
 
 **A native PlayStation Vita port of Halo: Combat Evolved, built from the decompilation of the Xbox game.**
 
-[![Latest release](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?label=stable&color=2ea44f)](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?label=latest&color=2ea44f)](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
 [![Beta](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?include_prereleases&label=beta&color=d29922)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
 [![Downloads](https://img.shields.io/github/downloads/BirchWoodGod/halo-ce-vita/total?color=blue)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
@@ -36,10 +36,11 @@ It is not an emulator: the game's own code is compiled for the Vita's ARM
 processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 > [!NOTE]
-> **1.1.0 is in beta.** This README describes 1.1.0. Its betas are on the
-> [releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases) as
-> pre-releases, for players who want to help test; the stable version is
-> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3).
+> **1.1.0 beta 3 is the recommended version.** It is still a beta, but it is
+> more stable than 1.0.3, so it is the [latest release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
+> until 1.1.0 is final. This README describes 1.1.0.
+> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3)
+> is still on the releases page.
 
 > [!IMPORTANT]
 > **No game data is included.** You need your own **Xbox** copy of Halo:
@@ -56,11 +57,11 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 <div align="center">
 
-### Watch it run
+### Install tutorial
 
-[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+[![Halo CE Vita Install Tutorial | v1.1.0 beta.3, on YouTube](https://img.youtube.com/vi/x46zLnwlRUU/hqdefault.jpg)](https://youtu.be/x46zLnwlRUU)
 
-<sub><i><a href="https://youtu.be/S6CrPv_F2jU">Halo CE PS Vita port v1.0.3 | Stability Update</a></i></sub>
+<sub><i><a href="https://youtu.be/x46zLnwlRUU">Halo CE Vita Install Tutorial | v1.1.0 beta.3</a></i></sub>
 
 </div>
 
@@ -91,9 +92,6 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | 🧰 **[Windows install tool](#easy-install-windows-tool)** | Gathers your files and copies them to the Vita. |
 | 🎮 **Controls** | A settings panel in tabs (**SELECT + D-pad down**), button remapping, touch zones, gyro aiming and PlayStation button icons. |
 
-Coming in **1.1.1** (see the [roadmap](ROADMAP.md)): game chat and voice
-chat.
-
 ## What works
 
 | | |
@@ -120,6 +118,8 @@ The current list is in the [roadmap](ROADMAP.md) and the
 [issues](https://github.com/BirchWoodGod/halo-ce-vita/issues).
 
 ## Install
+
+Prefer a video? The [install tutorial](https://youtu.be/x46zLnwlRUU) walks through all of it.
 
 ### Requirements
 

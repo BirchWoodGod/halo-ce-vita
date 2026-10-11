@@ -81,12 +81,7 @@ version).
 
 ## Next: 1.1.1
 
-Done or under way on their own branches; they change what the Vitas send
-each other (a new network version), so they come after 1.1.0:
-
-- **Game chat**: quick-chat phrases and typed messages in the lobby and in
-  game, with mutes and the host's On / Quick chat only / Off setting.
-- **Voice chat** in network games.
+Fixes for the bugs found in the 1.1.0 betas.
 
 ## Later
 
