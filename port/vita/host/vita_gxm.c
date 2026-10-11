@@ -107,6 +107,9 @@ struct block
 	unsigned int size;
 };
 
+static unsigned long memory_model_free(void);
+static int memory_figure_wanted(void);
+
 static void *block_allocate(struct block *block, SceKernelMemBlockType type, unsigned int size, int map,
 	const char *name)
 {
@@ -114,7 +117,19 @@ static void *block_allocate(struct block *block, SceKernelMemBlockType type, uns
 	block->uid = sceKernelAllocMemBlock(name, type, size, NULL);
 	if (block->uid < 0)
 	{
-		log_line("gxm: cannot allocate %s (%u bytes): 0x%08x", name, size, (unsigned)block->uid);
+		/* (with the kernel's free CDRAM, in its 1 MB steps, and the
+		model's: on the owner's Vita the model counted 4.8-9 MB free when a
+		1.25-4 MB block was refused, NO_FREE_PHYSICAL_PAGE_CDRAM - CDRAM
+		the bookkeeping does not see, or free in pieces) */
+		SceKernelFreeMemorySizeInfo info;
+
+		memset(&info, 0, sizeof(info));
+		info.size = sizeof(info);
+		if (sceKernelGetFreeMemorySize(&info) < 0)
+			info.size_cdram = info.size_user = -1024;
+		log_line("gxm: cannot allocate %s (%u bytes): 0x%08x (the kernel's free: CDRAM %d KB, user %d KB; the model's "
+			"CDRAM %lu KB)", name, size, (unsigned)block->uid, info.size_cdram / 1024, info.size_user / 1024,
+			memory_model_free() / 1024);
 		block->base = NULL;
 		return NULL;
 	}
@@ -151,15 +166,18 @@ static void memory_os_free(struct block *block)
 }
 
 /* whether the kernel's free CDRAM figure follows what is freed (the
-hardware's does; Vita3K's falls with every block freed): tried at start-up
-(memory_figure_check) */
+hardware's does, in 1 MB steps: every hardware log since Oct 6 has 114688 KB,
+113664 KB with a 256 KB block, 114688 KB after it; Vita3K's falls with every
+block freed): tried at start-up (memory_figure_check); 1 exact, 2 in steps
+of up to 1 MB. The free CDRAM is then the smaller of it and the model's
+(vgxm_memory.h memory_cdram_free) */
 static int memory_figure_trusted;
 
 static long memory_os_free_kb(int user)
 {
 	SceKernelFreeMemorySizeInfo info;
 
-	if (!user && !memory_figure_trusted)
+	if (!user && (!memory_figure_trusted || !memory_figure_wanted()))
 		return -1;
 	memset(&info, 0, sizeof(info));
 	info.size = sizeof(info);
@@ -184,10 +202,15 @@ static void memory_figure_check(void)
 			sceKernelFreeMemBlock(block);
 		sceKernelGetFreeMemorySize(&info[index]);
 	}
-	memory_figure_trusted = block >= 0 && info[0].size_cdram == info[2].size_cdram &&
-		info[0].size_cdram - info[1].size_cdram == 256 * 1024;
+	memory_figure_trusted = block < 0 || info[0].size_cdram != info[2].size_cdram ? 0 :
+		info[0].size_cdram - info[1].size_cdram == 256 * 1024 ? 1 :
+		info[0].size_cdram - info[1].size_cdram >= 256 * 1024 && info[0].size_cdram - info[1].size_cdram <= 1024 * 1024 ?
+		2 : 0;
 	log_line("gxm: the free CDRAM figure %s (%d KB, %d KB with a 256 KB block, %d KB after it)",
-		memory_figure_trusted ? "follows what is freed: used" : "does not follow what is freed: the model's used",
+		!memory_figure_trusted ? "does not follow what is freed: the model's used" :
+		!memory_figure_wanted() ? "follows what is freed, but the model's used (HALO_CDRAM_FIGURE=model)" :
+		memory_figure_trusted == 1 ? "follows what is freed: used, with the model's as the most" :
+		"follows what is freed in steps of 1 MB: used, with the model's as the most",
 		info[0].size_cdram / 1024, info[1].size_cdram / 1024, info[2].size_cdram / 1024);
 }
 

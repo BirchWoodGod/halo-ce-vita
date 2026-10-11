@@ -39,7 +39,19 @@ to CDRAM when it is free again (pool_promote).
 HALO_CDRAM_RESERVE_MB=<n> (debug): n MB of CDRAM count as taken, so a
 tighter Vita can be tried anywhere; the model of what is free
 (memory_model_free: 112 MB less the parameter buffer and everything above)
-then refuses what would not fit. HALO_CDRAM_HEADROOM_MB=<n> (debug): the
+then refuses what would not fit.
+
+The free CDRAM (memory_cdram_free) is the model's, or the kernel's figure
+where that follows what is freed and is smaller: the hardware's does, in
+1 MB steps (vita_gxm.c memory_figure_check). On the owner's Vita the model
+counted 9 MB free when a texture pool segment was refused (Extinction,
+Oct 9) and 4.8 MB free when a 1.25 MB screen target was (a10, Oct 10):
+CDRAM the bookkeeping does not see, or free only in pieces the kernel
+cannot hand out; the texture pool then took the targets' headroom and
+every live change needed the block cache flushed. HALO_CDRAM_FIGURE=model
+(debug): the model's alone, as before. The harness has no kernel;
+HALO_CDRAM_HIDDEN_MB=<n> (vgxm_null.c) gives it n MB of CDRAM that such
+a figure counts and the model does not. HALO_CDRAM_HEADROOM_MB=<n> (debug): the
 texture pool leaves the targets n MB instead of what they would need (0: it
 takes CDRAM while there is any, as the single 56 MB block did).
 
@@ -124,10 +136,25 @@ static unsigned long memory_model_free(void)
 	return taken < CDRAM_APPLICATION_BYTES ? CDRAM_APPLICATION_BYTES - taken : 0;
 }
 
-/* the CDRAM free: the hardware's figure where it can be trusted (not
-Vita3K's, which falls with every block freed, nor the harness's, which has
-none: the model's then), less the reserve, and no more than the model's
-with one */
+/* HALO_CDRAM_FIGURE=model (debug): the kernel's free CDRAM figure not
+used (memory_cdram_free); 1 otherwise */
+static int memory_figure_wanted(void)
+{
+	static int wanted = -1;
+
+	if (wanted < 0)
+	{
+		const char *setting = getenv("HALO_CDRAM_FIGURE");
+
+		wanted = !setting || strcmp(setting, "model") != 0;
+	}
+	return wanted;
+}
+
+/* the CDRAM free: the kernel's figure where it follows what is freed (the
+hardware's, in 1 MB steps; not Vita3K's, which falls with every block
+freed, nor the harness's without HALO_CDRAM_HIDDEN_MB: the model's then),
+less the reserve, and no more than the model's */
 static unsigned long memory_cdram_free(void)
 {
 	long real = memory_os_free_kb(0);
@@ -137,11 +164,9 @@ static unsigned long memory_cdram_free(void)
 		return memory_model_free();
 	free = (unsigned long)real * 1024;
 	if (memory_reserve_bytes)
-	{
 		free = free > memory_reserve_bytes ? free - memory_reserve_bytes : 0;
-		if (free > memory_model_free())
-			free = memory_model_free();
-	}
+	if (free > memory_model_free())
+		free = memory_model_free();
 	return free;
 }
 

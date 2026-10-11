@@ -149,11 +149,23 @@ struct block
 static void *memory_user_bases[MEMORY_USER_BLOCKS];
 static unsigned long memory_user_bytes;
 
+static long memory_kernel_free_bytes(void);
+
 static int memory_os_allocate(int user, unsigned int size, const char *name, struct block *block)
 {
 	static int uids;
 
-	(void)name;
+	if (!user && memory_kernel_free_bytes() >= 0 && size > (unsigned long)memory_kernel_free_bytes())
+	{
+		/* (HALO_CDRAM_HIDDEN_MB: refused as the Vita's kernel refuses, with
+		its log line) */
+		static int refusals;
+
+		if (refusals++ < 32)
+			log_line("gxm: cannot allocate %s (%u bytes): 0x80024309 (the kernel's free: CDRAM %ld KB; HALO_CDRAM_HIDDEN_MB)",
+				name, size, memory_kernel_free_bytes() / 1024);
+		return 0;
+	}
 	/* (mapped, not the C heap's: on the Vita these are memory blocks of
 	their own, and the logs' C heap figures stay the Vita's) */
 	block->base = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -199,12 +211,19 @@ made there (the texture pool's segments in user RAM), so a Vita whose user
 RAM is short - a Custom Edition map's tag cache in it, 16-20 MB free on the
 owner's in a 16-player game on Extinction - can be tried here; unset, it is
 not known (-1) and the pool takes user RAM up to POOL_USER_MAXIMUM */
+static int memory_figure_wanted(void);
+
 static long memory_os_free_kb(int user)
 {
 	static long free_kb = -2;
 
 	if (!user)
-		return -1;
+	{
+		/* (HALO_CDRAM_HIDDEN_MB: the Vita's figure, in its 1 MB steps) */
+		long kernel = memory_kernel_free_bytes();
+
+		return kernel < 0 || !memory_figure_wanted() ? -1 : kernel / (1024 * 1024) * 1024;
+	}
 	if (free_kb == -2)
 		free_kb = getenv("HALO_USER_FREE_MB") ? atol(getenv("HALO_USER_FREE_MB")) * 1024 : -1;
 	if (free_kb < 0)
@@ -215,6 +234,32 @@ static long memory_os_free_kb(int user)
 static unsigned long memory_target_headroom(void);
 
 #include "vgxm_memory.h"
+
+/* (debug) HALO_CDRAM_HIDDEN_MB=<n>: n MB of CDRAM held that the model does
+not count, as on the owner's Vita (vgxm_memory.h memory_cdram_free): the
+kernel the harness stands in for refuses a block that does not fit beside
+them, and its free figure (memory_os_free_kb, in 1 MB steps) counts them;
+-1 (no figure) unset */
+static long memory_kernel_free_bytes(void)
+{
+	static long hidden = -2;
+	unsigned long free;
+
+	if (hidden == -2)
+	{
+		const char *setting = getenv("HALO_CDRAM_HIDDEN_MB");
+
+		hidden = setting && atoi(setting) > 0 ? atol(setting) * 1024 * 1024 : -1;
+		if (hidden > 0)
+			log_line("gxm: %ld MB of CDRAM held that the model does not count (HALO_CDRAM_HIDDEN_MB)",
+				hidden / (1024 * 1024));
+	}
+	if (hidden < 0)
+		return -1;
+	/* (the reserve is the model's own, not the kernel's) */
+	free = memory_model_free() + memory_reserve_bytes;
+	return free > (unsigned long)hidden ? (long)(free - (unsigned long)hidden) : 0;
+}
 
 int vgxm_initialize(void *arena, unsigned long arena_size)
 {

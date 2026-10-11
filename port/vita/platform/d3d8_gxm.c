@@ -91,6 +91,9 @@ void halo_screen_ui_offset(unsigned char centered)
 }
 
 static void screen_settings_apply(void);
+/* the screen's targets were made below the scale asked for; the full size
+to be tried again at the next present, a map gone (screen_settings_apply) */
+static int screen_scale_lowered, screen_scale_retry;
 static void dynres_configure(void);
 static void cdram_wanted_relieve(void);
 static void renderer_map_unloaded(void);
@@ -111,7 +114,7 @@ long halo_screen_commit(void)
 		dynres_configured = 1;
 		dynres_configure();
 	}
-	if (generation != settings_seen)
+	if (generation != settings_seen || screen_scale_retry)
 	{
 		settings_seen = generation;
 		screen_settings_apply();
@@ -4793,7 +4796,9 @@ own bounds and copies after this returns (rasterizer_screen_width_update),
 before it records the next frame. If the targets cannot all be had at the
 new size (CDRAM taken or in pieces), they are made at the old one again,
 the screen keeps it, and the settings panel says the change waits for a
-restart (halo_screen_restart_needed). */
+restart (halo_screen_restart_needed); Dynamic resolution's are made at the
+largest scale that fits instead (screen_scales), and the screen is never
+left without targets (smaller ones then). */
 
 static int screen_restart_needed;
 
@@ -4997,6 +5002,10 @@ static void renderer_map_unloaded(void)
 	vita_texture_decodes_quiesce();
 	freed = vita_texture_pool_release();
 	trimmed = vgxm_memory_trim();
+	/* (screen targets made smaller for want of CDRAM: the full size tried
+	again at the next present, screen_settings_apply) */
+	if (screen_scale_lowered)
+		screen_scale_retry = TRUE;
 	platform_log("cdram: a map gone: the texture pool %lu KB -> %lu KB held (%lu KB of CDRAM given back), %lu KB of cached "
 		"blocks freed: %lu KB -> %lu KB free", held / 1024, vgxm_pool_held() / 1024, freed / 1024, trimmed / 1024,
 		before / 1024, vgxm_cdram_free() / 1024);
@@ -5118,17 +5127,52 @@ static void cdram_wanted_relieve(void)
 		dozed, vgxm_cdram_free() / 1024);
 }
 
+/* The render scales the screen-sized targets are made at, largest first
+(the settings panel's). Dynamic resolution's targets are made at the full
+size, the most it draws at; when CDRAM has no room for them there
+(screen_settings_apply, after what costs nothing is given back), at the
+largest of these that fits, before any texture pool segment is given up:
+in a heavy scene the scale drawn is mostly below the full size anyway, and
+a segment moved out of CDRAM is textures decoded again and sampled from
+user RAM. The controller's ceiling is the scale they were made at
+(dynres_frame_end), and its minimum comes down with it when lower
+(dynres_controller_limits). Made smaller so (or, with a fixed scale, when
+not even the old size could be had again), the full size is tried again
+once a map is gone (renderer_map_unloaded: the texture pool given back),
+at the next present. */
+static const float screen_scales[] = { 1.0f, 0.875f, 0.75f, 0.625f, 0.5f };
+#define SCREEN_SCALE_COUNT (sizeof(screen_scales) / sizeof(screen_scales[0]))
+
+/* the screen-sized targets at the largest of screen_scales from `from` down
+to `to` that can be had (vgxm_render_scale is then that); 0 when none */
+static float screen_targets_make_scaled(float from, float to, long old_width, long width, unsigned long *made)
+{
+	unsigned int index;
+
+	for (index = 0; index < SCREEN_SCALE_COUNT; index++)
+	{
+		if (screen_scales[index] > from + 0.001f || screen_scales[index] < to - 0.001f)
+			continue;
+		vgxm_render_scale_set(screen_scales[index]);
+		if (screen_targets_make((unsigned long)old_width, (unsigned long)width, made))
+			return screen_scales[index];
+	}
+	return 0.0f;
+}
+
 static void screen_settings_apply(void)
 {
 	const char *setting = getenv("HALO_RENDER_SCALE");
 	/* (dynamic: the targets at the full size, drawn into a part of them -
 	the dynamic resolution) */
-	float scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale(), drawn;
+	int dynamic = setting && !strcmp(setting, "dynamic"), retry = screen_scale_retry;
+	float scale = setting && !dynamic ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale(), drawn;
 	long width = screen_width_wanted(), old_width = screen_width;
 	unsigned long long started;
 	unsigned long made = 0, targets, cdram, cached, cdram_free, freed = 0, dozed = 0, moved, pool_parts = 0, wanted;
-	int restored = TRUE, made_new;
+	int restored = TRUE, made_new, lowered_old = FALSE;
 
+	screen_scale_retry = FALSE;
 	if (scale < 0.5f || scale > 1.0f)
 		scale = 1.0f;
 	if (!device.created || !device.gpu_ready)
@@ -5137,6 +5181,14 @@ static void screen_settings_apply(void)
 	{
 		/* (back to what the screen has: nothing waits for a restart) */
 		screen_restart_needed = FALSE;
+		screen_scale_lowered = FALSE;
+		return;
+	}
+	if (dynamic && screen_scale_lowered && !retry && width == old_width)
+	{
+		/* (Dynamic's targets made smaller for want of CDRAM: not made
+		again at every change in the panel - the full size is tried once
+		a map is gone) */
 		return;
 	}
 	if (!screen_allocated_width)
@@ -5165,7 +5217,7 @@ static void screen_settings_apply(void)
 	/* (to the dynamic resolution: the targets made at the full size are
 	drawn at the scale they had, from which its controller starts,
 	dynres_frame_end) */
-	if (setting && !strcmp(setting, "dynamic") && drawn < scale)
+	if (dynamic && drawn < scale)
 		vgxm_render_rect_set(drawn);
 	{
 		/* (debug) HALO_CDRAM_DOZE_ALL=1: every copy of the screen given back
@@ -5179,15 +5231,30 @@ static void screen_settings_apply(void)
 	made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
 	if (!made_new && cdram_relief_enabled())
 	{
-		/* (short of CDRAM: what costs nothing given back, then the
-		texture pool's segments one at a time, each time tried again) */
+		/* (short of CDRAM: what costs nothing given back, tried again) */
 		freed = cdram_relieve(&dozed);
 		made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+	}
+	if (!made_new && dynamic)
+	{
+		/* (Dynamic: a smaller ceiling before any texture is given up) */
+		made_new = screen_targets_make_scaled(scale - 0.01f, 0.5f, old_width, width, &made) > 0.0f;
+	}
+	if (!made_new && cdram_relief_enabled())
+	{
+		/* (then the texture pool's segments, one at a time, each time
+		tried again - Dynamic from the full size down) */
 		while (!made_new && (moved = cdram_relieve_pool()) != 0)
 		{
 			freed += moved;
 			pool_parts++;
-			made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+			if (dynamic)
+				made_new = screen_targets_make_scaled(scale, 0.5f, old_width, width, &made) > 0.0f;
+			else
+			{
+				vgxm_render_scale_set(scale);
+				made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+			}
 		}
 	}
 	if (made_new)
@@ -5195,6 +5262,10 @@ static void screen_settings_apply(void)
 		screen_entries_rekey((unsigned long)old_width, (unsigned long)width);
 		screen_width = width;
 		screen_restart_needed = FALSE;
+		screen_scale_lowered = vgxm_render_scale() < scale;
+		if (screen_scale_lowered)
+			platform_log("dynamic resolution: no CDRAM for the screen's targets at %.0f%%: made at %.0f%%, the most it "
+				"draws at until a map is gone", scale * 100.0f, vgxm_render_scale() * 100.0f);
 		device.presentation.BackBufferWidth = (UINT)width;
 		d3d8_surface_resize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, (unsigned long)width, SCREEN_HEIGHT);
 		d3d8_surface_resize(&device.depth_buffer, D3DFMT_LIN_D24S8, (unsigned long)width, SCREEN_HEIGHT);
@@ -5208,10 +5279,28 @@ static void screen_settings_apply(void)
 		restored = screen_targets_make((unsigned long)old_width, (unsigned long)old_width, &made);
 		if (!restored)
 		{
+			/* (not even that: smaller ones, the texture pool's segments
+			given up for them - never a screen without targets, which the
+			game drew into as nothing until one was had again) */
+			float below = screen_targets_make_scaled(old_scale - 0.01f, 0.5f, old_width, old_width, &made);
+
+			while (below <= 0.0f && (moved = cdram_relieve_pool()) != 0)
+			{
+				freed += moved;
+				pool_parts++;
+				below = screen_targets_make_scaled(old_scale, 0.5f, old_width, old_width, &made);
+			}
+			restored = below > 0.0f;
+			lowered_old = restored && below < old_scale;
+			screen_scale_lowered = lowered_old;
+		}
+		if (!restored)
+		{
 			/* (should not be: the entries without a target ask for one
 			again every 30 frames, render_target_get_version) */
 			struct render_target_entry *entry;
 
+			vgxm_render_scale_set(old_scale);
 			for (entry = render_targets; entry; entry = entry->next)
 				if (screen_sized_entry(entry))
 					entry->id = 0;
@@ -5224,8 +5313,9 @@ static void screen_settings_apply(void)
 	vgxm_target_stats(&targets, &cdram, &cached, &cdram_free);
 	platform_log("screen: %ldx%d at %.0f%%%s: %lu screen-sized targets made again in %llu us; %lu target slots, "
 		"targets hold %lu KB of CDRAM, %lu KB kept for other sizes, %lu KB free", screen_width, SCREEN_HEIGHT, vgxm_render_scale() * 100.0f,
-		screen_restart_needed ? (restored ? " (the change waits for a restart: no memory for the new size)" :
-		" (NO TARGETS: no memory for the old size either)") : "",
+		screen_restart_needed ? (!restored ? " (NO TARGETS: no memory for the old size either)" : lowered_old ?
+		" (the change waits for a restart: no memory for the new size, nor the old)" :
+		" (the change waits for a restart: no memory for the new size)") : "",
 		made, (unsigned long long)(vita_host_time_us() - started), targets, cdram / 1024, cached / 1024,
 		cdram_free / 1024);
 	if (freed || dozed)
@@ -5238,8 +5328,9 @@ static void screen_settings_apply(void)
 
 HALO_RENDER_SCALE=dynamic (the settings panel's Render resolution: Dynamic):
 the screen-sized targets are made at the full size (the render scale 1, or
-the old size when a live change found no CDRAM for it: vgxm_render_scale is
-the ceiling) and each frame is drawn into the top left part of them, from
+the largest of screen_scales CDRAM has room for at a live change, the full
+size tried again once a map is gone: vgxm_render_scale is the ceiling) and
+each frame is drawn into the top left part of them, from
 HALO_DYNAMIC_RES_MIN (the panel's Dynamic minimum, 0.5, 0.625 or 0.75 -
 the profiles' 50%, 63% and 75%; 0.5 unset) of the size up to the whole, in
 32nds (16, 20 or 24: no rounding). The scale follows the GPU's time for
