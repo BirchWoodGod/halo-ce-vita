@@ -4083,6 +4083,89 @@ boolean object_force_inside_bsp(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) An object's attached lights are taken off the map and put back
+every tick (object_connect_lights below, for every unit and item: the
+dynamic lighting flag is never cleared): the marker found by name, the
+light's sphere, its clusters' reference lists. In a multiplayer game the
+weapons lying about and the bodies (24 players: about 30 and 20) did it
+every tick at rest, unmoved, for 7% of a client's objects update. Such an
+object's lights are left connected when nothing they are placed from has
+changed since the last time: the object's node matrices, its function
+values (a light's size and brightness) and its attachments, kept as a hash
+by the object's slot. The lights stay in the same clusters at the same
+places; only the order of the clusters' light lists differs (a light put
+back goes last), which the render alone reads. Moving, carried, living or
+outside a multiplayer game: put back every tick as before. */
+static unsigned long *objects_resting_lights_hash;
+static short *objects_resting_lights_identifier;
+
+static unsigned long objects_resting_lights_mix(
+	unsigned long hash,
+	void const *data,
+	long size)
+{
+	byte const *bytes = (byte const *)data;
+	long i;
+
+	for (i = 0; i < size; i++)
+		hash = (hash ^ bytes[i]) * 16777619ul;
+	return hash;
+}
+
+static boolean objects_resting_lights_unchanged(
+	long object_index,
+	struct object_header_datum *header,
+	struct object_datum *object)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+	short identifier = DATUM_INDEX_TO_IDENTIFIER(object_index);
+	unsigned long hash = 2166136261ul;
+	boolean resting;
+
+	resting = game_engine_running() &&
+		object->object.parent_object_index == NONE &&
+		TEST_FLAG(object->object.flags, _object_at_rest_bit) &&
+		(TEST_FLAG(_object_mask_item, header->type) ||
+			(header->type == _object_type_biped && TEST_FLAG(object->object.damage_flags, _object_dead_bit))) &&
+		absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP;
+	if (!resting)
+	{
+		if (objects_resting_lights_identifier && absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP)
+			objects_resting_lights_identifier[absolute_index] = 0;
+		return FALSE;
+	}
+	if (!objects_resting_lights_hash)
+	{
+		objects_resting_lights_hash = (unsigned long *)calloc(HALO_PORT_MAXIMUM_OBJECTS_PER_MAP, sizeof(*objects_resting_lights_hash));
+		objects_resting_lights_identifier = (short *)calloc(HALO_PORT_MAXIMUM_OBJECTS_PER_MAP, sizeof(*objects_resting_lights_identifier));
+		if (!objects_resting_lights_hash || !objects_resting_lights_identifier)
+		{
+			free(objects_resting_lights_hash);
+			free(objects_resting_lights_identifier);
+			objects_resting_lights_hash = NULL;
+			objects_resting_lights_identifier = NULL;
+			return FALSE;
+		}
+	}
+	hash = objects_resting_lights_mix(hash,
+		object_header_block_get(object_index, &object->object.node_matrices), object->object.node_matrices.size);
+	hash = objects_resting_lights_mix(hash, object->object.incoming_function_values, sizeof(object->object.incoming_function_values));
+	hash = objects_resting_lights_mix(hash, object->object.outgoing_function_values, sizeof(object->object.outgoing_function_values));
+	hash = objects_resting_lights_mix(hash, object->object.attachment_types, sizeof(object->object.attachment_types));
+	hash = objects_resting_lights_mix(hash, object->object.attachment_indices, sizeof(object->object.attachment_indices));
+	hash = objects_resting_lights_mix(hash, &object->object.location, sizeof(object->object.location));
+	if (objects_resting_lights_identifier[absolute_index] == identifier && identifier &&
+		objects_resting_lights_hash[absolute_index] == hash)
+	{
+		return TRUE;
+	}
+	objects_resting_lights_identifier[absolute_index] = identifier;
+	objects_resting_lights_hash[absolute_index] = hash;
+	return FALSE;
+}
+#endif
+
 static boolean object_update(
 	long object_index)
 {
@@ -4185,7 +4268,13 @@ static boolean object_update(
 			)
 		)
 		{
+#ifdef HALO_LINUX
+			/* (port: left as they are at rest, above) */
+			if (!objects_resting_lights_unchanged(object_index, header, object))
+#endif
+			{
 			OBJECT_STEP_BEGIN(_objects_phase_lights); object_connect_lights(object_index, TRUE, TRUE); OBJECT_STEP_END();
+			}
 		}
 
 		// Update children (if we have any)
