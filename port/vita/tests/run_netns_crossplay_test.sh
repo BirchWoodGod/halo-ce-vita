@@ -921,11 +921,11 @@ crosstls)
 		[ -f "$log" ] || continue
 		grep -a "Internet play: broker 198.51.100" "$log" | head -3 | sed "s/^/  $copy: /"
 		grep -aqE "Internet play: broker 198\.51\.100\.[0-9]+: .*; trying it over TLS \(port 8883\) at once" "$log" &&
-			grep -aqE "Internet play: broker 198\.51\.100\.[0-9]+ ready \(MQTT 5 over TLS \(TLS.*\) at 198\.51\.100\.[0-9]+:8883; carries the public games\)" "$log" ||
+			grep -aqE "Internet play: broker 198\.51\.100\.[0-9]+ ready \(MQTT [0-9.]+ over TLS \(TLS.*\) at 198\.51\.100\.[0-9]+:8883; carries the public games\)" "$log" ||
 			{ echo "  our $copy did not fall back to the broker's TLS port"; tls_ok=0; }
 	done
-	tls_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep -c "^connect hceu-[0-9a-f]* mqtt5 .* tls$")
-	plain_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep "^connect " | grep -vc " tls$")
+	tls_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep -c "^connect hceu-[0-9a-f]* mqtt[45] .* tls$")
+	plain_connects=$(cat "$out"/broker-*.log 2>/dev/null | grep "^connect hce" | grep -vc " tls$")
 	echo "  the brokers' connections: $tls_connects over TLS (ours), $plain_connects plain (OpenCE's)"
 	{ [ "$tls_connects" -ge 1 ] && [ "$plain_connects" -ge 2 ]; } || tls_ok=0
 	[ $tls_ok = 1 ] || our_results="$our_results net-opence-ours-tls:tls"

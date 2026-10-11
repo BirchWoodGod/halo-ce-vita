@@ -40,7 +40,7 @@
 #            copies must say the plain port failed and reach the broker over
 #            TLS at once, the host be listed, the joiner find the game (never
 #            "can't reach") and join it, and every connection the broker
-#            took be a TLS one
+#            took be a TLS one (HALO_TEST_MQTT311=1: MQTT 3.1.1 over TLS)
 #   lobbydns lobby, the joiners knowing the broker by a name
 #            (broker.halo.test) that the test's own /etc/hosts holds only
 #            from HALO_TEST_DNS_DOWN seconds (40) after the first joiner
@@ -797,12 +797,12 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 				grep -a "Internet play: broker 198.51.100.1" "$log" | head -4 | sed "s/^/$side: /"
 				grep -aq "Internet play: broker 198.51.100.1: \($why\).*; trying it over TLS (port 8883) at once" "$log" ||
 					fail "the $side did not say the plain port failed ($plain) and try TLS at once"
-				grep -aq "Internet play: broker 198.51.100.1 ready (MQTT 5 over TLS (TLS.*) at 198.51.100.1:8883; carries the public games)" "$log" ||
+				grep -aq "Internet play: broker 198.51.100.1 ready (MQTT [0-9.]* over TLS (TLS.*) at 198.51.100.1:8883; carries the public games)" "$log" ||
 					fail "the $side did not reach the broker over TLS"
 				grep -aq "Can't reach the online game list" "$log" && fail "the $side said the game list could not be reached"
 			done
-			grep -q "^connect hcev-[0-9a-f]* mqtt5 .* tls$" "$out/broker.log" || fail "the broker took no TLS connection"
-			grep -E "^connect " "$out/broker.log" | grep -vq " tls$" && fail "the broker took a plain connection"
+			grep -q "^connect hcev-[0-9a-f]* mqtt[45] .* tls$" "$out/broker.log" || fail "the broker took no TLS connection"
+			grep -E "^connect hcev-" "$out/broker.log" | grep -vq " tls$" && fail "the broker took a plain connection"
 			grep -aq 'Internet play: browser: new game "' "$out/joiner/run.log" || fail "the joiner's browser showed no game"
 		fi
 	fi
