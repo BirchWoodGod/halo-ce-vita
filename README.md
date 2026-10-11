@@ -57,11 +57,11 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 <div align="center">
 
-### Watch it run
+### Install tutorial
 
-[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+[![Halo CE Vita Install Tutorial | v1.1.0 beta.3, on YouTube](https://img.youtube.com/vi/x46zLnwlRUU/hqdefault.jpg)](https://youtu.be/x46zLnwlRUU)
 
-<sub><i><a href="https://youtu.be/S6CrPv_F2jU">Halo CE PS Vita port v1.0.3 | Stability Update</a></i></sub>
+<sub><i><a href="https://youtu.be/x46zLnwlRUU">Halo CE Vita Install Tutorial | v1.1.0 beta.3</a></i></sub>
 
 </div>
 
@@ -118,6 +118,8 @@ The current list is in the [roadmap](ROADMAP.md) and the
 [issues](https://github.com/BirchWoodGod/halo-ce-vita/issues).
 
 ## Install
+
+Prefer a video? The [install tutorial](https://youtu.be/x46zLnwlRUU) walks through all of it.
 
 ### Requirements
 
