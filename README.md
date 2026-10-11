@@ -24,7 +24,7 @@
   <tr>
     <td><img src="docs/screenshots/pelicans.png" alt="Two Pelicans over the sea in The Silent Cartographer's opening"></td>
     <td><img src="docs/screenshots/beach-landing.png" alt="Landing on The Silent Cartographer's beach"></td>
-    <td><img src="docs/screenshots/blood-gulch.png" alt="Covenant at a Blood Gulch base"></td>
+    <td><img src="docs/screenshots/silent-cartographer-camp.png" alt="Grunts at the Covenant camp where you fight the Hunters, on The Silent Cartographer"></td>
   </tr>
 </table>
 
