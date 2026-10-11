@@ -730,6 +730,10 @@ static void host_send_damage(
 	}
 }
 
+/* each tick's actor states' machines due them, a bit each (by the machine's
+number in the tick's list), found as the states are */
+#define ACTOR_DUE_LONGS ((HALO_PORT_MAXIMUM_NETWORK_MACHINES + 31) / 32)
+
 /* Host, after each tick: sends each client the AI units driven this tick.
 Units near the client's players go every tick, others less often. A unit
 with a fresh impulse, action, speech or animation goes to everyone in each
@@ -741,22 +745,31 @@ void network_actors_host_tick(
 	void)
 {
 	static struct distributed_actor_state states[MAXIMUM_NETWORK_ACTORS];
-	/* sent to every client this tick, whatever its period */
-	static boolean urgent[MAXIMUM_NETWORK_ACTORS];
+	/* the machines each state goes to this tick: an urgent one all of them,
+	whatever their periods, else those whose period it is (each period
+	found once, for the state's making and its sends) */
+	static unsigned long due[MAXIMUM_NETWORK_ACTORS][ACTOR_DUE_LONGS];
 	struct distributed_actor_state_message message;
 	long machine_indices[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
+	short viewer_numbers[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
 	short machine_count = distributed_client_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+	short due_longs = (short)((machine_count + 31) / 32);
 	long now = game_time_get();
 	short state_count = 0;
 	short index;
 	short machine_number;
 
+	/* (each machine's place among the tick's viewers, network_objects.c's,
+	found once rather than for every unit) */
+	for (machine_number = 0; machine_number < machine_count; machine_number++)
+		viewer_numbers[machine_number] = network_objects_viewer_number(machine_indices[machine_number]);
 	for (index = 0; index < host_actor_count; index++)
 	{
 		struct host_actor *actor = &host_actors[index];
 		struct unit_datum *unit;
 		word control_flags;
 		boolean is_urgent, wanted;
+		unsigned long *actor_due;
 
 		if (!actor_unit_valid(actor->unit_index) ||
 			(!actor->noted && !TEST_FLAG(unit_get(actor->unit_index)->unit.flags, _unit_running_blindly_bit)))
@@ -774,18 +787,29 @@ void network_actors_host_tick(
 			(actor->speech_sound != NONE && actor->speech_sends > 0) ||
 			(actor->user_animation_graph != NONE && actor->user_animation_sends > 0) ||
 			(control_flags & ~actor->sent_control_flags & ONE_SHOT_CONTROL_FLAGS) != 0;
+		/* (the next free state's bits, kept if it is made) */
+		actor_due = due[state_count];
+		csmemset(actor_due, is_urgent ? 0xFF : 0, due_longs * sizeof(actor_due[0]));
 		wanted = is_urgent;
-		for (machine_number = 0; machine_number < machine_count && !wanted; machine_number++)
+		if (!is_urgent)
 		{
-			short period = network_objects_send_period(machine_indices[machine_number], &unit->object.position);
+			long phase = now + (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(actor->unit_index);
 
-			wanted = (now + (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(actor->unit_index)) % period == 0;
+			for (machine_number = 0; machine_number < machine_count; machine_number++)
+			{
+				short period = network_objects_viewer_send_period(viewer_numbers[machine_number], &unit->object.position);
+
+				if (phase % period == 0)
+				{
+					actor_due[machine_number / 32] |= 1UL << (machine_number % 32);
+					wanted = TRUE;
+				}
+			}
 		}
 		actor->sent_control_flags = control_flags;
 		if (wanted)
 		{
 			actor_state_from_unit(actor, &states[state_count]);
-			urgent[state_count] = is_urgent;
 			state_count++;
 		}
 		actor->noted = FALSE;
@@ -800,16 +824,15 @@ void network_actors_host_tick(
 	for (machine_number = 0; machine_number < machine_count; machine_number++)
 	{
 		long machine_index = machine_indices[machine_number];
+		unsigned long bit = 1UL << (machine_number % 32);
+		short word_index = (short)(machine_number / 32);
 		short count = 0;
 
 		for (index = 0; index < state_count; index++)
 		{
-			struct distributed_actor_state const *state = &states[index];
-			short period = network_objects_send_period(machine_index, &state->position);
-
-			if (!urgent[index] && (now + (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(state->unit_index)) % period != 0)
+			if (!(due[index][word_index] & bit))
 				continue;
-			message.states[count++] = *state;
+			message.states[count++] = states[index];
 			if (count == MAXIMUM_ENTRIES_PER_MESSAGE || count == DATAGRAM_ENTRIES(struct distributed_actor_state))
 			{
 				distributed_send_to_machine(machine_index, &message, _distributed_message_actor_states, count,

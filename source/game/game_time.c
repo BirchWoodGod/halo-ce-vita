@@ -463,6 +463,24 @@ static void halo_run_report(void)
 		platform_log("tick-run-hitch: %.1f ms: update queues %.1f, %lu ticks %.1f, distributed %.1f, game frame %.1f",
 			total / 1000.0, run_us[_run_update_queues] / 1000.0, run_ticks, run_us[_run_game_ticks] / 1000.0,
 			run_us[_run_distributed] / 1000.0, run_us[_run_game_frame] / 1000.0);
+	/* (every 300 ticks: the update's steps' averages a tick, "tick-run") */
+	{
+		static unsigned long long period_us[NUMBER_OF_RUN_STEPS];
+		static unsigned long period_ticks;
+
+		for (step = 0; step < NUMBER_OF_RUN_STEPS; step++)
+			period_us[step] += run_us[step];
+		period_ticks += run_ticks;
+		if (period_ticks >= 300)
+		{
+			platform_log("tick-run (ms/tick): update queues %.3f, ticks %.3f, distributed %.3f, game frame %.3f",
+				period_us[_run_update_queues] / 1000.0 / period_ticks, period_us[_run_game_ticks] / 1000.0 / period_ticks,
+				period_us[_run_distributed] / 1000.0 / period_ticks, period_us[_run_game_frame] / 1000.0 / period_ticks);
+			for (step = 0; step < NUMBER_OF_RUN_STEPS; step++)
+				period_us[step] = 0;
+			period_ticks = 0;
+		}
+	}
 	for (step = 0; step < NUMBER_OF_RUN_STEPS; step++)
 		run_us[step] = 0;
 	run_ticks = 0;

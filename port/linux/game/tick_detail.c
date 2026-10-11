@@ -142,3 +142,68 @@ void halo_net_detail_report(void)
 	}
 	platform_log("net-detail (ms/frame, calls/frame):%s", line);
 }
+
+/* (HALO_TICK_PROFILE=1 or more) the distributed netcode's host work each
+tick (network_distributed.c, network_coop.c, network_actors.c): a
+"net-tick (ms/tick, calls/tick)" line every 300 ticks, apart from the
+tick-detail line (a Vita's log line holds 1024 characters). For a co-op
+host's cost by the number of machines it sends to: "datagram" is each
+datagram's send (sealed for internet play), nested in the step that filled
+it. */
+static int net_tick_enabled = -1;
+static const char *net_tick_names[DETAIL_SLOTS];
+static unsigned long long net_tick_totals[DETAIL_SLOTS];
+static unsigned long net_tick_counts[DETAIL_SLOTS];
+static unsigned long net_tick_ticks;
+
+static int net_tick_detail_enabled(void)
+{
+	if (net_tick_enabled < 0)
+	{
+		const char *setting = getenv("HALO_TICK_PROFILE");
+
+		net_tick_enabled = setting && atoi(setting) != 0 && vita_host_time_us;
+	}
+	return net_tick_enabled;
+}
+
+unsigned long long halo_net_tick_begin(void)
+{
+	return net_tick_detail_enabled() ? vita_host_time_us() : 0;
+}
+
+void halo_net_tick_end(const char *name, unsigned long long started)
+{
+	int slot;
+
+	if (!net_tick_detail_enabled() || !name)
+		return;
+	for (slot = 0; slot < DETAIL_SLOTS; slot++)
+	{
+		if (net_tick_names[slot] == name || !net_tick_names[slot])
+		{
+			net_tick_names[slot] = name;
+			net_tick_totals[slot] += vita_host_time_us() - started;
+			net_tick_counts[slot]++;
+			return;
+		}
+	}
+}
+
+/* once a networked tick (network_distributed.c) */
+void halo_net_tick_report(void)
+{
+	char line[1024];
+	int n = 0, slot;
+
+	if (!net_tick_detail_enabled() || ++net_tick_ticks % 300)
+		return;
+	for (slot = 0; slot < DETAIL_SLOTS && net_tick_names[slot] && n < (int)sizeof(line); slot++)
+	{
+		n += snprintf(line + n, sizeof(line) - n, " %s %.3f(%.1f)", net_tick_names[slot],
+			net_tick_totals[slot] / 1000.0 / 300.0, net_tick_counts[slot] / 300.0);
+		net_tick_totals[slot] = 0;
+		net_tick_counts[slot] = 0;
+	}
+	platform_log("net-tick (ms/tick, calls/tick):%s", line);
+}
