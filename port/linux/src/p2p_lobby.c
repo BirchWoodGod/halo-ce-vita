@@ -1215,8 +1215,11 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	shown->has_teams = (listing->flags & _listing_has_teams) != 0;
 	shown->pc_map = (listing->flags & _listing_pc_map) != 0;
 	/* (the crossplay wire's listing has no co-op bit nor difficulty: OpenCE
-	lists co-op as no game engine, the campaign's, docs/crossplay.md 6) */
-	shown->coop = network_wire_crossplay() ? listing->engine_type == 0 : (listing->flags & _listing_coop) != 0;
+	lists co-op as no game engine, the campaign's, docs/crossplay.md 6; never
+	on one of the Xbox's multiplayer levels) */
+	shown->coop = network_wire_crossplay() ?
+		listing->engine_type == 0 && !crossplay_guard_stock_multiplayer_map(listing->map, (int)sizeof(listing->map)) :
+		(listing->flags & _listing_coop) != 0;
 	shown->dedicated = (listing->flags & _listing_dedicated) != 0;
 	shown->score_limit = listing->score_limit;
 	shown->difficulty = network_wire_crossplay() ? 255 : listing->difficulty;

@@ -47,6 +47,12 @@ level), its players and maximum (any values) */
 int crossplay_guard_judge(int coop, int players, int maximum);
 /* whether those counts make it large */
 int crossplay_guard_large(int players, int maximum);
+/* whether a map (a tag path, levels\test\<name>\<name>, or a listing's bare
+name) is one of the Xbox's thirteen multiplayer levels: a game on one is
+never co-op, whatever its engine says (a PC host between games, or a
+network test's, can send no engine for a moment). Case aside; size bounds
+the name read */
+int crossplay_guard_stock_multiplayer_map(const char *map, int size);
 
 /* the player's answer about the large game of this name (the listing's,
 the advertisement's or the record's: compared on its letters and digits,

@@ -988,6 +988,7 @@ static void failed_join_checks(void)
 
 /* (opence_listing's players, most players and game engine: a check's) */
 static int opence_players = 5, opence_maximum = 128, opence_engine = 2;
+static const char *opence_map = "bloodgulch";
 
 /* an OpenCE host's listing (its p2p_lobby.c listing_make at 6399ed9d, CC0):
 format, version, flags and label given, signed with the PC host's key; its
@@ -999,7 +1000,7 @@ static int opence_listing(unsigned char *bytes, const unsigned char *pc_seed, co
 	unsigned char data[64 + P2P_MAXIMUM_LISTING_SIZE];
 	int size = 0, label_size = (int)strlen(label), index;
 	unsigned long now = (unsigned long)time(NULL);
-	static const char *const texts[3] = { "PC game", "bloodgulch", "Slayer" };
+	const char *const texts[3] = { "PC game", opence_map, "Slayer" };
 
 	bytes[size++] = 'H';
 	bytes[size++] = 'L';
@@ -1129,9 +1130,16 @@ static void crossplay_checks(void)
 	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
 		"hceu-lobby-1", 0);
 	hear(bytes, size, 0, slot);
+	check(entry_of(slot, &entry) && !entry.coop && !strcmp(entry.badge, "PC"),
+		"crossplay: no game engine on Blood Gulch (a host between games): not co-op");
+	opence_map = "a10";
+	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
+		"hceu-lobby-1", 0);
+	hear(bytes, size, 0, slot);
 	check(entry_of(slot, &entry) && entry.coop && !entry.experimental && !strcmp(entry.badge, "PC CO-OP") &&
-		!strncmp(entry.rules, "Co-op: Blood Gulch", 18) && !strstr(entry.rules, "Easy"),
-		"crossplay: no game engine: a PC co-op game, badged PC CO-OP, no difficulty made up");
+		!strcmp(entry.rules, "Co-op: The Pillar of Autumn") && !strstr(entry.rules, "Easy"),
+		"crossplay: no game engine on a10: a PC co-op game, badged PC CO-OP, no difficulty made up");
+	opence_map = "bloodgulch";
 	opence_players = 255;
 	opence_maximum = 0;
 	opence_engine = 255;

@@ -47,6 +47,44 @@ int crossplay_guard_judge(int coop, int players, int maximum)
 	return CROSSPLAY_GUARD_OK;
 }
 
+int crossplay_guard_stock_multiplayer_map(const char *map, int size)
+{
+	static const char *const levels[] = { "beavercreek", "bloodgulch", "boardingaction", "carousel", "chillout",
+		"damnation", "hangemhigh", "longest", "prisoner", "putput", "ratrace", "sidewinder", "wizard" };
+	char name[32];
+	int index, start = 0, length = 0, test_folder;
+
+	if (!map || size <= 0)
+		return 0;
+	for (index = 0; index < size && map[index]; index++)
+	{
+		if (map[index] == '\\' || map[index] == '/')
+			start = index + 1;
+	}
+	length = index - start;
+	if (length <= 0 || length >= (int)sizeof(name))
+		return 0;
+	for (index = 0; index < length; index++)
+	{
+		char c = map[start + index];
+
+		name[index] = (char)(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+	}
+	name[length] = 0;
+	/* (a path: the Xbox's own, levels\test\<name>\<name>; Halo PC's
+	custom_maps\<name> is a Custom Edition map of that name) */
+	test_folder = start == 0 || (start > 12 && !strncmp(map, "levels", 6) && (map[6] == '\\' || map[6] == '/') &&
+		!strncmp(map + 7, "test", 4));
+	if (!test_folder)
+		return 0;
+	for (index = 0; index < (int)(sizeof(levels) / sizeof(levels[0])); index++)
+	{
+		if (!strcmp(name, levels[index]))
+			return 1;
+	}
+	return 0;
+}
+
 /* a name's key: its ASCII letters (lower case) and digits, at most 15; 0 if
 it has none */
 static int answer_key(const char *name, char key[ANSWER_KEY_SIZE])

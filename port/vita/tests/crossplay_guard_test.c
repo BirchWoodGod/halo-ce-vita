@@ -49,6 +49,23 @@ int main(void)
 	check(crossplay_guard_judge(0, INT_MIN, INT_MIN) == CROSSPLAY_GUARD_OK &&
 		crossplay_guard_judge(0, INT_MAX, -1) == CROSSPLAY_GUARD_LARGE &&
 		crossplay_guard_judge(0, -1, INT_MAX) == CROSSPLAY_GUARD_LARGE, "counts at the ends of an int: no refusal, no overflow");
+	/* the Xbox's multiplayer levels: never co-op */
+	check(crossplay_guard_stock_multiplayer_map("levels\\test\\bloodgulch\\bloodgulch", 128) &&
+		crossplay_guard_stock_multiplayer_map("levels/test/wizard/wizard", 128) &&
+		crossplay_guard_stock_multiplayer_map("bloodgulch", 32) && crossplay_guard_stock_multiplayer_map("BloodGulch", 32),
+		"the Xbox's multiplayer levels, by path or a listing's bare name");
+	check(!crossplay_guard_stock_multiplayer_map("custom_maps\\bloodgulch", 128) &&
+		!crossplay_guard_stock_multiplayer_map("levels\\a10\\a10", 128) &&
+		!crossplay_guard_stock_multiplayer_map("a10", 8) && !crossplay_guard_stock_multiplayer_map("", 8) &&
+		!crossplay_guard_stock_multiplayer_map(NULL, 8) && !crossplay_guard_stock_multiplayer_map("bloodgulch", 5) &&
+		!crossplay_guard_stock_multiplayer_map("levels\\test\\bloodgulchx\\bloodgulchx", 128),
+		"not: Halo PC's custom_maps, a campaign level, nothing, a name cut by its size, a longer name");
+	{
+		char unended[40];
+
+		memset(unended, 'b', sizeof(unended));
+		check(!crossplay_guard_stock_multiplayer_map(unended, (int)sizeof(unended)), "an unended name: read within its size");
+	}
 	/* the answers */
 	check(crossplay_guard_answered("XpHost", now) == -1, "nothing answered yet");
 	crossplay_guard_answer("XpHost", 1, now);

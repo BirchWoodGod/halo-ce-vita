@@ -48,6 +48,10 @@ static struct
 	boolean accepted;
 	/* the controllers told they cannot play split screen (a bit each) */
 	unsigned long split_told;
+	/* the map of the last record taken (a record of the same map with no
+	engine, after the first, is a host between games, not co-op) */
+	char record_map[MAP_NAME_SIZE];
+	boolean record_seen;
 	/* the automatic joins told of a "no" */
 	boolean declined_told;
 } network_crossplay_guard;
@@ -70,9 +74,10 @@ static void name_ascii(
 	ascii[length] = 0;
 }
 
-/* whether a game on this map with this engine is co-op: no game engine
-(the campaign's, as OpenCE lists and hosts co-op), or one of the
-campaign's levels whatever it says */
+/* whether a game on this map with this engine is co-op: one of the
+campaign's levels whatever it says, or no game engine (the campaign's, as
+OpenCE lists and hosts co-op) but on one of the Xbox's multiplayer levels
+(a PC host between games, or a network test's, sends no engine a moment) */
 static boolean coop_game(
 	char const *map_name,
 	long map_name_size,
@@ -81,13 +86,13 @@ static boolean coop_game(
 	char map[MAP_NAME_SIZE];
 	long length = map_name_size < (long)sizeof(map) ? map_name_size : (long)sizeof(map) - 1;
 
-	if (engine_type == 0)
-		return TRUE;
 	if (!map_name || length <= 0)
-		return FALSE;
+		return engine_type == 0;
 	memcpy(map, map_name, (size_t)length);
 	map[length] = 0;
-	return main_get_solo_level_from_name(map) != NONE;
+	if (main_get_solo_level_from_name(map) != NONE)
+		return TRUE;
+	return engine_type == 0 && !crossplay_guard_stock_multiplayer_map(map, (int)sizeof(map));
 }
 
 static void coop_refusal_tell(
@@ -168,6 +173,7 @@ boolean network_crossplay_guard_record(
 	struct network_game const *game)
 {
 	char name[GAME_NAME_SIZE];
+	boolean coop;
 
 	/* (this machine's own server's game: split screen, bots) */
 	if (!network_wire_crossplay() || !game || global_network_game_server_get())
@@ -178,8 +184,23 @@ boolean network_crossplay_guard_record(
 		network_crossplay_guard.client = client;
 	}
 	name_ascii(game->name, NUMBEROF(game->name), name, sizeof(name));
-	switch (crossplay_guard_judge(coop_game(game->map.name, sizeof(game->map.name), game->variant.game_engine_index),
-		game->player_count, game->maximum_players))
+	{
+		char map[MAP_NAME_SIZE];
+
+		csmemcpy(map, game->map.name, sizeof(map) - 1);
+		map[sizeof(map) - 1] = 0;
+		coop = coop_game(map, sizeof(map), game->variant.game_engine_index);
+		/* (no engine on a map already played here: a PC host between games,
+		ChupathingyCE's; a campaign level stays co-op) */
+		if (coop && network_crossplay_guard.record_seen && !csstrcmp(map, network_crossplay_guard.record_map) &&
+			main_get_solo_level_from_name(map) == NONE)
+		{
+			coop = FALSE;
+		}
+		csmemcpy(network_crossplay_guard.record_map, map, sizeof(map));
+		network_crossplay_guard.record_seen = TRUE;
+	}
+	switch (crossplay_guard_judge(coop, game->player_count, game->maximum_players))
 	{
 	case CROSSPLAY_GUARD_COOP:
 		coop_refusal_tell(name);
