@@ -1194,13 +1194,22 @@ boolean valid_real_vector2d(
 	return valid_real(vector->i) && valid_real(vector->j);
 }
 
-static void machine_add_player(
+static boolean machine_add_player(
 	long machine_index,
 	long player_index)
 {
 	long *machine_player_list;
 	long machine_player_index;
 
+#ifdef HALO_LINUX
+	/* port: a machine the table has (a network player's, from a host) */
+	if (DATUM_INDEX_TO_ABSOLUTE_INDEX(machine_index) < 0 ||
+		DATUM_INDEX_TO_ABSOLUTE_INDEX(machine_index) >= MAXIMUM_NETWORK_MACHINE_COUNT)
+	{
+		error(_error_silent, "failed to create a player: no machine #%ld", machine_index);
+		return FALSE;
+	}
+#endif
 	machine_player_list =
 		machine_to_player_table[DATUM_INDEX_TO_ABSOLUTE_INDEX(machine_index)];
 	for (machine_player_index = 0;
@@ -1216,15 +1225,23 @@ static void machine_add_player(
 
 	if (machine_player_index == MAXIMUM_LOCAL_PLAYERS)
 	{
+#ifdef HALO_LINUX
+		/* port: a machine with no room for another player (what a network
+		game's host sends decides the players a client makes, and a host
+		need not keep to four a machine): refused, not the process ended */
+		error(_error_silent, "failed to create a player: machine #%ld has no room for another", machine_index);
+		return FALSE;
+#else
 		display_assert(
 			"failed to create a player",
 			"c:\\halo\\SOURCE\\game\\players.c",
 			240,
 			TRUE);
 		system_exit(-1);
+#endif
 	}
 
-	return;
+	return TRUE;
 }
 
 /* port: a player who left the game in progress is no longer its machine's
@@ -1303,7 +1320,17 @@ long player_new(
 			csmemcpy(&player->network_player_data, network_player, sizeof(struct network_player));
 	}
 
+#ifdef HALO_LINUX
+	/* port: no player where its machine has no room (machine_add_player) */
+	if (!machine_add_player(machine_index, player_index))
+	{
+		if (player_index != NONE)
+			player_delete(player_index);
+		return NONE;
+	}
+#else
 	machine_add_player(machine_index, player_index);
+#endif
 
 	return player_index;
 }

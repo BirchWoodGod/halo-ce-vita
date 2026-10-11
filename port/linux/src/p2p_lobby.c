@@ -89,6 +89,7 @@ Nothing changes on the wire.
 #include "posix.h"
 #include "port_config.h"
 #include "p2p_internal.h"
+#include "../game/net_fuzz_twin.h"
 #include "halo_port_limits.h"
 #include "lang.h"
 #include "crossplay_guard.h"
@@ -1048,6 +1049,20 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 
 	if (!parse_hex(hash_text, key_hash, P2P_KEY_HASH_SIZE))
 		return;
+#ifdef NET_FUZZ_TWIN_ENABLED
+	/* (tests only: a seed for p2p_lobby_fuzz.c, its mode 2: the slot, a 0,
+	the payload, heard on this wire, retained: net_fuzz_twin.h) */
+	if (size > 0)
+	{
+		char prefix[2 + 2 * P2P_KEY_HASH_SIZE + 1];
+		int length = (int)strlen(hash_text);
+
+		prefix[0] = (char)(network_wire_crossplay() ? 0x42 : 0x02);
+		prefix[1] = 0x01;
+		memcpy(prefix + 2, hash_text, (size_t)length + 1);
+		net_fuzz_capture(_net_fuzz_capture_listing, payload[0], prefix, 2 + length + 1, payload, size);
+	}
+#endif
 	{
 		unsigned char own[P2P_KEY_HASH_SIZE];
 

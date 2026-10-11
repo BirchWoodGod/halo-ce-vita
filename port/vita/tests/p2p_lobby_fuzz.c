@@ -193,8 +193,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	return 0;
 }
 
-#ifndef USE_LIBFUZZER
-/* ---------- the engine */
+/* ---------- the engine (without libFuzzer), and the seeds */
 
 static unsigned long long state = 88172645463325252ULL;
 
@@ -262,6 +261,29 @@ static void make_seeds(void)
 	}
 }
 
+#ifdef USE_LIBFUZZER
+/* (run_net_fuzz_test.sh's target lobby: net_fuzz_main.c's checks; with
+NET_FUZZ_SEED_DIR set, the first 16 seeds written there, as the other targets
+write theirs) */
+void net_fuzz_write_seed(const char *folder, const char *name, const void *data, unsigned long size);
+
+int net_fuzz_checks(void)
+{
+	const char *folder = getenv("NET_FUZZ_SEED_DIR");
+	int index;
+
+	setup();
+	make_seeds();
+	for (index = 0; folder && index < 16; index++)
+	{
+		char name[32];
+
+		snprintf(name, sizeof(name), "seed-%02d%s", index, seeds[index][0] & 0x40 ? "-crossplay" : "");
+		net_fuzz_write_seed(folder, name, seeds[index], (unsigned long)seed_sizes[index]);
+	}
+	return 0;
+}
+#else
 static int mutate(unsigned char *input, int size)
 {
 	int count = 1 + next_random() % 8, change;
