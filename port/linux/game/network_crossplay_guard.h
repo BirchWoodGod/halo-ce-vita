@@ -1,0 +1,66 @@
+/*
+NETWORK_CROSSPLAY_GUARD.H
+
+The game client's side of the crossplay guardrails (docs/crossplay.md 6,
+T11; the rules are port/linux/src/crossplay_guard.h's). With Crossplay on
+(network_wire.h) this machine joins PC games only, and:
+
+- a PC co-op game is refused from its LAN advertisement (no game engine,
+  or a campaign level), before any join, and again on its settings record
+  (the game left, the player told);
+- a large PC game (more than 16 players in it, or a maximum above 16) is
+  joined, and the player asked once whether to play it anyway: in the
+  server browser before the join, else in the game's lobby when its
+  settings record arrives; "no" leaves it;
+- split screen (PS TV): one local player in a crossplay game; another is
+  not added, and told why.
+
+Nothing here applies on the legacy wire, nor to a game this machine's own
+server runs (split screen, bots).
+*/
+
+#ifndef __NETWORK_CROSSPLAY_GUARD_H
+#define __NETWORK_CROSSPLAY_GUARD_H
+
+struct network_game;
+
+/* a PC host's LAN advertisement, of a version this machine joins: FALSE
+refuses it (the player told, if tell) */
+boolean network_crossplay_guard_advertisement(
+	wchar_t const *game_name,
+	char const *map_name,
+	long map_name_size,
+	short engine_type,
+	long players,
+	long maximum,
+	boolean tell);
+/* whether the player said no to this large PC game a moment ago (the
+automatic joins, network_game_client_join_first_available_game, leave it
+alone: said once, if tell) */
+boolean network_crossplay_guard_declined(
+	wchar_t const *game_name,
+	boolean tell);
+/* the host's settings record as the client takes it (client: whose
+game): FALSE refuses it, the player told, and the game is to be left */
+boolean network_crossplay_guard_record(
+	void const *client,
+	struct network_game const *game);
+/* each frame of the client: FALSE when the player said no to the large
+game it is in (the game is to be left) */
+boolean network_crossplay_guard_update(
+	void const *client);
+/* the client reset (a new search or join): its game's answers forgotten
+(the browser's stay theirs: crossplay_guard.h) */
+void network_crossplay_guard_reset(
+	void);
+/* whether the local player (controller local_player_index) may be added
+to the game (machine_index: this machine's; requested: the controllers
+whose players were asked for, requested_count of them): FALSE, told once */
+boolean network_crossplay_guard_local_player(
+	struct network_game const *game,
+	short machine_index,
+	short local_player_index,
+	boolean const *requested,
+	short requested_count);
+
+#endif /* __NETWORK_CROSSPLAY_GUARD_H */

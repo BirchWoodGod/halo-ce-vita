@@ -244,6 +244,14 @@ struct p2p_lobby_entry
 	/* hosted by a dedicated server (port/linux/DEDICATED_SERVER.md), whose
 	host has no player of its own */
 	int dedicated;
+	/* (crossplay_guard.h) co-op on a campaign level (on the crossplay wire:
+	no game engine, refused there); a PC game with more than 16 players in
+	it or a maximum above 16 (the crossplay wire only: joined after asking
+	once) */
+	int coop, experimental;
+	/* the badges a row shows (the crossplay wire's, else empty): "PC" or "PC
+	SERVER", then " EXPERIMENTAL" or " CO-OP" (translated) */
+	char badge[48];
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any

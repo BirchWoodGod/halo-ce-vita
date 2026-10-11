@@ -47,11 +47,15 @@
 # on the crossplay wire). Each also runs its control: the same host with an
 # OpenCE client, which must pass (else the harness is broken and the run
 # fails). Acceptance tests since the wire switch (T4/T5, network_wire.h):
-# opencelan, opencehost, chupahost, chupaserver and damnserver must pass;
-# crossrefuse is still EXPECTED TO FAIL (T11's refusals): reported as XFAIL
+# opencelan, opencehost, chupahost, chupaserver and damnserver must pass, and
+# since the guardrails (T11, crossplay_guard.h) crossrefuse and crossbig. A
+# mode named in XPPC_EXPECTED_FAIL (none by default) is reported as XFAIL
 # with the stage where our client stopped and the log lines that say why,
 # exit status 0 (XPPC_STRICT=1: a failure; a pass is reported as XPASS: take
-# the mode off XPPC_EXPECTED_FAIL)
+# the mode off XPPC_EXPECTED_FAIL). Every game an OpenCE host makes by its
+# fast setup takes 128 players, a large PC game, which our client joins
+# after asking once: the answer is HALO_CROSSPLAY_LARGE_ANSWER (XPPC_LARGE_ANSWER,
+# default yes)
 #   opencelan   OpenCE host, our client on its LAN (system link)
 #   opencehost  OpenCE host behind NAT A, public; our client behind NAT B
 #               joins it from the server browser, and another opens its
@@ -72,10 +76,21 @@
 #               hceu); our copy told to host with Crossplay on refuses to
 #               (never on the crossplay wire); and our client with Crossplay
 #               off does not join an OpenCE host on its LAN
-#   crossrefuse OpenCE hosts our client must refuse with the right message
-#               (section 6, T11): a game of 32 players, a co-op game, a map
-#               our client does not have; today it refuses for the Vita line
-#               or not at all, so the check is on the message
+#   crossrefuse what our client refuses in a PC game (section 6, T11), on
+#               OpenCE hosts on LANs of their own: a co-op game (a10:
+#               refused before any join, the reason named), a second local
+#               player (split screen, HALO_NETWORK_TEST_SECOND_PLAYER: not
+#               added, said, the game played on), and a map our client lacks
+#               (wizard: T3's refusal, crossplay_maps.c; checked only when
+#               this build has it, else reported as waiting for T3)
+#   crossbig    large PC games (section 6: allowed, Experimental, asked
+#               once; never refused by their players): an OpenCE host of
+#               128 players (its fast setup's) with our client answering yes,
+#               on a LAN (asked in the lobby) and from the server browser
+#               (asked there, the listing badged EXPERIMENTAL, the lobby not
+#               asking again): asked exactly once, then the whole game
+#               played; and answering no on a LAN: no tick of its game
+#               played, the game left
 #   all         every mode above, one after the other (expected failures as
 #               XFAIL), and a summary
 #
@@ -106,7 +121,8 @@
 #   XPPC_CONTROL=0     leave out the expected-fail modes' controls
 #   XPPC_MQTT311=1     the broker refuses MQTT 5 (every copy must fall back to
 #                      3.1.1)
-#   XPPC_EXPECTED_FAIL the expected-fail modes ("crossrefuse")
+#   XPPC_EXPECTED_FAIL the expected-fail modes (none)
+#   XPPC_LARGE_ANSWER  our client's answer about a large PC game (yes)
 #   HALO_TEST_OUT      where the logs go (deleted after a pass unless
 #                      HALO_TEST_KEEP=1; default a new folder under
 #                      ~/halo-test-out)
@@ -126,11 +142,11 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
-expected_fail=${XPPC_EXPECTED_FAIL:-crossrefuse}
+expected_fail=${XPPC_EXPECTED_FAIL:-}
 mode=${1:-}
 
 case $mode in
-pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse|crossmixed) ;;
+pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed) ;;
 crossversion)
 	echo "SKIP (crossversion): wants T10's signed crossplay table (HALO_CROSSPLAY_TABLE, a test key)"
 	exit 0 ;;
@@ -142,7 +158,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossmixed crossrefuse crossversion; do
+	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossmixed crossrefuse crossbig crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -337,7 +353,7 @@ run_copy() {
 		binary=$dir/bin/halo
 		own="SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_FRAME_CAP=30
 			HALO_TICK_THREAD=1 HALO_EXIT_AFTER=$run_seconds HALO_NET_BROKERS=$broker:1883 HALO_NET_RELAYS=198.51.100.1:47320
-			HALO_NET_ALLOW_RELAY=false HALO_CROSSPLAY=1 ${XPPC_OUR_ENV:-}" ;;
+			HALO_NET_ALLOW_RELAY=false HALO_CROSSPLAY=1 HALO_CROSSPLAY_LARGE_ANSWER=${XPPC_LARGE_ANSWER:-yes} ${XPPC_OUR_ENV:-}" ;;
 	*)
 		case $kind in
 		opence) binary=$opence ;;
@@ -719,52 +735,126 @@ crossmixed)
 	echo "--- the brokers' topics"; broker_topics
 	;;
 crossrefuse)
-	# three OpenCE hosts on LANs of their own, each with our client: a game
-	# bigger than a Vita takes (an OpenCE host's fast setup, as its network
-	# test hosts, takes 128 players: HALO_PORT_MAXIMUM_NETWORK_PLAYERS;
-	# OpenCE has no setting for fewer), a co-op game (a10), and a map our
-	# client lacks (wizard: its maps folder without it). The right refusals
-	# (section 6, T11's messages, to be written) are looked for loosely: the
-	# reason named
-	pair refuse-big lan opence ours
+	# OpenCE hosts on LANs of their own, each with our client (section 6,
+	# T11): a co-op game (a10), refused before any join with the reason
+	# named; a Slayer game where our client asks for a second local player
+	# (split screen: one player per Vita in PC games), refused and said, the
+	# game played on; and a map our client lacks (wizard: its maps folder
+	# without it), T3's refusal (crossplay_maps.c, feat/xp-map-identity),
+	# looked for only when this build has its text
 	host_game='levels\a10\a10' host_variants=coop pair refuse-coop lan opence ours
-	mkdir -p "$out/maps-nowizard"
-	for f in "$data"/maps/*.map; do
-		[ "$(basename "$f")" = wizard.map ] || ln -sfn "$f" "$out/maps-nowizard/$(basename "$f")"
-	done
-	client_maps=$out/maps-nowizard host_game=wizard pair refuse-map lan opence ours
+	pair refuse-split lan opence ours HALO_NETWORK_TEST_SECOND_PLAYER=3
+	t3=0
+	grep -aq "PC hosts can't send maps" "$vita" && t3=1
+	if [ $t3 = 1 ]; then
+		mkdir -p "$out/maps-nowizard"
+		for f in "$data"/maps/*.map; do
+			[ "$(basename "$f")" = wizard.map ] || ln -sfn "$f" "$out/maps-nowizard/$(basename "$f")"
+		done
+		client_maps=$out/maps-nowizard host_game=wizard pair refuse-map lan opence ours
+	fi
 	wait_pairs
-	refused=0
-	for name in refuse-big refuse-coop refuse-map; do
-		case $name in
-		refuse-big) want='too (big|many players)|more than 16 players|PC game too big' ;;
-		refuse-coop) want='co-?op.*(PC|crossplay|refus|cannot)|(refus|cannot).*co-?op' ;;
-		refuse-map) want='(missing|do not have|don.t have|no map|couldn.t (find|load)).*(wizard|Wizard)' ;;
-		esac
-		got=$(grep -ahiE "$want" "$out/$name/client/run.log" "$out/$name/client/data/debug.txt" 2>/dev/null |
-			grep -v "/" | head -2)
-		joined=$(grep -ac "network test: joining" "$out/$name/client/run.log" 2>/dev/null)
-		said=$(grep -ahiE "not a Vita|Vita-only|cannot join|refus|not joining" "$out/$name/client/run.log" "$out/$name/client/data/debug.txt" \
-			2>/dev/null | grep -v "/" | sed 's/^[0-9.]* [0-9:]*  //; s/^halo-linux: //' | sort -u | head -3)
-		echo "--- $name: our client joined ${joined:-0} times; the right refusal: ${got:-none}"
-		[ -n "$said" ] && echo "$said" | sed 's/^/  it said: /'
-		if [ -n "$got" ] && [ "${joined:-0}" = 0 ]; then
-			our_results="$our_results $name:pass"
-		elif [ "${joined:-0}" != 0 ]; then
-			our_results="$our_results $name:joined-instead-of-refusing"
-		else
-			# (no spaces: the stages are a list of words)
-			stage=refusal-message
-			grep -aqiE "not joining a host of network version" "$out/$name/client/data/debug.txt" "$out/$name/client/run.log" \
-				2>/dev/null && stage="$stage(refused-for-the-network-version-instead)"
-			grep -aqiE "not a Vita|Vita-only" "$out/$name/client/run.log" "$out/$name/client/data/debug.txt" 2>/dev/null &&
-				stage="$stage(and-as-not-a-Vita-while-the-host-was-in-its-lobby)"
-			our_results="$our_results $name:$stage"
+	for name in refuse-coop refuse-split refuse-map; do
+		clientlog=$out/$name/client/run.log clientdebug=$out/$name/client/data/debug.txt
+		if [ "$name" = refuse-map ] && [ $t3 = 0 ]; then
+			echo "--- refuse-map: not checked: this build has no T3 map refusals (feat/xp-map-identity's crossplay_maps.c)"
+			continue
 		fi
+		joined=$(grep -ac "network test: joining" "$clientlog" 2>/dev/null)
+		said=$(grep -ahiE "not a Vita|Vita-only|cannot join|refus|not joining|not adding|isn.t in your maps" "$clientlog" \
+			"$clientdebug" 2>/dev/null | grep -v "/" | sed 's/^[0-9.]* [0-9:]*  //; s/^halo-linux: //' | sort -u | head -3)
+		case $name in
+		refuse-coop)
+			got=$(grep -ahiE 'co-?op.*(PC|crossplay|refus|cannot)|(refus|cannot).*co-?op' "$clientlog" "$clientdebug" \
+				2>/dev/null | grep -v "/" | head -2)
+			echo "--- $name: our client joined ${joined:-0} times; the refusal: ${got:-none}"
+			if [ -n "$got" ] && [ "${joined:-0}" = 0 ]; then
+				result=pass
+			elif [ "${joined:-0}" != 0 ]; then
+				result=joined-instead-of-refusing
+			else
+				result=refusal-message
+			fi ;;
+		refuse-split)
+			# (each copy of our client: not added, said once; never asked of
+			# the host; the game played: crossplay_check.py's steps)
+			got=$(cat "$out/$name"/*/run.log 2>/dev/null | grep -ac "crossplay: not adding local player 1")
+			asked=$(cat "$out/$name"/*/run.log 2>/dev/null | grep -ac "network test: asking for a second local player")
+			requested=$(cat "$out/$name"/*/data/debug.txt 2>/dev/null |
+				grep -ac "requesting a player addition (controller index #1)")
+			echo "--- $name: asked ${asked:-0}, refused-and-said ${got:-0}, requested of the host ${requested:-0}"
+			if [ "${asked:-0}" = 0 ]; then
+				result=never-asked-for-a-second-player
+			elif [ "${got:-0}" != "${asked:-0}" ] || [ "${requested:-0}" != 0 ]; then
+				result=second-player-said-$got-requested-$requested
+			elif ! check_pair "$name"; then
+				result=${check_stage:-play}
+			else
+				result=pass
+			fi ;;
+		refuse-map)
+			got=$(grep -ahiE "(missing|do not have|don.t have|no map|couldn.t (find|load)|isn.t in your maps folder).*" \
+				"$clientlog" "$clientdebug" 2>/dev/null | grep -i wizard | grep -v "/" | head -2)
+			# (ticks played after the host's settings named its map: its game)
+			ticks=$(sed -n "/join: the host's map is .*wizard/,\$ p" "$clientlog" 2>/dev/null | grep -ac "network test: tick [0-9]* ")
+			echo "--- $name: our client played ${ticks:-0} ticks of the host's game; the refusal: ${got:-none}"
+			if [ -n "$got" ] && [ "${ticks:-0}" = 0 ]; then
+				result=pass
+			elif [ "${ticks:-0}" != 0 ]; then
+				result=played-instead-of-refusing
+			else
+				result=refusal-message
+			fi ;;
+		esac
+		[ -n "$said" ] && echo "$said" | sed 's/^/  it said: /'
+		our_results="$our_results $name:$result"
 		# (the host must have hosted, or the check proves nothing)
 		grep -aq "network test: hosting" "$out/$name/host/run.log" ||
 			{ controls_ok=0; echo "BROKEN ($mode): the OpenCE host of $name never hosted"; }
 	done
+	;;
+crossbig)
+	# large PC games (section 6, the owner's Oct 11 2026): an OpenCE host's
+	# fast setup takes 128 players, a maximum above 16: our client joins it
+	# after asking once (HALO_CROSSPLAY_LARGE_ANSWER answers), on a LAN (the
+	# lobby asks) and from the server browser (the browser asks; the lobby
+	# then not), and plays the whole game; answering no, it plays none of it
+	test_names="big-lan-yes big-net-yes"
+	pair big-lan-yes lan opence ours HALO_CROSSPLAY_LARGE_ANSWER=yes
+	pair big-net-yes net opence ours HALO_CROSSPLAY_LARGE_ANSWER=yes
+	pair big-lan-no lan opence ours HALO_CROSSPLAY_LARGE_ANSWER=no
+	run_our_modes
+	results=
+	for r in $our_results; do
+		name=${r%%:*} result=${r#*:}
+		clientlog=$out/$name/client/run.log clientdebug=$out/$name/client/data/debug.txt
+		asked=$(grep -ac "crossplay: asking about the large PC game" "$clientlog" 2>/dev/null)
+		experimental=$(grep -ac "joining the large PC game .*experimental\|playing the large PC game" "$clientdebug" 2>/dev/null)
+		badged=$(grep -ac "the public games list .* badge PC EXPERIMENTAL" "$clientlog" 2>/dev/null)
+		echo "--- $name: asked ${asked:-0} times; experimental lines ${experimental:-0}; listed with the badge ${badged:-0}"
+		if [ "$result" = pass ] && [ "${asked:-0}" != 1 ]; then
+			result=asked-$asked-times
+		elif [ "$result" = pass ] && [ "$name" = big-net-yes ] && [ "${badged:-0}" = 0 ]; then
+			result=listing-not-badged-experimental
+		elif [ "$result" = pass ] && [ "${experimental:-0}" = 0 ]; then
+			result=not-said-experimental
+		fi
+		results="$results $name:$result"
+	done
+	our_results=$results
+	name=big-lan-no
+	clientlog=$out/$name/client/run.log clientdebug=$out/$name/client/data/debug.txt
+	ticks=$(grep -ac "network test: tick [0-9]* " "$clientlog" 2>/dev/null)
+	asked=$(grep -ac "crossplay: asking about the large PC game" "$clientlog" 2>/dev/null)
+	left=$(grep -ac "leaving the large PC game .*the player said no" "$clientdebug" 2>/dev/null)
+	echo "--- $name: asked ${asked:-0} times, left ${left:-0}, played ${ticks:-0} ticks"
+	if [ "${asked:-0}" -ge 1 ] && [ "${left:-0}" -ge 1 ] && [ "${ticks:-0}" = 0 ]; then
+		our_results="$our_results $name:pass"
+	else
+		our_results="$our_results $name:asked-$asked-left-$left-ticks-$ticks"
+	fi
+	grep -aq "network test: hosting" "$out/$name/host/run.log" ||
+		{ controls_ok=0; echo "BROKEN ($mode): the OpenCE host of $name never hosted"; }
 	;;
 esac
 

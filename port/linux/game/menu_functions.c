@@ -48,6 +48,8 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 #include "halo_menus.h"
 #include "../src/lang.h"
 #include "../src/p2p.h"
+#include "../src/crossplay_guard.h"
+#include "network_wire.h"
 #include "../src/system_link_shortcut.h"
 
 #include <stdio.h>
@@ -58,6 +60,9 @@ halo_text_input_*, vita_settings.c); elsewhere from HALO_TEST_TEXT_INPUT,
 void platform_log(char const *format, ...);
 int setenv(const char *name, const char *value, int overwrite);
 unsigned long system_milliseconds(void);
+void platform_show_message(char const *title, char const *message);
+void platform_ask_question(char const *title, char const *text);
+int platform_question_answer(void);
 
 /* the game's (port) */
 boolean ui_widget_port_start_network_game_server(void);
@@ -245,6 +250,10 @@ static struct
 	screen */
 	boolean open_system_link;
 	boolean open_password;
+	/* (crossplay_guard.h) a large PC game chosen: the player asked whether
+	to join it anyway, the answer awaited */
+	boolean large_asked;
+	struct p2p_lobby_entry large_entry;
 } menu_functions;
 
 /* ---------- private code */
@@ -488,6 +497,8 @@ static void multiplayer_update(struct widget_instance *list)
 
 /* ---- the server browser */
 
+static void browser_large_watch(void);
+
 static void row_column(struct widget_instance *row, char const *name, char const *text)
 {
 	text_show(named(row, name), text);
@@ -501,6 +512,7 @@ static void browser_update(struct widget_instance *list)
 	long index, focused_row = NONE;
 
 	join_watch();
+	browser_large_watch();
 	menu_functions.entry_count = 0;
 	while (menu_functions.entry_count < BROWSER_ROWS &&
 		p2p_lobby_entry((int)menu_functions.entry_count, &menu_functions.entries[menu_functions.entry_count]))
@@ -527,7 +539,16 @@ static void browser_update(struct widget_instance *list)
 		child->disabled = FALSE;
 		/* (the lock: a game with a password, 2a6dc2b7) */
 		widget_instance_set_visibility_recursive(named(child, "row_lock"), entry->locked != 0);
-		row_column(child, "row_name", entry->name);
+		/* (a PC game's badges first: crossplay_guard.h) */
+		if (entry->badge[0])
+		{
+			char badged[P2P_LOBBY_NAME_SIZE + sizeof(entry->badge) + 4];
+
+			snprintf(badged, sizeof(badged), "[%s] %s", entry->badge, entry->name);
+			row_column(child, "row_name", badged);
+		}
+		else
+			row_column(child, "row_name", entry->name);
 		row_column(child, "row_map", entry->map);
 		row_column(child, "row_game", entry->gametype);
 		snprintf(text, sizeof(text), "%d/%d", entry->players, entry->maximum);
@@ -620,11 +641,56 @@ static struct p2p_lobby_entry const *browser_entry(struct widget_instance *widge
 	return menu_functions.chosen_valid ? &menu_functions.chosen : NULL;
 }
 
+/* a game chosen to join, past the crossplay guardrails: its password
+first, if it has one */
+static void browser_join_entry(struct p2p_lobby_entry const *entry)
+{
+	if (entry->locked)
+	{
+		/* (its password first: the password screen, from the main loop) */
+		menu_functions.password[0] = 0;
+		menu_functions.password_help = _help_ask;
+		menu_functions.open_password = TRUE;
+		return;
+	}
+	join_begin(entry, NULL);
+}
+
+/* the player's answer about the large PC game chosen (crossplay_guard.h):
+remembered, so that its lobby does not ask again; yes joins it */
+static void browser_large_answered(int yes)
+{
+	struct p2p_lobby_entry const *entry = &menu_functions.large_entry;
+
+	menu_functions.large_asked = FALSE;
+	crossplay_guard_answer(entry->name, yes, system_milliseconds());
+	platform_log("menus: the large PC game %s (%d of %d players): the player said %s", entry->name, entry->players,
+		entry->maximum, yes ? "join anyway" : "no");
+	if (!yes)
+	{
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("Not joined"));
+		return;
+	}
+	browser_join_entry(entry);
+}
+
+/* (each frame on the browser) the answer, once the player gives it */
+static void browser_large_watch(void)
+{
+	int answer;
+
+	if (!menu_functions.large_asked)
+		return;
+	answer = platform_question_answer();
+	if (answer >= 0)
+		browser_large_answered(answer);
+}
+
 static boolean browser_join(struct widget_instance *widget)
 {
 	struct p2p_lobby_entry const *entry = browser_entry(widget);
 
-	if (!entry)
+	if (!entry || menu_functions.large_asked)
 		return TRUE;
 	menu_functions.chosen = *entry;
 	menu_functions.chosen_valid = TRUE;
@@ -634,15 +700,31 @@ static boolean browser_join(struct widget_instance *widget)
 		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That is your own game"));
 		return TRUE;
 	}
-	if (entry->locked)
+	/* (crossplay_guard.h: a PC co-op game refused; a large PC game asked
+	about once) */
+	if (network_wire_crossplay() && entry->coop)
 	{
-		/* (its password first: the password screen, from the main loop) */
-		menu_functions.password[0] = 0;
-		menu_functions.password_help = _help_ask;
-		menu_functions.open_password = TRUE;
+		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("PC co-op games can't be joined"));
+		platform_log("menus: not joining the PC co-op game %s (crossplay)", entry->name);
+		platform_show_message(T("Halo: cannot join this game"), crossplay_guard_coop_refusal());
 		return TRUE;
 	}
-	join_begin(entry, NULL);
+	if (network_wire_crossplay() && entry->experimental &&
+		crossplay_guard_answered(entry->name, system_milliseconds()) != 1)
+	{
+		int answer = crossplay_guard_test_answer();
+
+		menu_functions.large_entry = *entry;
+		menu_functions.large_asked = TRUE;
+		platform_log("menus: the large PC game %s (%d of %d players): asking the player", entry->name, entry->players,
+			entry->maximum);
+		if (answer >= 0)
+			browser_large_answered(answer);
+		else
+			platform_ask_question(crossplay_guard_large_title(), crossplay_guard_large_question());
+		return TRUE;
+	}
+	browser_join_entry(entry);
 	return TRUE;
 }
 

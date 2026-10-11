@@ -103,6 +103,9 @@ Called from the main loop every frame (main.c).
 
 /* internet play's codes and lobby (port/linux/src/p2p.c) */
 #include "../src/p2p.h"
+/* the crossplay guardrails (docs/crossplay.md 6, T11) */
+#include "../src/crossplay_guard.h"
+#include "network_wire.h"
 
 /* the platform layer's (port/linux/src/port_config.c) */
 const char *config_string(char const *name);
@@ -220,6 +223,11 @@ static struct
 	before its game began, and the seconds since it ended */
 	long retries;
 	real retry_seconds;
+	/* debug.network_test_second_player: the seconds after joining a second
+	local player is asked for, and whether it was */
+	real second_player_time;
+	real second_player_seconds;
+	boolean second_player_asked;
 } network_test;
 
 /* the variant at the index of the list (copied to name), FALSE past its end */
@@ -371,6 +379,7 @@ static void network_test_read_settings(
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
 	network_test.rejoin_time = (real)config_real("debug.network_test_rejoin");
 	network_test.retries = (long)config_integer("debug.network_test_retry");
+	network_test.second_player_time = (real)config_real("debug.network_test_second_player");
 	snprintf(network_test.lobby_name, sizeof(network_test.lobby_name), "%s",
 		config_string("debug.network_test_public_name"));
 	network_test.local_after = network_test.local ? 0.0f : (real)config_real("debug.network_test_local_after");
@@ -1528,6 +1537,20 @@ void network_test_update(
 		}
 	}
 
+	/* (a second local player asked for, as a second controller's A on the
+	pregame screen or in the game: split screen in a network game; its own
+	clock from the join) */
+	if (network_test.mode == _network_test_join && network_test.joined && network_test.second_player_time > 0.0f &&
+		!network_test.second_player_asked && global_network_game_client_get())
+	{
+		network_test.second_player_seconds += seconds;
+		if (network_test.second_player_seconds >= network_test.second_player_time)
+		{
+			network_test.second_player_asked = TRUE;
+			platform_log("network test: asking for a second local player (controller 2): %s",
+				network_game_client_add_player(global_network_game_client_get(), 1) ? "asked or held" : "failed");
+		}
+	}
 	if (!main_menu_loaded)
 		return;
 	network_test.menu_seconds += seconds;
@@ -1676,9 +1699,32 @@ void network_test_update(
 					if (entry.compatible && !entry.own &&
 						(!network_test.lobby_name[0] || !strcmp(entry.name, network_test.lobby_name)))
 					{
-						platform_log("network test: the public games list \"%s\"%s%s: %s; %s", entry.name,
-							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "", entry.rules,
-							entry.players_line);
+						platform_log("network test: the public games list \"%s\"%s%s%s%s: %s; %s", entry.name,
+							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "",
+							entry.badge[0] ? " badge " : "", entry.badge, entry.rules, entry.players_line);
+						/* (as the browsers do, crossplay_guard.h: a PC co-op game
+						refused; a large one asked about once, the answer
+						HALO_CROSSPLAY_LARGE_ANSWER's) */
+						if (network_wire_crossplay() && entry.coop)
+						{
+							platform_log("network test: not joining the public game \"%s\": a PC co-op game (crossplay)",
+								entry.name);
+							continue;
+						}
+						if (network_wire_crossplay() && entry.experimental &&
+							crossplay_guard_answered(entry.name, system_milliseconds()) < 0)
+						{
+							int answer = crossplay_guard_test_answer();
+
+							platform_log("crossplay: asking about the large PC game %s (%d of %d players): %s", entry.name,
+								entry.players, entry.maximum, answer > 0 ? "join anyway" : "no");
+							crossplay_guard_answer(entry.name, answer > 0, system_milliseconds());
+						}
+						if (network_wire_crossplay() && entry.experimental &&
+							crossplay_guard_answered(entry.name, system_milliseconds()) == 0)
+						{
+							continue;
+						}
 						snprintf(network_test.lobby_id, sizeof(network_test.lobby_id), "%s", entry.id);
 						network_test.lobby_locked = entry.locked != 0;
 						break;

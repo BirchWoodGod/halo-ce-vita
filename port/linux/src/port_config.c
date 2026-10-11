@@ -358,6 +358,11 @@ static const struct config_setting config_settings[] =
 	{ "debug.network_test_retry", _config_integer, "0", "HALO_NETWORK_TEST_RETRY", _environment_value, _platform_all,
 		"Times a joining machine of an automated test whose join ended before its\n"
 		"game began (a map download cut off, refused) joins again; 0 never." },
+	{ "debug.network_test_second_player", _config_real, "0.0", "HALO_NETWORK_TEST_SECOND_PLAYER", _environment_value,
+		_platform_all,
+		"Seconds after an automated test's joining machine joined its game that it\n"
+		"asks for a second local player (controller 2, split screen) too, once; 0\n"
+		"never. On the crossplay wire it is refused (one player per Vita for now)." },
 	{ "debug.network_test_local_after", _config_real, "0.0", "HALO_NETWORK_TEST_LOCAL_AFTER", _environment_value,
 		_platform_all,
 		"Seconds an automated test host (\"host:<map>\") keeps its game's lobby\n"

@@ -91,6 +91,7 @@ Nothing changes on the wire.
 #include "p2p_internal.h"
 #include "halo_port_limits.h"
 #include "lang.h"
+#include "crossplay_guard.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1213,10 +1214,12 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	shown->in_progress = (listing->flags & _listing_in_progress) != 0;
 	shown->has_teams = (listing->flags & _listing_has_teams) != 0;
 	shown->pc_map = (listing->flags & _listing_pc_map) != 0;
-	shown->coop = (listing->flags & _listing_coop) != 0;
+	/* (the crossplay wire's listing has no co-op bit nor difficulty: OpenCE
+	lists co-op as no game engine, the campaign's, docs/crossplay.md 6) */
+	shown->coop = network_wire_crossplay() ? listing->engine_type == 0 : (listing->flags & _listing_coop) != 0;
 	shown->dedicated = (listing->flags & _listing_dedicated) != 0;
 	shown->score_limit = listing->score_limit;
-	shown->difficulty = listing->difficulty;
+	shown->difficulty = network_wire_crossplay() ? 255 : listing->difficulty;
 	shown->listed_player_count = 0;
 	for (index = 0; index < listing->listed_player_count; index++)
 	{
@@ -2053,6 +2056,15 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	entry->has_teams = listing->has_teams;
 	entry->failed = listing->failed;
 	entry->dedicated = listing->dedicated;
+	/* (crossplay_guard.h: a PC game's badges; the legacy wire's rows have
+	none, their games all the Vitas') */
+	entry->coop = listing->coop;
+	if (network_wire_crossplay())
+	{
+		entry->experimental = crossplay_guard_large(entry->players, entry->maximum);
+		snprintf(entry->badge, sizeof(entry->badge), "%s%s", crossplay_guard_badge(1, listing->dedicated),
+			entry->coop ? T(" CO-OP") : entry->experimental ? T(" EXPERIMENTAL") : "");
+	}
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)
 	{
