@@ -666,6 +666,9 @@ struct widget_instance;
 #include "networking/network_server_manager.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
+#ifdef HALO_LINUX
+#include "bots.h" /* port: port/linux/game/bots_playlist.c */
+#endif
 #include "rasterizer/rasterizer.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
@@ -4753,6 +4756,12 @@ void network_game_reset_to_pregame_ui(
 	ui_widgets_close_all();
 	if (network_game_is_splitscreen_local())
 	{
+#ifdef HALO_LINUX
+		/* port: the bots' playlist's next game: its lobby with the
+		countdown on, not the map choice (port/linux/game/bots_playlist.c) */
+		if (bots_playlist_pregame_ui())
+			return;
+#endif
 		if (network_game_is_quickstart_local())
 		{
 			if (!ui_widget_load_by_name_or_tag(

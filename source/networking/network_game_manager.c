@@ -94,6 +94,9 @@ symbols in this file:
 #include "objects/objects.h"
 #include "units/units.h"
 #include "text/unicode.h"
+#ifdef HALO_LINUX
+#include "bots.h"
+#endif
 
 #include <xtl.h>
 
@@ -785,7 +788,13 @@ boolean network_game_create_game_objects(
 		but on the crossplay wire, where it plays what it sends (the
 		network test's stand-in for a PC host). */
 		if (!global_network_game_server_get() ||
-			network_game_record_format_current() == _network_game_record_crossplay)
+			network_game_record_format_current() == _network_game_record_crossplay
+#ifdef HALO_LINUX
+			/* (and a game of the offline bots' playlist: its time limit,
+			port/linux/game/bots_playlist.c) */
+			|| bots_playlist_set_up(game->map.name)
+#endif
+			)
 		{
 			struct game_variant_options const *options = &game->variant_options;
 			void platform_log(char const *format, ...);

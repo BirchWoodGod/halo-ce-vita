@@ -50,6 +50,14 @@ found; the maps are looked for the first time this is asked. */
 short custom_edition_maps_display_index(
 	char const *level_name);
 
+/* Whether the map file named `name` (no path) is one of the level list's
+multiplayer maps that are not the Xbox's own (a Custom Edition or Xbox
+cache, turned on): the offline bots' playlist's custom lines
+(port/linux/game/bots_playlist.c) name no other. The maps are looked for
+the first time this is asked. */
+boolean custom_edition_maps_multiplayer_listed(
+	char const *name);
+
 /* A Custom Edition map's name and description, for the display index
 `display_index`, or NULL when that is no map's (text_group.c). */
 wchar_t *custom_edition_maps_name(

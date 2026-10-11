@@ -103,6 +103,14 @@ char const *network_game_server_machine_hardware_id(
 void network_game_server_update_ticks(
 	struct network_game_server *server,
 	short tick_count);
+#ifdef HALO_LINUX
+/* port: the offline bots' playlist's lobby countdown, started (TRUE while
+it runs) and stopped (port/linux/game/bots_playlist.c) */
+boolean network_game_server_port_start_countdown(
+	struct network_game_server *server);
+void network_game_server_port_stop_countdown(
+	struct network_game_server *server);
+#endif
 void network_game_server_change_map_name(
 	struct network_game_server *server,
 	char const *map_name);

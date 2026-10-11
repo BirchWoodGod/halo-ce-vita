@@ -255,6 +255,15 @@ void test_input_hold_back(int hold)
 	test_input_holding_back = hold;
 }
 
+/* the automated tests (bots_playlist.c's HALO_TEST_BOT_PLAYLIST_CANCEL): the
+player holds B, as one stopping the bots' playlist in its countdown does */
+static int test_input_holding_b;
+
+void test_input_hold_b(int hold)
+{
+	test_input_holding_b = hold;
+}
+
 /* (debug) HALO_TEST_PAD="steps": presses for automated menu tests on Linux
 (no window to type into: the harness), as HALO_PAD_FILE gives the Vita's
 (port/vita/host/vita_input.c): steps "name:hold_ms:pause_ms" separated by
@@ -429,6 +438,8 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	}
 	if (test_input_holding_back)
 		pad->wButtons |= XINPUT_GAMEPAD_BACK;
+	if (test_input_holding_b)
+		pad->bAnalogButtons[XINPUT_GAMEPAD_B] = 255;
 	if (seed < 0)
 		return;
 	/* (HALO_TEST_PAD presses the menus: the scripted player plays only in
