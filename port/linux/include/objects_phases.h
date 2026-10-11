@@ -6,7 +6,8 @@ own time and objects, the phases' totals, the children's share) and
 "objects-phases" (each type's time by phase, with calls). objects_phases.c.
 
 Each object's update is timed as its own type (a child - a held weapon, a
-grenade stuck to a biped - as the child's type, not its parent's), and the
+grenade stuck to a biped - as the child's type, not its parent's; a dead
+biped as "corpse", or "corpse_rest" once at rest), and the
 time inside it is split exclusively among the phases below: a phase nested
 in another (the collision tests of a biped's move, the cluster references of
 a light's reconnect) is taken out of the outer one. The phases:

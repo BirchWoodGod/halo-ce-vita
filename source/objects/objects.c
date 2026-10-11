@@ -4094,7 +4094,10 @@ static boolean object_update(
 	if (!TEST_FLAG(header->flags, _object_header_do_not_update_bit))
 	{
 #ifdef HALO_LINUX
-		HALO_OBJECTS_OBJECT_PUSH(header->type);
+		/* (dead bipeds counted apart: "corpse", and "corpse_rest" once at
+		rest; objects_phases.c's slots 12 and 13) */
+		HALO_OBJECTS_OBJECT_PUSH(header->type == _object_type_biped && TEST_FLAG(object->object.damage_flags, _object_dead_bit) ?
+			(TEST_FLAG(object->object.flags, _object_at_rest_bit) ? 13 : 12) : header->type);
 #endif
 		if (TEST_FLAG(object->object.flags, _object_garbage_bit))
 		{
