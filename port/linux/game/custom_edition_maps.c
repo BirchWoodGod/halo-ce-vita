@@ -45,6 +45,9 @@ in lines of about 20 characters.
 #include "bmp_files.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "crossplay_maps.h"
+#include "network_game_record.h"
+#include "cache_file_formats.h"
 #include "text/unicode.h"
 #include "../src/lang.h"
 
@@ -916,6 +919,23 @@ unsigned long custom_edition_maps_network_identity(
 	{
 		return 0;
 	}
+	/* (on the crossplay wire, what map.version means there, OpenCE's since its
+	network version 22 (cache_files_map_version, CC0): a Custom Edition map's
+	(custom_maps\<name>) raw header checksum, else 0. This build hosts no
+	crossplay game but the network test's stand-in for a PC host
+	(network_test.c); the legacy wire's identity below is as it was) */
+	if (network_game_record_format_current() == _network_game_record_crossplay)
+	{
+		struct crossplay_local_map local;
+		char file[CROSSPLAY_MAP_FILE_BYTES];
+
+		if (crossplay_map_name_parse(level_name, csstrlen(level_name) + 1, file) != _crossplay_map_kind_custom_edition)
+		{
+			return 0;
+		}
+		custom_edition_cache_crossplay_facts(file, &local);
+		return local.file == _crossplay_map_file_custom_edition ? local.checksum : 0;
+	}
 	name = tag_name_strip_path(level_name);
 	/* (a Halo PC map named as an Xbox level, which this machine plays with
 	PC maps on, custom_edition_cache.c: not the Xbox level, and said, so that
@@ -1045,6 +1065,60 @@ boolean custom_edition_maps_stock_problem(
 	error(_error_silent, "custom maps: the host plays the Xbox level '%s', which this machine cannot load: %s", name, why);
 
 	return TRUE;
+}
+
+short custom_edition_maps_crossplay_check(
+	char const *level_name,
+	long level_name_size,
+	unsigned long host_version,
+	char file[CROSSPLAY_MAP_FILE_BYTES],
+	char *why,
+	long why_size)
+{
+	struct crossplay_local_map local;
+	short kind = crossplay_map_name_parse(level_name, level_name_size, file);
+	short verdict;
+
+	why[0] = 0;
+	csmemset(&local, 0, sizeof(local));
+	/* (only a name that passed is looked for, and only as a file of the maps
+	folder: crossplay_map_name_parse's file name, no folder) */
+	if (kind == _crossplay_map_kind_xbox || kind == _crossplay_map_kind_custom_edition)
+	{
+		custom_edition_cache_crossplay_facts(file, &local);
+		if (kind == _crossplay_map_kind_xbox && crossplay_map_file_is_stock(file) && !host_version)
+		{
+			local.stock_problem = custom_edition_maps_stock_problem(level_name, 0, why, why_size);
+		}
+		if (kind == _crossplay_map_kind_custom_edition && local.file == _crossplay_map_file_custom_edition)
+		{
+			/* (`why` names those missing) */
+			local.resource_maps_missing = custom_edition_cache_missing_resource_maps(file, why, why_size);
+		}
+	}
+	verdict = crossplay_map_verdict(kind, file, host_version, &local);
+	if (verdict == _crossplay_map_unusable && !why[0])
+	{
+		snprintf(why, (size_t)why_size, "%s", cache_file_status_describe((enum cache_file_status)local.status));
+	}
+	if (verdict != _crossplay_map_playable)
+	{
+		crossplay_map_name_printable(level_name, level_name_size, file);
+		error(
+			_error_silent,
+			"crossplay: the PC host's map '%s' (0x%08lX) is not played here: %s%s%s",
+			file,
+			host_version,
+			crossplay_map_verdict_describe(verdict),
+			why[0] ? ": " : "",
+			why);
+	}
+	else if (local.file == _crossplay_map_file_custom_edition)
+	{
+		error(_error_silent, "crossplay: the PC host's Custom Edition map '%s' (0x%08lX) is this machine's", file, host_version);
+	}
+
+	return verdict;
 }
 
 char const *custom_edition_maps_level_title(
