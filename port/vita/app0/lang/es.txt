@@ -617,6 +617,7 @@
 "the scenario's scripts use more syntax nodes than this build has room for, or are not a syntax node array" = "los scripts del escenario usan más nodos de sintaxis de los que caben en esta versión, o no son una lista de nodos"
 "the Halo: CE Anniversary header is not valid (flags or tag data address)" = "la cabecera de Halo: CE Anniversary no es válida (indicadores o dirección de los datos de tags)"
 "the scenario names more objects than this build has room for" = "el escenario nombra más objetos de los que caben en esta versión"
+"the scenario's scripts take parameters, which this build does not run" = "los scripts del escenario reciben parámetros, que esta versión no ejecuta"
 "Halo: CE Anniversary maps play only from the mods folder, offline" = "los mapas de Halo: CE Anniversary solo se juegan desde la carpeta mods, sin conexión"
 "a resource map header is not valid" = "la cabecera de un mapa de recursos no es válida"
 "a resource map is not of the type needed" = "un mapa de recursos no es del tipo necesario"

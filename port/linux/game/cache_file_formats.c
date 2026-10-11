@@ -871,6 +871,7 @@ static char const *const cache_file_status_descriptions[NUMBER_OF_CACHE_FILE_STA
 	N_("the tag data and the tags held by resource maps do not fit below the structure BSP"),
 	N_("the Halo: CE Anniversary header is not valid (flags or tag data address)"),
 	N_("the scenario names more objects than this build has room for"),
+	N_("the scenario's scripts take parameters, which this build does not run"),
 };
 
 static char const *const cache_file_format_descriptions[NUMBER_OF_CACHE_FILE_FORMATS] =
@@ -5043,6 +5044,12 @@ not a call; a call of a script; a reference to a global */
 #define SCENARIO_HS_GLOBALS_OFFSET 0x4A8
 #define HS_SCRIPT_BYTES 0x5C
 #define HS_SCRIPT_ROOT_EXPRESSION_OFFSET 0x24
+/* MCC's scripts' parameters (Invader's scenario.json: a block in the
+script's padding) and the nodes naming one (a primitive global reference
+with bit 4: GulchCE's mcc_script_parameters.c) */
+#define HS_SCRIPT_PARAMETERS_OFFSET 0x50
+#define HS_SYNTAX_NODE_PARAMETER_FLAGS_MASK 0x17
+#define HS_SYNTAX_NODE_PARAMETER_FLAGS 0x15
 #define HS_GLOBAL_BYTES 0x5C
 #define HS_GLOBAL_INITIALIZATION_EXPRESSION_OFFSET 0x28
 #define NO_SYNTAX_NODE 0xFFFF
@@ -5177,9 +5184,17 @@ static enum cache_file_status mcc_cea_script_nodes_pack(
 	}
 	for (node_index = 0; node_index < node_count; node_index++)
 	{
-		packed_indices[node_index] = read_u16(nodes + (uint32_t)node_index * HS_SYNTAX_NODE_BYTES) ?
-			(uint16_t)packed_count++ :
-			NO_SYNTAX_NODE;
+		uint8_t const *node = nodes + (uint32_t)node_index * HS_SYNTAX_NODE_BYTES;
+
+		packed_indices[node_index] = read_u16(node) ? (uint16_t)packed_count++ : NO_SYNTAX_NODE;
+		/* (a script's parameter, which this build's interpreter would take
+		for a global: mcc_cea_script_parameters_refuse) */
+		if (read_u16(node) &&
+			(read_u16(node + HS_SYNTAX_NODE_FLAGS_OFFSET) & HS_SYNTAX_NODE_PARAMETER_FLAGS_MASK) == HS_SYNTAX_NODE_PARAMETER_FLAGS)
+		{
+			free(packed_indices);
+			return _cache_file_status_script_parameters;
+		}
 	}
 	if (packed_count > MAXIMUM_HS_SYNTAX_NODES_PER_SCENARIO)
 	{
@@ -5244,6 +5259,31 @@ static enum cache_file_status mcc_cea_script_nodes_pack(
 	write_u32(syntax_data + TAG_DATA_SIZE_OFFSET,
 		DATA_ARRAY_HEADER_BYTES + MAXIMUM_HS_SYNTAX_NODES_PER_SCENARIO * HS_SYNTAX_NODE_BYTES);
 	report->script_nodes_packed = packed_count;
+
+	return _cache_file_status_ok;
+}
+
+/* MCC's scripts may take parameters, which this build's interpreter has
+no notion of: it would run such a script with none and take each node
+naming one for a reference to a global. A map with any is refused (its
+nodes are refused as they are packed, mcc_cea_script_nodes_pack); no map
+examined has one (MCC's own a10, b30, c40, d40; Ruby's Rebalanced Halo:
+CE). GulchCE runs them (mcc_script_parameters.c, a runtime of its own). */
+static enum cache_file_status mcc_cea_script_parameters_refuse(
+	struct load_state const *state,
+	uint8_t *scenario)
+{
+	int32_t element_count;
+	int32_t element_index;
+	uint8_t *elements = mcc_cea_block_elements(state, scenario + SCENARIO_HS_SCRIPTS_OFFSET, HS_SCRIPT_BYTES, &element_count);
+
+	for (element_index = 0; element_index < element_count; element_index++)
+	{
+		if (read_u32(elements + (uint32_t)element_index * HS_SCRIPT_BYTES + HS_SCRIPT_PARAMETERS_OFFSET + TAG_BLOCK_COUNT_OFFSET))
+		{
+			return _cache_file_status_script_parameters;
+		}
+	}
 
 	return _cache_file_status_ok;
 }
@@ -5611,7 +5651,11 @@ enum cache_file_status mcc_cea_cache_fix(
 		return _cache_file_status_bad_scenario_tag;
 	}
 	report->problem_tag_index = (int32_t)(scenario_handle & ABSOLUTE_INDEX_MASK);
-	status = mcc_cea_script_nodes_pack(&state, tag_cache + scenario_offset, report);
+	status = mcc_cea_script_parameters_refuse(&state, tag_cache + scenario_offset);
+	if (status == _cache_file_status_ok)
+	{
+		status = mcc_cea_script_nodes_pack(&state, tag_cache + scenario_offset, report);
+	}
 	if (status == _cache_file_status_ok)
 	{
 		status = mcc_cea_object_names_fit(&state, tag_cache + scenario_offset, report);

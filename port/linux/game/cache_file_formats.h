@@ -200,6 +200,7 @@ enum cache_file_status
 	/* (port) Halo: CE Anniversary caches */
 	_cache_file_status_bad_mcc_cea_header,
 	_cache_file_status_bad_object_names,
+	_cache_file_status_script_parameters,
 
 	NUMBER_OF_CACHE_FILE_STATUSES
 };

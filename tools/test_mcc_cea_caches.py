@@ -456,6 +456,27 @@ def test_more_script_nodes_than_this_build_has_are_refused(report_tool, tmp_path
     assert report["mcc_cea_fix"].startswith("the scenario's scripts use more syntax nodes")
 
 
+def test_a_script_taking_parameters_is_refused(report_tool, tmp_path):
+    # MCC's parameter block in the script's padding (+0x50): this build's
+    # interpreter has no parameters
+    cache = Cache(script_nodes=(8, None, {}))
+    path = cache.write(tmp_path)
+    script = cache.where["tag_data"] + cache.addresses["script"] - BASE
+    returncode, report = run_report(report_tool, patched(path, script + 0x50, "<I", 1))
+    assert returncode == 1
+    assert report["mcc_cea_fix"] == "the scenario's scripts take parameters, which this build does not run"
+
+
+def test_a_node_naming_a_parameter_is_refused(report_tool, tmp_path):
+    # a primitive global reference with bit 4 (flags 0x15): a parameter
+    cache = Cache(script_nodes=(8, None, {}))
+    path = cache.write(tmp_path)
+    nodes = cache.where["tag_data"] + cache.addresses["array"] + 0x38 - BASE
+    returncode, report = run_report(report_tool, patched(path, nodes + 3 * 20 + 6, "<H", 0x15))
+    assert returncode == 1
+    assert report["mcc_cea_fix"] == "the scenario's scripts take parameters, which this build does not run"
+
+
 def test_named_object_names_past_512_take_the_places_of_unnamed_ones(report_tool, tmp_path):
     references = [("script", 520), ("command", 530), ("conversation", 515), ("script", 3), ("command", 511)]
     cache = Cache(name_count=531, name_references=references)
