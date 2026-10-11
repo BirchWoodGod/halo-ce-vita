@@ -709,6 +709,14 @@ static boolean gbxmodel_geometry_part_check(
 			MAXIMUM_NODES_PER_MODEL_GEOMETRY_PART, MAXIMUM_NODES_PER_MODEL_GEOMETRY_PART);
 		part->local_node_count = MAXIMUM_NODES_PER_MODEL_GEOMETRY_PART;
 	}
+	/* (a model of no nodes has none its local nodes could name: node 0,
+	which a local node past the model's is made below, is not one either,
+	and the corrected part was not clean when checked again) */
+	if (part->local_node_count > 0 && model->nodes.count <= 0)
+	{
+		tag_validate_refuse(validation, "has %d local nodes, and its model no nodes", part->local_node_count);
+		return FALSE;
+	}
 	for (node_index = 0; node_index < part->local_node_count; node_index++)
 	{
 		if (part->local_node_indices[node_index] >= model->nodes.count)
