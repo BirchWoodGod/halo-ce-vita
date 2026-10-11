@@ -19,7 +19,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .linux_build import (LINUX_PROFILE, MINIUPNPC_DIR, OPTIMISATION, WINDOWS_PROFILE, XDK_INCLUDE, lto_mode,
+from .linux_build import (ZLIB_DIR, ZLIB_SOURCES, ZLIB_DEFINES, LINUX_PROFILE, MINIUPNPC_DIR, OPTIMISATION, WINDOWS_PROFILE, XDK_INCLUDE, lto_mode,
+                          LIBOGG_INCLUDE, ogg_sound_cflags, ogg_sound_sources,
                           march_flag, miniupnpc_sources, pgo_mode, compile_launcher, musl_math_cflags,
                           musl_math_sources, pgo_profile, profile_use_flags, xdk_headers)
 from .ninja_syntax import Writer
@@ -48,7 +49,21 @@ SDL_DIR = THIRD_PARTY / f"SDL3-{SDL_VERSION}"
 #    frame chain.
 # the TOML parser the platform layer reads config.toml with (port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
+# (from OpenCE c9ee319a) the menus' XML parser (port/linux/src/menu_files.c),
+# with Windows' rand_s for its hash salt (expat_config.h)
+EXPAT_DIR = Path("port/third_party/expat")
+EXPAT_SOURCES = ("xmlparse.c", "xmlrole.c", "xmltok.c", "random_rand_s.c")
 KCP_DIR = Path("port/third_party/kcp")
+# (from OpenCE, MrBruh's "Second hardening round") the port's zlib
+# (port/third_party/zlib/zlib_prefixed.h, 1.3.2): what inflates the maps,
+# which are anyone's files, instead of the game's own 1.1.3 (its inflate
+# only, its names prefixed z_)
+ZLIB_DIR = Path("port/third_party/zlib")
+ZLIB_SOURCES = ("adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "uncompr.c", "zutil.c")
+# (its names prefixed, and the one Z_PREFIX leaves, its error messages, which
+# the game's zlib names the same)
+ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
+MONOCYPHER_DIR = Path("port/third_party/monocypher")
 
 
 def updater_defines(release: bool) -> str:
@@ -349,6 +364,8 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
                 # tick_thread.h, load_profile.h ...), included with quotes,
                 # but not the Linux build's C runtime wrappers next to them
                 f"-iquote {LINUX_DIR / 'include'}",
+                # the headers of the port's own game units (port/linux/game)
+                f"-iquote {Path(linux_config['game_sources'])}",
                 # the POSIX threads over Windows threads
                 # (port/windows/src/win32_posix.c) the native ports' threads
                 # use (pthread.h, sched.h): after the C runtime, whose
@@ -375,7 +392,10 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             f"-I{linux_platform}",
             f"-I{PORT_DIR / 'include'}",
             f"-I{TOML_DIR}",
+            f"-I{EXPAT_DIR}",
             f"-I{KCP_DIR}",
+            f"-I{MONOCYPHER_DIR}",
+            LIBOGG_INCLUDE,
             # halo_linux_winsock_names.h, but not the Linux build's C runtime
             # wrappers next to it
             f"-iquote {LINUX_DIR / 'include'}",
@@ -412,8 +432,21 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # the settings file's parser (port/third_party/tomlc17), with the
         # platform layer's ABI and nothing else
         add_object(TOML_DIR / "tomlc17.c", " ".join([abi, "-std=gnu11", "-w"]))
+        # the menus' XML parser (port/third_party/expat; menu_files.c), with
+        # its hash salt from rand_s
+        for name in EXPAT_SOURCES:
+            add_object(EXPAT_DIR / name, " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-w"]))
         # internet play's reliable streams (port/third_party/kcp; p2p.c)
         add_object(KCP_DIR / "ikcp.c", " ".join([abi, "-std=gnu11", "-w"]))
+        # the port's zlib (map inflation: cache_files_decompress_windows.c)
+        for name in ZLIB_SOURCES:
+            add_object(ZLIB_DIR / name, " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
+        # internet play's signatures and password keys (port/third_party/monocypher)
+        for name in ("monocypher.c", "monocypher-ed25519.c"):
+            add_object(MONOCYPHER_DIR / name, " ".join([abi, "-std=gnu11", "-w"]))
+        # Custom Edition's Ogg Vorbis sounds (port/linux/src/ogg_sound.c)
+        for source in ogg_sound_sources():
+            add_object(source, ogg_sound_cflags(abi))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():

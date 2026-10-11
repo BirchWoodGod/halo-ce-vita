@@ -16,6 +16,8 @@ the game gave their surface, as in the OpenGL device.
 
 #include "vita_xgpu.h"
 #include "vita_gxm.h"
+#include "dynamic_resolution.h"
+#include "blend_constant.h"
 #include "sdl_platform.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
@@ -26,6 +28,9 @@ the game gave their surface, as in the OpenGL device.
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef HALO_VITA
+#include <sys/mman.h>
+#endif
 #include "vita_compat.h"
 #include "vita_host.h"
 #include "frame_timing.h"
@@ -86,20 +91,33 @@ void halo_screen_ui_offset(unsigned char centered)
 }
 
 static void screen_settings_apply(void);
+static void dynres_configure(void);
+static void cdram_wanted_relieve(void);
+static void renderer_map_unloaded(void);
+static unsigned long cdram_census_frame(void);
+static void cdram_census(const char *when);
 
 long halo_screen_commit(void)
 {
 	extern volatile unsigned long halo_settings_generation;
 	static unsigned long settings_seen;
+	static int dynres_configured;
 	unsigned long generation = __atomic_load_n(&halo_settings_generation, __ATOMIC_ACQUIRE);
 
 	if (!screen_width)
 		return halo_screen_width();
+	if (!dynres_configured)
+	{
+		dynres_configured = 1;
+		dynres_configure();
+	}
 	if (generation != settings_seen)
 	{
 		settings_seen = generation;
 		screen_settings_apply();
+		dynres_configure();
 	}
+	cdram_wanted_relieve();
 	return screen_width;
 }
 
@@ -150,6 +168,76 @@ static int render_state_dirty_bit(unsigned long state)
 static int texture_state_dirty_bit(unsigned long type)
 {
 	return type >= D3DTSS_BUMPENVMAT00 && type <= D3DTSS_BUMPENVLOFFSET ? STATE_DIRTY_VALUES : STATE_DIRTY_MATERIAL;
+}
+
+/* The material states (a record_material's words: the render states, then
+the stages' states, as one array) the setters changed since the split
+records last resolved their material (record_state_current): the states
+are the last material's but for these. A setter that changes a value of
+the material notes its word here, once; more than MATERIAL_LOG_CAPACITY
+words, or a change whose state is not known, leave the log overflowed, and
+the material is then found as before, by its whole states. */
+#define MATERIAL_STATE_WORDS (D3DRS_MAX + D3DTSS_MAXSTAGES * D3DTSS_MAX)
+#define MATERIAL_LOG_CAPACITY 96
+static unsigned short material_log[MATERIAL_LOG_CAPACITY];
+/* (each word's value when it was first changed: the last material's) */
+static DWORD material_log_old[MATERIAL_LOG_CAPACITY];
+/* (MATERIAL_LOG_CAPACITY + 1: overflowed) */
+static unsigned int material_log_count = MATERIAL_LOG_CAPACITY + 1;
+static unsigned short material_log_mark[MATERIAL_STATE_WORDS];
+static unsigned short material_log_generation = 1;
+
+static void material_log_note(unsigned long word, DWORD old)
+{
+	if (material_log_mark[word] != material_log_generation)
+	{
+		material_log_mark[word] = material_log_generation;
+		if (material_log_count < MATERIAL_LOG_CAPACITY)
+		{
+			material_log_old[material_log_count] = old;
+			material_log[material_log_count++] = (unsigned short)word;
+		}
+		else
+			material_log_count = MATERIAL_LOG_CAPACITY + 1;
+	}
+}
+
+static void material_log_overflow(void)
+{
+	material_log_count = MATERIAL_LOG_CAPACITY + 1;
+}
+
+/* (the states are the material's again) */
+static void material_log_reset(void)
+{
+	material_log_count = 0;
+	if (++material_log_generation == 0)
+	{
+		memset(material_log_mark, 0, sizeof(material_log_mark));
+		material_log_generation = 1;
+	}
+}
+
+/* (port) bumped by every change of a render or texture stage state's value
+(halo_d3d_state_serial): the game's model parts set again only the states
+some other draw may have changed (rasterizer_xbox_models.c) */
+static unsigned long d3d_state_serial;
+
+unsigned long halo_d3d_state_serial(void)
+{
+	return d3d_state_serial;
+}
+
+/* a render state's value is about to change: the dirty bit, and the log
+for a material state */
+static void render_state_changed(unsigned long state)
+{
+	int bit = render_state_dirty_bit(state);
+
+	d3d_state_serial++;
+	device_state_dirty |= bit;
+	if (bit == STATE_DIRTY_MATERIAL)
+		material_log_note(state, D3D__RenderState[state]);
 }
 DWORD D3D__TextureState[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 WORD *D3D__IndexData;
@@ -243,6 +331,11 @@ struct render_target_entry
 	BOOL drawn;
 	/* its target is a cell of its surface's atlas (render_target_atlas) */
 	BOOL cell;
+	/* a screen-sized target given back for CDRAM while unused (its id
+	kept): made again when next drawn into (render_target_wake), not before
+	the frame wake_frame after a try that found no memory */
+	BOOL dormant;
+	unsigned long wake_frame;
 };
 
 #define RENDER_TARGET_BUCKET_COUNT 256
@@ -282,6 +375,8 @@ struct gxm_device
 	{
 		DWORD data;
 		UINT stride;
+		/* the buffer is one the game never rewrites (halo_d3d_buffer_in_place) */
+		BOOL in_place;
 	} streams[16];
 	UINT base_vertex_index;
 	/* halo_d3d_stream_attribute: an input register the stream draws take
@@ -385,11 +480,68 @@ static struct
 	unsigned long material_new, worker_texture_builds;
 	/* new values blocks (record_values); materials found kept */
 	unsigned long values_new, material_kept;
+	/* materials found kept by a transition from the last */
+	unsigned long material_transitions;
 } stats;
 
 /* draws recorded since start-up, never reset: the render profile counts
 them per phase (halo_render_draw_counts) */
 static unsigned long draw_counter_stream, draw_counter_immediate;
+
+/* (port) a scissor rectangle for the draws recorded next, in normalised
+device coordinates of the viewport (x right, y down, -1..1), or off (NULL):
+the dynamic lights' passes over the structure (rasterizer_xbox_environment.c)
+are clipped to the screen rectangle outside which their light adds nothing.
+Mapped to the viewport's pixels when each draw is recorded, rounded outward,
+and intersected with the viewport's own rectangle. */
+static int device_scissor_on;
+static float device_scissor[4];
+
+/* (port) the sky drawn after the opaque scene (render.c, HALO_SKY_LATE):
+while on, the draws recorded test depth, less-equal, without writing it,
+at the depth the window was cleared to (1: the viewport's depth range is
+made that one value), so they colour only the pixels nothing opaque has
+covered - the pixels the sky's own draws, without depth, would have been
+left visible on before the scene covered the rest. */
+static int device_sky_depth;
+
+void halo_d3d_sky_depth(int on)
+{
+	device_sky_depth = on != 0;
+}
+
+int halo_d3d_sky_late_supported(void)
+{
+	return 1;
+}
+
+void halo_d3d_scissor(const float *rectangle)
+{
+	device_scissor_on = rectangle != NULL;
+	if (rectangle)
+		memcpy(device_scissor, rectangle, sizeof(device_scissor));
+}
+
+static void scissor_apply(long clip[4])
+{
+	float width, height;
+	long x0, y0, x1, y1;
+
+	if (!device_scissor_on)
+		return;
+	width = (float)device.viewport.Width;
+	height = (float)device.viewport.Height;
+	x0 = (long)floorf((float)device.viewport.X + (device_scissor[0] + 1.0f) * 0.5f * width) - 1;
+	y0 = (long)floorf((float)device.viewport.Y + (device_scissor[1] + 1.0f) * 0.5f * height) - 1;
+	x1 = (long)ceilf((float)device.viewport.X + (device_scissor[2] + 1.0f) * 0.5f * width) + 1;
+	y1 = (long)ceilf((float)device.viewport.Y + (device_scissor[3] + 1.0f) * 0.5f * height) + 1;
+	if (x0 > clip[0]) clip[0] = x0;
+	if (y0 > clip[1]) clip[1] = y0;
+	if (x1 < clip[2]) clip[2] = x1;
+	if (y1 < clip[3]) clip[3] = y1;
+	if (clip[2] < clip[0]) clip[2] = clip[0];
+	if (clip[3] < clip[1]) clip[3] = clip[1];
+}
 
 void halo_render_draw_counts(unsigned long *stream, unsigned long *immediate)
 {
@@ -683,7 +835,7 @@ static struct render_target_entry *render_target_recycle(unsigned long width, un
 
 	for (entry = render_targets; entry; entry = entry->next)
 	{
-		if (entry->id && !entry->chain_levels && !entry->cell && entry->target.depth == depth &&
+		if (entry->id && !entry->chain_levels && !entry->cell && !entry->dormant && entry->target.depth == depth &&
 			entry->last_used + 300 < device.frame &&
 			!(camo_target_reserved() && camo_copy_size(entry->target.width, entry->target.height, entry->target.depth) &&
 				!camo_copy_size(width, height, depth)))
@@ -785,6 +937,29 @@ static void render_target_atlas_frame_end(void)
 	}
 }
 
+/* a dormant entry's target made again (screen_targets_doze gave its memory
+back); FALSE while there is no memory for it */
+static BOOL render_target_wake(struct render_target_entry *entry)
+{
+	static unsigned long woken;
+
+	if (!entry->dormant)
+		return TRUE;
+	if (device.frame < entry->wake_frame)
+		return FALSE;
+	if (!vgxm_target_remake(entry->id, entry->target.width, entry->target.height, entry->target.depth, &entry->texture))
+	{
+		entry->wake_frame = device.frame + 30;
+		return FALSE;
+	}
+	entry->dormant = FALSE;
+	entry->drawn = FALSE;
+	if (++woken <= 20)
+		platform_log("render target %lu (%lux%lu %s) made again as it is drawn into (%lu so far)", entry->id,
+			entry->target.width, entry->target.height, entry->target.depth ? "depth" : "colour", woken);
+	return TRUE;
+}
+
 static struct render_target_entry *render_target_get_version(const D3DSurface *surface, unsigned long version)
 {
 	struct render_target_entry *entry, *placeholder = NULL, **link;
@@ -800,7 +975,7 @@ static struct render_target_entry *render_target_get_version(const D3DSurface *s
 			entry->target.height == height && entry->target.depth == depth && entry->version == version)
 		{
 			if (entry->id)
-				return entry;
+				return render_target_wake(entry) ? entry : NULL;
 			/* A surface no target could be made for. It used to stay
 			without one for good: the recycling below only ran at the
 			first request, and right after a level change every target is
@@ -923,8 +1098,8 @@ static struct render_target_entry *render_target_entry_find_version(unsigned lon
 
 	for (entry = *render_target_bucket(data); entry; entry = entry->next_in_bucket)
 	{
-		if (entry->id && entry->target.data == data && !entry->target.depth && entry->version == version &&
-			(!best || entry->last_rendered > best->last_rendered))
+		if (entry->id && !entry->dormant && entry->target.data == data && !entry->target.depth &&
+			entry->version == version && (!best || entry->last_rendered > best->last_rendered))
 		{
 			best = entry;
 		}
@@ -1320,6 +1495,7 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 		else
 			platform_log("Direct3D: running without the GPU (nothing is displayed)");
 		device.created = TRUE;
+		platform_renderer_map_unloaded = renderer_map_unloaded;
 	}
 	*returned_device = device_pointer();
 	return S_OK;
@@ -1562,9 +1738,29 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 		simple_state_tables_made = 1;
 	}
 	if ((method & 3) || slot >= sizeof(simple_state_of_method) || !simple_state_of_method[slot])
+	{
+		d3d_state_serial++;
 		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
+		material_log_overflow();
+	}
 	else if (D3D__RenderState[simple_state_of_method[slot] - 1] != value)
+	{
+		d3d_state_serial++;
 		device_state_dirty |= simple_dirty_bit_of_method[slot];
+		if (simple_dirty_bit_of_method[slot] == STATE_DIRTY_MATERIAL)
+			material_log_note(simple_state_of_method[slot] - 1UL, D3D__RenderState[simple_state_of_method[slot] - 1]);
+	}
+}
+
+void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value)
+{
+	/* (D3DDevice_SetRenderState_Simple and the caller's store: the state
+	is a simple one, below D3DRS_SIMPLE_MAX) */
+	if (state < D3DRS_MAX && D3D__RenderState[state] != value)
+	{
+		render_state_changed(state);
+		D3D__RenderState[state] = value;
+	}
 }
 
 void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWORD value)
@@ -1572,7 +1768,7 @@ void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWO
 	if ((unsigned long)state < D3DRS_MAX)
 	{
 		if (D3D__RenderState[state] != value)
-			device_state_dirty |= render_state_dirty_bit(state);
+			render_state_changed(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1586,7 +1782,7 @@ void WINAPI D3DDevice_SetRenderStateNotInline(D3DRENDERSTATETYPE state, DWORD va
 	else if ((unsigned long)state < D3DRS_MAX)
 	{
 		if (D3D__RenderState[state] != value)
-			device_state_dirty |= render_state_dirty_bit(state);
+			render_state_changed(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1596,7 +1792,7 @@ static void render_state_store(unsigned long state, DWORD value)
 {
 	if (D3D__RenderState[state] != value)
 	{
-		device_state_dirty |= render_state_dirty_bit(state);
+		render_state_changed(state);
 		D3D__RenderState[state] = value;
 	}
 }
@@ -1654,7 +1850,12 @@ static void texture_state_store(DWORD stage, unsigned long type, DWORD value)
 {
 	if (stage < D3DTSS_MAXSTAGES && type < D3DTSS_MAX && D3D__TextureState[stage][type] != value)
 	{
-		device_state_dirty |= texture_state_dirty_bit(type);
+		int bit = texture_state_dirty_bit(type);
+
+		d3d_state_serial++;
+		device_state_dirty |= bit;
+		if (bit == STATE_DIRTY_MATERIAL)
+			material_log_note(D3DRS_MAX + stage * D3DTSS_MAX + type, D3D__TextureState[stage][type]);
 		D3D__TextureState[stage][type] = value;
 	}
 }
@@ -1702,44 +1903,30 @@ void WINAPI D3DDevice_SetPalette(DWORD stage, D3DPalette *palette)
 void WINAPI D3DDevice_SetPixelShaderProgram(D3DPIXELSHADERDEF *definition)
 {
 	/* (a definition the same as what the states hold, field by field, is
-	no change: the dirty flag is kept as it is) */
+	no change: the dirty flag is kept as it is; each state it changes is
+	marked as its setter would) */
+	unsigned long index;
+
 	if (!definition)
 		return;
-	if (memcmp(&D3D__RenderState[D3DRS_PSALPHAINPUTS0], definition->PSAlphaInputs, sizeof(definition->PSAlphaInputs)) ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSABCD] != definition->PSFinalCombinerInputsABCD ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSEFG] != definition->PSFinalCombinerInputsEFG ||
-		memcmp(&D3D__RenderState[D3DRS_PSCONSTANT0_0], definition->PSConstant0, sizeof(definition->PSConstant0)) ||
-		memcmp(&D3D__RenderState[D3DRS_PSCONSTANT1_0], definition->PSConstant1, sizeof(definition->PSConstant1)) ||
-		memcmp(&D3D__RenderState[D3DRS_PSALPHAOUTPUTS0], definition->PSAlphaOutputs, sizeof(definition->PSAlphaOutputs)) ||
-		memcmp(&D3D__RenderState[D3DRS_PSRGBINPUTS0], definition->PSRGBInputs, sizeof(definition->PSRGBInputs)) ||
-		D3D__RenderState[D3DRS_PSCOMPAREMODE] != definition->PSCompareMode ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT0] != definition->PSFinalCombinerConstant0 ||
-		D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT1] != definition->PSFinalCombinerConstant1 ||
-		memcmp(&D3D__RenderState[D3DRS_PSRGBOUTPUTS0], definition->PSRGBOutputs, sizeof(definition->PSRGBOutputs)) ||
-		D3D__RenderState[D3DRS_PSCOMBINERCOUNT] != definition->PSCombinerCount ||
-		D3D__RenderState[D3DRS_PSTEXTUREMODES] != definition->PSTextureModes ||
-		D3D__RenderState[D3DRS_PSDOTMAPPING] != definition->PSDotMapping ||
-		D3D__RenderState[D3DRS_PSINPUTTEXTURE] != definition->PSInputTexture)
+	for (index = 0; index < 8; index++)
 	{
-		device_state_dirty = STATE_DIRTY_MATERIAL | STATE_DIRTY_VALUES;
+		render_state_store(D3DRS_PSALPHAINPUTS0 + index, definition->PSAlphaInputs[index]);
+		render_state_store(D3DRS_PSCONSTANT0_0 + index, definition->PSConstant0[index]);
+		render_state_store(D3DRS_PSCONSTANT1_0 + index, definition->PSConstant1[index]);
+		render_state_store(D3DRS_PSALPHAOUTPUTS0 + index, definition->PSAlphaOutputs[index]);
+		render_state_store(D3DRS_PSRGBINPUTS0 + index, definition->PSRGBInputs[index]);
+		render_state_store(D3DRS_PSRGBOUTPUTS0 + index, definition->PSRGBOutputs[index]);
 	}
-	else
-		return;
-	memcpy(&D3D__RenderState[D3DRS_PSALPHAINPUTS0], definition->PSAlphaInputs, sizeof(definition->PSAlphaInputs));
-	D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSABCD] = definition->PSFinalCombinerInputsABCD;
-	D3D__RenderState[D3DRS_PSFINALCOMBINERINPUTSEFG] = definition->PSFinalCombinerInputsEFG;
-	memcpy(&D3D__RenderState[D3DRS_PSCONSTANT0_0], definition->PSConstant0, sizeof(definition->PSConstant0));
-	memcpy(&D3D__RenderState[D3DRS_PSCONSTANT1_0], definition->PSConstant1, sizeof(definition->PSConstant1));
-	memcpy(&D3D__RenderState[D3DRS_PSALPHAOUTPUTS0], definition->PSAlphaOutputs, sizeof(definition->PSAlphaOutputs));
-	memcpy(&D3D__RenderState[D3DRS_PSRGBINPUTS0], definition->PSRGBInputs, sizeof(definition->PSRGBInputs));
-	D3D__RenderState[D3DRS_PSCOMPAREMODE] = definition->PSCompareMode;
-	D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT0] = definition->PSFinalCombinerConstant0;
-	D3D__RenderState[D3DRS_PSFINALCOMBINERCONSTANT1] = definition->PSFinalCombinerConstant1;
-	memcpy(&D3D__RenderState[D3DRS_PSRGBOUTPUTS0], definition->PSRGBOutputs, sizeof(definition->PSRGBOutputs));
-	D3D__RenderState[D3DRS_PSCOMBINERCOUNT] = definition->PSCombinerCount;
-	D3D__RenderState[D3DRS_PSTEXTUREMODES] = definition->PSTextureModes;
-	D3D__RenderState[D3DRS_PSDOTMAPPING] = definition->PSDotMapping;
-	D3D__RenderState[D3DRS_PSINPUTTEXTURE] = definition->PSInputTexture;
+	render_state_store(D3DRS_PSFINALCOMBINERINPUTSABCD, definition->PSFinalCombinerInputsABCD);
+	render_state_store(D3DRS_PSFINALCOMBINERINPUTSEFG, definition->PSFinalCombinerInputsEFG);
+	render_state_store(D3DRS_PSCOMPAREMODE, definition->PSCompareMode);
+	render_state_store(D3DRS_PSFINALCOMBINERCONSTANT0, definition->PSFinalCombinerConstant0);
+	render_state_store(D3DRS_PSFINALCOMBINERCONSTANT1, definition->PSFinalCombinerConstant1);
+	render_state_store(D3DRS_PSCOMBINERCOUNT, definition->PSCombinerCount);
+	render_state_store(D3DRS_PSTEXTUREMODES, definition->PSTextureModes);
+	render_state_store(D3DRS_PSDOTMAPPING, definition->PSDotMapping);
+	render_state_store(D3DRS_PSINPUTTEXTURE, definition->PSInputTexture);
 }
 
 /* ---------- vertex shaders */
@@ -2218,6 +2405,13 @@ struct render_command
 	wave the worker runs it in (render_worker: small_target_wave) */
 	unsigned char new_run;
 	unsigned char wave;
+	/* the records before it are run first, the held waves and the main
+	scene's so far (a small target's copies ran out: command_begin) */
+	unsigned char flush_before;
+	/* (HALO_FILL_STATS) the render phase that recorded the draw (render.c) */
+	signed char phase;
+	/* recorded while the sky is drawn late (halo_d3d_sky_depth) */
+	unsigned char sky_depth;
 	/* the copy of a small target this run renders into */
 	unsigned long color_version;
 	/* draws */
@@ -2250,6 +2444,60 @@ struct render_command
 };
 
 #define COMMAND_RING 6144
+
+/* The recording's buffers that last the whole run - the command ring (6 MB),
+the state, material, values and bump arenas of the three frames in flight
+(~7 MB), the material cache and the target arenas, ~16 MB in all - in
+memory blocks of user RAM rather than the C heap: on the Vita newlib's
+fixed 48 MB, which the game, the system's libraries and the shader compiler
+share, and which they had filled to ~42 MB by the main menu, leaving a
+session's later allocations ~6 MB. Zeroed; never freed. A request of
+LASTING_OWN_BYTES or more has a block of its own, the smaller ones are
+carved from blocks of LASTING_BLOCK_BYTES; the C heap when there is no
+block. (The harness maps them: its C heap figures stay the Vita's.) */
+#define LASTING_BLOCK_BYTES (1024ul * 1024)
+#define LASTING_OWN_BYTES (512ul * 1024)
+
+static void *lasting_alloc(unsigned long bytes, const char *name)
+{
+	static unsigned char *block;
+	static unsigned long block_left;
+	unsigned char *memory = NULL;
+
+	bytes = (bytes + 63) & ~63ul;
+	if (bytes > block_left)
+	{
+		unsigned long size = bytes >= LASTING_OWN_BYTES ? (bytes + 4095) & ~4095ul : LASTING_BLOCK_BYTES;
+#ifdef HALO_VITA
+		int uid = -1;
+
+		memory = vita_host_block_alloc("halo renderer buffers", size, &uid);
+		if (memory)
+			memset(memory, 0, size);
+#else
+		memory = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (memory == MAP_FAILED)
+			memory = NULL;
+#endif
+		if (!memory)
+		{
+			platform_log("Direct3D: no memory block for the %s (%lu KB): in the C heap", name, bytes / 1024);
+			return calloc(1, bytes);
+		}
+		/* (a block of its own keeps what is left of the last one) */
+		if (bytes < LASTING_OWN_BYTES)
+		{
+			block = memory;
+			block_left = size;
+		}
+		else
+			return memory;
+	}
+	memory = block;
+	block += bytes;
+	block_left -= bytes;
+	return memory;
+}
 
 /* a single-producer, single-consumer ring: the game's thread advances the
 head, the worker the tail; neither locks, and a thread with nothing to do
@@ -2303,6 +2551,16 @@ static unsigned long stage_texture_mode_of(const struct nv2a_pixel_shader_key *k
 /* the colour target of the worker's last bound targets
 (bind_recorded_targets), marked drawn once a draw or a clear goes in */
 static struct render_target_entry *worker_color_entry;
+/* (HALO_FILL_STATS: fill_stats.c) the worker's depth target, and the
+estimate's entry points */
+static unsigned long worker_depth_id;
+int halo_fill_stats_sampled(void);
+void halo_fill_stats_draw(const struct vgxm_draw *draw, const DWORD *instructions, unsigned long instruction_count,
+	unsigned long input_mask, unsigned long packed_mask, unsigned long color_mask, int phase,
+	unsigned long color_id, unsigned long depth_id);
+void halo_fill_stats_clear(unsigned long flags, float depth, const long clip[4], unsigned long depth_id);
+void halo_fill_stats_present(unsigned long color_id, unsigned long width, unsigned long height);
+extern int halo_render_phase;
 
 static BOOL bind_recorded_targets(const struct render_command *command, BOOL *has_depth)
 {
@@ -2327,6 +2585,11 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 	{
 		color = last.color_entry;
 		depth = last.depth_entry;
+		/* (an entry whose target was given back for now: made again) */
+		if (color && color->dormant && !render_target_wake(color))
+			color = NULL;
+		if (depth && depth->dormant && !render_target_wake(depth))
+			depth = NULL;
 	}
 	else
 	{
@@ -2352,6 +2615,7 @@ static BOOL bind_recorded_targets(const struct render_command *command, BOOL *ha
 		depth->last_used = device.frame + 1;
 	vgxm_set_targets(color ? color->id : 0, depth ? depth->id : 0);
 	worker_color_entry = color;
+	worker_depth_id = depth ? depth->id : 0;
 	*has_depth = depth != NULL;
 	return TRUE;
 }
@@ -2497,7 +2761,10 @@ static void bind_recorded_textures(struct render_command *command, float texture
 		}
 		else
 		{
-			source = vita_texture_get(header, command->palette[stage], &description);
+			/* (an immediate draw's - the HUD, the menus, sprites, the screen
+			effects - is whole at once, as the texture streaming waits for
+			theirs: a lower level stood in as blocks) */
+			source = vita_texture_get(header, command->palette[stage], &description, !command->immediate);
 			{
 				/* (experiment) HALO_LINEAR_SCALE_OFF=1: no 1/size scale for
 				linear textures that are not render targets */
@@ -2927,6 +3194,7 @@ static BOOL worker_build_record(struct render_command *command)
 	draw->blend_source = rs[D3DRS_SRCBLEND];
 	draw->blend_destination = rs[D3DRS_DESTBLEND];
 	draw->blend_operation = rs[D3DRS_BLENDOP];
+	draw->blend_color = rs[D3DRS_BLENDCOLOR];
 	draw->color_write = rs[D3DRS_COLORWRITEENABLE];
 	draw->cull = worker_cull(state);
 	draw->depth_bias_slope = draw->depth_bias_units = 0.0f;
@@ -2962,12 +3230,93 @@ static BOOL worker_build_record(struct render_command *command)
 	return draw->fragment_uniforms[0] && draw->fragment_uniforms[1];
 }
 
+static void fill_stats_draw(const struct render_command *command, const struct vgxm_draw *draw)
+{
+	halo_fill_stats_draw(draw, command->program->instructions, command->program->instruction_count,
+		command->program->input_mask, command->immediate ? 0 : command->packed_mask,
+		command->immediate ? 0 : command->color_mask, command->phase,
+		worker_color_entry ? worker_color_entry->id : 0, worker_depth_id);
+}
+
+/* a draw to GXM, once per visibility test segment as recorded; without
+count_visibility the draw counts for no test (the first of a blend's two
+passes: blend_constant.h) */
+static void issue_draw(const struct render_command *command, struct vgxm_draw *draw, int count_visibility)
+{
+	if (!count_visibility)
+		draw->visibility_index = 0;
+	if (command->segment_count > 1)
+	{
+		/* one draw per visibility test, as they were recorded: the same
+		state, each its own triangles and slot */
+		const unsigned short *indices = draw->indices;
+		unsigned long index_count = draw->index_count, visibility_index = draw->visibility_index, segment;
+
+		for (segment = 0; segment < command->segment_count; segment++)
+		{
+			draw->indices = indices + command->segments[segment].first_index;
+			draw->index_count = command->segments[segment].index_count;
+			draw->visibility_index = count_visibility ? command->segments[segment].visibility_index : 0;
+			if (halo_fill_stats_sampled())
+				fill_stats_draw(command, draw);
+			vgxm_draw(draw);
+		}
+		draw->indices = indices;
+		draw->index_count = index_count;
+		draw->visibility_index = visibility_index;
+	}
+	else
+	{
+		if (halo_fill_stats_sampled())
+			fill_stats_draw(command, draw);
+		vgxm_draw(draw);
+	}
+}
+
+/* the fragment uniforms' second buffer of a draw whose blend's constant is
+folded into its program: a copy with the fold's two rows after it */
+static const void *blend_fold_uniforms(const void *second, const struct blend_pass *pass)
+{
+	float (*copy)[4] = vgxm_worker_alloc((VITA_FU_FOLD_COUNT - VITA_FU_A_COUNT) * sizeof(float) * 4, 16);
+
+	if (!copy)
+		return NULL;
+	memcpy(copy, second, (VITA_FU_COUNT - VITA_FU_A_COUNT) * sizeof(float) * 4);
+	memcpy(copy[VITA_FU_BLEND_SCALE - VITA_FU_A_COUNT], pass->scale, sizeof(float) * 4);
+	memcpy(copy[VITA_FU_BLEND_OFFSET - VITA_FU_A_COUNT], pass->offset, sizeof(float) * 4);
+	return copy;
+}
+
+/* the log's line for each kind of blend made of GXM's factors, once */
+static void blend_plan_note(const struct vgxm_draw *draw, const struct blend_plan *plan)
+{
+	static unsigned long noted[32];
+	static int noted_count;
+	unsigned long kind = draw->blend_source << 17 ^ draw->blend_destination << 2 ^ draw->blend_operation << 20 ^
+		(unsigned long)plan->pass_count ^ (unsigned long)!plan->exact << 31;
+	int index;
+
+	for (index = 0; index < noted_count; index++)
+		if (noted[index] == kind)
+			return;
+	if (noted_count >= 32)
+		return;
+	noted[noted_count++] = kind;
+	platform_log("blend %lu/%lu op %lu, constant %08lx, writes %08lx: %s%s", draw->blend_source, draw->blend_destination,
+		draw->blend_operation, draw->blend_color, draw->color_write, plan->how,
+		plan->exact ? "" : " (GXM's factors cannot make it: an approximation)");
+}
+
 static void execute_draw(struct render_command *command)
 {
 	struct vgxm_draw *draw = &command->draw;
 	float texture_scale[4][4];
 	BOOL has_depth;
 	int stage;
+	/* (a blend GXM cannot take as it is: blend_constant.h) */
+	struct blend_plan blend_plan;
+	int blend_passes = 0;
+	unsigned long plain_shader = 0, fold_shader = 0;
 
 	unsigned long long profile_from;
 
@@ -3016,7 +3365,46 @@ static void execute_draw(struct render_command *command)
 			memcpy(copy[VITA_FU_TEXTURE_SCALE - VITA_FU_A_COUNT + stage], texture_scale[stage], sizeof(float) * 4);
 		draw->fragment_uniforms[1] = copy;
 	}
-	draw->fragment_shader = fragment_shader_get(&command->key);
+	if (draw->blend)
+		blend_passes = blend_constant_plan(draw->blend_source, draw->blend_destination, draw->blend_operation,
+			draw->color_write, draw->blend_color, &blend_plan);
+	if (blend_passes)
+	{
+		/* the program as it is and/or its fold, as the passes need */
+		int pass, plain = 0, fold = 0;
+
+		for (pass = 0; pass < blend_plan.pass_count; pass++)
+		{
+			if (blend_plan.passes[pass].fold)
+				fold = 1;
+			else
+				plain = 1;
+		}
+		if (plain)
+			plain_shader = fragment_shader_get(&command->key);
+		if (fold)
+		{
+			struct nv2a_pixel_shader_key fold_key = command->key;
+
+			fold_key.blend_fold = 1;
+			fold_shader = fragment_shader_get(&fold_key);
+		}
+		/* (none drawn until both are ready: one pass alone is wrong) */
+		draw->fragment_shader = (plain && !plain_shader) || (fold && !fold_shader) ? 0 : plain ? plain_shader : fold_shader;
+		blend_plan_note(draw, &blend_plan);
+	}
+	else
+		draw->fragment_shader = fragment_shader_get(&command->key);
+	if (command->sky_depth)
+	{
+		/* (after the record's states are built: they are shared and
+		cached by state block, the sky's own say no depth test) */
+		draw->depth_test = has_depth;
+		draw->depth_write = 0;
+		draw->depth_function = D3DCMP_LESSEQUAL;
+		draw->viewport_scale[2] = 0.0f;
+		draw->viewport_offset[2] = 1.0f;
+	}
 	{
 		/* (debug) HALO_TRACE_CAMO=n: the first n draws of the active
 		camouflage (rasterizer_xbox_active_camouflage.c): the screen copy
@@ -3166,26 +3554,39 @@ static void execute_draw(struct render_command *command)
 	DRAW_PROFILE_ADD(6, profile_from);
 	draw->vertex_input_mask = command->program->input_mask;
 	draw->vertex_program_hash = command->program->instruction_hash;
-	if (command->segment_count > 1)
+	if (blend_passes)
 	{
-		/* one draw per visibility test, as they were recorded: the same
-		state, each its own triangles and slot */
-		const unsigned short *indices = draw->indices;
-		unsigned long index_count = draw->index_count, visibility_index = draw->visibility_index, segment;
+		/* each pass with its factors and program; the first of two only
+		multiplies the colour target: the depth, stencil and visibility
+		test are the second's */
+		int pass;
 
-		for (segment = 0; segment < command->segment_count; segment++)
+		for (pass = 0; pass < blend_plan.pass_count; pass++)
 		{
-			draw->indices = indices + command->segments[segment].first_index;
-			draw->index_count = command->segments[segment].index_count;
-			draw->visibility_index = command->segments[segment].visibility_index;
-			vgxm_draw(draw);
+			const struct blend_pass *plan_pass = &blend_plan.passes[pass];
+			struct vgxm_draw pass_draw = *draw;
+			int first_of_two = blend_plan.pass_count == 2 && pass == 0;
+
+			pass_draw.blend_source = plan_pass->source;
+			pass_draw.blend_destination = plan_pass->destination;
+			pass_draw.blend_operation = plan_pass->operation;
+			pass_draw.fragment_shader = plan_pass->fold ? fold_shader : plain_shader;
+			if (plan_pass->fold)
+			{
+				pass_draw.fragment_uniforms[1] = blend_fold_uniforms(draw->fragment_uniforms[1], plan_pass);
+				if (!pass_draw.fragment_uniforms[1])
+					return;
+			}
+			if (first_of_two)
+			{
+				pass_draw.depth_write = 0;
+				pass_draw.stencil_fail = pass_draw.stencil_depth_fail = pass_draw.stencil_pass = D3DSTENCILOP_KEEP;
+			}
+			issue_draw(command, &pass_draw, !first_of_two);
 		}
-		draw->indices = indices;
-		draw->index_count = index_count;
-		draw->visibility_index = visibility_index;
 	}
 	else
-		vgxm_draw(draw);
+		issue_draw(command, draw, 1);
 	if (worker_color_entry && draw->color_write)
 		worker_color_entry->drawn = TRUE;
 	DRAW_PROFILE_ADD(7, profile_from);
@@ -3194,6 +3595,7 @@ static void execute_draw(struct render_command *command)
 static void write_screenshot(struct render_target_entry *target);
 static void write_display_screenshot(unsigned long frame);
 int halo_trace_active(void);
+static void dynres_frame_end(void);
 
 static void execute_command(struct render_command *command)
 {
@@ -3239,6 +3641,8 @@ static void execute_command(struct render_command *command)
 			if (!has_depth)
 				flags &= ~(D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL);
 			vgxm_clear(flags, command->clear_color, command->clear_depth, command->clear_stencil, command->clip);
+			if (halo_fill_stats_sampled())
+				halo_fill_stats_clear(flags, command->clear_depth, command->clip, worker_depth_id);
 			if (worker_color_entry && (flags & D3DCLEAR_TARGET))
 				worker_color_entry->drawn = TRUE;
 		}
@@ -3256,12 +3660,25 @@ static void execute_command(struct render_command *command)
 			/* (the frame's visibility counts: the game's frame they are of) */
 			vgxm_visibility_frame(command->frame);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
+			halo_fill_stats_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			if (command->screenshot)
 				write_display_screenshot(command->frame);
 		}
 		if (halo_trace_active())
 			platform_log("trace: worker presented %lu", command->frame);
+		/* (the next frame's render scale, between the two) */
+		dynres_frame_end();
 		render_target_atlas_frame_end();
+		{
+			/* (the census during play: cdram_census) */
+			static int census_done;
+
+			if (!census_done && command->frame >= cdram_census_frame())
+			{
+				census_done = 1;
+				cdram_census("during play");
+			}
+		}
 		worker_build_frame_end();
 		vita_texture_cache_begin_frame();
 		break;
@@ -3281,6 +3698,9 @@ static void *render_worker(void *unused)
 	/* (a pthread, since it waits on pthread condition variables; pinned
 	to the second core) */
 	vita_host_pin_current_thread(1);
+#ifdef HALO_VITA
+	vita_host_thread_watch("render worker");
+#endif
 	{
 		/* the records of the frame that are not hoisted, run at its present,
 		and the hoisted ones of the later waves (small_target_wave), run
@@ -3288,6 +3708,7 @@ static void *render_worker(void *unused)
 		static unsigned long deferred[COMMAND_RING], waved[COMMAND_RING];
 		unsigned long deferred_count = 0, waved_count = 0, index = 0;
 		unsigned int last_wave = 0;
+		BOOL submit_begun = FALSE;
 
 		for (;;)
 		{
@@ -3302,10 +3723,18 @@ static void *render_worker(void *unused)
 				vita_host_sleep_us(50);
 			}
 			command = &commands[(command_tail + index) % COMMAND_RING];
-			if (command->kind == _command_present)
+			/* (a present, or a record before which what came before is
+			run: a small target's copies ran out, target_versions_ran_out) */
+			if (command->kind == _command_present || command->flush_before)
 			{
 				unsigned long each;
 				unsigned int wave;
+
+				/* (the frame's main work goes to the GPU from here: the
+				dynamic resolution's GPU time) */
+				if (!submit_begun)
+					vgxm_frame_submit_begin();
+				submit_begun = TRUE;
 
 				for (wave = 1; wave <= last_wave; wave++)
 					for (each = 0; each < waved_count; each++)
@@ -3316,6 +3745,10 @@ static void *render_worker(void *unused)
 				for (each = 0; each < deferred_count; each++)
 					execute_command(&commands[deferred[each] % COMMAND_RING]);
 				deferred_count = 0;
+			}
+			if (command->kind == _command_present)
+			{
+				submit_begun = FALSE;
 				execute_command(command);
 				__atomic_store_n(&frames_presented, frames_presented + 1, __ATOMIC_RELEASE);
 				__atomic_store_n(&command_tail, command_tail + index + 1, __ATOMIC_RELEASE);
@@ -3350,7 +3783,7 @@ static void worker_start(void)
 	const char *setting = getenv("HALO_RENDER_THREAD");
 
 	worker_enabled = !setting || atoi(setting) != 0;
-	commands = calloc(COMMAND_RING, sizeof(*commands));
+	commands = lasting_alloc(COMMAND_RING * sizeof(*commands), "command ring");
 	if (!commands)
 		worker_enabled = 0;
 	if (worker_enabled)
@@ -3384,6 +3817,73 @@ static struct
 } target_versions[32];
 static unsigned long target_version_count;
 static unsigned long last_recorded_target;
+
+/* Small targets drawn from the main scene. The sun glow
+(rasterizer_xbox_lights.c) copies the back buffer around the sun into two
+64x64 targets, blurs them into each other four times, each pass weighted
+by the alpha the copy left in the target it draws into (DESTALPHA), and
+draws the rays from the last one. The copies read the main scene and so
+stayed in the frame's order, but the passes after them read only small
+targets: they were hoisted ahead of the main scene, before the copies were
+drawn, and each went into a fresh copy of its target, whose alpha nothing
+had written. The blur was black and the rays added nothing (issue #31). A
+small surface a run draws into from a screen-sized target is now drawn in
+the game's order from then on, into one target (no copies), as on the
+Xbox. HALO_SMALL_IN_ORDER=0: copied and hoisted, as before. */
+#define MAXIMUM_IN_ORDER_SURFACES 8
+
+static unsigned long in_order_surfaces[MAXIMUM_IN_ORDER_SURFACES];
+static unsigned long in_order_surface_count;
+
+static BOOL surface_in_order(unsigned long data)
+{
+	unsigned long index;
+
+	for (index = 0; index < in_order_surface_count; index++)
+		if (in_order_surfaces[index] == data)
+			return TRUE;
+	return FALSE;
+}
+
+static unsigned long *target_version_slot(unsigned long data);
+
+/* (recording a draw) one of its stages reads this surface: a draw reading
+an in-order surface is not hoisted, and a run into a copy of a small target
+that reads a screen-sized target makes the small one an in-order surface
+(this draw, and the rest of the frame, already without the copy) */
+static void record_reads_surface(struct render_command *command, unsigned long data)
+{
+	const struct render_target_entry *read;
+	unsigned long *version;
+	static int enabled = -1;
+
+	if (in_order_surface_count && surface_in_order(data))
+	{
+		command->hoistable = FALSE;
+		return;
+	}
+	if (!command->color_version)
+		return;
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SMALL_IN_ORDER");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	if (!enabled || in_order_surface_count >= MAXIMUM_IN_ORDER_SURFACES ||
+		!(read = render_target_entry_find(data)) ||
+		(read->target.width <= SMALL_TARGET_WIDTH && read->target.height <= SMALL_TARGET_WIDTH))
+	{
+		return;
+	}
+	in_order_surfaces[in_order_surface_count++] = command->targets->color_surface.Data;
+	if ((version = target_version_slot(command->targets->color_surface.Data)) != NULL)
+		*version = 0;
+	command->color_version = 0;
+	command->hoistable = FALSE;
+	platform_log("small targets: %08lx is drawn from the screen-sized %08lx, in order and without copies",
+		(unsigned long)command->targets->color_surface.Data, data);
+}
 
 static BOOL surface_is_small_cached(const D3DSurface *surface);
 static BOOL surface_is_depth_cached(const D3DSurface *surface);
@@ -3448,6 +3948,27 @@ static unsigned long *target_version_slot(unsigned long data)
 	target_versions[target_version_count].data = data;
 	target_versions[target_version_count].version = 0;
 	return &target_versions[target_version_count++].version;
+}
+
+/* A run into a small target whose copies ran out (more than 24 object
+shadows in view, the armoury's racks of weapons in d40). It drew into the
+last copy again, and being hoisted, ran ahead of the main scene's draws that
+read that copy for the shadows before it: each of those shadows was drawn
+with the last one's picture (a rifle's with a body's, stretched over the
+floor), and they came and went as the count in view crossed 24. Now the
+target's copies start again, and the worker first runs every record before
+this one (the waves held and the main scene so far: render_worker), so
+the copies are free; the main scene is split there, once each 24 copies. */
+static unsigned long target_versions_ran_out_count;
+static BOOL target_versions_flush_pending;
+
+static void target_versions_ran_out(unsigned long *version)
+{
+	if (++target_versions_ran_out_count <= 4)
+		platform_log("small targets: more than %d copies of one in a frame: the frame's records so far run first (%lu so far)",
+			MAXIMUM_TARGET_VERSIONS, target_versions_ran_out_count);
+	*version = 1;
+	target_versions_flush_pending = TRUE;
 }
 
 /* the draw being recorded runs the constant fragment program
@@ -3630,7 +4151,7 @@ static const struct record_targets *record_targets_current(const D3DSurface *col
 		int index;
 
 		for (index = 0; index < 3; index++)
-			target_arenas[index] = calloc(TARGET_BLOCKS_PER_FRAME, sizeof(struct record_targets));
+			target_arenas[index] = lasting_alloc(TARGET_BLOCKS_PER_FRAME * sizeof(struct record_targets), "target arenas");
 	}
 	if (!target_arenas[state_arena_index] || target_blocks_used >= TARGET_BLOCKS_PER_FRAME)
 	{
@@ -3781,8 +4302,10 @@ static struct render_command *command_begin(unsigned long kind)
 	command->new_run = command->targets && command->targets->color_valid &&
 		last_recorded_target != command->targets->color_surface.Data;
 	command->wave = 0;
+	command->flush_before = 0;
 	if (kind != _command_present && command->targets->color_valid && surface_is_small_cached(&command->targets->color_surface) &&
-		!(command->targets->depth_valid && device.depth_stencil->Data && !surface_is_small(&command->targets->depth_surface)))
+		!(command->targets->depth_valid && device.depth_stencil->Data && !surface_is_small(&command->targets->depth_surface)) &&
+		!surface_in_order(command->targets->color_surface.Data))
 	{
 		unsigned long *version = target_version_slot(command->targets->color_surface.Data);
 
@@ -3791,6 +4314,8 @@ static struct render_command *command_begin(unsigned long kind)
 			/* a new run into the target: a fresh copy */
 			if (last_recorded_target != command->targets->color_surface.Data && *version < MAXIMUM_TARGET_VERSIONS)
 				(*version)++;
+			else if (last_recorded_target != command->targets->color_surface.Data)
+				target_versions_ran_out(version);
 			command->color_version = *version;
 			command->hoistable = *version > 0;
 		}
@@ -3930,6 +4455,15 @@ static void small_target_wave(struct render_command *command)
 
 static void command_commit(struct render_command *command)
 {
+	if (target_versions_flush_pending)
+	{
+		/* (the first record after the copies started again: the waves
+		start again with it) */
+		target_versions_flush_pending = FALSE;
+		command->flush_before = 1;
+		wave_target_count = 0;
+		wave_overflow = FALSE;
+	}
 	if (worker_enabled)
 	{
 		small_target_wave(command);
@@ -3966,13 +4500,10 @@ static void worker_drain(void)
 		else if (vita_host_time_us() - waited_from > 12000000ull)
 		{
 			static volatile unsigned long hung_frame;
-			static int crash = -1;
+			/* (read each time: the settings panel's Dev page switches it) */
+			const char *setting = getenv("HALO_HANG_CRASH");
+			int crash = setting && atoi(setting) != 0;
 
-			if (crash < 0)
-			{
-				const char *setting = getenv("HALO_HANG_CRASH");
-				crash = setting && atoi(setting) != 0;
-			}
 			hung_frame = frames_requested;
 			if (crash)
 				*(volatile int *)32 = 0;
@@ -4055,7 +4586,9 @@ static int screen_targets_make(unsigned long old_width, unsigned long new_width,
 	{
 		unsigned long width;
 
-		if (!screen_sized_entry(entry))
+		/* (one given back for now is made when next drawn into, at the
+		new size: render_target_wake) */
+		if (!screen_sized_entry(entry) || entry->dormant)
 			continue;
 		width = entry->target.width == old_width ? new_width : entry->target.width;
 		if (!vgxm_target_remake(entry->id, width, SCREEN_HEIGHT, entry->target.depth, &entry->texture))
@@ -4090,18 +4623,271 @@ static void screen_entries_rekey(unsigned long old_width, unsigned long new_widt
 		/* (zeros until the next frame draws them: not sampled before) */
 		entry->drawn = FALSE;
 		entry->last_rendered = 0;
-		entry->last_used = device.frame + 1;
+		/* (last_used stays: a copy unused for ten seconds is still one, for
+		screen_targets_doze) */
 	}
+}
+
+/* ---------- CDRAM when it runs short
+
+(the game's thread, with the worker and the GPU idle: a live change of the
+screen's targets, or a target that found no CDRAM - halo_screen_commit)
+What can be given back, safest first (vgxm_memory.h): the block cache, the
+small targets' blocks every share of which is back, the targets no entry
+refers to (the copies moved into atlases, the levels a mip chain replaced),
+the screen-sized targets no frame has used for ten seconds (the zoom's and
+the pause menu's copies, made again when next drawn into:
+render_target_wake), then the texture pool's segments in CDRAM, one at a
+time from the top, each moved to user RAM (the textures in it decoded again
+as they are used). */
+
+/* a target allocation a frame made that found no CDRAM, noted before a
+live change (whose own attempts' refusals are not kept): cdram_wanted_relieve */
+static unsigned long cdram_wanted_pending;
+
+/* HALO_CDRAM_RELIEF=0 (debug): nothing given back when CDRAM runs short
+(as before: a live change that does not fit waits for a restart) */
+static BOOL cdram_relief_enabled(void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_CDRAM_RELIEF");
+
+		enabled = !setting || atoi(setting) != 0;
+		if (!enabled)
+			platform_log("cdram: nothing given back when it runs short (HALO_CDRAM_RELIEF=0)");
+	}
+	return enabled != 0;
+}
+
+/* a screen-sized target unused for idle frames (ten seconds; 0: any; not
+the back buffer nor its depth) given back, its entry dormant; the count */
+static unsigned long screen_targets_doze(unsigned long idle)
+{
+	struct render_target_entry *entry;
+	unsigned long count = 0;
+
+	for (entry = render_targets; entry; entry = entry->next)
+	{
+		if (!screen_sized_entry(entry) || entry->dormant || (idle && entry->last_used + idle >= device.frame) ||
+			(entry->target.data == device.back_buffer.Data && !entry->target.depth) ||
+			(entry->target.data == device.depth_buffer.Data && entry->target.depth))
+		{
+			/* (the zoom's copy is a colour surface over the depth buffer's
+			memory: not the depth buffer) */
+			continue;
+		}
+		vgxm_target_release(entry->id);
+		entry->dormant = TRUE;
+		entry->wake_frame = 0;
+		entry->drawn = FALSE;
+		count++;
+	}
+	return count;
+}
+
+/* the targets no entry refers to given back (vgxm_targets_sweep) */
+static unsigned long targets_unreferenced_sweep(void)
+{
+	static unsigned char referenced[VGXM_MAXIMUM_TARGETS + 1];
+	struct render_target_entry *entry;
+
+	memset(referenced, 0, sizeof(referenced));
+	for (entry = render_targets; entry; entry = entry->next)
+		if (entry->id && entry->id <= VGXM_MAXIMUM_TARGETS)
+			referenced[entry->id] = 1;
+	if (camo_reserved_id && camo_reserved_id <= VGXM_MAXIMUM_TARGETS)
+		referenced[camo_reserved_id] = 1;
+	return vgxm_targets_sweep(referenced, sizeof(referenced));
+}
+
+/* what costs no texture: the bytes freed (the dozing targets' at the
+screen's next remake) */
+static unsigned long cdram_relieve(unsigned long *dozed)
+{
+	unsigned long freed = targets_unreferenced_sweep();
+
+	*dozed = screen_targets_doze(300);
+	return freed + vgxm_memory_trim();
+}
+
+/* one texture pool segment moved to user RAM and its textures forgotten;
+the CDRAM bytes freed (0: none left in CDRAM) */
+static unsigned long cdram_relieve_pool(void)
+{
+	void *base;
+	unsigned long size, freed, textures = 0;
+
+	/* (no decode in the background may write into the moved memory) */
+	vita_texture_decodes_quiesce();
+	freed = vgxm_pool_demote(&base, &size);
+
+	if (freed && size)
+		textures = vita_texture_cache_forget(base, size);
+	if (freed)
+		platform_log("cdram: a texture pool part (%lu KB) moved out of CDRAM, %lu textures to decode again", freed / 1024,
+			textures);
+	return freed;
+}
+
+/* (platform_renderer_map_unloaded: cache_files.c's scenario_tags_unload,
+on the game's thread, between a map's tags going and the next's coming)
+the texture pool's textures - the old map's - forgotten and its segments
+but the first given back to CDRAM, the screen block cache and the small
+targets' spare blocks freed (vgxm_memory_trim): the next map starts with
+the video memory a fresh start has, and makes the segments it fills. On the
+owner's Vita (beta.2, Oct 8) the pool, grown to 56 MB on The Silent
+Cartographer, kept every segment for the session, the block cache 8 MB
+more, 3 MB of CDRAM free: a live change's targets failed, then after a
+join on carousel a pool segment and every texture */
+static void renderer_map_unloaded(void)
+{
+	unsigned long held = vgxm_pool_held(), before = vgxm_cdram_free(), freed, trimmed;
+
+	if (!device.created || !device.gpu_ready)
+		return;
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+	vita_texture_decodes_quiesce();
+	freed = vita_texture_pool_release();
+	trimmed = vgxm_memory_trim();
+	platform_log("cdram: a map gone: the texture pool %lu KB -> %lu KB held (%lu KB of CDRAM given back), %lu KB of cached "
+		"blocks freed: %lu KB -> %lu KB free", held / 1024, vgxm_pool_held() / 1024, freed / 1024, trimmed / 1024,
+		before / 1024, vgxm_cdram_free() / 1024);
+}
+
+/* the texture pool's segments in user RAM moved back to CDRAM while the
+targets keep their headroom */
+static void cdram_pool_return(void)
+{
+	void *base;
+	unsigned long size, moved = 0, textures = 0;
+
+	vita_texture_decodes_quiesce();
+	while (vgxm_pool_promote(&base, &size))
+	{
+		moved++;
+		if (size)
+			textures += vita_texture_cache_forget(base, size);
+	}
+	if (moved)
+		platform_log("cdram: %lu texture pool segments back in CDRAM, %lu textures to decode again", moved, textures);
+}
+
+/* the census (HALO_CDRAM_CENSUS=1, or =<frame> for when, or performance
+logging): what holds CDRAM, at a frame of play (900 by default, the worker's
+present) and after each live change; with HALO_CDRAM_CENSUS, a line per
+target with what it is */
+static int cdram_census_level(void)
+{
+	static int level = -1;
+
+	if (level < 0)
+	{
+		const char *setting = getenv("HALO_CDRAM_CENSUS");
+
+		level = setting && atoi(setting) > 0 ? 2 : (getenv("HALO_PERF_LOG") && atoi(getenv("HALO_PERF_LOG"))) ||
+			(getenv("HALO_FRAME_TIMING") && atoi(getenv("HALO_FRAME_TIMING")) > 0) ? 1 : 0;
+	}
+	return level;
+}
+
+static unsigned long cdram_census_frame(void)
+{
+	const char *setting = getenv("HALO_CDRAM_CENSUS");
+
+	return setting && atol(setting) > 1 ? (unsigned long)atol(setting) : 900;
+}
+
+static void cdram_census(const char *when)
+{
+	static char roles[VGXM_MAXIMUM_TARGETS + 1][80];
+	static const char *role_of[VGXM_MAXIMUM_TARGETS + 1];
+	struct render_target_entry *entry;
+	int level = cdram_census_level();
+
+	if (!level)
+		return;
+	memset(role_of, 0, sizeof(role_of));
+	for (entry = render_targets; entry; entry = entry->next)
+	{
+		unsigned long id = entry->id;
+
+		if (!id || id > VGXM_MAXIMUM_TARGETS || role_of[id])
+			continue;
+		snprintf(roles[id], sizeof(roles[id]), "%s%s %08lx v%lu, used %ld frames ago%s",
+			entry->target.data == device.back_buffer.Data && !entry->target.depth ? "the back buffer" :
+			entry->target.data == device.depth_buffer.Data && entry->target.depth ? "the depth buffer" :
+			camo_copy_size(entry->target.width, entry->target.height, entry->target.depth) ? "the camouflage's copy" :
+			screen_sized_entry(entry) ? "a copy of the screen" : entry->chain_levels ? "a mip chain level" :
+			entry->cell ? "an atlas cell" : "a surface",
+			entry->dormant ? " (given back for now)" : "", (unsigned long)entry->target.data, entry->version,
+			(long)device.frame - (long)entry->last_used, entry->drawn || entry->target.depth ? "" : ", not drawn since made");
+		role_of[id] = roles[id];
+	}
+	if (camo_reserved_id && camo_reserved_id <= VGXM_MAXIMUM_TARGETS && !role_of[camo_reserved_id])
+		role_of[camo_reserved_id] = "the camouflage's copy (reserved, not yet used)";
+	platform_log("cdram census %s: %ldx%d at %.0f%%%s", when, screen_width, SCREEN_HEIGHT,
+		vgxm_render_scale() * 100.0f, getenv("HALO_RENDER_SCALE") && !strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") ?
+		" (dynamic)" : "");
+	vgxm_memory_census(role_of, VGXM_MAXIMUM_TARGETS + 1, level >= 2);
+}
+
+/* (halo_screen_commit, after a present) a target found no CDRAM in a
+frame (a scene's new surface: the effect it is for goes until it has
+one): once the worker and the GPU are done, what costs no texture is given
+back, then texture pool segments until that much is free; at most every
+ten seconds (the entry asks again every 30 frames) */
+static void cdram_wanted_relieve(void)
+{
+	static unsigned long relieved_frame;
+	unsigned long wanted, freed, dozed, pool_parts = 0, moved;
+
+	if (!device.created || !device.gpu_ready || (relieved_frame && device.frame < relieved_frame + 300) ||
+		!cdram_relief_enabled())
+	{
+		return;
+	}
+	wanted = vgxm_cdram_wanted();
+	if (cdram_wanted_pending > wanted)
+		wanted = cdram_wanted_pending;
+	cdram_wanted_pending = 0;
+	if (!wanted)
+		return;
+	relieved_frame = device.frame;
+	if (worker_enabled > 0)
+	{
+		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
+			vita_host_sleep_us(100);
+	}
+	vgxm_wait_gpu_idle();
+	freed = cdram_relieve(&dozed);
+	while (vgxm_cdram_free() < wanted + 256 * 1024 && (moved = cdram_relieve_pool()) != 0)
+	{
+		freed += moved;
+		pool_parts++;
+	}
+	platform_log("cdram: a target found no CDRAM (%lu KB): %lu KB given back (%lu texture pool parts moved to user "
+		"RAM, %lu unused copies of the screen until next drawn), %lu KB free now", wanted / 1024, freed / 1024, pool_parts,
+		dozed, vgxm_cdram_free() / 1024);
 }
 
 static void screen_settings_apply(void)
 {
 	const char *setting = getenv("HALO_RENDER_SCALE");
-	float scale = setting ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale();
+	/* (dynamic: the targets at the full size, drawn into a part of them -
+	the dynamic resolution) */
+	float scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f, old_scale = vgxm_render_scale(), drawn;
 	long width = screen_width_wanted(), old_width = screen_width;
 	unsigned long long started;
-	unsigned long made = 0, targets, cdram, cached, cdram_free;
-	int restored = TRUE;
+	unsigned long made = 0, targets, cdram, cached, cdram_free, freed = 0, dozed = 0, moved, pool_parts = 0, wanted;
+	int restored = TRUE, made_new;
 
 	if (scale < 0.5f || scale > 1.0f)
 		scale = 1.0f;
@@ -4129,8 +4915,42 @@ static void screen_settings_apply(void)
 			vita_host_sleep_us(100);
 	}
 	vgxm_wait_gpu_idle();
+	/* (a frame's target that found no CDRAM, kept for cdram_wanted_relieve
+	past the change's own refusals) */
+	wanted = vgxm_cdram_wanted();
+	if (wanted > cdram_wanted_pending)
+		cdram_wanted_pending = wanted;
+	drawn = vgxm_render_rect();
 	vgxm_render_scale_set(scale);
-	if (screen_targets_make((unsigned long)old_width, (unsigned long)width, &made))
+	/* (to the dynamic resolution: the targets made at the full size are
+	drawn at the scale they had, from which its controller starts,
+	dynres_frame_end) */
+	if (setting && !strcmp(setting, "dynamic") && drawn < scale)
+		vgxm_render_rect_set(drawn);
+	{
+		/* (debug) HALO_CDRAM_DOZE_ALL=1: every copy of the screen given back
+		at a live change, used or not, to be made again as it is next drawn
+		into (tries render_target_wake) */
+		const char *setting = getenv("HALO_CDRAM_DOZE_ALL");
+
+		if (setting && atoi(setting))
+			screen_targets_doze(0);
+	}
+	made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+	if (!made_new && cdram_relief_enabled())
+	{
+		/* (short of CDRAM: what costs nothing given back, then the
+		texture pool's segments one at a time, each time tried again) */
+		freed = cdram_relieve(&dozed);
+		made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+		while (!made_new && (moved = cdram_relieve_pool()) != 0)
+		{
+			freed += moved;
+			pool_parts++;
+			made_new = screen_targets_make((unsigned long)old_width, (unsigned long)width, &made);
+		}
+	}
+	if (made_new)
 	{
 		screen_entries_rekey((unsigned long)old_width, (unsigned long)width);
 		screen_width = width;
@@ -4138,6 +4958,8 @@ static void screen_settings_apply(void)
 		device.presentation.BackBufferWidth = (UINT)width;
 		d3d8_surface_resize(&device.back_buffer, D3DFMT_LIN_A8R8G8B8, (unsigned long)width, SCREEN_HEIGHT);
 		d3d8_surface_resize(&device.depth_buffer, D3DFMT_LIN_D24S8, (unsigned long)width, SCREEN_HEIGHT);
+		/* (a smaller size: the texture pool's parts in user RAM back) */
+		cdram_pool_return();
 	}
 	else
 	{
@@ -4157,6 +4979,8 @@ static void screen_settings_apply(void)
 		screen_entries_rekey((unsigned long)old_width, (unsigned long)old_width);
 		screen_restart_needed = TRUE;
 	}
+	/* (the attempts' refusals are answered: not a target's in a frame) */
+	vgxm_cdram_wanted();
 	vgxm_target_stats(&targets, &cdram, &cached, &cdram_free);
 	platform_log("screen: %ldx%d at %.0f%%%s: %lu screen-sized targets made again in %llu us; %lu target slots, "
 		"targets hold %lu KB of CDRAM, %lu KB kept for other sizes, %lu KB free", screen_width, SCREEN_HEIGHT, vgxm_render_scale() * 100.0f,
@@ -4164,6 +4988,264 @@ static void screen_settings_apply(void)
 		" (NO TARGETS: no memory for the old size either)") : "",
 		made, (unsigned long long)(vita_host_time_us() - started), targets, cdram / 1024, cached / 1024,
 		cdram_free / 1024);
+	if (freed || dozed)
+		platform_log("screen: CDRAM was short: %lu KB given back (%lu texture pool parts moved to user RAM), %lu unused "
+			"copies of the screen given back until next drawn", freed / 1024, pool_parts, dozed);
+	cdram_census("after a live change");
+}
+
+/* ---------- the dynamic resolution
+
+HALO_RENDER_SCALE=dynamic (the settings panel's Render resolution: Dynamic):
+the screen-sized targets are made at the full size (the render scale 1, or
+the old size when a live change found no CDRAM for it: vgxm_render_scale is
+the ceiling) and each frame is drawn into the top left part of them, from
+HALO_DYNAMIC_RES_MIN (0.5) of the size up to the whole, in 32nds. The
+scale follows the GPU's time for the frames before (vgxm_gpu_frame_next;
+dynamic_resolution.c: down fast, up slowly) against the frame limit's
+budget (HALO_FRAME_CAP: 33.3 ms at 30 FPS and when off, 16.7 at 60). It
+changes on the worker, after a present and before the next frame's first
+record: the targets' rectangles (vgxm_render_rect_set) and their entries'
+textures move together, and every effect that samples the screen or a copy
+of it goes through those textures in the game's own coordinates
+(bind_recorded_textures: the glow, the zoom's copy, the camouflage's, the
+heat haze, the water), so nothing is made again and nothing hitches.
+
+The game's thread reads the settings (dynres_configure, at the first
+present and after a change in the panel) into dynres_config and bumps its
+generation; the worker takes them at its next frame end. Debug:
+HALO_DYNRES_FORCE=<percent> holds that scale (with
+HALO_RENDER_SCALE=dynamic: the targets at the full size);
+HALO_DYNRES_CYCLE=<frames> steps 100%..50%..100% two 32nds at a time every
+that many frames; HALO_DYNRES_SIM=<ms> stands in for the GPU's time, that
+many ms at 100% and growing with the pixels (the null renderer times
+nothing); HALO_DYNRES_BUDGET=<ms> another budget. With the performance
+logging (HALO_FRAME_TIMING) the changes go to halo.log, a line a second at
+most, and a summary every 300 frames. */
+
+static struct
+{
+	volatile unsigned long generation;
+	int enabled, floor, force, cycle, log;
+	float budget_ms, sim_ms;
+} dynres_config;
+
+static struct
+{
+	unsigned long generation;
+	int enabled, floor, force, cycle, log;
+	float budget_ms, sim_ms;
+	struct dynres_controller controller;
+	/* the level the targets are drawn at now (32nds) */
+	int level;
+	unsigned long frames;
+	/* the log: changes since the last line, the level then, the time of
+	the last line; the summary's frames, levels, GPU times */
+	unsigned long changes_pending, summary_changes;
+	int logged_level;
+	unsigned long long logged_us;
+	unsigned long summary_frames, summary_over;
+	int summary_minimum, summary_maximum;
+	float summary_level_sum, summary_gpu_sum, summary_gpu_maximum;
+	float last_gpu_ms, last_tail_ms;
+} dynres;
+
+static int dynres_level_of(float scale)
+{
+	int level = (int)(scale * DYNRES_UNITS + 0.5f);
+
+	return level < 1 ? 1 : level > DYNRES_UNITS ? DYNRES_UNITS : level;
+}
+
+/* (the game's thread) */
+static void dynres_configure(void)
+{
+	const char *scale = getenv("HALO_RENDER_SCALE"), *minimum = getenv("HALO_DYNAMIC_RES_MIN");
+	const char *force = getenv("HALO_DYNRES_FORCE"), *cycle = getenv("HALO_DYNRES_CYCLE");
+	const char *sim = getenv("HALO_DYNRES_SIM"), *budget = getenv("HALO_DYNRES_BUDGET");
+	const char *cap = getenv("HALO_FRAME_CAP"), *timing = getenv("HALO_FRAME_TIMING");
+	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2;
+	int enabled, forced = force && atoi(force) > 0 ? dynres_level_of(atoi(force) / 100.0f) : 0;
+	float budget_ms = cap && atoi(cap) > 0 ? 1000.0f / (float)atoi(cap) : 1000.0f / 30.0f;
+
+	/* (frame interpolation: the tick's budget whatever the frame limit -
+	the frames between ticks are drawn only while there is time for them
+	(main.c), and the resolution is not lowered to make that time; the
+	panel's value, which the game reads as the next frame starts) */
+	{
+		int halo_interpolation_enabled(void);
+		const char *interpolation = getenv("HALO_INTERPOLATION");
+
+		if (interpolation ? !strcmp(interpolation, "true") || !strcmp(interpolation, "1") : halo_interpolation_enabled())
+			budget_ms = 1000.0f / 30.0f;
+	}
+	if (floor < DYNRES_UNITS / 2)
+		floor = DYNRES_UNITS / 2;
+	if (forced && forced < DYNRES_UNITS / 2)
+		forced = DYNRES_UNITS / 2;
+	if (budget && atof(budget) > 1.0)
+		budget_ms = (float)atof(budget);
+	enabled = (scale && !strcmp(scale, "dynamic")) || forced || (cycle && atoi(cycle) > 0);
+	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force ||
+		(enabled && budget_ms != dynres_config.budget_ms))
+		platform_log("dynamic resolution: %s%s (floor %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
+			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (double)budget_ms,
+			cycle && atoi(cycle) > 0 ? ", cycling" : "", sim && atof(sim) > 0.0 ? ", GPU simulated" : "");
+	dynres_config.enabled = enabled;
+	dynres_config.floor = floor;
+	dynres_config.force = forced;
+	dynres_config.cycle = cycle && atoi(cycle) > 0 ? atoi(cycle) : 0;
+	dynres_config.sim_ms = sim && atof(sim) > 0.0 ? (float)atof(sim) : 0.0f;
+	dynres_config.budget_ms = budget_ms;
+	dynres_config.log = timing && atoi(timing) > 0;
+	__atomic_store_n(&dynres_config.generation, dynres_config.generation + 1, __ATOMIC_RELEASE);
+}
+
+/* the targets drawn at level from the next frame on (the worker, between
+frames; or the game's thread with the worker idle) */
+static void dynres_apply(int level)
+{
+	struct render_target_entry *entry;
+	float applied = vgxm_render_rect_set((float)level / DYNRES_UNITS);
+
+	for (entry = render_targets; entry; entry = entry->next)
+		if (screen_sized_entry(entry) && !entry->target.depth)
+			vgxm_target_texture(entry->id, &entry->texture);
+	dynres.level = dynres_level_of(applied);
+}
+
+static void dynres_log_change(int from)
+{
+	unsigned long long now = vita_host_time_us();
+
+	dynres.changes_pending++;
+	dynres.summary_changes++;
+	if (!dynres.log)
+		return;
+	if (!dynres.logged_us)
+		dynres.logged_level = from;
+	if (now - dynres.logged_us < 1000000ull)
+		return;
+	platform_log("dynamic resolution: %d%% (from %d%%; GPU %.1f ms, tail %.1f, budget %.1f; %lu changes in %.1f s)",
+		dynres.level * 100 / DYNRES_UNITS, dynres.logged_level * 100 / DYNRES_UNITS, (double)dynres.last_gpu_ms,
+		(double)dynres.last_tail_ms, (double)dynres.budget_ms, dynres.changes_pending,
+		dynres.logged_us ? (now - dynres.logged_us) / 1000000.0 : 0.0);
+	dynres.changes_pending = 0;
+	dynres.logged_level = dynres.level;
+	dynres.logged_us = now;
+}
+
+/* a frame the GPU finished, at the level it was drawn at */
+static int dynres_measured(float gpu_ms, float tail_ms, int frame_level, float interval_ms)
+{
+	int level = dynres.controller.level;
+
+	dynres.last_gpu_ms = gpu_ms;
+	dynres.last_tail_ms = tail_ms;
+	if (dynres.enabled && !dynres.force && !dynres.cycle)
+		level = dynres_controller_frame(&dynres.controller, gpu_ms, tail_ms, frame_level, interval_ms);
+	if (dynres.log && gpu_ms * 1000.0f < 250000.0f)
+	{
+		dynres.summary_frames++;
+		dynres.summary_level_sum += (float)frame_level;
+		dynres.summary_gpu_sum += gpu_ms;
+		if (gpu_ms > dynres.summary_gpu_maximum)
+			dynres.summary_gpu_maximum = gpu_ms;
+		if (gpu_ms > dynres.budget_ms)
+			dynres.summary_over++;
+		if (!dynres.summary_minimum || frame_level < dynres.summary_minimum)
+			dynres.summary_minimum = frame_level;
+		if (frame_level > dynres.summary_maximum)
+			dynres.summary_maximum = frame_level;
+		if (dynres.summary_frames == 300)
+		{
+			platform_log("dynamic resolution: %lu frames at %d..%d%% (mean %.0f%%), GPU mean %.1f ms, max %.1f, "
+				"%lu over the %.1f ms budget, %lu changes", dynres.summary_frames,
+				dynres.summary_minimum * 100 / DYNRES_UNITS, dynres.summary_maximum * 100 / DYNRES_UNITS,
+				(double)(dynres.summary_level_sum * 100.0f / DYNRES_UNITS / dynres.summary_frames),
+				(double)(dynres.summary_gpu_sum / dynres.summary_frames), (double)dynres.summary_gpu_maximum,
+				dynres.summary_over, (double)dynres.budget_ms, dynres.summary_changes);
+			dynres.summary_frames = dynres.summary_over = dynres.summary_changes = 0;
+			dynres.summary_minimum = dynres.summary_maximum = 0;
+			dynres.summary_level_sum = dynres.summary_gpu_sum = dynres.summary_gpu_maximum = 0.0f;
+		}
+	}
+	return level;
+}
+
+/* (the worker, after a present) the frames the GPU finished, and the next
+frame's level */
+static void dynres_frame_end(void)
+{
+	unsigned long generation = __atomic_load_n(&dynres_config.generation, __ATOMIC_ACQUIRE);
+	struct vgxm_gpu_frame frame;
+	int ceiling = dynres_level_of(vgxm_render_scale()), level;
+
+	if (generation != dynres.generation)
+	{
+		int was_enabled = dynres.enabled;
+
+		dynres.generation = generation;
+		dynres.enabled = dynres_config.enabled;
+		dynres.floor = dynres_config.floor;
+		dynres.force = dynres_config.force;
+		dynres.cycle = dynres_config.cycle;
+		dynres.sim_ms = dynres_config.sim_ms;
+		dynres.budget_ms = dynres_config.budget_ms;
+		dynres.log = dynres_config.log;
+		if (dynres.enabled && !was_enabled)
+		{
+			/* (from the scale drawn until now: at the first frame the
+			ceiling, switched on in a game the fixed scale it had - from
+			the ceiling, the Vita went from 50% to 100% in a Covenant
+			fight and spent seconds over the budget coming back down,
+			Oct 7) */
+			dynres.level = dynres_level_of(vgxm_render_rect());
+			dynres_controller_start(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms, dynres.level);
+		}
+		vgxm_overlay_dynamic(dynres.enabled);
+	}
+	if (!dynres.level)
+		dynres.level = dynres_level_of(vgxm_render_rect());
+	dynres_controller_limits(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
+	level = dynres.controller.level;
+	dynres.frames++;
+	/* (drained whether on or not: the overlay's GPU line) */
+	while (vgxm_gpu_frame_next(&frame))
+		if (!dynres.sim_ms)
+			level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+	if (dynres.sim_ms)
+	{
+		/* (debug) a GPU whose time grows with the pixels, 8% noise, its
+		frames finished at once */
+		static unsigned int noise = 12345;
+		float scale = (float)dynres.level / DYNRES_UNITS, gpu;
+
+		noise = noise * 1103515245u + 12345u;
+		gpu = dynres.sim_ms * scale * scale * (1.0f + 0.08f * (((noise >> 8) & 0xffff) / 32767.5f - 1.0f));
+		level = dynres_measured(gpu, gpu * 0.7f, dynres.level, gpu > dynres.budget_ms ? gpu : dynres.budget_ms);
+	}
+	if (!dynres.enabled)
+		level = DYNRES_UNITS;
+	else if (dynres.force)
+		level = dynres.force;
+	else if (dynres.cycle)
+	{
+		/* 32, 30 .. 16, 18 .. 30, again */
+		unsigned long step = (dynres.frames / (unsigned long)dynres.cycle) % 16;
+
+		level = step <= 8 ? DYNRES_UNITS - 2 * (int)step : DYNRES_UNITS / 2 + 2 * (int)(step - 8);
+	}
+	if (level > ceiling)
+		level = ceiling;
+	if (level != dynres.level)
+	{
+		int from = dynres.level;
+
+		dynres_apply(level);
+		if (dynres.level != from && dynres.enabled)
+			dynres_log_change(from);
+	}
 }
 
 /* has the target a depth format? (no GPU work: the worker creates targets) */
@@ -4600,6 +5682,150 @@ static unsigned long material_hash_current(void)
 	return hash;
 }
 
+/* Transitions between kept materials: from a material, a set of material
+states changed to new values (the log's words whose values differ from the
+material's, in word order) led to a material, found by its whole states
+then. From the same material, the same changes lead to the same material:
+the states are that material's but for the logged words (every setter that
+changes a material state logs it, as it marks the state dirty), and the
+words hold the same values. A transition is kept only between materials
+of the kept pool, which are never rewritten nor freed. The whole-state
+search compared 1.1 KB of states with a kept material, missing the caches
+on most of its lines (b30: a fifth of the game thread's record cost). */
+#define MATERIAL_PATCH_MAX 48
+#define MATERIAL_TRANSITION_SLOTS 4096
+#define MATERIAL_TRANSITION_PROBES 4
+/* (the patches' words and values, in a pool emptied with the table when
+it is full: b30 keeps ~3700 transitions in 150 s, of 12 words on average) */
+#define MATERIAL_PATCH_POOL 32768
+struct material_transition
+{
+	const struct record_material *from, *to;
+	unsigned long hash;
+	unsigned long first;
+	unsigned short count;
+};
+static struct material_transition *material_transitions;
+static unsigned short *material_patch_words;
+static DWORD *material_patch_values;
+static unsigned long material_patch_used;
+
+/* the states' current value of a material word */
+static DWORD material_word_current(unsigned long word)
+{
+	return word < D3DRS_MAX ? D3D__RenderState[word] :
+		D3D__TextureState[(word - D3DRS_MAX) / D3DTSS_MAX][(word - D3DRS_MAX) % D3DTSS_MAX];
+}
+
+static BOOL material_in_pool(const struct record_material *material)
+{
+	return material_cache_pool && material >= material_cache_pool && material < material_cache_pool + material_cache_used;
+}
+
+/* the logged words whose current values differ from the last material's
+(the values they had when first changed), in word order; FALSE when there
+are more than MATERIAL_PATCH_MAX */
+static BOOL material_patch_current(unsigned short *word, DWORD *value, unsigned short *count)
+{
+	unsigned int index, found = 0;
+
+	for (index = 0; index < material_log_count; index++)
+	{
+		unsigned short at = material_log[index];
+		DWORD current = material_word_current(at);
+
+		if (current != material_log_old[index])
+		{
+			unsigned int place = found;
+
+			if (found >= MATERIAL_PATCH_MAX)
+				return FALSE;
+			while (place > 0 && word[place - 1] > at)
+			{
+				word[place] = word[place - 1];
+				value[place] = value[place - 1];
+				place--;
+			}
+			word[place] = at;
+			value[place] = current;
+			found++;
+		}
+	}
+	*count = (unsigned short)found;
+	return TRUE;
+}
+
+static unsigned long material_patch_hash(const struct record_material *from, const unsigned short *word,
+	const DWORD *value, unsigned short count)
+{
+	unsigned long hash = (2166136261UL ^ (unsigned long)(size_t)from) * 16777619UL;
+	unsigned short index;
+
+	for (index = 0; index < count; index++)
+		hash = ((hash ^ word[index]) * 16777619UL ^ value[index]) * 16777619UL;
+	return hash;
+}
+
+static const struct record_material *material_transition_find(const struct record_material *from, unsigned long hash,
+	const unsigned short *word, const DWORD *value, unsigned short count)
+{
+	unsigned long probe;
+
+	if (!material_transitions)
+		return NULL;
+	for (probe = 0; probe < MATERIAL_TRANSITION_PROBES; probe++)
+	{
+		const struct material_transition *entry = &material_transitions[(hash + probe) % MATERIAL_TRANSITION_SLOTS];
+
+		if (entry->from == from && entry->hash == hash && entry->count == count &&
+			!memcmp(&material_patch_words[entry->first], word, count * sizeof(word[0])) &&
+			!memcmp(&material_patch_values[entry->first], value, count * sizeof(value[0])))
+		{
+			return entry->to;
+		}
+	}
+	return NULL;
+}
+
+static __attribute__((noinline)) void material_transition_keep(const struct record_material *from, const struct record_material *to,
+	unsigned long hash, const unsigned short *word, const DWORD *value, unsigned short count)
+{
+	struct material_transition *entry = NULL;
+	unsigned long probe;
+
+	if (!material_transitions)
+	{
+		material_transitions = lasting_alloc(MATERIAL_TRANSITION_SLOTS * sizeof(*material_transitions), "material transitions");
+		material_patch_words = lasting_alloc(MATERIAL_PATCH_POOL * sizeof(*material_patch_words), "material transitions");
+		material_patch_values = lasting_alloc(MATERIAL_PATCH_POOL * sizeof(*material_patch_values), "material transitions");
+		if (!material_transitions || !material_patch_words || !material_patch_values)
+		{
+			material_transitions = NULL;
+			return;
+		}
+	}
+	if (material_patch_used + count > MATERIAL_PATCH_POOL)
+	{
+		/* (full: begun again) */
+		memset(material_transitions, 0, MATERIAL_TRANSITION_SLOTS * sizeof(*material_transitions));
+		material_patch_used = 0;
+	}
+	for (probe = 0; probe < MATERIAL_TRANSITION_PROBES && !entry; probe++)
+		if (!material_transitions[(hash + probe) % MATERIAL_TRANSITION_SLOTS].from)
+			entry = &material_transitions[(hash + probe) % MATERIAL_TRANSITION_SLOTS];
+	/* (all taken: the first gives way) */
+	if (!entry)
+		entry = &material_transitions[hash % MATERIAL_TRANSITION_SLOTS];
+	entry->from = from;
+	entry->to = to;
+	entry->hash = hash;
+	entry->count = count;
+	entry->first = material_patch_used;
+	memcpy(&material_patch_words[material_patch_used], word, count * sizeof(word[0]));
+	memcpy(&material_patch_values[material_patch_used], value, count * sizeof(value[0]));
+	material_patch_used += count;
+}
+
 static BOOL values_match_current(const struct record_values *values)
 {
 	int index, stage;
@@ -4723,10 +5949,11 @@ static int record_split_enabled(void)
 		enabled = !setting || atoi(setting) != 0;
 		for (index = 0; enabled && index < 3; index++)
 		{
-			state_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_state));
-			material_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_material));
-			values_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_values));
-			bump_arenas[index] = malloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_bump));
+			state_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_state), "state arenas");
+			material_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_material),
+				"material arenas");
+			values_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_values), "values arenas");
+			bump_arenas[index] = lasting_alloc(STATE_BLOCKS_PER_FRAME * sizeof(struct record_bump), "bump arenas");
 			if (!state_arenas[index] || !material_arenas[index] || !values_arenas[index] || !bump_arenas[index])
 				enabled = 0;
 		}
@@ -4776,6 +6003,33 @@ static const struct record_state *record_state_current(void)
 	0); likewise the values */
 	if (!material_last || (device_state_dirty & STATE_DIRTY_MATERIAL))
 	{
+		/* (the last material and the logged changes: the same material
+		when none changed a value, else the material a transition kept) */
+		const struct record_material *from = material_last;
+		unsigned short patch_word[MATERIAL_PATCH_MAX], patch_count = 0;
+		DWORD patch_value[MATERIAL_PATCH_MAX];
+		unsigned long patch_hash = 0;
+		BOOL patched = material_last && material_log_count <= MATERIAL_LOG_CAPACITY && material_in_pool(material_last) &&
+			material_patch_current(patch_word, patch_value, &patch_count);
+
+		if (patched && !patch_count)
+		{
+			stats.state_equal++;
+			goto material_found;
+		}
+		if (patched)
+		{
+			const struct record_material *to;
+
+			patch_hash = material_patch_hash(material_last, patch_word, patch_value, patch_count);
+			if ((to = material_transition_find(material_last, patch_hash, patch_word, patch_value, patch_count)) != NULL)
+			{
+				material_last = (struct record_material *)to;
+				stats.material_kept++;
+				stats.material_transitions++;
+				goto material_found;
+			}
+		}
 		if (!material_last || !material_matches_current(material_last))
 		{
 			int index, stage;
@@ -4794,10 +6048,12 @@ static const struct record_state *record_state_current(void)
 			{
 				material_last = kept;
 				stats.material_kept++;
+				if (patched && material_in_pool(material_last))
+					material_transition_keep(from, material_last, patch_hash, patch_word, patch_value, patch_count);
 				goto material_found;
 			}
 			if (!material_cache_pool)
-				material_cache_pool = malloc(MATERIAL_CACHE_CAPACITY * sizeof(*material_cache_pool));
+				material_cache_pool = lasting_alloc(MATERIAL_CACHE_CAPACITY * sizeof(*material_cache_pool), "material cache");
 			if (material_cache_pool && material_cache_used < MATERIAL_CACHE_CAPACITY)
 			{
 				material_last = &material_cache_pool[material_cache_used++];
@@ -4817,10 +6073,13 @@ static const struct record_state *record_state_current(void)
 			for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 				memset(&material_last->texture_state[stage][D3DTSS_BUMPENVMAT00], 0, RECORD_VALUE_BUMP_COUNT * sizeof(DWORD));
 			stats.material_new++;
+			if (patched && material_in_pool(material_last))
+				material_transition_keep(from, material_last, patch_hash, patch_word, patch_value, patch_count);
 		}
 		else
 			stats.state_equal++;
-	material_found:;
+	material_found:
+		material_log_reset();
 	}
 	if (!values_last || (device_state_dirty & STATE_DIRTY_VALUES))
 	{
@@ -4904,6 +6163,8 @@ static struct render_command *record_draw(BOOL immediate)
 	command = command_begin(_command_draw);
 	if (!command)
 		return NULL;
+	command->phase = (signed char)halo_render_phase;
+	command->sky_depth = (unsigned char)device_sky_depth;
 	DRAW_FINE_ADD(0, profile_from);
 	draw = &command->draw;
 	/* (not the whole draw, 478 bytes into a cold ring entry: every field is
@@ -5004,8 +6265,11 @@ static struct render_command *record_draw(BOOL immediate)
 							command->texture_version[stage] = target_versions[index].version;
 					if ((D3D__RenderState[D3DRS_PSTEXTUREMODES] >> (stage * 5)) & 0x1f)
 						command->texture_target_data[stage] = texture->Data;
-					if (command->hoistable && !command->texture_version[stage] && render_target_entry_find(texture->Data))
+					if (command->hoistable && command->texture_target_data[stage] && !command->texture_version[stage] &&
+						render_target_entry_find(texture->Data))
 						command->hoistable = FALSE;
+					if (command->texture_target_data[stage])
+						record_reads_surface(command, texture->Data);
 				}
 			}
 			DRAW_PROFILE_ADD(2, profile_from);
@@ -5023,6 +6287,7 @@ static struct render_command *record_draw(BOOL immediate)
 			draw->clip[1] = (long)device.viewport.Y;
 			draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 			draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
+			scissor_apply(draw->clip);
 			draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 			if (immediate)
 				{ stats.immediate_draws++; draw_counter_immediate++; }
@@ -5098,9 +6363,18 @@ static struct render_command *record_draw(BOOL immediate)
 					command->texture_version[stage] = target_versions[index].version;
 			}
 			/* reading a target that is not a copy (the main scene): the
-			draw must stay in order */
-			if (command->hoistable && !command->texture_version[stage] && render_target_entry_find(texture->Data))
+			draw must stay in order. Only a stage the pixel shader samples
+			reads it (bind_recorded_textures binds no other): a target left
+			bound on a stage the draw does not sample - the active
+			camouflage's copy of the screen stays on stage 2 after the
+			cloaked units are drawn - held the motion sensor's blips in
+			the frame's order, a scene of their own and a split of the
+			main scene more each frame a cloaked unit was in view (#33) */
+			if (command->hoistable && command->texture_target_data[stage] && !command->texture_version[stage] &&
+				render_target_entry_find(texture->Data))
 				command->hoistable = FALSE;
+			if (command->texture_target_data[stage])
+				record_reads_surface(command, texture->Data);
 		}
 		command->palette[stage] = device.palettes[stage] && device.palettes[stage]->Data ?
 			(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[stage]->Data) : NULL;
@@ -5204,6 +6478,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->blend_source = rs[D3DRS_SRCBLEND];
 	draw->blend_destination = rs[D3DRS_DESTBLEND];
 	draw->blend_operation = rs[D3DRS_BLENDOP];
+	draw->blend_color = rs[D3DRS_BLENDCOLOR];
 	draw->color_write = rs[D3DRS_COLORWRITEENABLE];
 	/* the cull mode names the screen winding to discard */
 	draw->cull = rs[D3DRS_CULLMODE] == D3DCULL_NONE ? 0 : rs[D3DRS_CULLMODE];
@@ -5223,6 +6498,7 @@ static struct render_command *record_draw(BOOL immediate)
 	draw->clip[1] = (long)device.viewport.Y;
 	draw->clip[2] = (long)(device.viewport.X + device.viewport.Width);
 	draw->clip[3] = (long)(device.viewport.Y + device.viewport.Height);
+	scissor_apply(draw->clip);
 	draw->visibility_index = device.visibility_test_active ? device.visibility_index : 0;
 	if (immediate)
 		{ stats.immediate_draws++; draw_counter_immediate++; }
@@ -5326,7 +6602,7 @@ static BOOL setup_streams(struct vgxm_draw *draw, unsigned long first, unsigned 
 
 			stream_slot[stream] = draw->stream_count++;
 			draw->strides[stream_slot[stream]] = stride;
-			if (memory_is_static(start, bytes))
+			if (device.streams[stream].in_place || memory_is_static(start, bytes))
 			{
 				stats.direct_bytes += bytes;
 				draw->streams[stream_slot[stream]] = start;
@@ -5453,12 +6729,86 @@ static BOOL needs_conversion(D3DPRIMITIVETYPE type)
 	return type == D3DPT_QUADLIST || type == D3DPT_LINESTRIP || type == D3DPT_LINELOOP;
 }
 
+/* (port) Vertex buffers the game made once and never rewrites, outside the
+tag cache: a Custom Edition map's converted model and structure BSP
+geometry (port/linux/game/custom_edition_geometry.c). Like the tag cache's
+geometry, they lie in the window the GPU maps, and are read in place rather
+than copied into the ring every draw (Vita3K, Blood Gulch built as a Custom
+Edition map: the ring's use fell from 1058 KB to 152 KB a frame, the Xbox
+map's being 131 KB). Kept by buffer, in an open-addressed table. */
+#define IN_PLACE_BUFFER_SLOTS 4096
+#define IN_PLACE_REMOVED ((const void *)1)
+static const void *in_place_buffers[IN_PLACE_BUFFER_SLOTS];
+
+static unsigned long in_place_slot(const void *buffer)
+{
+	return (unsigned long)(((unsigned long)buffer >> 3) * 2654435761UL) % IN_PLACE_BUFFER_SLOTS;
+}
+
+static BOOL buffer_in_place(const void *buffer)
+{
+	unsigned long slot = in_place_slot(buffer), probe;
+
+	if (!buffer)
+		return FALSE;
+	for (probe = 0; probe < IN_PLACE_BUFFER_SLOTS && in_place_buffers[slot]; probe++)
+	{
+		if (in_place_buffers[slot] == buffer)
+			return TRUE;
+		slot = (slot + 1) % IN_PLACE_BUFFER_SLOTS;
+	}
+	return FALSE;
+}
+
+void halo_d3d_buffer_in_place(const void *buffer, int in_place)
+{
+	unsigned long slot, probe;
+
+	if (!buffer)
+		return;
+	layer_enter();
+	slot = in_place_slot(buffer);
+	if (!in_place || !buffer_in_place(buffer))
+	{
+		for (probe = 0; probe < IN_PLACE_BUFFER_SLOTS; probe++)
+		{
+			const void *entry = in_place_buffers[slot];
+
+			if (in_place && (!entry || entry == IN_PLACE_REMOVED))
+			{
+				in_place_buffers[slot] = buffer;
+				break;
+			}
+			if (!in_place && entry == buffer)
+			{
+				in_place_buffers[slot] = IN_PLACE_REMOVED;
+				break;
+			}
+			if (!entry)
+				break;
+			slot = (slot + 1) % IN_PLACE_BUFFER_SLOTS;
+		}
+		if (in_place && probe == IN_PLACE_BUFFER_SLOTS)
+		{
+			static int warned;
+
+			if (!warned++)
+				platform_log("Direct3D: more than %d vertex buffers to read in place; the rest are copied", IN_PLACE_BUFFER_SLOTS);
+		}
+	}
+	/* (the current streams are copied until set again) */
+	for (slot = 0; slot < 16; slot++)
+		device.streams[slot].in_place = FALSE;
+	layer_leave();
+}
+
 void WINAPI D3DDevice_SetStreamSource(UINT stream_number, D3DVertexBuffer *stream_data, UINT stride)
 {
 	if (stream_number >= 16)
 		return;
 	device.streams[stream_number].data = stream_data ? stream_data->Data : 0;
 	device.streams[stream_number].stride = stride;
+	device.streams[stream_number].in_place = buffer_in_place(stream_data);
 }
 
 /* (port) the stream draws that follow take input register reg from stream
@@ -5568,7 +6918,7 @@ static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_c
 		if (element->type == D3DVSDT_NONE || !device.streams[element->stream].data)
 			continue;
 		base = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[element->stream].data);
-		if (!memory_is_static(base, 1))
+		if (!device.streams[element->stream].in_place && !memory_is_static(base, 1))
 			streams_static = FALSE;
 	}
 	if (device.extra_attribute_reg >= 0 && device.streams[device.extra_attribute_stream].data &&
@@ -5667,9 +7017,24 @@ static void immediate_emit(void)
 
 	if (device.immediate_count == device.immediate_capacity)
 	{
-		device.immediate_capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
-		device.immediate_vertices = realloc(device.immediate_vertices,
-			device.immediate_capacity * XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float));
+		unsigned long capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
+		float *grown = realloc(device.immediate_vertices, capacity * XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float));
+
+		if (!grown)
+		{
+			/* (the heap is exhausted: the draw is dropped - its vertices
+			so far and the rest, which no longer gather until the next
+			Begin - and the buffer kept) */
+			static int warned;
+
+			if (!warned++)
+				platform_log("immediate draw: out of memory for %lu vertices, the draw is dropped", capacity);
+			device.immediate_active = FALSE;
+			device.immediate_count = 0;
+			return;
+		}
+		device.immediate_vertices = grown;
+		device.immediate_capacity = capacity;
 	}
 	/* (the registers the draw carries, packed in register order: the draw's
 	attribute order, immediate_end) */
@@ -5740,9 +7105,25 @@ static int immediate_hold_room(unsigned long floats)
 {
 	if (floats <= held_immediate.capacity)
 		return 1;
-	held_immediate.capacity = floats > held_immediate.capacity * 2 ? floats : held_immediate.capacity * 2;
-	held_immediate.vertices = realloc(held_immediate.vertices, held_immediate.capacity * sizeof(float));
-	return held_immediate.vertices != NULL;
+	{
+		unsigned long capacity = floats > held_immediate.capacity * 2 ? floats : held_immediate.capacity * 2;
+		float *grown = realloc(held_immediate.vertices, capacity * sizeof(float));
+
+		if (!grown)
+		{
+			/* (the held vertices and capacity are kept, so the next draw
+			does not take a freed or NULL buffer for room; the caller drops
+			this draw) */
+			static int warned;
+
+			if (!warned++)
+				platform_log("immediate draw: out of memory holding %lu floats, the draw is dropped", floats);
+			return 0;
+		}
+		held_immediate.vertices = grown;
+		held_immediate.capacity = capacity;
+	}
+	return 1;
 }
 
 static void immediate_end(void)
@@ -6130,6 +7511,13 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 
 		halo_frame_timing_recent(&frame_ms, &tick_ms, &render_ms);
 		vgxm_overlay_set(frame_ms > 0.0f ? 1000.0f / frame_ms : 0.0f, tick_ms, render_ms);
+		{
+			/* (frame interpolation's frames go out triple buffered:
+			vita_gxm.c, "the display's buffers") */
+			int halo_interpolation_enabled(void);
+
+			vgxm_display_buffering(halo_interpolation_enabled() ? 3 : 2);
+		}
 		command = command_begin(_command_present);
 		before = vita_host_time_us();
 
@@ -6206,6 +7594,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			vgxm_cache_write_us;
 		extern volatile unsigned long vita_texture_builds, vita_texture_build_bytes, vgxm_compiles, vgxm_shader_loads,
 			vgxm_links, vgxm_compiles_background;
+		extern volatile unsigned long vita_texture_background_builds, vita_texture_background_bytes, vita_texture_stand_ins;
 		static unsigned long long previous_present;
 		static unsigned long hitches_logged;
 		unsigned long long now = vita_host_time_us();
@@ -6213,17 +7602,20 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		if (previous_present && now - previous_present > 100000ull && hitches_logged < 200)
 		{
 			hitches_logged++;
-			platform_log("hitch: frame %lu took %.1f ms; textures decoded %lu (%lu KB) in %.1f ms, shaders compiled %lu in %.1f ms"
+			platform_log("hitch: frame %lu took %.1f ms; textures decoded %lu (%lu KB) in %.1f ms (%lu stand-ins made, %lu (%lu KB)"
+				" decoded in the background swapped in), shaders compiled %lu in %.1f ms"
 				" (loaded %lu in %.1f ms, cache writes %.1f ms, linked %lu in %.1f ms, %lu compiled in the background),"
 				" waited %.1f ms for the worker",
 				device.frame, (now - previous_present) / 1000.0, vita_texture_builds, vita_texture_build_bytes / 1024,
-				vita_texture_build_us / 1000.0, vgxm_compiles, vgxm_compile_us / 1000.0, vgxm_shader_loads,
+				vita_texture_build_us / 1000.0, vita_texture_stand_ins, vita_texture_background_builds,
+				vita_texture_background_bytes / 1024, vgxm_compiles, vgxm_compile_us / 1000.0, vgxm_shader_loads,
 				vgxm_shader_load_us / 1000.0, vgxm_cache_write_us / 1000.0, vgxm_links, vgxm_link_us / 1000.0, vgxm_compiles_background,
 				frame_drain_us / 1000.0);
 		}
 		vita_texture_build_us = 0;
 		vita_texture_builds = 0;
 		vita_texture_build_bytes = 0;
+		vita_texture_stand_ins = vita_texture_background_builds = vita_texture_background_bytes = 0;
 		vgxm_compile_us = 0;
 		vgxm_compiles = 0;
 		vgxm_shader_load_us = vgxm_link_us = vgxm_cache_write_us = 0;
@@ -6328,9 +7720,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			stats.copied_chunk[2] / 1024.0 / stats.presents, stats.copied_chunk[3] / 1024.0 / stats.presents,
 			stats.copied_chunk[4] / 1024.0 / stats.presents, stats.copied_chunk[5] / 1024.0 / stats.presents,
 			stats.copied_vertex_misc / 1024.0 / stats.presents, stats.copied_fragment / 1024.0 / stats.presents);
-		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu kept materials (%lu kept in all), %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
+		platform_log("state blocks per frame: %lu reused, %lu new (%lu new materials, %lu kept materials (%lu by transition, %lu kept in all), %lu new values, %lu compared equal); worker builds %lu (+%lu texture-only)",
 			stats.state_quick / stats.presents, stats.state_new / stats.presents, stats.material_new / stats.presents,
-			stats.material_kept / stats.presents, material_cache_used,
+			stats.material_kept / stats.presents, stats.material_transitions / stats.presents, material_cache_used,
 			stats.values_new / stats.presents,
 			stats.state_equal / stats.presents, stats.worker_builds / stats.presents, stats.worker_texture_builds / stats.presents);
 		memset(&stats, 0, sizeof(stats));

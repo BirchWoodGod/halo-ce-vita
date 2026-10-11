@@ -1,0 +1,15 @@
+# An Oddball server, free-for-all and team games in turn
+# (tools/package_server.py: examples/). Copy it to init.txt in the server's
+# folder, and give it a name of your own. Port 2304: one port per server.
+sv_name "My Oddball Server"
+sv_maxplayers 12
+sv_public 1
+sv_port 2304
+sv_timelimit 15
+sv_minplayers 1
+sv_mapcycle_add chillout oddball
+sv_mapcycle_add prisoner team_oddball
+sv_mapcycle_add hangemhigh oddball
+sv_mapcycle_add beavercreek team_oddball
+sv_mapcycle_add ratrace oddball
+sv_mapcycle_add carousel team_oddball

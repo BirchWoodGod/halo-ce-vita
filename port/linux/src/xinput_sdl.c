@@ -38,6 +38,7 @@ drive the controller.
 
 #include <SDL3/SDL.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -103,6 +104,19 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 
 	*yaw = 0.0f;
 	*pitch = 0.0f;
+#ifdef HALO_VITA
+	/* the Vita has no mouse: its gyroscope aims the same way
+	(port/vita/platform/vita_pad.c) */
+	{
+		extern int vita_pad_gyro_look(short gamepad_index, float *yaw, float *pitch);
+
+		(void)scale;
+		(void)invert;
+		(void)x;
+		(void)y;
+		return vita_pad_gyro_look(gamepad_index, yaw, pitch);
+	}
+#endif
 	if (gamepad_index != 0)
 		return FALSE;
 	if (invert < 0)
@@ -222,10 +236,174 @@ void test_input_hold_action(int hold)
 	test_input_holding_action = hold;
 }
 
+/* the automated tests (network_test.c's debug.network_test_scores): the
+player holds Back, the scoreboard, as the scripted player plays on */
+static int test_input_holding_back;
+
+void test_input_hold_back(int hold)
+{
+	test_input_holding_back = hold;
+}
+
+/* (debug) HALO_TEST_PAD="steps": presses for automated menu tests on Linux
+(no window to type into: the harness), as HALO_PAD_FILE gives the Vita's
+(port/vita/host/vita_input.c): steps "name:hold_ms:pause_ms" separated by
+spaces (hold 150 and pause 1500 by default), pressed one after another
+from when the main menu has been up for a second (test_input_main_menu,
+main.c). Names in the Xbox's terms: a b x y black white lt rt up down left
+right start back ls rs, several at once joined by "+"; "wait" presses
+none. halo.log says each step as it is pressed. */
+static struct
+{
+	int parsed;
+	int count;
+	int index;
+	Uint64 started;
+	struct
+	{
+		char name[24];
+		int buttons;
+		WORD digital;
+		unsigned int hold_ms;
+		unsigned int pause_ms;
+	} steps[96];
+} test_pad;
+static volatile int test_pad_menu_ready;
+/* (the main menu is up: the scripted player leaves the menus to the steps) */
+static volatile int test_pad_at_menu;
+
+/* main.c, every frame: whether the main menu is up */
+void test_input_main_menu(int loaded)
+{
+	static Uint64 since;
+
+	test_pad_at_menu = loaded;
+	if (!loaded)
+	{
+		since = 0;
+		return;
+	}
+	if (!since)
+		since = SDL_GetTicks();
+	if (SDL_GetTicks() - since >= 1000)
+		test_pad_menu_ready = 1;
+}
+
+static void test_pad_parse(void)
+{
+	static const struct
+	{
+		const char *name;
+		int analog;
+		WORD digital;
+	} names[] =
+	{
+		{ "a", XINPUT_GAMEPAD_A, 0 }, { "b", XINPUT_GAMEPAD_B, 0 }, { "x", XINPUT_GAMEPAD_X, 0 },
+		{ "y", XINPUT_GAMEPAD_Y, 0 }, { "black", XINPUT_GAMEPAD_BLACK, 0 }, { "white", XINPUT_GAMEPAD_WHITE, 0 },
+		{ "lt", XINPUT_GAMEPAD_LEFT_TRIGGER, 0 }, { "rt", XINPUT_GAMEPAD_RIGHT_TRIGGER, 0 },
+		{ "up", -1, XINPUT_GAMEPAD_DPAD_UP }, { "down", -1, XINPUT_GAMEPAD_DPAD_DOWN },
+		{ "left", -1, XINPUT_GAMEPAD_DPAD_LEFT }, { "right", -1, XINPUT_GAMEPAD_DPAD_RIGHT },
+		{ "start", -1, XINPUT_GAMEPAD_START }, { "back", -1, XINPUT_GAMEPAD_BACK },
+		{ "ls", -1, XINPUT_GAMEPAD_LEFT_THUMB }, { "rs", -1, XINPUT_GAMEPAD_RIGHT_THUMB },
+		{ "wait", -1, 0 },
+	};
+	const char *setting = getenv("HALO_TEST_PAD");
+	char text[2048];
+	char *token, *token_end;
+
+	test_pad.parsed = 1;
+	if (!setting || !*setting)
+		return;
+	snprintf(text, sizeof(text), "%s", setting);
+	for (token = strtok_r(text, " \t\r\n", &token_end); token && test_pad.count < (int)(sizeof(test_pad.steps) /
+		sizeof(test_pad.steps[0])); token = strtok_r(NULL, " \t\r\n", &token_end))
+	{
+		char *hold = strchr(token, ':');
+		char *pause = hold ? strchr(hold + 1, ':') : NULL;
+		char *key, *key_end;
+		int step = test_pad.count++;
+
+		memset(&test_pad.steps[step], 0, sizeof(test_pad.steps[step]));
+		test_pad.steps[step].hold_ms = 150;
+		test_pad.steps[step].pause_ms = 1500;
+		if (hold)
+		{
+			*hold = 0;
+			test_pad.steps[step].hold_ms = (unsigned int)atoi(hold + 1);
+		}
+		if (pause)
+		{
+			*pause = 0;
+			test_pad.steps[step].pause_ms = (unsigned int)atoi(pause + 1);
+		}
+		snprintf(test_pad.steps[step].name, sizeof(test_pad.steps[step].name), "%s", token);
+		for (key = strtok_r(token, "+", &key_end); key; key = strtok_r(NULL, "+", &key_end))
+		{
+			int index;
+
+			for (index = 0; index < (int)(sizeof(names) / sizeof(names[0])); index++)
+			{
+				if (!strcmp(key, names[index].name))
+				{
+					if (names[index].analog >= 0)
+						test_pad.steps[step].buttons |= 1 << names[index].analog;
+					test_pad.steps[step].digital |= names[index].digital;
+				}
+			}
+		}
+	}
+}
+
+static void test_pad_gamepad(XINPUT_GAMEPAD *pad)
+{
+	Uint64 now;
+
+	if (!test_pad.parsed)
+		test_pad_parse();
+	if (test_pad.index >= test_pad.count || !test_pad_menu_ready)
+		return;
+	now = SDL_GetTicks();
+	if (!test_pad.started)
+	{
+		test_pad.started = now;
+		platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+	}
+	while (test_pad.index < test_pad.count)
+	{
+		Uint64 elapsed = now - test_pad.started;
+		int analog;
+
+		if (elapsed < test_pad.steps[test_pad.index].hold_ms)
+		{
+			for (analog = 0; analog < 8; analog++)
+			{
+				if (test_pad.steps[test_pad.index].buttons & (1 << analog))
+					pad->bAnalogButtons[analog] = 255;
+			}
+			pad->wButtons |= test_pad.steps[test_pad.index].digital;
+			return;
+		}
+		if (elapsed < test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms)
+			return;
+		test_pad.started += test_pad.steps[test_pad.index].hold_ms + test_pad.steps[test_pad.index].pause_ms;
+		test_pad.index++;
+		if (test_pad.index < test_pad.count)
+			platform_log("test pad: %s", test_pad.steps[test_pad.index].name);
+		else
+			platform_log("test pad: done");
+	}
+}
+
 static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	static int checked;
 	static int seed = -1;
+	/* "bot:<seed>:look": it also looks up and down and presses X (action)
+	now and then: on Easy and Normal the campaign's first level asks for a
+	look all around and then for the action button before the player leaves
+	the cryo tube (player_action_test_action), and until a teammate is out a
+	co-op partner only watches (players_coop_room_to_spawn) */
+	static int look;
 	double t;
 
 	if (!checked)
@@ -237,8 +415,15 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 			seed = atoi(setting + 4);
 		else if (!strcmp(setting, "bot"))
 			seed = 0;
+		look = strstr(setting, ":look") != NULL;
 	}
+	if (test_input_holding_back)
+		pad->wButtons |= XINPUT_GAMEPAD_BACK;
 	if (seed < 0)
+		return;
+	/* (HALO_TEST_PAD presses the menus: the scripted player plays only in
+	a level) */
+	if (test_pad_at_menu && test_pad.count > 0)
 		return;
 	if (test_input_holding_action)
 	{
@@ -262,6 +447,12 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	pad->sThumbLY = (SHORT)(sin(t * 0.9) * 32000.0);
 	pad->sThumbLX = (SHORT)(cos(t * 0.6 + seed) * 20000.0);
 	pad->sThumbRX = (SHORT)(sin(t * 0.4) * 14000.0);
+	if (look)
+	{
+		pad->sThumbRY = (SHORT)(sin(t * 0.7 + seed) * 20000.0);
+		if (fmod(t, 4.0) >= 2.0 && fmod(t, 4.0) < 2.2)
+			pad->bAnalogButtons[XINPUT_GAMEPAD_X] = 255;
+	}
 	if (fmod(t, 3.0) < 0.3)
 		pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 255;
 	if (fmod(t, 5.0) < 0.1)
@@ -525,6 +716,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		if (count > 0)
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
 		test_input_gamepad(&state->Gamepad);
+		test_pad_gamepad(&state->Gamepad);
 	}
 	else if (port < count)
 	{

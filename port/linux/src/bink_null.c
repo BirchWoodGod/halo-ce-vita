@@ -41,10 +41,24 @@ void __stdcall BinkSetIOSize(unsigned long io_size)
 	(void)io_size;
 }
 
+/* (debug) HALO_TEST_MOVIE_FAILS_FOR_NOW=1: each open fails as the Vita's
+does when its video player does not start (memory), for now, not for want
+of the file (run_no_movies_test.sh attractretry) */
+static int open_failed_for_now;
+
+int halo_movie_open_failed_for_now(void)
+{
+	return open_failed_for_now;
+}
+
 HBINK __stdcall BinkOpen(const char *name, unsigned long flags)
 {
+	const char *setting = getenv("HALO_TEST_MOVIE_FAILS_FOR_NOW");
+
 	(void)flags;
-	platform_log("Bink video is not supported; skipping \"%s\"", name ? name : "");
+	open_failed_for_now = setting && atoi(setting) != 0;
+	platform_log("Bink video is not supported; skipping \"%s\"%s", name ? name : "",
+		open_failed_for_now ? " (failed for now: HALO_TEST_MOVIE_FAILS_FOR_NOW)" : "");
 	return NULL;
 }
 

@@ -3,20 +3,94 @@ P2P_SIGNAL.C
 
 Internet play's signalling (p2p.c): how a joiner and the host of an invite
 tell each other where they can be reached, through public MQTT brokers
-(network.signalling_brokers; MQTT 3.1.1 over TCP). Every broker is used at
-once, so any one of them working is enough.
+(those in brokers.txt, network.brokers_file; MQTT 5 over TCP, or 3.1.1 with
+a broker that refuses 5). Every broker is used at once, so any one of them
+working is enough (an answer goes back through each broker a request came
+through).
+They also carry the server browser's listings of public games (p2p_lobby.c):
+retained in each host's slot, published at least once (QoS 1, sent again
+until the broker acknowledges them), expiring at the broker after
+LISTING_EXPIRY seconds (MQTT 5), and cleared by the broker if the host's
+connection dies (the will every connection sets: harmless when not hosting).
+The listings, MQTT 5 and the publishing below are OpenCE's
+(https://github.com/OpenCommunityEdition/OpenCE, "Server browser of public
+internet games").
+
+A broker may drop a connection's publishes past about 10 a second without a
+word (EMQX), and a host's answers to a flood of JOINs would reach that: each
+broker's publishes spend from a bucket (PUBLISH_BURST at once, one more each
+PUBLISH_INTERVAL). Answers to proven joiners come first, then the listing
+(kept to publish later), then a joiner's requests and the browser's queries;
+answers to requests not proven yet only while some are left over (the
+joiner asks again).
 
 Everything that passes through them is sealed with a key derived from the
 invite's token, and goes to topics that are hashes of it, so the brokers
 (and anyone watching them) learn nothing and can join nothing:
 
-- the host listens on hceu/1/<HMAC(token, "host" | host)>, where a joiner
-  sends JOIN: its identifier, a nonce, and its addresses;
-- the joiner listens on hceu/1/<HMAC(token, "joiner" | joiner)>, where the
-  host answers ACCEPT: the nonce, a new random key for their tunnel, and
-  its own addresses.
+- the host listens on hceu/3/<HMAC(token, "host" | host)> (a Vita on
+  hcev/3/..., and so on: Vitas play only Vitas, halo_port_limits.h),
+  where a joiner sends JOIN: its public key (its identifier is the key's
+  hash), a nonce, its addresses, and the relays it names (if any: p2p.c);
+- the joiner listens on hceu/3/<HMAC(token, "joiner" | joiner)>, where the
+  host answers ACCEPT: its public key, the joiner's nonce, one of its own,
+  its addresses, its relays (if any), and a tag that only the two of them
+  can make (from their keys);
+- the joiner then repeats its JOIN with the host's nonce and a tag of its
+  own, made the same way, which shows that it holds the key it gave. Only
+  then does the host make a session.
 
-A joiner repeats its JOIN until the tunnel reaches the host.
+Their tunnel's keys come from their X25519 shared secret and the two
+nonces, and never travel: another holder of the invite reads the messages
+but cannot work them out, and cannot answer as the host (whose key must
+have the hash in the invite: 16 bytes, not only the identifier's 6, which
+a key could be made to have). It can send a JOIN in another
+machine's name, but cannot prove it: the host answers it (to that machine)
+and makes no session of it. A session no one could complete would keep that
+machine out while it lived (a session with a machine is not replaced while
+it lives, p2p.c), and a JOIN every so often would keep it out for good.
+
+The host's nonce is a hash of the request with a key of the host's and the
+time (it changes every HOST_NONCE_PERIOD), so the host need not remember
+what it answered: anyone with the invite can ask in a machine's name as
+often as it likes, pushing out whatever the host remembered. What it does
+keep of requests not proven yet (the work of their keys) only saves work.
+It answers them sparingly, as anyone with the invite can send them from as
+many keys as it likes: a request once each ANSWER_INTERVAL through each
+broker, and 20 a second in all (MAXIMUM_UNPROVEN_ANSWERS), each through the
+broker the request came through only (the joiner asks through them all,
+again every JOIN_INTERVAL, so a broker that loses the answers keeps no
+other's out).
+
+A joiner repeats its JOIN until the tunnel reaches the host. The host makes
+one session of a request (a public key and nonce) at most: anyone watching
+the brokers could send the proven JOIN again after the session ended, and
+have the host reach for the joiner's old addresses in its name, keeping it
+out (with the same keys again). It remembers the request at least while its
+host nonce lasts. So a joiner asks with a new nonce when its session with
+the host ends before the tunnel reached it, or when the host has not
+answered it in a while.
+
+Two ways to find an invite without being sent its link, for machines that
+cannot paste one (the Vita) or for strangers:
+
+- A short code (ABCD-EFGH: 40 bits from 32 letters and digits that cannot
+  be mistaken for each other). While it hosts, a machine keeps its invite
+  (its key's hash and the token) on the brokers as a retained message on
+  hcev/3/<HMAC(code token, "code")>, sealed with a key from the code; a
+  machine given the code subscribes there, gets the retained message at
+  once, and joins the invite in it. The code is only as secret as 40 bits:
+  anyone who collects the sealed records and tries every code finds the
+  invites, so a code is a convenience, not a lock (the invite's 128-bit
+  token is). Nothing the code leads to is more than the invite, which still
+  goes through JOIN/ACCEPT.
+- The server browser (p2p_lobby.c): a public game's signed listing, which
+  holds its invite (sealed with a password, if the game has one), but never
+  its code: a code stays the host's to give.
+(The topics start "hceu" on a PC, as the rest do: SIGNAL_PREFIX. Builds
+before the server browser listed a game, unsigned with its code, on
+hcev/3/lobby/<identifier>: they and these do not see each other's public
+games, but codes, invites, system link and ad hoc play are as they were.)
 */
 
 #include "platform.h"
@@ -24,30 +98,144 @@ A joiner repeats its JOIN until the tunnel reaches the host.
 #include "port_config.h"
 #include "p2p_internal.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* the platform layer's socket options are Winsock's (posix.h): a pending
+connect's error */
+#define WINSOCK_SOL_SOCKET 0xFFFF
+#define WINSOCK_SO_ERROR 0x1007
+
 enum
 {
 	MAXIMUM_BROKERS = 4,
-	/* the joiners a host remembers, so a repeated request gets the same
-	key: as many as it takes */
+	/* the joiners a host made sessions for, so a repeated request gets the
+	same session: as many as it takes */
 	MAXIMUM_JOINERS = P2P_MAXIMUM_PEERS + 1,
-	TOPIC_SIZE = 7 + 32 + 1,
+	/* the nonces of an asker's key it keeps the answer times of */
+	ASKER_NONCES = 4,
+	/* the requests not proven yet whose keys' work a host keeps, one a key;
+	only to save work, but as many as a flood of new keys takes seconds to
+	push out (one each UNPROVEN_ANSWER_INTERVAL at most, after the first
+	few: about 11 seconds), so a joiner's proof, which follows its answer at
+	once, finds its own */
+	MAXIMUM_ASKERS = 256,
+	/* the requests a session was made from, which make none again (a
+	host takes at most a few new players a minute: this is hours of them;
+	one is not forgotten while its host nonce lasts: USED_REQUEST_TIME) */
+	MAXIMUM_USED_REQUESTS = 1024,
+	/* (a slot's: hcev/3/lobby/s/ and a key hash in hex) */
+	TOPIC_SIZE = 64,
 	NONCE_SIZE = 8,
+	/* an ACCEPT's or a proven JOIN's tag: the first half of an HMAC-SHA256 */
+	TAG_SIZE = 16,
+	/* a proven JOIN's end: the host's nonce, and the tag */
+	PROOF_SIZE = NONCE_SIZE + TAG_SIZE,
 	BUFFER_SIZE = 4096,
-	MAXIMUM_MESSAGE_SIZE = 256,
+	MAXIMUM_MESSAGE_SIZE = 512,
+	/* a listing's most (p2p_lobby.c's) */
+	MAXIMUM_LISTING_SIZE = P2P_MAXIMUM_LISTING_SIZE,
+	/* the publishes awaiting acknowledgement on a broker */
+	MAXIMUM_IN_FLIGHT = 4,
+	/* a broker's publishes: at most PUBLISH_BURST at once, one more each
+	PUBLISH_INTERVAL milliseconds (EMQX drops a connection's publishes past
+	about 10 a second, without a word) */
+	PUBLISH_BURST = 8,
+	PUBLISH_INTERVAL = 125,
+	/* what is kept back of the bucket for answers to proven joiners and the
+	listing: a request's answer, and a query, need this many left */
+	UNPROVEN_RESERVE = 3,
+	/* seconds a listing lasts at the broker (MQTT 5's Message Expiry
+	Interval): a dead host's goes even from a broker that kept it through a
+	restart */
+	LISTING_EXPIRY = 90,
 
 	/* milliseconds */
 	CONNECT_TIMEOUT = 10000,
+	/* a broker that failed is tried again after this, twice as long each
+	failure after, to MAXIMUM_RETRY_INTERVAL */
 	RETRY_INTERVAL = 15000,
+	MAXIMUM_RETRY_INTERVAL = 120000,
+	/* a publish at least once not acknowledged is sent again */
+	RESEND_INTERVAL = 5000,
 	KEEP_ALIVE_SECONDS = 60,
 	PING_INTERVAL = 30000,
 	SILENCE_TIMEOUT = 90000,
 	JOIN_INTERVAL = 2000,
 	ANSWER_INTERVAL = 1000,
+	/* a joiner the host has not answered in this long asks anew, with a
+	new nonce (a fresh start: the host makes nothing of a request it did
+	not answer, as it makes a session only of a proven one) */
+	UNANSWERED_TIME = 20000,
+	/* a host nonce is taken in the period it is made in and the next */
+	HOST_NONCE_PERIOD = 30000,
+	USED_REQUEST_TIME = 2 * HOST_NONCE_PERIOD,
+	/* a host's work of the keys of requests from keys it has not met (a
+	millisecond or more each, on the thread the tunnels run on): this many
+	at once, and one more each this often */
+	MAXIMUM_KEY_WORK = 32,
+	KEY_WORK_INTERVAL = 50,
+	/* a host's answers to requests not proven yet, which anyone with the
+	invite can send from any number of keys: this many at once, and one more
+	each this often */
+	MAXIMUM_UNPROVEN_ANSWERS = 32,
+	UNPROVEN_ANSWER_INTERVAL = 50,
+	/* the reads of a broker's messages in one pass of the thread, whose
+	tunnels a flood of them would otherwise starve */
+	MAXIMUM_BROKER_READS = 8,
+	/* a hosting machine's code record is sent again this often (a broker
+	that restarted forgets retained messages) */
+	CODE_INTERVAL = 60000,
+	/* while a game is listed or the browser is open: a ping this often,
+	and a link that answers nothing (a ping, a listing) in
+	PING_ANSWER_TIMEOUT is taken for dead (a NAT that dropped its mapping, a
+	Wi-Fi drop) and connected again at once, rather than after
+	SILENCE_TIMEOUT, by when the broker has dropped the listing */
+	LOBBY_PING_INTERVAL = 15000,
+	PING_ANSWER_TIMEOUT = 10000,
+	/* ... and a broker that failed is tried again sooner: after this, twice
+	as long each failure after, to MAXIMUM_LOBBY_RETRY_INTERVAL */
+	LOBBY_RETRY_INTERVAL = 3000,
+	MAXIMUM_LOBBY_RETRY_INTERVAL = 15000,
+	/* the listing is published again on a broker this long after a new
+	connection's first acknowledgement of it: the broker's will of the old
+	connection (its session taken over by the new one) can empty the slot
+	after the new connection's listing */
+	SETTLE_REPUBLISH_TIME = 3000,
+	/* a broker's failure is logged again, the same way, after this; its
+	connection, after this */
+	FAILURE_LOG_INTERVAL = 300000,
+	READY_LOG_INTERVAL = 60000,
 };
+
+/* the topics a broker can be subscribed to at once */
+enum
+{
+	_topic_host,
+	_topic_join,
+	_topic_code,
+	/* the server browser's (p2p_lobby.c): the own slot, queries, all slots */
+	_topic_own_slot,
+	_topic_query,
+	_topic_slots,
+	NUMBER_OF_TOPICS,
+};
+
+/* MQTT 5's properties */
+enum
+{
+	_property_message_expiry = 0x02,
+	_property_server_keep_alive = 0x13,
+	_property_receive_maximum = 0x21,
+	_property_retain_available = 0x25,
+	_property_wildcard_available = 0x28,
+};
+
+/* the prefix of the topics, of the key derivation's label and of the MQTT
+client identifier: Vitas signal on their own (P2P_SIGNAL_PREFIX) */
+#define SIGNAL_PREFIX P2P_SIGNAL_PREFIX
 
 enum
 {
@@ -61,7 +249,13 @@ enum
 {
 	_message_join = 'J',
 	_message_accept = 'A',
-	MESSAGE_VERSION = 1,
+	/* 3: a JOIN proves its key before the host makes a session */
+	MESSAGE_VERSION = 3,
+	/* a code's record: the host's key hash and the invite's token */
+	_message_code = 'C',
+	/* 2: the record holds the key hash (1, of the older invites, held the
+	identifier alone) */
+	RECORD_VERSION = 2,
 };
 
 struct broker
@@ -77,22 +271,113 @@ struct broker
 	unsigned long heard_time;
 	int failures;
 	unsigned short packet_identifier;
-	/* the topics it has been asked for */
-	char host_topic[TOPIC_SIZE];
-	char join_topic[TOPIC_SIZE];
+	/* 5 (MQTT 5), or 4 (3.1.1: the broker refused 5) */
+	int protocol;
+	/* as its CONNACK said (MQTT 5; 3.1.1 brokers have both): without
+	either, it carries only signalling, not listings */
+	int retain_available;
+	int wildcard_available;
+	/* seconds; its own if it said */
+	int keep_alive;
+	int receive_maximum;
+	/* the bucket its publishes spend from */
+	int publish_tokens;
+	unsigned long publish_time;
+	/* the topics it has been asked for (_topic_host ...) */
+	char topics[NUMBER_OF_TOPICS][TOPIC_SIZE];
+	/* the listing's version it was given (signalling.lobby_version); and
+	whether it has yet to have its slot cleared (after a tombstone) */
+	int lobby_version;
+	int lobby_clear_pending;
+	/* a query to send once subscribed to the slots */
+	int query_pending;
+	/* the code's record, to publish when the bucket allows */
+	int code_pending;
+	/* a ping (or a publish at least once) awaiting any answer: when it was
+	sent; 0 if none (PING_ANSWER_TIMEOUT) */
+	unsigned long ping_time;
+	/* the subscription to the slots: its SUBACK's packet identifier, and
+	whether it was acknowledged (browsing on this broker) */
+	unsigned short slots_identifier;
+	int slots_subscribed;
+	/* this connection acknowledged this machine's listing (its PUBACK); a
+	republish due when a new connection's first acknowledgement has settled
+	(settle_time; 0: none), and whether one is still to come */
+	int listing_acknowledged;
+	int settle_wanted;
+	unsigned long settle_time;
+	/* diagnostics (halo.log): why it last failed, what was last logged and
+	when, the failures since not logged; its connections, and when the last
+	was logged */
+	char failure[96];
+	char logged_failure[96];
+	unsigned long failure_logged_time;
+	int failures_not_logged;
+	int connections;
+	int connections_not_logged;
+	unsigned long ready_logged_time;
+	/* the listing's refusals (MQTT 5's PUBACK reasons) not logged */
+	int refusal_logged;
+	unsigned long refusal_logged_time;
+	/* publishes at least once, awaiting PUBACK */
+	struct
+	{
+		int used;
+		unsigned short identifier;
+		unsigned long sent_time;
+		/* (a listing's) signalling.lobby_version when it was sent */
+		int version;
+		/* a listing, which a newer one replaces (not a tombstone or a
+		clearing) */
+		int listing;
+		/* refused (MQTT 5's PUBACK said why): sent again as a new publish
+		(the refusal ended the old one's identifier) */
+		int refused;
+		int size;
+		unsigned char payload[MAXIMUM_LISTING_SIZE];
+	} in_flight[MAXIMUM_IN_FLIGHT];
 	unsigned char input[BUFFER_SIZE];
 	int input_size;
 	unsigned char output[BUFFER_SIZE];
 	int output_size;
 };
 
+/* a request: of a session made (joiners), or not proven yet (askers: one a
+key, with its latest nonce, and no host nonce or secret; and its latest
+nonces answered, and when) */
 struct joiner
 {
 	unsigned char identifier[P2P_IDENTIFIER_SIZE];
+	unsigned char public_key[P2P_KEY_SIZE];
+	/* its and the host's */
 	unsigned char nonce[NONCE_SIZE];
-	unsigned char key[P2P_SHA256_SIZE];
+	unsigned char host_nonce[NONCE_SIZE];
+	/* pair_base's, and their session's secret */
+	unsigned char base[P2P_SHA256_SIZE];
+	unsigned char secret[P2P_SHA256_SIZE];
 	unsigned long answered_time;
+	/* (a joiner's) when it was answered through each broker */
+	unsigned long answered_broker_times[MAXIMUM_BROKERS];
+	/* (an asker's) its latest nonces answered, through which broker, when */
+	unsigned char answered_nonces[ASKER_NONCES][NONCE_SIZE];
+	signed char answered_nonce_brokers[ASKER_NONCES];
+	unsigned long answered_nonce_times[ASKER_NONCES];
 	int used;
+};
+
+/* work allowed: some at once, and one more each interval */
+struct budget
+{
+	int left;
+	/* as of when */
+	unsigned long time;
+};
+
+struct used_request
+{
+	/* the joiner's identifier and nonce */
+	unsigned char request[P2P_IDENTIFIER_SIZE + NONCE_SIZE];
+	unsigned long time;
 };
 
 static struct
@@ -102,6 +387,25 @@ static struct
 	int broker_count;
 	char client_identifier[24];
 
+	/* the server browser (p2p_lobby.c): this machine's slot (its will
+	clears it), whether its game is listed and whether it browses; the
+	listing to publish (none: size 0), its version, and whether it is a
+	tombstone (the slot is cleared after it) */
+	char own_slot[TOPIC_SIZE];
+	int lobby_listed;
+	int lobby_browsing;
+	unsigned char lobby_listing[MAXIMUM_LISTING_SIZE];
+	int lobby_listing_size;
+	int lobby_version;
+	int lobby_closing;
+	/* when signalling started, a broker last became able to carry the
+	browser, and the slots' subscription was last acknowledged (p2p_now; 0:
+	never); when the player last asked for the brokers (p2p_signal_kick) */
+	unsigned long started_time;
+	unsigned long lobby_time;
+	unsigned long browsing_time;
+	unsigned long kick_time;
+
 	/* hosting */
 	int hosting;
 	unsigned char host_token[P2P_TOKEN_SIZE];
@@ -109,25 +413,96 @@ static struct
 	char host_topic[TOPIC_SIZE];
 	struct joiner joiners[MAXIMUM_JOINERS];
 	int next_joiner;
+	struct joiner askers[MAXIMUM_ASKERS];
+	int next_asker;
+	/* the key of the host's nonces (host_nonce_for), for the run */
+	int has_nonce_key;
+	unsigned char nonce_key[P2P_SHA256_SIZE];
+	/* each request a session was made from (kept while hosting stops and
+	starts: an invite lasts the run) */
+	struct used_request used_requests[MAXIMUM_USED_REQUESTS];
+	int used_request_count;
+	int used_request_next;
+	/* the key work it may do now (MAXIMUM_KEY_WORK), and the answers it
+	may give requests not proven yet (MAXIMUM_UNPROVEN_ANSWERS) */
+	struct budget key_work;
+	struct budget unproven_answers;
 
-	/* joining */
+	/* joining: the host's identifier, and the hash of its key (the invite's) */
 	int joining;
 	unsigned char join_host[P2P_IDENTIFIER_SIZE];
+	unsigned char join_host_hash[P2P_KEY_HASH_SIZE];
 	unsigned char join_key[P2P_SHA256_SIZE];
 	unsigned char join_nonce[NONCE_SIZE];
+	/* the host's public key, once it answered, and pair_base's */
+	int join_has_base;
+	unsigned char join_host_public[P2P_KEY_SIZE];
+	unsigned char join_base[P2P_SHA256_SIZE];
 	char join_host_topic[TOPIC_SIZE];
 	char join_topic[TOPIC_SIZE];
 	unsigned long join_sent_time;
+	/* when join_nonce was made, and whether the host answered it (with
+	join_host_nonce, which its proof carries) */
+	unsigned long join_nonce_time;
+	int join_answered;
+	unsigned char join_host_nonce[NONCE_SIZE];
+
+	/* hosting: the code's record, kept on the brokers */
+	int has_code;
+	char code_topic[TOPIC_SIZE];
+	unsigned char code_key[P2P_SHA256_SIZE];
+	unsigned long code_sent_time;
+
+	/* looking up a code (with a host: only its record) */
+	int looking_up;
+	char lookup_topic[TOPIC_SIZE];
+	unsigned char lookup_key[P2P_SHA256_SIZE];
+	int lookup_has_host;
+	unsigned char lookup_host[P2P_IDENTIFIER_SIZE];
 } signalling;
 
 static int elapsed(unsigned long since, unsigned long time)
 {
-	return (long)(p2p_now() - since) >= (long)time;
+	/* (unsigned, as the clock wraps) */
+	return (unsigned int)(p2p_now() - since) >= (unsigned int)time;
+}
+
+/* now, as a time kept where 0 means none (never later than now, which
+elapsed would take for long past) */
+static unsigned long now_stamp(void)
+{
+	unsigned long now = p2p_now();
+
+	return now ? now : (unsigned long)-1;
 }
 
 static unsigned short network_short(unsigned short value)
 {
 	return (unsigned short)(value << 8 | value >> 8);
+}
+
+/* whether some of a budget is left now (maximum at once, one more each
+interval); spend takes one */
+static int budget_left(struct budget *budget, int maximum, int interval, int spend)
+{
+	unsigned long now = p2p_now();
+	unsigned long earned = (now - budget->time) / (unsigned long)interval;
+
+	if (earned >= (unsigned long)maximum || budget->left + (int)earned >= maximum)
+	{
+		budget->left = maximum;
+		budget->time = now;
+	}
+	else if (earned)
+	{
+		budget->left += (int)earned;
+		budget->time += earned * (unsigned long)interval;
+	}
+	if (budget->left <= 0)
+		return 0;
+	if (spend)
+		budget->left--;
+	return 1;
 }
 
 /* ---------- what is derived from a token */
@@ -155,7 +530,7 @@ static void make_topic(const unsigned char *token, const char *label, const unsi
 
 	derive(token, label, identifier, digest);
 	p2p_hex(digest, 16, text);
-	snprintf(topic, TOPIC_SIZE, "hceu/1/%s", text);
+	snprintf(topic, TOPIC_SIZE, SIGNAL_PREFIX "/3/%s", text);
 }
 
 /* ---------- MQTT */
@@ -169,10 +544,105 @@ static void broker_close(struct broker *broker, int failed)
 	broker->state_time = p2p_now();
 	broker->input_size = 0;
 	broker->output_size = 0;
-	broker->host_topic[0] = 0;
-	broker->join_topic[0] = 0;
+	memset(broker->topics, 0, sizeof(broker->topics));
+	memset(broker->in_flight, 0, sizeof(broker->in_flight));
+	/* (the will cleared the slot: the listing again once connected) */
+	broker->lobby_version = 0;
+	broker->lobby_clear_pending = 0;
+	broker->query_pending = 0;
+	broker->code_pending = 0;
+	broker->ping_time = 0;
+	broker->slots_identifier = 0;
+	broker->slots_subscribed = 0;
+	broker->listing_acknowledged = 0;
+	broker->settle_wanted = 0;
+	broker->settle_time = 0;
 	if (failed)
 		broker->failures++;
+}
+
+/* whether the server browser needs the brokers now: a game listed, or the
+browser open */
+static int lobby_active(void)
+{
+	return signalling.lobby_listed || signalling.lobby_browsing;
+}
+
+/* milliseconds before a broker that failed is tried again */
+static unsigned long retry_interval(const struct broker *broker)
+{
+	int failures = broker->failures < 1 ? 1 : broker->failures > 8 ? 8 : broker->failures;
+
+	if (lobby_active())
+	{
+		unsigned long interval = (unsigned long)LOBBY_RETRY_INTERVAL << (failures - 1);
+
+		return interval > MAXIMUM_LOBBY_RETRY_INTERVAL ? MAXIMUM_LOBBY_RETRY_INTERVAL : interval;
+	}
+	return failures >= 4 ? MAXIMUM_RETRY_INTERVAL : (unsigned long)RETRY_INTERVAL << (failures - 1);
+}
+
+/* a socket error, as the platform layer says it (posix_socket_last_error:
+Winsock's numbers), in words */
+static const char *socket_error_text(int error, char *text, int size)
+{
+	switch (error)
+	{
+	case WSAECONNREFUSED: return "refused";
+	case WSAECONNRESET: return "reset";
+	case WSAETIMEDOUT: return "timed out";
+	case WSAEHOSTUNREACH: return "host unreachable";
+	case WSAENETUNREACH: return "network unreachable";
+	}
+	snprintf(text, (size_t)size, "error %d", error);
+	return text;
+}
+
+/* a pending connect's error (SO_ERROR: the system's own number, Linux's or
+the Vita's BSD one), in words */
+static const char *connect_error_text(int error, char *text, int size)
+{
+	switch (error)
+	{
+	case 111: case 61: return "refused";
+	case 110: case 60: return "timed out";
+	case 113: case 65: return "host unreachable";
+	case 101: case 51: return "network unreachable";
+	case 104: case 54: return "reset";
+	}
+	snprintf(text, (size_t)size, "error %d", error);
+	return text;
+}
+
+/* a broker failed, for why: its connection closed, and why logged (the
+same failure again only each FAILURE_LOG_INTERVAL, with how many times it
+happened since) */
+static void broker_failed(struct broker *broker, const char *format, ...) __attribute__((format(printf, 2, 3)));
+static void broker_failed(struct broker *broker, const char *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(broker->failure, sizeof(broker->failure), format, arguments);
+	va_end(arguments);
+	broker_close(broker, 1);
+	if (strcmp(broker->failure, broker->logged_failure) || !broker->failure_logged_time ||
+		elapsed(broker->failure_logged_time, FAILURE_LOG_INTERVAL))
+	{
+		char again[48] = "";
+
+		if (broker->failures_not_logged)
+			snprintf(again, sizeof(again), " (and %d times since it was last said)", broker->failures_not_logged);
+		platform_log("Internet play: broker %s: %s%s; trying again in %lu s", broker->host, broker->failure, again,
+			retry_interval(broker) / 1000);
+		memcpy(broker->logged_failure, broker->failure, sizeof(broker->failure));
+		broker->failure_logged_time = now_stamp();
+		broker->failures_not_logged = 0;
+	}
+	else
+	{
+		broker->failures_not_logged++;
+	}
 }
 
 static void broker_flush(struct broker *broker)
@@ -184,9 +654,10 @@ static void broker_flush(struct broker *broker)
 		if (sent < 0)
 		{
 			int error = posix_socket_last_error();
+			char text[24];
 
 			if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-				broker_close(broker, 1);
+				broker_failed(broker, "the connection broke sending (%s)", socket_error_text(error, text, sizeof(text)));
 			return;
 		}
 		memmove(broker->output, broker->output + sent, (size_t)(broker->output_size - sent));
@@ -194,30 +665,58 @@ static void broker_flush(struct broker *broker)
 	}
 }
 
+static int put_variable(unsigned char *bytes, int value)
+{
+	int size = 0;
+
+	do
+	{
+		unsigned char byte = (unsigned char)(value & 127);
+
+		value >>= 7;
+		bytes[size++] = (unsigned char)(value ? byte | 128 : byte);
+	} while (value);
+	return size;
+}
+
+/* reads a variable byte integer; 0 if it does not fit */
+static int get_variable(const unsigned char *bytes, int size, int *offset, int *value)
+{
+	int shift = 0;
+
+	*value = 0;
+	for (;;)
+	{
+		unsigned char byte;
+
+		if (*offset >= size || shift > 21)
+			return 0;
+		byte = bytes[(*offset)++];
+		*value |= (byte & 127) << shift;
+		shift += 7;
+		if (!(byte & 128))
+			return 1;
+	}
+}
+
 /* queues a packet: its fixed header's first byte, and its body */
 static void broker_send(struct broker *broker, unsigned char type, const unsigned char *body, int size)
 {
 	unsigned char header[5];
-	int header_size = 1;
-	int remaining = size;
+	int header_size;
 
 	if (broker->socket < 0)
 		return;
 	header[0] = type;
-	do
-	{
-		unsigned char byte = (unsigned char)(remaining & 127);
-
-		remaining >>= 7;
-		header[header_size++] = (unsigned char)(remaining ? byte | 128 : byte);
-	} while (remaining);
+	header_size = 1 + put_variable(header + 1, size);
 	if (broker->output_size + header_size + size > BUFFER_SIZE)
 	{
-		broker_close(broker, 1);
+		broker_failed(broker, "it takes nothing in (%d bytes waiting to be sent)", broker->output_size);
 		return;
 	}
 	memcpy(broker->output + broker->output_size, header, (size_t)header_size);
-	memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
+	if (size)
+		memcpy(broker->output + broker->output_size + header_size, body, (size_t)size);
 	broker->output_size += header_size + size;
 	broker->sent_time = p2p_now();
 	broker_flush(broker);
@@ -233,77 +732,317 @@ static int put_string(unsigned char *body, const char *text)
 	return size + 2;
 }
 
-static void broker_topic(struct broker *broker, const char *topic, int subscribe)
+static unsigned short next_packet_identifier(struct broker *broker)
 {
-	unsigned char body[4 + TOPIC_SIZE + 1];
-	int size = 0;
-
 	if (++broker->packet_identifier == 0)
 		broker->packet_identifier = 1;
-	body[size++] = (unsigned char)(broker->packet_identifier >> 8);
-	body[size++] = (unsigned char)broker->packet_identifier;
-	size += put_string(body + size, topic);
-	if (subscribe)
-		body[size++] = 0; /* at most once */
-	broker_send(broker, subscribe ? 0x82 : 0xA2, body, size);
+	return broker->packet_identifier;
 }
 
-static void broker_publish(struct broker *broker, const char *topic, const unsigned char *payload, int payload_size)
+/* whether the broker may publish now, spending from its bucket: reserve is
+how many must be left after (UNPROVEN_RESERVE for what may wait) */
+static int broker_may_publish(struct broker *broker, int reserve)
 {
-	unsigned char body[2 + TOPIC_SIZE + MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
+	unsigned long now = p2p_now();
+	int gained = (int)((now - broker->publish_time) / PUBLISH_INTERVAL);
+
+	if (gained > 0)
+	{
+		broker->publish_tokens = broker->publish_tokens + gained > PUBLISH_BURST ? PUBLISH_BURST :
+			broker->publish_tokens + gained;
+		broker->publish_time += (unsigned long)gained * PUBLISH_INTERVAL;
+		if (broker->publish_tokens == PUBLISH_BURST)
+			broker->publish_time = now;
+	}
+	if (broker->publish_tokens <= reserve)
+		return 0;
+	broker->publish_tokens--;
+	return 1;
+}
+
+/* a SUBSCRIBE or UNSUBSCRIBE; returns its packet identifier */
+static unsigned short broker_topic(struct broker *broker, const char *topic, int subscribe, int no_local)
+{
+	unsigned char body[5 + TOPIC_SIZE + 1];
+	unsigned short identifier = next_packet_identifier(broker);
+	int size = 0;
+
+	body[size++] = (unsigned char)(identifier >> 8);
+	body[size++] = (unsigned char)identifier;
+	/* (MQTT 5: no properties) */
+	if (broker->protocol == 5)
+		body[size++] = 0;
+	size += put_string(body + size, topic);
+	/* at most once; MQTT 5: No Local, not this connection's own publishes */
+	if (subscribe)
+		body[size++] = (unsigned char)(broker->protocol == 5 && no_local ? 0x04 : 0);
+	broker_send(broker, subscribe ? 0x82 : 0xA2, body, size);
+	return identifier;
+}
+
+/* a PUBLISH at most once: signalling's and queries; retained, the code's
+record: the broker keeps it for later subscribers (an empty retained one
+removes what it kept) */
+static void broker_publish(struct broker *broker, const char *topic, const unsigned char *payload, int payload_size,
+	int retain)
+{
+	unsigned char body[3 + TOPIC_SIZE + MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
 	int size = put_string(body, topic);
 
-	memcpy(body + size, payload, (size_t)payload_size);
-	broker_send(broker, 0x30, body, size + payload_size);
+	if (broker->protocol == 5)
+		body[size++] = 0;
+	if (payload_size)
+		memcpy(body + size, payload, (size_t)payload_size);
+	broker_send(broker, retain ? 0x31 : 0x30, body, size + payload_size);
+}
+
+/* a publish at least once to the own slot, retained: a listing (expiring
+at the broker), or an empty one, which clears it; again (duplicate) if the
+first was not acknowledged */
+static void broker_publish_slot(struct broker *broker, unsigned short identifier, const unsigned char *payload,
+	int payload_size, int duplicate)
+{
+	unsigned char body[2 + TOPIC_SIZE + 2 + 8 + MAXIMUM_LISTING_SIZE];
+	int size = put_string(body, signalling.own_slot);
+
+	body[size++] = (unsigned char)(identifier >> 8);
+	body[size++] = (unsigned char)identifier;
+	if (broker->protocol == 5)
+	{
+		if (payload_size)
+		{
+			body[size++] = 5;
+			body[size++] = _property_message_expiry;
+			body[size++] = 0;
+			body[size++] = 0;
+			body[size++] = 0;
+			body[size++] = LISTING_EXPIRY;
+		}
+		else
+		{
+			body[size++] = 0;
+		}
+	}
+	if (payload_size)
+		memcpy(body + size, payload, (size_t)payload_size);
+	/* PUBLISH, QoS 1, retained */
+	broker_send(broker, (unsigned char)(0x30 | (duplicate ? 0x08 : 0) | 0x02 | 0x01), body, size + payload_size);
+	/* (its PUBACK due: a link that answers nothing is dead) */
+	if (!broker->ping_time)
+		broker->ping_time = now_stamp();
+}
+
+/* a listing (or a clearing: size 0) to the own slot, at least once: 0 if
+there is no room for it yet */
+static int broker_publish_listing(struct broker *broker, const unsigned char *payload, int size, int listing)
+{
+	int maximum = broker->receive_maximum < MAXIMUM_IN_FLIGHT ? broker->receive_maximum : MAXIMUM_IN_FLIGHT;
+	int count = 0;
+	int free_index = -1;
+	int index;
+
+	/* (a listing replaces an older one not acknowledged yet) */
+	for (index = 0; index < MAXIMUM_IN_FLIGHT; index++)
+	{
+		if (broker->in_flight[index].used && broker->in_flight[index].listing && listing)
+			broker->in_flight[index].used = 0;
+		if (broker->in_flight[index].used)
+			count++;
+		else if (free_index < 0)
+			free_index = index;
+	}
+	if (free_index < 0 || count >= maximum || !broker_may_publish(broker, 0))
+		return 0;
+	broker->in_flight[free_index].used = 1;
+	broker->in_flight[free_index].identifier = next_packet_identifier(broker);
+	broker->in_flight[free_index].sent_time = p2p_now();
+	broker->in_flight[free_index].listing = listing;
+	broker->in_flight[free_index].version = signalling.lobby_version;
+	broker->in_flight[free_index].refused = 0;
+	broker->in_flight[free_index].size = size;
+	if (size)
+		memcpy(broker->in_flight[free_index].payload, payload, (size_t)size);
+	broker_publish_slot(broker, broker->in_flight[free_index].identifier, payload, size, 0);
+	return 1;
+}
+
+/* a listing's PUBACK: the broker holds it (logged once a connection), or
+refused it (MQTT 5's reason: a quota, a rate; sent again later) */
+static void listing_answered(struct broker *broker, int reason)
+{
+	if (reason < 0x80)
+	{
+		broker->refusal_logged = 0;
+		if (broker->listing_acknowledged)
+			return;
+		broker->listing_acknowledged = 1;
+		/* (published again once settled: a new connection's) */
+		if (broker->settle_wanted)
+		{
+			broker->settle_wanted = 0;
+			broker->settle_time = now_stamp();
+		}
+		if (signalling.lobby_listed && !signalling.lobby_closing)
+		{
+			platform_log("Internet play: broker %s has the listing (acknowledged; retained%s)", broker->host,
+				broker->protocol == 5 ? ", expiring in 90 s unless published again" : "");
+		}
+		return;
+	}
+	if (!broker->refusal_logged || elapsed(broker->refusal_logged_time, FAILURE_LOG_INTERVAL))
+	{
+		platform_log("Internet play: broker %s refused the listing (PUBACK 0x%02x%s); sending it again in %d s",
+			broker->host, reason, reason == 0x97 ? ": quota exceeded" : reason == 0x96 ? ": publishing too fast" :
+			reason == 0x87 ? ": not authorized" : reason == 0x99 ? ": payload format invalid" :
+			reason == 0x90 ? ": topic name invalid" : "", RESEND_INTERVAL / 1000);
+		broker->refusal_logged = 1;
+		broker->refusal_logged_time = now_stamp();
+	}
+}
+
+/* whether the broker carries the server browser: retained messages and
+wildcards */
+static int broker_carries_lobby(const struct broker *broker)
+{
+	return broker->retain_available && broker->wildcard_available;
 }
 
 /* the topics a ready broker should be subscribed to */
 static void broker_sync_topics(struct broker *broker)
 {
-	const char *wanted[2];
-	char *had[2];
+	const char *wanted[NUMBER_OF_TOPICS];
+	int lobby = broker_carries_lobby(broker);
 	int index;
 
 	if (broker->state != _broker_ready)
 		return;
-	wanted[0] = signalling.hosting ? signalling.host_topic : "";
-	wanted[1] = signalling.joining ? signalling.join_topic : "";
-	had[0] = broker->host_topic;
-	had[1] = broker->join_topic;
-	for (index = 0; index < 2; index++)
+	wanted[_topic_host] = signalling.hosting ? signalling.host_topic : "";
+	wanted[_topic_join] = signalling.joining ? signalling.join_topic : "";
+	wanted[_topic_code] = signalling.looking_up ? signalling.lookup_topic : "";
+	wanted[_topic_own_slot] = lobby && signalling.lobby_listed ? signalling.own_slot : "";
+	wanted[_topic_query] = lobby && signalling.lobby_listed ? P2P_LOBBY_QUERY_TOPIC : "";
+	wanted[_topic_slots] = lobby && signalling.lobby_browsing ? P2P_LOBBY_SLOT_PREFIX "+" : "";
+	for (index = 0; index < NUMBER_OF_TOPICS; index++)
 	{
-		if (!strcmp(wanted[index], had[index]))
+		char *had = broker->topics[index];
+
+		if (!strcmp(wanted[index], had))
 			continue;
-		if (had[index][0])
-			broker_topic(broker, had[index], 0);
+		if (had[0])
+			broker_topic(broker, had, 0, 0);
+		if (index == _topic_slots)
+		{
+			broker->slots_subscribed = 0;
+			broker->slots_identifier = 0;
+		}
+		/* (the own slot without No Local: an emptying of it is seen and
+		mended, also one by this machine's own old connection's will, whose
+		client identifier is this one's) */
 		if (wanted[index][0])
-			broker_topic(broker, wanted[index], 1);
-		strcpy(had[index], wanted[index]);
+		{
+			unsigned short identifier = broker_topic(broker, wanted[index], 1, 0);
+
+			if (index == _topic_slots)
+				broker->slots_identifier = identifier;
+			if (!broker->ping_time)
+				broker->ping_time = now_stamp();
+		}
+		/* (once subscribed to the slots, the hosts are asked to publish:
+		retained copies come at once, but may be old) */
+		if (index == _topic_slots && wanted[index][0])
+			broker->query_pending = 1;
+		strcpy(had, wanted[index]);
 	}
 }
 
-static void publish_everywhere(const char *topic, const unsigned char *payload, int size)
+static void publish_everywhere(const char *topic, const unsigned char *payload, int size, int retain)
 {
 	int index;
 
 	for (index = 0; index < signalling.broker_count; index++)
 	{
-		if (signalling.brokers[index].state == _broker_ready)
-			broker_publish(&signalling.brokers[index], topic, payload, size);
+		struct broker *broker = &signalling.brokers[index];
+
+		if (broker->state == _broker_ready && broker_may_publish(broker, 0))
+			broker_publish(broker, topic, payload, size, retain);
+	}
+}
+
+static void publish_code(struct broker *broker);
+
+/* the listing's publishes due on a broker: the listing, or a tombstone and
+then the slot's clearing; acknowledgements not come sent again; and the
+code's record, and a query, when the bucket allows */
+static void broker_update_lobby(struct broker *broker)
+{
+	int index;
+
+	if (broker->state != _broker_ready)
+		return;
+	if (broker->code_pending && signalling.hosting && signalling.has_code)
+		publish_code(broker);
+	if (!broker_carries_lobby(broker))
+		return;
+	for (index = 0; index < MAXIMUM_IN_FLIGHT; index++)
+	{
+		if (broker->in_flight[index].used && elapsed(broker->in_flight[index].sent_time, RESEND_INTERVAL) &&
+			broker_may_publish(broker, 0))
+		{
+			int duplicate = !broker->in_flight[index].refused;
+
+			if (!duplicate)
+				broker->in_flight[index].identifier = next_packet_identifier(broker);
+			broker->in_flight[index].refused = 0;
+			broker->in_flight[index].sent_time = p2p_now();
+			broker_publish_slot(broker, broker->in_flight[index].identifier, broker->in_flight[index].payload,
+				broker->in_flight[index].size, duplicate);
+		}
+	}
+	if (broker->lobby_version != signalling.lobby_version && signalling.lobby_listing_size &&
+		broker_publish_listing(broker, signalling.lobby_listing, signalling.lobby_listing_size,
+		!signalling.lobby_closing))
+	{
+		broker->lobby_version = signalling.lobby_version;
+		broker->lobby_clear_pending = signalling.lobby_closing;
+	}
+	if (broker->lobby_clear_pending && broker->lobby_version == signalling.lobby_version &&
+		broker_publish_listing(broker, NULL, 0, 0))
+	{
+		broker->lobby_clear_pending = 0;
+	}
+	if (broker->query_pending && broker->topics[_topic_slots][0] && broker_may_publish(broker, UNPROVEN_RESERVE))
+	{
+		unsigned char nonce[NONCE_SIZE];
+
+		posix_random_bytes(nonce, sizeof(nonce));
+		broker_publish(broker, P2P_LOBBY_QUERY_TOPIC, nonce, sizeof(nonce), 0);
+		broker->query_pending = 0;
 	}
 }
 
 static void broker_connected(struct broker *broker)
 {
-	unsigned char body[64];
+	unsigned char body[32 + sizeof(signalling.client_identifier) + TOPIC_SIZE];
 	int size = 0;
 
+	if (!broker->protocol)
+		broker->protocol = 5;
 	size += put_string(body, "MQTT");
-	body[size++] = 4; /* 3.1.1 */
-	body[size++] = 0x02; /* a clean session */
+	body[size++] = (unsigned char)broker->protocol;
+	/* a clean session, and a will, retained: an empty message to this
+	machine's slot, which clears its listing if the connection dies (a
+	harmless no-op if it never was) */
+	body[size++] = 0x02 | 0x04 | 0x20;
 	body[size++] = 0;
 	body[size++] = KEEP_ALIVE_SECONDS;
+	if (broker->protocol == 5)
+		body[size++] = 0;
 	size += put_string(body + size, signalling.client_identifier);
+	if (broker->protocol == 5)
+		body[size++] = 0;
+	size += put_string(body + size, signalling.own_slot);
+	body[size++] = 0;
+	body[size++] = 0;
 	broker->state = _broker_awaiting_acknowledgement;
 	broker->state_time = p2p_now();
 	broker_send(broker, 0x10, body, size);
@@ -313,23 +1052,25 @@ static void broker_connect(struct broker *broker)
 {
 	struct sockaddr_in address;
 
-	if (!broker->looked_up || (!broker->address && broker->failures > 0))
+	if (!broker->looked_up || !broker->address || broker->failures >= 2)
 	{
-		/* may wait for DNS; only at the start, or after failing */
+		/* may wait for DNS; only at the start, or after failing (twice: the
+		broker may have moved) */
 		broker->address = p2p_resolve(broker->host);
 		broker->looked_up = 1;
 		if (!broker->address)
 		{
-			if (!broker->failures)
-				platform_log("Internet play: cannot look up the signalling broker %s", broker->host);
-			broker_close(broker, 1);
+			broker_failed(broker, "cannot look up its address (%s)", p2p_resolve_error());
 			return;
 		}
 	}
 	broker->socket = posix_socket(AF_INET, SOCK_STREAM, 0);
 	if (broker->socket < 0)
 	{
-		broker_close(broker, 1);
+		char text[24];
+
+		broker_failed(broker, "cannot open a socket (%s)", socket_error_text(posix_socket_last_error(), text,
+			sizeof(text)));
 		return;
 	}
 	posix_socket_set_nonblocking(broker->socket, 1);
@@ -346,13 +1087,14 @@ static void broker_connect(struct broker *broker)
 	else
 	{
 		int error = posix_socket_last_error();
+		char text[24];
 
 		if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-			broker_close(broker, 1);
+			broker_failed(broker, "cannot connect (%s)", socket_error_text(error, text, sizeof(text)));
 	}
 }
 
-/* ---------- the messages */
+/* ---------- addresses */
 
 static int put_candidates(unsigned char *message)
 {
@@ -365,6 +1107,27 @@ static int put_candidates(unsigned char *message)
 	{
 		memcpy(message + 1 + index * 6, &candidates[index].address, 4);
 		memcpy(message + 1 + index * 6 + 4, &candidates[index].port, 2);
+	}
+	return 1 + count * 6;
+}
+
+/* the relays this machine offers (p2p.c's relays), after the addresses:
+their count and each one's address and port, as the addresses are; nothing
+at all when it has none, so that a JOIN without them is as it was before
+relays (a host of before relays takes it) */
+static int put_relays(unsigned char *message)
+{
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+	int count = p2p_local_relays(relays, P2P_MAXIMUM_RELAYS);
+	int index;
+
+	if (!count)
+		return 0;
+	message[0] = (unsigned char)count;
+	for (index = 0; index < count; index++)
+	{
+		memcpy(message + 1 + index * 6, &relays[index].address, 4);
+		memcpy(message + 1 + index * 6 + 4, &relays[index].port, 2);
 	}
 	return 1 + count * 6;
 }
@@ -390,7 +1153,107 @@ static int get_candidates(const unsigned char *message, int size, struct p2p_can
 	return count;
 }
 
-static void send_join(void)
+/* the relays a message offers, read as the addresses are (at most
+P2P_MAXIMUM_RELAYS): their count, -1 if the block is not one */
+static int get_relays(const unsigned char *message, int size, struct p2p_candidate *relays)
+{
+	if (size < 1 || message[0] > P2P_MAXIMUM_RELAYS)
+		return -1;
+	return get_candidates(message, size, relays);
+}
+
+/* ---------- the keys: what only a joiner and the host can work out */
+
+/* HMAC(their X25519 shared secret, "hceu/2" (a Vita's "hcev/2") | the
+joiner's public key | the host's); other is the one that is not this machine's. 0 if it is unusable */
+static int pair_base(const unsigned char *joiner_public, const unsigned char *host_public,
+	const unsigned char *other, unsigned char *base)
+{
+	unsigned char shared[P2P_KEY_SIZE];
+	unsigned char data[6 + 2 * P2P_KEY_SIZE];
+
+	if (!p2p_shared_secret(other, shared))
+		return 0;
+	memcpy(data, SIGNAL_PREFIX "/2", 6);
+	memcpy(data + 6, joiner_public, P2P_KEY_SIZE);
+	memcpy(data + 6 + P2P_KEY_SIZE, host_public, P2P_KEY_SIZE);
+	p2p_hmac_sha256(shared, P2P_KEY_SIZE, data, sizeof(data), base);
+	return 1;
+}
+
+/* a session's secret, which the tunnel's keys come from (p2p.c) */
+static void session_secret(const unsigned char *base, const unsigned char *nonce, const unsigned char *host_nonce,
+	unsigned char *secret)
+{
+	unsigned char data[7 + 2 * NONCE_SIZE];
+
+	memcpy(data, "session", 7);
+	memcpy(data + 7, nonce, NONCE_SIZE);
+	memcpy(data + 7 + NONCE_SIZE, host_nonce, NONCE_SIZE);
+	p2p_hmac_sha256(base, P2P_SHA256_SIZE, data, sizeof(data), secret);
+}
+
+/* an ACCEPT's tag (label "accept") or a proven JOIN's ("join"), over what
+precedes it */
+static void message_tag(const unsigned char *base, const char *label, const unsigned char *message, int size,
+	unsigned char *tag)
+{
+	unsigned char data[6 + MAXIMUM_MESSAGE_SIZE];
+	unsigned char digest[P2P_SHA256_SIZE];
+	int label_size = (int)strlen(label);
+
+	memcpy(data, label, (size_t)label_size);
+	memcpy(data + label_size, message, (size_t)size);
+	p2p_hmac_sha256(base, P2P_SHA256_SIZE, data, label_size + size, digest);
+	memcpy(tag, digest, TAG_SIZE);
+}
+
+/* whether a message's tag (its last TAG_SIZE bytes) is right */
+static int tag_right(const unsigned char *base, const char *label, const unsigned char *message, int size)
+{
+	unsigned char tag[TAG_SIZE];
+
+	message_tag(base, label, message, size - TAG_SIZE, tag);
+	return p2p_equal(tag, message + size - TAG_SIZE, TAG_SIZE);
+}
+
+/* the host's nonce for a request (a joiner's public key and nonce) in a
+period of HOST_NONCE_PERIOD */
+static void host_nonce_for(const unsigned char *public_key, const unsigned char *nonce, unsigned long period,
+	unsigned char *host_nonce)
+{
+	unsigned char data[4 + P2P_KEY_SIZE + NONCE_SIZE];
+	unsigned char digest[P2P_SHA256_SIZE];
+	int index;
+
+	for (index = 0; index < 4; index++)
+		data[index] = (unsigned char)(period >> (index * 8));
+	memcpy(data + 4, public_key, P2P_KEY_SIZE);
+	memcpy(data + 4 + P2P_KEY_SIZE, nonce, NONCE_SIZE);
+	p2p_hmac_sha256(signalling.nonce_key, P2P_SHA256_SIZE, data, sizeof(data), digest);
+	memcpy(host_nonce, digest, NONCE_SIZE);
+}
+
+/* whether the host answered a request with this nonce lately: in this
+period, or the last */
+static int host_nonce_current(const unsigned char *public_key, const unsigned char *nonce,
+	const unsigned char *host_nonce)
+{
+	unsigned long period = p2p_now() / HOST_NONCE_PERIOD;
+	unsigned char expected[NONCE_SIZE];
+
+	host_nonce_for(public_key, nonce, period, expected);
+	if (p2p_equal(expected, host_nonce, NONCE_SIZE))
+		return 1;
+	/* (the last before the clock wraps, before the first) */
+	host_nonce_for(public_key, nonce, period ? period - 1 : 0xFFFFFFFFUL / HOST_NONCE_PERIOD, expected);
+	return p2p_equal(expected, host_nonce, NONCE_SIZE);
+}
+
+/* ---------- the messages */
+
+/* a JOIN, with this machine's relays or without (form 1 or 0) */
+static void send_join_form(int with_relays)
 {
 	unsigned char message[MAXIMUM_MESSAGE_SIZE];
 	unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
@@ -398,111 +1261,474 @@ static void send_join(void)
 
 	message[size++] = _message_join;
 	message[size++] = MESSAGE_VERSION;
-	memcpy(message + size, p2p_identifier(), P2P_IDENTIFIER_SIZE);
-	size += P2P_IDENTIFIER_SIZE;
+	memcpy(message + size, p2p_public_key(), P2P_KEY_SIZE);
+	size += P2P_KEY_SIZE;
 	memcpy(message + size, signalling.join_nonce, NONCE_SIZE);
 	size += NONCE_SIZE;
 	size += put_candidates(message + size);
+	if (with_relays)
+		size += put_relays(message + size);
+	/* answered: the proof that this machine holds its key, of which the host
+	makes the session */
+	if (signalling.join_answered)
+	{
+		memcpy(message + size, signalling.join_host_nonce, NONCE_SIZE);
+		size += NONCE_SIZE;
+		message_tag(signalling.join_base, "join", message, size, message + size);
+		size += TAG_SIZE;
+	}
 	size = p2p_seal(signalling.join_key, message, size, sealed);
-	publish_everywhere(signalling.join_host_topic, sealed, size);
+	publish_everywhere(signalling.join_host_topic, sealed, size, 0);
+}
+
+/* the JOIN: a request as before relays (a host takes relays only from a
+proof, and a host of before relays takes nothing longer); and its proof,
+once answered, also with this machine's relays if it has any, sent first
+(a host of before relays turns that one down and makes the session of the
+other; a host of now makes it of whichever comes first, and takes the
+relays from the one that has them) */
+static void send_join(void)
+{
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+
+	if (signalling.join_answered && p2p_local_relays(relays, P2P_MAXIMUM_RELAYS))
+		send_join_form(1);
+	send_join_form(0);
 	signalling.join_sent_time = p2p_now();
 }
 
-/* the host: a joiner asked */
-static void join_received(const unsigned char *message, int size)
+/* the request of a key and nonce (NULL: any) in a list */
+static struct joiner *find_joiner(struct joiner *list, int count, const unsigned char *public_key,
+	const unsigned char *nonce)
 {
-	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
+	int index;
+
+	for (index = 0; index < count; index++)
+	{
+		if (list[index].used && !memcmp(list[index].public_key, public_key, P2P_KEY_SIZE) &&
+			(!nonce || !memcmp(list[index].nonce, nonce, NONCE_SIZE)))
+		{
+			return &list[index];
+		}
+	}
+	return NULL;
+}
+
+/* pair_base with a joiner: kept from a request of its, else worked out */
+static int joiner_base(const unsigned char *public_key, unsigned char *base)
+{
+	int index;
+
+	for (index = 0; index < MAXIMUM_JOINERS + MAXIMUM_ASKERS; index++)
+	{
+		struct joiner const *joiner = index < MAXIMUM_JOINERS ? &signalling.joiners[index] :
+			&signalling.askers[index - MAXIMUM_JOINERS];
+
+		if (joiner->used && !memcmp(joiner->public_key, public_key, P2P_KEY_SIZE))
+		{
+			memcpy(base, joiner->base, P2P_SHA256_SIZE);
+			return 1;
+		}
+	}
+	/* (none left: the request is not answered, and asked again) */
+	if (!budget_left(&signalling.key_work, MAXIMUM_KEY_WORK, KEY_WORK_INTERVAL, 1))
+		return 0;
+	return pair_base(public_key, p2p_public_key(), public_key, base);
+}
+
+static int request_used(const unsigned char *request)
+{
+	int index;
+
+	for (index = 0; index < signalling.used_request_count; index++)
+	{
+		if (!memcmp(signalling.used_requests[index].request, request, P2P_IDENTIFIER_SIZE + NONCE_SIZE))
+			return 1;
+	}
+	return 0;
+}
+
+/* the host's answer to a request, through the broker it came through */
+static void send_accept(struct broker *broker, const unsigned char *identifier, const unsigned char *nonce,
+	const unsigned char *host_nonce, const unsigned char *base, int proven)
+{
 	unsigned char answer[MAXIMUM_MESSAGE_SIZE];
 	unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD];
-	const unsigned char *identifier = message + 2;
-	const unsigned char *nonce = identifier + P2P_IDENTIFIER_SIZE;
-	struct joiner *joiner = NULL;
 	char topic[TOPIC_SIZE];
-	int count;
-	int index;
-	int answer_size = 0;
+	int size = 0;
 
-	if (size < 2 + P2P_IDENTIFIER_SIZE + NONCE_SIZE + 1)
+	answer[size++] = _message_accept;
+	answer[size++] = MESSAGE_VERSION;
+	memcpy(answer + size, p2p_public_key(), P2P_KEY_SIZE);
+	size += P2P_KEY_SIZE;
+	memcpy(answer + size, nonce, NONCE_SIZE);
+	size += NONCE_SIZE;
+	memcpy(answer + size, host_nonce, NONCE_SIZE);
+	size += NONCE_SIZE;
+	size += put_candidates(answer + size);
+	/* (a joiner of before relays reads its addresses and the tag, and
+	nothing between) */
+	size += put_relays(answer + size);
+	message_tag(base, "accept", answer, size, answer + size);
+	size += TAG_SIZE;
+	size = p2p_seal(signalling.host_key, answer, size, sealed);
+	make_topic(signalling.host_token, "joiner", identifier, topic);
+	/* (a proven joiner's first: its session is made; others ask again) */
+	if (broker->state == _broker_ready && broker_may_publish(broker, proven ? 0 : UNPROVEN_RESERVE))
+		broker_publish(broker, topic, sealed, size, 0);
+}
+
+/* the host: a joiner asked (through broker); with a proof (the host's
+nonce, and a tag) once the host answered it */
+static void join_received(struct broker *broker, const unsigned char *message, int size)
+{
+	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+	unsigned char identifier[P2P_IDENTIFIER_SIZE];
+	unsigned char request[P2P_IDENTIFIER_SIZE + NONCE_SIZE];
+	unsigned char host_nonce[NONCE_SIZE];
+	unsigned char base[P2P_SHA256_SIZE];
+	unsigned char secret[P2P_SHA256_SIZE];
+	const unsigned char *public_key = message + 2;
+	const unsigned char *nonce = public_key + P2P_KEY_SIZE;
+	int fixed = 2 + P2P_KEY_SIZE + NONCE_SIZE;
+	int broker_index = (int)(broker - signalling.brokers);
+	struct joiner *joiner;
+	struct used_request *used;
+	int proven;
+	int count;
+	int relay_count = 0;
+
+	if (size < fixed + 1)
 		return;
-	count = get_candidates(nonce + NONCE_SIZE, size - (2 + P2P_IDENTIFIER_SIZE + NONCE_SIZE), candidates);
+	count = get_candidates(message + fixed, size - fixed, candidates);
 	if (count < 0)
 		return;
-	for (index = 0; index < MAXIMUM_JOINERS; index++)
+	/* (then the relays, unless a joiner of before relays sent it, or one
+	without any: 1 + 6n bytes, never 0 or PROOF_SIZE, so the two are told
+	apart) */
+	proven = size - fixed - 1 - count * 6;
+	if (proven != 0 && proven != PROOF_SIZE)
 	{
-		if (signalling.joiners[index].used &&
-			!memcmp(signalling.joiners[index].identifier, identifier, P2P_IDENTIFIER_SIZE))
-		{
-			joiner = &signalling.joiners[index];
-			break;
-		}
-	}
-	if (joiner && !memcmp(joiner->nonce, nonce, NONCE_SIZE))
-	{
-		/* the same request again, through another broker or repeated */
-		if (!elapsed(joiner->answered_time, ANSWER_INTERVAL))
+		relay_count = get_relays(message + fixed + 1 + count * 6, proven, relays);
+		if (relay_count < 0)
+			return;
+		proven -= 1 + relay_count * 6;
+		if (proven != 0 && proven != PROOF_SIZE)
 			return;
 	}
-	else
+	p2p_identifier_for(public_key, identifier);
+	joiner = find_joiner(signalling.joiners, MAXIMUM_JOINERS, public_key, nonce);
+	if (joiner)
 	{
-		if (!joiner)
+		/* a request a session was made from, again (through another broker,
+		or repeated until the tunnel reaches the host): that session's
+		answer, while it lasts; never another. The addresses only from a
+		proof (anyone can send the rest) */
+		if (proven && (memcmp(message + size - PROOF_SIZE, joiner->host_nonce, NONCE_SIZE) ||
+			!tag_right(joiner->base, "join", message, size)))
 		{
-			joiner = &signalling.joiners[signalling.next_joiner++ % MAXIMUM_JOINERS];
-			memcpy(joiner->identifier, identifier, P2P_IDENTIFIER_SIZE);
-			joiner->used = 1;
+			return;
 		}
-		memcpy(joiner->nonce, nonce, NONCE_SIZE);
-		posix_random_bytes(joiner->key, sizeof(joiner->key));
+		/* (the relays from a proof that has them: the joiner sends its proof
+		with them and without, the two at once, so before the answers' pace;
+		one without leaves them as they were) */
+		if (proven && relay_count > 0)
+			p2p_peer_relays(identifier, joiner->secret, relays, relay_count);
+		if (!elapsed(joiner->answered_broker_times[broker_index], ANSWER_INTERVAL) ||
+			!p2p_peer_reoffered(identifier, joiner->secret, candidates, proven ? count : 0) ||
+			(!proven && !budget_left(&signalling.unproven_answers, MAXIMUM_UNPROVEN_ANSWERS,
+			UNPROVEN_ANSWER_INTERVAL, 1)))
+		{
+			return;
+		}
+		joiner->answered_time = p2p_now();
+		joiner->answered_broker_times[broker_index] = joiner->answered_time;
+		send_accept(broker, identifier, joiner->nonce, joiner->host_nonce, joiner->base, proven);
+		return;
 	}
-	joiner->answered_time = p2p_now();
-	p2p_peer_offered(identifier, joiner->key, candidates, count, 0);
+	memcpy(request, identifier, P2P_IDENTIFIER_SIZE);
+	memcpy(request + P2P_IDENTIFIER_SIZE, nonce, NONCE_SIZE);
+	if (request_used(request))
+		return;
+	if (!proven)
+	{
+		/* an answer (to the machine whose key it is, which alone can prove
+		the request), and nothing else: the host keeps nothing of it that it
+		needs. A request's once each ANSWER_INTERVAL (a key's with another
+		nonce too: anyone may send its key with theirs, which must not keep
+		its own out), and few in all */
+		struct joiner *asker = find_joiner(signalling.askers, MAXIMUM_ASKERS, public_key, NULL);
+		int slot = 0;
 
-	answer[answer_size++] = _message_accept;
-	answer[answer_size++] = MESSAGE_VERSION;
-	memcpy(answer + answer_size, p2p_identifier(), P2P_IDENTIFIER_SIZE);
-	answer_size += P2P_IDENTIFIER_SIZE;
-	memcpy(answer + answer_size, identifier, P2P_IDENTIFIER_SIZE);
-	answer_size += P2P_IDENTIFIER_SIZE;
-	memcpy(answer + answer_size, nonce, NONCE_SIZE);
-	answer_size += NONCE_SIZE;
-	memcpy(answer + answer_size, joiner->key, P2P_SHA256_SIZE);
-	answer_size += P2P_SHA256_SIZE;
-	answer_size += put_candidates(answer + answer_size);
-	answer_size = p2p_seal(signalling.host_key, answer, answer_size, sealed);
-	make_topic(signalling.host_token, "joiner", identifier, topic);
-	publish_everywhere(topic, sealed, answer_size);
+		if (asker)
+		{
+			int index;
+
+			for (index = 0; index < ASKER_NONCES; index++)
+			{
+				if (!memcmp(asker->answered_nonces[index], nonce, NONCE_SIZE) &&
+					asker->answered_nonce_brokers[index] == broker_index)
+				{
+					slot = index;
+					break;
+				}
+				if ((long)(asker->answered_nonce_times[index] - asker->answered_nonce_times[slot]) < 0)
+					slot = index;
+			}
+			if (index < ASKER_NONCES && !elapsed(asker->answered_nonce_times[index], ANSWER_INTERVAL))
+				return;
+		}
+		/* (checked before the work of the keys, which anyone with the invite
+		can ask for as often as they like) */
+		if (p2p_peer_turned_away(identifier, 0) ||
+			!budget_left(&signalling.unproven_answers, MAXIMUM_UNPROVEN_ANSWERS, UNPROVEN_ANSWER_INTERVAL, 0))
+		{
+			return;
+		}
+		if (!asker)
+		{
+			if (!joiner_base(public_key, base))
+				return;
+			asker = &signalling.askers[signalling.next_asker];
+			signalling.next_asker = (signalling.next_asker + 1) % MAXIMUM_ASKERS;
+			memset(asker, 0, sizeof(*asker));
+			memcpy(asker->identifier, identifier, P2P_IDENTIFIER_SIZE);
+			memcpy(asker->public_key, public_key, P2P_KEY_SIZE);
+			memcpy(asker->base, base, P2P_SHA256_SIZE);
+			asker->used = 1;
+		}
+		budget_left(&signalling.unproven_answers, MAXIMUM_UNPROVEN_ANSWERS, UNPROVEN_ANSWER_INTERVAL, 1);
+		memcpy(asker->nonce, nonce, NONCE_SIZE);
+		asker->answered_time = p2p_now();
+		memcpy(asker->answered_nonces[slot], nonce, NONCE_SIZE);
+		asker->answered_nonce_brokers[slot] = (signed char)broker_index;
+		asker->answered_nonce_times[slot] = asker->answered_time;
+		host_nonce_for(public_key, nonce, p2p_now() / HOST_NONCE_PERIOD, host_nonce);
+		send_accept(broker, identifier, nonce, host_nonce, asker->base, 0);
+		return;
+	}
+	/* proven: with a nonce the host answered the request with lately, and a
+	tag only the key's holder can make. A new session (p2p.c turns it away
+	while another with that machine lives) */
+	memcpy(host_nonce, message + size - PROOF_SIZE, NONCE_SIZE);
+	if (!host_nonce_current(public_key, nonce, host_nonce) || p2p_peer_turned_away(identifier, 0) ||
+		!joiner_base(public_key, base) || !tag_right(base, "join", message, size))
+	{
+		return;
+	}
+	/* (a request is remembered while its proof lasts, at least: a copy of it
+	would make the session again, with the same keys) */
+	used = &signalling.used_requests[signalling.used_request_next];
+	if (signalling.used_request_count == MAXIMUM_USED_REQUESTS && !elapsed(used->time, USED_REQUEST_TIME))
+		return;
+	session_secret(base, nonce, host_nonce, secret);
+	if (!p2p_peer_offered(identifier, secret, candidates, count, 0))
+		return;
+	p2p_peer_relays(identifier, secret, relays, relay_count);
+	memcpy(used->request, request, sizeof(request));
+	used->time = p2p_now();
+	signalling.used_request_next = (signalling.used_request_next + 1) % MAXIMUM_USED_REQUESTS;
+	if (signalling.used_request_count < MAXIMUM_USED_REQUESTS)
+		signalling.used_request_count++;
+	joiner = &signalling.joiners[signalling.next_joiner];
+	signalling.next_joiner = (signalling.next_joiner + 1) % MAXIMUM_JOINERS;
+	memcpy(joiner->identifier, identifier, P2P_IDENTIFIER_SIZE);
+	memcpy(joiner->public_key, public_key, P2P_KEY_SIZE);
+	memcpy(joiner->nonce, nonce, NONCE_SIZE);
+	memcpy(joiner->host_nonce, host_nonce, NONCE_SIZE);
+	memcpy(joiner->base, base, P2P_SHA256_SIZE);
+	memcpy(joiner->secret, secret, P2P_SHA256_SIZE);
+	joiner->answered_time = p2p_now();
+	memset(joiner->answered_broker_times, 0, sizeof(joiner->answered_broker_times));
+	joiner->answered_broker_times[broker_index] = joiner->answered_time;
+	joiner->used = 1;
+	send_accept(broker, identifier, nonce, host_nonce, base, 1);
 }
 
 /* the joiner: the host answered */
 static void accept_received(const unsigned char *message, int size)
 {
 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
-	const unsigned char *host = message + 2;
-	const unsigned char *joiner = host + P2P_IDENTIFIER_SIZE;
-	const unsigned char *nonce = joiner + P2P_IDENTIFIER_SIZE;
-	const unsigned char *key = nonce + NONCE_SIZE;
-	int fixed = 2 + 2 * P2P_IDENTIFIER_SIZE + NONCE_SIZE + P2P_SHA256_SIZE;
+	struct p2p_candidate relays[P2P_MAXIMUM_RELAYS];
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	unsigned char secret[P2P_SHA256_SIZE];
+	const unsigned char *host_public = message + 2;
+	const unsigned char *nonce = host_public + P2P_KEY_SIZE;
+	const unsigned char *host_nonce = nonce + NONCE_SIZE;
+	int fixed = 2 + P2P_KEY_SIZE + 2 * NONCE_SIZE;
 	int count;
+	int relay_count = 0;
+	int rest;
 
-	if (size < fixed + 1 || memcmp(host, signalling.join_host, P2P_IDENTIFIER_SIZE) ||
-		memcmp(joiner, p2p_identifier(), P2P_IDENTIFIER_SIZE) || memcmp(nonce, signalling.join_nonce, NONCE_SIZE))
+	if (size < fixed + 1 + TAG_SIZE || memcmp(nonce, signalling.join_nonce, NONCE_SIZE))
 		return;
-	count = get_candidates(message + fixed, size - fixed, candidates);
-	if (count >= 0)
-		p2p_peer_offered(host, key, candidates, count, 1);
+	/* the first answer to the request holds: the proof carries its host
+	nonce (the host's changes every HOST_NONCE_PERIOD) */
+	if (signalling.join_answered && (memcmp(host_public, signalling.join_host_public, P2P_KEY_SIZE) ||
+		memcmp(host_nonce, signalling.join_host_nonce, NONCE_SIZE)))
+	{
+		return;
+	}
+	/* the invite's host: its key has the hash in the invite */
+	p2p_key_hash(host_public, hash);
+	if (memcmp(hash, signalling.join_host_hash, P2P_KEY_HASH_SIZE))
+		return;
+	if (!signalling.join_has_base || memcmp(signalling.join_host_public, host_public, P2P_KEY_SIZE))
+	{
+		if (!pair_base(p2p_public_key(), host_public, host_public, signalling.join_base))
+			return;
+		memcpy(signalling.join_host_public, host_public, P2P_KEY_SIZE);
+		signalling.join_has_base = 1;
+	}
+	/* and the answer is its */
+	if (!tag_right(signalling.join_base, "accept", message, size))
+		return;
+	count = get_candidates(message + fixed, size - TAG_SIZE - fixed, candidates);
+	if (count < 0)
+		return;
+	/* (the host's relays, if it has any: a host of before relays sends
+	none) */
+	rest = size - TAG_SIZE - fixed - 1 - count * 6;
+	if (rest > 0)
+	{
+		relay_count = get_relays(message + fixed + 1 + count * 6, rest, relays);
+		if (relay_count < 0)
+			return;
+	}
+	session_secret(signalling.join_base, nonce, host_nonce, secret);
+	if (!p2p_peer_offered(signalling.join_host, secret, candidates, count, 1))
+		return;
+	p2p_peer_relays(signalling.join_host, secret, relays, relay_count);
+	if (signalling.join_answered)
+		return;
+	memcpy(signalling.join_host_nonce, host_nonce, NONCE_SIZE);
+	signalling.join_answered = 1;
+	/* the proof, at once */
+	send_join();
 }
 
-static void publish_received(const char *topic, const unsigned char *payload, int size)
+/* ---------- codes and lobbies */
+
+/* what a code's topic and key derive from, as a token does: a hash of the
+code's eight characters */
+static void code_token(const char *code, unsigned char *token)
+{
+	char text[16 + P2P_CODE_LENGTH];
+	unsigned char digest[P2P_SHA256_SIZE];
+
+	memcpy(text, "halo code ", 10);
+	memcpy(text + 10, code, P2P_CODE_LENGTH);
+	p2p_sha256(text, 10 + P2P_CODE_LENGTH, digest);
+	memcpy(token, digest, P2P_TOKEN_SIZE);
+}
+
+/* the code's record (the host's key hash and the invite's token), sealed
+with the code's key, retained on one broker or all (broker NULL) */
+static void publish_code(struct broker *broker)
+{
+	unsigned char message[2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
+	unsigned char sealed[sizeof(message) + P2P_SEAL_OVERHEAD];
+	int size = 0;
+	int index;
+
+	message[size++] = _message_code;
+	message[size++] = RECORD_VERSION;
+	p2p_key_hash(p2p_public_key(), message + size);
+	size += P2P_KEY_HASH_SIZE;
+	memcpy(message + size, signalling.host_token, P2P_TOKEN_SIZE);
+	size += P2P_TOKEN_SIZE;
+	size = p2p_seal(signalling.code_key, message, size, sealed);
+	/* (each broker as its bucket allows: one that has none left now
+	publishes it in a coming pass, broker_update_lobby) */
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *each = &signalling.brokers[index];
+
+		if ((broker && each != broker) || each->state != _broker_ready)
+			continue;
+		each->code_pending = !broker_may_publish(each, 0);
+		if (!each->code_pending)
+			broker_publish(each, signalling.code_topic, sealed, size, 1);
+	}
+	signalling.code_sent_time = p2p_now();
+}
+
+/* empties a retained topic everywhere (whatever the buckets: it is rare,
+and must not be lost) */
+static void clear_retained(const char *topic)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		if (signalling.brokers[index].state == _broker_ready)
+			broker_publish(&signalling.brokers[index], topic, NULL, 0, 1);
+	}
+}
+
+static void sync_all_topics(void);
+
+/* a code looked up: its record names the invite */
+static void code_received(const unsigned char *message, int size)
+{
+	char text[16 + 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE) + 1];
+
+	if (size < 2 + P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE)
+		return;
+	/* (a lobby entry's code: anyone can publish a record of their own for a
+	code the lobby shows, and only the host the entry is listed under, whose
+	key's hash the record holds, is the entry's) */
+	if (signalling.lookup_has_host)
+	{
+		unsigned char host[P2P_IDENTIFIER_SIZE];
+
+		p2p_identifier_from_hash(message + 2, host);
+		if (memcmp(host, signalling.lookup_host, P2P_IDENTIFIER_SIZE))
+		{
+			static unsigned long logged_time;
+
+			if (!logged_time || elapsed(logged_time, 10000))
+			{
+				platform_log("Internet play: a record of the code names another host than the public game "
+					"listed with it; it is not joined");
+				logged_time = now_stamp();
+			}
+			return;
+		}
+	}
+	signalling.looking_up = 0;
+	memcpy(text, "halo://join/", 12);
+	p2p_hex(message + 2, P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE, text + 12);
+	sync_all_topics();
+	p2p_code_found(text);
+}
+
+static void publish_received(struct broker *broker, const char *topic, const unsigned char *payload, int size,
+	int retained)
 {
 	unsigned char message[MAXIMUM_MESSAGE_SIZE];
 	int message_size;
 
 	if (size > MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD)
 		return;
+	/* the server browser's: a slot (p2p_lobby.c checks the rest), a query */
+	if (!strncmp(topic, P2P_LOBBY_SLOT_PREFIX, sizeof(P2P_LOBBY_SLOT_PREFIX) - 1))
+	{
+		if (size <= MAXIMUM_LISTING_SIZE)
+			p2p_lobby_slot_heard(topic + sizeof(P2P_LOBBY_SLOT_PREFIX) - 1, payload, size, retained);
+		return;
+	}
+	if (!strcmp(topic, P2P_LOBBY_QUERY_TOPIC))
+	{
+		p2p_lobby_query_heard();
+		return;
+	}
 	if (signalling.hosting && !strcmp(topic, signalling.host_topic))
 	{
 		message_size = p2p_open(signalling.host_key, payload, size, message);
 		if (message_size >= 2 && message[0] == _message_join && message[1] == MESSAGE_VERSION)
-			join_received(message, message_size);
+			join_received(broker, message, message_size);
 	}
 	else if (signalling.joining && !strcmp(topic, signalling.join_topic))
 	{
@@ -510,6 +1736,149 @@ static void publish_received(const char *topic, const unsigned char *payload, in
 		if (message_size >= 2 && message[0] == _message_accept && message[1] == MESSAGE_VERSION)
 			accept_received(message, message_size);
 	}
+	else if (signalling.looking_up && !strcmp(topic, signalling.lookup_topic))
+	{
+		message_size = size ? p2p_open(signalling.lookup_key, payload, size, message) : -1;
+		if (message_size >= 2 && message[0] == _message_code && message[1] == RECORD_VERSION)
+			code_received(message, message_size);
+	}
+}
+
+/* a CONNACK: 0 if the connection is closed (refused, or to try 3.1.1) */
+static int broker_acknowledged(struct broker *broker, const unsigned char *body, int size)
+{
+	int code = body[1];
+	int offset = 2;
+	int properties = 0;
+
+	broker->retain_available = 1;
+	broker->wildcard_available = 1;
+	broker->keep_alive = KEEP_ALIVE_SECONDS;
+	broker->receive_maximum = MAXIMUM_IN_FLIGHT;
+	/* a broker that has not MQTT 5 answers 0x84 (5's unsupported protocol
+	version), or 3.1.1's 1 (unacceptable protocol version) */
+	if (broker->protocol == 5 && (code == 0x84 || (size == 2 && code == 1)))
+	{
+		platform_log("Internet play: the signalling broker %s has not MQTT 5; using 3.1.1", broker->host);
+		broker->protocol = 4;
+		broker_close(broker, 0);
+		/* (again at once) */
+		broker->state_time = p2p_now() - MAXIMUM_RETRY_INTERVAL;
+		return 0;
+	}
+	if (code != 0)
+	{
+		broker_failed(broker, "refused the connection (CONNACK 0x%02x%s)", code, code == 0x87 || code == 5 ?
+			": not authorized" : code == 0x97 ? ": quota exceeded" : code == 0x9F ? ": connecting too often" :
+			code == 0x89 || code == 3 ? ": busy" : code == 0x9C || code == 0x9D ? ": use another server" : "");
+		return 0;
+	}
+	if (broker->protocol == 5 && get_variable(body, size, &offset, &properties))
+	{
+		int end = offset + properties > size ? size : offset + properties;
+
+		while (offset < end)
+		{
+			int property = body[offset++];
+
+			switch (property)
+			{
+			/* a byte */
+			case 0x01: case 0x17: case 0x19: case 0x24: case 0x25: case 0x28: case 0x29: case 0x2A:
+				if (offset < end)
+				{
+					if (property == _property_retain_available)
+						broker->retain_available = body[offset];
+					else if (property == _property_wildcard_available)
+						broker->wildcard_available = body[offset];
+				}
+				offset += 1;
+				break;
+			/* two */
+			case 0x13: case 0x21: case 0x22: case 0x23:
+				if (offset + 2 <= end)
+				{
+					int value = body[offset] << 8 | body[offset + 1];
+
+					if (property == _property_server_keep_alive && value > 0)
+						broker->keep_alive = value;
+					else if (property == _property_receive_maximum && value > 0)
+						broker->receive_maximum = value;
+				}
+				offset += 2;
+				break;
+			/* four */
+			case 0x02: case 0x11: case 0x18: case 0x27:
+				offset += 4;
+				break;
+			/* a variable byte integer */
+			case 0x0B:
+			{
+				int value;
+
+				if (!get_variable(body, end, &offset, &value))
+					offset = end;
+				break;
+			}
+			/* a string or binary data: a length, then that */
+			case 0x03: case 0x08: case 0x09: case 0x12: case 0x15: case 0x16: case 0x1A: case 0x1C: case 0x1F:
+				offset += offset + 2 <= end ? 2 + (body[offset] << 8 | body[offset + 1]) : 2;
+				break;
+			/* a pair of strings */
+			case 0x26:
+			{
+				int pair;
+
+				for (pair = 0; pair < 2; pair++)
+					offset += offset + 2 <= end ? 2 + (body[offset] << 8 | body[offset + 1]) : 2;
+				break;
+			}
+			default:
+				/* (unknown: the rest can't be read) */
+				offset = end;
+				break;
+			}
+		}
+	}
+	broker->state = _broker_ready;
+	broker->failures = 0;
+	broker->publish_tokens = PUBLISH_BURST;
+	broker->publish_time = p2p_now();
+	broker->connections++;
+	if (broker_carries_lobby(broker))
+		signalling.lobby_time = now_stamp();
+	/* (a listed game's listing, published once connected, again once its
+	acknowledgement has settled) */
+	broker->settle_wanted = signalling.lobby_listed;
+	if (!broker->ready_logged_time || elapsed(broker->ready_logged_time, READY_LOG_INTERVAL))
+	{
+		const unsigned char *bytes = (const unsigned char *)&broker->address;
+		char again[64] = "";
+
+		if (broker->connections_not_logged)
+			snprintf(again, sizeof(again), " (connected %d times since it was last said)",
+				broker->connections_not_logged + 1);
+		platform_log("Internet play: broker %s ready (MQTT %s at %u.%u.%u.%u:%u; %s)%s", broker->host,
+			broker->protocol == 5 ? "5" : "3.1.1", bytes[0], bytes[1], bytes[2], bytes[3],
+			network_short(broker->port), broker_carries_lobby(broker) ? "carries the public games" :
+			!broker->retain_available ? "no retained messages: signalling only, no public games" :
+			"no wildcard subscriptions: signalling only, no public games", again);
+		broker->ready_logged_time = now_stamp();
+		broker->connections_not_logged = 0;
+	}
+	else
+	{
+		broker->connections_not_logged++;
+	}
+	broker_sync_topics(broker);
+	/* a joiner's first request need not wait for the next repeat */
+	if (signalling.joining)
+		send_join();
+	/* a host's code record, on a broker that may never have had it (or
+	forgot it); the listing follows (broker_update_lobby) */
+	if (signalling.hosting && signalling.has_code)
+		publish_code(broker);
+	return 1;
 }
 
 /* the packets that arrived whole */
@@ -536,14 +1905,14 @@ static void broker_parse(struct broker *broker)
 				break;
 			if (shift > 21)
 			{
-				broker_close(broker, 1);
+				broker_failed(broker, "sent a malformed packet");
 				return;
 			}
 		}
 		total = header_size + remaining;
 		if (total > BUFFER_SIZE)
 		{
-			broker_close(broker, 1);
+			broker_failed(broker, "sent a packet too large (%d bytes)", total);
 			return;
 		}
 		if (total > broker->input_size)
@@ -551,65 +1920,149 @@ static void broker_parse(struct broker *broker)
 		type = broker->input[0];
 		if ((type & 0xF0) == 0x20 && remaining >= 2)
 		{
-			/* CONNACK */
-			if (broker->input[header_size + 1] != 0)
+			if (broker->state != _broker_awaiting_acknowledgement)
 			{
-				platform_log("Internet play: the signalling broker %s refused the connection", broker->host);
-				broker_close(broker, 1);
+				/* (a second CONNACK is a broken broker's) */
+				broker_failed(broker, "sent a second CONNACK");
 				return;
 			}
-			broker->state = _broker_ready;
-			broker->failures = 0;
-			broker_sync_topics(broker);
-			/* a joiner's first request need not wait for the next repeat */
-			if (signalling.joining)
-				send_join();
+			if (!broker_acknowledged(broker, broker->input + header_size, remaining))
+				return;
 		}
 		else if ((type & 0xF0) == 0x30 && remaining >= 2)
 		{
 			/* PUBLISH */
 			const unsigned char *body = broker->input + header_size;
 			int topic_size = body[0] << 8 | body[1];
-			int offset = 2 + topic_size + (((type >> 1) & 3) ? 2 : 0);
+			int quality = (type >> 1) & 3;
+			int offset = 2 + topic_size;
+			int properties = 0;
+			int good = 1;
 
-			if (topic_size < TOPIC_SIZE && offset <= remaining)
+			if (quality)
+			{
+				/* (subscriptions ask for at most once; acknowledged all the
+				same) */
+				if (offset + 2 <= remaining && quality == 1)
+					broker_send(broker, 0x40, body + offset, 2);
+				offset += 2;
+			}
+			if (broker->protocol == 5 && offset <= remaining)
+			{
+				good = get_variable(body, remaining, &offset, &properties) && properties <= remaining - offset;
+				offset += properties;
+			}
+			if (good && topic_size < TOPIC_SIZE && offset <= remaining && broker->socket >= 0)
 			{
 				char topic[TOPIC_SIZE];
 
 				memcpy(topic, body + 2, (size_t)topic_size);
 				topic[topic_size] = 0;
-				publish_received(topic, body + offset, remaining - offset);
+				/* (a topic with a zero in it is no topic of ours) */
+				if ((int)strlen(topic) == topic_size)
+					publish_received(broker, topic, body + offset, remaining - offset, type & 1);
 			}
 		}
-		memmove(broker->input, broker->input + total, (size_t)(broker->input_size - total));
-		broker->input_size -= total;
+		else if ((type & 0xF0) == 0x40 && remaining >= 2)
+		{
+			/* PUBACK: MQTT 5's reason, if any, of 0x80 or more is a refusal
+			(a quota, a rate): sent again later */
+			const unsigned char *body = broker->input + header_size;
+			unsigned short identifier = (unsigned short)(body[0] << 8 | body[1]);
+			int reason = remaining >= 3 ? body[2] : 0;
+			int refused = reason >= 0x80;
+			int index;
+
+			for (index = 0; index < MAXIMUM_IN_FLIGHT; index++)
+			{
+				if (broker->in_flight[index].used && broker->in_flight[index].identifier == identifier)
+				{
+					broker->in_flight[index].used = refused;
+					broker->in_flight[index].refused = refused;
+					if (broker->in_flight[index].listing)
+						listing_answered(broker, reason);
+				}
+			}
+		}
+		else if ((type & 0xF0) == 0x90 && remaining >= 3)
+		{
+			/* SUBACK: the slots' subscription taken (0 to 2) or refused (MQTT
+			5: 0x80 and above; 3.1.1: 0x80) */
+			const unsigned char *body = broker->input + header_size;
+			unsigned short identifier = (unsigned short)(body[0] << 8 | body[1]);
+			int offset = 2, properties = 0;
+
+			if (broker->protocol == 5 && (!get_variable(body, remaining, &offset, &properties) ||
+				properties > remaining - offset))
+			{
+				offset = remaining;
+			}
+			else if (broker->protocol == 5)
+				offset += properties;
+			if (identifier && identifier == broker->slots_identifier && offset < remaining)
+			{
+				broker->slots_identifier = 0;
+				if (body[offset] < 0x80)
+				{
+					broker->slots_subscribed = 1;
+					signalling.browsing_time = now_stamp();
+				}
+				else
+				{
+					platform_log("Internet play: broker %s refused the subscription to the public games (0x%02x): "
+						"they are not seen through it", broker->host, body[offset]);
+				}
+			}
+		}
+		else if ((type & 0xF0) == 0xE0)
+		{
+			/* DISCONNECT (MQTT 5): the broker's, and why */
+			int reason = remaining >= 1 ? broker->input[header_size] : 0;
+
+			broker_failed(broker, "disconnected this machine (reason 0x%02x%s)", reason, reason == 0x8E ?
+				": session taken over" : reason == 0x8D ? ": keep alive timeout" : reason == 0x97 ? ": quota exceeded" :
+				reason == 0x96 ? ": publishing too fast" : reason == 0x93 ? ": too many publishes awaiting" :
+				reason == 0x8B ? ": the broker is shutting down" : reason == 0x89 ? ": busy" : reason == 0x9C ||
+				reason == 0x9D ? ": use another server" : reason == 0x87 ? ": not authorized" : "");
+			return;
+		}
+		/* (what it sent in answer may have closed it, emptying input) */
 		if (broker->socket < 0)
 			return;
+		memmove(broker->input, broker->input + total, (size_t)(broker->input_size - total));
+		broker->input_size -= total;
 	}
 }
 
 static void broker_readable(struct broker *broker)
 {
-	for (;;)
+	int reads;
+
+	/* (the rest in the next pass) */
+	for (reads = 0; reads < MAXIMUM_BROKER_READS; reads++)
 	{
 		int size = posix_socket_recv(broker->socket, broker->input + broker->input_size,
 			BUFFER_SIZE - broker->input_size, 0);
 
 		if (size == 0)
 		{
-			broker_close(broker, 1);
+			broker_failed(broker, broker->state == _broker_ready ? "closed the connection" :
+				"closed the connection before it was ready");
 			return;
 		}
 		if (size < 0)
 		{
 			int error = posix_socket_last_error();
+			char text[24];
 
 			if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-				broker_close(broker, 1);
+				broker_failed(broker, "the connection broke (%s)", socket_error_text(error, text, sizeof(text)));
 			return;
 		}
 		broker->input_size += size;
 		broker->heard_time = p2p_now();
+		/* (anything heard answers a ping) */
+		broker->ping_time = 0;
 		broker_parse(broker);
 		if (broker->socket < 0 || broker->input_size == BUFFER_SIZE)
 			return;
@@ -618,8 +2071,67 @@ static void broker_readable(struct broker *broker)
 
 /* ---------- p2p.c's side */
 
+/* the brokers if network.brokers_file cannot be read (the Vita's
+port/vita/app0/brokers.txt's) */
+#define DEFAULT_BROKERS "broker.emqx.io:1883,broker.hivemq.com:1883,test.mosquitto.org:1883"
+
+int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size)
+{
+	const char *name = config_string(file_setting);
+	const char *colon = strchr(name, ':');
+	char path[1024];
+	char *file;
+	size_t file_size = 0, index, length = 0;
+	int comment = 0;
+
+	snprintf(text, size, "%s", config_string(override_setting));
+	if (text[0])
+		return 1;
+	/* (a full path: "/...", "C:...", "app0:...") */
+	if (name[0] == '/' || name[0] == '\\' || (colon && !memchr(name, '/', (size_t)(colon - name))))
+		snprintf(path, sizeof(path), "%s", name);
+	else
+	{
+		config_folder(path, sizeof(path));
+		snprintf(path + strlen(path), sizeof(path) - strlen(path), "%s", name);
+	}
+	file = config_file_read(path, &file_size);
+	if (!file)
+		return 0;
+	for (index = 0; index < file_size && length + 1 < size; index++)
+	{
+		char character = file[index];
+
+		if (character == '\n' || character == '\r')
+			comment = 0;
+		else if (character == '#')
+			comment = 1;
+		if (!comment)
+			text[length++] = character == '\n' || character == '\r' || character == '\t' ? ',' : character;
+	}
+	text[length] = 0;
+	free(file);
+	return 1;
+}
+
+/* the brokers: network.signalling_brokers if set (the tests'), else those in
+network.brokers_file (beside config.toml, unless a full path: on the Vita,
+app0:brokers.txt, port/vita/app0/brokers.txt in its package), one on each
+line, "#" starting a comment, into text: host:port entries separated by
+commas (OpenCE's "Brokers in brokers.txt") */
+static void brokers_list(char *text, size_t size)
+{
+	if (!p2p_list_setting("network.signalling_brokers", "network.brokers_file", text, size))
+	{
+		platform_log("Internet play: the brokers' file %s cannot be read (network.brokers_file); using the usual ones",
+			config_string("network.brokers_file"));
+		snprintf(text, size, "%s", DEFAULT_BROKERS);
+	}
+}
+
 void p2p_signal_start(void)
 {
+	char list[1024];
 	const char *text;
 	unsigned char random[8];
 	char hex[17];
@@ -627,10 +2139,18 @@ void p2p_signal_start(void)
 	if (signalling.started)
 		return;
 	signalling.started = 1;
+	signalling.started_time = now_stamp();
 	posix_random_bytes(random, sizeof(random));
 	p2p_hex(random, sizeof(random), hex);
-	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), "hceu-%s", hex);
-	text = config_string("network.signalling_brokers");
+	snprintf(signalling.client_identifier, sizeof(signalling.client_identifier), SIGNAL_PREFIX "-%s", hex);
+	{
+		unsigned char hash[P2P_KEY_HASH_SIZE];
+
+		p2p_key_hash(p2p_public_key(), hash);
+		p2p_lobby_slot_topic(hash, signalling.own_slot, sizeof(signalling.own_slot));
+	}
+	brokers_list(list, sizeof(list));
+	text = list;
 	while (*text && signalling.broker_count < MAXIMUM_BROKERS)
 	{
 		const char *end = text + strcspn(text, ",");
@@ -655,6 +2175,9 @@ void p2p_signal_start(void)
 				broker->port = network_short((unsigned short)atoi(colon + 1));
 				*colon = 0;
 			}
+			/* (its address kept for when looking it up fails: one of this
+			machine's own settings) */
+			p2p_resolver_cache_allow(broker->host);
 			/* connect at once */
 			broker->state_time = p2p_now() - RETRY_INTERVAL;
 			signalling.broker_count++;
@@ -662,7 +2185,9 @@ void p2p_signal_start(void)
 		text = *end ? end + 1 : end;
 	}
 	if (!signalling.broker_count)
-		platform_log("Internet play: no signalling brokers (network.signalling_brokers), so invites cannot work");
+		platform_log("Internet play: no signalling brokers (network.brokers_file), so invites cannot work");
+	else if (text[strspn(text, ", ")])
+		platform_log("Internet play: only the first %d signalling brokers are used", MAXIMUM_BROKERS);
 }
 
 void p2p_signal_select_sets(int *read, int *read_count, int *write, int *write_count, int maximum_count)
@@ -702,23 +2227,33 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 	for (index = 0; index < signalling.broker_count; index++)
 	{
 		struct broker *broker = &signalling.brokers[index];
-		int retry = RETRY_INTERVAL * (broker->failures < 4 ? broker->failures + 1 : 4);
+		unsigned long ping_interval;
 
 		switch (broker->state)
 		{
 		case _broker_idle:
-			if (elapsed(broker->state_time, (unsigned long)retry))
+			if (elapsed(broker->state_time, retry_interval(broker)))
 				broker_connect(broker);
 			break;
 		case _broker_connecting:
 			if (list_holds(write, write_count, broker->socket))
 				broker_connected(broker);
 			else if (elapsed(broker->state_time, CONNECT_TIMEOUT))
-				broker_close(broker, 1);
+			{
+				/* (why, if the system knows: a refusal, an unreachable host) */
+				int error = 0, length = sizeof(error);
+				char text[24];
+
+				if (posix_socket_getsockopt(broker->socket, WINSOCK_SOL_SOCKET, WINSOCK_SO_ERROR, &error, &length) == 0 && error)
+					broker_failed(broker, "cannot connect (%s)", connect_error_text(error, text, sizeof(text)));
+				else
+					broker_failed(broker, "no answer connecting in %d s (blocked, or the broker is down)",
+						CONNECT_TIMEOUT / 1000);
+			}
 			break;
 		case _broker_awaiting_acknowledgement:
 			if (elapsed(broker->state_time, CONNECT_TIMEOUT))
-				broker_close(broker, 1);
+				broker_failed(broker, "connected, but no answer to CONNECT in %d s", CONNECT_TIMEOUT / 1000);
 			break;
 		}
 		if (broker->socket < 0 || broker->state == _broker_connecting)
@@ -729,16 +2264,48 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 			broker_readable(broker);
 		if (broker->state != _broker_ready)
 			continue;
-		if (elapsed(broker->heard_time, SILENCE_TIMEOUT))
+		if (elapsed(broker->heard_time, (unsigned long)broker->keep_alive * 1500 > SILENCE_TIMEOUT ?
+			(unsigned long)broker->keep_alive * 1500 : SILENCE_TIMEOUT))
 		{
-			broker_close(broker, 1);
+			broker_failed(broker, "silent for %d s", SILENCE_TIMEOUT / 1000);
 			continue;
 		}
-		if (elapsed(broker->sent_time, PING_INTERVAL))
+		/* (a link that answers nothing, while the browser needs it: dead) */
+		if (lobby_active() && broker->ping_time && elapsed(broker->ping_time, PING_ANSWER_TIMEOUT))
+		{
+			broker_failed(broker, "no answer in %d s (the link dropped)", PING_ANSWER_TIMEOUT / 1000);
+			continue;
+		}
+		ping_interval = (unsigned long)broker->keep_alive * 500 < PING_INTERVAL ?
+			(unsigned long)broker->keep_alive * 500 : PING_INTERVAL;
+		if (lobby_active() && ping_interval > LOBBY_PING_INTERVAL)
+			ping_interval = LOBBY_PING_INTERVAL;
+		if (elapsed(broker->sent_time, ping_interval))
+		{
 			broker_send(broker, 0xC0, NULL, 0);
+			if (!broker->ping_time)
+				broker->ping_time = now_stamp();
+		}
+		/* (a new connection's listing published again, once its slot has
+		settled: the old connection's will may have emptied it since) */
+		if (broker->settle_time && elapsed(broker->settle_time, SETTLE_REPUBLISH_TIME))
+		{
+			broker->settle_time = 0;
+			if (signalling.lobby_listed && !signalling.lobby_closing)
+				broker->lobby_version = 0;
+		}
+		broker_update_lobby(broker);
+	}
+	if (signalling.joining && !signalling.join_answered && elapsed(signalling.join_nonce_time, UNANSWERED_TIME))
+	{
+		posix_random_bytes(signalling.join_nonce, NONCE_SIZE);
+		signalling.join_nonce_time = p2p_now();
+		send_join();
 	}
 	if (signalling.joining && elapsed(signalling.join_sent_time, JOIN_INTERVAL))
 		send_join();
+	if (signalling.hosting && signalling.has_code && elapsed(signalling.code_sent_time, CODE_INTERVAL))
+		publish_code(NULL);
 }
 
 int p2p_signal_connected(void)
@@ -761,12 +2328,106 @@ static void sync_all_topics(void)
 		broker_sync_topics(&signalling.brokers[index]);
 }
 
-void p2p_signal_host(const unsigned char *token)
+void p2p_signal_kick(void)
 {
+	int index;
+
+	if (!signalling.started || (signalling.kick_time && !elapsed(signalling.kick_time, P2P_SIGNAL_KICK_INTERVAL)))
+		return;
+	signalling.kick_time = now_stamp();
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *broker = &signalling.brokers[index];
+
+		/* (one waiting after failing tries at its next pass; a name that
+		failed is looked up again) */
+		if (broker->state == _broker_idle && broker->failures)
+		{
+			broker->state_time = p2p_now() - MAXIMUM_RETRY_INTERVAL;
+			if (!broker->address)
+				broker->looked_up = 0;
+		}
+	}
+}
+
+void p2p_signal_counts(struct p2p_signal_counts *counts)
+{
+	int index;
+
+	memset(counts, 0, sizeof(*counts));
+	counts->brokers = signalling.broker_count;
+	counts->started_time = signalling.started ? signalling.started_time : 0;
+	counts->lobby_time = signalling.lobby_time;
+	counts->browsing_time = signalling.browsing_time;
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		const struct broker *broker = &signalling.brokers[index];
+		int ready = broker->state == _broker_ready;
+
+		counts->tried += broker->connections || broker->failures;
+		counts->ready += ready;
+		counts->lobby += ready && broker_carries_lobby(broker);
+		counts->browsing += ready && broker->slots_subscribed;
+		counts->listing += ready && broker->listing_acknowledged;
+	}
+}
+
+void p2p_signal_brokers_text(char *text, int size, int what)
+{
+	int index, length = 0;
+
+	if (size <= 0)
+		return;
+	text[0] = 0;
+	for (index = 0; index < signalling.broker_count && length < size; index++)
+	{
+		const struct broker *broker = &signalling.brokers[index];
+		const char *state;
+		char why[112];
+
+		if (broker->state == _broker_ready)
+		{
+			state = !broker_carries_lobby(broker) && what ? "signalling only" :
+				what == 1 ? (broker->slots_subscribed ? "browsing" : "subscribing") :
+				what == 2 ? (broker->listing_acknowledged ? "has it" : "not acknowledged yet") : "ready";
+		}
+		else if (broker->state != _broker_idle)
+			state = broker->connections || broker->failures ? "connecting again" : "connecting";
+		else if (broker->failure[0])
+		{
+			snprintf(why, sizeof(why), "%s", broker->failure);
+			state = why;
+		}
+		else
+			state = "not tried yet";
+		length += snprintf(text + length, (size_t)(size - length), "%s%s: %s", index ? ", " : "", broker->host, state);
+	}
+}
+
+void p2p_signal_host(const unsigned char *token, const char *code)
+{
+	if (!signalling.has_nonce_key)
+	{
+		posix_random_bytes(signalling.nonce_key, P2P_SHA256_SIZE);
+		signalling.has_nonce_key = 1;
+	}
 	memcpy(signalling.host_token, token, P2P_TOKEN_SIZE);
 	derive(token, "seal", NULL, signalling.host_key);
 	make_topic(token, "host", p2p_identifier(), signalling.host_topic);
 	signalling.hosting = 1;
+	signalling.has_code = code && strlen(code) == P2P_CODE_SIZE - 1;
+	if (signalling.has_code)
+	{
+		unsigned char token_of_code[P2P_TOKEN_SIZE];
+		char characters[P2P_CODE_LENGTH];
+
+		memcpy(characters, code, 4);
+		memcpy(characters + 4, code + 5, 4);
+		code_token(characters, token_of_code);
+		make_topic(token_of_code, "code", NULL, signalling.code_topic);
+		derive(token_of_code, "seal", NULL, signalling.code_key);
+		publish_code(NULL);
+	}
 	sync_all_topics();
 }
 
@@ -774,16 +2435,44 @@ void p2p_signal_stop_hosting(void)
 {
 	signalling.hosting = 0;
 	memset(signalling.joiners, 0, sizeof(signalling.joiners));
+	memset(signalling.askers, 0, sizeof(signalling.askers));
+	if (signalling.has_code)
+		clear_retained(signalling.code_topic);
+	signalling.has_code = 0;
 	sync_all_topics();
 }
 
-void p2p_signal_join(const unsigned char *host_identifier, const unsigned char *token)
+void p2p_signal_lookup_code(const char *code, const unsigned char *host)
 {
-	memcpy(signalling.join_host, host_identifier, P2P_IDENTIFIER_SIZE);
+	unsigned char token[P2P_TOKEN_SIZE];
+
+	signalling.lookup_has_host = host != NULL;
+	if (host)
+		memcpy(signalling.lookup_host, host, P2P_IDENTIFIER_SIZE);
+	code_token(code, token);
+	make_topic(token, "code", NULL, signalling.lookup_topic);
+	derive(token, "seal", NULL, signalling.lookup_key);
+	signalling.looking_up = 1;
+	sync_all_topics();
+}
+
+void p2p_signal_stop_lookup(void)
+{
+	signalling.looking_up = 0;
+	sync_all_topics();
+}
+
+void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token)
+{
+	memcpy(signalling.join_host_hash, host_hash, P2P_KEY_HASH_SIZE);
+	p2p_identifier_from_hash(host_hash, signalling.join_host);
 	derive(token, "seal", NULL, signalling.join_key);
-	make_topic(token, "host", host_identifier, signalling.join_host_topic);
+	make_topic(token, "host", signalling.join_host, signalling.join_host_topic);
 	make_topic(token, "joiner", p2p_identifier(), signalling.join_topic);
+	/* (new each time: the host makes one session of a request) */
 	posix_random_bytes(signalling.join_nonce, NONCE_SIZE);
+	signalling.join_nonce_time = p2p_now();
+	signalling.join_answered = 0;
 	signalling.joining = 1;
 	sync_all_topics();
 	send_join();
@@ -793,4 +2482,63 @@ void p2p_signal_stop_joining(void)
 {
 	signalling.joining = 0;
 	sync_all_topics();
+}
+
+void p2p_signal_lobby_topics(int listed, int browsing)
+{
+	signalling.lobby_listed = listed;
+	signalling.lobby_browsing = browsing;
+	sync_all_topics();
+}
+
+void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing)
+{
+	int index;
+
+	if (size > MAXIMUM_LISTING_SIZE)
+		return;
+	memcpy(signalling.lobby_listing, listing, (size_t)size);
+	signalling.lobby_listing_size = size;
+	signalling.lobby_closing = closing;
+	signalling.lobby_version++;
+	/* (at once where the bucket allows; the rest in the coming passes) */
+	for (index = 0; index < signalling.broker_count; index++)
+		broker_update_lobby(&signalling.brokers[index]);
+}
+
+void p2p_signal_lobby_query(void)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		if (signalling.brokers[index].topics[_topic_slots][0])
+			signalling.brokers[index].query_pending = 1;
+		broker_update_lobby(&signalling.brokers[index]);
+	}
+}
+
+void p2p_signal_lobby_quit(void)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *broker = &signalling.brokers[index];
+		static const unsigned char disconnect[2] = { 0, 0 };
+
+		if (broker->state != _broker_ready)
+			continue;
+		/* (unless sent already: the tombstone and the clearing) */
+		if (broker_carries_lobby(broker) && signalling.lobby_listing_size &&
+			(broker->lobby_version != signalling.lobby_version || broker->lobby_clear_pending))
+		{
+			broker_publish_slot(broker, next_packet_identifier(broker), signalling.lobby_listing,
+				signalling.lobby_listing_size, 0);
+			broker_publish_slot(broker, next_packet_identifier(broker), NULL, 0, 0);
+		}
+		/* DISCONNECT (MQTT 5: a normal one, its reason and no properties) */
+		broker_send(broker, 0xE0, disconnect, broker->protocol == 5 ? 2 : 0);
+		broker_flush(broker);
+	}
 }

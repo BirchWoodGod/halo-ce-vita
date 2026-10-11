@@ -20,11 +20,84 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#ifdef HALO_VITA
+#include "vita_host.h"
+#endif
+#include "load_profile.h"
+
+/* ---------- the file calls' time, and the memory card
+
+Every call here is timed for the frame-hitch line (load_profile.c): the
+game thread's apart from the others', the slowest of each by name. A frame
+that waited for a file - an open behind a map copy's write, a save, a
+directory read - says so on the Vita, where the memory card serves one
+request at a time.
+
+(debug) HALO_IO_THROTTLE_KBPS=<n>: the harness's disk made like the Vita's
+memory card - each read and write as long as it takes at n KB/s (the card:
+~10000-13000 to read, less to write), and one at a time, every thread's
+behind the one in progress, as the card's are; an open, a look at a file's
+attributes or a directory entry 0.5 ms (HALO_IO_THROTTLE_OP_US). So the
+harness shows what waits behind a map's copy or reads - the sound cache's
+loads, the frame's file calls. */
+
+static long io_throttle_kbps = -1, io_throttle_op_us;
+static pthread_mutex_t io_card_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void io_throttle_setup(void)
+{
+	if (io_throttle_kbps < 0)
+	{
+		const char *operation = getenv("HALO_IO_THROTTLE_OP_US");
+
+		io_throttle_op_us = operation ? atol(operation) : 500;
+		io_throttle_kbps = getenv("HALO_IO_THROTTLE_KBPS") ? atol(getenv("HALO_IO_THROTTLE_KBPS")) : 0;
+	}
+}
+
+/* the card taken for a request of `bytes` (0: an open, attributes, a
+directory entry), held for as long as the card would take */
+static void io_card_request(unsigned long long bytes)
+{
+	unsigned long long us;
+
+	io_throttle_setup();
+	if (io_throttle_kbps <= 0)
+		return;
+	if (bytes)
+		us = 1 + bytes * 1000000ull / ((unsigned long long)io_throttle_kbps * 1024ull);
+	else
+		us = (unsigned long long)io_throttle_op_us;
+	pthread_mutex_lock(&io_card_lock);
+	if (us)
+	{
+		struct timespec duration;
+
+		duration.tv_sec = (time_t)(us / 1000000ull);
+		duration.tv_nsec = (long)(us % 1000000ull) * 1000L;
+		while (nanosleep(&duration, &duration) != 0 && errno == EINTR)
+			;
+	}
+	pthread_mutex_unlock(&io_card_lock);
+}
+
+static unsigned long long file_call_started(void)
+{
+	return halo_load_profile_now();
+}
+
+static void file_call_done(unsigned long long started, const char *call, const char *path, unsigned long long bytes)
+{
+	if (started)
+		halo_load_profile_file_call(started, call, path, bytes);
+}
 
 /* ---------- paths */
 
@@ -235,7 +308,10 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		while (*cursor && *cursor != '\\' && *cursor != '/' && component_length + 1 < sizeof(component))
 			component[component_length++] = *cursor++;
 		component[component_length] = '\0';
-		if (!component_length || !strcmp(component, "."))
+		/* . and .. (and Windows' spellings of them, with trailing dots and
+		spaces) are skipped: FATX names are never only dots, and .. would
+		leave the root */
+		if (!component_length || strspn(component, ". ") == component_length)
 			continue;
 		if (!strcmp(component, ".."))
 		{
@@ -278,8 +354,10 @@ struct platform_file
 static void file_destroy(struct platform_handle *handle)
 {
 	struct platform_file *file = handle->data;
+	unsigned long long started = file_call_started();
 
 	close(file->descriptor);
+	file_call_done(started, "close", file->path, 0);
 	free(file);
 }
 
@@ -290,7 +368,7 @@ static struct platform_file *file_from_handle(HANDLE handle)
 	return record ? record->data : NULL;
 }
 
-HANDLE WINAPI CreateFileA(LPCSTR file_name, DWORD desired_access, DWORD share_mode,
+static HANDLE create_file(LPCSTR file_name, DWORD desired_access, DWORD share_mode,
 	LPSECURITY_ATTRIBUTES security_attributes, DWORD creation_disposition,
 	DWORD flags_and_attributes, HANDLE template_file)
 {
@@ -318,6 +396,7 @@ HANDLE WINAPI CreateFileA(LPCSTR file_name, DWORD desired_access, DWORD share_mo
 	}
 
 	platform_translate_path(file_name, path, sizeof(path));
+	io_card_request(0);
 	existed = posix_stat(path, &information) == 0;
 
 	if ((desired_access & GENERIC_READ) && (desired_access & GENERIC_WRITE))
@@ -383,6 +462,45 @@ HANDLE WINAPI CreateFileA(LPCSTR file_name, DWORD desired_access, DWORD share_mo
 	return handle;
 }
 
+/* (port) a file HANDLE for a descriptor already open on a host path (not an
+Xbox one): the dedicated server's shared map cache (shared_map_cache.c).
+The handle owns the descriptor (CloseHandle closes it); on failure the
+descriptor is closed and INVALID_HANDLE_VALUE returned */
+HANDLE platform_file_handle(int descriptor, const char *path)
+{
+	struct platform_file *file = calloc(1, sizeof(*file));
+	struct platform_handle *handle = file ? platform_handle_new(_platform_handle_file, file, file_destroy) : NULL;
+
+	if (!handle)
+	{
+		close(descriptor);
+		free(file);
+		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return INVALID_HANDLE_VALUE;
+	}
+	file->descriptor = descriptor;
+	snprintf(file->path, sizeof(file->path), "%s", path);
+	return handle;
+}
+
+HANDLE WINAPI CreateFileA(LPCSTR file_name, DWORD desired_access, DWORD share_mode,
+	LPSECURITY_ATTRIBUTES security_attributes, DWORD creation_disposition,
+	DWORD flags_and_attributes, HANDLE template_file)
+{
+	unsigned long long started = file_call_started();
+	HANDLE handle = create_file(file_name, desired_access, share_mode, security_attributes, creation_disposition,
+		flags_and_attributes, template_file);
+
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "open", file_name, 0);
+		SetLastError(error);
+	}
+	return handle;
+}
+
 #define READ_BOUNCE_SIZE 0x40000UL
 
 static ssize_t read_some(struct platform_file *file, void *buffer, size_t count, BOOL positioned,
@@ -393,7 +511,26 @@ static ssize_t read_some(struct platform_file *file, void *buffer, size_t count,
 		read(file->descriptor, buffer, count);
 }
 
+static BOOL read_at_timed(struct platform_file *file, LPVOID buffer, DWORD count, LPDWORD bytes_read,
+	BOOL positioned, unsigned long long offset);
+
 static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDWORD bytes_read,
+	BOOL positioned, unsigned long long offset)
+{
+	unsigned long long started = file_call_started();
+	BOOL result = read_at_timed(file, buffer, count, bytes_read, positioned, offset);
+
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "read", file->path, count);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL read_at_timed(struct platform_file *file, LPVOID buffer, DWORD count, LPDWORD bytes_read,
 	BOOL positioned, unsigned long long offset)
 {
 	DWORD total = 0;
@@ -402,6 +539,8 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 	it are made again - the Vita sees no other sign of the write) */
 	if (buffer && count)
 		memory_watch_prepare_write(buffer, count);
+	/* (the old shader caches' clean-up waits while the game reads) */
+	vita_host_file_read_note();
 #endif
 	/* The renderer write-protects guest memory it caches (memory_watch.c),
 	and the kernel fails a read() into a protected page instead of
@@ -450,6 +589,7 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 		total += (DWORD)result;
 	}
 	free(staging);
+	io_card_request(total);
 #ifdef HALO_VITA
 	/* (and marked again now the data is there: a texture made from the
 	buffer while the read was in flight is made again) */
@@ -461,16 +601,49 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 	return TRUE;
 }
 
+/* a write's piece: the Vita's memory card serves one request at a time, so
+a map copy's 4 MB write (cache_files_decompress_windows.c) held every other
+file call - the frame's opens, the cache file thread's texture and sound
+reads the frame waited for - for as long as the card took to write it,
+hundreds of milliseconds; in pieces of 128 KB (the copy reads its map in
+blocks of that size too), another thread's call waits
+for one piece at most (the writer yields between pieces). (debug)
+HALO_IO_WRITE_PIECE_KB: another size, 0 for the whole write at once */
+#define WRITE_PIECE_SIZE 0x20000UL
+
+static size_t write_piece_size(void)
+{
+	static long piece = -1;
+
+	if (piece < 0)
+	{
+		const char *setting = getenv("HALO_IO_WRITE_PIECE_KB");
+
+		piece = setting ? atol(setting) * 1024L : (long)WRITE_PIECE_SIZE;
+		if (piece < 0)
+			piece = (long)WRITE_PIECE_SIZE;
+	}
+	return piece ? (size_t)piece : (size_t)-1;
+}
+
 static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LPDWORD bytes_written,
 	BOOL positioned, unsigned long long offset)
 {
 	DWORD total = 0;
+	unsigned long long started = file_call_started();
 
 	while (total < count)
 	{
-		ssize_t result = positioned ?
-			pwrite(file->descriptor, (const char *)buffer + total, count - total, (off_t)(offset + total)) :
-			write(file->descriptor, (const char *)buffer + total, count - total);
+		size_t wanted = count - total;
+		ssize_t result;
+
+		if (wanted > write_piece_size())
+			wanted = write_piece_size();
+		if (total)
+			sched_yield();
+		result = positioned ?
+			pwrite(file->descriptor, (const char *)buffer + total, wanted, (off_t)(offset + total)) :
+			write(file->descriptor, (const char *)buffer + total, wanted);
 
 		if (result < 0)
 		{
@@ -479,12 +652,21 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 			platform_set_last_error_from_errno(errno);
 			if (bytes_written)
 				*bytes_written = total;
+			file_call_done(started, "write", file->path, total);
 			return FALSE;
 		}
+		io_card_request((unsigned long long)result);
 		total += (DWORD)result;
 	}
 	if (bytes_written)
 		*bytes_written = total;
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "write", file->path, total);
+		SetLastError(error);
+	}
 	return TRUE;
 }
 
@@ -560,17 +742,6 @@ BOOL WINAPI ReadFileEx(HANDLE handle, LPVOID buffer, DWORD count, LPOVERLAPPED o
 		return FALSE;
 	}
 	result = read_at(file, buffer, count, &done, TRUE, overlapped_offset(overlapped));
-	{
-		/* (debug) HALO_IO_THROTTLE_KBPS=<n>: the map's reads take as long as
-		at n KB/s (the Vita's memory card: ~10000-13000), to see in the
-		harness what waits behind them - the sound cache's loads */
-		static long throttle = -1;
-
-		if (throttle < 0)
-			throttle = getenv("HALO_IO_THROTTLE_KBPS") ? atol(getenv("HALO_IO_THROTTLE_KBPS")) : 0;
-		if (throttle > 0 && done)
-			Sleep((DWORD)(1 + (unsigned long long)done * 1000ull / ((unsigned long long)throttle * 1024ull)));
-	}
 	overlapped->Internal = result ? ERROR_SUCCESS : GetLastError();
 	if (result && done == 0 && count > 0)
 		overlapped->Internal = ERROR_HANDLE_EOF;
@@ -653,15 +824,27 @@ BOOL WINAPI SetEndOfFile(HANDLE handle)
 	struct platform_file *file = file_from_handle(handle);
 	unsigned long low, high;
 
+	unsigned long long started;
+	BOOL result = TRUE;
+
 	if (!file)
 		return FALSE;
+	started = file_call_started();
+	io_card_request(0);
 	if (posix_seek(file->descriptor, 0, 0, SEEK_CUR, &low, &high) != 0 ||
 		posix_truncate(file->descriptor, low, high) != 0)
 	{
 		platform_set_last_error_from_errno(errno);
-		return FALSE;
+		result = FALSE;
 	}
-	return TRUE;
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "set end", file->path, 0);
+		SetLastError(error);
+	}
+	return result;
 }
 
 BOOL WINAPI GetFileTime(HANDLE handle, LPFILETIME creation_time, LPFILETIME last_access_time, LPFILETIME last_write_time)
@@ -725,7 +908,7 @@ static void fill_attribute_data(const struct posix_file_information *information
 	data->nFileSizeLow = information->size_low;
 }
 
-DWORD WINAPI GetFileAttributesA(LPCSTR file_name)
+static DWORD get_file_attributes(LPCSTR file_name)
 {
 	struct posix_file_information information;
 	WIN32_FILE_ATTRIBUTE_DATA data;
@@ -741,7 +924,24 @@ DWORD WINAPI GetFileAttributesA(LPCSTR file_name)
 	return data.dwFileAttributes;
 }
 
-BOOL WINAPI GetFileAttributesExA(LPCSTR file_name, GET_FILEEX_INFO_LEVELS level, LPVOID file_information)
+DWORD WINAPI GetFileAttributesA(LPCSTR file_name)
+{
+	unsigned long long started = file_call_started();
+	DWORD result;
+
+	io_card_request(0);
+	result = get_file_attributes(file_name);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "attributes", file_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL get_file_attributes_ex(LPCSTR file_name, GET_FILEEX_INFO_LEVELS level, LPVOID file_information)
 {
 	struct posix_file_information information;
 	char path[1024];
@@ -761,7 +961,24 @@ BOOL WINAPI GetFileAttributesExA(LPCSTR file_name, GET_FILEEX_INFO_LEVELS level,
 	return TRUE;
 }
 
-BOOL WINAPI SetFileAttributesA(LPCSTR file_name, DWORD attributes)
+BOOL WINAPI GetFileAttributesExA(LPCSTR file_name, GET_FILEEX_INFO_LEVELS level, LPVOID file_information)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = get_file_attributes_ex(file_name, level, file_information);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "attributes", file_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL set_file_attributes(LPCSTR file_name, DWORD attributes)
 {
 	char path[1024];
 	struct posix_file_information information;
@@ -781,7 +998,24 @@ BOOL WINAPI SetFileAttributesA(LPCSTR file_name, DWORD attributes)
 	return TRUE;
 }
 
-BOOL WINAPI DeleteFileA(LPCSTR file_name)
+BOOL WINAPI SetFileAttributesA(LPCSTR file_name, DWORD attributes)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = set_file_attributes(file_name, attributes);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "set attributes", file_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL delete_file(LPCSTR file_name)
 {
 	char path[1024];
 
@@ -794,7 +1028,24 @@ BOOL WINAPI DeleteFileA(LPCSTR file_name)
 	return TRUE;
 }
 
-BOOL WINAPI MoveFileA(LPCSTR existing_file_name, LPCSTR new_file_name)
+BOOL WINAPI DeleteFileA(LPCSTR file_name)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = delete_file(file_name);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "delete", file_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL move_file(LPCSTR existing_file_name, LPCSTR new_file_name)
 {
 	char from[1024], to[1024];
 	struct posix_file_information information;
@@ -814,7 +1065,24 @@ BOOL WINAPI MoveFileA(LPCSTR existing_file_name, LPCSTR new_file_name)
 	return TRUE;
 }
 
-BOOL WINAPI CopyFileA(LPCSTR existing_file_name, LPCSTR new_file_name, BOOL fail_if_exists)
+BOOL WINAPI MoveFileA(LPCSTR existing_file_name, LPCSTR new_file_name)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = move_file(existing_file_name, new_file_name);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "move", new_file_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL copy_file(LPCSTR existing_file_name, LPCSTR new_file_name, BOOL fail_if_exists)
 {
 	char from[1024], to[1024];
 	char buffer[65536];
@@ -863,7 +1131,24 @@ BOOL WINAPI CopyFileA(LPCSTR existing_file_name, LPCSTR new_file_name, BOOL fail
 	return success;
 }
 
-BOOL WINAPI CreateDirectoryA(LPCSTR path_name, LPSECURITY_ATTRIBUTES security_attributes)
+BOOL WINAPI CopyFileA(LPCSTR existing_file_name, LPCSTR new_file_name, BOOL fail_if_exists)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = copy_file(existing_file_name, new_file_name, fail_if_exists);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "copy", new_file_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL create_directory(LPCSTR path_name, LPSECURITY_ATTRIBUTES security_attributes)
 {
 	char path[1024];
 
@@ -877,7 +1162,24 @@ BOOL WINAPI CreateDirectoryA(LPCSTR path_name, LPSECURITY_ATTRIBUTES security_at
 	return TRUE;
 }
 
-BOOL WINAPI RemoveDirectoryA(LPCSTR path_name)
+BOOL WINAPI CreateDirectoryA(LPCSTR path_name, LPSECURITY_ATTRIBUTES security_attributes)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = create_directory(path_name, security_attributes);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "make folder", path_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL remove_directory(LPCSTR path_name)
 {
 	char path[1024];
 
@@ -890,7 +1192,24 @@ BOOL WINAPI RemoveDirectoryA(LPCSTR path_name)
 	return TRUE;
 }
 
-BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR directory_name, PULARGE_INTEGER free_bytes_available,
+BOOL WINAPI RemoveDirectoryA(LPCSTR path_name)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = remove_directory(path_name);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "remove folder", path_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
+static BOOL get_disk_free_space(LPCSTR directory_name, PULARGE_INTEGER free_bytes_available,
 	PULARGE_INTEGER total_bytes, PULARGE_INTEGER total_free_bytes)
 {
 	char path[1024];
@@ -918,6 +1237,24 @@ BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR directory_name, PULARGE_INTEGER free_byte
 		total_bytes->HighPart = total_high;
 	}
 	return TRUE;
+}
+
+BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR directory_name, PULARGE_INTEGER free_bytes_available,
+	PULARGE_INTEGER total_bytes, PULARGE_INTEGER total_free_bytes)
+{
+	unsigned long long started = file_call_started();
+	BOOL result;
+
+	io_card_request(0);
+	result = get_disk_free_space(directory_name, free_bytes_available, total_bytes, total_free_bytes);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "free space", directory_name, 0);
+		SetLastError(error);
+	}
+	return result;
 }
 
 /* ---------- directory enumeration */
@@ -998,7 +1335,7 @@ static BOOL find_next_entry(struct platform_find *find, LPWIN32_FIND_DATAA data)
 	return FALSE;
 }
 
-HANDLE WINAPI FindFirstFileA(LPCSTR file_name, LPWIN32_FIND_DATAA data)
+static HANDLE find_first_file(LPCSTR file_name, LPWIN32_FIND_DATAA data)
 {
 	struct platform_find *find = calloc(1, sizeof(*find));
 	struct platform_handle *handle;
@@ -1047,13 +1384,42 @@ HANDLE WINAPI FindFirstFileA(LPCSTR file_name, LPWIN32_FIND_DATAA data)
 	return handle;
 }
 
+HANDLE WINAPI FindFirstFileA(LPCSTR file_name, LPWIN32_FIND_DATAA data)
+{
+	unsigned long long started = file_call_started();
+	HANDLE result;
+
+	io_card_request(0);
+	result = find_first_file(file_name, data);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "find first", file_name, 0);
+		SetLastError(error);
+	}
+	return result;
+}
+
 BOOL WINAPI FindNextFileA(HANDLE find_file, LPWIN32_FIND_DATAA data)
 {
 	struct platform_handle *handle = platform_handle_get(find_file, _platform_handle_find);
+	unsigned long long started;
+	BOOL result;
 
 	if (!handle)
 		return FALSE;
-	return find_next_entry(handle->data, data);
+	started = file_call_started();
+	io_card_request(0);
+	result = find_next_entry(handle->data, data);
+	if (started)
+	{
+		DWORD error = GetLastError();
+
+		file_call_done(started, "find next", ((struct platform_find *)handle->data)->directory_path, 0);
+		SetLastError(error);
+	}
+	return result;
 }
 
 /* FindClose is an XDK macro for CloseHandle */

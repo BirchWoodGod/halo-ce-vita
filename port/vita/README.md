@@ -43,6 +43,8 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 | `settings.txt` | the settings panel's choices |
 | `halo.log` | the port's log |
 | `env.txt` | optional debug switches, one `NAME=value` per line |
+| `host_invite.txt` | online play: the invite of the game you host (a private access token; see Multiplayer) |
+| `join_link.txt` | online play: an invite or code to join, taken and removed by the game (see Multiplayer) |
 
 ### Movies
 
@@ -56,9 +58,13 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
        -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
 ```
 
-A movie without an MP4 is skipped, as the game skips a missing movie. (The
-game looks for `data/bink/<name>.bik` first; the port creates an empty one
-for each MP4 at start-up.)
+A movie without an MP4 (or one that will not open) is skipped, as the game
+skips a missing movie: no intro, no attract videos, and the main menu takes
+input as soon as it is up - without the intro it comes up once the start-up
+saves and profile checks end, which the intro otherwise plays over. (The
+game looks for `data/bink/<name>.bik` first; the port creates a 12-byte
+stand-in for each MP4 at start-up, and removes the stand-ins whose MP4 is
+gone.)
 
 A movie is scaled to fill the screen at the shape its file gives (letter-
 or pillarboxed only as that needs): the Xbox's 4:3 movies fill the height,
@@ -88,39 +94,562 @@ one; `HALO_MOVIE_DUMP=n` writes the n-th frame as the decoder gave it
 | Start | Start | pause; skips a cinematic |
 | Select | Back | scoreboard |
 
-In the menus the D-pad moves the selection.
+In the menus the D-pad moves the selection. The settings panel's Controls
+tab has two pages laid out as the Xbox controller: Button layout puts each
+Xbox button on another Vita button (in play only: the menus keep this
+layout), and Touch zones makes each touch zone (below) press an Xbox
+button. Button layout's Button icons (Xbox by default) set to PlayStation
+makes the game's button icons show the Vita button each Xbox button is on
+now (below).
+
+**Touch zones** (`port/vita/host/vita_controls.c`; positions in the
+screen's 960 x 544 pixels, the rear pad scaled to the same as seen from the
+front):
+
+| Zone | Where | Counts |
+| --- | --- | --- |
+| Touch top left | front, 0-160 x 0-120 | at once |
+| Touch top right | front, 800-960 x 0-120 | at once |
+| Touch left edge | front, 0-120 x 190-400 (beside the D-pad, above the motion tracker) | at once |
+| Touch right edge | front, 840-960 x 190-400 (beside the face buttons) | at once |
+| Rear touch left | rear, 0-440 (all of its height), less the guard's border | once held the guard's time |
+| Rear touch right | rear, 520-960, less the guard's border | once held the guard's time |
+
+A finger counts for the zone it came down in for as long as it stays down;
+one that comes down outside every zone does nothing, and each finger counts
+on its own. The rear pad's guard (Rear touch guard, `HALO_TOUCH_REAR_GUARD`)
+keeps the hands holding the Vita from pressing anything: a finger that comes
+down within its border of the pad's edges (all four) never counts, even slid
+inwards, and one further in counts once held its time. On hardware a grip
+resting on the pad pressed a rear zone's button with the old 0.1 s and no
+border.
+
+| Rear touch guard | Border | Hold |
+| --- | --- | --- |
+| Off | none | 0.1 s |
+| Light | 48 px | 0.15 s |
+| Normal (default) | 96 px | 0.25 s |
+| Strong | 144 px | 0.4 s |
+
+A finger coming down counts as input for the screen's dimming.
+`HALO_PAD_FILE` (debug, `vita_input.c`) takes `tl tr el er rl rr` for the
+zones (touched at their middle, inside every guard's border).
+
+**Gyro aiming** (`vita_controls.c`, `vita_input.c`; Controls, Gyro aiming
+and the Gyro settings page, Off by default): the gyroscope's samples (`sceMotionGetSensorState`, every sample
+since the last frame, radians a second about the Vita's axes) go through a
+filter - the bias learnt from each second the Vita lies still (no axis
+moving 2 deg/s, the accelerometer 0.03 g; drift of a resting Vita), small
+motion smoothed (40 ms below 5 deg/s, none from 15 deg/s: hand tremor), a
+0.75 deg/s deadzone - and are integrated into angles. Held in landscape,
+the Vita's y axis (turning it left) is yaw left, x (its top edge towards
+you) pitch up, z (steering left) yaw with Gyro turning Tilt. The angles
+reach the game's look code as a direct change of facing, as mouse aim does
+on the desktop (`xinput_sdl.c` `halo_linux_mouse_look`,
+`source/game/player_control.c`): no stick acceleration, no clipping at full
+deflection, divided by the zoom like the stick. The game takes them once a
+frame while the player can look (not paused, not in a cinematic); what
+turns in the menus, with the panel open or before a zoom (While zoomed) or a
+button press (While holding) is dropped. The gyroscope is never input for
+the screen's dimming. `HALO_PAD_FILE` takes `gx=N gy=N gz=N` (degrees a
+second about x, y, z while the step is held, in place of the sensor;
+`gy=60:1000` turns the view left for a second), `HALO_GYRO_SIM=x,y,z` the
+same all the time, and `HALO_GYRO_LOG=1` logs the yaw and pitch the game
+took (debug).
 
 ## Settings panel
 
-Hold **Select + Start** for about a second, in play or in the menus. Up and
-down choose a setting, left and right (or Cross) change it, and Circle closes
-the panel. The game does not see the buttons while the panel is open.
+Hold **Select + Start** for about a second, in play or in the menus. **L and
+R** switch between four tabs, **Graphics**, **Controls**, **Audio** and
+**Multiplayer** (and **Dev**, once Show dev settings is on); up and down
+choose a line, left and right change it, Cross opens a line marked `>` (a
+page of rarely changed rows, or an action), and Circle goes back from a
+page or closes the panel. Each row's value is in a column of its own, the
+chosen row's help is under the rows and the panel's buttons on the line
+below. The game does not see the buttons while the panel is open. Rows
+marked `*` apply after a restart. Which page shows a row changes nothing
+of `settings.txt`: a file from an older version loads as it is.
+
+**Graphics**
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Performance overlay | Off | frames per second, game and render times, core load |
-| FPS counter | Off | the game's own frame counter, bottom right |
+| Profile | Balanced | sets the rows marked (P) at once: Performance, Balanced, Quality; Custom when they match none |
+| Render resolution (P) | 75% | the 3D view's resolution (applies at once); Dynamic: lowered in heavy scenes, from the Dynamic minimum up to 100% |
+| Dynamic minimum | 50% | shown with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes |
+| Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
+| Upscale filter | Smooth | Sharp: crisp pixels |
 | Frame limit | 30 FPS | the most frames shown a second |
-| Render resolution | 75% | the 3D view's resolution (applies after a restart) |
-| Model detail | Low | level of detail of characters, vehicles and props |
-| Hide distant objects | Small | skips objects that cover only a few pixels |
-| Scenery updates | Quarter | how often static props are updated |
-| Object lighting | Third | how often object lighting is recomputed |
-| Sound voices | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices); applies after a restart |
-| Sound occlusion | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
+| FPS counter | Off | the game's own frame counter, bottom right |
+| Smooth weapon motion | On | the first-person weapon blended between game ticks |
+| Advanced > | | the page below |
+
+Graphics, **Advanced**:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Model detail (P) | Low | level of detail of characters, vehicles and props (a model around the camera, like a10's cryotube, keeps the Xbox's) |
+| Hide distant objects (P) | Small | skips objects that cover only a few pixels (before their lighting is prepared) |
+| Object shadows (P) | Near only | the shadows under characters and vehicles: Full (the Xbox's, for objects over 30 pixels across), Near only (over 60 pixels), Off |
+| Dynamic lights (P) | 8 | the most dynamic lights (shots, explosions, muzzle flashes) a frame lights the scene and objects with, the nearest first: All (the Xbox's), 8, 4, 2 |
+| Effects quality (P) | Full | Performance: no dynamic lights' specular pass, specular lightmaps, reflections (shiny floors, mirrors) or grass; Minimal: also no decals (bullet holes, scorches, the map's markings), weather, contrails or light lens flares |
+| Particle density (P) | Full | Half, Third, Quarter: that share of the smoke, sparks and debris drawn (each particle drawn or not for its whole life; your own weapon's and the effects on weapons, units and vehicles all drawn) |
+| Sun rays (P) | On | the sun's glow and light shafts outdoors (Off in Performance: seven small extra scenes a frame for the graphics chip while the sun is in view) |
+| Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
+| Scenery updates (P) | Quarter | how often static props are updated |
+| Object lighting (P) | Third | how often object lighting is recomputed |
+| AI think rate (P) | Adaptive | how often enemies and allies think (what they see, feel and decide): Every tick (the Xbox's), Adaptive (within 8 world units of a player every tick, within 25 every second tick, farther every third), 15 Hz, 10 Hz. Their movement, aim and firing stay every tick; the game plays a little differently (they notice and decide a tick or two later). Replaces the 1.1.0 test builds' Distant AI |
+
+**Controls**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
 | Look sensitivity | 100% | right stick turning speed |
-| Crouch | Toggle | D-pad down crouches and the next press stands (Hold: crouch while held) |
 | Invert look | No | reverses the right stick's up and down |
-| Stick deadzone | Off | raise it if the sticks drift |
+| Crouch | Toggle | the left stick click (crouch): a press crouches and the next stands (Hold: crouch while held), from its Vita button or a touch zone |
+| Gyro aiming | Off | turning the Vita aims, with the right stick: On, While zoomed, While holding (the Gyro button) |
+| Rear touch guard | Normal | the rear zones ignore a touch that starts near the pad's edges (where the hands holding the Vita rest) and count once held: Off (no border, 0.1 s), Light, Normal (96 px, 0.25 s), Strong (144 px, 0.4 s) |
+| Button layout > | As shipped | Button icons (Xbox; PlayStation: below), then A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back: the Vita button of each in play (Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select as shipped; None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both. The row says Custom once one is moved |
+| Touch zones > | Off | Touch top left, top right, left edge, right edge, Rear touch left, right: the Xbox button each zone presses (A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back). The row says how many are on |
+| Gyro settings > | | Gyro button (L: While holding aims while held; in play it then does nothing else), Gyro sensitivity (1.5x; 0.5x-3x, 1x turns the view as far as the Vita turns, less while zoomed), Gyro vertical (Normal: tilt the top edge towards you to look up; Inverted), Gyro turning (Turn (yaw), or Tilt (roll) it like a wheel) |
+| Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings, Button icons and Show dev settings stay), Show dev settings (Off; shows the Dev tab), Update channel and Check for updates (below) |
+
+**Check for updates** (Controls > Advanced, under the rows with the build's
+version): the game asks the network for nothing until this is pressed. A
+press asks GitHub's public API (api.github.com, the releases of
+BirchWoodGod/halo-ce-vita) on a thread of its own and shows one line under
+the version: "Checking...", then "Up to date (1.1.0-beta.3)", "Update
+available: 1.1.0-beta.4" with github.com/BirchWoodGod/halo-ce-vita/releases
+under it (always that address, never one from the answer), "Couldn't check:
+no connection" (ad hoc play, no network, or GitHub unreachable) or
+"Couldn't check right now". A found update also shows in the main menu's
+corner until the game restarts, and halo.log has a line. Nothing is
+downloaded or installed: the player updates as they installed the game. A
+press within a minute of the last look that reached GitHub shows that look
+again (kept in `update_check.txt` in the data folder), as GitHub allows 60
+requests an hour from one address. **Update channel** (`HALO_UPDATE_CHANNEL`):
+Experimental (pre-releases and releases) or Stable (releases only); a beta
+build is on Experimental, its Stable shown greyed out ("Stable updates
+arrive with 1.1.0") and a saved Stable ignored; a release build offers both
+and starts on Stable. The request is HTTPS with Mbed TLS over the Vita's
+sockets (not the system's SceHttp/SceSsl): TLS 1.2 or 1.3, GitHub's
+certificate checked against the few authorities built into the game
+(`port/linux/src/update_roots.h`) and its host name, no redirect followed,
+the answer read to 256 KB at most and only each release's tag, pre-release
+and draft flags looked at; the request carries the User-Agent
+"HaloCEVita/<version>" and nothing else about the player or the Vita.
+
+**Button icons** (`HALO_BUTTON_ICONS`, xbox or playstation; live, kept by
+Reset controls): with PlayStation each of the game's button icons - the
+HUD's prompts (`source/interface/hud_messaging.c`), the icons in the menus'
+and the HUD's text and the menus' button hints (`ui_widget.c`) - shows the
+Vita button its Xbox button is on now (`vita_button_glyph` in
+`port/vita/host/vita_controls.c`): in play the Button layout's, else the
+first touch zone set to it; in the menus the fixed layout (A Cross, B
+Circle, X Square, Y Triangle, the triggers L and R, Back Select). Cross,
+Circle, Square and Triangle are drawn in code (`source/interface/hud_draw.c`:
+two strokes, a ring, a square, a triangle, of the game's own white bitmap),
+centred in the Xbox icon's sprite and as tall as its button, in the
+PlayStation's own colours (Cross blue, Circle red, Square pink, Triangle
+green); L, R, START, SELECT, the D-pad ("D-pad down") and the
+touch zones ("rear touch left") are words in the game's font. An Xbox
+button on no Vita button and no zone keeps its Xbox icon; so do the
+sticks' icons (move, look). The settings panel keeps the Xbox controller's
+names (A, B, X, Y, Black, White ...) with either setting: the Button icons
+change the game's icons only.
+
+The Touch zones page draws the front screen and the rear pad beside the
+rows: the chosen row's zone blue (dark blue while Off), the zones set to an
+Xbox button grey. The Gyro settings page has a line with the gyroscope's
+rates now (degrees a second: yaw, pitch, roll) and "learnt" once the Vita
+has lain still for a second.
+
+**Audio**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Language | Automatic | the language of this panel and of the port's own messages (see [Languages](#languages)): Automatic (the Vita's system language when the port has it, else English), English, Español; applies at once |
+| Sound voices * | Original | the most positional sounds playing at once (Original: 46); the game's own priorities pick which; faster with fewer, but sound playback feeds back into the game (the AI drifts from the original's choices) |
+| Sound occlusion (P) | Every 3rd | how often a sound's muffling behind walls is rechecked while it and the camera stay put (Every tick: the original) |
+| Sound updates (P) | Every 2nd | how often the sound manager places the sounds and picks which play: Every frame (the original), Every 2nd, Every 3rd frame; a new sound starts up to a frame or two later, the mixer plays on |
+
+**Multiplayer**: see [Multiplayer](#multiplayer).
+
+Multiplayer's **Modded maps** page lists the maps in the maps folder that
+are not the Xbox's own: name, size, kind (**Xbox** for a modded or newly built Xbox map, **CE**
+for a Halo Custom Edition one, **CE+OS** for an OpenSauce `.yelo`, marked
+`*`) and On or Off. Left and right turn a map off or on: an Off map stays in
+the folder but is left out of the multiplayer map list (`HALO_MAPS_DISABLED`
+in `settings.txt`; a game on a map you turned off may not be joinable).
+Square deletes a map, with its `.bmp` picture and `.txt` description, after
+asking (not the map being played). **PC maps** (Off by default,
+experimental) puts the Custom Edition maps in the map list; the page warns
+when the Custom Edition resource maps they need (`bitmaps.map`,
+`sounds.map`, `loc.map`) are not in the maps folder. A Halo Custom Edition
+installer (`halocesetup*.exe`) copied to `ux0:data/haloce-vita/` gives them:
+the game takes the three from it at start-up, on a thread of its own with
+a progress line (Circle stops it), then asks whether to delete the installer;
+**Extract PC files**, shown on the page while an installer is there and a
+file is missing, does the same (`port/vita/host/vita_ce_installer.c`,
+`port/linux/src/posix_ce_installer.c`). **Map downloads**
+decides what happens when you join a game on a custom map you lack:
+**Ask** (the default) asks whether to download it from the host, and in a
+game joined from the public lobby warns that the host is a stranger (only
+accept maps from players you trust); **Not public games** asks only in
+games joined with a code, on the same Wi-Fi or ad hoc; **Never** offers no
+downloads (`HALO_MAP_SHARE_FROM`: `ask`, `private`, `never`).
+
+**Dev** (once Show dev settings is on): debug switches for testers. Each
+is an `env.txt` variable; a switch is saved in `settings.txt` only while it
+is on, and off, `env.txt`'s value (or the default) applies. While any is on,
+`halo.log` says `settings: TEST MODE, dev switches on: ...` near its top.
+
+| Switch | Variable | What it does |
+| --- | --- | --- |
+| Performance logging * | `HALO_FRAME_TIMING=300`, `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1`, `HALO_LOAD_PROFILE=1` | where the frame and the tick go, in `halo.log` (`lines-profile`: the tick thread's particles and sounds, and the sound obstruction rays in them), and a `load-profile` line for a frame over 100 ms. A frame over 100 ms is named by its parts whether this is on or not: `frame-hitch` (the game thread's steps, its waits for the cache lock and the mixer, a map copy going on), `frame-hitch waits` (the cache file thread, the texture and sound caches, every file call the game thread or another made, the slowest by name) and `frame-hitch cores` (each core's busy share during the frame, the helpers' run times) |
+| Crash dump on hang | `HALO_HANG_CRASH=1` | a hang of 8 s (no frame presented) crashes on purpose, for a crash dump |
+| FPS overlay | `XV_FPS` | Off, FPS only (2), Full (1): frames per second, game and render times, core load, render scale, GPU time, free video memory (VRAM; yellow while part of the texture cache is in main memory) |
+| Debug camera | `HALO_DEBUG_CAMERA=1` | hold Black for a second: follow, orbit, then a flying camera |
+| Ad hoc dialog | `HALO_ADHOC_DIALOG_MODE` | which mode the system's ad hoc dialog uses: Connect (try first), Create or Join |
+| Save report | | copies `halo.log`, `halo-prev.log`, `settings.txt`, `env.txt` and the newest `ux0:data/psp2core-*.psp2dmp` into `ux0:data/haloce-vita/report-<date>/` and shows the folder |
+| A/B switches > | | the four below, on a page of their own |
+| GPU W clamp * | `HALO_GXM_WCLAMP=0` | A/B: models close to the camera dropping out (issue #9) |
+| Target mip minimum * | `HALO_TARGET_CHAIN_MIN_SIZE` | A/B: the smallest mip level of render targets (32, 16 or 8 pixels) |
+| Frame phase lock * | `HALO_FRAME_PHASE_LOCK=0` | A/B: 30 FPS frames kept between two ticks (Off: a fixed period) |
+| Render target sync * | `HALO_GXM_RTT_SYNC=0` | A/B: a scene waits for a render target drawn just before it |
 
 The choices are saved in `ux0:data/haloce-vita/settings.txt`.
 
 ## Multiplayer
 
-- **Split screen** needs two players, and the Vita has one controller.
-- **System link** over Wi-Fi between Vitas on the same network is in but not
-  yet tested with two consoles. Play against PCs is not supported yet.
-- **Ad hoc** (Vita to Vita without a router) and online play are not done yet.
+**Vitas play only Vitas.** Online, ad hoc and system link games on the Vita
+are between Vitas: a Vita does not list or join a PC's game, and the Linux,
+Windows and Android builds do not list or join a Vita's (a Vita cannot keep
+up with a PC host's game). Every machine needs the same version of this
+port and Xbox maps of a supported build (NTSC 01.10.12.2276 or 01.08.15.1749,
+PAL 01.01.14.2342); maps of another build cannot open the multiplayer menu.
+
+- **Split screen** needs two players, and the Vita has one controller: a
+  split screen game starts with you alone, to play the multiplayer maps on
+  your own.
+- **System link** over Wi-Fi: Vitas on the same network host and join each
+  other's games under Multiplayer, System Link.
+- **Ad hoc** (Vitas side by side, no router) and **online** (internet
+  play) are **experimental**: set the settings panel's Connection to them.
+  Both end in the game's own System Link screens: the other Vita's game
+  shows in the list, and you host or join as on a local network.
+
+**The game's Multiplayer menu.** Hosting and joining are in the game's own
+menus. With Halo PC's `bitmaps.map` and `loc.map` in the maps folder (from
+MCC's `halo1/maps/custom_edition/` or a Custom Edition install: see the main
+README's "Halo PC files"), the main menu's **Multiplayer** opens the
+PC version's Multiplayer screen, OpenCE's menus:
+
+| Item | What it does |
+| --- | --- |
+| Join Game: Internet | The server browser: the public games, a lock on those with a password, their map, gametype and players, and the chosen game's Players and Rules lines. A joins (a locked game's password is typed on the Vita's keyboard), X (Square) refreshes. The System Link screen then opens with the host's game in its list. |
+| Join Game: LAN | The System Link screen (games on this network, or reached by internet play or ad hoc). |
+| Join Game: Join by code | Direct Link: type the host's code (ABCD-EFGH) on the keyboard, then JOIN GAME; the System Link screen follows. |
+| Create Game: Internet | Server Setup: Server name (others see it in their lists; 15 characters; your Vita's user name until you type one), Max players (2 to 16; a joiner past it is told the game is full), Visibility (**Public**: listed in every Vita's server browser; **Private**: joined by its code), Password (a public game asks joiners for it; the code still joins). START GAME, then your profile, a map and a gametype: your lobby. The settings are kept. |
+| Create Game: LAN | The System Link screen, where Y creates a game. |
+| Co-op campaign | The Campaign screen: a profile, a level, a difficulty, then **Y** (co-op, below). |
+| Split screen, Edit gametypes | As on the Xbox. |
+
+Internet and Join by code need Connection Online. Without the two Halo PC
+files the Xbox's Multiplayer screen opens as before: **System Link** hosts
+(Y creates a game; online, its Visibility and the rest as last set) and
+joins games, and the settings panel's **Join with a code** joins a code.
+
+**Hosting and joining by System Link.** On the System Link screen:
+
+1. Press A to join if asked, A on your profile, then A again.
+2. **SYSTEM LINK GAMES** lists the games on the network. The host presses
+   **Y** to create one (A on a map, A on a game type); the others press
+   **A** on the host's game.
+3. Everyone waits in the lobby; A there starts the game sooner. A custom
+   map a joiner lacks comes from the host (the game asks, naming the host,
+   and warns in a public game; Cross: yes; Modded maps, Map downloads),
+   before the game starts: the host's game waits for the download, and its
+   lobby shows the progress by the joiner's name. For a PC map, a joiner
+   with PC maps off is asked to turn it on; a PC map also needs Custom
+   Edition's `bitmaps.map`, `sounds.map` and `loc.map` in the maps folder
+   (the game says which are missing). A joiner who cannot get the map is
+   told why (an older host, a game already started: join in the lobby).
+   A download that stops (cancelled, the connection lost) goes on from
+   where it stopped when you join for the same map again.
+
+The game's menus use the Xbox's buttons: A is Cross, B Circle, X Square, Y
+Triangle, Back Select. To host on a PC (Custom Edition) map, turn on PC maps
+on the Modded maps page first.
+
+**The latency meter.** In a network game being played (system link, ad
+hoc or online, directly or through a relay; multiplayer or co-op) the top
+right of the screen shows your round trip to the host: **Ping 45 ms** with
+four bars, green below 80 ms, yellow below 150, red above (two bars from
+150, one from 250). It is the game's own round trip, timed as the netcode
+already times it (nothing more is sent): the network both ways plus each
+machine's wait for its next tick to send, up to 33 ms each, so a Wi-Fi
+network shows 15 to 35 ms. If the host has sent nothing for two seconds it
+says **Connection problem** in red instead. The host shows **Max ping**:
+its slowest player's (one silent for a while, as long as it has been). Hold
+Back for the scoreboard: its **Ping** column has each player's ping (the
+host's own players 0). The host measures everyone's and sends its players
+the list every 3 seconds (online and ad hoc, a Vita host or a dedicated
+server of 1.1.0-beta.3 or later), so on another Vita the others' are the
+host's measure and your own is your own; a player whose ping is not known
+shows **-** (a host of 1.1.0-beta.2 or before, a system link game on a LAN,
+or no list from the host for 10 seconds). Latency meter Off hides both (on
+the host, it sends no list).
+
+The settings panel's **Multiplayer** tab:
+
+| Line | What it does |
+| --- | --- |
+| Connection | **Same Wi-Fi** (the default): system link on this network. **Ad hoc** (experimental): Vitas side by side, without a router. **Online** (experimental): internet play. Applies after a restart. |
+| Ad hoc room | With Connection Ad hoc: 1 to 4. Vitas in the same room play together. |
+| Join the room | With Ad hoc: the system's dialog joins (or makes) the room's group; then Multiplayer, System Link (LAN) in the game. |
+| Join with a code | Online, without the PC menus (whose Join by code does it): type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins), then the steps with how the lookup goes, and Cross opens System Link. |
+| Modded maps > | Your custom maps (above). |
+| Latency meter | **On** (the default) or **Off**: your round trip to the host in a network game (the latency meter, below). |
+
+Lines under them say your Vita's name and address and what the game is
+doing (looking for games and how many it found, hosting and how many
+players are in of the most it takes, in a lobby, in a game), with Online
+or Ad hoc your code or the ad hoc group, and without the Halo PC files
+"Online menus need bitmaps.map, loc.map: README".
+
+The ad hoc dialog's mode (Connect, Create or Join) is a Dev switch.
+
+**Online.** Set Connection to Online and restart. To host, create a game
+(Multiplayer, Create Game, Internet; or System Link's Y): the settings
+panel's Multiplayer tab then shows your code, **ABCD-EFGH** (it stays the
+same until you quit the game). Tell it to the others; with Visibility
+Public, your game is also listed in the server browser. To join, use the
+server browser or Join by code in the game's Multiplayer menu (without the
+Halo PC files: the settings panel's **Join with a code**); the System Link
+screen then opens, and the host's game is in the list once it is reached. A code is a convenience, not a password: anyone who has it (or
+guesses it) can join that game.
+
+The long invite still works too, as a fallback: the host's is written to
+`ux0:data/haloce-vita/host_invite.txt` (a private access token: share it
+only with the players you invite, and only while that game runs). To join
+with one, copy it with VitaShell or FTP under a temporary name into
+`ux0:data/haloce-vita/`, then rename it to `join_link.txt` (so the game
+never reads half a file); the game takes and removes the file within a
+second, and `halo.log` says what came of it. A file holding a code
+(`ABCD-EFGH`) works the same way.
+
+Internet play has no server of its own: the Vitas find each other through
+public MQTT brokers and then connect directly (UDP hole punching). That can
+fail between two networks whose NATs both give each destination its own port
+(some mobile and company networks, double NAT): forwarding a UDP port on one
+router helps (`HALO_NET_TUNNEL_PORT=<port>` in `env.txt`, the same port
+forwarded to that Vita). A relay (`port/relay`, run by anyone) can carry
+the game where no direct path works, still encrypted end to end: none is
+set by default; name one with `HALO_NET_RELAYS=host:port` in `env.txt` (one
+player naming it is enough; a direct connection is tried first and kept
+whenever it works). The Vita has no UPnP.
+
+**When the server browser is empty.** Its status line (top right) and the
+middle of the list say which of three it is: **Looking for public
+games...** (the brokers being reached, the hosts asked), **Can't reach the
+online game list - check your internet connection** (no broker could be
+reached: Wi-Fi, DNS, a firewall; X (Square) tries again at once), or **No
+public games right now** (the list was reached and holds no game of this
+version; "No public games for this version (2 on another)" when it holds
+games of another network version). Server Setup says **Can't reach the
+online game list** before you start a game that could not be listed. While
+you host, the settings panel's Multiplayer tab says whether your game is
+really listed: **Your code: ABCD-EFGH; Listed on 2 of 3 servers** (as many
+brokers as have acknowledged its listing), **getting listed...**, or **not
+listed: no game list**; your code works either way once one broker is
+reached. A broker whose name cannot be looked up (the Vita's resolver
+fails now and then) is reached at the address it had last time: the game
+keeps the last good address of each broker, STUN server and relay in
+`ux0:data/haloce-vita/data/dns_cache.txt` (only those names; safe to
+delete; `network.resolver_cache_file` in `config.toml`, empty for none).
+
+What `halo.log` says (send it with any report of a missing game):
+- `Internet play: broker <name> ready (MQTT 5 at <address>; carries the public games)`,
+  or `broker <name>: <why>; trying again in N s` (cannot look up its address
+  (and the resolver's reason), cannot connect (refused, unreachable), no
+  answer connecting, closed the connection, disconnected this machine (and
+  the broker's reason), no answer in 10 s (the link dropped)). The same
+  failure is said once every five minutes, with how often it happened since.
+- Hosting: `the game is public: its listing is being published`, then
+  `broker <name> has the listing (acknowledged; ...)` for each broker and
+  `the game is listed in everyone's public games (on 2 of 3 brokers: ...)`
+  only once one has acknowledged it; `the listing is on 1 of 3 brokers now`
+  as that changes, and `the game is not listed: no broker has acknowledged
+  its listing in N s (...)` (every minute) while none has.
+- Browsing: `browsing the public games`, then `browser (summary): N listings
+  heard (R retained, A again), G games shown; dropped ...` (why each one not
+  shown was left out: of another version, stale retained copies and how far
+  apart the clocks were, badly signed, on another's slot, with no name)
+  ten seconds after it opens or is refreshed and every minute while listings
+  come; `browser: new game "<name>" (players, map, gametype) from host
+  <first 8 digits of its key's hash>` and `game closed:` / `game gone` as the
+  list changes; `browser: "<the status line>"` as that changes; and `browser
+  (closing): ...` when it closes. No invite, token or password is ever
+  written there.
+
+What others can see: the public MQTT brokers and STUN servers (third
+parties) see each Vita's public IP address while it plays online, and the
+Vitas it plays with learn it too, as in any peer-to-peer game. Everything
+sent through the brokers is encrypted with keys from the invite, so the
+brokers learn no codes or invites, but anyone browsing the public games sees
+a public game's name (its Lobby name: your Vita's user name until you type
+another), its map, its rules, its
+players' names and counts, and can join it. A public game's listing is
+signed with the host's key (OpenCE's server browser), so no one else can
+list, change or remove it; it never holds the game's code. A game with a
+password lists its invite sealed with the password (Argon2id, about half a
+second on a Vita to try one), so only those who know it can join from the
+browser; a code still joins it. Private games are not listed. Vitas list on
+their own topics, signed under their own label: a PC never sees a Vita's
+public game, nor a Vita a PC's. A host can ban by device: the ID the
+game sends is a keyed hash (HMAC) of the Vita's OpenPSID made for this game
+only, not the OpenPSID itself.
+
+**Co-op (experimental).** Play the campaign together on up to four Vitas, by
+system link, online or ad hoc. The host starts it from the Campaign menu:
+Campaign, a profile, a level and a difficulty as for single player, then on
+the difficulty screen **Y** (Play co-op) instead of **A** (which plays
+alone, as ever). The game's lobby opens as the waiting screen: "Waiting for
+other players", with the level, the difficulty, this Vita's name and how the
+game is reached (system link, online and its code, or ad hoc); **B** cancels
+and goes back to the difficulty screen. Online, a co-op game is **private**
+(joined by its code) unless you choose: **X** on the waiting screen makes it
+public, listed in the server browser (with Server Setup's password, if one
+is set), and X again private (OpenCE's `network.coop_public`, kept). The
+others open the System Link screen (Multiplayer: LAN, the server browser or
+Join by code; without the PC menus, System Link or the settings panel's Join
+with a code), where the game is listed as "<host>: <level> (<difficulty>)"
+(with the level and "Co-op" and the difficulty beside it), and join it with
+**A**. The lobby shows a panel for each of the three others. Once the first
+is in, the level starts after 15 seconds, so the rest can join, or 6 seconds
+once the lobby is full (the host's **A** sooner); a Vita can also join a
+level in progress, and comes in beside the team. The PC menus' **Co-op
+campaign** opens the Campaign screen for the host. While the host waits
+alone, the lobby's X and A keys are hidden (B cancels; X there is the
+visibility, as the screen says), and B back on the difficulty screen keeps
+the difficulty chosen. 1.0.3's Co-op page, which made every game the Vita
+hosted a campaign level, is gone: a settings.txt that had a level set loads
+as Off. The Xbox game had co-op only in split screen; this is upstream
+halo-ce-universal's network co-op (credited in the main README):
+
+- Up to four players (two in 1.0.3). The host's Vita runs the level's
+  scripts and its AI for everyone, so its frame rate drops with each player
+  (the game's tick took a third to a half longer with four than with two on
+  the desktop test harness; `HALO_NET_COOP_PLAYERS=2` in env.txt keeps a
+  game to two), and upstream's extra enemies are off.
+- Cutscenes are skipped by vote: press **Start** in one, and it is skipped
+  once more than half of the Vitas have (the screen shows the count). Only a
+  press while the skip is offered counts (not one from before it, nor from a
+  level before).
+- Loading zones are the host's: its crossing switches the part of the level
+  and brings the others along (anyone's while the host is dead); another
+  player on one is told to wait for the host.
+- A dead player watches a teammate (A switches to the next) and comes back
+  beside one once it is safe. With everyone dead, all come back where they
+  were at the last checkpoint (the level is not reverted); checkpoints show
+  on every Vita.
+- A level won ends the round, and the lobby's next game is the campaign's
+  next level (after The Maw, The Pillar of Autumn). Started from the
+  Campaign menu, the lobby opens on it with no map to pick, and it starts
+  after ten seconds (the host's **A** sooner; **B** ends the co-op game).
+- Co-op leaves single player's save alone: a network game neither resumes
+  nor writes it, and Save and Quit in co-op only leaves the game. Levels
+  finished in co-op count as finished in the profile, as in the Xbox's
+  split screen co-op.
+- Every Vita needs this version (network version 18): a Vita joining a
+  game of another version is told which one is newer.
+
+**Ad hoc.** Set Connection to Ad hoc on every Vita and restart. Choose the
+same Ad hoc room on each (Multiplayer tab), then **Join the room**: the
+system's dialog joins (or makes) the room's group. Then in the game,
+Multiplayer, System Link (LAN with the PC menus). When the line under the
+tab says another machine is in the group, one Vita
+creates a System Link game and the others find it in their lists. Ad hoc carries the game the way online play does,
+over the group instead of the internet; nothing goes to the internet.
+
+## Languages
+
+The port's own text follows the settings panel's **Language** row (Audio
+tab): Automatic, the default, is the Vita's system language when the port
+has it, else English. That text is the panel, its messages, questions and
+progress lines over the game (map downloads, the Halo CE installer's PC
+files, a map that could not be loaded, a game that could not be joined),
+the PC multiplayer menus' own lines and the server browser's, co-op's
+waiting and spectating lines, the latency meter, and the missing data
+screen. It is in English and Spanish (Español) so far, and changes at once;
+the PC menus' screens follow from the next time the main menu loads.
+
+Halo's own text (its menus, the HUD's messages, the objectives, the
+subtitles, the button prompts' words) is not the port's: it is in the
+player's map files, ui.map and each level's, in the language of the disc
+they came from. The NTSC (North American) Xbox disc's maps hold English
+only, so with them Halo itself stays in English whatever the Language row
+says; no translation of Bungie's text can come with the port (no game data
+is in it). With a European (PAL) disc's maps in the player's language,
+Halo's own text is in that language:
+
+- copy them into `ux0:data/haloce-vita/maps/` as usual: they are Spanish
+  (or French, German, Italian) whatever the Language row says, since the
+  text is in the files;
+- or keep a language's maps in a folder of its own beside `maps`,
+  `maps_es` (`maps_fr`, `maps_de`, `maps_it`), as the Xbox did: the game
+  reads that folder when its language is the one chosen (Automatic: the
+  Vita's), at start. After a change of language the game fills its map
+  cache again (the first loads take a little longer, once).
+
+The PC multiplayer menus (with Halo PC's `bitmaps.map` and `loc.map` in
+the maps folder) take a few of their lists from `loc.map`: a Spanish Halo
+PC or Custom Edition install's `loc.map` gives those lists in Spanish by
+itself, around the port's own lines in the language chosen.
+
+### Translations
+
+Each language is one file of UTF-8 text in `port/vita/app0/lang/`, named
+by the language's code, packed into the VPK (`app0:lang/`) and read at
+start (`port/linux/src/lang.c`). In the code the English is the key:
+`T("English")` (`TW(L"...")` for text drawn with Halo's fonts, `N_("...")`
+for a table's strings, translated where they are shown), so a language
+without an entry for a string shows it in English. A line of a file is
+
+    "English text" = "the text in the language"
+
+with C's escapes (`\n`, `\r`, `\t`, `\"`, `\\`); `@name = "Español"` names
+the language as the Language row shows it, and `#` starts a comment.
+
+To add a language (French here):
+
+1. `python3 tools/lang_check.py --missing fr > port/vita/app0/lang/fr.txt`
+   writes every string as an English = English line; add
+   `@name = "Français"` at the top.
+2. Translate the right-hand side of each line. Keep each `%` conversion
+   (`%s`, `%d`, `%.40s`, `%%`) and Halo's button tokens (`%a-button`) as
+   they are, in the same order: a line whose conversions differ is not
+   taken (the English is shown, and `halo.log` says which line). The Xbox
+   controller's buttons keep the names the panel gives them (A, B, X, Y,
+   Back, Start, Black, White, the triggers).
+3. Mind the room: a panel row's name is 22 characters at most, its value
+   20, a help line 70, any other line 46 (the panel's font is upper case,
+   8 pixels a character; it draws ASCII and the Latin-1 letters, accents,
+   ñ, ç, ß, ¿ ¡ « » º ª).
+4. Check it: `sh port/vita/tests/run_lang_test.sh` (every marked string
+   has an entry in each file, with the same conversions, in characters the
+   panel draws) and `sh port/vita/tests/run_vita_settings_test.sh` (the
+   Spanish pass shows how a language is checked to fit: copy it for the
+   new one), then `configure.py` again and `ninja vita`.
+
+The file's name is the code the Vita's system languages map to
+(`vita_settings.c`, `system_language_codes`): `fr`, `de`, `it`, `pt` (and
+`pt-BR`, which falls back to `pt`), `nl`, `ru`, `pl`, `fi`, `sv`, `da`,
+`no`, `tr`, `ja`, `ko`, `zh-TW`, `zh-CN`. The panel's font has no glyphs
+beyond Latin-1, so Russian, Japanese, Korean or Chinese would need a font
+first. Adding a string to the code: give it to `T()`, add it to every file
+(`tools/lang_check.py` lists what is missing; CI fails until it is there).
 
 ## Building
 
@@ -163,7 +692,14 @@ says how it is made again after the Cg generators (`nv2a_psh_cg.c`,
 `nv2a_vsh_cg.c`) change: collect the sources with the gxm-null build
 (`HALO_SHADER_COLLECT`, `HALO_SHADER_TOUR`), compile them on Vita3K
 (`HALO_SHADER_PRECOMPILE`), pack them. A program the pack misses is compiled
-in the background on the device and kept in `shaders/`.
+in the background on the device and kept in `shaders/`. The VPK gets a copy
+of the pack stamped with the build's generator id (made again when that id
+changes; the build notes it when the pack in the tree was made for another
+generator: `vita_shader_pack.py --check` tells how many collected sources it
+still has). After an update, another build's `shaders/` is renamed to
+`shaders.old-<n>` at start-up and removed by a low-priority thread once the
+game is up, while it reads no files (`gxm: old shader cache clean-up` in the
+log; an interrupted one goes on at the next start).
 
 ### Debug switches
 
@@ -176,16 +712,35 @@ Useful ones:
 | `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go |
 | `HALO_GPU_STATS=1` | draws, uniforms, ring use per frame |
 | `HALO_SCREENSHOT_DIR=ux0:data/haloce-vita/shots`, `HALO_SCREENSHOT_EVERY=n` | a BMP every n frames (at 100% resolution) |
+| `HALO_HUD_LOG=1` | each HUD quad's bitmap and rectangle in `halo.log` the first time it is drawn there (`tests/run_hud_layout_test.sh`) |
+| `HALO_MODEL_LOD_LOG=1` | each model's detail level in `halo.log` the first time it draws at it, with the level the Xbox would have chosen (`tests/run_cryo_body_test.sh`) |
 | `HALO_NO_MOVIES=1`, `HALO_NO_AUDIO=1` | skip movies or sound |
 | `HALO_DXT_MIPS=0` | compressed textures without their mip chains |
 | `HALO_HEARTBEAT=1` | a line every 2 s in `heartbeat.txt` (is the game still running?) |
 | `HALO_STARTUP_CHECKS=1` | the clocks and the cost of basic operations, logged at start-up |
-| `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do (see Help wanted) |
+| `HALO_NET_TRACE=1` | every socket's calls, failures and traffic every 2 s, and the network library's free memory, in `halo.log` ("net trace:"); runs the socket self-test at start-up too |
+| `HALO_NET_SELFTEST=1` | the socket layer's loopback and broadcast behaviour, logged at start-up |
+| `HALO_NET_PROFILE=1` | the networked frame's steps and the socket queries, timed |
+| `HALO_NET_TUNNEL_PORT=<port>` | online play's UDP port (to forward it on the router) |
+| `HALO_NET_BROKERS`, `HALO_NET_STUN` | the signalling brokers and STUN servers online play uses (`host:port`, commas between) |
+| `HALO_ADHOC_GROUP=NAME` | the ad hoc group's name (up to 8 letters) in place of the room's |
+| `HALO_ADHOC_ID_TYPE=0` | the ad hoc libraries' product ID type (default 1, reserved, as vitaQuake) |
+| `HALO_ADHOC_PROBE=1` | logs what the Vita's ad hoc libraries do without joining a group |
 | `HALO_SHADER_ASYNC=0` | a shader that is neither shipped nor cached is compiled while the game waits (the default compiles it in the background and skips its draws until it is ready) |
 | `HALO_SHADER_PACK=0` | ignore the shipped shaders (`app0:shaders.pak`) |
+| `HALO_SHADER_SWEEP=0` | leave another build's old shader cache folders (`shaders.old-<n>`) on the memory card |
 | `HALO_NET_PROFILE=1`, `HALO_NET_TRACE=1` | where a network game's frame goes; what its sockets do |
 | `HALO_NET_CATCH_UP_TICKS=n` | the most ticks a frame of a System Link or online game runs to catch up with real time (default 2; 30 = beta.1's pacing) |
+| `HALO_TICK_OVERLAP=1`, `=0` | when a tick takes longer than 33 ms and longer than the frame's render, a frame runs one tick instead of two while that keeps at least four fifths of the game's speed (frames come up to twice as often); unset: on in a multiplayer game nobody else plays in (a local game, or a System Link host no other machine joined), off in the campaign and in games with other machines; `tick pacing:` lines in `halo.log` |
+| `HALO_TICK_CATCH_UP=0` | one tick a frame at most in a local game and, now, for a System Link host no other machine joined: the game plays slower instead of the frame rate halving |
+| `HALO_DECAL_CACHE_WINDOW=n` | a new decal takes the least recently drawn room among the n decals after the last one made instead of searching all 2048 (default 64; 0 = the whole cache, as the Xbox) |
+| `HALO_DECAL_MIN_PIXELS=n` | decals that would be under n pixels across from every local view are not made (default 0: off) |
+| `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off; no longer a row: AI think rate) |
+| `HALO_TICK_HASH_MASK=2` | (Linux harness) the tick hash also leaves out what the render writes into the objects and lights, to compare render settings |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
+| `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host, so it plays at a slow host's pace (default 6; 0 = never); the host's tick counted on from its newest message for as long as that message has waited (a network that holds the host's messages back does not hold the client) |
+| `HALO_NET_COOP_SILENCE_MS=n` | for at most this long (default 1500) |
+| `HALO_NET_SYNC_TRACE=1` | each correction (what made it, the object, how far off) and every 30 s the bytes sent of each message type, in `debug.txt` ("net sync:") |
 
 ## Layout of port/vita
 
@@ -196,13 +751,16 @@ Useful ones:
 | `include/` | the boundary between the two (`vita_host.h`, `vita_gxm.h`) |
 | `null/` | the do-nothing GXM for the Linux test build |
 | `sce_sys/` | LiveArea images |
+| `app0/` | files in the VPK beside the eboot: the shipped shaders, the brokers and relays, the PC menus' XML, the translations (`lang/`) |
 
 ## Help wanted
 
-- **Ad hoc multiplayer** so two Vitas can play without a router, then online
-  play. The SDK names no call that joins an ad hoc group: with
-  `HALO_ADHOC_PROBE=1` the PSP-style ad hoc libraries start, but the Vita
-  stays out of any group (peer-to-peer sockets work over Wi-Fi).
+- **Testing online and ad hoc play** on Vitas (see Multiplayer): send
+  `halo.log` from each machine, with `HALO_NET_TRACE=1` in `env.txt`.
+  Ad hoc play joins its group through the system's network check dialog
+  in a PSP ad hoc mode (the SDK names no call that joins one directly; the
+  dialog is how vitaQuake does it), then carries the game over PDP
+  datagrams; which dialog mode two Vitas need is not known yet.
 - **Performance** in heavy fights (the render on the first core is the limit;
   see the timing lines).
 - **DXT1 mip chains**: Vita3K shows rainbow noise on some DXT1 textures'

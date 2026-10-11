@@ -57,6 +57,14 @@ void __stdcall BinkSetIOSize(unsigned long io_size)
 	(void)io_size;
 }
 
+/* the last BinkOpen failed for now (halo_movie_open_failed_for_now) */
+static int open_failed_for_now;
+
+int halo_movie_open_failed_for_now(void)
+{
+	return open_failed_for_now;
+}
+
 HBINK __stdcall BinkOpen(const char *name, unsigned long flags)
 {
 	char path[256];
@@ -65,6 +73,7 @@ HBINK __stdcall BinkOpen(const char *name, unsigned long flags)
 	unsigned long width = 0, height = 0;
 
 	(void)flags;
+	open_failed_for_now = 0;
 	if (!name)
 		return NULL;
 	/* (debug) HALO_NO_MOVIES=1: every movie skipped */
@@ -79,7 +88,10 @@ HBINK __stdcall BinkOpen(const char *name, unsigned long flags)
 		length = 64;
 	snprintf(path, sizeof(path), "ux0:data/haloce-vita/movies/%.*s.mp4", (int)length, base);
 	if (vita_movie_open(path, &width, &height) != 0)
+	{
+		open_failed_for_now = vita_movie_open_failed_for_now();
 		return NULL;
+	}
 	memset(&movie_handle, 0, sizeof(movie_handle));
 	movie_handle.Width = width;
 	movie_handle.Height = height;

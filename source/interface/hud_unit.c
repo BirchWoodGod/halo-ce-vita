@@ -67,6 +67,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries/cseries.h"
+#include "cseries/errors.h"
 #include "cutscene/cinematics.h"
 #include "effects/player_effects.h"
 #include "game/game.h"
@@ -394,6 +395,20 @@ void scripted_hud_blink_motion_sensor(
 	return;
 }
 
+/* port: the scripts' show and blink flags, for network co-op
+(port/linux/game/network_coop.c) */
+long hud_unit_port_script_flags(
+	void)
+{
+	return unit_hud_globals->script_flags;
+}
+
+void hud_unit_port_set_script_flags(
+	long flags)
+{
+	unit_hud_globals->script_flags = flags;
+}
+
 void hud_play_unit_sounds(
 	struct player_datum const *player,
 	boolean show_hud)
@@ -492,7 +507,8 @@ void hud_play_unit_sounds(
 					sound_flags,
 					&hud_definition->warning_sounds,
 					hud_state->last_sound_handles,
-					&hud_state->sound_flags);
+					&hud_state->sound_flags,
+					(short)NUMBEROF(hud_state->last_sound_handles));
 			}
 		}
 	}
@@ -1286,6 +1302,26 @@ void hud_render_unit_interface(
 							&hud_definition->auxilary_meters,
 							meter_index,
 							struct auxilary_meter_definition);
+
+						/* port: the type is the map's and indexes the flash times
+						and values (one type, the integrated light, which every
+						retail meter is): a meter of any other is not drawn, and
+						that is said once */
+						if (!VALID_INDEX(meter->type, (short)NUMBEROF(hud_state->auxilary_flash_time)))
+						{
+							static boolean bad_meter_type_reported = FALSE;
+
+							if (!bad_meter_type_reported)
+							{
+								bad_meter_type_reported = TRUE;
+								error(
+									_error_silent,
+									"unit hud auxilary meter of type %d (of %d) not drawn",
+									meter->type,
+									(short)NUMBEROF(hud_state->auxilary_flash_time));
+							}
+							continue;
+						}
 
 						if (TEST_FLAG(
 								hud_state->auxilary_active_type_flags,

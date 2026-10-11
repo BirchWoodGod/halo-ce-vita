@@ -692,6 +692,20 @@ symbols in this file:
 #include "saved games/game_state.h"
 #include "sound/game_sound.h"
 #include "vehicles.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
+#include "coop_enemies.h" /* port: port/linux/game/coop_enemies.c */
+
+/* port: the control and animation impulses the host's actors give their
+units go to the clients' copies (port/linux/game/network_actors.c) */
+void network_actors_note_control(long unit_index, struct unit_control_data const *control_data);
+void network_actors_note_impulse(long unit_index, short animation_impulse, real_vector2d const *alignment_vector);
+void network_actors_note_melee(long unit_index, real_vector2d const *alignment_vector);
+void network_actors_note_leap(long unit_index, real_vector2d const *alignment_vector);
+/* port/linux/game/network_objects.c: the host's pick of a flinch or death animation */
+short network_objects_damage_animation(long unit_index, short type, short animation_index);
+void network_actors_note_user_animation(long unit_index, long animation_graph_index, short animation_index,
+	boolean interpolate);
 
 /* ---------- constants */
 
@@ -734,14 +748,6 @@ enum
 enum
 {
 	_unit_debug_function_active_bit = 2,
-};
-
-enum
-{
-	_unit_damage_animation_soft_ping = 0,
-	_unit_damage_animation_hard_ping,
-	_unit_damage_animation_soft_kill,
-	_unit_damage_animation_hard_kill,
 };
 
 enum
@@ -1026,6 +1032,8 @@ static void unit_drop_item(long unit_index, long item_index);
 #ifdef HALO_LINUX
 /* port/linux/game/network_objects.c's */
 boolean network_objects_creating_host_object(void);
+/* port/linux/game/network_damage.c's */
+void network_damage_note_grenade(long unit_index, short grenade_type);
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
 #endif
@@ -1348,7 +1356,8 @@ boolean unit_get_seat_entrance_point(
 							&animation_seat->animations)
 								[_unit_seat_animation_seat_enter].animation_index;
 
-						if (animation_index != NONE)
+						/* port: an animation the graph has (a map's index) */
+						if (VALID_INDEX(animation_index, animation_graph->animations.count))
 						{
 							struct animation *animation = TAG_BLOCK_GET_ELEMENT(
 								&animation_graph->animations,
@@ -1366,7 +1375,10 @@ boolean unit_get_seat_entrance_point(
 								&root_matrix,
 								&entrance_matrix);
 
-							csstrcpy(enter_hint_marker_name, seat->marker_name);
+							/* port: the marker name is a map's 32 bytes, which
+							needn't end; copied up to its length */
+							csstrncpy(enter_hint_marker_name, seat->marker_name, TAG_STRING_LENGTH);
+							enter_hint_marker_name[TAG_STRING_LENGTH] = 0;
 							csstrcat(enter_hint_marker_name, " enter-hint");
 							object_get_marker_by_name(
 								target_unit_index,
@@ -2095,6 +2107,10 @@ short unit_get_grenade_count(
 	{
 		match_assert("c:\\halo\\SOURCE\\units\\units.c", 7847, grenade_type==NONE || (grenade_type>=0 && grenade_type<NUMBER_OF_UNIT_GRENADE_TYPES));
 
+		/* port: a unit carries none of a type it doesn't have (a map's type) */
+		if (!VALID_INDEX(grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES))
+			return 0;
+
 		return unit->unit.grenade_counts[grenade_type];
 	}
 
@@ -2187,6 +2203,12 @@ short unit_add_grenade_type_to_inventory(
 	match_assert("c:\\halo\\SOURCE\\units\\units.c", 7309, grenade_count>=0);
 	match_assert("c:\\halo\\SOURCE\\units\\units.c", 7310, (grenade_type >= 0) && (grenade_type < NUMBER_OF_UNIT_GRENADE_TYPES));
 
+	/* port: only the types a unit carries (an actor variant's type, map
+	data; the rest wrote past the unit). Not reported: the released maps'
+	warthog gunner variant has type 28786, with no grenades */
+	if (!VALID_INDEX(grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES))
+		return 0;
+
 	unit->unit.grenade_counts[grenade_type] += grenade_count;
 	unit->unit.desired_grenade_index = grenade_type;
 	unit->unit.current_grenade_index = grenade_type;
@@ -2208,13 +2230,23 @@ boolean unit_add_grenade_to_inventory(
 		struct game_globals_grenade);
 	long local_player_index;
 	boolean result = FALSE;
+	static boolean grenade_type_reported = FALSE;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\units\\units.c",
 		7282,
 		equipment_definition->equipment.powerup_type==_equipment_powerup_grenade);
 
+	/* port: only the types a unit carries (a map's type) */
+	if (!VALID_INDEX(equipment_definition->equipment.grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES) &&
+		!grenade_type_reported)
+	{
+		grenade_type_reported = TRUE;
+		error(_error_silent, "### ERROR %s has grenade type %d; it can't be picked up",
+			tag_get_name(equipment->definition_index), equipment_definition->equipment.grenade_type);
+	}
 	if (grenade &&
+		VALID_INDEX(equipment_definition->equipment.grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES) &&
 		unit->unit.grenade_counts[equipment_definition->equipment.grenade_type] <
 			grenade->maximum_count)
 	{
@@ -2344,6 +2376,8 @@ void unit_scripting_suspended(
 	long unit_index,
 	boolean suspended)
 {
+	/* port: co-op players the scripts can't name go with player0 */
+	coop_scripts_suspend_followers(unit_index, suspended);
 	if (unit_index!=NONE)
 	{
 		struct unit_datum *unit = unit_get(unit_index);
@@ -2401,6 +2435,7 @@ boolean unit_custom_animation_at_frame(
 		{
 			unit->object.animation.state.frame_index = frame_index;
 			success = TRUE;
+			network_coop_note_unit_animation_frame(unit_index, frame_index);
 		}
 	}
 
@@ -3772,6 +3807,7 @@ void unit_detach_from_parent(
 
 	if (unit->object.parent_object_index != NONE)
 	{
+		long parent_index = unit->object.parent_object_index;
 		real_point3d parent_origin;
 		real_point3d unit_origin;
 		real_vector3d velocity;
@@ -3801,6 +3837,10 @@ void unit_detach_from_parent(
 			&unit->object.translational_velocity);
 		object_set_visibility(unit_index, TRUE);
 		object_compute_node_matrices(unit_index);
+		/* port: a vehicle dropped by another comes with more in a large
+		co-op game (port/linux/game/network_coop.c) */
+		if (unit->object.type == _object_type_vehicle && object_get(parent_index)->object.type == _object_type_vehicle)
+			network_coop_vehicle_dropped(unit_index, parent_index);
 	}
 
 	return;
@@ -4117,6 +4157,13 @@ boolean unit_start_user_animation(
 							TRUE);
 						object_compute_node_matrices_recursive(unit_index);
 						animation_started = TRUE;
+						network_coop_note_unit_animation(unit_index, animation_graph_index, animation_index,
+							interpolate);
+						if (unit->unit.player_index == NONE)
+						{
+							network_actors_note_user_animation(unit_index, animation_graph_index, animation_index,
+								interpolate);
+						}
 					}
 				}
 			}
@@ -4167,9 +4214,98 @@ void unit_stop_custom_animation(
 	if (unit_index!=NONE && unit_get(unit_index)->unit.animation.state==_unit_state_user_animation)
 	{
 		unit_animation_set_state(unit_index, _unit_state_idle);
+		network_coop_note_unit_animation(unit_index, NONE, NONE, FALSE);
 	}
 
 	return;
+}
+
+/* port: a unit that feigned death gets back up (a Flood combat form). The
+host's does when its timer runs out (unit_update); a client's copy when the
+host's word on it says it is alive again (network_actors.c). */
+void unit_port_resurrect(
+	long unit_index)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+	short new_state = TEST_FLAG(unit->unit.animation.flags, _unit_animation_fallen_on_front_bit) ?
+		_unit_state_resurrect_front : _unit_state_resurrect_back;
+
+	SET_FLAG(unit->object.damage_flags, _object_dead_bit, FALSE);
+	unit_set_actively_controlled(unit_index, TRUE);
+	unit_set_or_test_seat_and_weapon_label(unit_index, base_seat_label_get(_unit_animation_state_suspicious), NULL,
+		TRUE);
+	unit_animation_set_state(unit_index, new_state);
+	SET_FLAG(unit->unit.animation.flags, _unit_animation_ignore_translation_bit, FALSE);
+	if (unit->object.type == _object_type_biped)
+		biped_stop_limp_body_physics(unit_index);
+	unit_scream(unit_index, _unit_scream_resurrection);
+}
+
+/* how far into its own flinch or death animation a client's unit still
+switches to the host's pick */
+#define DAMAGE_ANIMATION_SWITCH_TICKS 10
+
+/* port: whether the unit plays a flinch or death animation of the type
+(the host's pick, port/linux/game/network_objects.c): it is switched to the
+host's if its own has only just begun. FALSE if it plays none. */
+boolean unit_port_correct_damage_animation(
+	long unit_index,
+	short type,
+	short animation_index)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+	long animation_graph_index = unit_definition_get(unit->definition_index)->object.animation_graph.index;
+
+	if (type == _unit_damage_animation_soft_ping)
+	{
+		/* (an overlay, beside the unit's animation) */
+		if (unit->unit.animation.soft_ping_animation.index == NONE)
+			return FALSE;
+		if (unit->unit.animation.soft_ping_animation.frame_index < DAMAGE_ANIMATION_SWITCH_TICKS)
+			unit->unit.animation.soft_ping_animation.index = animation_index;
+		return TRUE;
+	}
+	if (type == _unit_damage_animation_hard_ping ?
+		unit->unit.animation.state != _unit_state_hard_ping :
+		unit->unit.animation.state != _unit_state_dying && unit->unit.animation.state != _unit_state_dying_airborne)
+	{
+		return FALSE;
+	}
+	if (unit->object.animation.state.index != animation_index &&
+		unit->object.animation.state.frame_index < DAMAGE_ANIMATION_SWITCH_TICKS)
+	{
+		unit_set_animation(unit_index, animation_graph_index, animation_index);
+		object_compute_node_matrices_recursive(unit_index);
+	}
+	return TRUE;
+}
+
+/* port: a co-op client plays the custom animation the host's unit started
+(network_coop.c): exactly that animation, not another random permutation */
+void unit_port_play_user_animation(
+	long unit_index,
+	long animation_graph_index,
+	short animation_index,
+	boolean interpolate,
+	short frame_index)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+	struct animation_graph *animation_graph = animation_graph_definition_get(animation_graph_index);
+	struct animation *animation;
+
+	if (animation_index < 0 || animation_index >= animation_graph->animations.count)
+		return;
+	animation = TAG_BLOCK_GET_ELEMENT(&animation_graph->animations, animation_index, struct animation);
+	if (animation->type != _animation_base)
+		return;
+	if (interpolate)
+		object_start_interpolation(unit_index, 6);
+	unit->unit.animation.state = _unit_state_user_animation;
+	unit_set_animation(unit_index, animation_graph_index, animation_index);
+	SET_FLAG(unit->unit.animation.flags, _unit_animation_postpone_weapon_ik_until_interpolation_ends_bit, TRUE);
+	if (frame_index > 0 && frame_index < animation->frame_count)
+		unit->object.animation.state.frame_index = frame_index;
+	object_compute_node_matrices_recursive(unit_index);
 }
 
 boolean unit_melee_attack_begin(
@@ -4251,6 +4387,9 @@ boolean unit_melee_attack_begin(
 				else
 				{
 					unit->unit.melee_attack_state = 1;
+					/* port: the AI's swing, played on the clients too */
+					if (unit->unit.player_index == NONE)
+						network_actors_note_melee(unit_index, alignment_vector);
 				}
 				result = TRUE;
 			}
@@ -4304,6 +4443,9 @@ boolean unit_leap_begin(
 				{
 					unit_align_facing(unit_index, alignment_vector);
 				}
+				/* port: the AI's leap, played on the clients too */
+				if (unit->unit.player_index == NONE)
+					network_actors_note_leap(unit_index, alignment_vector);
 
 				result = TRUE;
 			}
@@ -4673,6 +4815,10 @@ void unit_scripting_enter_vehicle(
 					}
 				}
 			}
+
+			/* port: co-op players the scripts can't name board with player0 */
+			if (unit->object.parent_object_index == vehicle_index)
+				coop_scripts_board_followers(unit_index, vehicle_index, seat_name);
 		}
 	}
 
@@ -4785,10 +4931,13 @@ void unit_scripting_exit_vehicle(
 	if (unit_index!=NONE)
 	{
 		struct unit_datum *unit = unit_get(unit_index);
+		long vehicle_index = unit->object.parent_object_index;
 
 		if (unit->object.parent_object_index!=NONE && unit->unit.parent_seat_index!=NONE)
 		{
 			unit_try_and_exit_seat(unit_index);
+			/* port: co-op players the scripts can't name get out with player0 */
+			coop_scripts_exit_followers(unit_index, vehicle_index);
 		}
 	}
 
@@ -5165,6 +5314,11 @@ short vehicle_scripting_load_magic(
 		short available_seat_count;
 		long reference_index;
 		long unit_index;
+		/* port: the riders left without a seat that network co-op keeps
+		(coop_enemies.c), erased once the list is gone through */
+		long unseated_actor_indices[64];
+		short unseated_count = 0;
+		short unseated_number;
 
 		available_seat_count = vehicle_scripting_find_available_seats(
 			vehicle_index,
@@ -5183,6 +5337,7 @@ short vehicle_scripting_load_magic(
 			{
 				struct unit_datum *unit = (struct unit_datum *)object;
 				short available_seat_index;
+				long loaded_before = loaded_count;
 
 				for (available_seat_index = 0;
 					available_seat_index<available_seat_count;
@@ -5218,9 +5373,33 @@ short vehicle_scripting_load_magic(
 						}
 					}
 				}
+
+				/* port: network co-op's extra enemies (coop_enemies.c): a
+				rider seated, or one left without a seat, kept until the
+				seated get out */
+				if (loaded_count > loaded_before)
+					coop_enemies_rider_seated(vehicle_index, unit_index);
+				else if (unit->object.parent_object_index == NONE && unit->unit.actor_index != NONE &&
+					unseated_count < (short)NUMBEROF(unseated_actor_indices) &&
+					coop_enemies_rider_unseated(vehicle_index, unit_index))
+				{
+					unseated_actor_indices[unseated_count++] = unit->unit.actor_index;
+				}
 			}
 
 			unit_index = object_list_get_next(object_list_index, &reference_index);
+		}
+		for (unseated_number = 0; unseated_number < unseated_count; unseated_number++)
+			actor_erase(unseated_actor_indices[unseated_number], FALSE);
+
+		/* port: co-op players the scripts can't name board with player0,
+		once this load's seats are taken */
+		for (unit_index = object_list_get_first(object_list_index, &reference_index);
+			unit_index != NONE;
+			unit_index = object_list_get_next(object_list_index, &reference_index))
+		{
+			if (object_get(unit_index)->object.parent_object_index == vehicle_index)
+				coop_scripts_board_followers(unit_index, vehicle_index, seat_name);
 		}
 	}
 
@@ -5232,6 +5411,7 @@ void unit_open(
 {
 	if (unit_index!=NONE)
 	{
+		network_coop_note_unit_open(unit_index, TRUE);
 		unit_animation_set_state(unit_index, _unit_state_opening);
 	}
 
@@ -5243,6 +5423,7 @@ void unit_close(
 {
 	if (unit_index!=NONE)
 	{
+		network_coop_note_unit_open(unit_index, FALSE);
 		unit_animation_set_state(unit_index, _unit_state_closing);
 	}
 
@@ -5508,32 +5689,7 @@ boolean unit_update(
 			{
 				if (unit->object.body_vitality>0.f)
 				{
-					short new_state = TEST_FLAG(
-							unit->unit.animation.flags,
-							_unit_animation_fallen_on_front_bit) ? _unit_state_resurrect_front : _unit_state_resurrect_back;
-
-					SET_FLAG(unit->object.damage_flags, _object_dead_bit, FALSE);
-
-					unit_set_actively_controlled(unit_index, TRUE);
-					unit_set_or_test_seat_and_weapon_label(
-						unit_index,
-						base_seat_label_get(_unit_animation_state_suspicious),
-						NULL,
-						TRUE
-					);
-					unit_animation_set_state(unit_index, new_state);
-
-					SET_FLAG(
-						unit->unit.animation.flags,
-						_unit_animation_ignore_translation_bit,
-						FALSE);
-
-					if (unit->object.type==_object_type_biped)
-					{
-						biped_stop_limp_body_physics(unit_index);
-					}
-
-					unit_scream(unit_index, _unit_scream_resurrection);
+					unit_port_resurrect(unit_index);
 				}
 				else
 				{
@@ -5850,7 +6006,17 @@ boolean unit_update(
 
 	if (!TEST_FLAG(unit_definition->unit.flags, _unit_simple_creature_bit))
 	{
+		static boolean powered_seats_reported = FALSE;
 		short seat_index;
+
+		if (unit_definition->unit.powered_seats.count>(long)NUMBEROF(unit->unit.seat_power) &&
+			!powered_seats_reported)
+		{
+			powered_seats_reported = TRUE;
+			error(_error_silent, "### ERROR %s has %ld powered seats; only the first %d get power",
+				tag_get_name(unit->definition_index), unit_definition->unit.powered_seats.count,
+				(int)NUMBEROF(unit->unit.seat_power));
+		}
 
 		if (TEST_FLAG(unit->unit.animation.flags, _unit_animation_showing_acceleration_bit))
 		{
@@ -5860,7 +6026,9 @@ boolean unit_update(
 			unit->unit.seat_acceleration.k = unit->unit.seat_desired_acceleration.k*0.3f + unit->unit.seat_acceleration.k*0.7f;
 		}
 
-		for (seat_index = 0; seat_index<unit_definition->unit.powered_seats.count; ++seat_index)
+		/* port: no more powered seats than the unit keeps power for (a map's
+		count; the rest wrote past the unit) */
+		for (seat_index = 0; seat_index<MIN(unit_definition->unit.powered_seats.count, (long)NUMBEROF(unit->unit.seat_power)); ++seat_index)
 		{
 			boolean v96 = FALSE;
 			struct powered_seat_definition *powered_seat = TAG_BLOCK_GET_ELEMENT(&unit_definition->unit.powered_seats, seat_index, struct powered_seat_definition);
@@ -6461,6 +6629,9 @@ static void unit_ping_animation(
 					animation_graph_index,
 					selected_damage_animation_index);
 			}
+			/* port: the host's pick on every machine (port/linux/game/network_objects.c) */
+			animation_index = network_objects_damage_animation(unit_index, _unit_damage_animation_soft_ping,
+				animation_index);
 
 			if (animation_index==NONE)
 			{
@@ -6585,6 +6756,8 @@ static void unit_ping_animation(
 					animation_graph_index,
 					selected_damage_animation_index);
 			}
+			/* port: the host's pick on every machine (port/linux/game/network_objects.c) */
+			animation_index = network_objects_damage_animation(unit_index, damage_animation_type, animation_index);
 
 			if (animation_index!=NONE)
 			{
@@ -7701,6 +7874,9 @@ static void unit_throw_grenade_move_to_hand(
 		object_attach_to_node(unit_index, object_index, marker.node_index);
 		unit->unit.grenade_object_index = object_index;
 		unit->unit.grenade_throw_state = _unit_grenade_throw_in_hand;
+		/* port: the host takes a client's report of the grenade's damage only
+		from a grenade thrown (network_damage.c) */
+		network_damage_note_grenade(unit_index, unit->unit.current_grenade_index);
 	}
 	else
 	{
@@ -8184,6 +8360,24 @@ boolean unit_add_weapon_to_inventory(
 	boolean added = FALSE;
 	short mode = (short)is_starting_weapon;
 
+	/* port: only a weapon goes in a unit's weapons. A map's tag reference
+	(a starting or initial weapon, an item collection) can name any object,
+	which was then used as a weapon. In the released maps they all name
+	weapons (224 initial weapons, 32 item collection entries, every
+	starting profile) */
+	if (weapon->object.type!=_object_type_weapon)
+	{
+		static boolean reported = FALSE;
+
+		if (!reported)
+		{
+			reported = TRUE;
+			error(_error_silent, "### ERROR %s isn't a weapon; it can't be carried",
+				tag_get_name(weapon->definition_index));
+		}
+		return FALSE;
+	}
+
 	if (TEST_FLAG(weapon->object.flags, _object_connected_to_map_bit) &&
 		weapon->object.parent_object_index==NONE &&
 		unit_can_use_weapon(unit_index, weapon_index) &&
@@ -8515,6 +8709,8 @@ boolean unit_start_animation_impulse(
 				{
 					unit_align_facing(unit_index, alignment_vector);
 				}
+				if (unit->unit.player_index == NONE)
+					network_actors_note_impulse(unit_index, animation_impulse, alignment_vector);
 
 				result = TRUE;
 			}
@@ -10566,6 +10762,60 @@ static boolean unit_animation_set_state(
 done:
 	return result;
 }
+
+/* port: the nodes a unit's orientations hold: its model's, no more than a
+model can have (object_new sizes them from the model) */
+short unit_animation_model_node_count(
+	long unit_index)
+{
+	struct object_datum *object = object_get(unit_index);
+	struct object_definition *object_definition = object_definition_get(object->definition_index);
+	short model_node_count = 0;
+
+	if (object_definition->object.model.index!=NONE)
+	{
+		model_node_count = (short)PIN(
+			model_definition_get(object_definition->object.model.index)->nodes.count,
+			0, MAXIMUM_NODES_PER_MODEL);
+	}
+
+	return model_node_count;
+}
+
+/* port: the graph's animation, or NULL for one the graph doesn't have or
+one with more nodes than the model, which is all the orientations hold (a
+map's index and animation; the apply wrote past them). In the released
+maps every unit and vehicle animation has its model's node count */
+struct animation *unit_animation_get_fitting(
+	struct animation_graph *animation_graph,
+	short animation_index,
+	short model_node_count)
+{
+	static boolean reported = FALSE;
+	struct animation *animation = NULL;
+
+	if (VALID_INDEX(animation_index, animation_graph->animations.count))
+	{
+		animation = TAG_BLOCK_GET_ELEMENT(
+			&animation_graph->animations,
+			animation_index,
+			struct animation);
+
+		if (animation->node_count>model_node_count)
+		{
+			if (!reported)
+			{
+				reported = TRUE;
+				error(_error_silent, "### ERROR animation '%s' has %d nodes, more than its model's %d; it is skipped",
+					animation->name, animation->node_count, model_node_count);
+			}
+			animation = NULL;
+		}
+	}
+
+	return animation;
+}
+
 void unit_preprocess_node_orientations(
 	long unit_index,
 	struct real_orientation *node_orientations)
@@ -10575,41 +10825,43 @@ void unit_preprocess_node_orientations(
 	struct animation_graph_unit_seat *unit_seat;
 	real_matrix4x3 matrix;
 	struct unit_definition *unit_definition;
+	struct animation *animation;
+	short model_node_count;
 
 	unit = unit_get(unit_index);
 	unit_definition = unit_definition_get(unit->definition_index);
 	animation_graph = animation_graph_definition_get(
 		unit_definition->object.animation_graph.index);
+	/* port: every animation below is one the graph has and that fits the
+	model (unit_animation_get_fitting) */
+	model_node_count = unit_animation_model_node_count(unit_index);
 
-	if (unit->unit.animation.action_animation.index != NONE)
+	if (unit->unit.animation.action_animation.index != NONE &&
+		(animation = unit_animation_get_fitting(animation_graph,
+			unit->unit.animation.action_animation.index, model_node_count)) != NULL)
 	{
 		replacement_animation_apply(
-			TAG_BLOCK_GET_ELEMENT(
-				&animation_graph->animations,
-				unit->unit.animation.action_animation.index,
-				struct animation),
+			animation,
 			unit->unit.animation.action_animation.frame_index,
 			node_orientations);
 	}
 
-	if (unit->unit.animation.overlay_action_animation.index != NONE)
+	if (unit->unit.animation.overlay_action_animation.index != NONE &&
+		(animation = unit_animation_get_fitting(animation_graph,
+			unit->unit.animation.overlay_action_animation.index, model_node_count)) != NULL)
 	{
 		overlay_animation_apply(
-			TAG_BLOCK_GET_ELEMENT(
-				&animation_graph->animations,
-				unit->unit.animation.overlay_action_animation.index,
-				struct animation),
+			animation,
 			unit->unit.animation.overlay_action_animation.frame_index,
 			node_orientations);
 	}
 
-	if (unit->unit.animation.soft_ping_animation.index != NONE)
+	if (unit->unit.animation.soft_ping_animation.index != NONE &&
+		(animation = unit_animation_get_fitting(animation_graph,
+			unit->unit.animation.soft_ping_animation.index, model_node_count)) != NULL)
 	{
 		overlay_animation_apply(
-			TAG_BLOCK_GET_ELEMENT(
-				&animation_graph->animations,
-				unit->unit.animation.soft_ping_animation.index,
-				struct animation),
+			animation,
 			unit->unit.animation.soft_ping_animation.frame_index,
 			node_orientations);
 	}
@@ -10645,13 +10897,10 @@ void unit_preprocess_node_orientations(
 				animation_index = unit->unit.override_emotion_animation_index;
 			}
 
-			if (animation_index != NONE)
+			if (animation_index != NONE &&
+				(animation = unit_animation_get_fitting(animation_graph,
+					animation_index, model_node_count)) != NULL)
 			{
-				struct animation *animation = TAG_BLOCK_GET_ELEMENT(
-					&animation_graph->animations,
-					animation_index,
-					struct animation);
-
 				if (unit->unit.animation.emotion_index >= 0 &&
 					unit->unit.animation.emotion_index < animation->frame_count)
 				{
@@ -10671,13 +10920,10 @@ void unit_preprocess_node_orientations(
 			animation_index = animation_graph_animation_index_get(
 				&unit_seat->animations)[_unit_seat_animation_mouth_aperture].animation_index;
 
-			if (animation_index != NONE)
+			if (animation_index != NONE &&
+				(animation = unit_animation_get_fitting(animation_graph,
+					animation_index, model_node_count)) != NULL)
 			{
-				struct animation *animation = TAG_BLOCK_GET_ELEMENT(
-					&animation_graph->animations,
-					animation_index,
-					struct animation);
-
 				overlay_animation_apply_scaled(
 					animation,
 					0,
@@ -10708,13 +10954,10 @@ void unit_preprocess_node_orientations(
 							_unit_seat_animation_acceleration_front_back +
 							acceleration_index].animation_index;
 
-					if (animation_index != NONE)
+					if (animation_index != NONE &&
+						(animation = unit_animation_get_fitting(animation_graph,
+							animation_index, model_node_count)) != NULL)
 					{
-						struct animation *animation = TAG_BLOCK_GET_ELEMENT(
-							&animation_graph->animations,
-							animation_index,
-							struct animation);
-
 						overlay_animation_apply_continuous(
 							animation,
 							(animation->frame_count - 1) *
@@ -10737,7 +10980,9 @@ void unit_preprocess_node_orientations(
 
 			relative_aiming_angles = *global_zero_angles2d;
 
-			if (unit->unit.animation.aiming_screen_index != NONE)
+			if (unit->unit.animation.aiming_screen_index != NONE &&
+				(animation = unit_animation_get_fitting(animation_graph,
+					unit->unit.animation.aiming_screen_index, model_node_count)) != NULL)
 			{
 				real_vector3d relative_aiming_vector;
 				struct animation_aiming_screen_bounds const *aiming_bounds =
@@ -10795,10 +11040,7 @@ void unit_preprocess_node_orientations(
 					aiming_bounds->positive_pitch_frame_count *
 					aiming_bounds->positive_pitch_delta;
 				aiming_screen_apply(
-					TAG_BLOCK_GET_ELEMENT(
-						&animation_graph->animations,
-						unit->unit.animation.aiming_screen_index,
-						struct animation),
+					animation,
 					aiming_bounds,
 					relative_aiming_angles.yaw,
 					relative_aiming_angles.pitch,
@@ -10811,7 +11053,9 @@ void unit_preprocess_node_orientations(
 				struct animation_aiming_screen_bounds const *looking_bounds =
 					&unit_seat->looking_screen_bounds;
 
-				if (unit->unit.animation.looking_screen_index != NONE)
+				if (unit->unit.animation.looking_screen_index != NONE &&
+					(animation = unit_animation_get_fitting(animation_graph,
+						unit->unit.animation.looking_screen_index, model_node_count)) != NULL)
 				{
 					real_vector3d relative_looking_vector;
 					real_euler_angles2d relative_looking_angles;
@@ -10865,10 +11109,7 @@ void unit_preprocess_node_orientations(
 						looking_bounds->positive_pitch_frame_count *
 						looking_bounds->positive_pitch_delta;
 					aiming_screen_apply(
-						TAG_BLOCK_GET_ELEMENT(
-							&animation_graph->animations,
-							unit->unit.animation.looking_screen_index,
-							struct animation),
+						animation,
 						looking_bounds,
 						relative_looking_angles.yaw,
 						relative_looking_angles.pitch,
@@ -10990,6 +11231,9 @@ void unit_control(
 	struct unit_control_data const *control_data)
 {
 	struct unit_datum *unit = unit_get(unit_index);
+
+	if (unit->unit.player_index == NONE)
+		network_actors_note_control(unit_index, control_data);
 
 	match_assert(
 		"c:\\halo\\SOURCE\\units\\units.c",

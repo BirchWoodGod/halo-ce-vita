@@ -142,9 +142,25 @@ int halo_epoch_on_mutator(void);
 #include "sound/sound_manager.h"
 #ifdef HALO_LINUX
 #include "load_profile.h"
+#include "custom_edition_cache.h"
+#include "custom_edition_maps.h"
+#include "tag_schema.h" /* port: tag_validate.c */
+/* port: the port's text in the player's language (port/linux/src/lang.h,
+through the -iquote port/linux/game path) */
+#include "../src/lang.h"
 #endif
 
 /* ---------- constants */
+
+enum
+{
+	/* port: a vertex or index buffer in a cache file (a D3DResource: Common,
+	Data, Lock), as cache_files_disable_writes counts them */
+	CACHE_FILE_BUFFER_SIZE = 12,
+	/* port: what cache_file_read rounds a read's size up to a multiple of
+	(cache_files_windows.c) */
+	CACHE_FILE_SECTOR_SIZE = 512,
+};
 
 /* ---------- macros */
 
@@ -241,14 +257,36 @@ void texture_cache_close(
 	void);
 void display_error_damaged_media(
 	void);
+#ifdef HALO_LINUX
+void display_error_damaged_media_reason(
+	char const *format,
+	...);
+#endif
 void texture_cache_open(
 	void);
 void sound_idle(
 	void);
+static boolean cache_file_region_contains(
+	void const *region,
+	unsigned long region_size,
+	void const *address,
+	long count,
+	long element_size);
+static boolean cache_file_tag_header_verify(
+	struct cache_file_tag_header *tag_header,
+	long tag_data_size,
+	char const *scenario_name);
+static boolean cache_file_structure_bsp_reference_verify(
+	struct scenario_structure_bsp_reference *reference);
 
 /* ---------- globals */
 
 struct cache_file_globals cache_file_globals = { 0 };
+#ifdef HALO_LINUX
+/* port: the loaded tags' count, for tag_groups.h's release tag_get, which
+checks a map's tag references against it */
+long halo_loaded_tag_count = 0;
+#endif
 extern struct cache_file_tag_instance *global_tag_instances;
 char const *data_00316820[] =
 {
@@ -292,6 +330,174 @@ static struct cache_file_tag_instance *cache_get_tag_instance(
 		csprintf(temporary, "i don't think %08x is a tag index", tag_index));
 
 	return tag_instance;
+}
+
+/* port: whether count elements of element_size bytes at address all lie in
+the region_size bytes at region (no elements always do): a map's pointers
+and counts are checked so before anything follows them */
+static boolean cache_file_region_contains(
+	void const *region,
+	unsigned long region_size,
+	void const *address,
+	long count,
+	long element_size)
+{
+	unsigned long offset = (unsigned long)address - (unsigned long)region;
+
+	if (count == 0)
+		return TRUE;
+
+	return count > 0 &&
+		(unsigned long)address >= (unsigned long)region &&
+		offset <= region_size &&
+		(unsigned long)count <= (region_size - offset) / (unsigned long)element_size;
+}
+
+/* port: whether the tag header of the tags just read (tag_data_size bytes
+at the tag cache's base) can be trusted, as everything after trusts it:
+its tag table and vertex and index buffers lie in the tag data, its tags'
+count fits a tag index's absolute index, and it names a scenario tag */
+static boolean cache_file_tag_header_verify(
+	struct cache_file_tag_header *tag_header,
+	long tag_data_size,
+	char const *scenario_name)
+{
+	char const *problem = NULL;
+
+	if (tag_header->signature != CACHE_FILE_TAG_HEADER_SIGNATURE)
+	{
+		problem = "signature";
+	}
+	else if (tag_header->tag_count <= 0 || tag_header->tag_count > UNSIGNED_SHORT_MAX)
+	{
+		problem = "tag count";
+	}
+	else if (!cache_file_region_contains(
+		tag_header,
+		tag_data_size,
+		tag_header->tag_instances,
+		tag_header->tag_count,
+		sizeof(struct cache_file_tag_instance)))
+	{
+		problem = "tag table";
+	}
+	else if (!cache_file_region_contains(
+		tag_header,
+		tag_data_size,
+		tag_header->vertex_buffers,
+		tag_header->vertex_buffer_count,
+		CACHE_FILE_BUFFER_SIZE))
+	{
+		problem = "vertex buffers";
+	}
+	else if (!cache_file_region_contains(
+		tag_header,
+		tag_data_size,
+		tag_header->index_buffers,
+		tag_header->index_buffer_count,
+		CACHE_FILE_BUFFER_SIZE))
+	{
+		problem = "index buffers";
+	}
+	else
+	{
+		long scenario_absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(tag_header->scenario_tag_index);
+		long absolute_index;
+
+		if (scenario_absolute_index >= tag_header->tag_count ||
+			tag_header->tag_instances[scenario_absolute_index].tag_index != tag_header->scenario_tag_index ||
+			tag_header->tag_instances[scenario_absolute_index].group_tag != SCENARIO_TAG)
+		{
+			problem = "scenario tag";
+		}
+
+		/* port: each tag's data lies in the tag cache, or there is none yet
+		(a structure bsp's, set as it loads). Every tag_get goes by these.
+		The port's own tags (menu_tags.c) are added after this, and may lie
+		elsewhere */
+		for (absolute_index = 0;
+			!problem && absolute_index < tag_header->tag_count;
+			absolute_index++)
+		{
+			void const *base_address = tag_header->tag_instances[absolute_index].base_address;
+
+			if (base_address &&
+				!cache_file_region_contains(tag_header, TAG_CACHE_SIZE, base_address, 1, 1))
+			{
+				problem = "tag data address";
+			}
+		}
+	}
+
+	if (problem)
+	{
+		error(_error_silent, "the cache file '%s' is damaged: its tag header's %s is wrong", scenario_name, problem);
+
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+/* port: whether a structure bsp reference (the scenario's) may be loaded:
+its bytes lie in the map and fit the tag cache after the tag data, where
+they are read to (rounded up to whole sectors, as the read is), and it
+names a structure bsp tag */
+static boolean cache_file_structure_bsp_reference_verify(
+	struct scenario_structure_bsp_reference *reference)
+{
+	byte *tag_cache_base_address = physical_memory_get_tag_cache_base_address();
+	long tag_data_size = cache_file_globals.header.tag_data_size;
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(reference->structure_bsp.index);
+	long read_size;
+
+	if (reference->file_offset < 0 ||
+		reference->file_size < (long)sizeof(struct cache_file_structure_bsp_header) ||
+		reference->file_size > TAG_CACHE_SIZE ||
+		reference->file_offset > cache_file_globals.header.file_length - reference->file_size)
+	{
+		error(
+			_error_silent,
+			"a structure bsp is damaged: %08x bytes at %08x, in %08x bytes",
+			reference->file_size,
+			reference->file_offset,
+			cache_file_globals.header.file_length);
+
+		return FALSE;
+	}
+
+	read_size = (reference->file_size + CACHE_FILE_SECTOR_SIZE - 1) & ~(CACHE_FILE_SECTOR_SIZE - 1);
+	if (!cache_file_region_contains(
+		tag_cache_base_address + tag_data_size,
+		TAG_CACHE_SIZE - tag_data_size,
+		reference->base_address,
+		read_size,
+		1))
+	{
+		error(
+			_error_silent,
+			"a structure bsp is damaged: its %08x bytes at %08x would load to %08lx, outside the tag cache",
+			reference->file_size,
+			reference->file_offset,
+			(unsigned long)reference->base_address);
+
+		return FALSE;
+	}
+
+	if (reference->structure_bsp.index == NONE ||
+		absolute_index >= cache_file_globals.tag_header->tag_count ||
+		global_tag_instances[absolute_index].tag_index != reference->structure_bsp.index ||
+		global_tag_instances[absolute_index].group_tag != STRUCTURE_BSP_TAG)
+	{
+		error(
+			_error_silent,
+			"a structure bsp is damaged: %08x is not a structure bsp tag",
+			reference->structure_bsp.index);
+
+		return FALSE;
+	}
+
+	return TRUE;
 }
 
 /* ---------- public code */
@@ -346,18 +552,113 @@ char const *cache_files_map_directory(
 	return map_directory;
 }
 
+#ifdef HALO_LINUX
+/* the map file whose tags are loaded (its name without the extension), for
+the Vita settings panel, which does not delete a map in use */
+static char cache_files_loaded_map[64];
+
+int halo_cache_map_in_use(
+	char const *name)
+{
+	return cache_files_loaded_map[0] && !csstrcasecmp(cache_files_loaded_map, name);
+}
+#endif
+
 void scenario_tags_unload(
 	void)
 {
+#ifdef HALO_LINUX
+	/* (platform_memory_log: what the map leaves behind) */
+	char unloaded_map[NUMBEROF(cache_files_loaded_map)];
+
+	csstrncpy(unloaded_map, cache_files_loaded_map, NUMBEROF(unloaded_map) - 1);
+	unloaded_map[NUMBEROF(unloaded_map) - 1] = 0;
+	cache_files_loaded_map[0] = 0;
+#endif
 	sound_cache_close();
 	texture_cache_close();
+#ifdef HALO_LINUX
+	/* port: the menus' tags go, and the map's own table comes back
+	(port/linux/game/menu_tags.c): after the texture cache, which writes to
+	the bitmaps it has loaded as it closes */
+	{
+		extern void menu_tags_unloaded(void);
+
+		menu_tags_unloaded();
+	}
+#endif
 	cache_file_close();
+#ifdef HALO_LINUX
+	/* a Halo Custom Edition map has no Xbox vertex or index buffers
+	(port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_tags_loaded())
+	{
+		custom_edition_cache_tags_unload();
+	}
+	else
+	{
+		tags_header_deregister_vertex_and_index_buffers(cache_file_globals.tag_header);
+	}
+#else
 	tags_header_deregister_vertex_and_index_buffers(cache_file_globals.tag_header);
+#endif
 	cache_file_globals.tags_loaded = FALSE;
 	global_tag_instances = NULL;
+#ifdef HALO_LINUX
+	halo_loaded_tag_count = 0;
+	if (unloaded_map[0])
+	{
+		if (platform_renderer_map_unloaded)
+		{
+			platform_renderer_map_unloaded();
+		}
+		platform_memory_log("unloaded", unloaded_map);
+	}
+#endif
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port: the loaded tags' table and its count, for the menus' tags
+(port/linux/game/menu_tags.c), which a copy with theirs added replaces -
+in the tag header too, which the tag checks read (tag_validate.c), and the
+release builds' count (halo_loaded_tag_count): the table first, then its
+count, so that another thread looking a tag up meanwhile walks one table
+or the other */
+void *cache_files_tag_instances(
+	long *count)
+{
+	*count = cache_file_globals.tags_loaded ? cache_file_globals.tag_header->tag_count : 0;
+	return cache_file_globals.tags_loaded ? global_tag_instances : NULL;
+}
+
+void cache_files_set_tag_instances(
+	void *instances,
+	long count)
+{
+	if (!cache_file_globals.tags_loaded)
+		return;
+	/* (and the count the release builds' tag_get checks indices against,
+	tag_groups.h: without it, every tag of ours read as the empty one) */
+	if (count > cache_file_globals.tag_header->tag_count)
+	{
+		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_instances, (struct cache_file_tag_instance *)instances,
+			__ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&halo_loaded_tag_count, count, __ATOMIC_RELEASE);
+	}
+	else
+	{
+		__atomic_store_n(&halo_loaded_tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_count, count, __ATOMIC_RELEASE);
+		__atomic_store_n(&cache_file_globals.tag_header->tag_instances, (struct cache_file_tag_instance *)instances,
+			__ATOMIC_RELEASE);
+		__atomic_store_n(&global_tag_instances, (struct cache_file_tag_instance *)instances, __ATOMIC_RELEASE);
+	}
+}
+#endif
 
 void tag_files_open(
 	void)
@@ -396,7 +697,9 @@ long tag_loaded(
 	long group_tag,
 	char const *name)
 {
-	short absolute_index;
+	/* port: a long, as the tags' count is (a short wrapped on a count past
+	0x7FFF, and the walk never ended) */
+	long absolute_index;
 	long result = NONE;
 #ifdef HALO_LINUX
 	/* (port) the answers memoized: the game asks for the same few tags by
@@ -619,16 +922,121 @@ long tag_iterator_next(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port (from OpenCE, MrBruh's "Harden map and network input" and "Load,
+check and run Halo Custom Edition and OpenSauce maps"): whether size bytes
+at address lie in the loaded map's tag cache: the Xbox tag cache, or the
+one a Custom Edition map's tags were loaded into (custom_edition_cache.c),
+which may be larger */
+boolean cache_file_tag_cache_contains(
+	void const *address,
+	long size)
+{
+	unsigned long base = (unsigned long)physical_memory_get_tag_cache_base_address();
+	unsigned long tag_cache_size = TAG_CACHE_SIZE;
+	unsigned long offset;
+
+	if (custom_edition_cache_tags_loaded())
+		base = (unsigned long)custom_edition_cache_tag_cache(&tag_cache_size);
+	offset = (unsigned long)address - base;
+
+	return base && size > 0 &&
+		(unsigned long)address >= base &&
+		offset <= tag_cache_size &&
+		(unsigned long)size <= tag_cache_size - offset;
+}
+#endif
+
+#ifdef HALO_LINUX
+/* port: map files are untrusted and the tag header the map carries (its tag
+instance array, counts and buffer arrays) is read and its pointers walked by
+the loader. On the Vita the pointers have been relocated into the tag cache
+(tag_relocate.c); on the desktop they are absolute addresses in the mapped
+window. Either way they must all lie inside the window and the array
+extents must fit, or a crafted map would read out of bounds. A map that
+fails is refused ("damaged or not supported") instead of loaded. */
+#define MAXIMUM_LOADED_TAG_COUNT 0x20000
+static boolean cache_file_tag_header_valid(
+	struct cache_file_tag_header const *tag_header)
+{
+	unsigned long base = (unsigned long)physical_memory_get_tag_cache_base_address();
+	unsigned long end = base + 0x01600000;
+	struct cache_file_tag_instance const *instances = tag_header->tag_instances;
+	unsigned long instances_address = (unsigned long)instances;
+	long scenario_absolute_index = (short)tag_header->scenario_tag_index;
+
+	if (tag_header->signature != CACHE_FILE_TAG_HEADER_SIGNATURE ||
+		tag_header->tag_count < 1 || tag_header->tag_count > MAXIMUM_LOADED_TAG_COUNT ||
+		instances_address < base || instances_address >= end ||
+		(unsigned long)tag_header->tag_count > (end - instances_address) / sizeof(struct cache_file_tag_instance) ||
+		scenario_absolute_index < 0 || scenario_absolute_index >= tag_header->tag_count ||
+		tag_header->vertex_buffer_count < 0 || tag_header->index_buffer_count < 0)
+	{
+		return FALSE;
+	}
+	if (tag_header->vertex_buffer_count > 0)
+	{
+		unsigned long address = (unsigned long)tag_header->vertex_buffers;
+
+		if (address < base || address >= end ||
+			(unsigned long)tag_header->vertex_buffer_count > (end - address) / sizeof(D3DVertexBuffer))
+		{
+			return FALSE;
+		}
+	}
+	if (tag_header->index_buffer_count > 0)
+	{
+		unsigned long address = (unsigned long)tag_header->index_buffers;
+
+		if (address < base || address >= end ||
+			(unsigned long)tag_header->index_buffer_count > (end - address) / sizeof(D3DIndexBuffer))
+		{
+			return FALSE;
+		}
+	}
+	/* the scenario tag the loader reads next must be a scenario in the
+	window */
+	if (instances[scenario_absolute_index].group_tag != SCENARIO_TAG ||
+		(unsigned long)instances[scenario_absolute_index].base_address < base ||
+		(unsigned long)instances[scenario_absolute_index].base_address >= end)
+	{
+		return FALSE;
+	}
+
+	return TRUE;
+}
+#endif
+
 boolean cache_file_header_verify(
 	struct cache_file_header *header,
 	char const *scenario_name,
 	boolean fatal)
 {
+#ifdef HALO_LINUX
+	/* the native builds say what a Halo Custom Edition cache is instead of
+	calling it an old version of this build's caches, and still refuse it
+	(port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_refuse(header, header->build, scenario_name, fatal))
+	{
+		return FALSE;
+	}
+#endif
 	if (header->header_signature != CACHE_FILE_HEADER_SIGNATURE ||
 		header->footer_signature != CACHE_FILE_FOOTER_SIGNATURE ||
 		header->file_length < 0 ||
 		header->file_length > 0x11600000 ||
-		csstrlen(header->name) > 31)
+		csstrlen(header->name) > 31
+#ifdef HALO_LINUX
+		/* port: map files are untrusted - the tag data must be a sane range
+		that fits the 22 MB tag cache and lies within the file, so the load
+		below (a read of tag_data_size into the tag cache) cannot overrun it */
+		|| header->tag_data_offset < (long)sizeof(struct cache_file_header)
+		|| header->tag_data_size < (long)sizeof(struct cache_file_tag_header)
+		|| header->tag_data_size > 0x01600000
+		|| header->tag_data_offset > header->file_length
+		|| header->tag_data_size > header->file_length - header->tag_data_offset
+#endif
+		)
 	{
 		if (fatal)
 		{
@@ -678,18 +1086,256 @@ boolean cache_file_header_verify(
 	}
 #endif
 
+	/* port: the map holds at least its header, and its tag data lies in it
+	and fits the tag cache, which it is read into whole (a size rounded up
+	to whole sectors still fits, the cache being whole sectors). Checked
+	without overflow: the offset and size are each checked first */
+	if (header->file_length < (long)sizeof(struct cache_file_header) ||
+		header->tag_data_offset < 0 ||
+		header->tag_data_size < 0 ||
+		header->tag_data_size > TAG_CACHE_SIZE ||
+		header->tag_data_offset > header->file_length - header->tag_data_size)
+	{
+		error(
+			_error_silent,
+			"the cache file '%s' is damaged: %08x bytes of tag data at %08x, in %08x bytes",
+			scenario_name,
+			header->tag_data_size,
+			header->tag_data_offset,
+			header->file_length);
+
+		return FALSE;
+	}
+
 	return TRUE;
 }
+
+/* port: the builds of the released maps, by region. Any build here plays
+multiplayer with the others; a map of another build may differ in what
+machines send each other, so its players cannot open the multiplayer menu
+(ui_widget.c, ui_widget_launch_widget). A PAL build's maps are played as the
+NTSC maps are (port/linux/game/pal_tags.c) */
+static struct
+{
+	char const *build;
+	char const *region;
+} const cache_file_builds[] =
+{
+	{ "01.01.14.2342", "PAL" },
+	{ "01.10.12.2276", "NTSC" },
+	{ "01.08.15.1749", "NTSC" },
+};
+
+/* the region of a build's maps ("PAL" or "NTSC") if it is listed above, else
+NULL; build is a cache file header's (which need not end it) */
+char const *cache_files_build_region(
+	char const *build)
+{
+	short index;
+
+	for (index = 0; index < NUMBEROF(cache_file_builds); index++)
+	{
+		if (!csstrncmp(build, cache_file_builds[index].build, sizeof(cache_file_globals.header.build)))
+			return cache_file_builds[index].region;
+	}
+
+	return NULL;
+}
+
+/* the region of the loaded map's build if it plays multiplayer, else NULL;
+build gets the build */
+char const *cache_files_multiplayer_region(
+	char build[0x20])
+{
+	csstrncpy(build, cache_file_globals.header.build, 0x20);
+	build[0x1F] = 0;
+
+	return cache_files_build_region(cache_file_globals.header.build);
+}
+
+/* whether the named map plays multiplayer with the others: FALSE only for
+a map whose header is of a build not listed above (a map whose header cannot
+be read is left to precaching, which tells of a missing map); build gets the
+map's build, empty if unread. The multiplayer menus check the loaded map's
+(ui.map's) build; this checks a multiplayer map's own, which may be of
+another build: the object and damage messages name definitions by tag
+index, which differs between builds */
+boolean cache_files_map_plays_multiplayer(
+	char const *map_name,
+	char build[0x20])
+{
+	struct cache_file_header header;
+	char path[256];
+	HANDLE file;
+	boolean result = TRUE;
+
+	build[0] = 0;
+	if (!map_name || !map_name[0])
+		return TRUE;
+#ifdef HALO_LINUX
+	/* (port) a custom map (a modded Xbox map, a Custom Edition one:
+	port/linux/game/custom_edition_maps.c) is of whatever build its tools
+	wrote: the host's copy of it decides instead
+	(custom_edition_maps_host_copy_matches, network_client_manager.c) */
+	if (custom_edition_maps_display_index(map_name) != NONE)
+		return TRUE;
+#endif
+	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), tag_name_strip_path(map_name));
+	file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	if (file != INVALID_HANDLE_VALUE)
+	{
+		unsigned long bytes_read;
+
+		if (ReadFile(file, &header, sizeof(header), &bytes_read, NULL) &&
+			bytes_read == sizeof(header) &&
+			cache_file_header_verify(&header, path, FALSE))
+		{
+			csstrncpy(build, header.build, 0x20);
+			build[0x1F] = 0;
+			result = cache_files_build_region(header.build) != NULL;
+		}
+		CloseHandle(file);
+	}
+
+	return result;
+}
+
+/* tells the player that maps of a build (a cache file header's) do not play
+multiplayer: map_name the map's, or NULL for the player's maps */
+void cache_files_show_multiplayer_unavailable(
+	char const *map_name,
+	char const *build)
+{
+	void platform_log(char const *format, ...);
+	void platform_show_message(char const *title, char const *message);
+	char message[480];
+
+	if (map_name)
+	{
+		platform_log("multiplayer is unavailable: the map %s is of build %s, which is not supported", map_name, build);
+		snprintf(
+			message,
+			sizeof(message),
+			T("The map %s (build %s) isn't supported for multiplayer yet.\n\nThe README lists the maps multiplayer plays."),
+			tag_name_strip_path(map_name),
+			build);
+	}
+	else
+	{
+		platform_log("multiplayer is unavailable: maps of build %s are not supported", build);
+		snprintf(
+			message,
+			sizeof(message),
+			T("Your maps (build %s) aren't supported for multiplayer yet.\n\nThe README lists the maps multiplayer plays."),
+			build);
+	}
+	platform_show_message(T("Halo: multiplayer unavailable"), message);
+
+	return;
+}
+
+#ifdef HALO_LINUX
+/* port: the map whose precache last failed (cache_files_precache_failed),
+not tried again every second (cache_files_give_time_to_precache) until a map
+is chosen or a game's settings name one again */
+static char cache_files_precache_failed_map[256];
+
+void cache_files_precache_failure_forget(
+	void)
+{
+	cache_files_precache_failed_map[0] = 0;
+
+	return;
+}
+
+/* (map_share.c's: a joiner leaves its game, told why) */
+boolean map_share_client_precache_failed(char const *level_name, char const *why);
+
+/* A map that could not be precached: missing, cut short, a Halo PC map named
+as an Xbox level with PC maps off, too big (cache_files_windows.c says which).
+Retail Halo stopped at the damaged disc error for any of them, as this did:
+in a joiner's lobby, the host's map (Ben's Battle Creek, October 2026), the
+game closing. Now the player is told why: a joiner leaves its game at its next
+frame (`blocking` FALSE: the lobby's precache, map_share.c), a host is told
+at once, and a map being loaded is recorded as refused, so game_load fails
+and the menu says why (custom_edition_cache_load_failure_show;
+network_game_create_game_objects ends a network game). The menus' own map
+has no menu to go back to: FALSE, and the damaged disc as before. */
+boolean cache_files_precache_failed(
+	char const *map_name,
+	boolean blocking)
+{
+	void platform_log(char const *format, ...);
+	char why[320];
+	char const *name = tag_name_strip_path(map_name ? map_name : "");
+
+	if (!csstrcasecmp(name, "ui"))
+	{
+		return FALSE;
+	}
+	if (!name[0])
+	{
+		snprintf(why, sizeof(why), T("no map was named"));
+		platform_log("map: a map with no name could not be precached");
+		error(_error_silent, "cache: a map with no name could not be precached");
+		if (blocking)
+		{
+			halo_map_load_refused("", why);
+		}
+		return TRUE;
+	}
+	cache_files_precache_failure_describe(map_name, why, sizeof(why));
+	platform_log("map: %s could not be precached: %s", name, why);
+	error(_error_silent, "cache: '%s' could not be precached: %s", map_name, why);
+	csstrncpy(cache_files_precache_failed_map, map_name, sizeof(cache_files_precache_failed_map) - 1);
+	cache_files_precache_failed_map[sizeof(cache_files_precache_failed_map) - 1] = 0;
+	if (!blocking)
+	{
+		/* (a host's or a lone player's map chosen in the menus: said now,
+		once (the map is not tried again until chosen again); the game
+		does not start without it) */
+		if (!map_share_client_precache_failed(map_name, why))
+		{
+			void platform_show_message(char const *title, char const *message);
+			char message[480];
+
+			snprintf(message, sizeof(message), T("Couldn't load %s: %s."), custom_edition_maps_level_title(map_name), why);
+			platform_show_message(T("Halo: map"), message);
+		}
+		return TRUE;
+	}
+	halo_map_load_refused(map_name, why);
+
+	return TRUE;
+}
+#endif
 
 boolean cache_files_give_time_to_precache(
 	char const *map_name)
 {
 	boolean result = FALSE;
 
+#ifdef HALO_LINUX
+	/* (port: no map named, nothing to precache: an empty name passed for
+	precached when a cache file was empty, and was a damaged disc when none
+	was, network_game_client_update_precache_status) */
+	if (!map_name || !map_name[0])
+	{
+		return FALSE;
+	}
+#endif
 	if (cache_files_precache_map_loaded(map_name))
 	{
 		result = TRUE;
 	}
+#ifdef HALO_LINUX
+	/* (port: one that failed is not tried again each second) */
+	else if (cache_files_precache_failed_map[0] && map_name &&
+		!csstrcasecmp(cache_files_precache_failed_map, map_name) &&
+		!cache_files_precache_in_progress())
+	{
+	}
+#endif
 	else
 	{
 		if (cache_files_precache_in_progress() &&
@@ -703,8 +1349,22 @@ boolean cache_files_give_time_to_precache(
 			real progress;
 			short status = cache_files_precache_map_status(&progress);
 
+#ifdef HALO_LINUX
+			/* port: said, not a damaged disc (cache_files_precache_failed) */
+			if (status == 2)
+			{
+				cache_files_precache_map_end();
+				if (!cache_files_precache_failed(map_name, FALSE))
+				{
+					display_error_damaged_media_reason("the menus' map %s could not be copied to the map cache",
+						map_name ? map_name : "");
+					display_error_damaged_media();
+				}
+			}
+#else
 			if (status == 2)
 				display_error_damaged_media();
+#endif
 			else if (status == 1)
 				cache_files_precache_map_end();
 		}
@@ -712,7 +1372,17 @@ boolean cache_files_give_time_to_precache(
 		{
 			cache_files_precache_set_priority(0);
 			if (!cache_files_precache_map_begin(map_name, FALSE))
+#ifdef HALO_LINUX
+			{
+				if (!cache_files_precache_failed(map_name, FALSE))
+				{
+					display_error_damaged_media_reason("the menus' map %s could not be precached", map_name ? map_name : "");
+					display_error_damaged_media();
+				}
+			}
+#else
 				display_error_damaged_media();
+#endif
 		}
 	}
 
@@ -729,8 +1399,48 @@ long scenario_tags_load(
 
 	stripped_scenario_name = tag_name_strip_path(scenario_name);
 	result = NONE;
+#ifdef HALO_LINUX
+	csstrncpy(cache_files_loaded_map, stripped_scenario_name, sizeof(cache_files_loaded_map) - 1);
+	cache_files_loaded_map[sizeof(cache_files_loaded_map) - 1] = 0;
+#endif
 	texture_cache_open();
 	sound_cache_open();
+#ifdef HALO_LINUX
+	/* port: the menus' XML read meanwhile, on a thread of its own, for
+	ui.map (port/linux/game/menu_tags.c) */
+	{
+		extern void menu_tags_preload(char const *map_name);
+
+		menu_tags_preload(stripped_scenario_name);
+	}
+	/* a Halo Custom Edition map, when those may run, is read in place into
+	its own tag cache and has no Xbox vertex or index buffers
+	(port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_playable(stripped_scenario_name))
+	{
+		cache_file_globals.tag_header = custom_edition_cache_tags_load(
+			stripped_scenario_name,
+			&cache_file_globals.header);
+		if (cache_file_globals.tag_header)
+		{
+			global_tag_instances = cache_file_globals.tag_header->tag_instances;
+			halo_loaded_tag_count = cache_file_globals.tag_header->tag_count;
+			cache_file_globals.tags_loaded = TRUE;
+			result = cache_file_globals.tag_header->scenario_tag_index;
+		}
+		else
+		{
+			/* (a map that cannot be loaded leaves nothing open: the menu's
+			map is loaded next, custom_edition_cache_load_failure_show, and
+			a texture cache opened twice lost the menu's textures) */
+			sound_cache_close();
+			texture_cache_close();
+			cache_files_loaded_map[0] = 0;
+		}
+
+		return result;
+	}
+#endif
 	if (cache_file_open(stripped_scenario_name, &cache_file_globals.header))
 	{
 		tag_cache_base_address = physical_memory_get_tag_cache_base_address();
@@ -749,9 +1459,32 @@ long scenario_tags_load(
 				SwitchToThread();
 			}
 
+			/* port (from OpenCE, MrBruh's "Harden map and network input"):
+			tags that did not all read, or whose header cannot be trusted,
+			are not loaded: the map is refused, as one whose header is wrong
+			is, and closed for the next to open (the header is checked where
+			the tags are, once relocated) */
+			if (read_complete != TRUE)
+			{
+				error(_error_silent, "the cache file '%s' could not be read", scenario_name);
+				cache_file_close();
+				halo_map_load_refused(scenario_name, "this map file is damaged or not supported");
+
+				return NONE;
+			}
 #ifdef HALO_RELOCATABLE_TAG_CACHE
 			halo_tag_relocate_tags(tag_cache_base_address, cache_file_globals.header.tag_data_size);
 #endif
+			if (!cache_file_tag_header_verify(
+				tag_cache_base_address,
+				cache_file_globals.header.tag_data_size,
+				scenario_name))
+			{
+				cache_file_close();
+				halo_map_load_refused(scenario_name, "this map file is damaged or not supported");
+
+				return NONE;
+			}
 			cache_file_globals.tag_header = tag_cache_base_address;
 			match_vassert(
 				"c:\\halo\\SOURCE\\cache\\cache_files.c",
@@ -768,7 +1501,56 @@ long scenario_tags_load(
 					'a',
 					'g',
 					's'));
+#ifdef HALO_LINUX
+			/* port: refuse a map whose tag header is damaged or crafted
+			before anything reads its tags (tag_cache_base_address holds the
+			relocated tags now) */
+			if (!cache_file_tag_header_valid(cache_file_globals.tag_header)
+#ifdef HALO_RELOCATABLE_TAG_CACHE
+				/* a tag block whose count or pointer did not fit the tag data:
+				a crafted map (tag_relocate.c) */
+				|| halo_tag_relocate_anomalies() != 0
+#endif
+				)
+			{
+				error(_error_silent, "cache: '%s' has a damaged or unsupported tag header; refusing it", scenario_name);
+				halo_map_load_refused(scenario_name, "this map file is damaged or not supported");
+				cache_file_globals.tag_header = NULL;
+				return NONE;
+			}
+			/* port (from OpenCE, MrBruh's "Validate map tags before
+			loading"): and every tag checked against its group's schema
+			before anything reads it (port/linux/game/tag_validate.c), where
+			the tags are now (relocated): a map whose tags' pointers cannot be
+			trusted is refused; what can be corrected is */
+			{
+				boolean validated = tag_validate_tags(
+					tag_cache_base_address,
+					cache_file_globals.header.tag_data_size,
+					cache_file_globals.header.file_length,
+					stripped_scenario_name);
+
+				if (!validated)
+				{
+					error(_error_silent, "cache: '%s' failed the tag check (above); refusing it", scenario_name);
+					/* (a check with no memory to run in is the session's
+					memory, not the map: the player is told to restart) */
+					halo_map_load_refused(scenario_name, tag_validate_out_of_memory() ?
+						"out of memory: restart the game" : "this map file is damaged or not supported");
+					cache_file_globals.tag_header = NULL;
+					return NONE;
+				}
+				if (tag_validate_corrections())
+				{
+					error(_error_silent, "cache: '%s' needed %ld tag corrections (above)", scenario_name,
+						tag_validate_corrections());
+				}
+			}
+#endif
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
+#ifdef HALO_LINUX
+			halo_loaded_tag_count = cache_file_globals.tag_header->tag_count;
+#endif
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
 			cache_file_globals.tags_loaded = TRUE;
 #ifdef HALO_LINUX
@@ -780,8 +1562,32 @@ long scenario_tags_load(
 			}
 #endif
 			result = cache_file_globals.tag_header->scenario_tag_index;
+#ifdef HALO_LINUX
+			/* port: OpenCE's multiplayer screens, added to ui.map's tags
+			when the player's Halo PC data is in the maps folder
+			(port/linux/game/menu_tags.c) */
+			{
+				extern void menu_tags_loaded(char const *map_name);
+
+				menu_tags_loaded(stripped_scenario_name);
+			}
+#endif
+		}
+		/* port: a map refused is closed for the next to open */
+		else
+		{
+			cache_file_close();
 		}
 	}
+#ifdef HALO_LINUX
+	/* port: an Xbox cache that did not load (not in the cache, a header that
+	failed cache_file_header_verify, or a tag header refused above) returns
+	to the menu with a message rather than stopping the game fatally */
+	if (result == NONE)
+	{
+		halo_map_load_refused(stripped_scenario_name, "this map file is damaged or not supported");
+	}
+#endif
 
 	return result;
 }
@@ -794,12 +1600,65 @@ boolean scenario_structure_bsp_load(
 #ifdef HALO_LINUX
 	unsigned long long started = halo_load_profile_now();
 #endif
+	/* port: the bsp's header, once read and checked */
+	struct cache_file_structure_bsp_header *structure_bsp_header;
+
+	/* port (from OpenCE, MrBruh's "Harden map and network input"): the tag
+	data's size was checked as the map loaded (cache_file_header_verify);
+	the bsp's reference is the map's, and is checked before anything is
+	read where it says, its read rounded up to whole sectors too (a Custom
+	Edition map's by its own loader) */
+	if (!custom_edition_cache_tags_loaded() &&
+		(cache_file_globals.header.tag_data_size < 0 ||
+			cache_file_globals.header.tag_data_size > TAG_CACHE_SIZE ||
+			!cache_file_structure_bsp_reference_verify(reference)))
+	{
+		halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+		return FALSE;
+	}
 
 	tag_cache_base_address = physical_memory_get_tag_cache_base_address();
+#ifdef HALO_LINUX
+	/* port: a structure BSP reference's file range and load address come
+	from the (untrusted) map; the Xbox loader reads file_size bytes from the
+	file into base_address. Refuse one that would read out of the file or
+	write past the tag cache (a Custom Edition BSP is read and bounds-checked
+	by custom_edition_cache.c instead). */
+	if (!custom_edition_cache_tags_loaded())
+	{
+		unsigned long tag_data_size = (unsigned long)cache_file_globals.header.tag_data_size;
+		unsigned long base = (unsigned long)tag_cache_base_address;
+		unsigned long load = (unsigned long)reference->base_address;
+
+		if (reference->file_offset < (long)sizeof(struct cache_file_header) ||
+			reference->file_size <= 0 ||
+			(unsigned long)reference->file_size > 0x01600000 - tag_data_size ||
+			reference->file_offset > cache_file_globals.header.file_length ||
+			(unsigned long)reference->file_size > (unsigned long)(cache_file_globals.header.file_length - reference->file_offset) ||
+			load < base + tag_data_size ||
+			load >= base + 0x01600000 ||
+			(unsigned long)reference->file_size > base + 0x01600000 - load)
+		{
+			error(_error_silent, "cache: structure BSP %ld has a damaged or unsupported range (0x%lX+0x%lX at 0x%lX); refusing it",
+				(long)reference->structure_bsp.index, (unsigned long)reference->file_offset,
+				(unsigned long)reference->file_size, load);
+			halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+			return FALSE;
+		}
+	}
+	if (!custom_edition_cache_tags_loaded())
+	{
+		csmemset(
+			tag_cache_base_address + cache_file_globals.header.tag_data_size,
+			0xCD,
+			0x01600000 - cache_file_globals.header.tag_data_size);
+	}
+#else
 	csmemset(
 		tag_cache_base_address + cache_file_globals.header.tag_data_size,
 		0xCD,
 		0x01600000 - cache_file_globals.header.tag_data_size);
+#endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_clear, started, 0x01600000 - cache_file_globals.header.tag_data_size);
 	started = halo_load_profile_now();
@@ -822,6 +1681,24 @@ boolean scenario_structure_bsp_load(
 				sound_idle();
 			}
 		}
+
+		/* port (from OpenCE, MrBruh's "Harden map and network input"): a
+		bsp that did not all read, or whose header is not one, is not
+		loaded (its pointers are checked once relocated, below) */
+		structure_bsp_header = reference->base_address;
+		if (read_complete != TRUE ||
+			structure_bsp_header->signature != CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE)
+		{
+			error(
+				_error_silent,
+				"a structure bsp is damaged: its %08x bytes at %08x %s",
+				reference->file_size,
+				reference->file_offset,
+				read_complete != TRUE ? "could not be read" : "have a wrong header");
+			halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+
+			return FALSE;
+		}
 	}
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_read, started, reference->file_size);
@@ -829,20 +1706,124 @@ boolean scenario_structure_bsp_load(
 #endif
 
 #ifdef HALO_RELOCATABLE_TAG_CACHE
-	halo_tag_relocate_structure_bsp(tag_cache_base_address, reference->base_address, reference->file_size);
+	/* (a Custom Edition map's structure BSP is linked to where it is read:
+	custom_edition_cache.c) */
+	if (!custom_edition_cache_tags_loaded())
+	{
+		halo_tag_relocate_structure_bsp(tag_cache_base_address, reference->base_address, reference->file_size);
+		/* port: a tag block in the structure BSP whose count or pointer did
+		not fit (a crafted map): refuse it */
+		if (halo_tag_relocate_anomalies() != 0)
+		{
+			error(_error_silent, "cache: structure BSP %ld has a damaged or unsupported block; refusing it",
+				(long)reference->structure_bsp.index);
+			halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+			return FALSE;
+		}
+	}
+	else
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size);
 #endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_relocate, started, 0);
 	started = halo_load_profile_now();
 #endif
-	cache_file_globals.structure_bsp_header = reference->base_address;
+	/* port (from OpenCE, MrBruh's "Harden map and network input"): a bsp
+	whose header's pointers leave what was read (where they are now,
+	relocated) is not loaded */
+	if (!cache_file_region_contains(
+			reference->base_address,
+			reference->file_size,
+			structure_bsp_header->base_address,
+			1,
+			1) ||
+		!cache_file_region_contains(
+			reference->base_address,
+			reference->file_size,
+			structure_bsp_header->vertex_buffers,
+			structure_bsp_header->vertex_buffer_count,
+			CACHE_FILE_BUFFER_SIZE) ||
+		!cache_file_region_contains(
+			reference->base_address,
+			reference->file_size,
+			structure_bsp_header->index_buffers,
+			structure_bsp_header->index_buffer_count,
+			CACHE_FILE_BUFFER_SIZE))
+	{
+		error(
+			_error_silent,
+			"a structure bsp is damaged: its %08x bytes at %08x have a wrong header",
+			reference->file_size,
+			reference->file_offset);
+		halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+
+		return FALSE;
+	}
+	cache_file_globals.structure_bsp_header = structure_bsp_header;
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",
 		0xE0,
 		cache_file_globals.structure_bsp_header->signature==CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE);
+#ifdef HALO_LINUX
+	/* port: refuse an Xbox structure BSP whose header is damaged before its
+	buffers are registered or its tag instance is set (a Custom Edition BSP
+	is checked by custom_edition_cache.c) */
+	if (!custom_edition_cache_tags_loaded())
+	{
+		struct cache_file_structure_bsp_header const *bsp = cache_file_globals.structure_bsp_header;
+		unsigned long base = (unsigned long)tag_cache_base_address;
+		unsigned long end = base + 0x01600000;
+		short absolute_index = (short)reference->structure_bsp.index;
+
+		if (bsp->signature != CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE ||
+			bsp->vertex_buffer_count < 0 || bsp->index_buffer_count < 0 ||
+			absolute_index < 0 || absolute_index >= cache_file_globals.tag_header->tag_count ||
+			(bsp->vertex_buffer_count > 0 && ((unsigned long)bsp->vertex_buffers < base ||
+				(unsigned long)bsp->vertex_buffers >= end ||
+				(unsigned long)bsp->vertex_buffer_count > (end - (unsigned long)bsp->vertex_buffers) / sizeof(D3DVertexBuffer))) ||
+			(bsp->index_buffer_count > 0 && ((unsigned long)bsp->index_buffers < base ||
+				(unsigned long)bsp->index_buffers >= end ||
+				(unsigned long)bsp->index_buffer_count > (end - (unsigned long)bsp->index_buffers) / sizeof(D3DIndexBuffer))))
+		{
+			error(_error_silent, "cache: structure BSP %ld has a damaged or unsupported header; refusing it",
+				(long)reference->structure_bsp.index);
+			halo_map_load_refused(cache_files_loaded_map, "this map file is damaged or not supported");
+			cache_file_globals.structure_bsp_header = NULL;
+			return FALSE;
+		}
+	}
+#endif
+#ifdef HALO_LINUX
+	/* port (from OpenCE, MrBruh's "Validate map tags before loading"): and
+	checked against its schema, as the map's tags were, where it is now
+	(relocated), before its buffers are registered
+	(port/linux/game/tag_validate.c; a Custom Edition map's too) */
+	if (!tag_validate_structure_bsp(
+		reference->structure_bsp.index,
+		reference->base_address,
+		reference->file_size))
+	{
+		error(_error_silent, "cache: structure BSP %ld failed the tag check (above); refusing it",
+			(long)reference->structure_bsp.index);
+		halo_map_load_refused(cache_files_loaded_map, tag_validate_out_of_memory() ?
+			"out of memory: restart the game" : "this map file is damaged or not supported");
+		cache_file_globals.structure_bsp_header = NULL;
+		return FALSE;
+	}
+#endif
 	structure_bsp_header_register_vertex_buffers(cache_file_globals.structure_bsp_header);
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_vertex_buffers, started, 0);
+	/* a Halo Custom Edition structure BSP has no Xbox vertex buffers: its
+	vertices are compressed and given buffers instead
+	(port/linux/game/custom_edition_geometry.c) */
+	if (custom_edition_cache_tags_loaded() &&
+		!custom_edition_structure_bsp_load(cache_file_globals.structure_bsp_header->base_address))
+	{
+		cache_file_globals.structure_bsp_header = NULL;
+
+		return FALSE;
+	}
 #endif
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);
 	match_assert(
@@ -864,6 +1845,14 @@ void scenario_structure_bsp_unload(
 	struct cache_file_tag_instance *tag_instance;
 
 	structure_bsp_header_deregister_vertex_buffers(cache_file_globals.structure_bsp_header);
+#ifdef HALO_LINUX
+	/* the buffers a Halo Custom Edition structure BSP was given
+	(port/linux/game/custom_edition_geometry.c) */
+	if (custom_edition_cache_tags_loaded())
+	{
+		custom_edition_structure_bsp_unload();
+	}
+#endif
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",
@@ -886,7 +1875,24 @@ void *tag_get(
 	char expected_group[16];
 	char returned_group[16];
 
-	struct cache_file_tag_instance *tag_instance = cache_get_tag_instance(tag_index);
+	struct cache_file_tag_instance *tag_instance;
+
+#ifdef HALO_LINUX
+	/* port: a map's tag reference is untrusted (tag_groups.h's release
+	tag_get checks the same): an index past the tags, or a tag of another
+	group, gets the empty data rather than memory past the tags */
+	if (!cache_file_globals.tags_loaded || !global_tag_instances ||
+		(short)tag_index < 0 || (short)tag_index >= cache_file_globals.tag_header->tag_count ||
+		!global_tag_instances[(short)tag_index].base_address ||
+		(global_tag_instances[(short)tag_index].group_tag != group_tag &&
+		global_tag_instances[(short)tag_index].parent_group_tags[0] != group_tag &&
+		global_tag_instances[(short)tag_index].parent_group_tags[1] != group_tag))
+	{
+		tag_index_error("tag", tag_index, cache_file_globals.tags_loaded ? cache_file_globals.tag_header->tag_count : 0);
+		return tag_empty_data_sized(0x10000);
+	}
+#endif
+	tag_instance = cache_get_tag_instance(tag_index);
 	match_vassert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",
 		298,

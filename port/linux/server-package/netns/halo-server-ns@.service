@@ -1,0 +1,49 @@
+# The dedicated server number <n> in a network namespace of its own, hs<n>
+# (halo-netns@.service, halo-netns.sh; README-SERVER.md, "Each server in a
+# network namespace"). Not needed to run several servers on one machine:
+# halo-server@.service does that with each server's own game ports. This is
+# the first VPS's set-up, kept for builds without sv_game_port and for
+# keeping each server's traffic apart. Each server's folder is
+# /opt/halo/servers/s<n> (maps/, and an init.txt whose sv_port is 2301 + n),
+# the program /opt/halo/bin/halo-server, the user halo:
+#   sudo systemctl enable --now halo-server-ns@1 halo-server-ns@2
+#   journalctl -u halo-server-ns@1 -f      (the code Vitas join with)
+[Unit]
+Description=Halo CE for PS Vita dedicated server s%i (own network namespace)
+Requires=halo-netns@%i.service
+After=halo-netns@%i.service
+
+[Service]
+User=halo
+Group=halo
+WorkingDirectory=/opt/halo/servers/s%i
+NetworkNamespacePath=/run/netns/hs%i
+BindReadOnlyPaths=/etc/netns/hs%i/resolv.conf:/etc/resolv.conf
+ExecStart=/opt/halo/bin/halo-server -path /opt/halo/servers/s%i
+# (no console under systemd: commands from init.txt; stop with SIGTERM, which
+# closes the server browser's listing)
+StandardInput=null
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=10
+MemoryMax=600M
+# (no privileges, nothing writable but the server's folder)
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/halo/servers/s%i
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

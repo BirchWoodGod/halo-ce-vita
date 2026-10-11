@@ -24,6 +24,15 @@ enum
 
 #define bitmap_group_get(index) ((struct bitmap_group *)tag_get(BITMAP_GROUP_TAG, (index)))
 
+/* (port) the width and height a bitmap is placed and mapped at by its
+pixels (the HUD, interface drawing, the screen effects' maps): its first
+level's, also when a Custom Edition map's large texture is drawn from its
+second (levels_dropped), whose own size is half that */
+#define bitmap_placed_width(bitmap) \
+	((short)((bitmap)->width << ((bitmap)->levels_dropped == 1 ? 1 : 0)))
+#define bitmap_placed_height(bitmap) \
+	((short)((bitmap)->height << ((bitmap)->levels_dropped == 1 ? 1 : 0)))
+
 /* ---------- structures */
 
 struct bitmap_data
@@ -37,7 +46,10 @@ struct bitmap_data
 	unsigned short flags;
 	union point2d registration_point;
 	short mipmap_count;
-	short mipmap_pad;
+	/* (port) the Xbox's padding: the levels a Custom Edition map's large
+	texture is drawn without (custom_edition_bitmaps_reduce), 0 or 1; its
+	width and height are then its second level's */
+	short levels_dropped;
 	long pixels_offset;
 	long pixels_size;
 	long tag_index;

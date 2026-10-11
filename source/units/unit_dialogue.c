@@ -94,6 +94,9 @@ symbols in this file:
 #include "tag_files/tag_groups.h"
 #include "unit_definitions.h"
 
+/* port: the AI's speech goes to the clients' copies (port/linux/game/network_actors.c) */
+void network_actors_note_speech(long unit_index, long sound_definition_index);
+
 /* ---------- constants */
 
 enum unit_play_speech_type
@@ -272,6 +275,10 @@ short unit_test_speech(
 				144,
 				(vocalization_type >= 0) &&
 					(vocalization_type < NUMBER_OF_VOCALIZATION_TYPES));
+			/* port: a vocalization that is not one (from a map's command
+			list or a script) has no sound */
+			if (vocalization_type < 0 || vocalization_type >= NUMBER_OF_VOCALIZATION_TYPES)
+				break;
 
 			sound_definition_index =
 				dialogue_definition->vocalizations[vocalization_type].index;
@@ -404,7 +411,8 @@ void unit_dialogue_determine_variant(
 		short variant_count = 0;
 		short variant_index;
 
-		for (variant_index = 0; variant_index < definition->unit.dialogue_variants.count; variant_index++)
+		/* port: a short counter stops at SHORT_MAX (a map's count) */
+		for (variant_index = 0; variant_index < MIN(definition->unit.dialogue_variants.count, SHORT_MAX); variant_index++)
 		{
 			struct unit_dialogue_variant *variant = TAG_BLOCK_GET_ELEMENT(
 				&definition->unit.dialogue_variants,
@@ -1036,6 +1044,15 @@ void unit_dialogue_update(
 						&position,
 						&forward,
 						1.0f);
+					/* port: the AI's speech, heard on the clients too (they
+					play pain and death sounds themselves) */
+					if (unit->unit.player_index == NONE &&
+						unit->unit.speech.current.priority != _unit_speech_pain &&
+						unit->unit.speech.current.priority != _unit_speech_involuntary &&
+						unit->unit.speech.current.priority != _unit_speech_death)
+					{
+						network_actors_note_speech(unit_index, unit->unit.speech.current.sound_definition_index);
+					}
 				}
 
 				ai_communication_started(
@@ -1117,7 +1134,8 @@ static long unit_find_dialogue_variant(
 	short variant_count = 0;
 	short variant_index;
 
-	for (variant_index = 0; variant_index < definition->unit.dialogue_variants.count; variant_index++)
+	/* port: a short counter stops at SHORT_MAX (a map's count) */
+	for (variant_index = 0; variant_index < MIN(definition->unit.dialogue_variants.count, SHORT_MAX); variant_index++)
 	{
 		struct unit_dialogue_variant *variant = TAG_BLOCK_GET_ELEMENT(
 			&definition->unit.dialogue_variants,
@@ -1125,7 +1143,23 @@ static long unit_find_dialogue_variant(
 			struct unit_dialogue_variant);
 
 		if (variant_number == NONE || variant->variant_number == variant_number)
+		{
+			/* port: no more than the array holds (a map's count; released
+			maps have at most 6 variants) */
+			if (variant_count >= (short)NUMBEROF(variant_indices))
+			{
+				static boolean reported = FALSE;
+
+				if (!reported)
+				{
+					reported = TRUE;
+					error(_error_silent, "unit_find_dialogue_variant overflowed variant array");
+				}
+				break;
+			}
+
 			variant_indices[variant_count++] = variant_index;
+		}
 	}
 
 	if (variant_count > 0)

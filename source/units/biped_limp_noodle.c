@@ -37,6 +37,7 @@ symbols in this file:
 #else
 #define halo_epoch_threaded 0
 #endif
+#include "cseries/errors.h"
 #include "math/real_math.h"
 #include "models/model_animation_definitions.h"
 #include "models/model_definitions.h"
@@ -47,6 +48,16 @@ symbols in this file:
 #include "units/biped_definitions.h"
 #include "units/biped_limp_noodle.h"
 #include "units/bipeds.h"
+#ifdef HALO_LINUX
+#include <string.h>
+#endif
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 /* ---------- constants */
 
@@ -60,7 +71,15 @@ enum
 
 /* ---------- macros */
 
-
+#ifdef HALO_LINUX
+/* (port) the relaxation's collision tests, remembered for the rest of its
+call (limp_noodle_test_sphere, limp_noodle_test_vector) */
+#define LIMP_NOODLE_TEST_SPHERE limp_noodle_test_sphere
+#define LIMP_NOODLE_TEST_VECTOR limp_noodle_test_vector
+#else
+#define LIMP_NOODLE_TEST_SPHERE collision_test_sphere
+#define LIMP_NOODLE_TEST_VECTOR collision_test_vector
+#endif
 
 /* ---------- structures */
 
@@ -94,10 +113,127 @@ static void biped_limp_noodle_adjust_orientations(
 	real_matrix4x3 *node_matrices,
 	long node_count,
 	real_point3d const *last_positions);
+static boolean biped_limp_noodle_nodes_valid(
+	long biped_index,
+	struct animation_graph const *animation_graph);
 /* ---------- globals */
 
 static struct collision_feature_list features;
 static real_point3d last_positions[MAXIMUM_NODES_PER_ANIMATION];
+
+#ifdef HALO_LINUX
+/* (port) a body's relaxation asks the same questions again: a node that did
+not move since its last test is tested again (the next of the four
+iterations, the next joint sharing its point), ~60% of its vector tests and
+~35% of its sphere tests in b30's fight, ~70 vector tests a relaxing body a
+tick, for a few dozen ticks after each death. Its tests are of the structure
+and of scenery and machines, which do not change while it relaxes (it moves
+only its own nodes, and is passed over by its own tests: their ignored
+object, and a biped, which the tests leave out), so within one call
+(biped_limp_noodle_move_relax_and_constrain_positions, which empties these)
+the same question has the same answer, the result word for word: a test
+asked again, by its arguments' bits, is answered from here. (A sphere test
+is of the structure alone: collision_test_sphere.) The tick's thread only,
+as the features above. */
+enum
+{
+	LIMP_NOODLE_REMEMBERED_TESTS = 64,
+};
+
+struct limp_noodle_vector_test
+{
+	unsigned long flags;
+	long ignore_object_index;
+	real_point3d point;
+	real_vector3d vector;
+	boolean hit;
+	struct collision_result collision;
+};
+
+struct limp_noodle_sphere_test
+{
+	real_point3d center;
+	real radius;
+	boolean hit;
+};
+
+static struct limp_noodle_vector_test limp_noodle_vector_tests[LIMP_NOODLE_REMEMBERED_TESTS];
+static long limp_noodle_vector_test_count;
+static struct limp_noodle_sphere_test limp_noodle_sphere_tests[LIMP_NOODLE_REMEMBERED_TESTS];
+static long limp_noodle_sphere_test_count;
+
+static boolean limp_noodle_test_vector(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision)
+{
+	long test_index;
+	boolean hit;
+
+	for (test_index = 0; test_index < limp_noodle_vector_test_count; test_index++)
+	{
+		struct limp_noodle_vector_test const *test = &limp_noodle_vector_tests[test_index];
+
+		if (test->flags == flags &&
+			test->ignore_object_index == ignore_object_index &&
+			!memcmp(&test->point, point, sizeof(test->point)) &&
+			!memcmp(&test->vector, vector, sizeof(test->vector)))
+		{
+			*collision = test->collision;
+			return test->hit;
+		}
+	}
+
+	hit = collision_test_vector(flags, point, vector, ignore_object_index, collision);
+	if (limp_noodle_vector_test_count < LIMP_NOODLE_REMEMBERED_TESTS)
+	{
+		struct limp_noodle_vector_test *test = &limp_noodle_vector_tests[limp_noodle_vector_test_count++];
+
+		test->flags = flags;
+		test->ignore_object_index = ignore_object_index;
+		test->point = *point;
+		test->vector = *vector;
+		test->hit = hit;
+		test->collision = *collision;
+	}
+
+	return hit;
+}
+
+static boolean limp_noodle_test_sphere(
+	real_point3d const *center,
+	real radius,
+	long ignore_object_index)
+{
+	long test_index;
+	boolean hit;
+
+	for (test_index = 0; test_index < limp_noodle_sphere_test_count; test_index++)
+	{
+		struct limp_noodle_sphere_test const *test = &limp_noodle_sphere_tests[test_index];
+
+		if (!memcmp(&test->center, center, sizeof(test->center)) &&
+			!memcmp(&test->radius, &radius, sizeof(test->radius)))
+		{
+			return test->hit;
+		}
+	}
+
+	hit = collision_test_sphere(center, radius, ignore_object_index);
+	if (limp_noodle_sphere_test_count < LIMP_NOODLE_REMEMBERED_TESTS)
+	{
+		struct limp_noodle_sphere_test *test = &limp_noodle_sphere_tests[limp_noodle_sphere_test_count++];
+
+		test->center = *center;
+		test->radius = radius;
+		test->hit = hit;
+	}
+
+	return hit;
+}
+#endif
 
 /* ---------- public code */
 
@@ -228,7 +364,7 @@ static boolean biped_limp_noodle_valid_joint_rotation(
 				{
 					BIT_VECTOR_SET_FLAG(moved_node_flags, node_index, TRUE);
 					if (current_world_position->z >= rotate_to_position.z &&
-						!collision_test_sphere(
+						!LIMP_NOODLE_TEST_SPHERE(
 							&rotate_to_position,
 							collision_radius,
 							biped_index))
@@ -296,6 +432,11 @@ static void biped_limp_noodle_move_relax_and_constrain_positions(
 		(halo_epoch_threaded || ( global_current_collision_user_depth < MAXIMUM_COLLISION_USER_STACK_DEPTH)));
 	if (!halo_epoch_threaded) global_current_collision_users[global_current_collision_user_depth++] =
 		_collision_user_limp_body_physics;
+#ifdef HALO_LINUX
+	/* (port) a new call: nothing remembered (limp_noodle_test_vector) */
+	limp_noodle_vector_test_count = 0;
+	limp_noodle_sphere_test_count = 0;
+#endif
 
 	if (realcmp(collision_radius, 0.f) ||
 		collision_radius < 0.f ||
@@ -358,7 +499,7 @@ static void biped_limp_noodle_move_relax_and_constrain_positions(
 				vector_from_points3d(parent_position, position, &segment);
 
 				if (!iteration &&
-					!collision_test_sphere(
+					!LIMP_NOODLE_TEST_SPHERE(
 						position,
 						collision_radius,
 						biped_index))
@@ -395,7 +536,7 @@ static void biped_limp_noodle_move_relax_and_constrain_positions(
 					point_from_line3d(parent_position, &segment, -0.015f, &ray_origin);
 					scale_vector3d(&segment, 1.03f, &segment);
 
-					if (collision_test_vector(
+					if (LIMP_NOODLE_TEST_VECTOR(
 						_collision_test_for_bipeds_dead_flags |
 							FLAG(_collision_test_ignore_invisible_surfaces_bit),
 						&ray_origin,
@@ -408,11 +549,11 @@ static void biped_limp_noodle_move_relax_and_constrain_positions(
 						long endpoint_index;
 						long embedded_count;
 
-						embedded[0] = collision_test_sphere(
+						embedded[0] = LIMP_NOODLE_TEST_SPHERE(
 							position,
 							0.03f,
 							biped_index);
-						embedded[1] = collision_test_sphere(
+						embedded[1] = LIMP_NOODLE_TEST_SPHERE(
 							parent_position,
 							0.03f,
 							biped_index);
@@ -521,7 +662,7 @@ static void biped_limp_noodle_move_relax_and_constrain_positions(
 							else
 							{
 								scale_vector3d(&segment, correction, &velocity);
-								if (collision_test_sphere(
+								if (LIMP_NOODLE_TEST_SPHERE(
 									position,
 									collision_radius,
 									biped_index))
@@ -541,9 +682,11 @@ static void biped_limp_noodle_move_relax_and_constrain_positions(
 					}
 					else
 					{
-						if (node->next_sibling_node_index != NONE)
+						/* port: no more than node_queue holds (a map's links,
+						which could go in a loop) */
+						if (node->next_sibling_node_index != NONE && queue_tail < (short)NUMBEROF(node_queue))
 							node_queue[queue_tail++] = node->next_sibling_node_index;
-						if (node->first_child_node_index != NONE)
+						if (node->first_child_node_index != NONE && queue_tail < (short)NUMBEROF(node_queue))
 							node_queue[queue_tail++] = node->first_child_node_index;
 						continue;
 					}
@@ -551,9 +694,11 @@ static void biped_limp_noodle_move_relax_and_constrain_positions(
 			}
 
 next_node:
-			if (node->next_sibling_node_index != NONE)
+			/* port: no more than node_queue holds (a map's links, which could
+			go in a loop) */
+			if (node->next_sibling_node_index != NONE && queue_tail < (short)NUMBEROF(node_queue))
 				node_queue[queue_tail++] = node->next_sibling_node_index;
-			if (node->first_child_node_index != NONE)
+			if (node->first_child_node_index != NONE && queue_tail < (short)NUMBEROF(node_queue))
 				node_queue[queue_tail++] = node->first_child_node_index;
 		}
 		while (queue_head != queue_tail);
@@ -704,6 +849,7 @@ static void biped_limp_noodle_adjust_orientations(
 boolean biped_limp_noodle_relax_nodes_onto_environment(
 	long biped_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_physics);
 	struct biped_datum *biped = biped_get(biped_index);
 	struct biped_definition *definition = biped_definition_get(biped->definition_index);
 	struct animation_graph *animation_graph = animation_graph_definition_get(
@@ -715,6 +861,14 @@ boolean biped_limp_noodle_relax_nodes_onto_environment(
 	boolean relaxation_complete =
 		biped->biped.limp_body_current_relaxation_iterations >=
 		biped->biped.limp_body_max_relaxation_iterations;
+
+	/* port: a graph whose nodes don't fit the biped is done relaxing (a
+	map's counts and links) */
+	if (!relaxation_complete &&
+		!biped_limp_noodle_nodes_valid(biped_index, animation_graph))
+	{
+		relaxation_complete = TRUE;
+	}
 
 	if (!relaxation_complete)
 	{
@@ -737,5 +891,47 @@ boolean biped_limp_noodle_relax_nodes_onto_environment(
 			biped->biped.limp_body_current_relaxation_iterations++;
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return relaxation_complete;
+}
+
+/* port: TRUE when the graph's nodes fit last_positions, node_queue and the
+biped's node matrices, and every link names one of them (a map's counts and
+indices). The relaxation walks them without checking. Released bipeds have at
+most 41 nodes, as many as their models, and no bad links. */
+static boolean biped_limp_noodle_nodes_valid(
+	long biped_index,
+	struct animation_graph const *animation_graph)
+{
+	static boolean reported = FALSE;
+	struct object_datum *object = object_get(biped_index);
+	long node_count = animation_graph->nodes.count;
+	boolean valid = node_count > 0 &&
+		node_count <= MAXIMUM_NODES_PER_ANIMATION &&
+		node_count <= object->object.node_matrices.size / (long)sizeof(real_matrix4x3);
+	long node_index;
+
+	for (node_index = 0; valid && node_index < node_count; node_index++)
+	{
+		struct animation_graph_node *node = TAG_BLOCK_GET_ELEMENT(
+			&animation_graph->nodes,
+			node_index,
+			struct animation_graph_node);
+
+		if ((node->next_sibling_node_index != NONE && !VALID_INDEX(node->next_sibling_node_index, node_count)) ||
+			(node->first_child_node_index != NONE && !VALID_INDEX(node->first_child_node_index, node_count)) ||
+			(node_index && !VALID_INDEX(node->parent_node_index, node_count)))
+		{
+			valid = FALSE;
+		}
+	}
+
+	if (!valid && !reported)
+	{
+		reported = TRUE;
+		error(_error_silent, "### ERROR %s has %ld animation nodes or a bad node link; its body doesn't relax",
+			tag_get_name(object->definition_index), node_count);
+	}
+
+	return valid;
 }

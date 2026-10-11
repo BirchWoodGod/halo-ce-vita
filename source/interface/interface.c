@@ -104,6 +104,9 @@ symbols in this file:
 #include "text/draw_string.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "latency_meter.h"
+#endif
 
 /* ---------- constants */
 
@@ -474,6 +477,11 @@ void interface_draw_fullscreen_overlays(
 	interface_splitscreen_render();
 	hud_render_timer();
 	terminal_draw();
+#ifdef HALO_LINUX
+	/* port: a network game's round trip to the host
+	(port/linux/game/latency_meter.c) */
+	latency_meter_draw();
+#endif
 	main_framerate_render();
 	render_debug_profile();
 
@@ -505,8 +513,8 @@ void interface_draw_bitmap(
 	{
 		real u = ((vertex_index+1)&2) ? clip->x1 : clip->x0;
 		real v = (vertex_index>1) ? clip->y1 : clip->y0;
-		real local_x = (bitmap->width*u - bitmap->registration_point.x)*scale;
-		real local_y = (bitmap->height*v - bitmap->registration_point.y)*scale;
+		real local_x = (bitmap_placed_width(bitmap)*u - bitmap->registration_point.x)*scale;
+		real local_y = (bitmap_placed_height(bitmap)*v - bitmap->registration_point.y)*scale;
 
 		vertices[vertex_index].position.x = point->x + local_x*cosine_theta - local_y*sine_theta;
 		vertices[vertex_index].position.y = point->y + local_x*sine_theta + local_y*cosine_theta;

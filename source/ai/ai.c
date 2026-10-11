@@ -245,6 +245,11 @@ symbols in this file:
 
 #include <stddef.h>
 
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) the lines of sight's time and counts (lines_profile.c) */
+#include "lines_profile.h"
+#endif
+
 #undef COLLISIONS_EXTERNAL_COLLISION_TEST_LINE
 #undef REAL_MATH_EXTERNAL_NORMALIZE3D
 #undef REAL_MATH_EXTERNAL_POINT_FROM_LINE3D
@@ -500,6 +505,11 @@ typedef char ai_prop_unopposable_enemy_offset_assert[
 /* ---------- prototypes */
 
 static void ai_place_pending_mounted_weapons(
+	void);
+boolean ai_enemies_endanger_player(
+	boolean must_be_attacking,
+	long unit_index);
+static void ai_flush_spatial_effects(
 	void);
 
 /* ---------- globals */
@@ -2006,8 +2016,11 @@ void ai_update(
 	return;
 }
 
+/* port: unit_index NONE is any player's unit (the game's own check); else
+only enemies of that unit count (network co-op's respawn, players.c) */
 boolean ai_enemies_endanger_player(
-	boolean must_be_attacking)
+	boolean must_be_attacking,
+	long unit_index)
 {
 	long current_time = game_time_get();
 	struct data_iterator iterator;
@@ -2020,7 +2033,8 @@ boolean ai_enemies_endanger_player(
 	{
 		if (prop->player &&
 			prop->enemy &&
-			unit_get(prop->unit_index)->unit.player_index != NONE)
+			unit_get(prop->unit_index)->unit.player_index != NONE &&
+			(unit_index == NONE || prop->unit_index == unit_index))
 		{
 			struct actor_datum *actor = actor_get(prop->owner_actor_index);
 			long object_index = actor->meta.swarm
@@ -2103,13 +2117,27 @@ boolean ai_enemies_endanger_player(
 boolean ai_enemies_can_see_player(
 	void)
 {
-	return ai_enemies_endanger_player(FALSE);
+	return ai_enemies_endanger_player(FALSE, NONE);
 }
 
 boolean ai_enemies_attacking_player(
 	void)
 {
-	return ai_enemies_endanger_player(TRUE);
+	return ai_enemies_endanger_player(TRUE, NONE);
+}
+
+/* port: whether enemies can see this player's unit */
+boolean ai_port_enemies_can_see_unit(
+	long unit_index)
+{
+	return ai_enemies_endanger_player(FALSE, unit_index);
+}
+
+/* port: whether enemies are attacking this player's unit */
+boolean ai_port_enemies_attacking_unit(
+	long unit_index)
+{
+	return ai_enemies_endanger_player(TRUE, unit_index);
 }
 
 long ai_get_race_from_team_index(
@@ -2315,6 +2343,11 @@ short ai_test_line_of_sight(
 	boolean clear_line_of_sight;
 	boolean blocked;
 	short result;
+#ifdef HALO_LINUX
+	unsigned long long lines_started = halo_lines_now();
+
+	halo_lines_stats.ai_los_calls++;
+#endif
 
 	if (ai_debug.render_lineofsight)
 		ai_debug_lineofsight(p0, p0_cluster_index, p1, p1_cluster_index);
@@ -2373,6 +2406,16 @@ short ai_test_line_of_sight(
 			clear_line_of_sight = FALSE;
 			collision_t = collision.t;
 		}
+#ifdef HALO_LINUX
+		halo_lines_stats.ai_los_rays++;
+		if (!clear_line_of_sight)
+		{
+			if (collision.type == _collision_result_object)
+				halo_lines_stats.ai_los_object_hits++;
+			else
+				halo_lines_stats.ai_los_other_hits++;
+		}
+#endif
 	}
 
 	{
@@ -2414,6 +2457,9 @@ short ai_test_line_of_sight(
 			p0b.z = p0->z - perpendicular.k * 0.25f;
 
 			ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+			halo_lines_stats.ai_los_extra_lines++;
+#endif
 			if (clear_line_of_sight)
 			{
 				blocked = collision_test_line(
@@ -2426,6 +2472,9 @@ short ai_test_line_of_sight(
 				if (!blocked)
 				{
 					ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+					halo_lines_stats.ai_los_extra_lines++;
+#endif
 					blocked = collision_test_line(
 						collision_flags,
 						&p0b,
@@ -2446,6 +2495,9 @@ short ai_test_line_of_sight(
 				if (!blocked)
 				{
 					ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+					halo_lines_stats.ai_los_extra_lines++;
+#endif
 					blocked = !collision_test_line(
 						collision_flags,
 						&p0b,
@@ -2469,6 +2521,9 @@ short ai_test_line_of_sight(
 			point_from_line3d(p1, global_down3d, 0.1f, &p1c);
 
 			ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+			halo_lines_stats.ai_los_extra_lines++;
+#endif
 			blocked = collision_test_line(
 				collision_flags,
 				&p1a,
@@ -2479,6 +2534,9 @@ short ai_test_line_of_sight(
 			if (!blocked)
 			{
 				ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+				halo_lines_stats.ai_los_extra_lines++;
+#endif
 				blocked = collision_test_line(
 					collision_flags,
 					&p1b,
@@ -2490,6 +2548,9 @@ short ai_test_line_of_sight(
 			if (!blocked)
 			{
 				ai_profile.meters[_ai_meter_collisions].accumulator++;
+#ifdef HALO_LINUX
+				halo_lines_stats.ai_los_extra_lines++;
+#endif
 				blocked = collision_test_line(
 					collision_flags,
 					&p1c,
@@ -2536,6 +2597,10 @@ occluded:
 	result = _ai_line_of_sight_occluded;
 
 finish:
+#ifdef HALO_LINUX
+	if (lines_started)
+		halo_lines_stats.ai_los_us += halo_lines_now() - lines_started;
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\ai\\ai.c",
 		0x3F0,

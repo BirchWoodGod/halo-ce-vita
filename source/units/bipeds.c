@@ -280,6 +280,17 @@ symbols in this file:
 #include "render/render_debug.h"
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
+
+/* port: port/linux/game/network_objects.c's (a client deletes the host's
+objects on the host's word alone) */
+boolean network_objects_may_delete(long object_index);
 
 #ifdef HALO_LINUX
 /* (HALO_TICK_PROFILE=3) the biped update's stages timed (tick_detail.c) */
@@ -844,9 +855,12 @@ static void biped_falling_damage(
 				object_cause_damage(&damage, biped_index, NONE, NONE, NONE, NULL);
 			}
 
+			/* (port: not the host's biped on a client, which the host erases:
+			the delete was refused, and logged as done) */
 			if (!game_engine_running() &&
 				TEST_FLAG(biped->object.flags, _object_outside_of_map_bit) &&
-				player_index_from_unit_index(biped_index) == NONE)
+				player_index_from_unit_index(biped_index) == NONE &&
+				network_objects_may_delete(biped_index))
 			{
 				long actor_index = biped->unit.swarm_actor_index;
 
@@ -2359,6 +2373,7 @@ static void biped_find_nearby_support_surface(
 static void biped_update_physics(
 	struct biped_physics *physics)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_physics);
 	real_vector2d facing = { 0.f, 0.f };
 	boolean climbing = TEST_FLAG(physics->in_flags, _biped_physics_in_climb_anything_bit);
 	word in_flags;
@@ -2655,6 +2670,7 @@ static void biped_update_physics(
 				physics->existing_support_surface_index,
 				struct collision_surface);
 			long edge_index = surface->first_edge_index;
+			short edge_count = 0;
 			real_plane3d plane;
 			real_plane3d best_plane;
 			real best_velocity_dot;
@@ -2672,14 +2688,41 @@ static void biped_update_physics(
 
 			do
 			{
-				struct collision_edge *edge = TAG_BLOCK_GET_ELEMENT(
+				struct collision_edge *edge;
+				boolean reverse;
+				long neighbor_surface_index;
+
+				/* port: the surface's ring of edges ends as
+				collision_surface_edge_ring_continues says, or at an edge
+				whose vertices aren't the bsp's (a map's indices; the
+				retail rings all close within 3 to 8 edges) */
+				if (!collision_surface_edge_ring_continues(bsp, edge_index, edge_count++))
+				{
+					break;
+				}
+				edge = TAG_BLOCK_GET_ELEMENT(
 					&bsp->edges,
 					edge_index,
 					struct collision_edge);
-				boolean reverse = physics->existing_support_surface_index == edge->surface_indices[1];
-				long neighbor_surface_index = edge->surface_indices[!reverse];
+				if (!VALID_INDEX(edge->vertex_indices[0], bsp->vertices.count) ||
+					!VALID_INDEX(edge->vertex_indices[1], bsp->vertices.count))
+				{
+					static boolean reported = FALSE;
 
-				if (neighbor_surface_index != NONE)
+					if (!reported)
+					{
+						reported = TRUE;
+						error(_error_silent, "collision edge #%ld's vertices are not the bsp's", edge_index);
+					}
+					break;
+				}
+				reverse = physics->existing_support_surface_index == edge->surface_indices[1];
+				neighbor_surface_index = edge->surface_indices[!reverse];
+
+				/* port: (and a neighbor that is no surface of the bsp's is
+				none) */
+				if (neighbor_surface_index != NONE &&
+					collision_bsp_valid_surface_index(bsp, neighbor_surface_index))
 				{
 					struct collision_surface *neighbor_surface = TAG_BLOCK_GET_ELEMENT(
 						&bsp->surfaces,
@@ -3051,6 +3094,7 @@ static void biped_update_physics(
 	match_assert_valid_real_point3d("c:\\halo\\SOURCE\\units\\bipeds.c", 0xF10, &physics->new_position);
 	match_assert_valid_real_vector3d("c:\\halo\\SOURCE\\units\\bipeds.c", 0xF11, &physics->new_velocity);
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 

@@ -275,12 +275,14 @@ static void rasterizer_screen_effect_set_texture_transforms(
 		else
 			noise_bitmap = &viewport_map;
 
-		convolution_size.i = convolution_bitmap->width;
-		convolution_size.j = convolution_bitmap->height;
-		scanline_size.i = scanline_bitmap->width;
-		scanline_size.j = scanline_bitmap->height;
-		noise_size.i = noise_bitmap->width;
-		noise_size.j = noise_bitmap->height;
+		/* (port) mapped by their pixels: a Custom Edition map's texture drawn
+		from its second level at its first's size (bitmap_placed_width) */
+		convolution_size.i = bitmap_placed_width(convolution_bitmap);
+		convolution_size.j = bitmap_placed_height(convolution_bitmap);
+		scanline_size.i = bitmap_placed_width(scanline_bitmap);
+		scanline_size.j = bitmap_placed_height(scanline_bitmap);
+		noise_size.i = bitmap_placed_width(noise_bitmap);
+		noise_size.j = bitmap_placed_height(noise_bitmap);
 		screen_size.i = viewport_map.width;
 		screen_size.j = viewport_map.height;
 
@@ -542,6 +544,15 @@ void _rasterizer_screen_effect(
 				!parameters->convolution_mask,
 				"blur effect cannot specify convolution mask");
 
+#ifdef HALO_LINUX
+		/* (port) the effect's own maps (the zoom's convolution mask, the
+		video effect's scanlines and noise) are waited for, not streamed: the
+		stand-in a streamed bitmap is drawn with while it loads is opaque
+		white, and as the convolution mask its alpha of 1 everywhere blurs
+		the whole screen, the scope's window too (rasterizer_xbox.c
+		rasterizer_texture_streaming_hold) */
+		rasterizer_texture_streaming_hold(TRUE);
+#endif
 		rasterizer_set_vertex_shader_permutation(
 			_rasterizer_vertex_shader_screen_effect,
 			_rasterizer_vertex_type_screen,
@@ -1177,6 +1188,9 @@ void _rasterizer_screen_effect(
 			FALSE,
 			FALSE,
 			TRUE);
+#ifdef HALO_LINUX
+		rasterizer_texture_streaming_hold(FALSE);
+#endif
 	}
 
 	rasterizer_profile_end(_rasterizer_profile_screen_effect);

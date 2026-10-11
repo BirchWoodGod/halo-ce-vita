@@ -126,6 +126,7 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "units/units.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 
 /* ---------- constants */
 
@@ -536,6 +537,7 @@ void hud_activate_team_nav_point_with_flag(
 	short flag_index,
 	float vertical_offset)
 {
+	network_coop_note_nav_point(_coop_nav_point_team_flag, nav_index, team_index, flag_index, vertical_offset);
 	hud_activate_team_nav_point(nav_index, team_index, _hud_nav_point_type_flag, flag_index, vertical_offset);
 
 	return;
@@ -547,6 +549,7 @@ void hud_activate_team_nav_point_with_object(
 	long object_index,
 	float vertical_offset)
 {
+	network_coop_note_nav_point(_coop_nav_point_team_object, nav_index, team_index, object_index, vertical_offset);
 	hud_activate_team_nav_point(nav_index, team_index, _hud_nav_point_type_object, object_index, vertical_offset);
 
 	return;
@@ -593,6 +596,7 @@ void hud_deactivate_team_nav_point_with_flag(
 	short team_index,
 	short flag_index)
 {
+	network_coop_note_nav_point(_coop_nav_point_team_flag, NONE, team_index, flag_index, 0.0f);
 	hud_deactivate_team_nav_point(team_index, _hud_nav_point_type_flag, flag_index);
 
 	return;
@@ -602,6 +606,7 @@ void hud_deactivate_team_nav_point_with_object(
 	short team_index,
 	long object_index)
 {
+	network_coop_note_nav_point(_coop_nav_point_team_object, NONE, team_index, object_index, 0.0f);
 	hud_deactivate_team_nav_point(team_index, _hud_nav_point_type_object, object_index);
 
 	return;
@@ -615,6 +620,7 @@ void hud_unit_activate_nav_point_with_flag(
 {
 	long player_index = player_index_from_unit_index(unit_index);
 
+	network_coop_note_nav_point(_coop_nav_point_unit_flag, nav_index, unit_index, flag_index, vertical_offset);
 	if (player_index!=NONE)
 	{
 		hud_activate_nav_point(nav_index, player_index, _hud_nav_point_type_flag, flag_index, vertical_offset);
@@ -631,6 +637,7 @@ void hud_unit_activate_nav_point_with_object(
 {
 	long player_index = player_index_from_unit_index(unit_index);
 
+	network_coop_note_nav_point(_coop_nav_point_unit_object, nav_index, unit_index, object_index, vertical_offset);
 	if (player_index!=NONE)
 	{
 		hud_activate_nav_point(nav_index, player_index, _hud_nav_point_type_object, object_index, vertical_offset);
@@ -645,6 +652,7 @@ void hud_unit_deactivate_nav_point_with_flag(
 {
 	long player_index = player_index_from_unit_index(unit_index);
 
+	network_coop_note_nav_point(_coop_nav_point_unit_flag, NONE, unit_index, flag_index, 0.0f);
 	if (player_index!=NONE)
 	{
 		hud_deactivate_nav_point(player_index, _hud_nav_point_type_flag, flag_index);
@@ -659,6 +667,7 @@ void hud_unit_deactivate_nav_point_with_object(
 {
 	long player_index = player_index_from_unit_index(unit_index);
 
+	network_coop_note_nav_point(_coop_nav_point_unit_object, NONE, unit_index, object_index, 0.0f);
 	if (player_index!=NONE)
 	{
 		hud_deactivate_nav_point(player_index, _hud_nav_point_type_object, object_index);
@@ -743,6 +752,16 @@ void custom_render_nav_point(
 		real delta_y;
 		real delta_z;
 
+		/* port: with the tick on a thread of its own (HALO_TICK_THREAD) the
+		player may have died, its unit gone, since game_engine_render_nav_points
+		looked: no arrow this frame (unit_get_camera_position read the unit
+		at NULL: a crash in Boarding Action's CTF and King of the Hill with
+		bots) */
+		if (unit_index == NONE ||
+			!object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+		{
+			return;
+		}
 		unit_get_camera_position(unit_index, &camera_position);
 
 		delta_x = position->x-camera_position.x;
@@ -890,11 +909,11 @@ void custom_render_nav_point(
 					FLAG(_hud_number_show_trailing_m_bit);
 
 				bitmap_extent =
-					((clip->x1-clip->x0)*(real)bitmap->width)*0.5f;
+					((clip->x1-clip->x0)*(real)bitmap_placed_width(bitmap))*0.5f;
 				numbers.placement.offset.x = (short)(long)(
 					bitmap_extent*arrow_scale*0.33000001f + (real)point.x);
 				bitmap_extent =
-					((clip->y1-clip->y0)*(real)bitmap->height)*0.5f;
+					((clip->y1-clip->y0)*(real)bitmap_placed_height(bitmap))*0.5f;
 				numbers.placement.offset.y = (short)(long)(
 					bitmap_extent*arrow_scale*0.66000003f + (real)point.y);
 				numbers.placement.offset.x -= render.camera.window_bounds.x0;

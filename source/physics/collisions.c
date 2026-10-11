@@ -117,6 +117,22 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/bipeds.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+/* the objects' bounding spheres packed for the walks below
+(object_bounds_cache.c) */
+#include "object_bounds_cache.h"
+/* the point physics' leaves and cells (point_leaf_cache.c) */
+#include "point_leaf_cache.h"
+/* a cluster's objects with their types for the walks below
+(cluster_object_types.c) */
+#include "cluster_object_types.h"
+#include <string.h>
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 #undef REAL_MATH_EXTERNAL_POINT_FROM_LINE3D
 
@@ -238,6 +254,7 @@ boolean collision_test_sphere(
 	real radius,
 	long ignore_object_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean result;
 	struct collision_bsp_test_sphere_result sphere_result;
 
@@ -252,10 +269,12 @@ boolean collision_test_sphere(
 			&sphere_result);
 		if (!result)
 		{
+			HALO_OBJECTS_PHASE_POP();
 			return result;
 		}
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return TRUE;
 }
 
@@ -264,6 +283,7 @@ boolean collision_test_point(
 	real_point3d const *point,
 	long ignore_object_index)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	unsigned long collision_flags = flags;
 	long leaf_index;
 	long reference_index;
@@ -310,19 +330,142 @@ boolean collision_test_point(
 	}
 
 no_collision:
+	HALO_OBJECTS_PHASE_POP();
 	return FALSE;
 
 collision:
+	HALO_OBJECTS_PHASE_POP();
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* (port) the structure tests of the sound obstruction rays, kept: a sound's
+ray from the camera is cast again every few ticks (HALO_SOUND_OBSTRUCTION_TICKS)
+and every frame a new sound starts, and while the player and the sound stand
+still (b30's fight: two thirds of the rays with the player standing, half
+under the benchmark's fixed cameras, a twentieth with the player running about)
+it is the same ray, bit for bit. collision_bsp_test_vector's answer is a
+function of the bsp, the test's flags, the breakable surfaces' state, the point
+and the vector alone: a ray asked again (the same values) is answered with the
+answer it had - a surface met, or none and the leaves it passed through (32 at
+most kept) - while the bsp (halo_structure_bsp_generation) and the breakable
+surfaces' flags (compared each time) are as they were. Its objects are tested
+again as before (they move). The tick's thread only (the sound manager runs
+there) */
+enum
+{
+	OBSTRUCTION_MEMO_ENTRIES = 256,
+	OBSTRUCTION_MEMO_LEAVES = 32
+};
+
+static struct
+{
+	unsigned long generation;
+	unsigned long structure_bsp_generation;
+	byte breakable_surface_flags[MAXIMUM_BREAKABLE_SURFACES_PER_MAP / 8];
+	struct
+	{
+		unsigned long generation;
+		unsigned long bsp_flags;
+		unsigned long point_vector[6];
+		boolean surface_met;
+		short leaf_count;
+		long leaf_indices[OBSTRUCTION_MEMO_LEAVES];
+	} entries[OBSTRUCTION_MEMO_ENTRIES];
+} obstruction_memo = { 1 };
+
+/* the entry for the ray's values (a stale one when none is kept for them) and
+whether it holds their answer */
+static boolean obstruction_memo_find(
+	unsigned long bsp_flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long *entry_index)
+{
+	unsigned long words[6];
+	unsigned long hash;
+	byte const *flags = breakable_surface_flags_get();
+	long index;
+
+	if (obstruction_memo.structure_bsp_generation != halo_structure_bsp_generation ||
+		memcmp(obstruction_memo.breakable_surface_flags, flags, sizeof(obstruction_memo.breakable_surface_flags)))
+	{
+		obstruction_memo.generation++;
+		obstruction_memo.structure_bsp_generation = halo_structure_bsp_generation;
+		memcpy(obstruction_memo.breakable_surface_flags, flags, sizeof(obstruction_memo.breakable_surface_flags));
+	}
+	memcpy(&words[0], point, sizeof(real_point3d));
+	memcpy(&words[3], vector, sizeof(real_vector3d));
+	hash = bsp_flags;
+	for (index = 0; index < 6; index++)
+	{
+		hash = (hash ^ words[index]) * 16777619UL;
+	}
+	index = (long)((hash >> 8) % OBSTRUCTION_MEMO_ENTRIES);
+	*entry_index = index;
+
+	return obstruction_memo.entries[index].generation == obstruction_memo.generation &&
+		obstruction_memo.entries[index].bsp_flags == bsp_flags &&
+		!memcmp(obstruction_memo.entries[index].point_vector, words, sizeof(words));
+}
+
+static void obstruction_memo_store(
+	long entry_index,
+	unsigned long bsp_flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	boolean surface_met,
+	struct collision_bsp_test_vector_result const *bsp_result)
+{
+	if (!surface_met && bsp_result->leaf_count > OBSTRUCTION_MEMO_LEAVES)
+	{
+		obstruction_memo.entries[entry_index].generation = 0;
+		return;
+	}
+	obstruction_memo.entries[entry_index].generation = obstruction_memo.generation;
+	obstruction_memo.entries[entry_index].bsp_flags = bsp_flags;
+	memcpy(&obstruction_memo.entries[entry_index].point_vector[0], point, sizeof(real_point3d));
+	memcpy(&obstruction_memo.entries[entry_index].point_vector[3], vector, sizeof(real_vector3d));
+	obstruction_memo.entries[entry_index].surface_met = surface_met;
+	obstruction_memo.entries[entry_index].leaf_count = surface_met ? 0 : (short)bsp_result->leaf_count;
+	if (!surface_met)
+	{
+		memcpy(obstruction_memo.entries[entry_index].leaf_indices, bsp_result->leaf_indices,
+			bsp_result->leaf_count * sizeof(long));
+	}
+}
+
+unsigned long obstruction_memo_hits, obstruction_memo_misses;
+#endif
+
+#ifdef HALO_LINUX
+/* (port) collision_test_vector's body, made three ways (each call below
+passes constants): as itself; with a key (point_leaf_cache.c: the point
+physics names its particle, whose end point's leaf may be known already); and
+for the sound obstruction rays, whose callers ask only whether anything is
+hit (any_hit): the result and the collision record are then left
+as soon as the answer is known - a structure or water hit, or the first object
+hit - where the full test would go on to find the nearest. The answer is the
+same: before the first hit the objects are tested against the whole vector
+(t 1) in both, and every later test could only find a nearer hit */
+static __inline__ __attribute__((always_inline)) boolean collision_test_vector_internal(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision,
+	long key,
+	boolean any_hit)
+#else
 boolean collision_test_vector(
 	unsigned long flags,
 	real_point3d const *point,
 	real_vector3d const *vector,
 	long ignore_object_index,
 	struct collision_result *collision)
+#endif
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean hit = FALSE;
 	boolean test_environment = TEST_FLAG(flags, _collision_test_structure_bit) ||
 		TEST_FLAG(flags, _collision_test_media_bit) ||
@@ -366,6 +509,52 @@ boolean collision_test_vector(
 
 		collision_log_usage(_collision_function_vector_structure);
 		collision_log_start_time(&collision_usage_times.vector_structure);
+#ifdef HALO_LINUX
+		/* (port) a sound obstruction ray asked again: its structure test's answer
+		as it was (obstruction_memo, above; a surface met answers it) */
+		if (any_hit &&
+			TEST_FLAG(flags, _collision_test_structure_bit) &&
+			object_bounds_cache_usable())
+		{
+			long entry_index;
+
+			if (obstruction_memo_find(bsp_flags, point, vector, &entry_index))
+			{
+				collision_log_usage(4 + 1);
+				obstruction_memo_hits++;
+				if (obstruction_memo.entries[entry_index].surface_met)
+				{
+					hit = TRUE;
+					goto answered;
+				}
+				bsp_result.t = REAL_MAX;
+				bsp_result.leaf_count = obstruction_memo.entries[entry_index].leaf_count;
+				memcpy(bsp_result.leaf_indices, obstruction_memo.entries[entry_index].leaf_indices,
+					bsp_result.leaf_count * sizeof(long));
+			}
+			else
+			{
+				boolean surface_met = collision_bsp_test_vector(
+					bsp_flags,
+					global_collision_bsp_get(),
+					MAXIMUM_BREAKABLE_SURFACES_PER_MAP,
+					breakable_surface_flags_get(),
+					point,
+					vector,
+					REAL_MAX,
+					&bsp_result);
+
+				obstruction_memo_misses++;
+				obstruction_memo_store(entry_index, bsp_flags, point, vector, surface_met, &bsp_result);
+				if (surface_met)
+				{
+					hit = TRUE;
+					goto answered;
+				}
+			}
+		}
+		else
+#endif
 		if (collision_bsp_test_vector(
 			bsp_flags,
 			global_collision_bsp_get(),
@@ -445,6 +634,12 @@ boolean collision_test_vector(
 		collision_log_end_time(
 			_collision_function_vector_structure,
 			collision_usage_times.vector_structure.QuadPart);
+#ifdef HALO_LINUX
+		if (any_hit && hit)
+		{
+			goto answered;
+		}
+#endif
 
 		if (TEST_FLAG(flags, _collision_test_media_bit) &&
 			collision->location.cluster_index != NONE)
@@ -512,9 +707,20 @@ boolean collision_test_vector(
 			}
 		}
 
+#ifdef HALO_LINUX
+		if (any_hit && hit)
+		{
+			goto answered;
+		}
+#endif
 		if (test_objects && bsp_result.leaf_count > 0)
 		{
 			long leaf_index;
+#ifdef HALO_LINUX
+			real_point3d point_value;
+			real_vector3d vector_value;
+			boolean use_bounds_cache;
+#endif
 
 			collision_log_usage(_collision_function_vector_objects);
 			collision_log_start_time(&collision_usage_times.vector_objects);
@@ -525,6 +731,15 @@ boolean collision_test_vector(
 
 			structure_cluster_marker_begin();
 			object_marker_begin();
+#ifdef HALO_LINUX
+			/* (port) the vector read once for the objects' sphere tests below
+			(a call between two reads them again through their pointers), and
+			whether the bounding spheres' packed copy may be read
+			(object_bounds_cache.c): the same values */
+			point_value = *point;
+			vector_value = *vector;
+			use_bounds_cache = object_bounds_cache_usable();
+#endif
 			for (leaf_index = 0; leaf_index < bsp_result.leaf_count; leaf_index++)
 			{
 				long leaf = bsp_result.leaf_indices[leaf_index];
@@ -550,12 +765,21 @@ boolean collision_test_vector(
 					/* (port) the cluster's objects taken in one walk, and the
 					ones object_test_vector would pass over at its first test
 					(a top-level object, no siblings: no other effect) passed
-					over here, without the call */
+					over here, without the call. The objects and their types
+					from the cluster's table when it has one (the types and
+					child flags their headers hold: cluster_object_types.c),
+					the headers read for the objects that get past them) */
 					long object_indices[COLLISION_CLUSTER_OBJECT_BATCH];
-					long object_count = cluster_get_collideable_objects(
-						(short)cluster_index,
-						object_indices,
-						NUMBEROF(object_indices));
+					struct cluster_object_type_table const *table = use_bounds_cache ?
+						cluster_object_types_get((short)cluster_index) :
+						NULL;
+					long const *objects = table ? table->object_indices : object_indices;
+					long object_count = table ?
+						table->count :
+						cluster_get_collideable_objects(
+							(short)cluster_index,
+							object_indices,
+							NUMBEROF(object_indices));
 
 					if (object_count != NONE)
 					{
@@ -564,10 +788,65 @@ boolean collision_test_vector(
 						for (object_slot = 0; object_slot < object_count; object_slot++)
 						{
 							struct object_datum *object;
+							struct object_header_datum const *header;
+							long type;
+							boolean child;
 
-							/* (object_mark_function, with the object looked up once) */
-							object_index = object_indices[object_slot];
-							object = object_get(object_index);
+							/* (object_mark_function, with the object looked up once;
+							an object of a type the test leaves out passed over by
+							its header, unmarked: object_test_vector would test
+							neither it nor its children, and the mark only keeps a
+							second visit in this test from testing it again. A
+							cluster's objects are at the top level (children are
+							not connected to the map), without siblings. A vehicle's
+							mass points test scenery and machines only, the AI's
+							line of sight vehicles too, and a fight's clusters are
+							mostly bipeds, weapons and projectiles, each object read
+							and written for nothing) */
+							object_index = objects[object_slot];
+							if (table)
+							{
+								header = NULL;
+								type = table->types[object_slot] & ~CLUSTER_OBJECT_TYPE_CHILD;
+								child = (table->types[object_slot] & CLUSTER_OBJECT_TYPE_CHILD) != 0;
+							}
+							else
+							{
+								header = object_header_get(object_index);
+								type = header->type;
+								child = TEST_FLAG(header->flags, _object_header_child_bit);
+							}
+							if (!TEST_FLAG(flags, type + _collision_test_objects_first_type_bit) &&
+								!child)
+							{
+								continue;
+							}
+							/* (an object whose bounding sphere the vector
+							misses, by its packed copy, passed over without
+							reading it: below it would be marked, then passed
+							over by the same test on the same values, a
+							cluster's object having no siblings; unmarked, a
+							second visit in this test passes it over again.
+							object_bounds_cache.c) */
+							if (use_bounds_cache && !child)
+							{
+								struct object_bounds const *bounds = object_bounds_cache_get(object_index);
+
+								if (bounds &&
+									!fast_vector_intersects_sphere_inline(
+										&point_value,
+										&vector_value,
+										&bounds->center,
+										bounds->radius))
+								{
+									continue;
+								}
+							}
+							if (!header)
+							{
+								header = object_header_get(object_index);
+							}
+							object = header->datum;
 							if (object->object.magic_number == global_object_marker)
 								continue;
 							object->object.magic_number = global_object_marker;
@@ -576,8 +855,8 @@ boolean collision_test_vector(
 									TEST_FLAG(object->object.flags, _object_invisible_bit) ||
 									!TEST_FLAG(flags, object->object.type + _collision_test_objects_first_type_bit) ||
 									!fast_vector_intersects_sphere_inline(
-										point,
-										vector,
+										&point_value,
+										&vector_value,
 										&object->object.bounding_sphere_center,
 										(object->object.bounding_sphere_radius))))
 							{
@@ -593,7 +872,19 @@ boolean collision_test_vector(
 								collision))
 							{
 								hit = TRUE;
+								if (any_hit)
+								{
+									break;
+								}
 							}
+						}
+						if (table)
+						{
+							cluster_object_types_release();
+						}
+						if (any_hit && hit)
+						{
+							break;
 						}
 						continue;
 					}
@@ -614,8 +905,20 @@ boolean collision_test_vector(
 								collision))
 						{
 							hit = TRUE;
+#ifdef HALO_LINUX
+							if (any_hit)
+							{
+								break;
+							}
+#endif
 						}
 					}
+#ifdef HALO_LINUX
+					if (any_hit && hit)
+					{
+						break;
+					}
+#endif
 				}
 			}
 			object_marker_end();
@@ -624,6 +927,12 @@ boolean collision_test_vector(
 				_collision_function_vector_objects,
 				collision_usage_times.vector_objects.QuadPart);
 		}
+#ifdef HALO_LINUX
+		if (any_hit)
+		{
+			goto answered;
+		}
+#endif
 
 		if (!hit)
 		{
@@ -664,11 +973,60 @@ boolean collision_test_vector(
 			(real_vector3d const *)point,
 			vector,
 			(real_vector3d *)&collision->point);
+#ifdef HALO_LINUX
+		if (key != NONE)
+		{
+			scenario_location_from_point_keyed(&collision->location, &collision->point, key);
+		}
+		else
+#endif
 		scenario_location_from_point(&collision->location, &collision->point);
 	}
 
+#ifdef HALO_LINUX
+answered:
+#endif
+	HALO_OBJECTS_PHASE_POP();
 	return hit;
 }
+
+#ifdef HALO_LINUX
+boolean collision_test_vector(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision)
+{
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, collision, NONE, FALSE);
+}
+
+/* (port) collision_test_vector for the point physics, its point named by the
+key (point_leaf_cache.c) */
+boolean collision_test_vector_keyed(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index,
+	struct collision_result *collision,
+	long key)
+{
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, collision, key, FALSE);
+}
+
+/* (port) whether collision_test_vector would hit anything, answered as soon
+as known (the sound obstruction rays: collision_test_vector_internal) */
+boolean collision_test_vector_obstructed(
+	unsigned long flags,
+	real_point3d const *point,
+	real_vector3d const *vector,
+	long ignore_object_index)
+{
+	struct collision_result collision;
+
+	return collision_test_vector_internal(flags, point, vector, ignore_object_index, &collision, NONE, TRUE);
+}
+#endif
 
 boolean collision_test_pill(
 	unsigned long flags,
@@ -678,6 +1036,7 @@ boolean collision_test_pill(
 	long ignore_object_index,
 	struct collision_result *collision)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean hit = FALSE;
 	struct collision_bsp_test_pill_result bsp_result;
 
@@ -750,6 +1109,7 @@ boolean collision_test_pill(
 	COLLISION_POINT_FROM_LINE3D(point, vector, collision->t, &collision->point);
 	scenario_location_from_point(&collision->location, &collision->point);
 
+	HALO_OBJECTS_PHASE_POP();
 	return hit;
 }
 
@@ -759,6 +1119,7 @@ boolean collision_test_vector_exit(
 	real_vector3d const *vector,
 	struct collision_result *exit_collision)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean found = FALSE;
 
 	exit_collision->type = NONE;
@@ -824,6 +1185,7 @@ boolean collision_test_vector_exit(
 		COLLISION_POINT_FROM_LINE3D(point, vector, exit_collision->t, &exit_collision->point);
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return found;
 }
 
@@ -836,6 +1198,7 @@ boolean collision_get_features_in_sphere(
 	long ignore_object_index,
 	struct collision_feature_list *features)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	unsigned long structure_flags;
 
 	collision_features_new(features);
@@ -879,6 +1242,10 @@ boolean collision_get_features_in_sphere(
 		if (objects && result.leaf_count > 0)
 		{
 			short leaf_reference_index;
+#ifdef HALO_LINUX
+			real_point3d center_value;
+			boolean use_bounds_cache;
+#endif
 
 			if (!(flags & _collision_test_objects_all_types_flags))
 			{
@@ -887,6 +1254,12 @@ boolean collision_get_features_in_sphere(
 
 			structure_cluster_marker_begin();
 			object_marker_begin();
+#ifdef HALO_LINUX
+			/* (port) the center read once for the objects' sphere tests below
+			(as collision_test_vector's): the same values */
+			center_value = *center;
+			use_bounds_cache = object_bounds_cache_usable();
+#endif
 			for (leaf_reference_index = 0;
 				leaf_reference_index < result.leaf_count;
 				leaf_reference_index++)
@@ -922,6 +1295,27 @@ boolean collision_get_features_in_sphere(
 							object_get_features_in_sphere would pass over at its
 							first tests passed over without the call) */
 							object_index = object_indices[object_slot];
+							/* (an object out of the sphere's reach by its
+							bounding sphere's packed copy passed over without
+							reading it: below it would be marked, then passed
+							over by the same test on the same values, a
+							cluster's object having no siblings; unmarked, a
+							second visit in this query passes it over again.
+							object_bounds_cache.c) */
+							if (use_bounds_cache &&
+								!TEST_FLAG(object_header_get(object_index)->flags, _object_header_child_bit))
+							{
+								struct object_bounds const *bounds = object_bounds_cache_get(object_index);
+
+								if (bounds &&
+									!point_in_sphere(
+										&center_value,
+										&bounds->center,
+										bounds->radius + radius))
+								{
+									continue;
+								}
+							}
 							object = object_get(object_index);
 							if (object->object.magic_number == global_object_marker)
 								continue;
@@ -933,7 +1327,7 @@ boolean collision_get_features_in_sphere(
 									(TEST_FLAG(object->object.damage_flags, _object_dead_bit) &&
 										object->object.type == _object_type_biped) ||
 									!point_in_sphere(
-										center,
+										&center_value,
 										&object->object.bounding_sphere_center,
 										object->object.bounding_sphere_radius + radius)))
 							{
@@ -985,6 +1379,7 @@ boolean collision_get_features_in_sphere(
 			collision_usage_times.features.QuadPart);
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return features->count[_collision_feature_sphere] != 0 ||
 		features->count[_collision_feature_cylinder] != 0 ||
 		features->count[_collision_feature_prism] != 0;
@@ -999,6 +1394,7 @@ boolean collision_fix_pill(
 	long ignore_object_index,
 	real_point3d *new_position)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	/* Name, type and function scope: PC demo and HCEX PDBs.
 	 * January confirms the 204-byte array and this function as its sole user.
 	 * The declaration's precise block position is not independently attested.
@@ -1140,6 +1536,7 @@ boolean collision_fix_pill(
 		(halo_epoch_threaded || ( global_current_collision_user_depth > 1)));
 	if (!halo_epoch_threaded) --global_current_collision_user_depth;
 
+	HALO_OBJECTS_PHASE_POP();
 	return result;
 }
 
@@ -1151,6 +1548,7 @@ boolean collision_test_pill_new(
 	long ignore_object_index,
 	struct collision_result *collision)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	boolean result = FALSE;
 	real t;
 	real_vector3d normal;
@@ -1190,6 +1588,7 @@ boolean collision_test_pill_new(
 	collision->plane.n.j = 0.0f;
 	collision->plane.n.k = 0.0f;
 
+	HALO_OBJECTS_PHASE_POP();
 	return result;
 }
 
@@ -1286,6 +1685,7 @@ short collision_move_point(
 	short maximum_collision_count,
 	struct collision_plane *collisions)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	short collision_count = 0;
 	real_point3d position;
 	real_vector3d velocity = *old_velocity;
@@ -1554,6 +1954,7 @@ short collision_move_point(
 	match_assert_valid_real_point3d("c:\\halo\\SOURCE\\physics\\collisions.c", 0x497, new_position);
 	match_assert_valid_real_vector3d("c:\\halo\\SOURCE\\physics\\collisions.c", 0x498, new_velocity);
 
+	HALO_OBJECTS_PHASE_POP();
 	return collision_count;
 }
 
@@ -1569,6 +1970,7 @@ short collision_move_pill(
 	short maximum_collision_count,
 	struct collision_plane *collisions)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_collision);
 	short result = FALSE;
 	struct collision_feature_list features;
 	real_point3d center;
@@ -1610,6 +2012,7 @@ short collision_move_pill(
 	match_assert("c:\\halo\\SOURCE\\physics\\collisions.c", 1230, (halo_epoch_threaded || ( global_current_collision_user_depth > 1)));
 	if (!halo_epoch_threaded) --global_current_collision_user_depth;
 
+	HALO_OBJECTS_PHASE_POP();
 	return result;
 }
 

@@ -1836,6 +1836,18 @@ void progress_bar_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) whether the loading screen has a picture to show: the player's
+retail executable's; without it the screen is black, which a frame of the
+pregame render with no progress bar shows as well, without its textures and
+front buffer (game_loading_screen_begin) */
+boolean progress_bar_has_picture(
+	void)
+{
+	return retail_loading_image.runs != NULL;
+}
+#endif
+
 boolean progress_bar_is_active(
 	void)
 {
@@ -2706,9 +2718,18 @@ static void progress_bar_load_loading_texture(
 	file= fopen(source_path, "rb");
 	if (file)
 	{
+		image.width= 0;
+		image.height= 0;
+		image.image_type= 0;
+		image.pixel_depth= 0;
 		tgaLoadHeader(file, &image);
-		image.pixels= pixels;
-		tgaLoadImageData(file, &image);
+		/* port: the file is a map pack's: only an uncompressed 24-bit
+		picture the texture's size is read into it */
+		if (image.image_type==2 && image.pixel_depth==24 && image.width==320 && image.height==240)
+		{
+			image.pixels= pixels;
+			tgaLoadImageData(file, &image);
+		}
 		fclose(file);
 	}
 #endif

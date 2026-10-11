@@ -105,8 +105,53 @@ GAME_FLAGS = [
 # the TOML parser the platform layer reads config.toml with (port_config.c)
 TOML_DIR = Path("port/third_party/tomlc17")
 KCP_DIR = Path("port/third_party/kcp")
+# (from OpenCE, MrBruh's "Second hardening round") the port's zlib
+# (port/third_party/zlib/zlib_prefixed.h, 1.3.2): what inflates the maps,
+# which are anyone's files, instead of the game's own 1.1.3 (its inflate
+# only, its names prefixed z_)
+ZLIB_DIR = Path("port/third_party/zlib")
+ZLIB_SOURCES = ("adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "uncompr.c", "zutil.c")
+# (its names prefixed, and the one Z_PREFIX leaves, its error messages, which
+# the game's zlib names the same)
+ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
+# internet play's signatures and password keys, for public games' listings
+# (port/linux/src/p2p_crypto.c, p2p_lobby.c)
+MONOCYPHER_DIR = Path("port/third_party/monocypher")
+MONOCYPHER_SOURCES = ("monocypher.c", "monocypher-ed25519.c")
+# the menus' XML parser (port/linux/src/menu_files.c: OpenCE's menus)
+EXPAT_DIR = Path("port/third_party/expat")
+EXPAT_SOURCES = ("xmlparse.c", "xmlrole.c", "xmltok.c")
+# the Custom Edition installer's cabinet reader and LZX decoder
+# (port/linux/src/posix_ce_installer.c), with config.h's one definition
+LIBMSPACK_DIR = Path("port/third_party/libmspack")
+LIBMSPACK_SOURCES = ("cabd.c", "lzxd.c", "mszipd.c", "qtmd.c", "system.c")
+LIBMSPACK_FLAGS = (f"-I{LIBMSPACK_DIR}", "-DHAVE_INTTYPES_H=1")
 MUSL_MATH_DIR = Path("port/third_party/musl-math")
-# the self-updater's TLS (port/linux/src/posix_update.c)
+# Halo Custom Edition's Ogg Vorbis sounds (port/linux/src/ogg_sound.c):
+# Xiph's Tremor (integer Vorbis) and libogg, allocating only from the
+# decoder's working memory through TLSF (port/third_party/tlsf); the
+# include folder holds the port's ogg/os_types.h
+TREMOR_DIR = Path("port/third_party/tremor")
+TREMOR_SOURCES = ("block.c", "codebook.c", "floor0.c", "floor1.c", "info.c", "mapping0.c", "mdct.c", "registry.c",
+                  "res012.c", "sharedbook.c", "synthesis.c", "window.c")
+LIBOGG_DIR = Path("port/third_party/libogg")
+LIBOGG_SOURCES = ("src/framing.c", "src/bitwise.c")
+LIBOGG_INCLUDE = f"-I{LIBOGG_DIR / 'include'}"
+TLSF_DIR = Path("port/third_party/tlsf")
+
+
+def ogg_sound_sources(tlsf: bool = True) -> List[Path]:
+    """Tremor's and libogg's sources, and TLSF's unless the build has it
+    already (the Vita's host layer)"""
+    sources = [TREMOR_DIR / name for name in TREMOR_SOURCES] + [LIBOGG_DIR / name for name in LIBOGG_SOURCES]
+    return sources + ([TLSF_DIR / "tlsf.c"] if tlsf else [])
+
+
+def ogg_sound_cflags(abi: str) -> str:
+    """the decoder's flags: its own, with the platform's ABI"""
+    return " ".join([abi, "-std=gnu11", "-O2", LIBOGG_INCLUDE, "-DNDEBUG", "-w"])
+# the self-updater's TLS (port/linux/src/posix_update.c) and the update
+# check's (posix_https.c)
 MBEDTLS_DIR = Path("port/third_party/mbedtls")
 # internet play's UPnP (port/linux/src/posix_upnp.c)
 MINIUPNPC_DIR = Path("port/third_party/miniupnpc")
@@ -340,21 +385,31 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     )
 
     n.rule(
+        name="linux_tool_link",
+        command="$linux_cc $ldflags -o $out @$out.rsp",
+        description="LINUX LINK $out",
+        rspfile="$out.rsp",
+        rspfile_content="$in_newline",
+    )
+
+    n.rule(
         name="linux_pgo_train",
         command="$python tools/pgo_train.py --binary $binary --work $work --output $out",
         description="LINUX PGO TRAINING: playing levels in the instrumented build",
         pool="console",
     )
 
-    abi = " ".join(LINUX_ABI_FLAGS + [march_flag(sln)] + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []))
+    abi = " ".join(LINUX_ABI_FLAGS + [march_flag(sln)] + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else [])
+                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else []))
     port_include = PORT_DIR / "include"
     sdk_flags = f"-idirafter {XDK_INCLUDE}"
     excluded = set(config.get("exclude_sources", []))
     libs = " ".join(f"-l{lib}" for lib in config.get("libraries", []))
 
     def emit(obj_dir: Path, output: Path, extra_cflags: List[str], extra_ldflags: List[str],
-             implicit_inputs: List[Path]) -> None:
-        """the objects and the executable, with the given extra flags"""
+             implicit_inputs: List[Path], validator: Optional[Path] = None) -> None:
+        """the objects and the executable, with the given extra flags (and
+        the tag validator alone, tools/map_validate.c, as validator)"""
         extra = " ".join(extra_cflags)
         # the posix_* units have glibc's 32-bit wchar_t, and LLVM will not
         # optimise them together with code that has a 16-bit one: they stay
@@ -393,6 +448,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 f"-include {semantics_header}",
                 defines,
                 f"-I{port_include}",
+                # the headers of the port's own game units (port/linux/game), for
+                # the game sources that call them
+                f"-iquote {Path(config['game_sources'])}",
                 includes,
                 sdk_flags,
             ])
@@ -423,6 +481,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             f"-I{port_include}",
             f"-I{TOML_DIR}",
             f"-I{KCP_DIR}",
+            f"-I{MONOCYPHER_DIR}",
+            f"-I{EXPAT_DIR}",
+            LIBOGG_INCLUDE,
             "-Isource -Isource/cseries",
             sdk_flags,
         ])
@@ -448,10 +509,12 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 continue
             if gxm_null and source.name == "sdl_platform.c":
                 add_object(source, gxm_null_cflags)
-            elif source.name == "posix_update.c":
+            elif source.name in ("posix_update.c", "posix_https.c"):
                 add_object(source, f"{posix_cflags} {mbedtls_include}", posix=True)
             elif source.name == "posix_upnp.c":
                 add_object(source, f"{posix_cflags} -I{MINIUPNPC_DIR / 'include'} -DMINIUPNP_STATICLIB", posix=True)
+            elif source.name == "posix_ce_installer.c":
+                add_object(source, " ".join([posix_cflags, *LIBMSPACK_FLAGS]), posix=True)
             elif source.name.startswith("posix_"):
                 add_object(source, posix_cflags, posix=True)
             elif source.name == "updater.c":
@@ -472,11 +535,28 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             add_object(source, " ".join(POSIX_FLAGS + [march_flag(sln), *MINIUPNPC_DEFINES,
                                                        f"-I{MINIUPNPC_DIR / 'include'}", f"-I{MINIUPNPC_DIR / 'src'}",
                                                        "-fno-builtin-wcslen", "-w"]), posix=True)
+        # the Custom Edition installer's cabinets (port/third_party/libmspack),
+        # with the host's ABI as posix_ce_installer.c, which uses it
+        for name in LIBMSPACK_SOURCES:
+            add_object(LIBMSPACK_DIR / name, " ".join(POSIX_FLAGS + [march_flag(sln), *LIBMSPACK_FLAGS, "-w"]),
+                       posix=True)
         # the settings file's parser (port/third_party/tomlc17), with the
         # platform layer's ABI (its structs hold doubles) and nothing else
         add_object(TOML_DIR / "tomlc17.c", " ".join([abi, "-std=gnu11", "-w"]))
         # internet play's reliable streams (port/third_party/kcp; p2p.c)
         add_object(KCP_DIR / "ikcp.c", " ".join([abi, "-std=gnu11", "-w"]))
+        # the port's zlib (map inflation: cache_files_decompress_windows.c)
+        for name in ZLIB_SOURCES:
+            add_object(ZLIB_DIR / name, " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
+        # internet play's signatures and password keys (port/third_party/monocypher)
+        for name in MONOCYPHER_SOURCES:
+            add_object(MONOCYPHER_DIR / name, " ".join([abi, "-std=gnu11", "-O2", "-w"]))
+        # the menus' XML parser (port/third_party/expat; menu_files.c)
+        for name in EXPAT_SOURCES:
+            add_object(EXPAT_DIR / name, " ".join([abi, "-std=gnu11", f"-I{EXPAT_DIR}", "-w"]))
+        # Custom Edition's Ogg Vorbis sounds (port/linux/src/ogg_sound.c)
+        for source in ogg_sound_sources():
+            add_object(source, ogg_sound_cflags(abi))
         # the game's sin, pow and the rest, the same on every port
         # (port/include/halo_math.h)
         for source in musl_math_sources():
@@ -492,6 +572,35 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             },
             implicit=[Path("tools/linux_link_check.py")],
         )
+
+        # (from OpenCE) the tag validator (port/linux/game/tag_validate.c,
+        # tag_schema*.c) alone on map files: the game's objects of it and of
+        # the Custom Edition loader (cache_file_formats.c), the port's zlib,
+        # and a program that reads maps (tools/map_validate.c)
+        if validator is not None:
+            game_dir = Path(config["game_sources"])
+            tool = Path("tools/map_validate.c")
+            tool_object = obj_dir / tool.with_suffix(".o")
+            n.build(
+                outputs=tool_object,
+                rule="linux_cc",
+                inputs=tool,
+                # (with the game's struct layout and returns, as the
+                # loader's objects it calls have them: -malign-double puts its
+                # reports' 64-bit fields where the game does)
+                variables={"cflags": " ".join([posix_cflags, "-malign-double", "-freg-struct-return",
+                                               f"-I{ZLIB_DIR}", *ZLIB_DEFINES, posix_extra])},
+            )
+            tool_objects = [tool_object, obj_dir / (game_dir / "tag_validate.o"),
+                            obj_dir / (game_dir / "cache_file_formats.o"),
+                            *(obj_dir / source.with_suffix(".o") for source in sorted(game_dir.glob("tag_schema*.c"))),
+                            *(obj_dir / (ZLIB_DIR / name).with_suffix(".o") for name in ZLIB_SOURCES)]
+            n.build(
+                outputs=validator,
+                rule="linux_tool_link",
+                inputs=tool_objects,
+                variables={"ldflags": " ".join(["--target=i686-linux-gnu", "-m32", "-no-pie", "-g", *extra_ldflags])},
+            )
 
     # Profile-guided optimisation: with the committed profile, or with
     # --pgo=train one that an instrumented build records while playing
@@ -512,6 +621,19 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     # compiled together when lld links them.
     cflags, ldflags = lto_flags(sln, build_dir / "thinlto-cache")
     cflags += profile_use_flags(profile)
-    emit(obj_dir, output, cflags, ldflags, [profile] if profile else [])
-    n.build(outputs="linux", rule="phony", inputs=output)
+    validator = build_dir / "map_validate"
+    emit(obj_dir, output, cflags, ldflags, [profile] if profile else [], validator)
+    n.build(outputs="linux", rule="phony", inputs=[output, validator])
+
+    # The dedicated server (ninja linux-server: port/linux/DEDICATED_SERVER.md):
+    # the same game compiled once more as a headless host on the Vitas' side
+    # of the Vita-only line (HALO_NET_AS_VITA) that can do nothing else
+    # (HALO_DEDICATED_SERVER: no window, sound or local player, and no join of
+    # another's game), into build/linux/halo-server. Not part of `ninja
+    # linux`; without the profile, which is the game's own (its code differs)
+    server_cflags, server_ldflags = lto_flags(sln, build_dir / "server" / "thinlto-cache")
+    server_output = build_dir / "halo-server"
+    emit(build_dir / "server" / "obj", server_output,
+         server_cflags + ["-DHALO_NET_AS_VITA=1", "-DHALO_DEDICATED_SERVER=1"], server_ldflags, [])
+    n.build(outputs="linux-server", rule="phony", inputs=[server_output])
     n.newline()

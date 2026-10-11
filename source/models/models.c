@@ -64,6 +64,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries.h"
+#include "cseries/errors.h"
 #include "cseries/profile.h"
 #include "models.h"
 
@@ -79,6 +80,7 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "shaders/shader_definitions.h"
 #include "shaders/shaders.h"
+#include "tag_files/tag_files.h"
 
 /* ---------- constants */
 
@@ -324,11 +326,15 @@ void halo_render_model_profile_report(unsigned long frames)
 static void render_model_parts(
 	struct model const *model,
 	char const *region_permutation_indices,
+	short region_permutation_count,
 	struct rasterizer_model_skinning const *skinning,
 	long object_index,
 	short geometry_detail_level_index,
 	short forced_shader_permutation_index,
 	long flags);
+static void model_data_error(
+	struct model const *model,
+	char const *problem);
 
 /* ---------- globals */
 
@@ -492,6 +498,7 @@ struct render_model_kept_part
 static void render_model_parts(
 	struct model const *model,
 	char const *region_permutation_indices,
+	short region_permutation_count,
 	struct rasterizer_model_skinning const *skinning,
 	long object_index,
 	short geometry_detail_level_index,
@@ -517,6 +524,11 @@ static void render_model_parts(
 		short sort_filth_count = 0;
 		short region_index;
 		short i, j;
+		/* port: no more regions than the permutations passed in hold: an
+		object's MAXIMUM_REGIONS_PER_OBJECT, or the default's
+		MAXIMUM_REGIONS_PER_MODEL (a map's count; retail models have 8 at
+		most) */
+		short region_count = (short)MIN(model->regions.count, region_permutation_count);
 
 #ifdef HALO_LINUX
 		if (pass != _render_model_pass_solid && !kept_overflow)
@@ -535,7 +547,7 @@ static void render_model_parts(
 		}
 		else
 #endif
-		for (region_index = 0; region_index<model->regions.count; region_index++)
+		for (region_index = 0; region_index<region_count; region_index++)
 		{
 			struct model_region *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
 			char permutation_index = region_permutation_indices[region_index];
@@ -548,11 +560,26 @@ static void render_model_parts(
 			if (permutation_index!=NONE)
 #endif
 			{
-				struct model_region_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
+				struct model_region_permutation *permutation;
+				short geometry_index;
+
+				/* port: a permutation the region has, and a geometry the model
+				has (a map's indices); a bad one draws nothing */
+				if (!VALID_INDEX(permutation_index, region->permutations.count))
+				{
+					model_data_error(model, "region permutation");
+					continue;
+				}
+				permutation = TAG_BLOCK_GET_ELEMENT(
 					&region->permutations,
 					permutation_index,
 					struct model_region_permutation);
-				short geometry_index = permutation->geometry_indices[geometry_detail_level_index];
+				geometry_index = permutation->geometry_indices[geometry_detail_level_index];
+				if (geometry_index!=NONE && !VALID_INDEX(geometry_index, model->geometries.count))
+				{
+					model_data_error(model, "geometry");
+					continue;
+				}
 
 				if (!render_model_no_geometry && geometry_index!=NONE)
 				{
@@ -562,11 +589,21 @@ static void render_model_parts(
 					for (part_index = 0; part_index<geometry->parts.count; part_index++)
 					{
 						struct model_geometry_part *part = TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index, struct model_geometry_part);
-						struct model_shader_reference *shader_reference = TAG_BLOCK_GET_ELEMENT(
+						struct model_shader_reference *shader_reference;
+						struct shader *shader;
+
+						/* port: a shader the model has (a map's index); a part
+						without one isn't drawn */
+						if (!VALID_INDEX(part->shader_index, model->shaders.count))
+						{
+							model_data_error(model, "shader");
+							continue;
+						}
+						shader_reference = TAG_BLOCK_GET_ELEMENT(
 							&model->shaders,
 							part->shader_index,
 							struct model_shader_reference);
-						struct shader *shader = shader_definition_get(shader_reference->shader.index);
+						shader = shader_definition_get(shader_reference->shader.index);
 
 #ifdef HALO_LINUX
 						if (pass == _render_model_pass_solid && shader_type_is_valid_for_model(shader->base.type) &&
@@ -617,6 +654,12 @@ static void render_model_parts(
 							{
 								if (pass==_render_model_pass_transparent)
 								{
+									/* port: the root's matrix for a node the model
+									doesn't have (a map's index) */
+									short centroid_node_index = VALID_INDEX(part->centroid_primary_node_index, skinning->node_matrix_count) ?
+										part->centroid_primary_node_index :
+										0;
+
 									match_assert("c:\\halo\\SOURCE\\models\\models.c", 442, !TEST_FLAG(flags, _render_model_shadow_bit));
 									match_assert(
 										"c:\\halo\\SOURCE\\models\\models.c",
@@ -630,7 +673,7 @@ static void render_model_parts(
 									RENDER_MODEL_PART_BEGIN();
 
 									matrix4x3_transform_point(
-										&skinning->node_matrices[part->centroid_primary_node_index],
+										&skinning->node_matrices[centroid_node_index],
 										&part->centroid,
 										&centroid);
 									rasterizer_model_transparent_geometry_submit(
@@ -642,7 +685,9 @@ static void render_model_parts(
 										&part->vertex_buffer,
 										NONE,
 										&centroid,
-										&sort_filth[sort_filth_count]);
+										/* port: no sort record once all of sort_filth is
+										used (it wrote one past it) */
+										sort_filth_count<MAXIMUM_PARTS_PER_MODEL_GEOMETRY ? &sort_filth[sort_filth_count] : NULL);
 									RENDER_MODEL_PART_END(1);
 
 									if (sort_filth_count<MAXIMUM_PARTS_PER_MODEL_GEOMETRY &&
@@ -739,6 +784,8 @@ void model_interpolate_node_orientations(
 	real fraction = (real)(frame_index + 1) / (real)frame_count;
 	real inverse_fraction = 1.f - fraction;
 	short node_index;
+	/* port: no more nodes than the engine's arrays hold (a map's count) */
+	short node_count = (short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
 
 	match_assert(
 		"c:\\halo\\SOURCE\\models\\models.c",
@@ -749,7 +796,7 @@ void model_interpolate_node_orientations(
 		580,
 		frame_index<frame_count);
 
-	for (node_index = 0; node_index < model->nodes.count; node_index++)
+	for (node_index = 0; node_index < node_count; node_index++)
 	{
 		struct real_orientation *target = &target_node_orientations[node_index];
 		struct real_orientation *original = &original_node_orientations[node_index];
@@ -773,8 +820,10 @@ void model_get_node_orientations(
 	real_orientation *node_orientations)
 {
 	short node_index;
+	/* port: no more nodes than the engine's arrays hold (a map's count) */
+	short node_count = (short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
 
-	for (node_index = 0; node_index<model->nodes.count; node_index++)
+	for (node_index = 0; node_index<node_count; node_index++)
 	{
 		struct model_node *node = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node);
 
@@ -795,6 +844,14 @@ void model_get_node_matrices(
 {
 	short node_queue[MAXIMUM_NODES_PER_MODEL];
 	short read_index, write_index;
+	/* port: the nodes the queue and the matrices hold (a map's count) */
+	short node_count = (short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
+
+	/* port: a model without nodes has no matrices */
+	if (node_count<=0)
+	{
+		return;
+	}
 
 	node_queue[0] = 0;
 	read_index = 0;
@@ -819,17 +876,41 @@ void model_get_node_matrices(
 		}
 		else
 		{
+			short parent_node_index = node->parent_node_index;
+
 			match_assert("c:\\halo\\SOURCE\\models\\models.c", 650, node->parent_node_index!=NONE);
-			matrix4x3_multiply(&node_matrices[node->parent_node_index], &node_matrix, &node_matrices[node_index]);
+			/* port: a parent the model doesn't have is the root (a map's index) */
+			if (!VALID_INDEX(parent_node_index, node_count))
+			{
+				model_data_error(model, "node's parent");
+				parent_node_index = 0;
+			}
+			matrix4x3_multiply(&node_matrices[parent_node_index], &node_matrix, &node_matrices[node_index]);
 		}
 
+		/* port: only nodes the model has, and no more than the queue holds (a
+		map's links, which could go in a loop) */
 		if (node->next_sibling_node_index!=NONE)
 		{
-			node_queue[write_index++] = node->next_sibling_node_index;
+			if (VALID_INDEX(node->next_sibling_node_index, node_count) && write_index<MAXIMUM_NODES_PER_MODEL)
+			{
+				node_queue[write_index++] = node->next_sibling_node_index;
+			}
+			else
+			{
+				model_data_error(model, "node's sibling");
+			}
 		}
 		if (node->first_child_node_index!=NONE)
 		{
-			node_queue[write_index++] = node->first_child_node_index;
+			if (VALID_INDEX(node->first_child_node_index, node_count) && write_index<MAXIMUM_NODES_PER_MODEL)
+			{
+				node_queue[write_index++] = node->first_child_node_index;
+			}
+			else
+			{
+				model_data_error(model, "node's child");
+			}
 		}
 	}
 
@@ -845,10 +926,12 @@ void model_node_matrices_from_orientations(
 	real_vector3d const *up)
 {
 	real_matrix4x3 root_matrix;
+	/* port: the nodes the queue and the matrices hold (a map's count) */
+	short node_count = (short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
 
 	matrix4x3_from_point_and_vectors(&root_matrix, origin, forward, up);
 
-	if (model->nodes.count>0)
+	if (node_count>0)
 	{
 		short node_queue[MAXIMUM_NODES_PER_MODEL];
 		short read_index = 0;
@@ -863,16 +946,39 @@ void model_node_matrices_from_orientations(
 			real_matrix4x3 const *parent_matrix = node_index==0 ? &root_matrix : &node_matrices[node->parent_node_index];
 			real_matrix4x3 node_matrix;
 
+			/* port: a parent the model doesn't have is the root (a map's index) */
+			if (node_index!=0 && !VALID_INDEX(node->parent_node_index, node_count))
+			{
+				model_data_error(model, "node's parent");
+				parent_matrix = &node_matrices[0];
+			}
+
 			matrix4x3_from_orientation(&node_matrix, &node_orientations[node_index]);
 			matrix4x3_multiply(parent_matrix, &node_matrix, &node_matrices[node_index]);
 
+			/* port: only nodes the model has, and no more than the queue holds
+			(a map's links, which could go in a loop) */
 			if (node->next_sibling_node_index!=NONE)
 			{
-				node_queue[write_index++] = node->next_sibling_node_index;
+				if (VALID_INDEX(node->next_sibling_node_index, node_count) && write_index<MAXIMUM_NODES_PER_MODEL)
+				{
+					node_queue[write_index++] = node->next_sibling_node_index;
+				}
+				else
+				{
+					model_data_error(model, "node's sibling");
+				}
 			}
 			if (node->first_child_node_index!=NONE)
 			{
-				node_queue[write_index++] = node->first_child_node_index;
+				if (VALID_INDEX(node->first_child_node_index, node_count) && write_index<MAXIMUM_NODES_PER_MODEL)
+				{
+					node_queue[write_index++] = node->first_child_node_index;
+				}
+				else
+				{
+					model_data_error(model, "node's child");
+				}
 			}
 		}
 		while (read_index!=write_index);
@@ -973,22 +1079,45 @@ short model_get_marker_by_name(
 
 		struct model *model = model_definition_get(model_index);
 		struct model_marker* marker = TAG_BLOCK_GET_ELEMENT(&model->markers, marker_index, struct model_marker);
+		/* port: the nodes the matrices passed in hold (a map's counts) */
+		short matrix_count = node_remapping_table ?
+			(short)MIN(node_count, MAXIMUM_NODES_PER_MODEL) :
+			(short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
 
 		for (i =0; i<marker->instances.count; i++)
 		{
 			struct model_marker_instance* instance = TAG_BLOCK_GET_ELEMENT(&marker->instances, i, struct model_marker_instance);
+
+			/* port: a marker on a region or node the model doesn't have is
+			skipped (a map's indices); the permutations passed in are an
+			object's (retail's markers are on regions 5 at most) */
+			if ((region_permutations && instance->region_index>=MAXIMUM_REGIONS_PER_OBJECT) ||
+				instance->node_index>=MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL))
+			{
+				model_data_error(model, "marker");
+				continue;
+			}
+
 			if (!region_permutations ||
 				region_permutations[instance->region_index]==instance->permutation_index)
 			{
 				struct object_marker *object_marker;
+				short marker_node_index;
 
 				if (result>=maximum_marker_count)
 				{
 					break;
 				}
 
+				marker_node_index = node_remapping_table ? node_remapping_table[instance->node_index] : instance->node_index;
+				if (!VALID_INDEX(marker_node_index, matrix_count))
+				{
+					model_data_error(model, "marker");
+					continue;
+				}
+
 				object_marker = &markers[result++];
-				object_marker->node_index = node_remapping_table ? node_remapping_table[instance->node_index] : instance->node_index;
+				object_marker->node_index = marker_node_index;
 				matrix4x3_from_point_and_quaternion(&object_marker->node_matrix, &instance->translation, &instance->rotation);
 				match_assert(
 					"c:\\halo\\SOURCE\\models\\models.c",
@@ -1194,7 +1323,95 @@ static short model_detail_level_keeping_transparency(
 	}
 	return level;
 }
+
+/* (port) HALO_MODEL_LOD_SCALE leaves a model whose bounding sphere holds the
+camera at the game's own detail level: it fills the view at any level, and
+its highest level can carry what the lower ones leave out for the view from
+inside. a10's cryotube draws the Master Chief's armour below the
+first-person camera in its super-high level alone (3000 pixels, which only
+the view from inside the tube reaches: 3300 to 5700 there at 4:3); the player's
+own biped is passed over in first person as on the Xbox (render_objects.c),
+so at 0.5 the tube's lower level left no body in view (issue #29) */
+static boolean model_sphere_holds_camera(
+	real_point3d const *centroid,
+	real radius)
+{
+	return centroid && radius > 0.0f &&
+		distance_squared3d(centroid, &render.camera.position) < radius * radius;
+}
+
+/* (port, debug) HALO_MODEL_LOD_LOG=1: each model's detail level logged when
+it first draws at a level, with the level the game itself would have
+chosen ("model detail: <model> level <n> (game <n>, <pixels> pixels,
+scale <s>)", or for a model around the camera "..., camera inside: game
+level kept, scaled <the level the scale would have chosen>)");
+run_cryo_body_test.sh reads it */
+static void model_detail_level_log(
+	long model_index,
+	struct model const *model,
+	short level,
+	real game_pixels,
+	float lod_scale,
+	boolean camera_inside)
+{
+	static int enabled = -1;
+	static unsigned long seen[1024];
+	unsigned long key;
+	unsigned long slot;
+	short game_level = NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1;
+	short scaled_level = NUMBER_OF_DETAIL_LEVELS_PER_MODEL-1;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_MODEL_LOD_LOG");
+
+		enabled = setting && atoi(setting) != 0;
+	}
+	if (!enabled)
+		return;
+	while (game_level>0 && game_pixels<model->detail_cutoff_pixels[game_level])
+	{
+		game_level--;
+	}
+	while (scaled_level>0 && game_pixels * lod_scale<model->detail_cutoff_pixels[scaled_level])
+	{
+		scaled_level--;
+	}
+	key = ((unsigned long)(model_index & 0xFFFF) << 12) | ((unsigned long)level << 9) |
+		((unsigned long)game_level << 6) | ((unsigned long)(camera_inside ? scaled_level : 7) << 3) | 0x80000000ul;
+	slot = ((unsigned long)(model_index & 0xFFFF) * 31u + ((key >> 3) & 0x1FFu) * 7u) & (NUMBEROF(seen) - 1);
+	if (seen[slot] == key)
+		return;
+	seen[slot] = key;
+	if (camera_inside)
+	{
+		platform_log("model detail: %s level %d (game %d, %.0f pixels, scale %.2f, camera inside: game level kept, scaled %d)",
+			tag_get_name(model_index), (int)level, (int)game_level, game_pixels, lod_scale, (int)scaled_level);
+	}
+	else
+	{
+		platform_log("model detail: %s level %d (game %d, %.0f pixels, scale %.2f)",
+			tag_get_name(model_index), (int)level, (int)game_level, game_pixels, lod_scale);
+	}
+}
 #endif
+
+/* port: a map's model with an index past what it has */
+static void model_data_error(
+	struct model const *model,
+	char const *problem)
+{
+	if (model_data_report_once(model))
+	{
+		error(
+			_error_silent,
+			"### ERROR a model (%ld nodes) has a bad %s index; it is skipped",
+			model->nodes.count,
+			problem);
+	}
+
+	return;
+}
 
 void render_model(
 	long model_index,
@@ -1241,6 +1458,13 @@ void render_model(
 		struct rasterizer_model_begin_parameters model_parameters;
 		short geometry_detail_level_index;
 		short node_index;
+		/* port: how many regions the permutations passed in hold (an
+		object's; the default's otherwise) */
+		short region_permutation_count = region_permutation_indices ?
+			MAXIMUM_REGIONS_PER_OBJECT :
+			MAXIMUM_REGIONS_PER_MODEL;
+		/* port: no more nodes than relative_node_matrices holds (a map's count) */
+		short node_count = (short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
 
 		if (!region_permutation_indices)
 		{
@@ -1265,7 +1489,7 @@ void render_model(
 
 		if (node_matrices)
 		{
-			for (node_index = 0; node_index<model->nodes.count; node_index++)
+			for (node_index = 0; node_index<node_count; node_index++)
 			{
 				struct model_node *node = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node);
 
@@ -1277,7 +1501,7 @@ void render_model(
 		}
 		else
 		{
-			for (node_index = 0; node_index<model->nodes.count; node_index++)
+			for (node_index = 0; node_index<node_count; node_index++)
 			{
 				relative_node_matrices[node_index] = render.frustum.world_to_view;
 			}
@@ -1288,12 +1512,15 @@ void render_model(
 
 #ifdef HALO_LINUX
 		real game_level_of_detail_pixels = -1.0f;
+		real unscaled_level_of_detail_pixels = level_of_detail_pixels;
+		boolean camera_inside = FALSE;
+		static float lod_scale = -1.0f;
 
 		{
 			/* (port) HALO_MODEL_LOD_SCALE=<real>: the detail level is chosen as
 			if the model covered that fraction of its pixels (a handheld quality
-			setting: 0.5 picks a level or so lower; the game state is untouched) */
-			static float lod_scale = -1.0f;
+			setting: 0.5 picks a level or so lower; the game state is untouched),
+			except for a model around the camera (model_sphere_holds_camera) */
 			static unsigned long settings_seen;
 			extern volatile unsigned long halo_settings_generation;
 
@@ -1305,8 +1532,12 @@ void render_model(
 			}
 			if (lod_scale != 1.0f)
 			{
-				game_level_of_detail_pixels = level_of_detail_pixels;
-				level_of_detail_pixels *= lod_scale;
+				camera_inside = model_sphere_holds_camera(centroid, radius);
+				if (!camera_inside)
+				{
+					game_level_of_detail_pixels = level_of_detail_pixels;
+					level_of_detail_pixels *= lod_scale;
+				}
 			}
 		}
 #endif
@@ -1330,6 +1561,11 @@ void render_model(
 			geometry_detail_level_index = model_detail_level_keeping_transparency(model_index, model,
 				region_permutation_indices, geometry_detail_level_index, game_level);
 		}
+		if (!TEST_FLAG(flags, _render_model_shadow_bit))
+		{
+			model_detail_level_log(model_index, model, geometry_detail_level_index,
+				unscaled_level_of_detail_pixels, lod_scale, camera_inside);
+		}
 #endif
 		if (rasterizer_debug_options.debug_model_lod!=NONE)
 		{
@@ -1344,11 +1580,12 @@ void render_model(
 		{
 			if (render_model_nodes)
 			{
-				for (node_index = 0; node_index<model->nodes.count; node_index++)
+				for (node_index = 0; node_index<node_count; node_index++)
 				{
 					struct model_node *node = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node);
 
-					if (node->parent_node_index!=NONE)
+					/* port: and the parent is one the model has (a map's index) */
+					if (VALID_INDEX(node->parent_node_index, node_count))
 					{
 						render_debug_line(
 							TRUE,
@@ -1376,7 +1613,11 @@ void render_model(
 							instance_index,
 							struct model_marker_instance);
 
-						if (region_permutation_indices[instance->region_index]==instance->permutation_index)
+						/* port: and the region and node are ones the model has room
+						for (a map's indices) */
+						if (instance->region_index<region_permutation_count &&
+							instance->node_index<node_count &&
+							region_permutation_indices[instance->region_index]==instance->permutation_index)
 						{
 							real_matrix4x3 marker_matrix;
 
@@ -1398,12 +1639,14 @@ void render_model(
 				short region_index;
 				real distance;
 
-				for (region_index = 0; region_index<model->regions.count; region_index++)
+				/* port: the regions and permutations render_model_parts draws (a
+				map's counts and indices) */
+				for (region_index = 0; region_index<MIN(model->regions.count, region_permutation_count); region_index++)
 				{
 					struct model_region *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
 					char permutation_index = region_permutation_indices[region_index];
 
-					if (permutation_index!=NONE)
+					if (VALID_INDEX(permutation_index, region->permutations.count))
 					{
 						struct model_region_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
 							&region->permutations,
@@ -1431,7 +1674,7 @@ void render_model(
 						maximum_actual_detail_level_index = MAX(maximum_actual_detail_level_index, actual_detail_level_index);
 
 						geometry_index = permutation->geometry_indices[geometry_detail_level_index];
-						if (geometry_index!=NONE)
+						if (VALID_INDEX(geometry_index, model->geometries.count))
 						{
 							struct model_geometry *geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index, struct model_geometry);
 							short part_index;
@@ -1510,7 +1753,7 @@ void render_model(
 		model_parameters.animation.colors = change_colors;
 		model_parameters.animation.values = function_values;
 		model_parameters.skinning.node_matrices = relative_node_matrices;
-		model_parameters.skinning.node_matrix_count = model->nodes.count;
+		model_parameters.skinning.node_matrix_count = node_count;
 		model_parameters.geometry_flags = 0;
 		model_parameters.base_map_scale = model->base_map_scale;
 
@@ -1539,6 +1782,7 @@ void render_model(
 		render_model_parts(
 			model,
 			region_permutation_indices,
+			region_permutation_count,
 			&model_parameters.skinning,
 			unique_identifier,
 			geometry_detail_level_index,
@@ -1562,4 +1806,35 @@ void render_model(
 	profile_exit(render_model_section);
 
 	return;
+}
+
+/* port: TRUE the first time a map's model, animation or other tag data is
+found bad. The checks run every frame; the report goes out once. */
+boolean model_data_report_once(
+	void const *data)
+{
+	static void const *reported_data[32];
+	static long next_reported_index = 0;
+	/* (and no more than this many reports in all: with more bad tags than
+	the list holds, each would push another out and be reported again
+	every frame) */
+	static long report_count = 0;
+	long reported_index;
+
+	for (reported_index = 0; reported_index<(long)NUMBEROF(reported_data); reported_index++)
+	{
+		if (reported_data[reported_index]==data)
+		{
+			return FALSE;
+		}
+	}
+	if (report_count >= 4 * (long)NUMBEROF(reported_data))
+	{
+		return FALSE;
+	}
+	report_count++;
+	reported_data[next_reported_index] = data;
+	next_reported_index = (next_reported_index+1)%(long)NUMBEROF(reported_data);
+
+	return TRUE;
 }

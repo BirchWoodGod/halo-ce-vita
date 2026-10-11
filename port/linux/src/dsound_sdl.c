@@ -19,7 +19,8 @@ point positions and with NEON where there is one) and applies:
 	  direction in listener space, and the low frequency part of the I3DL2
 	  direct path, obstruction and occlusion levels.
 Doppler, the high frequency filters, cones and I3DL2 reverb are not
-modelled.
+modelled. A look-ahead limiter keeps the sum of the voices under full scale
+(limit).
 
 Packets the mixer has finished are completed from DirectSoundDoWork, which
 the game calls every frame, and from Flush, never from the audio thread:
@@ -129,6 +130,8 @@ static struct
 	float front[3];
 	float top[3];
 	float rolloff_factor;
+	/* meters a unit (SetDistanceFactor): the game sets 3.048, a world unit
+	being 10 feet. Only Doppler, which is not modelled, would use it */
 	float distance_factor;
 } listener = { { 0, 0, 0 }, { 0, 0, 1 }, { 0, 1, 0 }, 1.0f, 1.0f };
 
@@ -305,7 +308,10 @@ static void spatialize(const struct sdl_stream *stream, float *left, float *righ
 		side = dot3(offset, right_axis);
 		ahead = dot3(offset, listener.front);
 	}
-	distance = sqrtf(dot3(offset, offset)) * listener.distance_factor;
+	/* in the game's units, those of the minimum and maximum distances: the
+	distance factor turns units into meters for Doppler, and scaling by it
+	here put every 3D sound 3 times as far away, up to 10 dB quieter */
+	distance = sqrtf(dot3(offset, offset));
 
 	/* DirectSound's inverse distance law, held beyond the maximum distance */
 	attenuation = 1.0f;
@@ -786,6 +792,11 @@ reported by DirectSoundDoWork every 300 calls */
 unsigned long long vita_host_time_us(void) __attribute__((weak));
 static volatile unsigned long long statistics_mix_us, statistics_wait_us;
 static volatile unsigned long statistics_mixes, statistics_voices, statistics_waits;
+/* the device's calls for audio: the longest time between two, and how many
+came over 25 ms apart (SDL asks for 512 frames, 10.7 ms: a gap past two of
+those has let the device's queue run dry, heard as a crackle) */
+static volatile unsigned long long statistics_callback_gap_us;
+static volatile unsigned long statistics_callbacks_late;
 
 static unsigned long long statistics_now(void)
 {
@@ -795,6 +806,9 @@ static unsigned long long statistics_now(void)
 /* game threads waiting for mixer_lock: the mixer hands the lock over
 between two voices when it sees one (mix) */
 static volatile int game_lock_wanted;
+/* the game's threads' waits for the mixer, for good (main.c's frame-hitch
+line takes a frame's from it) */
+volatile unsigned long long halo_mixer_game_wait_us;
 
 /* mixer_lock taken by the game's threads: the time spent waiting for the
 mixer is counted (a lock that is free costs no clock read) */
@@ -808,7 +822,9 @@ static void game_lock(void)
 	__atomic_add_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
 	pthread_mutex_lock(&mixer_lock);
 	__atomic_sub_fetch(&game_lock_wanted, 1, __ATOMIC_SEQ_CST);
-	statistics_wait_us += statistics_now() - started;
+	started = statistics_now() - started;
+	statistics_wait_us += started;
+	halo_mixer_game_wait_us += started;
 	statistics_waits++;
 }
 
@@ -885,22 +901,110 @@ static void mix_one_voice(struct sdl_stream *stream, float *output, unsigned lon
 	}
 }
 
-/* soft limit rather than wrap or hard clip when many voices pile up */
-static void limit(float *output, unsigned long samples)
+/* ---------- limiter (from OpenCE 5f388f78, Jeff Clark)
+
+The game sets its mix bins' headroom to 0 (sound_dsound_xbox.c), so the voices
+sum at their full level, as on the Xbox, and a pile of loud ones goes over
+full scale. Clipping each sample, or bending it near full scale (the tanh soft
+clipper before this: 23% harmonic distortion on a sine at twice full scale),
+distorts the sound: dialogue over gunfire crackled. Instead the whole mix is
+turned down for as long as it would go over, both channels alike. The output
+is delayed LIMITER_LOOKAHEAD - 1 frames (1.3 ms), so that the gain comes down
+smoothly before each peak: the smallest gain the frames ahead need, averaged
+over the last LIMITER_LOOKAHEAD frames, is never more than a peak needs when
+it plays. The gain comes back up over LIMITER_RELEASE_SECONDS.
+
+(port) The smallest gain the frames ahead need is kept as a sliding minimum
+(a queue of the frames whose needed gains rise, oldest first) instead of
+scanning the look-ahead every frame: the same gains to the bit, at about a
+twelfth of the cost (on a Pi 4 0.11-0.13% of a core against 1.39%;
+triage/mpfix-status.md), which on the Vita's mixer core is the difference
+between a few tenths of a millisecond a frame and two or three. */
+
+#define LIMITER_CEILING 0.891f /* -1 dBFS */
+#define LIMITER_LOOKAHEAD 64
+#define LIMITER_RELEASE_SECONDS 0.1f
+
+struct limiter
 {
-	unsigned long sample;
+	/* the frames the output is delayed by */
+	float delay[LIMITER_LOOKAHEAD][OUTPUT_CHANNELS];
+	/* the gain held down to what the frames ahead need, coming back up */
+	float held;
+	/* its last LIMITER_LOOKAHEAD values, and their sum */
+	float history[LIMITER_LOOKAHEAD];
+	double history_sum;
+	unsigned long position;
+	/* the frames counted, and the sliding minimum of the gains they need:
+	a queue (from head, count long) of frame numbers and their gains, the
+	gains rising */
+	unsigned long frame;
+	unsigned long queue_frames[LIMITER_LOOKAHEAD];
+	float queue_gains[LIMITER_LOOKAHEAD];
+	unsigned long queue_head, queue_count;
+	BOOL initialized;
+};
 
-	for (sample = 0; sample < samples; sample++)
+/* the output's, and HALO_AUDIO_VERIFY's reference mix's */
+static struct limiter output_limiter, verify_limiter;
+
+static void limit(struct limiter *limiter, float *output, unsigned long frames)
+{
+	float release = 1.0f - expf(-1.0f / (LIMITER_RELEASE_SECONDS * OUTPUT_RATE));
+	unsigned long frame, index, channel;
+
+	if (!limiter->initialized)
 	{
-		float value = output[sample];
+		for (index = 0; index < LIMITER_LOOKAHEAD; index++)
+			limiter->history[index] = 1.0f;
+		limiter->held = 1.0f;
+		limiter->history_sum = LIMITER_LOOKAHEAD;
+		limiter->initialized = TRUE;
+	}
+	for (frame = 0; frame < frames; frame++)
+	{
+		float *sample = output + frame * OUTPUT_CHANNELS;
+		unsigned long position = limiter->position;
+		unsigned long oldest = (position + 1) % LIMITER_LOOKAHEAD;
+		float peak = 0.0f, needed, lowest, gain;
 
-		if (value > 0.8f || value < -0.8f)
+		/* the new frame takes the slot of the oldest, which has played */
+		for (channel = 0; channel < OUTPUT_CHANNELS; channel++)
 		{
-			float sign = value < 0.0f ? -1.0f : 1.0f;
-			float excess = fabsf(value) - 0.8f;
-
-			output[sample] = sign * (0.8f + 0.2f * tanhf(excess / 0.2f));
+			if (fabsf(sample[channel]) > peak)
+				peak = fabsf(sample[channel]);
+			limiter->delay[position][channel] = sample[channel];
 		}
+		needed = peak > LIMITER_CEILING ? LIMITER_CEILING / peak : 1.0f;
+		/* (the smallest of the last LIMITER_LOOKAHEAD frames' needs: those
+		before the first frame needed 1) */
+		while (limiter->queue_count &&
+			limiter->queue_gains[(limiter->queue_head + limiter->queue_count - 1) % LIMITER_LOOKAHEAD] >= needed)
+		{
+			limiter->queue_count--;
+		}
+		index = (limiter->queue_head + limiter->queue_count) % LIMITER_LOOKAHEAD;
+		limiter->queue_frames[index] = limiter->frame;
+		limiter->queue_gains[index] = needed;
+		limiter->queue_count++;
+		if (limiter->frame - limiter->queue_frames[limiter->queue_head] >= LIMITER_LOOKAHEAD)
+		{
+			limiter->queue_head = (limiter->queue_head + 1) % LIMITER_LOOKAHEAD;
+			limiter->queue_count--;
+		}
+		lowest = limiter->queue_gains[limiter->queue_head];
+		limiter->frame++;
+		if (lowest < limiter->held)
+			limiter->held = lowest;
+		else
+			limiter->held += (lowest - limiter->held) * release;
+		limiter->history_sum += limiter->held - limiter->history[position];
+		limiter->history[position] = limiter->held;
+		gain = (float)(limiter->history_sum / LIMITER_LOOKAHEAD);
+		/* the frame LIMITER_LOOKAHEAD - 1 frames old plays */
+		for (channel = 0; channel < OUTPUT_CHANNELS; channel++)
+			sample[channel] = limiter->delay[oldest][channel] * gain;
+		limiter->position = oldest;
 	}
 }
 
@@ -987,7 +1091,7 @@ static void mix(float *output, unsigned long frames)
 	statistics_mix_us += statistics_now() - started;
 	statistics_mixes++;
 	statistics_voices += voices;
-	limit(output, frames * OUTPUT_CHANNELS);
+	limit(&output_limiter, output, frames);
 	{
 		/* (debug) HALO_AUDIO_DUMP=<file>: the mix as it goes to the device,
 		raw 32-bit float stereo at 48 kHz, for listening to and measuring
@@ -998,7 +1102,7 @@ static void mix(float *output, unsigned long frames)
 		dump_mix("HALO_AUDIO_DUMP", &dump, &dump_checked, output, frames);
 		if (audio_verify > 0 && frames <= VERIFY_FRAMES)
 		{
-			limit(verify_mix, frames * OUTPUT_CHANNELS);
+			limit(&verify_limiter, verify_mix, frames);
 			dump_mix("HALO_AUDIO_DUMP_REF", &reference_dump, &reference_dump_checked, verify_mix, frames);
 		}
 	}
@@ -1011,6 +1115,11 @@ static BOOL audio_started = FALSE;
 static BOOL frame_locked_mixing = FALSE;
 
 void vita_host_pin_current_thread(int core) __attribute__((weak));
+#ifdef HALO_VITA
+int vita_host_fourth_core_move(const char *role);
+int vita_host_fourth_core_join(const char *role, int level);
+void vita_host_thread_watch(const char *role);
+#endif
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
@@ -1026,7 +1135,13 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 		for the length of a mix, the tick's on the third core included.
 		HALO_AUDIO_CORE=0-2 pins it (default -1: left to the system; on
 		core 1, with the render worker, the user heard crackle in the b30
-		fight, while unpinned it inflated the tick's sound time) */
+		fight, while unpinned it inflated the tick's sound time).
+		HALO_AUDIO_CORE=3, or without HALO_AUDIO_CORE Fourth core helpers
+		at Audio or All async: the Vita's fourth core, where the system
+		allows it (vita_fourth_core.c; as in Bruno Santana's modified build.
+		The game waits for the mixer's lock, and the system's processes
+		there run too: the sound mixer's line says how late the device's
+		calls came and how long the game waited) */
 		pinned = 1;
 		if (vita_host_pin_current_thread)
 		{
@@ -1035,7 +1150,30 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 
 			if (core >= 0 && core <= 2)
 				vita_host_pin_current_thread(core);
+#ifdef HALO_VITA
+			if (core == 3)
+				vita_host_fourth_core_move("sound mixer");
+			else if (!setting)
+				vita_host_fourth_core_join("sound mixer", 1);
+			else
+				vita_host_thread_watch("sound mixer");
+#endif
 		}
+	}
+	{
+		static unsigned long long previous_call;
+		unsigned long long now = statistics_now();
+
+		if (previous_call && now > previous_call)
+		{
+			unsigned long long gap = now - previous_call;
+
+			if (gap > statistics_callback_gap_us)
+				statistics_callback_gap_us = gap;
+			if (gap > 25000)
+				statistics_callbacks_late++;
+		}
+		previous_call = now;
 	}
 	while (additional_amount > 0)
 	{
@@ -1126,6 +1264,31 @@ static void packet_release(struct voice_packet *entry)
 	entry->samples = NULL;
 }
 
+/* (debug) HALO_AUDIO_PACKET_TRACE=1: each packet the mixer played out, with
+where its data was and the RMS of what it decoded of it
+(run_ce_ogg_sound_test.sh: a Custom Edition Ogg Vorbis sound's Xbox ADPCM,
+custom_edition_sounds.c, is played) */
+static void packet_trace(const struct sdl_stream *stream, const struct voice_packet *entry)
+{
+	static int trace = -1;
+	unsigned long frames, index, count;
+	double sum = 0.0;
+
+	if (trace < 0)
+		trace = getenv("HALO_AUDIO_PACKET_TRACE") && atoi(getenv("HALO_AUDIO_PACKET_TRACE"));
+	if (!trace || !entry->finished || !entry->samples)
+		return;
+	frames = stream->adpcm ? entry->decoded_frames : entry->frames;
+	if (frames > entry->frames)
+		frames = entry->frames;
+	count = frames * stream->channels;
+	for (index = 0; index < count; index++)
+		sum += (double)entry->samples[index] * entry->samples[index];
+	platform_log("mixer: played %lu frames of a %s %lu-channel packet at %p (%lu bytes), rms %.0f",
+		frames, stream->adpcm ? "adpcm" : "pcm", stream->channels, entry->packet.pvBuffer,
+		(unsigned long)entry->packet.dwMaxSize, count ? sqrt(sum / (double)count) : 0.0);
+}
+
 /* completes the head packet; called with the lock held, which the game's
 callback runs without */
 static void stream_complete_head(struct sdl_stream *stream, DWORD status, DWORD completed_size)
@@ -1133,6 +1296,7 @@ static void stream_complete_head(struct sdl_stream *stream, DWORD status, DWORD 
 	struct voice_packet *entry = &stream->packets[stream->packet_head];
 	XMEDIAPACKET packet = entry->packet;
 
+	packet_trace(stream, entry);
 	packet_release(entry);
 	entry->finished = FALSE;
 	stream->packet_head = (stream->packet_head + 1) % MAXIMUM_STREAM_PACKETS;
@@ -1343,9 +1507,11 @@ VOID WINAPI DirectSoundDoWork(void)
 
 	if (frame_locked_mixing)
 	{
+		/* (HALO_FIXED_TICK_FRAMES: a tick's audio over that many frames) */
+		int halo_fixed_tick_frames(void);
 		static float buffer[(OUTPUT_RATE / 30) * OUTPUT_CHANNELS];
 
-		mix(buffer, OUTPUT_RATE / 30);
+		mix(buffer, OUTPUT_RATE / 30 / halo_fixed_tick_frames());
 	}
 	streams_complete_finished();
 	if (enabled < 0)
@@ -1354,18 +1520,28 @@ VOID WINAPI DirectSoundDoWork(void)
 
 		enabled = setting && atoi(setting) != 0;
 	}
-	if (enabled && ++calls % 300 == 0)
+	/* (every 300 calls, and at most a line a second: a map load calls this
+	from its IO waits hundreds of times a second, and the line flooded the
+	log, a line every 2 ms after "restart level" on the Vita; the counts run
+	on until the line) */
+	if (enabled && ++calls >= 300 && (!last_report || statistics_now() - last_report >= 1000000ull))
 	{
 		unsigned long mixes = statistics_mixes;
 		unsigned long long now = statistics_now();
 		double elapsed_us = last_report && now > last_report ? (double)(now - last_report) : 0.0;
+		unsigned long frames = calls;
 
 		last_report = now;
-		platform_log("sound mixer: %.1f%% of a core (%.2f ms/mix, %.1f voices), game waits for the mixer %.2f ms/frame (%lu waits)",
+		platform_log("sound mixer: %.1f%% of a core (%.2f ms/mix, %.1f voices), game waits for the mixer %.2f ms/frame (%lu waits);"
+			" device calls: longest gap %.1f ms, %lu over 25 ms",
 			elapsed_us > 0.0 ? 100.0 * (double)statistics_mix_us / elapsed_us : 0.0,
 			mixes ? (double)statistics_mix_us / 1000.0 / (double)mixes : 0.0,
 			mixes ? (double)statistics_voices / (double)mixes : 0.0,
-			(double)statistics_wait_us / 1000.0 / 300.0, statistics_waits);
+			(double)statistics_wait_us / 1000.0 / (double)frames, statistics_waits,
+			(double)statistics_callback_gap_us / 1000.0, statistics_callbacks_late);
+		calls = 0;
+		statistics_callback_gap_us = 0;
+		statistics_callbacks_late = 0;
 		statistics_mix_us = statistics_wait_us = 0;
 		statistics_mixes = statistics_voices = statistics_waits = 0;
 		if (audio_verify > 0)

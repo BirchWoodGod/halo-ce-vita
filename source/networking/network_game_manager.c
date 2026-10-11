@@ -17,7 +17,7 @@ symbols in this file:
 0011A410 00b0:
 	_network_game_reset_for_next_round (0000)
 0011A4C0 0010:
-	_network_game_dump (0000)
+	_network_game_assign_players_to_team (0000)
 0011A4D0 0030:
 	_network_player_is_valid (0000)
 0011A500 00b0:
@@ -86,8 +86,12 @@ symbols in this file:
 #include "main/main.h"
 #include "memory/data.h"
 #include "network_game_globals.h"
+#include "network_messages.h"
 #include "network_game_manager.h"
 #include "network_game_ui.h"
+#include "networking/network_server_manager.h"
+#include "objects/objects.h"
+#include "units/units.h"
 #include "text/unicode.h"
 
 #include <xtl.h>
@@ -96,29 +100,46 @@ symbols in this file:
 
 /* the machine and player slots of a network game: the Xbox's 4 and 16, or the
 native builds' session limits (port/linux/include/halo_port_limits.h) */
-#ifdef HALO_LINUX
 #define NETWORK_GAME_MACHINE_SLOTS HALO_PORT_MAXIMUM_NETWORK_MACHINES
 #define NETWORK_GAME_PLAYER_SLOTS HALO_PORT_MAXIMUM_NETWORK_PLAYERS
-#else
-#define NETWORK_GAME_MACHINE_SLOTS 4
-#define NETWORK_GAME_PLAYER_SLOTS 16
-#endif
 
-#ifdef HALO_LINUX
 /* port: the distributed netcode names players by their datums' absolute
 indices (port/linux/game), which every machine must share: a machine that
 joined the game in progress too, which has neither the players who left
 (their datums stay until the game ends) nor the order the others added
 players in. So there each player's datum is its slot in the host's player
 list: every machine makes it there (network_game_spawn_player), and the host
-gives a player added to the game in progress a slot whose datum is free. */
+gives a player added to the game in progress a slot whose datum is free.
+(Only in a game: in the lobby the host runs the user interface's scenario,
+whose local player holds datum 0, and a full lobby could not use slot 0.)
+A player who quit the game holds his slot no longer once his unit is gone:
+his datum gives way to the next player there (network_game_spawn_player),
+so that those who quit do not keep the game from filling. Nor in the lobby
+between games, where the last game's datums stay until the next is made. */
+/* a player who quit the game and has no unit left: his slot can be another's */
+static boolean network_game_player_slot_reusable(
+	struct player_datum const *player)
+{
+	return player->quit_out_of_game && player->unit_index == NONE;
+}
+
 static boolean network_game_player_slot_held(
 	long slot)
 {
-	return game_in_progress() && player_data && player_data->valid && slot < player_data->maximum_count &&
-		((struct datum_header *)((byte *)player_data->data + player_data->size * slot))->identifier != 0;
+	struct network_game_server *server = global_network_game_server_get();
+	struct player_datum *player;
+
+	if (!game_in_progress() || !game_engine_running() ||
+		!player_data || !player_data->valid || slot >= player_data->maximum_count ||
+		(server && !network_game_server_playing(server)))
+	{
+		return FALSE;
+	}
+	player = (struct player_datum *)((byte *)player_data->data + player_data->size * slot);
+	if (((struct datum_header *)player)->identifier == 0)
+		return FALSE;
+	return !network_game_player_slot_reusable(player);
 }
-#endif
 
 enum
 {
@@ -141,62 +162,12 @@ struct game_options
 	char map_name[256];
 };
 
-struct network_machine
-{
-	wchar_t name[32];
-	char machine_index;
-	byte __padding41[3];
-};
-
-struct network_game_map
-{
-	long __unknown0;
-	char name[0x80];
-};
-
-struct network_game_local_data
-{
-	boolean game_objects_loaded;
-	byte __padding431[3];
-};
-
-struct network_game
-{
-	wchar_t name[16];
-	struct network_game_map map;
-	struct game_variant variant;
-	byte __padding10C;
-	byte game_mode;
-#ifdef HALO_LINUX
-	/* 128 does not fit a signed char */
-	byte maximum_player_count;
-#else
-	char maximum_player_count;
-#endif
-	byte __padding10F;
-	short difficulty;
-	short machine_count;
-	struct network_machine machines[NETWORK_GAME_MACHINE_SLOTS];
-	short player_count;
-	struct network_player players[NETWORK_GAME_PLAYER_SLOTS];
-	short __unknown426;
-	unsigned long random_seed;
-	byte __unknown42C[4];
-	struct network_game_local_data local_data;
-};
-
-#ifdef HALO_LINUX
 typedef char network_game_players_offset_assert[
 	offsetof(struct network_game, players) == HALO_PORT_NETWORK_GAME_PLAYERS_OFFSET ? 1 : -1];
 typedef char network_game_size_assert[
 	sizeof(struct network_game) == HALO_PORT_NETWORK_GAME_SIZE ? 1 : -1];
-#endif
 
 /* ---------- prototypes */
-
-static long compare_network_players(
-	struct network_player *p1,
-	struct network_player *p2);
 
 /* ---------- globals */
 
@@ -214,15 +185,15 @@ boolean network_game_add_machine(
 		0x6A,
 		game && machine && network_machine_is_valid(machine));
 
-	for (machine_index = 0; machine_index < NETWORK_GAME_MACHINE_SLOTS; machine_index++)
+	/* port: at its own index, not the first free slot: the host numbers a
+	machine by its connection's slot, which must be its slot here (two
+	machines once shared an index) */
+	machine_index = machine->machine_index;
+	if (!network_machine_is_valid(&game->machines[machine_index]))
 	{
-		if (!network_machine_is_valid(&game->machines[machine_index]))
-		{
-			csmemcpy(&game->machines[machine_index], machine, sizeof(*machine));
-			game->machine_count++;
-			result = TRUE;
-			break;
-		}
+		csmemcpy(&game->machines[machine_index], machine, sizeof(*machine));
+		game->machine_count++;
+		result = TRUE;
 	}
 
 	return result;
@@ -281,7 +252,6 @@ void network_game_generate_local_machine_name(
 	char ascii_machine_name[32];
 	HANDLE find_handle;
 
-#ifdef HALO_LINUX
 	/* port: a machine that brings one player to the game (the one who
 	joined multiplayer on it) is named after that player's profile, not the
 	system's random nickname: the system link list shows a host's game by it */
@@ -303,15 +273,12 @@ void network_game_generate_local_machine_name(
 			struct player_profile profile;
 
 			player_ui_get_active_player_profile(joined_player_index, &profile);
-			if (profile.player_name[0])
-			{
-				ustrncpy(machine_name, profile.player_name, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH);
-				machine_name[MIN(MAXIMUM_PLAYER_PROFILE_NAME_LENGTH, 32) - 1] = 0;
+			/* (a default profile, without a name: the machine's user's,
+			network_game_local_player_name; without one, the nickname) */
+			if (network_game_local_player_name(profile.player_name, machine_name, MIN(MAXIMUM_PLAYER_PROFILE_NAME_LENGTH, 32)))
 				return;
-			}
 		}
 	}
-#endif
 	find_handle = XFindFirstNicknameW(FALSE, machine_name, 32);
 
 	if (find_handle == INVALID_HANDLE_VALUE)
@@ -360,7 +327,7 @@ void network_game_end_and_load_ui(
 	return;
 }
 
-void network_game_dump(
+void network_game_assign_players_to_team(
 	struct network_game *game,
 	char const *prefix)
 {
@@ -380,7 +347,7 @@ boolean network_game_add_player(
 		0xBB,
 		game && player);
 
-	if (game->player_count < game->maximum_player_count)
+	if (game->player_count < game->maximum_players)
 	{
 		if (VALID_INDEX(player->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
 			VALID_INDEX(player->controller_index, MAXIMUM_LOCAL_PLAYERS))
@@ -397,9 +364,8 @@ boolean network_game_add_player(
 			if (player_index == NETWORK_GAME_PLAYER_SLOTS && network_player_is_valid(player))
 			{
 				new_player_index = NONE;
-#ifdef HALO_LINUX
-				/* (the distributed netcode's: the host's slot, as it chose it) */
-				if (network_game_distributed() && player->player_list_index != NONE)
+				/* (the host's slot, as it chose it) */
+				if (player->player_list_index != NONE)
 				{
 					if (VALID_INDEX(player->player_list_index, NETWORK_GAME_PLAYER_SLOTS) &&
 						game->players[player->player_list_index].player_list_index == NONE)
@@ -408,14 +374,11 @@ boolean network_game_add_player(
 					}
 				}
 				else
-#endif
 				for (player_index = 0; player_index < NETWORK_GAME_PLAYER_SLOTS; player_index++)
 				{
 					if (game->players[player_index].player_list_index == NONE
-#ifdef HALO_LINUX
 						/* (not the slot of a player who left the game in progress) */
-						&& !(network_game_distributed() && network_game_player_slot_held(player_index))
-#endif
+						&& !network_game_player_slot_held(player_index)
 						)
 					{
 						new_player_index = player_index;
@@ -436,10 +399,30 @@ boolean network_game_add_player(
 	}
 	else
 	{
-		error(2, "game is already at maximum players; can't add new player");
+		network_event("game is already at maximum players; can't add new player");
 	}
 
 	return result;
+}
+
+/* port: whether a player can be added to the game (a free slot, which in a
+game in progress is not the slot of a player who left: network_game_add_player) */
+boolean network_game_has_free_player_slot(
+	struct network_game *game)
+{
+	long player_index;
+
+	if (game->player_count >= game->maximum_players)
+		return FALSE;
+	for (player_index = 0; player_index < NETWORK_GAME_PLAYER_SLOTS; player_index++)
+	{
+		if (game->players[player_index].player_list_index == NONE &&
+			!network_game_player_slot_held(player_index))
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
 }
 
 boolean network_player_is_valid(
@@ -449,13 +432,9 @@ boolean network_player_is_valid(
 		player->controller_index >= 0 &&
 		player->controller_index < MAXIMUM_LOCAL_PLAYERS &&
 		player->machine_index >= 0 &&
-#ifdef HALO_LINUX
 		/* the Xbox game checks the machine against the split screen limit,
 		which only works while both are 4 */
 		(long)player->machine_index < MAXIMUM_NETWORK_MACHINE_COUNT)
-#else
-		player->machine_index < MAXIMUM_LOCAL_PLAYERS)
-#endif
 	{
 		return TRUE;
 	}
@@ -498,16 +477,44 @@ boolean network_game_spawn_player(
 		network_player_is_valid(player));
 
 	controller_index = network_game_player_is_local(player) ? player->controller_index : NONE;
-#ifdef HALO_LINUX
-	/* (the distributed netcode's: the datum at the player's slot, with the
-	identifier datum_new would give it) */
-	if (network_game_distributed() && VALID_INDEX(player->player_list_index, NETWORK_GAME_PLAYER_SLOTS))
+	/* (the datum at the player's slot, with the identifier datum_new would
+	give it) */
+	if (VALID_INDEX(player->player_list_index, NETWORK_GAME_PLAYER_SLOTS))
 	{
+		/* port: a player who quit there gives way (network_game_player_slot_held),
+		and his units forget him */
+		if (player_data && player_data->valid && player->player_list_index < player_data->maximum_count)
+		{
+			struct player_datum *quitter = (struct player_datum *)((byte *)player_data->data +
+				player_data->size * player->player_list_index);
+
+			/* (the host's choice stands: a client whose clock has not yet
+			come to the quit of the player there gives way too, to another
+			machine's player) */
+			if (((struct datum_header *)quitter)->identifier != 0 &&
+				(network_game_player_slot_reusable(quitter) ||
+					quitter->network_player_data.machine_index != player->machine_index ||
+					quitter->network_player_data.controller_index != player->controller_index))
+			{
+				long quitter_index = ((long)(word)((struct datum_header *)quitter)->identifier << 16) |
+					player->player_list_index;
+				struct object_iterator iterator;
+
+				object_iterator_new(&iterator, _object_mask_unit, 0);
+				while (object_iterator_next(&iterator))
+				{
+					struct unit_datum *unit = unit_get(iterator.index);
+
+					if (unit->unit.player_index == quitter_index)
+						unit->unit.player_index = NONE;
+				}
+				player_delete(quitter_index);
+			}
+		}
 		player_index = player_new(player->machine_index,
 			((long)(word)player_data->next_identifier << 16) | player->player_list_index, controller_index, player);
 	}
 	else
-#endif
 	player_index = player_new(player->machine_index, NONE, controller_index, player);
 	if (player_index != NONE)
 	{
@@ -594,8 +601,9 @@ void network_game_invalidate(
 		network_game_invalidate_machine(game, (short)machine_index);
 
 	csmemset(game->players, NONE, sizeof(game->players));
-	game->game_mode = 2;
-	game->maximum_player_count = NETWORK_GAME_PLAYER_SLOTS;
+	game->minimum_players = 2;
+	/* (port: 128 in the native builds, halo_port_limits.h) */
+	game->maximum_players = NETWORK_GAME_PLAYER_SLOTS;
 	game->local_data.game_objects_loaded = FALSE;
 
 	return;
@@ -613,7 +621,10 @@ boolean network_game_update_player(
 		0x101,
 		game && player);
 
-	if (network_game_player_is_valid(player, game))
+	/* (port: the slot comes from the wire: one out of the list wrote over
+	the machines) */
+	if (network_game_player_is_valid(player, game) &&
+		VALID_INDEX(player->player_list_index, NETWORK_GAME_PLAYER_SLOTS))
 	{
 		current_player = &game->players[player->player_list_index];
 		if (current_player->controller_index == player->controller_index &&
@@ -625,7 +636,7 @@ boolean network_game_update_player(
 	}
 
 	if (!result)
-		error(2, "tried to update a player with indvalid data");
+		network_event("tried to update a player with indvalid data");
 
 	return result;
 }
@@ -650,6 +661,14 @@ boolean network_game_remove_player(
 				game->players[player_index].machine_index == player->machine_index &&
 				game->players[player_index].controller_index == player->controller_index)
 			{
+				/* port: a client's count is the host's (its settings), and
+				need not be as many as the players it lists: none taken
+				below none (OpenCE's) */
+				if (game->player_count <= 0)
+				{
+					error(2, "tried to remove a player from a game of %d players", game->player_count);
+					break;
+				}
 				network_game_invalidate_player(&game->players[player_index]);
 				game->player_count--;
 				result = TRUE;
@@ -659,7 +678,7 @@ boolean network_game_remove_player(
 	}
 	else
 	{
-		error(2, "tried to remove a player with indvalid data");
+		network_event("tried to remove a player with indvalid data");
 	}
 
 	return result;
@@ -690,12 +709,14 @@ boolean network_game_remove_machine(
 						game->players[player_index].machine_index == machine->machine_index)
 					{
 						if (!network_game_remove_player(game, &game->players[player_index]))
-							error(2, "failed to remove a machine's player");
+							network_event("failed to remove a machine's player");
 					}
 				}
 
 				network_game_invalidate_machine(game, machine->machine_index);
-				game->machine_count--;
+				/* (port: and none below none, as for its players) */
+				if (game->machine_count > 0)
+					game->machine_count--;
 				result = TRUE;
 				break;
 			}
@@ -742,7 +763,12 @@ boolean network_game_create_game_objects(
 	game_precache_new_map(options.map_name, TRUE);
 	main_menu_unload();
 
-	if (game_in_progress())
+	/* port: and whenever a map is loaded. After a game the client is back in
+	the main menu's map with its clock ended (network_game_dispose_game_objects),
+	so not in progress: the next game's map was loaded over it, and the
+	texture cache, opened again, lost the menu's loaded textures (a crash in
+	lruv_block_new) */
+	if (game_in_progress() || game_map_loaded())
 	{
 		game_dispose_from_old_map();
 		game_unload();
@@ -756,32 +782,16 @@ boolean network_game_create_game_objects(
 		game->local_data.game_objects_loaded = TRUE;
 		game_initialize_for_new_map();
 
-#ifdef HALO_LINUX
-		/* (the distributed netcode's players stay in their slots, which are
-		their datums: network_game_spawn_player) */
-		if (!network_game_distributed())
-#endif
-		qsort(
-			game->players,
-			NETWORK_GAME_PLAYER_SLOTS,
-			sizeof(struct network_player),
-			(int(__cdecl *)(const void *, const void *))compare_network_players);
-
+		/* (the players stay in their slots, which are their datums:
+		network_game_spawn_player) */
 		for (player_index = 0; player_index < NETWORK_GAME_PLAYER_SLOTS; player_index++)
 		{
 			if (!network_player_is_valid(&game->players[player_index]))
 			{
-#ifdef HALO_LINUX
-				/* (unsorted, the slots of players who left are among them) */
-				if (network_game_distributed())
-					continue;
-#endif
-				break;
+				/* (the slots of players who left are among them) */
+				continue;
 			}
-#ifdef HALO_LINUX
-			if (network_game_distributed())
-				game->players[player_index].player_list_index = (char)player_index;
-#endif
+			game->players[player_index].player_list_index = (char)player_index;
 
 			if (!network_game_spawn_player(&game->players[player_index]))
 			{
@@ -790,6 +800,22 @@ boolean network_game_create_game_objects(
 			}
 		}
 	}
+#ifdef HALO_LINUX
+	/* port: a custom map that cannot be loaded here (memory, a protected
+	map, a missing resource map): the player is told why, and the game left
+	- a host's ends for everyone - for the menu, rather than stopped
+	(port/linux/game/custom_edition_cache.c) */
+	else if (custom_edition_cache_load_failure_show(options.map_name))
+	{
+		errors_clear();
+		error(_error_silent, "game_load() failed.");
+		/* (the menu's map at once: the rest of this frame reads the tags of
+		a map - the input's, in main_loop - before the next one leaves the
+		game, network_game_client_start_frame) */
+		main_menu_load();
+		network_game_abort();
+	}
+#endif
 	else
 	{
 		error(0, "game_load() failed.");
@@ -799,38 +825,3 @@ boolean network_game_create_game_objects(
 }
 
 /* ---------- private code */
-
-static long compare_network_players(
-	struct network_player *p1,
-	struct network_player *p2)
-{
-	long result = 0;
-
-	match_assert(
-		"c:\\halo\\SOURCE\\networking\\network_game_manager.c",
-		0x142,
-		p1 && p2);
-
-	if (!network_player_is_valid(p1) && !network_player_is_valid(p2))
-		result = 0;
-	else if (!network_player_is_valid(p1) && network_player_is_valid(p2))
-		result = 1;
-	else if (network_player_is_valid(p1) && !network_player_is_valid(p2))
-		result = -1;
-	else if (p1->machine_index > p2->machine_index)
-		result = 1;
-	else if (p1->machine_index < p2->machine_index)
-		result = -1;
-	else if (p1->controller_index > p2->controller_index)
-		result = 1;
-	else if (p1->controller_index < p2->controller_index)
-		result = -1;
-	else
-		match_vassert(
-			"c:\\halo\\SOURCE\\networking\\network_game_manager.c",
-			0x165,
-			FALSE,
-			"multiple players on the same machine cannot have the same controller index");
-
-	return result;
-}

@@ -33,6 +33,10 @@ symbols in this file:
 #include "memory/data.h"
 #include "units/bipeds.h"
 #include "units/unit_definitions.h"
+#ifdef HALO_LINUX
+/* port/linux/game/network_coop.c: a group's value changed (the co-op host lists the groups again) */
+void network_coop_note_device_group(short group_index);
+#endif
 
 /* ---------- constants */
 
@@ -217,6 +221,9 @@ boolean machine_update(
 				machine->device.position_group_index);
 
 			group->actual_value = machine->device.position;
+#ifdef HALO_LINUX
+			network_coop_note_device_group(machine->device.position_group_index);
+#endif
 		}
 	}
 

@@ -19,3 +19,8 @@ crt/limits.h).
 #undef CHAR_MAX
 #undef CHAR_MIN
 #endif
+
+/* POSIX setenv, which the C runtime does not have (main.c's @set test
+command, menu_functions.c's Play page settings, map_share.c), over its
+_putenv_s: port/windows/src/win32_posix.c */
+int setenv(const char *name, const char *value, int overwrite);

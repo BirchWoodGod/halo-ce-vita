@@ -5,6 +5,12 @@ glibc file system helpers for the platform layer (see posix.h). Built with
 the host ABI and _FILE_OFFSET_BITS=64.
 */
 
+#ifdef __vita__
+/* (first: the C library's headers make st_ctime and the like macros, and
+SceIoStat has members of those names) */
+#include <psp2/io/stat.h>
+#include <errno.h>
+#endif
 #include <dirent.h>
 #include <fcntl.h>
 #include <string.h>
@@ -27,8 +33,12 @@ static void fill_information(const struct stat *st, struct posix_file_informatio
 	memset(information, 0, sizeof(*information));
 	if (S_ISDIR(st->st_mode))
 		information->flags |= _posix_file_is_directory;
+#ifndef __vita__
+	/* (the Vita's newlib gives no permission bits, only whether it is a file
+	or a folder: nothing there is called read-only) */
 	if (!(st->st_mode & S_IWUSR))
 		information->flags |= _posix_file_is_read_only;
+#endif
 	split64((unsigned long long)st->st_size, &information->size_low, &information->size_high);
 #ifdef __vita__
 	/* (newlib keeps whole seconds) */
@@ -147,8 +157,35 @@ int posix_disk_space(const char *path,
 	return 0;
 }
 
+/* SetFileAttributesA's read-only bit (xbox_files.c), which the game clears
+on every file it deletes (file_delete, files_windows.c) */
 int posix_set_read_only(const char *path, int read_only)
 {
+#ifdef __vita__
+	/* newlib's chmod hands sceIoChstat the POSIX permission bits alone,
+	without the file's type, which it refuses (EINVAL): every file_delete
+	failed with error 0x57 before it was tried. The card's own bits are
+	used instead, and a write bit that cannot be read or set there is not
+	in the way of deleting the file (DeleteFileA then says if that fails) */
+	struct stat st;
+	SceIoStat information;
+	int result;
+
+	if (stat(path, &st) != 0)
+		return -1;
+	result = sceIoGetstat(path, &information);
+	if (result >= 0 && ((information.st_mode & SCE_S_IWUSR) != 0) == (read_only != 0))
+	{
+		information.st_mode ^= SCE_S_IWUSR;
+		result = sceIoChstat(path, &information, SCE_CST_MODE);
+	}
+	if (result < 0 && read_only)
+	{
+		errno = (result & 0xffffff00) == 0x80010000 ? (result & 0xff) : EIO;
+		return -1;
+	}
+	return 0;
+#else
 	struct stat st;
 	mode_t mode;
 
@@ -156,7 +193,11 @@ int posix_set_read_only(const char *path, int read_only)
 		return -1;
 	mode = st.st_mode & 07777;
 	mode = read_only ? (mode & ~(mode_t)0222) : (mode | S_IWUSR);
+	/* (already so: nothing to change) */
+	if (mode == (st.st_mode & 07777))
+		return 0;
 	return chmod(path, mode);
+#endif
 }
 
 int posix_make_directory(const char *path)

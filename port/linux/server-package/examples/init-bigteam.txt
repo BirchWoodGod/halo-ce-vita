@@ -1,0 +1,14 @@
+# A big team server: Team Slayer on the large maps, up to 16 players
+# (tools/package_server.py: examples/). Copy it to init.txt in the server's
+# folder, and give it a name of your own. Its port is 2303, so it can run
+# beside the Slayer example (one port per server).
+sv_name "My Big Team Server"
+sv_maxplayers 16
+sv_public 1
+sv_port 2303
+sv_timelimit 15
+sv_minplayers 1
+sv_mapcycle_add bloodgulch team_slayer
+sv_mapcycle_add sidewinder team_slayer
+sv_mapcycle_add boardingaction team_slayer
+sv_mapcycle_add damnation team_slayer

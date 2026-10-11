@@ -23,7 +23,13 @@ ATTRACT_MODE.C
 enum
 {
 	ATTRACT_MODE_COUNTDOWN = 75000,
-	MUSIC_FADE_TIME = 1500
+	MUSIC_FADE_TIME = 1500,
+#ifdef HALO_LINUX
+	/* port: an attract movie that failed for now is tried again after this
+	long, twice that after a second failure, and so on to the most */
+	ATTRACT_MODE_RETRY_DELAY = 300000,
+	ATTRACT_MODE_RETRY_DELAY_MAXIMUM = 2400000,
+#endif
 };
 
 /* ---------- prototypes */
@@ -38,6 +44,49 @@ static unsigned long attract_mode_countdown_timer;
 static char bss_00453ae8[128];
 
 short data_002e4c84 = NONE;
+
+#ifdef HALO_LINUX
+/* port: whether each attract movie plays: -1 not looked for yet, 0 missing
+(no d:\bink file in any language) or failed to open, 1 there. The movies are
+optional (README; the Linux build plays none): without them the countdown
+stopped the menu's music, took the texture cache's memory for a movie that
+was not there and started the music over, every 75 s */
+static signed char attract_mode_movie_state[NUMBER_OF_ATTRACT_MODE_MOVIES] = { -1, -1, -1 };
+
+/* port: a movie that failed for now (halo_movie_open_failed_for_now: the
+Vita's video player did not start, out of memory, as on beta.2's main menu
+after a long session, Oct 8) stays playable, and the countdown waits until
+attract_mode_retry_time (0: none), attract_mode_retry_delay after the
+failure; before, it was never tried again, and the three movies' failures
+each stopped the menu's music and started it over */
+static unsigned long attract_mode_retry_time;
+static unsigned long attract_mode_retry_delay;
+
+void platform_log(char const *format, ...);
+
+static boolean attract_mode_movie_playable(
+	short movie)
+{
+	if (attract_mode_movie_state[movie] < 0)
+		attract_mode_movie_state[movie] = attract_mode_get_localized_movie_path(movie)[0] != '\0';
+
+	return attract_mode_movie_state[movie] > 0;
+}
+
+static boolean attract_mode_any_movie_playable(
+	void)
+{
+	short movie;
+
+	for (movie = 0; movie<NUMBER_OF_ATTRACT_MODE_MOVIES; movie++)
+	{
+		if (attract_mode_movie_playable(movie))
+			return TRUE;
+	}
+
+	return FALSE;
+}
+#endif
 
 /* ---------- public code */
 
@@ -64,6 +113,19 @@ boolean attract_mode_should_start(
 		
 		time_since_last_event = MAX(attract_mode_countdown_timer, time_since_last_event);
 		time_elapsed = current_time-time_since_last_event;
+#ifdef HALO_LINUX
+		/* port: no attract movie to play, no countdown (the music plays on);
+		looked for once, when it would first run out */
+		if (time_elapsed>=ATTRACT_MODE_COUNTDOWN-MUSIC_FADE_TIME && !attract_mode_any_movie_playable())
+		{
+			time_elapsed = 0;
+		}
+		/* port: and none until a failure's wait is over */
+		if (attract_mode_retry_time && (long)(current_time-attract_mode_retry_time)<0)
+		{
+			time_elapsed = 0;
+		}
+#endif
 	
 		if (time_elapsed>=ATTRACT_MODE_COUNTDOWN-MUSIC_FADE_TIME)
 		{
@@ -199,6 +261,33 @@ void attract_mode_start(
 {
 	short video_index;
 
+#ifdef HALO_LINUX
+	{
+		/* port: one of the attract movies there are, another than the
+		last when there is another (attract_mode_movie_playable) */
+		short playable[NUMBER_OF_ATTRACT_MODE_MOVIES];
+		short playable_count = 0;
+		short movie;
+
+		for (movie = 0; movie<NUMBER_OF_ATTRACT_MODE_MOVIES; movie++)
+		{
+			if (attract_mode_movie_playable(movie))
+				playable[playable_count++] = movie;
+		}
+		if (playable_count==0)
+		{
+			attract_mode_countdown_timer = system_milliseconds();
+			return;
+		}
+		do
+		{
+			video_index = seed_random_range(get_global_local_random_seed_address(), 0, playable_count);
+			video_index = playable[PIN(video_index, 0, playable_count-1)];
+		}
+		while (playable_count>1 && video_index==data_002e4c84);
+		data_002e4c84 = video_index;
+	}
+#else
 	while (TRUE)
 	{
 		video_index = seed_random_range(get_global_local_random_seed_address(), 0, NUMBER_OF_ATTRACT_MODE_MOVIES);
@@ -210,6 +299,7 @@ void attract_mode_start(
 			break;
 		}
 	}
+#endif
 
 	ui_stop_main_menu_music();
 
@@ -217,8 +307,32 @@ void attract_mode_start(
 
 	if (!bink_playback_active())
 	{
+#ifdef HALO_LINUX
+		/* port: a movie that does not open (an unreadable file, or on the
+		Vita a stand-in whose MP4 went) is not tried again; one that failed
+		for now is, after a wait */
+		if (halo_movie_open_failed_for_now())
+		{
+			attract_mode_retry_delay = attract_mode_retry_delay ?
+				MIN(2*attract_mode_retry_delay, ATTRACT_MODE_RETRY_DELAY_MAXIMUM) : ATTRACT_MODE_RETRY_DELAY;
+			attract_mode_retry_time = (system_milliseconds()+attract_mode_retry_delay) | 1;
+			platform_log("attract mode: the movie failed for now; the next in %lu s",
+				attract_mode_retry_delay/1000);
+		}
+		else
+		{
+			attract_mode_movie_state[video_index] = 0;
+		}
+#endif
 		attract_mode_countdown_timer = system_milliseconds();
 	}
+#ifdef HALO_LINUX
+	else
+	{
+		attract_mode_retry_delay = 0;
+		attract_mode_retry_time = 0;
+	}
+#endif
 
 	return;
 }

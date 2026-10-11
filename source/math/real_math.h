@@ -570,7 +570,7 @@ boolean fast_vector_intersects_sphere(real_point3d const *point, real_vector3d c
 #ifdef HALO_LINUX
 /* (port) fast_vector_intersects_sphere, inline for the collision queries'
 object walks: the same operations in the same order (real_math.c) */
-static __inline boolean fast_vector_intersects_sphere_inline(
+static __inline__ boolean fast_vector_intersects_sphere_inline(
 	real_point3d const *point,
 	real_vector3d const *vector,
 	real_point3d const *center,

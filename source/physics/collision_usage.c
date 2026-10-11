@@ -634,6 +634,16 @@ void collision_log_usage(
 {
 	short user;
 
+#ifdef HALO_LINUX
+	/* (port) with no period open there is nothing to count into, which the
+	user lookup below finds too (NONE) after two calls (game_in_progress,
+	game_in_editor): on every collision test, and with the tick on its own
+	thread no period ever opens (collision_log_store_period) */
+	if (collision_usage_current_period == NONE)
+	{
+		return;
+	}
+#endif
 	user = collision_log_get_current_user(collision_function);
 	if (user != NONE)
 	{

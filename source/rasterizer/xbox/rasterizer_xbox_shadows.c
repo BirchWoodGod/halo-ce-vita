@@ -258,6 +258,10 @@ static real local_object_bounding_radius = 0.0f;
 static real_matrix4x3 local_shadow_matrix = { 0 };
 static struct rasterizer_model_begin_parameters const *local_parameters = NULL;
 static boolean shadow_setup = FALSE;
+#ifdef HALO_LINUX
+/* (port: d3d8_gxm.c, the shadows' scissor below) */
+void halo_d3d_scissor(const float *rectangle);
+#endif
 static boolean shadow_used = FALSE;
 
 /* ---------- public code */
@@ -604,6 +608,9 @@ void _rasterizer_environment_shadow_end(
 				_error_silent,
 				"### WARNING empty shadow has been cast");
 		}
+#ifdef HALO_LINUX
+		halo_d3d_scissor(NULL);
+#endif
 
 		if (!shadow_restored)
 		{
@@ -619,6 +626,60 @@ void _rasterizer_environment_shadow_end(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port) an object's shadow drawn over the structure clipped to the screen
+rectangle of the box it can darken. The pass multiplies by one minus the
+shadow (ZERO/INVSRCCOLOR, alpha tested above 0): the shadow map read at
+0.5 + 0.5 * (forward, -left) . (point - position) / radius with border
+addressing - its border, 0, outside the square of half-size radius - times
+the linear corner fade read (clamped) at (up . d / 4 radius, -2 up . d /
+radius), which reaches 0 at either coordinate's 1: a quarter radius above
+the shadow's origin and four radii below it along up. Outside that box the
+pass leaves the pixel as it was. The box is 10% larger (half a texel of
+either texture's filter), its screen rectangle as the lights'
+(rasterizer_xbox_environment.c halo_d3d_screen_box). HALO_SHADOW_SCISSOR=0:
+unclipped, as before. */
+void halo_d3d_scissor(const float *rectangle);
+boolean halo_d3d_screen_box(real_point3d const *centre, real_vector3d const *axes, float rectangle[4]);
+extern char *getenv(const char *name);
+extern int atoi(const char *text);
+
+static void environment_shadow_scissor(
+	void)
+{
+	static int enabled = -1;
+	real radius = local_object_bounding_radius;
+	real_point3d centre;
+	real_vector3d axes[3];
+	float rectangle[4];
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SHADOW_SCISSOR");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	halo_d3d_scissor(NULL);
+	if (!enabled || !(radius > 0.0f))
+		return;
+	/* along up from -0.5 to 4 radii: centred at 1.75, half 2.25 (+10%) */
+	centre.x = local_shadow_matrix.position.x + local_shadow_matrix.up.i * 1.75f * radius;
+	centre.y = local_shadow_matrix.position.y + local_shadow_matrix.up.j * 1.75f * radius;
+	centre.z = local_shadow_matrix.position.z + local_shadow_matrix.up.k * 1.75f * radius;
+	axes[0].i = local_shadow_matrix.forward.i * 1.1f * radius;
+	axes[0].j = local_shadow_matrix.forward.j * 1.1f * radius;
+	axes[0].k = local_shadow_matrix.forward.k * 1.1f * radius;
+	axes[1].i = local_shadow_matrix.left.i * 1.1f * radius;
+	axes[1].j = local_shadow_matrix.left.j * 1.1f * radius;
+	axes[1].k = local_shadow_matrix.left.k * 1.1f * radius;
+	axes[2].i = local_shadow_matrix.up.i * 2.5f * radius;
+	axes[2].j = local_shadow_matrix.up.j * 2.5f * radius;
+	axes[2].k = local_shadow_matrix.up.k * 2.5f * radius;
+	if (halo_d3d_screen_box(&centre, axes, rectangle))
+		halo_d3d_scissor(rectangle);
+}
+#endif
 
 void _rasterizer_environment_shadow_draw(
 	struct shader const *shader,
@@ -877,6 +938,9 @@ void _rasterizer_environment_shadow_draw(
 					TRUE);
 				shadow_restored = TRUE;
 			}
+#ifdef HALO_LINUX
+			environment_shadow_scissor();
+#endif
 
 			shadow_setup = TRUE;
 		}
@@ -907,6 +971,9 @@ void _rasterizer_environment_shadow_draw(
 void _rasterizer_environment_shadows_end(
 	void)
 {
+#ifdef HALO_LINUX
+	halo_d3d_scissor(NULL);
+#endif
 	rasterizer_profile_end(_rasterizer_profile_environment_shadows);
 
 	return;

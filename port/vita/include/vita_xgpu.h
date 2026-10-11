@@ -76,6 +76,13 @@ struct nv2a_vertex_constant_usage
 #define VITA_FU_BUMP_LUMINANCE 25  /* [4] */
 #define VITA_FU_TEXTURE_SCALE 29   /* [4] */
 #define VITA_FU_COUNT 33
+/* (a draw whose blend's constant factor is folded into its program, the
+key's blend_fold: blend_constant.h) the program's output o becomes o *
+scale + offset, the two rows past the second buffer's in a copy of it the
+draw has of its own; the other programs do not declare them */
+#define VITA_FU_BLEND_SCALE 33
+#define VITA_FU_BLEND_OFFSET 34
+#define VITA_FU_FOLD_COUNT 35
 /* two buffers: A = registers 0..17 (the combiner constants: BUFFER[0],
 which change per material and part), B = 18..32 (fog, alpha reference,
 bump, texture scale: BUFFER[1], per view), so a part's constants do not
@@ -106,9 +113,23 @@ struct vgxm_texture;
 
 /* the GXM texture for an Xbox texture header, decoding it into the
 texture pool when it is new or its memory was written since; *description
-receives what it is. NULL when the format is not handled. */
+receives what it is. NULL when the format is not handled. streamed: it may
+be drawn from a lower level of its own while it decodes in the background
+(vita_textures.c); 0, decoded whole now. */
 const struct vgxm_texture *vita_texture_get(const DWORD *resource, const D3DCOLOR *palette,
-	struct xgpu_texture_description *description);
+	struct xgpu_texture_description *description, int streamed);
 void vita_texture_cache_begin_frame(void);
+/* forgets the textures decoded into size bytes at base (a texture pool
+segment moved between CDRAM and user RAM: vgxm_pool_demote/promote), each
+decoded again when next used; with the render worker idle. The count */
+unsigned long vita_texture_cache_forget(const void *base, unsigned long size);
+/* (a map gone; the worker and the GPU idle, the decodes quiesced) every
+texture forgotten and the pool's segments but its first given back: the
+CDRAM bytes freed */
+unsigned long vita_texture_pool_release(void);
+/* the textures decoding in the background stopped before the pool forgets
+or moves memory (the queued given up, the one decoding waited for, those
+done swapped in); the worker, or the game's thread while it is idle */
+void vita_texture_decodes_quiesce(void);
 
 #endif

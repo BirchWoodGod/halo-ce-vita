@@ -105,6 +105,8 @@ symbols in this file:
 #include "sound/game_sound.h"
 #include "tag_files/tag_files.h"
 #include "text/draw_string.h"
+#include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
@@ -992,6 +994,7 @@ void hud_autosave(
 		: hud_globals->checkpoint_end_index;
 	short local_player_index;
 
+	network_coop_note_hud(_coop_hud_checkpoint, active);
 	scripted_hud_messages_clear();
 	if (active && hud_globals->checkpoint_sound.index != NONE)
 	{
@@ -1030,9 +1033,21 @@ static void hud_draw_friendly_indicator(
 	struct bitmap_data *bitmap;
 	real depth_factor;
 	real fade;
+	long unit_index = player->unit_index;
 
+#ifdef HALO_LINUX
+	/* port: with the tick on a thread of its own (HALO_TICK_THREAD, the
+	Vita's) the teammate may have died, its unit gone, since
+	hud_draw_friendly_indicators looked: no indicator this frame
+	(unit_get_head_position read the unit at NULL: a crash in Chill Out's
+	CTF with bots on the player's team) */
+	if (unit_index == NONE || !object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+	{
+		return;
+	}
+#endif
 	unit_get_head_position(
-		player->unit_index,
+		unit_index,
 		&head_position);
 	head_position.z += 0.30000001f;
 	matrix4x3_transform_point(
@@ -1269,6 +1284,13 @@ void hud_draw_screen(
 		{
 			hud_draw_players();
 		}
+
+		/* port: who a dead network co-op player is watching */
+		if (player->unit_index == NONE && coop_spectating() && !cinematic_in_progress())
+			coop_spectate_draw(render.local_player_index);
+		/* port: the network co-op vote to skip a cinematic */
+		if (cinematic_in_progress())
+			coop_skip_vote_draw(render.local_player_index);
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))

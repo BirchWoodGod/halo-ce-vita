@@ -20,6 +20,10 @@ header included in hcex build.
 
 /* ---------- prototypes/NETWORK_SERVER_MANAGER.C */
 
+/* port: whether the host's game is being played (not its lobby) */
+boolean network_game_server_playing(
+	struct network_game_server *server);
+
 struct network_game_server;
 struct game_variant;
 
@@ -30,8 +34,6 @@ void network_game_server_dispose(
 boolean network_game_server_idle(
 	struct network_game_server *server);
 void network_game_server_open_game(
-	struct network_game_server *server);
-void network_game_server_close_game(
 	struct network_game_server *server);
 void network_game_server_switch_to_postgame(
 	struct network_game_server *server);
@@ -44,11 +46,50 @@ void network_game_server_pause_countdown(
 	boolean pause_countdown);
 void network_game_generate_join_game_token(
 	byte *join_token);
-long network_game_server_get_oldest_client_update_received(
-	struct network_game_server *server);
-void network_game_server_stalled_on_client(
+void network_game_server_kick_machine(
+	long machine_index,
+	boolean kept_out);
+/* the host's ban command (console.c, hs.c) */
+enum
+{
+	NETWORK_GAME_SERVER_NAME_TEXT_SIZE = 16,
+};
+/* port: a co-op level was won (main.c). Ends the round for everyone as in
+multiplayer; the next round is on next_map (NULL repeats the level). */
+void network_game_server_port_cooperative_won(
+	char const *next_map);
+/* port: co-op server settings: the difficulty, sent to clients, and the
+build's maximum players (Server Setup's player count is for PvP) */
+void network_game_server_port_set_cooperative(
 	struct network_game_server *server,
-	boolean stalled);
+	short difficulty);
+/* port: co-op hosted from the campaign's menus (the difficulty screen's Y,
+ui_widget_event_handler_functions.c): this server's game is that level on
+that difficulty, and goes on from the campaign's next level after each one
+won, whatever the settings' co-op choice. Returns FALSE without a server in
+its lobby or a campaign level. */
+boolean network_game_server_port_cooperative_from_menu(
+	char const *map_name,
+	short difficulty);
+/* port: the server's game is co-op hosted from the campaign's menus (its
+lobby is the waiting screen: interface/ui_widget.c); and the rounds it
+has started (0 in the first lobby, 1 after the first level won, ...) */
+boolean network_game_server_port_cooperative_menu(
+	short *rounds);
+boolean network_game_server_ban_player(
+	char const *text);
+/* port: the host's kick command: as the ban command, but nothing kept (no
+bans.txt line, the address not kept out): the player may join again at once */
+boolean network_game_server_kick_player(
+	char const *text);
+short network_game_server_matching_player_names(
+	char const *text,
+	char (*names)[NETWORK_GAME_SERVER_NAME_TEXT_SIZE],
+	short maximum_count);
+unsigned long network_game_server_machine_address(
+	long machine_index);
+char const *network_game_server_machine_hardware_id(
+	long machine_index);
 void network_game_server_update_ticks(
 	struct network_game_server *server,
 	short tick_count);

@@ -83,6 +83,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries/cseries.h"
+#include "cseries/errors.h"
 #include "math/real_math.h"
 #include "bitmaps/bitmaps.h"
 #include "bitmaps/bitmap_group.h"
@@ -104,12 +105,21 @@ symbols in this file:
 #include "render/render.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "cache_file_formats.h" /* port: port/linux/game/cache_file_formats.c */
+#include "custom_edition_cache.h"
+#endif
 
 /* ---------- constants */
 
 enum
 {
 	_hud_dont_scale_offset_bit = 0,
+#ifdef HALO_LINUX
+	/* port: Halo PC's, which the Xbox's tags never set (a Custom Edition
+	map's numbers keep it: cache_file_formats.c hud_placement_convert) */
+	_hud_use_high_resolution_scale_bit = 2,
+#endif
 };
 
 /* hud number and meter definitions (no shared header declares these yet;
@@ -210,6 +220,15 @@ enum bitmap_group_type
 {
 	_bitmap_group_type_interface_bitmaps = 4,
 };
+
+#ifdef HALO_LINUX
+/* port: Halo PC's bitmap group flags, which the Xbox's tags never set */
+enum
+{
+	_bitmap_group_half_hud_scale_bit = 4,
+	_bitmap_group_force_hud_use_highres_scale_bit = 7,
+};
+#endif
 
 enum
 {
@@ -408,6 +427,9 @@ static void hud_draw_multitexture_overlay(
 
 /* ---------- globals */
 
+/* port: a hud bitmap's bad sequence or sprite was reported (once) */
+static boolean hud_bad_bitmap_reported = FALSE;
+
 /* ---------- public code */
 
 /* Inspect the guarded caller's frame, not the return site of this helper.
@@ -456,7 +478,8 @@ void hud_retrieve_bitmap_and_bounding_rect(
 	{
 		struct bitmap_group *group = bitmap_group_get(bitmap_group_index);
 
-		if (sequence_index<group->sequences.count)
+		/* port: and not below the first sequence (the index is the map's) */
+		if (sequence_index>=0 && sequence_index<group->sequences.count)
 		{
 			struct bitmap_group_sequence *sequence = TAG_BLOCK_GET_ELEMENT(
 				&group->sequences, sequence_index, struct bitmap_group_sequence);
@@ -468,11 +491,27 @@ void hud_retrieve_bitmap_and_bounding_rect(
 			sprite_count = sequence->sprites.count;
 			if (sprite_count)
 			{
-				struct bitmap_group_sprite *sprite = TAG_BLOCK_GET_ELEMENT(
-					&sequence->sprites, frame_index%sprite_count, struct bitmap_group_sprite);
+				/* port: a negative sprite count would give a negative sprite.
+				A sprite's bitmap must be one the group has, or the sprite is
+				not drawn. */
+				struct bitmap_group_sprite *sprite = sprite_count>0 ? TAG_BLOCK_GET_ELEMENT(
+					&sequence->sprites, frame_index%sprite_count, struct bitmap_group_sprite) : NULL;
 
-				*bitmap = TAG_BLOCK_GET_ELEMENT(
-					&group->bitmaps, sprite->bitmap_index, struct bitmap_data);
+				if (sprite && sprite->bitmap_index>=0 && sprite->bitmap_index<group->bitmaps.count)
+				{
+					*bitmap = TAG_BLOCK_GET_ELEMENT(
+						&group->bitmaps, sprite->bitmap_index, struct bitmap_data);
+				}
+				else
+				{
+					*bitmap = NULL;
+					if (!hud_bad_bitmap_reported)
+					{
+						hud_bad_bitmap_reported = TRUE;
+						error(_error_silent, "hud bitmap 0x%08lX sequence #%d has a bad sprite (not drawn)",
+							(unsigned long)bitmap_group_index, sequence_index);
+					}
+				}
 			}
 			else
 			{
@@ -547,6 +586,35 @@ static boolean hud_draw_multitexture_overlay_get_current_weapon_definition(
 
 	return result;
 }
+
+#ifdef HALO_LINUX
+/* port: Halo PC picks an overlay's shader by the value this build turns its
+blend function into (add, subtract, multiply, multiply2x, dot), from shaders
+listed alphabetically (add, dot, multiply, multiply2x, subtract). For the
+Custom Edition maps made around that (Chimera's multitexture_overlay_fix.cpp,
+by SnowyMouse; from DamnationCE, CC0), each function becomes the one Halo PC
+drew with. */
+static short hud_multitexture_overlay_blend_function(
+	short blend_function)
+{
+	static short const halo_pc_blend_functions[NUMBER_OF_HUD_MULTITEXTURE_OVERLAY_BLEND_FUNCTIONS] =
+	{
+		_hud_multitexture_overlay_blend_function_add,
+		_hud_multitexture_overlay_blend_function_multiply,
+		_hud_multitexture_overlay_blend_function_dot,
+		_hud_multitexture_overlay_blend_function_multiply2x,
+		_hud_multitexture_overlay_blend_function_subtract,
+	};
+
+	if (blend_function >= 0 && blend_function < NUMBER_OF_HUD_MULTITEXTURE_OVERLAY_BLEND_FUNCTIONS &&
+		custom_edition_cache_relies_on(_custom_edition_behaviour_gearbox_multitexture_blend_modes))
+	{
+		return halo_pc_blend_functions[blend_function];
+	}
+
+	return blend_function;
+}
+#endif
 
 static void hud_draw_multitexture_overlay(
 	struct multitexture_overlay_hud_element_definition const *overlay,
@@ -679,7 +747,11 @@ static void hud_draw_multitexture_overlay(
 				&parameters.map1_to_2_blend_function
 			};
 
+#ifdef HALO_LINUX
+			switch (hud_multitexture_overlay_blend_function(overlay->map_blending_function[map_index]))
+#else
 			switch (overlay->map_blending_function[map_index])
+#endif
 			{
 			case _hud_multitexture_overlay_blend_function_add:
 				*out_modes[map_index] =
@@ -936,6 +1008,84 @@ pixel32 real_alpha_intensity_to_pixel32(
 	return real_argb_color_to_pixel32(&color);
 }
 
+
+#ifdef HALO_LINUX
+/* (port) set around the drawing of a weapon HUD element that belongs to its
+zoomed scope (hud_static_element_shown_by_zoom): hud_calculate_point lays a
+corner-anchored one out in the 4:3 window centred on a wide screen, where the
+scope's window and frame are (centred) */
+static boolean hud_draw_scope_centered = FALSE;
+
+void hud_draw_set_scope_centered(
+	boolean centered)
+{
+	hud_draw_scope_centered = centered;
+	return;
+}
+
+/* (port) a centre-anchored element at least as wide as the Xbox's 640
+columns (Firefight Airlock's ODST visor and its low-shield glow: a 1024-pixel
+frame at 0.625, made to fill the 4:3 screen) is a full-screen overlay: on a
+wide screen it is widened to the window, as Chimera's widescreen fix widens a
+menu element spanning the whole 640x480 frame, rather than leaving the sides
+bare. Other centred elements keep their 4:3 size (crosshairs, the scope), and
+only static elements are looked at: a crosshair hiding the area outside its
+reticle (hud_weapon.c) is already drawn over the whole viewport. */
+static boolean hud_draw_static_element_drawing = FALSE;
+
+static void hud_full_screen_element_widen(
+	short corner,
+	real_rectangle2d const *bounds,
+	real_vector2d *xy_scale)
+{
+	long screen_width = halo_screen_width();
+	real window_width = (real)(render.camera.window_bounds.x1 - render.camera.window_bounds.x0);
+	real columns_640 = window_width * 640.0f / (real)screen_width;
+
+	if (hud_draw_static_element_drawing &&
+		corner == _hud_anchor_center &&
+		screen_width > 640 &&
+		(bounds->x1 - bounds->x0) * xy_scale->i >= columns_640 - 2.0f)
+	{
+		xy_scale->i *= (real)screen_width / 640.0f;
+	}
+
+	return;
+}
+
+/* (port) whether a static element is part of a zoomed scope: one of its
+multitexture overlays is driven by the zoom level (the sniper rifle's two
+range ladders, drawn as overlays faded in by the zoom, are anchored to the top
+left corner at offsets made for 640 columns) */
+boolean hud_static_element_shown_by_zoom(
+	struct static_hud_element_definition const *element)
+{
+	short overlay_index;
+
+	for (overlay_index = 0; overlay_index < element->multitexture_overlays.count; overlay_index++)
+	{
+		struct multitexture_overlay_hud_element_definition const *overlay = TAG_BLOCK_GET_ELEMENT(
+			&element->multitexture_overlays,
+			overlay_index,
+			struct multitexture_overlay_hud_element_definition);
+		short function_index;
+
+		for (function_index = 0; function_index < overlay->functions.count; function_index++)
+		{
+			struct multitexture_overlay_hud_element_effector_definition const *effector = TAG_BLOCK_GET_ELEMENT(
+				&overlay->functions,
+				function_index,
+				struct multitexture_overlay_hud_element_effector_definition);
+
+			if (effector->source == _hud_multitexture_overlay_effector_source_zoom_level)
+				return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+#endif
+
 void hud_calculate_point(
 	short local_player_index,
 	struct hud_absolute_placement_definition const *absolute_placement,
@@ -978,12 +1128,40 @@ void hud_calculate_point(
 	corner = absolute_placement->corner;
 	if (corner < _hud_anchor_center)
 	{
+#ifdef HALO_LINUX
+		/* (port) a scope's element anchored to a corner (hud_draw_set_scope_centered)
+		is laid out in a 4:3 window centred in a wider one: its offset was made for
+		the Xbox's 640 columns, beside the scope's window, which is centred. The
+		window's half-width is scaled as the screen's 640 columns are, and the
+		title-safe margin with it (rasterizer_screen_width_update), so on a 4:3
+		screen nothing moves. Elsewhere a corner element keeps the wide window's
+		corner (the ammunition, the motion sensor). */
+		real window_x = render.camera.window_bounds.v[
+			((corner & FLAG(_hud_anchor_right_bit)) << 1) |
+				FLAG(_hud_anchor_right_bit)];
+
+		if (hud_draw_scope_centered && halo_screen_width() > 640)
+		{
+			real window_center = (render.camera.window_bounds.x0 + render.camera.window_bounds.x1) * 0.5f;
+			real half_width = (render.camera.window_bounds.x1 - render.camera.window_bounds.x0) * 0.5f *
+				(640.0f / (real)halo_screen_width());
+
+			window_x = TEST_FLAG(corner, _hud_anchor_right_bit) ?
+				window_center + half_width :
+				window_center - half_width;
+		}
+		point.x = placement->offset.x *
+			(TEST_FLAG(corner, _hud_anchor_right_bit) ? -1 : 1) * scale +
+			window_x -
+			render.camera.viewport_bounds.x0;
+#else
 		point.x = placement->offset.x *
 			(TEST_FLAG(corner, _hud_anchor_right_bit) ? -1 : 1) * scale +
 			render.camera.window_bounds.v[
 				((corner & FLAG(_hud_anchor_right_bit)) << 1) |
 					FLAG(_hud_anchor_right_bit)] -
 			render.camera.viewport_bounds.x0;
+#endif
 		point.y = placement->offset.y *
 			(TEST_FLAG(corner, _hud_anchor_bottom_bit) ? -1 : 1) * scale +
 			render.camera.window_bounds.v[corner & FLAG(_hud_anchor_bottom_bit)] -
@@ -1014,23 +1192,23 @@ void hud_calculate_point(
 			break;
 
 		case _hud_anchor_top_right:
-			point.x += (bitmap_data->registration_point.x - bitmap_data->width) * scale;
+			point.x += (bitmap_data->registration_point.x - bitmap_placed_width(bitmap_data)) * scale;
 			point.y += bitmap_data->registration_point.y * scale;
 			break;
 
 		case _hud_anchor_bottom_left:
 			point.x += bitmap_data->registration_point.x * scale;
-			point.y += (bitmap_data->registration_point.y - bitmap_data->height) * scale;
+			point.y += (bitmap_data->registration_point.y - bitmap_placed_height(bitmap_data)) * scale;
 			break;
 
 		case _hud_anchor_bottom_right:
-			point.x += (bitmap_data->registration_point.x - bitmap_data->width) * scale;
-			point.y += (bitmap_data->registration_point.y - bitmap_data->height) * scale;
+			point.x += (bitmap_data->registration_point.x - bitmap_placed_width(bitmap_data)) * scale;
+			point.y += (bitmap_data->registration_point.y - bitmap_placed_height(bitmap_data)) * scale;
 			break;
 
 		case _hud_anchor_center:
-			point.x += (bitmap_data->registration_point.x + bitmap_data->width / 2) * scale;
-			point.y += (bitmap_data->registration_point.y + bitmap_data->width / 2) * scale;
+			point.x += (bitmap_data->registration_point.x + bitmap_placed_width(bitmap_data) / 2) * scale;
+			point.y += (bitmap_data->registration_point.y + bitmap_placed_width(bitmap_data) / 2) * scale;
 			break;
 
 		default:
@@ -1184,12 +1362,32 @@ void hud_draw_weapon_overlays(
 		if (!TEST_FLAG(item->flags, _hud_overlay_runtime_invalid_bit) &&
 			(item->type & type_flags))
 		{
-			struct bitmap_group_sequence *sequence = TAG_BLOCK_GET_ELEMENT(
-				&bitmap_group_get(overlays->bitmap.index)->sequences,
-				item->sequence_index,
-				struct bitmap_group_sequence);
+			struct bitmap_group_sequence *sequence = NULL;
 			pixel32 color;
 			short frame_index;
+
+			/* port: the item's sequence is the map's. Only one the bitmap has
+			is looked at, and a sequence with no sprites stays on frame 0
+			(it was a divide by zero). The bad sequence itself isn't drawn
+			(hud_retrieve_bitmap_and_bounding_rect). */
+			if (overlays->bitmap.index!=NONE)
+			{
+				struct bitmap_group *group = bitmap_group_get(overlays->bitmap.index);
+
+				if (item->sequence_index>=0 && item->sequence_index<group->sequences.count)
+				{
+					sequence = TAG_BLOCK_GET_ELEMENT(
+						&group->sequences,
+						item->sequence_index,
+						struct bitmap_group_sequence);
+				}
+				else if (!hud_bad_bitmap_reported)
+				{
+					hud_bad_bitmap_reported = TRUE;
+					error(_error_silent, "hud overlay bitmap 0x%08lX has no sequence #%d (not drawn)",
+						(unsigned long)overlays->bitmap.index, item->sequence_index);
+				}
+			}
 
 			if (TEST_FLAG(item->flags, _hud_overlay_flashes_bit) &&
 				TEST_FLAG(draw_flags, _hud_draw_flashing_bit))
@@ -1203,7 +1401,8 @@ void hud_draw_weapon_overlays(
 
 			if (TEST_FLAG(item->flags, _hud_overlay_flashes_bit) &&
 				TEST_FLAG(draw_flags, _hud_draw_flashing_bit) &&
-				item->frame_rate > 0)
+				item->frame_rate > 0 &&
+				sequence && sequence->sprites.count > 0)
 			{
 				frame_index = (short)(((game_time_get() - reference_time) /
 					item->frame_rate / TICKS_PER_SECOND) % sequence->sprites.count);
@@ -1321,6 +1520,9 @@ void hud_draw_static_element(
 		is_interface_bitmap =
 			bitmap_group->type == _bitmap_group_type_interface_bitmaps;
 
+#ifdef HALO_LINUX
+		hud_draw_static_element_drawing = TRUE;
+#endif
 		hud_draw_bitmap_with_meter(
 			NULL,
 			bitmap,
@@ -1335,7 +1537,13 @@ void hud_draw_static_element(
 			FALSE);
 
 		for (overlay_index = 0;
-			overlay_index < static_element->multitexture_overlays.count;
+			overlay_index < static_element->multitexture_overlays.count
+#ifdef HALO_LINUX
+				/* port: none on the Custom Edition maps Chimera lists as
+				drawing none (from DamnationCE, CC0) */
+				&& !custom_edition_cache_relies_on(_custom_edition_behaviour_block_multitexture_overlays)
+#endif
+				;
 			overlay_index++)
 		{
 			struct multitexture_overlay_hud_element_definition const *overlay =
@@ -1381,6 +1589,9 @@ void hud_draw_static_element(
 				clip,
 				&bounds,
 				is_interface_bitmap);
+#ifdef HALO_LINUX
+			hud_full_screen_element_widen(absolute_placement->corner, &bounds, &xy_scale);
+#endif
 			hud_draw_multitexture_overlay(
 				overlay,
 				local_player_index,
@@ -1391,12 +1602,61 @@ void hud_draw_static_element(
 				0.0f,
 				color);
 		}
+#ifdef HALO_LINUX
+		hud_draw_static_element_drawing = FALSE;
+#endif
 	}
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 685);
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port, debug) HALO_HUD_LOG=1: each HUD quad the first time it is drawn at a
+place and size, "hud quad: <bitmap's tag> x0 y0 x1 y1 (screen <width>)" in the
+window's pixels (port/vita/tests/run_hud_layout_test.sh reads them) */
+static void hud_quad_log(
+	struct bitmap_data const *bitmap,
+	struct dynamic_screen_vertex const *vertices)
+{
+	static int wanted = -1;
+	static unsigned long seen[512];
+	static int seen_count;
+	void platform_log(char const *format, ...);
+	char *tag_get_name(long tag_index);
+	long x0 = (long)vertices[0].position.x, x1 = x0, y0 = (long)vertices[0].position.y, y1 = y0;
+	unsigned long signature;
+	int index;
+
+	if (wanted < 0)
+		wanted = getenv("HALO_HUD_LOG") && atoi(getenv("HALO_HUD_LOG"));
+	if (!wanted)
+		return;
+	for (index = 1; index < 4; index++)
+	{
+		x0 = MIN(x0, (long)vertices[index].position.x);
+		x1 = MAX(x1, (long)vertices[index].position.x);
+		y0 = MIN(y0, (long)vertices[index].position.y);
+		y1 = MAX(y1, (long)vertices[index].position.y);
+	}
+	signature = (unsigned long)bitmap->tag_index * 2654435761UL ^ (unsigned long)(x0 * 73856093L) ^
+		(unsigned long)(y0 * 19349663L) ^ (unsigned long)(x1 * 83492791L) ^ (unsigned long)(y1 * 1234567L) ^
+		(unsigned long)halo_screen_width();
+	for (index = 0; index < seen_count; index++)
+	{
+		if (seen[index] == signature)
+			return;
+	}
+	if (seen_count < (int)NUMBEROF(seen))
+		seen[seen_count++] = signature;
+	platform_log("hud quad: %s %ld %ld %ld %ld (screen %ld)",
+		bitmap->tag_index != NONE && bitmap->tag_index != 0 ? tag_get_name(bitmap->tag_index) : "?",
+		x0, y0, x1, y1, halo_screen_width());
+
+	return;
+}
+#endif
 
 static void hud_draw_bitmap_internal(
 	void *meter_parameters,
@@ -1448,6 +1708,9 @@ static void hud_draw_bitmap_internal(
 		_shader_framebuffer_blend_function_alpha_multiply_add;
 	parameters.map[0] = (struct bitmap_data *)bitmap;
 
+#ifdef HALO_LINUX
+	hud_quad_log(bitmap, vertices);
+#endif
 	rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 985);
@@ -1512,6 +1775,9 @@ static void hud_draw_bitmap_with_meter(
 		clip,
 		&bounds,
 		is_interface_bitmap);
+#ifdef HALO_LINUX
+	hud_full_screen_element_widen(absolute_placement->corner, &bounds, &xy_scale);
+#endif
 	hud_draw_bitmap_internal(
 		meter_parameters,
 		bitmap,
@@ -1544,13 +1810,15 @@ static real_rectangle2d const *get_sprite_clip_rect(
 	{
 		struct bitmap_group *group = bitmap_group_get(bitmap_group_index);
 
-		if (sequence_index<group->sequences.count)
+		/* port: no sequence below the first, and no sprite from a negative
+		sprite count or frame (all the map's) */
+		if (sequence_index>=0 && sequence_index<group->sequences.count)
 		{
 			struct bitmap_group_sequence *sequence = TAG_BLOCK_GET_ELEMENT(
 				&group->sequences, sequence_index, struct bitmap_group_sequence);
 			long sprite_count = sequence->sprites.count;
 
-			if (sprite_count)
+			if (sprite_count>0 && frame_index>=0)
 			{
 				struct bitmap_group_sprite *sprite = TAG_BLOCK_GET_ELEMENT(
 					&sequence->sprites, frame_index%sprite_count, struct bitmap_group_sprite);
@@ -1579,8 +1847,10 @@ static void hud_calculate_bitmap_bounds(
 
 	csmemset(stack_buffer, 0x62, sizeof(stack_buffer));
 
-	width = (clip->x1-clip->x0)*(is_interface_bitmap ? 1 : bitmap->width);
-	height = (clip->y1-clip->y0)*(is_interface_bitmap ? 1 : bitmap->height);
+	/* (port) a Custom Edition texture drawn from its second level at its
+	first's size (bitmap_placed_width) */
+	width = (clip->x1-clip->x0)*(is_interface_bitmap ? 1 : bitmap_placed_width(bitmap));
+	height = (clip->y1-clip->y0)*(is_interface_bitmap ? 1 : bitmap_placed_height(bitmap));
 
 	switch (placement_type)
 	{
@@ -1781,9 +2051,13 @@ void hud_draw_meter(
 
 		meter_parameters.background_color =
 			((UNSIGNED_CHAR_MAX - (meter->empty_color>>24))<<24) | (meter->empty_color&0xFFFFFF);
+		/* port: fade and opacity clamped to [0, 1], as the tools keep them; a
+		Custom Edition map's meter can be outside that, which asserted, and
+		packed into the wrong channels in a release build (DamnationCE /
+		OpenCE f823a18d, CC0) */
 		meter_parameters.tint_color = real_alpha_intensity_to_pixel32(
-			meter->fade,
-			1.0f-meter->opacity);
+			PIN(meter->fade, 0.0f, 1.0f),
+			PIN(1.0f-meter->opacity, 0.0f, 1.0f));
 		meter_parameters.gradient = 1.0f;
 		meter_parameters.flash_color_is_negative = FALSE;
 		meter_parameters.tint_mode_2 = TRUE;
@@ -1845,6 +2119,7 @@ void hud_draw_numbers(
 			real decimal_point_width = (real)(numbers->fractional_digits ?
 				hud_number->decimal_point_width : 0);
 			real scale;
+			real digit_scale;
 			point2d origin;
 			point2d cursor;
 			short digit_index;
@@ -1858,6 +2133,21 @@ void hud_draw_numbers(
 				scale = hud_globals_get_scale(
 					TEST_FLAG(draw_flags, _hud_draw_in_multiplayer_bit));
 			}
+			digit_scale = scale;
+#ifdef HALO_LINUX
+			/* port: Halo PC draws the digits at half their size, spaced as
+			the digits tag says, for a number flagged to use its high
+			resolution scale (a Custom Edition map's digits are twice the
+			Xbox's) or digits whose bitmap has a HUD scale flag (from
+			DamnationCE, CC0) */
+			if (custom_edition_cache_tags_loaded() &&
+				(TEST_FLAG(numbers->placement.multiplayer_scaling_flags, _hud_use_high_resolution_scale_bit) ||
+					TEST_FLAG(bitmap_group->flags, _bitmap_group_half_hud_scale_bit) ||
+					TEST_FLAG(bitmap_group->flags, _bitmap_group_force_hud_use_highres_scale_bit)))
+			{
+				digit_scale = scale * 0.5f;
+			}
+#endif
 
 			if (TEST_FLAG(numbers->number_flags, _hud_number_show_trailing_m_bit))
 			{
@@ -1939,7 +2229,7 @@ void hud_draw_numbers(
 						absolute_placement->corner,
 						&point,
 						clip,
-						scale,
+						digit_scale,
 						0.0f,
 						color,
 						bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -1980,7 +2270,7 @@ void hud_draw_numbers(
 							absolute_placement->corner,
 							&point,
 							clip,
-							scale,
+							digit_scale,
 							0.0f,
 							color,
 							bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2015,7 +2305,7 @@ void hud_draw_numbers(
 							absolute_placement->corner,
 							&point,
 							clip,
-							scale,
+							digit_scale,
 							0.0f,
 							color,
 							bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2052,7 +2342,7 @@ void hud_draw_numbers(
 						absolute_placement->corner,
 						&point,
 						clip,
-						scale,
+						digit_scale,
 						0.0f,
 						color,
 						bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2085,7 +2375,7 @@ void hud_draw_numbers(
 						absolute_placement->corner,
 						&point,
 						clip,
-						scale,
+						digit_scale,
 						0.0f,
 						color,
 						bitmap_group->type == _bitmap_group_type_interface_bitmaps);
@@ -2098,3 +2388,323 @@ void hud_draw_numbers(
 
 	return;
 }
+
+#ifdef HALO_VITA
+/* ---------- (port) the Vita's button icons
+
+The settings panel's Button icons, PlayStation (vita_controls.h): each of
+the game's button icons - the HUD's prompts (hud_messaging.c), the icons in
+the menus' and the HUD's text (ui_widget.c draw_string_and_hack_in_icons)
+and the menus' button hints (the a_butn ... widgets, ui_widget.c) - shows
+the Vita button its Xbox button is on now (vita_pad.c, which follows the
+Button layout and the touch zones). Cross, circle, square and triangle are
+drawn here, centred where the Xbox icon's sprite would be and as tall as
+it: two strokes, a ring, a square, a triangle, quads of the game's own
+white bitmap (the virtual keyboard's caret), in the PlayStation's own
+colours (cross blue, circle red, square pink, triangle green), with the
+alpha the callers give (the Xbox icon's, from hud_globals' button icons,
+as it fades). The others
+(L, R, Start, Select, the D-pad, the touch zones) are words in the game's
+font, drawn by the callers as the icons that are text are. */
+
+#include "input/input.h"
+#include "tag_files/tag_files.h"
+#include "tag_files/tag_groups.h"
+#include "vita_controls.h"
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
+
+#include <string.h>
+
+/* (vita_pad.c) */
+int vita_pad_button_glyph(short gamepad_button);
+int vita_pad_play_button_glyph(short gamepad_button);
+
+enum
+{
+	VITA_GLYPH_RING_SEGMENTS = 24
+};
+
+short hud_vita_button_glyph(
+	short icon_index)
+{
+	/* (the buttons only: the sticks' icons, 16 and 17, are the Vita's too) */
+	if (icon_index < 0 || icon_index >= NUMBER_OF_GAMEPAD_BUTTONS)
+		return VITA_GLYPH_NONE;
+
+	return (short)vita_pad_button_glyph(icon_index);
+}
+
+/* the multiplayer score hint (game_engine.c), "Hold BACK for score" in
+the Xbox maps and a Custom Edition map's (cache_file_formats.c), names the
+Vita button the Xbox's Back is on in play: SELECT as shipped. A face button
+has no word (it is drawn), so BACK stays for one */
+void hud_vita_score_hint(
+	wchar_t *buffer,
+	long buffer_size)
+{
+	wchar_t const *name = hud_vita_glyph_text((short)vita_pad_play_button_glyph(_gamepad_binary_button_back));
+
+	if (name && buffer_size > 0)
+		vita_text_name_button(buffer, (int)buffer_size, L"BACK", name);
+}
+
+/* the glyph of a menu's button hint widget, by its bitmap
+(ui\shell\bitmaps\a_butn, b_butn, x_butn, y_butn, a_butn_sm, b_butn_sm);
+VITA_GLYPH_NONE for any other bitmap */
+short hud_vita_menu_button_glyph(
+	long bitmap_group_index)
+{
+	char const *name;
+	char const *base;
+	char const *letter;
+
+	if (bitmap_group_index == NONE)
+		return VITA_GLYPH_NONE;
+	name = tag_get_name(bitmap_group_index);
+	if (!name)
+		return VITA_GLYPH_NONE;
+	base = strrchr(name, '\\');
+	base = base ? base + 1 : name;
+	letter = base[0] ? strchr("abxy", base[0]) : NULL;
+	if (!letter || strncmp(base + 1, "_butn", 5) || (base[6] && strcmp(base + 6, "_sm")))
+		return VITA_GLYPH_NONE;
+
+	/* (A B X Y: the game's buttons 0 to 3) */
+	return hud_vita_button_glyph((short)(letter - "abxy"));
+}
+
+/* the face button (_icon_a_button ... _icon_y_button) whose Xbox icon's
+colour a drawn glyph takes; NONE for one that is text */
+short hud_vita_glyph_face_icon(
+	short glyph)
+{
+	return glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_TRIANGLE ? glyph - VITA_GLYPH_CROSS : NONE;
+}
+
+/* the word of a glyph that is text (in the style of the game's own icon
+words, hud_icon_messages: "D-pad up"), in the player's language (lang.h:
+the buttons' own names stay); NULL for a drawn one or none */
+wchar_t const *hud_vita_glyph_text(
+	short glyph)
+{
+	static wchar_t const *const texts[VITA_GLYPH_COUNT] =
+	{
+		NULL, NULL, NULL, NULL, NULL,
+		L"L", L"R",
+		N_(L"D-pad up"), N_(L"D-pad down"), N_(L"D-pad left"), N_(L"D-pad right"),
+		L"START", L"SELECT",
+		N_(L"touch top left"), N_(L"touch top right"), N_(L"touch left edge"), N_(L"touch right edge"),
+		N_(L"rear touch left"), N_(L"rear touch right")
+	};
+
+	return glyph > VITA_GLYPH_NONE && glyph < VITA_GLYPH_COUNT && texts[glyph] ? TW(texts[glyph]) : NULL;
+}
+
+static void vita_glyph_quad(
+	struct bitmap_data *white,
+	real_point2d const *corners,
+	pixel32 color)
+{
+	struct dynamic_screen_vertex vertices[4];
+	struct rasterizer_dynamic_screen_geometry_parameters parameters;
+	short vertex_index;
+
+	for (vertex_index = 0; vertex_index < 4; vertex_index++)
+	{
+		vertices[vertex_index].position = corners[vertex_index];
+		vertices[vertex_index].texture_coordinates.x = 0.5f;
+		vertices[vertex_index].texture_coordinates.y = 0.5f;
+		vertices[vertex_index].color = color;
+	}
+	csmemset(&parameters, 0, sizeof(parameters));
+	parameters.map_texture_scale[0].i = 1.0f;
+	parameters.map_texture_scale[0].j = 1.0f;
+	parameters.map_scale[0].i = 1.0f;
+	parameters.map_scale[0].j = 1.0f;
+	parameters.framebuffer_blend_function = _shader_framebuffer_blend_function_alpha_multiply_add;
+	parameters.map[0] = white;
+	rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
+
+	return;
+}
+
+/* a closed outline: the band between an outer and an inner polygon, a quad
+per side */
+static void vita_glyph_outline(
+	struct bitmap_data *white,
+	real_point2d const *outer,
+	real_point2d const *inner,
+	short count,
+	pixel32 color)
+{
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		short next = (index + 1) % count;
+		real_point2d corners[4];
+
+		corners[0] = outer[index];
+		corners[1] = outer[next];
+		corners[2] = inner[next];
+		corners[3] = inner[index];
+		vita_glyph_quad(white, corners, color);
+	}
+
+	return;
+}
+
+/* a polygon of `count` corners round (x, y), `radius` out, the first at
+`angle` (radians, the screen's y down) */
+static void vita_glyph_polygon(
+	real_point2d *points,
+	short count,
+	real x,
+	real y,
+	real radius,
+	real angle)
+{
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		real theta = angle + index * 2.0f * 3.14159265f / count;
+
+		points[index].x = x + radius * (real)cos(theta);
+		points[index].y = y + radius * (real)sin(theta);
+	}
+
+	return;
+}
+
+boolean hud_vita_glyph_draw_in_rect(
+	short glyph,
+	real_rectangle2d const *rectangle,
+	pixel32 color)
+{
+	/* (cross, circle, square, triangle: the PlayStation's colours, the
+	caller's alpha) */
+	static pixel32 const face_colors[4] = { 0x006EA8F0, 0x00F05A5A, 0x00E08CD8, 0x0030D0A0 };
+	long white_index = tag_loaded(BITMAP_GROUP_TAG, "ui\\shell\\bitmaps\\white");
+	struct bitmap_data *white;
+	real width = rectangle->x1 - rectangle->x0;
+	real height = rectangle->y1 - rectangle->y0;
+	real x = (rectangle->x0 + rectangle->x1) * 0.5f;
+	real y = (rectangle->y0 + rectangle->y1) * 0.5f;
+	/* half the glyph's size and its strokes' width: as big as the Xbox
+	button in its sprite (its oval about 0.9 of the sprite's width), a
+	stroke an eighth of that */
+	real half = (width < height ? width : height) * 0.46f;
+	real stroke = half * 0.26f;
+	real_point2d outer[VITA_GLYPH_RING_SEGMENTS];
+	real_point2d inner[VITA_GLYPH_RING_SEGMENTS];
+
+	if (white_index == NONE || hud_vita_glyph_face_icon(glyph) == NONE)
+		return FALSE;
+	color = face_colors[hud_vita_glyph_face_icon(glyph)] | (color & 0xFF000000);
+	white = bitmap_group_get_bitmap_from_sequence(white_index, 0, 0);
+	if (!white || !_texture_cache_bitmap_get_hardware_format(white, FALSE, TRUE))
+		return FALSE;
+	if (stroke < 1.5f)
+		stroke = 1.5f;
+
+	switch (glyph)
+	{
+	case VITA_GLYPH_CROSS:
+		{
+			/* two strokes corner to corner of a square a little smaller
+			than the others */
+			real reach = half * 0.78f;
+			real offset = stroke * 0.5f * 0.70710678f;
+			real_point2d corners[4];
+			short diagonal;
+
+			for (diagonal = 0; diagonal < 2; diagonal++)
+			{
+				real sign = diagonal ? -1.0f : 1.0f;
+				/* (the second stroke's corners the other way round: both
+				wound alike, the renderer drawing only one winding) */
+				short first = diagonal ? 3 : 1;
+				short last = diagonal ? 1 : 3;
+
+				corners[0].x = x - reach + offset;
+				corners[0].y = y - sign * (reach + offset);
+				corners[first].x = x + reach + offset;
+				corners[first].y = y + sign * (reach - offset);
+				corners[2].x = x + reach - offset;
+				corners[2].y = y + sign * (reach + offset);
+				corners[last].x = x - reach - offset;
+				corners[last].y = y - sign * (reach - offset);
+				vita_glyph_quad(white, corners, color);
+			}
+		}
+		break;
+
+	case VITA_GLYPH_CIRCLE:
+		vita_glyph_polygon(outer, VITA_GLYPH_RING_SEGMENTS, x, y, half, 0.0f);
+		vita_glyph_polygon(inner, VITA_GLYPH_RING_SEGMENTS, x, y, half - stroke, 0.0f);
+		vita_glyph_outline(white, outer, inner, VITA_GLYPH_RING_SEGMENTS, color);
+		break;
+
+	case VITA_GLYPH_SQUARE:
+		{
+			/* (a square's corners are a polygon of four, from 45 degrees;
+			its side 1.6 half) */
+			real radius = half * 0.8f * 1.41421356f;
+
+			vita_glyph_polygon(outer, 4, x, y, radius, 3.14159265f * 0.25f);
+			vita_glyph_polygon(inner, 4, x, y, radius - stroke * 1.41421356f, 3.14159265f * 0.25f);
+			vita_glyph_outline(white, outer, inner, 4, color);
+		}
+		break;
+
+	case VITA_GLYPH_TRIANGLE:
+		{
+			/* point up, its centre a quarter of its radius low so that it
+			is as high as the others and on the same middle (an
+			equilateral's inner one is in by the stroke where its corners
+			are in by twice it) */
+			real radius = half * 1.15f;
+			real centre = y + radius * 0.25f;
+
+			vita_glyph_polygon(outer, 3, x, centre, radius, -3.14159265f * 0.5f);
+			vita_glyph_polygon(inner, 3, x, centre, radius - 2.0f * stroke, -3.14159265f * 0.5f);
+			vita_glyph_outline(white, outer, inner, 3, color);
+		}
+		break;
+	}
+
+	return TRUE;
+}
+
+/* a glyph where hud_draw_bitmap_direct would have drawn the Xbox icon's
+sprite: the same placement, clip and scale. FALSE if it could not be drawn
+(the caller draws the Xbox icon) */
+boolean hud_vita_glyph_draw(
+	short glyph,
+	struct bitmap_data const *bitmap,
+	short placement,
+	point2d const *point,
+	real_rectangle2d const *clip,
+	real scale,
+	pixel32 color)
+{
+	real_rectangle2d default_clip;
+	real_rectangle2d bounds;
+	real_rectangle2d rectangle;
+
+	default_clip.x0 = 0.0f;
+	default_clip.x1 = 1.0f;
+	default_clip.y0 = 0.0f;
+	default_clip.y1 = 1.0f;
+	if (!clip)
+		clip = &default_clip;
+	hud_calculate_bitmap_bounds(bitmap, placement, clip, &bounds, FALSE);
+	rectangle.x0 = point->x + bounds.x0 * scale;
+	rectangle.x1 = point->x + bounds.x1 * scale;
+	rectangle.y0 = point->y + bounds.y0 * scale;
+	rectangle.y1 = point->y + bounds.y1 * scale;
+
+	return hud_vita_glyph_draw_in_rect(glyph, &rectangle, color);
+}
+#endif

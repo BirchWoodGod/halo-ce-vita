@@ -321,6 +321,33 @@ boolean terminal_update(
 	return result;
 }
 
+/* port/linux/src/port_config.c's */
+const char *config_string(const char *name);
+
+boolean terminal_command_running = FALSE;
+
+/* port: whether the console shows a kind of what is logged on screen, as
+config.toml's game.console_log says: "all", everything; "important" (and
+anything else), the serious and the important; "none", the serious only
+(the asserts that stop the game). debug.txt has every line whatever it is */
+boolean terminal_shows(
+	short kind)
+{
+	static short level = NONE;
+
+	if (level == NONE)
+	{
+		const char *setting = config_string("game.console_log");
+
+		level = _terminal_message_important;
+		if (setting && !csstrcmp(setting, "all"))
+			level = _terminal_message_chatter;
+		else if (setting && !csstrcmp(setting, "none"))
+			level = _terminal_message_serious;
+	}
+	return kind <= level;
+}
+
 void terminal_printf(
 	real_argb_color const *color,
 	char const *format,
@@ -343,22 +370,15 @@ void terminal_printf(
 
 		if (line_index!=NONE)
 		{
-			short count;
+			int count;
 			struct output_line_datum *line = output_line_get(line_index);
 			line->timer = 0;
 			line->color = !color ? default_terminal_printf_color : *color;
-			count = _vsnprintf(line->buffer, NUMBEROF(line->buffer)-2, format, arglist) - 1;
-			match_vassert(
-				"c:\\halo\\SOURCE\\interface\\terminal.c",
-				413,
-				count < (short)(NUMBEROF(line->buffer)-1),
-				csprintf(
-					temporary,
-					"terminal_printf call generated %d characters; the buffer size is %d characters.",
-					count,
-					NUMBEROF(line->buffer)-1
-				)
-			);
+			/* a line longer than the on-screen buffer used to halt here, from
+			inside error(), so the real halt was never written down */
+			count = _vsnprintf(line->buffer, NUMBEROF(line->buffer)-2, format, arglist);
+			if (count < 0 || count >= (int)(NUMBEROF(line->buffer)-2))
+				line->buffer[NUMBEROF(line->buffer)-2] = 0;
 			line->tabstop = strstr(line->buffer, "|t") != 0;
 			telnet_console_print(line->buffer);
 		}

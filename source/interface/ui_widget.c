@@ -634,6 +634,7 @@ struct widget_instance;
 #include "bink/bink_playback.h"
 #include "bungie_net/common/thread.h"
 #include "cache/texture_cache.h"
+#include "cache/cache_files.h"
 #include "cseries/cseries_windows.h"
 #include "cutscene/cinematics.h"
 #include "event_manager.h"
@@ -663,6 +664,8 @@ struct widget_instance;
 #include "networking/network_connection.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_server_manager.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
 #include "rasterizer/rasterizer.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
@@ -678,6 +681,9 @@ struct widget_instance;
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "ui_widget.h"
+#ifdef HALO_LINUX
+#include "custom_edition_maps.h"
+#endif
 
 /* ---------- constants */
 
@@ -1443,6 +1449,23 @@ static boolean ui_check_for_pause_game(
 
 /* ---------- globals */
 
+/* port: an error message of the port's own text (display_error_text_deferred):
+the text waiting for its dialog, then the dialog's text box showing it */
+static wchar_t const *ui_widget_port_error_pending_text = NULL;
+static wchar_t const *ui_widget_port_error_text = NULL;
+static struct widget_instance *ui_widget_port_error_text_box = NULL;
+/* port: text boxes that show the port's own text in place of their string
+list's (ui_widget_port_text_override), for one render of the widgets: the
+game data functions that set it run in that render, before the boxes */
+static struct
+{
+	struct widget_instance *widget;
+	wchar_t text[64];
+} ui_widget_port_text_overrides[8];
+static short ui_widget_port_text_override_count = 0;
+/* port: co-op from the campaign's menus (ui_widget_event_handler_functions.c) */
+boolean ui_widget_port_cooperative_campaign_host(struct widget_instance *list, struct event_record *event);
+
 static struct ui_widget_bss_prefix ui_widget_globals_storage;
 
 #define string_data ui_widget_globals_storage.string_data
@@ -1939,6 +1962,13 @@ void display_error_abort_to_dashboard_deferred(
 	short error_code,
 	boolean optional)
 {
+#ifdef HALO_LINUX
+	{
+		void platform_log(char const *format, ...);
+
+		platform_log("error dialog %d queued (the dashboard error of the saved games' checks)", (int)error_code);
+	}
+#endif
 	if (widget_globals.deferred_dashboard_error_code == NONE)
 	{
 		widget_globals.deferred_dashboard_error_code = error_code;
@@ -2200,10 +2230,17 @@ void ui_widget_delete(
 		if (handler->event_type == _widget_event_deleted &&
 			TEST_FLAG(handler->flags, _event_handler_run_function_bit))
 		{
+			/* port: an event of nothing, not none: a map's widget may name a
+			function for this handler that reads its event */
+			static struct event_record no_event;
 			boolean widget_deleted = FALSE;
-			boolean handled = ui_widget_event_handler_function_invoke(
+			boolean handled;
+
+			csmemset(&no_event, 0, sizeof(no_event));
+			no_event.controller_index = NONE;
+			handled = ui_widget_event_handler_function_invoke(
 				widget,
-				NULL,
+				&no_event,
 				handler->function,
 				&widget_deleted);
 
@@ -2264,6 +2301,11 @@ void ui_widget_delete(
 	case _ui_widget_type_text_box:
 		if (widget->parameters.text_box.text)
 			dispose_pointer(widget_memory_pool, widget->parameters.text_box.text);
+		if (widget == ui_widget_port_error_text_box)
+		{
+			ui_widget_port_error_text_box = NULL;
+			ui_widget_port_error_text = NULL;
+		}
 		break;
 	case _ui_widget_type_spinner_list:
 	case _ui_widget_type_column_list:
@@ -2332,6 +2374,25 @@ static struct widget_instance *ui_widget_launch_widget(
 	struct widget_instance *root;
 	struct widget_instance *new_widget;
 	short local_player_index;
+
+	/* port: the menus of multiplayer with other machines (not split screen's
+	or co-op's) open only on maps of a build that plays multiplayer with the
+	others (cache_files.c, cache_files_multiplayer_region); otherwise the
+	player is told why, and the menu stays */
+	{
+		static char const multiplayer_menus[] = "ui\\shell\\main_menu\\multiplayer_type_select\\connected\\";
+		char const *name = tag_get_name(widget_tag_index);
+		char build[0x20];
+
+		if (name &&
+			!csstrncmp(name, multiplayer_menus, sizeof(multiplayer_menus) - 1) &&
+			!cache_files_multiplayer_region(build))
+		{
+			cache_files_show_multiplayer_unavailable(NULL, build);
+
+			return NULL;
+		}
+	}
 
 	if (TEST_FLAG(definition->flags, _widget_always_use_tag_controller_index_bit))
 	{
@@ -2420,6 +2481,21 @@ static __inline boolean widget_instance_can_handle_events(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+/* port: a row of OpenCE's lists (port/linux/game/menu_tags.c) that takes no
+focus: hidden or disabled (a list's rows past its games:
+port/linux/game/menu_functions.c), which up and down pass over */
+static boolean widget_instance_port_skipped(
+	struct widget_instance *list,
+	struct widget_instance *child)
+{
+	extern boolean pc_menu_tag(long tag_index);
+
+	return child && list->type == _ui_widget_type_column_list && pc_menu_tag(list->definition_tag_index) &&
+		(!child->visible || child->disabled);
+}
+
+#endif
 static struct widget_instance *widget_instance_find_by_tag_index_recursive(
 	struct widget_instance *widget,
 	long tag_index)
@@ -2522,6 +2598,38 @@ static void widget_instance_give_focus_by_tag(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the screen open for the local player (its stack's top), or NULL
+(port/linux/game/menu_functions.c) */
+struct widget_instance *ui_widget_port_active_screen(
+	short local_player_index)
+{
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return NULL;
+	return widget_globals.active_widgets[local_player_index];
+}
+
+#endif
+#ifdef HALO_LINUX
+/* port: gives a list's child the focus, as up and down do (OpenCE's lists,
+port/linux/game/menu_functions.c: off a row that went away) */
+void ui_widget_port_give_focus(
+	struct widget_instance *list,
+	struct widget_instance *child)
+{
+	struct widget_instance *sibling;
+	short index = 0;
+
+	for (sibling = list->child; sibling && sibling != child; sibling = sibling->next)
+		index++;
+	if (!sibling)
+		return;
+	widget_instance_give_focus_directly(list, child);
+	if (list->type == _ui_widget_type_column_list || list->type == _ui_widget_type_spinner_list)
+		list->parameters.list.selected_index = index;
+}
+
+#endif
 boolean widget_event_function_list_widget_goto_next_item(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -2619,6 +2727,22 @@ boolean widget_event_function_list_widget_goto_next_item(
 				child = widget->child;
 				item_index = 0;
 			}
+#ifdef HALO_LINUX
+			{
+				long tries = 0;
+
+				while (widget_instance_port_skipped(widget, child) && tries++ < 256)
+				{
+					child = child->next;
+					item_index++;
+					if (!child)
+					{
+						child = widget->child;
+						item_index = 0;
+					}
+				}
+			}
+#endif
 			if (child)
 			{
 				widget_instance_give_focus_by_tag(
@@ -2745,6 +2869,27 @@ boolean widget_event_function_list_widget_goto_previous_item(
 					item_index++;
 				}
 			}
+#ifdef HALO_LINUX
+			{
+				long tries = 0;
+
+				while (widget_instance_port_skipped(widget, child) && tries++ < 256)
+				{
+					child = child->previous;
+					item_index--;
+					if (!child)
+					{
+						child = widget->child;
+						item_index = 0;
+						while (child->next)
+						{
+							child = child->next;
+							item_index++;
+						}
+					}
+				}
+			}
+#endif
 			widget_instance_give_focus_by_tag(
 				widget,
 				child->definition_tag_index,
@@ -3510,6 +3655,31 @@ static boolean ui_widget_load_children_recursive(
 			ui_widget_add_child(widget, child);
 		}
 	}
+	/* port: co-op from the campaign's menus: the difficulty screen's Y
+	button (Y plays co-op: widget_instance_process_one_event_recursive),
+	the maps' own button where the profile screen has its Y (Create New);
+	its label is drawn with the screen (port/linux/game/coop_menu.c) */
+	if (result && widget->parent == NULL && coop_menu_available() &&
+		widget->definition_tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG,
+			"ui\\shell\\main_menu\\difficulty_select\\difficulty_select_list_screen"))
+	{
+		long y_button_tag = tag_loaded(UI_WIDGET_DEFINITION_TAG, "ui\\shell\\main_menu\\y_butn");
+		struct widget_instance *child = y_button_tag != NONE ? ui_widget_load_by_name_or_tag(
+			NULL,
+			y_button_tag,
+			widget,
+			widget->local_player_index,
+			NONE,
+			NONE,
+			NONE) : NULL;
+
+		if (child)
+		{
+			child->horizontal_offset = (short)(78 + widget->horizontal_offset);
+			child->vertical_offset = (short)(414 + widget->vertical_offset);
+			ui_widget_add_child(widget, child);
+		}
+	}
 	if (widget->type == _ui_widget_type_column_list &&
 		definition->extended_description_widget.index != NONE)
 	{
@@ -3550,6 +3720,10 @@ static boolean ui_widget_load_children_recursive(
 
 			for (child = widget->child; child; child = child->next)
 			{
+#ifdef HALO_LINUX
+				if (widget_instance_port_skipped(widget, child))
+					continue;
+#endif
 				if (widget->type == _ui_widget_type_spinner_list ||
 					widget->type == _ui_widget_type_column_list ||
 					widget_instance_can_handle_events(child))
@@ -3588,7 +3762,10 @@ static void widget_instance_initialize(
 	widget->visible = TRUE;
 	widget->render_regardless_of_controller_index =
 		TEST_FLAG(definition->flags, _widget_render_regardless_of_controller_index_bit);
-	widget->pause_game_time = TEST_FLAG(definition->flags, _widget_pause_game_time_bit);
+	/* port: a network co-op game never pauses (it opens the campaign's pause
+	screen, which would) */
+	widget->pause_game_time = TEST_FLAG(definition->flags, _widget_pause_game_time_bit) &&
+		!network_coop_active();
 	widget->creation_time = widget_globals.current_system_milliseconds;
 	widget->milliseconds_to_auto_close = MAX(definition->milliseconds_to_auto_close, 0);
 	widget->auto_close_fade_time = MAX(definition->auto_close_fade_time, 0);
@@ -3680,6 +3857,17 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 		(widget_stack>=0) && (widget_stack<MAXIMUM_GAMEPADS));
 	if (tag_index == NONE)
 		tag_index = tag_loaded(UI_WIDGET_DEFINITION_TAG, name);
+#ifdef HALO_LINUX
+	/* port: OpenCE's Multiplayer screen in place of the Xbox's when the
+	player's Halo PC data is in the maps folder, and the screens its flows
+	open in place of the game's (port/linux/game/menu_tags.c) */
+	if (!parent)
+	{
+		extern long menu_tags_screen(long tag_index);
+
+		tag_index = menu_tags_screen(tag_index);
+	}
+#endif
 	if (tag_index != NONE)
 	{
 		definition = ui_widget_definition_get(tag_index);
@@ -3705,6 +3893,22 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 					previous_local_player_index = NONE;
 				}
 				widget_globals.active_widgets[widget_stack] = widget;
+#ifdef HALO_LINUX
+				/* (port, debug) HALO_UI_LOG=1: halo.log names each screen
+				opened, for the automated menu tests (HALO_TEST_PAD) */
+				{
+					static int log_screens = -1;
+
+					if (log_screens < 0)
+						log_screens = getenv("HALO_UI_LOG") && atoi(getenv("HALO_UI_LOG"));
+					if (log_screens)
+					{
+						void platform_log(const char *format, ...);
+
+						platform_log("ui: screen %s", tag_get_name(tag_index));
+					}
+				}
+#endif
 				if (invoking_widget_tag != NONE &&
 					!TEST_FLAG(
 						ui_widget_definition_get(invoking_widget_tag)->flags,
@@ -3796,6 +4000,21 @@ static void render_state_bitmap(
 	real_rectangle2d const *clip;
 	real scale;
 	point2d point;
+#ifdef HALO_VITA
+	/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a button
+	icon shows the Vita button its Xbox button is on, a word in the font or
+	drawn in the sprite's place (the caller's colour: the Xbox face button's
+	there) */
+	struct icon_hud_element_definition *button_icons = hud_globals->messaging.button_icons.address;
+	short glyph = icon >= button_icons && icon < button_icons + hud_globals->messaging.button_icons.count ?
+		hud_vita_button_glyph((short)(icon - button_icons)) : NONE;
+
+	if (hud_vita_glyph_text(glyph))
+	{
+		render_state_text(bounds, cursor_bounds, hud_vita_glyph_text(glyph));
+		return;
+	}
+#endif
 
 	global_scenario_get();
 	game_globals = scenario_get_game_globals();
@@ -3823,6 +4042,16 @@ static void render_state_bitmap(
 		scale = hud_globals_get_scale(local_player_count() > 1);
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0 + 1.0f);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale - 2.0f);
+#ifdef HALO_VITA
+		if (hud_vita_glyph_face_icon(glyph) == NONE || !hud_vita_glyph_draw(
+			glyph,
+			bitmap,
+			_hud_anchor_bottom_left,
+			&point,
+			clip,
+			scale,
+			TEST_FLAG(icon->flags, _hud_icon_use_color_bit) ? icon->color : color))
+#endif
 		hud_draw_bitmap_direct(
 			bitmap,
 			_hud_anchor_bottom_left,
@@ -3843,6 +4072,40 @@ static void render_state_bitmap(
 	return;
 }
 
+#ifdef HALO_VITA
+/* (port) a menu's button hint (the a_butn ... widgets) with the settings
+panel's Button icons PlayStation: the Vita button drawn over the hint's
+rectangle, in the colour of the Xbox button the art shows (hud_draw.c), at
+the widget's alpha. FALSE when the widget is not a hint, or the icons are
+the Xbox's (its art is drawn) */
+static boolean vita_button_hint_draw(
+	long bitmap_group_index,
+	rectangle2d const *bounds,
+	pixel32 color)
+{
+	short glyph = hud_vita_menu_button_glyph(bitmap_group_index);
+	short face_icon = hud_vita_glyph_face_icon(glyph);
+	pixel32 face_color = 0xFFFFFFFF;
+	real_rectangle2d rectangle;
+
+	if (face_icon == NONE)
+		return FALSE;
+	if (face_icon < hud_globals->messaging.button_icons.count)
+	{
+		face_color = TAG_BLOCK_GET_ELEMENT(
+			&hud_globals->messaging.button_icons,
+			face_icon,
+			struct icon_hud_element_definition)->color;
+	}
+	rectangle.x0 = bounds->x0;
+	rectangle.x1 = bounds->x1;
+	rectangle.y0 = bounds->y0;
+	rectangle.y1 = bounds->y1;
+
+	return hud_vita_glyph_draw_in_rect(glyph, &rectangle, (face_color & 0x00FFFFFF) | (color & 0xFF000000));
+}
+#endif
+
 void draw_string_and_hack_in_icons(
 	rectangle2d *bounds,
 	rectangle2d *clip,
@@ -3853,8 +4116,27 @@ void draw_string_and_hack_in_icons(
 {
 	wchar_t *current = string_data;
 	rectangle2d cursor_bounds = *bounds;
+	unsigned long length;
 
-	wcscpy(string_data, instring);
+	/* port: no more than the buffer holds (the text is the map's: a string
+	list's or a hud message's; retail strings are up to 398 characters of
+	1024). A longer one is cut, said once. */
+	for (length = 0; length < NUMBEROF(string_data) - 1 && instring[length]; length++)
+		string_data[length] = instring[length];
+	string_data[length] = 0;
+	if (instring[length])
+	{
+		static boolean long_string_reported = FALSE;
+
+		if (!long_string_reported)
+		{
+			long_string_reported = TRUE;
+			error(
+				_error_silent,
+				"string of more than %d characters cut",
+				(long)NUMBEROF(string_data) - 1);
+		}
+	}
 	while (current)
 	{
 		wchar_t *icon_spec = wcschr(current, L'%');
@@ -3938,8 +4220,22 @@ void draw_string_and_hack_in_icons(
 				real_argb_color icon_color;
 				real_argb_color text_color;
 				long alpha;
+				struct icon_hud_element_definition *color_icon = icon;
 
-				pixel32_to_real_argb_color(icon->color, &icon_color);
+#ifdef HALO_VITA
+				/* (port) a PlayStation glyph drawn in the icon's place takes
+				the colour of the Xbox face button there (hud_draw.c) */
+				{
+					short face_icon = hud_vita_glyph_face_icon(hud_vita_button_glyph(icon_index));
+
+					if (face_icon != NONE && face_icon < hud_globals->messaging.button_icons.count)
+						color_icon = TAG_BLOCK_GET_ELEMENT(
+							&hud_globals->messaging.button_icons,
+							face_icon,
+							struct icon_hud_element_definition);
+				}
+#endif
+				pixel32_to_real_argb_color(color_icon->color, &icon_color);
 				icon->flags &= ~FLAG(_hud_icon_use_color_bit);
 				match_assert(
 					"c:\\halo\\SOURCE\\interface\\ui_widget.c",
@@ -3952,7 +4248,7 @@ void draw_string_and_hack_in_icons(
 				}
 				draw_string_get_color(&text_color);
 				alpha = (long)(text_color.alpha * 255.0f) << 24;
-				if (icon->color == 0 || ignore_icon_color)
+				if (color_icon->color == 0 || ignore_icon_color)
 					icon_color = text_color;
 				icon_color.red *= text_color.alpha;
 				icon_color.green *= text_color.alpha;
@@ -4074,6 +4370,22 @@ void display_error_deferred(
 	return;
 }
 
+/* port: an error message of the port's own text (the maps have only the
+Xbox's), in the dialog of an error whose text it takes the place of */
+void display_error_text_deferred(
+	wchar_t const *text,
+	short local_player_index)
+{
+	short index = local_player_index == NONE ? 0 : local_player_index;
+
+	if (!VALID_INDEX(index, MAXIMUM_NUMBER_OF_LOCAL_PLAYERS) || widget_globals.deferred_errors[index].error_code != NONE)
+		return;
+	ui_widget_port_error_pending_text = text;
+	display_error_deferred(_error_cannot_create_saved_game_file_with_empty_name, local_player_index, TRUE, FALSE);
+
+	return;
+}
+
 void display_errors_deferred_until_cinematic_stop(
 	void)
 {
@@ -4170,7 +4482,15 @@ void display_error(
 		struct widget_instance *top_widget;
 		long top_widget_tag_index;
 		struct widget_instance *widget;
+		/* (port: the port's own text for this error, taken whether or not its
+		dialog opens, so that it is never another's) */
+		wchar_t const *port_text = NULL;
 
+		if (error_code == _error_cannot_create_saved_game_file_with_empty_name)
+		{
+			port_text = ui_widget_port_error_pending_text;
+			ui_widget_port_error_pending_text = NULL;
+		}
 		if (local_player_index != NONE)
 		{
 			short index;
@@ -4283,6 +4603,12 @@ void display_error(
 					text_box->type == _ui_widget_type_text_box,
 					"expected a text box widget in the error widget");
 				text_box->parameters.text_box.string_list_index = PIN(error_code, 0, NUMBER_OF_ERROR_CODES - 1);
+				/* (port: the port's own text in place of the error's) */
+				if (port_text)
+				{
+					ui_widget_port_error_text_box = text_box;
+					ui_widget_port_error_text = port_text;
+				}
 				widget->widget_is_error_dialog = TRUE;
 				if (!widget->pause_game_time)
 				{
@@ -4330,12 +4656,60 @@ void display_error(
 	return;
 }
 
+#ifdef HALO_LINUX
+#include <stdarg.h>
+
+void platform_log(char const *format, ...);
+
+/* port: the error dialogs that end at the dashboard (the game's exit on the
+Vita), named in halo.log as they open: a player's report then says which
+and why (the damaged disc error said nothing: October 2026) */
+static char const *dashboard_error_name(
+	short error_code)
+{
+	switch (error_code)
+	{
+	case _error_hard_drive_not_enough_free_space:
+		return "not enough free space for saved games";
+	case _error_hard_drive_maximum_saved_game_files:
+		return "too many saved games";
+	case _error_media_damaged:
+		return "the disc is dirty or damaged";
+	case _error_saved_game_state_corrupt:
+		return "a saved game is damaged";
+	default:
+		return "an error";
+	}
+}
+
+void display_error_damaged_media_reason(
+	char const *format,
+	...)
+{
+	char reason[320];
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(reason, sizeof(reason), format, arguments);
+	va_end(arguments);
+	platform_log("damaged disc error: %s", reason);
+	error(_error_silent, "damaged disc error: %s", reason);
+
+	return;
+}
+#endif
+
 void display_error_abort_to_dashboard(
 	short error_code,
 	boolean optional)
 {
 	char const *widget_name;
 	struct widget_instance *widget;
+
+#ifdef HALO_LINUX
+	platform_log("error dialog %d (%s)%s: the game exits to the dashboard after it", (int)error_code,
+		dashboard_error_name(error_code), optional ? ", or back to the game" : "");
+#endif
 
 	if (optional == TRUE)
 		widget_name = "ui\\shell\\error\\error_abort_to_dashboard";
@@ -4400,7 +4774,20 @@ void network_game_reset_to_pregame_ui(
 	}
 	else
 	{
-		if (global_network_game_server_get())
+		/* port: co-op hosted from the campaign's menus goes on in its lobby,
+		on the campaign's next level, with no map to pick: the lobby's
+		countdown starts it (network_server_manager.c) */
+		if (global_network_game_server_get() && network_game_server_port_cooperative_menu(NULL))
+		{
+			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
+			if (!ui_widget_load_by_name_or_tag(
+				"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen",
+				NONE, NULL, NONE, NONE, NONE, NONE))
+			{
+				error(_error_silent, "failed to load networked pregame status screen");
+			}
+		}
+		else if (global_network_game_server_get())
 		{
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
 			if (!ui_widget_load_by_name_or_tag(
@@ -4595,6 +4982,19 @@ short remap_sticks_for_local_player(
 static unsigned long __stdcall filesystem_initialization_thread_proc(
 	void *input)
 {
+#ifdef HALO_LINUX
+	{
+		/* (test) HALO_TEST_FILESYSTEM_CHECK_MS=<ms>: the checks take that
+		much longer, as on a Vita's memory card (5-10 s, more at a first
+		start), for the harness (port/vita/tests/run_no_movies_test.sh) */
+		extern char *getenv(const char *name);
+		extern long atol(const char *text);
+		const char *setting = getenv("HALO_TEST_FILESYSTEM_CHECK_MS");
+
+		if (setting && atol(setting) > 0)
+			Sleep((unsigned long)atol(setting));
+	}
+#endif
 	widget_globals.filesystem_check_result = saved_game_perform_file_system_checks();
 	if (!widget_globals.filesystem_check_result)
 	{
@@ -4630,6 +5030,12 @@ static void perform_filesystem_initialization(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the main menu waits for the start-up filesystem checks
+(main_screen_shell_load, process_ui_widgets) */
+static boolean main_menu_waits_for_filesystem_checks = FALSE;
+#endif
+
 void main_screen_shell_load(
 	void)
 {
@@ -4660,6 +5066,24 @@ void main_screen_shell_load(
 		perform_filesystem_initialization();
 		input_abstraction_reset_controller_detection_timer();
 	}
+#ifdef HALO_LINUX
+	/* port: the main menu takes no input until the start-up filesystem
+	checks (perform_filesystem_initialization: saved games, profiles,
+	playlists) are done - process_ui_widgets drops every press while their
+	thread runs. On the Xbox the intro covers them (it cannot be skipped
+	before they end). Without it - the movies are optional (README), and
+	the Linux build has none - the menu came up at once and ignored every
+	button for as long as the checks took: 5-10 s on a Vita, more at a
+	first start, with the menu's music started beside them on the same
+	memory card. So the menu comes up when they end (process_ui_widgets),
+	ready for input as after the intro; the same if the intro ends first */
+	if (load_main_menu && widget_globals.initialization_thread)
+	{
+		main_menu_waits_for_filesystem_checks = TRUE;
+		load_main_menu = FALSE;
+		error(_error_silent, "the main menu waits for the filesystem checks");
+	}
+#endif
 	if (load_main_menu)
 	{
 		attract_mode_reset_timer();
@@ -4705,6 +5129,94 @@ real_rgb_color get_ui_rgb_white(
 	result.blue = global_ui_white_blue;
 
 	return result;
+}
+
+/* (the box's text override entry, made if it has none; -1 when they are all
+taken) */
+static short ui_widget_port_text_override_entry(
+	struct widget_instance *widget)
+{
+	short override_index;
+
+	for (override_index = 0; override_index < ui_widget_port_text_override_count; override_index++)
+	{
+		if (ui_widget_port_text_overrides[override_index].widget == widget)
+			return override_index;
+	}
+	if (override_index >= (short)NUMBEROF(ui_widget_port_text_overrides))
+		return -1;
+	ui_widget_port_text_override_count++;
+	ui_widget_port_text_overrides[override_index].widget = widget;
+	ui_widget_port_text_overrides[override_index].text[0] = 0;
+	return override_index;
+}
+
+/* port: the text box shows text in place of its string list's string, for
+this render of the widgets (call it from a game data function of the box or
+of a widget drawn before it) */
+void ui_widget_port_text_override(
+	struct widget_instance *widget,
+	wchar_t const *text)
+{
+	short override_index;
+
+	if (!widget || !text || (override_index = ui_widget_port_text_override_entry(widget)) < 0)
+		return;
+	ustrncpy(ui_widget_port_text_overrides[override_index].text, text,
+		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1);
+	ui_widget_port_text_overrides[override_index].text[
+		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1] = 0;
+}
+
+/* port: whether the text is wider than width in the text box's font */
+boolean ui_widget_port_text_too_wide(
+	struct widget_instance *widget,
+	wchar_t const *text,
+	short width)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+	long font_index = definition->text_font.index;
+	rectangle2d bounds = { 0, 0, 480, 2000 };
+	rectangle2d text_bounds;
+	rectangle2d cursor_bounds;
+
+	if (font_index == NONE)
+		return FALSE;
+	/* (as widget_instance_render_text_box draws: the plain style) */
+	{
+		real_argb_color color = get_ui_argb_white();
+
+		draw_string_set_draw_mode(font_index, NONE, 0, 0, &color);
+	}
+	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor_bounds);
+	return text_bounds.x1 - text_bounds.x0 > width;
+}
+
+/* port: the font and text colour of a widget definition (its tag's name),
+for the port's own text drawn as the menus draw theirs; FALSE if it has
+none */
+boolean ui_widget_port_text_style(
+	char const *widget_name,
+	long *font_index,
+	real_argb_color *color)
+{
+	long tag_index = tag_loaded(UI_WIDGET_DEFINITION_TAG, widget_name);
+	struct ui_widget_definition *definition;
+
+	if (tag_index == NONE)
+		return FALSE;
+	definition = ui_widget_definition_get(tag_index);
+	*font_index = definition->text_font.index;
+	*color = definition->text_color;
+	if (color->red == 1.0f && color->green == 1.0f && color->blue == 1.0f)
+	{
+		/* (as the text boxes draw a white: the menus' white) */
+		real alpha = color->alpha;
+
+		*color = get_ui_argb_white();
+		color->alpha = alpha;
+	}
+	return *font_index != NONE;
 }
 
 real_argb_color get_ui_argb_white(
@@ -4895,9 +5407,21 @@ static void widget_instance_render_text_box(
 			string_list_index = definition->string_list_index;
 		else
 			string_list_index = widget->parameters.text_box.string_list_index;
-		string = unicode_string_list_get_string(
-			definition->text_label_string_list.index,
-			string_list_index);
+		string = widget == ui_widget_port_error_text_box && ui_widget_port_error_text ?
+			(wchar_t *)ui_widget_port_error_text :
+			unicode_string_list_get_string(definition->text_label_string_list.index, string_list_index);
+		{
+			short override_index;
+
+			for (override_index = 0; override_index < ui_widget_port_text_override_count; override_index++)
+			{
+				if (ui_widget_port_text_overrides[override_index].widget == widget &&
+					ui_widget_port_text_overrides[override_index].text[0])
+				{
+					string = ui_widget_port_text_overrides[override_index].text;
+				}
+			}
+		}
 		length = ustrlen(string);
 		widget->parameters.text_box.text = pool_resize_pointer(
 			widget_memory_pool,
@@ -5749,6 +6273,10 @@ static void widget_instance_render_recursive(
 	long input_index;
 	struct widget_instance *child;
 	struct bitmap_data *bitmap;
+#ifdef HALO_LINUX
+	struct bitmap_data *custom_edition_picture;
+	short frame_index;
+#endif
 
 	if (!use_nifty_plasma_fx &&
 		TEST_FLAG(definition->flags, _widget_always_render_with_nifty_fx_bit))
@@ -5772,11 +6300,23 @@ static void widget_instance_render_recursive(
 		return;
 #ifdef HALO_LINUX
 	ui_mouse_note_target(widget, definition, offset);
-#endif
+	/* a Custom Edition map's picture, drawn over the whole widget, or the
+	unknown level's frame for a map without one
+	(port/linux/game/custom_edition_maps.c) */
+	frame_index = widget->animation.current_frame_index;
+	custom_edition_picture = custom_edition_maps_picture(
+		definition->background_bitmap.index,
+		&frame_index);
+	bitmap = custom_edition_picture ? custom_edition_picture : bitmap_group_get_bitmap_from_sequence(
+		definition->background_bitmap.index,
+		0,
+		frame_index);
+#else
 	bitmap = bitmap_group_get_bitmap_from_sequence(
 		definition->background_bitmap.index,
 		0,
 		widget->animation.current_frame_index);
+#endif
 	if (bitmap)
 	{
 		real alpha = alpha_modifier;
@@ -5842,6 +6382,9 @@ static void widget_instance_render_recursive(
 					clip = &wide_clip;
 				}
 			}
+#ifdef HALO_VITA
+			if (!vita_button_hint_draw(definition->background_bitmap.index, &bounds, color))
+#endif
 			draw_bitmap_in_rect(
 				bitmap,
 				&destination,
@@ -5852,10 +6395,17 @@ static void widget_instance_render_recursive(
 				FALSE);
 		}
 #else
+#ifdef HALO_VITA
+		if (!vita_button_hint_draw(definition->background_bitmap.index, &bounds, color))
+#endif
 		draw_bitmap_in_rect(
 			bitmap,
 			&bounds,
+#ifdef HALO_LINUX
+			custom_edition_picture ? NULL : &bounds,
+#else
 			&bounds,
+#endif
 			clip,
 			color,
 			&multitexture_params,
@@ -6011,6 +6561,8 @@ void render_ui_widgets(
 		window_bounds != NULL);
 	local_player_index_for_draw_string_and_hack_in_icons =
 		local_player_index == NONE ? 0 : local_player_index;
+	/* (port: set again by this render's game data functions) */
+	ui_widget_port_text_override_count = 0;
 	if (bink_playback_ui_rendering_inhibited())
 		return;
 	if (!virtual_keyboard_active())
@@ -6075,6 +6627,9 @@ void render_ui_widgets(
 #ifdef HALO_LINUX
 				ui_mouse_noting_targets = FALSE;
 #endif
+				/* port: co-op from the campaign's menus, the text the maps
+				have no strings for (port/linux/game/coop_menu.c) */
+				coop_menu_render(widget_globals.active_widgets[widget_index]->definition_tag_index);
 				if (widget_globals.debug_show_path)
 				{
 					real_argb_color color = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -6646,6 +7201,41 @@ static void widget_instance_process_one_event_recursive(
 			}
 		}
 	}
+	/* port: co-op from the campaign's menus: Y on the difficulty list hosts
+	the level chosen on the difficulty selected, and opens the game's lobby,
+	the waiting screen, with the difficulty screen behind it (B goes back to
+	it) */
+	if (event_for_this_widget && !widget_deleted && !event_handled &&
+		event->type == _event_type_button &&
+		event->data.button.value == 1 &&
+		event->data.button.index == _gamepad_analog_button_y &&
+		widget->definition_tag_index == tag_loaded(UI_WIDGET_DEFINITION_TAG,
+			"ui\\shell\\main_menu\\difficulty_select\\difficulty_select_list"))
+	{
+		long lobby_tag = tag_loaded(UI_WIDGET_DEFINITION_TAG,
+			"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen");
+
+		event_handled = TRUE;
+		if (lobby_tag != NONE && ui_widget_port_cooperative_campaign_host(widget, event))
+		{
+			if (ui_widget_launch_widget(widget, lobby_tag))
+			{
+				audio_feedback = _ui_audio_feedback_forward;
+				widget_deleted = TRUE;
+			}
+			else
+			{
+				error(_error_silent, "co-op: the lobby did not open");
+				dispose_global_network_game_client();
+				dispose_global_network_game_server();
+				network_game_accept_remote_connections(FALSE);
+				player_ui_clear_multiplayer_variant();
+				audio_feedback = _ui_audio_feedback_flag_failure;
+			}
+		}
+		else
+			audio_feedback = _ui_audio_feedback_flag_failure;
+	}
 	if (event_for_this_widget)
 	{
 		long handler_index;
@@ -6846,7 +7436,10 @@ static boolean ui_check_for_pause_game(
 								network_game_client_get_machine_index(client);
 							char const *widget_name;
 
-							switch (local_player_count)
+							/* port: a campaign map has only the campaign's pause screen */
+							if (network_coop_active())
+								widget_name = "ui\\shell\\solo_game\\pause_game\\pause_game";
+							else switch (local_player_count)
 							{
 							case 1:
 								widget_name =
@@ -7033,6 +7626,41 @@ void process_ui_widgets(
 		dispose_thread(widget_globals.initialization_thread);
 		widget_globals.initialization_thread = NULL;
 		ui_widgets_inhibit_processing(FALSE);
+#ifdef HALO_LINUX
+		/* port: the main menu that waited for the checks (main_screen_shell_load),
+		if the game is still at it and no screen was put up meanwhile; the
+		presses made while they ran dropped, as the intro drops them. A
+		screen opened while they ran - the Vita settings panel's Join a
+		game, Host a game or Host co-op campaign (system_link_shortcut.c),
+		the main menu behind it - stays: the main menu loaded over it
+		closed it (ui_widgets_close_all), and the System Link screen the
+		player asked for fell back to the main menu, its next A going into
+		Campaign (run_netns_online_test.sh coopmenu, 2 runs in 4) */
+		if (main_menu_waits_for_filesystem_checks)
+		{
+			boolean screen_up = FALSE;
+
+			main_menu_waits_for_filesystem_checks = FALSE;
+			for (widget_index = 0; widget_index<MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; widget_index++)
+			{
+				if (widget_globals.active_widgets[widget_index])
+					screen_up = TRUE;
+			}
+			if (main_menu_is_active())
+			{
+				event_manager_flush();
+				if (screen_up)
+				{
+					error(_error_silent, "the filesystem checks are done; the screen opened meanwhile stays");
+				}
+				else
+				{
+					error(_error_silent, "the filesystem checks are done; the main menu comes up");
+					main_screen_shell_load();
+				}
+			}
+		}
+#endif
 		switch (widget_globals.filesystem_check_result)
 		{
 		case _file_system_check_result_not_enough_free_space:

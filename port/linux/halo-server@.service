@@ -1,0 +1,73 @@
+# systemd template unit for several dedicated servers on one machine
+# (port/linux/DEDICATED_SERVER.md, "Several servers on one VPS"): one
+# instance per server folder, /opt/halo/servers/<name> (maps/, init.txt with
+# its own sv_port: 2302, 2303...), all run by the one user "halo", sharing the
+# map cache /opt/halo/mapcache. tools/halo-servers lists, starts, stops and
+# shows them. Install (as that section says):
+#   sudo useradd --system --home-dir /opt/halo --shell /usr/sbin/nologin halo
+#   sudo install -D -m 755 halo-server /opt/halo/bin/halo-server
+#   (the 32-bit SDL3 and its libraries in /opt/halo/lib, if the system has none)
+#   sudo install -d -o halo -g halo -m 750 /opt/halo/servers/s1 /opt/halo/mapcache
+#   (maps/ and init.txt into /opt/halo/servers/s1)
+#   sudo install -m 644 halo-server@.service /etc/systemd/system/halo-server@.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now halo-server@s1
+# Forward (and open in the firewall) each server's sv_port, UDP, and nothing
+# else: the game's ports (sv_game_port) stay on the machine.
+# Logs (and the code Vitas join with): journalctl -u halo-server@s1, kept and
+# rotated by journald (SystemMaxUse= in journald.conf)
+[Unit]
+Description=Halo CE for PS Vita dedicated server %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=halo
+Group=halo
+WorkingDirectory=/opt/halo/servers/%i
+# (the 32-bit SDL3 beside the program, when the system has none; and the
+# shared map cache, unless the server's init.txt names another: sv_map_cache)
+Environment=LD_LIBRARY_PATH=/opt/halo/lib
+Environment=HALO_MAP_CACHE=/opt/halo/mapcache
+ExecStart=/opt/halo/bin/halo-server -path /opt/halo/servers/%i
+# (no console under systemd: commands from init.txt; stop with SIGTERM, which
+# closes the server browser's listing)
+StandardInput=null
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=10
+# (no privileges, nothing writable but the server's folder and the shared
+# map cache; "-": a machine without the cache starts the servers anyway)
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths=/opt/halo/servers/%i -/opt/halo/mapcache
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# (a 32-bit program: x86 on a 64-bit PC, armhf on a 64-bit Pi)
+SystemCallArchitectures=native x86 arm
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0027
+# (a server used 92-117 MB; 600 MB each leaves room for four on 4 GB)
+MemoryMax=600M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

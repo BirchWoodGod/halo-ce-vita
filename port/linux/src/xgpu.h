@@ -109,7 +109,11 @@ struct nv2a_pixel_shader_key
 	/* (Vita) stages whose 2D fetch is a projective read of the varying
 	(the program writes its w): tex2Dproj, the divide done by the iterator */
 	unsigned char projective_coordinates;
-	unsigned char reserved[2];
+	/* (Vita) the blend's constant factor folded into the program: its
+	output becomes o * scale + offset, two rows past the fragment uniforms'
+	second buffer (vita_xgpu.h VITA_FU_BLEND_SCALE, blend_constant.h) */
+	unsigned char blend_fold;
+	unsigned char reserved;
 	/* (Vita) a volume texture's stage: log2 of its slices and of a slice's
 	width, laid side by side in one 2D texture (vita_textures.c); 0 else */
 	unsigned char volume_slices_log2[4];

@@ -77,6 +77,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries/cseries.h"
+#include "cseries/errors.h" /* port: collision_bsp_valid_surface_index */
 #include "collision_bsp.h"
 #include "collision_bsp_definitions.h"
 #include "collision_usage.h"
@@ -305,6 +306,59 @@ void render_debug_collision_edge(
 static struct collision_bsp_usage_times collision_bsp_usage_times = { 0 };
 
 /* ---------- public code */
+
+/* port (from OpenCE, MrBruh's "Validate map tags before loading"): whether
+a surface's ring of edges (from the map) goes on to edge_index after
+edge_count of its edges, and whether a surface index names one of the bsp's
+(FALSE, reported once, if not), for the code outside the collision tests
+that walks a bsp's surfaces and edges. The collision tests themselves walk
+bsps the validator has checked as they loaded (tag_schema_collision.c,
+collision_bsp_graph_check: their 3d and 2d trees, leaves and edge rings),
+and are not slowed by checking again */
+static boolean warned_about_collision_surface_edges;
+static boolean warned_about_collision_surface_index;
+
+boolean collision_surface_edge_ring_continues(
+	struct collision_bsp const *bsp,
+	long edge_index,
+	short edge_count)
+{
+	if (edge_index >= 0 &&
+		edge_index < bsp->edges.count &&
+		edge_count < MAXIMUM_EDGES_PER_COLLISION_SURFACE)
+	{
+		return TRUE;
+	}
+
+	if (!warned_about_collision_surface_edges)
+	{
+		error(_error_silent, "a collision surface's edges are not a ring of at most %d of the bsp's",
+			MAXIMUM_EDGES_PER_COLLISION_SURFACE);
+		warned_about_collision_surface_edges = TRUE;
+	}
+
+	return FALSE;
+}
+
+boolean collision_bsp_valid_surface_index(
+	struct collision_bsp const *bsp,
+	long surface_index)
+{
+	if (surface_index >= 0 && surface_index < bsp->surfaces.count)
+	{
+		return TRUE;
+	}
+
+	if (!warned_about_collision_surface_index)
+	{
+		error(_error_silent, "collision surface #%ld is not one of the bsp's %ld",
+			surface_index,
+			bsp->surfaces.count);
+		warned_about_collision_surface_index = TRUE;
+	}
+
+	return FALSE;
+}
 
 short collision_surface_edge_count(
 	struct collision_bsp const *bsp,
@@ -1820,6 +1874,31 @@ static void bsp3d_test_sphere_recursive(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) the vector walk's node, its children that are nodes asked for
+(__builtin_prefetch, a hint) while the walk reads and measures its plane: the
+next turn reads one of them. A large bsp's nodes and planes are seldom still
+cached when the AI looks (b30: 12,071 nodes, 4,616 planes, ~40 nodes a line
+of sight), each node a cache miss and its plane another behind it */
+static __inline__ struct bsp3d_node const *collision_bsp_vector_node(
+	struct tag_block const *nodes,
+	long node_index)
+{
+	struct bsp3d_node const *node = TAG_BLOCK_GET_ELEMENT(nodes, node_index, struct bsp3d_node);
+
+	if (node->children[0] >= 0)
+	{
+		__builtin_prefetch(TAG_BLOCK_GET_ELEMENT(nodes, node->children[0], struct bsp3d_node));
+	}
+	if (node->children[1] >= 0)
+	{
+		__builtin_prefetch(TAG_BLOCK_GET_ELEMENT(nodes, node->children[1], struct bsp3d_node));
+	}
+
+	return node;
+}
+#endif
+
 static boolean collision_bsp_test_vector_recursive(
 	struct collision_bsp_test_vector_context *data,
 	long node_index,
@@ -1829,19 +1908,31 @@ static boolean collision_bsp_test_vector_recursive(
 #ifdef HALO_LINUX
 	/* (port) the calls in tail position (the one child a node's span
 	reaches, and the far child after the near one) made as the loop's next
-	turn: the same nodes in the same order, with the same values */
+	turn: the same nodes in the same order, with the same values. The point,
+	the vector and the bsp's node and plane blocks read once a call, where
+	each node read them again through the context (a store in the loop - the
+	split's last plane, the call - keeping the compiler from holding them):
+	nothing the walk writes is any of them, and the plane's distance and dot
+	product are plane3d_distance_to_point's and dot_product3d's operations in
+	their order (a product's operands in either order are the same product) */
+	real const point_x = data->point->x;
+	real const point_y = data->point->y;
+	real const point_z = data->point->z;
+	real const vector_i = data->vector->i;
+	real const vector_j = data->vector->j;
+	real const vector_k = data->vector->k;
+	struct tag_block const nodes = data->bsp->bsp3d.nodes;
+	struct tag_block const planes = data->bsp->bsp3d.planes;
+
 	while (!(node_index & LONG_MIN))
 	{
-		struct bsp3d_node const *node = TAG_BLOCK_GET_ELEMENT(
-			&data->bsp->bsp3d.nodes,
-			node_index,
-			struct bsp3d_node);
+		struct bsp3d_node const *node = collision_bsp_vector_node(&nodes, node_index);
 		real_plane3d const *plane = TAG_BLOCK_GET_ELEMENT(
-			&data->bsp->bsp3d.planes,
+			&planes,
 			node->plane_designator,
 			real_plane3d);
-		real distance = plane3d_distance_to_point(plane, data->point);
-		real dot = dot_product3d(data->vector, &plane->n);
+		real distance = (point_x*plane->n.i + point_y*plane->n.j + point_z*plane->n.k) - plane->d;
+		real dot = vector_i*plane->n.i + vector_j*plane->n.j + vector_k*plane->n.k;
 		real distance0 = dot*t0 + distance;
 		real distance1 = dot*t1 + distance;
 		boolean reaches_back = distance0 < 0.f || distance1 < 0.f;

@@ -11,6 +11,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 sdk=${VITASDK:-$HOME/vitasdk}
 out=${TMPDIR:-/tmp}/vita_net_test.$$
+. "$here/test_out.sh"
+test_out_begin "$out"
 mkdir -p "$out/include"
 ln -s "$sdk/arm-vita-eabi/include/psp2" "$out/include/psp2"
 ln -s "$sdk/arm-vita-eabi/include/psp2common" "$out/include/psp2common"
@@ -21,5 +23,5 @@ $cc -m32 -pthread -g -O1 -Wall -Wno-unused-function -D_GNU_SOURCE -I"$out/includ
 	"$here/vita_net_test.c" "$here/mock_scenet.c" -o "$out/vita_net_test"
 status=0
 "$out/vita_net_test" || status=$?
-rm -rf "$out"
+test_out_done $status
 exit $status

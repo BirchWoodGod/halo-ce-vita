@@ -89,6 +89,112 @@ static unsigned long particles_profile_counts[4], particles_profile_frames;
 #define PARTICLES_PROFILE_NOW() (particles_profile_enabled > 0 ? vita_host_time_us() : 0)
 #define PARTICLES_PROFILE_ADD(index, since) do { if (particles_profile_enabled > 0) \
 	particles_profile_us[index] += vita_host_time_us() - (since); } while (0)
+
+/* (port) HALO_EFFECT_STATS=1: the particles drawn per frame by definition,
+with their screen area (each sprite's diameter in pixels, squared: its
+square's), the largest eight every 300 frames - which effects the GPU's
+fill goes to */
+#include <stdio.h>
+char *tag_get_name(long tag_index);
+static int effect_stats_enabled = -1;
+static unsigned long effect_stats_frames;
+#define EFFECT_STATS_SLOTS 64
+static struct { long definition_index; double area, count, maximum; } effect_stats[EFFECT_STATS_SLOTS];
+/* ... and the particles left undrawn because their frame was NONE (one the
+tick had not stepped yet, or read mid-change: render_epoch.h) */
+static unsigned long effect_stats_undrawn;
+
+static void effect_stats_add(long definition_index, real diameter)
+{
+	int slot = (int)((unsigned long)definition_index * 2654435761UL % EFFECT_STATS_SLOTS), probe;
+
+	for (probe = 0; probe < EFFECT_STATS_SLOTS; probe++, slot = (slot + 1) % EFFECT_STATS_SLOTS)
+	{
+		if (effect_stats[slot].count && effect_stats[slot].definition_index != definition_index)
+			continue;
+		effect_stats[slot].definition_index = definition_index;
+		effect_stats[slot].area += (double)diameter * diameter;
+		effect_stats[slot].count++;
+		if (diameter > effect_stats[slot].maximum)
+			effect_stats[slot].maximum = diameter;
+		return;
+	}
+}
+
+static void effect_stats_report(void)
+{
+	char line[1200];
+	int length = 0, rank;
+	double total = 0.0;
+
+	if (++effect_stats_frames % 300)
+		return;
+	for (rank = 0; rank < EFFECT_STATS_SLOTS; rank++)
+		total += effect_stats[rank].area;
+	for (rank = 0; rank < 8; rank++)
+	{
+		int slot, best = -1;
+
+		for (slot = 0; slot < EFFECT_STATS_SLOTS; slot++)
+			if (effect_stats[slot].count && (best < 0 || effect_stats[slot].area > effect_stats[best].area))
+				best = slot;
+		if (best < 0 || length > (int)sizeof(line) - 160)
+			break;
+		length += snprintf(line + length, sizeof(line) - length, " %s %.0f/%.0fK/%.0f",
+			tag_get_name(effect_stats[best].definition_index), effect_stats[best].count / 300.0,
+			effect_stats[best].area / 300.0 / 1000.0, effect_stats[best].maximum);
+		effect_stats[best].count = 0;
+	}
+	platform_log("effect-stats (particles a frame by definition: count/Kpx of their squares/largest diameter px; all %.0fK px; "
+		"%.1f undrawn without a frame):%s",
+		total / 300.0 / 1000.0, effect_stats_undrawn / 300.0, line);
+	effect_stats_undrawn = 0;
+	{
+		/* (render_sprite.c) the trimmed sprites */
+		extern double sprite_trim_area_full, sprite_trim_area_kept;
+		extern unsigned long sprite_trim_sprites, sprite_trim_trimmed, sprite_trim_empty, sprite_trim_fogged, sprite_trim_small;
+		/* (port/vita/platform/vita_textures.c; 0 in the OpenGL builds, xbox_textures.c) */
+		extern volatile unsigned long vita_sprite_texels_computed, vita_sprite_texels_texels;
+
+		platform_log("sprite-trim: %.0f sprites a frame, %.0f trimmed (%.1f empty), %.1f whole for the fog, %.1f small; quad area kept %.1f%% (coverage-weighted); "
+			"bounds computed %lu (%lu texels read) in all",
+			sprite_trim_sprites / 300.0, sprite_trim_trimmed / 300.0, sprite_trim_empty / 300.0, sprite_trim_fogged / 300.0, sprite_trim_small / 300.0,
+			sprite_trim_area_full > 0.0 ? 100.0 * sprite_trim_area_kept / sprite_trim_area_full : 100.0,
+			vita_sprite_texels_computed, vita_sprite_texels_texels);
+		sprite_trim_area_full = sprite_trim_area_kept = 0.0;
+		sprite_trim_sprites = sprite_trim_trimmed = sprite_trim_empty = sprite_trim_fogged = sprite_trim_small = 0;
+	}
+	memset(effect_stats, 0, sizeof(effect_stats));
+}
+#endif
+
+#ifdef HALO_LINUX
+/* (port, after Bruno Santana's Vita build) HALO_PARTICLE_RENDER_DIVISOR=n:
+one particle in n of the world's drawn (render_particles), and of the
+particle systems' that are not attached to an object
+(particle_systems.c); 1 (the default) all, as the Xbox. Which are drawn
+goes by the particle's slot, so a particle is drawn or not for as long as
+it lives (no flicker); the first-person weapon's particles and the
+particle systems on an object (a weapon's, a unit's, a vehicle's) are all
+drawn. Drawing only: every particle is still simulated. */
+int halo_particle_render_divisor(
+	void)
+{
+	static int divisor = -1;
+	static unsigned long settings_seen;
+	extern volatile unsigned long halo_settings_generation;
+
+	if (divisor < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_PARTICLE_RENDER_DIVISOR");
+
+		settings_seen = halo_settings_generation;
+		divisor = setting && *setting ? atoi(setting) : 1;
+		if (divisor < 1 || divisor > 4)
+			divisor = 1;
+	}
+	return divisor;
+}
 #endif
 
 /* ---------- public code */
@@ -157,6 +263,9 @@ void render_particles(
 	short group_particle_counts[MAXIMUM_RENDERED_PARTICLE_GROUPS];
 	short rendered_particle_count;
 	struct build_sprite_data sprite_data;
+#ifdef HALO_LINUX
+	int particle_divisor = halo_particle_render_divisor();
+#endif
 	real_point3d position;
 	real_vector3d direction;
 
@@ -169,6 +278,13 @@ void render_particles(
 		particles_profile_enabled = setting ? atoi(setting) : 0;
 	}
 	profile_from = PARTICLES_PROFILE_NOW();
+	if (effect_stats_enabled < 0)
+	{
+		const char *setting = getenv("HALO_EFFECT_STATS");
+		effect_stats_enabled = setting ? atoi(setting) : 0;
+	}
+	if (effect_stats_enabled > 0)
+		effect_stats_report();
 #endif
 	rendered_particle_count = 0;
 	profile_enter(render_particles_section);
@@ -397,6 +513,23 @@ void render_particles(
 								unsigned long flags;
 								word particle_flags;
 
+#ifdef HALO_LINUX
+								/* (HALO_PARTICLE_RENDER_DIVISOR, above: the
+								first-person weapon's are all drawn. A particle
+								thinned out is passed over only here, as drawn
+								for the game: the orphan's delete above is the
+								game's, and the game deletes a particle not
+								drawn for a while - particles.c's
+								last_rendered_frame_index) */
+								if (particle_divisor > 1 &&
+									DATUM_INDEX_TO_ABSOLUTE_INDEX(rendered_particle->particle_index) % particle_divisor != 0 &&
+									!rendered_particle->attached_to_first_person_weapon)
+								{
+									particle->last_rendered_frame_index = render.frame_index;
+									rendered_particle++;
+									continue;
+								}
+#endif
 								fade = 1.0f;
 								built_particle_count++;
 								scale =
@@ -441,6 +574,13 @@ void render_particles(
 										_particle_datum_v_mirror_bit));
 
 #ifdef HALO_LINUX
+								if (effect_stats_enabled > 0)
+								{
+									effect_stats_add(particle->definition_index,
+										diameter < definition->minimum_pixels ? definition->minimum_pixels : diameter);
+									if (particle->sequence_index < 0 || particle->frame_index < 0)
+										effect_stats_undrawn++;
+								}
 								/* (port) the particle's frame is the tick's, read
 								mid-change once: not drawn this frame (render_epoch.h) */
 								if (particle->sequence_index >= 0 && particle->frame_index >= 0)

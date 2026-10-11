@@ -908,11 +908,27 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries.h"
+#include "game/players.h"
+#include "cache/cache_files.h"
 #include "bungie_net/network/transport.h"
 #include "bungie_net/network/transport_endpoint_winsock.h"
 #include "interface/player_ui.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
+
+/* port: main.c's and network_server_manager.c's, which this file's headers
+do not declare (network co-op: ui_widget_port_cooperative_level_choose) */
+struct network_game_server;
+short main_get_solo_level_from_name(char const *name);
+void main_set_multiplayer_map_name(char const *map_name);
+void network_game_server_port_set_cooperative(struct network_game_server *server, short difficulty);
+boolean network_game_server_port_cooperative_from_menu(char const *map_name, short difficulty);
+boolean network_game_server_port_cooperative_menu(short *rounds);
 #include "saved games/player_profile.h"
 #include "interface/ui_widget_definitions.h"
+#ifdef HALO_LINUX
+#include "custom_edition_maps.h"
+#endif
 
 /* ---------- constants */
 
@@ -1127,6 +1143,10 @@ boolean network_game_client_advertised_game_compatible(
 	void *client,
 	void const *game,
 	boolean tell);
+/* ... and whether it is full (the player is told so) */
+boolean network_game_client_advertised_game_full(
+	void const *game,
+	boolean tell);
 #endif
 void *network_game_get_game(
 	void);
@@ -1171,6 +1191,11 @@ void saved_game_file_get_useable_untitled_profile_name(
 	wchar_t *name);
 boolean saved_game_file_retrieve_last_used_multiplayer_map(
 	char *map_name);
+#ifdef HALO_LINUX
+/* (January's call relies on an implicit declaration) */
+void saved_game_file_remember_last_used_multiplayer_map(
+	char const *map_name);
+#endif
 wchar_t *ustrncpy(
 	wchar_t *destination,
 	wchar_t const *source,
@@ -1606,7 +1631,13 @@ boolean widget_event_function_list_widget_goto_previous_item(
 
 extern short player_spawn_count;
 static wchar_t new_campaign_profile_name[12] = { 0 };
+#ifdef HALO_LINUX
+/* port: the campaign's ten levels, then the Custom Edition campaign maps
+(solo_level_list_custom_campaigns_add) */
+byte single_player_level_data[CUSTOM_EDITION_MAPS_CAMPAIGN_LIST_ENTRIES * sizeof(struct single_player_level_entry)] = { 0 };
+#else
 byte single_player_level_data[0x50] = { 0 };
+#endif
 struct persistent_game_difficulty
 {
 	short value;
@@ -2096,6 +2127,10 @@ static boolean network_game_join_game_from_server_list(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					/* port: a full game (closed in the list) says so */
+					network_game_client_advertised_game_full(server, TRUE);
+#endif
 					error(2, "attempted to join a closed game");
 					ui_play_audio_feedback_sound(4);
 				}
@@ -2116,6 +2151,9 @@ static boolean pause_game_restart_at_checkpoint(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+	/* port: in co-op this would revert only this machine */
+	if (network_coop_active())
+		return FALSE;
 #ifdef HALO_LINUX
 	{
 		void platform_log(const char *format, ...);
@@ -2132,6 +2170,9 @@ static boolean pause_game_restart_level(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+	/* port: in co-op this would restart only this machine */
+	if (network_coop_active())
+		return FALSE;
 #ifdef HALO_LINUX
 	{
 		void platform_log(const char *format, ...);
@@ -2148,6 +2189,17 @@ static boolean pause_game_quit_to_main_menu(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
+	/* port: in co-op, take every player on this machine out of the network
+	game with one press (not one per split screen player). The solo save is
+	left alone. */
+	if (network_coop_active())
+	{
+		short controller_index;
+
+		for (controller_index = 0; controller_index < MAXIMUM_LOCAL_PLAYERS; controller_index++)
+			network_game_client_local_player_quit(controller_index);
+		return TRUE;
+	}
 	game_state_save_to_persistent_storage();
 	main_goto_main_menu();
 	return TRUE;
@@ -2592,6 +2644,27 @@ static boolean netgame_unjoin_player(
 	boolean result = TRUE;
 	void *client = global_network_game_client_get();
 
+	/* port: B in the lobby of co-op hosted from the campaign's menus (the
+	waiting screen) cancels it: no game is left behind it (the System Link
+	lobby's keeps its game for the screens behind it), and the difficulty
+	screen is back */
+	if (client && network_game_server_port_cooperative_menu(NULL))
+	{
+#ifdef HALO_LINUX
+		{
+			void platform_log(const char *format, ...);
+
+			platform_log("co-op: the host left its lobby: the game is cancelled");
+		}
+#endif
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		network_game_accept_remote_connections(FALSE);
+		player_ui_clear_multiplayer_variant();
+		player_ui_clear_multiplayer_autojoin_for_local_player(
+			(short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1));
+		return TRUE;
+	}
 	if (client)
 	{
 		short state;
@@ -2734,12 +2807,39 @@ static boolean display_error_if_no_network_connection(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port: a game that could not be hosted, its server's or its client's
+connection not made (the game's ports another program's, or those of a copy
+of the game still running): the player stays where they were and is told
+why, and hosts again once the ports are free. The connection is no longer
+the server's (which the main loop then looked for every frame), and a list
+of games that was looking for games (the System Link list's Y) looks again */
+static void network_game_host_failed(
+	boolean had_client,
+	short controller_index)
+{
+	void platform_log(const char *format, ...);
+
+	if (had_client && create_global_network_game_client())
+		game_connection_set(_game_connection_network_client);
+	else
+		game_connection_set(_game_connection_local);
+	platform_log("network: could not host a game (the game's network ports in use?)");
+	display_error_text_deferred(
+		TW(L"Can't host a game:\r\nanother program is\r\nusing the network\r\nport. Try again later."),
+		controller_index);
+}
+#endif
+
 static boolean split_screen_game_initialize(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted)
 {
 	boolean result = TRUE;
+#ifdef HALO_LINUX
+	boolean had_client = global_network_game_client_get() != NULL;
+#endif
 
 	network_game_accept_remote_connections(FALSE);
 	if (!global_network_game_server_get())
@@ -2760,6 +2860,9 @@ static boolean split_screen_game_initialize(
 		dispose_global_network_game_client();
 		player_ui_clear_multiplayer_variant();
 		error(2, "failed to initiate split screen game networking");
+#ifdef HALO_LINUX
+		network_game_host_failed(had_client, event ? event->controller_index : NONE);
+#endif
 	}
 	return result;
 }
@@ -3052,6 +3155,17 @@ static boolean network_game_start_slower(
 	short machine_index;
 	long player_index;
 
+#ifdef HALO_LINUX
+	/* port: X in the waiting screen of co-op hosted online from the
+	campaign's menus lists the game in the server browser or not
+	(network.coop_public, port/linux/game/coop_menu.c) */
+	{
+		extern boolean coop_menu_toggle_public(void);
+
+		if (coop_menu_toggle_public())
+			return TRUE;
+	}
+#endif
 	if (client)
 	{
 		void *game = network_game_client_get_game(client);
@@ -3135,6 +3249,14 @@ static boolean multiplayer_level_list_initialize(
 	char map_name[256];
 	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
 	short level_count = 13;
+#ifdef HALO_LINUX
+	/* the Xbox levels, then the Custom Edition maps in the maps folder
+	(port/linux/game/custom_edition_maps.c) */
+	char **levels = custom_edition_maps_level_list(
+		event_handler_functions.multiplayer_levels,
+		level_count,
+		&level_count);
+#endif
 
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1228,
 		definition->type == 2,
@@ -3142,14 +3264,22 @@ static boolean multiplayer_level_list_initialize(
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1229,
 		definition->child_count == 3,
 		"expected 3 list items for 'multiplayer level list' widget");
+#ifdef HALO_LINUX
+	widget->generated_list = levels;
+#else
 	widget->generated_list = event_handler_functions.multiplayer_levels;
+#endif
 	widget->generated_count = level_count;
 	if (saved_game_file_retrieve_last_used_multiplayer_map(map_name))
 	{
 		widget->data3C.selected_index = 0;
 		while (widget->data3C.selected_index < level_count &&
 			_stricmp(map_name,
+#ifdef HALO_LINUX
+				levels[widget->data3C.selected_index]))
+#else
 				event_handler_functions.multiplayer_levels[widget->data3C.selected_index]))
+#endif
 		{
 			widget->data3C.selected_index++;
 		}
@@ -3348,6 +3478,14 @@ static boolean player_profile_color_picker_menu_initialize(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* port: the level and difficulty co-op was last hosted on from the
+difficulty list (ui_widget_port_cooperative_campaign_host): B in its lobby
+comes back to the list on that difficulty, not the default */
+static char difficulty_menu_cooperative_map[128];
+static short difficulty_menu_cooperative_difficulty = NONE;
+#endif
+
 static boolean difficulty_menu_initialize(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -3357,6 +3495,19 @@ static boolean difficulty_menu_initialize(
 
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 4860,
 		widget->type == 3, "expected column list for difficulty menu widget");
+#ifdef HALO_LINUX
+	if (difficulty_menu_cooperative_difficulty != NONE &&
+		_stricmp(difficulty_menu_cooperative_map, main_get_map_name()) == 0)
+	{
+		difficulty_widget = widget_instance_get_nth_child(widget, difficulty_menu_cooperative_difficulty);
+		if (difficulty_widget)
+		{
+			widget->data3C.selected_index = difficulty_menu_cooperative_difficulty;
+			widget->focused_child = difficulty_widget;
+			return TRUE;
+		}
+	}
+#endif
 	if (persistant_game_data_info.valid == TRUE &&
 		_stricmp(persistant_game_data_info.map_name, main_get_map_name()) == 0)
 	{
@@ -3529,6 +3680,17 @@ boolean ui_widget_event_handler_function_invoke(
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 478,
 		widget != NULL && widget_deleted != NULL,
 		"(widget != NULL) && (widget_deleted != NULL)");
+#ifdef HALO_LINUX
+	/* port: the menus' own functions (port/linux/game/menu_functions.c),
+	from PC_MENU_FUNCTION_BASE (halo_menus.h) */
+	if (function_index >= 256 && function_index < 0x8000)
+	{
+		extern boolean pc_menu_event_function_invoke(struct widget_instance *widget, struct event_record *event,
+			long function_index, boolean *widget_deleted);
+
+		return pc_menu_event_function_invoke(widget, event, function_index - 256, widget_deleted);
+	}
+#endif
 	if ((short)function_index >= 0 && function_index < 102)
 	{
 		result = event_handler_function_list.functions[(short)function_index](widget, event, widget_deleted);
@@ -3539,6 +3701,26 @@ boolean ui_widget_event_handler_function_invoke(
 	error(2, "invalid event_handler_function");
 	return FALSE;
 }
+
+#ifdef HALO_LINUX
+/* port: OpenCE's Create Game > Internet (port/linux/game/menu_functions.c):
+the network game's server started, as the System Link list's Y starts it
+before it opens the map list */
+boolean ui_widget_port_start_network_game_server(
+	void)
+{
+	return network_game_start_new_server(NULL, NULL, NULL);
+}
+
+/* port: a function's name, as the tags name it, by its index (NULL past the
+last), for the menus' files (port/linux/game/menu_tags.c) */
+char const *ui_widget_event_handler_function_name(
+	long function_index)
+{
+	return function_index >= 0 && function_index < NUMBEROF(event_handler_function_list.names) ?
+		event_handler_function_list.names[function_index] : NULL;
+}
+#endif
 
 static boolean new_campaign_chosen(
 	struct widget_instance *widget,
@@ -3564,6 +3746,9 @@ static boolean network_game_start_new_server(
 	boolean *widget_deleted)
 {
 	boolean result = TRUE;
+#ifdef HALO_LINUX
+	boolean had_client = global_network_game_client_get() != NULL;
+#endif
 
 	dispose_global_network_game_client();
 	player_ui_clear_multiplayer_variant();
@@ -3588,6 +3773,9 @@ static boolean network_game_start_new_server(
 		network_game_accept_remote_connections(FALSE);
 		player_ui_clear_multiplayer_variant();
 		error(2, "failed to initiate a multiplayer game server");
+#ifdef HALO_LINUX
+		network_game_host_failed(had_client, event ? event->controller_index : NONE);
+#endif
 	}
 	return result;
 }
@@ -4121,6 +4309,19 @@ static boolean player_profile_set_for_game_1wide(
 	}
 	if (player_profile_get(available_profiles[spinner_list->data3C.selected_index], &profile))
 	{
+		/* port: not a profile whose name the host's ban command could not
+		name (one made before names were checked: player_name_valid). A
+		default profile has no name, and the Xbox game let it play: its
+		player goes by this machine's user's name in the game
+		(network_game_local_player_name) */
+		if (profile.player_name[0] && !player_name_valid(profile.player_name, NUMBEROF(profile.player_name)))
+		{
+			display_error_text_deferred(
+				TW(L"Sorry, this profile's\r\nname can't be used in\r\nmultiplayer. Please\r\nrename the profile."),
+				controller_index);
+			ui_play_audio_feedback_sound(4);
+			return FALSE;
+		}
 		player_ui_set_active_player_profile(controller_index, available_profiles[spinner_list->data3C.selected_index], &profile);
 		return TRUE;
 	}
@@ -4204,6 +4405,32 @@ static boolean player_profile_initialize_controller_settings(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* port: puts the Custom Edition campaign maps in the campaign's level list
+after its ten levels (custom_edition_maps.c, looked for anew as the list
+opens; OpenCE's CUSTOM SINGLEPLAYER, ce41b41d), each available on any
+profile and with no marks of progress; returns the list's length */
+static short solo_level_list_custom_campaigns_add(
+	void)
+{
+	struct single_player_level_entry *entries = (struct single_player_level_entry *)single_player_level_data;
+	short count = custom_edition_maps_campaigns_find();
+	short index;
+
+	count = (short)MIN(count, CUSTOM_EDITION_MAPS_CAMPAIGN_LIST_ENTRIES - 10);
+	for (index = 0; index < count; index++)
+	{
+		struct single_player_level_entry *entry = &entries[10 + index];
+
+		csmemset(entry, 0, sizeof(*entry));
+		entry->map_name = (char *)custom_edition_maps_campaign_level_name(index);
+		entry->available = entry->map_name != NULL;
+	}
+
+	return (short)(10 + count);
+}
+
+#endif
 static boolean solo_level_initialize_list_coop(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -4215,7 +4442,7 @@ static boolean solo_level_initialize_list_coop(
 	short highest_difficulties[2];
 	struct ui_widget_definition *definition;
 
-	memset(single_player_level_data, 0, 0x50);
+	memset(single_player_level_data, 0, sizeof(single_player_level_data));
 	{
 		player_ui_get_active_player_profile(0, &profile0);
 		player_profile_get_highest_completed_solo_level(&profile0, &highest_levels[0], &highest_difficulties[0]);
@@ -4245,7 +4472,11 @@ static boolean solo_level_initialize_list_coop(
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 689, definition->type == 2, "expected a spinner list widget for 'solo level list' widget");
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 690, definition->child_count == 3, "expected 3 list items for 'solo level list' widget");
 	widget->generated_list = single_player_level_data;
+#ifdef HALO_LINUX
+	widget->generated_count = solo_level_list_custom_campaigns_add();
+#else
 	widget->generated_count = 10;
+#endif
 	widget->data3C.selected_index = PIN(player_ui_get_last_single_player_level_played(0), 0, 9);
 	return TRUE;
 }
@@ -4347,6 +4578,28 @@ static boolean solo_level_set_next_map_name(
 
 	list_widget = widget;
 	result = FALSE;
+#ifdef HALO_LINUX
+	/* port: a Custom Edition campaign map after the campaign's levels, never
+	locked: played as they are, at the difficulty chosen next (alone, or Y
+	there hosts it as network co-op) */
+	if (list_widget->data3C.selected_index >= 10)
+	{
+		char const *map_name = list_widget->data3C.selected_index < list_widget->generated_count ?
+			custom_edition_maps_campaign_level_name((short)(list_widget->data3C.selected_index - 10)) : NULL;
+
+		if (!map_name)
+		{
+			error(2, "this level is unavailable to you!");
+			ui_play_audio_feedback_sound(4);
+			return FALSE;
+		}
+		if (player_spawn_count == 1)
+			player_ui_remember_player1_profile(0);
+		main_set_map_name(map_name);
+		main_defer_map_map_change();
+		return TRUE;
+	}
+#endif
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 724, list_widget->data3C.selected_index >= 0 && list_widget->data3C.selected_index < 10, "I don't think this is the solo level list widget");
 	switch (player_spawn_count)
 	{
@@ -5705,6 +5958,9 @@ static boolean multiplayer_level_select(
 	struct widget_instance *level_list;
 	struct ui_widget_definition *definition;
 	long level_index;
+#ifdef HALO_LINUX
+	char **levels;
+#endif
 
 	definition = ui_widget_definition_get(widget->definition_tag_index);
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1280,
@@ -5724,10 +5980,20 @@ static boolean multiplayer_level_select(
 		definition->child_count == 3,
 		"expected 3 list items for 'multiplayer level list' widget");
 	level_list = widget->child->child;
+#ifdef HALO_LINUX
+	/* the levels the list offers: the Xbox levels, then the Custom Edition
+	maps (multiplayer_level_list_initialize) */
+	levels = level_list->generated_list;
+	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1298,
+		level_list->data3C.selected_index >= 0 && level_list->data3C.selected_index < level_list->generated_count,
+		"invalid multiplayer level specified from 'multiplayer level list' list widget");
+	map_name = levels[level_list->data3C.selected_index];
+#else
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1298,
 		level_list->data3C.selected_index >= 0 && level_list->data3C.selected_index < 13,
 		"invalid multiplayer level specified from 'multiplayer level list' list widget");
 	map_name = event_handler_functions.multiplayer_levels[level_list->data3C.selected_index];
+#endif
 	file = fopen("d:\\map_automation.txt", "r");
 	if (file)
 	{
@@ -5737,6 +6003,18 @@ static boolean multiplayer_level_select(
 		map_name = automation_map_name;
 		fclose(file);
 	}
+	/* port: a map of a build this version does not play with others (its
+	objects would not be the same as theirs): said, and the list stays */
+	{
+		char build[0x20];
+
+		if (global_network_game_server_get() && !network_game_is_splitscreen_local() &&
+			!cache_files_map_plays_multiplayer(map_name, build))
+		{
+			cache_files_show_multiplayer_unavailable(map_name, build);
+			return FALSE;
+		}
+	}
 	main_set_multiplayer_map_name(map_name);
 	game_engine_override_map_name(map_name);
 	{
@@ -5744,6 +6022,16 @@ static boolean multiplayer_level_select(
 		if (server)
 			network_game_server_change_map_name(server, map_name);
 	}
+#ifdef HALO_LINUX
+	for (level_index = 0; level_index < level_list->generated_count; level_index++)
+	{
+		if (!_stricmp(map_name, levels[level_index]))
+		{
+			saved_game_file_remember_last_used_multiplayer_map(levels[level_index]);
+			break;
+		}
+	}
+#else
 	for (level_index = 0; level_index < 13; level_index++)
 	{
 		if (!_stricmp(map_name, event_handler_functions.multiplayer_levels[level_index]))
@@ -5752,6 +6040,7 @@ static boolean multiplayer_level_select(
 			break;
 		}
 	}
+#endif
 	return TRUE;
 }
 
@@ -5906,7 +6195,11 @@ static boolean solo_level_initialize_list_single_player(
 		definition->child_count == 3,
 		"expected 3 list items for 'solo level list' widget");
 	widget->generated_list = single_player_level_data;
+#ifdef HALO_LINUX
+	widget->generated_count = solo_level_list_custom_campaigns_add();
+#else
 	widget->generated_count = 10;
+#endif
 	widget->data3C.selected_index = PIN(player_ui_get_last_single_player_level_played(0), 0, 9);
 
 	if (persistant_game_data_info.valid == TRUE)
@@ -5949,5 +6242,98 @@ static boolean solo_level_initialize_list_single_player(
 				event_handler_functions.unknown3C = NONE;
 		}
 	}
+	return TRUE;
+}
+
+/* port: sets up the server for co-op (the Vita's co-op choice: multiplayer_level_select):
+the campaign level (or a Custom Edition campaign map's: custom_edition_maps.c),
+the difficulty, and a gametype with no game engine, which is what makes a
+network game co-op (game.c, players.c). Returns FALSE without a server or a
+campaign level. */
+boolean ui_widget_port_cooperative_level_choose(
+	char const *map_name,
+	short difficulty)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	/* (a game_variant, game_engine.h: its description, 12 characters, then
+	its game engine, none) */
+	struct game_variant_data variant;
+
+	if (!server || !map_name || !custom_edition_maps_campaign_level(map_name))
+		return FALSE;
+	csmemset(&variant, 0, sizeof(variant));
+	ustrncpy((wchar_t *)variant.data, L"Co-op", 11);
+	main_set_difficulty(difficulty);
+	main_set_multiplayer_map_name(map_name);
+	network_game_server_port_set_cooperative(server, difficulty);
+	network_game_server_change_map_name(server, map_name);
+	network_game_server_change_game_variant(server, &variant);
+	return TRUE;
+}
+
+/* port: co-op from the campaign's menus (ui_widget.c: Y on the difficulty
+list, after a level was chosen as for single player): hosts a network game
+of that level on the difficulty selected, as Multiplayer, System Link's Y
+(Create Game) hosts one (network_game_start_new_server), with this
+machine's player joined to it under the campaign's profile, as picking a
+profile for System Link does. The caller then opens the lobby. FALSE (the
+player told why, where the game's own checks tell) without a network, on
+maps that do not play with others, or without a campaign level. */
+boolean ui_widget_port_cooperative_campaign_host(
+	struct widget_instance *list,
+	struct event_record *event)
+{
+	char map_name[128];
+	char build[0x20];
+	short difficulty = list->data3C.selected_index;
+	short controller_index = (short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1);
+	boolean deleted = FALSE;
+
+	csstrncpy(map_name, main_get_map_name(), sizeof(map_name) - 1);
+	map_name[sizeof(map_name) - 1] = 0;
+	if (difficulty < 0 || difficulty > 3 || !custom_edition_maps_campaign_level(map_name))
+		return FALSE;
+	if (!transport_network_available())
+	{
+		display_error(5, event->controller_index, TRUE, TRUE);
+		return FALSE;
+	}
+	if (!cache_files_multiplayer_region(build))
+	{
+		cache_files_show_multiplayer_unavailable(NULL, build);
+		return FALSE;
+	}
+	main_set_difficulty(difficulty);
+	dispose_global_network_game_server();
+	if (!network_game_start_new_server(list, event, &deleted))
+		return FALSE;
+	if (!network_game_server_port_cooperative_from_menu(map_name, difficulty))
+	{
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		network_game_accept_remote_connections(FALSE);
+		player_ui_clear_multiplayer_variant();
+		return FALSE;
+	}
+	/* (the campaign's profile is the first player's: another controller's
+	player plays under it) */
+	if (controller_index != 0)
+	{
+		struct player_profile profile;
+
+		player_ui_get_active_player_profile(0, &profile);
+		player_ui_set_active_player_profile(controller_index, player_ui_get_active_player_profile_index(0), &profile);
+	}
+	player_ui_local_player_joined_multiplayer_game(controller_index);
+#ifdef HALO_LINUX
+	{
+		void platform_log(const char *format, ...);
+
+		platform_log("co-op: hosting %s on difficulty %d from the campaign's menus", map_name, difficulty);
+	}
+	csstrncpy(difficulty_menu_cooperative_map, map_name, sizeof(difficulty_menu_cooperative_map) - 1);
+	difficulty_menu_cooperative_map[sizeof(difficulty_menu_cooperative_map) - 1] = 0;
+	difficulty_menu_cooperative_difficulty = difficulty;
+#endif
 	return TRUE;
 }

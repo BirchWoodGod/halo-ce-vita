@@ -123,6 +123,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries.h"
+#include "errors.h"
 #include "object_types.h"
 
 #include "cache/cache_files.h"
@@ -579,6 +580,20 @@ struct object_type_definition *object_type_definition_get(
 			"#%d isn't a valid object type in [#0,#%d)",
 			object_type,
 			NUMBER_OF_OBJECT_TYPES));
+	/* port: a type that is not one (from a map's data) is scenery's, the
+	type with the least to it, not whatever lies past the table: its
+	procedures are called through it */
+	if (!VALID_INDEX(object_type, NUMBER_OF_OBJECT_TYPES) || !object_type_definitions[object_type])
+	{
+		static boolean logged = FALSE;
+
+		if (!logged)
+		{
+			logged = TRUE;
+			error(_error_silent, "#%d is not an object type: scenery's is used", object_type);
+		}
+		object_type = _object_type_scenery;
+	}
 	match_assert(
 		"c:\\halo\\SOURCE\\objects\\object_types.c",
 		632,
@@ -875,6 +890,45 @@ void object_type_export_function_values(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) the object types with a handler for a deleted object in any of
+their parts (units, projectiles), as type flags: the definitions are
+constant, so the mask is too. objects_fix_for_deleted_object calls the
+handlers of these types only - for any other object the call found no
+handler and did nothing - instead of once for every object in the game
+(~1000 of them in b30's beach fight, for every projectile that hits) */
+unsigned long object_types_handling_deleted_objects(
+	void)
+{
+	static unsigned long mask;
+	static boolean known;
+
+	if (!known)
+	{
+		unsigned long types = 0;
+		short type;
+
+		for (type = 0; type < NUMBER_OF_OBJECT_TYPES; type++)
+		{
+			struct object_type_definition *definition = object_type_definitions[type];
+			short i;
+
+			for (i = 0; definition && definition->part_definitions[i]; i++)
+			{
+				if (definition->part_definitions[i]->handle_deleted_object)
+				{
+					types |= FLAG(type);
+				}
+			}
+		}
+		mask = types;
+		known = TRUE;
+	}
+
+	return mask;
+}
+#endif
+
 void object_type_handle_deleted_object(
 	long object_index,
 	long deleted_object_index)
@@ -1107,6 +1161,58 @@ void object_types_disconnect_from_structure_bsp(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: whether every object the scenario places names an entry of its
+type's palette (or none): the palette index is a map's, and is read without
+a check wherever objects are placed (object_types_place_objects,
+objects_place_object...). A map whose index points past its palette - a
+crafted one: the fuzzer's - is refused as it loads (scenario.c), rather than
+each read being checked, which would cost every placement. */
+boolean object_types_scenario_palettes_valid(
+	struct scenario *scenario)
+{
+	short object_type;
+
+	for (object_type = 0; object_type < NUMBER_OF_OBJECT_TYPES; object_type++)
+	{
+		struct object_type_definition *definition = object_type_definition_get(object_type);
+
+		if (definition->placement_tag_block_offset!=NONE &&
+			definition->palette_tag_block_offset!=NONE)
+		{
+			long element_size;
+			struct tag_block *scenario_datums = scenario_get_object_type_scenario_datums(
+				scenario,
+				object_type,
+				&element_size);
+			struct tag_block *scenario_palette = scenario_get_object_type_scenario_palette(
+				scenario,
+				object_type);
+			long scenario_datum_index;
+
+			if (scenario_datums->count > 0 && (!scenario_datums->address || element_size < (long)sizeof(struct scenario_object_datum)))
+			{
+				return FALSE;
+			}
+			for (scenario_datum_index = 0; scenario_datum_index < scenario_datums->count; scenario_datum_index++)
+			{
+				struct scenario_object_datum const *scenario_object = (struct scenario_object_datum const *)
+					((byte const *)scenario_datums->address + scenario_datum_index * element_size);
+
+				if (scenario_object->palette_entry_index != NONE &&
+					(scenario_object->palette_entry_index < 0 ||
+					scenario_object->palette_entry_index >= scenario_palette->count))
+				{
+					return FALSE;
+				}
+			}
+		}
+	}
+
+	return TRUE;
+}
+#endif
+
 void object_types_place_objects(
 	boolean reconnecting)
 {
@@ -1141,8 +1247,10 @@ void object_types_place_objects(
 				{
 					short scenario_datum_index;
 
+					/* port: no more than the short counter reaches (a map's count;
+					retail has up to 1523) */
 					for (scenario_datum_index = 0;
-						scenario_datum_index < scenario_datums->count;
+						scenario_datum_index < MIN(scenario_datums->count, SHORT_MAX);
 						scenario_datum_index++)
 					{
 						struct scenario_object_datum *scenario_object =
@@ -1151,7 +1259,14 @@ void object_types_place_objects(
 								scenario_datum_index,
 								element_size);
 
-						if (scenario_object->palette_entry_index!=NONE)
+						/* port: a palette entry the scenario has, naming a tag (a
+						map's index; object_new_from_scenario makes nothing from
+						any other) */
+						if (VALID_INDEX(scenario_object->palette_entry_index, scenario_palette->count) &&
+							TAG_BLOCK_GET_ELEMENT(
+								scenario_palette,
+								scenario_object->palette_entry_index,
+								struct scenario_object_palette_entry)->reference.index!=NONE)
 						{
 							struct scenario_object_palette_entry *palette_entry = TAG_BLOCK_GET_ELEMENT(
 								scenario_palette,
@@ -1191,8 +1306,9 @@ void object_types_place_objects(
 					short scenario_datum_index;
 
 					objects_memory_compact();
+					/* port: no more than the short counter reaches (a map's count) */
 					for (scenario_datum_index = 0;
-						scenario_datum_index < scenario_datums->count;
+						scenario_datum_index < MIN(scenario_datums->count, SHORT_MAX);
 						scenario_datum_index++)
 					{
 						struct scenario_object_datum *scenario_object =
@@ -1261,8 +1377,9 @@ void object_types_place_all(
 					scenario,
 					object_type);
 
+				/* port: no more than the short counter reaches (a map's count) */
 				for (scenario_datum_index = 0;
-					scenario_datum_index < scenario_datums->count;
+					scenario_datum_index < MIN(scenario_datums->count, SHORT_MAX);
 					scenario_datum_index++)
 				{
 					struct scenario_object_datum *scenario_object =
@@ -1271,6 +1388,16 @@ void object_types_place_all(
 							scenario_datum_index,
 							element_size);
 
+#ifdef HALO_LINUX
+					/* a Halo Custom Edition map places the vehicles its placements'
+					multiplayer spawn flags name for the game type, as retail Halo
+					does (port/linux/game/custom_edition_objects.c) */
+					if (object_type == _object_type_vehicle &&
+						!custom_edition_vehicle_placement_allowed(scenario_object))
+					{
+						continue;
+					}
+#endif
 					object_new_from_scenario(scenario_object, scenario_palette);
 					objects_garbage_collection();
 				}
@@ -1305,8 +1432,9 @@ void object_names_postprocess(
 					object_type,
 					&element_size);
 
+				/* port: no more than the short counter reaches (a map's count) */
 				for (scenario_datum_index = 0;
-					scenario_datum_index < scenario_datums->count;
+					scenario_datum_index < MIN(scenario_datums->count, SHORT_MAX);
 					scenario_datum_index++)
 				{
 					struct scenario_object_datum *scenario_object =
@@ -1315,7 +1443,9 @@ void object_names_postprocess(
 							scenario_datum_index,
 							element_size);
 
-					if (scenario_object->name_index!=NONE)
+					/* port: only a name the scenario has (a map's index, which
+					wrote into whatever was there; retail's are below 448) */
+					if (VALID_INDEX(scenario_object->name_index, scenario->object_names.count))
 					{
 						struct scenario_object_name *object_name = TAG_BLOCK_GET_ELEMENT(
 							&scenario->object_names,
@@ -1351,7 +1481,9 @@ long object_type_synchronize(
 	real_matrix4x3 matrix;
 	struct object_datum *object;
 
-	if (scenario_object->palette_entry_index==NONE)
+	/* port: a palette entry the scenario doesn't have is none (a map's
+	index) */
+	if (!VALID_INDEX(scenario_object->palette_entry_index, palette->count))
 	{
 		if (object_index!=NONE)
 		{
@@ -1466,7 +1598,9 @@ long object_type_synchronize(
 		}
 	}
 
-	if (scenario_object->name_index!=NONE)
+	/* port: only a name the scenario has (a map's index, which wrote into
+	whatever was there) */
+	if (VALID_INDEX(scenario_object->name_index, global_scenario_get()->object_names.count))
 	{
 		struct scenario_object_name *object_name = TAG_BLOCK_GET_ELEMENT(
 			&global_scenario_get()->object_names,

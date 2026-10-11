@@ -206,6 +206,105 @@ struct debug_memory_globals debug_memory_globals =
 	debug_memory_signature
 };
 
+#ifdef HALO_LINUX
+/* ---------- the lock (port)
+
+Every malloc, free and realloc of the game's code is one of these
+(cseries.h), and each threads its block onto one list: the header's next
+and previous, the list's first pointer and the neighbours' checksums. On
+the Xbox only the game's thread allocated. The port allocates from more
+than one: since v1.1.0-beta.1 a Custom Edition map's bitmaps are read on
+the cache file thread, and each arrival there rebuilds the bitmap's
+hardware format (custom_edition_bitmap_pixels_arrived ->
+rasterizer_xbox_bitmap_rebuild_hardware_format), a malloc and a free of a
+buffer the size of the bitmap, while the game's thread allocates as it
+loads the map (data_new). Two threads in the list at once lost a block from
+it: a push at the front beside a removal of the front left the pushed
+block's previous NULL and it out of the list, and its free later found no
+previous ("previous" at debug_memory.c #446, an assertion only logged off
+the tick's thread, then a write through NULL: "segmentation fault at 0x4").
+A joining copy with the map already in its maps folder crashed so as the
+map loaded (the harness as a Vita, netns mapmid: beta.2's and next-1.1's);
+the release builds and the Vita keep the same list, unchecked. Now one
+lock over the list: recursive (an assertion's report inside may allocate; a
+dump checks the list), its owner cleared before it is let go (lruv_cache.c's
+reasons), the fill of a new block's own bytes and the C library's free
+outside it. port/vita/tests/run_debug_memory_threads_test.sh */
+
+#include <pthread.h>
+#include <sched.h>
+
+/* the calling thread's id (the Vita's kernel thread id, posix_profile.c's
+pthread_self, Windows' thread id) and a short sleep; pthread_self and
+sched_yield without them */
+unsigned long vita_host_thread_id(void) __attribute__((weak));
+void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+
+static unsigned long debug_memory_owner;
+static long debug_memory_depth;
+static volatile int debug_memory_held;
+
+static unsigned long debug_memory_self(
+	void)
+{
+	unsigned long self = vita_host_thread_id ?
+		vita_host_thread_id() :
+		(unsigned long)pthread_self();
+
+	/* (0 is "no owner") */
+	return self ? self : 1;
+}
+
+static void debug_memory_lock(
+	void)
+{
+	unsigned long self = debug_memory_self();
+	unsigned long spins = 0;
+
+	if (__atomic_load_n(&debug_memory_owner, __ATOMIC_RELAXED) == self)
+	{
+		debug_memory_depth++;
+		return;
+	}
+	while (__atomic_load_n(&debug_memory_held, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&debug_memory_held, 1, __ATOMIC_ACQUIRE))
+	{
+		/* (a short spin, then the core to whoever holds it, which may
+		run at a lower priority) */
+		if (++spins > 100)
+		{
+			if (vita_host_sleep_us)
+			{
+				vita_host_sleep_us(20);
+			}
+			else
+			{
+				sched_yield();
+			}
+		}
+	}
+	__atomic_store_n(&debug_memory_owner, self, __ATOMIC_RELAXED);
+	debug_memory_depth = 1;
+
+	return;
+}
+
+static void debug_memory_unlock(
+	void)
+{
+	if (--debug_memory_depth == 0)
+	{
+		__atomic_store_n(&debug_memory_owner, 0, __ATOMIC_RELAXED);
+		__atomic_store_n(&debug_memory_held, 0, __ATOMIC_RELEASE);
+	}
+
+	return;
+}
+#else
+#define debug_memory_lock() ((void)0)
+#define debug_memory_unlock() ((void)0)
+#endif
+
 /* ---------- public code */
 
 void debug_memory_manager_initialize(
@@ -246,6 +345,7 @@ void debug_dump_memory_for_file(
 	FILE *dump_file = NULL;
 	long total_size = 0;
 
+	debug_memory_lock();
 	header = debug_memory_globals.first_pointer;
 	debug_check_memory("c:\\halo\\SOURCE\\cseries\\debug_memory.c", 513);
 
@@ -291,6 +391,7 @@ void debug_dump_memory_for_file(
 			total_size);
 		fclose(dump_file);
 	}
+	debug_memory_unlock();
 
 	return;
 }
@@ -307,6 +408,7 @@ void debug_dump_memory_by_file(
 	FILE *dump_file;
 	short i;
 
+	debug_memory_lock();
 	header = debug_memory_globals.first_pointer;
 	debug_check_memory("c:\\halo\\SOURCE\\cseries\\debug_memory.c", 553);
 
@@ -380,6 +482,7 @@ void debug_dump_memory_by_file(
 			debug_memory_globals.maximum_pointer_size);
 		fclose(dump_file);
 	}
+	debug_memory_unlock();
 
 	return;
 }
@@ -428,6 +531,7 @@ void debug_check_memory(
 {
 	struct debug_memory_header *header;
 
+	debug_memory_lock();
 	debug_check_memory_globals(file, line);
 	header = debug_memory_globals.first_pointer;
 	while (header != NULL)
@@ -448,6 +552,7 @@ void debug_check_memory(
 				line));
 		header = header->next;
 	}
+	debug_memory_unlock();
 
 	return;
 }
@@ -467,6 +572,7 @@ void *debug_malloc(
 		"c:\\halo\\SOURCE\\cseries\\debug_memory.c",
 		214,
 		size>=0 && size<MAXIMUM_POINTER_SIZE);
+	debug_memory_lock();
 	debug_check_memory_globals(file, line);
 
 	header = system_malloc(allocation_size);
@@ -482,6 +588,7 @@ void *debug_malloc(
 		debug_memory_add_pointer(header);
 
 		pointer = header + 1;
+#ifndef HALO_LINUX
 		if (clear)
 		{
 			csmemset(pointer, 0, size);
@@ -490,6 +597,7 @@ void *debug_malloc(
 		{
 			csmemset(pointer, 0xCA, size);
 		}
+#endif
 	}
 
 	if (pointer != NULL)
@@ -500,6 +608,22 @@ void *debug_malloc(
 			debug_memory_globals.maximum_pointer_size = debug_memory_globals.current_heap_size;
 		}
 	}
+#ifdef HALO_LINUX
+	debug_memory_unlock();
+	/* (the block's own bytes, which no other thread knows of yet: outside
+	the lock, a bitmap's megabytes among them) */
+	if (pointer != NULL)
+	{
+		if (clear)
+		{
+			csmemset(pointer, 0, size);
+		}
+		else
+		{
+			csmemset(pointer, 0xCA, size);
+		}
+	}
+#endif
 
 	return pointer;
 }
@@ -512,6 +636,9 @@ void debug_free(
 	struct debug_memory_header *header =
 		(struct debug_memory_header *)pointer - 1;
 
+	/* (the header too: a neighbour's push or removal rewrites its links
+	and checksum) */
+	debug_memory_lock();
 	debug_check_memory_globals(file, line);
 	debug_check_pointer_header(header, file, line);
 	debug_check_pointer_overrun(pointer, file, line);
@@ -519,6 +646,7 @@ void debug_free(
 	debug_memory_globals.current_heap_size -= header->size;
 	debug_memory_remove_pointer(header, file, line);
 	header->signature = debug_memory_disposed_signature;
+	debug_memory_unlock();
 	system_free(header);
 
 	return;
@@ -544,6 +672,7 @@ void *debug_realloc(
 		"c:\\halo\\SOURCE\\cseries\\debug_memory.c",
 		338,
 		size>=0 && size<MAXIMUM_POINTER_SIZE);
+	debug_memory_lock();
 	debug_check_memory_globals(file, line);
 
 	if (pointer != NULL)
@@ -592,6 +721,7 @@ void *debug_realloc(
 			debug_memory_globals.maximum_pointer_size = debug_memory_globals.current_heap_size;
 		}
 	}
+	debug_memory_unlock();
 
 	return result;
 }

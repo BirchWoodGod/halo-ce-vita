@@ -78,14 +78,60 @@ static DWORD WINAPI thread_main(LPVOID parameter)
 	return 0;
 }
 
+/* the handles of joinable threads (created without
+PTHREAD_CREATE_DETACHED), which pthread_join waits on and pthread_detach
+lets go: a pthread_t is the thread's identifier, which Windows may give
+another thread once the last handle to this one is closed */
+struct joinable_thread
+{
+	struct joinable_thread *next;
+	DWORD identifier;
+	HANDLE handle;
+};
+
+static SRWLOCK joinable_lock = SRWLOCK_INIT;
+static struct joinable_thread *joinable_threads;
+
+static HANDLE joinable_thread_take(DWORD identifier)
+{
+	struct joinable_thread **link;
+	HANDLE handle = NULL;
+
+	AcquireSRWLockExclusive(&joinable_lock);
+	for (link = &joinable_threads; *link; link = &(*link)->next)
+	{
+		if ((*link)->identifier == identifier)
+		{
+			struct joinable_thread *entry = *link;
+
+			*link = entry->next;
+			handle = entry->handle;
+			free(entry);
+			break;
+		}
+	}
+	ReleaseSRWLockExclusive(&joinable_lock);
+	return handle;
+}
+
 int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*start)(void *), void *argument)
 {
 	struct thread_start *parameter = malloc(sizeof(*parameter));
+	struct joinable_thread *joinable = NULL;
 	DWORD identifier;
 	HANDLE handle;
 
 	if (!parameter)
 		return EAGAIN;
+	if (!attributes || !attributes->detached)
+	{
+		joinable = malloc(sizeof(*joinable));
+		if (!joinable)
+		{
+			free(parameter);
+			return EAGAIN;
+		}
+	}
 	parameter->start = start;
 	parameter->argument = argument;
 	handle = CreateThread(NULL, attributes ? attributes->stack_size : 0, thread_main, parameter,
@@ -93,17 +139,66 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*
 	if (!handle)
 	{
 		free(parameter);
+		free(joinable);
 		return EAGAIN;
 	}
-	/* nothing joins threads: the handle is not needed */
-	CloseHandle(handle);
+	if (joinable)
+	{
+		joinable->identifier = identifier;
+		joinable->handle = handle;
+		AcquireSRWLockExclusive(&joinable_lock);
+		joinable->next = joinable_threads;
+		joinable_threads = joinable;
+		ReleaseSRWLockExclusive(&joinable_lock);
+	}
+	else
+	{
+		CloseHandle(handle);
+	}
 	*thread = identifier;
+	return 0;
+}
+
+int pthread_join(pthread_t thread, void **value)
+{
+	HANDLE handle = joinable_thread_take((DWORD)thread);
+
+	if (!handle)
+		return ESRCH;
+	WaitForSingleObject(handle, INFINITE);
+	CloseHandle(handle);
+	if (value)
+		*value = NULL;
 	return 0;
 }
 
 int pthread_detach(pthread_t thread)
 {
-	(void)thread;
+	HANDLE handle = joinable_thread_take((DWORD)thread);
+
+	if (handle)
+		CloseHandle(handle);
+	return 0;
+}
+
+/* ---------- the environment */
+
+/* POSIX setenv over the C runtime's environment, which getenv reads (an
+empty value removes the variable there) */
+int setenv(const char *name, const char *value, int overwrite)
+{
+	if (!name || !*name || strchr(name, '=') || !value)
+	{
+		errno = EINVAL;
+		return -1;
+	}
+	if (!overwrite && getenv(name))
+		return 0;
+	if (_putenv_s(name, value) != 0)
+	{
+		errno = EINVAL;
+		return -1;
+	}
 	return 0;
 }
 

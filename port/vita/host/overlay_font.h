@@ -97,3 +97,137 @@ static const unsigned char font[96][8] = {
     {0x38,0x44,0x04,0x08,0x10,0x00,0x10,0x00},
     {0x38,0x44,0x04,0x08,0x10,0x00,0x10,0x00},
 };
+
+/* (port) the letters the port's translated text needs (lang.c; Spanish's
+á é í ó ú ñ ü ¿ ¡, and the other Latin-1 letters of the languages a file
+may be added for): a letter of `font` with a mark over it, drawn in the
+rows above the cell (OVERLAY_ROWS_ABOVE, a row's gap left under the mark),
+or a cedilla under it in the cell's empty last row; the font being upper
+case, a small letter is drawn as its capital. Then ¿ ¡ « » ß º ª, glyphs
+of their own. */
+
+#define OVERLAY_ROWS_ABOVE 3
+#define OVERLAY_ROWS (OVERLAY_ROWS_ABOVE + 8)
+
+enum
+{
+	OVERLAY_UNMARKED,
+	OVERLAY_ACUTE,
+	OVERLAY_GRAVE,
+	OVERLAY_CIRCUMFLEX,
+	OVERLAY_DIAERESIS,
+	OVERLAY_TILDE,
+	OVERLAY_RING,
+	OVERLAY_CEDILLA,
+};
+
+/* each mark's two rows, the top one first */
+static const unsigned char overlay_marks[][2] = {
+	{ 0x00, 0x00 },
+	{ 0x08, 0x10 },
+	{ 0x20, 0x10 },
+	{ 0x10, 0x28 },
+	{ 0x00, 0x28 },
+	{ 0x34, 0x58 },
+	{ 0x10, 0x10 },
+	{ 0x00, 0x00 },
+};
+
+/* U+00C0 to U+00FF: the capital each is drawn with (0: none) and its mark
+(Ð Ø ×: their letters, unmarked) */
+static const struct
+{
+	char letter;
+	unsigned char mark;
+} overlay_latin1[64] = {
+	{ 'A', OVERLAY_GRAVE }, { 'A', OVERLAY_ACUTE }, { 'A', OVERLAY_CIRCUMFLEX }, { 'A', OVERLAY_TILDE },
+	{ 'A', OVERLAY_DIAERESIS }, { 'A', OVERLAY_RING }, { 0, 0 }, { 'C', OVERLAY_CEDILLA },
+	{ 'E', OVERLAY_GRAVE }, { 'E', OVERLAY_ACUTE }, { 'E', OVERLAY_CIRCUMFLEX }, { 'E', OVERLAY_DIAERESIS },
+	{ 'I', OVERLAY_GRAVE }, { 'I', OVERLAY_ACUTE }, { 'I', OVERLAY_CIRCUMFLEX }, { 'I', OVERLAY_DIAERESIS },
+	{ 'D', 0 }, { 'N', OVERLAY_TILDE }, { 'O', OVERLAY_GRAVE }, { 'O', OVERLAY_ACUTE },
+	{ 'O', OVERLAY_CIRCUMFLEX }, { 'O', OVERLAY_TILDE }, { 'O', OVERLAY_DIAERESIS }, { 'X', 0 },
+	{ 'O', 0 }, { 'U', OVERLAY_GRAVE }, { 'U', OVERLAY_ACUTE }, { 'U', OVERLAY_CIRCUMFLEX },
+	{ 'U', OVERLAY_DIAERESIS }, { 'Y', OVERLAY_ACUTE }, { 0, 0 }, { 0, 0 },
+	/* (the small letters: their capitals) */
+	{ 'A', OVERLAY_GRAVE }, { 'A', OVERLAY_ACUTE }, { 'A', OVERLAY_CIRCUMFLEX }, { 'A', OVERLAY_TILDE },
+	{ 'A', OVERLAY_DIAERESIS }, { 'A', OVERLAY_RING }, { 0, 0 }, { 'C', OVERLAY_CEDILLA },
+	{ 'E', OVERLAY_GRAVE }, { 'E', OVERLAY_ACUTE }, { 'E', OVERLAY_CIRCUMFLEX }, { 'E', OVERLAY_DIAERESIS },
+	{ 'I', OVERLAY_GRAVE }, { 'I', OVERLAY_ACUTE }, { 'I', OVERLAY_CIRCUMFLEX }, { 'I', OVERLAY_DIAERESIS },
+	{ 'D', 0 }, { 'N', OVERLAY_TILDE }, { 'O', OVERLAY_GRAVE }, { 'O', OVERLAY_ACUTE },
+	{ 'O', OVERLAY_CIRCUMFLEX }, { 'O', OVERLAY_TILDE }, { 'O', OVERLAY_DIAERESIS }, { 0, 0 },
+	{ 'O', 0 }, { 'U', OVERLAY_GRAVE }, { 'U', OVERLAY_ACUTE }, { 'U', OVERLAY_CIRCUMFLEX },
+	{ 'U', OVERLAY_DIAERESIS }, { 'Y', OVERLAY_ACUTE }, { 0, 0 }, { 'Y', OVERLAY_DIAERESIS },
+};
+
+/* the glyphs of their own: ¡ ª « º » ¿ ß */
+static const struct
+{
+	unsigned short code;
+	unsigned char rows[8];
+} overlay_extra[] = {
+	{ 0x00A1, { 0x10, 0x00, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00 } },
+	{ 0x00AA, { 0x30, 0x08, 0x38, 0x48, 0x38, 0x00, 0x78, 0x00 } },
+	{ 0x00AB, { 0x00, 0x14, 0x28, 0x50, 0x28, 0x14, 0x00, 0x00 } },
+	{ 0x00BA, { 0x30, 0x48, 0x48, 0x30, 0x00, 0x78, 0x00, 0x00 } },
+	{ 0x00BB, { 0x00, 0x50, 0x28, 0x14, 0x28, 0x50, 0x00, 0x00 } },
+	{ 0x00BF, { 0x10, 0x00, 0x10, 0x20, 0x40, 0x44, 0x38, 0x00 } },
+	{ 0x00DF, { 0x30, 0x48, 0x48, 0x50, 0x48, 0x44, 0x58, 0x00 } },
+};
+
+/* the character of UTF-8 text at *text (the pointer moved past it) as rows
+of 8 pixels: OVERLAY_ROWS_ABOVE above the cell, then the cell's 8; 0 for a
+character not drawn (its cell is taken all the same; a byte that is not
+UTF-8 is a character of its own, one cut short none) */
+static int overlay_glyph(const char **text, unsigned char rows[OVERLAY_ROWS])
+{
+	const unsigned char *at = (const unsigned char *)*text;
+	unsigned int code = *at++;
+	int index;
+
+	if (code >= 0xC0 && code < 0xF8)
+	{
+		int more = code >= 0xF0 ? 3 : code >= 0xE0 ? 2 : 1;
+		unsigned int value = code & (0x3F >> more);
+
+		for (index = 0; index < more && (at[index] & 0xC0) == 0x80; index++)
+			value = (value << 6) | (at[index] & 0x3F);
+		/* (a character cut short, by a %.40s's bytes: not drawn) */
+		if (index < more)
+		{
+			*text = (const char *)(at + index);
+			return 0;
+		}
+		code = value;
+		at += more;
+	}
+	*text = (const char *)at;
+	memset(rows, 0, OVERLAY_ROWS);
+	if (code >= 'a' && code <= 'z')
+		code = code - 'a' + 'A';
+	if (code >= 32 && code < 128)
+	{
+		memcpy(rows + OVERLAY_ROWS_ABOVE, font[code - 32], 8);
+		return 1;
+	}
+	if (code >= 0xC0 && code <= 0xFF && overlay_latin1[code - 0xC0].letter)
+	{
+		int mark = overlay_latin1[code - 0xC0].mark;
+
+		memcpy(rows + OVERLAY_ROWS_ABOVE, font[overlay_latin1[code - 0xC0].letter - 32], 8);
+		if (mark == OVERLAY_CEDILLA)
+			rows[OVERLAY_ROWS - 1] = 0x10;
+		else
+		{
+			rows[0] = overlay_marks[mark][0];
+			rows[1] = overlay_marks[mark][1];
+		}
+		return 1;
+	}
+	for (index = 0; index < (int)(sizeof(overlay_extra) / sizeof(overlay_extra[0])); index++)
+		if (overlay_extra[index].code == code)
+		{
+			memcpy(rows + OVERLAY_ROWS_ABOVE, overlay_extra[index].rows, 8);
+			return 1;
+		}
+	return 0;
+}

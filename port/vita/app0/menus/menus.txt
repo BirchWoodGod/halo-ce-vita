@@ -1,0 +1,5 @@
+# OpenCE's multiplayer screens (port/linux/src/menu_files.c reads the files listed here)
+art.xml
+multiplayer.xml
+browser.xml
+setup.xml

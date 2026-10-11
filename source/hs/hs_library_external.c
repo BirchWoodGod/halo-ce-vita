@@ -103,6 +103,9 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "sound/sound_definitions.h"
 #include "units/units.h"
+#include "hs/hs.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 
 /* ---------- constants */
 
@@ -199,12 +202,11 @@ boolean hs_not(
 void hs_print(
 	char const *message)
 {
-	/* BUG (preserved for exact matching): the printed string is passed as the format
-	 * (January 0x4b8970 +0x0c pushes it as terminal_printf's format), so a '%' in the
-	 * text, from a scenario script or typed at this build's console, reads arguments
-	 * that were never passed. A corrected build should print it through "%s".
-	 * Source-policy approval pending (2026-09-27 audit). */
-	terminal_printf(global_real_argb_green, message);
+	/* port: printed through "%s". January passes the text as the format
+	(0x4b8970 +0x0c pushes it as terminal_printf's format), so a '%' in it,
+	from a scenario script or typed at the console, read arguments that
+	were never passed */
+	terminal_printf(global_real_argb_green, "%s", message);
 
 	return;
 }
@@ -235,6 +237,7 @@ boolean hs_trigger_volume_test_objects(
 	long object_list_index,
 	boolean all)
 {
+	static boolean reported = FALSE;
 	long reference_index;
 	long object_index;
 	boolean result;
@@ -264,7 +267,17 @@ boolean hs_trigger_volume_test_objects(
 			&reference_index);
 	}
 
-	BIT_VECTOR_SET_FLAG(hs_debug_data, trigger_volume_index, result);
+	/* port: only the volumes hs_debug_data has bits for (a script's index,
+	map data; released maps have at most 158 volumes) */
+	if (VALID_INDEX(trigger_volume_index, MAXIMUM_TRIGGER_VOLUMES_PER_SCENARIO))
+	{
+		BIT_VECTOR_SET_FLAG(hs_debug_data, trigger_volume_index, result);
+	}
+	else if (!reported)
+	{
+		reported = TRUE;
+		error(_error_silent, "### ERROR a script tests trigger volume #%d", trigger_volume_index);
+	}
 
 	return result;
 }
@@ -708,6 +721,8 @@ void hs_effect_new(
 	struct scenario_cutscene_flag *cutscene_flag;
 	real_vector3d forward;
 
+	/* port: and on network co-op's clients (port/linux/game/network_coop.c) */
+	network_coop_note_effect(effect_definition_index, cutscene_flag_index);
 	cutscene_flag = TAG_BLOCK_GET_ELEMENT(
 		&global_scenario_get()->cutscene_flags,
 		cutscene_flag_index,
@@ -740,6 +755,9 @@ void hs_effect_new_from_object_marker(
 		if (object_index != NONE)
 		{
 			struct object_marker marker;
+
+			/* port: and on network co-op's clients (port/linux/game/network_coop.c) */
+			network_coop_note_object_effect(effect_definition_index, object_index, marker_name);
 
 			if (object_get_marker_by_name(
 				object_index,
@@ -872,10 +890,17 @@ boolean hs_trigger_volume_test_objects_all(
 	short trigger_volume_index,
 	long object_list_index)
 {
-	return hs_trigger_volume_test_objects(
-		trigger_volume_index,
-		object_list_index,
-		TRUE);
+	boolean inside;
+
+	if (!coop_scripts_any_player_will_do(object_list_index))
+		return hs_trigger_volume_test_objects(trigger_volume_index, object_list_index, TRUE);
+	/* port: in network co-op, waiting for every player means waiting for
+	any one of them, and the rest are brought to them (coop_scripts.c) */
+	inside = hs_trigger_volume_test_objects(trigger_volume_index, object_list_index, FALSE);
+	if (inside && hs_runtime_waiting_on_call())
+		coop_scripts_gather_in_volume(trigger_volume_index, object_list_index);
+
+	return inside;
 }
 
 boolean hs_trigger_volume_test_objects_any(
@@ -1014,6 +1039,8 @@ void hs_object_teleport(
 	short cutscene_flag_index)
 {
 	code_000b9500(object_index, cutscene_flag_index, TRUE, TRUE);
+	/* port: co-op players the scripts can't name go with player0 */
+	coop_scripts_teleport_followers(object_index);
 
 	return;
 }
@@ -1032,6 +1059,9 @@ void hs_teleport_players_not_in_trigger_volume(
 	short cutscene_flag_index)
 {
 	long player_index;
+	/* port: in network co-op the first player moved goes to the flag and
+	the rest around them, instead of all into the same spot */
+	long first_unit_index = NONE;
 
 	for (player_index = data_next_index(player_data, NONE);
 		player_index != NONE;
@@ -1045,11 +1075,17 @@ void hs_teleport_players_not_in_trigger_volume(
 				trigger_volume_index,
 				player->unit_index))
 		{
+			if (first_unit_index != NONE && network_coop_active())
+			{
+				player_teleport(player_index, first_unit_index, &object_get(first_unit_index)->object.position);
+				continue;
+			}
 			code_000b9500(
 				player->unit_index,
 				cutscene_flag_index,
 				TRUE,
 				TRUE);
+			first_unit_index = player->unit_index;
 		}
 	}
 

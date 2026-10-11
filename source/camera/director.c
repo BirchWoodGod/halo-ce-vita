@@ -119,8 +119,13 @@ symbols in this file:
 
 #include "director.h"
 
+#ifdef HALO_LINUX
+#include <stdlib.h>
+#endif
+
 #include "camera_scripting.h"
 #include "dead_camera.h"
+#include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
 #include "editor_flying_camera.h"
 #include "first_person_camera.h"
 #include "flying_camera.h"
@@ -137,6 +142,9 @@ symbols in this file:
 
 #include "units/unit_definitions.h"
 #include "units/units.h"
+
+/* network_game_globals.c's */
+boolean network_game_distributed_client(void);
 
 /* ---------- constants */
 
@@ -697,27 +705,39 @@ static void director_choose_camera_game(
 	}
 	else
 	{
-		struct player_datum *player = player_get(local_player_get_player_index(local_player_index));
-		boolean use_dead_camera = player->unit_index == NONE && player->statistics.deaths > 0;
+		long player_index = local_player_get_player_index(local_player_index);
+		struct player_datum *player = player_get(player_index);
+		/* port: and a network co-op player who hasn't spawned yet, waiting for
+		the level's first checkpoint, watches too */
+		boolean use_dead_camera = player->unit_index == NONE &&
+			(player->statistics.deaths > 0 || players_coop_waiting_to_start(player_index));
 
-		if (key)
+		if (key && !network_game_distributed_client())
 			director_rotate_cameras(local_player_index, director_game_camera_modes, 3);
 		if (!director_camera_scripted->camera_scripted)
 		{
 			director_choose_game_perspective(local_player_index, initialize);
 			if (use_dead_camera)
 			{
-				if (director->camera_proc != (director_camera_update_proc)dead_camera_update)
+				/* port: a dead network co-op player watches a living teammate
+				(port/linux/game/coop_spectate.c), or its own body if nobody is alive */
+				long watched_unit_index = coop_spectating() ? coop_spectate_unit(local_player_index) : NONE;
+
+				if (director->camera_proc != (director_camera_update_proc)dead_camera_update ||
+					(watched_unit_index != NONE &&
+						((struct dead_camera *)director->camera_data)->unit_index != watched_unit_index))
 				{
 					dead_camera_new(
 						(struct dead_camera *)director->camera_data,
 						local_player_index,
-						NONE);
+						watched_unit_index);
 					director_set_camera(
 						local_player_index,
 						(director_camera_update_proc)dead_camera_update,
 						TRUE);
 				}
+				if (watched_unit_index != NONE)
+					coop_spectate_camera((struct dead_camera *)director->camera_data);
 			}
 			else if (director->camera_proc == (director_camera_update_proc)dead_camera_update)
 			{
@@ -776,6 +796,17 @@ static void director_choose_camera_script_camera_record(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (read when Black asks for a switch, so the settings panel's Dev tab row
+applies at once) */
+static boolean director_debug_camera_enabled(void)
+{
+	char const *setting = getenv("HALO_DEBUG_CAMERA");
+
+	return setting && atoi(setting) != 0;
+}
+#endif
+
 static boolean director_update_controls(
 	short local_player_index,
 	struct camera_control *controls)
@@ -816,6 +847,14 @@ static boolean director_update_controls(
 			switch_camera = ticks > 0 && ticks % TICKS_PER_SECOND == 0;
 #endif
 		}
+#ifdef HALO_LINUX
+		/* port: the camera switch (Black held a second: a following, an
+		orbiting, then a flying camera through walls) is a tool of the beta
+		build; on the Vita Black is D-pad left or a rear touch zone a hand can
+		rest on, so it is off unless HALO_DEBUG_CAMERA=1 */
+		if (switch_camera && !director_debug_camera_enabled())
+			switch_camera = FALSE;
+#endif
 
 		if (director->camera_proc !=
 				(director_camera_update_proc)first_person_camera_update &&

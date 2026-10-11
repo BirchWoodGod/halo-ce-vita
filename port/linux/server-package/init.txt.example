@@ -1,0 +1,47 @@
+# init.txt: the dedicated server's commands, run at the start, one a line
+# (DEDICATED_SERVER.md, "init.txt" and "Commands"). Copy this file to
+# init.txt in the server's folder and change what you like. Lines that
+# start with #, ; or // are comments. The server never runs a program or a
+# script from this file.
+
+# The name in the server browser (up to 32 characters; a Vita's System Link
+# list shows the first 16).
+sv_name "My Halo Server"
+
+# The most players (2 to 16).
+sv_maxplayers 12
+
+# 1: listed in every Vita's server browser. 0: joined only by the code the
+# server shows when it starts.
+sv_public 1
+
+# A password for joining from the server browser ("" for none). The code
+# always joins.
+sv_password ""
+
+# Internet play's UDP port: the one to forward on your router and open in
+# the firewall. One port per server on a machine.
+sv_port 2302
+
+# The map cycle: a map of your maps/ folder (without .map) and a gametype
+# (slayer, team_slayer, ctf, king, team_king, oddball, team_oddball, race,
+# team_race, ...). An empty cycle plays Blood Gulch slayer.
+sv_mapcycle_add bloodgulch ctf
+sv_mapcycle_add chillout slayer
+sv_mapcycle_add hangemhigh team_slayer
+
+# A game's longest time, in minutes (0: until its score), and the score that
+# wins (0: the gametype's).
+sv_timelimit 15
+sv_scorelimit 0
+
+# The players a game needs before its countdown starts.
+sv_minplayers 1
+
+# 1: Vitas without a custom map of the cycle may download it from the server
+# in the lobby. 0 (the default): no downloads.
+sv_map_download 0
+
+# If the internet reaches this machine at an address the server cannot find
+# itself (a "symmetric" NAT), say it here:
+# sv_public_address 203.0.113.7:2302

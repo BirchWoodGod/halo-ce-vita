@@ -72,6 +72,13 @@ symbols in this file:
 #include "cluster_partitions.h"
 #include "structure_bsp_definitions.h"
 #include "structures/structures.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
+#include "objects_phases.h"
+#else
+#define HALO_OBJECTS_PHASE_PUSH(phase) ((void)0)
+#define HALO_OBJECTS_PHASE_POP() ((void)0)
+#endif
 
 /* ---------- constants */
 
@@ -168,6 +175,30 @@ static struct
 	unsigned long map_generation;
 } list_tails[LIST_TAIL_SLOTS];
 static unsigned long list_tail_generation = 1;
+
+/* (port) A cluster's list of datums as cluster_partition_get_cluster_datums
+last walked it, kept until any list of any partition changes (a connect, a
+disconnect, a partition made again or copied: cluster_datums_changes) or the
+game state is replaced (halo_map_generation). A vehicle's mass points test
+the clusters it is in again and again between two moves: Covenant V Marines'
+Banshee (22 mass points) has its ground planes, antigravity probes and up to
+four passes against penetration ask for the same few clusters some 110 times a
+tick, each walk a reference at a time through the cluster's list (a cache
+miss each on the Vita, ~60 objects a list in its fight). The tick's own
+(the render's walks are left alone); the copy is the list in its order. */
+#define CLUSTER_DATUMS_CACHE_ENTRIES 16
+#define CLUSTER_DATUMS_CACHE_LENGTH 256
+static struct
+{
+	struct cluster_partition const *partition;
+	short cluster_index;
+	unsigned long changes;
+	unsigned long map_generation;
+	long count;
+	long datums[CLUSTER_DATUMS_CACHE_LENGTH];
+} cluster_datums_cache[CLUSTER_DATUMS_CACHE_ENTRIES];
+static unsigned long cluster_datums_changes = 1;
+static unsigned long cluster_datums_cache_next;
 
 static unsigned long list_tail_slot(long *head)
 {
@@ -328,6 +359,10 @@ void cluster_partition_new(
 {
 	char cluster_name[256];
 
+#ifdef HALO_LINUX
+	cluster_datums_changes++;
+#endif
+
 	partition->cluster_first_data_references = game_state_malloc(
 		name,
 		"cluster references",
@@ -363,6 +398,9 @@ void cluster_partition_make_valid(
 	struct cluster_partition *partition)
 {
 #ifdef HALO_LINUX
+	cluster_datums_changes++;
+#endif
+#ifdef HALO_LINUX
 	list_tail_generation++;
 #endif
 	csmemset(
@@ -378,6 +416,9 @@ void cluster_partition_make_valid(
 void cluster_partition_make_invalid(
 	struct cluster_partition *partition)
 {
+#ifdef HALO_LINUX
+	cluster_datums_changes++;
+#endif
 	if (partition->cluster_reference_data->valid)
 		data_make_invalid(partition->cluster_reference_data);
 
@@ -390,6 +431,9 @@ void cluster_partition_make_invalid(
 void cluster_partition_delete(
 	struct cluster_partition *partition)
 {
+#ifdef HALO_LINUX
+	cluster_datums_changes++;
+#endif
 	if (partition->cluster_first_data_references)
 		partition->cluster_first_data_references = NULL;
 
@@ -407,12 +451,19 @@ void cluster_partition_copy(
 	struct cluster_partition const *source)
 {
 #ifdef HALO_LINUX
+	cluster_datums_changes++;
+#endif
+#ifdef HALO_LINUX
 	list_tail_generation++;
 #endif
+	/* port (from OpenCE, MrBruh's "Harden map and network input"): no
+	more clusters than the partitions hold (a map's bsp may say it has
+	more) */
 	csmemcpy(
 		result->cluster_first_data_references,
 		source->cluster_first_data_references,
-		global_structure_bsp_get()->clusters.count * sizeof(*result->cluster_first_data_references));
+		PIN(global_structure_bsp_get()->clusters.count, 0, MAXIMUM_CLUSTERS_PER_STRUCTURE) *
+			sizeof(*result->cluster_first_data_references));
 	reference_list_copy(
 		result->cluster_reference_data,
 		source->cluster_reference_data);
@@ -441,6 +492,12 @@ collision queries walk ~6000 objects a tick (b30's beach fight), and a call
 or two per object, each asking which thread it is on, cost more than the
 tests most of them fail. A render walk that must skip the tick's new datums,
 and a list longer than maximum, are left to those (NONE). */
+unsigned long cluster_partition_changes(
+	void)
+{
+	return cluster_datums_changes;
+}
+
 long cluster_partition_get_cluster_datums(
 	struct cluster_partition const *partition,
 	short cluster_index,
@@ -449,11 +506,29 @@ long cluster_partition_get_cluster_datums(
 {
 	long reference_index;
 	long count = 0;
+	boolean cached = !halo_epoch_threaded || halo_epoch_on_mutator();
+	unsigned long slot;
 
 	/* (the render's skip of the tick's new datums: those exist only while a
 	tick's epoch is open, until its join) */
 	if (partition->datum_data && halo_epoch_active && !halo_epoch_on_mutator())
 		return NONE;
+	if (cached)
+	{
+		for (slot = 0; slot < CLUSTER_DATUMS_CACHE_ENTRIES; slot++)
+		{
+			if (cluster_datums_cache[slot].partition == partition &&
+				cluster_datums_cache[slot].cluster_index == cluster_index &&
+				cluster_datums_cache[slot].changes == cluster_datums_changes &&
+				cluster_datums_cache[slot].map_generation == halo_map_generation)
+			{
+				if (cluster_datums_cache[slot].count > maximum)
+					return NONE;
+				csmemcpy(indices, cluster_datums_cache[slot].datums, cluster_datums_cache[slot].count * sizeof(*indices));
+				return cluster_datums_cache[slot].count;
+			}
+		}
+	}
 	reference_index = *code_00180fa0((struct cluster_partition *)partition, cluster_index);
 	while (reference_index != NONE)
 	{
@@ -464,6 +539,16 @@ long cluster_partition_get_cluster_datums(
 		if (count >= maximum)
 			return NONE;
 		indices[count++] = datum_index;
+	}
+	if (cached && count <= CLUSTER_DATUMS_CACHE_LENGTH)
+	{
+		slot = cluster_datums_cache_next++ % CLUSTER_DATUMS_CACHE_ENTRIES;
+		cluster_datums_cache[slot].partition = partition;
+		cluster_datums_cache[slot].cluster_index = cluster_index;
+		cluster_datums_cache[slot].changes = cluster_datums_changes;
+		cluster_datums_cache[slot].map_generation = halo_map_generation;
+		cluster_datums_cache[slot].count = count;
+		csmemcpy(cluster_datums_cache[slot].datums, indices, count * sizeof(*indices));
 	}
 	return count;
 }
@@ -502,9 +587,14 @@ void cluster_partition_reconnect(
 	float radius,
 	struct location const *location)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_map);
 	short cluster_indices[64];
 	short cluster_count;
 	short cluster_index_index;
+
+#ifdef HALO_LINUX
+	cluster_datums_changes++;
+#endif
 
 	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x6f, partition);
 	match_assert("c:\\halo\\SOURCE\\structures\\cluster_partitions.c", 0x70, first_cluster_reference);
@@ -547,6 +637,7 @@ void cluster_partition_reconnect(
 #endif
 	}
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 
@@ -555,7 +646,12 @@ void cluster_partition_disconnect(
 	long datum_index,
 	long *first_cluster_reference)
 {
+	HALO_OBJECTS_PHASE_PUSH(_objects_phase_map);
 	long cluster_reference_index = *first_cluster_reference;
+
+#ifdef HALO_LINUX
+	cluster_datums_changes++;
+#endif
 
 	while (cluster_reference_index != NONE)
 	{
@@ -591,6 +687,7 @@ void cluster_partition_disconnect(
 
 	*first_cluster_reference = NONE;
 
+	HALO_OBJECTS_PHASE_POP();
 	return;
 }
 
@@ -618,6 +715,17 @@ static long *code_00180fa0(
 		"c:\\halo\\SOURCE\\structures\\cluster_partitions.c",
 		0xd5,
 		cluster_index>=0 && cluster_index<global_structure_bsp_get()->clusters.count);
+
+	/* port (from OpenCE, MrBruh's "Harden map and network input"): a
+	cluster index that fits no cluster's list has an empty list (what is
+	put in it is not kept), not one past the lists */
+	if (cluster_index < 0 || cluster_index >= MAXIMUM_CLUSTERS_PER_STRUCTURE)
+	{
+		static long no_cluster_first_reference;
+
+		no_cluster_first_reference = NONE;
+		return &no_cluster_first_reference;
+	}
 
 	return &partition->cluster_first_data_references[cluster_index];
 }

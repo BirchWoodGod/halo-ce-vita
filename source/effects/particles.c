@@ -94,6 +94,9 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "sound/game_sound.h"
 #include "sound/sound_definitions.h"
+#ifdef HALO_LINUX
+#include "point_leaf_cache.h"
+#endif
 
 /* ---------- constants */
 
@@ -478,21 +481,38 @@ static boolean particle_next_sequence(
 	struct particle_datum *particle = particle_get(particle_index);
 	struct particle_definition *definition = particle_definition_get(particle->definition_index);
 	struct bitmap_group *bitmap = bitmap_group_get(definition->bitmap.index);
+#ifdef HALO_LINUX
+	/* (port) the next sequence is chosen in a local, and the particle's own
+	is written only once one is found. With the tick on its own thread the
+	render draws the state the previous tick left while this one runs
+	(render_epoch.h): a particle this tick deletes is kept intact for that
+	render, which draws it one last time. Here a particle at the end of its
+	last sequence had its sequence set to NONE before it was deleted, so
+	whenever the tick got there before the render did, the render skipped it
+	(render_particles.c's check for a frame read mid-change). Particles that
+	live for one frame went undrawn: the assault rifle's first-person muzzle
+	flash (effects\particles\flash\flash h ar, one sprite a sequence,
+	animates once a frame), most visibly on a30 (#32). */
+	short sequence_index = NONE;
+#define PARTICLE_NEXT_SEQUENCE_INDEX sequence_index
+#else
+#define PARTICLE_NEXT_SEQUENCE_INDEX particle->sequence_index
 
 	particle->sequence_index = NONE;
+#endif
 
 	if (particle->state == _particle_state_next_sequence_initial)
 	{
 		if (definition->initial_sequence_count > 0)
 		{
-			particle->sequence_index = (short)(definition->first_sequence_index +
+			PARTICLE_NEXT_SEQUENCE_INDEX = (short)(definition->first_sequence_index +
 				local_random_range(0, definition->initial_sequence_count));
 		}
 
 		particle->state++;
 	}
 
-	if ((particle->sequence_index == NONE &&
+	if ((PARTICLE_NEXT_SEQUENCE_INDEX == NONE &&
 			particle->state == _particle_state_next_sequence_looping) ||
 		particle->state == _particle_state_still_looping)
 	{
@@ -502,7 +522,7 @@ static boolean particle_next_sequence(
 		if (particle->age < particle->lifespan &&
 			definition->looping_sequence_count > 0)
 		{
-			particle->sequence_index = (short)(definition->initial_sequence_count +
+			PARTICLE_NEXT_SEQUENCE_INDEX = (short)(definition->initial_sequence_count +
 				definition->first_sequence_index +
 				local_random_range(0, definition->looping_sequence_count));
 		}
@@ -512,12 +532,12 @@ static boolean particle_next_sequence(
 		}
 	}
 
-	if (particle->sequence_index == NONE &&
+	if (PARTICLE_NEXT_SEQUENCE_INDEX == NONE &&
 		particle->state == _particle_state_next_sequence_final)
 	{
 		if (definition->final_sequence_count > 0)
 		{
-			particle->sequence_index = (short)(definition->looping_sequence_count +
+			PARTICLE_NEXT_SEQUENCE_INDEX = (short)(definition->looping_sequence_count +
 				definition->initial_sequence_count +
 				definition->first_sequence_index +
 				local_random_range(0, definition->final_sequence_count));
@@ -526,14 +546,15 @@ static boolean particle_next_sequence(
 		particle->state++;
 	}
 
-	if (particle->sequence_index == NONE || !bitmap->sequences.count)
+	if (PARTICLE_NEXT_SEQUENCE_INDEX == NONE || !bitmap->sequences.count)
 	{
 		particle_die(particle_index);
 
 		return FALSE;
 	}
 
-	particle->sequence_index = (short)PIN(particle->sequence_index, 0, bitmap->sequences.count - 1);
+	particle->sequence_index = (short)PIN(PARTICLE_NEXT_SEQUENCE_INDEX, 0, bitmap->sequences.count - 1);
+#undef PARTICLE_NEXT_SEQUENCE_INDEX
 
 	return TRUE;
 }
@@ -583,6 +604,11 @@ static boolean particle_next_frame(
 		else
 		{
 			result = particle_next_sequence(particle_index);
+#ifdef HALO_LINUX
+			/* (port) one that died keeps the frame it is drawn at
+			(particle_next_sequence) */
+			if (result)
+#endif
 			particle->frame_index = 0;
 		}
 	}
@@ -658,7 +684,13 @@ static boolean particle_update_physics(
 			short collision_material_type;
 			unsigned long collision_flags;
 
+#ifdef HALO_LINUX
+			/* (port) the particle names its cell (point_leaf_cache.c) */
+			collision_flags = point_physics_update_keyed(
+				POINT_LEAF_KEY(_point_leaf_particle, particle_index),
+#else
 			collision_flags = point_physics_update(
+#endif
 				0,
 				physics,
 				&particle->location,
@@ -827,6 +859,9 @@ void particle_new(
 	struct location location;
 	real_point3d position;
 	long particle_index;
+#ifdef HALO_LINUX
+	struct point_leaf_cell seed;
+#endif
 
 	match_assert_valid_real_vector3d(
 		"c:\\halo\\SOURCE\\effects\\particles.c",
@@ -868,7 +903,13 @@ void particle_new(
 		position = data->position;
 	}
 
+#ifdef HALO_LINUX
+	/* (port) the point's cell kept for the particle's first move
+	(point_leaf_cache.c): the same leaf */
+	scenario_location_from_point_seed(&location, &position, &seed);
+#else
 	scenario_location_from_point(&location, &position);
+#endif
 
 	if (location.leaf_index == NONE ||
 		!new_particle_is_visible(definition, &location, &position, data->radius))
@@ -880,6 +921,9 @@ void particle_new(
 
 	if (particle_index == NONE)
 		return;
+#ifdef HALO_LINUX
+	point_leaf_cache_seed_store(POINT_LEAF_KEY(_point_leaf_particle, particle_index), &seed);
+#endif
 
 	particle = particle_get(particle_index);
 
@@ -985,6 +1029,11 @@ void particle_new(
 		}
 	}
 
+#ifdef HALO_LINUX
+	/* (port) as the Xbox had it for one that dies here without a sequence:
+	particle_next_sequence leaves the particle's own as it was */
+	particle->sequence_index = NONE;
+#endif
 	if (particle_next_sequence(particle_index))
 	{
 		struct bitmap_group *bitmap = bitmap_group_get(definition->bitmap.index);

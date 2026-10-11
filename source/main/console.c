@@ -58,6 +58,7 @@ symbols in this file:
 #include "cseries/profile.h"
 #include "editor/editor_stubs.h"
 #include "hs/hs.h"
+#include "networking/network_server_manager.h"
 #include "input/input.h"
 #include "interface/terminal.h"
 #include "math/real_math.h"
@@ -167,7 +168,8 @@ void console_printf(
 		terminal_clear();
 	}
 	
-	vsprintf(buffer, format, arglist);
+	/* port: no longer than the buffer (cut to 255 below, as it was) */
+	vsnprintf(buffer, NUMBEROF(buffer), format, arglist);
 	buffer[255] = '\0';
 	
 	terminal_printf(0, "%s", buffer);
@@ -192,10 +194,14 @@ void console_warning(
 	va_start(arglist, format);
 
 
-	vsprintf(buffer, format, arglist);
+	/* port: no longer than the buffer (cut to 255 below, as it was) */
+	vsnprintf(buffer, NUMBEROF(buffer), format, arglist);
 	buffer[255] = '\0';
 
-	terminal_printf(global_real_argb_red, "%s", buffer);
+	/* (port: an important line, shown as config.toml's game.console_log
+	says; the answer to a command someone typed, always) */
+	if (terminal_shows(terminal_command_running ? _terminal_message_serious : _terminal_message_important))
+		terminal_printf(global_real_argb_red, "%s", buffer);
 	if (console_dump_to_file)
 	{
 		csstrncat(buffer, "\r\n", NUMBEROF(buffer));
@@ -215,7 +221,12 @@ static boolean console_process_command(
 	short newest_previous_command_index = (console_globals.newest_previous_command_index + 1) % MAXIMUM_NUMBER_OF_PREVIOUS_COMMANDS;
 
 	console_globals.newest_previous_command_index = newest_previous_command_index;
-	strcpy(console_globals.previous_commands[newest_previous_command_index], command);
+	/* port: no longer than the slot (a command can come from the telnet
+	console) */
+	csstrncpy(console_globals.previous_commands[newest_previous_command_index], command,
+		NUMBEROF(console_globals.previous_commands[newest_previous_command_index]) - 1);
+	console_globals.previous_commands[newest_previous_command_index][
+		NUMBEROF(console_globals.previous_commands[newest_previous_command_index]) - 1] = 0;
 
 
 	console_globals.previous_command_count = MIN(console_globals.previous_command_count + 1, MAXIMUM_NUMBER_OF_PREVIOUS_COMMANDS);
@@ -248,14 +259,66 @@ static char *console_get_text_to_autocomplete(
 	return result;
 }
 
+/* port: the text after the host's ban or kick command ("ban ", "kick "),
+which completes as a player's name (network_game_server_matching_player_names);
+NULL if the input is not one */
+static char *console_player_command_name(
+	void)
+{
+	static char const *const commands[] = { "ban", "kick" };
+	char *text = console_globals.input_state.result;
+	short command;
+
+	while (*text == ' ' || *text == '(')
+		text++;
+	for (command = 0; command < (short)NUMBEROF(commands); command++)
+	{
+		char const *word = commands[command];
+		long length = (long)strlen(word);
+		long index;
+
+		for (index = 0; index < length; index++)
+		{
+			char character = text[index] >= 'A' && text[index] <= 'Z' ? text[index] - 'A' + 'a' : text[index];
+
+			if (character != word[index])
+				break;
+		}
+		if (index == length && text[length] == ' ')
+		{
+			text += length;
+			while (*text == ' ' || *text == '"')
+				text++;
+			return text;
+		}
+	}
+	return NULL;
+}
+
 static void console_complete(
 	void)
 {
 	char *matching_items[256];
 	char print_buffer[1024];
+	/* (port: the players' names the ban and kick commands complete) */
+	static char player_names[64][NETWORK_GAME_SERVER_NAME_TEXT_SIZE];
 
-	char *token = console_get_text_to_autocomplete();
-	short count = hs_tokens_enumerate(token, NONE, matching_items, NUMBEROF(matching_items));
+	char *token = console_player_command_name();
+	short count;
+
+	if (token)
+	{
+		short index;
+
+		count = network_game_server_matching_player_names(token, player_names, NUMBEROF(player_names));
+		for (index = 0; index < count; index++)
+			matching_items[index] = player_names[index];
+	}
+	else
+	{
+		token = console_get_text_to_autocomplete();
+		count = hs_tokens_enumerate(token, NONE, matching_items, NUMBEROF(matching_items));
+	}
 
 	if (count)
 	{
@@ -294,19 +357,21 @@ static void console_complete(
 				csstrcat(print_buffer, "|t");
 				if (token_num % 4 == 3)
 				{
-					console_printf(FALSE, print_buffer);
+					/* (port: as text, not a format: players' names are other
+					machines') */
+					console_printf(FALSE, "%s", print_buffer);
 					print_buffer[0] = '\0';
 				}
 			}
 			else
 			{
-				console_printf(FALSE, matching_items[token_num]);
+				console_printf(FALSE, "%s", matching_items[token_num]);
 			}
 		}
 
 		if (print_second_column && (token_num - 1) % 4 != 3)
 		{
-			console_printf(FALSE, print_buffer);
+			console_printf(FALSE, "%s", print_buffer);
 		}
 
 		strncpy(token, matching_items[0], last_similar_character_index + 1);
@@ -324,6 +389,11 @@ void console_startup(
 	FILE *file;
 	short newest_previous_command_index;
 
+#ifdef HALO_DEDICATED_SERVER
+	/* (port) a dedicated server's init.txt is its own commands, which it
+	runs itself (port/linux/game/dedicated_server.c): no script from a file */
+	return;
+#endif
 	if (!game_in_editor())
 	{
 		file = fopen("d:\\init.txt", "r");

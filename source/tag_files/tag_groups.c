@@ -5,9 +5,66 @@ TAG_GROUPS.C
 /* ---------- headers */
 
 #include "cseries.h"
+#include "errors.h"
 #include "tag_files.h"
 #include "byte_swapping.h"
 #include "tag_groups.h"
+
+#ifdef HALO_LINUX
+/* ---------- constants */
+
+enum
+{
+	/* port: the most bytes of the empty data (tag_empty_data): more than
+	any tag's root or any block's element */
+	TAG_EMPTY_DATA_SIZE = 0x10000,
+};
+
+/* ---------- globals */
+
+/* port: (tag_empty_data) */
+static unsigned long tag_empty_data_bytes[TAG_EMPTY_DATA_SIZE / sizeof(unsigned long)];
+
+/* ---------- private code */
+
+/* port: an index past what it indexes, logged once */
+void tag_index_error(
+	char const *what,
+	long index,
+	long count)
+{
+	static boolean logged = FALSE;
+
+	if (!logged)
+	{
+		logged = TRUE;
+		error(_error_silent, "#%ld is not a %s index in [#0,#%ld): an empty one is used", index, what, count);
+	}
+
+	return;
+}
+
+/* port (from OpenCE, "Validate map tags before loading"): what an index
+into a tag block, a tag's data or the tags that is not one gives
+(tag_block_get_element_with_size, tag_data_get_pointer, tag_get, and the
+release builds' inline forms in tag_groups.h): TAG_EMPTY_DATA_SIZE bytes of
+zeros, zeroed again each time, in place of whatever lies past the block,
+the data or the tags. Map data is untrusted: an index a crafted map gave
+reads an element or tag with nothing in it (no elements in its blocks, no
+tags referenced) instead of memory past it, and a write lands nowhere that
+matters. */
+void *tag_empty_data_sized(
+	long size)
+{
+	if (size < 0 || size > TAG_EMPTY_DATA_SIZE)
+	{
+		return NULL;
+	}
+	csmemset(tag_empty_data_bytes, 0, sizeof(tag_empty_data_bytes));
+
+	return tag_empty_data_bytes;
+}
+#endif
 
 /* ---------- public code */
 
@@ -37,6 +94,14 @@ void* tag_data_get_pointer(
 {
 	match_assert("c:\\halo\\SOURCE\\tag_files\\tag_groups.c", 3073, size>=0);
 	match_assert("c:\\halo\\SOURCE\\tag_files\\tag_groups.c", 3074, offset>=0 && offset+size<=data->size);
+#ifdef HALO_LINUX
+	/* port: bytes past the data are the empty data's (tag_empty_data) */
+	if (size < 0 || offset < 0 || offset > data->size || size > data->size - offset || (size && !data->address))
+	{
+		tag_index_error("data", offset, data->size);
+		return tag_empty_data_sized(size);
+	}
+#endif
 
 	return (void *)((byte *)data->address + offset);
 }
@@ -56,6 +121,15 @@ void *tag_block_get_element_with_size(
 			index,
 			block->definition ? block->definition->name : "<unknown>", block->count));
 	match_assert("c:\\halo\\SOURCE\\tag_files\\tag_groups.c", 3090, block->address);
+#ifdef HALO_LINUX
+	/* port: an element past the block (an index a map's data gave, which
+	nothing checked) is the empty data (tag_empty_data) */
+	if (index < 0 || index >= block->count || !block->address)
+	{
+		tag_index_error("block element", index, block->count);
+		return tag_empty_data_sized(element_size);
+	}
+#endif
 
 	return (void *)((byte *)block->address + (index * element_size));
 }

@@ -102,6 +102,22 @@ unsigned long point_physics_update(
 	short *collision_material_type,
 	real radius,
 	real dt);
+#ifdef HALO_LINUX
+/* (port) the same, the point named by a key (point_leaf_cache.h; NONE: none) */
+unsigned long point_physics_update_keyed(
+	long key,
+	unsigned long flags,
+	struct point_physics_definition const *definition,
+	struct location *location,
+	short force_weather_palette_index,
+	real_point3d *position,
+	real_vector3d *translational_velocity,
+	real_vector3d const *translational_force,
+	real_vector3d *collision_normal,
+	short *collision_material_type,
+	real radius,
+	real dt);
+#endif
 
 /* ---------- globals */
 

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "networking/network_connection.h"
+#include "game/players.h"
 
 /* ---------- constants */
 
@@ -45,37 +46,6 @@ enum
 /* ---------- structures */
 
 struct unit_camera;
-
-struct player_control_unit_camera_info
-{
-	long unit_index;
-	short seat_index;
-	short pad6;
-	struct unit_camera const *camera;
-	real_point3d position;
-};
-
-struct player_control
-{
-	long unit_index;
-	unsigned long control_flags;
-	word inhibited_button_bit_vector;
-	word reset_button_when_released_bit_vector;
-	real_euler_angles2d desired_angles;
-	real_vector2d throttle;
-	real primary_trigger;
-	short desired_weapon_index;
-	short desired_grenade_index;
-	short zoom_level;
-	boolean use_autolevel;
-	char autolevel_ticks;
-	long target_object_index;
-	real autoaim_level;
-	real magnetism_level;
-	real look_acceleration_time;
-	real pitch_minimum;
-	real pitch_maximum;
-};
 
 struct player_control_globals_data
 {

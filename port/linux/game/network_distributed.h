@@ -38,13 +38,15 @@ enum
 	_distributed_message_objects_synchronized,
 	/* a client has loaded the game: it wants the host's objects (reliable) */
 	_distributed_message_client_ready,
-	/* damage the host dealt, for its clients' effects (unreliable) */
+	/* damage the host dealt, for its clients' effects (unreliable: to the
+	machines of the players it concerns, a kill to all) */
 	_distributed_message_damage_events,
 	/* a client's own players' hits (reliable) */
 	_distributed_message_hit_reports,
 	/* the vehicle a client's own player drives, every tick (unreliable) */
 	_distributed_message_vehicle_prediction,
-	/* what players picked up, for their clients to show (reliable) */
+	/* what players picked up, for their clients to show (reliable, to
+	each player's machine) */
 	_distributed_message_pickups,
 	/* a client's own players' input, every tick, each tick's buttons with
 	the next ticks' (unreliable) */
@@ -54,6 +56,53 @@ enum
 	_distributed_message_relayed_actions,
 	/* the unreliable messages of a tick to one machine, in one datagram */
 	_distributed_message_batch,
+	/* the host's text to every client, which shows it in red on its
+	console (a player dropped for cheating: distributed_note_client_clock) */
+	_distributed_message_notice,
+	/* a client's Discord user, as its Discord told it (reliable, with its
+	ready: distributed_client_send_identity) */
+	_distributed_message_client_identity,
+	/* the host's actors' units: their control and state (network_actors.c).
+	A number of its own, clear of the kinds upstream adds: a build without
+	it drops the message as a kind it does not know, so the network version
+	stays upstream's and its players join as before */
+	_distributed_message_actor_states = 64,
+	/* co-op (a campaign map, no game engine): the host's structure BSP,
+	twice a second, for a client to switch to; numbered as actor_states */
+	_distributed_message_structure_bsp,
+	/* co-op: the host's cinematic, camera and screen fade, every tick
+	(network_coop.c) */
+	_distributed_message_coop_presentation,
+	/* (0.2.0's co-op script sounds; now part of coop_events. The number
+	stays taken so a 0.2.0 build never misreads a newer message.) */
+	_distributed_message_coop_sounds_retired,
+	/* co-op: device group state (network_coop.c) */
+	_distributed_message_coop_device_groups,
+	/* co-op: which named objects exist on the host (network_coop.c) */
+	_distributed_message_coop_object_names,
+	/* co-op: a client's vote to skip the cutscene, to the host (network_coop.c) */
+	_distributed_message_coop_skip_vote,
+	/* co-op: what the host's scripts did once: sounds, titles, HUD text,
+	animations (network_coop.c) */
+	_distributed_message_coop_events,
+	/* co-op: where the host's scenery and machines are, when they move
+	(network_coop.c) */
+	_distributed_message_coop_object_transforms,
+	/* the damage the host's AI units are taking, which their shields'
+	flares are drawn by (network_actors.c); 73 in upstream's AI sync too */
+	_distributed_message_actor_damage = 73,
+	/* co-op: how the host's objects look (their permutations, scale), when
+	that changes (network_coop.c) */
+	_distributed_message_coop_object_looks,
+	/* the flinch and death animations the host picked for its units, which a
+	client plays rather than its own picks (network_objects.c) */
+	_distributed_message_damage_animations = 75,
+	/* co-op: the host's cinematic screen effect (blur, filters, video), when
+	it changes and every two seconds (network_coop.c) */
+	_distributed_message_coop_screen_effect = 76,
+	/* co-op: where the host's devices are (doors, elevators), when they move
+	(network_coop.c) */
+	_distributed_message_coop_device_states = 77,
 
 	NUMBER_OF_DISTRIBUTED_MESSAGES
 };
@@ -75,6 +124,10 @@ tick, drawn as it goes; further, it is put there, drawn gliding
 #define HOST_BLEND_DISTANCE 0.25f
 #define HOST_VEHICLE_BLEND_DISTANCE 0.5f
 #define REMOTE_BLEND_DISTANCE 1.0f
+/* world units: how far a remote unit may be from where the host says
+before it is put there, and how far from the origin a unit can be */
+#define REMOTE_CORRECTION_TOLERANCE 0.05f
+#define UNIT_WORLD_BOUND 32768.0f
 #define REMOTE_VEHICLE_BLEND_DISTANCE 2.0f
 
 enum
@@ -105,11 +158,21 @@ struct distributed_vector
 	short k;
 };
 
+/* (what goes on the wire, as it is on every machine) */
+typedef char distributed_message_header_size_assert[
+	sizeof(struct distributed_message_header) == 8 ? 1 : -1];
+typedef char distributed_message_header_game_time_offset_assert[
+	offsetof(struct distributed_message_header, game_time) == 4 ? 1 : -1];
+typedef char distributed_vector_size_assert[sizeof(struct distributed_vector) == 6 ? 1 : -1];
+
 /* ---------- macros */
 
-/* the entries of a type that fit one unreliable message */
+/* the entries of a type that fit one unreliable message, in a tick's batch
+(its header, and the message's size and header but for its message header);
+a longer message is split where a batch is full */
 #define DATAGRAM_ENTRIES(type) \
-	((short)((DATAGRAM_MAXIMUM_SIZE - sizeof(struct distributed_message_header)) / sizeof(type)))
+	((short)((DATAGRAM_MAXIMUM_SIZE - 2 * sizeof(struct distributed_message_header) - sizeof(word) + \
+		sizeof(message_header)) / sizeof(type)))
 /* ... and one reliable message (its count a byte) */
 #define RELIABLE_ENTRIES(type) \
 	((short)MIN(255, (MAXIMUM_MESSAGE_SIZE - sizeof(struct distributed_message_header)) / sizeof(type)))
@@ -119,6 +182,7 @@ struct distributed_vector
 /* sends a message (its header filled in here) where destination says: the
 unreliable ones gathered into one datagram a machine each tick */
 void distributed_send(void *message, byte type, short count, word size, short destination);
+void distributed_client_send_identity(void);
 /* ... unreliably to one client (the host) */
 void distributed_send_to_machine(long machine_index, void *message, byte type, short count, word size);
 /* ... reliably to one client (the host) */
@@ -134,13 +198,70 @@ boolean distributed_player_is_local(long player_index);
 long distributed_living_unit(struct player_datum const *player);
 /* whether the player is one of that client machine's (the host) */
 boolean distributed_machine_has_player(long machine_index, short player_index);
-void distributed_count_sent(void);
 void distributed_count_correction(void);
+/* (HALO_NET_SYNC_TRACE=1) whether corrections and message bytes are logged */
+boolean distributed_sync_trace(void);
+/* (traced) a correction: what made it, the object, where the host has it, how far off it was */
+void distributed_trace_correction(char const *source, long object_index, real_point3d const *position,
+	real error_distance);
+void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 /* (the host) the client machines in the game, but for its own; their count */
 short distributed_client_machines(long *machine_indices, short maximum);
+/* (main.c) the host has no machine in its game but its own */
+boolean network_distributed_host_alone(void);
 /* (the host) how long a message takes that client and its answer back, in
 ticks (and its jitter), as its players' input messages tell */
 real distributed_machine_round_trip_ticks(long machine_index);
+/* (a client) the host's latest tick it has had a message of, NONE for none */
+long distributed_latest_host_time(void);
+/* (a client) how long ago, in milliseconds, that tick's message came; NONE
+for none */
+long distributed_latest_host_time_age_ms(void);
+/* (a client) how long the host takes to have this machine's players and
+tell it back, in ticks (0 before it is measured) */
+real distributed_own_round_trip_ticks(void);
+/* the latency meter (latency_meter.c) and the scoreboard: the netcode's
+round trips above, timed in milliseconds by when this machine sent the tick
+they come back naming, and what is shown of them, refreshed twice a second
+in the tick (so the render reads them whole). A player's ping, in
+milliseconds: the host knows each client machine's round trip (its own
+players' 0), a client its own players' (its own round trip) and the others'
+as the host's table has them (p2p.c), NONE before it is known (or with no
+fresh table) */
+long distributed_player_ping(short player_index);
+/* (a client) its round trip to the host in milliseconds, NONE before it is
+known or on the host */
+long distributed_own_ping(void);
+/* (the host) its slowest client's round trip in milliseconds, NONE for none */
+long distributed_slowest_client_ping(void);
+/* (a client) the host has sent nothing for a while (the Xbox's "trouble is
+brewing", sooner) */
+boolean distributed_connection_problem(void);
+/* ... the player's machine (the host: a client's that has sent it nothing
+for a while; a client: its own, as above) */
+boolean distributed_player_connection_problem(short player_index);
+/* (a client) the host has its players (or its vehicle) at that tick of this
+machine's, as told now: its own round trip timed */
+void distributed_note_own_round_trip(long time);
+/* (the host, in its tick) the client machine a player is on, NONE for none
+(the host's own players') */
+long distributed_player_machine(short player_index);
+/* (the host, in its tick) whether the client's players can see the player
+(or the player is its own, or it has none alive to see with) */
+boolean distributed_machine_sees_player(long machine_index, short player_index);
+/* what a message says, checked: a number finite; a point's parts finite
+and within bound of the origin; an object's index whole (its identifier
+never 0, which any object at the index matches) */
+boolean distributed_real_valid(real value);
+boolean distributed_point_valid(real_point3d const *point, real bound);
+boolean distributed_object_index_valid(long object_index);
+/* whether a tag index from the host really is a tag of that group */
+boolean distributed_tag_of_group(long tag_index, unsigned long group_tag);
+/* the graph's animation, if a graph tag and animation index from the host are valid */
+struct animation *distributed_graph_animation(long animation_graph_index, short animation_index);
+/* ... an orientation's two axes (unpacked): TRUE when they are one long
+and about square, then made exactly so */
+boolean distributed_axes_make_valid(real_vector3d *forward, real_vector3d *up);
 /* the vectors in 16 bits a part (struct distributed_vector) */
 void distributed_vector_pack(real_vector3d const *vector, real scale, struct distributed_vector *result);
 void distributed_vector_unpack(struct distributed_vector const *vector, real scale, real_vector3d *result);
@@ -148,14 +269,79 @@ void distributed_unit_vector_unpack(struct distributed_vector const *vector, rea
 #define DISTRIBUTED_UNIT_SCALE 32767.0f
 #define DISTRIBUTED_VELOCITY_SCALE 1024.0f
 #define DISTRIBUTED_ANGULAR_VELOCITY_SCALE 4096.0f
+/* an angle as a 16-bit fraction of a turn, and back (yaw from 0 to 2 pi,
+pitch from -pi to pi) */
+short distributed_angle_pack(real angle);
+real distributed_angle_unpack(short value, boolean signed_angle);
+/* shields and health in 16 bits */
+word distributed_vitality_pack(real value);
+real distributed_vitality_unpack(word value);
+
+/* ---------- prototypes/NETWORK_ACTORS.C */
+
+void network_actors_new_game(void);
+/* (the host, after each tick) the units its actors drove this tick, to
+each client */
+void network_actors_host_tick(void);
+/* (a client) the host's word on its actors' units */
+void network_actors_handle_states(void const *entries, short count);
+word network_actors_entry_size(void);
+/* (a client, in its tick where the host runs its actors) each actor's unit
+given the control the host last sent for it */
+void network_actors_drive(void);
+/* (a client) whether the host's actor states place this unit now (a living AI
+unit they came for lately), rather than its object states */
+boolean network_actors_client_drives(long unit_index);
+/* (the host) whether this tick's actor states place this unit, rather than its object states */
+boolean network_actors_host_drives(long unit_index);
+
+/* ---------- prototypes/NETWORK_COOP.C */
+
+void network_coop_new_game(void);
+/* after each tick, on the host and on a client */
+void network_coop_host_tick(void);
+void network_coop_client_tick(void);
+/* the message handlers, and their entry sizes */
+word network_coop_presentation_entry_size(void);
+void network_coop_handle_presentation(void const *entries, long host_time);
+word network_coop_event_entry_size(void);
+void network_coop_handle_events(void const *entries, short count);
+word network_coop_device_group_entry_size(void);
+void network_coop_handle_device_groups(void const *entries, short count);
+word network_coop_object_names_entry_size(void);
+void network_coop_handle_object_names(void const *entries);
+word network_coop_object_transform_entry_size(void);
+word network_coop_object_look_entry_size(void);
+void network_coop_handle_object_looks(void const *entries, short count);
+word network_coop_screen_effect_entry_size(void);
+word network_coop_device_state_entry_size(void);
+void network_coop_handle_device_states(void const *entries, short count);
+void network_coop_handle_screen_effect(void const *entries, short count);
+word network_actors_damage_entry_size(void);
+void network_actors_handle_damage(void const *entries, short count);
+void network_coop_handle_object_transforms(void const *entries, short count);
+word network_coop_skip_vote_entry_size(void);
+void network_coop_handle_skip_vote(long machine_index, void const *entries);
+/* game_sound.c: a sound the host's scripts played */
+enum
+{
+	_coop_sound_impulse,
+	_coop_sound_looping_start,
+	_coop_sound_looping_stop,
+};
+void network_coop_note_sound(short kind, long definition_index, long object_index, real scale);
 
 /* ---------- prototypes/NETWORK_OBJECTS.C */
 
 void network_objects_new_game(void);
 /* after each tick */
 void network_objects_host_tick(void);
+word network_objects_damage_animation_entry_size(void);
+void network_objects_handle_damage_animations(void const *entries, short count);
 void network_objects_client_tick(void);
-void network_objects_client_ready(long machine_index);
+/* (the host) a client has loaded the game and asks for the host's objects:
+again, having failed to make one of them */
+void network_objects_client_asked(long machine_index, boolean again);
 void network_objects_handle_changes(void const *entries, short count);
 void network_objects_handle_synchronized(void);
 void network_objects_handle_states(void const *entries, short count);
@@ -176,10 +362,16 @@ boolean network_objects_reconcile(long object_index, real_point3d const *positio
 	real blend_distance);
 /* a unit in the vehicle's seat as the host has it (NONE: in none) */
 void network_objects_set_seat(long unit_index, long vehicle_index, short seat_index);
+/* (the host) the ticks between sends to a machine of a unit at position, by
+how near that machine's players are (network_actors.c) */
+short network_objects_send_period(long machine_index, real_point3d const *position);
 
 /* ---------- prototypes/NETWORK_DAMAGE.C */
 
 void network_damage_new_game(void);
+/* the host: a grenade a player's unit threw (units.c), whose damage that
+player's machine reports */
+void network_damage_note_grenade(long unit_index, short grenade_type);
 void network_damage_host_tick(void);
 void network_damage_client_tick(void);
 void network_damage_handle_events(void const *entries, short count);

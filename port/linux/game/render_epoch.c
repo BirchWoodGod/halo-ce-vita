@@ -177,7 +177,12 @@ int halo_thread_index(void)
 	for (index = 0; index < count; index++)
 		if (here >= thread_table[index].low && here < thread_table[index].high)
 			return index;
-	while (__atomic_exchange_n(&thread_table_lock, 1, __ATOMIC_ACQUIRE))
+	/* (this lock and the port's other spin locks test, then test and set:
+	the exchange only when the lock looks free, so a waiting core spins on
+	its own copy of the line instead of taking it from the holder's core
+	each time round - Bruno Santana's change) */
+	while (__atomic_load_n(&thread_table_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&thread_table_lock, 1, __ATOMIC_ACQUIRE))
 		;
 	count = thread_table_count;
 	for (index = 0; index < count; index++)
@@ -672,7 +677,8 @@ void halo_marker_lock(int which)
 
 	if (!halo_epoch_threaded)
 		return;
-	while (__atomic_exchange_n(&marker_held[which], 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&marker_held[which], __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&marker_held[which], 1, __ATOMIC_ACQUIRE))
 	{
 		if (!waited_from && vita_host_time_us)
 			waited_from = vita_host_time_us();

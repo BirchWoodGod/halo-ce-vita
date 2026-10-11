@@ -51,6 +51,16 @@ void *vgxm_worker_alloc(unsigned long size, unsigned long alignment);
 void *vgxm_pool_alloc(unsigned long size, unsigned long alignment);
 /* waits for the GPU and forgets every pool allocation */
 void vgxm_pool_reset(void);
+/* as vgxm_pool_reset, and every segment but the first freed (a map gone):
+the CDRAM bytes given back */
+unsigned long vgxm_pool_release(void);
+/* the bytes the pool's segments and large blocks hold */
+unsigned long vgxm_pool_held(void);
+/* the pool full: waits for the GPU and frees the pool's next segment (the
+oldest allocations, from the start again past the end), its memory in
+*base and *size (0 if it had none) for what was decoded there to be
+forgotten; 0 when none is left to free so (vgxm_pool_reset then) */
+int vgxm_pool_recycle(void **base, unsigned long *size);
 unsigned long vgxm_pool_used(void);
 
 /* ---------- textures: 16-byte GXM control words */
@@ -108,11 +118,47 @@ and more: HALO_RENDER_SCALE), and a new one for the targets made from now
 on (the settings panel's change, between frames: d3d8_gxm.c) */
 float vgxm_render_scale(void);
 void vgxm_render_scale_set(float scale);
+/* the dynamic resolution (d3d8_gxm.c, on the worker between two frames, or
+with it idle): the screen-sized targets drawn into their top left, scale
+times the size asked for, their memory as it was made (at most the render
+scale; 1: the whole target). Returns the scale in effect. Viewports, clips,
+clears, visibility counts, the blit to the display and screenshots follow;
+the colour targets' textures cover the drawn part once vgxm_target_texture
+is called again for each (a target made from now on has it already) */
+float vgxm_render_rect_set(float scale);
+float vgxm_render_rect(void);
+void vgxm_target_texture(unsigned long id, struct vgxm_texture *texture);
 /* (the log) the target slots made, the CDRAM the targets hold, the CDRAM
 kept for the screen-sized targets' sizes not in use (vita_gxm.c
 screen_block_keep), and the CDRAM free */
 void vgxm_target_stats(unsigned long *targets, unsigned long *cdram_bytes, unsigned long *cached_bytes,
 	unsigned long *cdram_free);
+/* ---------- video memory (CDRAM: port/vita/include/vgxm_memory.h)
+
+The CDRAM free (the hardware's figure where it can be trusted, the model's
+otherwise, less HALO_CDRAM_RESERVE_MB's reserve). The rest is for the
+device's live changes and relief (d3d8_gxm.c), between frames, with the
+worker and the GPU idle: vgxm_cdram_wanted, the largest target allocation
+that found no CDRAM since it was last asked (0: none); vgxm_memory_trim
+frees what costs nothing (the block cache, the small targets' blocks with
+every share back), the bytes freed; vgxm_targets_sweep gives back every
+target whose id is not marked in referenced[] (count entries; never an
+atlas or its cells), the bytes they held; vgxm_pool_demote moves the
+texture pool's highest part in CDRAM to user RAM (the CDRAM bytes freed, 0
+if none), and vgxm_pool_promote the lowest in user RAM back to CDRAM when
+the targets keep their headroom (1 if one moved): the textures decoded in
+*base's *size bytes are to be forgotten (vita_texture_cache_forget).
+vgxm_memory_census logs what holds CDRAM; with detail, a line per target,
+with roles[id] (count entries) saying what each is */
+/* (the most target ids there are) */
+#define VGXM_MAXIMUM_TARGETS 256
+unsigned long vgxm_cdram_free(void);
+unsigned long vgxm_cdram_wanted(void);
+unsigned long vgxm_memory_trim(void);
+unsigned long vgxm_targets_sweep(const unsigned char *referenced, unsigned long count);
+unsigned long vgxm_pool_demote(void **base, unsigned long *size);
+int vgxm_pool_promote(void **base, unsigned long *size);
+void vgxm_memory_census(const char *const *roles, unsigned long count, int detail);
 /* colour targets for each level of one linear mip chain (levels one after
 another, rows aligned to 8 texels, as the texture cache's own mipmapped
 textures), so a texture the game renders level by level (the water's
@@ -207,6 +253,9 @@ struct vgxm_draw
 	unsigned long stencil_test, stencil_function, stencil_reference, stencil_read_mask, stencil_write_mask;
 	unsigned long stencil_fail, stencil_depth_fail, stencil_pass;
 	unsigned long blend, blend_source, blend_destination, blend_operation;
+	/* D3DRS_BLENDCOLOR (its factors are made of GXM's before the draw
+	reaches vgxm_draw: blend_constant.h) */
+	unsigned long blend_color;
 	/* D3DCOLORWRITEENABLE_* bits */
 	unsigned long color_write;
 	/* 0 none, else D3DCULL_CW or D3DCULL_CCW: the winding that is discarded */
@@ -248,6 +297,23 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 thread; the frames' scenes all end with the present's notification) */
 void vgxm_wait_gpu_idle(void);
 
+/* the GPU's time for the frames presented (the dynamic resolution's
+measure): the worker marks when it starts handing a frame's main work to
+the GPU (vgxm_frame_submit_begin, before the records held for the present);
+vgxm_gpu_frame_next gives each frame the GPU has finished since, oldest
+first, 1 while there is one. gpu_ms is from the later of the submission's
+start and the previous frame's finish to the frame's finish, tail_ms from
+the later of its last scene's submission and that finish (most of gpu_ms
+when the GPU is the wall), interval_ms from the previous frame's finish;
+scale is the render rectangle it was drawn at. None on the null renderer */
+struct vgxm_gpu_frame
+{
+	unsigned long frame;
+	float gpu_ms, tail_ms, interval_ms, scale;
+};
+void vgxm_frame_submit_begin(void);
+int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame);
+
 /* a line of the renderer's cache sizes (shaders, linked programs,
 targets, scenes this frame) for the frame statistics */
 const char *vgxm_counts(void);
@@ -255,18 +321,29 @@ const char *vgxm_counts(void);
 /* the numbers the overlay shows (XV_FPS=1): frames per second, the game
 tick and render times in milliseconds */
 void vgxm_overlay_set(float fps, float tick_ms, float render_ms);
-/* the performance overlay on or off (the settings panel's switch) */
+/* the performance overlay: 0 off, 1 the full one (frames per second, tick
+and render times, the cores' load), 2 frames per second only (XV_FPS, the
+settings panel's switch) */
 void vgxm_overlay_enable(int enabled);
+/* the full overlay's RES line marks the dynamic resolution as running */
+void vgxm_overlay_dynamic(int dynamic);
 /* the frame's scale to the display: 0 smooth (bilinear), 1 sharp
 (nearest); HALO_UPSCALE_FILTER at start-up */
 void vgxm_upscale_filter_set(int filter);
+/* the display's buffers: 3 (triple buffering, frame interpolation's: the
+third made the first time) or 2, from the next frame on */
+void vgxm_display_buffering(int buffers);
 /* (debug) the display buffer last presented, 960x544 (the screenshots'
 HALO_SCREENSHOT_DISPLAY=1) */
 const void *vgxm_display_pixels(unsigned long *pitch, unsigned long *width, unsigned long *height);
 /* the settings panel (vita_settings.c): text is its lines separated by
-'\n' (the first a title, the last a hint), selected the highlighted line;
-NULL hides it */
+'\n' (the first a title, or a tab bar when it starts with '\t': the tabs'
+names between '|', the shown one after a '*'; the last a hint; a line that
+starts with '!' is a warning), selected the highlighted line; NULL hides it */
 void vgxm_menu_set(const char *text, int selected);
+/* a system dialog (vita_net.c's network check) is up: the system draws it
+over each frame presented while active (host side only) */
+void vgxm_common_dialog(int active);
 
 /* the colour target's pixels in rows of 32-bit BGRA, for screenshots
 (waits for the GPU), and its size (smaller than asked for when the render

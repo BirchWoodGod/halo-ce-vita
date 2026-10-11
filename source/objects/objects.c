@@ -15,19 +15,20 @@ tick tombstoned this epoch is gone for the tick, one it created is not yet
 there for the render) */
 #define OBJECT_HEADER_LIVE(header, absolute_index) \
 	((header)->identifier && !halo_epoch_datum_hidden_from_caller(object_header_data, (absolute_index)))
-/* object_update's sub-steps, timed for the HALO_TICK_PROFILE report below
-(in the ticks fine_profile.h picks) */
-#include "fine_profile.h"
-static unsigned long long objects_step_us[8], objects_step_started;
-static int objects_step_depth;
-static int objects_profile_on;
-#define OBJECT_STEP_ON() (objects_profile_on > 0 && halo_fine_tick_on && objects_step_depth == 0)
-#define OBJECT_STEP_BEGIN() do { if (OBJECT_STEP_ON()) objects_step_started = halo_fine_tick_now(); } while (0)
-#define OBJECT_STEP_END(k) do { if (OBJECT_STEP_ON()) objects_step_us[k] += halo_fine_tick_now() - objects_step_started; } while (0)
+/* objects_update by object type and phase (HALO_TICK_PROFILE=2:
+objects_phases.h) */
+#include "objects_phases.h"
+/* the bounding spheres' packed copy for the collision walks
+(object_bounds_cache.c) */
+#include "object_bounds_cache.h"
+#include <stdlib.h>
+void platform_log(const char *format, ...);
+#define OBJECT_STEP_BEGIN(phase) HALO_OBJECTS_PHASE_PUSH(phase)
+#define OBJECT_STEP_END() HALO_OBJECTS_PHASE_POP()
 #else
 #define OBJECT_HEADER_LIVE(header, absolute_index) ((header)->identifier)
-#define OBJECT_STEP_BEGIN() ((void)0)
-#define OBJECT_STEP_END(k) ((void)0)
+#define OBJECT_STEP_BEGIN(phase) ((void)0)
+#define OBJECT_STEP_END() ((void)0)
 #endif
 
 #include "damage.h"
@@ -83,11 +84,30 @@ static int objects_profile_on;
 
 #define MAXIMUM_DUMPS 1024
 
+/* port: the garbage collection (objects_garbage_collection). With many
+players spread over a level and many bodies (co-op's extra enemies), every
+body was in some player's view, none could go, and the whole collection
+(every garbage object's visibility, the memory pool compacted) ran again
+every tick on the host. In network co-op only (single player and
+multiplayer keep the game's own collection), a player sees garbage no
+further off than GARBAGE_VISIBLE_DISTANCE (world units, about 90 metres),
+and a collection of active garbage that left too much is tried again only
+after GARBAGE_ACTIVE_RETRY_TICKS. Running short of memory or objects still
+collects at once. */
+#define GARBAGE_VISIBLE_DISTANCE 30.0f
+#define GARBAGE_ACTIVE_RETRY_TICKS TICKS_PER_SECOND
+
 
 // This is dangerous, bungie returns the same value regardless of whether the index is valid
+/* port: an index is 1-4 for the incoming functions and 5-8 for the outgoing
+ones (the Xbox read both through incoming_function_values, which the
+outgoing ones follow; retail uses up to 8). Anything else is a map's bad
+index, which reads no function: 0 */
 #define OBJECT_INCOMING_FUNCTION_GET_VALUE(object, index)	\
-((index)>=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS+1 ?			\
-(object)->object.incoming_function_values[(index)-1] :		\
+((unsigned long)((index)-1)>=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS+NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS ? \
+0.f :														\
+(index)>=NUMBER_OF_INCOMING_OBJECT_FUNCTIONS+1 ?			\
+(object)->object.outgoing_function_values[(index)-NUMBER_OF_INCOMING_OBJECT_FUNCTIONS-1] : \
 (object)->object.incoming_function_values[(index)-1])
 
 #define OBJECT_FRAME_INDEX_GET(object_index) ((object_index) + game_time_get())
@@ -111,6 +131,11 @@ struct object_globals
 		short cluster_index;
 	} pvs_activation;
 };
+
+/* port: when a collection of active garbage may be tried again (NONE: at
+once); not in the game state, so a revert, which takes the clock back, puts
+it right (objects_garbage_active_due) */
+static long garbage_active_retry_time = NONE;
 
 struct object_memory_release_function
 {
@@ -141,7 +166,14 @@ on the host's word */
 long network_objects_new_object_index(void);
 boolean network_objects_creating_host_object(void);
 boolean network_objects_may_delete(long object_index);
+/* port/linux/game/network_coop.c's: the co-op host's object census looks at each object made */
+void network_coop_note_object_new(long object_index);
 #endif
+/* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
+void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
+	char const *child_marker_name);
+void network_coop_note_detach(long parent_index, long child_index);
+boolean network_coop_active(void);
 
 static void object_connect_lights(long object_index, boolean disconnect, boolean reconnect);
 static void object_name_list_allocate(void);
@@ -172,6 +204,8 @@ static void object_delete_attachments(long object_index);
 static void object_delete_recursive(long object_index, boolean delete_siblings);
 static void object_compute_function_values(long object_index);
 static void object_compute_change_colors(long object_index);
+static void object_model_nodes_error(long model_index, struct model const *model);
+static void object_definition_data_error(long definition_index, char const *problem);
 
 /* ---------- globals */
 
@@ -366,6 +400,19 @@ void *object_iterator_next(
 	while (abs_index<object_header_data->count)
 	{
 		long index = DATUM_INDEX_NEW(abs_index++, header->identifier);
+#ifdef HALO_LINUX
+		/* (port) the type and flags first: they are the header's own bytes,
+		while the liveness test asks the render epoch about the slot (a call
+		and a fence), which every header of another type paid for too */
+		if ((iterator->flags&header->flags)==iterator->flags &&
+			TEST_FLAG(iterator->type_flags, header->type) &&
+			OBJECT_HEADER_LIVE(header, abs_index - 1))
+		{
+			iterator->index = index;
+			result = header->datum;
+			break;
+		}
+#else
 		if (OBJECT_HEADER_LIVE(header, abs_index - 1))
 		{
 			if ((iterator->flags&header->flags)==iterator->flags &&
@@ -376,6 +423,7 @@ void *object_iterator_next(
 				break;
 			}
 		}
+#endif
 		++header;
 	}
 	iterator->absolute_index = abs_index;
@@ -408,7 +456,9 @@ void object_set_object_index_for_name_index(
 	short name_index,
 	long object_index)
 {
-	if (VALID_INDEX(name_index, global_scenario_get()->object_names.count))
+	/* port: and one the name list holds (a map's count; retail has up to
+	448 names) */
+	if (VALID_INDEX(name_index, MIN(global_scenario_get()->object_names.count, MAXIMUM_OBJECT_NAMES_PER_SCENARIO)))
 	{
 		object_name_list[name_index] = object_index;
 	}
@@ -422,7 +472,29 @@ void objects_fix_for_deleted_object(
 	struct object_datum *object;
 
 	struct object_iterator iterator;
+#ifdef HALO_LINUX
+	/* (port) the types with a handler: object_types.c */
+	unsigned long object_types_handling_deleted_objects(void);
+	unsigned long handling_types = object_types_handling_deleted_objects();
+
+#ifdef HALO_RELEASE
+	/* (port) only the objects of those types are visited: an object's
+	umbrella shield (the other reference cleared here) is never anything
+	but NONE - object_new sets it so, and nothing in the game sets it to an
+	object (damage.c only reads it) - so the clearing below never found an
+	object to clear, and the walk read every object in the game (~1000 in
+	b30's beach fight, a cache miss each on the Vita) for every projectile
+	that hit. The headers are still walked in order; the handlers are
+	called for the same objects in the same order. (Builds with assertions
+	visit every object and check that no umbrella shield names the deleted
+	object.) */
+	object_iterator_new(&iterator, handling_types, 0);
+#else
 	object_iterator_new(&iterator, _object_mask_all, 0);
+#endif
+#else
+	object_iterator_new(&iterator, _object_mask_all, 0);
+#endif
 
 	for (object = (struct object_datum *)object_iterator_next(&iterator);
 		object;
@@ -430,8 +502,15 @@ void objects_fix_for_deleted_object(
 	{
 		if (object->object.umbrella_shield_object_index==deleted_object_index)
 		{
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+			match_vassert("c:\\halo\\SOURCE\\objects\\objects.c", __LINE__, FALSE,
+				"objects_fix_for_deleted_object: an umbrella shield named an object (a release build skips the objects that have no handler)");
+#endif
 			object->object.umbrella_shield_object_index = NONE;
 		}
+#ifdef HALO_LINUX
+		if (TEST_FLAG(handling_types, object->object.type))
+#endif
 		object_type_handle_deleted_object(iterator.index, deleted_object_index);
 	}
 
@@ -586,6 +665,18 @@ void object_pvs_set_camera_point(
 	return;
 }
 
+void objects_port_set_activating_cluster(
+	short cluster_index)
+{
+	if (cluster_index == NONE || cluster_index >= global_structure_bsp_get()->clusters.count)
+	{
+		object_globals->pvs_activation_type = _pvs_activation_normal;
+		return;
+	}
+	object_globals->pvs_activation_type = _pvs_activation_cluster;
+	object_globals->pvs_activation.cluster_index = cluster_index;
+}
+
 void object_pvs_clear(void)
 {
 	object_globals->pvs_activation_type = _pvs_activation_normal;
@@ -713,6 +804,10 @@ static long object_header_new(
 			index = NONE;
 		}
 	}
+#ifdef HALO_LINUX
+	if (index!=NONE && data==object_header_data)
+		network_coop_note_object_new(index);
+#endif
 
 	return index;
 }
@@ -854,6 +949,32 @@ int halo_tick_hash_object_marks(long *saved, int maximum, int restore)
 		{
 			saved[count++] = header->datum->object.magic_number;
 			header->datum->object.magic_number = 0;
+		}
+	}
+	return count;
+}
+
+/* (tick_hash.c, HALO_TICK_HASH_MASK=2) every object's cached render state
+(the render's, render_objects.c: which objects are drawn, and how often their
+lighting is prepared, change it) saved and cleared, or put back */
+int halo_tick_hash_object_render_states(long *saved, int maximum, int restore)
+{
+	short absolute_index;
+	int count = 0;
+
+	for (absolute_index = 0; absolute_index < object_header_data->count && count < maximum; absolute_index++)
+	{
+		struct object_header_datum *header = (struct object_header_datum *)
+			((char *)object_header_data->data + object_header_data->size * absolute_index);
+
+		if (!header->identifier || !header->datum)
+			continue;
+		if (restore)
+			header->datum->object.cached_render_state_index = saved[count++];
+		else
+		{
+			saved[count++] = header->datum->object.cached_render_state_index;
+			header->datum->object.cached_render_state_index = 0;
 		}
 	}
 	return count;
@@ -1596,7 +1717,9 @@ void object_permute_region(
 		short region_index;
 		struct model* model = model_definition_get(object_definition->object.model.index);
 		
-		for (region_index = 0; region_index<model->regions.count; region_index++)
+		/* port: no more regions than the object's region_permutations holds
+		(a map's count; retail has up to 8) */
+		for (region_index = 0; region_index<MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT); region_index++)
 		{
 			if (desired_region_index==NONE || desired_region_index==region_index)
 			{
@@ -1606,7 +1729,10 @@ void object_permute_region(
 					region_index,
 					struct model_region);
 
-				for (permutation_index = 0; permutation_index<region->permutations.count; permutation_index++)
+				/* port: no more permutations than a region has room for (a map's
+				count, which a short counter would never reach; retail has up
+				to 12) */
+				for (permutation_index = 0; permutation_index<MIN(region->permutations.count, MAXIMUM_PERMUTATIONS_PER_MODEL_REGION); permutation_index++)
 				{
 					struct model_region_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
 						&region->permutations,
@@ -1644,9 +1770,31 @@ boolean object_get_function_value(
 	{
 		match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 1654, function_index>=0 && function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS);
 
-		*value_reference = object->object.outgoing_function_values[function_index];
-		
-		result = TEST_FLAG(object->object.functions_active_flags, function_index);
+		/* port: a function the object can have (a map's index, from an
+		attachment, a widget or a shader; retail's are NONE or 0-3), or
+		it reads as off */
+		if (VALID_INDEX(function_index, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS))
+		{
+			*value_reference = object->object.outgoing_function_values[function_index];
+
+			result = TEST_FLAG(object->object.functions_active_flags, function_index);
+		}
+		else
+		{
+			static boolean function_index_reported = FALSE;
+
+			if (!function_index_reported)
+			{
+				function_index_reported = TRUE;
+				error(
+					_error_silent,
+					"### ERROR %s asked for function #%d; it reads as off",
+					tag_get_name(object->definition_index),
+					function_index);
+			}
+			*value_reference = 0.f;
+			result = FALSE;
+		}
 	}
 	
 	return result;
@@ -1805,7 +1953,8 @@ boolean object_visible_to_any_player(
 						struct unit_datum const *unit = unit_get(player->unit_index);
 						real distance = normalize3d(vector_from_points3d(&player_position, &object->object.bounding_sphere_center, &eye_to_point));
 
-						if (dot_product3d(&unit->unit.desired_aiming_vector, &eye_to_point) > cosine(arctangent(object->object.bounding_sphere_radius, distance) + sloppy_maximum_field_of_view))
+						if ((!network_coop_active() || distance <= GARBAGE_VISIBLE_DISTANCE) &&
+							dot_product3d(&unit->unit.desired_aiming_vector, &eye_to_point) > cosine(arctangent(object->object.bounding_sphere_radius, distance) + sloppy_maximum_field_of_view))
 						{
 							visible = TRUE;
 							break;
@@ -1985,6 +2134,26 @@ real_matrix4x3 *object_get_node_matrix(
 	short node_index)
 {
 	match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 1060, object_has_node(object_index, node_index));
+	/* port: a node the object has no matrix for (an index a map's data
+	gave) is its first node, which every object has, not whatever lies
+	past its matrices */
+	{
+		struct object_datum *object = object_get(object_index);
+
+		if (node_index < 0 ||
+			node_index >= object->object.node_matrices.size / (short)sizeof(real_matrix4x3))
+		{
+			static boolean logged = FALSE;
+
+			if (!logged)
+			{
+				logged = TRUE;
+				error(_error_silent, "object %08lx has no node #%d: its first node is used",
+					(unsigned long)object_index, node_index);
+			}
+			node_index = 0;
+		}
+	}
 
 #ifdef HALO_LINUX
 	{
@@ -2424,7 +2593,16 @@ void object_export_function_values(
 			default:
 				region_index = object_definition->object.function_modes[i]-_object_function_first_region_damage;
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 2630, region_index>=0 && region_index<MAXIMUM_REGIONS_PER_OBJECT);
-				value = object->object.region_damage[region_index] / 255.f;
+				/* port: a region the object has, or 0 (a map's function mode;
+				retail's are 0-5, 10, 18 and 19) */
+				if (VALID_INDEX(region_index, MAXIMUM_REGIONS_PER_OBJECT))
+				{
+					value = object->object.region_damage[region_index] / 255.f;
+				}
+				else
+				{
+					object_definition_data_error(object->definition_index, "function mode; it reads 0");
+				}
 				break;
 			}
 			object->object.incoming_function_values[i] = value;
@@ -2513,7 +2691,10 @@ void object_compute_node_matrices(
 		cannot_interpolate_node_orientations_storage :
 		(real_orientation *)object_header_block_get(object_index, &object->object.node_orientations);
 
-	if (object_definition->object.model.index!=NONE)
+	OBJECT_STEP_BEGIN(_objects_phase_nodes);
+	/* port: a model without nodes is placed like no model (a map's count) */
+	if (object_definition->object.model.index!=NONE &&
+		model_definition_get(object_definition->object.model.index)->nodes.count>0)
 	{
 		real_matrix4x3 *object_node_matrix;
 		boolean world_relative;
@@ -2525,6 +2706,8 @@ void object_compute_node_matrices(
 		struct object_type_definition *object_type_definition = object_type_definition_get(object->object.type);
 		
 		struct model *model = model_definition_get(object_definition->object.model.index);
+		/* port: the nodes node_stack and the orientations hold (a map's count) */
+		short model_node_count = (short)MIN(model->nodes.count, MAXIMUM_NODES_PER_MODEL);
 
 		if (object->object.parent_object_index==NONE)
 		{
@@ -2588,8 +2771,11 @@ void object_compute_node_matrices(
 					overlay_index,
 					struct animation_graph_object_overlay);
 
-				if (overlay->animation_index!=NONE &&
-					overlay->function_index<object_definition->object.functions.count)
+				/* port: an animation the graph has (a map's index), and a function
+				the object has room for (a map's index; NONE read before the
+				functions; retail's are 0-3) */
+				if (VALID_INDEX(overlay->animation_index, animation_graph->animations.count) &&
+					VALID_INDEX(overlay->function_index, MIN(object_definition->object.functions.count, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS)))
 				{
 					struct object_function_definition* function = TAG_BLOCK_GET_ELEMENT(
 						&object_definition->object.functions,
@@ -2601,7 +2787,14 @@ void object_compute_node_matrices(
 						struct animation);
 					real value= object->object.outgoing_function_values[overlay->function_index];
 
-					if (overlay->mode==_object_overlay_mode_frame)
+					/* port: no more nodes than the model has, which is all the
+					orientations hold (a map's animation; retail's overlays have
+					the model's count) */
+					if (animation->node_count>model_node_count)
+					{
+						object_definition_data_error(object->definition_index, "overlay animation (more nodes than its model); it is skipped");
+					}
+					else if (overlay->mode==_object_overlay_mode_frame)
 					{
 						real frame_index;
 						if (TEST_FLAG(function->flags, _object_function_additive_bit))
@@ -2615,7 +2808,9 @@ void object_compute_node_matrices(
 
 						overlay_animation_apply_continuous(animation, frame_index, node_orientations);
 					}
-					else if (overlay->mode==_object_overlay_mode_scale)
+					/* port: and a frame to pick (a map's frame count of 0 divided
+					by zero) */
+					else if (overlay->mode==_object_overlay_mode_scale && animation->frame_count>0)
 					{
 						short frame_index = OBJECT_FRAME_INDEX_GET(object_index) % (unsigned long)animation->frame_count;
 
@@ -2890,11 +3085,18 @@ void object_compute_node_matrices(
 			else
 			{
 				real_orientation *orientation = &node_orientations[node_stack_index];
+				short parent_node_index = node->parent_node_index;
 
 				matrix4x3_from_orientation(&object_nodes[node_stack_index], orientation);
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 2929, node->parent_node_index!=NONE);
+				/* port: a parent the model doesn't have is the root (a map's index) */
+				if (!VALID_INDEX(parent_node_index, model_node_count))
+				{
+					object_model_nodes_error(object_definition->object.model.index, model);
+					parent_node_index = 0;
+				}
 				matrix4x3_multiply(
-					&object_nodes[node->parent_node_index],
+					&object_nodes[parent_node_index],
 					&object_nodes[node_stack_index],
 					&object_nodes[node_stack_index]);
 			}
@@ -2912,13 +3114,29 @@ void object_compute_node_matrices(
 
 			next_sibling_node_index = node->next_sibling_node_index;
 
+			/* port: only nodes the model has, and no more than node_stack holds
+			(a map's links, which could go in a loop) */
 			if (next_sibling_node_index!=NONE)
 			{
-				node_stack[node_count++] = next_sibling_node_index;
+				if (VALID_INDEX(next_sibling_node_index, model_node_count) && node_count<MAXIMUM_NODES_PER_MODEL)
+				{
+					node_stack[node_count++] = next_sibling_node_index;
+				}
+				else
+				{
+					object_model_nodes_error(object_definition->object.model.index, model);
+				}
 			}
 			if (node->first_child_node_index!=NONE)
 			{
-				node_stack[node_count++] = node->first_child_node_index;
+				if (VALID_INDEX(node->first_child_node_index, model_node_count) && node_count<MAXIMUM_NODES_PER_MODEL)
+				{
+					node_stack[node_count++] = node->first_child_node_index;
+				}
+				else
+				{
+					object_model_nodes_error(object_definition->object.model.index, model);
+				}
 			}
 
 			if (node_index==node_count)
@@ -2943,7 +3161,13 @@ void object_compute_node_matrices(
 	{
 		object->object.bounding_sphere_radius *= object->object.scale;
 	}
+#ifdef HALO_LINUX
+	/* (port) and the packed copy the collision walks read
+	(object_bounds_cache.c) */
+	object_bounds_cache_update(object_index, &object->object.bounding_sphere_center, object->object.bounding_sphere_radius);
+#endif
 
+	OBJECT_STEP_END();
 	return;
 }
 
@@ -3000,7 +3224,9 @@ static void object_choose_random_change_colors(
 				), 
 				1.f);
 
-			for (permutation_index =0; permutation_index<cc->permutations.count; permutation_index++)
+			/* port: no more than the short counter reaches (a map's count;
+			retail has up to 8) */
+			for (permutation_index =0; permutation_index<MIN(cc->permutations.count, SHORT_MAX); permutation_index++)
 			{
 				struct object_change_color_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
 					&cc->permutations,
@@ -3035,6 +3261,7 @@ void objects_scripting_detach(
 		child_object_index!=NONE &&
 		object_get(child_object_index)->object.parent_object_index == parent_object_index)
 	{
+		network_coop_note_detach(parent_object_index, child_object_index);
 		object_detach(child_object_index);
 	}
 
@@ -3269,8 +3496,22 @@ static void attachments_new(
 
 	struct object_datum *object = object_get(object_index);
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
+	/* port: no more attachments than the object holds (a map's count; the rest
+	aren't made) */
+	short attachment_count = (short)MIN(object_definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT);
 
-	for (attachment_num = 0; attachment_num<object_definition->object.attachments.count; attachment_num++)
+	if (object_definition->object.attachments.count>MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT &&
+		model_data_report_once(object_definition))
+	{
+		error(
+			_error_silent,
+			"### ERROR %s has %ld attachments; only the first %d are made",
+			tag_get_name(object->definition_index),
+			object_definition->object.attachments.count,
+			MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT);
+	}
+
+	for (attachment_num = 0; attachment_num<attachment_count; attachment_num++)
 	{
 		struct object_attachment_definition* attachment = TAG_BLOCK_GET_ELEMENT(
 			&object_definition->object.attachments,
@@ -3420,6 +3661,7 @@ long object_new(
 #endif
 	long definition_index = data->definition_index;
 
+	OBJECT_STEP_BEGIN(_objects_phase_create);
 	match_assert_valid_real_point3d("c:\\halo\\SOURCE\\objects\\objects.c", 618, &data->position)
 	match_assert_valid_real_vector3d_axes2("c:\\halo\\SOURCE\\objects\\objects.c", 619, &data->forward, &data->up);
 	match_assert_valid_real_vector3d("c:\\halo\\SOURCE\\objects\\objects.c", 620, &data->angular_velocity);
@@ -3433,6 +3675,23 @@ long object_new(
 		)
 	{
 		definition_index = game_engine_remap_object_definition(definition_index);
+	}
+
+	/* port: only an object whose type is its tag's group (a map's type, which
+	picks the datum's size, the type's functions and how the rest of the tag
+	is read; retail's all match). The object isn't made */
+	if (definition_index!=NONE &&
+		object_definition_index_to_object_type(definition_index)!=object_definition_get(definition_index)->object.type)
+	{
+		if (model_data_report_once(object_definition_get(definition_index)))
+		{
+			error(
+				_error_silent,
+				"### ERROR %s has object type #%d, not its tag's; it isn't made",
+				tag_get_name(definition_index),
+				object_definition_get(definition_index)->object.type);
+		}
+		definition_index = NONE;
 	}
 
 	if (definition_index!=NONE)
@@ -3455,6 +3714,11 @@ long object_new(
 			struct object_datum *object = object_get(object_index);
 			boolean success = TRUE;
 
+#ifdef HALO_LINUX
+			/* (port) a datum's earlier object's packed bounding sphere is not
+			this one's (object_bounds_cache.c) */
+			object_bounds_cache_forget(object_index);
+#endif
 			SET_FLAG(object_header->flags, _object_header_being_created_bit, TRUE);
 			SET_FLAG(object_header->flags, _object_header_automatically_deactivate_bit, TRUE);
 
@@ -3521,10 +3785,39 @@ long object_new(
 			}
 			else
 			{
-				node_count = model_definition_get(object_definition->object.model.index)->nodes.count;
+				long model_node_count = model_definition_get(object_definition->object.model.index)->nodes.count;
+
+				/* port: the root's matrix at least, which the object always has
+				(a map's model with no nodes is placed like no model). And no
+				more nodes than a block's size, a short, can hold: past that the
+				size wrapped and the matrices overran the object (a map's count;
+				the object isn't made) */
+				if (model_node_count==0)
+				{
+					node_count = 1;
+				}
+				else if (model_node_count<0 ||
+					model_node_count>SHORT_MAX/(long)sizeof(struct real_matrix4x3))
+				{
+					if (model_data_report_once(model_definition_get(object_definition->object.model.index)))
+					{
+						error(
+							_error_silent,
+							"### ERROR model %s has %ld nodes; %s isn't made",
+							tag_get_name(object_definition->object.model.index),
+							model_node_count,
+							tag_get_name(definition_index));
+					}
+					node_count = NONE;
+				}
+				else
+				{
+					node_count = (short)model_node_count;
+				}
 			}
 
-			if (object_header_block_allocate(
+			if (node_count>0 &&
+				object_header_block_allocate(
 				object_index,
 				offsetof(struct object_datum, object.node_matrices),
 				sizeof(struct real_matrix4x3) * node_count))
@@ -3638,6 +3931,7 @@ long object_new(
 	here on (render_epoch.h) */
 	halo_epoch_scope_ready(epoch_scope);
 #endif
+	OBJECT_STEP_END();
 	return object_index;
 }
 
@@ -3777,6 +4071,9 @@ static boolean object_update(
 	boolean result = TRUE;
 	if (!TEST_FLAG(header->flags, _object_header_do_not_update_bit))
 	{
+#ifdef HALO_LINUX
+		HALO_OBJECTS_OBJECT_PUSH(header->type);
+#endif
 		if (TEST_FLAG(object->object.flags, _object_garbage_bit))
 		{
 			++object_globals->active_garbage_object_count;
@@ -3792,13 +4089,13 @@ static boolean object_update(
 			}
 		}
 
-		OBJECT_STEP_BEGIN(); object_type_update(object_index); OBJECT_STEP_END(0);
+		OBJECT_STEP_BEGIN(_objects_phase_type); object_type_update(object_index); OBJECT_STEP_END();
 		if (object_definition->object.collision_model.index!=NONE)
 		{
-			OBJECT_STEP_BEGIN(); object_damage_update(object_index); OBJECT_STEP_END(1);
+			OBJECT_STEP_BEGIN(_objects_phase_damage); object_damage_update(object_index); OBJECT_STEP_END();
 		}
 
-		OBJECT_STEP_BEGIN(); object_type_export_function_values(object_index); OBJECT_STEP_END(2);
+		OBJECT_STEP_BEGIN(_objects_phase_functions); object_type_export_function_values(object_index); OBJECT_STEP_END();
 
 		if (!TEST_FLAG(object->object.flags, _object_do_not_recompute_node_matrices_bit))
 		{
@@ -3843,15 +4140,17 @@ static boolean object_update(
 			}
 			if (!skip)
 			{
-				OBJECT_STEP_BEGIN(); object_compute_node_matrices(object_index); OBJECT_STEP_END(3);
+				object_compute_node_matrices(object_index);
 			}
 #else
-			OBJECT_STEP_BEGIN(); object_compute_node_matrices(object_index); OBJECT_STEP_END(3);
+			object_compute_node_matrices(object_index);
 #endif
 		}
 
-		OBJECT_STEP_BEGIN(); object_compute_function_values(object_index); OBJECT_STEP_END(4);
+		OBJECT_STEP_BEGIN(_objects_phase_functions);
+		object_compute_function_values(object_index);
 		object_compute_change_colors(object_index);
+		OBJECT_STEP_END();
 
 		if (
 			TEST_FLAG(object->object.flags, _object_dynamic_lighting_recompute_bit) &&
@@ -3861,31 +4160,27 @@ static boolean object_update(
 			)
 		)
 		{
-			OBJECT_STEP_BEGIN(); object_connect_lights(object_index, TRUE, TRUE); OBJECT_STEP_END(5);
+			OBJECT_STEP_BEGIN(_objects_phase_lights); object_connect_lights(object_index, TRUE, TRUE); OBJECT_STEP_END();
 		}
 
 		// Update children (if we have any)
-#ifdef HALO_LINUX
-		/* (the children's and siblings' updates: their own step 7 at the top) */
-		OBJECT_STEP_BEGIN();
-#endif
 		if (object->object.first_child_object_index!=NONE)
 		{
-			{ objects_step_depth++; object_update(object->object.first_child_object_index); objects_step_depth--; }
+			object_update(object->object.first_child_object_index);
 		}
 
 		if (object->object.parent_object_index!=NONE)
 		{
 			if (object->object.next_object_index!=NONE)
 			{
-				{ objects_step_depth++; object_update(object->object.next_object_index); objects_step_depth--; }
+				object_update(object->object.next_object_index);
 			}
 		}
-#ifdef HALO_LINUX
-		OBJECT_STEP_END(7);
-#endif
 
-		OBJECT_STEP_BEGIN(); object_postprocess_node_matrices(object_index); OBJECT_STEP_END(6);
+		OBJECT_STEP_BEGIN(_objects_phase_nodes); object_postprocess_node_matrices(object_index); OBJECT_STEP_END();
+#ifdef HALO_LINUX
+		HALO_OBJECTS_OBJECT_POP();
+#endif
 	}
 
 	return result;
@@ -3920,7 +4215,9 @@ long object_new_from_scenario(
 	
 	long result = NONE;
 
-	if (scenario_object->palette_entry_index!=NONE &&
+	/* port: a palette entry the scenario has (a map's index; retail's are
+	all NONE or in range) */
+	if (VALID_INDEX(scenario_object->palette_entry_index, palette->count) &&
 		(
 			!object_globals->initial_placement ||
 			!TEST_FLAG(scenario_object->placement_flags, _scenario_object_placement_not_automatic_bit)
@@ -4007,16 +4304,33 @@ long object_new_by_name(
 		name_index,
 		struct scenario_object_name);
 
-	struct tag_block* datum = scenario_get_object_type_scenario_datums(
+	struct tag_block* datum;
+	struct tag_block *palette;
+	struct scenario_object_datum *object;
+
+	/* port: a name that names no placement (one past the names, or whose
+	type has no placements or whose placement is not there: a map's) makes
+	no object, rather than one of whatever its fields read as */
+	if (!VALID_INDEX(name_index, scenario->object_names.count) ||
+		!VALID_INDEX(name->runtime_object_type, NUMBER_OF_OBJECT_TYPES) ||
+		object_type_definition_get(name->runtime_object_type)->placement_tag_block_offset == NONE ||
+		object_type_definition_get(name->runtime_object_type)->palette_tag_block_offset == NONE)
+	{
+		return NONE;
+	}
+
+	datum = scenario_get_object_type_scenario_datums(
 		scenario,
 		name->runtime_object_type,
 		&placement_tag_block_element_size);
+	if (!VALID_INDEX(name->runtime_scenario_datum_index, datum->count))
+		return NONE;
 
-	struct tag_block *palette = scenario_get_object_type_scenario_palette(
+	palette = scenario_get_object_type_scenario_palette(
 		scenario,
 		name->runtime_object_type);
 
-	struct scenario_object_datum *object = (struct scenario_object_datum *)tag_block_get_element_with_size(
+	object = (struct scenario_object_datum *)tag_block_get_element_with_size(
 			datum,
 			name->runtime_scenario_datum_index,
 			placement_tag_block_element_size);
@@ -4036,6 +4350,7 @@ void objects_scripting_attach(
 		child_object_index !=NONE &&
 		object_get(child_object_index)->object.parent_object_index==NONE)
 	{
+		network_coop_note_attach(parent_object_index, parent_marker_name, child_object_index, child_marker_name);
 		object_attach_to_marker(parent_object_index, parent_marker_name, child_object_index, child_marker_name);
 	}
 
@@ -4050,7 +4365,9 @@ void object_delete_immediately(
 		return;
 #endif
 	object_delete_initial_recursive(object_index, FALSE);
+	OBJECT_STEP_BEGIN(_objects_phase_create);
 	object_delete_recursive(object_index, FALSE);
+	OBJECT_STEP_END();
 
 	return;
 }
@@ -4067,7 +4384,21 @@ static long active_garbage_limit(
 	return limit_per_16_players * MAX(16, player_count) / 16;
 }
 
+/* port: whether a collection of active garbage may be tried
+(GARBAGE_ACTIVE_RETRY_TICKS: in network co-op) */
+static boolean objects_garbage_active_due(
+	void)
+{
+	long now = game_time_get();
+
+	if (!network_coop_active())
+		return TRUE;
+	if (garbage_active_retry_time != NONE && garbage_active_retry_time - now > GARBAGE_ACTIVE_RETRY_TICKS)
+		garbage_active_retry_time = NONE;
+	return garbage_active_retry_time == NONE || now >= garbage_active_retry_time;
+}
 #endif
+
 void objects_garbage_collection(
 	void)
 {
@@ -4095,7 +4426,8 @@ void objects_garbage_collection(
 		else
 		{
 #ifdef HALO_LINUX
-			if (object_globals->active_garbage_object_count>=active_garbage_limit(GARBAGE_LIMIT_ACTIVE_GARBAGE_TRIGGER))
+			if (object_globals->active_garbage_object_count>=active_garbage_limit(GARBAGE_LIMIT_ACTIVE_GARBAGE_TRIGGER) &&
+				objects_garbage_active_due())
 #else
 			if (object_globals->active_garbage_object_count>=GARBAGE_LIMIT_ACTIVE_GARBAGE_TRIGGER)
 #endif
@@ -4109,6 +4441,7 @@ void objects_garbage_collection(
 	{
 		long garbage_collect_mode_wide;
 		short garbage_object_count = 0;
+		short collected_count = 0;
 		boolean should_collect = FALSE;
 
 		{
@@ -4213,12 +4546,19 @@ void objects_garbage_collection(
 
 					object_set_garbage(object_index, FALSE);
 					object_delete_immediately(object_index);
+					collected_count++;
 				}
 			}
 
 			}
 
-		memory_pool_compact(object_memory_pool);
+		/* port: in network co-op, active garbage left above its target is
+		tried again later, and nothing collected moves nothing to compact */
+		if (garbage_collect_mode == _garbage_collect_active_objects)
+			garbage_active_retry_time = should_collect ? NONE : game_time_get() + GARBAGE_ACTIVE_RETRY_TICKS;
+		if (!network_coop_active() || collected_count > 0 ||
+			garbage_collect_mode != _garbage_collect_active_objects)
+			memory_pool_compact(object_memory_pool);
 		
 		if (debug_object_garbage_collection)
 		{
@@ -4301,7 +4641,11 @@ void objects_garbage_collection(
 					break;
 				}
 
-				if (status_still_critical || garbage_collection_after_first_attempt)
+				/* (port: in network co-op as often as the warning, not every
+				tick: a host kept critical by many enemies wrote it to
+				debug.txt each tick) */
+				if ((status_still_critical || garbage_collection_after_first_attempt) &&
+					(garbage_should_warn || !network_coop_active()))
 				{
 					char tempbuffer[512];
 					const char *status;
@@ -4398,60 +4742,43 @@ void objects_garbage_collection(
 }
 
 
+
 #ifdef HALO_LINUX
-/* HALO_TICK_PROFILE=1: objects_update's time by object type (game.c logs
-the tick's phases) */
-#include <stdlib.h>
-void platform_log(const char *format, ...);
-static unsigned long long objects_profile_type_us[16];
-static unsigned long objects_profile_type_count[16], objects_profile_ticks;
-static int objects_profile_on = -1;
-static unsigned long long objects_profile_now(void)
-{
-	/* (per-object timing at HALO_TICK_PROFILE=2 only: thousands of clock
-	reads a tick cost the tick itself) */
-	if (objects_profile_on < 0) { const char *e = getenv("HALO_TICK_PROFILE"); objects_profile_on = e && atoi(e) >= 2; }
-	return objects_profile_on > 0 && halo_fine_tick_on ? halo_fine_tick_now() : 0;
-}
-static void objects_profile_add(int type, unsigned long long started)
-{
-	if (objects_profile_on > 0 && halo_fine_tick_on && type >= 0 && type < 16)
-	{
-		objects_profile_type_us[type] += halo_fine_tick_now() - started;
-		objects_profile_type_count[type]++;
-	}
-}
-static void objects_profile_report(void)
+/* (port) HALO_FRAME_TIMING: the objects in the game by type with each frame
+report (frame_timing.c), and the most there have been. A count that only
+grows names what a game mode never cleans up (a Custom Edition match got
+slower the longer it ran: 26 objects drawn a frame at first, 153 three
+minutes on). Read from the main thread while the tick may run: the array's
+slots stay where they are, so a count may be one off, nothing worse. */
+void halo_objects_census_report(void)
 {
 	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
 		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
-	char line[768]; int n = 0, type;
-	/* (per timed tick: fine_profile.h) */
-	static struct halo_fine_mark mark;
-	unsigned long timed;
-	double per;
+	static long peak;
+	long counts[16] = { 0 }, total = 0, index, type;
+	char line[512];
+	int n = 0;
+	const unsigned char *slot;
 
-	if (objects_profile_on <= 0 || ++objects_profile_ticks % 300) return;
-	timed = halo_fine_tick_since(&mark);
-	per = timed ? 1.0 / (timed * 1000.0) : 0.0;
-	for (type = 0; type < 16; type++)
+	if (!object_header_data || !object_header_data->valid || !object_header_data->data)
+		return;
+	slot = (const unsigned char *)object_header_data->data;
+	for (index = 0; index < object_header_data->maximum_count; index++, slot += object_header_data->size)
 	{
-		if (!objects_profile_type_count[type]) continue;
-		n += snprintf(line + n, sizeof(line) - n, " %s %.2f(%.0f)", names[type], objects_profile_type_us[type] * per,
-			timed ? (double)objects_profile_type_count[type] / timed : 0.0);
-		objects_profile_type_us[type] = 0; objects_profile_type_count[type] = 0;
-	}
-	{
-		static const char *step_names[8] = { "type", "damage", "export", "node_matrices", "functions", "lights", "postprocess", "children" };
-		int k;
-		for (k = 0; k < 8; k++)
+		const struct object_header_datum *header = (const struct object_header_datum *)slot;
+
+		if (header->identifier)
 		{
-			n += snprintf(line + n, sizeof(line) - n, " | %s %.2f", step_names[k], objects_step_us[k] * per);
-			objects_step_us[k] = 0;
+			counts[header->type & 15]++;
+			total++;
 		}
 	}
-	n += snprintf(line + n, sizeof(line) - n, " | %s", mark.note);
-	platform_log("objects-update (ms/tick, objects/tick):%s", line);
+	if (total > peak)
+		peak = total;
+	for (type = 0; type < 16; type++)
+		if (counts[type])
+			n += snprintf(line + n, sizeof(line) - n, " %s %ld", names[type], counts[type]);
+	platform_log("objects: %ld in the game (most %ld):%s", total, peak, line);
 }
 #endif
 
@@ -4498,6 +4825,126 @@ static boolean objects_scenery_update_skipped(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (port) HALO_TICK_PROFILE (the performance logging switch): an
+objects_update of more than 50 ms is logged as "objects-hitch" with the
+three objects whose updates took longest, each with the part of its time
+spent waiting for the cache lock (the caches the render shares: a texture
+it reads from a Custom Edition map file holds the lock throughout) and
+reading map files itself (custom_edition_cache.c). On the Vita a hitch of
+Extinction's tick (450-550 ms, every tick, as the player looked about) came
+with 104 ms a frame of the tick's waits for the cache lock. Each object's
+update is timed: two clock reads (~1.4 us on the Vita) per object updated,
+with the switch on only. */
+#define OBJECTS_HITCH_US 50000
+#define OBJECTS_HITCH_SLOWEST 3
+unsigned long long vita_host_time_us(void);
+extern volatile unsigned long long halo_cache_lock_wait_us[2];
+extern volatile unsigned long long halo_map_read_us[2];
+extern volatile unsigned long long halo_cache_lock_tick_longest_us;
+extern const char *volatile halo_cache_lock_tick_longest_site;
+extern const char *volatile halo_cache_lock_tick_longest_holder;
+struct objects_hitch_object
+{
+	long object_index;
+	short type;
+	unsigned long long us, lock_wait_us, read_us;
+};
+static int objects_hitch_on = -1;
+static unsigned long long objects_hitch_started;
+static unsigned long objects_hitch_updated;
+static struct objects_hitch_object objects_hitch_slowest[OBJECTS_HITCH_SLOWEST];
+/* (vehicles.c) a vehicle's kind, driver and rest, for the line */
+int vehicle_hitch_describe(long vehicle_index, char *line, int size);
+
+static void objects_hitch_begin(void)
+{
+	if (objects_hitch_on < 0)
+	{
+		const char *setting = getenv("HALO_TICK_PROFILE");
+
+		objects_hitch_on = setting && atoi(setting) > 0;
+	}
+	if (objects_hitch_on)
+	{
+		csmemset(objects_hitch_slowest, 0, sizeof(objects_hitch_slowest));
+		objects_hitch_updated = 0;
+		halo_cache_lock_tick_longest_us = 0;
+		objects_hitch_started = vita_host_time_us();
+	}
+}
+
+/* one object's update: its time, and the waits and reads in it */
+static void objects_hitch_object_update(long object_index, short type)
+{
+	unsigned long long started, lock_wait = halo_cache_lock_wait_us[1], read = halo_map_read_us[1], us;
+	int slot;
+
+	if (!objects_hitch_on)
+	{
+		object_update(object_index);
+		return;
+	}
+	started = vita_host_time_us();
+	object_update(object_index);
+	us = vita_host_time_us() - started;
+	objects_hitch_updated++;
+	for (slot = 0; slot < OBJECTS_HITCH_SLOWEST; slot++)
+	{
+		if (us > objects_hitch_slowest[slot].us)
+		{
+			memmove(&objects_hitch_slowest[slot + 1], &objects_hitch_slowest[slot],
+				(OBJECTS_HITCH_SLOWEST - 1 - slot) * sizeof(objects_hitch_slowest[0]));
+			objects_hitch_slowest[slot].object_index = object_index;
+			objects_hitch_slowest[slot].type = type;
+			objects_hitch_slowest[slot].us = us;
+			objects_hitch_slowest[slot].lock_wait_us = halo_cache_lock_wait_us[1] - lock_wait;
+			objects_hitch_slowest[slot].read_us = halo_map_read_us[1] - read;
+			break;
+		}
+	}
+}
+
+static void objects_hitch_end(unsigned long long lock_wait_before, unsigned long long read_before)
+{
+	static const char *names[16] = { "biped", "vehicle", "weapon", "equipment", "garbage", "projectile", "scenery",
+		"machine", "control", "light_fixture", "placeholder", "sound_scenery", "t12", "t13", "t14", "t15" };
+	unsigned long long us;
+	char line[1024];
+	int length, slot;
+
+	if (!objects_hitch_on)
+		return;
+	us = vita_host_time_us() - objects_hitch_started;
+	if (us < OBJECTS_HITCH_US)
+		return;
+	length = snprintf(line, sizeof(line), "objects-hitch: objects_update %.1f ms, %lu objects updated, cache lock waits %.1f ms, "
+		"map file reads %.1f ms; slowest:", us / 1000.0, objects_hitch_updated,
+		(halo_cache_lock_wait_us[1] - lock_wait_before) / 1000.0, (halo_map_read_us[1] - read_before) / 1000.0);
+	for (slot = 0; slot < OBJECTS_HITCH_SLOWEST && objects_hitch_slowest[slot].us; slot++)
+	{
+		struct objects_hitch_object *slowest = &objects_hitch_slowest[slot];
+		struct object_datum *object = object_try_and_get(slowest->object_index);
+
+		length += snprintf(line + length, sizeof(line) - length, " %s '%s' %.1f ms (lock %.1f, reads %.1f)",
+			names[slowest->type & 15], object ? tag_get_name(object->definition_index) : "(deleted)",
+			slowest->us / 1000.0, slowest->lock_wait_us / 1000.0, slowest->read_us / 1000.0);
+		if (object && slowest->type == _object_type_vehicle && length < (int)sizeof(line))
+			length += vehicle_hitch_describe(slowest->object_index, line + length, sizeof(line) - length);
+		if (length >= (int)sizeof(line))
+			break;
+	}
+	if (halo_cache_lock_tick_longest_us && length < (int)sizeof(line))
+	{
+		snprintf(line + length, sizeof(line) - length, "; longest lock wait %.1f ms in %s, behind %s",
+			halo_cache_lock_tick_longest_us / 1000.0,
+			halo_cache_lock_tick_longest_site ? halo_cache_lock_tick_longest_site : "?",
+			halo_cache_lock_tick_longest_holder ? halo_cache_lock_tick_longest_holder : "?");
+	}
+	platform_log("%s", line);
+}
+#endif
+
 void objects_update(
 	void)
 {
@@ -4510,6 +4957,12 @@ void objects_update(
 	struct object_header_datum *object_header;
 
 	boolean dont_update_object = ((game_time_get()&1)!=0) && game_players_are_double_speed();
+#ifdef HALO_LINUX
+	unsigned long long hitch_lock_wait = halo_cache_lock_wait_us[1], hitch_read = halo_map_read_us[1];
+
+	objects_hitch_begin();
+	halo_objects_phases_begin();
+#endif
 
 	profile_enter(section);
 
@@ -4584,10 +5037,22 @@ void objects_update(
 	object_header = (struct object_header_datum *)object_header_data->data;
 	for (i = 0; i<object_header_data->count; ++object_header)
 	{
+#ifdef HALO_LINUX
+		/* (port) the header's own flags before the liveness test, which asks
+		the render epoch about the slot (a call for every object in the game,
+		twice a tick): the same objects pass, in the same order */
+		if (object_header->identifier &&
+			TEST_FLAG(object_header->flags, _object_header_active_bit) &&
+			!TEST_FLAG(object_header->flags, _object_header_being_created_bit) &&
+			OBJECT_HEADER_LIVE(object_header, i))
+#else
 		if (OBJECT_HEADER_LIVE(object_header, i))
+#endif
 		{
+#ifndef HALO_LINUX
 			if (TEST_FLAG(object_header->flags, _object_header_active_bit) &&
 				!TEST_FLAG(object_header->flags, _object_header_being_created_bit))
+#endif
 			{
 				long object_index = DATUM_INDEX_NEW(i, object_header->identifier);
 				match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 416, object_get(object_index)->object.parent_object_index==NONE);
@@ -4601,10 +5066,7 @@ void objects_update(
 				/* (the scenery divisor: above objects_update) */
 				if (!objects_scenery_update_skipped(i, object_header))
 				{
-					unsigned long long update_started = objects_profile_now();
-
-					object_update(object_index);
-					objects_profile_add(object_header->type, update_started);
+					objects_hitch_object_update(object_index, object_header->type);
 				}
 #else
 				object_update(object_index);
@@ -4618,7 +5080,17 @@ void objects_update(
 	object_header = (struct object_header_datum *)object_header_data->data;
 	for (i = 0; i<object_header_data->count; ++object_header)
 	{
+#ifdef HALO_LINUX
+		/* (port) a header with none of the three flags below has nothing
+		done to it here (its "do not update" flag is clear already): the
+		liveness test is asked only of the others */
+		if (object_header->identifier &&
+			(object_header->flags & (FLAG(_object_header_do_not_update_bit) |
+				FLAG(_object_header_being_created_bit) | FLAG(_object_header_being_deleted_bit))) &&
+			OBJECT_HEADER_LIVE(object_header, i))
+#else
 		if (OBJECT_HEADER_LIVE(object_header, i))
+#endif
 		{
 			SET_FLAG(object_header->flags, _object_header_do_not_update_bit, FALSE);
 
@@ -4633,17 +5105,22 @@ void objects_update(
 
 			if (TEST_FLAG(object_header->flags, _object_header_being_deleted_bit))
 			{
+				OBJECT_STEP_BEGIN(_objects_phase_create);
 				object_delete_recursive(DATUM_INDEX_NEW(i, object_header->identifier), FALSE);
+				OBJECT_STEP_END();
 			}
 		}
 		++i;
 	}
 
+	OBJECT_STEP_BEGIN(_objects_phase_create);
 	objects_garbage_collection();
+	OBJECT_STEP_END();
 
 	profile_exit(section);
 #ifdef HALO_LINUX
-	objects_profile_report();
+	halo_objects_phases_end();
+	objects_hitch_end(hitch_lock_wait, hitch_read);
 #endif
 
 	return;
@@ -4674,7 +5151,8 @@ static void object_connect_lights(
 		short i;
 		struct object_definition *object_definition = object_definition_get(object->definition_index);
 		
-		for (i =0; i<object_definition->object.attachments.count; ++i)
+		/* port: the attachments attachments_new made (a map's count) */
+		for (i =0; i<MIN(object_definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT); ++i)
 		{
 			if (!object->object.attachment_types[i] && object->object.attachment_indices[i]!=NONE)
 			{
@@ -4729,7 +5207,24 @@ static void object_name_list_new(
 		4099,
 		name_index>=0 && name_index<MAXIMUM_OBJECT_NAMES_PER_SCENARIO);
 
-	if (object_name_list[name_index]==NONE)
+	/* port: only a name the scenario has and the name list holds (a map's
+	index; the lookup gave NONE for any other, so it came here; retail's
+	are below 448) */
+	if (!VALID_INDEX(name_index, MIN(global_scenario_get()->object_names.count, MAXIMUM_OBJECT_NAMES_PER_SCENARIO)))
+	{
+		static boolean name_index_reported = FALSE;
+
+		if (!name_index_reported)
+		{
+			name_index_reported = TRUE;
+			error(
+				_error_silent,
+				"### ERROR %s was placed with name #%d, which the scenario doesn't have; it is left unnamed",
+				tag_get_name(object->definition_index),
+				name_index);
+		}
+	}
+	else if (object_name_list[name_index]==NONE)
 	{
 		object_name_list[name_index] = object_index;
 		object->object.name_index = name_index;
@@ -4756,7 +5251,9 @@ static void object_name_list_delete(
 		struct scenario *scenario = global_scenario_get();
 		object->object.name_index = NONE;
 
-		for (i =0; i<scenario->object_names.count; ++i)
+		/* port: no more than the name list holds (a map's count, which a short
+		counter would never reach; retail has up to 448) */
+		for (i =0; i<MIN(scenario->object_names.count, MAXIMUM_OBJECT_NAMES_PER_SCENARIO); ++i)
 		{
 			if (object_name_list[i]==object_index)
 			{
@@ -4926,7 +5423,9 @@ static short object_find_region_permutations_available_with_variant(
 	short i;
 	short result = 0;
 
-	for (i = 0; i<region->permutations.count; i++)
+	/* port: no more permutations than a region has room for, and the caller's
+	available_indices holds (a map's count) */
+	for (i = 0; i<MIN(region->permutations.count, MAXIMUM_PERMUTATIONS_PER_MODEL_REGION); i++)
 	{
 		struct model_region_permutation* permutation = TAG_BLOCK_GET_ELEMENT(
 			&region->permutations,
@@ -4956,7 +5455,10 @@ static boolean object_select_random_region_permutations_by_variant(
 	struct object_datum *object = object_get(object_index);
 	boolean result = TRUE;
 
-	for (region_index =0; region_index<model->regions.count; region_index++)
+	/* port: no more regions than the object's region_permutations holds (a
+	map's count; past them are the change colors and the node blocks; retail
+	has up to 8) */
+	for (region_index =0; region_index<MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT); region_index++)
 	{
 		struct model_region *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
 		short permutation_index = object_find_region_permutations_available_with_variant(region, variant_number, available_permutation_indices);
@@ -4990,7 +5492,9 @@ static short object_determine_variant_number(
 	struct object_datum *object = object_get(object_index);
 	short result = 0;
 
-	for (region_index =0; region_index<model->regions.count&& !result; region_index++)
+	/* port: the regions object_select_random_region_permutations_by_variant
+	chose for (a map's count) */
+	for (region_index =0; region_index<MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT)&& !result; region_index++)
 	{
 		struct model_region* region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
 		if (object->object.region_permutations[region_index] < region->permutations.count)
@@ -5070,7 +5574,8 @@ static void attachments_delete(
 	struct object_datum *object = object_get(object_index);
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
 
-	for (attachment_index =0; attachment_index<object_definition->object.attachments.count; ++attachment_index)
+	/* port: the attachments attachments_new made (a map's count) */
+	for (attachment_index =0; attachment_index<MIN(object_definition->object.attachments.count, MAXIMUM_NUMBER_OF_ATTACHMENTS_PER_OBJECT); ++attachment_index)
 	{
 		if (object->object.attachment_types[attachment_index]!=NONE &&
 			object->object.attachment_indices[attachment_index]!=NONE)
@@ -5097,6 +5602,41 @@ static void attachments_delete(
 				break;
 			}
 		}
+	}
+
+	return;
+}
+
+/* port: a map's object definition with a bad count, index or type, reported
+once (most of these are read every tick) */
+static void object_definition_data_error(
+	long definition_index,
+	char const *problem)
+{
+	if (model_data_report_once(object_definition_get(definition_index)))
+	{
+		error(
+			_error_silent,
+			"### ERROR %s has a bad %s",
+			tag_get_name(definition_index),
+			problem);
+	}
+
+	return;
+}
+
+/* port: a map's model with a bad node list, reported once (the matrices are
+built every tick) */
+static void object_model_nodes_error(
+	long model_index,
+	struct model const *model)
+{
+	if (model_data_report_once(model))
+	{
+		error(
+			_error_silent,
+			"### ERROR model %s has a bad node list; its bad links are skipped",
+			tag_get_name(model_index));
 	}
 
 	return;
@@ -5172,8 +5712,16 @@ static void object_compute_function_values(
 	struct object_datum *object = object_get(object_index);
 	struct object_definition *object_definition = object_definition_get(object->definition_index);
 	real huh = (57 * DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + game_time_get()) * 0.033333335f;
+	/* port: no more functions than the object holds values for (a map's count;
+	past them are the attachments and the node blocks; retail has up to 4) */
+	short function_count = (short)MIN(object_definition->object.functions.count, NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS);
 
-	for (function_index = 0; function_index<object_definition->object.functions.count; ++function_index)
+	if (object_definition->object.functions.count>NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS)
+	{
+		object_definition_data_error(object->definition_index, "function count; only the first 4 are computed");
+	}
+
+	for (function_index = 0; function_index<function_count; ++function_index)
 	{
 		real value;
 		real output;
@@ -5275,7 +5823,11 @@ static void object_compute_function_values(
 			}
 		}
 
+		/* port: (an index of no function turns nothing off: the map's, and a
+		flag past the byte's) */
 		if (function->turn_off_with_function_index!=NONE &&
+			function->turn_off_with_function_index>=0 &&
+			function->turn_off_with_function_index<NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS &&
 			!TEST_FLAG(object->object.functions_active_flags, function->turn_off_with_function_index))
 		{
 			function_is_active = FALSE;
@@ -5302,7 +5854,15 @@ static void object_compute_change_colors(
 	if (TEST_FLAG(object_definition->object.runtime_flags, _object_runtime_scaled_change_colors_bit))
 	{
 		short cc_index;
-		for (cc_index = 0; cc_index<object_definition->object.change_colors.count; cc_index++)
+		/* port: no more change colors than the object holds (a map's count;
+		past them are the node blocks; retail has up to 3) */
+		short change_color_count = (short)MIN(object_definition->object.change_colors.count, NUMBER_OF_OBJECT_CHANGE_COLORS);
+
+		if (object_definition->object.change_colors.count>NUMBER_OF_OBJECT_CHANGE_COLORS)
+		{
+			object_definition_data_error(object->definition_index, "change color count; only the first 4 are used");
+		}
+		for (cc_index = 0; cc_index<change_color_count; cc_index++)
 		{
 			struct object_change_color_definition *change_color = TAG_BLOCK_GET_ELEMENT(
 				&object_definition->object.change_colors,

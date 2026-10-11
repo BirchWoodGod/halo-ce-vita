@@ -339,6 +339,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "frame_timing.h"
 #include "tick_thread.h"
+#include "view_distance.h"
 #include "render_epoch.h"
 void platform_log(const char *format, ...);
 #endif
@@ -382,6 +383,9 @@ void platform_log(const char *format, ...);
 #include "bink/bink_playback.h"
 #include "main/d3d_intimacy.h"
 #include "networking/network_game_globals.h"
+#include "networking/network_game_manager.h"
+#include "networking/network_server_manager.h" /* port: a co-op game's level won */
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "camera/director.h"
 #include "camera/observer.h"
 #include "objects/objects.h"
@@ -392,6 +396,7 @@ void platform_log(const char *format, ...);
 #include "hs/hs.h"
 #ifdef HALO_LINUX
 #include "load_profile.h"
+#include "custom_edition_cache.h" /* port: custom_edition_level_name */
 #endif
 #include "render/render.h"
 #include "text/draw_string.h"
@@ -664,8 +669,16 @@ struct _screenshot_and_framerate_globals
 typedef char screenshot_and_framerate_globals_size_assert[
 	sizeof(struct _screenshot_and_framerate_globals) == 0x38B ? 1 : -1];
 
+#ifdef HALO_DEDICATED_SERVER
+#include "dedicated_server.h"
+#endif
 #ifdef HALO_LINUX
 void network_test_update(boolean main_menu_loaded, real seconds);
+/* the Vita settings panel's Host a game and Join a game
+(port/linux/game/system_link_shortcut.c) */
+void system_link_shortcut_update(boolean main_menu_loaded);
+/* (debug) HALO_TEST_PAD's presses start at the main menu (port/linux/src/xinput_sdl.c) */
+void test_input_main_menu(int loaded);
 #endif
 
 /* ---------- prototypes */
@@ -713,8 +726,17 @@ static char const *scenario_paths[10] =
 };
 
 static struct _main_globals main_globals = { 0 };
+/* Keep the original globals layout; these clocks belong to pending requests. */
+static long main_loss_last_tick;
+static long main_respawn_last_tick;
 boolean debug_force_frame_rate_update = FALSE;
+#ifdef HALO_DEDICATED_SERVER
+/* (port) a dedicated server draws nothing: it has no player to draw for
+(port/linux/game/dedicated_server.c) */
+boolean debug_no_drawing = TRUE;
+#else
 boolean debug_no_drawing = FALSE;
+#endif
 boolean debug_game_save = FALSE;
 boolean debug_frame_rate = FALSE;
 boolean display_framerate = FALSE;
@@ -860,6 +882,13 @@ short game_connection(
 }
 
 #ifdef HALO_LINUX
+/* (port) whether the main menu is up and no network game holds the game:
+nothing is lost if the game restarts now (vita_ce_installer.c) */
+int halo_main_menu_idle(void)
+{
+	return main_globals.main_menu_scenario_loaded && main_globals.connection == _game_connection_local;
+}
+
 /* (port) whether the arrays data.c holds to the Xbox's sizes are held now:
 a local game, unless HALO_XBOX_PARTICLE_LIMITS=0 (data.c datum_new_limit) */
 int halo_local_limits_active(void)
@@ -947,6 +976,11 @@ void main_lost_map(
 		main_map_request_log("game lost (back to the last checkpoint in 3 s)");
 	main_checkpoint_cancelled("a lost game");
 #endif
+	if (!main_globals.lost_map)
+	{
+		main_globals.loss_timer = 0;
+		main_loss_last_tick = game_time_get();
+	}
 	main_globals.saving_map = FALSE;
 	main_globals.lost_map = TRUE;
 	return;
@@ -1026,9 +1060,14 @@ void main_save_map_nonsafe(
 void main_respawn(
 	boolean in_multiplayer)
 {
+	if (!main_globals.respawn)
+	{
+		main_globals.respawn_timer = 0;
+		main_respawn_last_tick = game_time_get();
+	}
 	main_globals.respawn = TRUE;
 	if (in_multiplayer)
-		main_globals.respawn_timer = 91;
+		main_globals.respawn_timer = 92;
 	return;
 }
 
@@ -1294,6 +1333,13 @@ short main_get_solo_level_from_name(
 	char lower_name[128] = { 0 };
 	short level;
 
+#ifdef HALO_LINUX
+	/* port: a Custom Edition campaign map (custom_maps\firefight-airlock)
+	is never one of the campaign's levels, whatever its name holds: not its
+	saved game, its progress or its next level (custom_edition_cache.h) */
+	if (custom_edition_level_name(name))
+		return NONE;
+#endif
 	csstrncpy(lower_name, name, NUMBEROF(lower_name) - 1);
 	lower_name[NUMBEROF(lower_name) - 1] = 0;
 	strlwr(lower_name);
@@ -1473,6 +1519,8 @@ short main_get_window_count(
 
 #ifdef HALO_LINUX
 static void main_checkpoint_log_new_map(void);
+/* (HALO_TEST_COMMANDS' "M" commands) the maps loaded */
+static unsigned long main_test_maps_loaded;
 #endif
 
 static void main_new_map(
@@ -1491,6 +1539,19 @@ static void main_new_map(
 	game_load_started = halo_load_profile_now();
 	loaded = game_load(options);
 	halo_load_profile_add(_halo_load_game_load, game_load_started, 0);
+	/* port: a custom or downloaded map that failed to load for any reason
+	(not only the Custom Edition loader's) goes back to the menu with a
+	message rather than halting the game (halt_and_catch_fire would crash on
+	a handheld): a crafted or damaged map a host sent a joiner, or one copied
+	in by hand, must not be able to stop the game. A working install's stock
+	maps do not fail here, and a precise reason the loader recorded is kept
+	(custom_edition_cache.c, cache_files.c). */
+	{
+		extern void halo_map_load_refused(char const *map_name, char const *reason);
+
+		if (!loaded)
+			halo_map_load_refused(options->map_name, "this map file is damaged or not supported");
+	}
 	if (loaded)
 #else
 	if (game_load(options))
@@ -1501,6 +1562,21 @@ static void main_new_map(
 #endif
 		game_initialize_for_new_map();
 	}
+#ifdef HALO_LINUX
+	/* port: a custom map that cannot be loaded (memory, a protected map, a
+	missing resource map): the player is told why, and the menu loaded,
+	rather than the game stopped (port/linux/game/custom_edition_cache.c) */
+	else if (custom_edition_cache_load_failure_show(options->map_name))
+	{
+		errors_clear();
+		error(_error_silent, "game_load() failed.");
+		platform_log("new map: %s could not be loaded; back to the main menu", options->map_name);
+		main_globals.want_to_be_at_main_menu = TRUE;
+		main_menu_load();
+
+		return;
+	}
+#endif
 	else
 	{
 		error(_error_immediate, "game_load() failed.");
@@ -1524,6 +1600,8 @@ static void main_new_map(
 	game_initial_pulse();
 #ifdef HALO_LINUX
 	platform_log("new map: ready");
+	platform_memory_log("loaded", options->map_name);
+	main_test_maps_loaded++;
 #endif
 
 	main_globals.reset_map = FALSE;
@@ -1539,7 +1617,10 @@ static void main_new_map(
 	main_globals.load_core = main_globals.load_core_at_startup;
 	main_globals.load_core_at_startup = FALSE;
 
-	if (main_globals.allow_persistent_storage)
+	/* port: never a network game (co-op on a campaign level): the campaign
+	save is single player's, and a network game neither resumes nor writes
+	it (pause_game_quit_to_main_menu) */
+	if (main_globals.allow_persistent_storage && main_globals.connection == _game_connection_local)
 		game_state_try_and_load_from_persistent_storage();
 	ui_widgets_disable_pause_game(30);
 #ifdef HALO_LINUX
@@ -1623,6 +1704,11 @@ void main_set_multiplayer_map_name(
 {
 	csstrncpy(main_globals.multiplayer_map_name, map_name, NUMBEROF(main_globals.multiplayer_map_name) - 1);
 	main_globals.multiplayer_map_name[NUMBEROF(main_globals.multiplayer_map_name) - 1] = 0;
+#ifdef HALO_LINUX
+	/* (port: a map chosen anew is tried again, though it failed before:
+	cache_files_precache_failed) */
+	cache_files_precache_failure_forget();
+#endif
 	cache_files_give_time_to_precache(main_globals.multiplayer_map_name);
 	return;
 }
@@ -1996,11 +2082,40 @@ void main_pregame_render(
 	return;
 }
 
+/* port: a network co-op host reverts to its last saved state with its
+clock kept going forward, and the clients follow through the co-op syncs
+(network_coop.c). FALSE without a saved state, which would reset the map
+on the host alone. */
+static boolean main_coop_host_revert(
+	void)
+{
+	long now = game_time_get();
+
+	if (!game_state_port_saved_game_valid())
+		return FALSE;
+	game_state_revert();
+	network_coop_reverted(now);
+	ui_widgets_disable_pause_game(30);
+	return TRUE;
+}
+
+static boolean main_coop_host(
+	void)
+{
+	return game_connection() == _game_connection_network_server && network_coop_active();
+}
+
 static void main_revert_map_private(
 	void)
 {
-	game_state_revert();
-	ui_widgets_disable_pause_game(30);
+	/* (a network client never reverts on its own: its game is the host's) */
+	if (main_coop_host())
+		main_coop_host_revert();
+	else if (game_connection() != _game_connection_network_client)
+	{
+		game_state_revert();
+		ui_widgets_disable_pause_game(30);
+	}
 	main_globals.revert_map = FALSE;
 	return;
 }
@@ -2008,11 +2123,29 @@ static void main_revert_map_private(
 static void main_skip_cinematic_private(
 	void)
 {
-	if (cinematic_can_be_skipped())
+	/* port: only a local game or a network co-op host reverts to skip; a
+	network game's other machines would be left out of step */
+	boolean skippable = cinematic_can_be_skipped();
+	boolean skipped = FALSE;
+
+	if (skippable && main_coop_host())
+	{
+		skipped = main_coop_host_revert();
+		if (skipped)
+			network_coop_skip_done();
+	}
+	else if (skippable && game_connection() == _game_connection_local)
 	{
 		game_state_revert();
 		ui_widgets_disable_pause_game(30);
+		skipped = TRUE;
+	}
+	if (skipped)
 		main_globals.revert_map = FALSE;
+	else if (main_coop_host())
+	{
+		error(_error_silent, "co-op: cutscene not skipped (skippable %d, saved state %d)",
+			skippable, game_state_port_saved_game_valid());
 	}
 	main_globals.skip_cinematic = FALSE;
 	return;
@@ -2109,6 +2242,8 @@ static void main_save_map_private(
 			if (save_map_safely && checkpoint_wait_checks >= 300 && checkpoint_log_lines++ < CHECKPOINT_LOG_LINES)
 				platform_log("checkpoint: safe after %ld frames", checkpoint_wait_checks);
 #endif
+			/* port: remember where the players are, for network co-op respawns */
+			players_note_checkpoint();
 			hud_autosave(TRUE);
 			main_globals.save_map_completed = TRUE;
 			main_globals.saving_map = FALSE;
@@ -2127,17 +2262,52 @@ static void main_switch_to_structure_bsp_private(
 	return;
 }
 
+/* The original post-increment test expires on its 92nd 30 Hz update.
+   Render-only frames must not advance it. Saturate so blocked co-op
+   respawns can retry indefinitely without overflowing the short counter. */
+static boolean main_death_timer_expired(
+	short *timer,
+	long *last_tick,
+	boolean advance)
+{
+	long current_tick = game_time_get();
+	unsigned long elapsed_ticks = 0;
+
+	if (current_tick < *last_tick)
+	{
+		/* A checkpoint/core load can move the simulation clock backwards. */
+		*timer = 0;
+	}
+	else
+	{
+		elapsed_ticks = (unsigned long)current_tick - (unsigned long)*last_tick;
+	}
+	*last_tick = current_tick;
+
+	if (!advance)
+		return FALSE;
+
+	*timer = (short)MIN(92, (unsigned long)*timer + elapsed_ticks);
+	return *timer >= 92;
+}
+
 static void main_lost_map_private(
 	void)
 {
-	if (!game_time_get_paused())
+	if (main_death_timer_expired(
+		&main_globals.loss_timer, &main_loss_last_tick,
+		!game_time_get_paused()))
 	{
-		if (main_globals.loss_timer++ > 90)
-		{
-			main_globals.lost_map = FALSE;
-			main_globals.loss_timer = 0;
+		main_globals.lost_map = FALSE;
+		main_globals.loss_timer = 0;
+		/* port: in network co-op, everyone dying respawns the players where
+		they were at the last checkpoint, without a revert. A mission the
+		scripts failed (game_lost, with players still alive: d40's timer,
+		a50's Keyes) does revert, or its failure cutscene would never end. */
+		if (game_connection() != _game_connection_network_server)
 			game_state_revert();
-		}
+		else if (players_are_all_dead() || !main_coop_host_revert())
+			players_respawn_at_checkpoint();
 	}
 	return;
 }
@@ -2145,13 +2315,13 @@ static void main_lost_map_private(
 static void main_respawn_private(
 	void)
 {
-	if (!game_time_get_paused() && !cinematic_in_progress())
+	if (main_death_timer_expired(
+		&main_globals.respawn_timer, &main_respawn_last_tick,
+		!game_time_get_paused() && !cinematic_in_progress()) &&
+		players_respawn_coop())
 	{
-		if (main_globals.respawn_timer++ > 90 && players_respawn_coop())
-		{
-			main_globals.respawn = FALSE;
-			main_globals.respawn_timer = 0;
-		}
+		main_globals.respawn = FALSE;
+		main_globals.respawn_timer = 0;
 	}
 	return;
 }
@@ -2295,9 +2465,37 @@ static void main_won_map_private(
 {
 	short level;
 	short local_player_index;
+
+	/* port: when a network co-op level is won, the round ends for everyone as
+	in multiplayer, back to the lobby, and the next round is the campaign's
+	next level (The Maw's: The Pillar of Autumn). A level not in the campaign
+	repeats. */
+	if (game_connection() == _game_connection_network_server && network_coop_active())
+	{
+		struct network_game *game = network_game_get_game();
+
+		main_globals.won_map = FALSE;
+		level = game ? main_get_solo_level_from_name(game->map.name) : NONE;
+		player_profile_save_level_completed(0);
+		network_game_server_port_cooperative_won(level != NONE ?
+			main_get_solo_level_name((level + 1) % NUMBER_OF_SINGLE_PLAYER_LEVELS) : NULL);
+		return;
+	}
 	main_globals.want_to_be_at_main_menu = TRUE;
 	main_globals.won_map = FALSE;
-	level = main_get_solo_level_from_name(main_globals.soloplayer_map_name) + 1;
+	level = main_get_solo_level_from_name(main_globals.soloplayer_map_name);
+#ifdef HALO_LINUX
+	/* port: a level not in the campaign (a Custom Edition campaign map's)
+	is no profile's progress and has no next level: won, it goes back to the
+	main menu, where NONE + 1 would have gone on to The Pillar of Autumn
+	(OpenCE's main.c, ce41b41d, rolls the credits instead) */
+	if (level == NONE)
+	{
+		error(_error_silent, "won '%s', not a campaign level: back to the main menu", main_globals.soloplayer_map_name);
+		return;
+	}
+#endif
+	level = level + 1;
 	if (level >= 10)
 		level = NONE;
 	for (local_player_index = 0; local_player_index < player_spawn_count; local_player_index++)
@@ -2436,6 +2634,464 @@ static long main_network_catch_up_ticks(
 	return ticks;
 }
 
+/* (port) HALO_TICK_OVERLAP: tick pacing for a game that cannot keep up.
+With the tick on its own thread (tick_thread.c) a frame takes the longer of
+its render and its update, the update's ticks one after another while the
+render draws. A frame that runs two ticks to catch up with real time gains
+game time only while the render covers them: once a tick takes longer than
+its 33 ms share of real time and the update is longer than the render, a
+second tick makes the frame nearly twice as long for little more game time
+- only the update's per-frame work (particles, sounds, the netcode's: ~7 ms
+on the Vita) is shared by its ticks (the Vita in a Custom Edition AI war:
+50 ms ticks, a 30 ms render, two ticks a frame: 9 fps at 18.6 ticks a
+second; one tick a frame: 17.5 fps at 17.5 ticks a second). So, from the
+ticks', the per-frame work's and the render's times averaged over the last
+frames, a frame runs one tick while that plays at most a fifth slower than
+two would (a game already slower than real time, which then plays at up to
+twice the frame rate) and while it is quicker.
+
+1 (on everywhere) or 0 (off everywhere); unset, on for a multiplayer game
+this machine plays alone (a local game, or a host no other machine has
+joined: the Vita's way to play a Custom Edition map), where only the frame
+rate is at stake, and off for the campaign and for network games with
+other machines, whose pace stays real time as long as two ticks a frame
+can keep it. Each tick's simulation is the same either way. */
+static struct
+{
+	unsigned long long started_us;
+	unsigned long long render_us;
+	unsigned long long ticks_us_at_start;
+	real tick_ms;
+	real frame_work_ms;
+	real render_ms;
+	long frames;
+	boolean one_tick;
+	long changes_logged;
+} main_tick_pacing;
+
+/* network_distributed.c */
+boolean network_distributed_host_alone(void);
+/* game_time.c */
+extern volatile unsigned long long halo_game_ticks_us;
+
+static void main_tick_pacing_tick_started(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+	main_tick_pacing.started_us = vita_host_time_us ? vita_host_time_us() : 0;
+	main_tick_pacing.render_us = 0;
+	main_tick_pacing.ticks_us_at_start = halo_game_ticks_us;
+}
+
+/* the frame is presented: its render's time, from the tick's start */
+static void main_tick_pacing_presented(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+	if (main_tick_pacing.started_us && vita_host_time_us)
+		main_tick_pacing.render_us = vita_host_time_us() - main_tick_pacing.started_us;
+}
+
+/* the update is joined: its ticks' time each and its per-frame work's */
+static void main_tick_pacing_joined(
+	void)
+{
+	extern volatile short halo_render_elapsed_ticks;
+	short ticks = halo_render_elapsed_ticks;
+
+	if (ticks > 0 && main_tick_pacing.render_us)
+	{
+		real update_ms = (real)halo_tick_thread_last_us() / 1000.0f;
+		real ticks_ms = (real)(halo_game_ticks_us - main_tick_pacing.ticks_us_at_start) / 1000.0f;
+		real tick_ms = ticks_ms / (real)ticks;
+		real frame_work_ms = update_ms > ticks_ms ? update_ms - ticks_ms : 0.0f;
+		real render_ms = (real)main_tick_pacing.render_us / 1000.0f;
+
+		if (main_tick_pacing.frames++ == 0)
+		{
+			main_tick_pacing.tick_ms = tick_ms;
+			main_tick_pacing.frame_work_ms = frame_work_ms;
+			main_tick_pacing.render_ms = render_ms;
+		}
+		else
+		{
+			main_tick_pacing.tick_ms += (tick_ms - main_tick_pacing.tick_ms) * 0.125f;
+			main_tick_pacing.frame_work_ms += (frame_work_ms - main_tick_pacing.frame_work_ms) * 0.125f;
+			main_tick_pacing.render_ms += (render_ms - main_tick_pacing.render_ms) * 0.125f;
+		}
+	}
+	main_tick_pacing.started_us = 0;
+}
+
+static boolean main_tick_pacing_one_tick(
+	void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static int overlap = -2;
+	boolean one_tick = FALSE;
+
+	if (overlap == -2)
+	{
+		const char *setting = getenv("HALO_TICK_OVERLAP");
+
+		overlap = setting ? atoi(setting) != 0 : -1;
+	}
+	/* (with some hysteresis, so a frame rate near the boundary does not
+	switch back and forth) */
+	if (overlap != 0 && halo_tick_thread_enabled() && main_tick_pacing.frames >= 8 &&
+		main_tick_pacing.tick_ms > (main_tick_pacing.one_tick ? 0.95f : 1.0f) * 1000.0f / TICKS_PER_SECOND)
+	{
+		boolean wanted = overlap > 0;
+
+		/* (unset: a multiplayer game nobody else plays in) */
+		if (overlap < 0)
+		{
+			wanted = game_engine_running() &&
+				(main_globals.connection == _game_connection_local ||
+					(main_globals.connection == _game_connection_network_server &&
+						(network_game_is_splitscreen_local() || network_distributed_host_alone())));
+		}
+		if (wanted)
+		{
+			/* (ticks a second either way: a frame lasts the longer of the
+			render and the update) */
+			real one = main_tick_pacing.frame_work_ms + main_tick_pacing.tick_ms;
+			real two = main_tick_pacing.frame_work_ms + 2.0f * main_tick_pacing.tick_ms;
+
+			if (one < main_tick_pacing.render_ms)
+				one = main_tick_pacing.render_ms;
+			if (two < main_tick_pacing.render_ms)
+				two = main_tick_pacing.render_ms;
+			one_tick = 1.0f / one >= (main_tick_pacing.one_tick ? 0.75f : 0.8f) * 2.0f / two;
+		}
+	}
+	if (one_tick != main_tick_pacing.one_tick)
+	{
+		main_tick_pacing.one_tick = one_tick;
+		if (main_tick_pacing.changes_logged < 40)
+		{
+			main_tick_pacing.changes_logged++;
+			platform_log("tick pacing: %s a frame (tick %.1f ms, the update's other work %.1f ms, render %.1f ms)",
+				one_tick ? "one tick" : "up to two ticks", main_tick_pacing.tick_ms,
+				main_tick_pacing.frame_work_ms, main_tick_pacing.render_ms);
+		}
+	}
+	return one_tick;
+}
+
+/* (port) frame interpolation's pacing: the settings panel's Frame
+interpolation (HALO_INTERPOLATION, port/linux/game/render_interpolation.c).
+The game still ticks 30 times a second; a frame draws the world between the
+last two ticks, and up to two frames are drawn a tick, one as the tick
+starts and one half a tick on. A frame drawn between ticks costs a render of
+its own (and its update's per-frame work: game_frame, the sounds), so two
+frames a tick only while both fit in half a tick each: from the frames'
+busy times (less the pacing's sleep) averaged, those whose update ran a
+tick and those that ran none, and the game thread's own part of a frame
+(less its wait for the tick: what a frame between ticks would take). Else
+one frame a tick, still blended, phase-locked half a tick past each tick as
+the 30 FPS cap is: the game's rate is never lowered for the frames between,
+and the dynamic resolution's budget stays the tick's (d3d8_gxm.c). Back to
+two a tick only after a wait that doubles each time the two did not fit
+(2 s, up to 32 s), so a scene at the edge does not switch back and forth.
+
+HALO_INTERPOLATION_RATE (debug): 2 always two frames a tick, 1 always one.
+With the performance logging the frame-timing line counts the frames
+presented, those that drew a new tick and those drawn between ticks
+(frame_timing.c), and each switch is logged. */
+#define INTERPOLATION_HALF_TICK_MS (500.0f / TICKS_PER_SECOND)
+
+static struct
+{
+	boolean two_a_tick;
+	/* busy times averaged: frames whose update ran ticks, those that ran
+	none, and the game thread's own part of any */
+	real tick_frame_ms, between_frame_ms, own_ms;
+	long measured, frames_in_mode, overruns;
+	/* this frame: its start, its sleep, its wait for the tick, its update's
+	clock sample and ticks */
+	unsigned long long frame_started_us, slept_us, joined_us, update_us;
+	short update_ticks;
+	/* the game clock: the fraction of a tick an update left over, and when
+	that update's time was taken (main_update_time_unthrottled) */
+	real reference_fraction;
+	unsigned long long reference_us;
+	boolean reference_valid;
+	/* the end of the last paced frame */
+	unsigned long long paced_us;
+	/* two a tick again not before retry_us; the wait after the next miss;
+	when the mode last changed */
+	unsigned long long retry_us, retry_wait_us, changed_us;
+	long changes_logged;
+} main_interpolation_pacing;
+
+int halo_fixed_tick(void);
+int halo_fixed_tick_frames(void);
+int halo_repeatable_run(void);
+
+/* HALO_INTERPOLATION_RATE: 0 adaptive (unset), 1 or 2 frames a tick */
+static int main_interpolation_rate(
+	void)
+{
+	extern char *getenv(const char *name);
+	extern int atoi(const char *text);
+	static int rate = -1;
+
+	if (rate < 0)
+	{
+		const char *setting = getenv("HALO_INTERPOLATION_RATE");
+
+		rate = setting && (atoi(setting) == 1 || atoi(setting) == 2) ? atoi(setting) : 0;
+	}
+	return rate;
+}
+
+static boolean main_interpolation_two_a_tick(
+	void)
+{
+	if (main_interpolation_rate())
+		return main_interpolation_rate() == 2;
+	return main_interpolation_pacing.two_a_tick;
+}
+
+/* the clock as an update left it (its leftover; 1 when paused or no game) */
+static void main_interpolation_reference(
+	real fraction)
+{
+	main_interpolation_pacing.reference_fraction = fraction;
+	main_interpolation_pacing.reference_us = main_interpolation_pacing.update_us;
+	main_interpolation_pacing.reference_valid = fraction >= 0.0f && fraction < 1.0f && game_in_progress();
+}
+
+/* (main_rasterizer_throttle) the frame ends at the next slot: half a slot
+past a tick (one a tick) or past a tick and past its half (two) */
+static void main_interpolation_sleep(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	extern void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+	real slot = main_interpolation_two_a_tick() ? 0.5f : 1.0f;
+	unsigned long long period = (unsigned long long)(slot * 1000000.0f / TICKS_PER_SECOND);
+	unsigned long long now, target;
+
+	if (!vita_host_time_us || !vita_host_sleep_us || halo_fixed_tick() || halo_repeatable_run())
+		return;
+	now = vita_host_time_us();
+	/* (only for a frame that fit in its slot, as the 30 FPS cap's phase
+	lock: a longer one is shown at once) */
+	if (main_interpolation_pacing.paced_us && now - main_interpolation_pacing.paced_us < period)
+	{
+		target = main_interpolation_pacing.paced_us + period;
+		if (main_interpolation_pacing.reference_valid)
+		{
+			/* (the clock at the last frame's end, from the last update's) */
+			real fraction = main_interpolation_pacing.reference_fraction +
+				(real)((double)(long long)(main_interpolation_pacing.paced_us - main_interpolation_pacing.reference_us) *
+					(TICKS_PER_SECOND / 1000000.0));
+			real phase = fraction - slot * (real)floor(fraction / slot);
+
+			if (phase >= 0.0f && phase < slot)
+			{
+				target = main_interpolation_pacing.paced_us +
+					(unsigned long long)((1.5f * slot - phase) * (1000000.0f / TICKS_PER_SECOND));
+			}
+		}
+		if (target > now)
+		{
+			vita_host_sleep_us((unsigned long)(target - now));
+			main_interpolation_pacing.slept_us += vita_host_time_us() - now;
+			now = vita_host_time_us();
+		}
+	}
+	main_interpolation_pacing.paced_us = now;
+}
+
+static void main_interpolation_switch(
+	boolean two_a_tick,
+	unsigned long long now)
+{
+	if (two_a_tick == main_interpolation_pacing.two_a_tick)
+		return;
+	if (!two_a_tick)
+	{
+		/* (the two did not fit: the next try waits longer) */
+		main_interpolation_pacing.retry_wait_us = main_interpolation_pacing.retry_wait_us ?
+			main_interpolation_pacing.retry_wait_us * 2 : 2000000ull;
+		if (main_interpolation_pacing.retry_wait_us > 32000000ull)
+			main_interpolation_pacing.retry_wait_us = 32000000ull;
+		main_interpolation_pacing.retry_us = now + main_interpolation_pacing.retry_wait_us;
+	}
+	if (main_interpolation_pacing.changes_logged < 60)
+	{
+		main_interpolation_pacing.changes_logged++;
+		platform_log("frame interpolation: %s a tick (frames that ran a tick %.1f ms, between ticks %.1f ms, "
+			"the game thread's own %.1f ms)",
+			two_a_tick ? "two frames" : "one frame", main_interpolation_pacing.tick_frame_ms,
+			main_interpolation_pacing.between_frame_ms, main_interpolation_pacing.own_ms);
+	}
+	main_interpolation_pacing.two_a_tick = two_a_tick;
+	main_interpolation_pacing.frames_in_mode = 0;
+	main_interpolation_pacing.overruns = 0;
+	main_interpolation_pacing.changed_us = now;
+}
+
+/* the frame is over: its times measured, the number of frames a tick
+decided for the next */
+static void main_interpolation_frame_end(
+	boolean rendered)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	unsigned long long now, busy_us;
+	real busy_ms, own_ms;
+
+	if (!vita_host_time_us || !main_interpolation_pacing.frame_started_us)
+		return;
+	now = vita_host_time_us();
+	busy_us = now - main_interpolation_pacing.frame_started_us;
+	busy_us = busy_us > main_interpolation_pacing.slept_us ? busy_us - main_interpolation_pacing.slept_us : 0;
+	busy_ms = (real)busy_us / 1000.0f;
+	own_ms = busy_us > main_interpolation_pacing.joined_us ?
+		(real)(busy_us - main_interpolation_pacing.joined_us) / 1000.0f : 0.0f;
+	main_interpolation_pacing.frame_started_us = 0;
+	/* (frames of a running game only: a paused one's frames are light) */
+	if (!halo_interpolation_enabled() || !rendered || !game_in_progress() || game_time_get_paused())
+		return;
+	if (main_interpolation_pacing.update_ticks > 0)
+	{
+		main_interpolation_pacing.tick_frame_ms += main_interpolation_pacing.tick_frame_ms > 0.0f ?
+			(busy_ms - main_interpolation_pacing.tick_frame_ms) * 0.125f : busy_ms;
+	}
+	else
+	{
+		main_interpolation_pacing.between_frame_ms += main_interpolation_pacing.between_frame_ms > 0.0f ?
+			(busy_ms - main_interpolation_pacing.between_frame_ms) * 0.125f : busy_ms;
+	}
+	main_interpolation_pacing.own_ms += main_interpolation_pacing.measured ?
+		(own_ms - main_interpolation_pacing.own_ms) * 0.125f : own_ms;
+	main_interpolation_pacing.measured++;
+	main_interpolation_pacing.frames_in_mode++;
+	if (main_interpolation_rate())
+		return;
+	if (main_interpolation_pacing.two_a_tick)
+	{
+		main_interpolation_pacing.overruns = busy_ms > 1.3f * INTERPOLATION_HALF_TICK_MS ?
+			main_interpolation_pacing.overruns + 1 : 0;
+		if (main_interpolation_pacing.overruns >= 3 ||
+			(main_interpolation_pacing.frames_in_mode >= 8 &&
+				(main_interpolation_pacing.tick_frame_ms > 1.05f * INTERPOLATION_HALF_TICK_MS ||
+					main_interpolation_pacing.between_frame_ms > 1.05f * INTERPOLATION_HALF_TICK_MS)))
+		{
+			main_interpolation_switch(FALSE, now);
+		}
+		else if (now - main_interpolation_pacing.changed_us > 10000000ull)
+		{
+			/* (ten seconds of two a tick: the next miss waits 2 s again) */
+			main_interpolation_pacing.retry_wait_us = 0;
+		}
+	}
+	else if (main_interpolation_pacing.frames_in_mode >= 30 && now >= main_interpolation_pacing.retry_us &&
+		main_interpolation_pacing.tick_frame_ms <= 0.85f * INTERPOLATION_HALF_TICK_MS &&
+		main_interpolation_pacing.own_ms <= 0.85f * INTERPOLATION_HALF_TICK_MS)
+	{
+		main_interpolation_switch(TRUE, now);
+	}
+}
+
+/* (port) frame interpolation keeps real time through a hitch. A local
+game's frame elapses at most two ticks (main_update_time_unthrottled: the
+heavy frames' spiral), so the time of a frame longer than that - a settings
+change remaking the screen's targets, a burst of texture decodes, 150-300
+ms on the Vita - was dropped, and the game fell behind real time by it each
+time (the harness, a 250 ms hitch a second: 23.6 ticks a second, on or off).
+With frame interpolation on, that time is kept and the frames after it each
+run up to two ticks until it is caught up (no more than a second of it; a
+frame of over half a second - a load, a checkpoint written - is a stall,
+dropped as before), so the
+game keeps its 30 ticks a second through hitches and the frames between
+ticks hide the extra tick. Not in a network game (its own pacing), with one
+tick a frame asked for (HALO_TICK_CATCH_UP=0, HALO_TICK_OVERLAP), paused,
+or in a film. */
+#define INTERPOLATION_CATCH_UP_MAXIMUM 1.0f
+#define INTERPOLATION_STALL 0.5f
+
+static real main_interpolation_catch_up(
+	real wanted,
+	real allowed)
+{
+	static real owed;
+	static long dropped_logged;
+	const real most = 0.06666667014360428f;
+
+	if (!halo_interpolation_enabled() || !main_tick_catch_up() || main_tick_pacing.one_tick ||
+		!game_in_progress() || game_time_get_paused() ||
+		!(main_globals.connection == _game_connection_local ||
+			(main_globals.connection == _game_connection_network_server && network_game_is_splitscreen_local())))
+	{
+		owed = 0.0f;
+		return allowed;
+	}
+	if (wanted - allowed > INTERPOLATION_STALL)
+	{
+		/* (a stall, not a hitch: dropped, as before, with what was owed) */
+		if (dropped_logged++ < 20)
+			platform_log("frame interpolation: a %.0f ms stall not caught up", wanted * 1000.0f);
+		owed = 0.0f;
+	}
+	else if (wanted > allowed)
+	{
+		owed += wanted - allowed;
+		if (owed > INTERPOLATION_CATCH_UP_MAXIMUM)
+			owed = INTERPOLATION_CATCH_UP_MAXIMUM;
+	}
+	if (owed > 0.0f && allowed < most)
+	{
+		real paid = most - allowed < owed ? most - allowed : owed;
+
+		allowed += paid;
+		owed -= paid;
+	}
+	return allowed;
+}
+
+/* (harness) HALO_TEST_HITCH=<every ms>:<ms>: the game thread stalls that
+long that often (as a settings change remaking the screen's targets or a
+burst of texture decodes does on the Vita), for the pacing's test that the
+game keeps real time through hitches (port/vita/tests/run_hitch_pacing_test.sh) */
+static void main_test_hitch(
+	void)
+{
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	extern void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+	extern char *getenv(const char *name);
+	extern long atol(const char *text);
+	static long every = -1, length;
+	static unsigned long long next_us;
+
+	if (every < 0)
+	{
+		const char *setting = getenv("HALO_TEST_HITCH");
+		const char *colon = setting ? strchr(setting, ':') : NULL;
+
+		every = colon ? atol(setting) : 0;
+		length = colon ? atol(colon + 1) : 0;
+	}
+	if (every > 0 && length > 0 && vita_host_time_us && vita_host_sleep_us && game_in_progress())
+	{
+		unsigned long long now = vita_host_time_us();
+
+		if (!next_us)
+			next_us = now + (unsigned long long)every * 1000;
+		else if (now >= next_us)
+		{
+			vita_host_sleep_us((unsigned long)length * 1000);
+			next_us = now + (unsigned long long)every * 1000;
+		}
+	}
+}
+
 static void main_update_time_unthrottled(
 	void)
 {
@@ -2443,6 +3099,7 @@ static void main_update_time_unthrottled(
 	LARGE_INTEGER counter;
 	LARGE_INTEGER frequency;
 	real seconds_elapsed = 0.0f;
+	real raw_seconds_elapsed = 0.0f;
 
 	QueryPerformanceCounter(&counter);
 	QueryPerformanceFrequency(&frequency);
@@ -2460,6 +3117,7 @@ static void main_update_time_unthrottled(
 	else
 	{
 		seconds_elapsed = PIN(seconds_elapsed, 0.0f, 1.0f);
+		raw_seconds_elapsed = seconds_elapsed;
 		/* (port) a split screen game - the Vita's solo multiplayer: a host
 		with its own client on one machine and no other - is paced as a
 		local game, at most two ticks a frame. As a network server it took
@@ -2502,13 +3160,35 @@ static void main_update_time_unthrottled(
 		(HALO_NET_CATCH_UP_TICKS): a machine that cannot keep up plays
 		slower than real time for a moment, as the campaign does; the
 		others take its updates as they come (each stamped with its tick).
-		The lockstep netcode keeps the Xbox's pacing (its clients must run
-		every tick the host ran). */
-		else if ((main_globals.connection == _game_connection_network_server ||
-			main_globals.connection == _game_connection_network_client) && network_game_distributed())
+		Every network game is distributed now - System Link, online play
+		and ad hoc alike (protocol 9 has no lockstep path) - so every one is
+		paced so; a client left more than a second behind the host takes
+		the host's clock at its next update (network_client_manager.c). */
+		else if (main_globals.connection == _game_connection_network_server ||
+			main_globals.connection == _game_connection_network_client)
 		{
 			seconds_elapsed = CEILING(seconds_elapsed, (real)main_network_catch_up_ticks() * 0.03333333507180214f);
+			/* (port) HALO_TICK_CATCH_UP=0 for a host with no other machine
+			in its game (a System Link game hosted to play a multiplayer
+			map alone, as the Vita does): nobody to keep up with, so paced
+			as the local game above */
+			if (main_globals.connection == _game_connection_network_server &&
+				seconds_elapsed > 0.03333333507180214f && !main_tick_catch_up() && game_in_progress() &&
+				!cinematic_in_progress() && network_distributed_host_alone())
+			{
+				seconds_elapsed = 0.03333333507180214f;
+			}
+			/* (a co-op client too far ahead of a slow host waits for it) */
+			if (main_globals.connection == _game_connection_network_client && network_coop_client_hold())
+				seconds_elapsed = 0.0f;
 		}
+		/* (port) one tick a frame while two would not play faster
+		(HALO_TICK_OVERLAP, above) */
+		if (seconds_elapsed > 0.03333333507180214f && main_tick_pacing_one_tick())
+			seconds_elapsed = 0.03333333507180214f;
+		/* (port) frame interpolation: the time past those two ticks a frame
+		caught up with in the frames after it */
+		seconds_elapsed = main_interpolation_catch_up(raw_seconds_elapsed, seconds_elapsed);
 	}
 	{
 		int halo_repeatable_run(void);
@@ -2525,6 +3205,16 @@ static void main_update_time_unthrottled(
 
 		if (halo_fixed_tick() && !main_globals.movie)
 			seconds_elapsed = 1.0f / TICKS_PER_SECOND;
+		/* (debug) HALO_FIXED_TICK_FRAMES=<n>: n frames a tick instead
+		(tick_hash.c), the frames between drawn with frame interpolation */
+		if (halo_fixed_tick() && !main_globals.movie && halo_fixed_tick_frames() > 1)
+			seconds_elapsed = 0.03333333507180214f / (real)halo_fixed_tick_frames();
+	}
+	{
+		/* (frame interpolation's pacing: when this frame's time was taken) */
+		extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+		main_interpolation_pacing.update_us = vita_host_time_us ? vita_host_time_us() : 0;
 	}
 
 	main_globals.frame_start_milliseconds = system_milliseconds();
@@ -2834,7 +3524,14 @@ void main_rasterizer_throttle(
 	}
 
 #ifdef HALO_LINUX
-	if (halo_frame_unthrottled() && !halo_interpolation_enabled())
+	if (halo_frame_unthrottled() && halo_interpolation_enabled())
+	{
+		/* (port) frame interpolation: one or two frames a tick, each ending
+		at its slot of the tick (main_interpolation_pacing), whatever
+		display.frame_cap says */
+		main_interpolation_sleep();
+	}
+	else if (halo_frame_unthrottled() && !halo_interpolation_enabled())
 	{
 		/* (port) unthrottled without interpolation: the picture changes only
 		with the 30 Hz ticks, so frames are capped at 30 a second by sleeping
@@ -2855,6 +3552,11 @@ void main_rasterizer_throttle(
 			const char *setting = getenv("HALO_FRAME_CAP");
 			cap = setting ? atol(setting) : 30;
 		}
+#ifdef HALO_DEDICATED_SERVER
+		/* (a dedicated server: the tick rate with machines connected, a few
+		frames a second without) */
+		cap = dedicated_server_frame_cap();
+#endif
 		if (cap > 0 && vita_host_time_us && vita_host_sleep_us)
 		{
 			unsigned long long period = 1000000ull / (unsigned long long)cap;
@@ -3586,13 +4288,16 @@ void main_game_render(
 /* (port, debug) HALO_TEST_COMMANDS="tick:command;tick:command...": console
 commands run at the top of the main loop once the game time reaches each
 tick, for testing the save paths without a controller, e.g.
-"300:game_save_totally_unsafe;600:game_revert". Besides the console's
+"300:game_save_totally_unsafe;600:game_revert" ("L300:..." waits for a
+level: not the main menu's scenario). Besides the console's
 own, @skip asks for a cinematic skip (as the controller does), @quit
-does the pause menu's Save and Quit, and "@camera x y z yaw pitch" puts
+does the pause menu's Save and Quit, @menu goes back to the main menu
+without saving, @exit ends the game, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
 positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
-tick, every frame), "@tv name" puts every player's unit at the centre of
+tick, every frame), "M<tick>:..." runs in turn, each once a map has
+loaded since the one before it ran (map cycles), "@tv name" puts every player's unit at the centre of
 that scenario trigger volume (the benchmarks walk the player through a
 level's encounters this way: triage/perf2-status.md), "@where" logs where
 every vehicle and scenery object is, and "@shot name"
@@ -3600,7 +4305,12 @@ has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device; on the Vita its display, as name<frame>.bmp);
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
 (vita_settings_set, through halo_test_setting_hook; elsewhere the variable, and the settings generation the
-readers watch). Each runs once,
+readers watch); "@host command" asks for a host command (kick, ban,
+bringto) as the Vita's Play page does (main_request_host_command),
+"@update" presses the settings panel's Check for updates
+(update_check_request, port/linux/src/update_notify.c), and
+"@sound tag [n]" plays that sound tag (the nth so named) as
+sound_impulse_start does with no object. Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 /* (the Vita's settings panel sets it: vita_settings_load) */
@@ -3612,6 +4322,56 @@ char halo_screenshot_name[64];
 
 static void main_test_camera(char const *arguments);
 static void main_test_trigger_volume(char const *name);
+static void main_test_bsp_switch_trigger(char const *arguments);
+/* damage.c's */
+void damage_kill_object_for_player(long object_index, long player_index);
+
+/* (main_request_host_command) the host commands asked for, run in order at
+the top of the main loop (main_host_commands_update) */
+#include <pthread.h>
+enum
+{
+	MAXIMUM_REQUESTED_HOST_COMMANDS = 8,
+};
+static pthread_mutex_t main_host_commands_lock = PTHREAD_MUTEX_INITIALIZER;
+static char main_host_commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+static short main_host_command_count;
+
+boolean main_request_host_command(
+	char const *command)
+{
+	boolean queued = FALSE;
+
+	if (!command || strlen(command) >= sizeof(main_host_commands[0]))
+		return FALSE;
+	pthread_mutex_lock(&main_host_commands_lock);
+	if (main_host_command_count < MAXIMUM_REQUESTED_HOST_COMMANDS)
+	{
+		strcpy(main_host_commands[main_host_command_count++], command);
+		queued = TRUE;
+	}
+	pthread_mutex_unlock(&main_host_commands_lock);
+	return queued;
+}
+
+static void main_host_commands_update(
+	void)
+{
+	char commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+	short count;
+	short index;
+
+	pthread_mutex_lock(&main_host_commands_lock);
+	count = main_host_command_count;
+	memcpy(commands, main_host_commands, sizeof(commands[0]) * count);
+	main_host_command_count = 0;
+	pthread_mutex_unlock(&main_host_commands_lock);
+	for (index = 0; index < count; index++)
+	{
+		platform_log("host command (settings panel): %s", commands[index]);
+		hs_compile_and_evaluate(commands[index]);
+	}
+}
 
 static void main_test_commands_update(
 	void)
@@ -3620,8 +4380,11 @@ static void main_test_commands_update(
 	static float pan[7];
 	static long pan_start;
 	static int parsed = 0;
-	static struct { long tick; char command[120]; boolean done; } commands[160];
+	static struct { long tick; char command[120]; boolean done; boolean in_level; boolean after_map; } commands[160];
 	static short command_count;
+	/* ("M" commands: the maps loaded when the last one ran) */
+	static unsigned long after_map_generation;
+	boolean after_map_waiting = FALSE;
 	short index;
 
 	if (!parsed)
@@ -3639,7 +4402,12 @@ static void main_test_commands_update(
 				end = setting + strlen(setting);
 			if (colon && colon < end)
 			{
-				commands[command_count].tick = atol(setting);
+				/* ("L<tick>:": in a level only, not in the main menu's
+				scenario, whose time runs too: a level reached through the
+				menus, HALO_TEST_PAD) */
+				commands[command_count].in_level = *setting == 'L';
+				commands[command_count].after_map = *setting == 'M';
+				commands[command_count].tick = atol(setting + (*setting == 'L' || *setting == 'M'));
 				length = (size_t)(end - colon - 1);
 				if (length >= sizeof(commands[0].command))
 					length = sizeof(commands[0].command) - 1;
@@ -3655,17 +4423,45 @@ static void main_test_commands_update(
 		return;
 	for (index = 0; index < command_count; index++)
 	{
-		if (commands[index].done || game_time_get() < commands[index].tick)
+		/* ("M<tick>:": in turn, each in the next map loaded after the one
+		before it ran - a menu or level reached by the one before - once its
+		time reaches the tick: map changes in a row, harness map cycles) */
+		if (commands[index].after_map && !commands[index].done)
+		{
+			if (after_map_waiting || main_test_maps_loaded == after_map_generation ||
+				game_time_get() < commands[index].tick)
+			{
+				after_map_waiting = TRUE;
+				continue;
+			}
+			after_map_waiting = TRUE;
+			after_map_generation = main_test_maps_loaded;
+		}
+		if (commands[index].done || game_time_get() < commands[index].tick ||
+			(commands[index].in_level && main_globals.main_menu_scenario_loaded))
+		{
 			continue;
+		}
 		commands[index].done = TRUE;
 		platform_log("test command at tick %ld: %s", (long)game_time_get(), commands[index].command);
 		if (!strcmp(commands[index].command, "@skip"))
 			main_skip_cinematic();
+		/* (@exit: the game ends there, as debug.exit_after ends it - the
+		map fuzzing's runs, triage/mssafe) */
+		else if (!strcmp(commands[index].command, "@exit"))
+		{
+			platform_log("test command: exiting");
+			exit(EXIT_SUCCESS);
+		}
 		else if (!strcmp(commands[index].command, "@quit"))
 		{
 			game_state_save_to_persistent_storage();
 			main_goto_main_menu();
 		}
+		/* (@menu: back to the main menu, as a network game's end or
+		leaving it does, without saving) */
+		else if (!strcmp(commands[index].command, "@menu"))
+			main_goto_main_menu();
 		else if (!strncmp(commands[index].command, "@shot ", 6))
 			csstrncpy(halo_screenshot_name, commands[index].command + 6, sizeof(halo_screenshot_name) - 1);
 		else if (!strncmp(commands[index].command, "@pan ", 5))
@@ -3700,8 +4496,104 @@ static void main_test_commands_update(
 				__atomic_add_fetch(&halo_settings_generation, 1, __ATOMIC_RELEASE);
 			}
 		}
+		/* (@update: the settings panel's Check for updates pressed,
+		port/linux/src/update_notify.c) */
+		else if (!strcmp(commands[index].command, "@update"))
+		{
+			int update_check_request(void);
+
+			update_check_request();
+		}
 		else if (!strncmp(commands[index].command, "@tv ", 4))
 			main_test_trigger_volume(commands[index].command + 4);
+		/* network co-op (port/linux/game/network_coop.c): "@vote" is this
+		machine's press of skip in a cinematic; "@bsp P K" stands player P
+		(its absolute index, -1 every player) in the Kth of the loaded BSP's
+		switch trigger volumes; "@kill P" kills player P */
+		else if (!strcmp(commands[index].command, "@vote"))
+		{
+			platform_log("test command: skip pressed (offered %d, skippable %d)", network_coop_skip_offered(),
+				cinematic_can_be_skipped());
+			if ((cinematic_can_be_skipped() || network_coop_skip_offered()) && !network_coop_vote_skip())
+				main_skip_cinematic();
+		}
+		else if (!strncmp(commands[index].command, "@bsp ", 5))
+			main_test_bsp_switch_trigger(commands[index].command + 5);
+		else if (!strcmp(commands[index].command, "@bsplist"))
+			main_test_bsp_switch_trigger("-2 -1");
+		/* "@pos P X Y Z": player P stands there */
+		else if (!strncmp(commands[index].command, "@pos ", 5))
+		{
+			long player_absolute_index = NONE;
+			real_point3d position;
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			if (sscanf(commands[index].command + 5, "%ld %f %f %f", &player_absolute_index, &position.x, &position.y,
+				&position.z) == 4)
+			{
+				data_iterator_new(&iterator, player_data);
+				while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+				{
+					if (DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index &&
+						player->unit_index != NONE)
+					{
+						object_set_position(player->unit_index, &position, NULL, NULL);
+					}
+				}
+			}
+		}
+		else if (!strncmp(commands[index].command, "@kill ", 6))
+		{
+			long player_absolute_index = atol(commands[index].command + 6);
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			data_iterator_new(&iterator, player_data);
+			while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+			{
+				if (DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index &&
+					player->unit_index != NONE)
+				{
+					platform_log("test command: player %ld killed", player_absolute_index);
+					damage_kill_object_for_player(player->unit_index, NONE);
+				}
+			}
+		}
+		/* (@host <command>: asked for as the settings panel asks,
+		main_request_host_command: run at the next frame's top) */
+		else if (!strncmp(commands[index].command, "@host ", 6))
+			main_request_host_command(commands[index].command + 6);
+		/* (@sound <tag> [n]: the sound of that name (the nth of them:
+		protected maps name every tag alike) played as a script's
+		sound_impulse_start with no object plays it, any sound the map
+		has, where a script names only the scenario's references:
+		run_ce_ogg_sound_test.sh) */
+		else if (!strncmp(commands[index].command, "@sound ", 7))
+		{
+			void scripted_sound_new(long definition_index, long source_object_index, real scale);
+			char name[128];
+			long wanted = 0;
+			long definition_index = NONE;
+			struct tag_iterator iterator;
+			long tag_index;
+
+			name[0] = '\0';
+			sscanf(commands[index].command + 7, "%127s %ld", name, &wanted);
+			tag_iterator_new(&iterator, 'snd!');
+			while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+			{
+				if (!_stricmp(tag_get_name(tag_index), name) && wanted-- == 0)
+				{
+					definition_index = tag_index;
+					break;
+				}
+			}
+			platform_log("test command: sound %s %s", commands[index].command + 7,
+				definition_index != NONE ? "played" : "not in the map");
+			if (definition_index != NONE)
+				scripted_sound_new(definition_index, NONE, 1.f);
+		}
 		else
 			hs_compile_and_evaluate(commands[index].command);
 	}
@@ -3756,6 +4648,78 @@ static void main_test_trigger_volume(
 	platform_log("test command: no trigger volume %s", name);
 }
 
+/* "@bsp P K": player P (-1 every player) stands in the middle of the Kth
+switch trigger volume whose source is the loaded structure BSP (a
+scenario's block of them, as players.c has it) */
+struct main_test_bsp_switch_trigger_volume
+{
+	short trigger_volume_index;
+	short source_structure_bsp_index;
+	short destination_structure_bsp_index;
+	short cutscene_flag_index;
+};
+
+static void main_test_bsp_switch_trigger(
+	char const *arguments)
+{
+	struct scenario *scenario = global_scenario_get();
+	long player_absolute_index = NONE;
+	int wanted = 0;
+	short index;
+	int found = 0;
+
+	sscanf(arguments, "%ld %d", &player_absolute_index, &wanted);
+	for (index = 0; index < scenario->bsp_switch_trigger_volumes.count; index++)
+	{
+		struct main_test_bsp_switch_trigger_volume *switch_volume = TAG_BLOCK_GET_ELEMENT(
+			&scenario->bsp_switch_trigger_volumes, index, struct main_test_bsp_switch_trigger_volume);
+		struct scenario_trigger_volume *volume;
+		real_point3d centre;
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		if (player_absolute_index != -2 &&
+			(switch_volume->source_structure_bsp_index != global_structure_bsp_index_get() || found++ != wanted))
+		{
+			continue;
+		}
+		volume = TAG_BLOCK_GET_ELEMENT(&scenario->trigger_volumes, switch_volume->trigger_volume_index,
+			struct scenario_trigger_volume);
+		if (volume->type == _scenario_trigger_volume_type_axis_aligned)
+		{
+			centre.x = (volume->bounds.x0 + volume->bounds.x1) / 2.0f;
+			centre.y = (volume->bounds.y0 + volume->bounds.y1) / 2.0f;
+			centre.z = (volume->bounds.z0 + volume->bounds.z1) / 2.0f;
+		}
+		else
+		{
+			real_matrix4x3 matrix;
+			real_point3d middle = { volume->extents.i / 2.0f, volume->extents.j / 2.0f, volume->extents.k / 2.0f };
+
+			matrix4x3_from_point_and_vectors(&matrix, &volume->position, &volume->forward, &volume->up);
+			matrix4x3_transform_point(&matrix, &middle, &centre);
+		}
+		platform_log("test command: BSP switch trigger %d (%s, BSP %d to %d) at %.2f %.2f %.2f for player %ld", index,
+			volume->name, (int)switch_volume->source_structure_bsp_index,
+			(int)switch_volume->destination_structure_bsp_index, centre.x, centre.y, centre.z, player_absolute_index);
+		/* ("@bsplist": every one listed, nobody moved) */
+		if (player_absolute_index == -2)
+			continue;
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (player->unit_index != NONE && (player_absolute_index == NONE ||
+				DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index))
+			{
+				object_set_position(player->unit_index, &centre, NULL, NULL);
+			}
+		}
+		return;
+	}
+	if (player_absolute_index != -2)
+		platform_log("test command: no BSP switch trigger %d from BSP %d", wanted, (int)global_structure_bsp_index_get());
+}
+
 static void main_test_camera(
 	char const *arguments)
 {
@@ -3784,6 +4748,7 @@ the tick on its thread: the main loop's own work before the render, the
 networked game's above all, and the wait for the tick after the present) */
 enum
 {
+	_main_split_loop,
 	_main_split_input,
 	_main_split_network_start,
 	_main_split_time_ui,
@@ -3791,46 +4756,151 @@ enum
 	_main_split_network_end,
 	_main_split_camera_engine,
 	_main_split_join,
+	_main_split_render,
+	_main_split_present,
 	NUMBER_OF_MAIN_SPLITS
 };
 static int main_split_enabled = -1;
 static unsigned long long main_split_last, main_split_us[NUMBER_OF_MAIN_SPLITS];
 static unsigned long main_split_frames;
+/* (the frame's own, for the frame-hitch line: always measured, a few clock
+reads a frame) */
+static unsigned long long main_split_frame_us[NUMBER_OF_MAIN_SPLITS], main_split_frame_started;
 
 static void main_split_mark(int step)
 {
 	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
 	unsigned long long now;
 
+	if (!vita_host_time_us)
+		return;
 	if (main_split_enabled < 0)
 	{
 		const char *setting = getenv("HALO_RENDER_PROFILE");
 
 		main_split_enabled = setting && atoi(setting) != 0;
 	}
-	if (main_split_enabled <= 0 || !vita_host_time_us)
-		return;
 	now = vita_host_time_us();
 	if (step >= 0 && main_split_last)
-		main_split_us[step] += now - main_split_last;
+	{
+		if (main_split_enabled > 0)
+			main_split_us[step] += now - main_split_last;
+		main_split_frame_us[step] += now - main_split_last;
+	}
 	main_split_last = now;
 }
 
-static void main_split_report(void)
+/* the frame-hitch lines' other parts: the waits the game thread's steps may
+hold (load_profile.c: the cache file thread, the texture and sound caches,
+the file calls; lruv_cache.c: the cache lock; dsound_sdl.c: the mixer's
+lock), a map copy going on (the map's decompression into the cache
+partition: the memory card's busiest), and on the Vita each core's busy
+share and the helpers' run times (vita_fourth_core.c) */
+extern volatile unsigned long long halo_cache_lock_wait_us[2];
+extern volatile unsigned long long halo_mixer_game_wait_us __attribute__((weak));
+#ifdef HALO_VITA
+int vita_host_frame_cores(char *line, int size, int describe);
+#endif
+/* (network_coop.c: a co-op client's frames held for the host) */
+int network_coop_client_pace_note(char *line, int size);
+
+/* the game thread's frames are counted from one drawn frame to the next: a
+loop that draws nothing (a co-op client held for its host, a tick not yet
+due) runs again at once, and its steps add to the drawn frame's, so a gap
+between two drawn frames is named whole. TRUE at a drawn frame's end (or
+one not drawn for 5 s), when the frame's counts start again */
+static boolean main_split_report(boolean presented)
 {
 	static const char *const names[NUMBER_OF_MAIN_SPLITS] =
-		{ "input", "network_start", "time+ui", "player_control", "network_end", "camera+engine", "tick_join" };
-	char line[512];
+		{ "loop", "input", "network_start", "time+ui", "player_control", "network_end", "camera+engine", "tick_join",
+		"render", "present" };
+	static unsigned long long lock_wait_before, mixer_wait_before;
+	static unsigned long loops;
+	char line[900];
 	int n = 0, index;
+	extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+	unsigned long long now, total, lock_wait, mixer_wait;
 
+	if (!vita_host_time_us)
+		return TRUE;
+	loops++;
+	now = vita_host_time_us();
+	if (!presented && main_split_frame_started && now - main_split_frame_started < 5000000ull)
+		return FALSE;
+	{
+		/* (a frame over 100 ms, from the last frame's end to this one's:
+		the game thread's steps that frame, by name - "loop" is the main
+		loop's top (a map's load, a revert, a save), "present" holds the
+		wait for the worker - and what it waited for, so a hitch with no
+		texture decoded, no shader and no wait for the worker says what it
+		was, on the hardware too, with no switch on) */
+		static unsigned long hitches;
+
+		lock_wait = halo_cache_lock_wait_us[0];
+		mixer_wait = &halo_mixer_game_wait_us ? halo_mixer_game_wait_us : 0;
+		total = main_split_frame_started && now > main_split_frame_started ? now - main_split_frame_started : 0;
+		if (total > 100000ull && hitches < 1000)
+		{
+			unsigned long long marked = 0;
+			char cores[900];
+
+			hitches++;
+			for (index = 0; index < NUMBER_OF_MAIN_SPLITS; index++)
+			{
+				marked += main_split_frame_us[index];
+				if (main_split_frame_us[index] >= 1000ull || index != _main_split_loop)
+					n += snprintf(line + n, sizeof(line) - n, " %s %.1f", names[index], (double)main_split_frame_us[index] / 1000.0);
+			}
+			n += snprintf(line + n, sizeof(line) - n, ", other %.1f", (double)(total > marked ? total - marked : 0) / 1000.0);
+			if (loops > 1 && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; %lu loops drew nothing%s", loops - 1, presented ? "" : " (nor this one)");
+			if (n < (int)sizeof(line) - 2 &&
+				network_coop_client_pace_note(line + n + 2, (int)sizeof(line) - n - 2) > 0)
+			{
+				line[n] = ';';
+				line[n + 1] = ' ';
+				n += (int)strlen(line + n);
+			}
+			if (lock_wait - lock_wait_before >= 1000ull && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; cache lock waits %.1f ms", (double)(lock_wait - lock_wait_before) / 1000.0);
+			if (mixer_wait - mixer_wait_before >= 1000ull && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; mixer lock waits %.1f ms", (double)(mixer_wait - mixer_wait_before) / 1000.0);
+			if (cache_files_precache_in_progress() && n < (int)sizeof(line))
+				n += snprintf(line + n, sizeof(line) - n, "; a map copy in progress");
+			platform_log("frame-hitch: %.1f ms on the game thread:%s", (double)total / 1000.0, line);
+			if (halo_load_profile_describe(line, sizeof(line)))
+				platform_log("frame-hitch waits: %s", line);
+#ifdef HALO_VITA
+			if (vita_host_frame_cores(cores, sizeof(cores), 1) > 0)
+				platform_log("frame-hitch cores: %s", cores);
+#else
+			(void)cores;
+#endif
+			n = 0;
+		}
+		else
+		{
+			/* (the samples go on; the holds noted are this frame's) */
+#ifdef HALO_VITA
+			vita_host_frame_cores(NULL, 0, 0);
+#endif
+			network_coop_client_pace_note(line, 0);
+		}
+		memset(main_split_frame_us, 0, sizeof(main_split_frame_us));
+		main_split_frame_started = now;
+		lock_wait_before = lock_wait;
+		mixer_wait_before = mixer_wait;
+		loops = 0;
+	}
 	if (main_split_enabled <= 0 || ++main_split_frames % 300)
-		return;
+		return TRUE;
 	for (index = 0; index < NUMBER_OF_MAIN_SPLITS; index++)
 	{
 		n += snprintf(line + n, sizeof(line) - n, " %s %.2f", names[index], (double)main_split_us[index] / 1000.0 / 300.0);
 		main_split_us[index] = 0;
 	}
 	platform_log("main-split (ms/frame):%s", line);
+	return TRUE;
 }
 #define MAIN_SPLIT(step) main_split_mark(step)
 #endif
@@ -3843,6 +4913,7 @@ void main_loop(
 #ifdef HALO_LINUX
 	boolean tick_running = FALSE;
 	boolean simulate;
+	boolean presented;
 #endif
 
 	if (!game_in_editor())
@@ -3866,6 +4937,7 @@ void main_loop(
 	{
 #ifdef HALO_LINUX
 		main_test_commands_update();
+		main_host_commands_update();
 		{
 			void halo_shader_tour_update(void);
 
@@ -3962,7 +5034,20 @@ void main_loop(
 		profile_frame_start();
 #ifdef HALO_LINUX
 		halo_frame_timing(_frame_timing_frame_start, 0);
-		MAIN_SPLIT(-1);
+		MAIN_SPLIT(_main_split_loop);
+		/* (frame interpolation: the setting as this frame has it, and the
+		frame's times for its pacing) */
+		halo_interpolation_latch();
+		{
+			extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+
+			main_interpolation_pacing.frame_started_us = vita_host_time_us ? vita_host_time_us() : 0;
+			main_interpolation_pacing.slept_us = 0;
+			main_interpolation_pacing.joined_us = 0;
+			main_interpolation_pacing.update_ticks = 0;
+		}
+		presented = FALSE;
+		main_test_hitch();
 #endif
 		input_frame_begin();
 		input_update();
@@ -3975,9 +5060,16 @@ void main_loop(
 		{
 			render_frame = TRUE;
 
-#ifdef HALO_LINUX
+#ifdef HALO_DEDICATED_SERVER
+			/* the dedicated server's hosting and commands
+			(port/linux/game/dedicated_server.c); none of the tests' sessions */
+			dedicated_server_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			MAIN_SPLIT(_main_split_input);
+#elif defined(HALO_LINUX)
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			system_link_shortcut_update(main_globals.main_menu_scenario_loaded);
+			test_input_main_menu(main_globals.main_menu_scenario_loaded);
 			MAIN_SPLIT(_main_split_input);
 #endif
 			connection = main_globals.connection;
@@ -4069,8 +5161,21 @@ void main_loop(
 					if (!halo_tick_thread_enabled())
 					{
 						halo_frame_timing(_frame_timing_tick_start, 0);
+						halo_view_points_capture();
 						game_time_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 						halo_frame_timing(_frame_timing_tick_end, 0);
+						main_interpolation_pacing.update_ticks = game_time_get_elapsed();
+						main_interpolation_reference(game_time_get_tick_fraction());
+						/* (frame interpolation draws from the poses as each
+						tick left them: render_interpolation.c) */
+						if (halo_interpolation_enabled())
+						{
+							void render_tick_poses_capture(void);
+							void render_tick_poses_publish(void);
+
+							render_tick_poses_capture();
+							render_tick_poses_publish();
+						}
 					}
 #else
 					game_time_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
@@ -4080,8 +5185,10 @@ void main_loop(
 						(main_globals.halt_time_scale &&
 							(game_time_get_paused() || game_time_get_elapsed()>0 || game_time_get_speed()<1.0f));
 #ifdef HALO_LINUX
-					/* frames between ticks too (render_interpolation.c) */
-					if (halo_interpolation_enabled())
+					/* frames between ticks too (render_interpolation.c),
+					while two a tick fit (main_interpolation_pacing); else
+					one a tick, as without */
+					if (halo_interpolation_enabled() && main_interpolation_two_a_tick())
 						render_frame = main_globals.main_menu_scenario_loaded || main_globals.halt_time_scale;
 #endif
 					render_frame &= !game_engine_running() || game_time_get()>=3;
@@ -4110,7 +5217,10 @@ void main_loop(
 #ifdef HALO_LINUX
 				if (simulate && halo_tick_thread_enabled())
 				{
+					/* (the cameras just updated: view_distance.c) */
+					halo_view_points_capture();
 					halo_tick_thread_start((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+					main_tick_pacing_tick_started();
 					tick_running = TRUE;
 				}
 #endif
@@ -4140,7 +5250,26 @@ void main_loop(
 					}
 					halo_frame_timing(_frame_timing_render_start, 0);
 					render_interpolation_frame_begin();
-					main_game_render((double)main_globals.seconds_elapsed);
+					{
+						/* (harness) HALO_RENDER_SLOWDOWN=<factor>: the render
+						takes that many times as long (a sleep for the rest),
+						as HALO_TICK_SLOWDOWN the tick (tick_thread.c) */
+						extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+						extern void vita_host_sleep_us(unsigned long microseconds) __attribute__((weak));
+						extern double atof(const char *text);
+						static real slowdown = -1.0f;
+						unsigned long long render_started = vita_host_time_us ? vita_host_time_us() : 0;
+
+						if (slowdown < 0.0f)
+						{
+							const char *setting = getenv("HALO_RENDER_SLOWDOWN");
+
+							slowdown = setting ? (real)atof(setting) : 0.0f;
+						}
+						main_game_render((double)main_globals.seconds_elapsed);
+						if (slowdown > 1.0f && render_started && vita_host_sleep_us)
+							vita_host_sleep_us((unsigned long)((slowdown - 1.0f) * (real)(vita_host_time_us() - render_started)));
+					}
 					render_interpolation_frame_end();
 					halo_frame_timing(_frame_timing_render_end, 0);
 #else
@@ -4149,7 +5278,12 @@ void main_loop(
 					profile_render_end();
 				}
 			}
+#ifdef HALO_DEDICATED_SERVER
+			/* (a dedicated server: no loading screen either) */
+			else if (FALSE)
+#else
 			else
+#endif
 			{
 				profile_render_start();
 				main_pregame_render();
@@ -4157,6 +5291,7 @@ void main_loop(
 			}
 
 #ifdef HALO_LINUX
+			MAIN_SPLIT(_main_split_render);
 			halo_frame_timing(_frame_timing_present_start, 0);
 #endif
 			main_rasterizer_throttle();
@@ -4164,13 +5299,29 @@ void main_loop(
 			if (render_frame && !debug_no_drawing)
 			{
 				main_present_frame();
+#ifdef HALO_LINUX
+				presented = TRUE;
+#endif
 			}
 #ifdef HALO_LINUX
 			halo_frame_timing(_frame_timing_present_end, 0);
-			MAIN_SPLIT(-1);
+			MAIN_SPLIT(_main_split_present);
 			if (tick_running)
 			{
+				extern unsigned long long vita_host_time_us(void) __attribute__((weak));
+				unsigned long long join_started = vita_host_time_us ? vita_host_time_us() : 0;
+
+				main_tick_pacing_presented();
 				halo_tick_thread_join();
+				if (join_started)
+					main_interpolation_pacing.joined_us = vita_host_time_us() - join_started;
+				{
+					extern volatile short halo_render_elapsed_ticks;
+
+					main_interpolation_pacing.update_ticks = halo_render_elapsed_ticks;
+				}
+				main_interpolation_reference(halo_render_tick_fraction_get());
+				main_tick_pacing_joined();
 				MAIN_SPLIT(_main_split_join);
 				halo_frame_timing_tick_threaded(halo_tick_thread_last_us() * 1000ull);
 				tick_running = FALSE;
@@ -4201,9 +5352,22 @@ void main_loop(
 		input_frame_end();
 		profile_frame_end();
 #ifdef HALO_LINUX
+		/* (frame interpolation: the frame's times for the pacing, and the
+		frames presented, those of a new tick and those between, for the
+		frame-timing line: frame_timing.c) */
+		main_interpolation_frame_end(presented);
+		{
+			/* (paused: the pause menu's frames, which draw no tick either way;
+			between: frame interpolation's frames between two ticks) */
+			boolean paused = presented && game_in_progress() && game_time_get_paused();
+
+			halo_frame_timing_presented(presented, presented && !paused && game_in_progress() &&
+				halo_interpolation_enabled() && !render_interpolation_frame_drew_new_tick(), paused,
+				halo_interpolation_enabled(), main_interpolation_two_a_tick());
+		}
 		halo_frame_timing(_frame_timing_frame_end, game_in_progress() ? (unsigned long)game_time_get() : 0);
-		halo_load_profile_frame_end();
-		main_split_report();
+		if (main_split_report(presented))
+			halo_load_profile_frame_end();
 		{
 			void halo_net_detail_report(void);
 

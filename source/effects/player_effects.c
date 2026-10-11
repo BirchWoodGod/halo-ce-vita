@@ -89,6 +89,7 @@ symbols in this file:
 #include "effects/player_effects.h"
 
 #include "camera/observer.h"
+#include "cseries/errors.h"
 #include "game/game.h"
 #include "game/game_globals.h"
 #include "game/player_control.h"
@@ -108,6 +109,7 @@ symbols in this file:
 #include "units/units.h"
 
 #include <stddef.h>
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 
 /* ---------- constants */
 
@@ -398,6 +400,7 @@ void scripted_player_effect_set_rotation(
 	real pitch,
 	real roll)
 {
+	network_coop_note_player_effect(_coop_player_effect_rotation, yaw, pitch, roll);
 	player_effect_globals->scripted_effect.max_rotation.yaw = DEGREES_TO_RADIANS(yaw);
 	player_effect_globals->scripted_effect.max_rotation.pitch = DEGREES_TO_RADIANS(pitch);
 	player_effect_globals->scripted_effect.max_rotation.roll = DEGREES_TO_RADIANS(roll);
@@ -459,6 +462,50 @@ void player_effect_screen_fade_out(
 	return;
 }
 
+/* port: read and set the screen fade, so a co-op host can send it to its
+clients (port/linux/game/network_coop.c): color, length, direction, and
+the game time it started */
+void player_effect_port_screen_fade_get(
+	real_rgb_color *color,
+	short *ticks,
+	boolean *fading_out,
+	long *start_time)
+{
+	*color = player_effect_globals->screen_fade.color;
+	*ticks = player_effect_globals->screen_fade.ticks;
+	*fading_out = player_effect_globals->screen_fade.fading_out;
+	*start_time = player_effect_globals->screen_fade.start_time;
+
+	return;
+}
+
+void player_effect_port_screen_fade_set(
+	real_rgb_color const *color,
+	short ticks,
+	boolean fading_out,
+	long start_time)
+{
+	player_effect_globals->screen_fade.color = *color;
+	player_effect_globals->screen_fade.ticks = ticks;
+	player_effect_globals->screen_fade.fading_out = fading_out;
+	player_effect_globals->screen_fade.start_time = start_time;
+
+	return;
+}
+
+boolean player_effect_port_scripted_active(
+	void)
+{
+	return TEST_FLAG(player_effect_globals->global_flags, _scripted_player_effect_active_bit);
+}
+
+void player_effect_port_scripted_end(
+	void)
+{
+	SET_FLAG(player_effect_globals->global_flags, _scripted_player_effect_active_bit, FALSE);
+	SET_FLAG(player_effect_globals->global_flags, _scripted_player_effect_stopping_bit, FALSE);
+}
+
 void player_effect_get_damage_indicators(
 	short local_player_index,
 	byte *damage_indicators)
@@ -508,6 +555,26 @@ static void player_effect_update_screen_flash(
 	real time_scale)
 {
 	real time_factor = time_scale * TICKS_PER_SECOND;
+
+	/* port: the type is the map's (a damage effect's; retail up to 6 of 7)
+	and indexes the type map, here and as the flash is drawn: one that is
+	no type is no flash, and that is said once */
+	if (!VALID_INDEX(screen_flash->type, NUMBER_OF_SCREEN_FLASH_TYPES))
+	{
+		static boolean bad_type_reported = FALSE;
+
+		if (!bad_type_reported)
+		{
+			bad_type_reported = TRUE;
+			error(
+				_error_silent,
+				"screen flash of type %d (of %d) not shown",
+				screen_flash->type,
+				NUMBER_OF_SCREEN_FLASH_TYPES);
+		}
+
+		return;
+	}
 
 	if (!(effect->screen_flash.priority > screen_flash->priority &&
 		effect->screen_flash_time_left > screen_flash->duration * time_factor) &&
@@ -610,6 +677,7 @@ void scripted_player_effect_set_translation(
 {
 	real_vector3d *translation = &player_effect_globals->scripted_effect.max_translation;
 
+	network_coop_note_player_effect(_coop_player_effect_translation, horizontal, vertical, depth);
 	translation->i = horizontal;
 	translation->j = vertical;
 	translation->k = depth;
@@ -623,6 +691,7 @@ void scripted_player_effect_start(
 {
 	short ticks;
 
+	network_coop_note_player_effect(_coop_player_effect_start, maximum_intensity, attack_time, 0.0f);
 	player_effect_globals->scripted_effect.max_intensity = maximum_intensity;
 
 	ticks = (short)fast_ftol(attack_time * TICKS_PER_SECOND);
@@ -645,6 +714,7 @@ void scripted_player_effect_stop(
 {
 	short ticks = (short)fast_ftol(duration * TICKS_PER_SECOND);
 
+	network_coop_note_player_effect(_coop_player_effect_stop, duration, 0.0f, 0.0f);
 	player_effect_globals->scripted_effect.timer = ticks;
 	player_effect_globals->scripted_effect.total_time = ticks;
 	SET_FLAG(

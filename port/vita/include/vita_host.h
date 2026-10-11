@@ -13,6 +13,16 @@ ABI). Parameters are 32-bit scalars and pointers only, so both ABIs agree.
 is up; its size is stored through size */
 void *vita_host_arena(unsigned long *size);
 
+/* a memory block of its own (user memory, outside the window), size a
+multiple of 64 KB; NULL when there is no room, else its id is stored
+through uid for vita_host_block_free */
+void *vita_host_block_alloc(const char *name, unsigned long size, int *uid);
+void vita_host_block_free(int uid);
+
+/* the game reads a file (counted: vita_gxm.c's clean-up of old shader
+caches removes files only while the game reads none) */
+void vita_host_file_read_note(void);
+
 /* one line to ux0:data/haloce-vita/log.txt and the debug output */
 void vita_host_log(const char *line);
 
@@ -29,8 +39,28 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core,
 	int priority);
 
-/* each core's busy share of the last second, 0-100, or 255 unknown */
-void vita_host_cpu_usage(unsigned char busy[3]);
+/* ---------- the fourth core (port/vita/host/vita_fourth_core.c) */
+
+/* Fourth core helpers' level (HALO_CPU3_AUX, read at start-up): 0 off,
+1 audio, 2 all async */
+int vita_host_fourth_core_level(void);
+/* the calling thread onto the fourth core (affinity 0x80000) if Fourth core
+helpers is at `level` or above and the system allows it (a kernel plugin
+such as CapUnlocker): 3 when it moved, -1 when it stays where it was;
+halo.log says which, naming it `role` */
+int vita_host_fourth_core_join(const char *role, int level);
+/* the same whatever the setting (HALO_AUDIO_CORE=3) */
+int vita_host_fourth_core_move(const char *role);
+/* the calling thread's run time logged with the frame timing, as `role` */
+void vita_host_thread_watch(const char *role);
+/* with each frame-timing line: the watched threads' and the cores' times */
+void vita_host_thread_times_report(unsigned long frames);
+/* the frame-hitch line's cores and threads, sampled at each frame's end (main.c) */
+int vita_host_frame_cores(char *line, int size, int describe);
+
+/* each core's busy share of the last second, 0-100, or 255 unknown (the
+fourth core's last) */
+void vita_host_cpu_usage(unsigned char busy[4]);
 
 /* microseconds since the process started */
 unsigned long long vita_host_time_us(void);
@@ -48,6 +78,9 @@ int vita_movie_poll(void);
 /* the waiting frame as rows of X8R8G8B8 */
 void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigned long height);
 void vita_movie_close(void);
+/* whether the last vita_movie_open failed for now (the video player did not
+start: memory), not for want of the file */
+int vita_movie_open_failed_for_now(void);
 /* the open movie's display shape (width / height), which an MP4 may give
 apart from its size in pixels; 0 with no movie open */
 float vita_movie_display_aspect(void);
@@ -77,6 +110,9 @@ unsigned long vita_movie_detect_pitch(const unsigned char *luma, unsigned long r
 
 /* the SCE_CTRL_* button bits */
 #define VITA_BUTTON_SELECT 0x00000001UL
+/* (a paired DualShock's stick clicks: vita_ctrl_ports.h) */
+#define VITA_BUTTON_L3 0x00000002UL
+#define VITA_BUTTON_R3 0x00000004UL
 #define VITA_BUTTON_START 0x00000008UL
 #define VITA_BUTTON_UP 0x00000010UL
 #define VITA_BUTTON_RIGHT 0x00000020UL
@@ -93,14 +129,50 @@ struct vita_host_pad
 {
 	unsigned long buttons;
 	unsigned char lx, ly, rx, ry;
+	/* the touch zones held (a bit per VITA_ZONE_*, vita_controls.h) */
+	unsigned long touch;
+	/* the angles the Vita turned since the last read (radians about its x,
+	y and z axes, filtered: vita_controls.h, gyro aiming) */
+	float gyro[3];
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);
+/* the gyroscope's line on the settings panel's Gyro settings page: the rates now
+(degrees a second), whether the bias was learnt */
+void vita_gyro_status(char *text, int size);
 /* the settings panel (vita_settings.c): nonzero when it took the buttons
 (open, or SELECT+START held), and the game should see none */
 int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
+void vita_settings_message(const char *title, const char *text);
+/* the language files read (app0:lang) and the Vita's system language
+chosen for the port's text, before anything is shown (lang.c) */
+void vita_settings_language_init(void);
+/* the Custom Edition installer's maps (vita_ce_installer.c): taken on a
+thread of their own when an installer is there and they are missing (0
+started, else -1); the state for Modded maps: 0 nothing to do, 1 an
+installer (its file name) and maps missing, 2 taking them */
+int vita_ce_installer_start(void);
+int vita_ce_installer_state(char *name, int size);
+/* ad hoc play (vita_net.c): joins an ad hoc group through the system's
+network check dialog, on a thread of its own. mode 0 "connect" (the room's
+group, made if there is none), 1 make one, 2 pick one nearby; room 1-4.
+0 if it started */
+int vita_adhoc_connect(int mode, int room);
+void vita_adhoc_leave(void);
+/* 0 not in a group, 1 joining (the dialog is up: the game should see no
+buttons), 2 in a group, -1 the last attempt failed; a line saying so */
+int vita_adhoc_state(char *text, int size);
+/* the system's keyboard (vita_ime.c), for a line of text the settings
+panel asks for (the Play page's lobby name and password): opens it over the
+game with this title and text (ASCII, at most maximum_length characters;
+password: the characters hidden). 0 if it opened */
+int vita_ime_open(const char *title, const char *text, int maximum_length, int password);
+/* while it is open, 0; once closed, 1 with the text typed in text (its
+printable ASCII characters; others are left out), or -1 if it was
+cancelled or failed. The game should see no buttons while it is open */
+int vita_ime_poll(char *text, int size);
 /* (debug) HALO_ADHOC_PROBE=1: logs what the Vita's ad hoc libraries do
 (vita_net.c) */
 void vita_net_adhoc_probe(void);

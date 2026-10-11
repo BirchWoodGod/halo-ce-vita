@@ -55,6 +55,14 @@ struct weapon_hud_overlay_definition;
 
 /* ---------- prototypes/HUD_DRAW.C */
 
+#ifdef HALO_LINUX
+struct static_hud_element_definition;
+void hud_draw_set_scope_centered(
+	boolean centered);
+boolean hud_static_element_shown_by_zoom(
+	struct static_hud_element_definition const *element);
+#endif
+
 long get_return_eip(
 	void);
 real hud_globals_get_scale(
@@ -135,6 +143,34 @@ void hud_draw_numbers(
 	short draw_flags,
 	long flash_reference_time,
 	real override_scale);
+
+#ifdef HALO_VITA
+/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a glyph is
+a VITA_GLYPH_* (port/vita/include/vita_controls.h), 0 for the Xbox's icon */
+short hud_vita_button_glyph(
+	short icon_index);
+short hud_vita_menu_button_glyph(
+	long bitmap_group_index);
+short hud_vita_glyph_face_icon(
+	short glyph);
+wchar_t const *hud_vita_glyph_text(
+	short glyph);
+void hud_vita_score_hint(
+	wchar_t *buffer,
+	long buffer_size);
+boolean hud_vita_glyph_draw(
+	short glyph,
+	struct bitmap_data const *bitmap,
+	short placement,
+	point2d const *point,
+	real_rectangle2d const *clip,
+	real scale,
+	pixel32 color);
+boolean hud_vita_glyph_draw_in_rect(
+	short glyph,
+	real_rectangle2d const *rectangle,
+	pixel32 color);
+#endif
 
 /* ---------- public code */
 

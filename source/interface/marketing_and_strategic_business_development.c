@@ -79,6 +79,14 @@ void xbox_dashboard_launch(
 	LAUNCH_DATA launch_data = {0};
 	long abort_error;
 
+#ifdef HALO_LINUX
+	{
+		void platform_log(char const *format, ...);
+
+		platform_log("dashboard: the player chose to leave the game (the error dialog %d, or the menu's exit)",
+			(int)dashboard_abort_error);
+	}
+#endif
 	clean_up_for_image_launch();
 
 	abort_error = dashboard_abort_error;

@@ -1487,6 +1487,22 @@ void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
 	(void)value;
 }
 
+/* (port) the Vita device's count of state changes (port/vita/platform/
+d3d8_gxm.c), which this device does not keep: a new value at every call,
+so the game sets every state anew */
+unsigned long halo_d3d_state_serial(void)
+{
+	static unsigned long serial;
+
+	return ++serial;
+}
+
+void D3DFASTCALL D3DDevice_SetRenderState_SimpleIndex(DWORD state, DWORD value)
+{
+	if (state < D3DRS_MAX)
+		D3D__RenderState[state] = value;
+}
+
 void D3DFASTCALL D3DDevice_SetRenderState_Deferred(D3DRENDERSTATETYPE state, DWORD value)
 {
 	if ((unsigned long)state < D3DRS_MAX)
@@ -3337,11 +3353,37 @@ void WINAPI D3DDevice_SetStreamSource(UINT stream_number, D3DVertexBuffer *strea
 stream (four floats a vertex, from its first byte) rather than from the
 register's current value, until reg -1 is given: the decals' batches carry
 each decal's colour per vertex this way (rasterizer_xbox_decals.c) */
+/* (port) a vertex buffer the game never rewrites, which the Vita's device
+reads in place (port/vita/platform/d3d8_gxm.c); OpenGL copies every draw's
+vertices anyway */
+void halo_d3d_buffer_in_place(const void *buffer, int in_place)
+{
+	(void)buffer;
+	(void)in_place;
+}
+
 void halo_d3d_stream_attribute(long reg, long stream)
 {
 	device.extra_attribute_active = reg >= 0 && reg < XGPU_VERTEX_ATTRIBUTE_COUNT && stream >= 0 && stream < 16;
 	device.extra_attribute_reg = device.extra_attribute_active ? (unsigned long)reg : 0;
 	device.extra_attribute_stream = device.extra_attribute_active ? (unsigned long)stream : 0;
+}
+
+/* (the GXM device's light scissor, d3d8_gxm.c: drawn unclipped here) */
+void halo_d3d_scissor(const float *rectangle)
+{
+	(void)rectangle;
+}
+
+/* (and its late sky's depth: render.c draws the sky first for this device) */
+void halo_d3d_sky_depth(int on)
+{
+	(void)on;
+}
+
+int halo_d3d_sky_late_supported(void)
+{
+	return 0;
 }
 
 void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_index)
@@ -3443,9 +3485,24 @@ static void immediate_emit(void)
 
 	if (device.immediate_count == device.immediate_capacity)
 	{
-		device.immediate_capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
-		device.immediate_vertices = realloc(device.immediate_vertices,
-			device.immediate_capacity * floats * sizeof(float));
+		unsigned long capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
+		float *grown = realloc(device.immediate_vertices, capacity * floats * sizeof(float));
+
+		if (!grown)
+		{
+			/* (the heap is exhausted: the draw is dropped and the buffer
+			kept; the rest of its vertices no longer gather until the next
+			Begin) */
+			static int warned;
+
+			if (!warned++)
+				platform_log("immediate draw: out of memory for %lu vertices, the draw is dropped", capacity);
+			device.immediate_active = FALSE;
+			device.immediate_count = 0;
+			return;
+		}
+		device.immediate_vertices = grown;
+		device.immediate_capacity = capacity;
 	}
 	memcpy(device.immediate_vertices + device.immediate_count * floats, device.attributes, floats * sizeof(float));
 	device.immediate_count++;
@@ -3740,6 +3797,12 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	}
 	platform_pump_events();
 
+	/* (the vertical blanks that let the queued frames go, from the first
+	frame on: a menus' map precached before main_initialize_time sets the
+	vertical blank callback presents frames while it waits - a dedicated
+	server waiting for another to add ui.map to the shared map cache - and
+	with no vertical blank yet the third frame waited for ever) */
+	vertical_blank_start();
 	pthread_mutex_lock(&vertical_blank_lock);
 	/* the Xbox keeps at most two frames queued behind its 60 Hz display;
 	with interpolation, frames come at the real display's rate instead,

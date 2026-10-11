@@ -181,6 +181,10 @@ symbols in this file:
 #include "bungie_net/common/message_header.h"
 #include "memory/data_packet_groups.h"
 #include "networking/network_messages.h"
+#include "map_share_protocol.h"
+
+/* cseries_windows.c's */
+unsigned long system_milliseconds(void);
 
 /* ---------- constants */
 
@@ -207,11 +211,7 @@ struct network_game_message_packet_definitions
 	struct data_packet_definition server_machine_accepted;
 	struct data_packet_field server_machine_rejected_fields[2];
 	struct data_packet_definition server_machine_rejected;
-#ifdef HALO_LINUX
 	struct data_packet_field server_game_settings_update_fields[4];
-#else
-	struct data_packet_field server_game_settings_update_fields[2];
-#endif
 	struct data_packet_definition server_game_settings_update;
 	struct data_packet_field server_pregame_countdown_fields[2];
 	struct data_packet_definition server_pregame_countdown;
@@ -223,7 +223,7 @@ struct network_game_message_packet_definitions
 	struct data_packet_definition server_begin_game;
 	struct data_packet_field server_graceful_game_exit_pregame_fields[2];
 	struct data_packet_definition server_graceful_game_exit_pregame;
-	struct data_packet_field client_join_game_request_fields[3];
+	struct data_packet_field client_join_game_request_fields[4];
 	struct data_packet_definition client_join_game_request;
 	struct data_packet_field client_add_player_request_pregame_fields[4];
 	struct data_packet_definition client_add_player_request_pregame;
@@ -269,7 +269,13 @@ struct network_game_message_packet_definitions
 	struct data_packet_definition client_switch_to_pregame;
 	struct data_packet_field client_graceful_game_exit_postgame_fields[2];
 	struct data_packet_definition client_graceful_game_exit_postgame;
-	struct data_packet_entry packets[35];
+	struct data_packet_field client_map_download_fields[4];
+	struct data_packet_definition client_map_download;
+	struct data_packet_field server_map_download_answer_fields[4];
+	struct data_packet_definition server_map_download_answer;
+	struct data_packet_field server_map_download_data_fields[4];
+	struct data_packet_definition server_map_download_data;
+	struct data_packet_entry packets[38];
 	struct data_packet_group_definition group;
 };
 
@@ -287,19 +293,17 @@ DEFINE_NETWORK_GAME_MESSAGE(message_server_game_advertise, 0x114);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_pong, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_machine_accepted, 0x08);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_machine_rejected, 0x02);
-#ifdef HALO_LINUX
 /* one piece of the game settings record: total size, offset, length, then the
 bytes (network_server_message_handler.c) */
 DEFINE_NETWORK_GAME_MESSAGE(message_server_game_settings_update, 8 + HALO_PORT_NETWORK_GAME_SETTINGS_FRAGMENT_SIZE);
-#else
-DEFINE_NETWORK_GAME_MESSAGE(message_server_game_settings_update, 0x434);
-#endif
 DEFINE_NETWORK_GAME_MESSAGE(message_server_pregame_countdown, 0x02);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_begin_game, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_graceful_game_exit_pregame, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_pregame_keep_alive, 0x02);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_postgame_keep_alive, 0x02);
-DEFINE_NETWORK_GAME_MESSAGE(message_client_join_game_request, 0x50);
+/* (port: the joining machine's hardware id after the Xbox's, 0x20 bytes of
+hex: p2p.c's p2p_hardware_id) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_join_game_request, 0x70);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_add_player_request_pregame, 0x20);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_remove_player_request_pregame, 0x20);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_settings_request, 0x44);
@@ -307,12 +311,8 @@ DEFINE_NETWORK_GAME_MESSAGE(message_client_player_settings_request, 0x20);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_game_start_request, 0x02);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_graceful_game_exit_pregame, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_map_is_precached_pregame, 0x100);
-#ifdef HALO_LINUX
 /* one 0x20-byte action per player */
 DEFINE_NETWORK_GAME_MESSAGE(message_server_game_update, 0x10 + HALO_PORT_MAXIMUM_NETWORK_PLAYERS * 0x20);
-#else
-DEFINE_NETWORK_GAME_MESSAGE(message_server_game_update, 0x210);
-#endif
 DEFINE_NETWORK_GAME_MESSAGE(message_server_add_player_ingame, 0x20);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_remove_player_ingame, 0x24);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_game_over, 0x04);
@@ -327,6 +327,11 @@ DEFINE_NETWORK_GAME_MESSAGE(message_server_graceful_game_exit_postgame, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_remove_player_request_postgame, 0x20);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_switch_to_pregame, 0x04);
 DEFINE_NETWORK_GAME_MESSAGE(message_client_graceful_game_exit_postgame, 0x04);
+/* (port) map sharing's (port/linux/game/map_share_protocol.h: struct
+map_share_request, map_share_answer_message, map_share_data_message) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_map_download, 2 * 2 + 2 * 4 + MAP_SHARE_NAME_BYTES);
+DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_answer, 2 * 2 + 3 * 4 + MAP_SHARE_NAME_BYTES + MAP_SHARE_DIGEST_BYTES);
+DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_data, 2 * 2 + 4 + MAP_SHARE_CHUNK_BYTES);
 
 #undef DEFINE_NETWORK_GAME_MESSAGE
 
@@ -334,7 +339,7 @@ DEFINE_NETWORK_GAME_MESSAGE(message_client_graceful_game_exit_postgame, 0x04);
 
 /* ---------- globals */
 
-struct network_game_message_packet_definitions data_0030aa68 =
+static struct network_game_message_packet_definitions data_0030aa68 =
 {
 	{
 		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
@@ -372,15 +377,10 @@ struct network_game_message_packet_definitions data_0030aa68 =
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(server_machine_rejected, "message_server_machine_rejected_packet", message_server_machine_rejected),
 	{
-#ifdef HALO_LINUX
 		DATA_PACKET_FIELD(_data_packet_field_shorts, 3),
 		DATA_PACKET_FIELD(_data_packet_field_pad, 2),
 		DATA_PACKET_FIELD(_data_packet_field_raw, HALO_PORT_NETWORK_GAME_SETTINGS_FRAGMENT_SIZE),
 		DATA_PACKET_FIELD_END,
-#else
-		DATA_PACKET_FIELD(_data_packet_field_raw, 1076),
-		DATA_PACKET_FIELD_END,
-#endif
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(server_game_settings_update, "message_server_game_settings_update_packet", message_server_game_settings_update),
 	{
@@ -411,6 +411,7 @@ struct network_game_message_packet_definitions data_0030aa68 =
 	{
 		DATA_PACKET_FIELD(_data_packet_field_shorts, 32),
 		DATA_PACKET_FIELD(_data_packet_field_bytes, 16),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, 32),
 		DATA_PACKET_FIELD_END,
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(client_join_game_request, "message_client_join_game_request_packet", message_client_join_game_request),
@@ -460,11 +461,7 @@ struct network_game_message_packet_definitions data_0030aa68 =
 	{
 		DATA_PACKET_FIELD(_data_packet_field_longs, 3),
 		DATA_PACKET_FIELD(_data_packet_field_pad, 2),
-#ifdef HALO_LINUX
 		DATA_PACKET_FIELD(_data_packet_field_array, HALO_PORT_MAXIMUM_NETWORK_PLAYERS),
-#else
-		DATA_PACKET_FIELD(_data_packet_field_array, 16),
-#endif
 		DATA_PACKET_FIELD(_data_packet_field_longs, 6),
 		DATA_PACKET_FIELD(_data_packet_field_shorts, 3),
 		DATA_PACKET_FIELD(_data_packet_field_pad, 2),
@@ -564,6 +561,27 @@ struct network_game_message_packet_definitions data_0030aa68 =
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(client_graceful_game_exit_postgame, "message_client_graceful_game_exit_postgame_packet", message_client_graceful_game_exit_postgame),
 	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 2),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, MAP_SHARE_NAME_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_map_download, "message_client_map_download_packet", message_client_map_download),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 3),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, MAP_SHARE_NAME_BYTES + MAP_SHARE_DIGEST_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_map_download_answer, "message_server_map_download_answer_packet", message_server_map_download_answer),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 1),
+		DATA_PACKET_FIELD(_data_packet_field_raw, MAP_SHARE_CHUNK_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_map_download_data, "message_server_map_download_data_packet", message_server_map_download_data),
+	{
 		{ 0, 0, &data_0030aa68.client_broadcast_game_search },
 		{ 0, 0, &data_0030aa68.client_ping },
 		{ 1, 0, &data_0030aa68.server_game_advertise },
@@ -599,28 +617,67 @@ struct network_game_message_packet_definitions data_0030aa68 =
 		{ 7, 0, &data_0030aa68.client_remove_player_request_postgame },
 		{ 7, 0, &data_0030aa68.client_switch_to_pregame },
 		{ 7, 0, &data_0030aa68.client_graceful_game_exit_postgame },
+		{ 3, 0, &data_0030aa68.client_map_download },
+		{ 2, 0, &data_0030aa68.server_map_download_answer },
+		{ 2, 0, &data_0030aa68.server_map_download_data },
 	},
 	{
 		"network_game_messages_group",
-		35,
+		38,
 		8,
-#ifdef HALO_LINUX
 		/* the per-tick update of 128 players decodes to 0x1010 bytes */
 		HALO_PORT_NETWORK_PACKET_SIZE,
 		HALO_PORT_NETWORK_PACKET_SIZE,
-#else
-		0x600,
-		0x800,
-#endif
 		data_0030aa68.packets,
 	},
 };
 
-#ifdef HALO_LINUX
 static byte network_game_message_buffer[HALO_PORT_MAXIMUM_NETWORK_MESSAGE_SIZE + 4];
-#else
-static byte network_game_message_buffer[0x604];
-#endif
+
+/* port: each type's structure as the game declares it (the typedefs above,
+in the order of enum network_game_message_type). The packet table puts the
+server's begin game, pregame exit and pregame keep alive definitions one
+place off their types (as every build sends them), so a pregame keep alive
+(2 bytes) is encoded and decoded as 4: its encoder read past the host's
+structure, and its decoder wrote past the client's, with the host's bytes */
+static short const network_game_message_structure_sizes[NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES] =
+{
+	sizeof(message_client_broadcast_game_search), sizeof(message_client_ping), sizeof(message_server_game_advertise),
+	sizeof(message_server_pong), sizeof(message_server_machine_accepted), sizeof(message_server_machine_rejected),
+	sizeof(message_server_game_settings_update), sizeof(message_server_pregame_countdown),
+	sizeof(message_server_begin_game), sizeof(message_server_graceful_game_exit_pregame),
+	sizeof(message_server_pregame_keep_alive), sizeof(message_server_postgame_keep_alive),
+	sizeof(message_client_join_game_request), sizeof(message_client_add_player_request_pregame),
+	sizeof(message_client_remove_player_request_pregame), sizeof(message_client_settings_request),
+	sizeof(message_client_player_settings_request), sizeof(message_client_game_start_request),
+	sizeof(message_client_graceful_game_exit_pregame), sizeof(message_client_map_is_precached_pregame),
+	sizeof(message_server_game_update), sizeof(message_server_add_player_ingame),
+	sizeof(message_server_remove_player_ingame), sizeof(message_server_game_over), sizeof(message_client_loaded),
+	sizeof(message_client_game_update), sizeof(message_client_add_player_request_ingame),
+	sizeof(message_client_remove_player_request_ingame), sizeof(message_client_host_crashed_cry_for_help),
+	sizeof(message_client_join_new_host), sizeof(message_server_switch_to_pregame),
+	sizeof(message_server_graceful_game_exit_postgame), sizeof(message_client_remove_player_request_postgame),
+	sizeof(message_client_switch_to_pregame), sizeof(message_client_graceful_game_exit_postgame),
+	sizeof(message_client_map_download), sizeof(message_server_map_download_answer),
+	sizeof(message_server_map_download_data),
+};
+
+/* port: whether a type's packet definition holds more than its structure
+(the pregame keep alive: see above); its decoded size through size */
+static boolean network_game_message_larger_than_structure(
+	long message_type,
+	short *decoded_size)
+{
+	struct data_packet_entry const *packet;
+
+	if (message_type < 0 || message_type >= NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES)
+		return FALSE;
+	packet = &data_0030aa68.group.packets[message_type];
+	if (!packet->definition || packet->definition->size <= network_game_message_structure_sizes[message_type])
+		return FALSE;
+	*decoded_size = packet->definition->size;
+	return TRUE;
+}
 
 /* ---------- public code */
 
@@ -641,17 +698,41 @@ void network_event(
 #line 331 "c:\\halo\\SOURCE\\networking\\network_messages.c"
 	match_assert(__FILE__, __LINE__, format);
 
+	/* port: no more than NETWORK_EVENTS_PER_SECOND lines a second, then how
+	many were left out (a flood of datagrams, which anyone may send, each
+	logged, stalled the game writing its log a line at a time) */
+	{
+		enum
+		{
+			NETWORK_EVENTS_PER_SECOND = 64,
+		};
+		static unsigned long second_time = 0;
+		static long second_count = 0;
+		static long left_out_count = 0;
+		unsigned long now = system_milliseconds();
+
+		if (!second_time || now - second_time >= 1000)
+		{
+			second_time = now ? now : 1;
+			second_count = 0;
+			if (left_out_count)
+				error(3, "(%ld more network events not logged)", left_out_count);
+			left_out_count = 0;
+		}
+		if (++second_count > NETWORK_EVENTS_PER_SECOND)
+		{
+			left_out_count++;
+			return;
+		}
+	}
+
 	va_start(arguments, format);
 	_vsnprintf(temporary, NUMBEROF(temporary) - 1, format, arguments);
 	va_end(arguments);
 
-#ifdef HALO_LINUX
-	/* (the text can hold what a peer sent - a machine or map name - so it
-	is never a format: a '%n' in it wrote to memory) */
+	/* (formatted already: what it holds, names and addresses from the
+	network among it, is not a format) */
 	error(3, "%s", temporary);
-#else
-	error(3, temporary);
-#endif
 
 	return;
 }
@@ -674,14 +755,13 @@ void *create_network_game_message(
 	const void *message_struct,
 	short message_struct_size)
 {
-#ifdef HALO_LINUX
 	/* as large as the packet group lets the encoder write */
 	byte encoded_message[HALO_PORT_NETWORK_PACKET_SIZE];
-#else
-	byte encoded_message[0x600];
-#endif
 	union network_game_message_size encoded_message_size;
 	void *message;
+	/* (port) */
+	byte padded[16];
+	short padded_size;
 
 	encoded_message_size.value = sizeof(encoded_message);
 
@@ -827,15 +907,34 @@ void *create_network_game_message(
 #line 211 "c:\\halo\\SOURCE\\networking\\network_messages.c"
 		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_graceful_game_exit_postgame));
 		break;
+	case _message_client_map_download:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_map_download));
+		break;
+	case _message_server_map_download_answer:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_map_download_answer));
+		break;
+	case _message_server_map_download_data:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_map_download_data));
+		break;
 	default:
 #line 213 "c:\\halo\\SOURCE\\networking\\network_messages.c"
 		match_vassert(__FILE__, __LINE__, FALSE, "unknown network game message structure type");
 		break;
 	}
 
+	/* port: the structure in a buffer as large as its definition, the rest
+	zero (the encoder reads the whole definition) */
+	if (network_game_message_larger_than_structure(message_type, &padded_size) &&
+		padded_size <= (short)sizeof(padded) &&
+		message_struct_size == network_game_message_structure_sizes[message_type])
+	{
+		csmemset(padded, 0, sizeof(padded));
+		csmemcpy(padded, message_struct, message_struct_size);
+		message_struct = padded;
+	}
+
 	if (encode_network_game_message(message_struct, encoded_message, &encoded_message_size.encoded, message_type, 1))
 	{
-#ifdef HALO_LINUX
 		/* a message header holds lengths up to HALO_PORT_MAXIMUM_NETWORK_MESSAGE_SIZE-1,
 		header included: a longer message would go out with a wrong length and
 		derail the stream (create_message only asserts on it) */
@@ -845,7 +944,6 @@ void *create_network_game_message(
 			message = NULL;
 		}
 		else
-#endif
 		message = create_message(3, encoded_message, encoded_message_size.value, network_game_message_buffer, sizeof(network_game_message_buffer));
 		if (!message)
 		{
@@ -874,7 +972,35 @@ boolean decode_network_game_message(
 #line 313 "c:\\halo\\SOURCE\\networking\\network_messages.c"
 	match_assert(__FILE__, __LINE__, message_struct && encoded_message && encoded_message_size && (*encoded_message_size>0) && packet_type && (*packet_type>=0) && packet_version && (*packet_version>0));
 
-	result = data_packet_group_decode_packet(&data_0030aa68.group, message_struct, encoded_message, encoded_message_size, packet_type, packet_version, expected_packet_class);
+	/* port: a type whose definition holds more than its structure is decoded
+	into a buffer, and the structure takes what it holds (the packet's type
+	is its last byte) */
+	{
+		short decoded_size;
+
+		if (*encoded_message_size > 0 &&
+			network_game_message_larger_than_structure(
+				((char const *)encoded_message)[*encoded_message_size - 1], &decoded_size))
+		{
+			byte decoded[16];
+
+			if (decoded_size > (short)sizeof(decoded))
+			{
+				result = FALSE;
+			}
+			else
+			{
+				result = data_packet_group_decode_packet(&data_0030aa68.group, decoded, encoded_message, encoded_message_size,
+					packet_type, packet_version, expected_packet_class);
+				if (result)
+					csmemcpy(message_struct, decoded, network_game_message_structure_sizes[*packet_type]);
+			}
+		}
+		else
+		{
+			result = data_packet_group_decode_packet(&data_0030aa68.group, message_struct, encoded_message, encoded_message_size, packet_type, packet_version, expected_packet_class);
+		}
+	}
 
 	if (!result)
 	{

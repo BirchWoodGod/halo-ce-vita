@@ -104,13 +104,25 @@ struct random_math_globals random_math_globals;
 #pragma bss_seg()
 #endif
 
+#if defined(HALO_LINUX) && !defined(HALO_VITA)
+/* (port) the lock is each thread's: the render (main.c) holds it while the
+tick runs on its own thread (tick_thread.c), whose global random() is not
+the render's (a debug build halted in a multiplayer game, and the two
+threads' counts were lost to each other). The Vita's builds check no
+assertions. */
+static __thread long global_random_seed_lock;
+#define GLOBAL_RANDOM_SEED_LOCK global_random_seed_lock
+#else
+#define GLOBAL_RANDOM_SEED_LOCK random_math_globals.global_random_seed_lock
+#endif
+
 /* ---------- public code */
 
 void
 lock_global_random_seed(
 	void)
 {
-	random_math_globals.global_random_seed_lock++;
+	GLOBAL_RANDOM_SEED_LOCK++;
 	return;
 }
 
@@ -121,9 +133,9 @@ unlock_global_random_seed(
 	match_dassert(
 		"c:\\halo\\SOURCE\\math\\random_math.c",
 		41,
-		random_math_globals.global_random_seed_lock>0,
+		GLOBAL_RANDOM_SEED_LOCK>0,
 		"unmatched call to unlock_random_seed() somewhere");
-	random_math_globals.global_random_seed_lock--;
+	GLOBAL_RANDOM_SEED_LOCK--;
 	return;
 }
 
@@ -139,7 +151,7 @@ unsigned long *get_global_random_seed_address(
 	match_dassert(
 		"c:\\halo\\SOURCE\\math\\random_math.c",
 		56,
-		!game_engine_running() || !random_math_globals.global_random_seed_lock,
+		!game_engine_running() || !GLOBAL_RANDOM_SEED_LOCK,
 		"you should not be using global random(); use local random() instead");
 	return &random_math_globals.global_random_seed;
 }

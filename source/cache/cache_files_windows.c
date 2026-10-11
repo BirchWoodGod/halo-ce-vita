@@ -190,12 +190,22 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "scenario/scenario_definitions.h"
 #include "rasterizer/rasterizer.h"
+#ifdef HALO_LINUX
+#include "custom_edition_cache.h"
+/* port: the port's text in the player's language (port/linux/src/lang.h,
+through the -iquote port/linux/game path) */
+#include "../src/lang.h"
+#endif
 
 #include <xtl.h>
 #ifdef HALO_LINUX
 #include "load_profile.h"
 #include <stdlib.h>
 int halo_thread_index(void);
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c) */
+int vita_host_fourth_core_join(const char *role, int level);
+#endif
 /* the cache file thread, by halo_thread_index (load_profile.c) */
 static int cache_file_thread_index = -1;
 /* (port) cache_file_read is called by the tick (sounds, the textures it
@@ -203,6 +213,23 @@ predicts) and the render (textures) at once: a free request slot is
 claimed under this, or both took the same slot, one read was lost and its
 texture or sound never finished loading */
 static volatile int cache_request_claim_lock;
+/* (port) a request for a Custom Edition map's bitmap (cache_file_read_bitmap):
+its tag (NONE: an Xbox map's read) and unrounded size, by request slot */
+static struct
+{
+	long tag_index;
+	long size;
+} cache_request_custom_edition[512];
+
+static boolean custom_edition_reads_on_thread(
+	void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+		enabled = !getenv("HALO_CE_READ_THREAD") || atoi(getenv("HALO_CE_READ_THREAD")) != 0;
+	return enabled;
+}
 #endif
 
 /* ---------- constants */
@@ -435,12 +462,252 @@ static short cached_map_files_find_map(
 
 static struct cache_file_runtime_globals cache_file_globals;
 
+#ifdef HALO_DEDICATED_SERVER
+/* ---------- (port) the dedicated server's shared map cache
+
+port/linux/src/shared_map_cache.c: with sv_map_cache, a map is decompressed
+once into a folder that several servers share, and a cache slot holds that
+file's handle (read-only) in place of its own copy. Under a precache (its
+begin to its end, as game.c drives it) the shared copy is attached at once,
+built (the copy writes the shared folder's temporary file, not the slot's),
+or waited for while another server builds it; a map that cannot be shared
+is copied into the slot as before. */
+
+int shared_map_cache_enabled(void);
+HANDLE shared_map_cache_open(const char *name, unsigned long checksum, long file_length);
+int shared_map_cache_build_begin(const char *name, unsigned long checksum, long file_length, long size,
+	HANDLE *handle);
+HANDLE shared_map_cache_build_end(int finished, long file_length);
+void platform_log(char const *format, ...);
+
+enum
+{
+	_shared_precache_none = 0,
+	/* the shared copy is the slot's: nothing to copy */
+	_shared_precache_attached,
+	/* another server builds it */
+	_shared_precache_waiting,
+	/* this server builds it (the copy writes the shared folder) */
+	_shared_precache_building,
+	/* the slot's own copy, after waiting (the usual copy) */
+	_shared_precache_own,
+
+	/* how long a server waits for another's build before copying the map
+	itself (milliseconds) */
+	SHARED_PRECACHE_WAIT_LIMIT = 5 * 60 * 1000,
+};
+
+static struct
+{
+	short state;
+	boolean blocking;
+	boolean copy_finished;
+	boolean buffer_taken;
+	DWORD wait_started;
+	struct cache_file_header dvd_header;
+	/* the slots holding a shared copy, and their own files meanwhile */
+	boolean slot_shared[NUMBER_OF_CACHED_MAP_FILES];
+	HANDLE slot_own_file[NUMBER_OF_CACHED_MAP_FILES];
+} shared_precache;
+
+/* the slot's own file again (it held a shared copy) */
+static void shared_slot_detach(
+	short map_file_index)
+{
+	struct cached_map_file *map_file = cached_map_file_get(map_file_index);
+
+	if (!shared_precache.slot_shared[map_file_index])
+		return;
+	CloseHandle(map_file->file);
+	map_file->file = shared_precache.slot_own_file[map_file_index];
+	shared_precache.slot_shared[map_file_index] = FALSE;
+	memset(&map_file->header, 0, sizeof(struct cache_file_header));
+}
+
+/* the slot holds the shared copy of handle (which it now owns); FALSE, the
+slot as it was, if the copy is not the map's (its header) */
+static boolean shared_slot_attach(
+	short map_file_index,
+	HANDLE handle)
+{
+	struct cached_map_file *map_file = cached_map_file_get(map_file_index);
+	struct cache_file_header const *dvd_header = &shared_precache.dvd_header;
+	SYSTEMTIME system_time;
+
+	shared_slot_detach(map_file_index);
+	shared_precache.slot_own_file[map_file_index] = map_file->file;
+	shared_precache.slot_shared[map_file_index] = TRUE;
+	map_file->file = handle;
+	cached_map_file_read_header(map_file_index);
+	if (_stricmp(map_file->header.name, dvd_header->name) != 0 ||
+		map_file->header.checksum != dvd_header->checksum ||
+		map_file->header.file_length != dvd_header->file_length)
+	{
+		platform_log("map cache: the shared copy of %s is not that map (its header); copied into this "
+			"server's own cache", dvd_header->name);
+		shared_slot_detach(map_file_index);
+		return FALSE;
+	}
+	/* (newest, for the slots' turns: cached_map_files_find_free_map; the
+	shared file's own time is left alone) */
+	GetSystemTime(&system_time);
+	SystemTimeToFileTime(&system_time, &map_file->last_modification_date);
+
+	return TRUE;
+}
+
+/* the copy of the map into the slot's own file, or (destination) the
+shared folder's */
+static void shared_precache_copy(
+	short map_file_index,
+	HANDLE destination)
+{
+	char path[256];
+	long buffer_size = cache_copy_buffer_size(shared_precache.blocking);
+	void *buffer = texture_cache_steal_memory(buffer_size);
+
+	shared_precache.buffer_taken = TRUE;
+	cache_file_get_map_path(shared_precache.dvd_header.name, path);
+	error(_error_silent, "starting precaching of map '%s'", shared_precache.dvd_header.name);
+	cache_copy_begin(
+		buffer,
+		buffer_size,
+		destination,
+		cached_map_file_get_size(map_file_index),
+		path);
+}
+
+/* tries the shared cache for the map: TRUE if it is attached, built or
+waited for (the precache under way, the rest here); FALSE copies it into the
+slot as without one */
+static boolean shared_precache_try(
+	short map_file_index)
+{
+	struct cache_file_header const *header = &shared_precache.dvd_header;
+	HANDLE handle = shared_map_cache_open(header->name, header->checksum, header->file_length);
+
+	if (handle != INVALID_HANDLE_VALUE)
+	{
+		if (!shared_slot_attach(map_file_index, handle))
+			return FALSE;
+		platform_log("map cache: %s from the shared map cache", header->name);
+		shared_precache.state = _shared_precache_attached;
+		return TRUE;
+	}
+	switch (shared_map_cache_build_begin(header->name, header->checksum, header->file_length,
+		cached_map_file_get_size(map_file_index), &handle))
+	{
+		case 1:
+			shared_precache.state = _shared_precache_building;
+			shared_precache_copy(map_file_index, handle);
+			return TRUE;
+
+		case 0:
+			if (shared_precache.state != _shared_precache_waiting)
+			{
+				platform_log("map cache: waiting for another server to add %s to the shared map cache",
+					header->name);
+				shared_precache.state = _shared_precache_waiting;
+				shared_precache.wait_started = GetTickCount();
+			}
+			return TRUE;
+
+		default:
+			return FALSE;
+	}
+}
+
+/* (precache_map_begin) the shared cache's part: TRUE if it took the map */
+static boolean shared_precache_begin(
+	short map_file_index,
+	struct cache_file_header const *dvd_header,
+	boolean blocking)
+{
+	shared_slot_detach(map_file_index);
+	memset(&shared_precache.dvd_header, 0, sizeof(shared_precache.dvd_header));
+	shared_precache.state = _shared_precache_none;
+	shared_precache.copy_finished = FALSE;
+	shared_precache.buffer_taken = FALSE;
+	shared_precache.blocking = blocking;
+	if (!shared_map_cache_enabled())
+		return FALSE;
+	memcpy(&shared_precache.dvd_header, dvd_header, sizeof(shared_precache.dvd_header));
+
+	return shared_precache_try(map_file_index);
+}
+
+/* (precache_map_status) while waiting for another server's build: the copy
+appeared, the build stopped (this server builds it), or the wait is too
+long (the slot's own copy) */
+static void shared_precache_wait(
+	void)
+{
+	short map_file_index = cache_file_globals.copying_to_map_file_index;
+
+	if (shared_precache_try(map_file_index))
+	{
+		if (shared_precache.state != _shared_precache_waiting)
+			return;
+		if (GetTickCount() - shared_precache.wait_started < SHARED_PRECACHE_WAIT_LIMIT)
+		{
+			Sleep(16);
+			return;
+		}
+	}
+	platform_log("map cache: %s is copied into this server's own cache", shared_precache.dvd_header.name);
+	shared_precache.state = _shared_precache_own;
+	shared_precache_copy(map_file_index, cached_map_file_get_handle(map_file_index));
+}
+
+/* (precache_map_end) the shared cache's end of the precache: TRUE if it
+ended it */
+static boolean shared_precache_end(
+	void)
+{
+	short map_file_index = cache_file_globals.copying_to_map_file_index;
+	short state = shared_precache.state;
+
+	shared_precache.state = _shared_precache_none;
+	switch (state)
+	{
+		case _shared_precache_attached:
+		case _shared_precache_waiting:
+			break;
+
+		case _shared_precache_building:
+		{
+			HANDLE handle;
+
+			cache_copy_end();
+			if (shared_precache.buffer_taken)
+				texture_cache_return_memory();
+			shared_precache.buffer_taken = FALSE;
+			handle = shared_map_cache_build_end(shared_precache.copy_finished,
+				shared_precache.dvd_header.file_length);
+			if (handle != INVALID_HANDLE_VALUE && !shared_slot_attach(map_file_index, handle))
+				memset(&cached_map_file_get(map_file_index)->header, 0, sizeof(struct cache_file_header));
+			break;
+		}
+
+		default:
+			/* (none, or the slot's own copy: the usual end) */
+			return FALSE;
+	}
+	cache_file_globals.copy_in_progress = FALSE;
+	cache_file_globals.copying_to_map_file_index = NONE;
+
+	return TRUE;
+}
+#endif
+
 /* ---------- public code */
 
 void tags_header_register_vertex_and_index_buffers(
 	struct cache_file_tag_header *header)
 {
-	short index;
+	/* port: a long, as the buffers' counts are (a short wrapped on a count
+	past 0x7FFF, and the loop never ended) */
+	long index;
 
 	for (index = 0; index < header->vertex_buffer_count; index++)
 	{
@@ -463,7 +730,9 @@ void tags_header_register_vertex_and_index_buffers(
 void tags_header_deregister_vertex_and_index_buffers(
 	struct cache_file_tag_header *header)
 {
-	short index;
+	/* port: a long, as the buffers' counts are (a short wrapped on a count
+	past 0x7FFF, and the loop never ended) */
+	long index;
 
 	for (index = 0; index < header->vertex_buffer_count; index++)
 	{
@@ -493,7 +762,9 @@ void tags_header_deregister_vertex_and_index_buffers(
 void structure_bsp_header_register_vertex_buffers(
 	struct cache_file_structure_bsp_header *header)
 {
-	short index;
+	/* port: a long, as the buffers' counts are (a short wrapped on a count
+	past 0x7FFF, and the loop never ended) */
+	long index;
 
 	for (index = 0; index < header->vertex_buffer_count; index++)
 	{
@@ -517,7 +788,9 @@ void structure_bsp_header_register_vertex_buffers(
 void structure_bsp_header_deregister_vertex_buffers(
 	struct cache_file_structure_bsp_header *header)
 {
-	short index;
+	/* port: a long, as the buffers' counts are (a short wrapped on a count
+	past 0x7FFF, and the loop never ended) */
+	long index;
 
 	rasterizer_globals.current_lock_operation = _rasterizer_lock_bsp_switch;
 
@@ -586,8 +859,181 @@ boolean cache_files_precache_is_copying_map(
 boolean cache_files_precache_map_loaded(
 	const char *map_name)
 {
+#ifdef HALO_LINUX
+	/* a Halo Custom Edition map, when those may run, is read in place and
+	never copied to the cache partition (port/linux/game/custom_edition_cache.c) */
+	if (custom_edition_cache_playable(map_name))
+	{
+		return TRUE;
+	}
+#endif
 	return cached_map_files_find_map(tag_name_strip_path(map_name)) != NONE;
 }
+
+#ifdef HALO_LINUX
+/* port: forgets this session's cache partition copy of the map `map_name`,
+whose file a download has just replaced (port/linux/game/map_share.c): the
+copy is found by the name in its header alone, and a map without a checksum
+(Invader's) would otherwise be played from the old copy until the game
+restarts. FALSE, keeping it, when that copy is open or being made. */
+boolean cache_files_forget_cached_map(
+	const char *map_name)
+{
+	const char *name = tag_name_strip_path(map_name);
+	short map_file_index = cached_map_files_find_map(name);
+
+	if (cache_file_globals.copy_in_progress && !_stricmp(cache_file_globals.copying_to_map_file_name, name))
+	{
+		return FALSE;
+	}
+	if (map_file_index == NONE)
+	{
+		return TRUE;
+	}
+	if (map_file_index == cache_file_globals.open_map_file_index)
+	{
+		return FALSE;
+	}
+	memset(&cached_map_file_get(map_file_index)->header, 0, sizeof(struct cache_file_header));
+	error(_error_silent, "cache partition: the copy of '%s' (cache file %d) is forgotten", name, map_file_index);
+
+	return TRUE;
+}
+
+/* port: how the last precache's copy failed (cache_files_precache_map_status:
+_cache_copy_read_failure and the others), or 0 */
+static short cache_files_last_copy_failure = 0;
+/* (and the cache file it was copying to) */
+static short cache_files_last_copy_slot = NONE;
+
+boolean cache_files_xbox_map_problem(
+	char const *map_name,
+	char *why,
+	long why_size)
+{
+	char const *name = tag_name_strip_path(map_name ? map_name : "");
+	struct cache_file_header header;
+	char path[256];
+	HANDLE file = INVALID_HANDLE_VALUE;
+	unsigned long bytes_read = 0;
+	boolean read = FALSE;
+	long largest;
+
+	why[0] = 0;
+	if (!name[0])
+	{
+		snprintf(why, (size_t)why_size, T("the host named no map"));
+		return TRUE;
+	}
+	cache_file_get_map_path(name, path);
+	if (path[0])
+	{
+		file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	}
+	if (file == INVALID_HANDLE_VALUE)
+	{
+		snprintf(why, (size_t)why_size, T("%s.map isn't in your maps folder"), name);
+		return TRUE;
+	}
+	read = ReadFile(file, &header, sizeof(header), &bytes_read, NULL) && bytes_read == sizeof(header);
+	CloseHandle(file);
+	if (!read)
+	{
+		snprintf(why, (size_t)why_size, T("your %s.map is cut short (%lu bytes): copy it to your maps folder again"),
+			name, bytes_read);
+		return TRUE;
+	}
+	/* (a Halo PC map named as an Xbox level: its loader is
+	custom_edition_cache.c's, with PC maps on, and it is not the Xbox map) */
+	if (custom_edition_cache_is_custom_edition(name))
+	{
+		snprintf(why, (size_t)why_size, T("your %s.map is the Halo PC (Custom Edition) map, not the Xbox one"), name);
+		return TRUE;
+	}
+	/* (Halo PC's own maps, version 7: Halo PC's maps folder copied over the
+	Xbox maps) */
+	if (header.header_signature == 'head' && header.version == 7)
+	{
+		snprintf(why, (size_t)why_size, T("your %s.map is the Halo PC map, not the Xbox one"), name);
+		return TRUE;
+	}
+	if (!cache_file_header_verify(&header, path, FALSE))
+	{
+		snprintf(why, (size_t)why_size, T("your %s.map isn't an Xbox map this game can load (damaged, or another "
+			"version's): copy the Xbox %s.map to your maps folder again"), name, name);
+		return TRUE;
+	}
+	if (_stricmp(header.name, name) != 0)
+	{
+		snprintf(why, (size_t)why_size, T("your %s.map is another map (it names itself '%.31s')"), name, header.name);
+		return TRUE;
+	}
+	switch (header.scenario_type)
+	{
+	case _scenario_type_solo:
+		largest = cached_map_file_get_size(0);
+		break;
+	case _scenario_type_main_menu:
+		largest = cached_map_file_get_size(2);
+		break;
+	case _scenario_type_multiplayer:
+		largest = cached_map_file_get_size(3);
+		break;
+	default:
+		largest = 0;
+		break;
+	}
+	if (header.file_length >= largest)
+	{
+		snprintf(why, (size_t)why_size, T("your %s.map is too big for the game's map cache (%ld bytes)"),
+			name, (long)header.file_length);
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+void cache_files_precache_failure_describe(
+	char const *map_name,
+	char *why,
+	long why_size)
+{
+	char const *name = tag_name_strip_path(map_name ? map_name : "");
+
+	if (cache_files_xbox_map_problem(map_name, why, why_size))
+	{
+		return;
+	}
+	switch (cache_files_last_copy_failure)
+	{
+	case _cache_copy_write_failure:
+	{
+		char path[256];
+
+		path[0] = 0;
+		if (cache_files_last_copy_slot >= 0 && cache_files_last_copy_slot < NUMBER_OF_CACHED_MAP_FILES)
+		{
+			cached_map_file_get_path(cache_files_last_copy_slot, path);
+		}
+		snprintf(why, (size_t)why_size, T("the game's map cache %s couldn't be written (is the memory card full, or the "
+			"data folder read-only?)"), path);
+		break;
+	}
+	case _cache_copy_read_failure:
+	case _cache_copy_bad_file_failure:
+		snprintf(why, (size_t)why_size, T("your %s.map is cut short or damaged: copy it to your maps folder again"), name);
+		break;
+	default:
+		snprintf(why, (size_t)why_size, T("your %s.map could not be read"), name);
+		break;
+	}
+
+	return;
+}
+#endif
+
+/* (the port's, port/linux/src/sdl_platform.c) */
+void platform_log(char const *format, ...);
 
 boolean cache_files_precache_map_begin(
 	const char *map_name,
@@ -603,11 +1049,54 @@ boolean cache_files_precache_map_begin(
 		if (cache_file_read_header_from_dvd(cache_map_name, &header))
 		{
 			long buffer_size = cache_copy_buffer_size(copy_map);
-			void *buffer = texture_cache_steal_memory(buffer_size);
 			short map_file_index = cached_map_files_find_free_map(
 				header.file_length,
 				header.scenario_type);
-			struct cached_map_file *map_file = cached_map_file_get(map_file_index);
+			void *buffer;
+			struct cached_map_file *map_file;
+
+			/* port: the cache file slots are found by the name in their
+			header (cached_map_files_find_map): a map file whose header names
+			another map would be copied again each time it was asked for, for
+			ever */
+			if (_stricmp(header.name, cache_map_name) != 0)
+			{
+				error(_error_silent, "map '%s' names itself '%s' in its header: refused", cache_map_name, header.name);
+				platform_log("map %s.map names itself '%s' in its header; a map's name must be its file's",
+					cache_map_name, header.name);
+				/* (port: the menus' map alone; any other is said by the caller,
+				cache_files_precache_failed, and the menu shown) */
+				if (copy_map && !_stricmp(cache_map_name, "ui"))
+				{
+					display_error_damaged_media_reason("ui.map names itself '%s' in its header", header.name);
+					display_error_damaged_media();
+				}
+
+				return FALSE;
+			}
+
+			/* port: a map no cache file holds (of no type the cache files are
+			for, or too big for its type's) is not precached; the texture
+			cache's memory is taken only once one does */
+			if (map_file_index == NONE)
+			{
+				error(_error_silent, "no cache file can hold map '%s' (%08x bytes, type %d)",
+					cache_map_name, header.file_length, header.scenario_type);
+				if (copy_map && !_stricmp(cache_map_name, "ui"))
+				{
+					display_error_damaged_media_reason("ui.map is too big for its cache file (%ld bytes, type %d)",
+						(long)header.file_length, (int)header.scenario_type);
+					display_error_damaged_media();
+				}
+
+				return FALSE;
+			}
+#ifdef HALO_DEDICATED_SERVER
+			/* (the slot's own file, if it held a shared copy: the copy
+			below writes it) */
+			shared_slot_detach(map_file_index);
+#endif
+			map_file = cached_map_file_get(map_file_index);
 
 			memset(
 				&map_file->header,
@@ -615,12 +1104,23 @@ boolean cache_files_precache_map_begin(
 				sizeof(struct cache_file_header));
 			cache_file_globals.copy_in_progress = TRUE;
 			cache_file_globals.copying_to_map_file_index = map_file_index;
+#ifdef HALO_LINUX
+			cache_files_last_copy_failure = 0;
+#endif
 			strncpy(
 				cache_file_globals.copying_to_map_file_name,
 				cache_map_name,
 				sizeof(cache_file_globals.copying_to_map_file_name) - 1);
 			cache_file_globals.copying_to_map_file_name[
 				sizeof(cache_file_globals.copying_to_map_file_name) - 1] = 0;
+#ifdef HALO_DEDICATED_SERVER
+			/* (the shared map cache's copy, attached, built or waited for) */
+			if (shared_precache_begin(map_file_index, &header, copy_map))
+			{
+				return TRUE;
+			}
+#endif
+			buffer = texture_cache_steal_memory(buffer_size);
 			cache_file_get_map_path(cache_map_name, path);
 			error(_error_silent, "starting precaching of map '%s'", cache_map_name);
 			cache_copy_begin(
@@ -634,8 +1134,9 @@ boolean cache_files_precache_map_begin(
 		{
 			error(_error_silent, "couldn't find map '%s' on the DVD", cache_map_name);
 			error(_error_silent, "full path name '%s'", map_name);
-			if (copy_map)
+			if (copy_map && !_stricmp(cache_map_name, "ui"))
 			{
+				display_error_damaged_media_reason("ui.map is missing from the maps folder, or isn't an Xbox map");
 				display_error_damaged_media();
 			}
 
@@ -658,6 +1159,15 @@ void cache_files_initialize(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		188,
 		cache_file_globals.requests);
+#ifdef HALO_LINUX
+	/* cache_file_open clears the requests before an Xbox map is read; a
+	Halo Custom Edition map is read without it, so they start out free
+	(port/linux/game/custom_edition_cache.c) */
+	memset(
+		cache_file_globals.requests,
+		0,
+		MAXIMUM_SIMULTANEOUS_CACHE_REQUESTS * sizeof(struct cache_file_request));
+#endif
 	cache_file_windows_thread_create();
 	cache_files_verify_language();
 	cache_files_open_cache_files();
@@ -673,6 +1183,12 @@ void cache_files_precache_map_end(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		1031,
 		cache_file_globals.copy_in_progress);
+#ifdef HALO_DEDICATED_SERVER
+	if (shared_precache_end())
+	{
+		return;
+	}
+#endif
 	cache_copy_end();
 	texture_cache_return_memory();
 	cached_map_file_set_modification_date(cache_file_globals.copying_to_map_file_index);
@@ -772,6 +1288,19 @@ boolean cache_file_open(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		223,
 		cache_file_globals.open_map_file_index==NONE);
+#ifdef HALO_LINUX
+	/* port: a map that is not in the cache (its header named another map,
+	or it could not be precached: a crafted, damaged or missing file,
+	cache_files_precache_failed) is not opened, rather than indexing the
+	cached-map array out of bounds: before the assertion below, so that the
+	builds that check it go back to the menu with the reason too */
+	if (map_file_index == NONE)
+	{
+		error(_error_silent, "the map '%s' is in no cache file", scenario_name);
+
+		return FALSE;
+	}
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		224,
@@ -797,7 +1326,8 @@ static short cache_file_read_internal(
 	void *buffer,
 	boolean *completion_flag_reference,
 	boolean blocking,
-	boolean urgent);
+	boolean urgent,
+	boolean bitmap);
 
 short cache_file_read(
 	long tag_index,
@@ -807,7 +1337,27 @@ short cache_file_read(
 	boolean *completion_flag_reference,
 	boolean blocking)
 {
-	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, blocking, FALSE);
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, blocking, FALSE, FALSE);
+}
+
+/* (port) cache_file_read for the texture cache's bitmaps. A Halo Custom
+Edition map's reads were served in place, on the thread that asked - the
+render or the tick, holding the cache lock (xbox_texture_cache.c) - so a
+megabyte from the memory card stalled the frame, and the other thread
+waited for the lock (hardware: "longest lock wait 25.2 ms in
+_texture_cache_bitmap_get_hardware_format" on a Custom Edition map, the
+tick behind the render's reads). They go to the cache file thread as an
+Xbox map's do, a blocking one first; whoever waits for one waits outside
+the lock. HALO_CE_READ_THREAD=0: in place, as before */
+short cache_file_read_bitmap(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference,
+	boolean blocking)
+{
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, blocking, FALSE, TRUE);
 }
 
 short cache_file_read_urgent(
@@ -817,7 +1367,7 @@ short cache_file_read_urgent(
 	void *buffer,
 	boolean *completion_flag_reference)
 {
-	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, FALSE, TRUE);
+	return cache_file_read_internal(tag_index, offset, size, buffer, completion_flag_reference, FALSE, TRUE, FALSE);
 }
 
 static short cache_file_read_internal(
@@ -827,7 +1377,8 @@ static short cache_file_read_internal(
 	void *buffer,
 	boolean *completion_flag_reference,
 	boolean blocking,
-	boolean urgent)
+	boolean urgent,
+	boolean bitmap)
 #else
 short cache_file_read(
 	long tag_index,
@@ -841,8 +1392,24 @@ short cache_file_read(
 #ifdef HALO_LINUX
 	short request_index;
 	struct cache_file_request *request;
+	long request_size;
 
-	while (__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
+	/* reads of a Halo Custom Edition map are served in place, at once, and
+	take no request slot - nor the claim lock below, which nothing would
+	release (port/linux/game/custom_edition_cache.c) */
+	boolean custom_edition = custom_edition_cache_tags_loaded();
+
+	if (custom_edition && (!bitmap || !custom_edition_reads_on_thread()))
+	{
+		custom_edition_cache_read(tag_index, offset, size, buffer);
+		*completion_flag_reference = TRUE;
+
+		/* (a free slot's index, never used: cache_file_promote_read takes
+		only indices in range) */
+		return cache_request_next_free_index();
+	}
+	while (__atomic_load_n(&cache_request_claim_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&cache_request_claim_lock, 1, __ATOMIC_ACQUIRE))
 		SwitchToThread();
 	request_index = cache_request_next_free_index();
 	request = cache_request_get(request_index);
@@ -851,6 +1418,11 @@ short cache_file_read(
 	struct cache_file_request *request = cache_request_get(request_index);
 #endif
 
+#ifdef HALO_LINUX
+	/* (a Custom Edition map's bitmap is read from its own files, with no
+	cached map file open) */
+	if (!custom_edition)
+#endif
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		269,
@@ -867,6 +1439,19 @@ short cache_file_read(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		276,
 		offset>=0);
+	/* port: the offset and size are the map's (a texture's or sound's,
+	which nothing checks): a negative one is no read, failed at once (a
+	negative size read the file to its end over what follows the buffer) */
+	if (offset < 0 || size < 0)
+	{
+		error(_error_silent, "cache file read of %08x bytes at %08x refused", size, offset);
+		*completion_flag_reference = _cache_file_read_failed;
+
+		return NONE;
+	}
+#ifdef HALO_LINUX
+	request_size = size;
+#endif
 	if (size & (CACHE_FILE_SECTOR_SIZE - 1))
 	{
 		size = (size | (CACHE_FILE_SECTOR_SIZE - 1)) + 1;
@@ -882,6 +1467,10 @@ short cache_file_read(
 	request->overlapped.Offset = offset;
 	request->buffer = buffer;
 #ifdef HALO_LINUX
+	/* (a Custom Edition map's bitmap: read by the cache file thread from
+	the map's own files, at its own size) */
+	cache_request_custom_edition[request_index].tag_index = custom_edition ? tag_index : NONE;
+	cache_request_custom_edition[request_index].size = custom_edition ? request_size : 0;
 	/* (the request is filled in before the cache file thread can see it
 	pending: on the Vita's cores it could see the flag before the fields
 	and read with the slot's last offset, size and completion flag) */
@@ -909,7 +1498,36 @@ short cache_files_precache_map_status(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		984,
 		cache_file_globals.copy_in_progress);
+#ifdef HALO_DEDICATED_SERVER
+	if (shared_precache.state == _shared_precache_waiting)
+	{
+		shared_precache_wait();
+	}
+	if (shared_precache.state == _shared_precache_attached)
+	{
+		*progress = 1.0f;
+		return _cached_map_file_success;
+	}
+	if (shared_precache.state == _shared_precache_waiting)
+	{
+		*progress = 0.0f;
+		return _cached_map_file_in_progress;
+	}
+#endif
+#ifdef HALO_LINUX
+	/* (port: how it failed, for the player: cache_files_precache_failure_describe) */
+	{
+		short copy_status = cache_copy_get_status(progress);
+
+		if (copy_status != _cache_copy_in_progress && copy_status != _cache_copy_finished)
+		{
+			cache_files_last_copy_failure = copy_status;
+			cache_files_last_copy_slot = cache_file_globals.copying_to_map_file_index;
+		}
+		switch (copy_status)
+#else
 	switch (cache_copy_get_status(progress))
+#endif
 	{
 		case _cache_copy_bad_file_failure:
 		case _cache_copy_read_failure:
@@ -917,6 +1535,10 @@ short cache_files_precache_map_status(
 			break;
 
 		case _cache_copy_write_failure:
+#ifdef HALO_DEDICATED_SERVER
+			/* (the shared folder's file failed, not the slot's) */
+			if (shared_precache.state != _shared_precache_building)
+#endif
 			cached_map_file_invalidate(cache_file_globals.copying_to_map_file_index);
 			status = _cached_map_file_failed;
 			break;
@@ -927,6 +1549,9 @@ short cache_files_precache_map_status(
 
 		case _cache_copy_finished:
 			status = _cached_map_file_success;
+#ifdef HALO_DEDICATED_SERVER
+			shared_precache.copy_finished = TRUE;
+#endif
 			break;
 
 		/* status is left unassigned only by this default arm. Not reached unassigned: the
@@ -937,6 +1562,9 @@ short cache_files_precache_map_status(
 			match_vassert("c:\\halo\\SOURCE\\cache\\cache_files_windows.c", 1013, FALSE, NULL);
 			break;
 	}
+#ifdef HALO_LINUX
+	}
+#endif
 
 	return status;
 }
@@ -1094,6 +1722,15 @@ static void cache_files_open_cache_files(
 			CloseHandle(file);
 			file = INVALID_HANDLE_VALUE;
 		}
+#ifdef HALO_LINUX
+		/* port: a cache file that cannot be made fails every map copied to
+		it (the damaged disc error of old): named in halo.log */
+		if (file == INVALID_HANDLE_VALUE)
+		{
+			platform_log("map cache: %s (%ld bytes) could not be made (error %lu): the maps it holds can't be loaded",
+				path, size, (unsigned long)GetLastError());
+		}
+#endif
 
 		map_file->file = file;
 		if (valid)
@@ -1109,12 +1746,35 @@ static void cache_files_open_cache_files(
 				valid = FALSE;
 			}
 #endif
+#ifdef HALO_LINUX
+			/* (port) a copy is kept only when its checksum tells it from
+			another build of the map: Invader writes none (0xFFFFFFFF) in
+			the Xbox maps it builds, so any copy of such a map passed for it
+			- one of another version of the map too - and was played with
+			whatever it held (Vita3K: an Invader-built Blood Gulch drew its
+			base and sky as colour noise from an old copy, and right once
+			the copies were deleted). Such maps are copied again each time
+			the game starts; the length must agree too */
+			if (map_file->header.checksum == 0xFFFFFFFFUL ||
+				!map_file->header.checksum)
+			{
+				valid = FALSE;
+			}
+			if (cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
+				map_file->header.checksum == dvd_header.checksum &&
+				map_file->header.file_length == dvd_header.file_length &&
+				valid)
+			{
+				continue;
+			}
+#else
 			if (cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
 				map_file->header.checksum == dvd_header.checksum &&
 				valid)
 			{
 				continue;
 			}
+#endif
 		}
 
 		memset(
@@ -1145,7 +1805,13 @@ static void CALLBACK cache_file_read_io_completion_routine(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		1389,
 		finished_request->overlapped.hEvent);
-	*(volatile boolean *)finished_request->overlapped.hEvent = TRUE;
+	/* port: a read that failed or came up short completes as failed: what
+	waits on it stops waiting, and a caller that checks (the map's tags and
+	bsps) sees it, instead of taking what is in its buffer for the map */
+	*(volatile boolean *)finished_request->overlapped.hEvent =
+		error_code == ERROR_SUCCESS && bytes_transferred == (unsigned long)finished_request->size ?
+			TRUE :
+			_cache_file_read_failed;
 	finished_request->pending = FALSE;
 	finished_request->running = FALSE;
 
@@ -1176,6 +1842,14 @@ static void cache_file_windows_thread_proc(
 		setting = getenv("HALO_IO_EACH");
 		complete_each = !setting || atoi(setting) != 0;
 	}
+#ifdef HALO_VITA
+	/* (port) Fourth core helpers, All async: this thread on the Vita's
+	fourth core where the system allows it (port/vita/host/
+	vita_fourth_core.c; as in Bruno Santana's modified build). Mostly
+	waiting for the memory card; a read late there is a texture or a sound
+	late */
+	vita_host_fourth_core_join("cache file thread", 2);
+#endif
 #endif
 	while (TRUE)
 	{
@@ -1241,6 +1915,24 @@ static void cache_file_windows_thread_proc(
 #ifdef HALO_LINUX
 			/* (the fields are read after the flag that published them) */
 			__atomic_thread_fence(__ATOMIC_ACQUIRE);
+			{
+				short index = (short)(best_request - cache_file_globals.requests);
+
+				if (cache_request_custom_edition[index].tag_index != NONE)
+				{
+					/* (a Custom Edition map's bitmap: read here, from its
+					files, and done) */
+					best_request->running = TRUE;
+					custom_edition_cache_read(cache_request_custom_edition[index].tag_index,
+						(long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
+						best_request->buffer);
+					cache_request_custom_edition[index].tag_index = NONE;
+					__atomic_store_n((volatile boolean *)best_request->overlapped.hEvent, TRUE, __ATOMIC_RELEASE);
+					best_request->running = FALSE;
+					__atomic_store_n(&best_request->pending, FALSE, __ATOMIC_RELEASE);
+					continue;
+				}
+			}
 #endif
 
 			file = cached_map_file_get_handle(cache_file_globals.open_map_file_index);
@@ -1298,8 +1990,23 @@ static void cache_file_get_map_path(
 {
 #ifdef HALO_LINUX
 	/* (every caller's path is 256 characters; the name can come from a
-	multiplayer host) */
-	snprintf(path, 256, "%s%s.map", cache_files_map_directory(), map_name);
+	multiplayer host). port (from OpenCE, MrBruh's "Validate map tags before
+	loading"): one that doesn't fit is no path (no file is found), not a cut
+	one (another file could be) */
+	{
+		int length = snprintf(path, 256, "%s%s.map", cache_files_map_directory(), map_name);
+
+		if (length < 0 || length >= 256)
+		{
+			error(_error_silent, "map path for '%.64s' is too long", map_name);
+			path[0] = 0;
+			return;
+		}
+	}
+	/* or the OpenSauce .yelo cache of that name, which the header check
+	names and refuses; every caller's path holds 256 characters
+	(port/linux/game/custom_edition_cache.c) */
+	opensauce_cache_path_find(path, 256);
 #else
 	sprintf(path, "%s%s.map", cache_files_map_directory(), map_name);
 #endif
@@ -1376,9 +2083,11 @@ static short cached_map_files_find_free_map(
 		 * arm's assertion failure calls system_exit, which does not return in January
 		 * (0x47c960 jumps to halt_and_catch_fire 0x4f21c0, which loops or calls exit).
 		 * Source-policy approval pending (2026-09-27 audit). */
+		/* port: the type is the map's header's, and a release build's assertion
+		goes on: a type no cache file is for finds none */
 		default:
 			match_vassert("c:\\halo\\SOURCE\\cache\\cache_files_windows.c", 1172, FALSE, NULL);
-			break;
+			return NONE;
 	}
 
 	for (map_file_index = first_map_file_index;
@@ -1770,6 +2479,14 @@ static short cached_map_files_find_map(
 {
 	short map_file_index;
 
+#ifdef HALO_LINUX
+	/* port: no map is named "": an empty name matched an empty cache file,
+	and passed for a map precached (cache_files_give_time_to_precache) */
+	if (!map_name || !map_name[0])
+	{
+		return NONE;
+	}
+#endif
 	for (map_file_index = 0;
 		map_file_index < NUMBER_OF_CACHED_MAP_FILES;
 		map_file_index++)

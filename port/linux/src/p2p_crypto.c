@@ -3,17 +3,24 @@ P2P_CRYPTO.C
 
 What internet play needs to keep an invite's signalling and its tunnel
 private (p2p.c): SHA-256 (FIPS 180-4) and HMAC-SHA256 (RFC 2104), from
-which an invite's topics and keys are derived, and sealing a message with a
-32-byte key: ChaCha20-Poly1305 (RFC 8439) with a random 12-byte nonce sent
-ahead of the ciphertext. The public brokers carry sealed messages, so only
-holders of the invite read them or can make ones the host accepts; the
-tunnel's packets are sealed with a key only its two machines have.
+which an invite's topics and keys are derived; ChaCha20-Poly1305 (RFC 8439)
+with additional data, which seals the tunnel's packets (a counter for their
+nonce) and, with a random nonce sent ahead of the ciphertext, signalling's
+messages; X25519 (RFC 7748), with which two machines agree on their
+tunnel's keys without sending them; and Ed25519 (RFC 8032, Monocypher's),
+with which a host signs its public game's listing (p2p_lobby.c). The public
+brokers carry sealed messages, so only holders of the invite read them; the
+tunnel's packets are sealed with keys only its two machines have.
 */
 
 #include "platform.h"
 #include "posix.h"
 #include "p2p_internal.h"
 
+#include "monocypher.h"
+#include "monocypher-ed25519.h"
+
+#include <stdlib.h>
 #include <string.h>
 
 /* ---------- SHA-256 */
@@ -139,6 +146,40 @@ void p2p_sha256(const void *data, int size, unsigned char *digest)
 	sha256_begin(&context);
 	sha256_add(&context, data, size);
 	sha256_end(&context, digest);
+}
+
+/* a running SHA-256, for the game's own units (map sharing's file digest,
+port/linux/game/map_share_protocol.h, which declares these with the same
+opaque context) */
+struct halo_sha256_stream
+{
+	unsigned long long opaque[16];
+};
+typedef char halo_sha256_stream_fits[sizeof(struct sha256) <= sizeof(struct halo_sha256_stream) ? 1 : -1];
+
+void halo_sha256_begin(struct halo_sha256_stream *context)
+{
+	sha256_begin((struct sha256 *)context);
+}
+
+void halo_sha256_add(struct halo_sha256_stream *context, const void *data, unsigned long size)
+{
+	const unsigned char *bytes = data;
+
+	/* (sha256_add takes an int) */
+	while (size > 0)
+	{
+		int count = size > 0x40000000UL ? 0x40000000 : (int)size;
+
+		sha256_add((struct sha256 *)context, bytes, count);
+		bytes += count;
+		size -= (unsigned long)count;
+	}
+}
+
+void halo_sha256_end(struct halo_sha256_stream *context, unsigned char *digest)
+{
+	sha256_end((struct sha256 *)context, digest);
 }
 
 void p2p_hmac_sha256(const unsigned char *key, int key_size, const void *data, int size, unsigned char *digest)
@@ -347,17 +388,11 @@ static void poly1305_end(struct poly1305 *context, unsigned char *tag)
 	sum = (unsigned long long)h3 + context->pad[3] + (sum >> 32); store32(tag + 12, (unsigned int)sum);
 }
 
-/* ---------- sealing: ChaCha20-Poly1305 (RFC 8439) with a random nonce */
+/* ---------- ChaCha20-Poly1305 (RFC 8439) */
 
-enum
-{
-	NONCE_SIZE = 12,
-	TAG_SIZE = 16,
-};
-
-/* the AEAD's tag over ciphertext, with no additional data */
-static void aead_tag(const unsigned char *key, const unsigned char *nonce, const unsigned char *ciphertext,
-	int size, unsigned char *tag)
+/* the AEAD's tag over the additional data and the ciphertext */
+static void aead_tag(const unsigned char *key, const unsigned char *nonce, const unsigned char *additional,
+	int additional_size, const unsigned char *ciphertext, int size, unsigned char *tag)
 {
 	unsigned char block[64];
 	unsigned char lengths[16];
@@ -365,36 +400,345 @@ static void aead_tag(const unsigned char *key, const unsigned char *nonce, const
 
 	chacha20_block(key, 0, nonce, block);
 	poly1305_begin(&context, block);
+	poly1305_add(&context, additional, additional_size);
 	poly1305_add(&context, ciphertext, size);
 	memset(lengths, 0, sizeof(lengths));
+	store32(lengths, (unsigned int)additional_size);
 	store32(lengths + 8, (unsigned int)size);
 	poly1305_add(&context, lengths, sizeof(lengths));
 	poly1305_end(&context, tag);
 }
 
+int p2p_aead_seal(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const void *plaintext, int size, unsigned char *sealed)
+{
+	chacha20_xor(key, 1, nonce, plaintext, size, sealed);
+	aead_tag(key, nonce, additional, additional_size, sealed, size, sealed + size);
+	return size + P2P_TAG_SIZE;
+}
+
+int p2p_aead_open(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const unsigned char *sealed, int size, unsigned char *plaintext)
+{
+	unsigned char tag[P2P_TAG_SIZE];
+	int text_size = size - P2P_TAG_SIZE;
+
+	if (text_size < 0)
+		return -1;
+	aead_tag(key, nonce, additional, additional_size, sealed, text_size, tag);
+	if (!p2p_equal(tag, sealed + text_size, P2P_TAG_SIZE))
+		return -1;
+	chacha20_xor(key, 1, nonce, sealed, text_size, plaintext);
+	return text_size;
+}
+
 int p2p_seal(const unsigned char *key, const void *plaintext, int size, unsigned char *sealed)
 {
-	posix_random_bytes(sealed, NONCE_SIZE);
-	chacha20_xor(key, 1, sealed, plaintext, size, sealed + NONCE_SIZE);
-	aead_tag(key, sealed, sealed + NONCE_SIZE, size, sealed + NONCE_SIZE + size);
-	return size + P2P_SEAL_OVERHEAD;
+	posix_random_bytes(sealed, P2P_NONCE_SIZE);
+	return P2P_NONCE_SIZE + p2p_aead_seal(key, sealed, NULL, 0, plaintext, size, sealed + P2P_NONCE_SIZE);
 }
 
 int p2p_open(const unsigned char *key, const unsigned char *sealed, int size, unsigned char *plaintext)
 {
-	unsigned char tag[TAG_SIZE];
+	if (size < P2P_NONCE_SIZE)
+		return -1;
+	return p2p_aead_open(key, sealed, NULL, 0, sealed + P2P_NONCE_SIZE, size - P2P_NONCE_SIZE, plaintext);
+}
+
+int p2p_equal(const void *first, const void *second, int size)
+{
+	const unsigned char *a = first, *b = second;
 	unsigned char difference = 0;
-	int text_size = size - P2P_SEAL_OVERHEAD;
 	int index;
 
-	if (text_size < 0)
-		return -1;
-	aead_tag(key, sealed, sealed + NONCE_SIZE, text_size, tag);
-	/* compared in constant time */
-	for (index = 0; index < TAG_SIZE; index++)
-		difference |= (unsigned char)(tag[index] ^ sealed[NONCE_SIZE + text_size + index]);
-	if (difference)
-		return -1;
-	chacha20_xor(key, 1, sealed, sealed + NONCE_SIZE, text_size, plaintext);
-	return text_size;
+	/* in constant time */
+	for (index = 0; index < size; index++)
+		difference |= (unsigned char)(a[index] ^ b[index]);
+	return difference == 0;
+}
+
+/* ---------- X25519 (RFC 7748), after TweetNaCl's crypto_scalarmult
+(Bernstein, van Gastel, Janssen, Lange, Schwabe, Smetsers; public domain):
+field elements in sixteen 16-bit limbs, every step in constant time */
+
+typedef long long field[16];
+
+static void field_carry(field value)
+{
+	long long carry;
+	int index;
+
+	for (index = 0; index < 16; index++)
+	{
+		value[index] += 1LL << 16;
+		carry = value[index] >> 16;
+		value[(index + 1) * (index < 15)] += carry - 1 + 37 * (carry - 1) * (index == 15);
+		value[index] -= carry * 65536;
+	}
+}
+
+/* swaps p and q if bit, without branching on it */
+static void field_swap(field p, field q, long long bit)
+{
+	long long mask = ~(bit - 1);
+	int index;
+
+	for (index = 0; index < 16; index++)
+	{
+		long long t = mask & (p[index] ^ q[index]);
+
+		p[index] ^= t;
+		q[index] ^= t;
+	}
+}
+
+static void field_pack(unsigned char *bytes, const field value)
+{
+	field m, t;
+	int index, pass;
+
+	memcpy(t, value, sizeof(t));
+	field_carry(t);
+	field_carry(t);
+	field_carry(t);
+	for (pass = 0; pass < 2; pass++)
+	{
+		long long borrow;
+
+		m[0] = t[0] - 0xffed;
+		for (index = 1; index < 15; index++)
+		{
+			m[index] = t[index] - 0xffff - ((m[index - 1] >> 16) & 1);
+			m[index - 1] &= 0xffff;
+		}
+		m[15] = t[15] - 0x7fff - ((m[14] >> 16) & 1);
+		borrow = (m[15] >> 16) & 1;
+		m[14] &= 0xffff;
+		field_swap(t, m, 1 - borrow);
+	}
+	for (index = 0; index < 16; index++)
+	{
+		bytes[2 * index] = (unsigned char)(t[index] & 0xff);
+		bytes[2 * index + 1] = (unsigned char)(t[index] >> 8);
+	}
+}
+
+static void field_unpack(field value, const unsigned char *bytes)
+{
+	int index;
+
+	for (index = 0; index < 16; index++)
+		value[index] = bytes[2 * index] + ((long long)bytes[2 * index + 1] << 8);
+	value[15] &= 0x7fff;
+}
+
+static void field_add(field out, const field a, const field b)
+{
+	int index;
+
+	for (index = 0; index < 16; index++)
+		out[index] = a[index] + b[index];
+}
+
+static void field_subtract(field out, const field a, const field b)
+{
+	int index;
+
+	for (index = 0; index < 16; index++)
+		out[index] = a[index] - b[index];
+}
+
+static void field_multiply(field out, const field a, const field b)
+{
+	long long t[31];
+	int i, j;
+
+	memset(t, 0, sizeof(t));
+	for (i = 0; i < 16; i++)
+	{
+		for (j = 0; j < 16; j++)
+			t[i + j] += a[i] * b[j];
+	}
+	for (i = 0; i < 15; i++)
+		t[i] += 38 * t[i + 16];
+	memcpy(out, t, sizeof(field));
+	field_carry(out);
+	field_carry(out);
+}
+
+static void field_invert(field out, const field value)
+{
+	field c;
+	int bit;
+
+	memcpy(c, value, sizeof(c));
+	for (bit = 253; bit >= 0; bit--)
+	{
+		field_multiply(c, c, c);
+		if (bit != 2 && bit != 4)
+			field_multiply(c, c, value);
+	}
+	memcpy(out, c, sizeof(c));
+}
+
+void p2p_x25519(unsigned char *result, const unsigned char *scalar, const unsigned char *point)
+{
+	static const unsigned char base_point[P2P_KEY_SIZE] = { 9 };
+	static const field a24 = { 0xDB41, 1 };
+	unsigned char z[P2P_KEY_SIZE];
+	field x, a, b, c, d, e, f;
+	int index;
+
+	memcpy(z, scalar, sizeof(z));
+	z[31] = (unsigned char)((z[31] & 127) | 64);
+	z[0] &= 248;
+	field_unpack(x, point ? point : base_point);
+	memcpy(b, x, sizeof(b));
+	memset(a, 0, sizeof(a));
+	memset(c, 0, sizeof(c));
+	memset(d, 0, sizeof(d));
+	a[0] = d[0] = 1;
+	for (index = 254; index >= 0; index--)
+	{
+		long long bit = (z[index >> 3] >> (index & 7)) & 1;
+
+		field_swap(a, b, bit);
+		field_swap(c, d, bit);
+		field_add(e, a, c);
+		field_subtract(a, a, c);
+		field_add(c, b, d);
+		field_subtract(b, b, d);
+		field_multiply(d, e, e);
+		field_multiply(f, a, a);
+		field_multiply(a, c, a);
+		field_multiply(c, b, e);
+		field_add(e, a, c);
+		field_subtract(a, a, c);
+		field_multiply(b, a, a);
+		field_subtract(c, d, f);
+		field_multiply(a, c, a24);
+		field_add(a, a, d);
+		field_multiply(c, c, a);
+		field_multiply(a, d, f);
+		field_multiply(d, b, x);
+		field_multiply(b, e, e);
+		field_swap(a, b, bit);
+		field_swap(c, d, bit);
+	}
+	field_invert(c, c);
+	field_multiply(a, a, c);
+	field_pack(result, a);
+}
+
+/* ---------- Ed25519 (RFC 8032, with SHA-512), from Monocypher
+(port/third_party/monocypher): a run's key, from which its X25519 key also
+comes, signs the listing of a public game (p2p_lobby.c) */
+
+void p2p_sha512(const void *data, int size, unsigned char *digest)
+{
+	crypto_sha512(digest, data, (size_t)size);
+}
+
+void p2p_ed25519_public(const unsigned char *seed, unsigned char *public_key, unsigned char *x25519_secret)
+{
+	unsigned char copy[P2P_SEED_SIZE];
+	unsigned char secret_key[64];
+	unsigned char hash[64];
+
+	/* (the key pair's making wipes the seed it is given) */
+	memcpy(copy, seed, sizeof(copy));
+	crypto_ed25519_key_pair(secret_key, public_key, copy);
+	if (x25519_secret)
+	{
+		/* the scalar Ed25519 signs with: X25519 clamps it the same way */
+		p2p_sha512(seed, P2P_SEED_SIZE, hash);
+		memcpy(x25519_secret, hash, P2P_KEY_SIZE);
+	}
+	crypto_wipe(secret_key, sizeof(secret_key));
+	crypto_wipe(hash, sizeof(hash));
+}
+
+void p2p_ed25519_sign(const unsigned char *seed, const unsigned char *public_key, const void *message, int size,
+	unsigned char *signature)
+{
+	unsigned char secret_key[64];
+
+	/* (Monocypher's secret key: the seed, then the public key) */
+	memcpy(secret_key, seed, P2P_SEED_SIZE);
+	memcpy(secret_key + P2P_SEED_SIZE, public_key, P2P_KEY_SIZE);
+	crypto_ed25519_sign(signature, secret_key, message, (size_t)size);
+	crypto_wipe(secret_key, sizeof(secret_key));
+}
+
+int p2p_ed25519_to_x25519(const unsigned char *public_key, unsigned char *x25519_public)
+{
+	static const unsigned char zero[P2P_KEY_SIZE];
+	static const unsigned char scalar[P2P_KEY_SIZE] = { 1 };
+	unsigned char product[P2P_KEY_SIZE];
+
+	crypto_eddsa_to_x25519(x25519_public, public_key);
+	/* a point of small order (whose multiple by a clamped scalar, a
+	multiple of 8, is 0) has signatures anyone can make, and secrets anyone
+	knows */
+	crypto_x25519(product, scalar, x25519_public);
+	return !p2p_equal(product, zero, P2P_KEY_SIZE);
+}
+
+/* ---------- passwords (a password-protected public game's listing holds
+its invite's token sealed with the password's key: p2p_lobby.c) */
+
+/* Argon2id of 4 MiB (OpenCE's) and four passes (OpenCE's three, and one
+more: the Vita's key is worked out on a thread of its own, so it may take
+longer): about 58 ms on a Raspberry Pi 4 in 32-bit ARM at 1.8 GHz, built as
+the Vita builds it, so about half a second on a Vita's Cortex-A9 at 444 MHz
+(eight times slower); once for the host and once a guess for a joiner */
+#define PASSWORD_KEY_BLOCKS 4096
+#define PASSWORD_KEY_PASSES 4
+
+int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key)
+{
+	crypto_argon2_config config = { CRYPTO_ARGON2_ID, PASSWORD_KEY_BLOCKS, PASSWORD_KEY_PASSES, 1 };
+	crypto_argon2_inputs inputs;
+	void *work_area = malloc((size_t)PASSWORD_KEY_BLOCKS * 1024);
+
+	inputs.pass = (const unsigned char *)password;
+	inputs.pass_size = (unsigned int)strlen(password);
+	inputs.salt = salt;
+	inputs.salt_size = P2P_KEY_SIZE;
+	if (!work_area)
+	{
+		/* (no key anyone could guess: nothing opens with it) */
+		posix_random_bytes(key, P2P_PASSWORD_KEY_SIZE);
+		return 0;
+	}
+	crypto_argon2(key, P2P_PASSWORD_KEY_SIZE, work_area, config, inputs, crypto_argon2_no_extras);
+	crypto_wipe(work_area, (size_t)PASSWORD_KEY_BLOCKS * 1024);
+	free(work_area);
+	return 1;
+}
+
+void p2p_seal_token(const unsigned char *key, const unsigned char *signing_key, const unsigned char *token,
+	unsigned char *sealed)
+{
+	/* (a nonce of its own each time: 24 random bytes never repeat) */
+	posix_random_bytes(sealed, 24);
+	crypto_aead_lock(sealed + 24 + 16, sealed + 24, key, sealed, signing_key, P2P_KEY_SIZE, token, P2P_TOKEN_SIZE);
+}
+
+int p2p_unseal_token(const unsigned char *key, const unsigned char *signing_key, const unsigned char *sealed,
+	unsigned char *token)
+{
+	return crypto_aead_unlock(token, sealed + 24, key, sealed, signing_key, P2P_KEY_SIZE, sealed + 24 + 16,
+		P2P_TOKEN_SIZE) == 0;
+}
+
+int p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size,
+	const unsigned char *signature)
+{
+	unsigned char x25519_public[P2P_KEY_SIZE];
+
+	/* (Monocypher's check turns away an S past the group's order: one
+	signature a message) */
+	return p2p_ed25519_to_x25519(public_key, x25519_public) &&
+		crypto_ed25519_check(signature, public_key, message, (size_t)size) == 0;
 }

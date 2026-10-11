@@ -120,6 +120,12 @@ parser.add_argument(
     "render path measured on any Linux machine, such as an ARM board, without the hardware)",
 )
 parser.add_argument(
+    "--linux-net-vita",
+    action="store_true",
+    help="the Linux build plays online as a PlayStation Vita (HALO_NET_AS_VITA): Vitas play only Vitas, so the "
+    "automated network tests need a Linux build on the Vitas' side (port/linux/include/halo_port_limits.h)",
+)
+parser.add_argument(
     "--vita-aligned",
     choices=["hot", "none"],
     default="none",
@@ -198,6 +204,7 @@ sln.ninja_path = args.ninja
 sln.ml_path = args.ml
 sln.linux_cc = args.linux_cc
 sln.linux_d3d = args.linux_d3d
+sln.linux_net_vita = args.linux_net_vita
 sln.compiler_launcher = args.compiler_launcher
 sln.port_release = args.release
 sln.port_lto = args.lto

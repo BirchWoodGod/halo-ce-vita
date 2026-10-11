@@ -12,6 +12,11 @@ relocating block, data and tag reference pointers and the Xbox-only raw
 pointers (model parts, BSP materials). A scan by value would not do: packed
 vertex normals and collision BSP indices look like window addresses.
 
+Halo Custom Edition caches are linked to 0x40440000 instead, with a tag
+cache of 23 MB (1.5 times that with OpenSauce's memory upgrades); their tags
+are moved the same way once custom_edition_cache.c has loaded and converted
+them, which leaves them in this build's layouts (halo_tag_relocate_linked_*).
+
 HALO_TAG_RELOCATION_REPORT=1 prints what was relocated; HALO_TAG_DUMP=<dir>
 keeps a copy of what was read, before relocation. */
 
@@ -20,6 +25,9 @@ keeps a copy of what was read, before relocation. */
 
 /* (platform.h's; stderr on Linux, the log on the Vita) */
 void platform_log(const char *format, ...);
+/* (platform.h's: zeroed memory of its own, xbox_memory.c) */
+void *halo_custom_edition_memory_alloc(unsigned long bytes);
+void halo_custom_edition_memory_free(void *address);
 #include <string.h>
 
 #include "tag_relocate.h"
@@ -63,24 +71,66 @@ struct tag_layout_group
 
 #define NO_LAYOUT 0xFFFF
 
+/* one bit per word of the Xbox window: relocated already */
+static unsigned char xbox_relocated[WINDOW_WORDS / 8];
+
 static struct
 {
 	unsigned char *window;
 	unsigned long bias;
-	/* one bit per word of the window: relocated already */
-	unsigned char relocated[WINDOW_WORDS / 8];
+	/* the address the data are linked to, the size of the window there and
+	its words */
+	unsigned long link_base, link_size, words;
+	/* one bit per word of the window: relocated already (xbox_relocated, or
+	a Custom Edition window's own) */
+	unsigned char *relocated;
 	/* the loaded ranges, as Xbox addresses; pointers are followed only
 	into them */
 	unsigned long tags_end;
 	unsigned long bsp_start, bsp_end;
 	unsigned long pointers, outside, walked;
+	/* port: tag blocks whose count and element pointer are inconsistent with
+	the loaded region, and tag references to no loaded tag or to a tag of
+	another group than they name (a crafted map): the caller refuses such a
+	map */
+	unsigned long invalid;
+	/* port: the loaded tag instances (32 bytes each, relocated) that tag
+	references are checked against; none: not checked */
+	unsigned char *instances;
+	long instance_count;
+	/* (stale references made to name no tag) */
+	unsigned long stale;
 	int report;
 } relocation;
 
 static int loaded(unsigned long xbox_address)
 {
-	return (xbox_address >= XBOX_TAG_CACHE_BASE && xbox_address < relocation.tags_end) ||
+	return (xbox_address >= relocation.link_base && xbox_address < relocation.tags_end) ||
 		(xbox_address >= relocation.bsp_start && xbox_address < relocation.bsp_end);
+}
+
+/* port: map files are untrusted - whether the whole span [xbox_start,
+xbox_start + bytes) lies inside one loaded region, with no overflow, so that
+a crafted block count or buffer count cannot walk an array off the end of
+the tag cache window (an out-of-bounds read, or a count so large the walk
+never ends). */
+static int region_fits(unsigned long xbox_start, unsigned long bytes)
+{
+	unsigned long end = xbox_start + bytes;
+
+	if (end < xbox_start)
+	{
+		return 0;
+	}
+	if (xbox_start >= relocation.link_base && end <= relocation.tags_end)
+	{
+		return 1;
+	}
+	if (relocation.bsp_end > relocation.bsp_start && xbox_start >= relocation.bsp_start && end <= relocation.bsp_end)
+	{
+		return 1;
+	}
+	return 0;
 }
 
 /* relocates the pointer at location (inside the window) once; returns where
@@ -90,12 +140,12 @@ static unsigned char *relocate_word(unsigned char *location)
 	unsigned long word = (unsigned long)(location - relocation.window) / 4;
 	unsigned long value;
 
-	if (word >= WINDOW_WORDS)
+	if (word >= relocation.words)
 		return NULL;
 	memcpy(&value, location, 4);
 	if (relocation.relocated[word / 8] & (1 << (word % 8)))
 		return (unsigned char *)value;
-	if (value - XBOX_TAG_CACHE_BASE >= XBOX_TAG_CACHE_SIZE)
+	if (value - relocation.link_base >= relocation.link_size)
 	{
 		if (value)
 			relocation.outside++;
@@ -106,6 +156,15 @@ static unsigned char *relocate_word(unsigned char *location)
 	value += relocation.bias;
 	memcpy(location, &value, 4);
 	return (unsigned char *)value;
+}
+
+/* port: an inconsistency the walk found (HALO_TAG_RELOCATION_REPORT=1 logs
+the first few) */
+static void walk_invalid(const char *what, unsigned long a, unsigned long b, unsigned long c)
+{
+	if (relocation.report && relocation.invalid < 8)
+		platform_log("tag-relocate: invalid %s (0x%08lx 0x%08lx 0x%08lx)", what, a, b, c);
+	relocation.invalid++;
 }
 
 static void walk(unsigned short struct_index, unsigned char *address)
@@ -128,13 +187,25 @@ static void walk(unsigned short struct_index, unsigned char *address)
 
 			memcpy(&count, at, 4);
 			elements = relocate_word(at + 4);
-			if (elements && count > 0 && field->child != NO_LAYOUT &&
-				loaded((unsigned long)(elements - relocation.bias)))
+			/* port: a non-empty tag block must point into the loaded region
+			and its whole element array must fit there; a crafted count or
+			pointer is flagged (the map is refused) rather than walked off
+			the end or left for the game to index out of bounds */
+			if (count != 0 && field->child_size > 0)
 			{
-				long element;
+				if (count < 0 || !elements ||
+					(unsigned long)count > relocation.link_size / field->child_size ||
+					!region_fits((unsigned long)(elements - relocation.bias), (unsigned long)count * field->child_size))
+				{
+					walk_invalid("block", (unsigned long)count, (unsigned long)elements, field->child_size);
+				}
+				else if (field->child != NO_LAYOUT)
+				{
+					long element;
 
-				for (element = 0; element < count; element++)
-					walk(field->child, elements + element * field->child_size);
+					for (element = 0; element < count; element++)
+						walk(field->child, elements + element * field->child_size);
+				}
 			}
 			break;
 		}
@@ -143,6 +214,53 @@ static void walk(unsigned short struct_index, unsigned char *address)
 			break;
 		case _tag_field_reference:
 			relocate_word(at + 4);
+			/* port: a reference names no tag (NONE) or a loaded one, of the
+			group it says (or a group that tag's inherits): checked here,
+			once, rather than in every tag_get (tag_groups.h) */
+			if (relocation.instances)
+			{
+				unsigned long group_tag;
+				long tag_index;
+
+				memcpy(&group_tag, at, 4);
+				memcpy(&tag_index, at + 12, 4);
+				if (tag_index != -1)
+				{
+					short absolute_index = (short)tag_index;
+					unsigned char *instance;
+					unsigned long instance_groups[3];
+					long instance_index;
+
+					if (absolute_index < 0 || absolute_index >= relocation.instance_count)
+					{
+						walk_invalid("reference index", group_tag, (unsigned long)tag_index, (unsigned long)relocation.instance_count);
+						break;
+					}
+					instance = relocation.instances + absolute_index * 32;
+					memcpy(instance_groups, instance, 12);
+					memcpy(&instance_index, instance + 12, 4);
+					if (group_tag && group_tag != 0xFFFFFFFFUL && instance_groups[0] != group_tag &&
+						instance_groups[1] != group_tag && instance_groups[2] != group_tag)
+					{
+						/* (Bungie's own maps have a few stale references: another
+						tag's salt, of another group, which nothing gets - the
+						debug builds would assert. Such a one names no tag now;
+						one of the tag's own salt but another group is a crafted
+						map's) */
+						if (((unsigned long)tag_index & 0xFFFF0000UL) && instance_index != tag_index)
+						{
+							long none = -1;
+
+							memcpy(at + 12, &none, 4);
+							relocation.stale++;
+						}
+						else
+						{
+							walk_invalid("reference group", group_tag, (unsigned long)tag_index, instance_groups[0]);
+						}
+					}
+				}
+			}
 			break;
 		case _tag_field_pointer:
 			relocate_word(at);
@@ -161,7 +279,9 @@ static void relocate_buffers(unsigned char *array, long count)
 {
 	long index;
 
-	if (!array || count <= 0 || !loaded((unsigned long)(array - relocation.bias)))
+	/* port: the buffer array (12 bytes each) must fit the loaded region */
+	if (!array || count <= 0 || (unsigned long)count > relocation.link_size / 12 ||
+		!region_fits((unsigned long)(array - relocation.bias), (unsigned long)count * 12))
 		return;
 	for (index = 0; index < count; index++)
 		relocate_word(array + index * 12 + 4);
@@ -193,40 +313,55 @@ static void begin(void *tag_cache)
 
 	relocation.report = value && value[0] == '1';
 	relocation.window = tag_cache;
-	relocation.bias = (unsigned long)tag_cache - XBOX_TAG_CACHE_BASE;
-	relocation.pointers = relocation.outside = relocation.walked = 0;
+	relocation.bias = (unsigned long)tag_cache - relocation.link_base;
+	relocation.pointers = relocation.outside = relocation.walked = relocation.invalid = relocation.stale = 0;
 }
 
 static void finish(const char *what, unsigned long size)
 {
 	if (relocation.report)
 		platform_log("tag-relocate: %s: %lu bytes, bias 0x%08lx: %lu pointers relocated, %lu structs walked, "
-			"%lu pointer fields outside the window", what, size, relocation.bias, relocation.pointers,
-			relocation.walked, relocation.outside);
+			"%lu pointer fields outside the window, %lu inconsistencies, %lu stale references", what, size, relocation.bias,
+			relocation.pointers, relocation.walked, relocation.outside, relocation.invalid, relocation.stale);
 }
 
-void halo_tag_relocate_tags(void *tag_cache, unsigned long size)
+/* port: the number of inconsistent tag blocks the last relocation walk
+found (a crafted map); the caller refuses the map when it is not zero */
+unsigned long halo_tag_relocate_anomalies(void)
 {
-	unsigned char *header = tag_cache;
-	unsigned char *instances;
-	long count, index, vertex_buffer_count, index_buffer_count;
+	return relocation.invalid;
+}
 
-	begin(tag_cache);
-	dump(tag_cache, size, "tags");
-	memset(relocation.relocated, 0, sizeof(relocation.relocated));
-	relocation.tags_end = XBOX_TAG_CACHE_BASE + size;
-	relocation.bsp_start = relocation.bsp_end = 0;
-	if (!relocation.bias)
+static void use_xbox_window(void)
+{
+	relocation.link_base = XBOX_TAG_CACHE_BASE;
+	relocation.link_size = XBOX_TAG_CACHE_SIZE;
+	relocation.words = WINDOW_WORDS;
+	relocation.relocated = xbox_relocated;
+}
+
+/* (called every 32 tags the walk takes: the loading screen's frames while
+a Custom Edition map loads, custom_edition_cache.c; NULL: none) */
+void (*halo_tag_relocate_progress)(void);
+
+/* walks the tags of every instance */
+static void relocate_instances(unsigned char *instances, long count)
+{
+	long index;
+
+	/* port: the instance array (32 bytes each) must fit the loaded tags: a
+	crafted tag count cannot send the walk off the end */
+	if (!instances || count <= 0 || (unsigned long)count > relocation.link_size / 32 ||
+		!region_fits((unsigned long)(instances - relocation.bias), (unsigned long)count * 32))
+	{
+		relocation.instances = NULL;
+		relocation.instance_count = 0;
 		return;
-	/* the header: tag instances, count, vertex and index buffers */
-	instances = relocate_word(header);
-	memcpy(&count, header + 12, 4);
-	memcpy(&vertex_buffer_count, header + 16, 4);
-	memcpy(&index_buffer_count, header + 24, 4);
-	relocate_buffers(relocate_word(header + 20), vertex_buffer_count);
-	relocate_buffers(relocate_word(header + 28), index_buffer_count);
-	if (!instances)
-		return;
+	}
+	/* (the references the walk meets are checked against these, and so are
+	the structure BSPs' later) */
+	relocation.instances = instances;
+	relocation.instance_count = count;
 	for (index = 0; index < count; index++)
 	{
 		/* group tags x3, tag index, name, base address, unused x2 */
@@ -235,6 +370,8 @@ void halo_tag_relocate_tags(void *tag_cache, unsigned long size)
 		unsigned char *base;
 		unsigned short group;
 
+		if (halo_tag_relocate_progress && !(index & 31))
+			halo_tag_relocate_progress();
 		relocate_word(instance + 16);
 		base = relocate_word(instance + 20);
 		if (!base || !loaded((unsigned long)(base - relocation.bias)))
@@ -253,7 +390,115 @@ void halo_tag_relocate_tags(void *tag_cache, unsigned long size)
 			platform_log("tag-relocate: no layout for tag group '%c%c%c%c'",
 				(int)(group_tag >> 24), (int)(group_tag >> 16 & 0xff), (int)(group_tag >> 8 & 0xff), (int)(group_tag & 0xff));
 	}
+}
+
+void halo_tag_relocate_tags(void *tag_cache, unsigned long size)
+{
+	unsigned char *header = tag_cache;
+	unsigned char *instances;
+	long count, vertex_buffer_count, index_buffer_count;
+
+	use_xbox_window();
+	begin(tag_cache);
+	dump(tag_cache, size, "tags");
+	memset(relocation.relocated, 0, relocation.words / 8);
+	relocation.tags_end = relocation.link_base + size;
+	relocation.bsp_start = relocation.bsp_end = 0;
+	/* (a new map's instances: none until relocate_instances finds them) */
+	relocation.instances = NULL;
+	relocation.instance_count = 0;
+	if (!relocation.bias)
+		return;
+	/* the header: tag instances, count, vertex and index buffers */
+	instances = relocate_word(header);
+	memcpy(&count, header + 12, 4);
+	memcpy(&vertex_buffer_count, header + 16, 4);
+	memcpy(&index_buffer_count, header + 24, 4);
+	relocate_buffers(relocate_word(header + 20), vertex_buffer_count);
+	relocate_buffers(relocate_word(header + 28), index_buffer_count);
+	if (!instances)
+		return;
+	relocate_instances(instances, count);
 	finish("tags", size);
+}
+
+/* the Custom Edition window's own bits, kept from its tags to its
+structure BSPs */
+static unsigned char *linked_relocated;
+static unsigned long linked_base, linked_size, linked_tags_end;
+
+int halo_tag_relocate_linked_tags(void *tag_cache, unsigned long size, unsigned long link_base,
+	unsigned long window_bytes)
+{
+	unsigned char *header = tag_cache;
+	unsigned char *instances;
+	long count;
+
+	/* (in memory of its own, zeroed, rather than the C heap, of which the
+	Vita has a fixed 48 MB that the system's libraries share: 736 KB for a
+	23 MB window) */
+	halo_tag_relocate_linked_release();
+	linked_relocated = halo_custom_edition_memory_alloc(window_bytes / 32 + 1);
+	if (!linked_relocated)
+		return 0;
+	linked_base = link_base;
+	linked_size = window_bytes;
+	relocation.link_base = link_base;
+	relocation.link_size = window_bytes;
+	relocation.words = window_bytes / 4;
+	relocation.relocated = linked_relocated;
+	begin(tag_cache);
+	relocation.tags_end = linked_tags_end = link_base + size;
+	relocation.bsp_start = relocation.bsp_end = 0;
+	relocation.instances = NULL;
+	relocation.instance_count = 0;
+	if (!relocation.bias)
+		return 1;
+	/* the Custom Edition tag index: tag instances, scenario, checksum,
+	count, then model data offsets and sizes (no pointers) */
+	instances = relocate_word(header);
+	memcpy(&count, header + 12, 4);
+	if (instances)
+		relocate_instances(instances, count);
+	finish("custom edition tags", size);
+	return 1;
+}
+
+void halo_tag_relocate_linked_structure_bsp(void *tag_cache, void *bsp, unsigned long size)
+{
+	unsigned char *header = bsp;
+	unsigned char *structure;
+	unsigned long start_word, end_word, word;
+
+	if (!linked_relocated)
+		return;
+	relocation.link_base = linked_base;
+	relocation.link_size = linked_size;
+	relocation.words = linked_size / 4;
+	relocation.relocated = linked_relocated;
+	relocation.tags_end = linked_tags_end;
+	begin(tag_cache);
+	relocation.bsp_start = (unsigned long)bsp - relocation.bias;
+	relocation.bsp_end = relocation.bsp_start + size;
+	if (!relocation.bias)
+		return;
+	start_word = (unsigned long)(header - relocation.window) / 4;
+	end_word = start_word + (size + 3) / 4;
+	if (end_word > relocation.words)
+		end_word = relocation.words;
+	for (word = start_word; word < end_word; word++)
+		relocation.relocated[word / 8] &= (unsigned char)~(1 << (word % 8));
+	/* the Custom Edition header: the BSP tag, then no Xbox vertex buffers */
+	structure = relocate_word(header);
+	if (structure && loaded((unsigned long)(structure - relocation.bias)))
+		walk(TAG_LAYOUT_STRUCTURE_BSP, structure);
+	finish("custom edition structure bsp", size);
+}
+
+void halo_tag_relocate_linked_release(void)
+{
+	halo_custom_edition_memory_free(linked_relocated);
+	linked_relocated = NULL;
 }
 
 void halo_tag_relocate_structure_bsp(void *tag_cache, void *bsp, unsigned long size)
@@ -263,6 +508,7 @@ void halo_tag_relocate_structure_bsp(void *tag_cache, void *bsp, unsigned long s
 	unsigned long start_word, end_word, word;
 	long vertex_buffer_count, lightmap_vertex_buffer_count;
 
+	use_xbox_window();
 	begin(tag_cache);
 	dump(bsp, size, "bsp");
 	relocation.bsp_start = (unsigned long)bsp - relocation.bias;
@@ -272,8 +518,8 @@ void halo_tag_relocate_structure_bsp(void *tag_cache, void *bsp, unsigned long s
 	/* this BSP replaces whatever was loaded there before */
 	start_word = (unsigned long)(header - relocation.window) / 4;
 	end_word = start_word + (size + 3) / 4;
-	if (end_word > WINDOW_WORDS)
-		end_word = WINDOW_WORDS;
+	if (end_word > relocation.words)
+		end_word = relocation.words;
 	for (word = start_word; word < end_word; word++)
 		relocation.relocated[word / 8] &= (unsigned char)~(1 << (word % 8));
 	/* the header: the BSP tag, vertex buffers, lightmap vertex buffers */

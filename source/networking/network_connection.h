@@ -12,14 +12,10 @@ header included in hcex build.
 
 enum
 {
-#ifdef HALO_LINUX
 	/* the distributed netcode's per-tick state (port/linux/NETCODE.md): as
 	large as fits one Ethernet frame with the internet play tunnel's
 	overhead (every native build must agree) */
 	DATAGRAM_MAXIMUM_SIZE = 1200,
-#else
-	DATAGRAM_MAXIMUM_SIZE = 400,
-#endif
 	MAXIMUM_NUMBER_OF_LOCAL_PLAYERS = 4,
 	_connection_dont_timeout = 0,
 	_connection_create_server_bit = 0,
@@ -55,6 +51,8 @@ boolean network_connection_connect(
 struct network_connection *network_connection_new(
 	unsigned long flags,
 	word well_known_port);
+boolean network_connection_last_read_was_unreliable(
+	void);
 boolean network_connection_read(
 	struct network_connection *connection,
 	void *buffer,
@@ -81,6 +79,10 @@ void network_connection_set_connection_rejection_procedure(
 	struct network_connection *connection,
 	network_connection_rejection_procedure connection_rejection_procedure);
 boolean network_connection_active(
+	struct network_connection *connection);
+/* port: the bytes waiting in the connection's outgoing reliable queue, which
+its stream has not taken yet (map sharing keeps it short) */
+long network_connection_reliable_queued_bytes(
 	struct network_connection *connection);
 boolean network_connection_going_stale(
 	struct network_connection *connection);

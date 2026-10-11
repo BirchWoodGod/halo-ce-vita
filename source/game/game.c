@@ -167,6 +167,7 @@ struct game_options;
 #include "memory/data.h"
 #include "networking/network_messages.h"
 #include "networking/telnet_console.h"
+#include "objects/object_lights.h"
 #include "objects/objects.h"
 #include "physics/breakable_surfaces.h"
 #include "physics/collision_usage.h"
@@ -179,9 +180,19 @@ struct game_options;
 #include "sound/game_sound.h"
 #include "sound/sound_classes.h"
 #include "sound/sound_manager.h"
+#ifdef HALO_LINUX
+/* (HALO_TICK_PROFILE) game_frame's steps (lines_profile.c) */
+#include "lines_profile.h"
+#endif
 #include "structures/structures.h"
 #include "units/units.h"
 #include "units/vehicles.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
+
+/* network_game_globals.c's */
+boolean network_game_distributed_client(void);
+/* port: a client drives the host's actors' units as the host sent them (port/linux/game/network_actors.c) */
+void network_actors_drive(void);
 
 /* ---------- constants */
 
@@ -441,11 +452,19 @@ static unsigned long tick_profile_ticks;
 unsigned long long vita_host_time_us(void);
 void platform_log(const char *format, ...);
 static unsigned long long tick_now(void) { return vita_host_time_us ? vita_host_time_us() : 0; }
-static void tick_phase_begin(void) { if (tick_profile_enabled > 0) tick_phase_started = tick_now(); }
-static void tick_phase_end(int phase, const char *name)
+static void tick_profile_check(void)
 {
 	if (tick_profile_enabled < 0) { const char *e = getenv("HALO_TICK_PROFILE"); tick_profile_enabled = e && atoi(e) != 0; }
-	if (tick_profile_enabled <= 0) return;
+}
+/* (the switch read at the first phase's start too: read at its end only,
+the first tick's first phase counted from the clock's zero - the start-up,
+"tick 0 took 4491.8 ms: remove_quitting_players_from_game 4489.6" on the
+hardware) */
+static void tick_phase_begin(void) { tick_profile_check(); if (tick_profile_enabled > 0) tick_phase_started = tick_now(); }
+static void tick_phase_end(int phase, const char *name)
+{
+	tick_profile_check();
+	if (tick_profile_enabled <= 0 || !tick_phase_started) return;
 	{
 		unsigned long long elapsed = tick_now() - tick_phase_started;
 
@@ -496,6 +515,16 @@ void game_tick(
 	halo_fine_tick_begin();
 	tick_phase_begin();
 #endif
+	/* port: a data array gone out of order reported, and the lights made
+	again if it was theirs (game_state.c, object_lights.c), before anything
+	of the tick: a loaded game state's first tick, its scripts placing
+	actors, made the first light from it (Sentry NATIVE-7) */
+	game_state_check_data_arrays();
+	lights_port_recover();
+
+	/* port: a client of another's game, the host's rules (its own cheats and
+	game speed, set before it joined too, put back) */
+	cheats_network_client_enforce();
 	remove_quitting_players_from_game();
 #ifdef HALO_LINUX
 	tick_phase_end(0, "remove_quitting_players_from_game");
@@ -517,7 +546,10 @@ void game_tick(
 #ifdef HALO_LINUX
 	tick_phase_begin();
 #endif
-	ai_update();
+	if (!network_game_distributed_client())
+		ai_update();
+	else
+		network_actors_drive();
 #ifdef HALO_LINUX
 	tick_phase_end(3, "ai_update");
 #endif
@@ -554,7 +586,11 @@ void game_tick(
 #ifdef HALO_LINUX
 	tick_phase_begin();
 #endif
-	hs_update();
+	/* port: in network co-op only the host runs the scripts. A client running
+	them would place the map's actors and objects a second time and make
+	decisions that belong to the host. */
+	if (!(network_game_distributed_client() && network_coop_active()))
+		hs_update();
 #ifdef HALO_LINUX
 	tick_phase_end(7, "hs_update");
 #endif
@@ -590,6 +626,9 @@ void game_tick(
 	tick_phase_begin();
 #endif
 	player_effect_update();
+	/* port: and at its end, before the frame draws the lights */
+	game_state_check_data_arrays();
+	lights_port_recover();
 #ifdef HALO_LINUX
 	tick_phase_end(12, "player_effect_update");
 	tick_phase_report();
@@ -920,6 +959,10 @@ void set_random_seed(
 	return;
 }
 
+#ifdef HALO_LINUX
+void game_loading_screen_end(void);
+#endif
+
 boolean game_load(
 	struct game_options *options)
 {
@@ -942,6 +985,11 @@ boolean game_load(
 	{
 		game_globals->map_loaded = TRUE;
 	}
+#ifdef HALO_LINUX
+	/* port: a Custom Edition map's loading screen, up from its tags' load
+	through its first structure BSP's (custom_edition_cache.c) */
+	game_loading_screen_end();
+#endif
 
 	return game_globals->map_loaded;
 }
@@ -978,6 +1026,13 @@ void game_initialize_for_new_map(
 	players_initialize_for_new_map();
 	scenario_initialize_for_new_map();
 	objects_initialize_for_new_map();
+	/* nothing of the distributed netcode's carried into the new game
+	(port/linux/game/network_distributed.c), before anything of the map
+	makes an object: a client makes the map's objects, and the game type's
+	(the flags of capture the flag, game_engine_initialize_for_new_map), at
+	the host's indices, not its own objects' of the last game's */
+	network_distributed_new_game();
+	render_interpolation_reset();
 	render_initialize_for_new_map();
 	structures_initialize_for_new_map();
 	breakable_surfaces_initialize_for_new_map();
@@ -994,11 +1049,7 @@ void game_initialize_for_new_map(
 	weather_particle_systems_initialize_for_new_map();
 	point_physics_initialize_for_new_map();
 	game_engine_initialize_for_new_map();
-#ifdef HALO_LINUX
-	/* nothing of the distributed netcode's carried into the new game
-	(port/linux/game/network_distributed.c) */
-	network_distributed_new_game();
-#endif
+
 	game_statistics_start();
 	update_server_new();
 	player_control_initialize_for_new_map();
@@ -1026,6 +1077,14 @@ void game_initialize_for_new_map(
 	return;
 }
 
+/* port: whether a map is loaded, the main menu's too: game_in_progress()
+is not, once game_time_end() stops its clock */
+boolean game_map_loaded(
+	void)
+{
+	return game_globals->map_loaded;
+}
+
 boolean game_map_loading_in_progress(
 	real *progress)
 {
@@ -1036,6 +1095,140 @@ boolean game_map_loading_in_progress(
 
 	return globals->map_load_in_progress;
 }
+
+#ifdef HALO_LINUX
+/* port: the loading screen while game_load reads a map, as
+game_precache_new_map shows it while the cache file thread copies one: a
+Custom Edition map is read in place, never copied, and its load in
+scenario_tags_load (port/linux/game/custom_edition_cache.c) took the
+owner's Vita 12 s with no frame drawn (Oct 9, Hugeass; the hang watchdog
+spoke at 8 s). Its loader calls game_loading_screen_frame as it goes and
+while it waits for its reader thread, and a frame is drawn and presented
+when one is due: the old map is gone by then (game_dispose_from_old_map
+closed the widgets, game_unload its tags), so main_pregame_render draws the
+loading screen alone, as before the first map. */
+int halo_thread_index(void);
+
+enum
+{
+	/* (30 a second, the precache's rate on the Xbox) */
+	LOADING_SCREEN_FRAME_US = 33000,
+};
+
+static struct
+{
+	boolean active;
+	boolean drawing;
+	/* the progress bar drawn (a picture to show), or the pregame render's
+	frame alone */
+	boolean progress_bar;
+	int thread;
+	unsigned long long started_us;
+	unsigned long long last_us;
+	unsigned long long longest_us;
+	unsigned long frames;
+} game_loading_screen;
+
+void game_loading_screen_begin(
+	void)
+{
+#ifndef HALO_DEDICATED_SERVER
+	struct game_runtime_globals_prefix *globals = game_globals;
+
+	csmemset(&game_loading_screen, 0, sizeof(game_loading_screen));
+	game_loading_screen.active = TRUE;
+	game_loading_screen.thread = halo_thread_index();
+	game_loading_screen.started_us = tick_now();
+	game_loading_screen.last_us = game_loading_screen.started_us;
+	/* (without the retail picture the progress bar draws a black screen:
+	the pregame render's frame alone is one, and makes none of the progress
+	bar's textures and front buffer in the memory window - 2 MB the map's
+	load then has as before) */
+	game_loading_screen.progress_bar = progress_bar_has_picture();
+	if (game_loading_screen.progress_bar)
+	{
+		globals->map_load_in_progress = TRUE;
+		globals->loading_progress = 0.0f;
+		progress_bar_begin(global_scenario_index != NONE);
+	}
+#endif
+
+	return;
+}
+
+void game_loading_screen_frame(
+	real progress)
+{
+	struct game_runtime_globals_prefix *globals = game_globals;
+	unsigned long long now;
+
+	if (!game_loading_screen.active ||
+		game_loading_screen.drawing ||
+		halo_thread_index() != game_loading_screen.thread)
+	{
+		return;
+	}
+	now = tick_now();
+	if (now - game_loading_screen.last_us < LOADING_SCREEN_FRAME_US)
+	{
+		return;
+	}
+	if (now - game_loading_screen.last_us > game_loading_screen.longest_us)
+	{
+		game_loading_screen.longest_us = now - game_loading_screen.last_us;
+	}
+	game_loading_screen.drawing = TRUE;
+	if (game_loading_screen.progress_bar)
+	{
+		globals->loading_progress = PIN(progress, 0.0f, 1.0f);
+	}
+	main_pregame_render();
+	main_present_frame();
+	game_loading_screen.drawing = FALSE;
+	game_loading_screen.frames++;
+	game_loading_screen.last_us = tick_now();
+
+	return;
+}
+
+/* whether the loading screen is up and the caller is the thread that
+draws it (a read it waits for can show it meanwhile) */
+boolean game_loading_screen_up_here(
+	void)
+{
+	return game_loading_screen.active && halo_thread_index() == game_loading_screen.thread;
+}
+
+void game_loading_screen_end(
+	void)
+{
+	struct game_runtime_globals_prefix *globals = game_globals;
+	unsigned long long now = tick_now();
+
+	if (!game_loading_screen.active)
+	{
+		return;
+	}
+	if (now - game_loading_screen.last_us > game_loading_screen.longest_us)
+	{
+		game_loading_screen.longest_us = now - game_loading_screen.last_us;
+	}
+	platform_log("loading screen: %lu frames over %lu ms, at most %lu ms between two%s",
+		game_loading_screen.frames,
+		(unsigned long)((now - game_loading_screen.started_us) / 1000),
+		(unsigned long)(game_loading_screen.longest_us / 1000),
+		game_loading_screen.progress_bar ? "" : " (no picture: no progress bar)");
+	if (game_loading_screen.progress_bar)
+	{
+		progress_bar_end();
+		globals->map_load_in_progress = FALSE;
+		globals->loading_progress = 1.0f;
+	}
+	game_loading_screen.active = FALSE;
+
+	return;
+}
+#endif
 
 void game_unload(
 	void)
@@ -1056,8 +1249,16 @@ void game_unload(
 		while (!map_status);
 
 		ui_widgets_close_all();
+#ifdef HALO_LINUX
+		/* port: the precache under way (another map's, not the one being
+		unloaded) failed: ended, and said when that map is wanted again
+		(cache_files_precache_failed), rather than a damaged disc now */
+		if (map_status == 2)
+			error(_error_silent, "game_unload: the precache under way failed; ended");
+#else
 		if (map_status == 2)
 			display_error_damaged_media();
+#endif
 		cache_files_precache_map_end();
 	}
 
@@ -1143,6 +1344,15 @@ void game_precache_new_map(
 				_error_silent,
 				"shouldn't be here... map '%s' doesn't exist",
 				map_name);
+#ifdef HALO_LINUX
+			/* port: said, and game_load fails with the reason rather than
+			the game stopping (cache_files_precache_failed) */
+			if (blocking && cache_files_precache_failed(map_name, TRUE))
+			{
+				main_queue_map_name(NULL);
+				return;
+			}
+#endif
 			if (blocking)
 			{
 				match_vassert(
@@ -1179,8 +1389,28 @@ void game_precache_new_map(
 
 			progress_bar_end();
 			ui_widgets_close_all();
+#ifdef HALO_LINUX
+			/* port: a copy that failed (a file cut short, the card full) is
+			said, and game_load fails with the reason rather than the game
+			stopping at the damaged disc (cache_files_precache_failed) */
+			if (map_status == _cached_map_file_failed)
+			{
+				cache_files_precache_map_end();
+				if (!cache_files_precache_failed(map_name, TRUE))
+				{
+					display_error_damaged_media_reason("the menus' map %s could not be copied to the map cache", map_name);
+					display_error_damaged_media();
+				}
+				globals = game_globals;
+				globals->map_load_in_progress = FALSE;
+				globals->loading_progress = 0.0f;
+				main_queue_map_name(NULL);
+				return;
+			}
+#else
 			if (map_status == _cached_map_file_failed)
 				display_error_damaged_media();
+#endif
 			cache_files_precache_map_end();
 			match_assert(
 				"c:\\halo\\SOURCE\\game\\game.c",
@@ -1268,6 +1498,32 @@ void game_frame(
 		game_globals->active);
 
 	collision_log_begin_period(1);
+#ifdef HALO_LINUX
+	{
+		unsigned long long started = halo_lines_now();
+
+		particles_update(frame_dt);
+		halo_lines_profile_step(_lines_step_particles, started);
+		started = halo_lines_now();
+		contrails_update(frame_dt);
+		halo_lines_profile_step(_lines_step_contrails, started);
+		started = halo_lines_now();
+		particle_systems_update(frame_dt);
+		halo_lines_profile_step(_lines_step_particle_systems, started);
+		started = halo_lines_now();
+		widgets_update(frame_dt);
+		halo_lines_profile_step(_lines_step_widgets, started);
+		started = halo_lines_now();
+		game_sound_update(frame_dt);
+		halo_lines_profile_step(_lines_step_game_sound, started);
+		started = halo_lines_now();
+		scenario_frame_update(frame_dt);
+		rasterizer_frame_update(frame_dt);
+		numeric_countdown_timer_update();
+		halo_lines_profile_step(_lines_step_rest, started);
+		halo_lines_profile_frame();
+	}
+#else
 	particles_update(frame_dt);
 	contrails_update(frame_dt);
 	particle_systems_update(frame_dt);
@@ -1276,6 +1532,7 @@ void game_frame(
 	scenario_frame_update(frame_dt);
 	rasterizer_frame_update(frame_dt);
 	numeric_countdown_timer_update();
+#endif
 	collision_log_end_period();
 
 	return;
@@ -1288,7 +1545,9 @@ void remove_quitting_players_from_game(
 	struct player_datum *player;
 	long current_time;
 
-	if (!game_engine_running())
+	/* port: also in network co-op, which has no game engine. Without this a
+	player who left kept their unit, and it respawned. */
+	if (!game_engine_running() && !network_coop_active())
 		return;
 
 	current_time = game_time_get();
@@ -1299,7 +1558,9 @@ void remove_quitting_players_from_game(
 
 		if (quit_time != NONE && !player->quit_out_of_game)
 		{
-			if (current_time == quit_time)
+			/* port: at its time or past it (a client's clock may jump the
+			ticks it missed to the host's, game_time_set_distributed) */
+			if (current_time >= quit_time)
 			{
 				long unit_index = player->unit_index;
 
@@ -1309,15 +1570,6 @@ void remove_quitting_players_from_game(
 					unit_get(unit_index);
 					unit_kill_no_statistics(player->unit_index);
 				}
-			}
-			else if (current_time > quit_time)
-			{
-				error(
-					_error_silent,
-					"player %x failed to quit, wanted %d is %d",
-					iterator.datum_index,
-					quit_time,
-					current_time);
 			}
 		}
 	}

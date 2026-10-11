@@ -336,6 +336,7 @@ symbols in this file:
 
 #include "cseries/cseries.h"
 #include "cseries/cseries_windows.h"
+#include "cseries/errors.h"
 #include "bungie_net/network/transport.h"
 #include "interface/ui_widget.h"
 #include "interface/ui_widget_definitions.h"
@@ -349,10 +350,18 @@ symbols in this file:
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
+#include "networking/network_server_manager.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
 #include "text/text_group.h"
 #include "text/unicode.h"
+#include "coop_menu.h" /* port: port/linux/game/coop_menu.c */
+#include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
+#ifdef HALO_LINUX
+#include "custom_edition_maps.h"
+#include "map_share.h"
+#include "bots.h"
+#endif
 
 #ifdef HALO_LINUX
 #include <stdlib.h>
@@ -370,23 +379,17 @@ enum
 
 enum
 {
-#ifdef HALO_LINUX
 	/* the native builds' session limit (port/linux/include/halo_port_limits.h) */
 	MAXIMUM_NETWORK_MACHINE_COUNT = HALO_PORT_MAXIMUM_NETWORK_MACHINES,
-#else
-	MAXIMUM_NETWORK_MACHINE_COUNT = 4,
-#endif
 	MAXIMUM_NETWORK_ADVERTISED_GAMES = 9,
 };
 
-#ifdef HALO_LINUX
 enum
 {
 	/* the networked pregame screen has panels for the local machine and three
 	remote machines, fewer than the native builds' sessions can hold */
 	NUMBER_OF_REMOTE_MACHINE_PANELS = 3,
 };
-#endif
 
 enum network_game_platform
 {
@@ -434,17 +437,11 @@ enum multiplayer_game_bitmap_frame
 /* Same TU-local definition as network_client_manager.c, network_game_manager.c,
    network_server_manager.c and network_server_message_handler.c; no shared header
    owns it. January assertion strings in those objects preserve the macro name. */
-#ifdef HALO_LINUX
 /* widened: a char machine index is always below the native builds' 128
 machines, and clang warns about the always-true char comparison */
 #define network_machine_is_valid(machine) \
 	((machine) && (machine)->machine_index >= 0 && \
 	(long)(machine)->machine_index < MAXIMUM_NETWORK_MACHINE_COUNT)
-#else
-#define network_machine_is_valid(machine) \
-	((machine) && (machine)->machine_index >= 0 && \
-	(machine)->machine_index < MAXIMUM_NETWORK_MACHINE_COUNT)
-#endif
 
 /* ---------- structures */
 
@@ -509,25 +506,6 @@ struct widget_instance
 	struct ui_widget_animation_data animation;
 };
 
-struct ui_game_variant
-{
-	byte padding00[0x18];
-	enum game_engine_type engine_type;
-	boolean has_teams;
-	byte padding1D[0x23];
-	long score_to_win;
-	byte padding44[0x08];
-	union
-	{
-		boolean ctf_assault;
-		long race_type;
-	} game_mode;
-	long single_flag_time;
-	byte padding54[0x08];
-	long oddball_ball_type;
-	byte padding60[0x08];
-};
-
 struct network_advertised_game
 {
 	byte padding00[0x30];
@@ -546,34 +524,6 @@ struct network_advertised_game
 	boolean oddball_variant;
 };
 
-struct network_machine
-{
-	wchar_t name[32];
-	char machine_index;
-	byte padding41[3];
-};
-
-struct network_game
-{
-	byte padding000[0x24];
-	char map_name[0x80];
-	struct ui_game_variant variant;
-	byte padding10C;
-	byte game_mode;
-	byte maximum_player_count;
-	byte padding10F;
-	short difficulty;
-	short machine_count;
-	struct network_machine machines[MAXIMUM_NETWORK_MACHINE_COUNT];
-	short player_count;
-#ifdef HALO_LINUX
-	/* the native builds' session limit, as in the networking copies */
-	struct network_player players[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
-#else
-	struct network_player players[16];
-#endif
-};
-
 typedef char network_advertised_game_size_assert[
 	sizeof(struct network_advertised_game) == 0xE4 ? 1 : -1];
 typedef char network_advertised_game_game_name_offset_assert[
@@ -584,10 +534,6 @@ typedef char network_advertised_game_platform_offset_assert[
 	offsetof(struct network_advertised_game, platform) == 0xDE ? 1 : -1];
 typedef char network_machine_size_assert[
 	sizeof(struct network_machine) == 0x44 ? 1 : -1];
-#ifndef HALO_LINUX
-typedef char network_game_players_offset_assert[
-	offsetof(struct network_game, players) == 0x226 ? 1 : -1];
-#else
 /* the native builds' session limits move the players; every copy of the
 record is checked against port/linux/include/halo_port_limits.h (this one
 declares it only up to the players) */
@@ -598,7 +544,6 @@ typedef char network_game_players_end_assert[
 		HALO_PORT_NETWORK_GAME_PLAYERS_END ? 1 : -1];
 typedef char network_game_size_assert[
 	sizeof(struct network_game) <= HALO_PORT_NETWORK_GAME_SIZE ? 1 : -1];
-#endif
 
 struct playlist_profile
 {
@@ -651,11 +596,95 @@ static void spinner_list_3wide_determine_displayed_item_indices(
 static long filter_invalid_list_indices(
 	long *indices,
 	long number_of_items);
+static void widget_function_null(
+	struct widget_instance *widget);
+static void settings_menu_update_extended_description(
+	struct widget_instance *widget);
+static void playlist_settings_menu_update_extended_description(
+	struct widget_instance *widget);
+static void playlist_gametype_select_menu_update_extended_description(
+	struct widget_instance *widget);
+static void multiplayer_type_menu_update_extended_description(
+	struct widget_instance *widget);
+static void solo_level_select_list_update_displayed_items(
+	struct widget_instance *widget);
+static void difficulty_select_menu_update_extended_description(
+	struct widget_instance *widget);
+static void set_textbox_to_build_number(
+	struct widget_instance *widget);
+static void server_list_menu_update(
+	struct widget_instance *widget);
+static void network_pregame_status_screen_update(
+	struct widget_instance *widget);
+static void splitscreen_pregame_status_screen_update(
+	struct widget_instance *widget);
+static void netgame_prejoin_players(
+	struct widget_instance *widget);
+static void mutliplayer_settings_select_list_update_displayed_items(
+	struct widget_instance *widget);
+static void player_profile_3wide_list_update(
+	struct widget_instance *widget);
+static void player_profile_edit_select_menu_update_extended_description(
+	struct widget_instance *widget);
+static void player_profile_1wide_list_update(
+	struct widget_instance *widget);
+static void solo_game_objective_text(
+	struct widget_instance *widget);
+static void player_profile_color_picker_update(
+	struct widget_instance *widget);
+static void main_menu_animation_fakery(
+	struct widget_instance *widget);
+static void mp_level_select_list_update_displayed_items(
+	struct widget_instance *widget);
+static void get_active_player_profile_display_name(
+	struct widget_instance *widget);
+static void get_editable_player_profile_display_name(
+	struct widget_instance *widget);
+static void get_editable_playlist_profile_display_name(
+	struct widget_instance *widget);
+static void get_active_player_profile_color_index(
+	struct widget_instance *widget);
+static void multiplayer_game_set_text_box_for_map_name(
+	struct widget_instance *widget);
+static void multiplayer_game_set_text_box_for_game_ruleset(
+	struct widget_instance *widget);
+static void multiplayer_game_set_text_box_for_teams_noteams(
+	struct widget_instance *widget);
+static void multiplayer_game_set_text_box_for_score_limit(
+	struct widget_instance *widget);
+static void multiplayer_game_set_text_box_for_score_limit_type(
+	struct widget_instance *widget);
+static void multiplayer_game_set_bitmap_for_map(
+	struct widget_instance *widget);
+static void multiplayer_game_set_bitmap_for_ruleset(
+	struct widget_instance *widget);
+static void multiplayer_game_set_text_box_for_number_of_players(
+	struct widget_instance *widget);
+static void multiplayer_edit_profile_set_ruleset_textbox_string_index(
+	struct widget_instance *widget);
+static void system_link_status_check(
+	struct widget_instance *widget);
+static void multiplayer_game_directions(
+	struct widget_instance *widget);
+static void teams_no_teams_mp_game_bitmap_update(
+	struct widget_instance *widget);
+static void warn_if_difficulty_will_nuke_saved_game(
+	struct widget_instance *widget);
+static void dim_if_no_system_link_cable(
+	struct widget_instance *widget);
 
 /* ---------- globals */
 
+static ui_widget_game_data_function game_data_input_function_list[41];
+
 extern struct persistent_game_data_info_view persistant_game_data_info;
+#ifdef HALO_LINUX
+/* (port: the campaign's ten levels, then the Custom Edition campaign maps:
+ui_widget_event_handler_functions.c) */
+extern struct single_player_level_entry single_player_level_data[CUSTOM_EDITION_MAPS_CAMPAIGN_LIST_ENTRIES];
+#else
 extern struct single_player_level_entry single_player_level_data[10];
+#endif
 extern struct cached_player_profile_entry cached_player_profile[3];
 extern struct cached_variant_profile_entry cached_variant_profile[3];
 
@@ -679,6 +708,17 @@ void ui_widget_game_data_function_invoke(
 		0x10A,
 		widget);
 
+#ifdef HALO_LINUX
+	/* port: the menus' own functions (port/linux/game/menu_functions.c),
+	from PC_MENU_FUNCTION_BASE (halo_menus.h) */
+	if (function >= 256 && function < 0x8000)
+	{
+		extern void pc_menu_game_data_function_invoke(struct widget_instance *widget, long function);
+
+		pc_menu_game_data_function_invoke(widget, function - 256);
+		return;
+	}
+#endif
 	if ((short)function >= 0 && function < NUMBEROF(game_data_input_function_list))
 	{
 		game_data_input_function_list[(short)function](widget);
@@ -689,14 +729,14 @@ void ui_widget_game_data_function_invoke(
 	return;
 }
 
-void widget_function_null(
+static void widget_function_null(
 	struct widget_instance *widget)
 {
 	(void)widget;
 	return;
 }
 
-void settings_menu_update_extended_description(
+static void settings_menu_update_extended_description(
 	struct widget_instance *list_widget)
 {
 	struct ui_widget_definition *description_definition = ui_widget_definition_get(
@@ -748,7 +788,7 @@ void settings_menu_update_extended_description(
 	return;
 }
 
-void playlist_settings_menu_update_extended_description(
+static void playlist_settings_menu_update_extended_description(
 	struct widget_instance *list_widget)
 {
 	struct widget_instance *child;
@@ -789,7 +829,7 @@ void playlist_settings_menu_update_extended_description(
 	return;
 }
 
-void playlist_gametype_select_menu_update_extended_description(
+static void playlist_gametype_select_menu_update_extended_description(
 	struct widget_instance *list_widget)
 {
 	struct widget_instance *child;
@@ -830,7 +870,7 @@ void playlist_gametype_select_menu_update_extended_description(
 	return;
 }
 
-void multiplayer_type_menu_update_extended_description(
+static void multiplayer_type_menu_update_extended_description(
 	struct widget_instance *list_widget)
 {
 	struct widget_instance *child;
@@ -865,7 +905,7 @@ void multiplayer_type_menu_update_extended_description(
 	return;
 }
 
-void difficulty_select_menu_update_extended_description(
+static void difficulty_select_menu_update_extended_description(
 	struct widget_instance *list_widget)
 {
 	struct ui_widget_definition *description_definition = ui_widget_definition_get(
@@ -917,7 +957,7 @@ void difficulty_select_menu_update_extended_description(
 	return;
 }
 
-void server_list_menu_update(
+static void server_list_menu_update(
 	struct widget_instance *widget)
 {
 	/* Name, nine-element size and function scope from the 2003 PC demo PDB and the HCEX PDB (static
@@ -986,14 +1026,39 @@ void server_list_menu_update(
 			item && item_index < displayed_server_count;
 			item = item->next, item_index++)
 		{
+			/* (port: room for a co-op game's "<host>: <level> (<difficulty>)") */
 			item->parameters.text_box.text = ui_widget_realloc(
 				item->parameters.text_box.text,
-				0x40,
+				0x80,
 				"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
 				0x2C5);
 			if (item->parameters.text_box.text)
 			{
-				if (displayed_servers[item_index]->open == TRUE)
+				short difficulty;
+
+				/* port: a co-op game, by its level and difficulty */
+				if (network_game_client_advertised_game_cooperative(displayed_servers[item_index], &difficulty))
+				{
+					wchar_t description[0x40];
+
+					coop_menu_game_description(displayed_servers[item_index]->game_name,
+						displayed_servers[item_index]->map_name, difficulty, description, NUMBEROF(description));
+					if (displayed_servers[item_index]->open == TRUE)
+						ustrncpy(item->parameters.text_box.text, description, 0x3F);
+					else
+					{
+						usnprintf(item->parameters.text_box.text, 0x3F, L"%s %s",
+							unicode_string_list_get_string(tag_loaded(UNICODE_STRING_LIST_TAG, "ui\\multiplayer_game_text"),
+								19), description);
+					}
+					item->parameters.text_box.text[0x3F] = 0;
+					/* (the list's box shows about 190 of the font's pixels beside
+					the description: a longer one scrolls along while selected, and
+					is cut short with "..." else) */
+					coop_menu_fit_line(item->parameters.text_box.text, 190, item,
+						item_index == widget->parameters.list.selected_list_item_index);
+				}
+				else if (displayed_servers[item_index]->open == TRUE)
 				{
 					ustrncpy(
 						item->parameters.text_box.text,
@@ -1096,6 +1161,9 @@ void server_list_menu_update(
 				struct network_advertised_game *server = displayed_servers[
 					widget->parameters.list.selected_list_item_index];
 				char const *map_name;
+#ifdef HALO_LINUX
+				short custom_edition_map_index;
+#endif
 
 				switch (server->engine_type)
 				{
@@ -1154,6 +1222,14 @@ void server_list_menu_update(
 					map_bitmap->animation.current_frame_index = 12;
 				else
 					map_bitmap->animation.current_frame_index = 13;
+#ifdef HALO_LINUX
+				/* a Custom Edition map this machine has shows its own name and
+				picture, even one whose name holds an Xbox level's
+				(port/linux/game/custom_edition_maps.c) */
+				custom_edition_map_index = custom_edition_maps_display_index(map_name);
+				if (custom_edition_map_index != NONE)
+					map_bitmap->animation.current_frame_index = custom_edition_map_index;
+#endif
 
 				open_closed_text->parameters.text_box.string_list_index =
 					(server->open == TRUE) ? 20 : 21;
@@ -1193,12 +1269,16 @@ void server_list_menu_update(
 
 				number_of_players_text->parameters.text_box.text = ui_widget_realloc(
 					number_of_players_text->parameters.text_box.text,
+#ifdef HALO_LINUX
+					/* (port: "128/128", below) */
+					8 * sizeof(wchar_t),
+#else
 					8,
+#endif
 					"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
 					0x364);
 				if (number_of_players_text->parameters.text_box.text)
 				{
-#ifdef HALO_LINUX
 					/* room for a three-digit count: the Linux runtime's
 					_vsnwprintf writes its terminator inside the count */
 					usnprintf(
@@ -1206,14 +1286,21 @@ void server_list_menu_update(
 						4,
 						L"%d",
 						server->player_count);
-#else
-					usnprintf(
-						number_of_players_text->parameters.text_box.text,
-						3,
-						L"%d",
-						server->player_count);
-#endif
 					number_of_players_text->parameters.text_box.text[3] = 0;
+#ifdef HALO_LINUX
+					/* port: and the most its host allows, "3/16" (eight
+					characters: room for "128/128") */
+					if (server->maximum_player_count > 0)
+					{
+						usnprintf(
+							number_of_players_text->parameters.text_box.text,
+							8,
+							L"%d/%d",
+							server->player_count,
+							server->maximum_player_count);
+						number_of_players_text->parameters.text_box.text[7] = 0;
+					}
+#endif
 				}
 
 				score_limit_text->parameters.text_box.text = ui_widget_realloc(
@@ -1263,6 +1350,33 @@ void server_list_menu_update(
 				message_text->parameters.text_box.string_list_index = 2;
 				message_text->visible = FALSE;
 
+				/* port: a co-op game: its level, and co-op on its difficulty,
+				in place of a multiplayer map and game type */
+				{
+					short difficulty;
+
+					if (network_game_client_advertised_game_cooperative(server, &difficulty))
+					{
+						wchar_t text[48];
+						wchar_t difficulty_name[16];
+
+						coop_menu_level_name(map_name, text, NUMBEROF(text));
+						ui_widget_port_text_override(map_name_text, text);
+						coop_menu_difficulty_name(difficulty, difficulty_name, NUMBEROF(difficulty_name));
+						usnprintf(text, NUMBEROF(text), TW(L"Co-op, %s"), difficulty_name);
+						text[NUMBEROF(text) - 1] = 0;
+						ui_widget_port_text_override(ruleset_text, text);
+						ui_widget_port_text_override(teams_text, TW(L"Campaign"));
+						score_limit_text->visible = FALSE;
+						score_limit_type_text->visible = FALSE;
+					}
+					else
+					{
+						score_limit_text->visible = TRUE;
+						score_limit_type_text->visible = TRUE;
+					}
+				}
+
 				if (!widget->focused_child)
 				{
 					widget->parameters.list.selected_list_item_index = 0;
@@ -1305,7 +1419,40 @@ void server_list_menu_update(
 	return;
 }
 
-void network_pregame_status_screen_update(
+/* port: the lobby screen's X and A keys (delay and start the game) shown
+or not: the co-op host's waiting screen hides them while it is alone */
+static void network_pregame_button_key_update(
+	struct widget_instance *screen,
+	boolean shown)
+{
+	static char const *const hidden[] = { "\\x_butn", "\\=delay_game", "\\a_butn", "\\=start_game" };
+	struct widget_instance *child;
+
+	for (child = screen ? screen->child : NULL; child; child = child->next)
+	{
+		char const *name = tag_get_name(child->definition_tag_index);
+		struct widget_instance *key;
+
+		if (!name || !strstr(name, "\\mp_button_key"))
+			continue;
+		for (key = child->child; key; key = key->next)
+		{
+			char const *key_name = tag_get_name(key->definition_tag_index);
+			size_t key_length = key_name ? strlen(key_name) : 0;
+			long index;
+
+			for (index = 0; index < NUMBEROF(hidden); index++)
+			{
+				size_t length = strlen(hidden[index]);
+
+				if (key_length >= length && !strcmp(key_name + key_length - length, hidden[index]))
+					key->visible = shown;
+			}
+		}
+	}
+}
+
+static void network_pregame_status_screen_update(
 	struct widget_instance *widget)
 {
 	struct network_game *game = network_game_get_game();
@@ -1400,7 +1547,7 @@ void network_pregame_status_screen_update(
 						seconds_to_game_start - (hours * 60 + minutes) * 60);
 				}
 			}
-			else if (waiting_for_machines || game->variant.has_teams == TRUE)
+			else if (waiting_for_machines || game->variant.universal_variant.teams == TRUE)
 			{
 				status_text->visible = FALSE;
 				countdown_text->visible = FALSE;
@@ -1504,7 +1651,7 @@ void network_pregame_status_screen_update(
 				team_list && team_list->type == _ui_widget_type_spinner_list,
 				"expected a spinner list for local player team display");
 
-			if (!game->variant.has_teams)
+			if (!game->variant.universal_variant.teams)
 				widget_instance_set_visibility_recursive(team_list, FALSE);
 			else
 				widget_instance_set_visibility_recursive(team_list, TRUE);
@@ -1540,7 +1687,7 @@ void network_pregame_status_screen_update(
 					name_text->parameters.text_box.text[name_length] = 0;
 				}
 
-				if (!game->variant.has_teams)
+				if (!game->variant.universal_variant.teams)
 				{
 					controller_bitmap->animation.current_frame_index = 1;
 				}
@@ -1569,14 +1716,9 @@ void network_pregame_status_screen_update(
 		}
 
 		{
-#ifdef HALO_LINUX
 			/* one entry per remote machine panel, not per remote machine */
 			long machine_indices[NUMBER_OF_REMOTE_MACHINE_PANELS];
 			struct widget_instance *machine_widgets[NUMBER_OF_REMOTE_MACHINE_PANELS];
-#else
-			long machine_indices[MAXIMUM_NETWORK_MACHINE_COUNT - 1];
-			struct widget_instance *machine_widgets[MAXIMUM_NETWORK_MACHINE_COUNT - 1];
-#endif
 			long machine_widget_index;
 			long j;
 
@@ -1593,16 +1735,9 @@ void network_pregame_status_screen_update(
 				if (network_machine_is_valid(machine) &&
 					machine->machine_index != local_machine_index)
 				{
-#ifdef HALO_LINUX
 					/* more remote machines than panels: show the first ones */
 					if (j >= NUMBER_OF_REMOTE_MACHINE_PANELS)
 						break;
-#else
-					match_assert(
-						"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
-						0x4D4,
-						j<(MAXIMUM_NETWORK_MACHINE_COUNT-1));
-#endif
 
 					machine_indices[j] = machine_index;
 					j++;
@@ -1610,11 +1745,7 @@ void network_pregame_status_screen_update(
 			}
 
 			for (machine_widget_index = 0;
-#ifdef HALO_LINUX
 				machine_widget_index < NUMBER_OF_REMOTE_MACHINE_PANELS;
-#else
-				machine_widget_index < MAXIMUM_NETWORK_MACHINE_COUNT - 1;
-#endif
 				machine_widget_index++)
 			{
 				struct widget_instance *remote_machine_icon;
@@ -1655,8 +1786,24 @@ void network_pregame_status_screen_update(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					/* port: a machine the host is sending its map to shows how
+					far it is, by its name (the game waits for it to start:
+					port/linux/game/map_share.c) */
+					short download_percent = global_network_game_server_get() ?
+						map_share_server_machine_percent(game->machines[machine_indices[machine_widget_index]].machine_index) :
+						NONE;
+					wchar_t download_text[24];
+
+					download_text[0] = 0;
+					if (download_percent != NONE)
+						usnprintf(download_text, NUMBEROF(download_text), TW(L" (map %d%%)"), (int)download_percent);
+#endif
 					remote_machine_icon->animation.current_frame_index = 1;
 					length = ustrlen(game->machines[machine_indices[machine_widget_index]].name);
+#ifdef HALO_LINUX
+					length += ustrlen(download_text);
+#endif
 					remote_machine_name_text->parameters.text_box.text = ui_widget_realloc(
 						remote_machine_name_text->parameters.text_box.text,
 						(word)(2 * length + 2),
@@ -1664,10 +1811,21 @@ void network_pregame_status_screen_update(
 						0x4F4);
 					if (remote_machine_name_text->parameters.text_box.text)
 					{
+#ifdef HALO_LINUX
+						long name_length = length - ustrlen(download_text);
+
+						ustrncpy(
+							remote_machine_name_text->parameters.text_box.text,
+							game->machines[machine_indices[machine_widget_index]].name,
+							name_length);
+						ustrncpy(remote_machine_name_text->parameters.text_box.text + name_length, download_text,
+							length - name_length);
+#else
 						ustrncpy(
 							remote_machine_name_text->parameters.text_box.text,
 							game->machines[machine_indices[machine_widget_index]].name,
 							length);
+#endif
 						remote_machine_name_text->parameters.text_box.text[length] = 0;
 					}
 
@@ -1697,7 +1855,7 @@ void network_pregame_status_screen_update(
 						{
 							player_widget->animation.current_frame_index = 2;
 						}
-						else if (!game->variant.has_teams)
+						else if (!game->variant.universal_variant.teams)
 						{
 							player_widget->animation.current_frame_index =
 								local_player_controller_bitmap_frames[0][local_player_index][0];
@@ -1725,12 +1883,30 @@ void network_pregame_status_screen_update(
 					}
 				}
 			}
+			/* port: a co-op game takes as many as network.coop_players (two
+			or four on the Vitas): its lobby shows that many machines'
+			panels, and the waiting screen of co-op hosted from the menus,
+			alone, its text where the others go (port/linux/game/coop_menu.c) */
+			{
+				boolean cooperative = coop_menu_game_is_cooperative(game);
+				boolean waiting = cooperative && global_network_game_server_get() && machine_indices[0] == NONE;
+				boolean text = waiting && network_game_server_port_cooperative_menu(NULL);
+
+				third_machine_widget->visible = !cooperative || machine_indices[1] != NONE ||
+					(!text && game->maximum_players > 2);
+				fourth_machine_widget->visible = !cooperative || machine_indices[2] != NONE ||
+					(!text && game->maximum_players > 3);
+				/* (the host's waiting screen, alone: the lobby's X (delay
+				the game) and A (start it) do nothing yet, and are not shown;
+				B cancels, as the screen's text says) */
+				network_pregame_button_key_update(widget->parent, !waiting);
+			}
 		}
 	}
 	return;
 }
 
-void splitscreen_pregame_status_screen_update(
+static void splitscreen_pregame_status_screen_update(
 	struct widget_instance *widget)
 {
 	struct network_game *game = network_game_get_game();
@@ -1814,7 +1990,7 @@ void splitscreen_pregame_status_screen_update(
 						seconds_to_game_start - (hours * 60 + minutes) * 60);
 				}
 			}
-			else if (game->player_count < 2 || game->variant.has_teams == TRUE)
+			else if (game->player_count < 2 || game->variant.universal_variant.teams == TRUE)
 			{
 				status_text->visible = FALSE;
 				countdown_text->visible = FALSE;
@@ -1872,6 +2048,30 @@ void splitscreen_pregame_status_screen_update(
 			}
 		}
 
+#ifdef HALO_LINUX
+		/* port: the offline bots in this game (port/linux/game/bots.c),
+		whom the screen's four controller places do not show: "<this
+		machine's name> + 3 bots" */
+		{
+			static wchar_t name_with_bots[48];
+			long bot_count = 0;
+
+			for (player_index = 0; player_index < (long)NUMBEROF(game->players); player_index++)
+			{
+				if (network_player_is_valid(&game->players[player_index]) &&
+					bots_machine_is_bot(game->players[player_index].machine_index))
+				{
+					bot_count++;
+				}
+			}
+			if (bot_count > 0)
+			{
+				usnprintf(name_with_bots, NUMBEROF(name_with_bots), bot_count == 1 ? TW(L"%s + 1 bot") : TW(L"%s + %d bots"),
+					machine_name, bot_count);
+				machine_name = name_with_bots;
+			}
+		}
+#endif
 		length = ustrlen(machine_name);
 		machine_name_text->parameters.text_box.text = ui_widget_realloc(
 			machine_name_text->parameters.text_box.text,
@@ -1904,7 +2104,7 @@ void splitscreen_pregame_status_screen_update(
 			name_text = controller_bitmap->next;
 			team_list = name_text->next;
 
-			if (!game->variant.has_teams)
+			if (!game->variant.universal_variant.teams)
 				widget_instance_set_visibility_recursive(team_list, FALSE);
 
 			if (local_player_indices[local_player_index] == NONE)
@@ -1938,7 +2138,7 @@ void splitscreen_pregame_status_screen_update(
 					name_text->parameters.text_box.text[name_length] = 0;
 				}
 
-				if (!game->variant.has_teams)
+				if (!game->variant.universal_variant.teams)
 				{
 					controller_bitmap->animation.current_frame_index = 1;
 				}
@@ -1969,7 +2169,7 @@ void splitscreen_pregame_status_screen_update(
 	return;
 }
 
-void netgame_prejoin_players(
+static void netgame_prejoin_players(
 	struct widget_instance *widget)
 {
 	struct network_game_client *client = global_network_game_client_get();
@@ -1997,14 +2197,10 @@ void netgame_prejoin_players(
 				player_ui_local_player_wants_to_play_multiplayer((short)state_or_index.index);
 		}
 
-#ifdef HALO_LINUX
 		/* every player slot of the native builds' larger sessions */
 		for (state_or_index.index = 0;
 			(short)state_or_index.index < (short)NUMBEROF(game->players);
 			state_or_index.index++)
-#else
-		for (state_or_index.index = 0; (short)state_or_index.index < 16; state_or_index.index++)
-#endif
 		{
 			if (network_player_is_valid(&game->players[(short)state_or_index.index]) &&
 				network_game_player_is_local(&game->players[(short)state_or_index.index]))
@@ -2026,7 +2222,7 @@ void netgame_prejoin_players(
 	return;
 }
 
-void set_textbox_to_build_number(
+static void set_textbox_to_build_number(
 	struct widget_instance *widget)
 {
 	/* Name, type and function scope from the 2003 PC demo PDB and the HCEX PDB (static local
@@ -2080,16 +2276,28 @@ void set_textbox_to_build_number(
 
 	if (widget->parameters.text_box.text)
 	{
+		wchar_t const *shown = build_number_string;
+
+#ifdef HALO_LINUX
+		/* (port) a newer version the settings panel's Check for updates
+		found, in the build number's corner until the game restarts
+		(port/linux/src/update_notify.c) */
+		static wchar_t update_text[NUMBEROF(build_number_string)];
+		int update_check_menu_text(unsigned short *text, int count);
+
+		if (update_check_menu_text((unsigned short *)update_text, NUMBEROF(update_text)))
+			shown = update_text;
+#endif
 		ustrncpy(
 			widget->parameters.text_box.text,
-			build_number_string,
+			shown,
 			NUMBEROF(build_number_string) - 1);
 		widget->parameters.text_box.text[NUMBEROF(build_number_string) - 1] = 0;
 	}
 	return;
 }
 
-void solo_game_objective_text(
+static void solo_game_objective_text(
 	struct widget_instance *widget)
 {
 	wchar_t const *objective = hud_messaging_get_objective();
@@ -2117,7 +2325,7 @@ void solo_game_objective_text(
 	return;
 }
 
-void main_menu_animation_fakery(
+static void main_menu_animation_fakery(
 	struct widget_instance *widget)
 {
 	match_vassert(
@@ -2140,7 +2348,7 @@ void main_menu_animation_fakery(
 	return;
 }
 
-void get_active_player_profile_display_name(
+static void get_active_player_profile_display_name(
 	struct widget_instance *widget)
 {
 	struct player_profile profile;
@@ -2170,7 +2378,7 @@ void get_active_player_profile_display_name(
 	return;
 }
 
-void get_editable_player_profile_display_name(
+static void get_editable_player_profile_display_name(
 	struct widget_instance *widget)
 {
 	struct player_profile *profile;
@@ -2203,7 +2411,7 @@ void get_editable_player_profile_display_name(
 	return;
 }
 
-void get_editable_playlist_profile_display_name(
+static void get_editable_playlist_profile_display_name(
 	struct widget_instance *widget)
 {
 	struct game_variant *profile;
@@ -2238,7 +2446,7 @@ void get_editable_playlist_profile_display_name(
 	return;
 }
 
-void get_active_player_profile_color_index(
+static void get_active_player_profile_color_index(
 	struct widget_instance *widget)
 {
 	struct player_profile profile;
@@ -2257,7 +2465,7 @@ void get_active_player_profile_color_index(
 	return;
 }
 
-void player_profile_edit_select_menu_update_extended_description(
+static void player_profile_edit_select_menu_update_extended_description(
 	struct widget_instance *list_widget)
 {
 	struct widget_instance *child;
@@ -2431,11 +2639,14 @@ static void game_options_menu_update_pic_desc(
 	return;
 }
 
-void multiplayer_game_set_text_box_for_map_name(
+static void multiplayer_game_set_text_box_for_map_name(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
 	char const *map_name;
+#ifdef HALO_LINUX
+	short custom_edition_map_index;
+#endif
 
 	match_vassert(
 		"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
@@ -2446,7 +2657,17 @@ void multiplayer_game_set_text_box_for_map_name(
 	game = network_game_get_game();
 	if (game)
 	{
-		map_name = game->map_name;
+		map_name = game->map.name;
+#ifdef HALO_LINUX
+		/* a Custom Edition map shows its own name, even one whose name holds
+		an Xbox level's (port/linux/game/custom_edition_maps.c) */
+		custom_edition_map_index = custom_edition_maps_display_index(map_name);
+		if (custom_edition_map_index != NONE)
+		{
+			widget->parameters.text_box.string_list_index = custom_edition_map_index;
+			return;
+		}
+#endif
 	if (strstr(map_name, "beavercreek"))
 	{
 		widget->parameters.text_box.string_list_index = 0;
@@ -2516,7 +2737,7 @@ void multiplayer_game_set_text_box_for_map_name(
 	return;
 }
 
-void multiplayer_game_set_text_box_for_game_ruleset(
+static void multiplayer_game_set_text_box_for_game_ruleset(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
@@ -2530,20 +2751,20 @@ void multiplayer_game_set_text_box_for_game_ruleset(
 	game = network_game_get_game();
 	if (game)
 	{
-		switch (game->variant.engine_type)
+		switch (game->variant.game_engine_index)
 		{
 		case game_engine_ctf:
-			if (game->variant.game_mode.ctf_assault == TRUE)
+			if (game->variant.game_engine_variant.ctf.assault == TRUE)
 			{
 				widget->parameters.text_box.string_list_index =
-					game->variant.single_flag_time ?
+					game->variant.game_engine_variant.ctf.single_flag_time ?
 						_multiplayer_game_text_string_single_flag_assault :
 						_multiplayer_game_text_string_assault;
 			}
 			else
 			{
 				widget->parameters.text_box.string_list_index =
-					game->variant.single_flag_time ?
+					game->variant.game_engine_variant.ctf.single_flag_time ?
 						_multiplayer_game_text_string_single_flag_ctf :
 						_multiplayer_game_text_string_capture_the_flag;
 			}
@@ -2553,7 +2774,7 @@ void multiplayer_game_set_text_box_for_game_ruleset(
 				_multiplayer_game_text_string_slayer;
 			break;
 		case game_engine_oddball:
-			switch (game->variant.oddball_ball_type)
+			switch (game->variant.game_engine_variant.oddball.oddball_ball_type)
 			{
 			case 1:
 				widget->parameters.text_box.string_list_index =
@@ -2574,7 +2795,7 @@ void multiplayer_game_set_text_box_for_game_ruleset(
 				_multiplayer_game_text_string_king_of_the_hill;
 			break;
 		case game_engine_race:
-			switch (game->variant.game_mode.race_type)
+			switch (game->variant.game_engine_variant.race.race_type)
 			{
 			case 2:
 				widget->parameters.text_box.string_list_index =
@@ -2598,7 +2819,7 @@ void multiplayer_game_set_text_box_for_game_ruleset(
 	return;
 }
 
-void multiplayer_game_set_text_box_for_teams_noteams(
+static void multiplayer_game_set_text_box_for_teams_noteams(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
@@ -2612,7 +2833,7 @@ void multiplayer_game_set_text_box_for_teams_noteams(
 	game = network_game_get_game();
 	if (game)
 	{
-		widget->parameters.text_box.string_list_index = game->variant.has_teams != TRUE ? 13 : 12;
+		widget->parameters.text_box.string_list_index = game->variant.universal_variant.teams != TRUE ? 13 : 12;
 		return;
 	}
 
@@ -2620,7 +2841,7 @@ void multiplayer_game_set_text_box_for_teams_noteams(
 	return;
 }
 
-void multiplayer_game_set_text_box_for_score_limit(
+static void multiplayer_game_set_text_box_for_score_limit(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
@@ -2641,7 +2862,7 @@ void multiplayer_game_set_text_box_for_score_limit(
 			0xAC8);
 		if (widget->parameters.text_box.text)
 		{
-			usnprintf(widget->parameters.text_box.text, 7, L"%d", game->variant.score_to_win);
+			usnprintf(widget->parameters.text_box.text, 7, L"%d", game->variant.universal_variant.score_to_win);
 			widget->parameters.text_box.text[7] = 0;
 		}
 		return;
@@ -2651,7 +2872,7 @@ void multiplayer_game_set_text_box_for_score_limit(
 	return;
 }
 
-void multiplayer_game_set_text_box_for_score_limit_type(
+static void multiplayer_game_set_text_box_for_score_limit_type(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
@@ -2665,7 +2886,7 @@ void multiplayer_game_set_text_box_for_score_limit_type(
 	game = network_game_get_game();
 	if (game)
 	{
-		switch (game->variant.engine_type)
+		switch (game->variant.game_engine_index)
 		{
 		case game_engine_ctf:
 			widget->parameters.text_box.string_list_index =
@@ -2676,7 +2897,7 @@ void multiplayer_game_set_text_box_for_score_limit_type(
 				_multiplayer_game_text_string_frags;
 			break;
 		case game_engine_oddball:
-			widget->parameters.text_box.string_list_index = game->variant.oddball_ball_type == 2 ?
+			widget->parameters.text_box.string_list_index = game->variant.game_engine_variant.oddball.oddball_ball_type == 2 ?
 				_multiplayer_game_text_string_frags : _multiplayer_game_text_string_minutes;
 			break;
 		case game_engine_king:
@@ -2699,11 +2920,14 @@ void multiplayer_game_set_text_box_for_score_limit_type(
 	return;
 }
 
-void multiplayer_game_set_bitmap_for_map(
+static void multiplayer_game_set_bitmap_for_map(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
 	char const *map_name;
+#ifdef HALO_LINUX
+	short custom_edition_map_index;
+#endif
 
 	match_vassert(
 		"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
@@ -2714,7 +2938,17 @@ void multiplayer_game_set_bitmap_for_map(
 	game = network_game_get_game();
 	if (game)
 	{
-		map_name = game->map_name;
+		map_name = game->map.name;
+#ifdef HALO_LINUX
+		/* a Custom Edition map shows its own picture, even one whose name
+		holds an Xbox level's (port/linux/game/custom_edition_maps.c) */
+		custom_edition_map_index = custom_edition_maps_display_index(map_name);
+		if (custom_edition_map_index != NONE)
+		{
+			widget->animation.current_frame_index = custom_edition_map_index;
+			return;
+		}
+#endif
 	if (strstr(map_name, "beavercreek"))
 	{
 		widget->animation.current_frame_index = 0;
@@ -2784,7 +3018,7 @@ void multiplayer_game_set_bitmap_for_map(
 	return;
 }
 
-void multiplayer_game_set_bitmap_for_ruleset(
+static void multiplayer_game_set_bitmap_for_ruleset(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
@@ -2798,7 +3032,7 @@ void multiplayer_game_set_bitmap_for_ruleset(
 	game = network_game_get_game();
 	if (game)
 	{
-		switch (game->variant.engine_type)
+		switch (game->variant.game_engine_index)
 		{
 		case game_engine_ctf:
 			widget->animation.current_frame_index = _multiplayer_game_bitmap_ctf;
@@ -2826,7 +3060,7 @@ void multiplayer_game_set_bitmap_for_ruleset(
 	return;
 }
 
-void multiplayer_game_set_text_box_for_number_of_players(
+static void multiplayer_game_set_text_box_for_number_of_players(
 	struct widget_instance *widget)
 {
 	struct network_game *game;
@@ -2847,13 +3081,9 @@ void multiplayer_game_set_text_box_for_number_of_players(
 			0xB56);
 		if (widget->parameters.text_box.text)
 		{
-#ifdef HALO_LINUX
 			/* room for a three-digit count: the Linux runtime's _vsnwprintf
 			writes its terminator inside the count */
 			usnprintf(widget->parameters.text_box.text, 4, L"%d", game->player_count);
-#else
-			usnprintf(widget->parameters.text_box.text, 3, L"%d", game->player_count);
-#endif
 			widget->parameters.text_box.text[3] = 0;
 		}
 		return;
@@ -2863,7 +3093,7 @@ void multiplayer_game_set_text_box_for_number_of_players(
 	return;
 }
 
-void multiplayer_edit_profile_set_ruleset_textbox_string_index(
+static void multiplayer_edit_profile_set_ruleset_textbox_string_index(
 	struct widget_instance *widget)
 {
 	struct game_variant *profile;
@@ -2911,7 +3141,7 @@ void multiplayer_edit_profile_set_ruleset_textbox_string_index(
 	return;
 }
 
-void system_link_status_check(
+static void system_link_status_check(
 	struct widget_instance *widget)
 {
 	(void)widget;
@@ -2925,7 +3155,7 @@ void system_link_status_check(
 	return;
 }
 
-void multiplayer_game_directions(
+static void multiplayer_game_directions(
 	struct widget_instance *widget)
 {
 	struct network_game *game = network_game_get_game();
@@ -2939,25 +3169,21 @@ void multiplayer_game_directions(
 
 	if (server)
 	{
-		if (!network_game_is_splitscreen_local() &&
+		boolean waiting_for_machines = !network_game_is_splitscreen_local() &&
 			game &&
-			game->machine_count < 2)
-		{
-			widget->parameters.text_box.string_list_index =
-				_multiplayer_game_text_string_waiting_for_machine;
-			widget->visible = TRUE;
-			return;
-		}
+			game->machine_count < 2;
 
-#ifdef HALO_VITA
+#ifdef HALO_PORT_VITA_NETWORK
 		/* (port) one player starts a local game on the Vita
 		(network_server_manager.c): no "Waiting for another player" over
 		its countdown */
-		if (network_game_is_splitscreen_local() &&
+		if (!waiting_for_machines &&
+			network_game_is_splitscreen_local() &&
 			game &&
 			game->player_count < 1)
 #else
-		if (network_game_is_splitscreen_local() &&
+		if (!waiting_for_machines &&
+			network_game_is_splitscreen_local() &&
 			game &&
 			game->player_count < 2)
 #endif
@@ -2967,14 +3193,47 @@ void multiplayer_game_directions(
 			widget->visible = TRUE;
 			return;
 		}
+
+		if (waiting_for_machines)
+		{
+			widget->parameters.text_box.string_list_index =
+				_multiplayer_game_text_string_waiting_for_machine;
+			widget->visible = TRUE;
+			/* port: co-op hosted from the campaign's menus waits for a
+			partner, or for the others of a larger game */
+			if (network_game_server_port_cooperative_menu(NULL))
+			{
+				ui_widget_port_text_override(widget,
+					game && game->maximum_players > 2 ? TW(L"Waiting for other players") : TW(L"Waiting for your partner"));
+			}
+			return;
+		}
+	}
+	/* port: a co-op lobby (host or partner): the level and its difficulty
+	(not over the countdown, which this bar shows then) */
+	if (game && coop_menu_game_is_cooperative(game) && !network_game_is_splitscreen_local() &&
+		network_game_client_get_seconds_to_game_start(global_network_game_client_get()) < 0)
+	{
+		wchar_t text[64];
+		wchar_t level[48];
+		wchar_t difficulty_name[16];
+
+		coop_menu_level_name(game->map.name, level, NUMBEROF(level));
+		coop_menu_difficulty_name(game->difficulty, difficulty_name, NUMBEROF(difficulty_name));
+		usnprintf(text, NUMBEROF(text), TW(L"Co-op: %s (%s)"), level, difficulty_name);
+		text[NUMBEROF(text) - 1] = 0;
+		widget->parameters.text_box.string_list_index = _multiplayer_game_text_string_waiting_for_machine;
+		ui_widget_port_text_override(widget, text);
+		widget->visible = TRUE;
+		return;
 	}
 
 	if (game &&
-		game->variant.has_teams == TRUE &&
+		game->variant.universal_variant.teams == TRUE &&
 		network_game_client_get_seconds_to_game_start(global_network_game_client_get()) < 0)
 	{
-		long team_zero_player_count = 0;
 		long team_one_player_count = 0;
+		long team_zero_player_count = 0;
 		long player_index;
 
 		for (player_index = 0;
@@ -2999,12 +3258,13 @@ void multiplayer_game_directions(
 		{
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_teams_ready;
-			widget->visible = TRUE;
-			return;
+		}
+		else
+		{
+			widget->parameters.text_box.string_list_index =
+				_multiplayer_game_text_string_waiting_for_teams;
 		}
 
-		widget->parameters.text_box.string_list_index =
-			_multiplayer_game_text_string_waiting_for_teams;
 		widget->visible = TRUE;
 		return;
 	}
@@ -3013,7 +3273,7 @@ void multiplayer_game_directions(
 	return;
 }
 
-void teams_no_teams_mp_game_bitmap_update(
+static void teams_no_teams_mp_game_bitmap_update(
 	struct widget_instance *widget)
 {
 	struct network_game *game = network_game_get_game();
@@ -3025,11 +3285,11 @@ void teams_no_teams_mp_game_bitmap_update(
 		"expected a container bitmap for mp pregame header widget");
 
 	if (game)
-		widget->animation.current_frame_index = game->variant.has_teams != TRUE;
+		widget->animation.current_frame_index = game->variant.universal_variant.teams != TRUE;
 	return;
 }
 
-void warn_if_difficulty_will_nuke_saved_game(
+static void warn_if_difficulty_will_nuke_saved_game(
 	struct widget_instance *difficulty_screen_widget)
 {
 	struct widget_instance *difficulty_list = difficulty_screen_widget->child;
@@ -3060,7 +3320,7 @@ void warn_if_difficulty_will_nuke_saved_game(
 	return;
 }
 
-void dim_if_no_system_link_cable(
+static void dim_if_no_system_link_cable(
 	struct widget_instance *widget)
 {
 	match_vassert(
@@ -3129,7 +3389,7 @@ static void spinner_list_3wide_determine_displayed_item_indices(
 	return;
 }
 
-void player_profile_update_cache_for_nwide_list(
+static void player_profile_update_cache_for_nwide_list(
 	long *profile_indices,
 	long profile_index_count)
 {
@@ -3191,7 +3451,7 @@ void player_profile_update_cache_for_nwide_list(
 	return;
 }
 
-void variant_profile_update_cache_for_nwide_list(
+static void variant_profile_update_cache_for_nwide_list(
 	long *profile_indices,
 	long profile_index_count)
 {
@@ -3253,7 +3513,7 @@ void variant_profile_update_cache_for_nwide_list(
 	return;
 }
 
-void mutliplayer_settings_select_list_update_displayed_items(
+static void mutliplayer_settings_select_list_update_displayed_items(
 	struct widget_instance *list_widget)
 {
 	long descriptions_tag_index = tag_loaded(
@@ -3560,7 +3820,7 @@ void mutliplayer_settings_select_list_update_displayed_items(
 	return;
 }
 
-void player_profile_3wide_list_update(
+static void player_profile_3wide_list_update(
 	struct widget_instance *list_widget)
 {
 	long displayed_item_indices[3] = { NONE, NONE, NONE };
@@ -3789,7 +4049,7 @@ void player_profile_3wide_list_update(
 	return;
 }
 
-void player_profile_1wide_list_update(
+static void player_profile_1wide_list_update(
 	struct widget_instance *list_widget)
 {
 	struct widget_instance *name_bitmap;
@@ -4009,7 +4269,7 @@ void player_profile_1wide_list_update(
 	return;
 }
 
-void solo_level_select_list_update_displayed_items(
+static void solo_level_select_list_update_displayed_items(
 	struct widget_instance *list_widget)
 {
 	struct player_profile profile;
@@ -4093,6 +4353,28 @@ void solo_level_select_list_update_displayed_items(
 		difficulty_marker->animation.current_frame_index = 2;
 		cooperative_marker->animation.current_frame_index = 3;
 
+#ifdef HALO_LINUX
+		/* port: a Custom Edition campaign map after the campaign's levels
+		shows its own name, picture and description by its display index
+		(port/linux/game/custom_edition_maps.c; the level not reached yet's
+		when it is gone), and no marks of progress */
+		if (displayed_item_indices[item_index] >= 10)
+		{
+			short display_index = custom_edition_maps_campaign_display_index(
+				(short)(displayed_item_indices[item_index] - 10));
+
+			if (display_index == NONE)
+				display_index = 10;
+			map_name->parameters.text_box.string_list_index = display_index;
+			map_bitmap->animation.current_frame_index = display_index;
+			map_description->parameters.text_box.string_list_index = display_index;
+			completion_marker->visible = FALSE;
+			difficulty_marker->visible = FALSE;
+			cooperative_marker->visible = FALSE;
+			continue;
+		}
+#endif
+
 		match_vassert(
 			"c:\\halo\\SOURCE\\interface\\ui_widget_game_data_input_functions.c",
 			0x204,
@@ -4139,7 +4421,7 @@ void solo_level_select_list_update_displayed_items(
 	return;
 }
 
-void player_profile_color_picker_update(
+static void player_profile_color_picker_update(
 	struct widget_instance *list_widget)
 {
 	struct ui_widget_definition *definition;
@@ -4207,7 +4489,7 @@ void player_profile_color_picker_update(
 	return;
 }
 
-void mp_level_select_list_update_displayed_items(
+static void mp_level_select_list_update_displayed_items(
 	struct widget_instance *list_widget)
 {
 	struct ui_widget_definition *definition = ui_widget_definition_get(
@@ -4267,6 +4549,12 @@ void mp_level_select_list_update_displayed_items(
 				_ui_widget_type_text_box,
 			"expected a text box widget for the list item's third child (map description)");
 
+#ifdef HALO_LINUX
+		/* the Custom Edition maps after the Xbox levels show their own names,
+		pictures and descriptions (port/linux/game/custom_edition_maps.c) */
+		displayed_item_indices[item_index] = custom_edition_maps_level_display_index(
+			(short)displayed_item_indices[item_index]);
+#endif
 		map_name->parameters.text_box.string_list_index =
 			(short)displayed_item_indices[item_index];
 		map_bitmap->animation.current_frame_index =
@@ -4313,7 +4601,7 @@ static long filter_invalid_list_indices(
 
 /* ---------- callback table */
 
-ui_widget_game_data_function game_data_input_function_list[41] =
+static ui_widget_game_data_function game_data_input_function_list[41] =
 {
 	widget_function_null,
 	settings_menu_update_extended_description,

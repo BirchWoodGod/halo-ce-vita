@@ -22,6 +22,14 @@ enum cached_map_file_precache_state
 	NUMBER_OF_CACHED_MAP_FILE_PRECACHE_STATES,
 };
 
+/* port: what a read's completion flag is set to when the read failed or came
+up short (cache_file_read): not FALSE, so whatever waits on it stops
+waiting, but not TRUE either, so a caller that checks can tell */
+enum
+{
+	_cache_file_read_failed = 2,
+};
+
 /* ---------- macros */
 
 /* ---------- structures */
@@ -37,12 +45,19 @@ struct cache_file_structure_bsp_header;
 struct tag_iterator
 {
 	byte reserved0[4];
-	short absolute_index;
-	byte reserved6[10];
+	/* port: a long, as the tags' count is (a short wrapped on a count past
+	0x7FFF, and the walk never ended); the struct keeps its size */
+	long absolute_index;
+	byte reserved8[8];
 	long group_tag;
 };
 
 /* ---------- prototypes/CACHE_FILES.C */
+
+char const *cache_files_build_region(char const *build);
+char const *cache_files_multiplayer_region(char build[0x20]);
+boolean cache_files_map_plays_multiplayer(char const *map_name, char build[0x20]);
+void cache_files_show_multiplayer_unavailable(char const *map_name, char const *build);
 
 const char *cache_files_map_directory(
 	void);
@@ -165,9 +180,47 @@ short cache_file_read_urgent(
 	long size,
 	void *buffer,
 	boolean *completion_flag_reference);
+/* (port) cache_file_read for the texture cache: a Custom Edition map's
+bitmap read on the cache file thread too, not in place */
+short cache_file_read_bitmap(
+	long tag_index,
+	long offset,
+	long size,
+	void *buffer,
+	boolean *completion_flag_reference,
+	boolean blocking);
 #endif
 
 unsigned long tag_get_group_tag(long tag_index);
+
+#ifdef HALO_LINUX
+/* port: whether size bytes at address lie in the loaded map's tag cache
+(the Xbox tag cache, or a Custom Edition map's own) */
+boolean cache_file_tag_cache_contains(void const *address, long size);
+/* port: what keeps this machine's file of the Xbox map `map_name` names from
+being precached, for the player (cache_files_windows.c): FALSE when nothing
+that can be seen before copying it does; else TRUE and `why` */
+boolean cache_files_xbox_map_problem(
+	char const *map_name,
+	char *why,
+	long why_size);
+/* port: why the last precache of `map_name` failed, for the player */
+void cache_files_precache_failure_describe(
+	char const *map_name,
+	char *why,
+	long why_size);
+/* port: a map that could not be precached (cache_files.c): said, and the
+game goes back to the menu or a joiner leaves its game, rather than a
+damaged disc. FALSE for the menus' own map, which has no menu to go back
+to. */
+boolean cache_files_precache_failed(
+	char const *map_name,
+	boolean blocking);
+/* port: whatever map last failed to precache may be tried again (a map
+chosen, or a game's settings received: main_set_multiplayer_map_name) */
+void cache_files_precache_failure_forget(
+	void);
+#endif
 
 /* ---------- prototypes/XBOX_TEXTURE_CACHE.C */
 

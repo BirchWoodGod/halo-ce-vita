@@ -102,6 +102,12 @@ void platform_log(const char *format, ...);
 #define halo_cache_lock_acquire() ((void)0)
 #define halo_cache_lock_release() ((void)0)
 #endif
+#ifdef HALO_LINUX
+/* (port) for the texture report (vita_textures.c halo_texture_stats_report):
+the bitmaps read into the cache and their bytes, and the blocks evicted to
+make room (the cache is 22 MB, sized for the Xbox's maps) */
+volatile unsigned long halo_texture_cache_loads, halo_texture_cache_load_bytes, halo_texture_cache_evictions;
+#endif
 /* (port) the public functions take the shared cache lock: the tick loads
 textures for the objects it creates while the render loads its own */
 void texture_cache_delete(void);
@@ -319,6 +325,8 @@ static void render_inverse_transform_screen_point(
 static boolean texture_cache_start_loading_bitmap(
 	struct bitmap_data *bitmap,
 	boolean block);
+static boolean texture_cache_bitmap_valid(
+	struct bitmap_data *bitmap);
 
 /* ---------- globals */
 
@@ -688,6 +696,9 @@ static void texture_cache_delete_block_proc(
 		texture->bitmap->cache_block_index==block_index);
 	texture->bitmap->cache_block_index = NONE;
 	texture->bitmap->base_address = NULL;
+#ifdef HALO_LINUX
+	halo_texture_cache_evictions++;
+#endif
 	datum_delete(
 		xbox_texture_cache_globals.textures,
 		block_index);
@@ -846,13 +857,79 @@ static void texture_cache_close_unlocked(
 	return;
 }
 
+/* port: whether a map's bitmap is one the hardware format can describe and
+the texture cache can size: a type and format the tables have, sizes up to
+the device's (D3DDevice_GetDeviceCaps: 4096, a volume 512; retail's are 2048
+and 32 at most), mipmaps its sizes have, the compressed flag its format's,
+and a linear one's rows as Size can hold them. Its pixels are read and its
+hardware format built from these; a bad one isn't loaded, said once. */
+static boolean texture_cache_bitmap_valid(
+	struct bitmap_data *bitmap)
+{
+	static boolean reported = FALSE;
+	boolean linear = TEST_FLAG(bitmap->flags, _bitmap_linear_bit);
+	short maximum_dimension = bitmap->type==_bitmap_type_3d ? 512 : 4096;
+	boolean valid =
+		VALID_INDEX(bitmap->type, NUMBER_OF_BITMAP_TYPES) &&
+		VALID_INDEX(bitmap->format, NUMBER_OF_BITMAP_FORMATS) &&
+		bitmap->width>0 && bitmap->width<=maximum_dimension &&
+		bitmap->height>0 && bitmap->height<=maximum_dimension &&
+		bitmap->depth>0 && bitmap->depth<=maximum_dimension &&
+		bitmap->mipmap_count>=0 &&
+		bitmap->mipmap_count<=floor_log2(MAX(bitmap->width, MAX(bitmap->height, bitmap->depth))) &&
+		bitmap->pixels_size>=0;
+
+	if (valid)
+	{
+		boolean compressed_format =
+			bitmap->format>=_bitmap_format_dxt1 && bitmap->format<=_bitmap_format_dxt5;
+		boolean compressed_flag = TEST_FLAG(bitmap->flags, _bitmap_compressed_bit) ? TRUE : FALSE;
+
+		valid =
+			bitmap_d3d_format_tables[linear ? _bitmap_d3d_format_table_linear : _bitmap_d3d_format_table_regular][bitmap->format]!=NONE &&
+			compressed_flag==compressed_format;
+	}
+	if (valid && linear)
+	{
+		long row_pitch = bitmap_mipmap_get_row_pitch(bitmap, 0);
+
+		valid =
+			row_pitch>0 &&
+			row_pitch%D3DTEXTURE_PITCH_ALIGNMENT==0 &&
+			row_pitch/D3DTEXTURE_PITCH_ALIGNMENT<=(long)((D3DSIZE_PITCH_MASK>>D3DSIZE_PITCH_SHIFT)+1);
+	}
+	if (!valid && !reported)
+	{
+		error(
+			_error_silent,
+			"### ERROR bitmap %s (#%dx#%dx#%d, format #%d, type #%d) can't be cached; it isn't drawn",
+			tag_get_name(bitmap->tag_index),
+			bitmap->width,
+			bitmap->height,
+			bitmap->depth,
+			bitmap->format,
+			bitmap->type);
+		reported = TRUE;
+	}
+
+	return valid;
+}
+
 static boolean texture_cache_start_loading_bitmap(
 	struct bitmap_data *bitmap,
 	boolean block)
 {
 	long cache_block_index;
 	byte *base_address;
-	long size = rasterizer_xbox_bitmap_get_pixel_data_size(bitmap);
+	long size;
+
+	/* port: only a bitmap the hardware format and the cache can hold (a
+	map's fields) */
+	if (!texture_cache_bitmap_valid(bitmap))
+	{
+		return FALSE;
+	}
+	size = rasterizer_xbox_bitmap_get_pixel_data_size(bitmap);
 
 	size = MAX(size, bitmap->pixels_size);
 	cache_block_index = lruv_block_new(
@@ -881,13 +958,35 @@ static boolean texture_cache_start_loading_bitmap(
 		bitmap->base_address = base_address;
 		texture->bitmap = bitmap;
 		texture_cache_initialize_hardware_format(bitmap, &texture->hardware_format);
+#ifdef HALO_LINUX
+		/* (port: a Custom Edition map's read not in place, under the cache
+		lock, but on the cache file thread: cache_files_windows.c) */
+		texture->read_request_handle = cache_file_read_bitmap(
+#else
 		texture->read_request_handle = cache_file_read(
+#endif
 			bitmap->tag_index,
 			bitmap->pixels_offset,
 			bitmap->pixels_size,
 			base_address,
 			&texture->loaded,
 			block);
+#ifdef HALO_LINUX
+		halo_texture_cache_loads++;
+		halo_texture_cache_load_bytes += bitmap->pixels_size;
+		{
+			/* (debug) HALO_TEXTURE_CACHE_LOG=1: each bitmap read into the
+			cache, named, with its size (which textures a map's churn reads
+			again and again) */
+			static int log_reads = -1;
+
+			if (log_reads < 0)
+				log_reads = getenv("HALO_TEXTURE_CACHE_LOG") && atoi(getenv("HALO_TEXTURE_CACHE_LOG"));
+			if (log_reads)
+				platform_log("texture cache read: %s %dx%d format %d, %ld bytes, %d mipmaps", tag_get_name(bitmap->tag_index),
+					bitmap->width, bitmap->height, bitmap->format, size, bitmap->mipmap_count);
+		}
+#endif
 
 		return TRUE;
 	}
@@ -1062,6 +1161,20 @@ void *_texture_cache_bitmap_get_hardware_format(
 		struct xbox_texture_cache_texture *texture = NULL;
 
 		halo_cache_lock_acquire();
+		/* port (from OpenCE, MrBruh's "Validate map tags before loading"):
+		a cache block that isn't this bitmap's (a map's stale index) is
+		none */
+		if (bitmap->cache_block_index != NONE)
+		{
+			struct xbox_texture_cache_texture *cached_texture = datum_try_and_get(
+				xbox_texture_cache_globals.textures,
+				bitmap->cache_block_index);
+
+			if (!cached_texture || cached_texture->bitmap != bitmap)
+			{
+				bitmap->cache_block_index = NONE;
+			}
+		}
 		if (bitmap->cache_block_index == NONE && load)
 		{
 			texture_cache_start_loading_bitmap(bitmap, block);
@@ -1153,15 +1266,23 @@ void *_texture_cache_bitmap_get_hardware_format(
 	{
 		if (system_milliseconds() - texture_cache_last_failure_time > 10000)
 		{
-			terminal_printf(
-				global_real_argb_purple,
-				"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+			/* (port: chatter, shown as config.toml's game.console_log says) */
+			if (terminal_shows(_terminal_message_chatter))
+			{
+				terminal_printf(
+					global_real_argb_purple,
+					"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+			}
 			error(
 				_error_silent,
 				"YOU GOT STABBED!!!! double-click \"GETSTABBED.BAT\" on your PC now!!!");
-			terminal_printf(
-				global_real_argb_purple,
-				"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+			/* (port: chatter, shown as config.toml's game.console_log says) */
+			if (terminal_shows(_terminal_message_chatter))
+			{
+				terminal_printf(
+					global_real_argb_purple,
+					"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+			}
 			lruv_debug_to_file(
 				"d:\\stabbed.txt",
 				tag_get_name(bitmap->tag_index),

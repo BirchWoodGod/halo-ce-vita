@@ -511,6 +511,46 @@ void rasterizer_xbox_bitmap_swizzle(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) one level's face (or a 3D texture's level) swizzled from source
+into destination, as rasterizer_xbox_bitmap_swizzle does it through a
+buffer of its own */
+static void rasterizer_xbox_bitmap_swizzle_level(
+	struct bitmap_data const *bitmap,
+	short mipmap_index,
+	byte *destination,
+	byte const *source,
+	long size)
+{
+	short bytes_per_pixel = bitmap_format_get_bits_per_pixel(bitmap->format)/8;
+	short width = bitmap_mipmap_get_width(bitmap, mipmap_index);
+	short height = bitmap_mipmap_get_height(bitmap, mipmap_index);
+
+	if (bitmap->type == _bitmap_type_3d)
+	{
+		short depth = bitmap_mipmap_get_depth(bitmap, mipmap_index);
+
+		switch (bytes_per_pixel)
+		{
+			case 1: rasterizer_xbox_bitmap_swizzle3d_byte(destination, source, width, height, depth); break;
+			case 2: rasterizer_xbox_bitmap_swizzle3d_word(destination, source, width, height, depth); break;
+			case 4: rasterizer_xbox_bitmap_swizzle3d_long(destination, source, width, height, depth); break;
+			default: memcpy(destination, source, size); break;
+		}
+	}
+	else
+	{
+		switch (bytes_per_pixel)
+		{
+			case 1: rasterizer_xbox_bitmap_swizzle2d_byte(destination, source, width, height); break;
+			case 2: rasterizer_xbox_bitmap_swizzle2d_word(destination, source, width, height); break;
+			case 4: rasterizer_xbox_bitmap_swizzle2d_long(destination, source, width, height); break;
+			default: memcpy(destination, source, size); break;
+		}
+	}
+}
+#endif
+
 boolean rasterizer_xbox_bitmap_rebuild_hardware_format(
 	struct bitmap_data *bitmap)
 {
@@ -520,6 +560,19 @@ boolean rasterizer_xbox_bitmap_rebuild_hardware_format(
 	short face_count = (bitmap->type == _bitmap_type_cube_map) ? NUMBER_OF_FACES_PER_CUBE : 1;
 	byte *buffer;
 	short face_index;
+#ifdef HALO_LINUX
+	/* (port) Each level is swizzled straight into the buffer below, not in
+	place first: the swizzle in place takes a second buffer, the size of a
+	level, beside this one, and every Custom Edition bitmap comes through here
+	(custom_edition_bitmaps.c), uncompressed ones too: Covenant V Marines'
+	largest, 1024x512 at 32 bits, wanted 2 MB beside its 2.7 MB, and on the
+	Vita one found no room in the C heap (newlib's 48 MB, 42 MB of it in use
+	with the map loaded, Oct 7) and was drawn unswizzled ("failed to allocate
+	temporary buffer for swizzling"). The same pixels (56 bitmaps of the
+	map, 2D, cube and 3D, compared with the swizzle in place), one buffer. */
+	boolean swizzled_here = !TEST_FLAG(bitmap->flags, _bitmap_compressed_bit) &&
+		!TEST_FLAG(bitmap->flags, _bitmap_linear_bit);
+#endif
 
 	match_assert("c:\\halo\\SOURCE\\rasterizer\\rasterizer_swizzle.c", 549, bitmap->base_address);
 
@@ -527,6 +580,9 @@ boolean rasterizer_xbox_bitmap_rebuild_hardware_format(
 
 	if (buffer)
 	{
+#ifdef HALO_LINUX
+		if (!swizzled_here)
+#endif
 		rasterizer_xbox_bitmap_swizzle(bitmap);
 
 		for (face_index = 0; face_index < face_count; face_index++)
@@ -569,6 +625,12 @@ boolean rasterizer_xbox_bitmap_rebuild_hardware_format(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					if (swizzled_here)
+						rasterizer_xbox_bitmap_swizzle_level(bitmap, mipmap_index, buffer+offset,
+							source+adjusted_face_index*mipmap_size, mipmap_size);
+					else
+#endif
 					memcpy(buffer+offset, source+adjusted_face_index*mipmap_size, mipmap_size);
 					offset += mipmap_size;
 				}
@@ -582,6 +644,10 @@ boolean rasterizer_xbox_bitmap_rebuild_hardware_format(
 
 		memcpy(bitmap->base_address, buffer, size);
 		match_free("c:\\halo\\SOURCE\\rasterizer\\rasterizer_swizzle.c", 629, buffer);
+#ifdef HALO_LINUX
+		if (swizzled_here)
+			SET_FLAG(bitmap->flags, _bitmap_swizzled_bit, TRUE);
+#endif
 	}
 	else
 	{

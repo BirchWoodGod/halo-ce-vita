@@ -336,8 +336,24 @@ typedef char rasterizer_triangle_size_assert[
 
 /* ---------- prototypes */
 
+#ifdef HALO_LINUX
+/* (rasterizer_xbox.c) */
+void rasterizer_model_part_skinning(struct vertex_buffer const *vertex_buffer);
+#endif
+
 static D3DVertexBuffer *dynamic_vertex_group_get_d3d_vertex_buffer(
 	struct dynamic_vertex_group const *group);
+static void draw_primitives_data_error(
+	char const *problem);
+static boolean draw_primitives_vertex_buffer_valid(
+	struct vertex_buffer const *vertex_buffer);
+static boolean draw_primitives_triangle_buffer_valid(
+	struct triangle_buffer const *triangle_buffer,
+	long *triangle_count);
+static boolean draw_primitives_dynamic_triangle_count_valid(
+	struct dynamic_triangle_buffer const *dynamic_triangle_buffer,
+	long first_triangle_index,
+	long *triangle_count);
 
 /* ---------- globals */
 
@@ -357,6 +373,28 @@ static D3DVertexBuffer *aux_dynamic_unlit_vb = NULL;
 static boolean dynamic_triangles_overflow_warning = FALSE;
 static boolean dynamic_vertices_overflow_warning = FALSE;
 
+
+#ifdef HALO_LINUX
+/* (port) the pools at their fullest (rasterizer.h), "rasterizer pools" in
+the frame report */
+struct rasterizer_pools_peaks rasterizer_pools_peaks;
+void platform_log(const char *format, ...);
+
+void halo_rasterizer_pools_report(void)
+{
+	struct rasterizer_pools_peaks *peaks = &rasterizer_pools_peaks;
+
+	platform_log("rasterizer pools (fullest frame; refused): dynamic triangles %ld/%d in %ld/%d buffers (%lu), unlit "
+		"vertices %ld/%ld, vertex buffers %ld/%d (%lu), transparent groups %ld/%ld (%lu), lens flares %ld/%ld (%lu)",
+		peaks->triangles, RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLES, peaks->triangle_buffers,
+		RASTERIZER_MAXIMUM_DYNAMIC_TRIANGLE_BUFFERS, peaks->triangles_refused, peaks->unlit_vertices,
+		dynamic_vertices.groups[_rasterizer_vertex_type_dynamic_unlit].total_vertex_count, peaks->vertex_buffers,
+		RASTERIZER_MAXIMUM_DYNAMIC_VERTEX_BUFFERS, peaks->vertices_refused, peaks->transparent_groups,
+		(long)RASTERIZER_MAXIMUM_TRANSPARENT_GEOMETRY_GROUPS, peaks->transparent_groups_refused, peaks->lens_flares,
+		(long)MAXIMUM_LENS_FLARES_PER_FRAME, peaks->lens_flares_refused);
+	csmemset(peaks, 0, sizeof(*peaks));
+}
+#endif
 
 /* ---------- public code */
 
@@ -641,6 +679,12 @@ long _rasterizer_dynamic_triangles_new(
 			dynamic_triangle_buffer->triangle_count = count;
 			dynamic_triangles.triangle_count += count;
 			dynamic_triangles.buffer_count++;
+#ifdef HALO_LINUX
+			if (dynamic_triangles.triangle_count > rasterizer_pools_peaks.triangles)
+				rasterizer_pools_peaks.triangles = dynamic_triangles.triangle_count;
+			if (dynamic_triangles.buffer_count > rasterizer_pools_peaks.triangle_buffers)
+				rasterizer_pools_peaks.triangle_buffers = dynamic_triangles.buffer_count;
+#endif
 
 			if (rasterizer_debug_options.stats==_rasterizer_stats_geometry)
 			{
@@ -648,7 +692,11 @@ long _rasterizer_dynamic_triangles_new(
 				rasterizer_frame_statistics.dynamic_triangle_buffer_count++;
 			}
 		}
+#ifdef HALO_LINUX
+		else if (++rasterizer_pools_peaks.triangles_refused, !dynamic_triangles_overflow_warning)
+#else
 		else if (!dynamic_triangles_overflow_warning)
+#endif
 		{
 			error(_error_silent, "### ERROR too many dynamic triangles requested from rasterizer");
 			dynamic_triangles_overflow_warning = TRUE;
@@ -749,6 +797,24 @@ void _rasterizer_dynamic_triangles_delete(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) the vertices of a type still free this frame, and buffers left
+(render_sprite.c asks before taking room for trimmed sprites) */
+long rasterizer_dynamic_vertices_available(
+	short type)
+{
+	struct dynamic_vertex_group *group;
+
+	if (type < 0 || type >= NUMBER_OF_RASTERIZER_VERTEX_TYPES ||
+		dynamic_vertices.buffer_count >= RASTERIZER_MAXIMUM_DYNAMIC_VERTEX_BUFFERS - 1)
+		return 0;
+	group = &dynamic_vertices.groups[type];
+	if (!group->d3d_vertex_buffer)
+		return 0;
+	return group->maximum_vertex_count - group->vertex_count;
+}
+
+#endif
 long _rasterizer_dynamic_vertices_new(
 	short type,
 	long count)
@@ -791,6 +857,12 @@ long _rasterizer_dynamic_vertices_new(
 			dynamic_vertex_buffer->vertex_count = count;
 			group->vertex_count += count;
 			dynamic_vertices.buffer_count++;
+#ifdef HALO_LINUX
+			if (type == _rasterizer_vertex_type_dynamic_unlit && group->vertex_count > rasterizer_pools_peaks.unlit_vertices)
+				rasterizer_pools_peaks.unlit_vertices = group->vertex_count;
+			if (dynamic_vertices.buffer_count > rasterizer_pools_peaks.vertex_buffers)
+				rasterizer_pools_peaks.vertex_buffers = dynamic_vertices.buffer_count;
+#endif
 
 			if (rasterizer_debug_options.stats==_rasterizer_stats_geometry)
 			{
@@ -798,7 +870,11 @@ long _rasterizer_dynamic_vertices_new(
 				rasterizer_frame_statistics.dynamic_vertex_buffer_count++;
 			}
 		}
+#ifdef HALO_LINUX
+		else if (++rasterizer_pools_peaks.vertices_refused, !dynamic_vertices_overflow_warning)
+#else
 		else if (!dynamic_vertices_overflow_warning)
+#endif
 		{
 			error(_error_silent, "### ERROR too many dynamic vertices requested from rasterizer");
 			dynamic_vertices_overflow_warning = TRUE;
@@ -1270,6 +1346,11 @@ void rasterizer_draw_dynamic_triangles_static_vertices(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		823,
 		global_d3d_device);
+#ifdef HALO_LINUX
+	/* port: a part of a model of many nodes, its own nodes' constants
+	(rasterizer_xbox.c, from DamnationCE) */
+	rasterizer_model_part_skinning(vertex_buffer);
+#endif
 
 	while (triangle_count>0)
 	{
@@ -1304,6 +1385,13 @@ void rasterizer_draw_dynamic_triangles_static_vertices(
 			dynamic_triangle_buffer_index<dynamic_triangles.buffer_count);
 
 		dynamic_triangle_buffer = &dynamic_triangles.buffers[dynamic_triangle_buffer_index];
+		/* port: a vertex type the tables have (a map's), and no more triangles
+		than the dynamic buffer was filled with */
+		if (!draw_primitives_vertex_buffer_valid(vertex_buffer) ||
+			!draw_primitives_dynamic_triangle_count_valid(dynamic_triangle_buffer, first_triangle_index, &triangle_count))
+		{
+			break;
+		}
 		vertex_size = rasterizer_geometry_get_vertex_size(vertex_buffer->type);
 
 		match_assert(
@@ -1399,6 +1487,11 @@ void rasterizer_draw_dynamic_triangles_static_vertices2(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		890,
 		global_d3d_device);
+#ifdef HALO_LINUX
+	/* port: a part of a model of many nodes, its own nodes' constants
+	(rasterizer_xbox.c, from DamnationCE) */
+	rasterizer_model_part_skinning(vertex_buffer0);
+#endif
 
 	while (triangle_count>0)
 	{
@@ -1442,6 +1535,14 @@ void rasterizer_draw_dynamic_triangles_static_vertices2(
 			dynamic_triangle_buffer_index<dynamic_triangles.buffer_count);
 
 		dynamic_triangle_buffer = &dynamic_triangles.buffers[dynamic_triangle_buffer_index];
+		/* port: vertex types the tables have (a map's), and no more triangles
+		than the dynamic buffer was filled with */
+		if (!draw_primitives_vertex_buffer_valid(vertex_buffer0) ||
+			!draw_primitives_vertex_buffer_valid(vertex_buffer1) ||
+			!draw_primitives_dynamic_triangle_count_valid(dynamic_triangle_buffer, first_triangle_index, &triangle_count))
+		{
+			break;
+		}
 		vertex_size0 = rasterizer_geometry_get_vertex_size(vertex_buffer0->type);
 		vertex_size1 = rasterizer_geometry_get_vertex_size(vertex_buffer1->type);
 
@@ -1568,6 +1669,12 @@ void rasterizer_draw_static_triangles_dynamic_vertices(
 			break;
 		}
 		if (dynamic_vertex_buffer_index==NONE)
+		{
+			break;
+		}
+		/* port: a triangle buffer type the table has, and no more triangles
+		than the buffer has (a map's) */
+		if (!draw_primitives_triangle_buffer_valid(triangle_buffer, &triangle_count))
 		{
 			break;
 		}
@@ -1710,6 +1817,11 @@ void rasterizer_draw_static_triangles_static_vertices(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		1063,
 		global_d3d_device);
+#ifdef HALO_LINUX
+	/* port: a part of a model of many nodes, its own nodes' constants
+	(rasterizer_xbox.c, from DamnationCE) */
+	rasterizer_model_part_skinning(vertex_buffer);
+#endif
 
 	while (triangle_count>0)
 	{
@@ -1729,6 +1841,13 @@ void rasterizer_draw_static_triangles_static_vertices(
 			break;
 		}
 		if (!vertex_buffer->hardware_format)
+		{
+			break;
+		}
+		/* port: a triangle buffer and vertex type the tables have, and no
+		more triangles than the buffer has (a map's) */
+		if (!draw_primitives_vertex_buffer_valid(vertex_buffer) ||
+			!draw_primitives_triangle_buffer_valid(triangle_buffer, &triangle_count))
 		{
 			break;
 		}
@@ -1902,6 +2021,69 @@ void rasterizer_draw(
 }
 
 /* ---------- private code */
+
+/* port: a map's buffer with a type past the tables or more triangles than
+it has; said once */
+static void draw_primitives_data_error(
+	char const *problem)
+{
+	static boolean reported = FALSE;
+
+	if (!reported)
+	{
+		error(_error_silent, "### ERROR a draw has a bad %s; it is cut short", problem);
+		reported = TRUE;
+	}
+
+	return;
+}
+
+static boolean draw_primitives_vertex_buffer_valid(
+	struct vertex_buffer const *vertex_buffer)
+{
+	if (VALID_INDEX(vertex_buffer->type, NUMBER_OF_RASTERIZER_VERTEX_TYPES))
+	{
+		return TRUE;
+	}
+	draw_primitives_data_error("vertex buffer type");
+
+	return FALSE;
+}
+
+/* (the static draws start at triangle 0) */
+static boolean draw_primitives_triangle_buffer_valid(
+	struct triangle_buffer const *triangle_buffer,
+	long *triangle_count)
+{
+	if (!VALID_INDEX(triangle_buffer->type, NUMBER_OF_TRIANGLE_BUFFER_TYPES))
+	{
+		draw_primitives_data_error("triangle buffer type");
+		return FALSE;
+	}
+	if (*triangle_count>triangle_buffer->count)
+	{
+		draw_primitives_data_error("triangle count");
+		*triangle_count = triangle_buffer->count;
+	}
+
+	return *triangle_count>0;
+}
+
+static boolean draw_primitives_dynamic_triangle_count_valid(
+	struct dynamic_triangle_buffer const *dynamic_triangle_buffer,
+	long first_triangle_index,
+	long *triangle_count)
+{
+	long available_count = dynamic_triangle_buffer->triangle_count - first_triangle_index;
+
+	if (first_triangle_index<0 || *triangle_count>available_count)
+	{
+		draw_primitives_data_error("dynamic triangle count");
+		*triangle_count = first_triangle_index<0 ? 0 : available_count;
+	}
+
+	return *triangle_count>0;
+}
 
 static D3DVertexBuffer *dynamic_vertex_group_get_d3d_vertex_buffer(
 	struct dynamic_vertex_group const *group)

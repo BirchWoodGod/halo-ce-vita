@@ -144,6 +144,7 @@ symbols in this file:
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "text/unicode.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -549,6 +550,22 @@ static void render_state_bitmap(
 	real_rectangle2d const *clip = NULL;
 	real scale;
 	point2d point;
+#ifdef HALO_VITA
+	/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a button
+	icon shows the Vita button its Xbox button is on, a word in the font or
+	drawn in the sprite's place in the colour of the Xbox face button there */
+	struct icon_hud_element_definition const *button_icons = hud_globals->messaging.button_icons.address;
+	long button_icon_count = hud_globals->messaging.button_icons.count;
+	short glyph = icon >= button_icons && icon < button_icons + button_icon_count ?
+		hud_vita_button_glyph((short)(icon - button_icons)) : NONE;
+	short face_icon = hud_vita_glyph_face_icon(glyph);
+
+	if (hud_vita_glyph_text(glyph))
+	{
+		render_state_text(bounds, cursor_bounds, hud_vita_glyph_text(glyph), FALSE);
+		return;
+	}
+#endif
 
 	if (icon->frame_rate)
 		frame_index = game_time_get() / icon->frame_rate;
@@ -564,6 +581,16 @@ static void render_state_bitmap(
 		scale = local_player_count() > 1 ? 0.75f : 1.0f;
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale);
+#ifdef HALO_VITA
+		if (face_icon == NONE || face_icon >= button_icon_count || !hud_vita_glyph_draw(
+			glyph,
+			bitmap,
+			_hud_corner_bottom_left,
+			&point,
+			clip,
+			scale,
+			TEST_FLAG(button_icons[face_icon].flags, _hud_icon_use_color_bit) ? button_icons[face_icon].color : color))
+#endif
 		hud_draw_bitmap_direct(
 			bitmap,
 			_hud_corner_bottom_left,
@@ -578,12 +605,12 @@ static void render_state_bitmap(
 		else if (clip)
 		{
 			cursor_bounds->x0 = (short)(
-				((clip->x1 - clip->x0) * bitmap->width + icon->width_offset) * scale + point.x);
+				((clip->x1 - clip->x0) * bitmap_placed_width(bitmap) + icon->width_offset) * scale + point.x);
 		}
 		else
 		{
 			cursor_bounds->x0 = (short)(
-				(bitmap->width + icon->width_offset) * scale + point.x);
+				(bitmap_placed_width(bitmap) + icon->width_offset) * scale + point.x);
 		}
 	}
 
@@ -625,6 +652,7 @@ void scripted_hud_set_state_message(
 {
 	struct scenario *scenario = global_scenario_get();
 
+	network_coop_note_hud(_coop_hud_help_text, message_index);
 	if (hud_scripted_globals->show_hud_help_text &&
 		scenario->hud_messages.index != NONE)
 	{
@@ -645,6 +673,7 @@ void scripted_hud_set_flashing_state(
 {
 	long time;
 
+	network_coop_note_hud(_coop_hud_help_flash, flash);
 	if (flash && !hud_messaging_globals->use_flash)
 	{
 		time = game_time_get();
@@ -675,6 +704,7 @@ void scripted_hud_set_objective(
 {
 	struct scenario *scenario = global_scenario_get();
 
+	network_coop_note_hud(_coop_hud_objective, message_index);
 	if (scenario->hud_messages.index != NONE)
 	{
 		struct hud_message_text_definition *hud_messages =
@@ -754,6 +784,47 @@ void scripted_hud_show_timer(
 {
 	hud_messaging_globals->timer.enabled = show;
 	return;
+}
+
+/* port: the script timer and the scenario's message count, for network
+co-op (port/linux/game/network_coop.c) */
+void hud_messaging_port_timer_get(
+	struct hud_timer_state *state)
+{
+	struct hud_timer_data_definition const *timer = &hud_messaging_globals->timer;
+
+	state->reference_time = timer->reference_time;
+	state->ticks = timer->ticks;
+	state->flash_cutoff = timer->flash_cutoff;
+	state->x = timer->position.n[0];
+	state->y = timer->position.n[1];
+	state->corner = timer->corner;
+	state->paused = timer->paused;
+	state->enabled = timer->enabled;
+}
+
+void hud_messaging_port_timer_set(
+	struct hud_timer_state const *state)
+{
+	struct hud_timer_data_definition *timer = &hud_messaging_globals->timer;
+
+	timer->reference_time = state->reference_time;
+	timer->ticks = state->ticks;
+	timer->flash_cutoff = state->flash_cutoff;
+	timer->position.n[0] = state->x;
+	timer->position.n[1] = state->y;
+	timer->corner = PIN(state->corner, 0, 4);
+	timer->paused = state->paused;
+	timer->enabled = state->enabled;
+}
+
+short hud_messaging_port_message_count(
+	void)
+{
+	struct scenario *scenario = global_scenario_get();
+
+	return scenario->hud_messages.index != NONE ?
+		(short)HUD_MESSAGE_TEXT_DEFINITION_GET(scenario->hud_messages.index)->messages.count : 0;
 }
 
 void scripted_hud_pause_timer(
@@ -1165,6 +1236,7 @@ void scripted_hud_messages_clear(
 	struct hud_messaging_datum_definition *datum = hud_messaging_globals->message_data;
 	long datum_count = NUMBER_OF_HUD_MESSAGING_DATUMS;
 
+	network_coop_note_hud(_coop_hud_messages_clear, 0);
 	do
 	{
 		struct hud_message_definition *message = datum->messages;
@@ -1592,6 +1664,24 @@ void hud_messaging_update(
 										0x457,
 										custom_index < NUMBER_OF_HUD_CUSTOM_ICONS,
 										"custom_index<NUMBER_OF_HUD_CUSTOM_ICONS");
+									/* port: the icon is the map's (a message element's
+									data, retail up to custom 2) and indexes the message's
+									8 custom icons: one past them is not drawn, said once */
+									if (custom_index >= NUMBER_OF_HUD_CUSTOM_ICONS)
+									{
+										static boolean bad_custom_icon_reported = FALSE;
+
+										if (!bad_custom_icon_reported)
+										{
+											bad_custom_icon_reported = TRUE;
+											error(
+												_error_silent,
+												"hud message uses custom icon %d (of %d)",
+												custom_index,
+												NUMBER_OF_HUD_CUSTOM_ICONS);
+										}
+										break;
+									}
 									if (TEST_FLAG(state_message->is_text_flags, custom_index))
 									{
 										short string_index = state_message->info[custom_index].text.string_index;

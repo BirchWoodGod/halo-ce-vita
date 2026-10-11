@@ -1,0 +1,15 @@
+# A King of the Hill server, free-for-all and team games in turn
+# (tools/package_server.py: examples/). Copy it to init.txt in the server's
+# folder, and give it a name of your own. Port 2305: one port per server.
+sv_name "My King of the Hill Server"
+sv_maxplayers 12
+sv_public 1
+sv_port 2305
+sv_timelimit 15
+sv_minplayers 1
+sv_mapcycle_add chillout king
+sv_mapcycle_add hangemhigh team_king
+sv_mapcycle_add prisoner king
+sv_mapcycle_add damnation team_king
+sv_mapcycle_add beavercreek king
+sv_mapcycle_add carousel team_king

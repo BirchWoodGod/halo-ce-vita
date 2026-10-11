@@ -1199,6 +1199,90 @@ void _rasterizer_environment_diffuse_light_end(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) a dynamic light's passes over the structure clipped to the screen
+rectangle of its distance attenuation's reach. The passes add (ONE/ONE,
+DESTALPHA/ONE) the light times its attenuation, a volume texture read at
+(point - light) * 0.5 / radius + 0.5 in world axes (the vertex programs:
+the constants at -81) with border addressing: outside the cube of half-size
+radius about the light the read is the border colour, 0, and the pass adds
+0. The rectangle bounds the cube's eight corners on the screen, the cube
+15% larger (the volume's linear filter reaches half a texel out), rounded
+outward by the device (d3d8_gxm.c halo_d3d_scissor); no clip when a corner
+reaches the near plane. halo_d3d_screen_box is shared with the object
+shadows (rasterizer_xbox_shadows.c). HALO_LIGHT_SCISSOR=0: unclipped, as
+before. */
+void halo_d3d_scissor(const float *rectangle);
+extern char *getenv(const char *name);
+extern int atoi(const char *text);
+
+/* the screen rectangle (normalised, y down) of the box centre +- the three
+half-axes, or FALSE when it reaches the near plane or covers the screen */
+boolean halo_d3d_screen_box(
+	real_point3d const *centre,
+	real_vector3d const *axes,
+	float rectangle[4])
+{
+	struct render_frustum const *frustum = &global_window_parameters.frustum;
+	int corner;
+
+	rectangle[0] = rectangle[1] = 1.0f;
+	rectangle[2] = rectangle[3] = -1.0f;
+	if (!frustum->projection_valid)
+		return FALSE;
+	for (corner = 0; corner < 8; corner++)
+	{
+		real_point3d point = *centre, view;
+		real inverse_depth, screen_x, screen_y;
+		int axis;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			real sign = (corner >> axis) & 1 ? 1.0f : -1.0f;
+
+			point.x += sign * axes[axis].i;
+			point.y += sign * axes[axis].j;
+			point.z += sign * axes[axis].k;
+		}
+		matrix4x3_transform_point(&frustum->world_to_view, &point, &view);
+		/* (view space looks down -z) */
+		if (!(view.z < -frustum->z_near))
+			return FALSE;
+		inverse_depth = -1.0f / view.z;
+		screen_x = (frustum->projection_matrix[0][0] * view.x + frustum->projection_matrix[2][0] * view.z) * inverse_depth;
+		screen_y = -(frustum->projection_matrix[1][1] * view.y + frustum->projection_matrix[2][1] * view.z) * inverse_depth;
+		if (screen_x < rectangle[0]) rectangle[0] = screen_x;
+		if (screen_y < rectangle[1]) rectangle[1] = screen_y;
+		if (screen_x > rectangle[2]) rectangle[2] = screen_x;
+		if (screen_y > rectangle[3]) rectangle[3] = screen_y;
+	}
+	return !(rectangle[0] <= -1.0f && rectangle[1] <= -1.0f && rectangle[2] >= 1.0f && rectangle[3] >= 1.0f);
+}
+
+static void environment_light_scissor(
+	real_point3d const *position,
+	real attenuation_radius)
+{
+	static int enabled = -1;
+	real half_size = attenuation_radius * 1.15f;
+	real_vector3d axes[3] = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
+	float rectangle[4];
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_LIGHT_SCISSOR");
+
+		enabled = !setting || atoi(setting) != 0;
+	}
+	halo_d3d_scissor(NULL);
+	if (!enabled || !(attenuation_radius > 0.0f))
+		return;
+	axes[0].i = axes[1].j = axes[2].k = half_size;
+	if (halo_d3d_screen_box(position, axes, rectangle))
+		halo_d3d_scissor(rectangle);
+}
+#endif
+
 void _rasterizer_environment_diffuse_light_begin(
 	long light_index)
 {
@@ -1295,6 +1379,9 @@ void _rasterizer_environment_diffuse_light_begin(
 		D3DDevice_SetRenderState(
 			D3DRS_PSCONSTANT0_0,
 			real_rgb_color_to_pixel32(&light->color));
+#ifdef HALO_LINUX
+		environment_light_scissor(&light->position, light->radius);
+#endif
 	}
 	return;
 }
@@ -1461,6 +1548,9 @@ void _rasterizer_environment_diffuse_lights_begin(
 void _rasterizer_environment_diffuse_lights_end(
 	void)
 {
+#ifdef HALO_LINUX
+	halo_d3d_scissor(NULL);
+#endif
 	rasterizer_profile_end(_rasterizer_profile_environment_diffuse_lights);
 	return;
 }
@@ -1892,6 +1982,10 @@ void _rasterizer_environment_specular_light_begin(
 			specular_light_vertex_shader_permutation_index = 1;
 			rasterizer_environment_globals.specular_light_brightness =
 				real_rgb_color_brightness(&light->color);
+#ifdef HALO_LINUX
+			/* (a spot light's attenuation is its own: not clipped) */
+			halo_d3d_scissor(NULL);
+#endif
 			rasterizer_environment_specular_spot_light_begin(light_index);
 		}
 		else
@@ -1925,6 +2019,9 @@ void _rasterizer_environment_specular_light_begin(
 			vertex_constants[4].k = 0.0f;
 			vertex_constants[4].l = 1.0f;
 			D3DDevice_SetVertexShaderConstant(-81, vertex_constants, 5);
+#ifdef HALO_LINUX
+			environment_light_scissor(&light->position, 1.0f / inverse_radius);
+#endif
 
 			rasterizer_set_texture_direct(
 				1,
@@ -2118,6 +2215,9 @@ void _rasterizer_environment_specular_light_draw(
 void _rasterizer_environment_specular_lights_end(
 	void)
 {
+#ifdef HALO_LINUX
+	halo_d3d_scissor(NULL);
+#endif
 	rasterizer_profile_end(_rasterizer_profile_environment_specular_lights);
 	return;
 }

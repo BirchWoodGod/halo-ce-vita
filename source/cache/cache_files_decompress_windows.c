@@ -223,7 +223,16 @@ symbols in this file:
 #include "cseries/errors.h"
 #include "cache/cache_files.h"
 #include "cache/cache_files_decompress_windows.h"
-#include "memory/zlib/zlib.h"
+/* port (from OpenCE, MrBruh's "Second hardening round"): the port's zlib
+(1.3.2), not the game's 1.1.3, inflates the maps, which are anyone's files
+(a map downloaded from a stranger too); its inflate needs about 40 KB of
+ZLIB_BUFFER_SIZE, and frees what it takes in the reverse order, as
+cache_copy_compressed_free wants */
+#include "../../port/third_party/zlib/zlib_prefixed.h"
+#ifdef HALO_VITA
+/* (port/vita/host/vita_fourth_core.c) */
+int vita_host_fourth_core_join(const char *role, int level);
+#endif
 
 #include <xtl.h>
 
@@ -758,6 +767,14 @@ static void cache_copy_initialize_file_data(
 		"c:\\halo\\SOURCE\\cache\\cache_files_decompress_windows.c",
 		964,
 		self->read_bytes_left>=sizeof(self->header));
+	/* port: a map that did not open, or is too short to hold a header, is a
+	bad file, not copied (the assertion goes on in a release build, and an
+	unopened file's size is -1, which it compared unsigned) */
+	if (self->source_file == INVALID_HANDLE_VALUE ||
+		self->read_bytes_left < (long)sizeof(self->header))
+	{
+		cache_copy_set_flag(_copy_bad_file_bit);
+	}
 
 	csmemset(self->overlapped_in_use_flags, 0, sizeof(self->overlapped_in_use_flags));
 	csmemset(self->overlapped_completed_flags, 0, sizeof(self->overlapped_completed_flags));
@@ -1010,6 +1027,9 @@ short cache_copy_get_status(
 {
 	unsigned long flags = cache_copy_get_flags();
 	short status = 0;
+#ifdef HALO_LINUX
+	boolean complete;
+#endif
 
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files_decompress_windows.c",
@@ -1018,13 +1038,27 @@ short cache_copy_get_status(
 
 	if (global_self->blocking)
 		Sleep(16);
+#ifdef HALO_LINUX
+	/* port: whether the copy is over, then its flags, both after the wait:
+	the flags were read before it, and a copy that failed in those 16 ms
+	(a map file cut short, found as it decompresses) was over with its
+	failure unread, which said it was copied: a blocking precache then went
+	on to load a map the cache did not hold. The copy thread sets a failure
+	before it says it is over, so the flags read after its end hold it. */
+	complete = WaitForSingleObject(global_self->copy_complete_event, 0) == 0;
+	flags = cache_copy_get_flags();
+#endif
 
 	if (!flags && global_self->copy_thread)
 	{
 		if (global_self->header.size > 0)
 		{
+#ifdef HALO_LINUX
+			status = (short)(complete + _cache_copy_in_progress);
+#else
 			status = (short)((WaitForSingleObject(global_self->copy_complete_event, 0) == 0) +
 				_cache_copy_in_progress);
+#endif
 			if (WaitForSingleObject(global_self->progress_update_event, 0) == 0)
 			{
 				real read_progress;
@@ -1613,6 +1647,25 @@ static void cache_copy_run_decompression(
 		if (self->write_requests_pending > 1)
 			decompressor_timer_stop(_decompressor_timer_zlib_during_write_file);
 
+		/* port: a stream that ends before the size the header gives the map
+		is a bad file: the rest of the cache file would be taken for it */
+		if (zlib_result == Z_STREAM_END &&
+			zlib_stream->total_out != (uLong)(self->header.size - sizeof(self->header)))
+		{
+			match_vassert(
+				"c:\\halo\\SOURCE\\cache\\cache_files_decompress_windows.c",
+				1248,
+				FALSE,
+				csprintf(
+					decompressor_globals.message,
+					"decompression ended after %lu of %ld bytes",
+					(unsigned long)zlib_stream->total_out,
+					self->header.size - (long)sizeof(self->header)));
+			cache_copy_set_flag(_copy_bad_file_bit);
+
+			break;
+		}
+
 		if (zlib_result == Z_OK || zlib_result == Z_STREAM_END)
 		{
 			if (!zlib_stream->avail_in)
@@ -1631,6 +1684,14 @@ static void cache_copy_run_decompression(
 			if (cache_copy_stop_requested())
 				break;
 
+#ifdef HALO_LINUX
+			/* port: a map file cut short or damaged is the player's file, not
+			a fault of the game's: logged, and the copy fails as a bad file
+			(said to the player: cache_files_precache_failed), also in the
+			builds that check assertions */
+			error(_error_silent, "cache copy: '%s' does not decompress (zlib %d, '%s'): a bad file",
+				global_self->src_name, zlib_result, zlib_stream->msg ? zlib_stream->msg : "");
+#else
 			match_vassert(
 				"c:\\halo\\SOURCE\\cache\\cache_files_decompress_windows.c",
 				1248,
@@ -1640,6 +1701,7 @@ static void cache_copy_run_decompression(
 					"decompression fucked up with error code (%d), msg '%s'",
 					zlib_result,
 					zlib_stream->msg ? zlib_stream->msg : ""));
+#endif
 			cache_copy_set_flag(_copy_bad_file_bit);
 
 			break;
@@ -1654,6 +1716,12 @@ static unsigned long __stdcall simple_cache_copy_thread(
 {
 	struct simple_decompressor_definition *self = global_self;
 
+#ifdef HALO_VITA
+	/* (port) Fourth core helpers, All async: the map's decompression on
+	the Vita's fourth core where the system allows it (as in Bruno
+	Santana's modified build) */
+	vita_host_fourth_core_join("map decompression", 2);
+#endif
 	for (;;)
 	{
 		WaitForSingleObject(self->copy_start_event, INFINITE);
@@ -1664,14 +1732,22 @@ static unsigned long __stdcall simple_cache_copy_thread(
 		cache_copy_initialize_read_buffers(self);
 		cache_copy_initialize_file_data(self);
 
-		if (!cache_copy_stop_requested())
+		/* port: nor is a bad file (cache_copy_initialize_file_data) read */
+		if (!cache_copy_stop_requested() && !(self->flags & ALL_COPY_FAILURE_FLAGS))
 		{
 			decompressor_timer_start(_decompressor_timer_setup);
 			cache_copy_initialize_read_data(self);
 			cache_copy_initialize_zlib(self);
 			decompressor_timer_stop(_decompressor_timer_setup);
 
-			if (cache_file_header_verify(&self->header, "cache decompressed", TRUE))
+			/* port: a header that is not a map's is a bad file, so the copy
+			fails (it ended as if it had worked, and the map was precached
+			again, or, of no size, seemed never to end) */
+			if (!cache_file_header_verify(&self->header, "cache decompressed", TRUE))
+			{
+				cache_copy_set_flag(_copy_bad_file_bit);
+			}
+			else
 			{
 				boolean keep_going = TRUE;
 

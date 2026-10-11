@@ -13,13 +13,24 @@ Settings are named "section.key", as in the file: "display.vsync".
 #ifndef PORT_CONFIG_H
 #define PORT_CONFIG_H
 
+#include <stddef.h>
+
 int config_boolean(const char *name);
 long config_integer(const char *name);
 double config_real(const char *name);
 /* never NULL; "" when unset */
 const char *config_string(const char *name);
+/* the folder config.toml is in, with its separator */
+void config_folder(char *path, size_t size);
+/* a whole file, NUL terminated, or NULL; free() it */
+char *config_file_read(const char *path, size_t *size);
+/* a whole file written (replaced); 1 on success */
+int config_file_write(const char *path, const char *text, size_t size);
 /* sets a boolean setting, and writes it into config.toml (only its line
 changes); 1 on success */
 int config_write_boolean(const char *name, int value);
+/* sets a setting for this run only (the file is left alone), from text as
+its environment variable would; 1 if the setting exists */
+int config_set_override(const char *name, const char *text);
 
 #endif

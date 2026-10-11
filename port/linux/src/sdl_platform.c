@@ -15,6 +15,8 @@ and the debug keyboard that the game's console reads.
 #include "port_config.h"
 #include "p2p.h"
 #include "xiso.h"
+#include "ce_installer.h"
+#include "posix.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -46,6 +48,9 @@ static unsigned long keystroke_head, keystroke_count;
 /* updater.c's: the desktop self-updater */
 void updater_start(void);
 void updater_poll(SDL_Window *window);
+#endif
+#if !defined(HALO_NOT_DESKTOP) && defined(__linux__)
+static void platform_ce_installer(void);
 #endif
 
 BOOL platform_sdl_initialize(void)
@@ -81,11 +86,66 @@ BOOL platform_sdl_initialize(void)
 	/* found (or offered to the player, platform_offer_game_data) before the
 	game's window opens */
 	platform_data_root();
+#ifdef __linux__
+	platform_ce_installer();
+#endif
 	/* (a new version looked for meanwhile, updater_poll asking about it) */
 	updater_start();
 #endif
 	return TRUE;
 }
+
+#if !defined(HALO_NOT_DESKTOP) && defined(__linux__)
+/* ---------- the Custom Edition installer (posix_ce_installer.c) */
+
+static int platform_ce_installer_progress(void *context, const char *file, unsigned long long done,
+	unsigned long long total)
+{
+	static Uint64 logged;
+	Uint64 now = SDL_GetTicks();
+
+	(void)context;
+	if (file[0] && (!logged || now - logged >= 2000))
+	{
+		platform_log("Custom Edition installer: %s, %llu%%", file, total ? done * 100 / total : 100ULL);
+		logged = now;
+	}
+	return 0;
+}
+
+/* a Halo Custom Edition installer (halocesetup*.exe) in the data root or its
+maps folder: the resource maps missing from the maps folder (bitmaps.map,
+sounds.map, loc.map) taken from it before the game starts, so its first
+ui.map has the PC menus (the Vita does it on a thread of its own:
+port/vita/host/vita_ce_installer.c) */
+static void platform_ce_installer(void)
+{
+	const char *root = platform_data_root(), *maps_root = getenv("HALO_MAPS_ROOT");
+	char maps[1024], on_disk[256], installer[1024], error[512];
+	unsigned long long size;
+	int missing, result;
+	Uint64 started;
+
+	if (maps_root && *maps_root)
+		snprintf(maps, sizeof(maps), "%s", maps_root);
+	else if (posix_find_entry_case_insensitive(root, "maps", on_disk, sizeof(on_disk)))
+		snprintf(maps, sizeof(maps), "%s/%s", root, on_disk);
+	else
+		return;
+	missing = ce_installer_missing(maps);
+	if (!missing || (!ce_installer_find(root, installer, sizeof(installer), &size) &&
+		!ce_installer_find(maps, installer, sizeof(installer), &size)))
+		return;
+	platform_log("Custom Edition installer: taking the resource maps missing from %s out of %s", maps, installer);
+	started = SDL_GetTicks();
+	result = ce_installer_extract(installer, maps, missing, platform_ce_installer_progress, NULL, error, sizeof(error));
+	if (result == CE_INSTALLER_DONE)
+		platform_log("Custom Edition installer: bitmaps.map, sounds.map and loc.map in %s in %llu ms; the installer "
+			"can be deleted", maps, (unsigned long long)(SDL_GetTicks() - started));
+	else
+		platform_log("Custom Edition installer: %s", error);
+}
+#endif
 
 #ifndef HALO_NOT_DESKTOP
 /* ---------- first start without game data (xbox_files.c) */
@@ -294,13 +354,43 @@ BOOL platform_offer_game_data(const char *destination)
 }
 #endif
 
+/* (frames between ticks: port/linux/game/render_interpolation.c) the
+setting as the frame being made has it: read again only as a frame starts
+(halo_interpolation_latch), so the tick on its thread and the frame drawn
+alongside it see the same */
+static int interpolation_enabled = -1;
+
 int halo_interpolation_enabled(void)
 {
-	static int enabled = -1;
+	if (interpolation_enabled < 0)
+		interpolation_enabled = config_boolean("display.interpolation");
+	return interpolation_enabled;
+}
 
-	if (enabled < 0)
-		enabled = config_boolean("display.interpolation");
-	return enabled;
+/* main.c, as a frame starts (no tick running): the Vita's settings panel
+changes HALO_INTERPOLATION mid-game, and takes effect at once */
+void halo_interpolation_latch(void)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen;
+
+	if (interpolation_enabled < 0)
+	{
+		settings_seen = halo_settings_generation;
+		interpolation_enabled = config_boolean("display.interpolation");
+	}
+	else if (settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_INTERPOLATION");
+		int enabled = setting && (!strcmp(setting, "true") || !strcmp(setting, "1"));
+
+		settings_seen = halo_settings_generation;
+		if (setting && enabled != interpolation_enabled)
+		{
+			platform_log("frame interpolation %s (settings panel)", enabled ? "on" : "off");
+			interpolation_enabled = enabled;
+		}
+	}
 }
 
 #if !defined(HALO_NOT_DESKTOP) && !defined(HALO_GXM_NULL)
@@ -604,9 +694,31 @@ static void platform_invite_clipboard(BOOL look)
 
 	if (invite)
 	{
+#ifdef HALO_VITA
+		/* There is no desktop clipboard on the Vita. Export the invite
+		to a file VitaShell can show or transfer to another player. */
+		char path[512];
+		FILE *file;
+
+		snprintf(path, sizeof(path), "ux0:data/haloce-vita/host_invite.txt");
+		file = fopen(path, "w");
+		if (file)
+		{
+			fprintf(file, "%s\n", invite);
+			if (fclose(file) == 0)
+				platform_log("Internet play: invite written to %s", path);
+			else
+				platform_log("Internet play: could not finish writing %s", path);
+		}
+		else
+			platform_log("Internet play: could not write %s", path);
+#else
 		SDL_SetClipboardText(invite);
+#endif
 		snprintf(seen, sizeof(seen), "%s", invite);
+#ifndef HALO_VITA
 		platform_log("Internet play: the invite link is on the clipboard");
+#endif
 #ifdef HALO_ANDROID
 		SDL_ShowAndroidToast("Hosting: the invite link is on the clipboard", 1, -1, 0, 0);
 #endif
@@ -653,6 +765,157 @@ void platform_show_message(const char *title, const char *message)
 	pthread_mutex_unlock(&platform_message_lock);
 }
 
+/* ---------- a question and a progress line for the player (map sharing:
+port/linux/game/map_share.c) */
+
+static char platform_question_title[80];
+static char platform_question_text[600];
+/* shown (pending for the event pump), and its answer: -1 none yet, 0 no,
+1 yes */
+static BOOL platform_question_pending;
+static int platform_question_result = -1;
+
+/* asks the player a yes or no question (NULL withdraws one); the answer
+comes later, platform_question_answer. A run nobody watches answers no. */
+void platform_ask_question(const char *title, const char *text)
+{
+	if (!text)
+	{
+#ifdef HALO_VITA
+		extern void vita_settings_question(const char *title, const char *text);
+		vita_settings_question(NULL, NULL);
+#endif
+		pthread_mutex_lock(&platform_message_lock);
+		platform_question_pending = FALSE;
+		platform_question_result = -1;
+		pthread_mutex_unlock(&platform_message_lock);
+		return;
+	}
+	platform_log("%s: %s (yes or no?)", title, text);
+#ifdef HALO_VITA
+	{
+		extern void vita_settings_question(const char *title, const char *text);
+
+		pthread_mutex_lock(&platform_message_lock);
+		platform_question_result = -1;
+		pthread_mutex_unlock(&platform_message_lock);
+		vita_settings_question(title, text);
+	}
+#else
+	pthread_mutex_lock(&platform_message_lock);
+	if (config_boolean("debug.hidden_window") || config_boolean("debug.null_renderer"))
+	{
+		platform_question_pending = FALSE;
+		platform_question_result = 0;
+	}
+	else
+	{
+		snprintf(platform_question_title, sizeof(platform_question_title), "%s", title);
+		snprintf(platform_question_text, sizeof(platform_question_text), "%s", text);
+		platform_question_pending = TRUE;
+		platform_question_result = -1;
+	}
+	pthread_mutex_unlock(&platform_message_lock);
+#endif
+}
+
+int platform_question_answer(void)
+{
+#ifdef HALO_VITA
+	extern int vita_settings_question_answer(void);
+
+	return vita_settings_question_answer();
+#else
+	int result;
+
+	pthread_mutex_lock(&platform_message_lock);
+	result = platform_question_result;
+	pthread_mutex_unlock(&platform_message_lock);
+	return result;
+#endif
+}
+
+#ifndef HALO_VITA
+/* (on the event pump's thread: a desktop's message box waits for the
+answer) */
+static void platform_ask_pending_question(void)
+{
+	char title[sizeof(platform_question_title)];
+	char text[sizeof(platform_question_text)];
+	const SDL_MessageBoxButtonData buttons[] = {
+		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "No" },
+		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Yes" },
+	};
+	SDL_MessageBoxData box;
+	BOOL pending;
+	int button = 0;
+
+	pthread_mutex_lock(&platform_message_lock);
+	pending = platform_question_pending;
+	platform_question_pending = FALSE;
+	memcpy(title, platform_question_title, sizeof(title));
+	memcpy(text, platform_question_text, sizeof(text));
+	pthread_mutex_unlock(&platform_message_lock);
+	if (!pending)
+		return;
+	memset(&box, 0, sizeof(box));
+	box.flags = SDL_MESSAGEBOX_INFORMATION;
+	box.title = title;
+	box.message = text;
+	box.numbuttons = (int)(sizeof(buttons) / sizeof(buttons[0]));
+	box.buttons = buttons;
+#ifndef HALO_NOT_DESKTOP
+	box.window = platform_window;
+#endif
+	if (!SDL_ShowMessageBox(&box, &button))
+		button = 0;
+	pthread_mutex_lock(&platform_message_lock);
+	platform_question_result = button == 1;
+	pthread_mutex_unlock(&platform_message_lock);
+}
+#endif
+
+/* shows a progress line over the game (NULL hides it); the Vita's circle
+cancels, platform_progress_cancelled. Elsewhere it is logged at most every
+few seconds, and leaving the lobby cancels. */
+void platform_show_progress(const char *title, const char *text)
+{
+#ifdef HALO_VITA
+	extern void vita_settings_progress(const char *title, const char *text);
+
+	vita_settings_progress(title, text);
+#else
+	static Uint64 logged_ticks;
+	Uint64 now = SDL_GetTicks();
+
+	if (text && (!logged_ticks || now - logged_ticks >= 5000))
+	{
+		char line[600];
+		char *cursor;
+
+		snprintf(line, sizeof(line), "%s", text);
+		for (cursor = line; *cursor; cursor++)
+			if (*cursor == '\n')
+				*cursor = ' ';
+		platform_log("%s: %s", title ? title : "", line);
+		logged_ticks = now;
+	}
+	if (!text)
+		logged_ticks = 0;
+#endif
+}
+
+int platform_progress_cancelled(void)
+{
+#ifdef HALO_VITA
+	extern int vita_settings_progress_cancelled(void);
+
+	return vita_settings_progress_cancelled();
+#else
+	return 0;
+#endif
+}
+
 static void platform_show_pending_message(void)
 {
 	char title[sizeof(platform_message_title)];
@@ -667,7 +930,12 @@ static void platform_show_pending_message(void)
 	pthread_mutex_unlock(&platform_message_lock);
 	if (!pending)
 		return;
-#ifdef HALO_NOT_DESKTOP
+#ifdef HALO_VITA
+	{
+		extern void vita_settings_message(const char *title, const char *text);
+		vita_settings_message(title, text);
+	}
+#elif defined(HALO_NOT_DESKTOP)
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, title, text, NULL);
 #else
 	{
@@ -714,6 +982,9 @@ void platform_pump_events(void)
 		exit(EXIT_SUCCESS);
 	}
 	platform_show_pending_message();
+#ifndef HALO_VITA
+	platform_ask_pending_question();
+#endif
 #ifndef HALO_NOT_DESKTOP
 	updater_poll(platform_window);
 #endif

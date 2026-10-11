@@ -36,14 +36,42 @@ word network_game_server_get_state(
 	short *substate);
 boolean network_game_server_game_is_open(
 	struct network_game_server *server);
-#ifdef HALO_LINUX
 /* joining a distributed game in progress (network_server_manager.c) */
 boolean network_game_server_accepts_late_joins(
 	struct network_game_server *server);
+#ifdef HALO_DEDICATED_SERVER
+/* (the dedicated server) a join asked while the game goes back to its lobby
+(over, or the scores): held, and answered once the lobby is up; FALSE if not
+held (answered now, as before) */
+boolean network_game_server_hold_join(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine,
+	word const *message,
+	short message_size);
+#endif
 boolean network_game_server_client_machine_is_loaded(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine);
 void network_game_server_late_joiner_loaded(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
+#ifdef HALO_LINUX
+/* port: a machine joining the game in progress with no player in it yet,
+not started nor loaded (map sharing's downloads to join in progress) */
+boolean network_game_server_client_machine_joining_in_progress(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
+/* port: when the machine joined (0: not one that joined) */
+unsigned long network_game_server_client_machine_join_time(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
+#endif
+/* the machine was heard from (its timeout, network_server_manager.c) */
+void network_game_server_client_machine_heard(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
+/* the host's own machine (its local client's) */
+boolean network_game_server_client_machine_is_local(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine);
 /* (network_server_message_handler.c) to one client machine, reliably */
@@ -56,7 +84,6 @@ boolean network_game_server_send_game_settings_to_client_machine(
 	struct network_game_server_client_machine *machine,
 	void const *game,
 	long game_size);
-#endif
 boolean network_game_server_game_is_valid(
 	struct network_game_server *server);
 boolean network_game_server_client_machine_is_joined_to_game(
@@ -91,6 +118,9 @@ void network_game_server_handle_client_update_packet(
 boolean network_game_server_switch_machine_from_postgame_to_pregame(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *client_machine);
+void network_game_server_set_machine_hardware_id(
+	struct network_game_server_client_machine *machine,
+	char const *hardware_id);
 void network_game_server_queue_player_for_addition(
 	struct network_game_server *server,
 	struct network_player *player);
@@ -119,6 +149,13 @@ boolean network_game_server_remove_machine_from_game(
 void network_game_server_update_countdown(
 	struct network_game_server *server,
 	short countdown_event);
+/* the lobby takes changes (not once the game has started loading) */
+boolean network_game_server_lobby_is_open(
+	struct network_game_server *server);
+/* a client machine's slower may add to the countdown (once each countdown) */
+boolean network_game_server_client_machine_may_slow_countdown(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *machine);
 /* ---------- globals */
 
 /* ---------- public code */

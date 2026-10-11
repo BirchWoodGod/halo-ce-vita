@@ -1890,6 +1890,17 @@ void rasterizer_debug_immediate_vector(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) rasterizer_debug_model_vertices draws after a model part
+(rasterizer_xbox_models.c keeps a part's states for the next part only
+while it is off) */
+boolean rasterizer_debug_model_vertices_on(
+	void)
+{
+	return rasterizer_debug_model_vertices_enabled;
+}
+#endif
+
 void rasterizer_debug_model_vertices(
 	long object_index,
 	struct rasterizer_model_skinning const *skinning,

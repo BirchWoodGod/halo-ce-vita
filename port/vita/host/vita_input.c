@@ -2,31 +2,59 @@
 VITA_INPUT.C
 
 The Vita's buttons and sticks for port/vita/platform/vita_pad.c (sceCtrl, in
-the wide analog mode real firmware needs for the sticks to move).
+the wide analog mode real firmware needs for the sticks to move) merged
+with a paired controller's on ports 1 to 4 (vita_ctrl_ports.c), and the
+touch zones held on the front screen and the rear pad (sceTouch;
+vita_controls.c says where the zones are and when a finger counts).
 
 (debug) HALO_PAD_FILE=ux0:data/haloce-vita/pad.txt: presses for automated
 tests in Vita3K, without typing into its window. The file is looked for every
 half second; its steps, "name:hold_ms:pause_ms" separated by spaces, are
 pressed one after another and the file is deleted. Names: x c z v (cross
 circle square triangle), up down left right, start select, l r, w a s d (the
-left stick), i j k ll (the right stick), a+b for buttons together.
+left stick), i j k ll (the right stick), a+b for buttons together, and the
+touch zones: tl tr (the front screen's top corners), el er (its left and
+right edges), rl rr (the rear pad's halves), touched at their middle (a
+rear one counts after its hold time, as a finger does). gx=N, gy=N, gz=N
+turn the gyroscope at N degrees a second about the Vita's x, y or z axis
+while held (vita_controls.h: gy=60 turns the view left, gx=60 looks up),
+instead of the sensor; (debug) HALO_GYRO_SIM=x,y,z (degrees a second) does
+the same all the time. Neither teaches the gyro's bias.
+
+The gyroscope (sceMotion) is read every frame, each sample the sensor took
+since the last (vita_controls.c filters them into angles, learning the bias
+while the Vita lies still); it never counts as input for the idle dim (a
+Vita lying on a table drifts).
 */
 
 #include <psp2/ctrl.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/motion.h>
+#include <psp2/touch.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "vita_controls.h"
+#include "vita_ctrl_ports.h"
+#include "lang.h"
 #include "vita_host.h"
+
+/* bumped by the settings panel (port_config.c) */
+extern volatile unsigned long halo_settings_generation;
 
 #define MAXIMUM_PAD_STEPS 64
 
 struct pad_step
 {
 	unsigned int buttons;
+	/* the touch zones (a bit each) */
+	unsigned int touch;
 	int lx, ly, rx, ry;
+	/* the gyroscope's rates (degrees a second, the Vita's axes), if set */
+	int gyro_set;
+	float gyro[3];
 	unsigned int hold_ms;
 	unsigned int pause_ms;
 };
@@ -51,7 +79,15 @@ static void pad_step_add_key(struct pad_step *step, const char *name)
 	};
 	int index;
 
-	if (!strcmp(name, "w"))
+	for (index = 0; index < VITA_ZONE_COUNT; index++)
+		if (!strcmp(name, vita_touch_zones[index].script_name))
+			step->touch |= 1u << index;
+	if (name[0] == 'g' && name[1] >= 'x' && name[1] <= 'z' && name[2] == '=')
+	{
+		step->gyro_set = 1;
+		step->gyro[name[1] - 'x'] = (float)atof(name + 3);
+	}
+	else if (!strcmp(name, "w"))
 		step->ly = 0;
 	else if (!strcmp(name, "s"))
 		step->ly = 255;
@@ -129,8 +165,16 @@ static void pad_script_poll(unsigned long long now)
 	pad_step_start = now;
 }
 
+/* the zones the script touches now, and the gyroscope's rates it sets
+(degrees a second) */
+static unsigned int pad_script_touch;
+static int pad_script_gyro_set;
+static float pad_script_gyro[3];
+
 static void pad_script_apply(struct vita_host_pad *pad, unsigned long long now)
 {
+	pad_script_touch = 0;
+	pad_script_gyro_set = 0;
 	while (pad_step_index < pad_step_count)
 	{
 		const struct pad_step *step = &pad_steps[pad_step_index];
@@ -139,6 +183,9 @@ static void pad_script_apply(struct vita_host_pad *pad, unsigned long long now)
 		if (elapsed_ms < step->hold_ms)
 		{
 			pad->buttons |= step->buttons;
+			pad_script_touch = step->touch;
+			pad_script_gyro_set = step->gyro_set;
+			memcpy(pad_script_gyro, step->gyro, sizeof(pad_script_gyro));
 			if (step->lx != 128)
 				pad->lx = step->lx;
 			if (step->ly != 128)
@@ -156,7 +203,8 @@ static void pad_script_apply(struct vita_host_pad *pad, unsigned long long now)
 	}
 }
 
-/* when the player last touched a button or moved a stick (process time,
+/* when the player last pressed a button, moved a stick or put a finger on
+a touch panel (process time,
 us): the heartbeat stops telling the system the Vita is in use a while after
 it, so an untouched Vita dims and sleeps as its settings say (an OLED screen
 left on the pause menu would otherwise show the HUD for hours) */
@@ -167,30 +215,330 @@ static int stick_moved(unsigned char value)
 	return value < 128 - 32 || value > 128 + 32;
 }
 
+/* each panel's active area (sceTouchGetPanelInfo), to scale its positions
+to the screen's pixels */
+static int touch_left[2], touch_top[2], touch_width[2], touch_height[2];
+static struct vita_touch_tracker touch_tracker;
+
+static void touch_start(void)
+{
+	int panel;
+
+	for (panel = 0; panel < 2; panel++)
+	{
+		SceTouchPanelInfo info;
+
+		sceTouchSetSamplingState(panel ? SCE_TOUCH_PORT_BACK : SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+		memset(&info, 0, sizeof(info));
+		if (sceTouchGetPanelInfo(panel ? SCE_TOUCH_PORT_BACK : SCE_TOUCH_PORT_FRONT, &info) >= 0 &&
+			info.maxAaX > info.minAaX && info.maxAaY > info.minAaY)
+		{
+			touch_left[panel] = info.minAaX;
+			touch_top[panel] = info.minAaY;
+			touch_width[panel] = info.maxAaX - info.minAaX + 1;
+			touch_height[panel] = info.maxAaY - info.minAaY + 1;
+		}
+		else
+		{
+			/* (the panels' usual areas: front 1920 x 1088, rear 1920 x
+			782 from y 108) */
+			touch_left[panel] = 0;
+			touch_top[panel] = panel ? 108 : 0;
+			touch_width[panel] = 1920;
+			touch_height[panel] = panel ? 782 : 1088;
+		}
+	}
+}
+
+/* the fingers on both panels (and the script's), in screen pixels: the
+zones they hold this frame; *started is how many came down */
+static unsigned int touch_read(unsigned long long now, int *started)
+{
+	struct vita_touch_contact contacts[2 * SCE_TOUCH_MAX_REPORT + VITA_ZONE_COUNT];
+	int count = 0, panel, index;
+	static unsigned long settings_seen;
+	static int settings_read;
+
+	/* the rear pad's guard (the panel's Rear touch guard; read again
+	after a change in the settings panel) */
+	if (!settings_read || settings_seen != halo_settings_generation)
+	{
+		settings_read = 1;
+		settings_seen = halo_settings_generation;
+		touch_tracker.rear_guard = vita_rear_guard_named(getenv("HALO_TOUCH_REAR_GUARD"));
+	}
+
+	for (panel = 0; panel < 2; panel++)
+	{
+		SceTouchData data;
+
+		memset(&data, 0, sizeof(data));
+		if (sceTouchPeek(panel ? SCE_TOUCH_PORT_BACK : SCE_TOUCH_PORT_FRONT, &data, 1) < 0)
+			continue;
+		for (index = 0; index < (int)data.reportNum && index < SCE_TOUCH_MAX_REPORT; index++)
+		{
+			struct vita_touch_contact *contact = &contacts[count++];
+
+			contact->panel = panel ? VITA_TOUCH_REAR : VITA_TOUCH_FRONT;
+			contact->id = data.report[index].id;
+			contact->x = (data.report[index].x - touch_left[panel]) * VITA_TOUCH_WIDTH / touch_width[panel];
+			contact->y = (data.report[index].y - touch_top[panel]) * VITA_TOUCH_HEIGHT / touch_height[panel];
+		}
+	}
+	for (index = 0; index < VITA_ZONE_COUNT; index++)
+		if (pad_script_touch & (1u << index))
+		{
+			const struct vita_touch_zone *zone = &vita_touch_zones[index];
+			struct vita_touch_contact *contact = &contacts[count++];
+
+			contact->panel = zone->panel;
+			/* (ids the panels never report) */
+			contact->id = 0x100 + index;
+			contact->x = (zone->left + zone->right) / 2;
+			contact->y = (zone->top + zone->bottom) / 2;
+		}
+	return (unsigned int)vita_touch_update(&touch_tracker, contacts, count, now, started);
+}
+
+/* ---------- the gyroscope */
+
+#define GYRO_RECORDS 64
+#define DEGREES 0.017453293f
+
+static struct vita_gyro_filter gyro_filter;
+static int gyro_sampling;
+static unsigned int gyro_counter, gyro_timestamp;
+static int gyro_have_sample;
+/* when the sensor last gave a sample, and the simulation last ran
+(process time, us) */
+static unsigned long long gyro_sensor_seen, gyro_simulated_at;
+/* the sensor's samples counted over its first seconds, for halo.log */
+static unsigned long long gyro_counted_since;
+static int gyro_counted, gyro_count_logged;
+/* HALO_GYRO_SIM's rates (degrees a second) */
+static int gyro_sim_set = -1;
+static float gyro_sim[3];
+
+static void gyro_start(void)
+{
+	int result = sceMotionStartSampling();
+
+	/* (SDL's sensor driver may have started it already) */
+	gyro_sampling = result >= 0 || (unsigned int)result == SCE_MOTION_ERROR_ALREADY_SAMPLING;
+	if (gyro_sampling)
+		sceMotionReset();
+	{
+		const char *sim = getenv("HALO_GYRO_SIM");
+
+		gyro_sim_set = sim && *sim && sscanf(sim, "%f,%f,%f", &gyro_sim[0], &gyro_sim[1], &gyro_sim[2]) >= 1;
+	}
+	{
+		char line[96];
+
+		snprintf(line, sizeof(line), "gyro: sampling %s (0x%08x)%s", gyro_sampling ? "on" : "off",
+			(unsigned int)result, gyro_sim_set ? ", HALO_GYRO_SIM set" : "");
+		vita_host_log(line);
+	}
+}
+
+/* the angles the Vita turned since the last read (radians, its axes) */
+static void gyro_read(unsigned long long now, float angle[3])
+{
+	static SceMotionSensorState records[GYRO_RECORDS];
+	int simulated = pad_script_gyro_set || gyro_sim_set > 0;
+	int count = 0, index;
+
+	angle[0] = angle[1] = angle[2] = 0.0f;
+	if (gyro_sampling)
+	{
+		memset(records, 0, sizeof(records));
+		if (sceMotionGetSensorState(records, GYRO_RECORDS) >= 0)
+			count = GYRO_RECORDS;
+	}
+	/* the records not seen before, oldest first (sorted by their counter) */
+	for (index = 1; index < count; index++)
+	{
+		SceMotionSensorState record = records[index];
+		int at = index;
+
+		while (at > 0 && records[at - 1].counter > record.counter)
+		{
+			records[at] = records[at - 1];
+			at--;
+		}
+		records[at] = record;
+	}
+	for (index = 0; index < count; index++)
+	{
+		const SceMotionSensorState *record = &records[index];
+		float rate[3], accel[3], dt;
+
+		if (gyro_have_sample && (int)(record->counter - gyro_counter) <= 0)
+			continue;
+		if (!record->counter && !record->timestamp)
+			continue;
+		dt = gyro_have_sample ? (float)(unsigned int)(record->timestamp - gyro_timestamp) * 1e-6f : 0.0f;
+		gyro_have_sample = 1;
+		gyro_counter = record->counter;
+		gyro_timestamp = record->timestamp;
+		gyro_sensor_seen = now;
+		gyro_counted++;
+		/* (a simulation in place of the sensor: its samples only counted) */
+		if (simulated)
+			continue;
+		rate[0] = record->gyro.x;
+		rate[1] = record->gyro.y;
+		rate[2] = record->gyro.z;
+		accel[0] = record->accelerometer.x;
+		accel[1] = record->accelerometer.y;
+		accel[2] = record->accelerometer.z;
+		vita_gyro_filter_sample(&gyro_filter, rate, accel, dt, 1, angle);
+	}
+	/* (once, in halo.log: how often the sensor samples, and the bias then;
+	a hardware report says whether the gyro works) */
+	if (!gyro_counted_since)
+		gyro_counted_since = now;
+	else if (!gyro_count_logged && now - gyro_counted_since >= 5000000)
+	{
+		char line[128];
+
+		gyro_count_logged = 1;
+		snprintf(line, sizeof(line), "gyro: %d sensor samples a second; bias %+.2f %+.2f %+.2f deg/s (%d still seconds)",
+			gyro_counted / 5, gyro_filter.bias[0] / DEGREES, gyro_filter.bias[1] / DEGREES,
+			gyro_filter.bias[2] / DEGREES, gyro_filter.still_count);
+		vita_host_log(line);
+	}
+	if (simulated)
+	{
+		float rate[3];
+		float dt = gyro_simulated_at ? (float)(now - gyro_simulated_at) * 1e-6f : 0.0f;
+
+		for (index = 0; index < 3; index++)
+			rate[index] = ((pad_script_gyro_set ? pad_script_gyro[index] : 0.0f) +
+				(gyro_sim_set > 0 ? gyro_sim[index] : 0.0f)) * DEGREES;
+		/* (in samples of 5 ms, as the sensor's, however long the frame
+		took - Vita3K's are 120 ms - up to a quarter of a second) */
+		if (dt > 0.25f)
+			dt = 0.25f;
+		while (dt > 0.0f)
+		{
+			float step = dt > 0.005f ? 0.005f : dt;
+
+			vita_gyro_filter_sample(&gyro_filter, rate, NULL, step, 0, angle);
+			dt -= step;
+		}
+		gyro_simulated_at = now;
+	}
+	else
+		gyro_simulated_at = 0;
+}
+
+void vita_gyro_status(char *text, int size)
+{
+	unsigned long long now = sceKernelGetProcessTimeWide();
+	int rate[3], axis;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		float degrees = gyro_filter.rate[axis] / DEGREES;
+
+		rate[axis] = degrees > 999.0f ? 999 : degrees < -999.0f ? -999 : (int)(degrees + (degrees < 0 ? -0.5f : 0.5f));
+	}
+	/* (the settings panel's line: in the language chosen, lang.c) */
+	if (!gyro_sampling && !gyro_simulated_at)
+		snprintf(text, (size_t)size, "%s", T("Gyro: no sensor"));
+	else if (!gyro_simulated_at && (!gyro_sensor_seen || now - gyro_sensor_seen > 1000000))
+		snprintf(text, (size_t)size, "%s", T("Gyro: no samples"));
+	else
+		/* (degrees a second, the game's way round: yaw left +, pitch up +) */
+		snprintf(text, (size_t)size, T("Gyro: yaw %+d pitch %+d roll %+d %s"), rate[1], rate[0], rate[2],
+			gyro_simulated_at ? T("simulated") : gyro_filter.still_count ? T("learnt") : T("lay still"));
+}
+
+/* ---------- the controller ports (vita_ctrl_ports.c) */
+
+static void ctrl_sample_from(struct vita_ctrl_sample *sample, const SceCtrlData *data)
+{
+	sample->buttons = data->buttons;
+	sample->lx = data->lx;
+	sample->ly = data->ly;
+	sample->rx = data->rx;
+	sample->ry = data->ry;
+}
+
+static int ctrl_read_vita(struct vita_ctrl_sample *sample)
+{
+	SceCtrlData data;
+	int result;
+
+	memset(&data, 0, sizeof(data));
+	data.lx = data.ly = data.rx = data.ry = 128;
+	result = sceCtrlPeekBufferPositive(0, &data, 1);
+	ctrl_sample_from(sample, &data);
+	return result;
+}
+
+static int ctrl_read_port(int port, struct vita_ctrl_sample *sample)
+{
+	SceCtrlData data;
+	int result;
+
+	memset(&data, 0, sizeof(data));
+	data.lx = data.ly = data.rx = data.ry = 128;
+	result = sceCtrlPeekBufferPositive2(port, &data, 1);
+	if (result >= 0)
+		ctrl_sample_from(sample, &data);
+	return result;
+}
+
+static int ctrl_port_types(unsigned char types[VITA_CTRL_PORTS])
+{
+	SceCtrlPortInfo info;
+	int result, port;
+
+	memset(&info, 0, sizeof(info));
+	result = sceCtrlGetControllerPortInfo(&info);
+	for (port = 0; port < VITA_CTRL_PORTS; port++)
+		types[port] = info.port[port];
+	return result;
+}
+
+static const struct vita_ctrl_layer ctrl_layer = { ctrl_read_vita, ctrl_read_port, ctrl_port_types, vita_host_log };
+static struct vita_ctrl_ports ctrl_ports;
+
 void vita_host_pad_read(struct vita_host_pad *pad)
 {
 	static int started;
-	SceCtrlData data;
+	struct vita_ctrl_sample data;
 	unsigned long long now;
+	int touches_started = 0;
 
 	if (!started)
 	{
 		started = 1;
 		sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
+		/* (the paired controllers' calls take the extended mode) */
+		sceCtrlSetSamplingModeExt(SCE_CTRL_MODE_ANALOG_WIDE);
+		touch_start();
+		gyro_start();
 	}
-	memset(&data, 0, sizeof(data));
-	data.lx = data.ly = data.rx = data.ry = 128;
-	sceCtrlPeekBufferPositive(0, &data, 1);
+	now = sceKernelGetProcessTimeWide();
+	/* the Vita's buttons and sticks, and a paired controller's (port 1 to
+	4: a PS TV's DualShocks, or a pad a plugin puts there) */
+	vita_ctrl_ports_read(&ctrl_ports, &ctrl_layer, now, &data);
 	pad->buttons = data.buttons;
 	pad->lx = data.lx;
 	pad->ly = data.ly;
 	pad->rx = data.rx;
 	pad->ry = data.ry;
 
-	now = sceKernelGetProcessTimeWide();
-	if (data.buttons || stick_moved(data.lx) || stick_moved(data.ly) || stick_moved(data.rx) || stick_moved(data.ry) ||
-		!vita_host_last_input_us)
-		vita_host_last_input_us = now;
 	pad_script_poll(now);
 	pad_script_apply(pad, now);
+	pad->touch = touch_read(now, &touches_started);
+	gyro_read(now, pad->gyro);
+	/* (a finger coming down is input too; one left resting on the rear
+	pad is not, after its first frame; the gyroscope never is) */
+	if (data.buttons || stick_moved(data.lx) || stick_moved(data.ly) || stick_moved(data.rx) || stick_moved(data.ry) ||
+		touches_started || !vita_host_last_input_us)
+		vita_host_last_input_us = now;
 }

@@ -134,6 +134,16 @@ void display_error_deferred(
 	short local_player_index,
 	boolean modal,
 	boolean pause_game_time);
+void display_error_text_deferred(
+	wchar_t const *text,
+	short local_player_index);
+#ifdef HALO_LINUX
+/* port: why the damaged disc error is shown, to halo.log and debug.txt
+(ui_widget.c): every caller says before showing it */
+void display_error_damaged_media_reason(
+	char const *format,
+	...);
+#endif
 void display_error_abort_to_dashboard_deferred(
 	short error_code,
 	boolean optional);
@@ -152,6 +162,23 @@ real_rgb_color get_ui_rgb_white(
 	void);
 real_argb_color get_ui_argb_white(
 	void);
+/* port: the text box shows text in place of its string list's string, for
+this render of the widgets (from a game data function of the box, or of a
+widget drawn before it) */
+void ui_widget_port_text_override(
+	struct widget_instance *widget,
+	wchar_t const *text);
+/* port: whether the text is wider than width in the text box's font */
+boolean ui_widget_port_text_too_wide(
+	struct widget_instance *widget,
+	wchar_t const *text,
+	short width);
+/* port: the font and text colour of a widget definition (its tag's name),
+for the port's own text drawn as the menus draw theirs */
+boolean ui_widget_port_text_style(
+	char const *widget_name,
+	long *font_index,
+	real_argb_color *color);
 pixel32 modulate_pixel32_by_real_alpha(
 	pixel32 argb,
 	real alpha);

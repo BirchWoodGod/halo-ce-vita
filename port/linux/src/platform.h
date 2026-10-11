@@ -137,6 +137,42 @@ BOOL platform_is_contiguous(const void *address);
 #define PLATFORM_VIRTUAL_TO_PHYSICAL(address) ((unsigned long)(address) & ~PLATFORM_CONTIGUOUS_BASE)
 #endif
 
+/* The window Halo Custom Edition tag data are linked to (0x40440000), for
+the experimental Custom Edition map loading: reserved at start-up when
+HALO_CUSTOM_EDITION is set, else NULL (also declared for the game in
+halo_linux_source_fixups.h). */
+void *halo_custom_edition_tag_cache(void);
+/* Whether Halo Custom Edition maps may run (HALO_CUSTOM_EDITION). */
+int halo_custom_edition_enabled(void);
+/* A Custom Edition map's tag cache of `bytes`: the window above when it is
+reserved, else memory of its own (the Vita, which cannot have the window),
+whose tags are then moved there (custom_edition_cache.c); NULL when there is
+no room. Released when the map goes. */
+void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
+void halo_custom_edition_tag_cache_release(void);
+/* Zeroed memory for a Custom Edition map's converted structure BSP vertices,
+relocation bitmap and conversion, in memory blocks of their own (neither the
+C heap nor the window); NULL when there is no room. */
+void *halo_custom_edition_memory_alloc(unsigned long bytes);
+void halo_custom_edition_memory_free(void *address);
+/* The C heap: bytes in use, and its size (0: no fixed size) */
+void platform_heap_usage(unsigned long *in_use, unsigned long *capacity);
+/* the contiguous window's bytes in blocks and free (where blocks are laid out) */
+void platform_contiguous_usage(unsigned long *used, unsigned long *free_bytes);
+/* One log line ("memory: <when> <map>: C heap ...") of the C heap, the
+window and, where the renderer has set platform_memory_renderer_report (the
+Vita's GXM device), its texture pool, video memory and programs: a session
+that grows from map to map shows it map by map */
+void platform_memory_log(const char *when, const char *map_name);
+extern void (*platform_memory_renderer_report)(char *text, unsigned long size);
+/* (cache_files.c, a map's tags gone: the Vita's renderer gives back what
+its textures held, d3d8_gxm.c) */
+extern void (*platform_renderer_map_unloaded)(void);
+/* Which textures hold their channels where Halo PC keeps them, for the same
+(xbox_textures.c; also declared for the game there) */
+void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order);
+void halo_custom_edition_texels_forget(void);
+
 /* ---------- guest memory write tracking (memory_watch.c)
 
 Pages of the contiguous window that the renderer has cached (textures) are

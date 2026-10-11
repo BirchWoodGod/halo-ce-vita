@@ -34,7 +34,9 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <string.h>
 #include <strings.h>
 
+#include "lang.h"
 #include "vita_host.h"
+#include "vita_version.h"
 
 #define VITA_DATA_DIRECTORY "ux0:data/haloce-vita"
 /* the game's own files (settings, log, init.txt); the maps go in
@@ -177,6 +179,25 @@ void *vita_host_arena(unsigned long *size)
 	return arena;
 }
 
+void *vita_host_block_alloc(const char *name, unsigned long size, int *uid)
+{
+	SceUID block = sceKernelAllocMemBlock(name, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, size, NULL);
+	void *base = NULL;
+
+	vita_host_log_memory("before a memory block");
+	if (block < 0)
+		return NULL;
+	sceKernelGetMemBlockBase(block, &base);
+	*uid = block;
+	return base;
+}
+
+void vita_host_block_free(int uid)
+{
+	if (uid >= 0)
+		sceKernelFreeMemBlock(uid);
+}
+
 unsigned long long vita_host_time_us(void)
 {
 	return sceKernelGetProcessTimeWide();
@@ -205,12 +226,59 @@ int vita_host_thread_describe(unsigned long id, char *text, unsigned long size)
 
 /* The game looks for d:\bink\<movie>.bik before it opens a movie, and
 the Vita plays the MP4 in movies/ in its place (bink_vita.c): an empty
-.bik stands in for each MP4 there, so a movie copied in plays */
+.bik stands in for each MP4 there, so a movie copied in plays. A stand-in
+whose MP4 went (the movies folder deleted or renamed: the movies are
+optional) goes too, so the game skips that movie as one it does not have
+rather than trying to open it */
+#define MOVIE_STAND_IN "mp4 stand-in"
+
+static void movie_placeholders_remove_stale(void)
+{
+	SceUID directory = sceIoDopen(VITA_DEFAULT_DATA_ROOT "/bink");
+	SceIoDirent entry;
+	/* (the names first, then the removals: not while the folder is read) */
+	char stale[16][64];
+	int stale_count = 0, index;
+
+	if (directory < 0)
+		return;
+	memset(&entry, 0, sizeof(entry));
+	while (sceIoDread(directory, &entry) > 0)
+	{
+		size_t length = strlen(entry.d_name);
+
+		if (length > 4 && length < sizeof(stale[0]) && strcasecmp(entry.d_name + length - 4, ".bik") == 0 &&
+			entry.d_stat.st_size == sizeof(MOVIE_STAND_IN) - 1 && stale_count < 16)
+		{
+			char path[160];
+			SceIoStat stat;
+
+			snprintf(path, sizeof(path), VITA_DATA_DIRECTORY "/movies/%.*s.mp4", (int)(length - 4), entry.d_name);
+			if (sceIoGetstat(path, &stat) < 0)
+				snprintf(stale[stale_count++], sizeof(stale[0]), "%s", entry.d_name);
+		}
+		memset(&entry, 0, sizeof(entry));
+	}
+	sceIoDclose(directory);
+	for (index = 0; index < stale_count; index++)
+	{
+		char path[160], message[192];
+
+		snprintf(path, sizeof(path), VITA_DEFAULT_DATA_ROOT "/bink/%.63s", stale[index]);
+		sceIoRemove(path);
+		snprintf(message, sizeof(message), "movie: %.63s has no MP4 in movies/ now; its stand-in removed (the movie is skipped)",
+			stale[index]);
+		vita_host_log(message);
+	}
+}
+
 static void movie_placeholders(void)
 {
-	SceUID directory = sceIoDopen(VITA_DATA_DIRECTORY "/movies");
+	SceUID directory;
 	SceIoDirent entry;
 
+	movie_placeholders_remove_stale();
+	directory = sceIoDopen(VITA_DATA_DIRECTORY "/movies");
 	if (directory < 0)
 		return;
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT "/bink", 0777);
@@ -230,7 +298,7 @@ static void movie_placeholders(void)
 
 				if (file >= 0)
 				{
-					sceIoWrite(file, "mp4 stand-in", 12);
+					sceIoWrite(file, MOVIE_STAND_IN, sizeof(MOVIE_STAND_IN) - 1);
 					sceIoClose(file);
 				}
 			}
@@ -253,22 +321,21 @@ where, and START leaves */
 
 static void message_text(uint32_t *pixels, int x, int y, int scale, uint32_t color, const char *text)
 {
-	for (; *text; text++, x += 8 * scale)
+	/* (UTF-8: a translated line's accented letters, overlay_glyph) */
+	for (; *text; x += 8 * scale)
 	{
-		unsigned char c = (unsigned char)*text;
+		unsigned char glyph[OVERLAY_ROWS];
 		int row, column, dy, dx;
 
-		if (c >= 'a' && c <= 'z')
-			c = (unsigned char)(c - 'a' + 'A');
-		if (c < 32 || c >= 128)
+		if (!overlay_glyph(&text, glyph))
 			continue;
-		for (row = 0; row < 8; row++)
+		for (row = 0; row < OVERLAY_ROWS; row++)
 			for (column = 0; column < 8; column++)
-				if (font[c - 32][row] & (0x80 >> column))
+				if (glyph[row] & (0x80 >> column))
 					for (dy = 0; dy < scale; dy++)
 						for (dx = 0; dx < scale; dx++)
 						{
-							int px = x + column * scale + dx, py = y + row * scale + dy;
+							int px = x + column * scale + dx, py = y + (row - OVERLAY_ROWS_ABOVE) * scale + dy;
 
 							if (px >= 0 && px < MESSAGE_WIDTH && py >= 0 && py < MESSAGE_HEIGHT)
 								pixels[py * MESSAGE_WIDTH + px] = color;
@@ -278,18 +345,19 @@ static void message_text(uint32_t *pixels, int x, int y, int scale, uint32_t col
 
 static void show_missing_data(void)
 {
+	/* (35 characters a line fit at this size; each in the Vita's language,
+	lang.c, a translation's lines as long) */
 	static const char *const lines[] = {
-		/* (35 characters a line fit at this size) */
-		"The game files are missing.",
+		N_("The game files are missing."),
 		"",
-		"Copy the maps folder of your",
-		"Xbox Halo: Combat Evolved to",
+		N_("Copy the maps folder of your"),
+		N_("Xbox Halo: Combat Evolved to"),
 		"",
 		"  ux0:data/haloce-vita/maps/",
 		"",
-		"(ui.map, bloodgulch.map ...)",
+		N_("(ui.map, bloodgulch.map ...)"),
 		"",
-		"Press START to exit.",
+		N_("Press START to exit."),
 	};
 	SceUID block = sceKernelAllocMemBlock("message", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 2 * 1024 * 1024, NULL);
 	SceDisplayFrameBuf frame;
@@ -304,7 +372,7 @@ static void show_missing_data(void)
 		pixels[index] = 0xff1a1008u;
 	message_text(pixels, 60, 50, 4, 0xff40ff40u, "HALO CE");
 	for (index = 0; index < sizeof(lines) / sizeof(lines[0]); index++)
-		message_text(pixels, 60, 130 + (int)index * 32, 3, 0xffe0e0e0u, lines[index]);
+		message_text(pixels, 60, 130 + (int)index * 32, 3, 0xffe0e0e0u, T(lines[index]));
 	memset(&frame, 0, sizeof(frame));
 	frame.size = sizeof(frame);
 	frame.base = pixels;
@@ -315,9 +383,20 @@ static void show_missing_data(void)
 	sceDisplaySetFrameBuf(&frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
 	for (;;)
 	{
+		int port;
+
 		memset(&pad, 0, sizeof(pad));
 		sceCtrlPeekBufferPositive(0, &pad, 1);
 		if (pad.buttons & SCE_CTRL_START)
+			break;
+		/* (or a paired controller's START: vita_ctrl_ports.c) */
+		for (port = 1; port <= 4; port++)
+		{
+			memset(&pad, 0, sizeof(pad));
+			if (sceCtrlPeekBufferPositive2(port, &pad, 1) >= 0 && (pad.buttons & SCE_CTRL_START))
+				break;
+		}
+		if (port <= 4)
 			break;
 		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 		sceDisplayWaitVblankStart();
@@ -640,6 +719,7 @@ static int game_thread(SceSize arguments_size, void *arguments_data)
 
 	(void)arguments_size;
 	(void)arguments_data;
+	vita_host_thread_watch("game");
 	/* (above the game's threads, which spin at the default priority
 	while they wait on each other: at their priority it never ran) */
 	{
@@ -665,26 +745,40 @@ int main(int argc, char **argv)
 	(void)argv;
 	sceIoMkdir(VITA_DATA_DIRECTORY, 0777);
 	sceIoMkdir(VITA_DATA_DIRECTORY "/saves", 0777);
+	/* An invite from a previous process cannot join this run's host. */
+	sceIoRemove(VITA_DATA_DIRECTORY "/host_invite.txt");
 	if (freopen(VITA_DATA_DIRECTORY "/log.txt", "w", stderr))
 		setvbuf(stderr, NULL, _IONBF, 0);
 	/* the last session's log is kept (a crash leaves no other trace) */
 	sceIoRemove(VITA_DATA_DIRECTORY "/halo-prev.log");
 	sceIoRename(VITA_DATA_DIRECTORY "/halo.log", VITA_DATA_DIRECTORY "/halo-prev.log");
 	{
-		/* (the realtime stamp tells one launch's log from the next) */
+		/* (the realtime stamp tells one launch's log from the next; the
+		version, which build a report came from) */
 		char message[96];
 
-		snprintf(message, sizeof(message), "vita: Halo CE starting, realtime %ld", (long)time(NULL));
+		snprintf(message, sizeof(message), "vita: Halo CE " HALO_VITA_VERSION " starting, realtime %ld", (long)time(NULL));
 		vita_host_log(message);
 	}
 
 	memset(&init, 0, sizeof(init));
 	memset(&boot, 0, sizeof(boot));
 	sceAppUtilInit(&init, &boot);
-	scePowerSetArmClockFrequency(444);
-	scePowerSetBusClockFrequency(222);
-	scePowerSetGpuClockFrequency(222);
-	scePowerSetGpuXbarClockFrequency(166);
+	/* the port's text in the Vita's language, from here on (lang.c; the
+	settings' Language row's choice is applied when they are loaded) */
+	vita_settings_language_init();
+	/* the clocks the game needs as floors: raised to them, never lowered
+	from more (a 500 MHz profile of PSVshell or another overclocking plugin
+	stays; 444/222/222/166 are the system's highest otherwise) - from
+	Bruno Santana's modified build */
+	if (scePowerGetArmClockFrequency() < 444)
+		scePowerSetArmClockFrequency(444);
+	if (scePowerGetBusClockFrequency() < 222)
+		scePowerSetBusClockFrequency(222);
+	if (scePowerGetGpuClockFrequency() < 222)
+		scePowerSetGpuClockFrequency(222);
+	if (scePowerGetGpuXbarClockFrequency() < 166)
+		scePowerSetGpuXbarClockFrequency(166);
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);
@@ -718,8 +812,9 @@ int main(int argc, char **argv)
 	}
 	{
 		char message[128];
-		snprintf(message, sizeof(message), "vita: arm %d MHz, bus %d MHz, gpu %d MHz", scePowerGetArmClockFrequency(),
-			scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency());
+		snprintf(message, sizeof(message), "vita: arm %d MHz, bus %d MHz, gpu %d MHz, xbar %d MHz",
+			scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(),
+			scePowerGetGpuXbarClockFrequency());
 		vita_host_log(message);
 	}
 
@@ -787,7 +882,8 @@ static int log_thread_state; /* 0 none, 1 running, -1 could not start */
 
 static void log_acquire(void)
 {
-	while (__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&log_lock, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE))
 		;
 }
 
@@ -802,20 +898,27 @@ static void log_drain(void)
 	static volatile int draining;
 	char chunk[16 * 1024];
 
-	while (__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
+	while (__atomic_load_n(&draining, __ATOMIC_RELAXED) ||
+		__atomic_exchange_n(&draining, 1, __ATOMIC_ACQUIRE))
 		sceKernelDelayThread(100);
 	for (;;)
 	{
 		unsigned long length, start, first;
 
+		/* (the lock is held only to read where the lines end: the bytes up
+		to there are the drain's alone until log_head moves past them, so a
+		log thread on the fourth core, put off by the system's processes
+		there, never keeps the game's threads spinning at the lock) */
 		log_acquire();
 		length = log_tail - log_head;
+		log_release();
 		if (length > sizeof(chunk))
 			length = sizeof(chunk);
 		start = log_head % LOG_RING_SIZE;
 		first = length < LOG_RING_SIZE - start ? length : LOG_RING_SIZE - start;
 		memcpy(chunk, log_ring + start, first);
 		memcpy(chunk + first, log_ring, length - first);
+		log_acquire();
 		log_head += length;
 		log_release();
 		if (!length)
@@ -830,6 +933,9 @@ static int log_thread(SceSize arguments_size, void *arguments)
 {
 	(void)arguments_size;
 	(void)arguments;
+	/* (Fourth core helpers: the lines wait in the ring; a game's thread
+	writes them itself only when the ring is full) */
+	vita_host_fourth_core_join("log", 2);
 	for (;;)
 	{
 		sceKernelWaitSema(log_semaphore, 1, NULL);

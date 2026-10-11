@@ -20,7 +20,10 @@ other unit, and this unit adds one weak definition of each (a COFF weak
 external, which a COMDAT copy or an outright definition elsewhere overrides;
 COFF allows only one weak definition of a name, hence only here). The C
 runtime's headers come first, so that its own inline functions are left
-alone.
+alone. A weak function cannot be static, so the port's own file-local
+helpers in the game's headers (halo_rint, object_mark_inline and the like)
+are spelled `static __inline__`, which the redefinition below leaves alone;
+`static __inline` there is an error on Windows.
 */
 
 #ifdef _WIN32
