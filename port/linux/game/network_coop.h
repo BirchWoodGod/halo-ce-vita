@@ -45,6 +45,11 @@ enum
 /* whether this is a network co-op game (not its lobby, whose menu scene also
 has no game engine) */
 boolean network_coop_active(void);
+/* whether the players collide with each other: FALSE in a co-op game whose
+host set PLAYER COLLISIONS off (its record's cooperative_flags, which only
+the crossplay wire carries: OpenCE's Server Setup; bipeds.c, collisions.c;
+OpenCE's, 62fa7e13) */
+boolean network_coop_player_collisions(void);
 /* whether this machine is a co-op client, whose devices only the host moves */
 boolean network_coop_devices_remote(void);
 /* devices.c: a group's devices were set straight to its value */

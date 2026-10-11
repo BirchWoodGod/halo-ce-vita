@@ -59,8 +59,10 @@ LEGACY_COMMIT = "50ae7395"
 # automatic check yet: MANUAL, listed so the list says what is open). Closed
 # by T4/T5 (feat/xp-wire-switch): G2, G3, G4, G5, G15, and G12/G13 as
 # "silent toward PC machines" (T6-lite: this build's extensions never sent on
-# the crossplay wire; the capability handshake proper is T6's)
-EXPECTED_OPEN = {"G6", "G9", "G10", "G11", "G14"}
+# the crossplay wire; the capability handshake proper is T6's). G14 by the PC
+# co-op work (feat/xp-coop): judged by what a client indexes with a host's
+# numbers, docs/crossplay.md 6.2
+EXPECTED_OPEN = {"G6", "G9", "G10", "G11"}
 
 GAP_TITLES = {
 	"G1": "game settings record (13,120 bytes, game_variant_options)",
@@ -564,7 +566,7 @@ def run(arguments):
 	if ng.get("cooperative_flags") == tg.get("cooperative_flags") and ov.get("cooperative", {}).get(coop) == \
 		tv.get("cooperative", {}).get(coop) and ng.get("cooperative_flags") is not None:
 		report.gap("G8", "PASS", f"cooperative_flags at 0x{ng['cooperative_flags']:X}, bit {ov['cooperative'][coop]} "
-			"(carried and checked; co-op crossplay is refused, the collisions switch is not played)")
+			"(carried and checked; PLAYER COLLISIONS off played: network_coop_player_collisions)")
 	else:
 		report.gap("G8", "FAIL", f"cooperative_flags at {ng.get('cooperative_flags')} (upstream {tg.get('cooperative_flags')})")
 
@@ -615,11 +617,47 @@ def run(arguments):
 		"; ".join(["missing " + ", ".join(missing)] if missing else [] + different) or
 		f"{len(shape)} constants identical")
 
-	# --- G14: capacities
+	# --- G14: capacities, judged by what a client indexes with a host's
+	# numbers (docs/crossplay.md 6.2). A client runs no AI and no scripts:
+	# the actor, prop and swarm pools, script object lists and the game state
+	# they make are the host's only, and caches, effects and widgets are each
+	# machine's own. Objects (named by datum index) must match, the object
+	# memory must hold what the host's does, and the client's table of the
+	# AI units it drives (network_actor_table.h) the host's actors and the
+	# units its cutscenes drive (upstream: network_actors.c's actors + 32)
 	capacity = macros(opence.text("port/linux/include/halo_port_capacity.h"), r"HALO_PORT_\w+")
+	host_only = {"HALO_PORT_MAXIMUM_ACTORS", "HALO_PORT_MAXIMUM_PROPS", "HALO_PORT_MAXIMUM_SWARMS",
+		"HALO_PORT_MAXIMUM_SWARM_COMPONENTS", "HALO_PORT_MAXIMUM_OBJECT_LISTS_PER_MAP",
+		"HALO_PORT_MAXIMUM_LISTED_OBJECTS_PER_MAP", "HALO_PORT_GAME_STATE_CPU_SIZE", "HALO_PORT_GAME_STATE_SIZE"}
+	problems, notes = [], []
+	for name, rule in (("HALO_PORT_MAXIMUM_OBJECTS_PER_MAP", "=="), ("HALO_PORT_OBJECT_MEMORY_POOL_SIZE", ">=")):
+		theirs, ours_value = tv["macro"].get(name), ov["macro"].get(name)
+		if theirs is None:
+			continue
+		if ours_value is None or (ours_value != theirs if rule == "==" else ours_value < theirs):
+			problems.append(f"{name} {ours_value} vs {theirs} (a client indexes it with the host's numbers)")
+	table = ROOT / "port/linux/game/network_actor_table.h"
+	table_capacity = None
+	if table.exists():
+		match = re.search(r"#define NETWORK_ACTOR_TABLE_CAPACITY \(?\s*(\d+)\s*(?:\+\s*(\d+))?\s*\)?", table.read_text())
+		if match:
+			table_capacity = int(match.group(1)) + int(match.group(2) or 0)
+	upstream_actors = tv["macro"].get("HALO_PORT_MAXIMUM_ACTORS")
+	if upstream_actors is not None:
+		if table_capacity is None or table_capacity < upstream_actors + 32:
+			problems.append(f"the client's AI unit table {table_capacity} vs the host's {upstream_actors} + 32")
+		else:
+			notes.append(f"client AI table {table_capacity} (host {upstream_actors} + 32)")
 	missing, different = compare_values(ov["macro"], tv["macro"], capacity)
-	report.gap("G14", "FAIL" if missing or different else "PASS",
-		"; ".join((["missing " + ", ".join(missing)] if missing else []) + different) or "identical")
+	host_different = [d for d in different if d.split()[0] in host_only]
+	if host_different:
+		notes.append("host-only " + "; ".join(host_different))
+	local = [d.split()[0] for d in different if d.split()[0] not in host_only and
+		d.split()[0] not in ("HALO_PORT_MAXIMUM_OBJECTS_PER_MAP", "HALO_PORT_OBJECT_MEMORY_POOL_SIZE")]
+	local += [name for name in missing if name not in host_only]
+	if local:
+		notes.append("each machine's own " + ", ".join(local))
+	report.gap("G14", "FAIL" if problems else "PASS", "; ".join(problems + notes) or "identical")
 
 	# --- G15: the version
 	announced = tv["macro"].get("HALO_PORT_NETWORK_VERSION")

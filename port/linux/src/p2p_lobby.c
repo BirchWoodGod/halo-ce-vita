@@ -2079,9 +2079,13 @@ static void entry_from_listing(const struct p2p_listing *listing, struct p2p_lob
 	entry->coop = listing->coop;
 	if (network_wire_crossplay())
 	{
-		entry->experimental = crossplay_guard_large(entry->players, entry->maximum);
+		/* (a co-op game is Experimental whatever its players: asked about
+		once, as a large one) */
+		int verdict = crossplay_guard_judge(entry->coop, entry->players, entry->maximum);
+
+		entry->experimental = verdict != CROSSPLAY_GUARD_OK;
 		snprintf(entry->badge, sizeof(entry->badge), "%s%s", crossplay_guard_badge(1, listing->dedicated),
-			entry->coop ? T(" CO-OP") : entry->experimental ? T(" EXPERIMENTAL") : "");
+			crossplay_guard_badge_suffix(verdict));
 	}
 	/* the Rules line: "Slayer to 50 on Wizard", "Co-op: Halo, Heroic" */
 	if (listing->coop)

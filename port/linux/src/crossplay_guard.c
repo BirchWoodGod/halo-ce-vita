@@ -47,6 +47,11 @@ int crossplay_guard_judge(int coop, int players, int maximum)
 	return CROSSPLAY_GUARD_OK;
 }
 
+int crossplay_guard_experimental(int coop, int players, int maximum)
+{
+	return crossplay_guard_judge(coop, players, maximum) != CROSSPLAY_GUARD_OK;
+}
+
 int crossplay_guard_stock_multiplayer_map(const char *map, int size)
 {
 	static const char *const levels[] = { "beavercreek", "bloodgulch", "boardingaction", "carousel", "chillout",
@@ -194,8 +199,29 @@ const char *crossplay_guard_large_question(void)
 	return T("Large PC game: more than 16 players can make the Vita lag. Join anyway?");
 }
 
-const char *crossplay_guard_coop_refusal(void)
+const char *crossplay_guard_title(int verdict)
 {
-	return T("This is a PC co-op game. Co-op games on PC hosts can't be joined with Crossplay on: they run more AI "
-		"than the Vita can hold.");
+	return verdict == CROSSPLAY_GUARD_COOP ? T("Halo: PC co-op game") : crossplay_guard_large_title();
+}
+
+const char *crossplay_guard_question(int verdict, int players)
+{
+	if (verdict != CROSSPLAY_GUARD_COOP)
+		return crossplay_guard_large_question();
+	if (players > CROSSPLAY_GUARD_COOP_PLAYERS)
+		return T("PC co-op game with more than 4 players: experimental on the Vita. More players and the host's extra "
+			"enemies can make it lag. Join anyway?");
+	return T("PC co-op game: experimental on the Vita. The host's AI and extra enemies can make it lag. Join anyway?");
+}
+
+const char *crossplay_guard_badge_suffix(int verdict)
+{
+	switch (verdict)
+	{
+	case CROSSPLAY_GUARD_COOP:
+		return T(" CO-OP EXPERIMENTAL");
+	case CROSSPLAY_GUARD_LARGE:
+		return T(" EXPERIMENTAL");
+	}
+	return "";
 }

@@ -2890,7 +2890,13 @@ struct transparent_geometry_group *_rasterizer_model_transparent_geometry_submit
 					group = submitted_group;
 				}
 
+				/* port: (and only with a group: none when they ran out, whose
+				references stay NULL below) */
+#ifdef HALO_LINUX
+				if (sort_filth && group)
+#else
 				if (sort_filth)
+#endif
 				{
 					sort_filth->group_index =
 						rasterizer_transparent_geometry_get_group_presorted_index(

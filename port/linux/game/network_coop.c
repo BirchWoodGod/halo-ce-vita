@@ -92,6 +92,8 @@ index and tag, since the map placed them at the same index everywhere.
 #include "models/model_animation_definitions.h"
 #include "models/model_definitions.h"
 #include "models/models.h"
+#include "networking/network_game_globals.h"
+#include "networking/network_game_manager.h"
 #include "objects/object_definitions.h"
 #include "objects/objects.h"
 #include "objects/object_types.h"
@@ -1975,7 +1977,10 @@ static void client_apply_nav_point(
 	boolean activate = event->value != NONE;
 	boolean flag = event->type == _coop_nav_point_team_flag || event->type == _coop_nav_point_unit_flag;
 	boolean team = event->type == _coop_nav_point_team_flag || event->type == _coop_nav_point_team_object;
-	real offset = event->reals[0];
+	/* (above or below its target no further than an observer reaches: a
+	host's number, which drawn far out turned the arrow's maths to
+	infinities) */
+	real offset = PIN(event->reals[0], -CAMERA_WORLD_BOUND, CAMERA_WORLD_BOUND);
 
 	if (activate && (event->value < 0 || event->value >= hud_globals->waypoint.arrows.count))
 		return;
@@ -2357,6 +2362,17 @@ boolean network_coop_active(
 
 	return (connection == _game_connection_network_server || connection == _game_connection_network_client) &&
 		global_scenario && global_scenario->type == _scenario_type_solo && !game_engine_running();
+}
+
+boolean network_coop_player_collisions(
+	void)
+{
+	struct network_game *game;
+
+	/* (the legacy wire's records never carry a switch: network_game_record.c) */
+	if (!network_coop_active() || !(game = network_game_get_game()))
+		return TRUE;
+	return !TEST_FLAG(game->cooperative_flags, _network_game_cooperative_no_player_collisions_bit);
 }
 
 boolean network_coop_devices_remote(

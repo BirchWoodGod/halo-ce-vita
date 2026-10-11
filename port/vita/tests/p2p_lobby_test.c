@@ -1136,9 +1136,10 @@ static void crossplay_checks(void)
 	size = opence_listing(bytes, pc_seed, pc_key, 1, HALO_PORT_CROSSPLAY_NETWORK_VERSION, 1, sequence++, token,
 		"hceu-lobby-1", 0);
 	hear(bytes, size, 0, slot);
-	check(entry_of(slot, &entry) && entry.coop && !entry.experimental && !strcmp(entry.badge, "PC CO-OP") &&
+	check(entry_of(slot, &entry) && entry.coop && entry.experimental && !strcmp(entry.badge, "PC CO-OP EXPERIMENTAL") &&
 		!strcmp(entry.rules, "Co-op: The Pillar of Autumn") && !strstr(entry.rules, "Easy"),
-		"crossplay: no game engine on a10: a PC co-op game, badged PC CO-OP, no difficulty made up");
+		"crossplay: no game engine on a10: a PC co-op game, experimental, badged PC CO-OP EXPERIMENTAL, no difficulty "
+		"made up");
 	opence_map = "bloodgulch";
 	opence_players = 255;
 	opence_maximum = 0;

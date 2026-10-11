@@ -94,6 +94,7 @@ Called from the main loop every frame (main.c).
 #include "items/items.h"
 #include "objects/damage.h"
 #include "scenario/scenario.h"
+#include "scenario/scenario_definitions.h"
 #include "tag_files/tag_files.h"
 #include "camera/observer.h"
 #include "cutscene/cinematics.h"
@@ -122,6 +123,8 @@ void network_distributed_statistics(long *sent, long *received, long *correction
 void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 void network_distributed_item_statistics(long *creates, long *deletes, long *failures, long *removed);
 void network_damage_statistics(long *sent_reports, long *dealt_reports, long *rejected_reports, long *replayed_events);
+/* network_actors.c's */
+void network_actors_client_statistics(long *tracked, long *most, long *untracked, long *rejected);
 /* xinput_sdl.c's */
 void test_input_hold_action(int hold);
 void test_input_hold_back(int hold);
@@ -746,11 +749,37 @@ static void network_test_log_players(
 		long watched = coop_spectate_unit(0);
 		long holds, most_lead;
 
+		long objects = 0, units = 0, ai_units = 0;
+		long tracked, most, untracked, rejected;
+		struct object_iterator iterator;
+		struct object_datum *object;
+
 		network_coop_client_pace_statistics(&holds, &most_lead);
-		platform_log("network test: co-op tick %ld | bsp %d | cinematic %d skip %s %d/%d%s | watching %lx | held %ld lead %ld",
-			game_time_get(), (int)global_structure_bsp_index_get(), (int)cinematic_in_progress(),
+		/* (the census: this machine's objects, its units and those of them
+		AI's, which a client has as its host's; the AI units it tracks to
+		drive, the most this game, those it had no room for and the states it
+		refused: docs/crossplay.md 6.2) */
+		object_iterator_new(&iterator, _object_mask_all, 0);
+		while ((object = object_iterator_next(&iterator)) != NULL)
+		{
+			objects++;
+			if (TEST_FLAG(_object_mask_unit, object->object.type))
+			{
+				units++;
+				if (unit_get(iterator.index)->unit.player_index == NONE &&
+					!TEST_FLAG(object->object.damage_flags, _object_dead_bit))
+				{
+					ai_units++;
+				}
+			}
+		}
+		network_actors_client_statistics(&tracked, &most, &untracked, &rejected);
+		platform_log("network test: co-op tick %ld | bsp %d | bsps %d | cinematic %d skip %s %d/%d%s | watching %lx | held %ld"
+			" lead %ld | objects %ld units %ld living ai %ld | ai tracked %ld most %ld untracked %ld rejected %ld",
+			game_time_get(), (int)global_structure_bsp_index_get(),
+			(int)global_scenario_get()->structure_bsp_references.count, (int)cinematic_in_progress(),
 			offered ? "offered" : "no", (int)votes, (int)voters, voted ? " voted" : "", (unsigned long)watched,
-			holds, most_lead);
+			holds, most_lead, objects, units, ai_units, tracked, most, untracked, rejected);
 	}
 }
 
@@ -1711,25 +1740,20 @@ void network_test_update(
 						platform_log("network test: the public games list \"%s\"%s%s%s%s: %s; %s", entry.name,
 							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "",
 							entry.badge[0] ? " badge " : "", entry.badge, entry.rules, entry.players_line);
-						/* (as the browsers do, crossplay_guard.h: a PC co-op game
-						refused; a large one asked about once, the answer
+						/* (as the browsers do, crossplay_guard.h: a large or co-op
+						PC game asked about once, the answer
 						HALO_CROSSPLAY_LARGE_ANSWER's) */
-						if (network_wire_crossplay() && entry.coop)
-						{
-							platform_log("network test: not joining the public game \"%s\": a PC co-op game (crossplay)",
-								entry.name);
-							continue;
-						}
-						if (network_wire_crossplay() && entry.experimental &&
+						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) < 0)
 						{
 							int answer = crossplay_guard_test_answer();
 
-							platform_log("crossplay: asking about the large PC game %s (%d of %d players): %s", entry.name,
-								entry.players, entry.maximum, answer > 0 ? "join anyway" : "no");
+							platform_log("crossplay: asking about the %s PC game %s (%d of %d players): %s",
+								entry.coop ? "co-op" : "large", entry.name, entry.players, entry.maximum,
+								answer > 0 ? "join anyway" : "no");
 							crossplay_guard_answer(entry.name, answer > 0, system_milliseconds());
 						}
-						if (network_wire_crossplay() && entry.experimental &&
+						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) == 0)
 						{
 							continue;

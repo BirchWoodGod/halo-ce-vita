@@ -77,12 +77,46 @@
 #               (never on the crossplay wire); and our client with Crossplay
 #               off does not join an OpenCE host on its LAN
 #   crossrefuse what our client refuses in a PC game (section 6, T11), on
-#               OpenCE hosts on LANs of their own: a co-op game (a10:
-#               refused before any join, the reason named), a second local
-#               player (split screen, HALO_NETWORK_TEST_SECOND_PLAYER: not
-#               added, said, the game played on), and a map our client lacks
+#               OpenCE hosts on LANs of their own: a second local player
+#               (split screen, HALO_NETWORK_TEST_SECOND_PLAYER: not added,
+#               said, the game played on), and a map our client lacks
 #               (wizard: T3's refusal, crossplay_maps.c; checked only when
-#               this build has it, else reported as waiting for T3)
+#               this build has it, else reported as waiting for T3). A PC
+#               co-op game is not refused since Oct 11 2026: crosscoop
+#   crosscoop   PC co-op (section 6.2): an OpenCE, a ChupathingyCE and a
+#               DamnationCE host each start a network co-op game on a
+#               campaign level (XPPC_COOP_LEVEL, b30: its Map screen's co-op,
+#               normal difficulty, OpenCE's extra enemies per player as its
+#               default) on a LAN of its own, and our client joins it,
+#               answering yes to the co-op question (asked exactly once),
+#               plays (a bot) with the host's player, has the host's AI units
+#               (driven by their actor states), takes the host's checkpoint
+#               (game_save on the host's telnet console) and its BSP switch
+#               (switch_bsp), and ends with no AI unit untracked, no actor
+#               state refused and no crash; the OpenCE game again with four
+#               players (our client and two OpenCE clients); and our client
+#               answering no on an OpenCE host: left, no tick of it played.
+#               Control: an OpenCE client of an OpenCE co-op host. The census
+#               lines (objects, units, AI units tracked) are summarised
+#   crosscoopcensus  measurements for section 6.2 (not in all): for each
+#               campaign level of XPPC_COOP_LEVELS (every one in the maps
+#               folder), an OpenCE co-op host with our client, alone (2
+#               players) and with two OpenCE clients (4), the host's extra
+#               enemies XPPC_COOP_ENEMIES (per_player: OpenCE's default, 50%
+#               a player; multiplier:N), its BSPs walked through on its
+#               console; our client's most objects, units, living AI units and
+#               AI units tracked per game in a table. Fails on an AI unit
+#               untracked, a state refused or a crash. XPPC_COOP_PARALLEL
+#               games at once (3)
+#   crosscoopfuzz  the co-op handlers fuzzed in a live PC co-op game (not in
+#               all; HALO_TEST_VITA an AddressSanitizer build with
+#               HALO_NET_FUZZ_TWIN: net_fuzz_twin.h): OpenCE, ChupathingyCE
+#               and DamnationCE co-op hosts, our client twinning one in
+#               XPPC_FUZZ_RATE (2) of the host's AI and co-op messages and
+#               the batches that carry them (HALO_NET_FUZZ_KINDS=16,64-77),
+#               and on OpenCE one in 3 of every message; passes with no
+#               sanitizer memory error and no crash, our client running to
+#               its end (the game itself may go wrong: twins lie)
 #   crossbig    large PC games (section 6: allowed, Experimental, asked
 #               once; never refused by their players): an OpenCE host of
 #               128 players (its fast setup's) with our client answering yes,
@@ -139,6 +173,10 @@
 #                      3.1.1)
 #   XPPC_EXPECTED_FAIL the expected-fail modes (none)
 #   XPPC_LARGE_ANSWER  our client's answer about a large PC game (yes)
+#   XPPC_COOP_LEVEL    crosscoop's campaign level (b30); XPPC_COOP_SECONDS how
+#                      long its games run (240); XPPC_COOP_HOST_ENV more
+#                      VAR=value for its hosts (HALO_TEST_INPUT=look:3: a10's
+#                      cryo tube wants its host to look around)
 #   HALO_TEST_OUT      where the logs go (deleted after a pass unless
 #                      HALO_TEST_KEEP=1; default a new folder under
 #                      ~/halo-test-out)
@@ -166,7 +204,11 @@ expected_fail=${XPPC_EXPECTED_FAIL:-}
 mode=${1:-}
 
 case $mode in
-pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed) ;;
+pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse|crossbig|crossmixed|crosscoop) ;;
+crosscoopcensus) ;;
+crosscoopfuzz)
+	grep -aq "net fuzz twin: one message in" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
+		{ echo "SKIP (crosscoopfuzz): HALO_TEST_VITA is not a HALO_NET_FUZZ_TWIN build (AddressSanitizer)"; exit 0; } ;;
 crossmaps)
 	ce_map=${XPPC_CE_MAP:-${HALO_TEST_CE_MAP:-}}
 	ce_resources=${XPPC_CE_RESOURCES:-}
@@ -187,7 +229,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossmaps crossmixed crossrefuse crossbig crossversion; do
+	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossmaps crossmixed crossrefuse crossbig crosscoop crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -228,9 +270,10 @@ need() { # need NAME PATH: the binary must be there
 	[ -n "$2" ] && [ -x "$2" ] || { echo "BROKEN ($mode): no $1 (${2:-unset}): XPPC_BUILDS or its own variable"; exit 2; }
 }
 need OpenCE "$opence"
-case $mode in chupaopence|chupahost) need ChupathingyCE "$chupa" ;; esac
+case $mode in chupaopence|chupahost|crosscoop) need ChupathingyCE "$chupa" ;; esac
 [ "$mode" = chupaserver ] && need "ChupathingyCE's server" "$chupa_server"
-[ "$mode" = damnserver ] && need DamnationCE "$damnation"
+case $mode in damnserver|crosscoop|crosscoopfuzz) need DamnationCE "$damnation" ;; esac
+[ "$mode" = crosscoopfuzz ] && need ChupathingyCE "$chupa"
 case $mode in pcself|chupaopence) ;; *) need "our Vita-path build" "$vita" ;; esac
 [ -f "$data/maps/bloodgulch.map" ] && [ -f "$data/maps/ui.map" ] ||
 	{ echo "BROKEN ($mode): no maps in $data/maps (HALO_TEST_DATA)"; exit 2; }
@@ -611,6 +654,153 @@ broker_topics() { # broker_topics NAME: the topic families each copy published o
 	done
 }
 
+# coop_game NAME HOSTKIND "CLIENTKINDS" [OURENV]: a network co-op game on
+# XPPC_COOP_LEVEL that HOSTKIND hosts on a LAN of its own (its network test's
+# "coop" variant: the Map screen's co-op), each of CLIENTKINDS joining it
+# (client, client2, ...: ours first when it is one); once the first client
+# has played 20 s beside the host's player, the host saves a checkpoint, and
+# 25 s later switches the BSP (its telnet console), noted in
+# NAME/commands.log. In the background; coop_check reads it
+coop_level=${XPPC_COOP_LEVEL:-b30}
+coop_seconds=${XPPC_COOP_SECONDS:-240}
+coop_game() {
+	local name=$1 hostkind=$2 kinds=$3 extra=${4:-} n host_ns host_ip i kind
+	local client_nss= client_ips=
+	subnet=$((subnet + 1)); n=$subnet
+	side "$n"; host_ns=$side_machine; host_ip=192.168.$n.2
+	i=0
+	for kind in $kinds; do
+		i=$((i + 1))
+		lan_machine "$n" $((i + 2)); client_nss="$client_nss $held"; client_ips="$client_ips 192.168.$n.$((i + 2))"
+	done
+	mkdir -p "$out/$name"
+	echo "$name: $hostkind co-op host on ${coop_game_level:-$coop_level}${coop_host_extra:+ ($coop_host_extra)}, clients:$kinds" |
+		tee "$out/$name/what"
+	(
+		run_seconds=$coop_seconds
+		trap 'kill $mine 2>/dev/null; wait 2>/dev/null; exit 0' TERM
+		run_copy "$name/host" "$host_ns" "$hostkind" "$host_ip" 198.51.100.1 HALO_NET_ONLINE=false \
+			"HALO_NETWORK_TEST=host:levels\\${coop_game_level:-$coop_level}\\${coop_game_level:-$coop_level}:coop" \
+			HALO_NETWORK_TEST_START=$start_delay HALO_NET_LOBBY_NAME=XpCoop HALO_TELNET_CONSOLE=1 HALO_TEST_INPUT=bot:3 \
+			${coop_host_extra:-} ${XPPC_COOP_HOST_ENV:-}
+		mine=$last_pid; host_pid=$last_pid
+		for i in $(seq 1 60); do
+			grep -aqE "network test: (player 0 is named|starting the game)" "$out/$name/host/run.log" 2>/dev/null && break
+			sleep 1
+		done
+		i=0
+		set -- $client_nss
+		local ips=($client_ips) copy
+		for kind in $kinds; do
+			i=$((i + 1)); copy=client; [ $i -gt 1 ] && copy=client$i
+			run_copy "$name/$copy" "$1" "$kind" "${ips[$((i - 1))]}" 198.51.100.1 HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+				HALO_TEST_INPUT=bot:$((50 + i)) $([ "$kind" = ours ] && echo "$extra")
+			mine="$mine $last_pid"
+			shift
+			sleep 2
+		done
+		# (the host's checkpoint and BSP switch, once the first client has
+		# played beside the host's player: two players alive in its log)
+		played=0 saved= switched=
+		while kill -0 "$host_pid" 2>/dev/null; do
+			sleep 1
+			played=$(grep -a "network test: tick" "$out/$name/client/run.log" 2>/dev/null |
+				grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+			if [ -z "$saved" ] && [ "${played:-0}" -ge 20 ]; then
+				saved=$SECONDS
+				coop_console "$host_ns" "game_save" && echo "game_save sent after $played s of play" >> "$out/$name/commands.log"
+			fi
+			if [ -n "$saved" ] && [ -z "$switched" ] && [ $((SECONDS - saved)) -ge 25 ]; then
+				switched=$SECONDS
+				# (the host's other BSP: our client logs the one it has, the
+				# host's, which it follows; the PC builds log none)
+				bsp=$(grep -a "network test: co-op tick" "$out/$name/client/run.log" 2>/dev/null | tail -1 |
+					sed -n 's/.*| bsp \([0-9]*\) .*/\1/p')
+				target=$([ "${bsp:-0}" = 0 ] && echo 1 || echo 0)
+				coop_console "$host_ns" "switch_bsp $target" &&
+					echo "switch_bsp $target sent (the host on bsp ${bsp:-?})" >> "$out/$name/commands.log"
+			fi
+			# (the census: every BSP of the level in turn, 25 s each, by the
+			# count our client logs)
+			if [ "${coop_bsp_walk:-0}" = 1 ] && [ -n "$switched" ] && [ $((SECONDS - switched)) -ge 25 ]; then
+				bsps=$(grep -a "network test: co-op tick" "$out/$name/client/run.log" 2>/dev/null | tail -1 |
+					sed -n 's/.*| bsps \([0-9]*\) .*/\1/p')
+				target=$((${target:-0} + 1))
+				if [ -n "$bsps" ] && [ "$target" -lt "$bsps" ]; then
+					switched=$SECONDS
+					coop_console "$host_ns" "switch_bsp $target" && echo "switch_bsp $target sent (walk)" >> "$out/$name/commands.log"
+				fi
+			fi
+		done
+		kill $mine 2>/dev/null; wait 2>/dev/null
+	) > "$out/$name/pair.log" 2>&1 &
+	pids="$pids $!"
+	pair_pids="${pair_pids:-} $!"
+	pairs=$((pairs + 1))
+}
+# coop_console NETNS COMMAND: a line to the host's script console
+# (debug.telnet_console, 127.0.0.1:2323 in its namespace)
+coop_console() {
+	nsenter -t "$1" -n timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2323 || exit 1; sleep 0.5; printf "%s\r\n" "$1" >&3;
+		sleep 1; exec 3>&-' coop_console "$2"
+}
+# coop_check NAME [no]: our client in that co-op game (coop_game's): its
+# verdict in coop_result, its census in coop_census
+coop_check() {
+	local name=$1 answer=${2:-yes} log debug asked played census ai most untracked rejected saved bsp_host bsp_ours
+	log=$out/$name/client/run.log debug=$out/$name/client/data/debug.txt
+	asked=$(grep -ac "crossplay: asking about the co-op PC game" "$log" 2>/dev/null)
+	played=$(grep -a "network test: tick" "$log" 2>/dev/null | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+	census=$(grep -a "network test: co-op tick" "$log" 2>/dev/null | sed -n 's/.*| objects \([0-9]*\) units \([0-9]*\) living ai \([0-9]*\) | ai tracked \([0-9]*\) most \([0-9]*\) untracked \([0-9]*\) rejected \([0-9]*\).*/\1 \2 \3 \4 \5 \6 \7/p')
+	coop_census=$(echo "$census" | awk 'NF == 7 { if ($1 > o) o = $1; if ($2 > u) u = $2; if ($3 > a) a = $3; if ($5 > m) m = $5;
+		un = $6; re = $7 } END { printf "objects %d units %d living-ai %d ai-tracked-most %d untracked %d rejected %d",
+		o, u, a, m, un, re }')
+	ai=$(echo "$coop_census" | sed -n 's/.*living-ai \([0-9]*\).*/\1/p')
+	most=$(echo "$coop_census" | sed -n 's/.*ai-tracked-most \([0-9]*\).*/\1/p')
+	untracked=$(echo "$coop_census" | sed -n 's/.*untracked \([0-9]*\).*/\1/p')
+	rejected=$(echo "$coop_census" | sed -n 's/.*rejected \([0-9]*\).*/\1/p')
+	if [ "$answer" = no ]; then
+		local left ticks
+		left=$(grep -ac "leaving the co-op PC game .*the player said no" "$debug" 2>/dev/null)
+		# (the host's game's ticks: a network co-op game's census lines; the
+		# bot pressing A in the main menu afterwards starts a campaign of its
+		# own, whose ticks are not the host's)
+		ticks=$(grep -ac "network test: co-op tick [0-9]* " "$log" 2>/dev/null)
+		echo "--- $name: asked ${asked:-0} times, left ${left:-0}, played ${ticks:-0} ticks"
+		if [ "${asked:-0}" -ge 1 ] && [ "${left:-0}" -ge 1 ] && [ "${ticks:-0}" = 0 ]; then
+			coop_result=pass
+		else
+			coop_result=asked-$asked-left-$left-ticks-$ticks
+		fi
+		return
+	fi
+	saved=$(grep -ac "co-op: the host's checkpoint" "$debug" 2>/dev/null)
+	# (the BSP the host switched to, and whether our client followed it)
+	bsp_host=$(sed -n 's/^switch_bsp \([0-9]*\) sent.*/\1/p' "$out/$name/commands.log" 2>/dev/null | head -1)
+	bsp_ours=0
+	[ -n "$bsp_host" ] && bsp_ours=$(grep -a "network test: co-op tick" "$log" 2>/dev/null | grep -ac "| bsp $bsp_host |")
+	echo "--- $name: asked ${asked:-0} times; ${played:-0} s with two players alive; $coop_census; host checkpoints taken" \
+		"${saved:-0}; on the host's switched BSP ${bsp_host:-?} for ${bsp_ours:-0} s"
+	sed 's/^/  host: /' "$out/$name/commands.log" 2>/dev/null
+	if [ "${asked:-0}" != 1 ]; then
+		coop_result=asked-${asked:-0}-times
+	elif [ "${played:-0}" -lt 30 ]; then
+		coop_result=played-${played:-0}-s
+	elif [ "${ai:-0}" = 0 ] || [ "${most:-0}" = 0 ]; then
+		coop_result=no-host-ai-seen
+	elif [ "${untracked:-0}" != 0 ] || [ "${rejected:-0}" != 0 ]; then
+		coop_result=ai-untracked-$untracked-rejected-$rejected
+	elif [ "${saved:-0}" = 0 ]; then
+		coop_result=no-checkpoint
+	elif [ -z "$bsp_host" ] || [ "${bsp_ours:-0}" -lt 5 ]; then
+		coop_result=bsp-switch-not-followed
+	elif cat "$log" "$debug" 2>/dev/null | grep -aqE "ERROR: AddressSanitizer|egmentation fault|stack trace|SIGSEGV|SIGABRT|EXCEPTION halt"; then
+		coop_result=crash-or-sanitizer
+	else
+		coop_result=pass
+	fi
+}
+
 # ---- the modes
 our_results=  # "NAME:STAGE" of our client's runs
 controls_ok=1
@@ -773,7 +963,6 @@ crossrefuse)
 	# game played on; and a map our client lacks (wizard: its maps folder
 	# without it), T3's refusal (crossplay_maps.c, feat/xp-map-identity),
 	# looked for only when this build has its text
-	host_game='levels\a10\a10' host_variants=coop pair refuse-coop lan opence ours
 	pair refuse-split lan opence ours HALO_NETWORK_TEST_SECOND_PLAYER=3
 	t3=0
 	grep -aq "PC hosts can't send maps" "$vita" && t3=1
@@ -785,7 +974,7 @@ crossrefuse)
 		client_maps=$out/maps-nowizard host_game=wizard pair refuse-map lan opence ours
 	fi
 	wait_pairs
-	for name in refuse-coop refuse-split refuse-map; do
+	for name in refuse-split refuse-map; do
 		clientlog=$out/$name/client/run.log clientdebug=$out/$name/client/data/debug.txt
 		if [ "$name" = refuse-map ] && [ $t3 = 0 ]; then
 			echo "--- refuse-map: not checked: this build has no T3 map refusals (feat/xp-map-identity's crossplay_maps.c)"
@@ -795,17 +984,6 @@ crossrefuse)
 		said=$(grep -ahiE "not a Vita|Vita-only|cannot join|refus|not joining|not adding|isn.t in your maps" "$clientlog" \
 			"$clientdebug" 2>/dev/null | grep -v "/" | sed 's/^[0-9.]* [0-9:]*  //; s/^halo-linux: //' | sort -u | head -3)
 		case $name in
-		refuse-coop)
-			got=$(grep -ahiE 'co-?op.*(PC|crossplay|refus|cannot)|(refus|cannot).*co-?op' "$clientlog" "$clientdebug" \
-				2>/dev/null | grep -v "/" | head -2)
-			echo "--- $name: our client joined ${joined:-0} times; the refusal: ${got:-none}"
-			if [ -n "$got" ] && [ "${joined:-0}" = 0 ]; then
-				result=pass
-			elif [ "${joined:-0}" != 0 ]; then
-				result=joined-instead-of-refusing
-			else
-				result=refusal-message
-			fi ;;
 		refuse-split)
 			# (each copy of our client: not added, said once; never asked of
 			# the host; the game played: crossplay_check.py's steps)
@@ -889,6 +1067,129 @@ crossmaps)
 	fi
 	grep -aq "network test: hosting" "$out/$name/host/run.log" && ! grep -aq "map missing" "$out/$name/host/run.log" ||
 		{ controls_ok=0; echo "BROKEN ($mode): the OpenCE host of $name never hosted its map"; }
+	;;
+crosscoop)
+	# PC co-op (section 6.2, the owner's Oct 11 2026): each PC build hosts a
+	# network co-op game; our client answers yes (asked once), plays, has the
+	# host's AI, its checkpoint and its BSP switch; four players on OpenCE;
+	# answering no, none of it played
+	control coop-opence-opence && coop_game coop-opence-opence opence opence
+	coop_game coop-opence-ours opence ours
+	coop_game coop-chupa-ours chupa ours
+	coop_game coop-damnation-ours damnation ours
+	coop_game coop4-opence-ours opence "ours opence opence"
+	coop_game coop-opence-no opence ours HALO_CROSSPLAY_LARGE_ANSWER=no
+	wait_pairs
+	for name in $control_names; do
+		played=$(grep -a "network test: tick" "$out/$name/client/run.log" 2>/dev/null | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+		echo "--- control $name: ${played:-0} s with two players alive"
+		[ "${played:-0}" -ge 30 ] || { controls_ok=0; echo "BROKEN ($mode): the control $name played ${played:-0} s"; }
+	done
+	for name in coop-opence-ours coop-chupa-ours coop-damnation-ours coop4-opence-ours coop-opence-no; do
+		grep -aq "network test: hosting" "$out/$name/host/run.log" ||
+			{ controls_ok=0; echo "BROKEN ($mode): the host of $name never hosted"; }
+		coop_check "$name" $([ "$name" = coop-opence-no ] && echo no)
+		our_results="$our_results $name:$coop_result"
+	done
+	# (the four-player game: every copy saw all four alive at once)
+	name=coop4-opence-ours
+	all=$(grep -a "network test: tick" "$out/$name/client/run.log" 2>/dev/null |
+		grep -aEc "player [0-9]+: \(.*player [0-9]+: \(.*player [0-9]+: \(.*player [0-9]+: \(")
+	echo "--- $name: our client's seconds with all four players alive: ${all:-0}"
+	if [ "${all:-0}" -lt 15 ]; then
+		our_results=$(echo "$our_results" | sed "s/ $name:pass/ $name:four-players-alive-${all:-0}-s/")
+	fi
+	# (the record of each: difficulty and co-op switches, OpenCE's network
+	# version 19's cooperative_flags; its network test leaves PLAYER
+	# COLLISIONS on, which only Server Setup turns off)
+	grep -ah "the host's co-op game on difficulty" "$out"/coop*-ours/client/run.log 2>/dev/null | sort | uniq -c |
+		sed 's/^/  /'
+	;;
+crosscoopcensus)
+	# section 6.2's numbers: our client's census in OpenCE co-op games on the
+	# campaign's levels, 2 and 4 players, the host's extra enemies as set
+	levels=${XPPC_COOP_LEVELS:-}
+	if [ -z "$levels" ]; then
+		for l in a10 a30 a50 b30 b40 c10 c20 c40 d20 d40; do [ -f "$data/maps/$l.map" ] && levels="$levels $l"; done
+	fi
+	enemies=${XPPC_COOP_ENEMIES:-per_player}
+	case $enemies in
+	per_player) enemies_env="HALO_NET_COOP_ENEMIES_MODE=per_player" ;;
+	multiplier:*) enemies_env="HALO_NET_COOP_ENEMIES_MODE=multiplier HALO_NET_COOP_ENEMIES_MULTIPLIER=${enemies#multiplier:}" ;;
+	none) enemies_env="HALO_NET_COOP_ENEMIES_MODE=none" ;;
+	*) echo "BROKEN ($mode): XPPC_COOP_ENEMIES is per_player, none or multiplier:N"; exit 2 ;;
+	esac
+	parallel=${XPPC_COOP_PARALLEL:-3}
+	names= running=0
+	for l in $levels; do
+		for players in 2 4; do
+			name=census-$l-${players}p
+			names="$names $name"
+			kinds=ours; [ $players = 4 ] && kinds="ours opence opence"
+			coop_bsp_walk=1 coop_game_level=$l coop_host_extra="$enemies_env" coop_game "$name" opence "$kinds"
+			running=$((running + 1))
+			[ $running -ge "$parallel" ] && { wait_pairs; running=0; }
+		done
+	done
+	wait_pairs
+	echo "--- census: the host's extra enemies $enemies; our client's most in each game (docs/crossplay.md 6.2)"
+	printf '  %-18s %8s %6s %10s %11s %9s %8s %5s %s\n' game objects units living-ai ai-tracked untracked refused bsps played-s
+	for name in $names; do
+		log=$out/$name/client/run.log
+		row=$(grep -a "network test: co-op tick" "$log" 2>/dev/null | sed -n 's/.*| bsp \([0-9]*\) .*| objects \([0-9]*\) units \([0-9]*\) living ai \([0-9]*\) | ai tracked [0-9]* most \([0-9]*\) untracked \([0-9]*\) rejected \([0-9]*\).*/\1 \2 \3 \4 \5 \6 \7/p' |
+			awk '{ b[$1] = 1; if ($2 > o) o = $2; if ($3 > u) u = $3; if ($4 > a) a = $4; if ($5 > m) m = $5; un = $6; re = $7 }
+				END { n = 0; for (k in b) n++; printf "%d %d %d %d %d %d %d", o, u, a, m, un, re, n }')
+		played=$(grep -a "network test: tick" "$log" 2>/dev/null | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
+		set -- $row
+		printf '  %-18s %8s %6s %10s %11s %9s %8s %5s %s\n' "$name" "${1:-?}" "${2:-?}" "${3:-?}" "${4:-?}" "${5:-?}" "${6:-?}" \
+			"${7:-?}" "${played:-0}"
+		result=pass
+		if cat "$log" "$out/$name/client/data/debug.txt" 2>/dev/null |
+			grep -aqE "ERROR: AddressSanitizer|egmentation fault|stack trace|SIGSEGV|SIGABRT|EXCEPTION halt"; then
+			result=crashed
+			grep -ahE "EXCEPTION halt|egmentation fault" "$log" "$out/$name/client/data/debug.txt" 2>/dev/null | head -2 |
+				sed 's/^/    /'
+		elif [ "${played:-0}" -lt 30 ]; then
+			result=played-${played:-0}-s
+		elif [ "${5:-1}" != 0 ] || [ "${6:-1}" != 0 ]; then
+			result=untracked-${5:-?}-refused-${6:-?}
+		fi
+		our_results="$our_results $name:$result"
+	done
+	;;
+crosscoopfuzz)
+	# the co-op handlers meet mutated twins of a PC co-op host's real
+	# messages, in a running game (net_fuzz_twin.h): no sanitizer error, no
+	# crash, our client to its end
+	rate=${XPPC_FUZZ_RATE:-2}
+	fuzz_env() { echo "HALO_NET_FUZZ_RATE=$1 HALO_NET_FUZZ_SEED=$2 HALO_NET_FUZZ_DUMP=fuzzdump.txt ${3:+HALO_NET_FUZZ_KINDS=$3}"; }
+	coop_game fuzz-opence-ours opence ours "$(fuzz_env "$rate" 11 16,64-77)"
+	coop_game fuzz-chupa-ours chupa ours "$(fuzz_env "$rate" 12 16,64-77)"
+	coop_game fuzz-damnation-ours damnation ours "$(fuzz_env "$rate" 13 16,64-77)"
+	coop_game fuzz4-opence-ours opence "ours opence opence" "$(fuzz_env "$rate" 14 16,64-77)"
+	coop_game fuzzall-opence-ours opence ours "$(fuzz_env 3 15)"
+	wait_pairs
+	for name in fuzz-opence-ours fuzz-chupa-ours fuzz-damnation-ours fuzz4-opence-ours fuzzall-opence-ours; do
+		log=$out/$name/client/run.log debug=$out/$name/client/data/debug.txt
+		twins=$(grep -aoE "net fuzz twin: [0-9]+ twins" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
+		asan=$(grep -ac "ERROR: AddressSanitizer" "$log" 2>/dev/null)
+		ubsan=$(grep -aE "runtime error" "$log" 2>/dev/null | sed 's/^.*\/\(source\|port\)/\1/; s/: runtime error.*//' | sort | uniq -c |
+			tr '\n' ';')
+		ticks=$(grep -ac "network test: co-op tick" "$log" 2>/dev/null)
+		crashed=$(cat "$log" "$debug" 2>/dev/null | grep -acE "egmentation fault|SIGSEGV|SIGABRT|stack trace|Aborted|EXCEPTION halt")
+		echo "--- $name: twins ${twins:-0}; co-op seconds ${ticks:-0}; AddressSanitizer errors ${asan:-0}; crash lines" \
+			"${crashed:-0}; UBSan: ${ubsan:-none}"
+		result=pass
+		if [ "${asan:-0}" != 0 ]; then
+			result=addresssanitizer
+			grep -a -A12 "ERROR: AddressSanitizer" "$log" | head -16 | sed 's/^/  /'
+		elif [ "${crashed:-0}" != 0 ]; then
+			result=crashed
+		elif [ "${twins:-0}" -lt 16 ] || [ "${ticks:-0}" -lt 30 ]; then
+			result=too-few-twins-${twins:-0}-or-co-op-seconds-${ticks:-0}
+		fi
+		our_results="$our_results $name:$result"
+	done
 	;;
 crossbig)
 	# large PC games (section 6, the owner's Oct 11 2026): an OpenCE host's

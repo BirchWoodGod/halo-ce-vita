@@ -739,16 +739,17 @@ static void browser_join_entry(struct p2p_lobby_entry const *entry)
 	join_begin(entry, NULL);
 }
 
-/* the player's answer about the large PC game chosen (crossplay_guard.h):
-remembered, so that its lobby does not ask again; yes joins it */
+/* the player's answer about the large or co-op PC game chosen
+(crossplay_guard.h): remembered, so that its lobby does not ask again; yes
+joins it */
 static void browser_large_answered(int yes)
 {
 	struct p2p_lobby_entry const *entry = &menu_functions.large_entry;
 
 	menu_functions.large_asked = FALSE;
 	crossplay_guard_answer(entry->name, yes, system_milliseconds());
-	platform_log("menus: the large PC game %s (%d of %d players): the player said %s", entry->name, entry->players,
-		entry->maximum, yes ? "join anyway" : "no");
+	platform_log("menus: the %s PC game %s (%d of %d players): the player said %s", entry->coop ? "co-op" : "large",
+		entry->name, entry->players, entry->maximum, yes ? "join anyway" : "no");
 	if (!yes)
 	{
 		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("Not joined"));
@@ -785,28 +786,22 @@ static boolean browser_join(struct widget_instance *widget)
 		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("That is your own game"));
 		return TRUE;
 	}
-	/* (crossplay_guard.h: a PC co-op game refused; a large PC game asked
+	/* (crossplay_guard.h: a large or co-op PC game, Experimental, asked
 	about once) */
-	if (network_wire_crossplay() && entry->coop)
-	{
-		snprintf(menu_functions.status, sizeof(menu_functions.status), "%s", T("PC co-op games can't be joined"));
-		platform_log("menus: not joining the PC co-op game %s (crossplay)", entry->name);
-		platform_show_message(T("Halo: cannot join this game"), crossplay_guard_coop_refusal());
-		return TRUE;
-	}
-	if (network_wire_crossplay() && entry->experimental &&
+	if (network_wire_crossplay() && (entry->experimental || entry->coop) &&
 		crossplay_guard_answered(entry->name, system_milliseconds()) != 1)
 	{
 		int answer = crossplay_guard_test_answer();
+		int verdict = entry->coop ? CROSSPLAY_GUARD_COOP : CROSSPLAY_GUARD_LARGE;
 
 		menu_functions.large_entry = *entry;
 		menu_functions.large_asked = TRUE;
-		platform_log("menus: the large PC game %s (%d of %d players): asking the player", entry->name, entry->players,
-			entry->maximum);
+		platform_log("menus: the %s PC game %s (%d of %d players): asking the player", entry->coop ? "co-op" : "large",
+			entry->name, entry->players, entry->maximum);
 		if (answer >= 0)
 			browser_large_answered(answer);
 		else
-			platform_ask_question(crossplay_guard_large_title(), crossplay_guard_large_question());
+			platform_ask_question(crossplay_guard_title(verdict), crossplay_guard_question(verdict, entry->players));
 		return TRUE;
 	}
 	browser_join_entry(entry);

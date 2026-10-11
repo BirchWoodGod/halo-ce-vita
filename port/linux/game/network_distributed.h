@@ -280,6 +280,11 @@ real distributed_vitality_unpack(word value);
 /* ---------- prototypes/NETWORK_ACTORS.C */
 
 void network_actors_new_game(void);
+/* (a client) the AI units it tracks now, the most this game, the states of
+units it had no room for (a host driving more than it tracks: 288 on the
+legacy wire, 1056 on the crossplay one), and the states refused for their
+values */
+void network_actors_client_statistics(long *tracked, long *most, long *untracked, long *rejected);
 /* (the host, after each tick) the units its actors drove this tick, to
 each client */
 void network_actors_host_tick(void);

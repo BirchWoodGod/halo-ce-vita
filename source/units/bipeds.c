@@ -280,6 +280,7 @@ symbols in this file:
 #include "render/render_debug.h"
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
+#include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #ifdef HALO_LINUX
 /* (HALO_TICK_PROFILE=2) objects_update's phases: objects_phases.h */
 #include "objects_phases.h"
@@ -360,6 +361,10 @@ enum
 	_biped_physics_in_dead_bit,
 	_biped_physics_in_pass_through_bipeds_bit,
 	_biped_physics_in_climb_anything_bit,
+	/* port: a player's, in a co-op game without player collisions: the other
+	players' bipeds are not in its way (network_coop_player_collisions;
+	OpenCE's, 62fa7e13) */
+	_biped_physics_in_pass_through_players_bit,
 };
 
 enum
@@ -1198,6 +1203,12 @@ boolean biped_fix_position(
 				_biped_passes_through_bipeds_bit) ?
 				_collision_test_for_bipeds_passthrough_living_flags :
 				_collision_test_for_bipeds_living_flags;
+#ifdef HALO_LINUX
+			/* port: (where it fits among the other players, as it moves:
+			_biped_physics_in_pass_through_players_bit) */
+			if (biped->unit.player_index != NONE && !network_coop_player_collisions())
+				collision_flags |= FLAG(_collision_test_skip_player_bipeds_bit);
+#endif
 		}
 
 		if (new_position)
@@ -2644,6 +2655,8 @@ static void biped_update_physics(
 		collision_flags = TEST_FLAG(physics->in_flags, _biped_physics_in_pass_through_bipeds_bit) ?
 			_collision_test_for_bipeds_passthrough_living_flags :
 			_collision_test_for_bipeds_living_flags;
+		if (TEST_FLAG(physics->in_flags, _biped_physics_in_pass_through_players_bit))
+			collision_flags |= FLAG(_collision_test_skip_player_bipeds_bit);
 	}
 
 	position = physics->position;
@@ -4017,6 +4030,10 @@ static void biped_update_moving(
 	}
 	if (TEST_FLAG(definition->biped.flags, _biped_passes_through_bipeds_bit))
 		SET_FLAG(in_flags, _biped_physics_in_pass_through_bipeds_bit, TRUE);
+#ifdef HALO_LINUX
+	if (biped->unit.player_index != NONE && !network_coop_player_collisions())
+		SET_FLAG(in_flags, _biped_physics_in_pass_through_players_bit, TRUE);
+#endif
 	if (TEST_FLAG(definition->biped.flags, _biped_climbs_anything_bit) &&
 		!TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
 	{

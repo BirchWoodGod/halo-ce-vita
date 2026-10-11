@@ -260,8 +260,14 @@ static void cluster_list_add_last(
 	}
 	else
 	{
-		match_vassert("..\\objects\\reference_lists.h", 0x5b, FALSE,
-			csprintf(temporary, "couldn't add to reference list %s", array->name));
+		/* port: a full list (more objects or lights in its clusters than the
+		lists hold: a PC co-op host's multiplied enemies) drops the datum out
+		of them, as reference_list_add does and as release builds did, rather
+		than halt on another machine's numbers (OpenCE's warning) */
+		static long dropped;
+
+		if (dropped++ < 8)
+			error(_error_silent, "WARNING: maximum %ss per map (%d) exceeded.", array->name, array->maximum_count);
 	}
 }
 #endif

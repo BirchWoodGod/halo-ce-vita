@@ -1,7 +1,8 @@
 # Crossplay plan: Vita and PC (OpenCE, ChupathingyCE, DamnationCE)
 
 Status: plan, with T1, T2, T8 and the client side of T4 and T5 built
-(sections 10.1 and 10.2). Written Oct 11 2026 against
+(sections 10.1 and 10.2), and PC co-op joined as Experimental (section 6.2,
+10.4). Written Oct 11 2026 against
 next-1.1 50ae7395 (network version 18), next-1.1.1 367b4534 (network
 version 19, unreleased), OpenCE 6399ed9d (network version 26),
 ChupathingyCE 8cb79900 (0.7.2e, network version 26, accepts 11 to 30) and
@@ -164,13 +165,13 @@ netns modes pingsmixed, mapmidmixed and swatmixed test this.
 | G5 | Server browser listing | "HL" **format 2**, `hcev/3/lobby/...`, label `hcev-lobby-1`, version must equal ours (`p2p_lobby.c:556, 1228`) | Format 1, `hceu/3/lobby/...`, `hceu-lobby-1`, version must equal 26 | Format | 1 |
 | G6 | `map.version` in the game record | Legacy wire: our map-share identity (checksum ^ size·0x9E3779B1, or a CRC-32), CE multiplayer maps named `levels\test\<n>\<n>` (`custom_edition_maps.c`, `map_share_protocol.c`). Crossplay: **closed for our client (T3, section 6.1)** | Raw CE header checksum; CE maps named `custom_maps\<name>` (v22, 4e8ed2f1; 9d309f8d) | Meaning: each side refuses the other's CE maps | 1 (CE maps), stock maps unaffected |
 | G7 | v24 PC vehicle set | Missing | New enum value in `game_variant_options.vehicle_set` | Meaning (rides G1) | 1 |
-| G8 | v19 co-op player collisions | `__padding10C` | `cooperative_flags` bit 0 in byte 0x10C | Meaning; harmless if ignored | 2 |
+| G8 | v19 co-op player collisions | `__padding10C` | `cooperative_flags` bit 0 in byte 0x10C | Meaning; harmless if ignored | 2: **closed** (carried, checked and played: 6.2) |
 | G9 | v10 pings (distributed 19) | Missing on 1.1. 1.1.1 has the same id and entry, but rejects values over 9999 other than 0xFFFF, while OpenCE sends up to 0xFFFE. | Every 2 s, unreliable | Additive | 1 (port 1.1.1's, relax the check) |
 | G10 | Votekick (distributed 78/79) | Missing | 3b20ef87, no version raise | Additive | 2 |
 | G11 | Voice (distributed 80/81/82) | 1.1.1 uses **78/79** (a collision with votekick), Opus 16 kHz, 16 kbps, 4 talkers, play only | Opus 48 kHz, 8–64 kbps chosen by the host, keyed frames, in the lobby too, proximity modes, 8 talkers | Collision, then format | 4 (renumber before 1.1.1 ships) |
 | G12 | Our Bungie-group messages 35–37 (map share) and 38–39 (chat, 1.1.1) | Ours only | None. Unknown packet types are logged and dropped (`network_server_message_handler.c:1355`, `network_client_message_handler.c:704`) [V]. A future OpenCE type 35+ would collide. | Additive today; collision risk later | 1 (gate behind capabilities) |
 | G13 | Our tunnel type 6 (client ping table) | Ours only | Types 1–5 | Additive [I] (verify the drop path in OpenCE `p2p.c`) | 1 (gate) |
-| G14 | Capacity (`halo_port_capacity.h`) | Actors 256, props 768, swarms 32, object lists (Xbox size), listed objects 1024, game state 0xFC0000 | 1024, 8192, 128, 1024, 8192, 0x13C0000. Network actors 1056 vs our 288. | Index ranges in **co-op** | Co-op crossplay refused until checked (section 6) |
+| G14 | Capacity (`halo_port_capacity.h`) | Actors 256, props 768, swarms 32, object lists (Xbox size), listed objects 1024, game state 0xFC0000 | 1024, 8192, 128, 1024, 8192, 0x13C0000. Network actors 1056 vs our 288. | Index ranges in **co-op** | **Closed** (6.2): those pools are the host's only; a client's AI unit table is 1056 on the crossplay wire |
 | G15 | Version check | Exact match on the client, from the advertisement. The host never checks (true in all four projects). | Exact match on the client (DamnationCE uses a range that is currently 26..26; ChupathingyCE 11..30) | Policy | 1 + table in 2 |
 | G16 | WebRTC (browser players) | None | DTLS/SCTP data channels, ICE-lite | Not planned on the Vita. Announce kind "none" as ChupathingyCE does, so browser players can't join us and we can't join them. | — |
 
@@ -438,7 +439,7 @@ from the listing or advertisement, and again on the settings record:
 | Check | Default | Notes |
 |---|---|---|
 | players (owner, Oct 11) | **allow**, marked **Experimental** past 16 | Not a refusal: OpenCE's quick-setup hosts allow 128 slots, and our tree holds 128 machines (`HALO_PORT_MAXIMUM_NETWORK_MACHINES`), so it is a frame-rate question, not a limit. With Crossplay On, the browser badges a game with more than 16 players in it, or a maximum above 16, "Experimental", and joining one asks once ("Large PC game: more than 16 players can make the Vita lag. Join anyway?"). Judged on current players and the maximum, from the listing and again on the settings record. |
-| co-op | refuse the crossplay wire's co-op hosts | G14: a PC co-op host drives up to 1056 actors; ours hold 288. The other direction (PC client, Vita co-op host) is safe in principle and can open in phase 3 after an index audit. |
+| co-op (owner, Oct 11) | **allow**, marked **Experimental**, asked once | Built (section 6.2): a PC co-op game is badged CO-OP EXPERIMENTAL and joining it asks once ("PC co-op game: experimental on the Vita. The host's AI and extra enemies can make it lag. Join anyway?"; past 4 players it says so). Every index such a host sends fits this build (G14 closed). The other direction (PC client, Vita co-op host) stays off: a Vita never hosts on the crossplay wire. |
 | map | must be present locally and pass `custom_edition_maps` limits (23 MB tag cache, file ≤ 0x18000000, no compressed CE maps, resource maps from the player) | Built (T3, section 6.1). OpenCE has no map download, so a PC host's custom map needs the player's own copy; a missing one is refused with a message naming it, and map share is never asked of a PC host. |
 | game in progress (flag 0x02) | allowed | Late join costs a precache. Our texture-streaming work applies. |
 | split screen in a PC game (PS TV) | 1 local player in crossplay games until measured | |
@@ -479,7 +480,8 @@ the messages) and offers no download.
 As built (T11, Oct 11 2026; section 10.3): `port/linux/src/crossplay_guard.c`
 holds the rules and texts, `port/linux/game/network_crossplay_guard.c` the
 game client's hooks. A co-op game is one with no game engine (how OpenCE
-lists and hosts co-op) or on a campaign level.
+lists and hosts co-op) or on a campaign level: joined as Experimental since
+section 6.2.
 
 **Our hosts with PC clients** (phase 3, task T12):
 - The 16-player cap stays (`network_game_server_port_maximum_players`).
@@ -497,6 +499,138 @@ lists and hosts co-op) or on a campaign level.
 
 **Official servers.** They are x86, so any PC load is fine there. Keep their
 16-player cap and stock maps while Vitas join them. Big Team stays at 16.
+
+### 6.2 PC co-op (G14, built Oct 11 2026)
+
+The owner's decision: a Vita with Crossplay on joins a PC host's network
+co-op game, badged Experimental and asked about once, as a large game is.
+Branch feat/xp-coop.
+
+**The wire is already the same** [V]. Co-op's distributed kinds have the
+same numbers on both sides (64 actor states, 65 structure BSP, 66
+presentation, 68 device groups, 69 object names, 70 skip vote, 71 events, 72
+object transforms, 73 actor damage, 74 object looks, 75 damage animations,
+76 screen effect, 77 device states), and every `struct distributed_coop_*`
+and `distributed_actor_state` is the same field for field (diffed). Of
+OpenCE's 18 co-op commits (8194c5a0 to bad4bf45) all were in but the game
+half of 62fa7e13 (PLAYER COLLISIONS, ported now) and 140f0298 (a follow
+camera kept valid, client-local; ours has its own fix). Our differences
+from upstream's co-op code are host-side (the object census, actor states'
+send periods, no object states for AI bipeds that actor states place) or
+client-local (the pace hold, traces); an OpenCE host sends AI bipeds' object
+states too, which our client ignores while their actor states are fresh.
+The join is the same: co-op is a campaign level with no game engine; the
+difficulty is the record's (checked: 0 to 3); OpenCE's advertisement has no
+co-op bit (G2), so a co-op game is known by its engine 0 on a level that is
+not one of the Xbox's multiplayer ones. `cooperative_flags` (G8) was already
+carried and checked (only bit 0 known); its PLAYER COLLISIONS off now lets
+the players' bipeds pass through each other on our client as on the host
+(`network_coop_player_collisions`, bipeds.c, collisions.c). OpenCE allows up
+to 16 players in co-op by default (Server Setup, up to its maximum), with
+its extra enemies on (`per_player`, 50% of a squad more per player past the
+first, at most 8 times the squad).
+
+**What G14 really is** [V]. A distributed client runs no AI (game.c runs
+`ai_update` only off clients; actors.c places no actor and no encounter on a
+client) and no scripts in co-op (game.c skips `hs_update` on a co-op
+client). So the actor, prop and swarm pools, the script object lists and
+the game state they make (0xFC0000 against OpenCE's 0x13C0000) are filled
+only by a host: a PC host's numbers never index them on our client. What a
+host's numbers do index on a client:
+
+| Index | Ours | OpenCE | Checked |
+|---|---|---|---|
+| object (datum index) | 8192 objects, 0x800000 bytes | the same | `distributed_object_index_valid`, tracked objects = objects per map |
+| player, machine | 128, 128 | the same | the record's checks, `distributed_player` |
+| device group | 1024 (devices.c) | the same | `device_group_find`: below the scenario's count and 1024 |
+| object name, BSP, cutscene flag, title, HUD message, marker, breakable surface | the map's own | the same map | each against the scenario, model or BSP block's count |
+| tag (sound, effect, animation) | the map's own | the same map | `distributed_tag_of_group`, `distributed_graph_animation` |
+| AI units a client drives (actor states) | **288** (actors + 32) | 1056 (OpenCE's version 13) | the one real gap: now **1056 on the crossplay wire** |
+
+A full AI table never corrupted anything: the unit's actor state was
+dropped, its object states still placed it (an OpenCE host sends them for
+every unit), and nothing drove its aim, fire and animations. The table now
+holds OpenCE's 1024 + 32 on the crossplay wire (about 150 KB of static
+data, outside the game state, so saves are untouched; the legacy wire keeps
+288), found by the unit's absolute object index through a slot map
+(`port/linux/game/network_actor_table.c`) rather than a walk of a thousand
+entries for every state. A unit past it is still dropped gracefully, logged
+once a game ("the host drives more AI units than this client tracks") and
+counted; a state refused for its values is logged once with the field and
+counted. The wire contract test now judges G14 this way (objects equal,
+object memory at least the host's, the client's AI table at least the
+host's actors + 32) and passes. Approach: (b) for the one table that a
+client fills from a host, (a) for everything else, which already dropped
+out-of-range entries without a crash and needed no change.
+
+**Measured** (crosscoopcensus: OpenCE co-op hosts, our client's census each
+second; the bots do not progress through a level, so the census covers each
+level's start and every BSP the host switched through on its console):
+
+| Level | Extra enemies | Players | Objects | Units | Living AI | AI units tracked (most) |
+|---|---|---|---|---|---|---|
+| a50 | per player (OpenCE's default) | 2 / 4 | 1176 / 1061 | 45 / 60 | 25 / 32 | 22 / 30 |
+| b30 | per player | 2 / 4 | 1078 / 1156 | 95 / 129 | 82 / 110 | 31 / 31 |
+| b40 | per player | 2 / 4 | 580 / 594 | 66 / 73 | 58 / 63 | 9 / 14 |
+| c10 | per player | 2 / 4 | 963 / 995 | 29 / 31 | 13 / 13 | 7 / 7 |
+| c20 | per player | 2 / 4 | 639 / 657 | 42 / 46 | 29 / 29 | 29 / 29 |
+| c40 | per player | 2 / 4 | 541 / 574 | 39 / 47 | 11 / 11 | 8 / 8 |
+| d20 | per player | 2 / 4 | 925 / 979 | 48 / 73 | 23 / 45 | 6 / 21 |
+| d40 | per player | 2 / 4 | 722 / 778 | 63 / 82 | 35 / 30 | 8 / 0 |
+| a50 | 32 times | 2 / 4 | 1563 / 1582 | 317 / 322 | 297 / 297 | **294 / 294** |
+| b30 | 32 times | 2 / 4 | 2496 / 2231 | 808 / 812 | 794 / 794 | **651 / 651** |
+| b40 | 32 times | 2 / 4 | 890 / 884 | 227 / 228 | 210 / 210 | 161 / 161 |
+| c20 | 32 times | 2 / 4 | 1481 / 1488 | 898 / 898 | 886 / 886 | **897 / 897** |
+| d20 | 32 times | 2 / 4 | 1028 / 1545 | 333 / 707 | 308 / 677 | 192 / 192 |
+| d40 | 32 times | 4 | 1157 | 305 | 246 | 0 |
+
+No AI unit was ever untracked and no actor state refused. With OpenCE's
+defaults every level stays far inside every capacity, the old table of 288
+included (31 at most). With its extra enemies at their maximum (32 times)
+the host drives up to 897 AI units at once on c20 and 651 on b30: past the
+old 288, inside the new 1056 (the host's own actor pool, 1024, bounds it).
+Objects peaked at 2496 of 8192. a10 (its cryo tube waits for the host to
+finish its look training, which the bots don't) and a30 (players spawn
+after its long opening) were left at their starts.
+
+The stress run found two things, both fixed: our checked (debug) builds
+halted when the lights' cluster reference lists filled ("couldn't add to
+reference list cluster light reference": our port's two append-at-the-end
+adds asserted where OpenCE's and the Xbox's own add drop the datum; release
+builds, the Vita's, already dropped it), and the overflow warning was
+written once per datum per tick (20,000 debug.txt lines a minute), now 8
+times a run. Our client's lights overflow those lists where OpenCE's
+clients don't (our lights' port work keeps more clusters): at 32 times
+some lights drop out of clusters on our client; at OpenCE's defaults the
+lists never filled.
+
+**Policy** (the owner's): allowed, Experimental, asked once: "PC co-op game:
+experimental on the Vita. The host's AI and extra enemies can make it lag.
+Join anyway?" (past 4 players: "PC co-op game with more than 4 players:
+experimental on the Vita. More players and the host's extra enemies can
+make it lag. Join anyway?"). Asked in either browser before the join and
+remembered for its lobby, else in the lobby when the record comes; "no"
+leaves it, and System Link's automatic join doesn't come back to it. Badges:
+"PC CO-OP EXPERIMENTAL" (PC menus), "COOP EXP" (the panel's rows), "PC co-op:
+experimental on the Vita" (its line in words). Large co-op (more than the
+Vita's own 4) is allowed with the same single question, which says so: the
+census shows no capacity limit reached at 4 players with extra enemies, so
+it is a frame-rate question, as large multiplayer games are. The question is
+asked once a game, on the players when it is asked. Kept: a Vita never hosts
+on the crossplay wire; one local player in a crossplay game; the record's
+values checked as before.
+
+**Limits and risks.**
+- CPU, not memory, is the Vita's limit: OpenCE's extra enemies and more
+  players mean more units to simulate on every machine. Unmeasured on a
+  Vita (owner-run hardware check).
+- OpenCE's network test cannot turn PLAYER COLLISIONS off (only Server
+  Setup does), so the collisions-off path is ported from upstream and
+  reviewed, not exercised against a PC host in the harness.
+- The bots do not play through a level: scripted encounters later in a
+  level (the AI a level places as players advance) were reached only as far
+  as BSP switches and level starts go; the stress run's multiplied extra
+  enemies stand in for a level's peak.
 
 ---
 
@@ -523,7 +657,7 @@ What crossplay changes:
 | Threat | Where it hits | Required handling |
 |---|---|---|
 | Malformed or oversized messages from a PC host or client | every decoder | Field tables bound sizes. Fuzz every new parser under ASan/UBSan (`run_net_fuzz_test.sh` gains targets: variant options, listing v1, signalling v4, votekick, voice 80–82, capabilities, table). |
-| Out-of-range indices in a valid-sized struct (player, machine, actor, object, BSP, vehicle set, loadout) | distributed handlers, settings record | Bounds-check against **our** capacities, not OpenCE's (G14). A PC host may legally send indices our pools don't have. Audit task T14 with a test per index. |
+| Out-of-range indices in a valid-sized struct (player, machine, actor, object, BSP, vehicle set, loadout) | distributed handlers, settings record | Bounds-check against **our** capacities, not OpenCE's (G14). A PC host may legally send indices our pools don't have. Co-op's audited (section 6.2): every one checked against what this build holds; T14 for the rest. |
 | Settings that crash or starve the Vita | settings record, map | Section 6 refusals, enforced on receipt as well as in the browser |
 | Map-share abuse | our 35–37 | Already: host serves only its current custom map, name whitelist, header validation, SHA-256 before rename, 256 MiB cap, rate limits. New: never request a map from a peer that didn't announce map_share; keep "download only from code/Wi-Fi games unless Anyone". |
 | Hostile custom maps on a PC host | map loader | Our validator and script allowlist (from OpenCE's map validator). Port ChupathingyCE's map-hardening items we lack (see 7.3). |
@@ -705,7 +839,8 @@ support; OpenCE falls back to 3.1.1) and `stun_test_server.py`.
 | `dedicatedopence` | our crossplay server, one OpenCE client + one of ours + bots | full game, both scoreboards agree (tick hash on our side), map rotation |
 | `pcjoinsvita` | our Vita-path host with `HALO_TICK_SLOWDOWN=19`, OpenCE clients | 16 cap holds, the 17th is refused, host frame budget logged |
 | `crossmixed` | beta.4 (v18) binaries (`HALO_TEST_VITA_OLD`) + beta.5 + OpenCE | legacy and crossplay games each work; beta.4 on a crossplay host gets the update message |
-| `crossrefuse` | OpenCE host: co-op / a second local player / missing map | our client refuses with the right message |
+| `crossrefuse` | OpenCE host: a second local player / missing map (co-op until 6.2) | our client refuses with the right message |
+| `crosscoop` | OpenCE, ChupathingyCE, DamnationCE co-op hosts on b30; OpenCE with 4 players; answering no | asked once, plays beside the host, has its AI, takes its checkpoint and BSP switch, nothing untracked or refused (10.4) |
 | `crossbig` | OpenCE host of 128 (more than 16: Experimental) | our client asks once, then plays; answering no, it plays none of it |
 | `crossversion` | an OpenCE build one version ahead, table not widened, then widened (signed test key) | refused, then plays |
 | `crossfuzz` | ASan build of ours, `debug.network_corrupt` a third of datagrams on the PC peer | no ASan report, game continues |
@@ -818,7 +953,8 @@ G3, G4, G5, G12, G13 and G15; still open: G6 (T3), G9, G10, G11, G14.
 
 Branch feat/xp-guardrails. With Crossplay on (and only then):
 
-- **PC co-op games are refused** (G14), with "This is a PC co-op game.
+- **PC co-op games are refused** (G14; superseded the same day by 10.4:
+  joined as Experimental), with "This is a PC co-op game.
   Co-op games on PC hosts can't be joined with Crossplay on: they run more
   AI than the Vita can hold." Checked in both server browsers (the PC
   menus', `menu_functions.c`, and the settings panel's), on a LAN
@@ -859,6 +995,67 @@ crossversion (SKIP, T10), with no leaks. It found one bug, now fixed: a
 ChupathingyCE host's settings record between games names Blood Gulch with
 no game engine for a moment, so no engine on one of the Xbox's multiplayer
 levels is not co-op.
+
+### 10.4 PC co-op as built (Oct 11 2026)
+
+Branch feat/xp-coop (section 6.2). With Crossplay on:
+
+- **PC co-op games are joined, Experimental**, after asking once (the
+  large-game mechanism: `crossplay_guard_question`, the answer remembered by
+  the game's name for its lobby, `HALO_CROSSPLAY_LARGE_ANSWER` for automated
+  runs). Badges: "PC CO-OP EXPERIMENTAL", the panel's "COOP EXP" and "PC
+  co-op: experimental on the Vita". The refusal text and its paths are gone;
+  the second local player and the map refusals stay.
+- **The client's AI unit table** holds 1056 on the crossplay wire
+  (`network_actor_table.c`, found by absolute object index; 288 on the
+  legacy wire), its overflow logged once and counted, refused actor states
+  logged with the field. The network test's co-op line logs the census.
+- **PLAYER COLLISIONS off** (`cooperative_flags` bit 0) is played
+  (`network_coop_player_collisions`, OpenCE 62fa7e13's game half).
+- **Fixes found by the new tests**: a full cluster reference list drops the
+  datum (warned 8 times a run) instead of halting a checked build, and no
+  NULL transparent group's references are written through; a nav point
+  with no screen type yet draws no arrow (was index -1), the host's nav
+  point offset pinned; no division by 0 local players in effects' particle
+  counts.
+
+**Tests:**
+- `crosscoop` (in `all`): OpenCE, ChupathingyCE and DamnationCE co-op hosts
+  on b30, our client asked once, 166-193 s beside the host's player, the
+  host's AI units driven (at most 31-44 tracked at once), the host's
+  checkpoint taken (`game_save` on its telnet console) and its
+  `switch_bsp 1` followed (121-145 s on it), nothing untracked or refused;
+  four players (ours and two OpenCE clients): all four alive 174-186 s;
+  answering no: left, no co-op tick played. Control: an OpenCE client.
+- `crosscoopcensus` (not in `all`): the measurements of 6.2.
+- `crosscoopfuzz` (not in `all`; an ASan + UBSan `HALO_NET_FUZZ_TWIN` build
+  of ours): one in two of the host's AI and co-op messages (kinds 16 and
+  64-77, `HALO_NET_FUZZ_KINDS`) twinned on each of the three PC builds' co-op
+  hosts, four players on OpenCE, and one in three of every message: about
+  30,000 twins, no AddressSanitizer error, no crash; UBSan only the lines
+  known before (start-up, the null renderer, render_sprite.c, units.c). Its
+  first run found the nav point index; the ASan stress census (32 times,
+  b30 and c20) the effects division.
+- `actor_table` network fuzz target (run_net_fuzz_test.sh): the table
+  against a plain list, with ASan and UBSan, kept cases and libFuzzer.
+- The wire contract test passes G14 (and G8's text says the switch is
+  played).
+
+**Gates** (feat/xp-coop): the strict crossplay suite (`XPPC_STRICT=1 all`)
+passes every mode but crossversion (SKIP, T10) and crossmaps (SKIP there for
+want of a CE map; run on its own with pcgulch and the Custom Edition
+resource maps: PASS), no leaks; Crossplay off: netns code, coop, lobby,
+menus, dedicated and swatmixed (beta binaries) PASS, the wire contract's
+legacy baseline unchanged; settings test (381 checks a configuration),
+p2p_lobby (175), crossplay_guard (28), browser list, network wire, port
+config, players' machines, lang (552 of 552 translated) and the network
+fuzz targets (kept cases, then 60 s of libFuzzer each, actor_table
+included) PASS; a10 and b30 150 s threaded single player exit 0; the Vita
+build compiles (eboot and VPK).
+
+**Not checked here:** the collisions-off path against a PC host (OpenCE's
+network test leaves it on; only its Server Setup turns it off); a real
+Vita's frame rate in a PC co-op game (owner-run).
 
 ---
 

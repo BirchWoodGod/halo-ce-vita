@@ -1612,9 +1612,8 @@ boolean network_game_client_game_settings_updated(
 			return FALSE;
 		}
 #ifdef HALO_LINUX
-		/* port: a PC host's game this machine does not play (crossplay: a
-		co-op game), refused, the player told and the game left; a large
-		one asked about once (network_crossplay_guard.c) */
+		/* port: a PC host's game the player said no to (crossplay: a large
+		or co-op game, asked about once), left (network_crossplay_guard.c) */
 		if (!network_crossplay_guard_record(client, message_packet))
 		{
 			display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
@@ -3677,8 +3676,8 @@ boolean network_game_client_advertised_game_compatible(
 	{
 		if (distributed && network_wire_version_accepted(theirs))
 		{
-			/* (docs/crossplay.md 6, T11: a PC co-op game refused, a large one
-			joined as experimental: network_crossplay_guard.c) */
+			/* (docs/crossplay.md 6, T11: a PC co-op or large game joined as
+			experimental, asked about in its lobby: network_crossplay_guard.c) */
 			if (!network_crossplay_guard_advertisement(game->game_name, game->map.name, (long)sizeof(game->map.name),
 				game->engine_type, (long)game->player_count, (long)game->maximum_player_count, tell))
 			{
@@ -3799,8 +3798,8 @@ boolean network_game_client_join_first_available_game(
 				network_game_client_incompatibility_told = TRUE;
 				return FALSE;
 			}
-			/* (a large PC game the player said no to a moment ago: not joined
-			again by itself, network_crossplay_guard.c) */
+			/* (a large or co-op PC game the player said no to a moment ago: not
+			joined again by itself, network_crossplay_guard.c) */
 			if (network_crossplay_guard_declined(game->game_name, TRUE))
 				return FALSE;
 

@@ -5,13 +5,12 @@ The game client's side of the crossplay guardrails (docs/crossplay.md 6,
 T11; the rules are port/linux/src/crossplay_guard.h's). With Crossplay on
 (network_wire.h) this machine joins PC games only, and:
 
-- a PC co-op game is refused from its LAN advertisement (no game engine,
-  or a campaign level), before any join, and again on its settings record
-  (the game left, the player told);
-- a large PC game (more than 16 players in it, or a maximum above 16) is
-  joined, and the player asked once whether to play it anyway: in the
-  server browser before the join, else in the game's lobby when its
-  settings record arrives; "no" leaves it;
+- a PC co-op game (no game engine, or a campaign level) and a large PC
+  game (more than 16 players in it, or a maximum above 16) are joined,
+  Experimental, and the player asked once whether to play it anyway: in
+  the server browser before the join, else in the game's lobby when its
+  settings record arrives; "no" leaves it (co-op since Oct 11 2026: its
+  indices all fit this build, docs/crossplay.md 6.2);
 - split screen (PS TV): one local player in a crossplay game; another is
   not added, and told why.
 
@@ -25,7 +24,9 @@ server runs (split screen, bots).
 struct network_game;
 
 /* a PC host's LAN advertisement, of a version this machine joins: FALSE
-refuses it (the player told, if tell) */
+refuses it (the player told, if tell). Nothing is refused by it now (a
+co-op or large game is logged, and asked about in its lobby); kept as the
+place a refusal would go */
 boolean network_crossplay_guard_advertisement(
 	wchar_t const *game_name,
 	char const *map_name,
