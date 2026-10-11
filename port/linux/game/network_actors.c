@@ -33,6 +33,7 @@ an AI unit the same way it kills a player's.
 /* ---------- headers */
 
 #include "cseries.h"
+#include "cseries/errors.h"
 #include "game/game.h"
 #include "networking/network_game_globals.h"
 #include "objects/objects.h"
@@ -43,6 +44,7 @@ an AI unit the same way it kills a player's.
 #include "units/unit_control_data.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "network_wire.h"
 
 #include <math.h>
 
@@ -52,8 +54,17 @@ enum
 {
 	/* AI units tracked at once: every actor (halo_port_capacity.h's
 	HALO_PORT_MAXIMUM_ACTORS) and the units the cutscenes' recorded
-	animations drive */
+	animations drive. The host's table, and a client's on the legacy wire
+	(its host is a Vita, of these) */
 	MAXIMUM_NETWORK_ACTORS = HALO_PORT_MAXIMUM_ACTORS + 32,
+	/* A client's on the crossplay wire (network_wire.h): a PC co-op host's
+	(OpenCE's 1024 actors and 32, its network version 13), whose extra
+	enemies give each squad more of itself for each player. A client runs
+	no AI, so only this table, not the actor pools, holds what such a host
+	drives (docs/crossplay.md 6.2) */
+	MAXIMUM_CROSSPLAY_CLIENT_ACTORS = 1024 + 32,
+	MAXIMUM_CLIENT_NETWORK_ACTORS = MAXIMUM_CROSSPLAY_CLIENT_ACTORS > MAXIMUM_NETWORK_ACTORS ?
+		MAXIMUM_CROSSPLAY_CLIENT_ACTORS : MAXIMUM_NETWORK_ACTORS,
 	MAXIMUM_ENTRIES_PER_MESSAGE = 64,
 	/* A client keeps applying a control for this long after the host last
 	sent one. After that the unit is left alone: the actor let go of it, or
@@ -243,8 +254,20 @@ one counter, so a unit that drops out of the table and comes back can't
 repeat the number a client last played */
 static byte host_event_number;
 
-static struct client_actor client_actors[MAXIMUM_NETWORK_ACTORS];
+static struct client_actor client_actors[MAXIMUM_CLIENT_NETWORK_ACTORS];
 static short client_actor_count;
+/* client: each unit's entry by its object's absolute index, plus one (0:
+none), so an entry is found at once among a thousand */
+static short client_actor_slots[MAXIMUM_OBJECTS_PER_MAP];
+/* client: the most entries this game, the units whose states found the
+table full (each told once a game: logged the first time), and the entries
+refused for their values */
+static struct
+{
+	short most;
+	long untracked;
+	long rejected;
+} client_actor_statistics;
 
 /* ---------- private code */
 
@@ -299,24 +322,96 @@ static struct host_actor *host_actor_for(
 	return &host_actors[host_actor_count++];
 }
 
+/* client: how many AI units it tracks: a PC co-op host's on the crossplay
+wire, a Vita host's on the legacy one (as betas 1-4) */
+static short client_actor_limit(
+	void)
+{
+	return network_wire_crossplay() ? MAXIMUM_CROSSPLAY_CLIENT_ACTORS : MAXIMUM_NETWORK_ACTORS;
+}
+
+/* client: the unit's entry, NULL for none (a unit_index a valid object
+index: distributed_object_index_valid) */
+static struct client_actor *client_actor_find(
+	long unit_index)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(unit_index);
+	short slot;
+
+	if (absolute_index < 0 || absolute_index >= MAXIMUM_OBJECTS_PER_MAP)
+		return NULL;
+	slot = client_actor_slots[absolute_index];
+	if (slot <= 0 || slot > client_actor_count || client_actors[slot - 1].unit_index != unit_index)
+		return NULL;
+	return &client_actors[slot - 1];
+}
+
+/* client: the entry at index removed, the last put in its place */
+static void client_actor_remove(
+	short index)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(client_actors[index].unit_index);
+
+	if (absolute_index >= 0 && absolute_index < MAXIMUM_OBJECTS_PER_MAP &&
+		client_actor_slots[absolute_index] == index + 1)
+	{
+		client_actor_slots[absolute_index] = 0;
+	}
+	client_actors[index] = client_actors[--client_actor_count];
+	if (index < client_actor_count)
+	{
+		absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(client_actors[index].unit_index);
+		if (absolute_index >= 0 && absolute_index < MAXIMUM_OBJECTS_PER_MAP)
+			client_actor_slots[absolute_index] = (short)(index + 1);
+	}
+}
+
 static struct client_actor *client_actor_for(
 	long unit_index)
 {
-	short index;
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(unit_index);
+	struct client_actor *actor = client_actor_find(unit_index);
+	short slot;
 
-	for (index = 0; index < client_actor_count; index++)
-	{
-		if (client_actors[index].unit_index == unit_index)
-			return &client_actors[index];
-	}
-	if (client_actor_count >= MAXIMUM_NETWORK_ACTORS)
+	if (actor)
+		return actor;
+	if (absolute_index < 0 || absolute_index >= MAXIMUM_OBJECTS_PER_MAP)
 		return NULL;
-	csmemset(&client_actors[client_actor_count], 0, sizeof(client_actors[0]));
-	client_actors[client_actor_count].unit_index = unit_index;
-	client_actors[client_actor_count].impulse = NONE;
-	client_actors[client_actor_count].speech_sound = NONE;
-	client_actors[client_actor_count].user_animation_graph = NONE;
-	return &client_actors[client_actor_count++];
+	/* (an entry of the object this index held before, gone: its place is the
+	new unit's) */
+	slot = client_actor_slots[absolute_index];
+	if (slot > 0 && slot <= client_actor_count &&
+		DATUM_INDEX_TO_ABSOLUTE_INDEX(client_actors[slot - 1].unit_index) == absolute_index)
+	{
+		actor = &client_actors[slot - 1];
+		if (actor->driven && object_try_and_get_and_verify_type(actor->unit_index, _object_mask_unit))
+			unit_set_actively_controlled(actor->unit_index, FALSE);
+	}
+	else if (client_actor_count >= client_actor_limit())
+	{
+		/* (its object states still place it: an OpenCE host sends them for
+		every unit; it is not driven) */
+		if (!client_actor_statistics.untracked)
+		{
+			error(_error_silent, "AI sync: the host drives more AI units than this client tracks (%d): the rest are "
+				"placed but not driven", (int)client_actor_limit());
+		}
+		client_actor_statistics.untracked++;
+		return NULL;
+	}
+	else
+	{
+		actor = &client_actors[client_actor_count++];
+		client_actor_slots[absolute_index] = client_actor_count;
+		if (client_actor_count > client_actor_statistics.most)
+			client_actor_statistics.most = client_actor_count;
+	}
+	csmemset(actor, 0, sizeof(*actor));
+	actor->unit_index = unit_index;
+	actor->impulse = NONE;
+	actor->speech_sound = NONE;
+	actor->user_animation_graph = NONE;
+	return actor;
 }
 
 /* whether the unit exists, is alive, and isn't a player's */
@@ -453,13 +548,17 @@ static boolean actor_state_apply(
 			!distributed_graph_animation(state->user_animation_graph, state->user_animation)) ||
 		!distributed_point_valid(&state->position, UNIT_WORLD_BOUND))
 	{
+		client_actor_statistics.rejected++;
 		return FALSE;
 	}
 	distributed_vector_unpack(&state->velocity, DISTRIBUTED_VELOCITY_SCALE, &velocity);
 	distributed_vector_unpack(&state->forward, DISTRIBUTED_UNIT_SCALE, &forward);
 	distributed_vector_unpack(&state->up, DISTRIBUTED_UNIT_SCALE, &up);
 	if (!distributed_axes_make_valid(&forward, &up))
+	{
+		client_actor_statistics.rejected++;
 		return FALSE;
+	}
 	actor = client_actor_for(state->unit_index);
 	if (!actor)
 		return TRUE;
@@ -584,6 +683,20 @@ void network_actors_new_game(
 {
 	host_actor_count = 0;
 	client_actor_count = 0;
+	csmemset(client_actor_slots, 0, sizeof(client_actor_slots));
+	csmemset(&client_actor_statistics, 0, sizeof(client_actor_statistics));
+}
+
+void network_actors_client_statistics(
+	long *tracked,
+	long *most,
+	long *untracked,
+	long *rejected)
+{
+	*tracked = client_actor_count;
+	*most = client_actor_statistics.most;
+	*untracked = client_actor_statistics.untracked;
+	*rejected = client_actor_statistics.rejected;
 }
 
 /* host: unit_control calls this when an actor drives its unit */
@@ -922,17 +1035,10 @@ boolean network_actors_host_drives(
 boolean network_actors_client_drives(
 	long unit_index)
 {
-	short index;
+	struct client_actor const *actor = client_actor_find(unit_index);
 
-	for (index = 0; index < client_actor_count; index++)
-	{
-		if (client_actors[index].unit_index == unit_index)
-		{
-			return distributed_latest_host_time() - client_actors[index].received_host_time <= ACTOR_STATES_FRESH_TICKS &&
-				actor_unit_valid(unit_index) && object_get(unit_index)->object.type != _object_type_vehicle;
-		}
-	}
-	return FALSE;
+	return actor && distributed_latest_host_time() - actor->received_host_time <= ACTOR_STATES_FRESH_TICKS &&
+		actor_unit_valid(unit_index) && object_get(unit_index)->object.type != _object_type_vehicle;
 }
 
 /* Client: called at the point in the tick where the host runs the AI.
@@ -951,7 +1057,7 @@ void network_actors_drive(
 		{
 			if (actor->driven && object_try_and_get_and_verify_type(actor->unit_index, _object_mask_unit))
 				unit_set_actively_controlled(actor->unit_index, FALSE);
-			client_actors[index--] = client_actors[--client_actor_count];
+			client_actor_remove(index--);
 			continue;
 		}
 		/* vehicles follow the host's transform instead (network_objects.c) */

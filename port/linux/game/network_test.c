@@ -122,6 +122,8 @@ void network_distributed_statistics(long *sent, long *received, long *correction
 void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 void network_distributed_item_statistics(long *creates, long *deletes, long *failures, long *removed);
 void network_damage_statistics(long *sent_reports, long *dealt_reports, long *rejected_reports, long *replayed_events);
+/* network_actors.c's */
+void network_actors_client_statistics(long *tracked, long *most, long *untracked, long *rejected);
 /* xinput_sdl.c's */
 void test_input_hold_action(int hold);
 void test_input_hold_back(int hold);
@@ -746,11 +748,36 @@ static void network_test_log_players(
 		long watched = coop_spectate_unit(0);
 		long holds, most_lead;
 
+		long objects = 0, units = 0, ai_units = 0;
+		long tracked, most, untracked, rejected;
+		struct object_iterator iterator;
+		struct object_datum *object;
+
 		network_coop_client_pace_statistics(&holds, &most_lead);
-		platform_log("network test: co-op tick %ld | bsp %d | cinematic %d skip %s %d/%d%s | watching %lx | held %ld lead %ld",
+		/* (the census: this machine's objects, its units and those of them
+		AI's, which a client has as its host's; the AI units it tracks to
+		drive, the most this game, those it had no room for and the states it
+		refused: docs/crossplay.md 6.2) */
+		object_iterator_new(&iterator, _object_mask_all, 0);
+		while ((object = object_iterator_next(&iterator)) != NULL)
+		{
+			objects++;
+			if (TEST_FLAG(_object_mask_unit, object->object.type))
+			{
+				units++;
+				if (unit_get(iterator.index)->unit.player_index == NONE &&
+					!TEST_FLAG(object->object.damage_flags, _object_dead_bit))
+				{
+					ai_units++;
+				}
+			}
+		}
+		network_actors_client_statistics(&tracked, &most, &untracked, &rejected);
+		platform_log("network test: co-op tick %ld | bsp %d | cinematic %d skip %s %d/%d%s | watching %lx | held %ld lead %ld"
+			" | objects %ld units %ld living ai %ld | ai tracked %ld most %ld untracked %ld rejected %ld",
 			game_time_get(), (int)global_structure_bsp_index_get(), (int)cinematic_in_progress(),
 			offered ? "offered" : "no", (int)votes, (int)voters, voted ? " voted" : "", (unsigned long)watched,
-			holds, most_lead);
+			holds, most_lead, objects, units, ai_units, tracked, most, untracked, rejected);
 	}
 }
 
