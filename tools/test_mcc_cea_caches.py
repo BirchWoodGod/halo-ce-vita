@@ -456,6 +456,60 @@ def test_more_script_nodes_than_this_build_has_are_refused(report_tool, tmp_path
     assert report["mcc_cea_fix"].startswith("the scenario's scripts use more syntax nodes")
 
 
+def resource_map_file(map_type, items):
+    """A resource map: header, item data, names, index (as
+    test_cache_file_formats.py makes them); the items' data offsets"""
+    data = bytearray(16)
+    placed = []
+    for name, payload in items:
+        while len(data) % 4:
+            data.append(0)
+        placed.append((name, len(data), len(payload)))
+        data.extend(payload)
+    names_offset = len(data)
+    name_offsets = []
+    for name, _, _ in placed:
+        name_offsets.append(len(data) - names_offset)
+        data.extend(name.encode("latin-1") + b"\0")
+    index_offset = len(data)
+    for (name, offset, size), name_offset in zip(placed, name_offsets):
+        data.extend(struct.pack("<iii", name_offset, size, offset))
+    struct.pack_into("<iiii", data, 0, map_type, names_offset, index_offset, len(items))
+    return data, [offset for _, offset, _ in placed]
+
+
+def external_bitmap_cache(tmp_path, item_size=32, shift=0, with_map=True):
+    """a cache whose bitmap's 32 bytes of pixels are in a bitmaps.map beside
+    it (MCC's, as a mod's own): the item of `item_size` there, named by
+    `shift` bytes past its start"""
+    cache = Cache()
+    path = cache.write(tmp_path)
+    bitmaps, offsets = resource_map_file(1, [("test\\other_0", bytes(48)), ("test\\bitmap_0", bytes(item_size))])
+    if with_map:
+        (tmp_path / "bitmaps.map").write_bytes(bitmaps)
+    bitmap = cache.where["tag_data"] + cache.addresses["bitmap"] - BASE
+    patched(path, bitmap + 0x0E, "<H", 1 << 8)
+    return patched(path, bitmap + 0x18, "<I", offsets[1] + shift)
+
+
+def test_pixels_in_a_mods_own_bitmaps_map_are_read_from_its_item(report_tool, tmp_path):
+    returncode, report = run_report(report_tool, external_bitmap_cache(tmp_path))
+    assert returncode == 0, report
+    assert report["resource_map.bitmaps"].endswith("(ok)")
+    assert report["bitmap_data_ranges_checked"] == "1"
+
+
+@pytest.mark.parametrize("case, message", [
+    (dict(shift=4), "a tag's entry is missing from its resource map"),
+    (dict(item_size=16), "a tag's entry is missing from its resource map"),
+    (dict(with_map=False), "a map needs a resource map that was not supplied"),
+])
+def test_pixels_not_an_item_of_the_bitmaps_map_are_refused(report_tool, tmp_path, case, message):
+    returncode, report = run_report(report_tool, external_bitmap_cache(tmp_path, **case))
+    assert returncode == 1
+    assert report["load"] == message
+
+
 def test_a_script_taking_parameters_is_refused(report_tool, tmp_path):
     # MCC's parameter block in the script's padding (+0x50): this build's
     # interpreter has no parameters
@@ -717,5 +771,36 @@ def test_seeded_corruption_never_crashes_the_loader(report_tool, tmp_path):
             else:
                 struct.pack_into("<I", data, offset & ~3, generator.choice(interesting))
         path = tmp_path / f"trial{trial % 8}.map"
+        path.write_bytes(data)
+        run_report(report_tool, path)
+
+
+def test_seeded_corruption_of_a_mods_bitmaps_map_never_crashes_the_loader(report_tool, tmp_path):
+    """The same, with the bitmap's pixels in a bitmaps.map beside the cache:
+    the resource map's header, names and index, and the bitmap's flags,
+    offset and size, corrupted (resource_map_open, resource_map_item_at)."""
+    path = external_bitmap_cache(tmp_path)
+    pristine_map = (tmp_path / "bitmaps.map").read_bytes()
+    pristine_cache = path.read_bytes()
+    cache = Cache()
+    cache.build()
+    bitmap = cache.where["tag_data"] + cache.addresses["bitmap"] - BASE
+    interesting = [0, 1, 4, 16, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFF, len(pristine_map), len(pristine_map) - 4]
+    generator = random.Random(20261011)
+    for trial in range(300):
+        resource = bytearray(pristine_map)
+        data = bytearray(pristine_cache)
+        for _ in range(generator.randint(1, 4)):
+            if generator.random() < 0.7:
+                offset = generator.randrange(0, len(resource) - 4)
+                target = resource
+            else:
+                offset = bitmap + generator.choice((0x0E, 0x18, 0x1C))
+                target = data
+            if generator.random() < 0.5:
+                target[offset] = generator.randrange(256)
+            else:
+                struct.pack_into("<I", target, offset & ~3 if target is resource else offset, generator.choice(interesting))
+        (tmp_path / "bitmaps.map").write_bytes(resource)
         path.write_bytes(data)
         run_report(report_tool, path)

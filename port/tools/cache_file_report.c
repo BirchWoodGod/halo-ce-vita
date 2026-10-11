@@ -17,8 +17,9 @@ made. A cache that loads is then converted for this build as far as its
 bytes alone go (custom_edition_cache_convert), and --dump-tags writes the
 converted tags, as they would sit at 0x40440000, to FILE. A Halo: CE
 Anniversary cache (MCC's version 13, docs/mcc_cea_maps.md) is loaded as the
-game loads one from a mod's folder, with no resource maps and its tags made
-this build's first (mcc_cea_cache_fix); its tags would sit at 0x50000000.
+game loads one from a mod's folder, with MCC's bitmaps.map and sounds.map of
+DIRECTORY (its pixels and samples alone) and its tags made this build's
+first (mcc_cea_cache_fix); its tags would sit at 0x50000000.
 --no-mcc-cea loads it as the game loads one from anywhere else: refused.
 Every file gets a block of "key: value" lines; the exit status is 0 when
 every file was recognized and every Custom Edition cache loaded and
@@ -269,10 +270,16 @@ static int report_custom_edition_cache(
 	{
 		printf("resource_maps_substituted: stock files instead of mod set '%s'\n", identity->opensauce.mod_name);
 	}
-	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES && identity->format != _cache_file_format_mcc_cea_cache; type++)
+	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES; type++)
 	{
 		char path[PATH_BYTES];
 
+		/* (a Halo: CE Anniversary cache's pixels and samples may be in MCC's
+		bitmaps.map and sounds.map beside it, as a mod's are for the game) */
+		if (identity->format == _cache_file_format_mcc_cea_cache && type == _resource_map_locale)
+		{
+			continue;
+		}
 		resource_map_path(identity, maps_directory, use_stock_data_files, (enum resource_map_type)type, path);
 		if (!stdio_source_open(&resource_sources[type], path))
 		{
@@ -324,6 +331,8 @@ static int report_custom_edition_cache(
 			report.model_index_data_offset);
 		printf("bitmap_data_ranges_checked: %" PRId32 "\n", report.bitmap_data_ranges_checked);
 		printf("sound_sample_ranges_checked: %" PRId32 "\n", report.sound_sample_ranges_checked);
+		if (report.mcc_cea_sound_permutations_silent)
+			printf("mcc_cea_sound_permutations_silent: %" PRId32 "\n", report.mcc_cea_sound_permutations_silent);
 		printf("relocated_pointers: %" PRId32 "\n", report.relocated_pointer_count);
 		printf("computed_checksum: 0x%08" PRIx32 "\n", report.computed_checksum);
 		printf("trailing_bytes: 0x%" PRIx32 "\n", report.trailing_bytes);

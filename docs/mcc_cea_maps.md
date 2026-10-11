@@ -59,9 +59,19 @@ uby_a10`: no stock
   is never taken for the stock one. A map named as a file of the maps
   folder (a converted `ruby_a10.map`) is left out: the maps folder's
   plays. 16 mods and 64 maps at most are listed.
-- **Only maps that keep every bitmap and sound** play (classic-only maps,
-  as the Ruby maps are): a map that takes tags from MCC's shared
-  `bitmaps.map` or `sounds.map` is refused, and needs none of Halo PC's.
+- **Bitmaps and sounds**: a map that keeps them all in itself (classic-only
+  maps, as the Ruby maps are) needs nothing else. A map that keeps their
+  pixels and samples in MCC's resource maps reads them from a
+  `bitmaps.map` and `sounds.map` in the mod's own `maps` folder, beside it
+  (never the maps folder's, which are Halo PC's): each bitmap's pixels
+  must be one of `bitmaps.map`'s items, by offset and size, or the map is
+  refused (as it is when the file is missing); a sound whose samples are
+  not one of `sounds.map`'s items, or whose mod has no `sounds.map`, plays
+  nothing (MCC keeps its own sounds in FMOD banks, so a map built against
+  MCC's shared files has none of them here).
+  A map that takes whole tags from them is refused. MCC's own campaign
+  maps load so, with MCC's `halo1/maps/bitmaps.map` beside them (a test
+  of this loader, below: their sounds are silent).
 - `debug.txt` says what was found (`mods: 10 maps of 1 mods ...`), why a
   map was left out, and what the load made of each (`custom edition:
   Halo: CE Anniversary: ...`).

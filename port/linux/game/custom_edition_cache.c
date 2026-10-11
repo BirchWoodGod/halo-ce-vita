@@ -1206,6 +1206,13 @@ static void custom_edition_cache_report_log(
 		(long)report->relocated_pointer_count,
 		report->checksum_deferred ? "taken with the models" :
 		TEST_FLAG(report->warnings, _custom_edition_warning_checksum_mismatch_bit) ? "mismatched" : "matched");
+	if (report->mcc_cea_sound_permutations_silent)
+	{
+		error(
+			_error_silent,
+			"custom edition: Halo: CE Anniversary: %ld sound permutations are silent: their samples are in a sounds.map the mod does not have (MCC keeps its own in FMOD banks)",
+			(long)report->mcc_cea_sound_permutations_silent);
+	}
 
 	return;
 }
@@ -1779,13 +1786,37 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		return NULL;
 	}
 
-	/* (a Halo: CE Anniversary map takes no tags from resource maps) */
-	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES && !mcc_cea; type++)
+	/* (port: a Halo: CE Anniversary map takes no tags from resource maps,
+	only pixels and samples from MCC's bitmaps.map and sounds.map: a mod's
+	own, beside its maps in its folder, never the maps folder's, which are
+	Halo PC's; the map is refused if it names one that is not there) */
+	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES; type++)
 	{
 		char resource_path[MAP_PATH_SIZE];
 
-		if (!custom_edition_resource_map_path(&identity, (enum resource_map_type)type, resource_path) ||
-			!custom_edition_file_open(&globals->resource_files[type], resource_path))
+		if (mcc_cea)
+		{
+			char const *folder_end = strrchr(path, '\\');
+			long folder_length = folder_end ? (long)(folder_end - path) + 1 : 0;
+
+			if (type == _resource_map_locale || !folder_length ||
+				folder_length + strlen(resource_map_type_describe((enum resource_map_type)type)) +
+					strlen(MAP_FILE_EXTENSION) >= MAP_PATH_SIZE)
+			{
+				continue;
+			}
+			sprintf(resource_path, "%.*s%s%s", (int)folder_length, path,
+				resource_map_type_describe((enum resource_map_type)type), MAP_FILE_EXTENSION);
+			if (!file_path_exists(resource_path))
+			{
+				continue;
+			}
+		}
+		else if (!custom_edition_resource_map_path(&identity, (enum resource_map_type)type, resource_path))
+		{
+			continue;
+		}
+		if (!custom_edition_file_open(&globals->resource_files[type], resource_path))
 		{
 			error(_error_silent, "custom edition: no resource map '%s'", resource_path);
 			continue;

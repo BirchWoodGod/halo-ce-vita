@@ -474,6 +474,12 @@ static void mod_add(
 			stem[index] = lower_case(data.cFileName[index]);
 		}
 		stem[stem_length] = 0;
+		/* (a mod's own bitmaps.map and sounds.map, which its maps' pixels and
+		samples may be in: custom_edition_cache.c reads them with its maps) */
+		if (!csstrcmp(stem, "bitmaps") || !csstrcmp(stem, "sounds") || !csstrcmp(stem, "loc"))
+		{
+			continue;
+		}
 		if (!map_stem_valid(stem) ||
 			(long)strlen(mod->key) + 1 + stem_length > CUSTOM_EDITION_MODS_MAXIMUM_NAME_LENGTH)
 		{

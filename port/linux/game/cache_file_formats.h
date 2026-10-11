@@ -320,6 +320,10 @@ struct resource_map
 	int32_t item_count;
 	struct resource_map_item *items;
 	char *names;
+	/* (port) the items in the order of their data's offsets, made when a
+	Halo: CE Anniversary map's pixels or samples are first looked for in
+	them (by offset: resource_map_item_at); freed with the rest */
+	struct resource_map_item *items_by_offset;
 };
 
 struct custom_edition_load_report
@@ -350,6 +354,10 @@ struct custom_edition_load_report
 	int32_t structure_bsp_materials_checked;
 	int32_t bitmap_data_ranges_checked;
 	int32_t sound_sample_ranges_checked;
+	/* (port) a Halo: CE Anniversary map's sound permutations whose samples
+	are in a sounds.map the map was not given (MCC's own, which are FMOD
+	banks), made silent */
+	int32_t mcc_cea_sound_permutations_silent;
 	int32_t relocated_pointer_count;
 	uint32_t computed_checksum;
 	uint32_t trailing_bytes;

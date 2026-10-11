@@ -560,6 +560,9 @@ struct load_state
 	uint32_t model_index_data_offset;
 	uint32_t model_data_size;
 	int32_t tag_index;
+	/* (port) a Halo: CE Anniversary cache's: its pixels and samples in a
+	resource map must each be one of its items (resource_map_item_at) */
+	int mcc_cea;
 };
 
 /* ---------- prototypes */
@@ -1502,6 +1505,91 @@ static char const *tag_name_get(
 		NULL;
 }
 
+static int resource_map_item_offset_compare(
+	void const *first,
+	void const *second)
+{
+	uint32_t first_offset = ((struct resource_map_item const *)first)->data_offset;
+	uint32_t second_offset = ((struct resource_map_item const *)second)->data_offset;
+
+	return first_offset < second_offset ? -1 : first_offset > second_offset;
+}
+
+/* (port) Whether `size` bytes at `offset` of a resource map are (the first
+bytes of) one of its items: an item whose data starts there and holds as
+many. A Halo: CE Anniversary map names its pixels and samples in MCC's
+bitmaps.map and sounds.map (a mod's own, beside its maps) by their offset,
+each an item's data (its name the bitmap tag's and index, or the sound's,
+pitch range and permutation: GulchCE's mcc_resources.c, CC0, which also
+matches the names and, for MCC's own repacked files, a unique name of the
+same size elsewhere: not here, where the files are the mod's). Out of memory
+for the order, -1. */
+static int resource_map_item_at(
+	struct resource_map *map,
+	uint32_t offset,
+	uint32_t size)
+{
+	int32_t first = 0;
+	int32_t last;
+
+	if (!map->items_by_offset)
+	{
+		map->items_by_offset = malloc(((size_t)map->item_count + 1) * sizeof(*map->items_by_offset));
+		if (!map->items_by_offset)
+		{
+			return -1;
+		}
+		memcpy(map->items_by_offset, map->items, (size_t)map->item_count * sizeof(*map->items_by_offset));
+		qsort(map->items_by_offset, (size_t)map->item_count, sizeof(*map->items_by_offset), resource_map_item_offset_compare);
+	}
+	last = map->item_count;
+	while (first < last)
+	{
+		int32_t middle = first + (last - first) / 2;
+
+		if (map->items_by_offset[middle].data_offset < offset)
+		{
+			first = middle + 1;
+		}
+		else
+		{
+			last = middle;
+		}
+	}
+	for (; first < map->item_count && map->items_by_offset[first].data_offset == offset; first++)
+	{
+		if (size <= map->items_by_offset[first].size)
+		{
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+/* (port) For a Halo: CE Anniversary cache, that the range of a resource map
+is one of its items (resource_map_item_at) */
+static enum cache_file_status mcc_cea_resource_range_check(
+	struct load_state *state,
+	struct resource_map *map,
+	uint32_t offset,
+	uint32_t size)
+{
+	int found;
+
+	if (!state->mcc_cea)
+	{
+		return _cache_file_status_ok;
+	}
+	found = resource_map_item_at(map, offset, size);
+	if (found < 0)
+	{
+		return load_fail(state, _cache_file_status_out_of_memory, offset);
+	}
+
+	return found ? _cache_file_status_ok : load_fail(state, _cache_file_status_missing_resource_item, offset);
+}
+
 static enum cache_file_status bitmap_data_check(
 	struct load_state *state,
 	uint32_t element_offset)
@@ -1531,6 +1619,12 @@ static enum cache_file_status bitmap_data_check(
 	{
 		return load_fail(state, _cache_file_status_bad_resource_data_range, pixels_offset);
 	}
+	if (flag_is_set(read_u16(bitmap + BITMAP_DATA_FLAGS_OFFSET), BITMAP_DATA_IN_RESOURCE_MAP_BIT) &&
+		mcc_cea_resource_range_check(state, state->resource_maps[_resource_map_bitmaps], pixels_offset, pixels_size) !=
+			_cache_file_status_ok)
+	{
+		return state->report->status;
+	}
 	state->report->bitmap_data_ranges_checked++;
 
 	return _cache_file_status_ok;
@@ -1548,6 +1642,36 @@ static enum cache_file_status sound_permutation_check(
 	if (size < 0)
 	{
 		return load_fail(state, _cache_file_status_bad_resource_data_range, element_offset);
+	}
+	/* (port) a Halo: CE Anniversary map's samples in a sounds.map: one of
+	its items (resource_map_item_at), else silent. MCC keeps its own maps'
+	samples in FMOD banks, not a sounds.map, so a mod map that names them
+	(one built against MCC's shared files) has none here: its sounds play
+	nothing rather than the map being refused; nothing is read for them */
+	if (state->mcc_cea && flag_is_set(read_u32(samples + TAG_DATA_FLAGS_OFFSET), SOUND_SAMPLES_IN_RESOURCE_MAP_BIT))
+	{
+		struct resource_map *sounds = state->resource_maps[_resource_map_sounds];
+		int found = sounds && range_fits(file_offset, (uint32_t)size, sounds->source->size) ?
+			resource_map_item_at(sounds, file_offset, (uint32_t)size) :
+			0;
+
+		if (found < 0)
+		{
+			return load_fail(state, _cache_file_status_out_of_memory, file_offset);
+		}
+		if (!found)
+		{
+			uint8_t *silent = state->tag_cache + element_offset + SOUND_PERMUTATION_SAMPLES_OFFSET;
+
+			write_u32(silent + TAG_DATA_SIZE_OFFSET, 0);
+			write_u32(silent + TAG_DATA_FILE_OFFSET_OFFSET, 0);
+			write_u32(silent + TAG_DATA_FLAGS_OFFSET,
+				read_u32(silent + TAG_DATA_FLAGS_OFFSET) & ~(1U << SOUND_SAMPLES_IN_RESOURCE_MAP_BIT));
+			state->report->mcc_cea_sound_permutations_silent++;
+			return _cache_file_status_ok;
+		}
+		state->report->sound_sample_ranges_checked++;
+		return _cache_file_status_ok;
 	}
 	if (flag_is_set(read_u32(samples + TAG_DATA_FLAGS_OFFSET), SOUND_SAMPLES_IN_RESOURCE_MAP_BIT))
 	{
@@ -2952,8 +3076,10 @@ void resource_map_close(
 {
 	free(map->items);
 	free(map->names);
+	free(map->items_by_offset);
 	map->items = NULL;
 	map->names = NULL;
+	map->items_by_offset = NULL;
 	map->item_count = 0;
 
 	return;
@@ -3058,8 +3184,9 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	int mcc_cea_allowed,
 	struct custom_edition_load_report *report)
 {
-	/* (a Halo: CE Anniversary cache takes no tags from resource maps) */
-	static struct resource_map *const no_resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES] = { NULL };
+	/* (port: a Halo: CE Anniversary cache takes no tags from resource maps,
+	only pixels and samples from MCC's bitmaps.map and sounds.map) */
+	struct resource_map *mcc_cea_resource_maps[NUMBER_OF_RESOURCE_MAP_TYPES] = { NULL };
 	struct cache_file_identity *identity = &report->identity;
 	int mcc_cea;
 	struct load_state state;
@@ -3099,7 +3226,13 @@ static enum cache_file_status custom_edition_cache_load_linked(
 	{
 		tag_cache_address = MCC_CEA_TAG_CACHE_ADDRESS;
 		linked_address = MCC_CEA_TAG_CACHE_ADDRESS;
-		state.resource_maps = no_resource_maps;
+		if (resource_maps)
+		{
+			mcc_cea_resource_maps[_resource_map_bitmaps] = resource_maps[_resource_map_bitmaps];
+			mcc_cea_resource_maps[_resource_map_sounds] = resource_maps[_resource_map_sounds];
+		}
+		state.resource_maps = mcc_cea_resource_maps;
+		state.mcc_cea = 1;
 	}
 	report->tag_cache_bytes = custom_edition_tag_cache_bytes(identity);
 	if (tag_cache_bytes < report->tag_cache_bytes)
