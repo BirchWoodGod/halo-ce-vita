@@ -1635,7 +1635,7 @@ void custom_edition_cache_crossplay_facts(
 	csmemset(local, 0, sizeof(*local));
 	local->file = _crossplay_map_file_absent;
 	local->pc_maps_on = halo_custom_edition_enabled();
-	if (!file_name || !file_name[0] || !custom_edition_map_path(file_name, path))
+	if (!file_name || !file_name[0] || !custom_edition_map_path(file_name, path, NULL))
 	{
 		return;
 	}
