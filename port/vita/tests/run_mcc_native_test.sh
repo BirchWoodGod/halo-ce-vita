@@ -97,6 +97,8 @@ run() {
 first=
 for file in "$mod"/maps/*.map; do
 	stem=$(basename "$file" .map | tr 'A-Z' 'a-z')
+	# (a mod's own resource maps, which its maps' pixels and samples may be in)
+	case " bitmaps sounds loc " in *" $stem "*) continue ;; esac
 	map=${key}_$stem
 	if [ -n "${HALO_TEST_MCC_ONLY:-}" ]; then
 		case " $HALO_TEST_MCC_ONLY " in *" $stem "*|*" $map "*) ;; *) continue ;; esac
