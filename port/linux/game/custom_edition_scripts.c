@@ -228,6 +228,12 @@ static boolean function_call_convert(
 	if (function_index == NONE && !strcmp(name, "player_effect_set_max_vibrate"))
 	{
 		function_index = hs_find_function_by_name("player_effect_set_max_rumble");
+		/* (and named so in the string data, where hs_compile looks the
+		function up again by its name: the shorter name written over it) */
+		if (function_index != NONE)
+		{
+			strcpy((char *)name, "player_effect_set_max_rumble");
+		}
 	}
 	if (function_index == NONE && !strcmp(name, "mcc_mission_segment") && call->type == _hs_type_boolean)
 	{
