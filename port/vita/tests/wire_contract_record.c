@@ -70,6 +70,12 @@ int config_boolean(const char *name)
 	return 0;
 }
 
+/* (network_wire.c's: the record's wire is given to each call here) */
+int network_wire_crossplay(void)
+{
+	return 0;
+}
+
 static long read_hex(char const *path, unsigned char *bytes, long maximum)
 {
 	FILE *file = fopen(path, "r");

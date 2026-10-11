@@ -100,6 +100,11 @@ Nothing changes on the wire.
 enum
 {
 	LISTING_FORMAT = 2,
+	/* OpenCE's (the crossplay wire's, network_wire.h): format 2 without the
+	score, the difficulty and the players' names, and only its five flags
+	(and ChupathingyCE's dedicated bit, 128 as ours); read, never written:
+	a Vita on the crossplay wire browses, it hosts nothing */
+	LISTING_FORMAT_CROSSPLAY = 1,
 	_listing_open = 1,
 	_listing_in_progress = 2,
 	_listing_has_teams = 4,
@@ -201,6 +206,10 @@ struct browse_counts
 
 #define SIGNATURE_LABEL P2P_SIGNAL_PREFIX "-lobby-1"
 static const char signature_label[] = SIGNATURE_LABEL;
+/* OpenCE's (the crossplay wire's): the same length as ours */
+static const char crossplay_signature_label[] = "hceu-lobby-1";
+
+typedef char check_signature_labels[sizeof(signature_label) == sizeof(crossplay_signature_label) ? 1 : -1];
 
 typedef char check_listing_size[MAXIMUM_LISTING_SIZE <= P2P_MAXIMUM_LISTING_SIZE ? 1 : -1];
 
@@ -551,9 +560,13 @@ static int p2p_lobby_listing_read(const unsigned char *bytes, int size, struct l
 	int offset = 0;
 	int index;
 
+	int crossplay = network_wire_crossplay();
+
 	memset(listing, 0, sizeof(*listing));
-	if (size < MINIMUM_LISTING_SIZE || size > MAXIMUM_LISTING_SIZE || bytes[0] != 'H' || bytes[1] != 'L' ||
-		bytes[2] != LISTING_FORMAT)
+	/* (OpenCE's format 1 is 4 bytes shorter at its least: no score,
+	difficulty or count of names) */
+	if (size < MINIMUM_LISTING_SIZE - (crossplay ? 4 : 0) || size > MAXIMUM_LISTING_SIZE || bytes[0] != 'H' ||
+		bytes[1] != 'L' || bytes[2] != (crossplay ? LISTING_FORMAT_CROSSPLAY : LISTING_FORMAT))
 	{
 		return 0;
 	}
@@ -561,6 +574,11 @@ static int p2p_lobby_listing_read(const unsigned char *bytes, int size, struct l
 	listing->version = bytes[offset] << 8 | bytes[offset + 1];
 	offset += 2;
 	listing->flags = bytes[offset++];
+	/* (OpenCE's flags; the rest are other projects' or none: not this
+	build's Halo PC map and co-op) */
+	if (crossplay)
+		listing->flags &= _listing_open | _listing_in_progress | _listing_has_teams | _listing_closed |
+			_listing_password | _listing_dedicated;
 	listing->sequence = get_long(bytes + offset);
 	offset += 4;
 	listing->time = get_long(bytes + offset);
@@ -589,7 +607,15 @@ static int p2p_lobby_listing_read(const unsigned char *bytes, int size, struct l
 	{
 		return 0;
 	}
-	/* (the score, the difficulty and the count of names) */
+	/* (the score, the difficulty and the count of names: format 2's) */
+	if (crossplay)
+	{
+		offset += STAMP_SIZE;
+		if (offset + P2P_SIGNATURE_SIZE != size)
+			return 0;
+		listing->signed_size = offset;
+		return 1;
+	}
 	if (offset + 4 > size)
 		return 0;
 	listing->score_limit = bytes[offset] << 8 | bytes[offset + 1];
@@ -614,7 +640,7 @@ static int listing_signed(const unsigned char *bytes, const struct listing *list
 {
 	unsigned char data[sizeof(signature_label) - 1 + MAXIMUM_LISTING_SIZE];
 
-	memcpy(data, signature_label, sizeof(signature_label) - 1);
+	memcpy(data, network_wire_crossplay() ? crossplay_signature_label : signature_label, sizeof(signature_label) - 1);
 	memcpy(data + sizeof(signature_label) - 1, bytes, (size_t)listing->signed_size);
 	return p2p_ed25519_verify(listing->key, data, (int)(sizeof(signature_label) - 1) + listing->signed_size,
 		bytes + listing->signed_size);
@@ -1225,7 +1251,7 @@ static int listing_check(const struct queued *queued, struct listing *listing, i
 
 	if (!p2p_lobby_listing_read(queued->payload, queued->size, listing))
 		reason = _drop_malformed;
-	else if (listing->version != HALO_PORT_NETWORK_VERSION)
+	else if (!network_wire_version_accepted((unsigned int)listing->version))
 		reason = _drop_version;
 	else if (!signing_key_hash(listing->key, key_hash) || memcmp(key_hash, queued->key_hash, P2P_KEY_HASH_SIZE))
 		reason = _drop_slot;

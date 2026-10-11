@@ -64,6 +64,7 @@ same datum index (identifier and all), so that any message can name one:
 #include "cutscene/cinematics.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "network_wire.h"
 
 #include <math.h>
 
@@ -2339,8 +2340,10 @@ static void distributed_client_create(
 	/* (a unit's grenades are the host's, which its inventories bring: none
 	until they come, not the tag's that unit_new gave it, which the host's
 	game engine replaces with the game's at a player's spawn: a player
-	spawned with the button held threw one here the host's copy had not) */
-	if (TEST_FLAG(_object_mask_unit, object_get(object_index)->object.type))
+	spawned with the button held threw one here the host's copy had not.
+	OpenCE's (1f87b4ff): the crossplay wire's only, the legacy Vita wire
+	plays as the betas do, network_wire.h) */
+	if (network_wire_crossplay() && TEST_FLAG(_object_mask_unit, object_get(object_index)->object.type))
 		csmemset(unit_get(object_index)->unit.grenade_counts, 0, sizeof(unit_get(object_index)->unit.grenade_counts));
 	distributed_client_apply_change(object_index, change);
 }

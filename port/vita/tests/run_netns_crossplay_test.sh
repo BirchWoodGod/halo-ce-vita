@@ -46,11 +46,12 @@
 # owner scoped it: our client joins PC games and servers; a Vita never hosts
 # on the crossplay wire). Each also runs its control: the same host with an
 # OpenCE client, which must pass (else the harness is broken and the run
-# fails). EXPECTED TO FAIL until the wire gaps are closed (T2-T7): reported
-# as XFAIL with the stage where our client stopped and the log lines that say
-# why, exit status 0 (XPPC_STRICT=1: a failure, for when they are the
-# acceptance tests; a pass is reported as XPASS: take the mode off
-# XPPC_EXPECTED_FAIL)
+# fails). Acceptance tests since the wire switch (T4/T5, network_wire.h):
+# opencelan, opencehost, chupahost, chupaserver and damnserver must pass;
+# crossrefuse is still EXPECTED TO FAIL (T11's refusals): reported as XFAIL
+# with the stage where our client stopped and the log lines that say why,
+# exit status 0 (XPPC_STRICT=1: a failure; a pass is reported as XPASS: take
+# the mode off XPPC_EXPECTED_FAIL)
 #   opencelan   OpenCE host, our client on its LAN (system link)
 #   opencehost  OpenCE host behind NAT A, public; our client behind NAT B
 #               joins it from the server browser, and another opens its
@@ -63,6 +64,14 @@
 #   damnserver  DamnationCE's dedicated server (its game binary with
 #               HALO_DEDICATED), an OpenCE client and ours, on a LAN and over
 #               the internet (by its invite: it lists only on its game list)
+#   crossmixed  the switch's two worlds kept apart (our builds only, and one
+#               OpenCE host): our Vita host on the legacy wire (Crossplay
+#               off) and our client with Crossplay on, on a LAN (it does not
+#               join, and says the game is on the Vita-to-Vita network) and
+#               over the internet (it never sees the game: hcev against
+#               hceu); our copy told to host with Crossplay on refuses to
+#               (never on the crossplay wire); and our client with Crossplay
+#               off does not join an OpenCE host on its LAN
 #   crossrefuse OpenCE hosts our client must refuse with the right message
 #               (section 6, T11): a game of 32 players, a co-op game, a map
 #               our client does not have; today it refuses for the Vita line
@@ -70,11 +79,9 @@
 #   all         every mode above, one after the other (expected failures as
 #               XFAIL), and a summary
 #
-# Not here: crossmixed (crossplay is one switch, HALO_CROSSPLAY: it becomes
-# "a crossplay client cannot see or join a legacy Vita host, and a legacy
-# one a crossplay host's game, each cleanly": wants T4's wire) and
-# crossversion (wants T10's signed table): both report SKIP. dedicatedopence and pcjoinsvita were dropped (Oct 11 2026: our
-# server and Vita hosts stay off the crossplay wire).
+# Not here: crossversion (wants T10's signed table): reports SKIP.
+# dedicatedopence and pcjoinsvita were dropped (Oct 11 2026: our server and
+# Vita hosts stay off the crossplay wire).
 #
 # With XPPC_PROBE=1 the expected-fail modes also run our client with
 # HALO_NETWORK_TEST_CROSS_LINE=1 (debug builds: it lists and joins a host on
@@ -99,8 +106,7 @@
 #   XPPC_CONTROL=0     leave out the expected-fail modes' controls
 #   XPPC_MQTT311=1     the broker refuses MQTT 5 (every copy must fall back to
 #                      3.1.1)
-#   XPPC_EXPECTED_FAIL the expected-fail modes ("opencelan opencehost chupahost
-#                      chupaserver damnserver crossrefuse")
+#   XPPC_EXPECTED_FAIL the expected-fail modes ("crossrefuse")
 #   HALO_TEST_OUT      where the logs go (deleted after a pass unless
 #                      HALO_TEST_KEEP=1; default a new folder under
 #                      ~/halo-test-out)
@@ -120,15 +126,11 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
-expected_fail=${XPPC_EXPECTED_FAIL:-opencelan opencehost chupahost chupaserver damnserver crossrefuse}
+expected_fail=${XPPC_EXPECTED_FAIL:-crossrefuse}
 mode=${1:-}
 
 case $mode in
-pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse) ;;
-crossmixed)
-	echo "SKIP (crossmixed): wants T4's wire switch (HALO_CROSSPLAY=1 speaking OpenCE's wire); then: a crossplay"
-	echo "client cannot see or join a legacy Vita host, and a legacy client a crossplay one, each told why"
-	exit 0 ;;
+pcself|chupaopence|opencelan|opencehost|chupahost|chupaserver|damnserver|crossrefuse|crossmixed) ;;
 crossversion)
 	echo "SKIP (crossversion): wants T10's signed crossplay table (HALO_CROSSPLAY_TABLE, a test key)"
 	exit 0 ;;
@@ -140,7 +142,7 @@ all)
 	status=0
 	mkdir -p "$HOME/halo-test-out"
 	all_log=$(mktemp "$HOME/halo-test-out/xppc-all.XXXX")
-	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossrefuse crossmixed crossversion; do
+	for m in pcself chupaopence opencelan opencehost chupahost chupaserver damnserver crossmixed crossrefuse crossversion; do
 		echo "=== $m"
 		HALO_TEST_OUT=${HALO_TEST_OUT:+$HALO_TEST_OUT/$m} "$0" "$m" | tee "$all_log"
 		rc=${PIPESTATUS[0]}
@@ -662,6 +664,58 @@ chupaserver|damnserver)
 		pair_server "lan-$mode-ours-probe" lan "$kind" ours "$cross_line"; : > "$out/lan-$mode-ours-probe/server"
 	fi
 	run_our_modes
+	echo "--- the brokers' topics"; broker_topics
+	;;
+crossmixed)
+	# the two worlds of the one switch (HALO_CROSSPLAY), kept apart: a Vita
+	# host on the legacy wire and a crossplay client (a LAN, and the internet
+	# from the server browser); a copy with Crossplay on told to host; a
+	# legacy client on an OpenCE host's LAN
+	host_extra=HALO_CROSSPLAY=0 pair mixed-lan-vita-cross lan ours ours
+	host_extra=HALO_CROSSPLAY=0 pair mixed-net-vita-cross net ours ours
+	pair mixed-lan-crosshost lan ours ours
+	pair mixed-lan-opence-legacy lan opence ours HALO_CROSSPLAY=0
+	wait_pairs
+	for name in mixed-lan-vita-cross mixed-net-vita-cross mixed-lan-crosshost mixed-lan-opence-legacy; do
+		hostlog=$out/$name/host/run.log clientlog=$out/$name/client/run.log
+		# (the game's own lines, network_event's, are in debug.txt)
+		clientdebug=$out/$name/client/data/debug.txt hostdebug=$out/$name/host/data/debug.txt
+		joined=$(grep -ac "network test: joining" "$clientlog" 2>/dev/null)
+		players=$(grep -ac "network test: player 1 is named" "$hostlog" 2>/dev/null)
+		hosted=$(grep -ac "network test: hosting" "$hostlog" 2>/dev/null)
+		result=pass
+		case $name in
+		mixed-lan-vita-cross)
+			# (the Vita host hosts; our crossplay client sees it, does not join,
+			# and says why)
+			said=$(cat "$clientlog" "$clientdebug" 2>/dev/null | grep -ac "not joining a host of network version 18 (crossplay")
+			{ [ "$hosted" -ge 1 ] && [ "${joined:-0}" = 0 ] && [ "${players:-0}" = 0 ] && [ "${said:-0}" -ge 1 ]; } ||
+				result="hosted-$hosted-joined-$joined-players-$players-told-$said"
+			;;
+		mixed-net-vita-cross)
+			# (the Vita host lists its game on hcev; our crossplay client browses
+			# hceu and never sees it)
+			listed=$(grep -ac "the public games list" "$clientlog" 2>/dev/null)
+			{ [ "$hosted" -ge 1 ] && [ "${listed:-0}" = 0 ] && [ "${players:-0}" = 0 ]; } ||
+				result="hosted-$hosted-listed-$listed-players-$players"
+			;;
+		mixed-lan-crosshost)
+			# (Crossplay on: the copy told to host does not, and says why)
+			refused=$(cat "$hostlog" "$hostdebug" 2>/dev/null | grep -ac "not hosting a game: Crossplay is on")
+			{ [ "${hosted:-0}" = 0 ] && [ "${refused:-0}" -ge 1 ] && [ "${joined:-0}" = 0 ]; } ||
+				result="hosted-$hosted-refused-$refused-joined-$joined"
+			;;
+		mixed-lan-opence-legacy)
+			# (Crossplay off: an OpenCE host is not joined, as betas 1-4)
+			{ [ "$hosted" -ge 1 ] && [ "${joined:-0}" = 0 ] && [ "${players:-0}" = 0 ]; } ||
+				result="hosted-$hosted-joined-$joined-players-$players"
+			;;
+		esac
+		echo "--- $name: $result"
+		grep -ahE "not joining|ignoring a host|not hosting|the public games list" "$clientlog" "$clientdebug" "$hostlog" 2>/dev/null |
+			sed 's/^[0-9.]* [0-9:]*  //; s/^halo-linux: //' | sort | uniq -c | head -4 | sed 's/^/  /'
+		our_results="$our_results $name:$result"
+	done
 	echo "--- the brokers' topics"; broker_topics
 	;;
 crossrefuse)

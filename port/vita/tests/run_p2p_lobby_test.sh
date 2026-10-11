@@ -10,7 +10,8 @@
 #                                  UBSan (default 2,000,000 inputs)
 #   run_p2p_lobby_test.sh signal [RUNS]   what a signalling broker sends
 #                                  (p2p_signal.c's MQTT 5 and 3.1.1 reading)
-#                                  fuzzed the same way (p2p_signal_fuzz.c)
+#                                  fuzzed the same way (p2p_signal_fuzz.c), on
+#                                  the legacy wire, then the crossplay wire
 # Needs the Linux build configured in this tree (build/linux: the platform
 # layer's generated semantics header) and clang that targets i686 (CLANG,
 # default the Linux build's compiler from build.ninja; the sanitized builds
@@ -51,7 +52,10 @@ if [ "$mode" = signal ]; then
 	${FUZZ_CLANG:-clang} -m32 -O1 -fsanitize=address,undefined -fno-sanitize-recover=undefined $game_flags \
 		-Wl,--unresolved-symbols=ignore-in-object-files -o "$out/p2p_signal_fuzz" "$here/p2p_signal_fuzz.c" $crypto \
 		-lpthread
-	"$out/p2p_signal_fuzz" "$runs"
+	# (on each wire: the legacy Vita wire's, and the crossplay wire's, OpenCE's)
+	"$out/p2p_signal_fuzz" "$runs" || exit 1
+	echo "--- the crossplay wire"
+	P2P_SIGNAL_FUZZ_CROSSPLAY=1 "$out/p2p_signal_fuzz" "$runs"
 	exit $?
 fi
 status=0

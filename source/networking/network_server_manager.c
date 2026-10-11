@@ -477,6 +477,7 @@ symbols in this file:
 #include "map_share.h"
 #include "dedicated_server.h"
 #include "bots.h"
+#include "network_wire.h"
 #endif
 
 #include "cache/cache_files.h"
@@ -3539,7 +3540,10 @@ void network_game_generate_join_game_token(
 #ifdef HALO_PORT_VITA_NETWORK
 	/* (port) Vitas play only Vitas (halo_port_limits.h): a Vita's token is
 	not a PC's, so each kind of host refuses the other kind's joiners (the
-	join request handler compares the tokens) */
+	join request handler compares the tokens). The legacy wire's only: on
+	the crossplay wire (network_wire.h) a Vita's token is OpenCE's, the
+	constant, so that a PC host takes its join */
+	if (!network_wire_crossplay())
 	{
 		static byte const vita_token[] = "Vita-only game!";
 		int i;

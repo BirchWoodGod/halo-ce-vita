@@ -73,6 +73,7 @@ machine (their datum identifiers need not be).
 #include "units/bipeds.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "network_wire.h"
 #include "dedicated_server.h"
 #include "latency_meter.h"
 #include "../src/p2p.h"
@@ -2778,8 +2779,10 @@ static void distributed_handle_unit_state(
 		it): on the teleporter it lands on, as a teleporter leaves the
 		player it sends, so that this machine's does not send it back each
 		time the host's word puts it there until it steps off
-		(game_engine_update_teleporter) */
-		if (distance_squared3d(&before, &object_get(unit_index)->object.position) > 1.0f)
+		(game_engine_update_teleporter). OpenCE's (22fe5628): the crossplay
+		wire's only, the legacy Vita wire plays as the betas do
+		(network_wire.h) */
+		if (network_wire_crossplay() && distance_squared3d(&before, &object_get(unit_index)->object.position) > 1.0f)
 		{
 			player->teleporter_index = find_netgame_flag(&object_get(unit_index)->object.position, 1.0f, 0.0f,
 				_netgame_flag_teleporter_source, NONE);

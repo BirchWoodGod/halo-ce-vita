@@ -23,6 +23,9 @@ ready.
 #include <stdlib.h>
 #include <string.h>
 
+#include "halo_port_limits.h"
+#include "network_wire.h"
+
 /* ---------- the clock */
 
 static unsigned long net_fuzz_clock = 1000000;
@@ -89,6 +92,32 @@ const char *config_string(const char *name)
 	if (!strcmp(name, "network.stun_servers"))
 		return net_fuzz_stun;
 	return "";
+}
+
+/* the network wire (port/linux/src/network_wire.c, network.crossplay read
+once): a target's choice per input, so that both wires are fuzzed */
+static int net_fuzz_crossplay;
+
+int network_wire_crossplay(void)
+{
+	return net_fuzz_crossplay;
+}
+
+unsigned int network_wire_version(void)
+{
+	return net_fuzz_crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+}
+
+int network_wire_version_accepted(unsigned int version)
+{
+	return version == network_wire_version();
+}
+
+int network_wire_hosting_refused(const char **why)
+{
+	if (why)
+		*why = "crossplay";
+	return net_fuzz_crossplay;
 }
 
 /* ---------- randomness: a counter, so every run is the same */

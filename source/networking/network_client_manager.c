@@ -396,6 +396,7 @@ symbols in this file:
 #ifdef HALO_LINUX
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
+#include "network_wire.h"
 #include "map_share.h"
 /* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
 #include "../src/lang.h"
@@ -1234,11 +1235,16 @@ boolean network_game_client_write(
 
 #ifdef HALO_LINUX
 /* port: a message to the host, reliably (map sharing's requests:
-port/linux/game/map_share.c) */
+port/linux/game/map_share.c). This build's own messages (past OpenCE's
+types) are never sent on the crossplay wire, whose hosts are PC builds
+that have none of them (network_wire.h): refused, as a host that is not
+there */
 boolean network_game_client_send_to_server(
 	struct network_game_client *client,
 	void *message)
 {
+	if (network_wire_crossplay())
+		return FALSE;
 	return client && client->connection && message &&
 		network_game_client_write(client->connection, message, GET_MESSAGE_SIZE(*(message_header *)message), NULL, TRUE);
 }
@@ -2702,7 +2708,10 @@ static boolean add_advertised_game(
 	long game_index;
 
 	/* (port) Vitas play only Vitas (halo_port_limits.h): a host of the
-	other kind is never listed */
+	other kind is never listed. On the crossplay wire (network_wire.h) the
+	bit is OpenCE's "in progress", not a Vita's: every host is listed, and
+	its version decides (network_game_client_advertised_game_compatible) */
+	if (!network_wire_crossplay())
 	{
 		boolean vita_host = (advertisement->__unknown5A[HALO_PORT_ADVERTISED_FLAGS_OFFSET] &
 			HALO_PORT_ADVERTISED_VITA_FLAG) != 0;
@@ -3471,7 +3480,7 @@ boolean network_game_client_advertised_game_compatible(
 	boolean tell)
 {
 	long game_index = client ? game - client->available_games : NONE;
-	unsigned int ours = HALO_PORT_NETWORK_VERSION;
+	unsigned int ours = network_wire_version();
 	unsigned int theirs;
 	boolean distributed;
 	boolean vita_host;
@@ -3483,6 +3492,37 @@ boolean network_game_client_advertised_game_compatible(
 	theirs = network_game_client_advertised_versions[game_index].version;
 	distributed = (network_game_client_advertised_versions[game_index].flags &
 		HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG) != 0;
+	/* (port) the crossplay wire (network_wire.h): a PC host (OpenCE,
+	ChupathingyCE, DamnationCE) of a version this build joins, playing the
+	distributed netcode; the Vita line and its flag are the legacy wire's */
+	if (network_wire_crossplay())
+	{
+		if (distributed && network_wire_version_accepted(theirs))
+		{
+			network_event("joining a host of network version %u (crossplay)", theirs);
+			return TRUE;
+		}
+		if (theirs == HALO_PORT_NETWORK_VERSION)
+		{
+			snprintf(message, sizeof(message), "%s",
+				T("This game is on the Vita-to-Vita network (Crossplay off).\n\n"
+				"Crossplay is on: turn it off (Settings, Multiplayer) and restart to join Vita games."));
+		}
+		else
+		{
+			snprintf(message, sizeof(message),
+				T("This PC game's network version (%u) is not one this version of the game can join (%u).\n\n"
+				"Update the game, or join another game."),
+				theirs, ours);
+		}
+		if (tell)
+		{
+			network_event("not joining a host of network version %u%s (crossplay: this machine joins %u)", theirs,
+				distributed ? "" : " with the lockstep netcode", ours);
+			platform_show_message(T("Halo: cannot join this game"), message);
+		}
+		return FALSE;
+	}
 	vita_host = (network_game_client_advertised_versions[game_index].flags &
 		HALO_PORT_ADVERTISED_VITA_FLAG) != 0;
 #ifdef HALO_PORT_VITA_NETWORK
@@ -3632,8 +3672,12 @@ boolean network_game_client_advertised_game_cooperative(
 		return FALSE;
 	}
 	game_index = game - client->available_games;
-	if (!(network_game_client_advertised_versions[game_index].flags & HALO_PORT_ADVERTISED_COOP_FLAG))
+	/* (the crossplay wire's 0x04 is not ours: ChupathingyCE's Delta) */
+	if (network_wire_crossplay() ||
+		!(network_game_client_advertised_versions[game_index].flags & HALO_PORT_ADVERTISED_COOP_FLAG))
+	{
 		return FALSE;
+	}
 	if (difficulty)
 		*difficulty = (short)PIN(network_game_client_advertised_versions[game_index].difficulty, 0, 3);
 	return TRUE;

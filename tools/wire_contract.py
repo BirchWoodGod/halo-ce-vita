@@ -55,9 +55,12 @@ OPENCE_COMMIT = "6399ed9d"
 # was built (network version 18)
 LEGACY_COMMIT = "50ae7395"
 
-# the gaps of docs/crossplay.md section 3.2 not yet closed (G6, G12, G13 have
-# no automatic check yet: MANUAL, listed so the list says what is open)
-EXPECTED_OPEN = {"G2", "G3", "G4", "G5", "G6", "G9", "G10", "G11", "G12", "G13", "G14", "G15"}
+# the gaps of docs/crossplay.md section 3.2 not yet closed (G6 has no
+# automatic check yet: MANUAL, listed so the list says what is open). Closed
+# by T4/T5 (feat/xp-wire-switch): G2, G3, G4, G5, G15, and G12/G13 as
+# "silent toward PC machines" (T6-lite: this build's extensions never sent on
+# the crossplay wire; the capability handshake proper is T6's)
+EXPECTED_OPEN = {"G6", "G9", "G10", "G11", "G14"}
 
 GAP_TITLES = {
 	"G1": "game settings record (13,120 bytes, game_variant_options)",
@@ -235,7 +238,9 @@ ENUM_SOURCES = {
 	"cooperative": ("source/networking/network_game_manager.h", r"_network_game_cooperative_\w+"),
 }
 MACRO_SOURCES = [("port/linux/include/halo_port_limits.h", r"HALO_PORT_\w+"),
-	("port/linux/include/halo_port_capacity.h", r"HALO_PORT_\w+")]
+	("port/linux/include/halo_port_capacity.h", r"HALO_PORT_\w+"),
+	# (the wire switch's, docs/crossplay.md T4: the crossplay wire's version)
+	("port/linux/include/network_wire.h", r"HALO_PORT_\w+")]
 
 
 def declared_values(builder, tree):
@@ -245,6 +250,8 @@ def declared_values(builder, tree):
 		'#include "networking/network_messages.h"']
 	if (tree.path / "port/linux/game/network_distributed.h").exists():
 		lines.append('#include "network_distributed.h"')
+	if (tree.path / "port/linux/include/network_wire.h").exists():
+		lines.append('#include "network_wire.h"')
 	lines += ["#include <stdio.h>", "int main(void)", "{"]
 	for group, (relative, pattern) in ENUM_SOURCES.items():
 		for name in enumerators(tree.text(relative), pattern):
@@ -484,9 +491,16 @@ def run(arguments):
 	report.base("S1 Bungie messages 0-%d: numbers and encoded bytes" % (len(their_names) - 1), not problems,
 		"; ".join(problems) or f"{len(their_names)} types identical")
 	extra = our_names[len(their_names):]
-	report.gap("G12", "MANUAL" if extra else "PASS",
+	# (this build's own messages are sent only through
+	# network_game_client_send_to_server, which the wire switch silences on
+	# the crossplay wire; the host side never runs there: a Vita hosts no PC)
+	sender = source_function(ours.text("source/networking/network_client_manager.c"),
+		"boolean network_game_client_send_to_server(")
+	silenced = bool(re.search(r"network_wire_crossplay\(\)", sender))
+	report.gap("G12", "PASS" if not extra or silenced else "MANUAL",
 		("ours only: " + ", ".join(f"{len(their_names) + i} {n[9:]}" for i, n in enumerate(extra)) +
-			" (gated by the capability handshake: T6)") if extra else "no messages past upstream's")
+			(", never sent on the crossplay wire (network_game_client_send_to_server)" if silenced else
+			" (gated by the capability handshake: T6)")) if extra else "no messages past upstream's")
 
 	# --- distributed kinds
 	ours_kinds, their_kinds = ov.get("distributed", {}), tv.get("distributed", {})
@@ -649,7 +663,13 @@ def run(arguments):
 
 	# --- the rest
 	report.gap("G6", "MANUAL", "map identity on the wire: T3's own test (netns badmap/mapmid)")
-	report.gap("G13", "MANUAL", "tunnel type 6 (ping table): gated by T6, its own test")
+	p2p = ours.text("port/linux/src/p2p.c")
+	ping_send = source_function(p2p, "inner[0] = _packet_ping_table;")
+	ping_take = source_function(p2p, "ping_table_received(peer, inner + 1")
+	if "network_wire_crossplay()" in ping_send and "network_wire_crossplay()" in ping_take:
+		report.gap("G13", "PASS", "tunnel type 6 (ping table) neither sent nor read on the crossplay wire")
+	else:
+		report.gap("G13", "MANUAL", "tunnel type 6 (ping table): gated by T6, its own test")
 	report.gap("G16", "N/A", "WebRTC is not planned on the Vita (announce kind none: T5)")
 	return report, work
 

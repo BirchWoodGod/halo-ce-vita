@@ -24,6 +24,9 @@ is a list of records, each a kind, a 16-bit length and that many bytes:
      and a tag): the rest, its nonce and addresses, the fuzzer's
   6  the clock moves on (the first byte, in tenths of a second), and a pass
      of the signalling's update runs
+An input whose length has bit 1 set runs on the crossplay wire
+(network_wire.h: OpenCE's message version 4, its WebRTC block after the
+host's addresses, no relays, no hosting, codes or listing of its own).
 Built twice by run_net_fuzz_test.sh, as net_fuzz_p2p.c is.
 */
 
@@ -45,9 +48,12 @@ static unsigned char fuzz_joiner_public[P2P_KEY_SIZE];
 static const unsigned char fuzz_token[P2P_TOKEN_SIZE] = { 't', 'o', 'k', 'e', 'n' };
 static const unsigned char fuzz_join_token[P2P_TOKEN_SIZE] = { 'j', 'o', 'i', 'n' };
 static int fuzz_offers;
-/* the pairs' bases (pair_base), worked out once: X25519 is slow */
-static unsigned char fuzz_join_base[P2P_SHA256_SIZE];
-static unsigned char fuzz_host_base[P2P_SHA256_SIZE];
+/* the pairs' bases (pair_base), worked out once for each wire (their label
+is the wire's): X25519 is slow */
+static unsigned char fuzz_join_bases[2][P2P_SHA256_SIZE];
+static unsigned char fuzz_host_bases[2][P2P_SHA256_SIZE];
+#define fuzz_join_base (fuzz_join_bases[net_fuzz_crossplay != 0])
+#define fuzz_host_base (fuzz_host_bases[net_fuzz_crossplay != 0])
 
 unsigned long p2p_now(void) { return net_fuzz_clock; }
 unsigned long p2p_resolve(const char *host) { (void)host; return 0x01020304; }
@@ -188,13 +194,19 @@ static void fuzz_reset_protocol(int protocol)
 
 	if (!keys_made)
 	{
+		int wire = net_fuzz_crossplay;
+
 		p2p_x25519(fuzz_public_key, fuzz_secret_key, NULL);
 		p2p_identifier_for(fuzz_public_key, fuzz_identifier);
 		p2p_x25519(fuzz_host_public, fuzz_host_secret, NULL);
 		p2p_x25519(fuzz_joiner_public, fuzz_joiner_secret, NULL);
-		/* (as the joiner and the host each work them out) */
-		pair_base(fuzz_public_key, fuzz_host_public, fuzz_host_public, fuzz_join_base);
-		pair_base(fuzz_joiner_public, fuzz_public_key, fuzz_joiner_public, fuzz_host_base);
+		/* (as the joiner and the host each work them out, on each wire) */
+		for (net_fuzz_crossplay = 0; net_fuzz_crossplay < 2; net_fuzz_crossplay++)
+		{
+			pair_base(fuzz_public_key, fuzz_host_public, fuzz_host_public, fuzz_join_base);
+			pair_base(fuzz_joiner_public, fuzz_public_key, fuzz_joiner_public, fuzz_host_base);
+		}
+		net_fuzz_crossplay = wire;
 		keys_made = 1;
 	}
 	memset(&signalling, 0, sizeof(signalling));
@@ -302,7 +314,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 		if (size > MAXIMUM_MESSAGE_SIZE - 2 - P2P_KEY_SIZE - NONCE_SIZE - TAG_SIZE)
 			size = MAXIMUM_MESSAGE_SIZE - 2 - P2P_KEY_SIZE - NONCE_SIZE - TAG_SIZE;
 		message[length++] = _message_accept;
-		message[length++] = MESSAGE_VERSION;
+		message[length++] = (unsigned char)message_version();
 		memcpy(message + length, fuzz_host_public, P2P_KEY_SIZE);
 		length += P2P_KEY_SIZE;
 		memcpy(message + length, signalling.join_nonce, NONCE_SIZE);
@@ -403,7 +415,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	const unsigned char *record;
 	int kind, record_size, count = 0;
 
-	/* (MQTT 3.1.1, and 5 for an input of odd length) */
+	/* (MQTT 3.1.1, and 5 for an input of odd length; the crossplay wire for
+	one whose length has bit 1) */
+	net_fuzz_crossplay = (size & 2) != 0;
 	fuzz_reset_protocol(size & 1 ? 5 : 4);
 	while (count++ < 64 && net_fuzz_next_record(&cursor, end, &kind, &record, &record_size))
 		fuzz_record(kind, record, record_size);
@@ -418,6 +432,147 @@ static void fuzz_check(int condition, const char *what)
 {
 	printf("%s %s\n", condition ? "PASS" : "FAIL", what);
 	fuzz_failures += !condition;
+}
+
+/* the last publish's sealed message, opened with key (the JOIN this machine
+sent): its size, or -1 */
+static int fuzz_sent_opened(const unsigned char *key, unsigned char *message)
+{
+	int offset;
+
+	for (offset = 0; offset < net_fuzz_sent_size; offset++)
+	{
+		int size = p2p_open(key, net_fuzz_sent + offset, net_fuzz_sent_size - offset, message);
+
+		if (size >= 2)
+			return size;
+	}
+	return -1;
+}
+
+/* the real host's ACCEPT of this machine's JOIN with the given block after
+the addresses (one, of the harness's); whether the joiner took it */
+static int fuzz_accept_taken(int version, const unsigned char *block, int block_size)
+{
+	static unsigned char message[MAXIMUM_MESSAGE_SIZE + 64];
+	static unsigned char sealed[MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD + 64];
+	int length = 0;
+
+	fuzz_reset();
+	message[length++] = _message_accept;
+	message[length++] = (unsigned char)version;
+	memcpy(message + length, fuzz_host_public, P2P_KEY_SIZE);
+	length += P2P_KEY_SIZE;
+	memcpy(message + length, signalling.join_nonce, NONCE_SIZE);
+	length += NONCE_SIZE;
+	memset(message + length, 0x31, NONCE_SIZE);
+	length += NONCE_SIZE;
+	message[length++] = 1;
+	memcpy(message + length, "\x0a\x00\x00\x02\x13\x88", 6);
+	length += 6;
+	memcpy(message + length, block, (size_t)block_size);
+	length += block_size;
+	message_tag(fuzz_join_base, "accept", message, length, message + length);
+	length += TAG_SIZE;
+	fuzz_publish(signalling.join_topic, sealed, p2p_seal(signalling.join_key, message, length, sealed));
+	return signalling.join_answered;
+}
+
+/* the crossplay wire (OpenCE's signalling, network_wire.h) */
+static void fuzz_crossplay_checks(void)
+{
+	static unsigned char message[MAXIMUM_MESSAGE_SIZE + 64];
+	static const unsigned char none[] = { 0 };
+	/* (a native OpenCE host's: its certificate's hash, no ICE text, no
+	names, as p2p_webrtc_describe makes it) */
+	unsigned char native[1 + 32 + 1 + 1 + 1 + 1];
+	/* (a browser's: ICE text and an mDNS name) */
+	unsigned char browser[1 + 32 + 1 + 4 + 1 + 22 + 1 + 1 + 9 + 2];
+	unsigned char bad[sizeof(browser)];
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	char topic[TOPIC_SIZE];
+	int size, offset;
+
+	net_fuzz_crossplay = 1;
+	fuzz_reset();
+	fuzz_check(!signalling.hosting && !signalling.looking_up && !signalling.lobby_listed && signalling.lobby_browsing,
+		"crossplay: no hosting, no code looked up, nothing listed; browsing");
+	fuzz_check(!strncmp(signalling.join_topic, "hceu/3/", 7) && !strncmp(signalling.join_host_topic, "hceu/3/", 7) &&
+		!strncmp(signalling.client_identifier, "hceu-", 5) && !strcmp(P2P_LOBBY_SLOT_PREFIX, "hceu/3/lobby/s/") &&
+		!strcmp(P2P_LOBBY_QUERY_TOPIC, "hceu/3/lobby/q"), "crossplay: OpenCE's topics and client identifier (hceu)");
+	/* the JOIN sent: version 4, the addresses, a WebRTC block of kind none,
+	no relays (though the harness offers one) */
+	p2p_key_hash(fuzz_host_public, hash);
+	p2p_signal_join(hash, fuzz_join_token);
+	size = fuzz_sent_opened(signalling.join_key, message);
+	offset = 2 + P2P_KEY_SIZE + NONCE_SIZE;
+	fuzz_check(size == offset + 1 + 6 + 1 && message[0] == _message_join && message[1] == 4 && message[offset] == 1 &&
+		message[offset + 7] == 0, "crossplay: the JOIN is OpenCE's version 4: addresses, WebRTC kind none, no relays");
+	/* the host's ACCEPT */
+	fuzz_check(fuzz_accept_taken(4, none, sizeof(none)), "crossplay: an ACCEPT with WebRTC kind none is taken");
+	size = fuzz_sent_opened(signalling.join_key, message);
+	fuzz_check(size == offset + 1 + 6 + 1 + PROOF_SIZE && message[1] == 4 && message[offset + 7] == 0,
+		"crossplay: its proof is version 4, kind none, then the host's nonce and the tag (no relays)");
+	memset(native, 0, sizeof(native));
+	native[0] = 1;
+	memset(native + 1, 0xAB, 32);
+	fuzz_check(fuzz_accept_taken(4, native, sizeof(native) - 1),
+		"crossplay: a native host's block (certificate, no ICE text, no names) is taken");
+	fuzz_check(!fuzz_accept_taken(4, native, sizeof(native)), "crossplay: one with a byte left over is not");
+	size = 0;
+	browser[size++] = 2;
+	memset(browser + size, 0xCD, 32);
+	size += 32;
+	browser[size++] = 4;
+	memcpy(browser + size, "ab+/", 4);
+	size += 4;
+	browser[size++] = 22;
+	memcpy(browser + size, "0123456789abcdefghijkl", 22);
+	size += 22;
+	browser[size++] = 1;
+	browser[size++] = 9;
+	memcpy(browser + size, "a-1.local", 9);
+	size += 9;
+	browser[size++] = 0x13;
+	browser[size++] = 0x88;
+	fuzz_check(size == (int)sizeof(browser) && fuzz_accept_taken(4, browser, size),
+		"crossplay: a browser's block (ICE text, an mDNS name and its port) is taken");
+	memcpy(bad, browser, sizeof(bad));
+	bad[1 + 32 + 1] = '!';
+	fuzz_check(!fuzz_accept_taken(4, bad, size), "crossplay: ICE text with a character not ICE's is not");
+	memcpy(bad, browser, sizeof(bad));
+	bad[1 + 32] = 3;
+	fuzz_check(!fuzz_accept_taken(4, bad, size), "crossplay: a username fragment shorter than 4 is not");
+	memcpy(bad, browser, sizeof(bad));
+	bad[1 + 32 + 1 + 4 + 1 + 22] = 3;
+	fuzz_check(!fuzz_accept_taken(4, bad, size), "crossplay: more mDNS names than 2 is not");
+	memcpy(bad, browser, sizeof(bad));
+	bad[size - 4] = 'x';
+	fuzz_check(!fuzz_accept_taken(4, bad, size), "crossplay: a name not \".local\" is not");
+	memcpy(bad, browser, sizeof(bad));
+	bad[size - 2] = bad[size - 1] = 0;
+	fuzz_check(!fuzz_accept_taken(4, bad, size), "crossplay: a name's port 0 is not");
+	bad[0] = 3;
+	fuzz_check(!fuzz_accept_taken(4, bad, 1), "crossplay: a WebRTC kind past 2 is not");
+	fuzz_check(!fuzz_accept_taken(4, none, 0), "crossplay: an ACCEPT without the block is not");
+	{
+		/* (a legacy host's: its relays where the block goes) */
+		static const unsigned char relays[] = { 1, 10, 0, 0, 3, 0x13, 0x88 };
+
+		fuzz_check(!fuzz_accept_taken(4, relays, sizeof(relays)), "crossplay: relays where the block goes are not");
+	}
+	fuzz_check(!fuzz_accept_taken(3, none, sizeof(none)), "crossplay: an ACCEPT of version 3 (the Vita wire's) is not");
+	/* and the legacy wire as it was: version 3, relays, no WebRTC */
+	net_fuzz_crossplay = 0;
+	fuzz_reset();
+	fuzz_check(!strncmp(signalling.join_topic, P2P_SIGNAL_PREFIX "/3/", 5) && signalling.hosting,
+		"legacy: its own topics (" P2P_SIGNAL_PREFIX "), hosting");
+	fuzz_check(!fuzz_accept_taken(4, none, sizeof(none)), "legacy: an ACCEPT of version 4 is not taken");
+	fuzz_check(fuzz_accept_taken(3, none, 0), "legacy: one of version 3 without relays is");
+	size = fuzz_sent_opened(signalling.join_key, message);
+	fuzz_check(size > 1 && message[1] == 3, "legacy: its JOIN is version 3");
+	snprintf(topic, sizeof(topic), "%s", P2P_LOBBY_SLOT_PREFIX);
+	fuzz_check(!strcmp(topic, P2P_SIGNAL_PREFIX "/3/lobby/s/"), "legacy: its own slots");
 }
 
 int net_fuzz_checks(void)
@@ -491,6 +646,9 @@ int net_fuzz_checks(void)
 	fuzz_check(net_fuzz_sent_count == sent + 1, "one with one is answered");
 	fuzz_publish(signalling.host_topic, sealed, p2p_seal(signalling.host_key, message, size, sealed));
 	fuzz_check(net_fuzz_sent_count == sent + 1, "and the same again (a replay) not at once");
+
+	fuzz_crossplay_checks();
+	net_fuzz_crossplay = 0;
 	fuzz_reset();
 	return fuzz_failures;
 }

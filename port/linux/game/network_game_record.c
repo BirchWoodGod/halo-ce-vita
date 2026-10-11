@@ -12,9 +12,7 @@ The game settings record on the legacy Vita wire and on the crossplay wire
 #include "networking/network_game_manager.h"
 
 #include "network_game_record.h"
-
-/* the platform layer's (port/linux/src/port_config.c) */
-int config_boolean(const char *name);
+#include "network_wire.h"
 
 /* ---------- the layouts */
 
@@ -126,7 +124,7 @@ boolean network_game_cooperative_flags_valid(
 short network_game_record_format_current(
 	void)
 {
-	return config_boolean("network.crossplay") ? _network_game_record_crossplay : _network_game_record_legacy;
+	return network_wire_crossplay() ? _network_game_record_crossplay : _network_game_record_legacy;
 }
 
 long network_game_record_size(

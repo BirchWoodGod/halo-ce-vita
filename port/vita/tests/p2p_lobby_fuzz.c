@@ -19,7 +19,10 @@ input's first byte says how:
 	2  the rest split at its first 0: a slot's name, then a payload
 
 and its second its flags: retained, a clock step (expiry, tombstones), a
-query heard, the browser toggled. The p2p_lobby_test.c stand-ins serve.
+query heard, the browser toggled. With the first byte's 0x40 the input is
+heard on the crossplay wire (network_wire.h: OpenCE's listings, format 1,
+"hceu-lobby-1", version 26; mode 1 signs it so). The p2p_lobby_test.c
+stand-ins serve.
 */
 
 #define P2P_LOBBY_FUZZ
@@ -36,6 +39,8 @@ static unsigned char host_seeds[HOSTS][P2P_SEED_SIZE], host_keys[HOSTS][P2P_KEY_
 static char host_slots[HOSTS][2 * P2P_KEY_HASH_SIZE + 1];
 /* inputs after which a game was listed, and entries shown */
 static unsigned long listed_inputs, entries_shown, locked_shown;
+/* ... of them on the crossplay wire */
+static unsigned long crossplay_listed;
 
 static void setup(void)
 {
@@ -66,9 +71,10 @@ static int host_sign(int host, unsigned char *bytes, int size)
 {
 	unsigned char data[64 + P2P_MAXIMUM_LISTING_SIZE + 64];
 	int signed_size = size - P2P_SIGNATURE_SIZE;
-	int label_size = (int)strlen(SIGNATURE_LABEL);
+	const char *label = test_crossplay ? "hceu-lobby-1" : SIGNATURE_LABEL;
+	int label_size = (int)strlen(label);
 
-	memcpy(data, SIGNATURE_LABEL, (size_t)label_size);
+	memcpy(data, label, (size_t)label_size);
 	memcpy(data + label_size, bytes, (size_t)signed_size);
 	p2p_ed25519_sign(host_seeds[host], host_keys[host], data, label_size + signed_size, bytes + signed_size);
 	return size;
@@ -87,7 +93,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	setup();
 	if (size < 2)
 		return 0;
-	mode = data[0] % 3;
+	mode = (data[0] & 0x3F) % 3;
+	test_crossplay = (data[0] & 0x40) != 0;
 	flags = data[1];
 	data += 2;
 	size -= 2;
@@ -113,9 +120,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
 			payload[0] = 'H';
 			payload[1] = 'L';
-			payload[2] = LISTING_FORMAT;
-			payload[3] = (unsigned char)(HALO_PORT_NETWORK_VERSION >> 8);
-			payload[4] = (unsigned char)HALO_PORT_NETWORK_VERSION;
+			unsigned int version = test_crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+
+			payload[2] = test_crossplay ? LISTING_FORMAT_CROSSPLAY : LISTING_FORMAT;
+			payload[3] = (unsigned char)(version >> 8);
+			payload[4] = (unsigned char)version;
 			payload[10] = (unsigned char)(now >> 24);
 			payload[11] = (unsigned char)(now >> 16);
 			memcpy(payload + 14, host_keys[(flags >> 2) % HOSTS], P2P_KEY_SIZE);
@@ -154,7 +163,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	/* everything shown, and the first game joined (an open one at once; a
 	locked one's password is not tried: Argon2 per input would crawl) */
 	if (p2p_lobby_entry(0, &entry))
+	{
 		listed_inputs++;
+		crossplay_listed += test_crossplay != 0;
+	}
 	for (index = 0; p2p_lobby_entry(index, &entry); index++)
 	{
 		entries_shown++;
@@ -233,8 +245,17 @@ static void make_seeds(void)
 		lobby.has_password = (index & 16) != 0;
 		size = listing_make(listing, index % 7 == 0 ? _listing_closed : 0);
 		pthread_mutex_unlock(&p2p_lock);
+		/* (a quarter OpenCE's, for the crossplay wire: format 1, signed under
+		its label) */
+		if ((index & 3) == 3)
+		{
+			static const unsigned char token[P2P_TOKEN_SIZE] = { 0x26 };
+
+			size = opence_listing(listing, host_seeds[index % HOSTS], host_keys[index % HOSTS], 1,
+				HALO_PORT_CROSSPLAY_NETWORK_VERSION, index * 13, (unsigned long)index, token, "hceu-lobby-1", 0);
+		}
 		/* (half as heard (mode 0), half to be signed again (mode 1)) */
-		seeds[index][0] = (unsigned char)(index & 1 ? 0 : 1);
+		seeds[index][0] = (unsigned char)((index & 1 ? 0 : 1) | ((index & 3) == 3 ? 0x40 : 0));
 		seeds[index][1] = (unsigned char)(index * 37);
 		memcpy(seeds[index] + 2, listing, (size_t)(index & 1 ? size : size - P2P_SIGNATURE_SIZE));
 		seed_sizes[index] = 2 + (index & 1 ? size : size - P2P_SIGNATURE_SIZE);
@@ -371,8 +392,8 @@ int main(int count, char **arguments)
 			fflush(stdout);
 		}
 	}
-	printf("PASS: %lu inputs, no sanitizer report; inputs after which a game was listed: %lu; entries shown: %lu "
-		"(%lu locked)\n", runs, listed_inputs, entries_shown, locked_shown);
+	printf("PASS: %lu inputs, no sanitizer report; inputs after which a game was listed: %lu (%lu on the crossplay "
+		"wire); entries shown: %lu (%lu locked)\n", runs, listed_inputs, crossplay_listed, entries_shown, locked_shown);
 	return 0;
 }
 #endif

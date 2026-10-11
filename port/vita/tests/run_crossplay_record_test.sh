@@ -3,8 +3,10 @@
 # this tree's Linux build with crossplay on (HALO_CROSSPLAY=true: OpenCE's
 # 13,120-byte record, port/linux/game/network_game_record.c), the host a
 # stand-in for a PC host whose gametype has PC options
-# (HALO_NETWORK_TEST_VARIANT_OPTIONS, network_test.c), in netns code mode
-# (run_netns_online_test.sh: no internet, the test broker and STUN). The host
+# (HALO_NETWORK_TEST_VARIANT_OPTIONS, network_test.c; HALO_TEST_CROSSPLAY_HOST=1,
+# a debug build's leave to host on the crossplay wire, which a Vita never
+# does: network_wire.h), in netns lan mode (run_netns_online_test.sh: system
+# link on one LAN, as a PC host's; codes and relays are the legacy wire's). The host
 # plays Team Slayer on Blood Gulch with every vehicle the map places
 # (team_slayer+vehicles) and options: red's vehicle set none, blue's custom
 # (a Warthog, two Ghosts, nothing else), the FRIENDS radar and a two-minute
@@ -14,7 +16,8 @@
 #   every 10 s) the host's, at most a Warthog and two Ghosts, no Scorpion;
 # - play with the host, and see the game end on the time limit (the host's
 #   game over by about two minutes of game time, 3,600 ticks).
-# The same with crossplay off is netns code mode itself (the legacy record).
+# The same with crossplay off is netns code and lan modes themselves (the
+# legacy record).
 #   HALO_TEST_VITA   the build (default build/linux/halo of this tree)
 #   HALO_TEST_OUT, HALO_TEST_KEEP   as run_netns_online_test.sh's
 set -u
@@ -28,11 +31,11 @@ options="time_limit=2,radar_players=1,vehicle_set=1:255,counts_blue=1.2.0.0.0.0"
 # do not end it first)
 HALO_TEST_OUT="$out" HALO_TEST_KEEP=1 HALO_TEST_SECONDS=${HALO_TEST_SECONDS:-210} HALO_TEST_SCORE=50 \
 	HALO_TEST_HOST_GAME=host:bloodgulch:team_slayer+vehicles \
-	HALO_TEST_ENV="HALO_CROSSPLAY=true HALO_NETWORK_TEST_VARIANT_OPTIONS=$options ${HALO_TEST_ENV:-}" \
-	"$here/run_netns_online_test.sh" code
+	HALO_TEST_ENV="HALO_CROSSPLAY=true HALO_TEST_CROSSPLAY_HOST=1 HALO_NETWORK_TEST_VARIANT_OPTIONS=$options ${HALO_TEST_ENV:-}" \
+	"$here/run_netns_online_test.sh" lan
 status=$?
 fail() { echo "FAIL $*"; status=1; }
-[ $status = 0 ] || echo "FAIL the netns code run (above)"
+[ $status = 0 ] || echo "FAIL the netns lan run (above)"
 host=$out/host/run.log
 joiner=$out/joiner/run.log
 if [ -f "$host" ] && [ -f "$joiner" ]; then

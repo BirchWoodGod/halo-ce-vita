@@ -40,6 +40,12 @@ int config_boolean(const char *name)
 	return 0;
 }
 
+/* (network_wire.c's: the record's wire is given to each call here) */
+int network_wire_crossplay(void)
+{
+	return 0;
+}
+
 /* ---------- the target */
 
 /* the options as the game reads them: every value an index or a time it can
