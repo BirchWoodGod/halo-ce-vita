@@ -110,7 +110,8 @@ for target in $targets; do
 		source/bungie_net/common/message_header.c" ;;
 	variant_options) flags=$game_flags; sources="port/vita/tests/net_fuzz_variant_options.c
 		port/linux/game/network_game_record.c" ;;
-	lobby) flags=$lobby_flags; sources="port/vita/tests/p2p_lobby_fuzz.c port/linux/src/p2p_crypto.c port/linux/src/lang.c
+	lobby) flags=$lobby_flags; sources="port/vita/tests/p2p_lobby_fuzz.c port/linux/src/p2p_crypto.c port/linux/src/crossplay_guard.c
+		port/linux/src/lang.c
 		$monocypher" ;;
 	*) echo "FAIL unknown target $target"; status=1; continue ;;
 	esac
