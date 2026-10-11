@@ -11,6 +11,10 @@
 #   variant_options  the game settings record a host sends, on the legacy
 #              Vita wire and on the crossplay wire (OpenCE's: the gametype's PC
 #              options and co-op's switches; port/linux/game/network_game_record.c)
+#   lobby      the server browser's listings (port/linux/src/p2p_lobby.c, as
+#              p2p_lobby_fuzz.c drives it): the Vita's (format 2) and, on the
+#              crossplay wire, OpenCE's (format 1 under hceu-lobby-1), read,
+#              checked, taken, shown and joined
 # Each is built 32-bit as the game is, with AddressSanitizer and UBSan, and
 # runs its checks and the cases kept in net_fuzz_cases/<target> (inputs that
 # found bugs, and seeds); any out-of-bounds access, overflow or failed
@@ -19,7 +23,7 @@
 #                        (clang's i386 runtime, its COMDAT groups taken out
 #                        when it does not link as it is); what it finds goes
 #                        to NET_FUZZ_OUT (default a folder under TMPDIR)
-#   NET_FUZZ_TARGETS     the targets (default all five)
+#   NET_FUZZ_TARGETS     the targets (default all six)
 #   NET_FUZZ_DEDICATED=1 builds them as the dedicated server's code
 #                        (HALO_DEDICATED_SERVER, HALO_NET_AS_VITA: its limits
 #                        on a peer's packets and an address's peers, its
@@ -35,7 +39,7 @@ out=${TMPDIR:-/tmp}/net_fuzz_test.$$
 test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
-targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options"}
+targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options lobby"}
 seconds=${NET_FUZZ_SECONDS:-0}
 mkdir -p "$out"
 cd "$root"
@@ -50,6 +54,13 @@ platform_flags="--target=i686-linux-gnu -m32 -fms-extensions -fshort-wchar -mali
 # (one line: the commands are built with eval, for the game's quoted include
 # paths)
 platform_flags=$(echo $platform_flags)
+# the server browser's, as run_p2p_lobby_test.sh builds p2p_lobby_fuzz.c (its
+# stand-ins are p2p_lobby_test.c's; LLVMFuzzerTestOneInput alone)
+lobby_flags="--target=i686-linux-gnu -m32 -ffunction-sections -fdata-sections -fms-extensions -fshort-wchar -fcommon
+	-fno-strict-aliasing -fwrapv -O1 -g -std=gnu11 -D_GNU_SOURCE -DHALO_LINUX_PLATFORM_LAYER -DHALO_VITA -DUSE_LIBFUZZER -w
+	-include port/linux/include/halo_linux_prefix.h -include build/linux/platform_msvc_semantics.h -Iport/linux/src
+	-Iport/linux/include -Iport/third_party/monocypher -Isource -Isource/cseries -idirafter port/include/xdk"
+lobby_flags=$(echo $lobby_flags)
 # the game's own (network_messages.c's in build.ninja), DEBUG: its assertions fatal
 game_flags=$(awk '/^build build\/linux\/obj\/source\/networking\/network_messages.o:/ { found = 1 }
 	found && /^  cflags =/ { line = 1 } line { printf "%s ", $0; if ($0 !~ /\$$/) exit }' build.ninja |
@@ -94,6 +105,8 @@ for target in $targets; do
 		source/bungie_net/common/message_header.c" ;;
 	variant_options) flags=$game_flags; sources="port/vita/tests/net_fuzz_variant_options.c
 		port/linux/game/network_game_record.c" ;;
+	lobby) flags=$lobby_flags; sources="port/vita/tests/p2p_lobby_fuzz.c port/linux/src/p2p_crypto.c port/linux/src/lang.c
+		$monocypher" ;;
 	*) echo "FAIL unknown target $target"; status=1; continue ;;
 	esac
 	objects=; fuzz_objects=
