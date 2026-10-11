@@ -14,6 +14,10 @@ AddressSanitizer builds in the netns tests (run_netns_crossplay_test.sh,
 run_netns_online_test.sh): the last twins are written to HALO_NET_FUZZ_DUMP
 when the process dies under a sanitizer, and every 1024 twins.
 
+HALO_NET_FUZZ_KINDS (a list of the distributed netcode's kinds, "64-77":
+the AI's and co-op's) twins only those, for the co-op handlers on a PC
+co-op host (run_netns_crossplay_test.sh crosscoopfuzz).
+
 With HALO_NET_FUZZ_CAPTURE=folder, the first few of each kind of what a
 client takes from a host are written there as the fuzz targets' seeds
 (net_fuzz_capture): the game's messages (as net_fuzz_messages.c's inputs),

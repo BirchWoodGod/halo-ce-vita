@@ -13,6 +13,11 @@ release builds).
   HALO_NET_FUZZ_CAPTURE=d  the first NET_FUZZ_CAPTURE_EACH of each kind of
                          what a client takes from its host, written to d
                          (which must be there) as fuzz targets' seeds
+  HALO_NET_FUZZ_KINDS=list  only the distributed netcode's messages of these
+                         kinds get twins (a comma list of numbers and ranges,
+                         "64-77" for the AI and co-op messages, 16 for the
+                         batches that carry a tick's unreliable ones); the
+                         game's own packets none. Unset: every message
 */
 
 #include "net_fuzz_twin.h"
@@ -49,6 +54,10 @@ static struct
 {
 	int ready;
 	int rate;
+	/* HALO_NET_FUZZ_KINDS: the distributed kinds twinned, a bit each (none
+	set: every message) */
+	int filtered;
+	unsigned char kinds[32];
 	unsigned long state;
 	unsigned long count;
 	char dump_path[512];
@@ -107,6 +116,36 @@ void net_fuzz_capture(
 	fclose(file);
 }
 
+/* HALO_NET_FUZZ_KINDS read: "a,b-c,..." of kinds 0-255 */
+static void net_fuzz_kinds_read(
+	char const *list)
+{
+	while (list && *list)
+	{
+		char *end;
+		long first = strtol(list, &end, 10), last = first, kind;
+
+		if (end == list)
+			break;
+		if (*end == '-')
+		{
+			char const *from = end + 1;
+
+			last = strtol(from, &end, 10);
+			if (end == from)
+				last = first;
+		}
+		for (kind = first < 0 ? 0 : first; kind <= last && kind < 256; kind++)
+		{
+			net_fuzz.kinds[kind / 8] |= (unsigned char)(1 << (kind % 8));
+			net_fuzz.filtered = 1;
+		}
+		list = *end == ',' ? end + 1 : end;
+		if (*end && *end != ',')
+			break;
+	}
+}
+
 static int net_fuzz_random(
 	void)
 {
@@ -163,8 +202,10 @@ int net_fuzz_twin(
 		net_fuzz.ready = 1;
 		net_fuzz.rate = rate ? atoi(rate) : 0;
 		net_fuzz.state = seed ? strtoul(seed, NULL, 10) : 1;
-		fprintf(stderr, "net fuzz twin: one message in %d twinned (direction %d), capture %s\n", net_fuzz.rate, direction,
-			getenv("HALO_NET_FUZZ_CAPTURE") ? getenv("HALO_NET_FUZZ_CAPTURE") : "off");
+		net_fuzz_kinds_read(getenv("HALO_NET_FUZZ_KINDS"));
+		fprintf(stderr, "net fuzz twin: one message in %d twinned (direction %d), capture %s, kinds %s\n", net_fuzz.rate,
+			direction, getenv("HALO_NET_FUZZ_CAPTURE") ? getenv("HALO_NET_FUZZ_CAPTURE") : "off",
+			net_fuzz.filtered ? getenv("HALO_NET_FUZZ_KINDS") : "all");
 		if (dump)
 		{
 			snprintf(net_fuzz.dump_path, sizeof(net_fuzz.dump_path), "%s", dump);
@@ -186,11 +227,21 @@ int net_fuzz_twin(
 		else if (((header >> 2) & 3) == 2)
 			net_fuzz_capture(_net_fuzz_capture_data, ((unsigned char const *)message)[2], NULL, 0, message, size);
 	}
-	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM ||
-		net_fuzz_random() % net_fuzz.rate)
-	{
+	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM)
 		return 0;
+	/* (HALO_NET_FUZZ_KINDS: a distributed message of a kind listed, its type
+	the byte after the message header) */
+	if (net_fuzz.filtered)
+	{
+		unsigned short header;
+		unsigned char kind = ((unsigned char const *)message)[2];
+
+		memcpy(&header, message, 2);
+		if (((header >> 2) & 3) != 2 || !(net_fuzz.kinds[kind / 8] & (1 << (kind % 8))))
+			return 0;
 	}
+	if (net_fuzz_random() % net_fuzz.rate)
+		return 0;
 	memcpy(bytes, message, size);
 	mutations = 1 + net_fuzz_random() % 6;
 	for (mutation = 0; mutation < mutations; mutation++)
