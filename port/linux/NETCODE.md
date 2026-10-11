@@ -89,7 +89,10 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
   actors. This tree keeps the Xbox's pool of 256 (single player's saves keep
   their layout, and the Vita has no memory for more), so they find no room,
   and its Vitas default to none (`network.coop_players` 2, 3 and 4 experimental; extra enemies
-  "none").
+  "none"). As a client it needs none of those pools (it runs no AI): with
+  Crossplay on it joins a PC host's co-op game, Experimental, and its table
+  of the AI units it drives holds a PC host's 1056 (`network_actor_table.c`,
+  `docs/crossplay.md` 6.2).
 - **Host authoritative.** The host alone decides damage, deaths, spawns,
   pickups, scores and the game's objects; clients do not decide them but
   apply what the host sends.
@@ -201,7 +204,9 @@ WebRTC block of kind none; listing format 1 under `hceu-lobby-1`; the
 13,120-byte settings record; upstream's simulation fixes 1f87b4ff,
 22fe5628, 792711ca and ab3c388c) and joins only PC hosts and servers of an
 accepted version; it hosts nothing, and sends none of this tree's own
-messages (map sharing, codes, relays, the ping table). The switch is read
+messages (map sharing, codes, relays, the ping table). A PC co-op game and
+a PC game of more than 16 players are joined after asking once
+(Experimental: `port/linux/src/crossplay_guard.c`). The switch is read
 once, at the network's start.
 
 A client plays by its host's rules: in another's game (searching for it,
