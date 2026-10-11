@@ -14,7 +14,7 @@ its version 24 among them). Two wires carry it (docs/crossplay.md):
   the local data where the options begin. A record received on it gets the
   options its variant implies (game_variant_options_default), which are the
   Xbox game's play: what the betas play. What this wire sends is byte for
-  byte what the betas send (port/vita/tests/run_net_record_test.sh).
+  byte what the betas send (port/vita/tests/run_wire_contract_test.sh's L1).
 - the crossplay wire (OpenCE's): the record as it is. A record received on
   it is a stranger's (a PC host's): its options and co-op switches must be
   ones this game can play by, else the record is refused
@@ -25,7 +25,8 @@ Which wire: network.crossplay (HALO_CROSSPLAY), the one switch
 names, map) stay network_game_client_game_settings_updated's.
 
 Kept apart from the game (it needs only its headers) so that a fuzz target
-and the record test build it on their own (port/vita/tests/net_fuzz_record.c).
+and the record test build it on their own (port/vita/tests/net_fuzz_variant_options.c,
+wire_contract_record.c).
 */
 
 #ifndef __NETWORK_GAME_RECORD_H

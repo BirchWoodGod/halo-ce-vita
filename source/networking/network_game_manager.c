@@ -89,6 +89,7 @@ symbols in this file:
 #include "network_messages.h"
 #include "network_game_manager.h"
 #include "network_game_ui.h"
+#include "network_game_record.h"
 #include "networking/network_server_manager.h"
 #include "objects/objects.h"
 #include "units/units.h"
@@ -779,10 +780,33 @@ boolean network_game_create_game_objects(
 		game_set_game_variant(&game->variant);
 		/* port: and its PC options, as the host sent them (the crossplay
 		wire: a PC host's; on the legacy wire the variant's defaults, which
-		game_set_game_variant has set). A host plays the defaults: this
-		build has no editor for them. */
-		if (!global_network_game_server_get())
-			game_set_game_variant_options(&game->variant_options);
+		game_set_game_variant has set). A host plays the defaults, which
+		game_set_game_variant has set (this build has no editor for them),
+		but on the crossplay wire, where it plays what it sends (the
+		network test's stand-in for a PC host). */
+		if (!global_network_game_server_get() ||
+			network_game_record_format_current() == _network_game_record_crossplay)
+		{
+			struct game_variant_options const *options = &game->variant_options;
+			void platform_log(char const *format, ...);
+
+			game_set_game_variant_options(options);
+			if (network_game_record_format_current() == _network_game_record_crossplay)
+			{
+				platform_log("game: the host's PC options: time limit %d min, friendly fire %d (penalty %d s), "
+					"vehicle respawn %d s, team balance %d, radar %d, vehicle sets %d/%d, counts "
+					"%d.%d.%d.%d.%d.%d/%d.%d.%d.%d.%d.%d, loadout %d (%d, %d), no map weapons %d; co-op switches %d",
+					options->time_limit, options->friendly_fire, options->friendly_fire_penalty,
+					options->vehicle_respawn_time, options->auto_team_balance, options->radar_players,
+					options->vehicle_set[0], options->vehicle_set[1],
+					options->vehicle_counts[0][0], options->vehicle_counts[0][1], options->vehicle_counts[0][2],
+					options->vehicle_counts[0][3], options->vehicle_counts[0][4], options->vehicle_counts[0][5],
+					options->vehicle_counts[1][0], options->vehicle_counts[1][1], options->vehicle_counts[1][2],
+					options->vehicle_counts[1][3], options->vehicle_counts[1][4], options->vehicle_counts[1][5],
+					options->loadout, options->primary_weapon, options->secondary_weapon, options->no_map_weapons,
+					game->cooperative_flags);
+			}
+		}
 	}
 
 	if (game_load(&options))

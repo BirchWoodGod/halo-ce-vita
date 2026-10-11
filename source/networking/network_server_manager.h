@@ -62,6 +62,12 @@ enum
 multiplayer; the next round is on next_map (NULL repeats the level). */
 void network_game_server_port_cooperative_won(
 	char const *next_map);
+/* port: the gametype's PC options sent on the crossplay wire (a test's
+stand-in for a PC host's: network_test.c); options out of range ignored */
+struct game_variant_options;
+void network_game_server_port_set_variant_options(
+	struct network_game_server *server,
+	struct game_variant_options const *options);
 /* port: co-op server settings: the difficulty, sent to clients, and the
 build's maximum players (Server Setup's player count is for PvP) */
 void network_game_server_port_set_cooperative(

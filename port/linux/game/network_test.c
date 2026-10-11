@@ -430,6 +430,72 @@ static void network_test_append(
 		*length = MIN(*length + written, size - 1);
 }
 
+/* HALO_NETWORK_TEST_VARIANT_OPTIONS: the gametype's PC options the host
+sends on the crossplay wire (network_game_record.c), as a PC host's would:
+"key=value,..." of time_limit (minutes), friendly_fire, friendly_fire_penalty,
+vehicle_respawn_time, auto_team_balance, radar_players, vehicle_set
+(red:blue, 254 PC, 255 custom), counts_red and counts_blue (six counts,
+by dots: warthog.ghost.scorpion.rocket warthog.banshee.turret), loadout,
+primary_weapon, secondary_weapon, no_map_weapons; the rest the variant's
+defaults (game_engine.h's enums give the values) */
+static void network_test_variant_options(
+	struct game_variant const *variant)
+{
+	char const *text = getenv("HALO_NETWORK_TEST_VARIANT_OPTIONS");
+	struct game_variant_options options;
+	char copy[512];
+	char *item;
+	char *rest;
+
+	if (!text || !text[0] || !global_network_game_server_get())
+		return;
+	game_variant_options_default(variant, &options);
+	snprintf(copy, sizeof(copy), "%s", text);
+	for (item = strtok_r(copy, ",", &rest); item; item = strtok_r(NULL, ",", &rest))
+	{
+		char *value = strchr(item, '=');
+		long number;
+
+		if (!value)
+			continue;
+		*value++ = 0;
+		number = strtol(value, NULL, 0);
+		if (!strcmp(item, "time_limit")) options.time_limit = (short)number;
+		else if (!strcmp(item, "friendly_fire")) options.friendly_fire = (short)number;
+		else if (!strcmp(item, "friendly_fire_penalty")) options.friendly_fire_penalty = (short)number;
+		else if (!strcmp(item, "vehicle_respawn_time")) options.vehicle_respawn_time = (short)number;
+		else if (!strcmp(item, "auto_team_balance")) options.auto_team_balance = (boolean)number;
+		else if (!strcmp(item, "radar_players")) options.radar_players = (byte)number;
+		else if (!strcmp(item, "loadout")) options.loadout = (byte)number;
+		else if (!strcmp(item, "primary_weapon")) options.primary_weapon = (byte)number;
+		else if (!strcmp(item, "secondary_weapon")) options.secondary_weapon = (byte)number;
+		else if (!strcmp(item, "no_map_weapons")) options.no_map_weapons = (boolean)number;
+		else if (!strcmp(item, "vehicle_set"))
+		{
+			char *colon = strchr(value, ':');
+
+			options.vehicle_set[0] = (byte)number;
+			options.vehicle_set[1] = (byte)(colon ? strtol(colon + 1, NULL, 0) : number);
+		}
+		else if (!strcmp(item, "counts_red") || !strcmp(item, "counts_blue"))
+		{
+			short side = !strcmp(item, "counts_blue");
+			short type;
+			char *cursor = value;
+
+			for (type = 0; type < NUMBER_OF_VARIANT_VEHICLES && *cursor; type++)
+			{
+				options.vehicle_counts[side][type] = (byte)strtol(cursor, &cursor, 0);
+				if (*cursor == '.')
+					cursor++;
+			}
+		}
+	}
+	platform_log("network test: the gametype's PC options from HALO_NETWORK_TEST_VARIANT_OPTIONS%s",
+		game_variant_options_valid(&options) ? "" : " are out of range: not sent");
+	network_game_server_port_set_variant_options(global_network_game_server_get(), &options);
+}
+
 /* every ten seconds of a game, the weapons and equipment this machine has,
 by kind (tag name and index: the players' lines name the weapons they carry
 by index), lying about and carried: what a game type gives (the dedicated
@@ -1553,6 +1619,7 @@ void network_test_update(
 					variant.universal_variant.score_to_win = network_test.score_to_win;
 				player_ui_set_game_variant(&variant);
 				network_game_server_change_game_variant(global_network_game_server_get(), &variant);
+				network_test_variant_options(&variant);
 				network_test.map_set = TRUE;
 			}
 			else if (network_test.map_set && network_test.map_path[0] && global_network_game_server_get() &&
