@@ -249,10 +249,16 @@ int r;
                              &s->sub.trees.tb, s->hufts, z);
       if (t != Z_OK)
       {
-        ZFREE(z, s->sub.trees.blens);
+        /* port: zlib 1.1.4's fix (CVE-2002-0059): blens freed here only
+        when the mode leaves BTREE, else inflate_blocks_reset frees it
+        again (a tree table or allocation that fails, the latter forced by
+        any stream when memory is short) */
         r = t;
         if (r == Z_DATA_ERROR)
+        {
+          ZFREE(z, s->sub.trees.blens);
           s->mode = BAD;
+        }
         LEAVE
       }
       s->sub.trees.index = 0;
@@ -313,11 +319,15 @@ int r;
         t = inflate_trees_dynamic(257 + (t & 0x1f), 1 + ((t >> 5) & 0x1f),
                                   s->sub.trees.blens, &bl, &bd, &tl, &td,
                                   s->hufts, z);
-        ZFREE(z, s->sub.trees.blens);
+        /* port: zlib 1.1.4's fix (CVE-2002-0059), as above: blens freed
+        only as the mode leaves DTREE */
         if (t != Z_OK)
         {
           if (t == (uInt)Z_DATA_ERROR)
+          {
+            ZFREE(z, s->sub.trees.blens);
             s->mode = BAD;
+          }
           r = t;
           LEAVE
         }
@@ -329,6 +339,7 @@ int r;
         }
         s->sub.decode.codes = c;
       }
+      ZFREE(z, s->sub.trees.blens);
       s->mode = CODES;
     case CODES:
       UPDATE
