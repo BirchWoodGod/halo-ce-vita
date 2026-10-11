@@ -99,6 +99,10 @@ level not reached yet (ui_widget_game_data_input_functions.c) */
 #define PICTURE_EXTENSION ".bmp"
 /* a 4K screenshot is 25 MB as a bmp file */
 #define MAXIMUM_PICTURE_FILE_BYTES 0x04000000L
+/* (port) a mod map's picture, a stranger's file read whole into the C heap
+(the Vita's is 48 MB): its PNG is at most 1024 a side (png_files.c), 4 MB
+of pixels however it is compressed, and a bmp of that size is as large */
+#define MAXIMUM_MOD_PICTURE_FILE_BYTES 0x00800000L
 /* the width and height of a picture's texture: about twice the menus'
 level pictures */
 #define PICTURE_TEXTURE_SIZE 256
@@ -903,7 +907,7 @@ static struct bitmap_data *custom_edition_map_picture_read(
 	}
 	if (fseek(stream, 0, SEEK_END) == 0 &&
 		(size = ftell(stream)) >= 0 &&
-		size <= MAXIMUM_PICTURE_FILE_BYTES &&
+		size <= (map->mod ? MAXIMUM_MOD_PICTURE_FILE_BYTES : MAXIMUM_PICTURE_FILE_BYTES) &&
 		fseek(stream, 0, SEEK_SET) == 0)
 	{
 		/* one more byte, so that an empty file is not a failed allocation */
