@@ -690,8 +690,10 @@ static boolean browser_join(struct widget_instance *widget)
 {
 	struct p2p_lobby_entry const *entry = browser_entry(widget);
 
-	if (!entry || menu_functions.large_asked)
+	/* (a question unanswered stays no lock: a game chosen again asks anew) */
+	if (!entry)
 		return TRUE;
+	menu_functions.large_asked = FALSE;
 	menu_functions.chosen = *entry;
 	menu_functions.chosen_valid = TRUE;
 	menu_functions.status[0] = 0;
