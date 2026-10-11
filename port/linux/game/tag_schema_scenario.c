@@ -113,6 +113,10 @@ enum
 	/* recorded_animation_playback.c: an event's type is 6 bits, its time
 	delta 2 */
 	_recorded_event_end = 1,
+	/* (recorded_animation_playback.c and _v1.c: a weapon index, a word) */
+	_recorded_event_weapon_index_set = 5,
+	/* units.h */
+	RECORDED_UNIT_WEAPONS = 4,
 	NUMBER_OF_RECORDED_EVENT_TYPES = 23,
 	/* scenario.c */
 	NUMBER_OF_TRIGGER_VOLUME_TYPES = 2,
@@ -639,17 +643,43 @@ static long recorded_event_v1_size(
 	return 16;
 }
 
+/* a weapon index of a recorded animation (the unit control's, and each
+weapon index event's): one of a unit's four weapons or none (0xFFFF), as
+unit_control asserts; another (Halo: CE Anniversary maps' 0xFF00, which a
+release build took for weapon -256 of the unit's inventory) is made none,
+the unit keeping its weapon, when `fix`: whether it was another (port;
+GulchCE's mcc_recordings.c, CC0, found and fixed the same) */
+static boolean recorded_weapon_index_fix(
+	byte *weapon_index,
+	boolean fix)
+{
+	unsigned short value = (unsigned short)(weapon_index[0] | (weapon_index[1] << 8));
+
+	if (value < RECORDED_UNIT_WEAPONS || value == 0xFFFF)
+		return FALSE;
+	if (fix)
+		weapon_index[0] = weapon_index[1] = 0xFF;
+
+	return TRUE;
+}
+
 /* a dry run of an event stream, as the game plays it: NULL if it is
 playable (its version known, every event of a known type and inside the
 stream, up to the end event), what is wrong otherwise. (A time delta the
-game asserts is short or long enough plays as it is) */
+game asserts is short or long enough plays as it is.) *weapon_fixes counts
+the weapon indices recorded_weapon_index_fix finds wrong, and with `fix`
+makes none (only once the stream is known playable: a first pass without) */
 static char const *recorded_animation_decode(
-	struct recorded_animation_definition const *animation)
+	struct recorded_animation_definition const *animation,
+	boolean fix,
+	long *weapon_fixes)
 {
-	byte const *stream = animation->event_stream.address;
+	byte *stream = animation->event_stream.address;
 	long size = animation->event_stream.size;
 	long offset;
 	short version_index;
+
+	*weapon_fixes = 0;
 
 	if (animation->version < 1 || animation->version > RECORDED_ANIMATION_VERSION)
 		return "has an unknown version";
@@ -662,10 +692,15 @@ static char const *recorded_animation_decode(
 		offset += version_index == 1 ? 4 : 2;
 	if (animation->version == RECORDED_ANIMATION_VERSION)
 		offset += RECORDED_ANIMATION_STATE_SIZE;
+	if (offset > size)
+		return "ends inside its unit's control";
+	/* (the unit control's weapon index: recorded_unit_control's fifth byte) */
+	*weapon_fixes += recorded_weapon_index_fix(stream + 4, fix);
 
 	for (;;)
 	{
 		long event_type;
+		long event_size;
 
 		if (animation->version == RECORDED_ANIMATION_VERSION)
 		{
@@ -695,8 +730,12 @@ static char const *recorded_animation_decode(
 			}
 			if (event_type >= NUMBER_OF_RECORDED_EVENT_TYPES)
 				return "has an event of an unknown type";
-			if (event_type != _recorded_event_end)
-				offset += recorded_event_size(event_type);
+			event_size = event_type != _recorded_event_end ? recorded_event_size(event_type) : 0;
+			if (event_size > size - offset)
+				return "ends inside an event";
+			if (event_type == _recorded_event_weapon_index_set)
+				*weapon_fixes += recorded_weapon_index_fix(stream + offset, fix);
+			offset += event_size;
 		}
 		else
 		{
@@ -705,8 +744,12 @@ static char const *recorded_animation_decode(
 			event_type = *(short const *)(stream + offset);
 			if (event_type < 0 || event_type >= NUMBER_OF_RECORDED_EVENT_TYPES)
 				return "has an event of an unknown type";
-			if (event_type != _recorded_event_end)
-				offset += recorded_event_v1_size(event_type);
+			event_size = event_type != _recorded_event_end ? recorded_event_v1_size(event_type) : 0;
+			if (event_size > size - offset)
+				return "ends inside an event";
+			if (event_type == _recorded_event_weapon_index_set)
+				*weapon_fixes += recorded_weapon_index_fix(stream + offset + RECORDED_EVENT_V1_HEADER_SIZE, fix);
+			offset += event_size;
 		}
 		if (offset > size)
 			return "ends inside an event";
@@ -725,6 +768,7 @@ static boolean recorded_animation_check(
 {
 	struct recorded_animation_definition *animation = base;
 	char const *error;
+	long weapon_fixes;
 
 	/* (one already marked unplayable, as below, stays so) */
 	if (!animation->version && !animation->length_in_ticks && !animation->event_stream.size &&
@@ -732,7 +776,12 @@ static boolean recorded_animation_check(
 	{
 		return TRUE;
 	}
-	error = recorded_animation_decode(animation);
+	error = recorded_animation_decode(animation, FALSE, &weapon_fixes);
+	if (!error && weapon_fixes)
+	{
+		recorded_animation_decode(animation, TRUE, &weapon_fixes);
+		tag_validate_correct(validation, "has %ld weapon indices of no weapon: none", weapon_fixes);
+	}
 	if (error)
 	{
 		tag_validate_correct(validation, "%s: not played", error);
