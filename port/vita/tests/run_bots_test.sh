@@ -59,8 +59,9 @@
 #            bots in every game and walking (a team gametype with both
 #            teams), and memory steady over the map changes: halo.log's
 #            "memory: unloaded ui" between games, from the third on, the C
-#            heap within 512 KB of the third's, the texture pool at its first
-#            segment (4 MB) and video memory as free (1 MB)
+#            heap rising 96 KB a change at most on average (1 MB in all), the
+#            texture pool at its first segment (4 MB) and video memory as
+#            free (1 MB)
 #   playlistcancel  Custom (bots.playlist custom): a bots_playlist.txt with
 #            good lines and bad (no gametype, extra words, maps not there or
 #            not multiplayer, paths, format strings, a gametype the bots do
@@ -694,9 +695,16 @@ if len(memory) < wanted_games:
     fail("%d unloads of the menus between games, not %d" % (len(memory), wanted_games))
 if len(memory) >= 3:
     heap, pool, video = memory[2]
+    # (the C heap creeps a few tens of KB a change on the harness with or
+    # without the playlist - the network test's own game list, Oct 11 2026:
+    # 26 to 187 KB a change - as the session's caches fill; a map's data
+    # left behind would be megabytes)
+    if len(memory) > 3:
+        rise = (memory[-1][0] - heap) / float(len(memory) - 3)
+        print("  the C heap from the third change on: %+d KB, %.0f KB a change" % (memory[-1][0] - heap, rise))
+        if rise > 96 or memory[-1][0] - heap > 1024:
+            fail("the C heap rose %d KB over %d changes from the third" % (memory[-1][0] - heap, len(memory) - 3))
     for index, (h, p, v) in enumerate(memory[2:], 3):
-        if h - heap > 512:
-            fail("the C heap at the %dth change %d KB, %d KB more than at the third" % (index, h, h - heap))
         if p > 4096:
             fail("the texture pool held %d KB at the %dth change" % (p, index))
         if v < video - 1024:
