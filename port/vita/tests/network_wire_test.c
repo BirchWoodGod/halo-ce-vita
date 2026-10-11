@@ -71,6 +71,13 @@ int main(int argc, char **argv)
 			!network_wire_version_accepted(0xFFFF), "and of no other version (18, 25, 27, 0, 65535)");
 		check(network_wire_hosting_refused(&why) && why && strstr(why, "turn Crossplay off"),
 			"hosting refused, the player told to turn Crossplay off");
+		setenv("HALO_TEST_CROSSPLAY_HOST", "1", 1);
+#ifdef HALO_RELEASE
+		check(network_wire_hosting_refused(NULL), "a release build: HALO_TEST_CROSSPLAY_HOST changes nothing");
+#else
+		check(!network_wire_hosting_refused(NULL), "a test build with HALO_TEST_CROSSPLAY_HOST=1: a PC host's stand-in");
+#endif
+		unsetenv("HALO_TEST_CROSSPLAY_HOST");
 		{
 			int before = reads;
 

@@ -264,6 +264,7 @@ symbols in this file:
 #include "text/unicode.h"
 #include "map_share.h"
 #include "network_game_record.h"
+#include "network_wire.h"
 #include "main/main.h"
 #include "custom_edition_maps.h"
 /* system_milliseconds(), for the settings update interval */
@@ -1756,16 +1757,32 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			/* the native builds' network version and netcode (a client
 			refuses a host of another version, or of the lockstep netcode
 			older builds had: network_client_manager.c) */
-			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET] = (byte)(HALO_PORT_NETWORK_VERSION & 0xFF);
-			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] = (byte)(HALO_PORT_NETWORK_VERSION >> 8);
+			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET] = (byte)(network_wire_version() & 0xFF);
+			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] = (byte)(network_wire_version() >> 8);
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] =
 				HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG;
+			/* (the crossplay wire's (network_wire.h), as OpenCE's hosts make
+			it: a game under way flagged so, nothing of the Vitas'. Only a
+			test's stand-in for a PC host gets here: a Vita hosts no game on
+			that wire, network_wire_hosting_refused) */
+			if (network_wire_crossplay())
+			{
+				if (network_game_server_get_state(server, NULL) != _network_game_server_state_pregame)
+				{
+					advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_IN_PROGRESS_FLAG;
+				}
+			}
+			else
+			{
 #ifdef HALO_PORT_VITA_NETWORK
 			/* (Vitas play only Vitas: halo_port_limits.h) */
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_VITA_FLAG;
 #endif
-			/* (co-op: the lists show the level and its difficulty) */
-			if (game->variant.game_engine_index == 0 && custom_edition_maps_campaign_level(game->map.name))
+			}
+			/* (co-op: the lists show the level and its difficulty; the legacy
+			wire's) */
+			if (!network_wire_crossplay() && game->variant.game_engine_index == 0 &&
+				custom_edition_maps_campaign_level(game->map.name))
 			{
 				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_COOP_FLAG;
 				advertisement.reserved[HALO_PORT_ADVERTISED_COOP_DIFFICULTY_OFFSET] = (byte)PIN(game->difficulty, 0, 3);

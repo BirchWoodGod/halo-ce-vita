@@ -436,7 +436,7 @@ The settings panel's **Multiplayer** tab:
 | Line | What it does |
 | --- | --- |
 | Connection | **Same Wi-Fi** (the default): system link on this network. **Ad hoc** (experimental): Vitas side by side, without a router. **Online** (experimental): internet play. Applies after a restart. |
-| Crossplay | **Off** (the default): Vita to Vita, as betas 1–4. **On**: OpenCE's games instead (PC hosts and servers running OpenCE, ChupathingyCE or DamnationCE). Not with Ad hoc. |
+| Crossplay | **Off** (the default): Vita to Vita, as betas 1–4. **On**: OpenCE's games instead (PC hosts and servers running OpenCE, ChupathingyCE or DamnationCE), joined from the server browser, an invite link or System Link; the Vita hosts nothing while it is on (turn it off to host), and codes, map sharing and relays are Vita-only. After a restart. Not with Ad hoc. |
 | Ad hoc room | With Connection Ad hoc: 1 to 4. Vitas in the same room play together. |
 | Join the room | With Ad hoc: the system's dialog joins (or makes) the room's group; then Multiplayer, System Link (LAN) in the game. |
 | Join with a code | Online, without the PC menus (whose Join by code does it): type the host's code with the D-pad (up and down change a letter, left and right move, Cross joins), then the steps with how the lookup goes, and Cross opens System Link. |

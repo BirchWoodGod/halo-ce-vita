@@ -11,6 +11,8 @@ read once and kept for the run.
 #include "lang.h"
 
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* the versions a crossplay client joins: the pinned OpenCE's (6399ed9d).
 ChupathingyCE and DamnationCE hosts announce the same (docs/crossplay.md 2) */
@@ -51,9 +53,24 @@ int network_wire_version_accepted(unsigned int version)
 	return 0;
 }
 
+/* (automated tests only, never in release builds) HALO_TEST_CROSSPLAY_HOST=1:
+this machine hosts on the crossplay wire, a stand-in for a PC host (OpenCE's
+advertisement, join token and settings record, on a LAN), for the record's
+end-to-end test (run_crossplay_record_test.sh); a Vita never does */
+static int network_wire_test_host(void)
+{
+#ifdef HALO_RELEASE
+	return 0;
+#else
+	const char *value = getenv("HALO_TEST_CROSSPLAY_HOST");
+
+	return value && !strcmp(value, "1");
+#endif
+}
+
 int network_wire_hosting_refused(const char **why)
 {
-	if (!network_wire_crossplay())
+	if (!network_wire_crossplay() || network_wire_test_host())
 		return 0;
 	if (why)
 		*why = T("Crossplay is on: a Vita joins PC games but does not host them. "

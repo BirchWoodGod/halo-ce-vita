@@ -191,6 +191,19 @@ Its Vitas (and its Linux build standing in for one) play only Vitas
 (`HALO_PORT_ADVERTISED_VITA_FLAG`), so an upstream build of the same number
 is refused all the same.
 
+**Two wires, one switch** (`docs/crossplay.md`; `network.crossplay`,
+the Vita's Crossplay row; `port/linux/include/network_wire.h`). Off, the
+default, is the legacy Vita wire above, byte for byte as betas 1-4 speak it.
+On, the machine speaks upstream's wire as of OpenCE 6399ed9d (network
+version 26: its advertisement flags, where 0x02 is a game under way; its
+constant join token; signalling on `hceu` with message version 4 and a
+WebRTC block of kind none; listing format 1 under `hceu-lobby-1`; the
+13,120-byte settings record; upstream's simulation fixes 1f87b4ff,
+22fe5628, 792711ca and ab3c388c) and joins only PC hosts and servers of an
+accepted version; it hosts nothing, and sends none of this tree's own
+messages (map sharing, codes, relays, the ping table). The switch is read
+once, at the network's start.
+
 A client plays by its host's rules: in another's game (searching for it,
 in its lobby, or playing it) the developer console, the telnet console
 and the cheat buttons run only commands that change nothing of the game

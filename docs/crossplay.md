@@ -1,6 +1,7 @@
 # Crossplay plan: Vita and PC (OpenCE, ChupathingyCE, DamnationCE)
 
-Status: plan only, no game code changed. Written Oct 11 2026 against
+Status: plan, with T1, T2, T8 and the client side of T4 and T5 built
+(sections 10.1 and 10.2). Written Oct 11 2026 against
 next-1.1 50ae7395 (network version 18), next-1.1.1 367b4534 (network
 version 19, unreleased), OpenCE 6399ed9d (network version 26),
 ChupathingyCE 8cb79900 (0.7.2e, network version 26, accepts 11 to 30) and
@@ -740,6 +741,38 @@ first failing stage, next to an OpenCE-client control that passes.
 **Hardware.** Hardware checks come last and are owner-run: one Vita on an
 official crossplay server with a PC player, then a Vita joining a PC host.
 Ask before any deploy or quit on a Vita.
+
+### 10.2 The wire switch as built (T4 + T5 client side, Oct 11 2026)
+
+Branch feat/xp-wire-switch. One switch, as the owner decided: no per-game
+wire choice and no Vita host on the crossplay wire.
+
+- `port/linux/include/network_wire.h`, `port/linux/src/network_wire.c`:
+  `network.crossplay` read once, at the network's start, and kept for the
+  run (the panel's Crossplay row now applies after a restart). Ad hoc and
+  the dedicated server are always legacy. The crossplay wire speaks 26 and
+  joins the versions of a compiled-in list (26 alone) until T10's table.
+- **Off** changes no byte: the legacy wire's topics, message version 3,
+  relays, listing format 2, token XOR, flags and the 13,092-byte record are
+  as before, and the four OpenCE behaviour fixes ported in c4835524
+  (1f87b4ff, 22fe5628, 792711ca, ab3c388c) apply only on the crossplay
+  wire, so a beta.4 machine and a beta.5 one agree.
+- **On**: OpenCE's advertisement flags (the Vita and co-op bits are not
+  read), the constant join token, `hceu` signalling with message version 4
+  and a WebRTC block of kind none (a host's block is checked and skipped:
+  the tunnel stays plain UDP), no relays, listing format 1 under
+  `hceu-lobby-1`. Hosting is refused on every path (Create Game, fast
+  setup, co-op, the panel), with the player told to turn Crossplay off.
+  Our extensions stay silent toward PC machines (T6-lite): map share's
+  messages are never sent, codes are refused with a message, relays are
+  off, and the ping table is neither sent nor read.
+
+**Results (netns, our client with `HALO_CROSSPLAY=1`):** opencelan,
+opencehost (browser and invite link), chupahost, chupaserver and damnserver
+pass every step, so they are now acceptance tests (`XPPC_EXPECTED_FAIL`
+defaults to `crossrefuse`, which waits for T11). The new `crossmixed` mode
+checks that the two worlds stay apart. The wire contract test closes G2,
+G3, G4, G5, G12, G13 and G15; still open: G6 (T3), G9, G10, G11, G14.
 
 ---
 
