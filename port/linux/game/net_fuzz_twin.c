@@ -263,7 +263,7 @@ int net_fuzz_twin(
 	memcpy(net_fuzz.ring[slot].original, message, size);
 	memcpy(net_fuzz.ring[slot].bytes, bytes, (size_t)length);
 	net_fuzz.count++;
-	if (!(net_fuzz.count % 1024))
+	if (!(net_fuzz.count % 1024) || net_fuzz.count == 16 || net_fuzz.count == 256)
 	{
 		fprintf(stderr, "net fuzz twin: %lu twins (direction %d)\n", net_fuzz.count, direction);
 		net_fuzz_dump();
