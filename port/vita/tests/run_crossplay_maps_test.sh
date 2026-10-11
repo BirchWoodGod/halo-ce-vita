@@ -17,7 +17,7 @@
 #    a real PC host (run_netns_crossplay_test.sh crossmaps is that, expected
 #    to fail until then). Two copies of this tree's Linux build, both with
 #    crossplay on (HALO_CROSSPLAY=true: OpenCE's settings record), in netns
-#    code mode (run_netns_online_test.sh); the host names its map as an
+#    lan mode (run_netns_online_test.sh; the host the debug build's PC-host stand-in, HALO_TEST_CROSSPLAY_HOST=1); the host names its map as an
 #    OpenCE host does (network_test.c: a map with a path is that level;
 #    custom_edition_maps_network_identity on the crossplay wire: the raw
 #    checksum). Cases:
@@ -120,8 +120,8 @@ EOF
 		echo "=== $name: the host on '${game#host:}', the joiner's maps: $(basename "$joiner_data")"
 		HALO_TEST_OUT="$out/$name" HALO_TEST_KEEP=1 HALO_TEST_SECONDS=${CROSSPLAY_MAPS_SECONDS:-150} \
 			HALO_TEST_REJOIN=0 HALO_TEST_HOST_GAME="$game" HALO_TEST_DATA_HOST="$host_data" HALO_TEST_DATA_JOINER="$joiner_data" \
-			HALO_TEST_ENV="HALO_CROSSPLAY=true HALO_CUSTOM_EDITION=1 ${HALO_TEST_ENV:-}" \
-			"$here/run_netns_online_test.sh" code > "$out/$name.log" 2>&1
+			HALO_TEST_ENV="HALO_CROSSPLAY=true HALO_TEST_CROSSPLAY_HOST=1 HALO_CUSTOM_EDITION=1 ${HALO_TEST_ENV:-}" \
+			"$here/run_netns_online_test.sh" lan > "$out/$name.log" 2>&1
 		case_status=$?
 		tail -3 "$out/$name.log" | sed 's/^/  netns: /'
 		host_log=$out/$name/host/run.log
@@ -155,7 +155,7 @@ EOF
 			grep -aq "join: the host's map is levels.test.bloodgulch.bloodgulch (copy 0x00000000)" "$out/stock/joiner/run.log" ||
 				fail "stock: the host did not name Blood Gulch as an OpenCE host does"
 			played stock || fail "stock: the joiner did not play"
-			[ "$case_status" = 0 ] || fail "stock: netns code mode failed (its log: $out/stock.log)" ;;
+			[ "$case_status" = 0 ] || fail "stock: netns lan mode failed (its log: $out/stock.log)" ;;
 		ce)
 			run_case ce "host:custom_maps\\$ce_name:slayer" "$host_maps" "$(maps_folder joiner-ce with)"
 			grep -aq "join: the host's map is custom_maps.$ce_name (copy $checksum)" "$out/ce/joiner/run.log" ||
