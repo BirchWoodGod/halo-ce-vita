@@ -4995,8 +4995,10 @@ static long objects_scenery_update_divisor = -1;
 static unsigned long objects_scenery_update_pass;
 static unsigned long objects_scenery_update_settings_seen;
 
-/* (port) HALO_NET_REMOTE_LOD=1 (opt-in, off by default: the owner's call,
-triage/large-game-status.md): on a client of a multiplayer game, another
+/* (port) HALO_NET_REMOTE_LOD (network.remote_lod, the Vita's Multiplayer row
+Unseen players): auto, the default, in a game of more than 16 players (the
+owner, Oct 11 2026: where a Vita needs it), 1 always, 0 never. On a client
+of a multiplayer game, another
 machine's player's living biped, on foot, that the render has not drawn in
 the last 4 frames and whose player is not firing, throwing, meleeing,
 reloading, swapping, jumping or acting this tick, is updated every other
@@ -5007,8 +5009,56 @@ the host's words, its animation, its footsteps and its weapon's upkeep. In
 view, or doing any of those, it is updated every tick. A 24-player client:
 -16% of its tick (24 players on Hang 'Em High, most remote players out of
 view at any time). */
-static int objects_remote_lod_enabled = -1;
+enum
+{
+	_objects_remote_lod_never,
+	_objects_remote_lod_always,
+	_objects_remote_lod_large_games,
+};
+/* (more players than this make a game large: crossplay_guard.h's 16) */
+#define OBJECTS_REMOTE_LOD_LARGE_PLAYERS 16
+
+static int objects_remote_lod_mode = -1;
 static unsigned long objects_remote_lod_settings_seen;
+
+/* the players in the game, counted once a tick */
+static long objects_remote_lod_players(void)
+{
+	static long counted_tick = -1;
+	static long count;
+
+	if (counted_tick != (long)game_time_get())
+	{
+		struct data_iterator iterator;
+
+		count = 0;
+		data_iterator_new(&iterator, player_data);
+		while (data_iterator_next(&iterator))
+		{
+			count++;
+		}
+		counted_tick = (long)game_time_get();
+	}
+	return count;
+}
+
+/* whether unseen remote players go at half rate now (said in the log when
+that changes: the setting, or Auto's game passing 16 players) */
+static boolean objects_remote_lod_active(void)
+{
+	static int reported = -1;
+	boolean active = objects_remote_lod_mode == _objects_remote_lod_always ||
+		(objects_remote_lod_mode == _objects_remote_lod_large_games &&
+			objects_remote_lod_players() > OBJECTS_REMOTE_LOD_LARGE_PLAYERS);
+
+	if (active != reported)
+	{
+		reported = active;
+		error(_error_silent, "objects: unseen remote players at %s (%s, %ld players)", active ? "half rate" : "full rate",
+			objects_remote_lod_mode == _objects_remote_lod_always ? "Reduced" : "Auto", objects_remote_lod_players());
+	}
+	return active;
+}
 
 static boolean objects_remote_lod_skipped(
 	short absolute_index,
@@ -5018,14 +5068,15 @@ static boolean objects_remote_lod_skipped(
 	struct unit_datum const *unit;
 	struct player_datum const *player;
 
-	if (objects_remote_lod_enabled < 0 || objects_remote_lod_settings_seen != halo_settings_generation)
+	if (objects_remote_lod_mode < 0 || objects_remote_lod_settings_seen != halo_settings_generation)
 	{
 		char const *setting = getenv("HALO_NET_REMOTE_LOD");
 
 		objects_remote_lod_settings_seen = halo_settings_generation;
-		objects_remote_lod_enabled = setting && atoi(setting) != 0;
+		objects_remote_lod_mode = !setting || !setting[0] || !strcmp(setting, "auto") ? _objects_remote_lod_large_games :
+			atoi(setting) != 0 ? _objects_remote_lod_always : _objects_remote_lod_never;
 	}
-	if (!objects_remote_lod_enabled || header->type != _object_type_biped ||
+	if (objects_remote_lod_mode == _objects_remote_lod_never || header->type != _object_type_biped ||
 		((absolute_index + game_time_get()) & 1) == 0)
 	{
 		return FALSE;
@@ -5038,7 +5089,8 @@ static boolean objects_remote_lod_skipped(
 			FLAG(_unit_control_use_equipment_bit) | FLAG(_unit_control_weapon_reload_bit) |
 			FLAG(_unit_control_weapon_primary_trigger_bit) | FLAG(_unit_control_weapon_secondary_trigger_bit) |
 			FLAG(_unit_control_throw_grenade_bit) | FLAG(_unit_control_swap_weapons_bit))) ||
-		!network_game_distributed_client() || !game_engine_running())
+		!network_game_distributed_client() || !game_engine_running() ||
+		!objects_remote_lod_active())
 	{
 		return FALSE;
 	}
