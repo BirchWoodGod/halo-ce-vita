@@ -3,7 +3,7 @@ PARTICLE_BUDGET.C
 
 (port) HALO_PARTICLE_BUDGET (full, reduced, low; or 0, 1, 2), else
 config.toml's graphics.particles: the settings panel's Particles row, Reduced
-in its Performance profile. Particles are a large share of the tick in a big
+in all three of its profiles. Particles are a large share of the tick in a big
 fight (a 15-bot Chill Out on the Pi: ~1000 live, the local game's 1024 most
 of the time, ~2.8 us each a frame, the Vita some six times that), most of
 them the assault rifle's sparks (20-40 at every bullet's impact on metal or

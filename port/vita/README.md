@@ -174,13 +174,13 @@ of `settings.txt`: a file from an older version loads as it is.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Profile | Balanced | sets the rows marked (P) at once: Performance, Balanced, Quality; Custom when they match none. All three are Dynamic resolution, from 50%, 63% and 75%; Quality is otherwise the Xbox's but for the AI think rate (Adaptive). A `settings.txt` saved with a profile by an older version loads as that profile with this version's values (a Custom one keeps its rows) |
+| Profile | Balanced | sets the rows marked (P) at once: Performance, Balanced, Quality; Custom when they match none. All three are Dynamic resolution, from 50%, 63% and 75%, with Adaptive AI. Balanced is Performance's cost with Medium models, sound occlusion every 3rd tick, Full effects and every particle drawn; Quality adds shadows near, sun rays, High models, 8 lights, Tiny, Half, Half and sound every frame; Particles are Reduced in all three (Full is the processor's biggest cost in big multiplayer fights). Object shadows and Sun rays give the graphics chip small extra scenes every frame (the slowest extras on the Vita), so only Quality has them; the Xbox's every row is too slow (Custom). A `settings.txt` saved with a profile by an older version loads as that profile with this version's values (a Custom one keeps its rows) |
 | Render resolution (P) | Dynamic | the 3D view's resolution (applies at once): 100% to 50%, or Dynamic, lowered in heavy scenes from the Dynamic minimum up to 100% (with video memory too short for 100%, switched to in play: up to the largest that fits, 100% tried again at the next map) |
 | Dynamic minimum (P) | 63% | shown with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes. Performance 50%, Balanced 63%, Quality 75% |
 | Frame limit | 30 FPS | the most frames shown a second |
 | FPS counter | Off | the game's own frame counter, bottom right |
 | Smooth weapon motion | On | the first-person weapon blended between game ticks |
-| Particles (P) | Full | the particles a fight's shots, impacts and explosions make (applies at once). Reduced (the Performance profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera). Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
+| Particles (P) | Reduced | the particles a fight's shots, impacts and explosions make (applies at once). Full (the Xbox's), Reduced (every profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera). Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
 | Display > | 16:9, Smooth | the page below |
 | Advanced > | | the page after it |
 
@@ -195,13 +195,13 @@ Graphics, **Advanced**:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Model detail (P) | Low | level of detail of characters, vehicles and props (a model around the camera, like a10's cryotube, keeps the Xbox's) |
+| Model detail (P) | Medium | level of detail of characters, vehicles and props (a model around the camera, like a10's cryotube, keeps the Xbox's) |
 | Hide distant objects (P) | Small | skips objects that cover only a few pixels (before their lighting is prepared) |
-| Object shadows (P) | Near only | the shadows under characters and vehicles: Full (the Xbox's, for objects over 30 pixels across), Near only (over 60 pixels), Off |
-| Dynamic lights (P) | 8 | the most dynamic lights (shots, explosions, muzzle flashes) a frame lights the scene and objects with, the nearest first: All (the Xbox's), 8, 4, 2 |
+| Object shadows (P) | Off | the shadows under characters and vehicles: Full (the Xbox's, for objects over 30 pixels across), Near only (over 60 pixels), Off |
+| Dynamic lights (P) | 4 | the most dynamic lights (shots, explosions, muzzle flashes) a frame lights the scene and objects with, the nearest first: All (the Xbox's), 8, 4, 2 |
 | Effects quality (P) | Full | Performance: no dynamic lights' specular pass, specular lightmaps, reflections (shiny floors, mirrors) or grass; Minimal: also no decals (bullet holes, scorches, the map's markings), weather, contrails or light lens flares |
 | Particle density (P) | Full | Half, Third, Quarter: that share of the smoke, sparks and debris drawn (each particle drawn or not for its whole life; your own weapon's and the effects on weapons, units and vehicles all drawn) |
-| Sun rays (P) | On | the sun's glow and light shafts outdoors (Off in Performance: seven small extra scenes a frame for the graphics chip while the sun is in view) |
+| Sun rays (P) | Off | the sun's glow and light shafts outdoors (On in Quality: seven small extra scenes a frame for the graphics chip while the sun is in view) |
 | Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
@@ -569,11 +569,11 @@ hosted a campaign level, is gone: a settings.txt that had a level set loads
 as Off. The Xbox game had co-op only in split screen; this is upstream
 halo-ce-universal's network co-op (credited in the main README):
 
-- Up to four players (two in 1.0.3). The host's Vita runs the level's
-  scripts and its AI for everyone, so its frame rate drops with each player
-  (the game's tick took a third to a half longer with four than with two on
-  the desktop test harness; `HALO_NET_COOP_PLAYERS=2` in env.txt keeps a
-  game to two), and upstream's extra enemies are off.
+- Two players by default, as on the Xbox; three or four with **Co-op
+  players** on the Multiplayer tab (experimental). The host's Vita runs the
+  level's scripts and its AI for everyone, so its frame rate drops with each
+  player (the game's tick took a third to a half longer with four than with
+  two on the desktop test harness), and upstream's extra enemies are off.
 - Cutscenes are skipped by vote: press **Start** in one, and it is skipped
   once more than half of the Vitas have (the screen shows the count). Only a
   press while the skip is offered counts (not one from before it, nor from a

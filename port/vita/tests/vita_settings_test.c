@@ -974,7 +974,7 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") && strstr(menu, "< Online"),
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && strstr(menu, "< Online"),
 		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
@@ -983,14 +983,14 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser\n") && strstr(menu, "\n\x04No game yet: host one or join one\n") &&
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
-	check(menu_rows() == 6 && menu_fits(), "Multiplayer: six rows, 46 characters a line");
+	check(menu_rows() == 7 && menu_fits(), "Multiplayer: seven rows, 46 characters a line");
 	/* the offline bots: Bots on, its skill and teams rows below it, live */
 	to_line("Bots");
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|Co-op players|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
 		"Bots 3: Bot skill, Bot teams and Bot vehicles below it, live");
 	to_line("  Bot skill");
@@ -1001,7 +1001,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
 		"Bots Off: the bot rows hidden again");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
@@ -1011,13 +1011,13 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Bots|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
+	check(!strcmp(labels, "Connection*|Crossplay|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
 		"the PC menus in the game: Connection and Modded maps only");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
 
@@ -1127,7 +1127,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_UP);
 	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Bots|Modded maps|Latency meter"),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Bots|Co-op players|Modded maps|Latency meter"),
 		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
 	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
@@ -1143,7 +1143,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Bots|Modded maps|Latency meter") && menu_fits(),
+	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Bots|Co-op players|Modded maps|Latency meter") && menu_fits(),
 		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
 	clock_us += 5000000;
 	to_line("Ad hoc room");
@@ -1175,7 +1175,7 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Bots|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
+	check(!strcmp(labels, "Connection*|Crossplay|Bots|Co-op players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
 	/* Latency meter (latency_meter.c): On as shipped, Off and back, live */
 	to_line("Latency meter");
 	check(strstr(menu, "\nLatency meter\x02  On >") && setting_named("HALO_LATENCY_METER") &&
@@ -1195,6 +1195,19 @@ static void test_multiplayer_tab(void)
 		"Crossplay On: HALO_CROSSPLAY 1");
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "0"), "Crossplay Off again: 0");
+	/* Co-op players (network.coop_players): 2 as shipped, 3 and 4 experimental */
+	to_line("Co-op players");
+	check(strstr(menu, "\nCo-op players\x02  2 >") && strstr(setting_named("HALO_NET_COOP_PLAYERS")->help, "may lag"),
+		"Co-op players: 2 as shipped, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nCo-op players\x02< 3 (experimental) >") && getenv("HALO_NET_COOP_PLAYERS") &&
+		!strcmp(getenv("HALO_NET_COOP_PLAYERS"), "3"), "Co-op players 3, experimental: HALO_NET_COOP_PLAYERS 3");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nCo-op players\x02< 4 (experimental)  ") && !strcmp(getenv("HALO_NET_COOP_PLAYERS"), "4"),
+		"Co-op players 4, experimental, the last");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_NET_COOP_PLAYERS") && !strcmp(getenv("HALO_NET_COOP_PLAYERS"), "2"), "Co-op players 2 again");
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -1210,7 +1223,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection*|Crossplay|Join with a code|Bots|Co-op players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -1283,7 +1296,7 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
-		"HALO_BOT_VEHICLES",
+		"HALO_BOT_VEHICLES", "HALO_NET_COOP_PLAYERS",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET",
 	};
 	int index, all = 1, choices = 0;
@@ -1376,8 +1389,10 @@ static int profile_rows_are(int profile, char *report, int size)
 
 /* Bruno Santana's settings (Graphics > Advanced, and Audio's Sound updates):
 his variables and values, so his build's settings.txt carries over; each in
-the profiles, Quality the Xbox's every one but the AI's think rate
-(Adaptive, 1.1.0-beta.4: every tick was too slow), Balanced the defaults; a row
+the profiles (1.1.0-beta.4's redone Balanced and Quality: Balanced without
+shadows and with 4 lights, as Performance, but Full effects and particles
+drawn; Quality shadows near, 8 lights, sound every frame, Adaptive AI),
+Balanced the defaults; a row
 changed by hand makes the profile Custom; a settings.txt saved with a
 profile before the rows were added takes the profile's values */
 static void test_bruno_rows(void)
@@ -1386,8 +1401,8 @@ static void test_bruno_rows(void)
 	{
 		const char *variable, *performance, *balanced, *quality;
 	} rows[] = {
-		{ "HALO_VITA_SHADOWS", "0", "1", "2" },
-		{ "HALO_MAX_SCENE_LIGHTS", "4", "8", "0" },
+		{ "HALO_VITA_SHADOWS", "0", "0", "1" },
+		{ "HALO_MAX_SCENE_LIGHTS", "4", "4", "8" },
 		{ "HALO_VITA_EFFECTS_QUALITY", "1", "2", "2" },
 		{ "HALO_PARTICLE_RENDER_DIVISOR", "2", "1", "1" },
 		{ "HALO_AI_THINK_DIVISOR", "0", "0", "0" },
@@ -1427,7 +1442,7 @@ static void test_bruno_rows(void)
 			all = 0;
 		}
 	}
-	check(all, "Bruno Santana's rows: in every profile (Quality the Xbox's: Full, All, every frame; Adaptive AI), "
+	check(all, "Bruno Santana's rows: in every profile (Quality: Near only, 8, Full, Full, every frame; Adaptive AI), "
 		"Balanced their defaults and in the environment, live");
 	check(!setting_named("HALO_AI_PERCEPTION_LOD"), "1.1's Distant AI row is gone (AI think rate)");
 	check(!strcmp(setting_named("HALO_AI_THINK_DIVISOR")->values[0], "1") && !strcmp(setting_named("HALO_AI_THINK_DIVISOR")->values[1], "0") &&
@@ -1439,13 +1454,14 @@ static void test_bruno_rows(void)
 		!strcmp(settings[0].names[settings[0].choice], "Custom"), "Effects quality Performance: saved, the profile Custom");
 	vita_settings_set("HALO_VITA_EFFECTS_QUALITY", "2");
 	check(settings[0].choice == profile, "... and back");
-	/* Quality sets every one to the Xbox's but the AI's (Adaptive),
-	Performance to its own; each profile its Dynamic resolution's minimum */
+	/* Quality: shadows near, 8 lights, the Xbox's effects, particles and
+	sound, Adaptive AI; Performance its own; each profile its Dynamic
+	resolution's minimum */
 	vita_settings_set("HALO_PROFILE", "quality");
-	check(!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") &&
+	check(!strcmp(getenv("HALO_VITA_SHADOWS"), "1") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8") &&
 		!strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") && !strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") &&
 		!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
-		"Quality: the Xbox's shadows, lights, effects, particles and sound; Adaptive AI");
+		"Quality: shadows near, 8 lights, the Xbox's effects, particles and sound; Adaptive AI");
 	check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
 		!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(settings[0].names[settings[0].choice], "Quality"),
 		"Quality: Dynamic resolution from 75%, High model detail");
@@ -1457,9 +1473,10 @@ static void test_bruno_rows(void)
 	check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") &&
 		!strcmp(settings[0].names[settings[0].choice], "Performance"), "Performance: Dynamic resolution from 50%");
 	vita_settings_set("HALO_PROFILE", "balanced");
-	check(!strcmp(settings[0].names[settings[0].choice], "Balanced") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8") &&
+	check(!strcmp(settings[0].names[settings[0].choice], "Balanced") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") &&
+		!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") &&
 		!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625"),
-		"Balanced again: Dynamic resolution from 63%");
+		"Balanced again: no shadows, 4 lights, Full effects, Dynamic resolution from 63%");
 	/* his build's settings.txt values off our list: the nearest */
 	vita_settings_set("HALO_MAX_SCENE_LIGHTS", "12");
 	check(!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8"), "Dynamic lights 12 (his build's): 8, the nearest");
@@ -1472,9 +1489,9 @@ by default and in no profile, a level saved and in the environment the next
 start reads, a restart's row, the profile left as it was; his build's
 settings.txt line read; back Off */
 /* Particles (the particle budget, port/linux/game/particle_budget.c): on the
-Graphics tab, Full, Reduced, Low; Full by default and in Balanced and
-Quality, Reduced in Performance; live (no restart), saved as a word; a
-change by hand makes the profile Custom */
+Graphics tab, Full, Reduced, Low; Reduced by default and in every profile
+(Full cost Quality 16% more CPU in a 15-bot Chill Out fight); live (no restart), saved as a word; a change by
+hand makes the profile Custom */
 static void test_particles_row(void)
 {
 	struct setting *row = setting_named("HALO_PARTICLE_BUDGET");
@@ -1488,35 +1505,38 @@ static void test_particles_row(void)
 	check(row && row->page == TAB_GRAPHICS && !row->restart && row->count == 3 &&
 		!strcmp(row->names[0], "Full") && !strcmp(row->names[1], "Reduced") && !strcmp(row->names[2], "Low") &&
 		!strcmp(row->values[0], "full") && !strcmp(row->values[1], "reduced") && !strcmp(row->values[2], "low") &&
-		!strcmp(row->values[shipped_choice[row - settings]], "full") && getenv("HALO_PARTICLE_BUDGET") &&
-		!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full"),
-		"Particles: on the Graphics tab, Full, Reduced, Low (full, reduced, low); Full by default, in the environment, live");
+		!strcmp(row->values[shipped_choice[row - settings]], "reduced") && getenv("HALO_PARTICLE_BUDGET") &&
+		!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced"),
+		"Particles: on the Graphics tab, Full, Reduced, Low (full, reduced, low); Reduced by default, in the environment, live");
 	check(in_profile >= 0 && !strcmp(profile_values[0][in_profile], "reduced") &&
-		!strcmp(profile_values[1][in_profile], "full") && !strcmp(profile_values[2][in_profile], "full"),
-		"Particles in the profiles: Performance Reduced, Balanced and Quality Full");
+		!strcmp(profile_values[1][in_profile], "reduced") && !strcmp(profile_values[2][in_profile], "reduced"),
+		"Particles in the profiles: Reduced in all three");
 	check(to_line("Particles") && strstr(menu, "\n\x05" "Fewer sparks, smoke and debris in big fights\n") && menu_fits(),
 		"Particles: its help line fits");
 	press(VITA_BUTTON_RIGHT);
-	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=reduced\n") &&
-		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Particles\x02< Reduced >") && !restart_pending &&
-		!strcmp(settings[0].names[settings[0].choice], "Custom"),
-		"Particles Reduced: saved, in the environment, no restart, the profile Custom");
-	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "low") && strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=low\n") &&
-		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Particles\x02< Low  "), "Particles Low: the last");
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Particles\x02< Low  ") && !restart_pending &&
+		!strcmp(settings[0].names[settings[0].choice], "Custom"),
+		"Particles Low: saved, in the environment, no restart, the profile Custom; the last");
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "low"), "Particles Low: read back from settings.txt");
 	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && settings[0].choice == profile, "Particles Reduced: the profile again");
 	press(VITA_BUTTON_LEFT);
-	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && settings[0].choice == profile, "Particles Full: the profile again");
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=full\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Particles\x02  Full >") &&
+		!strcmp(settings[0].names[settings[0].choice], "Custom"), "Particles Full: saved, the first, the profile Custom");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && settings[0].choice == profile, "... and Reduced again");
 	vita_settings_set("HALO_PROFILE", "performance");
 	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(settings[0].names[settings[0].choice], "Performance"),
 		"Performance: Reduced particles");
 	vita_settings_set("HALO_PROFILE", "quality");
-	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full"), "Quality: Full particles, the Xbox's");
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(settings[0].names[settings[0].choice], "Quality"),
+		"Quality: Reduced particles");
 	vita_settings_set("HALO_PROFILE", "balanced");
-	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
-		"Balanced: Full particles");
+	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
+		"Balanced: Reduced particles");
 	while (menu_selected > 2)
 		press(VITA_BUTTON_UP);
 }
@@ -2133,13 +2153,13 @@ int main(void)
 		!strncmp(menu_line(5, line, sizeof(line)), "Frame interpolation\x02", 20) &&
 		!strncmp(menu_line(6, line, sizeof(line)), "FPS counter\x02", 12) &&
 		!strncmp(menu_line(7, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
-		!strcmp(menu_line(8, line, sizeof(line)), "Particles\x02  Full >") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Particles\x02< Reduced >") &&
 		!strcmp(menu_line(9, line, sizeof(line)), "Display\x02  16:9, Smooth  >") &&
 		!strcmp(menu_line(10, line, sizeof(line)), "Advanced\x02  >") &&
 		!strncmp(menu_line(11, line, sizeof(line)), "\x05Sets resolution", 16) &&
 		!strncmp(menu_line(12, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
 		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter, weapon "
-		"motion, Particles (Full), Display (16:9, Smooth), Advanced; help, buttons");
+		"motion, Particles (Reduced), Display (16:9, Smooth), Advanced; help, buttons");
 	check(menu_fits() && menu_rows() <= 10, "Graphics: ten rows at most, each fits");
 	check(!strstr(menu, "Aspect ratio") && !strstr(menu, "Upscale filter") && !strstr(menu, "Model detail"),
 		"Graphics: the aspect ratio and upscale filter under Display, the detail rows under Advanced");
@@ -2231,23 +2251,23 @@ int main(void)
 	check(open_page("Advanced") && strstr(menu, "\n\x03Graphics > Advanced\n") &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Model detail\x02", 13) &&
 		!strncmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02", 21) &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Object shadows\x02< Near only >") &&
-		!strcmp(menu_line(5, line, sizeof(line)), "Dynamic lights\x02< 8 >") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Object shadows\x02< Off  ") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Dynamic lights\x02< 4 >") &&
 		!strcmp(menu_line(6, line, sizeof(line)), "Effects quality\x02  Full >") &&
 		!strcmp(menu_line(7, line, sizeof(line)), "Particle density\x02  Full >") &&
-		!strncmp(menu_line(8, line, sizeof(line)), "Sun rays\x02", 9) &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Sun rays\x02< Off  ") &&
 		!strncmp(menu_line(9, line, sizeof(line)), "Tiny decals\x02", 12) &&
 		!strncmp(menu_line(10, line, sizeof(line)), "Scenery updates\x02", 16) &&
 		!strncmp(menu_line(11, line, sizeof(line)), "Object lighting\x02", 16) &&
 		!strcmp(menu_line(12, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
 		!strcmp(menu_line(13, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 12 && menu_fits(),
-		"Graphics, Advanced: model detail, distant objects, shadows (Near only), lights (8), effects, particles (Full), "
-		"sun rays, tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (All async, after a restart)");
+		"Graphics, Advanced: model detail, distant objects, shadows (Off), lights (4), effects, particles (Full), "
+		"sun rays (Off), tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (All async, after a restart)");
 	test_bruno_rows();
 	test_fourth_core();
 	press(VITA_BUTTON_LEFT);
-	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
-		"a detail row changed on its page: the profile Custom");
+	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+		"a detail row changed on its page (Model detail High): the profile Custom");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "... and Balanced again");
 	press(VITA_BUTTON_CIRCLE);
@@ -2500,8 +2520,8 @@ int main(void)
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") && choice_of("HALO_DYNAMIC_RES_MIN") == 1,
 			"a 1.0 settings.txt (Custom): Dynamic minimum at its default, 63%");
 		check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(getenv("HALO_SOUND_OBSTRUCTION_TICKS"), "6") &&
-			!strcmp(getenv("HALO_SUN_RAYS"), "1") && !strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0"),
-			"a 1.0 settings.txt (Custom): its own rows kept, the rows it does not name at their defaults");
+			!strcmp(getenv("HALO_SUN_RAYS"), "0") && !strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0"),
+			"a 1.0 settings.txt (Custom): its own rows kept, the rows it does not name at their defaults (no sun rays)");
 	}
 
 	/* 1.0.3's co-op choice (every game hosted became that level, the
@@ -2566,7 +2586,9 @@ int main(void)
 	while the rows match it) load as that profile with this build's values:
 	the rows added since (Sun rays, 1.1; Bruno Santana's, 1.1; Particles,
 	1.1.0-beta.4) and the ones changed (1.1.0-beta.4: Dynamic resolution
-	in all three with their minimums, Quality's Adaptive AI). Custom keeps
+	in all three with their minimums, Quality's Adaptive AI; then Balanced
+	and Quality redone: a Balanced player's shadows, sun rays and 8 lights
+	go, Medium models and Reduced particles come). Custom keeps
 	its rows; a row env.txt names is left to env.txt (and settings.txt,
 	which has the last word over it, as for any row) */
 	{
@@ -2606,6 +2628,20 @@ int main(void)
 			"HALO_VITA_EFFECTS_QUALITY=2\nHALO_PARTICLE_RENDER_DIVISOR=1\nHALO_SUN_RAYS=1\nHALO_SCENERY_UPDATE_DIVISOR=4\n"
 			"HALO_LIGHTING_REFRESH_DIVISOR=3\nHALO_AI_THINK_DIVISOR=1\nHALO_SOUND_OBSTRUCTION_TICKS=3\n"
 			"HALO_SOUND_MANAGER_DIVISOR=2\nHALO_PARTICLE_BUDGET=full\n";
+		/* (1.1.0-beta.4's test builds, before Balanced was redone: every
+		row saved, the old Balanced's shadows near, sun rays, 8 lights,
+		Low models, Full particles) */
+		static const char balanced_b4[] = "HALO_PROFILE=balanced\nHALO_RENDER_SCALE=dynamic\nHALO_DYNAMIC_RES_MIN=0.625\n"
+			"HALO_MODEL_LOD_SCALE=0.5\nHALO_MIN_OBJECT_PIXELS=8\nHALO_VITA_SHADOWS=1\nHALO_MAX_SCENE_LIGHTS=8\n"
+			"HALO_VITA_EFFECTS_QUALITY=2\nHALO_PARTICLE_RENDER_DIVISOR=1\nHALO_SUN_RAYS=1\nHALO_SCENERY_UPDATE_DIVISOR=4\n"
+			"HALO_LIGHTING_REFRESH_DIVISOR=3\nHALO_AI_THINK_DIVISOR=0\nHALO_SOUND_OBSTRUCTION_TICKS=3\n"
+			"HALO_SOUND_MANAGER_DIVISOR=2\nHALO_PARTICLE_BUDGET=full\n";
+		/* (and its Quality: the Xbox's rows but the AI's) */
+		static const char quality_b4[] = "HALO_PROFILE=quality\nHALO_RENDER_SCALE=dynamic\nHALO_DYNAMIC_RES_MIN=0.75\n"
+			"HALO_MODEL_LOD_SCALE=1\nHALO_MIN_OBJECT_PIXELS=0\nHALO_VITA_SHADOWS=2\nHALO_MAX_SCENE_LIGHTS=0\n"
+			"HALO_VITA_EFFECTS_QUALITY=2\nHALO_PARTICLE_RENDER_DIVISOR=1\nHALO_SUN_RAYS=1\nHALO_SCENERY_UPDATE_DIVISOR=1\n"
+			"HALO_LIGHTING_REFRESH_DIVISOR=1\nHALO_AI_THINK_DIVISOR=0\nHALO_SOUND_OBSTRUCTION_TICKS=1\n"
+			"HALO_SOUND_MANAGER_DIVISOR=1\nHALO_PARTICLE_BUDGET=full\n";
 		/* (Custom by its minimum alone: Dynamic from 75%, Balanced's rows
 		otherwise) */
 		static const char custom_dynamic[] = "HALO_PROFILE=custom\nHALO_RENDER_SCALE=dynamic\nHALO_DYNAMIC_RES_MIN=0.75\n";
@@ -2640,19 +2676,23 @@ int main(void)
 			printf("(%s)\n", report);
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
 			!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "0") && !strcmp(getenv("HALO_SUN_RAYS"), "1") &&
-			!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && !strcmp(getenv("HALO_VITA_SHADOWS"), "2") &&
-			!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "0") && !strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") &&
-			!strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1"),
-			"... its 100% Dynamic from 75%, Adaptive AI; sun rays, Full particles, the Xbox's shadows, lights, effects, sound");
+			!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(getenv("HALO_VITA_SHADOWS"), "1") &&
+			!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8") && !strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2") &&
+			!strcmp(getenv("HALO_PARTICLE_RENDER_DIVISOR"), "1") && !strcmp(getenv("HALO_SOUND_MANAGER_DIVISOR"), "1") &&
+			!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(getenv("HALO_SOUND_OBSTRUCTION_TICKS"), "3"),
+			"... its 100% Dynamic from 75%, Adaptive AI; sun rays, Reduced particles, shadows near, 8 lights, High models, "
+			"the Xbox's effects and sound, occlusion every 3rd tick");
 
 		write_file(SETTINGS_FILE, balanced_11, sizeof(balanced_11) - 1);
 		profile_rows_fresh();
 		vita_settings_load();
 		check(profile_rows_are(1, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Balanced") &&
 			!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.625") &&
-			!strcmp(getenv("HALO_PARTICLE_BUDGET"), "full") && !strcmp(getenv("HALO_UPSCALE_FILTER"), "1"),
+			!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(getenv("HALO_UPSCALE_FILTER"), "1") &&
+			!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_SUN_RAYS"), "0") &&
+			!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75"),
 			"a Balanced settings.txt of the 1.1 betas (75%, minimum 50%, before Particles): Balanced, Dynamic from 63%, "
-			"Full particles; its Sharp filter kept");
+			"Reduced particles, no shadows or sun rays, 4 lights, Medium models; its Sharp filter kept");
 		if (report[0])
 			printf("(%s)\n", report);
 		/* (saved again: this build's values, still Balanced) */
@@ -2660,8 +2700,30 @@ int main(void)
 		check(strstr(file_text(SETTINGS_FILE), "HALO_PROFILE=balanced\n") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=dynamic\n") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_DYNAMIC_RES_MIN=0.625\n") &&
-			strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=full\n"),
-			"... saved again: Balanced with Dynamic from 63%");
+			strstr(file_text(SETTINGS_FILE), "HALO_PARTICLE_BUDGET=reduced\n") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_VITA_SHADOWS=0\n") && strstr(file_text(SETTINGS_FILE), "HALO_SUN_RAYS=0\n"),
+			"... saved again: Balanced with Dynamic from 63%, Reduced particles, no shadows, no sun rays");
+		write_file(SETTINGS_FILE, balanced_b4, sizeof(balanced_b4) - 1);
+		profile_rows_fresh();
+		vita_settings_load();
+		check(profile_rows_are(1, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Balanced") &&
+			!strcmp(getenv("HALO_VITA_SHADOWS"), "0") && !strcmp(getenv("HALO_SUN_RAYS"), "0") &&
+			!strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "4") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75") &&
+			!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(getenv("HALO_VITA_EFFECTS_QUALITY"), "2"),
+			"a Balanced settings.txt of 1.1.0-beta.4's test builds (shadows near, sun rays, 8 lights, Full particles): "
+			"the redone Balanced (none, off, 4, Reduced; Medium models, Full effects)");
+		if (report[0])
+			printf("(%s)\n", report);
+		write_file(SETTINGS_FILE, quality_b4, sizeof(quality_b4) - 1);
+		profile_rows_fresh();
+		vita_settings_load();
+		check(profile_rows_are(2, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Quality") &&
+			!strcmp(getenv("HALO_VITA_SHADOWS"), "1") && !strcmp(getenv("HALO_MAX_SCENE_LIGHTS"), "8") &&
+			!strcmp(getenv("HALO_SCENERY_UPDATE_DIVISOR"), "2") && !strcmp(getenv("HALO_SOUND_OBSTRUCTION_TICKS"), "3"),
+			"a Quality settings.txt of 1.1.0-beta.4's test builds (the Xbox's rows): the redone Quality (shadows near, "
+			"8 lights, scenery every 2nd tick, occlusion every 3rd)");
+		if (report[0])
+			printf("(%s)\n", report);
 		write_file(SETTINGS_FILE, quality_11, sizeof(quality_11) - 1);
 		profile_rows_fresh();
 		vita_settings_load();
@@ -2692,7 +2754,7 @@ int main(void)
 		profile_rows_fresh();
 		vita_settings_load();
 		check(!strcmp(settings[0].names[settings[0].choice], "Custom") && !strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") &&
-			!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.5"),
+			!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "0.75"),
 			"a Custom settings.txt, Dynamic from 75% on Balanced's rows: Custom, its minimum kept");
 
 		/* env.txt's rows stand: a 1.0.3 Quality file (no AI row) with env.txt
@@ -2705,7 +2767,7 @@ int main(void)
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_AI_THINK_DIVISOR"), "1") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.5") &&
 			!strcmp(getenv("HALO_RENDER_SCALE"), "dynamic") && !strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") &&
-			!strcmp(getenv("HALO_VITA_SHADOWS"), "2") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+			!strcmp(getenv("HALO_VITA_SHADOWS"), "1") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 			"env.txt's AI every tick and minimum 50% over a Quality settings.txt: env.txt's, the rest Quality's, Custom");
 		/* (and a row env.txt names that settings.txt names too: settings.txt's,
 		as for any row - the 1.0.3 Balanced file's 75% under env.txt's 50%) */

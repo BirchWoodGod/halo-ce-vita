@@ -4472,7 +4472,7 @@ void network_game_server_port_set_cooperative(
 	if (!server || server->state != _network_game_server_state_pregame)
 		return;
 	server->game.difficulty = difficulty;
-	/* (network.coop_players: 4 on the Vitas, whose host runs the campaign's
+	/* (network.coop_players: 2 on the Vitas, 3 and 4 experimental, whose host runs the campaign's
 	AI and scripts for everyone, 16 elsewhere as upstream's Server Setup) */
 	server->game.maximum_players = (byte)PIN(config_integer("network.coop_players"), 2, MAXIMUM_NETWORK_PLAYER_COUNT);
 	if (!network_game_server_send_game_data_pregame(server))
@@ -4642,7 +4642,7 @@ static boolean network_game_server_port_lobby_name(
 /* port: the settings' lobby name and most players, applied to the hosted
 game's lobby each frame (the Vita's settings panel changes them at any
 time): the game lists and the lobby show them at once. Not a co-op game
-(network.coop_players: four on the Vitas), nor a local (split screen) one; the
+(network.coop_players: two on the Vitas, three or four experimental), nor a local (split screen) one; the
 most players is never fewer than the players in the lobby already. */
 static void network_game_server_port_lobby_settings(
 	struct network_game_server *server)

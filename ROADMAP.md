@@ -52,8 +52,8 @@ version).
   `sounds.map` and `loc.map`. Built on iamhaller's networking work. Vita to
   Vita only.
 - **Ad hoc** play between Vitas (no router), next to **Same Wi-Fi** (system link).
-- **Campaign co-op over the network** for up to four Vitas, Private or
-  Public, built on OpenCE's network co-op (the Xbox only had split-screen
+- **Campaign co-op over the network** for two Vitas (three or four
+  experimental), Private or Public, built on OpenCE's network co-op (the Xbox only had split-screen
   co-op on one console).
 - **Custom maps**: Xbox maps, and Halo PC / Custom Edition multiplayer and
   campaign maps; a joiner downloads the host's map in the lobby.
@@ -81,12 +81,7 @@ version).
 
 ## Next: 1.1.1
 
-Done or under way on their own branches; they change what the Vitas send
-each other (a new network version), so they come after 1.1.0:
-
-- **Game chat**: quick-chat phrases and typed messages in the lobby and in
-  game, with mutes and the host's On / Quick chat only / Off setting.
-- **Voice chat** in network games.
+Fixes for the bugs found in the 1.1.0 betas.
 
 ## Later
 

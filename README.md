@@ -4,7 +4,7 @@
 
 **A native PlayStation Vita port of Halo: Combat Evolved, built from the decompilation of the Xbox game.**
 
-[![Latest release](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?label=stable&color=2ea44f)](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?label=latest&color=2ea44f)](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
 [![Beta](https://img.shields.io/github/v/release/BirchWoodGod/halo-ce-vita?include_prereleases&label=beta&color=d29922)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
 [![Downloads](https://img.shields.io/github/downloads/BirchWoodGod/halo-ce-vita/total?color=blue)](https://github.com/BirchWoodGod/halo-ce-vita/releases)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
@@ -24,7 +24,7 @@
   <tr>
     <td><img src="docs/screenshots/pelicans.png" alt="Two Pelicans over the sea in The Silent Cartographer's opening"></td>
     <td><img src="docs/screenshots/beach-landing.png" alt="Landing on The Silent Cartographer's beach"></td>
-    <td><img src="docs/screenshots/blood-gulch.png" alt="Covenant at a Blood Gulch base"></td>
+    <td><img src="docs/screenshots/silent-cartographer-camp.png" alt="Grunts at the Covenant camp where you fight the Hunters, on The Silent Cartographer"></td>
   </tr>
 </table>
 
@@ -36,10 +36,11 @@ It is not an emulator: the game's own code is compiled for the Vita's ARM
 processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 > [!NOTE]
-> **1.1.0 is in beta.** This README describes 1.1.0. Its betas are on the
-> [releases page](https://github.com/BirchWoodGod/halo-ce-vita/releases) as
-> pre-releases, for players who want to help test; the stable version is
-> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3).
+> **1.1.0 beta 3 is the recommended version.** It is still a beta, but it is
+> more stable than 1.0.3, so it is the [latest release](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
+> until 1.1.0 is final. This README describes 1.1.0.
+> [1.0.3](https://github.com/BirchWoodGod/halo-ce-vita/releases/tag/v1.0.3)
+> is still on the releases page.
 
 > [!IMPORTANT]
 > **No game data is included.** You need your own **Xbox** copy of Halo:
@@ -56,11 +57,11 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 <div align="center">
 
-### Watch it run
+### Install tutorial
 
-[![Halo CE PS Vita port v1.0.3 | Stability Update, on YouTube](https://img.youtube.com/vi/S6CrPv_F2jU/hqdefault.jpg)](https://youtu.be/S6CrPv_F2jU)
+[![Halo CE Vita Install Tutorial | v1.1.0 beta.3, on YouTube](https://img.youtube.com/vi/x46zLnwlRUU/hqdefault.jpg)](https://youtu.be/x46zLnwlRUU)
 
-<sub><i><a href="https://youtu.be/S6CrPv_F2jU">Halo CE PS Vita port v1.0.3 | Stability Update</a></i></sub>
+<sub><i><a href="https://youtu.be/x46zLnwlRUU">Halo CE Vita Install Tutorial | v1.1.0 beta.3</a></i></sub>
 
 </div>
 
@@ -80,7 +81,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | 🌐 **Online play** | The PC version's multiplayer menus (from OpenCE): a server browser of public games, **Join by code**, and Create Game with lobby name, max players, public or private and a password. Needs the [Halo PC files](#halo-pc-files). |
 | 🖥️ **Dedicated servers** | Official US servers in the server browser (Slayer, Big Team, Oddball, King of the Hill), and [your own](#dedicated-servers) on a Linux PC or a Raspberry Pi. |
 | 📶 **Ad hoc** | Vitas side by side with no router, next to **Same Wi-Fi** (system link). |
-| 🤝 **[Co-op campaign](#co-op-campaign)** | Up to **four** Vitas, Private or Public. |
+| 🤝 **[Co-op campaign](#co-op-campaign)** | **Two** Vitas, or three or four (experimental), Private or Public. |
 | 🤖 **Offline bots** | Up to 15 computer players in Split Screen games, from Easy to Legendary. |
 | 🗺️ **[Custom maps](#custom-maps-and-map-sharing)** | Xbox maps, and Halo PC / Custom Edition multiplayer and campaign maps. A Vita that joins without the host's map downloads it, in the lobby or before it joins a game under way. |
 | ⚙️ **[Graphics settings](#graphics)** | Profiles, object shadows, dynamic lights, effects quality, particle density, AI think rate and sound updates, after **Bruno Santana**'s modified build. |
@@ -91,16 +92,13 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | 🧰 **[Windows install tool](#easy-install-windows-tool)** | Gathers your files and copies them to the Vita. |
 | 🎮 **Controls** | A settings panel in tabs (**SELECT + D-pad down**), button remapping, touch zones, gyro aiming and PlayStation button icons. |
 
-Coming in **1.1.1** (see the [roadmap](ROADMAP.md)): game chat and voice
-chat.
-
 ## What works
 
 | | |
 | --- | --- |
 | 🎮 **Campaign** | The whole campaign from the menus, with checkpoints, saves and Save and Quit, cinematics, and the movies if you convert them ([optional](#movies-optional)). |
 | 🏁 **Multiplayer** | Between Vitas: same Wi-Fi (system link), online and ad hoc (both experimental), and the multiplayer maps on your own or with bots. Vitas play only Vitas: PCs can't join a Vita's game, nor a Vita a PC's. |
-| 🤝 **Co-op** | The campaign over the network for up to four Vitas (experimental). |
+| 🤝 **Co-op** | The campaign over the network for two Vitas, or up to four (experimental). |
 | 🗺️ **Custom maps** | Xbox maps, Custom Edition multiplayer maps and Custom Edition campaign maps (experimental). |
 | ⏱️ **Frame rate** | Up to 30 fps, or up to 60 with frame interpolation. Quiet areas and cinematics hold 25 to 30 fps; the biggest fights drop lower. See [Performance](#performance). |
 
@@ -112,7 +110,8 @@ chat.
   Vita host offers it from beta 4; until then, join a Vita's game while it
   is in the lobby.
 - In co-op the host's Vita runs everyone's AI and the level's scripts, so it
-  slows down with three or four players.
+  slows down with three or four players: co-op takes two by default, and
+  three or four are experimental.
 - Master Chief's body can be missing in The Pillar of Autumn's cryo tube
   ([#29](https://github.com/BirchWoodGod/halo-ce-vita/issues/29)).
 
@@ -120,6 +119,8 @@ The current list is in the [roadmap](ROADMAP.md) and the
 [issues](https://github.com/BirchWoodGod/halo-ce-vita/issues).
 
 ## Install
+
+Prefer a video? The [install tutorial](https://youtu.be/x46zLnwlRUU) walks through all of it.
 
 ### Requirements
 
@@ -319,8 +320,10 @@ game's name, map and players are visible to anyone browsing. See
 
 ### Co-op campaign
 
-Play the campaign together on up to **four** Vitas, by system link, online
-or ad hoc (experimental). The host goes **Campaign**, a profile, a level and
+Play the campaign together on **two** Vitas, by system link, online or ad
+hoc (experimental). The host can take three or four with **Co-op players**
+in the settings panel's Multiplayer tab (experimental: the host's Vita runs
+everyone's AI, so it may lag). The host goes **Campaign**, a profile, a level and
 a difficulty, then **Y** (Play co-op) instead of A. On the waiting screen:
 
 - **X** switches the game between **Private** (the default: joined by its
@@ -437,34 +440,47 @@ version loads as it is).
 ### Graphics
 
 The **Profile** row at the top sets the speed-related rows together:
-**Performance**, **Balanced** (the defaults) or **Quality** (the game as on
-the Xbox, but for the resolution and the AI's think rate). All three use
-Dynamic resolution, each with its own minimum. Changing one of those rows
-yourself makes the profile **Custom**. A settings file saved with a profile
-by an older version loads as that profile with these values.
+**Performance**, **Balanced** (the defaults) or **Quality** (the best look
+that stays playable on the Vita). All three use Dynamic resolution, each
+with its own minimum. Changing one of those rows yourself makes the profile
+**Custom**. A settings file saved with a profile by an older version loads
+as that profile with these values.
 
 | Setting | Performance | Balanced (default) | Quality |
 | --- | --- | --- | --- |
 | Render resolution | Dynamic | Dynamic | Dynamic |
 | Dynamic minimum | 50% | 63% | 75% |
-| Model detail | Low | Low | High |
-| Hide distant objects | Small | Small | Off |
-| Scenery updates | Quarter | Quarter | Every tick |
-| Object lighting | Third | Third | Full |
-| Object shadows | Off | Near only | Full |
-| Dynamic lights | 4 | 8 | All |
+| Particles | Reduced | Reduced | Reduced |
+| Model detail | Low | Medium | High |
+| Hide distant objects | Small | Small | Tiny |
+| Object shadows | Off | Off | Near only |
+| Dynamic lights | 4 | 4 | 8 |
 | Effects quality | Performance | Full | Full |
 | Particle density | Half | Full | Full |
-| Sun rays | Off | On | On |
+| Sun rays | Off | Off | On |
+| Scenery updates | Quarter | Quarter | Half |
+| Object lighting | Third | Third | Half |
 | AI think rate | Adaptive | Adaptive | Adaptive |
-| Sound occlusion | Every 6th | Every 3rd | Every tick |
+| Sound occlusion | Every 6th | Every 3rd | Every 3rd |
 | Sound updates | Every 2nd | Every 2nd | Every frame |
-| Best for | the biggest fights, Pillar of Autumn | most of the game | quiet areas, cinematics, screenshots |
+| Best for | the biggest fights, 60 FPS | most of the game | quiet areas, cinematics, screenshots |
+
+Balanced costs the Vita about what Performance does: it adds nothing that
+gives the graphics chip extra passes, only reflections, shine and grass,
+every particle drawn, better models and a sharper picture. Object shadows
+and Sun rays are the slow extras on the Vita: each is a set of small extra
+scenes for the graphics chip every frame, so they are in Quality only.
+Quality also costs the processor up to about a tenth more than
+Performance in big fights (Particles Full adds as much again in big
+multiplayer fights, so it is Reduced in all three). The Xbox's every row (Full shadows, all lights, everything
+updated every tick) is too slow on the Vita; set it yourself under Advanced
+if you want it (Custom).
 
 Object shadows, Dynamic lights, Effects quality, Particle density, AI think
 rate, Sound updates and the fourth core's helpers come from **Bruno
-Santana**'s modified build of this port. Balanced and Performance think less
-often for far-off enemies and update the sounds every other frame, so a
+Santana**'s modified build of this port. All three profiles think less often
+for far-off enemies, and Balanced and Performance update the sounds every
+other frame, so a
 fight plays a little differently from the Xbox's; the shadows, lights,
 effects and particles change only what is drawn. None of them drops
 see-through parts such as the Covenant field generators' domes or visors.
@@ -526,8 +542,9 @@ one test a firefight went from about 16 fps at 75% to about 26 fps at 50%
 (the Performance profile's Dynamic minimum).
 
 What helps, in the settings panel: the **Performance** profile; **Render
-resolution** Dynamic with a lower **Dynamic minimum**, or 50%; **Model detail** Low or Lowest; **Hide distant
-objects** Small or Medium; **Sun rays** Off; **Sound voices** 16. Keep
+resolution** Dynamic with a lower **Dynamic minimum**, or 50%; **Object shadows** Off and **Sun rays** Off
+(extra scenes for the graphics chip); **Particles** Reduced (the processor's work in big multiplayer fights);
+**Model detail** Low or Lowest; **Hide distant objects** Small or Medium; **Sound voices** 16. Keep
 **Smooth weapon motion** on: it makes the frame rate feel steadier.
 
 ### More performance with plugins (optional)

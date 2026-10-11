@@ -335,10 +335,10 @@ static struct setting settings[] = {
 	particles a fight's effects make - an entry's count and a long life span
 	cut, those too small to see at their distance not made; muzzle flashes,
 	the first-person weapon's and scripted effects whole. Live; Reduced in
-	the Performance profile. Particle density, under Advanced, draws fewer of
+	every profile. Particle density, under Advanced, draws fewer of
 	those made) */
 	{ "Particles", "HALO_PARTICLE_BUDGET", 0, 3, { "full", "reduced", "low" }, { "Full", "Reduced", "Low" },
-		"Fewer sparks, smoke and debris in big fights", 0, TAB_GRAPHICS },
+		"Fewer sparks, smoke and debris in big fights", 1, TAB_GRAPHICS },
 	/* (the picture's framing and scaling, set once: on a page of their
 	own, which keeps the tab to a screen with Dynamic minimum shown; the
 	row says both, page_summary) */
@@ -349,7 +349,7 @@ static struct setting settings[] = {
 		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_DISPLAY },
 	PAGE_ROW("Advanced", "Detail and update rates (the Profile sets them)", TAB_GRAPHICS, PAGE_GRAPHICS_ADVANCED),
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
-		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 2,
+		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 1,
 		PAGE_GRAPHICS_ADVANCED },
 	{ "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", 0, 4, { "0", "4", "8", "12" },
 		{ "Off", "Tiny", "Small", "Medium" }, "Skip objects this small on screen", 2, PAGE_GRAPHICS_ADVANCED },
@@ -358,9 +358,9 @@ static struct setting settings[] = {
 	objects over 60 pixels across, the Xbox's 30 -, object_lights.c's
 	dynamic lights cap, render.c's passes, render_particles.c's density) */
 	{ "Object shadows", "HALO_VITA_SHADOWS", 0, 3, { "2", "1", "0" }, { "Full", "Near only", "Off" },
-		"Shadows under characters and vehicles", 1, PAGE_GRAPHICS_ADVANCED },
+		"Shadows under characters and vehicles", 2, PAGE_GRAPHICS_ADVANCED },
 	{ "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", 0, 4, { "0", "8", "4", "2" }, { "All", "8", "4", "2" },
-		"The most lights from shots and blasts a frame", 1, PAGE_GRAPHICS_ADVANCED },
+		"The most lights from shots and blasts a frame", 2, PAGE_GRAPHICS_ADVANCED },
 	{ "Effects quality", "HALO_VITA_EFFECTS_QUALITY", 0, 3, { "2", "1", "0" },
 		{ "Full", "Performance", "Minimal" }, "Performance: no reflections, specular, grass", 0,
 		PAGE_GRAPHICS_ADVANCED },
@@ -370,7 +370,7 @@ static struct setting settings[] = {
 	/* (the sun's glow and rays, rasterizer_lights.c: seven small scenes a
 	frame while the sun is in view) */
 	{ "Sun rays", "HALO_SUN_RAYS", 0, 2, { "1", "0" }, { "On", "Off" },
-		"The sun's glow and light shafts outdoors", 0, PAGE_GRAPHICS_ADVANCED },
+		"The sun's glow and light shafts outdoors", 1, PAGE_GRAPHICS_ADVANCED },
 	/* (decals.c: decals under 2 pixels across are not made. Off as on the
 	Xbox, in no profile yet: to be tried on hardware) */
 	{ "Tiny decals", "HALO_DECAL_MIN_PIXELS", 0, 2, { "0", "2" }, { "Shown", "Skipped" },
@@ -538,6 +538,11 @@ static struct setting settings[] = {
 		"Team games: bots on both teams, or all against you", 0, TAB_MULTIPLAYER },
 	{ "  Bot vehicles", "HALO_BOT_VEHICLES", 0, 2, { "1", "0" }, { "On", "Off" },
 		"Bots drive and ride the map's vehicles", 0, TAB_MULTIPLAYER },
+	/* (network.coop_players: co-op games this Vita hosts take 2 players by
+	default, the Xbox's; 3 and 4 are experimental, the host running the
+	campaign's AI and scripts for everyone: network_server_manager.c) */
+	{ "Co-op players", "HALO_NET_COOP_PLAYERS", 0, 3, { "2", "3", "4" }, { "2", "3 (experimental)", "4 (experimental)" },
+		"Co-op you host. 3-4: your Vita may lag", 0, TAB_MULTIPLAYER },
 	PAGE_ROW("Modded maps", "Custom maps: on, off, delete; PC maps", TAB_MULTIPLAYER, PAGE_MAPS),
 	/* (the latency meter, port/linux/game/latency_meter.c: the round trip
 	to the host at the top right of a network game and in the scoreboard's
@@ -550,11 +555,11 @@ static struct setting settings[] = {
 	{ "  Lobby name", "HALO_NET_LOBBY_NAME", 0, 0, { NULL }, { NULL }, "The name others see for your game", 0,
 		PAGE_PLAY, KIND_TEXT },
 	/* (network_server_manager.c: the game's maximum_players; co-op takes
-	network.coop_players, four) */
+	network.coop_players, the Co-op players row) */
 	{ "  Max players", "HALO_NET_MAX_PLAYERS", 0, 15,
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
 		{ "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" },
-		"The most players your games take (co-op: 4)", 14, PAGE_PLAY },
+		"The most players your games take (not co-op)", 14, PAGE_PLAY },
 	/* (network.host_public, OpenCE's: p2p.c) */
 	{ "  Visibility", "HALO_NET_HOST_PUBLIC", 0, 2, { "false", "true" }, { "Private", "Public" },
 		"Private: others join by code. Public: listed too", 1, PAGE_PLAY },
@@ -613,7 +618,26 @@ static int shipped_choice[SETTING_COUNT];
 static int shipped_kept;
 
 /* the profiles (the Profile row's first three choices): the value of each
-row a profile sets. Balanced is the release's defaults (the rows' own) */
+row a profile sets. Balanced is the release's defaults (the rows' own).
+
+Measured for 1.1.0-beta.4 (Oct 2026: the Vita's render path's CPU work
+in the Linux build on a Raspberry Pi 4 and on x86, fixed ticks, a row at a
+time from Performance; a10, b30, c10, 15-bot Blood Gulch CTF and Chill
+Out): the old Balanced cost the Pi's CPU only 6-12% more than Performance
+in the campaign (15-22% in the bots games, most of it Full particles, the
+game's own work), yet the Vita ran it at 22-26 fps to Performance's 34. It
+is the graphics chip's scenes: Object shadows (Near only: 1.5 more scenes
+a frame on a10, 3 to 19 target changes a frame in a Chill Out fight) and
+Sun rays (seven 64x64 scenes while the sun is in view) each end the main
+scene and store it to memory, and halo.log's gxm line shows those frames
+waiting in the display queue ("queue" 20-57 ms a frame at 15-26 fps; its
+"waiting for the GPU" is measured after that wait, hence 0.00). So
+Balanced adds only what makes no extra scene and little CPU (Pi +0-5%);
+Quality spends its CPU (Pi +3-12%) and the old Balanced's scenes on what
+shows most - shadows near, sun rays, High models, 8 lights - and not on
+the rows that cost much and show little (Full particles in big fights,
+sound occlusion every tick, all lights, Full shadows' extra targets,
+scenery and lighting every tick: the old Quality) */
 #define PROFILE_CUSTOM 3
 #define PROFILE_ROWS 15
 
@@ -632,16 +656,20 @@ static const char *const profile_values[PROFILE_CUSTOM][PROFILE_ROWS] = {
 	effects, half the particles drawn, Adaptive AI, sound every 2nd frame;
 	Reduced particles */
 	{ "dynamic", "0.5", "8", "4", "3", "6", "0", "0", "4", "1", "2", "0", "2", "reduced", "0.5" },
-	/* Balanced (the release's defaults): Dynamic resolution from 63%, Low,
-	Small, Quarter, Third, Every 3rd, sun rays; shadows near only, 8 lights,
-	Full effects and particles, Adaptive AI, sound every 2nd frame; Full
+	/* Balanced (the release's defaults): Performance's scenes and nearly its
+	CPU (Pi +1-5%), with Dynamic resolution from 63%, Medium models, sound
+	occlusion every 3rd tick, Full effects (reflections, specular, grass)
+	and every particle drawn: Small, Quarter, Third, no sun rays, no object
+	shadows, 4 lights, Adaptive AI, sound every 2nd frame, Reduced
 	particles */
-	{ "dynamic", "0.5", "8", "4", "3", "3", "1", "1", "8", "2", "1", "0", "2", "full", "0.625" },
-	/* Quality, the Xbox's but for two: Dynamic resolution from 75% (100%
-	held in heavy fights is too slow), High, Off, Every tick, Full, Every
-	tick, sun rays; all shadows, lights, effects and particles, Adaptive AI
-	(every tick was too slow too), sound every frame; Full particles */
-	{ "dynamic", "1", "0", "1", "1", "1", "1", "2", "0", "2", "1", "0", "1", "full", "0.75" },
+	{ "dynamic", "0.75", "8", "4", "3", "3", "0", "0", "4", "2", "1", "0", "2", "reduced", "0.625" },
+	/* Quality: Balanced with shadows near, sun rays, High models, 8 lights,
+	Tiny, Half, Half and sound every frame (Pi CPU +3-12%, its scenes the
+	old Balanced's); Dynamic resolution from 75%, sound occlusion every 3rd
+	tick, Adaptive AI, Reduced particles (Full: +16% more in a 15-bot
+	Chill Out fight, +30% in all). The Xbox's every row (Custom) was too
+	slow on both chips */
+	{ "dynamic", "1", "4", "2", "2", "3", "1", "1", "8", "2", "1", "0", "1", "reduced", "0.75" },
 };
 
 /* the variables the performance logging switch sets, and their values */
@@ -1476,7 +1504,11 @@ void vita_settings_load(void)
 		/* the saved profile's rows take its values as this build has them,
 		those added since (Sun rays, in 1.1; Particles, in 1.1.0-beta.4) and
 		those changed (1.1.0-beta.4: Dynamic resolution in all three, with
-		their minimums; Quality's Adaptive AI) - HALO_PROFILE is saved only
+		their minimums; Quality's Adaptive AI; then Balanced and Quality
+		redone, above profile_values: a Balanced player's shadows, sun rays
+		and 8 lights go, Medium models and Reduced particles come; Quality's
+		Xbox rows become its own) -
+		HALO_PROFILE is saved only
 		while the rows match it (Custom otherwise), so a player's own
 		choices are never taken back. A row env.txt names keeps what env.txt
 		and settings.txt give it (settings.txt's last, as for any row) */
