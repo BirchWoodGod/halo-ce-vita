@@ -10,6 +10,9 @@ release builds).
   HALO_NET_FUZZ_DUMP=f   the last twins, and the messages they came from, as
                          hex, written to f when a sanitizer ends the process
                          and every 1024 twins (so that a hang leaves them too)
+  HALO_NET_FUZZ_CAPTURE=d  the first NET_FUZZ_CAPTURE_EACH of each kind of
+                         what a client takes from its host, written to d
+                         (which must be there) as fuzz targets' seeds
 */
 
 #include "net_fuzz_twin.h"
@@ -19,6 +22,10 @@ release builds).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* (the C library's: the game's fopen takes an Xbox path, port/linux/include/
+stdio.h; these are the host's) */
+#undef fopen
 
 /* (AddressSanitizer's, when the build has it) */
 #if defined(__SANITIZE_ADDRESS__)
@@ -54,6 +61,51 @@ static struct
 		unsigned char bytes[NET_FUZZ_TWIN_MAXIMUM];
 	} ring[NET_FUZZ_TWIN_RING];
 } net_fuzz;
+
+enum
+{
+	NET_FUZZ_CAPTURE_EACH = 4,
+};
+
+static char const *const net_fuzz_capture_names[NUMBER_OF_NET_FUZZ_CAPTURES] =
+{
+	"packet", "data", "record", "accept", "listing"
+};
+
+void net_fuzz_capture(
+	int kind,
+	int key,
+	void const *prefix,
+	int prefix_size,
+	void const *bytes,
+	int size)
+{
+	static unsigned char counts[NUMBER_OF_NET_FUZZ_CAPTURES][256];
+	static int ready;
+	static char const *folder;
+	char path[768];
+	FILE *file;
+
+	if (!ready)
+	{
+		ready = 1;
+		folder = getenv("HALO_NET_FUZZ_CAPTURE");
+	}
+	if (!folder || !folder[0] || kind < 0 || kind >= NUMBER_OF_NET_FUZZ_CAPTURES || prefix_size < 0 || size < 0)
+		return;
+	key &= 0xFF;
+	if (counts[kind][key] >= NET_FUZZ_CAPTURE_EACH)
+		return;
+	snprintf(path, sizeof(path), "%s/%s-%02x-%d", folder, net_fuzz_capture_names[kind], key, counts[kind][key]);
+	counts[kind][key]++;
+	if (!(file = fopen(path, "wb")))
+		return;
+	if (prefix_size)
+		fwrite(prefix, 1, (size_t)prefix_size, file);
+	if (size)
+		fwrite(bytes, 1, (size_t)size, file);
+	fclose(file);
+}
 
 static int net_fuzz_random(
 	void)
@@ -111,6 +163,8 @@ int net_fuzz_twin(
 		net_fuzz.ready = 1;
 		net_fuzz.rate = rate ? atoi(rate) : 0;
 		net_fuzz.state = seed ? strtoul(seed, NULL, 10) : 1;
+		fprintf(stderr, "net fuzz twin: one message in %d twinned (direction %d), capture %s\n", net_fuzz.rate, direction,
+			getenv("HALO_NET_FUZZ_CAPTURE") ? getenv("HALO_NET_FUZZ_CAPTURE") : "off");
 		if (dump)
 		{
 			snprintf(net_fuzz.dump_path, sizeof(net_fuzz.dump_path), "%s", dump);
@@ -118,6 +172,19 @@ int net_fuzz_twin(
 			__sanitizer_set_death_callback(net_fuzz_dump);
 #endif
 		}
+	}
+	/* (the host's messages: seeds, a game message as net_fuzz_messages.c
+	takes it, after its header) */
+	if (direction == _net_fuzz_twin_client_from_host && size >= 3)
+	{
+		unsigned short header;
+
+		memcpy(&header, message, 2);
+		if (((header >> 2) & 3) == 3)
+			net_fuzz_capture(_net_fuzz_capture_packet, ((unsigned char const *)message)[size - 1], NULL, 0,
+				(unsigned char const *)message + 2, size - 2);
+		else if (((header >> 2) & 3) == 2)
+			net_fuzz_capture(_net_fuzz_capture_data, ((unsigned char const *)message)[2], NULL, 0, message, size);
 	}
 	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM ||
 		net_fuzz_random() % net_fuzz.rate)

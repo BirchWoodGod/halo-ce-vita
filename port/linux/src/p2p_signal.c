@@ -97,6 +97,7 @@ games, but codes, invites, system link and ad hoc play are as they were.)
 #include "posix.h"
 #include "port_config.h"
 #include "p2p_internal.h"
+#include "../game/net_fuzz_twin.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -1728,6 +1729,17 @@ static void accept_received(const unsigned char *message, int size)
 	/* and the answer is its */
 	if (!tag_right(signalling.join_base, "accept", message, size))
 		return;
+#ifdef NET_FUZZ_TWIN_ENABLED
+	/* (tests only: a seed for net_fuzz_signal.c's record of kind 2, the
+	host's nonce, addresses and the rest: net_fuzz_twin.h) */
+	{
+		unsigned char record[3] = { 2, (unsigned char)(size - TAG_SIZE - 2 - P2P_KEY_SIZE - NONCE_SIZE),
+			(unsigned char)((size - TAG_SIZE - 2 - P2P_KEY_SIZE - NONCE_SIZE) >> 8) };
+
+		net_fuzz_capture(_net_fuzz_capture_accept, message[1], record, sizeof(record),
+			message + 2 + P2P_KEY_SIZE + NONCE_SIZE, size - TAG_SIZE - 2 - P2P_KEY_SIZE - NONCE_SIZE);
+	}
+#endif
 	count = get_candidates(message + fixed, size - TAG_SIZE - fixed, candidates);
 	if (count < 0)
 		return;

@@ -14,6 +14,14 @@ AddressSanitizer builds in the netns tests (run_netns_crossplay_test.sh,
 run_netns_online_test.sh): the last twins are written to HALO_NET_FUZZ_DUMP
 when the process dies under a sanitizer, and every 1024 twins.
 
+With HALO_NET_FUZZ_CAPTURE=folder, the first few of each kind of what a
+client takes from a host are written there as the fuzz targets' seeds
+(net_fuzz_capture): the game's messages (as net_fuzz_messages.c's inputs),
+the distributed netcode's, the game settings record (as
+net_fuzz_variant_options.c's), signalling's ACCEPT and the server browser's
+listings (as net_fuzz_signal.c's and p2p_lobby_fuzz.c's): seeds from real
+traffic, a PC host's in the crossplay tests.
+
 First written for the network hardening audit (triage, Oct 7 2026) and kept
 out of the tree then; committed for the crossplay security pass
 (docs/crossplay.md, T9), compiled out of every other build.
@@ -39,6 +47,20 @@ at most), its size in twin_size; FALSE (most messages, and always without
 HALO_NET_FUZZ_RATE) for none */
 int net_fuzz_twin(void const *message, unsigned short size, unsigned short buffer_size, void *twin,
 	unsigned short *twin_size, int direction);
+
+enum
+{
+	_net_fuzz_capture_packet,
+	_net_fuzz_capture_data,
+	_net_fuzz_capture_record,
+	_net_fuzz_capture_accept,
+	_net_fuzz_capture_listing,
+	NUMBER_OF_NET_FUZZ_CAPTURES
+};
+
+/* (HALO_NET_FUZZ_CAPTURE set) the prefix and the bytes written as a file
+of the kind and key (0-255), the first few of each */
+void net_fuzz_capture(int kind, int key, void const *prefix, int prefix_size, void const *bytes, int size);
 #endif
 
 #endif

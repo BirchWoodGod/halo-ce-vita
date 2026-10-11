@@ -202,6 +202,7 @@ symbols in this file:
 #include "networking/network_messages.h"
 #include "map_share.h"
 #include "network_game_record.h"
+#include "net_fuzz_twin.h"
 
 /* port/linux/game/network_distributed.c's */
 void network_distributed_handle_message(long machine_index, word const *message, word size);
@@ -1008,6 +1009,16 @@ static boolean network_game_client_receive_game_settings_piece(
 				char const *why = NULL;
 
 				network_game_client_settings_staging_size = 0;
+#ifdef NET_FUZZ_TWIN_ENABLED
+				/* (tests only: a seed for net_fuzz_variant_options.c, its kind
+				byte first: net_fuzz_twin.h) */
+				{
+					byte kind = network_game_record_format_current() == _network_game_record_crossplay ? 0 : 1;
+
+					net_fuzz_capture(_net_fuzz_capture_record, kind, &kind, 1, network_game_client_settings_staging,
+						piece->total_size);
+				}
+#endif
 				/* port: a record a host sent, checked (a PC host's options
 				and co-op switches on the crossplay wire) */
 				if (!network_game_record_decode(network_game_record_format_current(), network_game_client_settings_staging,
