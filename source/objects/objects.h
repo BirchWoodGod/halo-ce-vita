@@ -447,6 +447,12 @@ char const *object_get_attachment_marker_name(long object_index, short attachmen
 boolean object_has_node(long object_index, short node_index);
 void object_set_automatic_deactivation(long object_index, boolean automatic_deactivation);
 void object_set_visibility(long object_index, boolean visible_flag);
+#ifdef HALO_LINUX
+/* (port) the render's note that it drew an object this frame, and whether
+it drew one in the last frames (objects.c) */
+void object_note_drawn(long object_index);
+boolean object_drawn_within(long object_index, long frames);
+#endif
 void object_get_velocities(long object_index, real_vector3d *translational_velocity, real_vector3d *angular_velocity);
 struct location *object_get_location(long object_index, struct location *location);
 void object_start_interpolation(long object_index, short frame_count);

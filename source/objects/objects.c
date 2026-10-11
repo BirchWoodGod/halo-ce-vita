@@ -76,6 +76,9 @@ void platform_log(const char *format, ...);
 #include "sound/game_sound.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+#include "render/render.h"
+#endif
 
 /* ---------- constants */
 
@@ -4082,6 +4085,39 @@ boolean object_force_inside_bsp(
 
 	return result;
 }
+
+#ifdef HALO_LINUX
+/* (port) the render frame each object was last drawn in, by slot: the
+render stamps it as it draws the object (render_objects.c), and the tick
+asks it before cosmetic work nobody would see (object_drawn_within). Read
+across threads: a frame index read mid-change only says "not drawn" or
+"drawn" a frame early or late. */
+static volatile long objects_drawn_frame[HALO_PORT_MAXIMUM_OBJECTS_PER_MAP];
+static volatile short objects_drawn_identifier[HALO_PORT_MAXIMUM_OBJECTS_PER_MAP];
+
+void object_note_drawn(
+	long object_index)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+
+	if (object_index != NONE && absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP)
+	{
+		objects_drawn_frame[absolute_index] = render.frame_index;
+		objects_drawn_identifier[absolute_index] = DATUM_INDEX_TO_IDENTIFIER(object_index);
+	}
+}
+
+boolean object_drawn_within(
+	long object_index,
+	long frames)
+{
+	long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+
+	return object_index != NONE && absolute_index < HALO_PORT_MAXIMUM_OBJECTS_PER_MAP &&
+		objects_drawn_identifier[absolute_index] == DATUM_INDEX_TO_IDENTIFIER(object_index) &&
+		render.frame_index - objects_drawn_frame[absolute_index] <= frames;
+}
+#endif
 
 #ifdef HALO_LINUX
 /* (port) An object's attached lights are taken off the map and put back

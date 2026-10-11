@@ -1662,6 +1662,10 @@ static void object_render_state_refresh(
 
 	state->render_scene_index = render.scene_index;
 	state->render_frame_index = render.frame_index;
+#ifdef HALO_LINUX
+	/* (port: the tick asks before cosmetic work, objects.c) */
+	object_note_drawn(object_index);
+#endif
 
 	return;
 }

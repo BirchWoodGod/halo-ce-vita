@@ -307,6 +307,12 @@ void halo_tick_detail_end(const char *name, unsigned long long started);
 this: its first person melee animation, sped up a quarter; OpenCE's) */
 #define UNARMED_MELEE_TICKS 16
 
+#ifdef HALO_LINUX
+/* port: a body drawn in none of the last this many render frames is not
+relaxed onto the ground (biped_update_dead) */
+#define BIPED_LIMP_BODY_DRAWN_FRAMES 4
+#endif
+
 /* port: whether a player with no weapon may melee: in a game whose PC
 options give a custom loadout (game_variant_options: a PC host's, whose
 loadout may be none; OpenCE's, c9ee319a). The Xbox game, and the legacy
@@ -1961,6 +1967,24 @@ static void biped_update_dead(
 	struct biped_datum *biped = biped_get(biped_index);
 	struct biped_definition *definition = biped_definition_get(biped->definition_index);
 
+#ifdef HALO_LINUX
+	/* (port) A body's relaxation onto the ground (20 ticks of collision
+	tests on every node, from when its dying animation ends at rest) only
+	changes how the body lies: in a multiplayer game, a body the render has
+	not drawn in the last few frames keeps its dying animation's last pose
+	instead (its relaxation counted done; a body in view relaxes as
+	before). A big game's client relaxed every body anywhere on the map,
+	5000 collision tests a death, mostly out of sight. */
+	if (TEST_FLAG(biped->biped.flags, _biped_limp_body_physics_active_bit) &&
+		biped->biped.limp_body_current_relaxation_iterations <
+			biped->biped.limp_body_max_relaxation_iterations &&
+		game_engine_running() &&
+		!object_drawn_within(biped_index, BIPED_LIMP_BODY_DRAWN_FRAMES))
+	{
+		biped->biped.limp_body_current_relaxation_iterations =
+			biped->biped.limp_body_max_relaxation_iterations;
+	}
+#endif
 	if (TEST_FLAG(biped->biped.flags, _biped_limp_body_physics_active_bit) &&
 		biped->biped.limp_body_current_relaxation_iterations <
 			biped->biped.limp_body_max_relaxation_iterations)
