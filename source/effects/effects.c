@@ -2530,6 +2530,15 @@ static void effect_update(
 
 				if (count > MAXIMUM_SPLIT_SCREEN_PARTICLE_COUNT)
 				{
+#ifdef HALO_LINUX
+					/* port: none with no local player (a dedicated server, a
+					network client before its player spawns), whom the division
+					by 0 gave an infinity's conversion: 0 on x86, 255 on ARM
+					(UBSan, crosscoopcensus) */
+					if (local_player_count() <= 0)
+						effect->particle_counts[particle_index] = 0;
+					else
+#endif
 					effect->particle_counts[particle_index] = (byte)(long)
 						(((real)count - MAXIMUM_SPLIT_SCREEN_PARTICLE_COUNT) /
 						local_player_count() +
