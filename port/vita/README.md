@@ -568,11 +568,11 @@ hosted a campaign level, is gone: a settings.txt that had a level set loads
 as Off. The Xbox game had co-op only in split screen; this is upstream
 halo-ce-universal's network co-op (credited in the main README):
 
-- Up to four players (two in 1.0.3). The host's Vita runs the level's
-  scripts and its AI for everyone, so its frame rate drops with each player
-  (the game's tick took a third to a half longer with four than with two on
-  the desktop test harness; `HALO_NET_COOP_PLAYERS=2` in env.txt keeps a
-  game to two), and upstream's extra enemies are off.
+- Two players by default, as on the Xbox; three or four with **Co-op
+  players** on the Multiplayer tab (experimental). The host's Vita runs the
+  level's scripts and its AI for everyone, so its frame rate drops with each
+  player (the game's tick took a third to a half longer with four than with
+  two on the desktop test harness), and upstream's extra enemies are off.
 - Cutscenes are skipped by vote: press **Start** in one, and it is skipped
   once more than half of the Vitas have (the screen shows the count). Only a
   press while the skip is offered counts (not one from before it, nor from a

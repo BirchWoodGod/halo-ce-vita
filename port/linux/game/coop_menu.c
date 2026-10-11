@@ -8,7 +8,7 @@ alone (as ever) and Y hosts a network game of it on the difficulty selected
 network_server_manager.c network_game_server_port_cooperative_from_menu).
 The game's own lobby (connected_pregame_screen) is then the waiting screen:
 "Waiting for your partner" (or for other players, in a game of more than
-two: network.coop_players, four on the Vitas) in its message bar, and here,
+two: network.coop_players, two on the Vitas) in its message bar, and here,
 where the other machines' panels go, the level, the difficulty, this
 machine's name, how the game is reached (system link, online and its code,
 ad hoc) and B to cancel; online also whether it is listed in the server

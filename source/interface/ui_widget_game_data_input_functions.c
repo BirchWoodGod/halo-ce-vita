@@ -1884,7 +1884,7 @@ static void network_pregame_status_screen_update(
 				}
 			}
 			/* port: a co-op game takes as many as network.coop_players (two
-			or four on the Vitas): its lobby shows that many machines'
+			on the Vitas, three or four experimental): its lobby shows that many machines'
 			panels, and the waiting screen of co-op hosted from the menus,
 			alone, its text where the others go (port/linux/game/coop_menu.c) */
 			{

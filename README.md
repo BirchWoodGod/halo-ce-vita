@@ -81,7 +81,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | 🌐 **Online play** | The PC version's multiplayer menus (from OpenCE): a server browser of public games, **Join by code**, and Create Game with lobby name, max players, public or private and a password. Needs the [Halo PC files](#halo-pc-files). |
 | 🖥️ **Dedicated servers** | Official US servers in the server browser (Slayer, Big Team, Oddball, King of the Hill), and [your own](#dedicated-servers) on a Linux PC or a Raspberry Pi. |
 | 📶 **Ad hoc** | Vitas side by side with no router, next to **Same Wi-Fi** (system link). |
-| 🤝 **[Co-op campaign](#co-op-campaign)** | Up to **four** Vitas, Private or Public. |
+| 🤝 **[Co-op campaign](#co-op-campaign)** | **Two** Vitas, or three or four (experimental), Private or Public. |
 | 🤖 **Offline bots** | Up to 15 computer players in Split Screen games, from Easy to Legendary. |
 | 🗺️ **[Custom maps](#custom-maps-and-map-sharing)** | Xbox maps, and Halo PC / Custom Edition multiplayer and campaign maps. A Vita that joins without the host's map downloads it, in the lobby or before it joins a game under way. |
 | ⚙️ **[Graphics settings](#graphics)** | Profiles, object shadows, dynamic lights, effects quality, particle density, AI think rate and sound updates, after **Bruno Santana**'s modified build. |
@@ -98,7 +98,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | --- | --- |
 | 🎮 **Campaign** | The whole campaign from the menus, with checkpoints, saves and Save and Quit, cinematics, and the movies if you convert them ([optional](#movies-optional)). |
 | 🏁 **Multiplayer** | Between Vitas: same Wi-Fi (system link), online and ad hoc (both experimental), and the multiplayer maps on your own or with bots. Vitas play only Vitas: PCs can't join a Vita's game, nor a Vita a PC's. |
-| 🤝 **Co-op** | The campaign over the network for up to four Vitas (experimental). |
+| 🤝 **Co-op** | The campaign over the network for two Vitas, or up to four (experimental). |
 | 🗺️ **Custom maps** | Xbox maps, Custom Edition multiplayer maps and Custom Edition campaign maps (experimental). |
 | ⏱️ **Frame rate** | Up to 30 fps, or up to 60 with frame interpolation. Quiet areas and cinematics hold 25 to 30 fps; the biggest fights drop lower. See [Performance](#performance). |
 
@@ -110,7 +110,8 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
   Vita host offers it from beta 4; until then, join a Vita's game while it
   is in the lobby.
 - In co-op the host's Vita runs everyone's AI and the level's scripts, so it
-  slows down with three or four players.
+  slows down with three or four players: co-op takes two by default, and
+  three or four are experimental.
 - Master Chief's body can be missing in The Pillar of Autumn's cryo tube
   ([#29](https://github.com/BirchWoodGod/halo-ce-vita/issues/29)).
 
@@ -319,8 +320,10 @@ game's name, map and players are visible to anyone browsing. See
 
 ### Co-op campaign
 
-Play the campaign together on up to **four** Vitas, by system link, online
-or ad hoc (experimental). The host goes **Campaign**, a profile, a level and
+Play the campaign together on **two** Vitas, by system link, online or ad
+hoc (experimental). The host can take three or four with **Co-op players**
+in the settings panel's Multiplayer tab (experimental: the host's Vita runs
+everyone's AI, so it may lag). The host goes **Campaign**, a profile, a level and
 a difficulty, then **Y** (Play co-op) instead of A. On the waiting screen:
 
 - **X** switches the game between **Private** (the default: joined by its
