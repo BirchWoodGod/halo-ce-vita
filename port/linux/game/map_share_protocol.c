@@ -510,7 +510,11 @@ int map_share_receiver_start_stream(
 		{
 			return 0;
 		}
-		if (inflateInit2(stream, MAP_SHARE_DEFLATE_WINDOW_BITS) != Z_OK)
+		/* (with a window of deflate's largest distance, 32 KB, not the
+		sender's 16 KB: the game's zlib (1.1.3) checks a stream's matches
+		against neither, and a peer's match reaching further back than its
+		window is copied from before the window's memory) */
+		if (inflateInit2(stream, MAX_WBITS) != Z_OK)
 		{
 			free(stream);
 			return 0;
