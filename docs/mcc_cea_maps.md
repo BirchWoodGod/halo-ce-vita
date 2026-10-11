@@ -334,8 +334,68 @@ s of fixed ticks, the first cinematics skipped, deathless):
   block of its own (25-33.6 MB of user RAM on the Vita), where an Xbox
   map's tags are in the game's window.
 
-Not measured on a Vita: user RAM with a 33.6 MB tag cache, Ogg Vorbis
-decoding of ~1000 sounds a map, and the tick cost of the larger encounters.
+Not measured on a Vita: user RAM with a 33.6 MB tag cache and the tick
+cost of the larger encounters.
+
+### Sounds: the sound cache file
+
+Every Ruby map's sounds are Ogg Vorbis (as MCC's own are): 991-1123 sounds
+a map (d20 257), 5030-5811 permutations (d20 1638), 47-61 MB of streams
+that are 130-180 MB of Xbox ADPCM (`cache_file_report`'s
+`sound_permutations_ogg_vorbis`; ten maps 493 MB of Ogg Vorbis, 1416 MB of
+ADPCM). A stock map's Xbox ADPCM is read and played as it is; an Ogg Vorbis
+permutation was decoded each time the sound cache loaded it. On the owner's
+Vita (October 10, converted ruby_b30, 80 s): 103 decoded in 19.6 s of the
+fourth core, which the map reader, the cache file thread, the map
+decompression and the mixer share, and frames of 0.6-1.0 s where the game
+waited for the tick while the decoder ran: the tick slept (91 ms of run
+time in a 1078 ms wait) while the decoder had the fourth core to itself
+(99% busy, the cache file thread and map reader starved: reads of 42 KB took
+600 ms). At the other helpers' priority the decoder kept the core (the Vita
+does not share a core between threads of one priority), and the tick could
+wait on it two ways: deleting a sound cache block whose decoding ran, which
+waited for the decoder's next read of the stream, and the map read lock
+(`custom_edition_cache_read`), which the decoder held for its reads and the
+tick takes for the textures it predicts. The harness, whose scheduler does
+share a core, shows neither for long; the frame-hitch line now names the
+lock's waits ("custom map read lock wait") for the Vita to say.
+
+Now each permutation's ADPCM is kept in the map's sound cache file
+(`mods/<mod>/cache/<map>.sndcache`, or `sound_cache/<map>.sndcache` for a
+converted map in `maps`; docs/custom_edition_caches.md) and read from there
+the next time, the file filled in the background at the lowest priority,
+the deleting thread never waits, and the decoder reads with handles of its
+own. A full file is the map's ADPCM: 133 MB for b30 (1.4 GB for the ten);
+memory: the decoder's 450 KB block grows by the table, 38 bytes a
+permutation (203 KB for b30), taken as the map loads.
+
+gxm-null harness, b30 from the mods folder, the beach walk, threaded tick,
+real time, the decoder made 60 times slower (`HALO_OGG_DECODE_SLOWDOWN`,
+the Vita's: the owner's 190 ms a permutation against 3 ms here) and the
+memory card's speed (`HALO_IO_THROTTLE_KBPS=10000`):
+
+| b30, ~80 s of play | decoded | read from the file | tick waits over 100 ms |
+| --- | --- | --- | --- |
+| before | 249 | - | 1 (126 ms) |
+| first play, file empty | 162 | 56 (permutations the sound cache had let go) | 0 |
+| first play, no background filling | 151 | 64 | 0 |
+| second play, file full | 0 | 245: 14 MB in 2.7 s of the throttled card | 0 |
+
+Without the slowdown the background fills the whole b30 file in under a
+minute; decoding every permutation of b30 (7490 s of audio) takes 8.9 s on
+the desktop (847 times real time) and 26.6 s on a Raspberry Pi 4 (282
+times), the ADPCM identical to the game's to the byte on both (the file's
+CRC-32s); a Vita's A9, some 6-8 times slower than the Pi's A72, would take
+3-4 minutes of its fourth core, which the background spreads over the time
+the core is idle.
+
+The converter could transcode instead (port/tools/mcc_map_convert.py,
+nothing done yet): the converted maps would hold the ADPCM themselves
+(+87 MB for b30, 221 to 308 MB; +923 MB for the ten) and never decode, at
+8.9 s a map of a desktop's time; it needs a native tool of ours (Tremor and
+xbox_adpcm_encoder.c) or Invader's invader-recover and invader-sound, which
+rebuild sound tags from recovered audio (their gains and skip fractions not
+kept as the map has them).
 
 ## Tested
 

@@ -54,6 +54,7 @@ each one, and their vertices read from the file as they load
 #include "../src/lang.h"
 #include "custom_edition_mods.h"
 #include "tag_relocate.h"
+#include "load_profile.h"
 
 #include "memory/zlib/zlib.h"
 
@@ -124,6 +125,13 @@ struct custom_edition_cache_globals
 	boolean structure_bsp_vertices_known;
 	uint32_t structure_bsp_vertices_offset;
 	uint32_t structure_bsp_vertices_size;
+	/* (port) the files' paths, a mod's map or not, and the CRC-32 of the
+	map's header: custom_edition_sounds.c's own reader, and its sound cache
+	file's name and what it was made from */
+	char map_path[MAP_PATH_SIZE];
+	boolean map_from_mods;
+	uint32_t map_header_crc;
+	char resource_paths[NUMBER_OF_RESOURCE_MAP_TYPES][MAP_PATH_SIZE];
 };
 
 /* ---------- globals */
@@ -1748,6 +1756,11 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		custom_edition_cache_files_close();
 		return NULL;
 	}
+	/* (port: custom_edition_sounds.c's sound cache file and reader) */
+	csstrncpy(globals->map_path, path, sizeof(globals->map_path) - 1);
+	globals->map_path[sizeof(globals->map_path) - 1] = 0;
+	globals->map_from_mods = from_mods;
+	globals->map_header_crc = cache_file_crc32_update(0, header, CACHE_FILE_HEADER_BYTES);
 	error(_error_silent, "custom edition: loading '%s' (build %s%s)",
 		path,
 		identity.build,
@@ -1777,6 +1790,8 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 			error(_error_silent, "custom edition: no resource map '%s'", resource_path);
 			continue;
 		}
+		csstrncpy(globals->resource_paths[type], resource_path, sizeof(globals->resource_paths[type]) - 1);
+		globals->resource_paths[type][sizeof(globals->resource_paths[type]) - 1] = 0;
 		status = resource_map_open(
 			&globals->resource_files[type].source,
 			(enum resource_map_type)type,
@@ -2213,6 +2228,8 @@ void custom_edition_cache_tags_unload(
 	tag_validate_structure_vertices_in_file(FALSE);
 	custom_edition_cache_globals.behaviours = 0;
 	custom_edition_cache_globals.hud_mcc_canvas = FALSE;
+	custom_edition_cache_globals.map_path[0] = 0;
+	csmemset(custom_edition_cache_globals.resource_paths, 0, sizeof(custom_edition_cache_globals.resource_paths));
 	custom_edition_cache_globals.tag_cache = NULL;
 	custom_edition_cache_globals.loaded_bytes = 0;
 	custom_edition_cache_globals.tag_cache_bytes = 0;
@@ -2335,10 +2352,22 @@ boolean custom_edition_cache_read(
 
 	/* (January read its map from its main thread only; the port's tick
 	and render threads both read: read_lock) */
-	while (__atomic_load_n(&globals->read_lock, __ATOMIC_RELAXED) ||
+	if (__atomic_load_n(&globals->read_lock, __ATOMIC_RELAXED) ||
 		__atomic_exchange_n(&globals->read_lock, 1, __ATOMIC_ACQUIRE))
 	{
-		SwitchToThread();
+		/* (port: the time spent waiting for another thread's read, in the
+		frame-hitch line) */
+		unsigned long long wait_started = halo_load_profile_now();
+
+		while (__atomic_load_n(&globals->read_lock, __ATOMIC_RELAXED) ||
+			__atomic_exchange_n(&globals->read_lock, 1, __ATOMIC_ACQUIRE))
+		{
+			SwitchToThread();
+		}
+		if (wait_started)
+		{
+			halo_load_profile_add(_halo_load_custom_read_lock_wait, wait_started, 0);
+		}
 	}
 	read = file->opened && size >= 0;
 	if (size > 0)
@@ -2383,4 +2412,170 @@ boolean custom_edition_cache_read(
 	__atomic_store_n(&globals->read_lock, 0, __ATOMIC_RELEASE);
 
 	return read;
+}
+
+/* (port) the reader custom_edition_sounds.c's thread reads its sounds'
+samples through: the map and sounds.map opened again, read with positioned
+reads and no lock (nothing it reads is converted, and the lock would keep
+the tick's and the render worker's reads waiting behind a thread that, on
+the Vita, runs below them) */
+boolean custom_edition_cache_reader_open(
+	struct custom_edition_cache_reader *reader)
+{
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	struct custom_edition_file file;
+
+	csmemset(reader, 0, sizeof(*reader));
+	if (!globals->tags_loaded || !globals->map_path[0] || !custom_edition_file_open(&file, globals->map_path))
+	{
+		return FALSE;
+	}
+	reader->map = file.handle;
+	reader->map_bytes = file.source.size;
+	if (globals->resource_files[_resource_map_sounds].opened &&
+		globals->resource_paths[_resource_map_sounds][0] &&
+		custom_edition_file_open(&file, globals->resource_paths[_resource_map_sounds]))
+	{
+		reader->sounds = file.handle;
+		reader->sounds_bytes = file.source.size;
+	}
+	reader->opened = TRUE;
+
+	return TRUE;
+}
+
+boolean custom_edition_cache_reader_read(
+	struct custom_edition_cache_reader const *reader,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer)
+{
+	void *handle = reader->map;
+	unsigned long file_offset = offset;
+	unsigned long file_bytes = reader->map_bytes;
+
+	if (!reader->opened)
+	{
+		return FALSE;
+	}
+	if (offset >= COMBINED_SOUNDS_OFFSET)
+	{
+		handle = reader->sounds;
+		file_offset = offset - COMBINED_SOUNDS_OFFSET;
+		file_bytes = reader->sounds_bytes;
+	}
+	else if (offset >= COMBINED_BITMAPS_OFFSET)
+	{
+		/* (no sound's samples are in bitmaps.map) */
+		return FALSE;
+	}
+	if (!handle || file_offset > file_bytes || size > file_bytes - file_offset)
+	{
+		return FALSE;
+	}
+	if (!size)
+	{
+		return TRUE;
+	}
+	memory_watch_prepare_write(buffer, size);
+
+	return custom_edition_file_read(handle, (uint32_t)file_offset, (uint32_t)size, buffer) != 0;
+}
+
+void custom_edition_cache_reader_close(
+	struct custom_edition_cache_reader *reader)
+{
+	if (reader->map)
+	{
+		CloseHandle((HANDLE)reader->map);
+	}
+	if (reader->sounds)
+	{
+		CloseHandle((HANDLE)reader->sounds);
+	}
+	csmemset(reader, 0, sizeof(*reader));
+
+	return;
+}
+
+boolean custom_edition_cache_sound_cache_path(
+	char *path,
+	long path_size,
+	char *directory,
+	long directory_size,
+	struct custom_edition_sound_cache_source *source)
+{
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	char const *name = globals->map_path;
+	char const *separator;
+	char stem[CUSTOM_EDITION_SOUND_CACHE_NAME_BYTES];
+	long length;
+	long index;
+
+	if (!globals->tags_loaded || !globals->map_path[0] || path_size <= 0 || directory_size <= 0)
+	{
+		return FALSE;
+	}
+	/* the map file's name without its extension: letters, digits, '_',
+	'-' and '.' only (a maps folder file's name is a stranger's) */
+	for (separator = name; *separator; separator++)
+	{
+		if (*separator == '\\' || *separator == '/')
+		{
+			name = separator + 1;
+		}
+	}
+	for (length = 0; name[length] && name[length] != '.'; length++)
+	{
+		char character = name[length];
+
+		if (length >= (long)sizeof(stem) - 1 ||
+			!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '_' || character == '-'))
+		{
+			return FALSE;
+		}
+		stem[length] = character >= 'A' && character <= 'Z' ? (char)(character - 'A' + 'a') : character;
+	}
+	stem[length] = 0;
+	if (!length)
+	{
+		return FALSE;
+	}
+	if (globals->map_from_mods)
+	{
+		/* d:\mods\<mod>\maps\<map>.map: d:\mods\<mod>\cache\<map>.sndcache */
+		long folder_end = (long)(name - globals->map_path);
+
+		/* (the maps folder's own name and its separator before the map's) */
+		if (folder_end < 6 || _strnicmp(globals->map_path + folder_end - 5, "maps", 4))
+		{
+			return FALSE;
+		}
+		folder_end -= 5;
+		if (folder_end + (long)sizeof("cache") >= directory_size ||
+			snprintf(directory, (size_t)directory_size, "%.*scache", (int)folder_end, globals->map_path) >= directory_size)
+		{
+			return FALSE;
+		}
+	}
+	else if (snprintf(directory, (size_t)directory_size, "%s", CUSTOM_EDITION_SOUND_CACHE_DIRECTORY) >= directory_size)
+	{
+		return FALSE;
+	}
+	if (snprintf(path, (size_t)path_size, "%s\\%s%s", directory, stem, CUSTOM_EDITION_SOUND_CACHE_EXTENSION) >= path_size)
+	{
+		return FALSE;
+	}
+	csmemset(source, 0, sizeof(*source));
+	for (index = 0; index < length; index++)
+	{
+		source->name[index] = stem[index];
+	}
+	source->map_bytes = globals->map.opened ? globals->map.source.size : 0;
+	source->map_header_crc = globals->map_header_crc;
+	source->sounds_bytes = globals->resource_files[_resource_map_sounds].opened ?
+		globals->resource_files[_resource_map_sounds].source.size : 0;
+
+	return TRUE;
 }

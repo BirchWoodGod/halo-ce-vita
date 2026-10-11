@@ -51,6 +51,7 @@ static const char *const kind_names[_halo_load_count] =
 	"wait for cache thread",
 	"sound cache wait",
 	"texture cache wait",
+	"custom map read lock wait",
 	"after-load procs",
 	"file calls (game thread)",
 	"file calls (other threads)",

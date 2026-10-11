@@ -3822,8 +3822,15 @@ static void sound_prepare(
 				}
 				else
 				{
-					write_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET, ogg_vorbis_adpcm_bytes(
-						read_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET), channels, halved));
+					uint32_t adpcm_bytes = ogg_vorbis_adpcm_bytes(
+						read_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET), channels, halved);
+
+					write_u32(permutation + SOUND_PERMUTATION_BUFFER_SIZE_OFFSET, adpcm_bytes);
+					report->sound_permutations_ogg_vorbis++;
+					report->sound_ogg_vorbis_bytes += read_u32(permutation + SOUND_PERMUTATION_SAMPLES_SIZE_OFFSET);
+					report->sound_ogg_vorbis_adpcm_bytes += adpcm_bytes;
+					if (!adpcm_bytes)
+						report->sound_permutations_ogg_vorbis_unsized++;
 				}
 			}
 			else if (permutation_compression == SOUND_COMPRESSION_NONE)

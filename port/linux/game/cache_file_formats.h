@@ -515,6 +515,14 @@ struct custom_edition_conversion_report
 	/* Ogg Vorbis sounds made Xbox ADPCM ones, which the sound cache decodes
 	as it loads them (custom_edition_sounds.c) */
 	int32_t sounds_ogg_vorbis;
+	/* (port) their permutations, the streams' bytes and the Xbox ADPCM
+	bytes the sound cache gives them (0 for one the loader could not size,
+	which the sound cache measures as it loads it): what the decoding costs
+	and what a sound cache file holds (custom_edition_sounds.c) */
+	int32_t sound_permutations_ogg_vorbis;
+	int32_t sound_permutations_ogg_vorbis_unsized;
+	uint32_t sound_ogg_vorbis_bytes;
+	uint32_t sound_ogg_vorbis_adpcm_bytes;
 	/* 16-bit PCM permutations of Xbox ADPCM sounds, which the sound cache
 	encodes to Xbox ADPCM as it loads them (custom_edition_sounds.c) */
 	int32_t sound_permutations_pcm;

@@ -458,7 +458,21 @@ enum ogg_sound_status ogg_sound_transcode(
 	}
 	decoder.request = request;
 	decoder.result = result;
-	xbox_adpcm_encoder_begin(&decoder.encoder, request->output, request->output_bytes, request->channels);
+	if (request->sink)
+	{
+		if (!xbox_adpcm_encoder_begin_sink(&decoder.encoder, request->output, request->staging_bytes,
+			request->output_bytes, request->channels, request->sink, request->sink_context))
+		{
+			result->status = _ogg_sound_bad_arguments;
+			decoder.request = NULL;
+			decoder.result = NULL;
+			return result->status;
+		}
+	}
+	else
+	{
+		xbox_adpcm_encoder_begin(&decoder.encoder, request->output, request->output_bytes, request->channels);
+	}
 
 	decoder.heap = tlsf_create_with_pool(request->working, request->working_bytes);
 	if (!decoder.heap)
@@ -482,6 +496,7 @@ enum ogg_sound_status ogg_sound_transcode(
 	result->frames_padded = xbox_adpcm_encoder_finish(&decoder.encoder);
 	result->frames_decoded = decoder.encoder.frames;
 	result->truncated |= decoder.encoder.truncated;
+	result->stopped = decoder.encoder.stopped;
 	result->sum_of_squares = decoder.encoder.sum_of_squares;
 	result->peak = decoder.encoder.peak;
 	result->status = status;
@@ -497,7 +512,18 @@ enum ogg_sound_status ogg_sound_transcode(
 	struct ogg_sound_result *result)
 {
 	memset(result, 0, sizeof(*result));
-	if (request && request->output)
+	if (request && request->output && request->sink)
+	{
+		struct xbox_adpcm_encoder encoder;
+
+		if (xbox_adpcm_encoder_begin_sink(&encoder, request->output, request->staging_bytes, request->output_bytes,
+			request->channels, request->sink, request->sink_context))
+		{
+			xbox_adpcm_encoder_finish(&encoder);
+			result->stopped = encoder.stopped;
+		}
+	}
+	else if (request && request->output)
 		memset(request->output, 0, request->output_bytes);
 	result->status = _ogg_sound_unsupported_format;
 	return result->status;

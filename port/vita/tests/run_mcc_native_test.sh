@@ -2,8 +2,8 @@
 # Halo: CE Anniversary maps (MCC's version 13) played natively from a mod's
 # folder in the data root's mods folder (custom_edition_mods.c,
 # docs/mcc_cea_maps.md), in the Linux harness (gxm-null), with no converter:
-# the mod's folder is linked (read only) as mods/<name>, as a player copies it
-# to ux0:data/haloce-vita/mods/<name>/. Each of its maps is loaded as the
+# the mod's files are linked (read only) into mods/<name>, as a player copies
+# its folder to ux0:data/haloce-vita/mods/<name>/. Each of its maps is loaded as the
 # campaign's level list loads it (mods\<key>_<map>), its first cinematics
 # skipped, and played for HALO_TEST_MCC_SECONDS (120) of fixed ticks: it must
 # load, its ticks must reach HALO_TEST_MCC_TICKS (3000), and no assertion or
@@ -58,16 +58,21 @@ key=$(printf '%s' "$name" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | cut -c1-12)
 mkdir -p "$out"
 
 # run NAME LEVEL SECONDS COMMANDS: the harness, fixed ticks, the Vita's
-# settings, the mod linked into the mods folder
+# settings, the mod's files linked into the mods folder
 run() {
 	local run_name=$1 level=$2 run_seconds=$3 commands=$4
 	local dir="$out/$run_name"
 	rm -rf "$dir"
-	mkdir -p "$dir/data/maps" "$dir/data/mods" "$dir/save"
+	mkdir -p "$dir/data/maps" "$dir/data/mods/$name" "$dir/save"
 	for file in "$(cd "$data" && pwd)"/maps/*.map; do
 		ln -sfn "$file" "$dir/data/maps/"
 	done
-	ln -sfn "$mod" "$dir/data/mods/$name"
+	# (the mod's folder made here, its files and folders linked into it: the
+	# game writes a mod's sound cache files into its folder's cache folder,
+	# custom_edition_sounds.c, never into Steam's)
+	for entry in "$mod"/*; do
+		ln -sfn "$entry" "$dir/data/mods/$name/"
+	done
 	[ -n "${extra_map:-}" ] && ln -sfn "$extra_map" "$dir/data/maps/$extra_map_name"
 	printf 'game_difficulty_set hard\nmap_name %s\n' "$level" > "$dir/data/init.txt"
 	# shellcheck disable=SC2086
