@@ -133,6 +133,14 @@ __inline void reference_list_add(
 	}
 	else
 	{
+#ifdef HALO_LINUX
+		/* port: said 8 times a run, not once per datum per tick: a PC co-op
+		host's multiplied enemies overflowed the lights' cluster references
+		on a client every tick (20,000 lines a minute into debug.txt) */
+		static long dropped;
+
+		if (dropped++ < 8)
+#endif
 		error(_error_silent, "WARNING: maximum %ss per map (%d) exceeded.", array->name, array->maximum_count);
 	}
 
