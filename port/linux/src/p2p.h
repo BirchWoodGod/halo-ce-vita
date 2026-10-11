@@ -34,6 +34,13 @@ const unsigned char *p2p_identifier(void);
 /* the address the game reaches the machine with this identifier at, if it
 is an internet play peer (reached yet or not) */
 int p2p_peer_address(const unsigned char *identifier, unsigned long *address);
+/* the host this machine joined (an invite, a code or the server browser),
+once reached and for P2P_JOINED_HOST_MILLISECONDS after: its identifier (6
+bytes, as its games' XNADDR abEnet carries it) and nonzero, so that its game
+is joined by itself when listed (network_game_client_join_invited_game);
+take: forgotten (joined, or given up) */
+enum { P2P_JOINED_HOST_MILLISECONDS = 60000 };
+int p2p_joined_host(unsigned char *identifier, int take);
 
 /* a destination the game sends to or connects to (stream: a TCP socket;
 socket: the game's UDP socket connected to it, else -1): 1 if it is a peer's

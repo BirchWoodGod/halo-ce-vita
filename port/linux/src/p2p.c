@@ -465,6 +465,10 @@ static struct
 	unsigned char join_host_hash[P2P_KEY_HASH_SIZE];
 	unsigned char join_token[P2P_TOKEN_SIZE];
 	unsigned long join_time;
+	/* the joined host reached (p2p_joined_host): its game is joined by
+	itself once listed, until P2P_JOINED_HOST_MILLISECONDS or taken */
+	int join_reached;
+	unsigned long join_reached_time;
 
 	char clipboard[P2P_LINK_SIZE];
 	int has_clipboard;
@@ -1476,6 +1480,8 @@ static void peer_heard(struct peer *peer, unsigned long address, unsigned short 
 			{
 				p2p.joining = 0;
 				p2p_signal_stop_joining();
+				p2p.join_reached = 1;
+				p2p.join_reached_time = now;
 			}
 			set_connected_status(relayed);
 		}
@@ -2566,6 +2572,24 @@ int p2p_broadcast_datagram(unsigned short source_port, unsigned short port, cons
 	}
 	pthread_mutex_unlock(&p2p_lock);
 	return count;
+}
+
+int p2p_joined_host(unsigned char *identifier, int take)
+{
+	int result = 0;
+
+	if (!p2p.running)
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	if (p2p.join_reached && !elapsed(p2p.join_reached_time, P2P_JOINED_HOST_MILLISECONDS))
+	{
+		memcpy(identifier, p2p.join_host, P2P_IDENTIFIER_SIZE);
+		result = 1;
+	}
+	if (take)
+		p2p.join_reached = 0;
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
 }
 
 int p2p_peer_address(const unsigned char *peer_identifier, unsigned long *address)
@@ -3799,6 +3823,7 @@ static void update_joining(void)
 			return;
 		p2p.join_requested = 0;
 		p2p.joining = 1;
+		p2p.join_reached = 0;
 		p2p.join_time = p2p_now();
 		p2p_hex(p2p.join_host, P2P_IDENTIFIER_SIZE, name);
 		set_status(N_("joining %s's game"), name);

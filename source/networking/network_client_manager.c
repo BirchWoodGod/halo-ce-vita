@@ -3823,6 +3823,32 @@ boolean network_game_client_join_first_available_game(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+/* port: the open game listed now from the machine whose identifier its
+XNADDR carries (an internet play peer's, xnet.c), or NULL */
+void const *network_game_client_listed_game_of(
+	unsigned char const *host)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	long game_index;
+
+	if (!client || !host || client->state != _network_game_client_state_searching || client->join_in_progress)
+		return NULL;
+	for (game_index = 0; game_index < MAXIMUM_NETWORK_ADVERTISED_GAMES; game_index++)
+	{
+		struct network_advertised_game *game = &client->available_games[game_index];
+
+		if (network_game_client_advertised_game_is_valid(game) &&
+			game->platform == network_game_get_local_platform() && game->open &&
+			!memcmp(((XNADDR const *)&game->xnaddr)->abEnet, host, 6))
+		{
+			return game;
+		}
+	}
+	return NULL;
+}
+#endif
+
 /* port: the games the System Link list shows now (valid, of this
 platform), for the Vita settings panel's Multiplayer tab
 (port/linux/game/system_link_shortcut.c); 0 without a client searching */

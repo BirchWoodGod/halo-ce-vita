@@ -213,6 +213,29 @@ void system_link_shortcut_update(
 	char build[0x20];
 
 	system_link_shortcut_status(main_menu_loaded);
+	/* (the host an invite, a code or the server browser joined, once
+	reached: its game joined as soon as the System Link list shows it, as A
+	on its row would; tried once, the host then forgotten, so that a refusal
+	is told once and a later visit to the list joins nothing by itself) */
+	if (main_menu_loaded)
+	{
+		extern int p2p_joined_host(unsigned char *identifier, int take);
+		extern int ui_widget_port_join_listed_game(void const *server);
+		unsigned char host[6];
+		void const *game;
+
+		if (p2p_joined_host(host, FALSE) && (game = network_game_client_listed_game_of(host)) != NULL)
+		{
+			int joined = ui_widget_port_join_listed_game(game);
+
+			if (joined >= 0)
+			{
+				p2p_joined_host(host, TRUE);
+				platform_log("system link: the joined host's game %s by itself",
+					joined ? "joined" : "listed but not joined (as a pick would be told)");
+			}
+		}
+	}
 	/* (OpenCE's multiplayer screens: what they open from outside the
 	widgets' own events, menu_functions.c) */
 	{
