@@ -1314,9 +1314,39 @@ static struct tag_schema_field const cutscene_flag_fields[] =
 	TAG_SCHEMA_END
 };
 
+/* a cutscene camera point's field of view (camera_scripting.c): 0 the
+default (70 degrees), else what the scripted camera takes, which it and the
+observer assert is 0.001 to 90 degrees; Halo: CE Anniversary maps have wider
+(Solar Flare's 100 degrees: GulchCE's mcc_tags.c, CC0, limits them so), so
+one past 90 is made 90, and one that is no angle (not a number, below 0.001,
+a half turn or more) the default */
+static boolean cutscene_camera_point_check(
+	struct tag_validation *validation,
+	void *base)
+{
+	struct scenario_cutscene_camera_point *point = base;
+	real field_of_view = point->field_of_view;
+
+	if (field_of_view == 0.f)
+		return TRUE;
+	if (!(field_of_view >= 0.001f && field_of_view < _pi))
+	{
+		tag_validate_correct(validation, "a camera point's field of view is no angle: the default");
+		point->field_of_view = 0.f;
+	}
+	else if (field_of_view > _pi / 2.f)
+	{
+		tag_validate_correct(validation, "a camera point's field of view is wider than 90 degrees: 90");
+		point->field_of_view = _pi / 2.f;
+	}
+
+	return TRUE;
+}
+
 static struct tag_schema_field const cutscene_camera_point_fields[] =
 {
 	TAG_SCHEMA_STRING(struct scenario_cutscene_camera_point, name),
+	TAG_SCHEMA_CHECK(cutscene_camera_point_check),
 	TAG_SCHEMA_END
 };
 

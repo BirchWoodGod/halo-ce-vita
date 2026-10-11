@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""The tag validator's check of recorded animations (port/linux/game/
-tag_schema_scenario.c, recorded_animation_check), run by tools/map_validate.c
-on a copy of a Halo Custom Edition map whose recorded animations are changed.
+"""The tag validator's checks of a scenario's recorded animations and
+cutscene camera points (port/linux/game/tag_schema_scenario.c,
+recorded_animation_check, cutscene_camera_point_check), run by
+tools/map_validate.c on a copy of a Halo Custom Edition map so changed.
 
 A weapon index of a recorded animation (its unit control's, at byte 4 of
 the stream, and each weapon index event's) that is neither one of a unit's
 four weapons nor none (0xFFFF) is made none: Halo: CE Anniversary maps carry
 0xFF00 (GulchCE's mcc_recordings.c found it on Solar Flare), which a release
 build took for weapon -256 of the unit's inventory. A recording of the stock
-indices is left as it is; a stream cut short is not played.
+indices is left as it is; a stream cut short is not played. A camera point's
+field of view wider than 90 degrees (Halo: CE Anniversary's, which the
+scripted camera asserts against) is made 90, one that is no angle the default.
 
 No map is in the repository: HALO_TEST_CE_MAP names a Custom Edition map with
 recorded animations (default Ruby's converted c10, whose recordings have weapon index events, from the October 2026 run,
@@ -35,6 +38,9 @@ RECORDED_ANIMATION_VERSION = 0x20
 RECORDED_ANIMATION_CONTROL_VERSION = 0x22
 RECORDED_ANIMATION_STREAM = 0x2C
 UNIT_CONTROL_SIZE = 52
+SCENARIO_CAMERA_POINTS = 0x4F0
+CAMERA_POINT_SIZE = 0x68
+CAMERA_POINT_FIELD_OF_VIEW = 0x40
 
 
 def paths():
@@ -49,6 +55,29 @@ def paths():
     if not game_map.is_file() or not all((resources / f"{n}.map").is_file() for n in ("bitmaps", "sounds", "loc")):
         pytest.skip("no Custom Edition map and resource maps (HALO_TEST_CE_MAP, HALO_TEST_CE_RESOURCES)")
     return validator, game_map, resources
+
+
+def scenario(data):
+    """(the file offset of a Custom Edition cache's scenario tag, a function
+    from a tag data address to its file offset)"""
+    tag_data_offset = struct.unpack_from("<I", data, 0x10)[0]
+
+    def file_offset(address):
+        return tag_data_offset + address - TAG_BASE
+
+    tags_address, scenario_id, _, tag_count = struct.unpack_from("<IIII", data, tag_data_offset)
+    for index in range(tag_count):
+        entry = file_offset(tags_address) + index * 32
+        if struct.unpack_from("<I", data, entry + 12)[0] == scenario_id:
+            return file_offset(struct.unpack_from("<I", data, entry + 20)[0]), file_offset
+    raise AssertionError("no scenario tag")
+
+
+def camera_points(data):
+    """the file offsets of a Custom Edition cache's cutscene camera points"""
+    base, file_offset = scenario(data)
+    count, address = struct.unpack_from("<II", data, base + SCENARIO_CAMERA_POINTS)
+    return [file_offset(address) + index * CAMERA_POINT_SIZE for index in range(count)]
 
 
 def recordings(data):
@@ -172,3 +201,40 @@ def test_a_stream_cut_inside_its_unit_control_is_not_played(setting, tmp_path):
     code, output = validate(validator, resources, copy)
     assert code == 0, output[-2000:]
     assert "ends inside its unit's control: not played" in output
+
+
+@pytest.mark.parametrize("angle, message, made", [
+    (1.7453292, "is wider than 90 degrees: 90", 1.5707964),
+    (float("nan"), "is no angle: the default", 0.0),
+    (-1.0, "is no angle: the default", 0.0),
+    (3.2, "is no angle: the default", 0.0),
+])
+def test_a_camera_points_field_of_view_is_made_one_the_camera_takes(tmp_path, angle, message, made):
+    validator, game_map, resources = paths()
+    data = game_map.read_bytes()
+    points = camera_points(data)
+    if not points:
+        pytest.skip(f"{game_map.name} has no cutscene camera point")
+    changed = bytearray(data)
+    struct.pack_into("<f", changed, points[0] + CAMERA_POINT_FIELD_OF_VIEW, angle)
+    copy = tmp_path / game_map.name
+    copy.write_bytes(changed)
+    code, output = validate(validator, resources, copy)
+    assert code == 0, output[-2000:]
+    assert f"a camera point's field of view {message}" in output
+
+
+def test_camera_points_of_the_default_or_a_narrower_field_of_view_need_nothing(tmp_path):
+    validator, game_map, resources = paths()
+    data = game_map.read_bytes()
+    points = camera_points(data)
+    if len(points) < 2:
+        pytest.skip(f"{game_map.name} has fewer than two cutscene camera points")
+    changed = bytearray(data)
+    struct.pack_into("<f", changed, points[0] + CAMERA_POINT_FIELD_OF_VIEW, 0.0)
+    struct.pack_into("<f", changed, points[1] + CAMERA_POINT_FIELD_OF_VIEW, 1.5707963)
+    copy = tmp_path / game_map.name
+    copy.write_bytes(changed)
+    code, output = validate(validator, resources, copy)
+    assert code == 0, output[-2000:]
+    assert "camera point's field of view" not in output
