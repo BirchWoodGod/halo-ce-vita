@@ -4996,8 +4996,9 @@ static unsigned long objects_scenery_update_pass;
 static unsigned long objects_scenery_update_settings_seen;
 
 /* (port) HALO_NET_REMOTE_LOD (network.remote_lod, the Vita's Multiplayer row
-Unseen players): 0, the default, never (the owner, Oct 11 2026: Full by
-default); auto in a game of more than 16 players; 1 always. On a client
+Unseen players): auto, the default, in a game of more than 16 players (the
+owner, Oct 11 2026: only crossplay's PC games are that large); 1 always; 0
+never. On a client
 of a multiplayer game, another
 machine's player's living biped, on foot, that the render has not drawn in
 the last 4 frames and whose player is not firing, throwing, meleeing,
@@ -5073,8 +5074,7 @@ static boolean objects_remote_lod_skipped(
 		char const *setting = getenv("HALO_NET_REMOTE_LOD");
 
 		objects_remote_lod_settings_seen = halo_settings_generation;
-		objects_remote_lod_mode = !setting || !setting[0] ? _objects_remote_lod_never :
-			!strcmp(setting, "auto") ? _objects_remote_lod_large_games :
+		objects_remote_lod_mode = !setting || !setting[0] || !strcmp(setting, "auto") ? _objects_remote_lod_large_games :
 			atoi(setting) != 0 ? _objects_remote_lod_always : _objects_remote_lod_never;
 	}
 	if (objects_remote_lod_mode == _objects_remote_lod_never || header->type != _object_type_biped ||
