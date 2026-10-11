@@ -436,8 +436,7 @@ from the listing or advertisement, and again on the settings record:
 
 | Check | Default | Notes |
 |---|---|---|
-| maximum players | refuse > 16 | A table `limits.max_join_players` may raise it. The setting shows "PC game too big for the Vita". |
-| current players | refuse > 16 | Covers games whose maximum is lowered later |
+| players (owner, Oct 11) | **allow**, marked **Experimental** past 16 | Not a refusal: OpenCE's quick-setup hosts allow 128 slots, and our tree holds 128 machines (`HALO_PORT_MAXIMUM_NETWORK_MACHINES`), so it is a frame-rate question, not a limit. With Crossplay On, the browser badges a game with more than 16 players in it, or a maximum above 16, "Experimental", and joining one asks once ("Large PC game: more than 16 players can make the Vita lag. Join anyway?"). Judged on current players and the maximum, from the listing and again on the settings record. |
 | co-op | refuse the crossplay wire's co-op hosts | G14: a PC co-op host drives up to 1056 actors; ours hold 288. The other direction (PC client, Vita co-op host) is safe in principle and can open in phase 3 after an index audit. |
 | map | must be present locally and pass `custom_edition_maps` limits (23 MB tag cache, file ≤ 0x18000000, no compressed CE maps, resource maps from the player) | OpenCE has no map download, so a PC host's custom map needs the player's own copy. The v22 missing-map message names it. |
 | game in progress (flag 0x02) | allowed | Late join costs a precache. Our texture-streaming work applies. |
