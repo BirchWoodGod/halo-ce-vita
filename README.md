@@ -474,7 +474,9 @@ The Graphics tab's other rows:
 - **Render resolution**: **Dynamic** (the default) lowers it only while
   the graphics chip is the limit, down to the **Dynamic minimum** (shown
   while Dynamic is chosen; 63% in Balanced); or a fixed 100% to 50%, lower
-  being faster and softer.
+  being faster and softer. When video memory is too short for Dynamic's
+  100% (a heavy map, switched to in play), its most is the largest that
+  fits, and 100% is tried again at the next map.
 - **Frame limit**: 30 FPS (the default), 60 FPS or Off.
 - **Frame interpolation** (Off by default): the game runs 30 ticks a second;
   with this On the Vita draws frames between them, blended, for up to 60

@@ -175,7 +175,7 @@ of `settings.txt`: a file from an older version loads as it is.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Profile | Balanced | sets the rows marked (P) at once: Performance, Balanced, Quality; Custom when they match none. All three are Dynamic resolution, from 50%, 63% and 75%; Quality is otherwise the Xbox's but for the AI think rate (Adaptive). A `settings.txt` saved with a profile by an older version loads as that profile with this version's values (a Custom one keeps its rows) |
-| Render resolution (P) | Dynamic | the 3D view's resolution (applies at once): 100% to 50%, or Dynamic, lowered in heavy scenes from the Dynamic minimum up to 100% |
+| Render resolution (P) | Dynamic | the 3D view's resolution (applies at once): 100% to 50%, or Dynamic, lowered in heavy scenes from the Dynamic minimum up to 100% (with video memory too short for 100%, switched to in play: up to the largest that fits, 100% tried again at the next map) |
 | Dynamic minimum (P) | 63% | shown with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes. Performance 50%, Balanced 63%, Quality 75% |
 | Frame limit | 30 FPS | the most frames shown a second |
 | FPS counter | Off | the game's own frame counter, bottom right |
