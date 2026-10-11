@@ -1977,7 +1977,10 @@ static void client_apply_nav_point(
 	boolean activate = event->value != NONE;
 	boolean flag = event->type == _coop_nav_point_team_flag || event->type == _coop_nav_point_unit_flag;
 	boolean team = event->type == _coop_nav_point_team_flag || event->type == _coop_nav_point_team_object;
-	real offset = event->reals[0];
+	/* (above or below its target no further than an observer reaches: a
+	host's number, which drawn far out turned the arrow's maths to
+	infinities) */
+	real offset = PIN(event->reals[0], -CAMERA_WORLD_BOUND, CAMERA_WORLD_BOUND);
 
 	if (activate && (event->value < 0 || event->value >= hud_globals->waypoint.arrows.count))
 		return;

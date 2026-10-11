@@ -737,6 +737,17 @@ void custom_render_nav_point(
 
 	csmemset(stack_buffer, 0x62, sizeof(stack_buffer));
 
+#ifdef HALO_LINUX
+	/* port: a nav point activated since the last update has no screen type
+	yet (NONE: hud_update_nav_points finds it), which indexed the arrow's
+	sequences at -1; no arrow this frame. A co-op client's come with the
+	host's events, between updates (UBSan, crosscoopfuzz) */
+	if (waypoint_type<0 || waypoint_type>=NUMBEROF(((struct hud_waypoint_arrow *)0)->sequence_indices))
+	{
+		return;
+	}
+#endif
+
 	arrow = TAG_BLOCK_GET_ELEMENT(
 		&hud_globals->waypoint.arrows,
 		nav_index,
