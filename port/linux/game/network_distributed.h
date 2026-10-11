@@ -363,8 +363,11 @@ boolean network_objects_reconcile(long object_index, real_point3d const *positio
 /* a unit in the vehicle's seat as the host has it (NONE: in none) */
 void network_objects_set_seat(long unit_index, long vehicle_index, short seat_index);
 /* (the host) the ticks between sends to a machine of a unit at position, by
-how near that machine's players are (network_actors.c) */
-short network_objects_send_period(long machine_index, real_point3d const *position);
+how near that machine's players are (network_actors.c), by the machine's
+number among this tick's viewers, which network_objects_viewer_number finds
+once (NONE: not one, every tick) */
+short network_objects_viewer_number(long machine_index);
+short network_objects_viewer_send_period(short machine_number, real_point3d const *position);
 
 /* ---------- prototypes/NETWORK_DAMAGE.C */
 
