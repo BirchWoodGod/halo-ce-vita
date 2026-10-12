@@ -88,6 +88,10 @@ nothing of it reaches another player, in either direction.
   or joined, nor the dedicated server's). A version 13 file in the maps
   folder is named and refused ("plays one only from a mod's folder"), and
   a file of any other kind in a mod's folder is not loaded.
+- The mods folder is not even looked in unless MCC mods is on (off by
+  default), for any name a game of another machine gives (a host's map, a
+  film's: `custom_edition_map_path` gets its mods argument only when the
+  connection is local), nor ever by the dedicated server.
 - It has a format of its own (`_cache_file_format_mcc_cea_cache`), which
   every check of the Custom Edition format leaves out: network identities
   (`custom_edition_cache_map_identity`), join checks
@@ -334,6 +338,43 @@ s of fixed ticks, the first cinematics skipped, deathless):
 - A C heap that grows by ~25 MB over the first map played and stays there
   is the harness's with any map (the stock a10 too), not the mods'.
 
+### Tick and render cost (October 11 2026, feat/mcc-110)
+
+gxm-null harness on x86, threaded tick, fixed ticks, the scripted player
+deathless, `HALO_TICK_PROFILE=1`; the Vita's profile switches (static
+scenery, LOD 0.5, lighting every third tick ...). Mean of the 10 s
+windows' ms a tick (the game's own tick, not the frame), and the render
+thread's recording:
+
+| Run | Tick (ms) | p90 window | Render (ms) | Bipeds at the end |
+| --- | --- | --- | --- | --- |
+| stock a10, 180 s, base (`feat/crossplay` 326330d7), three runs | 0.264 / 0.257 / 0.269 | 0.29 | 0.52-0.55 | 45 |
+| stock a10, this branch, two clean runs | 0.267 / 0.250 | 0.27-0.30 | 0.52 | 45 |
+| stock b30, 180 s, base / this branch | 0.724 / 0.707 | | 0.98 / 1.01 | 69 |
+| Ruby's b30 (converted), 180 s | 0.759 | | 1.11 | 114 |
+| stock c10 / Ruby's c10, 180 s | 0.483 / 0.442 | | 0.79 / 0.66 | 11 / 17 |
+| shader tour of b30 (8 s a stop, 420 s): stock | 0.529 | 0.97 | 0.52 | 69 |
+| the same: Ruby's b30 | 1.345 | 2.34 | 1.11 | 114 |
+| the same: MCC's own b30 natively (version 13) | 0.501 | 1.00 | 0.56 | 69 |
+| shader tour of a50: stock / Ruby's | 0.358 / 0.235 | 1.07 / 0.74 | 0.40 / 0.27 | 32 / 42 |
+
+- Stock maps: unchanged by the branch (a10 and b30 within the runs'
+  noise; the same objects at the end).
+- The version 13 loader costs nothing once a map is loaded: MCC's own b30
+  played natively ticks as the Xbox b30 does.
+- Ruby's maps are heavier where its encounters are bigger: its b30, with
+  45 more bipeds as the tour wakes them, costs 2.5 times the stock tick and
+  twice the recording; its a50 and c10 do not (the tours stop at each
+  map's own cutscene flags, so they are not the same walk). On the owner's
+  Vita (October 10, converted maps) the mod averaged ~28 fps over 16
+  minutes; the harness says that is the content's cost on the tick and
+  render threads, not the loader's, and nothing in this branch makes it
+  cheaper. Scaled by the stock map's own cost (the harness is not the
+  Vita, but both threads' work grows alike): Ruby's b30 fights take ~2.4
+  times stock b30's tick at the 90th percentile and twice its recording,
+  so where the stock level holds 30 fps on a Vita those fights fall well
+  below it, as the owner saw.
+
 ### The converted maps (feat/mcc-maps)
 
 - All ten load and run 11000-14000 ticks with their cinematics skipped;
@@ -473,6 +514,36 @@ every piece taken names GulchCE where it lands). None of its MCC art
   before), `run_bots_test.sh slayer`, `run_netns_online_test.sh code` and
   `lobby` (a `--linux-net-vita` build), `run_map_share_test.sh`,
   `run_net_fuzz_test.sh`, and the Vita build.
+
+- October 11 2026 (`feat/mcc-110`, the four branches on `feat/crossplay`):
+  `test_mcc_cea_caches.py` 40 (also scripts with parameters refused, a
+  mod's `bitmaps.map` read by item, offsets not an item's refused, 300
+  seeded corruptions of the `bitmaps.map`), `test_scenario_validation.py`
+  9 (recordings' weapon indices, camera fields of view, through
+  `map_validate` on a converted map), `test_cache_file_formats.py` 158,
+  `test_mcc_map_convert.py` 15; MCC's own ten campaign maps played
+  natively as a mod (`run_mcc_native_test.sh` with
+  `HALO_TEST_MCC_MOD` a folder linking MCC's `halo1/maps/*.map` and its
+  `bitmaps.map`, read-only: no Ruby map was at hand): all ten load and run
+  120 s, a10 won goes on to a30, a version 13 map in the maps folder is
+  refused, and with MCC mods off the mods folder is not looked at;
+  `run_hud_layout_test.sh` with MCC's b30 natively and Ruby's converted
+  b30; the regression suites (netns code, coop, lobby, menus, swatmixed,
+  dedicated and mapmid, map sharing, crossplay strict with crossmaps,
+  settings, p2p lobby, language, network fuzz, Ogg sounds).
+
+- The security review of October 11 2026 (fuzzing under AddressSanitizer
+  and undefined-behaviour trapping, 32-bit): `map_validate`, which now
+  loads version 13 maps as the game does, 416000 runs on MCC's a10, a30,
+  b30, b40, c40 and d20 with words changed at random; 60000 seeded
+  corruptions of made-up caches through `cache_file_report`; 4 million of
+  the BSP vertex window reader; libFuzzer on the PNG reader (57.8
+  million), the campaign files' JSON reader (67.9 million) and the sound
+  cache file reader (8.9 million): no crash; one validator fix (a model
+  part naming nodes of a model of none) and the game's zlib's double free
+  (CVE-2002-0059), which map sharing reached, fixed.
+- The shipped shader programs hold every program a shader tour of
+  Ruby's ten maps (219) and of MCC's own ten played natively (215) drew.
 
 Not tried on a Vita: the mods folder's listing and pictures, a version 13
 map's load (its user RAM: 18-26 MB of tags, a megabyte while a BSP
