@@ -20,7 +20,11 @@ then the stream. ogg_sound_measure reads the stream's first 512 and last
 ogg_sound_transcode decodes it into an output with guards each side; every
 input must only fail or succeed, writing within the output. A stream whose
 identification header (its checksums made good) says another rate than the
-sound's goes through the rate converter (xbox_adpcm_encoder.c). The same
+sound's goes through the rate converter (xbox_adpcm_encoder.c). It is
+decoded again in pieces of a few blocks (1 to 8, as the input's size gives)
+its decoding kept between them, as a long sound's chain of links is
+(custom_edition_sounds.c): each piece within its place, and when the whole
+and every piece decoded, the pieces the whole output to the byte. The same
 bytes are then taken as Xbox ADPCM blocks of those channels, decoded
 (xbox_adpcm_block_decode) and taken from a rate the bytes give (any from
 1 kHz to 192 kHz, some out of those bounds) to one of the output's, as the
@@ -178,6 +182,59 @@ static void adpcm_rate_pass(const uint8_t *data, int channels, int length)
 	free(output);
 }
 
+/* the whole request's output again in pieces, the decoding kept between
+them */
+static void pieces_pass(struct ogg_sound_request const *whole, struct ogg_sound_result const *whole_result,
+	unsigned char const *whole_output, int channels)
+{
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	uint32_t blocks = whole->output_bytes / block_bytes;
+	uint32_t piece_blocks = 1 + stream_size % 8;
+	struct ogg_sound_request request = *whole;
+	struct ogg_sound_result result;
+	unsigned char *output;
+	uint32_t block, index;
+	int all_decoded = 1;
+	int kept = 0;
+
+	if (!blocks)
+		return;
+	output = malloc(blocks * block_bytes + 2 * GUARD_BYTES);
+	if (!output)
+		return;
+	memset(output, GUARD_VALUE, blocks * block_bytes + 2 * GUARD_BYTES);
+	request.keep = 1;
+	request.stream_key = 0xF0F0F0F0ULL ^ stream_size;
+	for (block = 0; block < blocks; block += piece_blocks)
+	{
+		uint32_t count = blocks - block < piece_blocks ? blocks - block : piece_blocks;
+
+		request.output = output + GUARD_BYTES + block * block_bytes;
+		request.output_bytes = count * block_bytes;
+		request.first_frame = block * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+		ogg_sound_transcode(&request, &result);
+		if ((unsigned)result.status >= NUMBER_OF_OGG_SOUND_STATUSES ||
+			result.frames_decoded + result.frames_padded > count * OGG_SOUND_ADPCM_BLOCK_SAMPLES ||
+			(all_decoded && result.status == _ogg_sound_ok && result.resumed != kept))
+		{
+			abort();
+		}
+		all_decoded &= result.status == _ogg_sound_ok;
+		kept = result.kept;
+		for (index = 0; index < GUARD_BYTES; index++)
+		{
+			if (output[index] != GUARD_VALUE || output[GUARD_BYTES + blocks * block_bytes + index] != GUARD_VALUE)
+				abort();
+		}
+	}
+	if (whole_result->status == _ogg_sound_ok && all_decoded &&
+		memcmp(output + GUARD_BYTES, whole_output, blocks * block_bytes))
+	{
+		abort();
+	}
+	free(output);
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
 	struct ogg_sound_stream_info info;
@@ -239,6 +296,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		if (output[index] != GUARD_VALUE || output[GUARD_BYTES + output_bytes + index] != GUARD_VALUE)
 			abort();
 	}
+	pieces_pass(&request, &result, output + GUARD_BYTES, channels);
 	free(output);
 	adpcm_rate_pass(data, channels, length);
 	return 0;

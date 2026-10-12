@@ -23,6 +23,16 @@ AddressSanitizer and UBSan:
 	  stereo, read in pieces as custom_edition_sounds.c reads it, plays as
 	  the sine at its pitch; too short and too long outputs, a part frame,
 	  bad arguments and garbage stay within the output;
+	- a stream's output in pieces (the links of a long sound's chain,
+	  custom_edition_sounds.c), its decoding kept between them, is the
+	  whole output to the byte, at the streams' rates, halved, and
+	  interpolated up (frames made past a piece's end held for the next)
+	  and down, whatever the pieces' size, with another stream decoded
+	  between them in other working memory; a piece decoded from the
+	  start, or taken up past a skipped one, plays as the whole's frames
+	  there, and one before where the decoding stopped is decoded from the
+	  start; 16-bit PCM and Xbox ADPCM links taken from
+	  xbox_adpcm_rate_start's frame play as the whole's frames there;
 	- with --resource-map <sounds.map> (Halo PC's, the player's own; not in
 	  this repository), every Ogg Vorbis permutation in it is decoded to
 	  the length its buffer size says.
@@ -1055,6 +1065,337 @@ static void test_resource_map(char const *path)
 	free(map.data);
 }
 
+/* ---------- pieces of the output (a long sound's chain of links:
+custom_edition_sounds.c) */
+
+static double second_working_memory[OGG_SOUND_WORKING_BYTES / sizeof(double)];
+
+/* the ratio, in dB, of `a` to its difference from `b` (99: the same) */
+static double difference_db(short const *a, short const *b, uint32_t count)
+{
+	double signal = 0.0, noise = 0.0;
+	uint32_t index;
+
+	for (index = 0; index < count; index++)
+	{
+		double difference = (double)a[index] - b[index];
+
+		signal += (double)a[index] * a[index];
+		noise += difference * difference;
+	}
+	return noise > 0.0 ? 10.0 * log10(signal / noise) : 99.0;
+}
+
+/* one piece: `blocks` blocks of the output from block `block` into
+`output` (the whole output's size) */
+static enum ogg_sound_status piece_transcode(struct stream *stream, struct output *output, int channels, long rate,
+	uint32_t block, uint32_t blocks, int keep, uint64_t key, void *working, struct ogg_sound_result *result)
+{
+	struct ogg_sound_request request;
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+
+	memset(&request, 0, sizeof(request));
+	request.read = stream_read;
+	request.read_context = stream;
+	request.input_bytes = stream->size;
+	request.output = output->bytes + block * block_bytes;
+	request.output_bytes = blocks * block_bytes;
+	request.channels = channels;
+	request.rate = rate;
+	request.working = working;
+	request.working_bytes = OGG_SOUND_WORKING_BYTES;
+	request.first_frame = block * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+	request.keep = keep;
+	request.stream_key = key;
+	return ogg_sound_transcode(&request, result);
+}
+
+/* the piece's frames as played against the whole output's there */
+static double piece_db(struct output const *whole, struct output const *pieces, int channels, uint32_t block, uint32_t blocks)
+{
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	short *a = malloc(sizeof(short) * blocks * OGG_SOUND_ADPCM_BLOCK_SAMPLES * channels);
+	short *b = malloc(sizeof(short) * blocks * OGG_SOUND_ADPCM_BLOCK_SAMPLES * channels);
+	double db;
+
+	adpcm_decode(whole->bytes + block * block_bytes, blocks * block_bytes, channels, a);
+	adpcm_decode(pieces->bytes + block * block_bytes, blocks * block_bytes, channels, b);
+	db = difference_db(a, b, blocks * OGG_SOUND_ADPCM_BLOCK_SAMPLES * channels);
+	free(a);
+	free(b);
+	return db;
+}
+
+/* A stream's output in pieces at `rate` is the whole output to the byte:
+with the decoding kept between them (the decoding, the rate converter's
+state and frames made past a piece's end, and the encoder's step index go
+on), whatever their size, another stream decoded between them in other
+working memory changing nothing; each decoded from the stream's start (the
+frames before warming the encoder as they did the whole's); one taken up
+past a skipped piece; and one before where the kept decoding stopped,
+which is decoded from the start. */
+static void test_pieces_at(struct fixture *fixture, long rate, struct fixture *other)
+{
+	static uint32_t const sizes[] = { 1, 2, 3, 7, 16, 1000 };
+	int channels = fixture->stream_channels;
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	struct ogg_sound_stream_info info;
+	struct ogg_sound_result result;
+	struct output whole, pieces;
+	uint32_t frames, blocks, block, piece, size_index, next_frame;
+	uint64_t key = 0x1234567800000000ULL | (uint32_t)rate;
+	int same, resumed_all, kept_right, skipped_right;
+	double worst = 99.0;
+
+	ogg_sound_measure(fixture->stream.data, fixture->stream.size, fixture->stream.data, fixture->stream.size, &info);
+	frames = ogg_sound_output_frames(info.frames, info.rate, rate);
+	blocks = (frames + OGG_SOUND_ADPCM_BLOCK_SAMPLES - 1) / OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+	whole = output_new(blocks * block_bytes);
+	pieces = output_new(blocks * block_bytes);
+	transcode(&fixture->stream, &whole, channels, rate, working_memory, sizeof(working_memory), &result);
+	CHECK(result.status == _ogg_sound_ok && !result.kept && !result.resumed, "%s at %ld: %s", fixture->name, rate,
+		ogg_sound_status_describe(result.status));
+
+	/* kept between pieces */
+	for (size_index = 0; size_index < sizeof(sizes) / sizeof(sizes[0]); size_index++)
+	{
+		uint32_t decoded = 0;
+
+		memset(pieces.bytes, 0x5A, pieces.size);
+		resumed_all = kept_right = skipped_right = 1;
+		for (block = 0; block < blocks; block += piece)
+		{
+			piece = blocks - block < sizes[size_index] ? blocks - block : sizes[size_index];
+			piece_transcode(&fixture->stream, &pieces, channels, rate, block, piece, 1, key, working_memory, &result);
+			CHECK(result.status == _ogg_sound_ok, "%s at %ld in pieces of %u: %s", fixture->name, rate, sizes[size_index],
+				ogg_sound_status_describe(result.status));
+			resumed_all &= result.resumed == (block > 0);
+			skipped_right &= result.frames_skipped == 0;
+			/* (the last kept as ended) */
+			kept_right &= result.kept;
+			decoded += result.frames_decoded;
+			if (block + piece < blocks)
+			{
+				kept_right &= ogg_sound_kept(working_memory, sizeof(working_memory), key, &next_frame) &&
+					next_frame == (block + piece) * OGG_SOUND_ADPCM_BLOCK_SAMPLES &&
+					!ogg_sound_kept(working_memory, sizeof(working_memory), key + 1, NULL);
+			}
+			/* (another stream between, in other working memory) */
+			if (other)
+			{
+				struct output elsewhere = output_new(4 * OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)other->stream_channels);
+				struct ogg_sound_result other_result;
+
+				transcode(&other->stream, &elsewhere, other->stream_channels, other->rate, second_working_memory,
+					sizeof(second_working_memory), &other_result);
+				free(elsewhere.memory);
+			}
+		}
+		same = !memcmp(pieces.bytes, whole.bytes, whole.size);
+		CHECK(same && resumed_all && kept_right && skipped_right && decoded == frames && output_guards_intact(&pieces),
+			"%s at %ld in kept pieces of %u blocks: the same bytes %d, resumed %d, kept %d, skipped %d, %u frames of %u",
+			fixture->name, rate, sizes[size_index], same, resumed_all, kept_right, skipped_right, decoded, frames);
+	}
+	/* kept as ended where the stream ended: a piece past it is silence,
+	nothing decoded */
+	{
+		struct output past = output_new(2 * block_bytes);
+		int silent = 1;
+		uint32_t index;
+		struct ogg_sound_request request;
+
+		memset(past.bytes, 0x5A, past.size);
+		kept_right = ogg_sound_kept(working_memory, sizeof(working_memory), key, &next_frame) && next_frame == frames;
+		memset(&request, 0, sizeof(request));
+		request.read = stream_read;
+		request.read_context = &fixture->stream;
+		request.input_bytes = fixture->stream.size;
+		request.output = past.bytes;
+		request.output_bytes = past.size;
+		request.channels = channels;
+		request.rate = rate;
+		request.working = working_memory;
+		request.working_bytes = sizeof(working_memory);
+		request.first_frame = blocks * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+		request.keep = 1;
+		request.stream_key = key;
+		ogg_sound_transcode(&request, &result);
+		for (index = 0; index < past.size; index++)
+			silent &= past.bytes[index] == 0;
+		CHECK(kept_right && result.status == _ogg_sound_ok && result.resumed && result.kept && silent &&
+			!result.frames_decoded && output_guards_intact(&past),
+			"%s at %ld: ended at %u (%d), a piece past it resumed %d, silent %d", fixture->name, rate, next_frame, kept_right,
+			result.resumed, silent);
+		free(past.memory);
+	}
+
+	/* each piece from the start (none kept) */
+	piece = blocks > 6 ? blocks / 6 : 1;
+	memset(pieces.bytes, 0x5A, pieces.size);
+	skipped_right = 1;
+	for (block = 0; block < blocks; block += piece)
+	{
+		uint32_t count = blocks - block < piece ? blocks - block : piece;
+
+		piece_transcode(&fixture->stream, &pieces, channels, rate, block, count, 0, key, working_memory, &result);
+		skipped_right &= result.status == _ogg_sound_ok && !result.resumed && !result.kept &&
+			result.frames_skipped == block * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+		if (piece_db(&whole, &pieces, channels, block, count) < worst)
+			worst = piece_db(&whole, &pieces, channels, block, count);
+	}
+	same = !memcmp(pieces.bytes, whole.bytes, whole.size);
+	CHECK(skipped_right && same, "%s at %ld in pieces from the start: skipped right %d, the same bytes %d (%.1f dB)",
+		fixture->name, rate, skipped_right, same, worst);
+
+	/* kept, then a piece skipped, then one before where it stopped */
+	if (blocks >= 3 * piece)
+	{
+		double skip_db, back_db;
+		int skip_right, back_right;
+
+		piece_transcode(&fixture->stream, &pieces, channels, rate, 0, piece, 1, key, working_memory, &result);
+		piece_transcode(&fixture->stream, &pieces, channels, rate, 2 * piece, piece, 1, key, working_memory, &result);
+		skip_right = result.status == _ogg_sound_ok && result.resumed &&
+			result.frames_skipped == piece * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+		skip_db = piece_db(&whole, &pieces, channels, 2 * piece, piece);
+		piece_transcode(&fixture->stream, &pieces, channels, rate, piece, piece, 1, key, working_memory, &result);
+		back_right = result.status == _ogg_sound_ok && !result.resumed &&
+			result.frames_skipped == piece * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+		back_db = piece_db(&whole, &pieces, channels, piece, piece);
+		CHECK(skip_right && skip_db == 99.0 && back_right && back_db == 99.0,
+			"%s at %ld: a piece past one skipped resumed %d at %.1f dB, one before decoded from the start %d at %.1f dB",
+			fixture->name, rate, skip_right, skip_db, back_right, back_db);
+		printf("  %s at %ld Hz: kept pieces, pieces from the start, past a skipped one and back the whole's bytes\n",
+			fixture->name, rate);
+	}
+	free(whole.memory);
+	free(pieces.memory);
+}
+
+static void test_pieces(void)
+{
+	/* at the fixtures' own rates (as they are, and halved), then
+	interpolated up (frames made past a piece's end held for the next) and
+	down */
+	test_pieces_at(&fixtures[0], 22050, &fixtures[3]);
+	test_pieces_at(&fixtures[1], 22050, NULL);
+	test_pieces_at(&fixtures[2], 22050, &fixtures[1]);
+	test_pieces_at(&fixtures[3], 44100, NULL);
+	test_pieces_at(&fixtures[1], 44100, NULL);
+	test_pieces_at(&fixtures[0], 48000, NULL);
+	test_pieces_at(&fixtures[3], 32000, NULL);
+}
+
+/* 16-bit PCM and Xbox ADPCM links (custom_edition_sounds.c, pcm_encode:
+read from xbox_adpcm_rate_start's frame, its skip left out) play as the
+whole output's frames there, at their rate and halved */
+static void test_pcm_links(void)
+{
+	int case_index;
+
+	for (case_index = 0; case_index < 6; case_index++)
+	{
+		int channels = 1 + case_index % 2;
+		int halved = case_index >= 2;
+		int adpcm_input = case_index >= 4;
+		long input_rate = halved ? 44100 : 22050;
+		long rate = halved ? input_rate / 2 : input_rate;
+		uint32_t input_frames = (uint32_t)input_rate;
+		uint32_t unit_frames = adpcm_input ? XBOX_ADPCM_BLOCK_SAMPLES : 1;
+		uint32_t unit_bytes = adpcm_input ? XBOX_ADPCM_BLOCK_BYTES * (uint32_t)channels : 2 * (uint32_t)channels;
+		unsigned char *pcm = pcm_sine(input_frames, channels, input_rate);
+		unsigned char *input = pcm;
+		uint32_t input_bytes = input_frames * 2 * (uint32_t)channels;
+		uint32_t frames = xbox_adpcm_rate_frames(input_frames, input_rate, rate);
+		uint32_t block_bytes = XBOX_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+		uint32_t blocks = (frames + XBOX_ADPCM_BLOCK_SAMPLES - 1) / XBOX_ADPCM_BLOCK_SAMPLES;
+		struct output whole = output_new(blocks * block_bytes);
+		struct output link = output_new(blocks * block_bytes);
+		struct output adpcm = output_new(xbox_adpcm_bytes(input_frames, channels));
+		static uint32_t const first_blocks[] = { 1, 2, 5, 17, 100 };
+		double worst = 99.0;
+		int skips_right = 1;
+		uint32_t pass;
+
+		if (adpcm_input)
+		{
+			struct xbox_adpcm_encoder encoder;
+
+			pcm_encode(pcm, input_bytes, &adpcm, channels, 16 * 1024, &encoder);
+			input = adpcm.bytes;
+			input_bytes = adpcm.size;
+		}
+		/* the whole (first_frame 0), then links from each block */
+		for (pass = 0; pass <= sizeof(first_blocks) / sizeof(first_blocks[0]); pass++)
+		{
+			uint32_t first_block = pass ? first_blocks[pass - 1] : 0;
+			uint32_t first_frame = first_block * XBOX_ADPCM_BLOCK_SAMPLES;
+			struct output *output = pass ? &link : &whole;
+			struct xbox_adpcm_encoder encoder;
+			struct xbox_adpcm_rate converter;
+			uint32_t skip, warm;
+			uint64_t start = xbox_adpcm_rate_start(first_frame, halved, unit_frames, &skip, &warm);
+			uint32_t offset = (uint32_t)(start / unit_frames * unit_bytes);
+
+			if (first_block >= blocks)
+				continue;
+			xbox_adpcm_encoder_begin(&encoder, output->bytes + first_block * block_bytes, (blocks - first_block) * block_bytes,
+				channels);
+			encoder.skip_frames = skip;
+			encoder.warm_frames = warm;
+			xbox_adpcm_rate_begin(&converter, &encoder, input_rate, rate);
+			skips_right &= start <= (uint64_t)(halved ? 2 * first_frame : first_frame) && start % unit_frames == 0 &&
+				skip <= (halved ? unit_frames / 2 + 1 : unit_frames) &&
+				warm == (first_frame >= XBOX_ADPCM_BLOCK_SAMPLES ? XBOX_ADPCM_BLOCK_SAMPLES : first_frame);
+			/* (as custom_edition_sounds.c's piece_frames takes them) */
+			for (; offset + unit_bytes <= input_bytes && !encoder.full; offset += unit_bytes)
+			{
+				int values[XBOX_ADPCM_MAXIMUM_CHANNELS];
+				int channel;
+
+				if (adpcm_input)
+				{
+					short decoded[XBOX_ADPCM_BLOCK_SAMPLES * XBOX_ADPCM_MAXIMUM_CHANNELS];
+					int frame;
+
+					xbox_adpcm_block_decode(input + offset, channels, decoded);
+					for (frame = 0; frame < XBOX_ADPCM_BLOCK_SAMPLES; frame++)
+					{
+						for (channel = 0; channel < channels; channel++)
+							values[channel] = decoded[frame * channels + channel];
+						xbox_adpcm_rate_frame(&converter, values);
+					}
+				}
+				else
+				{
+					for (channel = 0; channel < channels; channel++)
+						values[channel] = (int16_t)(uint16_t)(input[offset + 2 * channel] | input[offset + 2 * channel + 1] << 8);
+					xbox_adpcm_rate_frame(&converter, values);
+				}
+			}
+			xbox_adpcm_rate_finish(&converter);
+			xbox_adpcm_encoder_finish(&encoder);
+			if (pass)
+			{
+				uint32_t count = blocks - first_block < 4 ? blocks - first_block : 4;
+				double db = piece_db(&whole, &link, channels, first_block, count);
+
+				if (db < worst)
+					worst = db;
+			}
+		}
+		CHECK(skips_right && worst >= 30.0 && output_guards_intact(&link),
+			"%s %d ch%s: links from their first frames %.1f dB from the whole there (skips right %d)",
+			adpcm_input ? "Xbox ADPCM" : "16-bit PCM", channels, halved ? " halved" : "", worst, skips_right);
+		printf("  %s %d ch%s: links %.1f dB from the whole's frames there\n", adpcm_input ? "Xbox ADPCM" : "16-bit PCM",
+			channels, halved ? " halved" : "", worst);
+		free(pcm);
+		free(whole.memory);
+		free(link.memory);
+		free(adpcm.memory);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	char const *cases = getenv("OGG_SOUND_CASES") ? getenv("OGG_SOUND_CASES") : "ogg_sound_cases";
@@ -1085,6 +1426,9 @@ int main(int argc, char **argv)
 	test_pcm();
 	printf("other rates:\n");
 	test_rates();
+	printf("pieces (links of a long sound's chain):\n");
+	test_pieces();
+	test_pcm_links();
 	printf("damage:\n");
 	for (index = 0; index < FIXTURE_COUNT; index++)
 		test_damage(&fixtures[index]);

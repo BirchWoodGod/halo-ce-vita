@@ -95,6 +95,25 @@ static int ima_encode(int target, int *predictor, int *index)
 
 /* ---------- blocks */
 
+/* the block's frames encoded only for the step index they leave (the
+encoder warmed) */
+static void block_warm(struct xbox_adpcm_encoder *encoder)
+{
+	int channel;
+
+	for (channel = 0; channel < encoder->channels; channel++)
+	{
+		int predictor = encoder->block[0][channel];
+		int index = encoder->step_index[channel];
+		int sample;
+
+		for (sample = 1; sample < XBOX_ADPCM_BLOCK_SAMPLES; sample++)
+			ima_encode(encoder->block[sample][channel], &predictor, &index);
+		encoder->step_index[channel] = index;
+	}
+	encoder->block_frames = 0;
+}
+
 static void block_encode(struct xbox_adpcm_encoder *encoder)
 {
 	int channels = encoder->channels;
@@ -168,14 +187,87 @@ int xbox_adpcm_encoder_begin(
 	return 1;
 }
 
+void xbox_adpcm_encoder_warm(
+	struct xbox_adpcm_encoder *encoder,
+	uint32_t frames)
+{
+	if (frames < (uint32_t)encoder->block_frames)
+	{
+		encoder->block_frames = 0;
+		encoder->warm_frames = frames;
+		return;
+	}
+	encoder->warm_frames = frames - (uint32_t)encoder->block_frames;
+	if (encoder->block_frames == XBOX_ADPCM_BLOCK_SAMPLES)
+		block_warm(encoder);
+}
+
+int xbox_adpcm_encoder_continue(
+	struct xbox_adpcm_encoder *encoder,
+	void *output,
+	uint32_t output_bytes)
+{
+	encoder->blocks_written = 0;
+	encoder->truncated = 0;
+	encoder->sum_of_squares = 0.0;
+	encoder->peak = 0;
+	if (!output || encoder->channels < 1 || encoder->channels > XBOX_ADPCM_MAXIMUM_CHANNELS)
+	{
+		encoder->output = NULL;
+		encoder->output_blocks = 0;
+		encoder->full = 1;
+		encoder->frames = 0;
+		return 0;
+	}
+	encoder->output = (uint8_t *)output;
+	encoder->output_blocks = output_bytes / encoder->block_bytes;
+	encoder->full = encoder->output_blocks == 0;
+	/* (the frames held are this output's first, unless they warm it) */
+	encoder->frames = encoder->warm_frames ? 0 : (uint32_t)encoder->block_frames;
+	if (!encoder->full && !encoder->warm_frames && encoder->block_frames == XBOX_ADPCM_BLOCK_SAMPLES)
+		block_encode(encoder);
+	return 1;
+}
+
 void xbox_adpcm_encoder_frame(
 	struct xbox_adpcm_encoder *encoder,
 	int const *frame)
 {
 	int channel;
 
+	if (encoder->skip_frames)
+	{
+		encoder->skip_frames--;
+		return;
+	}
+	if (encoder->warm_frames)
+	{
+		for (channel = 0; channel < encoder->channels; channel++)
+		{
+			int value = frame[channel];
+
+			encoder->block[encoder->block_frames][channel] =
+				(short)(value > 32767 ? 32767 : value < -32768 ? -32768 : value);
+		}
+		encoder->warm_frames--;
+		if (++encoder->block_frames == XBOX_ADPCM_BLOCK_SAMPLES)
+			block_warm(encoder);
+		return;
+	}
 	if (encoder->full)
 	{
+		if (encoder->hold && encoder->output && encoder->block_frames < XBOX_ADPCM_BLOCK_SAMPLES)
+		{
+			for (channel = 0; channel < encoder->channels; channel++)
+			{
+				int value = frame[channel];
+
+				encoder->block[encoder->block_frames][channel] =
+					(short)(value > 32767 ? 32767 : value < -32768 ? -32768 : value);
+			}
+			encoder->block_frames++;
+			return;
+		}
 		encoder->truncated = 1;
 		return;
 	}
@@ -292,7 +384,9 @@ static void rate_interpolate(struct xbox_adpcm_rate *rate, int const *frame)
 		rate->position = 0;
 		return;
 	}
-	while (rate->position < rate->output_rate && !rate->encoder->full)
+	/* (an encoder that holds what follows a full output takes the rest:
+	ogg_sound.c's pieces) */
+	while (rate->position < rate->output_rate && (!rate->encoder->full || rate->encoder->hold))
 	{
 		int output[XBOX_ADPCM_MAXIMUM_CHANNELS];
 
@@ -420,6 +514,29 @@ void xbox_adpcm_rate_finish(
 			rate->have_last = 0;
 		}
 	}
+}
+
+uint64_t xbox_adpcm_rate_start(
+	uint32_t first_frame,
+	int halved,
+	uint32_t unit_frames,
+	uint32_t *skip_frames,
+	uint32_t *warm_frames)
+{
+	/* the block before warms the encoder (from cold: near the whole's step
+	index), from output frame `warm_from` */
+	uint32_t warm_from = first_frame >= XBOX_ADPCM_BLOCK_SAMPLES ? first_frame - XBOX_ADPCM_BLOCK_SAMPLES : 0;
+	/* (halved: output frame k is (1 2 1)/4 of input frames 2k-1 to 2k+1,
+	the pairs taken from an even frame with the frame before the pair kept:
+	from frame 2k-2, frame k-1 made, with the wrong frame before it, and
+	skipped) */
+	uint64_t input_frame = halved ? (warm_from ? 2 * ((uint64_t)warm_from - 1) : 0) : warm_from;
+
+	if (unit_frames > 1)
+		input_frame -= input_frame % unit_frames;
+	*warm_frames = first_frame - warm_from;
+	*skip_frames = warm_from - (uint32_t)(halved ? input_frame / 2 : input_frame);
+	return input_frame;
 }
 
 uint32_t xbox_adpcm_rate_frames(
