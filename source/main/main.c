@@ -4330,7 +4330,9 @@ bringto) as the Vita's Play page does (main_request_host_command),
 "@update" presses the settings panel's Check for updates
 (update_check_request, port/linux/src/update_notify.c), and
 "@sound tag [n]" plays that sound tag (the nth so named) as
-sound_impulse_start does with no object. Each runs once,
+sound_impulse_start does with no object, and "@weapon P name" takes
+player P's weapons and gives it one of the first weapon tag with name in
+its name. Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 /* (the Vita's settings panel sets it: vita_settings_load) */
@@ -4627,6 +4629,65 @@ static void main_test_commands_update(
 					damage_kill_object_for_player(player->unit_index, NONE);
 				}
 			}
+		}
+		/* "@weapon P name": player P's weapons all taken (deleted), and a
+		new one of the first weapon tag whose name has `name` in it given
+		instead, in its hands (the
+		bots' precision weapons: run_bots_test.sh's precision cases) */
+		else if (!strncmp(commands[index].command, "@weapon ", 8))
+		{
+			long player_absolute_index = NONE;
+			char name[64];
+			long definition_index = NONE;
+			struct tag_iterator tags;
+			long tag_index;
+			struct data_iterator iterator;
+			struct player_datum *player;
+
+			name[0] = '\0';
+			if (sscanf(commands[index].command + 8, "%ld %63[^;]", &player_absolute_index, name) == 2)
+			{
+				tag_iterator_new(&tags, 'weap');
+				while ((tag_index = tag_iterator_next(&tags)) != NONE && definition_index == NONE)
+				{
+					if (strstr(tag_get_name(tag_index), name))
+						definition_index = tag_index;
+				}
+			}
+			data_iterator_new(&iterator, player_data);
+			while (definition_index != NONE && (player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+			{
+				if (DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) == player_absolute_index &&
+					player->unit_index != NONE)
+				{
+					struct object_placement_data placement;
+					struct unit_datum *unit = unit_get(player->unit_index);
+					long weapon_index;
+					short slot;
+
+					/* (every weapon, the one in its hands too, which
+					unit_delete_all_weapons leaves) */
+					for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+					{
+						if (unit->unit.weapon_object_indices[slot] != NONE)
+						{
+							object_delete(unit->unit.weapon_object_indices[slot]);
+							unit->unit.weapon_object_indices[slot] = NONE;
+						}
+					}
+					unit->unit.current_weapon_index = NONE;
+					unit->unit.desired_weapon_index = NONE;
+					object_placement_data_new(&placement, definition_index, NONE);
+					placement.position = object_get(player->unit_index)->object.position;
+					weapon_index = object_new(&placement);
+					platform_log("test command: player %ld (machine %ld) given %s: %s", player_absolute_index,
+						(long)player->network_player_data.machine_index, tag_get_name(definition_index),
+						weapon_index != NONE && unit_add_weapon_to_inventory(player->unit_index, weapon_index,
+							_unit_add_weapon_replace) ? "held" : "not taken");
+				}
+			}
+			if (definition_index == NONE)
+				platform_log("test command: no weapon named %s", name);
 		}
 		/* (@host <command>: asked for as the settings panel asks,
 		main_request_host_command: run at the next frame's top) */

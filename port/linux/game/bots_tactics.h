@@ -39,6 +39,21 @@ enum
 	NUMBER_OF_BOTS_ROLES,
 };
 
+/* what kind of a precision weapon the bot holds (bots.c's
+bots_weapon_precision, from the weapon's tag) */
+enum
+{
+	/* none: the bot as before */
+	_bots_precision_none = 0,
+	/* a zoom and a bullet (the pistol): a vantage point near, held a little
+	while, by a roamer */
+	_bots_precision_mid,
+	/* a scope and a bullet (the sniper rifle): a vantage point, held */
+	_bots_precision_long,
+	/* a zoom and one slow projectile (the rocket launcher) */
+	_bots_precision_heavy,
+};
+
 /* the most waypoints a lane goes by, side lanes, vantage points kept a map,
 places they are scored by (the flag stands, the hills, the ball's spawns,
 the direct route), and points of the direct route kept */
@@ -85,6 +100,19 @@ there (*moving, *direction and *throttle changed), and leaves it when the
 enemy comes this near */
 void bots_tactics_fight(long bot_index, real_point3d const *position, real target_distance, boolean *moving,
 	real *direction, real *throttle);
+/* bots_choose_goal, first: off its vantage point when it is time (its
+weapon changed, nearly empty, hurt, its time up), whatever it goes for
+meanwhile (a powerup, a vehicle); and whether it holds one now (bots_
+powerup_goal: a health pack alone takes it off it) */
+void bots_tactics_check(long bot_index, long player_index);
+boolean bots_tactics_holding(long bot_index);
+/* bots_choose_goal: the game's objective comes first now (the flag or the
+ball carried, its own flag to bring back, its carrier to chase): off its
+vantage point */
+void bots_tactics_objective(long bot_index);
+/* bots_target_score: how much further the bot sees an enemy (1 as before;
+more through its scope at its vantage point) */
+real bots_tactics_sight_scale(long bot_index);
 /* bots_report, each minute: halo.log's tactics line */
 void bots_tactics_report(long now);
 
@@ -119,6 +147,12 @@ struct bots_tactics_bot
 	short last_vantage;
 	unsigned long failed_vantages;
 	long failed_until_tick;
+	/* the precision weapon it holds the vantage point for (bots_weapon_
+	precision: none for its role's, a sniper's or a King defender's) */
+	short vantage_weapon;
+	/* the precision weapon of the vantage point it rests from (a sniper
+	rifle taken up after a pistol's: no rest) */
+	short rest_weapon;
 	/* looking about there: at which watched place, until when */
 	short look_place;
 	long look_until_tick;
@@ -213,6 +247,8 @@ before but for their routes) */
 boolean bots_tactics_enabled(void);
 /* the gametype's engine (game_engine_ctf ...), read once a tick */
 long bots_tactics_game(void);
+/* bots.c's: the precision of a weapon object (NONE: none) */
+short bots_weapon_precision(long weapon_index);
 /* a bot's next random number (its own, seeded by its index and the game's) */
 unsigned long bots_tactics_random(struct bots_tactics_bot *state);
 
@@ -223,9 +259,13 @@ boolean bots_vantage_step(void);
 void bots_vantage_dispose(void);
 void bots_vantage_release(long bot_index, char const *why);
 /* the vantage point for a bot of the role: the best not another's, near
-`position` (NONE for none); for a defender, one over its team's stand (CTF)
-or the hill (King: the game's goal, `objective`) */
-short bots_vantage_choose(long bot_index, real_point3d const *position, real_point3d const *objective);
+`position` and no further than `maximum_distance` from it (NONE for none);
+for a defender, one over its team's stand (CTF, a sniper rifle's) or the hill
+(King: the game's goal), `objective` */
+short bots_vantage_choose(long bot_index, real_point3d const *position, real_point3d const *objective,
+	real maximum_distance);
+/* a team's flag stand (the place the vantage points see; FALSE for none) */
+boolean bots_vantage_stand(long team, real_point3d *point);
 /* a vantage point's ground and surface; a defender's post of its team */
 void bots_vantage_point(short vantage, real_point3d *point, long *surface_index);
 boolean bots_vantage_post(long team, short post, real_point3d *point, long *surface_index);
@@ -235,6 +275,21 @@ long bots_vantage_count(void);
 unsigned long bots_vantage_sees(short vantage);
 long bots_places_count(void);
 struct bots_place const *bots_place_get(long index);
+/* why a bot left its vantage point */
+enum
+{
+	_bots_vantage_left_time = 0,
+	_bots_vantage_left_enemy,
+	_bots_vantage_left_ammunition,
+	_bots_vantage_left_hurt,
+	/* its precision weapon dropped or swapped for another */
+	_bots_vantage_left_weapon,
+	/* the game's objective first (the flag, the ball) */
+	_bots_vantage_left_objective,
+	_bots_vantage_left_other,
+	NUMBER_OF_BOTS_VANTAGE_LEFT,
+};
+
 /* the statistics of halo.log's tactics line */
 struct bots_tactics_counts
 {
@@ -243,22 +298,12 @@ struct bots_tactics_counts
 	long lanes_given_up;
 	long vantages_chosen;
 	long vantages_reached;
-	long vantage_leaves[5];
+	long vantage_leaves[NUMBER_OF_BOTS_VANTAGE_LEFT];
 	long vantage_failures;
 	long posts_taken;
 };
 
 extern struct bots_tactics_counts bots_tactics_counts;
-
-/* why a bot left its vantage point */
-enum
-{
-	_bots_vantage_left_time = 0,
-	_bots_vantage_left_enemy,
-	_bots_vantage_left_ammunition,
-	_bots_vantage_left_hurt,
-	_bots_vantage_left_other,
-};
 
 /* the platform layer's */
 const char *config_string(char const *name);

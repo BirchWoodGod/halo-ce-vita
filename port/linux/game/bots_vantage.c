@@ -3,9 +3,10 @@ BOTS_VANTAGE.C
 
 (port) The offline bots' vantage points (bots.c's bots; in every Bot routes
 mode): the map's few standing spots that see the most of what the bots
-fight over, found once a map, held a while by the bots holding a sniper
-rifle or a rocket launcher, by the snipers (bots_roles.c) and by King of
-the Hill's defenders, over the hill.
+fight over, found once a map, held a while by the bots holding a precision
+weapon (a sniper rifle; a pistol, one near; bots.c's bots_weapon_precision,
+from the weapon's tag) or a rocket launcher, by the snipers (bots_roles.c)
+and by King of the Hill's defenders, over the hill.
 
 The places that matter: the CTF flag stands, King of the Hill's hills, the
 oddball's spawns (in those games), the direct route a quarter, half and
@@ -713,7 +714,8 @@ boolean bots_vantage_step(void)
 
 /* ---------- the bots at them */
 
-short bots_vantage_choose(long bot_index, real_point3d const *position, real_point3d const *objective)
+short bots_vantage_choose(long bot_index, real_point3d const *position, real_point3d const *objective,
+	real maximum_distance)
 {
 	struct bots_tactics_bot *state = &bots_tactics_bots[bot_index];
 	long index, best = NONE, objective_place = NONE;
@@ -747,7 +749,8 @@ short bots_vantage_choose(long bot_index, real_point3d const *position, real_poi
 			(TEST_FLAG(state->failed_vantages, index) && now < state->failed_until_tick) ||
 			(index == state->last_vantage && bots_vantage.count > 1) ||
 			(objective_place != NONE && (!TEST_FLAG(spot->sees, objective_place) ||
-				bots_vantage_distance3d(&spot->point, &bots_vantage.places[objective_place].point) > 40.0f)))
+				bots_vantage_distance3d(&spot->point, &bots_vantage.places[objective_place].point) > 40.0f)) ||
+			bots_vantage_distance3d(&spot->point, position) > maximum_distance)
 		{
 			continue;
 		}
@@ -774,6 +777,7 @@ void bots_vantage_release(long bot_index, char const *why)
 	if (state->vantage != NONE)
 		state->last_vantage = state->vantage;
 	state->vantage = NONE;
+	state->vantage_weapon = _bots_precision_none;
 	state->hold_tick = 0;
 }
 
@@ -791,6 +795,21 @@ boolean bots_vantage_post(long team, short post, real_point3d *point, long *surf
 	*point = bots_vantage.posts[team][post];
 	*surface_index = bots_vantage.post_surfaces[team][post];
 	return TRUE;
+}
+
+boolean bots_vantage_stand(long team, real_point3d *point)
+{
+	long index;
+
+	for (index = 0; index < bots_vantage.place_count; index++)
+	{
+		if (!strcmp(bots_vantage.places[index].name, team ? "stand 1" : "stand 0"))
+		{
+			*point = bots_vantage.places[index].point;
+			return team == 0 || team == 1;
+		}
+	}
+	return FALSE;
 }
 
 long bots_vantage_post_count(long team)

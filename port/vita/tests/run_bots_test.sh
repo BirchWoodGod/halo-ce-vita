@@ -95,7 +95,24 @@
 #            defenders (halo.log's roles line) about their own flag stand -
 #            within 25 units of it half their time alive from the 20th second
 #            on, one a team at least - the attackers' time there printed too
-#   tactics  lanes, vantage and roles
+#   precision  Slayer, 4 bots, Heroic, not fighting, on foot
+#            (HALO_BOT_VEHICLES=0: a bot driving goes where it drives),
+#            Bot routes Direct: the bots' precision weapons
+#            (bots.c's bots_weapon_precision, from the weapons' tags): halo.log
+#            names the sniper rifle a long one and the pistol a middle one, the
+#            plasma pistol none; 10 s in, the first bot is given a sniper
+#            rifle (HALO_TEST_COMMANDS' @weapon) and the others shotguns: the
+#            first comes to a vantage point (halo.log's arrival, for its long
+#            precision weapon, before the swap) and holds it 10 s (its places
+#            within 2.5 units, or until the swap); 70 s in (45 s in
+#            precision2) it is given a shotgun instead: holding a vantage point then, it leaves it
+#            (halo.log: off it, weapon) and is 5 units from it within 30 s,
+#            else walks 15 units in them; and it comes to none for a long
+#            precision weapon in them (about the map again)
+#   precisionlanes  precision with Bot routes Lanes
+#   precision2  precision on Hang 'em High (HALO_TEST_PRECISION_MAP)
+#   precisions  precision, precisionlanes and precision2
+#   tactics  lanes, vantage, roles and the precision cases
 #
 # The vehicle cases: the bots must take the vehicles - their census in
 # halo.log every ten seconds (bots.c: riding, driving, gunning, the distance
@@ -166,7 +183,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
 test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 cases=${*:-slayer teams}
-cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams iron /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /; s/ tactics / lanes vantage roles /')
+cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams iron /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /; s/ tactics / lanes vantage roles precisions /; s/ precisions / precision precisionlanes precision2 /')
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 ce_resources=${HALO_TEST_CE_RESOURCES:-}
 if [ -z "$ce_resources" ]; then
@@ -185,6 +202,7 @@ case_bots() { # NAME
 	playlistcancel) echo 3 ;;
 	ladders) echo 8 ;;
 	lanes) echo 12 ;;
+	precision*) echo 4 ;;
 	vantage) echo 6 ;;
 	roles) echo 8 ;;
 	*) echo "$bots" ;;
@@ -348,6 +366,18 @@ for name in $cases; do
 	ladders) run ladders oddball MAP=boardingaction HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 & ;;
 	lanes) run lanes ctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_BOT_PEACEFUL=1 HALO_BOT_ROUTES=lanes HALO_BOT_VEHICLES=0 & ;;
 	vantage) run vantage snipers HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 & ;;
+	precision | precisionlanes | precision2)
+		# (the first bot a sniper rifle 10 s in, before the vantage points
+		# are made, the others shotguns - which they keep over a sniper rifle
+		# lying about, worth no more to them; a shotgun for the first 70 s in,
+		# 45 s on Hang 'em High, whose vantage points are nearer)
+		routes=direct precision_map=$map swap=2100
+		[ "$name" = precisionlanes ] && routes=lanes
+		[ "$name" = precision2 ] && precision_map=${HALO_TEST_PRECISION_MAP:-hangemhigh} swap=1350
+		commands="L300:@weapon 1 sniper rifle;L300:@weapon 2 shotgun;L300:@weapon 3 shotgun;L300:@weapon 4 shotgun;"
+		commands="${commands}L$swap:@weapon 1 shotgun"
+		run "$name" slayer MAP="$precision_map" HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 HALO_BOT_VEHICLES=0 \
+			HALO_BOT_ROUTES=$routes "HALO_TEST_COMMANDS=$commands" & ;;
 	roles) run roles ctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
 	playlist)
 		(seconds=$playlist_seconds
@@ -466,6 +496,13 @@ if name == "ladders":
     elif climbs < 1:
         fail("no bot climbed a ladder (%d gone to)" % moves_number(r"gone to (\d+)"))
     sys.exit(1 if failed else 0)
+# (the precision cases: the bot given the sniper rifle, which holds a vantage
+# point)
+precision_subject = None
+for line in open(log, errors="replace"):
+    m = re.search(r"test command: player \d+ \(machine (\d+)\) given .*sniper rifle: held", line)
+    if m:
+        precision_subject = int(m.group(1))
 kills = deaths = died = 0
 for i in sorted(bot_players):
     track = places.get(i, [])
@@ -484,7 +521,7 @@ for i in sorted(bot_players):
         (named.get(i, "?"), walked, spread, score, k, d))
     # (the tactics cases: a defender keeps about its stand, a sniper holds
     # its vantage points; bots_roles.c's roles line)
-    kept = name in ("lanes", "vantage", "roles") and any(
+    kept = (name.startswith("precision") and machine == precision_subject) or name in ("lanes", "vantage", "roles") and any(
         re.search(r"bot %d team \d+ (defender|sniper)" % (machine - 112), line) for line in open(log, errors="replace")
         if "bots: roles (" in line)
     if walked < 60.0 and not kept:
@@ -636,6 +673,103 @@ if name == "vantage":
                     held_from = started if held_from is None else min(held_from, started)
         if held_from is None or held_from > vantage_seconds:
             fail("no bot came to a vantage point and held it 10 s within %.0f s" % vantage_seconds)
+    sys.exit(1 if failed else 0)
+if name.startswith("precision"):
+    # (each line's tick: the network test's last before it, a second apart)
+    events, tick = [], 0
+    for line in lines:
+        m = re.search(r"network test: tick (\d+)", line)
+        if m:
+            tick = int(m.group(1))
+        else:
+            events.append((tick, line))
+    kinds = [line.split("bots: weapon ", 1)[1].strip() for line in lines if re.search(r"bots: weapon .*: (precision|heavy)", line)]
+    print("  precision weapons: %s" % "; ".join(kinds))
+    if not any(re.search(r"sniper rifle: precision, long", k) for k in kinds):
+        fail("the sniper rifle not named a long precision weapon")
+    if not any(re.search(r"\\pistol\\pistol: precision, middle", k) for k in kinds):
+        fail("the pistol not named a middle precision weapon")
+    if any("plasma pistol" in k for k in kinds):
+        fail("the plasma pistol named a precision weapon")
+    gave = swap = None
+    for line in lines:
+        m = re.search(r"test command at tick (\d+): @weapon 1 (.*)", line)
+        if m and "sniper" in m.group(2):
+            gave = int(m.group(1))
+        elif m:
+            swap = int(m.group(1))
+    if precision_subject is None or precision_subject < 113 or gave is None or swap is None:
+        fail("no bot was given the sniper rifle (%s), or no swap" % precision_subject)
+        sys.exit(1)
+    bot = precision_subject - 112
+    points = {}
+    for line in lines:
+        m = re.search(r"bots: vantage point (\d+) at \(([-\d.]+) ([-\d.]+) ([-\d.]+)\)", line)
+        if m:
+            points[int(m.group(1))] = (float(m.group(2)), float(m.group(3)))
+    print("  %d vantage points" % len(points))
+    track = [(t, x, y) for player, tr in tracks().items() for t, x, y, team, machine in tr if machine == precision_subject]
+    mine = [(t, line) for t, line in events if re.search(r"bots: bot %d \(\w+\) (at|off|holds) vantage point" % bot, line)]
+    for t, line in mine:
+        print("  %5.0f s %s" % (t / 30.0, line.split("bots: ", 1)[1].strip()))
+    for t, line in events:
+        if "for its middle precision" in line:
+            print("  (a pistol's) %5.0f s %s" % (t / 30.0, line.split("bots: ", 1)[1].strip()))
+    arrivals = [(t, int(m.group(1))) for t, line in mine
+        for m in [re.search(r"(?:at|holds) vantage point (\d+) .*for its long precision", line)] if m and gave <= t <= swap]
+    if not arrivals:
+        fail("bot %d came to no vantage point with its sniper rifle in %.0f s" % (bot, (swap - gave) / 30.0))
+    else:
+        arrived, point = arrivals[0]
+        px, py = points.get(point, (0.0, 0.0))
+        held, run_start = 0, None
+        for t, x, y in track:
+            if t < arrived - 30:
+                continue
+            if math.hypot(x - px, y - py) < 2.5:
+                run_start = t if run_start is None else run_start
+                held = max(held, (min(t, swap) - run_start) // 30 + 1)
+            else:
+                run_start = None
+            if t > swap:
+                break
+        still = run_start is not None and run_start < swap
+        print("  bot %d at vantage point %d %.0f s after the sniper rifle, held it %d s%s" % (bot, point, (arrived - gave) / 30.0,
+            held, " (until the swap)" if still else ""))
+        if held < 10 and not (still and held >= 3):
+            fail("bot %d held its vantage point %d s" % (bot, held))
+    # the swap: off its vantage point (weapon) when it held one, none after
+    state = None
+    for t, line in mine:
+        if t < swap:
+            state = "off" if " off vantage point" in line else "at"
+    left = [t for t, line in mine if swap <= t <= swap + 4 * 30 and "(weapon)" in line]
+    print("  at the swap (%.0f s) bot %d %s; off for its weapon %s" % (swap / 30.0, bot,
+        "held a vantage point" if state == "at" else "held none", "%.0f s after" % ((left[0] - swap) / 30.0) if left else "never"))
+    if state == "at" and not left:
+        fail("bot %d kept its vantage point with a shotgun" % bot)
+    after = [t for t, line in mine if swap + 4 * 30 < t <= swap + 34 * 30 and "for its long precision" in line and
+        " at vantage point" in line]
+    if after:
+        fail("bot %d came to a vantage point %.0f s after the swap" % (bot, (after[0] - swap) / 30.0))
+    walked, away = 0.0, 0.0
+    window = [(x, y) for t, x, y in track if swap <= t <= swap + 30 * 30]
+    for (x0, y0), (x1, y1) in zip(window, window[1:]):
+        if math.hypot(x1 - x0, y1 - y0) < 8.0:
+            walked += math.hypot(x1 - x0, y1 - y0)
+    held_point = None
+    for t, line in mine:
+        m = re.search(r" (?:at|holds) vantage point (\d+)", line)
+        if t < swap and m:
+            held_point = points.get(int(m.group(1)))
+    if state == "at" and held_point:
+        away = max([math.hypot(x - held_point[0], y - held_point[1]) for x, y in window] or [0.0])
+    print("  bot %d walked %.1f units in the 30 s after the swap%s" % (bot, walked,
+        ", %.1f units from its vantage point at most" % away if state == "at" else ""))
+    if state == "at" and away < 5.0:
+        fail("bot %d stayed by its vantage point with a shotgun" % bot)
+    elif state != "at" and walked < 15.0:
+        fail("bot %d walked only %.1f units after the swap" % (bot, walked))
     sys.exit(1 if failed else 0)
 if name == "roles":
     stands = None
