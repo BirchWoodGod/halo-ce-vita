@@ -156,6 +156,7 @@ the setting for one start of the game. It has priority over the file.
 | `display.window_scale` | `2` | `HALO_WINDOW_SCALE` | The size of the window, as a multiple of 640x480. You can change the size of the window. |
 | `display.vsync` | `true` | `HALO_NO_VSYNC=1` sets `false` | `true`: each frame waits for the display. |
 | `display.interpolation` | `true` | `HALO_INTERPOLATION` | `true`: one frame for each refresh of the display. `false`: 30 frames each second, as on the Xbox. Refer to "Frame rate". |
+| `display.first_person_legs` | `false` | `HALO_FIRST_PERSON_LEGS` | `true`: in first person, your own body is drawn from the waist down, so you see your legs when you look down, moving as everyone else sees them. Not in a vehicle, zoomed, in a cutscene or in third person. Only the picture changes: hit boxes, the camera and the network are as before. From OpenCE. |
 | `graphics.particles` | `"full"` | `HALO_PARTICLE_BUDGET` | The particles that the effects of a fight make. `"full"`: all, as on the Xbox. `"reduced"` or `"low"`: fewer sparks, smoke, dust and debris, and they go sooner (in multiplayer, out of view, after a sixth of a second; `"low"` a tenth). Muzzle flashes, flashes, your own weapon and the effects of scripts and cutscenes are not changed. |
 | `audio.enabled` | `true` | `HALO_NO_AUDIO=1` sets `false` | `false`: no audio device. The sound continues without output. |
 | `audio.volume` | `1.0` | `HALO_VOLUME` | The master volume. |
@@ -491,6 +492,7 @@ Other changes are in `#ifdef HALO_LINUX`. All the native ports define
 | `cseries/errors.c` | `debug.txt` stays open between lines. |
 | `networking/`, `game/`, `interface/`, `bungie_net/network/` and the pools of objects, effects and sounds | The system link limits and the memory for them. |
 | `game/`, `objects/`, `units/`, `networking/` | The distributed netcode. Refer to `NETCODE.md`. |
+| `render/render_objects.c`, `objects/objects.c` | In first person, your own body is drawn from the waist down with the pose `game/first_person_legs.c` makes (`display.first_person_legs`, from OpenCE); the waist it found and the mesh `game/object_mesh.c` read are forgotten on a new map. |
 
 The x86 inline assembly of the game has C replacements in
 `#ifdef HALO_LINUX`. Thus the compiler can optimize that code for each

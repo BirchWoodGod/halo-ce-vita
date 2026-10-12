@@ -172,6 +172,9 @@ boolean network_objects_creating_host_object(void);
 boolean network_objects_may_delete(long object_index);
 /* port/linux/game/network_coop.c's: the co-op host's object census looks at each object made */
 void network_coop_note_object_new(long object_index);
+/* port/linux/game/first_person_legs.c's (from OpenCE): the last map's
+waist and mesh forgotten */
+void first_person_legs_reset(void);
 #endif
 /* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
 void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
@@ -1285,6 +1288,11 @@ void objects_initialize_for_new_map(
 	widgets_initialize_for_new_map();
 	object_types_initialize_for_new_map();
 	lights_initialize_for_new_map();
+#ifdef HALO_LINUX
+	/* port: the last map's waist and mesh forgotten
+	(port/linux/game/first_person_legs.c) */
+	first_person_legs_reset();
+#endif
 	
 	data_make_valid(object_header_data);
 	object_name_list_clear();
