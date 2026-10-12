@@ -8,16 +8,17 @@ goal, path, walk and fight by the hooks of bots_tactics.h.
 
 The roles, once a second, of each team's bots (in a game without teams, of
 all of them) by their order in the team, so not every bot rushes the flag:
-- CTF: attackers, every third bot a defender and one sniper with four bots
-  or more (two with ten). A defender keeps about its own flag stand: its
+- CTF: attackers, with four bots or more every third a defender and one a
+  sniper (two with ten; three bots a team are all attackers, a third of them
+  at home was too many). A defender keeps about its own flag stand: its
   posts (bots_vantage.c: the stand, the best vantage spot near it that sees
   it, the direct route a fifth of the way out) in turn every fifteen to
   twenty-five seconds, watching the way the enemy comes; its flag taken or
   lying away from home, it goes after it as every bot does (bots.c's CTF
   goals come first). No defenders in Invasion (the flags at the other base).
-- King of the Hill: attackers to the hill, every third bot a defender over
-  it from a vantage point that sees it (and the hill itself when none does),
-  a sniper with four or more.
+- King of the Hill: attackers to the hill, with four bots or more every
+  third a defender over it from a vantage point that sees it (and the hill
+  itself when none does), and a sniper.
 - Oddball: attackers, a sniper with four or more. Race: attackers alone.
 - Slayer: roamers (bots.c's roaming, after the enemy), a sniper with five
   or more (two with ten).
@@ -229,11 +230,11 @@ static short bots_roles_for(long game, short rank, long team_size, long *defende
 	switch (game)
 	{
 	case game_engine_ctf:
-		most_defenders = bots_tactics.assault ? 0 : team_size / 3;
+		most_defenders = bots_tactics.assault || team_size < 4 ? 0 : team_size / 3;
 		most_snipers = team_size >= 4 ? 1 + (team_size >= 10) : 0;
 		break;
 	case game_engine_king:
-		most_defenders = team_size / 3;
+		most_defenders = team_size < 4 ? 0 : team_size / 3;
 		most_snipers = team_size >= 4 ? 1 : 0;
 		break;
 	case game_engine_oddball:

@@ -115,11 +115,11 @@ What a bot does each tick, in a player's terms:
 - Roles, routes and vantage points (port: bots_roles.c, bots_routes.c and
   bots_vantage.c, steering the bot through bots_tactics.h's hooks here: its
   goal, its searches' goal, its look and its fight). Each team's bots have
-  roles by gametype and team size: in CTF every third a defender, about its
-  own flag stand (its posts in turn: the stand, a spot near it that sees it,
-  the way out), and a sniper with four or more; in King of the Hill every
-  third a defender over the hill from a vantage point; a sniper in Oddball
-  and Slayer (roamers there); the rest attackers. Bot routes (bots.routes,
+  roles by gametype and team size: in CTF with four or more every third a
+  defender, about its own flag stand (its posts in turn: the stand, a spot
+  near it that sees it, the way out), and a sniper; in King of the Hill
+  likewise a defender over the hill from a vantage point; a sniper in
+  Oddball and Slayer (roamers there); the rest attackers. Bot routes (bots.routes,
   the settings panel's Bot routes, HALO_BOT_ROUTES): Direct, the default, is
   the bots as before - everyone the shortest way, down the middle; Lanes
   spreads each team's attackers over the direct route and the map's two side
