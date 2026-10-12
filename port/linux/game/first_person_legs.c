@@ -2,7 +2,7 @@
 FIRST_PERSON_LEGS.C
 
 Your own legs in first person (display.first_person_legs, HALO_FIRST_PERSON_LEGS;
-the Vita's settings panel: Graphics > Display > First-person legs): the
+the Vita's settings panel: Graphics > First person > First-person legs): the
 player's own body, which the game animates as everyone else sees it but does
 not draw for its own player, drawn from the waist down. Look down while
 standing, running, strafing or crouching and the legs move as the body's

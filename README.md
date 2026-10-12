@@ -450,14 +450,14 @@ as that profile with these values.
 | --- | --- | --- | --- |
 | Render resolution | Dynamic | Dynamic | Dynamic |
 | Dynamic minimum | 50% | 63% | 75% |
-| Particles | Reduced | Reduced | Reduced |
 | Model detail | Low | Medium | High |
 | Hide distant objects | Small | Small | Tiny |
 | Object shadows | Off | Off | Near only |
 | Dynamic lights | 4 | 4 | 8 |
 | Effects quality | Performance | Full | Full |
-| Particle density | Half | Full | Full |
 | Sun rays | Off | Off | On |
+| Particles | Reduced | Reduced | Reduced |
+| Particle density | Half | Full | Full |
 | Scenery updates | Quarter | Quarter | Half |
 | Object lighting | Third | Third | Half |
 | AI think rate | Adaptive | Adaptive | Adaptive |
@@ -473,8 +473,8 @@ scenes for the graphics chip every frame, so they are in Quality only.
 Quality also costs the processor up to about a tenth more than
 Performance in big fights (Particles Full adds as much again in big
 multiplayer fights, so it is Reduced in all three). The Xbox's every row (Full shadows, all lights, everything
-updated every tick) is too slow on the Vita; set it yourself under Advanced
-if you want it (Custom).
+updated every tick) is too slow on the Vita; set it yourself under Detail
+and Performance if you want it (Custom).
 
 Object shadows, Dynamic lights, Effects quality, Particle density, AI think
 rate, Sound updates and the fourth core's helpers come from **Bruno
@@ -485,7 +485,7 @@ fight plays a little differently from the Xbox's; the shadows, lights,
 effects and particles change only what is drawn. None of them drops
 see-through parts such as the Covenant field generators' domes or visors.
 
-The Graphics tab's other rows:
+The Graphics tab, top to bottom (Profile, then):
 
 - **Render resolution**: **Dynamic** (the default) lowers it only while
   the graphics chip is the limit, down to the **Dynamic minimum** (shown
@@ -498,14 +498,20 @@ The Graphics tab's other rows:
   with this On the Vita draws frames between them, blended, for up to 60
   frames a second while it keeps up, and one a tick when it can't. It
   applies at once.
-- **FPS counter**, and **Smooth weapon motion** (On: the weapon blended
-  between ticks; it costs almost nothing).
-- **Display >**: **Aspect ratio**, 16:9 (the default) fills the screen with
+- **FPS counter**.
+- **Screen >**: **Aspect ratio**, 16:9 (the default) fills the screen with
   a wider view, 4:3 shows the Xbox's own framing, HUD and menus between
   black bars; **Upscale filter**, Smooth (the default) or Sharp (crisp,
   blocky pixels).
-- **Advanced >**: the rows the profiles set, Tiny decals, and **Fourth core
-  helpers** (see [plugins](#more-performance-with-plugins-optional)).
+- **First person >**: **First-person legs** (On: your own legs when you
+  look down) and **Smooth weapon motion** (On: the weapon blended between
+  ticks; it costs almost nothing).
+- **Detail >**: Model detail, Hide distant objects, Object shadows, Dynamic
+  lights, Effects quality, Sun rays, Tiny decals, **Particles** and Particle
+  density (all but Tiny decals set by the profiles).
+- **Performance >**: Scenery updates, Object lighting, AI think rate (set by
+  the profiles) and **Fourth core helpers** (see
+  [plugins](#more-performance-with-plugins-optional)).
 
 ### Audio, Multiplayer and Dev
 
@@ -554,7 +560,7 @@ needed, and the game runs the same without them.
 
 - **[CapUnlocker](https://github.com/GrapheneCt/CapUnlocker)** by GrapheneCt
   lets games use the Vita's fourth CPU core, which the system normally keeps
-  for itself. With it, **Fourth core helpers** (Graphics > Advanced;
+  for itself. With it, **Fourth core helpers** (Graphics > Performance;
   **All async** by default; it applies after a restart) moves background
   work onto that core: **Audio** moves the sound mixer, **All async** also
   the display queue, loading, map decompression, checkpoint writing, shader

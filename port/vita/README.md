@@ -178,21 +178,28 @@ of `settings.txt`: a file from an older version loads as it is.
 | Render resolution (P) | Dynamic | the 3D view's resolution (applies at once): 100% to 50%, or Dynamic, lowered in heavy scenes from the Dynamic minimum up to 100% (with video memory too short for 100%, switched to in play: up to the largest that fits, 100% tried again at the next map) |
 | Dynamic minimum (P) | 63% | shown with Render resolution Dynamic (the resolution follows the graphics chip's load, frame by frame, up to 100%): the lowest it goes. Performance 50%, Balanced 63%, Quality 75% |
 | Frame limit | 30 FPS | the most frames shown a second |
+| Frame interpolation | Off | On: frames drawn between the game's 30 ticks a second, blended, for up to 60 FPS while the Vita keeps up (applies at once) |
 | FPS counter | Off | the game's own frame counter, bottom right |
-| Smooth weapon motion | On | the first-person weapon blended between game ticks |
-| Particles (P) | Reduced | the particles a fight's shots, impacts and explosions make (applies at once). Full (the Xbox's), Reduced (every profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera); in multiplayer a spark or puff out of view goes after a sixth of a second (Low: a tenth) instead of half a second. Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
-| Display > | 16:9, Smooth | the page below |
-| Advanced > | | the page after it |
+| Screen > | 16:9, Smooth | Aspect ratio, Upscale filter |
+| First person > | | First-person legs, Smooth weapon motion |
+| Detail > | | Model detail to Particle density (most of them set by the Profile) |
+| Performance > | | Scenery updates, Object lighting, AI think rate, Fourth core helpers |
 
-Graphics, **Display**:
+Graphics, **Screen**:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
 | Upscale filter | Smooth | Sharp: crisp pixels |
-| First-person legs | Off | On: your own legs when you look down in first person, walking, running and crouching as other players see them (from OpenCE; applies at once). Not drawn in a vehicle, zoomed, in a cutscene or in third person; only the picture changes. One more model a frame on foot: 4 draws, about 2,000 triangles, and looking straight down an eighth of the screen, which hides as much floor |
 
-Graphics, **Advanced**:
+Graphics, **First person**:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| First-person legs | On | your own legs when you look down in first person, walking, running and crouching as other players see them (from OpenCE; applies at once). Not drawn in a vehicle, zoomed, in a cutscene or in third person; only the picture changes. One more model a frame on foot: 4 draws, about 2,000 triangles, and looking straight down an eighth of the screen, which hides as much floor |
+| Smooth weapon motion | On | the first-person weapon blended between game ticks |
+
+Graphics, **Detail**:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -201,12 +208,19 @@ Graphics, **Advanced**:
 | Object shadows (P) | Off | the shadows under characters and vehicles: Full (the Xbox's, for objects over 30 pixels across), Near only (over 60 pixels), Off |
 | Dynamic lights (P) | 4 | the most dynamic lights (shots, explosions, muzzle flashes) a frame lights the scene and objects with, the nearest first: All (the Xbox's), 8, 4, 2 |
 | Effects quality (P) | Full | Performance: no dynamic lights' specular pass, specular lightmaps, reflections (shiny floors, mirrors) or grass; Minimal: also no decals (bullet holes, scorches, the map's markings), weather, contrails or light lens flares |
-| Particle density (P) | Full | Half, Third, Quarter: that share of the smoke, sparks and debris drawn (each particle drawn or not for its whole life; your own weapon's and the effects on weapons, units and vehicles all drawn) |
 | Sun rays (P) | Off | the sun's glow and light shafts outdoors (On in Quality: seven small extra scenes a frame for the graphics chip while the sun is in view) |
 | Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
+| Particles (P) | Reduced | the particles a fight's shots, impacts and explosions make (applies at once). Full (the Xbox's), Reduced (every profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera); in multiplayer a spark or puff out of view goes after a sixth of a second (Low: a tenth) instead of half a second. Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
+| Particle density (P) | Full | Half, Third, Quarter: that share of the smoke, sparks and debris drawn (each particle drawn or not for its whole life; your own weapon's and the effects on weapons, units and vehicles all drawn) |
+
+Graphics, **Performance**:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
 | Scenery updates (P) | Quarter | how often static props are updated |
 | Object lighting (P) | Third | how often object lighting is recomputed |
 | AI think rate (P) | Adaptive | how often enemies and allies think (what they see, feel and decide): Every tick (the Xbox's), Adaptive (within 8 world units of a player every tick, within 25 every second tick, farther every third), 15 Hz, 10 Hz. Their movement, aim and firing stay every tick; the game plays a little differently (they notice and decide a tick or two later). Replaces the 1.1.0 test builds' Distant AI |
+| Fourth core helpers * | All async | Needs a kernel plugin such as CapUnlocker, which gives the game the Vita's fourth core: Audio moves the sound mixer there, All async also the display queue, loading, map decompression, checkpoint writing, shader compiling and the log. In no profile; applies after a restart |
 
 **General**
 

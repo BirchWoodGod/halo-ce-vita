@@ -103,7 +103,7 @@ static const struct config_setting config_settings[] =
 		"Draw a frame for every display refresh, blending between the game's 30\n"
 		"ticks a second; false keeps the original 30 frames a second." },
 	/* (port/linux/game/first_person_legs.c, from OpenCE; the Vita's settings
-	panel's First-person legs row, Graphics > Display. Live) */
+	panel's First-person legs row, Graphics > First person. Live) */
 	{ "display.first_person_legs", _config_boolean, "true", "HALO_FIRST_PERSON_LEGS", _environment_value, _platform_all,
 		"Your own legs in first person, seen looking down: your body as others\n"
 		"see it, drawn from the waist down, moving as it moves." },

@@ -1464,6 +1464,107 @@ static void test_online_rows(void)
 	to_line("Save report");
 }
 
+/* the Graphics tab and its pages (the owner's layout, 1.1.0-beta.5): the
+tab's six rows and four pages - Screen, First person, Detail, Performance -
+each page's rows in order; every row with its variable, values, default and
+restart as before the regrouping (the profiles' rows: test_bruno_rows,
+test_particles_row), nothing else on them */
+static void test_graphics_layout(void)
+{
+	static const struct
+	{
+		int page;
+		const char *label, *variable, *values;
+		int restart;
+		const char *shipped;
+	} rows[] = {
+		{ TAB_GRAPHICS, "Profile", "HALO_PROFILE", "performance|balanced|quality|custom", 0, "balanced" },
+		{ TAB_GRAPHICS, "Render resolution", "HALO_RENDER_SCALE", "1|0.875|0.75|0.625|0.5|dynamic", 0, "dynamic" },
+		{ TAB_GRAPHICS, "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", "0.5|0.625|0.75", 0, "0.625" },
+		{ TAB_GRAPHICS, "Frame limit", "HALO_FRAME_CAP", "30|60|0", 0, "30" },
+		{ TAB_GRAPHICS, "Frame interpolation", "HALO_INTERPOLATION", "false|true", 0, "false" },
+		{ TAB_GRAPHICS, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
+		{ TAB_GRAPHICS, "Screen", NULL, NULL, 0, NULL },
+		{ PAGE_GRAPHICS_SCREEN, "Aspect ratio", "HALO_DISPLAY_WIDTH", "848|640", 0, "848" },
+		{ PAGE_GRAPHICS_SCREEN, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
+		{ TAB_GRAPHICS, "First person", NULL, NULL, 0, NULL },
+		{ PAGE_GRAPHICS_FIRST_PERSON, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
+		{ PAGE_GRAPHICS_FIRST_PERSON, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
+		{ TAB_GRAPHICS, "Detail", NULL, NULL, 0, NULL },
+		{ PAGE_GRAPHICS_DETAIL, "Model detail", "HALO_MODEL_LOD_SCALE", "1|0.75|0.5|0.35", 0, "0.75" },
+		{ PAGE_GRAPHICS_DETAIL, "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", "0|4|8|12", 0, "8" },
+		{ PAGE_GRAPHICS_DETAIL, "Object shadows", "HALO_VITA_SHADOWS", "2|1|0", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", "0|8|4|2", 0, "4" },
+		{ PAGE_GRAPHICS_DETAIL, "Effects quality", "HALO_VITA_EFFECTS_QUALITY", "2|1|0", 0, "2" },
+		{ PAGE_GRAPHICS_DETAIL, "Sun rays", "HALO_SUN_RAYS", "1|0", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Tiny decals", "HALO_DECAL_MIN_PIXELS", "0|2", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Particles", "HALO_PARTICLE_BUDGET", "full|reduced|low", 0, "reduced" },
+		{ PAGE_GRAPHICS_DETAIL, "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", "1|2|3|4", 0, "1" },
+		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", "1|2|4", 0, "4" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", "1|2|3", 0, "3" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "AI think rate", "HALO_AI_THINK_DIVISOR", "1|0|2|3", 0, "0" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Fourth core helpers", "HALO_CPU3_AUX", "0|1|2", 1, "2" },
+	};
+	static const int opened[] = { PAGE_GRAPHICS_SCREEN, PAGE_GRAPHICS_FIRST_PERSON, PAGE_GRAPHICS_DETAIL,
+		PAGE_GRAPHICS_PERFORMANCE };
+	static const char *const names[] = { "Screen", "First person", "Detail", "Performance" };
+	int count = (int)(sizeof(rows) / sizeof(rows[0]));
+	int index, row = 0, all = 1, pages_opened = 0;
+
+	for (index = 0; index < SETTING_COUNT; index++)
+	{
+		const struct setting *setting = &settings[index];
+		char values[160];
+		int choice, length = 0;
+
+		if (setting->page != TAB_GRAPHICS && pages[setting->page].tab != TAB_GRAPHICS)
+			continue;
+		if (row >= count || strcmp(setting->label, rows[row].label) != 0 || setting->page != rows[row].page)
+		{
+			printf("graphics row %d: %s (page %d)\n", row, setting->label, setting->page);
+			all = 0;
+			row++;
+			continue;
+		}
+		if (!rows[row].variable)
+		{
+			/* (a page's row) */
+			if (setting->kind != KIND_ACTION || setting->action != ACTION_PAGE || setting->variable ||
+				pages_opened >= 4 || setting->opens != opened[pages_opened] ||
+				strcmp(pages[setting->opens].name, names[pages_opened]) != 0 ||
+				pages[setting->opens].tab != TAB_GRAPHICS || !setting->help)
+			{
+				printf("graphics page row: %s\n", setting->label);
+				all = 0;
+			}
+			pages_opened++;
+			row++;
+			continue;
+		}
+		values[0] = 0;
+		for (choice = 0; choice < setting->count && length < (int)sizeof(values); choice++)
+			length += snprintf(values + length, sizeof(values) - length, "%s%s", choice ? "|" : "",
+				setting->values[choice]);
+		if (!setting->variable || strcmp(setting->variable, rows[row].variable) != 0 || setting->kind != KIND_CHOICE ||
+			strcmp(values, rows[row].values) != 0 || setting->restart != rows[row].restart || setting->dev ||
+			strcmp(setting->values[shipped_choice[index]], rows[row].shipped) != 0)
+		{
+			printf("graphics row: %s (%s, %s, default %s)\n", setting->label, setting->variable ? setting->variable : "-",
+				values, setting->values[shipped_choice[index]]);
+			all = 0;
+		}
+		row++;
+	}
+	check(all && row == count && pages_opened == 4,
+		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter; "
+		"Screen (Aspect ratio, Upscale filter), First person (First-person legs, Smooth weapon motion), Detail "
+		"(Model detail ... Particles, Particle density), Performance (Scenery updates, Object lighting, AI think "
+		"rate, Fourth core helpers*): each row's variable, values, default and restart as before");
+	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
+		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
+}
+
 /* every settings variable 1.0.3 had (its settings.txt) is still a row,
 with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
@@ -1581,7 +1682,8 @@ static int profile_rows_are(int profile, char *report, int size)
 	return 1;
 }
 
-/* Bruno Santana's settings (Graphics > Advanced, and Audio's Sound updates):
+/* Bruno Santana's settings (Graphics > Detail and Performance, and Audio's
+Sound updates):
 his variables and values, so his build's settings.txt carries over; each in
 the profiles (1.1.0-beta.4's redone Balanced and Quality: Balanced without
 shadows and with 4 lights, as Performance, but Full effects and particles
@@ -1677,13 +1779,13 @@ static void test_bruno_rows(void)
 	vita_settings_set("HALO_PROFILE", "balanced");
 }
 
-/* Fourth core helpers (Graphics > Advanced; vita_fourth_core.c): Bruno
+/* Fourth core helpers (Graphics > Performance; vita_fourth_core.c): Bruno
 Santana's levels and variable (HALO_CPU3_AUX: Off, Audio, All async), Off
 by default and in no profile, a level saved and in the environment the next
 start reads, a restart's row, the profile left as it was; his build's
 settings.txt line read; back Off */
-/* Particles (the particle budget, port/linux/game/particle_budget.c): on the
-Graphics tab, Full, Reduced, Low; Reduced by default and in every profile
+/* Particles (the particle budget, port/linux/game/particle_budget.c): on
+Graphics > Detail, Full, Reduced, Low; Reduced by default and in every profile
 (Full cost Quality 16% more CPU in a 15-bot Chill Out fight); live (no restart), saved as a word; a change by
 hand makes the profile Custom */
 static void test_particles_row(void)
@@ -1696,12 +1798,12 @@ static void test_particles_row(void)
 	for (index = 0; index < PROFILE_ROWS; index++)
 		if (!strcmp(profile_variables[index], "HALO_PARTICLE_BUDGET"))
 			in_profile = index;
-	check(row && row->page == TAB_GRAPHICS && !row->restart && row->count == 3 &&
+	check(row && row->page == PAGE_GRAPHICS_DETAIL && !row->restart && row->count == 3 &&
 		!strcmp(row->names[0], "Full") && !strcmp(row->names[1], "Reduced") && !strcmp(row->names[2], "Low") &&
 		!strcmp(row->values[0], "full") && !strcmp(row->values[1], "reduced") && !strcmp(row->values[2], "low") &&
 		!strcmp(row->values[shipped_choice[row - settings]], "reduced") && getenv("HALO_PARTICLE_BUDGET") &&
 		!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced"),
-		"Particles: on the Graphics tab, Full, Reduced, Low (full, reduced, low); Reduced by default, in the environment, live");
+		"Particles: on Graphics > Detail, Full, Reduced, Low (full, reduced, low); Reduced by default, in the environment, live");
 	check(in_profile >= 0 && !strcmp(profile_values[0][in_profile], "reduced") &&
 		!strcmp(profile_values[1][in_profile], "reduced") && !strcmp(profile_values[2][in_profile], "reduced"),
 		"Particles in the profiles: Reduced in all three");
@@ -1741,11 +1843,11 @@ static void test_fourth_core(void)
 	int profile = settings[0].choice;
 	char line[128];
 
-	check(row && row->page == PAGE_GRAPHICS_ADVANCED && row->restart && row->count == 3 &&
+	check(row && row->page == PAGE_GRAPHICS_PERFORMANCE && row->restart && row->count == 3 &&
 		!strcmp(row->values[row->choice], "2") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
 		!strcmp(row->names[2], "All async") && !strcmp(row->values[1], "1") && !strcmp(row->values[2], "2") &&
 		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "2"),
-		"Fourth core helpers: on Graphics > Advanced, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
+		"Fourth core helpers: on Graphics > Performance, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
 	check(strstr(row->help, "Needs CapUnlocker") && strstr(row->help, "background work"), "Fourth core helpers: the help names the plugin (the README's words)");
 	{
 		int index, in_profile = 0;
@@ -2338,6 +2440,7 @@ int main(void)
 	test_variables_kept();
 	setenv("HALO_VITA_NETWORK", "online", 1);
 	vita_settings_load();
+	test_graphics_layout();
 	check(!strcmp(getenv("HALO_NET_ONLINE"), "true") && !strcmp(getenv("HALO_NET_ALLOW_UPNP"), "false"),
 		"Network Online: internet play on, without UPnP");
 	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser"), "the lobby name is the Vita's user name");
@@ -2367,18 +2470,22 @@ int main(void)
 		!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
 		!strncmp(menu_line(5, line, sizeof(line)), "Frame interpolation\x02", 20) &&
-		!strncmp(menu_line(6, line, sizeof(line)), "FPS counter\x02", 12) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "Smooth weapon motion\x02", 21) &&
-		!strcmp(menu_line(8, line, sizeof(line)), "Particles\x02< Reduced >") &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Display\x02  16:9, Smooth  >") &&
-		!strcmp(menu_line(10, line, sizeof(line)), "Advanced\x02  >") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "FPS counter\x02  Off >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Screen\x02  16:9, Smooth  >") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "First person\x02  >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Detail\x02  >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "Performance\x02  >") &&
 		!strncmp(menu_line(11, line, sizeof(line)), "\x05Sets resolution", 16) &&
 		!strncmp(menu_line(12, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
-		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter, weapon "
-		"motion, Particles (Reduced), Display (16:9, Smooth), Advanced; help, buttons");
-	check(menu_fits() && menu_rows() <= 10, "Graphics: ten rows at most, each fits");
-	check(!strstr(menu, "Aspect ratio") && !strstr(menu, "Upscale filter") && !strstr(menu, "Model detail"),
-		"Graphics: the aspect ratio and upscale filter under Display, the detail rows under Advanced");
+		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter, "
+		"Screen (16:9, Smooth), First person, Detail, Performance; help, buttons");
+	check(menu_fits() && menu_rows() == 10, "Graphics: ten rows with Dynamic minimum shown, each fits");
+	check(!strstr(menu, "Aspect ratio") && !strstr(menu, "Upscale filter") && !strstr(menu, "First-person legs") &&
+		!strstr(menu, "Smooth weapon motion") && !strstr(menu, "Model detail") && !strstr(menu, "\nParticles") &&
+		!strstr(menu, "Particle density") && !strstr(menu, "Scenery updates") && !strstr(menu, "AI think rate") &&
+		!strstr(menu, "Fourth core helpers") && !strstr(menu, "Display") && !strstr(menu, "Advanced"),
+		"Graphics: the aspect ratio and upscale filter under Screen, legs and weapon motion under First person, "
+		"the detail rows and particles under Detail, the update rates under Performance (no Display, no Advanced)");
 	check(strstr(menu, "\nProfile\x02< Balanced >") && strstr(menu, "\nRender resolution\x02< Dynamic  ") &&
 		strstr(menu, "\nDynamic minimum\x02< 63% >") && strstr(menu, "\nFrame limit\x02  30 FPS >"),
 		"values in a column: '< ' or two spaces before each; Balanced: Dynamic, from 63%");
@@ -2420,44 +2527,76 @@ int main(void)
 		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 63%: Balanced again");
 	}
 	{
-		/* Display: the aspect ratio, the upscale filter and the
-		first-person legs, on a page of their own (live, no *); the row
-		says the first two */
+		/* Screen: the aspect ratio and the upscale filter, on a page of
+		their own (live, no *); the row says both. First person: the
+		first-person legs and the weapon's motion (live, no *) */
 		unsigned long generation;
 
-		check(to_line("Display") && strstr(menu, "\n\x05" "Aspect ratio, upscale filter, first-person legs\n") &&
-			menu_fits(), "Display: its help says what is there");
-		check(open_page("Display") && strstr(menu, "\n\x03Graphics > Display\n") &&
+		check(to_line("Screen") && strstr(menu, "\n\x05" "Aspect ratio, upscale filter\n") &&
+			menu_fits(), "Screen: its help says what is there");
+		check(open_page("Screen") && strstr(menu, "\n\x03Graphics > Screen\n") &&
 			!strcmp(menu_line(2, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
-			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02< On  ") && menu_rows() == 3 &&
-			menu_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*") &&
-			!strstr(menu, "First-person legs*") && !strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1"),
-			"Graphics, Display: Aspect ratio (16:9), Upscale filter (Smooth), First-person legs (On, in the environment), live");
+			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") && menu_rows() == 2 &&
+			menu_fits() && menu_height_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
+			"Graphics, Screen: Aspect ratio (16:9), Upscale filter (Smooth), live");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && strstr(file_text(SETTINGS_FILE), "HALO_DISPLAY_WIDTH=640\n") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Aspect ratio 4:3: saved, the profile kept");
+		press(VITA_BUTTON_DOWN);
+		check(strstr(menu, "\n\x05Scaling to the screen: Sharp = crisp pixels\n") && menu_fits(),
+			"Upscale filter: its help line fits");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_UPSCALE_FILTER"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_UPSCALE_FILTER=1\n") &&
+			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02< Sharp  ") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Upscale filter Sharp: saved, the profile kept");
+		press(VITA_BUTTON_CIRCLE);
+		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Screen\x02  4:3, Sharp  >") && menu_fits(),
+			"circle: back to Graphics, on Screen, which says 4:3, Sharp");
+		vita_settings_set("HALO_DISPLAY_WIDTH", "848");
+		vita_settings_set("HALO_UPSCALE_FILTER", "0");
+
+		check(to_line("First person") && strstr(menu, "\n\x05" "First-person legs, smooth weapon motion\n") &&
+			!strcmp(menu_line(menu_selected, line, sizeof(line)), "First person\x02  >") && menu_fits(),
+			"First person: its help says what is there");
+		check(open_page("First person") && strstr(menu, "\n\x03Graphics > First person\n") &&
+			!strcmp(menu_line(2, line, sizeof(line)), "First-person legs\x02< On  ") &&
+			!strcmp(menu_line(3, line, sizeof(line)), "Smooth weapon motion\x02  On >") && menu_rows() == 2 &&
+			menu_fits() && menu_height_fits() && !strstr(menu, "First-person legs*") &&
+			!strstr(menu, "Smooth weapon motion*") && !strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1") &&
+			!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "1"),
+			"Graphics, First person: First-person legs (On), Smooth weapon motion (On), both in the environment, live");
 		/* (port/linux/game/first_person_legs.c reads it again as the
 		generation changes) */
-		press(VITA_BUTTON_DOWN);
-		press(VITA_BUTTON_DOWN);
 		check(strstr(menu, "\n\x05Your legs when you look down, as others see them\n") && menu_fits(),
 			"First-person legs: its help line fits");
 		generation = halo_settings_generation;
 		press(VITA_BUTTON_LEFT);
 		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0") && halo_settings_generation != generation &&
 			strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=0\n") &&
-			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02  Off >") && !strstr(notice, "Restart") &&
+			!strcmp(menu_line(2, line, sizeof(line)), "First-person legs\x02  Off >") && !strstr(notice, "Restart") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
 			"First-person legs Off: in the environment and settings.txt at once, no restart, the profile kept");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=1\n"),
 			"... and On again");
+		press(VITA_BUTTON_DOWN);
+		check(strstr(menu, "\n\x05The weapon's animation blended between game ticks\n") && menu_fits(),
+			"Smooth weapon motion: its help line fits");
+		generation = halo_settings_generation;
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "0") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATE_FIRST_PERSON=0\n") &&
+			!strcmp(menu_line(3, line, sizeof(line)), "Smooth weapon motion\x02< Off  ") && !strstr(notice, "Restart") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"Smooth weapon motion Off: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "1") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATE_FIRST_PERSON=1\n"), "... and On again");
 		press(VITA_BUTTON_CIRCLE);
 		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
-			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Display\x02  4:3, Smooth  >"),
-			"circle: back to Graphics, on Display, which says 4:3");
-		vita_settings_set("HALO_DISPLAY_WIDTH", "848");
+			!strcmp(menu_line(menu_selected, line, sizeof(line)), "First person\x02  >"),
+			"circle: back to Graphics, on First person");
 		while (menu_selected > 2)
 			press(VITA_BUTTON_UP);
 	}
@@ -2483,34 +2622,56 @@ int main(void)
 		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n"), "... and Off again");
 	}
-	test_particles_row();
-	/* Graphics' Advanced: the detail rows the profile sets */
-	check(open_page("Advanced") && strstr(menu, "\n\x03Graphics > Advanced\n") &&
-		!strncmp(menu_line(2, line, sizeof(line)), "Model detail\x02", 13) &&
-		!strncmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02", 21) &&
+	/* Graphics' Detail: the detail rows (most of them the profile's), the
+	particles made and drawn */
+	check(to_line("Detail") && strstr(menu, "\n\x05" "Models, shadows, lights, effects, particles\n") && menu_fits(),
+		"Detail: its help says what is there");
+	check(open_page("Detail") && strstr(menu, "\n\x03Graphics > Detail\n") &&
+		!strcmp(menu_line(2, line, sizeof(line)), "Model detail\x02< Medium >") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02< Small >") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "Object shadows\x02< Off  ") &&
 		!strcmp(menu_line(5, line, sizeof(line)), "Dynamic lights\x02< 4 >") &&
 		!strcmp(menu_line(6, line, sizeof(line)), "Effects quality\x02  Full >") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "Particle density\x02  Full >") &&
-		!strcmp(menu_line(8, line, sizeof(line)), "Sun rays\x02< Off  ") &&
-		!strncmp(menu_line(9, line, sizeof(line)), "Tiny decals\x02", 12) &&
-		!strncmp(menu_line(10, line, sizeof(line)), "Scenery updates\x02", 16) &&
-		!strncmp(menu_line(11, line, sizeof(line)), "Object lighting\x02", 16) &&
-		!strcmp(menu_line(12, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
-		!strcmp(menu_line(13, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 12 && menu_fits(),
-		"Graphics, Advanced: model detail, distant objects, shadows (Off), lights (4), effects, particles (Full), "
-		"sun rays (Off), tiny decals, scenery, lighting, AI think rate (Adaptive), fourth core helpers (All async, after a restart)");
-	test_bruno_rows();
-	test_fourth_core();
+		!strcmp(menu_line(7, line, sizeof(line)), "Sun rays\x02< Off  ") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02  Shown >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Particles\x02< Reduced >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "Particle density\x02  Full >") &&
+		!strncmp(menu_line(11, line, sizeof(line)), "\x05Level of detail", 16) && menu_rows() == 9 && menu_fits() &&
+		menu_height_fits() && !strstr(menu, "*\x02"),
+		"Graphics, Detail: model detail (Medium), distant objects (Small), shadows (Off), lights (4), effects (Full), "
+		"sun rays (Off), tiny decals (Shown), Particles (Reduced), particle density (Full); all live");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page (Model detail High): the profile Custom");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "... and Balanced again");
+	test_particles_row();
 	press(VITA_BUTTON_CIRCLE);
 	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
-		!strncmp(menu_line(menu_selected, line, sizeof(line)), "Advanced\x02", 9),
-		"circle: back to Graphics, on Advanced");
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
+		"circle: back to Graphics, on Detail");
+	/* Graphics' Performance: the update rates, the AI's, the fourth core */
+	check(to_line("Performance") && strstr(menu, "\n\x05" "Update rates, AI think rate, fourth core helpers\n") &&
+		menu_fits(), "Performance: its help says what is there");
+	check(open_page("Performance") && strstr(menu, "\n\x03Graphics > Performance\n") &&
+		!strcmp(menu_line(2, line, sizeof(line)), "Scenery updates\x02< Quarter  ") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Object lighting\x02< Third  ") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 4 &&
+		menu_fits() && menu_height_fits() && !strstr(menu, "Scenery updates*") && !strstr(menu, "AI think rate*"),
+		"Graphics, Performance: scenery (Quarter), lighting (Third), AI think rate (Adaptive), fourth core helpers "
+		"(All async, after a restart)");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_SCENERY_UPDATE_DIVISOR"), "2") && !strcmp(settings[0].names[settings[0].choice], "Custom") &&
+		!restart_pending, "a rate changed on its page (Scenery updates Half): the profile Custom, no restart");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "... and Balanced again");
+	test_bruno_rows();
+	test_fourth_core();
+	press(VITA_BUTTON_CIRCLE);
+	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Performance\x02  >"),
+		"circle: back to Graphics, on Performance");
 	press(VITA_BUTTON_L);
 	check(strstr(menu, "*Multiplayer") != NULL, "L from the first tab wraps to the last shown");
 	press(VITA_BUTTON_R);
@@ -3029,6 +3190,66 @@ int main(void)
 		vita_settings_load();
 		check(profile_rows_are(1, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
 			"no settings.txt, no env.txt: Balanced");
+
+		/* a settings.txt of the Graphics tab's Display and Advanced pages
+		(before the regrouping: its rows in that order, every one moved
+		since set apart from its default) loads as it was: the rows are
+		their variables, wherever the panel shows them */
+		{
+			static const struct
+			{
+				const char *variable, *value;
+			} saved[] = {
+				{ "HALO_PROFILE", "custom" }, { "HALO_RENDER_SCALE", "0.75" }, { "HALO_DYNAMIC_RES_MIN", "0.5" },
+				{ "HALO_FRAME_CAP", "60" }, { "HALO_INTERPOLATION", "true" }, { "HALO_FRAMERATE_COUNTER", "1" },
+				{ "HALO_INTERPOLATE_FIRST_PERSON", "0" }, { "HALO_PARTICLE_BUDGET", "low" },
+				{ "HALO_DISPLAY_WIDTH", "640" }, { "HALO_UPSCALE_FILTER", "1" }, { "HALO_FIRST_PERSON_LEGS", "0" },
+				{ "HALO_MODEL_LOD_SCALE", "0.35" }, { "HALO_MIN_OBJECT_PIXELS", "12" }, { "HALO_VITA_SHADOWS", "2" },
+				{ "HALO_MAX_SCENE_LIGHTS", "2" }, { "HALO_VITA_EFFECTS_QUALITY", "0" },
+				{ "HALO_PARTICLE_RENDER_DIVISOR", "3" }, { "HALO_SUN_RAYS", "1" }, { "HALO_DECAL_MIN_PIXELS", "2" },
+				{ "HALO_SCENERY_UPDATE_DIVISOR", "2" }, { "HALO_LIGHTING_REFRESH_DIVISOR", "1" },
+				{ "HALO_AI_THINK_DIVISOR", "3" }, { "HALO_CPU3_AUX", "1" },
+			};
+			static const char *const defaults[][2] = {
+				{ "HALO_FRAME_CAP", "30" }, { "HALO_INTERPOLATION", "false" }, { "HALO_FRAMERATE_COUNTER", "0" },
+				{ "HALO_INTERPOLATE_FIRST_PERSON", "1" }, { "HALO_DISPLAY_WIDTH", "848" }, { "HALO_UPSCALE_FILTER", "0" },
+				{ "HALO_FIRST_PERSON_LEGS", "1" }, { "HALO_DECAL_MIN_PIXELS", "0" }, { "HALO_CPU3_AUX", "2" },
+			};
+			char text[1024];
+			int length = 0, all = 1;
+
+			for (index = 0; index < (int)(sizeof(saved) / sizeof(saved[0])); index++)
+				length += snprintf(text + length, sizeof(text) - length, "%s=%s\n", saved[index].variable, saved[index].value);
+			write_file(SETTINGS_FILE, text, (size_t)length);
+			profile_rows_fresh();
+			vita_settings_load();
+			for (index = 1; index < (int)(sizeof(saved) / sizeof(saved[0])); index++)
+			{
+				const struct setting *setting = setting_named(saved[index].variable);
+
+				if (!setting || strcmp(setting->values[setting->choice], saved[index].value) != 0 ||
+					!getenv(saved[index].variable) || strcmp(getenv(saved[index].variable), saved[index].value) != 0)
+				{
+					printf("not as saved: %s=%s\n", saved[index].variable, saved[index].value);
+					all = 0;
+				}
+			}
+			check(all && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+				"a settings.txt saved with the Display and Advanced pages: every row as saved (now on Screen, First person, "
+				"Detail, Performance and the tab), Custom");
+			/* (back to the defaults) */
+			for (index = 0; index < (int)(sizeof(defaults) / sizeof(defaults[0])); index++)
+				vita_settings_set(defaults[index][0], defaults[index][1]);
+			unlink(SETTINGS_FILE);
+			profile_rows_fresh();
+			vita_settings_load();
+			restart_pending = 0;
+			for (index = 0; index < (int)(sizeof(defaults) / sizeof(defaults[0])); index++)
+				if (strcmp(getenv(defaults[index][0]), defaults[index][1]) != 0)
+					all = 0;
+			check(all && profile_rows_are(1, report, sizeof(report)) && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
+				"... and the defaults again: Balanced");
+		}
 	}
 
 	/* a settings.txt with Dynamic loads */

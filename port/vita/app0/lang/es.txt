@@ -21,7 +21,9 @@
 "Multiplayer" = "Multijugador"
 "Dev" = "Dev"
 "Advanced" = "Avanzado"
-"Display" = "Pantalla"
+"Screen" = "Pantalla"
+"First person" = "Primera persona"
+"Detail" = "Detalle"
 "Button layout" = "Asignar botones"
 "Touch zones" = "Zonas táctiles"
 "Gyro settings" = "Giroscopio"
@@ -64,10 +66,12 @@
 "Particles" = "Partículas"
 "Fewer sparks, smoke and debris in big fights" = "Menos chispas, humo y escombros en combates grandes"
 "Reduced" = "Reducido"
-"Detail and update rates (the Profile sets them)" = "Detalle y frecuencias (el Perfil los ajusta)"
-"Aspect ratio, upscale filter, first-person legs" = "Relación de aspecto, filtro de escalado, piernas"
+"Aspect ratio, upscale filter" = "Relación de aspecto, filtro de escalado"
+"First-person legs, smooth weapon motion" = "Piernas visibles, movimiento del arma"
+"Models, shadows, lights, effects, particles" = "Modelos, sombras, luces, efectos, partículas"
+"Update rates, AI think rate, fourth core helpers" = "Frecuencias, ritmo de la IA, cuarto núcleo"
 
-# ---------- Graphics > Advanced
+# ---------- Graphics > Detail, Performance
 "Model detail" = "Detalle de modelos"
 "Level of detail of characters and vehicles" = "Nivel de detalle de personajes y vehículos"
 "High" = "Alto"
