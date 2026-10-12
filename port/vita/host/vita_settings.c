@@ -360,10 +360,10 @@ static struct setting settings[] = {
 		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_DISPLAY },
 	/* (port/linux/game/first_person_legs.c, from OpenCE: your own body
 	drawn from the waist down in first person, one more model a frame on
-	foot. Off by default and in every profile; on its page, not the tab,
+	foot. On by default and in every profile; on its page, not the tab,
 	which is ten rows already. Live) */
 	{ "First-person legs", "HALO_FIRST_PERSON_LEGS", 0, 2, { "0", "1" }, { "Off", "On" },
-		"Your legs when you look down, as others see them", 0, PAGE_GRAPHICS_DISPLAY },
+		"Your legs when you look down, as others see them", 1, PAGE_GRAPHICS_DISPLAY },
 	PAGE_ROW("Advanced", "Detail and update rates (the Profile sets them)", TAB_GRAPHICS, PAGE_GRAPHICS_ADVANCED),
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
 		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 1,

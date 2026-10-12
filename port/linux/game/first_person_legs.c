@@ -131,23 +131,24 @@ static boolean first_person_legs_enabled(
 	static int enabled = -1;
 	static unsigned long settings_seen;
 
-	if (enabled < 0)
+	/* (the environment first, as particle_budget_level: the Vita's
+	settings panel sets the variable, not the setting port_config.c read
+	at startup, and a change made in the menus before the first frame in
+	first person must count too) */
+	if (enabled < 0 || settings_seen != halo_settings_generation)
 	{
-		settings_seen = halo_settings_generation;
-		enabled = config_boolean("display.first_person_legs") != 0;
-	}
-	else if (settings_seen != halo_settings_generation)
-	{
-		/* (the Vita's settings panel sets the environment variable, as
-		port_config.c reads it: "0", "false", "no" and "off" are false) */
+		/* (as port_config.c reads it: "0", "false", "no" and "off" are
+		false) */
 		char const *setting = getenv("HALO_FIRST_PERSON_LEGS");
 
 		settings_seen = halo_settings_generation;
-		if (setting)
+		if (setting && *setting)
 		{
-			enabled = *setting && strcmp(setting, "0") && strcasecmp(setting, "false") &&
+			enabled = strcmp(setting, "0") && strcasecmp(setting, "false") &&
 				strcasecmp(setting, "no") && strcasecmp(setting, "off");
 		}
+		else
+			enabled = config_boolean("display.first_person_legs") != 0;
 	}
 	return enabled != 0;
 }

@@ -2430,10 +2430,10 @@ int main(void)
 		check(open_page("Display") && strstr(menu, "\n\x03Graphics > Display\n") &&
 			!strcmp(menu_line(2, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
 			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
-			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02  Off >") && menu_rows() == 3 &&
+			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02< On  ") && menu_rows() == 3 &&
 			menu_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*") &&
-			!strstr(menu, "First-person legs*") && !strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0"),
-			"Graphics, Display: Aspect ratio (16:9), Upscale filter (Smooth), First-person legs (Off, in the environment), live");
+			!strstr(menu, "First-person legs*") && !strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1"),
+			"Graphics, Display: Aspect ratio (16:9), Upscale filter (Smooth), First-person legs (On, in the environment), live");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && strstr(file_text(SETTINGS_FILE), "HALO_DISPLAY_WIDTH=640\n") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Aspect ratio 4:3: saved, the profile kept");
@@ -2444,15 +2444,15 @@ int main(void)
 		check(strstr(menu, "\n\x05Your legs when you look down, as others see them\n") && menu_fits(),
 			"First-person legs: its help line fits");
 		generation = halo_settings_generation;
-		press(VITA_BUTTON_RIGHT);
-		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1") && halo_settings_generation != generation &&
-			strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=1\n") &&
-			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02< On  ") && !strstr(notice, "Restart") &&
-			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
-			"First-person legs On: in the environment and settings.txt at once, no restart, the profile kept");
 		press(VITA_BUTTON_LEFT);
-		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=0\n"),
-			"... and Off again");
+		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=0\n") &&
+			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02  Off >") && !strstr(notice, "Restart") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"First-person legs Off: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=1\n"),
+			"... and On again");
 		press(VITA_BUTTON_CIRCLE);
 		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
 			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Display\x02  4:3, Smooth  >"),

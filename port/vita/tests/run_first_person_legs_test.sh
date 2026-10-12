@@ -11,12 +11,15 @@
 # in and how far they were set back, HALO_FIRST_PERSON_LEGS_LOG=1 a line each
 # time they start or stop being drawn and why:
 #
-#   a10-off     the setting off (the default): never drawn, no line at all
-#   a10-on      out of the cryotube (hidden in it: a vehicle), on foot,
+#   a10-off     the setting off: never drawn, no line at all
+#   a10-on      the setting unset (On by default): out of the cryotube (hidden in it: a vehicle), on foot,
 #               looking down: drawn, set back further than looking ahead,
 #               the mesh read for the waist under 400 KB
 #   a10-live    off at the start, then on (@set, as the settings panel sets
 #               it), then off: drawn only while on
+#   a10-menu    off at the start, set on (@set) before the first frame in
+#               first person, as in the menus: drawn (the setting read at
+#               startup does not win over the panel's)
 #   b30-vehicle on foot, drawn; in the Warthog's seat: not drawn; out: drawn
 #   bloodgulch  multiplayer: drawn; zoomed: not drawn ("zoomed"); unzoomed:
 #               drawn; then another map (hangemhigh): the waist and mesh
@@ -47,7 +50,7 @@ ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_first_person_legs_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-a10-off a10-on a10-live b30-vehicle bloodgulch extinction}
+cases=${*:-a10-off a10-on a10-live a10-menu b30-vehicle bloodgulch extinction}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
 
@@ -167,14 +170,15 @@ b30_setup='L60:@skip;L200:(ai_erase_all);L205:(set cheat_deathless_player true);
 started=()
 for c in $cases; do
 	case $c in
-	a10-off) run "$c" 40 "$a10" "$a10_out;L300:@look -80;L600:@legs" & ;;
+	a10-off) run "$c" 40 "$a10" "$a10_out;L300:@look -80;L600:@legs" HALO_FIRST_PERSON_LEGS=0 & ;;
 	a10-on)
 		# (the cryotube's exit takes until about tick 500: the view is turned
 		# after it)
-		run "$c" 50 "$a10" "$a10_out;L240:@legs;L600:@look -80;L700:@legs;L800:@look 0;L900:@legs" \
-			HALO_FIRST_PERSON_LEGS=1 & ;;
+		run "$c" 50 "$a10" "$a10_out;L240:@legs;L600:@look -80;L700:@legs;L800:@look 0;L900:@legs" & ;;
 	a10-live)
-		run "$c" 45 "$a10" "$a10_out;L300:@look -80;L380:@legs;L400:@set HALO_FIRST_PERSON_LEGS 1;L420:@look -80;L600:@legs;L700:@set HALO_FIRST_PERSON_LEGS 0;L720:@legs;L900:@legs" & ;;
+		run "$c" 45 "$a10" "$a10_out;L300:@look -80;L380:@legs;L400:@set HALO_FIRST_PERSON_LEGS 1;L420:@look -80;L600:@legs;L700:@set HALO_FIRST_PERSON_LEGS 0;L720:@legs;L900:@legs" HALO_FIRST_PERSON_LEGS=0 & ;;
+	a10-menu)
+		run "$c" 40 "$a10" "L2:@set HALO_FIRST_PERSON_LEGS 1;$a10_out;L600:@look -80;L700:@legs" HALO_FIRST_PERSON_LEGS=0 & ;;
 	b30-vehicle)
 		run "$c" 65 "$b30" "$b30_setup;L1100:@look -80;L1150:@legs;L1250:@legs;L1260:(unit_enter_vehicle (player0) jeep \"w-driver\");L1290:@seat;L1300:@legs;L1450:@legs;L1460:(unit_exit_vehicle (player0));L1560:@seat;L1570:@look -80;L1650:@legs" \
 			HALO_FIRST_PERSON_LEGS=1 & ;;
@@ -220,6 +224,9 @@ for c in "${started[@]}"; do
 		expect "$c" "off: not drawn ($f380 frames by tick 380)" test "$f380" = 0
 		expect "$c" "set on mid-game: drawn ($f600 frames by tick 600)" gt "${f600:-0}" 0
 		expect "$c" "set off again: no more frames ($f720 by tick 720, $f900 by 900)" test -n "$f720" -a "$f720" = "$f900" ;;
+	a10-menu)
+		f700=$(frames "$c" 700)
+		expect "$c" "set on before the first frame in first person: drawn ($f700 frames by tick 700)" gt "${f700:-0}" 0 ;;
 	b30-vehicle)
 		f1150=$(frames "$c" 1150) f1250=$(frames "$c" 1250) f1300=$(frames "$c" 1300) f1450=$(frames "$c" 1450)
 		f1650=$(frames "$c" 1650)
