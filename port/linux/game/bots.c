@@ -112,6 +112,26 @@ What a bot does each tick, in a player's terms:
   climbable pipes) is left be. There is no other climbing: a stuck bot
   jumps and sidesteps as before (halo.log's moves line counted what stood
   before stuck bots: low walls a jump clears were a few in a hundred).
+- Roles, routes and vantage points (port: bots_roles.c, bots_routes.c and
+  bots_vantage.c, steering the bot through bots_tactics.h's hooks here: its
+  goal, its searches' goal, its look and its fight). Each team's bots have
+  roles by gametype and team size: in CTF with four or more every third a
+  defender, about its own flag stand (its posts in turn: the stand, a spot
+  near it that sees it, the way out), and a sniper; in King of the Hill
+  likewise a defender over the hill from a vantage point; a sniper in
+  Oddball and Slayer (roamers there); the rest attackers. Bot routes (bots.routes,
+  the settings panel's Bot routes, HALO_BOT_ROUTES): Direct, the default, is
+  the bots as before - everyone the shortest way, down the middle; Lanes
+  spreads each team's attackers over the direct route and the map's two side
+  lanes in turn, Mixed every third of them on a side lane: such a bot on foot
+  to a goal a long way off searches its way to its lane's next waypoint
+  first, and gives the lane up when it finds no way there. Vantage points: a
+  sniper, a bot holding a sniper rifle or a rocket launcher, and King's
+  defenders hold one a while (a third of a team at once), looking from one
+  place it sees to another, and leave it when an enemy comes near, when out
+  of ammunition, hurt, or after a while. The lanes and the vantage points are
+  found as each game's bots first tick, a bounded step a tick (the map's
+  walkable surfaces as a graph, the AI's sight test), and logged.
 
 Skill (bots.skill): easy, normal, heroic, legendary - how soon it reacts,
 how far and how wide it sees, how large its aim error is and how fast that
@@ -135,7 +155,8 @@ the bots stay the same from run to run). halo.log has each minute of play's
 bot line: their ticks' time (us/tick), the searches and how many failed;
 port: and its moves line: the times a bot stood stuck and what was before
 it, the powerups gone for and taken, the bodies restored, the ladders and
-their climbs.
+their climbs; and its tactics line (bots_roles.c): the lanes taken and given
+up, the vantage points held and left, the defenders' posts.
 */
 
 #include "cseries.h"
@@ -167,6 +188,7 @@ their climbs.
 #include "tag_files/tag_files.h"
 
 #include "bots.h"
+#include "bots_tactics.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -2491,6 +2513,8 @@ void bots_initialize_for_new_map(void)
 		bots_globals.bots[index].ride_vehicle_index = NONE;
 	}
 	bots_helper.helper_us = 0;
+	/* port: (the routes, vantage points and roles: bots_tactics.h) */
+	bots_tactics_initialize_for_new_map();
 }
 
 void bots_dispose_from_old_map(void)
@@ -2499,6 +2523,7 @@ void bots_dispose_from_old_map(void)
 	still loaded; the answers are dropped) */
 	bots_paths_release();
 	bots_globals.map_ready = FALSE;
+	bots_tactics_dispose_from_old_map();
 }
 
 /* ---------- path searches
@@ -2662,6 +2687,13 @@ static void bots_search_ask(struct bots_bot *bot, long unit_index)
 	search->start_surface_index = start_surface_index;
 	search->goal_point = bot->goal_point;
 	search->goal_surface_index = bot->goal_surface_index;
+	/* port: Bot routes Lanes or Mixed (bots_routes.c): on foot, to the
+	waypoint of the bot's lane on its way */
+	if (vehicle_index == NONE && (bot->goal_kind == _bots_goal_objective || bot->goal_kind == _bots_goal_roam ||
+		bot->goal_kind == _bots_goal_enemy))
+	{
+		bots_routes_search_goal(search->bot_index, &start, &search->goal_point, &search->goal_surface_index);
+	}
 	search->asked_tick = game_time_get();
 	search->goal_serial = bot->goal_serial;
 	search->found = FALSE;
@@ -3009,6 +3041,10 @@ static void bots_search_take(struct bots_bot *bot, boolean alive)
 			if (getenv("HALO_BOT_PATH_LOG"))
 				bots_search_log_failure(bot, search, reached);
 		}
+		/* port: (a lane's waypoint or a vantage point it finds no way to:
+		given up, a new search) */
+		if (bots_tactics_search_answer(search->bot_index, &search->goal_point, reached, state->heap_count <= 1))
+			bot->path.valid = FALSE;
 		/* (an item it finds no way to: another, and not this one a while) */
 		if (bot->goal_kind == _bots_goal_item && !reached && !bot->via_teleporter)
 		{
@@ -3784,8 +3820,19 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 		goal_count = 0;
 	else
 	{
+		real_point3d post;
+		long post_surface_index;
+
 		if (bots_ctf_goal(bot, player_get(player_index), position))
 			return;
+		/* port: a vantage point to hold, a defender's post (bots_tactics.h:
+		the bot's role, its weapon) */
+		if (!bot->held_objective &&
+			bots_tactics_goal((long)(bot - bots_globals.bots), player_index, position, &post, &post_surface_index))
+		{
+			bots_set_goal(bot, _bots_goal_objective, &post, post_surface_index);
+			return;
+		}
 		goal_count = game_engine_port_player_goals(player_index, goals, NUMBEROF(goals));
 	}
 	if (goal_count > 0)
@@ -3876,6 +3923,14 @@ static boolean bots_follow_path(struct bots_bot *bot, long unit_index, real_poin
 
 	if (bot->goal_kind == _bots_goal_none)
 		return FALSE;
+	/* port: at its lane's waypoint (bots_routes.c): a new path, on to the
+	goal (the search asked for the waypoint dropped) */
+	if (bots_routes_waypoint_reached((long)(bot - bots_globals.bots), position))
+	{
+		bot->goal_serial++;
+		bot->path.valid = FALSE;
+		bot->path_tick = now - TICKS_PER_SECOND;
+	}
 	if (now < bot->escape_until_tick)
 	{
 		*direction = bot->escape_direction;
@@ -4049,6 +4104,7 @@ static void bots_bot_reset(struct bots_bot *bot, long player_index, long bot_ind
 	bot->vehicle_avoid_index = NONE;
 	bot->ride_vehicle_index = NONE;
 	bot->powerup_index = NONE;
+	bots_tactics_bot_reset(bot_index, player_index);
 }
 
 /* a bot's tick: what it knows of itself, and the controls it builds */
@@ -4306,6 +4362,10 @@ static void bots_bot_walk(struct bots_bot *bot, struct bots_tick *tick)
 	{
 		tick->flags |= FLAG(_unit_control_weapon_reload_bit);
 	}
+	/* port: standing at a vantage point or a defender's post: looking from
+	one place it watches to another (bots_tactics.h) */
+	if (!tick->moving)
+		bots_tactics_look((long)(bot - bots_globals.bots), &tick->position, tick->now, &bot->yaw, &bot->pitch);
 }
 
 /* the bots in each other's way (a team's bots leaving their base by the same
@@ -5591,9 +5651,11 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->path.valid = FALSE;
 		bot->goal_kind = _bots_goal_none;
 		bot->previous_control_flags = 0;
-		/* port: (and the vehicle it went for, or rode) */
+		/* port: (and the vehicle it went for, or rode; its vantage point
+		and its lane's waypoints) */
 		bots_vehicle_forget(bot);
 		bot->ride_vehicle_index = NONE;
+		bots_tactics_bot_dead(bot_index);
 		return;
 	}
 	tick.unit = unit_get(tick.player->unit_index);
@@ -5747,6 +5809,13 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 				tick.moving = TRUE;
 			}
 		}
+		/* port: fighting at its vantage point: there still, or off it with
+		the enemy near (bots_tactics.h) */
+		if (tick.fighting)
+		{
+			bots_tactics_fight(bot_index, &tick.position, tick.target_distance, &tick.moving, &tick.move_direction,
+				&tick.throttle_scale);
+		}
 		bots_vehicle_approach(bot, &tick);
 		bots_profile_part(_bots_part_walk, &started);
 		bots_bot_weapons(bot, &tick);
@@ -5831,6 +5900,8 @@ static void bots_report(void)
 		bots_globals.powerups_taken[_bots_powerup_overshield], bots_globals.powerups_sought[_bots_powerup_camouflage],
 		bots_globals.powerups_taken[_bots_powerup_camouflage], bots_globals.bodies_restored, bots_globals.ladder_count,
 		bots_globals.ladder_tries, bots_globals.ladder_climbs);
+	/* port: (the lanes, vantage points and posts: bots_tactics.h) */
+	bots_tactics_report(now);
 	if (bots_profile.enabled > 0)
 	{
 		double ticks = (double)bots_globals.ticks;
@@ -5879,6 +5950,9 @@ void bots_update_actions(struct player_action *actions)
 			bots_ground_memo_begin();
 			bots_powerups_find();
 			bots_paths_scan();
+			/* port: the map's lanes and vantage points (a bounded step a
+			tick), the roles (bots_tactics.h) */
+			bots_tactics_update();
 			bots_profile_part(_bots_part_scan, &scan_started);
 		}
 		bot_index = player->network_player_data.machine_index - BOTS_FIRST_MACHINE;

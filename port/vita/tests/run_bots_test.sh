@@ -76,6 +76,26 @@
 #            countdown (HALO_TEST_BOT_PLAYLIST_CANCEL=2): the playlist stops,
 #            no second game starts and Split Screen is not left
 #   playlists  playlist and playlistcancel
+#   lanes    CTF, Bot routes Lanes (HALO_BOT_ROUTES=lanes), 12 bots on both
+#            teams, Heroic, not fighting (HALO_BOT_PEACEFUL=1: the flags'
+#            ways alone): Blood Gulch's side lanes found (two), and the bots
+#            crossing the middle of the map (the middle fifth of the direct
+#            route bots_routes.c logs) by two routes at least: the attackers'
+#            first crossing of each life (its offset from the direct route,
+#            the mean while the bot is there), by the lane halo.log's roles
+#            line gives them, two lanes' means 12 units apart at least; a
+#            lane's waypoint passed (halo.log's tactics line); every bot's
+#            crossings are printed
+#   vantage  Snipers (every player a sniper rifle), 6 bots, Heroic, not
+#            fighting: the map's vantage points logged (three at least), and a
+#            bot comes to one (halo.log's arrival, within 2.5 units of a point
+#            logged, its place each second) within HALO_TEST_VANTAGE_SECONDS
+#            (90) and holds it ten seconds at least
+#   roles    CTF, 8 bots on both teams, Heroic, fighting: each team's
+#            defenders (halo.log's roles line) about their own flag stand -
+#            within 25 units of it half their time alive from the 20th second
+#            on, one a team at least - the attackers' time there printed too
+#   tactics  lanes, vantage and roles
 #
 # The vehicle cases: the bots must take the vehicles - their census in
 # halo.log every ten seconds (bots.c: riding, driving, gunning, the distance
@@ -146,7 +166,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
 test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 cases=${*:-slayer teams}
-cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams iron /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /')
+cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams iron /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /; s/ tactics / lanes vantage roles /')
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 ce_resources=${HALO_TEST_CE_RESOURCES:-}
 if [ -z "$ce_resources" ]; then
@@ -164,6 +184,9 @@ case_bots() { # NAME
 	playlist) echo 6 ;;
 	playlistcancel) echo 3 ;;
 	ladders) echo 8 ;;
+	lanes) echo 12 ;;
+	vantage) echo 6 ;;
+	roles) echo 8 ;;
 	*) echo "$bots" ;;
 	esac
 }
@@ -323,6 +346,9 @@ for name in $cases; do
 		done
 		run turret slayer+vehicles MAP=extinction HALO_BOT_SKILL=heroic "HALO_TEST_COMMANDS=$commands" & ;;
 	ladders) run ladders oddball MAP=boardingaction HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 & ;;
+	lanes) run lanes ctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_BOT_PEACEFUL=1 HALO_BOT_ROUTES=lanes HALO_BOT_VEHICLES=0 & ;;
+	vantage) run vantage snipers HALO_BOT_SKILL=heroic HALO_BOT_PEACEFUL=1 & ;;
+	roles) run roles ctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
 	playlist)
 		(seconds=$playlist_seconds
 			run playlist slayer MAP=chillout HALO_BOT_SKILL=heroic HALO_NETWORK_TEST_SCORE=3 HALO_BOT_PLAYLIST=all \
@@ -363,9 +389,10 @@ check() { # NAME
 	case $name in playlist | playlistcancel) check_playlist "$name"; return ;; esac
 	# (bots.playlist off, as in every other case: the playlist does nothing)
 	grep -aq "bots playlist" "$log" && fail "$name" "the playlist logged with bots.playlist off"
-	python3 - "$log" "$(case_bots "$name")" "$name" "$map" "$budget" <<'EOF' || status=1
+	python3 - "$log" "$(case_bots "$name")" "$name" "$map" "$budget" "${HALO_TEST_VANTAGE_SECONDS:-90}" <<'EOF' || status=1
 import re, sys, math
 log, bots, name, game_map, budget = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], float(sys.argv[5])
+vantage_seconds = float(sys.argv[6])
 named = {}
 places = {}
 last = {}
@@ -455,12 +482,190 @@ for i in sorted(bot_players):
     kills += k; deaths += d; died += d > 0
     print("  bot %-11s walked %6.1f spread %5.1f  score %d kills %d deaths %d" %
         (named.get(i, "?"), walked, spread, score, k, d))
-    if walked < 60.0:
+    # (the tactics cases: a defender keeps about its stand, a sniper holds
+    # its vantage points; bots_roles.c's roles line)
+    kept = name in ("lanes", "vantage", "roles") and any(
+        re.search(r"bot %d team \d+ (defender|sniper)" % (machine - 112), line) for line in open(log, errors="replace")
+        if "bots: roles (" in line)
+    if walked < 60.0 and not kept:
         fail("%s walked only %.1f units" % (named.get(i, "?"), walked))
-    if spread < 25.0:
+    if spread < 25.0 and not kept:
         fail("%s stayed within %.1f units" % (named.get(i, "?"), spread))
 scores = [v[0] for v in last.values()]
 print("  bots: %d kills, %d deaths; best score %d" % (kills, deaths, max(scores) if scores else 0))
+# (the tactics cases: bots_routes.c, bots_vantage.c, bots_roles.c)
+lines = open(log, errors="replace").read().splitlines()
+tactics = [line for line in lines if "bots: tactics at tick" in line]
+if tactics:
+    print("  tactics: %s" % tactics[-1].split("bots: ", 1)[-1].strip())
+def tracks():
+    # each player's places each second, by tick (the network test's lines): {player: [(tick, x, y, team, machine)]}
+    result = {}
+    for line in lines:
+        if "network test: tick " not in line:
+            continue
+        tick = int(re.search(r"tick (\d+)", line).group(1))
+        for m in re.finditer(r"player (\d+): \(([-\d.]+) ([-\d.]+) [-\d.]+\)[^|]*? s-?\d+ k\d+ d\d+ f\d+ t(-?\d+) m(\d+)", line):
+            result.setdefault(int(m.group(1)), []).append((tick, float(m.group(2)), float(m.group(3)), int(m.group(4)), int(m.group(5))))
+    return result
+def roles_of():
+    # halo.log's last roles line: {bot number: (team, role, lane)}
+    result = {}
+    for line in lines:
+        if "bots: roles (" in line:
+            result = {}
+            for m in re.finditer(r"bot (\d+) team (\d+) (\w+)(?: \(([\w ]+)\))?", line.split("): ", 1)[1]):
+                result[int(m.group(1))] = (int(m.group(2)), m.group(3), m.group(4) or "")
+    return result
+if name == "lanes":
+    route = None
+    for line in lines:
+        m = re.search(r"bots: routes: walkable graph.*the direct route [\d.]+ units:(.*)", line)
+        if m:
+            route = [(float(a), float(b)) for a, b in re.findall(r"\(([-\d.]+) ([-\d.]+)\)", m.group(1))]
+    lanes = [line for line in lines if re.search(r"bots: routes: lane \d+ by", line)]
+    print("  %d side lanes: %s" % (len(lanes), "; ".join(l.split("routes: ", 1)[1].strip() for l in lanes)))
+    if len(lanes) < 2:
+        fail("%d side lanes found on Blood Gulch, not 2" % len(lanes))
+    passed = re.search(r"waypoints passed (\d+)", tactics[-1]) if tactics else None
+    if not passed or int(passed.group(1)) < 1:
+        fail("no lane's waypoint passed")
+    if not route or len(route) < 2:
+        fail("no direct route in halo.log")
+        sys.exit(1)
+    lengths = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(route, route[1:])]
+    total = sum(lengths)
+    def place(x, y):
+        best = None
+        walked = 0.0
+        for (ax, ay), (bx, by), length in zip(route, route[1:], lengths):
+            dx, dy = bx - ax, by - ay
+            u = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (length * length))) if length > 0 else 0.0
+            cx, cy = ax + dx * u, ay + dy * u
+            d = math.hypot(x - cx, y - cy)
+            side = 1.0 if dx * (y - ay) - dy * (x - ax) >= 0 else -1.0
+            if best is None or d < best[0]:
+                best = (d, (walked + length * u) / total, d * side)
+            walked += length
+        return best[1], best[2]
+    roles = roles_of()
+    # each attacker's crossings of the middle, and the first of each life
+    # (from its base: the way its lane takes it)
+    crossings, firsts = {}, {}
+    for player, track in tracks().items():
+        if track[0][4] < 113:
+            continue
+        bot = track[0][4] - 112
+        inside, previous, first_done = [], None, False
+        for tick, x, y, team, machine in track + [(None, None, None, None, None)]:
+            respawn = x is not None and previous is not None and math.hypot(x - previous[0], y - previous[1]) > 8.0
+            along = offset = None
+            if x is not None and not respawn:
+                along, offset = place(x, y)
+            if along is not None and 0.4 <= along <= 0.6:
+                inside.append(offset)
+                previous = (x, y)
+                continue
+            if len(inside) >= 2:
+                crossings.setdefault(bot, []).append(sum(inside) / len(inside))
+                if not first_done:
+                    firsts.setdefault(bot, []).append(sum(inside) / len(inside))
+                    first_done = True
+            inside = []
+            if respawn:
+                first_done = False
+            previous = (x, y) if x is not None else None
+    by_lane = {}
+    for bot, offsets in sorted(crossings.items()):
+        team, role, lane = roles.get(bot, (None, "?", ""))
+        print("  bot %d (%s%s): crossed the middle %d times, offsets %s; the first of each life %s" % (bot, role,
+            " " + lane if lane else "", len(offsets), " ".join("%+.0f" % o for o in offsets),
+            " ".join("%+.0f" % o for o in firsts.get(bot, []))))
+        if role in ("attacker", "roamer"):
+            by_lane.setdefault(lane, []).extend(firsts.get(bot, []))
+    means = dict((lane, sum(v) / len(v)) for lane, v in by_lane.items() if v)
+    print("  the attackers' first crossings by lane (mean offset from the direct route): %s" %
+        ", ".join("%s %+.1f (%d)" % (lane, means[lane], len(by_lane[lane])) for lane in sorted(means)))
+    if len(means) < 2 or max(means.values()) - min(means.values()) < 12.0:
+        fail("the attackers crossed the middle by one route (their lanes' mean offsets %s)" %
+            ", ".join("%s %+.1f" % (lane, means[lane]) for lane in sorted(means)))
+    sys.exit(1 if failed else 0)
+if name == "vantage":
+    points = []
+    for line in lines:
+        m = re.search(r"bots: vantage point (\d+) at \(([-\d.]+) ([-\d.]+) ([-\d.]+)\)", line)
+        if m:
+            points.append((float(m.group(2)), float(m.group(3))))
+    arrivals = [line for line in lines if re.search(r"bots: bot \d+ \(\w+\) at vantage point", line)]
+    print("  %d vantage points, %d arrivals" % (len(points), len(arrivals)))
+    if len(points) < 3:
+        fail("%d vantage points logged on Blood Gulch, not 3 at least" % len(points))
+    first_tick = None
+    best = (0, None, None)
+    for player, track in tracks().items():
+        if track[0][4] < 113:
+            continue
+        if first_tick is None or track[0][0] < first_tick:
+            first_tick = track[0][0]
+        run_start, run_point, run_length = None, None, 0
+        for tick, x, y, team, machine in track:
+            near = [i for i, (px, py) in enumerate(points) if math.hypot(x - px, y - py) < 2.5]
+            if near and near[0] == run_point:
+                run_length += 1
+            else:
+                run_start, run_point, run_length = (tick if near else None), (near[0] if near else None), (1 if near else 0)
+            if run_point is not None and run_length > best[0] and run_start is not None:
+                best = (run_length, run_start, (track[0][4] - 112, run_point + 1))
+    if best[1] is None:
+        fail("no bot came to a vantage point")
+    else:
+        print("  bot %d held vantage point %d for %d s from %.0f s" % (best[2][0], best[2][1], best[0], (best[1] - first_tick) / 30.0))
+        if best[0] < 10:
+            fail("no bot held a vantage point 10 s (%d at most)" % best[0])
+        held_from = None
+        for player, track in tracks().items():
+            if track[0][4] < 113:
+                continue
+            run_point, run_length = None, 0
+            for tick, x, y, team, machine in track:
+                near = [i for i, (px, py) in enumerate(points) if math.hypot(x - px, y - py) < 2.5]
+                run_length = run_length + 1 if near and near[0] == run_point else (1 if near else 0)
+                run_point = near[0] if near else None
+                if run_length == 10:
+                    started = (tick - first_tick) / 30.0 - 9
+                    held_from = started if held_from is None else min(held_from, started)
+        if held_from is None or held_from > vantage_seconds:
+            fail("no bot came to a vantage point and held it 10 s within %.0f s" % vantage_seconds)
+    sys.exit(1 if failed else 0)
+if name == "roles":
+    stands = None
+    for line in lines:
+        m = re.search(r"bots: CTF.*the stands: team 0 \(([-\d.]+) ([-\d.]+) [-\d.]+\) team 1 \(([-\d.]+) ([-\d.]+)", line)
+        if m:
+            stands = ((float(m.group(1)), float(m.group(2))), (float(m.group(3)), float(m.group(4))))
+    roles = roles_of()
+    if not stands or not roles:
+        fail("no CTF stands or no roles in halo.log")
+        sys.exit(1)
+    near = {}
+    for player, track in tracks().items():
+        if track[0][4] < 113:
+            continue
+        bot = track[0][4] - 112
+        start = track[0][0] + 20 * 30
+        samples = [(x, y, team) for tick, x, y, team, machine in track if tick >= start and team in (0, 1)]
+        if samples:
+            near[bot] = sum(1 for x, y, team in samples if math.hypot(x - stands[team][0], y - stands[team][1]) < 25.0) / float(len(samples))
+    for team in (0, 1):
+        defenders = [bot for bot, (t, role, lane) in roles.items() if t == team and role == "defender"]
+        others = [bot for bot, (t, role, lane) in roles.items() if t == team and role != "defender"]
+        print("  team %d: defenders %s near their stand %s of their time; the others %s" % (team, defenders,
+            " ".join("%.0f%%" % (100 * near.get(b, 0)) for b in defenders),
+            " ".join("%.0f%%" % (100 * near.get(b, 0)) for b in others)))
+        if not defenders:
+            fail("team %d has no defender" % team)
+        elif max(near.get(b, 0) for b in defenders) < 0.5:
+            fail("team %d's defenders were near their stand %.0f%% of their time at most" % (team, 100 * max(near.get(b, 0) for b in defenders)))
 if name == "against":
     teams = {}
     for line in open(log, errors="replace"):
@@ -522,7 +727,7 @@ if name != "race" and kills <= bots:
 if name != "race" and died * 2 < bots:
     fail("only %d bots died" % died)
 # (CTF's score is captures, which three minutes may not see)
-if name not in ("ctf", "vctf", "iron") and (not scores or max(scores) <= 0):
+if name not in ("ctf", "vctf", "iron", "roles") and (not scores or max(scores) <= 0):
     fail("no score")
 # (the vehicle cases: the bots' census of their vehicles)
 if name.startswith("v") or name == "iron":

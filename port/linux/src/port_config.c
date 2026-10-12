@@ -309,6 +309,12 @@ static const struct config_setting config_settings[] =
 		"1: the bots drive and ride the map's vehicles (Warthogs, Ghosts and\n"
 		"Scorpions) to goals a long way off; 0: they stay on foot. The Vita's\n"
 		"settings panel (Multiplayer, Bot vehicles) sets it." },
+	{ "bots.routes", _config_string, "\"direct\"", "HALO_BOT_ROUTES", _environment_value, _platform_all,
+		"The ways the bots go to their goals (port/linux/game/bots_routes.c):\n"
+		"\"direct\" (everyone the shortest way, down the middle into one fight),\n"
+		"\"lanes\" (the attackers spread over the map's side lanes, flanking) or\n"
+		"\"mixed\" (most direct, a few on the side lanes). The Vita's settings\n"
+		"panel (Multiplayer, Bot routes) sets it." },
 	{ "bots.playlist", _config_string, "\"off\"", "HALO_BOT_PLAYLIST", _environment_value, _platform_all,
 		"A local game with bots goes on to the next map and gametype by itself\n"
 		"after the scores (port/linux/game/bots_playlist.c): \"off\" (the player\n"
