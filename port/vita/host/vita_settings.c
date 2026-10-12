@@ -124,7 +124,10 @@ menus need bitmaps.map, loc.map: README" (halo_pc_menus_state).
   Legendary), "Bot teams" (HALO_BOT_TEAMS: in team games Even, on both
   teams, or Against you, all on the other team) and "Bot vehicles"
   (HALO_BOT_VEHICLES: On, the bots drive and ride the map's Warthogs, Ghosts
-  and Scorpions, or Off, on foot) and "Bot playlist" (HALO_BOT_PLAYLIST:
+  and Scorpions, or Off, on foot), "Bot routes" (HALO_BOT_ROUTES: Direct,
+  everyone the shortest way down the middle, as before; Lanes, the attackers
+  spread over the map's side lanes; Mixed, a few of them;
+  port/linux/game/bots_routes.c) and "Bot playlist" (HALO_BOT_PLAYLIST:
   Off; Small maps, Big maps, Everything or Custom, bots_playlist.txt in the
   data folder: after the scores the game goes on to the next map and
   gametype by itself, port/linux/game/bots_playlist.c) show below it. Live:
@@ -548,6 +551,11 @@ static struct setting settings[] = {
 		"Team games: bots on both teams, or all against you", 0, TAB_MULTIPLAYER },
 	{ "  Bot vehicles", "HALO_BOT_VEHICLES", 0, 2, { "1", "0" }, { "On", "Off" },
 		"Bots drive and ride the map's vehicles", 0, TAB_MULTIPLAYER },
+	/* (port/linux/game/bots_routes.c: Direct as before, everyone down the
+	middle; Lanes and Mixed spread the attackers over the map's side lanes.
+	Live: read each second) */
+	{ "  Bot routes", "HALO_BOT_ROUTES", 0, 3, { "direct", "lanes", "mixed" }, { "Direct", "Lanes", "Mixed" },
+		"Direct: all charge the middle. Lanes, Mixed: some flank by the sides", 0, TAB_MULTIPLAYER },
 	/* (port/linux/game/bots_playlist.c: after the scores the next map and
 	gametype by itself; Custom reads bots_playlist.txt in the data folder.
 	Live: read at each game's scores) */
@@ -1110,7 +1118,8 @@ static int setting_shown(const struct setting *setting)
 	if (setting->action == ACTION_CE_EXTRACT)
 		return maps_installer_state == 1;
 	if (setting->variable && (!strcmp(setting->variable, "HALO_BOT_SKILL") || !strcmp(setting->variable, "HALO_BOT_TEAMS") ||
-		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
+		!strcmp(setting->variable, "HALO_BOT_VEHICLES") || !strcmp(setting->variable, "HALO_BOT_ROUTES") ||
+		!strcmp(setting->variable, "HALO_BOT_PLAYLIST")))
 		return choice_of("HALO_BOTS") != 0;
 	/* (a code typed in: online, on a Vita whose game has not got the PC
 	menus' Direct Link, menu_tags.c) */

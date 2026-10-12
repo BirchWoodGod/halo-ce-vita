@@ -1015,12 +1015,24 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|  Bot playlist|Co-op players|Unseen players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
-		"Bots 3: Bot skill, Bot teams, Bot vehicles and Bot playlist below it, live");
+		"Bots 3: Bot skill, Bot teams, Bot vehicles, Bot routes and Bot playlist below it, live");
 	to_line("  Bot skill");
 	press(VITA_BUTTON_RIGHT);
 	check(getenv("HALO_BOT_SKILL") && !strcmp(getenv("HALO_BOT_SKILL"), "heroic"), "Bot skill: Normal, then Heroic");
+	/* the bots' routes: Direct, then Lanes and Mixed, live (bots_routes.c
+	reads it each second) */
+	to_line("  Bot routes");
+	check(strstr(menu, "Direct") && strstr(menu, "flank") && menu_fits(), "Bot routes: Direct, its help saying the sides");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_BOT_ROUTES") && !strcmp(getenv("HALO_BOT_ROUTES"), "lanes") && strstr(menu, "Lanes") && menu_fits(),
+		"Bot routes: Direct, then Lanes");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_BOT_ROUTES") && !strcmp(getenv("HALO_BOT_ROUTES"), "mixed") && strstr(menu, "Mixed"), "Bot routes: then Mixed");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_BOT_ROUTES") && !strcmp(getenv("HALO_BOT_ROUTES"), "direct"), "Bot routes: Direct again");
 	/* the bots' playlist: Off, then Small maps ... Custom, live (bots_playlist.c
 	reads it at each game's scores) */
 	to_line("  Bot playlist");
@@ -1478,7 +1490,7 @@ static void test_variables_kept(void)
 		"HALO_NET_MAX_PLAYERS", "HALO_NET_HOST_PUBLIC", "HALO_NET_COOP_PUBLIC", "HALO_CPU3_AUX",
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
-		"HALO_BOT_VEHICLES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
+		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET",
 	};
 	int index, all = 1, choices = 0;
