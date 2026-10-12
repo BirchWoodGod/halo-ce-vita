@@ -190,6 +190,7 @@ Graphics, **Display**:
 | --- | --- | --- |
 | Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
 | Upscale filter | Smooth | Sharp: crisp pixels |
+| First-person legs | Off | On: your own legs when you look down in first person, walking, running and crouching as other players see them (from OpenCE; applies at once). Not drawn in a vehicle, zoomed, in a cutscene or in third person; only the picture changes. One more model a frame on foot: 4 draws, about 2,000 triangles, and looking straight down an eighth of the screen, which hides as much floor |
 
 Graphics, **Advanced**:
 

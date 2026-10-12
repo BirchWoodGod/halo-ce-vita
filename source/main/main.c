@@ -4317,7 +4317,10 @@ loaded since the one before it ran (map cycles), "@tv name" puts every player's 
 that scenario trigger volume (the benchmarks walk the player through a
 level's encounters this way: triage/perf2-status.md), "@where" logs where
 every vehicle and scenery object is, "@seat" which vehicle and seat each
-player's unit rides in, and "@shot name"
+player's unit rides in, "@look pitch [zoom]" turns the first local
+player's view to that pitch (degrees, down negative) and, given, sets its
+zoom level (-1 none), and "@legs" logs the frames its own legs were drawn in
+(display.first_person_legs, first_person_legs.c), and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device; on the Vita its display, as name<frame>.bmp);
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
@@ -4504,6 +4507,32 @@ static void main_test_commands_update(
 		}
 		/* (@seat: each player's unit's vehicle and seat, or on foot, in
 		the log: run_seat_race_test.sh sees its unit get in and out) */
+		/* (@look, @legs: run_first_person_legs_test.sh) */
+		else if (!strncmp(commands[index].command, "@look ", 6))
+		{
+			float pitch;
+			int zoom;
+			int given = sscanf(commands[index].command + 6, "%f %d", &pitch, &zoom);
+
+			if (given >= 1 && local_player_get_player_index(0) != NONE)
+			{
+				struct player_control *control = player_control_get(0);
+
+				control->desired_angles.pitch = DEGREES_TO_RADIANS(pitch);
+				if (given >= 2)
+					control->zoom_level = (short)zoom;
+			}
+		}
+		else if (!strcmp(commands[index].command, "@legs"))
+		{
+			unsigned long first_person_legs_drawn_frames(real *set_back_last, real *set_back_most);
+			real set_back_last;
+			real set_back_most;
+			unsigned long frames = first_person_legs_drawn_frames(&set_back_last, &set_back_most);
+
+			platform_log("test command: first-person legs drawn in %lu frames (set back %.3f, at most %.3f)", frames,
+				(double)set_back_last, (double)set_back_most);
+		}
 		else if (!strcmp(commands[index].command, "@seat"))
 		{
 			struct data_iterator iterator;

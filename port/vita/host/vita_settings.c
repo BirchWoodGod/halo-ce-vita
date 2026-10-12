@@ -352,12 +352,18 @@ static struct setting settings[] = {
 		"Fewer sparks, smoke and debris in big fights", 1, TAB_GRAPHICS },
 	/* (the picture's framing and scaling, set once: on a page of their
 	own, which keeps the tab to a screen with Dynamic minimum shown; the
-	row says both, page_summary) */
-	PAGE_ROW("Display", "Aspect ratio and upscale filter", TAB_GRAPHICS, PAGE_GRAPHICS_DISPLAY),
+	row says the first two, page_summary) */
+	PAGE_ROW("Display", "Aspect ratio, upscale filter, first-person legs", TAB_GRAPHICS, PAGE_GRAPHICS_DISPLAY),
 	{ "Aspect ratio", "HALO_DISPLAY_WIDTH", 0, 2, { "848", "640" }, { "16:9", "4:3" },
 		"4:3: the Xbox's framing, black bars", 0, PAGE_GRAPHICS_DISPLAY },
 	{ "Upscale filter", "HALO_UPSCALE_FILTER", 0, 2, { "0", "1" }, { "Smooth", "Sharp" },
 		"Scaling to the screen: Sharp = crisp pixels", 0, PAGE_GRAPHICS_DISPLAY },
+	/* (port/linux/game/first_person_legs.c, from OpenCE: your own body
+	drawn from the waist down in first person, one more model a frame on
+	foot. Off by default and in every profile; on its page, not the tab,
+	which is ten rows already. Live) */
+	{ "First-person legs", "HALO_FIRST_PERSON_LEGS", 0, 2, { "0", "1" }, { "Off", "On" },
+		"Your legs when you look down, as others see them", 0, PAGE_GRAPHICS_DISPLAY },
 	PAGE_ROW("Advanced", "Detail and update rates (the Profile sets them)", TAB_GRAPHICS, PAGE_GRAPHICS_ADVANCED),
 	{ "Model detail", "HALO_MODEL_LOD_SCALE", 0, 4, { "1", "0.75", "0.5", "0.35" },
 		{ "High", "Medium", "Low", "Lowest" }, "Level of detail of characters and vehicles", 1,

@@ -710,7 +710,8 @@ This port stands on a lot of other people's work:
   `port/android`, each with its own README). Campaign co-op over the
   network is theirs too (xshxdex98's and MrBruh's work: `network_coop.c`,
   `coop_spectate.c`, `coop_scripts.c`, `network_actors.c`), brought in with
-  its commits' history and authors.
+  its commits' history and authors. Your own legs in first person
+  (`first_person_legs.c`, `object_mesh.c`) are OpenCE's too.
 - **[bnunu/halo-ce-universal](https://github.com/bnunu/halo-ce-universal)**
   (Jonas Volman): the Halo Custom Edition and OpenSauce map loader and its
   conversions (`port/linux/game/cache_file_formats.c`,

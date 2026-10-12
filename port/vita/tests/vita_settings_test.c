@@ -1468,8 +1468,8 @@ static void test_online_rows(void)
 with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
-players, Visibility, Fourth core helpers, Latency meter, Particles; the
-Play page's two texts) */
+players, Visibility, Fourth core helpers, Latency meter, Particles,
+First-person legs; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1491,7 +1491,7 @@ static void test_variables_kept(void)
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
-		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET",
+		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS",
 	};
 	int index, all = 1, choices = 0;
 
@@ -2420,18 +2420,39 @@ int main(void)
 		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 63%: Balanced again");
 	}
 	{
-		/* Display: the aspect ratio and the upscale filter, on a page of
-		their own (live, no *); the row says both */
-		check(to_line("Display") && strstr(menu, "\n\x05" "Aspect ratio and upscale filter\n") && menu_fits(),
-			"Display: its help says what is there");
+		/* Display: the aspect ratio, the upscale filter and the
+		first-person legs, on a page of their own (live, no *); the row
+		says the first two */
+		unsigned long generation;
+
+		check(to_line("Display") && strstr(menu, "\n\x05" "Aspect ratio, upscale filter, first-person legs\n") &&
+			menu_fits(), "Display: its help says what is there");
 		check(open_page("Display") && strstr(menu, "\n\x03Graphics > Display\n") &&
 			!strcmp(menu_line(2, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") && menu_rows() == 2 &&
-			menu_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
-			"Graphics, Display: Aspect ratio (16:9), Upscale filter (Smooth), live");
+			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
+			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02  Off >") && menu_rows() == 3 &&
+			menu_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*") &&
+			!strstr(menu, "First-person legs*") && !strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0"),
+			"Graphics, Display: Aspect ratio (16:9), Upscale filter (Smooth), First-person legs (Off, in the environment), live");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && strstr(file_text(SETTINGS_FILE), "HALO_DISPLAY_WIDTH=640\n") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Aspect ratio 4:3: saved, the profile kept");
+		/* (port/linux/game/first_person_legs.c reads it again as the
+		generation changes) */
+		press(VITA_BUTTON_DOWN);
+		press(VITA_BUTTON_DOWN);
+		check(strstr(menu, "\n\x05Your legs when you look down, as others see them\n") && menu_fits(),
+			"First-person legs: its help line fits");
+		generation = halo_settings_generation;
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=1\n") &&
+			!strcmp(menu_line(4, line, sizeof(line)), "First-person legs\x02< On  ") && !strstr(notice, "Restart") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"First-person legs On: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=0\n"),
+			"... and Off again");
 		press(VITA_BUTTON_CIRCLE);
 		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
 			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Display\x02  4:3, Smooth  >"),

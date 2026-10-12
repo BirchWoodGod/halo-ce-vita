@@ -921,6 +921,13 @@ static boolean render_object_kept_whatever_its_size(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* port: port/linux/game/first_person_legs.c (from OpenCE) */
+boolean first_person_legs_wanted(long object_index);
+real_matrix4x3 const *first_person_legs_node_matrices(long object_index, real_matrix4x3 const *nodes);
+void first_person_legs_drawn(void);
+#endif
+
 static void render_object_list(
 	struct object_render_data *data,
 	struct render_model_effect const *parent_model_effect,
@@ -939,7 +946,23 @@ static void render_object_list(
 		struct object_datum *object = object_get(object_index);
 #endif
 
+#ifdef HALO_LINUX
+		/* port: the player's own legs, seen looking down in first person
+		(display.first_person_legs; port/linux/game/first_person_legs.c, from
+		OpenCE): its body drawn from the waist down, nothing it carries. Not
+		in mirrors or the shadow pass; off, nothing here changes */
+		boolean legs = !data->shadow && !render.camera.mirrored &&
+			object_is_first_person_camera(object_index) && first_person_legs_wanted(object_index);
+		real_matrix4x3 const *node_matrices = legs ?
+			first_person_legs_node_matrices(object_index, object_get_node_matrices(object_index)) :
+			NULL;
+
+		if (!node_matrices)
+			legs = FALSE;
+		if (!object_is_first_person_camera(object_index) || render.camera.mirrored || legs)
+#else
 		if (!object_is_first_person_camera(object_index) || render.camera.mirrored)
+#endif
 		{
 			struct render_model_effect model_effect;
 
@@ -1119,7 +1142,11 @@ static void render_object_list(
 					render_model(
 						definition->object.model.index,
 						level_of_detail_pixels,
+#ifdef HALO_LINUX
+						legs ? node_matrices : object_get_node_matrices(object_index),
+#else
 						object_get_node_matrices(object_index),
+#endif
 						object->object.region_permutations,
 						object->object.outgoing_change_colors,
 						object->object.outgoing_function_values,
@@ -1136,6 +1163,10 @@ static void render_object_list(
 						object->object.forced_shader_permutation_index,
 						data->no_planar_fog ? FLAG(_render_model_no_planar_fog_bit) : 0);
 					OBJECTS_PROFILE_ADD(_objects_profile_models, model_before);
+#ifdef HALO_LINUX
+					if (big_enough && legs)
+						first_person_legs_drawn();
+#endif
 					}
 
 					if (debug_objects)
@@ -1173,7 +1204,11 @@ static void render_object_list(
 				}
 			}
 
+#ifdef HALO_LINUX
+			if (!data->shadow && !legs && object->object.first_widget_index != NONE)
+#else
 			if (!data->shadow && object->object.first_widget_index != NONE)
+#endif
 			{
 				struct render_animation animation;
 
@@ -1191,7 +1226,11 @@ static void render_object_list(
 #endif
 			}
 
+#ifdef HALO_LINUX
+			if (object->object.first_child_object_index != NONE && !legs)
+#else
 			if (object->object.first_child_object_index != NONE)
+#endif
 			{
 				render_object_list(
 					data,

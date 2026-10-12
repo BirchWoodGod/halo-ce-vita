@@ -45,6 +45,8 @@
 "4:3: the Xbox's framing, black bars" = "4:3: el encuadre de la Xbox, con barras negras"
 "Upscale filter" = "Filtro de escalado"
 "Scaling to the screen: Sharp = crisp pixels" = "Escalado a la pantalla: Nítido = píxeles definidos"
+"First-person legs" = "Piernas visibles"
+"Your legs when you look down, as others see them" = "Tus piernas al mirar abajo, como las ven los demás"
 "Smooth" = "Suave"
 "Sharp" = "Nítido"
 "Frame limit" = "Límite de FPS"
@@ -63,7 +65,7 @@
 "Fewer sparks, smoke and debris in big fights" = "Menos chispas, humo y escombros en combates grandes"
 "Reduced" = "Reducido"
 "Detail and update rates (the Profile sets them)" = "Detalle y frecuencias (el Perfil los ajusta)"
-"Aspect ratio and upscale filter" = "Relación de aspecto y filtro de escalado"
+"Aspect ratio, upscale filter, first-person legs" = "Relación de aspecto, filtro de escalado, piernas"
 
 # ---------- Graphics > Advanced
 "Model detail" = "Detalle de modelos"
