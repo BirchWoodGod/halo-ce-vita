@@ -256,8 +256,20 @@ decoding is forgotten if it waits, and cut short and waited for if it
 runs. */
 void custom_edition_sound_cancel(
 	boolean *loaded);
+/* The map's tags are loaded (scenario_tags_load): each Ogg Vorbis or
+16-bit PCM permutation longer than the sound cache gives one
+(OGG_SOUND_MAXIMUM_ADPCM_BYTES) is made a chain of permutations, as
+Halo's own music is, so that it plays whole; nothing is decoded. */
+void custom_edition_sounds_map_loaded(
+	void);
+/* Whether `permutation` is a link of such a chain (its first included),
+which an impulse sound plays on through as a looping sound plays any
+chain (sound_manager.c). */
+boolean custom_edition_sound_is_chained(
+	struct sound_permutation const *permutation);
 /* The map is going: the waiting decodings are forgotten, the one running
-waited for, and the decoder's working memory given back. */
+waited for, and the decoder's working memory and the chains given back
+(after the sound cache has closed: its blocks name the chains' links). */
 void custom_edition_sounds_stop(
 	void);
 

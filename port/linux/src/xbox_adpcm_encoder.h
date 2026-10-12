@@ -58,6 +58,19 @@ struct xbox_adpcm_encoder
 	int step_index[XBOX_ADPCM_MAXIMUM_CHANNELS];
 	/* nonzero once every block is written: further frames are left out */
 	int full;
+	/* frames still to be left out before the first one taken, then frames
+	still to be encoded only for the step index they leave (whole blocks,
+	the frames held included: xbox_adpcm_encoder_warm), so that the first
+	block written is as an encoding of the frames before would have made
+	it: a piece of a longer output that starts past its beginning (a link
+	of a long sound's chain, custom_edition_sounds.c) */
+	uint32_t skip_frames;
+	uint32_t warm_frames;
+	/* nonzero: once every block is written, the frames given go on filling
+	the block being filled (a block's worth at most) instead of being left
+	out, for xbox_adpcm_encoder_continue to start the next output with (a
+	rate converter's frames made from one input frame, ogg_sound.c) */
+	int hold;
 
 	/* the frames taken, and whether any were left out; the samples' sum of
 	squares and largest magnitude (for the logs and the tests) */
@@ -105,7 +118,26 @@ int xbox_adpcm_encoder_begin(
 	uint32_t output_bytes,
 	int channels);
 
-/* One frame: a sample by channel, clamped to 16 bits. */
+/* The next `frames` frames, the frames it holds (hold) the first of them,
+are encoded only for the step index they leave (whole blocks: the output
+then starts at a block's first frame), before an output is begun or
+continued; with fewer than it holds, those it holds are let go. */
+void xbox_adpcm_encoder_warm(
+	struct xbox_adpcm_encoder *encoder,
+	uint32_t frames);
+
+/* Starts filling another output with the frames that follow those of the
+output it filled, the step index carried and the frames it held (hold)
+written first (unless they warm it); the skip and the warming are left as
+they are. 0 when the output is not usable (none: every frame is then left
+out). */
+int xbox_adpcm_encoder_continue(
+	struct xbox_adpcm_encoder *encoder,
+	void *output,
+	uint32_t output_bytes);
+
+/* One frame: a sample by channel, clamped to 16 bits (left out while
+frames are skipped). */
 void xbox_adpcm_encoder_frame(
 	struct xbox_adpcm_encoder *encoder,
 	int const *frame);
@@ -136,6 +168,23 @@ void xbox_adpcm_rate_frame(
 /* The input's last frames (before xbox_adpcm_encoder_finish). */
 void xbox_adpcm_rate_finish(
 	struct xbox_adpcm_rate *rate);
+
+/* Where an input of units of `unit_frames` frames (1: 16-bit PCM;
+XBOX_ADPCM_BLOCK_SAMPLES: Xbox ADPCM blocks) taken at its rate, or at half
+it when `halved`, is to be taken from for its output to go on from output
+frame `first_frame` (a block's first) as a taking of the whole input does
+there (a link of a long sound's chain: custom_edition_sounds.c): returns
+the input frame to start from (a unit's first; halved, the frame before an
+output frame's pair is taken again, for the low-pass), with the output
+frames then to skip and to warm the encoder with (a block's, from cold:
+xbox_adpcm_encoder.skip_frames and warm_frames) into `skip_frames` and
+`warm_frames`. */
+uint64_t xbox_adpcm_rate_start(
+	uint32_t first_frame,
+	int halved,
+	uint32_t unit_frames,
+	uint32_t *skip_frames,
+	uint32_t *warm_frames);
 
 /* The frames of output of `input_frames` frames at `input_rate` taken at
 `output_rate`: as many, half (rounded up) for twice the rate, else the

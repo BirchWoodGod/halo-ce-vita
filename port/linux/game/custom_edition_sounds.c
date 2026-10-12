@@ -56,6 +56,20 @@ xbox_adpcm_block_decode), takes them at half their rate and encodes them
 sound's: ogg_sound.c). Nothing is decoded as the map loads: a permutation
 is when the sound cache loads it, into the block it gives it.
 
+A permutation longer than the sound cache gives one
+(OGG_SOUND_MAXIMUM_ADPCM_BYTES: 42 s of 22 kHz stereo; a map's music) is
+made a chain of permutations of ~256 KB each as the map loads
+(custom_edition_sounds_map_loaded), as Halo's own music is: the pitch
+range's permutations and the links are copied into a memory block of their
+own, the range pointed at them, and the sound marked as having linked
+permutations, so the sound manager plays the links in turn, asks for the
+next ones ahead, and loops back to the first only after the last. Each
+link is made Xbox ADPCM as the cache loads it: a 16-bit PCM one read from
+its first frame, an Ogg Vorbis one in a stream decoder (working memory of
+its own, two at most) taking up the decoding where the link before kept it
+(ogg_sound_request.keep), the links of a stream decoded in order; else from
+the stream's start.
+
 HALO_OGG_TRACE=1 logs each decoding: the sound, the frames, the decoded
 samples' RMS and peak, the time and working memory it took, and where its
 ADPCM is (run_ce_ogg_sound_test.sh). A permutation that does not decode is
@@ -68,11 +82,13 @@ logged once (a sound's first), whatever the setting, and plays as silence.
 #include "errors.h"
 #include "tag_files/tag_groups.h"
 #include "tag_files/tag_files.h"
+#include "cache/cache_files.h"
 #include "sound/sound_definitions.h"
 #include "custom_edition_cache.h"
 #include "cache_file_formats.h"
 #include "../src/ogg_sound.h"
 #include "../src/xbox_adpcm_encoder.h"
+#include "../src/port_config.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -102,7 +118,40 @@ enum
 	MEMORY_BLOCK_BYTES = OGG_SOUND_WORKING_BYTES + MEASURE_LARGEST_TAIL_BYTES + MEASURE_HEAD_BYTES,
 	/* the decoding thread's stack: Tremor's deepest use is ~32 KB */
 	DECODER_STACK_BYTES = 256 * 1024,
+
+	/* a permutation of more Xbox ADPCM than the sound cache gives one
+	(OGG_SOUND_MAXIMUM_ADPCM_BYTES) is made a chain of links of about this
+	much each, of equal length: the sound manager asks for three links
+	ahead of the one playing (sound_manager.c), which with the one playing
+	take about the cache the cut-off permutation took (1 MB); 6 s of 22 kHz
+	stereo, 3 s of 44 kHz */
+	CHAIN_LINK_BYTES = 256 * 1024,
+	/* the most of a permutation made a chain (the rest is cut off): 11 min
+	of 44 kHz stereo, 45 of 22 kHz stereo */
+	CHAIN_MAXIMUM_ADPCM_BYTES = 64 * 1024 * 1024,
+	/* the most links a map's chains add (124 bytes each) */
+	CHAIN_MAXIMUM_LINKS = 4096,
+	/* the most permutations a pitch range may have (next_permutation_index
+	is a short) */
+	CHAIN_MAXIMUM_RANGE_PERMUTATIONS = 32767,
+	/* an Ogg Vorbis permutation the loader found no plausible length for
+	(none, or more than a permutation holds: Halo PC's word for a long
+	sound, or a protected map's scrambled one) is measured as the map loads
+	when its stream is this big or bigger: a stream that long a
+	permutation cannot hold is (Vorbis is a twelfth of Xbox ADPCM at the
+	least, but for near silence); a smaller one is measured as it first
+	loads, as before, and played at most as long as a permutation holds */
+	CHAIN_MEASURE_STREAM_BYTES = 32 * 1024,
+	/* the Ogg Vorbis chains whose decoding is kept between their links
+	(ogg_sound_request.keep), each in working memory of its own: the
+	music and a long sound over it (more alternate, each link of theirs
+	then decoded from the stream's start) */
+	STREAM_DECODERS = 2,
 };
+
+/* the first frame of a permutation of the chains' table that is not a
+link (one of a pitch range copied there with them) */
+#define CHAIN_NOT_A_LINK 0xFFFFFFFFUL
 
 /* sample_buffer_size of a permutation found unplayable */
 #define SOUND_BUFFER_UNPLAYABLE 0xFFFFFFFFUL
@@ -134,6 +183,14 @@ struct waiting_sound
 	/* the permutation, for the logs (its tags outlast the decoding:
 	custom_edition_sounds_stop) */
 	struct sound_permutation const *permutation;
+	/* a link of a chain: its first frame in its sound's Xbox ADPCM (0 for
+	any other permutation), its index and the chain's links (for the logs),
+	and whether it is an Ogg Vorbis link, decoded in a stream decoder */
+	boolean link;
+	uint32_t first_frame;
+	long link_index;
+	long link_count;
+	boolean stream_link;
 };
 
 /* ---------- globals */
@@ -166,6 +223,27 @@ static struct
 
 	/* the memory block (MEMORY_BLOCK_BYTES) */
 	byte *memory;
+
+	/* the chains (custom_edition_sounds_map_loaded), in a memory block of
+	their own: the stream decoders' working memory (OGG_SOUND_WORKING_BYTES
+	each), then the permutations of the pitch ranges given chains (their
+	own and their links), then each one's first frame in its sound
+	(CHAIN_NOT_A_LINK: not a link), its index in its chain and the chain's
+	links */
+	byte *chain_memory;
+	struct sound_permutation *chain_permutations;
+	uint32_t *chain_first_frames;
+	short *chain_link_indices;
+	short *chain_link_counts;
+	long chain_permutation_count;
+	byte *stream_working[STREAM_DECODERS];
+	unsigned long stream_working_used[STREAM_DECODERS];
+	long stream_decoder_count;
+	unsigned long stream_uses;
+	/* (links made Xbox ADPCM since the map came, and of them those whose
+	stream decoding was taken up where the link before left it) */
+	unsigned long link_decoded_count;
+	unsigned long link_resumed_count;
 	/* (decodings since the map came, and their time, for the log: Ogg
 	Vorbis and 16-bit PCM) */
 	unsigned long decoded_count;
@@ -237,6 +315,77 @@ static struct sound_definition *permutation_definition(
 	return (struct sound_definition *)tag_get(SOUND_DEFINITION_TAG, (long)permutation->unknown3);
 }
 
+static int definition_channels(struct sound_definition const *definition)
+{
+	return definition->encoding == 1 ? 2 : 1;
+}
+
+static long definition_rate(struct sound_definition const *definition)
+{
+	return definition->sample_rate == 1 ? 44100 : 22050;
+}
+
+/* the permutation's place in the chains' table, or NONE */
+static long chain_index(
+	struct sound_permutation const *permutation)
+{
+	uintptr_t first = (uintptr_t)custom_edition_sounds_globals.chain_permutations;
+	uintptr_t address = (uintptr_t)permutation;
+
+	if (!first || address < first ||
+		address >= first + (uintptr_t)custom_edition_sounds_globals.chain_permutation_count * sizeof(struct sound_permutation))
+	{
+		return NONE;
+	}
+	return (long)((address - first) / sizeof(struct sound_permutation));
+}
+
+/* whether the permutation is a link of a chain (its first included), and
+its first frame in its sound */
+static boolean chain_link(
+	struct sound_permutation const *permutation,
+	uint32_t *first_frame)
+{
+	long index = chain_index(permutation);
+
+	if (index == NONE || custom_edition_sounds_globals.chain_first_frames[index] == CHAIN_NOT_A_LINK)
+		return FALSE;
+	if (first_frame)
+		*first_frame = custom_edition_sounds_globals.chain_first_frames[index];
+	return TRUE;
+}
+
+/* the Xbox ADPCM bytes the whole of a permutation is made (for a long one
+more than the sound cache gives a permutation); 0 when that is not known
+(an Ogg Vorbis permutation not measured) or it is muted (16-bit PCM not of
+whole frames: the loader's buffer size 0) */
+static uint32_t permutation_whole_bytes(
+	struct sound_permutation const *permutation,
+	struct sound_definition const *definition)
+{
+	enum transcoding transcoding = permutation_transcoding(permutation);
+	int channels = definition_channels(definition);
+	uint32_t size = permutation->samples.size > 0 ? (uint32_t)permutation->samples.size : 0;
+	uint32_t frames;
+
+	if (transcoding == _transcoding_ogg_vorbis)
+		return permutation->sample_buffer_size == SOUND_BUFFER_UNPLAYABLE ? 0 : (uint32_t)permutation->sample_buffer_size;
+	if (transcoding == _transcoding_none || !permutation->sample_buffer_size || !size)
+		return 0;
+	if (transcoding == _transcoding_adpcm_halved)
+	{
+		/* (64 frames a block, halved: 32) */
+		frames = size / (XBOX_ADPCM_BLOCK_BYTES * (uint32_t)channels) * (XBOX_ADPCM_BLOCK_SAMPLES / 2);
+	}
+	else
+	{
+		frames = size / (2 * (uint32_t)channels);
+		if (transcoding == _transcoding_pcm_halved)
+			frames = frames / 2 + frames % 2;
+	}
+	return xbox_adpcm_bytes(frames, channels);
+}
+
 /* the stream's bytes, read from the map's files for the decoder; the
 decoding stops (a failed read) once the block is being deleted */
 static int stream_read(void *context, uint32_t offset, uint32_t size, void *buffer)
@@ -264,16 +413,26 @@ static void sound_decode_report(
 	if (trace_enabled())
 	{
 		double samples = (double)result->frames_decoded * sound->channels;
+		char link[96];
 
+		/* (a link: which, from which frame, and how its frames were come to;
+		after the ADPCM's place, which the tests read) */
+		link[0] = '\0';
+		if (sound->link)
+		{
+			snprintf(link, sizeof(link), ", link %ld of %ld from frame %lu, %s %lu frames", sound->link_index + 1,
+				sound->link_count, (unsigned long)sound->first_frame,
+				result->resumed ? "resumed skipping" : "from the start skipping", (unsigned long)result->frames_skipped);
+		}
 		platform_log("%s sound: %.32s of %s: %s, %lu frames %d ch %ld Hz%s (+%lu silent%s), rms %.0f peak %d, "
-			"%.2f ms, %lu KB working, adpcm %lu bytes at %p",
+			"%.2f ms, %lu KB working, adpcm %lu bytes at %p%s",
 			pcm ? "pcm" : adpcm ? "adpcm" : "ogg", sound->permutation->name, tag_get_name((long)sound->permutation->unknown3),
 			ogg_sound_status_describe(result->status), (unsigned long)result->frames_decoded,
 			result->stream_channels, result->stream_rate, result->halved ? " halved" : "",
-			(unsigned long)result->frames_padded, result->truncated ? ", cut off" : "",
+			(unsigned long)result->frames_padded, result->truncated ? (sound->link ? ", more follows" : ", cut off") : "",
 			samples > 0 ? log_square_root(result->sum_of_squares / samples) : 0.0, result->peak,
 			(double)took / 1000.0, (unsigned long)(result->working_peak_bytes / 1024),
-			(unsigned long)sound->destination_bytes, sound->destination);
+			(unsigned long)sound->destination_bytes, sound->destination, link);
 	}
 	if (result->status != _ogg_sound_ok && !custom_edition_sounds_globals.running_cancelled)
 	{
@@ -336,7 +495,10 @@ static void piece_frames(struct waiting_sound const *sound, struct xbox_adpcm_ra
 whole frames (a halved one's, or Xbox ADPCM's, of whole blocks, decoded and
 taken at half their rate): what the samples do not fill is silence, and
 what does not fit is left out (the block is the size the loader worked out
-from them) */
+from them). A link of a chain is read from the frame (or block) its first
+frame is made from, the halving's frame before it included, and the frames
+made before its first are left out: the same frames as a whole decoding's
+there */
 static void pcm_encode(struct waiting_sound *sound)
 {
 	struct xbox_adpcm_encoder encoder;
@@ -347,15 +509,27 @@ static void pcm_encode(struct waiting_sound *sound)
 	boolean halved = sound->transcoding != _transcoding_pcm;
 	uint32_t unit_bytes = sound->transcoding == _transcoding_adpcm_halved ?
 		XBOX_ADPCM_BLOCK_BYTES * (uint32_t)sound->channels : 2 * (uint32_t)sound->channels;
+	uint32_t unit_frames = sound->transcoding == _transcoding_adpcm_halved ? XBOX_ADPCM_BLOCK_SAMPLES : 1;
 	uint32_t piece_bytes = PCM_READ_BYTES / unit_bytes * unit_bytes;
 	uint32_t offset = 0;
+	uint32_t skip = 0;
+	uint32_t warm = 0;
 
 	memset(&result, 0, sizeof(result));
 	result.status = _ogg_sound_ok;
 	result.stream_channels = sound->channels;
 	result.stream_rate = halved ? 2 * sound->rate : sound->rate;
 	result.halved = halved;
+	if (sound->first_frame)
+	{
+		uint64_t start = xbox_adpcm_rate_start(sound->first_frame, halved, unit_frames, &skip, &warm) / unit_frames * unit_bytes;
+
+		offset = start < sound->file_bytes ? (uint32_t)start : sound->file_bytes;
+	}
+	result.frames_skipped = skip + warm;
 	xbox_adpcm_encoder_begin(&encoder, sound->destination, sound->destination_bytes, sound->channels);
+	encoder.skip_frames = skip;
+	encoder.warm_frames = warm;
 	if (!xbox_adpcm_rate_begin(&rate, &encoder, result.stream_rate, sound->rate))
 		result.status = _ogg_sound_unsupported_format;
 	while (result.status == _ogg_sound_ok && offset < sound->file_bytes && !encoder.full)
@@ -372,6 +546,7 @@ static void pcm_encode(struct waiting_sound *sound)
 	}
 	if (offset < sound->file_bytes)
 		encoder.truncated = 1;
+	result.frames_skipped -= encoder.skip_frames + encoder.warm_frames;
 	xbox_adpcm_rate_finish(&rate);
 	result.frames_padded = xbox_adpcm_encoder_finish(&encoder);
 	result.frames_decoded = encoder.frames;
@@ -385,6 +560,44 @@ static void pcm_encode(struct waiting_sound *sound)
 	return;
 }
 
+/* the stream an Ogg Vorbis link is of, for its decoding kept between
+links (ogg_sound_request.stream_key): its place and size */
+static uint64_t waiting_stream_key(struct waiting_sound const *sound)
+{
+	return (uint64_t)sound->file_bytes << 32 | (uint32_t)sound->file_offset;
+}
+
+/* the stream decoder for an Ogg Vorbis link: the one whose kept decoding
+of its stream goes on at or before its first frame, else the one used
+longest ago; NULL without one (the decoding thread's) */
+static byte *stream_decoder(struct waiting_sound const *sound)
+{
+	uint64_t key = waiting_stream_key(sound);
+	long chosen = NONE;
+	long index;
+
+	for (index = 0; index < custom_edition_sounds_globals.stream_decoder_count; index++)
+	{
+		uint32_t next_frame;
+
+		if (ogg_sound_kept(custom_edition_sounds_globals.stream_working[index], OGG_SOUND_WORKING_BYTES, key, &next_frame) &&
+			next_frame <= sound->first_frame)
+		{
+			chosen = index;
+			break;
+		}
+		if (chosen == NONE ||
+			custom_edition_sounds_globals.stream_working_used[index] < custom_edition_sounds_globals.stream_working_used[chosen])
+		{
+			chosen = index;
+		}
+	}
+	if (chosen == NONE)
+		return NULL;
+	custom_edition_sounds_globals.stream_working_used[chosen] = ++custom_edition_sounds_globals.stream_uses;
+	return custom_edition_sounds_globals.stream_working[chosen];
+}
+
 static void sound_decode(struct waiting_sound *sound)
 {
 	struct ogg_sound_request request;
@@ -392,6 +605,8 @@ static void sound_decode(struct waiting_sound *sound)
 	unsigned long long started = vita_host_time_us();
 	unsigned long long took;
 
+	if (sound->link)
+		custom_edition_sounds_globals.link_decoded_count++;
 	if (sound->transcoding != _transcoding_ogg_vorbis)
 	{
 		pcm_encode(sound);
@@ -407,6 +622,21 @@ static void sound_decode(struct waiting_sound *sound)
 	request.rate = sound->rate;
 	request.working = custom_edition_sounds_globals.memory;
 	request.working_bytes = OGG_SOUND_WORKING_BYTES;
+	/* (a link: its frames from its first; an Ogg Vorbis one's decoding
+	kept for the next link, and taken up from the link before where that
+	kept it, in a stream decoder: else decoded from the stream's start) */
+	request.first_frame = sound->first_frame;
+	if (sound->stream_link)
+	{
+		byte *working = stream_decoder(sound);
+
+		if (working)
+		{
+			request.working = working;
+			request.keep = TRUE;
+			request.stream_key = waiting_stream_key(sound);
+		}
+	}
 	if (request.working)
 	{
 		ogg_sound_transcode(&request, &result);
@@ -421,9 +651,35 @@ static void sound_decode(struct waiting_sound *sound)
 	took = vita_host_time_us() - started;
 	custom_edition_sounds_globals.decoded_count++;
 	custom_edition_sounds_globals.decoded_microseconds += took;
+	if (result.resumed)
+		custom_edition_sounds_globals.link_resumed_count++;
 
 	sound_decode_report(sound, &result, took);
 	return;
+}
+
+/* whether the waiting decoding `index` may be done next: an Ogg Vorbis
+link may not while a link of the same stream from an earlier frame waits
+(the links of a chain are decoded in order, each taking up the decoding
+the one before kept; with the lock held) */
+static boolean waiting_ready(long index)
+{
+	struct waiting_sound const *sound = &custom_edition_sounds_globals.waiting[index];
+	long other;
+
+	if (!sound->stream_link)
+		return TRUE;
+	for (other = 0; other < custom_edition_sounds_globals.waiting_count; other++)
+	{
+		struct waiting_sound const *earlier = &custom_edition_sounds_globals.waiting[other];
+
+		if (earlier->stream_link && earlier->first_frame < sound->first_frame &&
+			earlier->file_offset == sound->file_offset && earlier->file_bytes == sound->file_bytes)
+		{
+			return FALSE;
+		}
+	}
+	return TRUE;
 }
 
 static void *decoder_thread(void *parameter)
@@ -438,15 +694,19 @@ static void *decoder_thread(void *parameter)
 	pthread_mutex_lock(&custom_edition_sounds_globals.lock);
 	for (;;)
 	{
-		long shortest = 0;
+		long shortest = NONE;
 		long index;
 
 		while (custom_edition_sounds_globals.waiting_count == 0)
 			pthread_cond_wait(&custom_edition_sounds_globals.wake, &custom_edition_sounds_globals.lock);
-		for (index = 1; index < custom_edition_sounds_globals.waiting_count; index++)
+		/* (of those that may be done now: one always may, the earliest
+		waiting link of each stream) */
+		for (index = 0; index < custom_edition_sounds_globals.waiting_count; index++)
 		{
-			if (custom_edition_sounds_globals.waiting[index].destination_bytes <
-				custom_edition_sounds_globals.waiting[shortest].destination_bytes)
+			if ((shortest == NONE ||
+				custom_edition_sounds_globals.waiting[index].destination_bytes <
+					custom_edition_sounds_globals.waiting[shortest].destination_bytes) &&
+				waiting_ready(index))
 			{
 				shortest = index;
 			}
@@ -511,7 +771,8 @@ static boolean stream_read_now(
 }
 
 /* the ADPCM bytes of a stream its first and last pages describe, played
-by the sound `definition`; 0 when they do not go together. Its first page
+by the sound `definition` (all of them: more than the sound cache gives a
+permutation, for a long sound); 0 when they do not go together. Its first page
 holds only the identification header (Vorbis I: 58 bytes); its last page
 is looked for in its last few kilobytes, then in as many as a page can be
 (a high quality stream's are tens of kilobytes) */
@@ -520,8 +781,8 @@ static uint32_t measured_adpcm_bytes(
 	struct sound_definition const *definition)
 {
 	uint32_t size = (uint32_t)permutation->samples.size;
-	int channels = definition->encoding == 1 ? 2 : 1;
-	long rate = definition->sample_rate == 1 ? 44100 : 22050;
+	int channels = definition_channels(definition);
+	long rate = definition_rate(definition);
 	struct ogg_sound_stream_info info;
 	uint32_t tail_bytes = size < MEASURE_TAIL_BYTES ? size : MEASURE_TAIL_BYTES;
 	uint32_t head_bytes = size < MEASURE_HEAD_BYTES ? size : MEASURE_HEAD_BYTES;
@@ -556,10 +817,7 @@ static uint32_t measured_adpcm_bytes(
 	frames = found ? ogg_sound_output_frames(info.frames, info.rate, rate) : 0;
 	if (!frames || info.channels < 1 || info.channels > 2)
 		return 0;
-	/* (more than the cache gives a permutation is cut off) */
 	bytes = ogg_sound_adpcm_bytes(frames, channels);
-	if (bytes > OGG_SOUND_MAXIMUM_ADPCM_BYTES)
-		bytes = OGG_SOUND_MAXIMUM_ADPCM_BYTES / (OGG_SOUND_ADPCM_BLOCK_BYTES * channels) * (OGG_SOUND_ADPCM_BLOCK_BYTES * channels);
 	return bytes;
 }
 
@@ -589,7 +847,13 @@ long custom_edition_sound_cache_bytes(
 	{
 		struct sound_definition const *definition = permutation_definition(permutation);
 		uint32_t bytes = definition ? measured_adpcm_bytes(permutation, definition) : 0;
+		uint32_t block_bytes = definition ? OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)definition_channels(definition) : 1;
 
+		/* (more than the cache gives a permutation is cut off: a long sound
+		is made a chain as the map loads, custom_edition_sounds_map_loaded,
+		unless its stream was too small to be measured then) */
+		if (bytes > OGG_SOUND_MAXIMUM_ADPCM_BYTES)
+			bytes = OGG_SOUND_MAXIMUM_ADPCM_BYTES / block_bytes * block_bytes;
 		permutation->sample_buffer_size = bytes ? bytes : SOUND_BUFFER_UNPLAYABLE;
 		if (!bytes)
 		{
@@ -603,6 +867,295 @@ long custom_edition_sound_cache_bytes(
 		return 0;
 	}
 	return (long)permutation->sample_buffer_size;
+}
+
+boolean custom_edition_sound_is_chained(
+	struct sound_permutation const *permutation)
+{
+	return chain_link(permutation, NULL);
+}
+
+/* a permutation's chain: its links and the blocks of each but the last
+(whole Xbox ADPCM blocks of `channels` channels, of equal length but the
+last: the loop comes back to the first link when the last starts, so a last
+link of a few blocks would leave the first no time to load), for all of
+its `whole_bytes` up to CHAIN_MAXIMUM_ADPCM_BYTES; 0 links when it needs
+no chain */
+static long chain_layout(
+	uint32_t whole_bytes,
+	int channels,
+	uint32_t *link_blocks)
+{
+	uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+	uint32_t blocks;
+	uint32_t links;
+
+	*link_blocks = 0;
+	if (whole_bytes <= OGG_SOUND_MAXIMUM_ADPCM_BYTES)
+		return 0;
+	if (whole_bytes > CHAIN_MAXIMUM_ADPCM_BYTES)
+		whole_bytes = CHAIN_MAXIMUM_ADPCM_BYTES;
+	blocks = whole_bytes / block_bytes;
+	links = (blocks * block_bytes + CHAIN_LINK_BYTES - 1) / CHAIN_LINK_BYTES;
+	*link_blocks = (blocks + links - 1) / links;
+	return (long)((blocks + *link_blocks - 1) / *link_blocks);
+}
+
+/* the links a pitch range's chains add to it (0 when it has none, or they
+would make it more than a range may have) */
+static long range_links_added(
+	struct sound_pitch_range const *range,
+	struct sound_definition const *definition)
+{
+	long added = 0;
+	long index;
+
+	for (index = 0; index < range->permutations.count; index++)
+	{
+		struct sound_permutation const *permutation =
+			(struct sound_permutation const *)range->permutations.address + index;
+		uint32_t link_blocks;
+		long links = chain_layout(permutation_whole_bytes(permutation, definition), definition_channels(definition),
+			&link_blocks);
+
+		if (links > 1)
+			added += links - 1;
+	}
+	return range->permutations.count + added > CHAIN_MAXIMUM_RANGE_PERMUTATIONS ? 0 : added;
+}
+
+/* whether the map's sound `definition` and its pitch range `range` are
+ones whose chains are made (the same answer as the map is planned and as
+the chains are made: custom_edition_sounds_map_loaded) */
+static boolean range_chained(
+	struct sound_pitch_range const *range,
+	struct sound_definition const *definition,
+	long *links_so_far)
+{
+	long added = range_links_added(range, definition);
+
+	if (!added || *links_so_far + added > CHAIN_MAXIMUM_LINKS)
+		return FALSE;
+	*links_so_far += added;
+	return TRUE;
+}
+
+/* the permutations of the pitch range `range` of `definition` (of the
+sound `tag_index`) and their chains' links, written at `permutations`
+(the chains' table from `table_index`), which the range then has; returns
+how many */
+static long range_chains_make(
+	struct sound_pitch_range *range,
+	struct sound_definition const *definition,
+	long tag_index,
+	long table_index)
+{
+	struct sound_permutation const *own = (struct sound_permutation const *)range->permutations.address;
+	struct sound_permutation *permutations = custom_edition_sounds_globals.chain_permutations + table_index;
+	long count = range->permutations.count;
+	int channels = definition_channels(definition);
+	long rate = definition_rate(definition);
+	boolean linked = TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit);
+	long index;
+
+	memcpy(permutations, own, (size_t)count * sizeof(*permutations));
+	for (index = 0; index < count; index++)
+		custom_edition_sounds_globals.chain_first_frames[table_index + index] = CHAIN_NOT_A_LINK;
+	for (index = 0; index < range->permutations.count; index++)
+	{
+		uint32_t whole_bytes = permutation_whole_bytes(&own[index], definition);
+		uint32_t block_bytes = OGG_SOUND_ADPCM_BLOCK_BYTES * (uint32_t)channels;
+		uint32_t link_blocks;
+		long links = chain_layout(whole_bytes, channels, &link_blocks);
+		uint32_t blocks = (whole_bytes > CHAIN_MAXIMUM_ADPCM_BYTES ? CHAIN_MAXIMUM_ADPCM_BYTES : whole_bytes) / block_bytes;
+		/* (the chain goes on with what the permutation was followed by, in
+		a sound that had chains of its own) */
+		short after = linked ? own[index].next_permutation_index : NONE;
+		long link;
+
+		if (links < 2)
+			continue;
+		for (link = 0; link < links; link++)
+		{
+			long link_index = link ? count + link - 1 : index;
+			struct sound_permutation *permutation = &permutations[link_index];
+			uint32_t first_block = (uint32_t)link * link_blocks;
+			uint32_t link_frames;
+
+			*permutation = own[index];
+			permutation->sample_buffer_size = MIN(link_blocks, blocks - first_block) * block_bytes;
+			permutation->next_permutation_index = link + 1 < links ? (short)(count + link) : after;
+			custom_edition_sounds_globals.chain_first_frames[table_index + link_index] = first_block * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+			custom_edition_sounds_globals.chain_link_indices[table_index + link_index] = (short)link;
+			custom_edition_sounds_globals.chain_link_counts[table_index + link_index] = (short)links;
+			/* the mouth's 30 ticks a second, from the link's first */
+			link_frames = MIN(link_blocks, blocks - first_block) * OGG_SOUND_ADPCM_BLOCK_SAMPLES;
+			if (own[index].mouth_data.size > 0 && own[index].mouth_data.address)
+			{
+				long first_tick = (long)((uint64_t)first_block * OGG_SOUND_ADPCM_BLOCK_SAMPLES * 30 / (uint64_t)rate);
+				long ticks = (long)(((uint64_t)link_frames * 30 + (uint64_t)rate - 1) / (uint64_t)rate);
+
+				if (first_tick > own[index].mouth_data.size - 1)
+					first_tick = own[index].mouth_data.size - 1;
+				permutation->mouth_data.address = (byte *)own[index].mouth_data.address + first_tick;
+				permutation->mouth_data.size = MAX(1, MIN(ticks, own[index].mouth_data.size - first_tick));
+			}
+		}
+		platform_log("custom edition: %s (%.32s) is %lu frames of %d ch %ld Hz (%lu KB of Xbox ADPCM), played as a chain "
+			"of %ld permutations of %lu KB%s",
+			tag_get_name(tag_index), own[index].name, (unsigned long)(blocks * OGG_SOUND_ADPCM_BLOCK_SAMPLES), channels, rate,
+			(unsigned long)(whole_bytes / 1024), links, (unsigned long)(link_blocks * block_bytes / 1024),
+			whole_bytes > CHAIN_MAXIMUM_ADPCM_BYTES ? " (the rest cut off)" : "");
+		count += links - 1;
+	}
+	return count;
+}
+
+void custom_edition_sounds_map_loaded(
+	void)
+{
+	struct tag_iterator iterator;
+	long tag_index;
+	long links_so_far = 0;
+	long table_count = 0;
+	long stream_chains = 0;
+	long chains = 0;
+	unsigned long table_bytes;
+	unsigned long bytes;
+	long used;
+	long index;
+
+	/* (a map without sound plays none: the dedicated server) */
+	if (!custom_edition_cache_tags_loaded() || !config_boolean("audio.enabled") ||
+		custom_edition_sounds_globals.chain_memory)
+	{
+		return;
+	}
+	/* what the chains need: the lengths the loader could not give of
+	streams that may be long measured now, as they would be as they first
+	load */
+	tag_iterator_new(&iterator, SOUND_DEFINITION_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct sound_definition *definition = (struct sound_definition *)tag_get(SOUND_DEFINITION_TAG, tag_index);
+		long range_index;
+
+		for (range_index = 0; range_index < definition->pitch_ranges.count; range_index++)
+		{
+			struct sound_pitch_range *range = TAG_BLOCK_GET_ELEMENT(&definition->pitch_ranges, range_index, struct sound_pitch_range);
+
+			for (index = 0; index < range->permutations.count; index++)
+			{
+				struct sound_permutation *permutation = TAG_BLOCK_GET_ELEMENT(&range->permutations, index, struct sound_permutation);
+
+				if (permutation_transcoding(permutation) == _transcoding_ogg_vorbis && permutation->sample_buffer_size == 0 &&
+					permutation->samples.size >= CHAIN_MEASURE_STREAM_BYTES)
+				{
+					uint32_t whole_bytes = measured_adpcm_bytes(permutation, definition);
+
+					/* (none: left to be measured as it loads, and said then) */
+					if (whole_bytes)
+						permutation->sample_buffer_size = whole_bytes;
+				}
+			}
+			if (range_chained(range, definition, &links_so_far))
+			{
+				table_count += range->permutations.count + range_links_added(range, definition);
+				for (index = 0; index < range->permutations.count; index++)
+				{
+					struct sound_permutation const *permutation =
+						TAG_BLOCK_GET_ELEMENT(&range->permutations, index, struct sound_permutation);
+					uint32_t link_blocks;
+
+					if (chain_layout(permutation_whole_bytes(permutation, definition), definition_channels(definition),
+						&link_blocks) > 1)
+					{
+						chains++;
+						if (permutation_transcoding(permutation) == _transcoding_ogg_vorbis)
+							stream_chains++;
+					}
+				}
+			}
+		}
+	}
+	if (!table_count)
+		return;
+
+	/* the memory: the stream decoders, then the table */
+	custom_edition_sounds_globals.stream_decoder_count = MIN(stream_chains, STREAM_DECODERS);
+	table_bytes = (unsigned long)table_count * (sizeof(struct sound_permutation) + sizeof(uint32_t) + 2 * sizeof(short));
+	bytes = (unsigned long)custom_edition_sounds_globals.stream_decoder_count * OGG_SOUND_WORKING_BYTES + table_bytes;
+	custom_edition_sounds_globals.chain_memory = (byte *)halo_custom_edition_memory_alloc(bytes);
+	if (!custom_edition_sounds_globals.chain_memory)
+	{
+		error(_error_silent, "custom edition: no room for the chains of %ld long sounds; they are cut off", chains);
+		custom_edition_sounds_globals.stream_decoder_count = 0;
+		return;
+	}
+	for (index = 0; index < custom_edition_sounds_globals.stream_decoder_count; index++)
+	{
+		custom_edition_sounds_globals.stream_working[index] =
+			custom_edition_sounds_globals.chain_memory + (unsigned long)index * OGG_SOUND_WORKING_BYTES;
+		custom_edition_sounds_globals.stream_working_used[index] = 0;
+	}
+	custom_edition_sounds_globals.chain_permutations = (struct sound_permutation *)(custom_edition_sounds_globals.chain_memory +
+		(unsigned long)custom_edition_sounds_globals.stream_decoder_count * OGG_SOUND_WORKING_BYTES);
+	custom_edition_sounds_globals.chain_first_frames = (uint32_t *)(custom_edition_sounds_globals.chain_permutations + table_count);
+	custom_edition_sounds_globals.chain_link_indices = (short *)(custom_edition_sounds_globals.chain_first_frames + table_count);
+	custom_edition_sounds_globals.chain_link_counts = custom_edition_sounds_globals.chain_link_indices + table_count;
+	custom_edition_sounds_globals.chain_permutation_count = table_count;
+
+	/* the chains, the same ranges as above: each range given its
+	permutations and their links in the table */
+	links_so_far = 0;
+	used = 0;
+	tag_iterator_new(&iterator, SOUND_DEFINITION_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct sound_definition *definition = (struct sound_definition *)tag_get(SOUND_DEFINITION_TAG, tag_index);
+		boolean chained = FALSE;
+		long range_index;
+
+		for (range_index = 0; range_index < definition->pitch_ranges.count; range_index++)
+		{
+			struct sound_pitch_range *range = TAG_BLOCK_GET_ELEMENT(&definition->pitch_ranges, range_index, struct sound_pitch_range);
+			long count;
+
+			if (!range_chained(range, definition, &links_so_far) ||
+				used + range->permutations.count + range_links_added(range, definition) > table_count)
+			{
+				continue;
+			}
+			count = range_chains_make(range, definition, tag_index, used);
+			range->permutations.address = custom_edition_sounds_globals.chain_permutations + used;
+			range->permutations.count = count;
+			used += count;
+			chained = TRUE;
+		}
+		/* the sound plays its chains (sound_definition_next_permutation);
+		one that had none of its own has every other permutation end its
+		chain, as any of its permutations did */
+		if (chained && !TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit))
+		{
+			SET_FLAG(definition->flags, _sound_definition_linked_permutations_bit, TRUE);
+			for (range_index = 0; range_index < definition->pitch_ranges.count; range_index++)
+			{
+				struct sound_pitch_range *range = TAG_BLOCK_GET_ELEMENT(&definition->pitch_ranges, range_index, struct sound_pitch_range);
+
+				for (index = 0; index < range->permutations.count; index++)
+				{
+					struct sound_permutation *permutation = TAG_BLOCK_GET_ELEMENT(&range->permutations, index, struct sound_permutation);
+
+					if (!chain_link(permutation, NULL))
+						permutation->next_permutation_index = NONE;
+				}
+			}
+		}
+	}
+	platform_log("custom edition: %ld long sounds made chains of permutations (%ld permutations, %lu KB, and %ld stream "
+		"decoders of %lu KB)", chains, table_count, table_bytes / 1024, custom_edition_sounds_globals.stream_decoder_count,
+		(unsigned long)OGG_SOUND_WORKING_BYTES / 1024);
+	return;
 }
 
 boolean custom_edition_sound_load(
@@ -631,9 +1184,14 @@ boolean custom_edition_sound_load(
 		sound->destination = destination;
 		sound->destination_bytes = (uint32_t)destination_bytes;
 		sound->loaded = loaded;
-		sound->channels = definition->encoding == 1 ? 2 : 1;
-		sound->rate = definition->sample_rate == 1 ? 44100 : 22050;
+		sound->channels = definition_channels(definition);
+		sound->rate = definition_rate(definition);
 		sound->permutation = permutation;
+		sound->first_frame = 0;
+		sound->link = chain_link(permutation, &sound->first_frame);
+		sound->link_index = sound->link ? custom_edition_sounds_globals.chain_link_indices[chain_index(permutation)] : 0;
+		sound->link_count = sound->link ? custom_edition_sounds_globals.chain_link_counts[chain_index(permutation)] : 0;
+		sound->stream_link = sound->link && transcoding == _transcoding_ogg_vorbis;
 		*loaded = FALSE;
 		queued = TRUE;
 		pthread_cond_signal(&custom_edition_sounds_globals.wake);
@@ -690,19 +1248,38 @@ void custom_edition_sounds_stop(
 		halo_custom_edition_memory_free(custom_edition_sounds_globals.memory);
 		custom_edition_sounds_globals.memory = NULL;
 	}
+	/* (the tags that named the chains go with the map) */
+	if (custom_edition_sounds_globals.chain_memory)
+	{
+		long index;
+
+		halo_custom_edition_memory_free(custom_edition_sounds_globals.chain_memory);
+		custom_edition_sounds_globals.chain_memory = NULL;
+		custom_edition_sounds_globals.chain_permutations = NULL;
+		custom_edition_sounds_globals.chain_first_frames = NULL;
+		custom_edition_sounds_globals.chain_link_indices = NULL;
+		custom_edition_sounds_globals.chain_link_counts = NULL;
+		custom_edition_sounds_globals.chain_permutation_count = 0;
+		for (index = 0; index < STREAM_DECODERS; index++)
+			custom_edition_sounds_globals.stream_working[index] = NULL;
+		custom_edition_sounds_globals.stream_decoder_count = 0;
+	}
 	if (custom_edition_sounds_globals.decoded_count || custom_edition_sounds_globals.encoded_count)
 	{
 		platform_log("ogg sound: %lu Ogg Vorbis permutations decoded with the map, %.1f ms in all; "
-			"%lu 16-bit PCM ones encoded, %.1f ms",
+			"%lu 16-bit PCM ones encoded, %.1f ms; %lu of them links of long sounds' chains (%lu taken up from the link before)",
 			custom_edition_sounds_globals.decoded_count,
 			(double)custom_edition_sounds_globals.decoded_microseconds / 1000.0,
 			custom_edition_sounds_globals.encoded_count,
-			(double)custom_edition_sounds_globals.encoded_microseconds / 1000.0);
+			(double)custom_edition_sounds_globals.encoded_microseconds / 1000.0,
+			custom_edition_sounds_globals.link_decoded_count, custom_edition_sounds_globals.link_resumed_count);
 	}
 	custom_edition_sounds_globals.decoded_count = 0;
 	custom_edition_sounds_globals.decoded_microseconds = 0;
 	custom_edition_sounds_globals.encoded_count = 0;
 	custom_edition_sounds_globals.encoded_microseconds = 0;
+	custom_edition_sounds_globals.link_decoded_count = 0;
+	custom_edition_sounds_globals.link_resumed_count = 0;
 	memset(failure_reported, 0, sizeof(failure_reported));
 	pthread_mutex_unlock(&custom_edition_sounds_globals.lock);
 	return;

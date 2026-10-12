@@ -301,6 +301,30 @@ changed:
   taken but the cache block the permutation gets (at most 1 MB) as an Xbox
   ADPCM one does. A sound of 16-bit PCM alone (none on hand) is made an
   Xbox ADPCM one, which the game plays, where it was refused too.
+- **Long sounds** (more Xbox ADPCM than the 1 MB the sound cache gives a
+  permutation: 42 s of 22 kHz stereo; a map's music, long commentary) were
+  cut off there, and looping music went back to its start early:
+  rainbow-road's 222.6 s track after 42.3 s. As the map loads
+  (`custom_edition_sounds_map_loaded`, from `scenario_tags_load`) each such
+  Ogg Vorbis or 16-bit PCM permutation is made a chain of permutations of
+  ~256 KB each, of equal length, as Halo's own music is: the pitch range's
+  permutations and the links are copied into a memory block of the map's
+  (124 bytes a permutation), the range pointed at them and the sound marked
+  as having linked permutations, so the sound manager plays the links in
+  turn, asks for three ahead, and a looping sound starts again at the first
+  link only after the last. The lengths the loader could not give of
+  streams of 32 KB or more are measured then. Each link is decoded as the
+  sound cache asks for it; an Ogg Vorbis link takes up the decoding where
+  the link before kept it in a stream decoder of its own (384 KB, two at
+  most, only on maps with such sounds: `ogg_sound_request.keep`), so a
+  chain costs one decoding of its stream, and the links are the whole
+  stream's Xbox ADPCM to the byte; a 16-bit PCM link is read from its
+  first frame. An impulse sound (a script's `sound_impulse_start`) plays on
+  through such a chain too (`sound_manager.c`), where the Xbox played an
+  impulse sound's first permutation only. Up to 64 MB of a permutation
+  (11 minutes of 44 kHz stereo) and 4096 links a map; past that, or with no
+  room for the block, a sound is cut off as before.
+  run_ce_long_music_test.sh.
 - **Ogg Vorbis streams of another rate than their sound's** (none in the
   four maps: every stream there is at its sound's rate) are interpolated to
   the sound's rate (low-passed first when the rate goes down), within 1 kHz
@@ -863,7 +887,7 @@ every layout used was then checked against the sample maps.
   ADPCM, decoded as the sound cache loads them (encoding a 16-bit PCM one
   takes about a millisecond on x86): an Ogg Vorbis permutation takes the cache
   memory an Xbox ADPCM one of its length would (at most 1 MB; longer ones
-  are cut off there), and its first play waits for the decoding (a few
+  are made chains of ~256 KB links, above), and its first play waits for the decoding (a few
   milliseconds on x86, ~40 ms for a 5 s stereo music link on a Raspberry Pi
   4; the Vita is slower). The ADPCM costs ~30 dB of signal to noise on a
   sine (run_ogg_sound_test.sh), as the Xbox's own sounds do.

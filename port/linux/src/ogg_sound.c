@@ -178,10 +178,27 @@ int ogg_sound_measure(
 #ifndef HALO_OGG_SOUND_NO_DECODER
 /* ---------- the decoder's state */
 
-/* (static, not on the stack: what the decoding changes must be what is in
-memory when an allocation that does not fit longjmps back) */
-static struct
+enum
 {
+	/* the state's mark while a decoding is kept in its working memory */
+	KEPT_MARK = 0x4B455054,
+};
+
+/* The decoder's state, at the start of its working memory (the heap
+follows it), so that a decoding can be kept there between two pieces of a
+stream's output (ogg_sound_request.keep), and so that what the decoding
+changes is what is in memory when an allocation that does not fit
+longjmps back. */
+struct decoder_state
+{
+	/* KEPT_MARK while a decoding is kept: of which stream, channels and
+	rate, and the output frame it goes on with */
+	uint32_t kept;
+	uint64_t stream_key;
+	int channels;
+	long output_rate;
+	uint32_t next_frame;
+
 	struct ogg_sound_request const *request;
 	struct ogg_sound_result *result;
 
@@ -195,38 +212,50 @@ static struct
 	struct xbox_adpcm_encoder encoder;
 	struct xbox_adpcm_rate rate;
 
-	/* the stream */
+	/* the stream, the bytes of it read, whether its first logical stream
+	has begun and its last page come, and whether the decoding is over
+	(the stream ended, or its input) */
 	ogg_sync_state sync;
 	ogg_stream_state stream;
 	vorbis_info info;
 	vorbis_comment comment;
 	vorbis_dsp_state dsp;
 	vorbis_block block_state;
+	uint32_t input_offset;
+	int begun;
 	int stream_started;
+	int stream_ended;
 	int headers;
-} decoder;
+	int finished;
+};
+
+/* (the state's bytes, the heap aligned after them) */
+#define DECODER_STATE_BYTES ((sizeof(struct decoder_state) + 15) & ~(size_t)15)
+
+/* the state of the decoding being done (ogg_sound_transcode) */
+static struct decoder_state *decoder;
 
 /* ---------- the working memory (ogg/os_types.h) */
 
 static void out_of_memory(void)
 {
-	longjmp(decoder.out_of_memory, 1);
+	longjmp(decoder->out_of_memory, 1);
 }
 
 static void heap_note(void *pointer)
 {
-	decoder.heap_in_use += tlsf_block_size(pointer);
-	if (decoder.heap_in_use > decoder.result->working_peak_bytes)
-		decoder.result->working_peak_bytes = decoder.heap_in_use;
+	decoder->heap_in_use += tlsf_block_size(pointer);
+	if (decoder->heap_in_use > decoder->result->working_peak_bytes)
+		decoder->result->working_peak_bytes = decoder->heap_in_use;
 }
 
 void *halo_ogg_malloc(size_t bytes)
 {
 	void *pointer;
 
-	if (!decoder.heap)
+	if (!decoder || !decoder->heap)
 		out_of_memory();
-	pointer = tlsf_malloc(decoder.heap, bytes ? bytes : 1);
+	pointer = tlsf_malloc(decoder->heap, bytes ? bytes : 1);
 	if (!pointer)
 		out_of_memory();
 	heap_note(pointer);
@@ -246,10 +275,10 @@ void *halo_ogg_calloc(size_t count, size_t size)
 
 void halo_ogg_free(void *pointer)
 {
-	if (!pointer || !decoder.heap)
+	if (!pointer || !decoder || !decoder->heap)
 		return;
-	decoder.heap_in_use -= tlsf_block_size(pointer);
-	tlsf_free(decoder.heap, pointer);
+	decoder->heap_in_use -= tlsf_block_size(pointer);
+	tlsf_free(decoder->heap, pointer);
 }
 
 void *halo_ogg_realloc(void *pointer, size_t bytes)
@@ -259,13 +288,13 @@ void *halo_ogg_realloc(void *pointer, size_t bytes)
 
 	if (!pointer)
 		return halo_ogg_malloc(bytes);
-	if (!decoder.heap)
+	if (!decoder || !decoder->heap)
 		out_of_memory();
 	old_size = tlsf_block_size(pointer);
-	moved = tlsf_realloc(decoder.heap, pointer, bytes ? bytes : 1);
+	moved = tlsf_realloc(decoder->heap, pointer, bytes ? bytes : 1);
 	if (!moved)
 		out_of_memory();
-	decoder.heap_in_use -= old_size;
+	decoder->heap_in_use -= old_size;
 	heap_note(moved);
 	return moved;
 }
@@ -280,12 +309,12 @@ static void stream_frame(int const *samples, int stream_channels)
 
 	/* the output's channels: a stereo stream of a mono sound mixed, a
 	mono stream of a stereo sound on both sides */
-	if (decoder.request->channels == stream_channels)
+	if (decoder->request->channels == stream_channels)
 	{
 		for (channel = 0; channel < stream_channels; channel++)
 			converted[channel] = samples[channel];
 	}
-	else if (decoder.request->channels == 1)
+	else if (decoder->request->channels == 1)
 	{
 		converted[0] = (samples[0] + samples[1]) / 2;
 	}
@@ -294,21 +323,23 @@ static void stream_frame(int const *samples, int stream_channels)
 		converted[0] = converted[1] = samples[0];
 	}
 
-	xbox_adpcm_rate_frame(&decoder.rate, converted);
+	xbox_adpcm_rate_frame(&decoder->rate, converted);
 }
 
-/* the frames the decoder has ready */
+/* the frames the decoder has ready, until the output is full: those it
+did not take stay the decoder's (a kept decoding's next piece starts with
+them) */
 static void pcm_drain(void)
 {
 	ogg_int32_t **pcm;
 	int frames;
 
-	while (!decoder.encoder.full && (frames = vorbis_synthesis_pcmout(&decoder.dsp, &pcm)) > 0)
+	while (!decoder->encoder.full && (frames = vorbis_synthesis_pcmout(&decoder->dsp, &pcm)) > 0)
 	{
-		int stream_channels = decoder.info.channels;
+		int stream_channels = decoder->info.channels;
 		int frame;
 
-		for (frame = 0; frame < frames && !decoder.encoder.full; frame++)
+		for (frame = 0; frame < frames && !decoder->encoder.full; frame++)
 		{
 			int samples[MAXIMUM_CHANNELS];
 			int channel;
@@ -318,8 +349,8 @@ static void pcm_drain(void)
 			stream_frame(samples, stream_channels);
 		}
 		if (frame < frames)
-			decoder.result->truncated = 1;
-		vorbis_synthesis_read(&decoder.dsp, frames);
+			decoder->result->truncated = 1;
+		vorbis_synthesis_read(&decoder->dsp, frame);
 	}
 	return;
 }
@@ -330,27 +361,27 @@ static void pcm_drain(void)
 status that ends the decoding, else _ogg_sound_ok */
 static enum ogg_sound_status packet_take(ogg_packet *packet)
 {
-	if (decoder.headers < VORBIS_HEADER_COUNT)
+	if (decoder->headers < VORBIS_HEADER_COUNT)
 	{
-		if (vorbis_synthesis_headerin(&decoder.info, &decoder.comment, packet) < 0)
+		if (vorbis_synthesis_headerin(&decoder->info, &decoder->comment, packet) < 0)
 			return _ogg_sound_not_vorbis;
-		decoder.headers++;
-		if (decoder.headers == 1)
+		decoder->headers++;
+		if (decoder->headers == 1)
 		{
-			decoder.result->stream_channels = decoder.info.channels;
-			decoder.result->stream_rate = decoder.info.rate;
-			decoder.result->halved = decoder.info.rate == 2 * decoder.request->rate;
-			if (decoder.info.channels < 1 || decoder.info.channels > MAXIMUM_CHANNELS ||
-				!ogg_sound_output_frames(1, decoder.info.rate, decoder.request->rate) ||
-				!xbox_adpcm_rate_begin(&decoder.rate, &decoder.encoder, decoder.info.rate, decoder.request->rate))
+			decoder->result->stream_channels = decoder->info.channels;
+			decoder->result->stream_rate = decoder->info.rate;
+			decoder->result->halved = decoder->info.rate == 2 * decoder->request->rate;
+			if (decoder->info.channels < 1 || decoder->info.channels > MAXIMUM_CHANNELS ||
+				!ogg_sound_output_frames(1, decoder->info.rate, decoder->request->rate) ||
+				!xbox_adpcm_rate_begin(&decoder->rate, &decoder->encoder, decoder->info.rate, decoder->request->rate))
 			{
 				return _ogg_sound_unsupported_format;
 			}
 		}
-		else if (decoder.headers == VORBIS_HEADER_COUNT)
+		else if (decoder->headers == VORBIS_HEADER_COUNT)
 		{
-			if (vorbis_synthesis_init(&decoder.dsp, &decoder.info) != 0 ||
-				vorbis_block_init(&decoder.dsp, &decoder.block_state) != 0)
+			if (vorbis_synthesis_init(&decoder->dsp, &decoder->info) != 0 ||
+				vorbis_block_init(&decoder->dsp, &decoder->block_state) != 0)
 			{
 				return _ogg_sound_not_vorbis;
 			}
@@ -358,84 +389,126 @@ static enum ogg_sound_status packet_take(ogg_packet *packet)
 		return _ogg_sound_ok;
 	}
 	/* (a damaged audio packet is skipped, as players do) */
-	if (vorbis_synthesis(&decoder.block_state, packet) == 0)
-		vorbis_synthesis_blockin(&decoder.dsp, &decoder.block_state);
-	pcm_drain();
+	if (vorbis_synthesis(&decoder->block_state, packet) == 0)
+		vorbis_synthesis_blockin(&decoder->dsp, &decoder->block_state);
 	return _ogg_sound_ok;
 }
 
-/* a page: the first logical stream's packets. Returns nonzero when the
-decoding is over (its last page, the output full, or a status) */
-static int page_take(ogg_page *page, enum ogg_sound_status *status)
+/* a page: the first logical stream's (its packets are taken out one by
+one: stream_run). Returns the status that ends the decoding, else
+_ogg_sound_ok */
+static enum ogg_sound_status page_take(ogg_page *page)
 {
-	ogg_packet packet;
-	int result;
-
-	if (!decoder.stream_started)
+	if (!decoder->stream_started)
 	{
 		/* (whatever comes before a stream's first page is not ours) */
 		if (!ogg_page_bos(page))
-			return 0;
-		if (ogg_stream_init(&decoder.stream, ogg_page_serialno(page)) != 0)
-		{
-			*status = _ogg_sound_out_of_memory;
-			return 1;
-		}
-		decoder.stream_started = 1;
+			return _ogg_sound_ok;
+		if (ogg_stream_init(&decoder->stream, ogg_page_serialno(page)) != 0)
+			return _ogg_sound_out_of_memory;
+		decoder->stream_started = 1;
 	}
 	/* (another logical stream's page, multiplexed or chained, is passed
-	over) */
-	if (ogg_page_serialno(page) != decoder.stream.serialno)
-		return 0;
-	if (ogg_stream_pagein(&decoder.stream, page) != 0)
-		return 0;
-	while ((result = ogg_stream_packetout(&decoder.stream, &packet)) != 0)
-	{
-		/* (a gap in the stream: the next packet is taken) */
-		if (result < 0)
-			continue;
-		*status = packet_take(&packet);
-		if (*status != _ogg_sound_ok || decoder.encoder.full)
-			return 1;
-	}
-	return ogg_page_eos(page);
+	over; so is one after the stream's last) */
+	if (decoder->stream_ended || ogg_page_serialno(page) != decoder->stream.serialno)
+		return _ogg_sound_ok;
+	if (ogg_stream_pagein(&decoder->stream, page) != 0)
+		return _ogg_sound_ok;
+	if (ogg_page_eos(page))
+		decoder->stream_ended = 1;
+	return _ogg_sound_ok;
 }
 
-static enum ogg_sound_status stream_decode(void)
+/* Decodes until the output is full (the rest left for a kept decoding's
+next piece) or the decoding is over (finished: the stream's last page
+taken, or the input read). Returns the status that ends the decoding, else
+_ogg_sound_ok. */
+static enum ogg_sound_status stream_run(void)
 {
-	struct ogg_sound_request const *request = decoder.request;
-	enum ogg_sound_status status = _ogg_sound_ok;
-	uint32_t offset = 0;
+	struct ogg_sound_request const *request = decoder->request;
+	enum ogg_sound_status status;
 
-	ogg_sync_init(&decoder.sync);
-	vorbis_info_init(&decoder.info);
-	vorbis_comment_init(&decoder.comment);
-	while (offset < request->input_bytes)
+	if (!decoder->begun)
 	{
-		uint32_t size = request->input_bytes - offset;
-		char *buffer;
+		decoder->begun = 1;
+		ogg_sync_init(&decoder->sync);
+		vorbis_info_init(&decoder->info);
+		vorbis_comment_init(&decoder->comment);
+	}
+	for (;;)
+	{
+		ogg_packet packet;
 		ogg_page page;
+		uint32_t size;
+		char *buffer;
 		int result;
 
-		if (size > OGG_SOUND_READ_BYTES)
-			size = OGG_SOUND_READ_BYTES;
-		buffer = ogg_sync_buffer(&decoder.sync, (long)size);
-		if (!buffer)
-			return _ogg_sound_out_of_memory;
-		if (!request->read(request->read_context, offset, size, buffer))
-			return _ogg_sound_read_failed;
-		ogg_sync_wrote(&decoder.sync, (long)size);
-		offset += size;
-		while ((result = ogg_sync_pageout(&decoder.sync, &page)) != 0)
+		/* the frames the last packet made */
+		if (decoder->headers >= VORBIS_HEADER_COUNT)
 		{
-			/* (bytes that are not a page are skipped) */
+			pcm_drain();
+			if (decoder->encoder.full)
+				return _ogg_sound_ok;
+		}
+		/* the next packet of the pages taken */
+		if (decoder->stream_started)
+		{
+			result = ogg_stream_packetout(&decoder->stream, &packet);
+			/* (a gap in the stream: the next packet is taken) */
 			if (result < 0)
 				continue;
-			if (page_take(&page, &status))
-				return status;
+			if (result > 0)
+			{
+				status = packet_take(&packet);
+				/* (an output full from the start ends the decoding at its
+				first packet) */
+				if (status != _ogg_sound_ok || decoder->encoder.full)
+					return status;
+				continue;
+			}
+			if (decoder->stream_ended)
+			{
+				decoder->finished = 1;
+				return _ogg_sound_ok;
+			}
 		}
+		/* the next page of the bytes read */
+		result = ogg_sync_pageout(&decoder->sync, &page);
+		/* (bytes that are not a page are skipped) */
+		if (result < 0)
+			continue;
+		if (result > 0)
+		{
+			status = page_take(&page);
+			if (status != _ogg_sound_ok)
+				return status;
+			continue;
+		}
+		/* more of the stream */
+		if (decoder->input_offset >= request->input_bytes)
+		{
+			decoder->finished = 1;
+			return decoder->headers < VORBIS_HEADER_COUNT ? _ogg_sound_not_vorbis : _ogg_sound_ok;
+		}
+		size = request->input_bytes - decoder->input_offset;
+		if (size > OGG_SOUND_READ_BYTES)
+			size = OGG_SOUND_READ_BYTES;
+		buffer = ogg_sync_buffer(&decoder->sync, (long)size);
+		if (!buffer)
+			return _ogg_sound_out_of_memory;
+		if (!request->read(request->read_context, decoder->input_offset, size, buffer))
+			return _ogg_sound_read_failed;
+		ogg_sync_wrote(&decoder->sync, (long)size);
+		decoder->input_offset += size;
 	}
-	return decoder.headers < VORBIS_HEADER_COUNT ? _ogg_sound_not_vorbis : _ogg_sound_ok;
+}
+
+/* whether the state holds a kept decoding that `request` goes on with */
+static int decoding_resumable(struct decoder_state const *state, struct ogg_sound_request const *request)
+{
+	return request->keep && state->kept == KEPT_MARK && state->stream_key == request->stream_key &&
+		state->channels == request->channels && state->output_rate == request->rate &&
+		request->first_frame >= state->next_frame;
 }
 
 enum ogg_sound_status ogg_sound_transcode(
@@ -444,9 +517,9 @@ enum ogg_sound_status ogg_sound_transcode(
 {
 	/* (volatile: set on both sides of the setjmp) */
 	volatile enum ogg_sound_status status;
+	struct decoder_state *state;
 
 	memset(result, 0, sizeof(*result));
-	memset(&decoder, 0, sizeof(decoder));
 	if (!request || !request->read || !request->output ||
 		request->channels < 1 || request->channels > MAXIMUM_CHANNELS ||
 		request->rate <= 0 || request->rate > OGG_SOUND_MAXIMUM_RATE ||
@@ -456,38 +529,141 @@ enum ogg_sound_status ogg_sound_transcode(
 		result->status = _ogg_sound_bad_arguments;
 		return result->status;
 	}
-	decoder.request = request;
-	decoder.result = result;
-	xbox_adpcm_encoder_begin(&decoder.encoder, request->output, request->output_bytes, request->channels);
+	state = (struct decoder_state *)request->working;
+	if (decoding_resumable(state, request) && state->finished)
+	{
+		struct xbox_adpcm_encoder silence;
 
-	decoder.heap = tlsf_create_with_pool(request->working, request->working_bytes);
-	if (!decoder.heap)
+		/* the stream ended before this piece: silence, and still kept as
+		ended (no piece after it decodes the stream again to find that) */
+		xbox_adpcm_encoder_begin(&silence, request->output, request->output_bytes, request->channels);
+		result->frames_padded = xbox_adpcm_encoder_finish(&silence);
+		result->resumed = 1;
+		result->kept = 1;
+		result->frames_skipped = request->first_frame - state->next_frame;
+		result->stream_channels = state->info.channels;
+		result->stream_rate = state->info.rate;
+		result->halved = state->info.rate == 2 * request->rate;
+		result->status = _ogg_sound_ok;
+		return result->status;
+	}
+	if (decoding_resumable(state, request))
+	{
+		uint32_t skip = request->first_frame - state->next_frame;
+
+		/* the kept decoding: its frames held past the last output are this
+		one's first; those before this one's first (a piece skipped) only
+		warm the encoder, as they would have the whole output's (or, short
+		of whole blocks, are skipped) */
+		if (!skip)
+		{
+		}
+		else if (skip % XBOX_ADPCM_BLOCK_SAMPLES == 0)
+		{
+			xbox_adpcm_encoder_warm(&state->encoder, skip);
+		}
+		else if (skip >= (uint32_t)state->encoder.block_frames)
+		{
+			state->encoder.skip_frames = skip - (uint32_t)state->encoder.block_frames;
+			state->encoder.block_frames = 0;
+		}
+		else
+		{
+			memmove(state->encoder.block[0], state->encoder.block[skip],
+				(size_t)(state->encoder.block_frames - (int)skip) * sizeof(state->encoder.block[0]));
+			state->encoder.block_frames -= (int)skip;
+		}
+		xbox_adpcm_encoder_continue(&state->encoder, request->output, request->output_bytes);
+		result->resumed = 1;
+		result->frames_skipped = skip;
+		result->stream_channels = state->info.channels;
+		result->stream_rate = state->info.rate;
+		result->halved = state->info.rate == 2 * request->rate;
+		result->working_peak_bytes = state->heap_in_use;
+	}
+	else
+	{
+		memset(state, 0, sizeof(*state));
+		state->channels = request->channels;
+		state->output_rate = request->rate;
+		xbox_adpcm_encoder_begin(&state->encoder, request->output, request->output_bytes, request->channels);
+		/* (the frames before the first decoded and left out, warming the
+		encoder as they would have the whole output's) */
+		state->encoder.skip_frames = request->first_frame % XBOX_ADPCM_BLOCK_SAMPLES;
+		state->encoder.warm_frames = request->first_frame - state->encoder.skip_frames;
+		state->encoder.hold = request->keep;
+		result->frames_skipped = request->first_frame;
+		state->heap = tlsf_create_with_pool((uint8_t *)request->working + DECODER_STATE_BYTES,
+			request->working_bytes - DECODER_STATE_BYTES);
+	}
+	/* (kept again only once this piece is done) */
+	state->kept = 0;
+	state->request = request;
+	state->result = result;
+	decoder = state;
+
+	if (!state->heap)
 	{
 		status = _ogg_sound_bad_arguments;
 	}
-	else if (setjmp(decoder.out_of_memory) == 0)
+	else if (setjmp(state->out_of_memory) == 0)
 	{
-		status = stream_decode();
+		status = stream_run();
 		/* (the last frames of a stream of another rate) */
-		xbox_adpcm_rate_finish(&decoder.rate);
+		if (state->finished)
+			xbox_adpcm_rate_finish(&state->rate);
 	}
 	else
 	{
 		status = _ogg_sound_out_of_memory;
 	}
-	/* the heap goes whole: nothing in it is used again */
-	decoder.heap = NULL;
 
 	/* (the last part block, and silence after it) */
-	result->frames_padded = xbox_adpcm_encoder_finish(&decoder.encoder);
-	result->frames_decoded = decoder.encoder.frames;
-	result->truncated |= decoder.encoder.truncated;
-	result->sum_of_squares = decoder.encoder.sum_of_squares;
-	result->peak = decoder.encoder.peak;
+	result->frames_padded = xbox_adpcm_encoder_finish(&state->encoder);
+	result->frames_decoded = state->encoder.frames;
+	/* (frames skipped short of the output: none of it was reached) */
+	result->frames_skipped -= state->encoder.skip_frames + state->encoder.warm_frames;
+	result->truncated |= state->encoder.truncated;
+	result->sum_of_squares = state->encoder.sum_of_squares;
+	result->peak = state->encoder.peak;
 	result->status = status;
-	decoder.request = NULL;
-	decoder.result = NULL;
+	if (status == _ogg_sound_ok && request->keep && (state->finished || state->encoder.full) &&
+		request->first_frame <= UINT32_MAX - state->encoder.frames)
+	{
+		/* kept for the next piece (one the output filled before the
+		stream's end, or one the stream ended in: what follows is silence) */
+		state->kept = KEPT_MARK;
+		state->stream_key = request->stream_key;
+		state->next_frame = request->first_frame + state->encoder.frames;
+		result->kept = 1;
+		result->truncated |= !state->finished;
+	}
+	/* else, and once the stream has ended, the heap goes whole: nothing in
+	it is used again */
+	if (!result->kept || state->finished)
+		state->heap = NULL;
+	state->request = NULL;
+	state->result = NULL;
+	decoder = NULL;
 	return status;
+}
+
+int ogg_sound_kept(
+	void const *working,
+	size_t working_bytes,
+	uint64_t stream_key,
+	uint32_t *next_frame)
+{
+	struct decoder_state const *state = (struct decoder_state const *)working;
+
+	if (!working || ((uintptr_t)working & (WORKING_ALIGNMENT - 1)) || working_bytes < OGG_SOUND_MINIMUM_WORKING_BYTES ||
+		state->kept != KEPT_MARK || state->stream_key != stream_key)
+	{
+		return 0;
+	}
+	if (next_frame)
+		*next_frame = state->next_frame;
+	return 1;
 }
 
 #else
@@ -501,6 +677,19 @@ enum ogg_sound_status ogg_sound_transcode(
 		memset(request->output, 0, request->output_bytes);
 	result->status = _ogg_sound_unsupported_format;
 	return result->status;
+}
+
+int ogg_sound_kept(
+	void const *working,
+	size_t working_bytes,
+	uint64_t stream_key,
+	uint32_t *next_frame)
+{
+	(void)working;
+	(void)working_bytes;
+	(void)stream_key;
+	(void)next_frame;
+	return 0;
 }
 #endif
 

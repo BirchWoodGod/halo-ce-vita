@@ -1428,6 +1428,9 @@ long scenario_tags_load(
 			halo_loaded_tag_count = cache_file_globals.tag_header->tag_count;
 			cache_file_globals.tags_loaded = TRUE;
 			result = cache_file_globals.tag_header->scenario_tag_index;
+			/* (its sounds too long for a permutation made chains of them:
+			custom_edition_sounds.c) */
+			custom_edition_sounds_map_loaded();
 		}
 		else
 		{

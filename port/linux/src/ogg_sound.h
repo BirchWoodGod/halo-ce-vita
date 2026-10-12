@@ -35,9 +35,11 @@ enum
 	OGG_SOUND_MAXIMUM_RATE = 48000,
 
 	/* the most Xbox ADPCM a permutation is given (the sound cache holds
-	4 MB): 21 s of 44 kHz stereo, 85 s of 22 kHz mono. A longer stream is
-	cut off there. Retail Xbox permutations are 377064 bytes at most, and
-	Halo PC's tool splits long sounds into permutations of ~5 s */
+	4 MB): 21 s of 44 kHz stereo, 85 s of 22 kHz mono. A longer sound is
+	made a chain of permutations as it loads (custom_edition_sounds.c), as
+	Halo's own music is (retail Xbox permutations are 377064 bytes at
+	most, and Halo PC's tool splits long sounds into permutations of ~5 s);
+	where it cannot be, it is cut off there */
 	OGG_SOUND_MAXIMUM_ADPCM_BYTES = 1024 * 1024
 };
 
@@ -88,6 +90,20 @@ struct ogg_sound_request
 	allocated */
 	void *working;
 	size_t working_bytes;
+
+	/* A piece of the stream's output (a link of a long sound's chain):
+	the output starts at the stream's output frame `first_frame`, the
+	frames before it decoded and left out. With `keep`, a decoding the
+	output fills before the stream's end is kept in the working memory (as
+	the stream `stream_key`, the caller's name for it), and a later
+	request of the same stream, channels and rate with the same working
+	memory whose first frame is not before where it stopped takes it up
+	there (result.resumed) instead of decoding the stream from its start;
+	the working memory must then be left alone between the two. The read
+	procedure and its context may differ (they read the same stream). */
+	uint32_t first_frame;
+	int keep;
+	uint64_t stream_key;
 };
 
 /* what a stream's first and last pages say (ogg_sound_measure) */
@@ -120,6 +136,12 @@ struct ogg_sound_result
 	int peak;
 	/* the most working memory in use at once */
 	size_t working_peak_bytes;
+	/* (a piece: request.first_frame) whether a kept decoding was taken up,
+	the frames decoded and left out before the output, and whether the
+	decoding is kept for the next piece */
+	int resumed;
+	uint32_t frames_skipped;
+	int kept;
 };
 
 /* ---------- prototypes */
@@ -156,6 +178,15 @@ allocator is the decoder's). Returns the result's status. */
 enum ogg_sound_status ogg_sound_transcode(
 	struct ogg_sound_request const *request,
 	struct ogg_sound_result *result);
+
+/* Nonzero when the working memory (of `working_bytes`, as given to
+ogg_sound_transcode) holds a kept decoding of the stream `stream_key`, and
+the output frame it goes on with into `next_frame`. */
+int ogg_sound_kept(
+	void const *working,
+	size_t working_bytes,
+	uint64_t stream_key,
+	uint32_t *next_frame);
 
 char const *ogg_sound_status_describe(enum ogg_sound_status status);
 
