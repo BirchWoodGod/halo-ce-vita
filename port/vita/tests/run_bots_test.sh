@@ -683,7 +683,10 @@ for game in started:
         fail("game %d: %d bots played, not %d" % (game["number"], len(bot_players), bots))
     # (10: a one-minute game on a small map, the bots fighting more than
     # walking - Battle Creek Team Slayer once gave 14.0 under another job's load)
-    if median < 10.0:
+    # (the run's last game, cut off as the run ends - never unloaded - is
+    # not asked to have been walked)
+    cut_off = game["unloaded"] is None and game is games[-1]
+    if median < 10.0 and not cut_off:
         fail("game %d: the bots walked %.1f units (median)" % (game["number"], median))
     team_game = game["gametype"].split("+")[0] in ("team_slayer", "ctf", "team_king", "team_oddball", "team_race", "invasion")
     if team_game and len(teams & {0, 1}) < 2:
