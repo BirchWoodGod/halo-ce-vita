@@ -22,9 +22,12 @@ and the map's lanes it spreads the attackers over.
 The lanes, once a map (as the bots' first ticks of a game run, a bounded
 step a tick: bots_tactics_update): the map's walkable graph - a node each
 walkable surface of the structure (the AI's own, which the bots' searches
-walk), joined across the edges they share with other walkable surfaces -
-and its two bases (the CTF flag stands, which every stock map places in
-every gametype; else the teams' starting locations, else the two starting
+walk), joined across the edges they share with other walkable surfaces, but
+those under a machine or a door (Sidewinder's blast door between the bases,
+scenery that never opens) - and its two bases (the CTF flag stands, which
+every stock map places in every gametype; else, or when there is no way
+between them, the teams' starting locations - Prisoner's stands are on its
+upper floor, which no walkable surface reaches - else the two starting
 locations furthest apart). A search from the first base (Dijkstra's, the
 surfaces' middles apart) finds the direct route to the second base; then a
 search for each side lane the same, but each surface the dearer the nearer
@@ -35,18 +38,24 @@ keeps near the direct route (8% of its length at most, 5 units) or is long
 waypoints (10 units). A lane's waypoints are its surfaces a third and two
 thirds of the way, those well off the direct route. halo.log has the graph,
 the direct route's points and each lane.
+
+(debug) HALO_BOT_ROUTES_DUMP=<file> (a path the game's files take: in the
+data folder) writes the graph's surfaces, the direct route and each lane's
+surfaces, a line each, for a picture of them.
 */
 
 #include "cseries.h"
 #include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
+#include "objects/objects.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 #include "physics/collision_bsp_definitions.h"
 #include "physics/collisions.h"
 #include "tag_files/tag_groups.h"
+#include "tag_files/tag_files.h"
 
 #include "bots.h"
 #include "bots_tactics.h"
@@ -67,9 +76,11 @@ more, and the map has no lanes nor vantage points */
 #define BOTS_ROUTES_CORNERS 16
 /* the work of a tick while the lanes are made: surfaces looked at, the
 searches' surfaces taken, the nodes placed across the direct route */
-#define BOTS_ROUTES_SURFACES_A_TICK 800
-#define BOTS_ROUTES_POPS_A_TICK 200
-#define BOTS_ROUTES_NODES_A_TICK 500
+#define BOTS_ROUTES_SURFACES_A_TICK 300
+#define BOTS_ROUTES_POPS_A_TICK 80
+#define BOTS_ROUTES_NODES_A_TICK 200
+/* the machines (doors, lifts) whose ground the graph leaves out */
+#define BOTS_ROUTES_MACHINES 32
 /* a goal nearer than this is gone to directly */
 #define BOTS_LANE_LEAST_DISTANCE 25.0f
 /* how near a waypoint a bot has come to it, and how long it has to */
@@ -79,6 +90,7 @@ searches' surfaces taken, the nodes placed across the direct route */
 enum
 {
 	_routes_phase_idle = 0,
+	_routes_phase_machines,
 	_routes_phase_nodes,
 	_routes_phase_links,
 	_routes_phase_bases,
@@ -122,6 +134,7 @@ static struct
 	long *node_of_surface;
 	long cursor;
 	long link_capacity;
+	long link_write;
 	/* the search (Dijkstra's, an indexed binary heap): its costs, the way
 	back, the heap and each node's place in it (NONE: not in it, -2: done) */
 	real *cost;
@@ -131,8 +144,18 @@ static struct
 	long heap_count;
 	long origin;
 	long target;
-	/* the bases' nodes */
+	/* the bases' nodes, and which bases they are (bots_routes_find_bases'
+	sets: the stands, the teams' starting locations, the two furthest apart) */
 	long base_nodes[2];
+	long base_set;
+	/* the nodes' costs from the first base made (what is reached: the
+	vantage points' spots, lanes or none) */
+	boolean costs_made;
+	/* the machines' spheres, whose ground the graph leaves out */
+	long machine_count;
+	real_point3d machine_centers[BOTS_ROUTES_MACHINES];
+	real machine_radii[BOTS_ROUTES_MACHINES];
+	long machine_surfaces;
 	/* the side lane being searched (0 or 1), its side (-1 or 1) */
 	long lane_index;
 	real lane_side;
@@ -301,6 +324,7 @@ void bots_routes_reset(void)
 	csmemset(&bots_routes_map, 0, sizeof(bots_routes_map));
 	csmemset(bots_routes.lanes, 0, sizeof(bots_routes.lanes));
 	bots_routes.phase = _routes_phase_idle;
+	bots_routes.costs_made = FALSE;
 	bots_routes.structure = NULL;
 	bots_routes.cursor = 0;
 }
@@ -351,10 +375,35 @@ static boolean bots_routes_begin(void)
 	}
 	for (index = 0; index < bots_routes.surface_count; index++)
 		bots_routes.node_of_surface[index] = NONE;
+	bots_routes.base_set = 0;
+	bots_routes.machine_surfaces = 0;
 	bots_graph.node_count = 0;
 	bots_graph.link_count = 0;
 	bots_routes.cursor = 0;
 	return TRUE;
+}
+
+/* the machines, and the scenery that is a door, whose ground the graph
+leaves out: the way under Sidewinder's blast door between the bases, scenery
+that never opens and that bots.c's searches learn to be in the way, would be
+the direct route */
+static void bots_routes_find_machines(void)
+{
+	struct object_iterator iterator;
+
+	bots_routes.machine_count = 0;
+	object_iterator_new(&iterator, _object_mask_machine | _object_mask_scenery, 0);
+	while (object_iterator_next(&iterator) && bots_routes.machine_count < BOTS_ROUTES_MACHINES)
+	{
+		struct object_datum *object = object_get(iterator.index);
+		char const *name = tag_get_name(object->definition_index);
+
+		if (!object_try_and_get_and_verify_type(iterator.index, _object_mask_machine) && (!name || !strstr(name, "door")))
+			continue;
+		bots_routes.machine_centers[bots_routes.machine_count] = object->object.bounding_sphere_center;
+		bots_routes.machine_radii[bots_routes.machine_count] = object->object.bounding_sphere_radius;
+		bots_routes.machine_count++;
+	}
 }
 
 /* the nodes: a step of the walkable surfaces' middles, areas and slopes; TRUE
@@ -368,13 +417,15 @@ static boolean bots_routes_nodes_step(void)
 	{
 		long surface_index = bots_routes.cursor;
 		real_point3d corners[BOTS_ROUTES_CORNERS];
+		long neighbours[BOTS_ROUTES_CORNERS];
 		struct bots_graph_node *node;
 		real_vector3d normal = { 0.0f, 0.0f, 0.0f };
 		long count, corner;
+		real reach;
 
 		if (!bots_routes_walkable(surface_index))
 			continue;
-		count = bots_routes_corners(bsp, surface_index, corners, NULL);
+		count = bots_routes_corners(bsp, surface_index, corners, neighbours);
 		if (count < 3)
 			continue;
 		node = &bots_graph.nodes[bots_graph.node_count];
@@ -397,6 +448,26 @@ static boolean bots_routes_nodes_step(void)
 			normal.j += c.j;
 			normal.k += c.k;
 		}
+		/* (not under a machine: the surface reaching into its sphere) */
+		reach = 0.0f;
+		for (corner = 0; corner < count; corner++)
+			reach = MAX(reach, bots_routes_distance2d(&node->middle, &corners[corner]));
+		for (corner = 0; corner < bots_routes.machine_count; corner++)
+		{
+			real_point3d const *center = &bots_routes.machine_centers[corner];
+			real radius = bots_routes.machine_radii[corner];
+
+			if (bots_routes_distance2d(&node->middle, center) < radius * 0.8f + reach &&
+				node->middle.z > center->z - radius - 1.0f && node->middle.z < center->z + radius)
+			{
+				break;
+			}
+		}
+		if (corner < bots_routes.machine_count)
+		{
+			bots_routes.machine_surfaces++;
+			continue;
+		}
 		node->area = 0.5f * (real)sqrt(normal.i * normal.i + normal.j * normal.j + normal.k * normal.k);
 		node->normal_k = node->area > 0.0f ? (real)fabs(normal.k) * 0.5f / node->area : 0.0f;
 		node->surface_index = surface_index;
@@ -404,33 +475,12 @@ static boolean bots_routes_nodes_step(void)
 		node->route_distance = 0.0f;
 		node->route_side = 0.0f;
 		node->route_along = 0.0f;
-		bots_routes.node_of_surface[surface_index] = bots_graph.node_count;
-		bots_graph.node_count++;
-	}
-	return bots_routes.cursor >= bots_routes.surface_count;
-}
-
-/* the links: a step of each node's walkable neighbours; TRUE when all are
-made */
-static boolean bots_routes_links_step(void)
-{
-	struct collision_bsp const *bsp = bots_routes_bsp();
-	long last = MIN(bots_routes.cursor + BOTS_ROUTES_SURFACES_A_TICK, bots_graph.node_count);
-
-	for (; bots_routes.cursor < last; bots_routes.cursor++)
-	{
-		long node_index = bots_routes.cursor;
-		real_point3d corners[BOTS_ROUTES_CORNERS];
-		long neighbours[BOTS_ROUTES_CORNERS];
-		long count, corner;
-
-		bots_graph.link_first[node_index] = bots_graph.link_count;
-		count = bots_routes_corners(bsp, bots_graph.nodes[node_index].surface_index, corners, neighbours);
+		/* (its walkable neighbours' surfaces, made nodes' indices once all
+		are made: bots_routes_links_step) */
+		bots_graph.link_first[bots_graph.node_count] = bots_graph.link_count;
 		for (corner = 0; corner < count; corner++)
 		{
-			long other = neighbours[corner];
-
-			if (other < 0 || other >= bots_routes.surface_count || bots_routes.node_of_surface[other] == NONE)
+			if (!bots_routes_walkable(neighbours[corner]))
 				continue;
 			if (bots_graph.link_count >= bots_routes.link_capacity)
 			{
@@ -438,16 +488,45 @@ static boolean bots_routes_links_step(void)
 				long *links = (long *)realloc(bots_graph.links, sizeof(long) * (size_t)capacity);
 
 				if (!links)
-					return TRUE;
+					break;
 				bots_graph.links = links;
 				bots_routes.link_capacity = capacity;
 			}
-			bots_graph.links[bots_graph.link_count++] = bots_routes.node_of_surface[other];
+			bots_graph.links[bots_graph.link_count++] = neighbours[corner];
+		}
+		bots_routes.node_of_surface[surface_index] = bots_graph.node_count;
+		bots_graph.node_count++;
+	}
+	if (bots_routes.cursor < bots_routes.surface_count)
+		return FALSE;
+	bots_graph.link_first[bots_graph.node_count] = bots_graph.link_count;
+	return TRUE;
+}
+
+/* the links: a step of the nodes' neighbours' surfaces made nodes' indices
+(those left out dropped, the links packed down in place); TRUE when all are */
+static boolean bots_routes_links_step(void)
+{
+	long last = MIN(bots_routes.cursor + BOTS_ROUTES_SURFACES_A_TICK * 4, bots_graph.node_count);
+
+	for (; bots_routes.cursor < last; bots_routes.cursor++)
+	{
+		long node_index = bots_routes.cursor;
+		long first = bots_graph.link_first[node_index], end = bots_graph.link_first[node_index + 1], link;
+
+		bots_graph.link_first[node_index] = bots_routes.link_write;
+		for (link = first; link < end; link++)
+		{
+			long other = bots_routes.node_of_surface[bots_graph.links[link]];
+
+			if (other != NONE)
+				bots_graph.links[bots_routes.link_write++] = other;
 		}
 	}
 	if (bots_routes.cursor < bots_graph.node_count)
 		return FALSE;
-	bots_graph.link_first[bots_graph.node_count] = bots_graph.link_count;
+	bots_graph.link_first[bots_graph.node_count] = bots_routes.link_write;
+	bots_graph.link_count = bots_routes.link_write;
 	return TRUE;
 }
 
@@ -477,9 +556,10 @@ static long bots_routes_node_at(real_point3d const *point)
 }
 
 /* the map's two bases: the CTF flag stands (every stock map has them, in
-every gametype), else the teams' starting locations' middles, else the two
+every gametype), else (set 1, or no way between those: Prisoner's on its
+upper floor) the teams' starting locations' middles, else (set 2) the two
 starting locations furthest apart; FALSE without */
-static boolean bots_routes_find_bases(real_point3d *bases)
+static boolean bots_routes_find_bases(long set, real_point3d *bases)
 {
 	struct scenario *scenario = global_scenario_get();
 	boolean found[2] = { FALSE, FALSE };
@@ -501,7 +581,7 @@ static boolean bots_routes_find_bases(real_point3d *bases)
 			found[flag->team_index] = TRUE;
 		}
 	}
-	if (found[0] && found[1])
+	if (found[0] && found[1] && set <= 0)
 		return TRUE;
 	csmemset(sums, 0, sizeof(sums));
 	for (index = 0; index < scenario->players.count; index++)
@@ -525,7 +605,7 @@ static boolean bots_routes_find_bases(real_point3d *bases)
 			bases[index].y = sums[index].y / (real)counts[index];
 			bases[index].z = sums[index].z / (real)counts[index];
 		}
-		if (bots_routes_distance2d(&bases[0], &bases[1]) > 10.0f)
+		if (bots_routes_distance2d(&bases[0], &bases[1]) > 10.0f && set <= 1)
 			return TRUE;
 	}
 	for (index = 0; index < scenario->players.count; index++)
@@ -968,8 +1048,9 @@ static void bots_routes_log_direct(void)
 		length += snprintf(line + length, sizeof(line) - (size_t)length, " (%.1f %.1f)", bots_routes_map.route_points[point].x,
 			bots_routes_map.route_points[point].y);
 	line[length] = 0;
-	platform_log("bots: routes: walkable graph of %ld surfaces (%ld links), bases (%.1f %.1f %.1f) and (%.1f %.1f %.1f); "
-		"the direct route %.0f units:%s", bots_graph.node_count, bots_graph.link_count, bots_routes_map.bases[0].x,
+	platform_log("bots: routes: walkable graph of %ld surfaces (%ld links; %ld under %ld machines left out), bases (%.1f %.1f %.1f) "
+		"and (%.1f %.1f %.1f); the direct route %.0f units:%s", bots_graph.node_count, bots_graph.link_count,
+		bots_routes.machine_surfaces, bots_routes.machine_count, bots_routes_map.bases[0].x,
 		bots_routes_map.bases[0].y, bots_routes_map.bases[0].z, bots_routes_map.bases[1].x, bots_routes_map.bases[1].y,
 		bots_routes_map.bases[1].z, bots_routes_map.route_length, line);
 }
@@ -980,12 +1061,17 @@ boolean bots_routes_step(void)
 	switch (bots_routes.phase)
 	{
 	case _routes_phase_idle:
-		bots_routes.phase = bots_routes_begin() ? _routes_phase_nodes : _routes_phase_none;
+		bots_routes.phase = bots_routes_begin() ? _routes_phase_machines : _routes_phase_none;
+		break;
+	case _routes_phase_machines:
+		bots_routes_find_machines();
+		bots_routes.phase = _routes_phase_nodes;
 		break;
 	case _routes_phase_nodes:
 		if (bots_routes_nodes_step())
 		{
 			bots_routes.cursor = 0;
+			bots_routes.link_write = 0;
 			bots_routes.phase = _routes_phase_links;
 		}
 		break;
@@ -998,7 +1084,7 @@ boolean bots_routes_step(void)
 		real_point3d bases[2];
 		long a, b;
 
-		if (bots_graph.node_count < 8 || !bots_routes_find_bases(bases))
+		if (bots_graph.node_count < 8 || !bots_routes_find_bases(bots_routes.base_set, bases))
 		{
 			platform_log("bots: routes: no bases found: no lanes");
 			bots_routes.phase = _routes_phase_none;
@@ -1031,7 +1117,19 @@ boolean bots_routes_step(void)
 
 			for (index = 0; index < bots_graph.node_count; index++)
 				bots_graph.nodes[index].cost = bots_routes.cost[index];
+			bots_routes.costs_made = TRUE;
 			bots_routes.target = bots_routes.base_nodes[1];
+			/* (no way between them: the next bases) */
+			if (bots_routes.cost[bots_routes.target] >= REAL_MAX && bots_routes.base_set < 2)
+			{
+				platform_log("bots: routes: no way between the bases (%.1f %.1f %.1f) and (%.1f %.1f %.1f): others",
+					bots_routes_map.bases[0].x, bots_routes_map.bases[0].y, bots_routes_map.bases[0].z,
+					bots_routes_map.bases[1].x, bots_routes_map.bases[1].y, bots_routes_map.bases[1].z);
+				bots_routes.base_set++;
+				bots_routes_map.has_bases = FALSE;
+				bots_routes.phase = _routes_phase_bases;
+				break;
+			}
 			if (!bots_routes_make_direct())
 			{
 				platform_log("bots: routes: no way between the bases: no lanes");
@@ -1083,7 +1181,7 @@ boolean bots_routes_step(void)
 /* whether the graph is there to read (the vantage points' making) */
 boolean bots_routes_graph_made(void)
 {
-	return bots_routes.phase == _routes_phase_done && bots_graph.nodes != NULL;
+	return bots_routes.costs_made && bots_graph.nodes != NULL;
 }
 
 /* ---------- a bot's lane */

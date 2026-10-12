@@ -9,19 +9,26 @@ the Hill's defenders, over the hill.
 
 The places that matter: the CTF flag stands, King of the Hill's hills, the
 oddball's spawns (in those games), the direct route a quarter, half and
-three quarters of the way between the bases and the side lanes' waypoints
-(bots_routes.c). The spots: the map's walkable surfaces (bots_routes.c's
+three quarters of the way between the bases, the side lanes' waypoints
+(bots_routes.c), and as many of the weapon and item spawns as there is room
+for (sixteen places in all; each the furthest from those taken: where the
+players go, Sidewinder's field, whose stands and direct route are in its
+bases and gullies). The spots: the map's walkable surfaces (bots_routes.c's
 graph) reached from the bases, flat and a body's size at least, each scored
 first by how high it stands above the walkable surfaces about it (the area's
 mean height within a dozen units) and how many places lie within a rifle's
-reach, the best forty kept six units apart; then the AI's sight test (the
+reach, the best thirty kept six units apart; then the AI's sight test (the
 bots' line of sight: the level, scenery and machines) from each one's eyes
 to each place within ninety units, and eight rays about it for how open it
 is. A spot's score: the places it sees, by their weight and distance (best
 from twelve to fifty units), its height and its openness; the best six that
 see two places at least, twelve units apart, are the map's, each logged in
-halo.log. All of it a few surfaces or eight rays a tick as the bots' first
-ticks of a game run (bots_tactics_update), nothing at the map's load.
+halo.log. All of it a few hundred surfaces or two rays a tick as the bots'
+first ticks of a game run (bots_tactics_update), nothing at the map's load:
+Blood Gulch's take some 500 ticks, 10 ms on the harness in all, 20 us a tick
+(the rays ten to fifteen each); its six are on the hills by the bases and
+along the canyon's sides. Indoor maps have few (Damnation two, Prisoner, whose
+upper floor no walkable surface reaches, none).
 
 CTF's defenders' posts, the same: their team's stand, the best spot within
 35 units that sees it, and the direct route a fifth of the way out.
@@ -46,13 +53,13 @@ CTF's defenders' posts, the same: their team's stand, the best spot within
 /* ---------- constants */
 
 /* the spots looked at with rays, and how far apart */
-#define BOTS_VANTAGE_CANDIDATES 40
+#define BOTS_VANTAGE_CANDIDATES 30
 #define BOTS_VANTAGE_CANDIDATE_SPACING 6.0f
 /* the vantage points kept, how far apart */
 #define BOTS_VANTAGE_SPACING 12.0f
 /* the work of a tick: surfaces scored, rays cast */
-#define BOTS_VANTAGE_NODES_A_TICK 500
-#define BOTS_VANTAGE_RAYS_A_TICK 4
+#define BOTS_VANTAGE_NODES_A_TICK 200
+#define BOTS_VANTAGE_RAYS_A_TICK 2
 /* a bot's eyes above its feet, a place's middle above its ground */
 #define BOTS_VANTAGE_EYE_HEIGHT 0.62f
 #define BOTS_PLACE_HEIGHT 0.55f
@@ -256,6 +263,43 @@ static void bots_vantage_find_places(void)
 		for (waypoint = 0; bots_routes_lane_waypoint(lane, waypoint, &point); waypoint++)
 			bots_vantage_add_place(&point, 1.0f, "lane");
 	}
+	/* the weapon and item spawns, where the players go (Sidewinder's field,
+	whose stands and direct route are in its bases and gullies), as many as
+	there is room for, each the furthest from those taken */
+	{
+		long first = bots_vantage.place_count, count;
+
+		for (count = 0; bots_vantage.place_count < BOTS_PLACES_MAXIMUM && count < 8; count++)
+		{
+			long best = NONE;
+			real best_distance = -1.0f;
+
+			for (index = 0; index < scenario->netgame_equipment.count; index++)
+			{
+				struct scenario_netgame_equipment *equipment =
+					TAG_BLOCK_GET_ELEMENT(&scenario->netgame_equipment, index, struct scenario_netgame_equipment);
+				real nearest = REAL_MAX;
+				long place;
+
+				for (place = 0; place < bots_vantage.place_count; place++)
+				{
+					real distance = bots_vantage_distance3d(&bots_vantage.places[place].point, &equipment->position);
+
+					if (place >= first || distance < 2.0f)
+						nearest = MIN(nearest, distance);
+				}
+				if (nearest > best_distance && nearest > 6.0f)
+				{
+					best_distance = nearest;
+					best = index;
+				}
+			}
+			if (best == NONE)
+				break;
+			bots_vantage_add_place(&TAG_BLOCK_GET_ELEMENT(&scenario->netgame_equipment, best,
+				struct scenario_netgame_equipment)->position, 1.0f, "item");
+		}
+	}
 }
 
 static void bots_vantage_free(void)
@@ -384,6 +428,19 @@ static void bots_vantage_choose_points(void)
 			}
 		}
 	}
+	/* (debug: HALO_BOT_TRACE, every spot scored) */
+	for (index = 0; getenv("HALO_BOT_TRACE") && index < bots_vantage.candidate_count; index++)
+	{
+		struct bots_vantage_spot const *spot = &bots_vantage.candidates[index];
+
+		platform_log("bots: trace vantage spot (%.1f %.1f %.1f) height %.1f open %d sees %d (%lx) first %.1f score %.1f",
+			spot->point.x, spot->point.y, spot->point.z, spot->height, (int)spot->open, (int)spot->sees_count, spot->sees,
+			spot->first_score, spot->score);
+	}
+	for (index = 0; getenv("HALO_BOT_TRACE") && index < bots_vantage.place_count; index++)
+		platform_log("bots: trace vantage place %ld %s (%.1f %.1f %.1f) weight %.1f", index, bots_vantage.places[index].name,
+			bots_vantage.places[index].point.x, bots_vantage.places[index].point.y, bots_vantage.places[index].point.z,
+			bots_vantage.places[index].weight);
 	bots_vantage.count = 0;
 	while (bots_vantage.count < BOTS_VANTAGE_MAXIMUM)
 	{
