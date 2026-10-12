@@ -32,7 +32,11 @@
 #   vslayer  Slayer likewise ("slayer+vehicles"): every bot for itself, a
 #            driver's seat alone (no one rides with an enemy)
 #   vteams   Team Slayer likewise ("team_slayer+vehicles"), Legendary
-#   vehicles vctf, vslayer and vteams (HALO_TEST_BOTS 8 is the brief's)
+#   iron     Iron CTF (the game's own variant: Scorpions alone, one at each
+#            base), 15 bots on both teams, Heroic: a bot must drive a
+#            Scorpion within 45 s of play (bots.c's tanks are worth a detour;
+#            the owner's Blood Gulch game, Oct 11 2026, saw the first at 87 s)
+#   vehicles vctf, vslayer, vteams and iron (HALO_TEST_BOTS 8 is the brief's)
 #   powerups Slayer, 12 bots, Heroic: the hurt go for the health packs (Blood
 #            Gulch's two on the bases' roofs) - one taken at least, or a
 #            body restored (halo.log's moves line, bots.c)
@@ -142,7 +146,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_bots_test.$$}
 test_out_begin "$out"
 bots=${HALO_TEST_BOTS:-6}
 cases=${*:-slayer teams}
-cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /')
+cases=$(echo " $cases " | sed 's/ vehicles / vctf vslayer vteams iron /; s/ new / powerups turret ladders /; s/ playlists / playlist playlistcancel /')
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 ce_resources=${HALO_TEST_CE_RESOURCES:-}
 if [ -z "$ce_resources" ]; then
@@ -156,6 +160,7 @@ case_bots() { # NAME
 	case $1 in
 	powerups) echo 12 ;;
 	turret) echo 6 ;;
+	iron) echo 15 ;;
 	playlist) echo 6 ;;
 	playlistcancel) echo 3 ;;
 	ladders) echo 8 ;;
@@ -301,6 +306,7 @@ for name in $cases; do
 	vctf) run vctf ctf+vehicles HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even HALO_NETWORK_TEST_PLAYER_DRIVES=1 & ;;
 	vslayer) run vslayer slayer+vehicles HALO_BOT_SKILL=heroic & ;;
 	vteams) run vteams team_slayer+vehicles HALO_BOT_SKILL=legendary HALO_BOT_TEAMS=even & ;;
+	iron) run iron ironctf HALO_BOT_SKILL=heroic HALO_BOT_TEAMS=even & ;;
 	powerups) run powerups slayer HALO_BOT_SKILL=heroic & ;;
 	turret)
 		if [ ! -e "$ce_maps/extinction.map" ] || [ ! -e "$ce_resources/bitmaps.map" ] ||
@@ -473,7 +479,7 @@ if name == "against":
 # starting locations' team), at the start and after: each life's first place
 # nearer its own team's stand (the scenario's flag of its team, which the
 # bots log; in Invasion the flags sit at the other base, the spawns do not)
-if name in ("ctf", "invasion", "vctf"):
+if name in ("ctf", "invasion", "vctf", "iron"):
     stands, team_of, alive, spawns, wrong = None, {}, {}, 0, []
     for line in open(log, errors="replace"):
         m = re.search(r"bots: CTF.*the stands: team 0 \(([-\d.]+) ([-\d.]+) [-\d.]+\) team 1 \(([-\d.]+) ([-\d.]+)", line)
@@ -516,18 +522,35 @@ if name != "race" and kills <= bots:
 if name != "race" and died * 2 < bots:
     fail("only %d bots died" % died)
 # (CTF's score is captures, which three minutes may not see)
-if name not in ("ctf", "vctf") and (not scores or max(scores) <= 0):
+if name not in ("ctf", "vctf", "iron") and (not scores or max(scores) <= 0):
     fail("no score")
 # (the vehicle cases: the bots' census of their vehicles)
-if name.startswith("v"):
+if name.startswith("v") or name == "iron":
     census = [line for line in open(log, errors="replace") if "bots: vehicles at tick" in line]
     most = most_driving = most_gunning = 0
+    insane = []
+    last_riding = 0.0
     for line in census:
-        m = re.search(r"(\d+) of \d+ bots riding \((\d+) driving, (\d+) gunning, (\d+) passengers", line)
-        if m:
-            most = max(most, int(m.group(1)))
-            most_driving = max(most_driving, int(m.group(2)))
-            most_gunning = max(most_gunning, int(m.group(3)) + int(m.group(4)))
+        m = re.search(r"(\d+) of (\d+) bots riding \((\d+) driving, (\d+) gunning, (\d+) passengers\), (\d+) going to one; "
+            r"vehicles (\d+), (\d+) with riders.*? in (\d+) \(driver (\d+), gunner (\d+), passenger (\d+)\), out (\d+) .*?"
+            r"in by kind: tank (\d+), jeep (\d+), scout (\d+); first in at tick (\d+); ([\d.]+) s riding", line)
+        if not m:
+            insane.append("a census line not read: %s" % line.strip()[:120])
+            continue
+        (riding, alive, driving, gunning, passengers, going, vehicles, occupied, entries, by_driver, by_gunner, by_passenger,
+            out, tanks, jeeps, scouts, first, ride_s) = [float(v) if "." in v else int(v) for v in m.groups()]
+        most = max(most, riding)
+        most_driving = max(most_driving, driving)
+        most_gunning = max(most_gunning, gunning + passengers)
+        # (the census sane: its counts within each other)
+        tick = re.search(r"vehicles at tick (\d+)", line).group(1)
+        if riding != driving + gunning + passengers or riding + going > alive or occupied > vehicles or \
+                entries != by_driver + by_gunner + by_passenger or out > entries or tanks + jeeps + scouts > entries or \
+                (entries > 0) != (first > 0) or ride_s + 0.05 < last_riding:
+            insane.append("tick %s: %s" % (tick, line.split("bots: ", 1)[-1].strip()[:200]))
+        last_riding = ride_s
+    for text in insane[:3]:
+        fail("the census is not sane: %s" % text)
     last_census = census[-1] if census else ""
     def count(pattern, kind=int):
         m = re.search(pattern, last_census)
@@ -536,9 +559,22 @@ if name.startswith("v"):
     beside = count(r"gunner (\d+)") + count(r"passenger (\d+)")
     print("  vehicles: %s" % (last_census.split("bots: ", 1)[-1].strip() if last_census else "no census"))
     print("  at most %d bots riding at once (%d driving, %d gunning or passengers)" % (most, most_driving, most_gunning))
+    # (when they got in, and in what: the entries' lines, at their tick)
+    first_by = {}
+    for line in open(log, errors="replace"):
+        m = re.search(r"bots: bot \d+ in (\S+) seat \d+ \((\w+).*at tick (\d+)", line)
+        if m and m.group(2) == "driver":
+            kind = next((k for k in ("scorpion", "ghost", "warthog") if k in m.group(1)), "other")
+            first_by.setdefault(kind, int(m.group(3)))
+    print("  first driver in: %s; %s" % (", ".join("%s %.0f s" % (k, t / 30.0) for k, t in sorted(first_by.items())) or "none",
+        re.search(r"in by kind: .*", last_census).group(0).strip() if "in by kind" in last_census else "no census"))
+    # (Iron CTF: the Scorpions taken, soon - a tank is worth a walk back to
+    # it, bots.c's bots_vehicle_worths; the owner's game saw none for 87 s)
+    if name == "iron" and game_map == "bloodgulch" and first_by.get("scorpion", 10 ** 9) > 45 * 30:
+        fail("no bot drove a Scorpion in the first 45 s of play")
     if entries < 2:
         fail("the bots got into vehicles %d times" % entries)
-    if most < 2:
+    if most < 2 and name != "iron":
         fail("at most %d bots rode at once" % most)
     if driven < 150:
         fail("the bots drove only %d units" % driven)
