@@ -62,7 +62,13 @@ What a bot does each tick, in a player's terms:
   or for a Warthog's gunner's (else passenger's) seat when a teammate, bot
   or player, drives it (the seats as the campaign's AI weighs them,
   action_vehicle.c); a bot driver waits while a teammate it saw coming gets
-  in. It gets in where and when a player could (still at the seat's
+  in. Port: a vehicle is worth what its kind is, as players weigh them - a
+  Scorpion a walk of 50 units, back to it too when it is near (Blood Gulch's
+  stand behind the bases, which bots leaving for the other flag never went
+  back for), a Ghost 40, a Warthog 30 and only on the way - and a bot fresh
+  from its base goes back for its base's vehicles; a bot much nearer to a
+  seat a teammate bot set off for takes it over.
+  It gets in where and when a player could (still at the seat's
   entrance: players.c's player_examine_nearby_vehicle), into the seat it
   chose, as the campaign's AI does (unit_enter_seat); a vehicle on its side
   it rights first, with the action button. A driver drives the same path
@@ -75,13 +81,17 @@ What a bot does each tick, in a player's terms:
   bot goes for is its own), so no two go for the same one. Stuck, a driver
   backs off and turns, then goes on; scenery or a machine it drives into is
   learnt to be in the way (Sidewinder's blast door), and the level it drives
-  into closed to the vehicles' searches alone (the banks a biped walks up).
+  into closed to the vehicles' searches alone (the banks a biped walks up;
+  port: what is before it looked for past its front and low at its treads,
+  and closed as far about as it is wide: a Scorpion's 2.2 units).
   A bot gets out when its vehicle lies on its side, sticks fast, has no
   driver, or near its goal when that wants it on foot (a flag, a hill, the
   ball), and leaves a vehicle that failed it alone a while. halo.log has
-  each entry and exit, and every ten seconds' census of them (bots riding,
-  driving, gunning, the distance driven, getting in and out and why, kills
-  riding).
+  the game's vehicles (port), each entry and exit, and every ten seconds'
+  census of them (bots riding, driving, gunning, the distance driven,
+  getting in and out and why, kills riding; port: the entries by kind, the
+  first's tick, the seconds riding, the seats taken over and the vehicles
+  given up on the way).
   Turrets (port): a vehicle that does not move - the vehicle type turret,
   or one with a gunner's seat and no driver's (Custom Edition maps' gun
   towers and Shades; no stock map has one) - is manned by a bot on foot
@@ -228,9 +238,15 @@ boolean unit_get_seat_entrance_point(long unit_index, long target_unit_index, sh
 /* a collision surface's flag: climbable (collision_bsp.c's) */
 #define BOTS_COLLISION_SURFACE_CLIMBABLE_BIT 2
 /* vehicles: a bot goes for one when its goal is further than this, the
-vehicle no further than this (and nearer than most of the way there) */
+vehicle no further than its type's reach (bots_vehicle_worths: a Warthog's
+30, a Ghost's 40, a Scorpion's 50) */
 #define BOTS_VEHICLE_GOAL_DISTANCE 35.0f
-#define BOTS_VEHICLE_REACH 30.0f
+/* port: the seconds after it spawns that a bot is fresh from its base: a
+vehicle there is gone for further out of its way (bots_vehicle_consider) */
+#define BOTS_VEHICLE_FRESH_SECONDS 10
+/* port: how much nearer a bot is to a seat another bot goes for before it
+takes the seat over (the other let go of it: bots_vehicle_consider) */
+#define BOTS_VEHICLE_TAKE_OVER 15.0f
 /* how near a driven path's step a vehicle is when it has reached it */
 #define BOTS_DRIVE_STEP_REACHED 2.5f
 /* how near its goal a bot riding gets out, when the goal wants it on foot */
@@ -549,6 +565,10 @@ struct bots_bot
 	short vehicle_presses;
 	long vehicle_check_tick;
 	long vehicle_rest_until_tick;
+	/* port: when it gives up on the vehicle it goes for (the walk there and
+	a while: bots_vehicle_approach); since when its unit lives (spawned) */
+	long vehicle_deadline_tick;
+	long spawn_tick;
 	long vehicle_avoid_index;
 	long vehicle_avoid_until_tick;
 	/* port: the vehicle it goes for is a turret (its gunner's seat, with no
@@ -662,7 +682,20 @@ static struct
 	long riding_fire_ticks;
 	/* the path searches bots driving asked for */
 	long driving_searches;
+	/* port: the bots' getting in by the vehicle's type (bots_vehicle_kind:
+	tanks, jeeps, scouts - the Scorpion, the Warthog, the Ghost), the tick
+	of the game's first (0 for none yet), and the ticks bots rode, all of
+	them together */
+	long vehicle_entries_by_kind[3];
+	long first_entry_tick;
+	long riding_ticks;
+	/* port: the seats a bot took over from a teammate further from them,
+	and the vehicles given up on the way (too long, or no way in) */
+	long vehicle_take_overs;
+	long vehicle_giveups;
 	long last_census_tick;
+	/* port: the game's vehicles logged (its first census) */
+	boolean vehicles_listed;
 	/* port: the bots' moves (halo.log's moves line, each minute): the times
 	a bot stood stuck while it walked, by what was before it - a low wall
 	(the level, scenery or a machine at its knees, nothing at its chest: a
@@ -1104,6 +1137,40 @@ static boolean bots_vehicle_drivable(long vehicle_index)
 	return type == _bots_vehicle_type_human_tank || type == _bots_vehicle_type_human_jeep ||
 		type == _bots_vehicle_type_alien_scout;
 }
+
+/* port: the kind of a vehicle a bot drives (bots_vehicle_worths' index):
+0 a tank (the Scorpion), 1 a jeep (the Warthog, the rocket Warthog), 2 a
+scout (the Ghost) */
+static short bots_vehicle_kind(long vehicle_index)
+{
+	short type = bots_vehicle_definition(vehicle_index)->vehicle_type;
+
+	return type == _bots_vehicle_type_human_tank ? 0 : type == _bots_vehicle_type_alien_scout ? 2 : 1;
+}
+
+/* port: what an empty vehicle's driver's seat is worth to a bot on foot, by
+its kind - as players weigh them, a Scorpion worth a walk back to it, a
+Ghost some way, a Warthog only on the way (the campaign's AI weighs none:
+its encounters are handed theirs): how far the bot walks to it (reach), and
+no further than this share of the way to its goal (but for one close); one
+this close is gone for in any direction (fresh from its base, nearer
+BOTS_VEHICLE_FRESH_SECONDS, ten units further, fifteen at least); else the
+vehicle no further from the goal than the bot is and this slack; and how
+much nearer it counts than it is (the choice's score). A Warthog's are the
+rules bots had before (a reach of 30, 0.6 of the way, 5 of slack) */
+static struct
+{
+	real reach;
+	real share;
+	real close;
+	real slack;
+	real bonus;
+} const bots_vehicle_worths[3] =
+{
+	{ 50.0f, 1.0f, 20.0f, 20.0f, 12.0f },
+	{ 30.0f, 0.6f, 0.0f, 5.0f, 0.0f },
+	{ 40.0f, 0.8f, 10.0f, 10.0f, 5.0f },
+};
 
 /* port: the seat of a turret a bot mans: a vehicle that does not move, its
 gun its gunner's - the vehicle type turret, or one with a gunner's seat and
@@ -1775,13 +1842,15 @@ static void bots_paths_close_object(long object_index, char const *why)
 
 /* port: a vehicle stuck with the level before it (a bank a biped walks up,
 the foot of a ledge, which the walkable surfaces join): the walkable surfaces
-just before it closed to the vehicles' searches alone, those under it and its
-goal's left open */
+just before it closed to the vehicles' searches alone, as far about as the
+vehicle is wide (1.5 units at least: a Scorpion's 2.2, which drove at a
+base's back door strip by strip), those under it and its goal's left open */
 static void bots_paths_close_for_vehicles(real_point3d const *point, real_point3d const *vehicle_point,
-	real_point3d const *goal_point)
+	real_point3d const *goal_point, real vehicle_radius)
 {
 	struct collision_bsp const *bsp;
 	long surface_index, closed = 0;
+	real about = MAX(1.5f, vehicle_radius);
 
 	if (!bots_paths_copy())
 		return;
@@ -1810,7 +1879,7 @@ static void bots_paths_close_for_vehicles(real_point3d const *point, real_point3
 		{
 			continue;
 		}
-		if (bots_distance2d(&middle, point) < 1.5f && fabs(middle.z - point->z) < 2.5f &&
+		if (bots_distance2d(&middle, point) < about && fabs(middle.z - point->z) < 2.5f &&
 			bots_distance2d(&middle, vehicle_point) > 1.2f && bots_distance2d(&middle, goal_point) > 3.0f)
 		{
 			bots_paths.vehicle_walkable[surface_index] &= (byte)~FLAG(BOTS_PATHFINDING_WALKABLE_BIT);
@@ -2412,7 +2481,13 @@ void bots_initialize_for_new_map(void)
 	bots_globals.riding_kills[0] = bots_globals.riding_kills[1] = 0;
 	bots_globals.riding_fire_ticks = 0;
 	bots_globals.driving_searches = 0;
+	csmemset(bots_globals.vehicle_entries_by_kind, 0, sizeof(bots_globals.vehicle_entries_by_kind));
+	bots_globals.first_entry_tick = 0;
+	bots_globals.vehicle_take_overs = 0;
+	bots_globals.vehicle_giveups = 0;
+	bots_globals.riding_ticks = 0;
 	bots_globals.last_census_tick = 0;
+	bots_globals.vehicles_listed = FALSE;
 	bots_globals.stuck_events = 0;
 	bots_globals.stuck_low = 0;
 	bots_globals.stuck_tall = 0;
@@ -4448,25 +4523,50 @@ The bots' own: the campaign's AI gets in, drives and guns through its actors
 has not; a bot gets in and drives with a player's controls, as its seats and
 ways are weighed there. */
 
-/* on foot: a vehicle to go for, looked for once a second while the bot's
-goal is a long way off (BOTS_VEHICLE_GOAL_DISTANCE) and no fight is close,
-nor does it carry the flag or the ball: an empty Warthog, Ghost or Scorpion
-standing still on its way (no further than BOTS_VEHICLE_REACH, nor than most
-of the way to the goal, nor further from the goal than the bot is), its
-driver's seat; a Warthog a teammate drives (a bot, which waits; a player,
+/* port: a teammate bot going for a seat the bot is much nearer to
+(BOTS_VEHICLE_TAKE_OVER), which it takes over: a Scorpion a bot set off for
+from 45 units away goes to the bot that spawns beside it. Teammates alone (a
+free-for-all's bots keep what they go for); the other bot, on foot as any
+going for a seat is, lets it go (bots_vehicle_consider) and looks again in a
+while; it can never take it back, being further from it */
+static boolean bots_seat_take_over(struct bots_bot const *bot, struct bots_bot const *other, long vehicle_index,
+	real distance)
+{
+	struct object_datum *unit = object_try_and_get(other->unit_index);
+
+	return unit && game_engine_has_teams() &&
+		player_get(other->player_index)->team_index == player_get(bot->player_index)->team_index &&
+		bots_distance2d(&unit->object.position, &object_get(vehicle_index)->object.position) >
+			distance + BOTS_VEHICLE_TAKE_OVER;
+}
+
+/* on foot: a vehicle to go for, looked for once a second (port: at once as
+it spawns) while the bot's goal is a long way off
+(BOTS_VEHICLE_GOAL_DISTANCE) and no fight is close, nor does it carry the
+flag or the ball: an empty Warthog, Ghost or Scorpion standing still on its
+way, its driver's seat, as its kind is worth (bots_vehicle_worths: a
+Scorpion 50 units off, or 20 in any direction, 30 fresh from its base; a
+Warthog 30 off, most of the way to the goal and not further from it than
+the bot is); a Warthog a teammate drives (a bot, which waits; a player,
 stopped), its gunner's seat, else a passenger's; or an empty vehicle on its
 side close by, to right. A seat it can enter as a player does
 (unit_can_enter_seat: no enemy in the vehicle; an animation for the seat),
-none another bot goes for; the nearest, a gunner's seat before a
-passenger's, as the campaign's AI weighs them (action_vehicle_evaluate_seat) */
+none another bot goes for (port: but a teammate's much further from it,
+bots_seat_take_over); the nearest, a Scorpion's before a Ghost's before a
+Warthog's driver's seat by their worth, a gunner's seat before a
+passenger's, as the campaign's AI weighs them
+(action_vehicle_evaluate_seat). The walk there given up on after 25 s, or
+longer for one far (bots_vehicle_approach) */
 static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 {
 	struct object_iterator iterator;
 	long now = tick->now;
 	long unit_index = tick->player->unit_index;
-	real goal_distance, best_score = REAL_MAX;
+	real goal_distance, best_score = REAL_MAX, best_distance = 0.0f;
 	long best_index = NONE;
 	short best_seat = NONE;
+	struct bots_bot *best_claimer = NULL;
+	boolean fresh;
 
 	if (bot->vehicle_index != NONE || now < bot->vehicle_check_tick || now < bot->vehicle_rest_until_tick)
 		return;
@@ -4482,13 +4582,14 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 	goal_distance = bots_distance2d(&bot->goal_point, &tick->position);
 	if (goal_distance < BOTS_VEHICLE_GOAL_DISTANCE)
 		return;
+	fresh = now - bot->spawn_tick < TICKS_PER_SECOND * BOTS_VEHICLE_FRESH_SECONDS;
 	object_iterator_new(&iterator, _object_mask_vehicle, 0);
 	while (object_iterator_next(&iterator))
 	{
 		struct unit_datum *vehicle = unit_get(iterator.index);
 		struct unit_definition *definition;
-		real distance, speed;
-		short seat_index;
+		real distance, speed, close, reach;
+		short seat_index, kind;
 		boolean friendly_driver, bot_driver;
 
 		if (TEST_FLAG(vehicle->object.damage_flags, _object_dead_bit) ||
@@ -4498,9 +4599,12 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 		{
 			continue;
 		}
+		kind = bots_vehicle_kind(iterator.index);
+		close = fresh ? MAX(bots_vehicle_worths[kind].close + 10.0f, 15.0f) : bots_vehicle_worths[kind].close;
+		reach = MIN(bots_vehicle_worths[kind].reach, MAX(close, goal_distance * bots_vehicle_worths[kind].share));
 		distance = bots_distance2d(&vehicle->object.position, &tick->position);
-		if (distance > MIN(BOTS_VEHICLE_REACH, goal_distance * 0.6f) ||
-			bots_distance2d(&vehicle->object.position, &bot->goal_point) > goal_distance + 5.0f)
+		if (distance > reach || (distance > close &&
+			bots_distance2d(&vehicle->object.position, &bot->goal_point) > goal_distance + bots_vehicle_worths[kind].slack))
 		{
 			continue;
 		}
@@ -4513,6 +4617,8 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 				best_score = distance + 10.0f;
 				best_index = iterator.index;
 				best_seat = NONE;
+				best_claimer = NULL;
+				best_distance = distance;
 			}
 			continue;
 		}
@@ -4521,13 +4627,15 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 		definition = unit_definition_get(vehicle->definition_index);
 		for (seat_index = 0; seat_index < definition->unit.seats.count; seat_index++)
 		{
-			short kind = bots_seat_kind(iterator.index, seat_index);
+			short seat_kind = bots_seat_kind(iterator.index, seat_index);
 			real score = distance;
+			struct bots_bot *claimer;
 
-			if (kind == _bots_seat_driver)
+			if (seat_kind == _bots_seat_driver)
 			{
 				if (vehicle->unit.driver_object_index != NONE || speed > 0.03f)
 					continue;
+				score -= bots_vehicle_worths[kind].bonus;
 			}
 			else
 			{
@@ -4536,10 +4644,12 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 				{
 					continue;
 				}
-				score += kind == _bots_seat_gunner ? -3.5f : 3.0f;
+				score += seat_kind == _bots_seat_gunner ? -3.5f : 3.0f;
 			}
-			if (score >= best_score || bots_seat_occupant(iterator.index, seat_index) != NONE ||
-				bots_seat_claimer(iterator.index, seat_index, bot) ||
+			if (score >= best_score || bots_seat_occupant(iterator.index, seat_index) != NONE)
+				continue;
+			claimer = bots_seat_claimer(iterator.index, seat_index, bot);
+			if ((claimer && !bots_seat_take_over(bot, claimer, iterator.index, distance)) ||
 				!unit_has_animation_to_enter_seat(unit_index, iterator.index, seat_index) ||
 				!unit_can_enter_seat(unit_index, iterator.index, seat_index, NULL))
 			{
@@ -4548,14 +4658,29 @@ static void bots_vehicle_consider(struct bots_bot *bot, struct bots_tick *tick)
 			best_score = score;
 			best_index = iterator.index;
 			best_seat = seat_index;
+			best_claimer = claimer;
+			best_distance = distance;
 		}
 	}
 	if (best_index == NONE)
 		return;
+	if (best_claimer)
+	{
+		if (best_claimer->goal_kind == _bots_goal_vehicle)
+		{
+			best_claimer->goal_serial++;
+			best_claimer->path.valid = FALSE;
+		}
+		bots_vehicle_forget(best_claimer);
+		best_claimer->vehicle_check_tick = now + TICKS_PER_SECOND * 3;
+		bots_globals.vehicle_take_overs++;
+	}
 	bot->vehicle_index = best_index;
 	bot->vehicle_seat_index = best_seat;
 	bot->vehicle_flip = best_seat == NONE;
 	bot->vehicle_tick = now;
+	/* (the walk there: some 2 units a second, and a while; 25 s at least) */
+	bot->vehicle_deadline_tick = now + TICKS_PER_SECOND * (long)MAX(25.0f, best_distance / 1.6f + 8.0f);
 	bot->vehicle_presses = 0;
 	bot->vehicle_press_tick = 0;
 	bots_vehicle_goal(bot, unit_index);
@@ -4626,6 +4751,7 @@ static void bots_turret_consider(struct bots_bot *bot, struct bots_tick *tick)
 	bot->vehicle_flip = FALSE;
 	bot->vehicle_turret = TRUE;
 	bot->vehicle_tick = now;
+	bot->vehicle_deadline_tick = now + TICKS_PER_SECOND * 25;
 	bot->vehicle_presses = 0;
 	bot->vehicle_press_tick = 0;
 	bots_vehicle_goal(bot, unit_index);
@@ -4653,8 +4779,15 @@ static void bots_vehicle_approach(struct bots_bot *bot, struct bots_tick *tick)
 		bots_vehicle_forget(bot);
 		return;
 	}
-	if (now - bot->vehicle_tick > TICKS_PER_SECOND * 25 || bot->vehicle_presses > 10)
+	if (now > bot->vehicle_deadline_tick || bot->vehicle_presses > 10)
 	{
+		/* (port: halo.log's; every bot leaving it be a while too was
+		tried, Oct 2026: on Sidewinder, whose Scorpions stick where some
+		bots get in and others do not, the bots rode them less) */
+		bots_globals.vehicle_giveups++;
+		platform_log("bots: bot %ld gave up on %s (%s), %.1f away", (long)(bot - bots_globals.bots) + 1,
+			tag_get_name(vehicle->definition_index), bot->vehicle_presses > 10 ? "no way in" : "too long on the way",
+			bots_distance2d(&bot->vehicle_entrance, &tick->position));
 		bots_vehicle_avoid(bot, bot->vehicle_index, TICKS_PER_SECOND * 30);
 		bots_vehicle_forget(bot);
 		return;
@@ -4842,13 +4975,26 @@ static void bots_bot_drive(struct bots_bot *bot, struct bots_tick *tick, long ve
 			be in the way, its surfaces closed to every bot's searches, as a
 			bot on foot learns it: bots_paths_learn) */
 			struct collision_result collision;
-			real scale = bot->ride_reversing ? -2.5f : 2.5f;
+			unsigned long flags = FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+				FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_scenery_bit) |
+				FLAG(_collision_test_objects_machines_bit);
+			/* (port: past its front: a Scorpion's is 2.2 units from its
+			middle, whose 2.5 found nothing before it) */
+			real length = MAX(2.5f, vehicle->object.bounding_sphere_radius + 0.6f);
+			real scale = bot->ride_reversing ? -length : length;
 			real_vector3d vector = { vehicle->object.forward.i * scale, vehicle->object.forward.j * scale,
 				vehicle->object.forward.k * scale };
-			boolean hit = collision_test_vector(FLAG(_collision_test_structure_bit) |
-				FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_objects_bit) |
-				FLAG(_collision_test_objects_scenery_bit) | FLAG(_collision_test_objects_machines_bit),
-				&vehicle->object.bounding_sphere_center, &vector, vehicle_index, &collision);
+			boolean hit = collision_test_vector(flags, &vehicle->object.bounding_sphere_center, &vector, vehicle_index, &collision);
+
+			/* (port: and low, at its wheels or treads: a ledge below its
+			middle) */
+			if (!hit)
+			{
+				real_point3d low = vehicle->object.position;
+
+				low.z += 0.25f;
+				hit = collision_test_vector(flags, &low, &vector, vehicle_index, &collision);
+			}
 
 			if (hit && collision.type == _collision_result_object &&
 				object_definition_get(object_get(collision.object_index)->definition_index)->object.collision_model.index != NONE &&
@@ -4863,7 +5009,8 @@ static void bots_bot_drive(struct bots_bot *bot, struct bots_tick *tick, long ve
 
 				before.x += vehicle->object.forward.i * 0.5f;
 				before.y += vehicle->object.forward.j * 0.5f;
-				bots_paths_close_for_vehicles(&before, &vehicle->object.position, &bot->goal_point);
+				bots_paths_close_for_vehicles(&before, &vehicle->object.position, &bot->goal_point,
+					vehicle->object.bounding_sphere_radius);
 			}
 			/* (stuck a second time: the scenery and machines about it learnt
 			too, as a bot on foot learns them when its path finds no way) */
@@ -5131,14 +5278,18 @@ static void bots_bot_ride(struct bots_bot *bot, struct bots_tick *tick, long veh
 				(int)gun->weapon.triggers.count, trigger ? trigger->flags : 0, trigger ? trigger->initial_rate_of_fire : 0.0f,
 				trigger ? trigger->charging_time : 0.0f, vehicle->unit.gunner_object_index == unit_index ? "it" : "not it");
 		}
-		platform_log("bots: bot %ld in %s seat %d (%s%s), went for seat %d%s", (long)(bot - bots_globals.bots) + 1,
+		platform_log("bots: bot %ld in %s seat %d (%s%s), went for seat %d%s, at tick %ld", (long)(bot - bots_globals.bots) + 1,
 			tag_get_name(vehicle->definition_index), (int)tick->unit->unit.parent_seat_index,
 			bot->ride_seat == _bots_seat_driver ? "driver" : bot->ride_seat == _bots_seat_gunner ? "gunner" : "passenger",
 			bot->ride_turret ? ", a turret" : "",
 			bot->vehicle_index == vehicle_index ? (int)bot->vehicle_seat_index : NONE,
 			vehicle->unit.driver_object_index != NONE && vehicle->unit.driver_object_index != unit_index ?
 				(bots_player_is_bot(unit_get(vehicle->unit.driver_object_index)->unit.player_index) ? ", a bot driving" :
-					", a player driving") : "");
+					", a player driving") : "", now);
+		if (bots_vehicle_drivable(vehicle_index))
+			bots_globals.vehicle_entries_by_kind[bots_vehicle_kind(vehicle_index)]++;
+		if (!bots_globals.first_entry_tick)
+			bots_globals.first_entry_tick = MAX(now, 1);
 		bots_vehicle_forget(bot);
 		bot->goal_kind = _bots_goal_none;
 		bot->goal_serial++;
@@ -5283,6 +5434,44 @@ static void bots_vehicle_got_out(struct bots_bot *bot, struct bots_tick *tick)
 	bot->stuck_count = 0;
 }
 
+/* port: halo.log's line of the game's vehicles, at its first census: how
+many of each (by tag; the gametype's vehicle set decides which the map
+places: game_engine.c), and with HALO_BOT_TRACE where each stands */
+static void bots_vehicle_list(void)
+{
+	struct object_iterator iterator;
+	long definitions[8], counts[8], kinds = 0, total = 0, index;
+	char line[400];
+	int length = 0;
+
+	object_iterator_new(&iterator, _object_mask_vehicle, 0);
+	while (object_iterator_next(&iterator))
+	{
+		struct object_datum *vehicle = object_get(iterator.index);
+
+		total++;
+		for (index = 0; index < kinds && definitions[index] != vehicle->definition_index; index++)
+			;
+		if (index == kinds && kinds < (long)NUMBEROF(definitions))
+		{
+			definitions[kinds] = vehicle->definition_index;
+			counts[kinds++] = 0;
+		}
+		if (index < kinds)
+			counts[index]++;
+		if (getenv("HALO_BOT_TRACE"))
+			platform_log("bots: trace vehicle %s at (%.1f %.1f %.1f), bounding radius %.2f, pathfinding radius %.2f",
+				tag_get_name(vehicle->definition_index), vehicle->object.position.x, vehicle->object.position.y,
+				vehicle->object.position.z, vehicle->object.bounding_sphere_radius,
+				bots_vehicle_definition(iterator.index)->ai_pathfinding_radius);
+	}
+	line[0] = 0;
+	for (index = 0; index < kinds && length < (int)sizeof(line) - 80; index++)
+		length += snprintf(line + length, sizeof(line) - (size_t)length, "%s%s %ld", index ? ", " : " (",
+			tag_get_name(definitions[index]), counts[index]);
+	platform_log("bots: the game's vehicles: %ld%s%s", total, line, kinds ? ")" : "");
+}
+
 /* halo.log's census of the bots' vehicles, every ten seconds: the bots
 riding and in which seats, those going for one, the vehicles and those with
 riders, the distance the bots drove them, the bots' getting in (by seat) and
@@ -5296,6 +5485,9 @@ static void bots_vehicle_census(void)
 
 	if (bots_globals.last_census_tick && now - bots_globals.last_census_tick < TICKS_PER_SECOND * 10)
 		return;
+	if (!bots_globals.vehicles_listed)
+		bots_vehicle_list();
+	bots_globals.vehicles_listed = TRUE;
 	bots_globals.last_census_tick = now;
 	for (index = 0; index < BOTS_MAXIMUM; index++)
 	{
@@ -5335,7 +5527,8 @@ static void bots_vehicle_census(void)
 	platform_log("bots: vehicles at tick %ld: %ld of %ld bots riding (%ld driving, %ld gunning, %ld passengers), %ld going to one; "
 		"vehicles %ld, %ld with riders; driven %.0f units; in %ld (driver %ld, gunner %ld, passenger %ld), out %ld (flipped %ld, "
 		"stuck %ld, at the goal %ld, no driver %ld, other %ld, no enemy %ld, hurt %ld), righted %ld; kills riding %ld (driving %ld), "
-		"%.1f s of gunners' and passengers' fire; %ld path searches driving; turrets %ld, manned %ld times, %.1f s of their fire, %ld kills from one%s", now,
+		"%.1f s of gunners' and passengers' fire; %ld path searches driving; turrets %ld, manned %ld times, %.1f s of their fire, %ld kills from one; "
+		"in by kind: tank %ld, jeep %ld, scout %ld; first in at tick %ld; %.0f s riding; %ld seats taken over, %ld given up on the way%s", now,
 		riding[_bots_seat_driver] + riding[_bots_seat_gunner] + riding[_bots_seat_passenger], alive,
 		riding[_bots_seat_driver], riding[_bots_seat_gunner], riding[_bots_seat_passenger], going, vehicles, occupied,
 		(double)bots_globals.driven_distance, bots_globals.vehicle_entries,
@@ -5347,7 +5540,9 @@ static void bots_vehicle_census(void)
 		bots_globals.vehicle_flips, bots_globals.riding_kills[0] + bots_globals.riding_kills[1], bots_globals.riding_kills[0],
 		(double)bots_globals.riding_fire_ticks / TICKS_PER_SECOND, bots_globals.driving_searches,
 		bots_globals.turret_count, bots_globals.turret_entries, (double)bots_globals.turret_fire_ticks / TICKS_PER_SECOND,
-		bots_globals.turret_kills, bots_vehicles_enabled() ? "" : " (bots take no vehicles: HALO_BOT_VEHICLES=0)");
+		bots_globals.turret_kills, bots_globals.vehicle_entries_by_kind[0], bots_globals.vehicle_entries_by_kind[1],
+		bots_globals.vehicle_entries_by_kind[2], bots_globals.first_entry_tick, (double)bots_globals.riding_ticks / TICKS_PER_SECOND,
+		bots_globals.vehicle_take_overs, bots_globals.vehicle_giveups, bots_vehicles_enabled() ? "" : " (bots take no vehicles: HALO_BOT_VEHICLES=0)");
 }
 
 /* (debug) HALO_BOT_TRACE=<seconds>: each bot's state that often */
@@ -5484,6 +5679,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bot->last_position = tick.object->object.position;
 		bots_vehicle_forget(bot);
 		bot->ride_vehicle_index = NONE;
+		/* port: (its base's vehicles looked at as it spawns) */
+		bot->spawn_tick = tick.now;
+		bot->vehicle_check_tick = 0;
 		bot->last_body_vitality = tick.object->object.body_vitality;
 		bot->item_powerup = _bots_powerup_none;
 		bot->powerup_index = NONE;
@@ -5494,7 +5692,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	tick.position = vehicle_index != NONE ? object_get(vehicle_index)->object.position : tick.object->object.position;
 	if (vehicle_index == NONE && bot->ride_vehicle_index != NONE)
 		bots_vehicle_got_out(bot, &tick);
-	/* (kills riding: the census's) */
+	/* (the time riding, and kills riding: the census's) */
+	if (vehicle_index != NONE && bot->ride_vehicle_index == vehicle_index)
+		bots_globals.riding_ticks++;
 	if (vehicle_index != NONE && bot->ride_vehicle_index == vehicle_index && tick.player->statistics.kills[0] > bot->kills_seen)
 	{
 		bots_globals.riding_kills[bot->ride_seat != _bots_seat_driver] += tick.player->statistics.kills[0] - bot->kills_seen;
