@@ -54,6 +54,7 @@ points chosen, reached and left and why, defenders' posts).
 #include "items/weapon_definitions.h"
 #include "networking/network_game_globals.h"
 #include "tag_files/tag_groups.h"
+#include "tag_files/tag_files.h"
 
 #include "bots.h"
 #include "bots_tactics.h"
@@ -195,7 +196,7 @@ static boolean bots_tactics_long_weapon(long weapon_index)
 }
 
 /* whether a weapon is nearly empty: what is left of it half a magazine at
-most */
+most (one with a magazine that loads rounds) */
 static boolean bots_tactics_weapon_low(long weapon_index)
 {
 	struct weapon_datum *weapon;
@@ -209,6 +210,9 @@ static boolean bots_tactics_weapon_low(long weapon_index)
 	if (definition->weapon.magazines.count <= 0)
 		return FALSE;
 	magazine = TAG_BLOCK_GET_ELEMENT(&definition->weapon.magazines, 0, struct weapon_magazine_definition);
+	/* (a battery's weapon, the plasma pistol's, loads no rounds) */
+	if (magazine->rounds_loaded_maximum <= 0)
+		return FALSE;
 	return weapon->weapon.magazines[0].rounds_loaded + weapon->weapon.magazines[0].rounds_total <=
 		MAX(1, magazine->rounds_loaded_maximum / 2);
 }
@@ -441,6 +445,21 @@ static void bots_tactics_leave(long bot_index, short why)
 	struct bots_tactics_bot *state = &bots_tactics_bots[bot_index];
 
 	bots_tactics_counts.vantage_leaves[why]++;
+	/* (debug: HALO_BOT_TRACE, each bot off its vantage point, why, its weapon) */
+	if (getenv("HALO_BOT_TRACE"))
+	{
+		struct player_datum *player = player_try_and_get(state->player_index);
+		long weapon_index = player ? bots_tactics_weapon(player->unit_index) : NONE;
+
+		platform_log("bots: trace bot %ld (%s) off vantage point %d (%s) after %ld ticks, held %ld, weapon %s %d/%d", bot_index + 1,
+			bots_role_name(state->role), (int)state->vantage + 1, why == _bots_vantage_left_time ? "time" :
+			why == _bots_vantage_left_enemy ? "enemy near" : why == _bots_vantage_left_ammunition ? "ammunition" :
+			why == _bots_vantage_left_hurt ? "hurt" : "other", game_time_get() - state->vantage_tick,
+			state->hold_tick ? game_time_get() - state->hold_tick : 0L,
+			weapon_index != NONE ? tag_get_name(weapon_get(weapon_index)->definition_index) : "none",
+			weapon_index != NONE ? (int)weapon_get(weapon_index)->weapon.magazines[0].rounds_loaded : 0,
+			weapon_index != NONE ? (int)weapon_get(weapon_index)->weapon.magazines[0].rounds_total : 0);
+	}
 	bots_vantage_release(bot_index, "left");
 	state->rest_until_tick = game_time_get() + (state->role == _bots_role_sniper ? bots_tactics_random_ticks(state, 10, 20) :
 		bots_tactics_random_ticks(state, 30, 45));
