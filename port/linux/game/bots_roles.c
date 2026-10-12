@@ -25,22 +25,45 @@ all of them) by their order in the team, so not every bot rushes the flag:
 The attackers and roamers are the ones Lanes and Mixed spread over the
 lanes (bots_routes_lane_for_rank), by their order among them.
 
-Vantage points: a sniper, a bot holding a sniper rifle or a rocket launcher
-(but a CTF defender), and King's defenders go to a vantage point (the best
-by its score and nearness that no other bot has, not the one it held last,
-nor one it found no way to; a third of a team's bots at most at once) and
-hold it a while - a sniper 35 to 50 seconds, King's defenders 25 to 40, the
-others 20 to 30 - looking from one place it sees to another (bots_tactics_
-look); fighting there, it keeps to the spot. It leaves when an enemy comes
-within nine units (and fights), when its weapon is nearly empty, when it is
-hurt (its body below a third: the health packs come first then), when its
-weapon is no longer a sniper rifle or a rocket launcher (but a sniper's), or
-after its time; then the game's goals a while (a sniper 10 to 20 seconds,
-the others 30 to 45) before another. One it does not come to within a
-minute, or finds no way to, is left be a minute. halo.log has each bot's
-arrival at a vantage point, the roles when they change and, each minute,
-the tactics line (lanes taken, waypoints passed and given up, vantage
-points chosen, reached and left and why, defenders' posts).
+Vantage points: a sniper, King's defenders, and a bot holding a precision
+weapon (bots.c's bots_weapon_precision, from the weapon's tag: a zoom, one
+bullet a shot, little error; or a heavy one, a zoom and one slow
+projectile) go to a vantage point (the best by its score and nearness
+that no other bot has, so no two stand on one; not the one it held last,
+nor one it found no way to; a third of a team's bots at most at once, half
+when it holds a long precision weapon) and
+hold it a while, looking from one place it sees to another (bots_tactics_
+look); fighting there, it keeps to the spot, and through a long precision
+weapon's scope it sees half as far again. By the weapon:
+- a long precision weapon (two zoom levels or a scope of 4x and up: the
+  sniper rifle) is held as a sniper holds it, 35 to 50 seconds, and taken
+  to another 10 to 20 seconds after (8 to 15 after a fight close up; at
+  once when taken up after a pistol's or a rocket's time at one); a CTF
+  defender holding one takes a vantage point that sees its own flag stand
+  (40 units from it at most), else keeps to its posts; King of the Hill's
+  attackers keep to the hill whatever they hold.
+- a middle one (a zoom alone: the pistol), a lighter liking: a roamer
+  (Slayer) alone, to a vantage point within 35 units of it, one bot a team
+  at once (not counted in the third: it keeps no sniper from one), 12 to 20
+  seconds, then about the map 30 to 45 seconds; the enemy within six units,
+  it leaves (the pistol fights well there).
+- a heavy one (the rocket launcher), as before, 20 to 30 seconds.
+King's defenders hold theirs 25 to 40 seconds. A bot leaves when an enemy
+comes within nine units (and fights), when its weapon is nearly empty, when
+it is hurt (its body below a third: the health packs come first then), when
+the precision weapon it went for is dropped or swapped for another (a long
+or heavy one for one of those; a middle one for any precision weapon: a
+pistol's bot that takes up a sniper rifle stays, and holds it as a sniper
+rifle's from then), when the game's objective
+comes first (the flag or the ball carried, its own flag to bring back or
+its carrier to chase: bots.c's CTF goals), or after its time; then the
+game's goals a while (a sniper 10 to 20 seconds, the others 30 to 45; 3
+after its weapon changed, 10 after the objective) before another. One it
+does not come to within a minute, or finds no way to, is left be a minute. halo.log has each bot's arrival at
+and leaving of a vantage point, the roles when they change and, each
+minute, the tactics line (lanes taken, waypoints passed and given up,
+vantage points chosen, reached and left and why, defenders' posts). The
+precision weapons the bots find on the map are each logged once a map.
 
 (debug) HALO_BOT_ROLES=0: neither roles nor vantage points (the lanes still).
 */
@@ -73,8 +96,15 @@ long game_engine_port_player_goals(long player_index, real_point3d *positions, l
 #define BOTS_TACTICS_PI 3.14159265f
 /* how near its vantage point a bot is there */
 #define BOTS_VANTAGE_ARRIVED 2.0f
-/* an enemy this near: off the vantage point, to fight */
+/* an enemy this near: off the vantage point, to fight (a middle precision
+weapon's bot: nearer) */
 #define BOTS_VANTAGE_ENEMY_NEAR 9.0f
+#define BOTS_VANTAGE_ENEMY_NEAR_MID 6.0f
+/* a middle precision weapon's bot: a vantage point this near it at most */
+#define BOTS_VANTAGE_MID_REACH 35.0f
+/* how much further a bot sees through a long precision weapon's scope at
+its vantage point */
+#define BOTS_VANTAGE_SCOPE_SIGHT 1.5f
 /* the most teams the roles are counted by */
 #define BOTS_TACTICS_TEAMS 16
 
@@ -163,37 +193,57 @@ static long bots_tactics_weapon(long unit_index)
 	return unit->unit.weapon_object_indices[unit->unit.current_weapon_index];
 }
 
-/* whether a weapon is a sniper rifle or a rocket launcher (by its tag's
-name, as bots.c values weapons; a few definitions remembered a map) */
-static boolean bots_tactics_long_weapon(long weapon_index)
+/* the precision of the unit's current weapon (bots.c's, from its tag) */
+static short bots_tactics_precision(long unit_index)
 {
-	static struct
-	{
-		long definition_index;
-		boolean long_range;
-	} known[8];
-	static long known_count;
-	static long known_game_tick = -1;
-	long definition_index, index;
-	char const *name;
+	return bots_weapon_precision(bots_tactics_weapon(unit_index));
+}
 
-	if (weapon_index == NONE)
-		return FALSE;
-	definition_index = weapon_get(weapon_index)->definition_index;
-	/* (forgotten when the game's time goes back: a new game) */
-	if (game_time_get() < known_game_tick)
-		known_count = 0;
-	known_game_tick = game_time_get();
-	for (index = 0; index < known_count; index++)
+/* whether the precision weapon held still keeps the bot at the vantage
+point it went to for the precision `wanted`: a long or heavy one's for a
+long or heavy one, a middle one's for any precision weapon */
+static boolean bots_tactics_still_precise(short wanted, short held)
+{
+	if (wanted == _bots_precision_mid)
+		return held == _bots_precision_mid || held == _bots_precision_long;
+	return held == _bots_precision_long || held == _bots_precision_heavy;
+}
+
+/* the precision weapon the bot would hold a vantage point for, by its role
+and the game: none when its part keeps it elsewhere (King's attackers in
+the hill; a CTF defender but with a long one, over its stand; a middle one
+a roamer's alone) */
+static short bots_tactics_weapon_wants(struct bots_tactics_bot const *state, short precision)
+{
+	if (precision == _bots_precision_none ||
+		(bots_tactics.game == game_engine_king && state->role == _bots_role_attacker))
 	{
-		if (known[index].definition_index == definition_index)
-			return known[index].long_range;
+		return _bots_precision_none;
 	}
-	name = tag_get_name(definition_index);
-	index = known_count < (long)NUMBEROF(known) ? known_count++ : (long)NUMBEROF(known) - 1;
-	known[index].definition_index = definition_index;
-	known[index].long_range = name && (strstr(name, "sniper") || strstr(name, "rocket"));
-	return known[index].long_range;
+	switch (precision)
+	{
+	case _bots_precision_long:
+		return _bots_precision_long;
+	case _bots_precision_heavy:
+		return state->role != _bots_role_defender ? _bots_precision_heavy : _bots_precision_none;
+	case _bots_precision_mid:
+		return state->role == _bots_role_roamer ? _bots_precision_mid : _bots_precision_none;
+	}
+	return _bots_precision_none;
+}
+
+static char const *bots_precision_name(short precision)
+{
+	return precision == _bots_precision_long ? "long precision" : precision == _bots_precision_mid ? "middle precision" :
+		precision == _bots_precision_heavy ? "heavy" : "none";
+}
+
+static char const *bots_vantage_left_name(short why)
+{
+	static char const *const names[NUMBER_OF_BOTS_VANTAGE_LEFT] =
+		{ "time", "enemy near", "ammunition", "hurt", "weapon", "objective", "other" };
+
+	return why >= 0 && why < NUMBER_OF_BOTS_VANTAGE_LEFT ? names[why] : "?";
 }
 
 /* whether a weapon is nearly empty: what is left of it half a magazine at
@@ -444,8 +494,16 @@ void bots_tactics_bot_dead(long bot_index)
 static void bots_tactics_leave(long bot_index, short why)
 {
 	struct bots_tactics_bot *state = &bots_tactics_bots[bot_index];
+	boolean scoped = state->role == _bots_role_sniper || state->vantage_weapon == _bots_precision_long;
+	short weapon = state->vantage_weapon;
+	long now = game_time_get();
 
 	bots_tactics_counts.vantage_leaves[why]++;
+	platform_log("bots: bot %ld (%s) off vantage point %d (%s) after %.0f s, held %.0f s%s%s", bot_index + 1,
+		bots_role_name(state->role), (int)state->vantage + 1, bots_vantage_left_name(why),
+		(double)(now - state->vantage_tick) / TICKS_PER_SECOND,
+		state->hold_tick ? (double)(now - state->hold_tick) / TICKS_PER_SECOND : 0.0,
+		weapon != _bots_precision_none ? ", there for its " : "", weapon != _bots_precision_none ? bots_precision_name(weapon) : "");
 	/* (debug: HALO_BOT_TRACE, each bot off its vantage point, why, its weapon) */
 	if (getenv("HALO_BOT_TRACE"))
 	{
@@ -453,17 +511,27 @@ static void bots_tactics_leave(long bot_index, short why)
 		long weapon_index = player ? bots_tactics_weapon(player->unit_index) : NONE;
 
 		platform_log("bots: trace bot %ld (%s) off vantage point %d (%s) after %ld ticks, held %ld, weapon %s %d/%d", bot_index + 1,
-			bots_role_name(state->role), (int)state->vantage + 1, why == _bots_vantage_left_time ? "time" :
-			why == _bots_vantage_left_enemy ? "enemy near" : why == _bots_vantage_left_ammunition ? "ammunition" :
-			why == _bots_vantage_left_hurt ? "hurt" : "other", game_time_get() - state->vantage_tick,
+			bots_role_name(state->role), (int)state->vantage + 1, bots_vantage_left_name(why), game_time_get() - state->vantage_tick,
 			state->hold_tick ? game_time_get() - state->hold_tick : 0L,
 			weapon_index != NONE ? tag_get_name(weapon_get(weapon_index)->definition_index) : "none",
 			weapon_index != NONE ? (int)weapon_get(weapon_index)->weapon.magazines[0].rounds_loaded : 0,
 			weapon_index != NONE ? (int)weapon_get(weapon_index)->weapon.magazines[0].rounds_total : 0);
 	}
+	state->rest_weapon = weapon;
 	bots_vantage_release(bot_index, "left");
-	state->rest_until_tick = game_time_get() + (state->role == _bots_role_sniper ? bots_tactics_random_ticks(state, 10, 20) :
-		bots_tactics_random_ticks(state, 30, 45));
+	/* (the game's goals a while: a sniper's, or a long precision weapon's
+	bot, soon back at it, sooner after a fight close up; at once after its
+	weapon changed, which may be taken up again; a while after the
+	objective) */
+	if (why == _bots_vantage_left_weapon)
+		state->rest_until_tick = now + TICKS_PER_SECOND * 3;
+	else if (why == _bots_vantage_left_objective)
+		state->rest_until_tick = now + TICKS_PER_SECOND * 10;
+	else if (scoped)
+		state->rest_until_tick = now + (why == _bots_vantage_left_enemy ? bots_tactics_random_ticks(state, 8, 15) :
+			bots_tactics_random_ticks(state, 10, 20));
+	else
+		state->rest_until_tick = now + bots_tactics_random_ticks(state, 30, 45);
 }
 
 /* why the bot leaves its vantage point now, NONE to stay */
@@ -473,6 +541,28 @@ static short bots_tactics_leave_reason(long bot_index, struct player_datum *play
 	struct object_datum *object = object_try_and_get(player->unit_index);
 	long weapon_index = bots_tactics_weapon(player->unit_index);
 
+	/* (its weapon first: the reason that says most) */
+	if (state->vantage_weapon != _bots_precision_none)
+	{
+		short precision = bots_weapon_precision(weapon_index);
+
+		if (!bots_tactics_still_precise(state->vantage_weapon, precision))
+			return _bots_vantage_left_weapon;
+		/* (a sniper rifle taken up at, or on the way to, a pistol's or a
+		rocket launcher's vantage point: held as a sniper rifle's from now) */
+		if (precision == _bots_precision_long && state->vantage_weapon != _bots_precision_long)
+		{
+			state->vantage_weapon = _bots_precision_long;
+			state->hold_ticks = (state->hold_tick ? now - state->hold_tick : 0) + bots_tactics_random_ticks(state, 35, 50);
+			platform_log("bots: bot %ld (%s) %s vantage point %d for its long precision now, for %.0f s", bot_index + 1,
+				bots_role_name(state->role), state->hold_tick ? "holds" : "goes to", (int)state->vantage + 1,
+				(double)(state->hold_ticks - (state->hold_tick ? now - state->hold_tick : 0)) / TICKS_PER_SECOND);
+		}
+	}
+	if (bots_tactics_weapon_low(weapon_index))
+		return _bots_vantage_left_ammunition;
+	if (object && object->object.body_vitality < 0.34f)
+		return _bots_vantage_left_hurt;
 	if (state->hold_tick && now - state->hold_tick >= state->hold_ticks)
 		return _bots_vantage_left_time;
 	if (!state->hold_tick && now - state->vantage_tick > TICKS_PER_SECOND * 60)
@@ -482,16 +572,72 @@ static short bots_tactics_leave_reason(long bot_index, struct player_datum *play
 		bots_tactics_counts.vantage_failures++;
 		return _bots_vantage_left_other;
 	}
-	if (bots_tactics_weapon_low(weapon_index))
-		return _bots_vantage_left_ammunition;
-	if (object && object->object.body_vitality < 0.34f)
-		return _bots_vantage_left_hurt;
-	if (state->role != _bots_role_sniper && !(state->role == _bots_role_defender && bots_tactics.game == game_engine_king) &&
-		!bots_tactics_long_weapon(weapon_index))
-	{
-		return _bots_vantage_left_other;
-	}
 	return NONE;
+}
+
+/* a vantage point for the bot to go to and hold (its role's, a sniper's or
+King's defender's; or its precision weapon's, `weapon_wants`): the best free
+one (bots_vantage_choose), a defender's over the hill or its own stand, a
+pistol's near; while its team has fewer holding one than a third of its bots
+(half for a long precision weapon's, a pistol's one apart). None: looked for
+again in a few seconds */
+static void bots_tactics_seek(long bot_index, long player_index, real_point3d const *position, boolean by_role,
+	short weapon_wants)
+{
+	struct bots_tactics_bot *state = &bots_tactics_bots[bot_index];
+	long now = game_time_get();
+	boolean king_defender = state->role == _bots_role_defender && bots_tactics.game == game_engine_king;
+	real_point3d hill, *objective = NULL;
+	long index, holders = 0, middle_holders = 0, most;
+	short vantage;
+
+	if (king_defender)
+	{
+		real_point3d goals[8];
+
+		if (game_engine_port_player_goals(player_index, goals, NUMBEROF(goals)) <= 0)
+			return;
+		hill = goals[0];
+		objective = &hill;
+	}
+	else if (!by_role && state->role == _bots_role_defender && bots_tactics.game == game_engine_ctf)
+	{
+		/* (a CTF defender's sniper rifle: over its own stand, else its posts) */
+		if (!bots_vantage_stand(state->team, &hill))
+			return;
+		objective = &hill;
+	}
+	for (index = 0; index < BOTS_MAXIMUM; index++)
+	{
+		/* (a pistol's bot, one a team, is not counted: it keeps no sniper
+		from a vantage point) */
+		if (index != bot_index && bots_tactics_bots[index].vantage != NONE && bots_tactics_bots[index].team == state->team)
+		{
+			if (bots_tactics_bots[index].vantage_weapon == _bots_precision_mid)
+				middle_holders++;
+			else
+				holders++;
+		}
+	}
+	most = weapon_wants == _bots_precision_long ? MAX(1, (bots_tactics.team_bots[state->team] + 1) / 2) :
+		MAX(1, bots_tactics.team_bots[state->team] / 3);
+	vantage = (weapon_wants == _bots_precision_mid ? !middle_holders : holders < most) ?
+		bots_vantage_choose(bot_index, position, objective,
+			weapon_wants == _bots_precision_mid ? BOTS_VANTAGE_MID_REACH : REAL_MAX) : NONE;
+	if (vantage == NONE)
+	{
+		state->rest_until_tick = now + TICKS_PER_SECOND * 5;
+		state->rest_weapon = weapon_wants;
+		return;
+	}
+	state->vantage = vantage;
+	state->vantage_weapon = weapon_wants;
+	state->vantage_tick = now;
+	state->hold_tick = 0;
+	state->hold_ticks = state->role == _bots_role_sniper || weapon_wants == _bots_precision_long ?
+		bots_tactics_random_ticks(state, 35, 50) : king_defender ? bots_tactics_random_ticks(state, 25, 40) :
+		weapon_wants == _bots_precision_mid ? bots_tactics_random_ticks(state, 12, 20) : bots_tactics_random_ticks(state, 20, 30);
+	bots_tactics_counts.vantages_chosen++;
 }
 
 boolean bots_tactics_goal(long bot_index, long player_index, real_point3d const *position, real_point3d *goal,
@@ -525,61 +671,39 @@ boolean bots_tactics_goal(long bot_index, long player_index, real_point3d const 
 			{
 				state->hold_tick = now;
 				bots_tactics_counts.vantages_reached++;
-				platform_log("bots: bot %ld (%s) at vantage point %d (%.1f %.1f %.1f), for %.0f s", bot_index + 1,
+				platform_log("bots: bot %ld (%s) at vantage point %d (%.1f %.1f %.1f), for %.0f s%s%s", bot_index + 1,
 					bots_role_name(state->role), (int)state->vantage + 1, goal->x, goal->y, goal->z,
-					(double)state->hold_ticks / TICKS_PER_SECOND);
+					(double)state->hold_ticks / TICKS_PER_SECOND,
+					state->vantage_weapon != _bots_precision_none ? ", for its " : "",
+					state->vantage_weapon != _bots_precision_none ? bots_precision_name(state->vantage_weapon) : "");
 			}
 			return TRUE;
 		}
 	}
-	/* one to go to: a sniper's, a sniper rifle's or a rocket launcher's, a
-	defender's over the hill */
-	if (now >= state->rest_until_tick)
+	/* one to go to: a sniper's, a precision weapon's (a sniper rifle's, a
+	pistol's near) or a rocket launcher's, a defender's over the hill (a CTF
+	defender's with a sniper rifle over its stand) */
 	{
-		long weapon_index = bots_tactics_weapon(player->unit_index);
 		boolean king_defender = state->role == _bots_role_defender && bots_tactics.game == game_engine_king;
-		boolean wants = state->role == _bots_role_sniper || king_defender ||
-			(state->role != _bots_role_defender && bots_tactics_long_weapon(weapon_index));
-		real_point3d hill, *objective = NULL;
+		boolean by_role = state->role == _bots_role_sniper || king_defender;
+		short weapon_wants = by_role ? _bots_precision_none :
+			bots_tactics_weapon_wants(state, bots_tactics_precision(player->unit_index));
 
-		if (king_defender)
+		/* (resting a while from a vantage point, the game's goals first;
+		but a sniper rifle taken up since one held for another weapon, a
+		pistol or a rocket launcher, goes to one at once) */
+		if (now < state->rest_until_tick &&
+			!(weapon_wants == _bots_precision_long && state->rest_weapon != _bots_precision_long))
 		{
-			real_point3d goals[8];
-			long count = game_engine_port_player_goals(player_index, goals, NUMBEROF(goals));
-
-			if (count > 0)
-			{
-				hill = goals[0];
-				objective = &hill;
-			}
-			else
-				wants = FALSE;
+			weapon_wants = _bots_precision_none;
+			by_role = FALSE;
 		}
-		if (wants)
+		if (by_role || weapon_wants != _bots_precision_none)
+			bots_tactics_seek(bot_index, player_index, position, by_role, weapon_wants);
+		if (state->vantage != NONE)
 		{
-			long index, holders = 0;
-			short vantage;
-
-			for (index = 0; index < BOTS_MAXIMUM; index++)
-			{
-				if (index != bot_index && bots_tactics_bots[index].vantage != NONE && bots_tactics_bots[index].team == state->team)
-					holders++;
-			}
-			vantage = holders < MAX(1, bots_tactics.team_bots[state->team] / 3) ?
-				bots_vantage_choose(bot_index, position, objective) : NONE;
-			if (vantage != NONE)
-			{
-				state->vantage = vantage;
-				state->vantage_tick = now;
-				state->hold_tick = 0;
-				state->hold_ticks = state->role == _bots_role_sniper ? bots_tactics_random_ticks(state, 35, 50) :
-					king_defender ? bots_tactics_random_ticks(state, 25, 40) : bots_tactics_random_ticks(state, 20, 30);
-				bots_tactics_counts.vantages_chosen++;
-				bots_vantage_point(vantage, goal, surface_index);
-				return TRUE;
-			}
-			/* (none free: looked for again in a few seconds) */
-			state->rest_until_tick = now + TICKS_PER_SECOND * 5;
+			bots_vantage_point(state->vantage, goal, surface_index);
+			return TRUE;
 		}
 	}
 	/* CTF's defenders: about the stand, post to post */
@@ -683,7 +807,7 @@ void bots_tactics_fight(long bot_index, real_point3d const *position, real targe
 	state = &bots_tactics_bots[bot_index];
 	if (state->vantage == NONE || !state->hold_tick)
 		return;
-	if (target_distance < BOTS_VANTAGE_ENEMY_NEAR)
+	if (target_distance < (state->vantage_weapon == _bots_precision_mid ? BOTS_VANTAGE_ENEMY_NEAR_MID : BOTS_VANTAGE_ENEMY_NEAR))
 	{
 		bots_tactics_leave(bot_index, _bots_vantage_left_enemy);
 		return;
@@ -699,21 +823,74 @@ void bots_tactics_fight(long bot_index, real_point3d const *position, real targe
 		*throttle *= 0.3f;
 }
 
+void bots_tactics_check(long bot_index, long player_index)
+{
+	struct player_datum *player;
+	short why;
+
+	if (bot_index < 0 || bot_index >= BOTS_MAXIMUM || bots_tactics_bots[bot_index].vantage == NONE ||
+		(player = player_try_and_get(player_index)) == NULL || player->unit_index == NONE)
+	{
+		return;
+	}
+	why = bots_tactics_leave_reason(bot_index, player, game_time_get());
+	if (why != NONE)
+		bots_tactics_leave(bot_index, why);
+}
+
+boolean bots_tactics_holding(long bot_index)
+{
+	return bot_index >= 0 && bot_index < BOTS_MAXIMUM && bots_tactics_bots[bot_index].vantage != NONE &&
+		bots_tactics_bots[bot_index].hold_tick != 0;
+}
+
+void bots_tactics_objective(long bot_index)
+{
+	if (bot_index < 0 || bot_index >= BOTS_MAXIMUM || bots_tactics_bots[bot_index].vantage == NONE)
+		return;
+	bots_tactics_leave(bot_index, _bots_vantage_left_objective);
+}
+
+real bots_tactics_sight_scale(long bot_index)
+{
+	struct bots_tactics_bot const *state;
+	struct player_datum *player;
+
+	if (bot_index < 0 || bot_index >= BOTS_MAXIMUM)
+		return 1.0f;
+	state = &bots_tactics_bots[bot_index];
+	if (state->vantage == NONE || !state->hold_tick || state->player_index == NONE ||
+		(player = player_try_and_get(state->player_index)) == NULL || player->unit_index == NONE)
+	{
+		return 1.0f;
+	}
+	return bots_tactics_precision(player->unit_index) == _bots_precision_long ? BOTS_VANTAGE_SCOPE_SIGHT : 1.0f;
+}
+
+static long bots_tactics_leaves_total(void)
+{
+	long index, total = 0;
+
+	for (index = 0; index < NUMBER_OF_BOTS_VANTAGE_LEFT; index++)
+		total += bots_tactics_counts.vantage_leaves[index];
+	return total;
+}
+
 void bots_tactics_report(long now)
 {
 	if (!bots_tactics.prepared)
 		return;
 	platform_log("bots: tactics at tick %ld: routes %s (%ld side lanes): lanes taken %ld, waypoints passed %ld, given up %ld; "
-		"vantage points %ld: chosen %ld, reached %ld, left %ld (time %ld, enemy near %ld, ammunition %ld, hurt %ld, other %ld), "
-		"no way %ld; defenders' posts taken %ld%s", now,
+		"vantage points %ld: chosen %ld, reached %ld, left %ld (time %ld, enemy near %ld, ammunition %ld, hurt %ld, weapon %ld, "
+		"objective %ld, other %ld), no way %ld; defenders' posts taken %ld%s", now,
 		bots_routes_mode() == _bots_routes_direct ? "direct" : bots_routes_mode() == _bots_routes_lanes ? "lanes" : "mixed",
 		bots_routes_map.lane_count, bots_tactics_counts.lanes_taken, bots_tactics_counts.waypoints_passed,
 		bots_tactics_counts.lanes_given_up, bots_vantage_count(), bots_tactics_counts.vantages_chosen,
 		bots_tactics_counts.vantages_reached,
-		bots_tactics_counts.vantage_leaves[0] + bots_tactics_counts.vantage_leaves[1] + bots_tactics_counts.vantage_leaves[2] +
-			bots_tactics_counts.vantage_leaves[3] + bots_tactics_counts.vantage_leaves[4],
+		bots_tactics_leaves_total(),
 		bots_tactics_counts.vantage_leaves[_bots_vantage_left_time], bots_tactics_counts.vantage_leaves[_bots_vantage_left_enemy],
 		bots_tactics_counts.vantage_leaves[_bots_vantage_left_ammunition], bots_tactics_counts.vantage_leaves[_bots_vantage_left_hurt],
+		bots_tactics_counts.vantage_leaves[_bots_vantage_left_weapon], bots_tactics_counts.vantage_leaves[_bots_vantage_left_objective],
 		bots_tactics_counts.vantage_leaves[_bots_vantage_left_other], bots_tactics_counts.vantage_failures,
 		bots_tactics_counts.posts_taken, bots_tactics_enabled() ? "" : " (no roles nor vantage points: HALO_BOT_ROLES=0)");
 }

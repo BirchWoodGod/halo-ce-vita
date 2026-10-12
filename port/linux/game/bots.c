@@ -126,10 +126,13 @@ What a bot does each tick, in a player's terms:
   lanes in turn, Mixed every third of them on a side lane: such a bot on foot
   to a goal a long way off searches its way to its lane's next waypoint
   first, and gives the lane up when it finds no way there. Vantage points: a
-  sniper, a bot holding a sniper rifle or a rocket launcher, and King's
-  defenders hold one a while (a third of a team at once), looking from one
-  place it sees to another, and leave it when an enemy comes near, when out
-  of ammunition, hurt, or after a while. The lanes and the vantage points are
+  sniper, a bot holding a precision weapon (bots_weapon_precision, from the
+  weapon's tag: a sniper rifle; a pistol, a lighter liking, one near; a
+  rocket launcher), and King's defenders hold one a while (a third of a team
+  at once, half with sniper rifles), looking from one place it sees to
+  another, and leave it when an enemy comes near, when out of ammunition,
+  hurt, when the weapon is dropped or swapped, when the flag or the ball
+  comes first, or after a while. The lanes and the vantage points are
   found as each game's bots first tick, a bounded step a tick (the map's
   walkable surfaces as a graph, the AI's sight test), and logged.
 
@@ -186,6 +189,7 @@ up, the vantage points held and left, the defenders' posts.
 #include "devices/device_definitions.h"
 #include "tag_files/tag_groups.h"
 #include "tag_files/tag_files.h"
+#include "cache/cache_files.h"
 
 #include "bots.h"
 #include "bots_tactics.h"
@@ -1353,6 +1357,57 @@ static real bots_weapon_range_compute(long definition_index)
 	return 7.0f;
 }
 
+/* port: what kind of a precision weapon it is, from its tag alone (not its
+name: a Custom Edition map's own rifles too), bots_tactics.h's
+_bots_precision_...: it zooms, its first trigger fires one projectile a
+shot (no spread of pellets), and
+- its projectile is a bullet, BOTS_PRECISION_SPEED or faster (world units
+  a tick: the stock pistol's 10, the sniper rifle's 33; the plasma bolts'
+  0.7 to 1.3), aimed true, its least error BOTS_PRECISION_ERROR at most (a
+  degree: the pistol's 0.2, the sniper rifle's 0.5; the assault rifle's 2):
+  a scope of two zoom levels or more, or BOTS_PRECISION_SCOPE times and up,
+  makes a long one (the sniper rifle: two levels, 2x and 8x), a zoom alone
+  a middle one (the pistol: 2x);
+- or it is slower than BOTS_HEAVY_SPEED (the rocket's 0.37): a heavy one
+  (the rocket launcher), which the bots holding it took to the vantage
+  points before too.
+The plasma pistol, the needler, the plasma and assault rifles and the
+flamethrower (none zooms) and the shotgun (fifteen pellets) are none.
+(Blood Gulch's, HALO_BOT_TRACE: each weapon's numbers in halo.log.) */
+#define BOTS_PRECISION_SPEED 6.0f
+#define BOTS_PRECISION_ERROR 0.0175f
+#define BOTS_PRECISION_SCOPE 4.0f
+#define BOTS_HEAVY_SPEED 1.0f
+static short bots_weapon_precision_compute(long definition_index)
+{
+	struct weapon_definition *definition = weapon_definition_get(definition_index);
+	struct weapon_trigger_definition *trigger;
+	struct projectile_definition *projectile;
+	real speed;
+
+	if (definition->weapon.triggers.count <= 0)
+		return _bots_precision_none;
+	trigger = TAG_BLOCK_GET_ELEMENT(&definition->weapon.triggers, 0, struct weapon_trigger_definition);
+	if (trigger->projectile.index == NONE)
+		return _bots_precision_none;
+	projectile = projectile_definition_get(trigger->projectile.index);
+	speed = 0.5f * (projectile->projectile.initial_velocity + projectile->projectile.final_velocity);
+	if (getenv("HALO_BOT_TRACE"))
+		platform_log("bots: trace weapon %s: zoom %d x%.1f-%.1f, %d a shot, projectile %s speed %.2f, error %.3f-%.3f",
+			tag_get_name(definition_index), (int)definition->weapon.zoom_level_count,
+			definition->weapon.zoom_magnification_minimum, definition->weapon.zoom_magnification_maximum,
+			(int)trigger->projectiles_per_shot, tag_get_name(trigger->projectile.index), speed,
+			trigger->projectile_error_angle_lower_bound, trigger->projectile_error_angle_upper_bound);
+	if (definition->weapon.zoom_level_count < 1 || trigger->projectiles_per_shot > 1)
+		return _bots_precision_none;
+	if (speed >= BOTS_PRECISION_SPEED && trigger->projectile_error_angle_lower_bound <= BOTS_PRECISION_ERROR)
+	{
+		return definition->weapon.zoom_level_count >= 2 ||
+			definition->weapon.zoom_magnification_maximum >= BOTS_PRECISION_SCOPE ? _bots_precision_long : _bots_precision_mid;
+	}
+	return speed > 0.0f && speed < BOTS_HEAVY_SPEED ? _bots_precision_heavy : _bots_precision_none;
+}
+
 /* what the bots know of a weapon definition (its value, the distance kept
 with it, how it fires, its projectile's speed), made once a map: the
 functions above read only its tag, its name and its trigger, which a map
@@ -1369,6 +1424,8 @@ struct bots_weapon_kind
 	/* port: the ticks its trigger charges (a turret's gun that fires only
 	charged, Extinction's gun tower's), 0 for none */
 	short charge_ticks;
+	/* port: what kind of a precision weapon (bots_tactics.h) */
+	short precision;
 };
 
 static struct
@@ -1405,6 +1462,11 @@ static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
 	kind->tap_ticks = bots_weapon_tap_ticks_compute(definition_index);
 	kind->range = bots_weapon_range_compute(definition_index);
 	kind->projectile_speed = bots_projectile_speed_compute(definition_index);
+	kind->precision = bots_weapon_precision_compute(definition_index);
+	if (kind->precision != _bots_precision_none && kind != &bots_weapon_kinds.spare)
+		platform_log("bots: weapon %s: %s", tag_get_name(definition_index), kind->precision == _bots_precision_long ?
+			"precision, long (a vantage point)" : kind->precision == _bots_precision_mid ? "precision, middle range" :
+			"heavy (a vantage point)");
 	kind->charge_ticks = 0;
 	{
 		struct weapon_definition *definition = weapon_definition_get(definition_index);
@@ -1437,6 +1499,13 @@ static short bots_weapon_tap_ticks(long weapon_index)
 static real bots_weapon_range(long weapon_index)
 {
 	return weapon_index != NONE ? bots_weapon_kind(weapon_get(weapon_index)->definition_index)->range : 6.0f;
+}
+
+/* port: (bots_tactics.h) */
+short bots_weapon_precision(long weapon_index)
+{
+	return weapon_index != NONE ? bots_weapon_kind(weapon_get(weapon_index)->definition_index)->precision :
+		_bots_precision_none;
 }
 
 /* port: whether the bot found no way to the item a while ago (left be
@@ -2288,6 +2357,17 @@ static void bots_prepare_map(void)
 	bots_globals.map_ready = TRUE;
 	bots_globals.roam_point_count = 0;
 	bots_prepare_paths();
+	/* port: the map's weapons known at once (halo.log names its precision
+	weapons: bots_weapon_precision), half the table at most (a vehicle's gun
+	is a weapon too) */
+	{
+		struct tag_iterator tags;
+		long tag_index;
+
+		tag_iterator_new(&tags, WEAPON_DEFINITION_TAG);
+		while (bots_weapon_kinds.count < BOTS_WEAPON_KINDS / 2 && (tag_index = tag_iterator_next(&tags)) != NONE)
+			bots_weapon_kind(tag_index);
+	}
 	if (!scenario)
 		return;
 	for (index = 0; index < scenario->netgame_equipment.count; index++)
@@ -3144,7 +3224,7 @@ struct bots_target_candidate
 FALSE for one out of reach or view, or not an enemy */
 static boolean bots_target_score(struct bots_bot *bot, struct player_datum *player, struct player_datum *other,
 	long player_index, real_point3d const *eye, struct bots_skill_definition const *skill, boolean hurt,
-	struct bots_target_candidate *candidate)
+	real sight_scale, struct bots_target_candidate *candidate)
 {
 	struct object_datum *object;
 	struct unit_datum *other_unit;
@@ -3159,7 +3239,8 @@ static boolean bots_target_score(struct bots_bot *bot, struct player_datum *play
 		return FALSE;
 	candidate->point = object->object.bounding_sphere_center;
 	distance = bots_distance3d(eye, &candidate->point);
-	reach = skill->sight_distance;
+	/* (port: further through a scope at a vantage point: bots_tactics.h) */
+	reach = skill->sight_distance * sight_scale;
 	/* (active camouflage: seen only close) */
 	if (TEST_FLAG(other_unit->unit.flags, _unit_active_camouflaged_bit))
 		reach *= 0.3f;
@@ -3187,6 +3268,7 @@ static long bots_find_target(struct bots_bot *bot, struct player_datum *player, 
 	struct data_iterator iterator;
 	struct player_datum *other;
 	boolean hurt = game_time_get() - bot->hurt_tick < TICKS_PER_SECOND * 2;
+	real sight_scale = bots_tactics_sight_scale((long)(bot - bots_globals.bots));
 	struct bots_target_candidate candidates[BOTS_MAXIMUM + MAXIMUM_LOCAL_PLAYERS];
 	long candidate_count = 0, index;
 	boolean ordered = TRUE;
@@ -3197,7 +3279,7 @@ static long bots_find_target(struct bots_bot *bot, struct player_datum *player, 
 	{
 		if (candidate_count >= (long)NUMBEROF(candidates))
 			ordered = FALSE;
-		else if (bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, &candidates[candidate_count]))
+		else if (bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, sight_scale, &candidates[candidate_count]))
 		{
 			real score = candidates[candidate_count].score;
 
@@ -3218,7 +3300,7 @@ static long bots_find_target(struct bots_bot *bot, struct player_datum *player, 
 		data_iterator_new(&iterator, player_data);
 		while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
 		{
-			if (!bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, &candidate) ||
+			if (!bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, sight_scale, &candidate) ||
 				candidate.score >= best_score ||
 				!bots_line_of_sight(player->unit_index, eye, &candidate.point, candidate.unit_index))
 			{
@@ -3663,7 +3745,7 @@ static boolean bots_powerup_goal(struct bots_bot *bot, struct unit_datum *unit, 
 	long now = game_time_get();
 	real body = unit->object.body_vitality;
 	real heal_below, best_score = REAL_MAX;
-	boolean objective_game;
+	boolean objective_game, holding;
 	long index, best = NONE;
 	real_point3d ground;
 	long surface_index;
@@ -3729,6 +3811,9 @@ static boolean bots_powerup_goal(struct bots_bot *bot, struct unit_datum *unit, 
 	bot->powerup_check_tick = now + TICKS_PER_SECOND;
 	heal_below = fighting ? skill->heal_below_fighting : skill->heal_below;
 	objective_game = game_engine_get_variant()->game_engine_index != game_engine_slayer;
+	/* port: (holding a vantage point, an overshield or camouflage only
+	beside it: bots_tactics.h) */
+	holding = bots_tactics_holding((long)(bot - bots_globals.bots));
 	for (index = 0; index < bots_powerups.count; index++)
 	{
 		long object_index = bots_powerups.items[index].object_index;
@@ -3757,6 +3842,8 @@ static boolean bots_powerup_goal(struct bots_bot *bot, struct unit_datum *unit, 
 		else
 		{
 			reach = fighting ? 10.0f : objective_game ? MIN(skill->powerup_reach, 12.0f) : skill->powerup_reach;
+			if (holding)
+				reach = MIN(reach, 6.0f);
 			score = distance - 6.0f;
 		}
 		if (distance > reach || score >= best_score)
@@ -3809,6 +3896,9 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 	long now = game_time_get();
 
 	bot->goal_exact = FALSE;
+	/* port: off its vantage point when it is time, whatever it goes for
+	(bots_tactics.h) */
+	bots_tactics_check((long)(bot - bots_globals.bots), player_index);
 	if (bot->vehicle_index != NONE && bots_vehicle_goal(bot, player_get(player_index)->unit_index))
 		return;
 	/* port: a health pack when hurt, an overshield or camouflage near: before
@@ -3824,11 +3914,16 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 		long post_surface_index;
 
 		if (bots_ctf_goal(bot, player_get(player_index), position))
+		{
+			/* port: (off its vantage point: the flag first) */
+			bots_tactics_objective((long)(bot - bots_globals.bots));
 			return;
+		}
 		/* port: a vantage point to hold, a defender's post (bots_tactics.h:
-		the bot's role, its weapon) */
-		if (!bot->held_objective &&
-			bots_tactics_goal((long)(bot - bots_globals.bots), player_index, position, &post, &post_surface_index))
+		the bot's role, its weapon); the ball carried, off it */
+		if (bot->held_objective)
+			bots_tactics_objective((long)(bot - bots_globals.bots));
+		else if (bots_tactics_goal((long)(bot - bots_globals.bots), player_index, position, &post, &post_surface_index))
 		{
 			bots_set_goal(bot, _bots_goal_objective, &post, post_surface_index);
 			return;
