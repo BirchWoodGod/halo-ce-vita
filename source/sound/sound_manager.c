@@ -656,6 +656,15 @@ static short sound_find_like_channel(
 static void update_channel_for_impulse_sound(
 	short channel_index,
 	real fade);
+#ifdef HALO_LINUX
+static void impulse_sound_chain_update(
+	short channel_index,
+	struct sound_datum *sound,
+	struct sound_definition *definition);
+/* (port/linux/game/custom_edition_sounds.c) */
+boolean custom_edition_sound_is_chained(
+	struct sound_permutation const *permutation);
+#endif
 static void update_channel_for_looping_sound(
 	short channel_index,
 	real fade);
@@ -2394,6 +2403,9 @@ static void update_channel_for_impulse_sound(
 			channel->playing_permutation->gain * definition->gain_modifier * gain;
 
 		channel_set_properties_hardware(channel_index, &properties, TRUE);
+#ifdef HALO_LINUX
+		impulse_sound_chain_update(channel_index, sound, definition);
+#endif
 	}
 
 	sound_manager_globals.platform_definition->channel_update(channel_index);
@@ -2938,6 +2950,60 @@ static boolean sound_permutations_ended(
 		struct sound_permutation);
 	return permutation->next_permutation_index == NONE;
 }
+
+/* A Custom Edition sound longer than a permutation holds is made a chain
+of permutations as its map loads (custom_edition_sounds.c), as Halo's own
+music is. Played as a looping sound's it plays on as any chain does
+(update_channel_for_looping_sound); played as an impulse (a script's
+sound_impulse_start), which the Xbox plays one permutation of, it plays on
+through its chain the same way: the next link asked for once the one
+queued has started, and queued behind it once loaded, the links after it
+asked for ahead. Any other impulse sound is left as it was. */
+static void impulse_sound_chain_update(
+	short channel_index,
+	struct sound_datum *sound,
+	struct sound_definition *definition)
+{
+	struct sound_pitch_range *pitch_range;
+	struct sound_permutation *permutation;
+
+	if (!VALID_INDEX(sound->pitch_range_index, definition->pitch_ranges.count))
+		return;
+	pitch_range = TAG_BLOCK_GET_ELEMENT(
+		&definition->pitch_ranges,
+		sound->pitch_range_index,
+		struct sound_pitch_range);
+	if (!VALID_INDEX(sound->permutation_index, pitch_range->permutations.count))
+		return;
+	permutation = TAG_BLOCK_GET_ELEMENT(
+		&pitch_range->permutations,
+		sound->permutation_index,
+		struct sound_permutation);
+	if (!custom_edition_sound_is_chained(permutation))
+		return;
+	if (!TEST_FLAG(sound->flags, _sound_waiting_for_cache_bit))
+	{
+		/* (the link queued has not started: it waits behind the one
+		playing) */
+		if (channel_get_state(channel_index) == _sound_channel_queued ||
+			!VALID_INDEX(permutation->next_permutation_index, pitch_range->permutations.count))
+		{
+			return;
+		}
+		sound->permutation_index = permutation->next_permutation_index;
+		SET_FLAG(sound->flags, _sound_waiting_for_cache_bit, TRUE);
+		permutation = TAG_BLOCK_GET_ELEMENT(
+			&pitch_range->permutations,
+			sound->permutation_index,
+			struct sound_permutation);
+	}
+	if (_sound_cache_sound_request(permutation, FALSE, TRUE, TRUE))
+	{
+		SET_FLAG(sound->flags, _sound_waiting_for_cache_bit, FALSE);
+		channel_queue_sound(channel_index, permutation);
+		sound_prefetch_linked_permutations(definition, pitch_range, permutation);
+	}
+}
 #endif
 
 static void update_channel_for_looping_sound(
@@ -3422,6 +3488,14 @@ static void refresh_sounds(
 						&definition->pitch_ranges,
 						sound->pitch_range_index,
 						struct sound_pitch_range)))
+			{
+				stop_sound = FALSE;
+			}
+			/* (an impulse sound playing a Custom Edition sound's chain whose
+			next link is still loading waits for it:
+			impulse_sound_chain_update) */
+			if (sound->type == _sound_impulse &&
+				TEST_FLAG(sound->flags, _sound_waiting_for_cache_bit))
 			{
 				stop_sound = FALSE;
 			}
