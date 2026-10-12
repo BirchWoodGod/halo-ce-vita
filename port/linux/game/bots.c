@@ -81,7 +81,9 @@ What a bot does each tick, in a player's terms:
   bot goes for is its own), so no two go for the same one. Stuck, a driver
   backs off and turns, then goes on; scenery or a machine it drives into is
   learnt to be in the way (Sidewinder's blast door), and the level it drives
-  into closed to the vehicles' searches alone (the banks a biped walks up).
+  into closed to the vehicles' searches alone (the banks a biped walks up;
+  port: what is before it looked for past its front and low at its treads,
+  and closed as far about as it is wide: a Scorpion's 2.2 units).
   A bot gets out when its vehicle lies on its side, sticks fast, has no
   driver, or near its goal when that wants it on foot (a flag, a hill, the
   ball), and leaves a vehicle that failed it alone a while. halo.log has
@@ -1818,13 +1820,15 @@ static void bots_paths_close_object(long object_index, char const *why)
 
 /* port: a vehicle stuck with the level before it (a bank a biped walks up,
 the foot of a ledge, which the walkable surfaces join): the walkable surfaces
-just before it closed to the vehicles' searches alone, those under it and its
-goal's left open */
+just before it closed to the vehicles' searches alone, as far about as the
+vehicle is wide (1.5 units at least: a Scorpion's 2.2, which drove at a
+base's back door strip by strip), those under it and its goal's left open */
 static void bots_paths_close_for_vehicles(real_point3d const *point, real_point3d const *vehicle_point,
-	real_point3d const *goal_point)
+	real_point3d const *goal_point, real vehicle_radius)
 {
 	struct collision_bsp const *bsp;
 	long surface_index, closed = 0;
+	real about = MAX(1.5f, vehicle_radius);
 
 	if (!bots_paths_copy())
 		return;
@@ -1853,7 +1857,7 @@ static void bots_paths_close_for_vehicles(real_point3d const *point, real_point3
 		{
 			continue;
 		}
-		if (bots_distance2d(&middle, point) < 1.5f && fabs(middle.z - point->z) < 2.5f &&
+		if (bots_distance2d(&middle, point) < about && fabs(middle.z - point->z) < 2.5f &&
 			bots_distance2d(&middle, vehicle_point) > 1.2f && bots_distance2d(&middle, goal_point) > 3.0f)
 		{
 			bots_paths.vehicle_walkable[surface_index] &= (byte)~FLAG(BOTS_PATHFINDING_WALKABLE_BIT);
@@ -4911,13 +4915,26 @@ static void bots_bot_drive(struct bots_bot *bot, struct bots_tick *tick, long ve
 			be in the way, its surfaces closed to every bot's searches, as a
 			bot on foot learns it: bots_paths_learn) */
 			struct collision_result collision;
-			real scale = bot->ride_reversing ? -2.5f : 2.5f;
+			unsigned long flags = FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+				FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_scenery_bit) |
+				FLAG(_collision_test_objects_machines_bit);
+			/* (port: past its front: a Scorpion's is 2.2 units from its
+			middle, whose 2.5 found nothing before it) */
+			real length = MAX(2.5f, vehicle->object.bounding_sphere_radius + 0.6f);
+			real scale = bot->ride_reversing ? -length : length;
 			real_vector3d vector = { vehicle->object.forward.i * scale, vehicle->object.forward.j * scale,
 				vehicle->object.forward.k * scale };
-			boolean hit = collision_test_vector(FLAG(_collision_test_structure_bit) |
-				FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_objects_bit) |
-				FLAG(_collision_test_objects_scenery_bit) | FLAG(_collision_test_objects_machines_bit),
-				&vehicle->object.bounding_sphere_center, &vector, vehicle_index, &collision);
+			boolean hit = collision_test_vector(flags, &vehicle->object.bounding_sphere_center, &vector, vehicle_index, &collision);
+
+			/* (port: and low, at its wheels or treads: a ledge below its
+			middle) */
+			if (!hit)
+			{
+				real_point3d low = vehicle->object.position;
+
+				low.z += 0.25f;
+				hit = collision_test_vector(flags, &low, &vector, vehicle_index, &collision);
+			}
 
 			if (hit && collision.type == _collision_result_object &&
 				object_definition_get(object_get(collision.object_index)->definition_index)->object.collision_model.index != NONE &&
@@ -4932,7 +4949,8 @@ static void bots_bot_drive(struct bots_bot *bot, struct bots_tick *tick, long ve
 
 				before.x += vehicle->object.forward.i * 0.5f;
 				before.y += vehicle->object.forward.j * 0.5f;
-				bots_paths_close_for_vehicles(&before, &vehicle->object.position, &bot->goal_point);
+				bots_paths_close_for_vehicles(&before, &vehicle->object.position, &bot->goal_point,
+					vehicle->object.bounding_sphere_radius);
 			}
 			/* (stuck a second time: the scenery and machines about it learnt
 			too, as a bot on foot learns them when its path finds no way) */
