@@ -738,7 +738,7 @@ This port stands on a lot of other people's work:
 - **[Xita](https://github.com/Xita-Project/xita)**: the earlier work on running Halo on the Vita, whose
   findings (the register combiner translation, the GPU and threading
   lessons, the tools) went into this port.
-- **Bruno Santana**: his modified build of this port showed the Vita's
+- **[Bruno Santana](https://github.com/YoshiroSan)**: his modified build of this port showed the Vita's
   fourth core running helper work, frame interpolation at 60 fps and more
   graphics settings, which 1.1.0's are built after.
 - **iamhaller**: the networking work online play started from.
